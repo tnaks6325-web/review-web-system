@@ -75,7 +75,9 @@
   /* ══ 업체용(광고주) 뷰어 — 좌측 세로 작업 목록 + 본문 폭 상한 (시안 design-advertiser-viewer.html) ══
      상단 가로 탭(tb2) 대신 업체관리 사이드바 구성을 차용한다. 클래스는 aw* 접두로 신설 —
      기존 .advitem/.owntab(업체관리 소유)·.worow(작업오더 탭 소유)와 이름 충돌 금지(실측 사고 전례). */
-  .wrap.advwrap{grid-template-columns:224px minmax(0,1fr) 300px}
+  /* 업체 뷰어 = 좌측 작업목록 + 본문 2열. 협업/댓글은 우측 세로 레일이 아니라 상단 4번째 박스(사용자 확정 2026-10-02 —
+     세로 레일이 화면 높이 전체를 차지해 표 폭을 300px 잡아먹었다). */
+  .wrap.advwrap{grid-template-columns:224px minmax(0,1fr)}
   .wrap.advwrap.railhidden{grid-template-columns:224px minmax(0,1fr)}
   .wrap.advwrap.widemode{grid-template-columns:minmax(0,1fr)}
   .wrap.advwrap.widemode .awside{display:none}
@@ -1941,6 +1943,22 @@
   /* C/S도 작업 조건·진행 현황·제출물 미리보기와 같은 stretch 규칙을 쓴다.
      size containment로 긴 채팅 목록은 행 높이에 기여하지 않고, 나머지 세 카드가 정한 높이만
      따라간다. 대화 목록과 메시지는 카드 안에서만 스크롤해 네 카드의 세로 길이가 일치한다. */
+  /* 업체 뷰어 협업/댓글 박스 — C/S 미니창과 같은 열 구성·같은 stretch·같은 내부 스크롤(목록만 스크롤, 입력칸은 아래 고정). */
+  .tp3grid.c3.thmini{grid-template-columns:minmax(210px,1fr) minmax(262px,1fr) minmax(300px,1.5fr) minmax(240px,1fr);max-width:2107px}
+  .tp3grid.c3.thmini .advth-pane{min-width:0;align-self:stretch;min-height:330px;contain:size;overflow:hidden;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:12px}
+  .advth-head{box-sizing:border-box;height:40px;min-height:40px;padding:11px 13px;border-bottom:1px solid var(--line);margin:0}
+  .advth-head .rtbadge{margin-left:5px}.advth-head .rtbadge[hidden]{display:none}
+  .advth-body{flex:1;min-height:0;display:flex;flex-direction:column;padding:9px 10px;gap:0}
+  .advth-body .railnote{flex:none}
+  .advth-body .thlist{flex:1;min-height:0;overflow-y:auto;margin-bottom:8px}
+  .advth-body .thitem{padding:8px 10px}
+  .advth-body .thform{flex:none;padding:7px}
+  .advth-body .thform textarea{height:34px;min-height:34px;max-height:90px;padding:6px 8px;font-size:12.5px}
+  .advth-body .throw{margin-top:5px}
+  .tp3grid.c3.fold .advth-pane{min-height:0;contain:none}
+  .tp3grid.c3.fold .advth-body{display:none}
+  .tp3grid.c3.fold .advth-head{border-bottom:0}
+  @media(max-width:1100px){.tp3grid.c3.thmini{grid-template-columns:1fr}.tp3grid.c3.thmini .advth-pane{grid-column:auto;height:330px}}
   .tp3grid.c3.csmini .wdcsmini-pane{min-width:0;align-self:stretch;height:auto;min-height:330px;max-height:none;contain:size;overflow:hidden;background:var(--card);border:1px solid var(--line);border-radius:12px}
   .wdcsmini{height:100%;min-height:0;display:flex;flex-direction:column;color:var(--ink);background:var(--card)}
   /* 제목행은 작업 조건·진행 현황·제출물 미리보기와 같은 tp3 제목행을 쓴다.
@@ -3349,7 +3367,7 @@ async function _csBadgeRefresh(){
 function switchView(v){ if(v==='reedit'){ v='cs'; STATE.reOpenQueue=true; }
   if(v!=='cs' && typeof _reCloseReviewPopup==='function') _reCloseReviewPopup();
   STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
-  const rt=$('#railToggle'); if(rt) rt.style.display=(v==='workdesk')?'':'none';   // 레일은 작업보드 뷰에만 존재
+  const rt=$('#railToggle'); if(rt) rt.style.display=(v==='workdesk'&&STATE.role!=='advertiser')?'':'none';   // 레일은 작업보드 뷰에만 존재(업체 뷰어는 레일 없음 — 협업/댓글은 상단 박스)
   const wt=$('#wideToggle'); if(wt) wt.style.display=(v==='workdesk')?'':'none';   // 전체화면 토글도 작업보드 뷰에만
   if(v==='home') renderHomeView(); else if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='inspect') renderInspectView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else if(v==='payment') renderPaymentView(); else if(v==='guides') renderGuidesView(); else if(v==='alimtalk') renderAlimtalkView(); else if(v==='settings') renderSettingsView(); else renderWorkdeskView();
   if(v!=='workdesk') _measureChrome();   // 작업보드를 떠나면 작업바가 사라짐 → --tbh 0으로 회수(다른 뷰 높이 계산 오염 방지)
@@ -3536,8 +3554,7 @@ function renderWorkdeskView(){
       <aside class="awside" id="awside">
         <div id="awlist"><div class="empty" style="padding:10px">불러오는 중…</div></div>
       </aside>
-      <div class="main" id="main"><div class="empty">불러오는 중…</div></div>
-      <div class="rail" id="rail"></div></div>`;
+      <div class="main" id="main"><div class="empty">불러오는 중…</div></div></div>`;
     _syncRailToggle(); _syncWideToggle();
     _watchChrome(); loadTabs();
     return;
@@ -7110,7 +7127,10 @@ function summaryStrip(wd,d,m,c){
   /* C/S는 내부 운영 역할에서만 보인다. 작업보드와 상단 C/S는 같은 campaignKey의 같은 방을 읽고,
      광고주에게는 리뷰어 연락처·대화가 노출되지 않도록 패널 자체를 만들지 않는다. */
   const csMini=isAdv?'':`<aside class="wdcsmini-pane" id="workdeskCsMini" aria-label="이 작업의 C/S 대화"></aside>`;
-  return `<div class="tp3grid c3${csMini?' csmini':''}${_topFolded()?' fold':''}">${cond}${prog}<aside class="rvpane" id="rvPane"></aside>${csMini}</div>`;
+  /* 업체 뷰어의 협업/댓글 = C/S 미니창과 **같은 4번째 자리**의 박스(사용자 확정 2026-10-02).
+     내용은 종전 레일과 같은 `#railThread` 하나를 loadThread/renderThread 가 채운다(렌더러 사본 0). */
+  const thBox=isAdv?`<aside class="advth-pane" aria-label="협업/댓글"><div class="tp3t tp3h topcardhd advth-head" onclick="_topToggle()" title="클릭하면 상단 네 블록이 함께 접히거나 펼쳐집니다">협업/댓글<span class="rtbadge" id="advThBadge" hidden></span><span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div><div class="advth-body" id="railThread"><div class="empty" style="padding:14px">불러오는 중…</div></div></aside>`:'';
+  return `<div class="tp3grid c3${csMini?' csmini':''}${thBox?' thmini':''}${_topFolded()?' fold':''}">${cond}${prog}<aside class="rvpane" id="rvPane"></aside>${csMini}${thBox}</div>`;
 }
 
 /* ══ 작업 조건 10항목(내부 화면) ══════════════════════════════════════════════
@@ -8136,7 +8156,7 @@ function renderThread(){
   box.innerHTML=`${openReq?`<div class="railnote">⚠ 미완료 확인요청 ${openReq}건</div>`:''}
     <div class="thlist">${rows}</div>
     <div class="thform">
-      <textarea id="thbody" rows="2" placeholder="코멘트 또는 확인요청 내용… (Ctrl+Enter로 등록)"></textarea>
+      <textarea id="thbody" rows="2" placeholder="${$('#advThBadge')?'코멘트·확인요청 입력 (Ctrl+Enter)':'코멘트 또는 확인요청 내용… (Ctrl+Enter로 등록)'}"></textarea>
       <div class="throw">
         <label class="thopt"><input type="checkbox" id="threq"> 확인요청</label>
         ${ci?`<label class="thopt"><input type="checkbox" id="thint"> 내부만</label>`:''}
@@ -8146,6 +8166,7 @@ function renderThread(){
   const ta=$('#thbody'); if(ta) ta.addEventListener('keydown',e=>{ if((e.ctrlKey||e.metaKey)&&e.key==='Enter') postThread(); });
   // 탭 배지: 미완료 확인요청 수를 [협업/댓글] 탭에 표기(다른 탭 보고 있어도 눈에 띄게)
   const tb=document.querySelector('.railtab[data-rt="thread"]'); if(tb) tb.innerHTML='협업/댓글'+(openReq?` <span class="rtbadge">${openReq}</span>`:'');
+  const ab=$('#advThBadge'); if(ab){ ab.textContent=openReq?String(openReq):''; ab.hidden=!openReq; }   // 업체 뷰어 상단 박스 제목 배지
 }
 async function postThread(){
   const st=STATE.thread; if(!st) return; const t=st.tab;

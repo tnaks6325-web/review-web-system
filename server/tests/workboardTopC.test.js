@@ -133,7 +133,10 @@ t('★ fail-soft — 캡처 조회가 실패해도 리뷰 캡처는 나간다', 
 
 console.log('\n── C. 화면: 상단 3분할 · 작업세부 폐지 · 정산 통합 ──');
 t('★ 내부 렌더는 조건·진행·미리보기와 C/S 미니창을 한 그리드에 배치하고 접힘 상태를 복원한다',
-  /const csMini=isAdv\?'':`<aside class="wdcsmini-pane"[\s\S]{0,220}<div class="tp3grid c3\$\{csMini\?' csmini':''\}\$\{_topFolded\(\)\?' fold':''\}">\$\{cond\}\$\{prog\}<aside class="rvpane" id="rvPane"><\/aside>\$\{csMini\}<\/div>/.test(wd));
+  // 2026-10-02: 업체 뷰어는 같은 4번째 자리에 협업/댓글 박스(thBox) — 내부(csMini)·업체(thBox)는 서로 배타(isAdv)
+  /const csMini=isAdv\?'':`<aside class="wdcsmini-pane"/.test(wd)
+  && /const thBox=isAdv\?`<aside class="advth-pane"[\s\S]*?`:'';/.test(wd)
+  && /<div class="tp3grid c3\$\{csMini\?' csmini':''\}\$\{thBox\?' thmini':''\}\$\{_topFolded\(\)\?' fold':''\}">\$\{cond\}\$\{prog\}<aside class="rvpane" id="rvPane"><\/aside>\$\{csMini\}\$\{thBox\}<\/div>/.test(wd));
 /* ★ 정의 부재만 보면 **호출만 되살린 변이**를 놓친다(변이시험 실측) — 호출 0 까지 함께 고정. */
 t('★ 작업세부 상시 펼침은 본문에서 사라졌다(정의·호출 모두)',
   !/function renderWorkOrderSection/.test(wd) && !/renderWorkOrderSection\(/.test(wd)
@@ -496,9 +499,9 @@ t('★ 일건수 = wd.todayProgress.quota(공고 기준 칩) — 재계산 사�
 }
 
 // 접기/펼치기 — 세 박스 일괄 + 하단선 일치
-t('★ 머리줄 3곳(작업조건 정상·폴백 / 진행현황 / 미리보기) 전부 _topToggle 로 수렴', (() => {
+t('★ 머리줄(작업조건 정상·폴백 / 진행현황 / 미리보기 / 업체 협업·댓글) 전부 _topToggle 로 수렴', (() => {
   const n = (wd.match(/onclick="_topToggle\(\)"/g) || []).length;
-  return n === 4;   // 작업조건 2(정상+폴백) + 진행현황 1 + 미리보기(rvhd) 1
+  return n === 5;   // 작업조건 2(정상+폴백) + 진행현황 1 + 미리보기(rvhd) 1 + 업체 협업/댓글 박스 1(2026-10-02)
 })());
 /* ★★ 업체 뷰어도 같은 3분할·같은 접기(사용자 확정 2026-08-23) — 종전의 "광고주는 접기 없음"
    규칙은 폐기됐다. 다른 것은 작업 조건 카드의 **내용**(업체 4줄)과 정산 자리뿐이다. */
