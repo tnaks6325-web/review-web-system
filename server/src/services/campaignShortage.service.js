@@ -257,6 +257,9 @@ async function listShortages(admin, opts = {}) {
   const items = [];
   for (const c of cands) {
     if (decided.has(c.id)) continue;
+    // ★ 상품별 하루 한도가 걸린 공고는 어제 실제로 열 수 있던 인원이 공고 전체 인원보다 적을 수 있다 → 묻지 않는다.
+    //   한도 조회 실패(null)도 모름이라 묻지 않는다(코덱스 리뷰).
+    if (optCapped === null || optCapped.has(String(c.id))) continue;
     if (!opts.skipRecipient && !isRecipient(admin && admin.name, c, wos.get(c.id))) continue;
     if (scheduleUnknown(c) || (schMap && st.isUsableSchedule(scheduleFor(schMap, c)))) continue;
     const counts = countsMap.get(c.id);
@@ -329,6 +332,8 @@ function _worktableNote(ws) {
 async function _lockedRecheck(client, camp, d, it, cur, admin, opts) {
   const err = (msg, code) => Object.assign(new Error(msg), { code });
   if (!_stillEligible(camp)) throw err('그 사이 공고가 보관·게시 해제되었거나 이미 처리됐습니다', 'not_eligible');
+  const capNow = await _optionCappedIds(client, [d.campaignId]);
+  if (capNow === null || capNow.has(String(d.campaignId))) throw err('상품별 하루 한도가 정해진 공고라 처리할 수 없습니다', 'not_eligible');
   if (!opts.skipRecipient) {
     const { linkedWorkOrdersForCampaigns } = require('./linkedRecruitQuota.service');
     let wo = null;
@@ -390,8 +395,6 @@ async function applyDecisions(admin, decisions, opts = {}) {
           afterLock: async (client, camp, schedule) => {
             // ★ 잠근 행으로 후보 조건·받는 사람·날짜·어제 부족 인원을 다시 본다(두 갈래 공용)
             const { lockNow, counts } = await _lockedRecheck(client, camp, d, it, cur, admin, opts);
-            const capNow = await _optionCappedIds(client, [d.campaignId]);
-            if (capNow === null || capNow.has(String(d.campaignId))) throw Object.assign(new Error('상품별 하루 한도가 정해진 공고라 오늘에 더할 수 없습니다'), { code: 'today_blocked' });
             const stNow = st.computeCampaignState(camp, counts, lockNow, st.isUsableSchedule(schedule) ? schedule : null);
             // ★ 잠근 그 순간에도 오늘 다시 열 수 있는지 다시 본다 — 그 사이 마감 시각이 지났거나 공고가 닫혔으면 거절(코덱스 리뷰)
             const again = _canRaiseToday(camp, stNow, lockNow);

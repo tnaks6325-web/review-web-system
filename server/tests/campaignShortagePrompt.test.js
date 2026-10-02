@@ -120,7 +120,7 @@ ok('173 컬럼도 부팅 점검 대상', /\['recruit_campaigns', 'shortage_promp
 ok('자정을 넘기면 새 날짜 목록을 다시 받는다', /if \(S\.date && kstYesterday\(\) !== S\.date\)/.test(require('fs').readFileSync(require('path').join(__dirname,'../../frontend/js/shortage-prompt.js'),'utf8')));
 ok('리뷰어앱 스코프 편집으로 게시 전환해도 게시 시각 기록', /published_at = CASE WHEN \$3 = 'active' AND status IS DISTINCT FROM 'active' THEN NOW\(\)/.test(require('fs').readFileSync(require('path').join(__dirname,'../src/routes/campaign.routes.js'),'utf8')));
 ok('잠근 행으로 다시 확인 = 공용 함수를 두 갈래가 함께 씀(오늘 더하기·기간 늘리기)', /await _lockedRecheck\(client, camp, d, it, cur, admin, opts\)/.test(src) && /await _lockedRecheck\(client, lk\[0\], d, it, cur, admin, opts\)/.test(src) && /!c\.archived_at && !c\.shortage_prompt_off_at/.test(src));
-ok('상품별 하루 한도 공고는 오늘 더하기 막음(목록·잠금 둘 다)', /_optionCappedIds\(db, ids\)/.test(src) && /_optionCappedIds\(client, \[d\.campaignId\]\)/.test(src));
+ok('상품별 하루 한도 공고는 오늘 더하기 막음(목록·잠금 둘 다)', /_optionCappedIds\(db, ids\)/.test(src) && /_optionCappedIds\(client, \[d\.campaignId\]\)/.test(src) && /if \(optCapped === null \|\| optCapped\.has\(String\(c\.id\)\)\) continue/.test(src));
 ok('반영 요청은 50건씩 나눠 보낸다', /for \(var bi = 0; bi < send\.length; bi \+= 50\)/.test(require('fs').readFileSync(require('path').join(__dirname,'../../frontend/js/shortage-prompt.js'),'utf8')));
 ok('잠근 순간 어제 부족 인원도 다시 계산 — 바뀌었으면 거절', /_loadFacts\(client, \[d\.campaignId\], lockNow/.test(src) && /'stale_shortage'\)/.test(src));
 ok('계획 킬스위치가 꺼지면 어제 계획도 무시', /const plans = \(PLAN_ON\(\) && counts\.plans\) \|\| null/.test(src));
@@ -137,5 +137,6 @@ ok('작업오더에서 정원을 빌려 쓰는 공고는 묻지 않음', /eff\.d
 ok('오늘 더할 인원은 하루 상한 9999 안에서', /MAX_DAY_COUNT - todayQuota/.test(src));
 ok('작업표 줄 경고는 만든 쪽 문구(ra.message·ra.over)', /ra\.message \|\|/.test(src) && /ra\.over != null/.test(src) && !/ra\.excess/.test(src));
 ok('참여형으로 바꾼 날도 게시 시각을 새로 남김', /COALESCE\(\$20, participation_mode\) = TRUE AND participation_mode IS DISTINCT FROM TRUE/.test(require('fs').readFileSync(require('path').join(__dirname,'../src/routes/campaign.routes.js'),'utf8')));
+ok('177 = 작업 종류 변경도 기록 · 배포 시각으로 기존 공고 채움', (() => { const m = read('migrations/177_campaign_quota_rules_init.sql'); return /NEW\.work_kind\s+IS DISTINCT FROM OLD\.work_kind/.test(m) && /UPDATE recruit_campaigns SET quota_rules_changed_at = NOW\(\) WHERE quota_rules_changed_at IS NULL/.test(m); })());
 console.log(`\ncampaignShortagePrompt: ${passed} passed`);
 process.exit(0);

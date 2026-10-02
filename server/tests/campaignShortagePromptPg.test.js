@@ -242,7 +242,7 @@ async function app(cid, phone, when, status = 'submitted') {
   await camp(P + 'Q', { title: '테스트Q' }); await app(P + 'Q', '00000141', D2NOON);
   await pool.query(`INSERT INTO campaign_options (campaign_id, opt_key, daily_limit) VALUES ($1,'a',1),($1,'b',1)`, [P + 'Q']);
   const Q = mine(await svc.listShortages({ name: '박세희' })).find(i => i.campaignId === P + 'Q');
-  ok('⑫ 상품별 하루 한도 공고 → 오늘 더하기 막힘 · 사유 문장', Q && Q.canAddToday === false && /상품별 하루 한도/.test(Q.todayBlockedReason), Q);
+  ok('⑫ 상품별 하루 한도 공고는 묻지 않음(어제 실제로 열 수 있던 인원을 알 수 없다)', !Q, Q);
   const rQ = await svc.applyDecisions({ name: '박세희' }, [{ campaignId: P + 'Q', choice: 'today' }]);
   ok('⑫-2 강제로 보내도 서버가 거절 · 기록 0', rQ.results[0].ok === false && (await pool.query(`SELECT 1 FROM campaign_plan_events WHERE campaign_id=$1`, [P + 'Q'])).rowCount === 0, rQ);
 
