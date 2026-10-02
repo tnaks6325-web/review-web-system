@@ -497,7 +497,13 @@ function _totalCapFor(camp, schedule, orderTotal = 0) {
   return displayRecruitTotal(camp && camp.recruit_total, orderTotal).total;
 }
 
-async function savePlans(campaignId, body, actor) {
+/**
+ * @param opts (선택) — 다른 기능이 **같은 잠금·같은 트랜잭션** 안에서 끼어들 자리(어제 부족 인원 팝업 · 결정 201).
+ *   opts.afterLock(client, camp, schedule) → { todayCount? }  : 캠페인 행을 잠근 직후. 오늘 인원을 그 순간 값으로 다시 정할 때.
+ *   opts.beforeCommit(client)                                   : 커밋 직전. 같은 트랜잭션에 기록을 남길 때(실패하면 저장 전체가 되돌아간다).
+ *   ★ 미전달 = 종전 동작 100%.
+ */
+async function savePlans(campaignId, body, actor, opts) {
   // ※ 킬스위치(CAMPAIGN_DAILY_PLAN=0)는 **판정만** 끈다 — 저장 원장은 유지해 재활성 시
   //   조절이 그대로 되살아난다(프론트가 planEnabled=false 로 저장을 잠가 실수 저장은 없다).
   const b = body || {};
@@ -584,6 +590,16 @@ async function savePlans(campaignId, body, actor) {
       const wo = await linkedWorkOrderForCampaign(camp, ['recruit_count']);
       orderTotal = Number(wo && wo.recruit_count) || 0;
     } catch (e) { logger.warn(`[campaignPlan] 잠금 후 연결 발주 정원 재조회 실패(공고 값만 사용) camp=${campaignId}: ${e.message}`); }
+    if (opts && typeof opts.afterLock === 'function') {
+      const r = await opts.afterLock(client, camp, schedule);
+      if (r && Number.isInteger(r.todayCount)) {
+        const t = set.find(x => x.date === today);
+        if (t) {
+          if (r.todayCount < 0 || r.todayCount > MAX_DAY_COUNT) { const e = new Error('인원 값이 올바르지 않습니다.'); e.code = 'bad_count'; throw e; }
+          t.count = r.todayCount;
+        }
+      }
+    }
 
     // 원칙 ⑤: 오늘 계획은 "오늘 확정 + 유효 홀드" 아래로 못 내린다(참여 취소는 이 기능의 일이 아님).
     // 해제(remove)로 기본값 복귀해도 결과가 하한 밑이면 같은 이유로 거부(모순된 화면 방지).
@@ -829,6 +845,7 @@ async function savePlans(campaignId, body, actor) {
         `INSERT INTO campaign_plan_events (campaign_id, actor, action, detail) VALUES ($1, $2, 'carry_apply', $3)`,
         [campaignId, actor || null, JSON.stringify({ amount: carryApply, note: note || undefined })]);
     }
+    if (opts && typeof opts.beforeCommit === 'function') await opts.beforeCommit(client);
     await client.query('COMMIT');
     // 작업표 원본(campaign_participants)만 바꾸면 기존 작업보드·검색·집계가 읽는
     // raw/review 원장이 이전 날짜를 유지한다. 커밋 후 같은 탭의 투영을 즉시 재생성해

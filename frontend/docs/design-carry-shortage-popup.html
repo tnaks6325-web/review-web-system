@@ -1,0 +1,235 @@
+<title>부족 인원 처리 팝업 시안</title>
+<style>
+/* 배치: 위 = 시안 고르는 탭 / 아래 = 작업보드 흉내 배경 위에 그 시안을 실제로 띄워 눌러 보는 무대 */
+:root{
+  --bg:#f3f4f7; --surface:#ffffff; --fg:#1d2433; --sub:#5b6478; --line:#dfe3ea;
+  --accent:#2f5bd3; --accent-soft:#e8eefc; --warn:#b5620b; --warn-soft:#fdf1e2;
+  --ok:#1f8a4c; --ok-soft:#e5f5ec; --shade:rgba(20,26,40,.42); --board:#e9ecf1;
+  --font:system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#141821; --surface:#1d2230; --fg:#e7eaf1; --sub:#9aa3b5; --line:#2e3546;
+  --accent:#7b9cf0; --accent-soft:#25304d; --warn:#f0a85a; --warn-soft:#3a2b1a;
+  --ok:#5fcb8d; --ok-soft:#1d3428; --shade:rgba(0,0,0,.6); --board:#191e29; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#141821; --surface:#1d2230; --fg:#e7eaf1; --sub:#9aa3b5; --line:#2e3546;
+  --accent:#7b9cf0; --accent-soft:#25304d; --warn:#f0a85a; --warn-soft:#3a2b1a;
+  --ok:#5fcb8d; --ok-soft:#1d3428; --shade:rgba(0,0,0,.6); --board:#191e29; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);margin:0;padding-block:20px;padding-inline:16px}
+.wrap{max-width:1100px;margin:0 auto;display:grid;gap:16px}
+h1{font-size:1.25rem;margin:0;text-wrap:balance}
+.lead{color:var(--sub);margin:0;line-height:1.6;max-width:68ch}
+.tabs{display:flex;flex-wrap:wrap;gap:8px}
+.tab{border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:10px;padding:10px 14px;font:inherit;cursor:pointer;text-align:left;min-width:0}
+.tab b{display:block;font-size:.95rem}.tab span{color:var(--sub);font-size:.8rem}
+.tab[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
+.tab:focus-visible,.btn:focus-visible,.x:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.note{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:.85rem;line-height:1.55;min-width:0}
+.note b{display:block;margin-bottom:4px}
+/* 무대 */
+.stage{position:relative;height:560px;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:var(--board)}
+.board{position:absolute;inset:0;padding:14px;display:grid;grid-template-rows:auto 1fr;gap:10px}
+.bar{height:34px;border-radius:8px;background:var(--surface);border:1px solid var(--line);display:flex;align-items:center;padding:0 12px;gap:14px;font-size:.8rem;color:var(--sub)}
+.bar b{color:var(--fg)}
+.rows{display:grid;gap:6px;align-content:start}
+.r{height:30px;border-radius:6px;background:var(--surface);opacity:.7}
+.shade{position:absolute;inset:0;background:var(--shade)}
+.reset{position:absolute;right:12px;bottom:12px;z-index:5}
+/* 공통 부품 */
+.btn{font:inherit;border-radius:9px;border:1px solid var(--line);background:var(--surface);color:var(--fg);padding:10px 12px;cursor:pointer;text-align:left;width:100%;display:grid;gap:2px}
+.btn small{color:var(--sub);font-size:.76rem;line-height:1.4}
+.btn.pri{border-color:var(--accent);background:var(--accent-soft)}
+.btn.sm{width:auto;padding:6px 10px;font-size:.8rem;display:inline-block}
+.btn:hover{filter:brightness(.97)}
+.x{border:0;background:none;color:var(--sub);font-size:1.1rem;cursor:pointer;padding:4px 8px}
+.short{color:var(--warn);font-weight:700;font-variant-numeric:tabular-nums}
+.tag{display:inline-block;font-size:.72rem;border-radius:6px;padding:2px 7px;background:var(--warn-soft);color:var(--warn);font-weight:700}
+.done{font-size:.8rem;border-radius:7px;padding:6px 9px;background:var(--ok-soft);color:var(--ok);font-weight:700}
+.later{background:var(--accent-soft);color:var(--accent)}
+.meta{color:var(--sub);font-size:.8rem}
+.num{font-variant-numeric:tabular-nums}
+/* 안1: 중앙 목록 팝업 */
+.m1{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(620px,calc(100% - 24px));max-height:calc(100% - 24px);overflow:auto;background:var(--surface);border-radius:14px;border:1px solid var(--line);padding:18px;display:grid;gap:12px}
+.m1 h2{font-size:1.05rem;margin:0}
+.m1 .item{border:1px solid var(--line);border-radius:10px;padding:12px;display:grid;gap:8px}
+.m1 .acts{display:flex;flex-wrap:wrap;gap:6px}
+.m1 .item{grid-template-columns:64px minmax(0,1fr);align-items:start;column-gap:12px}
+.m1 .item.picked{border-color:var(--accent)}
+.thumb{width:64px;height:64px;border-radius:9px;border:1px solid var(--line);display:block;background:var(--board)}
+.m1 .body{display:grid;gap:8px;min-width:0}
+.m1 .btn.sm[aria-pressed="true"]{border-color:var(--accent);background:var(--accent);color:#fff}
+.m1 .foot{position:sticky;bottom:-18px;margin:0 -18px -18px;padding:12px 18px;background:var(--surface);border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.apply{font:inherit;font-weight:700;border:0;border-radius:9px;padding:10px 20px;background:var(--accent);color:#fff;cursor:pointer}
+.apply:disabled{opacity:.45;cursor:not-allowed}
+.apply:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* 반영 완료 안내 — 화면 정중앙, 잠깐 보였다가 천천히 사라진다(화면 조작은 막지 않는다) */
+.okmsg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:6;pointer-events:none;
+  background:var(--fg);color:var(--surface);border-radius:14px;padding:16px 22px;display:grid;gap:6px;text-align:center;
+  max-width:calc(100% - 32px);box-shadow:0 10px 30px rgba(0,0,0,.25)}
+.okmsg b{font-size:1.05rem}
+.okmsg span{font-size:.82rem;opacity:.8}
+@media (prefers-reduced-motion:no-preference){
+  .okmsg{animation:okfade 2.8s ease-in forwards}
+  @keyframes okfade{0%{opacity:0;transform:translate(-50%,-46%)}10%{opacity:1;transform:translate(-50%,-50%)}55%{opacity:1}100%{opacity:0}}
+}
+@media (prefers-reduced-motion:reduce){.okmsg{transition:opacity .2s}}
+/* 안2: 한 건씩 넘기는 카드 */
+.m2{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(440px,calc(100% - 24px));max-height:calc(100% - 24px);overflow:auto;background:var(--surface);border-radius:14px;border:1px solid var(--line);padding:18px;display:grid;gap:12px}
+.m2 .head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.m2 .big{font-size:2rem;font-weight:800;color:var(--warn);line-height:1}
+.m2 .facts{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:.85rem}
+.m2 .facts dt{color:var(--sub)}.m2 .facts dd{margin:0}
+.m2 .pager{display:flex;gap:6px;justify-content:center}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--line)}.dot.on{background:var(--accent)}
+/* 안3: 우측 하단 알림 카드 */
+.m3{position:absolute;right:12px;bottom:56px;width:min(340px,calc(100% - 24px));display:grid;gap:8px}
+.card3{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--warn);border-radius:10px;padding:12px;display:grid;gap:8px;box-shadow:0 6px 18px rgba(0,0,0,.12)}
+.card3 .t{display:flex;justify-content:space-between;gap:6px;align-items:start}
+@media (max-width:520px){.stage{height:640px}}
+@media (prefers-reduced-motion:no-preference){.m1,.m2,.card3{animation:in .18s ease-out}
+@keyframes in{from{opacity:.4}to{opacity:1}}}
+</style>
+
+<div class="wrap">
+  <h1>어제 부족 인원 처리 팝업 — 시안 3가지</h1>
+  <p class="lead">공고 담당자와 그 작업오더를 보낸 AE가 로그인하면, 어제 하루 인원을 다 못 채운 공고를 알려주고 처리 방법을 고르게 합니다. 버튼은 실제로 눌러 볼 수 있습니다(예시 데이터, 저장되지 않음).</p>
+
+  <div class="tabs" role="group" aria-label="시안 선택">
+    <button class="tab" id="t1" aria-pressed="true"><b>안 1 · 한 장에 모아 보기</b><span>고른 뒤 [반영]으로 한꺼번에 적용</span></button>
+    <button class="tab" id="t2" aria-pressed="false"><b>안 2 · 한 건씩 넘기기</b><span>공고 하나에 집중, 결과 미리 보기</span></button>
+    <button class="tab" id="t3" aria-pressed="false"><b>안 3 · 구석 알림 카드</b><span>일을 막지 않고 오른쪽 아래에</span></button>
+  </div>
+
+  <div class="stage" id="stage">
+    <div class="board" aria-hidden="true">
+      <div class="bar"><b>리뷰웹시스템[3버전]</b><span>홈</span><span>작업보드</span><span>모집공고</span><span>C/S</span></div>
+      <div class="rows"><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div></div>
+    </div>
+    <div id="mount"></div>
+    <button class="btn sm reset" id="reset">처음 상태로</button>
+  </div>
+
+  <div class="notes">
+    <div class="note"><b>세 버튼이 하는 일 (모든 안 공통)</b>① 모집 기간을 늘려 뒤에 붙이기: 끝나는 날이 하루 이상 밀리고, 이 공고는 다시 묻지 않습니다. ② 오늘 모집에 더하기: 오늘 정원이 부족 인원만큼 늘어납니다. ③ 1시간 뒤 다시 묻기: 1시간 뒤 같은 질문이 다시 뜹니다.</div>
+    <div class="note"><b>누구에게 뜨나</b>그 공고의 담당자(만두/망고)와 작업오더를 보낸 AE. 한 사람이 처리하면 다른 사람 화면에서도 사라집니다.</div>
+    <div class="note"><b>숫자는 어디서 오나</b>지금 공고 카드에 뜨는 "이월 N"과 같은 계산(공고 전체 기준)입니다. 새로 세지 않습니다.</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var DATA = [
+    {title:"배송메세지있음//가습기외4종", th:["#dfe6ef","#b8c4d4","가습"], short:3, plan:19, got:16, today:19, end:"10/8 (수)", endNew:"10/9 (목)"},
+    {title:"10/2 쿠 아르퓨레 페이스트 클리너 1개", th:["#e6f0e4","#9cc29a","세정"], short:5, plan:20, got:15, today:20, end:"10/12 (일)", endNew:"10/13 (월)"},
+    {title:"쿠팡 블랑카우 고보습 리페어크림", th:["#f3e8df","#d7b49a","크림"], short:2, plan:10, got:8, today:10, end:"10/6 (월)", endNew:"10/7 (화)"}
+  ];
+  var state = {v:1, res:{}, idx:0};
+  var mount = document.getElementById('mount');
+  function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];});}
+  function resText(i){
+    var r = state.res[i], d = DATA[i];
+    if (r === 'extend') return '<div class="done">기간을 늘렸습니다 · 끝나는 날 '+d.end+' → '+d.endNew+' · 이 공고는 다시 묻지 않습니다</div>';
+    if (r === 'today') return '<div class="done">오늘 모집 '+d.today+'명 → '+(d.today+d.short)+'명으로 늘렸습니다</div>';
+    if (r === 'later') return '<div class="done later">1시간 뒤('+laterTime()+') 다시 묻겠습니다</div>';
+    return '';
+  }
+  function laterTime(){var t=new Date(Date.now()+3600e3);return t.getHours()+':'+String(t.getMinutes()).padStart(2,'0');}
+  function thumb(d){
+    var svg='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="'+d.th[0]+'"/><rect x="20" y="12" width="24" height="40" rx="7" fill="'+d.th[1]+'"/><rect x="26" y="8" width="12" height="7" rx="2" fill="'+d.th[1]+'"/><text x="32" y="37" font-size="9" text-anchor="middle" fill="#ffffff" font-family="sans-serif">'+d.th[2]+'</text></svg>';
+    return '<img class="thumb" alt="" src="data:image/svg+xml,'+encodeURIComponent(svg)+'">';
+  }
+  var LABEL = {extend:'기간 늘려 뒤에 붙이기', today:'오늘 모집에 더하기', later:'1시간 뒤 다시 묻기'};
+  function pending(){return DATA.map(function(_,i){return i;}).filter(function(i){return !state.res[i];});}
+
+  function buttons(i, compact){
+    var d = DATA[i];
+    if (compact) return '<div class="acts">'+
+      '<button class="btn sm" data-a="extend" data-i="'+i+'">기간 늘려 뒤에 붙이기</button>'+
+      '<button class="btn sm pri" data-a="today" data-i="'+i+'">오늘 모집에 +'+d.short+'명</button>'+
+      '<button class="btn sm" data-a="later" data-i="'+i+'">1시간 뒤 다시</button></div>';
+    return '<div style="display:grid;gap:8px">'+
+      '<button class="btn" data-a="extend" data-i="'+i+'"><b>모집 기간을 늘려 뒤에 붙이기</b><small>끝나는 날 '+d.end+' → '+d.endNew+' · 이 공고는 앞으로 묻지 않음</small></button>'+
+      '<button class="btn pri" data-a="today" data-i="'+i+'"><b>오늘 모집에 '+d.short+'명 더하기</b><small>오늘 정원 '+d.today+'명 → '+(d.today+d.short)+'명</small></button>'+
+      '<button class="btn" data-a="later" data-i="'+i+'"><b>1시간 뒤 다시 묻기</b><small>지금은 닫고 1시간 뒤 다시 띄웁니다</small></button></div>';
+  }
+
+  function render(){
+    var html = '';
+    var left = pending();
+    if (state.v === 1){
+      var sel = state.sel || {}, nSel = Object.keys(sel).length;
+      html = '<div class="shade"></div><div class="m1" role="dialog" aria-label="어제 부족 인원">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center"><h2>어제 모집 인원이 부족한 공고 '+DATA.length+'건</h2><button class="x" data-a="close" aria-label="닫기">✕</button></div>'+
+        '<p class="meta" style="margin:0">공고마다 처리 방법을 고른 뒤 오른쪽 아래 [반영]을 누르면 한꺼번에 적용됩니다.</p>'+
+        DATA.map(function(d,i){
+          var c = sel[i];
+          var hint = c==='extend' ? '끝나는 날 '+d.end+' → '+d.endNew+' · 이 공고는 앞으로 묻지 않음'
+                   : c==='today' ? '오늘 정원 '+d.today+'명 → '+(d.today+d.short)+'명'
+                   : c==='later' ? '1시간 뒤 다시 묻습니다' : '아직 고르지 않았습니다';
+          function pb(a,t){return '<button class="btn sm" data-a="pick" data-c="'+a+'" data-i="'+i+'" aria-pressed="'+(c===a)+'">'+t+'</button>';}
+          return '<div class="item'+(c?' picked':'')+'">'+thumb(d)+'<div class="body">'+
+            '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>'+esc(d.title)+'</b><span class="tag">어제 '+d.short+'명 부족</span></div>'+
+            '<div class="meta num">어제 계획 '+d.plan+'명 · 실제 '+d.got+'명</div>'+
+            '<div class="acts">'+pb('extend','기간 늘려 뒤에 붙이기')+pb('today','오늘 모집에 +'+d.short+'명')+pb('later','1시간 뒤 다시')+'</div>'+
+            '<div class="meta">'+hint+'</div></div></div>';
+        }).join('')+
+        '<div class="foot"><span class="meta">'+nSel+'건 선택'+(DATA.length-nSel ? ' · 고르지 않은 '+(DATA.length-nSel)+'건은 다음 로그인 때 다시 묻습니다' : '')+'</span>'+
+        '<button class="apply" data-a="apply"'+(nSel?'':' disabled')+'>반영</button></div></div>';
+    } else if (state.v === 2){
+      if (!left.length){ html = '<div class="shade"></div><div class="m2"><b>모두 처리했습니다</b><p class="meta" style="margin:0">'+DATA.map(function(_,i){return resText(i);}).join('')+'</p></div>'; }
+      else {
+        var i = left.indexOf(state.idx) >= 0 ? state.idx : left[0]; state.idx = i;
+        var d = DATA[i];
+        html = '<div class="shade"></div><div class="m2" role="dialog" aria-label="어제 부족 인원">'+
+          '<div class="head"><span class="meta">어제 부족 공고 '+(DATA.length-left.length+1)+' / '+DATA.length+'</span><button class="x" data-a="close" aria-label="닫기">✕</button></div>'+
+          '<b style="font-size:1rem">'+esc(d.title)+'</b>'+
+          '<div style="display:flex;align-items:baseline;gap:8px"><span class="big num">'+d.short+'명</span><span class="meta">어제 못 채운 인원</span></div>'+
+          '<dl class="facts num"><dt>어제 계획</dt><dd>'+d.plan+'명</dd><dt>실제 참여</dt><dd>'+d.got+'명</dd><dt>오늘 정원</dt><dd>'+d.today+'명</dd><dt>끝나는 날</dt><dd>'+d.end+'</dd></dl>'+
+          buttons(i,false)+
+          '<div class="pager">'+DATA.map(function(_,k){return '<span class="dot'+(k===i?' on':'')+'"></span>';}).join('')+'</div></div>';
+      }
+    } else {
+      html = '<div class="m3">'+DATA.map(function(d,i){
+        var open = state.open === i;
+        return '<div class="card3"><div class="t"><div><b style="font-size:.88rem">'+esc(d.title)+'</b><div class="meta">어제 <span class="short">'+d.short+'명</span> 부족 · 계획 '+d.plan+' / 실제 '+d.got+'</div></div>'+
+          (state.res[i]?'':'<button class="x" data-a="toggle" data-i="'+i+'" aria-label="펼치기">'+(open?'▴':'▾')+'</button>')+'</div>'+
+          (state.res[i] ? resText(i) : (open ? buttons(i,false) : '<button class="btn sm pri" data-a="toggle" data-i="'+i+'">처리 방법 고르기</button>'))+'</div>';
+      }).join('')+'</div>';
+    }
+    mount.innerHTML = html;
+  }
+
+  mount.addEventListener('click', function(e){
+    var b = e.target.closest('[data-a]'); if (!b) return;
+    var a = b.getAttribute('data-a'), i = Number(b.getAttribute('data-i'));
+    if (a === 'close'){ mount.innerHTML = '<div class="m3"><div class="card3"><b>닫았습니다</b><span class="meta">처리하지 않은 공고는 다음 로그인 때 다시 뜹니다.</span></div></div>'; return; }
+    if (a === 'toggle'){ state.open = state.open === i ? -1 : i; render(); return; }
+    if (a === 'pick'){ state.sel = state.sel || {}; var c = b.getAttribute('data-c'); if (state.sel[i] === c) delete state.sel[i]; else state.sel[i] = c; render(); return; }
+    if (a === 'apply'){ var keys = Object.keys(state.sel||{});
+      mount.innerHTML = '';   // 팝업 닫기
+      var m = document.createElement('div'); m.className = 'okmsg'; m.setAttribute('role','status');
+      m.innerHTML = '<b>✓ '+keys.length+'건 반영했습니다</b>'+keys.map(function(k){return '<span>'+esc(DATA[k].title)+' — '+LABEL[state.sel[k]]+'</span>';}).join('');
+      document.getElementById('stage').appendChild(m);
+      var gone = function(){ if (m.parentNode) m.parentNode.removeChild(m); };
+      m.addEventListener('animationend', gone);
+      setTimeout(gone, window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches ? 2200 : 3200);   // 애니메이션 이벤트가 안 와도 반드시 사라진다
+      return; }
+    state.res[i] = a; if (state.v === 2){ var l = pending(); if (l.length) state.idx = l[0]; }
+    render();
+  });
+  function pick(v){ var om=document.querySelector('.okmsg'); if(om) om.remove(); state.v = v; state.res = {}; state.sel = {}; state.idx = 0; state.open = -1;
+    ['t1','t2','t3'].forEach(function(id,k){document.getElementById(id).setAttribute('aria-pressed', String(k+1===v));});
+    try{ localStorage.setItem('carry_mock_v', String(v)); }catch(_){}
+    render(); }
+  document.getElementById('t1').onclick = function(){pick(1);};
+  document.getElementById('t2').onclick = function(){pick(2);};
+  document.getElementById('t3').onclick = function(){pick(3);};
+  document.getElementById('reset').onclick = function(){pick(state.v);};
+  var start = 1; var h = (location.hash||'').replace('#','');
+  if (h === 'v2') start = 2; else if (h === 'v3') start = 3;
+  else { try{ var s = Number(localStorage.getItem('carry_mock_v')); if (s>=1&&s<=3) start = s; }catch(_){} }
+  pick(start);
+})();
+</script>
