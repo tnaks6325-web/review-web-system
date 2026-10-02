@@ -174,7 +174,12 @@ async function run() {
   // ── 작업 선택 = 좌측 세로 목록(업체관리 차용) ──
   ok('광고주 작업보드 = awside 사이드바 + advwrap 그리드(가로 탭바 없음)',
     src.includes('class="wrap advwrap') && src.includes('id="awside"') );
-  ok('advwrap 3열 그리드(사이드바 224px + 본문 + 레일)', /\.wrap\.advwrap\{grid-template-columns:224px minmax\(0,1fr\) 300px\}/.test(css));
+  // 2026-10-02 사용자 확정: 업체 뷰어는 우측 레일 없이 2열 — 협업/댓글은 상단 4번째 박스(.advth-pane)
+  ok('advwrap 2열 그리드(사이드바 224px + 본문 · 우측 레일 없음)', /\.wrap\.advwrap\{grid-template-columns:224px minmax\(0,1fr\)\}/.test(css)
+    && !/class="wrap advwrap[^`]*<div class="rail" id="rail">/.test(src));
+  ok('협업/댓글 = 상단 4번째 박스(같은 #railThread 를 채운다 · 업체만)',
+    /const thBox=isAdv\?`<aside class="advth-pane"[^`]*id="railThread"/.test(src) && /\$\{csMini\}\$\{thBox\}<\/div>`/.test(src));
+  ok('업체 화면에는 우측 사이드바 토글을 안 그린다(레일이 없다)', /v==='workdesk'&&STATE\.role!=='advertiser'/.test(src));
   ok('_renderTabList 광고주 분기 → _renderAdvSidebar(세그먼트/탭바 미참조) + 첫 화면 갱신',
     /if\(STATE\.role==='advertiser'\)\{ _renderAdvSidebar\(\); if\(!STATE\.cur\) _renderAdvHome\(\); return; \}/.test(src));
   ok('loadTabs 가 광고주면 /my-work-summary 를 함께 받는다', src.includes("api('/api/trackb/my-work-summary')"));
