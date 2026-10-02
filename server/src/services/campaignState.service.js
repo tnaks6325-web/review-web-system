@@ -1228,7 +1228,11 @@ function computeOptionView(opt, cnt, campState) {
   const used = (Number(c.submitted) || 0) + (Number(c.activeHolds) || 0);
   const todayUsed = (Number(c.todaySubmitted) || 0) + (Number(c.todayActiveHolds) || 0);
   const remaining = recruitTotal > 0 ? Math.max(0, recruitTotal - used) : null;       // null=무제한
-  const todayRemaining = dailyLimit > 0 ? Math.max(0, dailyLimit - todayUsed) : null;  // null=옵션 일일제한 없음
+  // ★★ 오늘 남은 자리는 **남은 정원보다 클 수 없다** (사용자 확정 2026-10-02 — 정원 5·일건수 3 이면
+  //   첫날 3 → 둘째 날은 잔량 2). 참여 차단은 원래 정원 소진(soldout)이 먼저 막았지만, 화면은
+  //   "2자리 남음 · 오늘 3자리"로 실제보다 많이 말했다. 정원 무제한(null)이면 일건수 그대로.
+  const todayByDaily = dailyLimit > 0 ? Math.max(0, dailyLimit - todayUsed) : null;  // null=옵션 일일제한 없음
+  const todayRemaining = (todayByDaily !== null && remaining !== null) ? Math.min(todayByDaily, remaining) : todayByDaily;
 
   let status;
   if (String(opt.status || 'active') === 'closed') status = 'closed';          // 수동 마감
