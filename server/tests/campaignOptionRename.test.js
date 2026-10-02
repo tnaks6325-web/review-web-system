@@ -23,7 +23,8 @@ function ok(name, cond) { assert(cond, name); passed++; console.log('  ✓ ' + n
 const start = routes.indexOf('function _planOptionRenames');
 const end = routes.indexOf('async function _saveCampaignOptions');
 assert(start > 0 && end > start, 'rename 함수 위치');
-const sandbox = { logger: { info() {} }, Date };
+let _now = 1000;
+const sandbox = { logger: { info() {} }, Date: { now: () => (_now += 7) }, Math };
 vm.createContext(sandbox);
 vm.runInContext(routes.slice(start, end) + '\nthis._plan=_planOptionRenames;this._apply=_applyOptionRenames;', sandbox);
 const plan = (cur, opts) => sandbox._plan(cur, opts, new Set(opts.map(o => o.optKey)));
@@ -45,6 +46,10 @@ ok('맞바꾸기(A↔B)는 허용', plan(['A', 'B'], [{ optKey: 'B', prevOptKey:
   ok('참여 기록(option_key)도 함께 변경', calls.filter(c => /UPDATE campaign_applications SET option_key/.test(c.sql)).length === 4);
   ok('주문 기록(selected_opt_key)은 건드리지 않음', !calls.some(c => /order_submissions/.test(c.sql)));
   const final = calls.filter(c => /UPDATE campaign_options/.test(c.sql)).slice(-2).map(c => c.p[2]).sort();
+  const optTmp = calls.filter(c => /campaign_options SET opt_key/.test(c.sql)).map(c => [c.p[1], c.p[2]]);
+  const appTmp = calls.filter(c => /campaign_applications SET option_key/.test(c.sql)).map(c => [c.p[1], c.p[2]]);
+  ok('임시 이름이 두 표·두 단계에서 같은 값(시각이 흘러도)', JSON.stringify(optTmp) === JSON.stringify(appTmp)
+    && optTmp[0][1] === optTmp[2][0] && optTmp[1][1] === optTmp[3][0]);
   ok('최종 이름 = 새 이름', JSON.stringify(final) === JSON.stringify(['A', 'B']));
   const none = [];
   await sandbox._apply({ query: async (s) => { none.push(s); return { rows: [] }; } }, 'c1', [{ optKey: 'A', prevOptKey: '' }], new Set(['A']));

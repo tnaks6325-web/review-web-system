@@ -300,7 +300,11 @@ async function _applyOptionRenames(client, campaignId, options, keep) {
   if (!options.some(o => o && o.prevOptKey && o.prevOptKey !== o.optKey)) return [];
   const { rows } = await client.query('SELECT opt_key FROM campaign_options WHERE campaign_id=$1', [campaignId]);
   const plan = _planOptionRenames(rows.map(r => r.opt_key), options, keep);
-  const tmp = (i) => '__rename_tmp_' + i + '_' + Date.now();
+  // ★ 임시 이름은 한 번만 만들어 두 표·두 단계에서 같은 값을 쓴다(호출마다 만들면 시각이 달라져
+  //   선택지와 참여 기록이 서로 다른 임시 이름으로 흩어진다 — 코드리뷰 P1).
+  const stamp = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  const tmpKeys = plan.map((_, i) => '__rename_tmp_' + i + '_' + stamp);
+  const tmp = (i) => tmpKeys[i];
   for (let i = 0; i < plan.length; i++) {
     await client.query('UPDATE campaign_options SET opt_key=$3, updated_at=NOW() WHERE campaign_id=$1 AND opt_key=$2', [campaignId, plan[i].from, tmp(i)]);
     await client.query('UPDATE campaign_applications SET option_key=$3 WHERE campaign_id=$1 AND option_key=$2', [campaignId, plan[i].from, tmp(i)]);
