@@ -45,6 +45,9 @@ const api = read('frontend/api.js');
 const missing = [];
 let count = 0;
 const mapNames = new Set();
+// ★ gasGet/gasPost 는 route.path 만 붙이고 주석의 '/:id…' 꼬리를 붙이지 않는다(Codex P2) — 동적 매핑을 화면이 부르면 404.
+//   2026-10-04 기준 8개 모두 실제 화면 호출 0(시안 mockups 만). 아래 역방향 검사에서 "부르면 실패"로 고정한다.
+const dynamicNames = new Set();
 for (const m of api.matchAll(/'(\w+)'\s*:\s*\{\s*method:\s*'(\w+)'\s*,\s*path:\s*'([^']+)'[^\n]*/g)) {
   count++;
   mapNames.add(m[1]);
@@ -52,6 +55,7 @@ for (const m of api.matchAll(/'(\w+)'\s*:\s*\{\s*method:\s*'(\w+)'\s*,\s*path:\s
   const tail = m[0].slice(m[0].indexOf('}'));
   const dyn = (tail.match(/\/\/[^\n]*?(\/:[\w/:]+)/) || [])[1] || '';
   if (!exists(m[2], p, dyn)) missing.push(`${m[1]} → ${m[2]} ${m[3]}${dyn}`);
+  if (dyn) dynamicNames.add(m[1]);
 }
 ok(`api.js 액션 매핑 ${count}개가 모두 실제 서버 입구를 가리킨다` + (missing.length ? '\n      → ' + missing.join('\n      → ') : ''),
   count > 50 && missing.length === 0);
@@ -60,16 +64,23 @@ ok(`api.js 액션 매핑 ${count}개가 모두 실제 서버 입구를 가리킨
  * 매핑이 없으면 gasGet/gasPost 가 "알 수 없는 action" 으로 끝난다 — 버튼은 있는데 아무 일도 안 남.
  * KNOWN_DEAD = 이 가드를 세울 때(2026-10-04) 이미 매핑 없던 구글시트 시절 버튼 3개. 결정 186 다음 항목에서 처리한다 —
  * 여기에 새 이름을 더하지 말 것(새 버튼은 매핑을 만들거나 버튼을 지운다). */
-const KNOWN_DEAD = new Set(['cleanOrphanDetailRows', 'debugBuildStep', 'testTabConfig']);
+const KNOWN_DEAD = new Set(['cleanOrphanDetailRows', 'debugBuildStep', 'testTabConfig', 'debugSingleSheet']);
+// gas 래퍼가 아닌 헬퍼 본문의 하위 동작 이름(예: _campEditorAction({action:'add'})) — 액션 매핑 대상이 아니다.
+const SUB_ACTIONS = new Set(['add', 'toggle', 'remove', 'edit', 'delete', 'list']);
 const unmapped = [];
 (function walk(d) {
   for (const e of fs.readdirSync(d, { withFileTypes: true })) {
     const f = path.join(d, e.name);
-    if (e.isDirectory()) { if (!['node_modules', 'docs'].includes(e.name)) walk(f); continue; }
-    if (!/\.(js|html)$/.test(e.name) || /\.test\.js$/.test(e.name)) continue;
+    if (e.isDirectory()) { if (!['node_modules', 'docs', 'mockups'].includes(e.name)) walk(f); continue; }
+    if (!/\.(js|html)$/.test(e.name) || /\.test\.js$/.test(e.name) || e.name === 'api.js') continue;
     const src = fs.readFileSync(f, 'utf8');
-    for (const m of src.matchAll(/gas(?:Get|Post|PostUpload)\(\s*\{\s*action\s*:\s*["'](\w+)["']/g)) {
-      if (!mapNames.has(m[1]) && !KNOWN_DEAD.has(m[1])) unmapped.push(`${path.relative(root, f)}: ${m[1]}`);
+    if (!/gas(?:Get|Post|PostUpload)\(/.test(src)) continue;
+    // 호출 안 직접 리터럴 + 변수에 먼저 담는 형태(const p = { action: '…' }) 모두 — Codex P2
+    for (const m of src.matchAll(/action\s*:\s*["'](\w+)["']/g)) {
+      const a = m[1];
+      if (SUB_ACTIONS.has(a) || KNOWN_DEAD.has(a)) continue;
+      if (!mapNames.has(a)) unmapped.push(`${path.relative(root, f)}: ${a}`);
+      else if (dynamicNames.has(a)) unmapped.push(`${path.relative(root, f)}: ${a}(동적 매핑 — 래퍼가 /:id 를 안 붙여 404)`);
     }
   }
 })(path.join(root, 'frontend'));
@@ -102,18 +113,31 @@ ok('블랙리스트·공지 배너 창 함수는 남아 있고 옛 대시보드�
 /* ═══ 옛 대시보드 인라인 핸들러가 부르는 함수는 어딘가에 정의돼 있다 ═══
  * 공유 스크립트를 지울 때 같이 사라지는 버튼을 잡는다(이번에 실제로 놓쳤다). */
 const scripts = [...admin.matchAll(/<script src="([^"?]+)/g)].map(m => m[1]).filter(s => !/^https?:/.test(s));
-const defined = new Set();
-const addDefs = (src) => { for (const m of src.matchAll(/(?:function\s+|(?:window\.|^|[\s;])(?:const|let|var)?\s*)([A-Za-z_$][\w$]*)\s*(?:\(|=\s*(?:async\s*)?(?:function|\())/gm)) defined.add(m[1]); };
-for (const s of scripts) { const fp = path.join(root, 'frontend', s); if (fs.existsSync(fp)) addDefs(fs.readFileSync(fp, 'utf8')); }
-for (const m of admin.matchAll(/<script>([\s\S]*?)<\/script>/g)) addDefs(m[1]);
-// 인라인 핸들러 값 안의 **모든** 함수 호출(맨 앞·세미콜론 뒤·조건 뒤·window.fn 포함, 멤버 호출 a.b() 는 제외) — Codex P2
+// 전역에서 부를 수 있는 함수만 센다(Codex P2): 옛 대시보드 스크립트를 **실제로 한 번 실행**(가짜 브라우저 객체)하고
+//   인라인 핸들러가 부르는 이름이 전역에서 함수인지 vm 안에서 typeof 로 확인한다.
+//   IIFE·DOMContentLoaded 안으로 숨은 함수는 여기서 undefined 로 잡힌다. 실행 중 오류는 스크립트 단위로 삼킨다
+//   (함수 선언은 실행 전에 만들어지므로 오류 뒤 함수도 잡힌다).
+const vm = require('vm');
+const any = () => { const f = function () { return p; }; const p = new Proxy(f, { get: (t, k) => (k === Symbol.toPrimitive ? () => '' : k === 'then' ? undefined : p), apply: () => p, construct: () => p, set: () => true, has: () => true }); return p; };
+const store = () => { const m = new Map(); return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k), clear: () => m.clear(), key: () => null, length: 0 }; };
+const sandbox = { console: { log() {}, warn() {}, error() {}, info() {}, debug() {} }, document: any(), navigator: any(), location: any(), history: any(),
+  localStorage: store(), sessionStorage: store(), fetch: () => new Promise(() => {}), setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {},
+  requestAnimationFrame: () => 0, alert() {}, confirm: () => false, prompt: () => null, matchMedia: () => any(), getComputedStyle: () => any(),
+  EventSource: any(), MutationObserver: any(), IntersectionObserver: any(), ResizeObserver: any(), CustomEvent: any(), Event: any(), HTMLElement: any(), Element: any(), Node: any(), Image: any(), FileReader: any(), Blob: any(), FormData: any(), AbortController: any(), DOMParser: any(), XMLHttpRequest: any(),
+  URL, URLSearchParams, Intl, Date, Math, JSON, Promise, Map, Set, WeakMap, Array, Object, String, Number, Boolean, RegExp, Error, Symbol, encodeURIComponent, decodeURIComponent, parseInt, parseFloat, isNaN, TextEncoder, TextDecoder, structuredClone, atob, btoa };
+sandbox.window = sandbox; sandbox.self = sandbox; sandbox.globalThis = sandbox;
+const ctx = vm.createContext(sandbox);
+const runErrors = [];
+for (const src of scripts) { const fp = path.join(root, 'frontend', src); if (!fs.existsSync(fp)) continue; try { vm.runInContext(fs.readFileSync(fp, 'utf8'), ctx, { filename: src, timeout: 5000 }); } catch (e) { runErrors.push(src + ': ' + String(e.message).slice(0, 60)); } }
+for (const m of admin.matchAll(/<script(?![^>]*src)[^>]*>([\s\S]*?)<\/script>/g)) { try { vm.runInContext(m[1], ctx, { timeout: 5000 }); } catch (e) { runErrors.push('inline: ' + String(e.message).slice(0, 60)); } }
+const isGlobalFn = (fn) => { try { return vm.runInContext(`typeof ${fn} === 'function'`, ctx); } catch (_) { return false; } };
 const called = new Set();
 for (const a of admin.matchAll(/\son[a-z]+="([^"]*)"/g)) {
   for (const m of a[1].matchAll(/(^|[^\w$.])(?:window\.)?([A-Za-z_$][\w$]*)\s*\(/g)) called.add(m[2]);
 }
 const BUILTIN = new Set(['if', 'return', 'event', 'this', 'document', 'window', 'alert', 'confirm', 'location', 'history', 'setTimeout',
-  'function', 'String', 'Number', 'parseInt', 'encodeURIComponent', 'decodeURIComponent', 'JSON', 'Math', 'open', 'print', 'fetch', 'while', 'for', 'switch']);
-const undef = [...called].filter(fn => !BUILTIN.has(fn) && !defined.has(fn));
+  'function', 'String', 'Number', 'parseInt', 'encodeURIComponent', 'decodeURIComponent', 'JSON', 'Math', 'open', 'print', 'fetch', 'while', 'for', 'switch', 'var', 'rgba', 'rgb', 'url']); // var·rgba·url = 핸들러 안 CSS 문자열
+const undef = [...called].filter(fn => !BUILTIN.has(fn) && !isGlobalFn(fn));
 ok(`옛 대시보드 인라인 버튼이 부르는 함수 ${called.size}개가 모두 정의돼 있다` + (undef.length ? ' → 없음: ' + undef.join(', ') : ''), undef.length === 0);
 
 console.log(`\n✅ frontendActionMapRoutes: ${n}개 통과`);
