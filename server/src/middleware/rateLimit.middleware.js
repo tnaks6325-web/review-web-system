@@ -1,5 +1,6 @@
 const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
+const { isLoginSessionToken } = require('./auth.middleware');
 
 // ── 전역 제한 = "사람별 통" + "인터넷 주소별 상한" 두 겹 (decision 188, 2026-09-28) ──
 // ★ 종전엔 인터넷 주소(IP) 하나당 분당 120 한 통이었다. 사무실은 직원 전원이 한 주소를 쓰고,
@@ -143,8 +144,8 @@ const imageApiLimiter = rateLimit({
     const token = authHeader && authHeader.split(' ')[1];
     if (!token) return false;
     try {
-      jwt.verify(token, process.env.JWT_SECRET);
-      return true; // 인증된 관리자 → 제한 없음
+      // 로그인 세션 토큰만 면제 — 무인증으로 받는 추출 증명·리뷰어 세션으로 제한을 풀지 못하게(결정 201).
+      return isLoginSessionToken(jwt.verify(token, process.env.JWT_SECRET)); // 인증된 관리자 → 제한 없음
     } catch (_) {
       return false; // 토큰 무효 → 제한 적용
     }
@@ -167,7 +168,7 @@ const imageUploadLimiter = rateLimit({
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
     if (!token) return false;
-    try { jwt.verify(token, process.env.JWT_SECRET); return true; } catch (_) { return false; }
+    try { return isLoginSessionToken(jwt.verify(token, process.env.JWT_SECRET)); } catch (_) { return false; }
   },
 });
 

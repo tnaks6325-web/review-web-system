@@ -1,5 +1,18 @@
 const jwt = require('jsonwebtoken');
 
+// ★★★ 로그인 세션 토큰 판정(완화 금지 · 2026-10-04 결정 201).
+//   같은 JWT_SECRET 으로 **로그인이 아닌 토큰**도 서명된다 — 무인증 `POST /api/image/extract` 가 누구에게나
+//   주는 추출 증명(aud reviewer-order-identity · purpose), 무비밀번호 리뷰어 세션(aud reviewer-app · scope),
+//   관리자→리뷰어 홈 교환권(scope reviewer_home_admin). 서명만 보면 이 토큰들이 관리자 라우트를 통과했다
+//   (로그인 없이 리뷰어 목록·삭제까지). 로그인 토큰은 aud·scope·purpose 가 없고 role 이 아래 넷 중 하나다.
+//   via(intranet·reviewer_campaign·link·brand-link)별 경로 제한은 authMiddleware 가 이어서 따로 본다.
+const LOGIN_ROLES = new Set(['master', 'admin', 'staff', 'advertiser']);
+function isLoginSessionToken(decoded) {
+  if (!decoded || typeof decoded !== 'object') return false;
+  if (decoded.aud != null || decoded.scope != null || decoded.purpose != null) return false;
+  return LOGIN_ROLES.has(decoded.role);
+}
+
 /**
  * JWT 토큰 검증 미들웨어
  * Authorization: Bearer <token> 헤더에서 토큰 추출
@@ -22,6 +35,9 @@ function authMiddleware(req, res, next) {
       if (err.name === 'TokenExpiredError') {
         return res.status(401).json({ error: '세션이 만료되었습니다. 다시 로그인하세요.' });
       }
+      return res.status(401).json({ error: '유효하지 않은 인증 토큰입니다.' });
+    }
+    if (!isLoginSessionToken(decoded)) {
       return res.status(401).json({ error: '유효하지 않은 인증 토큰입니다.' });
     }
     // ★ 인트라넷 SSO 토큰(via:'intranet')은 Track B 리뷰웹시스템[3버전](/api/trackb/*) 전용.
@@ -78,4 +94,4 @@ function internalOnlyMiddleware(req, res, next) {
   next();
 }
 
-module.exports = { authMiddleware, masterOnlyMiddleware, adminOrMasterMiddleware, internalOnlyMiddleware };
+module.exports = { authMiddleware, masterOnlyMiddleware, adminOrMasterMiddleware, internalOnlyMiddleware, isLoginSessionToken };
