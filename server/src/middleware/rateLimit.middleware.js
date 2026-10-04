@@ -1,5 +1,6 @@
 const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
+const { isTrustedLoginToken } = require('./auth.middleware');
 
 // ── 전역 제한 = "사람별 통" + "인터넷 주소별 상한" 두 겹 (decision 188, 2026-09-28) ──
 // ★ 종전엔 인터넷 주소(IP) 하나당 분당 120 한 통이었다. 사무실은 직원 전원이 한 주소를 쓰고,
@@ -56,7 +57,9 @@ function rateIdentity(req) {
   const bearerPayload = bearer ? _verify(bearer[1]) : null;
   const reviewerPayload = _verify(req.headers['x-reviewer-token'])
     || (bearerPayload && bearerPayload.scope === 'reviewer_session' ? bearerPayload : null);
-  if (bearerPayload && bearerPayload.scope !== 'reviewer_session') {
+  // ★ 직원 통·주소 상한 면제는 **로그인 토큰만**(결정 201 · Codex P2) — 서명만 맞는 비로그인 토큰
+  //   (추출 증명·리뷰어 홈 교환권·공고수정 토큰)은 아래 리뷰어/번호/주소 통으로 떨어진다.
+  if (bearerPayload && isTrustedLoginToken(bearerPayload)) {
     // 서명된 고유 ID를 이름보다 먼저 쓴다 — 브랜드·광고주 이름은 겹칠 수 있다(같은 이름 = 같은 통 금지).
     const pl = bearerPayload;
     const who = pl.brand_id != null ? `b${pl.brand_id}`
@@ -143,8 +146,8 @@ const imageApiLimiter = rateLimit({
     const token = authHeader && authHeader.split(' ')[1];
     if (!token) return false;
     try {
-      jwt.verify(token, process.env.JWT_SECRET);
-      return true; // 인증된 관리자 → 제한 없음
+      // 로그인 세션 토큰만 면제 — 무인증으로 받는 추출 증명·리뷰어 세션으로 제한을 풀지 못하게(결정 201).
+      return isTrustedLoginToken(jwt.verify(token, process.env.JWT_SECRET)); // 인증된 관리자 → 제한 없음
     } catch (_) {
       return false; // 토큰 무효 → 제한 적용
     }
@@ -167,7 +170,7 @@ const imageUploadLimiter = rateLimit({
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
     if (!token) return false;
-    try { jwt.verify(token, process.env.JWT_SECRET); return true; } catch (_) { return false; }
+    try { return isTrustedLoginToken(jwt.verify(token, process.env.JWT_SECRET)); } catch (_) { return false; }
   },
 });
 
