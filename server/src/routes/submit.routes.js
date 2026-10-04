@@ -1561,40 +1561,7 @@ router.post('/order', async (req, res, next) => {
   }
 });
 
-// ═══════════════════════════════════════════════════════════
-// POST /api/submit/check-files — 리뷰파일 존재 확인 (GAS: checkReviewFiles)
-// ═══════════════════════════════════════════════════════════
-router.post('/check-files', async (req, res, next) => {
-  try {
-    const { sheetId, tabName, rowIndex } = req.body;
-
-    // tab_configs에서 폴더 URL 조회
-    const { rows } = await pool.query(
-      'SELECT folder_url, capture_folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
-      [sheetId, tabName]
-    );
-
-    if (rows.length === 0 || !rows[0].folder_url) {
-      return res.json({ ok: true, exists: false, message: '폴더 URL 미설정' });
-    }
-
-    // Drive API로 폴더 내 파일 확인
-    try {
-      const driveService = require('../services/drive.service');
-      const folderId = extractFolderId(rows[0].folder_url);
-      if (folderId) {
-        const files = await driveService.listFolderContents(folderId);
-        return res.json({ ok: true, exists: files.length > 0, fileCount: files.length });
-      }
-    } catch (driveErr) {
-      console.warn('Drive API 조회 실패:', driveErr.message);
-    }
-
-    res.json({ ok: true, exists: false, message: '파일 확인 불가' });
-  } catch (err) {
-    next(err);
-  }
-});
+// POST /api/submit/check-files(무인증 · 폴더 파일 개수) 은 2026-10-05 제거 — 결정 186 103번(옛 리뷰제출 화면의 열 수 없는 진단 창 전용 · 9/2 이후 호출 0).
 
 // ═══════════════════════════════════════════════════════════
 // 헬퍼 함수들
@@ -1609,13 +1576,6 @@ function getColLetter(colIdx) {
     idx = Math.floor(idx / 26) - 1;
   }
   return letter;
-}
-
-/** Google Drive URL에서 폴더 ID 추출 */
-function extractFolderId(url) {
-  if (!url) return null;
-  const m = url.match(/\/folders\/([a-zA-Z0-9_-]+)/);
-  return m ? m[1] : null;
 }
 
 /** 주문 데이터를 헤더에 맞게 매핑

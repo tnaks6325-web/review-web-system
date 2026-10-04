@@ -7885,17 +7885,8 @@ async function _updateSmartDirtyBadge() {
     const hintEl  = document.getElementById("smartModeHint");
     const hintTxt = document.getElementById("smartModeHintText");
     if (!badge) return;
-    const dirtyCnt = data.dirtyCount || 0;
-    if (dirtyCnt > 0) {
-      // ★ v10.0: 배지 스타일 강화 — 흰 반투명 → 빨간 배지로 더 눈에 띄게
-      badge.textContent = dirtyCnt + "개 변경";
-      badge.style.cssText = "display:inline;background:#DC2626;color:#fff;padding:1px 7px;border-radius:10px;font-size:.7rem;font-weight:700;margin-left:5px;";
-      if (hintEl && hintTxt) {
-        hintTxt.textContent = `🔴 변경된 캠페인 ${dirtyCnt}개 — 스마트빌드 갱신 클릭 시 해당 캠페인만 재갱신합니다.`;
-        hintEl.style.display = "";
-        hintEl.style.color = "#DC2626";
-      }
-    } else {
+    // ('N개 변경' 빨간 배지 갈래는 2026-10-05 제거 — 결정 186 104번: indexStatus 응답에 dirtyCount 가 없어 늘 0)
+    {
       badge.style.display = "none";
       if (hintEl && hintTxt) {
         hintTxt.textContent = "변경된 탭 없음 — 클릭 시 전체 갱신 주기 도래 여부에 따라 자동 판단합니다.";
@@ -7903,68 +7894,11 @@ async function _updateSmartDirtyBadge() {
         hintEl.style.color = "#6b7280";
       }
     }
-    // ★ v10.2 P2-C: 고아 행 경고 (orphanCount > 0)
-    _handleOrphanRowsWarning(data.orphanCount || 0, data.orphanRows || []);
   } catch (_) {}
 }
 
-// ★ v10.2 P2-C: 고아 행 경고 배너 처리
-let _lastOrphanCount = 0;
-function _handleOrphanRowsWarning(orphanCount, orphanRows) {
-  _lastOrphanCount = orphanCount;
-  // 기존 배너 제거
-  const existBanner = document.getElementById("orphanRowsBanner");
-  if (existBanner) existBanner.remove();
-  if (orphanCount <= 0) return;
-
-  // 경고 배너 생성
-  const banner = document.createElement("div");
-  banner.id = "orphanRowsBanner";
-  banner.style.cssText = "background:#FFF7ED;border:1px solid #FB923C;border-radius:8px;padding:12px 16px;"
-    + "margin:8px 0;font-size:.85rem;color:#9A3412;line-height:1.6;";
-
-  const sampleHtml = (orphanRows && orphanRows.length > 0)
-    ? orphanRows.slice(0, 5).map(o =>
-        `<span style="font-family:monospace;font-size:.78rem">• ${escHtml(o.tabName || o.sheetId)} (행 ${o.rowNum})</span>`
-      ).join("<br>")
-    : "";
-
-  banner.innerHTML = `<b><i class="fas fa-broom" style="color:#F97316"></i> 미사용 세부목록 행 ${orphanCount}개 감지</b>`
-    + (sampleHtml ? `<br><div style="margin:6px 0 4px;padding:6px 8px;background:#FED7AA;border-radius:4px;font-size:.78rem">${sampleHtml}</div>` : "")
-    + `<br><button onclick="cleanOrphanRows()" style="margin-top:4px;padding:4px 14px;background:#EA580C;color:#fff;`
-    + `border:none;border-radius:6px;font-size:.8rem;cursor:pointer;font-weight:700">`
-    + `<i class="fas fa-trash-alt"></i> 미사용 설정 정리</button>`
-    + `<button onclick="document.getElementById('orphanRowsBanner').remove()" style="margin-left:8px;padding:4px 10px;`
-    + `background:transparent;color:#9A3412;border:1px solid #FB923C;border-radius:6px;font-size:.8rem;cursor:pointer">`
-    + `무시</button>`;
-
-  // gasErrorBanner 앞에 삽입
-  const anchor = document.getElementById("gasErrorBanner") || document.getElementById("indexSettingContent");
-  if (anchor && anchor.parentNode) {
-    anchor.parentNode.insertBefore(banner, anchor);
-  }
-}
-
-/**
- * ★ v10.2 P2-C: 고아 세부목록 행 일괄 삭제
- */
-async function cleanOrphanRows() {
-  if (!confirm(`미사용 세부목록 행 ${_lastOrphanCount}개를 삭제합니다.\n삭제된 행은 복구할 수 없습니다. 계속하시겠습니까?`)) return;
-  try {
-    showToast("⏳ 미사용 설정 정리 중...", false);
-    const data = await gasGet({ action: "cleanOrphanDetailRows" }, 30000);
-    if (data.ok) {
-      showToast(`✅ ${data.deleted}개 미사용 행 삭제 완료`, "success");
-      const banner = document.getElementById("orphanRowsBanner");
-      if (banner) banner.remove();
-      _lastOrphanCount = 0;
-    } else {
-      showToast("❌ 정리 오류: " + (data.error || "알 수 없는 오류"), "error");
-    }
-  } catch (e) {
-    showToast("❌ 요청 실패: " + e.message, "error");
-  }
-}
+// (고아 세부목록 행 경고 띠·[미사용 설정 정리] 버튼은 2026-10-05 제거 — 결정 186 104번: 서버 indexStatus 응답에
+//  orphanCount·dirtyCount 가 없어 한 번도 뜰 수 없었고, 정리 액션 cleanOrphanDetailRows 는 매핑도 없었다.)
 
 async function loadIndexStatus() {
   const builtAt = document.getElementById("indexBuiltAt");
@@ -8002,8 +7936,6 @@ async function loadIndexStatus() {
       builtAt.textContent = data.builtAtStr || "-";
       count.textContent   = (data.count || 0).toLocaleString() + "건";
     }
-    // ★ v10.2 P2-C: 고아 행 경고 처리
-    _handleOrphanRowsWarning(data.orphanCount || 0, data.orphanRows || []);
   } catch (err) {
     badge.className = "index-badge index-badge-error";
     badge.textContent = "오류";

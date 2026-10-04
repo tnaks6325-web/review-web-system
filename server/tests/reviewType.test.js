@@ -233,7 +233,9 @@ t('★★ 프론트 프리필 표의 라벨이 서버 REVIEW_TYPES 와 일치(�
   return JSON.stringify(pairs) === JSON.stringify(server);
 })());
 
-t('탭 설정 팝오버 선택지가 새 목록(두 화면 모두)', ['admin.html', 'search.html'].every(f => {
+// search.html 의 탭 설정 팝오버는 옛 대시보드 사본(그릴 자리 없음)이라 2026-10-05 제거(결정 186 103번) — 관리자 화면만 본다.
+t('검색 화면에 옛 대시보드 탭 설정 팝오버 사본이 남아 있지 않다', !/id="tcPopover"/.test(F('search.html')));
+t('탭 설정 팝오버 선택지가 새 목록(관리자 화면)', ['admin.html'].every(f => {
   const s = F(f);
   const block = (s.match(/<div class="tc-option-row" id="tcOptReview">([\s\S]*?)<\/div>/) || [, ''])[1];
   return RT.REVIEW_TYPE_LABELS.every(l => block.includes(`data-val="${l}"`))
@@ -243,8 +245,8 @@ t('탭 설정 팝오버 선택지가 새 목록(두 화면 모두)', ['admin.htm
    표시(배지)만 갱신하고 입력 창구를 옛 어휘로 두면, 거기서 고른 '실배송'이 그대로 저장되어
    `resolveReviewType` 이 null 로 떨어진다 = "설정했는데 검수는 미지정"(2026-08-06 사고의 입구).
    창구를 하나라도 빠뜨리면 정리 도구(087)가 고친 값을 그 화면이 다시 되돌린다. */
-t('★ 탭 설정 팝오버 = 두 화면 모두 새 목록(admin·search) (admin-siand.html 은 결정 186 44번에서 제거)',
-  ['admin.html', 'search.html'].every(f => {
+t('★ 탭 설정 팝오버 = 관리자 화면 새 목록 (admin-siand.html 은 결정 186 44번, search.html 사본은 103번에서 제거)',
+  ['admin.html'].every(f => {
     const block = (F(f).match(/<div class="tc-option-row" id="tcOptReview">([\s\S]*?)<\/div>/) || [, ''])[1];
     return RT.REVIEW_TYPE_LABELS.every(l => block.includes(`data-val="${l}"`))
         && !/data-val="실배송"|data-val="빈박스"|data-val="믹스"/.test(block);

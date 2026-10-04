@@ -22,8 +22,6 @@ function show(idOrEl, displayType) {
 // filesByIdx:   { [idx]: File[] }  — 슬롯별 파일 목록
 // memoByIdx:    { [idx]: string }  — 슬롯별 메모 (기존 단건 memoTxt와 별도)
 const S = { selectedRow: null, selectedRows: [], filesByIdx: {}, memoByIdx: {}, files: [], step: 1, receiptStepMode: false };
-const ADMIN_SESSION_KEY  = "rapp_admin_exp";
-const ADMIN_SESSION_MS   = 8 * 60 * 60 * 1000;
 const REVIEWER_AUTH_KEY  = "rapp_reviewer_auth";  // ★ 리뷰어 로그인 세션 키
 
 /* ═══ M2 참여형 임베드 모드 (?embed=1) — campaign.html iframe 안에서 열릴 때 ═══
@@ -1553,12 +1551,6 @@ function _onNameInput() { /* authScreen 기반 실시간 유효성 검사 없음
 async function _onNameNext()       { /* 미사용: _doLogin() 으로 대체 */ }
 async function _onPhoneAuthSubmit(){ /* 미사용: _doLogin() 으로 대체 */ }
 
-/* ── 미등록 차단 블록에서 등록 모달 열기 ── */
-function _openRegisterFromBlock() {
-  const nrWrap = document.getElementById("notRegisteredWrap");
-  if (nrWrap) nrWrap.style.display = "none";
-  openRegisterModal();
-}
 
 /* ══════════════════════════════════════════════════════════════
    ★★★ 통합 로그인/등록 화면 JS (authScreen 기반) ★★★
@@ -4392,51 +4384,13 @@ function resetApp() {
 
 /* ── 관리자 세션 (search.html에서는 미사용 — stub 유지) ── */
 function isAdminLoggedIn() { return false; }
-function setAdminSession() {}
 function clearAdminSession() {}
-function getAdminSessionRemaining() { return null; }
 
 /* ── GAS URL 설정 모달 (비밀번호 인증) ── */
 const GAS_URL_PW = "rhakdnjdy1!"; // 설정 접근 비밀번호
 
-function openGasUrlModal() {
-  // 항상 STEP1(비밀번호)부터 시작
-  show("gasUrlStep1");
-  hide("gasUrlStep2");
-  const pwEl = document.getElementById("gasUrlPwInput");
-  pwEl.value = "";
-  hide("gasUrlPwError");
-  hide("gasUrlError");
-  show("gasUrlModal", "flex");
-  setTimeout(() => pwEl.focus(), 100);
-}
 function closeGasUrlModal() {
   hide("gasUrlModal");
-}
-function verifyGasUrlPw() {
-  const pw    = document.getElementById("gasUrlPwInput").value;
-  const errEl = document.getElementById("gasUrlPwError");
-  hide(errEl);
-  if (!pw) {
-    errEl.textContent = "비밀번호를 입력하세요.";
-    show(errEl);
-    return;
-  }
-  if (pw !== GAS_URL_PW) {
-    errEl.textContent = "비밀번호가 틀렸습니다.";
-    show(errEl);
-    document.getElementById("gasUrlPwInput").value = "";
-    document.getElementById("gasUrlPwInput").focus();
-    return;
-  }
-  // 비밀번호 확인 성공 → STEP2로 전환
-  hide("gasUrlStep1");
-  const urlInput = document.getElementById("gasUrlInput");
-  urlInput.value = APP_CONFIG.GAS_WEB_APP_URL || "";
-  hide("gasUrlError");
-  show("gasUrlStep2");
-  _renderGasUrlHistory(); // ← 이력 목록 갱신
-  setTimeout(() => urlInput.focus(), 100);
 }
 function saveGasUrl() {
   const url   = document.getElementById("gasUrlInput").value.trim();
@@ -4495,58 +4449,6 @@ function _addGasUrlHistory(url) {
   try { localStorage.setItem(GAS_URL_HISTORY_KEY, JSON.stringify(list)); } catch (_) {}
 }
 
-/** 이력 전체 삭제 */
-function clearGasUrlHistory() {
-  if (!confirm("변경 이력을 모두 삭제하시겠습니까?")) return;
-  try { localStorage.removeItem(GAS_URL_HISTORY_KEY); } catch (_) {}
-  _renderGasUrlHistory();
-}
-
-/** 이력 목록을 모달에 렌더링 */
-function _renderGasUrlHistory() {
-  const wrap = document.getElementById("gasUrlHistoryWrap");
-  const list = document.getElementById("gasUrlHistoryList");
-  if (!wrap || !list) return;
-  const history = _loadGasUrlHistory();
-  if (!history.length) { wrap.style.display = "none"; return; }
-  wrap.style.display = "block";
-  list.innerHTML = history.map((h, i) => {
-    const dt  = new Date(h.savedAt);
-    const pad = n => String(n).padStart(2, "0");
-    const dateStr = `${dt.getFullYear()}.${pad(dt.getMonth()+1)}.${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
-    // URL 중간 생략 (앞 30자 + … + 끝 20자)
-    const short = h.url.length > 54
-      ? h.url.slice(0, 32) + "…" + h.url.slice(-20)
-      : h.url;
-    const isCurrent = (APP_CONFIG.GAS_WEB_APP_URL === h.url);
-    return `
-      <div class="gas-url-history-item${isCurrent ? ' gas-url-history-current' : ''}"
-           onclick="_selectGasUrlHistory('${i}')" title="${h.url}">
-        <div style="display:flex;align-items:center;gap:6px;min-width:0">
-          <span class="gas-url-ver-badge">v${h.version}</span>
-          <span class="gas-url-history-url">${short}</span>
-          ${isCurrent ? '<span class="gas-url-cur-tag">현재</span>' : ''}
-        </div>
-        <span class="gas-url-history-date">${dateStr}</span>
-      </div>`;
-  }).join('');
-}
-
-/** 이력 항목 클릭 → 입력칸에 자동 입력 */
-function _selectGasUrlHistory(idx) {
-  const history = _loadGasUrlHistory();
-  const entry   = history[Number(idx)];
-  if (!entry) return;
-  const input = document.getElementById("gasUrlInput");
-  if (input) {
-    input.value = entry.url;
-    input.focus();
-    // 선택 피드백
-    document.querySelectorAll(".gas-url-history-item").forEach((el, i) => {
-      el.classList.toggle("gas-url-history-selected", i === Number(idx));
-    });
-  }
-}
 
 /** GAS PropertiesService에 URL 저장 (백그라운드, 비동기) */
 async function _saveAppUrlToGas(url) {
@@ -4563,22 +4465,8 @@ async function _saveAppUrlToGas(url) {
   }
 }
 
-/* ── 관리자 접근 차단 (search.html에서는 모든 경로 비활성) ── */
-function openAdminLogin() {}
-function closeAdminLogin() {}
-async function submitAdminLogin() {}
-function enterAdminScreen() {}
 function exitAdmin() {}
 
-/* ── 관리자 탭 전환 ── */
-function switchAdminTab(tabName) {
-  document.querySelectorAll(".admin-tab-btn").forEach(b => b.classList.remove("active"));
-  document.querySelectorAll(".admin-tab-pane").forEach(p => p.classList.remove("active"));
-  const btn  = document.querySelector(`.admin-tab-btn[data-tab="${tabName}"]`);
-  const pane = document.getElementById(`tab-${tabName}`);
-  if (btn)  btn.classList.add("active");
-  if (pane) pane.classList.add("active");
-}
 
 /* ── 제출 현황 대시보드 ── */
 async function loadAdminDashboard() {
@@ -4850,143 +4738,6 @@ function _buildTabUrl(sheetUrl, sheetId, tabGid) {
   return baseUrl;
 }
 
-// 대시보드 렌더링 (외부에서 data를 직접 넘겨 재렌더링 가능)
-function renderDashboard(data) {
-  const wrap  = document.getElementById("dashboardWrap");
-  const stats = data.stats || [];
-  const grand = data.grand || { total: 0, submitted: 0, pending: 0 };
-  const rate  = grand.total > 0 ? Math.round(grand.submitted / grand.total * 100) : 0;
-  document.getElementById("sumTotal").textContent   = grand.total.toLocaleString();
-  document.getElementById("sumDone").textContent    = grand.submitted.toLocaleString();
-  document.getElementById("sumPending").textContent = grand.pending.toLocaleString();
-  document.getElementById("sumRate").textContent    = rate + "%";
-  show("dashboardSummary");
-  if (!stats.length) {
-    wrap.innerHTML = '<div class="admin-empty"><i class="fas fa-inbox"></i><p>데이터가 없습니다</p></div>';
-    return;
-  }
-  // 기존 렌더링 로직 재사용: loadAdminDashboard의 render 부분을 그대로 실행
-  // stats를 직접 주입해 재렌더링
-  wrap.innerHTML = "";
-
-  // ── 컬럼 헤더: wrap 직속 (scrollOuter 밖) → sticky 정상 동작 ──
-  const colHdr = document.createElement("div");
-  colHdr.id = "dashColHeader";
-  colHdr.className = "dash-col-header";
-  _buildColHeader(colHdr);
-  wrap.appendChild(colHdr);
-
-  // ── 가로 스크롤 래퍼 (캠페인 블록만 포함) ──
-  const scrollOuter2 = document.createElement("div");
-  scrollOuter2.id = "dashboardScrollOuter";
-  const scrollInner2 = document.createElement("div");
-  scrollInner2.id = "dashboardScrollInner";
-  scrollOuter2.appendChild(scrollInner2);
-  wrap.appendChild(scrollOuter2);
-
-  stats.forEach((c, ci) => {
-    const cRate    = c.total > 0 ? Math.round(c.submitted / c.total * 100) : 0;
-    const tableId  = `dct-r-${ci}`;
-    const block    = document.createElement("div");
-    // 완료 업체 재계산
-    const allDone      = c.closedOnly === true || c.tabs.every(t => {
-      const key = (t.sheetId||"")+"||"+(t.tab||"");
-      return _closedSet.has(key) || (t.total > 0 && t.pending === 0);
-    });
-    const hasClosed = c.closedOnly === true || c.tabs.some(t => _closedSet.has((t.sheetId||"")+"||"+(t.tab||"")));
-    block.className = "dash-campaign-block" + (allDone ? " camp-all-done" : "") + (hasClosed ? " camp-has-closed" : "");
-    const campSheetId2 = (c.tabs[0] && c.tabs[0].sheetId) ? c.tabs[0].sheetId : "";
-    const header = document.createElement("div");
-    header.className = "dash-campaign-header";
-    header.innerHTML = `
-      <div class="dash-campaign-left">
-        <i class="fas fa-chevron-down dash-toggle-icon"></i>
-        ${campSheetId2 ? `<button class="btn-camp-refresh" data-sheetid="${escHtml(campSheetId2)}" data-campname="${escHtml(c.campaign)}" onclick="event.stopPropagation();refreshCampaignIndex(this)" title="이 캠페인만 동기화"><i class="fas fa-sync-alt"></i> 갱신</button>` : ""}
-        <span class="dash-campaign-name">${escHtml(c.campaign)}</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
-        <span class="dash-campaign-total">${c.submitted}/${c.total} (${cRate}%)</span>
-      </div>`;
-    header.addEventListener("click", () => toggleDashTab(tableId, header));
-    const table = document.createElement("div");
-    table.id        = tableId;
-    table.className = "dash-tab-table collapsed";
-    c.tabs.forEach(t => {
-      const tRate      = t.total > 0 ? Math.round(t.submitted / t.total * 100) : 0;
-      const tabKey     = (t.sheetId||"")+"||"+(t.tab||"");
-      const isClosedTab = _closedSet.has(tabKey);
-      const isTabDone  = (t.total > 0 && t.pending === 0);
-      const row        = document.createElement("div");
-      row.className    = "dash-tab-row"+(isTabDone?" tab-done":"")+(isClosedTab?" is-closed-row":"");
-      row.dataset.tabkey = tabKey;
-      const _tabSheetUrl2 = _buildTabUrl(t.sheetUrl, t.sheetId, t.tabGid);
-      const tabNameHtml = _tabSheetUrl2
-        ? `<a class="dash-tab-link" href="${escHtml(_tabSheetUrl2)}" target="_blank" title="${escHtml(_tabSheetUrl2)}">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>`
-        : `<span>${escHtml(t.tab)}</span>`;
-      const startDateHtml = t.startDate
-        ? `<span class="tab-start-date"><i class="fas fa-calendar-day"></i> ${escHtml(t.startDate)}</span>` : "";
-      const tuip = t.tuip||0, chuihap = t.chuihap||0;
-      let stateHtml = "";
-      if (isClosedTab)  stateHtml = `<span class="dash-pending-badge badge-done" style="background:#e8f1fe;color:#1b64da;border-color:#cce0fb">⬛ 마감</span>`;
-      else if (isTabDone) stateHtml = `<span class="dash-pending-badge badge-done">✓ 완료</span>`;
-      else if (tuip>0) stateHtml = `<span class="work-badge badge-tuip"><i class="fas fa-user-plus"></i> 투입중 ${tuip}</span>`;
-      else if (chuihap>0) stateHtml = `<span class="work-badge badge-chuihap"><i class="fas fa-layer-group"></i> 취합중 ${chuihap}</span>`;
-      const tcData = { sheetId:t.sheetId, sheetUrl:t.sheetUrl||"", tabName:t.tab,
-        manager:t.manager||"", timeRange:t.timeRange||"", taekhap:t.taekhap||false,
-        reviewType:t.reviewType||"", paymentType:t.paymentType||"", displayName:t.displayName||"",
-        isBulk:t.isBulk||false };
-      const tcAttr = escHtml(JSON.stringify(tcData));
-
-      // ★ 차수별 독립 행 렌더링
-      if (t.roundList && t.roundList.length >= 1) {
-        t.roundList.forEach(rd => {
-          const rdRow = document.createElement("div");
-          const rdDone = (rd.total > 0 && rd.pending === 0);
-          rdRow.className = "dash-tab-row"+(rdDone?" tab-done":"")+(isClosedTab?" is-closed-row":"");
-          rdRow.dataset.tabkey = tabKey;
-          const rdRate = rd.total > 0 ? Math.round(rd.submitted / rd.total * 100) : 0;
-          const rdStartDate = rd.startDate || t.startDate || "";
-          const rdStartDateHtml = rdStartDate
-            ? `<span class="tab-start-date"><i class="fas fa-calendar-day"></i> ${escHtml(rdStartDate)}</span>`
-            : "";
-          let rdStateHtml = "";
-          if (isClosedTab)      rdStateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
-          else if (rdDone)      rdStateHtml = `<span class="bar-lbl-center">✓ 완료</span>`;
-          else if ((rd.tuip||0) > 0 || (rd.chuihap||0) > 0) {
-            const rdTotal2 = rd.total || 0;
-            const rdLeft  = (rd.tuip||0)    > 0 ? `<span class="bar-lbl-left"><i class="fas fa-user-plus"></i> 투입중 ${rd.tuip}/${rdTotal2}</span>`          : `<span class="bar-lbl-left"></span>`;
-            const rdRight = (rd.chuihap||0) > 0 ? `<span class="bar-lbl-right"><i class="fas fa-layer-group"></i> 취합중 ${rd.chuihap}/${rdTotal2}</span>` : `<span class="bar-lbl-right"></span>`;
-            rdStateHtml = rdLeft + rdRight;
-          }
-          const tRd = Object.assign({}, t, { submitted: rd.submitted, total: rd.total, pending: rd.pending, tuip: rd.tuip||0, chuihap: rd.chuihap||0 });
-          rdRow.dataset.state = _rowState(isClosedTab, rdDone, rd.tuip||0, rd.chuihap||0);
-          rdRow.innerHTML = _buildTabRowHtml(tRd, tabKey, isClosedTab, tabNameHtml, rdStartDateHtml, rdRate, rdStateHtml, tcAttr, rd.round);
-          table.appendChild(rdRow);
-        });
-      } else {
-        row.dataset.state = _rowState(isClosedTab, isTabDone, tuip, chuihap);
-        row.innerHTML = _buildTabRowHtml(t, tabKey, isClosedTab, tabNameHtml, startDateHtml, tRate, stateHtml, tcAttr, null);
-        table.appendChild(row);
-      }
-    });
-    block.appendChild(header);
-    block.appendChild(table);
-    scrollInner2.appendChild(block);
-  });
-  if (hideDoneMode) wrap.classList.add("hide-done-mode");
-  else wrap.classList.remove("hide-done-mode");
-  if (hideClosedCampMode) wrap.classList.add("hide-closed-camp-mode");
-  else                    wrap.classList.remove("hide-closed-camp-mode");
-  if (hideClosedTabMode)  wrap.classList.add("hide-closed-tab-mode");
-  else                    wrap.classList.remove("hide-closed-tab-mode");
-  if (_closedMode)        wrap.classList.add("closed-mode");
-  if (activeFilters.size > 0) applyDashFilter();
-  _fixStickyPositions();
-  _bindScrollSync();
-  _closeColResizePopup();
-  _syncTabnameWidth(); // 렌더 완료 후 tabname 재계산
-  loadColWidths();    // ★ 렌더 후 저장된 컬럼 너비 재적용
-}
 
 // ═══════════════════════════════════════════════════════
 // 탭 행 HTML 빌더 (loadAdminDashboard + renderDashboard 공용)
@@ -5182,25 +4933,6 @@ const DASH_COL_DEFS = [
 ];
 const COL_WIDTH_LS_KEY = 'dashColWidths_v1';
 
-/** 컨테이너 안쪽 너비 반환 - dashboardScrollOuter 기준 (스크롤 컨테이너) */
-function _getContainerWidth() {
-  const outer = document.getElementById('dashboardScrollOuter');
-  if (outer) {
-    const w = outer.getBoundingClientRect().width;
-    if (w > 0) return w;
-  }
-  const pane = document.querySelector('.admin-tab-pane.active');
-  if (pane) {
-    const w = pane.getBoundingClientRect().width;
-    if (w > 0) return w - 32;
-  }
-  const body = document.querySelector('.admin-body');
-  if (body) {
-    const w = body.getBoundingClientRect().width;
-    if (w > 0) return w - 48;
-  }
-  return window.innerWidth - 80;
-}
 
 /** localStorage에서 저장된 너비 로드 후 CSS 변수 적용 (CB 컬럼 제외 - 모드 토글이 관리) */
 function loadColWidths() {
@@ -5232,22 +4964,9 @@ function saveColWidths() {
   try { localStorage.setItem(COL_WIDTH_LS_KEY, JSON.stringify(data)); } catch(_) {}
 }
 
-/** (호환성 stub) */
-function _updateDashMinWidth() {}
 /** (호환성 stub - tabname 자동조정 방식 폐기) */
 function _syncTabnameWidth() {}
 
-/** 컬럼 너비를 기본값으로 초기화 (CB 컬럼 제외) */
-function resetColWidths() {
-  const root = document.documentElement;
-  DASH_COL_DEFS.forEach(col => {
-    if (col.isCb) return; // CB 컬럼은 모드 토글이 관리
-    root.style.removeProperty(col.varName);
-  });
-  try { localStorage.removeItem(COL_WIDTH_LS_KEY); } catch(_) {}
-  _closeColResizePopup();
-  showToast('컬럼 너비가 기본값으로 초기화되었습니다.');
-}
 
 /**
  * 컬럼 헤더 요소 빌드
@@ -5444,8 +5163,6 @@ if (document.readyState === 'loading') {
 }
 // (창 크기 변경 시 특별한 재계산 불필요 - 각 컬럼이 독립 고정px로 관리됨)
 
-/** (overflow:visible 전환으로 불필요 - 호환성 stub) */
-function _syncColHeaderScroll() {}
 
 /** (overflow:visible 전환으로 불필요 - 호환성 stub) */
 function _bindScrollSync() {}
@@ -5461,54 +5178,11 @@ function toggleDashTab(tableId, header) {
 }
 
 let hideDoneMode = false;
-function toggleHideDone() {
-  hideDoneMode = !hideDoneMode;
-  const btn  = document.getElementById("btnHideDone");
-  const wrap = document.getElementById("dashboardWrap");
-  if (hideDoneMode) {
-    btn.innerHTML = '<i class="fas fa-eye"></i> 완료건 표시';
-    btn.classList.add("active");
-    wrap.classList.add("hide-done-mode");
-  } else {
-    btn.innerHTML = '<i class="fas fa-eye-slash"></i> 완료건 숨김';
-    btn.classList.remove("active");
-    wrap.classList.remove("hide-done-mode");
-  }
-}
 
 // ── 마감업체 숨김: 모든 탭이 완료인 캠페인 전체 숨김 ──
 let hideClosedCampMode = false;
-function toggleHideClosedCamp() {
-  hideClosedCampMode = !hideClosedCampMode;
-  const btn  = document.getElementById("btnHideClosedCamp");
-  const wrap = document.getElementById("dashboardWrap");
-  if (hideClosedCampMode) {
-    btn.innerHTML = '<i class="fas fa-building"></i> 마감업체 표시';
-    btn.classList.add("active");
-    wrap.classList.add("hide-closed-camp-mode");
-  } else {
-    btn.innerHTML = '<i class="fas fa-building"></i> 마감업체 숨김';
-    btn.classList.remove("active");
-    wrap.classList.remove("hide-closed-camp-mode");
-  }
-}
 
 let hideClosedTabMode = false;
-function toggleHideClosedTab() {
-  hideClosedTabMode = !hideClosedTabMode;
-  const btn  = document.getElementById("btnHideClosedTab");
-  const wrap = document.getElementById("dashboardWrap");
-  if (hideClosedTabMode) {
-    btn.innerHTML = '<i class="fas fa-archive"></i> 마감탭 표시';
-    btn.classList.add("active");
-    wrap.classList.add("hide-closed-tab-mode");
-  } else {
-    btn.innerHTML = '<i class="fas fa-archive"></i> 마감탭 숨김';
-    btn.classList.remove("active");
-    wrap.classList.remove("hide-closed-tab-mode");
-  }
-}
-
 
 
 // ═══════════════════════════════════════════════════════════
@@ -5522,135 +5196,7 @@ let _closedSet = new Set();
 
 // 마감 모드 ON/OFF
 let _closedMode = false;
-function toggleClosedMode() {
-  _closedMode = !_closedMode;
-  const btn     = document.getElementById("btnClosed");
-  const execBtn = document.getElementById("btnClosedExec");
-  const wrap    = document.getElementById("dashboardWrap");
-  if (_closedMode) {
-    btn.classList.add("active");
-    btn.innerHTML = '<i class="fas fa-archive"></i> 마감 <span style="font-size:.68rem;opacity:.8">(선택 중)</span>';
-    execBtn.style.display = "flex";
-    wrap.classList.add("closed-mode");
-    document.documentElement.style.setProperty('--dc-closedcb', '28px');
-  } else {
-    btn.classList.remove("active");
-    btn.innerHTML = '<i class="fas fa-archive"></i> 마감';
-    execBtn.style.display = "none";
-    wrap.classList.remove("closed-mode");
-    document.documentElement.style.setProperty('--dc-closedcb', '0px');
-  }
-  _syncTabnameWidth(); // 체크박스 열(28px) 추가/제거에 따라 tabname 재계산
-}
 
-// [실행] 버튼 → 변경 내역 확인 후 팝업
-function execClosed() {
-  const cbs = document.querySelectorAll("#dashboardWrap .closed-cb");
-  if (!cbs.length) { showToast("표시된 탭이 없습니다.", true); return; }
-
-  let toClose = [], toOpen = [];
-  cbs.forEach(cb => {
-    const key = cb.dataset.tabkey || "";
-    const tabName = (key.split("||")[1] || "").trim();
-    if (cb.checked  && !_closedSet.has(key)) toClose.push({ key, tabName });
-    if (!cb.checked &&  _closedSet.has(key)) toOpen.push({ key, tabName });
-  });
-
-  if (!toClose.length && !toOpen.length) {
-    showToast("변경된 항목이 없습니다."); return;
-  }
-
-  // 목록 렌더링
-  const listEl = document.getElementById("closedConfirmList");
-  listEl.innerHTML = "";
-  toClose.forEach(({ tabName }) => {
-    const el = document.createElement("div");
-    el.className = "closed-confirm-list-item";
-    el.innerHTML = `<i class="fas fa-archive" style="color:#1b64da;font-size:.75rem"></i> ${tabName} → <b>마감</b>`;
-    listEl.appendChild(el);
-  });
-  toOpen.forEach(({ tabName }) => {
-    const el = document.createElement("div");
-    el.className = "closed-confirm-list-item remove-item";
-    el.innerHTML = `<i class="fas fa-undo" style="font-size:.75rem"></i> ${tabName} → <b>마감 해제</b>`;
-    listEl.appendChild(el);
-  });
-
-  const parts = [];
-  if (toClose.length) parts.push(`<b>${toClose.length}건</b> 마감`);
-  if (toOpen.length)  parts.push(`<b>${toOpen.length}건</b> 해제`);
-  document.getElementById("closedConfirmMsg").innerHTML =
-    `선택한 인덱스를 마감 처리합니다.<br>` +
-    `대상: ${parts.join(" / ")}<br>` +
-    `<span style="color:#EF4444;font-size:.8rem">⚠️ 마감된 인덱스는 동기화 후 검색에서 제외됩니다.</span>`;
-
-  document.getElementById("closedConfirmOverlay").classList.add("open");
-}
-
-// 팝업 취소
-function cancelClosed() {
-  document.getElementById("closedConfirmOverlay").classList.remove("open");
-}
-
-// 팝업 확인 → GAS 베이스시트에 저장
-async function confirmClosed() {
-  document.getElementById("closedConfirmOverlay").classList.remove("open");
-
-  const cbs = document.querySelectorAll("#dashboardWrap .closed-cb");
-  const items = [];
-  cbs.forEach(cb => {
-    const key = cb.dataset.tabkey || "";
-    if (!key) return;
-    const [sheetId, tabName] = key.split("||");
-    const wasClosed  = _closedSet.has(key);
-    const isChecked  = cb.checked;
-    if (isChecked === wasClosed) return;
-    items.push({ sheetId: sheetId || "", tabName: tabName || "", isClosed: isChecked });
-  });
-
-  if (!items.length) { _exitClosedMode(); return; }
-
-  // 낙관적 업데이트
-  items.forEach(({ sheetId, tabName, isClosed }) => {
-    const key = (sheetId || "") + "||" + (tabName || "");
-    if (isClosed) _closedSet.add(key);
-    else          _closedSet.delete(key);
-  });
-
-  _exitClosedMode();
-  _reRenderDashboard();
-
-  try {
-    const json = await gasPost({ action: "setClosed", items });
-    if (!json.ok) {
-      showToast("⚠️ 서버 저장 실패: " + (json.error || "알 수 없는 오류"), true);
-      loadAdminDashboard();
-    } else {
-      const closeCount  = items.filter(i => i.isClosed).length;
-      const openCount   = items.filter(i => !i.isClosed).length;
-      let msg = "";
-      if (closeCount) msg += `${closeCount}건 마감 완료. `;
-      if (openCount)  msg += `${openCount}건 마감 해제. `;
-      msg += "인덱스 재갱신 후 적용됩니다.";
-      showToast("✅ " + msg);
-    }
-  } catch (err) {
-    showToast("⚠️ 서버 연결 오류: " + err.message + " (새로고침 권장)", true);
-    loadAdminDashboard();
-  }
-}
-
-function _exitClosedMode() {
-  _closedMode = false;
-  const btn     = document.getElementById("btnClosed");
-  const execBtn = document.getElementById("btnClosedExec");
-  const wrap    = document.getElementById("dashboardWrap");
-  btn.classList.remove("active");
-  btn.innerHTML = '<i class="fas fa-archive"></i> 마감';
-  execBtn.style.display = "none";
-  wrap.classList.remove("closed-mode");
-  document.documentElement.style.setProperty('--dc-closedcb', '0px');
-}
 
 // ── 비고(메모) 관리 ──
 const _TAB_MEMO_KEY = "rapp_tab_memo";     // { tabKey: memoString, ... }
@@ -5673,29 +5219,7 @@ function _setTabMemo(tabKey, memo) {
 
 // 대시보드 재렌더링 (마지막 로드 데이터 재사용 — API 재호출 없이 즉시)
 let _lastDashData = null;
-function _reRenderDashboard() {
-  if (_lastDashData) {
-    renderDashboard(_lastDashData);
-  } else {
-    loadAdminDashboard();
-  }
-}
 
-// 컬럼 헤더 sticky top 위치 보정
-// sticky 요소들의 실제 '점유 높이'를 offsetHeight 기준으로 합산
-function _fixColHeaderTop() {
-  requestAnimationFrame(() => {
-    const colHdr = document.getElementById("dashColHeader");
-    if (!colHdr) return;
-
-    const appHdr     = document.querySelector("#screenAdmin .app-header");
-    const sectionHdr = document.querySelector("#tabDashboard .admin-section-header");
-    // offsetHeight = 렌더된 실제 픽셀 높이 (스크롤 위치 무관)
-    const appH     = appHdr     ? appHdr.offsetHeight     : 0;
-    const sectionH = sectionHdr ? sectionHdr.offsetHeight : 0;
-    colHdr.style.top = (appH + sectionH) + "px";
-  });
-}
 
 // ── 관리자 화면 sticky 위치 전체 보정 ──
 // app-header 높이를 측정해 section-header · col-header 순으로 top 값을 확정
@@ -5718,8 +5242,6 @@ function _fixStickyPositions() {
   });
 }
 
-
-let allExpanded = false;
 
 // ═══════════════════════════════════════════════════════
 // ★ 빠른 인라인 편집 (빈 셀 클릭 시)
@@ -6882,7 +6404,6 @@ function selectBankItem(name) {
 }
 
 
-
 /* ══════════════════════════════════════════════════════
    네이버+쿠팡 동시작업 모드 (nc=1)
    ══════════════════════════════════════════════════════ */
@@ -7858,12 +7379,6 @@ async function _loadReviewerProfileForForm() {
 // ★ v9.14: 리뷰어 프로필 모달 관련 함수
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-/** 타계정 주민번호 형식화 */
-function _formatSubAccJumin(input) {
-  let v = input.value.replace(/[^0-9]/g, "").slice(0, 13);
-  if (v.length > 6) v = v.slice(0, 6) + "-" + v.slice(6);
-  input.value = v;
-}
 
 /** ★ 인라인 프로필 자동 로드 (로그인 후 메인 화면에 즉시 표시) */
 async function _loadInlineProfile() {
@@ -7965,39 +7480,6 @@ async function _saveIdentityShoppingId(position) {
   } catch (e) { showToast(e.message || "아이디 저장에 실패했습니다.", "error"); }
 }
 
-/** 리뷰어 프로필 모달 열기 */
-async function openReviewerProfileModal() {
-  const modal = document.getElementById("reviewerProfileModal");
-  if (!modal) return;
-
-  // 인증 세션 확인
-  const auth = _getReviewerSession();
-  if (!auth) { showToast("세션이 만료되었습니다. 다시 로그인해주세요.", "warning"); return; }
-
-  const name   = auth.name   || "";
-  const phone8 = auth.phone8 || "";
-
-  modal.style.display = "flex";
-
-  // 로딩 표시
-  document.getElementById("rpmSelfName").textContent  = "로딩 중...";
-  document.getElementById("rpmSubList").innerHTML = '<div style="text-align:center;padding:16px;color:var(--t3);font-size:.8rem"><i class="fas fa-spinner fa-spin"></i> 로딩 중...</div>';
-
-  try {
-    const res = await gasGet({ action: "getReviewerProfile", name, phone8 });
-    if (res?.ok && res.profile) {
-      const p = res.profile;
-      window._reviewerProfile = { ...res, ...p, found: true };
-      _renderReviewerProfileModal(window._reviewerProfile);
-    } else {
-      document.getElementById("rpmSelfName").textContent = name || "미등록";
-      document.getElementById("rpmSelfPhone").textContent = phone8 ? ("***-****-" + phone8.slice(-4)) : "-";
-      document.getElementById("rpmSubList").innerHTML = '<div style="text-align:center;padding:16px;color:var(--t3);font-size:.8rem">등록 정보를 찾을 수 없습니다.</div>';
-    }
-  } catch(e) {
-    document.getElementById("rpmSelfName").textContent = "로드 실패: " + e.message;
-  }
-}
 
 /** 프로필 모달 데이터 렌더링 */
 function _renderReviewerProfileModal(profile) {
@@ -8048,16 +7530,6 @@ function _renderReviewerProfileModal(profile) {
   if (addBtn) addBtn.disabled = subs.length >= 10;
 }
 
-/** 타계정 추가 폼 열기 */
-function openAddSubAccountForm() {
-  document.getElementById("subAccountFormTitle").textContent = "타계정 추가";
-  document.getElementById("subAccountEditIdx").value = "-1";
-  document.getElementById("subAccName").value = "";
-  document.getElementById("subAccPhone").value = "";
-  document.getElementById("subAccIncomeName").value = "";
-  document.getElementById("subAccJumin").value = "";
-  document.getElementById("subAccountForm").style.display = "";
-}
 
 /** 타계정 수정 폼 열기 */
 function editSubAccount(idx) {
@@ -8079,73 +7551,6 @@ function editSubAccount(idx) {
   document.getElementById("subAccountForm").style.display = "";
 }
 
-/** 타계정 추가/수정 취소 */
-function cancelSubAccountForm() {
-  document.getElementById("subAccountForm").style.display = "none";
-}
-
-/** 타계정 저장 (추가 or 수정) */
-async function saveSubAccount() {
-  const name      = (document.getElementById("subAccName")?.value || "").trim();
-  const phone     = (document.getElementById("subAccPhone")?.value || "").replace(/[^0-9]/g, "");
-  const incomeName = (document.getElementById("subAccIncomeName")?.value || "").trim();
-  const juminDigits = (document.getElementById("subAccJumin")?.value || "").replace(/[^0-9]/g, "");
-  const editIdx   = parseInt(document.getElementById("subAccountEditIdx")?.value || "-1", 10);
-
-  if (!name) { showToast("이름을 입력해주세요.", "warning"); return; }
-  if (phone.length !== 11) { showToast("전화번호는 11자리 숫자여야 합니다.", "warning"); return; }
-  if (juminDigits && juminDigits.length !== 13) { showToast("주민번호는 13자리 숫자여야 합니다.", "warning"); return; }
-
-  // 인증 세션
-  const auth = _getReviewerSession() || {};
-  const myName   = auth.name   || "";
-  const myPhone8 = auth.phone8 || "";
-  if (!myName || !myPhone8) { showToast("세션이 만료되었습니다.", "warning"); return; }
-
-  // 현재 프로필 복사 후 수정
-  const profile  = window._reviewerProfile;
-  const subs     = JSON.parse(JSON.stringify(_parseSubAccounts(profile?.subAccounts)));
-
-  const newSub = {
-    name,
-    phone: phone.slice(0,3) + "-" + phone.slice(3,7) + "-" + phone.slice(7),
-    incomeName,
-    jumin: juminDigits
-  };
-
-  if (editIdx >= 0 && editIdx < subs.length) {
-    subs[editIdx] = { ...subs[editIdx], ...newSub }; // 공통 아이디 등 확장 필드 보존
-  } else {
-    if (subs.length >= 10) { showToast("타계정은 최대 10개까지 등록 가능합니다.", "warning"); return; }
-    subs.push(newSub); // 추가
-  }
-
-  const btn = document.getElementById("btnSaveSubAccount");
-  if (btn) { btn.disabled = true; btn.textContent = "저장 중..."; }
-
-  try {
-    const res = await gasPost({
-      action: "saveSubAccounts",
-      name: myName,
-      phone8: myPhone8,
-      subAccounts: JSON.stringify(subs)
-    });
-    if (res?.ok) {
-      showToast(editIdx >= 0 ? "타계정이 수정되었습니다." : "타계정이 추가되었습니다.");
-      // 프로필 갱신
-      if (!window._reviewerProfile) window._reviewerProfile = {};
-      window._reviewerProfile.subAccounts = subs;
-      _renderReviewerProfileModal(window._reviewerProfile);
-      cancelSubAccountForm();
-    } else {
-      showToast("❌ " + (res?.error || "저장에 실패했습니다."), "error");
-    }
-  } catch(e) {
-    showToast("❌ 오류: " + e.message, "error");
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = "저장"; }
-  }
-}
 
 /** 타계정 삭제 */
 async function deleteSubAccount(idx) {
@@ -8180,12 +7585,6 @@ async function deleteSubAccount(idx) {
   }
 }
 
-/** 리뷰어 프로필 모달 닫기 */
-function closeReviewerProfileModal() {
-  const modal = document.getElementById("reviewerProfileModal");
-  if (modal) modal.style.display = "none";
-  cancelSubAccountForm();
-}
 
 /* ═══════════════════════════════════════════════════
    입력 포맷팅 유틸리티
@@ -10849,39 +10248,6 @@ async function quickEditCell(e, cell) {
   });
 }
 
-function toggleAllCampaigns() {
-  const wrap   = document.getElementById("dashboardWrap");
-  if (!wrap) return;
-
-  const tables  = wrap.querySelectorAll(".dash-tab-table");
-  const headers = wrap.querySelectorAll(".dash-campaign-header");
-  const btn     = document.getElementById("btnExpandAll");
-  if (!tables.length) return;
-
-  // 현재 상태: 하나라도 펼쳐져 있으면 → 전체 접기, 모두 접혀 있으면 → 전체 펼치기
-  const anyOpen = Array.from(tables).some(t => !t.classList.contains("collapsed"));
-  allExpanded   = !anyOpen;
-
-  tables.forEach((table, i) => {
-    const header = headers[i];
-    const icon   = header ? header.querySelector(".dash-toggle-icon") : null;
-    if (allExpanded) {
-      table.classList.remove("collapsed");
-      if (icon) icon.classList.add("rotated");
-    } else {
-      table.classList.add("collapsed");
-      if (icon) icon.classList.remove("rotated");
-    }
-  });
-
-  if (allExpanded) {
-    btn.innerHTML = '<i class="fas fa-compress-alt"></i> 전체 접기';
-    btn.classList.add("active");
-  } else {
-    btn.innerHTML = '<i class="fas fa-expand-alt"></i> 전체 펼치기';
-    btn.classList.remove("active");
-  }
-}
 
 /* ── 대시보드 필터 드롭다운 ─────────────────────────────────
    activeFilters: Set (비어있으면 전체 표시)
@@ -10890,11 +10256,6 @@ function toggleAllCampaigns() {
 ─────────────────────────────────────────────────────────── */
 const activeFilters = new Set();
 
-function toggleFilterDropdown(e) {
-  e.stopPropagation();
-  const dd = document.getElementById("dashFilterDropdown");
-  dd.classList.toggle("open");
-}
 
 // 드롭다운 외부 클릭 시 닫기
 document.addEventListener("click", function(e) {
@@ -10905,32 +10266,6 @@ document.addEventListener("click", function(e) {
   }
 });
 
-function onFilterChange(checkbox) {
-  const f = checkbox.value;
-  const item = checkbox.closest(".dash-filter-item");
-  if (checkbox.checked) {
-    activeFilters.add(f);
-    if (item) item.classList.add("checked");
-  } else {
-    activeFilters.delete(f);
-    if (item) item.classList.remove("checked");
-  }
-  updateFilterBtn();
-  applyDashFilter();
-}
-
-function updateFilterBtn() {
-  const btn = document.getElementById("dashFilterBtn");
-  if (!btn) return;
-  const count = activeFilters.size;
-  if (count > 0) {
-    btn.classList.add("has-filter");
-    btn.innerHTML = `<i class="fas fa-filter"></i> 필터 <span class="filter-badge">${count}</span>`;
-  } else {
-    btn.classList.remove("has-filter");
-    btn.innerHTML = `<i class="fas fa-filter"></i> 필터`;
-  }
-}
 
 /* ══════════════════════════════════════════════════════════
    캠페인별 인덱스 부분 갱신
@@ -11139,16 +10474,6 @@ function initTcTimePicker(val) {
   _syncTcTimePicker();
 }
 
-/** 모드 버튼 클릭: "" | "자유" | "timed" */
-function setTcTimeMode(mode) {
-  _tcTimeMode = mode;
-  if (mode !== "timed") {
-    // 타임지정 아닐 때 시간 선택 초기화
-    _tcTimeStart = null;
-    _tcTimeEnd   = null;
-  }
-  _syncTcTimePicker();
-}
 
 /** 그리드 셀 클릭 (타임지정 모드에서만 호출됨) */
 function onTcTimeClick(slot) {
@@ -11176,12 +10501,6 @@ function onTcTimeClick(slot) {
   _syncTcTimePicker();
 }
 
-/** 그리드 초기화 버튼 */
-function clearTcTimeGrid() {
-  _tcTimeStart = null;
-  _tcTimeEnd   = null;
-  _syncTcTimePicker();
-}
 
 /** hidden input·UI 일괄 동기화 */
 function _syncTcTimePicker() {
@@ -11251,22 +10570,8 @@ function _syncTcTimePicker() {
   display.textContent = dispStr;
 }
 
-function closeTcPopover() {
-  document.getElementById("tcPopover").classList.remove("open");
-  _tcCurrent = null;
-}
 // 팝오버 UI만 닫고 _tcCurrent는 유지 (confirmTcSave 내부용)
-function _closeTcPopoverUiOnly() {
-  document.getElementById("tcPopover").classList.remove("open");
-}
 
-// 팝오버 외부 클릭 시 닫기
-document.addEventListener("click", function(e) {
-  const pop = document.getElementById("tcPopover");
-  if (pop && pop.classList.contains("open") && !pop.contains(e.target)) {
-    closeTcPopover();
-  }
-});
 
 // ★ tc-clickable 셀 클릭 → data-tc 파싱 → 팝오버 오픈 (onclick 속성 방식 대체)
 document.addEventListener("click", function(e) {
@@ -11288,97 +10593,6 @@ document.addEventListener("click", function(e) {
   opt.classList.add("sel");
 });
 
-// 저장 버튼 → 경고 팝업 띄우기
-function requestTcSave() {
-  if (!_tcCurrent) return;
-  // 현재 입력값 snapshot
-  _tcCurrent._pendingManager     = (document.querySelector("#tcOptManager .tc-opt.sel")  || {}).dataset?.val ?? "";
-  _tcCurrent._pendingReviewType  = (document.querySelector("#tcOptReview .tc-opt.sel")   || {}).dataset?.val ?? "";
-  _tcCurrent._pendingPaymentType = (document.querySelector("#tcOptPayment .tc-opt.sel")  || {}).dataset?.val ?? "";
-  _tcCurrent._pendingDisplayName = document.getElementById("tcDisplayInput").value.trim();
-  _tcCurrent._pendingTimeRange   = document.getElementById("tcTimeInput").value.trim();
-  _tcCurrent._pendingTaekhap     = document.getElementById("tcTaekhapCheck").checked;
-  _tcCurrent._pendingIsBulk      = document.getElementById("tcBulkCheck").checked;
-
-  document.getElementById("tcConfirmMsg").innerHTML =
-    `<b>${escHtml(_tcCurrent.tabName)}</b> 탭의 설정을 변경하시겠습니까?<br>저장하면 베이스시트에 즉시 반영됩니다.`;
-  document.getElementById("tcConfirmOverlay").classList.add("open");
-}
-
-function closeTcConfirm() {
-  document.getElementById("tcConfirmOverlay").classList.remove("open");
-}
-
-async function confirmTcSave() {
-  closeTcConfirm();
-  _closeTcPopoverUiOnly(); // _tcCurrent는 유지한 채 팝오버 UI만 닫음
-  if (!_tcCurrent) return;
-
-  // ① GAS URL 설정 여부 확인
-  if (!APP_CONFIG.GAS_WEB_APP_URL) {
-    showToast("❌ GAS 웹앱 URL이 설정되지 않았습니다. 설정 화면에서 URL을 먼저 입력해주세요.", true);
-    _tcCurrent = null;
-    openGasUrlModal();
-    return;
-  }
-
-  // ② sheetId: 탭 데이터의 sheetId 사용 (DB가 원본)
-  const resolvedSheetId = _tcCurrent.sheetId || "";
-  if (!resolvedSheetId) {
-    showToast("❌ sheetId를 특정할 수 없습니다. 인덱스를 먼저 갱신해주세요.", true);
-    _tcCurrent = null;
-    return;
-  }
-
-  // ③ 저장할 파라미터 구성
-  // sheetUrl: 세부목록 탭에 URL로 저장하기 위해 함께 전송
-  // #gid= 이후 앵커 제거 → URL 매칭 일관성 확보
-  const rawSheetUrl = _tcCurrent.sheetUrl
-    || (resolvedSheetId ? "https://docs.google.com/spreadsheets/d/" + resolvedSheetId + "/edit" : "");
-  const resolvedSheetUrl = rawSheetUrl.split("#")[0]; // #gid=xxx 제거
-  const payload = {
-    action:      "setTabConfig",
-    sheetId:     resolvedSheetId,
-    sheetUrl:    resolvedSheetUrl,
-    tabName:     _tcCurrent.tabName             || "",
-    manager:     _tcCurrent._pendingManager     || "",
-    timeRange:   _tcCurrent._pendingTimeRange   || "",
-    taekhap:     _tcCurrent._pendingTaekhap ? "true" : "false",
-    reviewType:  _tcCurrent._pendingReviewType  || "",
-    paymentType: _tcCurrent._pendingPaymentType || "",
-    displayName: _tcCurrent._pendingDisplayName || "",
-    isBulk:      _tcCurrent._pendingIsBulk ? "true" : "false"
-  };
-
-  // ④ 디버그 로그 (F12 콘솔에서 확인)
-  console.log("[TC] 저장 payload:", JSON.stringify(payload));
-
-  try {
-    // ★ POST 방식으로 전송 (한글·특수문자 안전, displayName 등 누락 방지)
-    // POST 실패 시 GET으로 폴백 (CORS 환경 대응)
-    let json;
-    try {
-      json = await gasPost(payload);
-    } catch (postErr) {
-      console.warn("[TC] POST 실패, GET으로 폴백:", postErr.message);
-      json = await gasGet(payload);
-    }
-    console.log("[TC] 응답:", json);
-
-    if (json.ok) {
-      console.log("[TC] 저장 완료. tabName:", json.tabName, "updated:", json.updated, "row:", json.row);
-      showToast("✅ 설정이 저장되었습니다." + (json.updated ? " (업데이트)" : " (신규)"));
-      loadAdminDashboard();
-    } else {
-      console.error("[TC] 저장 실패 응답:", json);
-      showToast("❌ 저장 실패: " + (json.error || JSON.stringify(json)), true);
-    }
-  } catch (err) {
-    console.error("[TC] 요청 오류:", err);
-    showToast("❌ 오류: " + err.message + " (F12 콘솔 확인)", true);
-  }
-  _tcCurrent = null;
-}
 
 /** 간단한 토스트 메시지 */
 function showToast(msg, isErr) {
@@ -11402,569 +10616,7 @@ function showToast(msg, isErr) {
   t._tid = setTimeout(() => { t.style.opacity = "0"; }, 2500);
 }
 
-/* ── GAS 설정 모달 ── */
-/* ── 동기화 모달 ── */
-function openIndexModal() {
-  show("indexModal", "flex");
-  if (APP_CONFIG.GAS_WEB_APP_URL) loadIndexStatus();
-}
-function closeIndexModal() {
-  hide("indexModal");
-  // 인덱스 관련 UI 초기화
-  const elapsedRow = document.getElementById("indexElapsedRow");
-  const resultRow  = document.getElementById("indexResultRow");
-  if (elapsedRow) elapsedRow.style.display = "none";
-  if (resultRow)  resultRow.style.display  = "none";
-  const gasErrBanner = document.getElementById("gasErrorBanner");
-  if (gasErrBanner) gasErrBanner.style.display = "none";
-}
 
-/* ── 각종 진단 모달 ── */
-function openDiagModal() {
-  show("diagModal", "flex");
-}
-function closeDiagModal() {
-  hide("diagModal");
-  // 진단 UI 초기화
-  const inp = document.getElementById("debugSheetIdInput");
-  if (inp) inp.value = "";
-  const choiceWrap = document.getElementById("debugSheetChoiceWrap");
-  if (choiceWrap) choiceWrap.style.display = "none";
-  const singleRes = document.getElementById("debugSingleResult");
-  if (singleRes) { singleRes.innerHTML = ""; singleRes.className = "hidden"; singleRes.style.display = "none"; }
-  const baseRes = document.getElementById("debugBaseResult");
-  if (baseRes) { baseRes.innerHTML = ""; baseRes.className = "hidden"; }
-  const tabRes = document.getElementById("debugTabConfigResult");
-  if (tabRes) { tabRes.textContent = ""; tabRes.className = "hidden"; }
-  const jsonpRes = document.getElementById("jsonpTestResult");
-  if (jsonpRes) jsonpRes.style.display = "none";
-}
-// 진단 모달 내 파일존재확인 (모달 열기)
-function openCheckFilesModalFromDiag() {
-  closeDiagModal();
-  openCheckFilesModal();
-}
-
-/* ── 하위 호환: 구 함수명 alias ── */
-function openAdminSetting() { openIndexModal(); }
-function closeAdminSetting() { closeIndexModal(); }
-function saveAdminSetting() { closeIndexModal(); }
-
-
-/* ── 인덱스 상태 / 갱신 ── */
-async function loadIndexStatus() {
-  const badge   = document.getElementById("indexStatusBadge");
-  const builtAt = document.getElementById("indexBuiltAt");
-  const count   = document.getElementById("indexCount");
-  badge.className = "index-badge index-badge-unknown";
-  badge.textContent = "조회 중...";
-  builtAt.textContent = "-";
-  count.textContent   = "-";
-  // 코드 버전 행 초기화
-  const codeVerRow  = document.getElementById("codeVersionRow");
-  const codeVerText = document.getElementById("codeVersionText");
-  if (codeVerRow) codeVerRow.style.display = "none";
-  // 소요시간/결과 행은 buildIndex 완료 시에만 표시 → 단순 조회 시 숨김 유지
-  try {
-    const data = await gasGet({ action: "indexStatus" });
-    // ★ GAS 코드 버전 표시 (재배포할 때마다 갱신됨)
-    if (data.codeVersion && codeVerRow && codeVerText) {
-      codeVerText.textContent = data.codeVersion;
-      codeVerRow.style.display = "";
-    }
-    if (!data.exists) {
-      badge.className = "index-badge index-badge-none";
-      badge.textContent = "없음";
-      builtAt.textContent = "인덱스가 없습니다. 갱신 버튼을 눌러주세요.";
-    } else if (data.expired) {
-      badge.className = "index-badge index-badge-expired";
-      badge.textContent = "만료됨";
-      builtAt.textContent = data.builtAtStr || "-";
-      count.textContent   = (data.count || 0).toLocaleString() + "건";
-    } else {
-      badge.className = "index-badge index-badge-ok";
-      badge.textContent = "정상";
-      builtAt.textContent = data.builtAtStr || "-";
-      count.textContent   = (data.count || 0).toLocaleString() + "건";
-    }
-  } catch (err) {
-    badge.className = "index-badge index-badge-error";
-    badge.textContent = "오류";
-    const emsg = err.message || "";
-    if (emsg.includes("fetch") || emsg.includes("Failed to fetch") || emsg.includes("NetworkError")) {
-      builtAt.textContent = "❌ GAS 응답 없음 — URL 확인 또는 GAS 재배포 필요";
-    } else if (emsg === "GAS URL 없음") {
-      builtAt.textContent = "GAS URL을 먼저 저장하세요.";
-    } else {
-      builtAt.textContent = "❌ " + emsg.substring(0, 60);
-    }
-  }
-}
-
-/* ── 동기화 진행 표시 ── */
-let _buildTimer = null;
-// v6: Sheets API 배치 처리 기준 예상시간 (기존 120초 → 60초로 단축)
-// 실제 캠페인 수에 따라 동적 조정
-let BUILD_EXPECTED_SEC = 60;
-
-function startBuildProgress(campaignCount) {
-  // 캠페인 수에 따라 예상시간 동적 설정
-  // Sheets API batchGet 사용 시: 탭 목록 ~5초 + 헤더스캔 ~(N*0.5)초 + 데이터 ~(N*0.8)초
-  if (campaignCount && campaignCount > 0) {
-    BUILD_EXPECTED_SEC = Math.min(270, Math.max(30, Math.round(5 + campaignCount * 1.2)));
-  } else {
-    BUILD_EXPECTED_SEC = 60;
-  }
-
-  const wrap    = document.getElementById("buildProgressWrap");
-  const bar     = document.getElementById("buildProgressBar");
-  const label   = document.getElementById("buildProgressLabel");
-  const pct     = document.getElementById("buildProgressPct");
-  const eta     = document.getElementById("buildProgressEta");
-  const elapsed = document.getElementById("buildProgressTime");
-  show(wrap);
-  bar.style.width = "0%";
-  let sec = 0;
-
-  // v6 단계별 메시지 (Sheets API 배치 처리 흐름 반영)
-  const stages = [
-    { pct: 0,  msg: "베이스시트 캠페인 목록 읽는 중..." },
-    { pct: 15, msg: "탭 메타정보 조회 중 (Sheets API)..." },
-    { pct: 35, msg: "헤더 배치 스캔 중..." },
-    { pct: 55, msg: "데이터 배치 읽기 중..." },
-    { pct: 75, msg: "인덱스 행 파싱 중..." },
-    { pct: 88, msg: "캐시 저장 중..." },
-    { pct: 94, msg: "거의 완료됐어요..." },
-  ];
-
-  _buildTimer = setInterval(() => {
-    sec++;
-    // 로그 스케일 진행 (최대 95%)
-    const progress = Math.min(95, Math.round(
-      (1 - Math.exp(-sec / (BUILD_EXPECTED_SEC * 0.55))) * 100
-    ));
-    bar.style.width = progress + "%";
-    pct.textContent = progress + "%";
-    elapsed.textContent = sec + "초 경과";
-
-    // 단계 메시지
-    let curMsg = stages[0].msg;
-    for (const s of stages) { if (progress >= s.pct) curMsg = s.msg; }
-    label.textContent = curMsg;
-
-    // 잔여 시간
-    const remaining = Math.max(0, Math.round(
-      BUILD_EXPECTED_SEC * (1 - progress / 100) * 1.15
-    ));
-    if (progress < 92) {
-      eta.textContent = "예상 잔여: 약 " + (remaining >= 60
-        ? Math.ceil(remaining / 60) + "분 " + (remaining % 60) + "초"
-        : remaining + "초");
-    } else {
-      eta.textContent = "마무리 중...";
-    }
-  }, 1000);
-}
-
-function stopBuildProgress() {
-  if (_buildTimer) { clearInterval(_buildTimer); _buildTimer = null; }
-  const wrap  = document.getElementById("buildProgressWrap");
-  const bar   = document.getElementById("buildProgressBar");
-  const pct   = document.getElementById("buildProgressPct");
-  const eta   = document.getElementById("buildProgressEta");
-  const label = document.getElementById("buildProgressLabel");
-  bar.style.width   = "100%";
-  pct.textContent   = "100%";
-  eta.textContent   = "완료!";
-  label.textContent = "갱신 완료 ✓";
-  bar.style.background = "linear-gradient(90deg,#12b886,#0ca678)";
-  setTimeout(() => {
-    hide(wrap);
-    // 바 색상 원복
-    bar.style.background = "linear-gradient(90deg,var(--p),#3182f6)";
-  }, 2500);
-}
-
-async function debugBaseSheet() {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
-  const btn = document.getElementById("btnDebugBase");
-  const resEl = document.getElementById("debugBaseResult");
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 진단 중...';
-  show(resEl);
-  resEl.textContent = "베이스시트 파싱 중...";
-  try {
-    const data = await gasGet({ action: "debugBaseSheet" }, 15000);
-    if (data.ok) {
-      const camps = (data.campaigns || []).map(c => `• ${c.name} (${c.id.substring(0,12)}...)`).join("\n");
-      resEl.innerHTML =
-        `<b>✅ 파싱 성공</b><br>` +
-        `시트명: ${data.sheetName || "-"}<br>` +
-        `총 행수: ${data.lastRow}, 열수: ${data.lastCol}<br>` +
-        `<b>캠페인 수: ${data.campaignCount}개</b><br><br>` +
-        `<b>[캠페인 목록 (최대 10개)]</b><br>` +
-        (camps ? camps.replace(/\n/g,"<br>") : "없음") +
-        (data.sampleRows && data.sampleRows.length ?
-          `<br><br><b>[첫 ${data.sampleRows.length}행 원본]</b><br>` +
-          data.sampleRows.map(r => `행${r.row}: ${JSON.stringify(r.cells)}`).join("<br>")
-          : "");
-      if (data.campaignCount === 0) {
-        resEl.innerHTML += `<br><br><b style="color:#EF4444">⚠ 캠페인 URL을 찾지 못했습니다.<br>베이스시트 A열에 spreadsheets URL이 있는지 확인하세요.</b>`;
-      }
-    } else {
-      resEl.innerHTML = `<b style="color:#EF4444">❌ 오류: ${data.error}</b><br><small>${data.stack||""}</small>`;
-    }
-  } catch(e) {
-    resEl.textContent = "오류: " + e.message;
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-bug"></i> 베이스시트 파싱 진단';
-  }
-}
-
-async function debugBuildStep(step) {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
-  const resEl = document.getElementById("debugBaseResult");
-  show(resEl);
-  resEl.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Step ${step} 진단 중...`;
-  try {
-    const data = await gasGet({ action: "debugBuildStep", step: String(step) }, 30000);
-    const logHtml = (data.log || []).map(l => {
-      if (l.includes("실패") || l.includes("오류") || l.includes("error")) return `<span style="color:#EF4444">${l}</span>`;
-      if (l.includes("성공") || l.includes("정상") || l.includes("완료")) return `<span style="color:#12b886">${l}</span>`;
-      return `<span style="color:#374151">${l}</span>`;
-    }).join("<br>");
-
-    let extra = "";
-    if (data.campaigns)  extra += `<br><b>캠페인:</b> ${data.campaigns.map(c=>`${c.name}`).join(", ")}`;
-    if (data.tabs)       extra += `<br><b>탭목록:</b> ${data.tabs.join(", ")} <i style="color:#6B7280">(방법: ${data.tabMethod})</i>`;
-    if (data.headerMethod) extra += `<br><b>헤더 읽기:</b> ${data.headerMethod}`;
-    if (data.preview)    extra += `<br><b>헤더 미리보기:</b><br>${data.preview.slice(0,3).map(r=>JSON.stringify(r)).join("<br>")}`;
-    if (data.elapsed)    extra += `<br><b>소요: ${data.elapsed}</b>`;
-
-    if (data.ok) {
-      resEl.innerHTML = `<b style="color:#12b886">✅ Step ${step} 정상</b><br>${logHtml}${extra}`;
-    } else {
-      resEl.innerHTML =
-        `<b style="color:#EF4444">❌ Step ${step} 실패</b><br>` +
-        `<b>오류: ${data.error || ""}</b><br>` +
-        logHtml + extra +
-        (data.stack ? `<br><small style="color:#9CA3AF">${data.stack.replace(/\n/g,"<br>")}</small>` : "");
-    }
-  } catch(e) {
-    resEl.innerHTML = `<b style="color:#EF4444">❌ 네트워크 오류: ${e.message}</b>`;
-  }
-}
-
-/** ─── 특정 시트 개별 진단: 입력값 변경 시 gid 여부 판단 ─── */
-function onDebugSheetInput() {
-  const raw = (document.getElementById("debugSheetIdInput").value || "").trim();
-  const choiceWrap = document.getElementById("debugSheetChoiceWrap");
-  // gid 포함 여부 확인
-  const hasGid = /[?#&]gid=\d+/.test(raw) || /\/edit.*#gid=\d+/.test(raw);
-  if (hasGid && raw.includes("/spreadsheets/d/")) {
-    choiceWrap.style.display = "block";
-  } else {
-    choiceWrap.style.display = "none";
-  }
-}
-
-/** 진단 버튼 클릭 시 처리 */
-function onDebugSheetDiagClick() {
-  const raw = (document.getElementById("debugSheetIdInput").value || "").trim();
-  if (!raw) { showToast("sheetId 또는 URL을 입력하세요.", "warning"); return; }
-  const hasGid = /[?#&]gid=\d+/.test(raw) || /\/edit.*#gid=\d+/.test(raw);
-  if (hasGid && raw.includes("/spreadsheets/d/")) {
-    // gid 포함: 선택지 표시만 (이미 onDebugSheetInput에서 열렸을 수 있으나 확실히 표시)
-    document.getElementById("debugSheetChoiceWrap").style.display = "block";
-    // 결과 영역 초기화
-    const resEl = document.getElementById("debugSingleResult");
-    resEl.className = "hidden";
-    resEl.style.display = "none";
-    showToast("진단 방식을 선택해주세요.", "info");
-  } else {
-    // gid 없음: 바로 전체진단 실행
-    debugSingleSheet("full");
-  }
-}
-
-/** ─── 특정 시트 개별 진단 (mode: 'tab' | 'full') ─── */
-async function debugSingleSheet(mode) {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
-
-  const raw   = (document.getElementById("debugSheetIdInput").value || "").trim();
-  const resEl = document.getElementById("debugSingleResult");
-  if (!raw) { showToast("sheetId 또는 URL을 입력하세요.", "warning"); return; }
-
-  // sheetId 및 gid 추출
-  const mId  = raw.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]{20,})/);
-  const sheetId = mId ? mId[1] : raw;
-  const mGid = raw.match(/[?#&]gid=(\d+)/);
-  const gid  = mGid ? mGid[1] : null;
-
-  // mode 결정: gid 있고 'tab' 모드면 단일탭 진단, 나머지는 전체진단
-  const diagMode = (mode === "tab" && gid) ? "tab" : "full";
-  const diagGid  = diagMode === "tab" ? gid : null;
-
-  // 선택지 영역 숨기기
-  document.getElementById("debugSheetChoiceWrap").style.display = "none";
-
-  show(resEl);
-  resEl.style.display = "";
-  const modeLabel = diagMode === "tab" ? `gid:${diagGid} (단일탭)` : "전체진단";
-  resEl.innerHTML = `<i class="fas fa-spinner fa-spin"></i> <b>${sheetId.substring(0,16)}…</b> 진단 중 <span style="color:#3182f6">[${modeLabel}]</span>...`;
-
-  try {
-    const params = { action: "debugSingleSheet", sheetId };
-    if (diagGid) params.gid = diagGid;
-    const data = await gasGet(params, 40000);
-
-    // 결과 렌더링 헬퍼
-    const ok    = s => `<span style="color:#12b886;font-weight:700">${s}</span>`;
-    const err   = s => `<span style="color:#EF4444;font-weight:700">${s}</span>`;
-    const warn  = s => `<span style="color:#D97706;font-weight:700">${s}</span>`;
-    const gray  = s => `<span style="color:#6B7280">${s}</span>`;
-
-    const totalTabs = (data.allTabs || []).length;
-    const validCount = (data.validTabs || []).length;
-
-    let html = `<b>🔍 진단 대상:</b> ${gray(sheetId)}`;
-    if (diagMode === "tab") html += ` ${gray(`(gid:${diagGid} 탭만)`)}`;
-    html += `<br><br>`;
-
-    // ① 베이스시트 등록 여부
-    html += `<b>① 베이스시트 등록</b>: `;
-    if (data.registered === true)  html += ok("✅ 등록됨");
-    else if (data.registered === false) html += err("❌ 미등록 → 작업오더 접수로 등록하세요 (관리자 작업오더 탭 → 접수하기)");
-    else html += warn("⚠ 확인 불가");
-    html += `<br>`;
-
-    // ② 시트 접근 권한
-    html += `<b>② 시트 접근 권한</b>: `;
-    if (data.accessible === true)       html += ok("✅ 접근 가능");
-    else if (data.accessible === false) html += err(`❌ 접근 불가 → ${escHtml(data.accessError || "공유 권한 확인 필요")}`);
-    else html += warn("⚠ 확인 불가");
-    html += `<br>`;
-
-    // ③ 시트 제목
-    if (data.sheetTitle) {
-      html += `<b>③ 스프레드시트 제목</b>: ${escHtml(data.sheetTitle)}<br>`;
-    }
-
-    // ④ 탭 목록 — 헤더에 "총 N개 중 인덱스 반영 탭 M개" 표시
-    if (diagMode === "tab") {
-      // 단일탭 진단: 해당 탭 1개만 표시
-      html += `<b>④ 탭 목록 (단일탭 진단)</b>: `;
-      if (data.allTabs && data.allTabs.length) {
-        const tab = data.allTabs[0];
-        const isValid = data.validTabs && data.validTabs.includes(tab);
-        html += `탭명: ${escHtml(tab)} — ${isValid ? ok("인덱스 반영") : err("스킵됨")}<br>`;
-      } else {
-        html += warn("해당 탭을 찾을 수 없음") + "<br>";
-      }
-    } else {
-      // 전체진단: 총 N개 중 M개
-      html += `<b>④ 탭 목록 (전체)</b>: `;
-      if (totalTabs > 0) {
-        html += `총 ${totalTabs}개 중 인덱스 반영 탭 ${ok(String(validCount) + "개")}<br>`;
-        html += data.allTabs.map(tab => {
-          const isValid = data.validTabs && data.validTabs.includes(tab);
-          return `  ${isValid ? ok("●") : gray("○")} ${escHtml(tab)}${isValid ? "" : gray(" (스킵됨)")}`;
-        }).join("<br>") + "<br>";
-      } else {
-        html += warn("탭 없음 또는 읽기 실패") + "<br>";
-      }
-    }
-
-    // ⑤ 스킵 원인 (간소화) — 단일탭 모드는 해당 탭 1개만 표시
-    if (data.skipReasons && Object.keys(data.skipReasons).length) {
-      // 단일탭 모드: GAS가 전체 탭 스캔 결과를 반환해도 해당 탭만 표시
-      let skipEntries = Object.entries(data.skipReasons);
-      if (diagMode === "tab" && data.allTabs && data.allTabs.length) {
-        const targetTab = data.allTabs[0]; // 단일탭의 탭명
-        skipEntries = skipEntries.filter(([tab]) => tab === targetTab);
-      }
-      if (skipEntries.length > 0) {
-        html += `<b>⑤ 스킵 원인</b>:<br>`;
-        skipEntries.forEach(([tab, reason]) => {
-          const simpleReason = _simplifySkipReason(reason);
-          html += `  ${err("✗")} ${escHtml(tab)} → ${warn(simpleReason)}<br>`;
-        });
-      }
-    }
-
-    // ⑥ 헤더 샘플 (첫 번째 유효 탭)
-    if (data.headerSample) {
-      const sampleTabLabel = data.headerSampleTab ? ` (${escHtml(data.headerSampleTab)})` : "";
-      html += `<b>⑥ 헤더 샘플${sampleTabLabel}</b>:<br>`;
-      html += gray(JSON.stringify(data.headerSample).substring(0, 200)) + "<br>";
-    }
-
-    // 오류 로그
-    if (data.errors && data.errors.length) {
-      html += `<br><b>⚠ 오류 로그</b>:<br>`;
-      data.errors.forEach(e => { html += `  ${err("→")} ${escHtml(e)}<br>`; });
-    }
-
-    // 최종 판정
-    html += `<br><b>🏁 최종 판정</b>: `;
-    if (data.verdict === "ok") {
-      // 단일탭 모드: 인덱스 실제 포함 여부 추가 표시
-      if (diagMode === "tab") {
-        if (data.isInIndex === true) {
-          html += ok("✅ 정상 + 현재 인덱스에도 포함됨 (대시보드에 바로 표시)");
-        } else if (data.isInIndex === false) {
-          html += warn("⚠ 헤더 정상 (스킵 없음) — 그러나 현재 인덱스에 미포함") +
-            `<br><small style="color:#D97706;margin-left:2px">→ [인덱스 지금 갱신] 버튼을 눌러야 대시보드에 반영됩니다.</small>`;
-        } else {
-          html += ok("✅ 정상 — 동기화 시 포함됩니다");
-        }
-      } else {
-        html += ok("✅ 정상 — 동기화 시 포함됩니다");
-      }
-    }
-    else if (data.verdict === "tab_not_found") html += err(`❌ gid:${diagGid} 탭을 찾을 수 없음 — URL의 gid 값을 확인하세요`);
-    else if (data.verdict === "no_tab" || data.verdict === "no_valid_tab") html += err("❌ 유효 탭 없음 — 탭명 패턴 또는 헤더 확인 필요");
-    else if (data.verdict === "no_access") html += err("❌ 접근 불가 — 시트 공유 설정 확인");
-    else if (data.verdict === "not_registered") html += err("❌ 미등록 — 작업오더 접수 필요");
-    else if (data.verdict)                 html += warn(escHtml(data.verdict));
-    else if (data.error)                   html += err(escHtml(data.error));
-
-    // 단일탭 모드에서 인덱스 미포함인 경우 원인 힌트 추가
-    if (diagMode === "tab" && data.isInIndex === false && data.verdict === "ok") {
-      const tabName = data.allTabs && data.allTabs[0] ? data.allTabs[0] : "";
-      html += `<br><br><b>💡 대시보드 미표시 원인 후보:</b><br>`;
-      html += `&nbsp;&nbsp;1. 동기화 전 상태 → <b>[인덱스 지금 갱신]</b> 클릭 후 재확인<br>`;
-      html += `&nbsp;&nbsp;2. 갱신 시 해당 탭이 스킵됐을 가능성 → 갱신 후 재진단<br>`;
-      html += `&nbsp;&nbsp;3. 세부목록에 해당 탭 미등록 → ⚙ 탭설정 후 저장<br>`;
-      if (tabName) html += `&nbsp;&nbsp;4. 탭명 특수문자/공백 문제: <i>"${escHtml(tabName)}"</i><br>`;
-    }
-
-    resEl.innerHTML = html;
-
-  } catch(e) {
-    resEl.innerHTML = `<b style="color:#EF4444">❌ 네트워크/GAS 오류: ${escHtml(e.message)}</b><br><small>GAS 백엔드에 debugSingleSheet 액션이 구현되어 있어야 합니다.</small>`;
-  }
-}
-
-/** 스킵 원인 문자열 간소화 헬퍼 */
-function _simplifySkipReason(reason) {
-  if (!reason) return "알 수 없음";
-  const r = String(reason);
-  // 헤더 키워드 없음 패턴
-  if (r.includes("DATA_TAB_KEYWORDS") || r.includes("헤더 키워드") || r.includes("header keyword") || r.includes("번호") || r.includes("주문자")) {
-    return "헤더 키워드 없음 (번호/주문자/수취인/수취인명/성함 중 없음)";
-  }
-  // 검색 컬럼 없음
-  if (r.includes("SEARCH_COL") || r.includes("검색 컬럼") || r.includes("name column")) {
-    return "이름 컬럼 없음 (수취인/주문자/성함 등 없음)";
-  }
-  // 숨김 탭
-  if (r.includes("hidden") || r.includes("숨김")) {
-    return "숨겨진 탭";
-  }
-  // 시스템 탭
-  if (r.includes("INDEX_TAB") || r.includes("인덱스") || r.includes("세부목록") || r.includes("탭설정")) {
-    return "시스템 탭 (제외 대상)";
-  }
-  // 빈 탭
-  if (r.includes("empty") || r.includes("비어") || r.includes("데이터 없")) {
-    return "데이터 없음 (빈 탭)";
-  }
-  // 기타: 100자 이상이면 잘라냄
-  return r.length > 80 ? r.substring(0, 80) + "…" : r;
-}
-
-/** ─── 세부목록(탭설정) 진단 함수들 ─── */
-async function debugTabConfig() {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
-  const resEl = document.getElementById("debugTabConfigResult");
-  show(resEl);
-  resEl.textContent = "⏳ 세부목록 현황 조회 중...";
-  try {
-    const data = await gasGet({ action: "debugTabConfig" }, 15000);
-    const dl = data.detailSheet || {};
-    const lines = [
-      `📋 세부목록 탭 존재: ${dl.exists ? "✅ 있음" : "❌ 없음"}`,
-      `📊 현재 행 수: ${dl.lastRow || 0}행`,
-      `🆔 DB(tab_configs) 기반 관리 중`,
-      `📌 탭 이름: "${data.DETAIL_SHEET_NAME || "세부목록"}"`,
-    ];
-    if (dl.exists && dl.data && dl.data.length > 0) {
-      lines.push("", "📄 저장된 데이터 (최대 10행):");
-      dl.data.slice(0, 10).forEach((row, i) => {
-        if (i === 0) {
-          lines.push(`  헤더: ${row.map(c => String(c).substring(0,20)).join(" | ")}`);
-        } else {
-          const url  = String(row[0] || "").substring(0, 30);
-          const tab  = String(row[1] || "-");
-          const mgr  = String(row[2] || "-");
-          const time = String(row[3] || "-");
-          const tk   = String(row[4] || "-");
-          const rv   = String(row[5] || "-");
-          lines.push(`  ${i}행: [${tab}] 담당:${mgr} 시간:${time} 택대:${tk} 리뷰:${rv}`);
-        }
-      });
-    } else if (!dl.exists) {
-      lines.push("", "⚠️ 세부목록 탭이 없습니다.", "→ 저장 테스트 버튼을 눌러 탭 자동 생성을 확인하세요.");
-    } else {
-      lines.push("", "ℹ️ 아직 저장된 데이터가 없습니다.");
-    }
-    resEl.textContent = lines.join("\n");
-  } catch(e) {
-    resEl.textContent = "❌ 오류: " + e.message + "\n\n(GAS가 최신 버전으로 재배포되었는지 확인하세요)";
-  }
-}
-
-async function testTabConfigSave() {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
-  const resEl = document.getElementById("debugTabConfigResult");
-  show(resEl);
-  resEl.textContent = "⏳ 테스트 저장 중... (베이스시트 세부목록에 테스트 행 추가)";
-  try {
-    const data = await gasGet({ action: "testTabConfig" }, 15000);
-    if (data.ok) {
-      resEl.textContent =
-        `✅ 저장 테스트 성공!\n` +
-        `tabName: ${data.tabName || "테스트탭"}\n` +
-        `행 위치: ${data.row}행\n` +
-        `신규/업데이트: ${data.updated ? "업데이트" : "신규 추가"}\n\n` +
-        `→ 베이스시트의 "세부목록" 탭을 확인하세요.`;
-      showToast("✅ 테스트 저장 성공! 세부목록 탭을 확인하세요.");
-    } else {
-      resEl.textContent = `❌ 저장 실패: ${data.error || JSON.stringify(data)}\n\n(GAS 재배포 필요 여부 확인)`;
-    }
-  } catch(e) {
-    resEl.textContent =
-      `❌ 네트워크/GAS 오류: ${e.message}\n\n` +
-      `가능한 원인:\n` +
-      `1. GAS가 구버전으로 배포됨 → 새 버전으로 재배포 필요\n` +
-      `2. GAS URL이 잘못됨 → 설정에서 URL 확인\n` +
-      `3. 스프레드시트 권한 없음 → 시트 접근 권한 확인`;
-  }
-}
-
-/** ★ 동기화 완료 후 대시보드 자동 새로고침 */
-function _autoRefreshDashboardAfterBuild() {
-  // 관리자 화면이 열려 있고, 대시보드 탭이 보이는 상태일 때만 자동 동기화
-  const screenAdmin = document.getElementById("screenAdmin");
-  if (!screenAdmin || !screenAdmin.classList.contains("active")) return;
-  const dashWrap = document.getElementById("dashboardWrap");
-  if (!dashWrap) return;
-  // 약간의 딜레이 후 새로고침 (GAS 캐시 반영 대기)
-  setTimeout(() => {
-    showToast("🔄 대시보드 자동 새로고침 중...", "info");
-    loadAdminDashboard();
-  }, 800);
-}
-
-/* ── 열쇠 드롭다운 메뉴 ── */
-function toggleKeyMenu(e) {
-  e.stopPropagation();
-  const dd = document.getElementById('keyDropdown');
-  const isHidden = dd.style.display === 'none' || !dd.style.display;
-  dd.style.display = isHidden ? 'block' : 'none';
-}
 function closeKeyMenu() {
   const dd = document.getElementById('keyDropdown');
   if (dd) dd.style.display = 'none';
@@ -11975,114 +10627,6 @@ document.addEventListener('click', function(e) {
   if (wrap && !wrap.contains(e.target)) closeKeyMenu();
 });
 
-/* ── 비밀번호 변경 ── */
-function openChangePw() {
-  document.getElementById("cpCurrentPw").value = "";
-  document.getElementById("cpNewPw").value     = "";
-  document.getElementById("cpNewPw2").value    = "";
-  hide("changePwError");
-  show("changePwModal", "flex");
-}
-function closeChangePw() { hide("changePwModal"); }
-async function submitChangePw() {
-  const currentPw = document.getElementById("cpCurrentPw").value;
-  const newPw     = document.getElementById("cpNewPw").value;
-  const newPw2    = document.getElementById("cpNewPw2").value;
-  const errEl     = document.getElementById("changePwError");
-  hide(errEl);
-  if (!currentPw || !newPw || !newPw2) { errEl.textContent = "모든 항목을 입력하세요."; show(errEl); return; }
-  if (newPw !== newPw2)                { errEl.textContent = "새 비밀번호가 일치하지 않습니다."; show(errEl); return; }
-  if (newPw.length < 4)               { errEl.textContent = "새 비밀번호는 4자 이상이어야 합니다."; show(errEl); return; }
-  showLoading("변경 중...");
-  try {
-    const data = await gasPost({ action: "adminChangePw", currentPw, newPw });
-    hideLoading();
-    if (data.success) {
-      closeChangePw();
-      showToast("비밀번호가 변경되었습니다.", "success");
-    } else {
-      errEl.textContent = data.error || "오류가 발생했습니다.";
-      show(errEl);
-    }
-  } catch (err) {
-    hideLoading();
-    showToast("오류: " + err.message, "error");
-  }
-}
-
-function togglePwVisible(inputId, btn) {
-  const input = document.getElementById(inputId);
-  const icon  = btn.querySelector("i");
-  if (input.type === "password") {
-    input.type     = "text";
-    icon.className = "fas fa-eye-slash";
-  } else {
-    input.type     = "password";
-    icon.className = "fas fa-eye";
-  }
-}
-
-/* ── GAS 통신 ──
-/**
- * ★ GAS JSONP 테스트 함수
- * indexStatus를 JSONP로 호출해 현재 배포된 GAS가 callback 파라미터를 처리하는지 확인
- */
-async function testGasJsonp() {
-  const btn    = document.getElementById("btnTestJsonp");
-  const resEl  = document.getElementById("jsonpTestResult");
-  const url    = APP_CONFIG.GAS_WEB_APP_URL;
-  if (!url) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
-
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 테스트 중...';
-  resEl.style.display = "block";
-  resEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> JSONP 테스트 중...';
-
-  try {
-    const t0   = Date.now();
-    const data = await _jsonpGet(`${url}?action=indexStatus`, 10000);
-    const ms   = Date.now() - t0;
-    if (data && (data.exists !== undefined || data.count !== undefined)) {
-      const verBadge = data.codeVersion
-        ? `<br><span style="color:#3182f6;font-weight:600">📌 Code.gs 버전: ${escHtml(data.codeVersion)}</span>`
-        : "";
-      resEl.innerHTML =
-        `<span style="color:#0ca678;font-weight:700">✅ JSONP 지원 확인됨</span> (${ms}ms)<br>` +
-        `GAS 버전이 정상입니다. 동기화을 진행할 수 있습니다.${verBadge}<br>` +
-        `<small style="color:#6B7280">응답: count=${data.count||0}, exists=${data.exists}</small>`;
-      // 코드 버전 행 갱신
-      const cvRow  = document.getElementById("codeVersionRow");
-      const cvText = document.getElementById("codeVersionText");
-      if (data.codeVersion && cvRow && cvText) { cvText.textContent = data.codeVersion; cvRow.style.display = ""; }
-      // 오류 배너 숨김
-      const b = document.getElementById("gasErrorBanner");
-      if (b) b.style.display = "none";
-    } else if (data && data.error) {
-      resEl.innerHTML =
-        `<span style="color:#D97706;font-weight:700">⚠ JSONP는 됐지만 GAS 오류:</span> ${escHtml(data.error)}`;
-    } else {
-      resEl.innerHTML =
-        `<span style="color:#D97706;font-weight:700">⚠ 응답 형식 이상:</span> ${JSON.stringify(data).substring(0,100)}`;
-    }
-  } catch (e) {
-    const m = e.message || "";
-    if (m.includes("스크립트 로드 실패") || m.includes("Script load failed")) {
-      resEl.innerHTML =
-        `<span style="color:#DC2626;font-weight:700">❌ JSONP 미지원</span><br>` +
-        `현재 배포된 GAS가 <b>구버전</b>입니다.<br>` +
-        `<b>Code.gs를 최신 버전으로 재배포</b>하면 해결됩니다.<br>` +
-        `<small style="color:#6B7280">▶ 배포 → 기존 배포 관리 → 수정(연필) → 새 버전 → 배포</small>`;
-      document.getElementById("gasErrorBanner").style.display = "block";
-    } else if (m.includes("시간 초과")) {
-      resEl.innerHTML = `<span style="color:#D97706;font-weight:700">⚠ 시간 초과</span> — GAS가 응답하지 않습니다.`;
-    } else {
-      resEl.innerHTML = `<span style="color:#DC2626;font-weight:700">❌ 오류:</span> ${escHtml(m)}`;
-    }
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-plug"></i> GAS 연결 테스트 (JSONP 지원 여부)';
-  }
-}
 
 /*
  * GAS 웹앱은 긴 요청 시 302 리다이렉트 발생 → CORS 헤더 유실 문제
@@ -12314,20 +10858,6 @@ function hideLoading() {
   setTimeout(() => { el.style.display = "none"; el.classList.remove("fade-out"); }, 280);
 }
 
-// ══════════════════════════════════════════════════════════
-// ★ 파일 존재 확인 모달
-// ══════════════════════════════════════════════════════════
-function openCheckFilesModal() {
-  const modal = document.getElementById("checkFilesModal");
-  if (!modal) return;
-  // 초기화
-  document.getElementById("checkFilesPwInput").value = "";
-  const res = document.getElementById("checkFilesResult");
-  res.style.display = "none";
-  res.innerHTML = "";
-  modal.classList.add("open");
-  setTimeout(() => document.getElementById("checkFilesPwInput").focus(), 80);
-}
 
 function closeCheckFilesModal() {
   const modal = document.getElementById("checkFilesModal");
@@ -12339,95 +10869,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape") closeCheckFilesModal();
 });
 
-// 모달 바깥 클릭 시 닫기
-document.getElementById("checkFilesModal")?.addEventListener("click", function(e) {
-  if (e.target === this) closeCheckFilesModal();
-});
 
-async function runCheckReviewFiles() {
-  const pwInput = document.getElementById("checkFilesPwInput");
-  const pw = (pwInput?.value || "").trim();
-  if (!pw) { showToast("비밀번호를 입력하세요.", "error"); pwInput?.focus(); return; }
-
-  const resEl = document.getElementById("checkFilesResult");
-  resEl.style.display = "";
-  resEl.innerHTML = `<div class="cfr-summary running">
-    <i class="fas fa-spinner fa-spin"></i> 전체 시트 순회 중… 수십 초 소요될 수 있습니다.
-  </div>`;
-
-  // 실행 버튼 비활성화
-  const runBtn = resEl.closest(".check-files-box")?.querySelector("button[onclick='runCheckReviewFiles()']");
-  if (runBtn) { runBtn.disabled = true; runBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 실행 중…'; }
-
-  try {
-    let res;
-    try {
-      res = await gasPost({ action: "checkReviewFiles", pw });
-    } catch (_) {
-      res = await gasGet({ action: "checkReviewFiles", pw });
-    }
-
-    if (res.error) {
-      resEl.innerHTML = `<div class="cfr-item error">
-        <i class="fas fa-times-circle"></i> ${escHtml(res.error)}
-      </div>`;
-      return;
-    }
-
-    const { restored = 0, results = [], errors = [] } = res;
-    let html = "";
-
-    // 요약
-    if (restored === 0 && errors.length === 0) {
-      html += `<div class="cfr-summary ok">
-        <i class="fas fa-check-circle"></i> 삭제된 파일 없음 — 모든 리뷰 파일이 정상입니다.
-      </div>`;
-    } else if (restored > 0) {
-      html += `<div class="cfr-summary warn">
-        <i class="fas fa-undo-alt"></i> ${restored}건 복원됨 — 대시보드를 새로고침하면 반영됩니다.
-      </div>`;
-    }
-
-    // 복원 항목
-    results.forEach(item => {
-      html += `<div class="cfr-item restored">
-        <b>${escHtml(item.name)}</b>
-        <span style="color:#0ca678;margin-left:6px">${escHtml(item.tabName)}</span>
-        <span style="font-size:.75rem;color:#6B7280;margin-left:4px">행${item.rowIndex}</span><br>
-        <span style="font-size:.75rem">${escHtml(item.reason)}</span>
-      </div>`;
-    });
-
-    // 오류 항목
-    errors.forEach(err => {
-      html += `<div class="cfr-item error">
-        <i class="fas fa-exclamation-triangle"></i> ${escHtml(String(err))}
-      </div>`;
-    });
-
-    if (!html) {
-      html = `<div class="cfr-item empty">결과 없음</div>`;
-    }
-
-    resEl.innerHTML = html;
-
-    // 복원이 있으면 비밀번호 입력란 비우기
-    if (restored > 0) {
-      pwInput.value = "";
-      showToast(restored + "건 복원 완료. 대시보드를 새로고침하세요.", "success");
-    }
-
-  } catch (err) {
-    resEl.innerHTML = `<div class="cfr-item error">
-      <i class="fas fa-times-circle"></i> 통신 오류: ${escHtml(err.message || String(err))}
-    </div>`;
-  } finally {
-    if (runBtn) {
-      runBtn.disabled = false;
-      runBtn.innerHTML = '<i class="fas fa-search"></i> 확인 실행';
-    }
-  }
-}
 function showToast(msg, type="info", duration=3500) {
   const c = document.getElementById("toastContainer");
   const t = document.createElement("div");
@@ -12463,273 +10905,10 @@ function showCenterAlert(msg, duration=4000) {
 /* ══════════════════════════════════════════════
    검색 진단 모달 (searchAll GAS 응답 직접 조회)
    ══════════════════════════════════════════════ */
-function openSearchDebugModal() {
-  document.getElementById('searchDebugModal').style.display = 'flex';
-  document.getElementById('debugNameInput').focus();
-}
-function closeSearchDebugModal() {
-  document.getElementById('searchDebugModal').style.display = 'none';
-}
 
-async function runSearchDebug() {
-  const q = document.getElementById('debugNameInput').value.trim();
-  if (!q || q.length < 2) { showToast('이름을 2글자 이상 입력하세요.', 'warning'); return; }
-
-  // UI 초기화
-  const elResult  = document.getElementById('debugResult');
-  const elLoading = document.getElementById('debugLoading');
-  const elEmpty   = document.getElementById('debugEmpty');
-  const elError   = document.getElementById('debugError');
-  elResult.style.display  = 'none';
-  elLoading.style.display = 'block';
-  elEmpty.style.display   = 'none';
-  elError.style.display   = 'none';
-
-  try {
-    // GAS searchAll 원본 응답 (isSubmitted 포함 전체 행)
-    const data = await gasGet({ action: 'searchAllDebug', query: q });
-    elLoading.style.display = 'none';
-
-    // GAS가 searchAllDebug를 지원하지 않으면 일반 searchAll 사용
-    const rawResults = data.results || data.allResults || [];
-
-    if (!rawResults.length) {
-      elEmpty.style.display = 'block';
-      return;
-    }
-
-    // 통계
-    const total     = rawResults.length;
-    const submitted = rawResults.filter(r => r.isSubmitted).length;
-    const pending   = total - submitted;
-    document.getElementById('debugSummary').innerHTML =
-      `전체 <b>${total}건</b> | ` +
-      `<span style="color:#DC2626">isSubmitted=true: <b>${submitted}건</b></span> | ` +
-      `<span style="color:#0ca678">isSubmitted=false(검색 노출): <b>${pending}건</b></span>`;
-
-    // 테이블 렌더
-    const tbody = document.getElementById('debugTableBody');
-    tbody.innerHTML = '';
-    rawResults.forEach((r, i) => {
-      const isS    = r.isSubmitted;
-      const rdRaw  = r.submitVal !== undefined ? r.submitVal : (r.reviewDoneRaw !== undefined ? r.reviewDoneRaw : (r.row ? r.row[r.submitCol] : '—'));
-      const submitColDisp = r.submitCol || '(없음)';
-      const depDisp  = r.depositor || '';
-      const accDisp  = r.account   || '';
-      const bankDisp = r.bank      || '';
-      // 원인 힌트
-      let causeHint = '';
-      if (isS) {
-        if (r.submitCol && r.submitCol !== '(없음)') causeHint = `리뷰컬럼(${r.submitCol})="${rdRaw}"`;
-        else if (depDisp && accDisp && bankDisp) causeHint = `리뷰컬럼없음→예금주+계좌+은행 모두채움`;
-        else causeHint = `제출값="${rdRaw}"`;
-      }
-      const tr = document.createElement('tr');
-      tr.style.background = isS ? '#FEF2F2' : '#F0FDF4';
-      tr.innerHTML = `
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;color:#6B7280">${i+1}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-weight:600">${escHtml(r.displayName||'')}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-size:.7rem;color:#4B5563">${escHtml((r.campaignName||'')+(r.tabName?(' / '+r.tabName):''))}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-size:.7rem">${escHtml(r.productName||r.tcDisplayName||'')}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;font-weight:700;color:${isS?'#DC2626':'#0ca678'}">${isS?'✅ true':'⬜ false'}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-family:monospace;font-size:.7rem;color:${isS?'#DC2626':'#4B5563'}">${escHtml(causeHint||String(rdRaw??''))}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-family:monospace;font-size:.65rem;color:#9CA3AF">${escHtml(r.sheetId||'')}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;color:#6B7280">${escHtml(String(r.row?._rowIndex??r.rowIndex??''))}</td>`;
-      tbody.appendChild(tr);
-    });
-
-    elResult.style.display = 'block';
-
-  } catch(err) {
-    elLoading.style.display = 'none';
-    // searchAllDebug 미지원 시 일반 searchAll로 재시도
-    if (err.message && (err.message.includes('알 수 없는') || err.message.includes('지원') || err.message.includes('action'))) {
-      await _runSearchDebugFallback(q);
-    } else {
-      elError.style.display = 'block';
-      elError.textContent   = '오류: ' + err.message;
-    }
-  }
-}
-
-/** searchAllDebug 미지원 시 일반 searchAll(isSubmitted 포함 전체)로 폴백 */
-async function _runSearchDebugFallback(q) {
-  const elLoading = document.getElementById('debugLoading');
-  const elEmpty   = document.getElementById('debugEmpty');
-  const elError   = document.getElementById('debugError');
-  const elResult  = document.getElementById('debugResult');
-  elLoading.style.display = 'block';
-
-  try {
-    // 일반 searchAll은 모든 결과를 반환하는지 확인
-    const data = await gasGet({ action: 'searchAll', query: q });
-    elLoading.style.display = 'none';
-
-    const rawResults = data.results || [];
-    if (!rawResults.length) {
-      elEmpty.style.display = 'block';
-      return;
-    }
-
-    const total     = rawResults.length;
-    const submitted = rawResults.filter(r => r.isSubmitted).length;
-    const pending   = total - submitted;
-    document.getElementById('debugSummary').innerHTML =
-      `<span style="color:#B45309">⚠ GAS가 searchAllDebug 미지원 → searchAll 응답 표시 (isSubmitted=true인 행이 반환 목록에 포함되지 않을 수 있음)</span><br>` +
-      `반환된 전체 <b>${total}건</b> | ` +
-      `<span style="color:#DC2626">isSubmitted=true: <b>${submitted}건</b></span> | ` +
-      `<span style="color:#0ca678">isSubmitted=false(검색 노출): <b>${pending}건</b></span>`;
-
-    const tbody = document.getElementById('debugTableBody');
-    tbody.innerHTML = '';
-    rawResults.forEach((r, i) => {
-      const isS = r.isSubmitted;
-      const rdRaw = r.reviewDoneRaw !== undefined ? r.reviewDoneRaw : '(GAS 미전달)';
-      const tr = document.createElement('tr');
-      tr.style.background = isS ? '#FEF2F2' : '#F0FDF4';
-      tr.innerHTML = `
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;color:#6B7280">${i+1}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-weight:600">${escHtml(r.displayName||'')}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-size:.7rem;color:#4B5563">${escHtml((r.campaignName||'')+(r.tabName?(' / '+r.tabName):''))}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-size:.7rem">${escHtml(r.productName||r.tcDisplayName||'')}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;font-weight:700;color:${isS?'#DC2626':'#0ca678'}">${isS?'✅ true':'⬜ false'}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-family:monospace;font-size:.72rem;color:#92400E">${escHtml(String(rdRaw??''))}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-family:monospace;font-size:.65rem;color:#9CA3AF">${escHtml(r.sheetId||'')}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;color:#6B7280">${escHtml(String(r.row?._rowIndex??r.rowIndex??''))}</td>`;
-      tbody.appendChild(tr);
-    });
-    elResult.style.display = 'block';
-
-  } catch(err2) {
-    elLoading.style.display = 'none';
-    elError.style.display = 'block';
-    elError.innerHTML = `<b>GAS 오류:</b> ${escHtml(err2.message)}<br><br>` +
-      `<b>확인 방법:</b><br>` +
-      `1. GAS 스크립트 편집기에서 <code>doGet</code> 함수의 <code>searchAll</code> action을 찾으세요<br>` +
-      `2. <code>isSubmitted</code> 판단 로직이 어떤 컬럼을 읽는지 확인하세요<br>` +
-      `3. 스프레드시트에서 리뷰제출여부 컬럼의 실제 값을 확인하세요<br>` +
-      `4. <code>SUBMITTED_VALUES</code> 배열에 해당 값이 포함되는지 확인하세요`;
-  }
-}
-
-// 모달 외부 클릭 시 닫기
-document.getElementById('searchDebugModal')?.addEventListener('click', function(e) {
-  if (e.target === this) closeSearchDebugModal();
-});
-document.getElementById('dashRawModal')?.addEventListener('click', function(e) {
-  if (e.target === this) closeDashRawModal();
-});
 
 /* ══════════════════════════════════════════════
    집계 진단 모달 (dashboard GAS 응답 원본 조회)
    ══════════════════════════════════════════════ */
-let _dashRawData = null; // 마지막 조회 결과 캐시
 
-function openDashRawModal() {
-  document.getElementById('dashRawModal').style.display = 'flex';
-  // 이미 캐시된 데이터가 있으면 바로 표시, 없으면 새로 조회
-  if (_dashRawData) {
-    _renderDashRawTable(_dashRawData);
-  } else {
-    reloadDashRaw();
-  }
-}
-function closeDashRawModal() {
-  document.getElementById('dashRawModal').style.display = 'none';
-}
 
-async function reloadDashRaw() {
-  const elLoading = document.getElementById('dashRawLoading');
-  const elContent = document.getElementById('dashRawContent');
-  const elError   = document.getElementById('dashRawError');
-  elLoading.style.display = 'block';
-  elContent.style.display = 'none';
-  elError.style.display   = 'none';
-  document.getElementById('dashRawFilter').value = '';
-
-  try {
-    const data = await gasGet({ action: 'dashboard' });
-    _dashRawData = data;
-    elLoading.style.display = 'none';
-    _renderDashRawTable(data);
-  } catch(err) {
-    elLoading.style.display = 'none';
-    elError.style.display   = 'block';
-    elError.textContent = 'GAS 오류: ' + err.message;
-  }
-}
-
-function _renderDashRawTable(data) {
-  const elContent = document.getElementById('dashRawContent');
-  const elMeta    = document.getElementById('dashRawMeta');
-  const tbody     = document.getElementById('dashRawBody');
-
-  const stats = data.stats || [];
-  const grand = data.grand || {};
-
-  // 메타 요약
-  elMeta.innerHTML =
-    `조회 시각: <b>${new Date().toLocaleTimeString()}</b> &nbsp;|&nbsp; ` +
-    `총 캠페인: <b>${stats.length}</b> &nbsp;|&nbsp; ` +
-    `grand.total: <b>${grand.total ?? '—'}</b> &nbsp;|&nbsp; ` +
-    `grand.submitted: <b>${grand.submitted ?? '—'}</b> &nbsp;|&nbsp; ` +
-    `grand.pending: <b>${grand.pending ?? '—'}</b>` +
-    (data.indexBuiltAt ? ` &nbsp;|&nbsp; 인덱스: <b>${escHtml(data.indexBuiltAt)}</b>` : '');
-
-  tbody.innerHTML = '';
-  stats.forEach(c => {
-    (c.tabs || []).forEach(t => {
-      const rate = t.total > 0 ? Math.round(t.submitted / t.total * 100) : 0;
-      // 차수 요약
-      let roundSummary = '—';
-      if (t.roundList && t.roundList.length) {
-        roundSummary = t.roundList.map(rd =>
-          `<span style="white-space:nowrap">${escHtml(rd.round||'?')}: ${rd.submitted}/${rd.total}</span>`
-        ).join(' &nbsp; ');
-      }
-      // 이상 여부 강조 (total>0인데 submitted=0 이면 주황)
-      const isAnomal = t.total > 0 && t.submitted === 0;
-      // total=0 이면 회색
-      const isEmpty  = t.total === 0;
-
-      const tr = document.createElement('tr');
-      tr.dataset.campaign = (c.campaign || '').toLowerCase();
-      tr.dataset.tab      = (t.tab || '').toLowerCase();
-      tr.style.background = isAnomal ? '#FFFBEB' : isEmpty ? '#F9FAFB' : '';
-
-      tr.innerHTML = `
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;color:#374151;white-space:nowrap">${escHtml(c.campaign||'')}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-weight:600;white-space:nowrap">${escHtml(t.tab||'')}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;font-weight:700;color:${isEmpty?'#9CA3AF':'#1F2937'}">${t.total ?? '—'}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;font-weight:700;color:${t.submitted>0?'#0ca678':isAnomal?'#D97706':'#9CA3AF'}">${t.submitted ?? '—'}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;color:${t.pending>0?'#DC2626':'#6B7280'}">${t.pending ?? '—'}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center">
-          ${isEmpty
-            ? `<span style="color:#9CA3AF;font-size:.68rem">수취인없음</span>`
-            : `<span style="color:${rate===100?'#0ca678':rate>=50?'#3182f6':'#D97706'};font-weight:700">${rate}%</span>`
-          }
-        </td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;font-size:.7rem">
-          ${isAnomal
-            ? `<span style="color:#D97706;font-weight:700">⚠ 제출0</span>`
-            : isEmpty
-              ? `<span style="color:#9CA3AF">빈탭</span>`
-              : `<span style="color:#0ca678">정상</span>`
-          }
-        </td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-size:.7rem;color:#4B5563">${roundSummary}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-family:monospace;font-size:.62rem;color:#9CA3AF;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(t.sheetId||'')}">${escHtml(t.sheetId||'—')}</td>`;
-      tbody.appendChild(tr);
-    });
-  });
-
-  elContent.style.display = 'block';
-}
-
-function filterDashRawTable() {
-  const q = document.getElementById('dashRawFilter').value.toLowerCase().trim();
-  document.querySelectorAll('#dashRawBody tr').forEach(tr => {
-    const match = !q || tr.dataset.campaign.includes(q) || tr.dataset.tab.includes(q);
-    tr.style.display = match ? '' : 'none';
-  });
-}
