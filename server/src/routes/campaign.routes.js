@@ -974,7 +974,9 @@ async function _scopedCampaignEdit(req, res) {
        title=$2, status=$3, delivery_type=$4, review_fee=$5, time_range=$6,
        thumbnail_url=$7, landing_url=$8, window_start=$9, window_end=$10,
        daily_limit=$11, recruit_total=$12, sort_order=$13, max_slots=$14,
-       carry_mode=$15, carry_strategy=$16, updated_at=NOW()
+       carry_mode=$15, carry_strategy=$16,
+       published_at = CASE WHEN $3 = 'active' AND status IS DISTINCT FROM 'active' THEN NOW() ELSE published_at END,   -- 173: 스코프 편집으로 게시 전환해도 게시 시각을 남긴다(코덱스 리뷰)
+       updated_at=NOW()
      WHERE id=$1 RETURNING *`,
     [id, title, status, delivery_type, review_fee, time_range,
      thumbnail_url, landing_url, window_start || null, window_end || null,
@@ -2847,6 +2849,8 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       .invalidateCashReceiptContext(rows[0].linked_sheet_id, rows[0].linked_tab_name);
     // ★ 061: 상품옵션 저장(제공 시). 원자 저장(캠페인 락) — 실패 시 응답에 경고 표면화(조용한 정원 오염 방지, 레드 #7).
     let optionsWarning = null;
+    // 172: 처음부터 게시(모집중)로 만든 공고는 지금을 게시 시각으로 남긴다 — 실패해도 공고 생성은 유지(fail-soft)
+    if (rows[0].status === 'active') { try { await pool.query(`UPDATE recruit_campaigns SET published_at = NOW() WHERE id = $1 AND published_at IS NULL`, [rows[0].id]); } catch (e) { logger.warn('[campaign/create] 게시 시각 기록 실패: ' + e.message); } }
     if (normOpts) { try { await _saveCampaignOptions(rows[0].id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/create] ' + optionsWarning); } }
     if (hasWorkboardDisplayName) {
       rows[0].workboard_display_name = await _saveWorkboardDisplayName({ sheetId: lSheet, tabName: lTab, displayName: workboardDisplayName });
@@ -3209,6 +3213,9 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         notes = COALESCE($10, notes),
         chat_url = COALESCE($11, chat_url),
         status = COALESCE($12, status),
+        published_at = CASE WHEN (COALESCE($12, status) = 'active' AND status IS DISTINCT FROM 'active')
+                             OR (COALESCE($20, participation_mode) = TRUE AND participation_mode IS DISTINCT FROM TRUE)   -- 참여형으로 바꾼 날 = 그날부터 참여 가능(코덱스 리뷰)
+                            THEN NOW() ELSE published_at END,
         sort_order = COALESCE($13, sort_order),
         max_slots = COALESCE($14, max_slots),
         deadline = $15,
@@ -3432,7 +3439,9 @@ router.put('/admin/:id/status', authMiddleware, adminOrMasterMiddleware, async (
       }
     }
     const { rows } = await pool.query(
-      `UPDATE recruit_campaigns SET status = $2, updated_at = NOW() WHERE id = $1 RETURNING *`,
+      `UPDATE recruit_campaigns SET status = $2,
+         published_at = CASE WHEN $2 = 'active' AND status IS DISTINCT FROM 'active' THEN NOW() ELSE published_at END,  -- 172 게시 시각
+         updated_at = NOW() WHERE id = $1 RETURNING *`,
       [id, status]
     );
     if (rows.length === 0) {
@@ -4154,5 +4163,8 @@ async function _addApplicationToSheet(campaign, applicant) {
 
   logger.info(`[campaign/sheet] 행 추가 완료: ${linked_tab_name} - ${applicant.name} (행 ${headerRowIdx + 1 + nextNum})`);
 }
+
+// 공고 목록 5초 캐시 비우기 — 다른 기능이 정원을 바꾼 직후 화면이 옛 숫자를 다시 그리지 않게(어제 부족 인원 팝업 — 코덱스 리뷰)
+router.invalidateListCache = function () { _listCache = { at: 0, rows: null, countsMap: null, feeMap: null }; };
 
 module.exports = router;
