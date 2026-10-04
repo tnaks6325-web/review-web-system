@@ -33,26 +33,49 @@ for (const m of app.matchAll(/app\.use\(\s*'([^']+)'\s*,\s*(?:[\w.]+\s*,\s*)*(\w
 ok(`서버 라우트 표 구성(${routes.length}개)`, routes.length > 500);
 
 const toRe = (p) => new RegExp('^' + p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/:\w+/g, '[^/]+') + '$');
-function exists(method, p) {
+function exists(method, p, dynamic = false) {
   return routes.some(([rm, rp]) => (rm === method || rm === 'ALL')
-    && (toRe(rp).test(p) || rp.startsWith(p + '/:'))); // "/:id 는 호출 시 조합" 매핑 허용
+    && (toRe(rp).test(p) || (dynamic && rp.startsWith(p + '/:')))); // 접두 허용은 "/:id 동적" 주석이 있는 매핑만(Codex P2)
 }
 
 /* ═══ api.js 매핑 전수 ═══ */
 const api = read('frontend/api.js');
 const missing = [];
 let count = 0;
-for (const m of api.matchAll(/'(\w+)'\s*:\s*\{\s*method:\s*'(\w+)'\s*,\s*path:\s*'([^']+)'/g)) {
+const mapNames = new Set();
+for (const m of api.matchAll(/'(\w+)'\s*:\s*\{\s*method:\s*'(\w+)'\s*,\s*path:\s*'([^']+)'[^\n]*/g)) {
   count++;
+  mapNames.add(m[1]);
   const p = m[3].split('?')[0];
-  if (!exists(m[2], p)) missing.push(`${m[1]} → ${m[2]} ${m[3]}`);
+  const dynamic = /\/:\w+|동적|조합/.test(m[0].slice(m[0].indexOf('}')));
+  if (!exists(m[2], p, dynamic)) missing.push(`${m[1]} → ${m[2]} ${m[3]}`);
 }
 ok(`api.js 액션 매핑 ${count}개가 모두 실제 서버 입구를 가리킨다` + (missing.length ? '\n      → ' + missing.join('\n      → ') : ''),
   count > 50 && missing.length === 0);
 
+/* ═══ 반대 방향: 화면이 부르는 액션 이름이 매핑에 있다(Codex P2) ═══
+ * 매핑이 없으면 gasGet/gasPost 가 "알 수 없는 action" 으로 끝난다 — 버튼은 있는데 아무 일도 안 남.
+ * KNOWN_DEAD = 이 가드를 세울 때(2026-10-04) 이미 매핑 없던 구글시트 시절 버튼 3개. 결정 186 다음 항목에서 처리한다 —
+ * 여기에 새 이름을 더하지 말 것(새 버튼은 매핑을 만들거나 버튼을 지운다). */
+const KNOWN_DEAD = new Set(['cleanOrphanDetailRows', 'debugBuildStep', 'testTabConfig']);
+const unmapped = [];
+(function walk(d) {
+  for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+    const f = path.join(d, e.name);
+    if (e.isDirectory()) { if (!['node_modules', 'docs'].includes(e.name)) walk(f); continue; }
+    if (!/\.(js|html)$/.test(e.name) || /\.test\.js$/.test(e.name)) continue;
+    const src = fs.readFileSync(f, 'utf8');
+    for (const m of src.matchAll(/gas(?:Get|Post|PostUpload)\(\s*\{\s*action\s*:\s*["'](\w+)["']/g)) {
+      if (!mapNames.has(m[1]) && !KNOWN_DEAD.has(m[1])) unmapped.push(`${path.relative(root, f)}: ${m[1]}`);
+    }
+  }
+})(path.join(root, 'frontend'));
+ok('화면이 부르는 액션 이름은 모두 매핑에 있다' + (unmapped.length ? '\n      → ' + unmapped.join('\n      → ') : ''), unmapped.length === 0);
+
 /* 변이: 없는 입구는 잡는다 */
 ok('변이: 지운 입구는 없음으로 판정', !exists('GET', '/api/diag/campaign-stats') && !exists('GET', '/api/tab/stats'));
-ok('변이: 있는 입구는 있음으로 판정', exists('GET', '/api/admin/keywords') && exists('PUT', '/api/admin/keywords'));
+ok('변이: 있는 입구는 있음으로 판정', exists('GET', '/api/admin/keywords') && exists('PUT', '/api/admin/keywords', true));
+ok('변이: 동적 표시 없는 매핑은 접두 일치로 통과시키지 않는다', !exists('PUT', '/api/admin/keywords', false));
 
 /* ═══ 93~95번 · [진행률] 버튼 제거 고정 ═══ */
 for (const [method, p] of [['POST', '/api/submit/debug-tabs'], ['GET', '/api/submit/diag-tabs'], ['GET', '/api/submit/slot-status'],
@@ -62,8 +85,27 @@ for (const [method, p] of [['POST', '/api/submit/debug-tabs'], ['GET', '/api/sub
 ok('광고주 계정 관리는 3버전 입구가 남아 있다', exists('POST', '/api/trackb/advertiser-account'));
 ok('97·98번 잔류 입구는 남아 있다', exists('GET', '/api/campaign/admin/popular-credit-audit') && exists('POST', '/api/trackb/workdesk/auto-finish'));
 const admin = read('frontend/admin.html');
-ok('옛 대시보드: 진행률 패널·스크립트 없음', !/statsPanelOverlay/.test(admin) && !/index-stats\.js/.test(admin));
+ok('옛 대시보드: 진행률 패널 화면 없음', !/statsPanelOverlay/.test(admin));
 ok('옛 대시보드: [진행률] 버튼 없음', !/openStatsPanel|btn-tab-stats/.test(read('frontend/js/index-app.js')));
-ok('진행률 패널 스크립트 파일 없음', !fs.existsSync(path.join(root, 'frontend/js/index-stats.js')));
+// ★ 84-정정의 정정(Codex P1): index-stats.js 에는 블랙리스트·공지 배너 창도 있었다 — 파일째 지우면 그 버튼이 죽는다.
+const stats = read('frontend/js/index-stats.js');
+ok('진행률 패널 함수는 없다', !/function openStatsPanel|function _renderStatsPanel/.test(stats));
+ok('블랙리스트·공지 배너 창 함수는 남아 있고 옛 대시보드가 불러온다',
+  ['openBlPanel', 'closeBlPanel', 'loadBlacklist', 'addBlacklist', 'removeBlacklist', 'openNoticePanel', 'closeNoticePanel', 'saveNotice', 'clearNotice']
+    .every(fn => new RegExp('function ' + fn + '\\b').test(stats))
+  && /<script src="js\/index-stats\.js"><\/script>/.test(admin));
+
+/* ═══ 옛 대시보드 인라인 핸들러가 부르는 함수는 어딘가에 정의돼 있다 ═══
+ * 공유 스크립트를 지울 때 같이 사라지는 버튼을 잡는다(이번에 실제로 놓쳤다). */
+const scripts = [...admin.matchAll(/<script src="([^"?]+)/g)].map(m => m[1]).filter(s => !/^https?:/.test(s));
+const defined = new Set();
+const addDefs = (src) => { for (const m of src.matchAll(/(?:function\s+|(?:window\.|^|[\s;])(?:const|let|var)?\s*)([A-Za-z_$][\w$]*)\s*(?:\(|=\s*(?:async\s*)?(?:function|\())/gm)) defined.add(m[1]); };
+for (const s of scripts) { const fp = path.join(root, 'frontend', s); if (fs.existsSync(fp)) addDefs(fs.readFileSync(fp, 'utf8')); }
+for (const m of admin.matchAll(/<script>([\s\S]*?)<\/script>/g)) addDefs(m[1]);
+const called = new Set();
+for (const m of admin.matchAll(/\son(?:click|change|input|submit|keydown|keyup)="\s*(?:event\.\w+\(\);\s*)?(?:if\([^)]*\))?\s*([A-Za-z_$][\w$]*)\(/g)) called.add(m[1]);
+const BUILTIN = new Set(['if', 'return', 'event', 'this', 'document', 'window', 'alert', 'confirm', 'location', 'history', 'setTimeout']);
+const undef = [...called].filter(fn => !BUILTIN.has(fn) && !defined.has(fn));
+ok(`옛 대시보드 인라인 버튼이 부르는 함수 ${called.size}개가 모두 정의돼 있다` + (undef.length ? ' → 없음: ' + undef.join(', ') : ''), undef.length === 0);
 
 console.log(`\n✅ frontendActionMapRoutes: ${n}개 통과`);
