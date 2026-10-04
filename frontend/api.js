@@ -55,7 +55,6 @@ const API_BASE_URL = (function() {
 const _ACTION_MAP = {
   // 검색/인덱스 (Section 5)
   'searchAll':              { method: 'GET',  path: '/api/search' },
-  'searchAllDebug':         { method: 'GET',  path: '/api/search/debug' },
   'buildIndexSmart':        { method: 'POST', path: '/api/index/build' },
   'indexStatus':            { method: 'GET',  path: '/api/index/status' },
   'getIndexMasterStatus':   { method: 'GET',  path: '/api/index/status' },
@@ -152,13 +151,9 @@ const _ACTION_MAP = {
   // 제출 (Section 12)
   'submitReview':       { method: 'POST', path: '/api/submit/review' },
   'submitOrderForm':    { method: 'POST', path: '/api/submit/order' },
-  'checkReviewFiles':   { method: 'POST', path: '/api/submit/check-files' },
   'findSlot':           { method: 'POST', path: '/api/submit/find-slot' },
 
   // 진단/기타
-  'debugTabConfig':     { method: 'GET',  path: '/api/diag/debug-tab' },
-  'debugBaseSheet':     { method: 'GET',  path: '/api/diag/debug-base' },
-  'debugDetailSheet':   { method: 'GET',  path: '/api/diag/debug-tab' },
   'campaignList':       { method: 'GET',  path: '/api/diag/campaign-list' },
   'deleteCampaign':     { method: 'DELETE', path: '/api/diag/delete-campaign' },
 
@@ -230,8 +225,6 @@ const _ACTION_MAP = {
   // Phase 14: 키워드 관리 + 인식 실패 탭 진단
   'getKeywords':           { method: 'GET',    path: '/api/admin/keywords' },
   'addKeyword':            { method: 'POST',   path: '/api/admin/keywords' },
-  'toggleKeyword':         { method: 'PUT',    path: '/api/admin/keywords' },    // /:id 는 호출 시 path 조합
-  'deleteKeyword':         { method: 'DELETE', path: '/api/admin/keywords' },    // /:id
   'getUnrecognized':       { method: 'GET',    path: '/api/admin/unrecognized' },
   'ignoreUnrecognized':    { method: 'POST',   path: '/api/admin/unrecognized/ignore' },
   'resolveUnrecognized':   { method: 'POST',   path: '/api/admin/unrecognized/resolve' },
@@ -253,14 +246,8 @@ const _ACTION_MAP = {
 
   // ★ 모집공고(캠페인) 시스템
   'campaignList':          { method: 'GET',  path: '/api/campaign/list' },
-  'campaignDetail':        { method: 'GET',  path: '/api/campaign' },  // /:id 동적
-  'campaignApply':         { method: 'POST', path: '/api/campaign' },  // /:id/apply 동적
   'campaignAdminList':     { method: 'GET',  path: '/api/campaign/admin/list' },
   'campaignAdminCreate':   { method: 'POST', path: '/api/campaign/admin/create' },
-  'campaignAdminUpdate':   { method: 'PUT',  path: '/api/campaign/admin' },   // /:id 동적
-  'campaignAdminDelete':   { method: 'DELETE', path: '/api/campaign/admin' }, // /:id 동적
-  'campaignAdminStatus':   { method: 'PUT',  path: '/api/campaign/admin' },   // /:id/status 동적
-  'campaignApplications':  { method: 'GET',  path: '/api/campaign/admin' },   // /:id/applications 동적
 
   // ★ 작업 오더(work_orders) 시스템 — 동적 /:id 미지원이라 전부 평면경로 + body/query id
   'orderGuideImage':       { method: 'POST', path: '/api/order/guide-image' },

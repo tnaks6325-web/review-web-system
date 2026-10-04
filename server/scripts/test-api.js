@@ -262,13 +262,7 @@ async function main() {
   });
   console.log('');
 
-  // ═══ 14. 진단 엔드포인트 ═══
-  console.log('▶ [14] 진단');
-  await test('GET /api/diag/debug-tab', async () => {
-    const r = await req('GET', '/api/diag/debug-tab', null, authH());
-    return `debug-tab: ${r.status}`;
-  });
-  console.log('');
+  // (14. 진단 엔드포인트 debug-tab 은 2026-10-05 제거 — 결정 186 103번)
 
   // ═══ 15. 정리 (테스트 데이터 삭제) ═══
   console.log('▶ [15] 테스트 데이터 정리');

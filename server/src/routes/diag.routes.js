@@ -73,52 +73,9 @@ function verifiedInternalUploadIdentity(req) {
   }
 })();
 
-// ═══════════════════════════════════════════════════════════
-// GET /api/diag/debug-tab — 세부목록 현재 상태 진단 (GAS: debugTabConfig)
-// ═══════════════════════════════════════════════════════════
-router.get('/debug-tab', authMiddleware, async (req, res, next) => {
-  try {
-    const { rows } = await pool.query(`
-      SELECT sheet_id AS "sheetId", tab_name AS "tabName",
-             manager, time_range AS "timeRange", review_type AS "reviewType",
-             is_closed AS "isClosed",
-             campaign_name AS "campaignName",
-             updated_at AS "updatedAt"
-      FROM tab_configs
-      ORDER BY updated_at DESC
-      LIMIT 100
-    `);
-    res.json({ ok: true, configs: rows, total: rows.length });
-  } catch (err) {
-    next(err);
-  }
-});
+// GET /api/diag/debug-tab · /debug-base 은 2026-10-05 제거 — 결정 186 103번(옛 리뷰제출 화면의 열 수 없는 진단 창 전용 · 9/2 이후 호출 0).
 
 
-// ═══════════════════════════════════════════════════════════
-// GET /api/diag/debug-base — [DEPRECATED] 베이스시트 진단
-// 베이스시트 의존성 제거됨 — DB(tab_configs)가 원본
-// 하위 호환을 위해 엔드포인트는 유지하되, DB 기반 정보 반환
-// ═══════════════════════════════════════════════════════════
-router.get('/debug-base', authMiddleware, async (req, res, next) => {
-  try {
-    const { rows } = await pool.query(
-      `SELECT COUNT(*) AS total,
-              COUNT(*) FILTER (WHERE NOT is_closed) AS active,
-              COUNT(*) FILTER (WHERE is_closed) AS closed,
-              COUNT(DISTINCT sheet_id) AS sheets
-       FROM tab_configs`
-    );
-    const s = rows[0] || {};
-    res.json({
-      ok: true,
-      message: '베이스시트 의존성 제거됨 — DB(tab_configs) 기반 정보 반환',
-      stats: { total: +s.total, active: +s.active, closed: +s.closed, sheets: +s.sheets },
-    });
-  } catch (err) {
-    res.json({ ok: false, error: err.message });
-  }
-});
 
 // (GET /api/viewer/viewer-data — 광고주 뷰어 viewer.html 전용, 2026-09-28 제거 · 결정 186 47번)
 

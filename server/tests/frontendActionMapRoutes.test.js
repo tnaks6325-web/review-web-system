@@ -46,7 +46,7 @@ const missing = [];
 let count = 0;
 const mapNames = new Set();
 // ★ gasGet/gasPost 는 route.path 만 붙이고 주석의 '/:id…' 꼬리를 붙이지 않는다(Codex P2) — 동적 매핑을 화면이 부르면 404.
-//   2026-10-04 기준 8개 모두 실제 화면 호출 0(시안 mockups 만). 아래 역방향 검사에서 "부르면 실패"로 고정한다.
+//   2026-10-05 결정 186 105번으로 8개 모두 제거. 새로 생기면 아래 역방향 검사가 "부르면 실패"로 잡는다.
 const dynamicNames = new Set();
 for (const m of api.matchAll(/'(\w+)'\s*:\s*\{\s*method:\s*'(\w+)'\s*,\s*path:\s*'([^']+)'[^\n]*/g)) {
   count++;
@@ -64,7 +64,7 @@ ok(`api.js 액션 매핑 ${count}개가 모두 실제 서버 입구를 가리킨
  * 매핑이 없으면 gasGet/gasPost 가 "알 수 없는 action" 으로 끝난다 — 버튼은 있는데 아무 일도 안 남.
  * KNOWN_DEAD = 이 가드를 세울 때(2026-10-04) 이미 매핑 없던 구글시트 시절 버튼 3개. 결정 186 다음 항목에서 처리한다 —
  * 여기에 새 이름을 더하지 말 것(새 버튼은 매핑을 만들거나 버튼을 지운다). */
-const KNOWN_DEAD = new Set(['cleanOrphanDetailRows', 'debugBuildStep', 'testTabConfig', 'debugSingleSheet']);
+const KNOWN_DEAD = new Set(); // 2026-10-05 결정 186 103·104번으로 기존 4개(cleanOrphanDetailRows·debugBuildStep·testTabConfig·debugSingleSheet) 모두 제거 — 비워 둔다
 // gas 래퍼가 아닌 헬퍼 본문의 하위 동작 이름(예: _campEditorAction({action:'add'})) — 액션 매핑 대상이 아니다.
 const SUB_ACTIONS = new Set(['add', 'toggle', 'remove', 'edit', 'delete', 'list']);
 const unmapped = [];
@@ -85,6 +85,12 @@ const unmapped = [];
   }
 })(path.join(root, 'frontend'));
 ok('화면이 부르는 액션 이름은 모두 매핑에 있다' + (unmapped.length ? '\n      → ' + unmapped.join('\n      → ') : ''), unmapped.length === 0);
+
+ok('105번: 래퍼가 꼬리를 못 붙이는 동적 매핑이 남아 있지 않다', dynamicNames.size === 0);
+ok('103번: 옛 리뷰제출 진단 창 전용 매핑 없음', !['searchAllDebug', 'checkReviewFiles', 'debugTabConfig', 'debugBaseSheet', 'debugDetailSheet'].some(n => mapNames.has(n)));
+for (const [method, p] of [['GET', '/api/diag/debug-tab'], ['GET', '/api/diag/debug-base'], ['GET', '/api/search/debug'], ['POST', '/api/submit/check-files']]) {
+  ok(`103번: ${method} ${p} 제거 상태`, !exists(method, p));
+}
 
 /* 변이: 없는 입구는 잡는다 */
 ok('변이: 지운 입구는 없음으로 판정', !exists('GET', '/api/diag/campaign-stats') && !exists('GET', '/api/tab/stats'));
@@ -120,24 +126,43 @@ const scripts = [...admin.matchAll(/<script src="([^"?]+)/g)].map(m => m[1]).fil
 const vm = require('vm');
 const any = () => { const f = function () { return p; }; const p = new Proxy(f, { get: (t, k) => (k === Symbol.toPrimitive ? () => '' : k === 'then' ? undefined : p), apply: () => p, construct: () => p, set: () => true, has: () => true }); return p; };
 const store = () => { const m = new Map(); return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k), clear: () => m.clear(), key: () => null, length: 0 }; };
-const sandbox = { console: { log() {}, warn() {}, error() {}, info() {}, debug() {} }, document: any(), navigator: any(), location: any(), history: any(),
-  localStorage: store(), sessionStorage: store(), fetch: () => new Promise(() => {}), setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {},
-  requestAnimationFrame: () => 0, alert() {}, confirm: () => false, prompt: () => null, matchMedia: () => any(), getComputedStyle: () => any(),
-  EventSource: any(), MutationObserver: any(), IntersectionObserver: any(), ResizeObserver: any(), CustomEvent: any(), Event: any(), HTMLElement: any(), Element: any(), Node: any(), Image: any(), FileReader: any(), Blob: any(), FormData: any(), AbortController: any(), DOMParser: any(), XMLHttpRequest: any(),
-  URL, URLSearchParams, Intl, Date, Math, JSON, Promise, Map, Set, WeakMap, Array, Object, String, Number, Boolean, RegExp, Error, Symbol, encodeURIComponent, decodeURIComponent, parseInt, parseFloat, isNaN, TextEncoder, TextDecoder, structuredClone, atob, btoa };
-sandbox.window = sandbox; sandbox.self = sandbox; sandbox.globalThis = sandbox;
-const ctx = vm.createContext(sandbox);
-const runErrors = [];
-for (const src of scripts) { const fp = path.join(root, 'frontend', src); if (!fs.existsSync(fp)) continue; try { vm.runInContext(fs.readFileSync(fp, 'utf8'), ctx, { filename: src, timeout: 5000 }); } catch (e) { runErrors.push(src + ': ' + String(e.message).slice(0, 60)); } }
-for (const m of admin.matchAll(/<script(?![^>]*src)[^>]*>([\s\S]*?)<\/script>/g)) { try { vm.runInContext(m[1], ctx, { timeout: 5000 }); } catch (e) { runErrors.push('inline: ' + String(e.message).slice(0, 60)); } }
-const isGlobalFn = (fn) => { try { return vm.runInContext(`typeof ${fn} === 'function'`, ctx); } catch (_) { return false; } };
-const called = new Set();
-for (const a of admin.matchAll(/\son[a-z]+="([^"]*)"/g)) {
-  for (const m of a[1].matchAll(/(^|[^\w$.])(?:window\.)?([A-Za-z_$][\w$]*)\s*\(/g)) called.add(m[2]);
-}
 const BUILTIN = new Set(['if', 'return', 'event', 'this', 'document', 'window', 'alert', 'confirm', 'location', 'history', 'setTimeout',
   'function', 'String', 'Number', 'parseInt', 'encodeURIComponent', 'decodeURIComponent', 'JSON', 'Math', 'open', 'print', 'fetch', 'while', 'for', 'switch', 'var', 'rgba', 'rgb', 'url']); // var·rgba·url = 핸들러 안 CSS 문자열
-const undef = [...called].filter(fn => !BUILTIN.has(fn) && !isGlobalFn(fn));
-ok(`옛 대시보드 인라인 버튼이 부르는 함수 ${called.size}개가 모두 정의돼 있다` + (undef.length ? ' → 없음: ' + undef.join(', ') : ''), undef.length === 0);
+function checkPageHandlers(page) {
+  const html = read('frontend/' + page);
+  const sandbox = { console: { log() {}, warn() {}, error() {}, info() {}, debug() {} }, document: any(), navigator: any(), location: any(), history: any(),
+    localStorage: store(), sessionStorage: store(), fetch: () => new Promise(() => {}), setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {},
+    requestAnimationFrame: () => 0, alert() {}, confirm: () => false, prompt: () => null, matchMedia: () => any(), getComputedStyle: () => any(),
+    EventSource: any(), MutationObserver: any(), IntersectionObserver: any(), ResizeObserver: any(), CustomEvent: any(), Event: any(), HTMLElement: any(), Element: any(), Node: any(), Image: any(), FileReader: any(), Blob: any(), FormData: any(), AbortController: any(), DOMParser: any(), XMLHttpRequest: any(),
+    URL, URLSearchParams, Intl, Date, Math, JSON, Promise, Map, Set, WeakMap, Array, Object, String, Number, Boolean, RegExp, Error, Symbol, encodeURIComponent, decodeURIComponent, parseInt, parseFloat, isNaN, TextEncoder, TextDecoder, structuredClone, atob, btoa };
+  sandbox.window = sandbox; sandbox.self = sandbox; sandbox.globalThis = sandbox;
+  const ctx = vm.createContext(sandbox);
+  for (const m of html.matchAll(/<script[^>]*src="([^"?]+)/g)) {
+    if (/^https?:/.test(m[1])) continue;
+    const fp = path.join(root, 'frontend', m[1].replace(/^\//, ''));
+    if (!fs.existsSync(fp)) continue;
+    try { vm.runInContext(fs.readFileSync(fp, 'utf8'), ctx, { filename: m[1], timeout: 5000 }); } catch (_) { /* 함수 선언은 이미 만들어졌다 */ }
+  }
+  for (const m of html.matchAll(/<script(?![^>]*src)[^>]*>([\s\S]*?)<\/script>/g)) { try { vm.runInContext(m[1], ctx, { timeout: 5000 }); } catch (_) {} }
+  const isGlobalFn = (fn) => { try { return vm.runInContext(`typeof ${fn} === 'function'`, ctx); } catch (_) { return false; } };
+  const called = new Set();
+  for (const a of html.matchAll(/\son[a-z]+="([^"]*)"/g)) for (const m of a[1].matchAll(/(^|[^\w$.])(?:window\.)?([A-Za-z_$][\w$]*)\s*\(/g)) {
+    // JS 문자열 이어붙이기로 만든 속성(' + esc(x) + ') 안의 호출은 핸들러가 아니라 만드는 쪽 코드다
+    if (/\+\s*$/.test(a[1].slice(0, m.index + m[1].length))) continue;
+    called.add(m[2]);
+  }
+  const undef = [...called].filter(fn => !BUILTIN.has(fn) && !isGlobalFn(fn));
+  return { called, undef };
+}
+// 옛 대시보드 + 리뷰어 제출 화면(103번 정리) + 참여형 공고 화면(같은 search-app.js 를 싣는다)
+for (const page of ['admin.html', 'search.html', 'campaign.html']) {
+  const r = checkPageHandlers(page);
+  ok(`${page} 인라인 버튼이 부르는 함수 ${r.called.size}개가 모두 정의돼 있다` + (r.undef.length ? ' → 없음: ' + r.undef.join(', ') : ''), r.undef.length === 0);
+}
+ok('103번: 리뷰어 제출 화면에 숨은 관리자 창이 남아 있지 않다',
+  !['diagModal', 'indexModal', 'changePwModal', 'gasUrlModal', 'registerModal', 'reviewerProfileModal', 'tcPopover', 'checkFilesModal', 'dashRawModal', 'searchDebugModal', 'ofDuplicateWarn']
+    .some(id => read('frontend/search.html').includes(`id="${id}"`))
+  && !fs.existsSync(path.join(root, 'frontend/js/search-register.js')));
+ok('104번: 옛 대시보드 고아 행 경고 띠·정리 버튼 없음', !/_handleOrphanRowsWarning|cleanOrphanRows|orphanRowsBanner/.test(read('frontend/js/index-app.js')));
 
 console.log(`\n✅ frontendActionMapRoutes: ${n}개 통과`);
