@@ -69,7 +69,6 @@ const _ACTION_MAP = {
   'setClosed':        { method: 'POST', path: '/api/tab/closed' },
   'getTabOptions':    { method: 'GET',  path: '/api/tab/options' },
   'getTabEndDate':    { method: 'GET',  path: '/api/tab/end-date' },
-  'getCampaignStats': { method: 'GET',  path: '/api/diag/campaign-stats' },
 
   // 주문 원장(order ledger) PR-B — DB 주체 인라인 뷰어/편집/취소/수동추가
   'orderLedgerList':  { method: 'GET',  path: '/api/diag/order-ledger' },
@@ -164,7 +163,6 @@ const _ACTION_MAP = {
   'deleteCampaign':     { method: 'DELETE', path: '/api/diag/delete-campaign' },
 
   // 뷰어
-  'getViewerData':  { method: 'GET', path: '/api/viewer/viewer-data' },
 
   // 블랙리스트
   'blacklist':      { method: 'POST', path: '/api/blacklist' },
@@ -192,7 +190,6 @@ const _ACTION_MAP = {
   'reviewEditReject':     { method: 'POST', path: '/api/review-edit/reject' },
 
   // Drive 폴더 관리
-  'driveDiag':           { method: 'GET',  path: '/api/drive/diag' },
   'removeDuplicates':    { method: 'POST', path: '/api/drive/remove-duplicates' },
   'checkSubmissionStatus': { method: 'POST', path: '/api/drive/check-submission-status' },
   'getPendingRows':      { method: 'GET',  path: '/api/diag/pending-rows' },
@@ -266,10 +263,7 @@ const _ACTION_MAP = {
   'campaignApplications':  { method: 'GET',  path: '/api/campaign/admin' },   // /:id/applications 동적
 
   // ★ 작업 오더(work_orders) 시스템 — 동적 /:id 미지원이라 전부 평면경로 + body/query id
-  'orderSubmit':           { method: 'POST', path: '/api/order/submit' },
   'orderGuideImage':       { method: 'POST', path: '/api/order/guide-image' },
-  'orderMyList':           { method: 'GET',  path: '/api/order/my' },
-  'orderMyUpdate':         { method: 'PUT',  path: '/api/order/my/update' },
   'orderAdminList':        { method: 'GET',  path: '/api/order/admin/list' },
   'orderNewCount':         { method: 'GET',  path: '/api/order/admin/new-count' },
   'orderAdminStatus':      { method: 'PUT',  path: '/api/order/admin/status' },

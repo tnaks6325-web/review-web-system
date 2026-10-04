@@ -3682,7 +3682,6 @@ function _buildTabRowHtml(t, tabKey, isSubRow, isClosedTab, tabNameHtml, startDa
     <div class="dash-enddate-col" style="display:flex;align-items:center;justify-content:center;overflow:hidden;min-width:0;padding:0 2px">${endDateCell}</div>
     <div style="display:flex;align-items:center;justify-content:center;gap:3px;flex-wrap:nowrap;overflow:hidden;min-width:0;padding:0 2px">
       <button class="tc-info-btn tc-clickable" data-tc="${tcAttr}" title="일괄 정보 입력·수정" style="flex-shrink:0">+정보</button>
-      <button class="btn-tab-stats" onclick="event.stopPropagation();openStatsPanel('${escHtml(t.sheetId||'')}','${escHtml(t.tab||'')}','${escHtml(t.displayName||t.tab||'')}')" title="진행률 상세 보기" style="flex-shrink:0;padding:2px 5px"><i class="fas fa-chart-bar"></i></button>
     </div>`;
 }
 

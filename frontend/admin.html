@@ -1655,23 +1655,6 @@ body{ letter-spacing:-.01em; }
 
 
 <!-- ══════════════════════════════════
-     Phase 1-1: 진행률 통계 패널
-     ══════════════════════════════════ -->
-<div class="stats-panel-overlay" id="statsPanelOverlay" onclick="if(event.target===this)closeStatsPanel()">
-  <div class="stats-panel">
-    <div class="stats-panel-header">
-      <span class="stats-panel-title"><i class="fas fa-chart-bar" style="color:var(--p)"></i> <span id="statsPanelTabName">탭 진행률</span></span>
-      <button onclick="closeStatsPanel()" style="background:none;border:none;cursor:pointer;font-size:1.1rem;color:var(--t3);padding:2px 6px">✕</button>
-    </div>
-    <div class="stats-panel-body">
-      <div id="statsPanelContent">
-        <div style="text-align:center;padding:30px;color:var(--t3)"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ══════════════════════════════════
      Phase 1-2: 블랙리스트 관리 패널
      ══════════════════════════════════ -->
 <div class="bl-panel-overlay" id="blPanelOverlay" onclick="if(event.target===this)closeBlPanel()">
@@ -1955,8 +1938,8 @@ body{ letter-spacing:-.01em; }
 <script src="js/index-register.js"></script>
 
 <!-- ══════════════════════════════════════════════════════
-     Phase 1-1: 진행률 통계 패널 JS
-     Phase 1-2: 블랙리스트 관리 패널 JS
+     Phase 1-2: 블랙리스트 관리 패널 · 공지 배너 설정 JS
+     (Phase 1-1 진행률 통계 패널은 2026-10-04 제거 — 결정 186 84-정정)
      ══════════════════════════════════════════════════════ -->
 <script src="js/index-stats.js"></script>
 

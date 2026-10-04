@@ -1327,35 +1327,13 @@ body.col-resizing .col-drag-handle{pointer-events:auto!important}
 .btn-reg-admin:hover{background:var(--p);color:#fff;border-color:var(--p)}
 .btn-reg-admin i{font-size:.76rem}
 
-/* ══════════════════════════════════
-   Phase 1-1: 진행률 통계 패널
-   ══════════════════════════════════ */
-.stats-panel-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:1300;display:none;align-items:flex-end;justify-content:center}
-.stats-panel-overlay.open{display:flex}
-.stats-panel{background:#fff;border-radius:20px 20px 0 0;width:100%;max-width:560px;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 -4px 32px rgba(0,0,0,.18)}
-.stats-panel-header{padding:16px 18px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
-.stats-panel-title{font-size:1rem;font-weight:700;color:var(--t1);display:flex;align-items:center;gap:8px}
-.stats-panel-body{padding:16px 18px;overflow-y:auto;flex:1}
-.stats-summary-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px}
+/* 진행률 통계 패널(옛 대시보드 [진행률] 버튼)은 2026-10-04 제거 — 결정 186 정정. .stats-card* 는 다른 화면이 써서 남긴다. */
 .stats-card{background:var(--bg);border:1.5px solid var(--border);border-radius:12px;padding:12px 10px;text-align:center}
 .stats-card-val{font-size:1.5rem;font-weight:800;line-height:1}
 .stats-card-lbl{font-size:.68rem;color:var(--t3);margin-top:4px;font-weight:600}
 .stats-card.done .stats-card-val{color:var(--ok)}
 .stats-card.pending .stats-card-val{color:#F59E0B}
 .stats-card.total .stats-card-val{color:var(--p)}
-.stats-bar-wrap{background:#E5E7EB;border-radius:99px;height:8px;margin-bottom:14px;overflow:hidden}
-.stats-bar-fill{height:100%;border-radius:99px;background:var(--p);transition:width .5s ease}
-.stats-bar-fill.full{background:var(--ok)}
-.stats-section-title{font-size:.76rem;font-weight:700;color:var(--t2);margin-bottom:8px;display:flex;align-items:center;gap:5px}
-.stats-name-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
-.stats-name-chip{font-size:.73rem;padding:3px 9px;border-radius:20px;border:1.5px solid;font-weight:600}
-.stats-name-chip.pending-chip{background:#FEF3C7;color:#92400E;border-color:#FCD34D}
-.stats-name-chip.done-chip{background:var(--ok-l);color:#065F46;border-color:#6EE7B7}
-.stats-empty-msg{font-size:.8rem;color:var(--t3);padding:8px 0}
-.stats-tab-name{font-size:.82rem;font-weight:700;color:var(--t1);margin-bottom:12px;padding:8px 12px;background:#f2f7ff;border-radius:8px;border-left:3px solid var(--p)}
-/* 대시보드 행 통계 버튼 */
-.btn-tab-stats{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;background:#e8f1fe;color:#1b64da;border:1px solid #cce0fb;border-radius:8px;font-size:.65rem;font-weight:700;cursor:pointer;white-space:nowrap;transition:background .15s}
-.btn-tab-stats:hover{background:#cce0fb}
 
 /* ══════════════════════════════════
    Phase 1-2: 블랙리스트 관리 패널
