@@ -1622,6 +1622,28 @@ router.post('/settings/system-plan-cleanup', authMiddleware, adminOrMasterMiddle
       campaignIds: Array.isArray(b.campaignIds) ? b.campaignIds.map(String).slice(0, 500) : undefined }));
   } catch (err) { if (!_cdpNotReady(res, err)) next(err); }
 });
+// ★★ 어제 모집 부족 인원 처리 팝업(사용자 확정 2026-10-02, migration 173·174) — 공고 담당자 + 작업오더 보낸 AE.
+//   목록은 읽기 전용, 반영은 [📅 인원]과 같은 저장 경로(savePlans)를 탄다. 광고주·리뷰어 차단(internal).
+router.get('/shortage-prompts', authMiddleware, internalMiddleware, async (req, res) => {
+  try {
+    const out = await require('../services/campaignShortage.service').listShortages(req.admin);
+    res.json(out);
+  } catch (e) {
+    logger.warn('[shortage-prompts] 조회 실패(팝업 미표시): ' + e.message);
+    res.json({ ok: false, items: [], error: '부족 인원 조회에 실패했습니다.' });
+  }
+});
+router.post('/shortage-prompts/apply', authMiddleware, internalMiddleware, async (req, res) => {
+  try {
+    const out = await require('../services/campaignShortage.service').applyDecisions(req.admin, (req.body || {}).decisions, { date: (req.body || {}).date });
+    res.json(out);
+  } catch (e) {
+    const status = ['empty', 'too_many', 'day_changed'].includes(e.code) ? 400 : 500;
+    if (status === 500) logger.warn('[shortage-prompts/apply] 실패: ' + e.message);
+    res.status(status).json({ ok: false, code: e.code || null, error: status === 400 ? e.message : '반영에 실패했습니다: ' + e.message });
+  }
+});
+
 router.get('/campaigns/:id/daily-plan', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { getPlanOverview } = require('../services/campaignPlan.service');

@@ -3036,6 +3036,7 @@ function _dropSession(msg){ sessionStorage.removeItem('admin_token'); try{ local
   _pmLoadGeneration+=1;
   _pmLoadInFlight=null;
   if(typeof _wbOrderLiveStop==='function') _wbOrderLiveStop();
+  window.__SHORTAGE_PENDING=null; if(window.ShortagePrompt) window.ShortagePrompt.stop();
   // ★ 401 → 재로그인도 계정이 바뀔 수 있는 경로다. logout 과 같은 계정 귀속 상태를 비운다
   //   (안 비우면 다음 계정이 이전 계정의 열린 줄을 보고, 그것이 그 계정 서버 행에 저장된다).
   Object.assign(STATE,{ role:'',name:'',brandId:null,advName:'',advWork:null,advQ:'',advF:'all',brandNew:null,brandEdit:null,cur:null,tabs:[],
@@ -3138,6 +3139,10 @@ async function boot(){
     try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ } }
   renderShell();
   _wbOrderLiveStart();
+  // 어제 모집 부족 인원 팝업(2026-10-02) — 내부 직원만. 받는 사람(공고 담당자·작업오더 보낸 AE) 판정은 서버가 한다.
+  //   ★ 이 스크립트보다 모듈이 늦게 로드되면(새로고침·SSO) 시작 요청을 맡겨 두고 모듈이 로드되며 시작한다.
+  if(_isInternalRole()){ const _sp={ api, name: STATE.name };
+    if(window.ShortagePrompt) window.ShortagePrompt.start(_sp); else window.__SHORTAGE_PENDING=_sp; }
   // 공유 링크 실패는 조용히 홈으로 떨어지지 않는다 — 왜 못 열었는지(폐기·담당 밖) 말한다.
   if(_SHARE_ERR){ const msg=_SHARE_ERR; _SHARE_ERR=''; setTimeout(()=>alert(msg),50); }
 }
@@ -3248,6 +3253,7 @@ async function doLogin(){ const name=$('#lname').value.trim(), pw=$('#lpw').valu
   if(r&&r.success&&r.token){ sessionStorage.setItem('admin_token',r.token); boot(); } else $('#lerr').textContent=(r&&(r.error||r.message))||'로그인 실패'; }
 function logout(){
   if(typeof _wbOrderLiveStop==='function') _wbOrderLiveStop();
+  window.__SHORTAGE_PENDING=null; if(window.ShortagePrompt) window.ShortagePrompt.stop();
   _pmLoadGeneration+=1;
   _pmLoadInFlight=null;
   sessionStorage.removeItem('admin_token');
@@ -5435,6 +5441,18 @@ window.CAMPAIGN_DAILY_PLAN_SAVED=function(ev){
 /* 공고 저장/삭제 후 — 홈 목록이 떠 있으면 주석을 **강제로 새로 받아** 다시 그린다.
    ★ 서버 30초 캐시 때문에 그냥 새로고침하면 방금 발행한 공고가 한동안 안 잡혀
      [공고발행]이 그대로 남는다(사용자에겐 "저장이 안 된 것"으로 보인다). */
+/* 어제 부족 인원 팝업에서 [반영]한 뒤 — 지금 보고 있는 화면을 새 정원으로 다시 그린다
+   (모집공고 목록 · 홈 목록 · 열려 있는 작업보드 표). 반영은 이미 끝났으므로 실패해도 무시한다. */
+window.SHORTAGE_ON_APPLIED=function(applied){
+  const list=Array.isArray(applied)?applied:[];
+  try{ if(typeof loadRecruitList==='function') loadRecruitList(); }catch(_){ }
+  try{ window.CAMP_ON_SAVED && window.CAMP_ON_SAVED(); }catch(_){ }
+  // ★ 작업표는 **지금 열어 둔 그 작업**의 오늘 인원이 실제로 바뀐 경우에만 다시 읽는다
+  //   (다시 읽으면 필터·정렬·검색이 초기화된다 — 상관없는 공고 때문에 보던 표를 흔들지 않는다, 코덱스 리뷰).
+  try{ const c=STATE.cur;
+    if(STATE.view==='workdesk' && c && list.some(x=>x.choice==='today' && x.linkedSheetId===c.sheetId && x.linkedTabName===c.tabName)){
+      const i=STATE.tabs.indexOf(c); if(i>=0) selTab(i,{nav:true}); } }catch(_){ }
+};
 window.CAMP_ON_SAVED=function(){
   /* ★ 작업보드가 열려 있으면 **작업 조건도 다시 읽는다** — 공고 수정 모달에서 고친 값이
      그 자리에서 반영되지 않으면 "저장했는데 미설정 그대로"로 보인다(저장은 됐는데). */
@@ -18811,6 +18829,7 @@ window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';
 <script src="js/campaign-reviewer-gate.js"></script>
 <!-- 날짜별 모집인원 조절 + 차수(095) — 카드 [📅 인원] 버튼이 여는 공유 모달(admin.html 과 한 벌) -->
 <script src="js/campaign-daily-plan.js?v=20260927-norebuild"></script>
+<script src="js/shortage-prompt.js?v=20261002"></script>
 <!-- 참여 후 작업내용 4카드 공용 렌더러 — 발행 모달 오른쪽 "리뷰어가 보는 실제 화면" 미리보기가
      이것으로 그려진다. 없으면 `_renderPreview` 가 조용히 그 카드를 건너뛰어(window.CampWorkDetail 체크)
      리뷰웹시스템[3버전]에서만 미리보기가 비어 보인다(실측). -->
