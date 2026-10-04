@@ -620,7 +620,7 @@ router.post('/advertiser-link-login', advertiserLinkLimiter, async (req, res, ne
   catch (err) { next(err); }
 });
 
-// ── 광고주(거래처) 로그인 계정 관리 — master/admin. /api/admin/advertiser-users 와 동일 로직을
+// ── 광고주(거래처) 로그인 계정 관리 — master/admin. (옛 /api/admin/advertiser-users 는 2026-10-04 제거 — 결정 186 95번) 로직을
 //   Track B 표면(/api/trackb/*)으로도 노출: 인트라넷 SSO 관리자 토큰(via:intranet)은 /api/admin/* 격리라
 //   소유지정 UI에서 계정을 발급하려면 이 경로가 필요하다. 실제 CRUD는 auth.service 재사용(로직 단일). ──
 router.post('/advertiser-account', authMiddleware, internalMiddleware, async (req, res, next) => {

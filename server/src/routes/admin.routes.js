@@ -5,7 +5,6 @@ const {
   loginAdmin, loginStaff, loginAdvertiser, loginIntranet,
   addAdminUser, editAdminUser, deleteAdminUser, listAdminUsers,
   addStaffUser, editStaffUser, deleteStaffUser, listStaffUsers,
-  addAdvertiserUser, editAdvertiserUser, deleteAdvertiserUser, listAdvertiserUsers,
   changePw, changeMasterPw,
 } = require('../services/auth.service');
 const adminNickname = require('../services/adminNickname.service');
@@ -90,33 +89,7 @@ router.post('/advertiser-login', async (req, res, next) => {
   }
 });
 
-// ═══════════════════════════════════════════════════════════
-// POST /api/admin/advertiser-users — 광고주 계정 CRUD (master/admin 전용)
-// body: { action: 'add'|'edit'|'delete'|'list', name, pw, newPw, active, advertiserId }
-// ═══════════════════════════════════════════════════════════
-router.post('/advertiser-users', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { action, name, pw, newPw, active, advertiserId } = req.body;
-
-    switch (action) {
-      case 'add':
-        if (!name || !pw) return res.json({ error: '이름과 비밀번호를 입력하세요.' });
-        return res.json(await addAdvertiserUser(name, pw, advertiserId));
-      case 'edit':
-        if (!name) return res.json({ error: '이름이 필요합니다.' });
-        return res.json(await editAdvertiserUser(name, newPw || pw, active));
-      case 'delete':
-        if (!name) return res.json({ error: '삭제할 이름이 필요합니다.' });
-        return res.json(await deleteAdvertiserUser(name));
-      case 'list':
-        return res.json({ success: true, users: await listAdvertiserUsers() });
-      default:
-        return res.json({ error: '알 수 없는 action: ' + action });
-    }
-  } catch (err) {
-    res.json({ error: err.message });
-  }
-});
+// POST /api/admin/advertiser-users(광고주 계정 CRUD 옛 입구 — 3버전은 /api/trackb/advertiser-account, 로직은 auth.service 공용) 은 2026-10-04 제거 — 결정 186 95번(화면 호출 0 · 9/2 이후 호출 0).
 
 // ═══════════════════════════════════════════════════════════
 // POST /api/admin/change-pw — 비밀번호 변경 (GAS: adminChangePw)

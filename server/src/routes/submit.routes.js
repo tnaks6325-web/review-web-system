@@ -1,7 +1,7 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const router = express.Router();
-const { writeSheet, readSheet, appendSheet, getSpreadsheetMeta } = require('../services/sheets.service');
+const { writeSheet, readSheet, appendSheet } = require('../services/sheets.service');
 const { throttledCall } = require('../utils/sheetsThrottle');
 const { enqueue } = require('../services/syncQueue.service');
 const { logAbnormal } = require('../services/errorLog.service');
@@ -182,69 +182,9 @@ async function getCachedTabData(sheetId, tabName, opts = {}) {
   return result;
 }
 
-// ═══════════════════════════════════════════════════════════
-// 진단: 시트 탭 이름 목록 조회 (디버그용)
-// ═══════════════════════════════════════════════════════════
-router.post('/debug-tabs', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId } = req.body;
-    if (!sheetId) return res.json({ ok: false, error: 'sheetId 필요' });
-    const meta = await getSpreadsheetMeta(sheetId);
-    const tabs = (meta || []).map(s => ({
-      title: s.properties?.title,
-      gid: s.properties?.sheetId,
-      hidden: s.properties?.hidden || false,
-    }));
-    return res.json({ ok: true, tabs });
-  } catch (err) {
-    return res.json({ ok: false, error: err.message });
-  }
-});
+// POST /api/submit/debug-tabs · GET /diag-tabs · GET /slot-status(시트 시절 진단 3종) 은 2026-10-04 제거 — 결정 186 93번(화면 호출 0 · 9/2 이후 호출 0).
 
-// ═══════════════════════════════════════════════════════════
-// GET /api/submit/diag-tabs — tab_configs 데이터 진단 (캠페인/탭명 확인용)
-// ═══════════════════════════════════════════════════════════
-router.get('/diag-tabs', authMiddleware, async (req, res) => {
-  try {
-    const { sheetId } = req.query;
-    if (!sheetId) return res.json({ ok: false, error: 'sheetId 필요' });
-    const { rows } = await pool.query(
-      `SELECT sheet_id, tab_name, campaign_name, tab_gid, sheet_url, display_name
-       FROM tab_configs WHERE sheet_id = $1
-       ORDER BY tab_name LIMIT 30`,
-      [sheetId]
-    );
-    res.json({ ok: true, total: rows.length, tabs: rows });
-  } catch (err) {
-    res.json({ ok: false, error: err.message });
-  }
-});
 
-// ═══════════════════════════════════════════════════════════
-// GET /api/submit/slot-status — slot_locks 테이블 상태 확인 (진단용)
-// ═══════════════════════════════════════════════════════════
-router.get('/slot-status', authMiddleware, async (req, res) => {
-  try {
-    const { rows: tableCheck } = await pool.query(`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables
-        WHERE table_name = 'slot_locks'
-      ) AS "exists"
-    `);
-    const tableExists = tableCheck[0]?.exists || false;
-    if (!tableExists) {
-      return res.json({ ok: true, tableExists: false });
-    }
-    const { rows: stats } = await pool.query(`
-      SELECT COUNT(*) AS total,
-             COUNT(*) FILTER (WHERE is_submitted = TRUE) AS submitted
-      FROM slot_locks
-    `);
-    res.json({ ok: true, tableExists: true, stats: stats[0] });
-  } catch (err) {
-    res.json({ ok: false, error: err.message });
-  }
-});
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/submit/get-inaed-list — 시트에서 인애드명단+옵션 목록 조회

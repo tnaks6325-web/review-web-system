@@ -659,29 +659,7 @@ router.get('/end-date', async (req, res, next) => {
   }
 });
 
-// GET /api/tab/stats — 탭별 상세 통계 (GAS: getCampaignStats)
-router.get('/stats', authMiddleware, async (req, res, next) => {
-  try {
-    const { rows } = await pool.query(`
-      SELECT
-        im.sheet_id AS "sheetId",
-        im.tab_name AS "tabName",
-        im.campaign_name AS "campaignName",
-        im.row_count AS "totalCount",
-        im.submitted_count AS "submittedCount",
-        im.status,
-        tc.manager,
-        tc.review_type AS "reviewType",
-        tc.is_closed AS "isClosed"
-      FROM index_master im
-      LEFT JOIN tab_configs tc ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
-      ORDER BY im.built_at DESC NULLS LAST
-    `);
-    res.json({ ok: true, stats: rows });
-  } catch (err) {
-    next(err);
-  }
-});
+// GET /api/tab/stats(작업별 상세 통계 — GAS getCampaignStats 시절) 은 2026-10-04 제거 — 결정 186 94번(화면 호출 0 · 9/2 이후 호출 0).
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/tab/dashboard — 탭설정 현황 전체 조회
