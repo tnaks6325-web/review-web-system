@@ -822,20 +822,7 @@ router.get('/round-check', authMiddleware, async (req, res, next) => {
   }
 });
 
-router.get('/inaed-list', authMiddleware, async (req, res, next) => {
-  try {
-    const { rows } = await pool.query(`
-      SELECT name, phone, phone8, status, income_type AS "incomeType",
-             sub_accounts AS "subAccounts"
-      FROM reviewers
-      WHERE status = 'active'
-      ORDER BY name
-    `);
-    res.json({ ok: true, list: rows, total: rows.length });
-  } catch (err) {
-    next(err);
-  }
-});
+// (GET /api/diag/inaed-list(·viewer·image·blacklist) — 리뷰어 이름·전화 명단) 은 2026-10-04 제거 — 화면 호출 0 · 9/2 이후 호출 0 · 개인정보가 새는 입구(결정 186 92번).
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/image/drive-diag — Drive OAuth/SA 진단

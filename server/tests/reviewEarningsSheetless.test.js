@@ -7,7 +7,7 @@ const source = fs.readFileSync(
   'utf8'
 );
 const start = source.indexOf("router.get('/review-earnings'");
-const end = source.indexOf("router.get('/my-payments'", start);
+const end = source.indexOf("router.post('/cs/upload'", start);
 const body = source.slice(start, end);
 
 assert.ok(start >= 0, 'review earnings route is missing');

@@ -164,8 +164,9 @@ ok('★★ order_submissions 를 읽는 SQL 어디에도 created_at 이 없다(�
     });
   })());
 
-ok('신청 이력 API 도 참여 시점 금액 우선',
-  /COALESCE\(ca\.review_fee_snapshot, rc\.review_fee\) AS "reviewFee"/.test(rev));
+// 신청 이력 API(my-applications)는 2026-10-04 제거(결정 186 92번) — 참여 시점 금액 검사 대상이 없어졌다.
+ok('신청 이력 API 는 제거된 상태(되살리면 참여 시점 금액 우선을 다시 검사할 것)',
+  !/router\.get\('\/my-applications'/.test(rev));
 
 /* ══ ③ 스냅샷 기록·전파 ══ */
 ok('참여(홀드) INSERT 에 review_fee_snapshot 을 함께 기록한다',
