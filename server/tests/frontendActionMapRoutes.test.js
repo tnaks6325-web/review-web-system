@@ -56,10 +56,11 @@ ok('변이: 있는 입구는 있음으로 판정', exists('GET', '/api/admin/key
 
 /* ═══ 93~95번 · [진행률] 버튼 제거 고정 ═══ */
 for (const [method, p] of [['POST', '/api/submit/debug-tabs'], ['GET', '/api/submit/diag-tabs'], ['GET', '/api/submit/slot-status'],
-  ['GET', '/api/tab/stats'], ['POST', '/api/admin/advertiser-users']]) {
+  ['GET', '/api/tab/stats'], ['POST', '/api/admin/advertiser-users'], ['PATCH', '/api/short/update-round']]) {
   ok(`${method} ${p} 제거 상태`, !exists(method, p));
 }
 ok('광고주 계정 관리는 3버전 입구가 남아 있다', exists('POST', '/api/trackb/advertiser-account'));
+ok('97·98번 잔류 입구는 남아 있다', exists('GET', '/api/campaign/admin/popular-credit-audit') && exists('POST', '/api/trackb/workdesk/auto-finish'));
 const admin = read('frontend/admin.html');
 ok('옛 대시보드: 진행률 패널·스크립트 없음', !/statsPanelOverlay/.test(admin) && !/index-stats\.js/.test(admin));
 ok('옛 대시보드: [진행률] 버튼 없음', !/openStatsPanel|btn-tab-stats/.test(read('frontend/js/index-app.js')));
