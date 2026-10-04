@@ -1,0 +1,4 @@
+# graphify(저장소 지도)에서 제외할 경로 — .gitignore 와 합쳐서 적용된다
+.agents/
+.claude/
+graphify-out/
