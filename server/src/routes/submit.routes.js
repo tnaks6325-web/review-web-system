@@ -940,53 +940,7 @@ router.post('/review', async (req, res, next) => {
   }
 });
 
-// ═══════════════════════════════════════════════════════════
-// GET /api/submit/debug-headers — 시트 헤더 확인 (디버그용)
-// ═══════════════════════════════════════════════════════════
-router.get('/debug-headers', async (req, res) => {
-  try {
-    const { sheetId, tabName, gid, rowIndex } = req.query;
-    if (!sheetId || !tabName) return res.json({ error: 'sheetId, tabName 필요' });
-    const sheetOpts = gid ? { gid } : {};
-    const headers = await getCachedHeaders(sheetId, tabName, sheetOpts);
-    if (!headers) return res.json({ ok: false, error: '헤더를 가져올 수 없음' });
-
-    // 비고/포스팅 컬럼 검색
-    let bigoIdx = headers.findIndex(h => /비고/.test((h || '').trim()));
-    let postingIdx = headers.findIndex(h => /포스팅/.test((h || '').trim()));
-
-    const result = {
-      ok: true,
-      headerCount: headers.length,
-      headers,
-      bigoCol: bigoIdx >= 0 ? { idx: bigoIdx, name: headers[bigoIdx], letter: getColLetter(bigoIdx) } : null,
-      postingCol: postingIdx >= 0 ? { idx: postingIdx, name: headers[postingIdx], letter: getColLetter(postingIdx) } : null,
-    };
-
-    // rowIndex가 지정되면 해당 행의 특정 셀 값도 읽기
-    if (rowIndex) {
-      const row = parseInt(rowIndex);
-      const range = `'${tabName}'!A${row}:ZZ${row}`;
-      const rowData = await readSheet(sheetId, range, sheetOpts);
-      if (rowData && rowData[0]) {
-        const cells = rowData[0];
-        result.rowData = {};
-        headers.forEach((h, i) => {
-          if (h && cells[i] !== undefined && cells[i] !== '') {
-            result.rowData[h] = String(cells[i]);
-          }
-        });
-        // 특히 비고 컬럼 값 별도 표시
-        if (bigoIdx >= 0) result.bigoValue = cells[bigoIdx] !== undefined ? String(cells[bigoIdx]) : '(empty)';
-        if (postingIdx >= 0) result.postingValue = cells[postingIdx] !== undefined ? String(cells[postingIdx]) : '(empty)';
-      }
-    }
-
-    res.json(result);
-  } catch (err) {
-    res.json({ ok: false, error: err.message });
-  }
-});
+// (GET /api/submit/debug-headers — 인증 없이 시트 한 줄을 읽던 진단) 은 2026-10-04 제거 — 화면 호출 0 · 9/2 이후 호출 0 · 개인정보가 새는 입구(결정 186 92번).
 
 // ═══════════════════════════════════════════════════════════
 // POST /api/submit/order — 구매양식 제출

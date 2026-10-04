@@ -69,14 +69,14 @@ const checks = [
       && /historicalPhoneOwners[\s\S]*historicalOwners/.test(payment)],
   ['과거 신청 owner_phone8도 번호 변경 이력이 있으면 현재 번호 보유자에게 노출하지 않는다',
     occurrences(search, 'rpc.old_phone8 = ca.owner_phone8') === 2
-      && occurrences(reviewerRoutes, 'rpc.old_phone8 = ca.owner_phone8') === 10
+      && occurrences(reviewerRoutes, 'rpc.old_phone8 = ca.owner_phone8') === 9 // 2026-10-04 my-applications 제거로 10→9(결정 186 92번)
       && /rpc\.old_phone8 = ca\.owner_phone8 AND rpc\.reviewer_id <> \$1/.test(search)
       && /rpc\.old_phone8 = ca\.owner_phone8 AND rpc\.reviewer_id <> \$3/.test(search)
       && /rpc\.old_phone8 = ca\.owner_phone8[\s\S]{0,100}\$2::uuid IS NULL OR rpc\.reviewer_id <> \$2/.test(reviewerRoutes)
       && /rpc\.old_phone8 = ca\.owner_phone8[\s\S]{0,100}\$3::uuid IS NULL OR rpc\.reviewer_id <> \$3/.test(reviewerRoutes)],
   ['과거 identity alias가 다른 소유자를 가리키는 owner_phone8도 홈·상태·예상금액에서 차단한다',
     occurrences(search, 'ria.phone8 = ca.owner_phone8') === 2
-      && occurrences(reviewerRoutes, 'ria.phone8 = ca.owner_phone8') === 10
+      && occurrences(reviewerRoutes, 'ria.phone8 = ca.owner_phone8') === 9 // 2026-10-04 my-applications 제거로 10→9
       && /ria\.phone8 = ca\.owner_phone8[\s\S]{0,100}rii\.owner_reviewer_id <> \$1/.test(search)
       && /ria\.phone8 = ca\.owner_phone8[\s\S]{0,120}\$2::uuid IS NULL OR rii\.owner_reviewer_id <> \$2/.test(reviewerRoutes)
       && /ria\.phone8 = ca\.owner_phone8[\s\S]{0,120}\$3::uuid IS NULL OR rii\.owner_reviewer_id <> \$3/.test(reviewerRoutes)],

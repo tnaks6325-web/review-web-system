@@ -58,7 +58,8 @@ assert.match(block, /mode: 'hard_deleted'/, '삭제 결과가 실제 삭제임�
 // 내 참여현황의 두 원천(review_index + order_submissions) 모두 삭제된 작업표 행을 제외한다.
 assert.match(reviewerSrc, /FROM review_index ri[\s\S]*?NOT EXISTS \([\s\S]*?workdesk_participant_deletions wd[\s\S]*?wd\.seq=ri\.row_index/, '시트형 참여내역이 삭제 행을 다시 노출하지 않는다');
 assert.match(reviewerSrc, /FROM order_submissions os[\s\S]*?os\.deleted_at IS NULL[\s\S]*?workdesk_participant_deletions wd[\s\S]*?wd\.order_submission_id=os\.id/, 'DB 주문형 참여내역도 삭제 행을 다시 노출하지 않는다');
-assert.match(reviewerSrc, /ca\.status <> 'cancelled'/, '참여 신청 이력에서도 취소된 행을 제외한다');
+// 참여 신청 이력 API(my-applications)는 2026-10-04 제거(결정 186 92번) — 취소 행 제외 검사 대상이 없어졌다. 되살아나지 않게만 막는다.
+assert.doesNotMatch(reviewerSrc, /router\.get\('\/my-applications'/, '무인증 참여 신청 이력 입구는 제거된 상태');
 assert.match(workdeskSrc, /총 모집인원은 유지되며 빈 줄 1개가 보충됩니다/, '관리자 확인문구가 총량 보충을 안내한다');
 
 const importSrc = fs.readFileSync(path.join(root, 'src/services/participants.service.js'), 'utf8');

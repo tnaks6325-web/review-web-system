@@ -6,7 +6,7 @@ const {earningsCandidates}=require('../src/services/reviewEarningsCandidates.ser
 const source=fs.readFileSync(require.resolve('../src/routes/reviewer.routes'),'utf8');
 const identitySource=source.slice(source.indexOf('function _participantIdentityByOwnerSql'),source.indexOf('function sendReviewerIdentityError'));
 const identity=Function(identitySource+';return _participantIdentityByOwnerSql;')();
-const route=source.slice(source.indexOf("router.get('/review-earnings'"),source.indexOf("router.get('/my-payments'"));
+const route=source.slice(source.indexOf("router.get('/review-earnings'"),source.indexOf("router.post('/cs/upload'"));
 const templates=[...route.matchAll(/boundedReviewRead\(client => client\.query\(\s*`([\s\S]*?)`,/g)].map(m=>m[1]);
 assert.equal(templates.length,3);
 const routeRequire=require('module').createRequire(require.resolve('../src/routes/reviewer.routes'));
