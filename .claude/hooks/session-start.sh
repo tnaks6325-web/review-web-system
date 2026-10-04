@@ -22,6 +22,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -uo pipefail
 
+# 저장소 지도(graphify) 맞춤 — 로컬 컴퓨터 전용, 뒤에서 돌고 즉시 돌아온다
+sh "$(git rev-parse --show-toplevel 2>/dev/null)/scripts/graphify/session-start.sh" 2>/dev/null || true
+
 PW_DIR="${PLAYWRIGHT_BROWSERS_PATH:-/opt/pw-browsers}"
 
 # 관리형 환경이 아니면 조용히 종료(로컬 머신 오염 방지)
