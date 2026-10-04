@@ -33,9 +33,11 @@ for (const m of app.matchAll(/app\.use\(\s*'([^']+)'\s*,\s*(?:[\w.]+\s*,\s*)*(\w
 ok(`서버 라우트 표 구성(${routes.length}개)`, routes.length > 500);
 
 const toRe = (p) => new RegExp('^' + p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/:\w+/g, '[^/]+') + '$');
-function exists(method, p, dynamic = false) {
+const norm = (t) => t.replace(/:\w+/g, ':x');
+// dynamicSuffix = 매핑 주석에 적힌 정확한 동적 꼬리(예: '/:id/status'). 있으면 그 **완전한 템플릿**이 서버에 있어야 한다(Codex P2 — 접두 일치 금지).
+function exists(method, p, dynamicSuffix = '') {
   return routes.some(([rm, rp]) => (rm === method || rm === 'ALL')
-    && (toRe(rp).test(p) || (dynamic && rp.startsWith(p + '/:')))); // 접두 허용은 "/:id 동적" 주석이 있는 매핑만(Codex P2)
+    && (dynamicSuffix ? norm(rp) === norm(p + dynamicSuffix) : toRe(rp).test(p)));
 }
 
 /* ═══ api.js 매핑 전수 ═══ */
@@ -47,8 +49,9 @@ for (const m of api.matchAll(/'(\w+)'\s*:\s*\{\s*method:\s*'(\w+)'\s*,\s*path:\s
   count++;
   mapNames.add(m[1]);
   const p = m[3].split('?')[0];
-  const dynamic = /\/:\w+|동적|조합/.test(m[0].slice(m[0].indexOf('}')));
-  if (!exists(m[2], p, dynamic)) missing.push(`${m[1]} → ${m[2]} ${m[3]}`);
+  const tail = m[0].slice(m[0].indexOf('}'));
+  const dyn = (tail.match(/\/\/[^\n]*?(\/:[\w/:]+)/) || [])[1] || '';
+  if (!exists(m[2], p, dyn)) missing.push(`${m[1]} → ${m[2]} ${m[3]}${dyn}`);
 }
 ok(`api.js 액션 매핑 ${count}개가 모두 실제 서버 입구를 가리킨다` + (missing.length ? '\n      → ' + missing.join('\n      → ') : ''),
   count > 50 && missing.length === 0);
@@ -74,8 +77,9 @@ ok('화면이 부르는 액션 이름은 모두 매핑에 있다' + (unmapped.le
 
 /* 변이: 없는 입구는 잡는다 */
 ok('변이: 지운 입구는 없음으로 판정', !exists('GET', '/api/diag/campaign-stats') && !exists('GET', '/api/tab/stats'));
-ok('변이: 있는 입구는 있음으로 판정', exists('GET', '/api/admin/keywords') && exists('PUT', '/api/admin/keywords', true));
-ok('변이: 동적 표시 없는 매핑은 접두 일치로 통과시키지 않는다', !exists('PUT', '/api/admin/keywords', false));
+ok('변이: 있는 입구는 있음으로 판정', exists('GET', '/api/admin/keywords') && exists('PUT', '/api/admin/keywords', '/:id'));
+ok('변이: 동적 표시 없는 매핑은 접두 일치로 통과시키지 않는다', !exists('PUT', '/api/admin/keywords'));
+ok('변이: 동적 꼬리는 완전한 템플릿만 인정', exists('PUT', '/api/campaign/admin', '/:id/status') && !exists('PUT', '/api/campaign/admin', '/:id/nope'));
 
 /* ═══ 93~95번 · [진행률] 버튼 제거 고정 ═══ */
 for (const [method, p] of [['POST', '/api/submit/debug-tabs'], ['GET', '/api/submit/diag-tabs'], ['GET', '/api/submit/slot-status'],
@@ -102,9 +106,13 @@ const defined = new Set();
 const addDefs = (src) => { for (const m of src.matchAll(/(?:function\s+|(?:window\.|^|[\s;])(?:const|let|var)?\s*)([A-Za-z_$][\w$]*)\s*(?:\(|=\s*(?:async\s*)?(?:function|\())/gm)) defined.add(m[1]); };
 for (const s of scripts) { const fp = path.join(root, 'frontend', s); if (fs.existsSync(fp)) addDefs(fs.readFileSync(fp, 'utf8')); }
 for (const m of admin.matchAll(/<script>([\s\S]*?)<\/script>/g)) addDefs(m[1]);
+// 인라인 핸들러 값 안의 **모든** 함수 호출(맨 앞·세미콜론 뒤·조건 뒤·window.fn 포함, 멤버 호출 a.b() 는 제외) — Codex P2
 const called = new Set();
-for (const m of admin.matchAll(/\son(?:click|change|input|submit|keydown|keyup)="\s*(?:event\.\w+\(\);\s*)?(?:if\([^)]*\))?\s*([A-Za-z_$][\w$]*)\(/g)) called.add(m[1]);
-const BUILTIN = new Set(['if', 'return', 'event', 'this', 'document', 'window', 'alert', 'confirm', 'location', 'history', 'setTimeout']);
+for (const a of admin.matchAll(/\son[a-z]+="([^"]*)"/g)) {
+  for (const m of a[1].matchAll(/(^|[^\w$.])(?:window\.)?([A-Za-z_$][\w$]*)\s*\(/g)) called.add(m[2]);
+}
+const BUILTIN = new Set(['if', 'return', 'event', 'this', 'document', 'window', 'alert', 'confirm', 'location', 'history', 'setTimeout',
+  'function', 'String', 'Number', 'parseInt', 'encodeURIComponent', 'decodeURIComponent', 'JSON', 'Math', 'open', 'print', 'fetch', 'while', 'for', 'switch']);
 const undef = [...called].filter(fn => !BUILTIN.has(fn) && !defined.has(fn));
 ok(`옛 대시보드 인라인 버튼이 부르는 함수 ${called.size}개가 모두 정의돼 있다` + (undef.length ? ' → 없음: ' + undef.join(', ') : ''), undef.length === 0);
 

@@ -76,7 +76,6 @@ v2.16에서 구매양식 제출 시 자동 슬롯 매칭 시스템(인애드명 
 |---|---|---|
 | `/api/submit/find-slot` | POST | 슬롯 매칭 실행 (3순위 규칙 적용) |
 | `/api/submit/order` | POST | 구매양식 제출 (슬롯 매칭 결과 반영) |
-| `/api/submit/slot-status` | GET | slot_locks 테이블 상태 진단 |
 | `/api/diag/slot-locks` | GET | 슬롯 잠금 상세 진단 (인증 필요) |
 
 **슬롯 매칭 3순위 규칙:**
