@@ -17,7 +17,7 @@ const {
 } = require('../services/productOptions.service');
 const jwt = require('jsonwebtoken');
 const pool = require('../db/pool');
-const { authMiddleware, adminOrMasterMiddleware, isLoginSessionToken } = require('../middleware/auth.middleware');
+const { authMiddleware, adminOrMasterMiddleware, isTrustedLoginToken } = require('../middleware/auth.middleware');
 const drive = require('../services/drive.service');
 const { getSpreadsheetMeta } = require('../services/sheets.service');
 const { buildOneSheet } = require('../services/indexBuilder.service');
@@ -1378,7 +1378,7 @@ function _guideImageAuthed(req) {
   if (process.env.ORDER_INTAKE_KEY && intakeKey === process.env.ORDER_INTAKE_KEY) return true;
   try {
     const tok = (req.headers.authorization || '').split(' ')[1];
-    if (tok) return isLoginSessionToken(jwt.verify(tok, process.env.JWT_SECRET)); // 결정 201 — 로그인 토큰만
+    if (tok) return isTrustedLoginToken(jwt.verify(tok, process.env.JWT_SECRET)); // 결정 201 — 로그인 토큰만(공고수정 토큰 제외)
   } catch (_) { /* fallthrough */ }
   return false;
 }

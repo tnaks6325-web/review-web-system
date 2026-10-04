@@ -12,6 +12,12 @@ function isLoginSessionToken(decoded) {
   if (decoded.aud != null || decoded.scope != null || decoded.purpose != null) return false;
   return LOGIN_ROLES.has(decoded.role);
 }
+// authMiddleware 밖에서 토큰을 직접 보는 곳(속도 제한 면제·사람별 통·안내 이미지 업로드)용.
+//   리뷰어 공고수정 토큰(via reviewer_campaign)은 role 이 admin 이지만 **무비밀번호 약한 신원**이고
+//   경로 제한은 authMiddleware 안에서만 걸린다 → 여기서는 로그인으로 치지 않는다(Codex P1 · 결정 201).
+function isTrustedLoginToken(decoded) {
+  return isLoginSessionToken(decoded) && decoded.via !== 'reviewer_campaign';
+}
 
 /**
  * JWT 토큰 검증 미들웨어
@@ -94,4 +100,4 @@ function internalOnlyMiddleware(req, res, next) {
   next();
 }
 
-module.exports = { authMiddleware, masterOnlyMiddleware, adminOrMasterMiddleware, internalOnlyMiddleware, isLoginSessionToken };
+module.exports = { authMiddleware, masterOnlyMiddleware, adminOrMasterMiddleware, internalOnlyMiddleware, isLoginSessionToken, isTrustedLoginToken };

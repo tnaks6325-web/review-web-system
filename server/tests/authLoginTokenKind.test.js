@@ -17,7 +17,7 @@ const jwt = require('jsonwebtoken');
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-auth-login-token-kind';
 const SECRET = process.env.JWT_SECRET;
-const { authMiddleware, isLoginSessionToken } = require('../src/middleware/auth.middleware');
+const { authMiddleware, isLoginSessionToken, isTrustedLoginToken } = require('../src/middleware/auth.middleware');
 
 let n = 0;
 const ok = (name, cond) => { assert(cond, name); n++; console.log('  ✓ ' + name); };
@@ -70,16 +70,31 @@ ok('isLoginSessionToken: null·문자열 거부', !isLoginSessionToken(null) && 
 /* ═══ 속도 제한 면제·안내이미지 업로드도 같은 판정을 태운다(사본 금지) ═══ */
 const rl = fs.readFileSync(path.join(__dirname, '../src/middleware/rateLimit.middleware.js'), 'utf8');
 ok('속도 제한 면제: 서명만 보고 true 를 돌려주는 곳 0', !/jwt\.verify\([^;]*\);\s*return true/.test(rl) && !/jwt\.verify\(token, process\.env\.JWT_SECRET\);\s*\n\s*return true/.test(rl));
-ok('속도 제한 면제 2곳 모두 isLoginSessionToken', (rl.match(/return isLoginSessionToken\(jwt\.verify\(token/g) || []).length === 2);
+ok('속도 제한 면제 2곳 모두 isTrustedLoginToken', (rl.match(/return isTrustedLoginToken\(jwt\.verify\(token/g) || []).length === 2);
+ok('전역 제한의 직원 통도 isTrustedLoginToken', /if \(bearerPayload && isTrustedLoginToken\(bearerPayload\)\)/.test(rl));
 const order = fs.readFileSync(path.join(__dirname, '../src/routes/order.routes.js'), 'utf8');
 const guide = order.slice(order.indexOf('function _guideImageAuthed'), order.indexOf('function _publicApiBase'));
-ok('안내이미지 업로드 인증도 isLoginSessionToken', /return isLoginSessionToken\(jwt\.verify\(tok/.test(guide) && !/return true; \}/.test(guide.replace(/intakeKey === process\.env\.ORDER_INTAKE_KEY\) return true;/, '')));
+ok('안내이미지 업로드 인증도 isTrustedLoginToken', /return isTrustedLoginToken\(jwt\.verify\(tok/.test(guide) && !/return true; \}/.test(guide.replace(/intakeKey === process\.env\.ORDER_INTAKE_KEY\) return true;/, '')));
+
+/* ═══ authMiddleware 밖 직접 판정: 공고수정 토큰(무비밀번호)은 로그인으로 치지 않는다(Codex P1) ═══ */
+const campTok = jwt.verify(jwt.sign({ name: 'u', role: 'admin', via: 'reviewer_campaign', phone8: '1' }, SECRET), SECRET);
+ok('공고수정 토큰: authMiddleware 판정은 통과(경로 제한은 미들웨어가) · 직접 판정은 거부',
+  isLoginSessionToken(campTok) && !isTrustedLoginToken(campTok));
+ok('직원·광고주·인트라넷 로그인은 직접 판정 통과',
+  ['master', 'admin', 'staff', 'advertiser'].every(role => isTrustedLoginToken(jwt.verify(jwt.sign({ name: 'u', role }, SECRET), SECRET)))
+  && isTrustedLoginToken(jwt.verify(jwt.sign({ name: 'u', role: 'admin', via: 'intranet' }, SECRET), SECRET)));
+ok('추출 증명은 직접 판정 거부', !isTrustedLoginToken(jwt.verify(extract, SECRET, { audience: 'reviewer-order-identity', issuer: 'review-web-system' })));
 
 /* ═══ 실제 속도 제한 skip 동작 ═══ */
 {
   const mod = require('../src/middleware/rateLimit.middleware');
   const limiters = Object.values(mod).filter(v => typeof v === 'function');
   ok('속도 제한 모듈 로드(순환 require 없음)', limiters.length > 0);
+  const idOf = (tok) => mod.rateIdentity({ headers: { authorization: 'Bearer ' + tok, 'x-real-ip': '1.2.3.4' }, query: {}, body: {}, ip: '1.2.3.4' });
+  ok('전역 제한: 관리자 로그인은 직원 통(검증됨)', idOf(jwt.sign({ name: 'u', role: 'admin' }, SECRET)).kind === 'staff');
+  ok('전역 제한: 추출 증명은 직원 통이 아니고 주소 상한도 받는다', idOf(extract).kind !== 'staff' && idOf(extract).verified === false);
+  ok('전역 제한: 리뷰어 홈 교환권·공고수정 토큰도 직원 통 아님',
+    idOf(ticket).kind !== 'staff' && idOf(jwt.sign({ name: 'u', role: 'admin', via: 'reviewer_campaign', phone8: '1' }, SECRET)).kind !== 'staff');
 }
 
 console.log(`\n✅ authLoginTokenKind: ${n}개 통과`);
