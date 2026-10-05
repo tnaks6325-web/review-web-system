@@ -1049,7 +1049,9 @@ function renderAcctList(){
     ? '선택한 명의로 자리가 잡혀요. 타계정 건은 제한시간이 더 짧아요(기본 10분).'
     : onlyNoCredit
       ? '참여권이 남은 명의가 없어요. 일반 모집을 구매양식 제출까지 완료하면 그 명의로 참여할 수 있어요.'
-      : '지금 참여할 수 있는 명의가 없어요. 타계정을 추가하면 더 참여할 수 있어요.';
+      : (!multiEnabled() && rows.some(r => r.state === 'joined'))
+        ? '이 공고는 1인 1회라 이미 참여한 명의 하나로만 진행할 수 있어요.'
+        : '지금 참여할 수 있는 명의가 없어요. 타계정을 추가하면 더 참여할 수 있어요.';
 }
 async function openAcctSheet(optionKey, next){
   if(PREVIEW) return _pvBlock('참여하기');
