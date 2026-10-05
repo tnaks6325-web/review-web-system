@@ -81,8 +81,9 @@ ok('★★ 노출 판정은 `_ordererPickerOn()` 하나 — 검증 두 곳이 �
   /if \(_ordererPickerOn\(\) && !firstOrderer\)/.test(app)
   && /if \(_ordererPickerOn\(\) && !gv\(cid \+ "_orderer"\)\)/.test(app));
 
-ok('인애드명단 로드 세 갈래(성공·빈값·실패) 모두에서 노출을 다시 판정한다',
-  (app.match(/_applyOrdererPicker\(\);/g) || []).length >= 3);
+// 인애드명단 서버 입구는 2026-10-05 제거(결정 186 107번) — 로드는 항상 "후보 0건" 한 갈래이고, 그 갈래에서 노출을 다시 판정한다.
+ok('인애드명단 로드(후보 0건 고정)에서도 노출을 다시 판정한다',
+  /function _loadInaedList\(\) \{\s*_setOrdererDisabled\(false\);\s*_applyOrdererPicker\(\);/.test(app));
 
 /* ── 4. 무회귀 ───────────────────────────────────────────────────── */
 ok('★ 타계정 다건 프리필은 그대로 — 카드마다 그 명의 이름이 주문자로 남는다',
