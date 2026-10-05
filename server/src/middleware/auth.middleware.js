@@ -56,6 +56,16 @@ function authMiddleware(req, res, next) {
         return res.status(403).json({ error: '인트라넷 연동 계정은 리뷰웹시스템[3버전](Track B)에서만 사용할 수 있습니다.' });
       }
     }
+    // ★★ 광고주 토큰(role:'advertiser' — 계정·업체 링크·브랜드 링크)도 Track B(/api/trackb/*) 전용(결정 205 · 완화 금지).
+    //   광고주 화면은 trackb + 무인증 이미지 프록시만 쓴다. 이 줄이 없으면 업체 링크 하나로
+    //   authMiddleware 만 건 직원용 라우트(리뷰어 전체 명단·삭제·diag 등 약 130곳)에 닿았다.
+    //   trackb 안의 업체 스코프(_ensureThreadScope·canAccessTab·brandTabAllowed)는 그대로다.
+    if (decoded && decoded.role === 'advertiser') {
+      const p = (req.baseUrl || '') + (req.path || '');
+      if (!(p === '/api/trackb' || p.startsWith('/api/trackb/'))) {
+        return res.status(403).json({ error: '업체 계정은 업체 화면에서만 사용할 수 있습니다.' });
+      }
+    }
     // ★ 리뷰어 앱 공고수정 스코프 토큰(via:'reviewer_campaign')은 **공고 수정/상태변경만** 허용.
     //   리뷰어 로그인(무비밀번호)으로 발급된 약한 신원이라, 관리자 API·공고 생성/삭제/확정에
     //   도달하지 못하게 PUT /api/campaign/admin/:id[/status] 로만 격리(폐쇄 기본). role은 admin이라
