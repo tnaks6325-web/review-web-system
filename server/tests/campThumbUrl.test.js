@@ -30,6 +30,8 @@ function stubResp({ status = 200, ctype = 'image/jpeg', clen, body = Buffer.from
   ok('허용: thumbnail*.coupangcdn.com', thumbUrlAllowed('https://thumbnail6.coupangcdn.com/thumbnails/remote/492x492ex/image/a.jpg'));
   ok('허용: image*.coupangcdn.com', thumbUrlAllowed('https://image10.coupangcdn.com/image/retail/images/a.png'));
   ok('허용: apex coupangcdn.com', thumbUrlAllowed('https://coupangcdn.com/a.jpg'));
+  ok('허용: 카카오 메이커스 이미지', thumbUrlAllowed('https://t1.kakaocdn.net/makers_smith/file/items/1/masters/a.jpg?type=thumb&opt=R640x0.fjpg.i'));
+  ok('차단: 서픽스 위장(kakaocdn.net.evil.com)', !thumbUrlAllowed('https://kakaocdn.net.evil.com/a.jpg'));
   ok('차단: http(비 https)', !thumbUrlAllowed('http://thumbnail6.coupangcdn.com/a.jpg'));
   ok('차단: 임의 호스트', !thumbUrlAllowed('https://evil.com/a.jpg'));
   ok('차단: 서픽스 위장(coupangcdn.com.evil.com)', !thumbUrlAllowed('https://coupangcdn.com.evil.com/a.jpg'));
