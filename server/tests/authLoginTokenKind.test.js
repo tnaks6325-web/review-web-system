@@ -52,11 +52,22 @@ ok('로그인 role 이라도 scope/purpose 가 붙으면 거부',
   && run(jwt.sign({ name: 'x', role: 'admin', purpose: 'extract' }, SECRET)).status === 401);
 
 /* ═══ 로그인 토큰 — 지금처럼 통과(막다른 길 없음) ═══ */
-for (const role of ['master', 'admin', 'staff', 'advertiser']) {
+for (const role of ['master', 'admin', 'staff']) {
   const r = run(jwt.sign({ name: 'u', role }, SECRET, { expiresIn: '8h' }));
   ok(`${role} 로그인 토큰 통과`, r.passed && r.admin && r.admin.role === role);
 }
+// ★★ 광고주(계정·업체 링크·브랜드 링크)는 업체 화면 서버 기능(/api/trackb/*)만 — 결정 205 · 완화 금지
+{
+  const adv = jwt.sign({ name: 'u', role: 'advertiser', advertiser_id: 1 }, SECRET, { expiresIn: '8h' });
+  ok('advertiser 로그인 토큰은 업체 화면(trackb) 통과', run(adv, { baseUrl: '/api/trackb', p: '/workdesk/tabs' }).passed);
+  ok('advertiser 토큰은 직원용 라우트에서 403(리뷰어 명단·삭제 등)',
+    run(adv).status === 403 && run(adv, { baseUrl: '/api/reviewer', p: '/delete', method: 'POST' }).status === 403
+    && run(adv, { baseUrl: '/api/diag', p: '/reverse-sync-list' }).status === 403
+    && run(adv, { baseUrl: '/api/trackbx', p: '/y' }).status === 403);
+}
 ok('광고주 링크 토큰(via link) 통과', run(jwt.sign({ name: 'u', role: 'advertiser', advertiser_id: 1, via: 'link' }, SECRET), { baseUrl: '/api/trackb', p: '/x' }).passed);
+ok('광고주 링크 토큰도 trackb 밖은 403', run(jwt.sign({ name: 'u', role: 'advertiser', advertiser_id: 1, via: 'link' }, SECRET)).status === 403
+  && run(jwt.sign({ name: 'u', role: 'advertiser', advertiser_id: 1, brand_id: 2, via: 'brand-link' }, SECRET), { baseUrl: '/api/tab', p: '/dashboard' }).status === 403);
 ok('브랜드 링크 토큰(via brand-link) 통과', run(jwt.sign({ name: 'u', role: 'advertiser', advertiser_id: 1, brand_id: 2, via: 'brand-link' }, SECRET), { baseUrl: '/api/trackb', p: '/x' }).passed);
 ok('인트라넷 토큰은 trackb 통과 · 그 밖 403 유지',
   run(jwt.sign({ name: 'u', role: 'admin', via: 'intranet' }, SECRET), { baseUrl: '/api/trackb', p: '/x' }).passed
