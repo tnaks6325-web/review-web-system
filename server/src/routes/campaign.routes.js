@@ -1284,7 +1284,7 @@ router.get('/my-repurchase-status', reviewerSessionMiddleware, applyLimiter, asy
       allAccounts.push({ phone8: subP8, type: 'sub', displayName });
     }
     // 본계정 로그인은 등록된 전체 명의를, 타계정 로그인은 그 로그인 명의만 후보로 구성한다.
-    // 단, multi_account_mode=false 공고는 실제 신청 화면과 똑같이 로그인 명의 하나만 계산한다.
+    // 1인 1회 공고도 어느 명의로든 참여할 수 있으므로 같은 후보를 본다(2026-10-05, 결정 204).
     // 소유자 UUID/phone8로 증명되지 않은 타명의 이력은 조회하지 않고 unknown으로 표시한다.
     const loginP8 = String(req.reviewer.loginPhone8 || '').replace(/\D/g, '').slice(-8);
     // 같은 전화번호·다른 이름인 레거시 타계정은 seen 중복제거 때문에 self 행 하나로 접힌다.
@@ -1332,7 +1332,9 @@ router.get('/my-repurchase-status', reviewerSessionMiddleware, applyLimiter, asy
       if (!setting.multiAccountMode) {
         const lockedOne = states.find(a => a.status === 'locked');
         if (lockedOne) {
-          states = states.map(a => a.status === 'ready'
+          // unknown(신원 미확인 타명의)도 잠근다 — apply 게이트가 어차피 거절하므로 버튼만 열어두지 않는다.
+          //   잠금 근거는 같은 소유자의 다른 명의라 타인 이력 누설이 아니다.
+          states = states.map(a => (a.status === 'ready' || a.status === 'unknown')
             ? { ...a, status: 'locked', availableFrom: lockedOne.availableFrom, days: lockedOne.days, onePerPerson: true }
             : a);
         }
@@ -2067,6 +2069,7 @@ async function _applyParticipation(req, res, next, campPre) {
     // ★★ 1인 1회 게이트(2026-10-05) — 1인 1회 공고는 소유자 기준으로 **다른 명의**의 참여도 센다.
     //   같은 명의 재참여는 위·아래의 종전 규칙(재참여 기간)을 그대로 따르고, 여기서는 다른 명의만 본다.
     //   진행 중(유효 홀드·블로그 승인 대기) = 막음 / 제출완료 = 같은 명의와 똑같이 재참여 기간으로 판정.
+    //   ★ 소유자 = 로그인 번호 OR 소유자 UUID — 관리자가 로그인 번호를 바꾼 뒤에도 옛 번호로 남은 참여를 센다.
     //   ★ 조회 실패는 fail-open(막는 기능의 오류로 정상 참여를 막지 않는다 — 재참여 기간과 같은 규율).
     if (onePerPerson) {
       try {
@@ -2074,14 +2077,15 @@ async function _applyParticipation(req, res, next, campPre) {
         const { rows: other } = await client.query(
           `SELECT phone8, status, submitted_at
              FROM campaign_applications
-            WHERE campaign_id = $1 AND COALESCE(owner_phone8, phone8) = $2 AND phone8 <> $3
+            WHERE campaign_id = $1 AND phone8 <> $3
+              AND (COALESCE(owner_phone8, phone8) = $2 OR owner_reviewer_id = $4::uuid)
               AND ((status = 'applied' AND expires_at > NOW())
                 OR status = 'blog_pending'
                 OR (status = 'submitted' AND (order_submission_id IS NULL OR EXISTS (
                       SELECT 1 FROM order_submissions os1
                        WHERE os1.id = campaign_applications.order_submission_id AND os1.deleted_at IS NULL))))
             ORDER BY (status <> 'submitted') DESC, submitted_at DESC NULLS LAST
-            LIMIT 1`, [id, p8, holdP8]);
+            LIMIT 1`, [id, p8, holdP8, reg.rows[0].id]);
         await client.query('RELEASE SAVEPOINT one_per_person');
         if (other.length) {
           const o = other[0];

@@ -30,7 +30,7 @@ console.log('[2] 1인 1회 게이트');
 const i = routes.indexOf('if (onePerPerson) {');
 const g = routes.slice(i, routes.indexOf('// ★ 재참여(재구매) 기간 제한', i));
 ok('판정 = multi_account_mode !== true', /const onePerPerson = camp\.multi_account_mode !== true;/.test(routes));
-ok('소유자 기준 · 다른 명의만', /COALESCE\(owner_phone8, phone8\) = \$2 AND phone8 <> \$3/.test(g) && /\[id, p8, holdP8\]/.test(g));
+ok('소유자 기준 · 다른 명의만', /phone8 <> \$3/.test(g) && /\(COALESCE\(owner_phone8, phone8\) = \$2 OR owner_reviewer_id = \$4::uuid\)/.test(g) && /\[id, p8, holdP8, reg\.rows\[0\]\.id\]/.test(g));
 ok('진행 중(유효 홀드·블로그 대기)은 막는다', /status = 'applied' AND expires_at > NOW\(\)/.test(g) && /status = 'blog_pending'/.test(g) && /let blocked = o\.status !== 'submitted'/.test(g));
 ok('제출완료는 같은 명의와 같은 재참여 기간으로 판정', /repurchaseWindowFromSubmittedAt\(o\.submitted_at, camp\.repurchase_days/.test(g));
 ok('취소된 주문은 세지 않는다', /os1\.deleted_at IS NULL/.test(g));
@@ -41,6 +41,7 @@ ok('게이트는 재참여 기간 판정보다 앞(홀드 생성 전 = 자리 �
 console.log('[3] 재참여 상태');
 ok('1인 1회도 전 명의를 본다', !/setting\.multiAccountMode \? historyAccounts : historyAccounts\.filter/.test(routes));
 ok('한 명의가 잠기면 나머지 ready 도 잠근다', /if \(!setting\.multiAccountMode\) \{\s*const lockedOne = states\.find\(a => a\.status === 'locked'\)/.test(routes));
+ok('신원 미확인(unknown) 명의도 함께 잠근다', /states\.map\(a => \(a\.status === 'ready' \|\| a\.status === 'unknown'\)/.test(routes));
 
 console.log('[4] 화면');
 ok('관리자: 참여 방식 = 1인 1회 / 타계정 허용', /<span class="form-label">참여 방식<\/span>/.test(modal) && />1인 1회<\/button>/.test(modal) && />타계정 허용<\/button>/.test(modal) && !/>미허용<\/button>/.test(modal));
