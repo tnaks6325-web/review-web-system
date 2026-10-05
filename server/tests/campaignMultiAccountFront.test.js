@@ -57,8 +57,12 @@ ok('★ 명의 전환은 enterJoined() 재실행(iframe 재로드 = 인플라이
 ok('iframe은 여전히 단일 #orderFrame(추가 생성 없음)', (camp.match(/id="orderFrame"/g) || []).length === 1);
 
 // ── ④ 비활성 공고 무영향 ──
-ok('multi_account_mode=false면 명의 선택 없이 기존 경로(_doApply 즉시)',
-  /function _joinWithOption\(optionKey\)\{[\s\S]{0,200}if\(!multiEnabled\(\)\) return _doApply\(optionKey\);/.test(camp));
+// ★ 2026-10-05: 「1인 1회」(multi_account_mode=false)도 타계정 이름으로 참여할 수 있어 명의를 고른다.
+ok('★ 명의 고르기는 1인 1회·타계정 허용 공통(acctChoiceEnabled) — multiEnabled 로 좁히지 않는다',
+  /function _joinWithOption\(optionKey\)\{[\s\S]{0,200}if\(!acctChoiceEnabled\(\)\) return _doApply\(optionKey\);/.test(camp)
+  && /function acctChoiceEnabled\(\)\{ return !!_camp; \}/.test(camp));
+ok('★ 1인 1회 — 한 명의로 참여 중이면 나머지 명의를 잠근다(서버가 최종 권위)',
+  /if\(!multiEnabled\(\) && rows\.some\(r => r\.state === 'joined'\)\)/.test(camp) && camp.includes("one_per_person:"));
 ok('타계정 0개면 기존 흐름 그대로(명의 시트 미표시)', /if\(!\(_subs \|\| \[\]\)\.length\) return _doApply\(optionKey\);/.test(camp));
 ok('추가참여 버튼은 참여형 타계정 공고에서만 노출', /addBtn\.style\.display = \(multiEnabled\(\) &&/.test(camp));
 
@@ -71,8 +75,8 @@ ok('secure profile 조회 실패는 타계정 0개로 취급하지 않고 최초
   /let _subsLoadError = null/.test(camp)
   && /catch\(e\)\{ _subs = null; _subsLoadError = e; \}/.test(camp)
   && /if\(_subsLoadError\) return toast\('명의 정보를 불러오지 못했습니다/.test(camp));
-ok('타계정이 있는 허용 공고는 명의를 먼저 선택한 뒤 옵션으로 이동',
-  /if\(multiEnabled\(\)\)[\s\S]{0,180}if\(\(_subs \|\| \[\]\)\.length\) return openAcctSheet\(null, 'option'\)/.test(camp)
+ok('타계정이 있으면(1인 1회·타계정 허용 공통) 명의를 먼저 선택한 뒤 옵션으로 이동',
+  /if\(acctChoiceEnabled\(\)\)[\s\S]{0,180}if\(\(_subs \|\| \[\]\)\.length\) return openAcctSheet\(null, 'option'\)/.test(camp)
   && /function _continueInitialAcct\(\)/.test(camp));
 ok('제출 완료: 그 명의만 정리하고 남은 명의는 이어서 진행 CTA', /clearHold\(done\.phone8\)/.test(camp) && /doneNextBtn/.test(camp));
 

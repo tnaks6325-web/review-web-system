@@ -30,7 +30,7 @@ ok('063: multi_daily_limit·sub_hold_ttl_min·owner_phone8', /multi_daily_limit/
 ok('063: COALESCE 식 부분 인덱스(owner 활성홀드)', /\(\(COALESCE\(owner_phone8, phone8\)\)\) WHERE status = 'applied'/.test(mig063));
 ok('063: idempotent(IF NOT EXISTS)', !/ADD COLUMN (?!IF NOT EXISTS)/.test(mig063) && !/CREATE INDEX (?!IF NOT EXISTS)/.test(mig063));
 // ── apply 게이트 ──
-for (const r of ['multi_disabled', 'sub_invalid', 'sub_shares_owner_phone', 'sub_not_registered', 'owner_hold_cap', 'sub_daily_limit']) {
+for (const r of ['one_per_person', 'sub_invalid', 'sub_shares_owner_phone', 'sub_not_registered', 'owner_hold_cap', 'sub_daily_limit']) {
   ok(`apply: 사유 '${r}' 존재`, routes.includes(`'${r}'`));
 }
 const applyBody = routes.slice(routes.indexOf('async function _applyParticipation'), routes.indexOf("router.post('/:id/apply'"));

@@ -4214,7 +4214,7 @@ const RF_START_ITEMS = [
   { k: "transfer_memo", label: "입금명",   el: "rf_transfer_memo", required: true },
   { k: "badges",        label: "안내배지", el: "rf_badge_input" },
   { k: "cash_receipt",  label: "현금영수증", el: "rf_cashrcpt_toggle" },
-  { k: "multi_account", label: "다계정",   el: "rf_multi_account_toggle" },
+  { k: "multi_account", label: "참여 방식", el: "rf_multi_account_toggle" },
   { k: "chat_url",      label: "팀채팅방", el: "rf_chat_url" },   /* 필수 아님(2026-08-25) */
 ];
 
@@ -4231,7 +4231,7 @@ function _rfStartState() {
     { k: "transfer_memo", label: "입금명",     value: memo || "미입력", miss: req("transfer_memo") && !memo },
     { k: "badges",        label: "안내배지",   value: nBadge ? (nBadge + "개") : "없음", miss: req("badges") && !nBadge },
     { k: "cash_receipt",  label: "현금영수증", value: cash ? "발행" : "발행 안 함", miss: false },
-    { k: "multi_account", label: "다계정",     value: multi ? "허용" : "미허용", miss: false },
+    { k: "multi_account", label: "참여 방식", value: multi ? "타계정 허용" : "1인 1회", miss: false },
     { k: "chat_url",      label: "팀채팅방",   value: chat ? "입력됨" : "미입력", miss: req("chat_url") && !chat },
   ];
 }
@@ -5205,7 +5205,7 @@ const _RF_DIFF_FIELDS = [
   ["recruit_total",     "총 모집인원"],
   ["hold_ttl_min",      "자리 유효시간"],
   ["close_buffer_min",  "마감 버퍼"],
-  ["multi_account_mode","타계정 참여"],
+  ["multi_account_mode","참여 방식"],
   ["multi_daily_limit", "타계정 하루한도"],
   ["sub_hold_ttl_min",  "타계정 자리 유효시간"],
   ["repurchase_days",   "재참여 제한"],
