@@ -1697,7 +1697,7 @@ router.post('/sheetless-worktable-recover', authMiddleware, adminOrMasterMiddlew
       return res.status(400).json({ ok: false, error: '올바르지 않은 주문 식별값이 포함되어 있습니다.' });
     }
     const by = (req.admin && req.admin.name) ||
-      (req.user && (req.user.name || req.user.username || req.user.id)) || 'admin';
+      (req.admin && (req.admin.name || req.admin.username || req.admin.id)) || 'admin';
     const run = () => recoverUnwrittenSheetlessOrders({ limit, by, orderSubmissionIds, dryRun });
     const out = dryRun ? await run() : await withJobLock('sheetless_worktable_recover', run);
     if (out && out.skipped) return res.status(409).json({ ok: false, busy: true, error: '다른 작업보드 복구가 진행 중입니다.' });
@@ -1715,7 +1715,7 @@ router.post('/worktable-number-order-repair', authMiddleware, adminOrMasterMiddl
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
     const dryRun = b.dryRun !== false;
     const by = (req.admin && req.admin.name) ||
-      (req.user && (req.user.name || req.user.username || req.user.id)) || 'admin';
+      (req.admin && (req.admin.name || req.admin.username || req.admin.id)) || 'admin';
     const { renumberTab } = require('../services/rowNumbering.service');
     if (dryRun) return res.json(await renumberTab({ sheetId, tabName, dryRun: true, by }));
     const { withJobLock } = require('../utils/jobLock');
@@ -1762,7 +1762,7 @@ router.post('/cleanup-overflow-worktable-slots', authMiddleware, adminOrMasterMi
     const out = await cleanupOverflowEmptyWorktableSlots({
       dryRun: b.dryRun !== false,
       limit: Math.min(Math.max(parseInt(b.limit, 10) || 200, 1), 1000),
-      by: (req.admin && req.admin.name) || (req.user && (req.user.name || req.user.username)) || 'admin',
+      by: (req.admin && (req.admin.name || req.admin.username)) || 'admin',
     });
     res.json(out);
   } catch (err) { next(err); }

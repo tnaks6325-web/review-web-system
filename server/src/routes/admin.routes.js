@@ -710,7 +710,7 @@ router.post('/keywords', authMiddleware, masterOnlyMiddleware, async (req, res, 
        VALUES ($1, $2, $3)
        ON CONFLICT (category, keyword) DO UPDATE SET active = TRUE
        RETURNING id, category, keyword, active`,
-      [category, keyword.trim(), req.user?.name || 'admin']
+      [category, keyword.trim(), req.admin?.name || 'admin']
     );
     res.json({ ok: true, keyword: rows[0] });
   } catch (err) { next(err); }
@@ -783,7 +783,7 @@ router.post('/unrecognized/ignore', authMiddleware, masterOnlyMiddleware, async 
     const { rowCount } = await pool.query(
       `UPDATE unrecognized_tabs SET status = 'ignored', ignored_by = $1, ignored_at = NOW()
        WHERE id = ANY($2) AND status = 'pending'`,
-      [req.user?.name || 'admin', ids]
+      [req.admin?.name || 'admin', ids]
     );
     res.json({ ok: true, updated: rowCount });
   } catch (err) { next(err); }
@@ -798,7 +798,7 @@ router.post('/unrecognized/resolve', authMiddleware, masterOnlyMiddleware, async
     const { rowCount } = await pool.query(
       `UPDATE unrecognized_tabs SET status = 'resolved', ignored_by = $1, ignored_at = NOW()
        WHERE id = ANY($2)`,
-      [req.user?.name || 'admin', ids]
+      [req.admin?.name || 'admin', ids]
     );
     res.json({ ok: true, updated: rowCount });
   } catch (err) { next(err); }
