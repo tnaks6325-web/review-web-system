@@ -857,7 +857,6 @@ function _lockEmbedOption() {
    ══════════════════════════════════════════════════════════════════════════ */
 let _BATCH = null;   // { holds:[], byCid:{}, byP8:{}, byApp:{}, files:{}, small:{}, done:{} }
 const _BATCH_DONE_KEY = (_EMBED_CTX && !_EMBED_CTX.preview && _EMBED_CTX.campId) ? ("camp_batch_done_" + _EMBED_CTX.campId) : "";
-function _batchLoadDone() { try { return JSON.parse(sessionStorage.getItem(_BATCH_DONE_KEY) || "{}") || {}; } catch (_) { return {}; } }
 function _batchSaveDone(d) { try { sessionStorage.setItem(_BATCH_DONE_KEY, JSON.stringify(d)); } catch (_) { /* noop */ } }
 
 /**
@@ -1544,19 +1543,12 @@ function _applyLoginUI(name) {
   _loadInlineProfile();
 }
 
-/* ── STEP1: 이름 입력 변경 감지 (레거시 호환) ── */
-function _onNameInput() { /* authScreen 기반 실시간 유효성 검사 없음 */ }
-
-/* ── 레거시 no-op (authScreen 기반으로 대체됨) ── */
-async function _onNameNext()       { /* 미사용: _doLogin() 으로 대체 */ }
-async function _onPhoneAuthSubmit(){ /* 미사용: _doLogin() 으로 대체 */ }
-
 
 /* ══════════════════════════════════════════════════════════════
    ★★★ 통합 로그인/등록 화면 JS (authScreen 기반) ★★★
    ────────────────────────────────────────────────────────────
    - _switchAuthTab(tab)  : 로그인 ↔ 등록 탭 전환
-   - _doLogin()           : 이름 + 전화번호 뒤 8자리로 로그인
+   - _doLoginDirect()     : 이름 + 전화번호 뒤 8자리로 로그인 (옛 _doLogin 조회식은 2026-10-05 제거 — 결정 186 106번)
    - _doRegister()        : 이름 + 전화번호로 신규 등록 → 자동 로그인
    - _clearLoginErr()     : 로그인 오류 메시지 지우기
    - _clearRegErr()       : 등록 오류 메시지 지우기
@@ -1624,62 +1616,6 @@ function _showRegErr(msg) {
 
 /* ── 로그인: phone8 입력 → 이름 조회 → 확인 → 로그인 ── */
 
-// 조회된 이름을 임시 저장
-let _lookedUpName = null;
-
-/** phone8 입력 후 "이름 조회하기" 버튼 클릭 핸들러 */
-async function _doLookupPhone() {
-  const phone8 = (document.getElementById("loginPhoneInput").value || "").replace(/[^0-9]/g, "");
-  if (phone8.length !== 8) {
-    _showLoginErr("전화번호 뒤 8자리를 정확히 입력하세요.");
-    document.getElementById("loginPhoneInput").focus();
-    return;
-  }
-  if (!APP_CONFIG.GAS_WEB_APP_URL) {
-    _showLoginErr("GAS URL이 설정되지 않았습니다.");
-    return;
-  }
-
-  const btn = document.getElementById("btnLoginLookup");
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 조회 중...';
-  _clearLoginErr();
-  _hideLoginBlocked();
-
-  try {
-    const data = await gasGet({ action: "lookupPhone", phone8 });
-
-    if (!data.ok) {
-      _showLoginErr("등록된 전화번호가 없습니다. 등록 탭에서 먼저 등록해주세요.");
-      setTimeout(() => _switchAuthTab("register"), 900);
-      return;
-    }
-
-    // 상태 정지 체크
-    if (data.status === "정지" || data.status === "탈퇴") {
-      _showLoginBlocked(
-        data.status === "탈퇴"
-          ? "탈퇴된 계정입니다. 재가입이 필요한 경우 관리자에게 문의해주세요."
-          : "이 계정은 현재 이용이 제한되었습니다. 관리자에게 문의해주세요."
-      );
-      return;
-    }
-
-    // 이름 표시
-    _lookedUpName = data.name;
-    document.getElementById("phoneLookupName").textContent = data.name;
-    document.getElementById("phoneLookupResult").classList.add("show");
-    // 레거시 nameInput 채우기
-    const ni = document.getElementById("nameInput");
-    if (ni) ni.value = data.name;
-
-  } catch (e) {
-    _showLoginErr("오류: " + e.message);
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-search"></i> 이름 조회하기';
-  }
-}
 
 /** ★ 이름+전화번호 동시 입력 → 바로 로그인 */
 async function _doLoginDirect() {
@@ -1748,108 +1684,6 @@ async function _doLoginDirect() {
   }
 }
 
-/** "맞아요, 로그인" 버튼 클릭 핸들러 */
-async function _doLoginWithLookup() {
-  if (!_lookedUpName) return;
-  const phone8 = (document.getElementById("loginPhoneInput").value || "").replace(/[^0-9]/g, "");
-  const name   = _lookedUpName;
-
-  if (!APP_CONFIG.GAS_WEB_APP_URL) {
-    _showLoginErr("GAS URL이 설정되지 않았습니다.");
-    return;
-  }
-
-  const confirmBtn = document.querySelector(".plb-confirm");
-  if (confirmBtn) {
-    confirmBtn.disabled = true;
-    confirmBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 로그인 중...';
-  }
-
-  try {
-    const data = await gasGet({ action: "verifyReviewer", name, phone8 });
-
-    if (data.status === "정지" || data.status === "탈퇴") {
-      _showLoginBlocked(
-        data.status === "탈퇴"
-          ? "탈퇴된 계정입니다. 재가입이 필요한 경우 관리자에게 문의해주세요."
-          : "이 계정은 현재 이용이 제한되었습니다. 관리자에게 문의해주세요."
-      );
-      document.getElementById("phoneLookupResult").classList.remove("show");
-      return;
-    }
-
-    if (!data.ok) {
-      _showLoginErr(data.error || "인증에 실패했습니다. 다시 시도해주세요.");
-      _resetLoginLookup();
-      return;
-    }
-
-    // 성공
-    _saveAuthSession(name, true, true, data.phone8 || phone8, data.reviewerToken);
-    _applyLoginUI(name);
-    const ni = document.getElementById("nameInput");
-    if (ni) ni.value = name;
-
-    // ★ Phase 5: 구매양식 대기 중이면 폼으로 복귀
-    if (window._pendingOrderForm) {
-      window._pendingOrderForm = false;
-      window._slotAuth = { name, phone8: data.phone8 || phone8 };
-      initOrderFormMode();
-      return;
-    }
-
-    await doSearch();
-
-  } catch (e) {
-    _showLoginErr("오류: " + e.message);
-  } finally {
-    if (confirmBtn) {
-      confirmBtn.disabled = false;
-      confirmBtn.innerHTML = '<i class="fas fa-check-circle"></i> 맞아요, 로그인';
-    }
-  }
-}
-
-/** 기존 _doLogin() 호환 래퍼 (세션 복원 등 내부 호출용) */
-async function _doLogin() {
-  const name   = (document.getElementById("nameInput").value || "").trim()
-              || (document.getElementById("loginNameInput") || {}).value?.trim() || "";
-  const phone8 = (document.getElementById("loginPhoneInput").value || "").replace(/[^0-9]/g, "");
-  if (!name || !phone8 || phone8.length !== 8) {
-    _showLoginErr("이름과 전화번호 뒤 8자리를 모두 입력하세요.");
-    return;
-  }
-  // 이름이 있으면 바로 검증
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { _showLoginErr("GAS URL이 설정되지 않았습니다."); return; }
-  try {
-    const data = await gasGet({ action: "verifyReviewer", name, phone8 });
-    if (data.status === "정지" || data.status === "탈퇴") {
-      _showLoginBlocked("이 계정은 이용이 제한되었습니다."); return;
-    }
-    if (!data.ok) {
-      _showLoginErr(data.error || "인증에 실패했습니다. 다시 시도해주세요."); return;
-    }
-    _saveAuthSession(name, true, true, data.phone8 || phone8, data.reviewerToken);
-    _applyLoginUI(name);
-
-    // ★ Phase 5: 구매양식 대기 중이면 폼으로 복귀
-    if (window._pendingOrderForm) {
-      window._pendingOrderForm = false;
-      window._slotAuth = { name, phone8: data.phone8 || phone8 };
-      initOrderFormMode();
-      return;
-    }
-
-    await doSearch();
-  } catch(e) { _showLoginErr("오류: " + e.message); }
-}
-
-/** 조회 결과 패널 초기화 */
-function _resetLoginLookup() {
-  _lookedUpName = null;
-  document.getElementById("phoneLookupResult").classList.remove("show");
-  _hideLoginBlocked();
-}
 
 /** 정지 안내 표시 */
 function _showLoginBlocked(msg) {
@@ -2556,7 +2390,7 @@ function renderResults(results) {
 /* ── 리뷰 제출 화면 (다건 통합) ── */
 /**
  * items: Item 배열 (1건이면 [item], 다건이면 [item1, item2, ...])
- * 공통 진입점 — openSubmit(item) 대신 항상 이 함수 사용
+ * 공통 진입점(옛 단건 openSubmit 은 2026-10-05 제거 — 결정 186 106번)
  */
 function openSubmitMulti(items) {
   S.selectedRows = items;
@@ -3477,10 +3311,6 @@ function _mrRenderPreview(idx) {
   if (status) { status.textContent = `${files.length}장`; status.className = "mr-slot-status ok"; }
 }
 
-/* ── 기존 단건 openSubmit → openSubmitMulti 래퍼 ── */
-function openSubmit(item) {
-  openSubmitMulti([item]);
-}
 
 /* _openSubmitLegacy 제거됨 — openSubmit은 openSubmitMulti([item]) 래퍼로 대체 */
 
@@ -5621,37 +5451,6 @@ function _safeText(s) {
   return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 
-/**
- * 사전 선택된 옵션을 옵션피커에 자동 반영
- */
-function _applyPreSelectedOption(optKey) {
-  const tabs = document.querySelectorAll("#of_option_tabs .of-opt-tab");
-  if (tabs.length > 0) {
-    let matched = false;
-    tabs.forEach(btn => {
-      if (btn.dataset.optkey === optKey) {
-        // click() 대신 직접 상태만 변경 (무한루프 방지)
-        btn.classList.add("selected");
-        matched = true;
-      } else {
-        btn.classList.remove("selected");
-      }
-    });
-    if (!matched) {
-      tabs[0] && tabs[0].classList.add("selected");
-    }
-    // _selectedOptKey 재설정 + 주문자 활성화
-    _selectedOptKey = optKey;
-    _setOrdererDisabled(false);
-    // 주문자 입력칸 포커스
-    const input = document.getElementById("of_orderer");
-    if (input) setTimeout(() => input.focus(), 100);
-  } else {
-    // 피커 없음 → 직접 설정
-    _selectedOptKey = optKey;
-    _setOrdererDisabled(false);
-  }
-}
 
 // 전역 자동완성 데이터
 let _inaedNames      = [];   // GAS에서 받아온 전체 목록 [{ name, date, options, rowIndex }]
@@ -7272,53 +7071,6 @@ function _initIncomeSection(incomeType, profileData) {
   _initAllCardIncomeBlocks(incomeType, profileData);
 }
 
-/** 소득신고 명의자 선택 시 입력란 자동 채우기 */
-function _selectIncomePerson(selectedBtn, profileData, personIdx) {
-  // 버튼 선택 상태 업데이트
-  const btnsWrap = document.getElementById("ofIncomePersonBtns");
-  if (btnsWrap) {
-    btnsWrap.querySelectorAll("button").forEach(b => {
-      b.style.background = "#fff";
-      b.style.borderColor = "#D1D5DB";
-      b.style.color = "#374151";
-    });
-    if (selectedBtn) {
-      selectedBtn.style.background = "#e8f1fe";
-      selectedBtn.style.borderColor = "#3182f6";
-      selectedBtn.style.color = "#1b64da";
-    }
-  }
-
-  const incomeNameEl  = document.getElementById("ofIncomeName");
-  const residentNoEl  = document.getElementById("ofResidentNo");
-
-  let incomeName = "";
-  let residentNo = "";
-
-  if (personIdx === -1) {
-    // 본인
-    incomeName = profileData?.incomeName || "";
-    residentNo = profileData?.jumin || profileData?.residentNo || "";
-    window._selectedIncomePersonIdx = -1;
-  } else {
-    // 타계정
-    const sub = _parseSubAccounts(profileData?.subAccounts)[personIdx];
-    if (sub) {
-      incomeName = sub.incomeName || "";
-      residentNo = sub.jumin || sub.residentNo || "";
-    }
-    window._selectedIncomePersonIdx = personIdx;
-  }
-
-  if (incomeNameEl)  incomeNameEl.value = incomeName;
-  if (residentNoEl) {
-    // 저장된 주민번호는 마스킹하지 않고 그대로 표시 (입력 수정 가능)
-    let rn = residentNo.replace(/[^0-9]/g, "");
-    if (rn.length > 6) rn = rn.slice(0,6) + "-" + rn.slice(6);
-    residentNoEl.value = rn;
-    _formatResidentNo(residentNoEl);
-  }
-}
 
 /** 소득신고 입력값 유효성 검사 → { ok, incomeName, residentNo } */
 function _validateIncomeInput() {
@@ -8826,11 +8578,6 @@ function applyCardAiResult(cid) {
   }
 }
 
-/* ─ 하위호환: 기존 단일 카드 함수명 유지 (구 코드 참조 대비) ─ */
-function onImgSelected(input) { /* 신버전에서는 onCardImgSelected 사용 */ }
-function onImgDrop(e) { /* 신버전에서는 onCardImgDrop 사용 */ }
-function removeImg() { const cid = _orderCardIds[0]; if(cid) removeCardImg(cid); }
-function applyAiResult() { const cid = _orderCardIds[0]; if(cid) applyCardAiResult(cid); }
 
 // ── 연락처 실시간 포맷: 숫자만 추출 후 000-0000-0000 형식 적용
 function formatPhoneInput(el) {

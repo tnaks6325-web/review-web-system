@@ -163,6 +163,9 @@ ok('103번: 리뷰어 제출 화면에 숨은 관리자 창이 남아 있지 않
   !['diagModal', 'indexModal', 'changePwModal', 'gasUrlModal', 'registerModal', 'reviewerProfileModal', 'tcPopover', 'checkFilesModal', 'dashRawModal', 'searchDebugModal', 'ofDuplicateWarn']
     .some(id => read('frontend/search.html').includes(`id="${id}"`))
   && !fs.existsSync(path.join(root, 'frontend/js/search-register.js')));
+ok('106번: 리뷰제출 화면의 옛 조회식 로그인·단건 제출·호환 껍데기 함수 없음',
+  !/function (_doLogin|_doLookupPhone|_doLoginWithLookup|openSubmit|_selectIncomePerson|_applyPreSelectedOption|onImgSelected|onImgDrop|removeImg|applyAiResult)\(/.test(read('frontend/js/search-app.js'))
+  && /function _doLoginDirect\(/.test(read('frontend/js/search-app.js')));
 ok('104번: 옛 대시보드 고아 행 경고 띠·정리 버튼 없음', !/_handleOrphanRowsWarning|cleanOrphanRows|orphanRowsBanner/.test(read('frontend/js/index-app.js')));
 
 console.log(`\n✅ frontendActionMapRoutes: ${n}개 통과`);
