@@ -270,7 +270,9 @@ ok('★ 현영 제목 줄은 표시만 하고 폴더 창구를 만들지 않는�
     && !/rv2h/.test(WD);
 })());
 ok('★ 현영 비대상·업체에서는 label 이 빈 문자열이라 종전 본문 높이를 유지한다',
-  /const label=showReceipt\?[^;]+:'';[\s\S]{0,100}<div class="rv2c">\$\{label\}<div class="rv2b">\$\{body\}<\/div><\/div>/.test(WD));
+  /const label=showReceipt\?[^;]+:'';[\s\S]{0,100}<div class="rv2c">\$\{label\}<div class="rv2b">\$\{capBtn\}\$\{body\}<\/div><\/div>/.test(WD)
+  /* 구매캡처 교체 버튼(2026-09-30)은 흐름 밖(절대배치)이라 본문 높이에 기여하지 않는다 */
+  && /\.rv2 \.rvcaprep\{position:absolute;/.test(WD));
 ok('★ title 은 남는다 — 이미지 alt(접근성)·빈 상태 문구가 어느 칸인지 말한다',
   /alt="\$\{esc\(title\)\}"/.test(WD) && /const left=col\('cap','구매 캡처'/.test(WD)
   && /const right=col\('rev','리뷰 캡처'/.test(WD));

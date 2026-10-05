@@ -174,7 +174,12 @@ async function run() {
   // ── 작업 선택 = 좌측 세로 목록(업체관리 차용) ──
   ok('광고주 작업보드 = awside 사이드바 + advwrap 그리드(가로 탭바 없음)',
     src.includes('class="wrap advwrap') && src.includes('id="awside"') );
-  ok('advwrap 3열 그리드(사이드바 224px + 본문 + 레일)', /\.wrap\.advwrap\{grid-template-columns:224px minmax\(0,1fr\) 300px\}/.test(css));
+  // 2026-10-02 사용자 확정: 업체 뷰어는 우측 레일 없이 2열 — 협업/댓글은 상단 4번째 박스(.advth-pane)
+  ok('advwrap 2열 그리드(사이드바 224px + 본문 · 우측 레일 없음)', /\.wrap\.advwrap\{grid-template-columns:224px minmax\(0,1fr\)\}/.test(css)
+    && !/class="wrap advwrap[^`]*<div class="rail" id="rail">/.test(src));
+  ok('협업/댓글 = 상단 4번째 박스(같은 #railThread 를 채운다 · 업체만)',
+    /const thBox=isAdv\?`<aside class="advth-pane"[^`]*id="railThread"/.test(src) && /\$\{csMini\}\$\{thBox\}<\/div>`/.test(src));
+  ok('업체 화면에는 우측 사이드바 토글을 안 그린다(레일이 없다)', /v==='workdesk'&&STATE\.role!=='advertiser'/.test(src));
   ok('_renderTabList 광고주 분기 → _renderAdvSidebar(세그먼트/탭바 미참조) + 첫 화면 갱신',
     /if\(STATE\.role==='advertiser'\)\{ _renderAdvSidebar\(\); if\(!STATE\.cur\) _renderAdvHome\(\); return; \}/.test(src));
   ok('loadTabs 가 광고주면 /my-work-summary 를 함께 받는다', src.includes("api('/api/trackb/my-work-summary')"));
@@ -189,7 +194,7 @@ async function run() {
   ok('★ 헤더·요약 스트립이 본문 폭과 같은 값으로 캡(광고주 화면만)',
     // 상단 요약이 8칸 스트립(.stripA) → 3분할 카드(.tp3grid, 시안 B)로 바뀌며 캡 대상도 함께 옮겼다(검사 의미 불변)
     /body\.advm \.main \.mh,body\.advm \.tp3grid,body\.advm \.wobar,body\.advm \.wodetail\{max-width:1380px\}/.test(css));
-  ok('★ 원본(sot) 배지는 광고주에게 안 나간다(내부 용어)', /STATE\.role==='advertiser'\?'':sotBadge/.test(src));
+  ok('★ 원본(sot) 배지는 누구에게도 안 나간다(내부 용어 · 전환 기능 제거 (결정 186 5번 — 2026-09-28 원본 전환·write-back 제거))', !/sotBadge|원본: Track B/.test(src));
   ok('광고주도 진행 현황 안의 공통 정산 버튼을 사용하고 하단 정산 카드는 없다',
     /const setlIn=`<div class="setlin" id="setlCell">/.test(src)
     && !/id="setldetail"/.test(src) && !/id="settlementsec"/.test(src));
@@ -518,10 +523,8 @@ async function run() {
       && /FROM review_index r/.test(block)
       && !/listFolderFilesRecursive/.test(block);
   })());
-  ok('★ 폴더 공유는 내부 역할과 서버에 연결된 정확한 리뷰 폴더로만 제한한다',
-    /router\.post\('\/share-review-folder', authMiddleware, internalOnlyMiddleware/.test(driveRouteSrc)
-    && /SELECT folder_url FROM tab_configs WHERE sheet_id = \$1 AND tab_name = \$2/.test(driveRouteSrc)
-    && !/const \{ sheetId, tabName, folderUrl \} = req\.body/.test(driveRouteSrc));
+  ok('★ 리뷰 폴더를 링크공유로 여는 입구(share-review-folder)는 결정 186 72번에서 제거 — 되살리지 않는다',
+    !/router\.post\('\/share-review-folder'/.test(driveRouteSrc));
   ok('리뷰 캡처는 작성자 목록 팝업으로 열리고, 바깥 클릭 대신 이미지 우측 상단 닫기 버튼만 둔다',
     /function _rvOpenByImage\(el\)\{ _rvOpen\(el&&el\.dataset\.rid, \+\(el&&el\.dataset\.fidx\|\|0\)\); \}/.test(src)
     && /function _rvPopRender\(\)/.test(src)

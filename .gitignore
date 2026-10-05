@@ -37,3 +37,12 @@ Thumbs.db
 # Wrangler
 .wrangler/
 frontend-backup/
+
+# 브라우저 자동화 캡처(운영 데이터가 찍힐 수 있다 — 절대 커밋 금지)
+.playwright-mcp/
+
+# impeccable 디자인 도구 실행 파일(처음 쓸 때 자동으로 받는다 · 14MB라 저장소에 올리지 않는다)
+.claude/skills/impeccable/scripts/bin/
+
+# graphify 저장소 지도 결과물(로컬 전용)
+graphify-out/

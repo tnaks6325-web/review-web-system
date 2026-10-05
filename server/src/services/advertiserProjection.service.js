@@ -15,6 +15,7 @@
  */
 const crypto = require('crypto');
 const defaultPool = require('../db/pool');
+const { sameAdvertiser } = require('../utils/advertiserIdentity');
 
 const ADVERTISER_NAME_CONFLICT = 'advertiser_name_conflict';
 
@@ -109,11 +110,25 @@ async function projectIntranetAdvertiser(order, context, deps) {
       const { rows: sameNameRows } = await client.query(
         `SELECT id, intranet_advertiser_id FROM advertisers WHERE name = $1 FOR UPDATE`, [name]
       );
-      if (sameNameRows.length && !linkId) {
+      // ★★ 표기만 다른 같은 업체도 후보로 올린다(2026-09-28 올곧은무역·어니스트캄 실사고):
+      //   인트라넷에서 사업자명을 정정하면(`주식회사 올곧은무역` → `(주)올곧은무역`) 원본 ID 가 없는
+      //   옛 업체와 이름이 정확히 같지 않아 조용히 **새 업체가 하나 더** 만들어졌다.
+      //   판정 = utils/advertiserIdentity.sameAdvertiser(법인격 표기 무시 이름 일치 또는 사업자번호 숫자 일치).
+      //   ★ 원본 ID 가 없는 업체만 — 이미 다른 인트라넷 광고주에 연결된 업체는 확실히 다른 원본이다.
+      //   ★ 자동 병합은 여전히 금지 — 후보로 돌려주고 사람이 확인한다(결정 004).
+      const { rows: looseRows } = await client.query(
+        `SELECT id, name, COALESCE(intranet_business_number,'') AS biz FROM advertisers
+          WHERE COALESCE(intranet_advertiser_id,'') = '' AND COALESCE(status,'') <> 'ended'`);
+      const exactIds = new Set(sameNameRows.map(r => r.id));
+      const similarIds = looseRows
+        .filter(r => !exactIds.has(r.id) && sameAdvertiser({ name: r.name, businessNumber: r.biz }, { name, businessNumber }))
+        .map(r => r.id);
+      const conflictIds = sameNameRows.map(r => r.id).concat(similarIds);
+      if (conflictIds.length && !linkId) {
         // ★ 자동 병합 금지 — 대신 사람이 고를 후보를 함께 돌려준다.
-        const candidates = await _candidates(client, sameNameRows.map(r => r.id));
+        const candidates = await _candidates(client, conflictIds);
         throw new AdvertiserLinkError(
-          '동일 이름의 기존 광고주가 있어 자동 병합하지 않았습니다. 같은 업체인지 확인해 주세요.',
+          '같은 업체로 보이는 기존 광고주가 있어 자동 병합하지 않았습니다. 같은 업체인지 확인해 주세요.',
           ADVERTISER_NAME_CONFLICT,
           { name, intranetAdvertiserId: intranetId, businessNumber, contact, candidates }
         );
@@ -121,7 +136,8 @@ async function projectIntranetAdvertiser(order, context, deps) {
       if (linkId) {
         // ── 사람이 확인한 기존 업체에 원본 ID 를 백필해 연결 ──
         const { rows: picked } = await client.query(
-          `SELECT id, name, COALESCE(intranet_advertiser_id,'') AS cur
+          `SELECT id, name, COALESCE(intranet_advertiser_id,'') AS cur,
+                  COALESCE(intranet_business_number,'') AS biz
              FROM advertisers WHERE id = $1 FOR UPDATE`, [linkId]);
         if (!picked.length) {
           throw new AdvertiserLinkError('고른 업체를 찾을 수 없습니다. 목록을 새로고침한 뒤 다시 시도해 주세요.', 'advertiser_not_found');
@@ -130,19 +146,26 @@ async function projectIntranetAdvertiser(order, context, deps) {
           // ★ 남의 원본을 빼앗지 않는다(fail-closed).
           throw new AdvertiserLinkError('그 업체는 이미 다른 인트라넷 광고주에 연결되어 있습니다.', 'advertiser_already_linked');
         }
-        if (_text(picked[0].name, 200) !== name) {
-          // ★ 화면이 보여준 뒤 이름이 바뀌었다면 판단 근거가 달라진 것이다 — 다시 확인시킨다.
+        // ★ 고른 업체가 **지금도** 후보 조건(이름 정확일치 · 표기만 다른 이름 · 사업자번호 일치)에 맞는지
+        //   다시 본다 — 화면이 보여준 뒤 이름이 바뀌었다면 판단 근거가 달라진 것이다(결정 004).
+        const stillCandidate = _text(picked[0].name, 200) === name
+          || sameAdvertiser({ name: picked[0].name, businessNumber: picked[0].biz }, { name, businessNumber });
+        if (!stillCandidate) {
           throw new AdvertiserLinkError('그 사이 업체명이 바뀌었습니다. 다시 접수해 확인해 주세요.', 'advertiser_name_changed');
         }
+        // ★ 연결하면 이름도 원본(인트라넷 사업자명)을 따른다 — 단 다른 업체가 이미 그 이름을 쓰면
+        //   그대로 둔다(advertisers.name UNIQUE — 접수를 23505 로 죽이지 않는다).
         const upd = await client.query(
           `UPDATE advertisers SET
              intranet_advertiser_id   = $2,
              intranet_contact         = COALESCE(NULLIF($3, ''), intranet_contact),
              intranet_business_number = COALESCE(NULLIF($4, ''), intranet_business_number),
+             name = CASE WHEN NOT EXISTS (SELECT 1 FROM advertisers o WHERE o.name = $5 AND o.id <> $1)
+                         THEN $5 ELSE name END,
              updated_at = NOW()
            WHERE id = $1 AND COALESCE(intranet_advertiser_id,'') = ''
            RETURNING id`,
-          [linkId, intranetId, contact, businessNumber]
+          [linkId, intranetId, contact, businessNumber, name]
         );
         if (!upd.rows.length) {
           throw new AdvertiserLinkError('그 업체의 원본 연결이 방금 바뀌었습니다. 다시 시도해 주세요.', 'advertiser_link_race');
@@ -167,8 +190,12 @@ async function projectIntranetAdvertiser(order, context, deps) {
       }
     } else {
       await client.query(
+        // ★ 인트라넷에서 사업자명을 정정하면 여기서 이름이 따라간다. 단 다른 업체(원본 미연결 옛 행)가
+        //   그 이름을 이미 쓰고 있으면 UNIQUE 충돌로 **접수 전체가 죽는다** — 그때는 이름을 두고
+        //   (업체관리의 인트라넷 연결 점검이 그 두 업체를 병합 대상으로 알려 준다).
         `UPDATE advertisers SET
-           name = $2,
+           name = CASE WHEN NOT EXISTS (SELECT 1 FROM advertisers o WHERE o.name = $2 AND o.id <> $1)
+                       THEN $2 ELSE name END,
            intranet_contact = COALESCE(NULLIF($3, ''), intranet_contact),
            intranet_business_number = COALESCE(NULLIF($4, ''), intranet_business_number),
            updated_at = NOW()
@@ -213,8 +240,82 @@ async function projectIntranetAdvertiser(order, context, deps) {
   }
 }
 
+/**
+ * 접수된 작업(탭)을 그 업체 소유로 지정한다 — 업체관리·작업보드의 업체 묶음이 읽는 `advertiser_campaigns`.
+ *
+ * ★★ 2026-09-23 실사고(「고양이사료」): 리뷰오더에서 광고주를 고르고 계약(견적서)까지 붙였는데
+ *   접수가 `work_orders.advertiser_id`·포털 작업만 채우고 **소유 행은 만들지 않아** 작업이
+ *   업체관리·작업바에서 「미지정」으로 떨어졌다(같은 상태 4건 — 사람이 손으로 지정해야만 풀렸다).
+ *
+ * 규율:
+ *   - ★ **작업(탭) 단위만**(결정 082) — gid 가 없으면 지정하지 않는다(시트 전체 소유 금지).
+ *   - ★★ **이미 누가 소유하고 있으면 덮지 않는다**(탭 지정·시트 전체 어느 쪽이든) — 사람이 정한 소유를
+ *     재접수 한 번으로 바꾸면 안 된다(정산 계약 자동 연결의 kept_existing 과 같은 규율).
+ *   - ★ 같은 업체의 **해제된(soft-deleted) 행은 되살리지 않는다** — 사람이 [×]로 뺀 결정이다.
+ *   - ★ 종료(ended) 거래처로는 지정하지 않는다.
+ *   - 판정과 쓰기는 **한 문장**(INSERT … WHERE NOT EXISTS) — 조회 후 쓰기 사이 경합 창을 두지 않는다.
+ *   - 절대 throw 하지 않는다 — 호출부(접수)는 이미 끝난 일이다. 결과 코드로 사실을 말한다.
+ *
+ * @returns {Promise<{status:'assigned'|'already'|'kept_existing'|'kept_removed'|'advertiser_ended'|'no_gid'|'no_advertiser'|'failed', owner?:string, error?:string}>}
+ */
+async function ensureTabOwnership({ advertiserId, sheetId, tabGid, by } = {}, deps) {
+  const pool = (deps && deps.pool) || defaultPool;
+  const adv = _text(advertiserId, 64);
+  const sid = _text(sheetId, 200);
+  const gid = _text(tabGid, 64);
+  if (!adv || !sid) return { status: 'no_advertiser' };
+  if (!gid) return { status: 'no_gid' };
+  // ★ 동시 접수 직렬화 — NOT EXISTS 는 "없는 행"을 잠그지 못하고 유니크 인덱스는 업체별이라,
+  //   서로 다른 업체의 접수 둘이 같은 탭에 동시에 들어오면 둘 다 소유자가 된다(Codex 리뷰).
+  //   (시트·탭) 키로 트랜잭션 잠금을 잡고 판정·쓰기를 그 안에서 한다.
+  let client = null;
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`adv_own:${sid}:${gid}`]);
+    const { rows } = await client.query(
+      `INSERT INTO advertiser_campaigns (advertiser_id, sheet_id, tab_gid, assigned_by)
+       SELECT $1, $2, $3, $4
+        WHERE EXISTS (SELECT 1 FROM advertisers WHERE id = $1 AND COALESCE(status,'') <> 'ended')
+          AND NOT EXISTS (SELECT 1 FROM advertiser_campaigns
+                           WHERE deleted_at IS NULL AND sheet_id = $2
+                             AND (tab_gid IS NULL OR tab_gid = $3))
+       ON CONFLICT (advertiser_id, sheet_id, COALESCE(tab_gid,'')) DO NOTHING
+       RETURNING id`,
+      [adv, sid, gid, _text(by, 100) || '자동(작업오더)']
+    );
+    let result;
+    if (rows.length) {
+      result = { status: 'assigned' };
+    } else {
+      // 왜 안 넣었는지 사실대로 말한다(조용한 no-op 금지).
+      const { rows: own } = await client.query(
+        `SELECT ac.advertiser_id AS "advertiserId", a.name
+           FROM advertiser_campaigns ac LEFT JOIN advertisers a ON a.id = ac.advertiser_id
+          WHERE ac.deleted_at IS NULL AND ac.sheet_id = $1 AND (ac.tab_gid IS NULL OR ac.tab_gid = $2)
+          ORDER BY (ac.tab_gid IS NULL) ASC LIMIT 1`, [sid, gid]);
+      if (own.length) {
+        result = own[0].advertiserId === adv
+          ? { status: 'already' }
+          : { status: 'kept_existing', owner: own[0].name || own[0].advertiserId };
+      } else {
+        const { rows: a } = await client.query(`SELECT status FROM advertisers WHERE id = $1`, [adv]);
+        result = (!a.length || String(a[0].status || '') === 'ended') ? { status: 'advertiser_ended' } : { status: 'kept_removed' };
+      }
+    }
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    if (client) { try { await client.query('ROLLBACK'); } catch (_) {} }
+    return { status: 'failed', error: err.message };
+  } finally {
+    if (client) client.release();
+  }
+}
+
 module.exports = {
   projectIntranetAdvertiser,
+  ensureTabOwnership,
   AdvertiserLinkError,
   ADVERTISER_NAME_CONFLICT,
 };

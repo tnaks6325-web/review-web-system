@@ -166,7 +166,8 @@ async function bindProfileOwnerWhenEnabled(req, res, next) {
 // POST /api/reviewer/register — 리뷰어 등록 (GAS: registerReviewer)
 router.post('/register', registerLimiter, async (req, res, next) => {
   try {
-    const result = await registerReviewer(req.body);
+    // ★ 리뷰어 본인 가입은 카카오톡 아이디 필수(사용자 확정 2026-09-30). 요청 본문으로 끌 수 없게 서버가 세운다.
+    const result = await registerReviewer({ ...(req.body || {}), requireKakaoId: true });
     res.json(result);
   } catch (err) {
     next(err);
@@ -301,6 +302,17 @@ router.patch('/profile/identities/:identityKey/shopping-id', reviewerSessionMidd
   } catch (err) { return sendReviewerIdentityError(res, err, next); }
 });
 
+// 참여 직전 빈 주소 한 번 받기(조각 5). 빈 칸일 때만 채운다 — 이미 있으면 저장하지 않고 filled:false.
+router.patch('/profile/identities/:identityKey/address', reviewerSessionMiddleware, async (req, res, next) => {
+  try {
+    res.json(await reviewerOrderIdentity.saveIdentityAddress(
+      req.reviewer.ownerReviewerId,
+      decodeURIComponent(String(req.params.identityKey || '')),
+      req.body && req.body.address
+    ));
+  } catch (err) { return sendReviewerIdentityError(res, err, next); }
+});
+
 router.post('/order-identity-context', reviewerSessionMiddleware, async (req, res, next) => {
   try {
     res.json(await reviewerOrderIdentity.getParticipationIdentityContext(req.body || {}, req.reviewer));
@@ -332,7 +344,7 @@ router.post('/order-identity-match/manual-confirm', imageApiLimiter, reviewerSes
 // ★ Gemini 비용 보호: 이미지 API와 동일한 리미터 적용 (무인증 엔드포인트 DoS 방지)
 router.post('/identity-precheck', imageApiLimiter, bindProfileOwnerWhenEnabled, async (req, res) => {
   try {
-    const { profileMissing, resolveOrderIdentity } = require('../services/identity.service');
+    const { participationProfileMissing, resolveOrderIdentity } = require('../services/identity.service');
     const p8 = String(req.body?.phone8 || '').replace(/[^0-9]/g, '').slice(-8);
     if (p8.length !== 8) return res.json({ ok: false, error: 'phone8이 필요합니다.' });
 
@@ -350,7 +362,7 @@ router.post('/identity-precheck', imageApiLimiter, bindProfileOwnerWhenEnabled, 
     }
     if (!Array.isArray(reviewer.sub_accounts)) reviewer.sub_accounts = [];
 
-    const missing = profileMissing(reviewer);
+    const missing = participationProfileMissing(reviewer);   // 주소 제외(결정 181) — 제출 배너가 주소로 막지 않게
     if (missing.length > 0) {
       return res.json({ ok: true, profileMissing: missing, results: [] });
     }
@@ -369,92 +381,13 @@ router.post('/identity-precheck', imageApiLimiter, bindProfileOwnerWhenEnabled, 
   }
 });
 
-// GET /api/reviewer/inaed-list — 인애드 명단 조회 (전체 목록, 관리자용)
-router.get('/inaed-list', authMiddleware, async (req, res, next) => {
-  try {
-    const { rows } = await pool.query(`
-      SELECT name, phone, phone8, registered_at AS "registeredAt",
-             consent, status, income_type AS "incomeType",
-             resident_num AS "residentNum",
-             sub_accounts AS "subAccounts"
-      FROM reviewers
-      ORDER BY registered_at DESC
-    `);
-    res.json({ ok: true, list: rows, total: rows.length });
-  } catch (err) {
-    next(err);
-  }
-});
+// (GET /api/reviewer/inaed-list — 리뷰어 전원 주민번호·전화번호를 돌려주던 명단) 은 2026-10-04 제거 — 화면 호출 0 · 9/2 이후 호출 0 · 개인정보가 새는 입구(결정 186 92번).
 
 // ═══════════════════════════════════════════════════════════
 // Phase 2: 리뷰어 대시보드 API
 // ═══════════════════════════════════════════════════════════
 
-// GET /api/reviewer/my-applications?phone8=XX — 내 캠페인 신청 이력
-router.get('/my-applications', async (req, res, next) => {
-  try {
-    const { phone8 } = req.query;
-    if (!phone8 || phone8.length !== 8) {
-      return res.status(400).json({ ok: false, error: 'phone8 필수 (8자리)' });
-    }
-
-    // 1. 본계정 코드 스코프(본인+타계정+이전 별칭)를 읽는다. 코드가 아직 없는 레거시 행도
-    //    sub_accounts 범위로 계속 읽혀야 하므로 서비스가 기존 폴백까지 맡는다.
-    const { rows: reviewerRows } = await pool.query(
-      `SELECT name, phone FROM reviewers WHERE phone8 = $1 LIMIT 1`,
-      [phone8]
-    );
-    if (reviewerRows.length === 0) {
-      return res.json({ ok: true, applications: [], message: '등록된 리뷰어를 찾을 수 없습니다.' });
-    }
-    let phoneList = [phone8], ownerReviewerId = null;
-    try { const scope = await require('../services/reviewerIdentity.service').getOwnerScopeByLoginPhone8(phone8); phoneList = scope.phone8s || phoneList; ownerReviewerId = scope.ownerReviewerId || null; }
-    catch (scopeErr) { logger.warn('[my-applications] 코드 스코프 조회 실패(현재 번호만): ' + scopeErr.message); }
-
-    // 2. campaign_applications에서 소유자 전체의 신청 이력 조회. 표시/정산 집계는 소유자 기준이되,
-    //    같은 공고 재참여 제한은 계속 apply 경로의 실제 참여자 phone8/identity 기준으로 따로 판정한다.
-    const { rows: appRows } = await pool.query(`
-      SELECT
-        ca.id,
-        ca.campaign_id AS "campaignId",
-        ca.applicant_name AS "name",
-        ca.applicant_phone AS "phone",
-        ca.status,
-        ca.applied_at AS "appliedAt",
-        rc.title AS "campaignTitle",
-        rc.channel,
-        rc.channel_custom AS "channelCustom",
-        rc.manager,
-        COALESCE(ca.review_fee_snapshot, rc.review_fee) AS "reviewFee", -- ★ 082: 참여 시점 금액 우선
-        rc.status AS "campaignStatus"
-      FROM campaign_applications ca
-      LEFT JOIN recruit_campaigns rc ON ca.campaign_id = rc.id
-      WHERE (ca.owner_reviewer_id = $2
-             OR (ca.owner_reviewer_id IS NULL AND (
-               ca.phone8 = ANY($1)
-               OR (ca.owner_phone8 = ANY($1) AND NOT EXISTS (
-                 SELECT 1 FROM reviewer_phone_changes rpc
-                  WHERE rpc.old_phone8 = ca.owner_phone8
-                    AND ($2::uuid IS NULL OR rpc.reviewer_id <> $2)
-               ) AND NOT EXISTS (
-                 SELECT 1
-                   FROM reviewer_identity_aliases ria
-                   JOIN reviewer_identities rii ON rii.id = ria.identity_id
-                  WHERE ria.phone8 = ca.owner_phone8
-                    AND ($2::uuid IS NULL OR rii.owner_reviewer_id <> $2)
-               ))
-             )))
-        -- 작업보드에서 참여행을 삭제하며 취소된 건은 리뷰어의 참여이력에서 제외한다.
-        AND ca.status <> 'cancelled'
-      ORDER BY ca.applied_at DESC
-      LIMIT 50
-    `, [phoneList, ownerReviewerId]);
-
-    res.json({ ok: true, applications: appRows, total: appRows.length });
-  } catch (err) {
-    next(err);
-  }
-});
+// (GET /api/reviewer/my-applications — 번호 8자리만으로 신청 이력을 주던 무인증 입구) 은 2026-10-04 제거 — 화면 호출 0 · 9/2 이후 호출 0 · 개인정보가 새는 입구(결정 186 92번).
 
 // GET /api/reviewer/my-status?phone8=XX — 내 참여현황 (진행단계 포함)
 router.get('/my-status', async (req, res, next) => {
@@ -816,21 +749,34 @@ router.get('/overdue-review-warning', reviewerSessionMiddleware, async (req, res
 
     const { rows } = await require('../services/boundedReviewRead.service').boundedReviewRead(client => client.query(`
       WITH warning_candidate_ids AS MATERIALIZED (
+        /* 후보 주문 ID 모으기 — "계정ID 또는 전화번호"를 한 조건(OR)으로 쓰면 인덱스를 못 타고 표 전체를
+           읽어(주문표는 전화번호 정리식을 모든 행에 계산) 1.5초 제한에 걸렸다(운영 실측 약 50% 503).
+           갈래별로 나눠 각자 인덱스를 탄다(migration 168). 결과 집합은 OR 과 같다.
+           ★ 조건은 한 글자도 좁히지 않았다(삭제 여부 등은 종전처럼 아래 단계가 거른다). */
+        SELECT id FROM order_submissions WHERE owner_reviewer_id = $1
+        UNION
         SELECT id FROM order_submissions
-         WHERE owner_reviewer_id = $1
-            OR RIGHT(regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g'), 8) = ANY($2)
+         WHERE RIGHT(regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g'), 8) = ANY($2)
         UNION
-        SELECT order_submission_id FROM campaign_participants
-         WHERE owner_reviewer_id = $1 OR phone8 = ANY($2)
-            OR participant_identity_id IN (SELECT id FROM reviewer_identities WHERE owner_reviewer_id = $1)
+        SELECT order_submission_id FROM campaign_participants WHERE owner_reviewer_id = $1
         UNION
-        SELECT os.id FROM order_submissions os
-          JOIN campaign_applications app ON app.id = os.campaign_application_id
-         WHERE app.owner_reviewer_id = $1 OR app.owner_phone8 = ANY($2)
+        SELECT order_submission_id FROM campaign_participants WHERE phone8 = ANY($2)
+        UNION
+        SELECT cp.order_submission_id FROM reviewer_identities ri_owner
+          JOIN campaign_participants cp ON cp.participant_identity_id = ri_owner.id
+         WHERE ri_owner.owner_reviewer_id = $1
+        UNION
+        SELECT os.id FROM campaign_applications app
+          JOIN order_submissions os ON os.campaign_application_id = app.id
+         WHERE app.owner_reviewer_id = $1
+        UNION
+        SELECT os.id FROM campaign_applications app
+          JOIN order_submissions os ON os.campaign_application_id = app.id
+         WHERE app.owner_phone8 = ANY($2)
       ), warning_orders AS MATERIALIZED (
         SELECT os.* FROM order_submissions os
-          JOIN warning_candidate_ids candidate ON candidate.id = os.id
-         WHERE os.deleted_at IS NULL AND os.mirror_status = 'written'
+         WHERE os.id IN (SELECT id FROM warning_candidate_ids WHERE id IS NOT NULL)
+           AND os.deleted_at IS NULL AND os.mirror_status = 'written'
            AND os.submitted_at <= NOW() - INTERVAL '10 days'
       ), warning_participants AS MATERIALIZED (
       -- Resolve an order's participant once, before the index/obligation joins.
@@ -1028,7 +974,8 @@ router.get('/review-earnings', async (req, res, next) => {
                (ri.is_submitted2 = 'PAID' OR EXISTS (
                   SELECT 1 FROM jsonb_each_text(COALESCE(ri.row_json, '{}'::jsonb)) kv
                   WHERE kv.key ILIKE ANY($2) AND btrim(kv.value) <> ''
-               )) AS "isPaid"
+               )) AS "isPaid",
+               ${require('../services/reviewObligation.service').finishedTabSql('ri.sheet_id', 'ri.tab_name', 'ri.tab_gid')} AS "finished"
          FROM earnings_rows ri
          LEFT JOIN campaign_participants cp
            ON cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
@@ -1272,6 +1219,12 @@ router.get('/review-earnings', async (req, res, next) => {
        SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
               cp.sheet_id AS "participantSheetId", cp.tab_name AS "participantTabName", cp.seq AS "participantRowIndex",
               ${require('../services/reviewObligation.service').submittedSql('COALESCE(cp.is_submitted, FALSE)', 'cp', 'seq')} AS "isSubmitted",
+              (CASE WHEN cp.id IS NOT NULL
+                    THEN ${require('../services/reviewObligation.service').finishedTabSql('cp.sheet_id', 'cp.tab_name', "NULLIF(cp.tab_gid,'')")}
+                    WHEN os.sheet_id NOT LIKE 'campaign:%'
+                    THEN ${require('../services/reviewObligation.service').finishedTabSql('os.sheet_id', 'os.tab_name', "NULLIF(os.tab_gid,'')")}
+                    ELSE ${require('../services/reviewObligation.service').finishedTabSql('rc.linked_sheet_id', 'rc.linked_tab_name', "NULLIF(rc.linked_tab_gid,'')")}
+               END) AS "finished",
               COALESCE(NULLIF(substring(os.sheet_id from '^campaign:(.+)$'), ''), ca.campaign_id) AS "campaignId", os.price,
               os.review_fee_snapshot AS "feeSnapshot", os.delivery_review_fee_mix_snapshot AS "deliveryReviewFeeMixSnapshot",
               os.submitted_at AS "orderedAt", cp.row_json AS "rowJson",
@@ -1493,9 +1446,12 @@ router.get('/review-earnings', async (req, res, next) => {
         purchaseDate: of.orderDate || sheetDateToIso(r.startDate, camp.campStartDate) || null,
       };
       if (!r.isSubmitted) {
-        count++;
-        reviewTotal += reviewFee;
-        if (price != null) productTotal += price; else productUnknown++;
+        // 마감된 작업의 미제출 행은 "받을 예정"이 아니다(리뷰 내역 대기 목록에서도 빠진다).
+        if (!r.finished) {
+          count++;
+          reviewTotal += reviewFee;
+          if (price != null) productTotal += price; else productUnknown++;
+        }
       } else if (r.isPaid) {
         dCount++;
         dReviewTotal += reviewFee;
@@ -1535,6 +1491,7 @@ router.get('/review-earnings', async (req, res, next) => {
         dUnpaidCount++;
         continue;
       }
+      if (o.finished) continue;
       const fallbackKey = o.campaignId || `${o.sheetId || ''}||${o.tabName || ''}`;
       const existingFallback = sheetlessFallbackCounts.get(fallbackKey);
       if (existingFallback) {
@@ -1584,61 +1541,7 @@ router.get('/review-earnings', async (req, res, next) => {
   }
 });
 
-// GET /api/reviewer/my-payments?phone8=XX — 내 입금 내역
-router.get('/my-payments', async (req, res, next) => {
-  try {
-    const { phone8 } = req.query;
-    if (!phone8 || phone8.length !== 8) {
-      return res.status(400).json({ ok: false, error: 'phone8 필수 (8자리)' });
-    }
-
-    // reviewers에서 이름 조회
-    const { rows: reviewerRows } = await pool.query(
-      `SELECT name FROM reviewers WHERE phone8 = $1 LIMIT 1`,
-      [phone8]
-    );
-    if (reviewerRows.length === 0) {
-      return res.json({ ok: true, payments: [], summary: { total: 0, totalAmount: 0 } });
-    }
-    const name = reviewerRows[0].name;
-
-    // payment_records에서 해당 리뷰어의 입금 이력
-    const { rows: payRows } = await pool.query(`
-      SELECT
-        pr.id,
-        pr.tab_name AS "tabName",
-        pr.reviewer_name AS "name",
-        pr.amount,
-        pr.status,
-        pr.paid_at AS "paidAt",
-        tc.display_name AS "displayName",
-        tc.campaign_name AS "campaignName"
-      FROM payment_records pr
-      LEFT JOIN tab_configs tc ON pr.sheet_id = tc.sheet_id AND pr.tab_name = tc.tab_name
-      WHERE pr.reviewer_name = $1
-      ORDER BY pr.paid_at DESC
-      LIMIT 100
-    `, [name]);
-
-    // 총 입금액 합산
-    let totalAmount = 0;
-    payRows.forEach(r => {
-      const amt = parseInt((r.amount || '0').replace(/[^0-9]/g, ''));
-      if (!isNaN(amt)) totalAmount += amt;
-    });
-
-    res.json({
-      ok: true,
-      payments: payRows,
-      summary: {
-        total: payRows.length,
-        totalAmount,
-      }
-    });
-  } catch (err) {
-    next(err);
-  }
-});
+// (GET /api/reviewer/my-payments — 번호 8자리만으로 입금 내역(동명이인 포함)을 주던 무인증 입구) 은 2026-10-04 제거 — 화면 호출 0 · 9/2 이후 호출 0 · 개인정보가 새는 입구(결정 186 92번).
 
 // ═══════════════════════════════════════════════════════════
 // C/S 문의창구 — 리뷰어용 (토큰 없음, phone8이 사실상 인증 토큰)

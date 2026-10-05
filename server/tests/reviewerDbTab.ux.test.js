@@ -53,7 +53,7 @@ ok('저장 실패 시 화면값을 원래대로 되돌린다(거짓 성공 표�
 /* ── ② 컬럼 순서 ── */
 console.log('\n② 컬럼 순서(사용자 확정)');
 const thead = /<thead><tr>([\s\S]*?)<\/tr><\/thead>/.exec(
-  /_renderRvBody[\s\S]*?<\/tbody><\/table>/.exec(jsNoComment)[0]);
+  /function _renderRvBody[\s\S]*?<\/tbody><\/table>/.exec(jsNoComment)[0]);   // ★ 함수 정의에 고정 — 호출부에서 시작하면 앞에 끼어든 다른 표(명의 합치기 판단 내역)를 집는다
 const cols = [...thead[1].matchAll(/<th[^>]*>([\s\S]*?)<\/th>/g)].map(m => m[1].trim());
 /* 2026-08-05 자동 블랙리뷰어(091-2)로 갱신: 타계정 뒤에 누적참여·이전 리뷰,
    삭제 바로 왼쪽에 참여설정 — 나머지 순서는 종전 사용자 확정 그대로. */

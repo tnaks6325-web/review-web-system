@@ -316,7 +316,7 @@ const file = (over) => ({ id: 'F1', name: '김신혜.jpg', mimeType: 'image/jpeg
        `PANELS` 에 있어도 어느 호스트의 `mount({panels:[...]})` 에도 없으면 사람이 열 방법이 없다
        (실제로 capturelink 가 그랬고, [✅ 리뷰타입 정리]는 그 상태로 오래 방치돼 있었다).
        ★ 어느 호스트에 두는지는 기능마다 다르므로 **최소 한 곳**만 요구한다. */
-    const hosts = ADM + '\n' + WD + '\n' + front('admin-siand.html');
+    const hosts = ADM + '\n' + WD;   // (admin-siand.html 은 결정 186 44번에서 제거)
     const keys = (/var PANELS = \{([^}]*)\}/.exec(AS) || [, ''])[1]
       .split(',').map(x => x.split(':')[0].trim()).filter(Boolean);
     ok('PANELS 키를 읽었다(3개 이상)', keys.length >= 3, keys.join('|'));

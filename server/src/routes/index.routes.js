@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { searchByName, searchByNameDebug } = require('../services/search.service');
+const { searchByName } = require('../services/search.service');
 const { buildIndexSmart, checkDirtySheets, buildOneSheet } = require('../services/indexBuilder.service');
 const { authMiddleware } = require('../middleware/auth.middleware');
 const { emitIndexBuild } = require('../utils/sse');
@@ -79,18 +79,7 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-// ═══════════════════════════════════════════════════════════
-// GET /api/search/debug — 디버그용 검색 (GAS: searchAllDebug)
-// ═══════════════════════════════════════════════════════════
-router.get('/debug', authMiddleware, async (req, res, next) => {
-  try {
-    const { query } = req.query;
-    const result = await searchByNameDebug(query);
-    res.json(result);
-  } catch (err) {
-    next(err);
-  }
-});
+// GET /api/search/debug(= /api/index/debug) 은 2026-10-05 제거 — 결정 186 103번(옛 리뷰제출 화면의 열 수 없는 진단 창 전용 · 9/2 이후 호출 0).
 
 // ═══════════════════════════════════════════════════════════
 // POST /api/index/build — 인덱스 빌드 (비동기: 즉시 응답 + 백그라운드 처리)

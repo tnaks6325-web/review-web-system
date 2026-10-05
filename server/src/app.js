@@ -18,21 +18,13 @@ const reviewerRoutes = require('./routes/reviewer.routes');
 const adminRoutes    = require('./routes/admin.routes');
 const driveRoutes    = require('./routes/drive.routes');
 const shortRoutes    = require('./routes/shortlink.routes');
-const memoRoutes     = require('./routes/memo.routes');
-const paymentRoutes  = require('./routes/payment.routes');
 const submitRoutes   = require('./routes/submit.routes');
-const manualOrderRoutes = require('./routes/manualOrder.routes');
 const diagRoutes     = require('./routes/diag.routes');
 const archiveRoutes  = require('./routes/archive.routes');
-const dedupeRoutes   = require('./routes/dedupe.routes');
 const campaignRoutes = require('./routes/campaign.routes');
 const orderRoutes    = require('./routes/order.routes');
 const productRoutes  = require('./routes/product.routes');
-const portalRoutes   = require('./routes/portal.routes');
-const rawRoutes      = require('./routes/raw.routes');
 const csRoutes       = require('./routes/cs.routes');
-const mappingRoutes  = require('./routes/mapping.routes');
-const participantsRoutes = require('./routes/participants.routes');
 const trackBRoutes = require('./routes/trackB.routes');
 const reviewEditRoutes = require('./routes/reviewEdit.routes');
 const workboardConsolidationRoutes = require('./routes/workboardConsolidation.routes');
@@ -93,37 +85,32 @@ app.use('/api/drive',     driveRoutes);
 // 단축URL (Section 10)
 app.use('/api/short',     shortRoutes);
 
-// 메모 (Section 10)
-app.use('/api/memo',      memoRoutes);
+// (/api/memo — 옛 대시보드 탭 메모는 2026-09-28 제거, 결정 186 55번. memos 표는 보존)
 
-// 입금처리 (Section 11)
-app.use('/api/payment',   paymentRoutes);
+// (/api/payment — 옛 대시보드 입금처리 탭 전용(회차를 건너뛰는 수동 이체완료)은 2026-09-28 제거, 결정 186 57번. 입금은 /api/trackb/payment/*)
 
 // 리뷰제출 + 구매양식 (Section 5/12)
 app.use('/api/submit',    submitRoutes);
-// 외부모집 구매양식 관리자 수동제출(admin/master 전용) — 무인증 submit 경로와 분리
-app.use('/api/manual-order', manualOrderRoutes);
+// (/api/manual-order — 외부모집 수동제출 옛 입구는 2026-09-28 제거, 결정 186 54번. 핸들러는 /api/trackb/manual-order/* 가 위임으로 계속 사용)
 
 // 진단/디버그/뷰어/블랙리스트/캠페인/이미지 (Section 12)
 app.use('/api/diag',      diagRoutes);
 app.use('/api/archive',   archiveRoutes);
-app.use('/api/dedupe',    dedupeRoutes);
+// (/api/dedupe — 옛 대시보드 리뷰폴더 중복정리(Drive 휴지통 + 시트 '중복' 마킹)는 2026-09-28 제거, 결정 186 56번)
 app.use('/api/campaign',  campaignRoutes);
 app.use('/api/order',     orderRoutes);
 app.use('/api/product',   productRoutes);
 
 // 업무포털 — 거래처(광고주)별 작업 관리 (Section 13)
-app.use('/api/portal',    portalRoutes);
+// (/api/portal — 업무포털 전용 라우트는 2026-09-28 제거, 결정 186 45번. portal_works 표는 advertiserProjection 이 계속 사용.)
 
 // 리뷰어 C/S 문의창구 — 관리자 (Section 15)
 app.use('/api/cs',        csRoutes);
 
-// 구글시트 전체 RAW 미러링 (Section 14)
-app.use('/api/raw',       rawRoutes);
+// (/api/raw — RAW 미러 뷰어 입구는 2026-09-29 제거, 결정 186 75번. 5분 자동 미러 cron·rawMirror.service 는 유지)
 
-// 명시적 컬럼 매핑 (Section 15) — 구글시트 점진 대체 keystone
-app.use('/api/mapping',   mappingRoutes);
-app.use('/api/participants', participantsRoutes);  // Phase 1 shadow — master 전용, 신규 테이블만
+// (/api/mapping — 컬럼 매핑 편집 입구는 결정 186 75번에서 제거. columnMapping.service 는 장부·빌더가 계속 사용)
+// (/api/participants — 참여자 명단 테스트 화면 전용 라우트는 2026-09-28 제거, 결정 186 46번)
 // 인트라넷 SSO 토큰은 /api/trackb/* 밖으로 나갈 수 없다. 알림톡 운영 화면도 Track B 셸에서
 // 열리므로 같은 관리자 전용 라우터를 이 경로에도 먼저 마운트한다(기존 직접 관리자 경로 유지).
 app.use('/api/trackb/review-reminders', reviewReminderRoutes);
@@ -131,6 +118,7 @@ app.use('/api/trackb', trackBRoutes);              // Track B(평행 트랙) —
 
 // 리뷰 이미지 수정요청 (리뷰어 → 관리자 승인 → [리뷰] 폴더 파일 교체)
 app.use('/api/review-edit', reviewEditRoutes);
+// 작업보드 통합 — 상태 보기·비상 정지(rollback-mode)만 남김(준비 입구 5개는 2026-10-02 제거, 결정 186 71번)
 app.use('/api/workboard-consolidation', workboardConsolidationRoutes);
 app.use('/api/review-reminders', reviewReminderRoutes);
 
@@ -246,8 +234,6 @@ app.get('/health', async (req, res) => {
       admin: '/api/admin/login',
       drive: '/api/drive/*',
       short: '/api/short/*',
-      memo: '/api/memo',
-      payment: '/api/payment/targets',
       submit: '/api/submit/*',
       diag: '/api/diag/*',
     }

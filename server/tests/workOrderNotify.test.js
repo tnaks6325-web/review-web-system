@@ -44,9 +44,8 @@ ok('order: 헬퍼가 sse.emitWorkOrderNew 위임 + try/catch best-effort',
 }
 // 재제출: revision→submitted 복귀 문맥에서 resubmitted:true
 {
-  const idx = orderRoutes.indexOf('resubmitted: true');
-  ok('order: 재제출 emit(resubmitted:true)은 revision 복귀 문맥',
-    idx > 0 && orderRoutes.slice(Math.max(0, idx - 400), idx).includes("cur[0].status === 'revision'"));
+  // 재제출 알림은 AE 수정 경로(PUT /my/update)에만 있었다 (AE 수정 경로 PUT /my/update 는 staff.html 과 함께 결정 186 49번에서 제거).
+  ok('order: AE 재제출 경로가 되살아나지 않았다', !orderRoutes.includes("router.put('/my/update'"));
 }
 
 // ── 프론트: index-payment.js (SSE 수신) ──

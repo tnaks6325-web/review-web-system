@@ -74,7 +74,7 @@ const grid = body(wd, 'function buildGrid(');
 t('행 배경은 r.over 로만 켠다(화면 재판정 0)', /r\.over===true\?' class="gover"'/.test(grid));
 t('초과 배지도 r.over 로만', /r\.over===true\?' <span class="govb"/.test(grid));
 t('★ 복사 텍스트에서 초과 배지를 제거한다(셀 값에 "초과" 가 섞이지 않게)',
-  /\.ehist,\.rdel,\.src,\.visit,\.lock,\.govb/.test(wd));
+  /querySelectorAll\('\.ehist,\.rdel,\.src,\.visit,[^']*\.govb[,']/.test(wd));
 t('CSS 는 gover/govb 접두 — 맨몸 .over 를 쓰지 않는다',
   /tr\.gover>td\{/.test(wd) && /\.govb\{/.test(wd));
 
@@ -88,14 +88,22 @@ t('★ 초과 수는 서버 counts.over 만 — 화면에서 세지 않는다',
 t('초과면 참여자 게이지 숫자가 붉어지고 +N 초과 배지가 붙는다',
   /nm\$\{ov\?' isover':''\}/.test(strip) && /class="ovb">\+\$\{ov\} 초과/.test(strip));
 
-const home = body(wd, 'function _finProgHtml(');
-t('홈도 총건수 기준으로 초과를 말한다', /const over=\(rt&&_isNoSheet\(t\)&&filled>rt\.total\)/.test(home));
+const home = body(wd, 'function _finNumCells(');
+/* ★★ 판정은 `_finQuotaFill` 한 곳 — 참여 칸 파랑과 모집공고 칸 `✓ 모집완료` 가 같은 값을 본다
+   (2026-09-22 ②). 여기서 다시 세면 한 줄 안에서 두 칸이 갈린다. */
+const qfill = body(wd, 'function _finQuotaFill(');
+t('홈도 총건수 기준으로 초과를 말한다',
+  /const over=!!\(rt&&filled!=null&&_isNoSheet\(t\)&&filled>rt\.total\)/.test(qfill));
 /* ★★ 서버는 `meta.sheetless` 일 때만 행에 `over` 를 붙인다 — 홈에서 게이트를 빼면 시트 기반 탭에서
    홈만 붉어지고 "표에서 붉은 줄로 표시합니다" 가 거짓말이 된다(코덱스 리뷰 P2, 2026-08-24). */
 t('★ 홈 초과 판정도 무시트 작업만(시트 기반 탭에 거짓 경고 금지)',
-  /_isNoSheet\(t\)&&filled>rt\.total/.test(home));
+  /_isNoSheet\(t\)&&filled>rt\.total/.test(qfill));
+t('★ 판정 사본 0 — 숫자 칸은 그 함수를 받아 쓰기만 한다',
+  /const q=_finQuotaFill\(t\);/.test(home)
+  && !/filled>rt\.total/.test(home) && !/filled>=den/.test(home));
 t('홈 초과 표기는 색으로만(숫자는 이미 501/500 로 보인다)',
-  /wbl-num\$\{over\?' isover':''\}/.test(home) && !/\+\$\{over\} 초과/.test(home));
+  // 시안 확정(2026-09-22): 숫자는 총건수·참여가 **각자 칸**이라 참여 상자를 붉게 채우는 것으로 말한다.
+  /over\?'isover'/.test(home) && !/\+\$\{over\} 초과/.test(home));
 
 console.log('── D. 균형 모드: 여분 준비 줄을 닫을 수 있다 ──');
 t('★ 구간 뒤 빈 준비 줄을 0 명으로 표에 올린다(닫을 창구가 생긴다)',

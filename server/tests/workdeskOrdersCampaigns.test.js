@@ -35,19 +35,18 @@ const READ = ['GET /work-orders/list', 'GET /campaigns/list', 'GET /campaigns/:i
   'GET /campaigns/:id/activity-log',
   'GET /campaigns/:id/preview', 'GET /perm'];
 const WRITE = ['POST /work-orders/accept', 'PUT /work-orders/status',
-  'PUT /work-orders/update', 'PUT /work-orders/edit', 'POST /work-orders/submit',
+  'PUT /work-orders/update', 'PUT /work-orders/edit',   // (POST /work-orders/submit = 🧪 테스트 오더 — 결정 186 17번 제거)
   'POST /campaigns/create', 'PUT /campaigns/:id', 'POST /campaigns/:id/flags',
   'DELETE /campaigns/:id', 'POST /campaigns/:id/confirm', 'PUT /campaigns/:id/status',
   'POST /campaigns/:id/dismiss', 'POST /campaigns/:id/blog-approve',
   'POST /campaigns/:id/blog-reject', 'POST /campaigns/:id/archive',
-  'GET /worktable/plan', 'POST /worktable/create', 'POST /worktable/delete',
-  'POST /worktable/delete-tab',
+  // (GET /worktable/plan (결정 186 40번 — 작업표 미리보기 창·GET /worktable/plan 제거) · create·delete·delete-tab 은 제거 (결정 186 10번 — 2026-09-28 시트 탭 생성 createWorktable 제거))
   // 외부모집 구매양식 수동제출 — 리뷰어 등록·주문 원장·정원 차감·시트 쓰기를 일으키는 창구라
   // 접수·발행과 같은 공통 권한을 적용한다.
   'POST /manual-order/preview', 'POST /manual-order/submit'];
 const AE_CAMPAIGN_CONTROL = [
   'GET /campaigns/:id/daily-plan', 'POST /campaigns/:id/daily-plan',
-  'PUT /campaigns/:id/carry-strategy', 'POST /campaigns/:id/worktable-rebuild',
+  'PUT /campaigns/:id/carry-strategy',
   'POST /campaigns/:id/rounds', 'DELETE /campaigns/:id/rounds',
   'GET /campaigns/:id/reviewer-gate', 'GET /campaigns/:id/reviewer-gate/search',
   'POST /campaigns/:id/reviewer-gate',
@@ -74,7 +73,9 @@ t('★★ 편집은 전부 공통 게이트 뒤 — AE 허용과 광고주 차�
 t('★ 열람 라우트에는 편집 게이트를 걸지 않는다(읽기까지 막히면 탭이 무의미)', () => {
   READ.forEach(k => assert.ok(!L[k].includes('editorOnlyMiddleware'), k + ': 열람에 편집 게이트'));
 });
-t('날짜별 인원·차수·작업표 재구성·참여 제한도 AE가 조절', () => {
+t('날짜별 인원·차수·참여 제한도 AE가 조절', () => {
+  // 결정 185 — 수동 [작업표 재구성] 경로는 지웠다(전 기간 사용 0회) · 되살아나면 여기서 잡는다
+  assert.ok(!L['POST /campaigns/:id/worktable-rebuild'], '지운 수동 재구성 경로가 되살아났다');
   AE_CAMPAIGN_CONTROL.forEach(k => {
     assert.ok(L[k], '없음: ' + k);
     assert.ok(L[k].includes('internalMiddleware'), k + ': AE 허용 internalMiddleware 없음');
@@ -345,8 +346,8 @@ t('★ 상세 본문은 관리자 대시보드와 **같은 렌더러**(사본 �
   assert.ok(!/function _woDetailHtml/.test(APP), 'index-app.js 에 사본이 남아 있다');
   assert.ok(!/function _woDetailHtml/.test(HTML), 'workdesk.html 에 사본을 만들면 안 된다');
 });
-t('두 화면이 같은 모듈을 로드한다(admin·admin-siand·workdesk)', () => {
-  ['admin.html', 'admin-siand.html'].forEach(p => {
+t('두 화면이 같은 모듈을 로드한다(admin·workdesk) (admin-siand.html 은 결정 186 44번에서 제거)', () => {
+  ['admin.html'].forEach(p => {
     const s = F(p);
     // ★ 캐시버스팅 쿼리(?v=…)가 붙을 수 있다 — 고정하는 것은 **그 모듈을 로드한다**는 사실이다.
     assert.ok(/<script src="js\/work-order-detail\.js(\?[^"]*)?"><\/script>/.test(s), p + ' 미로드');

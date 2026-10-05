@@ -177,6 +177,16 @@ function profileMissing(reviewer) {
   return missing;
 }
 
+/**
+ * 참여·제출 게이트용 내정보 완비 — 주소는 요구하지 않는다(조각 5 · 결정 기록 181, 사용자 확정 2026-09-26).
+ * ★ 주소는 참여 뒤 구매양식에서 주문 캡처로 읽은 주소를 명의별로 [저장]해 채운다. 주문 칸의 배송주소는 제출 필수
+ *   (FIELDS_REQUIRED)라 주소 없는 주문은 여전히 들어오지 않는다.
+ * ★ profileMissing 자체는 바꾸지 않는다 — 내정보 화면의 "미등록" 표시는 4종 그대로.
+ */
+function participationProfileMissing(reviewer) {
+  return profileMissing(reviewer).filter((label) => label !== '주소');
+}
+
 /** 소유자 sub_accounts에서 명의(이름 정확일치 + phone8 정확일치) 탐색 — 타계정 참여(063) apply 게이트용.
  *  resolveOrderIdentity의 SUB 매칭과 동일 정규화(normName/normPhone8) — apply·submit 판정 드리프트 금지.
  *  순수함수(DB/네트워크 없음). 문자열(이중 인코딩) sub_accounts도 벨트로 파싱.
@@ -359,5 +369,5 @@ module.exports = {
   normName, normPhone8, normAccount, normAddress,
   extractHo, extractDong, bigramJaccard,
   addressHeuristic, addressSame, pickIdField,
-  profileMissing, resolveOrderIdentity, findSubAccount,
+  profileMissing, participationProfileMissing, resolveOrderIdentity, findSubAccount,
 };

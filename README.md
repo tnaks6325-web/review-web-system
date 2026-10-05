@@ -76,8 +76,6 @@ v2.16에서 구매양식 제출 시 자동 슬롯 매칭 시스템(인애드명 
 |---|---|---|
 | `/api/submit/find-slot` | POST | 슬롯 매칭 실행 (3순위 규칙 적용) |
 | `/api/submit/order` | POST | 구매양식 제출 (슬롯 매칭 결과 반영) |
-| `/api/submit/slot-status` | GET | slot_locks 테이블 상태 진단 |
-| `/api/diag/slot-locks` | GET | 슬롯 잠금 상세 진단 (인증 필요) |
 
 **슬롯 매칭 3순위 규칙:**
 
@@ -263,7 +261,6 @@ CREATE TABLE slot_locks (
 | `/api/admin/keywords` | GET/POST/PUT/DELETE | 인덱스 키워드 관리 |
 | `/api/admin/unrecognized` | GET | 인식 실패 탭 목록 |
 | `/api/admin/smart-build/*` | GET/POST | 스마트 빌드 관리 |
-| `/api/admin/db-rebuild` | POST | DB 전체 재구축 |
 | `/api/search?query=` | GET | 리뷰어 검색 |
 | `/api/index/status` | GET | 인덱스 상태 |
 | `/api/index/build` | POST | 인덱스 빌드 (비동기) |
@@ -275,15 +272,13 @@ CREATE TABLE slot_locks (
 | `/api/reviewer/*` | GET/POST | 리뷰어 관리 |
 | `/api/drive/*` | GET/POST | Drive 폴더 관리 |
 | `/api/short/*` | GET/POST | 단축URL |
-| `/api/memo` | GET/POST | 메모 |
-| `/api/payment/*` | GET/POST | 입금처리 |
 | `/api/review-reminders/status` | GET | 알림톡 설정·발송 상태(관리자 인증) |
 | `/api/review-reminders/run` | POST | 알림톡 dry-run 또는 수동 실행(관리자 인증, 기본 dry-run) |
 | `/api/archive/*` | GET/POST | 아카이브 |
 | `/api/diag/*` | GET/POST | 진단/모니터링 |
-| `/api/tab/fix-campaign-tab-swap` | POST | campaign_name/tab_gid 일괄 교정 (인증 필요, dryRun 지원) |
-| `/api/tab/sync-tab-names` | POST | 탭명 동기화 + GID 보충 (인증 필요) |
 | `/api/tab/clean-closed` | POST | 마감 탭 아카이브 처리 (인증 필요) |
+
+> 코드 다이어트(결정 186)로 제거된 입구: `/api/admin/db-rebuild`·`/api/tab/reset-all`·`/api/memo`·`/api/payment/*`(입금은 `/api/trackb/payment/*`)·`/api/portal/*`·`/api/participants/*`·`/api/dedupe/*`·옛 `/api/manual-order`(3버전 `/api/trackb/manual-order/*`) 등 — 목록은 `docs/decisions/186-코드-다이어트-장부-2026-09-28.md`.
 
 ## 환경변수 (Railway)
 ```

@@ -197,8 +197,49 @@ async function setGlobalBlacklist({ phone, on, reason, by }, db = pool) {
       [clean, String(reason || '').slice(0, 200), String(by || '')]);
     return { on: true };
   }
-  await db.query(`DELETE FROM blacklist WHERE REGEXP_REPLACE(phone,'[^0-9]','','g') = $1`, [clean]);
-  return { on: false };
+  /* ★★ 블랙리스트 해제 = 다시 참여 가능 (사용자 확정 2026-10-01 — "똑같이 풀어져야 한다")
+       공고별 "참여 불가"(campaign_reviewer_gates block)는 별개 표라, 블랙리스트만 지우면 리뷰어에게는
+       계속 "마감"으로 보였다(실측: 이미정 39곳 · 다른 6명 31곳). 해제할 때 그 번호의 공고별 차단도
+       **같은 트랜잭션에서** 함께 푼다(묻지 않는다). ★ 'allow'(허용 예외)는 무접촉 · 소프트 해제(이력 보존). */
+  const client = typeof db.connect === 'function' ? await db.connect() : null;
+  const q = client || db;
+  try {
+    if (client) await q.query('BEGIN');
+    await q.query(`DELETE FROM blacklist WHERE REGEXP_REPLACE(phone,'[^0-9]','','g') = $1`, [clean]);
+    const { released } = await releaseCampaignBlocks(clean, by, q);
+    if (client) await q.query('COMMIT');
+    return { on: false, campaignBlocksReleased: released };
+  } catch (err) {
+    if (client) { try { await q.query('ROLLBACK'); } catch (_) { /* noop */ } }
+    throw err;
+  } finally { if (client) client.release(); }
+}
+
+/* ── 블랙리스트를 풀어도 공고별 차단은 남는다 (2026-10-01 이미정 건) ──
+   공고별 [🚫 리뷰어] 의 "참여 불가"(campaign_reviewer_gates mode='block')는 전역 블랙리스트와
+   **별개 표**라, 등록리뷰어DB에서 블랙리스트를 풀어도 그대로 남아 리뷰어에게는 계속 "마감"으로 보였다
+   (실측: 공고 39곳 · 그중 모집 중 7곳). 해제 응답이 남은 개수를 말하고, 사람이 확인하면 함께 푼다.
+   ★ 'block' 만 센다·푼다 — 사람이 정한 허용 예외('allow')는 건드리지 않는다.
+   ★ 소프트 해제(released_at) — 관리 이력은 보존(applyGateChanges 와 같은 규율). */
+async function countCampaignBlocks(phone, db = pool) {
+  const p8 = String(phone || '').replace(/[^0-9]/g, '').slice(-8);
+  if (p8.length !== 8) return null;
+  const { rows: [r] } = await db.query(
+    `SELECT COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE c.status = 'active' AND c.archived_at IS NULL)::int AS live
+       FROM campaign_reviewer_gates g
+       LEFT JOIN recruit_campaigns c ON c.id = g.campaign_id
+      WHERE g.phone8 = $1 AND g.mode = 'block' AND g.released_at IS NULL`, [p8]);
+  return { total: r.total | 0, live: r.live | 0 };
+}
+
+async function releaseCampaignBlocks(phone, by, db = pool) {
+  const p8 = String(phone || '').replace(/[^0-9]/g, '').slice(-8);
+  if (p8.length !== 8) throw new Error('전화번호가 올바르지 않습니다.');
+  const { rowCount } = await db.query(
+    `UPDATE campaign_reviewer_gates SET released_at = NOW(), released_by = $2
+      WHERE phone8 = $1 AND mode = 'block' AND released_at IS NULL`, [p8, String(by || '').slice(0, 100)]);
+  return { released: rowCount | 0 };
 }
 
 /* ── 공고별 팝업 상단용: 전역 블랙리스트 목록(+이 공고 예외 상태·이전 리뷰) ── */
@@ -279,6 +320,7 @@ async function saveCriteria(raw, db = pool) {
 }
 
 module.exports = {
+  countCampaignBlocks, releaseCampaignBlocks,
   checkApplyGate, listGates, searchReviewers, applyGateChanges,
   getCriteria, saveCriteria,
   annotateReviewerRows, setGlobalBlacklist, listGlobalBlacklist,

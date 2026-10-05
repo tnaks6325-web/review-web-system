@@ -603,7 +603,12 @@ async function syncWorkOrderRecruitTotal({ workOrderId, recruitTotal }) {
     const worktable = await syncWorktableSlotsInTx(client, campaign, total, 'workorder-quota-sync');
     await client.query('UPDATE recruit_campaigns SET recruit_total=$2, updated_at=NOW() WHERE id=$1', [campaign.id, total]);
     await client.query('COMMIT');
-    return { linked: true, campaignId: campaign.id, recruitTotal: total, optionCount: nextOptions.size, worktable: await rebuildWorktableProjection(worktable, 'workorder-quota-sync') };
+    const rebuilt = await rebuildWorktableProjection(worktable, 'workorder-quota-sync');
+    /* ★ 결정 182 — 총 인원이 바뀌면 날짜별 예상 인원·종료일이 바뀐다 → 작업표 빈 줄 날짜도 따라간다.
+       커밋 뒤·자기 트랜잭션(탭 잠금 순서 보존) · 절대 throw 없음(정원 동기화는 이미 끝났다). */
+    const worktableRelay = await require('./campaignPlan.service')
+      .relayCampaignWorktable(campaign.id, { by: 'workorder-quota-sync' });
+    return { linked: true, campaignId: campaign.id, recruitTotal: total, optionCount: nextOptions.size, worktable: rebuilt, worktableRelay };
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     throw err;
@@ -612,6 +617,9 @@ async function syncWorkOrderRecruitTotal({ workOrderId, recruitTotal }) {
 
 module.exports = {
   quota,
+  /* ★ 작업오더 → 연결 공고 짝짓기 단일 출처 — 금액 전파(160-2)도 같은 규칙을 써야
+     "정원은 A 공고, 금액은 B 공고" 가 안 생긴다. */
+  linkedCampaign,
   displayRecruitTotal,
   displayRecruitTotalForCampaign,
   linkedWorkOrderForCampaign,

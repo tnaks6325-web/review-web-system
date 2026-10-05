@@ -78,10 +78,8 @@ function withStubPool(handler, run) {
     assert.strictEqual(PA.extractAmountNumber({ '결제금액': '-' }), 0);
     assert.strictEqual(PA.extractAmountNumber({ '결제금액': '-5000' }), 5000, '부호는 버리고 금액만');
   });
-  t('1f ★ 레거시 라우트가 사본을 다시 만들지 않았다(공용 함수 require)', () => {
-    const src = read('routes/payment.routes.js');
-    assert.ok(/require\(['"]\.\.\/utils\/paymentAmount['"]\)/.test(src), 'paymentAmount 를 require 해야 한다');
-    assert.ok(!/function\s+_extractAmount\s*\(/.test(src), '_extractAmount 사본이 되살아났다');
+  t('1f ★ 레거시 입금 라우트(금액 사본의 옛 소비처)가 되살아나지 않았다', () => {
+    assert.ok(!fs.existsSync(SRC('routes/payment.routes.js')), '옛 입금처리 옆길(/api/payment — 회차를 건너뛰는 수동 이체완료)은 결정 186 57번에서 제거 — 되살리지 않는다');
   });
   t('1g SQL 필터는 판정의 **상위집합**이다(정확일치 후보가 필터에 포함)', () => {
     for (const k of PA.EXACT_KEYS) assert.ok(PA.isAmountCandidateHeader(k), k + ' 가 후보에서 빠졌다');

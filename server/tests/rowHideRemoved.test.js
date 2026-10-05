@@ -45,8 +45,13 @@ console.log('\n[C] 화면 표면 0');
 
 console.log('\n[D] ★ 레거시 방어는 유지 — 남은 레코드가 시트로 나가지 않는다');
 {
-  ok("write-back 픽업 SQL 이 여전히 _hidden 을 제외한다", /field <> '_hidden'/.test(SVC));
-  ok('이력 화면은 옛 레코드를 읽을 수 있다(라벨 보존)', /'\(행 숨김\)'/.test(SVC));
+  /* 종전: write-back 픽업 SQL 이 _hidden 을 제외. 그 엔진이 통째로 제거됐으므로 편집 오버레이가
+     시트로 나가는 경로 자체가 없다 (결정 186 5번 — 2026-09-28 원본 전환·write-back 제거) — 되살아나면 _hidden 제외부터 다시 확인할 것. */
+  ok("편집을 시트로 내보내는 write-back 엔진이 없다(_hidden 이 시트로 나갈 길 0)",
+    !/function (_computeWritebackPlan|executeWriteback|_writebackEngine)\b/.test(SVC));
+  // 옛 편집 이력 목록(listEdits)은 제거됐다(결정 186 6번) — 라벨은 그것을 대신하는 🗒 로그가 맡는다.
+  ok('이력 화면(🗒 로그)은 옛 레코드를 읽을 수 있다(라벨 보존)',
+    /f === '_hidden' \? '\(행 숨김\)'/.test(fs.readFileSync(path.join(__dirname, '..', 'src/services/tabActivityLog.service.js'), 'utf8')));
 }
 
 console.log('\n[E] 실행 — 옛 오버레이가 있어도 줄이 남고 응답에 숨김 표면이 없다');

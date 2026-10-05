@@ -13,54 +13,10 @@ router.get('/status', authMiddleware, adminOrMasterMiddleware, async (req, res, 
   } catch (err) { next(err); }
 });
 
-// 기존 무시트 작업의 승인 목록을 정확히 120건으로 최초 1회 고정한다.
-router.post('/targets/approve-legacy', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    if (!req.body || req.body.confirm !== 'LOCK-APPROVED-120-WORKBOARDS') {
-      return res.status(400).json({ ok: false, code: 'confirmation_required', error: '확인 문자열이 필요합니다.' });
-    }
-    const out = await consolidation.approveLegacyTargets({ targets: req.body.targets, by: actor(req) });
-    res.status(201).json(out);
-  } catch (err) { next(err); }
-});
-
-// 전환 직전 대상별 원장·작업보드·리뷰·입금 참조를 sealed 스냅샷으로 보관한다.
-router.post('/backups', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const out = await consolidation.createPreCutoverBackup({
-      targets: req.body && req.body.targets,
-      reason: req.body && req.body.reason,
-      createdBy: actor(req),
-    });
-    res.status(201).json(out);
-  } catch (err) { next(err); }
-});
-
-// 1단계: sealed 백업과 동일한 대상에만 nullable workboard_id를 연결한다.
-router.post('/mappings', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    if (!req.body || req.body.confirm !== 'CREATE-WORKBOARD-PILOT-MAPPINGS') {
-      return res.status(400).json({ ok: false, code: 'confirmation_required', error: '확인 문자열이 필요합니다.' });
-    }
-    const out = await consolidation.createAdditiveMappings({
-      backupId: req.body.backupId, targets: req.body.targets, by: actor(req),
-    });
-    res.status(201).json(out);
-  } catch (err) { next(err); }
-});
-
-// pilot은 승인·연결된 작업 1건만, enabled는 승인된 120건이 모두 연결된 경우만 허용한다.
-router.post('/mode', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const mode = req.body && req.body.mode;
-    const expected = mode === 'pilot' ? 'START-ONE-WORKBOARD-PILOT' : 'ENABLE-APPROVED-120-WORKBOARDS';
-    if (!req.body || req.body.confirm !== expected) {
-      return res.status(400).json({ ok: false, code: 'confirmation_required', error: '확인 문자열이 필요합니다.' });
-    }
-    const control = await consolidation.setControlMode({ mode, targets: req.body.targets, by: actor(req) });
-    res.json({ ok: true, control });
-  } catch (err) { next(err); }
-});
+/* (전환 준비 입구 targets/approve-legacy · backups · mappings · mode 와 rollback-mappings 는 2026-08-28 enabled 전환
+   완료(대상 165 전부 enabled) 뒤 미사용으로 2026-10-02 제거 — 결정 186 71번. 함수는 workboardConsolidation.service 에 있다.)
+   ★★ 아래 rollback-mode 는 **비상 정지 스위치**라 남긴다(완화 금지) — enabled 경로에 이상(중복 활성 줄·참조 누락·
+      큐 재시도 급증)이 생기면 새 경로를 즉시 막고 미처리분을 legacy 복구 경로로 넘긴다(docs/prd-workboard-consolidation.md). */
 
 // 이 단계에서는 데이터 삭제·복원을 하지 않는다. 즉시 새 경로를 막아 기존 경로로 되돌린다.
 router.post('/rollback-mode', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
@@ -70,18 +26,6 @@ router.post('/rollback-mode', authMiddleware, adminOrMasterMiddleware, async (re
     }
     const control = await consolidation.rollbackToLegacy({ backupId: req.body.backupId || null, by: actor(req) });
     res.json({ ok: true, control });
-  } catch (err) { next(err); }
-});
-
-// 1단계 연결 자체도 되돌릴 때만 사용한다. 새 경로가 활성화되기 전의 가산적 데이터만 대상으로 한다.
-router.post('/rollback-mappings', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    if (!req.body || req.body.confirm !== 'REVERT-WORKBOARD-PILOT-MAPPINGS') {
-      return res.status(400).json({ ok: false, code: 'confirmation_required', error: '확인 문자열이 필요합니다.' });
-    }
-    await consolidation.rollbackToLegacy({ backupId: req.body.backupId || null, by: actor(req) });
-    const out = await consolidation.revertAdditiveMappings({ backupId: req.body.backupId, by: actor(req) });
-    res.json(out);
   } catch (err) { next(err); }
 });
 

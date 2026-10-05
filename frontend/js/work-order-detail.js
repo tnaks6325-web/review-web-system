@@ -169,7 +169,10 @@ function _woGuideHtml(raw) {
   return tmp.innerHTML;
 }
 
-const _INFLOW_LABEL = { guide: "유입가이드", link: "링크유입" };
+/* ★ 용어 통일(사용자 확정 2026-09-22): 유입**방식** 이름은 "가이드유입"(모집공고 모달과 같은 말).
+   ★ 가이드 **글 칸**의 이름은 여전히 "유입가이드" 다 — 그 칸에 "가이드유입"이라고 적으면 더 헷갈린다.
+   ★ 저장값(`inflow_type`)은 종전 그대로 `guide`/`link` — 보이는 말만 바뀐다. */
+const _INFLOW_LABEL = { guide: "가이드유입", link: "링크유입" };
 
 // 인트라넷이 review_guide/special_notes에 [헤더] 섹션으로 모든 항목을 중복 포함시켜 보내므로,
 // 개별 필드로 이미 표시되는 섹션은 버리고 지정한 라벨의 섹션 내용만 추출한다.
@@ -945,6 +948,8 @@ function _woCampaignPrefill(o) {
     // ★ 099: 체험단 종류 — 발행 폼이 그대로 저장한다(빈 값 = 리뷰 = 기존 동작).
     work_kind:     String(o.work_kind || "").trim(),
     product_url:   o.product_url || "",
+    // 모집공고 썸네일(163) — 리뷰오더에서 고른 사진(우리 프록시 URL). 비면 종전처럼 상품정보 자동수집이 채운다.
+    thumbnail_url: o.thumbnail_url || "",
     // ★ 상품정보 기본값 = 작업오더 입력 상품명·결제금액 (자동수집 성공 시 그 값으로 덮어씀)
     product_name:  _pi.name || "",
     price:         _pi.price || "",
@@ -1340,10 +1345,10 @@ function woAdvertiserLinkPicker(resp, onLink) {
   var head = document.createElement("div");
   head.style.cssText = "padding:16px 18px 12px;border-bottom:1px solid #E5E7EB";
   var h = document.createElement("div");
-  h.textContent = "⚠ 같은 이름의 업체가 이미 있습니다";
+  h.textContent = "⚠ 같은 업체로 보이는 업체가 이미 있습니다";
   h.style.cssText = "font-size:15px;font-weight:700;color:#B91C1C;margin-bottom:6px";
   var p = document.createElement("div");
-  p.textContent = "이름만으로는 같은 회사인지 알 수 없어 자동으로 붙이지 않았습니다. 아래 업체가 이 광고주와 같은 회사라면 연결해 접수합니다(연결하면 이후 접수는 자동으로 이어집니다).";
+  p.textContent = "이름이 같거나, 법인 표기(주식회사·(주))만 다르거나, 사업자번호가 같은 업체입니다. 그것만으로는 같은 회사인지 알 수 없어 자동으로 붙이지 않았습니다. 아래 업체가 이 광고주와 같은 회사라면 연결해 접수합니다(연결하면 이후 접수는 자동으로 이어집니다).";
   p.style.cssText = "font-size:12.5px;color:#6B7280;line-height:1.5";
   head.appendChild(h); head.appendChild(p);
 
@@ -1405,13 +1410,13 @@ function woAdvertiserLinkPicker(resp, onLink) {
   });
   if (!cands.length) {
     var empty = document.createElement("div");
-    empty.textContent = "겹치는 업체 정보를 가져오지 못했습니다. 업체관리에서 같은 이름의 업체를 확인해 주세요.";
+    empty.textContent = "겹치는 업체 정보를 가져오지 못했습니다. 업체관리에서 비슷한 이름의 업체를 확인해 주세요.";
     empty.style.cssText = "font-size:13px;color:#6B7280;padding:14px";
     list.appendChild(empty);
   }
 
   var note = document.createElement("div");
-  note.textContent = "다른 회사라면 연결하지 마세요. 업무포털 거래처 관리에서 기존 업체 이름을 구분되게 바꾼 뒤 다시 접수하면 새 업체로 등록됩니다.";
+  note.textContent = "다른 회사라면 연결하지 마세요. 업무포털 거래처 관리에서 기존 업체 이름을 구분되게 바꾼 뒤(법인 표기만 바꾸는 것으로는 구분되지 않습니다) 다시 접수하면 새 업체로 등록됩니다.";
   note.style.cssText = "margin:0 14px 10px;font-size:12px;color:#92400E;background:#FEF3C7;border-radius:8px;padding:9px 11px;line-height:1.5";
 
   var foot = document.createElement("div");

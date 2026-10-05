@@ -269,8 +269,9 @@ t('부속정보 파생 — 구조화 우선, 문장 폴백, 종류가 다르면 
 
 t('★★ 배송유형을 바꾸면 부속정보도 다시 세운다 — 옛 조합이 남으면 작업표가 유령 배분을 돈다', () => {
   const hits = (ORD.match(/b\.delivery_type_mix = _deliveryMixJson\(b, deliveryType\);/g) || []).length;
-  assert.strictEqual(hits, 3, '수정 경로 3곳(인트라넷 intake · AE · 관리자) 전부에 정리가 걸려야 한다');
-  assert.strictEqual((ORD.match(/b\.recall_courier = _rc\.courier;/g) || []).length, 3);
+  // (AE 수정 경로 PUT /my/update 는 staff.html 과 함께 결정 186 49번에서 제거)
+  assert.strictEqual(hits, 2, '수정 경로 2곳(인트라넷 intake · 관리자) 전부에 정리가 걸려야 한다');
+  assert.strictEqual((ORD.match(/b\.recall_courier = _rc\.courier;/g) || []).length, 2);
 });
 
 t('수정 화이트리스트 3종(인트라넷 intake · 관리자)', () => {
@@ -312,7 +313,7 @@ t('모집공고 모달 선택지·토글 6종', () => {
 });
 
 t('★ 옛 어휘(회수건·빈택배)는 어느 저장 경로에도 없다', () => {
-  ['../frontend/js/recruit-modal.js', '../frontend/js/campaign-cards.js', '../frontend/admin-siand.html'].forEach((f) => {
+  ['../frontend/js/recruit-modal.js', '../frontend/js/campaign-cards.js'].forEach((f) => {   // (admin-siand.html 은 결정 186 44번에서 제거)
     const src = read(f);
     assert.ok(!/<option value="회수건">/.test(src), f + ' 회수건');
     assert.ok(!/<option value="빈택배">/.test(src), f + ' 빈택배');
@@ -334,13 +335,13 @@ console.log('G) 옛 어휘 일괄 정리 도구');
 const DIAG = read('src/routes/diag.routes.js');
 
 t('★ 판정은 utils/deliveryType 단일 출처 — SQL 에 어휘를 박지 않는다', () => {
-  const blk = DIAG.slice(DIAG.indexOf("router.post('/delivery-type-cleanup'"), DIAG.indexOf("// POST /api/diag/participation-cleanup"));
+  const blk = DIAG.slice(DIAG.indexOf("router.post('/delivery-type-cleanup'"), DIAG.indexOf("\nrouter.", DIAG.indexOf("router.post('/delivery-type-cleanup'") + 10));
   assert.match(blk, /const \{ canonicalDeliveryValue \} = require\('\.\.\/utils\/deliveryType'\)/);
   assert.ok(!/빈택배|회수건/.test(blk), '어휘 리터럴을 라우트에 박지 않는다');
 });
 
 t('★★ 미리보기가 기본 — 명시하지 않으면 쓰기 0', () => {
-  const blk = DIAG.slice(DIAG.indexOf("router.post('/delivery-type-cleanup'"), DIAG.indexOf("// POST /api/diag/participation-cleanup"));
+  const blk = DIAG.slice(DIAG.indexOf("router.post('/delivery-type-cleanup'"), DIAG.indexOf("\nrouter.", DIAG.indexOf("router.post('/delivery-type-cleanup'") + 10));
   assert.match(blk, /const dryRun = req\.body\?\.dryRun !== false;/);
   const upd = blk.indexOf('UPDATE ');
   const gate = blk.indexOf('if (dryRun || total === 0)');
@@ -348,7 +349,7 @@ t('★★ 미리보기가 기본 — 명시하지 않으면 쓰기 0', () => {
 });
 
 t('★ 쓰기 표면 = delivery_type 한 칸 (updated_at 도 안 건드린다)', () => {
-  const blk = DIAG.slice(DIAG.indexOf("router.post('/delivery-type-cleanup'"), DIAG.indexOf("// POST /api/diag/participation-cleanup"));
+  const blk = DIAG.slice(DIAG.indexOf("router.post('/delivery-type-cleanup'"), DIAG.indexOf("\nrouter.", DIAG.indexOf("router.post('/delivery-type-cleanup'") + 10));
   const sets = blk.match(/UPDATE \$\{[a-z.]+\} SET ([^`]*) WHERE/);
   assert.ok(sets, 'UPDATE SET 절 추출');
   assert.strictEqual(sets[1].trim(), 'delivery_type = $2');
@@ -357,7 +358,7 @@ t('★ 쓰기 표면 = delivery_type 한 칸 (updated_at 도 안 건드린다)',
 });
 
 t('★ 접히는 값만 바꾼다 — 이미 표준형·판정 밖 값은 대상 아님', () => {
-  const blk = DIAG.slice(DIAG.indexOf("router.post('/delivery-type-cleanup'"), DIAG.indexOf("// POST /api/diag/participation-cleanup"));
+  const blk = DIAG.slice(DIAG.indexOf("router.post('/delivery-type-cleanup'"), DIAG.indexOf("\nrouter.", DIAG.indexOf("router.post('/delivery-type-cleanup'") + 10));
   assert.match(blk, /if \(!std \|\| std === r\.raw\) continue;/);
 });
 

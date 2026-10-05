@@ -123,43 +123,7 @@ router.get('/resolve', async (req, res, next) => {
   }
 });
 
-// ═══════════════════════════════════════════════════════════
-// PATCH /api/short/update-round — 기존 단축링크의 round 업데이트 (Admin)
-// ═══════════════════════════════════════════════════════════
-router.patch('/update-round', authMiddleware, async (req, res, next) => {
-  try {
-    const { code, round } = req.body;
-    if (!code) return res.json({ error: 'code가 필요합니다.' });
-    if (round === undefined) return res.json({ error: 'round 값이 필요합니다.' });
-
-    const { rowCount } = await pool.query(
-      'UPDATE short_links SET round = $1 WHERE code = $2',
-      [round, code]
-    );
-
-    if (rowCount === 0) {
-      return res.json({ error: '해당 코드를 찾을 수 없습니다.', code });
-    }
-
-    // composite_key도 업데이트 (round 포함)
-    const { rows } = await pool.query(
-      'SELECT sheet_id, gid, tab_name, display_name FROM short_links WHERE code = $1',
-      [code]
-    );
-    if (rows.length > 0) {
-      const r = rows[0];
-      const newCompositeKey = `${r.sheet_id}|${r.gid || ''}|${r.tab_name}|${r.display_name || ''}|${round}`;
-      await pool.query(
-        'UPDATE short_links SET composite_key = $1 WHERE code = $2',
-        [newCompositeKey, code]
-      );
-    }
-
-    res.json({ success: true, code, round, message: `코드 ${code}의 round를 '${round}'로 업데이트했습니다.` });
-  } catch (err) {
-    next(err);
-  }
-});
+// PATCH /api/short/update-round(단축링크 차수 사후 변경 — 화면 없음) 은 2026-10-04 제거 — 결정 186 96번(호출 0 · 9/2 이후 0 · authMiddleware 뿐).
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/short/og/:code — 카카오톡/SNS 크롤러용 동적 OG 메타태그 HTML

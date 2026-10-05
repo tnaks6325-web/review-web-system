@@ -41,8 +41,8 @@ assert.match(
 );
 assert.match(
   FRONT,
-  /setV\("rf_thumb_url", c\.thumbnail_url \|\| ""\)/,
-  '기존 공고 썸네일 URL을 새 입력란에 복원해야 합니다.'
+  /const _thumbV = c\.thumbnail_url \|\| [^;]*;\s*\n\s*setV\("rf_thumbnail", _thumbV\);\s*\n\s*setV\("rf_thumb_url", _thumbV\)/,
+  '기존 공고 썸네일 URL을 새 입력란에 복원해야 합니다(저장값 우선 — 작업오더 값은 비었을 때만 제안).'
 );
 assert.ok(
   !/document\.getElementById\("rf_notes"\)\.value\s*=\s*c\.notes/.test(FRONT),

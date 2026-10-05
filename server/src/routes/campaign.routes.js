@@ -213,6 +213,8 @@ function _normalizeOptionsInput(arr) {
     const reviewMixState = normalizeReviewTypeMix(obj.reviewTypeMix ?? obj.review_type_mix);
     out.push({
       optKey,
+      // ★★ 이름 바꾸기(rename): 이 줄이 원래 어떤 선택지였는지(저장된 opt_key). 없으면 '' = 종전 동작.
+      prevOptKey: _normOptKey(obj.prevOptKey ?? obj.prev_opt_key) || '',
       optionUrl: _normalizeOptionUrl(obj.optionUrl ?? obj.option_url ?? obj.url),
       // ★ 134 복합 작업: 선택 단위(unit)의 소속 상품명과 종류.
       //   unit_kind='product' = 옵션 없는 상품 자체가 선택지 → 시트 옵션 칸에 쓰지 않는다(submit.routes).
@@ -256,6 +258,65 @@ function _validateActiveUnitInflowGuides(inflowType, options) {
  *  ★★ 원자성·상호배제(레드/블루 #2·#7): 자체 트랜잭션 + recruit_campaigns 행 FOR UPDATE로
  *     apply/change-option과 동일 락 계층 확보 → "사용여부 SELECT→DELETE" 사이 동시 apply가
  *     끼어들어 방금 참여한 옵션을 삭제하는 TOCTOU를 봉합. 실패 시 전체 롤백(부분 저장 없음). */
+/**
+ * ★★ 선택지 이름 바꾸기(rename) — 같은 선택지를 새 이름으로 잇는다 (사용자 확정 2026-10-02).
+ * 종전엔 선택지를 이름(opt_key)으로만 구분해 이름을 바꾸면 "옛 선택지 빠짐 + 새 선택지 생김"이 되어
+ *  ① 참여자 있는 옛 이름이 리뷰어 화면에 '마감'으로 남고 ② 새 이름은 0명부터 다시 세어 정원 초과 모집이 됐다.
+ * → 화면이 보낸 prevOptKey(그 줄이 원래 어떤 선택지였는지)로 **선택지 행과 참여 기록의 이름을 함께 바꾼다**.
+ * ★ 바꾸는 곳 = campaign_options.opt_key + campaign_applications.option_key 두 곳뿐.
+ *   이미 접수된 주문(order_submissions.selected_opt_key)·작업표 옵션 칸은 **옛 이름 그대로 둔다**(사용자 확정 (나) — 산 시점의 사실).
+ * ★ fail-safe: 옛 이름이 이번 목록에도 그대로 있거나 / 원장에 없거나 / 같은 옛 이름을 두 줄이 주장하거나 /
+ *   새 이름이 이미 다른 선택지로 살아 있으면 **바꾸지 않는다**(종전 동작 = 새로 만들고 옛 것은 마감·삭제).
+ * ★ 서로 이름을 맞바꾸는 경우를 위해 임시 이름을 거쳐 두 단계로 바꾼다(유니크 충돌 방지).
+ * 호출자가 같은 트랜잭션·캠페인 행 잠금 안에서 부른다.
+ */
+function _planOptionRenames(currentKeys, options, keep) {
+  const cur = new Set(currentKeys);
+  const prevCount = new Map(), targetCount = new Map();
+  for (const o of options) {
+    const p = o && o.prevOptKey;
+    if (!p || p === o.optKey) continue;
+    prevCount.set(p, (prevCount.get(p) || 0) + 1);
+    targetCount.set(o.optKey, (targetCount.get(o.optKey) || 0) + 1);
+  }
+  // 이름을 안 바꾼(또는 새로 추가한) 줄의 이름 — 옛 이름이 여기 있으면 그 선택지는 그대로 남는다(이름 바꾸기 아님)
+  const stay = new Set(options.filter(o => o && (!o.prevOptKey || o.prevOptKey === o.optKey)).map(o => o.optKey));
+  let plan = options
+    .filter(o => o && o.prevOptKey && o.prevOptKey !== o.optKey)
+    .filter(o => cur.has(o.prevOptKey) && !stay.has(o.prevOptKey))
+    .filter(o => prevCount.get(o.prevOptKey) === 1 && targetCount.get(o.optKey) === 1)
+    .map(o => ({ from: o.prevOptKey, to: o.optKey }));
+  // 새 이름이 이미 원장에 있으면 그 이름도 이번에 다른 이름으로 비켜나야만 허용(맞바꾸기). 사슬은 안정될 때까지.
+  for (let changed = true; changed;) {
+    changed = false;
+    const leaving = new Set(plan.map(r => r.from));
+    const next = plan.filter(r => !cur.has(r.to) || leaving.has(r.to));
+    if (next.length !== plan.length) { plan = next; changed = true; }
+  }
+  return plan;
+}
+
+async function _applyOptionRenames(client, campaignId, options, keep) {
+  if (!options.some(o => o && o.prevOptKey && o.prevOptKey !== o.optKey)) return [];
+  const { rows } = await client.query('SELECT opt_key FROM campaign_options WHERE campaign_id=$1', [campaignId]);
+  const plan = _planOptionRenames(rows.map(r => r.opt_key), options, keep);
+  // ★ 임시 이름은 한 번만 만들어 두 표·두 단계에서 같은 값을 쓴다(호출마다 만들면 시각이 달라져
+  //   선택지와 참여 기록이 서로 다른 임시 이름으로 흩어진다 — 코드리뷰 P1).
+  const stamp = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  const tmpKeys = plan.map((_, i) => '__rename_tmp_' + i + '_' + stamp);
+  const tmp = (i) => tmpKeys[i];
+  for (let i = 0; i < plan.length; i++) {
+    await client.query('UPDATE campaign_options SET opt_key=$3, updated_at=NOW() WHERE campaign_id=$1 AND opt_key=$2', [campaignId, plan[i].from, tmp(i)]);
+    await client.query('UPDATE campaign_applications SET option_key=$3 WHERE campaign_id=$1 AND option_key=$2', [campaignId, plan[i].from, tmp(i)]);
+  }
+  for (let i = 0; i < plan.length; i++) {
+    await client.query('UPDATE campaign_options SET opt_key=$3, updated_at=NOW() WHERE campaign_id=$1 AND opt_key=$2', [campaignId, tmp(i), plan[i].to]);
+    await client.query('UPDATE campaign_applications SET option_key=$3 WHERE campaign_id=$1 AND option_key=$2', [campaignId, tmp(i), plan[i].to]);
+  }
+  if (plan.length) logger.info('[campaign/options] 선택지 이름 변경 ' + campaignId + ' ' + plan.map(r => r.from + ' → ' + r.to).join(', '));
+  return plan;
+}
+
 async function _saveCampaignOptions(campaignId, options) {
   if (!Array.isArray(options)) return; // 미전달=변경 없음
   const keep = new Set(options.map(o => o.optKey));
@@ -264,6 +325,7 @@ async function _saveCampaignOptions(campaignId, options) {
     await client.query('BEGIN');
     const { rows: lock } = await client.query('SELECT id FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [campaignId]);
     if (!lock.length) { await client.query('ROLLBACK'); return; }
+    await _applyOptionRenames(client, campaignId, options, keep);
     for (const o of options) {
       await client.query(
         `INSERT INTO campaign_options (campaign_id, opt_key, option_url, pay_amount, recruit_total, daily_limit, review_type_mix, sort_order, status,
@@ -693,6 +755,7 @@ function _publicView(row, counts, now, schedule) {
       state: weekend.blocked ? 'weekend_unpublished' : row.status,
       stateReason: weekend.blocked ? weekend.reason : null,
       stateMessage: weekend.blocked ? weekend.message : null,
+      closedKind: weekend.blocked ? (weekend.closedKind || 'weekend') : null,
       resumesOn: resume ? resume.date : weekend.resumesOn,
       resumesAt: resume ? resume.iso : null,
     };
@@ -718,6 +781,7 @@ function _publicView(row, counts, now, schedule) {
     scheduleSource: st.scheduleSource || null,
     stateReason: weekend.blocked ? weekend.reason : (st.stateReason || null),
     stateMessage: weekend.blocked ? weekend.message : null,
+    closedKind: weekend.blocked ? (weekend.closedKind || 'weekend') : null,
     resumesOn: resume ? resume.date : weekend.resumesOn,
     // 주말 미게시 카드의 "재개까지" 카운트다운 기준(ISO). 차단 중이 아니면 null.
     resumesAt: resume ? resume.iso : null,
@@ -910,7 +974,9 @@ async function _scopedCampaignEdit(req, res) {
        title=$2, status=$3, delivery_type=$4, review_fee=$5, time_range=$6,
        thumbnail_url=$7, landing_url=$8, window_start=$9, window_end=$10,
        daily_limit=$11, recruit_total=$12, sort_order=$13, max_slots=$14,
-       carry_mode=$15, carry_strategy=$16, updated_at=NOW()
+       carry_mode=$15, carry_strategy=$16,
+       published_at = CASE WHEN $3 = 'active' AND status IS DISTINCT FROM 'active' THEN NOW() ELSE published_at END,   -- 173: 스코프 편집으로 게시 전환해도 게시 시각을 남긴다(코덱스 리뷰)
+       updated_at=NOW()
      WHERE id=$1 RETURNING *`,
     [id, title, status, delivery_type, review_fee, time_range,
      thumbnail_url, landing_url, window_start || null, window_end || null,
@@ -922,6 +988,10 @@ async function _scopedCampaignEdit(req, res) {
     const fixed = await repairRecruitTotalFromRounds(id);
     if (fixed !== null) rows[0].recruit_total = fixed;
   } catch (_) { /* fail-soft */ }
+  // ★ 결정 182 — 일건수·이월 방식이 바뀌면 연결 작업표 빈 줄 날짜도 따라간다(절대 throw 없음).
+  if (rows[0] && rows[0].participation_mode) {
+    await require('../services/campaignPlan.service').relayCampaignWorktable(id, { by: 'reviewer-scoped-edit' });
+  }
   return res.json({ ok: true, data: rows[0] });
 }
 
@@ -1780,6 +1850,7 @@ async function _applyParticipation(req, res, next, campPre) {
       return res.status(403).json({
         ok: false,
         reason: weekend.reason,
+        closedKind: weekend.closedKind || 'weekend',
         resumesOn: weekend.resumesOn,
         error: weekend.message,
       });
@@ -1876,8 +1947,9 @@ async function _applyParticipation(req, res, next, campPre) {
     //   여기서 미리 막으면 홀드 미생성 = 자리 미점유 = 당일 참여권 무손실. 제출 단계 검사는 안전망으로 유지.
     //   ★ 063: 판정 기준은 항상 "소유자"(타계정 프로필은 제출측 SUB 자동보강이 담당, §02 신원확인 재사용)
     {
-      const { profileMissing } = require('../services/identity.service');
-      const missing = profileMissing(reg.rows[0]);
+      // ★ 조각 5(결정 181): 주소는 참여 뒤 구매양식에서 캡처 주소로 받는다 — 여기서는 요구하지 않는다.
+      const { participationProfileMissing } = require('../services/identity.service');
+      const missing = participationProfileMissing(reg.rows[0]);
       if (missing.length) {
         await client.query('ROLLBACK');
         return res.status(403).json({
@@ -2199,14 +2271,21 @@ router.post('/:id/apply', applyLimiter, async (req, res, next) => {
       return res.status(403).json({ ok: false, reason: 'archived', error: '모집이 종료된 공고입니다.' });
     }
 
-    const weekend = weekendPublicationState(camp);
-    if (weekend.blocked) {
-      return res.status(403).json({
-        ok: false,
-        reason: weekend.reason,
-        resumesOn: weekend.resumesOn,
-        error: weekend.message,
-      });
+    /* ★★ 참여형 공고는 여기서 쉬는 날을 판정하지 않는다 — 날짜별 계획(095)을 본 판정이
+       `_applyParticipation` 의 잠금 뒤 관문에 있다. 여기서 계획 없이 막으면 사람이 인원을 넣어
+       연 주말·공휴일도 첫 관문에서 막혀 "카드는 열렸는데 참여는 거부"가 된다(2026-09-23).
+       레거시 공고는 날짜별 계획 개념이 없으므로 종전대로 여기서 판정한다. */
+    if (!camp.participation_mode) {
+      const weekend = weekendPublicationState(camp);
+      if (weekend.blocked) {
+        return res.status(403).json({
+          ok: false,
+          reason: weekend.reason,
+          closedKind: weekend.closedKind || 'weekend',
+          resumesOn: weekend.resumesOn,
+          error: weekend.message,
+        });
+      }
     }
 
     // ★ 참여형 공고는 레거시 경로(슬롯 증가·시트 행 추가) 진입 금지 — 홀드 기반 신규 경로로 처리
@@ -2449,7 +2528,9 @@ async function _adminCampaignList(req, res, next) {
       /* ★ 주말 미게시(104)는 관리자 카드에도 그대로 보여준다 — 종전에는 공개 목록에만 적용돼
          토요일 관리자 카드가 "오늘 모집 0/30 · 모집중"으로 보였다(리뷰어는 신청 불가인데).
          카드 렌더러의 weekend 분기(_zeroQuotaNote·footer)가 이미 이 값을 기다리고 있었다. */
-      const _weekend = weekendPublicationState(r, now);
+      /* ★ 날짜별 계획(095)을 함께 넘긴다 — 빠지면 사람이 인원을 넣어 연 주말·공휴일도 관리자 카드엔
+         "미게시"로 보여 신청 관문(계획을 보는 쪽)과 갈린다(2026-09-23 공휴일 정리). */
+      const _weekend = weekendPublicationState(r, now, stateCnt && stateCnt.plans);
       const _resume = _weekendResume(r, _weekend, stateCnt, now, _sch);
       return {
         ...r,
@@ -2463,6 +2544,7 @@ async function _adminCampaignList(req, res, next) {
         state: _weekend.blocked ? 'weekend_unpublished' : st.state,
         stateReason: _weekend.blocked ? _weekend.reason : (st.stateReason || null),
         stateMessage: _weekend.blocked ? _weekend.message : null,
+        closedKind: _weekend.blocked ? (_weekend.closedKind || 'weekend') : null,
         resumesOn: _resume ? _resume.date : _weekend.resumesOn,
         resumesAt: _resume ? _resume.iso : null,
         // 표(주문 원장) 기준 총량(2단계) — null = 집계 불가/연결 없음(카드는 표 기준 문구를 그리지 않는다)
@@ -2767,6 +2849,8 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       .invalidateCashReceiptContext(rows[0].linked_sheet_id, rows[0].linked_tab_name);
     // ★ 061: 상품옵션 저장(제공 시). 원자 저장(캠페인 락) — 실패 시 응답에 경고 표면화(조용한 정원 오염 방지, 레드 #7).
     let optionsWarning = null;
+    // 172: 처음부터 게시(모집중)로 만든 공고는 지금을 게시 시각으로 남긴다 — 실패해도 공고 생성은 유지(fail-soft)
+    if (rows[0].status === 'active') { try { await pool.query(`UPDATE recruit_campaigns SET published_at = NOW() WHERE id = $1 AND published_at IS NULL`, [rows[0].id]); } catch (e) { logger.warn('[campaign/create] 게시 시각 기록 실패: ' + e.message); } }
     if (normOpts) { try { await _saveCampaignOptions(rows[0].id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/create] ' + optionsWarning); } }
     if (hasWorkboardDisplayName) {
       rows[0].workboard_display_name = await _saveWorkboardDisplayName({ sheetId: lSheet, tabName: lTab, displayName: workboardDisplayName });
@@ -2784,18 +2868,20 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
     const normFees = normalizeFeeSchedules(fee_schedules);
     let feeWarning = null;
     if (normFees) { try { await _saveFeeSchedules(rows[0].id, normFees); } catch (e) { feeWarning = '리뷰비 구간 저장 실패: ' + e.message; logger.warn('[campaign/create] ' + feeWarning); } }
-    /* ★★ D3-a(탈 구글시트 W2-b): 연결 탭이 **무시트**면 작업표의 날짜 분배를 달력에 프리필한다.
-       무시트 작업은 시트 일정 파생 대상이 아니므로(달력이 진실원본), 이게 없으면 그날 정원이
-       발행폼 `daily_limit` 하나로만 돌아가 작업표 계획과 어긋난다.
-       ★ 이미 있는 날짜는 덮지 않고(사람이 조절해 둔 값 보존) 지난 날짜는 넣지 않는다.
-       ★ fail-soft — 실패해도 공고 발행은 성공(달력은 [📅 인원] 모달에서 채울 수 있다). */
+    /* ★★ 결정 182(2026-09-26 — D3-a 뒤집기): 날짜별 인원은 **규칙**(일건수·주말·이월·총량)이 정하고
+       작업표가 따라간다. 그래서 작업표의 날짜별 줄 수를 계획으로 **옮겨 적지 않는다**(옮겨 적으면
+       그날은 일건수·이월·주말 변경이 반영되지 않는다 — 완화 금지). 대신
+       ① 인트라넷 오더의 휴무일만 그날 0명으로 저장하고 ② 작업표 빈 줄 날짜를 규칙에 맞춘다.
+       ★ fail-soft — 실패해도 공고 발행은 성공(사유는 planPrefill 로 응답에 싣는다). */
     let planPrefill = null;
     if (participation_mode === true && lSheet && lTab) {
       try {
         const isSl = await require('../utils/sheetlessScope').isSheetless(pool, lSheet, lTab);
         if (isSl) {
-          planPrefill = await require('../services/sheetlessDailyPlan.service').prefillFromWorktable({
-            campaignId: rows[0].id, sheetId: lSheet, tabName: lTab, by: req.admin?.name || 'admin' });
+          const cp = require('../services/campaignPlan.service');
+          const by = req.admin?.name || 'admin';
+          planPrefill = await cp.saveOrderHolidayZeros(rows[0], by);
+          planPrefill.relay = await cp.relayCampaignWorktable(rows[0].id, { by });
         }
       } catch (e) {
         planPrefill = { ok: false, reason: 'exception', message: e.message };
@@ -3127,6 +3213,9 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         notes = COALESCE($10, notes),
         chat_url = COALESCE($11, chat_url),
         status = COALESCE($12, status),
+        published_at = CASE WHEN (COALESCE($12, status) = 'active' AND status IS DISTINCT FROM 'active')
+                             OR (COALESCE($20, participation_mode) = TRUE AND participation_mode IS DISTINCT FROM TRUE)   -- 참여형으로 바꾼 날 = 그날부터 참여 가능(코덱스 리뷰)
+                            THEN NOW() ELSE published_at END,
         sort_order = COALESCE($13, sort_order),
         max_slots = COALESCE($14, max_slots),
         deadline = $15,
@@ -3278,7 +3367,13 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     const _rtSkipWorktable = _rtPrev !== null && (Number(rows[0].recruit_total) || 0) === _rtPrev;
     try { quotaSync = await syncCampaignRecruitTotal({ campaignId: id, recruitTotal: rows[0].recruit_total, skipWorktable: _rtSkipWorktable }); }
     catch (e) { logger.error('[campaign/update] 작업오더 정원 동기화 실패: ' + e.message); throw e; }
+    /* ★ 결정 182 — 일건수·주말·시작일·총 인원·이월 방식이 바뀌면 날짜별 인원이 바뀐다 → 연결 무시트
+       작업표의 빈 줄 날짜를 따라 맞춘다. 이미 맞으면 아무것도 안 바뀐다. ★ 절대 throw 없음(저장은 끝났다). */
+    const worktableRelay = rows[0].participation_mode
+      ? await require('../services/campaignPlan.service').relayCampaignWorktable(id, { by: req.admin?.name || 'admin' })
+      : null;
     res.json({ ok: true, data: rows[0], options: await _loadOptionsRaw(pool, id),
+      ...(worktableRelay ? { worktableRelay } : {}),
       feeSchedules: await _loadFeeSchedules(pool, id),
       ...(optionsWarning ? { optionsWarning } : {}), ...(feeWarning ? { feeWarning } : {}),
       ...(quotaSync ? { quotaSync } : {}),
@@ -3344,7 +3439,9 @@ router.put('/admin/:id/status', authMiddleware, adminOrMasterMiddleware, async (
       }
     }
     const { rows } = await pool.query(
-      `UPDATE recruit_campaigns SET status = $2, updated_at = NOW() WHERE id = $1 RETURNING *`,
+      `UPDATE recruit_campaigns SET status = $2,
+         published_at = CASE WHEN $2 = 'active' AND status IS DISTINCT FROM 'active' THEN NOW() ELSE published_at END,  -- 172 게시 시각
+         updated_at = NOW() WHERE id = $1 RETURNING *`,
       [id, status]
     );
     if (rows.length === 0) {
@@ -3665,6 +3762,66 @@ router.get('/admin/:id/preview', authMiddleware, adminOrMasterMiddleware, async 
 // POST /api/campaign/admin/:id/confirm {applicationId} — 만료+기구매(late) 구제의 유일 경로 (admin/master)
 //   유예 정책 제거에 따라, 만료 후 도착한 제출(late_order_id)은 이 수동확정으로만 자리 확정된다.
 //   잠금 계층 apply·주문확정과 동일: 캠페인 행 FOR UPDATE → 신청 행 FOR UPDATE. 동일 phone8 applied 선-취소(레드 #7).
+/**
+ * ★★ 이미 갈라진 선택지 합치기 (2026-10-02 사용자 확정 — 이름 바꾸기 기능 이전에 생긴 분리 정리용)
+ * 이름만 바꿨는데 "옛 이름 = 마감 + 새 이름 = 새 선택지"로 갈라진 공고에서, 옛 선택지의 참여 기록을
+ * 새 선택지로 옮기고 옛 선택지 행을 지운다 → 새 선택지가 정원을 이어서 센다·마감 줄이 사라진다.
+ * ★ 미리보기 기본(confirm !== true 면 쓰기 0) · 캠페인 행 FOR UPDATE · 전부 아니면 전무.
+ * ★ fail-closed: 옛 선택지가 마감(closed)이 아니거나 / 새 선택지가 없거나 / 둘이 같으면 거부.
+ * ★ 주문 기록(order_submissions.selected_opt_key)·작업표 옵션 칸은 옛 이름 그대로 둔다(사용자 확정 (나)).
+ */
+router.post('/admin/:id/options/merge', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  const id = String(req.params.id || '');
+  const pairs = (Array.isArray(req.body && req.body.pairs) ? req.body.pairs : [])
+    .map(p => ({ from: _normOptKey(p && p.from), to: _normOptKey(p && p.to) }))
+    .filter(p => p.from && p.to);
+  const confirm = req.body && req.body.confirm === true;
+  if (!pairs.length) return res.status(400).json({ ok: false, error: 'pairs(from,to) 필수' });
+  if (pairs.length > 50) return res.status(400).json({ ok: false, error: '한 번에 50쌍까지' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: lock } = await client.query('SELECT id FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [id]);
+    if (!lock.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '공고를 찾을 수 없습니다.' }); }
+    const { rows: opts } = await client.query('SELECT opt_key, status FROM campaign_options WHERE campaign_id=$1', [id]);
+    const byKey = new Map(opts.map(o => [o.opt_key, o]));
+    const froms = new Set();
+    const result = [];
+    for (const p of pairs) {
+      const f = byKey.get(p.from), t = byKey.get(p.to);
+      let reason = '';
+      if (p.from === p.to) reason = '같은 이름';
+      else if (!f) reason = '옛 선택지 없음';
+      else if (f.status !== 'closed') reason = '옛 선택지가 마감 상태가 아님';
+      else if (!t) reason = '새 선택지 없음';
+      else if (froms.has(p.from)) reason = '중복 요청';
+      else if (pairs.some(q => q.from === p.to)) reason = '새 선택지가 다른 합치기의 옛 선택지';
+      if (reason) { await client.query('ROLLBACK'); return res.status(409).json({ ok: false, error: `${p.from} → ${p.to}: ${reason}`, pair: p }); }
+      froms.add(p.from);
+      const { rows: cnt } = await client.query(
+        'SELECT status, COUNT(*)::int AS n FROM campaign_applications WHERE campaign_id=$1 AND option_key=$2 GROUP BY status', [id, p.from]);
+      result.push({ from: p.from, to: p.to, applications: cnt.reduce((m, r) => (m[r.status] = r.n, m), {}) });
+      if (confirm) {
+        await client.query('UPDATE campaign_applications SET option_key=$3 WHERE campaign_id=$1 AND option_key=$2', [id, p.from, p.to]);
+        await client.query('DELETE FROM campaign_options WHERE campaign_id=$1 AND opt_key=$2', [id, p.from]);
+      }
+    }
+    if (confirm) {
+      await client.query('COMMIT');
+      _listCache = { at: 0, rows: null, countsMap: null, feeMap: null };
+      logger.info('[campaign/options/merge] ' + id + ' ' + result.map(r => r.from + ' → ' + r.to).join(', ') + ' by ' + ((req.admin && req.admin.name) || '?'));
+    } else {
+      await client.query('ROLLBACK');
+    }
+    return res.json({ ok: true, dryRun: !confirm, merged: result });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    return next(e);
+  } finally {
+    client.release();
+  }
+});
+
 router.post('/admin/:id/confirm', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   const { id } = req.params;
   const appId = parseInt(req.body.applicationId, 10);
@@ -4006,5 +4163,8 @@ async function _addApplicationToSheet(campaign, applicant) {
 
   logger.info(`[campaign/sheet] 행 추가 완료: ${linked_tab_name} - ${applicant.name} (행 ${headerRowIdx + 1 + nextNum})`);
 }
+
+// 공고 목록 5초 캐시 비우기 — 다른 기능이 정원을 바꾼 직후 화면이 옛 숫자를 다시 그리지 않게(어제 부족 인원 팝업 — 코덱스 리뷰)
+router.invalidateListCache = function () { _listCache = { at: 0, rows: null, countsMap: null, feeMap: null }; };
 
 module.exports = router;

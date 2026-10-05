@@ -88,7 +88,6 @@ let bodyEl = null;   // #wblBody — 검색이 갱신하는 조각(아래 IME �
 const sandbox = {
   STATE: { tabs: [], finTab: 'run', finMgr: '', finQ: '', finFilter: '' },
   isFinished: t2 => !!(t2 && t2.finished),
-  isTodayDone: t2 => !!(t2 && t2.todayDone),
   isFinishCandidate: t2 => { candCalls.push(t2); const s = t2 && t2.stats; return !!(s && s.total && (s.submitted | 0) >= s.total && (s.paid | 0) >= s.total); },
   _finCanEdit: () => true,
   _finDate: v => String(v || ''),
@@ -104,11 +103,10 @@ vm.runInContext(BLOCK, sandbox, { filename: 'wbl-block.js' });
 const TAB = (o) => Object.assign({ sheetId: 'S1', advertiserName: '업체', campaigns: [], stats: {} }, o);
 const tOpen = TAB({ tabName: '모집중탭', campaigns: [{ id: 'c1', state: 'open' }], stats: { manager: '만두', total: 10, submitted: 8, paid: 5, folderUrl: 'https://drive.google.com/drive/folders/aaa', captureFolderUrl: 'https://drive.google.com/drive/folders/bbb', cashReceipt: true } });
 const tNone = TAB({ tabName: '공고없는탭', stats: { manager: '망고', total: 10, submitted: 10, paid: 10, cashReceipt: false } });
-const tDone = TAB({ tabName: '오늘완료탭', todayDone: true, campaigns: [{ id: 'c2', state: 'open' }], stats: { total: 5, submitted: 1, paid: 0, cashReceipt: false } });
 const tClosed = TAB({ tabName: '마감공고탭', campaigns: [{ id: 'c3', state: 'closed' }], stats: { total: 5, submitted: 3, paid: 3, cashReceipt: false } });
 
-t('금일 진행 = 오늘 완료 미체크 ∧ 공고 모집중(Q1 확정)', sandbox._finMatchFilter(tOpen, 'today') === true);
-t('오늘 완료 체크된 작업은 금일 진행에서 빠진다', sandbox._finMatchFilter(tDone, 'today') === false);
+// 오늘 완료 체크는 2026-09-30 코드 다이어트로 제거 → 금일 진행 = 공고 모집중 하나로 판정한다.
+t('금일 진행 = 공고 모집중(Q1 확정)', sandbox._finMatchFilter(tOpen, 'today') === true);
 t('공고가 마감이면 금일 진행 아님', sandbox._finMatchFilter(tClosed, 'today') === false);
 t('공고 자체가 없으면 금일 진행 아님(정의상 판정 불가)', sandbox._finMatchFilter(tNone, 'today') === false);
 t('레거시 공고는 status active 를 모집중으로(카드 점 색과 같은 _campRank 판정)',
@@ -146,12 +144,12 @@ const thCount = (thead.match(/<th[>\s]/g) || []).length;   // <thead 오계수 �
 const tb = html.indexOf('<tbody>');
 const firstRow = html.slice(tb, html.indexOf('</tr>', tb));   // 헤더의 </tr> 을 집지 않게 tbody 뒤에서 탐색
 const tdCount = (firstRow.match(/<td/g) || []).length;
-t(`★ 헤더 칸 수 ≡ 행 칸 수 (${thCount})`, thCount === tdCount && thCount === 12, `th=${thCount} td=${tdCount}`);
+t(`★ 헤더 칸 수 ≡ 행 칸 수 (${thCount})`, thCount === tdCount && thCount === 13, `th=${thCount} td=${tdCount}`);
 // 2026-08-19 사용자 확정: 목록에서 바로 공유 주소를 복사하는 [🔗 링크] 열이 작업표 옆에 붙었다.
 t('공유 열이 작업표 바로 뒤(작업표=내가 연다 / 공유=남에게 보낸다)',
   /작업표<\/th>\s*<th[^>]*>공유<\/th>/.test(thead));
-t('v3 헤더열 — 작업표·저장폴더·모집공고·오늘완료·마감이 독립 열',
-  /<th class="wbl-c">작업표<\/th>/.test(thead) && /저장폴더/.test(thead) && /모집공고/.test(thead) && /오늘완료/.test(thead) && /<th class="wbl-c">마감<\/th>/.test(thead));
+t('v3 헤더열 — 작업표·저장폴더·모집공고·마감이 독립 열(오늘완료 열은 2026-09-30 제거)',
+  /<th class="wbl-c">작업표<\/th>/.test(thead) && /저장폴더/.test(thead) && /모집공고/.test(thead) && !/오늘완료/.test(thead) && /<th class="wbl-c">마감<\/th>/.test(thead));
 t('작업표 열이 작업명↔담당 사이(사용자 확정)', /작업명[\s\S]{0,60}작업표[\s\S]{0,60}담당/.test(thead));
 t('히어로 "진행 중 작업" 단일 writer 유지', hero.textContent === '2');
 // 현영 비활성(사용자 확정): 숨기지 않고 옅은색 + 클릭 불가 + 사유
@@ -172,7 +170,8 @@ t('해제 상태 = 썸 없음(off)', /wbl-sw off/.test(html));
 sandbox.STATE.finFilter = 'pay';
 sandbox._finRenderList();
 t('필터 켜짐 = 썸 위치(중앙 104px)', /<i style="left:104px">/.test(host.innerHTML));
-t('입금 체크 중엔 미입금 건수를 빨간 병기', /\(미입금 3\)/.test(host.innerHTML));
+t('입금 체크 중엔 미입금 건수를 눈에 보이게 병기(시안 확정 2026-09-22: 상자 주황 + 남은 수 상시 표시)',
+  /class="rest on">3명 남음/.test(host.innerHTML) && /class="box short/.test(host.innerHTML));
 // today 필터의 정의상 한계 고지(조용한 누락 금지)
 sandbox.STATE.finFilter = 'today';
 sandbox._finRenderList();
@@ -192,7 +191,7 @@ sandbox._finRenderList();
 t('보관함에는 스위치 없음 + 필터 무시', !/wbl-sw/.test(host.innerHTML) && /끝난탭/.test(host.innerHTML));
 const finTb = host.innerHTML.indexOf('<tbody>');
 t('보관함 행도 칸 수 동일(빈 칸 유지 — 열 수가 사람·모드마다 달라지지 않는다)',
-  (host.innerHTML.slice(finTb, host.innerHTML.indexOf('</tr>', finTb)).match(/<td/g) || []).length === 12);
+  (host.innerHTML.slice(finTb, host.innerHTML.indexOf('</tr>', finTb)).match(/<td/g) || []).length === 13);
 sandbox.STATE.finTab = 'run'; sandbox.STATE.finFilter = '';
 t('탭 전환이 필터를 초기화한다', (sandbox._finPickTab('fin'), sandbox.STATE.finFilter === ''));
 
@@ -206,7 +205,11 @@ sandbox.STATE.finTab = 'run'; sandbox.STATE.finFilter = ''; sandbox.STATE.finQ =
 sandbox.STATE.tabs = [tOpen, tNone];
 sandbox._finRenderList();
 t('전체 렌더는 본문을 #wblBody 로 감싼다(검색이 갈아 끼울 지점)', /<div id="wblBody">/.test(host.innerHTML));
-bodyEl = { innerHTML: '' };
+// ★ 높이 고정(아래 2.6)을 **실제로 실행해 보려면** stub 이 style·offsetHeight 를 갖고 있어야 한다.
+//   offsetHeight 는 호출 순서를 기록하는 getter — "교체 전에 읽는가"·"한 번만 읽는가"를 본다.
+const hRead = [];
+bodyEl = { innerHTML: '', style: {},
+  get offsetHeight(){ hRead.push(this.innerHTML); return hRead.length === 1 ? 640 : 100; } };
 const shellBefore = host.innerHTML;
 const heroBefore = hero.textContent;
 sandbox._finSearch('모집');
@@ -224,8 +227,97 @@ t('★ 재생성 후 focus/커서 복구 코드는 제거됐다(조합을 되살
   !/setSelectionRange/.test(WD.slice(WD.indexOf('function _finSearch'), WD.indexOf('function _finSearch') + 600)));
 t('★ 본문 조각은 한 벌 — 전체 렌더와 검색이 같은 _finBodyHtml 을 쓴다(사본 금지)',
   (WD.match(/function _finBodyHtml\(/g) || []).length === 1 && (WD.match(/_finBodyHtml\(\)/g) || []).length >= 2);
+
+/* ── 2.6) 검색 중 화면 흔들림 — 본문 바깥 높이를 붙잡는다 ───────────────────────
+   사용자 신고(2026-09-21): "검색하는 과정에서 화면이 위아래로 흔들린다". 실측 원인 = 한글 조합
+   중간값(`ㅁ`·`모ㅈ`)에서 결과가 0건이 되어 **한 글자를 치는 동안에도** 목록 상자 높이가
+   "0건 ↔ N건" 을 왕복 → 아래 빠른메뉴가 밀리고 스크롤이 위로 클램프돼 화면이 튄다(530px).
+   ★ 그래서 "줄어들고 늘어나는 것은 목록(행)뿐" 이어야 한다 — 바깥 높이는 검색 내내 불변. */
+console.log('\n2.6) 검색 중 높이 고정 (화면 흔들림)');
+sandbox.STATE.finQ = ''; sandbox.STATE._finBodyH = 0;
+bodyEl.style = {}; hRead.length = 0; bodyEl.innerHTML = '검색전본문';
+sandbox._finSearch('모집');
+t('★ 검색을 시작하면 그 시점 본문 높이를 min-height 로 고정한다', bodyEl.style.minHeight === '640px');
+t('★ 높이는 innerHTML 교체 **전에** 읽는다(교체 후엔 이미 줄어든 높이라 의미가 없다)',
+  hRead.length === 1 && hRead[0] === '검색전본문', '교체 후에 읽었거나 여러 번 읽었다');
+sandbox._finSearch('ㅁ');
+t('★★ 조합 중간값(0건)에도 고정값을 다시 재지 않는다 — 재측정하면 작은 높이로 굳어 흔들림이 부활',
+  bodyEl.style.minHeight === '640px' && hRead.length === 1);
+t('그래도 목록(행)은 정상적으로 줄어든다(고정은 바깥 높이만)', /조건에 맞는 작업이 없습니다/.test(bodyEl.innerHTML));
+sandbox._finSearch('');
+t('★ 검색어를 비우면 고정 해제(빈 공간을 남기지 않는다)',
+  bodyEl.style.minHeight === '' && !(sandbox.STATE._finBodyH > 0));
+sandbox._finSearch('모집');
+t('다시 검색하면 그때 높이로 새로 고정한다', bodyEl.style.minHeight === '100px');
+sandbox._finRenderList();
+t('★ 전체 렌더는 고정을 해제한다(화면을 새로 그리는 시점 — 다음 입력이 새로 잡는다)',
+  !(sandbox.STATE._finBodyH > 0));
+t('★ 헤더는 여전히 재생성되지 않는다(2.5 의 IME 계약 유지)', /<div id="wblBody">/.test(host.innerHTML));
+t('★ 고정값 판정은 STATE 한 곳(사본 금지)', (WD.match(/_finBodyH/g) || []).length >= 3);
+
+/* ── 2.7) 모바일(≤720px) — "스크롤이 튀지 않을 만큼만" 고정 ─────────────────────
+   사용자 확정 2026-09-21(2차): 휴대폰도 흔들리지 않게. 그쪽은 `.wbl-tw{max-height:none}` 라
+   목록이 문서에 통째로 펼쳐져(실측 3257px) **전체를 고정하면 빈 공간이 수천 px** 이 된다.
+   → 지금 보고 있는 스크롤 위치가 살아남을 만큼만 고정한다(필요 없으면 0 = 빈 공간 0).
+   ★ 모드는 CSS(`--wblfix`)가 정한다 — 브레이크포인트 사본을 JS 에 만들지 않는다.
+   실측(390×844·작업 40개): 검색창을 보며 타이핑=0px(고정 불필요) · 중간까지 내린 상태 1260px→1px
+   · 맨 아래 3187px→1px. */
+console.log('\n2.7) 모바일 fit 모드 (스크롤이 튀지 않을 만큼만)');
+const SC = { scrollTop: 0, clientHeight: 794, scrollHeight: 4649 };   // 실측값(844 화면 − 상단 50)
+let bodyH = 3257;                                                     // 펼쳐진 목록 높이(실측)
+bodyEl = { innerHTML: '', style: {}, get offsetHeight(){ return bodyH; }, closest: () => SC };
+sandbox.getComputedStyle = () => ({ getPropertyValue: () => 'fit' });
+sandbox.STATE.finQ = ''; sandbox.STATE._finBodyH = 0; sandbox.STATE._finBodyGap = null;
+
+// ① 검색창을 보며 타이핑하는 정상 사용 = 여유가 충분 → 고정하지 않는다(빈 공간 0)
+SC.scrollTop = 479;
+sandbox._finSearch('모집');
+t('★★ 여유가 충분하면 고정하지 않는다(빈 공간 0 — 정상 사용에서 화면 불변)',
+  bodyEl.style.minHeight === '' && !(sandbox.STATE._finBodyH > 0));
+
+// ② 많이 내려본 상태 = 필요한 만큼만(전체 3257 이 아니라 1330)
+sandbox._finSearch(''); SC.scrollTop = 1928;
+sandbox._finSearch('모집');
+t('★★ 여유가 모자라면 "스크롤이 살아남을 만큼만" 고정한다(전체가 아니다)',
+  bodyEl.style.minHeight === '1330px', '실제: ' + bodyEl.style.minHeight);
+t('★ 전체 고정(펼쳐진 목록 높이)이 아니다 — 그랬다면 빈 공간이 수천 px', sandbox.STATE._finBodyH < bodyH);
+
+// ③ 결과가 0건이 되어 본문이 줄어도 고정값을 다시 재지 않는다(재측정하면 그 순간 튄다)
+bodyH = 90;
+sandbox._finSearch('ㅁ');
+t('★ 조합 중간값(0건)에도 고정값이 줄지 않는다', sandbox.STATE._finBodyH === 1330);
+
+// ④ 스크롤을 더 내린 뒤 검색어를 고치는 경우 → 키운다(줄이면 그 순간 튄다)
+SC.scrollTop = 2600;
+sandbox._finSearch('모집2');
+t('★★ 더 내려간 뒤 고치면 필요한 만큼 키운다(줄이지 않는다)', sandbox.STATE._finBodyH === 2002);
+SC.scrollTop = 100;
+sandbox._finSearch('모집3');
+t('★ 다시 올라가도 줄이지 않는다(줄이는 순간 그 자리에서 튄다)', sandbox.STATE._finBodyH === 2002);
+
+// ⑤ 검색어를 비우면 전부 해제
+sandbox._finSearch('');
+t('★ 검색어를 비우면 고정·기준값 모두 해제', bodyEl.style.minHeight === '' &&
+  !(sandbox.STATE._finBodyH > 0) && sandbox.STATE._finBodyGap === null);
+
+// ⑥ 모드를 못 읽으면 데스크톱(full)로 접는다
+sandbox.getComputedStyle = () => { throw new Error('no css'); };
+bodyH = 640;
+sandbox._finSearch('모집');
+t('★ 모드를 못 읽으면 full — 종전(데스크톱) 동작이 기본',
+  bodyEl.style.minHeight === '640px');
+sandbox._finSearch('');
+delete sandbox.getComputedStyle;
+
+t('★★ CSS 가 모드를 정한다 — 기본 full · 모바일 미디어쿼리에서 fit(브레이크포인트 사본 금지)',
+  /#wblBody\{[^}]*--wblfix:full/.test(WD) && /@media\(max-width:720px\)/.test(WD) && /#wblBody\{--wblfix:fit/.test(WD));
+t('★★ 모바일에서 min-height 를 !important 로 막지 않는다(막으면 fit 고정이 무시돼 흔들림이 부활)',
+  !/#wblBody\{[^}]*min-height:0!important/.test(WD));
+t('★ 스크롤 컨테이너를 못 찾아도 죽지 않는다(문서 스크롤 폴백)',
+  /document\.scrollingElement/.test(WD));
+
 bodyEl = null;   // 이후 절은 전체 렌더 경로를 그대로 검사한다
-sandbox.STATE.finQ = '';
+sandbox.STATE.finQ = ''; sandbox.STATE._finBodyH = 0;
 
 /* ── 3) 서버 stats 배선 — tabStatsMap 실제 실행(스텁 pool) ────────── */
 console.log('\n3) tabStatsMap 폴더 필드 (서비스 실행)');

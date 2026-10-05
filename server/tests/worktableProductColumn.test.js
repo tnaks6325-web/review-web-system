@@ -103,15 +103,19 @@ console.log('\n[D] 원장 저장 · 재기록 재료');
     !/scheduledUnitKey/.test(sl));
   ok('큐 원장을 다시 읽은 뒤에 옵션 키를 계산한다',
     /orderData = ledgerSvc\._osRowToOrderData\(freshOrders\[0\]\);[\s\S]{0,180}scheduledOptionKey =/.test(sl));
-  ok('슬롯 구분과 옵션 칸 기록은 옵션 키만 쓴다',
-    /const optText = selectedOptKey;/.test(sl) && /workboardId, scheduledOptionKey, orderSubmissionId\]\)\);/.test(sl));
+  // 2026-10-01: 상품은 **거르는 조건이 아니라 우선순위**(productPick)로만 넘긴다 — 슬롯 거르기(where)는 여전히 옵션 키뿐.
+  //   표식(option_text)은 옵션 키가 없을 때 **처음 채우는 줄 + 작업표 표기와 짝지어진 상품**으로만 맞춘다.
+  ok('슬롯 구분과 옵션 칸 기록은 옵션 키만 쓴다(상품은 우선순위·처음 채우는 줄 표식만)',
+    /const optText = selectedOptKey \|\| \(productOverwrite \? claimedProductKey : ''\);/.test(sl)
+    && /_pickOpenSlot\(client, \{\s*sheetId, tabName, workboardId, scheduledOptionKey, orderSubmissionId, headers,\s*productPick: scheduledOptionKey \? '' :/.test(sl)
+    && /const productOverwrite = freshClaim && !!claimedProductKey;/.test(sl));
   ok('상품형은 실제 옵션 키로 예약된 슬롯만 제외한다',
     /NOT EXISTS \([\s\S]{0,500}scope_co\.unit_kind[\s\S]{0,180}scope_co\.opt_key = cp\.option_text/.test(sl));
 
-  const create = read('src/services/worktableCreate.service.js');
-  const preview = read('src/routes/trackB.routes.js');
-  ok('시트 생성 조회가 투입방식을 읽는다', /review_type_mix, product_distribution_mode, source_revision/.test(create));
-  ok('작업표 미리보기도 투입방식을 읽는다', /review_type_mix, product_distribution_mode, source_revision/.test(preview));
+  // (시트 생성 조회 createWorktable 은 제거 (결정 186 10번 — 2026-09-28 시트 탭 생성 createWorktable 제거))
+  // (작업표 미리보기 로더도 제거 (결정 186 40번 — 작업표 미리보기 창·GET /worktable/plan 제거)) — 접수는 전체 행(SELECT *)이라 투입방식이 빠질 수 없다.
+  { const ordr = read('src/routes/order.routes.js');
+    ok('접수가 투입방식 포함 전체 행을 읽는다', /SELECT \* FROM work_orders WHERE id = \$1 AND deleted_at IS NULL LIMIT 1/.test(ordr)); }
 
   const sub = read('src/routes/submit.routes.js');
   ok('제출이 홀드에서 상품명을 읽는다', /co\.product_name AS product_name/.test(sub));

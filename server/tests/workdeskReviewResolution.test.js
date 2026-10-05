@@ -20,7 +20,7 @@ function menuContext({ field='col:리뷰제출', role='staff', count=1, archived
   const context={STATE:{role,canEdit:!archived&&role!=='advertiser',cur:{sheetless},wd:{roster:[{id:'row-1',name:'참여자',revision:'r1',filled:true}]}},
     $:()=>menu,_selectionGrid:()=>[Array(count).fill(td)],_canEditCells:()=>true,
     _workdeskStatusKindForField:f=>f==='col:리뷰제출'?'review':'',_isInternalRole:()=>['master','admin','staff'].includes(role),
-    _isPurchaseDateHeader:()=>false,_msgCanSend:()=>false,esc:s=>s,_CELL_COLORS:[],_selRanges:()=>[1],
+    _isPurchaseDateHeader:()=>false,_msgCanSend:()=>false,_menuWhoHtml:()=>'',esc:s=>s,_CELL_COLORS:[],_selRanges:()=>[1],
     _cellLockReason:()=>'',window:{innerWidth:900,innerHeight:900}};
   vm.createContext(context); vm.runInContext(fn('_openCellMenu'),context); context._openCellMenu(100,100,td);
   return menu.innerHTML;
@@ -63,7 +63,7 @@ function menuContext({ field='col:리뷰제출', role='staff', count=1, archived
     assert.equal(rows[0].isSubmitted,false); assert.equal(rows[1].isSubmitted,true);
   });
   await test('종결 조회는 홈·리뷰내역·입금·알림에서 공용 뷰 사용',()=>{
-    for(const p of ['src/services/search.service.js','src/routes/reviewer.routes.js','src/services/payment.service.js','src/routes/payment.routes.js','src/services/reviewReminder.service.js']) {
+    for(const p of ['src/services/search.service.js','src/routes/reviewer.routes.js','src/services/payment.service.js','src/services/reviewReminder.service.js']) {
       assert.match(read(p),/FROM review_closed_targets/,p);
     }
     assert.match(read('src/services/trackB.service.js'),/recordResolution\(client, row, 'order_cancelled'/);

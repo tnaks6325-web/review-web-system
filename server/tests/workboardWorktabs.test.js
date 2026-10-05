@@ -1,5 +1,8 @@
 /**
- * workboardWorktabs.test.js — "열린 작업 줄"(개인별) + "오늘 완료"(전사 공통) 회귀가드 (M2)
+ * workboardWorktabs.test.js — "열린 작업 줄"(개인별) 회귀가드 (M2)
+ *   ※ 같은 M2 의 "오늘 완료"(전사 공통 체크)는 2026-09-30 코드 다이어트(결정 186 · 킵 재검토 7번)로 제거했다.
+ *     9월 한 달 호출 0건 · 운영 체크 0건 실측. 표(trackb_tab_daily_done)는 보존(migration 검사 유지) —
+ *     4)·5)·7) 이 입구·서비스·응답·화면 잔재 0 을 고정한다. 아래 ①②⑤ 는 제거 전 설계 기록으로 남긴다.
  * 실행: node tests/workboardWorktabs.test.js
  * 설계: frontend/docs/prd-workboard-worktabs.html (v1.2, 사용자 확정) · migration 089 · M1(088) 후속
  *
@@ -25,7 +28,7 @@ const S = p => normalizeEol(fs.readFileSync(path.join(__dirname, '..', p), 'utf8
 let pass = 0;
 const t = (name, cond, extra) => { assert(cond, name + (extra ? ' → ' + extra : '')); pass++; console.log('  ✓ ' + name); };
 
-console.log('\n▶ 열린 작업 줄 + 오늘 완료 회귀가드 (M2)\n');
+console.log('\n▶ 열린 작업 줄 회귀가드 (M2)\n');
 
 process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://u:p@127.0.0.1:1/none';
 const WD = F('workdesk.html');
@@ -56,12 +59,7 @@ router.stack.filter(l => l.route).forEach(l => {
 });
 t('GET /workdesk/worktabs 등록 + authMiddleware 선행', (L['GET /workdesk/worktabs'] || [])[0] === 'authMiddleware');
 t('POST /workdesk/worktabs 등록 + authMiddleware 선행', (L['POST /workdesk/worktabs'] || [])[0] === 'authMiddleware');
-const DD = L['POST /workdesk/tab-daily-done'];
-t('POST /workdesk/tab-daily-done 등록', Array.isArray(DD));
-t('★ authMiddleware 가 맨 앞(빠지면 마스터 포함 전원 403 — 레포 실측 사고)', DD[0] === 'authMiddleware', (DD || []).join(','));
-t('★ 라우트레벨 adminOrMaster 없음 — staff 전체 탭 체크 경로 보존(스코프는 _ensureEditScope 가 건다)',
-  !DD.includes('adminOrMasterMiddleware') && !DD.includes('masterOnlyMiddleware'));
-t('오늘 완료 라우트가 _ensureEditScope 를 쓴다', /tab-daily-done[\s\S]{0,700}_ensureEditScope/.test(ROUTES));
+t('★ 오늘 완료 입구(POST /workdesk/tab-daily-done)는 제거됐다(2026-09-30 다이어트)', !L['POST /workdesk/tab-daily-done'] && !/tab-daily-done/.test(ROUTES));
 t('★ 열린 작업 줄은 **개인 데이터**라 스코프 게이트가 없다(자기 것만 읽고 쓴다 — 즐겨찾기와 같은 계약)',
   !/worktabs'[\s\S]{0,300}_ensureEditScope/.test(ROUTES));
 
@@ -103,74 +101,18 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   t('★ 저장의 42P01 도 진단 가능한 메시지로(프론트 catch 가 삼켜 무신호가 되던 경로)',
     sw.ok === false && sw.code === 'not_ready' && /089/.test(sw.error));
 
-  // ── 오늘 완료 ──
-  const cs = require('../src/services/campaignState.service');
-  const today = cs.kstTodayStr();
-  stub(() => ({ rows: [{ id: 1 }], rowCount: 1 }));
-  const on = await svc.setTabDailyDone({ sheetId: 'S1', tabName: 'T1', done: true, by: '만두' });
-  t('오늘 완료 ON', on.ok === true && on.done === true && on.created === true);
-  t('★ KST 오늘 날짜로 기록(서버 파생 — 클라이언트 시계 불신)', SQL[0].p.includes(today), JSON.stringify(SQL[0].p));
-  t('★ 같은 날 중복은 멱등(ON CONFLICT DO NOTHING)',
-    /ON CONFLICT \(sheet_id, tab_name, done_date\) DO NOTHING/.test(SQL[0].q));
-
-  stub(() => ({ rows: [], rowCount: 0 }));
-  const again = await svc.setTabDailyDone({ sheetId: 'S1', tabName: 'T1', done: true, by: '망고' });
-  t('재체크는 실패가 아니라 멱등 성공(created:false)', again.ok === true && again.created === false);
-
-  stub(() => ({ rows: [], rowCount: 1 }));
-  const off = await svc.setTabDailyDone({ sheetId: 'S1', tabName: 'T1', done: false, by: '만두' });
-  t('해제 = 오늘 행만 DELETE', off.ok === true && off.done === false && /DELETE FROM trackb_tab_daily_done/.test(SQL[0].q));
-  t('★★ 해제가 **오늘 행만** 지운다(어제 이력을 지우면 "언제 처리했나"가 사라진다)',
-    /done_date=\$3::date/.test(SQL[0].q) && SQL[0].p.includes(today));
-
-  stub(() => ({ rows: [{ sheetId: 'S1', tabName: 'T1', doneBy: '만두' }] }));
-  const dm = await svc.dailyDoneMap();
-  t('오늘 완료 맵 + 성공 플래그', dm.ok === true && !!dm.map['S1\tT1'] && dm.date === today);
-  t('★★ 조회가 "오늘"만 본다 — 어제 행은 저절로 빠진다(자정 리셋 크론이 없는 이유)',
-    /WHERE done_date = \$1::date/.test(SQL[0].q) && SQL[0].p[0] === today);
-
-  pool.query = async () => { const e = new Error('nope'); e.code = '42P01'; throw e; };
-  const dfail = await svc.dailyDoneMap();
-  t('★ 조회 실패는 ok:false 로 구분(빈 맵만 주면 체크가 조용히 풀린 것처럼 보인다)', dfail.ok === false);
-  const nr = await svc.setTabDailyDone({ sheetId: 'S1', tabName: 'T1', done: true, by: '만두' });
-  t('★ 마이그레이션 미적용(42P01)은 진단 가능한 메시지로', nr.ok === false && nr.code === 'not_ready' && /089/.test(nr.error));
-
-  /* ── 4) 라우트 실행 — 스코프 · 파싱 ────────────────────────── */
-  console.log('\n4) 스코프 · 파싱 (라우트 실제 호출)');
-  const layer = router.stack.find(l => l.route && l.route.path === '/workdesk/tab-daily-done');
-  const handler = layer.route.stack[layer.route.stack.length - 1].handle;
-  const call = async (admin, body) => {
-    let status = 200, payload = null;
-    const res = { status(c) { status = c; return this; }, json(o) { payload = o; return this; } };
-    await handler({ admin, body, query: {} }, res, e => { payload = { thrown: e && e.message }; });
-    return { status, payload };
-  };
-  const origSet = svc.setTabDailyDone;
-  let calls = 0, lastArgs = null;
-  svc.setTabDailyDone = async (a) => { calls++; lastArgs = a; return { ok: true }; };
-
-  calls = 0;
-  t('master 는 전체 탭 체크 가능', (await call({ role: 'master', name: 'm' }, { sheetId: 'S', tabName: 'T', done: true })).status === 200 && calls === 1);
-  calls = 0;
-  t('staff는 담당 여부와 무관하게 전체 탭 체크 가능', (await call({ role: 'staff', name: 'ae' }, { sheetId: 'S', tabName: 'T', done: true })).status === 200 && calls === 1);
-  calls = 0;
-  t('★ 광고주는 차단(오늘 완료도 내부 업무)', (await call({ role: 'advertiser', advertiser_id: 'a' }, { sheetId: 'S', tabName: 'T' })).status === 403 && calls === 0);
-  t('sheetId/tabName 없으면 400', (await call({ role: 'master', name: 'm' }, {})).status === 400);
-  await call({ role: 'master', name: 'm' }, { sheetId: 'S', tabName: 'T', done: 'false' });
-  t("★ done:'false'(문자열)를 완료로 오해하지 않는다(해제가 체크가 되면 되돌릴 수 없다)", lastArgs.done === false);
-  await call({ role: 'master', name: 'm' }, { sheetId: 'S', tabName: 'T', done: true });
-  t('done:true 는 완료', lastArgs.done === true);
-  svc.setTabDailyDone = origSet;
+  /* ── 4) 오늘 완료 제거 고정 ───────────────────────────────── */
+  console.log('\n4) 오늘 완료 제거 고정 (2026-09-30)');
+  t('서비스에서 오늘 완료 조회·토글 함수가 빠졌다', svc.dailyDoneMap === undefined && svc.setTabDailyDone === undefined);
 
   /* ── 5) 목록 응답 계약 ─────────────────────────────────────── */
   console.log('\n5) 목록 응답 계약 (/tabs)');
   const tabsLayer = router.stack.find(l => l.route && l.route.path === '/tabs');
   const tabsHandler = tabsLayer.route.stack[tabsLayer.route.stack.length - 1].handle;
-  const oScoped = svc.scopedActiveTabs, oFin = svc.finishedTabsMap, oStats = svc.tabStatsMap, oDaily = svc.dailyDoneMap;
+  const oScoped = svc.scopedActiveTabs, oFin = svc.finishedTabsMap, oStats = svc.tabStatsMap;
   svc.scopedActiveTabs = async () => ([{ sheetId: 'S1', tabName: 'T1', tabGid: '1' }, { sheetId: 'S1', tabName: 'T2', tabGid: '2' }]);
   svc.finishedTabsMap = async () => ({ ok: true, map: {} });
   svc.tabStatsMap = async () => ({ ok: true, map: {} });
-  svc.dailyDoneMap = async () => ({ ok: true, map: { 'S1\tT2': { doneBy: '만두' } }, date: today });
   const callTabs = async (admin, query) => {
     let payload = null;
     const res = { status() { return this; }, json(o) { payload = o; return this; } };
@@ -178,15 +120,9 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
     return payload;
   };
   const asAdmin = await callTabs({ role: 'admin', name: 'a' }, {});
-  t('오늘 완료를 주석으로 동봉', asAdmin.tabs[1].todayDone === true && asAdmin.tabs[0].todayDone === undefined);
-  t('오늘 기준 날짜를 함께 준다(화면이 서버 시각을 따르게)', asAdmin.kstDate === today);
-  svc.dailyDoneMap = async () => ({ ok: false, map: {}, date: today });
-  t('★ 조회 실패를 응답에 고지(dailyUnavailable) — 없으면 프론트가 체크를 지운다',
-    (await callTabs({ role: 'admin', name: 'a' }, {})).dailyUnavailable === true);
-  svc.dailyDoneMap = async () => ({ ok: true, map: { 'S1\tT2': { doneBy: '만두' } }, date: today });
-  const asAdv = await callTabs({ role: 'advertiser', advertiser_id: 'a1' }, {});
-  t('★ 광고주 응답엔 오늘 완료 주석이 없다(내부 업무 신호)', asAdv.tabs.every(x => x.todayDone === undefined));
-  svc.scopedActiveTabs = oScoped; svc.finishedTabsMap = oFin; svc.tabStatsMap = oStats; svc.dailyDoneMap = oDaily;
+  t('★ 목록 응답에 오늘 완료 주석·날짜·실패 깃발이 없다(제거 후 잔재 0)',
+    asAdmin.tabs.every(x => x.todayDone === undefined) && asAdmin.kstDate === undefined && asAdmin.dailyUnavailable === undefined);
+  svc.scopedActiveTabs = oScoped; svc.finishedTabsMap = oFin; svc.tabStatsMap = oStats;
   pool.query = origQuery;
 
   /* ── 6) 격리 ───────────────────────────────────────────────── */
@@ -197,12 +133,10 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   assert.ok(m2Block, 'M2 구역 마커(// ══ M2 … // ══ /M2)를 찾지 못했다 — 마커를 지우지 말 것');
   // `ON CONFLICT ... DO UPDATE SET` 은 같은 문장의 upsert 절이라 대상 테이블이 아니다 → 제외 후 판정
   const m2Writes = m2Block.replace(/--[^\n]*/g, '').replace(/DO UPDATE SET/gi, '');
-  t('★ 쓰기 표면은 신규 2테이블뿐(운영 테이블 무접촉)',
-    !/(INSERT INTO|UPDATE|DELETE FROM)\s+(?!trackb_workdesk_worktabs|trackb_tab_daily_done)/i.test(m2Writes),
+  t('★ 쓰기 표면은 열린 작업 줄 표 하나뿐(운영 테이블 무접촉 — 오늘 완료 표 쓰기도 제거됨)',
+    !/(INSERT INTO|UPDATE|DELETE FROM)\s+(?!trackb_workdesk_worktabs)/i.test(m2Writes),
     (m2Writes.match(/(INSERT INTO|UPDATE|DELETE FROM)\s+\w+/gi) || []).join(','));
   t('★ 시트 API 무접촉', !/sheets|spreadsheets|throttledCall/i.test(m2Block));
-  t('★★ KST 파생은 campaignState.kstTodayStr 재사용(사본을 만들면 날짜 규칙이 두 벌이 되어 갈린다)',
-    /require\('\.\/campaignState\.service'\)\.kstTodayStr\(\)/.test(m2Block) && !/KST_OFFSET/.test(m2Block));
 
   /* ── 7) 프론트 배선 ────────────────────────────────────────── */
   console.log('\n7) 프론트 배선');
@@ -241,8 +175,6 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   t('★ 자동 정리는 dirty 를 세우지 않는다(시스템 정리를 사용자 편집으로 치면 구식 로컬이 서버를 이긴다)',
     /function _wtPruneFinished\(\)\{[\s\S]{0,600}STATE\.worktabs=alive; STATE\._wtLoaded=true; _wtSaveLocal\(\)/.test(WD)
     && !/function _wtPruneFinished\(\)\{[\s\S]{0,600}_wtDirty=true/.test(WD));
-  t('★ 밤새 띄워 둔 화면도 자가치유(visibilitychange 복귀 시 날짜 확인)',
-    /visibilitychange[\s\S]{0,140}_finDayRollCheck\(\)/.test(WD) && /function _finDayRollCheck\(\)/.test(WD));
   t('★ 즐겨찾기 원장에 얹지 않는다(별도 엔드포인트 — Set 직렬화로 순서가 사라진다)',
     /api\('\/api\/trackb\/workdesk\/worktabs'/.test(WD) && !/@open␟/.test(WD));
   t('탭 키 규약은 즐겨찾기와 동일(_favKey 재사용 — 두 벌이면 같은 탭이 다른 키가 된다)',
@@ -255,21 +187,9 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
     !/return t && !isFinished\(t\)/.test(WD));
   t('★★ 목록이 아직 안 왔을 때는 정리 자체를 안 한다(부팅 때 전부 지워지는 사고 방지)',
     /function _wtPruneFinished\(\)\{\s*\n\s*if\(!\(STATE\.tabs\|\|\[\]\)\.length\) return;/.test(WD));
-  // ★ 자정 경계 — 서버가 판정한 날짜를 화면이 실제로 소비해야 stale 체크가 자가치유된다
-  t('★ 서버 kstDate 를 기록한다(두 흡수 경로 모두)', (WD.match(/if\(r\.kstDate\) STATE\.kstDate=r\.kstDate/g) || []).length === 2);
-  t('★★ 자정을 넘긴 화면 자가치유 — 토글 응답 날짜가 다르면 목록을 다시 받는다',
-    /if\(r\.date && STATE\.kstDate && r\.date!==STATE\.kstDate\)\{[\s\S]{0,220}_finEnsureStats\(true\)/.test(WD));
-  t('오늘 완료 토글 응답에 서버 날짜가 실린다(자가치유의 재료)', /return \{ ok: true, done: true, created: rows\.length > 0, date: today \}/.test(SVC_SRC));
-  t('★ 오늘 완료한 탭은 줄 **뒤로** 민다(시트에서 탭 뒤로 끌던 동작)',
-    /\.\.\.known\.filter\(x=>!isTodayDone\(x\.t\)\), \.\.\.known\.filter\(x=>isTodayDone\(x\.t\)\)/.test(WD));
-  t('★★ 오늘 완료는 목록에서 사라지지 않는다(사라지는 건 마감뿐) — 정렬만 뒤로',
-    /else \{ const n=list\.filter\(t=>!isTodayDone\(t\)\), d=list\.filter\(t=>isTodayDone\(t\)\); list=\[\.\.\.n,\.\.\.d\]; \}/.test(WD));
-  t('★ 홈에 "오늘 완료 n / m" 팀 진행률', /오늘 완료 \$\{nToday\} \/ \$\{nRun\}/.test(WD));
-  t('토글 실패 시 낙관적 반영을 되돌린다(화면만 바뀐 채 두지 않는다)',
-    /t\.todayDone=!want; _finRenderList\(\)/.test(WD));
-  t('★ 조회 실패 응답으로 오늘 완료 체크를 지우지 않는다',
-    /if\(!r\.dailyUnavailable\)\{ t\.todayDone=!!n\.todayDone/.test(WD));
-  t('실패를 화면이 말한다', /dailyUnavailable[\s\S]{0,120}오늘 완료 표시를 불러오지 못했습니다/.test(WD));
+  t('★ 오늘 완료 화면 잔재 0 — 체크 버튼·토글 함수·팀 진행률·정렬·날짜 자가치유',
+    !/toggleTodayDone|isTodayDone|todayDone|_finDayRollCheck|STATE\.kstDate|dailyUnavailable|tab-daily-done/.test(WD)
+    && !/오늘 완료 \$\{nToday\}/.test(WD));
   // ★★ M1 에서 실측한 따옴표 탈출 — 열린 줄도 같은 규율(문자열 보간 금지, data 속성 전달)
   t('★★ 0단 onclick 에 시트에서 온 이름을 넣지 않는다(따옴표 하나로 임의 JS 실행)',
     !/onclick="wt(Pick|Close)\('/.test(WD) && /onclick="wtPick\(this\.dataset\.k\)"/.test(WD));

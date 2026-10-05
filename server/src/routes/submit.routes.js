@@ -1,10 +1,11 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const router = express.Router();
-const { writeSheet, readSheet, appendSheet, getSpreadsheetMeta, batchReadSheet, batchUpdateSheet } = require('../services/sheets.service');
+const { writeSheet, readSheet, appendSheet } = require('../services/sheets.service');
 const { throttledCall } = require('../utils/sheetsThrottle');
 const { enqueue } = require('../services/syncQueue.service');
 const { logAbnormal } = require('../services/errorLog.service');
+const { mutateSubAccounts, findSubIndex } = require('../services/reviewerIdentityCards.service');
 const {
   createOrderLedgerEntry,
   markOrderQueued,
@@ -181,88 +182,9 @@ async function getCachedTabData(sheetId, tabName, opts = {}) {
   return result;
 }
 
-// ═══════════════════════════════════════════════════════════
-// 진단: 시트 탭 이름 목록 조회 (디버그용)
-// ═══════════════════════════════════════════════════════════
-router.post('/debug-tabs', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId } = req.body;
-    if (!sheetId) return res.json({ ok: false, error: 'sheetId 필요' });
-    const meta = await getSpreadsheetMeta(sheetId);
-    const tabs = (meta || []).map(s => ({
-      title: s.properties?.title,
-      gid: s.properties?.sheetId,
-      hidden: s.properties?.hidden || false,
-    }));
-    return res.json({ ok: true, tabs });
-  } catch (err) {
-    return res.json({ ok: false, error: err.message });
-  }
-});
+// POST /api/submit/debug-tabs · GET /diag-tabs · GET /slot-status(시트 시절 진단 3종) 은 2026-10-04 제거 — 결정 186 93번(화면 호출 0 · 9/2 이후 호출 0).
 
-// ═══════════════════════════════════════════════════════════
-// 진단: 시트 데이터 조회 (헤더 감지 디버그용)
-// ═══════════════════════════════════════════════════════════
-router.post('/debug-sheet-data', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, rows = 10 } = req.body;
-    if (!sheetId || !tabName) return res.json({ ok: false, error: 'sheetId, tabName 필요' });
-    const allRows = await readSheet(sheetId, `'${tabName}'!A1:ZZ${rows}`);
-    // 각 행에 대해 _isHeaderRow 결과도 함께 반환
-    const analyzed = (allRows || []).map((row, i) => {
-      const cells = (row || []).map(c => String(c || '').trim());
-      return { rowIdx: i, isHeader: _isHeaderRow(cells), cells: cells.slice(0, 20) };
-    });
-    return res.json({ ok: true, rowCount: (allRows || []).length, analyzed });
-  } catch (err) {
-    return res.json({ ok: false, error: err.message });
-  }
-});
 
-// ═══════════════════════════════════════════════════════════
-// GET /api/submit/diag-tabs — tab_configs 데이터 진단 (캠페인/탭명 확인용)
-// ═══════════════════════════════════════════════════════════
-router.get('/diag-tabs', authMiddleware, async (req, res) => {
-  try {
-    const { sheetId } = req.query;
-    if (!sheetId) return res.json({ ok: false, error: 'sheetId 필요' });
-    const { rows } = await pool.query(
-      `SELECT sheet_id, tab_name, campaign_name, tab_gid, sheet_url, display_name
-       FROM tab_configs WHERE sheet_id = $1
-       ORDER BY tab_name LIMIT 30`,
-      [sheetId]
-    );
-    res.json({ ok: true, total: rows.length, tabs: rows });
-  } catch (err) {
-    res.json({ ok: false, error: err.message });
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// GET /api/submit/slot-status — slot_locks 테이블 상태 확인 (진단용)
-// ═══════════════════════════════════════════════════════════
-router.get('/slot-status', authMiddleware, async (req, res) => {
-  try {
-    const { rows: tableCheck } = await pool.query(`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables
-        WHERE table_name = 'slot_locks'
-      ) AS "exists"
-    `);
-    const tableExists = tableCheck[0]?.exists || false;
-    if (!tableExists) {
-      return res.json({ ok: true, tableExists: false });
-    }
-    const { rows: stats } = await pool.query(`
-      SELECT COUNT(*) AS total,
-             COUNT(*) FILTER (WHERE is_submitted = TRUE) AS submitted
-      FROM slot_locks
-    `);
-    res.json({ ok: true, tableExists: true, stats: stats[0] });
-  } catch (err) {
-    res.json({ ok: false, error: err.message });
-  }
-});
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/submit/get-inaed-list — 시트에서 인애드명단+옵션 목록 조회
@@ -864,7 +786,7 @@ router.post('/review', async (req, res, next) => {
       /* ★★ 무시트 탭은 쓸 시트가 없다 — 표시는 위 Step 1 의 `markStatusCell` 이 **작업표 칸**에 이미 기록했다.
          이 게이트가 없으면 리뷰제출 표시 1건마다 ① 구글 호출 1회 → 404 ② `logAbnormal(warn)` 오류로그
          ③ 무의미한 `review_submit` 큐 항목이 쌓인다(프로덕션 E2E 로 실측 — 큐 백스톱이 시트 쓰기 자체는
-         막지만 그 앞의 낭비·소음은 남았다). payment.routes 의 `if (st.handled) continue` 와 같은 규율.
+         막지만 그 앞의 낭비·소음은 남았다). paymentApply.service 의 `if (st.handled) continue` 와 같은 규율.
          ★ 부분 제출(complete=false)은 markStatusCell 을 타지 않으므로 **여기서 따로 판정**한다.
          ★ 판정 실패는 종전 경로(fail-open) — 시트 기반 탭이 절대 다수다. */
       try {
@@ -958,53 +880,7 @@ router.post('/review', async (req, res, next) => {
   }
 });
 
-// ═══════════════════════════════════════════════════════════
-// GET /api/submit/debug-headers — 시트 헤더 확인 (디버그용)
-// ═══════════════════════════════════════════════════════════
-router.get('/debug-headers', async (req, res) => {
-  try {
-    const { sheetId, tabName, gid, rowIndex } = req.query;
-    if (!sheetId || !tabName) return res.json({ error: 'sheetId, tabName 필요' });
-    const sheetOpts = gid ? { gid } : {};
-    const headers = await getCachedHeaders(sheetId, tabName, sheetOpts);
-    if (!headers) return res.json({ ok: false, error: '헤더를 가져올 수 없음' });
-
-    // 비고/포스팅 컬럼 검색
-    let bigoIdx = headers.findIndex(h => /비고/.test((h || '').trim()));
-    let postingIdx = headers.findIndex(h => /포스팅/.test((h || '').trim()));
-
-    const result = {
-      ok: true,
-      headerCount: headers.length,
-      headers,
-      bigoCol: bigoIdx >= 0 ? { idx: bigoIdx, name: headers[bigoIdx], letter: getColLetter(bigoIdx) } : null,
-      postingCol: postingIdx >= 0 ? { idx: postingIdx, name: headers[postingIdx], letter: getColLetter(postingIdx) } : null,
-    };
-
-    // rowIndex가 지정되면 해당 행의 특정 셀 값도 읽기
-    if (rowIndex) {
-      const row = parseInt(rowIndex);
-      const range = `'${tabName}'!A${row}:ZZ${row}`;
-      const rowData = await readSheet(sheetId, range, sheetOpts);
-      if (rowData && rowData[0]) {
-        const cells = rowData[0];
-        result.rowData = {};
-        headers.forEach((h, i) => {
-          if (h && cells[i] !== undefined && cells[i] !== '') {
-            result.rowData[h] = String(cells[i]);
-          }
-        });
-        // 특히 비고 컬럼 값 별도 표시
-        if (bigoIdx >= 0) result.bigoValue = cells[bigoIdx] !== undefined ? String(cells[bigoIdx]) : '(empty)';
-        if (postingIdx >= 0) result.postingValue = cells[postingIdx] !== undefined ? String(cells[postingIdx]) : '(empty)';
-      }
-    }
-
-    res.json(result);
-  } catch (err) {
-    res.json({ ok: false, error: err.message });
-  }
-});
+// (GET /api/submit/debug-headers — 인증 없이 시트 한 줄을 읽던 진단) 은 2026-10-04 제거 — 화면 호출 0 · 9/2 이후 호출 0 · 개인정보가 새는 입구(결정 186 92번).
 
 // ═══════════════════════════════════════════════════════════
 // POST /api/submit/order — 구매양식 제출
@@ -1251,9 +1127,9 @@ router.post('/order', async (req, res, next) => {
       }
     } else if (_idPhone8.length === 8) {
       try {
-        const { profileMissing, resolveOrderIdentity } = require('../services/identity.service');
+        const { participationProfileMissing, resolveOrderIdentity } = require('../services/identity.service');
         let { rows: _rvRows } = await pool.query(
-          `SELECT name, phone, phone8, address, bank_name, bank_account, account_holder, sub_accounts
+          `SELECT id, name, phone, phone8, address, bank_name, bank_account, account_holder, sub_accounts
            FROM reviewers WHERE phone8 = $1 LIMIT 1`, [_idPhone8]
         );
         // ★ 타계정(063): 로그인 p8로 reviewers 행이 없으면(독립번호 타계정의 서브 로그인 세션 — verifyReviewer
@@ -1261,7 +1137,7 @@ router.post('/order', async (req, res, next) => {
         //   소유권 검증(campaign+명의 phone8+hold_token 정확일치) 통과 홀드에만. fail-open 원칙 유지(try 내부).
         if (!_rvRows.length && holdCtx) {
           const owner = await pool.query(
-            `SELECT r.name, r.phone, r.phone8, r.address, r.bank_name, r.bank_account, r.account_holder, r.sub_accounts
+            `SELECT r.id, r.name, r.phone, r.phone8, r.address, r.bank_name, r.bank_account, r.account_holder, r.sub_accounts
                FROM campaign_applications ca JOIN reviewers r ON r.phone8 = ca.owner_phone8
               WHERE ca.id = $1 AND ca.campaign_id = $2 AND ca.phone8 = $3
                 AND ca.hold_token = $4 AND ca.hold_token <> '' AND ca.owner_phone8 IS NOT NULL
@@ -1276,7 +1152,7 @@ router.post('/order', async (req, res, next) => {
           }
           if (!Array.isArray(_rv.sub_accounts)) _rv.sub_accounts = [];
 
-          const _missing = profileMissing(_rv);
+          const _missing = participationProfileMissing(_rv);   // 주소는 주문 칸 필수값으로 받는다(결정 181)
           if (_missing.length > 0) {
             return res.json({
               ok: false, code: 'PROFILE_INCOMPLETE', profileMissing: _missing,
@@ -1329,32 +1205,33 @@ router.post('/order', async (req, res, next) => {
             });
           }
           // SUB 매칭 시 타계정의 빈 주소/계좌 자동 보강 (best-effort)
-          if (_verdict.status === 'SUB' && _verdict.subIndex >= 0) {
+          if (_verdict.status === 'SUB' && _verdict.subIndex >= 0 && _rv.id) {
             try {
-              const _sub = _rv.sub_accounts[_verdict.subIndex] || {};
-              let _dirty = false;
-              if (!String(_sub.address || '').trim() && (b.extractedAddress || address)) {
-                _sub.address = String(b.extractedAddress || address).trim(); _dirty = true;
-              }
-              // 계좌 보강은 "본인 공통계좌와 다른 계좌"일 때만 (본인 계좌로 입금받는 흐름을
-              // 타계정 전용계좌로 오기록하지 않도록)
+              // ★ 조각 2-2(결정 177): 잠금 → 다시 읽기 → **이름+번호로 대상 재지목** → 빈 칸만 채움 → id 로 저장.
+              //   종전: 잠금 없이 읽은 배열을 통째로 phone8 로 덮어써 동시 저장(내정보)이 사라지고,
+              //   그 사이 목록이 바뀌면 칸 순번이 남을 가리켰다.
+              const _target = _rv.sub_accounts[_verdict.subIndex] || {};
               const _mainAcctDigits = String(_rv.bank_account || '').replace(/[^0-9]/g, '');
               const _orderAcctDigits = String(account || '').replace(/[^0-9]/g, '');
-              if (!String(_sub.bankAccount || '').trim() && _orderAcctDigits && _orderAcctDigits !== _mainAcctDigits) {
-                _sub.bankName = _sub.bankName || bank || '';
-                _sub.bankAccount = account;
-                _sub.accountHolder = _sub.accountHolder || depositor || '';
-                _dirty = true;
-              }
-              if (_dirty) {
-                _rv.sub_accounts[_verdict.subIndex] = _sub;
-                await pool.query(
-                  'UPDATE reviewers SET sub_accounts = $1::jsonb WHERE phone8 = $2',
-                  // ★ 063: owner 폴백 시 _idPhone8은 서브 p8이라 소유자 행에 못 쓴다 — 게이트 기준 행에 기록
-                  [JSON.stringify(_rv.sub_accounts), _rvRows[0].phone8 || _idPhone8]
-                );
-                logger.info(`[order-identity] 타계정 자동보강: ${_idPhone8} sub[${_verdict.subIndex}] ${_sub.name || ''}`);
-              }
+              const _res = await mutateSubAccounts(_rv.id, (subs) => {
+                const i = findSubIndex(subs, _target.name, _target.phone);
+                if (i < 0) return null; // 그 사이 사라졌거나 같은 명의가 둘 — 추측해서 쓰지 않는다
+                const sub = subs[i];
+                let dirty = false;
+                if (!String(sub.address || '').trim() && (b.extractedAddress || address)) {
+                  sub.address = String(b.extractedAddress || address).trim(); dirty = true;
+                }
+                // 계좌 보강은 "본인 공통계좌와 다른 계좌"일 때만 (본인 계좌로 입금받는 흐름을
+                // 타계정 전용계좌로 오기록하지 않도록)
+                if (!String(sub.bankAccount || '').trim() && _orderAcctDigits && _orderAcctDigits !== _mainAcctDigits) {
+                  sub.bankName = sub.bankName || bank || '';
+                  sub.bankAccount = account;
+                  sub.accountHolder = sub.accountHolder || depositor || '';
+                  dirty = true;
+                }
+                return dirty ? subs : null;
+              }, { source: 'order_enrich' });
+              if (_res.changed) logger.info(`[order-identity] 타계정 자동보강: ${_idPhone8} ${_target.name || ''}`);
             } catch (enrichErr) {
               logger.warn(`[order-identity] 타계정 자동보강 실패(무시): ${enrichErr.message}`);
             }
@@ -1388,11 +1265,30 @@ router.post('/order', async (req, res, next) => {
 
     // ★ 101: 블로그 주소는 **홀드에서 읽은 서버값만** 싣는다(요청 본문 미신뢰 — 옵션과 같은 규율).
     //   홀드가 없거나(레거시·관리자 경유) 리뷰체험단이면 undefined = 시트 '블로그URL' 칸 무접촉.
+    /* ★★ 2026-10-02 B안 — 구매양식 링크로 들어온 리뷰어가 고른 **상품**.
+         홀드가 있으면 홀드 값이 이긴다(서버 권위 · 종전 그대로). 홀드가 없을 때만 화면 값을 받되,
+         **그 작업의 상품 선택지에 있는 값만** 받는다(resolveProductLabel 정확·포함 일치 — 지어낸 값 차단).
+         ★ 못 맞추거나 조회가 실패하면 '' = 종전 동작(상품을 모른 채 접수) — 제출을 막지 않는다
+           (구버전 화면·배포 순서 차이에서 접수가 끊기면 안 된다. 고르기 강제는 화면이 한다). */
+    let formPickedProduct = '';
+    let formCaptureProduct = '';
+    if (!(holdCtx && holdCtx.productName) && (b.selectedProduct || b.productCaptureName)) {
+      try {
+        const so = require('../services/sheetlessOrder.service');
+        const choices = await so.listProductChoices(pool, orderScope.sheetId, orderScope.tabName);
+        if (choices.length) {
+          formPickedProduct = so.resolveProductLabel(String(b.selectedProduct || '').slice(0, 300), choices);
+          formCaptureProduct = so.resolveProductLabel(String(b.productCaptureName || '').slice(0, 300), choices);
+        }
+      } catch (pickErr) {
+        logger.warn(`[submit/order] 상품 선택 확인 실패 — 종전대로 접수: ${pickErr.message}`);
+      }
+    }
     const orderData = { orderer: _orderer, recipient, userId, phone, address, bank, account, depositor, price, dateStr, orderNum, memo,
                         selectedOptKey: sheetOptKey, blogUrl: (holdCtx && holdCtx.blogUrl) || '',
                         /* ★ 138 — 리뷰어가 고른 **상품**은 옵션과 별개의 칸(「상품」)에 적는다.
                            옵션 칸을 비우는 위 규율은 그대로 두고, 사라지던 값을 여기로 흘려보낸다. */
-                        selectedProduct: (holdCtx && holdCtx.productName) || '' };
+                        selectedProduct: (holdCtx && holdCtx.productName) || formPickedProduct || '' };
     // 통폐합 pilot/enabled에서 workboard_id가 연결된 작업만 큐 반영으로 전환한다.
     // 실패·미이관·legacy는 기존 무시트 즉시 반영을 그대로 탄다.
     let queuedWorkboardApply = false;
@@ -1600,6 +1496,19 @@ router.post('/order', async (req, res, next) => {
     }
 
     const captureSession = await _issueCaptureSession(ledger.orderSubmissionId, captureTarget, 'order_submit');
+    // ★ 2026-10-02 B안 — 리뷰어가 캡처와 **다른 상품**을 골랐으면 막지 않고 접수하되(판독이 틀릴 수 있다)
+    //   리뷰어 비정상로그에 남겨 담당자가 확인하게 한다. 둘 다 그 작업 선택지로 짝지어진 경우만(모르면 침묵).
+    //   ★ 응답을 기다리게 하지 않는다 · 실패해도 접수에 영향 없음.
+    if (formPickedProduct && formCaptureProduct && formPickedProduct !== formCaptureProduct) {
+      require('../services/reviewerEventLog.service').logReviewerEvent({
+        sheetId: orderScope.sheetId, tabName: orderScope.tabName,
+        reviewerName: String(loginName || recipient || ''), phone8: String(loginPhone8 || ''),
+        eventType: 'product_capture_mismatch', severity: 'warn',
+        message: `『${orderScope.tabName}』에 ${String(loginName || recipient || '리뷰어')} 리뷰어가 구매 캡처와 다른 상품을 골라 제출했습니다.`,
+        context: { picked: formPickedProduct, capture: formCaptureProduct, row: ledger.sheetRow || null },
+        orderSubmissionId: ledger.orderSubmissionId,
+      }).catch(e => logger.warn(`[submit/order] 상품 불일치 로그 실패(무시): ${e.message}`));
+    }
     res.json({
       ok: true,
       dbSaved: true,
@@ -1652,103 +1561,7 @@ router.post('/order', async (req, res, next) => {
   }
 });
 
-// ═══════════════════════════════════════════════════════════
-// POST /api/submit/check-duplicate — 중복 검사
-//
-// Phase 4: DB 전용 전환
-//   - Sheets readSheet 호출 완전 제거
-//   - order_submissions + review_index 기반 검사
-//   - 응답시간: 5~15초 → 3ms
-// ═══════════════════════════════════════════════════════════
-router.post('/check-duplicate', async (req, res, next) => {
-  try {
-    const { sheetId, tabName, userId, dateStr, orderNum, recipient, phone, address } = req.body;
-    if (!sheetId || !tabName) {
-      return res.json({ error: 'sheetId, tabName 필요' });
-    }
-
-    // ── DB 기반 중복 검사 (Sheets 읽기 완전 제거) ──
-    let isDuplicate = false;
-
-    // 1차: order_submissions 테이블에서 검사
-    if (userId || orderNum) {
-      const conditions = ['sheet_id = $1', 'tab_name = $2'];
-      const params = [sheetId, tabName];
-      let idx = 3;
-
-      if (userId) { conditions.push(`user_id = $${idx++}`); params.push(userId); }
-      if (orderNum) { conditions.push(`order_num = $${idx++}`); params.push(orderNum); }
-
-      const { rows } = await pool.query(
-        `SELECT COUNT(*) FROM order_submissions WHERE ${conditions.join(' AND ')}`,
-        params
-      );
-      isDuplicate = parseInt(rows[0].count) > 0;
-    }
-
-    // 2차: 아직 안 찾았으면 review_index에서도 검사 (phone8 기반)
-    if (!isDuplicate && phone) {
-      const phone8 = phone.replace(/[^0-9]/g, '').slice(-8);
-      if (phone8.length === 8) {
-        const { rows } = await pool.query(
-          `SELECT COUNT(*) FROM review_index
-           WHERE sheet_id = $1 AND tab_name = $2 AND phone8 = $3`,
-          [sheetId, tabName, phone8]
-        );
-        isDuplicate = parseInt(rows[0].count) > 0;
-      }
-    }
-
-    // 3차: recipient + address 조합으로도 검사
-    if (!isDuplicate && recipient && address) {
-      const { rows } = await pool.query(
-        `SELECT COUNT(*) FROM order_submissions
-         WHERE sheet_id = $1 AND tab_name = $2 AND recipient = $3 AND address = $4`,
-        [sheetId, tabName, recipient, address]
-      );
-      isDuplicate = parseInt(rows[0].count) > 0;
-    }
-
-    res.json({ ok: true, isDuplicate, source: 'db' });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/submit/check-files — 리뷰파일 존재 확인 (GAS: checkReviewFiles)
-// ═══════════════════════════════════════════════════════════
-router.post('/check-files', async (req, res, next) => {
-  try {
-    const { sheetId, tabName, rowIndex } = req.body;
-
-    // tab_configs에서 폴더 URL 조회
-    const { rows } = await pool.query(
-      'SELECT folder_url, capture_folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
-      [sheetId, tabName]
-    );
-
-    if (rows.length === 0 || !rows[0].folder_url) {
-      return res.json({ ok: true, exists: false, message: '폴더 URL 미설정' });
-    }
-
-    // Drive API로 폴더 내 파일 확인
-    try {
-      const driveService = require('../services/drive.service');
-      const folderId = extractFolderId(rows[0].folder_url);
-      if (folderId) {
-        const files = await driveService.listFolderContents(folderId);
-        return res.json({ ok: true, exists: files.length > 0, fileCount: files.length });
-      }
-    } catch (driveErr) {
-      console.warn('Drive API 조회 실패:', driveErr.message);
-    }
-
-    res.json({ ok: true, exists: false, message: '파일 확인 불가' });
-  } catch (err) {
-    next(err);
-  }
-});
+// POST /api/submit/check-files(무인증 · 폴더 파일 개수) 은 2026-10-05 제거 — 결정 186 103번(옛 리뷰제출 화면의 열 수 없는 진단 창 전용 · 9/2 이후 호출 0).
 
 // ═══════════════════════════════════════════════════════════
 // 헬퍼 함수들
@@ -1763,13 +1576,6 @@ function getColLetter(colIdx) {
     idx = Math.floor(idx / 26) - 1;
   }
   return letter;
-}
-
-/** Google Drive URL에서 폴더 ID 추출 */
-function extractFolderId(url) {
-  if (!url) return null;
-  const m = url.match(/\/folders\/([a-zA-Z0-9_-]+)/);
-  return m ? m[1] : null;
 }
 
 /** 주문 데이터를 헤더에 맞게 매핑

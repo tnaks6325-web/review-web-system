@@ -135,6 +135,43 @@ async function sendReviewAlimTalk({ to, reminderNo, variables, customFields = {}
   };
 }
 
+/* 문자 바이트 수 — 통신사 기준(한글 등 비ASCII 2바이트). 90바이트 초과는 장문(LMS). */
+function smsBytes(text) {
+  let n = 0;
+  for (const ch of String(text || '')) n += ch.charCodeAt(0) > 127 ? 2 : 1;
+  return n;
+}
+const SMS_MAX_BYTES = 90;
+const LMS_MAX_BYTES = 2000;
+
+/**
+ * 담당자 직접 입력 문자(SMS/LMS). 발신번호는 알림톡과 같은 등록 번호(SOLAPI_SENDER_NUMBER).
+ * ★ 길이로 종류를 정한다(90바이트 이하 SMS · 초과 LMS · 2000바이트 초과는 호출 전에 거부).
+ */
+async function sendSms({ to, text, subject = '', customFields = {} }, opts = {}) {
+  const c = _config();
+  const body = String(text || '');
+  const bytes = smsBytes(body);
+  if (!body.trim()) throw new Error('SMS_EMPTY');
+  if (bytes > LMS_MAX_BYTES) throw new Error('SMS_TOO_LONG');
+  const type = bytes > SMS_MAX_BYTES ? 'LMS' : 'SMS';
+  const msg = { to: String(to || '').replace(/[^0-9]/g, ''), from: c.senderNumber, type, text: body, customFields };
+  if (type === 'LMS') msg.subject = String(subject || '안내').slice(0, 20);
+  const payload = await _request(SEND_PATH, {
+    method: 'POST',
+    fetchImpl: opts.fetchImpl,
+    body: { messages: [msg], strict: true, allowDuplicates: false, showMessageList: true },
+  });
+  const result = _firstResult(payload);
+  return {
+    accepted: result.accepted,
+    messageId: result.messageId || null,
+    statusCode: String(result.statusCode || ''),
+    reason: String(result.statusMessage || result.reason || ''),
+    type,
+  };
+}
+
 async function getMessageStatus(messageId, opts = {}) {
   const qs = new URLSearchParams({
     criteria: 'messageId',
@@ -192,6 +229,12 @@ async function getAccountBilling(opts = {}) {
     spendable: balance + point,
     unitPrice,
     unitPriceVatIncluded: Math.round(unitPrice * 1.1 * 100) / 100,
+    // 담당자 수동 발송 확인창용 종류별 단가(부가세 별도 · 포함). 값이 없으면 null(모르는 값을 0으로 꾸미지 않는다).
+    prices: ['ata', 'sms', 'lms'].reduce((o, k) => {
+      const v = _finiteNumber(pricing[k]);
+      o[k] = v == null ? null : { unit: v, vat: Math.round(v * 1.1 * 100) / 100 };
+      return o;
+    }, {}),
     autoRecharge: Number(cash.autoRecharge) > 0,
     checkedAt: new Date(now).toISOString(),
   };
@@ -203,6 +246,10 @@ module.exports = {
   getSolapiStatus,
   createAuthorization,
   sendReviewAlimTalk,
+  sendSms,
+  smsBytes,
+  SMS_MAX_BYTES,
+  LMS_MAX_BYTES,
   getMessageStatus,
   getAccountBilling,
   _config,

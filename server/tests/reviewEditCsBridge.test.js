@@ -217,8 +217,8 @@ t('★ 카드 렌더러는 공유 모듈 하나뿐', () => {
     assert.ok(!/리뷰캡처 교체요청<\/span>/.test(s), n + ' 에 카드 마크업 사본이 있다');
   });
 });
-t('네 화면이 같은 모듈을 로드한다', () => {
-  [['admin.html', ADM], ['admin-siand.html', F('admin-siand.html')],
+t('세 화면이 같은 모듈을 로드한다', () => {   // (admin-siand.html 은 결정 186 44번에서 제거)
+  [['admin.html', ADM],
    ['workdesk.html', WD], ['index.html', F('index.html')]].forEach(([n, s]) =>
     assert.ok(/<script src="js\/cs-review-edit-card\.js"><\/script>/.test(s), n + ' 미로드'));
 });

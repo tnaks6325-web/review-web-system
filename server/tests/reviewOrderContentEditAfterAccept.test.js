@@ -90,6 +90,10 @@ function makeRes() {
 }
 
 async function call(order, body) {
+  /* ★ 핸들러는 요청 본문에 내부 계산값(`_normalized_…`)을 **써 넣는다**. 공용 픽스처(BODY)를
+     그대로 넘기면 그 값이 다음 케이스까지 따라가, "인트라넷이 보내지 않는 칸" 을 검사하는
+     케이스가 조용히 무력화된다. 그래서 여기서 한 벌 복사해 넘긴다. */
+  body = JSON.parse(JSON.stringify(body));
   const queries = [];
   pool.query = async (sql, params) => {
     const s = String(sql);
@@ -111,13 +115,17 @@ async function t(name, fn) {
   catch (e) { console.log('  ✗ ' + name + '\n      ' + e.message); fail += 1; }
 }
 
+// ★ pay_amount 는 2026-09-21 사용자 확정으로 합류했다(상품 구성의 1건당 금액과 함께 바뀌는 짝).
 const ALLOWED = ['title', 'manager_name', 'product_url', 'inflow_keyword',
-  'inflow_guide', 'guide_images', 'review_guide', 'special_notes'];
+  'inflow_guide', 'guide_images', 'review_guide', 'special_notes', 'pay_amount',
+  'thumbnail_url',   // ★ 163 — 공고 카드 그림 하나라 표·정원·금액 어디에도 안 쓰인다
+  // ★ 사용자 확정 2026-09-22 — 둘 다 작업표를 만드는 계산이 한 번도 보지 않는 값이다
+  //   (회귀가드 `inflowSourceEdit` 가 작업표 코드에 참조 0건을 고정한다).
+  'inflow_type', 'purchase_time'];
 const BLOCKED_SAMPLES = {
-  recruit_count: 500, daily_count: 99, start_date: '2026-12-25', pay_amount: 1,
+  recruit_count: 500, daily_count: 99, start_date: '2026-12-25',
   review_fee: 1, purchase_channel: '쿠팡', review_type: '텍스트', delivery_type: '빈박스',
   work_sheet_url: 'https://docs.google.com/x', work_kind: '블로그체험단',
-  product_option: '20포', purchase_time: '10:00 ~ 11:00',
 };
 
 async function run() {
@@ -136,6 +144,9 @@ async function run() {
       title: '새 작업명', manager_name: '박은비', product_url: 'https://x/y',
       inflow_keyword: '새 검색어', inflow_guide: '새 유입 가이드',
       guide_images: ['https://a/b.jpg'], review_guide: '새 리뷰 가이드', special_notes: '새 특이사항',
+      pay_amount: 31000,   // ★ 결제합계 — 상품 구성의 1건당 금액과 함께 바뀌는 짝(2026-09-21 확정)
+      thumbnail_url: 'https://api.example.com/api/order/guide-image/1AbCdEfGhIjKlMnOp',   // ★ 163
+      inflow_type: 'guide', purchase_time: '오후 2시 ~ 5시',   // ★ 사용자 확정 2026-09-22 — 작업표 무관
     });
     const { res } = await call(baseOrder(), body);
     assert.strictEqual(res.statusCode, 200, 'body=' + JSON.stringify(res.body));
@@ -150,7 +161,7 @@ async function run() {
     ['recruit_count =', 'start_date =', 'daily_count =', 'pay_amount =', 'work_sheet_url =',
       'review_type =', 'delivery_type =', 'purchase_channel =', 'work_kind =',
       'skip_weekends =', 'holidays =', 'product_options_json ='].forEach(col =>
-      assert.ok(!sql.includes(col), '잠긴 칸을 건드림: ' + col));
+      assert.ok(!sql.includes(col), '안 바뀐 칸을 건드림: ' + col));   // ★ pay_amount·product_options_json 은 허용 칸이지만 이 요청에서는 안 바뀌었다
     // 안 바뀐 허용 칸도 쓰지 않는다(접수 상태 보존)
     assert.ok(!sql.includes('review_guide ='), '안 바뀐 칸까지 쓴다');
   });
@@ -244,8 +255,23 @@ async function run() {
     const from = SRC.indexOf('if (partialEdit) {');
     const block = SRC.slice(from, SRC.indexOf('RETURNING *', from));
     assert.ok(block.length > 200, '검사할 조각을 못 잘랐다');
-    assert.ok(/\.filter\(column =>[^\n]*SOURCE_EDIT_AFTER_ACCEPT\.includes\(column\)/.test(block),
-      '쓰기 칸 목록을 만들 때 허용목록 검사가 사라졌다');
+    // ★ 허용목록 검사는 **공용 판정 함수 안**으로 옮겨졌다(2026-09-21) — 검사 의미는 그대로이고
+    //   "차단 판정과 저장 대상 선정이 같은 함수를 본다"는 축이 하나 더 붙어 종전보다 강하다.
+    assert.ok(/\.filter\(column =>[^\n]*_sourceEditAllowedAfterAccept\(column/.test(block),
+      '쓰기 칸 목록을 만들 때 허용 판정이 사라졌다');
+    const judgeStart = SRC.indexOf('function _sourceEditAllowedAfterAccept(');
+    assert.ok(judgeStart > 0, '허용 판정 함수가 없다');
+    const judge = SRC.slice(judgeStart, SRC.indexOf('\n}', judgeStart));
+    assert.ok(/SOURCE_EDIT_AFTER_ACCEPT\.includes\(column\)/.test(judge),
+      '허용 판정 안에서 허용목록 검사가 사라졌다');
+  });
+
+  await t('⑦ 막을지 판정과 저장할지 판정이 같은 함수를 본다(갈리면 조용한 무동작)', async () => {
+    // ⚠ 둘이 갈리면 "409 도 안 뜨는데 저장도 안 되는" 상태가 된다 — 저장했다고 답하면서 값을 버린다.
+    const from = SRC.indexOf('const blockedChanges = contentChanges.filter');
+    const blockedBlock = SRC.slice(from, from + 220);
+    assert.ok(/_sourceEditAllowedAfterAccept\(column/.test(blockedBlock),
+      '차단 판정이 공용 허용 판정을 안 쓴다');
   });
 
   await t('⑦ 칸 이름은 형식 검사를 통과한 것만 SQL 에 넣는다(주입 차단 — 지우지 말 것)', async () => {
@@ -256,6 +282,105 @@ async function run() {
     assert.ok(block.length > 200, '검사할 조각을 못 잘랐다');
     assert.ok(/\/\^\[a-z_\]\+\$\/\.test\(column\)/.test(block),
       '칸 이름 형식 검사가 사라졌다 — 칸 이름은 문자열로 조립되므로 주입 경로가 열린다');
+  });
+
+
+  /* ══════════════════════════════════════════════════════════════════════════
+     ★★★ 실사고 재현 — 인트라넷이 **실제로 보내는 모양**으로 돌린다 (2026-09-22)
+     ─────────────────────────────────────────────────────────────────────────
+     종전 픽스처는 상품 구성이 **빈 문자열**이고 요약 문장(`product_option`)이 늘 **같은 값**이라,
+     실제 인트라넷 payload 에서 벌어지는 일이 **한 번도 재현되지 않았다**:
+       161(결제금액)로 금액을 고치면 인트라넷이 요약 문장을 **새 금액으로 다시 만들어 보내는데**,
+       리뷰웹은 그 문장을 잠긴 칸으로 보고 저장하지 않았다 → 저장된 문장은 **옛 금액**으로 남고,
+       그 뒤로는 문장이 달라 **무엇을 고치든 항상 409** 가 됐다(티피링크 Tapo C113 오더 실측).
+     ⇒ 상품 구성이 **값이 있는** 오더에서, 인트라넷 payload 모양 그대로 돌려 고정한다.
+     ══════════════════════════════════════════════════════════════════════════ */
+  const REAL_OPTIONS = JSON.stringify([{
+    name: '티피링크 Tapo C113 홈캠 / 옵션 : 단품',
+    url: 'https://brand.naver.com/tplink/products/12170674633',
+    option_schema_version: 2, product_mode: 'none',
+    base: { pay: 55200, count: 5, daily: 5, review_type_mix: [] }, options: [],
+  }]);
+
+  await t('★ 상품 구성이 있는 오더에서 구매시간대만 고치면 통과한다(인트라넷 payload 그대로)', async () => {
+    const order = baseOrder({ product_options_json: REAL_OPTIONS, purchase_time: '자유시간대' });
+    const body = Object.assign({}, BODY, {
+      product_options_json: REAL_OPTIONS,       // ← 인트라넷은 이 칸만 보낸다
+      purchase_time: '오후 2시 ~ 5시',           // ← 고치는 칸
+    });
+    // ★ 인트라넷은 `_normalized_product_options_json` 을 **보내지 않는다** — 그 전제를 고정한다.
+    assert.ok(!Object.prototype.hasOwnProperty.call(body, '_normalized_product_options_json'),
+      '픽스처가 리뷰웹 내부 칸을 넣고 있다 — 그러면 실제와 다른 것을 검사하게 된다');
+    const { res } = await call(order, body);
+    assert.strictEqual(res.statusCode, 200,
+      '상품 구성을 건드리지 않았는데 막혔다(= 접수 뒤 원본 수정이 통째로 죽는다): ' + JSON.stringify(res.body));
+    assert.deepStrictEqual(res.body.edited_fields, ['purchase_time']);
+  });
+
+  await t('★ 상품 구성의 잠긴 부분을 실제로 바꾸면 여전히 막힌다(완화되지 않았다)', async () => {
+    const order = baseOrder({ product_options_json: REAL_OPTIONS });
+    const changed = JSON.parse(REAL_OPTIONS);
+    changed[0].base.count = 99;                 // 모집 수량 = 잠긴 부분
+    const { res } = await call(order, Object.assign({}, BODY, {
+      product_options_json: JSON.stringify(changed),
+    }));
+    assert.strictEqual(res.statusCode, 409, '잠긴 부분이 바뀌었는데 통과했다');
+    assert.ok(/상품/.test(String(res.body.error || '')), res.body.error);
+  });
+
+  await t('★ 상품 구성 안의 열린 부분(주소·가이드·결제금액)은 통과한다', async () => {
+    const order = baseOrder({ product_options_json: REAL_OPTIONS });
+    const changed = JSON.parse(REAL_OPTIONS);
+    changed[0].url = 'https://brand.naver.com/tplink/products/99999999';
+    changed[0].base.pay = 60000;
+    const { res } = await call(order, Object.assign({}, BODY, {
+      product_options_json: JSON.stringify(changed),
+    }));
+    assert.strictEqual(res.statusCode, 200, JSON.stringify(res.body));
+  });
+
+  await t('★ 결제금액을 고치면 사람이 읽는 요약 문장도 같이 저장된다(옛 금액이 남지 않는다)', async () => {
+    /* ★★ 실사고: 숫자 칸만 갱신되고 요약 문장은 옛 금액으로 남아
+       ㉮ 작업보드·리뷰검수·광고주 화면이 옛 금액을 보여주고
+       ㉯ 그 다음 수정이 "상품·옵션이 바뀌었다"로 **영영 막혔다**. */
+    const order = baseOrder({
+      product_options_json: REAL_OPTIONS,
+      product_option: '[상품/옵션/금액]\n1. 티피링크 Tapo C113 홈캠 / 옵션 : 단품 - 결제금액 52,200원 / 5명',
+    });
+    const changed = JSON.parse(REAL_OPTIONS);
+    changed[0].base.pay = 60000;
+    const body = Object.assign({}, BODY, {
+      product_options_json: JSON.stringify(changed),
+      pay_amount: 300000,
+      product_option: '[상품/옵션/금액]\n1. 티피링크 Tapo C113 홈캠 / 옵션 : 단품 - 결제금액 60,000원 / 5명',
+    });
+    const { res, updates } = await call(order, body);
+    assert.strictEqual(res.statusCode, 200, JSON.stringify(res.body));
+    assert.ok(res.body.edited_fields.includes('product_option'),
+      '요약 문장이 저장 대상에서 빠졌다 — 옛 금액이 화면에 남는다: ' + JSON.stringify(res.body.edited_fields));
+    assert.ok(updates.some(u => /product_option\s*=\s*\$/.test(String(u.sql || u))),
+      '요약 문장이 실제 UPDATE 에 없다');
+  });
+
+  await t('★ 요약 문장이 따라와도 잠긴 칸은 그대로 막힌다(우회로가 아니다)', async () => {
+    const order = baseOrder({ product_options_json: REAL_OPTIONS });
+    const changed = JSON.parse(REAL_OPTIONS);
+    changed[0].base.count = 99;                 // 인원 = 잠긴 부분
+    const { res, updates } = await call(order, Object.assign({}, BODY, {
+      product_options_json: JSON.stringify(changed),
+      product_option: '[상품/옵션/금액]\n1. 티피링크 Tapo C113 홈캠 - 99명',
+    }));
+    assert.strictEqual(res.statusCode, 409, '요약 문장을 같이 보내면 잠금이 뚫렸다');
+    assert.strictEqual(updates.length, 0, '거부인데 UPDATE 가 나갔다');
+  });
+
+  await t('★ 409 안내의 "바꿀 수 있는 칸" 은 허용 목록에서 파생한다(손으로 적지 않는다)', async () => {
+    const { res } = await call(baseOrder(), Object.assign({}, BODY, BLOCKED_SAMPLES));
+    assert.strictEqual(res.statusCode, 409);
+    const msg = String(res.body.error || '');
+    // 새로 열린 칸이 안내에 실제로 등장해야 한다 — 종전에는 문장이 손으로 적혀 있어 어긋났다
+    ['구매시간대', '유입방식', '공고 썸네일'].forEach(name =>
+      assert.ok(msg.includes(name), '안내에 "' + name + '" 이 없다(손으로 적은 목록이 남아 있다): ' + msg));
   });
 
   console.log(`\nreviewOrderContentEditAfterAccept: ${pass} 통과 / ${fail} 실패`);

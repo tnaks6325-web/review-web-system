@@ -16,14 +16,25 @@ function _intEnv(name, fallback, min, max, env = process.env) {
   return Math.max(min, Math.min(max, parsed));
 }
 
+const DEFAULT_SCHEDULE_DAYS = [7, 13, 14];
+function _scheduleDays(raw) {
+  const arr = String(raw == null ? '' : raw).split(',').map(v => Number.parseInt(v.trim(), 10));
+  const ok = arr.length === 3 && arr.every(n => Number.isInteger(n) && n >= 0 && n <= 90)
+    && arr[0] < arr[1] && arr[1] < arr[2];
+  return ok ? arr : DEFAULT_SCHEDULE_DAYS.slice();
+}
+
 function getReviewReminderConfig(env = process.env) {
   const provider = solapi.getSolapiStatus(env);
   return {
     enabled: env.REVIEW_REMINDER_ENABLED === '1',
     providerConfigured: provider.configured,
     missing: provider.missing,
-    firstOffsetDays: _intEnv('REVIEW_REMINDER_FIRST_OFFSET_DAYS', 0, -30, 90, env),
-    intervalHours: _intEnv('REVIEW_REMINDER_INTERVAL_HOURS', 24, 1, 24 * 30, env),
+    // ★ 발송 시점 = 구매일(구매양식 제출일, KST) 기준 1차·2차·3차 경과일(사용자 확정 2026-09-30: 7·13·14일).
+    //   제출기한 = 구매일 + 마지막 값(14일)의 끝. 시트 마감일 칸(end_date)은 어떤 작업표에도 없어 쓰지 않는다.
+    scheduleDays: _scheduleDays(env.REVIEW_REMINDER_SCHEDULE_DAYS),
+    // 앞 회차가 늦게 나갔을 때 다음 회차와 너무 붙지 않게 하는 최소 간격(시간).
+    minGapHours: _intEnv('REVIEW_REMINDER_MIN_GAP_HOURS', 12, 1, 72, env),
     finalGraceDays: _intEnv('REVIEW_REMINDER_FINAL_GRACE_DAYS', 1, 1, 30, env),
     retryHours: _intEnv('REVIEW_REMINDER_RETRY_HOURS', 6, 1, 24 * 7, env),
     dailyCap: _intEnv('REVIEW_REMINDER_DAILY_CAP', 40, 1, 10000, env),
@@ -127,36 +138,58 @@ function buildTemplateVariables(reminderNo, row, deadline, finalDue, reviewLink)
   return common;
 }
 
-function _eligibleAt(row, deadline, config) {
+// 구매일(KST) + days 일의 0시(KST).
+function _kstDayStart(date, days) {
+  const end = _addKstDaysEnd(date, days - 1);
+  return new Date(end.getTime() + 1);
+}
+
+/**
+ * 구매일 기준 발송 창.
+ *  - n 회차는 구매일 + scheduleDays[n-1] 일 0시부터 보낼 수 있다(크론이 10~18시에 돈다).
+ *  - 앞 회차가 늦게 나갔으면 그 뒤 minGapHours 가 지나야 다음 회차.
+ *  - ★ 마지막 회차 날(구매 +14일)이 끝나면 더 보내지 않는다 — 오래된 미작성 건에 1차부터 뒤늦게
+ *    몰아 보내지 않기 위해서다(켜는 순간 지난 건 전체에 알림이 쏟아지는 것 방지).
+ */
+function reminderSchedule(orderedAt, config) {
+  if (!orderedAt || Number.isNaN(new Date(orderedAt).getTime())) return null;
+  const days = config.scheduleDays || DEFAULT_SCHEDULE_DAYS;
+  const slots = days.map(d => _kstDayStart(orderedAt, d));
+  return {
+    purchaseDay: formatKstDate(orderedAt),
+    slots,
+    deadline: _addKstDaysEnd(orderedAt, days[2]),
+    windowEnd: _addKstDaysEnd(orderedAt, days[2]),
+  };
+}
+
+function _eligibleAt(row, sched, config) {
   const count = Number(row.reminderCount || 0);
-  if (count === 0) return _addHours(deadline, config.firstOffsetDays * 24);
-  if (count < 3 && row.lastRemindedAt) {
-    // 운영자가 마감일을 연장하면 앞선 알림 시각만 보고 다음 차수를 보내지 않는다.
-    const afterLastDelivery = _addHours(row.lastRemindedAt, config.intervalHours);
-    const afterCurrentDeadline = _addHours(deadline, config.firstOffsetDays * 24);
-    return afterLastDelivery > afterCurrentDeadline ? afterLastDelivery : afterCurrentDeadline;
+  if (count >= 3) return null;
+  let at = sched.slots[count];
+  if (count > 0 && row.lastRemindedAt) {
+    const gap = _addHours(row.lastRemindedAt, config.minGapHours || 12);
+    if (gap > at) at = gap;
   }
-  return null;
+  return at;
 }
 
 function _summarizePreview(rows, now, config) {
   const items = [];
   for (const row of rows) {
-    const deadline = parseReviewDeadline(row.endDate, {
-      startDate: row.startDate,
-      orderedAt: row.orderedAt,
-      now,
-    });
+    const sched = reminderSchedule(row.orderedAt, config);
+    const deadline = sched ? sched.deadline : null;
     const phone = normalizeKoreanMobile(row.orderPhone);
     const reminderNo = Number(row.reminderCount || 0) + 1;
-    const eligibleAt = deadline ? _eligibleAt(row, deadline, config) : null;
+    const eligibleAt = sched ? _eligibleAt(row, sched, config) : null;
     let reason = null;
-    if (!deadline) reason = 'deadline_unparseable';
+    if (!sched) reason = 'purchase_date_unknown';
     else if (!phone) reason = 'participant_phone_invalid';
     else if (row.reviewStatus && row.reviewStatus !== 'pending') reason = row.reviewStatus;
     else if (Number(row.reminderCount || 0) >= 3) reason = 'all_reminders_delivered';
     else if (row.hasOpenAttempt) reason = 'provider_result_pending';
     else if (row.latestAttemptAt && _addHours(row.latestAttemptAt, config.retryHours) > now) reason = 'retry_cooldown';
+    else if (now > sched.windowEnd) reason = 'schedule_passed';
     else if (eligibleAt && eligibleAt > now) reason = 'not_due';
     items.push({ row, deadline, phone, reminderNo, eligibleAt, reason });
   }
@@ -178,7 +211,13 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
     return row && (row.resolutionId || row.orderSubmissionId) ? row : null;
   }
 
-  async function loadCandidates(limit) {
+  async function loadCandidates(limit, config = getReviewReminderConfig(), target = null) {
+    // 발송 창(구매 +마지막 회차일)보다 오래된 구매는 애초에 읽지 않는다(+1일 여유).
+    // ★ 담당자 수동 발송(target)은 특정 줄을 지목하므로 기간 절을 끄고 그 줄만 읽는다.
+    const lookbackDays = target ? null : (config.scheduleDays || DEFAULT_SCHEDULE_DAYS)[2] + 2;
+    const tSheet = target ? String(target.sheetId || '') : null;
+    const tTab = target ? String(target.tabName || '') : null;
+    const tRows = target ? (target.rowIndexes || []).map(Number).filter(Number.isInteger) : null;
     const { rows } = await db.query(`
       SELECT ri.id AS "reviewIndexId", ri.sheet_id AS "sheetId", ri.tab_name AS "tabName",
              ri.row_index AS "rowIndex", ri.reviewer_name AS "reviewerName",
@@ -219,7 +258,8 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
        WHERE ri.is_submitted = FALSE
          AND ${require('./reviewObligation.service').unfulfilledSql('ri')}
          AND ri.row_index IS NOT NULL
-         AND COALESCE(ri.end_date, '') <> ''
+         AND ($2::int IS NULL OR ord.submitted_at >= NOW() - ($2::int * INTERVAL '1 day'))
+         AND ($3::text IS NULL OR (ri.sheet_id = $3 AND ri.tab_name = $4 AND ri.row_index = ANY($5::int[])))
          AND COALESCE(s.review_status, 'pending') = 'pending'
          AND NOT EXISTS (SELECT 1 FROM review_closed_targets closed
            WHERE closed.sheet_id=ri.sheet_id AND closed.tab_name=ri.tab_name AND closed.row_index=ri.row_index)
@@ -228,8 +268,8 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
             WHERE wd.order_submission_id = ord.id
                OR (wd.sheet_id = ri.sheet_id AND wd.tab_name = ri.tab_name AND wd.seq = ri.row_index)
          )
-       ORDER BY ri.end_date, ri.sheet_id, ri.tab_name, ri.row_index
-       LIMIT $1`, [limit]);
+       ORDER BY ord.submitted_at, ri.sheet_id, ri.tab_name, ri.row_index
+       LIMIT $1`, [limit, lookbackDays, tSheet, tTab, tRows]);
     return rows;
   }
 
@@ -448,7 +488,7 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
     }
 
     if (dryRun) {
-      const preview = _summarizePreview(await loadCandidates(candidateLimit), now, config);
+      const preview = _summarizePreview(await loadCandidates(candidateLimit, config), now, config);
       return {
         ok: true,
         dryRun: true,
@@ -480,7 +520,7 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
     let remaining = Math.max(0, config.dailyCap - usedToday);
     if (!remaining) return { ok: true, reconciled, submitted, closed, sent: 0, dailyCapReached: true };
 
-    const preview = _summarizePreview(await loadCandidates(Math.max(candidateLimit * 4, 100)), now, config);
+    const preview = _summarizePreview(await loadCandidates(Math.max(candidateLimit * 4, 100), config), now, config);
     const due = preview.filter(x => !x.reason).slice(0, Math.min(candidateLimit, remaining));
     const outcomes = [];
     for (const item of due) {
@@ -529,7 +569,61 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
     return { ok: true, config, billing, states: rows[0] || {}, deliveries: deliveries[0] || {} };
   }
 
-  return { run, status, reconcileAccepted, closeDueStates, refreshSubmittedStates, loadCandidates, closedStateForTarget };
+  /**
+   * 담당자 수동 알림톡 — 작업보드에서 고른 줄에 **다음 회차**를 지금 보낸다(사용자 확정 2026-09-30, 시안 A).
+   * ★ 발송 실행부는 자동 알림과 같은 sendOne 한 벌 — 원장(review_reminder_deliveries)에 그 회차로 남아
+   *   자동 알림이 같은 회차를 다시 보내지 않고, 3회 뒤 미작성 종결 흐름도 그대로 탄다.
+   * ★ 날짜가 아직 안 된 회차(not_due)만 앞당겨 보낼 수 있다. 그 외 사유(제출함·3회 완료·결과 확인 중·
+   *   번호 오류·알림 기간 지남)는 그대로 막고 사유를 말한다. 기간이 지난 건은 문자로 연락한다.
+   * ★ 자동 스위치(REVIEW_REMINDER_ENABLED)와 무관 — 발송 업체 설정만 되어 있으면 된다. 하루 상한은 세지만 막지 않는다.
+   */
+  const MANUAL_OK = new Set([null, 'not_due']);
+  const MANUAL_REASON = {
+    purchase_date_unknown: '구매 기록이 없어 알림톡 회차를 정할 수 없습니다 — 문자로 보내세요',
+    participant_phone_invalid: '주문 연락처가 휴대폰 번호가 아닙니다',
+    all_reminders_delivered: '알림톡 3회를 이미 모두 보냈습니다',
+    provider_result_pending: '앞서 보낸 알림톡의 도착 확인을 기다리는 중입니다',
+    retry_cooldown: '방금 실패한 알림톡의 재시도 대기 중입니다(6시간)',
+    schedule_passed: '알림톡 기간(구매 후 14일)이 지났습니다 — 문자로 보내세요',
+    submitted: '리뷰를 이미 제출했습니다',
+    closed_no_review: '미작성 종결된 줄입니다',
+    cancelled: '취소된 주문입니다',
+  };
+  async function manualPreview({ sheetId, tabName, rowIndexes, now = new Date() }) {
+    const config = getReviewReminderConfig();
+    try { await reconcileAccepted(now); } catch (e) { logger.warn(`[review-reminder] 수동 미리보기 결과 확인 실패: ${e.message}`); }
+    const rows = await loadCandidates(Math.min(500, (rowIndexes || []).length * 2 + 10), config, { sheetId, tabName, rowIndexes });
+    const preview = _summarizePreview(rows, now, config);
+    const byRow = new Map();
+    for (const x of preview) {
+      if (byRow.has(Number(x.row.rowIndex))) continue;   // 같은 줄에 주문이 둘이면 최신(LATERAL LIMIT 1)만
+      const ok = MANUAL_OK.has(x.reason);
+      byRow.set(Number(x.row.rowIndex), {
+        ok, item: ok ? x : null,
+        reminderNo: x.reminderNo, deadline: x.deadline ? formatKstDate(x.deadline) : '',
+        phoneTail: x.phone ? x.phone.slice(-4) : '',
+        reason: ok ? '' : (MANUAL_REASON[x.reason] || x.reason || '보낼 수 없습니다'),
+      });
+    }
+    return { config, byRow };
+  }
+  async function sendManual({ sheetId, tabName, rowIndexes, now = new Date() }) {
+    const { config, byRow } = await manualPreview({ sheetId, tabName, rowIndexes, now });
+    if (!config.providerConfigured) return { ok: false, error: '알림톡 발송 설정이 비어 있습니다', results: [] };
+    const results = [];
+    for (const rowIndex of rowIndexes) {
+      const p = byRow.get(Number(rowIndex));
+      if (!p) { results.push({ rowIndex, sent: false, reason: '리뷰 미제출 상태의 구매 기록을 찾지 못했습니다' }); continue; }
+      if (!p.ok) { results.push({ rowIndex, sent: false, reason: p.reason }); continue; }
+      const out = await sendOne(p.item, config, now);
+      results.push({ rowIndex, reminderNo: p.reminderNo, deadline: p.deadline, phoneTail: p.phoneTail,
+        orderSubmissionId: p.item.row.orderSubmissionId, reviewerName: p.item.row.reviewerName,
+        targetPhone: p.item.phone, ...out });
+    }
+    return { ok: true, results };
+  }
+
+  return { run, status, reconcileAccepted, manualPreview, sendManual, closeDueStates, refreshSubmittedStates, loadCandidates, closedStateForTarget };
 }
 
 const service = createReviewReminderService();
@@ -546,4 +640,5 @@ module.exports = {
   _dateParts,
   _kstParts,
   _summarizePreview,
+  reminderSchedule,
 };

@@ -41,14 +41,14 @@ ok('participation: 링크 upsert는 코드 FK를 비어있을 때만 보강', /C
 
 // owner 로그인은 모든 명의/별칭을 병합해 보되, apply 정책은 위의 실참여자 키와 분리된다.
 ok('my-status: 코드 소유자 범위를 phone8 ANY로 조회', /getOwnerScopeByLoginPhone8[\s\S]*?ri\.phone8 = ANY\(\$1\)/.test(reviewer));
-ok('my-applications: 이름 LIKE가 아니라 안전한 소유자 범위로 병합',
-  /WHERE \(ca\.owner_reviewer_id = \$2[\s\S]*ca\.owner_reviewer_id IS NULL[\s\S]*ca\.phone8 = ANY\(\$1\)[\s\S]*ca\.owner_phone8 = ANY\(\$1\)[\s\S]*rpc\.old_phone8 = ca\.owner_phone8/.test(reviewer));
+// my-applications 는 2026-10-04 제거(무인증 · 번호 8자리만으로 남의 신청 이력 조회 — 결정 186 92번). 되살아나지 않게 막는다.
+ok('my-applications: 무인증 신청 이력 입구는 제거된 상태', !/router\.get\('\/my-applications'/.test(reviewer));
 ok('admin: 전체 충돌 dry-run과 단일 bootstrap endpoint 존재', /identity-codes\/dry-run/.test(trackB) && /identity-codes\/:id\/bootstrap/.test(trackB));
 ok('admin: 이름 및 번호 변경은 preview+confirm+환경승인', /identity-codes\/:id\/change/.test(trackB) && /REVIEWER_IDENTITY_CHANGE_ENABLED/.test(read('src/services/reviewerIdentity.service.js')));
 // P1: 닫힌 별칭을 phone8 범위에 섞으면 번호 재사용 뒤 남의 이력이 보인다. 과거 행은 고정 UUID로만 병합한다.
 ok('번호 재사용: 닫힌 alias를 phone8 조회 범위에 넣지 않음', !/alias_phone8/.test(read('src/services/reviewerIdentity.service.js').slice(read('src/services/reviewerIdentity.service.js').indexOf('async function getOwnerScopeByLoginPhone8'))));
 ok('과거 코드 이력: my-status는 participation_links 소유자 FK로 병합', /pl\.owner_reviewer_id = \$2/.test(reviewer));
 ok('타계정 배열 재정렬: 변경 전 identity 현재값과 name+phone8을 대조', /subs\[index\]\.name[\s\S]*?identity\.current_name[\s\S]*?subs\[index\]\.phone[\s\S]*?identity\.current_phone8/.test(read('src/services/reviewerIdentity.service.js')));
-ok('코드 부여 뒤 profile 배열 일괄 변경은 차단', /identity_accounts_locked/.test(reviewerService) && /SELECT reviewer_no, sub_accounts FROM reviewers/.test(reviewerService));
+ok('코드 부여 뒤 profile 배열 일괄 변경은 차단', /identity_accounts_locked/.test(reviewerService) && /SELECT id, reviewer_no FROM reviewers/.test(reviewerService) && /owner\.reviewer_no != null/.test(reviewerService));
 
 console.log(`\n✅ reviewerIdentityCodes: ${passed}개 통과`);

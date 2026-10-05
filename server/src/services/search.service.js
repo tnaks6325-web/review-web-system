@@ -71,6 +71,28 @@ const OPEN_REVIEW_COND = `NOT EXISTS (
      AND rrs.row_index = ri.row_index AND rrs.review_status = 'closed_no_review'
 )`;
 
+// 마감된 작업(trackb_tab_finished)의 미제출 행은 "리뷰를 써야 하는 작업"으로 보이지 않게 뺀다.
+// 제출 완료 행은 이력이라 남긴다. 판정은 reviewObligation.finishedTabSql 단일 출처(이름 + gid 폴백).
+// 조회 실패는 종전 동작(fail-open) — 리뷰어 목록이 통째로 비는 것보다 낫다.
+async function _dropFinishedPending(results) {
+  const pending = results.filter(r => r && !r.isSubmitted && r.sheetId && r.tabName);
+  if (!pending.length) return results;
+  try {
+    const keys = [...new Map(pending.map(r => [`${r.sheetId}\t${r.tabName}\t${r.gid || ''}`,
+      { s: String(r.sheetId), t: String(r.tabName), g: String(r.gid || '') }])).values()];
+    const { rows } = await pool.query(
+      `SELECT k.s, k.t, k.g FROM unnest($1::text[], $2::text[], $3::text[]) AS k(s, t, g)
+        WHERE ${reviewObligation.finishedTabSql('k.s', 'k.t', "NULLIF(k.g,'')")}`,
+      [keys.map(k => k.s), keys.map(k => k.t), keys.map(k => k.g)]);
+    if (!rows.length) return results;
+    const fin = new Set(rows.map(r => `${r.s}\t${r.t}\t${r.g}`));
+    return results.filter(r => !(r && !r.isSubmitted && fin.has(`${r.sheetId}\t${r.tabName}\t${r.gid || ''}`)));
+  } catch (e) {
+    logger.warn('[Search] 마감 작업 필터 실패(무시 — 종전 목록 유지): ' + e.message);
+    return results;
+  }
+}
+
 /**
  * 입금 완료 여부 — is_submitted2='PAID'(입금칸 감지+값 존재) 우선,
  * 미감지 탭은 row_json의 입금 키워드 컬럼에 값이 있으면 완료로 간주(대시보드 폴백과 동일)
@@ -240,6 +262,12 @@ async function _mergeOrderSubmissions(results, phoneList, ownerReviewerId = null
         WHERE ${orderOwnerCondition}
           AND os.deleted_at IS NULL
           AND NOT EXISTS (SELECT 1 FROM review_closed_targets closed WHERE closed.order_submission_id=os.id)
+          -- 마감된 작업의 주문은 "써야 할 리뷰"로 붙이지 않는다. 참여형 주문(campaign:<id>)은
+          -- 원장 좌표가 가상이라 연결 공고의 작업표 좌표로 판정한다(decision 187).
+          AND NOT ${reviewObligation.finishedTabSql('os.sheet_id', 'os.tab_name', "NULLIF(os.tab_gid,'')")}
+          AND NOT EXISTS (SELECT 1 FROM recruit_campaigns frc
+                WHERE frc.id = COALESCE(ca.campaign_id, NULLIF(substring(os.sheet_id from '^campaign:(.+)$'), ''))
+                  AND ${reviewObligation.finishedTabSql('frc.linked_sheet_id', 'frc.linked_tab_name', "NULLIF(frc.linked_tab_gid,'')")})
           AND os.mirror_status IN ('pending', 'queued', 'pending_no_row', 'written', 'failed', 'stuck_manual')
           AND os.submitted_at > now() - ($2 || ' days')::interval
           AND (os.mirror_status <> 'written' OR os.sheet_written_at > now() - interval '2 hours')
@@ -738,7 +766,7 @@ async function searchByName(query, phone8, opts = {}) {
     } catch (_) { _crMap = new Map(); }
 
     // GAS 호환 결과 변환
-    const results = filteredRows.map(row => {
+    let results = filteredRows.map(row => {
       const rowObj = _parseRowJson(row.rowJson);
       return {
       displayName: (row.idxName || '').split('/')[0],
@@ -836,6 +864,7 @@ async function searchByName(query, phone8, opts = {}) {
       );
     }
 
+    results = await _dropFinishedPending(results);
     return {
       results,
       total: results.length,
@@ -973,7 +1002,7 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
       filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName, rowIndex: r.rowIndex })));
   } catch (_) { _crMap = new Map(); }
 
-  const results = filteredRows.map(row => {
+  let results = filteredRows.map(row => {
     const rowObj = _parseRowJson(row.rowJson);
     return {
     displayName: (row.idxName || '').split('/')[0],
@@ -1046,6 +1075,7 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
     await _mergeOrderSubmissions(results, [p8]);
   }
 
+  results = await _dropFinishedPending(results);
   return {
     results,
     total: results.length,
@@ -1102,4 +1132,4 @@ async function searchByNameDebug(query) {
   }
 }
 
-module.exports = { searchByName, searchByNameDebug, _getReviewerPhoneList, PAYMENT_COL_KEYWORDS };
+module.exports = { searchByName, searchByNameDebug, _getReviewerPhoneList, PAYMENT_COL_KEYWORDS, _dropFinishedPending };

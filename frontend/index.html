@@ -24,8 +24,6 @@
   <script src="js/image-shrink.js"></script>
   <script src="js/campaign-cards.js?v=20260916-direct-delivery"></script>
   <script src="js/campaign-workdetail.js"></script>
-  <!-- 외부모집 수동제출(공용 모달) — 진짜 admin_token 보유자가 참여형 카드에서 여는 경로 -->
-  <script src="js/manual-order.js?v=20260820-trackb-proxy"></script>
   <style>
     :root {
       --p: #3182f6; --p-light: #e8f1fe; --p-dark: #1b64da; --p-m: #a6c8fb;
@@ -819,7 +817,7 @@
     <div id="homeAdminLoginOvl" style="display:none;position:fixed;inset:0;z-index:100002;background:rgba(17,24,39,.5);align-items:center;justify-content:center;padding:20px">
       <div style="background:#fff;border-radius:16px;width:320px;max-width:94vw;padding:18px 18px 16px;box-shadow:0 20px 50px rgba(0,0,0,.3)">
         <div style="font-weight:800;font-size:.95rem;margin-bottom:4px">🔑 관리자 로그인</div>
-        <div style="font-size:.72rem;color:#6B7280;line-height:1.5;margin-bottom:12px">로그인하면 이 화면의 모집공고 카드에서 <b>⭐ 우선노출</b>과 <b>🧾 외부제출</b>을 바로 쓸 수 있어요.</div>
+        <div style="font-size:.72rem;color:#6B7280;line-height:1.5;margin-bottom:12px">로그인하면 이 화면의 모집공고 카드에서 <b>⭐ 우선노출</b>을 바로 쓸 수 있어요.</div>
         <input id="halId" placeholder="아이디" autocomplete="username"
                style="width:100%;font:inherit;font-size:.85rem;border:1px solid #E5E7EB;border-radius:9px;padding:9px 11px;margin-bottom:7px;outline:none">
         <input id="halPw" type="password" placeholder="비밀번호" autocomplete="current-password"
@@ -858,6 +856,13 @@
     <div id="sectionProfile" class="home-section">
       <div id="inlineProfileSection" style="display:none">
 
+        <!-- 카카오톡 아이디 미등록 안내(사용자 확정 2026-09-30) — 프로필을 불러와 값이 비어 있을 때만 보인다.
+             ★ 불러오기 실패(모름)에는 띄우지 않는다(등록한 사람에게 "미등록"이라고 말하지 않게). -->
+        <div id="pfKakaoNotice" style="display:none;margin:0 2px 10px;padding:10px 12px;border-radius:10px;background:#FEF9C3;border:1px solid #FDE68A;color:#713F12;font-size:.78rem;line-height:1.5;align-items:center;gap:10px">
+          <span style="flex:1;min-width:0"><b>카카오톡 아이디를 등록해 주세요</b><br>리뷰 기한 안내를 카톡으로 드려요. 아래 「카톡」 칸에 입력하고 저장하면 됩니다.</span>
+          <button type="button" class="pf-edit" onclick="focusKakaoIdInput()">등록하기</button>
+        </div>
+
         <!-- 본인 통합 카드 (내 등록정보 + 계좌) -->
         <article class="pf-acct self">
           <div class="pf-head">
@@ -876,6 +881,9 @@
               <span class="pf-v"><span id="pfBankLine" class="pf-muted">미등록</span><button id="btnAddBankInfo" class="pf-edit" onclick="openBankForm()">등록</button></span></div>
             <div class="pf-ln"><span class="pf-k">소득</span>
               <span class="pf-v"><span id="inlineSelfIncomeName" class="pf-muted">미등록</span><button id="btnAddIncomeInfo" class="pf-edit" onclick="openIncomeInfoForm()">추가</button><span class="pf-dot">·</span><span id="inlineSelfJumin" class="pf-muted">미등록</span><button id="btnJuminEye" class="pf-eye" style="display:none" onclick="toggleJumin(this)" aria-label="주민번호 뒷자리 보기"><i class="fas fa-eye"></i></button><button id="btnAddJuminInfo" class="pf-edit" onclick="openIncomeInfoForm()">추가</button></span></div>
+            <!-- 카카오톡 아이디 — 본계정에만 한 칸(타계정 카드에는 없음, 사용자 확정 2026-09-30) -->
+            <div class="pf-ln"><span class="pf-k">카톡</span>
+              <span class="pf-v" style="display:flex;gap:6px;align-items:center"><input id="pfSelfKakaoId" type="text" maxlength="31" placeholder="카카오톡 아이디" autocomplete="off" autocapitalize="off" spellcheck="false" style="min-width:0;flex:1;padding:6px 8px;border:1px solid #D1D5DB;border-radius:7px;font-size:.78rem" onkeydown="if(event.key==='Enter')saveKakaoIdInline()"><button id="btnSaveKakaoId" class="pf-edit" onclick="saveKakaoIdInline()">저장</button></span></div>
           </div>
         </article>
 
@@ -1284,8 +1292,8 @@ function refreshAdminModeBanner() {
   if (btn) btn.style.display = has ? "none" : "";
   if (msg) {
     msg.innerHTML = has
-      ? "카드에서 <b>[✏️ 관리자 수정]</b>·<b>[⭐ 우선노출]</b>·<b>[🧾 외부제출]</b>을 쓸 수 있어요."
-      : "카드의 <b>[✏️ 관리자 수정]</b>으로 공고를 고칠 수 있어요. <b>외부모집 수동제출</b>은 관리자 로그인이 필요해요.";
+      ? "카드에서 <b>[✏️ 관리자 수정]</b>·<b>[⭐ 우선노출]</b>을 쓸 수 있어요."
+      : "카드의 <b>[✏️ 관리자 수정]</b>으로 공고를 고칠 수 있어요. <b>⭐ 우선노출</b>은 관리자 로그인이 필요해요.";
   }
 }
 
@@ -1305,7 +1313,7 @@ function closeHomeAdminLogin() {
 /**
  * 홈에서 관리자 로그인 — 기존 `POST /api/admin/login` 그대로(서버 변경 0).
  * 성공하면 sessionStorage.admin_token 에 담고 공고 목록만 다시 그린다
- * (⭐·🧾 는 둘 다 `_realAdminTok()` 게이트라 한 번에 나타난다).
+ * (⭐ 는 `_realAdminTok()` 게이트 — 🧾 외부모집 수동제출은 결정 186 54번에서 3버전 전용).
  * ★ 리뷰어 세션은 건드리지 않는다 — 실패해도 보던 화면 그대로.
  */
 async function doHomeAdminLogin() {
@@ -1329,7 +1337,7 @@ async function doHomeAdminLogin() {
     closeHomeAdminLogin();
     refreshAdminModeBanner();
     showToast("관리자로 로그인되었습니다.");
-    if (typeof loadRecruitPreview === "function") loadRecruitPreview();   // ⭐·🧾 표시 반영
+    if (typeof loadRecruitPreview === "function") loadRecruitPreview();   // ⭐ 표시 반영
   } catch (e) {
     fail(e && e.message ? e.message : "로그인에 실패했습니다.");
   } finally {
@@ -1337,6 +1345,8 @@ async function doHomeAdminLogin() {
   }
 }
 
+// 함수 선언은 끌어올려지므로 스크립트 어느 시점에 불려도 안전하다(const 는 선언 전 접근 시 오류).
+function _campEditDenyKey() { return "rapp_camp_edit_deny"; }
 async function maybeFetchCampEditToken(user) {
   const setBanner = (on) => {
     const b = document.getElementById("adminModeBanner");
@@ -1347,12 +1357,22 @@ async function maybeFetchCampEditToken(user) {
     const phone8 = user && user.phone8;
     const name = user && user.name;
     if (!phone8 || !name) { sessionStorage.removeItem("rapp_camp_edit_token"); setBanner(false); return; }
+    // 허용명단에 없는 리뷰어(대부분)는 홈을 열 때마다 거절(401)을 받는다 — 같은 탭에서 10분 안에 다시
+    // 묻지 않는다. 새로 로그인하면 이 기억을 지워 바로 다시 확인한다(doLogin).
+    let deny = null;
+    try { deny = JSON.parse(sessionStorage.getItem(_campEditDenyKey()) || "null"); } catch (_) {}
+    if (deny && deny.p8 === String(phone8) && Date.now() - Number(deny.at) < 10 * 60 * 1000) {
+      sessionStorage.removeItem("rapp_camp_edit_token"); setBanner(false); return;
+    }
     const r = await fetch(API_BASE_URL + "/api/reviewer/campaign-token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, phone8 }),
     });
-    if (!r.ok) { sessionStorage.removeItem("rapp_camp_edit_token"); setBanner(false); return; }  // 비허용자=401 → 조용히
+    if (!r.ok) {   // 비허용자=401 → 조용히
+      if (r.status === 401) { try { sessionStorage.setItem(_campEditDenyKey(), JSON.stringify({ p8: String(phone8), at: Date.now() })); } catch (_) {} }
+      sessionStorage.removeItem("rapp_camp_edit_token"); setBanner(false); return;
+    }
     const j = await r.json();
     if (j && j.ok && j.token) { sessionStorage.setItem("rapp_camp_edit_token", j.token); setBanner(true); }
     else { sessionStorage.removeItem("rapp_camp_edit_token"); setBanner(false); }
@@ -1386,6 +1406,7 @@ async function doLogin() {
   const phone = document.getElementById("loginPhone").value.replace(/[^0-9]/g, "");
   if (!name) { showToast("이름을 입력해주세요"); document.getElementById("loginName").focus(); return; }
   if (!phone || phone.length !== 8) { showToast("전화번호 뒤 8자리를 입력해주세요"); return; }
+  try { sessionStorage.removeItem(_campEditDenyKey()); } catch (_) {}   // 새 로그인은 공고수정 권한을 바로 다시 확인
 
   const btn = document.querySelector(".login-btn");
   btn.disabled = true;
@@ -1476,8 +1497,10 @@ async function loadInlineProfile(user) {
       window._reviewerProfile = { ...res, ...p, found: true };
       if (nameEl) nameEl.textContent = p.name || name || "-";
       const phoneEl = document.getElementById("inlineSelfPhone");
-      if (phoneEl) phoneEl.textContent = p.phone || "-";
+      if (phoneEl) phoneEl.textContent = (typeof fmtPhone==='function'?fmtPhone(p.phone):p.phone) || "-";
       
+      renderSelfKakaoId(p.kakaoId);
+
       const incomeEl = document.getElementById("inlineSelfIncomeName");
       if (incomeEl) {
         const incVal = p.incomeType || "";
@@ -1594,10 +1617,23 @@ let _historyGeneration=0;
 let _historyCursors={pending:null,done:null},_historyMoreBusy=false;
 
 function _historyKey(user){return String(user&&user.reviewerToken||'')+'|'+String(user&&user.phone8||'');}
+// 새 조회(participations)가 아직 이 리뷰어에게 열리지 않았다는 답(legacy)을 10분 기억한다.
+// 대부분 리뷰어가 이 상태라 홈을 열 때마다 "확인 1번 + 옛 조회 1번" 두 요청이 나가던 것을 한 번으로 줄인다.
+// 옛 조회는 새 조회가 열린 뒤에도 정확하므로, 기억이 늦게 풀려도 화면 내용은 같다.
+function _historyLegacyKey(){ return 'rapp_history_legacy'; }
+function _historyLegacyRemembered(user){
+  try{ const m=JSON.parse(sessionStorage.getItem(_historyLegacyKey())||'null');
+    return !!(m&&m.k===String(user&&user.phone8||'')&&Date.now()-Number(m.at)<10*60*1000); }catch(_){ return false; }
+}
+function _rememberHistoryLegacy(user,on){
+  try{ if(on) sessionStorage.setItem(_historyLegacyKey(),JSON.stringify({k:String(user&&user.phone8||''),at:Date.now()}));
+    else sessionStorage.removeItem(_historyLegacyKey()); }catch(_){}
+}
 async function _fetchReviewHistory(user){
   const token=user.reviewerToken;
-  if(token){
+  if(token&&!_historyLegacyRemembered(user)){
     const pending=await ReviewerHistoryLoader.fetchPage(API_BASE_URL,token,'pending');
+    if(pending.mode!=='owner_id') _rememberHistoryLegacy(user,true);
     if(pending.mode==='owner_id'){
       const done=await ReviewerHistoryLoader.fetchPage(API_BASE_URL,token,'fulfilled');
       if(done.mode!=='owner_id') throw new Error('조회 전환 상태가 바뀌었습니다. 다시 불러와 주세요.');
@@ -2141,7 +2177,12 @@ function renderReviewSubTab() {
         ? `<img src="${_escAttrX(thumbUrl)}" alt="" onerror="_thumbErr(this)">`
         : '<i class="fas fa-box"></i>';
       const metaTail = doneDate ? ` <span class="c-tail">· 제출 ${escHtml(doneDate)}</span>` : '';
-      const metaHtml = `<div class="c-meta">${taskDate ? escHtml(taskDate) + ' ' : ''}<span class="c-who">${escHtml(itemName)}</span>${metaTail}</div>`;
+      /* ★★ 카드에 적는 이름 = **그 참여의 명의(수취인)** — 다건 그룹 줄과 **같은 판정 한 벌**
+         (`_partInfoParticipantName`)을 쓴다. 그전에는 단건 카드만 작업표의 이름 칸(= 주문자열,
+         파서가 '주문자'를 최우선으로 잡는다)을 그려 **같은 화면에서 두 규칙이 갈렸다**.
+         ★ 수취인을 모르는 작업(그 칸이 없는 표)은 종전대로 이름 칸 값으로 접는다 — 빈칸이 되면 안 된다. */
+      const whoName = _partInfoParticipantName(item) || itemName;
+      const metaHtml = `<div class="c-meta">${taskDate ? escHtml(taskDate) + ' ' : ''}<span class="c-who">${escHtml(whoName)}</span>${metaTail}</div>`;
       const nameText = taskName || itemName || '참여 작업 정보 없음';
       const optSuffix = optionName ? ` <span style="color:var(--t3);font-weight:600">· 옵션:${escHtml(optionName)}</span>` : '';
       const nameHtml = `<div class="c-name">${escHtml(nameText)}${roundBadge}${optSuffix}</div>`;
@@ -2554,7 +2595,8 @@ function openPartInfoSheet(items, opts){
     : '';
   document.getElementById('partInfoBody').innerHTML =
     '<div style="font-size:.9rem;font-weight:800;color:#111827;line-height:1.4">' + escHtml(_partInfoLabel(it)) + statusChip + '</div>' +
-    '<div style="font-size:.72rem;color:#9CA3AF;margin-top:3px">' + (many ? ('총 ' + list.length + '건') : escHtml(it.displayName || '')) + '</div>' +
+    /* 카드 첫 줄과 **같은 이름**을 말한다 — 누른 카드와 열린 팝업이 서로 다른 명의를 말하면 안 된다. */
+    '<div style="font-size:.72rem;color:#9CA3AF;margin-top:3px">' + (many ? ('총 ' + list.length + '건') : escHtml(_partInfoParticipantName(it) || it.displayName || '')) + '</div>' +
     listRows +
     '<div id="partInfoDetail" style="border:1px solid #EEF1F7;border-radius:11px;margin-top:11px;padding:9px 11px;font-size:.74rem;color:#9CA3AF">' +
       '<i class="fas fa-circle-notch fa-spin"></i> 상품 정보 불러오는 중…</div>' +
@@ -3031,7 +3073,7 @@ function renderInlineSubList(subs) {
       <div class="pf-head">
         <div class="pf-id"><div class="pf-nm">
           <span class="pf-who">${escHtml(sub.name || '-')}</span>
-          <span class="pf-ph">${escHtml(sub.phone || '')}</span>
+          <span class="pf-ph">${escHtml((typeof fmtPhone==='function'?fmtPhone(sub.phone || ''):sub.phone || ''))}</span>
           <span class="pf-chip pf-chip-idx">타계정 ${idx+1}</span>
         </div></div>
         <div class="pf-acts">
@@ -3092,6 +3134,48 @@ function cancelAddressForm() {
   const form = document.getElementById("inlineAddressForm");
   if (form) form.style.display = "none";
 }
+/* ═══ 카카오톡 아이디(본계정) ═══
+   ★ 형식 규칙은 서버 utils/kakaoId.js 가 최종 판정 — 여기선 빈 값·앞의 @ 만 정리하고 서버 사유를 그대로 보여 준다.
+   ★ 응답에 kakaoId 필드가 없으면(구버전 서버) 안내를 띄우지 않는다(모르는 것을 미등록으로 꾸미지 않는다). */
+function renderSelfKakaoId(v) {
+  const inp = document.getElementById("pfSelfKakaoId");
+  const note = document.getElementById("pfKakaoNotice");
+  const known = typeof v === "string";
+  const val = known ? v : "";
+  if (inp) { inp.value = val; inp.dataset.saved = val; }
+  if (note) note.style.display = (known && !val) ? "flex" : "none";
+}
+function focusKakaoIdInput() {
+  const inp = document.getElementById("pfSelfKakaoId");
+  if (!inp) return;
+  inp.scrollIntoView({ behavior: "smooth", block: "center" });
+  setTimeout(() => inp.focus(), 250);
+}
+async function saveKakaoIdInline() {
+  const inp = document.getElementById("pfSelfKakaoId");
+  if (!inp) return;
+  const kakaoId = (inp.value || "").trim().replace(/^@+/, "");
+  if (!kakaoId) { showToast("카카오톡 아이디를 입력해주세요"); inp.focus(); return; }
+  const user = getSavedUser();
+  if (!user || !user.name || !user.phone8) { showToast("세션이 만료되었습니다"); return; }
+  const btn = document.getElementById("btnSaveKakaoId");
+  if (btn) { btn.disabled = true; btn.textContent = "저장 중..."; }
+  try {
+    const res = await gasPost({ action: "saveKakaoId", name: user.name, phone8: user.phone8, kakaoId });
+    if (res && res.ok) {
+      showToast("✅ 카카오톡 아이디가 저장되었습니다");
+      if (window._reviewerProfile) window._reviewerProfile.kakaoId = res.kakaoId || kakaoId;
+      renderSelfKakaoId(res.kakaoId || kakaoId);
+    } else {
+      showToast((res && res.error) || "저장에 실패했습니다");
+    }
+  } catch (e) {
+    showToast("저장 중 오류: " + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "저장"; }
+  }
+}
+
 async function saveAddressInline() {
   const address = (document.getElementById("inlineAddressInput")?.value || "").trim();
   if (!address) { showToast("주소를 입력해주세요"); return; }
@@ -3496,6 +3580,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     try { switchTab("review"); } catch (_) {}
   } else if (location.hash === "#my" || location.hash === "#info") {
     try { switchTab("my"); } catch (_) {}
+  } else if (location.hash === "#cs") {
+    // 담당자가 보낸 문자의 "문의는 1:1 문의로" 링크 — 문자 답장 대신 직원이 보는 C/S 창구로 모은다.
+    try { switchTab("cs"); } catch (_) {}
   }
   // ★ 063 2단계: 공고에서 "타계정 정보 먼저 등록하기"로 넘어온 경우 —
   //   내정보 탭을 열고 상단에 "등록 후 공고로 돌아가기" 안내를 띄운다(파라미터 없으면 동작 불변).

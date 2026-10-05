@@ -1,10 +1,17 @@
 const pool = require('../db/pool');
+const { mutateSubAccounts } = require('./reviewerIdentityCards.service');
+const { normalizeKakaoId, KAKAO_ID_HINT } = require('../utils/kakaoId');
 
 /**
  * 리뷰어 등록 (GAS: registerReviewer)
  */
-async function registerReviewer({ name, phone, consent, sheetId }) {
+async function registerReviewer({ name, phone, consent, sheetId, kakaoId, requireKakaoId }) {
   if (!name || !name.trim()) return { ok: false, error: '이름을 입력하세요.' };
+  // ★ 카카오톡 아이디 — 리뷰어 본인 가입(/api/reviewer/register)에서만 필수(requireKakaoId).
+  //   관리자 경유 등록(외부모집 수동제출)은 값이 없어도 된다(그 경로는 카톡 아이디를 모른다).
+  const kakao = normalizeKakaoId(kakaoId);
+  if (kakao === null) return { ok: false, field: 'kakaoId', error: KAKAO_ID_HINT };
+  if (requireKakaoId && !kakao) return { ok: false, field: 'kakaoId', error: '카카오톡 아이디를 입력하세요.' };
 
   const cleanPhone = (phone || '').replace(/[^0-9]/g, '');
   if (cleanPhone.length !== 11) {
@@ -41,16 +48,16 @@ async function registerReviewer({ name, phone, consent, sheetId }) {
 
     // UNIQUE(phone) 제약을 활용한 중복 처리
     const result = await pool.query(`
-      INSERT INTO reviewers (name, phone, consent)
-      VALUES ($1, $2, $3)
+      INSERT INTO reviewers (name, phone, consent, kakao_id)
+      VALUES ($1, $2, $3, $4)
       ON CONFLICT (phone) DO NOTHING
       RETURNING *
-    `, [name.trim(), cleanPhone, true]);
+    `, [name.trim(), cleanPhone, true, kakao || '']);
 
     if (result.rowCount === 0) {
       // 번호 중복 — 기존 레코드 조회
       const { rows } = await pool.query(
-        'SELECT name, sub_accounts FROM reviewers WHERE phone = $1', [cleanPhone]
+        'SELECT id, name, sub_accounts FROM reviewers WHERE phone = $1', [cleanPhone]
       );
       const existing = rows[0] || {};
       const existingName = (existing.name || '').trim();
@@ -58,23 +65,28 @@ async function registerReviewer({ name, phone, consent, sheetId }) {
 
       // 같은 이름으로 재등록 → 진짜 중복 (이미 등록된 본인)
       if (existingName === newName) {
+        // 이미 등록된 본인 — 카톡 아이디는 빈 칸일 때만 채운다(내정보에서 정한 값을 덮지 않는다).
+        if (kakao) {
+          await pool.query(
+            `UPDATE reviewers SET kakao_id = $1 WHERE phone = $2 AND COALESCE(kakao_id,'') = ''`,
+            [kakao, cleanPhone]);
+        }
         return { ok: true, name: newName, phone: cleanPhone, alreadyRegistered: true };
       }
 
       // ★ A안: 같은 번호 + 다른 이름 → 타계정(sub_account)으로 추가하고 등록 허용
       //   (각 이름이 자기 이름으로 로그인 + 같은 번호 참여 조회 가능)
-      let subs = existing.sub_accounts;
-      if (typeof subs === 'string') { try { subs = JSON.parse(subs); } catch (_) { subs = []; } }
-      if (!Array.isArray(subs)) subs = [];
+      // ★ 조각 2-2(결정 177): 잠금 → 다시 읽기 → 없을 때만 추가(동시 저장 유실 방지 · 카드 즉시 맞춤).
       const p8 = cleanPhone.slice(-8);
-      const already = subs.some(s =>
-        (s.name || '').trim() === newName &&
-        (s.phone || '').replace(/[^0-9]/g, '').slice(-8) === p8
-      );
-      if (!already) {
+      await mutateSubAccounts(existing.id, (subs) => {
+        const already = subs.some(s =>
+          (s && s.name || '').trim() === newName &&
+          (s && s.phone || '').replace(/[^0-9]/g, '').slice(-8) === p8
+        );
+        if (already) return null;
         subs.push({ name: newName, phone: cleanPhone });
-        await pool.query('UPDATE reviewers SET sub_accounts = $1 WHERE phone = $2', [JSON.stringify(subs), cleanPhone]);
-      }
+        return subs;
+      }, { source: 'register' });
       return { ok: true, name: newName, phone: cleanPhone, addedAsSubAccount: true, mainName: existingName };
     }
 
@@ -244,6 +256,7 @@ async function handleReviewerProfile(body = {}) {
     bankName, bankAccount, accountHolder,      // saveBankInfo
     onlyIfEmpty,                               // saveBankInfo — 빈 칸만 채움(구매양식 제출 후 자동 저장)
     address,                                   // saveAddress
+    kakaoId,                                   // saveKakaoId
     ownerReviewerId,                           // 서명 리뷰어 세션 사용 시 UUID 스코프
   } = body;
   const p8 = (phone8 || '').replace(/[^0-9]/g, '');
@@ -257,7 +270,7 @@ async function handleReviewerProfile(body = {}) {
       `SELECT name, phone, income_type AS "incomeType", resident_num AS "residentNum",
               bank_name AS "bankName", bank_account AS "bankAccount",
               account_holder AS "accountHolder", address,
-              sub_accounts AS "subAccounts", status
+              sub_accounts AS "subAccounts", status, kakao_id AS "kakaoId"
        FROM reviewers WHERE ${scopeColumn} = $1 LIMIT 1`, [scopeValue]
     );
     if (rows.length === 0) return { ok: false, error: '등록된 회원 정보가 없습니다.' };
@@ -285,43 +298,29 @@ async function handleReviewerProfile(body = {}) {
     // 코드가 부여된 소유자는 배열을 통째로 바꾸면 member_no와 실제 참여자 UUID의 대응이
     // 깨질 수 있다. 코드 관리 화면에 "타계정 추가/분리" 절차가 생기기 전까지는 fail-closed.
     // 기존(코드 미부여) 리뷰어의 종전 프로필 저장은 그대로 허용한다.
-    let currentSubs = [];
+    // ★ 조각 2-2(결정 177): 대상은 id 하나로 확정한 뒤(phone8 은 비유니크 — 여러 행을 한 번에 덮을 수 있다)
+    //   잠금 안에서 다시 읽고 shoppingId 를 보존해 저장한다. 종전에는 읽기와 저장 사이가 열려 있어
+    //   그 사이 저장된 아이디·자동보강 값이 사라졌다.
+    let owner;
     try {
-      const coded = await pool.query(
-        `SELECT reviewer_no, sub_accounts FROM reviewers WHERE ${scopeColumn} = $1 LIMIT 1`,
-        [scopeValue]
-      );
-      if (coded.rows.length && coded.rows[0].reviewer_no != null) {
-        return { ok: false, code: 'identity_accounts_locked',
-          error: '코드가 부여된 타계정은 여기서 변경할 수 없습니다. 관리자 코드 관리 절차를 이용해주세요.' };
-      }
-      if (coded.rows.length) {
-        currentSubs = coded.rows[0].sub_accounts;
-        if (typeof currentSubs === 'string') {
-          try { currentSubs = JSON.parse(currentSubs); } catch (_) { currentSubs = []; }
-        }
-        if (!Array.isArray(currentSubs)) currentSubs = [];
-      }
+      const { rows: found } = await pool.query(
+        `SELECT id, reviewer_no FROM reviewers WHERE ${scopeColumn} = $1 LIMIT 2`, [scopeValue]);
+      if (!found.length) return { ok: false, error: '등록된 회원 정보가 없습니다.' };
+      if (found.length > 1) return { ok: false, code: 'ambiguous_reviewer', error: '같은 번호의 리뷰어가 여럿이라 저장할 수 없습니다. 관리자에게 문의해주세요.' };
+      owner = found[0];
     } catch (identityErr) {
       if (!identityErr || identityErr.code !== '42703') throw identityErr;
+      const { rows: found } = await pool.query(`SELECT id FROM reviewers WHERE ${scopeColumn} = $1 LIMIT 2`, [scopeValue]);
+      if (!found.length) return { ok: false, error: '등록된 회원 정보가 없습니다.' };
+      if (found.length > 1) return { ok: false, code: 'ambiguous_reviewer', error: '같은 번호의 리뷰어가 여럿이라 저장할 수 없습니다. 관리자에게 문의해주세요.' };
+      owner = found[0];
     }
-    // 명의의 공통 아이디는 전용 PATCH 경로에서만 변경한다. 구버전/캐시된 프로필 화면이
-    // shoppingId 필드를 싣지 않은 채 타계정의 다른 항목을 수정해도 기존 아이디를 잃지 않게
-    // 정확한 이름+전화 매칭을 우선하고, 이름/전화 자체를 편집한 1개 행은 같은 인덱스로 보존한다.
-    const sig = (sub) => `${String(sub && sub.name || '').replace(/\s+/g, '')}|${String(sub && sub.phone || '').replace(/\D/g, '').slice(-8)}`;
-    const usedOld = new Set();
-    subs.forEach((sub, idx) => {
-      let oldIdx = currentSubs.findIndex((old, i) => !usedOld.has(i) && sig(old) === sig(sub));
-      if (oldIdx < 0 && currentSubs[idx] && !usedOld.has(idx)) oldIdx = idx;
-      if (oldIdx < 0) return;
-      usedOld.add(oldIdx);
-      const old = currentSubs[oldIdx] || {};
-      const savedId = old.shoppingId != null ? old.shoppingId : old.shopping_id;
-      if (savedId != null) {
-        sub.shoppingId = String(savedId);
-        delete sub.shopping_id;
-      }
-    });
+    // 코드가 부여된 소유자는 배열을 통째로 바꾸면 member_no와 실제 참여자 UUID의 대응이
+    // 깨질 수 있다. 코드 관리 화면에 "타계정 추가/분리" 절차가 생기기 전까지는 fail-closed.
+    if (owner.reviewer_no != null) {
+      return { ok: false, code: 'identity_accounts_locked',
+        error: '코드가 부여된 타계정은 여기서 변경할 수 없습니다. 관리자 코드 관리 절차를 이용해주세요.' };
+    }
     const phone8s = new Set();
     for (const sub of subs) {
       const subPhone8 = String(sub && sub.phone || '').replace(/[^0-9]/g, '').slice(-8);
@@ -329,10 +328,26 @@ async function handleReviewerProfile(body = {}) {
       if (phone8s.has(subPhone8)) return { ok: false, error: '같은 연락처의 타계정은 한 번만 등록할 수 있습니다.' };
       phone8s.add(subPhone8);
     }
-    await pool.query(
-      `UPDATE reviewers SET sub_accounts = $1::jsonb WHERE ${scopeColumn} = $2`,
-      [JSON.stringify(subs), scopeValue]
-    );
+    // 명의의 공통 아이디는 전용 PATCH 경로에서만 변경한다. 구버전/캐시된 프로필 화면이
+    // shoppingId 필드를 싣지 않은 채 타계정의 다른 항목을 수정해도 기존 아이디를 잃지 않게
+    // 정확한 이름+전화 매칭을 우선하고, 이름/전화 자체를 편집한 1개 행은 같은 인덱스로 보존한다.
+    const sig = (sub) => `${String(sub && sub.name || '').replace(/\s+/g, '')}|${String(sub && sub.phone || '').replace(/\D/g, '').slice(-8)}`;
+    await mutateSubAccounts(owner.id, (currentSubs) => {
+      const usedOld = new Set();
+      subs.forEach((sub, idx) => {
+        let oldIdx = currentSubs.findIndex((old, i) => !usedOld.has(i) && sig(old) === sig(sub));
+        if (oldIdx < 0 && currentSubs[idx] && !usedOld.has(idx)) oldIdx = idx;
+        if (oldIdx < 0) return;
+        usedOld.add(oldIdx);
+        const old = currentSubs[oldIdx] || {};
+        const savedId = old.shoppingId != null ? old.shoppingId : old.shopping_id;
+        if (savedId != null) {
+          sub.shoppingId = String(savedId);
+          delete sub.shopping_id;
+        }
+      });
+      return subs;
+    }, { source: 'profile' });
     return { ok: true };
   }
 
@@ -383,6 +398,15 @@ async function handleReviewerProfile(body = {}) {
     const addr = (address == null ? '' : address).toString().trim();
     await pool.query(`UPDATE reviewers SET address = $1 WHERE ${scopeColumn} = $2`, [addr, scopeValue]);
     return { ok: true };
+  }
+
+  if (action === 'saveKakaoId') {
+    // 본계정 카카오톡 아이디 저장. 빈 값 저장 = 지우기 허용(주소 저장과 같은 규칙).
+    const kakao = normalizeKakaoId(kakaoId);
+    if (kakao === null) return { ok: false, error: KAKAO_ID_HINT };
+    const r = await pool.query(`UPDATE reviewers SET kakao_id = $1 WHERE ${scopeColumn} = $2`, [kakao, scopeValue]);
+    if (!r.rowCount) return { ok: false, error: '등록된 회원 정보가 없습니다.' };
+    return { ok: true, kakaoId: kakao };
   }
 
   return { ok: false, error: '알 수 없는 action' };

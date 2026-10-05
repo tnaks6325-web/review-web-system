@@ -595,94 +595,8 @@ async function transferOwnership({ sheetId, tabGid = null, toAdvertiserId, by = 
     throw e;
   } finally { client.release(); }
 }
-// ══════════════════════════════════════════════════════════════════════════
-// 시트 전체 소유 → 작업(탭) 단위로 펼치기 (사용자 확정 2026-08-23)
-//   업체관리의 지정 창구가 **작업(탭) 단위 하나**로 바뀌었지만, 이미 저장된 `tab_gid IS NULL`
-//   (시트 전체) 행은 그대로 살아 그 시트의 모든 탭을 계속 덮는다 — 새 탭이 생기면 자동 포함까지 된다.
-//   ★★ 무시트화(전환)는 `tab_configs.sheetless` 플래그만 켜고 `sheet_id` 는 그대로 두므로
-//      시트 축을 없애지 못한다(sheetlessCutover.service.js). 실제로 없애는 것은 이 펼치기다.
-//   ★★ 완화 금지 4종:
-//     ① 대상 탭은 **활성 작업 목록**(participants.listActiveTabs) — 화면의 미지정 판정과 같은 재료.
-//     ② **gid 없는 탭이 하나라도 있으면 그 시트는 펼치지 않는다**(fail-closed) — 그 작업은 개별
-//        소유를 만들 수 없어 시트 전체 행을 지우는 순간 **주인 없이 남는다**.
-//     ③ **다른 업체가 탭 지정으로 가져간 탭은 건너뛴다**(탭 지정 우선 = 사람이 명시한 더 강한 결정,
-//        transferOwnership 의 keptTabOverrides 와 같은 규율).
-//     ④ **미리보기 기본**(confirm !== true 면 쓰기 0) · 시트 하나당 한 트랜잭션(전부 아니면 전무).
-//   ★ 쓰기 표면 = advertiser_campaigns 한 곳(시트·장부·주문 무접촉).
-async function expandSheetOwnerships({ advertiserId = null, sheetId = null, confirm = false, by = 'admin', staffName = null } = {}) {
-  const db = getPool();
-  const where = ['ac.deleted_at IS NULL', 'ac.tab_gid IS NULL', `COALESCE(a.status,'') <> 'ended'`];
-  const vals = [];
-  if (advertiserId) { vals.push(String(advertiserId)); where.push(`ac.advertiser_id = $${vals.length}`); }
-  if (sheetId) { vals.push(String(sheetId)); where.push(`ac.sheet_id = $${vals.length}`); }
-  // staff(AE)는 자기 담당(inad_pm) 업체만 — 라우트 게이트와 이중.
-  if (staffName) { vals.push(String(staffName).trim()); where.push(`TRIM(COALESCE(a.inad_pm,'')) = TRIM($${vals.length})`); }
-  const { rows: owns } = await db.query(
-    `SELECT ac.advertiser_id AS "advertiserId", a.name AS "advertiserName", ac.sheet_id AS "sheetId"
-       FROM advertiser_campaigns ac JOIN advertisers a ON a.id = ac.advertiser_id
-      WHERE ${where.join(' AND ')} ORDER BY a.name, ac.sheet_id`, vals);
-  if (!owns.length) return { ok: true, dryRun: !confirm, items: [], expanded: 0, assigned: 0, skipped: 0 };
-
-  const tabs = await participants.listActiveTabs({ limit: 2000 });
-  const bySheet = new Map();
-  tabs.forEach(t => { const a = bySheet.get(t.sheetId) || []; a.push(t); bySheet.set(t.sheetId, a); });
-  const sids = [...new Set(owns.map(o => o.sheetId))];
-  const { rows: ovr } = await db.query(
-    `SELECT ac.sheet_id AS "sheetId", ac.tab_gid AS "tabGid", ac.advertiser_id AS "advertiserId", a.name AS "advertiserName"
-       FROM advertiser_campaigns ac JOIN advertisers a ON a.id = ac.advertiser_id
-      WHERE ac.deleted_at IS NULL AND ac.tab_gid IS NOT NULL AND ac.sheet_id = ANY($1)`, [sids]);
-
-  const items = [];
-  let expanded = 0, assigned = 0, skipped = 0;
-  for (const o of owns) {
-    const list = bySheet.get(o.sheetId) || [];
-    const title = (list[0] && list[0].spreadsheetTitle) || o.sheetId;
-    const gidless = list.filter(t => !String(t.tabGid == null ? '' : t.tabGid).trim());
-    const taken = new Map();   // gid → 그 탭을 탭지정으로 가진 타 업체
-    ovr.forEach(x => { if (x.sheetId === o.sheetId && x.advertiserId !== o.advertiserId) taken.set(String(x.tabGid), x.advertiserName); });
-    const targets = list.filter(t => {
-      const g = String(t.tabGid == null ? '' : t.tabGid).trim();
-      return g && !taken.has(g);
-    });
-    const kept = list.map(t => String(t.tabGid == null ? '' : t.tabGid).trim())
-      .filter(g => g && taken.has(g)).map(g => ({ tabGid: g, advertiserName: taken.get(g) }));
-    const row = {
-      advertiserId: o.advertiserId, advertiserName: o.advertiserName, sheetId: o.sheetId, sheetTitle: title,
-      tabs: targets.map(t => ({ tabGid: String(t.tabGid), tabName: t.tabName })),
-      keptTabOverrides: kept, gidlessCount: gidless.length,
-    };
-    // fail-closed — 모르는 채로 소유를 지우지 않는다(주인 없는 작업 금지).
-    if (!list.length) row.skipped = 'no_active_tabs';
-    else if (gidless.length) row.skipped = 'gidless_tab';
-    else if (!targets.length) row.skipped = 'all_tabs_taken';
-    if (row.skipped) { skipped++; items.push(row); continue; }
-    if (confirm) {
-      const client = await db.connect();
-      try {
-        await client.query('BEGIN');
-        for (const t of row.tabs) {
-          await client.query(
-            `INSERT INTO advertiser_campaigns (advertiser_id, sheet_id, tab_gid, assigned_by)
-               VALUES ($1,$2,$3,$4)
-             ON CONFLICT (advertiser_id, sheet_id, COALESCE(tab_gid,'')) DO UPDATE
-               SET deleted_at = NULL, assigned_by = EXCLUDED.assigned_by`,
-            [o.advertiserId, o.sheetId, t.tabGid, String(by).slice(0, 100)]);
-        }
-        await client.query(
-          `UPDATE advertiser_campaigns SET deleted_at = NOW()
-            WHERE advertiser_id=$1 AND sheet_id=$2 AND tab_gid IS NULL AND deleted_at IS NULL`,
-          [o.advertiserId, o.sheetId]);
-        await client.query('COMMIT');
-        row.applied = true; expanded++; assigned += row.tabs.length;
-      } catch (e) {
-        try { await client.query('ROLLBACK'); } catch (_) {}
-        row.skipped = 'error'; row.error = (e && e.message) || String(e); skipped++;
-      } finally { client.release(); }
-    } else { expanded++; assigned += row.tabs.length; }
-    items.push(row);
-  }
-  return { ok: true, dryRun: !confirm, items, expanded, assigned, skipped };
-}
+// (시트 전체 소유 펼치기 expandSheetOwnerships 는 2026-09-28 제거 — 결정 186 29번(옛 시트 전체 소유 0건 확인). 082 의 완화 금지 4종은 대상 제거로 효력 종료.
+//  tab_gid IS NULL 을 읽는 소비처는 그대로 — 혹시 남은 레거시 행도 계속 정상 동작한다.)
 async function listOwnership({ advertiserId, sheetId } = {}) {
   const db = getPool();
   const where = ['deleted_at IS NULL']; const vals = [];
@@ -713,7 +627,10 @@ async function listAdvertisersWithOwnership() {
 //   ★★ 재료는 홈 작업목록과 같은 tabStatsMap(index_master + 작업보드 실제 입금 셀) 하나다 —
 //     업체관리가 campaign_participants(bTotal/bSub/bPaid)로 따로 세면 **같은 작업이 홈에서는 마감 후보,
 //     업체관리에서는 아님**으로 갈린다(레포가 반복해 밟은 화면 간 불일치).
-//   ★ 통계가 없으면 판정하지 않는다(false) — 모르면 제안하지 않는다. 제안 전용이라 자동 처리는 없다.
+//   ★ 통계가 없으면 판정하지 않는다(false) — 모르면 제안하지 않는다.
+//   ★★ **자동 마감(autoFinishEligibleTabs)도 이 함수를 그대로 쓴다**(2026-09-21 사용자 확정) — 화면의
+//     `✓ 마감 후보` 배지와 자동 마감 대상이 **같은 판정**이어야 "배지는 떴는데 안 넘어간다"가 안 생긴다.
+//     판정을 여기서 복사해 가지 말 것(사본 금지 — 레포가 반복해 밟은 화면 간 불일치).
 //   ★ 프론트는 이 불리언을 **그대로 소비**한다(화면 재계산 금지 — 홈 [공고] 버튼과 같은 규율).
 function finishCandidate(stats) {
   if (!stats) return false;
@@ -856,6 +773,8 @@ async function generateAdvertiserLink({ advertiserId, by = '' } = {}) {
      ON CONFLICT (advertiser_id) DO UPDATE
        SET token = EXCLUDED.token, active = TRUE, created_by = EXCLUDED.created_by, created_at = NOW(), last_used_at = NULL
      RETURNING token, active`, [advertiserId, token, String(by).slice(0, 100)]);
+  // ★ 회전 = 유출 대응 — 병합으로 붙어 있던 옛 주소(169 별칭)도 함께 막는다(fail-soft: 표 미적용이면 무시).
+  await getPool().query(`DELETE FROM trackb_link_aliases WHERE kind = 'advertiser' AND target_id = $1`, [advertiserId]).catch(() => {});
   logger.info(`[trackB] 광고주 접속링크 발급/회전: ${advertiserId} by ${by}`);
   return { ok: true, token: rows[0].token, active: rows[0].active };
 }
@@ -936,24 +855,61 @@ async function createAdvertiserScoped({ name, inadPm = '', role = 'admin', byNam
   const db = getPool();
   const dup = await db.query('SELECT 1 FROM advertisers WHERE name = $1', [nm]);
   if (dup.rows.length > 0) return { ok: false, code: 409, error: '이미 존재하는 거래처명입니다.' };
+  // ★★ 근본 원인 수정(2026-09-28 올곧은무역·어니스트캄): 종전에는 인트라넷에서 이름을 확인만 하고
+  //   **원본 ID 를 버렸다**. 그래서 인트라넷에서 사업자명을 정정하면(법인 표기 변경 등) 다음 작업오더
+  //   접수가 이 업체를 못 찾고 **같은 업체를 하나 더** 만들었다. 이제 확인한 원본 ID·사업자번호를
+  //   함께 저장한다 — 이후 이름이 바뀌어도 원본 ID 로 같은 업체를 찾고 이름이 따라간다.
+  //   ★ 인트라넷에 같은 이름이 둘 이상이면 어느 쪽인지 정할 수 없어 ID 를 비워 둔다(추측 금지 —
+  //     업체관리 [인트라넷 연결 점검]이 그 업체를 '확인 필요'로 알려 준다).
+  const origin = _uniqueIntranetOrigin(chk);
+  const same = await findSameAdvertiser(db, { name: nm, intranetId: origin.intranetId, businessNumber: origin.businessNumber });
+  if (same) return _sameAdvertiserError(same);
   const id = 'adv_' + require('crypto').randomBytes(6).toString('hex');
   try {
     const { rows } = await db.query(
-      `INSERT INTO advertisers (id, name, status, inad_pm, contact, memo, sort_order)
-       VALUES ($1,$2,'active',$3,'','',0) RETURNING *`, [id, nm, pm]);
-    return { ok: true, data: rows[0] };
+      `INSERT INTO advertisers (id, name, status, inad_pm, contact, memo, sort_order,
+                                intranet_advertiser_id, intranet_business_number)
+       VALUES ($1,$2,'active',$3,'','',0,$4,$5) RETURNING *`,
+      [id, nm, pm, origin.intranetId, origin.businessNumber]);
+    return { ok: true, data: rows[0], intranetLinked: !!origin.intranetId };
   } catch (e) {
-    if (e && e.code === '23505') return { ok: false, code: 409, error: '이미 존재하는 거래처명입니다.' };   // 동시 생성 레이스(UNIQUE 백스톱)
+    if (e && e.code === '23505') return { ok: false, code: 409, error: '이미 존재하는 거래처명이거나, 같은 인트라넷 광고주로 등록된 업체가 있습니다.' };   // 동시 생성 레이스(UNIQUE 백스톱)
     throw e;
   }
 }
 
-// ── staff(AE) 소유권 게이트: 해당 업체의 담당(inad_pm)이 본인인 경우만 소유 지정/해제 허용. ──
-async function staffOwnsAdvertiser({ advertiserId, staffName } = {}) {
-  if (!advertiserId || !String(staffName || '').trim()) return false;
-  const { rows } = await getPool().query('SELECT inad_pm FROM advertisers WHERE id = $1', [advertiserId]);
-  return rows.length > 0 && String(rows[0].inad_pm || '').trim() === String(staffName).trim();
+// 인트라넷 이름 확인 결과에서 **하나로 정해지는** 원본만 꺼낸다(둘 이상이면 빈 값 — 추측 금지).
+function _uniqueIntranetOrigin(chk) {
+  const ms = (chk && Array.isArray(chk.matches)) ? chk.matches.filter(m => m && m.intranetId) : [];
+  if (ms.length !== 1) return { intranetId: '', businessNumber: '' };
+  return { intranetId: String(ms[0].intranetId).slice(0, 128), businessNumber: String(ms[0].bizNo || '').slice(0, 80) };
 }
+
+/**
+ * 새로 만들려는 업체와 **같은 업체로 보이는** 기존 업체를 찾는다 — 있으면 새로 만들지 않는다.
+ *   같은 인트라넷 원본 ID · 법인 표기만 다른 이름 · 같은 사업자번호(utils/advertiserIdentity 단일 출처).
+ *   ★ 이미 **다른** 인트라넷 광고주에 연결된 업체는 표기가 비슷해도 다른 원본이라 제외한다.
+ *   ★ 종료(ended)된 업체는 제외(되살리는 것은 이 함수의 일이 아니다).
+ */
+async function findSameAdvertiser(db, { name, intranetId = '', businessNumber = '' } = {}) {
+  const { sameAdvertiser } = require('../utils/advertiserIdentity');
+  const { rows } = await db.query(
+    `SELECT id, name, COALESCE(intranet_advertiser_id,'') AS "intranetId",
+            COALESCE(intranet_business_number,'') AS "businessNumber"
+       FROM advertisers WHERE COALESCE(status,'') <> 'ended'`);
+  const iid = String(intranetId || '');
+  return rows.find(r =>
+    (iid && r.intranetId === iid)
+    || ((!r.intranetId || !iid || r.intranetId === iid)
+        && sameAdvertiser({ name: r.name, businessNumber: r.businessNumber }, { name, businessNumber }))
+  ) || null;
+}
+function _sameAdvertiserError(same) {
+  return { ok: false, code: 409, existingId: same.id, existingName: same.name,
+    error: `이미 「${same.name}」 업체로 등록돼 있습니다 — 법인 표기만 다르거나 같은 인트라넷 광고주라 같은 업체로 보고 새로 만들지 않았습니다. 그 업체를 사용하세요.` };
+}
+
+// (staff 담당 게이트 staffOwnsAdvertiser — 유일 소비처 _ownershipExpandAllowed 와 함께 2026-09-28 제거 — 결정 186 29번(옛 시트 전체 소유 0건 확인).)
 
 /* ★★ staff 초기매핑 시트 게이트(`sheetAssignableByStaff`)는 **제거됐다**(사용자 확정 2026-08-24).
      "타 AE 업체가 이미 소유한 시트로의 자가 스코프 확장 차단"이 존재 이유였는데, 업체 지정 자체가
@@ -1002,7 +958,6 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
             rc.recruit_total AS "recruitTotal", rc.cash_receipt_required AS "cashReceiptRequired",
             sl.sales_id AS "salesId", sl.contract_number AS "contractNumber",
             co.closed_date AS "closeoutDate", co.row_count AS "closeoutRows", co.sub_count AS "closeoutSubs",
-            tm.memo,
             EXISTS (SELECT 1 FROM index_master im WHERE im.status = 'active' AND im.sheet_id = t.sheet_id
                       AND (im.tab_gid = t.tab_gid OR im.tab_name = t.tab_name)) AS "active"
        /*
@@ -1138,7 +1093,6 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
           WHERE c.sheet_id = t.sheet_id AND c.tab_name = t.tab_name AND c.deleted_at IS NULL
           ORDER BY c.created_at DESC, c.id DESC LIMIT 1
        ) co ON TRUE
-       LEFT JOIN trackb_tab_memos tm ON tm.sheet_id = t.sheet_id AND tm.tab_name = t.tab_name
       ORDER BY COALESCE(wo.latest_work_order_created_at, cnt.first_seen, t.mirrored_at) DESC NULLS LAST, t.tab_name DESC`, [advertiserId]);
   // ── 자료 폴더 바로가기(시안 A) 재료 — ★ 쿼리 순증 0(tab_configs 를 이미 조인하고 있다).
   //   현영 대상 여부는 captureSlots.hasCashReceiptSlot 단일 규칙(홈 버튼·/tab-folders 와 같은 함수).
@@ -1220,6 +1174,14 @@ async function intranetAdvertisers({ q = '', limit = 20 } = {}) {
   return { ok: true, items };
 }
 
+// 인트라넷 광고주DB 전체(원본 ID·사업자명·사업자번호) — 업체↔인트라넷 연결 점검용(advertiserIntranetSync).
+//   intranetAdvertisers 와 **같은 캐시**를 쓴다(사본 조회 금지). 도달 불가 + 캐시 없음이면 ok:false.
+async function intranetAdvertiserIndex() {
+  const r = await intranetAdvertisers({ q: '', limit: 1 });
+  if (!r || !r.ok) return { ok: false, error: (r && r.error) || 'intranet_unreachable', rows: [] };
+  return { ok: true, rows: (_intraAdvCache.rows || []).map(x => ({ intranetId: String(x.intranetId || ''), name: x.name, bizNo: x.bizNo || '' })) };
+}
+
 // ── 거래처 등록 검증: 인트라넷 광고주DB(business_name)에 "정확히" 존재하는 이름만 Track B 업체로 등록 허용.
 //   부분일치 유입 방지 위해 정확일치(공백제거·대소문 무시). 인트라넷 도달 불가면 unreachable=true(상위 fail-closed).
 async function isRegisteredIntranetAdvertiser(name) {
@@ -1227,8 +1189,10 @@ async function isRegisteredIntranetAdvertiser(name) {
   if (!nm) return { ok: true, registered: false };
   const r = await intranetAdvertisers({ q: name, limit: 50 });
   if (!r || !r.ok) return { ok: false, unreachable: true };
-  const registered = (r.items || []).some(it => String(it.name || '').trim().toLowerCase() === nm);
-  return { ok: true, registered };
+  const matches = (r.items || []).filter(it => String(it.name || '').trim().toLowerCase() === nm)
+    .map(it => ({ intranetId: String(it.intranetId || ''), bizNo: String(it.bizNo || ''), name: it.name }));
+  // matches = 등록 시 원본 ID 를 함께 저장하기 위한 재료(근본 원인 수정 2026-09-28).
+  return { ok: true, registered: matches.length > 0, matches };
 }
 
 // ══ 인트라넷 사용자(AE) 자동완성 프록시 ══ 담당AE(inad_pm) 매칭용. 스코프 키인 display_name +
@@ -1355,6 +1319,10 @@ function _mapSales(r) {
     registrationDate: r.registration_date || r.created_at || null,
     attributionMonth: r.attribution_month || null,
     contractAmount: Number(r.contract_amount) || 0,
+    // 혼합계약(sales_type='mixed') — 계산서 발행분(invoice_leg_amount)만 세금계산서 대상이다.
+    //   상품구입비 몫(cash_leg_amount)은 계산서를 발행하지 않으므로 계산서 진행 목표에서 뺀다.
+    salesType: String(r.sales_type || '').trim(),
+    invoiceLegAmount: Number(r.invoice_leg_amount) || 0,
     contractItems,
   };
 }
@@ -1565,15 +1533,40 @@ async function _salesById(salesId) {
   } catch (_) { return c ? c.sales : null; }   // stale 있으면 유지, 없으면 null
 }
 // S2: 견적서는 sales_id 로 quotes 를 역파생(quotes.sales_id, 화이트리스트 테이블) — 별도 quote 링크 불필요.
+//   ★★ 계약 1건에 견적서가 여러 장일 수 있다(선금·중도금·잔금 / 혼합계약 / 비교견적, 사용자 확정 2026-09-26).
+//     종전엔 `limit=1` + 정렬 없음이라 **아무 1장**만 잡혀 총비용이 반만 잡히거나 볼 때마다 달라졌다.
+//   ★★ 합계에 넣는 견적 = _liveQuotes 단일 출처 — 반려 제외 + 비교견적(A/B안)은 채택된 안만
+//     (인트라넷 견적묶음→계약 연결과 같은 규칙: 채택 표시가 하나라도 있으면 plan_label 없는 것 + 채택된 것만).
 //   20초 캐시(salesId별) — 정산 요약 배치·스텝퍼 연속 렌더의 인트라넷 왕복 방지(_salesById 와 동일 시맨틱).
+const _QUOTE_FETCH_LIMIT = 50;
+function _liveQuotes(rows) {
+  const all = (rows || []).filter(q => q && String(q.status || '') !== 'rejected');
+  const hasSelection = all.some(q => Number(q.plan_selected) === 1);
+  const live = hasSelection ? all.filter(q => q.plan_label == null || q.plan_label === '' || Number(q.plan_selected) === 1) : all;
+  const key = q => String(q.quote_date || '') + '\t' + String(q.created_at || '') + '\t' + String(q.quote_number || '');
+  return live.slice().sort((a, b) => key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0);
+}
+// 여러 장을 한 덩어리로 요약 — 기존 소비처가 읽는 {quoteNumber,status,quoteDate,totalAmount} 모양을 유지한다.
+//   status = 전부 수락이면 'accepted', 아니면 첫 미수락 장의 상태(한 장이면 종전과 같은 값).
+function _summarizeQuotes(live) {
+  if (!live.length) return null;
+  const acc = live.filter(q => q.status === 'accepted').length;
+  const firstOpen = live.find(q => q.status !== 'accepted');
+  return {
+    quoteNumber: String(live[0].quote_number || '').trim(),
+    status: acc === live.length ? 'accepted' : ((firstOpen && firstOpen.status) || 'draft'),
+    quoteDate: live[0].quote_date || null,
+    totalAmount: live.reduce((n, q) => n + (Number(q.total_amount) || 0), 0),
+    count: live.length, acceptedCount: acc,
+  };
+}
 const _quoteCache = new Map();   // salesId → { at, quote }
 async function _quoteForSalesResult(salesId) {
   const now = Date.now(); const c = _quoteCache.get(salesId);
   if (c && now - c.at < 20 * 1000) return { quote: c.quote, lookupFailed: false };
   try {
-    const j = await _intranetGet(`/api/tables/quotes?where=sales_id=${encodeURIComponent(salesId)}&limit=1`);
-    const q = (j.data || [])[0];
-    const quote = q ? { quoteNumber: String(q.quote_number || '').trim(), status: q.status || 'draft', quoteDate: q.quote_date || null, totalAmount: Number(q.total_amount) || 0 } : null;
+    const j = await _intranetGet(`/api/tables/quotes?where=sales_id=${encodeURIComponent(salesId)}&limit=${_QUOTE_FETCH_LIMIT}`);
+    const quote = _summarizeQuotes(_liveQuotes(j.data || []));
     _quoteCache.set(salesId, { at: now, quote });
     return { quote, lookupFailed: false };
   } catch (_) {
@@ -1583,6 +1576,63 @@ async function _quoteForSalesResult(salesId) {
 }
 async function _quoteForSales(salesId) {
   return (await _quoteForSalesResult(salesId)).quote;
+}
+// ── 세금계산서 여러 장(선금·중도금·잔금) — 발행 합계를 목표 금액과 대조해 진행 상태를 정한다. ──
+//   ★★ 종전 판정은 인트라넷 sales.invoice_status 하나라 **계산서가 1장이라도 연결되면 '발행완료'** 였다
+//     (선금만 나갔는데 잔금 미발행이 안 보인다). tax_invoices(sales_id 역링크) 합계로 판정한다.
+//   ★ 목표 = 혼합계약이면 계산서 발행분(invoice_leg_amount), 아니면 총비용(견적 합계 우선). 목표를 모르면(0)
+//     "연결된 계산서가 있다 = 발행"으로 접는다(종전 동작).
+//   ★ 연결된 계산서가 0장이면 종전 sales.invoice_status 를 그대로 쓴다 — 계산서를 연결하지 않고 상태만
+//     수기로 바꾼 과거 계약이 많아, 0장을 '미발행'으로 단정하면 멀쩡한 완료 건이 되돌아간다.
+//   ★ 조회 실패도 종전 상태로 접는다(모르는 채로 '일부'라고 말하지 않는다).
+const _invoiceCache = new Map();   // salesId → { at, rows }
+async function _invoicesForSales(salesId) {
+  const now = Date.now(); const c = _invoiceCache.get(salesId);
+  if (c && now - c.at < 20 * 1000) return { rows: c.rows, lookupFailed: false };
+  try {
+    const j = await _intranetGet(`/api/tables/tax_invoices?where=sales_id=${encodeURIComponent(salesId)}&limit=${_QUOTE_FETCH_LIMIT}`);
+    const rows = (j.data || []).filter(t => t && String(t.sales_id || salesId) === String(salesId));
+    _invoiceCache.set(salesId, { at: now, rows });
+    return { rows, lookupFailed: false };
+  } catch (_) { return { rows: c ? c.rows : null, lookupFailed: true }; }
+}
+function _normIssueDate(v) {
+  const d = String(v || '').replace(/[^0-9]/g, '').slice(0, 8);
+  return d.length === 8 ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : null;
+}
+const _INVOICE_VOID_RE = /취소|거부/;
+// 계산서 진행 판정 단일 출처 — settlementForTab·settlementSummaryForAdvertiser 가 함께 쓴다.
+function _invoiceProgress(sales, invRows, totalCost) {
+  const legacy = sales ? { status: sales.invoiceStatus, date: sales.invoiceDate } : null;
+  if (!sales) return null;
+  // ★ 발행 뒤 취소·거부된 계산서는 계약에 연결된 채로 남으므로 발행 합계에서 뺀다(인트라넷 status 문구:
+  //   '발행취소' · 거부). 인트라넷 발행 흐름이 계산서 쪽에도 계약을 적게 되면서(2026-09-26) 연결이 늘어난다.
+  const dated = (invRows || []).filter(t => _normIssueDate(t.issue_date));
+  const issued = dated.filter(t => !_INVOICE_VOID_RE.test(String(t.status || '')));
+  // ★ 연결된 계산서가 있는데 **전부 취소·거부**면 '미발행'이다 — 종전 상태(수기 '발행')로 접으면
+  //   유일한 계산서를 취소한 계약이 계속 발행 완료로 보인다(코덱스 리뷰 P1). 연결 0장·조회 실패만 종전 상태.
+  if (invRows && dated.length && !issued.length) {
+    return { status: 'not_issued', date: null, count: 0, issuedAmount: 0, targetAmount: null, voided: dated.length };
+  }
+  if (!invRows || !issued.length) return { ...legacy, count: 0, issuedAmount: 0, targetAmount: null };
+  const mixed = sales.salesType === 'mixed' && sales.invoiceLegAmount > 0;
+  // 목표 = 혼합계약은 발행분, 아니면 계약금액(계산서는 계약 기준으로 끊는다) — 계약금액을 모를 때만 견적 합계.
+  //   견적 합계를 먼저 쓰면 견적만 고치고 계약금액을 안 고친 건이 "일부 발행"으로 거짓 표시된다
+  //   (그 불일치는 이미 amountMismatch ⚠ 가 따로 말한다).
+  const target = mixed ? sales.invoiceLegAmount : (sales.amount > 0 ? sales.amount : (Number(totalCost) || 0));
+  const issuedAmount = issued.reduce((n, t) => n + (Number(t.total_amount) || 0), 0);
+  // ★ 수정세금계산서(마이너스)가 원본 계약을 물려받으면(inadd-webapp) 계약 해제 = 원본 + 전액 마이너스 = 0 이다.
+  //   합계가 0 이하면 '미발행' — "일부 발행 0 / 500만"으로 말하지 않는다.
+  if (issuedAmount <= 0) {
+    return { status: 'not_issued', date: null, count: 0, issuedAmount: 0, targetAmount: null, voided: issued.length };
+  }
+  const dates = issued.map(t => _normIssueDate(t.issue_date)).sort();
+  const done = !(target > 0) || issuedAmount >= target;
+  return {
+    status: done ? 'issued' : 'partial',
+    date: done ? dates[dates.length - 1] : (legacy && legacy.date) || dates[dates.length - 1],
+    count: issued.length, issuedAmount, targetAmount: target > 0 ? target : null, mixed,
+  };
 }
 
 // 탭 정산 스텝퍼(마감자료→견적서→계산서→선금/잔금). 링크 조회 → 인트라넷 프록시 병합 → 역할 렌즈.
@@ -1608,15 +1658,39 @@ async function settlementForTab({ sheetId, tabName, role = 'master', advertiserI
   const quoteResult = link.salesId ? await _quoteForSalesResult(link.salesId) : { quote: null, lookupFailed: false };
   const quote = quoteResult.quote;
   const contractNumber = (sales && sales.contractNumber) || link.contractNumber || '';
+  // 총비용 = 견적서 합계 우선, 없으면 계약금액 — 업체관리 요약(settlementSummaryForAdvertiser)과 같은 규칙.
+  const totalCost = quote && quote.totalAmount > 0 ? quote.totalAmount : (sales && sales.amount > 0 ? sales.amount : null);
+  const invRes = link.salesId && sales ? await _invoicesForSales(link.salesId) : { rows: null };
+  // 같은 계약을 함께 쓰는 다른 작업(내부 전용 — 광고주에겐 다른 업체 작업명이 섞일 수 있어 미동봉).
+  //   ★ fail-soft: 조회 실패면 필드를 싣지 않는다(화면은 "모름"을 공유 없음으로 꾸미지 않고 아무것도 안 그린다).
+  let sharedTabs, sharedTabCount;
+  if (!isAdv && link.salesId) {
+    try {
+      const { rows: sh } = await db.query(
+        `SELECT l.sheet_id AS "sheetId", l.tab_name AS "tabName",
+                COALESCE(NULLIF(tc.display_name, ''), l.tab_name) AS label,
+                COUNT(*) OVER ()::int AS total
+           FROM trackb_settlement_links l
+           LEFT JOIN tab_configs tc ON tc.sheet_id = l.sheet_id AND tc.tab_name = l.tab_name
+          WHERE l.sales_id = $1 AND l.deleted_at IS NULL AND NOT (l.sheet_id = $2 AND l.tab_name = $3)
+          ORDER BY l.created_at ASC LIMIT 20`, [link.salesId, sheetId, tabName]);
+      // ★ 이름 목록은 20개까지만 싣지만 숫자는 전체로 센다(잘린 목록 길이로 세면 21에서 멈춘다).
+      sharedTabCount = sh.length ? sh[0].total + 1 : 1;
+      sharedTabs = sh.map(({ total, ...r }) => r);
+    } catch (e) { logger.warn(`[settlement] 공유 작업 조회 실패: ${e.message}`); }
+  }
   return {
     linked: true, contractNumber, salesId: link.salesId,
+    sharedTabs, sharedTabCount,
     // Nit5: 광고주에겐 내부 정보(linkedBy·담당자) 미노출.
     linkedBy: isAdv ? undefined : link.linkedBy,
     proxyDown: link.salesId && !sales,   // 프록시 실패(라벨만) 신호
     closeout, closeoutAvailable,
     quote: quote || null,
     quoteLookupFailed: !!quoteResult.lookupFailed,
-    invoice: sales ? { status: sales.invoiceStatus, date: sales.invoiceDate } : null,
+    // 계산서 = 여러 장의 발행 합계 vs 목표(혼합계약은 발행분). 'partial' 은 일부만 발행된 상태(신설).
+    invoice: _invoiceProgress(sales, invRes.rows, totalCost),
+    totalCost,
     payment: sales ? { status: sales.paymentStatus, date: sales.paymentDate } : null,
     amount: sales ? sales.amount : null,
     // 입금매칭 누계/최근 입금일(광고주 정산 카드 금액 4칸용 — 내부 스텝퍼에도 추가만, 기존 필드 불변)
@@ -1684,12 +1758,15 @@ function _quoteHash(quote) {
   return crypto.createHash('sha256').update(basis).digest('hex').slice(0, 32);
 }
 // 스냅샷 적재(append-only) — 최신 버전과 해시가 같으면 write 0회. 경합의 UNIQUE 충돌은 무해(다음 조회로 수렴).
-async function _snapshotQuote(salesId, quote) {
+//   seedHash: 이 키에 기록이 아직 없을 때 "이미 옛 키에 같은 내용이 있다"는 뜻 — 같으면 적재하지 않는다
+//   (견적서가 1장→여러 장으로 바뀌는 순간 옛 기록의 마지막 버전을 새 키에 한 번 더 쌓지 않게).
+async function _snapshotQuote(salesId, quote, { seedHash = null } = {}) {
   if (!salesId || !quote) return;
   const db = getPool(); const hash = _quoteHash(quote);
   const { rows } = await db.query(
     'SELECT version, content_hash FROM trackb_quote_snapshots WHERE sales_id=$1 ORDER BY version DESC LIMIT 1', [salesId]);
   if (rows.length && rows[0].content_hash === hash) return;
+  if (!rows.length && seedHash && seedHash === hash) return;
   const next = rows.length ? rows[0].version + 1 : 1;
   try {
     await db.query(
@@ -1709,20 +1786,46 @@ async function quoteDocForTab({ sheetId, tabName, role = 'master', advertiserId 
   if (role === 'advertiser' && (!(await _settlementVisibleFor(advertiserId)) || (brandId && !(await _brandSettlementVisible(brandId))))) return { linked: false, hidden: true };
   const link = await _settlementLinkForTab(sheetId, tabName);
   if (!link || !link.salesId) return { linked: false };
-  let quote = null, proxyDown = false;
+  let rows = [], proxyDown = false;
   try {
-    const j = await _intranetGet(`/api/tables/quotes?where=sales_id=${encodeURIComponent(link.salesId)}&limit=1`);
-    quote = _mapQuoteFull((j.data || [])[0]);
+    const j = await _intranetGet(`/api/tables/quotes?where=sales_id=${encodeURIComponent(link.salesId)}&limit=${_QUOTE_FETCH_LIMIT}`);
+    rows = _liveQuotes(j.data || []);
   } catch (_) { proxyDown = true; }
-  if (quote) await _snapshotQuote(link.salesId, quote);
-  const { rows } = await getPool().query(
-    'SELECT version, payload, captured_at AS "capturedAt" FROM trackb_quote_snapshots WHERE sales_id=$1 ORDER BY version ASC LIMIT 30', [link.salesId]);
-  const versions = rows.map(r => ({ version: r.version, capturedAt: r.capturedAt, payload: r.payload }));
-  // 스냅샷이 아직 없는데 라이브 견적은 있는 경우(insert 실패 등) 라이브를 v1처럼 노출(fail-soft).
-  if (!versions.length && quote) versions.push({ version: 1, capturedAt: null, payload: quote });
+  // ★★ 버전 기록 키 — 견적서가 1장이면 종전 키(sales_id) 그대로(과거 기록 보존), 여러 장이면 장마다
+  //   `sales_id#quote_id`. 한 키에 여러 장을 적재하면 장이 번갈아 저장돼 가짜 "새 버전"이 쌓인다(종전 결함).
+  const multi = rows.length > 1;
+  // ★ 1장→여러 장 전환 시 옛 기록(sales_id 키)을 잃지 않는다 — 옛 키의 기록 중 **같은 견적번호**의 것을
+  //   그 장의 기록 앞에 이어 붙인다(코덱스 리뷰 P2). 옛 기록은 지우지도 옮기지도 않는다(읽기만).
+  let legacy = [];
+  if (multi) {
+    const { rows: lr } = await getPool().query(
+      'SELECT version, payload, captured_at AS "capturedAt", content_hash AS "hash" FROM trackb_quote_snapshots WHERE sales_id=$1 ORDER BY version ASC LIMIT 30', [link.salesId]);
+    legacy = lr;
+  }
+  const docs = [];
+  for (const row of rows) {
+    const quote = _mapQuoteFull(row);
+    const key = multi && row.id ? `${link.salesId}#${row.id}` : link.salesId;
+    const mine = multi ? legacy.filter(v => v.payload && String(v.payload.quoteNumber || '') === quote.quoteNumber && quote.quoteNumber) : [];
+    await _snapshotQuote(key, quote, { seedHash: mine.length ? mine[mine.length - 1].hash : null });
+    const { rows: vr } = await getPool().query(
+      'SELECT version, payload, captured_at AS "capturedAt" FROM trackb_quote_snapshots WHERE sales_id=$1 ORDER BY version ASC LIMIT 30', [key]);
+    const versions = [...mine, ...vr].slice(-30).map((r, i) => ({ version: i + 1, capturedAt: r.capturedAt, payload: r.payload }));
+    // 스냅샷이 아직 없는데 라이브 견적은 있는 경우(insert 실패 등) 라이브를 v1처럼 노출(fail-soft).
+    if (!versions.length && quote) versions.push({ version: 1, capturedAt: null, payload: quote });
+    docs.push({ quoteNumber: quote.quoteNumber, workName: quote.workName, totalAmount: quote.totalAmount, status: quote.status, versions });
+  }
+  // 조회 실패 시에는 종전처럼 쌓여 있던 기록을 보여준다(장 구분 없이 — 모르는 것을 지어내지 않는다).
+  if (!docs.length && proxyDown) {
+    const { rows: vr } = await getPool().query(
+      'SELECT version, payload, captured_at AS "capturedAt" FROM trackb_quote_snapshots WHERE sales_id=$1 ORDER BY version ASC LIMIT 30', [link.salesId]);
+    if (vr.length) docs.push({ versions: vr.map(r => ({ version: r.version, capturedAt: r.capturedAt, payload: r.payload })) });
+  }
   // 실제 인트라넷 PDF와 같은 로고·직인을 사용한다. 에셋 조회 실패는 문서 본문을 막지 않는다.
   const brandAssets = await _quoteBrandAssets();
-  return { linked: true, contractNumber: link.contractNumber || '', proxyDown, versions, brandAssets };
+  // `versions` = 첫 장(구버전 화면 호환). 새 화면은 `docs` 로 장을 넘긴다.
+  return { linked: true, contractNumber: link.contractNumber || '', proxyDown, docs,
+    versions: docs.length ? docs[0].versions : [], brandAssets };
 }
 // 계산서(전자세금계산서) 발행 요약 — sales 상태 + tax_invoices 이력(sales_id 역링크).
 async function invoiceDocForTab({ sheetId, tabName, role = 'master', advertiserId = null, brandId = null } = {}) {
@@ -1731,10 +1834,11 @@ async function invoiceDocForTab({ sheetId, tabName, role = 'master', advertiserI
   const link = await _settlementLinkForTab(sheetId, tabName);
   if (!link || !link.salesId) return { linked: false };
   const sales = await _salesById(link.salesId);
-  let records = [], proxyDown = false;
+  let records = [], proxyDown = false, raw = null;
   try {
-    const j = await _intranetGet(`/api/tables/tax_invoices?where=sales_id=${encodeURIComponent(link.salesId)}&limit=20`);
-    records = (j.data || []).map(t => ({
+    const j = await _intranetGet(`/api/tables/tax_invoices?where=sales_id=${encodeURIComponent(link.salesId)}&limit=${_QUOTE_FETCH_LIMIT}`);
+    raw = j.data || [];
+    records = raw.map(t => ({
       invoiceType: t.invoice_type || '', issueDate: t.issue_date || null,
       supplierName: t.supplier_name || '', recipientName: t.recipient_name || '',
       itemName: t.item_name || '',
@@ -1746,7 +1850,11 @@ async function invoiceDocForTab({ sheetId, tabName, role = 'master', advertiserI
   } catch (_) { proxyDown = true; }
   return {
     linked: true, contractNumber: link.contractNumber || '', proxyDown: proxyDown || (link.salesId && !sales),
-    invoice: sales ? { status: sales.invoiceStatus, date: sales.invoiceDate } : null,
+    invoice: await (async () => {
+      if (!sales) return null;
+      const q = await _quoteForSales(link.salesId);
+      return _invoiceProgress(sales, raw, q && q.totalAmount > 0 ? q.totalAmount : (sales.amount || null));
+    })(),
     amount: sales ? sales.amount : null,
     records,
   };
@@ -1763,29 +1871,55 @@ async function settlementSummaryForAdvertiser({ advertiserId } = {}) {
   const bySales = new Map();
   for (const t of linked) if (!bySales.has(t.salesId)) bySales.set(t.salesId, null);
   await Promise.all([...bySales.keys()].map(async (sid) => {
-    const [sales, quote] = await Promise.all([_salesById(sid), _quoteForSales(sid)]);
-    bySales.set(sid, { sales, quote });
+    const [sales, quote, inv] = await Promise.all([_salesById(sid), _quoteForSales(sid), _invoicesForSales(sid)]);
+    bySales.set(sid, { sales, quote, invRows: inv.rows });
   }));
+  // 계약 1건을 작업 여러 개가 함께 쓰는 경우 표시용(사용자 확정 2026-09-23 「1번」 — 금액은 나누지 않는다).
+  //   ★ 세는 범위 = 활성 정산 링크 전체(다른 업체 탭 포함 — 내부 화면 전용 함수라 새지 않는다).
+  //   ★ fail-soft: 조회 실패 시 이 업체 목록 안에서 센 값으로 접는다(배지가 사라지는 쪽보다 낫다).
+  const shareCount = await _sharedTabCounts([...bySales.keys()], linked);
   return linked.map(t => {
-    const { sales = null, quote = null } = bySales.get(t.salesId) || {};
+    const { sales = null, quote = null, invRows = null } = bySales.get(t.salesId) || {};
     const quoteAmount = quote && quote.totalAmount > 0 ? quote.totalAmount : null;
     const contractAmount = sales && sales.amount > 0 ? sales.amount : null;
+    const inv = _invoiceProgress(sales, invRows, quoteAmount != null ? quoteAmount : contractAmount);
     return {
       sheetId: t.sheetId, tabName: t.tabName, salesId: t.salesId,
       contractNumber: t.contractNumber || (sales && sales.contractNumber) || '',
       proxyDown: !sales,
       quoteDate: quote ? _normIntraDate(quote.quoteDate) : null,
       quoteStatus: quote ? quote.status : null,
-      invoiceDate: sales ? _normIntraDate(sales.invoiceDate) : null,
-      invoiceStatus: sales ? sales.invoiceStatus : null,
+      invoiceDate: inv ? _normIntraDate(inv.date) : null,
+      invoiceStatus: inv ? inv.status : null,
+      // 여러 장 정산(2026-09-26) — 견적서 장수·수락 수, 계산서 장수·발행 합계·목표.
+      quoteCount: quote ? quote.count : 0, quoteAccepted: quote ? quote.acceptedCount : 0,
+      invoiceCount: inv ? inv.count : 0, invoiceIssuedAmount: inv ? inv.issuedAmount : 0,
+      invoiceTargetAmount: inv ? inv.targetAmount : null,
       paidAmount: sales ? sales.paidAmount : null,                            // 현재까지 매칭된 입금 누계
       paidDate: sales ? _normIntraDate(sales.paidDate || sales.paymentDate) : null,   // 최근 입금매칭일
       paymentStatus: sales ? sales.paymentStatus : null,
       // 총비용 = 견적서상 금액(원칙). 견적 없으면 계약금액 폴백. 견적↔계약 금액 불일치는 ⚠ 신호만(자동 판정 안 함).
       totalCost: quoteAmount != null ? quoteAmount : contractAmount,
       amountMismatch: !!(quoteAmount && contractAmount && quoteAmount !== contractAmount),
+      // 이 계약을 함께 쓰는 작업 수(자기 포함). 2 이상이면 총비용·입금액은 "계약 전체" 금액이다.
+      sharedTabCount: shareCount.get(t.salesId) || 1,
     };
   });
+}
+// 계약(sales_id)별 활성 정산 링크 수. 실패하면 넘겨받은 목록 안에서 센다(fail-soft).
+async function _sharedTabCounts(salesIds, fallbackRows) {
+  const m = new Map();
+  if (!salesIds.length) return m;
+  try {
+    const { rows } = await getPool().query(
+      `SELECT sales_id AS "salesId", COUNT(*)::int AS n FROM trackb_settlement_links
+        WHERE deleted_at IS NULL AND sales_id = ANY($1::text[]) GROUP BY sales_id`, [salesIds]);
+    for (const r of rows) m.set(r.salesId, r.n);
+  } catch (e) {
+    logger.warn(`[settlement] 계약 공유 수 조회 실패 — 목록 안에서 셈: ${e.message}`);
+    for (const t of (fallbackRows || [])) if (t.salesId) m.set(t.salesId, (m.get(t.salesId) || 0) + 1);
+  }
+  return m;
 }
 // ── 업체용 뷰어 "내 작업 목록"(화면 A) — 광고주 렌즈 요약 배치. ──
 //   ownedTabsForAdvertiser(카운트) + settlementSummaryForAdvertiser(정산 배치)를 광고주에게 내도 되는
@@ -1821,6 +1955,11 @@ async function advertiserWorkSummary({ advertiserId, brandId = null } = {}) {
   const brandsOut = brandId ? undefined : (await brandsForAdvertiser({ advertiserId }).catch(() => null));
   // 136: 작업별 브랜드 담당자 — 배치 1쿼리(fail-soft 빈 맵). 브랜드 관리 화면의 작업 행이 현재 값을 그린다.
   const bmgr = await tabBrandManagersMap({ advertiserId });
+  // 계약 공유 묶음 — ★ 광고주에게 보이는 작업들 안에서만 센다(다른 업체·다른 브랜드 작업 수를 새지 않는다).
+  //   인트라넷 계약 ID 는 이 렌즈에서 버리므로, 화면이 합계를 한 번만 세도록 불투명한 묶음 번호만 싣는다.
+  const shareN = new Map(), shareGrp = new Map();
+  for (const t of tabs) { const s = setlByTab.get(t.sheetId + '\t' + t.tabName); if (s && s.salesId) shareN.set(s.salesId, (shareN.get(s.salesId) || 0) + 1); }
+  for (const [sid, n] of shareN) if (n > 1) shareGrp.set(sid, shareGrp.size + 1);
   return {
     settlementHidden: !visible,
     brand: brand ? { id: brand.id, name: brand.name, color: brand.color } : null,
@@ -1857,6 +1996,12 @@ async function advertiserWorkSummary({ advertiserId, brandId = null } = {}) {
           paidAmount: s.paidAmount != null ? s.paidAmount : null,
           paidDate: s.paidDate || null,
           paymentStatus: s.paymentStatus || null,
+          // 여러 장 정산 진행(금액·장수만 — 인트라넷 ID 없음)
+          quoteCount: s.quoteCount || 0, quoteAccepted: s.quoteAccepted || 0,
+          invoiceCount: s.invoiceCount || 0, invoiceIssuedAmount: s.invoiceIssuedAmount || 0,
+          invoiceTargetAmount: s.invoiceTargetAmount != null ? s.invoiceTargetAmount : null,
+          sharedTabCount: shareN.get(s.salesId) || 1,
+          shareGroup: shareGrp.get(s.salesId) || null,
         } : null,
       };
     }),
@@ -1917,6 +2062,8 @@ async function updateBrand({ advertiserId, brandId, action, name, color, on } = 
   if (action === 'link-rotate') {   // 유출 대응 — 새 토큰 발급(이전 링크 즉시 무효)
     const token = _linkToken();
     await db.query('UPDATE trackb_brands SET link_token=$2, link_active=TRUE WHERE id=$1', [brandId, token]);
+    // ★ 병합으로 붙어 있던 옛 브랜드 주소(169 별칭)도 함께 막는다.
+    await db.query(`DELETE FROM trackb_link_aliases WHERE kind = 'brand' AND target_id = $1`, [brandId]).catch(() => {});
     return { ok: true, linkToken: token };
   }
   if (action === 'settlement-visible') { await db.query('UPDATE trackb_brands SET settlement_visible=$2 WHERE id=$1', [brandId, on === true]); return { ok: true }; }
@@ -2030,17 +2177,7 @@ function _normIntraDate(s) {
   return v.slice(0, 10);
 }
 
-// ── 연결탭 비고(자유 텍스트, migration 056) — 탭당 1행 upsert. 관제실 '비고(인애드)' 대응. ──
-async function saveTabMemo({ sheetId, tabName, memo = '', by = '' } = {}) {
-  if (!sheetId || !tabName) return { ok: false, code: 400, error: 'sheetId, tabName 필수' };
-  const text = ((typeof memo === 'string' || typeof memo === 'number') ? String(memo) : '').slice(0, 2000);
-  await getPool().query(
-    `INSERT INTO trackb_tab_memos (sheet_id, tab_name, memo, updated_by, updated_at)
-     VALUES ($1,$2,$3,$4,NOW())
-     ON CONFLICT (sheet_id, tab_name) DO UPDATE SET memo=$3, updated_by=$4, updated_at=NOW()`,
-    [sheetId, tabName, text, String(by || '').slice(0, 100)]);
-  return { ok: true, memo: text };
-}
+// (연결탭 비고 saveTabMemo — 업체관리 비고 칸(결정 186 33번) 제거 뒤 호출처 0 → 2026-09-28 제거(58번). trackb_tab_memos 표는 보존.)
 
 // ══════════════════════════════════════════════════════════════════════════
 // P3 — 마감자료 자동 생성(리뷰완료 증빙 스냅샷, migration 055)
@@ -2055,6 +2192,7 @@ async function _closeoutRoster(sheetId, tabName) {
   const { rows } = await db.query(
     `SELECT id, seq, reviewer_name AS name, recipient_name AS recipient, phone8, round, option_text AS option,
             product_name AS product, is_submitted AS submitted, is_paid AS paid, submitted_at AS "submittedAt",
+            start_date AS "startDate",
             source, order_submission_id, identity_key
        FROM campaign_participants
       WHERE sheet_id=$1 AND tab_name=$2 AND active=TRUE AND deleted_at IS NULL
@@ -2091,24 +2229,49 @@ async function _closeoutRoster(sheetId, tabName) {
       phone8: pick('phone8', r.phone8), round: pick('round', r.round), option: pick('option_text', r.option),
       product: pick('product_name', r.product), submitted: !!pick('is_submitted', r.submitted),
       paid: !!pick('is_paid', r.paid), submittedAt: r.submittedAt,
+      /* ★ 가산 필드 2종(마감자료 CSV·건수는 **명시 열 목록**을 쓰므로 무영향).
+         `hasOrder` = 채움 판정(`rowNumbering.isFilledRow`)이 보는 네 칸 중 하나 — 이게 없으면
+         "주문만 붙고 이름이 아직 빈 줄"이 사람 수에서 빠져 홈 게이지와 목록이 갈린다.
+         `startDate` = 구매일자(표시 문자열) — 미제출 목록에서 "언제 산 사람인지"가 유일한 단서다. */
+      hasOrder: !!r.order_submission_id, startDate: r.startDate,
     });
   }
   return out;
 }
-// 마감자료 생성(이력 보존 — 재생성 시 새 행). 마감일=오늘 KST. 건수=활성/제출.
-async function generateCloseout({ sheetId, tabName, by = '' } = {}) {
-  if (!sheetId || !tabName) return { ok: false, code: 400, error: 'sheetId, tabName 필수' };
+
+/* ── 홈 작업목록 "아직 안 낸 사람" 목록 ────────────────────────────────────────
+   홈 표의 제출·입금 숫자를 누르면 **그 작업에서 아직 내지 않은 사람**을 보여준다.
+   ★★ **명단·판정 사본 0** — 마감자료와 **같은 `_closeoutRoster`**(활성 명단 + 편집 오버레이 합성,
+     작업보드 그리드와 같은 규칙)를 그대로 태운다. 여기서 따로 조회하면 "표에는 11명 남았는데
+     목록에는 12명"으로 갈린다.
+   ★★ **채워진 줄만 센다**(`rowNumbering.isFilledRow` 단일 출처) — 작업표 생성 때 미리 깔아 둔
+     **빈 슬롯은 사람이 아니다**(홈 게이지 분자와 같은 기준, 054/057 규율).
+   ★ 응답은 **최소 필드**(줄번호·이름·연락처 뒤4·구매일) — 홈 목록은 명단 화면이 아니다.
+     연락처는 **뒤 4자리만** 내보낸다(그 이상은 작업보드에서 본다).
+   ★ 상한을 넘으면 **자른 사실을 말한다**(`truncated`) — 조용히 일부만 보여주지 않는다. */
+async function pendingParticipants({ sheetId, tabName, kind = 'submit', limit = 200 } = {}) {
+  const k = kind === 'paid' ? 'paid' : 'submit';
   const roster = await _closeoutRoster(sheetId, tabName);
-  if (!roster.length) return { ok: false, code: 400, error: '활성 명단이 없습니다(그림자 투영 후 생성).' };
-  const subCount = roster.filter(r => r.submitted).length;
-  const kstDate = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);   // KST 날짜
-  const { rows } = await getPool().query(
-    `INSERT INTO trackb_tab_closeouts (sheet_id, tab_name, closed_date, row_count, sub_count, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6)
-     RETURNING id, closed_date AS "date", row_count AS "rowCount", sub_count AS "subCount", created_by AS "createdBy", created_at AS "createdAt"`,
-    [sheetId, tabName, kstDate, roster.length, subCount, String(by || '').slice(0, 100)]);
-  return { ok: true, closeout: rows[0] };
+  const people = roster.filter(r => _isFilledRow(r));            // 빈 슬롯 제외 = 실제 참여자
+  /* ★★ 입금 미완료 = **제출까지 한 사람 중 아직 입금 안 된 사람**(참여만 하고 리뷰를 안 낸 사람은
+     아직 입금 대상이 아니다). 홈 화면의 미입금 필터·정렬(`_finUnpaid` = 제출 − 입금)과 **같은 기준**이라야
+     "11명 남음"과 이 목록의 건수가 갈리지 않는다. 제출 미완료는 참여자 중 안 낸 사람. */
+  const rest = people.filter(r => (k === 'paid' ? (r.submitted && !r.paid) : !r.submitted));
+  const cap = Math.max(1, Math.min(500, Number(limit) || 200));
+  return {
+    ok: true, kind: k,
+    filled: people.length, done: people.length - rest.length, pending: rest.length,
+    truncated: rest.length > cap,
+    items: rest.slice(0, cap).map(r => ({
+      seq: r.seq,
+      name: String(r.name || r.recipient || '').slice(0, 40),
+      tail: r.phone8 ? String(r.phone8).slice(-4) : '',
+      day: String(r.startDate || '').slice(0, 20),
+    })),
+  };
 }
+// (마감자료 생성 generateCloseout · CSV closeoutCsv 는 2026-09-28 제거 — 결정 186 9번. 화면 버튼은 9/7 #1345 에서 이미 제거.
+//  기존 trackb_tab_closeouts 행은 latestCloseout 이 계속 읽는다.)
 // 최신 마감(스텝퍼 ① 소스). settlementForTab 이 병합. N-1: 동시각 tie 는 id DESC 로 결정적.
 async function latestCloseout({ sheetId, tabName } = {}) {
   if (!sheetId || !tabName) return null;
@@ -2117,30 +2280,6 @@ async function latestCloseout({ sheetId, tabName } = {}) {
        FROM trackb_tab_closeouts WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL
       ORDER BY created_at DESC, id DESC LIMIT 1`, [sheetId, tabName]);
   return rows[0] || null;
-}
-// CSV 셀 이스케이프 + 수식 인젝션 무력화(SF-2/N-4): =+-@ 또는 탭/CR 로 시작하면 앞에 ' 를 붙이고,
-//   ",\r,\n 포함 시 따옴표로 감싼다(Excel/LibreOffice 수식 실행 CWE-1236 차단).
-function _csvCell(v) {
-  let s = v == null ? '' : String(v);
-  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
-  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-}
-// 마감자료 CSV(UTF-8 BOM). PII라 내부(master/admin/staff) + 소유 광고주만 — reviewer 차단은 라우트 스코프.
-//   광고주 렌즈면 연락처·이름·수취인 마스킹(workdeskTab 정책 일치) — 노출 토글 OFF 여부는 라우트가 사전 게이트.
-async function closeoutCsv({ sheetId, tabName, role = 'master' } = {}) {
-  const roster = await _closeoutRoster(sheetId, tabName);
-  const isAdv = role === 'advertiser';
-  const header = ['번호', '참여자', '연락처', '수취인', '차수', '옵션', '상품', '제출', '입금', '제출일'];
-  const lines = [header.join(',')];
-  for (const r of roster) {
-    const phone = isAdv ? (r.phone8 ? '****' + String(r.phone8).slice(-4) : '') : (r.phone8 || '');
-    lines.push([
-      r.seq, isAdv ? _maskName(r.name) : r.name, phone, isAdv ? _maskName(r.recipient) : r.recipient,
-      r.round, r.option, r.product,
-      r.submitted ? 'O' : '', r.paid ? 'O' : '', r.submittedAt ? String(r.submittedAt).slice(0, 10) : '',
-    ].map(_csvCell).join(','));
-  }
-  return '﻿' + lines.join('\r\n');
 }
 
 // ══ 작업오더(발주) 연동 — 수동 링크 + 작업세부 노출 + 명단 골격 준비. B 내부·격리(라이브 무접촉). ══
@@ -2224,34 +2363,7 @@ async function linkWorkOrder({ workOrderId, sheetId, tabName, tabGid = null, by 
     [sheetId, tabName, workOrderId, String(by).slice(0, 100)]);
   return { ok: true };
 }
-async function unlinkWorkOrder({ sheetId, tabName } = {}) {
-  if (!sheetId || !tabName) throw new Error('unlinkWorkOrder: sheetId, tabName 필수');
-  const db = getPool();
-  const { rowCount } = await db.query(
-    `UPDATE trackb_work_order_links SET deleted_at = NOW()
-      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL`, [sheetId, tabName]);
-  return { ok: true, unlinked: rowCount };
-}
-
-// 발주 기준 명단 골격 준비: 유효 링크 발주의 모집인원·옵션으로 빈 슬롯을 부족분만 생성(gap-fill·멱등).
-async function prepareRosterFromWorkOrder({ sheetId, tabName, tabGid = null, by = 'admin' } = {}) {
-  if (!sheetId || !tabName) throw new Error('prepareRosterFromWorkOrder: sheetId, tabName 필수');
-  const db = getPool();
-  const linkedId = await _effectiveLinkedWorkOrderId(db, sheetId, tabName);
-  const { rows } = await db.query(
-    `SELECT recruit_count AS "recruitCount", product_options_json AS "optionsJson", product_option AS "productOption", title
-       FROM work_orders
-      WHERE deleted_at IS NULL AND ($3::text IS NOT NULL AND id=$3 OR (linked_tab_sheet_id=$1 AND linked_tab_name=$2))
-      ORDER BY ($3::text IS NOT NULL AND id=$3) DESC, created_at DESC LIMIT 1`, [sheetId, tabName, linkedId]);
-  const w = rows[0];
-  if (!w) return { ok: false, error: 'no_linked_work_order' };
-  const target = parseInt(w.recruitCount, 10) || 0;
-  if (target <= 0) return { ok: false, error: 'recruit_count_zero' };
-  let options = _parseWoOptions(w.optionsJson);
-  if (!options.length && w.productOption && String(w.productOption).trim()) options = [String(w.productOption).trim()];
-  const r = await participants.prepareRosterSlots({ sheetId, tabName, target, options, productName: w.title || null, by });
-  return { ok: true, ...r };
-}
+// (unlinkWorkOrder · prepareRosterFromWorkOrder 는 2026-09-28 제거 — 결정 186 11번.)
 
 // ── 관측 대시보드: 투영된 전 탭의 롤업(카운트 대조 + 준비도) 한 번에. 정밀 parity(진짜불일치)는 탭별 온디맨드. ──
 //   ★ fail-closed 신호 계약(레드-블루-심판): "모름/미검증/비었음"은 준비·정상으로 새지 않는다.
@@ -2388,85 +2500,9 @@ async function projectionCoverage({ projectedTabs = null, sample = 200 } = {}) {
   };
 }
 
-// ══ 진실원천(source_of_truth) 컨트롤 — 옵션 A cutover 스위치 (P1: 기반·관측, 동작은 P2 write-back 엔진) ══
-//   ★★ 격리 불변식(Track A 무접촉): 이 플래그를 읽는 곳은 **Track B write-back 엔진(P2, 미착수)뿐**이다.
-//      Track A 라이브 핫패스(검색 search.service · 주문원장 orderLedger · 리뷰인덱스빌드 smartBuild ·
-//      행배정 claimRow · 큐워커 syncQueue · RAW미러 rawMirror)는 source_of_truth 를 절대 참조하지 않으므로,
-//      여기서 값을 'db'로 바꿔도 **라이브 동작은 완전 불변**(write-back 엔진이 생기기 전까지 플립은 inert).
-//      이 불변식은 회귀가드 tests/trackBSourceOfTruth.test.js 가 Track A 파일에서 'source_of_truth' 미참조로 고정.
-const _SOT_VALUES = new Set(['sheet', 'db']);   // 'sheet'=레거시 기본 · 'db'=Track B 원본(cutover)
+// (진실원천 전환 getSourceOfTruth/setSourceOfTruth/cutoverAll 은 2026-09-28 제거 — 결정 186 5번.
+//  tab_configs.source_of_truth 칸은 남는다(본섭 전 탭 'sheet').)
 
-async function getSourceOfTruth({ sheetId, tabName } = {}) {
-  if (!sheetId || !tabName) throw new Error('getSourceOfTruth: sheetId, tabName 필수');
-  const db = getPool();
-  const { rows } = await db.query(
-    `SELECT source_of_truth AS "sourceOfTruth" FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`,
-    [sheetId, tabName]);
-  return (rows[0] && rows[0].sourceOfTruth) || 'sheet';
-}
-
-// 플립(master 전용, 라우트 게이트). 'db' 전환 게이트(fail-closed · 레드-블루-심판):
-//   ① parity 검증 실패/미상(real=null)은 "통과"가 아니라 거부(parity_check_failed) — 구 .catch(()=>null) fail-open 봉합.
-//   ② 진짜 불일치 real>0 → parity_not_clean. ③ A·B(phone8 기준) 모두 0행(유령/빈 탭) → empty_tab(cutover 무의미).
-//   force 만 ①~③ 우회(로그에 forced/UNVERIFIED 명시). 되돌리기 = value 'sheet'(게이트 없음).
-async function setSourceOfTruth({ sheetId, tabName, value, by = 'admin', force = false } = {}) {
-  if (!sheetId || !tabName) throw new Error('setSourceOfTruth: sheetId, tabName 필수');
-  if (!_SOT_VALUES.has(value)) return { ok: false, error: 'invalid_value', allowed: [..._SOT_VALUES] };
-  let parity = null, parityErr = null;
-  if (value === 'db') {
-    try { parity = await parityReport({ sheetId, tabName }); }   // data-parity 게이트(readiness 별도)
-    catch (e) { parityErr = e.message; }
-    const real = parity && parity.buckets ? parity.buckets.real : null;
-    if (!force && real == null) return { ok: false, error: 'parity_check_failed', detail: parityErr || 'real=null' };
-    if (!force && real > 0) return { ok: false, error: 'parity_not_clean', real, parity };
-    const d3 = (parity && parity.dims && parity.dims.d3_counts) || {};
-    if (!force && !(Number(d3.aTotal) > 0 && Number(d3.bTotal) > 0)) {
-      return { ok: false, error: 'empty_tab', aTotal: Number(d3.aTotal) || 0, bTotal: Number(d3.bTotal) || 0 };
-    }
-  }
-  const db = getPool();
-  const { rowCount } = await db.query(
-    `UPDATE tab_configs SET source_of_truth=$3 WHERE sheet_id=$1 AND tab_name=$2`,
-    [sheetId, tabName, value]);
-  if (!rowCount) return { ok: false, error: 'tab_not_found' };
-  logger.info(`[trackB] source_of_truth ${sheetId}/${tabName} → ${value} (by ${by}${force ? ', forced' : ''}${parityErr ? ', parity UNVERIFIED: ' + parityErr : ''})`);
-  return { ok: true, sheetId, tabName, sourceOfTruth: value, parity, parityVerified: value === 'db' ? !parityErr : null };
-}
-
-// ── 일괄 cutover: "전환 가능(candidate)" 탭 전부에 단건 플립을 순차 시도 — master 전용(라우트) ──
-//   ★★ 게이트를 복제하지 않는다 — 판정은 setSourceOfTruth(단건과 같은 fail-closed: **지금 시점** 라이브
-//      parity real=0 · 비어있지 않음)가 그대로 한다. 여기서는 overview() triage 로 시도 대상만 고른다
-//      (화면의 `cutover 준비` 칩과 같은 신호 — 화면이 보여준 것과 다른 집합을 전환하면 안 된다).
-//   ★★ force 없음(완화 금지) — 일괄에서 게이트를 우회하면 클릭 한 번이 검증 안 된 탭을 무더기로
-//      전환한다. 게이트에 걸린 탭은 사유와 함께 보고만 하고, 예외는 단건 플립(+탭명 타이핑 마찰)으로.
-//   ★ overviewFn/flipFn 주입은 테스트용(모듈 내부 호출은 렉시컬이라 export 스터빙이 안 먹는다 —
-//     "밖에서 감싸기" 함정. 프로덕션 경로는 인자 없이 호출돼 실제 함수를 쓴다).
-async function cutoverAll({ by = 'admin', overviewFn = overview, flipFn = setSourceOfTruth } = {}) {
-  const items = await overviewFn();
-  const results = [];
-  for (const it of items) {
-    const key = { sheetId: it.sheetId, tabName: it.tabName };
-    if (it.sourceOfTruth === 'db') { results.push({ ...key, ok: false, skipped: 'already_db' }); continue; }
-    if (it.ghost) { results.push({ ...key, ok: false, skipped: 'ghost' }); continue; }
-    if (!it.cutoverCandidate) {
-      const why = [];
-      if (!it.countMatch) why.push('count_mismatch');
-      if (!it.owned) why.push('unowned');
-      if (!it.woLinked) why.push('no_work_order');
-      results.push({ ...key, ok: false, skipped: 'not_candidate', reasons: why });
-      continue;
-    }
-    try {
-      const r = await flipFn({ ...key, value: 'db', by });   // force 절대 미전달
-      results.push(r && r.ok ? { ...key, ok: true }
-        : { ...key, ok: false, skipped: (r && r.error) || 'unknown', ...(r && r.real != null ? { real: r.real } : {}) });
-    } catch (e) { results.push({ ...key, ok: false, skipped: 'error', detail: e.message }); }
-  }
-  const flipped = results.filter(r => r.ok).length;
-  return { total: results.length, flipped, skipped: results.length - flipped, results };
-}
-
-// 광고주 스코프: 이 업체가 소유한 (sheet_id, tab_gid) 집합. tab_gid NULL 소유 = 그 시트 전체.
 async function scopedTabsForAdvertiser(advertiserId) {
   if (!advertiserId) return { sheetIds: [], tabGids: [], allTabSheetIds: [] };
   const db = getPool();
@@ -2883,46 +2919,39 @@ async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false } =
     push(r.row_index, r.review_file_id, 'review', r.review_file_at);
   }
   /* ── 구매 캡처(062 `order_submissions.capture_file_id`) ─────────────────────────
-     ★★ 줄 짝짓기는 **`sheet_row`(그 주문이 실제로 기록된 줄)** 하나로 한다.
-       `campaign_participants.order_submission_id` 링크는 오염 사례가 문서화돼 있어
-       (2026-08-19 장수산업 건) 그것으로 붙이면 **남의 구매 캡처가 이 줄에 뜬다** —
-       검수에서 잘못된 판단의 근거가 되므로, 근거가 확실한 값만 쓴다.
-     ★ 아직 표에 반영되지 않은 주문(sheet_row NULL)은 안 보인다 — 정직한 상태다.
+     ★★ 줄 짝짓기는 **이 줄 사람의 주문으로 확인된 것만** 쓴다(2026-09-30 운영 실측 · 사용자 확정).
+       종전에는 `sheet_row`(시트 시절 줄 번호) 하나로 붙였는데, 줄이 재배치된 작업에서 그 번호가
+       **남의 주문**을 가리켜 57줄 중 36줄에 다른 사람 구매캡처가 떴다(검수 판단을 흐리는 사고).
+       `order_submission_id` 링크도 오염 사례가 있다(2026-08-19 장수산업 건). 그래서 후보(줄 번호 ∪
+       링크 ∪ 표 주문번호)를 모은 뒤 **주문번호 → 연락처 → 이름**으로 확인한다.
+     ★★ 판정 단일 출처 = `utils/rowOrderMatch.matchRowsToOrders` — 구매캡처 교체와 같은 함수.
+     ★ 주문 좌표는 두 갈래: 탭 좌표 · 연결 공고 `campaign:<id>` 좌표(2026-08-23 블랑카우 건).
+       공고 매칭은 이름 → gid 폴백이고 **빈 gid 는 절을 켜지 않는다**. gid 는 서버가 tab_configs 에서 다시 구한다.
+     ★ 확인 못 한 줄에는 **싣지 않는다**(남의 사진을 보여주는 것보다 없다고 하는 편이 낫다).
      ★ fail-soft: 실패해도 리뷰 이미지는 그대로 나간다. */
-  const { rows: caps } = await db.query(
-    `SELECT sheet_row, capture_file_id, capture_uploaded_at
-       FROM order_submissions
-      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL
-        AND sheet_row IS NOT NULL AND capture_file_id IS NOT NULL
-      ORDER BY sheet_row, capture_uploaded_at NULLS LAST`,
-    [sheetId, tabName]).catch(() => ({ rows: [] }));
-  for (const r of caps) push(r.sheet_row, r.capture_file_id, 'order_capture', r.capture_uploaded_at);
-  /* ── 구매 캡처 ② **공고(참여형) 좌표 주문** ────────────────────────────────────
-     ★★ 실사고(2026-08-23 「0807(올리브영)블랑카우 바디로션 100건」): 8/19 이후 제출한 9명의
-       구매 캡처가 전부 "미제출"로 보였다. 파일은 Drive 에 있고 주문에도 연결돼 있었다 —
-       **공고를 거쳐 제출한 주문은 원장 좌표가 `campaign:<공고ID>`**(submit.routes
-       `_resolveCampaignOrderScope`)라 위 탭 좌표 조회에 **한 건도 안 걸렸을 뿐**이다.
-       그 탭에 공고가 붙은 순간부터 모든 신규 제출이 이 갈래로 들어오므로, 이 조회가 없으면
-       화면이 "제출 안 했다"고 거짓말을 계속한다.
-     ★ 짝짓기는 위와 **같은 `sheet_row`** 하나 — `campaign_participants.order_submission_id`
-       링크는 오염 사례가 문서화돼 있어 쓰지 않는다(2026-08-19 장수산업 건과 같은 규율).
-     ★ 공고 매칭은 이름 → gid 폴백이고 **빈 gid 는 절을 켜지 않는다**. gid 는 **서버가
-       tab_configs 에서 다시 구한다** — 화면이 보낸 값을 믿으면 낡은 화면이 남의 공고를 끌어온다.
-     ★ 차수 재발행으로 공고가 여럿이면 전부 합류한다(같은 작업표 줄에 기록된 주문들이다).
-     ★ fail-soft: 실패해도 위에서 모은 것은 그대로 나간다. */
   const _gid = tabCfg.gid || '';
-  const { rows: campCaps } = await db.query(
-    `SELECT os.sheet_row, os.capture_file_id, os.capture_uploaded_at
+  const { rows: capOrders } = await db.query(
+    `SELECT os.id, os.sheet_row, os.capture_file_id, os.capture_uploaded_at,
+            os.order_num, os.phone, os.recipient, os.orderer
        FROM order_submissions os
-       JOIN recruit_campaigns rc
-         ON os.sheet_id = 'campaign:' || rc.id AND os.tab_name = 'campaign:' || rc.id
-      WHERE rc.linked_sheet_id = $1
-        AND (rc.linked_tab_name = $2 OR ($3 <> '' AND rc.linked_tab_gid = $3))
-        AND os.deleted_at IS NULL
-        AND os.sheet_row IS NOT NULL AND os.capture_file_id IS NOT NULL
-      ORDER BY os.sheet_row, os.capture_uploaded_at NULLS LAST`,
+      WHERE os.deleted_at IS NULL AND os.capture_file_id IS NOT NULL
+        AND ((os.sheet_id = $1 AND os.tab_name = $2)
+          OR EXISTS (SELECT 1 FROM recruit_campaigns rc
+                      WHERE os.sheet_id = 'campaign:' || rc.id AND os.tab_name = 'campaign:' || rc.id
+                        AND rc.linked_sheet_id = $1
+                        AND (rc.linked_tab_name = $2 OR ($3 <> '' AND rc.linked_tab_gid = $3))))
+      ORDER BY os.capture_uploaded_at NULLS LAST`,
     [sheetId, tabName, _gid]).catch(() => ({ rows: [] }));
-  for (const r of campCaps) push(r.sheet_row, r.capture_file_id, 'order_capture', r.capture_uploaded_at);
+  if (capOrders.length) {
+    const { rows: capRows } = await db.query(
+      `SELECT cp.seq, cp.order_submission_id, cp.reviewer_name, cp.recipient_name, cp.phone8,
+              ${require('../utils/tableOrderNum').tableOrderNumSql('cp')} AS table_order_num
+         FROM campaign_participants cp
+        WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.deleted_at IS NULL`,
+      [sheetId, tabName]).catch(() => ({ rows: [] }));
+    const matched = require('../utils/rowOrderMatch').matchRowsToOrders(capRows, capOrders);
+    for (const [seq, o] of matched) push(seq, o.capture_file_id, 'order_capture', o.capture_uploaded_at);
+  }
   return Object.fromEntries(out);
 }
 
@@ -3036,49 +3065,6 @@ function _condSchedule(rows, headers) {
   } catch (_) { return null; }
 }
 
-/* 모집일 경고의 보정 근거: 이미 사람/주문이 채워진 작업표 행을 표에 표시되는 구매일자로
-   묶은 수다. 과거 무시트 전환 작업은 `campaign_daily_plans`에 조절한
-   일부 날짜만 남고, 완료된 행의 날짜는 작업표에만 남아 있을 수 있다. 그 경우 계획 합계만
-   비교하면 완료 작업을 미설정으로 오인한다.
-   ★ `out`은 마스킹 전 내부 렌즈에서 만들며 `filled`도 같은 시점에 확정된다. 날짜 셀 편집
-   오버레이가 있으면 화면에서 보이는 값이 우선한다. 날짜 열을 못 찾거나 파싱할 수 없으면
-   null로 실패 닫기 — 빈/비표준 날짜를 "배정됨"으로 세어 경고를 숨기지 않는다.
-   ★ 읽기 전용 순수 계산이다. 모집계획 저장·작업표 재구성·번호 재정렬 경로를 호출하지 않는다. */
-function _filledScheduledRowsByDate(rows, headers) {
-  try {
-    const list = Array.isArray(rows) ? rows : [];
-    if (!list.length) return null;
-    let keys = Array.isArray(headers) ? headers.filter(h => h != null && String(h).trim() !== '') : [];
-    if (!keys.length) {
-      const seen = new Set(); keys = [];
-      for (const r of list) {
-        const rj = (r && r.rowJson && typeof r.rowJson === 'object') ? r.rowJson : null;
-        if (!rj) continue;
-        for (const k of Object.keys(rj)) if (!seen.has(k)) { seen.add(k); keys.push(k); }
-      }
-    }
-    const { findDateColumnIndex } = require('./campaignSchedule.service');
-    const di = findDateColumnIndex(keys);
-    if (di < 0) return null;
-    const key = keys[di];
-    const raw = list.map(r => {
-      const rj = (r && r.rowJson && typeof r.rowJson === 'object') ? r.rowJson : {};
-      const edits = (r && r.cellEdits && typeof r.cellEdits === 'object') ? r.cellEdits : {};
-      const v = Object.prototype.hasOwnProperty.call(edits, key) ? edits[key] : rj[key];
-      return v == null ? '' : String(v);
-    });
-    const kst = new Date(Date.now() + 9 * 3600 * 1000);
-    const { parseDateColumn } = require('../utils/koreanDate');
-    const parsed = parseDateColumn(raw, { fallbackAnchor: { y: kst.getUTCFullYear(), m: kst.getUTCMonth() + 1 } });
-    const byDate = new Map();
-    for (let i = 0; i < list.length; i++) {
-      if (!list[i] || list[i].filled !== true || !parsed[i]) continue;
-      byDate.set(parsed[i], (byDate.get(parsed[i]) || 0) + 1);
-    }
-    return byDate;
-  } catch (_) { return null; }
-}
-
 async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null } = {}) {
   try {
     const gid = String(meta.tabGid || '').trim();
@@ -3090,6 +3076,7 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
               transfer_bank AS "transferBank",
               multi_account_mode AS "multiAccount", multi_daily_limit AS "multiDailyLimit",
               cash_receipt_required AS "cashReceiptRequired",
+              work_detail AS "workDetail",
               to_char(window_start,'HH24:MI') AS "windowStart",
               to_char(window_end,'HH24:MI')   AS "windowEnd",
               status, participation_mode AS "participationMode"
@@ -3196,16 +3183,41 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
        공고 옵션이 2종 미만이면 작업오더의 구조화 옵션으로 폴백한다. 2종 미만이면 빈 배열
        = 옵션 없는 작업(1건당 결제금액 한 줄 표기). 표시 전용 — 정원·홀드 판정 무접촉. */
     let options = [];
+    let campOpts = [];   // ★ 공고 옵션 원본 — 아래 '1건당 금액'이 쓴다(작업오더 폴백이 덮기 전 값)
     if (c) {
       const { rows: opts } = await db.query(
         `SELECT opt_key AS label, pay_amount AS pay, recruit_total AS count
            FROM campaign_options WHERE campaign_id = $1 AND status <> 'closed' ORDER BY id`,
         [c.id]).catch(() => ({ rows: [] }));
-      options = opts.map(o => ({ label: String(o.label || '').trim(), pay: num(o.pay), count: num(o.count) }))
-                    .filter(o => o.label);
+      campOpts = opts.map(o => ({ label: String(o.label || '').trim(), pay: num(o.pay), count: num(o.count) }))
+                     .filter(o => o.label);
+      options = campOpts;
     }
     if (options.length < 2 && wo) options = _condWoOptions(wo.productOptionsJson);
     if (options.length < 2) options = [];
+
+    /* ── 공고에 적은 **1건당 상품 결제금액**(사용자 확정 2026-09-21) ────────────────────
+       종전엔 작업 조건 카드의 결제금액만 **작업오더 전용**이라, 모집공고 진행상품 표에서
+       금액을 고쳐도 카드가 영영 안 바뀌었다(신고: 공고 52,200 ↔ 카드 55,200). 게다가 그
+       금액을 누르면 열리는 창구가 **모집공고 모달**이고 툴팁이 "저장하면 반영됩니다"라고
+       말해, 시키는 대로 고쳐도 아무 일이 없는 막다른 길이었다.
+       → 리뷰비·입금명·이체은행·총건수·일건수·구매시간과 **같은 규율**(공고 우선 · 없으면 발주).
+       ★ 읽는 자리 둘:
+         ① 살아있는 공고 옵션이 **정확히 1종**이면 그 금액(2종 이상은 위 `options` 가 담당한다)
+         ② 옵션을 안 쓰는 작업은 진행상품 표가 **작업내용 상품 원문**으로만 저장되므로 거기서 읽는다
+       ★ 파싱 규칙은 `utils/campaignProductLines` **단일 출처**(여기에 정규식을 적지 않는다).
+       ★ 기준 공고(`c`) 하나만 본다 — 리뷰비처럼 `pick()` 으로 다른 차수의 값을 주워 오면
+         **지난 차수의 금액**이 이번 작업 카드에 뜬다(정원을 `c` 로만 보는 것과 같은 이유).
+       ★ 못 읽으면 null = 화면이 종전대로 작업오더 값을 쓴다(무회귀). */
+    const campaignPayAmount = (() => {
+      if (!c) return null;
+      if (campOpts.length === 1) { const p = num(campOpts[0].pay); if (p != null && p > 0) return p; }
+      try {
+        const { firstPayAmountFromProductLines } = require('../utils/campaignProductLines');
+        const wd = (typeof c.workDetail === 'string') ? JSON.parse(c.workDetail) : c.workDetail;
+        return firstPayAmountFromProductLines(wd && wd.productLines);
+      } catch (_) { return null; }
+    })();
 
     /* 적용 정원(공고 우선 · 0이면 발주) — 상태엔진과 **같은 함수**를 태운다(사본 0). */
     const { displayRecruitTotal } = require('./linkedRecruitQuota.service');
@@ -3283,6 +3295,12 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       /* 1건당 상품 결제금액(사용자 확정 2026-08-20) — 진행 현황의 '결제금액'은 활성 주문 행의
          **합계**라 성질이 다르다(중복 표기가 아니다). 출처는 작업오더 한 곳. */
       payAmount: num(wo && wo.payAmount),
+      /* ★★ 공고에 적은 **1건당** 상품 결제금액(사용자 확정 2026-09-21) — 화면이 이 값을 작업오더
+         값보다 **먼저** 쓰고, 총액도 이 값 × 총건수로 계산한다.
+         ★★★ `payAmount`(= 작업오더 **결제합계**)와 성질이 다르다 — 절대 섞지 말 것. 합계를
+           1건당으로 읽고 건수를 곱해 60건 작업에 9,324만원을 찍은 사고(2026-08-21)가 있다.
+         ★ null = 공고에 금액이 없거나 못 읽음 → 화면은 종전대로 작업오더 값을 쓴다. */
+      campaignPayAmount,
       /* 옵션 2종 이상일 때만 채워진다 — 총결제금액은 싣지 않는다(자동계산은 화면 표시일 뿐
          저장값이 아니고, 여기 실으면 "편집할 수 있는 값"처럼 보인다). */
       options,
@@ -3789,38 +3807,26 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
      시트 기반 과거 표에 오탐을 내지 않도록 종전처럼 무시트에만 한정한다. */
   const _recruitCap = (_cond && Number(_cond.recruitTotal) > 0) ? Number(_cond.recruitTotal) : null;
   const _cap = (meta[0] && meta[0].sheetless) ? _recruitCap : null;
-  /* 모집일 미설정 수 = 작업 조건의 총 모집건수 - 유효한 날짜 배정량.
-     무시트 작업표는 달력(campaign_daily_plans)이 날짜별 정원의 진실원본이므로 합계를 그대로
-     비교할 수 있다. 단, 과거에 완료된 무시트 작업은 조절한 날만 계획 테이블에 남고 실제
-     날짜 배정은 작업표 행에만 남아 있을 수 있다. 이때는 날짜별로 작업표의 실제 배정과 저장
-     계획 중 큰 값을 합산한다. 같은 날은 이중 계산하지 않고, 과거 완료분과 미래 계획분이 서로
-     다른 날이면 모두 반영한다. 시트 기반은 이 테이블이 "조절한 날"만 보관하고 나머지는 시트 일정이
-     정하므로, 합산하면 정상 일정까지 미설정으로 오인한다 — 그 경우에는 표시하지 않는다.
-     저장 시 총량 초과는 막혀 있으므로 화면에는 부족분만 낸다. 계획 테이블이 아직 없는 구버전
-     DB/조회 실패는 0으로 위장하지 않고 필드를 생략해 경고 오탐을 막는다. */
+  /* 모집일 미설정 수 — ★ 결정 182(2026-09-26 · 사용자 확정 "예상 인원 기준으로 계산, 0이면 안 보임"):
+     날짜별 인원은 규칙이 정하므로, **날짜별 예상 인원(projectDailyQuotas)** 이 남은 인원을 다 담지
+     못할 때만 그 차이를 낸다(예: 일건수 0 · 400일 안에 못 채움). 정상 공고는 0 = 화면에 안 뜬다.
+     ★ 종전(저장된 계획 합계와 비교)은 계획을 "사람이 정한 날"만 남기는 새 방식에서 거짓 경고가 된다.
+     ★ 예상 인원을 못 구하면(조회 실패·시트 일정 공고) 필드를 생략한다(0 위장 금지). */
   let scheduleUnassigned;
   if (showEdits && meta[0] && meta[0].sheetless && _cond && _cond.campaignId && _recruitCap) {
     try {
-      const { rows: plans } = await db.query(
-        `SELECT to_char(plan_date,'YYYY-MM-DD') AS date, planned_count AS count
-           FROM campaign_daily_plans WHERE campaign_id=$1`, [_cond.campaignId]);
-      const plannedByDate = new Map();
-      for (const plan of plans) {
-        const date = String(plan && plan.date || '').slice(0, 10);
-        const count = Number(plan && plan.count);
-        if (date && Number.isFinite(count)) plannedByDate.set(date, Math.max(0, count));
+      const { rows: campRows } = await db.query('SELECT * FROM recruit_campaigns WHERE id = $1', [_cond.campaignId]);
+      if (campRows.length) {
+        const { fetchCampaignCounts, projectDailyQuotas } = require('./campaignState.service');
+        const cnt = (await fetchCampaignCounts(db, [campRows[0].id])).get(campRows[0].id) || {};
+        const proj = projectDailyQuotas(campRows[0], cnt, { maxDays: 400 });
+        if (proj && proj.remaining != null) {
+          const placed = proj.days.reduce((a, x) => a + (Number(x.quota) || 0), 0);
+          scheduleUnassigned = Math.max(0, proj.remaining - placed);
+        }
       }
-      const actualByDate = _filledScheduledRowsByDate(out, headers);
-      let scheduled = 0;
-      if (actualByDate == null) {
-        for (const count of plannedByDate.values()) scheduled += count;
-      } else {
-        const dates = new Set([...plannedByDate.keys(), ...actualByDate.keys()]);
-        for (const date of dates) scheduled += Math.max(plannedByDate.get(date) || 0, actualByDate.get(date) || 0);
-      }
-      scheduleUnassigned = Math.max(0, _recruitCap - scheduled);
     } catch (e) {
-      logger.warn(`[trackB] 모집일 계획 합계 조회 실패: ${e.message}`);
+      logger.warn(`[trackB] 모집일 예상 인원 계산 실패: ${e.message}`);
     }
   }
   let overCount = 0;
@@ -3859,7 +3865,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     cap: _cap || undefined,
     /* 총 모집완료 표기용 기준. 시트 기반은 초과행 색칠과 달리 이 값을 사용해야 한다. */
     completionCap: _recruitCap || undefined,
-    /* 총건수 대비 저장된 모집일 계획 부족분. 0이면 화면에 경고를 만들지 않는다. */
+    /* 남은 인원 중 날짜별 예상 인원에 담기지 못한 수(결정 182). 0이면 화면에 경고를 만들지 않는다. */
     scheduleUnassigned: scheduleUnassigned > 0 ? scheduleUnassigned : undefined,
     /* 정원을 넘겨 채워진 줄 수. cap 을 모르면 undefined(0 과 구분). */
     over: _cap ? overCount : undefined,
@@ -4369,7 +4375,8 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
     const dateIdx = findDateColumnIndex(headers);
     const dateHeader = dateIdx >= 0 ? headers[dateIdx] : null;
 
-    // 연결 공고가 있을 때만 계획 이동에 쓸 "마지막 계획일"을 읽는다.
+    // 연결 공고가 있을 때 보충 줄의 임시 날짜로 쓸 "마지막 계획일"을 읽는다(최종 날짜는 커밋 뒤 relay 가 맞춘다).
+    // ★ 결정 182 — 계획을 더 이상 쓰지 않으므로 잠그지 않는다(FOR UPDATE 제거: 저장과 불필요하게 줄 세우지 않는다).
     let finalPlan = null;
     if (campaignId) {
       const { rows: plans } = await client.query(
@@ -4377,8 +4384,7 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
            FROM campaign_daily_plans
           WHERE campaign_id=$1 AND planned_count > 0
           ORDER BY plan_date DESC
-          LIMIT 1
-          FOR UPDATE`, [campaignId]);
+          LIMIT 1`, [campaignId]);
       finalPlan = plans.length ? plans[0] : null;
     }
     const todayAnchor = (() => {
@@ -4492,33 +4498,11 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
     const renumbered = await require('./rowNumbering.service')
       .renumberTabInTx(client, { sheetId, tabName, by: `row-delete:${by}`.slice(0, 100) });
 
-    // 삭제된 날 -1 / 마지막 진행일 +1 = 날짜별 배치만 이동한다. 총 계획량은 바뀌지 않는다.
-    // 공고를 못 고른 경우(none/ambiguous)와 날짜를 못 읽은 경우엔 계획을 건드리지 않는다.
-    let planMoved = false;
-    if (shouldReplenish && campaignId && finalPlan && removedDate && removedDate !== finalPlan.date) {
-      const dateCount = new Map();
-      parsedDates.forEach(d => { if (d) dateCount.set(d, (dateCount.get(d) || 0) + 1); });
-      const { rows: sourcePlans } = await client.query(
-        `SELECT to_char(plan_date,'YYYY-MM-DD') AS date, planned_count
-           FROM campaign_daily_plans
-          WHERE campaign_id=$1 AND plan_date=$2::date
-          FOR UPDATE`, [campaignId, removedDate]);
-      const sourceCount = sourcePlans.length ? Number(sourcePlans[0].planned_count) : (dateCount.get(removedDate) || 0);
-      if (sourceCount >= 1) {
-        await client.query(
-          `UPDATE campaign_daily_plans
-              SET planned_count=planned_count+1, updated_by=$3, updated_at=NOW()
-            WHERE campaign_id=$1 AND plan_date=$2::date`,
-          [campaignId, finalPlan.date, `행삭제 보충:${by}`.slice(0, 100)]);
-        await client.query(
-          `INSERT INTO campaign_daily_plans (campaign_id, plan_date, planned_count, updated_by, updated_at)
-           VALUES ($1,$2::date,$3,$4,NOW())
-           ON CONFLICT (campaign_id,plan_date) DO UPDATE
-             SET planned_count=EXCLUDED.planned_count, updated_by=EXCLUDED.updated_by, updated_at=NOW()`,
-          [campaignId, removedDate, sourceCount - 1, `행삭제 이동:${by}`.slice(0, 100)]);
-        planMoved = true;
-      }
-    }
+    /* ★★ 결정 182(2026-09-26) — 줄을 지워도 **날짜별 계획을 옮기지 않는다**(종전: 지운 날 −1 · 마지막 날 +1).
+       날짜별 인원은 규칙(일건수·주말·이월·총량)이 정하므로, 취소로 빈 자리는 그 규칙이 알아서 다시
+       연다. 계획을 적으면 그날이 "사람이 정한 날"로 굳어 일건수·이월 변경이 반영되지 않는다(완화 금지).
+       보충 줄의 날짜는 커밋 뒤 작업표 날짜 맞추기(relayCampaignWorktable)가 규칙대로 옮긴다. */
+    const planMoved = false;
     if (campaignId) {
       await client.query(
         `INSERT INTO campaign_plan_events (campaign_id, actor, action, detail)
@@ -4535,6 +4519,7 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
       boardTarget: boardTarget || null,
       campaignScope,
       planMoved,
+      campaignId: campaignId || null,
       finalPlanDate: finalPlan ? finalPlan.date : null,
       replacementDate: shouldReplenish ? (finalDateLabel || null) : null,
       replacementSeq: replacement && replacement.rows[0] && replacement.rows[0].seq,
@@ -4616,11 +4601,19 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRol
     };
   }
 
+  /* ★ 결정 182 — 보충 줄의 날짜를 규칙(날짜별 예상 인원)에 맞춘다. 커밋 **뒤**에 한다: 행 삭제 트랜잭션은
+     줄을 잠근 채라, 그 안에서 탭 잠금을 잡으면 구매 기록(탭 잠금 → 줄 잠금)과 순서가 뒤집혀 교착한다.
+     ★ 절대 throw 없음 — 날짜 맞추기 실패가 행 삭제를 되돌리지 않는다. */
+  let worktableRelay = null;
+  if (result && result.campaignId) {
+    worktableRelay = await require('./campaignPlan.service')
+      .relayCampaignWorktable(result.campaignId, { by: `participant-delete:${by}`, ledgers: false });   // 장부는 바로 아래에서 한 번만
+  }
   let ledgerError = null;
   try { await _rebuildWorkdeskLedgers({ sheetId, tabName, by: `participant-delete:${by}` }); }
   catch (e) { ledgerError = (e && (e.code || e.message)) || 'rebuild_failed'; logger.warn(`[trackB] 행 삭제 후 장부 재생성 실패 tab=${tabName}: ${ledgerError}`); }
   _tabStatsCache = { at: 0, map: null };
-  return { ok: true, mode: 'hard_deleted', orderCanceled, sheetCleared, ...result, ledgerError };
+  return { ok: true, mode: 'hard_deleted', orderCanceled, sheetCleared, ...result, ledgerError, worktableRelay };
 }
 
 // 주문이 연결된 한 행을 안전하게 취소한다. 시트 물리행은 유지하고 주문값만 큐로 비워 행 이동 오염을 막는다.
@@ -4632,7 +4625,6 @@ async function deleteWorkdeskOrderRow(args) {
 }
 
 // 추가: 앵커 대상 없음(신규 참여자) → source='manual' 물리행(오버레이 아님). participants가 seq 원자화.
-async function addWorkdeskRow(args) { return participants.addParticipant(args); }
 
 /**
  * 작업보드 구매일자 달력 편집 (무시트 전용 · 2026-08-21).
@@ -5011,32 +5003,6 @@ async function listCellEdits({ sheetId, tabName, rowId, field, limit = 20 } = {}
   };
 }
 
-// ── 편집 이력(감사): 이 탭의 최근 편집(활성+되돌림)을 시각·편집자·필드·값·상태로. 앵커→참여자명 best-effort. ──
-async function listEdits({ sheetId, tabName, limit = 200 } = {}) {
-  if (!sheetId || !tabName) throw new Error('listEdits: sheetId, tabName 필수');
-  const db = getPool();
-  const lim = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000);
-  const { rows } = await db.query(
-    `SELECT pe.id, pe.field, pe.kind, pe.value_bool AS "valueBool", pe.value_text AS "valueText",
-            pe.created_by AS "createdBy", pe.created_at AS "createdAt",
-            pe.reverted_by AS "revertedBy", pe.reverted_at AS "revertedAt",
-            (SELECT cp.reviewer_name FROM campaign_participants cp
-               WHERE cp.sheet_id=pe.sheet_id AND cp.tab_name=pe.tab_name AND cp.deleted_at IS NULL AND cp.active=TRUE
-                 AND ((pe.anchor_type='order' AND cp.order_submission_id::text=pe.anchor_value)
-                   OR (pe.anchor_type='manual' AND cp.id::text=pe.anchor_value)
-                   OR (pe.anchor_type='identity' AND cp.identity_key=pe.anchor_value)) LIMIT 1) AS name
-       FROM participant_edits pe
-      WHERE pe.sheet_id=$1 AND pe.tab_name=$2
-      ORDER BY pe.created_at DESC LIMIT $3`,
-    [sheetId, tabName, lim]);
-  return rows.map(r => ({
-    id: r.id, name: r.name || null,
-    field: r.field === '_hidden' ? '(행 숨김)' : (r.field.indexOf('col:') === 0 ? r.field.slice(4) : r.field),
-    value: r.kind === 'bool' ? (r.valueBool ? '완료/있음' : '해제/없음') : (r.valueText || ''),
-    by: r.createdBy || '', at: r.createdAt,
-    reverted: !!r.revertedAt, revertedBy: r.revertedBy || null, revertedAt: r.revertedAt,
-  }));
-}
 
 // ══ 리뷰웹시스템[3버전] 커스텀 열(행별 자유메모) + 셀 배경색(드래그 범위, migration 080) ══
 //   ★ 격리: participant_edits/write-back 무접촉 신규 테이블만 사용 — 시트에 절대 쓰지 않는다.
@@ -5178,436 +5144,7 @@ async function setCellColors({ sheetId, tabName, cells, color, by = 'admin' } = 
     : { ok: true, applied, skipped };
 }
 
-// ══════════════════════════════════════════════════════════════════════════
-// P2/P2-2 write-back 경로 정합(red-blue-judge 확정): 플랜(_computeWritebackPlan)이 **유일 op 산출원**,
-//   _writebackEngine 이 tier 실행기 — base(cron·TRACK_B_WRITEBACK=1)=상태 토글만 /
-//   full(수동 apply-full·TRACK_B_WRITEBACK_FULL=1)=base+안전군 필드편집 / simulate=전체 플랜(시트 무접촉).
-//
-// ★★ 불변식(위반=Blocker):
-//   1) 격리: source_of_truth·양 env 판정은 이 파일에서만. Track A 파일·cron.js·routes 변경 0줄.
-//   2) 컬럼 disjoint: _wbOrderMappedMask = mapOrderToSheetRow(headers,{}) 의 non-null 칸(주문매핑칸).
-//      빈 orderData 에도 매핑칸은 ''(non-null)·비매핑칸은 null 을 반환(실코드 검증) — 옵션/계좌/금액/
-//      일자/비고/이름류까지 자동 위험군(risky_order_mapped). ★토글도 대상칸이 매핑칸이면 실적용 금지
-//      (예: submit_col2='입금일자' 는 일자칸 → order_append 와 충돌 가능 — 기존 P2 의 잠복 구멍 봉합).
-//   3) blank-only · un-write 불가 · 사람셀 클로버 금지: 충돌=held(비재시도). own-provenance(sig 로
-//      "내가 쓴 O" 지우기)는 기각 — 입금칸은 사람 입금표기와 공유라 sig 로도 현재 'O' 의 배타 소유 증명 불가.
-//   4) 신원 fail-closed: _wbIdentityOk(전화=digits 끝8자리 · 수취인=trim, AND, 비교불가=불일치).
-//      ★ ol.rowIdentityMatches 사용 금지 — normalizeGuardValue 가 digits '전체' equality 라
-//        시트 01012345678 vs DB phone8(12345678)이 상시 불일치 → 전건 blocked 잠복버그(이번에 수정).
-//   5) 저우선 throttle({priority:'low'}) + BUSY 양보 + 행당 저우선 읽기 1콜(신원칸∪대상칸 사각형)
-//      + TRACK_B_WRITEBACK_MAX_ROWS 상한 — 주문 예약 8슬롯(SHEETS_ORDER_RESERVE) 무굶김.
-//   6) 멱등·핑퐁0: no-op 수렴마킹(written) + written 재픽업 안 함 + 쓰기실패=무마킹 defer(재시도 멱등)
-//      + no_meta=무마킹 skip(마킹은 헤더 확보 후에만 — 오마킹 방지).
-//   7) status 어휘 고정 {NULL,'written','held','blocked'}(migration 052 CHECK 백스톱) — 구버전 픽업
-//      (IS NULL OR ='blocked')과 롤백 호환. markStatus 화이트리스트 + editId 없는 op(add/clear) 미호출.
-//   8) 두 env 미설정 = 완전 inert(gate_off/trigger_off 즉시 반환, DB·시트 무접촉).
-// ══════════════════════════════════════════════════════════════════════════
-function _wbColLetter(idx) { let s = '', i = idx; while (i >= 0) { s = String.fromCharCode((i % 26) + 65) + s; i = Math.floor(i / 26) - 1; } return s; }
-
-// 상태 토글 쓰기 산출(순수·단위테스트 대상). ★ c1/c2(submit_col/submit_col2) 두 열 외 range 생성 불가.
-//   want=false(해제)는 blank-only상 못 쓴다(현재 'O'면 conflict). cells는 minC..maxC 슬라이스.
-function _buildToggleWrite({ tabName, headers, submitCol, submitCol2, wantSubmitted, wantPaid, cells, minC, sheetRow }) {
-  const { _normSubmitCell, _wantMark } = require('./participantMirror.service');
-  const c1 = submitCol ? headers.indexOf(submitCol) : -1;
-  const c2 = submitCol2 ? headers.indexOf(submitCol2) : -1;
-  const writeData = []; let conflict = false;
-  for (const [col, want] of [[c1, wantSubmitted], [c2, wantPaid]]) {
-    if (col < 0 || want == null) continue;
-    const wantMark = _normSubmitCell(_wantMark(want));
-    const cur = _normSubmitCell(cells[col - minC]);
-    if (cur === wantMark) continue;                    // 멱등 no-op(이미 원하는 상태)
-    if (cur === '') writeData.push({ range: `'${tabName}'!${_wbColLetter(col)}${sheetRow}`, values: [[_wantMark(want)]] });
-    else conflict = true;                              // 사람/라이브가 채운 셀 → 클로버 금지(held)
-  }
-  return { writeData, conflict, c1, c2 };
-}
-
-// ── 주문매핑칸 마스크(disjoint 자동 유도): mapOrderToSheetRow 는 빈 orderData 에도
-//    주문칸에 ''(non-null)·비주문칸에 null 을 반환 → non-null = order_append 가 쓰는 칸. ──
-function _wbOrderMappedMask(headers) {
-  const ol = require('./orderLedger.service');
-  return ol.mapOrderToSheetRow(headers || [], {}).map(v => v !== null);
-}
-
-// ── 신원 재검증(fail-closed): rowIdentityMatches 의 의미(존재 칸 AND 일치·비교불가=거부) 승계 +
-//    전화는 digits 끝8자리 비교(DB phone8 과 정합 — 전체 equality 잠복버그 수정). ──
-function _wbIdentityOk({ cells, minC, phoneCol, recipCol, phone8, recipient }) {
-  const checks = [];
-  if (phoneCol >= 0 && String(phone8 || '').trim()) {
-    const cur = String(cells[phoneCol - minC] == null ? '' : cells[phoneCol - minC]).replace(/[^0-9]/g, '');
-    checks.push(cur.length >= 8 && cur.slice(-8) === String(phone8).trim());
-  }
-  if (recipCol >= 0 && String(recipient || '').trim()) {
-    const cur = String(cells[recipCol - minC] == null ? '' : cells[recipCol - minC]).trim();
-    checks.push(!!cur && cur === String(recipient).trim());
-  }
-  return checks.length > 0 && checks.every(Boolean);
-}
-
-function _wbEditFieldCol(ol, headers, field) {
-  if (field.indexOf('col:') === 0) return headers.indexOf(field.slice(4));
-  const m = { recipient_name: 'recipient', phone8: 'phone', option_text: 'selected_opt_key' };
-  if (m[field]) return ol._fieldToCol(headers, m[field]);
-  const kw = { round: /차수|회차|round/i, reviewer_name: /참여자|리뷰어|닉네임|이름/ };
-  if (kw[field]) { for (let i = 0; i < headers.length; i++) if (kw[field].test(String(headers[i] || ''))) return i; }
-  return -1;
-}
-// 위험군(필드명 기준): 소유권키(phone8/recipient) + 연락처/주소/수취인/주문번호 헤더 — 실적용 제외.
-//   (주문매핑칸 일반은 _wbOrderMappedMask 가 헤더 기준으로 추가 차단 — 이중 안전망.)
-function _wbIsRiskyField(field, header) {
-  if (field === 'phone8' || field === 'recipient_name') return true;
-  const h = field.indexOf('col:') === 0 ? field.slice(4) : (header || '');
-  return /연락처|전화|핸드폰|휴대폰|phone|주소|address|수취인|받는분|주문번호|ordernum/i.test(h);
-}
-
-const _WB_BLOCKED = ['no_anchor', 'ambiguous', 'no_column', 'no_sheet_row', 'no_tab_gid'];
-const _WB_RISKY = ['risky_ownership_key', 'risky_order_mapped', 'risky_coords', 'risky_append', 'manual_row'];
-const _WB_STATUSES = new Set(['written', 'held', 'blocked']);   // R3: 어휘 고정(052 CHECK 와 동형)
-
-// ── 유일 op 산출원(시트 무접촉·순수 읽기): scope='all'(시뮬 전체) | 'base'(토글 미반영) | 'full'(비토글 포함 미반영).
-//    픽업 술어(R2/R9): '_hidden' 은 base(IN 토글)·full(<>'_hidden') 양쪽 SQL 에서 제외 — 영구 재픽업 원천 차단.
-//    full 은 소유권키 필드(phone8/recipient_name)도 SQL 제외(실행·오마킹 자체가 없음, 시뮬엔 노출). ──
-async function _computeWritebackPlan(db, sheetId, tabName, { scope = 'all' } = {}) {
-  const ol = require('./orderLedger.service');
-  let editSql = `SELECT id, anchor_type, anchor_value, field, kind, value_bool, value_text
-       FROM participant_edits WHERE sheet_id=$1 AND tab_name=$2 AND reverted_at IS NULL`;
-  if (scope === 'base') {
-    editSql += ` AND field IN ('is_submitted','is_paid') AND (writeback_status IS NULL OR writeback_status='blocked')`;
-  } else if (scope === 'full') {
-    editSql += ` AND field <> '_hidden' AND field NOT IN ('phone8','recipient_name')
-        AND (writeback_status IS NULL OR writeback_status='blocked')`;
-  }
-  const { rows: edits } = await db.query(editSql, [sheetId, tabName]);
-  if (scope !== 'all' && !edits.length) return { noPending: true, edits: [], ops: [], roster: [], headers: [] };
-
-  const { rows: roster } = await db.query(
-    `SELECT id, seq, reviewer_name, recipient_name, phone8, round, option_text, product_name,
-            sheet_row, tab_gid, submit_col, submit_col2, source, order_submission_id, identity_key, deleted_at, active
-       FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2`, [sheetId, tabName]);
-  const byOrder = new Map(), byManual = new Map(), byIdent = new Map(), identCount = new Map(), orderCount = new Map();
-  for (const r of roster) {
-    if (r.deleted_at || !r.active) continue;
-    byManual.set(String(r.id), r);
-    // ★ order 앵커도 중복을 센다 — 유니크가 아니라, 세지 않으면 `set` 이 마지막 행으로 조용히 덮어
-    //   **어느 줄인지 모르는 채 한 줄을 골라** 시트에 쓰게 된다(identity 와 같은 규율).
-    if (r.order_submission_id) {
-      const ok = String(r.order_submission_id);
-      orderCount.set(ok, (orderCount.get(ok) || 0) + 1);
-      if (!byOrder.has(ok)) byOrder.set(ok, r);
-    }
-    if (r.source !== 'manual') { const ik = r.identity_key || identityKey(_ikFromRow(r)); if (ik) { identCount.set(ik, (identCount.get(ik) || 0) + 1); if (!byIdent.has(ik)) byIdent.set(ik, r); } }
-  }
-  let headers = [];
-  const gid = (roster.find(r => r.tab_gid) || {}).tab_gid || null;
-  try { const ctx = await ol.loadRawTabContext(sheetId, gid, tabName); headers = (ctx && ctx.headers) || []; } catch (_) {}
-  const mask = headers.length ? _wbOrderMappedMask(headers) : [];
-
-  const resolve = (e) => {
-    if (e.anchor_type === 'order') return (orderCount.get(e.anchor_value) || 0) > 1 ? { __ambiguous: true } : (byOrder.get(e.anchor_value) || null);
-    if (e.anchor_type === 'manual') return byManual.get(e.anchor_value) || null;
-    if (e.anchor_type === 'identity') return (identCount.get(e.anchor_value) || 0) > 1 ? { __ambiguous: true } : (byIdent.get(e.anchor_value) || null);
-    return null;
-  };
-  const tierOf = (type, guard) => {
-    if (type === 'add' || type === 'clear' || _WB_RISKY.includes(guard)) return 'manual';
-    if (_WB_BLOCKED.includes(guard)) return 'blocked';
-    return type === 'toggle' ? 'base' : 'full';
-  };
-  const ops = []; const hiddenManual = new Set();
-  for (const e of edits) {
-    const row = resolve(e);
-    if (e.field === '_hidden') { if (row && !row.__ambiguous && row.source === 'manual') hiddenManual.add(String(row.id)); continue; }
-    const nv = e.kind === 'bool' ? (e.value_bool ? 'O' : '') : (e.value_text == null ? '' : e.value_text);
-    if (!row) { ops.push({ editId: e.id, type: 'edit', field: e.field, newValue: nv, guard: 'no_anchor', tier: 'blocked' }); continue; }
-    if (row.__ambiguous) { ops.push({ editId: e.id, type: 'edit', field: e.field, newValue: nv, guard: 'ambiguous', tier: 'blocked' }); continue; }
-    const base = { editId: e.id, participantId: row.id, seq: row.seq, name: row.reviewer_name, sheetRow: row.sheet_row, field: e.field, newValue: nv };
-    const isToggle = (e.field === 'is_submitted' || e.field === 'is_paid');
-    let ci = -1, header = null;
-    if (isToggle) {
-      const col = e.field === 'is_submitted' ? row.submit_col : row.submit_col2;
-      ci = col ? headers.indexOf(col) : -1; header = col || null;
-    } else {
-      ci = _wbEditFieldCol(ol, headers, e.field); header = ci >= 0 ? headers[ci] : null;
-    }
-    let guard = 'ok';
-    if (!row.sheet_row) guard = 'no_sheet_row';
-    else if (!row.tab_gid) guard = 'no_tab_gid';
-    else if (ci < 0) guard = 'no_column';
-    else if (!isToggle && _wbIsRiskyField(e.field, header)) guard = 'risky_ownership_key';
-    else if (mask[ci]) guard = 'risky_order_mapped';            // ★ disjoint: 주문매핑칸은 토글도 실적용 금지
-    else if (row.source === 'manual') guard = 'manual_row';     // B 전용 물리행 — 시트 좌표 신뢰 불가(수동 검토)
-    const type = isToggle ? 'toggle' : 'edit';
-    ops.push({ ...base, type, header, colIndex: ci >= 0 ? ci : null,
-      column: ci >= 0 ? ol.getColLetter(ci) : null, valueBool: e.kind === 'bool' ? !!e.value_bool : null,
-      guard, tier: tierOf(type, guard) });
-  }
-  if (scope === 'all') {   // manual add/clear 는 시뮬 전용(editId 없음 → 엔진 실행·마킹 대상 아님, R11)
-    for (const r of roster) {
-      if (r.source !== 'manual') continue;
-      if (r.deleted_at || hiddenManual.has(String(r.id))) {
-        if (r.sheet_row) ops.push({ participantId: r.id, seq: r.seq, name: r.reviewer_name, sheetRow: r.sheet_row, type: 'clear', guard: 'risky_coords', tier: 'manual' });
-      } else if (r.active) {
-        ops.push({ participantId: r.id, seq: r.seq, name: r.reviewer_name, sheetRow: r.sheet_row || null, type: 'add', guard: 'risky_append', tier: 'manual',
-          newValue: { reviewer: r.reviewer_name, recipient: r.recipient_name, option: r.option_text } });
-      }
-    }
-  }
-  return { edits, ops, roster, headers };
-}
-
-// ── tier 실행기(단일 엔진): base=토글만 / full=토글+안전군 필드편집. 게이트는 공개 래퍼가 통과시킨 뒤 호출. ──
-async function _writebackEngine({ sheetId, tabName, tier }) {
-  const db = getPool();
-  const ol = require('./orderLedger.service');
-  const { readSheet, batchUpdateSheet, invalidateSheetMeta } = require('./sheets.service');
-  const { throttledCall, getThrottleStatus } = require('../utils/sheetsThrottle');
-
-  const plan = await _computeWritebackPlan(db, sheetId, tabName, { scope: tier });
-  if (plan.noPending) return { skipped: true, reason: 'no_pending', tabName };
-  const headers = plan.headers;
-  if (!headers.length) return { skipped: true, reason: 'no_meta', tabName };   // R6: 메타 없으면 무마킹 skip(자가치유)
-
-  const markStatus = async (editId, st, sig) => {
-    if (!editId || !_WB_STATUSES.has(st)) return;   // R3(어휘 고정) · R11(editId 없는 op 마킹 금지)
-    await db.query(
-      `UPDATE participant_edits SET writeback_status=$2, writeback_at=NOW(), writeback_sig=COALESCE($3,writeback_sig) WHERE id=$1`,
-      [editId, st, sig || null]);
-  };
-  const rmap = new Map(plan.roster.map(r => [String(r.id), r]));
-  const phoneCol = ol._fieldToCol(headers, 'phone');
-  const recipCol = ol._fieldToCol(headers, 'recipient');
-  let written = 0, held = 0, blocked = 0, deferred = 0, remaining = 0;
-
-  // per-row 그룹핑(R5): 같은 행의 토글·필드편집을 1회 읽기 + 1회 쓰기로(신원칸∪대상칸 사각형).
-  const perRow = new Map();
-  for (const op of plan.ops) {
-    if ((op.type !== 'toggle' && op.type !== 'edit') || !op.editId) continue;
-    if (_WB_BLOCKED.includes(op.guard)) { await markStatus(op.editId, 'blocked'); blocked++; continue; }   // 자가치유 재시도(30분)
-    if (_WB_RISKY.includes(op.guard)) { await markStatus(op.editId, 'held'); held++; continue; }           // 수동 대상(비재시도)
-    const row = rmap.get(String(op.participantId));
-    if (!row) { await markStatus(op.editId, 'blocked'); blocked++; continue; }
-    const key = String(row.id);
-    if (!perRow.has(key)) perRow.set(key, { row, wantSubmitted: null, wantPaid: null, toggleIds: [], fields: [] });
-    const g = perRow.get(key);
-    if (op.type === 'toggle') {
-      if (op.field === 'is_submitted') g.wantSubmitted = !!op.valueBool; else g.wantPaid = !!op.valueBool;
-      g.toggleIds.push(op.editId);
-    } else g.fields.push(op);
-  }
-  if (!perRow.size) return { tabName, written, held, blocked, deferred };
-
-  const BUSY = parseInt(process.env.TRACK_B_WRITEBACK_BUSY || '20', 10);
-  const MAX_ROWS = parseInt(process.env.TRACK_B_WRITEBACK_MAX_ROWS || '40', 10);   // R8: 첫 활성화 폭주 상한
-  invalidateSheetMeta(sheetId);   // 런당 1회(행당 재무효화는 그리드 메타 재조회 낭비 — R5)
-  let processed = 0;
-
-  for (const g of perRow.values()) {
-    const { row } = g;
-    const pend = g.toggleIds.length + g.fields.length;
-    const markAll = async (st) => { for (const id of g.toggleIds) await markStatus(id, st); for (const f of g.fields) await markStatus(f.editId, st); };
-    if (processed >= MAX_ROWS) { remaining += pend; continue; }                              // 다음 주기 재픽업(무마킹)
-    if (getThrottleStatus().requestsInLastMinute > BUSY) { deferred += pend; continue; }     // 저우선 양보(무마킹·멱등)
-    if (!row.phone8 || !row.recipient_name) { await markAll('blocked'); blocked += pend; continue; }
-    const idCols = [phoneCol, recipCol].filter(c => c >= 0);
-    if (!idCols.length) { await markAll('blocked'); blocked += pend; continue; }             // 신원 비교불가 = fail-closed
-    processed++;
-    const tCols = [];
-    if (g.toggleIds.length) {
-      const c1 = row.submit_col ? headers.indexOf(row.submit_col) : -1;
-      const c2 = row.submit_col2 ? headers.indexOf(row.submit_col2) : -1;
-      if (c1 >= 0) tCols.push(c1);
-      if (c2 >= 0) tCols.push(c2);
-    }
-    for (const f of g.fields) tCols.push(f.colIndex);
-    const allCols = idCols.concat(tCols);
-    const minC = Math.min(...allCols), maxC = Math.max(...allCols);
-    const rng = `'${tabName}'!${_wbColLetter(minC)}${row.sheet_row}:${_wbColLetter(maxC)}${row.sheet_row}`;
-    let cells;
-    try { const rd = await throttledCall(() => readSheet(sheetId, rng, { gid: row.tab_gid }), 2, { priority: 'low' }); cells = (rd && rd[0]) || null; }
-    catch (_) { deferred += pend; continue; }
-    if (!cells || !_wbIdentityOk({ cells, minC, phoneCol, recipCol, phone8: row.phone8, recipient: row.recipient_name })) {
-      await markAll('blocked'); blocked += pend; continue;   // 행이동/재사용/그리드밖 → 재투영 후 자가치유
-    }
-    const writeData = [];
-    let toggleStatus = null, toggleSig = null;
-    if (g.toggleIds.length) {
-      const { writeData: wd, conflict } = _buildToggleWrite({ tabName, headers, submitCol: row.submit_col, submitCol2: row.submit_col2,
-        wantSubmitted: g.wantSubmitted, wantPaid: g.wantPaid, cells, minC, sheetRow: row.sheet_row });
-      writeData.push(...wd);
-      toggleStatus = conflict ? 'held' : 'written';   // 수렴마킹: 이미 원하는 상태(no-op)도 written(R1 재편집 수렴)
-      toggleSig = `s=${g.wantSubmitted == null ? '-' : (g.wantSubmitted ? 'O' : '')}|p=${g.wantPaid == null ? '-' : (g.wantPaid ? 'O' : '')}`;
-    }
-    const fieldMarks = [];
-    for (const f of g.fields) {
-      const cur = String(cells[f.colIndex - minC] == null ? '' : cells[f.colIndex - minC]).trim();
-      const want = String(f.newValue == null ? '' : f.newValue).trim();
-      if (cur === want) { fieldMarks.push([f.editId, 'written', `f=${f.field}`]); continue; }   // 수렴(no-op)·멱등·핑퐁0
-      if (cur !== '') { fieldMarks.push([f.editId, 'held', null]); continue; }                   // blank-only(사람셀·un-write 보호)
-      writeData.push({ range: `'${tabName}'!${_wbColLetter(f.colIndex)}${row.sheet_row}`, values: [[want]] });   // want!=='' 보장(cur===''≠want)
-      fieldMarks.push([f.editId, 'written', `f=${f.field}`]);
-    }
-    if (writeData.length) {
-      try { await throttledCall(() => batchUpdateSheet(sheetId, writeData, 'RAW', { gid: row.tab_gid }), 2, { priority: 'low' }); }
-      catch (_) { deferred += pend; continue; }   // 실패=무마킹 defer(blank-only 재시도 멱등, 부분성공은 다음 런 no-op 수렴)
-    }
-    if (toggleStatus) {
-      for (const id of g.toggleIds) await markStatus(id, toggleStatus, toggleSig);
-      if (toggleStatus === 'held') held += g.toggleIds.length; else written += g.toggleIds.length;
-    }
-    for (const [id, st, sg] of fieldMarks) { await markStatus(id, st, sg); if (st === 'held') held++; else written++; }
-  }
-  const out = { tabName, written, held, blocked, deferred };
-  if (remaining) out.remaining = remaining;
-  return out;
-}
-
-// cutover 탭 1개의 미반영 상태 토글을 시트에 반영(base tier). 큐 없이 cron/수동이 직접 호출(멱등·재시도 안전).
-async function executeWriteback({ sheetId, tabName } = {}) {
-  if (process.env.TRACK_B_WRITEBACK !== '1') return { skipped: true, reason: 'gate_off' };
-  if (!sheetId || !tabName) return { skipped: true, reason: 'missing_args' };
-  if (await getSourceOfTruth({ sheetId, tabName }) !== 'db') return { skipped: true, reason: 'not_cutover' };
-
-  /* ★★ 무시트 탭은 **밀어넣을 시트가 없다**(탈 구글시트 W3).
-     그대로 엔진에 넣으면 행마다 `readSheet` 가 404 로 떨어져 `deferred` 만 쌓이고
-     **영원히 수렴하지 않는다**(조용한 무한 연기 — 화면엔 "반영 대기"로만 보인다).
-     무시트에서 그 자리를 대신하는 것은 **작업표**이므로, 상태 토글은 작업표 칸에 기록한다
-     (`sheetlessStatus.markStatusCell` = 리뷰 제출·입금 완료와 **같은 단일 경로**).
-     ★ 토글 외 필드 편집은 `held`(수동 대상)로 남긴다 — 어느 칸에 쓸지는 사람이 정한다. */
-  let sheetless = false;
-  try { sheetless = await require('../utils/sheetlessScope').isSheetless(getPool(), sheetId, tabName); }
-  catch (_) { sheetless = false; }   // 판정 실패 = 모른다 → 종전 엔진(시트 경로)
-  if (sheetless) return _writebackSheetless({ sheetId, tabName });
-
-  return _writebackEngine({ sheetId, tabName, tier: 'base' });
-}
-
-/**
- * 무시트 탭의 상태 토글 반영 — 시트 대신 작업표 칸에 기록한다.
- * ★ 판정·기록 사본 0: `sheetlessStatus.markStatusCell` 한 경로만 쓴다.
- * ★ 해제(false)는 지원하지 않는다 — blank-only 규율상 시트 경로도 값을 지우지 못하고,
- *   무시트에서만 지우기를 열면 두 경로의 의미가 갈린다(`held` 로 남겨 사람이 처리).
- */
-async function _writebackSheetless({ sheetId, tabName }) {
-  const db = getPool();
-  const markStatus = async (id, st) => {
-    try {
-      await db.query(
-        `UPDATE participant_edits SET writeback_status=$2, writeback_at=NOW() WHERE id=$1`, [id, st]);
-    } catch (_) { /* 표시 실패는 다음 주기 재픽업 */ }
-  };
-  const { rows } = await db.query(
-    `SELECT pe.id, pe.field, pe.value_bool, cp.seq AS row_index
-       FROM participant_edits pe
-       LEFT JOIN campaign_participants cp
-              ON cp.sheet_id = pe.sheet_id AND cp.tab_name = pe.tab_name
-             AND cp.deleted_at IS NULL
-             AND ( (pe.anchor_type = 'order'    AND cp.order_submission_id::text = pe.anchor_value)
-                OR (pe.anchor_type = 'manual'   AND cp.id::text                  = pe.anchor_value)
-                OR (pe.anchor_type = 'identity' AND cp.identity_key              = pe.anchor_value) )
-      WHERE pe.sheet_id=$1 AND pe.tab_name=$2 AND pe.reverted_at IS NULL
-        AND pe.field IN ('is_submitted','is_paid')
-        AND (pe.writeback_status IS NULL
-             OR (pe.writeback_status='blocked' AND (pe.writeback_at IS NULL OR pe.writeback_at < NOW() - INTERVAL '30 minutes')))
-      LIMIT 200`, [sheetId, tabName]);
-
-  /* ★ identity 앵커는 한 편집이 여러 행에 걸릴 수 있다(동명이인). 상류 게이트가 모호한 identity 를
-     거르지만 여기서도 fail-closed — **어느 줄인지 모르면 쓰지 않는다**(엉뚱한 줄에 입금 표시가 남는다). */
-  const seen = new Map();
-  for (const r of rows) {
-    const cur = seen.get(r.id);
-    if (!cur) seen.set(r.id, { ...r, _n: 1 });
-    else { cur._n++; if (String(cur.row_index) !== String(r.row_index)) cur.row_index = null; }
-  }
-
-  let written = 0, held = 0, blocked = 0;
-  const st = require('./sheetlessStatus.service');
-  for (const e of seen.values()) {
-    if (e.value_bool !== true) { await markStatus(e.id, 'held'); held++; continue; }   // 해제는 사람이
-    if (!e.row_index) { await markStatus(e.id, 'blocked'); blocked++; continue; }      // 행 앵커 없음 = 자가치유 재시도
-    let r = null;
-    try {
-      r = await st.markStatusCell({
-        sheetId, tabName, rowIndex: e.row_index,
-        kind: e.field === 'is_submitted' ? 'submit' : 'paid', by: 'writeback',
-      });
-    } catch (_) { r = null; }
-    if (r && r.handled && r.ok) { await markStatus(e.id, 'written'); written++; }
-    else { await markStatus(e.id, 'blocked'); blocked++; }
-  }
-  return { tabName, sheetless: true, written, held, blocked, deferred: 0 };
-}
-
-// cron/수동 진입점: cutover(source_of_truth='db') 탭 중 미반영 토글이 있는 탭만 순회(050 부분인덱스).
-//   락(trackb_writeback)은 호출측(cron/route)에서 감싼다 — 멀티인스턴스 이중 스윕 직렬화.
-async function writebackSweep({ limit = 100 } = {}) {
-  if (process.env.TRACK_B_WRITEBACK !== '1') return { skipped: true, reason: 'gate_off' };
-  const db = getPool();
-  const { rows: tabs } = await db.query(
-    `SELECT DISTINCT pe.sheet_id AS "sheetId", pe.tab_name AS "tabName"
-       FROM participant_edits pe JOIN tab_configs tc ON tc.sheet_id=pe.sheet_id AND tc.tab_name=pe.tab_name
-      WHERE pe.reverted_at IS NULL AND pe.field IN ('is_submitted','is_paid')
-        AND (pe.writeback_status IS NULL
-             OR (pe.writeback_status='blocked' AND (pe.writeback_at IS NULL OR pe.writeback_at < NOW() - INTERVAL '30 minutes')))
-        AND tc.source_of_truth='db'
-      LIMIT $1`, [limit]);
-  let done = 0, written = 0, held = 0, blocked = 0, errors = 0;
-  for (const t of tabs) {
-    try {
-      const r = await executeWriteback({ sheetId: t.sheetId, tabName: t.tabName });
-      done++; written += r.written || 0; held += r.held || 0; blocked += r.blocked || 0;
-    }
-    catch (e) { errors++; logger.warn(`[trackB] writeback ${t.tabName} 실패: ${e.message}`); }
-  }
-  return { candidateTabs: tabs.length, done, written, held, blocked, errors };
-}
-
-// 관측: 토글 3필드(기존 계약 불변) + 필드편집 하위객체 + staleWritten(되돌려진 written — 시트에 stale 'O' 잔존 신호).
-async function writebackStatus() {
-  const { rows } = await getPool().query(
-    `SELECT COUNT(*) FILTER (WHERE reverted_at IS NULL AND field IN ('is_submitted','is_paid') AND writeback_status='held')::int AS held,
-            COUNT(*) FILTER (WHERE reverted_at IS NULL AND field IN ('is_submitted','is_paid') AND writeback_status='blocked')::int AS blocked,
-            COUNT(*) FILTER (WHERE reverted_at IS NULL AND field IN ('is_submitted','is_paid') AND writeback_status='written')::int AS written,
-            COUNT(*) FILTER (WHERE reverted_at IS NULL AND field NOT IN ('is_submitted','is_paid','_hidden') AND writeback_status='written')::int AS "feWritten",
-            COUNT(*) FILTER (WHERE reverted_at IS NULL AND field NOT IN ('is_submitted','is_paid','_hidden') AND writeback_status='held')::int AS "feHeld",
-            COUNT(*) FILTER (WHERE reverted_at IS NULL AND field NOT IN ('is_submitted','is_paid','_hidden') AND writeback_status='blocked')::int AS "feBlocked",
-            COUNT(*) FILTER (WHERE reverted_at IS NOT NULL AND writeback_status='written')::int AS "staleWritten"
-       FROM participant_edits`);
-  const r = rows[0] || {};
-  return {
-    held: r.held || 0, blocked: r.blocked || 0, written: r.written || 0,
-    fieldEdits: { written: r.feWritten || 0, held: r.feHeld || 0, blocked: r.feBlocked || 0 },
-    staleWritten: r.staleWritten || 0,
-  };
-}
-
-// 시뮬레이션(시트 무접촉): 전체 플랜(scope='all') + tier 라벨(base=토글cron/full=수동적용/manual=시뮬만/blocked).
-async function simulateWriteback({ sheetId, tabName } = {}) {
-  if (!sheetId || !tabName) throw new Error('simulateWriteback: sheetId, tabName 필수');
-  const db = getPool();
-  const sot = await getSourceOfTruth({ sheetId, tabName });
-  const { ops, headers } = await _computeWritebackPlan(db, sheetId, tabName, { scope: 'all' });
-  const byType = {}; const byTier = {};
-  for (const o of ops) { byType[o.type] = (byType[o.type] || 0) + 1; byTier[o.tier] = (byTier[o.tier] || 0) + 1; }
-  const summary = {
-    total: ops.length,
-    ok: ops.filter(o => o.guard === 'ok').length,
-    risky: ops.filter(o => _WB_RISKY.includes(o.guard)).length,
-    blocked: ops.filter(o => _WB_BLOCKED.includes(o.guard)).length,
-    byType, byTier,
-  };
-  return { tabName, cutover: sot === 'db', triggerOn: process.env.TRACK_B_WRITEBACK_FULL === '1',
-    mode: 'simulate', noMeta: !headers.length, ops, summary };
-}
-
-// 실제 적용(full tier) — 기본 완전 inert. TRACK_B_WRITEBACK_FULL=1 + cutover 이중게이트(수동·크론 미연결).
-//   base 와 동일 엔진(단일 경로) — 안전군 필드편집까지, 위험군(소유권키/주문매핑칸/manual)은 held/시뮬만.
-async function applyWritebackFull({ sheetId, tabName } = {}) {
-  if (process.env.TRACK_B_WRITEBACK_FULL !== '1') return { skipped: true, reason: 'trigger_off' };   // ★ 시뮬레이션만
-  if (!sheetId || !tabName) return { skipped: true, reason: 'missing_args' };
-  if (await getSourceOfTruth({ sheetId, tabName }) !== 'db') return { skipped: true, reason: 'not_cutover' };
-  const r = await _writebackEngine({ sheetId, tabName, tier: 'full' });
-  return r.skipped ? r : { applied: true, ...r };
-}
+// (P2/P2-2 write-back 엔진은 2026-09-28 제거 — 결정 186 5번. 본섭 TRACK_B_WRITEBACK 미설정 · 전환 탭 0.)
 
 // ── 작업목록 즐겨찾기(로그인 계정별 개인화·영속) — Track B 리뷰웹시스템[3버전] 사이드바 ──
 //   서버 원본(계정 귀속) → 개인화 + 기기 무관 유지. 계정당 1행 upsert(키 배열). 순수 개인 데이터·격리.
@@ -5688,6 +5225,13 @@ const _FIN_KEY = (sheetId, tabName) => `${sheetId}\t${tabName}`;
  *  ★ **gid 폴백**: 운영 중 탭 리네임이 실재하므로(sync-tab-names·fix-swap) 이름만으로 매칭하면 마감이
  *    조용히 풀린다. 레포 규율 = "gid 우선 재매칭". 빈 gid 는 키를 만들지 않는다(전부 매칭되는 사고 방지). */
 const _FIN_GKEY = (sheetId, tabGid) => `${sheetId}\tgid:${tabGid}`;
+/** 그 탭이 마감됐는가 — finishedTabsMap 의 map 을 받아 **이름 → gid 폴백**으로 판정한다(키 규칙 단일 출처). */
+function isTabFinishedIn(map, sheetId, tabName, tabGid) {
+  if (!map) return false;
+  if (map[_FIN_KEY(sheetId, tabName)]) return true;
+  const g = String(tabGid == null ? '' : tabGid).trim();
+  return !!(g && map[_FIN_GKEY(sheetId, g)]);
+}
 async function finishedTabsMap() {
   try {
     const { rows } = await getPool().query(
@@ -5709,8 +5253,16 @@ async function finishedTabsMap() {
 }
 
 /** 마감/복귀. finish=true 는 **검수 확인(inspected)** 없이는 거부한다(사용자 확정 ㉠ — 서버가 최종 방어).
- *  멱등: 이미 마감된 탭 재마감·마감 아닌 탭 복귀 모두 no-op 성공. 활성 1건은 부분 유니크가 보장. */
-async function setTabFinished({ sheetId, tabName, tabGid = null, finish = true, inspected = false, by = '' } = {}) {
+ *  멱등: 이미 마감된 탭 재마감·마감 아닌 탭 복귀 모두 no-op 성공. 활성 1건은 부분 유니크가 보장.
+ *
+ *  ★★ `auto:true` = **자동 마감 경로 전용**(2026-09-21 사용자 확정 "확인 없이 자동 마감"):
+ *    검수 확인 게이트를 통과시키되 **`inspect_confirmed_at` 은 NULL 로 남긴다** — 사람이 확인하지
+ *    않았는데 확인 시각을 박으면 그 칸이 거짓을 말한다(책임추적 원장이라 더 나쁘다).
+ *  ★★★ **`auto` 를 요청 본문에서 받지 말 것(완화 금지)** — 라우트가 body 로 받는 순간 확인창을
+ *    우회한 요청이 그대로 통과해 게이트가 무의미해진다. 세우는 곳은 **서버 코드 한 곳**
+ *    (autoFinishEligibleTabs)뿐이고 회귀가드가 라우트에 그 키가 없음을 고정한다
+ *    (`req._trustedAdminView` 와 같은 규율). */
+async function setTabFinished({ sheetId, tabName, tabGid = null, finish = true, inspected = false, by = '', auto = false } = {}) {
   const s = String(sheetId || '').trim(), t = String(tabName || '').trim();
   if (!s || !t) return { ok: false, error: 'sheetId, tabName 필수' };
   const who = String(by || '').slice(0, 100);
@@ -5718,13 +5270,14 @@ async function setTabFinished({ sheetId, tabName, tabGid = null, finish = true, 
   try {
     if (finish) {
       // ★ 프론트 체크만 믿지 않는다 — 확인창을 우회한 요청은 여기서 막힌다(필수열람 게이트와 같은 규율).
-      if (!inspected) return { ok: false, error: '리뷰폴더 마감자료 검수 확인이 필요합니다.', code: 'inspect_required' };
+      //   ★ 자동 마감(auto)만 이 게이트를 지나간다 — 그 경로는 사람이 확인할 창구 자체가 없다.
+      if (!inspected && auto !== true) return { ok: false, error: '리뷰폴더 마감자료 검수 확인이 필요합니다.', code: 'inspect_required' };
       const { rows } = await db.query(
         `INSERT INTO trackb_tab_finished (sheet_id, tab_name, tab_gid, finished_by, inspect_confirmed_at)
-         VALUES ($1,$2,$3,$4,NOW())
+         VALUES ($1,$2,$3,$4, CASE WHEN $5::bool THEN NULL ELSE NOW() END)
          ON CONFLICT (sheet_id, tab_name) WHERE deleted_at IS NULL DO NOTHING
          RETURNING id, finished_at AS "finishedAt"`,
-        [s, t, tabGid == null ? null : String(tabGid), who]);
+        [s, t, tabGid == null ? null : String(tabGid), who, auto === true]);
       logger.info(`[trackB] 작업 마감: ${s}/${t} by ${who}${rows.length ? '' : ' (이미 마감 — no-op)'}`);
       return { ok: true, finished: true, created: rows.length > 0, finishedAt: rows[0] ? rows[0].finishedAt : null };
     }
@@ -5744,6 +5297,98 @@ async function setTabFinished({ sheetId, tabName, tabGid = null, finish = true, 
     }
     throw err;
   }
+}
+
+// ══ 작업 자동 마감 — "인원·제출·입금이 모두 채워지면 보관함으로" (2026-09-21 사용자 확정) ══════
+//   발단: 홈 작업목록에서 `✓ 마감 후보` 배지가 뜬 뒤에도 사람이 [🏁 마감]을 눌러야만 보관함으로
+//     갔다. 조건이 이미 숫자로 확정된 상태라 그 클릭이 순수한 잡일이었다.
+//
+//   ★★ **판정 사본 0** — 대상은 `finishCandidate(stats)` 그대로이고 재료도 홈·업체관리와 **같은
+//     `tabStatsMap`** 이다. 여기서 조건을 다시 세우면 "배지는 떴는데 안 넘어간다"(또는 그 반대)가
+//     생긴다. 이 함수가 하는 일은 **판정이 아니라 실행**뿐이다.
+//
+//   ★★ **되돌린 작업은 다시 마감하지 않는다(사용자 확정)** — 사람이 [↩ 진행중으로 복귀]를 누른 것은
+//     "아직 아니다"라는 판단이다. 그 탭에 복귀 이력(`deleted_at IS NOT NULL`)이 한 줄이라도 있으면
+//     자동 대상에서 **영구히** 뺀다. 이게 없으면 되돌려도 다음 주기에 또 마감돼 **되돌릴 방법이
+//     사라진다**(막다른 길). 마감이 정말 필요하면 담당자가 직접 [🏁 마감]을 누른다.
+//
+//   ★★ **모르면 마감하지 않는다(fail-closed 3종)** — 통계·마감목록·탭메타 중 하나라도 조회에
+//     실패하면 **한 건도 건드리지 않고** 사유를 돌려준다. 마감은 되돌릴 수 있지만 되돌리는 순간
+//     그 작업이 자동 경로에서 영구 제외되므로(위 규율), 잘못된 마감의 값이 싸지 않다.
+//   ★ 통계는 **force 로 다시 읽는다** — 30초 캐시의 낡은 값으로 마감하지 않는다.
+//
+//   ★ 쓰기 표면 = `setTabFinished` 를 통한 `trackb_tab_finished` 하나(시트·리뷰어 화면·주문·정산 무접촉).
+//   ★ 마감자는 `자동 마감` 으로 남긴다 — 보관함의 "마감일 · 마감자" 칸과 작업 로그가 **그대로** 그 값을
+//     보여주므로 화면 변경 없이 "누가 넘겼는지"가 드러난다(조용한 이동 금지).
+//   ★ 건별 독립 — 한 건이 실패해도 나머지는 계속한다(실패는 `failed` 로 보고).
+const AUTO_FINISH_BY = '자동 마감';
+const AUTO_FINISH_CAP = Math.max(1, Number(process.env.TAB_AUTO_FINISH_CAP) || 200);
+
+/** 자동 마감 대상(= 마감 후보 ∧ 미마감 ∧ 복귀 이력 없음)을 골라 마감한다.
+ *  @param {boolean} dryRun true 면 **쓰기 0건** — 대상 목록만 돌려준다(미리보기·진단).
+ *  @returns {{ok:boolean, code?:string, dryRun:boolean, scanned:number, candidates:Array,
+ *             finished:number, failed:Array, skippedReopened:number, capped:boolean}} */
+async function autoFinishEligibleTabs({ dryRun = false, cap = AUTO_FINISH_CAP, by = AUTO_FINISH_BY } = {}) {
+  const limit = Math.max(1, Number(cap) || AUTO_FINISH_CAP);
+  const out = { ok: true, dryRun: !!dryRun, scanned: 0, candidates: [], finished: 0, failed: [], skippedReopened: 0, capped: false };
+
+  // ① 통계 — ★ force: 낡은 캐시로 마감하지 않는다.
+  const st = await tabStatsMap({ force: true });
+  if (!st.ok) return { ...out, ok: false, code: 'stats_unavailable', error: '인원·제출·입금 수치를 불러오지 못해 자동 마감을 건너뜁니다.' };
+
+  // ② 이미 마감된 탭(재마감은 no-op 이지만, 모르는 채로 돌면 매 주기 무의미한 쓰기가 나간다).
+  const fin = await finishedTabsMap();
+  if (!fin.ok) return { ...out, ok: false, code: 'finished_unavailable', error: '마감 목록을 불러오지 못해 자동 마감을 건너뜁니다.' };
+
+  // ③ 탭 메타(gid) + 복귀 이력 — 한 쿼리. ★ gid 는 리네임 대비로 마감 행에 함께 박는다(088 규율).
+  let metaRows;
+  try {
+    const { rows } = await getPool().query(
+      `SELECT tc.sheet_id AS "sheetId", tc.tab_name AS "tabName", tc.tab_gid AS "tabGid",
+              EXISTS (SELECT 1 FROM trackb_tab_finished f
+                       WHERE f.sheet_id = tc.sheet_id AND f.tab_name = tc.tab_name
+                         AND f.deleted_at IS NOT NULL) AS "everReopened"
+         FROM tab_configs tc`);
+    metaRows = rows;
+  } catch (err) {
+    logger.warn(`[trackB] 자동 마감 중단(탭 메타 조회 실패 — 모르면 마감하지 않는다): ${err.message}`);
+    return { ...out, ok: false, code: 'meta_unavailable', error: '작업 목록을 불러오지 못해 자동 마감을 건너뜁니다.' };
+  }
+
+  // ④ 대상 선별 — 판정은 finishCandidate 하나(사본 금지).
+  for (const r of metaRows) {
+    const key = _FIN_KEY(r.sheetId, r.tabName);
+    const gid = String(r.tabGid == null ? '' : r.tabGid).trim();
+    if (fin.map[key] || (gid && fin.map[_FIN_GKEY(r.sheetId, gid)])) continue;   // 이미 마감
+    if (!finishCandidate(st.map[key])) continue;                                 // ★ 판정 단일 출처
+    out.scanned += 1;
+    if (r.everReopened) { out.skippedReopened += 1; continue; }                   // ★ 사람이 되돌린 작업
+    const s = st.map[key] || {};
+    out.candidates.push({ sheetId: r.sheetId, tabName: r.tabName, tabGid: gid,
+      displayName: s.displayName || s.campaignName || r.tabName,
+      total: s.total, submitted: s.submitted, paid: s.paid });
+  }
+  if (out.candidates.length > limit) { out.candidates = out.candidates.slice(0, limit); out.capped = true; }
+  if (dryRun) return out;   // ★ 미리보기는 쓰기 0건
+
+  // ⑤ 실행 — 건별 독립(한 건 실패가 나머지를 죽이지 않는다).
+  for (const c of out.candidates) {
+    try {
+      const r = await setTabFinished({ sheetId: c.sheetId, tabName: c.tabName, tabGid: c.tabGid || null,
+        finish: true, auto: true, by });
+      if (r && r.ok) out.finished += 1;
+      else out.failed.push({ sheetId: c.sheetId, tabName: c.tabName, error: (r && r.error) || '마감 실패' });
+    } catch (err) {
+      out.failed.push({ sheetId: c.sheetId, tabName: c.tabName, error: err.message });
+    }
+  }
+  if (out.finished || out.failed.length) {
+    logger.info(`[trackB] 자동 마감: ${out.finished}건 보관함 이동`
+      + (out.failed.length ? ` · 실패 ${out.failed.length}건` : '')
+      + (out.skippedReopened ? ` · 복귀 이력으로 제외 ${out.skippedReopened}건` : '')
+      + (out.capped ? ` · 상한(${limit}) 초과분은 다음 주기` : ''));
+  }
+  return out;
 }
 
 /** 작업목록 표의 재료(담당자·캠페인명·인원/제출/입금) 맵 — 홈 작업 목록 전용(`?stats=1`).
@@ -6015,6 +5660,10 @@ function _condAdvertiserLens(cd, { brandSession = false } = {}) {
     dailyLimit: cd.dailyLimit, dailyLimitSource: cd.dailyLimitSource,
     orderDailyCount: cd.orderDailyCount,
     payAmount: cd.payAmount, options: Array.isArray(cd.options) ? cd.options : [],
+    /* ★ 공고 1건당 금액도 업체 화면에 나간다 — 업체는 이미 결제금액을 보고 있어 **새로 새는
+       정보가 없고**, 안 실으면 "내부는 공고 금액인데 업체는 옛 작업오더 금액"으로 갈린다.
+       ★ 공고 **상품 원문**은 싣지 않는다(관리자가 손으로 적을 수 있는 자유 텍스트) — 숫자만. */
+    campaignPayAmount: cd.campaignPayAmount,
     channel: cd.channel || null,
     inflowType: cd.inflowType || null,
     /* 담당 2인 — ★ **실명(`adminRaw`)은 폐기**하고 여기서 fail-closed 를 완결한다:
@@ -6125,7 +5774,7 @@ async function tabTodayProgress(db, { sheetId, tabName } = {}) {
   }
 }
 
-// ══ M2: 열린 작업 줄(개인별) + 오늘 완료(전사 공통) — migration 089 ═══════════════════════
+// ══ M2: 열린 작업 줄(개인별) — migration 089 (같은 구역의 "오늘 완료"는 2026-09-30 코드 다이어트로 제거, 표는 보존) ═══════════════════════
 //   PRD: frontend/docs/prd-workboard-worktabs.html §1(두 상태 비교). 마감(088)과 **다른 것**이다.
 
 /** 열린 작업 줄 — 계정당 1행, **순서 있는 배열**(드래그로 정한 탭 배치가 곧 이 순서다).
@@ -6165,7 +5814,7 @@ async function setWorkdeskWorktabs(ownerKey, tabs) {
        ON CONFLICT (owner_key) DO UPDATE SET tabs=EXCLUDED.tabs, updated_at=NOW()`,
       [k, JSON.stringify(arr)]);
   } catch (err) {
-    // ★ 마감·오늘 완료와 같은 규율 — 그냥 throw 하면 프론트의 catch 가 삼켜 **아무 신호 없이** 저장이
+    // ★ 마감과 같은 규율 — 그냥 throw 하면 프론트의 catch 가 삼켜 **아무 신호 없이** 저장이
     //   안 되고, 사용자는 다음 부팅에 줄이 사라진 것을 보고서야 안다(원인 추적 불가).
     if (err && err.code === '42P01') {
       logger.error(`[trackB] trackb_workdesk_worktabs 테이블 없음(migration 089 미적용): ${err.message}`);
@@ -6176,53 +5825,8 @@ async function setWorkdeskWorktabs(ownerKey, tabs) {
   return { ok: true, count: arr.length, cap: WORKTAB_CAP, dropped: clean.length - arr.length };
 }
 
-/** 오늘(KST) 완료된 탭 → `{ ok, map }`. 키는 `sheetId\ttabName`.
- *  ★★ 날짜 비교만으로 판정하므로 **자정 리셋 크론이 없다** — 날짜가 바뀌면 어제 행이 저절로 빠진다.
- *  ★ KST 파생은 `campaignState.kstTodayStr` 재사용(사본 금지 — 날짜 규칙이 두 벌이 되면 갈린다). */
-async function dailyDoneMap() {
-  const today = require('./campaignState.service').kstTodayStr();
-  try {
-    const { rows } = await getPool().query(
-      `SELECT sheet_id AS "sheetId", tab_name AS "tabName", done_by AS "doneBy"
-         FROM trackb_tab_daily_done WHERE done_date = $1::date`, [today]);
-    const map = {};
-    for (const r of rows) map[_FIN_KEY(r.sheetId, r.tabName)] = { doneBy: r.doneBy || '' };
-    return { ok: true, map, date: today };
-  } catch (err) {
-    logger.warn(`[trackB] dailyDoneMap 실패(오늘 완료 표시 없이 계속 — 호출부가 고지한다): ${err.message}`);
-    return { ok: false, map: {}, date: today };
-  }
-}
-
-/** 오늘 완료 토글(전사 공통). 확인창 없는 가벼운 동작이라 검수 게이트 없음(마감과 다르다). */
-async function setTabDailyDone({ sheetId, tabName, done = true, by = '' } = {}) {
-  const s = String(sheetId || '').trim(), t = String(tabName || '').trim();
-  if (!s || !t) return { ok: false, error: 'sheetId, tabName 필수' };
-  const who = String(by || '').slice(0, 100);
-  const today = require('./campaignState.service').kstTodayStr();
-  try {
-    if (done) {
-      const { rows } = await getPool().query(
-        `INSERT INTO trackb_tab_daily_done (sheet_id, tab_name, done_date, done_by)
-         VALUES ($1,$2,$3::date,$4)
-         ON CONFLICT (sheet_id, tab_name, done_date) DO NOTHING RETURNING id`, [s, t, today, who]);
-      return { ok: true, done: true, created: rows.length > 0, date: today };
-    }
-    // 해제는 **오늘 행만** 지운다 — 어제 이력을 지우면 "언제 처리했나"가 사라진다.
-    const { rowCount } = await getPool().query(
-      `DELETE FROM trackb_tab_daily_done WHERE sheet_id=$1 AND tab_name=$2 AND done_date=$3::date`, [s, t, today]);
-    return { ok: true, done: false, cleared: rowCount, date: today };
-  } catch (err) {
-    if (err && err.code === '42P01') {
-      logger.error(`[trackB] trackb_tab_daily_done 테이블 없음(migration 089 미적용): ${err.message}`);
-      return { ok: false, code: 'not_ready', error: '오늘 완료 기능이 아직 준비되지 않았습니다(migration 089 미적용) — 관리자에게 알려주세요.' };
-    }
-    throw err;
-  }
-}
-
 // ══ /M2 ═══════════════════════════════════════════════════════════════════════════
-//   ★ 이 줄 위까지가 M2(열린 작업 줄·오늘 완료) 구역이다. 회귀가드가 "M2 의 쓰기 표면은 신규 2테이블뿐"
+//   ★ 이 줄 위까지가 M2(열린 작업 줄) 구역이다. 회귀가드가 "M2 의 쓰기 표면은 신규 테이블뿐"
 //     을 이 마커로 잘라 검사하므로, 아래에 다른 기능을 붙여도 그 검사가 오염되지 않는다.
 //     (2026-08-18 에 아래 함수가 들어오면서 마커가 없어 가드가 빨갛게 남아 있었다.)
 
@@ -6479,10 +6083,9 @@ module.exports = {
   setWorkdeskAdvertiserOrder,
   getWorkdeskWorktabs,
   setWorkdeskWorktabs,
-  dailyDoneMap,
-  setTabDailyDone,
-  finishedTabsMap,
+  finishedTabsMap, isTabFinishedIn,
   setTabFinished,
+  autoFinishEligibleTabs,
   tabStatsMap,
   tabCampaignsMap,
   tabTodayProgress,
@@ -6500,7 +6103,6 @@ module.exports = {
   setOwnership,
   removeOwnership,
   transferOwnership,
-  expandSheetOwnerships,
   listOwnership,
   listAdvertisersWithOwnership,
   ownedTabsForAdvertiser,
@@ -6511,8 +6113,7 @@ module.exports = {
   ownedSheetIds,
   getAdvertiserLink, ensureAdvertiserLink, generateAdvertiserLink, setAdvertiserLinkActive,
   setAdvertiserLinkLoginRequired,
-  isRegisteredIntranetAdvertiser,
-  staffOwnsAdvertiser,
+  isRegisteredIntranetAdvertiser, findSameAdvertiser, intranetAdvertiserIndex,
   intranetAdvertisers, intranetStaffUsers, setAdvertiserInadPm,
   intranetSalesSearch,
   advertiserForTab,
@@ -6526,7 +6127,7 @@ module.exports = {
   invoiceDocForTab,
   brandsForAdvertiser, createBrand, updateBrand, assignBrandTabs, brandTabAllowed,
   tabBrandManagersMap, tabBrandManagersFor, setTabBrandManagers, _normBrandManagers,
-  settlementSummaryForAdvertiser, advertiserWorkSummary, reviewImagesForTab, saveTabMemo,
+  settlementSummaryForAdvertiser, advertiserWorkSummary, reviewImagesForTab,
   __advertiserColumnsForTest: _advertiserColumns,   // 광고주 컬럼 화이트리스트(회귀가드 전용 노출)
   __advertiserHeaderCandidatesForTest: _advertiserHeaderCandidates,
   __advertiserColumnValueForTest: _advertiserColumnValue,
@@ -6539,9 +6140,8 @@ module.exports = {
   // 회귀가드 전용 — 인트라넷 사용자(AE) 60초 캐시를 비운다(시나리오마다 다른 스텁 응답을 태우기 위해).
   __resetIntraUserCacheForTest() { _intraUserCache = { at: 0, rows: null }; },
   settlementVisibleFor,
-  generateCloseout,
   latestCloseout,
-  closeoutCsv,
+  pendingParticipants,
   listThread,
   addThread,
   setRequestStatus,
@@ -6551,8 +6151,6 @@ module.exports = {
   openRequestCounts,
   listWorkOrders,
   linkWorkOrder,
-  unlinkWorkOrder,
-  prepareRosterFromWorkOrder,
   scopedTabsForAdvertiser,
   scopedTabsForStaff,
   scopedActiveTabs,
@@ -6560,19 +6158,6 @@ module.exports = {
   canAccessTab,
   overview,
   projectionCoverage,
-  getSourceOfTruth,
-  setSourceOfTruth,
-  cutoverAll,
-  executeWriteback,
-  writebackSweep,
-  writebackStatus,
-  _buildToggleWrite,
-  simulateWriteback,
-  applyWritebackFull,
-  _wbOrderMappedMask,
-  _wbIdentityOk,
-  _computeWritebackPlan,
-  _writebackEngine,
   workdeskTab,
   setWorkdeskTitle,
   normalizeDisplayName,   // 작업명 정리 — 회귀가드가 실제로 돌려 본다
@@ -6589,8 +6174,6 @@ module.exports = {
   deleteWorkdeskOrderRow,
   assignUnslottedOrderToOpenSlot,
   hideWorkdeskRow,
-  addWorkdeskRow,
-  listEdits,
   listCustomColumns,
   addCustomColumn,
   deleteCustomColumn,

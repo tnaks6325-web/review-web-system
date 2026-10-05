@@ -54,7 +54,8 @@ ok('submit: holdCtx 소비 3곳(신원폴백·옵션권위·확정문맥)', (sub
 ok('submit: owner 폴백 JOIN(소유권 3중검증 + owner_phone8 NOT NULL)', /JOIN reviewers r ON r\.phone8 = ca\.owner_phone8[\s\S]*?ca\.hold_token = \$4 AND ca\.hold_token <> '' AND ca\.owner_phone8 IS NOT NULL/.test(submit));
 ok('submit: 확정 문맥에 expectedOptKey 동봉', /campaignHold: holdCtx \? \{ \.\.\.holdCtx, expectedOptKey: effectiveOptKey[,}]/.test(submit));
 ok('submit: 확정 문맥에 orderIdentity 동봉(D3 명의 드리프트 경고 입력)', /orderIdentity: \{ phone \}/.test(submit));
-ok('submit: SUB 자동보강은 게이트 기준 행(_rvRows[0].phone8)에 기록', /_rvRows\[0\]\.phone8 \|\| _idPhone8/.test(submit));
+// ★ 조각 2-2(결정 177): 게이트 기준 행을 phone8 대신 그 행의 id 로 지목한다(phone8 비유니크 — 검사 의미 강화).
+ok('submit: SUB 자동보강은 게이트 기준 행(_rv.id)에 기록', /SELECT r\.id, r\.name/.test(submit) && /mutateSubAccounts\(_rv\.id,/.test(submit));
 // ── hold 드리프트 백스톱 ──
 ok('hold: confirm RETURNING id, option_key', /RETURNING id, option_key/.test(hold));
 ok('hold: 드리프트 warn은 홀드 옵션 비NULL일 때만(오탐 차단)', /_dbOpt && expectedOptKey !== undefined/.test(hold));

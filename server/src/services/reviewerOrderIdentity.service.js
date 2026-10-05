@@ -1,6 +1,8 @@
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const pool = require('../db/pool');
+const cards = require('./reviewerIdentityCards.service');
+const { syncCardsAfterWrite } = cards;
 const { addressSame, addressHeuristic, normAddress } = require('./identity.service');
 const { logger } = require('../utils/logger');
 
@@ -111,6 +113,7 @@ function verifyExtractionProof(token, extracted) {
   return p;
 }
 
+const _cardMissWarned = new Set();
 function legacyIdentityKey(name, phone, index) {
   return `sub:${stableHash(`${cleanName(name)}|${phone8(phone)}|${Number(index)}`).slice(0, 24)}`;
 }
@@ -137,6 +140,28 @@ async function loadOwnerProfile(ownerReviewerId, db = pool) {
     if (!err || !['42P01', '42703'].includes(err.code)) throw err;
   }
   const byMember = new Map(coded.map((row) => [Number(row.member_no), row]));
+  // ★ 조각 3-1(결정 178): 타계정의 이름표를 "칸 순번"이 아니라 **카드 번호**로 — 칸을 지우거나 순서를 바꿔도
+  //   과거 구매 기록과의 짝이 끊기지 않는다. 짝이 확실한 칸만 카드 번호, 나머지는 옛 이름표(막지 않는다).
+  let cardByIndex = new Map();
+  let mergedByIndex = new Map();
+  if (cards.cardKeysEnabled()) {
+    try {
+      const active = await cards.loadActiveCards(db, owner.id);
+      if (active) {
+        const mapped = cards.mapSubsToCards(owner, active);
+        cardByIndex = mapped.byIndex;
+        mergedByIndex = mapped.merged || new Map();
+        const lagging = mapped.misses.filter((m) => m.reason === 'no_card' || m.reason === 'ambiguous_card');
+        if (lagging.length && !_cardMissWarned.has(String(owner.id)) && _cardMissWarned.size < 500) {
+          _cardMissWarned.add(String(owner.id));
+          logger.warn(`[identity-cards] 카드 짝 못 찾음 → 옛 이름표 사용 owner=${owner.id} ${lagging.map((m) => `${m.index}:${m.reason}`).join(',')}`);
+        }
+      }
+    } catch (err) {
+      logger.warn(`[identity-cards] 카드 조회 실패 → 옛 이름표 사용: ${err.code || ''} ${err.message}`);
+      cardByIndex = new Map();
+    }
+  }
   const identities = [];
   const selfCode = byMember.get(0);
   identities.push({
@@ -156,8 +181,14 @@ async function loadOwnerProfile(ownerReviewerId, db = pool) {
   owner.sub_accounts.forEach((sub, index) => {
     const memberNo = index + 1;
     const code = byMember.get(memberNo);
+    const legacyKey = legacyIdentityKey(sub.name, sub.phone, index);
+    const cardId = cardByIndex.get(index) || null;
     identities.push({
-      identityKey: code ? `identity:${code.id}` : legacyIdentityKey(sub.name, sub.phone, index),
+      identityKey: code ? `identity:${code.id}` : (cardId ? `card:${cardId}` : legacyKey),
+      legacyIdentityKey: legacyKey,
+      cardId,
+      // 조각 4: 담당자가 다른 명의로 합친 칸 — 목록에서 빼지 않는다(내정보가 순서로 짝짓는다). 참여 명의 고르기만 숨긴다.
+      merged: mergedByIndex.has(index),
       participantIdentityId: code && code.id || null,
       memberNo,
       subIndex: index,
@@ -179,6 +210,7 @@ function publicIdentity(identity, { includeBank = false } = {}) {
   const result = {
     identityKey: identity.identityKey,
     type: identity.type,
+    merged: !!identity.merged,
     name: identity.name,
     phone: identity.phone,
     address: identity.address,
@@ -211,6 +243,10 @@ async function loadOrderInfoSuggestions(context, db = pool) {
   const selectedIdentityHash = context?.selected?.identityKey
     ? stableHash(context.selected.identityKey)
     : '';
+  // ★ 조각 3-1: 카드 번호로 옮기기 전의 과거 주문은 옛 이름표로 묶여 있다 — 둘 다 본다.
+  const identityHashes = [selectedIdentityHash];
+  const legacy = context?.selected?.legacyIdentityKey;
+  if (selectedIdentityHash && legacy && legacy !== context.selected.identityKey) identityHashes.push(stableHash(legacy));
   const participantIdentityId = UUID_RE.test(String(context?.selected?.participantIdentityId || ''))
     ? context.selected.participantIdentityId
     : null;
@@ -221,7 +257,7 @@ async function loadOrderInfoSuggestions(context, db = pool) {
        SELECT os.id
          FROM order_submissions os
         WHERE os.owner_reviewer_id = $1::uuid
-          AND os.participant_identity_key_hash = $2
+          AND os.participant_identity_key_hash = ANY($2::text[])
        UNION
        SELECT os.id
          FROM campaign_applications ca
@@ -260,7 +296,7 @@ async function loadOrderInfoSuggestions(context, db = pool) {
        FROM grouped
       ORDER BY use_count DESC, last_used_at DESC
       LIMIT 3`,
-    [context.owner.id, selectedIdentityHash, participantIdentityId]
+    [context.owner.id, identityHashes, participantIdentityId]
   );
   return rows.map((row) => ({
     id: orderInfoSuggestionId(row),
@@ -289,8 +325,15 @@ async function saveShoppingId(ownerReviewerId, identityKey, shoppingId) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // ★ 조각 2-2(결정 177): 읽기 전에 소유자 행을 잠근다 — 내정보 저장과 동시에 오면 한쪽이 사라졌다.
+    if (UUID_RE.test(String(ownerReviewerId || ''))) {
+      await client.query('SELECT 1 FROM reviewers WHERE id = $1 FOR NO KEY UPDATE', [ownerReviewerId]);
+    }
     const { owner, identities } = await loadOwnerProfile(ownerReviewerId, client);
-    const matches = identities.filter((item) => item.identityKey === String(identityKey || ''));
+    // 새로고침 전 화면은 옛 이름표를 보낼 수 있다 — 옛 이름표로도 찾는다(조각 3-1).
+    const wanted = String(identityKey || '');
+    let matches = identities.filter((item) => item.identityKey === wanted);
+    if (!matches.length && wanted) matches = identities.filter((item) => item.legacyIdentityKey === wanted);
     if (matches.length !== 1) throw new ReviewerOrderIdentityError('IDENTITY_NOT_FOUND', '저장할 명의를 찾을 수 없습니다.', 404);
     const selected = matches[0];
     if (selected.type === 'self') {
@@ -305,6 +348,7 @@ async function saveShoppingId(ownerReviewerId, identityKey, shoppingId) {
       subs[selected.subIndex] = { ...subs[selected.subIndex], shoppingId: value };
       await client.query('UPDATE reviewers SET sub_accounts = $2::jsonb WHERE id = $1', [owner.id, JSON.stringify(subs)]);
     }
+    await syncCardsAfterWrite(client, owner.id, { source: 'shopping_id' });
     if (selected.participantIdentityId) {
       await client.query(
         'UPDATE reviewer_identities SET shopping_id = $2, updated_at = NOW() WHERE id = $1 AND owner_reviewer_id = $3',
@@ -313,6 +357,72 @@ async function saveShoppingId(ownerReviewerId, identityKey, shoppingId) {
     }
     await client.query('COMMIT');
     return { ok: true, identityKey: selected.identityKey, shoppingId: value };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    throw err;
+  } finally { client.release(); }
+}
+
+function cleanAddress(value) {
+  return String(value == null ? '' : value).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * 참여 직전 빈 주소 한 번 받기 (조각 5 · 결정 기록 181).
+ * ★ 빈 칸일 때만 채운다 — 이미 있는 주소는 절대 덮지 않는다(이 경로는 "고치기"가 아니라 "처음 넣기").
+ *   이미 있으면 저장하지 않고 filled:false 로 지금 주소를 돌려준다(화면은 그대로 참여를 이어간다).
+ * ★ saveShoppingId 와 같은 규율: 읽기 전에 소유자 행을 잠그고, 저장 뒤 같은 트랜잭션에서 카드를 맞춘다.
+ */
+async function saveIdentityAddress(ownerReviewerId, identityKey, address) {
+  const value = cleanAddress(address);
+  if (value.length < 5 || value.length > 300) {
+    throw new ReviewerOrderIdentityError('ADDRESS_INVALID', '배송 주소를 확인해주세요 (5~300자).', 400);
+  }
+  // 쇼핑몰이 가린(*) 주소는 명의 주소로 굳히지 않는다 — 가린 부분을 고친 뒤에만 저장.
+  if (/[*＊●○◯◉•]/.test(value)) {
+    throw new ReviewerOrderIdentityError('ADDRESS_MASKED', '가려진 부분(*)을 고친 뒤 저장해주세요.', 400);
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    if (UUID_RE.test(String(ownerReviewerId || ''))) {
+      await client.query('SELECT 1 FROM reviewers WHERE id = $1 FOR NO KEY UPDATE', [ownerReviewerId]);
+    }
+    const { owner, identities } = await loadOwnerProfile(ownerReviewerId, client);
+    const wanted = String(identityKey || '');
+    let matches = identities.filter((item) => item.identityKey === wanted);
+    if (!matches.length && wanted) matches = identities.filter((item) => item.legacyIdentityKey === wanted);
+    if (matches.length !== 1) throw new ReviewerOrderIdentityError('IDENTITY_NOT_FOUND', '저장할 명의를 찾을 수 없습니다.', 404);
+    const selected = matches[0];
+    let filled = false;
+    let current = '';
+    if (selected.type === 'self') {
+      current = String(owner.address || '').trim();
+      if (!current) {
+        // ★ 빈 칸 판단을 JS trim() 과 맞춘다 — BTRIM 은 공백만 지워 탭·줄바꿈만 든 주소를 "있음"으로 봐
+        //   0행 갱신인데 filled:true 로 답했다(Codex P2). 실제로 바뀐 행이 있을 때만 filled.
+        const upd = await client.query(
+          "UPDATE reviewers SET address = $2 WHERE id = $1 AND COALESCE(address, '') ~ '^[[:space:]]*$'",
+          [owner.id, value]
+        );
+        filled = upd.rowCount === 1;
+      }
+    } else {
+      const subs = asSubs(owner.sub_accounts);
+      const sub = subs[selected.subIndex];
+      if (!sub || cleanName(sub.name) !== cleanName(selected.name) || phone8(sub.phone) !== phone8(selected.phone)) {
+        throw new ReviewerOrderIdentityError('IDENTITY_CHANGED', '타계정 정보가 변경되었습니다. 화면을 새로고침해주세요.', 409);
+      }
+      current = String(sub.address || '').trim();
+      if (!current) {
+        subs[selected.subIndex] = { ...sub, address: value };
+        await client.query('UPDATE reviewers SET sub_accounts = $2::jsonb WHERE id = $1', [owner.id, JSON.stringify(subs)]);
+        filled = true;
+      }
+    }
+    if (filled) await syncCardsAfterWrite(client, owner.id, { source: 'address_fill' });
+    await client.query('COMMIT');
+    return { ok: true, identityKey: selected.identityKey, address: filled ? value : current, filled };
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     throw err;
@@ -419,11 +529,24 @@ function maskedNameOcrNearMiss(raw, stored) {
   return visible >= 2 && matches >= 1 && mismatches === 1;
 }
 
-// 가림 없이 노출된 이름은 OCR 오탐 폭을 미리 제한하지 않고 재확인 후보로 둔다.
-// 실제 승인은 아래 수동확인에서 현재 참여 명의 직접 선택과 완전한 최종 입력을 요구한다.
+// 가림 없이 노출된 이름은 "한 글자" 오인식(바뀜·빠짐·더해짐 1개)까지만 재확인 후보로 둔다.
+// ★ 사용자 확정 2026-09-24(결정 1가): 이름이 통째로 다르면(김수만→박철수) 막는다. 종전에는 차이 폭을
+//   제한하지 않아, 남의 주문 캡처도 저장된 내 이름을 고르면 통과됐다(보고서 원인 3).
+function nameEditDistance(a, b) {
+  const x = [...a], y = [...b];
+  let prev = Array.from({ length: y.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= x.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= y.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[y.length];
+}
 function plainNameOcrCorrectionCandidate(raw, stored) {
   const a = cleanName(raw), b = cleanName(stored);
-  return !!a && !!b && !MASK_RE.test(a) && a !== b;
+  return !!a && !!b && !MASK_RE.test(a) && a !== b && nameEditDistance(a, b) <= 1;
 }
 
 function canReviewMaskedNameOcrCorrection(selectedScore, selected, competingIdentity) {
@@ -442,6 +565,11 @@ function canReviewMaskedNameOcrCorrection(selectedScore, selected, competingIden
 function canReviewPlainNameOcrCorrection(selectedScore, selected, competingIdentity) {
   if (!selectedScore || !selected) return false;
   const rawName = selectedScore.fields.recipient || selectedScore.fields.orderer;
+  // ★ 캡처 이름이 다른 저장 명의의 이름과 **정확히 맞으면** 오인식이 아니라 그 명의의 주문이다.
+  //   빼면 한 글자 차이 이름(김민수/김민우)의 다른 명의 캡처가 확인 단계로 풀린다(PR #1485 리뷰 P1).
+  //   ★ 경쟁 명의가 있다는 것만으로 막지 말 것 — 같은 번호·주소를 쓰는 타계정 명의는 이름이 달라도
+  //   두 칸이 맞아 경쟁자로 잡히므로, 본인 이름 한 글자 오인식의 정상 제출까지 막는다(PR #1486 리뷰 P1).
+  if (competingIdentity && nameVerdict(rawName, competingIdentity.name).verdict === 'match') return false;
   return selectedScore.parts.name.verdict === 'mismatch'
     // 전체 이름 OCR 불일치는 주소나 다른 저장 명의와의 유사도만으로 즉시 막지 않는다.
     // 자동 승인은 금지하고, 아래 수동확인에서 현재 참여 명의 선택을 다시 검증한다.
@@ -521,6 +649,13 @@ async function evaluateSelectedIdentity(extracted, selected, allIdentities, opti
   for (const identity of allIdentities) {
     if (identity.identityKey === selected.identityKey) continue;
     const other = await scoreIdentity(extracted, identity, { useGemini: false });
+    // 같은 소유자 안에서 이름이 같은 명의 = 같은 사람의 중복 등록(실사고 2026-09-24: 번호만 다른
+    // 두 칸 중 주소 빈 칸으로 참여 → 주소 있는 칸이 "다른 명의"로 잡혀 차단). 차단하지 않고
+    // 사유만 남긴다 — 참여 명의 확인은 선택 명의 자체의 판정(REVIEW/수동확인)이 맡는다.
+    if (cleanName(identity.name) && cleanName(identity.name) === cleanName(selected.name)) {
+      if (other.matches >= 2 && !reasonCodes.includes('duplicate_name_identity')) reasonCodes.push('duplicate_name_identity');
+      continue;
+    }
     if (other.matches >= 2 && other.score >= selectedScore.score) {
       competingIdentity = identity;
       // 선택 명의 자체도 독립 필드 2개 이상 명확히 맞으면 중복 저장정보 때문에 생긴
@@ -727,6 +862,18 @@ async function manualConfirm(body, reviewer) {
     const extract = verifyExtractionProof(body.extractToken, body.extracted || {});
     if (!extract.extractOk) throw new ReviewerOrderIdentityError('MANUAL_MODE_INVALID', '캡처 추출에 실패한 건은 AI 분석 장애 확인 절차를 이용해주세요.', 409);
     imageHash = extract.imageHash; extractedHash = extract.fieldsHash; reasonCodes = ['identity_match_unavailable'];
+    // ★ 캡처 자체도 결정적으로 재검사한다. 아래 공통 검사는 사용자가 보낸 입력칸(formFields)만 보므로,
+    //   입력칸을 내 정보로 채우면 남의 주문 캡처도 통과했다(2026-09-24 실측 우회). 네트워크 오류로도
+    //   이 경로에 들어오므로 악용이 아니어도 캡처 확인이 통째로 빠질 수 있었다.
+    const captureCheck = await evaluateSelectedIdentity(body.extracted || {}, context.selected, context.identities, {
+      useGemini: false, allowPlainNameCorrection: true,
+    });
+    if (captureCheck.status === 'MISMATCH') {
+      await audit({ context, status: 'MISMATCH', approvalMode: mode,
+        reasonCodes: ['identity_match_unavailable', ...captureCheck.reasonCodes], imageHash, extractedHash });
+      throw new ReviewerOrderIdentityError('IDENTITY_MISMATCH',
+        '캡처의 주문자가 참여한 명의와 다릅니다. 참여한 명의로 구매한 주문의 캡처를 올려주세요.', 409);
+    }
   } else if (mode === 'no_capture') {
     reasonCodes = ['no_capture_exception'];
   } else {
@@ -781,6 +928,69 @@ async function verifyApprovalForSubmission(body, reviewer) {
   return { context, approval };
 }
 
+/**
+ * 조각 3-1(결정 178): 과거 구매 기록의 명의 이름표를 "칸 순번" 해시 → 카드 번호 해시로 옮긴다.
+ * ★ 옛 해시가 **지금 목록의 같은 칸**(이름·번호·순번 모두 같음)과 맞을 때만 옮긴다 — 그래야 같은 사람이다.
+ *   이미 순서가 바뀌어 맞는 칸이 없는 기록은 건드리지 않고 건수로 보고한다(추측 금지).
+ * ★ dryRun 기본 · 소유자마다 한 트랜잭션 · 여러 번 돌려도 결과 같음.
+ */
+async function rebindLegacySubHashes({ db = pool, dryRun = true } = {}) {
+  const selfHash = stableHash('self');
+  const { rows } = await db.query(
+    `SELECT owner_reviewer_id AS owner, participant_identity_key_hash AS hash, COUNT(*)::int AS n
+       FROM order_submissions
+      WHERE owner_reviewer_id IS NOT NULL AND NULLIF(participant_identity_key_hash, '') IS NOT NULL
+        AND participant_identity_key_hash <> $1
+      GROUP BY 1, 2`, [selfHash]);
+  const byOwner = new Map();
+  for (const r of rows) {
+    const k = String(r.owner);
+    if (!byOwner.has(k)) byOwner.set(k, []);
+    byOwner.get(k).push(r);
+  }
+  const out = { ok: true, dryRun: !!dryRun, owners: byOwner.size, orders: 0, movable: 0, moved: 0,
+    alreadyCard: 0, noMatch: 0, noCard: 0, failed: [] };
+  for (const [ownerId, list] of byOwner) {
+    let identities;
+    try { ({ identities } = await loadOwnerProfile(ownerId, db)); }
+    catch (err) { out.failed.push({ ownerId, code: err.code || 'load_failed' }); continue; }
+    const cardHashes = new Set(identities.filter((i) => i.cardId).map((i) => stableHash(i.identityKey)));
+    const plan = new Map(); // legacyHash -> cardHash
+    for (const i of identities) {
+      if (i.type !== 'sub' || !i.legacyIdentityKey) continue;
+      const lh = stableHash(i.legacyIdentityKey);
+      plan.set(lh, i.cardId ? stableHash(i.identityKey) : null);
+    }
+    const moves = [];
+    for (const r of list) {
+      out.orders += r.n;
+      if (cardHashes.has(r.hash)) { out.alreadyCard += r.n; continue; }
+      if (!plan.has(r.hash)) { out.noMatch += r.n; continue; }
+      const to = plan.get(r.hash);
+      if (!to) { out.noCard += r.n; continue; }
+      out.movable += r.n;
+      moves.push({ from: r.hash, to });
+    }
+    if (dryRun || !moves.length) continue;
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+      for (const m of moves) {
+        const u = await client.query(
+          `UPDATE order_submissions SET participant_identity_key_hash = $3
+            WHERE owner_reviewer_id = $1 AND participant_identity_key_hash = $2`, [ownerId, m.from, m.to]);
+        out.moved += u.rowCount;
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+      out.failed.push({ ownerId, code: err.code || 'update_failed' });
+    } finally { client.release(); }
+  }
+  logger.info(`[identity-cards] rebind dryRun=${out.dryRun} orders=${out.orders} movable=${out.movable} moved=${out.moved} already=${out.alreadyCard} noMatch=${out.noMatch} noCard=${out.noCard} failed=${out.failed.length}`);
+  return out;
+}
+
 module.exports = {
   ReviewerOrderIdentityError,
   isEnabled,
@@ -793,6 +1003,7 @@ module.exports = {
   loadOwnerProfile,
   getSecureProfile,
   saveShoppingId,
+  saveIdentityAddress,
   resolveApplicationIdentity,
   maskedCompatible,
   maskedNameOcrNearMiss,
@@ -805,4 +1016,6 @@ module.exports = {
   matchCapture,
   manualConfirm,
   verifyApprovalForSubmission,
+  rebindLegacySubHashes,
+  _test: { legacyIdentityKey, stableHash },
 };

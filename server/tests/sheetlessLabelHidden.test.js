@@ -82,22 +82,10 @@ console.log('\n[B] 작업보드 머리 3종');
   /* ⚠ 검사 범위는 **작업보드 상단 `sotBadge` 한 곳**이다 — 파일 전체로 보면 관측 뷰의
      `원본` 열(`o.sourceOfTruth==='db'?'Track B':'시트'`)과 전환 토스트가 걸린다.
      그 둘은 다른 화면·다른 목적이라 이번 정리 대상이 아니다. */
-  ok('★ 작업보드 상단 `원본: 시트` 는 어떤 경우에도 안 그린다', (() => {
-    const i = WD.indexOf('const sotBadge=');
-    /* 끝 앵커 = **전환 버튼 대입문**. 그 버튼 문구에 「시트로 되돌리기」가 들어 있어
-       배지 블록에 포함시키면 이 검사가 제 뜻을 잃는다. 대입 이름은 두 가지가 있다:
-       지역변수(`const flipBtn=`) / [⋯] 메뉴 재렌더용 STATE 보관(`STATE._flipBtnHtml=`).
-       **둘 중 먼저 나오는 것**을 끝으로 삼는다 — 이름이 바뀌어도 보는 범위는 같다. */
-    const cands = ['const flipBtn=', 'STATE._flipBtnHtml=']
-      .map(k => WD.indexOf(k, i)).filter(x => x > i);
-    const j = cands.length ? Math.min(...cands) : -1;
-    const blk = WD.slice(i, j);
-    return i > 0 && j > i && !/시트/.test(blk);
-  })());
-  ok('★ `원본: Track B`(cutover 상태)는 그대로 남는다',
-    /const sotBadge=\(sot==='db'\)/.test(WD) && />원본: Track B</.test(WD));
-  ok('★ 전환 버튼도 그대로 — 상태 표기를 없앤 게 아니라 시트 표기만 뺐다',
-    /flipSoT\('\$\{sot==='db'\?'sheet':'db'\}'\)/.test(WD));
+  /* 「원본: Track B」 배지와 [Track B로 전환] 버튼도 전환 기능과 함께 제거됐다 (결정 186 5번 — 2026-09-28 원본 전환·write-back 제거).
+     본섭 전 탭이 source_of_truth='sheet' 였다. 작업보드 상단에는 원본 표기가 **어떤 것도** 없다. */
+  ok('★ 작업보드 상단에 원본 배지(시트·Track B)가 없다', !/const sotBadge=|>원본: (시트|Track B)</.test(WD));
+  ok('★ 전환 버튼도 없다', !/flipSoT\(|STATE\._flipBtnHtml/.test(WD));
 
   /* ★★ 그리드 모드 배지는 **둘 다 제거**했다(사용자 확정 2026-08-23) —
        `표 · 전체 열`(무시트) 은 전 작업이 무시트라 상시 표기였고, `시트 그리드 · 열람`(시트 기반)

@@ -408,7 +408,7 @@ async function loadRecruitTabOptions() {
     });
 
     _rfTabsErr = null;
-    _populateCampaignSelect();
+    _rfRepopulateLinkedSelects();
   } catch(e) {
     console.warn("[recruit] 탭 옵션 로드 실패:", e);
     _rfTabsErr = (e && e.message) || "불러오기 실패";
@@ -438,9 +438,25 @@ async function loadRecruitTabOptions() {
     });
     // DOM 폴백이 실제로 건졌으면 실패로 취급하지 않는다(관리자 대시보드 경로)
     if (_recruitTabList.length) _rfTabsErr = null;
-    _populateCampaignSelect();
+    _rfRepopulateLinkedSelects();
   }
   try { _rfRefreshLinkedTabNote(); } catch (_) {}   // 목록 상태가 바뀌면 안내도 다시 판단
+}
+
+/* ★★ 목록 갱신이 모달에 이미 골라 둔 연결 작업을 지우지 않게 한다 (2026-09-23 실사고).
+   [⚙ 작업 시작 설정]은 모집공고 화면으로 옮기면서(renderCampaignsView — 목록을 await 없이 다시 받음)
+   동시에 모달을 연다. 모달이 연결 작업을 고른 **뒤에** 그 요청이 끝나면 드롭다운이 통째로
+   비워져, 저장이 "연결 안 함"(unlinked)으로 나가고 작업보드 표시명은
+   「연결된 작업보드에서만 설정할 수 있습니다」로 거부됐다(표시명을 안 적었으면 공고가 연결 없이 저장된다).
+   ⇒ 다시 채우는 순간의 선택을 기억했다가 목록에 있으면 되살린다. 목록에서 사라졌으면 빈 값이 맞다. */
+function _rfRepopulateLinkedSelects() {
+  const cur = document.getElementById("rf_linked_tab")?.value || "";
+  _populateCampaignSelect();
+  if (cur) {
+    const i = cur.indexOf("||");
+    if (i > 0) _restoreLinkedTab(cur.slice(0, i), cur.slice(i + 2));
+  }
+  _syncWorkboardDisplayNameInput();
 }
 
 /* 1단계: 캠페인(시트) 선택 드롭다운 구성 */
@@ -471,6 +487,7 @@ function _populateCampaignSelect(currentSheetId) {
     tabSel.innerHTML = `<option value="">② 탭 선택 (캠페인 먼저 선택)</option>`;
     tabSel.disabled = true;
   }
+  _syncWorkboardDisplayNameInput();   // 연결이 비면 표시명 칸도 함께 잠근다(잠금 상태가 남아 저장 거부되던 것 방지)
 }
 
 /* 캠페인 선택 시 → 해당 시트의 탭 목록 표시 */
@@ -1148,58 +1165,8 @@ function onParticipationToggle(on) {
 }
 
 /** 👥 타계정 참여(063) 토글 — 하위 설정(하루한도·타계정 제한시간) 표시. 끄면 기본 [불가] 그대로. */
-/* ═══════════════════════════════════════════════════════════════════════
-   🧪 테스트 공고 만들기 — 대량구매(타계정 다건 일괄 제출) 검증용 프리셋
-   ─────────────────────────────────────────────────────────────────────
-   기존 발행 모달을 그대로 열고 값만 미리 채운다(신규 엔드포인트·신규 모달 0).
-   저장은 평소와 같은 [저장] 버튼 → 같은 검증·같은 라우트를 탄다.
-
-   ★ 왜 이 값들인가
-     - 상태 active : 참여·제출이 실제로 되어야 테스트가 된다
-       (status 를 draft 로 두면 상태엔진이 closed 로 판정해 참여 자체가 막힌다).
-       ⚠ 모달의 [리뷰어에게 숨김] 토글은 사용자 확정(2026-08-19)으로 제거됐다 —
-         테스트 공고도 모집중이면 리뷰어 목록에 뜬다. 테스트가 끝나면 게시(모집중) 토글을 내린다.
-     - 타계정 허용 + 하루한도 5 : 한 사람이 여러 명의로 같은 날 참여해야 일괄 제출이 켜진다.
-     - 자리 유효시간 30분 : 테스트 도중 만료로 막히지 않게(운영 기본값은 30/15분).
-     - 구매 시간대 비움 = 자율주문(종일 오픈).
-   ★ 연결 탭만 사람이 고른다 — 어느 시트에 테스트 행을 쓸지는 시스템이 정할 수 없다.
-   ═══════════════════════════════════════════════════════════════════════ */
-async function openTestCampaignModal() {
-  await openRecruitModal(null);
-  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
-  const chk = (id, on, after) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.checked = !!on;
-    if (typeof after === "function") { try { after(!!on); } catch (_) { /* noop */ } }
-  };
-
-  set("rf_title", "🧪 [테스트] 대량구매 일괄제출 검증");
-  set("rf_status", "active");            // ★ 참여가 실제로 되어야 테스트가 된다
-  set("rf_review_fee", 1000);
-  set("rf_time_range", "");              // 자율주문(종일 오픈)
-  set("rf_window_start", "");
-  set("rf_window_end", "");
-  set("rf_hold_ttl", 30);                // 테스트 중 만료로 끊기지 않게
-
-  chk("rf_participation", true, onParticipationToggle);   // 참여형이라야 홀드·일괄제출 경로를 탄다
-  chk("rf_multi_account", true, onMultiAccountToggle);    // 타계정 허용 = 일괄 제출의 전제
-  set("rf_multi_daily", 5);              // 하루에 여러 명의로 참여 가능해야 배치가 켜진다
-  set("rf_sub_ttl", 30);
-
-  // 진행상품 표가 정원의 진실원본 — 한 줄 넣어 총모집/일건수를 파생시킨다
-  try {
-    renderOptRows([]);
-    addOptRow({ productName: "테스트 상품", optKey: "", payAmount: 10000, recruitTotal: 100, dailyLimit: 20 });
-    if (typeof _syncPreviewFromOptRows === "function") _syncPreviewFromOptRows();
-  } catch (_) { /* 표가 없는 축약 화면이면 건너뛴다 */ }
-
-  try { renderPartCheck(); } catch (_) { /* noop */ }
-  if (typeof showToast === "function") {
-    showToast("🧪 테스트 공고 값을 채웠어요. 연결 탭만 고른 뒤 저장하세요.", "info");
-  }
-}
-if (typeof window !== "undefined") window.openTestCampaignModal = openTestCampaignModal;
+/* (🧪 테스트 공고 프리셋 openTestCampaignModal 은 2026-09-28 제거 — 결정 186 18번. 8/19 숨김 토글 제거 뒤로
+   이 프리셋 공고는 실제 리뷰어 목록에 떴다. 대량구매 검증은 테스트 서버에서 한다.) */
 
 /* 모집이월 배치 방식 — 공고에 carry_strategy(next|spread|extend)로 저장하고
    서버 상태엔진이 실제 오늘 정원을 계산한다. carry_mode(auto|hold)는 보류 기능 전용이다. */
@@ -2433,6 +2400,9 @@ function _buildOptRowEl(data) {
   const row = document.createElement("div");
   row.className = "rf-opt-row";
   row.dataset.status = status;
+  // ★★ 이름 바꾸기 추적 — 서버에서 불러온 선택지의 원래 이름. 저장 시 prevOptKey 로 보내
+  //   서버가 "새 선택지 + 옛 것 마감" 대신 같은 선택지의 이름만 바꾼다(정원·참여 인원 유지).
+  if (d.savedOptKey) row.dataset.origKey = String(d.savedOptKey);
   row.dataset.reviewTypeMix = JSON.stringify(Array.isArray(d.reviewTypeMix ?? d.review_type_mix) ? (d.reviewTypeMix ?? d.review_type_mix) : []);
   if (status === "closed") row.style.opacity = ".68";
   const lastBtn = status === "closed"
@@ -2581,6 +2551,7 @@ function renderOptRows(options, opts) {
       unitKind,
       optionUrl:   o.optionUrl ?? o.option_url ?? o.url ?? "",
       optKey:      o.optKey ?? o.opt_key ?? "",
+      savedOptKey: o.savedOptKey ?? "",
       payAmount:   o.payAmount ?? o.pay_amount ?? 0,
       recruitTotal: o.recruitTotal ?? o.recruit_total ?? 0,
       dailyLimit:  o.dailyLimit ?? o.daily_limit ?? 0,
@@ -2639,7 +2610,7 @@ function renderOptRowsWithProduct(options, productLines, campaign) {
     //   ★ 상품 단위는 opt_key 가 곧 상품명이므로 마지막 폴백으로 그것까지 본다.
     const saved = o.productName ?? o.product_name;
     const unit = String(o.unitKind ?? o.unit_kind ?? "");
-    const row = { ...o, productName: String(saved || "").trim()
+    const row = { ...o, savedOptKey: key, productName: String(saved || "").trim()
       || (hit && hit.productName)
       || (unit === "product" ? key : "")
       || firstProd || "" };
@@ -2724,6 +2695,7 @@ function readOptRows() {
     const guide = _ugCompose(r, r.dataset.ig);
     out.push({
       optKey,
+      prevOptKey:    String(r.dataset.origKey || ""),
       productName,
       unitKind,
       optionUrl,
@@ -3556,8 +3528,10 @@ async function openRecruitModal(id, prefill, woOrderId) {
             inflowHtml: orderPrefill.wd_inflow_html || orderPrefill.wd_inflow_text || '',
           }, wd);
         }
-        setV("rf_thumbnail", c.thumbnail_url || "");
-        setV("rf_thumb_url", c.thumbnail_url || "");
+        // 공고 저장값이 비었을 때만 작업오더(리뷰오더)의 썸네일을 제안한다 — 저장해야 공고에 반영된다.
+        const _thumbV = c.thumbnail_url || (prefill && prefill.thumbnail_url) || "";
+        setV("rf_thumbnail", _thumbV);
+        setV("rf_thumb_url", _thumbV);
         _syncCampThumbUrlPreview();
         renderOptRowsWithProduct(json.options || [], wd.productLines, c);   // 🧩 옵션표 + 상품명 복원
         renderPartCheck();
@@ -3618,6 +3592,11 @@ async function openRecruitModal(id, prefill, woOrderId) {
         if (pEl && prefill.price)        pEl.value = prefill.price;
       }
       /* ★ 상품확인용 URL이 있으면 자동수집 1회 시도 — 성공 항목만 덮어쓰고, 실패하면 위 기본값 유지 */
+      // ★ 리뷰오더에서 정한 썸네일이 있으면 그대로 싣는다(사람이 고른 값 — 자동수집이 덮지 않는다).
+      if (prefill.thumbnail_url) {
+        ["rf_thumbnail", "rf_thumb_url"].forEach(i => { const el = document.getElementById(i); if (el) el.value = prefill.thumbnail_url; });
+        _syncCampThumbUrlPreview();
+      }
       if (prefill.product_url) setTimeout(() => { try { fetchProductInfo({ auto: true }); } catch (_) {} }, 0);
 
       /* ★ M3: 참여형 자동 프리필 — 작업오더 세부내용 → 발행 폼 스냅샷 (관리자는 확인·수정만) */
@@ -3706,7 +3685,9 @@ async function fetchProductInfo(opts) {
     const pEl = document.getElementById("rf_price");
     if (has) {
       // ★ 리뷰 #10: 자동추출이 빈 값으로 직접 업로드 썸네일을 덮지 않게
-      if (r.thumbnail) {
+      // 자동 1회 시도는 이미 채워진 썸네일(작업오더 지정·직접 업로드)을 덮지 않는다.
+      const _hasThumb = !!(document.getElementById("rf_thumbnail")?.value || "").trim();
+      if (r.thumbnail && !(auto && _hasThumb)) {
         document.getElementById("rf_thumbnail").value = r.thumbnail;
         const _thumbUrl = document.getElementById("rf_thumb_url");
         if (_thumbUrl) _thumbUrl.value = r.thumbnail;
@@ -5397,7 +5378,8 @@ async function saveRecruitPostImpl() {
     source_work_order_id: (!_recruitEditId && _woPrefillOrderId) ? _woPrefillOrderId : undefined,
   };
   const workboardDisplayNameInput = document.getElementById('rf_workboard_display_name');
-  if (workboardDisplayNameInput && !workboardDisplayNameInput.disabled) {
+  // 연결값(tabKey)과 같은 근거로 보낸다 — 신규 공고인데 연결이 비면 서버가 거부하므로 싣지 않는다.
+  if (workboardDisplayNameInput && !workboardDisplayNameInput.disabled && (tabKey || _recruitEditId)) {
     payload.workboard_display_name = workboardDisplayNameInput.value.trim();
   }
 

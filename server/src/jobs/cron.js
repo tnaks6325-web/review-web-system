@@ -4,7 +4,6 @@ const { processQueue, purgeCompleted, retryAllFailed } = require('../services/sy
 const { mirrorAllSheets } = require('../services/rawMirror.service');
 const { getThrottleStatus } = require('../utils/sheetsThrottle');
 // [DEPRECATED — v11.8.0] syncSettingsOnly 제거: DB가 설정 원본이므로 시트→DB 동기화 불필요
-// const { syncSettingsOnly } = require('../services/masterSheet.service');
 const { logger } = require('../utils/logger');
 const { emitIndexBuild, broadcast } = require('../utils/sse');
 const { logAbnormal } = require('../services/errorLog.service');
@@ -276,7 +275,7 @@ function startCronJobs() {
 
   // ── 무시트 작업표 정원 자동 복구 ─────────────────────────────────────────────
   //   날짜별 조절·발주 정원 변경·과거 장애로 "총 500 / 줄 751"처럼 벌어진 경우를
-  //   사람이 [작업표 재구성] 버튼으로 고치지 않아도 자동으로 수렴시킨다.
+  //   사람이 손으로 고치지 않아도 자동으로 수렴시킨다.
   //   빈 초과 슬롯만 후순위부터 soft-delete하고, 같은 실행에서 번호 1..N 및 원장을 재생성한다.
   //   공유 탭·비활성 행은 서비스가 안전하게 건너뛴다. 멀티 인스턴스는 DB 락으로 1회만 실행.
   //   끄기: WORKTABLE_CAP_AUTOFIX=0. 기본 5분, 배포 직후에도 30초 후 한 번 실행한다.
@@ -418,6 +417,54 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
+  // ── 업체 ↔ 인트라넷 광고주 연결 동기화 (2026-09-28 올곧은무역·어니스트캄 — 같은 업체가 둘로 갈린 사고) ──
+  //   인트라넷에서 사업자명을 정정해도 리뷰웹 업체가 따라가게 한다: 원본 ID 로 연결된 업체는 이름·사업자번호를
+  //   맞추고, ID 가 비어 있는 업체는 인트라넷 사업자명이 **정확히 같은** 광고주가 하나일 때만 ID 를 채운다.
+  //   ★ 자동 병합은 하지 않는다(결정 004) — 같은 업체로 보이는 두 업체는 로그로만 알린다(합치기는 사람이).
+  //   ★ 인트라넷 도달 불가면 아무것도 쓰지 않는다. 되돌리기 = Railway `ADVERTISER_INTRANET_SYNC=0`.
+  if (process.env.ADVERTISER_INTRANET_SYNC !== '0') {
+    const asSchedule = process.env.ADVERTISER_INTRANET_SYNC_SCHEDULE || '23 * * * *';
+    let asRunning = false;
+    cron.schedule(asSchedule, async () => {
+      if (asRunning) return;
+      asRunning = true;
+      try {
+        const { applyIntranetSync } = require('../services/advertiserIntranetSync.service');
+        const { withJobLock } = require('../utils/jobLock');
+        const r = await withJobLock('advertiser_intranet_sync', () => applyIntranetSync({ by: 'cron' }));
+        if (r && r.skipped) logger.debug('[CRON-AdvSync] lock busy — 양보');
+        else if (r && r.ok) {
+          const c = r.remaining || {};
+          const needHuman = (c.duplicate || 0) + (c.rename_blocked || 0) + (c.name_taken || 0) + (c.suggest || 0) + (c.ambiguous || 0);
+          if (needHuman) logger.warn(`[CRON-AdvSync] 사람 확인 필요 ${needHuman}건(합치기 대상 ${(c.duplicate || 0) + (c.rename_blocked || 0)}) — 업체관리 인트라넷 연결 점검`);
+        } else if (r && !r.ok) logger.warn(`[CRON-AdvSync] ${r.error}`);
+      } catch (err) {
+        logger.error(`[CRON-AdvSync] error: ${err.message}`);
+      } finally { asRunning = false; }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
+  // ── 명의 카드 거울(조각 2-1 · 결정 기록 176): 10분마다 카드를 리뷰어 정보(sub_accounts)에 맞춘다 ──
+  //   ★ 저장 경로 19곳은 건드리지 않는다 — 달라진 리뷰어만 짧은 트랜잭션으로 맞춘다(FOR NO KEY UPDATE + lock_timeout).
+  //   ★ 아직 아무도 카드를 읽지 않으므로 최대 10분 늦어도 영향 없다. 되돌리기 = Railway `IDENTITY_CARDS_RECONCILE=0`.
+  if (process.env.IDENTITY_CARDS_RECONCILE !== '0') {
+    const icSchedule = process.env.IDENTITY_CARDS_RECONCILE_SCHEDULE || '7-59/10 * * * *';
+    let icRunning = false;
+    cron.schedule(icSchedule, async () => {
+      if (icRunning) return;
+      icRunning = true;
+      try {
+        const { reconcileCards } = require('../services/reviewerIdentityCards.service');
+        const { withJobLock } = require('../utils/jobLock');
+        const r = await withJobLock('identity_cards_reconcile', () => reconcileCards({ dryRun: false, by: 'cron' }));
+        if (r && r.skipped) logger.debug('[CRON-IdentityCards] lock busy — 양보');
+      } catch (err) {
+        // ★ 카드 거울이 크론을 죽이지 않는다(표 미적용 42P01 포함 — 로그만).
+        logger.error(`[CRON-IdentityCards] error: ${err.message}`);
+      } finally { icRunning = false; }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
   // ── Phase 4: campaign_participants를 review_index에서 주기 최신화(DB를 살아있는 원본화): 기본 OFF ──
   //   PARTICIPANTS_AUTO_SYNC=1 에서만. 시트 재읽기 0(DB→DB 복사)·라이브 소비처 없음(shadow) → 무영향.
   //   수동편집(source='manual') 행은 보존. 이미 가져온 탭만 대상(규모 작음).
@@ -441,6 +488,34 @@ function startCronJobs() {
       } catch (err) {
         logger.error(`[CRON-ParticipantsSync] error: ${err.message}`);
       } finally { partSyncRunning = false; }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
+  // ── 작업 자동 마감: 기본 ON · 10분마다 ─────────────────────────────────────────
+  //   "인원·제출·입금이 모두 채워진 작업"을 홈 작업목록에서 **마감 보관함**으로 자동 이동한다
+  //   (2026-09-21 사용자 확정). 대상 판정은 화면의 `✓ 마감 후보` 배지와 **같은 함수**이고,
+  //   사람이 [↩ 진행중으로 복귀]로 되돌린 작업은 다시 마감하지 않는다(서비스 주석 참조).
+  //   ★ 마감은 화면 분류일 뿐이라 시트·리뷰어 화면·주문·정산 무접촉 — 되돌리기는 클릭 한 번.
+  //   ★ 조회가 하나라도 실패하면 **한 건도 건드리지 않는다**(fail-closed — 서비스가 판정).
+  //   되돌리기 = Railway `TAB_AUTO_FINISH=0`.
+  if (process.env.TAB_AUTO_FINISH !== '0') {
+    const afSchedule = process.env.TAB_AUTO_FINISH_SCHEDULE || '*/10 * * * *';
+    let afRunning = false;
+    cron.schedule(afSchedule, async () => {
+      if (afRunning) return;
+      afRunning = true;
+      try {
+        const { autoFinishEligibleTabs } = require('../services/trackB.service');
+        const { withJobLock } = require('../utils/jobLock');
+        // ★ 멀티 인스턴스가 같은 탭을 동시에 마감하지 않게(활성 1건 부분유니크가 최종 방어지만
+        //   무의미한 경합 쓰기를 미리 막는다). 기존 락 이름들과 비충돌.
+        const r = await withJobLock('tab_auto_finish', () => autoFinishEligibleTabs({ dryRun: false, by: '자동 마감' }));
+        if (r && r.skipped) logger.debug('[CRON-AutoFinish] lock busy — 양보');
+        else if (r && r.ok === false) logger.warn(`[CRON-AutoFinish] 건너뜀(${r.code}): ${r.error}`);
+      } catch (err) {
+        // ★ 자동 마감이 크론을 죽이지 않는다.
+        logger.error(`[CRON-AutoFinish] error: ${err.message}`);
+      } finally { afRunning = false; }
     }, { timezone: 'Asia/Seoul' });
   }
 
@@ -480,27 +555,7 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
-  // ── Track B P2 상태 토글 write-back(기본 OFF): cutover 탭(진실원천 플래그='db')의 is_submitted/is_paid
-  //   오버레이 편집만 시트 리뷰제출/입금 상태칸에 반영. Track A 무접촉(스윕이 유일 구동자), 저우선·멱등·blank-only.
-  //   ★ 플래그 판정은 writebackSweep(trackB.service, 격리 ALLOWED) 안에서만 — 이 파일은 플래그를 읽지 않는다. ──
-  if (process.env.TRACK_B_WRITEBACK === '1') {
-    if (process.env.PARTICIPANTS_SHEET_MIRROR === '1')
-      logger.warn('[CRON-TrackB-WB] ⚠️ TRACK_B_WRITEBACK + PARTICIPANTS_SHEET_MIRROR 동시 활성 — 같은 상태칸 이중미러(blank-only라 비파괴). 같은 cutover 탭엔 하나만 권장.');
-    const wbSchedule = process.env.TRACK_B_WRITEBACK_SCHEDULE || '*/5 * * * *';
-    let wbRunning = false;
-    cron.schedule(wbSchedule, async () => {
-      if (wbRunning) return;
-      wbRunning = true;
-      try {
-        const { writebackSweep } = require('../services/trackB.service');
-        const { withJobLock } = require('../utils/jobLock');
-        const r = await withJobLock('trackb_writeback', () => writebackSweep({}));
-        if (r && r.written > 0) logger.info(`[CRON-TrackB-WB] tabs=${r.done} written=${r.written} held=${r.held} errors=${r.errors}`);
-      } catch (err) {
-        logger.error(`[CRON-TrackB-WB] error: ${err.message}`);
-      } finally { wbRunning = false; }
-    }, { timezone: 'Asia/Seoul' });
-  }
+  // (Track B P2 상태 토글 write-back 크론은 2026-09-28 제거 — 결정 186 5번. TRACK_B_WRITEBACK 은 본섭 미설정이었고 전환(source_of_truth='db') 탭 0.)
 
   const schedule = process.env.INDEX_CRON_SCHEDULE || '0 9,15 * * 1-6';
   cron.schedule(schedule, async () => {
@@ -577,36 +632,33 @@ function startCronJobs() {
     }
   }, { timezone: 'Asia/Seoul' });
 
-  // ── 고아 캡처 정리(A종류: 링크 끊김): 기본 ON · 매일 새벽 4시 40분 ─────────
-  //   ★★ 왜 필요한가 — 행 삭제·구매기록 취소(`orderCancellation`)도, 작업 통째 삭제
-  //     (`workTabDelete`)도 **Drive 파일을 건드리지 않는다**. 그래서 지울수록 "폴더엔
-  //     캡처가 있는데 화면엔 리뷰 이미지 미등록"인 고아가 쌓이는데 치우는 자동 경로가
-  //     어디에도 없었다(중복 정리 도구는 같은 SHA-256 지문의 사본만 잡는다).
-  //   ★ 판정 근거는 file_id / review_index_id 뿐 — **위치키(row_index) 금지**
-  //     (번호 정리·재배정으로 수시로 깨져 멀쩡한 캡처를 지운다. 서비스 주석 참조).
-  //   ★ 삭제는 **휴지통만**(30일 복구창) · 유예 ORPHAN_CAPTURE_GRACE_DAYS(기본 7일)
-  //     · 한 회차 상한 ORPHAN_CAPTURE_CLEAN_CAP(기본 200).
-  //   되돌리기 = Railway `ORPHAN_CAPTURE_CLEAN=0`.
-  if (process.env.ORPHAN_CAPTURE_CLEAN !== '0') {
-    const occSchedule = process.env.ORPHAN_CAPTURE_CLEAN_SCHEDULE || '40 4 * * *';
-    let occRunning = false;
-    cron.schedule(occSchedule, async () => {
-      if (occRunning) return;
-      occRunning = true;
+  // ── (고아 캡처 자동 정리 04:40 은 2026-10-02 제거 — 결정 064 후속 · 결정 186 73번)
+  //   도입(08-21) 이래 조회 칸 오류로 한 번도 돌지 않았고, 고쳐서 세어 보니 대상 72장 중 62장이
+  //   **번호가 다시 매겨진 정상 리뷰 사진**(같은 작업에 같은 사람이 다른 번호로 살아 있음 — 그중 11장은
+  //   유일한 리뷰 증빙일 수 있음)이었다. A 판정("붙어 있던 명단 줄이 사라짐")이 번호 재매김을 고아로 읽는다.
+  //   진짜 고아는 10장 남짓이라 자동으로 돌릴 이유가 없다 → 크론 제거. 수동 미리보기는
+  //   POST /api/drive/orphan-capture-cleanup(dryRun 기본) 그대로.
+
+  // ── 작업표 날짜 맞추기(결정 182 · 2026-09-26): 매일 새벽 4시 20분 ──
+  //   날짜별 인원은 규칙(일건수·주말·이월·총량)이 정하고 작업표가 따라간다. 전날 못 채운 몫(이월)과
+  //   종료일 연장은 날이 바뀌며 달라지므로, 조용한 시간에 작업표 빈 줄 날짜를 한 번 맞춘다.
+  //   ★ 0시는 자율주문 공고가 열려 참여가 몰리는 시각이라 피한다. ★ 빈 줄만 옮기고 줄은 만들지 않는다.
+  //   되돌리기 = Railway `CAMPAIGN_WORKTABLE_RELAY_CRON=0`.
+  if (process.env.CAMPAIGN_WORKTABLE_RELAY_CRON !== '0') {
+    const wrSchedule = process.env.CAMPAIGN_WORKTABLE_RELAY_SCHEDULE || '20 4 * * *';
+    let wrRunning = false;
+    cron.schedule(wrSchedule, async () => {
+      if (wrRunning) return;
+      wrRunning = true;
       try {
-        const { trashOrphanCaptures } = require('../services/orphanCaptureCleanup.service');
+        const { relayAllCampaignWorktables } = require('../services/campaignPlan.service');
         const { withJobLock } = require('../utils/jobLock');
-        const r = await withJobLock('orphan_capture_clean',
-          () => trashOrphanCaptures({ dryRun: false, by: 'cron' }));
-        if (r && r.skipped) logger.debug('[CRON-OrphanCapture] lock busy — 양보');
-        else if (r && r.ok && (r.trashed > 0 || r.failed > 0)) {
-          logger.warn(`[CRON-OrphanCapture] 휴지통 ${r.trashed}건 · 실패 ${r.failed}건`
-            + ` · 경합회피 ${r.skippedRecheck || 0}건 (유예 ${r.graceDays}일)`);
-        }
+        const r = await withJobLock('campaign_worktable_relay', () => relayAllCampaignWorktables({ by: 'cron' }));
+        if (r && r.skipped === true && !r.total) logger.debug('[CRON-WorktableRelay] lock busy — 양보');
+        else if (r) logger.info(`[CRON-WorktableRelay] 공고 ${r.total || 0} · 옮김 ${r.moved || 0} · 비움 ${r.cleared || 0} · 실패 ${r.failed || 0}`);
       } catch (err) {
-        // ★ 정리가 크론을 죽이지 않는다.
-        logger.error(`[CRON-OrphanCapture] error: ${err.message}`);
-      } finally { occRunning = false; }
+        logger.error(`[CRON-WorktableRelay] error: ${err.message}`);
+      } finally { wrRunning = false; }
     }, { timezone: 'Asia/Seoul' });
   }
 

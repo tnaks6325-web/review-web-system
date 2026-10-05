@@ -1,5 +1,5 @@
 /**
- * homeCampaignButton.test.js — 홈 작업목록 → [공고] 버튼 + 버튼 열 고정 + 오늘 완료 색표시 회귀가드
+ * homeCampaignButton.test.js — 홈 작업목록 → [공고] 버튼 + 버튼 열 고정 회귀가드
  * 실행: node tests/homeCampaignButton.test.js
  * 시안: frontend/docs/design-home-campaign-popup.html (사용자 확정)
  *
@@ -12,7 +12,7 @@
  *     → `computeCampaignState` 를 실제로 태우는지 고정.
  *  ④ **XSS** — onclick 에 시트/공고에서 온 문자열을 넣으면 따옴표 하나로 탈출된다(레포 실측 사고). 인덱스만.
  *  ⑤ **버튼 열 흔들림** — flex(내용 폭)로 되돌리면 같은 버튼이 줄마다 다른 자리에 온다(사용자 신고).
- *  ⑥ **오늘 완료 라벨 스왑 부활** — '☑ 오늘 완료' ↔ '해제' 로 글자가 바뀌면 폭이 달라져 ⑤ 가 재발한다.
+ *  ⑥ (오늘 완료 라벨 스왑 가드) — 오늘 완료 버튼 자체가 2026-09-30 코드 다이어트로 제거돼 "제거 고정"으로 바꿨다.
  */
 const assert = require('assert');
 const fs = require('fs');
@@ -114,7 +114,6 @@ const isCampSelect = q => /FROM recruit_campaigns/.test(q) && /linked_sheet_id/.
       scopedActiveTabs: async () => [{ sheetId: 'S1', tabName: 'T1', tabGid: '111' }, { sheetId: 'S1', tabName: 'T2', tabGid: '' }],
       finishedTabsMap: async () => ({ ok: true, map: {} }),
       tabStatsMap: async () => ({ ok: true, map: {} }),
-      dailyDoneMap: async () => ({ ok: true, map: {}, date: '2026-08-05' }),
       tabCampaignsMap: async () => ({ ok: true, map: { 'S1\tT1': [{ id: 'c1', title: '공고A', state: 'open', createdAt: 'x' }], 'S9\tT9': [{ id: 'zz', title: '남의 공고' }] } }),
     }, over || {});
     Object.keys(fake).forEach(k => { saved[k] = svc[k]; svc[k] = fake[k]; });
@@ -187,7 +186,7 @@ const isCampSelect = q => /FROM recruit_campaigns/.test(q) && /linked_sheet_id/.
   t('여러 건이면 개수를 표시하고 점은 가장 열린 상태', /공고 2/.test(h) && /wbl-cdot open/.test(h), h);
 
   h = ctx._campBtnHtml(tab([]), 2);
-  t('미발행(편집자) = ＋공고발행 — 띄어쓰기 없이 같은 칸 폭', /＋공고발행/.test(h) && !/＋ 공고 발행/.test(h), h);
+  t('미발행(편집자) = 공고발행 — 띄어쓰기 없이 같은 칸 폭', />공고발행/.test(h) && !/공고 발행/.test(h), h);
   ctx.STATE.campEdit = false;
   h = ctx._campBtnHtml(tab([]), 2);
   t('★ 편집 권한 없으면 발행 버튼을 아예 안 준다(눌러도 아무 일 없는 버튼 금지)', /disabled/.test(h) && !/openTabCampaign/.test(h), h);
@@ -196,14 +195,68 @@ const isCampSelect = q => /FROM recruit_campaigns/.test(q) && /linked_sheet_id/.
   ctx.STATE.campsUnavailable = true;
   h = ctx._campBtnHtml(tab([]), 2);
   t('★ 조회 실패는 "공고 없음"이 아니라 비활성 + 사유(중복 발행 차단)',
-    /disabled/.test(h) && /공고 \?/.test(h) && !/＋공고발행/.test(h), h);
+    /disabled/.test(h) && /공고 \?/.test(h) && !/>공고발행/.test(h), h);
   ctx.STATE.campsUnavailable = false;
+
+  /* ── 모집이 다 찬 작업 = `모집완료` (사용자 확정 2026-09-22) ──────────────────────
+     참여수가 총건수에 도달하면 더 뽑을 것이 없다 → 발행 권유(공고발행)를 거두고, 공고가 있으면
+     "모집 중"과 글자가 같던 `공고` 도 완료로 말한다. 판정은 **참여 칸 파랑과 같은 함수**. */
+  const tabQ = (camps, stats, sheetless) => ({
+    sheetId: 'S1', tabName: "x'),alert(1),String('", tabGid: '1',
+    campaigns: camps, stats, sheetless: sheetless !== false,
+  });
+  const CAMP1 = [{ id: 'c1', title: '공고A', state: 'soft_full', status: 'closed', recruitTotal: 200 }];
+
+  h = ctx._campBtnHtml(tabQ(CAMP1, { total: 200, filled: 200, submitted: 120, paid: 100 }), 5);
+  t('다 차면 모집완료 — 공고가 있으면 눌러서 그 공고를 연다',
+    />모집완료/.test(h) && /openTabCampaign\(5\)/.test(h) && !/disabled/.test(h) && /cmp done/.test(h), h);
+  t('★ onclick 에는 여전히 인덱스만(시트/공고 문자열 미보간 — XSS)', !/alert\(1\)/.test(h), h);
+
+  h = ctx._campBtnHtml(tabQ([], { total: 200, filled: 200 }), 6);
+  t('★ 공고가 없어도 다 찼으면 공고발행 대신 모집완료',
+    />모집완료/.test(h) && !/>공고발행/.test(h), h);
+  t('★★ 발행 길을 막지 않는다 — 흐리게 두되 여전히 눌린다(차수 추가가 정상 흐름)',
+    /cmp done dim/.test(h) && /openTabCampaign\(6\)/.test(h) && !/disabled/.test(h), h);
+  t('★ 왜 끝났는지 툴팁이 말한다(참여 N / 기준 M)', /참여 200명 \/ 200건/.test(h), h);
+
+  ctx.STATE.campEdit = false;
+  h = ctx._campBtnHtml(tabQ([], { total: 200, filled: 200 }), 6);
+  t('권한 없으면 누를 수 없다(서버 게이트와 1:1) — 표기는 그대로 모집완료',
+    /disabled/.test(h) && !/openTabCampaign/.test(h) && />모집완료/.test(h), h);
+  ctx.STATE.campEdit = true;
+
+  /* ★★ 모르는 것을 "완료"라고 말하지 않는다 — 틀린 완료 표기는 담당자가 남은 모집을 놓치게 한다. */
+  h = ctx._campBtnHtml(tabQ([], { total: 200 }), 7);                 // 구버전 백엔드 = 채움 수 미동봉
+  t('★ 채움 수를 모르면 종전 표기 그대로', />공고발행/.test(h) && !/>모집완료/.test(h), h);
+  h = ctx._campBtnHtml(tabQ([], null), 7);                            // 통계 자체가 없다
+  t('★ 통계가 아예 없어도 종전 표기 그대로', />공고발행/.test(h) && !/>모집완료/.test(h), h);
+  h = ctx._campBtnHtml(tabQ(CAMP1, { total: 200, filled: 120 }), 8);
+  t('아직 안 찼으면 종전 [공고] 그대로', /공고</.test(h) && !/>모집완료/.test(h), h);
+
+  /* 총건수를 못 구하면 참여 칸과 **같은 폴백**(작업표 줄 수)으로 접되, 접었다는 사실을 말한다. */
+  h = ctx._campBtnHtml(tabQ([], { total: 50, filled: 50 }), 9);
+  t('★ 총건수를 몰라 줄 수로 접었으면 툴팁이 그 사실을 말한다',
+    />모집완료/.test(h) && /줄 수 기준/.test(h), h);
+
+  h = ctx._campBtnHtml(tabQ(CAMP1, { total: 200, filled: 201 }), 10);
+  t('총건수를 넘겨 들어온 작업도 모집완료로 본다(056: 초과는 감추지 않는다)',
+    />모집완료/.test(h) && /넘겨 들어왔습니다/.test(h), h);
+  h = ctx._campBtnHtml(tabQ(CAMP1, { total: 200, filled: 201 }, false), 10);
+  t('★ 초과 경고는 무시트 작업만 — 시트 기반 탭엔 붙지 않는다(거짓 경고 금지)',
+    !/넘겨 들어왔습니다/.test(h), h);
+
+  /* ★★ 판정 사본 0 — 참여 칸(_finNumCells)과 이 칸이 같은 함수를 본다. 따로 세면 한 줄 안에서
+     "참여는 200/200 파랑인데 옆 칸은 공고발행" 으로 갈린다. */
+  const campBody = grab('function _campBtnHtml(t,i){', '\n/** 작업오더·모집공고 편집 권한');
+  t('★★ 판정은 _finQuotaFill 하나 — 칸에서 다시 세지 않는다',
+    /const q=_finQuotaFill\(t\);/.test(campBody)
+    && !/filled>=/.test(campBody) && !/\.filled>/.test(campBody), campBody.slice(0, 200));
 
   t('레거시 공고 라벨은 status 로 만든다', ctx._campLabel({ state: 'legacy', status: 'active' }) === '진행중');
   t('레거시 마감도 회색(등급 2)', ctx._campRank({ state: 'legacy', status: 'closed' }) === 2);
 
   /* ── 5) 프론트 배선 ──────────────────────────────────────────── */
-  console.log('\n5) 배선 · 열 고정 · 오늘 완료 표시');
+  console.log('\n5) 배선 · 열 고정');
   t('목록 행 액션에 [공고] 버튼이 들어간다', /_campBtnHtml\(t,i\)/.test(WD));
   // v3(사용자 확정): 통합 .wbl-act grid → **독립 헤더열**로 승격. 검사 의미는 그대로 "버튼은 줄마다 자기 열" —
   //   이제 표 구조가 정렬을 보장하므로, 남은 고정폭 요구는 저장폴더 칸 내부 3분할뿐이다.
@@ -211,9 +264,9 @@ const isCampSelect = q => /FROM recruit_campaigns/.test(q) && /linked_sheet_id/.
     /\.wbl-fol\{display:inline-grid;grid-template-columns:repeat\(3,40px\)/.test(WD));
   t('통합 .wbl-act grid 는 부활 금지(열 정렬은 표 구조가 담당)', !/\.wbl-act\{display:grid/.test(WD));
   t('모집공고는 독립 헤더열', /<th class="wbl-c">모집공고<\/th>/.test(WD));
-  t('★ 오늘 완료 라벨 스왑 부활 금지(폭이 달라져 열이 어긋난다)',
-    !/\$\{td\?'해제':'☑ 오늘 완료'\}/.test(WD) && /title="\$\{td\?'오늘 완료됨[^"]*}">☑ 오늘 완료</.test(WD));
-  t('★ 켜짐은 파란 채움으로 말한다', /\.wbl-b\.today\.on\{background:var\(--accent\);/.test(WD));
+  // ⑥ 오늘 완료 버튼은 2026-09-30 코드 다이어트(결정 186 · 킵 재검토 7번)로 열째 제거 — 라벨 스왑·파란 채움 가드도 대상이 사라졌다.
+  t('오늘 완료 버튼은 제거됐다(열 수가 줄어도 헤더·행 칸 수는 homeTasklistFilters 가 고정)',
+    !/toggleTodayDone|☑ 오늘 완료/.test(WD));
   t('조회 실패를 목록 상단에도 고지', /campsUnavailable[\s\S]{0,120}\[공고\] 버튼이 잠시 비활성/.test(WD));
   t('★ 실패 응답으로 기존 공고 주석을 덮지 않는다', /if\(!r\.campaignsUnavailable\) t\.campaigns=n\.campaigns\|\|\[\]/.test(WD));
   t('작업바 로드(stats 없음)에서 주석을 이월한다(버튼이 깜빡이며 사라지지 않게)', /_prevCamp\[k\]/.test(WD));

@@ -30,10 +30,15 @@ const REQUIRED_SCHEMA = [
   ['reviewer_history_control', 'coverage_epoch'],
   ['workdesk_review_resolutions', 'resolution'],
   ['review_closed_targets', 'resolution_id'],
+  ['reviewers', 'kakao_id'],                       // 170 — 리뷰어 가입 INSERT·내정보 저장(없으면 가입 전면 42703)
   ['reviewers', 'shopping_id'],                    // 147 — 명의별 공통 쇼핑 아이디(본인)
   ['reviewer_identities', 'shopping_id'],          // 147 — 코드 명의별 공통 쇼핑 아이디
   ['campaign_applications', 'owner_phone8'],       // 063 — apply INSERT·my-status·관제
   ['recruit_campaigns', 'multi_account_mode'],     // 063 — 공개 /list 명시 SELECT
+  ['recruit_campaigns', 'shortage_prompt_off_at'], // 173 — 부족 인원 팝업 후보 조회·기간 늘리기(없으면 팝업이 조용히 빈다)
+  ['recruit_campaigns', 'shortage_prompt_off_by'],  // 173
+  ['recruit_campaigns', 'published_at'],           // 174 — 게시 토글·공고 수정 UPDATE(없으면 게시 전환 전면 42703)
+  ['recruit_campaigns', 'quota_rules_changed_at'], // 175 — 없으면 어제 정원을 지금 설정으로 잘못 다시 계산한다(부족 인원 팝업)
   ['recruit_campaigns', 'multi_daily_limit'],      // 063 — apply 게이트·공고 저장
   ['recruit_campaigns', 'sub_hold_ttl_min'],       // 063 — 공개 /list 명시 SELECT
   ['campaign_applications', 'review_fee_snapshot'],// 082 — apply INSERT(없으면 참여 전면 42703)·리뷰어 참여내역
@@ -48,6 +53,7 @@ const REQUIRED_SCHEMA = [
   ['recruit_campaigns', 'transfer_memo'],         // 086 — 위와 같은 문장에 들어가므로 함께 막아야 한다
   ['recruit_campaigns', 'review_type'],           // 087 — 공고 create/update INSERT·SET 목록(없으면 공고 발행·수정 전면 42703)
   ['work_orders', 'sales_id'],                    // 088 — _insertWorkOrder INSERT 목록(없으면 인트라넷 오더 접수 전면 42703)
+  ['work_orders', 'thumbnail_url'],               // 163 — _insertWorkOrder INSERT 목록(같은 문장이라 없으면 접수가 통째로 죽는다)
   ['work_orders', 'guide_images'],                // 090 — _insertWorkOrder INSERT 목록(없으면 인트라넷 오더 접수 전면 42703)
   ['work_orders', 'source_review_order_id'],      // 102 — 원본 오더 식별자(중복 수신 방지)
   ['work_orders', 'delivery_type_mix'],           // 135 — _insertWorkOrder INSERT 목록(없으면 인트라넷 오더 접수 전면 42703)
@@ -355,23 +361,7 @@ async function runMigrations() {
       })();
     }
 
-    // ★ 블로그체험단 M3 — (주)바를참스킨 0804 작업 1회 동기화 (전용 화면·엔드포인트 없음, 사용자 확정).
-    //   이미 무시트 이관된 탭이라 시스템이 시트를 더 안 읽고 내부 시트 사본도 작업표 기준으로
-    //   재생성돼 빈 행 기록이 없다 → 시트를 **한 번만** 다시 읽어 1~50 자리를 표에 만든다.
-    //   추가만·시트 쓰기 0·멱등. 실패하면 가드를 안 남겨 다음 부팅에 재시도한다(부팅은 계속).
-    if (process.env.NODE_ENV === 'production' && !readOnlyPreview) {
-      (async () => {
-        try {
-          const { runBlog0804Backfill } = require('./src/services/blog0804Backfill.service');
-          const r = await runBlog0804Backfill();
-          if (r && r.reason === 'already_done') return;              // 조용히(평상시 로그 소음 0)
-          if (r && r.ok) logger.info(`[boot] 블로그 0804 1회 동기화: ${JSON.stringify(r)}`);
-          else logger.warn(`[boot] 블로그 0804 1회 동기화 미수행(다음 부팅에 재시도): ${JSON.stringify(r)}`);
-        } catch (err) {
-          logger.error(`[boot] 블로그 0804 1회 동기화 실패(무시, 다음 부팅에 재시도): ${err.message}`);
-        }
-      })();
-    }
+    // (블로그체험단 M3 바를참스킨 0804 1회 동기화 부팅 잡 — 완료 가드 확인만 반복하던 것, 2026-09-30 제거 · 결정 186 78번)
   });
 
   // ── Graceful Shutdown (Railway / Docker 대응) ──

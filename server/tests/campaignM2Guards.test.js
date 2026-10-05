@@ -19,7 +19,16 @@ let passed = 0;
 function ok(name, cond) { assert(cond, name); passed++; console.log('  ✓ ' + name); }
 
 // ── 변경① apply 내정보 게이트 ──
-ok('apply: profileMissing 재사용(identity.service)', /require\('\.\.\/services\/identity\.service'\)/.test(routes) && /profileMissing\(reg\.rows\[0\]\)/.test(routes));
+// ★ 조각 5(결정 181, 사용자 확정 2026-09-26): 주소는 참여 뒤 구매양식에서 캡처 주소로 받는다 — 참여 게이트는
+//   profileMissing 에서 '주소' 하나만 뺀 participationProfileMissing 를 쓴다(이름·전화·계좌는 그대로 요구).
+{
+  const idSvc = require('../src/services/identity.service');
+  ok('apply: 내정보 게이트(identity.service) — 주소만 빼고 이름·전화·계좌는 요구',
+    /require\('\.\.\/services\/identity\.service'\)/.test(routes) && /participationProfileMissing\(reg\.rows\[0\]\)/.test(routes)
+    && JSON.stringify(idSvc.participationProfileMissing({})) === JSON.stringify(['사용자명', '전화번호', '계좌'])
+    && JSON.stringify(idSvc.participationProfileMissing({ name: '김', phone: '010-1111-2222', bank_name: 'b', bank_account: '1', account_holder: '김' })) === '[]'
+    && JSON.stringify(idSvc.profileMissing({})) === JSON.stringify(['사용자명', '전화번호', '주소', '계좌']));
+}
 ok('apply: profile_missing 403 + missing 목록 반환', /reason: 'profile_missing', missing/.test(routes));
 // ★ 082: INSERT 에 review_fee_snapshot($9)이 붙었다 — 순서 검사 의미는 그대로.
 //   ★ 위치를 못 찾으면(-1) 통과로 새지 않게 존재부터 단언한다(약한 단언은 잘못된 이유로 통과한다).

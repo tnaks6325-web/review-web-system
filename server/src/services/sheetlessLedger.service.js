@@ -153,13 +153,7 @@ function participantPhone8(value) {
  * @param {string}  [o.by='system']
  * @returns {Promise<object>} 요약
  */
-/**
- * @param {boolean} preflight  이관 **전** 점검용(전환 관리 화면 ⑤ 항목). `dryRun` 과 **함께일 때만** 유효하며
- *   시트 기반 탭에서도 "열 구성을 알아볼 수 있는가"를 계산해 본다. 쓰기 경로는 그대로 잠겨 있다
- *   — 게이트가 막으려는 것은 **시트 값 덮어쓰기**인데 dry-run 은 한 줄도 쓰지 않기 때문.
- *   ★ preflight 만 주고 dryRun 을 빼면 종전대로 `not_sheetless` 로 거부한다(완화 금지).
- */
-async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false, by = 'system', preflight = false } = {}) {
+async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false, by = 'system' } = {}) {
   if (!sheetId || !tabName) throw new LedgerError('bad_request', 'sheetId, tabName 필수');
   const db = getPool();
 
@@ -169,7 +163,9 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
             closed_rounds, archived_rounds
        FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`, [sheetId, tabName]);
   if (!tcRows.length) throw new LedgerError('tab_not_registered', '등록되지 않은 탭입니다(접수 후 이용).');
-  if (!tcRows[0].sheetless && !(dryRun && preflight)) {
+  /* 종전 `dryRun && preflight` 예외(이관 전 점검표 ⑤)는 탈시트 전환 화면 제거로 호출자가 없어져
+     2026-09-28 삭제(결정 186 2번) — 시트 기반 탭은 미리보기도 거부한다(게이트가 더 좁아졌다). */
+  if (!tcRows[0].sheetless) {
     throw new LedgerError('not_sheetless',
       '시트 기반 탭입니다 — 장부는 시트에서 만들어집니다. 이 탭을 무시트로 이관한 뒤 실행하세요.');
   }
@@ -199,9 +195,8 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
   // ── 헤더 ──
   /* ★★ `detected_headers` 를 먼저 본다(2026-08 실측 사고): 시트 미러가 `headers` 에 넣는 값은
      **시트 A1 행 그대로**(대개 캠페인 정보 1~2칸)이고 진짜 열 이름 줄은 `detected_headers` 에 있다.
-     무시트 탭은 이 함수가 둘 다 같은 값으로 써 넣으므로 **동작이 한 글자도 안 바뀌고**,
-     시트 기반 탭을 preflight 로 볼 때만 달라진다 — 종전엔 A1 2칸이 잡혀
-     "열 2개 · 검색 명단 0명"인데 점검이 통과하는 false-green 이었다. */
+     무시트 탭은 이 함수가 둘 다 같은 값으로 써 넣으므로 **동작이 한 글자도 안 바뀐다**
+     (종전 이관 점검이 시트 기반 탭을 볼 때 A1 2칸이 잡혀 false-green 이던 자리 — 그 점검은 2026-09-28 제거). */
   const { rows: prevTab } = await db.query(
     `SELECT detected_headers, headers FROM raw_sheet_tabs WHERE sheet_id = $1 AND tab_gid = $2 LIMIT 1`,
     [sheetId, tabGid]);
@@ -331,15 +326,21 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
     /* ★ 제외 차수 행은 다시 넣지 않는다 — 이걸 빼면 위에서 옮겨 둔 행이 곧바로 되살아난다. */
     for (const r of indexed) {
       await client.query(
+        /* ★★ `recipient_name` 은 파서(`columnResolver`)가 이미 확정해 주는 값이다 — 여기서 버리면
+           무시트 탭만 `review_index.recipient_name` 이 영영 NULL 로 남아 ① 리뷰어 참여내역의
+           제출완료 카드가 수취인을 못 보여주고(그 응답은 row_json 을 비운다) ② 수취인 이름으로는
+           검색이 안 되며 ③ 파일명 ↔ 행 소급 매칭(`reviewFileLink`)도 그 키를 잃는다.
+           시트 경로(`indexBuilder`)는 이미 같은 값을 저장하므로 **두 경로를 같게 맞춘다**(판정 사본 0). */
         `INSERT INTO review_index
            (reviewer_name, sheet_id, tab_gid, tab_name, campaign_name, row_index,
             is_submitted, is_submitted2, product_url, product_name, submit_col, submit_col2,
-            row_json, start_date, end_date, round, phone8, built_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15,$16,$17,NOW())`,
+            row_json, start_date, end_date, round, phone8, recipient_name, built_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15,$16,$17,$18,NOW())`,
         [r.name, sheetId, tabGid || null, tabName, campaignName, r.rowIndex,
          !!r.isSubmitted, r.isSubmitted2 || 'NONE', r.productUrl || null, r.productName || null,
          r.submitCol || null, r.submitCol2 || null, JSON.stringify(r.rowJson || {}),
-         r.startDate || null, r.endDate || null, r.round || null, r.phone8 || null]);
+         r.startDate || null, r.endDate || null, r.round || null, r.phone8 || null,
+         r.recipientName || null]);
     }
 
     /* ②-1 스냅샷 복원 — 파서가 만들지 않는 컬럼이라 덮어쓸 값이 없다(충돌 없는 순수 복원).

@@ -164,73 +164,21 @@ console.log('\n[C] 두 기록 경로가 무시트 분기를 탄다');
   ok('입금 처리에는 deposit_mark 큐가 없다', !/enqueue\('deposit_mark'/.test(pay));
 }
 
-/* ══════════════ F. Existing O → submission-time backfill ══════════════ */
-console.log('\n[F] recent uploaded reviews with O are backfilled safely');
+/* ══════════════ F. 'O' → 제출 시각 보정 도구는 결정 186 63번에서 제거 ══════════════ */
+console.log('\n[F] 1회용 O 보정 도구 부재');
 {
   const stSrc = noLineComments(srv('src/services/sheetlessStatus.service.js'));
   const tbRoutes = noLineComments(srv('src/routes/trackB.routes.js'));
-
-  ok('backfill limits candidates to sheetless tabs', /COALESCE\(tc\.sheetless, FALSE\) = TRUE/.test(stSrc));
-  ok('backfill limits candidates to cells currently equal to O', /COALESCE\(cp\.row_json ->> ri\.submit_col, ''\) = 'O'/.test(stSrc));
-  ok('backfill uses the latest recorded review-upload timestamp', /MAX\(COALESCE\(rs\.uploaded_at, rs\.created_at\)\)/.test(stSrc));
-  ok('backfill formats the timestamp in Korea time', /AT TIME ZONE 'Asia\/Seoul'/.test(stSrc) && /FMMM\/FMDD HH24:MI/.test(stSrc));
-  ok('backfill rechecks O immediately before update', /AND COALESCE\(cp\.row_json ->> c\.submit_col, ''\) = 'O'/.test(stSrc));
-  ok('backfill rebuilds ledgers only for changed tabs', /rebuildLedgers\(\{ sheetId: tab\.sheetId, tabName: tab\.tabName/.test(stSrc));
-  ok('backfill endpoint is master-only and dry-run by default',
-    /review-submit-time-backfill', authMiddleware, masterOnlyMiddleware/.test(tbRoutes)
-    && /const dryRun = req\.body\?\.dryRun !== false/.test(tbRoutes));
-  ok('backfill requires an explicit confirmation to apply', /confirm !== 'replace-o-with-submission-time'/.test(tbRoutes));
-}
-{
-  const calls = [];
-  const candidate = {
-    sheetId: 'sheetless-1', tabName: 'campaign', rowIndex: 12, reviewerName: 'reviewer',
-    submitCol: '리뷰제출', sourceAt: '2026-08-10T09:13:00.000Z', submitValue: '8/10 18:13',
-  };
-  status.__setPoolForTest({ query: async (sql, params) => {
-    calls.push({ sql, params });
-    if (/MAX\(COALESCE\(rs\.uploaded_at, rs\.created_at\)\)/.test(sql)) return { rows: [candidate] };
-    if (/jsonb_to_recordset/.test(sql)) return { rows: [{ sheetId: 'sheetless-1', tabName: 'campaign', rowIndex: 12 }] };
-    return { rows: [] };
-  } });
-  const preview = await status.backfillReviewSubmitTimes({ dryRun: true });
-  ok('backfill preview reports candidates without writing', preview.dryRun === true && preview.candidateCount === 1 && calls.length === 1);
-
-  const realRebuild = ledger.rebuildLedgers;
-  const rebuilt = [];
-  ledger.rebuildLedgers = async (arg) => { rebuilt.push(arg); return { ok: true }; };
-  const applied = await status.backfillReviewSubmitTimes({ dryRun: false, by: 'master' });
-  ledger.rebuildLedgers = realRebuild;
-  status.__setPoolForTest(null);
-  const update = calls.find(x => /jsonb_to_recordset/.test(x.sql));
-  const plan = update ? JSON.parse(update.params[0]) : [];
-  ok('backfill apply writes only the previewed row and timestamp',
-    applied.updated === 1 && plan.length === 1 && plan[0].submit_value === '8/10 18:13' && plan[0].submit_col === '리뷰제출');
-  ok('backfill rebuilds the one changed tab after writing', rebuilt.length === 1 && rebuilt[0].sheetId === 'sheetless-1' && rebuilt[0].tabName === 'campaign');
+  ok('보정 서비스가 되살아나지 않았다', !/function backfillReviewSubmitTimes/.test(stSrc));
+  ok('보정 입구가 되살아나지 않았다', !/router\.post\('\/sheetless\/review-submit-time-backfill'/.test(tbRoutes));
 }
 
-/* ══════════════ D. Track B write-back 무시트 분기 ══════════════ */
-console.log('\n[D] cutover 된 무시트 탭은 시트를 읽지 않는다');
-{
-  const tb = noLineComments(srv('src/services/trackB.service.js'));
-  ok('executeWriteback 이 무시트를 분기', /if \(sheetless\) return _writebackSheetless\(/.test(tb));
-  ok('판정 실패는 종전 엔진(fail-open)', /catch \(_\) \{ sheetless = false; \}/.test(tb));
-  const fn = tb.slice(tb.indexOf('async function _writebackSheetless'), tb.indexOf('async function writebackSweep'));
-  ok('★ 무시트 분기는 readSheet 를 부르지 않는다', !/readSheet\(/.test(fn));
-  ok('★ 무시트 분기는 시트 쓰기를 하지 않는다', !/batchUpdateSheet\(|writeSheet\(/.test(fn));
-  ok('기록은 markStatusCell 단일 경로', /markStatusCell\(\{/.test(fn));
-  ok('해제(false)는 held — 두 경로 의미가 갈리지 않게', /value_bool !== true[\s\S]{0,80}?'held'/.test(fn));
-  ok('행 앵커 없으면 blocked(자가치유 재시도)', /!e\.row_index[\s\S]{0,80}?'blocked'/.test(fn));
-  ok('앵커 3종을 모두 해석(order·manual·identity)',
-    /anchor_type = 'order'/.test(fn) && /anchor_type = 'manual'/.test(fn) && /anchor_type = 'identity'/.test(fn));
-  ok('★ 모호한 identity 는 쓰지 않는다(엉뚱한 줄 기록 차단)', /cur\.row_index = null/.test(fn));
-}
+/* (D. Track B write-back 무시트 분기 — 엔진 제거로 삭제 (결정 186 5번 — 2026-09-28 원본 전환·write-back 제거)) */
 
 /* ══════════════ E. 무회귀 — 시트 기반 경로 ══════════════ */
 console.log('\n[E] 시트 기반 탭은 한 줄도 안 바뀐다');
 {
   const tb = noLineComments(srv('src/services/trackB.service.js'));
-  ok('시트 엔진 진입은 그대로', /return _writebackEngine\(\{ sheetId, tabName, tier: 'base' \}\);/.test(tb));
   const sub = noLineComments(srv('src/routes/submit.routes.js'));
   ok('기존 review_index UPDATE 는 유지(시트 탭이 쓰는 경로)',
     /UPDATE review_index SET is_submitted = TRUE, built_at = NOW\(\)/.test(sub));

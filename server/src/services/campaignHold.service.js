@@ -174,6 +174,36 @@ async function confirmHoldInTx(client, { applicationId, campaignId, phone8, hold
   return 'late';
 }
 
+async function logIdentityBlockedExpiries(pool, ids) {
+  try {
+    const { rows } = await pool.query(
+      `SELECT ca.id, ca.applicant_name, ca.phone8, rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid,
+              COUNT(a.*) FILTER (WHERE a.status = 'MISMATCH') AS blocked_tries
+         FROM campaign_applications ca
+         JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
+         JOIN reviewer_identity_match_audits a ON a.campaign_application_id = ca.id
+        WHERE ca.id = ANY($1::int[])
+        GROUP BY ca.id, rc.id
+       HAVING bool_or(a.status = 'MISMATCH')
+          AND NOT bool_or(a.status IN ('MATCH', 'MANUAL_CONFIRMED'))`, [ids]);
+    if (!rows.length) return;
+    const { logReviewerEvent } = require('./reviewerEventLog.service');
+    for (const r of rows) {
+      const who = r.applicant_name || '리뷰어';
+      await logReviewerEvent({
+        sheetId: r.linked_sheet_id || '', tabName: r.linked_tab_name || '', tabGid: r.linked_tab_gid || null,
+        reviewerName: r.applicant_name || '', phone8: r.phone8 || '',
+        eventType: 'identity_blocked_expired', severity: 'warn',
+        message: `${who} 리뷰어가 구매 캡처의 명의 확인에 막혀 구매양식을 내지 못하고 참여가 만료됐습니다.`,
+        context: { applicationId: r.id, blockedTries: Number(r.blocked_tries) || 0 },
+      }).catch((e) => logger.warn(`[campaignHold] 명의막힘 만료 로그 실패 app=${r.id}: ${e.message}`));
+    }
+  } catch (e) {
+    // 감사 테이블 미적용(42P01) 등 — 알림은 부가 기능이라 만료 처리를 막지 않는다.
+    logger.warn(`[campaignHold] 명의막힘 만료 조회 스킵: ${e.message}`);
+  }
+}
+
 /** 만료 스윕(정리용 — 판정 SoT는 시각 기준이라 지연·미실행 무해). DB-only, 시트 쿼터 0. */
 async function sweepExpiredHolds(pool) {
   // ① grace 경과분만 만료(확정과 동일 경계 → 정시제출 경합 창 0). SKIP LOCKED = 확정 중 행 건너뜀(교착 0, 심판 J6).
@@ -187,6 +217,9 @@ async function sweepExpiredHolds(pool) {
       RETURNING id`,
     [HOLD_GRACE_SEC]
   );
+  // ①-2 명의 확인에 막혀 만료된 참여를 담당자 로그에 남긴다(보고서 원인 5 — 20일간 82건이 아무도
+  //   모르게 만료됐다). 방금 만료된 id 만 보므로 같은 건이 두 번 쌓이지 않는다. 실패해도 스윕은 계속.
+  if (exp.rowCount) await logIdentityBlockedExpiries(pool, exp.rows.map(r => r.id));
   // ② late 백필: 확정 못 한 주문의 provenance 링크가 있으면 관제 수동확정 목록에 노출
   await pool.query(
     `UPDATE campaign_applications a SET late_order_id = o.id
@@ -272,4 +305,4 @@ async function sweepExpiredHolds(pool) {
   return { expired: exp.rowCount, autoDismissed, revived, closedPersisted: closedCount };
 }
 
-module.exports = { HOLD_GRACE_SEC, tabMatchesCampaign, maybePersistClosed, confirmHoldInTx, detectIdentityDrift, sweepExpiredHolds };
+module.exports = { HOLD_GRACE_SEC, tabMatchesCampaign, maybePersistClosed, confirmHoldInTx, detectIdentityDrift, sweepExpiredHolds, logIdentityBlockedExpiries };

@@ -65,7 +65,7 @@ ok('가림 주소는 모든 연속 가림문자를 제거해 비교한다',
   /MASK_RUN_RE = \/\[\*＊●○◯◉•·xX\]\+\/g/.test(service)
   && /replace\(MASK_RUN_RE, ' '\)/.test(service));
 ok('타계정 편집 API는 전용 경로의 shoppingId를 구버전 화면에서도 보존한다',
-  /SELECT reviewer_no, sub_accounts FROM reviewers/.test(reviewerServiceSource)
+  /mutateSubAccounts\(owner\.id, \(currentSubs\)/.test(reviewerServiceSource)
   && /sub\.shoppingId = String\(savedId\)/.test(reviewerServiceSource));
 ok('타계정 허용+등록 타계정 존재 시 명의 선택을 옵션보다 먼저 연다',
   /if\(multiEnabled\(\)\)[\s\S]{0,180}?if\(\(_subs \|\| \[\]\)\.length\) return openAcctSheet\(null, 'option'\)/.test(campaign));
@@ -83,9 +83,13 @@ ok('연속 캡처 분석의 늦은 응답은 request id로 폐기해 최신 캡�
 ok('공통 아이디 저장 체크는 카드 한 장만 선택 가능하다',
   /onchange="_selectShoppingIdSave\('\$\{cid\}'\)"/.test(appJs)
   && /other\.checked = false/.test(appJs));
+// ★ 조각 5(결정 181): 배송주소의 "내 정보에서 선택"은 명의 주소 선택기(_addressToolsMarkup — 칩·드롭다운·[저장])로
+//   바뀌었다. 검사 의미 불변 — 내정보 선택은 여전히 네 입력창 아래에만 있다(주소는 새 선택기 한 곳).
 ok('내정보 드롭다운은 아이디·수취인·연락처·배송주소 입력창 아래에만 둔다',
-  (appJs.match(/\$\{_savedOrderInfoMarkup\(cid, "/g) || []).length === 4
-  && ['userId', 'recipient', 'phone', 'address'].every((field) => appJs.includes(`\${_savedOrderInfoMarkup(cid, "${field}")}`))
+  (appJs.match(/\$\{_savedOrderInfoMarkup\(cid, "/g) || []).length === 3
+  && ['userId', 'recipient', 'phone'].every((field) => appJs.includes(`\${_savedOrderInfoMarkup(cid, "${field}")}`))
+  && (appJs.match(/\$\{_addressToolsMarkup\(cid\)\}/g) || []).length === 1
+  && (appJs.match(/\$\{_addressChipMarkup\(cid\)\}/g) || []).length === 1
   && !/savedOrderInfoMarkup\(cid, "(?:orderNumber|orderer|price)"\)/.test(appJs)
   && /\.of-field-control>\.of-input(?:,|\{)/.test(searchCss));
 ok('드롭다운 선택값은 DOM 버튼으로 만들고 입력 임시저장 순서를 바꾸지 않는다',
@@ -157,7 +161,9 @@ ok('타계정 참여는 선택 명의만 노출하되 구매양식 연락처는 
 ok('자주 쓰는 주문정보는 서명된 소유자와 현재 참여 명의가 모두 맞는 원장만 조회한다',
   /async function loadOrderInfoSuggestions\(context, db = pool\)/.test(service)
   && /os\.owner_reviewer_id = \$1::uuid/.test(service)
-  && /os\.participant_identity_key_hash = \$2/.test(service)
+  // ★ 조각 3-1(결정 178): 카드 번호 이름표 + 옮기기 전 옛 이름표 두 해시만(그 명의의 것만) 본다 — 검사 의미 불변.
+  && /os\.participant_identity_key_hash = ANY\(\$2::text\[\]\)/.test(service)
+  && /identityHashes = \[selectedIdentityHash\]/.test(service)
   && /ca\.owner_reviewer_id = \$1::uuid/.test(service)
   && /ca\.participant_identity_id = \$3::uuid/.test(service)
   && !/SELECT COUNT\(\*\) FROM reviewers r WHERE r\.phone8/.test(service)
@@ -217,19 +223,26 @@ async function verifyLegacySubIdPreservation() {
   const pool = require('../src/db/pool');
   const reviewerService = require('../src/services/reviewer.service');
   const original = pool.query;
+  const originalConnect = pool.connect;
   let saved;
-  pool.query = async (sql, params) => {
-    if (/SELECT reviewer_no, sub_accounts/.test(sql)) {
-      return { rows: [{ reviewer_no: null, sub_accounts: [
+  // ★ 조각 2-2(결정 177): 저장은 id 확정 → 트랜잭션 안에서 잠그고 다시 읽기 → id 로 저장 순서다.
+  const OWNER = '9b9b9b9b-9b9b-4b9b-8b9b-9b9b9b9b9b9b';
+  const query = async (sql, params) => {
+    if (/SELECT id, reviewer_no FROM reviewers/.test(sql)) return { rows: [{ id: OWNER, reviewer_no: null }] };
+    if (/FOR NO KEY UPDATE/.test(sql)) {
+      return { rows: [{ id: OWNER, name: '소유자', phone: '010-9999-8888', sub_accounts: [
         { name:'김민수', phone:'010-1111-2222', shoppingId:'keep-me', address:'기존' },
         { name:'박영희', phone:'010-3333-4444', shoppingId:'keep-two' },
       ] }] };
     }
     if (/UPDATE reviewers SET sub_accounts/.test(sql)) {
-      saved = JSON.parse(params[0]); return { rows: [], rowCount: 1 };
+      saved = JSON.parse(params[1]); return { rows: [], rowCount: 1 };
     }
+    if (/^(BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE)/.test(String(sql).trim()) || /FROM reviewer(s|_identity_cards)\b/.test(sql)) return { rows: [] };
     throw new Error('unexpected query: ' + sql);
   };
+  pool.query = query;
+  pool.connect = async () => ({ query, release() {} });
   try {
     const out = await reviewerService.handleReviewerProfile({
       action:'saveSubAccounts', phone8:'99998888', subAccounts: [
@@ -239,7 +252,7 @@ async function verifyLegacySubIdPreservation() {
     });
     ok('실행 검증: 타계정 이름·번호 수정과 기존 행 수정 모두 공통 아이디를 잃지 않는다',
       out.ok && saved[0].shoppingId === 'keep-me' && saved[1].shoppingId === 'keep-two');
-  } finally { pool.query = original; }
+  } finally { pool.query = original; pool.connect = originalConnect; }
 }
 
 verifyLegacySubIdPreservation().then(() => {

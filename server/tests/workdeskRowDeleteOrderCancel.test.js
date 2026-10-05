@@ -1,7 +1,8 @@
 /* 우클릭 행 삭제 = 구매기록 취소 + 총 모집인원 유지.
    스텁 DB 로 hideWorkdeskRow 를 실제 실행해, 두 가지를 고정한다.
    ① 살아 있는 구매양식이 붙은 행은 주문 취소와 "한 트랜잭션"으로 지워진다
-   ② 지운 자리는 마지막 진행일의 빈 자리로 보충된다 = 총원이 줄지 않는다 */
+   ② 지운 자리는 빈 자리로 보충된다 = 총원이 줄지 않는다
+   ③ ★ 결정 182(2026-09-26): 날짜별 계획은 쓰지 않는다 — 커밋 뒤 그 공고의 작업표 날짜를 규칙대로 맞춘다 */
 const assert = require('assert');
 const path = require('path');
 
@@ -9,6 +10,12 @@ const svc = require('../src/services/trackB.service');
 const cancelPath = require.resolve('../src/services/orderCancellation.service');
 
 const ORDER_ID = '11111111-2222-3333-4444-555555555555';
+
+// 커밋 뒤 날짜 맞추기(relayCampaignWorktable)는 실제 DB 를 열므로 기록만 하는 가짜로 바꾼다.
+const cpSvc = require('../src/services/campaignPlan.service');
+const relayCalls = [];
+cpSvc.relayCampaignWorktable = async (id, opts) => { relayCalls.push({ id, opts }); return { ok: true, moved: 0 }; };
+const lastRelay = () => relayCalls[relayCalls.length - 1];
 
 function makeStubPool({ liveOrder = true, sheetless = true, plans = [{ date: '2026-08-25', planned_count: 5 }],
   campaigns = [{ campaign_id: 'camp-1', is_open: true, is_linked: true }],
@@ -68,7 +75,8 @@ function restoreCancel() { delete require.cache[cancelPath]; }
     assert.strictEqual(out.replenished, 1, '지운 자리는 빈 자리로 보충되어야 합니다(총원 유지)');
     const sqls = log.map(l => l.sql);
     assert.ok(sqls.some(s => s.includes('INSERT INTO campaign_participants')), '보충 슬롯을 만들어야 합니다');
-    assert.ok(sqls.some(s => s.includes('planned_count=planned_count+1')), '마지막 진행일 계획을 1건 늘려야 합니다');
+    assert.ok(!sqls.some(s => /(UPDATE|INSERT INTO) campaign_daily_plans/.test(s)), '★★ 날짜별 계획에 쓰지 않는다(결정 182)');
+    assert.strictEqual(lastRelay() && lastRelay().id, 'camp-1', '커밋 뒤 그 공고의 작업표 날짜를 맞춘다');
     assert.ok(!sqls.some(s => /^(UPDATE|INSERT)/.test(s) && s.includes('recruit_total')),
       '총 모집수는 기준으로 읽기만 하고 값 자체를 건드리면 안 됩니다');
   }
@@ -166,8 +174,9 @@ function restoreCancel() { delete require.cache[cancelPath]; }
     restoreCancel();
     assert.strictEqual(out.ok, true, `참여 기록 없는 주문도 삭제되어야 합니다: ${JSON.stringify(out)}`);
     assert.strictEqual(out.replenished, 1, '이 경로에서도 총원은 유지되어야 합니다');
-    const planUpdate = log.find(l => l.sql.includes('planned_count=planned_count+1'));
-    assert.ok(planUpdate && planUpdate.params[0] === 'camp-solo', '연결된 그 공고의 계획에 보충해야 합니다');
+    assert.strictEqual(out.campaignId, 'camp-solo', '연결된 그 공고의 날짜를 맞춰야 합니다');
+    assert.strictEqual(lastRelay().id, 'camp-solo', '날짜 맞추기도 그 공고로 한다');
+    assert.ok(!log.some(l => /campaign_daily_plans/.test(l.sql) && /UPDATE|INSERT/.test(l.sql)), '계획 쓰기 0');
   }
 
   // ⑧ 연결 공고가 둘 이상이면 계획은 건드리지 않되, 행 삭제와 빈 자리 보충은 한다
@@ -186,8 +195,9 @@ function restoreCancel() { delete require.cache[cancelPath]; }
     restoreCancel();
     assert.strictEqual(out.ok, true, `공고가 모호해도 행 삭제는 되어야 합니다: ${JSON.stringify(out)}`);
     assert.strictEqual(out.campaignScope, 'ambiguous', '공고를 못 골랐다는 사실을 알려야 합니다');
+    assert.strictEqual(out.worktableRelay, null, '어느 공고인지 모르면 날짜 맞추기도 하지 않는다');
     assert.strictEqual(out.replenished, 1, '보충은 작업보드에 한다');
-    assert.strictEqual(out.planMoved, false, '어느 공고인지 모르면 공고 계획은 건드리지 않는다');
+    assert.strictEqual(out.planMoved, false, '계획 이동은 없다(결정 182)');
     assert.ok(!log.some(l => /campaign_daily_plans/.test(l.sql) && /UPDATE|INSERT/.test(l.sql)),
       '모호할 때 공고 계획 쓰기가 있으면 안 됩니다');
     assert.ok(log.some(l => /INSERT INTO campaign_participants/.test(l.sql)), '빈 자리는 만들어야 합니다');
@@ -208,8 +218,9 @@ function restoreCancel() { delete require.cache[cancelPath]; }
     const out = await svc.hideWorkdeskRow({ sheetId: 's1', tabName: 't1', rowId: 'row-1', by: '망고', actorRole: 'admin' });
     restoreCancel();
     assert.strictEqual(out.ok, true);
-    const planUpdate = log.find(l => l.sql.includes('planned_count=planned_count+1'));
-    assert.ok(planUpdate && planUpdate.params[0] === 'camp-linked', '그 주문이 참여한 공고가 우선이어야 합니다');
+    assert.strictEqual(out.campaignId, 'camp-linked', '그 주문이 참여한 공고가 우선이어야 합니다');
+    assert.strictEqual(lastRelay().id, 'camp-linked', '날짜 맞추기도 그 공고로 한다');
+    assert.ok(!log.some(l => /campaign_daily_plans/.test(l.sql) && /UPDATE|INSERT/.test(l.sql)), '계획 쓰기 0');
   }
 
   // ⑩ 마감된 공고 하나뿐이어도 지울 수 있다(계획 보충은 장부 정리일 뿐 재오픈이 아니다)
@@ -237,8 +248,9 @@ function restoreCancel() { delete require.cache[cancelPath]; }
     svc.__setLedgerRebuildForTest(async () => {});
     const out = await svc.hideWorkdeskRow({ sheetId: 's1', tabName: 't1', rowId: 'row-1', by: '망고', actorRole: 'admin' });
     assert.strictEqual(out.ok, true, `게시 중 공고가 하나면 고를 수 있어야 합니다: ${JSON.stringify(out)}`);
-    const planUpdate = log.find(l => l.sql.includes('planned_count=planned_count+1'));
-    assert.ok(planUpdate && planUpdate.params[0] === 'camp-live', '게시 중인 공고의 계획에 보충해야 합니다');
+    assert.strictEqual(out.campaignId, 'camp-live', '게시 중인 공고의 날짜를 맞춰야 합니다');
+    assert.strictEqual(lastRelay().id, 'camp-live', '날짜 맞추기도 그 공고로 한다');
+    assert.ok(!log.some(l => /campaign_daily_plans/.test(l.sql) && /UPDATE|INSERT/.test(l.sql)), '계획 쓰기 0');
     void client;
   }
 
@@ -253,6 +265,7 @@ function restoreCancel() { delete require.cache[cancelPath]; }
     restoreCancel();
     assert.strictEqual(out.ok, true, `공고 없는 작업표도 삭제되어야 합니다: ${JSON.stringify(out)}`);
     assert.strictEqual(out.campaignScope, 'none');
+    assert.strictEqual(out.worktableRelay, null, '공고가 없으면 날짜 맞추기도 없다');
     assert.strictEqual(out.replenished, 1, '총원은 작업보드 빈 자리로 유지한다');
     assert.strictEqual(out.planMoved, false);
     assert.strictEqual(out.replacementDate, '8/25 (월)', '작업표에서 가장 늦은 진행일 표기를 그대로 쓴다');

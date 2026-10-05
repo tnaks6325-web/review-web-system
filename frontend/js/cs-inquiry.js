@@ -201,7 +201,7 @@ function _renderCsRooms(list) {
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:5px">
             <span style="font-weight:700;color:var(--t1,#0F172A);font-size:.8rem">${escHtml(r.reviewerName || '-')}</span>
-            <span style="color:#94a3b8;font-size:.68rem;font-family:monospace">${escHtml(r.reviewerPhone8 || '')}</span>
+            <span style="color:#94a3b8;font-size:.68rem;font-family:monospace">${escHtml((typeof fmtPhone==='function'?fmtPhone(r.reviewerPhone8 || ''):r.reviewerPhone8 || ''))}</span>
             ${closedChip}
             ${r.adminMemo ? '<i class="fas fa-lock" title="관리자 메모 있음" style="color:#D97706;font-size:.6rem"></i>' : ''}
           </div>
@@ -237,7 +237,7 @@ async function csOpenConversation(threadId, reviewerName, reviewerPhone8) {
          style="padding:13px 16px;border-bottom:1px solid #eef2f7;display:flex;align-items:center;gap:8px">
       <i class="fas fa-comments" style="color:var(--p,#3182F6)"></i>
       <div style="flex:1;min-width:0">
-        <div style="font-weight:700;font-size:.9rem;color:var(--t1,#0F172A)">${escHtml(reviewerName)} <span style="color:#94a3b8;font-weight:400;font-size:.76rem;font-family:monospace">${escHtml(reviewerPhone8)}</span></div>
+        <div style="font-weight:700;font-size:.9rem;color:var(--t1,#0F172A)">${escHtml(reviewerName)} <span style="color:#94a3b8;font-weight:400;font-size:.76rem;font-family:monospace">${escHtml((typeof fmtPhone==='function'?fmtPhone(reviewerPhone8):reviewerPhone8))}</span></div>
         <div id="csConvCampaign" style="font-size:.74rem;color:var(--t3,#94A3B8)">불러오는 중...</div>
       </div>
       <span class="cs-conv-hint">주문정보 접기/펼치기</span>
@@ -433,7 +433,7 @@ function _csCtxHtml(d) {
         ${o ? kv('주문번호', o.orderNum) : ''}
         ${o ? kv('주문자', o.orderer) : ''}
         ${o ? kv('수취인', o.recipient) : ''}
-        ${o ? kv('연락처', o.phone) : ''}
+        ${o ? kv('연락처', (typeof fmtPhone==='function'?fmtPhone(o.phone):o.phone)) : ''}
         ${o ? kv('배송주소', o.address) : ''}
         ${(o && o.option) ? kv('옵션', o.option) : ''}
         ${(s && s.payAmount) ? kv('결제금액', s.payAmount) : ''}

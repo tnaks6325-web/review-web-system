@@ -55,7 +55,6 @@ const API_BASE_URL = (function() {
 const _ACTION_MAP = {
   // 검색/인덱스 (Section 5)
   'searchAll':              { method: 'GET',  path: '/api/search' },
-  'searchAllDebug':         { method: 'GET',  path: '/api/search/debug' },
   'buildIndexSmart':        { method: 'POST', path: '/api/index/build' },
   'indexStatus':            { method: 'GET',  path: '/api/index/status' },
   'getIndexMasterStatus':   { method: 'GET',  path: '/api/index/status' },
@@ -69,30 +68,18 @@ const _ACTION_MAP = {
   'setClosed':        { method: 'POST', path: '/api/tab/closed' },
   'getTabOptions':    { method: 'GET',  path: '/api/tab/options' },
   'getTabEndDate':    { method: 'GET',  path: '/api/tab/end-date' },
-  'getCampaignStats': { method: 'GET',  path: '/api/diag/campaign-stats' },
 
   // 주문 원장(order ledger) PR-B — DB 주체 인라인 뷰어/편집/취소/수동추가
   'orderLedgerList':  { method: 'GET',  path: '/api/diag/order-ledger' },
   'orderEdit':        { method: 'POST', path: '/api/diag/order-edit' },
   'orderCancel':      { method: 'POST', path: '/api/diag/order-cancel' },
   'orderManualAdd':   { method: 'POST', path: '/api/diag/order-manual-add' },
-  'syncTabFromSheet': { method: 'POST', path: '/api/tab/sync-from-sheet' },  // deprecated
-  'syncTabNames':     { method: 'POST', path: '/api/tab/sync-tab-names' },
   // [DEPRECATED v11.8.0] 2탭 통합으로 폐기된 액션 — 서버에서 deprecated 응답 반환
-  'syncMasterSheet':  { method: 'POST', path: '/api/tab/sync-master' },       // deprecated
-  'scanMasterSheet':  { method: 'POST', path: '/api/tab/scan-master' },       // deprecated
-  'fullMasterSync':   { method: 'POST', path: '/api/tab/full-sync' },         // deprecated
-  'syncSettingsOnly': { method: 'POST', path: '/api/tab/sync-settings' },     // deprecated
   // 인덱스 스캔 + DB 동기화 (정상 경로)
-  'indexScan':        { method: 'POST', path: '/api/tab/index-scan' },
-  'indexScanSync':    { method: 'POST', path: '/api/tab/index-scan-sync' },
-  'resetAllData':     { method: 'POST', path: '/api/tab/reset-all' },
 
   'getTabDashboard':  { method: 'GET',  path: '/api/tab/dashboard' },
   'getColPrefs':      { method: 'GET',  path: '/api/tab/col-prefs' },
   'saveColPrefs':     { method: 'POST', path: '/api/tab/col-prefs' },
-  'backfillGid':      { method: 'POST', path: '/api/tab/backfill-gid' },
-  'fixSheetUrls':     { method: 'POST', path: '/api/tab/fix-sheet-urls' },
   // 옵션(Option) 기능
   'getOptionHeaders': { method: 'GET',  path: '/api/tab/option-headers' },
   'saveOptionColumns':{ method: 'POST', path: '/api/tab/option-columns' },
@@ -113,6 +100,7 @@ const _ACTION_MAP = {
   'saveIncomeInfo':     { method: 'POST', path: '/api/reviewer/profile', remap: 'saveIncomeInfo' },
   'saveBankInfo':       { method: 'POST', path: '/api/reviewer/profile', remap: 'saveBankInfo' },
   'saveAddress':        { method: 'POST', path: '/api/reviewer/profile', remap: 'saveAddress' },
+  'saveKakaoId':        { method: 'POST', path: '/api/reviewer/profile', remap: 'saveKakaoId' },
   'identityPrecheck':   { method: 'POST', path: '/api/reviewer/identity-precheck' },
 
   // 리뷰어 소식·공지
@@ -151,49 +139,25 @@ const _ACTION_MAP = {
   'markNoticeRead':     { method: 'POST', path: '/api/admin/notices/read' },
 
   // Drive 폴더 (Section 9)
-  'syncCaptureFolders':     { method: 'POST', path: '/api/drive/sync-capture' },
-  'syncReviewFolders':      { method: 'POST', path: '/api/drive/sync-review' },
-  'syncAllFolders':         { method: 'POST', path: '/api/drive/sync-all' },
-  'batchCreateFolders':     { method: 'POST', path: '/api/drive/batch-create' },
-  'resetTabFolderUrls':     { method: 'POST', path: '/api/drive/reset-folder-urls' },
-  'migrateFolderNames':     { method: 'POST', path: '/api/drive/migrate-names' },
-  'organizeCaptureFolders': { method: 'POST', path: '/api/drive/organize-capture' },
   'saveCaptureFolder':      { method: 'POST', path: '/api/drive/save-capture' },
   'updateFolderUrls':       { method: 'POST', path: '/api/drive/update-urls' },
-  'findFolderCandidates':   { method: 'POST', path: '/api/drive/find-candidates' },
-  'diagCaptureFolders':     { method: 'GET',  path: '/api/drive/diag' },
 
   // 단축URL / 메모 (Section 10)
   'createShort':  { method: 'POST', path: '/api/short/create' },
   'resolveShort': { method: 'GET',  path: '/api/short/resolve' },
-  'getMemo':      { method: 'GET',  path: '/api/memo' },
-  'saveMemo':     { method: 'POST', path: '/api/memo' },
-  'deleteMemo':   { method: 'POST', path: '/api/memo' }, // DELETE는 브라우저 제약이 있으므로 POST
 
   // 입금처리 (Section 11)
-  'getPaymentTargets': { method: 'GET',  path: '/api/payment/targets' },
-  'markPaymentDone':   { method: 'POST', path: '/api/payment/mark-done' },
 
   // 제출 (Section 12)
   'submitReview':       { method: 'POST', path: '/api/submit/review' },
   'submitOrderForm':    { method: 'POST', path: '/api/submit/order' },
-  'checkReviewFiles':   { method: 'POST', path: '/api/submit/check-files' },
-  'checkDuplicateOrder':{ method: 'POST', path: '/api/submit/check-duplicate' },
   'findSlot':           { method: 'POST', path: '/api/submit/find-slot' },
 
   // 진단/기타
-  'debugTabConfig':     { method: 'GET',  path: '/api/diag/debug-tab' },
-  'debugSheet':         { method: 'GET',  path: '/api/diag/debug-sheet' },
-  'debugBaseSheet':     { method: 'GET',  path: '/api/diag/debug-base' },
-  'debugDetailSheet':   { method: 'GET',  path: '/api/diag/debug-tab' },
   'campaignList':       { method: 'GET',  path: '/api/diag/campaign-list' },
-  'previewCampaign':    { method: 'GET',  path: '/api/diag/preview-campaign' },
-  'addCampaign':        { method: 'POST', path: '/api/diag/add-campaign' },
   'deleteCampaign':     { method: 'DELETE', path: '/api/diag/delete-campaign' },
-  'createBaseSheet':    { method: 'POST', path: '/api/diag/new-sheet' },
 
   // 뷰어
-  'getViewerData':  { method: 'GET', path: '/api/viewer/viewer-data' },
 
   // 블랙리스트
   'blacklist':      { method: 'POST', path: '/api/blacklist' },
@@ -204,10 +168,6 @@ const _ACTION_MAP = {
   'reviewerLogCancelOrder': { method: 'POST', path: '/api/trackb/reviewer-logs/cancel-order' },
 
   // 시트 상단 강제 공지문 (C1:R1) — 신규 탭 자동 삽입 + 기존 탭 일괄 적용
-  'sheetNoticeGet':      { method: 'GET',  path: '/api/diag/sheet-notice' },
-  'sheetNoticeSet':      { method: 'POST', path: '/api/diag/sheet-notice' },
-  'sheetNoticeBulk':     { method: 'POST', path: '/api/diag/sheet-notice-bulk' },
-  'sheetNoticeBulkStat': { method: 'GET',  path: '/api/diag/sheet-notice-bulk' },
 
   // 이미지 (Gemini AI + Drive)
   'extractOrderImage':   { method: 'POST', path: '/api/image/image-extract' },
@@ -225,26 +185,8 @@ const _ACTION_MAP = {
   'reviewEditReject':     { method: 'POST', path: '/api/review-edit/reject' },
 
   // Drive 폴더 관리
-  'initRootFolder':      { method: 'POST', path: '/api/drive/init-root' },
-  'syncCaptureFolders':  { method: 'POST', path: '/api/drive/sync-capture' },
-  'syncReviewFolders':   { method: 'POST', path: '/api/drive/sync-review' },
-  'syncAllFolders':      { method: 'POST', path: '/api/drive/sync-all' },
-  'batchCreateFolders':  { method: 'POST', path: '/api/drive/batch-create' },
-  'migrateToNewStructure': { method: 'POST', path: '/api/drive/migrate-to-new-structure' },
-  'driveDiag':           { method: 'GET',  path: '/api/drive/diag' },
-  'driveAccountInfo':    { method: 'GET',  path: '/api/drive/account-info' },
-  'driveOwnershipAudit': { method: 'POST', path: '/api/drive/ownership-audit' },
-  'driveTransferOwnership': { method: 'POST', path: '/api/drive/transfer-ownership' },
-  'checkDuplicates':     { method: 'POST', path: '/api/drive/check-duplicates' },
   'removeDuplicates':    { method: 'POST', path: '/api/drive/remove-duplicates' },
   'checkSubmissionStatus': { method: 'POST', path: '/api/drive/check-submission-status' },
-  'relocateOrphanReviews': { method: 'POST', path: '/api/drive/relocate-orphan-reviews' },
-  'reviewFolderBackfill': { method: 'POST', path: '/api/drive/review-folder-backfill' },
-  'reviewSubmissions':     { method: 'GET',  path: '/api/drive/review-submissions' },
-  'moveFolderContents':    { method: 'POST', path: '/api/drive/move-folder-contents' },
-  'folderAudit':           { method: 'POST', path: '/api/drive/folder-audit' },
-  'shareReviewFolder':     { method: 'POST', path: '/api/drive/share-review-folder' },
-  'reviewReportLink':      { method: 'POST', path: '/api/drive/report-link' },
   'getPendingRows':      { method: 'GET',  path: '/api/diag/pending-rows' },
   'getUnpaidRows':       { method: 'GET',  path: '/api/diag/unpaid-rows' },
   'addTab':              { method: 'POST', path: '/api/diag/add-tab' },
@@ -253,8 +195,6 @@ const _ACTION_MAP = {
   // 기타 GAS 전용 (호환성)
   'getAppUrl':      { method: 'GET',  path: '/api/diag/app-url' },
   'saveAppUrl':     { method: 'POST', path: '/api/diag/app-url' },
-  'convertToNcHeaders': { method: 'POST', path: '/api/diag/convert-nc-headers' },
-  'createCampaignSheet': { method: 'POST', path: '/api/diag/create-campaign-sheet' },
 
   // Phase 2-5: Sync Queue + Build History
   'syncQueueStats':     { method: 'GET',  path: '/api/diag/sync-queue' },
@@ -267,9 +207,6 @@ const _ACTION_MAP = {
   'buildHistory':       { method: 'GET',  path: '/api/diag/build-history' },
 
   // Phase 12: 시트 권한 관리
-  'shareSheet':         { method: 'POST', path: '/api/diag/share-sheet' },
-  'shareAllSheets':     { method: 'POST', path: '/api/diag/share-all-sheets' },
-  'sheetPermissions':   { method: 'GET',  path: '/api/diag/sheet-permissions' },
 
   // Phase 10: Archive (탭 단위 마감)
   'archiveDetect':      { method: 'GET',  path: '/api/archive/detect' },
@@ -282,17 +219,12 @@ const _ACTION_MAP = {
   'archiveRestoreRound': { method: 'POST', path: '/api/archive/restore-round' },
 
   // Phase 11: Campaign Name Fix
-  'fixCampaignNames':   { method: 'POST', path: '/api/diag/fix-campaign-names' },
-  'sheetTitles':        { method: 'GET',  path: '/api/diag/sheet-titles' },
 
   // Phase 13: Empty Index Cleanup
-  'cleanupEmptyIndexes': { method: 'POST', path: '/api/diag/cleanup-empty-indexes' },
 
   // Phase 14: 키워드 관리 + 인식 실패 탭 진단
   'getKeywords':           { method: 'GET',    path: '/api/admin/keywords' },
   'addKeyword':            { method: 'POST',   path: '/api/admin/keywords' },
-  'toggleKeyword':         { method: 'PUT',    path: '/api/admin/keywords' },    // /:id 는 호출 시 path 조합
-  'deleteKeyword':         { method: 'DELETE', path: '/api/admin/keywords' },    // /:id
   'getUnrecognized':       { method: 'GET',    path: '/api/admin/unrecognized' },
   'ignoreUnrecognized':    { method: 'POST',   path: '/api/admin/unrecognized/ignore' },
   'resolveUnrecognized':   { method: 'POST',   path: '/api/admin/unrecognized/resolve' },
@@ -311,24 +243,14 @@ const _ACTION_MAP = {
   'smartBuildStop':        { method: 'POST', path: '/api/admin/smart-build/stop' },
 
   // ★ DB 전체 재구축 (초기화 → 탭목록 재등록 → 스마트빌드)
-  'dbRebuild':             { method: 'POST', path: '/api/admin/db-rebuild' },
 
   // ★ 모집공고(캠페인) 시스템
   'campaignList':          { method: 'GET',  path: '/api/campaign/list' },
-  'campaignDetail':        { method: 'GET',  path: '/api/campaign' },  // /:id 동적
-  'campaignApply':         { method: 'POST', path: '/api/campaign' },  // /:id/apply 동적
   'campaignAdminList':     { method: 'GET',  path: '/api/campaign/admin/list' },
   'campaignAdminCreate':   { method: 'POST', path: '/api/campaign/admin/create' },
-  'campaignAdminUpdate':   { method: 'PUT',  path: '/api/campaign/admin' },   // /:id 동적
-  'campaignAdminDelete':   { method: 'DELETE', path: '/api/campaign/admin' }, // /:id 동적
-  'campaignAdminStatus':   { method: 'PUT',  path: '/api/campaign/admin' },   // /:id/status 동적
-  'campaignApplications':  { method: 'GET',  path: '/api/campaign/admin' },   // /:id/applications 동적
 
   // ★ 작업 오더(work_orders) 시스템 — 동적 /:id 미지원이라 전부 평면경로 + body/query id
-  'orderSubmit':           { method: 'POST', path: '/api/order/submit' },
   'orderGuideImage':       { method: 'POST', path: '/api/order/guide-image' },
-  'orderMyList':           { method: 'GET',  path: '/api/order/my' },
-  'orderMyUpdate':         { method: 'PUT',  path: '/api/order/my/update' },
   'orderAdminList':        { method: 'GET',  path: '/api/order/admin/list' },
   'orderNewCount':         { method: 'GET',  path: '/api/order/admin/new-count' },
   'orderAdminStatus':      { method: 'PUT',  path: '/api/order/admin/status' },
@@ -358,17 +280,8 @@ const _ACTION_MAP = {
   'csAdminSaveMemo':       { method: 'POST', path: '/api/cs/memo' },
 
   // ★ 구글시트 전체 RAW 미러링 (Section 14)
-  'rawMirror':  { method: 'POST', path: '/api/raw/mirror' },
-  'rawStatus':  { method: 'GET',  path: '/api/raw/status' },
-  'rawTabs':    { method: 'GET',  path: '/api/raw/tabs' },
-  'rawRows':    { method: 'GET',  path: '/api/raw/rows' },
 
   // ★ 명시적 컬럼 매핑 (Section 15)
-  'mappingFields': { method: 'GET',  path: '/api/mapping/fields' },
-  'mappingGet':    { method: 'GET',  path: '/api/mapping' },
-  'mappingSave':   { method: 'POST', path: '/api/mapping' },
-  'mappingCoverage': { method: 'GET', path: '/api/mapping/coverage' },
-  'mappingDrift':    { method: 'GET', path: '/api/mapping/drift' },
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -853,3 +766,21 @@ function clearAdminSession() {
 
 // console에서 확인용
 console.log('[api.js] 리뷰웹시스템 API 모듈 로드됨 — 서버:', API_BASE_URL);
+
+/**
+ * 전화번호 화면 표기 단일 출처 — `010-0000-0000` (사용자 확정 2026-09-30).
+ * ★ 표시 전용이다. 저장값은 바꾸지 않는다(로그인·중복 확인·신원 연결이 숫자만 있는 원본으로 비교한다).
+ * ★ 규칙은 workdesk.html `_fmtPhone` 과 글자 그대로 같아야 한다 — 회귀가드 tests/phoneDisplayFormat.test.js 가 대조한다.
+ * ★ 모양을 맞출 수 없는 값(번호 두 개·자릿수 이상·글자)은 원본 그대로 둔다(지어내지 않는다).
+ */
+function fmtPhone(v){
+  if(v==null) return ''; const s=String(v).trim(); if(!s) return '';
+  if(/[^0-9\s\-.()+]/.test(s)) return s;                                      // 글자·마스킹(*)이 섞인 값은 원본 유지(숫자만 남기면 글자가 사라진다)
+  let d=s.replace(/[^0-9]/g,''); if(!d) return s;
+  if(d.length===10 && d[0]!=='0') d='0'+d;
+  if(d.length===8) return '010-'+d.slice(0,4)+'-'+d.slice(4);
+  if(d.length===11) return d.slice(0,3)+'-'+d.slice(3,7)+'-'+d.slice(7);
+  if(d.length===10) return d.startsWith('02') ? '02-'+d.slice(2,6)+'-'+d.slice(6) : d.slice(0,3)+'-'+d.slice(3,6)+'-'+d.slice(6);
+  if(d.length===9 && d.startsWith('02')) return '02-'+d.slice(2,5)+'-'+d.slice(5);
+  return s;
+}

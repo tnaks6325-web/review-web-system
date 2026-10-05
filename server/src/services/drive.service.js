@@ -386,34 +386,60 @@ async function uploadFileBase64(base64Data, fileName, mimeType, parentFolderId, 
         'DRIVE_OAUTH_CLIENT_ID/SECRET/REFRESH_TOKEN 또는 서비스 계정을 설정하세요.'
       );
     }
-    const res = await sa.files.create(makeParams(_makeStream()));
-    data = res.data;
-    usedClient = 'SA';
+    try {
+      const res = await sa.files.create(makeParams(_makeStream()));
+      data = res.data;
+      usedClient = 'SA';
+    } catch (e) {
+      /* ★ 대상 폴더가 사라졌을 수 있다 — 그 폴더를 가리키던 캐시를 그 자리에서 버린다.
+         다음 시도는 다시 물어 찾거나 새로 만든다(자가치유). 실패 자체는 그대로 올린다. */
+      invalidateSubFolderById(parentFolderId);
+      throw e;
+    }
   }
 
   logger.info(`[Drive] 업로드 성공: ${data.id} (${usedClient})`);
 
   // 파일을 "링크가 있는 모든 사용자" 읽기 가능으로 설정
   // opts.shareAnyone === false 면 공개하지 않음(비공개 유지 — 예: 유입가이드 이미지는 서버 프록시로만 노출)
+  /* ★★ opts.deferShare === true 면 **응답을 기다리지 않고** 뒤에서 건다.
+     ★ 왜: 이 호출은 Drive 왕복 1회(약 1초)인데 업로드 결과에는 아무 영향이 없다 —
+       파일 ID·링크는 위 files.create 가 이미 돌려줬다. 리뷰 캡처 제출은 이 1초를
+       그대로 리뷰어가 기다리고 있었다(2026-09-23 실측 4.1초 중).
+     ★ 공개가 늦어지는 동안의 영향은 **구글 CDN 썸네일이 잠깐 실패하고 우리 프록시로
+       폴백**하는 것뿐이다(008 — 화면은 계속 뜬다). 권한 자체는 종전과 같이 걸린다.
+     ★ 그래서 **미루기는 옵트인**이다 — 인자를 안 주면 종전대로 기다린다(무회귀). */
+  let _postUpload = null;
   if (opts.shareAnyone !== false) {
-    try {
-      const d = usedClient === 'OAuth' ? oauth : _getReadDrive();
-      if (d) {
-        await d.permissions.create({
-          fileId: data.id,
-          requestBody: { role: 'reader', type: 'anyone' },
-          supportsAllDrives: true,
-        });
+    const _share = async () => {
+      try {
+        const d = usedClient === 'OAuth' ? oauth : _getReadDrive();
+        if (d) {
+          await d.permissions.create({
+            fileId: data.id,
+            requestBody: { role: 'reader', type: 'anyone' },
+            supportsAllDrives: true,
+          });
+        }
+      } catch (permErr) {
+        logger.warn(`[Drive] 권한 설정 실패 (무시): ${permErr.message}`);
       }
-    } catch (permErr) {
-      logger.warn(`[Drive] 권한 설정 실패 (무시): ${permErr.message}`);
-    }
+    };
+    _postUpload = _share;
   }
 
-  // ── ② 소유권 보정: DRIVE_OWNER_EMAIL(tnaks6325)로 이전 ──
-  //   기존엔 SA 경로만 이전했으나, OAuth 계정이 tnaks6325가 아니면 OAuth 업로드도
-  //   잘못된 계정 소유로 남는다 → SA는 항상, OAuth는 계정 불일치 시 이전.
-  await _normalizeOwner(usedClient, oauth, data.id);
+  /* ── ② 소유권 보정: DRIVE_OWNER_EMAIL(tnaks6325)로 이전 ──
+       기존엔 SA 경로만 이전했으나, OAuth 계정이 tnaks6325가 아니면 OAuth 업로드도
+       잘못된 계정 소유로 남는다 → SA는 항상, OAuth는 계정 불일치 시 이전.
+     ★★ 공개 권한과 **함께** 미룬다 — 둘 다 업로드 결과(파일 ID·링크)에 영향이 없는
+       뒷정리인데, 한쪽만 미루면 남은 쪽의 await 사이에 미룬 쪽이 끼어들어 결국 기다린 셈이 된다.
+       (OAuth 가 이미 소유주면 이 단계는 왕복 0회라 평소에도 비용이 없다.) */
+  const _after = async () => {
+    if (_postUpload) await _postUpload();
+    await _normalizeOwner(usedClient, oauth, data.id);
+  };
+  if (opts.deferShare) setImmediate(() => { _after().catch(() => {}); });
+  else await _after();
 
   return data;
 }
@@ -511,13 +537,49 @@ async function setFolderAnyoneReader(folderId) {
  * 캡처폴더 하위의 차수별 서브폴더 찾기/생성
  * 경로: DRIVE_ROOT / [캡처] 캠페인명 / 차수명(또는 탭명) /
  */
+/* ★★ 서브폴더 위치 캐시 — 같은 (부모, 이름) 을 매 요청 Drive 에 다시 묻지 않는다.
+   ★ 왜: `findFolderByName` 은 SA 로 먼저 묻고 못 찾으면 OAuth 로 한 번 더 묻는다(최대 왕복 2회).
+     Drive 는 파일 크기와 무관하게 **왕복 하나당 0.8~1.5초**라(008 실측) 리뷰 캡처 제출
+     4.1초 중 **0.9초가 이 조회 하나**였다(2026-09-23 실측).
+   ★ 폴더 ID 는 거의 변하지 않는다 — 바뀌는 경우는 사람이 폴더를 지우거나 옮겼을 때뿐이고,
+     그때는 업로드가 실패하면서 `invalidateSubFolderById` 가 그 자리에서 캐시를 비운다
+     (다음 시도는 다시 물어 찾거나 새로 만든다 = 자가치유).
+   ★ 프로세스 메모리 캐시다 — 재배포하면 비고, 인스턴스마다 따로 데워진다(정합성 문제 없음:
+     같은 이름의 폴더를 두 번 만들지 않도록 Drive 조회 결과를 담을 뿐이다). */
+const _subFolderCache = new Map();
+const SUBFOLDER_TTL_MS = Number(process.env.DRIVE_SUBFOLDER_TTL_MS || 5 * 60 * 1000);
+const SUBFOLDER_CACHE_MAX = 500;
+const _subKey = (parentFolderId, name) => String(parentFolderId) + '\u0000' + String(name);
+
+/** 그 폴더를 가리키던 캐시를 버린다(업로드가 실패하면 그 자리에서 부른다). */
+function invalidateSubFolderById(folderId) {
+  if (!folderId) return 0;
+  let n = 0;
+  for (const [k, e] of _subFolderCache) {
+    if (e && e.v && e.v.id === folderId) { _subFolderCache.delete(k); n++; }
+  }
+  return n;
+}
+
 async function getOrCreateSubFolder(parentFolderId, subFolderName) {
+  const key = _subKey(parentFolderId, subFolderName);
+  const hit = _subFolderCache.get(key);
+  if (hit && (Date.now() - hit.ts) < SUBFOLDER_TTL_MS) return hit.v;
+
   // 기존 서브폴더 검색
   const existing = await findFolderByName(subFolderName, parentFolderId);
-  if (existing) return existing;
-
   // 없으면 생성 (OAuth 사용)
-  return await createFolder(subFolderName, parentFolderId);
+  const folder = existing || await createFolder(subFolderName, parentFolderId);
+
+  if (folder && folder.id) {
+    // 오래된 항목부터 버려 메모리를 묶어 둔다(첫 항목 = 가장 먼저 들어온 것)
+    if (_subFolderCache.size >= SUBFOLDER_CACHE_MAX) {
+      const first = _subFolderCache.keys().next().value;
+      if (first !== undefined) _subFolderCache.delete(first);
+    }
+    _subFolderCache.set(key, { v: folder, ts: Date.now() });
+  }
+  return folder;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1431,6 +1493,7 @@ async function transferOwnershipInFolders(folderIds, opts = {}) {
 }
 
 module.exports = {
+  invalidateSubFolderById,
   listFolderContents,
   downloadFile,
   createFolder,

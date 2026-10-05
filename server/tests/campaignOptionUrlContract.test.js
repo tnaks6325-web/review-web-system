@@ -59,6 +59,7 @@ const normalizedOptions = JSON.parse(JSON.stringify(sandbox._normalizeOptionsInp
 }])));
 assert.deepEqual(normalizedOptions, [{
   optKey: 'blue',
+  prevOptKey: '',   // 197 이름 바꾸기 — 미전달 = '' = 종전 동작(새 선택지로 저장)
   optionUrl: 'https://store.example/item?option=blue',
   payAmount: 33000,
   recruitTotal: 15,

@@ -249,7 +249,7 @@ async function run() {
   t('기존 클래스 계약 생존(.advitem[data-i]·.ct·.pmn)',
     /class="advitem\$\{[^}]*\}" data-i="\$\{i\}"/.test(HTML) && /class="ct"/.test(HTML) && /class="pmn /.test(HTML));
   // onclick 에는 인덱스만 — 시트/업체에서 온 문자열을 넣지 않는다(M1 실측 XSS)
-  for (const [fn, pat] of [['openOwnTab', /onclick="openOwnTab\(\$\{i\}\)"/], ['editTabMemo', /onclick="editTabMemo\(event,\$\{i\}\)"/],
+  for (const [fn, pat] of [['openOwnTab', /onclick="openOwnTab\(\$\{i\}\)"/],
     ['ownMatchContract', /onclick="ownMatchContract\(event,\$\{i\}\)"/], ['selAdv', /onclick="selAdv\(\$\{i\}\)"/],
     ['deleteAdv', /onclick="event\.stopPropagation\(\);deleteAdv\(\$\{i\}\)"/]]) {
     t(`★ onclick 은 인덱스만 전달: ${fn}`, pat.test(HTML));
@@ -262,7 +262,7 @@ async function run() {
   t('★ 검색 렌더는 #ownRows 만 교체한다', /\$\('#ownRows'\)/.test(rrows) && !/#owntabsSect/.test(rrows));
   t('★ 검색 입력 핸들러가 섹션을 다시 그리지 않는다',
     /function _ovmSearch\(v\)\{[^}]*_ovmRenderRows\(\);/.test(HTML) && !/function _ovmSearch\(v\)\{[^}]*_rerenderOwnTabs/.test(HTML));
-  t('비고 편집 중 재렌더 연기 로직 유지(입력 무음 소실 방지)', /\.omemoin'\)\)\{ STATE\._ownRerenderPending=true; return; \}/.test(rr));
+  t('★ 비고 칸·편집기는 없다 (결정 186 33번 — 비고 칸 제거)', !/editTabMemo|saveOwnMemo|omemoin/.test(HTML));
   // ESC — document 에 1회
   const escM = HTML.match(/document\.addEventListener\('keydown',function\(e\)\{ if\(e\.key==='Escape'&&_ovmDrawer\)/g) || [];
   t('★ ESC 리스너는 document 에 정확히 1회(컨테이너에 붙이면 포커스 밖에서 안 닫힌다)', escM.length === 1, 'n=' + escM.length);
@@ -316,8 +316,6 @@ async function run() {
   }
   // ★ M1 — 전체 렌더에서도 검색어·건수가 살아 있는가
   t('★ 검색 입력칸에 현재 검색어를 싣는다(전체 렌더 후에도 유지)', /id="ovmQ" value="\$\{esc\(_ovmQ\)\}"/.test(HTML));
-  t('★ 비고 저장 후 재렌더도 행 경로로 수렴(검색어·건수 초기화 방지)',
-    /const rerender=\(\)=>\{ STATE\._ownRerenderPending=false;\s*\n\s*if\(\$\('#ownRows'\)\)\{ _ovmRenderRows\(\); return; \}/.test(HTML));
   t('건수·칩 표기는 한 함수(_ovmSyncCnt)로 수렴', (HTML.match(/function _ovmSyncCnt\(/g) || []).length === 1
     && /function _ovmRenderRows\(\)\{[\s\S]{0,160}_ovmSyncCnt\(\);/.test(HTML));
   // ★ M4 — 로딩 자리표시자를 깐 함수는 어떤 예외에도 화면을 종결시킨다
@@ -364,9 +362,9 @@ async function run() {
     if (info && prog && mat && setl === false) baseN = cols;
   }
   t('16가지 열 묶음 조합 전부에서 헤더 칸 ≡ grid 열', combos === 16, 'combos=' + combos);
-  // 기본 = 작업정보·진척·자료 켬 + 정산상세 접힘(사용자 확정) → 13칸. FHD 폭 상한(1560) 안에서
-  //   가로 스크롤이 없어야 한다는 약속의 전제이므로 숫자를 고정한다.
-  t('★ 기본(자료 켬·정산상세 접힘)은 13칸', baseN === 13, 'cols=' + baseN);
+  // 기본 = 작업정보·진척·자료 켬 + 정산상세 접힘(사용자 확정) → 12칸(종전 13칸에서 비고 칸 제거 — 결정 186 33번).
+  //   FHD 폭 상한(1560) 안에서 가로 스크롤이 없어야 한다는 약속의 전제이므로 숫자를 고정한다.
+  t('★ 기본(자료 켬·정산상세 접힘)은 12칸', baseN === 12, 'cols=' + baseN);
   {
     const sb = { _ovmCols: () => ({ info: true, prog: true, mat: true, setl: false }) };
     vm.createContext(sb); vm.runInContext(src, sb);
@@ -393,7 +391,7 @@ async function run() {
       sb.STATE.ownSettle['S\tT8'] = { proxyDown: true };
       return vm.runInContext('_ovmRowMatch', sb)({ sheetId: 'S', tabName: 'T8' }, 'unpaid', '') === false; })());
     t('마감 필터', m({ sheetId: 'S', tabName: 'T1', finished: true }, 'fin') === true);
-    t('검색은 작업명·브랜드·상품·계약번호·비고를 본다',
+    t('검색은 작업명·브랜드·상품·계약번호를 본다',
       vm.runInContext('_ovmRowMatch', sb)({ sheetId: 'S', tabName: '넛세린_유산균', salesId: 'X' }, 'all', '유산균') === true
       && vm.runInContext('_ovmRowMatch', sb)({ sheetId: 'S', tabName: '넛세린', contractNumber: 'C-1' }, 'all', 'c-1') === true
       && vm.runInContext('_ovmRowMatch', sb)({ sheetId: 'S', tabName: '넛세린' }, 'all', '없는말') === false);

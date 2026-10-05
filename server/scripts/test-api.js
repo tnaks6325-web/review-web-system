@@ -207,26 +207,7 @@ async function main() {
   });
   console.log('');
 
-  // ═══ 9. 메모 ═══
-  console.log('▶ [9] 메모');
-  await test('POST /api/memo (저장)', async () => {
-    const r = await req('POST', '/api/memo', { sheetId: 'test-sheet', tabName: 'test-tab', text: '테스트 메모', name: '관리자', role: 'admin' });
-    if (!r.data.ok) throw new Error(JSON.stringify(r.data));
-    return '메모 저장 성공';
-  });
-
-  await test('GET /api/memo', async () => {
-    const r = await req('GET', '/api/memo?sheetId=test-sheet&tabName=test-tab');
-    if (!r.data.ok) throw new Error(JSON.stringify(r.data));
-    return `메모: "${r.data.memo?.text || r.data.memo?.content || '(빈)'}"`;
-  });
-
-  await test('DELETE /api/memo', async () => {
-    const r = await req('DELETE', '/api/memo?sheetId=test-sheet&tabName=test-tab', null, authH());
-    if (!r.data.ok) throw new Error(JSON.stringify(r.data));
-    return '메모 삭제 성공';
-  });
-  console.log('');
+  // (9. 메모 /api/memo — 2026-09-28 제거, 결정 186 55번)
 
   // ═══ 10. 단축 URL ═══
   console.log('▶ [10] 단축 URL');
@@ -246,14 +227,7 @@ async function main() {
   });
   console.log('');
 
-  // ═══ 11. 입금처리 ═══
-  console.log('▶ [11] 입금처리');
-  await test('GET /api/payment/targets', async () => {
-    const r = await req('GET', '/api/payment/targets', null, authH());
-    if (!r.data.ok) throw new Error(JSON.stringify(r.data));
-    return `대상: ${r.data.targets?.length || 0}건`;
-  });
-  console.log('');
+  // (11. 입금처리 /api/payment — 2026-09-28 제거, 결정 186 57번. 입금은 /api/trackb/payment/*)
 
   // ═══ 12. 블랙리스트 ═══
   console.log('▶ [12] 블랙리스트');
@@ -288,13 +262,7 @@ async function main() {
   });
   console.log('');
 
-  // ═══ 14. 진단 엔드포인트 ═══
-  console.log('▶ [14] 진단');
-  await test('GET /api/diag/debug-tab', async () => {
-    const r = await req('GET', '/api/diag/debug-tab', null, authH());
-    return `debug-tab: ${r.status}`;
-  });
-  console.log('');
+  // (14. 진단 엔드포인트 debug-tab 은 2026-10-05 제거 — 결정 186 103번)
 
   // ═══ 15. 정리 (테스트 데이터 삭제) ═══
   console.log('▶ [15] 테스트 데이터 정리');

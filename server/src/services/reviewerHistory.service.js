@@ -45,11 +45,14 @@ async function loadPage(selectFields, options, db=pool) {
   const scoped=`p.owner_reviewer_id=$1 AND ${visible}
     AND (NOT $2::boolean OR (p.participant_identity_id=$3::uuid
       OR (p.participant_identity_id IS NULL AND p.participant_phone8=ANY($4::text[]))))`;
-  const filter=`($5='all' AND p.review_obligation_status IN ('pending','fulfilled','unknown')
-    OR $5='pending' AND p.review_obligation_status IN ('pending','unknown') OR $5='fulfilled' AND p.review_obligation_status='fulfilled')`;
+  // 마감된 작업의 미제출 행은 "리뷰를 써야 하는 작업"이 아니다 — 대기 목록·대기 건수에서 뺀다(완료 이력은 유지).
+  const openPending=`p.review_obligation_status IN ('pending','unknown')
+    AND NOT ${require('./reviewObligation.service').finishedTabSql('p.sheet_id','p.tab_name',"COALESCE(NULLIF(p.index_snapshot->>'tab_gid',''),NULLIF(tc.tab_gid,''))")}`;
+  const filter=`($5='all' AND (${openPending} OR p.review_obligation_status='fulfilled')
+    OR $5='pending' AND ${openPending} OR $5='fulfilled' AND p.review_obligation_status='fulfilled')`;
   // Count and page run in one statement/snapshot; no global review_index COUNT/MAX.
   const {rows}=await db.query(`WITH counts AS (
-      SELECT count(*) FILTER(WHERE p.review_obligation_status IN ('pending','unknown'))::int AS pending,
+      SELECT count(*) FILTER(WHERE ${openPending})::int AS pending,
              count(*) FILTER(WHERE p.review_obligation_status='fulfilled')::int AS done,
              md5(COALESCE(string_agg(p.id::text||':'||p.record_version::text,',' ORDER BY p.id),'')) AS version
       FROM reviewer_participations p LEFT JOIN tab_configs tc ON tc.sheet_id=p.sheet_id AND tc.tab_name=p.tab_name WHERE ${scoped}

@@ -22,8 +22,6 @@ function show(idOrEl, displayType) {
 // filesByIdx:   { [idx]: File[] }  — 슬롯별 파일 목록
 // memoByIdx:    { [idx]: string }  — 슬롯별 메모 (기존 단건 memoTxt와 별도)
 const S = { selectedRow: null, selectedRows: [], filesByIdx: {}, memoByIdx: {}, files: [], step: 1, receiptStepMode: false };
-const ADMIN_SESSION_KEY  = "rapp_admin_exp";
-const ADMIN_SESSION_MS   = 8 * 60 * 60 * 1000;
 const REVIEWER_AUTH_KEY  = "rapp_reviewer_auth";  // ★ 리뷰어 로그인 세션 키
 
 /* ═══ M2 참여형 임베드 모드 (?embed=1) — campaign.html iframe 안에서 열릴 때 ═══
@@ -93,6 +91,7 @@ async function _loadOrderIdentityContext() {
     });
     _renderSavedOrderInfoPickers();
     _renderOrderInfoSuggestions();
+    _renderAddressTools();
     return data;
   })().catch((err) => { _identityContextPromise = null; throw err; });
   return _identityContextPromise;
@@ -241,6 +240,7 @@ function _restoreSavedInfoInputHandler(el, cid, field, locked) {
   else if (field === "address") el.oninput = () => {
     _clearSavedIdentitySelection(cid, "address");
     _ofClearError(cid + "_address"); _invalidateIdentityApproval(cid);
+    _syncAddressTools(cid, true);
   };
 }
 
@@ -285,6 +285,241 @@ function _renderSavedOrderInfoPickers() {
     });
   });
   _renderSavedBankAccountPicker();
+}
+
+/* ═══ 조각 5: 배송주소 — 캡처 주소를 명의 주소로 [저장] · 저장 주소 고르기 (결정 기록 181) ═══
+   ★ 명의 주소는 참여 전에 묻지 않는다. 구매양식에서 캡처로 읽은(또는 고친) 주소를 [저장]으로 그 명의에 넣는다.
+     [저장]은 그 명의에 저장된 주소가 없을 때만 보이고, 서버도 빈 칸만 채운다(이미 있는 주소는 덮지 않는다).
+   ★ 저장하면 명의 확인(캡처 대조)을 자동으로 다시 돌린다 — 저장 주소가 승인 증명에 묶여 있어서
+     그대로 두면 제출이 "저장 정보가 변경되었습니다"로 거절된다(사용자 확정 2026-09-26 1나).
+   ★ 고르는 주소 = 이 참여 명의의 저장 주소 + 이 명의로 지난 주문에 쓴 주소(최대 3개). 다른 명의 주소는 섞지 않는다(2가).
+     1개면 칸 위 칩 [적용], 2개 이상이면 칸 아래 한 줄 드롭다운(펼쳐도 아래 내용을 밀어낸다 — iframe 잘림 방지). */
+const _ADDR_MASK_RE = /[*＊●○◯◉•]/;
+const _addrUi = {};
+function _addrState(cid) { return _addrUi[cid] || (_addrUi[cid] = { applied: null, open: false, saving: false, saved: false, aiValue: null }); }
+function _addrKey(v) { return String(v || "").replace(/[()\[\],./·]/g, " ").replace(/\s+/g, " ").trim().toLowerCase(); }
+function _addrSelected() { return (_activeIdentityContext && _activeIdentityContext.selectedIdentity) || null; }
+
+/** 이 참여 명의가 고를 수 있는 주소 — 저장 주소 먼저, 나머지는 많이 쓴 순. 가림(*) 주소는 뺀다. */
+function _addressChoices() {
+  const sel = _addrSelected(); if (!sel) return [];
+  const list = []; const byKey = new Map();
+  const add = (address, saved, uses) => {
+    const value = String(address || "").trim();
+    if (!value || _ADDR_MASK_RE.test(value)) return;
+    const key = _addrKey(value);
+    const hit = byKey.get(key);
+    if (hit) { hit.saved = hit.saved || saved; hit.uses = Math.max(hit.uses, uses); return; }
+    const item = { address: value, saved, uses };
+    byKey.set(key, item); list.push(item);
+  };
+  add(sel.address, true, 0);
+  (_orderInfoSuggestions || []).forEach((s) => add(s && s.address, false, Number(s && s.useCount) || 1));
+  list.sort((a, b) => (b.saved - a.saved) || (b.uses - a.uses));
+  return list.slice(0, 3);
+}
+function _addressChoiceMeta(c) {
+  return (c.saved ? "저장 주소" : "") + (c.saved && c.uses ? " · " : "") + (c.uses ? "주문 " + c.uses + "번 사용" : "");
+}
+
+function _addressChipMarkup(cid) {
+  return `<div class="of-addr-chip" id="${cid}_addrChip" hidden></div>`;
+}
+function _addressToolsMarkup(cid) {
+  return `<div class="of-addr-help" id="${cid}_addrHelp" hidden></div>`
+    + `<div class="of-addr-pick" id="${cid}_addrPick" hidden></div>`
+    + `<div class="of-addr-save" id="${cid}_addrSave" hidden>`
+    + `<span class="of-addr-save-text" id="${cid}_addrSaveText"></span>`
+    + `<button type="button" class="of-addr-save-btn" id="${cid}_addrSaveBtn" onclick="_saveCardAddress('${cid}')">저장</button></div>`;
+}
+
+function _renderAddressTools() { (_orderCardIds || []).forEach((cid) => _syncAddressTools(cid, false)); }
+
+/** 주소 칸 주변(칩·드롭다운·참고 문구·[저장])을 지금 값에 맞춰 다시 그린다. fromInput = 사용자가 칸을 고쳤다. */
+function _syncAddressTools(cid, fromInput) {
+  const ta = document.getElementById(cid + "_address"); if (!ta) return;
+  const ui = _addrState(cid);
+  const sel = _addrSelected();
+  const value = String(ta.value || "").trim();
+  const masked = _ADDR_MASK_RE.test(value);
+  const name = (sel && sel.name) || "이";
+  const choices = sel ? _addressChoices() : [];
+  const appliedIdx = choices.findIndex((c) => value && _addrKey(c.address) === _addrKey(value));
+  if (fromInput) ui.open = false;
+
+  // 저장 행 — 그 명의에 저장된 주소가 없을 때만(저장 직후엔 "저장됨"으로 남는다)
+  const saveRow = document.getElementById(cid + "_addrSave");
+  const showSave = !!sel && !!sel.identityKey && (ui.saved || !String(sel.address || "").trim());
+  if (saveRow) {
+    saveRow.hidden = !showSave;
+    const txt = document.getElementById(cid + "_addrSaveText");
+    const btn = document.getElementById(cid + "_addrSaveBtn");
+    if (showSave && txt && btn) {
+      saveRow.classList.toggle("is-done", ui.saved);
+      saveRow.classList.toggle("is-off", !ui.saved && (masked || value.length < 5));
+      if (ui.saved) {
+        txt.textContent = (ui.savedName || name) + " 명의 주소로 저장됐어요";
+        btn.innerHTML = "✓ 저장됨"; btn.disabled = true; btn.className = "of-addr-save-btn is-done";
+      } else {
+        txt.textContent = "이 주소를 " + name + " 명의 주소로";
+        btn.innerHTML = ui.saving ? '<span class="of-addr-spin" aria-hidden="true"></span>' : "저장";
+        btn.setAttribute("aria-label", ui.saving ? "저장 중" : "저장");
+        btn.disabled = ui.saving || masked || value.length < 5;
+        btn.className = "of-addr-save-btn" + (ui.saving ? " is-busy" : "");
+      }
+    }
+  }
+
+  // 참고 문구 — 배지가 아니라 일반 참고 텍스트
+  const help = document.getElementById(cid + "_addrHelp");
+  if (help) {
+    let msg = ""; let warn = false;
+    if (value && masked) { msg = showSave && !ui.saved ? "* 가려진 부분(*)을 고치면 저장할 수 있어요" : "* 가려진 부분(*)은 직접 고쳐야 해요"; warn = true; }
+    else if (ui.aiValue != null && value) msg = _addrKey(value) === _addrKey(ui.aiValue) ? "* AI 자동추출 주소 · 오탈자는 직접 수정 가능" : "* 직접 수정한 주소";
+    help.textContent = msg; help.hidden = !msg; help.classList.toggle("is-warn", warn);
+  }
+
+  // 1개 = 칸 위 칩 [적용]
+  const chip = document.getElementById(cid + "_addrChip");
+  if (chip) {
+    if (choices.length === 1) {
+      const c = choices[0]; const on = appliedIdx === 0;
+      const head = (on ? "✓ " : "") + name + (c.saved ? " 저장 주소" : " 지난 주문 주소") + (on ? " 적용됨" : "");
+      chip.className = "of-addr-chip" + (on ? " is-on" : "");
+      chip.innerHTML = '<div class="of-addr-chip-ad"><b></b><span></span></div>'
+        + (on ? "" : '<button type="button" class="of-addr-chip-btn" onclick="_applyAddressChoice(\'' + cid + '\',0)">적용</button>');
+      chip.querySelector("b").textContent = head;
+      chip.querySelector("span").textContent = c.address;
+      chip.hidden = false;
+    } else { chip.hidden = true; chip.innerHTML = ""; }
+  }
+
+  // 2개 이상 = 칸 아래 한 줄 드롭다운
+  const pick = document.getElementById(cid + "_addrPick");
+  if (pick) {
+    if (choices.length >= 2) {
+      const label = appliedIdx >= 0
+        ? "✓ " + name + " 주소 " + (appliedIdx + 1) + "번째 적용됨 · 바꾸기"
+        : name + " 주소 " + choices.length + "개 중 선택";
+      pick.className = "of-addr-pick" + (ui.open ? " is-open" : "");
+      pick.innerHTML = '<button type="button" class="of-addr-pick-btn" aria-haspopup="listbox" aria-expanded="' + (ui.open ? "true" : "false")
+        + '" onclick="_toggleAddressPick(\'' + cid + '\')"><span class="of-addr-pick-pin" aria-hidden="true">📍</span><span class="of-addr-pick-label"></span><span class="of-addr-pick-car" aria-hidden="true">▾</span></button>'
+        + (ui.open ? '<div class="of-addr-pick-menu" role="listbox"></div>' : "");
+      pick.querySelector(".of-addr-pick-label").textContent = label;
+      const menu = pick.querySelector(".of-addr-pick-menu");
+      if (menu) choices.forEach((c, i) => {
+        const opt = document.createElement("button");
+        opt.type = "button"; opt.className = "of-addr-pick-opt" + (i === appliedIdx ? " is-on" : "");
+        opt.setAttribute("role", "option"); opt.setAttribute("aria-selected", i === appliedIdx ? "true" : "false");
+        const ad = document.createElement("span"); ad.className = "of-addr-pick-ad"; ad.textContent = c.address;
+        const meta = document.createElement("small"); meta.textContent = _addressChoiceMeta(c); ad.appendChild(meta);
+        const ck = document.createElement("span"); ck.className = "of-addr-pick-ck"; ck.setAttribute("aria-hidden", "true"); ck.textContent = i === appliedIdx ? "✓" : "";
+        opt.appendChild(ad); opt.appendChild(ck);
+        opt.addEventListener("click", () => window._applyAddressChoice(cid, i));
+        menu.appendChild(opt);
+      });
+      pick.hidden = false;
+    } else { pick.hidden = true; pick.innerHTML = ""; ui.open = false; }
+  }
+}
+
+window._toggleAddressPick = function (cid) {
+  const ui = _addrState(cid); ui.open = !ui.open;
+  Object.keys(_addrUi).forEach((k) => { if (k !== cid) _addrUi[k].open = false; });
+  _syncAddressTools(cid, false);
+};
+document.addEventListener("click", (e) => {
+  // ★ 드롭다운 버튼을 누르면 그 자리에서 다시 그려 원래 버튼은 문서에서 떨어져 나간다 — 떨어진 버튼을
+  //   "바깥 클릭"으로 보면 열자마자 닫힌다(테스트 서버 실측 2026-09-26). 문서에 붙어 있는 대상만 판단한다.
+  if (!e.target || !e.target.isConnected) return;
+  if (e.target.closest && e.target.closest(".of-addr-pick")) return;
+  Object.keys(_addrUi).forEach((cid) => { if (_addrUi[cid].open) { _addrUi[cid].open = false; _syncAddressTools(cid, false); } });
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  Object.keys(_addrUi).forEach((cid) => { if (_addrUi[cid].open) { _addrUi[cid].open = false; _syncAddressTools(cid, false); } });
+});
+
+/** 칩·드롭다운에서 주소를 골라 칸에 채운다. 저장 주소를 고른 경우만 "명의 저장정보 선택"으로 기록한다. */
+window._applyAddressChoice = function (cid, idx) {
+  const c = _addressChoices()[idx];
+  const ta = document.getElementById(cid + "_address");
+  const sel = _addrSelected();
+  if (!c || !ta || !sel) return;
+  ta.value = c.address;
+  ta.classList.remove("ai-filled", "ai-filled-asterisk", "ai-locked");
+  ta.style.paddingRight = "";
+  ta.parentElement?.querySelector(".ai-lock-badge")?.remove();
+  const st = _cardAiState[cid];
+  if (st) {
+    st.savedIdentitySelections = st.savedIdentitySelections || {};
+    if (c.saved) st.savedIdentitySelections.address = sel.identityKey;
+    else delete st.savedIdentitySelections.address;
+  }
+  const ui = _addrState(cid); ui.open = false; ui.aiValue = null;
+  _ofClearError(cid + "_address");
+  _invalidateIdentityApproval(cid);
+  _syncAddressTools(cid, false);
+  _embedSaveForm();
+  _syncSubmissionIdentityAction();
+};
+
+/** [저장] — 그 칸의 주소를 이 참여 명의 주소로 저장(빈 칸만) → 명의 확인을 다시 돌린다. */
+window._saveCardAddress = async function (cid) {
+  const ui = _addrState(cid);
+  const sel = _addrSelected();
+  const ta = document.getElementById(cid + "_address");
+  if (ui.saving || ui.saved || !sel || !sel.identityKey || !ta) return;
+  const value = String(ta.value || "").replace(/\s+/g, " ").trim();
+  if (value.length < 5 || _ADDR_MASK_RE.test(value)) { showToast("배송 주소를 확인해주세요", "error"); return; }
+  ui.saving = true; _syncAddressTools(cid, false);
+  try {
+    const res = await fetch(API_BASE_URL + "/api/reviewer/profile/identities/" + encodeURIComponent(sel.identityKey) + "/address", {
+      method: "PATCH", headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
+      body: JSON.stringify({ address: value }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data || !data.ok) throw new Error((data && data.error) || "주소를 저장하지 못했어요. 다시 눌러주세요.");
+    const stored = String(data.address || value).trim();
+    sel.address = stored;
+    (_activeIdentityContext?.savedIdentities || []).forEach((x) => { if (x && x.identityKey === sel.identityKey) x.address = stored; });
+    ui.saving = false; ui.saved = true; ui.savedName = sel.name || "";
+    _syncAddressTools(cid, false);
+    if (data.filled === false) showToast("이미 저장된 주소가 있어요");
+  } catch (err) {
+    ui.saving = false; _syncAddressTools(cid, false);
+    showToast(err.message || "주소를 저장하지 못했어요. 다시 눌러주세요.", "error");
+    return;
+  }
+  await _recheckCardIdentity(cid);
+};
+
+/**
+ * 명의 저장 정보가 바뀐 뒤 명의 확인을 다시 돌린다(같은 캡처 · 같은 추출 증명 — AI 재추출 없음).
+ * ★ 사용자가 고친 주소는 지킨다 — 다시 맞춰 보는 과정이 칸을 캡처 값으로 되돌리면 되살리고, 고친 값 확인 단계로 넘긴다.
+ * ★ 캡처가 아직 없으면 명의 정보만 새로 받는다(확인할 것이 없다).
+ */
+async function _recheckCardIdentity(cid) {
+  _identityContextPromise = null;
+  try { await _loadOrderIdentityContext(); } catch (_) { /* 아래 대조가 다시 시도한다 */ }
+  const st = _cardAiState[cid];
+  if (!st || !st.extractToken || !st.proofExtracted) { _syncSubmissionIdentityAction(); return; }
+  const ta = document.getElementById(cid + "_address");
+  const typed = ta ? ta.value : "";
+  const requestId = st.analysisRequestId;
+  st.extracted = { ...st.proofExtracted };
+  st.approvalToken = ""; st.priorApprovalToken = ""; st.reviewToken = ""; st.matchError = false;
+  st.identityBusy = true;
+  _renderIdentityMatchState(cid, "REVIEW", ["저장한 정보로 명의를 다시 확인하고 있어요."], false);
+  try { await _matchCardIdentity(cid, requestId); }
+  finally { if (st.analysisRequestId === requestId) st.identityBusy = false; }
+  if (st.analysisRequestId !== requestId) return;
+  if (ta && _addrKey(ta.value) !== _addrKey(typed)) {
+    ta.value = typed;
+    _invalidateIdentityApproval(cid);
+  }
+  _syncAddressTools(cid, false);
+  _renderIdentityMatchState(cid, st.identityStatus || "ERROR", st.identityReasons || [], !!st.identityCanManual);
 }
 
 function _renderSavedBankAccountPicker() {
@@ -406,6 +641,7 @@ window._applySavedOrderInfo = function (option) {
   const triggerLabel = wrap?.querySelector(".of-saved-info-trigger-label");
   if (triggerLabel) triggerLabel.textContent = option.textContent;
   _closeSavedInfoDropdowns();
+  if (appliedFields.includes("address")) { _addrState(cid).aiValue = null; _syncAddressTools(cid, false); }
   _embedSaveForm();
   _syncSubmissionIdentityAction();
   showToast((identity.name || "선택한") + "님의 " + (appliedFields.length > 1
@@ -478,7 +714,7 @@ function _renderOrderInfoSuggestions() {
       const recipient = document.createElement("strong");
       recipient.textContent = item.recipient || "수취인 없음";
       const phone = document.createElement("span");
-      phone.textContent = item.phone || "";
+      phone.textContent = (typeof fmtPhone==='function'?fmtPhone(item.phone || ""):item.phone || "");
       top.append(recipient, phone);
       if (Number(item.useCount) > 1) {
         const used = document.createElement("span");
@@ -534,6 +770,7 @@ function _applyOrderInfoSuggestion(button) {
     _ofClearError(cid + "_" + field);
   }
   _invalidateIdentityApproval(cid);
+  _addrState(cid).aiValue = null; _syncAddressTools(cid, false);
   _embedSaveForm();
   _syncSubmissionIdentityAction();
   showToast("수취인·연락처·주소를 함께 입력했습니다.", "success");
@@ -1314,12 +1551,6 @@ function _onNameInput() { /* authScreen 기반 실시간 유효성 검사 없음
 async function _onNameNext()       { /* 미사용: _doLogin() 으로 대체 */ }
 async function _onPhoneAuthSubmit(){ /* 미사용: _doLogin() 으로 대체 */ }
 
-/* ── 미등록 차단 블록에서 등록 모달 열기 ── */
-function _openRegisterFromBlock() {
-  const nrWrap = document.getElementById("notRegisteredWrap");
-  if (nrWrap) nrWrap.style.display = "none";
-  openRegisterModal();
-}
 
 /* ══════════════════════════════════════════════════════════════
    ★★★ 통합 로그인/등록 화면 JS (authScreen 기반) ★★★
@@ -1637,10 +1868,11 @@ function _hideLoginBlocked() {
 /* ── 등록 확인 모달 제어 ── */
 let _pendingRegData = null; // 확인 대기 중인 등록 데이터
 
-function _showRegConfirm(name, phone) {
+function _showRegConfirm(name, phone, kakaoId) {
   // 정보 채우기
   document.getElementById("rcName").textContent  = name;
-  document.getElementById("rcPhone").textContent = phone;
+  document.getElementById("rcPhone").textContent = (typeof fmtPhone==='function'?fmtPhone(phone):phone);
+  const rcK = document.getElementById("rcKakao"); if (rcK) rcK.textContent = kakaoId || "—";
   // 모달 표시
   document.getElementById("regConfirmOverlay").classList.add("show");
   // 포커스 트랩
@@ -1658,9 +1890,9 @@ function _hideRegConfirm() {
 async function _confirmRegister() {
   if (!_pendingRegData) return;
   _hideRegConfirm();
-  const { name, phone, p1, p2 } = _pendingRegData;
+  const { name, phone, p1, p2, kakaoId } = _pendingRegData;
   _pendingRegData = null;
-  await _submitRegister(name, phone, p1, p2);
+  await _submitRegister(name, phone, p1, p2, kakaoId);
 }
 
 // "아니요, 처음부터 다시 입력" 클릭 → 폼 초기화 후 모달 닫기
@@ -1671,6 +1903,7 @@ function _cancelRegister() {
   document.getElementById("regNameInline").value    = "";
   document.getElementById("regPhone1Inline").value  = "";
   document.getElementById("regPhone2Inline").value  = "";
+  { const k = document.getElementById("regKakaoInline"); if (k) k.value = ""; }
   document.getElementById("regConsentInline").checked = false;
   _clearRegErr();
   // 이름 입력 필드에 포커스
@@ -1699,6 +1932,8 @@ async function _doRegister() {
   const p1     = (document.getElementById("regPhone1Inline").value || "").replace(/[^0-9]/g, "");
   const p2     = (document.getElementById("regPhone2Inline").value || "").replace(/[^0-9]/g, "");
   const agree  = document.getElementById("regConsentInline").checked;
+  // 카카오톡 아이디 — 필수. 앞의 @ 는 떼고, 형식은 서버(utils/kakaoId.js)와 같은 규칙으로 먼저 알려 준다.
+  const kakaoId = ((document.getElementById("regKakaoInline") || {}).value || "").trim().replace(/^@+/, "");
 
   if (!name || name.length < 2) {
     _showRegErr("이름을 2글자 이상 입력하세요.");
@@ -1708,6 +1943,16 @@ async function _doRegister() {
   if (p1.length !== 4 || p2.length !== 4) {
     _showRegErr("전화번호를 정확히 입력하세요. (각 4자리)");
     document.getElementById(p1.length < 4 ? "regPhone1Inline" : "regPhone2Inline").focus();
+    return;
+  }
+  if (!kakaoId) {
+    _showRegErr("카카오톡 아이디를 입력하세요.");
+    document.getElementById("regKakaoInline").focus();
+    return;
+  }
+  if (!/^[A-Za-z0-9._-]{2,30}$/.test(kakaoId)) {
+    _showRegErr("카카오톡 아이디는 영문·숫자·. _ - 로 2~30자입니다. (카톡 → 설정 → 프로필 관리에서 확인)");
+    document.getElementById("regKakaoInline").focus();
     return;
   }
   if (!agree) {
@@ -1722,12 +1967,12 @@ async function _doRegister() {
   // ── 검증 통과 → 확인 모달 표시 ──
   const phone = "010" + p1 + p2;
   const phoneFmt = "010-" + p1 + "-" + p2;
-  _pendingRegData = { name, phone, p1, p2 };
-  _showRegConfirm(name, phoneFmt);
+  _pendingRegData = { name, phone, p1, p2, kakaoId };
+  _showRegConfirm(name, phoneFmt, kakaoId);
 }
 
 // 실제 서버 전송 (확인 버튼 클릭 후 호출)
-async function _submitRegister(name, phone, p1, p2) {
+async function _submitRegister(name, phone, p1, p2, kakaoId) {
   const btn = document.getElementById("btnRegisterInline");
   btn.disabled  = true;
   btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 등록 중...';
@@ -1736,9 +1981,9 @@ async function _submitRegister(name, phone, p1, p2) {
   try {
     let data;
     try {
-      data = await gasPost({ action: "registerReviewer", name, phone, consent: "true" });
+      data = await gasPost({ action: "registerReviewer", name, phone, consent: "true", kakaoId });
     } catch (_) {
-      data = await gasGet({ action: "registerReviewer", name, phone, consent: "true" });
+      data = await gasGet({ action: "registerReviewer", name, phone, consent: "true", kakaoId });
     }
 
     if (data && data.ok) {
@@ -2910,13 +3155,25 @@ const _preState = {};                // scope → { blocked, duplicateBlocked, c
 function _preCtx(idx) {
   const rows = (S.selectedRows && S.selectedRows.length) ? S.selectedRows : (S.selectedRow ? [S.selectedRow] : []);
   const it = rows[idx || 0] || rows[0] || {};
+  /* ★★★ 로그인 세션은 **이 자리에서 다시 읽는다**(`_loadAuthSession` 단일 출처).
+     — 종전엔 `authSession` 을 맨몸으로 참조했는데 그 이름은 구매양식 모드 함수의
+       **지역 변수**(`let authSession`)라 여기서는 존재하지 않는다 → 호출할 때마다
+       ReferenceError. 첨부 경로 3곳(`addFiles`·`_mrAddFiles`·`_csAddFiles`)이
+       `_preCheckFiles(..., { ..._preCtx(idx) })` 로 부르므로 **인자 평가 단계에서** 터졌고,
+       그 셋은 전부 async 인데 호출부가 await·catch 를 하지 않아 rejected promise 가
+       조용히 사라졌다 ⇒ 파일 첨부·미리보기는 그 앞에서 이미 끝나 **화면은 정상으로 보이는데
+       1차 필터만 배포 이래 한 번도 실행되지 않았다**(2026-08-06 ~ 2026-09-22, 서버 요청 0건).
+     ★ 다른 함수의 지역 변수에 기대지 않는다 — 리뷰검수 화면의 프리변수 무한로딩과 같은 계열.
+     ★ 세션 조회가 실패해도 판정은 계속한다(fail-open) — 이름·연락처는 중복 대조용 보조값이다. */
+  let au = {};
+  try { au = _loadAuthSession() || {}; } catch (_) { au = {}; }
   // ★ 줄 번호·이름·연락처를 함께 보낸다 — 서버가 "이 리뷰어가 **다른 건에** 이미 낸 사진인지"를
   //   첨부 즉시 대조하기 위한 최소 정보다(같은 건 재첨부는 중복으로 치지 않으므로 줄 번호가 필요).
   return {
     sheetId: it.sheetId || '', tabName: it.tabName || '',
     rowIndex: (it.rowIndex != null ? it.rowIndex : null),
-    reviewerName: it.name || (authSession && authSession.name) || '',
-    phone8: (authSession && authSession.phone8) || '',
+    reviewerName: it.name || au.name || '',
+    phone8: au.phone8 || '',
   };
 }
 
@@ -3086,7 +3343,28 @@ async function _preCheckOne(fileObj, ctx) {
  * 첨부된 파일들을 판별해 상태를 갱신한다. 세 첨부 경로(단일·다건·슬롯)가 모두 이걸 부른다.
  * ★ 미리보기 모드(관리자)에서는 돌리지 않는다 — 제출 자체가 막혀 있어 의미가 없다.
  */
+/**
+ * ★★★ 1차 필터는 **어떤 예외에도 조용히 사라지지 않는다**.
+ *   호출부 6곳이 `await` 도 `.catch()` 도 하지 않으므로(첨부 직후 비차단 실행),
+ *   안에서 던진 예외는 아무도 받지 않는 rejected promise 가 되어 **화면은 정상인데
+ *   판정만 영영 안 도는** 상태를 만든다(2026-08-06 `_preCtx` 프리변수 사고가 정확히 이것).
+ * ★★ 특히 `checking:true` 가 남으면 `_preHasBlock()` 이 **제출을 영구 차단**한다 —
+ *   그래서 실패 시 반드시 그 플래그를 내리고 화면을 종결한다(fail-open: 판정만 생략).
+ */
 async function _preCheckFiles(scope, anchorId, fileObjs, ctx) {
+  try {
+    return await _preCheckFilesInner(scope, anchorId, fileObjs, ctx);
+  } catch (e) {
+    console.warn('[precheck] 판정 실패(통과 처리):', (e && e.message) || e);
+    try {
+      const s = _preGet(scope);
+      s.checking = false;
+      _preRender(scope, anchorId);
+    } catch (_) { /* 화면 정리까지 실패해도 첨부·제출은 막지 않는다 */ }
+  }
+}
+
+async function _preCheckFilesInner(scope, anchorId, fileObjs, ctx) {
   const s = _preGet(scope);
   s._anchorId = anchorId;
   if (_PREVIEW_MODE || !Array.isArray(fileObjs) || fileObjs.length === 0) {
@@ -4106,51 +4384,13 @@ function resetApp() {
 
 /* ── 관리자 세션 (search.html에서는 미사용 — stub 유지) ── */
 function isAdminLoggedIn() { return false; }
-function setAdminSession() {}
 function clearAdminSession() {}
-function getAdminSessionRemaining() { return null; }
 
 /* ── GAS URL 설정 모달 (비밀번호 인증) ── */
 const GAS_URL_PW = "rhakdnjdy1!"; // 설정 접근 비밀번호
 
-function openGasUrlModal() {
-  // 항상 STEP1(비밀번호)부터 시작
-  show("gasUrlStep1");
-  hide("gasUrlStep2");
-  const pwEl = document.getElementById("gasUrlPwInput");
-  pwEl.value = "";
-  hide("gasUrlPwError");
-  hide("gasUrlError");
-  show("gasUrlModal", "flex");
-  setTimeout(() => pwEl.focus(), 100);
-}
 function closeGasUrlModal() {
   hide("gasUrlModal");
-}
-function verifyGasUrlPw() {
-  const pw    = document.getElementById("gasUrlPwInput").value;
-  const errEl = document.getElementById("gasUrlPwError");
-  hide(errEl);
-  if (!pw) {
-    errEl.textContent = "비밀번호를 입력하세요.";
-    show(errEl);
-    return;
-  }
-  if (pw !== GAS_URL_PW) {
-    errEl.textContent = "비밀번호가 틀렸습니다.";
-    show(errEl);
-    document.getElementById("gasUrlPwInput").value = "";
-    document.getElementById("gasUrlPwInput").focus();
-    return;
-  }
-  // 비밀번호 확인 성공 → STEP2로 전환
-  hide("gasUrlStep1");
-  const urlInput = document.getElementById("gasUrlInput");
-  urlInput.value = APP_CONFIG.GAS_WEB_APP_URL || "";
-  hide("gasUrlError");
-  show("gasUrlStep2");
-  _renderGasUrlHistory(); // ← 이력 목록 갱신
-  setTimeout(() => urlInput.focus(), 100);
 }
 function saveGasUrl() {
   const url   = document.getElementById("gasUrlInput").value.trim();
@@ -4209,58 +4449,6 @@ function _addGasUrlHistory(url) {
   try { localStorage.setItem(GAS_URL_HISTORY_KEY, JSON.stringify(list)); } catch (_) {}
 }
 
-/** 이력 전체 삭제 */
-function clearGasUrlHistory() {
-  if (!confirm("변경 이력을 모두 삭제하시겠습니까?")) return;
-  try { localStorage.removeItem(GAS_URL_HISTORY_KEY); } catch (_) {}
-  _renderGasUrlHistory();
-}
-
-/** 이력 목록을 모달에 렌더링 */
-function _renderGasUrlHistory() {
-  const wrap = document.getElementById("gasUrlHistoryWrap");
-  const list = document.getElementById("gasUrlHistoryList");
-  if (!wrap || !list) return;
-  const history = _loadGasUrlHistory();
-  if (!history.length) { wrap.style.display = "none"; return; }
-  wrap.style.display = "block";
-  list.innerHTML = history.map((h, i) => {
-    const dt  = new Date(h.savedAt);
-    const pad = n => String(n).padStart(2, "0");
-    const dateStr = `${dt.getFullYear()}.${pad(dt.getMonth()+1)}.${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
-    // URL 중간 생략 (앞 30자 + … + 끝 20자)
-    const short = h.url.length > 54
-      ? h.url.slice(0, 32) + "…" + h.url.slice(-20)
-      : h.url;
-    const isCurrent = (APP_CONFIG.GAS_WEB_APP_URL === h.url);
-    return `
-      <div class="gas-url-history-item${isCurrent ? ' gas-url-history-current' : ''}"
-           onclick="_selectGasUrlHistory('${i}')" title="${h.url}">
-        <div style="display:flex;align-items:center;gap:6px;min-width:0">
-          <span class="gas-url-ver-badge">v${h.version}</span>
-          <span class="gas-url-history-url">${short}</span>
-          ${isCurrent ? '<span class="gas-url-cur-tag">현재</span>' : ''}
-        </div>
-        <span class="gas-url-history-date">${dateStr}</span>
-      </div>`;
-  }).join('');
-}
-
-/** 이력 항목 클릭 → 입력칸에 자동 입력 */
-function _selectGasUrlHistory(idx) {
-  const history = _loadGasUrlHistory();
-  const entry   = history[Number(idx)];
-  if (!entry) return;
-  const input = document.getElementById("gasUrlInput");
-  if (input) {
-    input.value = entry.url;
-    input.focus();
-    // 선택 피드백
-    document.querySelectorAll(".gas-url-history-item").forEach((el, i) => {
-      el.classList.toggle("gas-url-history-selected", i === Number(idx));
-    });
-  }
-}
 
 /** GAS PropertiesService에 URL 저장 (백그라운드, 비동기) */
 async function _saveAppUrlToGas(url) {
@@ -4277,22 +4465,8 @@ async function _saveAppUrlToGas(url) {
   }
 }
 
-/* ── 관리자 접근 차단 (search.html에서는 모든 경로 비활성) ── */
-function openAdminLogin() {}
-function closeAdminLogin() {}
-async function submitAdminLogin() {}
-function enterAdminScreen() {}
 function exitAdmin() {}
 
-/* ── 관리자 탭 전환 ── */
-function switchAdminTab(tabName) {
-  document.querySelectorAll(".admin-tab-btn").forEach(b => b.classList.remove("active"));
-  document.querySelectorAll(".admin-tab-pane").forEach(p => p.classList.remove("active"));
-  const btn  = document.querySelector(`.admin-tab-btn[data-tab="${tabName}"]`);
-  const pane = document.getElementById(`tab-${tabName}`);
-  if (btn)  btn.classList.add("active");
-  if (pane) pane.classList.add("active");
-}
 
 /* ── 제출 현황 대시보드 ── */
 async function loadAdminDashboard() {
@@ -4564,143 +4738,6 @@ function _buildTabUrl(sheetUrl, sheetId, tabGid) {
   return baseUrl;
 }
 
-// 대시보드 렌더링 (외부에서 data를 직접 넘겨 재렌더링 가능)
-function renderDashboard(data) {
-  const wrap  = document.getElementById("dashboardWrap");
-  const stats = data.stats || [];
-  const grand = data.grand || { total: 0, submitted: 0, pending: 0 };
-  const rate  = grand.total > 0 ? Math.round(grand.submitted / grand.total * 100) : 0;
-  document.getElementById("sumTotal").textContent   = grand.total.toLocaleString();
-  document.getElementById("sumDone").textContent    = grand.submitted.toLocaleString();
-  document.getElementById("sumPending").textContent = grand.pending.toLocaleString();
-  document.getElementById("sumRate").textContent    = rate + "%";
-  show("dashboardSummary");
-  if (!stats.length) {
-    wrap.innerHTML = '<div class="admin-empty"><i class="fas fa-inbox"></i><p>데이터가 없습니다</p></div>';
-    return;
-  }
-  // 기존 렌더링 로직 재사용: loadAdminDashboard의 render 부분을 그대로 실행
-  // stats를 직접 주입해 재렌더링
-  wrap.innerHTML = "";
-
-  // ── 컬럼 헤더: wrap 직속 (scrollOuter 밖) → sticky 정상 동작 ──
-  const colHdr = document.createElement("div");
-  colHdr.id = "dashColHeader";
-  colHdr.className = "dash-col-header";
-  _buildColHeader(colHdr);
-  wrap.appendChild(colHdr);
-
-  // ── 가로 스크롤 래퍼 (캠페인 블록만 포함) ──
-  const scrollOuter2 = document.createElement("div");
-  scrollOuter2.id = "dashboardScrollOuter";
-  const scrollInner2 = document.createElement("div");
-  scrollInner2.id = "dashboardScrollInner";
-  scrollOuter2.appendChild(scrollInner2);
-  wrap.appendChild(scrollOuter2);
-
-  stats.forEach((c, ci) => {
-    const cRate    = c.total > 0 ? Math.round(c.submitted / c.total * 100) : 0;
-    const tableId  = `dct-r-${ci}`;
-    const block    = document.createElement("div");
-    // 완료 업체 재계산
-    const allDone      = c.closedOnly === true || c.tabs.every(t => {
-      const key = (t.sheetId||"")+"||"+(t.tab||"");
-      return _closedSet.has(key) || (t.total > 0 && t.pending === 0);
-    });
-    const hasClosed = c.closedOnly === true || c.tabs.some(t => _closedSet.has((t.sheetId||"")+"||"+(t.tab||"")));
-    block.className = "dash-campaign-block" + (allDone ? " camp-all-done" : "") + (hasClosed ? " camp-has-closed" : "");
-    const campSheetId2 = (c.tabs[0] && c.tabs[0].sheetId) ? c.tabs[0].sheetId : "";
-    const header = document.createElement("div");
-    header.className = "dash-campaign-header";
-    header.innerHTML = `
-      <div class="dash-campaign-left">
-        <i class="fas fa-chevron-down dash-toggle-icon"></i>
-        ${campSheetId2 ? `<button class="btn-camp-refresh" data-sheetid="${escHtml(campSheetId2)}" data-campname="${escHtml(c.campaign)}" onclick="event.stopPropagation();refreshCampaignIndex(this)" title="이 캠페인만 동기화"><i class="fas fa-sync-alt"></i> 갱신</button>` : ""}
-        <span class="dash-campaign-name">${escHtml(c.campaign)}</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
-        <span class="dash-campaign-total">${c.submitted}/${c.total} (${cRate}%)</span>
-      </div>`;
-    header.addEventListener("click", () => toggleDashTab(tableId, header));
-    const table = document.createElement("div");
-    table.id        = tableId;
-    table.className = "dash-tab-table collapsed";
-    c.tabs.forEach(t => {
-      const tRate      = t.total > 0 ? Math.round(t.submitted / t.total * 100) : 0;
-      const tabKey     = (t.sheetId||"")+"||"+(t.tab||"");
-      const isClosedTab = _closedSet.has(tabKey);
-      const isTabDone  = (t.total > 0 && t.pending === 0);
-      const row        = document.createElement("div");
-      row.className    = "dash-tab-row"+(isTabDone?" tab-done":"")+(isClosedTab?" is-closed-row":"");
-      row.dataset.tabkey = tabKey;
-      const _tabSheetUrl2 = _buildTabUrl(t.sheetUrl, t.sheetId, t.tabGid);
-      const tabNameHtml = _tabSheetUrl2
-        ? `<a class="dash-tab-link" href="${escHtml(_tabSheetUrl2)}" target="_blank" title="${escHtml(_tabSheetUrl2)}">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>`
-        : `<span>${escHtml(t.tab)}</span>`;
-      const startDateHtml = t.startDate
-        ? `<span class="tab-start-date"><i class="fas fa-calendar-day"></i> ${escHtml(t.startDate)}</span>` : "";
-      const tuip = t.tuip||0, chuihap = t.chuihap||0;
-      let stateHtml = "";
-      if (isClosedTab)  stateHtml = `<span class="dash-pending-badge badge-done" style="background:#e8f1fe;color:#1b64da;border-color:#cce0fb">⬛ 마감</span>`;
-      else if (isTabDone) stateHtml = `<span class="dash-pending-badge badge-done">✓ 완료</span>`;
-      else if (tuip>0) stateHtml = `<span class="work-badge badge-tuip"><i class="fas fa-user-plus"></i> 투입중 ${tuip}</span>`;
-      else if (chuihap>0) stateHtml = `<span class="work-badge badge-chuihap"><i class="fas fa-layer-group"></i> 취합중 ${chuihap}</span>`;
-      const tcData = { sheetId:t.sheetId, sheetUrl:t.sheetUrl||"", tabName:t.tab,
-        manager:t.manager||"", timeRange:t.timeRange||"", taekhap:t.taekhap||false,
-        reviewType:t.reviewType||"", paymentType:t.paymentType||"", displayName:t.displayName||"",
-        isBulk:t.isBulk||false };
-      const tcAttr = escHtml(JSON.stringify(tcData));
-
-      // ★ 차수별 독립 행 렌더링
-      if (t.roundList && t.roundList.length >= 1) {
-        t.roundList.forEach(rd => {
-          const rdRow = document.createElement("div");
-          const rdDone = (rd.total > 0 && rd.pending === 0);
-          rdRow.className = "dash-tab-row"+(rdDone?" tab-done":"")+(isClosedTab?" is-closed-row":"");
-          rdRow.dataset.tabkey = tabKey;
-          const rdRate = rd.total > 0 ? Math.round(rd.submitted / rd.total * 100) : 0;
-          const rdStartDate = rd.startDate || t.startDate || "";
-          const rdStartDateHtml = rdStartDate
-            ? `<span class="tab-start-date"><i class="fas fa-calendar-day"></i> ${escHtml(rdStartDate)}</span>`
-            : "";
-          let rdStateHtml = "";
-          if (isClosedTab)      rdStateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
-          else if (rdDone)      rdStateHtml = `<span class="bar-lbl-center">✓ 완료</span>`;
-          else if ((rd.tuip||0) > 0 || (rd.chuihap||0) > 0) {
-            const rdTotal2 = rd.total || 0;
-            const rdLeft  = (rd.tuip||0)    > 0 ? `<span class="bar-lbl-left"><i class="fas fa-user-plus"></i> 투입중 ${rd.tuip}/${rdTotal2}</span>`          : `<span class="bar-lbl-left"></span>`;
-            const rdRight = (rd.chuihap||0) > 0 ? `<span class="bar-lbl-right"><i class="fas fa-layer-group"></i> 취합중 ${rd.chuihap}/${rdTotal2}</span>` : `<span class="bar-lbl-right"></span>`;
-            rdStateHtml = rdLeft + rdRight;
-          }
-          const tRd = Object.assign({}, t, { submitted: rd.submitted, total: rd.total, pending: rd.pending, tuip: rd.tuip||0, chuihap: rd.chuihap||0 });
-          rdRow.dataset.state = _rowState(isClosedTab, rdDone, rd.tuip||0, rd.chuihap||0);
-          rdRow.innerHTML = _buildTabRowHtml(tRd, tabKey, isClosedTab, tabNameHtml, rdStartDateHtml, rdRate, rdStateHtml, tcAttr, rd.round);
-          table.appendChild(rdRow);
-        });
-      } else {
-        row.dataset.state = _rowState(isClosedTab, isTabDone, tuip, chuihap);
-        row.innerHTML = _buildTabRowHtml(t, tabKey, isClosedTab, tabNameHtml, startDateHtml, tRate, stateHtml, tcAttr, null);
-        table.appendChild(row);
-      }
-    });
-    block.appendChild(header);
-    block.appendChild(table);
-    scrollInner2.appendChild(block);
-  });
-  if (hideDoneMode) wrap.classList.add("hide-done-mode");
-  else wrap.classList.remove("hide-done-mode");
-  if (hideClosedCampMode) wrap.classList.add("hide-closed-camp-mode");
-  else                    wrap.classList.remove("hide-closed-camp-mode");
-  if (hideClosedTabMode)  wrap.classList.add("hide-closed-tab-mode");
-  else                    wrap.classList.remove("hide-closed-tab-mode");
-  if (_closedMode)        wrap.classList.add("closed-mode");
-  if (activeFilters.size > 0) applyDashFilter();
-  _fixStickyPositions();
-  _bindScrollSync();
-  _closeColResizePopup();
-  _syncTabnameWidth(); // 렌더 완료 후 tabname 재계산
-  loadColWidths();    // ★ 렌더 후 저장된 컬럼 너비 재적용
-}
 
 // ═══════════════════════════════════════════════════════
 // 탭 행 HTML 빌더 (loadAdminDashboard + renderDashboard 공용)
@@ -4896,25 +4933,6 @@ const DASH_COL_DEFS = [
 ];
 const COL_WIDTH_LS_KEY = 'dashColWidths_v1';
 
-/** 컨테이너 안쪽 너비 반환 - dashboardScrollOuter 기준 (스크롤 컨테이너) */
-function _getContainerWidth() {
-  const outer = document.getElementById('dashboardScrollOuter');
-  if (outer) {
-    const w = outer.getBoundingClientRect().width;
-    if (w > 0) return w;
-  }
-  const pane = document.querySelector('.admin-tab-pane.active');
-  if (pane) {
-    const w = pane.getBoundingClientRect().width;
-    if (w > 0) return w - 32;
-  }
-  const body = document.querySelector('.admin-body');
-  if (body) {
-    const w = body.getBoundingClientRect().width;
-    if (w > 0) return w - 48;
-  }
-  return window.innerWidth - 80;
-}
 
 /** localStorage에서 저장된 너비 로드 후 CSS 변수 적용 (CB 컬럼 제외 - 모드 토글이 관리) */
 function loadColWidths() {
@@ -4946,22 +4964,9 @@ function saveColWidths() {
   try { localStorage.setItem(COL_WIDTH_LS_KEY, JSON.stringify(data)); } catch(_) {}
 }
 
-/** (호환성 stub) */
-function _updateDashMinWidth() {}
 /** (호환성 stub - tabname 자동조정 방식 폐기) */
 function _syncTabnameWidth() {}
 
-/** 컬럼 너비를 기본값으로 초기화 (CB 컬럼 제외) */
-function resetColWidths() {
-  const root = document.documentElement;
-  DASH_COL_DEFS.forEach(col => {
-    if (col.isCb) return; // CB 컬럼은 모드 토글이 관리
-    root.style.removeProperty(col.varName);
-  });
-  try { localStorage.removeItem(COL_WIDTH_LS_KEY); } catch(_) {}
-  _closeColResizePopup();
-  showToast('컬럼 너비가 기본값으로 초기화되었습니다.');
-}
 
 /**
  * 컬럼 헤더 요소 빌드
@@ -5158,8 +5163,6 @@ if (document.readyState === 'loading') {
 }
 // (창 크기 변경 시 특별한 재계산 불필요 - 각 컬럼이 독립 고정px로 관리됨)
 
-/** (overflow:visible 전환으로 불필요 - 호환성 stub) */
-function _syncColHeaderScroll() {}
 
 /** (overflow:visible 전환으로 불필요 - 호환성 stub) */
 function _bindScrollSync() {}
@@ -5175,54 +5178,11 @@ function toggleDashTab(tableId, header) {
 }
 
 let hideDoneMode = false;
-function toggleHideDone() {
-  hideDoneMode = !hideDoneMode;
-  const btn  = document.getElementById("btnHideDone");
-  const wrap = document.getElementById("dashboardWrap");
-  if (hideDoneMode) {
-    btn.innerHTML = '<i class="fas fa-eye"></i> 완료건 표시';
-    btn.classList.add("active");
-    wrap.classList.add("hide-done-mode");
-  } else {
-    btn.innerHTML = '<i class="fas fa-eye-slash"></i> 완료건 숨김';
-    btn.classList.remove("active");
-    wrap.classList.remove("hide-done-mode");
-  }
-}
 
 // ── 마감업체 숨김: 모든 탭이 완료인 캠페인 전체 숨김 ──
 let hideClosedCampMode = false;
-function toggleHideClosedCamp() {
-  hideClosedCampMode = !hideClosedCampMode;
-  const btn  = document.getElementById("btnHideClosedCamp");
-  const wrap = document.getElementById("dashboardWrap");
-  if (hideClosedCampMode) {
-    btn.innerHTML = '<i class="fas fa-building"></i> 마감업체 표시';
-    btn.classList.add("active");
-    wrap.classList.add("hide-closed-camp-mode");
-  } else {
-    btn.innerHTML = '<i class="fas fa-building"></i> 마감업체 숨김';
-    btn.classList.remove("active");
-    wrap.classList.remove("hide-closed-camp-mode");
-  }
-}
 
 let hideClosedTabMode = false;
-function toggleHideClosedTab() {
-  hideClosedTabMode = !hideClosedTabMode;
-  const btn  = document.getElementById("btnHideClosedTab");
-  const wrap = document.getElementById("dashboardWrap");
-  if (hideClosedTabMode) {
-    btn.innerHTML = '<i class="fas fa-archive"></i> 마감탭 표시';
-    btn.classList.add("active");
-    wrap.classList.add("hide-closed-tab-mode");
-  } else {
-    btn.innerHTML = '<i class="fas fa-archive"></i> 마감탭 숨김';
-    btn.classList.remove("active");
-    wrap.classList.remove("hide-closed-tab-mode");
-  }
-}
-
 
 
 // ═══════════════════════════════════════════════════════════
@@ -5236,135 +5196,7 @@ let _closedSet = new Set();
 
 // 마감 모드 ON/OFF
 let _closedMode = false;
-function toggleClosedMode() {
-  _closedMode = !_closedMode;
-  const btn     = document.getElementById("btnClosed");
-  const execBtn = document.getElementById("btnClosedExec");
-  const wrap    = document.getElementById("dashboardWrap");
-  if (_closedMode) {
-    btn.classList.add("active");
-    btn.innerHTML = '<i class="fas fa-archive"></i> 마감 <span style="font-size:.68rem;opacity:.8">(선택 중)</span>';
-    execBtn.style.display = "flex";
-    wrap.classList.add("closed-mode");
-    document.documentElement.style.setProperty('--dc-closedcb', '28px');
-  } else {
-    btn.classList.remove("active");
-    btn.innerHTML = '<i class="fas fa-archive"></i> 마감';
-    execBtn.style.display = "none";
-    wrap.classList.remove("closed-mode");
-    document.documentElement.style.setProperty('--dc-closedcb', '0px');
-  }
-  _syncTabnameWidth(); // 체크박스 열(28px) 추가/제거에 따라 tabname 재계산
-}
 
-// [실행] 버튼 → 변경 내역 확인 후 팝업
-function execClosed() {
-  const cbs = document.querySelectorAll("#dashboardWrap .closed-cb");
-  if (!cbs.length) { showToast("표시된 탭이 없습니다.", true); return; }
-
-  let toClose = [], toOpen = [];
-  cbs.forEach(cb => {
-    const key = cb.dataset.tabkey || "";
-    const tabName = (key.split("||")[1] || "").trim();
-    if (cb.checked  && !_closedSet.has(key)) toClose.push({ key, tabName });
-    if (!cb.checked &&  _closedSet.has(key)) toOpen.push({ key, tabName });
-  });
-
-  if (!toClose.length && !toOpen.length) {
-    showToast("변경된 항목이 없습니다."); return;
-  }
-
-  // 목록 렌더링
-  const listEl = document.getElementById("closedConfirmList");
-  listEl.innerHTML = "";
-  toClose.forEach(({ tabName }) => {
-    const el = document.createElement("div");
-    el.className = "closed-confirm-list-item";
-    el.innerHTML = `<i class="fas fa-archive" style="color:#1b64da;font-size:.75rem"></i> ${tabName} → <b>마감</b>`;
-    listEl.appendChild(el);
-  });
-  toOpen.forEach(({ tabName }) => {
-    const el = document.createElement("div");
-    el.className = "closed-confirm-list-item remove-item";
-    el.innerHTML = `<i class="fas fa-undo" style="font-size:.75rem"></i> ${tabName} → <b>마감 해제</b>`;
-    listEl.appendChild(el);
-  });
-
-  const parts = [];
-  if (toClose.length) parts.push(`<b>${toClose.length}건</b> 마감`);
-  if (toOpen.length)  parts.push(`<b>${toOpen.length}건</b> 해제`);
-  document.getElementById("closedConfirmMsg").innerHTML =
-    `선택한 인덱스를 마감 처리합니다.<br>` +
-    `대상: ${parts.join(" / ")}<br>` +
-    `<span style="color:#EF4444;font-size:.8rem">⚠️ 마감된 인덱스는 동기화 후 검색에서 제외됩니다.</span>`;
-
-  document.getElementById("closedConfirmOverlay").classList.add("open");
-}
-
-// 팝업 취소
-function cancelClosed() {
-  document.getElementById("closedConfirmOverlay").classList.remove("open");
-}
-
-// 팝업 확인 → GAS 베이스시트에 저장
-async function confirmClosed() {
-  document.getElementById("closedConfirmOverlay").classList.remove("open");
-
-  const cbs = document.querySelectorAll("#dashboardWrap .closed-cb");
-  const items = [];
-  cbs.forEach(cb => {
-    const key = cb.dataset.tabkey || "";
-    if (!key) return;
-    const [sheetId, tabName] = key.split("||");
-    const wasClosed  = _closedSet.has(key);
-    const isChecked  = cb.checked;
-    if (isChecked === wasClosed) return;
-    items.push({ sheetId: sheetId || "", tabName: tabName || "", isClosed: isChecked });
-  });
-
-  if (!items.length) { _exitClosedMode(); return; }
-
-  // 낙관적 업데이트
-  items.forEach(({ sheetId, tabName, isClosed }) => {
-    const key = (sheetId || "") + "||" + (tabName || "");
-    if (isClosed) _closedSet.add(key);
-    else          _closedSet.delete(key);
-  });
-
-  _exitClosedMode();
-  _reRenderDashboard();
-
-  try {
-    const json = await gasPost({ action: "setClosed", items });
-    if (!json.ok) {
-      showToast("⚠️ 서버 저장 실패: " + (json.error || "알 수 없는 오류"), true);
-      loadAdminDashboard();
-    } else {
-      const closeCount  = items.filter(i => i.isClosed).length;
-      const openCount   = items.filter(i => !i.isClosed).length;
-      let msg = "";
-      if (closeCount) msg += `${closeCount}건 마감 완료. `;
-      if (openCount)  msg += `${openCount}건 마감 해제. `;
-      msg += "인덱스 재갱신 후 적용됩니다.";
-      showToast("✅ " + msg);
-    }
-  } catch (err) {
-    showToast("⚠️ 서버 연결 오류: " + err.message + " (새로고침 권장)", true);
-    loadAdminDashboard();
-  }
-}
-
-function _exitClosedMode() {
-  _closedMode = false;
-  const btn     = document.getElementById("btnClosed");
-  const execBtn = document.getElementById("btnClosedExec");
-  const wrap    = document.getElementById("dashboardWrap");
-  btn.classList.remove("active");
-  btn.innerHTML = '<i class="fas fa-archive"></i> 마감';
-  execBtn.style.display = "none";
-  wrap.classList.remove("closed-mode");
-  document.documentElement.style.setProperty('--dc-closedcb', '0px');
-}
 
 // ── 비고(메모) 관리 ──
 const _TAB_MEMO_KEY = "rapp_tab_memo";     // { tabKey: memoString, ... }
@@ -5387,29 +5219,7 @@ function _setTabMemo(tabKey, memo) {
 
 // 대시보드 재렌더링 (마지막 로드 데이터 재사용 — API 재호출 없이 즉시)
 let _lastDashData = null;
-function _reRenderDashboard() {
-  if (_lastDashData) {
-    renderDashboard(_lastDashData);
-  } else {
-    loadAdminDashboard();
-  }
-}
 
-// 컬럼 헤더 sticky top 위치 보정
-// sticky 요소들의 실제 '점유 높이'를 offsetHeight 기준으로 합산
-function _fixColHeaderTop() {
-  requestAnimationFrame(() => {
-    const colHdr = document.getElementById("dashColHeader");
-    if (!colHdr) return;
-
-    const appHdr     = document.querySelector("#screenAdmin .app-header");
-    const sectionHdr = document.querySelector("#tabDashboard .admin-section-header");
-    // offsetHeight = 렌더된 실제 픽셀 높이 (스크롤 위치 무관)
-    const appH     = appHdr     ? appHdr.offsetHeight     : 0;
-    const sectionH = sectionHdr ? sectionHdr.offsetHeight : 0;
-    colHdr.style.top = (appH + sectionH) + "px";
-  });
-}
 
 // ── 관리자 화면 sticky 위치 전체 보정 ──
 // app-header 높이를 측정해 section-header · col-header 순으로 top 값을 확정
@@ -5432,8 +5242,6 @@ function _fixStickyPositions() {
   });
 }
 
-
-let allExpanded = false;
 
 // ═══════════════════════════════════════════════════════
 // ★ 빠른 인라인 편집 (빈 셀 클릭 시)
@@ -5744,6 +5552,9 @@ function initOrderFormMode() {
 
   // ★ 옵션 데이터 비동기 로드 (화면 표시와 병렬)
   _loadReviewerOptionData(sheetId, tabName, gid, round);
+
+  // ★ 2026-10-02 B안: 상품이 여럿인 작업이면 「구매한 상품」 선택지를 받아 카드마다 그린다
+  _ofpLoad(sheetId, tabName);
 
   // ★ 제공정보 추가안내(진행방식/사업자번호/특이사항) 비동기 로드
   _loadProviderInfo(sheetId, tabName, incomeType);
@@ -6593,7 +6404,6 @@ function selectBankItem(name) {
 }
 
 
-
 /* ══════════════════════════════════════════════════════
    네이버+쿠팡 동시작업 모드 (nc=1)
    ══════════════════════════════════════════════════════ */
@@ -7024,6 +6834,9 @@ function _buildOrderCardHtml(cid, idx, type) {
       </div>
     </div>
 
+    <!-- ★ 2026-10-02 B안: 구매한 상품(상품 2종 이상인 작업 · 구매양식 링크 화면에서만 _ofpRender 가 채운다) -->
+    <div class="ofp" id="${cid}_prodPick" hidden></div>
+
     <!-- 입력 폼 -->
     <div style="font-size:.68rem;font-weight:700;color:var(--t3);margin-bottom:10px;letter-spacing:.04em">✏️ 아래 정보를 입력해주세요<span style="color:#F43F5E;font-weight:600">(*별표포함시 직접수정 필수.)</span></div>
 
@@ -7103,10 +6916,11 @@ function _buildOrderCardHtml(cid, idx, type) {
     <div class="of-field of-field--stack">
       <label class="of-label of-label-required" for="${cid}_address">배송주소</label>
       <div class="of-field-control">
+        ${_addressChipMarkup(cid)}
         <div class="of-input-status-wrap">
-          <textarea id="${cid}_address" class="of-input of-textarea" rows="2" placeholder="배송받을 주소" oninput="_clearSavedIdentitySelection('${cid}','address');_ofClearError('${cid}_address');_invalidateIdentityApproval('${cid}')"></textarea>
+          <textarea id="${cid}_address" class="of-input of-textarea" rows="2" placeholder="배송받을 주소" oninput="_clearSavedIdentitySelection('${cid}','address');_ofClearError('${cid}_address');_invalidateIdentityApproval('${cid}');_syncAddressTools('${cid}',true)"></textarea>
         </div>
-        ${_savedOrderInfoMarkup(cid, "address")}
+        ${_addressToolsMarkup(cid)}
       </div>
     </div>
 
@@ -7565,12 +7379,6 @@ async function _loadReviewerProfileForForm() {
 // ★ v9.14: 리뷰어 프로필 모달 관련 함수
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-/** 타계정 주민번호 형식화 */
-function _formatSubAccJumin(input) {
-  let v = input.value.replace(/[^0-9]/g, "").slice(0, 13);
-  if (v.length > 6) v = v.slice(0, 6) + "-" + v.slice(6);
-  input.value = v;
-}
 
 /** ★ 인라인 프로필 자동 로드 (로그인 후 메인 화면에 즉시 표시) */
 async function _loadInlineProfile() {
@@ -7595,7 +7403,7 @@ async function _loadInlineProfile() {
       window._reviewerProfile = { ...res, ...p, found: true };
       if (nameEl) nameEl.textContent = p.name || name || "-";
       const phoneEl = document.getElementById("inlineSelfPhone");
-      if (phoneEl) phoneEl.textContent = p.phone || "-";
+      if (phoneEl) phoneEl.textContent = (typeof fmtPhone==='function'?fmtPhone(p.phone):p.phone) || "-";
       const incomeEl = document.getElementById("inlineSelfIncomeName");
       if (incomeEl) {
         const incVal = p.incomeType || "";
@@ -7672,39 +7480,6 @@ async function _saveIdentityShoppingId(position) {
   } catch (e) { showToast(e.message || "아이디 저장에 실패했습니다.", "error"); }
 }
 
-/** 리뷰어 프로필 모달 열기 */
-async function openReviewerProfileModal() {
-  const modal = document.getElementById("reviewerProfileModal");
-  if (!modal) return;
-
-  // 인증 세션 확인
-  const auth = _getReviewerSession();
-  if (!auth) { showToast("세션이 만료되었습니다. 다시 로그인해주세요.", "warning"); return; }
-
-  const name   = auth.name   || "";
-  const phone8 = auth.phone8 || "";
-
-  modal.style.display = "flex";
-
-  // 로딩 표시
-  document.getElementById("rpmSelfName").textContent  = "로딩 중...";
-  document.getElementById("rpmSubList").innerHTML = '<div style="text-align:center;padding:16px;color:var(--t3);font-size:.8rem"><i class="fas fa-spinner fa-spin"></i> 로딩 중...</div>';
-
-  try {
-    const res = await gasGet({ action: "getReviewerProfile", name, phone8 });
-    if (res?.ok && res.profile) {
-      const p = res.profile;
-      window._reviewerProfile = { ...res, ...p, found: true };
-      _renderReviewerProfileModal(window._reviewerProfile);
-    } else {
-      document.getElementById("rpmSelfName").textContent = name || "미등록";
-      document.getElementById("rpmSelfPhone").textContent = phone8 ? ("***-****-" + phone8.slice(-4)) : "-";
-      document.getElementById("rpmSubList").innerHTML = '<div style="text-align:center;padding:16px;color:var(--t3);font-size:.8rem">등록 정보를 찾을 수 없습니다.</div>';
-    }
-  } catch(e) {
-    document.getElementById("rpmSelfName").textContent = "로드 실패: " + e.message;
-  }
-}
 
 /** 프로필 모달 데이터 렌더링 */
 function _renderReviewerProfileModal(profile) {
@@ -7715,7 +7490,7 @@ function _renderReviewerProfileModal(profile) {
   const subs       = _parseSubAccounts(profile.subAccounts);
 
   document.getElementById("rpmSelfName").textContent       = name || "-";
-  document.getElementById("rpmSelfPhone").textContent      = phone || "-";
+  document.getElementById("rpmSelfPhone").textContent      = (typeof fmtPhone==='function'?fmtPhone(phone):phone) || "-";
   document.getElementById("rpmSelfIncomeName").textContent = incomeName || "미등록";
   // 주민번호 마스킹 표시: 앞6자리-뒤1자리만 표시
   const juminDigits = jumin.replace(/[^0-9]/g, "");
@@ -7740,7 +7515,7 @@ function _renderReviewerProfileModal(profile) {
     return `
     <div style="background:#fff;border:1.5px solid #E5E7EB;border-radius:8px;padding:10px 12px;display:flex;align-items:center;gap:10px">
       <div style="flex:1;min-width:0">
-        <div style="font-size:.82rem;font-weight:700;color:var(--t1);margin-bottom:2px">[${idx+1}] ${escHtml(sub.name)} <span style="font-weight:400;color:var(--t3);font-size:.72rem">${escHtml(sub.phone||'')}</span></div>
+        <div style="font-size:.82rem;font-weight:700;color:var(--t1);margin-bottom:2px">[${idx+1}] ${escHtml(sub.name)} <span style="font-weight:400;color:var(--t3);font-size:.72rem">${escHtml((typeof fmtPhone==='function'?fmtPhone(sub.phone||''):sub.phone||''))}</span></div>
         <div style="font-size:.72rem;color:var(--t3)">소득명의: <span style="color:var(--t2)">${escHtml(sub.incomeName||'-')}</span> &nbsp;|&nbsp; 주민번호: <span style="color:var(--t2)">${juminDisplay}</span></div>
       </div>
       <div style="display:flex;gap:4px;flex-shrink:0">
@@ -7755,16 +7530,6 @@ function _renderReviewerProfileModal(profile) {
   if (addBtn) addBtn.disabled = subs.length >= 10;
 }
 
-/** 타계정 추가 폼 열기 */
-function openAddSubAccountForm() {
-  document.getElementById("subAccountFormTitle").textContent = "타계정 추가";
-  document.getElementById("subAccountEditIdx").value = "-1";
-  document.getElementById("subAccName").value = "";
-  document.getElementById("subAccPhone").value = "";
-  document.getElementById("subAccIncomeName").value = "";
-  document.getElementById("subAccJumin").value = "";
-  document.getElementById("subAccountForm").style.display = "";
-}
 
 /** 타계정 수정 폼 열기 */
 function editSubAccount(idx) {
@@ -7786,73 +7551,6 @@ function editSubAccount(idx) {
   document.getElementById("subAccountForm").style.display = "";
 }
 
-/** 타계정 추가/수정 취소 */
-function cancelSubAccountForm() {
-  document.getElementById("subAccountForm").style.display = "none";
-}
-
-/** 타계정 저장 (추가 or 수정) */
-async function saveSubAccount() {
-  const name      = (document.getElementById("subAccName")?.value || "").trim();
-  const phone     = (document.getElementById("subAccPhone")?.value || "").replace(/[^0-9]/g, "");
-  const incomeName = (document.getElementById("subAccIncomeName")?.value || "").trim();
-  const juminDigits = (document.getElementById("subAccJumin")?.value || "").replace(/[^0-9]/g, "");
-  const editIdx   = parseInt(document.getElementById("subAccountEditIdx")?.value || "-1", 10);
-
-  if (!name) { showToast("이름을 입력해주세요.", "warning"); return; }
-  if (phone.length !== 11) { showToast("전화번호는 11자리 숫자여야 합니다.", "warning"); return; }
-  if (juminDigits && juminDigits.length !== 13) { showToast("주민번호는 13자리 숫자여야 합니다.", "warning"); return; }
-
-  // 인증 세션
-  const auth = _getReviewerSession() || {};
-  const myName   = auth.name   || "";
-  const myPhone8 = auth.phone8 || "";
-  if (!myName || !myPhone8) { showToast("세션이 만료되었습니다.", "warning"); return; }
-
-  // 현재 프로필 복사 후 수정
-  const profile  = window._reviewerProfile;
-  const subs     = JSON.parse(JSON.stringify(_parseSubAccounts(profile?.subAccounts)));
-
-  const newSub = {
-    name,
-    phone: phone.slice(0,3) + "-" + phone.slice(3,7) + "-" + phone.slice(7),
-    incomeName,
-    jumin: juminDigits
-  };
-
-  if (editIdx >= 0 && editIdx < subs.length) {
-    subs[editIdx] = { ...subs[editIdx], ...newSub }; // 공통 아이디 등 확장 필드 보존
-  } else {
-    if (subs.length >= 10) { showToast("타계정은 최대 10개까지 등록 가능합니다.", "warning"); return; }
-    subs.push(newSub); // 추가
-  }
-
-  const btn = document.getElementById("btnSaveSubAccount");
-  if (btn) { btn.disabled = true; btn.textContent = "저장 중..."; }
-
-  try {
-    const res = await gasPost({
-      action: "saveSubAccounts",
-      name: myName,
-      phone8: myPhone8,
-      subAccounts: JSON.stringify(subs)
-    });
-    if (res?.ok) {
-      showToast(editIdx >= 0 ? "타계정이 수정되었습니다." : "타계정이 추가되었습니다.");
-      // 프로필 갱신
-      if (!window._reviewerProfile) window._reviewerProfile = {};
-      window._reviewerProfile.subAccounts = subs;
-      _renderReviewerProfileModal(window._reviewerProfile);
-      cancelSubAccountForm();
-    } else {
-      showToast("❌ " + (res?.error || "저장에 실패했습니다."), "error");
-    }
-  } catch(e) {
-    showToast("❌ 오류: " + e.message, "error");
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = "저장"; }
-  }
-}
 
 /** 타계정 삭제 */
 async function deleteSubAccount(idx) {
@@ -7887,12 +7585,6 @@ async function deleteSubAccount(idx) {
   }
 }
 
-/** 리뷰어 프로필 모달 닫기 */
-function closeReviewerProfileModal() {
-  const modal = document.getElementById("reviewerProfileModal");
-  if (modal) modal.style.display = "none";
-  cancelSubAccountForm();
-}
 
 /* ═══════════════════════════════════════════════════
    입력 포맷팅 유틸리티
@@ -8222,7 +7914,7 @@ function _renderInlineSubList(subs) {
     const identityKey = secureSub?.identityKey || "";
     return `<div style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:7px;padding:8px 10px;display:flex;align-items:center;gap:8px">
       <div style="flex:1;min-width:0">
-        <div style="font-size:.8rem;font-weight:700;color:var(--t1);margin-bottom:2px">[${idx+1}] ${escHtml(sub.name)} <span style="font-weight:400;color:var(--t3);font-size:.7rem">${escHtml(sub.phone||'')}</span></div>
+        <div style="font-size:.8rem;font-weight:700;color:var(--t1);margin-bottom:2px">[${idx+1}] ${escHtml(sub.name)} <span style="font-weight:400;color:var(--t3);font-size:.7rem">${escHtml((typeof fmtPhone==='function'?fmtPhone(sub.phone||''):sub.phone||''))}</span></div>
         <div style="font-size:.68rem;color:var(--t3)">소득명의: <span style="color:var(--t2)">${escHtml(sub.incomeName||'-')}</span> | 주민번호: <span style="color:var(--t2)">${jDisplay}</span></div>
         <div style="display:flex;gap:5px;margin-top:5px"><input id="inlineSubShoppingId_${idx}" data-identity-key="${escHtml(identityKey)}" data-saved-value="${escHtml(shoppingId)}" value="${escHtml(shoppingId)}" type="text" maxlength="200" placeholder="쇼핑 아이디" style="min-width:0;flex:1;padding:5px 7px;border:1px solid #D1D5DB;border-radius:6px;font-size:.72rem"><button onclick="_saveIdentityShoppingId(${idx + 1})" style="padding:4px 8px;border:1px solid #93C5FD;border-radius:6px;background:#EFF6FF;color:#2563EB;font-size:.65rem;font-weight:700">저장</button></div>
       </div>
@@ -8239,6 +7931,96 @@ function _renderInlineSubList(subs) {
 }
 
 /** ── 주문카드 추가 ── */
+/* ══════════════════════════════════════════════════════
+   구매한 상품 선택 (2026-10-02 사용자 확정 B안)
+   ──────────────────────────────────────────────────────
+   구매양식 링크로 들어온 리뷰어는 상품을 고를 곳이 없어, 상품이 여럿인 작업에서 표에 미리 적힌
+   상품이 그대로 남았다(고양이사료 51건 중 37건 불일치). 캡처를 올리면 서버가 읽은 상품을 그 작업
+   상품 중 하나로 짝지어(productLabel) 미리 골라 두고, 리뷰어는 확인만 한다.
+   ★ 선택지·짝짓기는 서버 단일 출처(listProductChoices·resolveProductLabel) — 여기엔 규칙 사본이 없다.
+   ★ 처음엔 아무것도 고르지 않는다(1번 자동 선택 = 이번 사고의 재현).
+   ★ 참여형 공고 화면(embed)·배치·네이버+쿠팡 모드는 대상 아님 — 상품은 홀드가 정한다.
+   ★ onclick 에 상품명을 넣지 않는다 — 인덱스만(위임 리스너).
+   ══════════════════════════════════════════════════════ */
+const _OFP = { products: [], pick: {}, ai: {}, aiDone: {}, capName: {}, open: {}, bound: false };
+
+function _ofpActive() {
+  return _OFP.products.length >= 2 && !_EMBED_CTX && !_BATCH && !window._ncMode && !_PREVIEW_MODE;
+}
+
+async function _ofpLoad(sheetId, tabName) {
+  _OFP.products = [];
+  if (_EMBED_CTX || !sheetId || !tabName) return;
+  try {
+    const qs = new URLSearchParams({ sheetId, tabName }).toString();
+    const r = await fetch(API_BASE_URL + "/api/tab/product-choices?" + qs);
+    const j = await r.json();
+    _OFP.products = (j && j.ok && Array.isArray(j.products)) ? j.products.map(x => String(x || "")).filter(Boolean) : [];
+  } catch (e) {
+    console.warn("[상품 선택] 선택지 조회 실패 — 종전 화면 유지:", e.message);
+    _OFP.products = [];
+  }
+  _orderCardIds.forEach(_ofpRender);
+}
+
+function _ofpOnExtracted(cid, label, rawName) {
+  _OFP.capName[cid] = rawName || "";
+  _OFP.aiDone[cid] = true;
+  const ok = label && _OFP.products.indexOf(label) >= 0 ? label : "";
+  _OFP.ai[cid] = ok;
+  // 리뷰어가 이미 직접 골랐으면 덮지 않는다(사람이 정한 값)
+  if (ok && !_OFP.pick[cid]) { _OFP.pick[cid] = ok; _OFP.open[cid] = false; }
+  _ofpRender(cid);
+}
+
+function _ofpOnCaptureCleared(cid) {
+  if (_OFP.pick[cid] && _OFP.pick[cid] === _OFP.ai[cid]) delete _OFP.pick[cid];
+  delete _OFP.ai[cid]; delete _OFP.aiDone[cid]; delete _OFP.capName[cid]; delete _OFP.open[cid];
+  _ofpRender(cid);
+}
+
+function _ofpRender(cid) {
+  const box = document.getElementById(cid + "_prodPick");
+  if (!box) return;
+  if (!_ofpActive()) { box.hidden = true; box.innerHTML = ""; return; }
+  if (!_OFP.bound) {
+    _OFP.bound = true;
+    document.addEventListener("click", function (ev) {
+      const b = ev.target && ev.target.closest ? ev.target.closest("[data-ofp-cid]") : null;
+      if (!b) return;
+      const c = b.getAttribute("data-ofp-cid");
+      if (b.hasAttribute("data-ofp-more")) { _OFP.open[c] = true; _ofpRender(c); return; }
+      const i = Number(b.getAttribute("data-ofp-i"));
+      if (!(i >= 0) || !_OFP.products[i]) return;
+      _OFP.pick[c] = _OFP.products[i];
+      _ofpRender(c);
+    });
+  }
+  const P = _OFP.products, pick = _OFP.pick[cid] || "", ai = _OFP.ai[cid] || "";
+  const icoOk = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M5 8.2l2 2 4-4.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const icoMiss = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.5v4.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="11.2" r=".9" fill="currentColor"/></svg>';
+  const row = (i) => {
+    const on = P[i] === pick;
+    return '<button type="button" class="ofp-opt" role="radio" aria-checked="' + (on ? "true" : "false") + '" data-ofp-cid="' + cid + '" data-ofp-i="' + i + '">'
+      + '<span class="ofp-radio" aria-hidden="true"></span><span class="ofp-nm">' + _safeText(P[i]) + '</span>'
+      + (ai && P[i] === ai ? '<span class="ofp-match">캡처와 일치</span>' : "") + "</button>";
+  };
+  let h = '<div class="ofp-lbl">구매한 상품 <span class="ofp-req">필수</span></div>';
+  const collapsed = ai && pick === ai && !_OFP.open[cid];
+  if (collapsed) {
+    h += '<div class="ofp-read ok">' + icoOk + "<span>캡처에서 상품을 찾아 골라 두었어요. 맞는지 확인해주세요.</span></div>";
+    h += '<div class="ofp-list" role="radiogroup" aria-label="구매한 상품">' + row(P.indexOf(ai)) + "</div>";
+    h += '<button type="button" class="ofp-more" data-ofp-cid="' + cid + '" data-ofp-more="1">다른 상품을 샀어요</button>';
+  } else {
+    if (_OFP.aiDone[cid] && !ai) h += '<div class="ofp-read miss">' + icoMiss + "<span>캡처에서 상품명을 찾지 못했어요. 산 상품을 골라주세요.</span></div>";
+    else if (!_OFP.aiDone[cid] && !pick) h += '<div class="ofp-hint">구매 캡처를 올리면 산 상품을 찾아 골라 드려요.</div>';
+    h += '<div class="ofp-list" role="radiogroup" aria-label="구매한 상품">' + P.map((_, i) => row(i)).join("") + "</div>";
+    if (ai && pick && pick !== ai) h += '<div class="ofp-hint">캡처와 다르게 고르면 담당자에게 표시됩니다.</div>';
+  }
+  box.innerHTML = h;
+  box.hidden = false;
+}
+
 function addOrderCard() {
   if (_orderCardIds.length >= MAX_ORDER_CARDS) {
     showToast("최대 " + MAX_ORDER_CARDS + "건까지만 추가할 수 있습니다.", "warning");
@@ -8267,6 +8049,7 @@ function addOrderCard() {
   }
 
   _updateCardCountBadge();
+  _ofpRender(cid);
   // 스크롤
   setTimeout(() => cardEl.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
 }
@@ -8390,8 +8173,9 @@ function onCardImgDrop(e, cid) {
 function removeCardImg(cid) {
   const st = _cardAiState[cid];
   if (st) { if (st.abortCtrl) { st.abortCtrl.abort(); st.abortCtrl = null; } if (st.countdownId) { clearInterval(st.countdownId); st.countdownId = null; } st.analysisRequestId=(Number(st.analysisRequestId)||0)+1; st.lastBase64=""; st.lastMime=""; st.extracted=null; st.proofExtracted=null; st.extractToken=""; st.approvalToken=""; st.priorApprovalToken=""; st.reviewToken=""; st.matchError=false; }
-  if (st) { st.identityBusy = false; st.identityStatus = ""; st.identityCanManual = false; st.identityChecks = []; st.savedIdentitySelections = {}; }
+  if (st) { st.identityBusy = false; st.identityStatus = ""; st.identityCanManual = false; st.identityChecks = []; st.identityReasonCodes = []; st.savedIdentitySelections = {}; }
   _syncSubmissionIdentityAction();
+  _ofpOnCaptureCleared(cid);
   const inp  = document.getElementById(cid + "_imgInput");  if (inp) inp.value = "";
   const prev = document.getElementById(cid + "_imgPreview"); if (prev) { prev.style.display="none"; document.getElementById(cid+"_imgThumb").src=""; }
   const zone = document.getElementById(cid + "_imgZone");   if (zone) zone.style.display = "";
@@ -8417,6 +8201,7 @@ function removeCardImg(cid) {
   }
   [cid+"_recipient", cid+"_phone", cid+"_address",
    cid+"_orderNumber", cid+"_price"].forEach(_unlockAiField);
+  _addrState(cid).aiValue = null; _syncAddressTools(cid, false);
   // oninput 핸들러 복원 (price)
   const priceEl = document.getElementById(cid+"_price");
   if (priceEl) priceEl.setAttribute("oninput", `formatPriceInput(this);this.classList.remove('ai-filled');this.dataset.userEdited='1';_ofClearError('${cid}_price')`);
@@ -8473,7 +8258,7 @@ async function _callCardExtractAi(cid, base64, mimeType) {
   st.extracted = null; st.proofExtracted = null; st.extractToken = ""; st.imageHash = "";
   st.approvalToken = ""; st.priorApprovalToken = ""; st.reviewToken = ""; st.matchError = false;
   st.savedIdentitySelections = {};
-  st.identityBusy = true; st.identityCanManual = false; st.identityChecks = [];
+  st.identityBusy = true; st.identityCanManual = false; st.identityChecks = []; st.identityReasonCodes = [];
   const identityStatus = document.getElementById(cid + "_identityStatus");
   if (identityStatus) identityStatus.innerHTML = '<strong>캡처를 분석하고 있습니다. 잠시 기다려주세요.</strong>';
   _syncSubmissionIdentityAction(cid);
@@ -8508,7 +8293,10 @@ async function _callCardExtractAi(cid, base64, mimeType) {
   }, 35000);
 
   try {
-    const payload = { action: "extractOrderImage", imageBase64: base64, mimeType };
+    const _ofpCtx = window._orderFormCtx || {};
+    // ★ 작업 좌표를 함께 보내면 서버가 캡처의 상품명을 그 작업 상품 중 하나로 짝지어 준다(productLabel)
+    const payload = { action: "extractOrderImage", imageBase64: base64, mimeType,
+                      sheetId: _ofpCtx.sheetId || "", tabName: _ofpCtx.tabName || "" };
     let json;
     try {
       // ★ [Node.js 이관] gasPostUpload()를 통해 API 서버로 전송 (업로드 진행률 표시)
@@ -8537,6 +8325,7 @@ async function _callCardExtractAi(cid, base64, mimeType) {
     st.extractToken = json.extractToken || "";
     st.imageHash = json.imageHash || "";
     st.extracted = { orderNumber: json.orderNumber||"", recipient: json.recipient||"", phone: json.phone||"", address: json.address||"", price: json.price||"", orderer:json.orderer||"", store:json.store||"" };
+    _ofpOnExtracted(cid, json.productLabel || "", json.productName || "");
     // extractToken은 AI 원본 추출값의 해시에 결속된다. 서버가 가림정보를 보완한
     // st.extracted와 섞지 않고 재확인 때 동일 증명을 검증할 수 있도록 원본을 보존한다.
     st.proofExtracted = { ...st.extracted };
@@ -8627,6 +8416,8 @@ function _purchasePrimaryAction() {
   const target = _purchaseIdentityTarget();
   if (target) {
     if (target.st.identityBusy) return;
+    // 불일치 판정은 캡처에서 읽은 값으로 내려지므로 입력칸 수정으로는 풀리지 않는다.
+    if (_identityNeedsNewCapture(target.st)) return _retrySubmissionIdentity(target.cid);
     const edit = target.issues.find((issue) => issue.edit);
     if (edit) { _pointToIdentityField(target.cid, edit.field); return; }
     if (!target.st.approvalToken) {
@@ -8646,27 +8437,60 @@ function _syncSubmissionIdentityAction() {
     panel.style.display = target ? "block" : "none";
     panel.dataset.cid = target?.cid || "";
     panel.innerHTML = target ? '<strong>' + (_orderCardIds.indexOf(target.cid) + 1) + '번째 주문</strong><div style="margin-top:8px">'
-      + (document.getElementById(target.cid + "_identityStatus")?.innerHTML || "캡처 확인이 필요합니다.") + '</div>' : "";
+      + (document.getElementById(target.cid + "_identityStatus")?.innerHTML
+        || (_identityNeedsNewCapture(target.st) ? _identityMismatchNotice(target.st) : "캡처 확인이 필요합니다.")) + '</div>' : "";
   }
   if (!btn || window._submitOrderFormInProgress) return;
   btn.onclick = _purchasePrimaryAction;
   btn.disabled = !!target?.st.identityBusy;
   btn.textContent = target?.st.identityBusy ? "확인 중…"
+    : target && _identityNeedsNewCapture(target.st) ? "다른 캡처 올리기"
     : target && !target.st.approvalToken && target.st.identityCanManual && !target.issues.some((item) => item.edit)
       ? "내 주문이 맞습니다" : "제출";
+}
+
+// 명의 불일치는 같은 캡처를 다시 분석해도 결과가 같다(실사고 2026-09-24: 재분석 48회 반복·참여 만료).
+// 불일치에서는 재분석 대신 다른 캡처를 고르게 한다. AI 분석 실패(ERROR)는 종전대로 재분석.
+function _identityNeedsNewCapture(st) {
+  return !!st && st.identityStatus === "MISMATCH" && !st.approvalToken;
+}
+
+function _identityMismatchNotice(st) {
+  const name = String(_activeIdentityContext?.selectedIdentity?.name || "").trim();
+  const who = name ? "참여한 명의(" + name + ")" : "참여한 명의";
+  // 서버는 같은 이름의 중복 명의를 "다른 명의"로 보지 않는다(duplicate_name_identity) — 그래서
+  // other_owner_identity_matches 는 이름이 다른 저장 명의와 맞은 경우에만 온다.
+  const otherOwner = (st.identityReasonCodes || []).includes("other_owner_identity_matches");
+  return '<div class="identity-mismatch-notice" style="margin-bottom:8px"><b>'
+    + (otherOwner ? "다른 명의의 주문 캡처로 보입니다" : "캡처의 주문자가 참여한 명의와 다릅니다")
+    + '</b><div>' + _safeText(otherOwner
+      ? "이 캡처는 " + who + "가 아닌, 내 정보에 저장된 다른 이름의 명의 주문으로 보입니다."
+      : "캡처에서 읽은 주문자 이름이 " + who + "와 다릅니다.")
+    + '</div><div>' + _safeText(who + "로 구매한 주문의 캡처를 올려주세요. 다른 명의로 구매했다면 그 명의로 다시 참여해야 합니다.")
+    + '</div><div style="margin-top:4px;color:#6b7280">' + _safeText("캡처가 맞는데도 이 안내가 계속 뜨면 1:1 문의로 알려주세요.")
+    + '</div></div>';
 }
 
 function _retrySubmissionIdentity(cid) {
   const st = _cardAiState[cid];
   if (st?.identityBusy) return;
+  if (_identityNeedsNewCapture(st)) {
+    const input = document.getElementById(cid + "_imgInput");
+    if (input) { input.value = ""; input.click(); }
+    return;
+  }
   if (st?.lastBase64) _retryCardAi(cid);
   else document.getElementById(cid + "_imgInput")?.click();
 }
 
 function _renderIdentityMatchState(cid, status, reasons, canManual) {
   const st = _cardAiState[cid];
-  const box = document.getElementById(cid + "_identityStatus"); if (!box || !st) return;
+  if (!st) return;
+  // 판정 상태는 안내 상자 유무와 무관하게 기록한다 — nc 모드 2번(쿠팡) 카드는 상자가 없어
+  // 여기서 먼저 반환하면 MISMATCH 가 기록되지 않아 재분석 반복이 그대로 남는다.
   st.identityStatus = status; st.identityReasons = reasons || []; st.identityCanManual = canManual;
+  const box = document.getElementById(cid + "_identityStatus");
+  if (!box) { _syncSubmissionIdentityAction(); return; }
   const issues = _identityIssues(cid);
   for (const field of ["recipient", "phone", "address", "price"]) {
     const el = document.getElementById(cid + "_" + field); if (!el) continue;
@@ -8685,8 +8509,14 @@ function _renderIdentityMatchState(cid, status, reasons, canManual) {
     if (diff) box.innerHTML += '<div style="overflow-wrap:anywhere"><b>등록 주소</b><br>' + _safeText(diff.registered) + '<br><b>주문 배송지</b><br>' + _safeText(diff.entered) + '</div>';
   }
   if (!issues.length && status !== "MATCH") box.innerHTML = '<div>' + _safeText((reasons || []).filter(Boolean).join(' · ') || '선택 명의의 주문인지 확인해주세요.') + '</div>';
+  const needsNewCapture = _identityNeedsNewCapture(st);
+  if (needsNewCapture) box.innerHTML = _identityMismatchNotice(st) + box.innerHTML;
+  else if (!st.approvalToken && (st.identityReasonCodes || []).includes("duplicate_name_identity")) {
+    const dupName = String(_activeIdentityContext?.selectedIdentity?.name || "").trim() || "같은";
+    box.innerHTML = '<div style="margin-bottom:8px">' + _safeText("내 정보에 " + dupName + " 이름의 명의가 두 번 저장돼 있어 자동으로 확인하지 못했습니다. 참여한 명의의 주문이 맞다면 [내 주문이 맞습니다]를 눌러주세요.") + '</div>' + box.innerHTML;
+  }
   if (!st.approvalToken && !canManual && !st.identityBusy) box.innerHTML += '<button type="button" class="identity-issue-link" onclick="_retrySubmissionIdentity(\'' + cid + '\')">'
-    + (st.lastBase64 ? '캡처 다시 분석하기' : '구매 캡처 선택하기') + '</button>';
+    + (needsNewCapture ? '다른 캡처 올리기' : st.lastBase64 ? '캡처 다시 분석하기' : '구매 캡처 선택하기') + '</button>';
   _syncSubmissionIdentityAction();
 }
 
@@ -8712,6 +8542,7 @@ async function _matchCardIdentity(cid, requestId) {
     st.priorApprovalToken = "";
     st.reviewToken = data.reviewToken || "";
     st.identityChecks = data.checks || [];
+    st.identityReasonCodes = Array.isArray(data.reasonCodes) ? data.reasonCodes : [];
     if (data.resolved) st.extracted = { ...st.extracted, ...data.resolved };
     _showCardAiResult(cid, st.extracted);
     if (data.status === "MATCH" || data.status === "REVIEW") applyCardAiResult(cid);
@@ -8923,37 +8754,16 @@ function applyCardAiResult(cid) {
         addrEl.classList.add("ai-filled");
         addrEl.classList.remove("ai-locked", "ai-filled-asterisk");
       }
-      // ★ 실시간 별표 감지 핸들러 (주소)
+      // ★ 실시간 별표 감지(주소) — 표시는 배지가 아니라 칸 아래 일반 참고 문구(_syncAddressTools · 조각 5)
       addrEl.addEventListener("input", function() {
-        const curVal = addrEl.value;
-        const stillHas = _hasIdentityMask(curVal);
-        const badge = addrEl.parentElement?.querySelector(".ai-lock-badge");
-        if (stillHas) {
-          addrEl.classList.add("ai-filled-asterisk");
-          addrEl.classList.remove("ai-filled");
-          if (badge) { badge.style.cssText = "background:#FFF1F2;color:#BE123C;border:1px solid #FDA4AF;position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:.62rem;padding:2px 8px;border-radius:6px;white-space:nowrap"; badge.innerHTML = '<i class="fas fa-exclamation-triangle"></i> *수정필수'; }
-        } else {
-          addrEl.classList.remove("ai-filled-asterisk");
-          addrEl.classList.add("ai-filled");
-          if (badge) { badge.style.cssText = "background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:.62rem;padding:2px 8px;border-radius:6px;white-space:nowrap"; badge.innerHTML = '<i class="fas fa-check-circle"></i> 수정완료'; }
-        }
+        const stillHas = _hasIdentityMask(addrEl.value);
+        addrEl.classList.toggle("ai-filled-asterisk", stillHas);
+        addrEl.classList.toggle("ai-filled", !stillHas);
       });
-      // 배지: 별표 여부에 따라 스타일 분기
-      const addrParent = addrEl.parentElement;
-      if (addrParent && !addrParent.querySelector(".ai-lock-badge")) {
-        addrEl.style.paddingRight = "100px";
-        const badge = document.createElement("span");
-        badge.className = "ai-lock-badge";
-        if (addrHasAsterisk) {
-          badge.style.cssText = "background:#FFF1F2;color:#BE123C;border:1px solid #FDA4AF;position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:.62rem;padding:2px 8px;border-radius:6px;white-space:nowrap";
-          badge.innerHTML = '<i class="fas fa-exclamation-triangle"></i> *수정필수';
-        } else {
-          badge.style.cssText = "background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:.62rem;padding:2px 8px;border-radius:6px;white-space:nowrap";
-          badge.innerHTML = '<i class="fas fa-pencil-alt"></i> AI 자동입력';
-        }
-        addrParent.style.position = "relative";
-        addrParent.appendChild(badge);
-      }
+      addrEl.parentElement?.querySelector(".ai-lock-badge")?.remove();
+      addrEl.style.paddingRight = "";
+      _addrState(cid).aiValue = d.address;
+      _syncAddressTools(cid, false);
     }
   }
 
@@ -9142,7 +8952,7 @@ async function _runIdentityPrecheck(auth, orders) {
           return false;
         }
         const msg = "⚠️ 내 정보와 다른 정보가 감지되었습니다.\n\n"
-          + `이름: ${idn.name || "-"}\n연락처: ${idn.phone || "-"}\n주소: ${idn.address || "-"}\n`
+          + `이름: ${idn.name || "-"}\n연락처: ${(typeof fmtPhone==='function'?fmtPhone(idn.phone):idn.phone) || "-"}\n주소: ${idn.address || "-"}\n`
           + `계좌: ${idn.bankName || ""} ${idn.bankAccount || "-"} (${idn.accountHolder || "-"})\n\n`
           + "현재 입력값을 나의 타계정으로 등록할까요?\n(등록해야 제출을 계속할 수 있습니다)";
         if (!confirm(msg)) {
@@ -9238,7 +9048,7 @@ function _showProfileGateBanner(missing) {
   const items = (missing || []).map(m => `<b>${_safeText(m)}</b>`).join(", ");
   box.innerHTML =
     '<div style="font-size:.9rem;font-weight:700;margin-bottom:6px"><i class="fas fa-user-lock" style="margin-right:6px"></i>내정보 등록이 필요합니다</div>'
-    + `<div style="font-size:.8rem;line-height:1.6;margin-bottom:10px">미등록 항목: ${items}<br>구매양식은 내정보(사용자명·전화번호·주소·계좌)를 등록한 리뷰어만 제출할 수 있습니다.</div>`
+    + `<div style="font-size:.8rem;line-height:1.6;margin-bottom:10px">미등록 항목: ${items}<br>구매양식은 내정보(사용자명·전화번호·계좌)를 등록한 리뷰어만 제출할 수 있습니다.</div>`
     + '<a href="index.html#my" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;padding:9px 16px;background:#DC2626;color:#fff;border-radius:9px;font-size:.82rem;font-weight:700;text-decoration:none"><i class="fas fa-id-card"></i> 내정보 등록하러 가기</a>'
     + '<span style="font-size:.72rem;color:#991B1B;margin-left:10px">등록 후 이 화면에서 다시 제출하면 됩니다.</span>';
   box.style.display = "block";
@@ -9451,6 +9261,15 @@ async function submitOrderForm() {
       _resetBtn(); return;
     }
   }
+  // ★ 2026-10-02 B안: 상품이 여럿인 작업은 카드마다 「구매한 상품」을 골라야 제출된다
+  if (_ofpActive()) {
+    const _ofpMiss = _orderCardIds.filter(c => !_OFP.pick[c]);
+    if (_ofpMiss.length) {
+      showToast("구매한 상품을 골라주세요.", "warning");
+      document.getElementById(_ofpMiss[0] + "_prodPick")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      _resetBtn(); return;
+    }
+  }
 
   // ── 각 카드 입력값 수집 및 유효성 검사 ──
   const gv = id => (document.getElementById(id)?.value || "").trim();
@@ -9644,6 +9463,9 @@ async function submitOrderForm() {
       extractedRecipient: _cardAiState[cid]?.extracted?.recipient || "",
       extractedPhone:     _cardAiState[cid]?.extracted?.phone     || "",
       extractedAddress:   _cardAiState[cid]?.extracted?.address   || "",
+      // ★ 2026-10-02 B안: 고른 상품 + 캡처에서 읽은 상품명(서버가 짝지어 다르면 로그에 남긴다)
+      selectedProduct:    _ofpActive() ? (_OFP.pick[cid] || "") : "",
+      productCaptureName: _ofpActive() ? (_OFP.capName[cid] || "") : "",
       identityConfirmed:  false
       ,saveShoppingId: !!document.getElementById(cid+"_saveIdChk")?.checked
     };
@@ -9761,6 +9583,8 @@ async function submitOrderForm() {
       extractedRecipient: o.extractedRecipient || "",
       extractedPhone:     o.extractedPhone     || "",
       extractedAddress:   o.extractedAddress   || "",
+      selectedProduct:    o.selectedProduct    || "",
+      productCaptureName: o.productCaptureName || "",
       identityConfirmed:  o.identityConfirmed ? "true" : "false",
       identityApprovalToken: o.identityApprovalToken || "",
       // ★ 참여형 캠페인 홀드 확정 문맥(M2) — embed 진입일 때만 전송. 서버가 소유권 3중검증 후 확정
@@ -9806,7 +9630,7 @@ async function submitOrderForm() {
       } else if (!res.ok && res.code === "NEED_SUB_REGISTER") {
         const idn = res.identity || {};
         const msgR = `⚠️ ${i+1}번째 주문: 내 정보와 다른 정보가 감지되었습니다.\n\n`
-          + `이름: ${idn.name || "-"}\n연락처: ${idn.phone || "-"}\n\n현재 입력값을 나의 타계정으로 등록하고 제출할까요?`;
+          + `이름: ${idn.name || "-"}\n연락처: ${(typeof fmtPhone==='function'?fmtPhone(idn.phone):idn.phone) || "-"}\n\n현재 입력값을 나의 타계정으로 등록하고 제출할까요?`;
         if (confirm(msgR)) {
           const reg2 = await _registerSubAccountFromOrder(window._slotAuth || {}, idn);
           if (reg2.ok) {
@@ -9833,6 +9657,12 @@ async function submitOrderForm() {
         break; // 이후 주문도 동일하게 막히므로 중단
       }
 
+      if (!res.ok && (res.code === "IDENTITY_APPROVAL_STALE" || res.code === "IDENTITY_CONTEXT_CHANGED")) {
+        // ★ 조각 5: 명의 저장 정보가 바뀌어 승인이 낡았다 — 같은 토큰으로 재제출하면 영영 실패한다.
+        //   명의 확인을 자동으로 다시 돌리고, 끝나면 다시 제출하게 한다.
+        _recheckCardIdentity(o.cid);
+        throw new Error("명의 정보가 바뀌어 다시 확인하고 있어요. 확인이 끝나면 다시 제출해주세요.");
+      }
       if (!res.ok) throw new Error(res.error||"제출 실패");
 
       successCount++;
@@ -10418,39 +10248,6 @@ async function quickEditCell(e, cell) {
   });
 }
 
-function toggleAllCampaigns() {
-  const wrap   = document.getElementById("dashboardWrap");
-  if (!wrap) return;
-
-  const tables  = wrap.querySelectorAll(".dash-tab-table");
-  const headers = wrap.querySelectorAll(".dash-campaign-header");
-  const btn     = document.getElementById("btnExpandAll");
-  if (!tables.length) return;
-
-  // 현재 상태: 하나라도 펼쳐져 있으면 → 전체 접기, 모두 접혀 있으면 → 전체 펼치기
-  const anyOpen = Array.from(tables).some(t => !t.classList.contains("collapsed"));
-  allExpanded   = !anyOpen;
-
-  tables.forEach((table, i) => {
-    const header = headers[i];
-    const icon   = header ? header.querySelector(".dash-toggle-icon") : null;
-    if (allExpanded) {
-      table.classList.remove("collapsed");
-      if (icon) icon.classList.add("rotated");
-    } else {
-      table.classList.add("collapsed");
-      if (icon) icon.classList.remove("rotated");
-    }
-  });
-
-  if (allExpanded) {
-    btn.innerHTML = '<i class="fas fa-compress-alt"></i> 전체 접기';
-    btn.classList.add("active");
-  } else {
-    btn.innerHTML = '<i class="fas fa-expand-alt"></i> 전체 펼치기';
-    btn.classList.remove("active");
-  }
-}
 
 /* ── 대시보드 필터 드롭다운 ─────────────────────────────────
    activeFilters: Set (비어있으면 전체 표시)
@@ -10459,11 +10256,6 @@ function toggleAllCampaigns() {
 ─────────────────────────────────────────────────────────── */
 const activeFilters = new Set();
 
-function toggleFilterDropdown(e) {
-  e.stopPropagation();
-  const dd = document.getElementById("dashFilterDropdown");
-  dd.classList.toggle("open");
-}
 
 // 드롭다운 외부 클릭 시 닫기
 document.addEventListener("click", function(e) {
@@ -10474,32 +10266,6 @@ document.addEventListener("click", function(e) {
   }
 });
 
-function onFilterChange(checkbox) {
-  const f = checkbox.value;
-  const item = checkbox.closest(".dash-filter-item");
-  if (checkbox.checked) {
-    activeFilters.add(f);
-    if (item) item.classList.add("checked");
-  } else {
-    activeFilters.delete(f);
-    if (item) item.classList.remove("checked");
-  }
-  updateFilterBtn();
-  applyDashFilter();
-}
-
-function updateFilterBtn() {
-  const btn = document.getElementById("dashFilterBtn");
-  if (!btn) return;
-  const count = activeFilters.size;
-  if (count > 0) {
-    btn.classList.add("has-filter");
-    btn.innerHTML = `<i class="fas fa-filter"></i> 필터 <span class="filter-badge">${count}</span>`;
-  } else {
-    btn.classList.remove("has-filter");
-    btn.innerHTML = `<i class="fas fa-filter"></i> 필터`;
-  }
-}
 
 /* ══════════════════════════════════════════════════════════
    캠페인별 인덱스 부분 갱신
@@ -10708,16 +10474,6 @@ function initTcTimePicker(val) {
   _syncTcTimePicker();
 }
 
-/** 모드 버튼 클릭: "" | "자유" | "timed" */
-function setTcTimeMode(mode) {
-  _tcTimeMode = mode;
-  if (mode !== "timed") {
-    // 타임지정 아닐 때 시간 선택 초기화
-    _tcTimeStart = null;
-    _tcTimeEnd   = null;
-  }
-  _syncTcTimePicker();
-}
 
 /** 그리드 셀 클릭 (타임지정 모드에서만 호출됨) */
 function onTcTimeClick(slot) {
@@ -10745,12 +10501,6 @@ function onTcTimeClick(slot) {
   _syncTcTimePicker();
 }
 
-/** 그리드 초기화 버튼 */
-function clearTcTimeGrid() {
-  _tcTimeStart = null;
-  _tcTimeEnd   = null;
-  _syncTcTimePicker();
-}
 
 /** hidden input·UI 일괄 동기화 */
 function _syncTcTimePicker() {
@@ -10820,22 +10570,8 @@ function _syncTcTimePicker() {
   display.textContent = dispStr;
 }
 
-function closeTcPopover() {
-  document.getElementById("tcPopover").classList.remove("open");
-  _tcCurrent = null;
-}
 // 팝오버 UI만 닫고 _tcCurrent는 유지 (confirmTcSave 내부용)
-function _closeTcPopoverUiOnly() {
-  document.getElementById("tcPopover").classList.remove("open");
-}
 
-// 팝오버 외부 클릭 시 닫기
-document.addEventListener("click", function(e) {
-  const pop = document.getElementById("tcPopover");
-  if (pop && pop.classList.contains("open") && !pop.contains(e.target)) {
-    closeTcPopover();
-  }
-});
 
 // ★ tc-clickable 셀 클릭 → data-tc 파싱 → 팝오버 오픈 (onclick 속성 방식 대체)
 document.addEventListener("click", function(e) {
@@ -10857,97 +10593,6 @@ document.addEventListener("click", function(e) {
   opt.classList.add("sel");
 });
 
-// 저장 버튼 → 경고 팝업 띄우기
-function requestTcSave() {
-  if (!_tcCurrent) return;
-  // 현재 입력값 snapshot
-  _tcCurrent._pendingManager     = (document.querySelector("#tcOptManager .tc-opt.sel")  || {}).dataset?.val ?? "";
-  _tcCurrent._pendingReviewType  = (document.querySelector("#tcOptReview .tc-opt.sel")   || {}).dataset?.val ?? "";
-  _tcCurrent._pendingPaymentType = (document.querySelector("#tcOptPayment .tc-opt.sel")  || {}).dataset?.val ?? "";
-  _tcCurrent._pendingDisplayName = document.getElementById("tcDisplayInput").value.trim();
-  _tcCurrent._pendingTimeRange   = document.getElementById("tcTimeInput").value.trim();
-  _tcCurrent._pendingTaekhap     = document.getElementById("tcTaekhapCheck").checked;
-  _tcCurrent._pendingIsBulk      = document.getElementById("tcBulkCheck").checked;
-
-  document.getElementById("tcConfirmMsg").innerHTML =
-    `<b>${escHtml(_tcCurrent.tabName)}</b> 탭의 설정을 변경하시겠습니까?<br>저장하면 베이스시트에 즉시 반영됩니다.`;
-  document.getElementById("tcConfirmOverlay").classList.add("open");
-}
-
-function closeTcConfirm() {
-  document.getElementById("tcConfirmOverlay").classList.remove("open");
-}
-
-async function confirmTcSave() {
-  closeTcConfirm();
-  _closeTcPopoverUiOnly(); // _tcCurrent는 유지한 채 팝오버 UI만 닫음
-  if (!_tcCurrent) return;
-
-  // ① GAS URL 설정 여부 확인
-  if (!APP_CONFIG.GAS_WEB_APP_URL) {
-    showToast("❌ GAS 웹앱 URL이 설정되지 않았습니다. 설정 화면에서 URL을 먼저 입력해주세요.", true);
-    _tcCurrent = null;
-    openGasUrlModal();
-    return;
-  }
-
-  // ② sheetId: 탭 데이터의 sheetId 사용 (DB가 원본)
-  const resolvedSheetId = _tcCurrent.sheetId || "";
-  if (!resolvedSheetId) {
-    showToast("❌ sheetId를 특정할 수 없습니다. 인덱스를 먼저 갱신해주세요.", true);
-    _tcCurrent = null;
-    return;
-  }
-
-  // ③ 저장할 파라미터 구성
-  // sheetUrl: 세부목록 탭에 URL로 저장하기 위해 함께 전송
-  // #gid= 이후 앵커 제거 → URL 매칭 일관성 확보
-  const rawSheetUrl = _tcCurrent.sheetUrl
-    || (resolvedSheetId ? "https://docs.google.com/spreadsheets/d/" + resolvedSheetId + "/edit" : "");
-  const resolvedSheetUrl = rawSheetUrl.split("#")[0]; // #gid=xxx 제거
-  const payload = {
-    action:      "setTabConfig",
-    sheetId:     resolvedSheetId,
-    sheetUrl:    resolvedSheetUrl,
-    tabName:     _tcCurrent.tabName             || "",
-    manager:     _tcCurrent._pendingManager     || "",
-    timeRange:   _tcCurrent._pendingTimeRange   || "",
-    taekhap:     _tcCurrent._pendingTaekhap ? "true" : "false",
-    reviewType:  _tcCurrent._pendingReviewType  || "",
-    paymentType: _tcCurrent._pendingPaymentType || "",
-    displayName: _tcCurrent._pendingDisplayName || "",
-    isBulk:      _tcCurrent._pendingIsBulk ? "true" : "false"
-  };
-
-  // ④ 디버그 로그 (F12 콘솔에서 확인)
-  console.log("[TC] 저장 payload:", JSON.stringify(payload));
-
-  try {
-    // ★ POST 방식으로 전송 (한글·특수문자 안전, displayName 등 누락 방지)
-    // POST 실패 시 GET으로 폴백 (CORS 환경 대응)
-    let json;
-    try {
-      json = await gasPost(payload);
-    } catch (postErr) {
-      console.warn("[TC] POST 실패, GET으로 폴백:", postErr.message);
-      json = await gasGet(payload);
-    }
-    console.log("[TC] 응답:", json);
-
-    if (json.ok) {
-      console.log("[TC] 저장 완료. tabName:", json.tabName, "updated:", json.updated, "row:", json.row);
-      showToast("✅ 설정이 저장되었습니다." + (json.updated ? " (업데이트)" : " (신규)"));
-      loadAdminDashboard();
-    } else {
-      console.error("[TC] 저장 실패 응답:", json);
-      showToast("❌ 저장 실패: " + (json.error || JSON.stringify(json)), true);
-    }
-  } catch (err) {
-    console.error("[TC] 요청 오류:", err);
-    showToast("❌ 오류: " + err.message + " (F12 콘솔 확인)", true);
-  }
-  _tcCurrent = null;
-}
 
 /** 간단한 토스트 메시지 */
 function showToast(msg, isErr) {
@@ -10971,746 +10616,7 @@ function showToast(msg, isErr) {
   t._tid = setTimeout(() => { t.style.opacity = "0"; }, 2500);
 }
 
-/* ── GAS 설정 모달 ── */
-/* ── 동기화 모달 ── */
-function openIndexModal() {
-  show("indexModal", "flex");
-  if (APP_CONFIG.GAS_WEB_APP_URL) loadIndexStatus();
-}
-function closeIndexModal() {
-  hide("indexModal");
-  // 인덱스 관련 UI 초기화
-  const elapsedRow = document.getElementById("indexElapsedRow");
-  const resultRow  = document.getElementById("indexResultRow");
-  if (elapsedRow) elapsedRow.style.display = "none";
-  if (resultRow)  resultRow.style.display  = "none";
-  const gasErrBanner = document.getElementById("gasErrorBanner");
-  if (gasErrBanner) gasErrBanner.style.display = "none";
-}
 
-/* ── 각종 진단 모달 ── */
-function openDiagModal() {
-  show("diagModal", "flex");
-}
-function closeDiagModal() {
-  hide("diagModal");
-  // 진단 UI 초기화
-  const inp = document.getElementById("debugSheetIdInput");
-  if (inp) inp.value = "";
-  const choiceWrap = document.getElementById("debugSheetChoiceWrap");
-  if (choiceWrap) choiceWrap.style.display = "none";
-  const singleRes = document.getElementById("debugSingleResult");
-  if (singleRes) { singleRes.innerHTML = ""; singleRes.className = "hidden"; singleRes.style.display = "none"; }
-  const baseRes = document.getElementById("debugBaseResult");
-  if (baseRes) { baseRes.innerHTML = ""; baseRes.className = "hidden"; }
-  const tabRes = document.getElementById("debugTabConfigResult");
-  if (tabRes) { tabRes.textContent = ""; tabRes.className = "hidden"; }
-  const jsonpRes = document.getElementById("jsonpTestResult");
-  if (jsonpRes) jsonpRes.style.display = "none";
-}
-// 진단 모달 내 파일존재확인 (모달 열기)
-function openCheckFilesModalFromDiag() {
-  closeDiagModal();
-  openCheckFilesModal();
-}
-
-/* ── 하위 호환: 구 함수명 alias ── */
-function openAdminSetting() { openIndexModal(); }
-function closeAdminSetting() { closeIndexModal(); }
-function saveAdminSetting() { closeIndexModal(); }
-
-
-/* ── 인덱스 상태 / 갱신 ── */
-async function loadIndexStatus() {
-  const badge   = document.getElementById("indexStatusBadge");
-  const builtAt = document.getElementById("indexBuiltAt");
-  const count   = document.getElementById("indexCount");
-  badge.className = "index-badge index-badge-unknown";
-  badge.textContent = "조회 중...";
-  builtAt.textContent = "-";
-  count.textContent   = "-";
-  // 코드 버전 행 초기화
-  const codeVerRow  = document.getElementById("codeVersionRow");
-  const codeVerText = document.getElementById("codeVersionText");
-  if (codeVerRow) codeVerRow.style.display = "none";
-  // 소요시간/결과 행은 buildIndex 완료 시에만 표시 → 단순 조회 시 숨김 유지
-  try {
-    const data = await gasGet({ action: "indexStatus" });
-    // ★ GAS 코드 버전 표시 (재배포할 때마다 갱신됨)
-    if (data.codeVersion && codeVerRow && codeVerText) {
-      codeVerText.textContent = data.codeVersion;
-      codeVerRow.style.display = "";
-    }
-    if (!data.exists) {
-      badge.className = "index-badge index-badge-none";
-      badge.textContent = "없음";
-      builtAt.textContent = "인덱스가 없습니다. 갱신 버튼을 눌러주세요.";
-    } else if (data.expired) {
-      badge.className = "index-badge index-badge-expired";
-      badge.textContent = "만료됨";
-      builtAt.textContent = data.builtAtStr || "-";
-      count.textContent   = (data.count || 0).toLocaleString() + "건";
-    } else {
-      badge.className = "index-badge index-badge-ok";
-      badge.textContent = "정상";
-      builtAt.textContent = data.builtAtStr || "-";
-      count.textContent   = (data.count || 0).toLocaleString() + "건";
-    }
-  } catch (err) {
-    badge.className = "index-badge index-badge-error";
-    badge.textContent = "오류";
-    const emsg = err.message || "";
-    if (emsg.includes("fetch") || emsg.includes("Failed to fetch") || emsg.includes("NetworkError")) {
-      builtAt.textContent = "❌ GAS 응답 없음 — URL 확인 또는 GAS 재배포 필요";
-    } else if (emsg === "GAS URL 없음") {
-      builtAt.textContent = "GAS URL을 먼저 저장하세요.";
-    } else {
-      builtAt.textContent = "❌ " + emsg.substring(0, 60);
-    }
-  }
-}
-
-/* ── 동기화 진행 표시 ── */
-let _buildTimer = null;
-// v6: Sheets API 배치 처리 기준 예상시간 (기존 120초 → 60초로 단축)
-// 실제 캠페인 수에 따라 동적 조정
-let BUILD_EXPECTED_SEC = 60;
-
-function startBuildProgress(campaignCount) {
-  // 캠페인 수에 따라 예상시간 동적 설정
-  // Sheets API batchGet 사용 시: 탭 목록 ~5초 + 헤더스캔 ~(N*0.5)초 + 데이터 ~(N*0.8)초
-  if (campaignCount && campaignCount > 0) {
-    BUILD_EXPECTED_SEC = Math.min(270, Math.max(30, Math.round(5 + campaignCount * 1.2)));
-  } else {
-    BUILD_EXPECTED_SEC = 60;
-  }
-
-  const wrap    = document.getElementById("buildProgressWrap");
-  const bar     = document.getElementById("buildProgressBar");
-  const label   = document.getElementById("buildProgressLabel");
-  const pct     = document.getElementById("buildProgressPct");
-  const eta     = document.getElementById("buildProgressEta");
-  const elapsed = document.getElementById("buildProgressTime");
-  show(wrap);
-  bar.style.width = "0%";
-  let sec = 0;
-
-  // v6 단계별 메시지 (Sheets API 배치 처리 흐름 반영)
-  const stages = [
-    { pct: 0,  msg: "베이스시트 캠페인 목록 읽는 중..." },
-    { pct: 15, msg: "탭 메타정보 조회 중 (Sheets API)..." },
-    { pct: 35, msg: "헤더 배치 스캔 중..." },
-    { pct: 55, msg: "데이터 배치 읽기 중..." },
-    { pct: 75, msg: "인덱스 행 파싱 중..." },
-    { pct: 88, msg: "캐시 저장 중..." },
-    { pct: 94, msg: "거의 완료됐어요..." },
-  ];
-
-  _buildTimer = setInterval(() => {
-    sec++;
-    // 로그 스케일 진행 (최대 95%)
-    const progress = Math.min(95, Math.round(
-      (1 - Math.exp(-sec / (BUILD_EXPECTED_SEC * 0.55))) * 100
-    ));
-    bar.style.width = progress + "%";
-    pct.textContent = progress + "%";
-    elapsed.textContent = sec + "초 경과";
-
-    // 단계 메시지
-    let curMsg = stages[0].msg;
-    for (const s of stages) { if (progress >= s.pct) curMsg = s.msg; }
-    label.textContent = curMsg;
-
-    // 잔여 시간
-    const remaining = Math.max(0, Math.round(
-      BUILD_EXPECTED_SEC * (1 - progress / 100) * 1.15
-    ));
-    if (progress < 92) {
-      eta.textContent = "예상 잔여: 약 " + (remaining >= 60
-        ? Math.ceil(remaining / 60) + "분 " + (remaining % 60) + "초"
-        : remaining + "초");
-    } else {
-      eta.textContent = "마무리 중...";
-    }
-  }, 1000);
-}
-
-function stopBuildProgress() {
-  if (_buildTimer) { clearInterval(_buildTimer); _buildTimer = null; }
-  const wrap  = document.getElementById("buildProgressWrap");
-  const bar   = document.getElementById("buildProgressBar");
-  const pct   = document.getElementById("buildProgressPct");
-  const eta   = document.getElementById("buildProgressEta");
-  const label = document.getElementById("buildProgressLabel");
-  bar.style.width   = "100%";
-  pct.textContent   = "100%";
-  eta.textContent   = "완료!";
-  label.textContent = "갱신 완료 ✓";
-  bar.style.background = "linear-gradient(90deg,#12b886,#0ca678)";
-  setTimeout(() => {
-    hide(wrap);
-    // 바 색상 원복
-    bar.style.background = "linear-gradient(90deg,var(--p),#3182f6)";
-  }, 2500);
-}
-
-async function debugBaseSheet() {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
-  const btn = document.getElementById("btnDebugBase");
-  const resEl = document.getElementById("debugBaseResult");
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 진단 중...';
-  show(resEl);
-  resEl.textContent = "베이스시트 파싱 중...";
-  try {
-    const data = await gasGet({ action: "debugBaseSheet" }, 15000);
-    if (data.ok) {
-      const camps = (data.campaigns || []).map(c => `• ${c.name} (${c.id.substring(0,12)}...)`).join("\n");
-      resEl.innerHTML =
-        `<b>✅ 파싱 성공</b><br>` +
-        `시트명: ${data.sheetName || "-"}<br>` +
-        `총 행수: ${data.lastRow}, 열수: ${data.lastCol}<br>` +
-        `<b>캠페인 수: ${data.campaignCount}개</b><br><br>` +
-        `<b>[캠페인 목록 (최대 10개)]</b><br>` +
-        (camps ? camps.replace(/\n/g,"<br>") : "없음") +
-        (data.sampleRows && data.sampleRows.length ?
-          `<br><br><b>[첫 ${data.sampleRows.length}행 원본]</b><br>` +
-          data.sampleRows.map(r => `행${r.row}: ${JSON.stringify(r.cells)}`).join("<br>")
-          : "");
-      if (data.campaignCount === 0) {
-        resEl.innerHTML += `<br><br><b style="color:#EF4444">⚠ 캠페인 URL을 찾지 못했습니다.<br>베이스시트 A열에 spreadsheets URL이 있는지 확인하세요.</b>`;
-      }
-    } else {
-      resEl.innerHTML = `<b style="color:#EF4444">❌ 오류: ${data.error}</b><br><small>${data.stack||""}</small>`;
-    }
-  } catch(e) {
-    resEl.textContent = "오류: " + e.message;
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-bug"></i> 베이스시트 파싱 진단';
-  }
-}
-
-async function debugBuildStep(step) {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
-  const resEl = document.getElementById("debugBaseResult");
-  show(resEl);
-  resEl.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Step ${step} 진단 중...`;
-  try {
-    const data = await gasGet({ action: "debugBuildStep", step: String(step) }, 30000);
-    const logHtml = (data.log || []).map(l => {
-      if (l.includes("실패") || l.includes("오류") || l.includes("error")) return `<span style="color:#EF4444">${l}</span>`;
-      if (l.includes("성공") || l.includes("정상") || l.includes("완료")) return `<span style="color:#12b886">${l}</span>`;
-      return `<span style="color:#374151">${l}</span>`;
-    }).join("<br>");
-
-    let extra = "";
-    if (data.campaigns)  extra += `<br><b>캠페인:</b> ${data.campaigns.map(c=>`${c.name}`).join(", ")}`;
-    if (data.tabs)       extra += `<br><b>탭목록:</b> ${data.tabs.join(", ")} <i style="color:#6B7280">(방법: ${data.tabMethod})</i>`;
-    if (data.headerMethod) extra += `<br><b>헤더 읽기:</b> ${data.headerMethod}`;
-    if (data.preview)    extra += `<br><b>헤더 미리보기:</b><br>${data.preview.slice(0,3).map(r=>JSON.stringify(r)).join("<br>")}`;
-    if (data.elapsed)    extra += `<br><b>소요: ${data.elapsed}</b>`;
-
-    if (data.ok) {
-      resEl.innerHTML = `<b style="color:#12b886">✅ Step ${step} 정상</b><br>${logHtml}${extra}`;
-    } else {
-      resEl.innerHTML =
-        `<b style="color:#EF4444">❌ Step ${step} 실패</b><br>` +
-        `<b>오류: ${data.error || ""}</b><br>` +
-        logHtml + extra +
-        (data.stack ? `<br><small style="color:#9CA3AF">${data.stack.replace(/\n/g,"<br>")}</small>` : "");
-    }
-  } catch(e) {
-    resEl.innerHTML = `<b style="color:#EF4444">❌ 네트워크 오류: ${e.message}</b>`;
-  }
-}
-
-/** ─── 특정 시트 개별 진단: 입력값 변경 시 gid 여부 판단 ─── */
-function onDebugSheetInput() {
-  const raw = (document.getElementById("debugSheetIdInput").value || "").trim();
-  const choiceWrap = document.getElementById("debugSheetChoiceWrap");
-  // gid 포함 여부 확인
-  const hasGid = /[?#&]gid=\d+/.test(raw) || /\/edit.*#gid=\d+/.test(raw);
-  if (hasGid && raw.includes("/spreadsheets/d/")) {
-    choiceWrap.style.display = "block";
-  } else {
-    choiceWrap.style.display = "none";
-  }
-}
-
-/** 진단 버튼 클릭 시 처리 */
-function onDebugSheetDiagClick() {
-  const raw = (document.getElementById("debugSheetIdInput").value || "").trim();
-  if (!raw) { showToast("sheetId 또는 URL을 입력하세요.", "warning"); return; }
-  const hasGid = /[?#&]gid=\d+/.test(raw) || /\/edit.*#gid=\d+/.test(raw);
-  if (hasGid && raw.includes("/spreadsheets/d/")) {
-    // gid 포함: 선택지 표시만 (이미 onDebugSheetInput에서 열렸을 수 있으나 확실히 표시)
-    document.getElementById("debugSheetChoiceWrap").style.display = "block";
-    // 결과 영역 초기화
-    const resEl = document.getElementById("debugSingleResult");
-    resEl.className = "hidden";
-    resEl.style.display = "none";
-    showToast("진단 방식을 선택해주세요.", "info");
-  } else {
-    // gid 없음: 바로 전체진단 실행
-    debugSingleSheet("full");
-  }
-}
-
-/** ─── 특정 시트 개별 진단 (mode: 'tab' | 'full') ─── */
-async function debugSingleSheet(mode) {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
-
-  const raw   = (document.getElementById("debugSheetIdInput").value || "").trim();
-  const resEl = document.getElementById("debugSingleResult");
-  if (!raw) { showToast("sheetId 또는 URL을 입력하세요.", "warning"); return; }
-
-  // sheetId 및 gid 추출
-  const mId  = raw.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]{20,})/);
-  const sheetId = mId ? mId[1] : raw;
-  const mGid = raw.match(/[?#&]gid=(\d+)/);
-  const gid  = mGid ? mGid[1] : null;
-
-  // mode 결정: gid 있고 'tab' 모드면 단일탭 진단, 나머지는 전체진단
-  const diagMode = (mode === "tab" && gid) ? "tab" : "full";
-  const diagGid  = diagMode === "tab" ? gid : null;
-
-  // 선택지 영역 숨기기
-  document.getElementById("debugSheetChoiceWrap").style.display = "none";
-
-  show(resEl);
-  resEl.style.display = "";
-  const modeLabel = diagMode === "tab" ? `gid:${diagGid} (단일탭)` : "전체진단";
-  resEl.innerHTML = `<i class="fas fa-spinner fa-spin"></i> <b>${sheetId.substring(0,16)}…</b> 진단 중 <span style="color:#3182f6">[${modeLabel}]</span>...`;
-
-  try {
-    const params = { action: "debugSingleSheet", sheetId };
-    if (diagGid) params.gid = diagGid;
-    const data = await gasGet(params, 40000);
-
-    // 결과 렌더링 헬퍼
-    const ok    = s => `<span style="color:#12b886;font-weight:700">${s}</span>`;
-    const err   = s => `<span style="color:#EF4444;font-weight:700">${s}</span>`;
-    const warn  = s => `<span style="color:#D97706;font-weight:700">${s}</span>`;
-    const gray  = s => `<span style="color:#6B7280">${s}</span>`;
-
-    const totalTabs = (data.allTabs || []).length;
-    const validCount = (data.validTabs || []).length;
-
-    let html = `<b>🔍 진단 대상:</b> ${gray(sheetId)}`;
-    if (diagMode === "tab") html += ` ${gray(`(gid:${diagGid} 탭만)`)}`;
-    html += `<br><br>`;
-
-    // ① 베이스시트 등록 여부
-    html += `<b>① 베이스시트 등록</b>: `;
-    if (data.registered === true)  html += ok("✅ 등록됨");
-    else if (data.registered === false) html += err("❌ 미등록 → 작업오더 접수로 등록하세요 (관리자 작업오더 탭 → 접수하기)");
-    else html += warn("⚠ 확인 불가");
-    html += `<br>`;
-
-    // ② 시트 접근 권한
-    html += `<b>② 시트 접근 권한</b>: `;
-    if (data.accessible === true)       html += ok("✅ 접근 가능");
-    else if (data.accessible === false) html += err(`❌ 접근 불가 → ${escHtml(data.accessError || "공유 권한 확인 필요")}`);
-    else html += warn("⚠ 확인 불가");
-    html += `<br>`;
-
-    // ③ 시트 제목
-    if (data.sheetTitle) {
-      html += `<b>③ 스프레드시트 제목</b>: ${escHtml(data.sheetTitle)}<br>`;
-    }
-
-    // ④ 탭 목록 — 헤더에 "총 N개 중 인덱스 반영 탭 M개" 표시
-    if (diagMode === "tab") {
-      // 단일탭 진단: 해당 탭 1개만 표시
-      html += `<b>④ 탭 목록 (단일탭 진단)</b>: `;
-      if (data.allTabs && data.allTabs.length) {
-        const tab = data.allTabs[0];
-        const isValid = data.validTabs && data.validTabs.includes(tab);
-        html += `탭명: ${escHtml(tab)} — ${isValid ? ok("인덱스 반영") : err("스킵됨")}<br>`;
-      } else {
-        html += warn("해당 탭을 찾을 수 없음") + "<br>";
-      }
-    } else {
-      // 전체진단: 총 N개 중 M개
-      html += `<b>④ 탭 목록 (전체)</b>: `;
-      if (totalTabs > 0) {
-        html += `총 ${totalTabs}개 중 인덱스 반영 탭 ${ok(String(validCount) + "개")}<br>`;
-        html += data.allTabs.map(tab => {
-          const isValid = data.validTabs && data.validTabs.includes(tab);
-          return `  ${isValid ? ok("●") : gray("○")} ${escHtml(tab)}${isValid ? "" : gray(" (스킵됨)")}`;
-        }).join("<br>") + "<br>";
-      } else {
-        html += warn("탭 없음 또는 읽기 실패") + "<br>";
-      }
-    }
-
-    // ⑤ 스킵 원인 (간소화) — 단일탭 모드는 해당 탭 1개만 표시
-    if (data.skipReasons && Object.keys(data.skipReasons).length) {
-      // 단일탭 모드: GAS가 전체 탭 스캔 결과를 반환해도 해당 탭만 표시
-      let skipEntries = Object.entries(data.skipReasons);
-      if (diagMode === "tab" && data.allTabs && data.allTabs.length) {
-        const targetTab = data.allTabs[0]; // 단일탭의 탭명
-        skipEntries = skipEntries.filter(([tab]) => tab === targetTab);
-      }
-      if (skipEntries.length > 0) {
-        html += `<b>⑤ 스킵 원인</b>:<br>`;
-        skipEntries.forEach(([tab, reason]) => {
-          const simpleReason = _simplifySkipReason(reason);
-          html += `  ${err("✗")} ${escHtml(tab)} → ${warn(simpleReason)}<br>`;
-        });
-      }
-    }
-
-    // ⑥ 헤더 샘플 (첫 번째 유효 탭)
-    if (data.headerSample) {
-      const sampleTabLabel = data.headerSampleTab ? ` (${escHtml(data.headerSampleTab)})` : "";
-      html += `<b>⑥ 헤더 샘플${sampleTabLabel}</b>:<br>`;
-      html += gray(JSON.stringify(data.headerSample).substring(0, 200)) + "<br>";
-    }
-
-    // 오류 로그
-    if (data.errors && data.errors.length) {
-      html += `<br><b>⚠ 오류 로그</b>:<br>`;
-      data.errors.forEach(e => { html += `  ${err("→")} ${escHtml(e)}<br>`; });
-    }
-
-    // 최종 판정
-    html += `<br><b>🏁 최종 판정</b>: `;
-    if (data.verdict === "ok") {
-      // 단일탭 모드: 인덱스 실제 포함 여부 추가 표시
-      if (diagMode === "tab") {
-        if (data.isInIndex === true) {
-          html += ok("✅ 정상 + 현재 인덱스에도 포함됨 (대시보드에 바로 표시)");
-        } else if (data.isInIndex === false) {
-          html += warn("⚠ 헤더 정상 (스킵 없음) — 그러나 현재 인덱스에 미포함") +
-            `<br><small style="color:#D97706;margin-left:2px">→ [인덱스 지금 갱신] 버튼을 눌러야 대시보드에 반영됩니다.</small>`;
-        } else {
-          html += ok("✅ 정상 — 동기화 시 포함됩니다");
-        }
-      } else {
-        html += ok("✅ 정상 — 동기화 시 포함됩니다");
-      }
-    }
-    else if (data.verdict === "tab_not_found") html += err(`❌ gid:${diagGid} 탭을 찾을 수 없음 — URL의 gid 값을 확인하세요`);
-    else if (data.verdict === "no_tab" || data.verdict === "no_valid_tab") html += err("❌ 유효 탭 없음 — 탭명 패턴 또는 헤더 확인 필요");
-    else if (data.verdict === "no_access") html += err("❌ 접근 불가 — 시트 공유 설정 확인");
-    else if (data.verdict === "not_registered") html += err("❌ 미등록 — 작업오더 접수 필요");
-    else if (data.verdict)                 html += warn(escHtml(data.verdict));
-    else if (data.error)                   html += err(escHtml(data.error));
-
-    // 단일탭 모드에서 인덱스 미포함인 경우 원인 힌트 추가
-    if (diagMode === "tab" && data.isInIndex === false && data.verdict === "ok") {
-      const tabName = data.allTabs && data.allTabs[0] ? data.allTabs[0] : "";
-      html += `<br><br><b>💡 대시보드 미표시 원인 후보:</b><br>`;
-      html += `&nbsp;&nbsp;1. 동기화 전 상태 → <b>[인덱스 지금 갱신]</b> 클릭 후 재확인<br>`;
-      html += `&nbsp;&nbsp;2. 갱신 시 해당 탭이 스킵됐을 가능성 → 갱신 후 재진단<br>`;
-      html += `&nbsp;&nbsp;3. 세부목록에 해당 탭 미등록 → ⚙ 탭설정 후 저장<br>`;
-      if (tabName) html += `&nbsp;&nbsp;4. 탭명 특수문자/공백 문제: <i>"${escHtml(tabName)}"</i><br>`;
-    }
-
-    resEl.innerHTML = html;
-
-  } catch(e) {
-    resEl.innerHTML = `<b style="color:#EF4444">❌ 네트워크/GAS 오류: ${escHtml(e.message)}</b><br><small>GAS 백엔드에 debugSingleSheet 액션이 구현되어 있어야 합니다.</small>`;
-  }
-}
-
-/** 스킵 원인 문자열 간소화 헬퍼 */
-function _simplifySkipReason(reason) {
-  if (!reason) return "알 수 없음";
-  const r = String(reason);
-  // 헤더 키워드 없음 패턴
-  if (r.includes("DATA_TAB_KEYWORDS") || r.includes("헤더 키워드") || r.includes("header keyword") || r.includes("번호") || r.includes("주문자")) {
-    return "헤더 키워드 없음 (번호/주문자/수취인/수취인명/성함 중 없음)";
-  }
-  // 검색 컬럼 없음
-  if (r.includes("SEARCH_COL") || r.includes("검색 컬럼") || r.includes("name column")) {
-    return "이름 컬럼 없음 (수취인/주문자/성함 등 없음)";
-  }
-  // 숨김 탭
-  if (r.includes("hidden") || r.includes("숨김")) {
-    return "숨겨진 탭";
-  }
-  // 시스템 탭
-  if (r.includes("INDEX_TAB") || r.includes("인덱스") || r.includes("세부목록") || r.includes("탭설정")) {
-    return "시스템 탭 (제외 대상)";
-  }
-  // 빈 탭
-  if (r.includes("empty") || r.includes("비어") || r.includes("데이터 없")) {
-    return "데이터 없음 (빈 탭)";
-  }
-  // 기타: 100자 이상이면 잘라냄
-  return r.length > 80 ? r.substring(0, 80) + "…" : r;
-}
-
-/** ─── 세부목록(탭설정) 진단 함수들 ─── */
-async function debugTabConfig() {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
-  const resEl = document.getElementById("debugTabConfigResult");
-  show(resEl);
-  resEl.textContent = "⏳ 세부목록 현황 조회 중...";
-  try {
-    const data = await gasGet({ action: "debugTabConfig" }, 15000);
-    const dl = data.detailSheet || {};
-    const lines = [
-      `📋 세부목록 탭 존재: ${dl.exists ? "✅ 있음" : "❌ 없음"}`,
-      `📊 현재 행 수: ${dl.lastRow || 0}행`,
-      `🆔 DB(tab_configs) 기반 관리 중`,
-      `📌 탭 이름: "${data.DETAIL_SHEET_NAME || "세부목록"}"`,
-    ];
-    if (dl.exists && dl.data && dl.data.length > 0) {
-      lines.push("", "📄 저장된 데이터 (최대 10행):");
-      dl.data.slice(0, 10).forEach((row, i) => {
-        if (i === 0) {
-          lines.push(`  헤더: ${row.map(c => String(c).substring(0,20)).join(" | ")}`);
-        } else {
-          const url  = String(row[0] || "").substring(0, 30);
-          const tab  = String(row[1] || "-");
-          const mgr  = String(row[2] || "-");
-          const time = String(row[3] || "-");
-          const tk   = String(row[4] || "-");
-          const rv   = String(row[5] || "-");
-          lines.push(`  ${i}행: [${tab}] 담당:${mgr} 시간:${time} 택대:${tk} 리뷰:${rv}`);
-        }
-      });
-    } else if (!dl.exists) {
-      lines.push("", "⚠️ 세부목록 탭이 없습니다.", "→ 저장 테스트 버튼을 눌러 탭 자동 생성을 확인하세요.");
-    } else {
-      lines.push("", "ℹ️ 아직 저장된 데이터가 없습니다.");
-    }
-    resEl.textContent = lines.join("\n");
-  } catch(e) {
-    resEl.textContent = "❌ 오류: " + e.message + "\n\n(GAS가 최신 버전으로 재배포되었는지 확인하세요)";
-  }
-}
-
-async function testTabConfigSave() {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
-  const resEl = document.getElementById("debugTabConfigResult");
-  show(resEl);
-  resEl.textContent = "⏳ 테스트 저장 중... (베이스시트 세부목록에 테스트 행 추가)";
-  try {
-    const data = await gasGet({ action: "testTabConfig" }, 15000);
-    if (data.ok) {
-      resEl.textContent =
-        `✅ 저장 테스트 성공!\n` +
-        `tabName: ${data.tabName || "테스트탭"}\n` +
-        `행 위치: ${data.row}행\n` +
-        `신규/업데이트: ${data.updated ? "업데이트" : "신규 추가"}\n\n` +
-        `→ 베이스시트의 "세부목록" 탭을 확인하세요.`;
-      showToast("✅ 테스트 저장 성공! 세부목록 탭을 확인하세요.");
-    } else {
-      resEl.textContent = `❌ 저장 실패: ${data.error || JSON.stringify(data)}\n\n(GAS 재배포 필요 여부 확인)`;
-    }
-  } catch(e) {
-    resEl.textContent =
-      `❌ 네트워크/GAS 오류: ${e.message}\n\n` +
-      `가능한 원인:\n` +
-      `1. GAS가 구버전으로 배포됨 → 새 버전으로 재배포 필요\n` +
-      `2. GAS URL이 잘못됨 → 설정에서 URL 확인\n` +
-      `3. 스프레드시트 권한 없음 → 시트 접근 권한 확인`;
-  }
-}
-
-// ── 구매캡쳐/리뷰저장 폴더 일괄 동기화 ────────────────────────
-async function syncAllFolders() {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
-  const btn = document.getElementById("btnSyncAllFolders");
-  btn.disabled  = true;
-  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 동기화 중...';
-
-  try {
-    const data = await gasGet({ action: "syncAllFolders" }, 120000);
-    if (data.error) {
-      showToast("❌ 폴더 동기화 실패: " + data.error, "error");
-    } else {
-      const lines = [];
-      if (data.capture) lines.push(`📂 캡쳐폴더 ${data.capture.updated}건 업데이트, ${data.capture.skipped}건 유지`);
-      if (data.review)  lines.push(`📁 리뷰폴더 ${data.review.updated}건 업데이트, ${data.review.skipped}건 유지${data.review.notFound > 0 ? `, ${data.review.notFound}건 미매칭` : ""}`);
-      showToast("✅ 일괄 동기화 완료 (" + data.elapsed + "초)\n" + lines.join(" / "), "success");
-      try { await loadAdminDashboard(); } catch(_) {}
-    }
-  } catch (err) {
-    showToast("❌ 폴더 동기화 오류: " + (err.message || ""), "error");
-  } finally {
-    btn.disabled  = false;
-    btn.innerHTML = '<i class="fas fa-folder-sync"></i> 구매캡쳐/리뷰저장 폴더 일괄동기화';
-  }
-}
-
-/** ★ 동기화 완료 후 대시보드 자동 새로고침 */
-function _autoRefreshDashboardAfterBuild() {
-  // 관리자 화면이 열려 있고, 대시보드 탭이 보이는 상태일 때만 자동 동기화
-  const screenAdmin = document.getElementById("screenAdmin");
-  if (!screenAdmin || !screenAdmin.classList.contains("active")) return;
-  const dashWrap = document.getElementById("dashboardWrap");
-  if (!dashWrap) return;
-  // 약간의 딜레이 후 새로고침 (GAS 캐시 반영 대기)
-  setTimeout(() => {
-    showToast("🔄 대시보드 자동 새로고침 중...", "info");
-    loadAdminDashboard();
-  }, 800);
-}
-
-/* ── 작업시트 추가 ── */
-function openAddCampaign() {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) {
-    showToast("❌ GAS 웹앱 URL이 설정되지 않았습니다.", true); return;
-  }
-  document.getElementById("addCampUrl").value = "";
-  document.getElementById("addCampPreview").textContent = "";
-  document.getElementById("addCampError").textContent = "";
-  document.getElementById("addCampPreviewBtn").disabled = true;
-  document.getElementById("addCampPreviewBtn").style.display = "";
-  document.getElementById("addCampSubmitBtn").style.display = "none";
-  document.getElementById("addCampPreviewArea").style.display = "none";
-  document.getElementById("addCampUrl").classList.remove("has-val");
-  document.getElementById("addCampOverlay").classList.add("open");
-  setTimeout(() => document.getElementById("addCampUrl").focus(), 80);
-}
-function closeAddCampaign() {
-  document.getElementById("addCampOverlay").classList.remove("open");
-}
-
-/** URL 입력 시 실시간 정제 미리보기 */
-function onAddCampInput() {
-  const raw = document.getElementById("addCampUrl").value.trim();
-  const errEl = document.getElementById("addCampError");
-  const preEl = document.getElementById("addCampPreview");
-  const btn   = document.getElementById("addCampPreviewBtn");
-  const inp   = document.getElementById("addCampUrl");
-  errEl.textContent = "";
-  // URL 변경 시 미리보기 초기화
-  document.getElementById("addCampPreviewArea").style.display = "none";
-  document.getElementById("addCampSubmitBtn").style.display = "none";
-  btn.style.display = "";
-  if (!raw) {
-    preEl.textContent = ""; btn.disabled = true; inp.classList.remove("has-val"); return;
-  }
-  // sheetId 추출 정규식
-  const m = raw.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]{20,})/);
-  if (!m) {
-    preEl.textContent = "";
-    errEl.textContent = "구글 스프레드시트 URL 형식이 아닙니다.";
-    btn.disabled = true; inp.classList.remove("has-val"); return;
-  }
-  const cleanUrl = "https://docs.google.com/spreadsheets/d/" + m[1] + "/edit";
-  preEl.textContent = "→ " + cleanUrl;
-  btn.disabled = false;
-  inp.classList.add("has-val");
-}
-
-/** 1단계: 미리보기 — 시트 제목 + 탭 목록 확인 */
-async function previewAddCampaign() {
-  const raw = document.getElementById("addCampUrl").value.trim();
-  const errEl = document.getElementById("addCampError");
-  const btn   = document.getElementById("addCampPreviewBtn");
-  if (!raw) return;
-  errEl.textContent = "";
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 조회중...';
-  try {
-    const data = await gasGet({ action: "previewCampaign", url: raw });
-    if (!data.ok) {
-      if (data.serviceAccount) {
-        const sa = data.serviceAccount;
-        const sheetUrl = raw.trim();
-        errEl.innerHTML = `
-          <div style="color:#dc2626;font-size:12px;line-height:1.6;margin-bottom:6px;">
-            시트 접근 권한이 없습니다.<br>아래 서비스 계정을 추가하려는 시트에<br><b>액세스 권한을 편집자로 추가</b> 후 다시 시도해주세요.
-          </div>
-          <div style="display:flex;align-items:center;gap:6px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:6px 10px;margin-bottom:8px;">
-            <code style="font-size:11px;color:#334155;flex:1;word-break:break-all;user-select:all;">${sa}</code>
-          </div>
-          <div style="display:flex;gap:6px;">
-            <button onclick="navigator.clipboard.writeText('${sa}').then(()=>{this.innerHTML='<i class=\\'fas fa-check\\'></i> 복사됨';this.style.background='#12b886';setTimeout(()=>{this.innerHTML='<i class=\\'fas fa-copy\\'></i> 서비스계정 복사';this.style.background='#3182f6'},1500)})"
-              style="flex:1;padding:6px 10px;background:#3182f6;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;">
-              <i class="fas fa-copy"></i> 서비스계정 복사
-            </button>
-            <button onclick="window.open('${sheetUrl}','_blank')"
-              style="flex:1;padding:6px 10px;background:#0ea5e9;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;">
-              <i class="fas fa-external-link-alt"></i> 시트 이동
-            </button>
-          </div>`;
-      } else {
-        errEl.textContent = data.error || "시트 조회 실패";
-      }
-      return;
-    }
-    // 시트 제목
-    document.getElementById("addCampSheetTitle").textContent = data.spreadsheetTitle;
-    // 이미 등록 여부
-    const badge = document.getElementById("addCampAlreadyBadge");
-    if (data.alreadyRegistered) {
-      badge.style.display = "block";
-      badge.textContent = "⚠ 이미 등록된 캠페인입니다 (" + data.existingName + "). 다시 등록하면 업데이트됩니다.";
-    } else {
-      badge.style.display = "none";
-    }
-    // 탭 목록
-    document.getElementById("addCampTabCount").textContent = data.tabCount;
-    const listEl = document.getElementById("addCampTabList");
-    listEl.innerHTML = "";
-    for (const tab of data.tabs) {
-      const el = document.createElement("div");
-      el.style.cssText = "padding:4px 8px; background:#fff; border:1px solid #e2e8f0; border-radius:4px; font-size:12px; color:#334155;";
-      el.textContent = tab.name;
-      listEl.appendChild(el);
-    }
-    if (data.tabs.length === 0) {
-      listEl.innerHTML = '<div style="color:#94a3b8; font-size:12px;">탭이 없습니다 (시스템 탭 제외)</div>';
-    }
-    // 미리보기 영역 표시, 확인 버튼 숨기고 등록 버튼 표시
-    document.getElementById("addCampPreviewArea").style.display = "block";
-    btn.style.display = "none";
-    document.getElementById("addCampSubmitBtn").style.display = "";
-    document.getElementById("addCampSubmitBtn").disabled = false;
-  } catch (err) {
-    errEl.textContent = err.message || "조회 실패";
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-search"></i> 확인';
-  }
-}
-
-/** 2단계: 등록 실행 */
-async function submitAddCampaign() {
-  const raw = document.getElementById("addCampUrl").value.trim();
-  const errEl = document.getElementById("addCampError");
-  const btn   = document.getElementById("addCampSubmitBtn");
-  if (!raw) return;
-  errEl.textContent = "";
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 등록 중...';
-  try {
-    const data = await gasGet({ action: "addCampaign", url: raw });
-    closeAddCampaign();
-    showToast(`✅ 등록 완료: ${data.campaignName} (${data.url})`);
-    // 등록 후 동기화 안내 토스트
-    setTimeout(() => showToast("💡 동기화 버튼을 눌러 대시보드에 반영하세요.", false), 2200);
-  } catch (err) {
-    errEl.textContent = err.message || "등록 실패";
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-plus"></i> 등록';
-  }
-}
-// ESC 키로 모달 닫기
-document.addEventListener("keydown", function(e) {
-  if (e.key === "Escape") {
-    if (document.getElementById("addCampOverlay").classList.contains("open"))
-      closeAddCampaign();
-  }
-});
-
-/* ── 열쇠 드롭다운 메뉴 ── */
-function toggleKeyMenu(e) {
-  e.stopPropagation();
-  const dd = document.getElementById('keyDropdown');
-  const isHidden = dd.style.display === 'none' || !dd.style.display;
-  dd.style.display = isHidden ? 'block' : 'none';
-}
 function closeKeyMenu() {
   const dd = document.getElementById('keyDropdown');
   if (dd) dd.style.display = 'none';
@@ -11721,114 +10627,6 @@ document.addEventListener('click', function(e) {
   if (wrap && !wrap.contains(e.target)) closeKeyMenu();
 });
 
-/* ── 비밀번호 변경 ── */
-function openChangePw() {
-  document.getElementById("cpCurrentPw").value = "";
-  document.getElementById("cpNewPw").value     = "";
-  document.getElementById("cpNewPw2").value    = "";
-  hide("changePwError");
-  show("changePwModal", "flex");
-}
-function closeChangePw() { hide("changePwModal"); }
-async function submitChangePw() {
-  const currentPw = document.getElementById("cpCurrentPw").value;
-  const newPw     = document.getElementById("cpNewPw").value;
-  const newPw2    = document.getElementById("cpNewPw2").value;
-  const errEl     = document.getElementById("changePwError");
-  hide(errEl);
-  if (!currentPw || !newPw || !newPw2) { errEl.textContent = "모든 항목을 입력하세요."; show(errEl); return; }
-  if (newPw !== newPw2)                { errEl.textContent = "새 비밀번호가 일치하지 않습니다."; show(errEl); return; }
-  if (newPw.length < 4)               { errEl.textContent = "새 비밀번호는 4자 이상이어야 합니다."; show(errEl); return; }
-  showLoading("변경 중...");
-  try {
-    const data = await gasPost({ action: "adminChangePw", currentPw, newPw });
-    hideLoading();
-    if (data.success) {
-      closeChangePw();
-      showToast("비밀번호가 변경되었습니다.", "success");
-    } else {
-      errEl.textContent = data.error || "오류가 발생했습니다.";
-      show(errEl);
-    }
-  } catch (err) {
-    hideLoading();
-    showToast("오류: " + err.message, "error");
-  }
-}
-
-function togglePwVisible(inputId, btn) {
-  const input = document.getElementById(inputId);
-  const icon  = btn.querySelector("i");
-  if (input.type === "password") {
-    input.type     = "text";
-    icon.className = "fas fa-eye-slash";
-  } else {
-    input.type     = "password";
-    icon.className = "fas fa-eye";
-  }
-}
-
-/* ── GAS 통신 ──
-/**
- * ★ GAS JSONP 테스트 함수
- * indexStatus를 JSONP로 호출해 현재 배포된 GAS가 callback 파라미터를 처리하는지 확인
- */
-async function testGasJsonp() {
-  const btn    = document.getElementById("btnTestJsonp");
-  const resEl  = document.getElementById("jsonpTestResult");
-  const url    = APP_CONFIG.GAS_WEB_APP_URL;
-  if (!url) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
-
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 테스트 중...';
-  resEl.style.display = "block";
-  resEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> JSONP 테스트 중...';
-
-  try {
-    const t0   = Date.now();
-    const data = await _jsonpGet(`${url}?action=indexStatus`, 10000);
-    const ms   = Date.now() - t0;
-    if (data && (data.exists !== undefined || data.count !== undefined)) {
-      const verBadge = data.codeVersion
-        ? `<br><span style="color:#3182f6;font-weight:600">📌 Code.gs 버전: ${escHtml(data.codeVersion)}</span>`
-        : "";
-      resEl.innerHTML =
-        `<span style="color:#0ca678;font-weight:700">✅ JSONP 지원 확인됨</span> (${ms}ms)<br>` +
-        `GAS 버전이 정상입니다. 동기화을 진행할 수 있습니다.${verBadge}<br>` +
-        `<small style="color:#6B7280">응답: count=${data.count||0}, exists=${data.exists}</small>`;
-      // 코드 버전 행 갱신
-      const cvRow  = document.getElementById("codeVersionRow");
-      const cvText = document.getElementById("codeVersionText");
-      if (data.codeVersion && cvRow && cvText) { cvText.textContent = data.codeVersion; cvRow.style.display = ""; }
-      // 오류 배너 숨김
-      const b = document.getElementById("gasErrorBanner");
-      if (b) b.style.display = "none";
-    } else if (data && data.error) {
-      resEl.innerHTML =
-        `<span style="color:#D97706;font-weight:700">⚠ JSONP는 됐지만 GAS 오류:</span> ${escHtml(data.error)}`;
-    } else {
-      resEl.innerHTML =
-        `<span style="color:#D97706;font-weight:700">⚠ 응답 형식 이상:</span> ${JSON.stringify(data).substring(0,100)}`;
-    }
-  } catch (e) {
-    const m = e.message || "";
-    if (m.includes("스크립트 로드 실패") || m.includes("Script load failed")) {
-      resEl.innerHTML =
-        `<span style="color:#DC2626;font-weight:700">❌ JSONP 미지원</span><br>` +
-        `현재 배포된 GAS가 <b>구버전</b>입니다.<br>` +
-        `<b>Code.gs를 최신 버전으로 재배포</b>하면 해결됩니다.<br>` +
-        `<small style="color:#6B7280">▶ 배포 → 기존 배포 관리 → 수정(연필) → 새 버전 → 배포</small>`;
-      document.getElementById("gasErrorBanner").style.display = "block";
-    } else if (m.includes("시간 초과")) {
-      resEl.innerHTML = `<span style="color:#D97706;font-weight:700">⚠ 시간 초과</span> — GAS가 응답하지 않습니다.`;
-    } else {
-      resEl.innerHTML = `<span style="color:#DC2626;font-weight:700">❌ 오류:</span> ${escHtml(m)}`;
-    }
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-plug"></i> GAS 연결 테스트 (JSONP 지원 여부)';
-  }
-}
 
 /*
  * GAS 웹앱은 긴 요청 시 302 리다이렉트 발생 → CORS 헤더 유실 문제
@@ -11942,19 +10740,40 @@ function _jsonpGet(fullUrl, timeoutMs) {
 
 /* ── 유틸 ── */
 
+/* ★★ 리뷰 캡처 축소 기준 — **값 단일 출처**(아래 ImageShrink 경로와 폴백이 같은 값을 쓴다).
+   ★ 긴 변 1600px (사용자 확정 2026-09-22): 리뷰 캡처는 세로로 긴 모바일 스크린샷
+     (예 1080×2400)이라 **가로 폭 기준으로는 한 번도 줄지 않았다** — 종전 `width > 1920`
+     조건이 참이 되는 일이 없어 원본 해상도 그대로 올라갔고, Drive 업로드가 3~9초였다.
+   ★ 품질 0.75 는 종전 그대로(바꾸지 않는다 — 한 번에 두 축을 흔들면 화질 문제의 원인을 못 가린다).
+   ⚠ 이 값은 **AI 판정의 입력 화질**이기도 하다(1차 필터·2차 검수가 같은 이미지를 읽는다).
+     더 낮추면 상품명·리뷰 본문 OCR 이 흔들린다 — 내리기 전에 실물로 확인할 것. */
+const REVIEW_CAPTURE_MAX_PX  = 1600;
+const REVIEW_CAPTURE_QUALITY = 0.75;
+
 /**
  * ★ 이미지 압축/리사이즈 (모바일 최적화)
- * - 최대 1920px으로 리사이즈
- * - JPEG 품질 0.75로 압축
- * - 원본 1MB 이하면 압축 스킵 (이미 작은 파일)
+ * - **긴 변** 기준 REVIEW_CAPTURE_MAX_PX 로 축소 (세로로 긴 캡처도 줄어든다)
+ * - JPEG 품질 REVIEW_CAPTURE_QUALITY
+ * - 원본 1MB 이하 JPEG 면 손대지 않는다(재인코딩은 화질만 깎는다)
+ *
+ * ★★ 축소 실행부 단일 출처 = `ImageShrink`(js/image-shrink.js) — 구매 캡처 업로드가
+ *   쓰는 그 모듈이다. 여기서는 **긴 변 기준**(`{longest:true}`)으로 부르고,
+ *   기존 소비처(구매 캡처 1920/0.8 · 배치 1080/0.6)는 인자를 안 넘겨 **가로 기준 그대로**다.
+ * ★ 모듈을 못 불러온 페이지를 위한 폴백을 남긴다 — 축소가 통째로 빠지면 큰 캡처가
+ *   서버 본문 상한(10MB)에 걸려 **증빙만 조용히 빠진다**(image-shrink.js 주석의 그 사고).
  */
-function compressImage(file, maxWidth = 1920, quality = 0.75) {
-  return new Promise((resolve, reject) => {
-    // 1MB 이하이고 JPEG이면 압축 불필요
-    if (file.size <= 1024 * 1024 && file.type === 'image/jpeg') {
-      return fileToBase64Raw(file).then(resolve).catch(reject);
-    }
+function compressImage(file, maxPx = REVIEW_CAPTURE_MAX_PX, quality = REVIEW_CAPTURE_QUALITY) {
+  // 1MB 이하이고 JPEG이면 압축 불필요
+  if (file.size <= 1024 * 1024 && file.type === 'image/jpeg') return fileToBase64Raw(file);
 
+  if (window.ImageShrink && typeof window.ImageShrink.fromFile === 'function') {
+    return window.ImageShrink.fromFile(file, maxPx, quality, { longest: true })
+      .then(r => (r && r.base64) ? r.base64 : fileToBase64Raw(file))
+      .catch(() => fileToBase64Raw(file));
+  }
+
+  // ── 폴백: 모듈 미로드. 위와 **같은 상한·같은 긴 변 기준**으로 직접 줄인다 ──
+  return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
 
@@ -11962,21 +10781,20 @@ function compressImage(file, maxWidth = 1920, quality = 0.75) {
       URL.revokeObjectURL(url);
 
       let { width, height } = img;
-
-      // 리사이즈 필요 여부 확인
-      if (width > maxWidth) {
-        height = Math.round(height * (maxWidth / width));
-        width = maxWidth;
+      const scale = Math.min(1, maxPx / Math.max(width || 1, height || 1));
+      if (scale < 1) {
+        width  = Math.round(width  * scale);
+        height = Math.round(height * scale);
       }
 
       const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
+      canvas.width = Math.max(1, width);
+      canvas.height = Math.max(1, height);
 
       const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, width, height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-      // JPEG로 압축 (품질 0.75)
+      // JPEG로 압축
       const dataUrl = canvas.toDataURL('image/jpeg', quality);
       const b64 = dataUrl.split(',')[1];
       if (!b64) {
@@ -11984,9 +10802,8 @@ function compressImage(file, maxWidth = 1920, quality = 0.75) {
         return;
       }
 
-      // 압축된 크기 계산
       const compressedSize = Math.round(b64.length * 0.75); // base64 → binary 크기 추정
-      console.log(`[compress] ${file.name}: ${(file.size/1024).toFixed(0)}KB → ${(compressedSize/1024).toFixed(0)}KB (${width}x${height})`);
+      console.log(`[compress] ${file.name}: ${(file.size/1024).toFixed(0)}KB → ${(compressedSize/1024).toFixed(0)}KB (${canvas.width}x${canvas.height})`);
 
       resolve(b64);
     };
@@ -12041,20 +10858,6 @@ function hideLoading() {
   setTimeout(() => { el.style.display = "none"; el.classList.remove("fade-out"); }, 280);
 }
 
-// ══════════════════════════════════════════════════════════
-// ★ 파일 존재 확인 모달
-// ══════════════════════════════════════════════════════════
-function openCheckFilesModal() {
-  const modal = document.getElementById("checkFilesModal");
-  if (!modal) return;
-  // 초기화
-  document.getElementById("checkFilesPwInput").value = "";
-  const res = document.getElementById("checkFilesResult");
-  res.style.display = "none";
-  res.innerHTML = "";
-  modal.classList.add("open");
-  setTimeout(() => document.getElementById("checkFilesPwInput").focus(), 80);
-}
 
 function closeCheckFilesModal() {
   const modal = document.getElementById("checkFilesModal");
@@ -12066,95 +10869,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape") closeCheckFilesModal();
 });
 
-// 모달 바깥 클릭 시 닫기
-document.getElementById("checkFilesModal")?.addEventListener("click", function(e) {
-  if (e.target === this) closeCheckFilesModal();
-});
 
-async function runCheckReviewFiles() {
-  const pwInput = document.getElementById("checkFilesPwInput");
-  const pw = (pwInput?.value || "").trim();
-  if (!pw) { showToast("비밀번호를 입력하세요.", "error"); pwInput?.focus(); return; }
-
-  const resEl = document.getElementById("checkFilesResult");
-  resEl.style.display = "";
-  resEl.innerHTML = `<div class="cfr-summary running">
-    <i class="fas fa-spinner fa-spin"></i> 전체 시트 순회 중… 수십 초 소요될 수 있습니다.
-  </div>`;
-
-  // 실행 버튼 비활성화
-  const runBtn = resEl.closest(".check-files-box")?.querySelector("button[onclick='runCheckReviewFiles()']");
-  if (runBtn) { runBtn.disabled = true; runBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 실행 중…'; }
-
-  try {
-    let res;
-    try {
-      res = await gasPost({ action: "checkReviewFiles", pw });
-    } catch (_) {
-      res = await gasGet({ action: "checkReviewFiles", pw });
-    }
-
-    if (res.error) {
-      resEl.innerHTML = `<div class="cfr-item error">
-        <i class="fas fa-times-circle"></i> ${escHtml(res.error)}
-      </div>`;
-      return;
-    }
-
-    const { restored = 0, results = [], errors = [] } = res;
-    let html = "";
-
-    // 요약
-    if (restored === 0 && errors.length === 0) {
-      html += `<div class="cfr-summary ok">
-        <i class="fas fa-check-circle"></i> 삭제된 파일 없음 — 모든 리뷰 파일이 정상입니다.
-      </div>`;
-    } else if (restored > 0) {
-      html += `<div class="cfr-summary warn">
-        <i class="fas fa-undo-alt"></i> ${restored}건 복원됨 — 대시보드를 새로고침하면 반영됩니다.
-      </div>`;
-    }
-
-    // 복원 항목
-    results.forEach(item => {
-      html += `<div class="cfr-item restored">
-        <b>${escHtml(item.name)}</b>
-        <span style="color:#0ca678;margin-left:6px">${escHtml(item.tabName)}</span>
-        <span style="font-size:.75rem;color:#6B7280;margin-left:4px">행${item.rowIndex}</span><br>
-        <span style="font-size:.75rem">${escHtml(item.reason)}</span>
-      </div>`;
-    });
-
-    // 오류 항목
-    errors.forEach(err => {
-      html += `<div class="cfr-item error">
-        <i class="fas fa-exclamation-triangle"></i> ${escHtml(String(err))}
-      </div>`;
-    });
-
-    if (!html) {
-      html = `<div class="cfr-item empty">결과 없음</div>`;
-    }
-
-    resEl.innerHTML = html;
-
-    // 복원이 있으면 비밀번호 입력란 비우기
-    if (restored > 0) {
-      pwInput.value = "";
-      showToast(restored + "건 복원 완료. 대시보드를 새로고침하세요.", "success");
-    }
-
-  } catch (err) {
-    resEl.innerHTML = `<div class="cfr-item error">
-      <i class="fas fa-times-circle"></i> 통신 오류: ${escHtml(err.message || String(err))}
-    </div>`;
-  } finally {
-    if (runBtn) {
-      runBtn.disabled = false;
-      runBtn.innerHTML = '<i class="fas fa-search"></i> 확인 실행';
-    }
-  }
-}
 function showToast(msg, type="info", duration=3500) {
   const c = document.getElementById("toastContainer");
   const t = document.createElement("div");
@@ -12190,273 +10905,10 @@ function showCenterAlert(msg, duration=4000) {
 /* ══════════════════════════════════════════════
    검색 진단 모달 (searchAll GAS 응답 직접 조회)
    ══════════════════════════════════════════════ */
-function openSearchDebugModal() {
-  document.getElementById('searchDebugModal').style.display = 'flex';
-  document.getElementById('debugNameInput').focus();
-}
-function closeSearchDebugModal() {
-  document.getElementById('searchDebugModal').style.display = 'none';
-}
 
-async function runSearchDebug() {
-  const q = document.getElementById('debugNameInput').value.trim();
-  if (!q || q.length < 2) { showToast('이름을 2글자 이상 입력하세요.', 'warning'); return; }
-
-  // UI 초기화
-  const elResult  = document.getElementById('debugResult');
-  const elLoading = document.getElementById('debugLoading');
-  const elEmpty   = document.getElementById('debugEmpty');
-  const elError   = document.getElementById('debugError');
-  elResult.style.display  = 'none';
-  elLoading.style.display = 'block';
-  elEmpty.style.display   = 'none';
-  elError.style.display   = 'none';
-
-  try {
-    // GAS searchAll 원본 응답 (isSubmitted 포함 전체 행)
-    const data = await gasGet({ action: 'searchAllDebug', query: q });
-    elLoading.style.display = 'none';
-
-    // GAS가 searchAllDebug를 지원하지 않으면 일반 searchAll 사용
-    const rawResults = data.results || data.allResults || [];
-
-    if (!rawResults.length) {
-      elEmpty.style.display = 'block';
-      return;
-    }
-
-    // 통계
-    const total     = rawResults.length;
-    const submitted = rawResults.filter(r => r.isSubmitted).length;
-    const pending   = total - submitted;
-    document.getElementById('debugSummary').innerHTML =
-      `전체 <b>${total}건</b> | ` +
-      `<span style="color:#DC2626">isSubmitted=true: <b>${submitted}건</b></span> | ` +
-      `<span style="color:#0ca678">isSubmitted=false(검색 노출): <b>${pending}건</b></span>`;
-
-    // 테이블 렌더
-    const tbody = document.getElementById('debugTableBody');
-    tbody.innerHTML = '';
-    rawResults.forEach((r, i) => {
-      const isS    = r.isSubmitted;
-      const rdRaw  = r.submitVal !== undefined ? r.submitVal : (r.reviewDoneRaw !== undefined ? r.reviewDoneRaw : (r.row ? r.row[r.submitCol] : '—'));
-      const submitColDisp = r.submitCol || '(없음)';
-      const depDisp  = r.depositor || '';
-      const accDisp  = r.account   || '';
-      const bankDisp = r.bank      || '';
-      // 원인 힌트
-      let causeHint = '';
-      if (isS) {
-        if (r.submitCol && r.submitCol !== '(없음)') causeHint = `리뷰컬럼(${r.submitCol})="${rdRaw}"`;
-        else if (depDisp && accDisp && bankDisp) causeHint = `리뷰컬럼없음→예금주+계좌+은행 모두채움`;
-        else causeHint = `제출값="${rdRaw}"`;
-      }
-      const tr = document.createElement('tr');
-      tr.style.background = isS ? '#FEF2F2' : '#F0FDF4';
-      tr.innerHTML = `
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;color:#6B7280">${i+1}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-weight:600">${escHtml(r.displayName||'')}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-size:.7rem;color:#4B5563">${escHtml((r.campaignName||'')+(r.tabName?(' / '+r.tabName):''))}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-size:.7rem">${escHtml(r.productName||r.tcDisplayName||'')}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;font-weight:700;color:${isS?'#DC2626':'#0ca678'}">${isS?'✅ true':'⬜ false'}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-family:monospace;font-size:.7rem;color:${isS?'#DC2626':'#4B5563'}">${escHtml(causeHint||String(rdRaw??''))}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-family:monospace;font-size:.65rem;color:#9CA3AF">${escHtml(r.sheetId||'')}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;color:#6B7280">${escHtml(String(r.row?._rowIndex??r.rowIndex??''))}</td>`;
-      tbody.appendChild(tr);
-    });
-
-    elResult.style.display = 'block';
-
-  } catch(err) {
-    elLoading.style.display = 'none';
-    // searchAllDebug 미지원 시 일반 searchAll로 재시도
-    if (err.message && (err.message.includes('알 수 없는') || err.message.includes('지원') || err.message.includes('action'))) {
-      await _runSearchDebugFallback(q);
-    } else {
-      elError.style.display = 'block';
-      elError.textContent   = '오류: ' + err.message;
-    }
-  }
-}
-
-/** searchAllDebug 미지원 시 일반 searchAll(isSubmitted 포함 전체)로 폴백 */
-async function _runSearchDebugFallback(q) {
-  const elLoading = document.getElementById('debugLoading');
-  const elEmpty   = document.getElementById('debugEmpty');
-  const elError   = document.getElementById('debugError');
-  const elResult  = document.getElementById('debugResult');
-  elLoading.style.display = 'block';
-
-  try {
-    // 일반 searchAll은 모든 결과를 반환하는지 확인
-    const data = await gasGet({ action: 'searchAll', query: q });
-    elLoading.style.display = 'none';
-
-    const rawResults = data.results || [];
-    if (!rawResults.length) {
-      elEmpty.style.display = 'block';
-      return;
-    }
-
-    const total     = rawResults.length;
-    const submitted = rawResults.filter(r => r.isSubmitted).length;
-    const pending   = total - submitted;
-    document.getElementById('debugSummary').innerHTML =
-      `<span style="color:#B45309">⚠ GAS가 searchAllDebug 미지원 → searchAll 응답 표시 (isSubmitted=true인 행이 반환 목록에 포함되지 않을 수 있음)</span><br>` +
-      `반환된 전체 <b>${total}건</b> | ` +
-      `<span style="color:#DC2626">isSubmitted=true: <b>${submitted}건</b></span> | ` +
-      `<span style="color:#0ca678">isSubmitted=false(검색 노출): <b>${pending}건</b></span>`;
-
-    const tbody = document.getElementById('debugTableBody');
-    tbody.innerHTML = '';
-    rawResults.forEach((r, i) => {
-      const isS = r.isSubmitted;
-      const rdRaw = r.reviewDoneRaw !== undefined ? r.reviewDoneRaw : '(GAS 미전달)';
-      const tr = document.createElement('tr');
-      tr.style.background = isS ? '#FEF2F2' : '#F0FDF4';
-      tr.innerHTML = `
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;color:#6B7280">${i+1}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-weight:600">${escHtml(r.displayName||'')}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-size:.7rem;color:#4B5563">${escHtml((r.campaignName||'')+(r.tabName?(' / '+r.tabName):''))}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-size:.7rem">${escHtml(r.productName||r.tcDisplayName||'')}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;font-weight:700;color:${isS?'#DC2626':'#0ca678'}">${isS?'✅ true':'⬜ false'}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-family:monospace;font-size:.72rem;color:#92400E">${escHtml(String(rdRaw??''))}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-family:monospace;font-size:.65rem;color:#9CA3AF">${escHtml(r.sheetId||'')}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;color:#6B7280">${escHtml(String(r.row?._rowIndex??r.rowIndex??''))}</td>`;
-      tbody.appendChild(tr);
-    });
-    elResult.style.display = 'block';
-
-  } catch(err2) {
-    elLoading.style.display = 'none';
-    elError.style.display = 'block';
-    elError.innerHTML = `<b>GAS 오류:</b> ${escHtml(err2.message)}<br><br>` +
-      `<b>확인 방법:</b><br>` +
-      `1. GAS 스크립트 편집기에서 <code>doGet</code> 함수의 <code>searchAll</code> action을 찾으세요<br>` +
-      `2. <code>isSubmitted</code> 판단 로직이 어떤 컬럼을 읽는지 확인하세요<br>` +
-      `3. 스프레드시트에서 리뷰제출여부 컬럼의 실제 값을 확인하세요<br>` +
-      `4. <code>SUBMITTED_VALUES</code> 배열에 해당 값이 포함되는지 확인하세요`;
-  }
-}
-
-// 모달 외부 클릭 시 닫기
-document.getElementById('searchDebugModal')?.addEventListener('click', function(e) {
-  if (e.target === this) closeSearchDebugModal();
-});
-document.getElementById('dashRawModal')?.addEventListener('click', function(e) {
-  if (e.target === this) closeDashRawModal();
-});
 
 /* ══════════════════════════════════════════════
    집계 진단 모달 (dashboard GAS 응답 원본 조회)
    ══════════════════════════════════════════════ */
-let _dashRawData = null; // 마지막 조회 결과 캐시
 
-function openDashRawModal() {
-  document.getElementById('dashRawModal').style.display = 'flex';
-  // 이미 캐시된 데이터가 있으면 바로 표시, 없으면 새로 조회
-  if (_dashRawData) {
-    _renderDashRawTable(_dashRawData);
-  } else {
-    reloadDashRaw();
-  }
-}
-function closeDashRawModal() {
-  document.getElementById('dashRawModal').style.display = 'none';
-}
 
-async function reloadDashRaw() {
-  const elLoading = document.getElementById('dashRawLoading');
-  const elContent = document.getElementById('dashRawContent');
-  const elError   = document.getElementById('dashRawError');
-  elLoading.style.display = 'block';
-  elContent.style.display = 'none';
-  elError.style.display   = 'none';
-  document.getElementById('dashRawFilter').value = '';
-
-  try {
-    const data = await gasGet({ action: 'dashboard' });
-    _dashRawData = data;
-    elLoading.style.display = 'none';
-    _renderDashRawTable(data);
-  } catch(err) {
-    elLoading.style.display = 'none';
-    elError.style.display   = 'block';
-    elError.textContent = 'GAS 오류: ' + err.message;
-  }
-}
-
-function _renderDashRawTable(data) {
-  const elContent = document.getElementById('dashRawContent');
-  const elMeta    = document.getElementById('dashRawMeta');
-  const tbody     = document.getElementById('dashRawBody');
-
-  const stats = data.stats || [];
-  const grand = data.grand || {};
-
-  // 메타 요약
-  elMeta.innerHTML =
-    `조회 시각: <b>${new Date().toLocaleTimeString()}</b> &nbsp;|&nbsp; ` +
-    `총 캠페인: <b>${stats.length}</b> &nbsp;|&nbsp; ` +
-    `grand.total: <b>${grand.total ?? '—'}</b> &nbsp;|&nbsp; ` +
-    `grand.submitted: <b>${grand.submitted ?? '—'}</b> &nbsp;|&nbsp; ` +
-    `grand.pending: <b>${grand.pending ?? '—'}</b>` +
-    (data.indexBuiltAt ? ` &nbsp;|&nbsp; 인덱스: <b>${escHtml(data.indexBuiltAt)}</b>` : '');
-
-  tbody.innerHTML = '';
-  stats.forEach(c => {
-    (c.tabs || []).forEach(t => {
-      const rate = t.total > 0 ? Math.round(t.submitted / t.total * 100) : 0;
-      // 차수 요약
-      let roundSummary = '—';
-      if (t.roundList && t.roundList.length) {
-        roundSummary = t.roundList.map(rd =>
-          `<span style="white-space:nowrap">${escHtml(rd.round||'?')}: ${rd.submitted}/${rd.total}</span>`
-        ).join(' &nbsp; ');
-      }
-      // 이상 여부 강조 (total>0인데 submitted=0 이면 주황)
-      const isAnomal = t.total > 0 && t.submitted === 0;
-      // total=0 이면 회색
-      const isEmpty  = t.total === 0;
-
-      const tr = document.createElement('tr');
-      tr.dataset.campaign = (c.campaign || '').toLowerCase();
-      tr.dataset.tab      = (t.tab || '').toLowerCase();
-      tr.style.background = isAnomal ? '#FFFBEB' : isEmpty ? '#F9FAFB' : '';
-
-      tr.innerHTML = `
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;color:#374151;white-space:nowrap">${escHtml(c.campaign||'')}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-weight:600;white-space:nowrap">${escHtml(t.tab||'')}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;font-weight:700;color:${isEmpty?'#9CA3AF':'#1F2937'}">${t.total ?? '—'}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;font-weight:700;color:${t.submitted>0?'#0ca678':isAnomal?'#D97706':'#9CA3AF'}">${t.submitted ?? '—'}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;color:${t.pending>0?'#DC2626':'#6B7280'}">${t.pending ?? '—'}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center">
-          ${isEmpty
-            ? `<span style="color:#9CA3AF;font-size:.68rem">수취인없음</span>`
-            : `<span style="color:${rate===100?'#0ca678':rate>=50?'#3182f6':'#D97706'};font-weight:700">${rate}%</span>`
-          }
-        </td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;font-size:.7rem">
-          ${isAnomal
-            ? `<span style="color:#D97706;font-weight:700">⚠ 제출0</span>`
-            : isEmpty
-              ? `<span style="color:#9CA3AF">빈탭</span>`
-              : `<span style="color:#0ca678">정상</span>`
-          }
-        </td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-size:.7rem;color:#4B5563">${roundSummary}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-family:monospace;font-size:.62rem;color:#9CA3AF;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(t.sheetId||'')}">${escHtml(t.sheetId||'—')}</td>`;
-      tbody.appendChild(tr);
-    });
-  });
-
-  elContent.style.display = 'block';
-}
-
-function filterDashRawTable() {
-  const q = document.getElementById('dashRawFilter').value.toLowerCase().trim();
-  document.querySelectorAll('#dashRawBody tr').forEach(tr => {
-    const match = !q || tr.dataset.campaign.includes(q) || tr.dataset.tab.includes(q);
-    tr.style.display = match ? '' : 'none';
-  });
-}

@@ -21,6 +21,7 @@ const crypto = require('crypto');
  */
 
 const pool = require('../db/pool');           // ★ 이 모듈은 pool 을 직접 export 한다(구조분해 금지)
+const { syncCardsAfterWrite } = require('./reviewerIdentityCards.service');
 const { logger } = require('../utils/logger'); // ★ 반대로 logger 는 { logger } 구조분해다
 const { PAYMENT_COL_KEYWORDS } = require('./search.service');
 const { resolveReviewFee, sheetDateToIso, toKstDate } = require('../utils/campaignFee');
@@ -107,6 +108,11 @@ function _int(v) {
   const n = parseInt(String(v == null ? '' : v).replace(/[^0-9-]/g, ''), 10);
   return Number.isFinite(n) ? n : 0;
 }
+
+/** 그 건의 구매양식 계좌를 등록DB 계좌보다 먼저 쓰는가(사용자 확정 2026-09-21 · 기본 켬).
+ *  ★ **호출 시점에 읽는다** — Railway 에서 `PAYMENT_FORM_ACCOUNT_FIRST=0` 만 넣으면
+ *    재배포 없이 종전 동작(등록 계좌 우선)으로 즉시 되돌아간다. */
+function _formAccountFirst() { return process.env.PAYMENT_FORM_ACCOUNT_FIRST !== '0'; }
 
 /* ══════════════════════════════════════════════════════════
    1) 입금대상 추출
@@ -247,22 +253,70 @@ async function listPaymentTargets(opts = {}) {
   // 참여행/주문의 현재 소유자 링크는 행 연락처보다 먼저 쓴다. 레거시 제출 링크만 있는 행은
   // 현재 연락처가 등록 리뷰어 한 명에게 정확히 연결되면 현재 계좌를 우선한다.
   const ownerAcctMap = await _loadOwnerAccountsByRow(rows);
+  // 좌표로 못 찾은 행만 — 모집공고 경유 주문은 원장 좌표가 `campaign:<공고ID>` 라 위 조회에 안 걸린다.
+  const linkedFormMap = await _loadLinkedFormAccounts(
+    rows.filter(r => !orderMap[r.sheetId + '||' + r.tabName + '||' + r.rowIndex]));
 
   const items = rows.map(r => {
     const key = r.sheetId + '||' + r.tabName;
     const camp = campMap[key] || null;
     const tab = tabMap[key] || null;
     const ord = orderMap[key + '||' + r.rowIndex] || null;
-    // 계좌 해석 순서 = ① 현재 참여행/주문 소유자 → ② 현재 행 연락처 → ③ 레거시 제출 링크 → ④ 구매양식.
+    // 등록DB 계좌 해석 순서 = ① 현재 참여행/주문 소유자 → ② 현재 행 연락처 → ③ 레거시 제출 링크.
     const ownerAcct = ownerAcctMap[key + '||' + r.rowIndex] || null;
     const directAcct = acctMap[r.phone8] || null;
     // 같은 번호가 여러 등록 리뷰어에게 연결되면 현재 행 소유자를 확정할 수 없다.
     // 이때 오래된 제출 링크로 빠지면 과거 소유자에게 송금되므로 owner_link는 사용하지 않는다.
     const safeOwnerAcct = ownerAcct && ownerAcct.source === 'owner_link'
       && acctMap.ambiguousPhone8s.has(r.phone8) ? null : ownerAcct;
-    const acct = safeOwnerAcct && safeOwnerAcct.source !== 'owner_link'
+    const registeredAcct = safeOwnerAcct && safeOwnerAcct.source !== 'owner_link'
       ? safeOwnerAcct
-      : directAcct || safeOwnerAcct || _orderAccount(ord, r) || null;
+      : directAcct || safeOwnerAcct || null;
+    /* ★★★ 그 건의 구매양식 계좌가 이긴다 (사용자 확정 2026-09-21 — 종전 규율을 뒤집었다)
+         왜: 종전에는 **등록DB 계좌가 언제나 이겨** 리뷰어가 양식에 적어 낸 계좌를 보지도 않았다.
+         실사고(모기위키 439/440) — 타계정 "백운"(정재석의 타계정, 전용계좌 미등록) 건이 양식에
+         김솔지 계좌를 적었는데 등록DB의 주인 계좌(정재석)로 나가, 김솔지는 2건 중 1건만 받았다.
+         전수 점검 결과 같은 불일치가 **40건**(예금주까지 다른 건 23건 · 746,800원)이었고, 그중
+         31건은 리뷰어가 **직접** 제출한 건이었다 = 양식에서 계좌를 바꿔 적어도 반영되지 않았다.
+       ★ **다를 때 조용히 보내지 않는다** — 아래 `accountMismatch` 로 두 계좌를 화면에 함께 실어
+         보내고, 담당자가 체크를 풀면 그 건만 보류된다(회차에 안 담긴다).
+       ★ **반쪽 값은 인정하지 않는다** — `_orderAccount` 가 은행·계좌·예금주 셋이 다 있을 때만
+         객체를 돌려준다(반쪽으로 이체 파일을 만들면 은행이 통째로 거부한다).
+       ★ **`reviewerId` 는 만들지 않는다**(112 규율 유지) — 양식 계좌는 지목할 등록 리뷰어가 없어
+         회차 스냅샷 대조에서 `unverifiable` 로 빠져야 다운로드가 막히지 않는다.
+       ★ 되돌리기 = env `PAYMENT_FORM_ACCOUNT_FIRST=0` (코드 변경 0). */
+    // ★ 계좌 근거로만 쓴다 — 상품비·리뷰비 스냅샷(`ord`)에는 섞지 않는다(금액 불변).
+    const formAcct = _orderAccount(ord || linkedFormMap[key + '||' + r.rowIndex] || null, r);
+    const useForm = _formAccountFirst() && !!formAcct;
+    const acct = useForm
+      // 신원 추적 필드(누가 참여했나)는 **등록DB 기준을 유지**한다 — 계좌(어디로 보내나)와 별개다.
+      ? { ...formAcct,
+          ownerReviewerId: (registeredAcct && registeredAcct.ownerReviewerId) || null,
+          participantIdentityId: (registeredAcct && registeredAcct.participantIdentityId) || null }
+      : (registeredAcct || formAcct || null);
+    /* 화면에 **말해야 하는 경우만** 재료를 싣는다(경고 전용 — 판정·보류는 하지 않는다).
+       ★★ **두 계좌가 같으면 `null`** — 양식 계좌가 기본 경로가 되면서 `accountSource==='order'`
+          가 대부분의 행에 붙는데, 그때마다 배지를 띄우면 **진짜 신호(불일치)가 묻힌다**(늑대소년).
+       ★ 비교는 숫자만(`normalizeAccount`) — `725602-00-129824` ↔ `72560200129824` 를 다름으로 오판 금지.
+       ★ `registered: null` = 등록된 계좌가 아예 없어 양식 계좌가 유일한 근거인 경우(112 의 2e). */
+    const _mmForm = formAcct ? {
+      bankName: formAcct.bankName || '',
+      accountTail: normalizeAccount(formAcct.bankAccount).slice(-4),
+      accountHolder: formAcct.accountHolder || '',
+    } : null;
+    const acctMismatch = !useForm ? null
+      : !registeredAcct
+        ? { form: _mmForm, registered: null, holderDiffers: false }
+        : normalizeAccount(formAcct.bankAccount) !== normalizeAccount(registeredAcct.bankAccount)
+          ? {
+              form: _mmForm,
+              registered: { bankName: registeredAcct.bankName || '',
+                            accountTail: normalizeAccount(registeredAcct.bankAccount).slice(-4),
+                            accountHolder: registeredAcct.accountHolder || '',
+                            name: registeredAcct.name || '', isSub: !!registeredAcct.isSub },
+              holderDiffers: String(formAcct.accountHolder || '').trim() !== String(registeredAcct.accountHolder || '').trim(),
+            }
+          : null;   // ← 같으면 아무 말도 하지 않는다
 
     // 상품비 = 관리자가 현재 작업보드에서 확인하는 표시값.
     // ★ campaign_participants 물리값 + participant_edits 오버레이를 작업보드 표와 같은 규칙으로
@@ -338,6 +392,9 @@ async function listPaymentTargets(opts = {}) {
     if (amount <= 0) issues.push('zero_amount');
     // 통장표시가 없어도 이체 자체는 되지만(양식상 필수 아님) 리뷰어가 무슨 돈인지 모른다 → 경고만.
     if (!memo) warnings.push('no_memo');
+    /* ★ 양식 계좌 ≠ 등록DB 계좌 — **경고만**(사용자 확정 2026-09-21: 보류시키지 않는다).
+       화면이 두 계좌를 나란히 보여주고, 담당자가 체크를 풀면 그 건만 회차에서 빠진다. */
+    if (acctMismatch) warnings.push('account_form_override');
     /* ★★ 리뷰비 0 = **리뷰비 없는 작업**이다 — 경고하지 않는다(사용자 확정 2026-08-24).
        종전에는 "근거(feeSource)를 못 찾으면" 경고했는데, 공고가 없는 옛 작업은 근거가 구조적으로
        없어 상시 경고로 뒤덮였다(실측: 보완 목록 37개 작업 대부분). 이 계정은 **상품비만 주는
@@ -381,10 +438,16 @@ async function listPaymentTargets(opts = {}) {
       //   타계정으로 지목한다 — 없는 명의를 지목하면 보완 저장이 `sub_not_found` 로 죽는다.
       accountRef: acct && acct.reviewerId
         ? { reviewerId: acct.reviewerId,
-            subPhone8: acct.isSub ? (acct.subPhone8 === undefined ? r.phone8 : acct.subPhone8) : null }
+            subPhone8: acct.isSub ? (acct.subPhone8 === undefined ? r.phone8 : acct.subPhone8) : null,
+            // ★ 조각 2-2(결정 177): 같은 번호를 쓰는 타계정을 가르는 이름 — 타계정을 실제로 지목할 때만 싣는다
+            ...(acct.isSub && (acct.subPhone8 === undefined ? r.phone8 : acct.subPhone8) ? { subName: acct.name || null } : {}) }
         : null,
       // 계좌를 어떻게 찾았는지 — self/sub(연락처 매칭) · owner_order/owner_link(소유자 링크 폴백)
+      //   · order(그 건의 구매양식 계좌 — 2026-09-21 확정으로 **기본 경로**가 됐다)
       accountSource: acct ? (acct.source || (acct.isSub ? 'sub' : 'self')) : null,
+      /* 양식 계좌로 보내는데 등록DB 계좌가 **다를 때만** 실린다(같거나 등록 계좌가 없으면 null).
+         화면은 이 값을 **그리기만** 한다 — 판정 사본을 만들지 않는다. */
+      accountMismatch: acctMismatch,
       productPrice, reviewFee: fee, amount, priceSource, feeSource, deliveryKind,
       workboardPrice, orderPrice, priceMismatch,
       tabReviewFee: tabFee, campaignReviewFee: campFee,
@@ -395,7 +458,34 @@ async function listPaymentTargets(opts = {}) {
   });
 
   flagPriceOutliers(items, workboardPopulation);
-  return { items, summary: _summarize(items) };
+
+  /* ★★ 마감(🏁)된 작업은 입금 대상에서 뺀다 (사용자 확정 2026-09-30 — "이미 종결된 작업은 관리할 필요 없다")
+       왜: 마감은 작업보드·홈에서만 빠지고 입금관리에는 그대로 남아, 작년 작업 286건 등 끝난 작업의 보류가
+       진짜 챙길 건을 가렸다(보류 331건 중 대부분).
+     ★ 마감 판정은 trackB.service 한 곳(이름 → gid 폴백) — 사본 금지.
+     ★ **조용히 빼지 않는다** — 뺀 건수(`finishedExcluded`)를 싣고 화면이 한 줄로 말하며 펼쳐 볼 수 있다.
+     ★ **모르면 빼지 않는다(fail-open)** — 마감 조회가 실패하면 전부 보여주고 `finishedUnavailable` 로 알린다.
+     ★ 회차 만들기(createBatch)는 `includeFinished:true` 로 부른다 — 사람이 펼쳐서 고른 건은 담을 수 있어야 한다. */
+  let shown = items, finishedExcluded = null, finishedUnavailable = false;
+  if (!opts.includeFinished) {
+    const tb = require('./trackB.service');   // 지연 require — trackB.service 도 이 모듈을 부른다(순환 방지)
+    const fin = await tb.finishedTabsMap();
+    if (fin.ok) {
+      const out = items.filter(it => tb.isTabFinishedIn(fin.map, it.sheetId, it.tabName, it.tabGid));
+      if (out.length) {
+        const outSet = new Set(out);
+        shown = items.filter(it => !outSet.has(it));
+        finishedExcluded = {
+          rows: out.length,
+          works: new Set(out.map(it => it.sheetId + '||' + it.tabName)).size,
+          payable: out.filter(it => it.payable).length,
+        };
+      }
+    } else {
+      finishedUnavailable = true;
+    }
+  }
+  return { items: shown, summary: _summarize(shown), finishedExcluded, finishedUnavailable };
 }
 
 /**
@@ -540,6 +630,44 @@ async function _loadOrderPrices(sheetIds, tabNames) {
     };
   }
   return map;
+}
+
+/**
+ * 좌표로 못 찾은 행의 구매양식 계좌 — **작업표 줄의 주문 연결**(campaign_participants.order_submission_id)로 찾는다.
+ *
+ * ★★ 왜(실사고 2026-09-30 풍성에프엔비 간장 272 최하영): 모집공고를 거친 주문은 원장 좌표가
+ *    `campaign:<공고ID>` 라 `_loadOrderPrices`(작업표 시트ID로 조회)에 **절대 안 걸린다**(그 탭 463건 중 424건).
+ *    그래서 157 "구매양식 계좌가 이긴다" 가 이 주문들에는 적용되지 않았고, 번호가 두 리뷰어에게 겹쳐
+ *    등록 계좌도 못 정한 건은 양식에 계좌가 멀쩡히 있는데 **"리뷰어 정보 없음"으로 매 회차 보류**됐다.
+ * ★ 짝짓기 키 = 주문 id(좌표·이름 불변). 단 **주문의 줄 번호 = 그 작업표 줄 번호**일 때만 인정한다 —
+ *    오염된 링크(남의 주문을 가리키는 줄)로 남의 계좌를 끌어오지 않는다(fail-closed).
+ * ★ 계좌 3칸만 돌려준다 — 금액·스냅샷은 여기서 싣지 않는다(이 경로로 금액이 바뀌면 안 된다).
+ * ★ 조회 실패는 빈 결과(종전 동작 그대로 — 입금대상 목록이 죽으면 안 된다).
+ */
+async function _loadLinkedFormAccounts(rows) {
+  const out = {};
+  if (!rows || !rows.length) return out;
+  try {
+    const { rows: found } = await pool.query(
+      `SELECT t.sheet_id AS "sheetId", t.tab_name AS "tabName", t.row_index AS "rowIndex",
+              os.bank AS "bank", os.account AS "account", os.depositor AS "depositor"
+         FROM unnest($1::text[], $2::text[], $3::int[]) AS t(sheet_id, tab_name, row_index)
+         JOIN campaign_participants cp
+           ON cp.sheet_id = t.sheet_id AND cp.tab_name = t.tab_name AND cp.seq = t.row_index
+          AND cp.deleted_at IS NULL AND cp.active = TRUE
+         JOIN order_submissions os
+           ON os.id = cp.order_submission_id AND os.deleted_at IS NULL
+          AND os.sheet_row = cp.seq`,
+      [rows.map(r => r.sheetId), rows.map(r => r.tabName), rows.map(r => r.rowIndex)]);
+    for (const o of found) {
+      const k = o.sheetId + '||' + o.tabName + '||' + o.rowIndex;
+      if (out[k]) { out[k] = null; continue; }   // 한 줄에 둘 이상 = 모호 → 쓰지 않는다
+      out[k] = { bank: o.bank || '', account: o.account || '', depositor: o.depositor || '' };
+    }
+  } catch (e) {
+    try { require('../utils/logger').logger.warn(`[payment] 연결 주문 계좌 조회 실패(무시): ${e.message}`); } catch (_) {}
+  }
+  return out;
 }
 
 /**
@@ -956,7 +1084,8 @@ async function createBatch({ bank, rows, by }) {
   if (!want.length) return { ok: false, error: '선택된 건이 없습니다.' };
 
   // 화면 값은 신뢰하지 않는다 — 대상 목록을 서버에서 다시 계산해 교집합만 담는다.
-  const { items: fresh } = await listPaymentTargets();
+  // ★ 마감 작업도 포함해 계산한다 — 화면에서 펼쳐 고른 건을 '대상 아님'으로 튕기지 않게.
+  const { items: fresh } = await listPaymentTargets({ includeFinished: true });
   const freshMap = new Map(fresh.map(it => [it.sheetId + '||' + it.tabName + '||' + it.rowIndex, it]));
 
   const picked = [];
@@ -1192,8 +1321,6 @@ function _batchView(b) {
     boardFailedCount: Number(b.board_failed_count || 0),
     boardStamp: b.board_stamp || '',
     boardRecordedAt: b.board_recorded_at || null,
-    resultCanApply: !!(b.result_upload_id && b.result_has_file && b.result_applied !== true
-      && (Number(b.result_success_count || 0) + Number(b.result_failed_count || 0) > 0)),
   };
 }
 
@@ -1434,7 +1561,7 @@ async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo, r
  *   소유자 공통계좌를 덮지 않는다(타계정 전용계좌 규약 유지).
  * ★ 빈 값은 **덮지 않는다**(부분 보완 허용) — 지우려면 화면이 아니라 등록리뷰어DB에서.
  */
-async function saveReviewerAccount({ reviewerId, subPhone8, bankName, bankAccount, accountHolder, by }) {
+async function saveReviewerAccount({ reviewerId, subPhone8, subName, bankName, bankAccount, accountHolder, by }) {
   // ★ 아래 `resolveBank` 검증이 화면에서 방금 등록한 표기를 알아야 한다(안 그러면
   //   표기를 넣어 두고도 계좌 저장이 '인식불가'로 거부되는 막다른 길).
   await _bankOv.ensureBankOverrides();
@@ -1459,15 +1586,20 @@ async function saveReviewerAccount({ reviewerId, subPhone8, bankName, bankAccoun
       const { rows } = await client.query(`SELECT sub_accounts FROM reviewers WHERE id = $1 FOR UPDATE`, [id]);
       if (!rows.length) throw new PaymentFixError('reviewer_not_found', '리뷰어를 찾지 못했습니다.');
       const arr = Array.isArray(rows[0].sub_accounts) ? rows[0].sub_accounts : [];
-      let hit = false;
-      const next = arr.map(s => {
-        const p8 = String((s && s.phone) || '').replace(/[^0-9]/g, '').slice(-8);
-        if (p8 !== sub || hit) return s;
-        hit = true;
-        return { ...s, ...(bn ? { bankName: bn } : {}), ...(ba ? { bankAccount: ba } : {}), ...(ah ? { accountHolder: ah } : {}) };
-      });
-      if (!hit) throw new PaymentFixError('sub_not_found', '그 타계정을 찾지 못했습니다. 화면을 새로고침해 주세요.');
+      // ★ 조각 2-2(결정 177): 여러 타계정이 같은 번호를 쓰면 번호만으로는 누구 칸인지 모른다(운영 17명).
+      //   종전에는 **첫 번째** 칸에 저장해 다른 타계정의 계좌를 덮었다 → 이름으로 좁히고, 그래도 여럿이면 저장하지 않는다.
+      const _nk = (v) => String(v || '').replace(/\s+/g, '');
+      const byPhone = [];
+      arr.forEach((s, i) => { if (String((s && s.phone) || '').replace(/[^0-9]/g, '').slice(-8) === sub) byPhone.push(i); });
+      let cand = byPhone;
+      if (byPhone.length > 1 && _nk(subName)) cand = byPhone.filter((i) => _nk(arr[i] && arr[i].name) === _nk(subName));
+      if (!cand.length) throw new PaymentFixError('sub_not_found', '그 타계정을 찾지 못했습니다. 화면을 새로고침해 주세요.');
+      if (cand.length > 1) throw new PaymentFixError('sub_ambiguous', '같은 번호를 쓰는 타계정이 여럿이라 누구 계좌인지 정할 수 없습니다. 등록리뷰어DB에서 직접 고쳐 주세요.');
+      const target = cand[0];
+      const next = arr.map((s, i) => (i !== target ? s
+        : { ...s, ...(bn ? { bankName: bn } : {}), ...(ba ? { bankAccount: ba } : {}), ...(ah ? { accountHolder: ah } : {}) }));
       await client.query(`UPDATE reviewers SET sub_accounts = $2::jsonb WHERE id = $1`, [id, JSON.stringify(next)]);
+      await syncCardsAfterWrite(client, id, { source: 'payment_account' });
       await client.query('COMMIT');
       return { ok: true, target: 'sub' };
     }

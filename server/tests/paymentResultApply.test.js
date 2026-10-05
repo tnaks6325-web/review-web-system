@@ -339,11 +339,8 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
       /require\('\.\/paymentApply\.service'\)/.test(resSrc)
       && /recordDeposits\(client,/.test(resSrc) && /markDepositCells\(/.test(resSrc));
 
-    const routeSrc = noLineComments(read('src/routes/payment.routes.js'));
-    ok('★ 기존 수동 처리(mark-done)도 같은 함수를 쓴다(사본이 남아 있지 않다)',
-      /paymentApply\.service/.test(routeSrc)
-      && !/UPDATE review_index SET is_submitted2/i.test(routeSrc)
-      && !/INSERT INTO payment_records/i.test(routeSrc));
+    ok('★ 회차를 건너뛰는 옛 수동 처리(mark-done) 라우트가 없다(결정 186 57번)',
+      !fs.existsSync(path.join(__dirname, '..', 'src', 'routes', 'payment.routes.js')));
 
     const applySrc = noLineComments(read('src/services/paymentApply.service.js'));
     ok('★ 무시트 탭은 작업표 칸에 쓰고 시트·큐로 내려가지 않는다(W3-a)',
@@ -389,13 +386,14 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
       /\['payment_batch_items', 'result_status'\]/.test(idx) && /\['payment_batches', 'applied_at'\]/.test(idx));
 
     const tb = noLineComments(read('src/routes/trackB.routes.js'));
-    for (const p of ['result-preview', 'result-apply']) {
-      const re = new RegExp("router\\.post\\('/payment/batch/:id/" + p + "', authMiddleware, adminOrMasterMiddleware");
-      ok(`★ /${p} = adminOrMaster(계좌·금액 표면)`, re.test(tb));
-    }
+    // 옛 수동 반영 입구(POST result-preview·result-apply)는 부르는 화면이 없어 2026-09-30 코드 다이어트
+    //   (결정 186 · 14번-①)로 제거했다. 같은 계산(previewResultFile·applyResultFile)은 result-auto-apply 가 안에서 쓴다.
+    ok('★ /result-auto-apply = adminOrMaster(계좌·금액 표면)',
+      /router\.post\('\/payment\/batch\/:id\/result-auto-apply', authMiddleware, adminOrMasterMiddleware/.test(tb));
+    ok('옛 수동 반영 입구 2개는 제거 상태',
+      !/router\.post\('\/payment\/batch\/:id\/result-(preview|apply)'/.test(tb));
     ok('★ 저장된 결과 미리보기 조회도 adminOrMaster로 제한한다',
       /router\.get\('\/payment\/batch\/:id\/result-preview', authMiddleware, adminOrMasterMiddleware/.test(tb));
-    ok('★ 반영은 confirm 없이는 실행되지 않는다', /b\.confirm !== true/.test(tb));
     ok('★ 42P01 은 not_ready 로 사유를 말한다(마스킹된 200 방지)', /code: 'not_ready'/.test(tb));
     ok('★ 안내 전송은 명시적으로 끈 경우만 끈다(기본 켬)', /notifyFailed: b\.notifyFailed !== false/.test(tb));
 
@@ -408,9 +406,9 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
        실제 사용자 흐름을 뜻하지 않는다. 저장 미리보기 열기와 수동 반영 함수의
        호출 관계만 확인한다. */
     const openResultBlock = wd.slice(wd.indexOf('function _pmOpenResult'), wd.indexOf('function _pmFileB64'));
-    const applyResultBlock = wd.slice(wd.indexOf('async function _pmResultApply'), wd.indexOf('async function _pmApplySavedResult'));
-    ok('★ 미리보기 → 확인 팝업 → 반영 순서', /result-preview/.test(openResultBlock) && /result-apply/.test(applyResultBlock));
-    ok('★ 반영 요청에 파일을 다시 보낸다(서버가 재해석)', /result-apply[\s\S]{0,240}base64:R\.file\.base64/.test(wd));
+    ok('★ 이체결과 확인은 저장된 미리보기만 연다', /result-preview/.test(openResultBlock));
+    ok('화면에 수동 반영 호출이 남아 있지 않다(죽은 _pmResultApply·_pmApplySavedResult 제거)',
+      !/_pmResultApply|_pmApplySavedResult|\/result-apply'/.test(wd));
     ok('★ 순서 배정을 화면이 고지한다', /결과를 순서대로 배정/.test(wd));
     ok('★ 결과없음은 이체실패·다음 회차 재포함으로 안내한다',
       /이체실패로 처리/.test(wd) && /다음 회차에 다시 포함/.test(wd));
@@ -418,9 +416,12 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
       && /notifyFailed: b\.notifyFailed !== false/.test(tb));
     ok('★ 확인 팝업은 body 직속', /document\.body\.appendChild\(el\);\s*\/\/ ★ body 직속/.test(wd));
     ok('★ Esc 리스너는 최상위 1회만', /_pmResultKeyBound/.test(wd));
-    ok('★ 자동 반영 결과에 작업보드 입금일 기록 결과를 표시하고, 회차별 별도 입금일 기록 버튼은 남기지 않는다',
-      /function _pmBoardApplyText\(board\)/.test(wd)
-      && /_pmBoardApplyText\(r\.board\)/.test(wd)
+    // ⚠ 종전 이 가드의 "_pmBoardApplyText(r.board) 표시" 조건은 **죽은 수동 반영 함수**에서만 참이었다
+    //   (자동 반영 결과 창은 작업보드 입금일 기록 결과를 그리지 않는다 — 결정 186 별건). 2026-09-30 수동 입구
+    //   제거와 함께 그 조건을 빼고, 실제로 있는 안전망(기록 실패 회차는 화면을 열 때 소급 기록)을 고정한다.
+    ok('★ 작업보드 입금일 기록 실패 회차는 화면을 열 때 자동 소급하고, 회차별 별도 입금일 기록 버튼은 남기지 않는다',
+      /Number\(batch\.boardFailedCount\) > 0/.test(wd)
+      && /deposit-date-backfill/.test(wd)
       && !/const depositDate\s*=/.test(wd)
       && !/function _pmBackfillPaidDeposit/.test(wd));
 

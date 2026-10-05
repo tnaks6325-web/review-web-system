@@ -76,11 +76,12 @@ function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve
      CREATE TABLE review_index_archive(sheet_id text,tab_name text,row_index int);
      CREATE TABLE tab_configs(sheet_id text,tab_name text,is_closed boolean DEFAULT false,sheetless boolean DEFAULT true,archived_rounds text);
      CREATE TABLE index_master_archive(sheet_id text,tab_name text);
-     CREATE TABLE trackb_tab_finished(sheet_id text,tab_name text,deleted_at timestamptz);
+     CREATE TABLE trackb_tab_finished(sheet_id text,tab_name text,tab_gid text,deleted_at timestamptz);
      CREATE TABLE campaign_applications(id text,owner_reviewer_id uuid);
      CREATE TABLE participation_links(sheet_id text,tab_name text,row_index int,owner_reviewer_id uuid);
      CREATE TABLE participant_edits(sheet_id text,tab_name text,anchor_type text,anchor_value text,field text,kind text,value_text text,value_bool boolean,reverted_at timestamptz);
      INSERT INTO reviewers VALUES('${owner}'),('${other}');INSERT INTO tab_configs(sheet_id,tab_name) VALUES('s','t');`);
+   await pg.exec('ALTER TABLE tab_configs ADD COLUMN IF NOT EXISTS tab_gid text'); // 실스키마(009)와 맞춤 — 마감 판정 gid 폴백
    await pg.exec(read('migrations/160_review_reminder_alimtalk.sql'));
    await pg.exec(read('migrations/161_workdesk_review_resolutions.sql'));
    await pg.exec(read('migrations/162_reviewer_participations.sql'));
@@ -165,6 +166,24 @@ function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve
       await query("UPDATE tab_configs SET archived_rounds=' R1, R2 ' WHERE sheet_id='s' AND tab_name='t'");
       assert.equal((await query('SELECT lifecycle_status FROM reviewer_participations WHERE id=$1',[before.id])).rows[0].lifecycle_status,'archived');
       await query("UPDATE tab_configs SET archived_rounds='' WHERE sheet_id='s' AND tab_name='t'");
+    });
+    await test('SQL: 마감된 작업의 미제출 행은 대기 목록·건수에서 빠지고 완료 이력은 남는다',async()=>{
+      const pendingId=await insert('미제출'),doneId=await insert('2026-09-01');
+      const pid=async id=>(await query('SELECT id FROM reviewer_participations WHERE campaign_participant_id=$1',[id])).rows[0].id;
+      const pP=await pid(pendingId),pD=await pid(doneId);
+      const ids=async status=>(await history.loadPage('p.id',{ownerReviewerId:owner,historyStatus:status,historyLimit:100},db)).rows.map(r=>r.id);
+      const before=await history.loadPage('p.id',{ownerReviewerId:owner,historyLimit:100},db);
+      assert.ok((await ids('pending')).includes(pP));
+      await query("INSERT INTO trackb_tab_finished(sheet_id,tab_name) VALUES('s','t')");
+      const after=await history.loadPage('p.id',{ownerReviewerId:owner,historyLimit:100},db);
+      assert.ok(!(await ids('pending')).includes(pP),'finished pending hidden');
+      assert.ok(!(await ids('all')).includes(pP),'finished pending hidden from all');
+      assert.ok((await ids('fulfilled')).includes(pD),'completed history kept');
+      assert.ok(after.counts.pending<before.counts.pending,'pending count excludes finished task');
+      assert.equal(after.counts.done,before.counts.done);
+      await query("UPDATE trackb_tab_finished SET deleted_at=now()");
+      assert.ok((await ids('pending')).includes(pP),'reopened task shows again');
+      await query("DELETE FROM trackb_tab_finished");
     });
     await test('SQL: 새 소유자 미확정 행은 전환 인증을 만료시킴',async()=>{
       const epoch=(await query('SELECT coverage_epoch FROM reviewer_history_control')).rows[0].coverage_epoch;

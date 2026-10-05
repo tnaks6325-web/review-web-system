@@ -107,6 +107,18 @@ const C = (fileId, extra = {}) => Object.assign({
     ok('dryRun 도 후보는 그대로 보고한다', r.total === 2);
   }
 
+  console.log('\n[B2] 실행은 고른 파일만(fileIds 필수 — 2026-10-02 · 완화 금지)');
+  {
+    const pool = makePool({ candidates: [C('f1'), C('f2')] });
+    const drive = makeDrive();
+    S.__setPoolForTest(pool); S.__setDriveForTest(drive);
+    const r = await S.trashOrphanCaptures({ dryRun: false });
+    ok('★★★ fileIds 없이 실행하면 아무것도 휴지통으로 보내지 않는다(번호 바뀐 정상 사진 보호)',
+      drive.trashed.length === 0 && pool.writes().length === 0 && r.trashed === 0 && /fileIds 필수/.test(r.error || ''));
+    const r2 = await S.trashOrphanCaptures({ dryRun: false, fileIds: [] });
+    ok('빈 목록도 실행 거부', drive.trashed.length === 0 && /fileIds 필수/.test(r2.error || ''));
+  }
+
   console.log('\n[C] 후보 교집합 — 화면 목록 불신');
   {
     const pool = makePool({ candidates: [C('f1')] });
@@ -131,7 +143,7 @@ const C = (fileId, extra = {}) => Object.assign({
     const pool = makePool({ candidates: [C('f1')], recheck: [] });
     const drive = makeDrive();
     S.__setPoolForTest(pool); S.__setDriveForTest(drive);
-    const r = await S.trashOrphanCaptures({ dryRun: false });
+    const r = await S.trashOrphanCaptures({ dryRun: false, fileIds: ['f1'] });
     ok('재검사에서 빠지면 휴지통으로 보내지 않는다', drive.trashed.length === 0);
     ok('건너뛴 건수를 보고한다(조용한 no-op 금지)', r.skippedRecheck === 1 && r.trashed === 0);
     ok('재검사는 파일 단위로 다시 조회한다', pool.findCalls >= 2);
@@ -161,7 +173,7 @@ const C = (fileId, extra = {}) => Object.assign({
     const pool = makePool({ candidates: [C('f1')] });
     const drive = makeDrive({ fail: true });
     S.__setPoolForTest(pool); S.__setDriveForTest(drive);
-    const r = await S.trashOrphanCaptures({ dryRun: false });
+    const r = await S.trashOrphanCaptures({ dryRun: false, fileIds: ['f1'] });
     ok('휴지통 실패면 원장을 고치지 않는다', pool.writes().length === 0);
     ok('실패 건수를 보고한다', r.failed === 1 && r.trashed === 0);
   }
@@ -169,7 +181,7 @@ const C = (fileId, extra = {}) => Object.assign({
     const pool = makePool({ candidates: [C('f1')] });
     const drive = makeDrive();
     S.__setPoolForTest(pool); S.__setDriveForTest(drive);
-    await S.trashOrphanCaptures({ dryRun: false, by: '망고' });
+    await S.trashOrphanCaptures({ dryRun: false, by: '망고', fileIds: ['f1'] });
     const w = pool.writes();
     ok('성공하면 원장 1건 갱신', w.length === 1);
     ok("slot_key='trashed' 로 표기(fileRoute 와 같은 칸)", /slot_key = 'trashed'/.test(w[0].q));
@@ -180,10 +192,33 @@ const C = (fileId, extra = {}) => Object.assign({
   console.log('\n[G] 크론 배선');
   {
     const cron = read('src/jobs/cron.js');
-    ok('킬스위치 ORPHAN_CAPTURE_CLEAN', /ORPHAN_CAPTURE_CLEAN !== '0'/.test(cron));
-    ok('jobLock 으로 직렬화', /withJobLock\('orphan_capture_clean'/.test(cron));
-    ok('크론은 실행 모드로 부른다', /trashOrphanCaptures\(\{ dryRun: false, by: 'cron' \}\)/.test(cron));
-    ok('정리 실패가 크론을 죽이지 않는다', /\[CRON-OrphanCapture\] error/.test(cron));
+    // 04:40 자동 정리는 2026-10-02 제거(결정 064 후속) — A 판정이 번호 재매김된 정상 사진을 잡는다(실측 72 중 62).
+    ok('★★ 고아 캡처 자동 정리 크론이 없다(되살리면 번호 바뀐 정상 리뷰 사진이 휴지통으로 간다)',
+      !/trashOrphanCaptures|orphanCaptureCleanup\.service|orphan_capture_clean/.test(cron));
+  }
+  {
+    console.log('\n[스키마] 후보 SQL 의 칸 이름이 실제 표에 있는가(2026-10-02 — cp.row_index 로 도입 이래 매일 실패)');
+    // ★ 가짜 pool 시험은 칸 이름 오류를 못 잡는다 → 마이그레이션 원문에서 표별 칸을 모아 대조한다.
+    const MIG = fs.readdirSync(path.join(__dirname, '..', 'migrations')).filter(f => f.endsWith('.sql'))
+      .map(f => fs.readFileSync(path.join(__dirname, '..', 'migrations', f), 'utf8')).join('\n');
+    const colsOf = (table) => {
+      const cols = new Set();
+      const re = new RegExp('CREATE TABLE(?: IF NOT EXISTS)? ' + table + '\\s*\\(([\\s\\S]*?)\\n\\);', 'g');
+      let m; while ((m = re.exec(MIG))) m[1].split('\n').forEach(l => { const c = (l.trim().match(/^([a-z_][a-z0-9_]*)\s/) || [])[1]; if (c) cols.add(c); });
+      const ra = new RegExp('ALTER TABLE(?: IF EXISTS)? ' + table + '\\b([\\s\\S]*?);', 'g');
+      while ((m = ra.exec(MIG))) for (const a of m[1].matchAll(/ADD COLUMN(?: IF NOT EXISTS)? ([a-z_][a-z0-9_]*)/g)) cols.add(a[1]);
+      return cols;
+    };
+    const ALIAS = { rs: 'review_submissions', oc: 'order_submissions', ol: 'order_submissions', ri: 'review_index',
+      rl: 'review_index', ins: 'review_inspections', er: 'review_edit_requests', ria: 'review_index_archive', cp: 'campaign_participants' };
+    const sql = (require('../src/services/orphanCaptureCleanup.service').__candidateSqlForTest || (() => ''))();
+    ok('후보 SQL 을 시험에서 꺼낼 수 있다', sql.length > 100);
+    const bad = [];
+    for (const m of sql.replace(/--[^\n]*/g, '').matchAll(/\b(rs|oc|ol|ri|rl|ins|er|ria|cp)\.([a-z_][a-z0-9_]*)/g)) {
+      if (!colsOf(ALIAS[m[1]]).has(m[2])) bad.push(m[1] + '.' + m[2]);
+    }
+    ok('★★ 후보 SQL 의 모든 칸이 마이그레이션에 존재한다', bad.length === 0, [...new Set(bad)].join(', '));
+    ok('활성 작업표 줄 제외는 cp.seq 로 맞춘다(cp.row_index 는 없는 칸)', /cp\.seq = rs\.row_index/.test(sql) && !/cp\.row_index/.test(sql.replace(/--[^\n]*/g, '')));
     const svc = src;
     ok('유예는 env 로 조절 가능', /ORPHAN_CAPTURE_GRACE_DAYS/.test(svc));
     ok('한 회차 상한이 있다(폭발반경 제한)', /ORPHAN_CAPTURE_CLEAN_CAP/.test(svc));
@@ -364,12 +399,12 @@ const C = (fileId, extra = {}) => Object.assign({
     delete process.env.AI_REVIEW_FOLDER_ID;
   }
 
-  console.log('\n[J] 크론은 여전히 A만 돌린다');
+  console.log('\n[J] 크론은 고아 정리를 부르지 않는다(2026-10-02 제거)');
   {
     const cron = read('src/jobs/cron.js');
     ok('★★ 크론이 B·C 를 부르지 않는다',
       !/trashTombstonedCaptures|trashFolderOrphans/.test(cron));
-    ok('크론은 A 만', /trashOrphanCaptures\(\{ dryRun: false, by: 'cron' \}\)/.test(cron));
+    ok('크론은 고아 정리를 아예 부르지 않는다(2026-10-02)', !/trashOrphanCaptures/.test(cron));
     const routes = read('src/routes/drive.routes.js');
     ok('★ 수동 창구가 종류를 나눠 받는다', /kind === 'tombstoned'/.test(routes) && /kind === 'folder'/.test(routes));
     ok('★ 미지정은 종전 동작(A)', /String\(b\.kind \|\| 'linked'\)/.test(routes));

@@ -143,7 +143,7 @@ t('★ 리터럴 NUL 없음(복합키는 이스케이프 표기)', () => {
 
 /* 화면: 미기록 회차에 조치 수단이 있다 */
 const html = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
-const wb = html.slice(html.indexOf('function _pmBatchWorkboard'), html.indexOf('function _pmBoardApplyText'));
+const wb = html.slice(html.indexOf('function _pmBatchWorkboard'), html.indexOf('function _pmBatchActions'));   // 종전 끝 표식 _pmBoardApplyText 는 2026-09-30 제거(바로 뒤 함수로 재지정 — 범위 동일)
 const fn = html.slice(html.indexOf('async function _pmDepositBackfill'), html.indexOf('async function _pmDepositBackfill') + 1400);
 
 t('★ "입금일 미기록" 회차에 [입금일 기록] 버튼이 있다', () => {

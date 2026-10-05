@@ -57,7 +57,9 @@ async function archiveCampaign(db, id, by) {
 /** 보관 해제 — 게이트 없음(비상구). 0행은 "되돌렸습니다"로 꾸미지 않는다. */
 async function unarchiveCampaign(db, id) {
   const { rows } = await db.query(
-    `UPDATE recruit_campaigns SET archived_at = NULL, updated_at = NOW()
+    `UPDATE recruit_campaigns SET archived_at = NULL,
+       published_at = CASE WHEN status = 'active' THEN NOW() ELSE published_at END,   -- 174: 보관 해제 = 오늘 다시 게시(보관 중은 리뷰어에게 안 보였다)
+       updated_at = NOW()
       WHERE id = $1 AND archived_at IS NOT NULL RETURNING id`, [id]);
   // ★ archived_by 는 지우지 않는다 — 이력 테이블이 없어 "누가 언제 보관했나"의 유일한 기록이다.
   if (!rows.length) {

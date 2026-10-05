@@ -36,6 +36,7 @@
  *   ⑤ 대상 지목은 언제나 **reviewers.id** — `WHERE phone8 =` 은 비유니크라 타인 행까지 함께 바꾼다.
  */
 const pool = require('../db/pool');
+const { syncCardsAfterWrite } = require('./reviewerIdentityCards.service');
 const { logger } = require('../utils/logger');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -203,6 +204,7 @@ async function applyPhoneChange({ id, newPhone, by }) {
       'UPDATE reviewers SET phone = $2, sub_accounts = $3::jsonb WHERE id = $1',
       [r.id, pre.newPhone, JSON.stringify(subs)]);
     if (!rowCount) throw new PhoneChangeError('not_found', '해당 리뷰어를 찾을 수 없습니다.');
+    await syncCardsAfterWrite(client, r.id, { source: 'phone_change' }); // 조각 2-2(결정 177) · 실패해도 변경 유지
 
     // ── 키 이관(전부 SAVEPOINT 격리 · 대상에 이미 행이 있으면 남기고 보고) ──
     const moved = {};

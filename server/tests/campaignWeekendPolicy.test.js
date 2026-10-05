@@ -11,7 +11,10 @@ test('주말 제외 공고는 한국 시간 토요일에 게시 보류 상태가
   assert.deepStrictEqual(state, {
     blocked: true,
     reason: 'weekend_unpublished',
-    message: '주말 미게시 · 월요일 재개',
+    // 2026-09-23: 재개일은 "다음 월요일" 고정이 아니라 실제 첫 진행일을 날짜로 말한다(추석 사고).
+    closedKind: 'weekend',
+    holidayName: null,
+    message: '주말 미게시 · 8/17(월) 재개',
     resumesOn: '2026-08-17',
   });
 });

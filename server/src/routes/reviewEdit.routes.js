@@ -29,6 +29,7 @@ const { imageApiLimiter } = require('../middleware/rateLimit.middleware');
 const sse = require('../utils/sse');
 const csBridge = require('../services/csBridge.service');
 const { reviewTypeForTab } = require('../services/reviewTypeContext.service');
+const { recipientNameForRow } = require('../services/captureOwnerName.service');
 
 // ── 공통 헬퍼 ──
 
@@ -750,7 +751,13 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
     if (!parents.includes(targetFolderId)) {
       await driveService.moveFile(r0.new_file_id, targetFolderId, parents[0] || r0.new_parent_id);
     }
-    const finalName = driveService.generateReviewFileName(r0.reviewer_name || '익명', 1, 'image/jpeg');
+    /* ★ 정식명의 이름도 업로드와 **같은 해석**(그 행의 수취인)을 쓴다 — 여기만 참여자 이름으로 두면
+       "처음 제출은 수취인인데 한 번 교체하면 주문자로 바뀌는" 드리프트가 생긴다.
+       못 찾으면 종전대로 요청에 적힌 이름으로 접는다(파일명 때문에 승인이 막히면 안 된다). */
+    const _finalOwner =
+      (await recipientNameForRow({ db: pool, sheetId: r0.sheet_id, tabName: r0.tab_name, rowIndex: r0.row_index }))
+      || r0.reviewer_name || '익명';
+    const finalName = driveService.generateReviewFileName(_finalOwner, 1, 'image/jpeg');
     try { await driveService.renameFile(r0.new_file_id, finalName); }
     catch (e) { logger.warn(`[review-edit] 새 파일 rename 실패(무시): ${e.message}`); }
     const finalUrl = r0.new_file_url || `https://drive.google.com/file/d/${r0.new_file_id}/view`;
@@ -922,3 +929,6 @@ router.post('/reject', authMiddleware, adminOrMasterMiddleware, async (req, res)
 });
 
 module.exports = router;
+/* 작업보드 [🖼 리뷰캡처 교체](reviewCaptureReplace.service)가 **같은 폴더 판정**을 쓰도록 내보낸다
+   (사본 금지 — 갈리면 직원 교체본과 리뷰어 교체요청 승인본이 다른 폴더에 쌓인다). */
+module.exports._resolveFolders = _resolveFolders;

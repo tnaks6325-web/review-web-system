@@ -244,18 +244,18 @@ RI.__setPoolForTest({ query: async (sql, params) => { _sql.push({ sql: String(sq
   // ★ 개수가 아니라 **경로별로** 본다 — 라우트를 늘릴 때마다 숫자를 고치는 가드는
   //   결국 숫자만 맞춰 통과시키게 된다(무엇이 있어야 하는지를 고정해야 한다).
   const riHas = (p, m) => riLayers.some(l => l.p === p && l.m.includes(m));
-  ok('검수 목록·확인·기대상품명·예시·스윕·CSV 라우트가 모두 등록돼 있다',
+  ok('검수 목록·확인·기대상품명·예시 라우트가 모두 등록돼 있다(CSV 는 결정 186 13번·수동 스윕은 68번에서 제거)',
     riHas('/review-inspect/list', 'get') && riHas('/review-inspect/resolve', 'post')
     && riHas('/review-inspect/product-names', 'get') && riHas('/review-inspect/product-names', 'post')
     && riHas('/review-inspect/samples', 'get') && riHas('/review-inspect/samples', 'post')
-    && riHas('/review-inspect/sweep', 'post') && riHas('/review-inspect/export.csv', 'get'));
+    && !riHas('/review-inspect/sweep', 'post') && !riHas('/review-inspect/export.csv', 'get'));
   ok('★★ 전부 authMiddleware 뒤 — 무인증 도달 불가',
     riLayers.every(l => l.mw.includes('authMiddleware')));
   ok('★★ 조회 계열은 _reInternal(내부인) — 광고주는 도달 불가',
     riLayers.filter(l => !/samples|sweep/.test(l.p) || l.m.includes('get'))
       .every(l => l.mw.includes('_reInternal') || l.mw.includes('adminOrMasterMiddleware')));
-  ok('★ 전사 설정(예시 등록)·스윕 실행은 adminOrMaster — AE 는 못 바꾼다',
-    riLayers.filter(l => (l.p === '/review-inspect/samples' && l.m.includes('post')) || l.p === '/review-inspect/sweep')
+  ok('★ 전사 설정(예시 등록)은 adminOrMaster — AE 는 못 바꾼다',
+    riLayers.filter(l => (l.p === '/review-inspect/samples' && l.m.includes('post')))
       .every(l => l.mw.includes('adminOrMasterMiddleware')));
   const tb = readS('routes/trackB.routes.js');
   ok('★ staff 는 담당 탭만 — 스코프 판정 실패는 거절(fail-closed)',
@@ -346,15 +346,11 @@ RI.__setPoolForTest({ query: async (sql, params) => { _sql.push({ sql: String(sq
     && !/findAuthorReuse[\s\S]{0,900}verdict: 'fail'/.test(svcSrc));
   ok('★ 같은 리뷰어 자신의 제출은 재사용으로 세지 않는다',
     /COALESCE\(reviewer_name,''\) <> COALESCE\(\$3,''\)/.test(svcSrc));
-  ok('CSV 내보내기(UTF-8 BOM · 판정사유 문장화)',
-    /function inspectionsCsv/.test(svcSrc) && /'\\ufeff'|﻿/.test(svcSrc)
-    && /review-inspect\/export\.csv/.test(tb));
   ok('★ 예시이미지 저장은 adminOrMaster(전사 설정이라 AE 가 못 바꾼다)',
     /router\.post\('\/review-inspect\/samples', authMiddleware, adminOrMasterMiddleware/.test(tb)
     && /router\.get\('\/review-inspect\/samples', authMiddleware, _reInternal/.test(tb));
-  ok('스윕 수동 실행도 adminOrMaster + 같은 락',
-    /router\.post\('\/review-inspect\/sweep', authMiddleware, adminOrMasterMiddleware/.test(tb)
-    && /withJobLock\('review_inspect_sweep'/.test(tb));
+  ok('수동 스윕 입구 없음(결정 186 68번) — 스윕은 cron·재검수가 같은 락으로 돈다',
+    !/router\.post\('\/review-inspect\/sweep'/.test(tb));
   /* ⚠ 2026-08-06: [↻ 과거분 검수]·[CSV] 는 화면에서 제거(사용자 확정 — 기능 불필요).
        과거분 따라잡기는 10분 크론이 계속 돈다(수동 버튼만 없앤 것)이라 서버는 무변경. */
   ok('프론트 — 예시 등록 버튼(제거된 과거분 검수·CSV 는 흔적 0)',

@@ -169,21 +169,21 @@ ok('★ _finBarHtml 루트가 id="finBar" 를 유지한다(_finRefresh 의 outer
   const roots = m[0].match(/<span class="tp3fin" id="finBar">/g) || [];
   return roots.length === 2 && /document\.getElementById\('finBar'\)/.test(src);
 })());
-/* ★ 2026-08-21 조건부 노출 도입 — 메뉴 내용은 `_mhMenuHtml()` 이 그리고, 진실원천 전환 버튼은
-     `STATE._flipBtnHtml` 로 넘어간다(헤더 렌더의 지역변수로는 재렌더 때 못 읽는다).
-     검사 의미는 그대로 — **master 도구 3종이 메뉴 안에 있고 제목 행에 낱개로 안 나온다**. */
-ok('★ master 도구 3종이 [⋯] 메뉴 안에 있다(주 행동 [마감]이 오른쪽 끝을 갖는다)', (() => {
+/* ★ 2026-08-21 조건부 노출 도입 — 메뉴 내용은 `_mhMenuHtml()` 이 그린다.
+     master 도구 3종([Track B로 전환]·[write-back 시뮬]·[그림자 투영])은 (결정 186 5번 — 2026-09-28 원본 전환·write-back 제거) 로 빠졌다.
+     검사 의미는 그대로 — **도구는 [⋯] 메뉴 안에서만 그려지고 제목 행에 낱개로 안 나온다**. */
+ok('★ 도구는 [⋯] 메뉴 한 곳에서 그린다(주 행동 [마감]이 오른쪽 끝을 갖는다)', (() => {
   const m = src.match(/function _mhMenuHtml\(\)\{[\s\S]*?\n\}/);
   if (!m) return false;
-  return /STATE\._flipBtnHtml/.test(m[0]) && /showWritebackSim\(\)/.test(m[0]) && /id="projBtn"/.test(m[0])
-    && /STATE\._flipBtnHtml=isMaster\?`<button class="btn" id="sotBtn"/.test(src)
+  return /openDedupeModal\(\)/.test(m[0]) && /openBloggerModal\(\)/.test(m[0])
+    && !/_flipBtnHtml|showWritebackSim|projBtn/.test(src)
     && /<span class="mhmenu" id="mhMenuBox">\$\{_mhMenuHtml\(\)\}<\/span>/.test(src);
 })());
 ok('★ 도구 버튼이 제목 행에 낱개로 남아 있지 않다(메뉴 밖 노출 0)', (() => {
   const mh = src.match(/<div class="mh mh-wb">[\s\S]*?<\/div>\r?\n/);
   if (!mh) return false;
   const outside = mh[0].replace(/<span class="mhtools"[\s\S]*?<\/span><\/span>/, '');
-  return !/showWritebackSim|projBtn|flipBtn/.test(outside);
+  return !/openDedupeModal|openBloggerModal/.test(outside);
 })());
 ok('★ [⋯] 바깥클릭/Esc 리스너는 1회만 등록(열 때마다 걸면 겹쳐 쌓인다)',
   /_mhToolsBound/.test(src) && (src.match(/document\.addEventListener\('click',e=>\{ const t=document\.getElementById\('mhTools'\)/g) || []).length === 1);
