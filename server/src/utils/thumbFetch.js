@@ -15,9 +15,26 @@
 const THUMB_URL_MAX_BYTES = 5 * 1024 * 1024; // 프론트 직접 업로드와 동일 상한
 const THUMB_URL_TIMEOUT_MS = 10000;
 
+// 기본 허용 이미지 CDN — 쿠팡 + 카카오(메이커스·선물하기·톡스토어) + 주요 쇼핑몰 이미지 서버.
+// env THUMB_URL_HOST_ALLOW 를 주면 이 기본 목록을 **대체**한다(기존 동작 유지).
+const DEFAULT_ALLOWED_HOSTS = [
+  'coupangcdn.com',
+  'kakaocdn.net',       // 카카오 메이커스·선물하기 (t1.kakaocdn.net 등)
+  'pstatic.net',        // 네이버 스마트스토어·쇼핑 (shop-phinf.pstatic.net 등)
+  'ssgcdn.com',         // SSG
+  'msscdn.net',         // 무신사
+  'oliveyoung.co.kr',   // 올리브영
+  'gmarket.co.kr', 'gcdn.net', // 지마켓
+  'a-static.com',       // 옥션
+  '11st.co.kr',         // 11번가
+  'cafe24img.com',      // 카페24 자사몰
+  'cafe24.com',
+];
+
 function _allowedHosts() {
-  return (process.env.THUMB_URL_HOST_ALLOW || 'coupangcdn.com')
-    .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const env = process.env.THUMB_URL_HOST_ALLOW;
+  const list = env ? env.split(',') : DEFAULT_ALLOWED_HOSTS;
+  return list.map((s) => s.trim().toLowerCase()).filter(Boolean);
 }
 
 // https + 허용 호스트(정확일치 또는 그 서브도메인)만 통과
@@ -34,7 +51,7 @@ function thumbUrlAllowed(url) {
 async function fetchThumbFromUrl(url) {
   const target = String(url || '').trim();
   if (!thumbUrlAllowed(target)) {
-    throw new Error('허용되지 않은 이미지 URL입니다. 쿠팡 이미지 주소(coupangcdn.com)만 지원합니다.');
+    throw new Error('허용되지 않은 이미지 주소입니다. 쿠팡·카카오·네이버·SSG·무신사 등 주요 쇼핑몰 이미지 주소만 지원합니다.');
   }
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), THUMB_URL_TIMEOUT_MS);
