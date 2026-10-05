@@ -108,7 +108,6 @@ const _ACTION_MAP = {
   'reviewerNoticesAll':   { method: 'GET',  path: '/api/reviewer/notices/all' },    // 관리자
   'reviewerNoticeSave':   { method: 'POST', path: '/api/reviewer/notices/save' },   // 관리자
   'reviewerNoticeDelete': { method: 'POST', path: '/api/reviewer/notices/delete' }, // 관리자
-  'getInaedList':       { method: 'GET',  path: '/api/submit/get-inaed-list' },
 
   // 관리자 인증 (Section 8)
   'adminLogin':         { method: 'POST', path: '/api/admin/login' },

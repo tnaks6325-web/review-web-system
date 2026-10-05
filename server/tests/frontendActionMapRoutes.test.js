@@ -166,6 +166,9 @@ ok('103번: 리뷰어 제출 화면에 숨은 관리자 창이 남아 있지 않
 ok('106번: 리뷰제출 화면의 옛 조회식 로그인·단건 제출·호환 껍데기 함수 없음',
   !/function (_doLogin|_doLookupPhone|_doLoginWithLookup|openSubmit|_selectIncomePerson|_applyPreSelectedOption|onImgSelected|onImgDrop|removeImg|applyAiResult)\(/.test(read('frontend/js/search-app.js'))
   && /function _doLoginDirect\(/.test(read('frontend/js/search-app.js')));
+ok('107번: 무인증 인애드명단 입구 제거 · 매핑 없음 · 리뷰어 양식은 후보 0건(자동 기록) 경로',
+  !exists('GET', '/api/submit/get-inaed-list') && !mapNames.has('getInaedList')
+  && /function _loadInaedList\(\) \{\s*_setOrdererDisabled\(false\);\s*_applyOrdererPicker\(\);/.test(read('frontend/js/search-app.js')));
 ok('104번: 옛 대시보드 고아 행 경고 띠·정리 버튼 없음', !/_handleOrphanRowsWarning|cleanOrphanRows|orphanRowsBanner/.test(read('frontend/js/index-app.js')));
 
 console.log(`\n✅ frontendActionMapRoutes: ${n}개 통과`);

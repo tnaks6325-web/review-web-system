@@ -5621,36 +5621,12 @@ async function _loadReviewerOptionData(sheetId, tabName, gid, round) {
   }
 }
 
-/** GAS에서 인애드명단 목록 로드 */
-async function _loadInaedList(sheetId, gid, tabName, round) {
-  try {
-    if (!APP_CONFIG.GAS_WEB_APP_URL) return;
-    const params = { action: "getInaedList", sheetId, gid, tabName };
-    if (round) params.round = round;
-    const data = await gasGet(params);
-    if (data && Array.isArray(data.names)) {
-      _inaedNames     = data.names;                     // [{ name, date, options, rowIndex }]
-      _optionHeaders  = data.optionHeaders  || [];      // ["옵션1","옵션2",...]
-      _memoHeader     = data.memoHeader     || "";      // "비고(닉네임)" 등
-      _orderNumHeader = data.orderNumHeader || "";      // "주문번호" 등
-      // ★ preSelectedOptKey가 있으면 유지, 없을 때만 초기화
-      if (!window._preSelectedOptKey) _selectedOptKey = null;
-      console.log("[자동완성] 인애드명단 로드 완료:", _inaedNames.length, "명",
-        "| 옵션헤더:", _optionHeaders, "| 비고:", _memoHeader, "| 주문번호:", _orderNumHeader);
-      // 비고/주문번호 입력란 동적 표시 + 옵션 피커 렌더링
-      _renderDynamicFields();
-      _applyOrdererPicker();      // 후보가 있으면 주문자 칸을 보여준다
-    } else {
-      // 데이터 없어도 입력란은 항상 활성화 유지
-      _setOrdererDisabled(false);
-      _applyOrdererPicker();      // 후보 0건 = 감춘 채로 둔다(서버가 로그인 이름으로 채움)
-    }
-  } catch (err) {
-    console.warn("[자동완성] 인애드명단 로드 실패:", err.message);
-    // ★ GAS 호출 실패해도 입력란은 반드시 활성화 (로드 실패가 입력 차단으로 이어지지 않도록)
-    _setOrdererDisabled(false);
-    _applyOrdererPicker();
-  }
+/** 인애드명단 후보 — 2026-10-05 제거(결정 186 107번).
+ *  옛 구글시트 명단을 무인증으로 읽어 시트 없이 운영하는 작업에도 전환 전 이름이 후보로 떴다.
+ *  이제 모든 작업이 "후보 0건" 경로 = 주문자 칸을 감추고 서버가 로그인한 본인 이름으로 기록한다. */
+function _loadInaedList() {
+  _setOrdererDisabled(false);
+  _applyOrdererPicker();
 }
 
 /** 비고·주문번호 입력란을 동적으로 표시/숨김 */

@@ -5598,25 +5598,8 @@ let _optionHeaders   = [];   // 옵션 헤더명 목록 (최대 3개)
 let _memoHeader      = "";   // 비고 헤더명
 let _orderNumHeader  = "";   // 주문번호 헤더명 (없으면 "")
 
-/** GAS에서 인애드명단 목록 로드 */
-async function _loadInaedList(sheetId, gid, tabName) {
-  try {
-    if (!APP_CONFIG.GAS_WEB_APP_URL) return;
-    const data = await gasGet({ action: "getInaedList", sheetId, gid, tabName });
-    if (data && Array.isArray(data.names)) {
-      _inaedNames     = data.names;                     // [{ name, date, options, rowIndex }]
-      _optionHeaders  = data.optionHeaders  || [];      // ["옵션1","옵션2",...]
-      _memoHeader     = data.memoHeader     || "";      // "비고(닉네임)" 등
-      _orderNumHeader = data.orderNumHeader || "";      // "주문번호" 등
-      console.log("[자동완성] 인애드명단 로드 완료:", _inaedNames.length, "명",
-        "| 옵션헤더:", _optionHeaders, "| 비고:", _memoHeader, "| 주문번호:", _orderNumHeader);
-      // 비고/주문번호 입력란 동적 표시
-      _renderDynamicFields();
-    }
-  } catch (err) {
-    console.warn("[자동완성] 인애드명단 로드 실패:", err.message);
-  }
-}
+/** 인애드명단 후보 — 2026-10-05 제거(결정 186 107번). 서버 입구가 없어 후보 0건으로 둔다. */
+function _loadInaedList() {}
 
 /** 비고·주문번호 입력란을 동적으로 표시/숨김 */
 function _renderDynamicFields() {
