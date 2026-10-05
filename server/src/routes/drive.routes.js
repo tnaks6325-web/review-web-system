@@ -390,7 +390,7 @@ router.post('/report-link', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, displayName } = req.body || {};
     if (!sheetId || !tabName) return res.json({ ok: false, error: 'sheetId, tabName이 필요합니다.' });
-    const createdBy = (req.user && (req.user.username || req.user.email || req.user.id)) || null;
+    const createdBy = (req.admin && (req.admin.name || req.admin.username || req.admin.id)) || null;
     const code = await _ensureReportCode(sheetId, tabName, (displayName || '').trim() || null, createdBy);
     res.json({
       ok: true,

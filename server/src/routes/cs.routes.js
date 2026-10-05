@@ -15,7 +15,8 @@ const { emitCsReplyToReviewer, broadcast } = require('../utils/sse');
 
 // 이하 모든 라우트 보호. AE(staff)도 리뷰어 C/S를 조회·답변할 수 있다.
 function internalMiddleware(req, res, next) {
-  const role = req.user?.role;
+  // ★ authMiddleware 는 토큰 내용을 req.admin 에 둔다(req.user 아님). 2026-08-26~10-05 req.user 를 읽어 옛 대시보드 /api/cs/* 가 전원 403 이었다.
+  const role = req.admin?.role;
   if (role === 'master' || role === 'admin' || role === 'staff') return next();
   return res.status(403).json({ ok: false, error: '권한 없음' });
 }
