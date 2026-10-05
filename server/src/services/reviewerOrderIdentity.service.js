@@ -470,13 +470,9 @@ async function resolveApplicationIdentity({ ownerReviewerId, applicationId, camp
     throw new ReviewerOrderIdentityError('SELECTED_IDENTITY_AMBIGUOUS', '참여 시 선택한 명의를 하나로 확정할 수 없습니다. 내정보를 확인해주세요.', 409);
   }
   let selected = candidates[0];
-  if (selected.type === 'sub' && !app.multi_account_mode) {
-    throw new ReviewerOrderIdentityError(
-      'SUB_ACCOUNT_NOT_ALLOWED',
-      '이 공고는 타계정 참여가 허용되지 않습니다.',
-      403
-    );
-  }
+  // ★★ 2026-10-05 — 「타계정 금지」 설정이 없어졌다(1인 1회 / 타계정 허용 두 가지). 1인 1회 공고도
+  //   타계정 이름 참여를 허용하고 "한 사람 한 번"은 참여(apply) 단계가 지킨다. 그래서 여기서 막지 않는다.
+  //   종전 차단은 참여는 통과시키고 제출에서 막아 결제한 리뷰어의 자리를 날렸다(같은 번호 타계정 박윤미 건).
   if (selected.type === 'sub') {
     const applicationPhone = String(app.applicant_phone || '').trim();
     selected = {

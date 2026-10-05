@@ -265,7 +265,7 @@
 <div class="sheet-ovl" id="acctSheet">
   <div class="sheet" style="max-height:84vh;overflow-y:auto">
     <h3>누구 명의로 참여할까요?</h3>
-    <p>한 명의는 이 공고에 <b>1건만</b> 참여할 수 있어요.</p>
+    <p id="acctSheetRule">한 명의는 이 공고에 <b>1건만</b> 참여할 수 있어요.</p>
     <div id="acctSheetList"></div>
     <div class="optnote" id="acctSheetNote"></div>
     <button class="btn" id="acctSheetGo" style="margin-top:12px" onclick="onAcctSheetConfirm()">이 명의로 참여</button>
@@ -636,7 +636,7 @@ async function _loadPopCredit(s){
   const own = await _fetchPopCredit(s.phone8);
   if(!own){ _popUnknown = true; return; }              // 본계정 조회 실패 = 모름(잠그지 않음)
   _popCredit = own;
-  if(multiEnabled()){
+  if(acctChoiceEnabled()){
     const subs = await loadSubs();                     // 실패 시 [] — 그때는 소유자 기준으로만 판정
     const seen = {}, targets = [];
     (subs || []).forEach(x => {
@@ -660,7 +660,7 @@ function _popLockable(){
   if(PREVIEW) return false;
   if(_popUnknown) return false;                        // 모르면 잠그지 않는다(서버가 최종 권위)
   if(!_popCredit || _popCredit.credits > 0) return false;
-  if(multiEnabled()){
+  if(acctChoiceEnabled()){
     if(!_popSubCredits) return false;                  // 타계정 조회 전 = 모름
     for(const k in _popSubCredits){
       if(_popSubCredits[k] && _popSubCredits[k].credits > 0) return false;
@@ -713,7 +713,7 @@ function renderPopNotice(){
         ? '<div style="margin-top:8px;font-size:.8rem;color:#047857"><b>남은 참여권 ' + c.credits + '건</b> · 최근 1일 일반 ' + c.normalDone + '건 · 사용한 인기 ' + c.popularUsed + '건</div>'
         : '<div style="margin-top:8px;font-size:.8rem;color:#DC2626"><b>남은 참여권 0건</b> — 아직 참여할 수 없어요 · 최근 1일 일반 ' + c.normalDone + '건 · 사용한 인기 ' + c.popularUsed + '건</div>');
   // ★ 타계정 참여가 열린 공고: 참여권은 명의별이라 "어느 명의로 참여할 수 있는지"를 말해준다.
-  if(c && multiEnabled() && _popSubCredits){
+  if(c && acctChoiceEnabled() && _popSubCredits){
     const ok = _popSubsWithCredit();
     if(ok.length){
       line += '<div style="margin-top:4px;font-size:.8rem;color:#047857">타계정 ' +
@@ -756,7 +756,7 @@ async function openPopGate(gateInfo){
   //   — 참여할 수 있는 다른 명의가 있으면 여기서도 말해준다(안내 카드와 같은 출처·같은 문장).
   const _gsub = $('popGateSubs');
   if(_gsub){
-    const _ok = (typeof multiEnabled === 'function' && multiEnabled() && _popSubCredits) ? _popSubsWithCredit() : [];
+    const _ok = (typeof acctChoiceEnabled === 'function' && acctChoiceEnabled() && _popSubCredits) ? _popSubsWithCredit() : [];
     _gsub.innerHTML = _ok.length
       ? '타계정 ' + _ok.map(v => _popEsc(v.name || '명의') + ' ' + v.credits + '건').join(' · ') + ' 명의로는 지금 참여할 수 있어요'
       : '';
@@ -950,6 +950,9 @@ const _acctBlocked = {};   // 서버가 거절한 명의 p8 → 사유문구(재
 let _repurchaseAccounts = {};
 
 function multiEnabled(){ return !!(_camp && _camp.multi_account_mode === true); }
+/* ★ 2026-10-05: 공고 설정은 「1인 1회」/「타계정 허용」 두 가지 — 둘 다 타계정 이름으로 참여할 수 있다.
+   명의 고르기는 두 방식 공통이고, 「타계정 허용」만 여러 명의로 추가 참여(multiEnabled)가 된다. */
+function acctChoiceEnabled(){ return !!_camp; }
 
 /** 타계정 목록 로드 — 로그인 서명 토큰의 소유자 UUID 범위만 조회 */
 async function loadSubs(force){
@@ -988,6 +991,10 @@ function _acctRows(){
   });
   // 서버가 거절한 명의는 잠금(자리는 점유되지 않았고, 사유를 그대로 보여준다)
   rows.forEach(r => { if(_acctBlocked[r.phone8] && (r.state === 'ok' || r.state === 'verify')){ r.state = 'blocked'; r.blockMsg = _acctBlocked[r.phone8]; } });
+  // ★ 1인 1회 공고 — 한 명의로 참여 중이면 나머지 명의는 고를 수 없다(서버 apply 게이트가 최종 권위).
+  if(!multiEnabled() && rows.some(r => r.state === 'joined')){
+    rows.forEach(r => { if(r.state === 'ok' || r.state === 'verify'){ r.state = 'blocked'; r.blockMsg = '이 공고는 1인 1회예요 — 다른 명의로 이미 참여 중이에요'; } });
+  }
   // ★ 인기 공고: 참여권은 명의별이라 어느 명의로 참여할 수 있는지 여기서 말해준다.
   //   참여권 0이 확인된 명의는 고를 수 없게 한다(고르면 서버가 403 — 헛걸음을 만들지 않는다).
   //   **모르면(조회 전·실패·인기 공고 아님) 손대지 않는다** — 우리 오류로 정당한 참여를 막지 않는다.
@@ -1042,7 +1049,9 @@ function renderAcctList(){
     ? '선택한 명의로 자리가 잡혀요. 타계정 건은 제한시간이 더 짧아요(기본 10분).'
     : onlyNoCredit
       ? '참여권이 남은 명의가 없어요. 일반 모집을 구매양식 제출까지 완료하면 그 명의로 참여할 수 있어요.'
-      : '지금 참여할 수 있는 명의가 없어요. 타계정을 추가하면 더 참여할 수 있어요.';
+      : (!multiEnabled() && rows.some(r => r.state === 'joined'))
+        ? '이 공고는 1인 1회라 이미 참여한 명의 하나로만 진행할 수 있어요.'
+        : '지금 참여할 수 있는 명의가 없어요. 타계정을 추가하면 더 참여할 수 있어요.';
 }
 async function openAcctSheet(optionKey, next){
   if(PREVIEW) return _pvBlock('참여하기');
@@ -1058,6 +1067,9 @@ async function openAcctSheet(optionKey, next){
   }
   renderAcctList();
   $('acctSheetGo').textContent = _acctNext === 'option' ? '이 명의로 계속' : '이 명의로 참여';
+  { const _rule = $('acctSheetRule'); if(_rule) _rule.innerHTML = multiEnabled()
+      ? '한 명의는 이 공고에 <b>1건만</b> 참여할 수 있어요.'
+      : '이 공고는 <b>1인 1회</b>예요 — 내 명의 중 <b>하나로만</b> 참여할 수 있어요.'; }
   $('acctSheet').style.display = 'flex';
 }
 function hideAcctSheet(){ $('acctSheet').style.display = 'none'; }
@@ -1200,10 +1212,10 @@ async function onJoin(){
   if(!PREVIEW){
     const s = getSession();
     if(!s) return needLogin(onJoin);
-    if(multiEnabled()) {
+    if(acctChoiceEnabled()) {
       await loadSubs();
       if(_subsLoadError) return toast('명의 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요');
-      // 타계정이 하나 이상인 허용 공고에서만 명의를 먼저 고른다.
+      // 타계정이 하나 이상이면 명의를 먼저 고른다(1인 1회·타계정 허용 공통).
       if((_subs || []).length) return openAcctSheet(null, 'option');
     }
   }
@@ -1221,7 +1233,7 @@ async function onJoin(){
 /** 옵션 확정 후 분기: 타계정 가능 공고 + 타계정 보유면 명의 선택, 아니면 본계정 즉시 참여 */
 async function _joinWithOption(optionKey){
   if(PREVIEW) return _pvSimulateApply(optionKey);
-  if(!multiEnabled()) return _doApply(optionKey);
+  if(!acctChoiceEnabled()) return _doApply(optionKey);
   await loadSubs();
   if(!(_subs || []).length) return _doApply(optionKey);   // 타계정 없음 = 기존 흐름 그대로
   return openAcctSheet(optionKey);
@@ -1376,6 +1388,7 @@ async function _doApply(optionKey, sub){
       daily_apply_cap:'오늘 참여 가능한 횟수를 넘었어요', rate_limited:'요청이 너무 많아요. 잠시 후 다시 시도해주세요',
       // ★ 063 타계정 사유(서버가 최종 권위 — 화면 추정과 다를 수 있어 그대로 안내)
       multi_disabled:'이 공고는 타계정 참여를 지원하지 않아요',
+      one_per_person:'이 공고는 1인 1회예요 — 다른 명의로 이미 참여했어요',
       sub_invalid:'타계정 이름과 전화번호를 확인해주세요',
       sub_shares_owner_phone:'본계정과 같은 번호의 타계정은 별도 참여할 수 없어요',
       sub_not_registered:'등록된 타계정이 아니에요. 내정보 > 타계정에서 먼저 등록해주세요',

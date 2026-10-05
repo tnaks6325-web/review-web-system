@@ -56,7 +56,7 @@ assert(campaign.includes('const info = gateInfo || _popCredit;'),
   // 게이트 모달도 명의별 참여권을 말한다 — 안내 카드와 **같은 함수**를 쓴다(문장이 갈리면 안 된다)
   const gate = campaign.slice(campaign.indexOf('async function openPopGate('), campaign.indexOf('function goPopNormal('));
   assert(gate.includes('_popSubsWithCredit()'), '게이트 모달의 명의 표기는 안내 카드와 같은 출처를 쓴다');
-  assert(/multiEnabled\(\) && _popSubCredits/.test(gate), '타계정 허용 공고 + 조회 완료일 때만 말한다(모르면 침묵)');
+  assert(/acctChoiceEnabled\(\) && _popSubCredits/.test(gate), '명의를 고를 수 있는 공고 + 조회 완료일 때만 말한다(모르면 침묵)');
   assert(gate.includes('_popEsc('), '명의 이름은 사용자 입력 — escape 한다');
   assert(campaign.includes('id="popGateSubs"'), '표기 자리(마크업)가 있어야 한다');
 }
@@ -75,6 +75,7 @@ function ctx({ camp, preview = false, btn = { disabled: false, textContent: '참
     API_BASE_URL: 'http://x',
     getSession: () => ({ phone8: '99998888', name: '나' }),
     multiEnabled: () => !!(camp && camp.multi_account_mode === true),
+    acctChoiceEnabled: () => !!camp,   // ★ 2026-10-05: 명의 고르기는 1인 1회·타계정 허용 공통
     loadSubs: async () => subs,
     _p8: (v) => String(v || '').replace(/\D/g, '').slice(-8),
     $: (id) => (id === 'joinBtn' ? btn : { style: { display: 'none' } }),
@@ -117,7 +118,8 @@ const POP_MULTI = { is_popular: true, multi_account_mode: true };
 
 // ① 크레딧 0 → 잠금 + 사유 문구
 {
-  const r = run({ camp: POP, credit: { normalDone: 0, popularUsed: 0 } });
+  // ★ 2026-10-05: 1인 1회 공고도 타계정 명의를 고를 수 있어 명의 조회가 끝난 뒤에 잠근다(타계정 0개 = {}).
+  const r = run({ camp: POP, credit: { normalDone: 0, popularUsed: 0 }, subCredits: {} });
   assert.equal(r.locked, true);
   assert.equal(r.btn.disabled, true, '참여권 0건이면 [참여하기]를 비활성화한다');
   assert(r.btn.textContent.includes('최근 1일 일반 모집 제출'), '잠금 사유와 참여권 유효기간을 버튼이 말해야 한다');
@@ -179,7 +181,7 @@ const POP_MULTI = { is_popular: true, multi_account_mode: true };
 }
 // ⑪ 크레딧 계산은 음수로 내려가지 않는다
 {
-  const r = run({ camp: POP, credit: { normalDone: 1, popularUsed: 3 } });
+  const r = run({ camp: POP, credit: { normalDone: 1, popularUsed: 3 }, subCredits: {} });
   assert.equal(r.state.credits, 0);
   assert.equal(r.locked, true);
 }
@@ -244,12 +246,13 @@ const POP_MULTI = { is_popular: true, multi_account_mode: true };
     assert.deepEqual(r.calls, ['99998888']);
     assert.equal(r.locked, false);
   }
-  // ⑯ 타계정 참여가 열리지 않은 공고는 타계정을 조회하지 않는다(요청 순증 0)
+  // ⑯ ★ 2026-10-05: 1인 1회 공고도 타계정 이름으로 참여할 수 있어 타계정 참여권도 조회한다
+  //   (어느 명의든 참여권이 있으면 잠그지 않는다 — 타계정 허용 공고와 같은 규칙).
   {
     const r = await load({ camp: POP, subs: [{ name: 'S1', phone: '010-1111-2222' }],
-                           api: { '99998888': { normalDone: 0, popularUsed: 0 } } });
-    assert.deepEqual(r.calls, ['99998888']);
-    assert.equal(r.locked, true);
+                           api: { '99998888': { normalDone: 0, popularUsed: 0 }, '11112222': { normalDone: 1, popularUsed: 0 } } });
+    assert.deepEqual(r.calls, ['99998888', '11112222']);
+    assert.equal(r.locked, false);
   }
   // ⑰ 소유자와 같은 번호·중복 타계정은 한 번만 조회한다
   {

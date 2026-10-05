@@ -7431,7 +7431,7 @@ function _condCardHtml(wd,d,m){
     ['@pay',null,null],
     ['구매채널','camp',  ch?esc(ch):null],
     ['유입방식','order', inflow?esc(inflow):null],
-    ['다계정','camp',    !ma?null:(ma.enabled?`허용${ma.dailyLimit?` <span class="u">하루 ${ma.dailyLimit}건</span>`:' <span class="u">제한 없음</span>'}`:'불가')],
+    ['참여 방식','camp',    !ma?null:(ma.enabled?`타계정 허용${ma.dailyLimit?` <span class="u">하루 ${ma.dailyLimit}건</span>`:' <span class="u">제한 없음</span>'}`:'1인 1회')],
     ['현금영수증','tab', cd.cashReceipt==null?null:(cd.cashReceipt?'대상':'해당 없음')],
     ['리뷰비','fee',     cd.feeSource?`${won(cd.reviewFee||0)}${cd.feeSource==='schedule'?'<span class="u" title="기간별 리뷰비 구간(오늘 기준)">구간</span>':''}`:null],
     ['입금명','memo',    cd.depositName?esc(cd.depositName):null],

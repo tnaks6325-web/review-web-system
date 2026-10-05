@@ -155,7 +155,7 @@ console.log('\n[F2] 모집공고 — 🚀 작업 시작 설정 줄');
   ok('★ 필수 여부는 RF_START_ITEMS[].required 단일 출처 — miss 를 손으로 적지 않는다',
     /miss: req\("transfer_memo"\) && !memo/.test(rc) && /miss: req\("chat_url"\) && !chat/.test(rc)
     && /value: cash \? "발행" : "발행 안 함", miss: false/.test(rc)
-    && /value: multi \? "허용" : "미허용", miss: false/.test(rc));
+    && /value: multi \? "타계정 허용" : "1인 1회", miss: false/.test(rc));
   ok('★★ 팀채팅방은 필수가 아니다(2026-08-25) — 목록·폼 `*`·레일 셋 다에서 빠졌다',
     !/k: "chat_url"[^\n]*required: true/.test(rc)
     && !/for="rf_chat_url">팀채팅방 <em class="required">/.test(rm)
@@ -195,7 +195,7 @@ console.log('\n[F2] 모집공고 — 🚀 작업 시작 설정 줄');
   ok('★ 빈 입금명은 빨간 미입력, 채워진 팀채팅방은 통과',
     st[0].miss === true && st[0].value === '미입력' && st[4].miss === false);
   ok('★ 현금영수증·다계정은 지금 값을 그대로 말한다(미설정으로 단정 금지)',
-    st[2].value === '발행' && st[3].value === '미허용' && !st[2].miss && !st[3].miss);
+    st[2].value === '발행' && st[3].value === '1인 1회' && !st[2].miss && !st[3].miss);
   ok('★ 배지는 개수로', st[1].value === '1개');
   ok('게시 전이면 줄을 보여준다', sb2.__vis() === true);
 

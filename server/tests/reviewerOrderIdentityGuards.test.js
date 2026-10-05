@@ -54,9 +54,11 @@ ok('Gemini 로그는 주문 원문이나 모델 원문 응답을 기록하지 �
   !/주소비교 JSON 파싱 실패:\s*\$\{text\./.test(gemini)
   && !/key\.slice\(0,\s*6\)/.test(gemini)
   && /추출필드=\$\{Object\.values/.test(gemini));
-ok('타계정은 허용 공고에서만 서버가 인정한다',
-  /selected\.type === 'sub' && !app\.multi_account_mode/.test(service)
-  && /SUB_ACCOUNT_NOT_ALLOWED/.test(service));
+// ★ 2026-10-05: 「타계정 금지」 설정 폐지 — 1인 1회 공고도 타계정 이름 참여를 허용하고
+//   "한 사람 한 번"은 참여(apply) 단계가 지킨다. 제출 단계에서 다시 막으면 결제한 리뷰어의 자리가 날아간다.
+ok('★ 제출 단계는 타계정을 공고 설정으로 막지 않는다(참여 단계 판정과 갈리지 않게)',
+  !/selected\.type === 'sub' && !app\.multi_account_mode/.test(service)
+  && !/throw new ReviewerOrderIdentityError\(\s*'SUB_ACCOUNT_NOT_ALLOWED'/.test(service));
 ok('다른 명의만 맞으면 하드 차단하고 선택 명의도 충분히 맞으면 수동확인으로 보낸다',
   /other\.matches >= 2[\s\S]{0,500}?multiple_identity_candidates[\s\S]{0,220}?status = 'MISMATCH'/.test(service));
 // 배송지 예외/명의 불일치 차단은 reviewerOrderIdentity.test.js와 Flow 테스트에서
@@ -67,8 +69,8 @@ ok('가림 주소는 모든 연속 가림문자를 제거해 비교한다',
 ok('타계정 편집 API는 전용 경로의 shoppingId를 구버전 화면에서도 보존한다',
   /mutateSubAccounts\(owner\.id, \(currentSubs\)/.test(reviewerServiceSource)
   && /sub\.shoppingId = String\(savedId\)/.test(reviewerServiceSource));
-ok('타계정 허용+등록 타계정 존재 시 명의 선택을 옵션보다 먼저 연다',
-  /if\(multiEnabled\(\)\)[\s\S]{0,180}?if\(\(_subs \|\| \[\]\)\.length\) return openAcctSheet\(null, 'option'\)/.test(campaign));
+ok('등록 타계정 존재 시(1인 1회·타계정 허용 공통) 명의 선택을 옵션보다 먼저 연다',
+  /if\(acctChoiceEnabled\(\)\)[\s\S]{0,180}?if\(\(_subs \|\| \[\]\)\.length\) return openAcctSheet\(null, 'option'\)/.test(campaign));
 ok('과거 다명의 일괄 제출 부팅은 명시적으로 비활성화돼 카드별 명의 혼선을 막는다',
   /function _batchBoot\(\)\s*\{\s*return null;\s*\}/.test(appJs));
 ok('구매양식은 체크한 경우에만 제출 성공 뒤 명의 아이디 저장 API를 호출한다',
