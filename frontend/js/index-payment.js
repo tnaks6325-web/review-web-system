@@ -713,7 +713,6 @@ async function loadApiMetrics() {
         'GET /dirty': '더티체크',
         'POST /image-upload': '이미지 업로드',
         'POST /review-upload': '리뷰 업로드',
-        'GET /get-inaed-list': '인애드명단 조회',
         'GET /dashboard': '대시보드',
         'POST /order': '구매양식 제출',
         'POST /find-slot': '슬롯 매칭',
