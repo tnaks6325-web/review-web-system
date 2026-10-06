@@ -118,6 +118,18 @@ function _clearSavedIdentitySelection(cid, field) {
   if (st?.savedIdentitySelections && field) delete st.savedIdentitySelections[field];
 }
 
+// "골랐음" 기록을 비울 때 목록 칸 글자도 함께 되돌린다. 글자만 남으면 리뷰어는 골랐다고 보지만
+// 서버는 선택이 없다고 409 SAVED_IDENTITY_SELECTION_REQUIRED 를 낸다(결정 207).
+function _resetSavedIdentityPickerLabels(cid) {
+  ["recipient", "phone", "address"].forEach((field) => {
+    const wrap = document.getElementById(cid + "_" + field + "SavedInfo");
+    const trigger = wrap?.querySelector(".of-saved-info-trigger");
+    const triggerLabel = trigger?.querySelector(".of-saved-info-trigger-label");
+    if (!triggerLabel || trigger.disabled) return;
+    triggerLabel.textContent = "내 정보에서 선택";
+  });
+}
+
 function _savedIdentitySelections(cid) {
   const selected = _cardAiState[cid]?.savedIdentitySelections || {};
   return {
@@ -585,6 +597,19 @@ window._applySavedBankAccount = function (option) {
   showToast((identity.accountHolder || identity.name || "선택한") + "님의 계좌 정보를 적용했습니다.", "success");
 };
 
+/** 칸 값이 저장값과 정규화 후 같은가 — 서버 manualConfirm 의 비교(phone8 · normAddress)와 같은 기준. */
+function _sameSavedIdentityValue(field, current, saved) {
+  const a = String(current || "").trim();
+  const b = String(saved || "").trim();
+  if (!a || !b || _hasIdentityMask(a)) return false;
+  if (field === "phone") {
+    const d8 = (v) => { const d = v.replace(/\D/g, ""); return d.length >= 8 ? d.slice(-8) : d; };
+    return d8(a).length === 8 && d8(a) === d8(b);
+  }
+  if (field === "address") return _addrKey(a) === _addrKey(b);
+  return false;
+}
+
 window._applySavedOrderInfo = function (option) {
   const cid = option?.dataset?.cid;
   const field = option?.dataset?.field;
@@ -622,6 +647,9 @@ window._applySavedOrderInfo = function (option) {
       const related = document.getElementById(cid + "_" + relatedField);
       if (related && (!String(related.value || "").trim() || _hasIdentityMask(related.value))) {
         applyIdentityField(relatedField, identity?.[key]);
+      } else if (related && _sameSavedIdentityValue(relatedField, related.value, identity?.[key])) {
+        // 이미 같은 명의 저장값과 똑같이 적혀 있으면 값은 그대로 두고 "골랐음"만 함께 기록한다.
+        appliedFields.push(relatedField);
       }
     }
   }
@@ -7902,6 +7930,7 @@ function removeCardImg(cid) {
   const st = _cardAiState[cid];
   if (st) { if (st.abortCtrl) { st.abortCtrl.abort(); st.abortCtrl = null; } if (st.countdownId) { clearInterval(st.countdownId); st.countdownId = null; } st.analysisRequestId=(Number(st.analysisRequestId)||0)+1; st.lastBase64=""; st.lastMime=""; st.extracted=null; st.proofExtracted=null; st.extractToken=""; st.approvalToken=""; st.priorApprovalToken=""; st.reviewToken=""; st.matchError=false; }
   if (st) { st.identityBusy = false; st.identityStatus = ""; st.identityCanManual = false; st.identityChecks = []; st.identityReasonCodes = []; st.savedIdentitySelections = {}; }
+  _resetSavedIdentityPickerLabels(cid);
   _syncSubmissionIdentityAction();
   _ofpOnCaptureCleared(cid);
   const inp  = document.getElementById(cid + "_imgInput");  if (inp) inp.value = "";
@@ -7986,6 +8015,7 @@ async function _callCardExtractAi(cid, base64, mimeType) {
   st.extracted = null; st.proofExtracted = null; st.extractToken = ""; st.imageHash = "";
   st.approvalToken = ""; st.priorApprovalToken = ""; st.reviewToken = ""; st.matchError = false;
   st.savedIdentitySelections = {};
+  _resetSavedIdentityPickerLabels(cid);
   st.identityBusy = true; st.identityCanManual = false; st.identityChecks = []; st.identityReasonCodes = [];
   const identityStatus = document.getElementById(cid + "_identityStatus");
   if (identityStatus) identityStatus.innerHTML = '<strong>캡처를 분석하고 있습니다. 잠시 기다려주세요.</strong>';
