@@ -2471,7 +2471,8 @@
       applyOverview(j);
       // ★ 코드리뷰 M1: 마감(영속)·임시저장 상태면 차수만으로는 모집이 재개되지 않는다 — 즉시 고지
       toast(j.roundNo + '차 +' + count + '건 — 총량 ' + j.newTotal + '건'
-        + (j.status && j.status !== 'active' ? ' · ⚠ 게시를 켜야 모집이 재개됩니다' : ''));
+        + (j.reopened ? ' · ✅ 가득 차서 마감됐던 공고라 모집을 다시 열었습니다' : '')
+        + (!j.reopened && j.status && j.status !== 'active' ? ' · ⚠ 게시를 켜야 모집이 재개됩니다' : ''));
       refreshHost();
     } catch (e) { toast('차수 추가 실패: ' + (e.message || e)); }
   }

@@ -945,12 +945,15 @@ async function addRound(campaignId, body, actor) {
     await client.query(
       `INSERT INTO campaign_plan_events (campaign_id, actor, action, detail) VALUES ($1, $2, 'round_add', $3)`,
       [campaignId, actor || null, JSON.stringify({ roundNo, count, startDate: startDate || null, label: label || null, newTotal })]);
+    // ★ 2026-10-06: 가득 차서 자동 마감된 공고는 총량이 늘면 다시 연다(maybeReopenAfterQuotaIncrease).
+    //   직전 총량만큼 확정돼 있던 경우만 — 가득 차기 전 수동 마감은 풀지 않는다. 같은 트랜잭션·SAVEPOINT 격리.
+    const reopened = await require('./campaignHold.service')
+      .maybeReopenAfterQuotaIncrease(client, campaignId, camp.recruit_total, { savepoint: true });
     await client.query('COMMIT');
-    logger.info(`[campaignPlan] ${actor || '?'} 가 공고 ${campaignId} ${roundNo}차 +${count}건 — 총량 ${newTotal}`);
-    // ★ status 동봉(코드리뷰 M1): 총원이 차면 closed 가 **영속**되어 있어(maybePersistClosed)
-    //   차수를 추가해도 게시를 켜기 전에는 모집이 재개되지 않는다 — 자동 재오픈은 수동 마감
-    //   (관리자 의도)과 구분할 수 없어 하지 않고, 화면이 이 값으로 "게시를 켜야 한다"를 말한다.
-    return { roundNo, newTotal, status: camp.status };
+    logger.info(`[campaignPlan] ${actor || '?'} 가 공고 ${campaignId} ${roundNo}차 +${count}건 — 총량 ${newTotal}${reopened ? ' · 모집 재개' : ''}`);
+    // ★ status 동봉(코드리뷰 M1): 가득 차기 전 수동 마감·임시저장이면 차수만으로는 모집이 재개되지 않는다 —
+    //   화면이 이 값으로 "게시를 켜야 한다"를 말한다. 자동 마감이 풀렸으면 active + reopened:true.
+    return { roundNo, newTotal, status: reopened ? 'active' : camp.status, reopened };
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     throw e;

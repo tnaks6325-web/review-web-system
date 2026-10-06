@@ -3251,9 +3251,10 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
        ★ **줄이려는 조작은 종전대로 막는다** — 값이 달라질 때만 게이트를 건너뛰지 않는다.
        ★ 이전 값을 못 읽으면(조회 실패·행 없음) **검사하는 쪽으로 접는다**(fail-closed). */
     let _rtPrev = null;
+    let _statusPrev = null;   // 2026-10-06: 총 건수 증량 시 "가득 차서 자동 마감"만 다시 열기 위해 직전 상태도 읽는다
     try {
-      const { rows: prevRt } = await pool.query('SELECT recruit_total FROM recruit_campaigns WHERE id = $1', [id]);
-      if (prevRt.length) _rtPrev = Number(prevRt[0].recruit_total) || 0;
+      const { rows: prevRt } = await pool.query('SELECT recruit_total, status FROM recruit_campaigns WHERE id = $1', [id]);
+      if (prevRt.length) { _rtPrev = Number(prevRt[0].recruit_total) || 0; _statusPrev = prevRt[0].status; }
     } catch (_) { _rtPrev = null; }
     const _rtSent = _rtEff !== undefined && _rtEff !== null && _rtEff !== '';
     const _rtChanged = _rtSent && (_rtPrev === null || (Number(_rtEff) || 0) !== _rtPrev);
@@ -3420,6 +3421,22 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         if (fixed !== null) { rows[0].recruit_total = fixed; _rtLocked = true; }
       } catch (_) { /* fail-soft */ }
     }
+    /* ★★ 2026-10-06: 총 건수를 늘려 저장했고, 이 공고가 "가득 차서 자동 마감"된 상태였다면 모집을 다시 연다.
+         조건 = 직전 closed(이번 요청이 마감으로 바꾼 게 아님) + 직전 총 건수만큼 확정 + 새 총 건수 > 확정 수.
+         수동 마감(가득 차기 전)은 풀지 않는다. 요청이 status 를 마감이 아닌 값으로 명시했으면 그 값이 이긴다.
+         ★ 절대 throw 없음(저장은 이미 끝났다). 응답 reopened:true 로 화면이 사실을 말한다. */
+    let _reopened = false;
+    if (_statusPrev === 'closed' && rows[0].status === 'closed' && _rtPrev !== null && _rtPrev > 0
+        && (Number(rows[0].recruit_total) || 0) > _rtPrev) {
+      try {
+        _reopened = await require('../services/campaignHold.service')
+          .maybeReopenAfterQuotaIncrease(pool, id, _rtPrev);
+        if (_reopened) {
+          rows[0].status = 'active';
+          _listCache = { at: 0, rows: null, countsMap: null, feeMap: null };
+        }
+      } catch (_) { /* fail-soft */ }
+    }
     // 차수 합계 보정까지 끝난 최종 정원을 연결 작업오더에도 즉시 반영한다.
     // 이 호출이 공고 수정 → 작업오더 동기화의 단일 진입점이다.
     let quotaSync = null;
@@ -3439,7 +3456,8 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       ...(optionsWarning ? { optionsWarning } : {}), ...(feeWarning ? { feeWarning } : {}),
       ...(quotaSync ? { quotaSync } : {}),
       // ★ 095: 차수 공고라 총모집 전송값을 무시했음을 화면에 알린다(진행상품 표 hidden 재전송 케이스)
-      ...(_rtLocked ? { recruitTotalLocked: true } : {}) });
+      ...(_rtLocked ? { recruitTotalLocked: true } : {}),
+      ...(_reopened ? { reopened: true } : {}) });
   } catch (err) {
     next(err);
   }
