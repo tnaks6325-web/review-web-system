@@ -66,6 +66,51 @@ async function maybePersistClosed(q, campaignId) {
 }
 
 /**
+ * ★★ 총 건수를 늘리면 "가득 차서 자동 마감된" 공고만 다시 연다 — maybePersistClosed 의 짝(2026-10-06).
+ *
+ * 조건 셋이 모두 참일 때만 closed → active (WHERE 한 문장, 멱등):
+ *   ① 지금 closed  ② 직전 총 건수(prevTotal)만큼 이미 확정(submitted)돼 있었다  ③ 새 총 건수 > 확정 수.
+ * ② 가 "가득 차서 닫힌 것"과 "관리자가 수동으로 닫은 것"을 가른다 — 가득 차기 전에 수동으로 닫은 공고는
+ *   확정 수 < 직전 총 건수라 풀리지 않는다(관리자 의도 존중).
+ * ★ 판정 재료는 maybePersistClosed 와 같은 신청 확정 수 — 닫는 기준과 여는 기준이 어긋나지 않는다.
+ * ★ 시트 일정 공고는 마감이 영속되지 않으므로 건드리지 않는다(_isScheduleDriven).
+ * ★ 직전 총 건수가 0(무제한)이면 가득 차서 닫힌 적이 없다 → 무동작.
+ * ★ 절대 throw 하지 않는다 — 다시 열기 실패가 총 건수 저장·차수 추가를 되돌리면 안 된다.
+ *   트랜잭션 안에서 부르면(opts.savepoint) SAVEPOINT 로 격리한다(실패 쿼리 하나가 tx 전체를 abort 시키므로).
+ * @returns {Promise<boolean>} 실제로 다시 열었으면 true
+ */
+async function maybeReopenAfterQuotaIncrease(q, campaignId, prevTotal, opts) {
+  const prev = Number(prevTotal) || 0;
+  if (!campaignId || prev <= 0) return false;
+  const sp = !!(opts && opts.savepoint);
+  try {
+    if (sp) await q.query('SAVEPOINT reopen_after_quota');
+    if (await _isScheduleDriven(q, campaignId)) {
+      if (sp) await q.query('RELEASE SAVEPOINT reopen_after_quota');
+      return false;
+    }
+    const r = await q.query(
+      `UPDATE recruit_campaigns rc SET status = 'active', updated_at = NOW()
+        WHERE rc.id = $1 AND rc.participation_mode AND rc.status = 'closed'
+          AND rc.recruit_total > $2
+          AND (SELECT COUNT(*) FROM campaign_applications ca
+                WHERE ca.campaign_id = rc.id AND ca.status = 'submitted') >= $2
+          AND (SELECT COUNT(*) FROM campaign_applications ca
+                WHERE ca.campaign_id = rc.id AND ca.status = 'submitted') < rc.recruit_total`,
+      [campaignId, prev]
+    );
+    if (sp) await q.query('RELEASE SAVEPOINT reopen_after_quota');
+    const reopened = (r.rowCount || 0) > 0;
+    if (reopened) logger.info(`[campaignHold] 총 건수 증량으로 모집 재개 camp=${campaignId} (직전 총 ${prev}건 가득 참 → 마감 해제)`);
+    return reopened;
+  } catch (e) {
+    if (sp) { try { await q.query('ROLLBACK TO SAVEPOINT reopen_after_quota'); await q.query('RELEASE SAVEPOINT reopen_after_quota'); } catch (_) {} }
+    logger.warn(`[campaignHold] 총 건수 증량 후 재개 판정 실패(저장은 유지) camp=${campaignId}: ${e.message}`);
+    return false;
+  }
+}
+
+/**
  * 타계정 홀드 ↔ 주문 연락처 드리프트 판정(순수함수, 방어 D3).
  *   자리는 "명의"로 소비되는데 시트행·입금·리뷰검색(/api/search 는 phone8 매칭)은 "주문 연락처"로 귀속된다
  *   → 불일치 = 리뷰 캡처 제출 불가 + 정산 오귀속인데, 종전엔 검증도 로그도 없었다(무신호).
@@ -305,4 +350,4 @@ async function sweepExpiredHolds(pool) {
   return { expired: exp.rowCount, autoDismissed, revived, closedPersisted: closedCount };
 }
 
-module.exports = { HOLD_GRACE_SEC, tabMatchesCampaign, maybePersistClosed, confirmHoldInTx, detectIdentityDrift, sweepExpiredHolds, logIdentityBlockedExpiries };
+module.exports = { HOLD_GRACE_SEC, tabMatchesCampaign, maybePersistClosed, maybeReopenAfterQuotaIncrease, confirmHoldInTx, detectIdentityDrift, sweepExpiredHolds, logIdentityBlockedExpiries };

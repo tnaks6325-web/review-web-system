@@ -5624,6 +5624,10 @@ async function saveRecruitPostImpl() {
     if (saved && saved.recruitTotalLocked === true) {
       _changed.unshift("⚠ 총모집은 차수 원장이 관리해 변경되지 않음 — [📅 인원]의 차수 추가/제거로");
     }
+    /* ★ 2026-10-06: 총 건수를 늘려 "가득 차서 자동 마감"됐던 공고가 다시 열린 경우 — 조용히 바뀌지 않게 고지 */
+    if (saved && saved.reopened === true) {
+      _changed.unshift("✅ 모집을 다시 열었습니다 — 가득 차서 마감됐던 공고가 총 건수 증가로 모집중으로 돌아왔습니다");
+    }
     if (_quotaSkipped) {
       _changed.unshift("⚠ 총건수·일건수는 건드리지 않았습니다 — 현재 값을 불러오지 못해 그대로 두었습니다");
     }

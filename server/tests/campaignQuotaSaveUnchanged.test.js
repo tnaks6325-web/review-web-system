@@ -88,7 +88,7 @@ console.log('\n[A] skipWorktable — 슬롯 맞추기만 건너뛴다');
   // ── C. 라우트 배선 ────────────────────────────────────────
   console.log('\n[C] 공고 수정 — 값이 달라졌을 때만 게이트');
   ok('UPDATE 앞에서 이전 총정원을 읽는다',
-    /SELECT recruit_total FROM recruit_campaigns WHERE id = \$1/.test(put));
+    /SELECT recruit_total(, status)? FROM recruit_campaigns WHERE id = \$1/.test(put));   // 2026-10-06: 총 건수 증량 재개 판정을 위해 status 를 함께 읽는다(검사 의미 불변)
   ok('★ assert 는 _rtChanged 일 때만 탄다(전송 여부가 아니라 변경 여부)',
     /if \(_rtChanged\) \{\s*\n\s*await assertCampaignRecruitTotal\(/.test(put));
   ok('★ 이전 값을 못 읽으면 검사하는 쪽으로 접는다(fail-closed)',
