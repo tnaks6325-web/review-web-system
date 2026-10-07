@@ -3246,7 +3246,8 @@ function _clientErrorReporter(req) {
 // 보내는 사람별 분당 상한 — 화면은 2초 간격·중복 제거로 보내므로 정상 사용은 한참 아래다(Codex P2: 기록 부풀리기 방지).
 const _clientErrorLimiter = require('express-rate-limit')({
   windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false,
-  keyGenerator: (req) => 'ce:' + (req._ceReporterKey || req.ip),
+  // 보내는 사람 구분은 전역 제한과 같은 단일 출처(rateIdentity — 서명된 brand_id·advertiser_id·iu·리뷰어 id 우선, Codex P2)
+  keyGenerator: (req) => 'ce:' + require('../middleware/rateLimit.middleware').rateIdentity(req).key,
   message: { ok: false, error: '오류 보고가 너무 많습니다.' },
 });
 const _ceStr = (v, n) => (typeof v === 'string' ? v : (v == null ? '' : String(v))).slice(0, n);
@@ -3255,7 +3256,6 @@ router.post('/client-error', (req, res, next) => {
   const reporter = _clientErrorReporter(req);
   if (!reporter) return res.status(401).json({ ok: false, error: '로그인이 필요합니다.' });
   req._ceReporter = reporter;
-  req._ceReporterKey = reporter.kind === 'reviewer' ? 'r:' + reporter.reviewer : `s:${reporter.role}:${reporter.via}:${reporter.name}`;
   next();
 }, _clientErrorLimiter, async (req, res) => {
   const reporter = req._ceReporter;

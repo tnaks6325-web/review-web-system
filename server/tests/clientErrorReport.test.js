@@ -70,6 +70,11 @@ const roi = require('../src/services/reviewerOrderIdentity.service');
     const codes = [];
     for (let i = 0; i < 25; i++) codes.push(await post(bearer({ name: 'flood', role: 'staff' })));
     ok('한 사람이 분당 20건을 넘기면 429', codes.filter(c => c === 200).length === 20 && codes.slice(20).every(c => c === 429));
+    // 같은 이름의 브랜드 링크 두 곳은 서로의 상한을 나눠 쓰지 않는다(서명된 brand_id 로 구분 — Codex P2)
+    const b1 = bearer({ name: '같은이름', role: 'advertiser', advertiser_id: 7, brand_id: 101, via: 'brand-link' });
+    const b2 = bearer({ name: '같은이름', role: 'advertiser', advertiser_id: 8, brand_id: 202, via: 'brand-link' });
+    for (let i = 0; i < 20; i++) await post(b1);
+    ok('브랜드 A 가 상한을 다 써도 같은 이름 브랜드 B 는 받는다', (await post(b1)) === 429 && (await post(b2)) === 200);
   } finally { server.close(); }
 
   const api = fs.readFileSync(path.join(__dirname, '../../frontend/api.js'), 'utf8');
