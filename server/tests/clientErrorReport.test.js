@@ -24,6 +24,8 @@ const logged = [];
 const origLoad = Module._load;
 Module._load = function (req, parent, isMain) {
   if (/errorLog\.service$/.test(req)) return { logAbnormal: (e) => logged.push(e) };
+  // ★ 실제 DB 에 닿지 않게(Codex P2) — diag.routes 는 불러올 때 스키마 보정 쿼리를 날린다
+  if (/db\/pool$/.test(req)) return { query: async () => ({ rows: [], rowCount: 0 }), connect: async () => ({ query: async () => ({ rows: [] }), release() {} }), on() {} };
   return origLoad.apply(this, arguments);
 };
 const diag = require('../src/routes/diag.routes');
@@ -35,8 +37,8 @@ const roi = require('../src/services/reviewerOrderIdentity.service');
   const app = express(); app.use(express.json()); app.use('/api/diag', diag);
   const server = http.createServer(app); await new Promise(r => server.listen(0, r));
   const port = server.address().port;
-  const post = (headers) => new Promise((resolve) => {
-    const body = JSON.stringify({ message: 'TypeError: x', page: '/workdesk', source: 'a.js', lineno: 1 });
+  const post = (headers, payload) => new Promise((resolve) => {
+    const body = JSON.stringify(payload || { message: 'TypeError: x', page: '/workdesk', source: 'a.js', lineno: 1 });
     const q = http.request({ port, path: '/api/diag/client-error', method: 'POST', headers: { 'Content-Type': 'application/json', ...headers } },
       (res) => { res.resume(); res.on('end', () => resolve(res.statusCode)); });
     q.end(body);
@@ -54,6 +56,20 @@ const roi = require('../src/services/reviewerOrderIdentity.service');
     const extract = roi.issueExtractionProof({ imageHash: 'h', extracted: {}, ok: true }).extractToken;
     ok('무인증으로 받는 추출 증명 → 401(결정 201 기준과 같다)', (await post({ Authorization: 'Bearer ' + extract })) === 401);
     ok('기록에 보낸 사람 종류가 남는다', logged.length === 4 && logged.every(e => e.context && e.context.reporter && e.context.reporter.kind));
+    // Codex P2 ① 공고수정 토큰(role admin · via reviewer_campaign)은 직원으로 치지 않는다 → 리뷰어 세션으로 기록
+    logged.length = 0;
+    const camp = 'Bearer ' + jwt.sign({ name: 'r', role: 'admin', via: 'reviewer_campaign', phone8: '1' }, SECRET);
+    ok('공고수정 토큰 단독 → 401', (await post({ Authorization: camp })) === 401);
+    ok('공고수정 토큰 + 리뷰어 세션 → 리뷰어로 기록', (await post({ Authorization: camp, 'X-Reviewer-Token': rt })) === 200 && logged[0].context.reporter.kind === 'reviewer');
+    // Codex P2 ② 칸 길이 상한
+    logged.length = 0;
+    await post(bearer({ name: 'cap', role: 'admin' }), { message: 'm'.repeat(5000), stack: 's'.repeat(9000), page: { x: 1 }, lineno: 'abc' });
+    const e = logged[0];
+    ok('긴 글자는 잘라서 저장(메시지 500·스택 2000)', e && e.error.message.length === 500 && e.error.stack.length === 2000 && e.context.lineno === null);
+    // Codex P2 ③ 보내는 사람별 분당 상한(20)
+    const codes = [];
+    for (let i = 0; i < 25; i++) codes.push(await post(bearer({ name: 'flood', role: 'staff' })));
+    ok('한 사람이 분당 20건을 넘기면 429', codes.filter(c => c === 200).length === 20 && codes.slice(20).every(c => c === 429));
   } finally { server.close(); }
 
   const api = fs.readFileSync(path.join(__dirname, '../../frontend/api.js'), 'utf8');

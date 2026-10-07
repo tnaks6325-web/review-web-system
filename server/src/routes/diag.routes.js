@@ -2,7 +2,7 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const { randomUUID } = require('crypto');
 const router = express.Router();
-const { authMiddleware, adminOrMasterMiddleware, isLoginSessionToken } = require('../middleware/auth.middleware');
+const { authMiddleware, adminOrMasterMiddleware, isTrustedLoginToken } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
 const { readSheet, getSpreadsheetMeta } = require('../services/sheets.service');
 const { getQueueStats, retryItem, retryAllFailed, purgeCompleted, deleteItem, deleteAllFailed, processQueue, drainTabQueue } = require('../services/syncQueue.service');
@@ -3232,7 +3232,9 @@ function _clientErrorReporter(req) {
   if (m) {
     try {
       const d = jwt.verify(m[1], process.env.JWT_SECRET);
-      if (isLoginSessionToken(d)) return { kind: 'staff', role: d.role, via: d.via || '', name: d.name || '' };
+      // isTrustedLoginToken — 리뷰어 공고수정 토큰(via reviewer_campaign, role admin 이지만 약한 신원)은 직원으로 치지 않는다(Codex P2).
+      //   그런 리뷰어는 아래 X-Reviewer-Token 으로 'reviewer' 로 정확히 기록된다.
+      if (isTrustedLoginToken(d)) return { kind: 'staff', role: d.role, via: d.via || '', name: String(d.name || '').slice(0, 60) };
     } catch (_) { /* 아래 리뷰어 세션으로 */ }
   }
   const rt = req.headers['x-reviewer-token'];
@@ -3241,11 +3243,28 @@ function _clientErrorReporter(req) {
   }
   return null;
 }
-router.post('/client-error', async (req, res) => {
+// 보내는 사람별 분당 상한 — 화면은 2초 간격·중복 제거로 보내므로 정상 사용은 한참 아래다(Codex P2: 기록 부풀리기 방지).
+const _clientErrorLimiter = require('express-rate-limit')({
+  windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false,
+  keyGenerator: (req) => 'ce:' + (req._ceReporterKey || req.ip),
+  message: { ok: false, error: '오류 보고가 너무 많습니다.' },
+});
+const _ceStr = (v, n) => (typeof v === 'string' ? v : (v == null ? '' : String(v))).slice(0, n);
+const _ceNum = (v) => (Number.isFinite(Number(v)) ? Math.trunc(Number(v)) : null);
+router.post('/client-error', (req, res, next) => {
   const reporter = _clientErrorReporter(req);
   if (!reporter) return res.status(401).json({ ok: false, error: '로그인이 필요합니다.' });
+  req._ceReporter = reporter;
+  req._ceReporterKey = reporter.kind === 'reviewer' ? 'r:' + reporter.reviewer : `s:${reporter.role}:${reporter.via}:${reporter.name}`;
+  next();
+}, _clientErrorLimiter, async (req, res) => {
+  const reporter = req._ceReporter;
   try {
-    const { message, source, lineno, colno, stack, page, userAgent } = req.body || {};
+    const b = (req.body && typeof req.body === 'object') ? req.body : {};
+    // ★ 모든 칸 길이 상한(Codex P2) — 화면이 보내는 모양(문자열·숫자)만 받는다.
+    const message = _ceStr(b.message, 500), source = _ceStr(b.source, 300), page = _ceStr(b.page, 300);
+    const stack = _ceStr(b.stack, 2000), userAgent = _ceStr(b.userAgent, 200);
+    const lineno = _ceNum(b.lineno), colno = _ceNum(b.colno);
     logger.error({
       message: `[ClientError] ${message}`,
       source, lineno, colno, page,
