@@ -726,7 +726,9 @@ function clearAdminSession() {
         let authHeaders = {};
         try {
           const pvTok = sessionStorage.getItem('camp_preview_tok');
-          if (pvTok) authHeaders = { Authorization: 'Bearer ' + pvTok };
+          // 미리보기가 **실제로 켜져 있을 때만**(campaign.html _enterPreview 가 body.pv 를 붙인다) — 미리보기를 떠난 같은 탭은 리뷰어로 기록(Codex P2)
+          //   ⚠ 미리보기 스크립트가 시작 직전에 멈춘 오류는 토큰 회수 전이라 기록되지 않을 수 있다(관리자 전용 드문 경우 — 결정 208 한계).
+          if (pvTok && document.body && document.body.classList.contains('pv')) authHeaders = { Authorization: 'Bearer ' + pvTok };
           else authHeaders = (typeof _getAuthHeaders === 'function') ? _getAuthHeaders() : {};
         } catch (_) { authHeaders = {}; }
         await fetch(API_BASE_URL + '/api/diag/client-error', {
