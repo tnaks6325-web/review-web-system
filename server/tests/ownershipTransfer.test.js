@@ -150,6 +150,7 @@ async function run() {
       document: { getElementById: () => null },
       STATE: { advs: [{ id: 'adv_wc', name: '주식회사 위프코리아' }, { id: 'adv_wf', name: '(주)위드프렌즈' }], ownItems: [] },
       refreshAdvCounts: async () => {}, selAdv: () => {},
+      _ovmHasWork: () => true, _ovmRenderOverview: () => {}, _ovmCloseDrawer: () => {},   // 2026-10-07 작업 0개 업체 숨김
       _trS: { own, from: { id: 'adv_wf', name: '(주)위드프렌즈' },
         tabs: [{ tabGid: '100', tabName: '위프 작업' }, { tabGid: '200', tabName: '다른 작업' }],
         gidless: 0, mode, picks, target, newName, newOk, newPm: '' },
@@ -170,7 +171,7 @@ async function run() {
   go = await runGo({ own: SHEET_OWN, mode: 'tab', picks: { 0: true, 1: true } });
   t('특정 탭 = 고른 gid 만큼 전송', go.posts.length === 2 && go.posts.map(p => p.tabGid).join(',') === '100,200');
   t('대상 업체 id 전송', go.posts[0].toAdvertiserId === 'adv_wc');
-  t('성공 토스트에 대상 업체명', /이관 완료 → 주식회사 위프코리아/.test(go.toasts.join('|')), go.toasts.join('|'));
+  t('성공 토스트에 대상 업체명', /이동 완료 → 주식회사 위프코리아/.test(go.toasts.join('|')), go.toasts.join('|'));
 
   go = await runGo({ own: { sheetId: 'S1', tabGid: '100' }, mode: 'all' });
   t('★ 탭 소유 줄은 범위 선택 무관 그 탭만(시트 전체로 번지지 않는다)',
@@ -182,14 +183,14 @@ async function run() {
     results: () => (++n === 1 ? { ok: true } : { ok: false, error: '권한 없음' }) });
   const msg = go.toasts.join('|');
   t('★★ 부분 실패를 "완료"로 꾸미지 않는다(건수·사유 고지)',
-    /일부만 이관됨 \(1\/2\)/.test(msg) && /권한 없음/.test(msg) && !/이관 완료/.test(msg), msg);
+    /일부만 이동됨 \(1\/2\)/.test(msg) && /권한 없음/.test(msg) && !/이동 완료/.test(msg), msg);
   go = await runGo({ own: SHEET_OWN, mode: 'tab', picks: { 0: true }, results: () => ({ ok: false, error: '대상 업체를 찾을 수 없습니다.' }) });
-  t('★ 전부 실패는 실패로 말한다', /이관 실패: 대상 업체/.test(go.toasts.join('|')), go.toasts.join('|'));
+  t('★ 전부 실패는 실패로 말한다', /이동 실패: 대상 업체/.test(go.toasts.join('|')), go.toasts.join('|'));
 
   go = await runGo({ own: SHEET_OWN, mode: 'tab', picks: {} });
-  t('작업 미선택이면 전송 0 + 안내', go.posts.length === 0 && /이관할 작업을 선택/.test(go.toasts.join('|')));
+  t('작업 미선택이면 전송 0 + 안내', go.posts.length === 0 && /이동할 작업을 선택/.test(go.toasts.join('|')));
   go = await runGo({ own: SHEET_OWN, target: '' });
-  t('대상 미선택이면 전송 0 + 안내', go.posts.length === 0 && /이관할 거래처를 선택/.test(go.toasts.join('|')));
+  t('대상 미선택이면 전송 0 + 안내', go.posts.length === 0 && /이동할 거래처를 선택/.test(go.toasts.join('|')));
   go = await runGo({ own: SHEET_OWN, picks: { 0: true }, target: '__new__', newName: '미등록업체', newOk: false });
   t('★ 미검증 새 거래처는 전송 0(등록 게이트 = 서버와 같은 규칙)',
     go.posts.length === 0 && /광고주DB\)에 등록된 이름/.test(go.toasts.join('|')), go.toasts.join('|'));

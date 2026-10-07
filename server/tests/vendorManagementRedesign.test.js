@@ -364,7 +364,8 @@ async function run() {
   t('16가지 열 묶음 조합 전부에서 헤더 칸 ≡ grid 열', combos === 16, 'combos=' + combos);
   // 기본 = 작업정보·진척·자료 켬 + 정산상세 접힘(사용자 확정) → 12칸(종전 13칸에서 비고 칸 제거 — 결정 186 33번).
   //   FHD 폭 상한(1560) 안에서 가로 스크롤이 없어야 한다는 약속의 전제이므로 숫자를 고정한다.
-  t('★ 기본(자료 켬·정산상세 접힘)은 12칸', baseN === 12, 'cols=' + baseN);
+  //   2026-10-07: 작업 줄마다 [업체 이동] 칸 추가(사용자 확정 A안) → 13칸.
+  t('★ 기본(자료 켬·정산상세 접힘)은 13칸(업체 이동 칸 포함)', baseN === 13, 'cols=' + baseN);
   {
     const sb = { _ovmCols: () => ({ info: true, prog: true, mat: true, setl: false }) };
     vm.createContext(sb); vm.runInContext(src, sb);
@@ -417,7 +418,7 @@ async function run() {
   /* ═══ 7. 인라인 업체 펼침 + 최신 작업의뢰순 ═══ */
   console.log('\n7) 인라인 업체 펼침 · 최신 작업의뢰순');
   {
-    const sb = {}; vm.createContext(sb); vm.runInContext(grab('_ovmOrderedAdvs'), sb);
+    const sb = { STATE: { ovMeta: null } }; vm.createContext(sb); vm.runInContext(grab('_ovmHasWork') + grab('_ovmOrderedAdvs'), sb);
     const ordered = vm.runInContext('_ovmOrderedAdvs', sb)([
       { name: '과거', latestRequestAt: '2026-08-01T00:00:00Z' },
       { name: '없음', latestRequestAt: null },
@@ -426,6 +427,16 @@ async function run() {
     t('업체 정렬은 latestRequestAt 내림차순, 날짜 없음은 마지막',
       ordered.map(x => x.a.name).join(',') === '최신,과거,없음', ordered.map(x => x.a.name).join(','));
     t('정렬 뒤에도 onclick 인덱스는 STATE.advs 원본 인덱스를 보존', ordered.map(x => x.i).join(',') === '2,0,1');
+    // ★ 2026-10-07 사용자 확정: 작업이 0개인 업체는 목록에서 뺀다 — 단 집계를 모르면(ovMeta 없음·ok:false) 빼지 않는다.
+    const list = [{ name: 'A', works: 3 }, { name: 'B', works: 0 }, { name: 'C' }];
+    const names = () => vm.runInContext('_ovmOrderedAdvs', sb)(list).map(x => x.a.name).sort().join(',');
+    sb.STATE.ovMeta = { ok: true };
+    t('★ 작업 0개 업체는 목록에서 빠진다(인덱스는 원본 보존)', names() === 'A'
+      && vm.runInContext('_ovmOrderedAdvs', sb)(list)[0].i === 0);
+    sb.STATE.ovMeta = { ok: false };
+    t('★ 집계 실패면 숨기지 않는다(모름 ≠ 0개)', names() === 'A,B,C');
+    sb.STATE.ovMeta = null;
+    t('★ 집계 미도착도 숨기지 않는다', names() === 'A,B,C');
   }
   t('업체 원장에 최신 작업의뢰순을 명시', /업체 · 최신 작업의뢰순 ↓/.test(HTML));
   t('업체 원장과 기본 연결작업 원장의 최소 폭을 맞춤',
@@ -456,10 +467,11 @@ async function run() {
     // 실제 헬퍼를 함께 올린다 — 배지 조건이 _ovmCandKnown 을 거치므로 플래그 로직까지 함께 실행된다.
     // ★ _isInternalRole 도 함께 올린다 — 업체 삭제(×) 버튼 게이트가 그 함수를 부른다(스텁을 두면
     //   역할 판정이 거기서만 딴판이 된다: workbarRecruitSort 가드의 WANT 목록과 같은 규율).
-    vm.runInContext([grab('_isInternalRole'), grab('_ovmCandKnown'), grab('_ovmCandWhy'), grab('_ovmAdvMatch'), grab('_ovmOrderedAdvs'), grab('_ovmRenderAdvs')].join('\n'), sb);
+    vm.runInContext([grab('_isInternalRole'), grab('_ovmCandKnown'), grab('_ovmCandWhy'), grab('_ovmAdvMatch'), grab('_ovmHasWork'), grab('_ovmOrderedAdvs'), grab('_ovmRenderAdvs')].join('\n'), sb);
     const render = (advs, ovMeta) => { sb.STATE.advs = advs; sb.STATE.ovMeta = ovMeta;
       boxes['#advs'].innerHTML = ''; vm.runInContext('_ovmRenderAdvs()', sb); return boxes['#advs'].innerHTML; };
-    const A = [{ id: 'A', name: '업체A', inadPm: 'AE', owned: 1, finishCand: 3 }, { id: 'B', name: '업체B', inadPm: 'AE', owned: 1, finishCand: 0 }];
+    // works = 작업 수 — 2026-10-07부터 작업 0개 업체는 목록에서 빠지므로 표본에 작업 수를 싣는다(검사 의미 불변).
+    const A = [{ id: 'A', name: '업체A', inadPm: 'AE', owned: 1, works: 1, finishCand: 3 }, { id: 'B', name: '업체B', inadPm: 'AE', owned: 1, works: 1, finishCand: 0 }];
     let html = render(A, { ok: true });
     t('마감자료 검수 대기가 있는 업체만 배지', (html.match(/ovm-b/g) || []).length === 1 && /">3<\/span>/.test(html), html.slice(0, 200));
     html = render(A, { ok: false });
@@ -470,7 +482,7 @@ async function run() {
       !/ovm-b/.test(html), html.slice(0, 200));
     html = render(A, { ok: true, finishedUnavailable: true });
     t('★ 마감 정보만 죽은 경우도 배지 미표시', !/ovm-b/.test(html));
-    html = render([{ id: 'C', name: '업체C', inadPm: '', owned: 0, finishCand: 0 }], { ok: true });
+    html = render([{ id: 'C', name: '업체C', inadPm: '', owned: 0, works: 1, finishCand: 0 }], { ok: true });
     t('AE 미지정은 사이드바에서 경고색으로 표기', /class="pmn noae"/.test(html) && /AE 미지정/.test(html));
     t('★ 사이드바 행 onclick 은 인덱스만(업체명 문자열 주입 금지)', /onclick="selAdv\(0\)"/.test(html));
   }
