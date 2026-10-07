@@ -2,7 +2,7 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const { randomUUID } = require('crypto');
 const router = express.Router();
-const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware, adminOrMasterMiddleware, isLoginSessionToken } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
 const { readSheet, getSpreadsheetMeta } = require('../services/sheets.service');
 const { getQueueStats, retryItem, retryAllFailed, purgeCompleted, deleteItem, deleteAllFailed, processQueue, drainTabQueue } = require('../services/syncQueue.service');
@@ -3221,9 +3221,31 @@ router.post('/metrics/reset', authMiddleware, async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 // POST /api/diag/client-error — 프론트엔드 JS 에러 수집
 // ═══════════════════════════════════════════════════════════
-router.post('/client-error', authMiddleware, async (req, res) => {
+// ★ 화면 오류 수신 — **로그인한 사람만**(직원·광고주 로그인 토큰 또는 리뷰어 세션). 결정 208.
+//   2026-05-13 무인증 쓰기를 막으려 authMiddleware 를 붙였는데 화면(api.js)은 토큰 없이 보내서
+//   5개월간 전부 401(화면 오류가 한 건도 안 쌓임). 화면이 가진 로그인 정보를 붙여 보내고,
+//   서버는 둘 중 하나만 맞으면 받는다. 익명은 계속 거절(가짜 오류로 기록 채우기 방지).
+//   authMiddleware 를 그대로 쓰지 않는 이유: 인트라넷·광고주 토큰의 경로 제한(trackb 전용)에 걸려
+//   3버전 직원 화면 오류가 계속 버려진다 — 기록용 입구라 로그인 확인만 한다.
+function _clientErrorReporter(req) {
+  const m = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || ''));
+  if (m) {
+    try {
+      const d = jwt.verify(m[1], process.env.JWT_SECRET);
+      if (isLoginSessionToken(d)) return { kind: 'staff', role: d.role, via: d.via || '', name: d.name || '' };
+    } catch (_) { /* 아래 리뷰어 세션으로 */ }
+  }
+  const rt = req.headers['x-reviewer-token'];
+  if (rt) {
+    try { const sess = verifyReviewerSession(rt); if (sess && sess.ownerReviewerId) return { kind: 'reviewer', reviewer: sess.ownerReviewerId }; } catch (_) {}
+  }
+  return null;
+}
+router.post('/client-error', async (req, res) => {
+  const reporter = _clientErrorReporter(req);
+  if (!reporter) return res.status(401).json({ ok: false, error: '로그인이 필요합니다.' });
   try {
-    const { message, source, lineno, colno, stack, page, userAgent } = req.body;
+    const { message, source, lineno, colno, stack, page, userAgent } = req.body || {};
     logger.error({
       message: `[ClientError] ${message}`,
       source, lineno, colno, page,
@@ -3233,7 +3255,7 @@ router.post('/client-error', authMiddleware, async (req, res) => {
     logAbnormal({
       flow: 'client', source: 'client', severity: 'warn',
       error: { message: message || 'client error', stack },
-      context: { page, source, lineno, colno, ip: req.ip, userAgent: (userAgent || req.headers['user-agent'] || '').substring(0, 120) },
+      context: { page, source, lineno, colno, ip: req.ip, userAgent: (userAgent || req.headers['user-agent'] || '').substring(0, 120), reporter },
     });
     res.json({ ok: true });
   } catch (err) {

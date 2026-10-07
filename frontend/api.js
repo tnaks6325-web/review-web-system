@@ -719,9 +719,13 @@ function clearAdminSession() {
     const batch = _errQueue.splice(0, 5); // 최대 5개씩
     for (const entry of batch) {
       try {
+        // ★ 로그인 정보를 붙여 보낸다(직원 admin_token · 리뷰어 세션) — 서버는 로그인한 사람의 오류만 받는다(결정 208).
+        //   붙이지 않으면 2026-05~10 처럼 전부 401 로 버려진다. 헤더 조립 실패는 오류 보고를 막지 않는다.
+        let authHeaders = {};
+        try { authHeaders = (typeof _getAuthHeaders === 'function') ? _getAuthHeaders() : {}; } catch (_) { authHeaders = {}; }
         await fetch(API_BASE_URL + '/api/diag/client-error', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeaders },
           body: JSON.stringify(entry),
         });
       } catch (_) { /* 전송 실패 무시 — 에러 리포팅이 앱을 방해하면 안 됨 */ }
