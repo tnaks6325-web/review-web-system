@@ -78,8 +78,9 @@ const roi = require('../src/services/reviewerOrderIdentity.service');
   } finally { server.close(); }
 
   const api = fs.readFileSync(path.join(__dirname, '../../frontend/api.js'), 'utf8');
-  const sender = api.slice(api.indexOf("'/api/diag/client-error'") - 400, api.indexOf("'/api/diag/client-error'") + 300);
+  const sender = api.slice(api.indexOf("'/api/diag/client-error'") - 1200, api.indexOf("'/api/diag/client-error'") + 300);
   ok('화면은 로그인 정보를 붙여 보낸다(_getAuthHeaders)', /_getAuthHeaders\(\)/.test(sender) && /\.\.\.authHeaders/.test(sender));
+  ok('공고 미리보기 탭은 전용 관리자 토큰만 붙인다(리뷰어 세션 미부착)', /sessionStorage\.getItem\('camp_preview_tok'\)[\s\S]{0,120}authHeaders = \{ Authorization: 'Bearer ' \+ pvTok \}/.test(sender));
   console.log(`\n✅ clientErrorReport: ${n}개 통과`);
   process.exit(0);
 })().catch((e) => { console.error(e); process.exit(1); });

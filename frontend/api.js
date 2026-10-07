@@ -721,8 +721,14 @@ function clearAdminSession() {
       try {
         // ★ 로그인 정보를 붙여 보낸다(직원 admin_token · 리뷰어 세션) — 서버는 로그인한 사람의 오류만 받는다(결정 208).
         //   붙이지 않으면 2026-05~10 처럼 전부 401 로 버려진다. 헤더 조립 실패는 오류 보고를 막지 않는다.
+        //   ★ 공고 미리보기 탭(campaign.html ?preview=1)은 관리자 토큰을 전용 칸(camp_preview_tok)에만 둔다 — 그 탭이면
+        //     그 관리자 토큰만 붙이고 리뷰어 세션은 붙이지 않는다(남아 있던 다른 리뷰어 이름으로 잘못 기록되는 것 방지, Codex P2).
         let authHeaders = {};
-        try { authHeaders = (typeof _getAuthHeaders === 'function') ? _getAuthHeaders() : {}; } catch (_) { authHeaders = {}; }
+        try {
+          const pvTok = sessionStorage.getItem('camp_preview_tok');
+          if (pvTok) authHeaders = { Authorization: 'Bearer ' + pvTok };
+          else authHeaders = (typeof _getAuthHeaders === 'function') ? _getAuthHeaders() : {};
+        } catch (_) { authHeaders = {}; }
         await fetch(API_BASE_URL + '/api/diag/client-error', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...authHeaders },
