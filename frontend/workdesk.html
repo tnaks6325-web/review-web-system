@@ -504,6 +504,9 @@
   .owntab .ocnt{font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--muted)}
   .owntab .ocnt b{font-weight:700;color:var(--ink)} .owntab .ocnt .c-sub{color:var(--accent)} .owntab .ocnt .c-paid{color:var(--safe)}
   .owntab .openb{font-size:11px;color:var(--accent);font-weight:700;white-space:nowrap;text-align:right}
+  .owntab .omove{font:inherit;font-size:11px;font-weight:750;white-space:nowrap;border:1px solid var(--line2);background:var(--card);color:var(--ink);border-radius:7px;padding:4px 8px;cursor:pointer}
+  .owntab .omove:hover{border-color:var(--accent);color:var(--accent-deep);background:var(--accent-soft)}
+  .owntab .omove:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .odot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--faint);opacity:.35;margin-right:6px;vertical-align:1px}
   .odot.a{background:var(--safe);opacity:1}
   /* 정산 컬럼(관제실 대응): 날짜셀·금액셀·비고(클릭 편집) */
@@ -17372,9 +17375,14 @@ function _ovmbFilterRows(v){
 
 // 업체 원장 정렬 = 그 업체에 연결된 가장 최근 작업의뢰(work_orders.created_at) 내림차순.
 // 날짜가 없는 레거시/소유 0건 업체는 아래로 보내고, 동률은 업체명으로 고정해 새로고침 때 흔들리지 않게 한다.
+/* ★ 작업이 하나도 없는 업체는 업체관리 목록에서 뺀다(사용자 확정 2026-10-07 — 이관으로 작업이 다 빠진 업체가
+   목록에 남지 않게, [보기] 줄 없음). 지우는 게 아니라 **목록에서만** 뺀다 — 접속 링크·계정·브랜드는 그대로이고
+   작업을 다시 붙이면 다시 나타난다. 이동 대상 검색(STATE.advs 전체)에는 계속 나온다.
+   ★ 집계를 못 불러왔으면(모름) 숨기지 않는다 — 실패 한 번에 업체가 통째로 사라지면 안 된다. */
+function _ovmHasWork(a){ const m=STATE.ovMeta; if(!m||!m.ok) return true; return (Number(a&&a.works)||0)>0; }
 function _ovmOrderedAdvs(advs){
   const time=v=>{ const n=Date.parse(v||''); return Number.isFinite(n)?n:0; };
-  return (advs||[]).map((a,i)=>({a,i})).sort((x,y)=>time(y.a.latestRequestAt)-time(x.a.latestRequestAt)
+  return (advs||[]).map((a,i)=>({a,i})).filter(o=>_ovmHasWork(o.a)).sort((x,y)=>time(y.a.latestRequestAt)-time(x.a.latestRequestAt)
     ||String(x.a.name||'').localeCompare(String(y.a.name||''),'ko'));
 }
 
@@ -17511,9 +17519,9 @@ function _ovmRenderOverview(opt){
     <header class="ovm-bhead"><div><h2>업체 관리</h2><p>관계 상태를 한 화면에서 확인하고, 업체 원장에서 바로 상세 업무로 이동합니다.</p></div>
       <span class="ovm-bsp"></span><button class="btn" onclick="renderOwnershipView()">새로고침</button><button class="btn pri" onclick="showAddAdvertiser()">업체 등록</button></header>
     <div id="ovmmBox">${_ovmmBoxHtml()}</div>
-    ${_ovmbSummaryHtml(advs,works,bad,matchKnown,candKnown)}
+    ${_ovmbSummaryHtml(advs.filter(_ovmHasWork),works,bad,matchKnown,candKnown)}
     <section class="ovm-ov ovm-bledger">
-    <div class="ovm-ovh"><h2>업체 ${advs.length}곳 · 작업 ${bad?'?':works.toLocaleString('ko-KR')}건</h2>
+    <div class="ovm-ovh"><h2>업체 ${advs.filter(_ovmHasWork).length}곳 · 작업 ${bad?'?':works.toLocaleString('ko-KR')}건</h2>
       <span class="s">${(STATE.mapTabs||[]).length?`진행 중 작업 ${_ovmLiveTabs().length}건 중 ${_ovmLiveTabs().length-unTabs}건이 업체에 지정됨`:'작업 목록을 불러오지 못해 지정 현황을 셀 수 없습니다'}</span></div>
     <p class="ovm-lead">업체 행을 누르면 화면 이동 없이 연결된 작업이 바로 아래에 펼쳐집니다. 업체는 <b>최신 작업의뢰순</b>입니다.
       ${(bad||!candKnown||!matchKnown||!linkKnown)?`<b style="color:var(--warn)"> · ${esc(bad?'집계를 불러오지 못해 숫자를 ?로 표시합니다':'일부 집계를 불러오지 못해 그 칸만 ?로 표시합니다')}</b>`:''}</p>
@@ -18306,6 +18314,7 @@ function _ovmGrid(){
   F(92);                       /* 계약 */
   if(c.setl){ F(62); F(62); F(62); F(62); }            /* 견적서·마감자료·계산서·입금일 */
   F(148);                      /* 입금액/총비용 */
+  F(70);                       /* 업체 이동(사용자 확정 2026-10-07 A안) */
   F(44);                       /* 열기 */
   const min=fixed+flexMin+(cols.length-1)*10;
   return { cols:cols.join(' '), min, n:cols.length };
@@ -18318,7 +18327,7 @@ function _ovmHead(){
   if(c.mat)  h.push('<span>자료</span>');
   h.push('<span>계약</span>');
   if(c.setl) h.push('<span>견적서</span>','<span>마감자료</span>','<span>계산서</span>','<span>입금일</span>');
-  h.push('<span>입금액/총비용</span>','<span></span>');
+  h.push('<span>입금액/총비용</span>','<span>이동</span>','<span></span>');
   return `<div class="othead" style="grid-template-columns:${g.cols};min-width:${g.min}px">${h.join('')}</div>`;
 }
 // 행 필터 — ★ 상태 칩 숫자와 목록이 **같은 판정**을 쓴다(따로 세면 "칩은 12인데 표는 3줄"이 된다).
@@ -18403,6 +18412,9 @@ function _ownRowsHtml(){
     if(c.setl){ cells.push(`<span class="ocol odate">${quoteCell}</span>`,`<span class="ocol odate">${closeoutCell}</span>`,
       `<span class="ocol odate">${invoiceCell}</span>`,`<span class="ocol odate">${paidDateCell}</span>`); }
     cells.push(`<span class="ocol omoney">${moneyCell}</span>`);
+    // ★ 업체 이동 — 종전엔 [소유 작업] 패널 안의 작은 [이관]으로만 갈 수 있어 아무도 몰랐다(사용자 신고 2026-10-07).
+    //   실행부는 같은 이관 팝업(ownTransfer · 서버 /ownership/transfer)이다 — 사본 0. onclick 은 인덱스만.
+    cells.push(_isInternalRole()?`<span class="ocol"><button type="button" class="omove" onclick="event.stopPropagation();ownMoveTab(${i})" title="이 작업을 다른 업체로 옮깁니다(업체관리에 없으면 광고주DB에서 찾아 새로 연결)">업체 이동</button></span>`:'<span></span>');
     cells.push(`<span class="openb">열기 ›</span>`);
     return `<div class="owntab" style="grid-template-columns:${g.cols};min-width:${g.min}px" onclick="openOwnTab(${i})" title="${esc(_tabTip(t))}">${cells.join('')}</div>`;
   }).join('');
@@ -18502,6 +18514,16 @@ function _trOpen(o){
   ov.style.display='flex';
   _trRender();
 }
+// 작업 줄의 [업체 이동] — 그 작업을 가리키는 소유 행을 찾아 같은 이관 팝업을 연다.
+//   ① 작업 단위 소유(탭 gid 일치) 우선 ② 없으면 그 시트의 옛 '전체' 소유(팝업이 옮길 작업을 고르게 한다).
+function ownMoveTab(i){
+  const t=(STATE.ownTabs||[])[i]; if(!t) return;
+  const items=STATE.ownItems||[], g=_ovmTabGid(t);
+  let k=g?items.findIndex(o=>o.sheetId===t.sheetId && String(o.tabGid==null?'':o.tabGid).trim()===g):-1;
+  if(k<0) k=items.findIndex(o=>o.sheetId===t.sheetId && !o.tabGid);
+  if(k<0){ toast('이 작업의 업체 지정 정보를 아직 불러오지 못했습니다 — 잠시 뒤 다시 눌러 주세요'); return; }
+  ownTransfer(k);
+}
 function ownTransfer(i){
   const a=STATE.advCur, o=(STATE.ownItems||[])[i]; if(!a||!o) return;
   _trOpen({kind:'transfer', from:a, sheetId:o.sheetId, tabGid:o.tabGid||null});
@@ -18523,10 +18545,10 @@ function _trRender(){
     <div class="note">${asg?'고른 작업만 지정됩니다 — <b>나머지 작업은 미지정으로 남습니다</b>.'
       :`고른 작업만 이관됩니다 — <b>나머지 작업은 ${esc((S.from&&S.from.name)||'')} 소유(시트 전체)로 남습니다</b>. 시트 전체 소유를 아예 없애려면 업체 패널에서 <b>[작업 단위로 펼치기]</b>를 먼저 실행하세요.`}</div>` : '';
   ov.innerHTML=`<div class="owntr">
-    <h3>${asg?'작업 업체 지정':'작업 이관'}</h3>
+    <h3>${asg?'작업 업체 지정':'작업을 다른 업체로 이동'}</h3>
     <div class="src"><b>${esc(srcLabel)}</b><br>현재 소유: ${asg?'<span style="color:var(--warn)">미지정</span>':esc((S.from&&S.from.name)||'')}</div>
     ${scopeUi}
-    <label>${asg?'지정할 거래처':'이관할 거래처'}</label>
+    <label>${asg?'지정할 거래처':'옮겨 갈 업체 <span style="color:var(--faint);font-weight:400">(목록에 없으면 [＋ 새 거래처 등록] → 광고주DB 검색)</span>'}</label>
     ${_trTargetFieldHtml(S)}
     ${S.target==='__new__'?`
       <label>새 거래처명 <span style="color:var(--faint);font-weight:400">(인트라넷 광고주DB 자동완성 — 목록에서 선택)</span></label>
@@ -18539,7 +18561,7 @@ function _trRender(){
       ? '지정하면 이 작업이 그 업체 소유가 되어 작업보드 그룹·업체관리 표·계약 매칭 후보에 나타납니다. 잘못 지정했으면 업체 패널의 [이관]·[×]로 되돌릴 수 있습니다.'
       : '이관하면 이 범위의 기존 소유는 해제되고, 작업보드 그룹·업체관리 표·계약 매칭 후보가 새 거래처 기준으로 바뀝니다. 이미 매칭된 계약·정산 링크는 그대로 유지됩니다(필요 시 별도 재매칭).'}</div>
     <div class="ft"><button class="btn" onclick="_trClose()">취소</button>
-      <button class="btn pri" id="trGoBtn" onclick="ownTransferGo()">${asg?'지정하기':'이관하기'}</button></div>
+      <button class="btn pri" id="trGoBtn" onclick="ownTransferGo()">${asg?'지정하기':'이동하기'}</button></div>
   </div>`;
   if(S.target==='__new__'){ _trChk(); const el=document.getElementById('trNewName'); if(el&&!S.newName) setTimeout(()=>el.focus(),30); }
 }
@@ -18675,7 +18697,7 @@ function _trChk(){ const S=_trS; if(!S) return; const chk=document.getElementByI
 async function ownTransferGo(){
   const S=_trS; if(!S) return;
   const asg=S.kind==='assign';                       // 지정(미지정 → 업체) / 이관(업체 → 업체)
-  const V=asg?'지정':'이관';
+  const V=asg?'지정':'이동';
   let targetId=S.target, targetName='';
   if(!targetId){ toast(V+'할 거래처를 선택하세요'); return; }
   let posts=[];
@@ -18721,8 +18743,10 @@ async function ownTransferGo(){
       else if(!STATE.advCur) _ovmRenderOverview();
       return;
     }
-    const idx=(STATE.advs||[]).findIndex(x=>x.id===fromId); if(idx>=0) selAdv(idx);
-  } finally { const b=document.getElementById('trGoBtn'); if(b){ b.disabled=false; b.textContent=asg?'지정하기':'이관하기'; } }
+    const idx=(STATE.advs||[]).findIndex(x=>x.id===fromId);
+    if(idx>=0 && _ovmHasWork(STATE.advs[idx])) selAdv(idx);
+    else { if(typeof _ovmCloseDrawer==='function') _ovmCloseDrawer(); _ovmRenderOverview(); }   // 작업이 다 빠져 목록에서 사라진 업체
+  } finally { const b=document.getElementById('trGoBtn'); if(b){ b.disabled=false; b.textContent=asg?'지정하기':'이동하기'; } }
 }
 /* ── 시트 전체 소유 펼치기 — **화면에서 제거됨**(사용자 확정 2026-08-23, 시트 UI 전부 제거) ──
    ★ 기존 `tab_gid IS NULL`(시트 전체) 소유는 운영에서 이미 정리했고(27건 → 작업 91건), 남은
@@ -18760,7 +18784,7 @@ async function refreshAdvCounts(){
   if($('#ovmbRows')){
     const ix=selectedId?STATE.advs.findIndex(a=>a.id===selectedId):-1;
     _ovmRenderOverview({nav:true});
-    if(ix>=0) await selAdv(ix,{nav:true});
+    if(ix>=0 && _ovmHasWork(STATE.advs[ix])) await selAdv(ix,{nav:true});
   } } }
 
 // 업체관리 설정 패널 ESC 닫기 — ★ document 에 **한 번만** 등록한다. 패널·뷰 컨테이너에 붙이면
