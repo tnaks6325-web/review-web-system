@@ -2,7 +2,7 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const { randomUUID } = require('crypto');
 const router = express.Router();
-const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware, adminOrMasterMiddleware, isTrustedLoginToken } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
 const { readSheet, getSpreadsheetMeta } = require('../services/sheets.service');
 const { getQueueStats, retryItem, retryAllFailed, purgeCompleted, deleteItem, deleteAllFailed, processQueue, drainTabQueue } = require('../services/syncQueue.service');
@@ -3221,9 +3221,50 @@ router.post('/metrics/reset', authMiddleware, async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 // POST /api/diag/client-error — 프론트엔드 JS 에러 수집
 // ═══════════════════════════════════════════════════════════
-router.post('/client-error', authMiddleware, async (req, res) => {
+// ★ 화면 오류 수신 — **로그인한 사람만**(직원·광고주 로그인 토큰 또는 리뷰어 세션). 결정 208.
+//   2026-05-13 무인증 쓰기를 막으려 authMiddleware 를 붙였는데 화면(api.js)은 토큰 없이 보내서
+//   5개월간 전부 401(화면 오류가 한 건도 안 쌓임). 화면이 가진 로그인 정보를 붙여 보내고,
+//   서버는 둘 중 하나만 맞으면 받는다. 익명은 계속 거절(가짜 오류로 기록 채우기 방지).
+//   authMiddleware 를 그대로 쓰지 않는 이유: 인트라넷·광고주 토큰의 경로 제한(trackb 전용)에 걸려
+//   3버전 직원 화면 오류가 계속 버려진다 — 기록용 입구라 로그인 확인만 한다.
+function _clientErrorReporter(req) {
+  const m = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || ''));
+  if (m) {
+    try {
+      const d = jwt.verify(m[1], process.env.JWT_SECRET);
+      // isTrustedLoginToken — 리뷰어 공고수정 토큰(via reviewer_campaign, role admin 이지만 약한 신원)은 직원으로 치지 않는다(Codex P2).
+      //   그런 리뷰어는 아래 X-Reviewer-Token 으로 'reviewer' 로 정확히 기록된다.
+      if (isTrustedLoginToken(d)) return { kind: 'staff', role: d.role, via: d.via || '', name: String(d.name || '').slice(0, 60) };
+    } catch (_) { /* 아래 리뷰어 세션으로 */ }
+  }
+  const rt = req.headers['x-reviewer-token'];
+  if (rt) {
+    try { const sess = verifyReviewerSession(rt); if (sess && sess.ownerReviewerId) return { kind: 'reviewer', reviewer: sess.ownerReviewerId }; } catch (_) {}
+  }
+  return null;
+}
+// 보내는 사람별 분당 상한 — 화면은 2초 간격·중복 제거로 보내므로 정상 사용은 한참 아래다(Codex P2: 기록 부풀리기 방지).
+const _clientErrorLimiter = require('express-rate-limit')({
+  windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false,
+  // 보내는 사람 구분은 전역 제한과 같은 단일 출처(rateIdentity — 서명된 brand_id·advertiser_id·iu·리뷰어 id 우선, Codex P2)
+  keyGenerator: (req) => 'ce:' + require('../middleware/rateLimit.middleware').rateIdentity(req).key,
+  message: { ok: false, error: '오류 보고가 너무 많습니다.' },
+});
+const _ceStr = (v, n) => (typeof v === 'string' ? v : (v == null ? '' : String(v))).slice(0, n);
+const _ceNum = (v) => (Number.isFinite(Number(v)) ? Math.trunc(Number(v)) : null);
+router.post('/client-error', (req, res, next) => {
+  const reporter = _clientErrorReporter(req);
+  if (!reporter) return res.status(401).json({ ok: false, error: '로그인이 필요합니다.' });
+  req._ceReporter = reporter;
+  next();
+}, _clientErrorLimiter, async (req, res) => {
+  const reporter = req._ceReporter;
   try {
-    const { message, source, lineno, colno, stack, page, userAgent } = req.body;
+    const b = (req.body && typeof req.body === 'object') ? req.body : {};
+    // ★ 모든 칸 길이 상한(Codex P2) — 화면이 보내는 모양(문자열·숫자)만 받는다.
+    const message = _ceStr(b.message, 500), source = _ceStr(b.source, 300), page = _ceStr(b.page, 300);
+    const stack = _ceStr(b.stack, 2000), userAgent = _ceStr(b.userAgent, 200);
+    const lineno = _ceNum(b.lineno), colno = _ceNum(b.colno);
     logger.error({
       message: `[ClientError] ${message}`,
       source, lineno, colno, page,
@@ -3233,7 +3274,7 @@ router.post('/client-error', authMiddleware, async (req, res) => {
     logAbnormal({
       flow: 'client', source: 'client', severity: 'warn',
       error: { message: message || 'client error', stack },
-      context: { page, source, lineno, colno, ip: req.ip, userAgent: (userAgent || req.headers['user-agent'] || '').substring(0, 120) },
+      context: { page, source, lineno, colno, ip: req.ip, userAgent: (userAgent || req.headers['user-agent'] || '').substring(0, 120), reporter },
     });
     res.json({ ok: true });
   } catch (err) {
