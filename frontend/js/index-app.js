@@ -4162,12 +4162,20 @@ function _applyHiddenCols() {
     btn.classList.toggle('is-cols-hidden', _colsHiddenActive);
     // 버튼 텍스트/아이콘 업데이트
     const iconEl = btn.querySelector('i');
+    /* ★ 2026-10-08: 관리자 화면의 #btnColVis 는 **빈 스텁**(admin.html 숨은 DOM)이라 자식 글자가 없다.
+       종전엔 없는 마지막 자식의 textContent 를 쓰다 예외가 나, 이 함수를 부른 대시보드 렌더의 뒤 단계
+       (정렬·검색 초기화·너비 감지·변경 배지)가 통째로 건너뛰어졌다(결정 186 장부 기록 결함). 글자 칸이 없으면 만든다. */
+    const setLabel = t => {
+      const last = btn.lastChild;
+      if (last && last.nodeType === 3) last.textContent = t;
+      else btn.appendChild(document.createTextNode(t));
+    };
     if (_colsHiddenActive) {
       if (iconEl) iconEl.className = 'fas fa-eye-slash';
-      btn.childNodes[btn.childNodes.length - 1].textContent = ' 열 숨김 중';
+      setLabel(' 열 숨김 중');
     } else {
       if (iconEl) iconEl.className = 'fas fa-columns';
-      btn.childNodes[btn.childNodes.length - 1].textContent = ' 열 설정';
+      setLabel(' 열 설정');
     }
   }
   // 드롭다운이 열려있으면 토글 버튼 상태도 갱신
