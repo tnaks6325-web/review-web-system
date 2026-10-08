@@ -2407,7 +2407,9 @@ function _buildOptThumbLine(row, initial) {
     '<input class="rform-input rf-opt-thumb" type="url" inputmode="url" maxlength="2048" ' +
       'placeholder="https://… 순차진행 때 이 상품이 모집 중이면 대표 사진으로 보여요(비우면 공고 사진)" ' +
       'style="flex:1;min-width:0;font-size:.72rem;padding:4px 6px">' +
-    '<label class="btn-icon-sm" title="사진 올리기" style="cursor:pointer;margin:0"><i class="fas fa-upload"></i>' +
+    '<label title="사진 파일 올리기" style="cursor:pointer;margin:0;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;' +
+      'padding:4px 8px;border:1px solid #D1D5DB;border-radius:6px;background:#fff;color:#374151;font-size:.72rem;font-weight:700">' +
+      '<i class="fas fa-upload"></i>올리기' +
       '<input type="file" accept="image/*" class="rf-opt-thumb-file" style="display:none"></label>';
   const input = line.querySelector(".rf-opt-thumb");
   const pv = line.querySelector(".rf-opt-thumb-pv");
