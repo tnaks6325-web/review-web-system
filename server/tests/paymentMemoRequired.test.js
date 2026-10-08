@@ -53,7 +53,7 @@ function load() {
     constSource('_pmNeedsMemo'), constSource('_pmOn'), constSource('_pmKey'), constSource('PM_MANAGER_NICK'),
     ...['_pmWorkKey', '_pmManagerName', '_pmManagerMatch', '_pmFilterItems', '_pmFilterState', '_pmWorkEntries',
       '_pmNormQ', '_pmMatchWork', '_pmMemoWorkEntries', '_pmMemoWorkRowsHtml', '_pmQueueMemoFix', '_pmOpenMemoWork',
-      '_pmHoldMemoWorks', '_runPendingCndFix', '_pmUnassignedWorks'].map(sourceOf),
+      '_pmHoldMemoWorks', '_runPendingCndFix', '_pmUnassignedWorks', '_pmHoldWorkEntries'].map(sourceOf),
     // 최상위 const 는 vm 컨텍스트 속성으로 안 드러난다 — 검사에서 부르도록 꺼내 둔다
     'this._pmOn=_pmOn; this._pmNeedsMemo=_pmNeedsMemo;',
   ].join('\n'), S);
@@ -157,8 +157,13 @@ test('⑤ 표: 입금명 없는 줄의 체크는 막히고, [미설정] 은 작�
   assert.match(table, /_pmNeedsMemo\(it\)\?'<input type="checkbox" disabled/);
   const rowMemo = sourceOf('_pmRowMemo');
   assert.match(rowMemo, /_pmQueueMemoFix\(it\); return _pmOpenBoard\(i\);/);
-  // 상단 경고는 담당자 범위 전체에서 센다(선택에서 빠졌다고 0 으로 꾸미지 않는다)
-  assert.match(sourceOf('_pmRender'), /const noMemo\s*=\s*_pmFilterItems\(allItems,\{manager:_pmFilterState\(\)\.manager\}\)/);
+  // 결정 217: 노란 안내 상자 대신 왼쪽 「고쳐야 고를 수 있는 작업」 줄이 건수를 말한다(선택과 무관하게 담당자 범위 전체)
+  assert.match(sourceOf('_pmMemoWorkRowsHtml'), /통장표시가 없는 건/);
+  assert.match(sourceOf('_pmMemoWorkRowsHtml'), /_pmMemoWorkEntries\(allItems,manager\)/);
+  // 입금명만 없는 작업은 오른쪽 표·보완 목록에 되풀이하지 않는다
+  assert.match(sourceOf('_pmVisibleItems'), /_pmMemoWorkEntries\(all, filter\.manager\)/);
+  // 단 그 작업의 보류 줄은 남긴다(계좌 보완 목록 건수가 사라지지 않게)
+  assert.match(sourceOf('_pmVisibleItems'), /!memo\.has\(_pmWorkKey\(it\)\) \|\| !it\.payable/);
 });
 
 test('⑥ 담당자도 입금명도 없는 작업은 "담당자 미지정" 안내에 남는다(담당자 칩을 골라도 사라지지 않게 — Codex P2)', () => {

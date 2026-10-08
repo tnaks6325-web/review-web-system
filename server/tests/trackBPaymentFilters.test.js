@@ -295,21 +295,82 @@ test('sheetless payment-date writes recover a missing saved column from workboar
   assert.match(sheetlessStatus, /raw_sheet_tabs/);
 });
 
-test('payment UI keeps the work list and selected-result panel side by side', () => {
-  assert.match(workdesk, /class="pmselectionlayout"/);
-  assert.match(workdesk, /입금 대상자 수/);
-  assert.match(workdesk, /선택 항목 서식 다운로드/);
+/* 시안 2(사용자 확정 2026-10-08 · 결정 217): 왼쪽 작업 고르기 | 오른쪽 고른 작업의 줄, 요약·서식 받기는 아래 고정 막대. */
+test('payment UI keeps the work list beside the selected rows, with a sticky summary bar', () => {
+  const render = sourceOf('_pmRender');
+  assert.match(render, /<aside class="pmv2left">\$\{_pmFilterBar\(allItems,/);
+  assert.match(render, /<div class="pmv2right">[\s\S]*\$\{_pmFixBlock\(\)\}[\s\S]*_pmTargetTable\(items\)/);
+  assert.match(render, /\$\{_pmBarHtml\(allItems\)\}/);
+  const bar = sourceOf('_pmBarHtml');
+  assert.match(bar, /입금 대상자 수/);
+  assert.match(bar, /선택 항목 서식 다운로드/);
+  // 숫자는 종전 요약과 같은 함수(사본 0) · 다운로드 대상 = 선택 작업의 체크된 항목
+  assert.match(bar, /_pmSelectedPaymentTotal\(allItems,filter,_pmOn\)/);
+  assert.match(bar, /_pmSelectedRecipientCount\(allItems,filter,_pmOn\)/);
+  assert.match(bar, /_pmFilterItems\(allItems,filter\)\.filter\(_pmOn\)/);
+  // 막대가 화면에 붙으려면 바깥 틀이 스크롤 상자를 만들면 안 된다
+  const css = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'css', 'payment-c-style.css'), 'utf8');
+  // 좌우 분할 화면에만 — 은행 이름 탭은 이 틀의 가로 스크롤이 필요하다
+  assert.match(css, /#pmbody>\.lgwrap\.pmv2wrap\{overflow:visible\}/);
+  assert.doesNotMatch(css, /#pmbody>\.lgwrap\{overflow:visible\}/);
+  assert.match(render, /class="lgwrap pmv2wrap"/);
+  assert.match(css, /#pmbody \.pmbar\{position:sticky;bottom:0/);
 });
 
 test('transfer batch history is grouped in a bordered panel', () => {
-  const paymentRender = workdesk.slice(workdesk.indexOf("$('#pmbody').innerHTML = `"), workdesk.indexOf('function _pmTargetTable'));
-  assert.match(paymentRender, /<section class="pmbatchpanel">[\s\S]*\$\{_pmBatchTable\(STATE\.pmBatches\|\|\[\]\)\}[\s\S]*<\/section>/);
+  // 결정 217: 테두리 패널은 그대로, 접고 펴는 서랍(details)이 됐다
+  assert.match(sourceOf('_pmBatchDrawerHtml'), /<details class="pmbatchpanel"[\s\S]*\$\{_pmBatchTable\(list\)\}<\/details>/);
   assert.match(workdesk, /\.pmbatchpanel\{[^}]*border:1px solid/);
 });
 
-test('transfer batch history appears directly below the payment summary cards', () => {
-  const paymentRender = workdesk.slice(workdesk.indexOf("$('#pmbody').innerHTML = `"), workdesk.indexOf('function _pmTargetTable'));
-  assert.ok(paymentRender.indexOf('<h2 class="pmh2">이체 회차</h2>') < paymentRender.indexOf('${_pmTargetTable(items)}'));
+/* ★★ 결정 217(사용자 확정 2026-10-08): 이체 회차는 줄 목록 **아래 서랍**이고, 처리할 것(결과 대기·입금일 기록 실패·
+   미확인·입금일 미기록)이 있을 때만 **자동으로 펼친다** — 결과를 안 올리면 작업 화면에 입금일이 안 찍힌다(놓치면 안 된다). */
+test('transfer batch drawer sits below the rows and opens itself when a batch needs attention', () => {
+  const render = sourceOf('_pmRender');
+  assert.ok(render.indexOf('_pmTargetTable(items)') < render.indexOf('${_pmBatchDrawerHtml()}'));
+  const sb = {};
+  vm.createContext(sb);
+  vm.runInContext(sourceOf('_pmBatchAttention'), sb);
+  const att = b => JSON.parse(JSON.stringify(sb._pmBatchAttention(b)));
+  assert.deepStrictEqual(att({ status: 'downloaded' }), ['wait']);
+  assert.deepStrictEqual(att({ status: 'applied', boardFailedCount: 2 }), ['fail']);
+  assert.deepStrictEqual(att({ status: 'applied', resultUnconfirmedCount: 1, boardRecordedCount: 5 }), ['unconfirmed']);
+  assert.deepStrictEqual(att({ status: 'applied', resultAppliedCount: 9 }), ['unrecorded']);
+  assert.deepStrictEqual(att({ status: 'applied', resultAppliedCount: 9, boardRecordedCount: 9 }), []);
+  assert.deepStrictEqual(att({ status: 'cancelled' }), []);
+  // ★ 여러 상태를 함께 가지면 전부 센다(하나로 접으면 접힌 서랍에서 두 번째 할 일이 사라진다 — Codex P2)
+  assert.deepStrictEqual(att({ status: 'applied', boardFailedCount: 1, resultUnconfirmedCount: 2 }), ['fail', 'unconfirmed']);
+  assert.deepStrictEqual(att({ status: 'applied', resultUnconfirmedCount: 1, resultAppliedCount: 3 }), ['unconfirmed', 'unrecorded']);
+  assert.match(sourceOf('_pmBatchDrawerHtml'), /_pmBatchAttention\(b\)\.includes\(k\)/);
+  const drawer = sourceOf('_pmBatchDrawerHtml');
+  // 사람이 직접 접고 편 상태가 자동 판단보다 우선(null = 자동)
+  assert.match(drawer, /STATE\.pmDrawerOpen===null \|\| STATE\.pmDrawerOpen===undefined \? _pmDrawerAuto\(\)/);
+  assert.match(drawer, /ontoggle="_pmDrawerToggle\(this\)"/);
+});
+
+/* 결정 217: 왼쪽 작업 목록 = 문제 있는 작업이 위(사용자 확정), 그 안에서는 가나다. 드래그 범위도 같은 순서. */
+test('visible work list puts works with problems first and keeps name order inside each group', () => {
+  const sb = { STATE: { pmWorkQ: '' }, _pmOn: it => it.payable };   // _pmOn 은 STATE.pmExcluded 를 보므로 스텁(이 검사는 순서만 본다)
+  vm.createContext(sb);
+  vm.runInContext(constSource('PM_MANAGER_NICK') + '\n' + ['_pmWorkKey', '_pmManagerName', '_pmManagerMatch', '_pmWorkEntries', '_pmNormQ', '_pmMatchWork', '_pmWorkFlags', '_pmVisibleWorkEntries'].map(sourceOf).join('\n')
+    + '\nconst _pmWorkHasFlag = ' + workdesk.match(/^const _pmWorkHasFlag = (.*)$/m)[1] + '\nthis._pmWorkHasFlag=_pmWorkHasFlag;', sb);
+  const row = o => Object.assign({ sheetId: 'S', manager: '만두', payable: true, warnings: [] }, o);
+  const items = [row({ tabName: 'A', tabLabel: '가' }), row({ tabName: 'B', tabLabel: '나', warnings: ['price_outlier'] }),
+    row({ tabName: 'C', tabLabel: '다' }), row({ tabName: 'D', tabLabel: '라' }), row({ tabName: 'D', tabLabel: '라', payable: false }),
+    row({ tabName: 'E', tabLabel: '마', accountMismatch: { form: {} } })];
+  const keys = JSON.parse(JSON.stringify(sb._pmVisibleWorkEntries(items, '').map(([k]) => k)));
+  assert.deepStrictEqual(keys, ['S||B', 'S||D', 'S||E', 'S||A', 'S||C']);
+  // 드래그가 같은 목록 순서를 쓴다
+  assert.match(sourceOf('_pmDragSelectWork'), /_pmVisibleWorkEntries\(/);
+});
+
+/* 결정 217: 보류만 있는 작업은 선택 목록에 못 들어가므로, 선택을 목록으로 굳혀도 표·보완 목록에서 사라지지 않게 보이는 건에 남긴다 —
+   그 줄은 _pmOn 이 아니라 다운로드·합계에는 절대 안 담긴다. */
+test('hold-only works stay visible after the selection becomes a list, and never reach the download', () => {
+  const vis = sourceOf('_pmVisibleItems');
+  assert.match(vis, /_pmHoldWorkEntries\(all, filter\.manager\)/);
+  assert.match(sourceOf('_pmDownload'), /_pmVisibleItems\(\)\.filter\(it=>it\.bank===bank && _pmOn\(it\)\)/);
+  assert.match(sourceOf('_pmMemoWorkRowsHtml'), /onclick="_pmJumpWork\(\$\{i\}\)"/);
 });
 
 test('transfer batch history shows ten rows before scrolling within its own area', () => {

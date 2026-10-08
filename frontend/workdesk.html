@@ -12217,7 +12217,22 @@ function _pmWorkEntries(items, manager, isPaymentTarget){
     .map(it=>[_pmWorkKey(it),it])).entries()]
     .sort((a,b)=>String(a[1].tabLabel||a[1].tabName||'').localeCompare(String(b[1].tabLabel||b[1].tabName||''),'ko'));
 }
-function _pmVisibleItems(){ return _pmFilterItems(STATE.pmItems||[], _pmFilterState()); }
+/* 보이는 건 = 고른 작업의 줄 + **보류만 있는 작업**의 줄(시안 2 · 사용자 확정 2026-10-08).
+   ★ 보류만 있는 작업은 고를 줄이 없어 선택 목록에 안 들어가므로, 선택을 목록으로 굳히는 순간 표·보완 목록에서
+     통째로 사라졌다(고칠 곳이 안 보이는 막다른 길). 그 줄들은 `_pmOn` 이 아니라 다운로드·합계에는 절대 안 담긴다. */
+function _pmVisibleItems(){
+  const all=STATE.pmItems||[], filter=_pmFilterState();
+  // ★ 입금명만 없는 작업은 왼쪽 「고쳐야 고를 수 있는 작업」에서만 다룬다 — 오른쪽 표·보완 목록에까지 실으면
+  //   같은 문제가 세 곳에 되풀이된다(종전 화면의 그 문제). 그 줄들은 어차피 _pmOn 이 아니다.
+  const memo=new Set(_pmMemoWorkEntries(all, filter.manager).map(([key])=>key));
+  // ★ 단 그 작업의 **보류 줄은 남긴다** — 빼면 계좌 보완 목록(한 명의를 여러 작업에 걸쳐 고치는 자리)에서 건수가 사라진다(리뷰 지적)
+  const picked=_pmFilterItems(all, filter).filter(it=>!memo.has(_pmWorkKey(it)) || !it.payable);
+  if(filter.workKeys===null) return picked;          // 전체 = 이미 다 보인다
+  const hold=new Set(_pmHoldWorkEntries(all, filter.manager).map(([key])=>key));
+  if(!hold.size) return picked;
+  const keep=new Set(picked);
+  return all.filter(it=>keep.has(it) || hold.has(_pmWorkKey(it)));   // 서버 순서 그대로
+}
 /** 담당자 칩 값 → 사람이 읽는 이름(빈 값 = 전체) */
 function _pmManagerLabel(manager){ return manager || '전체 담당자'; }
 
@@ -12336,9 +12351,48 @@ function _pmMatchWork(entry, q){
   const it=entry[1]||{};
   return _pmNormQ([it.tabLabel,it.tabName,entry[0]].filter(Boolean).join(' ')).includes(q);
 }
+/* 작업별 상태(시안 2) — 판정은 서버가 준 값 그대로 센다(payable·warnings·accountMismatch — 사본 0). */
+function _pmWorkFlags(items){
+  const m=new Map();
+  for(const it of items||[]){
+    const k=_pmWorkKey(it); let f=m.get(k);
+    if(!f) m.set(k, f={hold:0, outlier:0, acct:0});
+    if(!it.payable) f.hold++;
+    if((it.warnings||[]).includes('price_outlier')) f.outlier++;
+    if(it.accountMismatch) f.acct++;
+  }
+  return m;
+}
+const _pmWorkHasFlag = f => !!f && (f.hold+f.outlier+f.acct)>0;
+function _pmWorkFlagsHtml(f){
+  if(!_pmWorkHasFlag(f)) return '<span class="pmwflags"><span class="pmwflag ok">정상</span></span>';
+  return `<span class="pmwflags">${f.hold?`<span class="pmwflag bad" title="파일에서 빠지는 보류 줄">보류 ${f.hold}</span>`:''}${f.outlier?`<span class="pmwflag warn" title="단독 이상금액 — 같은 작업 대부분과 크게 다른 금액이 있습니다(자동으로 막지는 않음)">금액 확인 ${f.outlier}</span>`:''}${f.acct?`<span class="pmwflag warn" title="구매양식 계좌와 등록 계좌가 다른 줄">계좌 확인 ${f.acct}</span>`:''}</span>`;
+}
+/* ★ 보이는 작업 목록 = 문제 있는 작업이 위(사용자 확정 2026-10-08), 그 안에서는 종전 가나다 순.
+   드래그 범위도 이 목록 순서를 쓴다(보이는 순서와 끌어 고르는 순서가 같아야 한다). */
 function _pmVisibleWorkEntries(items, manager){
   const q=_pmNormQ(STATE.pmWorkQ);
-  return _pmWorkEntries(items,manager,_pmOn).filter(e=>_pmMatchWork(e,q));
+  const flags=_pmWorkFlags(items);
+  const bad=key=>_pmWorkHasFlag(flags.get(key))?1:0;
+  return _pmWorkEntries(items,manager,_pmOn).filter(e=>_pmMatchWork(e,q))
+    .map((e,i)=>[e,i]).sort((a,b)=>bad(b[0][0])-bad(a[0][0]) || a[1]-b[1]).map(([e])=>e);
+}
+/** 보류만 있는 작업 — 고를 줄이 하나도 없고(전부 보류) 입금명 문제도 아닌 작업. */
+function _pmHoldWorkEntries(items, manager){
+  const hasPay=new Set((items||[]).filter(it=>it.payable).map(_pmWorkKey));
+  return _pmWorkEntries(items,manager,it=>!it.payable).filter(([key])=>!hasPay.has(key));
+}
+/** [보완 ›](보류만 있는 작업) → 표에서 그 작업 묶음을 펼치고 그 자리로 이동(인덱스만 받는다) */
+function _pmJumpWork(i){
+  const key=(STATE.pmHoldWorks||[])[i]; if(!key) return;
+  const workList=$('#pmbody .pmworklist');
+  STATE.pmWorkScrollTop=workList ? workList.scrollTop : null;
+  if(STATE.pmFold) delete STATE.pmFold[key];
+  (STATE.pmFoldSeen||(STATE.pmFoldSeen=new Set())).add(key);
+  _pmRender();
+  const gi=(STATE.pmGroups||[]).indexOf(key);
+  const tr=gi>=0 ? document.querySelector('#pmbody tr.pmgrp[data-pgh="'+gi+'"]') : null;
+  if(tr) tr.scrollIntoView({block:'center'});
 }
 /** 입금명이 없어 고를 수 없는 작업 — 고를 수 있는 줄이 하나도 없고 **입금명만 정하면 대상이 되는** 작업.
  *  ★ 보류(계좌·은행)로만 빠진 작업은 여기 없다 — 입금명을 정해도 고를 게 없다(그건 보완 카드가 말한다).
@@ -12353,14 +12407,23 @@ function _pmMemoWorkEntries(items, manager){
 function _pmMemoWorkRowsHtml(allItems, manager){
   const q=_pmNormQ(STATE.pmWorkQ);
   const works=_pmMemoWorkEntries(allItems,manager).filter(e=>_pmMatchWork(e,q));
+  const holds=_pmHoldWorkEntries(allItems,manager).filter(e=>_pmMatchWork(e,q));
   STATE.pmMemoWorks=works.map(([,it])=>it);
-  if(!works.length) return '';
-  const rows=works.map(([key,it],i)=>{
+  STATE.pmHoldWorks=holds.map(([key])=>key);
+  if(!works.length && !holds.length) return '';
+  const sumOf=rows=>`${rows.length}건 · ${_pmNum(rows.reduce((sum,row)=>sum+(Number(row.amount)||0),0))}원`;
+  const memoRows=works.map(([key,it],i)=>{
     const rowItems=(allItems||[]).filter(row=>_pmWorkKey(row)===key && row.payable && _pmNeedsMemo(row));
+    const holdN=(allItems||[]).filter(row=>_pmWorkKey(row)===key && !row.payable).length;
     const label=it.tabLabel||it.tabName||key;
-    return `<button type="button" class="pmworkpick needmemo" onclick="_pmOpenMemoWork(${i})" title="입금명(통장표시)이 없어 선택할 수 없습니다 — 누르면 작업 화면에서 입금명 설정 창이 열립니다"><span class="pmworkname">${esc(label)}</span><span class="pmworkmeta">${rowItems.length}건 · ${_pmNum(rowItems.reduce((sum,row)=>sum+(Number(row.amount)||0),0))}원</span><span class="pmworkneed">입금명 필요 ›</span></button>`;
+    return `<button type="button" class="pmworkpick needmemo" onclick="_pmOpenMemoWork(${i})" title="입금명(통장표시)이 없어 선택할 수 없습니다 — 누르면 작업 화면에서 입금명 설정 창이 열립니다"><span class="pmworkmain"><span class="pmworkname">${esc(label)}</span><span class="pmwflags"><span class="pmwflag warn">입금명 필요</span>${holdN?`<span class="pmwflag bad" title="보류 줄은 오른쪽 표·보완 목록에 있습니다">보류 ${holdN}</span>`:''}</span></span><span class="pmworkmeta">통장표시가 없는 건 ${sumOf(rowItems)}</span><span class="pmworkneed">설정 ›</span></button>`;
   }).join('');
-  return `<div class="pmmemohead">입금명 미설정 ${works.length}개 — 입금명을 정해야 선택할 수 있습니다</div>${rows}`;
+  const holdRows=holds.map(([key,it],i)=>{
+    const rowItems=(allItems||[]).filter(row=>_pmWorkKey(row)===key);
+    const label=it.tabLabel||it.tabName||key;
+    return `<button type="button" class="pmworkpick needhold" onclick="_pmJumpWork(${i})" title="모든 줄이 보류라 고를 수 없습니다 — 누르면 오른쪽 표에서 그 작업을 펼쳐 보여줍니다"><span class="pmworkmain"><span class="pmworkname">${esc(label)}</span><span class="pmwflags"><span class="pmwflag bad">보류 ${rowItems.length}</span></span></span><span class="pmworkmeta">${sumOf(rowItems)}</span><span class="pmworkneed bad">보완 ›</span></button>`;
+  }).join('');
+  return `<div class="pmmemohead">고쳐야 고를 수 있는 작업 ${works.length+holds.length}개</div>${memoRows}${holdRows}`;
 }
 function _pmQueueMemoFix(w){ STATE.pendingCndFix={ sheetId:w.sheetId, tabName:w.tabName, kind:'memo' }; }
 /** [입금명 필요] 줄 → 그 작업의 작업보드 + 입금명 설정 창 예약(작업보드 열기는 `pendingTab` 계약 그대로) */
@@ -12385,11 +12448,12 @@ function _pmHoldMemoWorks(allItems){
 /* 작업 행 HTML — 전체 렌더와 검색 중 목록-only 렌더가 **같은 한 벌**을 쓴다(사본을 두면
    검색 결과 행만 모양·배선이 어긋난다). */
 function _pmWorkRowsHtml(allItems, works, selectedKeys){
+  const flags=_pmWorkFlags(allItems);
   return works.map(([key,it])=>{
     const selected=selectedKeys.has(key);
     const rowItems=(allItems||[]).filter(row=>_pmWorkKey(row)===key && _pmOn(row));
     const label=it.tabLabel||it.tabName||key;
-    return `<button type="button" class="pmworkpick ${selected?'on':''}" data-work-key="${esc(key)}" aria-pressed="${selected}" onpointerdown="_pmStartWorkDrag(event,${esc(JSON.stringify(key))})" onpointerenter="_pmDragSelectWork(event,${esc(JSON.stringify(key))})" onclick="_pmToggleWorkFromClick(${esc(JSON.stringify(key))})"><span class="pmworkname">${esc(label)}</span><span class="pmworkmeta">${rowItems.length}건 · ${_pmNum(rowItems.reduce((sum,row)=>sum+(Number(row.amount)||0),0))}원</span><span class="pmworkcheck" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><path d="m5 12 4 4L19 6"/></svg></span></button>`;
+    return `<button type="button" class="pmworkpick ${selected?'on':''}" data-work-key="${esc(key)}" aria-pressed="${selected}" onpointerdown="_pmStartWorkDrag(event,${esc(JSON.stringify(key))})" onpointerenter="_pmDragSelectWork(event,${esc(JSON.stringify(key))})" onclick="_pmToggleWorkFromClick(${esc(JSON.stringify(key))})"><span class="pmworkmain"><span class="pmworkname">${esc(label)}</span>${_pmWorkFlagsHtml(flags.get(key))}</span><span class="pmworkmeta">${rowItems.length}건 · ${_pmNum(rowItems.reduce((sum,row)=>sum+(Number(row.amount)||0),0))}원</span><span class="pmworkcheck" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><path d="m5 12 4 4L19 6"/></svg></span></button>`;
   }).join('');
 }
 function _pmWorkHintHtml(matched, total){
@@ -12420,7 +12484,7 @@ function _pmClearWorkSearch(){
   const el=$('#pmWorkQ'); if(el){ el.value=''; el.focus(); }
   _pmRenderWorkList();
 }
-function _pmFilterBar(allItems){
+function _pmFilterBar(allItems, extra){
   const filter=_pmFilterState();
   const managers=[...new Set((allItems||[]).map(it=>_pmManagerName(it.manager)).filter(Boolean))]
     .sort((a,b)=>a.localeCompare(b,'ko'));
@@ -12428,34 +12492,66 @@ function _pmFilterBar(allItems){
   const allWorkKeys=works.map(([key])=>key);
   const selectedKeys=new Set(filter.workKeys===null ? allWorkKeys : filter.workKeys.filter(key=>allWorkKeys.includes(key)));
   if(filter.workKeys!==null) filter.workKeys=[...selectedKeys];
-  const selectedItems=_pmFilterItems(allItems,filter).filter(_pmOn);
-  const selectedTotal=_pmSelectedPaymentTotal(allItems,filter,_pmOn);
-  const recipientCount=_pmSelectedRecipientCount(allItems,filter,_pmOn);
   const managerButton=(value,label)=>`<button type="button" class="pmmgr ${filter.manager===value?'on':''}" aria-pressed="${filter.manager===value}" onclick="_pmSelectManager(${esc(JSON.stringify(value))})">${esc(label)}</button>`;
   const visibleWorks=_pmVisibleWorkEntries(allItems,filter.manager);
   const searchQ=String(STATE.pmWorkQ||'');
   const workRows=_pmWorkRowsHtml(allItems,visibleWorks,selectedKeys);
   const memoRows=_pmMemoWorkRowsHtml(allItems,filter.manager);
+  const top=(extra&&extra.top)||'', bottom=(extra&&extra.bottom)||'';
+  // ★ 시안 2(사용자 확정 2026-10-08): 왼쪽 = 작업 고르기(C스타일 그대로), 합계·서식 받기는 아래 고정 막대(_pmBarHtml)
+  return `<section class="pmselect" aria-label="입금 대상 선택"><div class="pmselecthead"><strong>작업 선택</strong><span>${_pmManagerLabel(filter.manager)} · <b>선택 작업 ${selectedKeys.size}개</b><em> / 전체 ${works.length}개</em></span></div><div class="pmselectionleft"><div class="pmmanagers" role="group" aria-label="담당자 선택" title="담당자는 작업 화면(작업 조건)과 같은 값 — 작업오더의 작업담당입니다."><div class="pmsearch ${searchQ.trim()?'has':''}"><span class="pmsearchic" aria-hidden="true">🔎</span><input id="pmWorkQ" class="pmsearchin" type="search" autocomplete="off" placeholder="작업명 검색" aria-label="입금 대상 작업 검색" value="${esc(searchQ)}" oninput="_pmWorkSearch(this.value)"><button type="button" class="pmsearchx" title="검색어 지우기" aria-label="검색어 지우기" onclick="_pmClearWorkSearch()">✕</button></div>${managerButton('','전체')}${managers.map(name=>managerButton(name,name)).join('')}</div>${top}<div class="pmworkhead"><span id="pmWorkHint">${_pmWorkHintHtml(visibleWorks.length,allWorkKeys.length)}</span></div><div class="pmworklist">${workRows||(searchQ.trim()?`<div class="pmworkempty">‘${esc(searchQ.trim())}’ 와 일치하는 작업이 없습니다.</div>`:'<div class="empty">선택할 작업이 없습니다.</div>')}${memoRows}</div>${bottom}</div></section>`;
+}
+/* 아래 고정 막대 — 선택 요약 + 은행별 서식 받기(시안 2). 스크롤해도 화면 아래에 붙어 있어 표를 끝까지 보고 바로 받는다.
+   ★ 숫자·대상은 종전 요약 패널과 **같은 함수**(_pmSelectedPaymentTotal·_pmSelectedRecipientCount·_pmOn) — 사본 0.
+   ★ 다운로드 대상 = 선택된 작업들의 체크된 입금 항목만(C스타일 규칙). */
+function _pmBarHtml(allItems){
+  const filter=_pmFilterState();
+  const allWorkKeys=_pmWorkEntries(allItems,filter.manager,_pmOn).map(([key])=>key);
+  const selCount=filter.workKeys===null ? allWorkKeys.length : filter.workKeys.filter(key=>allWorkKeys.includes(key)).length;
+  const selectedItems=_pmFilterItems(allItems,filter).filter(_pmOn);
+  const selectedTotal=_pmSelectedPaymentTotal(allItems,filter,_pmOn);
+  const recipientCount=_pmSelectedRecipientCount(allItems,filter,_pmOn);
   const downloadButton=(bank,label)=>{
     const bankItems=selectedItems.filter(it=>it.bank===bank);
     return bankItems.length
       ? `<button class="btn primary pmdownload" onclick="_pmDownload('${bank}')">${label} 서식 다운로드 · ${bankItems.length}건</button>`
       : `<button class="btn pmdownload" disabled>${label} 대상 없음</button>`;
   };
-  return `<section class="pmselect" aria-label="입금 대상 선택"><div class="pmselecthead"><strong>입금 대상 선택</strong><span>${_pmManagerLabel(filter.manager)} · <b>선택 작업 ${selectedKeys.size}개</b><em> / 전체 ${works.length}개</em></span></div><div class="pmselectionlayout"><div class="pmselectionleft"><div class="pmmanagers" role="group" aria-label="담당자 선택" title="담당자는 작업 화면(작업 조건)과 같은 값 — 작업오더의 작업담당입니다."><div class="pmsearch ${searchQ.trim()?'has':''}"><span class="pmsearchic" aria-hidden="true">🔎</span><input id="pmWorkQ" class="pmsearchin" type="search" autocomplete="off" placeholder="작업명 검색" aria-label="입금 대상 작업 검색" value="${esc(searchQ)}" oninput="_pmWorkSearch(this.value)"><button type="button" class="pmsearchx" title="검색어 지우기" aria-label="검색어 지우기" onclick="_pmClearWorkSearch()">✕</button></div>${managerButton('','전체')}${managers.map(name=>managerButton(name,name)).join('')}</div><div class="pmworkhead"><strong>작업 선택</strong><span id="pmWorkHint">${_pmWorkHintHtml(visibleWorks.length,allWorkKeys.length)}</span></div><div class="pmworklist">${workRows||(searchQ.trim()?`<div class="pmworkempty">‘${esc(searchQ.trim())}’ 와 일치하는 작업이 없습니다.</div>`:'<div class="empty">선택할 작업이 없습니다.</div>')}${memoRows}</div></div><aside class="pmsummary" aria-label="선택 항목 요약"><div><div class="pmsummarytitle">선택한 입금 항목</div><p class="pmsummarycopy">선택된 작업의 체크된 입금 항목만 서식에 포함합니다.</p></div><div class="pmresultgrid"><div class="pmresult"><span>입금 대상자 수</span><strong>${recipientCount}명</strong></div><div class="pmresult total"><span>선택 항목 합계</span><strong>${_pmNum(selectedTotal)}원</strong></div></div><div class="pmdownloadtitle">선택 항목 서식 다운로드</div><div class="pmdownloads">${downloadButton('kbank','케이뱅크')}${downloadButton('hana','하나은행')}</div><p class="pmdownloadnote">은행별 서식으로 각각 내려받습니다.</p></aside></div></section>`;
+  return `<div class="pmbar"><div class="pmbarin" role="region" aria-label="선택 항목 요약"><div class="pmbarkv"><span>담당자</span><strong>${esc(_pmManagerLabel(filter.manager))}</strong></div><div class="pmbarkv"><span>선택 작업</span><strong>${selCount}개</strong></div><div class="pmbarkv"><span>입금 대상자 수</span><strong>${recipientCount}명</strong></div><div class="pmbarkv total"><span>선택 항목 합계</span><strong>${_pmNum(selectedTotal)}원</strong></div><span class="sp"></span><div class="pmdownloads" role="group" aria-label="선택 항목 서식 다운로드">${downloadButton('kbank','케이뱅크')}${downloadButton('hana','하나은행')}</div></div><p class="pmbarnote">선택된 작업의 체크된 입금 항목만 서식에 포함합니다 · 은행별 서식으로 각각 내려받습니다.</p></div>`;
+}
+/* 이체 회차 서랍(시안 2) — 처리할 것(결과 대기·입금일 기록 실패·미확인·입금일 미기록)이 있을 때만 **자동으로 펼친다**
+   (사용자 확정 2026-10-08). 접혀 있어도 머리에 그 개수를 말한다 — 결과를 안 올리면 작업 화면에 입금일이 안 찍힌다.
+   ★ 사람이 직접 접거나 편 상태(STATE.pmDrawerOpen)가 자동 판단보다 우선한다(null = 자동). */
+/* ★ 한 회차가 여러 상태를 함께 가질 수 있다(기록 실패 + 미확인 등) — 하나로 접으면 접힌 서랍 머리에서
+     두 번째 할 일이 사라진다(Codex P2). 상태마다 따로 센다. */
+function _pmBatchAttention(b){
+  if(!b || b.status==='cancelled') return [];
+  if(b.status!=='applied') return ['wait'];
+  const out=[];
+  if(Number(b.boardFailedCount)>0) out.push('fail');
+  if(Number(b.resultUnconfirmedCount)>0) out.push('unconfirmed');
+  const board=(b.boardRecordedCount||0)+(b.boardQueuedCount||0)+(b.boardSkippedCount||0)+(b.boardFailedCount||0);
+  if((b.resultAppliedCount||0)>0 && !board) out.push('unrecorded');
+  return out;
+}
+function _pmDrawerAuto(){ return (STATE.pmBatches||[]).some(b=>_pmBatchAttention(b).length>0); }
+function _pmDrawerToggle(el){
+  const auto=_pmDrawerAuto();
+  STATE.pmDrawerOpen = el.open===auto ? null : el.open;
+}
+function _pmBatchDrawerHtml(){
+  const list=STATE.pmBatches||[];
+  const n=k=>list.filter(b=>_pmBatchAttention(b).includes(k)).length;
+  const pills=[['wait','결과 대기','wait'],['fail','입금일 기록 실패','no'],['unconfirmed','미확인 이체','wait'],['unrecorded','입금일 미기록','wait']]
+    .map(([k,l,c])=>n(k)?`<span class="pmb ${c}">${l} ${n(k)}</span>`:'').join('');
+  const open = STATE.pmDrawerOpen===null || STATE.pmDrawerOpen===undefined ? _pmDrawerAuto() : !!STATE.pmDrawerOpen;
+  return `<details class="pmbatchpanel" ${open?'open':''} ontoggle="_pmDrawerToggle(this)"><summary><h2 class="pmh2">이체 회차</h2>${pills||'<span class="pmb ok">처리할 것 없음</span>'}<span class="sp"></span><span class="pmdrawerhint">최근 ${list.length}개 · 눌러서 펼치기/접기</span></summary>${_pmBatchTable(list)}</details>`;
 }
 
 function _pmRender(){
   const allItems = STATE.pmItems||[];
   _pmHoldMemoWorks(allItems);   // 선택 상태를 정한 **뒤에** 보이는 건을 뽑는다(순서 계약)
   const items = _pmVisibleItems();
-  const picked = b => items.filter(it=>it.bank===b && _pmOn(it));
-  const kb = picked('kbank'), hn = picked('hana');
-  const blocked = items.filter(it=>!it.payable);
-  // ★ 입금명 없는 건은 선택에서 빠지므로 "보이는 건"이 아니라 **담당자 범위 전체**에서 센다
-  //   (선택 목록으로 굳으면 그 작업 줄이 표에서 빠져 숫자가 0 으로 꾸며진다).
-  const noMemo  = _pmFilterItems(allItems,{manager:_pmFilterState().manager}).filter(it=>it.payable && _pmNeedsMemo(it));
-  const priceOutliers = items.filter(it=>(it.warnings||[]).includes('price_outlier'));
   // 담당자를 고른 상태에서만 뜬다 — 그 필터가 이 작업들을 가리는 순간이 곧 알려야 할 순간이다.
   const unassignedWorks = _pmFilterState().manager ? _pmUnassignedWorks(allItems) : [];
   STATE.pmFix = _pmBuildFix(items);   // 보완 창구(작업·리뷰어) — 표의 [보완] 버튼도 이 묶음을 쓴다
@@ -12467,29 +12563,22 @@ function _pmRender(){
     <button class="btn" onclick="_pmOpenDepositDateCorrection()">수동 입금일 이동</button>
     <button class="btn" onclick="_pmLoad()">새로고침</button></div>`;
 
-  const stat=(k,v,cls)=>`<div class="pmstat ${cls||''}"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+  /* ★★ 시안 2 — 좌우 분할(사용자 확정 2026-10-08 · 결정 217): 왼쪽 작업 고르기 · 오른쪽 고른 작업의 줄 ·
+     아래 고정 합계 막대 · 이체 회차는 서랍. 종전의 숫자 칸 줄과 노란 안내 상자(보류·입금명·이상금액)는 없앴다 —
+     같은 내용이 작업 줄의 상태 표시·표의 줄 표시·보완 목록에 이미 있어 3~5번씩 되풀이됐다.
+     ★ 보완 목록(_pmFixBlock)은 남긴다 — 한 명의의 계좌가 여러 작업에 걸린 경우를 한 번에 고치는 유일한 자리다(결정 111). */
   $('#pmbody').innerHTML = `
-    <div class="lgwrap" style="max-width:1400px">
+    <div class="lgwrap pmv2wrap" style="max-width:1400px">
       ${_pmTabsHtml()}
-      ${_pmFilterBar(allItems)}
-      <div class="pmstats">
-        ${stat('케이뱅크', kb.length+'건')}
-        ${stat('하나은행', hn.length+'건')}
-        ${blocked.length?stat('⚠ 보류(계좌·은행)', blocked.length+'건','warn'):''}
-        ${noMemo.length?stat('⚠ 입금명 없음', noMemo.length+'건','warn'):''}
-        ${priceOutliers.length?stat('⚠ 단독 이상금액', priceOutliers.length+'건','warn'):''}
+      <div class="pmv2">
+        <aside class="pmv2left">${_pmFilterBar(allItems,{ top: unassignedWorks.length?_pmUnassignedNoteHtml(unassignedWorks):'', bottom: _pmFinishedNoteHtml() })}</aside>
+        <div class="pmv2right">
+          ${_pmFixBlock()}
+          ${items.length||!allItems.length ? _pmTargetTable(items) : '<div class="empty">왼쪽에서 작업을 고르면 여기에 입금할 줄이 나옵니다.</div>'}
+        </div>
       </div>
-      <section class="pmbatchpanel">
-        <h2 class="pmh2">이체 회차</h2>
-        ${_pmBatchTable(STATE.pmBatches||[])}
-      </section>
-      ${_pmFinishedNoteHtml()}
-      ${blocked.length?`<div class="pmnote">⚠ <b>보류 ${blocked.length}건</b>은 파일에서 빠집니다 — 아래에서 사유를 바로 보완할 수 있습니다.</div>`:''}
-      ${noMemo.length?`<div class="pmnote">⚠ <b>통장표시가 없는 건 ${noMemo.length}건</b>은 선택할 수 없습니다(리뷰어 통장에 이름이 안 찍히므로) — 작업 선택의 <b>[입금명 필요]</b> 줄을 누르면 작업 화면에서 입금명 설정 창이 바로 열립니다.</div>`:''}
-      ${priceOutliers.length?`<div class="pmnote">⚠ <b>같은 작업의 대부분 금액과 크게 다른 단독 금액 ${priceOutliers.length}건</b>이 있습니다. 자동으로 막지는 않지만 다운로드 전에 아래의 ‘금액 확인’ 행을 검토해 주세요.</div>`:''}
-      ${unassignedWorks.length?_pmUnassignedNoteHtml(unassignedWorks):''}
-      ${_pmFixBlock()}
-      ${_pmTargetTable(items)}
+      ${_pmBatchDrawerHtml()}
+      ${_pmBarHtml(allItems)}
     </div>`;
   const workList=$('#pmbody .pmworklist');
   if(workList && Number.isFinite(STATE.pmWorkScrollTop)) workList.scrollTop=STATE.pmWorkScrollTop;
@@ -12514,6 +12603,17 @@ function _pmTargetTable(items){
   }
   STATE.pmGroups = groups.map(g=>g.key);          // 접기 토글이 참조(인덱스 → 키)
   const fold = STATE.pmFold || (STATE.pmFold={});
+  /* ★ 처음 보는 작업은 **문제 있는 작업만 펼치고 나머지는 접어 둔다**(사용자 확정 2026-10-08 — 15작업·380건을
+       다 펼치면 표가 끝없이 길다). 한 번 정한 뒤에는 사람이 접고 편 상태를 그대로 둔다(pmFoldSeen).
+     ★ 접기는 여전히 **표시 전용** — 머리줄이 선택 건수·합계를 말한다. */
+  const foldSeen = STATE.pmFoldSeen || (STATE.pmFoldSeen=new Set());
+  for(const g of groups){
+    if(foldSeen.has(g.key)) continue;
+    foldSeen.add(g.key);
+    const problem = g.items.some(it=>!it.payable || it.accountMismatch
+      || (it.warnings||[]).some(w=>w==='price_outlier' || w==='no_memo' || w==='account_form_override'));
+    if(!problem) fold[g.key]=true;
+  }
   // 그 작업의 모든 줄이 같은 값일 때만 그 값을 돌려준다(다르면 null = 줄마다 그린다)
   const same=(g,f)=>{ const v=f(g.items[0]); return g.items.every(x=>f(x)===v) ? v : null; };
 
