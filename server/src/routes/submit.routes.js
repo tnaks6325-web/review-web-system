@@ -1071,7 +1071,13 @@ router.post('/order', async (req, res, next) => {
         logger.warn(`[submit/order] 상품 선택 확인 실패 — 종전대로 접수: ${pickErr.message}`);
       }
     }
-    const orderData = { orderer: _orderer, recipient, userId, phone, address, bank, account, depositor, price, dateStr, orderNum, memo,
+    /* ★★ 구매일자가 빈 채로 오면 서버가 오늘(KST)을 채운다 — 관리자 수기 주문과 **같은 함수**(manualOrder.todayKstDateStr).
+       빈 문자열은 매퍼가 "그 칸을 지우는 쓰기"로 내보내(결정 017 — 공유 매퍼는 고치지 않는다) 작업표에 미리 적힌
+       구매일자를 지우고, 날짜별 계획 물량 계산까지 틀어진다(2026-10-08 E2E 실측). 리뷰어 화면은 항상 오늘 날짜를 보내므로
+       정상 제출은 무변화 — 화면을 거치지 않은 제출·옛 화면만 구제한다. */
+    const effectiveDateStr = String(dateStr == null ? '' : dateStr).trim()
+      || require('../services/manualOrder.service').todayKstDateStr();
+    const orderData = { orderer: _orderer, recipient, userId, phone, address, bank, account, depositor, price, dateStr: effectiveDateStr, orderNum, memo,
                         selectedOptKey: sheetOptKey, blogUrl: (holdCtx && holdCtx.blogUrl) || '',
                         /* ★ 138 — 리뷰어가 고른 **상품**은 옵션과 별개의 칸(「상품」)에 적는다.
                            옵션 칸을 비우는 위 규율은 그대로 두고, 사라지던 값을 여기로 흘려보낸다. */
