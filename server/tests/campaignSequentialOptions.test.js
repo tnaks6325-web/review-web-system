@@ -137,6 +137,9 @@ ok('균등분산: 종전대로 Σ min(일건수, 남은 정원) = 15',
     (routes.match(/computeOptionViews\(/g) || []).length >= 4);
   ok('참여·옵션 변경은 잠금 트랜잭션의 client 로 순차진행을 판정한다',
     (routes.match(/fetchSequentialCampaignIds\(client, \[id\]\)/g) || []).length === 2);
+  const manual = fs.readFileSync(path.join(__dirname, '../src/services/manualOrder.service.js'), 'utf8');
+  ok('관리자 수기 주문 상품 목록도 같은 목록 뷰를 쓴다(선택지 하나씩 판정 0)',
+    /computeOptionViews\(opts, counts, null, \{ sequential \}\)/.test(manual) && !/[^.\w]computeOptionView\(/.test(manual.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')));
   ok('대기 선택지 참여·변경 거절 사유 option_waiting', (routes.match(/reason: 'option_waiting'/g) || []).length === 2);
   const state = fs.readFileSync(path.join(__dirname, '../src/services/campaignState.service.js'), 'utf8');
   ok('하루 몫 상한 재료(_loadOptionDayCaps)도 같은 판정을 쓴다',

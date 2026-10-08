@@ -609,7 +609,7 @@ async function _loadOptionViews(db, campaignId, campState, now = new Date()) {
     [campaignId]);
   if (!rows.length) return [];
   const counts = await fetchOptionCounts(db, campaignId, now);
-  // ★ 결정 211: 순차진행 공고는 앞 선택지가 찰 때까지 뒤 선택지를 잠근다(판정 단일 출처 = computeOptionViews).
+  // ★ 결정 212: 순차진행 공고는 앞 선택지가 찰 때까지 뒤 선택지를 잠근다(판정 단일 출처 = computeOptionViews).
   const sequential = (await fetchSequentialCampaignIds(db, [campaignId])).has(String(campaignId));
   // ★ 134: 선택지별 유입가이드는 리뷰어 화면(work-detail)으로 나가는 HTML이므로 **응답 직전 재정화**
   //   (저장 시 1차 정화와 이중 적용 — §03-E 규율. 옛 행·직접 DB 수정분을 신뢰하지 않는다).
