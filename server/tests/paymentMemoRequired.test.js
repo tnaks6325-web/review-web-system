@@ -162,6 +162,8 @@ test('⑤ 표: 입금명 없는 줄의 체크는 막히고, [미설정] 은 작�
   assert.match(sourceOf('_pmMemoWorkRowsHtml'), /_pmMemoWorkEntries\(allItems,manager\)/);
   // 입금명만 없는 작업은 오른쪽 표·보완 목록에 되풀이하지 않는다
   assert.match(sourceOf('_pmVisibleItems'), /_pmMemoWorkEntries\(all, filter\.manager\)/);
+  // 단 그 작업의 보류 줄은 남긴다(계좌 보완 목록 건수가 사라지지 않게)
+  assert.match(sourceOf('_pmVisibleItems'), /!memo\.has\(_pmWorkKey\(it\)\) \|\| !it\.payable/);
 });
 
 test('⑥ 담당자도 입금명도 없는 작업은 "담당자 미지정" 안내에 남는다(담당자 칩을 골라도 사라지지 않게 — Codex P2)', () => {

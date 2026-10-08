@@ -310,7 +310,10 @@ test('payment UI keeps the work list beside the selected rows, with a sticky sum
   assert.match(bar, /_pmFilterItems\(allItems,filter\)\.filter\(_pmOn\)/);
   // 막대가 화면에 붙으려면 바깥 틀이 스크롤 상자를 만들면 안 된다
   const css = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'css', 'payment-c-style.css'), 'utf8');
-  assert.match(css, /#pmbody>\.lgwrap\{overflow:visible\}/);
+  // 좌우 분할 화면에만 — 은행 이름 탭은 이 틀의 가로 스크롤이 필요하다
+  assert.match(css, /#pmbody>\.lgwrap\.pmv2wrap\{overflow:visible\}/);
+  assert.doesNotMatch(css, /#pmbody>\.lgwrap\{overflow:visible\}/);
+  assert.match(render, /class="lgwrap pmv2wrap"/);
   assert.match(css, /#pmbody \.pmbar\{position:sticky;bottom:0/);
 });
 

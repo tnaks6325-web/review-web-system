@@ -12225,7 +12225,8 @@ function _pmVisibleItems(){
   // ★ 입금명만 없는 작업은 왼쪽 「고쳐야 고를 수 있는 작업」에서만 다룬다 — 오른쪽 표·보완 목록에까지 실으면
   //   같은 문제가 세 곳에 되풀이된다(종전 화면의 그 문제). 그 줄들은 어차피 _pmOn 이 아니다.
   const memo=new Set(_pmMemoWorkEntries(all, filter.manager).map(([key])=>key));
-  const picked=_pmFilterItems(all, filter).filter(it=>!memo.has(_pmWorkKey(it)));
+  // ★ 단 그 작업의 **보류 줄은 남긴다** — 빼면 계좌 보완 목록(한 명의를 여러 작업에 걸쳐 고치는 자리)에서 건수가 사라진다(리뷰 지적)
+  const picked=_pmFilterItems(all, filter).filter(it=>!memo.has(_pmWorkKey(it)) || !it.payable);
   if(filter.workKeys===null) return picked;          // 전체 = 이미 다 보인다
   const hold=new Set(_pmHoldWorkEntries(all, filter.manager).map(([key])=>key));
   if(!hold.size) return picked;
@@ -12413,8 +12414,9 @@ function _pmMemoWorkRowsHtml(allItems, manager){
   const sumOf=rows=>`${rows.length}건 · ${_pmNum(rows.reduce((sum,row)=>sum+(Number(row.amount)||0),0))}원`;
   const memoRows=works.map(([key,it],i)=>{
     const rowItems=(allItems||[]).filter(row=>_pmWorkKey(row)===key && row.payable && _pmNeedsMemo(row));
+    const holdN=(allItems||[]).filter(row=>_pmWorkKey(row)===key && !row.payable).length;
     const label=it.tabLabel||it.tabName||key;
-    return `<button type="button" class="pmworkpick needmemo" onclick="_pmOpenMemoWork(${i})" title="입금명(통장표시)이 없어 선택할 수 없습니다 — 누르면 작업 화면에서 입금명 설정 창이 열립니다"><span class="pmworkmain"><span class="pmworkname">${esc(label)}</span><span class="pmwflags"><span class="pmwflag warn">입금명 필요</span></span></span><span class="pmworkmeta">통장표시가 없는 건 ${sumOf(rowItems)}</span><span class="pmworkneed">설정 ›</span></button>`;
+    return `<button type="button" class="pmworkpick needmemo" onclick="_pmOpenMemoWork(${i})" title="입금명(통장표시)이 없어 선택할 수 없습니다 — 누르면 작업 화면에서 입금명 설정 창이 열립니다"><span class="pmworkmain"><span class="pmworkname">${esc(label)}</span><span class="pmwflags"><span class="pmwflag warn">입금명 필요</span>${holdN?`<span class="pmwflag bad" title="보류 줄은 오른쪽 표·보완 목록에 있습니다">보류 ${holdN}</span>`:''}</span></span><span class="pmworkmeta">통장표시가 없는 건 ${sumOf(rowItems)}</span><span class="pmworkneed">설정 ›</span></button>`;
   }).join('');
   const holdRows=holds.map(([key,it],i)=>{
     const rowItems=(allItems||[]).filter(row=>_pmWorkKey(row)===key);
@@ -12563,7 +12565,7 @@ function _pmRender(){
      같은 내용이 작업 줄의 상태 표시·표의 줄 표시·보완 목록에 이미 있어 3~5번씩 되풀이됐다.
      ★ 보완 목록(_pmFixBlock)은 남긴다 — 한 명의의 계좌가 여러 작업에 걸린 경우를 한 번에 고치는 유일한 자리다(결정 111). */
   $('#pmbody').innerHTML = `
-    <div class="lgwrap" style="max-width:1400px">
+    <div class="lgwrap pmv2wrap" style="max-width:1400px">
       ${_pmTabsHtml()}
       <div class="pmv2">
         <aside class="pmv2left">${_pmFilterBar(allItems,{ top: unassignedWorks.length?_pmUnassignedNoteHtml(unassignedWorks):'', bottom: _pmFinishedNoteHtml() })}</aside>
