@@ -12,6 +12,7 @@ const {
   fetchCampaignCounts,
   totalQuotaUsage,
   fetchOptionCounts,
+  fetchOptionCountsBatch,
   computeOptionView,
   liveOptions,
   timeStrToMinutes,
@@ -652,30 +653,15 @@ async function _fetchOptionsForCampaigns(db, ids, now = new Date()) {
   const out = new Map();
   const list = (ids || []).filter(Boolean);
   if (!list.length) return out;
-  const dayStart = kstDayStartUtc(now).toISOString();
   const { rows: optRows } = await db.query(
     `SELECT campaign_id, opt_key, pay_amount, recruit_total, daily_limit, status, product_name, unit_kind
        FROM campaign_options WHERE campaign_id = ANY($1) ORDER BY campaign_id, (status='closed'), sort_order, id`, [list]);
   if (!optRows.length) return out;
-  const { rows: cntRows } = await db.query(
-    `SELECT campaign_id, option_key,
-            COUNT(*) FILTER (WHERE status='applied'   AND expires_at > NOW())                      AS active_holds,
-            COUNT(*) FILTER (WHERE status='applied'   AND expires_at > NOW() AND applied_at >= $2)  AS today_active_holds,
-            COUNT(*) FILTER (WHERE status='submitted')                                              AS submitted,
-            COUNT(*) FILTER (WHERE status='submitted' AND submitted_at >= $2)                       AS today_submitted
-       FROM campaign_applications
-      WHERE campaign_id = ANY($1) AND option_key IS NOT NULL
-      GROUP BY campaign_id, option_key`, [list, dayStart]);
-  const cntMap = new Map(); // `${camp} ${optKey}` → cnt
-  for (const r of cntRows) {
-    cntMap.set(r.campaign_id + ' ' + r.option_key, {
-      activeHolds: Number(r.active_holds) || 0, todayActiveHolds: Number(r.today_active_holds) || 0,
-      submitted: Number(r.submitted) || 0, todaySubmitted: Number(r.today_submitted) || 0,
-    });
-  }
+  // ★ 결정 210: 선택지 카운트는 단일 출처(fetchOptionCountsBatch — 공고 밖 주문 포함)로 센다.
+  const cntBy = await fetchOptionCountsBatch(db, [...new Set(optRows.map(r => r.campaign_id))], now);
   for (const row of optRows) {
     if (!out.has(row.campaign_id)) out.set(row.campaign_id, []);
-    out.get(row.campaign_id).push({ row, cnt: cntMap.get(row.campaign_id + ' ' + row.opt_key) });
+    out.get(row.campaign_id).push({ row, cnt: (cntBy.get(row.campaign_id) || new Map()).get(row.opt_key) });
   }
   return out;
 }

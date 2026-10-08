@@ -74,7 +74,7 @@ ok('스코프 토큰은 옵션 편집 전 조기반환(레드 #4)', routes.index
 
 // ── 상태엔진 순수함수 계약 ──
 ok('computeOptionView: used=제출+유효홀드, soldout/today_done 판정', /const used = \(Number\(c\.submitted\)[\s\S]*?\+ \(Number\(c\.activeHolds\)/.test(state) && /status = 'soldout'/.test(state) && /status = 'today_done'/.test(state));
-ok('fetchOptionCounts: option_key IS NOT NULL 필터 + 시각기준 유효홀드', /WHERE campaign_id = \$1 AND option_key IS NOT NULL/.test(state) && /status='applied'\s+AND expires_at > NOW\(\)/.test(state));
+ok('fetchOptionCounts: option_key IS NOT NULL 필터 + 시각기준 유효홀드', /WHERE campaign_id = ANY\(\$1\) AND option_key IS NOT NULL/.test(state) && /status='applied'\s+AND expires_at > NOW\(\)/.test(state));
 
 // ── 마이그레이션 idempotent ──
 ok('migration 061: CREATE TABLE/INDEX IF NOT EXISTS + ADD COLUMN IF NOT EXISTS', /CREATE TABLE IF NOT EXISTS campaign_options/.test(mig) && /ADD COLUMN IF NOT EXISTS option_key/.test(mig) && /CREATE UNIQUE INDEX IF NOT EXISTS uq_campaign_options_key/.test(mig));

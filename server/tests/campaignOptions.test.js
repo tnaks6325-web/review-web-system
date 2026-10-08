@@ -126,6 +126,8 @@ async function run() {
     const captured = {};
     const mockDb = {
       async query(sql, params) {
+        // ★ 결정 210: 공고 밖 주문 조회가 뒤따른다 — 카운트 쿼리(첫 번째)만 검사한다(검사 의미 불변).
+        if (captured.sql) return { rows: [] };
         captured.sql = String(sql).replace(/\s+/g, ' ');
         captured.params = params;
         return { rows: [
@@ -137,8 +139,8 @@ async function run() {
     const m = await fetchOptionCounts(mockDb, 'camp_1', new Date('2026-07-22T05:00:00Z'));
     ok('9. fetchOptionCounts 매핑', () => {
       assert.ok(/option_key IS NOT NULL/.test(captured.sql), 'option_key NULL 제외 필터');
-      assert.ok(/GROUP BY option_key/.test(captured.sql), 'option_key GROUP BY');
-      assert.equal(captured.params[0], 'camp_1');
+      assert.ok(/GROUP BY campaign_id, option_key/.test(captured.sql), 'option_key GROUP BY');
+      assert.deepEqual(captured.params[0], ['camp_1']);
       assert.deepEqual(m.get('힙스'), { activeHolds: 2, todayActiveHolds: 1, submitted: 16, todaySubmitted: 3 });
       assert.equal(m.get('콰이어트').submitted, 5);
       assert.equal(m.get('없는옵션'), undefined);
