@@ -595,11 +595,21 @@ async function submitExternalOrder({
   } catch (e) {
     logger.warn(`[manual-order] 작업보드 큐 대상 판정 실패 — 기존 경로 유지: ${e.message}`);
   }
+  /* ★ 결정 213: 무시트 작업표는 **리뷰어 제출과 같은 길**로 줄을 고른다 — 원장이 옛 시트 방식으로
+     "다음 빈 줄"을 먼저 잡으면(sheet_row_claims) 고른 상품과 상관없이 줄이 정해져, 5번 상품 주문이
+     1번 상품 이름이 적힌 줄에 들어가고 그 이름이 그대로 남는다(e2e 실측). 원장은 시트 미러를 건너뛰고
+     작업표 기록이 상품을 보고 빈 줄을 고른다(submit.routes 의 skipSheetMirrorForWrite 와 같은 판정).
+     ★ 판정 실패 = 종전 경로(fail-open). */
+  let isSl = queuedWorkboardApply;
+  if (!queuedWorkboardApply) {
+    try { isSl = await require('../utils/sheetlessScope').isSheetless(require('../db/pool'), sheetId, tabName); }
+    catch (_) { isSl = false; }
+  }
   const ledger = await createOrderLedgerEntry({
     sheetId, tabName, gid, orderData,
     slotRowNumber: null,
     loginPhone8: p8, loginName: f.recipient || '',
-    skipSheetMirror: queuedWorkboardApply,
+    skipSheetMirror: queuedWorkboardApply || isSl,
     deferSheetlessApply: queuedWorkboardApply,
     // 작업표의 정원 밖 완성 행 허용은 이 출처가 DB에 확정돼야만 가능하다.
     // 사후 best-effort UPDATE로 두면 일시 오류 때 정상 외부모집 건이 빈 슬롯 취급된다.
@@ -643,11 +653,7 @@ async function submitExternalOrder({
   let sheetlessDone = null;
   // resolveQueuedWorkboardTarget가 이미 sheetless+승인+연결을 확인한 새 경로는 두 번째 조회에
   // 의존하지 않는다. 이 조회가 일시 실패해도 주문이 큐 없이 pending으로 고립되면 안 된다.
-  let isSl = queuedWorkboardApply;
-  if (!queuedWorkboardApply) {
-    try { isSl = await require('../utils/sheetlessScope').isSheetless(require('../db/pool'), sheetId, tabName); }
-    catch (_) { isSl = false; }
-  }
+  // (무시트 판정 isSl 은 원장 기록 전에 한 번만 한다 — 결정 213)
   if (queuedWorkboardApply) {
     try {
       await enqueue('workboard_apply', {
@@ -672,7 +678,12 @@ async function submitExternalOrder({
         loginPhone8: p8, loginName: f.recipient || '',
       });
     } catch (e) { sheetlessDone = { ok: false, reason: 'exception', message: e.message }; }
-    if (!sheetlessDone.ok) warnings.push('작업표 기록 실패(자동복구 대상): ' + (sheetlessDone.message || sheetlessDone.reason));
+    if (!sheetlessDone.ok) {
+      // ★ 원장은 시트 미러를 건너뛰어 'written' 으로 시작한다 — 실패 상태를 남겨야 자동복구가 다시 쓴다(리뷰어 제출과 같은 처리).
+      try { await markOrderMirrorFailed(ledger.orderSubmissionId, sheetlessDone.message || sheetlessDone.reason); }
+      catch (statusErr) { logger.error(`[manual-order] 작업표 실패상태 저장 실패(원장 저장은 완료): ${statusErr.message}`); }
+      warnings.push('작업표 기록 실패(자동복구 대상): ' + (sheetlessDone.message || sheetlessDone.reason));
+    }
   }
   if (ledger.sheetRow && !sheetlessDone && !queuedWorkboardApply) {
     try {

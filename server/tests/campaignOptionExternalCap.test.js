@@ -24,6 +24,9 @@ const NU_OPTS = NU.map(k => ({ opt_key: k, product_name: k }));
   ok('주문에 적힌 옵션이 정확히 같으면 그것이 먼저', () => {
     assert.equal(matchOrderOption(NU_OPTS, { selectedOptKey: NU[4], optionText: '1. HA-600FHC (누쓰쓰)' }), NU[4]);
   });
+  ok('주문에 적힌 상품이 줄에 미리 적힌 다른 상품 이름보다 앞선다(결정 213 e2e 실측)', () => {
+    assert.equal(matchOrderOption(NU_OPTS, { selectedOptKey: '', selectedProduct: NU[4], optionText: '1. HA-600FHC (누쓰쓰)', rowProduct: '1. HA-600FHC (누쓰쓰)' }), NU[4]);
+  });
   ok('여러 선택지에 걸리면 세지 않는다(모르면 세지 않음)', () => {
     assert.equal(matchOrderOption(NU_OPTS, { optionText: '누쓰쓰' }), null);
     assert.equal(matchOrderOption(NU_OPTS, { optionText: 'HA' }), null, '4글자 미만 부분 일치 금지');

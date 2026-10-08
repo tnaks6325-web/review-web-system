@@ -972,7 +972,33 @@ async function recoverUnwrittenSheetlessOrders({
         )
         AND ($2::int IS NULL OR os.submitted_at > NOW() - ($2 || ' hours')::interval)
         AND ($3::uuid[] IS NULL OR os.id = ANY($3::uuid[]))
-      ORDER BY os.submitted_at ASC
+     UNION ALL
+     /* ★ 결정 213: 작업보드 외부모집 수동제출(공고 없이 탭 단위) — 신청 기록이 없고, 무시트면 원장이 줄을 먼저 잡지
+        않아(sheet_row 없음) 일반 복구(시트 행 기준)에도 위 갈래(신청 기준)에도 걸리지 않는다. 그 탭 좌표로 다시 쓴다. */
+     SELECT os.id, os.submitted_at, os.orderer, os.recipient, os.user_id, os.phone, os.address,
+            os.bank, os.account, os.depositor, os.price, os.date_str, os.order_num,
+            os.memo, os.selected_opt_key, os.selected_product,
+            RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) AS login_phone8,
+            NULL AS owner_phone8, os.recipient AS login_name,
+            os.sheet_id AS linked_sheet_id, os.tab_name AS linked_tab_name, COALESCE(os.tab_gid, os.gid) AS linked_tab_gid,
+            tc.workboard_id
+       FROM order_submissions os
+       JOIN tab_configs tc
+         ON tc.sheet_id = os.sheet_id AND tc.tab_name = os.tab_name
+        AND COALESCE(tc.sheetless, FALSE) = TRUE
+       JOIN workboards w ON w.id = tc.workboard_id AND w.state = 'active'
+      WHERE os.deleted_at IS NULL
+        AND os.source = 'admin_external'
+        AND os.campaign_application_id IS NULL
+        AND os.sheet_row IS NULL
+        AND NOT EXISTS (SELECT 1 FROM campaign_applications ca2 WHERE ca2.order_submission_id = os.id OR ca2.late_order_id = os.id)
+        AND NOT EXISTS (
+          SELECT 1 FROM campaign_participants cp
+           WHERE cp.order_submission_id = os.id AND cp.deleted_at IS NULL
+        )
+        AND ($2::int IS NULL OR os.submitted_at > NOW() - ($2 || ' hours')::interval)
+        AND ($3::uuid[] IS NULL OR os.id = ANY($3::uuid[]))
+      ORDER BY submitted_at ASC
       LIMIT $1`, [lim, win, ids]);
 
   const result = {
