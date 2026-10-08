@@ -157,6 +157,15 @@ const OPT_ROWS = [
   });
   poolMod.query = realQuery;
 
+  await ok('무시트 작업표는 리뷰어 제출과 같은 길로 줄을 고른다 — 원장이 옛 시트 방식으로 줄을 먼저 잡지 않는다(결정 213)', async () => {
+    const src = require('fs').readFileSync(require('path').resolve(__dirname, '../src/services/manualOrder.service.js'), 'utf8');
+    const iSl = src.indexOf("isSheetless(require('../db/pool'), sheetId, tabName)");
+    const iLedger = src.indexOf('const ledger = await createOrderLedgerEntry(');
+    assert(iSl > 0 && iSl < iLedger, '무시트 판정이 원장 기록보다 먼저');
+    assert(/skipSheetMirror: queuedWorkboardApply \|\| isSl,/.test(src));
+    assert(/if \(!sheetlessDone\.ok\) \{\s*\/\/[^\n]*\n\s*try \{ await markOrderMirrorFailed\(ledger\.orderSubmissionId/.test(src), '작업표 기록 실패는 자동복구 대상으로 표시');
+  });
+
   // ── 화면 배선(정적) ──
   const fs = require('fs'), path = require('path');
   const mo = fs.readFileSync(path.resolve(__dirname, '../../frontend/js/manual-order.js'), 'utf8');

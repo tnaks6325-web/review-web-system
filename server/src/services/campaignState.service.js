@@ -1229,7 +1229,9 @@ function _normOptLabel(s) { return String(s || '').replace(/\s+/g, '').toLowerCa
 
 /**
  * 공고 밖 주문 1건 → 선택지 opt_key (모르면 null). 순수 함수.
- * 단서 순서: 주문에 적힌 옵션 → 작업표 줄의 옵션 칸 → 주문에 적힌 상품 → 작업표 줄의 상품 칸.
+ * 단서 순서: 주문에 적힌 옵션 → 주문에 적힌 상품 → 작업표 줄의 옵션 칸 → 작업표 줄의 상품 칸.
+ * ★ 주문 자체의 값(사람이 실제로 고른 것)이 줄에 미리 적힌 계획 표기보다 앞선다 — 줄 표기는 미리 깔아 둔
+ *   계획이라, 다른 상품 줄에 들어간 주문을 그 줄 이름으로 세면 엉뚱한 상품이 찬다(결정 213 e2e 실측).
  * ★★ **하나로 딱 맞을 때만** 귀속한다(정확 일치 → 없으면 4글자 이상 포함 관계). 둘 이상이 맞거나 아무것도
  *   안 맞으면 그 단서는 버린다 — 잘못 귀속하면 멀쩡한 선택지가 마감된다(모르면 세지 않는다 = 종전).
  * ★ 마감(closed) 선택지도 후보에 넣는다 — 빼면 마감된 선택지의 주문이 이름이 비슷한 다른 선택지로 붙는다.
@@ -1239,7 +1241,7 @@ function _normOptLabel(s) { return String(s || '').replace(/\s+/g, '').toLowerCa
 function matchOrderOption(options, order) {
   const all = (options || []).filter(o => o && typeof o.opt_key === 'string' && o.opt_key);
   if (!all.length || !order) return null;
-  for (const raw of [order.selectedOptKey, order.optionText, order.selectedProduct, order.rowProduct]) {
+  for (const raw of [order.selectedOptKey, order.selectedProduct, order.optionText, order.rowProduct]) {
     const c = _normOptLabel(raw);
     if (!c) continue;
     const exact = all.filter(o => c === _normOptLabel(o.opt_key) || (o.product_name && c === _normOptLabel(o.product_name)));
