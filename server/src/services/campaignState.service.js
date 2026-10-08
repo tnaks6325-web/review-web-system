@@ -1222,6 +1222,8 @@ function __resetHoldCacheForTest() { _blCache = { at: 0, carry: null, hold: null
 // 킬스위치(env): CAMPAIGN_OPTION_DAY_CAP=0 → ① 끔 · CAMPAIGN_OPTION_EXTERNAL_ORDERS=0 → ② 끔(즉시 종전).
 const OPTION_DAY_CAP_ENABLED = process.env.CAMPAIGN_OPTION_DAY_CAP !== '0';
 const OPTION_EXTERNAL_ENABLED = process.env.CAMPAIGN_OPTION_EXTERNAL_ORDERS !== '0';
+// ★ 결정 212: 인트라넷 투입방식 '순차진행' 오더의 공고는 선택지를 순서대로 연다. 끄면(=0) 즉시 종전(전부 동시에 열림).
+const SEQUENTIAL_OPTIONS_ENABLED = process.env.CAMPAIGN_SEQUENTIAL_OPTIONS !== '0';
 
 function _normOptLabel(s) { return String(s || '').replace(/\s+/g, '').toLowerCase(); }
 
@@ -1420,13 +1422,12 @@ async function _loadOptionDayCaps(db, ids, now = new Date()) {
     const out = new Map();
     if (live.size) {
       const counts = await fetchOptionCountsBatch(db, [...live.keys()], now);
+      /* ★ 결정 212: 순차진행 공고는 선택지 일건수를 쓰지 않는다(하루 몫 = 공고 일건수를 앞 선택지부터 채움)
+         → optionCapsFromViews 가 그 선택지의 하루 몫을 "남은 정원 전부"로 둔다(상한은 Σ 남은 정원 — 유한 유지). */
+      const seqIds = await fetchSequentialCampaignIds(db, [...live.keys()]);
       for (const [cid, opts] of live) {
         const cm = counts.get(cid) || new Map();
-        out.set(cid, opts.map(o => {
-          const v = computeOptionView(o, cm.get(o.opt_key), null);
-          return { key: o.opt_key, recruitTotal: v.recruitTotal, dailyLimit: v.dailyLimit,
-                   usedBefore: Math.max(0, v.used - v.todayUsed), todayUsed: v.todayUsed };
-        }));
+        out.set(cid, optionCapsFromViews(computeOptionViews(opts, cm, null, { sequential: seqIds.has(cid) })));
       }
     }
     if (sp) { try { await db.query('RELEASE SAVEPOINT opt_day_caps'); } catch (_) {} }
@@ -1435,6 +1436,36 @@ async function _loadOptionDayCaps(db, ids, now = new Date()) {
     if (sp) { try { await db.query('ROLLBACK TO SAVEPOINT opt_day_caps'); } catch (_) {} }
     return null;
   }
+}
+
+/**
+ * 목록 뷰 → 하루 몫 상한 재료. 순수 함수.
+ * ★ 결정 212(Codex P1): 순차진행 선택지는 일건수를 쓰지 않지만 **정원 상한은 유지**한다 —
+ *   일건수 자리에 정원을 넣어 그날 몫 = 남은 정원 전부(Σ 남은 정원). 0 으로 두면 optionDayCapacity 가
+ *   null(상한 없음)이 되어, 관리자가 선택지를 닫아 정원 합이 공고 총원보다 작아졌을 때 고를 선택지가 없는데
+ *   공고가 열리고 앞날 예상·작업표 날짜가 생긴다.
+ */
+function optionCapsFromViews(views) {
+  return (views || []).filter(v => v && v.status !== 'closed').map(v => ({
+    key: v.optKey, recruitTotal: v.recruitTotal,
+    dailyLimit: v.sequential ? v.recruitTotal : v.dailyLimit,
+    usedBefore: Math.max(0, v.used - v.todayUsed), todayUsed: v.todayUsed,
+  }));
+}
+
+/**
+ * 옵션 변경 판정용 카운트 — 신청자 자신의 유효 홀드를 **원래 선택지에서 뺀** 사본. 순수 함수.
+ * ★ 결정 212(Codex P1): 내 홀드가 앞 선택지의 마지막 자리를 채운 상태로 순서를 판정하면 뒤 선택지가 열린 것처럼
+ *   보여 변경이 허용되고, 변경 뒤에는 앞 선택지가 다시 비어 순서가 깨진다.
+ */
+function withoutOwnHold(countsMap, optionKey, appliedToday) {
+  const out = new Map(countsMap instanceof Map ? countsMap : []);
+  if (!optionKey || !out.has(optionKey)) return out;
+  const c = { ...out.get(optionKey) };
+  c.activeHolds = Math.max(0, (Number(c.activeHolds) || 0) - 1);
+  if (appliedToday) c.todayActiveHolds = Math.max(0, (Number(c.todayActiveHolds) || 0) - 1);
+  out.set(optionKey, c);
+  return out;
 }
 
 /** 선택지 하나가 그날 받을 수 있는 수 = min(일건수, 남은 정원). 정원 무제한이면 일건수. */
@@ -1467,10 +1498,11 @@ function optionDayCapacity(caps) {
  *            used, remaining(null=무제한), todayUsed, todayRemaining(null=제한없음),
  *            status: 'open'|'soldout'|'today_done'|'closed', selectable }
  */
-function computeOptionView(opt, cnt, campState) {
+function computeOptionView(opt, cnt, campState, viewOpts = null) {
   const c = cnt || { activeHolds: 0, todayActiveHolds: 0, submitted: 0, todaySubmitted: 0 };
   const recruitTotal = Math.max(0, Number(opt.recruit_total) || 0);
-  const dailyLimit = Math.max(0, Number(opt.daily_limit) || 0);
+  // ★ 결정 212: 순차진행이면 선택지 일건수를 쓰지 않는다(computeOptionViews 만 이 값을 넘긴다).
+  const dailyLimit = (viewOpts && viewOpts.ignoreDailyLimit) ? 0 : Math.max(0, Number(opt.daily_limit) || 0);
   // ★ 결정 210: 공고 밖 주문(외부모집 수동제출·바로 제출)도 그 선택지 자리를 쓴 것이다.
   const used = (Number(c.submitted) || 0) + (Number(c.activeHolds) || 0) + (Number(c.externalOrders) || 0);
   const todayUsed = (Number(c.todaySubmitted) || 0) + (Number(c.todayActiveHolds) || 0) + (Number(c.todayExternalOrders) || 0);
@@ -1511,6 +1543,73 @@ function computeOptionView(opt, cnt, campState) {
 }
 
 /**
+ * ★★ 결정 212 — 선택지 목록 뷰의 **단일 출처**(참여·옵션 변경·공개 목록·상세·관리자·하루 몫 상한이 모두 이것을 쓴다).
+ *
+ * 순차진행(`sequential`)이면 살아있는 선택지를 **저장 순서(sort_order)대로** 하나씩 연다:
+ *   - 맨 앞에서부터 처음으로 자리가 남은 선택지 = 지금 모집 중(`sequenceCurrent`)
+ *   - 그 뒤의 선택지 = `waiting`(고를 수 없음). 이미 정원이 찬(soldout) 뒤 선택지는 그대로 soldout.
+ *   - 선택지 일건수는 쓰지 않는다 — 하루 몫은 공고 일건수를 앞 선택지부터 채운다(사용자 확정 2026-10-08 권장안 가).
+ * ★ 순서를 걸 수 없는 공고는 종전 그대로(전부 동시에 열림):
+ *   살아있는 선택지 2개 미만 · 정원 무제한(0) 선택지가 하나라도 있음(앞이 무제한이면 뒤가 영원히 안 열린다).
+ * ★ 앞 선택지 홀드가 만료돼 자리가 다시 나면 그 선택지가 다시 "지금 모집 중"이 되고 뒤는 새 신청자에게 다시 잠긴다.
+ *   이미 뒤 선택지에 참여한 사람은 영향 없다(이 판정은 새로 고를 때만 쓰인다).
+ * @param rows      campaign_options 행 배열 — **closed 를 맨 뒤로, 나머지는 sort_order 순**으로 정렬돼 있어야 한다
+ * @param countsMap Map optKey → cnt (fetchOptionCounts)
+ * @param campState computeCampaignState 결과 또는 null
+ * @param o.sequential 연결 작업오더 투입방식이 순차진행인가(fetchSequentialCampaignIds)
+ */
+function computeOptionViews(rows, countsMap, campState, { sequential = false } = {}) {
+  const list = Array.isArray(rows) ? rows : [];
+  const cm = countsMap instanceof Map ? countsMap : new Map();
+  const live = liveOptions(list);
+  const seq = !!sequential && SEQUENTIAL_OPTIONS_ENABLED
+    && live.length >= 2 && live.every(r => Math.max(0, Number(r.recruit_total) || 0) > 0);
+  const views = list.map(r => computeOptionView(r, cm.get(r.opt_key), campState, seq ? { ignoreDailyLimit: true } : null));
+  if (!seq) return views;
+  let current = false;
+  for (const v of views) {
+    if (v.status === 'closed') continue;
+    v.sequential = true;
+    if (!current) {
+      if (v.status !== 'soldout') { v.sequenceCurrent = true; current = true; }
+      continue;
+    }
+    if (v.status !== 'soldout') { v.status = 'waiting'; v.selectable = false; }
+  }
+  return views;
+}
+
+/**
+ * 순차진행 공고 일괄 판정 → Set(campaignId). 근거 = 연결 작업오더의 투입방식(`product_distribution_mode`).
+ * ★ 짝짓기는 linkedRecruitQuota 공유 조각 한 곳(사본 금지) — 정원 폴백·유입방식과 같은 작업오더를 본다.
+ * ★★ fail-open: 조회 실패 = 빈 Set = 종전(전부 동시에 열림). 막는 기능의 오류로 참여가 막히면 안 된다.
+ *    잠금 tx 안이면 SAVEPOINT 격리(082 규율 — 실패 쿼리가 참여 tx 를 abort 시키지 않게).
+ */
+async function fetchSequentialCampaignIds(db, campaignIds) {
+  const out = new Set();
+  const ids = (Array.isArray(campaignIds) ? campaignIds : []).filter(Boolean).map(String);
+  if (!SEQUENTIAL_OPTIONS_ENABLED || !ids.length || !db || typeof db.query !== 'function') return out;
+  const inClient = typeof db.release === 'function';
+  let sp = false;
+  if (inClient) {
+    try { await db.query('SAVEPOINT seq_options'); sp = true; } catch (_) { /* tx 밖 클라이언트 */ }
+  }
+  try {
+    const { linkedWorkOrdersForCampaigns } = require('./linkedRecruitQuota.service');
+    const m = await linkedWorkOrdersForCampaigns(db, ids, ['product_distribution_mode']);
+    if (sp) await db.query('RELEASE SAVEPOINT seq_options').catch(() => {});
+    for (const [cid, r] of m) {
+      if (String((r && r.product_distribution_mode) || '').trim().toLowerCase() === 'sequential') out.add(String(cid));
+    }
+    return out;
+  } catch (e) {
+    if (sp) await db.query('ROLLBACK TO SAVEPOINT seq_options').catch(() => {});
+    try { require('../utils/logger').logger.warn(`[campaignState] 순차진행 판정 조회 실패(종전 동작): ${e.message}`); } catch (_) {}
+    return new Set();
+  }
+}
+
+/**
  * ★★ "이 공고는 옵션 공고인가" 판정의 **단일 출처** — 살아있는(마감 아닌) 옵션만 센다.
  *
  *  왜 필요한가(2026-08-07 우레온 건): 참여자가 붙은 옵션은 삭제 대신 `closed` 로 보존되는데
@@ -1537,6 +1636,10 @@ module.exports = {
   matchOrderOption,
   optionDayCapacity,
   computeOptionView,
+  computeOptionViews,
+  fetchSequentialCampaignIds,
+  optionCapsFromViews,
+  withoutOwnHold,
   liveOptions,
   dailyQuota,
   effectiveQuota,

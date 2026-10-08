@@ -68,6 +68,7 @@
     .optrow .oi .sub{font-size:.72rem;color:var(--t2);margin-top:2px}
     .optrow .obadge{font-size:.62rem;font-weight:800;border-radius:6px;padding:3px 8px;white-space:nowrap;flex-shrink:0}
     .obadge.soldout{background:#F3F4F6;color:var(--t3)}
+    .obadge.wait{background:#FFF1D6;color:#8A5A00}
     .obadge.hot{background:var(--warn-light);color:#92400E}
     .obadge.cur{background:var(--ok-light);color:#0ca678}
     /* 복합 작업(134) — 상품이 둘 이상이면 선택지를 상품별로 묶어 보여준다 */
@@ -811,6 +812,8 @@ function _optRemainText(o){
   if(_pvOpenSim() && o.status !== 'open') return '모집중 가정(미리보기)';
   if(o.status === 'soldout' || o.status === 'closed') return '마감';
   if(o.status === 'today_done') return '오늘 마감 (내일 가능)';
+  // ★ 결정 212 순차진행: 앞 상품이 마감돼야 열리는 상품
+  if(o.status === 'waiting') return (o.remaining != null ? o.remaining + '자리 · ' : '') + '앞 상품 마감 후 열림';
   const parts = [];
   parts.push(o.remaining == null ? '여유' : (o.remaining + '자리 남음'));
   if(o.todayRemaining != null) parts.push('오늘 ' + o.todayRemaining + '자리');
@@ -826,6 +829,7 @@ function _optBadgeHtml(o, isCur){
   if(_pvOpenSim()) return '';   // ★ 모집중 가정: 마감 배지를 붙이지 않는다
   if(o.status === 'soldout' || o.status === 'closed') return '<span class="obadge soldout">마감</span>';
   if(o.status === 'today_done') return '<span class="obadge soldout">오늘마감</span>';
+  if(o.status === 'waiting') return '<span class="obadge wait">대기</span>';
   if(o.remaining != null && o.remaining <= 3) return '<span class="obadge hot">임박</span>';
   return '';
 }
@@ -1367,8 +1371,10 @@ async function _doApply(optionKey, sub){
     }
     if(j.reason === 'not_registered'){ toast('리뷰어 등록 후 참여할 수 있어요'); setTimeout(()=>location.href='/search.html#register', 900); return; }
     // 옵션 관련 사유 → 옵션 상태 갱신 후 선택 시트 재오픈
-    if(['option_required','option_invalid','option_soldout','option_today_done','option_unavailable'].includes(j.reason)){
-      toast(j.reason === 'option_required' ? '참여할 옵션을 선택해주세요' : '선택한 옵션이 마감됐어요. 다른 옵션을 선택해주세요');
+    if(['option_required','option_invalid','option_soldout','option_today_done','option_unavailable','option_waiting'].includes(j.reason)){
+      toast(j.reason === 'option_required' ? '참여할 옵션을 선택해주세요'
+        : j.reason === 'option_waiting' ? '앞 상품이 마감된 뒤에 열리는 상품이에요. 지금 모집 중인 상품을 선택해주세요'
+        : '선택한 옵션이 마감됐어요. 다른 옵션을 선택해주세요');
       await loadCampaign();
       const pickable = ((_camp && _camp.options) || []).filter(o => o.selectable);
       if(pickable.length) openOptSheet();
@@ -1430,6 +1436,7 @@ async function _doChangeOption(newKey){
       await enterJoined(); // work-detail 재조회 + 구매양식 iframe 재로드(인플라이트 제출 파기 — 서버권위 TOCTOU 봉합)
       return;
     }
+    if(j.reason === 'option_waiting'){ toast('앞 상품이 마감된 뒤에 열리는 상품이에요'); await enterJoined(); return; }
     if(['option_soldout','option_today_done','option_closed','option_invalid'].includes(j.reason)){
       toast('그 옵션은 마감됐어요. 다른 옵션을 선택해주세요'); await enterJoined(); return;
     }

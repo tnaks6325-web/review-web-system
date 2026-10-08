@@ -14,6 +14,9 @@ const {
   fetchOptionCounts,
   fetchOptionCountsBatch,
   computeOptionView,
+  computeOptionViews,
+  fetchSequentialCampaignIds,
+  withoutOwnHold,
   liveOptions,
   timeStrToMinutes,
   kstDayStartUtc,
@@ -607,14 +610,30 @@ async function _loadOptionViews(db, campaignId, campState, now = new Date()) {
     [campaignId]);
   if (!rows.length) return [];
   const counts = await fetchOptionCounts(db, campaignId, now);
+  // ★ 결정 212: 순차진행 공고는 앞 선택지가 찰 때까지 뒤 선택지를 잠근다(판정 단일 출처 = computeOptionViews).
+  const sequential = (await fetchSequentialCampaignIds(db, [campaignId])).has(String(campaignId));
   // ★ 134: 선택지별 유입가이드는 리뷰어 화면(work-detail)으로 나가는 HTML이므로 **응답 직전 재정화**
   //   (저장 시 1차 정화와 이중 적용 — §03-E 규율. 옛 행·직접 DB 수정분을 신뢰하지 않는다).
-  return rows.map(r => {
-    const v = computeOptionView(r, counts.get(r.opt_key), campState);
+  return computeOptionViews(rows, counts, campState, { sequential }).map(v => {
     v.inflowGuideHtml = sanitizeGuideHtml(v.inflowGuideHtml);
     v.inflowGuideImages = sanitizeGuideImages(v.inflowGuideImages);
     return v;
   });
+}
+
+/**
+ * ★★ 결정 212 — 옵션 변경 판정 단일 출처(change-option 거절·work-detail 의 [옵션 변경] 버튼 노출이 같은 값을 본다).
+ * 신청자 자신의 홀드를 원래 선택지에서 뺀 카운트로 목록 뷰를 계산한다(순차진행 순서 우회 차단 — Codex P1).
+ * 캠페인 상태는 보지 않는다(이미 참여 중 — 종전 { state:'open' } 규율).
+ */
+async function _optionChangeViews(db, campaignId, app, now = new Date()) {
+  const { rows } = await db.query(
+    `SELECT opt_key, pay_amount, recruit_total, daily_limit, status, sort_order
+       FROM campaign_options WHERE campaign_id=$1 ORDER BY (status='closed'), sort_order, id`, [campaignId]);
+  const appliedToday = !!(app && app.applied_at && new Date(app.applied_at) >= kstDayStartUtc(now));
+  const counts = withoutOwnHold(await fetchOptionCounts(db, campaignId, now), app && app.option_key, appliedToday);
+  const sequential = (await fetchSequentialCampaignIds(db, [campaignId])).has(String(campaignId));
+  return { rows, views: computeOptionViews(rows, counts, { state: 'open' }, { sequential }) };
 }
 
 /** 참여 전 공개용 옵션 뷰: 옵션명+잔여만(금액은 참여 후 공개 원칙 — payAmount·상세카운트 제외).
@@ -629,7 +648,7 @@ function _publicOptionView(v) {
     unitKind: v.unitKind || 'option',
     remaining: v.remaining,           // null=무제한
     todayRemaining: v.todayRemaining, // null=옵션 일일제한 없음
-    status: v.status,                 // open|soldout|today_done|closed
+    status: v.status,                 // open|soldout|today_done|closed|waiting(순차진행 — 앞 선택지 마감 후 열림)
     selectable: v.selectable,
   };
 }
@@ -658,10 +677,13 @@ async function _fetchOptionsForCampaigns(db, ids, now = new Date()) {
        FROM campaign_options WHERE campaign_id = ANY($1) ORDER BY campaign_id, (status='closed'), sort_order, id`, [list]);
   if (!optRows.length) return out;
   // ★ 결정 210: 선택지 카운트는 단일 출처(fetchOptionCountsBatch — 공고 밖 주문 포함)로 센다.
-  const cntBy = await fetchOptionCountsBatch(db, [...new Set(optRows.map(r => r.campaign_id))], now);
+  const campIds = [...new Set(optRows.map(r => r.campaign_id))];
+  const cntBy = await fetchOptionCountsBatch(db, campIds, now);
+  const seqIds = await fetchSequentialCampaignIds(db, campIds);   // ★ 결정 212
   for (const row of optRows) {
     if (!out.has(row.campaign_id)) out.set(row.campaign_id, []);
-    out.get(row.campaign_id).push({ row, cnt: (cntBy.get(row.campaign_id) || new Map()).get(row.opt_key) });
+    out.get(row.campaign_id).push({ row, cnt: (cntBy.get(row.campaign_id) || new Map()).get(row.opt_key),
+      sequential: seqIds.has(String(row.campaign_id)) });
   }
   return out;
 }
@@ -1215,7 +1237,8 @@ router.get('/list', async (req, res, next) => {
       if (r.participation_mode && opts && opts.length) {
         // ★ 살아있는 옵션이 하나도 없으면(= 관리자가 옵션 구조를 정리한 공고) 옵션 자체를 노출하지 않는다 —
         //   apply 게이트와 같은 `liveOptions` 판정이라 "카드엔 옵션 N종인데 참여는 옵션을 안 받는" 불일치가 없다.
-        const optViews = opts.map(o => computeOptionView(o.row, o.cnt, view));
+        const optViews = computeOptionViews(opts.map(o => o.row), new Map(opts.map(o => [o.row.opt_key, o.cnt])), view,
+          { sequential: opts.some(o => o.sequential) });
         if (liveOptions(optViews).length) view.options = optViews.map(_publicOptionView);
       }
       return view;
@@ -1616,8 +1639,18 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
       if (app.option_key) selectedOption = options.find(o => o.optKey === app.option_key) || { optKey: app.option_key, status: 'open' };
       options = _optionListForReviewer(options);   // ★ 고른 뒤에 덜어낸다(selectedOption 은 원본 유지)
     }
-    // 옵션 변경은 유효 홀드(미제출) + 옵션 2개 이상일 때만 허용
-    const canChangeOption = validHold && options.length >= 2;
+    // 옵션 변경은 유효 홀드(미제출) + 옵션 2개 이상 + **실제로 옮겨 갈 수 있는 선택지가 있을 때만**(결정 212 · Codex P2 —
+    //   순차진행이면 나머지가 전부 대기라 시트를 열어도 고를 것이 없다). 판정 = change-option 과 같은 _optionChangeViews.
+    //   ★ 조회 실패 = 종전 규칙(옵션 2개 이상) — 버튼이 보여도 서버가 다시 판정하므로 안전한 쪽이다.
+    let canChangeOption = validHold && options.length >= 2;
+    if (canChangeOption) {
+      try {
+        const { views } = await _optionChangeViews(pool, id, app, now);
+        canChangeOption = views.some(v => v.optKey !== app.option_key && v.status === 'open');
+      } catch (e) {
+        logger.warn(`[campaign/work-detail] 옵션 변경 가능 판정 실패(종전 규칙): ${e.message}`);
+      }
+    }
 
     res.json({
       ok: true,
@@ -1702,7 +1735,7 @@ router.post('/:id/change-option', applyLimiter, async (req, res, next) => {
 
     // 내 유효 홀드(applied·미만료) 확인 — 제출완료면 변경 불가(관리자 정정 대상)
     const { rows: apps } = await client.query(
-      `SELECT id, status, expires_at, option_key FROM campaign_applications
+      `SELECT id, status, expires_at, option_key, applied_at FROM campaign_applications
         WHERE campaign_id=$1 AND phone8=$2 AND hold_token=$3 AND hold_token<>'' ORDER BY applied_at DESC LIMIT 1 FOR UPDATE`,
       [id, p8, token]);
     if (!apps.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '참여 내역이 없습니다.' }); }
@@ -1714,18 +1747,20 @@ router.post('/:id/change-option', applyLimiter, async (req, res, next) => {
     if (app.option_key === newKey) { await client.query('COMMIT'); return res.json({ ok: true, optionKey: newKey, unchanged: true }); }
 
     // 새 옵션: 활성 + 잔여/오늘 확인 (전환 대상은 자기 홀드를 포함하지 않음 = 기존 옵션에 계수돼 있음 → 순증 판정 정확)
-    const { rows: optRows } = await client.query(
-      `SELECT opt_key, pay_amount, recruit_total, daily_limit, status FROM campaign_options WHERE campaign_id=$1 AND opt_key=$2 LIMIT 1`,
-      [id, newKey]);
-    if (!optRows.length || optRows[0].status !== 'active') {
+    // ★ 결정 212: 순차진행 판정은 선택지 **전체 순서**가 있어야 하고, 내 홀드는 원래 선택지에서 뺀 상태로 본다
+    //   (내 홀드가 앞 선택지 마지막 자리를 채운 채 판정하면 뒤가 열린 것처럼 보인다 — Codex P1). 단일 출처 _optionChangeViews.
+    const { rows: allOptRows, views: changeViews } = await _optionChangeViews(client, id, app, now);
+    const target = allOptRows.find(o => o.opt_key === newKey);
+    if (!target || target.status !== 'active') {
       await client.query('ROLLBACK');
       return res.status(400).json({ ok: false, reason: 'option_invalid', error: '선택한 옵션을 찾을 수 없어요.' });
     }
-    const st = computeCampaignState(camp, (await fetchCampaignCounts(client, [id], now)).get(id), now);
-    const optCounts = await fetchOptionCounts(client, id, now);
-    const ov = computeOptionView(optRows[0], optCounts.get(newKey), { state: 'open' }); // 변경은 캠페인 open 무관(이미 참여중)
+    const ov = changeViews.find(v => v.optKey === newKey);   // 변경은 캠페인 open 무관(이미 참여중)
     if (ov.status !== 'open') {
       await client.query('ROLLBACK');
+      if (ov.status === 'waiting') {
+        return res.status(409).json({ ok: false, reason: 'option_waiting', option: _publicOptionView(ov), error: '아직 차례가 아닌 상품이에요. 앞 상품이 마감되면 열려요.' });
+      }
       const reason = ov.status === 'soldout' ? 'option_soldout' : (ov.status === 'today_done' ? 'option_today_done' : 'option_closed');
       return res.status(409).json({ ok: false, reason, option: _publicOptionView(ov), error: '선택한 옵션은 마감되었어요. 다른 옵션을 선택해주세요.' });
     }
@@ -1900,9 +1935,14 @@ async function _applyParticipation(req, res, next, campPre) {
           return res.status(400).json({ ok: false, reason: 'option_invalid', error: '선택한 옵션을 찾을 수 없어요. 새로고침 후 다시 선택해주세요.' });
         }
         const optCounts = await fetchOptionCounts(client, id, now);
-        const ov = computeOptionView(chosenOpt, optCounts.get(chosenOpt.opt_key), st);
+        // ★ 결정 212: 순차진행이면 앞 선택지가 찰 때까지 뒤 선택지는 waiting(목록 뷰 단일 출처로 계산).
+        const sequential = (await fetchSequentialCampaignIds(client, [id])).has(String(id));
+        const ov = computeOptionViews(allOpts, optCounts, st, { sequential }).find(v => v.optKey === chosenOpt.opt_key);
         if (ov.status !== 'open') {
           await client.query('ROLLBACK');
+          if (ov.status === 'waiting') {
+            return res.status(409).json({ ok: false, reason: 'option_waiting', option: _publicOptionView(ov), error: '아직 차례가 아닌 상품이에요. 앞 상품이 마감되면 열려요.' });
+          }
           const reason = ov.status === 'soldout' ? 'option_soldout' : (ov.status === 'today_done' ? 'option_today_done' : 'option_closed');
           return res.status(409).json({ ok: false, reason, option: _publicOptionView(ov), error: '선택한 옵션은 마감되었어요. 다른 옵션을 선택해주세요.' });
         }
