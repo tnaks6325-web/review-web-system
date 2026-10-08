@@ -1004,6 +1004,9 @@
   @keyframes shlFade{0%{opacity:0;transform:scale(.94)}12%{opacity:1;transform:scale(1)}55%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1)}}
   @media (prefers-reduced-motion:reduce){ #shlOk .shlbox{animation:shlFadeR 1.9s linear forwards} }
   @keyframes shlFadeR{0%{opacity:0}8%{opacity:1}60%{opacity:1}100%{opacity:0}}
+  /* 경고가 붙은 알림(광고주링크 — 결정 218) — 둘째 줄 + 읽을 시간(4.5초) */
+  #shlOk .shlbox .shlsub{display:block;margin-top:6px;font-size:12.5px;font-weight:650;color:#FDE68A;max-width:420px;line-height:1.5}
+  #shlOk .shlbox.long{animation-duration:4.5s}
   .modalov{position:fixed;inset:0;background:rgba(15,35,42,.5);z-index:200;display:flex;align-items:center;justify-content:center;padding:24px}
   .modalbox{background:var(--card);border-radius:14px;width:900px;max-width:96vw;max-height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 14px 44px rgba(0,0,0,.28)}
   .modalhd{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)} .modalhd b{font-size:14px;flex:1}
@@ -3197,17 +3200,18 @@ async function _copyText(t){
   }catch(_){ return false; }
 }
 // 화면 중앙 페이드아웃 알림 — body 직속(스크롤 컨테이너 밖) · 애니메이션 끝나면 제거(잔재 금지).
-function _shareLinkOk(msg){
+function _shareLinkOk(msg, sub){
   const prev=document.getElementById('shlOk'); if(prev) prev.remove();   // 연타 시 겹치지 않게
   const el=document.createElement('div'); el.id='shlOk';
   el.innerHTML='<div class="shlbox"></div>';
   el.firstChild.textContent=msg;   // ★ textContent — 문자열 보간 금지
+  if(sub){ const s2=document.createElement('span'); s2.className='shlsub'; s2.textContent=sub; el.firstChild.appendChild(s2); el.firstChild.classList.add('long'); }
   document.body.appendChild(el);
   const kill=()=>{ if(el.parentNode) el.remove(); };
   el.firstChild.addEventListener('animationend', kill);
-  setTimeout(kill, 2600);   // 애니메이션 이벤트가 안 와도(탭 비활성 등) 반드시 사라진다
+  setTimeout(kill, sub?5200:2600);   // 애니메이션 이벤트가 안 와도(탭 비활성 등) 반드시 사라진다
 }
-function _shareLinkPopup(title, url, copied){
+function _shareLinkPopup(title, url, copied, hint){
   let ov=document.getElementById('shlov');
   if(!ov){ ov=document.createElement('div'); ov.id='shlov'; ov.className='modalov';
     ov.addEventListener('click',e=>{ if(e.target===ov) ov.remove(); }); document.body.appendChild(ov); }
@@ -3221,7 +3225,7 @@ function _shareLinkPopup(title, url, copied){
              style="width:100%;padding:8px;font-size:12px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box">
       <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button class="btn xs pri" onclick="_shareLinkCopyAgain()">주소 복사</button>
-        <span style="font-size:11px;color:#64748b">받은 사람은 로그인하면 이 화면으로 바로 들어옵니다. 담당 범위 밖이면 열리지 않습니다.</span>
+        <span style="font-size:11px;color:#64748b">${esc(hint||'받은 사람은 로그인하면 이 화면으로 바로 들어옵니다. 담당 범위 밖이면 열리지 않습니다.')}</span>
       </div></div></div>`;
   const i=document.getElementById('shlUrl'); if(i){ i.focus(); i.select(); }
 }
@@ -3233,6 +3237,27 @@ function copyBoardLink(){ const t=STATE.cur; if(!t){ toast('작업을 먼저 여
   const m=(STATE.wd&&STATE.wd.meta)||{};
   _shareLinkCopy({ kind:'tab', sheetId:t.sheetId, tabName:t.tabName, tabGid:t.tabGid||'' },
                  '작업보드 링크 — '+(m.displayName||t.displayName||t.tabName||'')); }
+/* 작업보드 상단 [🏢 광고주링크] — 이 작업의 소유 업체(광고주)가 로그인 없이 보는 접속 링크를 즉시 복사.
+   ★ 링크는 업체관리의 「광고주 접속 링크」와 **같은 것**(업체당 하나 · /api/trackb/advertiser-link) — 새로 만들지 않는다.
+     없으면 ensure 로 만들고(기존 링크는 바꾸지 않는다 · 회전은 업체관리에서만), 폐기된 링크는 복사하지 않는다.
+   ★ 소유 업체는 **누르는 순간 서버가** 작업 좌표로 정한다(action 'for-tab' → advertiserForTab — 업체관리와 같은 판정).
+     화면에 캐시된 advertiserId 를 쓰면 업체 이관 뒤 옛 업체 링크를 복사한다(Codex 리뷰 P1). */
+async function copyAdvertiserLink(){
+  const t=STATE.cur; if(!t){ toast('작업을 먼저 여세요'); return; }
+  let r=null; try{ r=await api('/api/trackb/advertiser-link',{method:'POST',body:JSON.stringify({action:'for-tab',sheetId:t.sheetId,tabName:t.tabName})}); }catch(_){ r=null; }
+  // ★ 미지정은 서버가 advertiser:null 로 **명시**할 때만 — 필드가 없는 응답(옛 서버 등)을 미지정으로 꾸미지 않는다.
+  if(r&&r.ok&&r.advertiser===null){ alert('이 작업은 아직 업체(광고주)가 지정되지 않아 광고주 링크가 없습니다.\n업체관리에서 이 작업의 업체를 먼저 지정해 주세요.'); return; }
+  const lk=r&&r.ok&&r.link;
+  if(!lk||!lk.token){ alert('광고주 링크를 불러오지 못했습니다: '+((r&&r.error)||'서버 오류')); return; }
+  const name=(r.advertiser&&r.advertiser.name)||'업체';
+  if(lk.active===false){ alert(`"${name}" 광고주 링크는 폐기된 상태라 복사하지 않았습니다.\n업체관리 → ${name} → 광고주 접속 링크에서 [다시 활성] 후 사용하세요.`); return; }
+  const url=_advLinkUrl(lk.token);
+  // ★ 성공 알림에도 노출 범위를 말한다 — 경고가 마우스 올림(title)에만 있으면 터치 화면·평소 경로에서 못 본다(Codex 리뷰 P2).
+  if(await _copyText(url)){ _shareLinkOk(`"${name}" 광고주 링크가 복사되었습니다`,
+    '이 업체의 모든 작업(리뷰어 연락처·주소 포함)이 보이니 광고주에게만 전달하세요'); return; }
+  _shareLinkPopup('광고주 링크 — '+name, url, false,
+    '이 링크를 아는 사람은 로그인 없이 이 업체의 모든 작업(리뷰어 연락처·주소 포함)을 볼 수 있습니다. 광고주에게만 전달하세요.');
+}
 // 홈 작업목록 [🔗 링크] — 그 줄 작업의 공유 주소. 작업보드를 열지 않고 목록에서 바로 복사한다.
 //   ★ 인덱스만 넘긴다(시트에서 온 작업명을 onclick 문자열에 넣으면 따옴표 하나로 탈출된다).
 function copyTaskLinkFromHome(i){ const t=(STATE.tabs||[])[i]; if(!t){ toast('작업을 찾지 못했습니다'); return; }
@@ -6735,6 +6760,8 @@ function renderWorkdesk(wd){
   const workdeskTitle=m.displayName||STATE.cur.displayName||STATE.cur.tabName;
   // [🔗 링크 복사] — 인수인계 때 상대가 검색으로 찾아 들어가던 것을 주소 한 줄로 대신한다(내부 역할만).
   const shareBtn=STATE.role==='advertiser'?'':`<button class="btn" type="button" onclick="copyBoardLink()" title="이 작업보드로 바로 가는 고유 주소를 복사합니다. 메신저로 보내면 받은 사람이 로그인 후 이 화면으로 바로 들어옵니다(담당 범위 밖에는 열리지 않습니다).">🔗 링크 복사</button>`;
+  // [🏢 광고주링크] — 이 작업의 업체(광고주)가 로그인 없이 보는 주소를 바로 복사(내부 역할만 — 서버 게이트 internalMiddleware 와 1:1).
+  const advLinkBtn=_isInternalRole()?`<button class="btn" type="button" onclick="copyAdvertiserLink()" title="이 작업의 업체(광고주)가 로그인 없이 보는 광고주 링크를 복사합니다. 이 업체의 모든 작업(리뷰어 연락처·주소 포함)이 보이니 광고주에게만 전달하세요.">🏢 광고주링크</button>`:'';
   const planBtn=STATE.role==='advertiser'?'':`<button class="btn" type="button" onclick="openCurrentCampaignDailyPlan()" title="연결된 모집공고의 날짜별 모집인원을 조절합니다. 저장하면 무시트 작업표의 미배정 행도 같은 날짜 계획으로 재배치됩니다.">📅 모집인원 조절</button>`;
   /* [🗒 로그] — 이 작업에 무슨 일이 있었나(주문·취소·리뷰·편집·정원·정산·시스템 한 타임라인).
      ★ 내부 역할만 — 리뷰어 실명·연락처가 실린다(서버 게이트와 1:1).
@@ -6743,6 +6770,7 @@ function renderWorkdesk(wd){
   $('#main').innerHTML=`<div class="mh mh-wb"><span class="mh-title"><h1 class="${canEdit?'ttl-ed':''}" title="${esc(workdeskTitle)}${canEdit?' — 눌러서 작업명 수정':''}"${canEdit?' onclick="editWorkdeskTitle()"':''}>${esc(workdeskTitle)}</h1>${canEdit?'<button class="mh-title-edit" type="button" title="작업명 수정" aria-label="작업명 수정" onclick="editWorkdeskTitle()">✎</button>':''}</span>
     ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}${wd.archived?'<span class="bd">*마감 · 열람 전용</span>':''}${warn.join('')}
     ${wd.archived?'':shareBtn}
+    ${wd.archived?'':advLinkBtn}
     ${wd.archived?'':planBtn}
     ${logBtn}
     ${wd.archived?'':_finBarHtml()}
