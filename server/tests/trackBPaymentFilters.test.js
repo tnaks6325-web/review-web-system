@@ -178,7 +178,10 @@ test('unassigned-manager works get a nudge banner only while a specific manager 
 
 test('the unassigned-manager helper is work-level, computed the same way as the manager chips', () => {
   const helper = sourceOf('_pmUnassignedWorks');
-  assert.match(helper, /_pmWorkEntries\(items,'',_pmOn\)/);
+  // ★ 이체 대상(보류·제외 아님) 기준 — 입금명 미설정도 담는다(결정 216: _pmOn 으로 거르면 담당자·입금명이
+  //   둘 다 없는 작업이 담당자 칩을 고르는 순간 어디에도 안 보인다). 검사 의미는 강화(입금명 갈래 추가).
+  assert.match(helper, /_pmWorkEntries\(items,'',it=>it\.payable && !STATE\.pmExcluded\[_pmKey\(it\)\]\)/);
+  assert.doesNotMatch(helper, /_pmWorkEntries\(items,'',_pmOn\)/);
   assert.match(helper, /!_pmManagerName\(it\.manager\)/);
 });
 

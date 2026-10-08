@@ -53,7 +53,7 @@ function load() {
     constSource('_pmNeedsMemo'), constSource('_pmOn'), constSource('_pmKey'), constSource('PM_MANAGER_NICK'),
     ...['_pmWorkKey', '_pmManagerName', '_pmManagerMatch', '_pmFilterItems', '_pmFilterState', '_pmWorkEntries',
       '_pmNormQ', '_pmMatchWork', '_pmMemoWorkEntries', '_pmMemoWorkRowsHtml', '_pmQueueMemoFix', '_pmOpenMemoWork',
-      '_pmHoldMemoWorks', '_runPendingCndFix'].map(sourceOf),
+      '_pmHoldMemoWorks', '_runPendingCndFix', '_pmUnassignedWorks'].map(sourceOf),
     // 최상위 const 는 vm 컨텍스트 속성으로 안 드러난다 — 검사에서 부르도록 꺼내 둔다
     'this._pmOn=_pmOn; this._pmNeedsMemo=_pmNeedsMemo;',
   ].join('\n'), S);
@@ -159,4 +159,12 @@ test('⑤ 표: 입금명 없는 줄의 체크는 막히고, [미설정] 은 작�
   assert.match(rowMemo, /_pmQueueMemoFix\(it\); return _pmOpenBoard\(i\);/);
   // 상단 경고는 담당자 범위 전체에서 센다(선택에서 빠졌다고 0 으로 꾸미지 않는다)
   assert.match(sourceOf('_pmRender'), /const noMemo\s*=\s*_pmFilterItems\(allItems,\{manager:_pmFilterState\(\)\.manager\}\)/);
+});
+
+test('⑥ 담당자도 입금명도 없는 작업은 "담당자 미지정" 안내에 남는다(담당자 칩을 골라도 사라지지 않게 — Codex P2)', () => {
+  const S = load();
+  const items = [row({ tabName: 'NOMGR', manager: '', warnings: ['no_memo'] }), row({ tabName: 'OK' })];
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(S._pmUnassignedWorks(items).map(([k]) => k))), ['S1||NOMGR']);
+  // 보류 줄만 있는 작업은 종전처럼 제외
+  assert.strictEqual(S._pmUnassignedWorks([row({ manager: '', payable: false })]).length, 0);
 });

@@ -12225,7 +12225,9 @@ function _pmManagerLabel(manager){ return manager || '전체 담당자'; }
  *  안 잡혀 화면에서 사라진다. A안(사용자 확정 2026-08-24): 문구만 알리고 버튼 구성(C스타일)은
  *  건드리지 않되, 그 작업의 작업보드로 바로 보내 [관리자 수정]에서 작업담당을 정하도록 유도한다. */
 function _pmUnassignedWorks(items){
-  return _pmWorkEntries(items,'',_pmOn).filter(([,it])=>!_pmManagerName(it.manager));
+  // ★ 입금명 미설정 작업도 담는다(_pmOn 이 아니라 "이체 대상인가" 기준) — _pmOn 으로 거르면 담당자도 입금명도
+  //   없는 작업이 담당자 칩을 고르는 순간 선택 목록·이 안내·입금명 집계 어디에도 안 보인다(Codex P2, 결정 216).
+  return _pmWorkEntries(items,'',it=>it.payable && !STATE.pmExcluded[_pmKey(it)]).filter(([,it])=>!_pmManagerName(it.manager));
 }
 const _PM_UNASSIGNED_SHOW=5;
 /** ⚠ 담당자 미지정 안내 — **특정 담당자를 고른 상태에서만** 보인다(그 필터가 이 작업들을 가린다는
