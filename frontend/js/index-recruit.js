@@ -2126,7 +2126,7 @@ function _applyProdModeUi(m) {
   // 버튼은 두 모드 모두 "상품 추가" — none 이면 상품 한 줄, opt 이면 상품 그룹(옵션은 그룹 안에서 추가)
   const add = document.getElementById("rf_opt_addbtn");
   if (add) add.innerHTML = '<i class="fas fa-plus"></i> 상품 추가';
-  // ★ 결정 213(Codex P2): 옵션 없는 작업 모드는 선택지 원장을 저장하지 않는다 → 상품 사진 줄을 숨긴다(올려도 버려지는 막다른 길 방지)
+  // ★ 결정 214(Codex P2): 옵션 없는 작업 모드는 선택지 원장을 저장하지 않는다 → 상품 사진 줄을 숨긴다(올려도 버려지는 막다른 길 방지)
   document.querySelectorAll("#rf_opt_rows .rf-opt-thumb-line").forEach(l => { l.style.display = m === "opt" ? "flex" : "none"; });
 }
 /** 옵션 유무 선택 바로 아래 한 줄 안내. 진행상품 수가 아직 없으면 기본 1건으로 안내한다. */
@@ -2395,7 +2395,7 @@ function _syncRecruitTotalCells() {
  *   전부 후손 조회라 그대로 동작한다. 삭제만 껍데기를 지운다(가이드가 고아로 남지 않게).
  */
 /**
- * ★ 결정 213 — 선택지(상품)별 사진 줄. 순차진행 공고에서 이 상품이 "지금 모집 중"이면 리뷰어 화면의 대표 사진이 된다.
+ * ★ 결정 214 — 선택지(상품)별 사진 줄. 순차진행 공고에서 이 상품이 "지금 모집 중"이면 리뷰어 화면의 대표 사진이 된다.
  * 비우면 공고 대표 사진을 그대로 쓴다. 주소 붙여넣기 또는 [올리기](공고 썸네일과 같은 업로드 창구).
  * 입력칸은 row._thumbEl 로 잇는다(readOptRows 가 읽는다 — 행 밖 줄이라 row.querySelector 로는 안 잡힌다).
  */
@@ -2507,7 +2507,7 @@ function _buildOptRowEl(data) {
      "옵션별 유입가이드에 대한 공간을 확보해줘"). 패널·저장 로직(`_ugBuild`/`_ugLoad`/`_ugCompose`)은
      한 글자도 안 바꾼다 — 바뀐 건 **입구를 찾기 쉽게** 만드는 것뿐이다(사본 0). */
   unitEl.appendChild(row);
-  unitEl.appendChild(_buildOptThumbLine(row, d.thumbnailUrl ?? d.thumbnail_url ?? ""));   // ★ 결정 213: 상품 사진
+  unitEl.appendChild(_buildOptThumbLine(row, d.thumbnailUrl ?? d.thumbnail_url ?? ""));   // ★ 결정 214: 상품 사진
   const ugKey = _ugNewKey();
   row.dataset.ig = ugKey;
   _ugRegister(ugKey, "선택지 유입가이드");
@@ -2607,7 +2607,7 @@ function renderOptRows(options, opts) {
       reviewTypeMix: o.reviewTypeMix ?? o.review_type_mix ?? [],
       inflowGuideHtml: o.inflowGuideHtml ?? o.inflow_guide_html ?? "",
       inflowGuideImages: o.inflowGuideImages ?? o.inflow_guide_images ?? [],
-      thumbnailUrl: o.thumbnailUrl ?? o.thumbnail_url ?? "",   // ★ 결정 213
+      thumbnailUrl: o.thumbnailUrl ?? o.thumbnail_url ?? "",   // ★ 결정 214
       status:      o.status === "closed" ? "closed" : "active",
     };
   }));
@@ -2755,7 +2755,7 @@ function readOptRows() {
       reviewTypeMix: typeof _readOptionReviewMix === "function" ? _readOptionReviewMix(r) : [],
       inflowGuideHtml: guide.html,
       inflowGuideImages: guide.images,
-      // ★ 결정 213: 상품 사진(빈 값 = 공고 사진). 이 화면은 항상 보낸다 — 지운 것도 저장된다.
+      // ★ 결정 214: 상품 사진(빈 값 = 공고 사진). 이 화면은 항상 보낸다 — 지운 것도 저장된다.
       thumbnailUrl:  String((r._thumbEl && r._thumbEl.value) || "").trim(),
       status:        r.dataset.status === "closed" ? "closed" : "active",   // ★ 마감상태 보존(리뷰 #1)
     });
@@ -5690,7 +5690,7 @@ async function saveRecruitPostImpl() {
     if (_quotaSkipped) {
       _changed.unshift("⚠ 총건수·일건수는 건드리지 않았습니다 — 현재 값을 불러오지 못해 그대로 두었습니다");
     }
-    /* ★ 결정 213(Codex P2 배포 시차): 화면이 먼저 배포되고 서버가 아직 옛 버전이면 상품 사진이 조용히 버려진다
+    /* ★ 결정 214(Codex P2 배포 시차): 화면이 먼저 배포되고 서버가 아직 옛 버전이면 상품 사진이 조용히 버려진다
        → 사진을 보냈는데 서버가 "상품 사진 저장을 안다"는 표시를 주지 않았으면 다시 저장하라고 알린다. */
     if (saved && saved.optionThumbnails !== true && Array.isArray(payload.options)
         && payload.options.some(o => o && o.thumbnailUrl)) {

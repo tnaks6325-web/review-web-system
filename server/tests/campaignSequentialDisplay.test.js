@@ -1,5 +1,5 @@
 /**
- * campaignSequentialDisplay.test.js — 순차진행 공고의 제목·사진을 지금 모집 중인 상품으로 바꾸기 (결정 213 · 사용자 확정 2026-10-08)
+ * campaignSequentialDisplay.test.js — 순차진행 공고의 제목·사진을 지금 모집 중인 상품으로 바꾸기 (결정 214 · 사용자 확정 2026-10-08)
  * 실행: node tests/campaignSequentialDisplay.test.js
  *
  * 규칙: ① 제목 안의 상품 이름 부분만 바꾼다(앞에 붙인 "빈)))" 같은 표시는 유지)

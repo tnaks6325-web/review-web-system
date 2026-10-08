@@ -1598,7 +1598,7 @@ function _isSingleProductUnitCampaign(j){
 
 // 참여 후: 내가 고른 옵션 카드(+변경 버튼) — 옵션 미등록·단일상품 캠페인은 숨김
 function renderJoinedOption(j){
-  // ★ 결정 213: 순차진행 공고 — 참여 전 제목은 지금 모집 중 상품으로 바뀌므로, 참여 후에는 내가 고른 상품 제목으로 고정
+  // ★ 결정 214: 순차진행 공고 — 참여 전 제목은 지금 모집 중 상품으로 바뀌므로, 참여 후에는 내가 고른 상품 제목으로 고정
   if(j && j.joinedDisplay && j.joinedDisplay.title) $('hdTitle').textContent = j.joinedDisplay.title;
   const box = $('joinedOptionBox');
   const so = j && j.selectedOption;

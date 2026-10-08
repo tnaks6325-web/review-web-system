@@ -45,7 +45,7 @@ vm.createContext(sandbox);
 vm.runInContext(functionSource(routes, '_normOptKey'), sandbox);
 vm.runInContext(functionSource(routes, '_optNum'), sandbox);
 vm.runInContext(functionSource(routes, '_normalizeOptionUrl'), sandbox);
-vm.runInContext(functionSource(routes, '_normalizeOptionThumb'), sandbox);   // ★ 결정 213: 상품 사진 정규화(_normalizeOptionsInput 의존)
+vm.runInContext(functionSource(routes, '_normalizeOptionThumb'), sandbox);   // ★ 결정 214: 상품 사진 정규화(_normalizeOptionsInput 의존)
 vm.runInContext(functionSource(routes, '_normalizeOptionsInput'), sandbox);
 assert.equal(sandbox._normalizeOptionUrl('https://store.example/item?option=blue'), 'https://store.example/item?option=blue');
 assert.equal(sandbox._normalizeOptionUrl('javascript:alert(1)'), '');
@@ -73,7 +73,7 @@ assert.deepEqual(normalizedOptions, [{
   reviewMixError: null,
   sortOrder: 0,
   status: null,
-  thumbnailUrl: null,   // ★ 결정 213: 미전달 = null = 저장된 상품 사진 유지
+  thumbnailUrl: null,   // ★ 결정 214: 미전달 = null = 저장된 상품 사진 유지
   thumbError: false,
 }]);
 

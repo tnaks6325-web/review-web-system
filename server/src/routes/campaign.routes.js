@@ -23,7 +23,7 @@ const {
   kstTodayAt,
 } = require('../services/campaignState.service');
 const { deriveSchedules, tabsOfCampaigns, scheduleFor, describeTabDates } = require('../services/campaignSchedule.service');
-const { sequentialDisplay, joinedDisplay } = require('../utils/sequentialDisplay');   // ★ 결정 213
+const { sequentialDisplay, joinedDisplay } = require('../utils/sequentialDisplay');   // ★ 결정 214
 const { sanitizeWorkDetail, sanitizeGuideHtml, sanitizeGuideImages, GUIDE_IMAGE_FIELDS } = require('../utils/sanitizeGuideHtml');
 const { isActiveEditor } = require('../services/reviewerCampaignEditor.service');
 const {
@@ -204,7 +204,7 @@ function _normalizeOptionUrl(value) {
 }
 
 /**
- * ★ 결정 213: 선택지별 사진 주소 — `<img src>` 로 그대로 나가므로 **https 만**, 공백·따옴표·꺾쇠 없는 2048자 이내.
+ * ★ 결정 214: 선택지별 사진 주소 — `<img src>` 로 그대로 나가므로 **https 만**, 공백·따옴표·꺾쇠 없는 2048자 이내.
  * 미전달(undefined) = null = 저장된 값 유지(구버전 화면이 저장해도 사진이 지워지지 않게). '' = 지움. 형식 불량 = ''(지움 아님 — 아래 save 가 판정).
  */
 function _normalizeOptionThumb(value) {
@@ -233,7 +233,7 @@ function _normalizeOptionsInput(arr) {
       // ★★ 이름 바꾸기(rename): 이 줄이 원래 어떤 선택지였는지(저장된 opt_key). 없으면 '' = 종전 동작.
       prevOptKey: _normOptKey(obj.prevOptKey ?? obj.prev_opt_key) || '',
       optionUrl: _normalizeOptionUrl(obj.optionUrl ?? obj.option_url ?? obj.url),
-      // ★ 결정 213: 선택지별 사진(3상태 — null 유지 · '' 지움 · https 주소). 형식 불량은 thumbError 로 거절.
+      // ★ 결정 214: 선택지별 사진(3상태 — null 유지 · '' 지움 · https 주소). 형식 불량은 thumbError 로 거절.
       thumbnailUrl: _normalizeOptionThumb(obj.thumbnailUrl !== undefined ? obj.thumbnailUrl : obj.thumbnail_url),
       thumbError: _normalizeOptionThumb(obj.thumbnailUrl !== undefined ? obj.thumbnailUrl : obj.thumbnail_url) === undefined
         && (obj.thumbnailUrl !== undefined || obj.thumbnail_url !== undefined),
@@ -260,7 +260,7 @@ function _normalizeOptionsInput(arr) {
   return out;
 }
 
-/** ★ 결정 213: 선택지 사진 주소 형식 불량 → 저장 거절 문구(없으면 ''). */
+/** ★ 결정 214: 선택지 사진 주소 형식 불량 → 저장 거절 문구(없으면 ''). */
 function _optionThumbError(options) {
   const bad = (Array.isArray(options) ? options : []).filter(o => o && o.thumbError).map(o => o.optKey);
   return bad.length ? `상품 사진은 https 로 시작하는 이미지 주소여야 합니다: ${bad.join(', ')}` : '';
@@ -675,13 +675,13 @@ function _publicOptionView(v) {
     todayRemaining: v.todayRemaining, // null=옵션 일일제한 없음
     status: v.status,                 // open|soldout|today_done|closed|waiting(순차진행 — 앞 선택지 마감 후 열림)
     selectable: v.selectable,
-    // ★ 결정 213: 선택지별 사진·지금 모집 중 표시(민감정보 아님 — 참여 전 카드가 쓴다)
+    // ★ 결정 214: 선택지별 사진·지금 모집 중 표시(민감정보 아님 — 참여 전 카드가 쓴다)
     thumbnailUrl: v.thumbnailUrl || '',
     sequenceCurrent: v.sequenceCurrent === true,
   };
 }
 
-/** ★ 결정 213: 순차진행 공고의 참여 전 제목·사진을 지금 모집 중인 상품으로 바꾼다(단일 출처 utils/sequentialDisplay).
+/** ★ 결정 214: 순차진행 공고의 참여 전 제목·사진을 지금 모집 중인 상품으로 바꾼다(단일 출처 utils/sequentialDisplay).
  *  저장된 제목·사진은 baseTitle·baseThumbnailUrl 로 남긴다(관리자 화면·되돌리기 참고용). 순차진행이 아니면 무변경. */
 function _applySequentialDisplay(view, optViews) {
   const d = sequentialDisplay({ title: view.title, thumbnailUrl: view.thumbnail_url }, optViews);
@@ -1284,7 +1284,7 @@ router.get('/list', async (req, res, next) => {
           { sequential: opts.some(o => o.sequential) });
         if (liveOptions(optViews).length) {
           view.options = optViews.map(_publicOptionView);
-          _applySequentialDisplay(view, optViews);   // ★ 결정 213
+          _applySequentialDisplay(view, optViews);   // ★ 결정 214
         }
       }
       return view;
@@ -1565,7 +1565,7 @@ async function getCampaignDetail(req, res, next) {
       const opts = await _loadOptionViews(pool, id, view, now);
       if (liveOptions(opts).length) {
         view.options = opts.map(_publicOptionView);
-        _applySequentialDisplay(view, opts);   // ★ 결정 213
+        _applySequentialDisplay(view, opts);   // ★ 결정 214
       }
     }
     res.json({ ok: true, data: view, serverNow: now.toISOString() });
@@ -1688,7 +1688,7 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
       if (app.option_key) selectedOption = options.find(o => o.optKey === app.option_key) || { optKey: app.option_key, status: 'open' };
       options = _optionListForReviewer(options);   // ★ 고른 뒤에 덜어낸다(selectedOption 은 원본 유지)
     }
-    // ★ 결정 213: 순차진행 공고는 참여 전 제목·사진이 "지금 모집 중" 상품으로 바뀐다 → 참여한 사람에게는
+    // ★ 결정 214: 순차진행 공고는 참여 전 제목·사진이 "지금 모집 중" 상품으로 바뀐다 → 참여한 사람에게는
     //   **내가 고른 상품**의 제목·사진으로 고정해 준다(나중에 다음 상품이 열려도 바뀌지 않게). 순차 아님 = null(종전).
     // ★ Codex P2: 순차 판정은 **공고 기준**(선택지 중 하나라도 sequential) — 내가 고른 선택지를 관리자가 닫으면
     //   그 선택지 뷰에는 sequential 표시가 없어 지금 모집 상품 제목으로 잘못 남는다.
@@ -1722,7 +1722,7 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
       options,               // [{ optKey, payAmount, remaining, todayRemaining, status, selectable, ... }]
       selectedOption,        // 내가 참여한 옵션(잠금표시·구매양식 고정용)
       canChangeOption,
-      joinedDisplay: joinedView,   // ★ 결정 213: { title, thumbnailUrl } | null
+      joinedDisplay: joinedView,   // ★ 결정 214: { title, thumbnailUrl } | null
       workDetail,                                                // HTML은 응답 직전 방어적 재정화
       inflowType,                                                 // 'guide' | 'link' | '' — 랜딩 버튼 게이트
       cashReceipt: await _cashReceiptInfo(camp),                  // 현영 탭만 {required, businessNo, guideImageUrl} — 아니면 null
@@ -3034,7 +3034,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         logger.warn('[campaign/create] 달력 프리필 실패(공고는 발행됨): ' + e.message);
       }
     }
-    res.json({ ok: true, optionThumbnails: true /* ★ 결정 213: 상품 사진 저장을 아는 서버(배포 시차 판별) */, data: rows[0], options: await _loadOptionsRaw(pool, rows[0].id),
+    res.json({ ok: true, optionThumbnails: true /* ★ 결정 214: 상품 사진 저장을 아는 서버(배포 시차 판별) */, data: rows[0], options: await _loadOptionsRaw(pool, rows[0].id),
       feeSchedules: await _loadFeeSchedules(pool, rows[0].id),
       ...(optionsWarning ? { optionsWarning } : {}), ...(feeWarning ? { feeWarning } : {}),
       ...(quotaSync ? { quotaSync } : {}),
@@ -3537,7 +3537,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     const worktableRelay = rows[0].participation_mode
       ? await require('../services/campaignPlan.service').relayCampaignWorktable(id, { by: req.admin?.name || 'admin' })
       : null;
-    res.json({ ok: true, optionThumbnails: true /* ★ 결정 213: 상품 사진 저장을 아는 서버(배포 시차 판별) */, data: rows[0], options: await _loadOptionsRaw(pool, id),
+    res.json({ ok: true, optionThumbnails: true /* ★ 결정 214: 상품 사진 저장을 아는 서버(배포 시차 판별) */, data: rows[0], options: await _loadOptionsRaw(pool, id),
       ...(worktableRelay ? { worktableRelay } : {}),
       feeSchedules: await _loadFeeSchedules(pool, id),
       ...(optionsWarning ? { optionsWarning } : {}), ...(feeWarning ? { feeWarning } : {}),

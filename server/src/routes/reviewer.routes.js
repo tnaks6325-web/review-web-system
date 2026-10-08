@@ -34,7 +34,7 @@ const { boundedReviewRead } = require('../services/boundedReviewRead.service');
 
 
 /**
- * ★ 결정 213: 순차진행 공고의 "참여 중" 내역은 **내가 고른 상품**의 제목·사진으로 고정한다.
+ * ★ 결정 214: 순차진행 공고의 "참여 중" 내역은 **내가 고른 상품**의 제목·사진으로 고정한다.
  * (참여 전 화면은 지금 모집 중 상품으로 바뀌므로, 공고 저장 제목을 그대로 쓰면 다른 상품 이름이 보일 수 있다.)
  * 판정·치환 단일 출처 = utils/sequentialDisplay.joinedDisplay · 순차 판정 = campaignState.fetchSequentialCampaignIds.
  * ★ fail-soft — 조회 실패면 종전(공고 제목·사진) 그대로.
@@ -731,7 +731,7 @@ router.get('/my-status', async (req, res, next) => {
          ORDER BY ca.applied_at DESC
          LIMIT 20
       `, [phoneList, ownerReviewerId, restrictParticipant, participantIdentityId]);
-      await _applyJoinedDisplay(holdRows);   // ★ 결정 213: 순차진행 공고는 내가 고른 상품의 제목·사진으로 고정
+      await _applyJoinedDisplay(holdRows);   // ★ 결정 214: 순차진행 공고는 내가 고른 상품의 제목·사진으로 고정
       for (const h of holdRows) {
         items.unshift({
           id: `hold-${h.id}`,
@@ -1270,7 +1270,7 @@ router.get('/review-earnings', async (req, res, next) => {
               os.review_fee_snapshot AS "feeSnapshot", os.delivery_review_fee_mix_snapshot AS "deliveryReviewFeeMixSnapshot",
               os.submitted_at AS "orderedAt", cp.row_json AS "rowJson",
               COALESCE(rc.review_fee, 0) AS "reviewFee", rc.delivery_review_fee_mix AS "deliveryReviewFeeMix",
-              -- ★ 결정 213: 내가 고른 선택지에 사진이 있으면 그 사진(없으면 공고 대표 사진 — 종전)
+              -- ★ 결정 214: 내가 고른 선택지에 사진이 있으면 그 사진(없으면 공고 대표 사진 — 종전)
               COALESCE(NULLIF(co.thumbnail_url, ''), rc.thumbnail_url) AS "thumbnailUrl",
               to_char(rc.start_date, 'YYYY-MM-DD') AS "campStartDate"
          FROM earnings_orders os
