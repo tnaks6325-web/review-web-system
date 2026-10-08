@@ -332,10 +332,59 @@ async function confirmExternalApplication(client, {
  * 한 건 제출. 리뷰어 등록/연결 → 원장 기록 → (참여형이면) 정원 차감 → 시트 큐 등록.
  * @returns {{ok:boolean, orderSubmissionId?:string, sheetRow?:number, warnings:string[], error?:string, ...}}
  */
+/**
+ * ★ 결정 211: 작업보드(공고 없이 탭 단위)로 연 수동제출 창이 고를 **상품(선택지) 목록**.
+ * 그 탭에 연결된 참여형 공고(보관·마감 아님, 살아 있는 선택지 보유)가 **하나로 정해질 때만** 돌려준다
+ * (둘 이상이면 그중 active 하나, 그래도 못 정하면 null = 종전처럼 고르는 칸 없음).
+ * 남은 자리는 공고 화면과 같은 판정(fetchOptionCounts + computeOptionView — 공고 밖 주문 포함, 결정 210).
+ * ★ fail-open null — 목록을 못 그려도 접수는 종전대로 된다.
+ * @returns {null | { campaignId, choices: [{optKey, productName, unitKind, recruitTotal, used, remaining, todayRemaining, status}] }}
+ */
+async function tabOptionChoices(db, { sheetId, tabName } = {}, now = new Date()) {
+  if (!db || !sheetId || !tabName) return null;
+  try {
+    const { rows: camps } = await db.query(
+      `SELECT rc.id, rc.status FROM recruit_campaigns rc
+         LEFT JOIN tab_configs tc ON tc.sheet_id = $1 AND tc.tab_name = $2
+        WHERE rc.participation_mode AND rc.archived_at IS NULL AND COALESCE(rc.status, '') <> 'closed'
+          AND rc.linked_sheet_id = $1
+          AND (rc.linked_tab_name = $2 OR (COALESCE(tc.tab_gid, '') <> '' AND rc.linked_tab_gid = tc.tab_gid))
+          AND EXISTS (SELECT 1 FROM campaign_options o
+                       WHERE o.campaign_id = rc.id AND COALESCE(o.status, 'active') <> 'closed')`,
+      [sheetId, tabName]);
+    let pick = camps.length === 1 ? camps[0] : null;
+    if (!pick && camps.length > 1) {
+      const act = camps.filter(c => c.status === 'active');
+      if (act.length === 1) pick = act[0];
+    }
+    if (!pick) return null;
+    const { rows: opts } = await db.query(
+      `SELECT opt_key, product_name, unit_kind, recruit_total, daily_limit, status
+         FROM campaign_options WHERE campaign_id = $1 AND COALESCE(status, 'active') <> 'closed'
+        ORDER BY sort_order, id`, [pick.id]);
+    if (!opts.length) return null;
+    const { fetchOptionCounts, computeOptionView } = require('./campaignState.service');
+    const counts = await fetchOptionCounts(db, pick.id, now);
+    return {
+      campaignId: pick.id,
+      choices: opts.map(o => {
+        const v = computeOptionView(o, counts.get(o.opt_key), null);
+        return { optKey: o.opt_key, productName: v.productName, unitKind: v.unitKind,
+                 recruitTotal: v.recruitTotal, used: v.used, remaining: v.remaining,
+                 todayRemaining: v.todayRemaining, status: v.status };
+      }),
+    };
+  } catch (e) {
+    logger.warn(`[manual-order] 상품 목록 조회 실패(무시 — 고르는 칸 없이 종전대로): ${e.message}`);
+    return null;
+  }
+}
+
 async function submitExternalOrder({
   sheetId, tabName, gid, fields, campaignId, optionKey, targetApplicationId, adminName, allowOverCapacity = true, force = false,
   allowOverDaily = false, allowRepurchase = false,
   repurchaseDaysOverride,
+  optionCampaignId = null,   // ★ 결정 211: 작업보드 경로(campaignId 없음)에서 고른 상품을 풀이할 연결 공고(정원 차감·신청 생성 없음)
 }) {
   const warnings = [];
   const f = fields || {};
@@ -501,14 +550,18 @@ async function submitExternalOrder({
   /* ★ 138 선택 상품 — 옵션 칸을 비우는 위 규율은 그대로 두고, 그 상품명을 **별개의 「상품」 칸**으로
      흘려보낸다(리뷰어 제출 경로와 같은 규율). 같은 왕복에서 읽으므로 쿼리 순증 0. */
   let resolvedProduct = '';
-  if (resolvedOptKey && campaignId) {
+  const optionLookupCampaign = campaignId || optionCampaignId || null;
+  if (resolvedOptKey && optionLookupCampaign) {
     try {
       const { rows: u } = await pool.query(
         `SELECT unit_kind, product_name FROM campaign_options WHERE campaign_id = $1 AND opt_key = $2 LIMIT 1`,
-        [campaignId, resolvedOptKey]);
+        [optionLookupCampaign, resolvedOptKey]);
       if (u.length) {
         resolvedProduct = String(u[0].product_name || '');
         if (String(u[0].unit_kind || '') === 'product') resolvedOptKey = '';
+      } else if (!campaignId) {
+        // ★ 작업보드 경로: 그 공고에 없는 이름은 쓰지 않는다(옵션 칸에 엉뚱한 값이 남지 않게 — 종전처럼 비움).
+        resolvedOptKey = '';
       }
     } catch (_) { /* fail-open: 종전 동작 */ }
   }
@@ -670,6 +723,7 @@ async function submitExternalOrder({
 }
 
 module.exports = {
+  tabOptionChoices,
   submitExternalOrder,
   dailyRemainingForCampaign,
   ensureExternalReviewer,

@@ -11,7 +11,7 @@ const router = express.Router();
 const pool = require('../db/pool');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const { parseSlashForm } = require('../utils/slashForm');
-const { submitExternalOrder, dailyRemainingForCampaign } = require('../services/manualOrder.service');
+const { submitExternalOrder, dailyRemainingForCampaign, tabOptionChoices } = require('../services/manualOrder.service');
 const { checkRepurchaseWindowBatch, phone8Of, resolveCampaignRepurchaseDays } = require('../utils/repurchaseGuard');
 const { logger } = require('../utils/logger');
 
@@ -62,8 +62,15 @@ router.post('/preview', authMiddleware, adminOrMasterMiddleware, async (req, res
     }
   }
 
+  // ★ 결정 211: 작업보드 경로(공고 없이 탭 단위)면 그 탭에 연결된 공고의 상품(선택지) 목록을 함께 싣는다.
+  //   공고 화면 경로(campaignId 있음)는 종전대로(신청 선택이 옵션을 정한다).
+  const b = req.body || {};
+  const optCtx = (!b.campaignId && b.sheetId && b.tabName)
+    ? await tabOptionChoices(pool, { sheetId: String(b.sheetId), tabName: String(b.tabName) }) : null;
+
   res.json({
     ok: true, items,
+    optionChoices: optCtx ? optCtx.choices : [],
     truncated: all.length > MAX_LINES ? all.length - MAX_LINES : 0,
     okCount: items.filter(i => i.ok).length,
     errCount: items.filter(i => !i.ok).length,
@@ -128,8 +135,15 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
       }
     }
 
+    /* ★ 결정 211: 작업보드 경로의 상품(선택지) — 연결 공고가 하나로 정해지면 줄마다 고른 상품을 검증한다.
+       ★ 새 화면(optionAware)만 "안 고름·마감 미확인"을 막는다 — 옛 화면(배포 직후 캐시)은 종전대로 접수
+         (이미 산 주문의 기록이 비는 쪽이 더 나쁘다 — 오늘 몫 초과와 같은 규율). 상품이 하나뿐이면 자동. */
+    const optionAware = b.optionAware === true;
+    const optCtx = !campaignId ? await tabOptionChoices(pool, { sheetId, tabName }) : null;
+
     const adminName = (req.admin && req.admin.name) || '';
     const results = [];
+    const optTaken = new Map();   // ★ 이 묶음 안에서 상품별로 이미 받은 줄 수 — 남은 자리를 묶음 전체로 본다(Codex 리뷰)
     for (let i = 0; i < items.length; i++) {
       const it = items[i] || {};
       const f = it.fields || {};
@@ -146,12 +160,38 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
         results.push({ index: i, ok: false, error: `전화번호 자릿수가 이상합니다 (${pd.length}자리)`, name: f.recipient || '' });
         continue;
       }
+      // ★ 작업보드 경로에서 상품 목록을 못 읽었으면 화면 값을 쓰지 않는다(검증 못 한 이름이 옵션 칸에 남지 않게 = 종전).
+      let itemOptKey = campaignId ? (it.optionKey || '') : '';
+      let itemOver = false;
+      if (optCtx) {
+        const live = optCtx.choices;
+        const asked = String(it.optionKey || '');
+        // ★ 상품 1개 자동은 **고른 값이 비었을 때만** — 고른 상품이 그사이 사라졌는데 남은 하나로 바꿔 넣지 않는다.
+        const ch = asked ? live.find(c => c.optKey === asked) : (live.length === 1 ? live[0] : null);
+        if (optionAware && !ch) {
+          results.push({ index: i, ok: false, reason: asked ? 'option_unavailable' : 'option_required', name: f.recipient || '',
+            error: asked ? '고른 상품을 더 이상 고를 수 없습니다(마감·삭제) — 다시 열어 골라 주세요' : '상품(옵션)을 골라 주세요' });
+          continue;
+        }
+        if (ch) {
+          const n = (optTaken.get(ch.optKey) || 0) + 1;
+          itemOver = ch.remaining != null && n > ch.remaining;
+          if (optionAware && itemOver && it.optionFullAck !== true) {
+            results.push({ index: i, ok: false, reason: 'option_full_confirm', name: f.recipient || '',
+              error: `이 상품의 남은 자리(${ch.remaining})를 넘습니다 — 확인 체크 후 다시 제출해 주세요` });
+            continue;
+          }
+          optTaken.set(ch.optKey, n);
+        }
+        itemOptKey = ch ? ch.optKey : '';
+      }
       try {
         const r = await submitExternalOrder({
           sheetId, tabName, gid: gid || '',
           fields: f,
           campaignId: campaignId || null,
-          optionKey: it.optionKey || '',
+          optionCampaignId: optCtx ? optCtx.campaignId : null,
+          optionKey: itemOptKey,
           // 참여형 수동확정은 전화번호만으로 홀드를 고르지 않는다. 관리자가 선택한 신청 ID를
           // 서버가 캠페인·명의와 함께 다시 검증한다(재참여 직후 새 홀드 오확정 방지).
           targetApplicationId: it.targetApplicationId || null,
@@ -165,6 +205,10 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
         //   이번에 문제가 된 상태(정원을 넘긴 줄 모름)가 그대로 되돌아온다.
         if (allowOverDaily && r && r.ok) {
           r.warnings = (r.warnings || []).concat('오늘 모집인원을 초과해 접수했습니다(관리자 확인됨)');
+        }
+        if (r && r.ok && itemOver) {
+          const ch = optCtx.choices.find(c => c.optKey === itemOptKey);
+          r.warnings = (r.warnings || []).concat(`남은 자리가 없는 상품(${ch ? (ch.unitKind === 'option' ? ch.optKey : (ch.productName || ch.optKey)) : itemOptKey})에 정원을 넘겨 접수했습니다(관리자 확인됨)`);
         }
         results.push({ index: i, name: f.recipient || '', ...r });
       } catch (e) {
