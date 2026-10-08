@@ -13,7 +13,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const {
-  computeOptionViews, fetchSequentialCampaignIds, optionDayCapacity,
+  computeOptionViews, fetchSequentialCampaignIds, optionDayCapacity, optionCapsFromViews, withoutOwnHold,
 } = require('../src/services/campaignState.service');
 
 let passed = 0;
@@ -88,12 +88,28 @@ v = computeOptionViews(rows, counts(), { state: 'daily_done' }, { sequential: tr
 ok('공고 오늘 마감: 은갈치 status open 이지만 selectable false', v[0].status === 'open' && !v[0].selectable && v[1].status === 'waiting');
 
 console.log('\n[8] 공고 하루 몫 상한(결정 210)과의 연결');
-const capsOf = vs => vs.map(x => ({ key: x.optKey, recruitTotal: x.recruitTotal, dailyLimit: x.dailyLimit,
-  usedBefore: Math.max(0, x.used - x.todayUsed), todayUsed: x.todayUsed }));
-ok('순차진행: 선택지 일건수를 안 쓰므로 하루 몫 상한 없음(공고 일건수 15가 그대로)',
-  optionDayCapacity(capsOf(computeOptionViews(rows, counts(), null, { sequential: true }))) === null);
+const capsOf = vs => optionCapsFromViews(vs);
+ok('순차진행: 선택지 일건수 대신 남은 정원 전부 — 상한 Σ 남은 정원 30(공고 일건수 15가 실제 몫을 정함)',
+  optionDayCapacity(capsOf(computeOptionViews(rows, counts(), null, { sequential: true }))) === 30);
+ok('순차진행 상한은 유한하다 — 관리자가 은갈치를 닫으면 남은 두 선택지 정원 합 20 (Codex P1: null 이면 고를 것 없는데 열림)',
+  optionDayCapacity(capsOf(computeOptionViews([rows[1], rows[2], { ...rows[0], status: 'closed' }], counts(), null, { sequential: true }))) === 20);
+ok('순차진행 상한: 이미 찬 선택지는 0 — 옥돔·고등어만 남으면 20',
+  optionDayCapacity(capsOf(computeOptionViews(rows, new Map([['1. 은갈치', { submitted: 10, todaySubmitted: 0 }]]), null, { sequential: true }))) === 20);
 ok('균등분산: 종전대로 Σ min(일건수, 남은 정원) = 15',
   optionDayCapacity(capsOf(computeOptionViews(rows, counts(), null, { sequential: false }))) === 15);
+
+console.log('\n[8-2] 옵션 변경 — 내 홀드를 원래 선택지에서 빼고 판정 (Codex P1)');
+// 은갈치 확정 9 + 내 홀드 1 = 10(가득) → 내 홀드를 빼면 은갈치 1자리가 남는다 → 옥돔으로 바꾸면 순서가 깨진다
+const mine = counts(9, 0, 0, { a: { activeHolds: 1, todayActiveHolds: 1 } });
+v = computeOptionViews(rows, mine, OPEN, { sequential: true });
+ok('그대로 보면 은갈치 가득 → 옥돔이 열린 것처럼 보인다(이게 우회 경로)', v[1].status === 'open');
+v = computeOptionViews(rows, withoutOwnHold(mine, '1. 은갈치', true), OPEN, { sequential: true });
+ok('내 홀드를 빼면 은갈치 1자리 남음 → 옥돔은 대기 = 변경 거절', v[0].status === 'open' && v[1].status === 'waiting');
+const w = withoutOwnHold(mine, '1. 은갈치', false);
+ok('withoutOwnHold: 원본을 바꾸지 않고, 오늘 신청이 아니면 오늘 홀드는 그대로', mine.get('1. 은갈치').activeHolds === 1
+  && w.get('1. 은갈치').activeHolds === 0 && w.get('1. 은갈치').todayActiveHolds === 1);
+ok('withoutOwnHold: 0 아래로 내려가지 않고, 모르는 선택지면 그대로', withoutOwnHold(counts(), '1. 은갈치', true).get('1. 은갈치').activeHolds === 0
+  && withoutOwnHold(mine, '없는키', true).get('1. 은갈치').activeHolds === 1);
 
 (async () => {
   console.log('\n[9] 순차진행 판정 조회 — 연결 작업오더 투입방식');
@@ -135,15 +151,20 @@ ok('균등분산: 종전대로 Σ min(일건수, 남은 정원) = 15',
     !/[^.\w]computeOptionView\(/.test(routes.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')));
   ok('목록 뷰 단일 출처 computeOptionViews 를 4곳(상세 공용·목록·옵션 변경·참여)에서 쓴다',
     (routes.match(/computeOptionViews\(/g) || []).length >= 4);
-  ok('참여·옵션 변경은 잠금 트랜잭션의 client 로 순차진행을 판정한다',
-    (routes.match(/fetchSequentialCampaignIds\(client, \[id\]\)/g) || []).length === 2);
+  ok('참여는 잠금 트랜잭션의 client 로 순차진행을 판정한다',
+    (routes.match(/fetchSequentialCampaignIds\(client, \[id\]\)/g) || []).length === 1);
+  ok('옵션 변경은 _optionChangeViews(잠금 client · 내 홀드 제외) 단일 출처', /_optionChangeViews\(client, id, app, now\)/.test(routes)
+    && /withoutOwnHold\(await fetchOptionCounts\(db, campaignId, now\), app && app\.option_key, appliedToday\)/.test(routes)
+    && /SELECT id, status, expires_at, option_key, applied_at FROM campaign_applications/.test(routes));
+  ok('[옵션 변경] 버튼은 실제로 옮겨 갈 선택지가 있을 때만(같은 판정) — Codex P2',
+    /_optionChangeViews\(pool, id, app, now\)[\s\S]{0,120}canChangeOption = views\.some\(v => v\.optKey !== app\.option_key && v\.status === 'open'\)/.test(routes));
   const manual = fs.readFileSync(path.join(__dirname, '../src/services/manualOrder.service.js'), 'utf8');
   ok('관리자 수기 주문 상품 목록도 같은 목록 뷰를 쓴다(선택지 하나씩 판정 0)',
     /computeOptionViews\(opts, counts, null, \{ sequential \}\)/.test(manual) && !/[^.\w]computeOptionView\(/.test(manual.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')));
   ok('대기 선택지 참여·변경 거절 사유 option_waiting', (routes.match(/reason: 'option_waiting'/g) || []).length === 2);
   const state = fs.readFileSync(path.join(__dirname, '../src/services/campaignState.service.js'), 'utf8');
   ok('하루 몫 상한 재료(_loadOptionDayCaps)도 같은 판정을 쓴다',
-    /_loadOptionDayCaps[\s\S]*?fetchSequentialCampaignIds\(db,[\s\S]*?computeOptionViews\(opts, cm, null, \{ sequential/.test(state));
+    /_loadOptionDayCaps[\s\S]*?fetchSequentialCampaignIds\(db,[\s\S]*?optionCapsFromViews\(computeOptionViews\(opts, cm, null, \{ sequential/.test(state));
 
   console.log('\n[12] 화면 — 대기 상태·거절 사유를 처리한다');
   const camp = fs.readFileSync(path.join(__dirname, '../../frontend/campaign.html'), 'utf8');

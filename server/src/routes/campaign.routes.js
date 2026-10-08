@@ -16,6 +16,7 @@ const {
   computeOptionView,
   computeOptionViews,
   fetchSequentialCampaignIds,
+  withoutOwnHold,
   liveOptions,
   timeStrToMinutes,
   kstDayStartUtc,
@@ -620,6 +621,21 @@ async function _loadOptionViews(db, campaignId, campState, now = new Date()) {
   });
 }
 
+/**
+ * ★★ 결정 212 — 옵션 변경 판정 단일 출처(change-option 거절·work-detail 의 [옵션 변경] 버튼 노출이 같은 값을 본다).
+ * 신청자 자신의 홀드를 원래 선택지에서 뺀 카운트로 목록 뷰를 계산한다(순차진행 순서 우회 차단 — Codex P1).
+ * 캠페인 상태는 보지 않는다(이미 참여 중 — 종전 { state:'open' } 규율).
+ */
+async function _optionChangeViews(db, campaignId, app, now = new Date()) {
+  const { rows } = await db.query(
+    `SELECT opt_key, pay_amount, recruit_total, daily_limit, status, sort_order
+       FROM campaign_options WHERE campaign_id=$1 ORDER BY (status='closed'), sort_order, id`, [campaignId]);
+  const appliedToday = !!(app && app.applied_at && new Date(app.applied_at) >= kstDayStartUtc(now));
+  const counts = withoutOwnHold(await fetchOptionCounts(db, campaignId, now), app && app.option_key, appliedToday);
+  const sequential = (await fetchSequentialCampaignIds(db, [campaignId])).has(String(campaignId));
+  return { rows, views: computeOptionViews(rows, counts, { state: 'open' }, { sequential }) };
+}
+
 /** 참여 전 공개용 옵션 뷰: 옵션명+잔여만(금액은 참여 후 공개 원칙 — payAmount·상세카운트 제외).
  *  ★ 134: 선택지 묶음 머리에 쓸 상품명·단위 종류는 공개(민감정보 아님 — 참여 전 카드에서
  *    "상품A의 옵션1 / 상품A의 옵션2 / 상품B" 를 구분해 보여줘야 한다).
@@ -663,7 +679,7 @@ async function _fetchOptionsForCampaigns(db, ids, now = new Date()) {
   // ★ 결정 210: 선택지 카운트는 단일 출처(fetchOptionCountsBatch — 공고 밖 주문 포함)로 센다.
   const campIds = [...new Set(optRows.map(r => r.campaign_id))];
   const cntBy = await fetchOptionCountsBatch(db, campIds, now);
-  const seqIds = await fetchSequentialCampaignIds(db, campIds);   // ★ 결정 211
+  const seqIds = await fetchSequentialCampaignIds(db, campIds);   // ★ 결정 212
   for (const row of optRows) {
     if (!out.has(row.campaign_id)) out.set(row.campaign_id, []);
     out.get(row.campaign_id).push({ row, cnt: (cntBy.get(row.campaign_id) || new Map()).get(row.opt_key),
@@ -1623,8 +1639,18 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
       if (app.option_key) selectedOption = options.find(o => o.optKey === app.option_key) || { optKey: app.option_key, status: 'open' };
       options = _optionListForReviewer(options);   // ★ 고른 뒤에 덜어낸다(selectedOption 은 원본 유지)
     }
-    // 옵션 변경은 유효 홀드(미제출) + 옵션 2개 이상일 때만 허용
-    const canChangeOption = validHold && options.length >= 2;
+    // 옵션 변경은 유효 홀드(미제출) + 옵션 2개 이상 + **실제로 옮겨 갈 수 있는 선택지가 있을 때만**(결정 212 · Codex P2 —
+    //   순차진행이면 나머지가 전부 대기라 시트를 열어도 고를 것이 없다). 판정 = change-option 과 같은 _optionChangeViews.
+    //   ★ 조회 실패 = 종전 규칙(옵션 2개 이상) — 버튼이 보여도 서버가 다시 판정하므로 안전한 쪽이다.
+    let canChangeOption = validHold && options.length >= 2;
+    if (canChangeOption) {
+      try {
+        const { views } = await _optionChangeViews(pool, id, app, now);
+        canChangeOption = views.some(v => v.optKey !== app.option_key && v.status === 'open');
+      } catch (e) {
+        logger.warn(`[campaign/work-detail] 옵션 변경 가능 판정 실패(종전 규칙): ${e.message}`);
+      }
+    }
 
     res.json({
       ok: true,
@@ -1709,7 +1735,7 @@ router.post('/:id/change-option', applyLimiter, async (req, res, next) => {
 
     // 내 유효 홀드(applied·미만료) 확인 — 제출완료면 변경 불가(관리자 정정 대상)
     const { rows: apps } = await client.query(
-      `SELECT id, status, expires_at, option_key FROM campaign_applications
+      `SELECT id, status, expires_at, option_key, applied_at FROM campaign_applications
         WHERE campaign_id=$1 AND phone8=$2 AND hold_token=$3 AND hold_token<>'' ORDER BY applied_at DESC LIMIT 1 FOR UPDATE`,
       [id, p8, token]);
     if (!apps.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '참여 내역이 없습니다.' }); }
@@ -1721,21 +1747,15 @@ router.post('/:id/change-option', applyLimiter, async (req, res, next) => {
     if (app.option_key === newKey) { await client.query('COMMIT'); return res.json({ ok: true, optionKey: newKey, unchanged: true }); }
 
     // 새 옵션: 활성 + 잔여/오늘 확인 (전환 대상은 자기 홀드를 포함하지 않음 = 기존 옵션에 계수돼 있음 → 순증 판정 정확)
-    // ★ 결정 211: 순차진행 판정은 선택지 **전체 순서**가 있어야 하므로 전부 읽어 목록 뷰(단일 출처)로 계산한다.
-    const { rows: allOptRows } = await client.query(
-      `SELECT opt_key, pay_amount, recruit_total, daily_limit, status, sort_order
-         FROM campaign_options WHERE campaign_id=$1 ORDER BY (status='closed'), sort_order, id`,
-      [id]);
+    // ★ 결정 212: 순차진행 판정은 선택지 **전체 순서**가 있어야 하고, 내 홀드는 원래 선택지에서 뺀 상태로 본다
+    //   (내 홀드가 앞 선택지 마지막 자리를 채운 채 판정하면 뒤가 열린 것처럼 보인다 — Codex P1). 단일 출처 _optionChangeViews.
+    const { rows: allOptRows, views: changeViews } = await _optionChangeViews(client, id, app, now);
     const target = allOptRows.find(o => o.opt_key === newKey);
     if (!target || target.status !== 'active') {
       await client.query('ROLLBACK');
       return res.status(400).json({ ok: false, reason: 'option_invalid', error: '선택한 옵션을 찾을 수 없어요.' });
     }
-    const st = computeCampaignState(camp, (await fetchCampaignCounts(client, [id], now)).get(id), now);
-    const optCounts = await fetchOptionCounts(client, id, now);
-    const sequential = (await fetchSequentialCampaignIds(client, [id])).has(String(id));
-    const ov = computeOptionViews(allOptRows, optCounts, { state: 'open' }, { sequential })   // 변경은 캠페인 open 무관(이미 참여중)
-      .find(v => v.optKey === newKey);
+    const ov = changeViews.find(v => v.optKey === newKey);   // 변경은 캠페인 open 무관(이미 참여중)
     if (ov.status !== 'open') {
       await client.query('ROLLBACK');
       if (ov.status === 'waiting') {
@@ -1915,7 +1935,7 @@ async function _applyParticipation(req, res, next, campPre) {
           return res.status(400).json({ ok: false, reason: 'option_invalid', error: '선택한 옵션을 찾을 수 없어요. 새로고침 후 다시 선택해주세요.' });
         }
         const optCounts = await fetchOptionCounts(client, id, now);
-        // ★ 결정 211: 순차진행이면 앞 선택지가 찰 때까지 뒤 선택지는 waiting(목록 뷰 단일 출처로 계산).
+        // ★ 결정 212: 순차진행이면 앞 선택지가 찰 때까지 뒤 선택지는 waiting(목록 뷰 단일 출처로 계산).
         const sequential = (await fetchSequentialCampaignIds(client, [id])).has(String(id));
         const ov = computeOptionViews(allOpts, optCounts, st, { sequential }).find(v => v.optKey === chosenOpt.opt_key);
         if (ov.status !== 'open') {

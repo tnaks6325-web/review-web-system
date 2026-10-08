@@ -1423,13 +1423,11 @@ async function _loadOptionDayCaps(db, ids, now = new Date()) {
     if (live.size) {
       const counts = await fetchOptionCountsBatch(db, [...live.keys()], now);
       /* ★ 결정 212: 순차진행 공고는 선택지 일건수를 쓰지 않는다(하루 몫 = 공고 일건수를 앞 선택지부터 채움)
-         → computeOptionViews 가 dailyLimit 0 으로 돌려주므로 optionDayCapacity 는 상한 없음(null)이 된다. */
+         → optionCapsFromViews 가 그 선택지의 하루 몫을 "남은 정원 전부"로 둔다(상한은 Σ 남은 정원 — 유한 유지). */
       const seqIds = await fetchSequentialCampaignIds(db, [...live.keys()]);
       for (const [cid, opts] of live) {
         const cm = counts.get(cid) || new Map();
-        const views = computeOptionViews(opts, cm, null, { sequential: seqIds.has(cid) });
-        out.set(cid, views.map(v => ({ key: v.optKey, recruitTotal: v.recruitTotal, dailyLimit: v.dailyLimit,
-                   usedBefore: Math.max(0, v.used - v.todayUsed), todayUsed: v.todayUsed })));
+        out.set(cid, optionCapsFromViews(computeOptionViews(opts, cm, null, { sequential: seqIds.has(cid) })));
       }
     }
     if (sp) { try { await db.query('RELEASE SAVEPOINT opt_day_caps'); } catch (_) {} }
@@ -1438,6 +1436,36 @@ async function _loadOptionDayCaps(db, ids, now = new Date()) {
     if (sp) { try { await db.query('ROLLBACK TO SAVEPOINT opt_day_caps'); } catch (_) {} }
     return null;
   }
+}
+
+/**
+ * 목록 뷰 → 하루 몫 상한 재료. 순수 함수.
+ * ★ 결정 212(Codex P1): 순차진행 선택지는 일건수를 쓰지 않지만 **정원 상한은 유지**한다 —
+ *   일건수 자리에 정원을 넣어 그날 몫 = 남은 정원 전부(Σ 남은 정원). 0 으로 두면 optionDayCapacity 가
+ *   null(상한 없음)이 되어, 관리자가 선택지를 닫아 정원 합이 공고 총원보다 작아졌을 때 고를 선택지가 없는데
+ *   공고가 열리고 앞날 예상·작업표 날짜가 생긴다.
+ */
+function optionCapsFromViews(views) {
+  return (views || []).filter(v => v && v.status !== 'closed').map(v => ({
+    key: v.optKey, recruitTotal: v.recruitTotal,
+    dailyLimit: v.sequential ? v.recruitTotal : v.dailyLimit,
+    usedBefore: Math.max(0, v.used - v.todayUsed), todayUsed: v.todayUsed,
+  }));
+}
+
+/**
+ * 옵션 변경 판정용 카운트 — 신청자 자신의 유효 홀드를 **원래 선택지에서 뺀** 사본. 순수 함수.
+ * ★ 결정 212(Codex P1): 내 홀드가 앞 선택지의 마지막 자리를 채운 상태로 순서를 판정하면 뒤 선택지가 열린 것처럼
+ *   보여 변경이 허용되고, 변경 뒤에는 앞 선택지가 다시 비어 순서가 깨진다.
+ */
+function withoutOwnHold(countsMap, optionKey, appliedToday) {
+  const out = new Map(countsMap instanceof Map ? countsMap : []);
+  if (!optionKey || !out.has(optionKey)) return out;
+  const c = { ...out.get(optionKey) };
+  c.activeHolds = Math.max(0, (Number(c.activeHolds) || 0) - 1);
+  if (appliedToday) c.todayActiveHolds = Math.max(0, (Number(c.todayActiveHolds) || 0) - 1);
+  out.set(optionKey, c);
+  return out;
 }
 
 /** 선택지 하나가 그날 받을 수 있는 수 = min(일건수, 남은 정원). 정원 무제한이면 일건수. */
@@ -1610,6 +1638,8 @@ module.exports = {
   computeOptionView,
   computeOptionViews,
   fetchSequentialCampaignIds,
+  optionCapsFromViews,
+  withoutOwnHold,
   liveOptions,
   dailyQuota,
   effectiveQuota,
