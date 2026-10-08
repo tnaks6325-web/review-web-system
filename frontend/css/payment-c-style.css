@@ -59,3 +59,8 @@
   #pmbody .pmsearch{width:100%;margin-right:0}
   #pmbody .pmsearchin{width:100%}
 }
+/* 입금명(통장표시) 미설정 작업 — 고를 수 없고, 누르면 작업 화면의 입금명 설정 창으로 간다(2026-10-08) */
+#pmbody .pmmemohead{margin-top:6px;padding:8px 2px 2px;border-top:1px dashed #E3C9A0;font-size:10.5px;font-weight:750;color:#9A5B12}
+#pmbody .pmworkpick.needmemo{border-style:dashed;border-color:#E3C9A0;background:#FFFBF4;color:#5B6478}
+#pmbody .pmworkpick.needmemo:hover{border-color:#D9A75F;background:#FFF4E2}
+#pmbody .pmworkneed{font-size:10.5px;font-weight:800;color:#B0640F;white-space:nowrap}

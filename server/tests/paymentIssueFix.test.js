@@ -1087,6 +1087,7 @@ function withStubPool(handler, run) {
       esc: v => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
       _pmNum: n => String(Number(n) || 0),
       _pmOn: it => it.payable && !it.excluded,
+      _pmNeedsMemo: it => (it.warnings || []).includes('no_memo'),   // 2026-10-08 — 표가 입금명 없는 줄의 체크를 막을 때 쓴다
       _pmAcctSrcTip: () => '',
       PAY_FIX_KIND: { no_bank: 'work', no_account: 'account', bank_unknown: 'account', no_holder: 'account' },
       PAY_ISSUE_LABEL: { no_bank: '이체은행 미지정', no_account: '계좌 미등록', bank_unknown: '은행명 인식불가' },
