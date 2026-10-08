@@ -3091,7 +3091,7 @@ let STATE = { role:'', name:'', view:'', tabs:[], cur:null, wd:null, freezeUpto:
               canManageEditors:null,             // 서버가 판정한 편집 허용명단 관리 권한
               favs:null, _favLoaded:false,   // 작업목록 즐겨찾기(localStorage 영속)
               railTab:'thread',              // 우측 레일 탭(기본=협업/댓글)
-              ov:[], ovq:'', pendingTab:null, pendingAdv:null, lastBatch:null,
+              ov:[], ovq:'', pendingTab:null, pendingAdv:null, pendingCndFix:null, lastBatch:null,
               advWork:null, advView:'dash',   // 업체(광고주) 뷰어 — 작업 요약 + 첫 화면(대시보드 기본 | 전체 작업 표)
               advQ:'', advF:'all',            // 전체 작업 검색어 · 상태 칩(all|run|done) — 화면 전환에도 유지
               brandNew:null, brandEdit:null, brandOpen:null, bmEdit:null,  // 브랜드 추가 인라인(2안) · 카드 내 편집/확인 상태(브라우저 팝업 대체)
@@ -6775,6 +6775,22 @@ function renderWorkdesk(wd){
   /* 제출물 미리보기 — 업체 뷰어와 **같은 패널·같은 조작**을 내부 화면(작업보드 상단 ③)에도 쓴다.
      ★ 판정은 "패널이 그려졌나" 하나 — 역할 문자열로 다시 나누면 화면마다 갈린다. */
   if(document.getElementById('rvPane')) _rvBoot(STATE.cur);
+  _runPendingCndFix();
+}
+/* ★ 입금관리 [입금명 필요]·[미설정] → 작업보드에 닿으면 **입금명 설정 창을 바로 연다**(사용자 확정 2026-10-08).
+   창구는 작업 조건 카드의 `_cndFix` 그대로(공고 있으면 모집공고 수정 · 없으면 탭 설정) — 새 저장 경로 0.
+   ★ 예약은 다음 렌더 **한 번**에 소비한다. 그 사이 다른 작업이 열렸으면 실행하지 않고 버린다
+     (엉뚱한 작업의 설정 창이 뜨면 거기에 저장하게 된다). */
+function _runPendingCndFix(){
+  const p=STATE.pendingCndFix; if(!p) return;
+  STATE.pendingCndFix=null;
+  const t=STATE.cur;
+  if(!t || t.sheetId!==p.sheetId || t.tabName!==p.tabName) return;
+  setTimeout(()=>{
+    if(STATE.cur!==t) return;
+    if(!(STATE.wd&&STATE.wd.condition)){ _toast('이 작업의 작업 조건을 불러오지 못했습니다 — 작업 조건 카드에서 입금명을 설정해 주세요.'); return; }
+    _cndFix(p.kind);
+  },0);
 }
 
 // ══ 업체 뷰어 — 리뷰 캡처 미리보기(표 위 정보 조합 패널) ═══════════════════════════
@@ -12147,7 +12163,12 @@ async function _pmLoad(force){
 }
 
 const _pmKey = it => it.sheetId+'||'+it.tabName+'||'+it.rowIndex;
-const _pmOn  = it => it.payable && !STATE.pmExcluded[_pmKey(it)];
+/* ★★ 입금명(통장표시)이 없는 건은 **선택 대상이 아니다**(사용자 확정 2026-10-08) — 종전에는 경고만 하고
+   서식에 담겨 리뷰어 통장에 이름 없이 찍혔다. 판정은 서버 warnings 의 'no_memo' 그대로(화면 판정 사본 0).
+   ★ `_pmOn` 한 곳에 넣는다 — 다운로드·합계·대상자 수·작업 목록·표 체크가 이 한 함수를 보므로 함께 바뀐다
+     (한 곳만 따로 막으면 "목록엔 없는데 파일엔 들어감"이 된다). */
+const _pmNeedsMemo = it => (it.warnings||[]).includes('no_memo');
+const _pmOn  = it => it.payable && !_pmNeedsMemo(it) && !STATE.pmExcluded[_pmKey(it)];
 const _pmNum = n => (Number(n)||0).toLocaleString();
 
 function _pmWorkKey(it){ return String((it&&it.sheetId)||'')+'||'+String((it&&it.tabName)||''); }
@@ -12204,7 +12225,9 @@ function _pmManagerLabel(manager){ return manager || '전체 담당자'; }
  *  안 잡혀 화면에서 사라진다. A안(사용자 확정 2026-08-24): 문구만 알리고 버튼 구성(C스타일)은
  *  건드리지 않되, 그 작업의 작업보드로 바로 보내 [관리자 수정]에서 작업담당을 정하도록 유도한다. */
 function _pmUnassignedWorks(items){
-  return _pmWorkEntries(items,'',_pmOn).filter(([,it])=>!_pmManagerName(it.manager));
+  // ★ 입금명 미설정 작업도 담는다(_pmOn 이 아니라 "이체 대상인가" 기준) — _pmOn 으로 거르면 담당자도 입금명도
+  //   없는 작업이 담당자 칩을 고르는 순간 선택 목록·이 안내·입금명 집계 어디에도 안 보인다(Codex P2, 결정 216).
+  return _pmWorkEntries(items,'',it=>it.payable && !STATE.pmExcluded[_pmKey(it)]).filter(([,it])=>!_pmManagerName(it.manager));
 }
 const _PM_UNASSIGNED_SHOW=5;
 /** ⚠ 담당자 미지정 안내 — **특정 담당자를 고른 상태에서만** 보인다(그 필터가 이 작업들을 가린다는
@@ -12317,6 +12340,48 @@ function _pmVisibleWorkEntries(items, manager){
   const q=_pmNormQ(STATE.pmWorkQ);
   return _pmWorkEntries(items,manager,_pmOn).filter(e=>_pmMatchWork(e,q));
 }
+/** 입금명이 없어 고를 수 없는 작업 — 고를 수 있는 줄이 하나도 없고 **입금명만 정하면 대상이 되는** 작업.
+ *  ★ 보류(계좌·은행)로만 빠진 작업은 여기 없다 — 입금명을 정해도 고를 게 없다(그건 보완 카드가 말한다).
+ *  ★ 한 작업 안에 입금명 있는 줄이 섞여 있으면 그 작업은 평소처럼 고를 수 있고, 없는 줄만 표에서 막힌다. */
+function _pmMemoWorkEntries(items, manager){
+  const selectable=new Set(_pmWorkEntries(items,manager,_pmOn).map(([key])=>key));
+  return _pmWorkEntries(items,manager,it=>it.payable && _pmNeedsMemo(it)).filter(([key])=>!selectable.has(key));
+}
+/* [입금명 필요] 줄 — 고르는 대신 그 작업의 작업 화면으로 가서 입금명 설정 창을 바로 연다.
+   ★ 드래그 선택 배선(onpointerdown/enter)·data-work-key 를 **달지 않는다** — 끌어서 고르는 범위에 끼면 안 된다.
+   ★ onclick 에는 인덱스만(작업명은 시트/DB 발 문자열 — 보간 금지). 인덱스 표는 그릴 때마다 새로 만든다. */
+function _pmMemoWorkRowsHtml(allItems, manager){
+  const q=_pmNormQ(STATE.pmWorkQ);
+  const works=_pmMemoWorkEntries(allItems,manager).filter(e=>_pmMatchWork(e,q));
+  STATE.pmMemoWorks=works.map(([,it])=>it);
+  if(!works.length) return '';
+  const rows=works.map(([key,it],i)=>{
+    const rowItems=(allItems||[]).filter(row=>_pmWorkKey(row)===key && row.payable && _pmNeedsMemo(row));
+    const label=it.tabLabel||it.tabName||key;
+    return `<button type="button" class="pmworkpick needmemo" onclick="_pmOpenMemoWork(${i})" title="입금명(통장표시)이 없어 선택할 수 없습니다 — 누르면 작업 화면에서 입금명 설정 창이 열립니다"><span class="pmworkname">${esc(label)}</span><span class="pmworkmeta">${rowItems.length}건 · ${_pmNum(rowItems.reduce((sum,row)=>sum+(Number(row.amount)||0),0))}원</span><span class="pmworkneed">입금명 필요 ›</span></button>`;
+  }).join('');
+  return `<div class="pmmemohead">입금명 미설정 ${works.length}개 — 입금명을 정해야 선택할 수 있습니다</div>${rows}`;
+}
+function _pmQueueMemoFix(w){ STATE.pendingCndFix={ sheetId:w.sheetId, tabName:w.tabName, kind:'memo' }; }
+/** [입금명 필요] 줄 → 그 작업의 작업보드 + 입금명 설정 창 예약(작업보드 열기는 `pendingTab` 계약 그대로) */
+function _pmOpenMemoWork(i){
+  const w=(STATE.pmMemoWorks||[])[i]; if(!w) return;
+  _pmQueueMemoFix(w);
+  STATE.pendingTab={ sheetId:w.sheetId, tabName:w.tabName, tabGid:w.tabGid||'', spreadsheetTitle:'' };
+  switchView('workdesk');
+}
+/* ★ 입금명을 정하고 돌아온 작업은 **자동으로 선택하지 않는다**(사용자 확정 2026-10-08 — 사람이 눌러 고른다).
+   문제는 선택이 아직 "전체(null)"일 때뿐이다: null = 지금 고를 수 있는 작업 전부라, 입금명이 생기는 순간
+   그 작업이 저절로 끼어든다. 그때만 선택을 목록으로 굳혀 그 작업을 뺀다.
+   이미 목록으로 고른 상태라면 새로 고를 수 있게 된 작업은 원래 목록에 없다(손댈 것 없음). */
+function _pmHoldMemoWorks(allItems){
+  const seen=STATE.pmMemoSeen||(STATE.pmMemoSeen=new Set());
+  _pmMemoWorkEntries(allItems,'').forEach(([key])=>seen.add(key));
+  const filter=_pmFilterState();
+  if(filter.workKeys!==null || !seen.size) return;
+  const allKeys=_pmWorkEntries(allItems,filter.manager,_pmOn).map(([key])=>key);
+  if(allKeys.some(key=>seen.has(key))) filter.workKeys=allKeys.filter(key=>!seen.has(key));
+}
 /* 작업 행 HTML — 전체 렌더와 검색 중 목록-only 렌더가 **같은 한 벌**을 쓴다(사본을 두면
    검색 결과 행만 모양·배선이 어긋난다). */
 function _pmWorkRowsHtml(allItems, works, selectedKeys){
@@ -12340,10 +12405,11 @@ function _pmRenderWorkList(){
   const selectedKeys=new Set(filter.workKeys===null ? allKeys : filter.workKeys);
   const works=_pmVisibleWorkEntries(allItems,filter.manager);
   const rows=_pmWorkRowsHtml(allItems,works,selectedKeys);
+  const memoRows=_pmMemoWorkRowsHtml(allItems,filter.manager);
   // ★ "검색 결과 없음"과 "애초에 작업이 없음"을 구분해 말한다(뭉뚱그리면 원인을 못 찾는다).
-  wrap.innerHTML = rows || (String(STATE.pmWorkQ||'').trim()
+  wrap.innerHTML = (rows || (String(STATE.pmWorkQ||'').trim()
     ? `<div class="pmworkempty">‘${esc(String(STATE.pmWorkQ).trim())}’ 와 일치하는 작업이 없습니다.</div>`
-    : '<div class="empty">선택할 작업이 없습니다.</div>');
+    : '<div class="empty">선택할 작업이 없습니다.</div>')) + memoRows;
   wrap.scrollTop=0;
   const hint=$('#pmWorkHint'); if(hint) hint.innerHTML=_pmWorkHintHtml(works.length,allKeys.length);
   const box=$('#pmbody .pmsearch'); if(box) box.classList.toggle('has', !!String(STATE.pmWorkQ||'').trim());
@@ -12369,22 +12435,26 @@ function _pmFilterBar(allItems){
   const visibleWorks=_pmVisibleWorkEntries(allItems,filter.manager);
   const searchQ=String(STATE.pmWorkQ||'');
   const workRows=_pmWorkRowsHtml(allItems,visibleWorks,selectedKeys);
+  const memoRows=_pmMemoWorkRowsHtml(allItems,filter.manager);
   const downloadButton=(bank,label)=>{
     const bankItems=selectedItems.filter(it=>it.bank===bank);
     return bankItems.length
       ? `<button class="btn primary pmdownload" onclick="_pmDownload('${bank}')">${label} 서식 다운로드 · ${bankItems.length}건</button>`
       : `<button class="btn pmdownload" disabled>${label} 대상 없음</button>`;
   };
-  return `<section class="pmselect" aria-label="입금 대상 선택"><div class="pmselecthead"><strong>입금 대상 선택</strong><span>${_pmManagerLabel(filter.manager)} · <b>선택 작업 ${selectedKeys.size}개</b><em> / 전체 ${works.length}개</em></span></div><div class="pmselectionlayout"><div class="pmselectionleft"><div class="pmmanagers" role="group" aria-label="담당자 선택" title="담당자는 작업 화면(작업 조건)과 같은 값 — 작업오더의 작업담당입니다."><div class="pmsearch ${searchQ.trim()?'has':''}"><span class="pmsearchic" aria-hidden="true">🔎</span><input id="pmWorkQ" class="pmsearchin" type="search" autocomplete="off" placeholder="작업명 검색" aria-label="입금 대상 작업 검색" value="${esc(searchQ)}" oninput="_pmWorkSearch(this.value)"><button type="button" class="pmsearchx" title="검색어 지우기" aria-label="검색어 지우기" onclick="_pmClearWorkSearch()">✕</button></div>${managerButton('','전체')}${managers.map(name=>managerButton(name,name)).join('')}</div><div class="pmworkhead"><strong>작업 선택</strong><span id="pmWorkHint">${_pmWorkHintHtml(visibleWorks.length,allWorkKeys.length)}</span></div><div class="pmworklist">${workRows||(searchQ.trim()?`<div class="pmworkempty">‘${esc(searchQ.trim())}’ 와 일치하는 작업이 없습니다.</div>`:'<div class="empty">선택할 작업이 없습니다.</div>')}</div></div><aside class="pmsummary" aria-label="선택 항목 요약"><div><div class="pmsummarytitle">선택한 입금 항목</div><p class="pmsummarycopy">선택된 작업의 체크된 입금 항목만 서식에 포함합니다.</p></div><div class="pmresultgrid"><div class="pmresult"><span>입금 대상자 수</span><strong>${recipientCount}명</strong></div><div class="pmresult total"><span>선택 항목 합계</span><strong>${_pmNum(selectedTotal)}원</strong></div></div><div class="pmdownloadtitle">선택 항목 서식 다운로드</div><div class="pmdownloads">${downloadButton('kbank','케이뱅크')}${downloadButton('hana','하나은행')}</div><p class="pmdownloadnote">은행별 서식으로 각각 내려받습니다.</p></aside></div></section>`;
+  return `<section class="pmselect" aria-label="입금 대상 선택"><div class="pmselecthead"><strong>입금 대상 선택</strong><span>${_pmManagerLabel(filter.manager)} · <b>선택 작업 ${selectedKeys.size}개</b><em> / 전체 ${works.length}개</em></span></div><div class="pmselectionlayout"><div class="pmselectionleft"><div class="pmmanagers" role="group" aria-label="담당자 선택" title="담당자는 작업 화면(작업 조건)과 같은 값 — 작업오더의 작업담당입니다."><div class="pmsearch ${searchQ.trim()?'has':''}"><span class="pmsearchic" aria-hidden="true">🔎</span><input id="pmWorkQ" class="pmsearchin" type="search" autocomplete="off" placeholder="작업명 검색" aria-label="입금 대상 작업 검색" value="${esc(searchQ)}" oninput="_pmWorkSearch(this.value)"><button type="button" class="pmsearchx" title="검색어 지우기" aria-label="검색어 지우기" onclick="_pmClearWorkSearch()">✕</button></div>${managerButton('','전체')}${managers.map(name=>managerButton(name,name)).join('')}</div><div class="pmworkhead"><strong>작업 선택</strong><span id="pmWorkHint">${_pmWorkHintHtml(visibleWorks.length,allWorkKeys.length)}</span></div><div class="pmworklist">${workRows||(searchQ.trim()?`<div class="pmworkempty">‘${esc(searchQ.trim())}’ 와 일치하는 작업이 없습니다.</div>`:'<div class="empty">선택할 작업이 없습니다.</div>')}${memoRows}</div></div><aside class="pmsummary" aria-label="선택 항목 요약"><div><div class="pmsummarytitle">선택한 입금 항목</div><p class="pmsummarycopy">선택된 작업의 체크된 입금 항목만 서식에 포함합니다.</p></div><div class="pmresultgrid"><div class="pmresult"><span>입금 대상자 수</span><strong>${recipientCount}명</strong></div><div class="pmresult total"><span>선택 항목 합계</span><strong>${_pmNum(selectedTotal)}원</strong></div></div><div class="pmdownloadtitle">선택 항목 서식 다운로드</div><div class="pmdownloads">${downloadButton('kbank','케이뱅크')}${downloadButton('hana','하나은행')}</div><p class="pmdownloadnote">은행별 서식으로 각각 내려받습니다.</p></aside></div></section>`;
 }
 
 function _pmRender(){
   const allItems = STATE.pmItems||[];
+  _pmHoldMemoWorks(allItems);   // 선택 상태를 정한 **뒤에** 보이는 건을 뽑는다(순서 계약)
   const items = _pmVisibleItems();
   const picked = b => items.filter(it=>it.bank===b && _pmOn(it));
   const kb = picked('kbank'), hn = picked('hana');
   const blocked = items.filter(it=>!it.payable);
-  const noMemo  = items.filter(it=>_pmOn(it) && (it.warnings||[]).includes('no_memo'));
+  // ★ 입금명 없는 건은 선택에서 빠지므로 "보이는 건"이 아니라 **담당자 범위 전체**에서 센다
+  //   (선택 목록으로 굳으면 그 작업 줄이 표에서 빠져 숫자가 0 으로 꾸며진다).
+  const noMemo  = _pmFilterItems(allItems,{manager:_pmFilterState().manager}).filter(it=>it.payable && _pmNeedsMemo(it));
   const priceOutliers = items.filter(it=>(it.warnings||[]).includes('price_outlier'));
   // 담당자를 고른 상태에서만 뜬다 — 그 필터가 이 작업들을 가리는 순간이 곧 알려야 할 순간이다.
   const unassignedWorks = _pmFilterState().manager ? _pmUnassignedWorks(allItems) : [];
@@ -12406,7 +12476,7 @@ function _pmRender(){
         ${stat('케이뱅크', kb.length+'건')}
         ${stat('하나은행', hn.length+'건')}
         ${blocked.length?stat('⚠ 보류(계좌·은행)', blocked.length+'건','warn'):''}
-        ${noMemo.length?stat('⚠ 통장표시 없음', noMemo.length+'건','warn'):''}
+        ${noMemo.length?stat('⚠ 입금명 없음', noMemo.length+'건','warn'):''}
         ${priceOutliers.length?stat('⚠ 단독 이상금액', priceOutliers.length+'건','warn'):''}
       </div>
       <section class="pmbatchpanel">
@@ -12415,7 +12485,7 @@ function _pmRender(){
       </section>
       ${_pmFinishedNoteHtml()}
       ${blocked.length?`<div class="pmnote">⚠ <b>보류 ${blocked.length}건</b>은 파일에서 빠집니다 — 아래에서 사유를 바로 보완할 수 있습니다.</div>`:''}
-      ${noMemo.length?`<div class="pmnote">⚠ <b>통장표시가 없는 건 ${noMemo.length}건</b> — 이체는 되지만 리뷰어 통장에 이름이 안 찍힙니다.</div>`:''}
+      ${noMemo.length?`<div class="pmnote">⚠ <b>통장표시가 없는 건 ${noMemo.length}건</b>은 선택할 수 없습니다(리뷰어 통장에 이름이 안 찍히므로) — 작업 선택의 <b>[입금명 필요]</b> 줄을 누르면 작업 화면에서 입금명 설정 창이 바로 열립니다.</div>`:''}
       ${priceOutliers.length?`<div class="pmnote">⚠ <b>같은 작업의 대부분 금액과 크게 다른 단독 금액 ${priceOutliers.length}건</b>이 있습니다. 자동으로 막지는 않지만 다운로드 전에 아래의 ‘금액 확인’ 행을 검토해 주세요.</div>`:''}
       ${unassignedWorks.length?_pmUnassignedNoteHtml(unassignedWorks):''}
       ${_pmFixBlock()}
@@ -12469,7 +12539,7 @@ function _pmTargetTable(items){
     const idx = (STATE.pmItems||[]).indexOf(g.items[0]);   // 머리줄 버튼이 가리키는 = 그 작업의 첫 줄
                                                           // (작업 단위 값이라 어느 줄로 열어도 같은 팝업)
     const picked  = g.items.filter(_pmOn).length;
-    const payable = g.items.filter(it=>it.payable).length;
+    const payable = g.items.filter(it=>it.payable && !_pmNeedsMemo(it)).length;   // 입금명 없는 줄은 고를 수 없으니 분모에서 뺀다
     const sum     = g.items.filter(_pmOn).reduce((a,c)=>a+(Number(c.amount)||0),0);
 
     // 머리줄 — 작업명 + 건수 + (그 작업에서 값이 같은 칸들) + 선택 현황
@@ -12484,7 +12554,7 @@ function _pmTargetTable(items){
       + `<span class="n">${g.items.length}건</span>`
       + chips.join('')
       + `<span class="sp"></span>`
-      + (payable?`<span class="pmgsel">선택 ${picked}/${payable}건 · ${_pmNum(sum)}원</span>`:`<span class="pmgsel dim">이체 대상 없음</span>`)
+      + (payable?`<span class="pmgsel">선택 ${picked}/${payable}건 · ${_pmNum(sum)}원</span>`:`<span class="pmgsel dim">${g.items.some(it=>it.payable)?'입금명 필요':'이체 대상 없음'}</span>`)
       + `</div></td></tr>`;
 
     const rows = g.items.map(it=>{
@@ -12499,7 +12569,7 @@ function _pmTargetTable(items){
         ? `<tr class="${on?'':'off'}${hidden?' pmhide':''} pmmm" data-pg="${i}"><td></td><td colspan="10">${_pmAcctMismatchHtml(mm)}</td></tr>`
         : '';
       return `<tr class="${on?'':'off'}${hidden?' pmhide':''}" data-pg="${i}">
-      <td>${it.payable?`<input type="checkbox" ${on?'checked':''} onchange="_pmToggle(${idx},this.checked)">`:'—'}</td>
+      <td>${!it.payable?'—':_pmNeedsMemo(it)?'<input type="checkbox" disabled title="입금명(통장표시)을 정해야 선택할 수 있습니다 — 통장표시 칸의 [미설정]을 누르세요">':`<input type="checkbox" ${on?'checked':''} onchange="_pmToggle(${idx},this.checked)">`}</td>
       <td class="pmdim"></td>
       <td>${bankSig!==null?'':bankBadge(it)}</td>
       <td>${esc(it.reviewerName)}${it.isSub?`<span class="pmauto"${_pmAcctSrcTip(it)}>타계정</span>`:''}${
@@ -12928,7 +12998,7 @@ function _pmRowMemo(idx){
   const it=(STATE.pmItems||[])[idx]; if(!it) return;
   const f=STATE.pmFix||{works:[]};
   const i=f.works.findIndex(w=>w.sheetId===it.sheetId&&w.tabName===it.tabName);
-  if(i>=0) return _pmOpenBoard(i);
+  if(i>=0){ _pmQueueMemoFix(it); return _pmOpenBoard(i); }   // 작업보드에 닿으면 입금명 설정 창을 바로 연다
 }
 
 /* ★★ 확인창은 **무엇이 담기는지**를 그대로 읽어 준다(회차 #18 사고) — 담당자·작업이
