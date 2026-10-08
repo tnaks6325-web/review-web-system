@@ -331,12 +331,17 @@ test('transfer batch drawer sits below the rows and opens itself when a batch ne
   const sb = {};
   vm.createContext(sb);
   vm.runInContext(sourceOf('_pmBatchAttention'), sb);
-  assert.strictEqual(sb._pmBatchAttention({ status: 'downloaded' }), 'wait');
-  assert.strictEqual(sb._pmBatchAttention({ status: 'applied', boardFailedCount: 2 }), 'fail');
-  assert.strictEqual(sb._pmBatchAttention({ status: 'applied', resultUnconfirmedCount: 1, boardRecordedCount: 5 }), 'unconfirmed');
-  assert.strictEqual(sb._pmBatchAttention({ status: 'applied', resultAppliedCount: 9 }), 'unrecorded');
-  assert.strictEqual(sb._pmBatchAttention({ status: 'applied', resultAppliedCount: 9, boardRecordedCount: 9 }), '');
-  assert.strictEqual(sb._pmBatchAttention({ status: 'cancelled' }), '');
+  const att = b => JSON.parse(JSON.stringify(sb._pmBatchAttention(b)));
+  assert.deepStrictEqual(att({ status: 'downloaded' }), ['wait']);
+  assert.deepStrictEqual(att({ status: 'applied', boardFailedCount: 2 }), ['fail']);
+  assert.deepStrictEqual(att({ status: 'applied', resultUnconfirmedCount: 1, boardRecordedCount: 5 }), ['unconfirmed']);
+  assert.deepStrictEqual(att({ status: 'applied', resultAppliedCount: 9 }), ['unrecorded']);
+  assert.deepStrictEqual(att({ status: 'applied', resultAppliedCount: 9, boardRecordedCount: 9 }), []);
+  assert.deepStrictEqual(att({ status: 'cancelled' }), []);
+  // ★ 여러 상태를 함께 가지면 전부 센다(하나로 접으면 접힌 서랍에서 두 번째 할 일이 사라진다 — Codex P2)
+  assert.deepStrictEqual(att({ status: 'applied', boardFailedCount: 1, resultUnconfirmedCount: 2 }), ['fail', 'unconfirmed']);
+  assert.deepStrictEqual(att({ status: 'applied', resultUnconfirmedCount: 1, resultAppliedCount: 3 }), ['unconfirmed', 'unrecorded']);
+  assert.match(sourceOf('_pmBatchDrawerHtml'), /_pmBatchAttention\(b\)\.includes\(k\)/);
   const drawer = sourceOf('_pmBatchDrawerHtml');
   // 사람이 직접 접고 편 상태가 자동 판단보다 우선(null = 자동)
   assert.match(drawer, /STATE\.pmDrawerOpen===null \|\| STATE\.pmDrawerOpen===undefined \? _pmDrawerAuto\(\)/);

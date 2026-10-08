@@ -12522,23 +12522,26 @@ function _pmBarHtml(allItems){
 /* 이체 회차 서랍(시안 2) — 처리할 것(결과 대기·입금일 기록 실패·미확인·입금일 미기록)이 있을 때만 **자동으로 펼친다**
    (사용자 확정 2026-10-08). 접혀 있어도 머리에 그 개수를 말한다 — 결과를 안 올리면 작업 화면에 입금일이 안 찍힌다.
    ★ 사람이 직접 접거나 편 상태(STATE.pmDrawerOpen)가 자동 판단보다 우선한다(null = 자동). */
+/* ★ 한 회차가 여러 상태를 함께 가질 수 있다(기록 실패 + 미확인 등) — 하나로 접으면 접힌 서랍 머리에서
+     두 번째 할 일이 사라진다(Codex P2). 상태마다 따로 센다. */
 function _pmBatchAttention(b){
-  if(!b || b.status==='cancelled') return '';
-  if(b.status!=='applied') return 'wait';
-  if(Number(b.boardFailedCount)>0) return 'fail';
-  if(Number(b.resultUnconfirmedCount)>0) return 'unconfirmed';
+  if(!b || b.status==='cancelled') return [];
+  if(b.status!=='applied') return ['wait'];
+  const out=[];
+  if(Number(b.boardFailedCount)>0) out.push('fail');
+  if(Number(b.resultUnconfirmedCount)>0) out.push('unconfirmed');
   const board=(b.boardRecordedCount||0)+(b.boardQueuedCount||0)+(b.boardSkippedCount||0)+(b.boardFailedCount||0);
-  if((b.resultAppliedCount||0)>0 && !board) return 'unrecorded';
-  return '';
+  if((b.resultAppliedCount||0)>0 && !board) out.push('unrecorded');
+  return out;
 }
-function _pmDrawerAuto(){ return (STATE.pmBatches||[]).some(b=>!!_pmBatchAttention(b)); }
+function _pmDrawerAuto(){ return (STATE.pmBatches||[]).some(b=>_pmBatchAttention(b).length>0); }
 function _pmDrawerToggle(el){
   const auto=_pmDrawerAuto();
   STATE.pmDrawerOpen = el.open===auto ? null : el.open;
 }
 function _pmBatchDrawerHtml(){
   const list=STATE.pmBatches||[];
-  const n=k=>list.filter(b=>_pmBatchAttention(b)===k).length;
+  const n=k=>list.filter(b=>_pmBatchAttention(b).includes(k)).length;
   const pills=[['wait','결과 대기','wait'],['fail','입금일 기록 실패','no'],['unconfirmed','미확인 이체','wait'],['unrecorded','입금일 미기록','wait']]
     .map(([k,l,c])=>n(k)?`<span class="pmb ${c}">${l} ${n(k)}</span>`:'').join('');
   const open = STATE.pmDrawerOpen===null || STATE.pmDrawerOpen===undefined ? _pmDrawerAuto() : !!STATE.pmDrawerOpen;
