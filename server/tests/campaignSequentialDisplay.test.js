@@ -73,6 +73,14 @@ const r = swapTitle('빈)))1. 은갈치 단품 행사', [
 ], { optKey: '2. 옥돔', productName: '2. 옥돔', unitKind: 'product' });
 ok('"1. 은갈치 단품" 전체가 "2. 옥돔"으로', r.title === '빈)))2. 옥돔 행사');
 
+console.log('\n[4-2] 제목에 서로 다른 선택지 이름이 둘 이상이면 바꾸지 않는다 (Codex P2)');
+const two = computeOptionViews([
+  { opt_key: '빨강', product_name: '에코백', unit_kind: 'option', recruit_total: 5, status: 'active' },
+  { opt_key: '파랑', product_name: '에코백', unit_kind: 'option', recruit_total: 5, status: 'active' },
+], new Map([['빨강', { submitted: 5 }]]), { state: 'open' }, { sequential: true });
+d = sequentialDisplay({ title: '빨강/파랑 에코백', thumbnailUrl: '' }, two);
+ok('"빨강/파랑 에코백" → 제목 그대로("파랑/파랑" 금지) + 지금 모집: 파랑', d.title === '빨강/파랑 에코백' && d.nowRecruiting === '파랑');
+
 console.log('\n[5] 참여한 사람은 내가 고른 상품으로 고정');
 const jv = views(10, 0, 0);   // 지금은 옥돔 모집 중
 let j = joinedDisplay(BASE, jv, jv[0]);
@@ -105,7 +113,9 @@ ok('공개 선택지 뷰에 사진·지금 모집 표시', /thumbnailUrl: v\.thu
 ok('목록·상세 선택지 SELECT 에 thumbnail_url', /product_name, unit_kind, thumbnail_url\n\s*FROM campaign_options WHERE campaign_id = ANY\(\$1\)/.test(routes)
   && /inflow_guide_images, thumbnail_url\n\s*FROM campaign_options WHERE campaign_id=\$1/.test(routes));
 ok('관리자 프리필에 thumbnailUrl', /thumbnail_url AS "thumbnailUrl"\n\s*FROM campaign_options WHERE campaign_id=\$1/.test(routes));
-ok('참여 후 화면: 순차진행이면 내가 고른 상품 표시(joinedDisplay)', /joinedDisplay: joinedView/.test(routes) && /selectedOption && selectedOption\.sequential/.test(routes));
+ok('참여 후 화면: 순차진행(공고 기준)이면 내가 고른 상품 표시 — 고른 선택지가 닫혀도(Codex P2)', /joinedDisplay: joinedView/.test(routes) && /selectedOption && options\.some\(o => o && o\.sequential\)/.test(routes));
+ok('"지금 모집" 줄은 공고가 열려 있을 때만(Codex P2)', /if \(d\.nowRecruiting && view\.state === 'open'\) view\.nowRecruiting = d\.nowRecruiting/.test(routes));
+ok('저장 응답에 상품 사진 저장 가능 표시(배포 시차 판별 · Codex P2)', (routes.match(/optionThumbnails: true/g) || []).length === 2);
 const idx = fs.readFileSync(path.join(__dirname, '../index.js'), 'utf8');
 ok('필수 스키마에 campaign_options.thumbnail_url', /\['campaign_options', 'thumbnail_url'\]/.test(idx));
 ok('마이그레이션 181 — 가산 칸(빈 값 기본)', /ADD COLUMN IF NOT EXISTS thumbnail_url TEXT NOT NULL DEFAULT ''/.test(
@@ -113,7 +123,8 @@ ok('마이그레이션 181 — 가산 칸(빈 값 기본)', /ADD COLUMN IF NOT E
 const rev = fs.readFileSync(path.join(__dirname, '../src/routes/reviewer.routes.js'), 'utf8');
 ok('내 참여 내역(참여 중): 순차진행이면 고른 상품으로', /await _applyJoinedDisplay\(holdRows\)/.test(rev) && /ca\.option_key AS "optionKey"/.test(rev));
 ok('리뷰비 내역 사진: 고른 상품 사진 우선, 없으면 공고 사진', /COALESCE\(NULLIF\(co\.thumbnail_url, ''\), rc\.thumbnail_url\) AS "thumbnailUrl"/.test(rev)
-  && /LEFT JOIN campaign_options co ON co\.campaign_id = rc\.id AND co\.opt_key = ca\.option_key/.test(rev));
+  && /LEFT JOIN campaign_options co ON co\.campaign_id = rc\.id AND co\.opt_key = app_opt\.option_key/.test(rev)
+  && /WHERE app\.id = os\.campaign_application_id OR app\.order_submission_id = os\.id[\s\S]{0,200}\) app_opt ON TRUE/.test(rev));
 
 console.log('\n[8] 화면');
 const rec = fs.readFileSync(path.join(__dirname, '../../frontend/js/index-recruit.js'), 'utf8');
@@ -123,6 +134,9 @@ ok('관리자 공고 설정: 상품별 사진 줄 + 저장·불러오기', /func
 ok('공고 썸네일 업로드와 같은 업로드 창구(_uploadImageToProxy) — 사본 0', /const url = await _uploadImageToProxy\(file, "campthumb_"\)/.test(rec)
   && /await _uploadImageToProxy\(file, "optthumb_"\)/.test(rec)
   && !/fetch\(/.test(fnSrc(rec, '_uploadCampThumbFile')));
+ok('옛 서버가 사진을 버렸으면 다시 저장하라고 알림', /saved\.optionThumbnails !== true[\s\S]{0,160}상품 사진은 저장되지 않았습니다/.test(rec));
+ok('옵션 없는 작업 모드에서는 사진 줄을 숨긴다(Codex P2 — 올려도 버려지는 막다른 길)', /rf-opt-thumb-line"\)\.forEach\(l => \{ l\.style\.display = m === "opt" \? "flex" : "none"; \}\)/.test(rec)
+  && /_prodMode\(\) !== "opt"\) line\.style\.display = "none"/.test(rec));
 const cards = fs.readFileSync(path.join(__dirname, '../../frontend/js/campaign-cards.js'), 'utf8');
 ok('리뷰어 카드: 지금 모집 줄', /c\.nowRecruiting \? `<div class="pt-now"/.test(cards));
 const camp = fs.readFileSync(path.join(__dirname, '../../frontend/campaign.html'), 'utf8');

@@ -2126,6 +2126,8 @@ function _applyProdModeUi(m) {
   // 버튼은 두 모드 모두 "상품 추가" — none 이면 상품 한 줄, opt 이면 상품 그룹(옵션은 그룹 안에서 추가)
   const add = document.getElementById("rf_opt_addbtn");
   if (add) add.innerHTML = '<i class="fas fa-plus"></i> 상품 추가';
+  // ★ 결정 213(Codex P2): 옵션 없는 작업 모드는 선택지 원장을 저장하지 않는다 → 상품 사진 줄을 숨긴다(올려도 버려지는 막다른 길 방지)
+  document.querySelectorAll("#rf_opt_rows .rf-opt-thumb-line").forEach(l => { l.style.display = m === "opt" ? "flex" : "none"; });
 }
 /** 옵션 유무 선택 바로 아래 한 줄 안내. 진행상품 수가 아직 없으면 기본 1건으로 안내한다. */
 function _renderProdModeHelp() {
@@ -2401,6 +2403,8 @@ function _buildOptThumbLine(row, initial) {
   const line = document.createElement("div");
   line.className = "rf-opt-thumb-line";
   line.style.cssText = "display:flex;align-items:center;gap:6px;margin:4px 0 2px;font-size:.72rem;color:#6B7280;min-width:0";
+  // 옵션 없는 작업 모드에서는 숨긴다(저장되지 않는다) — 모드 전환은 _applyProdModeUi 가 이어서 맞춘다
+  if (typeof _prodMode === "function" && _prodMode() !== "opt") line.style.display = "none";
   line.innerHTML =
     '<span style="white-space:nowrap">🖼️ 상품 사진</span>' +
     '<img class="rf-opt-thumb-pv" alt="" style="width:28px;height:28px;object-fit:cover;border-radius:5px;border:1px solid #E5E7EB;display:none">' +
@@ -5685,6 +5689,12 @@ async function saveRecruitPostImpl() {
     }
     if (_quotaSkipped) {
       _changed.unshift("⚠ 총건수·일건수는 건드리지 않았습니다 — 현재 값을 불러오지 못해 그대로 두었습니다");
+    }
+    /* ★ 결정 213(Codex P2 배포 시차): 화면이 먼저 배포되고 서버가 아직 옛 버전이면 상품 사진이 조용히 버려진다
+       → 사진을 보냈는데 서버가 "상품 사진 저장을 안다"는 표시를 주지 않았으면 다시 저장하라고 알린다. */
+    if (saved && saved.optionThumbnails !== true && Array.isArray(payload.options)
+        && payload.options.some(o => o && o.thumbnailUrl)) {
+      _changed.unshift("⚠ 상품 사진은 저장되지 않았습니다 — 서버 업데이트가 끝난 뒤(1~2분) 다시 저장해주세요");
     }
 
     /* ★ 버튼 ✓ → 모달 닫힘 → 화면 가운데 안내(시안 C 확정) 로 시선이 이어진다.

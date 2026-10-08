@@ -48,8 +48,22 @@ function swapTitle(title, views, target) {
     if (owners.get(c.n).size === 1) cands.push({ ...c, v });
   }
   cands.sort((a, b) => b.n.length - a.n.length);   // 긴 이름 먼저("1. 은갈치 단품" 이 "은갈치" 보다 먼저)
-  const hit = cands.find(c => t.includes(c.n));
-  if (!hit) return { title: t, found: false };
+  // 제목 속 등장 위치를 모은다 — 더 긴 이름이 이미 덮은 자리 안의 짧은 이름은 따로 세지 않는다.
+  const covered = [];
+  const hits = [];
+  for (const c of cands) {
+    let from = 0, at;
+    while ((at = t.indexOf(c.n, from)) >= 0) {
+      const end = at + c.n.length;
+      if (!covered.some(([s, e]) => at >= s && end <= e)) { covered.push([at, end]); hits.push({ ...c, at }); }
+      from = at + 1;
+    }
+  }
+  if (!hits.length) return { title: t, found: false };
+  // ★ Codex P2: 제목에 **서로 다른 선택지 이름이 둘 이상** 있으면(예: "빨강/파랑 에코백") 어느 것을 바꿀지 모른다
+  //   → 바꾸지 않고 "지금 모집" 줄로만 알린다("파랑/파랑 에코백" 같은 잘못된 제목 방지).
+  if (new Set(hits.map(h => h.v)).size > 1) return { title: t, found: false };
+  const hit = hits[0];
   if (hit.v === target) return { title: t, found: true };
   const next = _clean(target[hit.kind]) || displayName(target);
   if (!next) return { title: t, found: false };

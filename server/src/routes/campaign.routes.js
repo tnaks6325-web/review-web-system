@@ -690,7 +690,8 @@ function _applySequentialDisplay(view, optViews) {
   view.baseThumbnailUrl = view.thumbnail_url || '';
   view.title = d.title;
   view.thumbnail_url = d.thumbnailUrl;
-  if (d.nowRecruiting) view.nowRecruiting = d.nowRecruiting;
+  // ★ Codex P2: "지금 모집" 줄은 공고가 실제로 열려 있을 때만(오픈 전·오늘 마감·종료 공고 옆에 쓰면 참여 게이트와 모순)
+  if (d.nowRecruiting && view.state === 'open') view.nowRecruiting = d.nowRecruiting;
   return view;
 }
 
@@ -1689,7 +1690,9 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
     }
     // ★ 결정 213: 순차진행 공고는 참여 전 제목·사진이 "지금 모집 중" 상품으로 바뀐다 → 참여한 사람에게는
     //   **내가 고른 상품**의 제목·사진으로 고정해 준다(나중에 다음 상품이 열려도 바뀌지 않게). 순차 아님 = null(종전).
-    const joinedView = (selectedOption && selectedOption.sequential)
+    // ★ Codex P2: 순차 판정은 **공고 기준**(선택지 중 하나라도 sequential) — 내가 고른 선택지를 관리자가 닫으면
+    //   그 선택지 뷰에는 sequential 표시가 없어 지금 모집 상품 제목으로 잘못 남는다.
+    const joinedView = (selectedOption && options.some(o => o && o.sequential))
       ? joinedDisplay({ title: camp.title, thumbnailUrl: camp.thumbnail_url }, options, selectedOption)
       : null;
     // 옵션 변경은 유효 홀드(미제출) + 옵션 2개 이상 + **실제로 옮겨 갈 수 있는 선택지가 있을 때만**(결정 212 · Codex P2 —
@@ -3031,7 +3034,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         logger.warn('[campaign/create] 달력 프리필 실패(공고는 발행됨): ' + e.message);
       }
     }
-    res.json({ ok: true, data: rows[0], options: await _loadOptionsRaw(pool, rows[0].id),
+    res.json({ ok: true, optionThumbnails: true /* ★ 결정 213: 상품 사진 저장을 아는 서버(배포 시차 판별) */, data: rows[0], options: await _loadOptionsRaw(pool, rows[0].id),
       feeSchedules: await _loadFeeSchedules(pool, rows[0].id),
       ...(optionsWarning ? { optionsWarning } : {}), ...(feeWarning ? { feeWarning } : {}),
       ...(quotaSync ? { quotaSync } : {}),
@@ -3534,7 +3537,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     const worktableRelay = rows[0].participation_mode
       ? await require('../services/campaignPlan.service').relayCampaignWorktable(id, { by: req.admin?.name || 'admin' })
       : null;
-    res.json({ ok: true, data: rows[0], options: await _loadOptionsRaw(pool, id),
+    res.json({ ok: true, optionThumbnails: true /* ★ 결정 213: 상품 사진 저장을 아는 서버(배포 시차 판별) */, data: rows[0], options: await _loadOptionsRaw(pool, id),
       ...(worktableRelay ? { worktableRelay } : {}),
       feeSchedules: await _loadFeeSchedules(pool, id),
       ...(optionsWarning ? { optionsWarning } : {}), ...(feeWarning ? { feeWarning } : {}),

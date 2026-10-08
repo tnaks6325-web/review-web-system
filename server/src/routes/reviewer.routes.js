@@ -1281,7 +1281,15 @@ router.get('/review-earnings', async (req, res, next) => {
          -- 이때 원장 좌표 campaign:<공고ID>는 이미 검증된 작업표 연결키이므로 같은 공고로 복원한다.
          LEFT JOIN recruit_campaigns rc
            ON rc.id = COALESCE(NULLIF(substring(os.sheet_id from '^campaign:(.+)$'), ''), ca.campaign_id)
-         LEFT JOIN campaign_options co ON co.campaign_id = rc.id AND co.opt_key = ca.option_key
+         -- ★ Codex P2: 신청 id 가 비어 있는 옛·복구 주문도 order_submission_id 로 신청을 되찾는다(다른 리뷰비 조회와 같은 규칙)
+         LEFT JOIN LATERAL (
+           SELECT app.option_key
+             FROM campaign_applications app
+            WHERE app.id = os.campaign_application_id OR app.order_submission_id = os.id
+            ORDER BY (app.id = os.campaign_application_id) DESC, app.applied_at DESC NULLS LAST
+            LIMIT 1
+         ) app_opt ON TRUE
+         LEFT JOIN campaign_options co ON co.campaign_id = rc.id AND co.opt_key = app_opt.option_key
         WHERE (
           (cp.id IS NOT NULL AND (
             ($2::uuid IS NULL AND cp.phone8 = ANY($1))
