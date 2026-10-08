@@ -30,8 +30,18 @@ assert.match(linkHtml, /onclick="advLinkCopy\(\)"/,
   '광고주 URL 복사는 접속 링크 관리 화면의 단일 버튼으로 제공해야 합니다.');
 assert.equal((linkHtml.match(/advLinkCopy\(\)/g) || []).length, 1,
   '접속 링크 관리 화면에는 URL 복사 버튼이 하나만 있어야 합니다.');
-assert.doesNotMatch(workdesk, /function copyAdvertiserLink\(|function _ovmCopyAdvLink\(|ovm-lkcopy/,
-  '목록·상세의 중복 복사 경로가 남으면 같은 광고주 URL을 여러 번 복사하게 된다.');
+// ★ 업체관리(목록·상세) 안의 중복 복사 경로는 계속 금지한다(2026-09-09 통합).
+assert.doesNotMatch(workdesk, /function _ovmCopyAdvLink\(|ovm-lkcopy/,
+  '업체관리 목록·상세의 중복 복사 경로가 남으면 같은 광고주 URL을 여러 번 복사하게 된다.');
+// ★ 결정 218(사용자 확정 2026-10-09): 작업보드 상단 [🏢 광고주링크] 한 곳만 추가 허용 — 업체관리 밖이고,
+//   같은 링크(advertiser-link ensure)를 쓴다. 다른 자리에 또 생기면 실패한다.
+assert.equal((workdesk.match(/onclick="copyAdvertiserLink\(\)"/g) || []).length, 1,
+  '광고주 링크 복사는 업체관리 「광고주 접속 링크」 + 작업보드 상단 버튼 한 곳까지만.');
+assert.match(workdesk, /const advLinkBtn=_isInternalRole\(\)\?`<button[^`]*onclick="copyAdvertiserLink\(\)"/,
+  '작업보드 버튼은 작업보드 상단(advLinkBtn)에만 있어야 한다.');
+const cal = workdesk.slice(workdesk.indexOf('async function copyAdvertiserLink('), workdesk.indexOf('async function copyAdvertiserLink(') + 1600);
+assert.match(cal, /action:'ensure'/, '작업보드 버튼은 링크를 바꾸지 않는다(ensure — 회전 금지).');
+assert.doesNotMatch(cal, /action:'generate'/, '작업보드 버튼에서 링크 회전 금지.');
 assert.match(workdesk, /광고주 접속 링크/,
   '유일한 진입점을 광고주 접속 링크로 명확히 표기해야 합니다.');
 
