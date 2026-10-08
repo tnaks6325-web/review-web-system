@@ -394,7 +394,7 @@ function _remainingOpenDays(c, startDate, fromDate, rt, dl, plans) {
  *   ② **총 모집인원은 그대로** — 마지막 clamp(rt - submittedBeforeToday)가 유지되므로
  *      이월이 총원을 넘겨 모집하는 일은 구조적으로 불가능하다.
  */
-function dailyQuota(c, submittedBeforeToday, carry, planCtx, eff) {
+function dailyQuota(c, submittedBeforeToday, carry, planCtx, eff, optCap = null) {
   // ★ 정원은 effectiveQuota 단일 출처 — 미전달(구 호출부)이면 공고 값 그대로(종전 동작).
   const dl = eff ? Number(eff.dailyLimit) || 0 : Number(c.daily_limit) || 0;
   const rt = eff ? Number(eff.recruitTotal) || 0 : Number(c.recruit_total) || 0;
@@ -451,6 +451,9 @@ function dailyQuota(c, submittedBeforeToday, carry, planCtx, eff) {
     }
   }
 
+  // ★ 결정 210: 선택지마다 그날 받을 수 있는 수의 합을 넘지 않는다(명시 조절일 포함 — 선택지가 못 받는 자리는
+  //   열어도 아무도 못 들어온다). null = 상한 없음(종전).
+  if (optCap !== null && optCap !== undefined && Number.isFinite(Number(optCap))) q = Math.min(q, Math.max(0, Number(optCap)));
   if (rt <= 0) return Math.max(0, q); // 무제한 캠페인 가드(영구 daily_done 방지)
   return Math.max(0, Math.min(q, rt - before));   // ★ 불변식 ② — 총원 초과 불가
 }
@@ -499,7 +502,7 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
         : Math.max(0, Math.min(plannedThrough(sch, todayStr) + planDeltaThrough(sch, counts.plans || null, todayStr),
             sch.totalSlots) - submittedBefore))
     : dailyQuota(c, submittedBefore, counts.carry && { ...counts.carry, today: todayStr },
-        { today: todayStr, plans: counts.plans || null }, eff);
+        { today: todayStr, plans: counts.plans || null }, eff, optionDayCapacity(counts.optionCaps));
   // 동일 탭을 공유한 재발행 공고는 표의 채움 수가 탭 전체 수다. 호출부가 탭 전체 정원·신청·홀드를
   // 함께 전달하면 각 공고에 같은 표 수를 개별 정원으로 적용하지 않고 공유 정원으로 판정한다.
   const tableTodayQuota = Number(counts.tableTodayQuota);
@@ -780,6 +783,15 @@ async function fetchCampaignCounts(pool, campaignIds, now = new Date()) {
       if (o) o.orderQuota = orderMap.get(id) || null;
     }
   }
+  /* ★ 결정 210: 선택지별 하루 몫 상한 재료 — 이 깔때기에 싣는다(목록·상세·참여 게이트·앞날 예상·작업표 날짜가
+     같은 상한을 본다). 쿼리 순서 계약(066 q[0]/q[1])을 흔들지 않게 맨 뒤. 실패 = 미부착 = 상한 없음(종전). */
+  const capMap = await _loadOptionDayCaps(pool, ids, now);
+  if (capMap) {
+    for (const id of ids) {
+      const o = out.get(id);
+      if (o) o.optionCaps = capMap.get(id) || null;
+    }
+  }
   return out;
 }
 
@@ -930,6 +942,22 @@ function projectDailyQuotas(c, counts, opts = {}) {
 
   let before = Number(cnt.submittedBeforeToday) || 0;
   let carrySince = cnt.carry ? (Number(cnt.carry.submittedSince) || 0) : 0;
+  /* ★ 결정 210: 선택지별 하루 몫 상한을 날마다 따라간다 — 선택지 사용량을 복사해 두고, 그날 채워진 인원을
+     선택지에 나눠 얹는다(오늘은 실제 들어온 수 먼저, 나머지·앞날은 선택지 순서대로 그날 받을 수 있는 만큼).
+     ★ 나눠 얹기는 예상일 뿐이다(실제로 누가 어느 선택지를 고를지는 모른다) — 상한 합이 하루 몫보다 클 때만 갈린다. */
+  const sim = Array.isArray(cnt.optionCaps) && cnt.optionCaps.length ? cnt.optionCaps.map(o => ({ ...o })) : null;
+  const spreadFill = (n, firstTake) => {
+    if (!sim) return;
+    let left = Math.max(0, Number(n) || 0);
+    const room = sim.map(o => _optionDayRoom(o));
+    const take = sim.map((o, i) => Math.min(room[i], firstTake ? Math.max(0, Number(o.todayUsed) || 0) : 0));
+    for (let i = 0; i < sim.length; i++) left -= take[i];
+    for (let i = 0; i < sim.length && left > 0; i++) {
+      const more = Math.min(left, Math.max(0, room[i] - take[i]));
+      take[i] += more; left -= more;
+    }
+    for (let i = 0; i < sim.length; i++) sim[i].usedBefore = (Number(sim[i].usedBefore) || 0) + take[i];
+  };
   const remaining = rt > 0 ? Math.max(0, rt - before) : null;
   const days = [];
   let endDate = null, truncated = false;
@@ -944,11 +972,13 @@ function projectDailyQuotas(c, counts, opts = {}) {
       quota = closed ? 0 : Math.max(0, Number(st.dailyQuota) || 0);
       // 오늘 이미 들어온 사람 = 판정 수(신청+홀드) · 오늘 주문(공고 밖 포함 — 결정 184) 중 큰 값
       fill = Math.max(quota, Number(st.todayCount) || 0, Number(cnt.todayOrders) || 0);
+      spreadFill(fill, true);
     } else if (!closed) {
       quota = dailyQuota(c, before,
         cnt.carry ? { ...cnt.carry, today: d, submittedSince: carrySince } : null,
-        { today: d, plans }, eff);
+        { today: d, plans }, eff, sim ? optionDayCapacity(sim) : null);
       fill = quota;
+      spreadFill(fill, false);
     }
     if (d >= from) {
       days.push({ date: d, quota, planned: planOverrideFor(plans, d), closed });
@@ -956,6 +986,8 @@ function projectDailyQuotas(c, counts, opts = {}) {
     }
     before += fill;
     carrySince += fill;
+    // ★ 결정 210: 선택지가 전부 정원에 닿으면 더 받을 날이 없다 — 빈 날만 180일 이어 붙이지 않는다.
+    if (sim && optionDayCapacity(sim) === 0 && d >= from) break;
     // 일건수도 계획도 없는 공고는 영원히 0 이다 — 빈 날만 이어 붙이지 않는다.
     if (!(dl > 0) && !plans) break;
     d = addIsoDays(d, 1);
@@ -1182,34 +1214,248 @@ function __resetHoldCacheForTest() { _blCache = { at: 0, carry: null, hold: null
 //   유효 홀드 = status='applied' AND expires_at>now (시각 기준 — 스윕 미실행 무해, 캠페인 카운트와 동일 계약).
 // ═══════════════════════════════════════════════════════════
 
+// ── 상품(선택지)별 하루 몫 상한 · 공고 밖 주문 계수 (결정 210 · 사용자 확정 2026-10-08) ──
+// ① 공고 전체 하루 몫은 "선택지마다 그날 받을 수 있는 수의 합"을 넘지 않는다 — 넘으면 일정·작업표가
+//    22/22/6 처럼 실제(22/18/10)와 다르게 깔리고 카드가 "오늘 4자리"인데 고를 선택지가 없다(누쓰쓰 50건 실측).
+// ② 공고를 거치지 않은 주문(작업보드 외부모집 수동제출 · 구매양식 바로 제출)도 그 줄의 상품/옵션 표기로
+//    선택지에 귀속해 센다 — 빼면 선택지가 정원을 넘겨 6/5 가 된다(같은 실측). 공고 전체 수는 184 부터 이미 센다.
+// 킬스위치(env): CAMPAIGN_OPTION_DAY_CAP=0 → ① 끔 · CAMPAIGN_OPTION_EXTERNAL_ORDERS=0 → ② 끔(즉시 종전).
+const OPTION_DAY_CAP_ENABLED = process.env.CAMPAIGN_OPTION_DAY_CAP !== '0';
+const OPTION_EXTERNAL_ENABLED = process.env.CAMPAIGN_OPTION_EXTERNAL_ORDERS !== '0';
+
+function _normOptLabel(s) { return String(s || '').replace(/\s+/g, '').toLowerCase(); }
+
 /**
- * 한 캠페인의 옵션별 카운트 집계 (option_key GROUP BY, 1쿼리).
- * @returns Map optKey → { activeHolds, todayActiveHolds, submitted, todaySubmitted }
+ * 공고 밖 주문 1건 → 선택지 opt_key (모르면 null). 순수 함수.
+ * 단서 순서: 주문에 적힌 옵션 → 작업표 줄의 옵션 칸 → 주문에 적힌 상품 → 작업표 줄의 상품 칸.
+ * ★★ **하나로 딱 맞을 때만** 귀속한다(정확 일치 → 없으면 4글자 이상 포함 관계). 둘 이상이 맞거나 아무것도
+ *   안 맞으면 그 단서는 버린다 — 잘못 귀속하면 멀쩡한 선택지가 마감된다(모르면 세지 않는다 = 종전).
+ * ★ 마감(closed) 선택지도 후보에 넣는다 — 빼면 마감된 선택지의 주문이 이름이 비슷한 다른 선택지로 붙는다.
+ * @param options campaign_options 행 [{opt_key, product_name}]
+ * @param order { selectedOptKey, optionText, selectedProduct, rowProduct }
  */
-async function fetchOptionCounts(db, campaignId, now = new Date()) {
+function matchOrderOption(options, order) {
+  const all = (options || []).filter(o => o && typeof o.opt_key === 'string' && o.opt_key);
+  if (!all.length || !order) return null;
+  for (const raw of [order.selectedOptKey, order.optionText, order.selectedProduct, order.rowProduct]) {
+    const c = _normOptLabel(raw);
+    if (!c) continue;
+    const exact = all.filter(o => c === _normOptLabel(o.opt_key) || (o.product_name && c === _normOptLabel(o.product_name)));
+    if (exact.length === 1) return exact[0].opt_key;
+    if (exact.length > 1 || c.length < 4) continue;
+    const part = all.filter(o => {
+      const k = _normOptLabel(o.opt_key), p = _normOptLabel(o.product_name);
+      return k.includes(c) || (p && (p.includes(c) || (p.length >= 4 && c.includes(p))));
+    });
+    if (part.length === 1) return part[0].opt_key;
+  }
+  return null;
+}
+
+/**
+ * 공고 밖 주문(신청 기록 없는 주문)을 선택지별로 센다 → Map(campaignId → Map(optKey → {n, today})).
+ * 범위·중복 규칙은 `_loadLinkedOrderCounts`(결정 031·184)와 같다: 공고 좌표 ∪ 연결 탭 좌표(시작일 이후),
+ * 같은 구매(주문번호+연락처)는 한 번, 취소됐어도 살아 있는 작업표 줄이 가리키면 센다.
+ * ★ 공유 탭(활성 공고 둘 이상)의 탭 좌표 주문은 어느 공고 것인지 몰라 세지 않는다(184 규율).
+ * ★ 늦은 구매로 신청이 확정(submitted)된 주문은 신청 쪽에서 이미 센다 → 제외(이중계수 방지).
+ * ★★ fail-soft null(= 종전: 세지 않음). 잠금 tx 안에서는 SAVEPOINT 로 격리(082 — 실패 쿼리가 tx 를 죽이지 않게).
+ */
+async function _loadExternalOptionOrders(db, ids, now = new Date()) {
+  if (!OPTION_EXTERNAL_ENABLED || TABLE_QUOTA_MODE === 'off' || !ids || !ids.length || !db || typeof db.query !== 'function') return null;
+  const inClient = typeof db.release === 'function';
+  let sp = false;
+  if (inClient) {
+    try { await db.query('SAVEPOINT opt_ext_orders'); sp = true; } catch (_) { /* tx 밖 클라이언트 */ }
+  }
+  try {
+    const dayStart = kstDayStartUtc(now).toISOString();
+    const { rows: optRows } = await db.query(
+      `SELECT campaign_id, opt_key, product_name FROM campaign_options WHERE campaign_id = ANY($1)`, [ids]);
+    const optsBy = new Map();
+    for (const r of optRows || []) {
+      if (!r || typeof r.opt_key !== 'string' || !r.opt_key || r.campaign_id == null) continue;
+      if (!optsBy.has(r.campaign_id)) optsBy.set(r.campaign_id, []);
+      optsBy.get(r.campaign_id).push(r);
+    }
+    const out = new Map();
+    const withOpts = ids.filter(id => optsBy.has(id));
+    if (withOpts.length) {
+      const { rows } = await db.query(`
+        SELECT DISTINCT ON (rc.id, ${ORDER_PURCHASE_KEY_SQL})
+               rc.id AS campaign_id, os.selected_opt_key, os.selected_product,
+               cp.option_text, cp.row_json->>'상품' AS row_product,
+               (os.submitted_at >= $2) AS is_today
+          FROM recruit_campaigns rc
+          JOIN LATERAL (
+            SELECT COUNT(*) AS n FROM recruit_campaigns rc2
+             WHERE rc2.participation_mode AND rc2.status = 'active' AND rc2.archived_at IS NULL
+               AND rc2.linked_sheet_id = rc.linked_sheet_id
+               AND (rc2.linked_tab_name = rc.linked_tab_name
+                    OR (NULLIF(rc.linked_tab_gid,'') IS NOT NULL
+                        AND NULLIF(rc2.linked_tab_gid,'') = NULLIF(rc.linked_tab_gid,'')))
+          ) shared ON TRUE
+          JOIN order_submissions os
+            ON ${ORDER_COUNTED_SQL}
+           AND os.campaign_application_id IS NULL
+           AND (
+                (os.sheet_id = 'campaign:' || rc.id AND os.tab_name = 'campaign:' || rc.id)
+             OR (shared.n <= 1
+                 AND NULLIF(rc.linked_sheet_id,'') IS NOT NULL
+                 AND os.sheet_id = rc.linked_sheet_id
+                 AND (os.tab_name = rc.linked_tab_name
+                      OR (NULLIF(rc.linked_tab_gid,'') IS NOT NULL
+                          AND NULLIF(os.tab_gid,'') = NULLIF(rc.linked_tab_gid,'')))
+                 AND os.submitted_at >= COALESCE((rc.start_date::text || 'T00:00:00+09:00')::timestamptz, rc.created_at))
+           )
+          LEFT JOIN LATERAL (
+            SELECT cpo.option_text, cpo.row_json FROM campaign_participants cpo
+             WHERE cpo.order_submission_id = os.id AND cpo.deleted_at IS NULL AND cpo.active
+             ORDER BY cpo.seq LIMIT 1
+          ) cp ON TRUE
+         WHERE rc.id = ANY($1) AND rc.participation_mode
+           AND NOT EXISTS (SELECT 1 FROM campaign_applications la
+                            WHERE la.late_order_id = os.id AND la.status = 'submitted')
+         ORDER BY rc.id, ${ORDER_PURCHASE_KEY_SQL}, os.submitted_at`, [withOpts, dayStart]);
+      for (const r of rows || []) {
+        if (!r || !optsBy.has(r.campaign_id)) continue;
+        const key = matchOrderOption(optsBy.get(r.campaign_id), {
+          selectedOptKey: r.selected_opt_key, optionText: r.option_text,
+          selectedProduct: r.selected_product, rowProduct: r.row_product,
+        });
+        if (!key) continue;
+        if (!out.has(r.campaign_id)) out.set(r.campaign_id, new Map());
+        const m = out.get(r.campaign_id);
+        const cur = m.get(key) || { n: 0, today: 0 };
+        cur.n += 1;
+        if (r.is_today === true || r.is_today === 't') cur.today += 1;
+        m.set(key, cur);
+      }
+    }
+    if (sp) { try { await db.query('RELEASE SAVEPOINT opt_ext_orders'); } catch (_) {} }
+    return out;
+  } catch (_) {
+    if (sp) { try { await db.query('ROLLBACK TO SAVEPOINT opt_ext_orders'); } catch (_) {} }
+    return null;
+  }
+}
+
+/**
+ * 여러 공고의 선택지별 카운트 일괄 집계 → Map(campaignId → Map(optKey → cnt)).
+ * cnt = { activeHolds, todayActiveHolds, submitted, todaySubmitted [, externalOrders, todayExternalOrders] }
+ * ★★ 선택지 카운트의 **단일 출처** — 참여 게이트(fetchOptionCounts)·공개 목록·공고 하루 몫 상한이 모두 이것을 쓴다.
+ */
+async function fetchOptionCountsBatch(db, campaignIds, now = new Date()) {
   const out = new Map();
-  if (!campaignId) return out;
+  const ids = (campaignIds || []).filter(Boolean);
+  if (!ids.length) return out;
   const dayStart = kstDayStartUtc(now).toISOString();
   const { rows } = await db.query(
-    `SELECT option_key,
+    `SELECT campaign_id, option_key,
             COUNT(*) FILTER (WHERE status='applied'   AND expires_at > NOW())                      AS active_holds,
             COUNT(*) FILTER (WHERE status='applied'   AND expires_at > NOW() AND applied_at >= $2)  AS today_active_holds,
             COUNT(*) FILTER (WHERE status='submitted')                                              AS submitted,
             COUNT(*) FILTER (WHERE status='submitted' AND submitted_at >= $2)                       AS today_submitted
        FROM campaign_applications
-      WHERE campaign_id = $1 AND option_key IS NOT NULL
-      GROUP BY option_key`,
-    [campaignId, dayStart]
+      WHERE campaign_id = ANY($1) AND option_key IS NOT NULL
+      GROUP BY campaign_id, option_key`,
+    [ids, dayStart]
   );
-  for (const r of rows) {
-    out.set(r.option_key, {
+  for (const r of rows || []) {
+    if (!r || r.option_key == null) continue;
+    const cid = r.campaign_id != null ? r.campaign_id : (ids.length === 1 ? ids[0] : null);
+    if (cid == null) continue;
+    if (!out.has(cid)) out.set(cid, new Map());
+    out.get(cid).set(r.option_key, {
       activeHolds: Number(r.active_holds) || 0,
       todayActiveHolds: Number(r.today_active_holds) || 0,
       submitted: Number(r.submitted) || 0,
       todaySubmitted: Number(r.today_submitted) || 0,
     });
   }
+  const ext = await _loadExternalOptionOrders(db, ids, now);
+  if (ext) {
+    for (const [cid, m] of ext) {
+      if (!out.has(cid)) out.set(cid, new Map());
+      const om = out.get(cid);
+      for (const [key, v] of m) {
+        const cur = om.get(key) || { activeHolds: 0, todayActiveHolds: 0, submitted: 0, todaySubmitted: 0 };
+        om.set(key, { ...cur, externalOrders: v.n, todayExternalOrders: v.today });
+      }
+    }
+  }
   return out;
+}
+
+/**
+ * 한 캠페인의 옵션별 카운트 → Map optKey → cnt (fetchOptionCountsBatch 의 공고 1개 판).
+ */
+async function fetchOptionCounts(db, campaignId, now = new Date()) {
+  if (!campaignId) return new Map();
+  return (await fetchOptionCountsBatch(db, [campaignId], now)).get(campaignId) || new Map();
+}
+
+/**
+ * 공고 하루 몫 상한 재료 일괄 로드 → Map(campaignId → [{key, recruitTotal, dailyLimit, usedBefore, todayUsed}]).
+ * 살아 있는(마감 아닌) 선택지만 싣는다 — 선택지가 없거나 전부 마감이면 싣지 않는다(liveOptions 규율: 옵션 없는 공고).
+ * ★★ fail-soft null = 상한 미적용(종전). 잠금 tx 안이면 SAVEPOINT 격리.
+ */
+async function _loadOptionDayCaps(db, ids, now = new Date()) {
+  if (!OPTION_DAY_CAP_ENABLED || !ids || !ids.length || !db || typeof db.query !== 'function') return null;
+  const inClient = typeof db.release === 'function';
+  let sp = false;
+  if (inClient) {
+    try { await db.query('SAVEPOINT opt_day_caps'); sp = true; } catch (_) { /* tx 밖 클라이언트 */ }
+  }
+  try {
+    const { rows: optRows } = await db.query(
+      `SELECT campaign_id, opt_key, recruit_total, daily_limit, status
+         FROM campaign_options WHERE campaign_id = ANY($1) ORDER BY campaign_id, sort_order, id`, [ids]);
+    const live = new Map();
+    for (const r of optRows || []) {
+      if (!r || typeof r.opt_key !== 'string' || !r.opt_key || r.campaign_id == null) continue;
+      if (String(r.status || 'active') === 'closed') continue;
+      if (!live.has(r.campaign_id)) live.set(r.campaign_id, []);
+      live.get(r.campaign_id).push(r);
+    }
+    const out = new Map();
+    if (live.size) {
+      const counts = await fetchOptionCountsBatch(db, [...live.keys()], now);
+      for (const [cid, opts] of live) {
+        const cm = counts.get(cid) || new Map();
+        out.set(cid, opts.map(o => {
+          const v = computeOptionView(o, cm.get(o.opt_key), null);
+          return { key: o.opt_key, recruitTotal: v.recruitTotal, dailyLimit: v.dailyLimit,
+                   usedBefore: Math.max(0, v.used - v.todayUsed), todayUsed: v.todayUsed };
+        }));
+      }
+    }
+    if (sp) { try { await db.query('RELEASE SAVEPOINT opt_day_caps'); } catch (_) {} }
+    return out;
+  } catch (_) {
+    if (sp) { try { await db.query('ROLLBACK TO SAVEPOINT opt_day_caps'); } catch (_) {} }
+    return null;
+  }
+}
+
+/** 선택지 하나가 그날 받을 수 있는 수 = min(일건수, 남은 정원). 정원 무제한이면 일건수. */
+function _optionDayRoom(o) {
+  const dl = Number(o.dailyLimit) || 0;
+  const rt = Number(o.recruitTotal) || 0;
+  return rt > 0 ? Math.min(dl, Math.max(0, rt - (Number(o.usedBefore) || 0))) : dl;
+}
+
+/**
+ * 공고 하루 몫 상한 = 선택지마다 그날 받을 수 있는 수의 합. 순수 함수.
+ * null = 상한 없음(재료 없음 · 선택지 없음 · 하루 제한 없는 선택지가 하나라도 있음 — 모르면 자르지 않는다).
+ */
+function optionDayCapacity(caps) {
+  if (!OPTION_DAY_CAP_ENABLED || !Array.isArray(caps) || !caps.length) return null;
+  let sum = 0;
+  for (const o of caps) {
+    if (!o || !(Number(o.dailyLimit) > 0)) return null;
+    sum += _optionDayRoom(o);
+  }
+  return sum;
 }
 
 /**
@@ -1225,8 +1471,9 @@ function computeOptionView(opt, cnt, campState) {
   const c = cnt || { activeHolds: 0, todayActiveHolds: 0, submitted: 0, todaySubmitted: 0 };
   const recruitTotal = Math.max(0, Number(opt.recruit_total) || 0);
   const dailyLimit = Math.max(0, Number(opt.daily_limit) || 0);
-  const used = (Number(c.submitted) || 0) + (Number(c.activeHolds) || 0);
-  const todayUsed = (Number(c.todaySubmitted) || 0) + (Number(c.todayActiveHolds) || 0);
+  // ★ 결정 210: 공고 밖 주문(외부모집 수동제출·바로 제출)도 그 선택지 자리를 쓴 것이다.
+  const used = (Number(c.submitted) || 0) + (Number(c.activeHolds) || 0) + (Number(c.externalOrders) || 0);
+  const todayUsed = (Number(c.todaySubmitted) || 0) + (Number(c.todayActiveHolds) || 0) + (Number(c.todayExternalOrders) || 0);
   const remaining = recruitTotal > 0 ? Math.max(0, recruitTotal - used) : null;       // null=무제한
   // ★★ 오늘 남은 자리는 **남은 정원보다 클 수 없다** (사용자 확정 2026-10-02 — 정원 5·일건수 3 이면
   //   첫날 3 → 둘째 날은 잔량 2). 참여 차단은 원래 정원 소진(soldout)이 먼저 막았지만, 화면은
@@ -1257,6 +1504,7 @@ function computeOptionView(opt, cnt, campState) {
     payAmount: Math.max(0, Number(opt.pay_amount) || 0),
     recruitTotal, dailyLimit,
     used, remaining, todayUsed, todayRemaining,
+    externalUsed: Math.max(0, Number(c.externalOrders) || 0),   // 그중 공고 밖 주문 수(관리자 표시용)
     status,
     selectable: status === 'open' && campOpen,
   };
@@ -1285,6 +1533,9 @@ module.exports = {
   computeCampaignState,
   fetchCampaignCounts,
   fetchOptionCounts,
+  fetchOptionCountsBatch,
+  matchOrderOption,
+  optionDayCapacity,
   computeOptionView,
   liveOptions,
   dailyQuota,
