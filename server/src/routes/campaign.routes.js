@@ -14,6 +14,8 @@ const {
   fetchOptionCounts,
   fetchOptionCountsBatch,
   computeOptionView,
+  computeOptionViews,
+  fetchSequentialCampaignIds,
   liveOptions,
   timeStrToMinutes,
   kstDayStartUtc,
@@ -607,10 +609,11 @@ async function _loadOptionViews(db, campaignId, campState, now = new Date()) {
     [campaignId]);
   if (!rows.length) return [];
   const counts = await fetchOptionCounts(db, campaignId, now);
+  // ★ 결정 211: 순차진행 공고는 앞 선택지가 찰 때까지 뒤 선택지를 잠근다(판정 단일 출처 = computeOptionViews).
+  const sequential = (await fetchSequentialCampaignIds(db, [campaignId])).has(String(campaignId));
   // ★ 134: 선택지별 유입가이드는 리뷰어 화면(work-detail)으로 나가는 HTML이므로 **응답 직전 재정화**
   //   (저장 시 1차 정화와 이중 적용 — §03-E 규율. 옛 행·직접 DB 수정분을 신뢰하지 않는다).
-  return rows.map(r => {
-    const v = computeOptionView(r, counts.get(r.opt_key), campState);
+  return computeOptionViews(rows, counts, campState, { sequential }).map(v => {
     v.inflowGuideHtml = sanitizeGuideHtml(v.inflowGuideHtml);
     v.inflowGuideImages = sanitizeGuideImages(v.inflowGuideImages);
     return v;
@@ -629,7 +632,7 @@ function _publicOptionView(v) {
     unitKind: v.unitKind || 'option',
     remaining: v.remaining,           // null=무제한
     todayRemaining: v.todayRemaining, // null=옵션 일일제한 없음
-    status: v.status,                 // open|soldout|today_done|closed
+    status: v.status,                 // open|soldout|today_done|closed|waiting(순차진행 — 앞 선택지 마감 후 열림)
     selectable: v.selectable,
   };
 }
@@ -658,10 +661,13 @@ async function _fetchOptionsForCampaigns(db, ids, now = new Date()) {
        FROM campaign_options WHERE campaign_id = ANY($1) ORDER BY campaign_id, (status='closed'), sort_order, id`, [list]);
   if (!optRows.length) return out;
   // ★ 결정 210: 선택지 카운트는 단일 출처(fetchOptionCountsBatch — 공고 밖 주문 포함)로 센다.
-  const cntBy = await fetchOptionCountsBatch(db, [...new Set(optRows.map(r => r.campaign_id))], now);
+  const campIds = [...new Set(optRows.map(r => r.campaign_id))];
+  const cntBy = await fetchOptionCountsBatch(db, campIds, now);
+  const seqIds = await fetchSequentialCampaignIds(db, campIds);   // ★ 결정 211
   for (const row of optRows) {
     if (!out.has(row.campaign_id)) out.set(row.campaign_id, []);
-    out.get(row.campaign_id).push({ row, cnt: (cntBy.get(row.campaign_id) || new Map()).get(row.opt_key) });
+    out.get(row.campaign_id).push({ row, cnt: (cntBy.get(row.campaign_id) || new Map()).get(row.opt_key),
+      sequential: seqIds.has(String(row.campaign_id)) });
   }
   return out;
 }
@@ -1215,7 +1221,8 @@ router.get('/list', async (req, res, next) => {
       if (r.participation_mode && opts && opts.length) {
         // ★ 살아있는 옵션이 하나도 없으면(= 관리자가 옵션 구조를 정리한 공고) 옵션 자체를 노출하지 않는다 —
         //   apply 게이트와 같은 `liveOptions` 판정이라 "카드엔 옵션 N종인데 참여는 옵션을 안 받는" 불일치가 없다.
-        const optViews = opts.map(o => computeOptionView(o.row, o.cnt, view));
+        const optViews = computeOptionViews(opts.map(o => o.row), new Map(opts.map(o => [o.row.opt_key, o.cnt])), view,
+          { sequential: opts.some(o => o.sequential) });
         if (liveOptions(optViews).length) view.options = optViews.map(_publicOptionView);
       }
       return view;
@@ -1714,18 +1721,26 @@ router.post('/:id/change-option', applyLimiter, async (req, res, next) => {
     if (app.option_key === newKey) { await client.query('COMMIT'); return res.json({ ok: true, optionKey: newKey, unchanged: true }); }
 
     // 새 옵션: 활성 + 잔여/오늘 확인 (전환 대상은 자기 홀드를 포함하지 않음 = 기존 옵션에 계수돼 있음 → 순증 판정 정확)
-    const { rows: optRows } = await client.query(
-      `SELECT opt_key, pay_amount, recruit_total, daily_limit, status FROM campaign_options WHERE campaign_id=$1 AND opt_key=$2 LIMIT 1`,
-      [id, newKey]);
-    if (!optRows.length || optRows[0].status !== 'active') {
+    // ★ 결정 211: 순차진행 판정은 선택지 **전체 순서**가 있어야 하므로 전부 읽어 목록 뷰(단일 출처)로 계산한다.
+    const { rows: allOptRows } = await client.query(
+      `SELECT opt_key, pay_amount, recruit_total, daily_limit, status, sort_order
+         FROM campaign_options WHERE campaign_id=$1 ORDER BY (status='closed'), sort_order, id`,
+      [id]);
+    const target = allOptRows.find(o => o.opt_key === newKey);
+    if (!target || target.status !== 'active') {
       await client.query('ROLLBACK');
       return res.status(400).json({ ok: false, reason: 'option_invalid', error: '선택한 옵션을 찾을 수 없어요.' });
     }
     const st = computeCampaignState(camp, (await fetchCampaignCounts(client, [id], now)).get(id), now);
     const optCounts = await fetchOptionCounts(client, id, now);
-    const ov = computeOptionView(optRows[0], optCounts.get(newKey), { state: 'open' }); // 변경은 캠페인 open 무관(이미 참여중)
+    const sequential = (await fetchSequentialCampaignIds(client, [id])).has(String(id));
+    const ov = computeOptionViews(allOptRows, optCounts, { state: 'open' }, { sequential })   // 변경은 캠페인 open 무관(이미 참여중)
+      .find(v => v.optKey === newKey);
     if (ov.status !== 'open') {
       await client.query('ROLLBACK');
+      if (ov.status === 'waiting') {
+        return res.status(409).json({ ok: false, reason: 'option_waiting', option: _publicOptionView(ov), error: '아직 차례가 아닌 상품이에요. 앞 상품이 마감되면 열려요.' });
+      }
       const reason = ov.status === 'soldout' ? 'option_soldout' : (ov.status === 'today_done' ? 'option_today_done' : 'option_closed');
       return res.status(409).json({ ok: false, reason, option: _publicOptionView(ov), error: '선택한 옵션은 마감되었어요. 다른 옵션을 선택해주세요.' });
     }
@@ -1900,9 +1915,14 @@ async function _applyParticipation(req, res, next, campPre) {
           return res.status(400).json({ ok: false, reason: 'option_invalid', error: '선택한 옵션을 찾을 수 없어요. 새로고침 후 다시 선택해주세요.' });
         }
         const optCounts = await fetchOptionCounts(client, id, now);
-        const ov = computeOptionView(chosenOpt, optCounts.get(chosenOpt.opt_key), st);
+        // ★ 결정 211: 순차진행이면 앞 선택지가 찰 때까지 뒤 선택지는 waiting(목록 뷰 단일 출처로 계산).
+        const sequential = (await fetchSequentialCampaignIds(client, [id])).has(String(id));
+        const ov = computeOptionViews(allOpts, optCounts, st, { sequential }).find(v => v.optKey === chosenOpt.opt_key);
         if (ov.status !== 'open') {
           await client.query('ROLLBACK');
+          if (ov.status === 'waiting') {
+            return res.status(409).json({ ok: false, reason: 'option_waiting', option: _publicOptionView(ov), error: '아직 차례가 아닌 상품이에요. 앞 상품이 마감되면 열려요.' });
+          }
           const reason = ov.status === 'soldout' ? 'option_soldout' : (ov.status === 'today_done' ? 'option_today_done' : 'option_closed');
           return res.status(409).json({ ok: false, reason, option: _publicOptionView(ov), error: '선택한 옵션은 마감되었어요. 다른 옵션을 선택해주세요.' });
         }

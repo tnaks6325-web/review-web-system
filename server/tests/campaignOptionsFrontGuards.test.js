@@ -53,7 +53,8 @@ ok('campaign-cards: 카드 옵션 요약칩(_optChip)', /function _optChip\(c\)/
 
 // ── 목록 API 옵션 ──
 ok('list API: 배치 옵션 조회(_fetchOptionsForCampaigns)', /async function _fetchOptionsForCampaigns/.test(routes) && /optionsMap = await _fetchOptionsForCampaigns/.test(routes));
-ok('list API: 카드에 옵션명+잔여(_publicOptionView, 금액 은닉)', /const optViews = opts\.map\(o => computeOptionView\(o\.row, o\.cnt, view\)\)/.test(routes) && /view\.options = optViews\.map\(_publicOptionView\)/.test(routes));
+// ★ 결정 212: 목록 뷰 단일 출처(computeOptionViews — 순차진행 순서 잠금 포함)로 바뀜. 검사 의미 불변(행+카운트 → 공개 뷰).
+ok('list API: 카드에 옵션명+잔여(_publicOptionView, 금액 은닉)', /const optViews = computeOptionViews\(opts\.map\(o => o\.row\), new Map\(opts\.map\(o => \[o\.row\.opt_key, o\.cnt\]\)\), view,/.test(routes) && /view\.options = optViews\.map\(_publicOptionView\)/.test(routes));
 // ★ 공개 뷰도 apply 게이트와 같은 `liveOptions` 기준 — 살아있는 옵션 0이면 옵션 자체를 안 실어
 //   카드 옵션칩·참여 전 옵션 목록이 "옵션 N종"이라 말하는데 참여는 옵션을 안 받는 불일치를 막는다.
 ok('list/상세 API: 살아있는 옵션 0이면 옵션 미노출(liveOptions 게이트)', /if \(liveOptions\(optViews\)\.length\) view\.options = /.test(routes) && /if \(liveOptions\(opts\)\.length\) view\.options = opts\.map\(_publicOptionView\)/.test(routes));

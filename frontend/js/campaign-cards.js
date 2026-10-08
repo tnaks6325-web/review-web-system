@@ -377,7 +377,8 @@
     const opts = (c && c.options) || [];
     if (!opts.length) return '';
     const open = opts.filter(o => o.status === 'open').length;
-    const done = opts.length - open;
+    // ★ 결정 212: 순차진행의 대기(waiting) 선택지는 마감이 아니다 — "N종 마감"에 세지 않는다.
+    const done = opts.filter(o => o.status !== 'open' && o.status !== 'waiting').length;
     const imminent = opts.some(o => o.status === 'open' && o.remaining != null && o.remaining <= 3);
     let hint = '';
     if (open === 0) hint = '전체 마감';
