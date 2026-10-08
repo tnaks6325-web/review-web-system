@@ -18,6 +18,7 @@ const db=new PGlite();
 const canon=rows=>rows.map(r=>JSON.stringify(r)).sort();
 (async()=>{try{
  await db.exec(`
+ CREATE TABLE campaign_options(campaign_id text,opt_key text,thumbnail_url text DEFAULT '');
  CREATE TABLE reviewers(id uuid,phone8 text,sub_accounts jsonb DEFAULT '[]');
  CREATE TABLE reviewer_phone_changes(reviewer_id uuid,old_phone8 text);
  CREATE TABLE reviewer_identities(id uuid,owner_reviewer_id uuid);
@@ -26,7 +27,7 @@ const canon=rows=>rows.map(r=>JSON.stringify(r)).sort();
  CREATE TABLE campaign_participants(id uuid,order_submission_id uuid,sheet_id text,tab_name text,seq int,owner_reviewer_id uuid,phone8 text,active boolean,deleted_at timestamptz,participant_identity_id uuid,row_json jsonb);
  CREATE TABLE reviewer_participations(sheet_id text,tab_name text,row_index int,lifecycle_status text,review_obligation_status text);
  CREATE TABLE order_submissions(id uuid,sheet_id text,tab_name text,sheet_row int,phone text,owner_reviewer_id uuid,deleted_at timestamptz,campaign_application_id uuid,participant_identity_id uuid,price text,review_fee_snapshot int,delivery_review_fee_mix_snapshot jsonb,submitted_at timestamptz);
- CREATE TABLE campaign_applications(id uuid,order_submission_id uuid,campaign_id text,owner_reviewer_id uuid,owner_phone8 text,phone8 text,participant_identity_id uuid,applied_at timestamptz);
+ CREATE TABLE campaign_applications(id uuid,order_submission_id uuid,campaign_id text,owner_reviewer_id uuid,owner_phone8 text,phone8 text,participant_identity_id uuid,applied_at timestamptz,option_key text);
  CREATE TABLE participation_links(sheet_id text,tab_name text,row_index int,phone8 text,owner_reviewer_id uuid,participant_identity_id uuid);
  CREATE TABLE review_closed_targets(sheet_id text,tab_name text,row_index int,order_submission_id uuid,review_status text);
  CREATE TABLE recruit_campaigns(id text,review_fee int,delivery_review_fee_mix jsonb,thumbnail_url text,start_date date);

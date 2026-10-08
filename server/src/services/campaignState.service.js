@@ -1536,6 +1536,8 @@ function computeOptionView(opt, cnt, campState, viewOpts = null) {
     inflowGuideHtml: String(opt.inflow_guide_html || ''),
     inflowGuideImages: Array.isArray(opt.inflow_guide_images) ? opt.inflow_guide_images : [],
     payAmount: Math.max(0, Number(opt.pay_amount) || 0),
+    // ★ 결정 213: 선택지별 사진(빈 값 = 공고 대표 사진). SELECT 에 칸이 없으면 '' — 종전 동작.
+    thumbnailUrl: String(opt.thumbnail_url || ''),
     recruitTotal, dailyLimit,
     used, remaining, todayUsed, todayRemaining,
     externalUsed: Math.max(0, Number(c.externalOrders) || 0),   // 그중 공고 밖 주문 수(관리자 표시용)

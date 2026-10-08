@@ -32,6 +32,46 @@ const reviewerOrderIdentity = require('../services/reviewerOrderIdentity.service
 const { earningsCandidates } = require('../services/reviewEarningsCandidates.service');
 const { boundedReviewRead } = require('../services/boundedReviewRead.service');
 
+
+/**
+ * ★ 결정 213: 순차진행 공고의 "참여 중" 내역은 **내가 고른 상품**의 제목·사진으로 고정한다.
+ * (참여 전 화면은 지금 모집 중 상품으로 바뀌므로, 공고 저장 제목을 그대로 쓰면 다른 상품 이름이 보일 수 있다.)
+ * 판정·치환 단일 출처 = utils/sequentialDisplay.joinedDisplay · 순차 판정 = campaignState.fetchSequentialCampaignIds.
+ * ★ fail-soft — 조회 실패면 종전(공고 제목·사진) 그대로.
+ */
+async function _applyJoinedDisplay(holdRows) {
+  const rows = (holdRows || []).filter(h => h && h.optionKey && h.campaignId);
+  if (!rows.length) return;
+  try {
+    const { fetchSequentialCampaignIds } = require('../services/campaignState.service');
+    const { joinedDisplay } = require('../utils/sequentialDisplay');
+    const ids = [...new Set(rows.map(h => String(h.campaignId)))];
+    const seq = await fetchSequentialCampaignIds(pool, ids);
+    const seqIds = ids.filter(id => seq.has(id));
+    if (!seqIds.length) return;
+    const { rows: opts } = await pool.query(
+      `SELECT campaign_id, opt_key, product_name, unit_kind, thumbnail_url
+         FROM campaign_options WHERE campaign_id = ANY($1) ORDER BY campaign_id, (status='closed'), sort_order, id`, [seqIds]);
+    const byCamp = new Map();
+    for (const o of opts) {
+      if (!byCamp.has(o.campaign_id)) byCamp.set(o.campaign_id, []);
+      byCamp.get(o.campaign_id).push({ optKey: o.opt_key, productName: o.product_name || '',
+        unitKind: o.unit_kind === 'product' ? 'product' : 'option', thumbnailUrl: o.thumbnail_url || '' });
+    }
+    for (const h of rows) {
+      const views = byCamp.get(String(h.campaignId));
+      if (!views) continue;
+      const joined = views.find(v => v.optKey === h.optionKey);
+      if (!joined) continue;
+      const d = joinedDisplay({ title: h.title, thumbnailUrl: h.thumbnailUrl }, views, joined);
+      h.title = d.title;
+      h.thumbnailUrl = d.thumbnailUrl;
+    }
+  } catch (e) {
+    logger.warn(`[reviewer] 순차진행 참여 내역 표시 실패(종전 표시): ${e.message}`);
+  }
+}
+
 router.get('/participations', reviewerSessionMiddleware, async (req, res, next) => {
   res.set('Cache-Control','no-store');
   try {
@@ -664,7 +704,7 @@ router.get('/my-status', async (req, res, next) => {
         SELECT ca.id, ca.campaign_id AS "campaignId", ca.applicant_name AS "name",
                ca.status, ca.applied_at AS "appliedAt", ca.expires_at AS "expiresAt",
                (ca.owner_phone8 IS NOT NULL AND ca.owner_phone8 <> ca.phone8) AS "isSub",
-               rc.title, rc.thumbnail_url AS "thumbnailUrl"
+               rc.title, rc.thumbnail_url AS "thumbnailUrl", ca.option_key AS "optionKey"
           FROM campaign_applications ca
           JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
          WHERE (ca.owner_reviewer_id = $2
@@ -691,6 +731,7 @@ router.get('/my-status', async (req, res, next) => {
          ORDER BY ca.applied_at DESC
          LIMIT 20
       `, [phoneList, ownerReviewerId, restrictParticipant, participantIdentityId]);
+      await _applyJoinedDisplay(holdRows);   // ★ 결정 213: 순차진행 공고는 내가 고른 상품의 제목·사진으로 고정
       for (const h of holdRows) {
         items.unshift({
           id: `hold-${h.id}`,
@@ -1229,7 +1270,8 @@ router.get('/review-earnings', async (req, res, next) => {
               os.review_fee_snapshot AS "feeSnapshot", os.delivery_review_fee_mix_snapshot AS "deliveryReviewFeeMixSnapshot",
               os.submitted_at AS "orderedAt", cp.row_json AS "rowJson",
               COALESCE(rc.review_fee, 0) AS "reviewFee", rc.delivery_review_fee_mix AS "deliveryReviewFeeMix",
-              rc.thumbnail_url AS "thumbnailUrl",
+              -- ★ 결정 213: 내가 고른 선택지에 사진이 있으면 그 사진(없으면 공고 대표 사진 — 종전)
+              COALESCE(NULLIF(co.thumbnail_url, ''), rc.thumbnail_url) AS "thumbnailUrl",
               to_char(rc.start_date, 'YYYY-MM-DD') AS "campStartDate"
          FROM earnings_orders os
          LEFT JOIN campaign_participants cp
@@ -1239,6 +1281,7 @@ router.get('/review-earnings', async (req, res, next) => {
          -- 이때 원장 좌표 campaign:<공고ID>는 이미 검증된 작업표 연결키이므로 같은 공고로 복원한다.
          LEFT JOIN recruit_campaigns rc
            ON rc.id = COALESCE(NULLIF(substring(os.sheet_id from '^campaign:(.+)$'), ''), ca.campaign_id)
+         LEFT JOIN campaign_options co ON co.campaign_id = rc.id AND co.opt_key = ca.option_key
         WHERE (
           (cp.id IS NOT NULL AND (
             ($2::uuid IS NULL AND cp.phone8 = ANY($1))
