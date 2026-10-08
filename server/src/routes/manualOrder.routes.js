@@ -143,6 +143,7 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
 
     const adminName = (req.admin && req.admin.name) || '';
     const results = [];
+    const optTaken = new Map();   // ★ 이 묶음 안에서 상품별로 이미 받은 줄 수 — 남은 자리를 묶음 전체로 본다(Codex 리뷰)
     for (let i = 0; i < items.length; i++) {
       const it = items[i] || {};
       const f = it.fields || {};
@@ -159,18 +160,28 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
         results.push({ index: i, ok: false, error: `전화번호 자릿수가 이상합니다 (${pd.length}자리)`, name: f.recipient || '' });
         continue;
       }
-      let itemOptKey = it.optionKey || '';
+      // ★ 작업보드 경로에서 상품 목록을 못 읽었으면 화면 값을 쓰지 않는다(검증 못 한 이름이 옵션 칸에 남지 않게 = 종전).
+      let itemOptKey = campaignId ? (it.optionKey || '') : '';
+      let itemOver = false;
       if (optCtx) {
         const live = optCtx.choices;
-        const ch = live.find(c => c.optKey === String(it.optionKey || '')) || (live.length === 1 ? live[0] : null);
+        const asked = String(it.optionKey || '');
+        // ★ 상품 1개 자동은 **고른 값이 비었을 때만** — 고른 상품이 그사이 사라졌는데 남은 하나로 바꿔 넣지 않는다.
+        const ch = asked ? live.find(c => c.optKey === asked) : (live.length === 1 ? live[0] : null);
         if (optionAware && !ch) {
-          results.push({ index: i, ok: false, reason: 'option_required', name: f.recipient || '', error: '상품(옵션)을 골라 주세요' });
+          results.push({ index: i, ok: false, reason: asked ? 'option_unavailable' : 'option_required', name: f.recipient || '',
+            error: asked ? '고른 상품을 더 이상 고를 수 없습니다(마감·삭제) — 다시 열어 골라 주세요' : '상품(옵션)을 골라 주세요' });
           continue;
         }
-        if (optionAware && ch && ch.status === 'soldout' && it.optionFullAck !== true) {
-          results.push({ index: i, ok: false, reason: 'option_full_confirm', name: f.recipient || '',
-            error: `이 상품은 이미 찼습니다(${ch.used}/${ch.recruitTotal}) — 확인 체크 후 다시 제출해 주세요` });
-          continue;
+        if (ch) {
+          const n = (optTaken.get(ch.optKey) || 0) + 1;
+          itemOver = ch.remaining != null && n > ch.remaining;
+          if (optionAware && itemOver && it.optionFullAck !== true) {
+            results.push({ index: i, ok: false, reason: 'option_full_confirm', name: f.recipient || '',
+              error: `이 상품의 남은 자리(${ch.remaining})를 넘습니다 — 확인 체크 후 다시 제출해 주세요` });
+            continue;
+          }
+          optTaken.set(ch.optKey, n);
         }
         itemOptKey = ch ? ch.optKey : '';
       }
@@ -195,9 +206,9 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
         if (allowOverDaily && r && r.ok) {
           r.warnings = (r.warnings || []).concat('오늘 모집인원을 초과해 접수했습니다(관리자 확인됨)');
         }
-        if (r && r.ok && optCtx && it.optionFullAck === true) {
+        if (r && r.ok && itemOver) {
           const ch = optCtx.choices.find(c => c.optKey === itemOptKey);
-          if (ch && ch.status === 'soldout') r.warnings = (r.warnings || []).concat(`이미 찬 상품(${ch.productName || ch.optKey})에 정원을 넘겨 접수했습니다(관리자 확인됨)`);
+          r.warnings = (r.warnings || []).concat(`남은 자리가 없는 상품(${ch ? (ch.unitKind === 'option' ? ch.optKey : (ch.productName || ch.optKey)) : itemOptKey})에 정원을 넘겨 접수했습니다(관리자 확인됨)`);
         }
         results.push({ index: i, name: f.recipient || '', ...r });
       } catch (e) {

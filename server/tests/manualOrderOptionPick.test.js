@@ -72,8 +72,8 @@ const OPT_ROWS = [
   const post = async (body) => { let out; await handler({ body: { sheetId: 'S', tabName: 'T', allowRepurchase: true, ...body }, admin: { name: 'A' } },
     { json: v => { out = v; }, status() { return this; } }, e => { throw e; }); return out; };
   const C2 = { campaignId: 'c1', choices: [
-    { optKey: NU[0], productName: NU[0], status: 'soldout', used: 5, recruitTotal: 5 },
-    { optKey: NU[1], productName: NU[1], status: 'open', used: 20, recruitTotal: 30 } ] };
+    { optKey: NU[0], productName: NU[0], status: 'soldout', used: 5, recruitTotal: 5, remaining: 0 },
+    { optKey: NU[1], productName: NU[1], status: 'open', used: 29, recruitTotal: 30, remaining: 1 } ] };
 
   await ok('새 화면: 상품 2개 이상인데 안 고른 줄은 거절(쓰기 없음)', async () => {
     choices = C2; calls.length = 0;
@@ -89,6 +89,26 @@ const OPT_ROWS = [
     assert.equal(calls[0].optionKey, NU[0]); assert.equal(calls[0].optionCampaignId, 'c1'); assert.equal(calls[0].campaignId, null);
     assert(r2.results[0].warnings.some(w => /정원을 넘겨/.test(w)));
   });
+  await ok('새 화면: 한 묶음에서 남은 자리(1)를 넘는 둘째 줄은 확인을 받는다(Codex 리뷰)', async () => {
+    choices = C2; calls.length = 0;
+    const r = await post({ optionAware: true, items: [{ fields: F, optionKey: NU[1] }, { fields: F, optionKey: NU[1] }] });
+    assert.equal(r.results[0].ok, true); assert.equal(r.results[1].reason, 'option_full_confirm'); assert.equal(calls.length, 1);
+    calls.length = 0;
+    const r2 = await post({ optionAware: true, items: [{ fields: F, optionKey: NU[1] }, { fields: F, optionKey: NU[1], optionFullAck: true }] });
+    assert.equal(r2.okCount, 2); assert(r2.results[1].warnings.some(w => /정원을 넘겨/.test(w)));
+  });
+  await ok('고른 상품이 그사이 사라지면 남은 하나로 바꿔 넣지 않는다(Codex 리뷰)', async () => {
+    choices = { campaignId: 'c1', choices: [{ optKey: 'B', productName: 'B', status: 'open', used: 0, recruitTotal: 10, remaining: 10 }] }; calls.length = 0;
+    const r = await post({ optionAware: true, items: [{ fields: F, optionKey: 'A' }] });
+    assert.equal(r.results[0].reason, 'option_unavailable'); assert.equal(calls.length, 0);
+    await post({ items: [{ fields: F, optionKey: 'A' }] });
+    assert.equal(calls[0].optionKey, '', '옛 화면은 접수하되 확인 못 한 이름은 버린다');
+  });
+  await ok('접수 때 상품 목록을 못 읽으면 화면 값을 쓰지 않는다(종전 = 빈 값 · Codex 리뷰)', async () => {
+    choices = null; calls.length = 0;
+    await post({ optionAware: true, items: [{ fields: F, optionKey: NU[0] }] });
+    assert.equal(calls[0].optionKey, ''); assert.equal(calls[0].optionCampaignId, null);
+  });
   await ok('새 화면: 남은 상품을 고르면 그 이름 + 연결 공고로 넘긴다(정원 차감·신청 생성 경로 아님)', async () => {
     choices = C2; calls.length = 0;
     await post({ optionAware: true, items: [{ fields: F, optionKey: NU[1] }] });
@@ -100,7 +120,7 @@ const OPT_ROWS = [
     assert.equal(r.okCount, 2); assert.equal(calls[0].optionKey, ''); assert.equal(calls[1].optionKey, '');
   });
   await ok('상품 1개 공고: 고르지 않아도 자동으로 그 상품', async () => {
-    choices = { campaignId: 'c9', choices: [{ optKey: 'X', productName: 'X', status: 'open', used: 0, recruitTotal: 10 }] }; calls.length = 0;
+    choices = { campaignId: 'c9', choices: [{ optKey: 'X', productName: 'X', status: 'open', used: 0, recruitTotal: 10, remaining: 10 }] }; calls.length = 0;
     await post({ optionAware: true, items: [{ fields: F }] });
     assert.equal(calls[0].optionKey, 'X'); assert.equal(calls[0].optionCampaignId, 'c9');
   });
@@ -148,6 +168,12 @@ const OPT_ROWS = [
     assert(/filter\(x => submittable\(x\.r\)\)/.test(mo));
     assert(/optionAware: OPTS\.length > 0/.test(mo) && /optionFullAck: x\.r\.optFullAck === true/.test(mo));
     assert(/pickOption, ackOption/.test(mo));
+  });
+  await ok('화면: 옵션 단위는 옵션 이름으로 보이고, 상품 1개여도 남은 자리 초과 확인 체크가 나온다(Codex 리뷰)', async () => {
+    assert(/o\.unitKind === 'option' \? o\.optKey : \(o\.productName \|\| o\.optKey\)/.test(mo));
+    const cell = mo.slice(mo.indexOf('function optCell('), mo.indexOf('function pickOption('));
+    assert(cell.indexOf('_optOver(it)') < cell.indexOf('OPTS.length === 1'), '확인 체크 판단이 자동 표시보다 먼저');
+    assert(/if \(!OPTS\.length\) return '';\s*if \(!_optOf\(it\)\) return 'need';/.test(mo));
   });
   console.log(`\n✅ manualOrderOptionPick: ${passed} passed`);
   process.exit(0);

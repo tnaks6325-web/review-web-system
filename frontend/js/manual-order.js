@@ -334,14 +334,22 @@
   }
 
   // ── 상품(선택지) 고르기 (결정 211) ─────────────────────────
-  const _optName = o => (o && (o.productName || o.optKey)) || '';
+  // 옵션 단위는 같은 상품의 옵션끼리 상품명이 같다 — 옵션 이름(optKey)으로 보여야 구분된다(Codex 리뷰).
+  const _optName = o => (o && (o.unitKind === 'option' ? o.optKey : (o.productName || o.optKey))) || '';
   const _optOf = it => OPTS.find(o => o.optKey === it.optKey) || null;
-  /** 이 줄이 상품 때문에 제출이 막히는가: 'need'(안 고름) | 'ack'(마감 상품 확인 전) | '' */
-  function optBlock(it) {
-    if (OPTS.length < 2 && !(OPTS.length === 1 && !it.optKey)) return '';
+  /** 이 줄이 고른 상품의 남은 자리를 넘는가 — 위에서부터 같은 상품을 고른 정상 줄 수로 센다(서버와 같은 순서·같은 셈). */
+  function _optOver(it) {
     const o = _optOf(it);
-    if (!o) return 'need';
-    if (o.status === 'soldout' && !it.optFullAck) return 'ack';
+    if (!o || o.remaining == null) return false;
+    let n = 0;
+    for (const r of ROWS) { if (r.ok && r.optKey === o.optKey) n++; if (r === it) break; }
+    return n > o.remaining;
+  }
+  /** 이 줄이 상품 때문에 제출이 막히는가: 'need'(안 고름) | 'ack'(남은 자리 초과 확인 전) | '' */
+  function optBlock(it) {
+    if (!OPTS.length) return '';
+    if (!_optOf(it)) return 'need';
+    if (_optOver(it) && !it.optFullAck) return 'ack';
     return '';
   }
   const submittable = it => !!it.ok && !optBlock(it);
@@ -353,13 +361,15 @@
   }
   function optCell(it, i) {
     if (!OPTS.length) return '';
-    if (OPTS.length === 1) return `<td style="min-width:150px"><span class="mo-bdg grn">자동</span> ${esc(_optName(OPTS[0]))}</td>`;
     const o = _optOf(it);
     let msg = '';
     if (!o) msg = '<div class="mo-msg e">✕ 상품을 골라야 제출할 수 있습니다</div>';
-    else if (o.status === 'soldout') msg = `<label class="mo-ack"><input type="checkbox" id="moAck${i}" ${it.optFullAck ? 'checked' : ''}
-        onchange="ManualOrder.ackOption(${i},this.checked)"> 이미 찬 상품입니다(${o.used}/${o.recruitTotal}). 그래도 등록하면 ${o.used + 1}/${o.recruitTotal}이 됩니다 — 확인했습니다</label>`;
+    else if (_optOver(it)) msg = `<label class="mo-ack"><input type="checkbox" id="moAck${i}" ${it.optFullAck ? 'checked' : ''}
+        onchange="ManualOrder.ackOption(${i},this.checked)"> ${o.remaining > 0
+          ? `이 상품은 남은 자리가 ${o.remaining}개라 이 줄부터 정원을 넘습니다`
+          : `이미 찬 상품입니다(${o.used}/${o.recruitTotal})`} — 이미 산 주문이라 확인 후 등록합니다</label>`;
     else if (o.todayRemaining === 0) msg = '<div class="mo-msg w">⚠ 오늘 몫은 찼지만 총 정원은 남아 있습니다 — 그대로 등록됩니다</div>';
+    if (OPTS.length === 1) return `<td style="min-width:180px"><span class="mo-bdg grn">자동</span> ${esc(_optName(OPTS[0]))}${msg}</td>`;
     return `<td style="min-width:220px">
       <select class="mo-appsel" id="moOpt${i}" aria-label="${i + 1}번 줄 상품" onchange="ManualOrder.pickOption(${i},this.value)">
         <option value="">상품 선택 필수</option>${OPTS.map(x => `<option value="${esc(x.optKey)}" ${it.optKey === x.optKey ? 'selected' : ''}>${esc(optLabel(x))}</option>`).join('')}
@@ -385,7 +395,7 @@
     const need = ROWS.filter(r => r.ok && optBlock(r) === 'need').length;
     const ack = ROWS.filter(r => r.ok && optBlock(r) === 'ack').length;
     const tip = document.getElementById('moOptTip');
-    if (tip) tip.textContent = need ? `상품을 고르지 않은 줄 ${need}개는 제출되지 않습니다` : ack ? `마감 상품 확인 체크 ${ack}개가 필요합니다` : '';
+    if (tip) tip.textContent = need ? `상품을 고르지 않은 줄 ${need}개는 제출되지 않습니다` : ack ? `남은 자리를 넘는 줄 ${ack}개는 확인 체크가 필요합니다` : '';
   }
 
   function rowHtml(it, i) {
