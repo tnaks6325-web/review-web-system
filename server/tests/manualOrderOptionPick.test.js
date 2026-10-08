@@ -166,6 +166,15 @@ const OPT_ROWS = [
     assert(/if \(!sheetlessDone\.ok\) \{\s*\/\/[^\n]*\n\s*try \{ await markOrderMirrorFailed\(ledger\.orderSubmissionId/.test(src), '작업표 기록 실패는 자동복구 대상으로 표시');
   });
 
+  await ok('작업표 기록이 실패한 작업보드 수동제출(신청·줄 번호 없음)도 자동복구가 다시 쓴다(결정 213 · Codex 리뷰)', async () => {
+    const src = require('fs').readFileSync(require('path').resolve(__dirname, '../src/services/sheetlessOrder.service.js'), 'utf8');
+    const fn = src.slice(src.indexOf('async function recoverUnwrittenSheetlessOrders('), src.indexOf('const result = {', src.indexOf('async function recoverUnwrittenSheetlessOrders(')));
+    assert(/UNION ALL/.test(fn), '신청 기준 갈래 + 수동제출 갈래');
+    assert(/os\.source = 'admin_external'/.test(fn) && /os\.campaign_application_id IS NULL/.test(fn) && /os\.sheet_row IS NULL/.test(fn));
+    assert(/COALESCE\(tc\.sheetless, FALSE\) = TRUE[\s\S]*JOIN workboards w ON w\.id = tc\.workboard_id AND w\.state = 'active'/.test(fn), '무시트·작업보드 연결 탭만');
+    assert(/ORDER BY submitted_at ASC\s*LIMIT \$1/.test(fn), '두 갈래를 합친 뒤 오래된 순 상한');
+  });
+
   // ── 화면 배선(정적) ──
   const fs = require('fs'), path = require('path');
   const mo = fs.readFileSync(path.resolve(__dirname, '../../frontend/js/manual-order.js'), 'utf8');
