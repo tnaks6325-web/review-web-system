@@ -1536,6 +1536,8 @@ function computeOptionView(opt, cnt, campState, viewOpts = null) {
     inflowGuideHtml: String(opt.inflow_guide_html || ''),
     inflowGuideImages: Array.isArray(opt.inflow_guide_images) ? opt.inflow_guide_images : [],
     payAmount: Math.max(0, Number(opt.pay_amount) || 0),
+    // ★ 결정 214: 선택지별 사진(빈 값 = 공고 대표 사진). SELECT 에 칸이 없으면 '' — 종전 동작.
+    thumbnailUrl: String(opt.thumbnail_url || ''),
     recruitTotal, dailyLimit,
     used, remaining, todayUsed, todayRemaining,
     externalUsed: Math.max(0, Number(c.externalOrders) || 0),   // 그중 공고 밖 주문 수(관리자 표시용)
@@ -1564,8 +1566,12 @@ function computeOptionViews(rows, countsMap, campState, { sequential = false } =
   const list = Array.isArray(rows) ? rows : [];
   const cm = countsMap instanceof Map ? countsMap : new Map();
   const live = liveOptions(list);
+  /* ★ 결정 214 E2E 실측: 관리자가 선택지를 닫아 **살아있는 선택지가 1개만** 남아도 순차진행 공고다 —
+     종전(살아있는 2개 이상 조건)은 이때 순차 표시를 통째로 꺼, 리뷰어 제목이 저장 제목(이미 닫힌 상품)으로 돌아가고
+     참여자 화면 제목이 비었다. 잠글 뒤 선택지는 없지만 "지금 모집 중" 표시와 일건수 미사용은 그대로 유지한다.
+     (선택지 행이 1개뿐인 공고 = 처음부터 단일 상품 = 종전 그대로.) */
   const seq = !!sequential && SEQUENTIAL_OPTIONS_ENABLED
-    && live.length >= 2 && live.every(r => Math.max(0, Number(r.recruit_total) || 0) > 0);
+    && list.length >= 2 && live.length >= 1 && live.every(r => Math.max(0, Number(r.recruit_total) || 0) > 0);
   const views = list.map(r => computeOptionView(r, cm.get(r.opt_key), campState, seq ? { ignoreDailyLimit: true } : null));
   if (!seq) return views;
   let current = false;

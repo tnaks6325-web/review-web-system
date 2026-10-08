@@ -45,6 +45,7 @@ vm.createContext(sandbox);
 vm.runInContext(functionSource(routes, '_normOptKey'), sandbox);
 vm.runInContext(functionSource(routes, '_optNum'), sandbox);
 vm.runInContext(functionSource(routes, '_normalizeOptionUrl'), sandbox);
+vm.runInContext(functionSource(routes, '_normalizeOptionThumb'), sandbox);   // ★ 결정 214: 상품 사진 정규화(_normalizeOptionsInput 의존)
 vm.runInContext(functionSource(routes, '_normalizeOptionsInput'), sandbox);
 assert.equal(sandbox._normalizeOptionUrl('https://store.example/item?option=blue'), 'https://store.example/item?option=blue');
 assert.equal(sandbox._normalizeOptionUrl('javascript:alert(1)'), '');
@@ -72,6 +73,8 @@ assert.deepEqual(normalizedOptions, [{
   reviewMixError: null,
   sortOrder: 0,
   status: null,
+  thumbnailUrl: null,   // ★ 결정 214: 미전달 = null = 저장된 상품 사진 유지
+  thumbError: false,
 }]);
 
 // ★ 134 — 값 미전달 시 기본값이 "종전 동작"이어야 한다(위 deepEqual 이 고정) + 모르는 unit_kind 는

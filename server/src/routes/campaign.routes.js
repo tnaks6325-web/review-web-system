@@ -23,6 +23,7 @@ const {
   kstTodayAt,
 } = require('../services/campaignState.service');
 const { deriveSchedules, tabsOfCampaigns, scheduleFor, describeTabDates } = require('../services/campaignSchedule.service');
+const { sequentialDisplay, joinedDisplay } = require('../utils/sequentialDisplay');   // ★ 결정 214
 const { sanitizeWorkDetail, sanitizeGuideHtml, sanitizeGuideImages, GUIDE_IMAGE_FIELDS } = require('../utils/sanitizeGuideHtml');
 const { isActiveEditor } = require('../services/reviewerCampaignEditor.service');
 const {
@@ -202,6 +203,18 @@ function _normalizeOptionUrl(value) {
   }
 }
 
+/**
+ * ★ 결정 214: 선택지별 사진 주소 — `<img src>` 로 그대로 나가므로 **https 만**, 공백·따옴표·꺾쇠 없는 2048자 이내.
+ * 미전달(undefined) = null = 저장된 값 유지(구버전 화면이 저장해도 사진이 지워지지 않게). '' = 지움. 형식 불량 = ''(지움 아님 — 아래 save 가 판정).
+ */
+function _normalizeOptionThumb(value) {
+  if (value === undefined) return null;
+  const raw = String(value == null ? '' : value).trim();
+  if (!raw) return '';
+  if (raw.length > 2048 || !/^https:\/\/[^\s"'<>]+$/i.test(raw)) return undefined;   // 형식 불량 = 저장 거절(호출부)
+  return raw;
+}
+
 /** 입력 옵션 배열 → 정규화·중복제거 행 배열. 배열 아님=null(미전달=변경없음). 빈 optKey 제거. */
 function _normalizeOptionsInput(arr) {
   if (!Array.isArray(arr)) return null;
@@ -220,6 +233,10 @@ function _normalizeOptionsInput(arr) {
       // ★★ 이름 바꾸기(rename): 이 줄이 원래 어떤 선택지였는지(저장된 opt_key). 없으면 '' = 종전 동작.
       prevOptKey: _normOptKey(obj.prevOptKey ?? obj.prev_opt_key) || '',
       optionUrl: _normalizeOptionUrl(obj.optionUrl ?? obj.option_url ?? obj.url),
+      // ★ 결정 214: 선택지별 사진(3상태 — null 유지 · '' 지움 · https 주소). 형식 불량은 thumbError 로 거절.
+      thumbnailUrl: _normalizeOptionThumb(obj.thumbnailUrl !== undefined ? obj.thumbnailUrl : obj.thumbnail_url),
+      thumbError: _normalizeOptionThumb(obj.thumbnailUrl !== undefined ? obj.thumbnailUrl : obj.thumbnail_url) === undefined
+        && (obj.thumbnailUrl !== undefined || obj.thumbnail_url !== undefined),
       // ★ 134 복합 작업: 선택 단위(unit)의 소속 상품명과 종류.
       //   unit_kind='product' = 옵션 없는 상품 자체가 선택지 → 시트 옵션 칸에 쓰지 않는다(submit.routes).
       //   모르는 값은 'option'(종전 동작) — 추측해서 상품 단위로 승격하지 않는다.
@@ -241,6 +258,12 @@ function _normalizeOptionsInput(arr) {
     });
   }
   return out;
+}
+
+/** ★ 결정 214: 선택지 사진 주소 형식 불량 → 저장 거절 문구(없으면 ''). */
+function _optionThumbError(options) {
+  const bad = (Array.isArray(options) ? options : []).filter(o => o && o.thumbError).map(o => o.optKey);
+  return bad.length ? `상품 사진은 https 로 시작하는 이미지 주소여야 합니다: ${bad.join(', ')}` : '';
 }
 
 /** 가이드유입은 실제 참여 가능한 선택지마다 안내가 있어야 한다.
@@ -333,17 +356,19 @@ async function _saveCampaignOptions(campaignId, options) {
     for (const o of options) {
       await client.query(
         `INSERT INTO campaign_options (campaign_id, opt_key, option_url, pay_amount, recruit_total, daily_limit, review_type_mix, sort_order, status,
-                                      product_name, unit_kind, inflow_guide_html, inflow_guide_images, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,COALESCE($9,'active'),$10,$11,$12,$13::jsonb,NOW())
+                                      product_name, unit_kind, inflow_guide_html, inflow_guide_images, thumbnail_url, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,COALESCE($9,'active'),$10,$11,$12,$13::jsonb,COALESCE($14,''),NOW())
          ON CONFLICT (campaign_id, opt_key) DO UPDATE SET
            option_url=EXCLUDED.option_url, pay_amount=EXCLUDED.pay_amount, recruit_total=EXCLUDED.recruit_total,
            daily_limit=EXCLUDED.daily_limit, review_type_mix=EXCLUDED.review_type_mix, sort_order=EXCLUDED.sort_order,
            status=COALESCE($9, campaign_options.status),
            product_name=EXCLUDED.product_name, unit_kind=EXCLUDED.unit_kind,
            inflow_guide_html=EXCLUDED.inflow_guide_html, inflow_guide_images=EXCLUDED.inflow_guide_images,
+           thumbnail_url=COALESCE($14, campaign_options.thumbnail_url),
            updated_at=NOW()`,
         [campaignId, o.optKey, o.optionUrl, o.payAmount, o.recruitTotal, o.dailyLimit, JSON.stringify(o.reviewTypeMix || []), o.sortOrder, o.status,
-         o.productName || '', o.unitKind || 'option', o.inflowGuideHtml || '', JSON.stringify(o.inflowGuideImages || [])]);
+         o.productName || '', o.unitKind || 'option', o.inflowGuideHtml || '', JSON.stringify(o.inflowGuideImages || []),
+         (typeof o.thumbnailUrl === 'string') ? o.thumbnailUrl : null]);
     }
     const { rows: existing } = await client.query('SELECT opt_key FROM campaign_options WHERE campaign_id=$1', [campaignId]);
     for (const e of existing) {
@@ -605,7 +630,7 @@ function _applyCurrentFee(view, schedules, now) {
 async function _loadOptionViews(db, campaignId, campState, now = new Date()) {
   const { rows } = await db.query(
     `SELECT opt_key, option_url, pay_amount, recruit_total, daily_limit, status,
-            product_name, unit_kind, inflow_guide_html, inflow_guide_images
+            product_name, unit_kind, inflow_guide_html, inflow_guide_images, thumbnail_url
        FROM campaign_options WHERE campaign_id=$1 ORDER BY (status='closed'), sort_order, id`,
     [campaignId]);
   if (!rows.length) return [];
@@ -650,7 +675,24 @@ function _publicOptionView(v) {
     todayRemaining: v.todayRemaining, // null=옵션 일일제한 없음
     status: v.status,                 // open|soldout|today_done|closed|waiting(순차진행 — 앞 선택지 마감 후 열림)
     selectable: v.selectable,
+    // ★ 결정 214: 선택지별 사진·지금 모집 중 표시(민감정보 아님 — 참여 전 카드가 쓴다)
+    thumbnailUrl: v.thumbnailUrl || '',
+    sequenceCurrent: v.sequenceCurrent === true,
   };
+}
+
+/** ★ 결정 214: 순차진행 공고의 참여 전 제목·사진을 지금 모집 중인 상품으로 바꾼다(단일 출처 utils/sequentialDisplay).
+ *  저장된 제목·사진은 baseTitle·baseThumbnailUrl 로 남긴다(관리자 화면·되돌리기 참고용). 순차진행이 아니면 무변경. */
+function _applySequentialDisplay(view, optViews) {
+  const d = sequentialDisplay({ title: view.title, thumbnailUrl: view.thumbnail_url }, optViews);
+  if (!d) return view;
+  view.baseTitle = view.title;
+  view.baseThumbnailUrl = view.thumbnail_url || '';
+  view.title = d.title;
+  view.thumbnail_url = d.thumbnailUrl;
+  // ★ Codex P2: "지금 모집" 줄은 공고가 실제로 열려 있을 때만(오픈 전·오늘 마감·종료 공고 옆에 쓰면 참여 게이트와 모순)
+  if (d.nowRecruiting && view.state === 'open') view.nowRecruiting = d.nowRecruiting;
+  return view;
 }
 
 /** 홀드 게이트 뒤(work-detail·관리자 미리보기)로 나가는 **옵션 목록**에서 선택지별 유입가이드를 덜어낸다(134).
@@ -673,7 +715,7 @@ async function _fetchOptionsForCampaigns(db, ids, now = new Date()) {
   const list = (ids || []).filter(Boolean);
   if (!list.length) return out;
   const { rows: optRows } = await db.query(
-    `SELECT campaign_id, opt_key, pay_amount, recruit_total, daily_limit, status, product_name, unit_kind
+    `SELECT campaign_id, opt_key, pay_amount, recruit_total, daily_limit, status, product_name, unit_kind, thumbnail_url
        FROM campaign_options WHERE campaign_id = ANY($1) ORDER BY campaign_id, (status='closed'), sort_order, id`, [list]);
   if (!optRows.length) return out;
   // ★ 결정 210: 선택지 카운트는 단일 출처(fetchOptionCountsBatch — 공고 밖 주문 포함)로 센다.
@@ -694,7 +736,8 @@ async function _loadOptionsRaw(db, campaignId) {
     `SELECT opt_key AS "optKey", option_url AS "optionUrl", pay_amount AS "payAmount", recruit_total AS "recruitTotal", review_type_mix AS "reviewTypeMix",
             daily_limit AS "dailyLimit", sort_order AS "sortOrder", status,
             product_name AS "productName", unit_kind AS "unitKind",
-            inflow_guide_html AS "inflowGuideHtml", inflow_guide_images AS "inflowGuideImages"
+            inflow_guide_html AS "inflowGuideHtml", inflow_guide_images AS "inflowGuideImages",
+            thumbnail_url AS "thumbnailUrl"
        FROM campaign_options WHERE campaign_id=$1 ORDER BY (status='closed'), sort_order, id`,
     [campaignId]);
   // ★ 응답 직전 재정화(§03-E 이중 적용) — 저장 시 정화본이라도 옛 행·직접 DB 수정분을 신뢰하지 않는다.
@@ -1239,7 +1282,10 @@ router.get('/list', async (req, res, next) => {
         //   apply 게이트와 같은 `liveOptions` 판정이라 "카드엔 옵션 N종인데 참여는 옵션을 안 받는" 불일치가 없다.
         const optViews = computeOptionViews(opts.map(o => o.row), new Map(opts.map(o => [o.row.opt_key, o.cnt])), view,
           { sequential: opts.some(o => o.sequential) });
-        if (liveOptions(optViews).length) view.options = optViews.map(_publicOptionView);
+        if (liveOptions(optViews).length) {
+          view.options = optViews.map(_publicOptionView);
+          _applySequentialDisplay(view, optViews);   // ★ 결정 214
+        }
       }
       return view;
     });
@@ -1517,7 +1563,10 @@ async function getCampaignDetail(req, res, next) {
       // 옵션명+잔여만 공개(금액 등 상세는 참여 후 work-detail에서)
       // ★ 목록과 같은 규칙 — 살아있는 옵션 0이면 옵션 구조 미노출(옵션 없는 공고로 보인다).
       const opts = await _loadOptionViews(pool, id, view, now);
-      if (liveOptions(opts).length) view.options = opts.map(_publicOptionView);
+      if (liveOptions(opts).length) {
+        view.options = opts.map(_publicOptionView);
+        _applySequentialDisplay(view, opts);   // ★ 결정 214
+      }
     }
     res.json({ ok: true, data: view, serverNow: now.toISOString() });
   } catch (err) {
@@ -1639,6 +1688,13 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
       if (app.option_key) selectedOption = options.find(o => o.optKey === app.option_key) || { optKey: app.option_key, status: 'open' };
       options = _optionListForReviewer(options);   // ★ 고른 뒤에 덜어낸다(selectedOption 은 원본 유지)
     }
+    // ★ 결정 214: 순차진행 공고는 참여 전 제목·사진이 "지금 모집 중" 상품으로 바뀐다 → 참여한 사람에게는
+    //   **내가 고른 상품**의 제목·사진으로 고정해 준다(나중에 다음 상품이 열려도 바뀌지 않게). 순차 아님 = null(종전).
+    // ★ Codex P2: 순차 판정은 **공고 기준**(선택지 중 하나라도 sequential) — 내가 고른 선택지를 관리자가 닫으면
+    //   그 선택지 뷰에는 sequential 표시가 없어 지금 모집 상품 제목으로 잘못 남는다.
+    const joinedView = (selectedOption && options.some(o => o && o.sequential))
+      ? joinedDisplay({ title: camp.title, thumbnailUrl: camp.thumbnail_url }, options, selectedOption)
+      : null;
     // 옵션 변경은 유효 홀드(미제출) + 옵션 2개 이상 + **실제로 옮겨 갈 수 있는 선택지가 있을 때만**(결정 212 · Codex P2 —
     //   순차진행이면 나머지가 전부 대기라 시트를 열어도 고를 것이 없다). 판정 = change-option 과 같은 _optionChangeViews.
     //   ★ 조회 실패 = 종전 규칙(옵션 2개 이상) — 버튼이 보여도 서버가 다시 판정하므로 안전한 쪽이다.
@@ -1666,6 +1722,7 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
       options,               // [{ optKey, payAmount, remaining, todayRemaining, status, selectable, ... }]
       selectedOption,        // 내가 참여한 옵션(잠금표시·구매양식 고정용)
       canChangeOption,
+      joinedDisplay: joinedView,   // ★ 결정 214: { title, thumbnailUrl } | null
       workDetail,                                                // HTML은 응답 직전 방어적 재정화
       inflowType,                                                 // 'guide' | 'link' | '' — 랜딩 버튼 게이트
       cashReceipt: await _cashReceiptInfo(camp),                  // 현영 탭만 {required, businessNo, guideImageUrl} — 아니면 null
@@ -2808,6 +2865,8 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
     const storeRecallCourier = deliveryBase === '회수' ? String(recall_courier || '').trim() : '';
     const storeRecallProduct = deliveryBase === '회수' ? String(recall_product || '').trim() : '';
     const normOpts = _normalizeOptionsInput(options);
+    const optionThumbError = _optionThumbError(normOpts);
+    if (optionThumbError) return res.status(400).json({ ok: false, error: optionThumbError });
     if (normalizedReviewType !== 'mixed' && normOpts) normOpts.forEach(option => { option.reviewTypeMix = []; });
     const optionReviewMixError = validateOptionReviewTypeMix(normalizedReviewType, normOpts);
     if (optionReviewMixError) return res.status(400).json({ ok: false, error: optionReviewMixError });
@@ -2975,7 +3034,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         logger.warn('[campaign/create] 달력 프리필 실패(공고는 발행됨): ' + e.message);
       }
     }
-    res.json({ ok: true, data: rows[0], options: await _loadOptionsRaw(pool, rows[0].id),
+    res.json({ ok: true, optionThumbnails: true /* ★ 결정 214: 상품 사진 저장을 아는 서버(배포 시차 판별) */, data: rows[0], options: await _loadOptionsRaw(pool, rows[0].id),
       feeSchedules: await _loadFeeSchedules(pool, rows[0].id),
       ...(optionsWarning ? { optionsWarning } : {}), ...(feeWarning ? { feeWarning } : {}),
       ...(quotaSync ? { quotaSync } : {}),
@@ -3041,6 +3100,8 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     let reviewMixCurrent = null;
     let effectiveReviewTypeForOptions = null;
     let normOpts = _normalizeOptionsInput(options);
+    const optionThumbError = _optionThumbError(normOpts);
+    if (optionThumbError) return res.status(400).json({ ok: false, error: optionThumbError });
     if (review_type !== undefined || review_type_mix !== undefined || recruit_total !== undefined) {
       const { rows: currentReviewRows } = await pool.query(
         'SELECT review_type, review_type_mix, recruit_total FROM recruit_campaigns WHERE id = $1', [id]
@@ -3476,7 +3537,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     const worktableRelay = rows[0].participation_mode
       ? await require('../services/campaignPlan.service').relayCampaignWorktable(id, { by: req.admin?.name || 'admin' })
       : null;
-    res.json({ ok: true, data: rows[0], options: await _loadOptionsRaw(pool, id),
+    res.json({ ok: true, optionThumbnails: true /* ★ 결정 214: 상품 사진 저장을 아는 서버(배포 시차 판별) */, data: rows[0], options: await _loadOptionsRaw(pool, id),
       ...(worktableRelay ? { worktableRelay } : {}),
       feeSchedules: await _loadFeeSchedules(pool, id),
       ...(optionsWarning ? { optionsWarning } : {}), ...(feeWarning ? { feeWarning } : {}),

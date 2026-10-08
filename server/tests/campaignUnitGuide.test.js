@@ -120,7 +120,7 @@ const sandbox = {
   sanitizeGuideHtml, sanitizeGuideImages,
 };
 vm.createContext(sandbox);
-for (const fn of ['_normOptKey', '_optNum', '_normalizeOptionUrl', '_normalizeOptionsInput', '_publicOptionView']) {
+for (const fn of ['_normOptKey', '_optNum', '_normalizeOptionUrl', '_normalizeOptionThumb', '_normalizeOptionsInput', '_publicOptionView']) {
   vm.runInContext(functionSource(routes, fn), sandbox);
 }
 
@@ -195,7 +195,7 @@ t('⑤ 외부모집 수동제출도 같은 규율(product 단위면 옵션 칸 �
 
 // ── 읽기 경로 정화·컬럼 ───────────────────────────────────────────
 t('읽기 경로 SELECT 에 새 컬럼 합류(뷰·프리필)', () => {
-  assert.match(routes, /product_name, unit_kind, inflow_guide_html, inflow_guide_images\n\s*FROM campaign_options WHERE campaign_id=\$1/);
+  assert.match(routes, /product_name, unit_kind, inflow_guide_html, inflow_guide_images, thumbnail_url\n\s*FROM campaign_options WHERE campaign_id=\$1/);
   assert.match(routes, /product_name AS "productName", unit_kind AS "unitKind"/);
   assert.match(routes, /inflow_guide_html AS "inflowGuideHtml", inflow_guide_images AS "inflowGuideImages"/);
 });

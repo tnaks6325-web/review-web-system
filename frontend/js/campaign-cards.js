@@ -914,6 +914,7 @@
         <div class="pthumb">${thumbInner}${overlay}${badges}${topleft}${repurchaseSash}${editChip}${moChip}</div>
         <div class="pbody">
           <h3 class="ptitle">${_esc(c.title || '(제목 없음)')}</h3>
+          ${c.nowRecruiting ? `<div class="pt-now" style="font-size:.74rem;font-weight:700;color:#1D4ED8;margin:-2px 0 4px">지금 모집: ${_esc(c.nowRecruiting)}</div>` : ''}
           <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">${isBlogCard ? '승인제' : '바로참여'}</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>
           ${_optChip(c)}
           ${gauge}

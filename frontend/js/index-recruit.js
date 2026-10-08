@@ -2126,6 +2126,8 @@ function _applyProdModeUi(m) {
   // 버튼은 두 모드 모두 "상품 추가" — none 이면 상품 한 줄, opt 이면 상품 그룹(옵션은 그룹 안에서 추가)
   const add = document.getElementById("rf_opt_addbtn");
   if (add) add.innerHTML = '<i class="fas fa-plus"></i> 상품 추가';
+  // ★ 결정 214(Codex P2): 옵션 없는 작업 모드는 선택지 원장을 저장하지 않는다 → 상품 사진 줄을 숨긴다(올려도 버려지는 막다른 길 방지)
+  document.querySelectorAll("#rf_opt_rows .rf-opt-thumb-line").forEach(l => { l.style.display = m === "opt" ? "flex" : "none"; });
 }
 /** 옵션 유무 선택 바로 아래 한 줄 안내. 진행상품 수가 아직 없으면 기본 1건으로 안내한다. */
 function _renderProdModeHelp() {
@@ -2392,6 +2394,52 @@ function _syncRecruitTotalCells() {
  * ★ 반환값은 **`.rf-unit` 껍데기**(행 + 접힌 선택지 가이드 블록) — 기존 셀렉터(`.rf-opt-row`)는
  *   전부 후손 조회라 그대로 동작한다. 삭제만 껍데기를 지운다(가이드가 고아로 남지 않게).
  */
+/**
+ * ★ 결정 214 — 선택지(상품)별 사진 줄. 순차진행 공고에서 이 상품이 "지금 모집 중"이면 리뷰어 화면의 대표 사진이 된다.
+ * 비우면 공고 대표 사진을 그대로 쓴다. 주소 붙여넣기 또는 [올리기](공고 썸네일과 같은 업로드 창구).
+ * 입력칸은 row._thumbEl 로 잇는다(readOptRows 가 읽는다 — 행 밖 줄이라 row.querySelector 로는 안 잡힌다).
+ */
+function _buildOptThumbLine(row, initial) {
+  const line = document.createElement("div");
+  line.className = "rf-opt-thumb-line";
+  line.style.cssText = "display:flex;align-items:center;gap:6px;margin:4px 0 2px;font-size:.72rem;color:#6B7280;min-width:0";
+  // 옵션 없는 작업 모드에서는 숨긴다(저장되지 않는다) — 모드 전환은 _applyProdModeUi 가 이어서 맞춘다
+  if (typeof _prodMode === "function" && _prodMode() !== "opt") line.style.display = "none";
+  line.innerHTML =
+    '<span style="white-space:nowrap">🖼️ 상품 사진</span>' +
+    '<img class="rf-opt-thumb-pv" alt="" style="width:28px;height:28px;object-fit:cover;border-radius:5px;border:1px solid #E5E7EB;display:none">' +
+    '<input class="rform-input rf-opt-thumb" type="url" inputmode="url" maxlength="2048" ' +
+      'placeholder="https://… 순차진행 때 이 상품이 모집 중이면 대표 사진으로 보여요(비우면 공고 사진)" ' +
+      'style="flex:1;min-width:0;font-size:.72rem;padding:4px 6px">' +
+    '<label title="사진 파일 올리기" style="cursor:pointer;margin:0;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;' +
+      'padding:4px 8px;border:1px solid #D1D5DB;border-radius:6px;background:#fff;color:#374151;font-size:.72rem;font-weight:700">' +
+      '<i class="fas fa-upload"></i>올리기' +
+      '<input type="file" accept="image/*" class="rf-opt-thumb-file" style="display:none"></label>';
+  const input = line.querySelector(".rf-opt-thumb");
+  const pv = line.querySelector(".rf-opt-thumb-pv");
+  const file = line.querySelector(".rf-opt-thumb-file");
+  row._thumbEl = input || null;
+  if (!input || !pv || !file) return line;   // 화면 조각을 못 만든 환경(시험용 가짜 화면 등) — 사진 칸 없이 종전대로
+  const sync = () => {
+    const v = String(input.value || "").trim();
+    const ok = /^https:\/\/[^\s"'<>]+$/i.test(v);
+    pv.style.display = ok ? "" : "none";
+    if (ok) pv.src = v; else pv.removeAttribute("src");
+    input.style.borderColor = (v && !ok) ? "#EF4444" : "";
+    input.title = (v && !ok) ? "https 로 시작하는 이미지 주소만 쓸 수 있어요" : "";
+  };
+  input.value = String(initial || "");
+  input.addEventListener("input", sync);
+  file.addEventListener("change", async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    const url = await _uploadImageToProxy(file, "optthumb_");
+    if (url) { input.value = url; sync(); showToast("상품 사진이 올라갔어요. 저장하면 반영됩니다.", "success"); }
+  });
+  sync();
+  return line;
+}
+
 function _buildOptRowEl(data) {
   const d = data || {};
   const status = (d.status === "closed") ? "closed" : "active";   // ★ 마감 상태 보존(리뷰 #1 — 저장 라운드트립에서 재활성화 방지)
@@ -2459,6 +2507,7 @@ function _buildOptRowEl(data) {
      "옵션별 유입가이드에 대한 공간을 확보해줘"). 패널·저장 로직(`_ugBuild`/`_ugLoad`/`_ugCompose`)은
      한 글자도 안 바꾼다 — 바뀐 건 **입구를 찾기 쉽게** 만드는 것뿐이다(사본 0). */
   unitEl.appendChild(row);
+  unitEl.appendChild(_buildOptThumbLine(row, d.thumbnailUrl ?? d.thumbnail_url ?? ""));   // ★ 결정 214: 상품 사진
   const ugKey = _ugNewKey();
   row.dataset.ig = ugKey;
   _ugRegister(ugKey, "선택지 유입가이드");
@@ -2558,6 +2607,7 @@ function renderOptRows(options, opts) {
       reviewTypeMix: o.reviewTypeMix ?? o.review_type_mix ?? [],
       inflowGuideHtml: o.inflowGuideHtml ?? o.inflow_guide_html ?? "",
       inflowGuideImages: o.inflowGuideImages ?? o.inflow_guide_images ?? [],
+      thumbnailUrl: o.thumbnailUrl ?? o.thumbnail_url ?? "",   // ★ 결정 214
       status:      o.status === "closed" ? "closed" : "active",
     };
   }));
@@ -2705,6 +2755,8 @@ function readOptRows() {
       reviewTypeMix: typeof _readOptionReviewMix === "function" ? _readOptionReviewMix(r) : [],
       inflowGuideHtml: guide.html,
       inflowGuideImages: guide.images,
+      // ★ 결정 214: 상품 사진(빈 값 = 공고 사진). 이 화면은 항상 보낸다 — 지운 것도 저장된다.
+      thumbnailUrl:  String((r._thumbEl && r._thumbEl.value) || "").trim(),
       status:        r.dataset.status === "closed" ? "closed" : "active",   // ★ 마감상태 보존(리뷰 #1)
     });
   });
@@ -4432,16 +4484,17 @@ function _applyCampThumbUpload(url) {
   _onPreviewInput();
 }
 
-async function _uploadCampThumbFile(file) {
+/** 이미지 파일 → 우리 프록시 절대 URL(공고 썸네일·상품 사진 공용 업로드 창구). 실패 = '' + 알림. */
+async function _uploadImageToProxy(file, prefix) {
   if (!file || !/^image\//i.test(file.type || "")) {
-    showToast("이미지 파일만 썸네일로 등록할 수 있습니다.", "error");
-    return false;
+    showToast("이미지 파일만 등록할 수 있습니다.", "error");
+    return "";
   }
   if (file.size > 5 * 1024 * 1024) {
     showToast("이미지는 5MB 이하로 올려주세요.", "error");
-    return false;
+    return "";
   }
-  showToast("썸네일 업로드 중...");
+  showToast("사진 업로드 중...");
   try {
     const b64 = await new Promise((res, rej) => {
       const r = new FileReader();
@@ -4452,18 +4505,24 @@ async function _uploadCampThumbFile(file) {
     const resp = await fetch(API_BASE_URL + "/api/order/guide-image", {
       method: "POST",
       headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
-      body: JSON.stringify({ imageBase64: b64, mimeType: file.type || "image/jpeg", fileName: "campthumb_" + Date.now() }),
+      body: JSON.stringify({ imageBase64: b64, mimeType: file.type || "image/jpeg", fileName: (prefix || "img_") + Date.now() }),
     });
     const j = await resp.json();
     if (!resp.ok || !j.ok || !j.url) throw new Error(j.error || "업로드 실패");
     // 절대 프록시 URL — 프론트(pages.dev)와 API(railway) 오리진이 달라 절대 URL이어야 카드에 뜬다
-    _applyCampThumbUpload(j.url);
-    showToast("썸네일이 업로드되었습니다.", "success");
-    return true;
+    return j.url;
   } catch (e) {
-    showToast("썸네일 업로드 실패: " + e.message, "error");
-    return false;
+    showToast("사진 업로드 실패: " + e.message, "error");
+    return "";
   }
+}
+
+async function _uploadCampThumbFile(file) {
+  const url = await _uploadImageToProxy(file, "campthumb_");
+  if (!url) return false;
+  _applyCampThumbUpload(url);
+  showToast("썸네일이 업로드되었습니다.", "success");
+  return true;
 }
 
 // 공고 썸네일 URL 입력창에서 Ctrl+V. 클립보드에 이미지가 있을 때만 가로채고,
@@ -5630,6 +5689,12 @@ async function saveRecruitPostImpl() {
     }
     if (_quotaSkipped) {
       _changed.unshift("⚠ 총건수·일건수는 건드리지 않았습니다 — 현재 값을 불러오지 못해 그대로 두었습니다");
+    }
+    /* ★ 결정 214(Codex P2 배포 시차): 화면이 먼저 배포되고 서버가 아직 옛 버전이면 상품 사진이 조용히 버려진다
+       → 사진을 보냈는데 서버가 "상품 사진 저장을 안다"는 표시를 주지 않았으면 다시 저장하라고 알린다. */
+    if (saved && saved.optionThumbnails !== true && Array.isArray(payload.options)
+        && payload.options.some(o => o && o.thumbnailUrl)) {
+      _changed.unshift("⚠ 상품 사진은 저장되지 않았습니다 — 서버 업데이트가 끝난 뒤(1~2분) 다시 저장해주세요");
     }
 
     /* ★ 버튼 ✓ → 모달 닫힘 → 화면 가운데 안내(시안 C 확정) 로 시선이 이어진다.
