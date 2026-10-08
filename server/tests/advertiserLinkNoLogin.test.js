@@ -40,7 +40,7 @@ assert.equal((workdesk.match(/onclick="copyAdvertiserLink\(\)"/g) || []).length,
 assert.match(workdesk, /const advLinkBtn=_isInternalRole\(\)\?`<button[^`]*onclick="copyAdvertiserLink\(\)"/,
   '작업보드 버튼은 작업보드 상단(advLinkBtn)에만 있어야 한다.');
 const cal = workdesk.slice(workdesk.indexOf('async function copyAdvertiserLink('), workdesk.indexOf('async function copyAdvertiserLink(') + 1600);
-assert.match(cal, /action:'ensure'/, '작업보드 버튼은 링크를 바꾸지 않는다(ensure — 회전 금지).');
+assert.match(cal, /action:'for-tab'/, '작업보드 버튼은 서버가 현재 업체를 정하고 링크를 바꾸지 않는다(for-tab → ensure — 회전 금지).');
 assert.doesNotMatch(cal, /action:'generate'/, '작업보드 버튼에서 링크 회전 금지.');
 assert.match(workdesk, /광고주 접속 링크/,
   '유일한 진입점을 광고주 접속 링크로 명확히 표기해야 합니다.');

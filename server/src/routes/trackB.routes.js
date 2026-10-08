@@ -602,6 +602,15 @@ router.post('/advertiser-link', authMiddleware, internalMiddleware, async (req, 
     const { action, advertiserId } = req.body || {};
     if (action === 'get') return res.json({ ok: true, link: await svc.getAdvertiserLink(advertiserId) });
     if (action === 'ensure') return res.json({ ok: true, link: await svc.ensureAdvertiserLink({ advertiserId, by: _by(req) }) });
+    /* ★ 결정 218: 작업보드 [🏢 광고주링크] — 소유 업체를 **서버가 지금** 작업 좌표로 정한다(advertiserForTab 단일 출처).
+       화면에 캐시된 advertiserId 를 믿으면 업체 이관 뒤 옛 업체 링크(그 업체의 다른 작업·연락처 노출)를 복사한다(Codex 리뷰). */
+    if (action === 'for-tab') {
+      const { sheetId, tabName } = req.body || {};
+      if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+      const owner = await svc.advertiserForTab({ sheetId: String(sheetId), tabName: String(tabName) });
+      if (!owner) return res.json({ ok: true, advertiser: null, link: null });
+      return res.json({ ok: true, advertiser: owner, link: await svc.ensureAdvertiserLink({ advertiserId: owner.id, by: _by(req) }) });
+    }
     if (action === 'generate') { const o = await svc.generateAdvertiserLink({ advertiserId, by: _by(req) }); return res.status(o.ok ? 200 : (o.code || 400)).json(o); }
     if (action === 'revoke') { const o = await svc.setAdvertiserLinkActive({ advertiserId, active: false, by: _by(req) }); return res.status(o.ok ? 200 : (o.code || 400)).json(o); }
     if (action === 'enable') { const o = await svc.setAdvertiserLinkActive({ advertiserId, active: true, by: _by(req) }); return res.status(o.ok ? 200 : (o.code || 400)).json(o); }
