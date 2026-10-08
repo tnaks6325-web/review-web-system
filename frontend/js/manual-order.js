@@ -52,6 +52,7 @@
   let CTX = null;      // { sheetId, tabName, gid, campaignId, title }
   let ROWS = [];       // 파싱 결과 + 캡처 상태 + targetApplicationId
   let STAGED = [];     // 1단계에서 먼저 받아 둔 구매캡쳐(줄이 나뉜 뒤 수취인 이름으로 배정)
+  let OPTS = [];       // ★ 결정 211: 작업보드 경로에서 고를 상품(선택지) 목록 — 서버 preview 가 연결 공고에서 싣는다
   let BUSY = false;
 
   // ── 스타일(1회 주입) ───────────────────────────────────────
@@ -62,6 +63,7 @@
     st.textContent = `
 .mo-ovl{position:fixed;inset:0;background:rgba(17,24,39,.5);z-index:100001;display:flex;align-items:center;justify-content:center;padding:20px}
 .mo-box{background:#fff;border-radius:16px;width:1040px;max-width:97vw;max-height:92vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.3);font-family:'Pretendard',-apple-system,'Noto Sans KR',sans-serif;color:#191F28}
+.mo-box.wide{width:1260px}
 .mo-hd{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #EFEFF3}
 .mo-hd b{font-size:15px} .mo-hd .sub{font-size:11.5px;color:#8B95A1}
 .mo-hd .sp{flex:1}
@@ -112,6 +114,9 @@
 .mo-pick:hover{color:#1b64da}
 .mo-msg{font-size:10.5px;line-height:1.5;margin-top:3px}
 .mo-msg.e{color:#B91C1C} .mo-msg.w{color:#B45309}
+.mo-ack{display:flex;gap:5px;align-items:flex-start;margin-top:4px;font-size:10.5px;line-height:1.45;color:#B45309;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:4px 6px;cursor:pointer}
+.mo-ack input{margin:1px 0 0}
+.mo-opttip{font-size:11.5px;font-weight:700;color:#B91C1C}
 .mo-appsel{width:100%;font:inherit;font-size:10.5px;border:1px solid #D7DCE5;border-radius:6px;padding:4px;background:#fff;color:#191F28}
 .mo-res{display:flex;gap:9px;align-items:flex-start;border:1px solid #EFEFF3;border-radius:11px;padding:10px 12px;margin-bottom:7px;background:#fff}
 .mo-res.ok{background:#F0FDF4;border-color:#BBF7D0} .mo-res.no{background:#FEF2F2;border-color:#FEE2E2}
@@ -128,7 +133,7 @@
     styles();
     CTX = Object.assign({ sheetId: '', tabName: '', gid: '', campaignId: null, title: '' }, ctx || {});
     if (!CTX.sheetId || !CTX.tabName) { alert('연결된 작업(시트·탭) 정보가 없어 수동제출을 열 수 없습니다.'); return; }
-    ROWS = []; STAGED = [];
+    ROWS = []; STAGED = []; OPTS = [];
     let ovl = document.getElementById('moOvl');
     if (!ovl) {
       ovl = document.createElement('div');
@@ -313,15 +318,74 @@
     if (!text.trim()) { alert('붙여넣은 내용이 없습니다.'); return; }
     let r;
     try {
-      r = await api(_moBase() + '/preview', { method: 'POST', body: JSON.stringify({ text }) });
+      r = await api(_moBase() + '/preview', { method: 'POST',
+        body: JSON.stringify({ text, sheetId: CTX.sheetId, tabName: CTX.tabName, campaignId: CTX.campaignId || null }) });
     } catch (e) { alert('분해 실패: ' + (e && e.message ? e.message : '서버에 연결하지 못했습니다')); return; }
     if (!r || !r.ok) { alert('분해 실패: ' + ((r && r.error) || '오류')); return; }
-    ROWS = (r.items || []).map(it => Object.assign({}, it, { capture: null, extract: null, applications: [], targetApplicationId: '' }));
+    // ★ 결정 211: 공고 화면 경로(campaignId)는 신청 선택이 옵션을 정하므로 상품 칸을 띄우지 않는다.
+    OPTS = (!CTX.campaignId && Array.isArray(r.optionChoices)) ? r.optionChoices.filter(o => o && o.optKey) : [];
+    ROWS = (r.items || []).map(it => Object.assign({}, it, { capture: null, extract: null, applications: [], targetApplicationId: '',
+      optKey: OPTS.length === 1 ? OPTS[0].optKey : '', optFullAck: false }));
     distributeStaged();   // 1단계에서 먼저 받아 둔 캡처를 수취인 이름으로 각 줄에 붙인다
     await loadApplicationCandidates();
     if (r.repairedCount) console.info('[ManualOrder] 자동보정 ' + r.repairedCount + '건');
     if (r.truncated) alert(`한 번에 최대 50건까지 처리합니다. ${r.truncated}건은 제외되었습니다.`);
     renderPreview();
+  }
+
+  // ── 상품(선택지) 고르기 (결정 211) ─────────────────────────
+  const _optName = o => (o && (o.productName || o.optKey)) || '';
+  const _optOf = it => OPTS.find(o => o.optKey === it.optKey) || null;
+  /** 이 줄이 상품 때문에 제출이 막히는가: 'need'(안 고름) | 'ack'(마감 상품 확인 전) | '' */
+  function optBlock(it) {
+    if (OPTS.length < 2 && !(OPTS.length === 1 && !it.optKey)) return '';
+    const o = _optOf(it);
+    if (!o) return 'need';
+    if (o.status === 'soldout' && !it.optFullAck) return 'ack';
+    return '';
+  }
+  const submittable = it => !!it.ok && !optBlock(it);
+  function optLabel(o) {
+    const left = o.remaining == null ? '정원 없음' : (o.status === 'soldout' ? `마감(${o.used}/${o.recruitTotal})` : '남은 ' + o.remaining);
+    const today = (o.status !== 'soldout' && o.todayRemaining != null && (o.remaining == null || o.todayRemaining < o.remaining))
+      ? ' · 오늘 ' + o.todayRemaining : '';
+    return _optName(o) + ' · ' + left + today;
+  }
+  function optCell(it, i) {
+    if (!OPTS.length) return '';
+    if (OPTS.length === 1) return `<td style="min-width:150px"><span class="mo-bdg grn">자동</span> ${esc(_optName(OPTS[0]))}</td>`;
+    const o = _optOf(it);
+    let msg = '';
+    if (!o) msg = '<div class="mo-msg e">✕ 상품을 골라야 제출할 수 있습니다</div>';
+    else if (o.status === 'soldout') msg = `<label class="mo-ack"><input type="checkbox" id="moAck${i}" ${it.optFullAck ? 'checked' : ''}
+        onchange="ManualOrder.ackOption(${i},this.checked)"> 이미 찬 상품입니다(${o.used}/${o.recruitTotal}). 그래도 등록하면 ${o.used + 1}/${o.recruitTotal}이 됩니다 — 확인했습니다</label>`;
+    else if (o.todayRemaining === 0) msg = '<div class="mo-msg w">⚠ 오늘 몫은 찼지만 총 정원은 남아 있습니다 — 그대로 등록됩니다</div>';
+    return `<td style="min-width:220px">
+      <select class="mo-appsel" id="moOpt${i}" aria-label="${i + 1}번 줄 상품" onchange="ManualOrder.pickOption(${i},this.value)">
+        <option value="">상품 선택 필수</option>${OPTS.map(x => `<option value="${esc(x.optKey)}" ${it.optKey === x.optKey ? 'selected' : ''}>${esc(optLabel(x))}</option>`).join('')}
+      </select>${msg}</td>`;
+  }
+  function pickOption(i, key) {
+    const it = ROWS[i]; if (!it) return;
+    it.optKey = key || ''; it.optFullAck = false;
+    renderPreview();
+    const el = document.getElementById('moOpt' + i); if (el) el.focus();
+  }
+  function ackOption(i, on) {
+    const it = ROWS[i]; if (!it) return;
+    it.optFullAck = !!on;
+    renderPreview();
+    const el = document.getElementById('moAck' + i); if (el) el.focus();
+  }
+  function syncSubmitBtn() {
+    const btn = document.getElementById('moSubmit');
+    if (!btn) return;
+    const n = ROWS.filter(submittable).length;
+    btn.disabled = !n; btn.textContent = n + '건 제출';
+    const need = ROWS.filter(r => r.ok && optBlock(r) === 'need').length;
+    const ack = ROWS.filter(r => r.ok && optBlock(r) === 'ack').length;
+    const tip = document.getElementById('moOptTip');
+    if (tip) tip.textContent = need ? `상품을 고르지 않은 줄 ${need}개는 제출되지 않습니다` : ack ? `마감 상품 확인 체크 ${ack}개가 필요합니다` : '';
   }
 
   function rowHtml(it, i) {
@@ -348,7 +412,7 @@
           <option value="">신청 선택 필수</option>${apps.map(a => `<option value="${esc(a.id)}" ${String(it.targetApplicationId) === String(a.id) ? 'selected' : ''}>#${esc(a.id)} · ${esc(a.applicant_name || '')} · ${esc(a.status)} · ${esc(a.applied_at || '')}</option>`).join('')}
         </select><div class="mo-msg w">기존 신청은 반드시 선택해야 합니다</div>`
       : '<span class="mo-bdg grn">기존 신청 없음</span>');
-    return `<tr class="${bad ? 'bad' : ''}">
+    return `<tr class="${bad || (it.ok && optBlock(it) === 'need') ? 'bad' : ''}">
       <td style="width:22px;color:#8B95A1">${i + 1}${fixBdg ? '<div style="margin-top:3px">' + fixBdg + '</div>' : ''}</td>
       <td style="width:96px">${inp('reviewerName')}${sub ? '<span class="mo-bdg vio">타계정</span>' : '<span class="mo-bdg grn">본인</span>'}</td>
       <td style="width:86px">${inp('recipient')}</td>
@@ -359,6 +423,7 @@
       <td style="width:110px">${inp('account')}</td>
       <td style="width:74px">${inp('depositor')}</td>
       <td style="width:74px">${inp('price')}</td>
+      ${optCell(it, i)}
       <td style="width:130px">
         <div class="${capCls}" tabindex="0" onpaste="ManualOrder.onPaste(event,${i})" onclick="this.focus()">${capTxt}</div>
         ${capPick}
@@ -379,7 +444,7 @@
           <table class="mo-tbl">
             <thead><tr>
               <th></th><th>리뷰어</th><th>수취인</th><th>아이디</th><th>전화번호</th><th>주소</th>
-              <th>은행</th><th>계좌번호</th><th>예금주</th><th>금액</th><th>구매캡쳐 · 참여신청</th>
+              <th>은행</th><th>계좌번호</th><th>예금주</th><th>금액</th>${OPTS.length ? '<th>상품(옵션)</th>' : ''}<th>구매캡쳐 · 참여신청</th>
             </tr></thead>
             <tbody>${ROWS.map(rowHtml).join('')}</tbody>
           </table>
@@ -388,11 +453,17 @@
           · 칸을 눌러 바로 수정할 수 있습니다 · 오류가 있는 줄은 제출에서 제외됩니다<br>
           · 구매캡쳐 칸을 클릭하고 <b>Ctrl+V</b> 하면 첨부됩니다 — 캡처 속 주문번호를 자동으로 읽습니다<br>
           · 참여형 공고에서 기존 신청이 보이면 <b>확정할 신청을 반드시 선택</b>하세요. 전화번호만으로 새 신청을 자동 확정하지 않습니다<br>
-          · <b>🔧 자동보정 / 🤖 AI 보정</b> 표시가 붙은 줄은 <b>슬래시(/)가 빠진 자리를 시스템이 찾아 나눈 것</b>입니다 — 값이 맞는지 꼭 확인하세요
+          · <b>🔧 자동보정 / 🤖 AI 보정</b> 표시가 붙은 줄은 <b>슬래시(/)가 빠진 자리를 시스템이 찾아 나눈 것</b>입니다 — 값이 맞는지 꼭 확인하세요${OPTS.length >= 2 ? `<br>
+          · 이 작업은 상품이 ${OPTS.length}개입니다 — <b>줄마다 상품을 골라야</b> 제출됩니다. 고른 상품이 작업표 「상품」 칸과 그 상품의 사용 수에 그대로 들어갑니다<br>
+          · 이미 찬 상품은 막지 않고 <b>확인 체크</b>를 받습니다 — 이미 구매가 끝난 건이라 기록이 비는 것보다 낫기 때문입니다` : ''}
         </div>
       </div>`,
       `<button class="mo-btn gh" onclick="ManualOrder.back()">← 다시 붙여넣기</button><span class="sp"></span>
+       <span class="mo-opttip" id="moOptTip" role="status"></span>
        <button class="mo-btn pri" id="moSubmit" ${okN ? '' : 'disabled'} onclick="ManualOrder.submit()">${okN}건 제출</button>`);
+    // ★ 상품 칸이 붙으면 전화번호·계좌 칸이 잘리지 않게 창을 넓힌다(좁은 화면은 max-width 97vw + 표 가로 스크롤).
+    const box = document.querySelector('#moOvl .mo-box'); if (box) box.classList.toggle('wide', OPTS.length >= 2);
+    syncSubmitBtn();
   }
 
   function back() { renderInput(); }
@@ -435,14 +506,15 @@
     it.ok = !bad;
     it.errors = bad ? (missing.length ? ['필수 항목이 비어 있습니다'] : ['전화번호 자릿수가 이상합니다']) : [];
     const btn = document.getElementById('moSubmit');
-    if (btn) { const n = ROWS.filter(r => r.ok).length; btn.disabled = !n; btn.textContent = n + '건 제출'; }
+    if (btn) syncSubmitBtn();
     // 오류 여부가 바뀐 줄만 색을 맞춘다(표 재렌더 없이 — 입력 중 포커스 유지)
     const tr = document.querySelectorAll('.mo-tbl tbody tr')[i];
     if (tr) {
-      tr.classList.toggle('bad', bad);
+      tr.classList.toggle('bad', bad || (it.ok && optBlock(it) === 'need'));
       // 고친 줄에 옛 ✕/⚠ 문구가 남아 있으면 "아직 오류"로 읽힌다 → 함께 갱신
-      tr.querySelectorAll('.mo-msg').forEach(el => el.remove());
+      // ★ 상품(옵션) 칸의 안내는 그 칸이 따로 관리한다(결정 211) — 마지막 칸의 문구만 지운다.
       const cell = tr.lastElementChild;
+      if (cell) cell.querySelectorAll('.mo-msg').forEach(el => el.remove());
       if (cell && bad) {
         const d = document.createElement('div');
         d.className = 'mo-msg e';
@@ -523,7 +595,7 @@
   // ── 3단계: 제출 ────────────────────────────────────────────
   async function submit() {
     if (BUSY) return;
-    const targets = ROWS.map((r, i) => ({ r, i })).filter(x => x.r.ok);
+    const targets = ROWS.map((r, i) => ({ r, i })).filter(x => submittable(x.r));
     if (!targets.length) return;
     if (!confirm(`${targets.length}건을 제출합니다.\n리뷰어 자동 등록${CTX.campaignId ? ' · 모집 정원 차감' : ''}이 함께 진행됩니다.`)) return;
     BUSY = true;
@@ -542,8 +614,10 @@
         allowOverDaily: allowOverDaily === true,
         allowRepurchase: allowRepurchase === true,
         force: force === true,
+        optionAware: OPTS.length > 0,   // ★ 결정 211: 서버가 "안 고름·마감 미확인"을 막는 것은 이 화면에서 온 요청만
         items: (subset ? subset.map(i => targets[i]) : targets)
-          .map(x => ({ fields: x.r.fields, optionKey: x.r.fields.optionKey || '', targetApplicationId: x.r.targetApplicationId || null })),
+          .map(x => ({ fields: x.r.fields, optionKey: x.r.optKey || x.r.fields.optionKey || '', optionFullAck: x.r.optFullAck === true,
+                       targetApplicationId: x.r.targetApplicationId || null })),
       }),
     });
 
@@ -704,7 +778,7 @@
   }
 
   window.ManualOrder = {
-    open, close, parse, back, edit, submit, pickApplication,
+    open, close, parse, back, edit, submit, pickApplication, pickOption, ackOption,
     onPaste, onFile,                                    // 2단계 표의 줄별 첨부
     onTextPaste, onStagePaste, onDrop, onStageFiles, unstage,   // 1단계 보관함
   };

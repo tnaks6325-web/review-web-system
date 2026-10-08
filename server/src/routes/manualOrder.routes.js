@@ -11,7 +11,7 @@ const router = express.Router();
 const pool = require('../db/pool');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const { parseSlashForm } = require('../utils/slashForm');
-const { submitExternalOrder, dailyRemainingForCampaign } = require('../services/manualOrder.service');
+const { submitExternalOrder, dailyRemainingForCampaign, tabOptionChoices } = require('../services/manualOrder.service');
 const { checkRepurchaseWindowBatch, phone8Of, resolveCampaignRepurchaseDays } = require('../utils/repurchaseGuard');
 const { logger } = require('../utils/logger');
 
@@ -62,8 +62,15 @@ router.post('/preview', authMiddleware, adminOrMasterMiddleware, async (req, res
     }
   }
 
+  // ★ 결정 211: 작업보드 경로(공고 없이 탭 단위)면 그 탭에 연결된 공고의 상품(선택지) 목록을 함께 싣는다.
+  //   공고 화면 경로(campaignId 있음)는 종전대로(신청 선택이 옵션을 정한다).
+  const b = req.body || {};
+  const optCtx = (!b.campaignId && b.sheetId && b.tabName)
+    ? await tabOptionChoices(pool, { sheetId: String(b.sheetId), tabName: String(b.tabName) }) : null;
+
   res.json({
     ok: true, items,
+    optionChoices: optCtx ? optCtx.choices : [],
     truncated: all.length > MAX_LINES ? all.length - MAX_LINES : 0,
     okCount: items.filter(i => i.ok).length,
     errCount: items.filter(i => !i.ok).length,
@@ -128,6 +135,12 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
       }
     }
 
+    /* ★ 결정 211: 작업보드 경로의 상품(선택지) — 연결 공고가 하나로 정해지면 줄마다 고른 상품을 검증한다.
+       ★ 새 화면(optionAware)만 "안 고름·마감 미확인"을 막는다 — 옛 화면(배포 직후 캐시)은 종전대로 접수
+         (이미 산 주문의 기록이 비는 쪽이 더 나쁘다 — 오늘 몫 초과와 같은 규율). 상품이 하나뿐이면 자동. */
+    const optionAware = b.optionAware === true;
+    const optCtx = !campaignId ? await tabOptionChoices(pool, { sheetId, tabName }) : null;
+
     const adminName = (req.admin && req.admin.name) || '';
     const results = [];
     for (let i = 0; i < items.length; i++) {
@@ -146,12 +159,28 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
         results.push({ index: i, ok: false, error: `전화번호 자릿수가 이상합니다 (${pd.length}자리)`, name: f.recipient || '' });
         continue;
       }
+      let itemOptKey = it.optionKey || '';
+      if (optCtx) {
+        const live = optCtx.choices;
+        const ch = live.find(c => c.optKey === String(it.optionKey || '')) || (live.length === 1 ? live[0] : null);
+        if (optionAware && !ch) {
+          results.push({ index: i, ok: false, reason: 'option_required', name: f.recipient || '', error: '상품(옵션)을 골라 주세요' });
+          continue;
+        }
+        if (optionAware && ch && ch.status === 'soldout' && it.optionFullAck !== true) {
+          results.push({ index: i, ok: false, reason: 'option_full_confirm', name: f.recipient || '',
+            error: `이 상품은 이미 찼습니다(${ch.used}/${ch.recruitTotal}) — 확인 체크 후 다시 제출해 주세요` });
+          continue;
+        }
+        itemOptKey = ch ? ch.optKey : '';
+      }
       try {
         const r = await submitExternalOrder({
           sheetId, tabName, gid: gid || '',
           fields: f,
           campaignId: campaignId || null,
-          optionKey: it.optionKey || '',
+          optionCampaignId: optCtx ? optCtx.campaignId : null,
+          optionKey: itemOptKey,
           // 참여형 수동확정은 전화번호만으로 홀드를 고르지 않는다. 관리자가 선택한 신청 ID를
           // 서버가 캠페인·명의와 함께 다시 검증한다(재참여 직후 새 홀드 오확정 방지).
           targetApplicationId: it.targetApplicationId || null,
@@ -165,6 +194,10 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
         //   이번에 문제가 된 상태(정원을 넘긴 줄 모름)가 그대로 되돌아온다.
         if (allowOverDaily && r && r.ok) {
           r.warnings = (r.warnings || []).concat('오늘 모집인원을 초과해 접수했습니다(관리자 확인됨)');
+        }
+        if (r && r.ok && optCtx && it.optionFullAck === true) {
+          const ch = optCtx.choices.find(c => c.optKey === itemOptKey);
+          if (ch && ch.status === 'soldout') r.warnings = (r.warnings || []).concat(`이미 찬 상품(${ch.productName || ch.optKey})에 정원을 넘겨 접수했습니다(관리자 확인됨)`);
         }
         results.push({ index: i, name: f.recipient || '', ...r });
       } catch (e) {
