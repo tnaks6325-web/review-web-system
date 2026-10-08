@@ -1159,6 +1159,8 @@ function withStubPool(handler, run) {
   t('7B-f ★★ 접기는 **표시 전용** — 체크 상태·이체 대상은 건드리지 않는다', () => {
     const items = [payRow({ rowIndex: 1 }), payRow({ rowIndex: 2 })];
     const S = loadTableFns(items);
+    // 결정 217: 문제 없는 작업은 처음에 접힌다 — 이 검사는 "펼친 상태에서 접기"를 보므로 기본 접기를 이미 지난 것으로 둔다
+    S.STATE.pmFoldSeen = new Set(['S1||T1']);
     S._pmTargetTable(items);                       // STATE.pmGroups 채움
     const before = items.map(it => S._pmOn(it)).join(',');
     S._pmFoldWork(0);                              // document 스텁이라 DOM 조작은 no-op
@@ -1170,6 +1172,20 @@ function withStubPool(handler, run) {
     assert.strictEqual((html.match(/pmhide/g) || []).length, 2, '접힘이 화면에 반영되지 않았다');
     S._pmFoldWork(0);
     assert.ok(!S.STATE.pmFold[S.STATE.pmGroups[0]], '다시 눌러도 안 펴진다');
+  });
+
+  t('7B-i ★ 처음 보는 작업은 문제 있는 것만 펼치고 나머지는 접는다 · 사람이 바꾼 상태는 유지(결정 217)', () => {
+    const items = [payRow({ rowIndex: 1, tabLabel: '정상' }),
+      payRow({ sheetId: 'S2', rowIndex: 2, tabLabel: '보류', payable: false, issues: ['no_account'] }),
+      payRow({ sheetId: 'S3', rowIndex: 3, tabLabel: '금액', warnings: ['price_outlier'] })];
+    const S = loadTableFns(items);
+    S._pmTargetTable(items);
+    assert.strictEqual(S.STATE.pmFold['S1||T1'], true, '문제 없는 작업이 펼쳐져 있다');
+    assert.ok(!S.STATE.pmFold['S2||T1'] && !S.STATE.pmFold['S3||T1'], '★ 문제 있는 작업이 접혀 있다(보류·금액 확인을 못 본다)');
+    // 사람이 펼친 뒤 다시 그려도 기본 접기가 되살아나지 않는다
+    S._pmFoldWork(0);
+    S._pmTargetTable(items);
+    assert.ok(!S.STATE.pmFold['S1||T1'], '★ 사람이 펼친 작업이 다시 접혔다');
   });
 
   t('7B-g ★★ 머리줄·데이터 줄의 onclick 은 인덱스만(작업명은 시트발 문자열)', () => {

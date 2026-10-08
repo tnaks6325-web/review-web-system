@@ -126,7 +126,8 @@ function handler(opts = {}) {
   t('2d 화면: 조회 두 곳이 같은 주소 함수를 쓰고, 안내 줄이 표시된다', () => {
     assert.strictEqual((wd.match(/api\('\/api\/trackb\/payment\/targets'/g) || []).length, 0, '주소를 하드코딩하지 않는다');
     assert.strictEqual((wd.match(/api\(_pmTargetsUrl\(\)/g) || []).length, 2);
-    assert.ok(/\$\{_pmFinishedNoteHtml\(\)\}/.test(wd));
+    // 시안 2(결정 217): 마감 안내는 왼쪽 작업 목록 아래로 옮겼다 — 렌더가 그 함수를 부르는 것은 그대로
+    assert.ok(/bottom:\s*_pmFinishedNoteHtml\(\)/.test(wd), '마감 안내 줄이 화면에 실리지 않는다');
     assert.ok(/onclick="_pmToggleFinished\(\)"/.test(wd));
   });
 
