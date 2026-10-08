@@ -30,6 +30,7 @@ const cnt = (a = 0, b = 0, c = 0) => new Map([
 const views = (a, b, c, seq = true) => computeOptionViews(rows, cnt(a, b, c), { state: 'open' }, { sequential: seq });
 const BASE = { title: JEJU_TITLE, thumbnailUrl: 'https://img.example/campaign.jpg' };
 
+let j;
 console.log('\n[1] 제목 안의 상품 이름만 바꾼다');
 let d = sequentialDisplay(BASE, views(0, 0, 0));
 ok('은갈치 모집 중 — 제목 그대로, 지금 모집 줄 없음', d.title === JEJU_TITLE && d.nowRecruiting === '');
@@ -81,9 +82,18 @@ const two = computeOptionViews([
 d = sequentialDisplay({ title: '빨강/파랑 에코백', thumbnailUrl: '' }, two);
 ok('"빨강/파랑 에코백" → 제목 그대로("파랑/파랑" 금지) + 지금 모집: 파랑', d.title === '빨강/파랑 에코백' && d.nowRecruiting === '파랑');
 
+console.log('\n[4-3] 관리자가 닫아 살아있는 상품이 1개만 남아도 지금 모집 표시 유지 (E2E 실측)');
+const oneLive = [ { ...rows[0], status: 'closed' }, { ...rows[1], status: 'closed' }, rows[2] ];
+const ov = computeOptionViews(oneLive, cnt(0, 0, 0), { state: 'open' }, { sequential: true });
+d = sequentialDisplay(BASE, ov);
+ok('은갈치·옥돔이 닫히고 고등어만 남음 → 제목·사진이 고등어살(저장 제목 은갈치로 돌아가지 않음)', d && d.title === '빈)))3. 고등어살 : 0.5kg(팩당 120g 4팩)');
+j = joinedDisplay(BASE, ov, ov[1]);
+ok('닫힌 옥돔에 참여한 사람은 여전히 옥돔', j.title === '빈)))2. 참옥돔 : 옥돔 중 180g이상 3마리');
+ok('참여자 화면 판정(공고 기준)이 켜져 있다 — 고등어 뷰가 sequential', ov.some(v => v.sequential));
+
 console.log('\n[5] 참여한 사람은 내가 고른 상품으로 고정');
 const jv = views(10, 0, 0);   // 지금은 옥돔 모집 중
-let j = joinedDisplay(BASE, jv, jv[0]);
+j = joinedDisplay(BASE, jv, jv[0]);
 ok('은갈치 참여자: 제목·사진 은갈치 그대로', j.title === JEJU_TITLE && j.thumbnailUrl === 'https://img.example/galchi.jpg');
 j = joinedDisplay(BASE, jv, jv[2]);
 ok('고등어살 참여자: 제목 고등어살 · 사진 없으니 공고 사진', j.title === '빈)))3. 고등어살 : 0.5kg(팩당 120g 4팩)' && j.thumbnailUrl === 'https://img.example/campaign.jpg');
