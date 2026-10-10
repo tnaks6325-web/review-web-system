@@ -808,26 +808,35 @@ async function manualConfirm(body, reviewer) {
     reasonCodes = Array.isArray(review.reasonCodes) ? review.reasonCodes : [];
     if (reasonCodes.some((code) =>
       ['masked_name_ocr_correction', 'plain_name_ocr_correction'].includes(code))) {
-      const fieldRules = {
-        recipient: { selected: context.selected.name, normalize: cleanName },
-        phone: { selected: context.selected.phone, normalize: phone8 },
-        address: { selected: context.selected.address, normalize: normAddress },
-      };
+      // ★ 결정 219 — "목록에서 골랐음" 기록(savedIdentitySelections)은 보지 않는다. 그 기록은 화면이
+      //   임의로 보내는 값이라 막는 효과가 없고, 직접 적었거나 분석 결과가 덮어쓴 정직한 제출만 막았다
+      //   (10-06~10-08 58회). 수취인은 **값**이 현재 참여 명의 이름과 같아야 한다(다른 이름은 계속 차단).
+      //   가림이던 연락처·주소는 실제 값(가림 없음)이면 저장값과 달라도 받는다 — 다른 번호·다른 배송지 주문
+      //   (사용자 확정 2026-10-10). 다른 배송지는 아래 공통 검사가 delivery_address_changed 로 남긴다.
       const requiredSavedFields = Array.isArray(review.requiredSavedFields)
-        ? review.requiredSavedFields.filter((field) => fieldRules[field]) : ['recipient'];
-      const invalidSavedField = requiredSavedFields.find((field) => {
-        const rule = fieldRules[field];
-        return String(body.savedIdentitySelections?.[field] || '') !== String(context.selected.identityKey)
-          || rule.normalize(body.formFields?.[field]) !== rule.normalize(rule.selected);
-      });
-      if (invalidSavedField) {
+        ? review.requiredSavedFields.filter((field) => ['recipient', 'phone', 'address'].includes(field)) : ['recipient'];
+      if (!requiredSavedFields.includes('recipient')) requiredSavedFields.unshift('recipient');
+      const selectedName = cleanName(context.selected.name);
+      if (!selectedName || cleanName(body.formFields?.recipient) !== selectedName) {
         throw new ReviewerOrderIdentityError(
           'SAVED_IDENTITY_SELECTION_REQUIRED',
-          '수취인 아래 내 저장정보에서 현재 참여 명의를 선택해 가림 정보를 보완해주세요.',
+          `수취인을 참여 명의 이름(${String(context.selected.name || '').trim()})으로 정확히 적어주세요. 수취인 아래 [내 정보에서 선택]으로 채울 수도 있어요.`,
           409
         );
       }
-      reasonCodes.push('saved_identity_selected');
+      const maskedField = requiredSavedFields.find((field) => {
+        if (field === 'recipient') return false;
+        const value = String(body.formFields?.[field] || '').trim();
+        return !value || MASK_RE.test(value);
+      });
+      if (maskedField) {
+        throw new ReviewerOrderIdentityError(
+          'IDENTITY_FIELDS_REQUIRED',
+          `${maskedField === 'phone' ? '연락처' : '배송주소'}의 가려진 부분(*)을 실제 정보로 고쳐주세요.`,
+          409
+        );
+      }
+      reasonCodes.push('identity_value_confirmed');
     }
   } else if (mode === 'form_edit') {
     // 필드 수정은 기존 승인토큰을 제출에 그대로 재사용하지 않는다. 다만 그 토큰으로
@@ -877,8 +886,9 @@ async function manualConfirm(body, reviewer) {
   }
 
   const check = await evaluateSelectedIdentity(body.formFields || {}, context.selected, context.identities, { useGemini: false });
+  // 결정 219 — 선택 기록이 아니라 값으로 판단한다(위 review 단계와 같은 기준).
   const explicitlyConfirmedPlainName = reasonCodes.includes('plain_name_ocr_correction')
-    && String(body.savedIdentitySelections?.recipient || '') === String(context.selected.identityKey)
+    && !!cleanName(context.selected.name)
     && cleanName(body.formFields?.recipient) === cleanName(context.selected.name);
   if (explicitlyConfirmedPlainName) {
     const missingOrMasked = ['recipient', 'phone', 'address'].find((field) => {
