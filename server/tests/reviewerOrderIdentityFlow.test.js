@@ -233,6 +233,9 @@ async function test(name, fn) { await fn(); passed++; console.log('  ✓ ' + nam
     // 가림이 남은 연락처·주소는 실제 정보로 고치라고 막는다.
     await assert.rejects(confirm({ ...selectedFields, phone:extracted.phone }), (err) => err.code === 'IDENTITY_FIELDS_REQUIRED');
     await assert.rejects(confirm({ ...selectedFields, address:'' }), (err) => err.code === 'IDENTITY_FIELDS_REQUIRED');
+    // 저장값과 달라도 받는 대신 쓸 수 있는 값이어야 한다(Codex P2) — 짧은 번호·한 글자 주소는 막는다.
+    await assert.rejects(confirm({ ...selectedFields, phone:'1' }), (err) => err.code === 'IDENTITY_FIELDS_REQUIRED');
+    await assert.rejects(confirm({ ...selectedFields, address:'a' }), (err) => err.code === 'IDENTITY_FIELDS_REQUIRED');
     // 직접 적은 같은 값 — 목록 선택 기록 없이 통과(10-06~08 실패 58회의 주원인).
     const manual = await confirm(selectedFields);
     await identity.verifyApprovalForSubmission({

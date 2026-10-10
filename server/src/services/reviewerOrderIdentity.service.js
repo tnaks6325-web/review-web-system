@@ -827,12 +827,15 @@ async function manualConfirm(body, reviewer) {
       const maskedField = requiredSavedFields.find((field) => {
         if (field === 'recipient') return false;
         const value = String(body.formFields?.[field] || '').trim();
-        return !value || MASK_RE.test(value);
+        if (!value || MASK_RE.test(value)) return true;
+        // 저장값과 달라도 받는 만큼 쓸 수 있는 값인지는 본다(Codex P2) — 연락처 9~12자리 · 주소 5~300자(ADDRESS_INVALID 와 같은 기준).
+        if (field === 'phone') return digits(value).length < 9 || digits(value).length > 12;
+        return value.length < 5 || value.length > 300;
       });
       if (maskedField) {
         throw new ReviewerOrderIdentityError(
           'IDENTITY_FIELDS_REQUIRED',
-          `${maskedField === 'phone' ? '연락처' : '배송주소'}의 가려진 부분(*)을 실제 정보로 고쳐주세요.`,
+          `${maskedField === 'phone' ? '연락처' : '배송주소'}를 가림(*) 없는 실제 정보로 정확히 적어주세요.`,
           409
         );
       }
