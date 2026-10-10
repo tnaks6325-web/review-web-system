@@ -100,14 +100,16 @@ ok('드롭다운 선택값은 DOM 버튼으로 만들고 입력 임시저장 순
   && /option\.textContent =/.test(appJs)
   && !/<select class="of-saved-info-select"/.test(appJs)
   && (appJs.match(/\.filter\(el => el\.type !== "file"\)/g) || []).length === 2);
-ok('가림 이름 OCR 보정은 현재 참여 명의의 저장정보 선택을 서버에서 다시 검증한다',
+// 결정 219 — 서버는 "목록에서 골랐음" 기록이 아니라 **값**으로 확인한다(기록은 화면이 임의로 보내 막는 효과가 없다).
+ok('가림 이름 OCR 보정은 수취인 값이 현재 참여 명의 이름과 같은지 서버에서 다시 검증한다',
   /st\.savedIdentitySelections\[appliedField\] = identity\.identityKey/.test(appJs)
-  && /savedIdentitySelections: _savedIdentitySelections\(cid\)/.test(appJs)
   && /masked_name_ocr_correction/.test(service)
   && /requiredSavedFields/.test(service)
   && /SAVED_IDENTITY_SELECTION_REQUIRED/.test(service)
-  && /body\.savedIdentitySelections\?\.\[field\]/.test(service));
-ok('전체 이름 OCR 보정은 주소·다른 명의 유사도 대신 현재 참여 명의 직접 선택을 요구한다',
+  && /cleanName\(body\.formFields\?\.recipient\) !== selectedName/.test(service)
+  && /MASK_RE\.test\(value\)/.test(service)
+  && !/body\.savedIdentitySelections/.test(service));
+ok('전체 이름 OCR 보정은 주소·다른 명의 유사도 대신 현재 참여 명의 이름 값을 요구한다',
   /function plainNameOcrCorrectionCandidate/.test(service)
   && /explicitlyConfirmedPlainName/.test(service)
   && /plain_name_ocr_correction/.test(service)

@@ -119,7 +119,7 @@ function _clearSavedIdentitySelection(cid, field) {
 }
 
 // "골랐음" 기록을 비울 때 목록 칸 글자도 함께 되돌린다. 글자만 남으면 리뷰어는 골랐다고 보지만
-// 서버는 선택이 없다고 409 SAVED_IDENTITY_SELECTION_REQUIRED 를 낸다(결정 207).
+// 서버는 선택이 없다고 409 SAVED_IDENTITY_SELECTION_REQUIRED 를 냈다(결정 207). 결정 219 부터 서버는 기록이 아니라 값으로 확인한다.
 function _resetSavedIdentityPickerLabels(cid) {
   ["recipient", "phone", "address"].forEach((field) => {
     const wrap = document.getElementById(cid + "_" + field + "SavedInfo");

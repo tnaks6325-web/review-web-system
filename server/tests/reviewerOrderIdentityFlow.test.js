@@ -191,29 +191,29 @@ async function test(name, fn) { await fn(); passed++; console.log('  ✓ ' + nam
     await identity.verifyApprovalForSubmission({ ...base, ...extracted, identityApprovalToken:matched.approvalToken }, reviewer);
   });
 
-  await test('전체 이름 1글자 OCR 오탐은 현재 참여 명의를 선택한 뒤 제출한다', async () => {
+  await test('전체 이름 1글자 OCR 오탐은 수취인을 현재 참여 명의 이름으로 고치면 제출한다(목록 선택 기록 불필요 · 결정 219)', async () => {
     const extracted = { recipient:'깁민수', phone:'010-0000-9999', address:selectedAddress };
     const proof = identity.issueExtractionProof({ imageHash:'6e'.repeat(32), extracted, ok:true });
     const reviewed = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted }, reviewer);
     assert.strictEqual(reviewed.status, 'REVIEW', JSON.stringify(reviewed));
     assert.ok(reviewed.reviewToken);
     assert.ok(reviewed.reasonCodes.includes('plain_name_ocr_correction'));
-    const corrected = { ...selectedFields, phone:extracted.phone };
+    // 오인식된 이름 그대로는 막는다 — 선택 기록을 보내도 값이 다르면 막는다.
     await assert.rejects(identity.manualConfirm({
       ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken,
-      formFields:corrected,
+      formFields:extracted, savedIdentitySelections:{ recipient:`identity:${selectedId}` },
     }, reviewer), (err) => err.code === 'SAVED_IDENTITY_SELECTION_REQUIRED');
+    const corrected = { ...selectedFields, phone:extracted.phone };
     const manual = await identity.manualConfirm({
       ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken,
       formFields:corrected,
-      savedIdentitySelections:{ recipient:`identity:${selectedId}` },
     }, reviewer);
     await identity.verifyApprovalForSubmission({
       ...base, ...corrected, identityApprovalToken:manual.approvalToken,
     }, reviewer);
   });
 
-  await test('쿠팡 가림 이름·연락처·주소는 저장 명의 선택으로 함께 보완해 재확인한다', async () => {
+  await test('쿠팡 가림 이름·연락처·주소는 실제 값으로 고치면 목록 선택 기록 없이 재확인한다(결정 219)', async () => {
     const extracted = {
       recipient:'김*순', phone:'010-****-5678',
       address:'***',
@@ -223,25 +223,37 @@ async function test(name, fn) { await fn(); passed++; console.log('  ✓ ' + nam
     assert.strictEqual(reviewed.status, 'REVIEW', JSON.stringify(reviewed));
     assert.ok(reviewed.reviewToken);
     assert.ok(reviewed.reasonCodes.includes('masked_name_ocr_correction'));
-    await assert.rejects(identity.manualConfirm({
-      ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken,
-      formFields:selectedFields,
-    }, reviewer), (err) => err.code === 'SAVED_IDENTITY_SELECTION_REQUIRED');
-    const manual = await identity.manualConfirm({
-      ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken,
-      formFields:selectedFields,
-      savedIdentitySelections:{
-        recipient:`identity:${selectedId}`,
-        phone:`identity:${selectedId}`,
-        address:`identity:${selectedId}`,
-      },
+    const confirm = (formFields, extra = {}) => identity.manualConfirm({
+      ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken, formFields, ...extra,
     }, reviewer);
+    // 이름은 값으로 확인한다 — 가림 그대로·다른 명의 이름은 선택 기록을 보내도 막는다.
+    await assert.rejects(confirm({ ...selectedFields, recipient:'김*순' }), (err) => err.code === 'SAVED_IDENTITY_SELECTION_REQUIRED');
+    await assert.rejects(confirm({ ...selectedFields, recipient:'박영희' },
+      { savedIdentitySelections:{ recipient:`identity:${selectedId}` } }), (err) => err.code === 'SAVED_IDENTITY_SELECTION_REQUIRED');
+    // 가림이 남은 연락처·주소는 실제 정보로 고치라고 막는다.
+    await assert.rejects(confirm({ ...selectedFields, phone:extracted.phone }), (err) => err.code === 'IDENTITY_FIELDS_REQUIRED');
+    await assert.rejects(confirm({ ...selectedFields, address:'' }), (err) => err.code === 'IDENTITY_FIELDS_REQUIRED');
+    // 저장값과 달라도 받는 대신 쓸 수 있는 값이어야 한다(Codex P2) — 짧은 번호·한 글자 주소는 막는다.
+    await assert.rejects(confirm({ ...selectedFields, phone:'1' }), (err) => err.code === 'IDENTITY_FIELDS_REQUIRED');
+    await assert.rejects(confirm({ ...selectedFields, address:'a' }), (err) => err.code === 'IDENTITY_FIELDS_REQUIRED');
+    // 직접 적은 같은 값 — 목록 선택 기록 없이 통과(10-06~08 실패 58회의 주원인).
+    const manual = await confirm(selectedFields);
     await identity.verifyApprovalForSubmission({
       ...base, ...selectedFields, identityApprovalToken:manual.approvalToken,
     }, reviewer);
+    assert.ok(JSON.parse(audits.at(-1)[8]).includes('identity_value_confirmed'));
+    // B: 다른 실제 연락처로 주문했어도 통과(연락처는 명의 판단에 쓰지 않는다).
+    const otherPhone = { ...selectedFields, phone:'010-2222-3333' };
+    const phoneApproval = await confirm(otherPhone);
+    await identity.verifyApprovalForSubmission({ ...base, ...otherPhone, identityApprovalToken:phoneApproval.approvalToken }, reviewer);
+    // C: 다른 실제 배송지로 주문했어도 통과하되 감사기록에 배송지 변경을 남긴다(사용자 확정 2026-10-10).
+    const otherAddress = { ...selectedFields, address:'경기 성남시 분당구 판교역로 235 7층' };
+    const addressApproval = await confirm(otherAddress);
+    await identity.verifyApprovalForSubmission({ ...base, ...otherAddress, identityApprovalToken:addressApproval.approvalToken }, reviewer);
+    assert.ok(JSON.parse(audits.at(-1)[8]).includes('delivery_address_changed'));
   });
 
-  await test('전화·주소가 모두 맞아 일반 REVIEW였던 OCR 이름 오류도 저장 명의 선택을 강제한다', async () => {
+  await test('전화·주소가 모두 맞아 일반 REVIEW였던 OCR 이름 오류도 가림 이름 그대로는 승인하지 않는다', async () => {
     const extracted = {
       recipient:'김*순', phone:'010-****-5678',
       address:'서울 강남구 테헤란로 ** 101동 1203호',
