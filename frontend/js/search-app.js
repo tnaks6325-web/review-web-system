@@ -7565,6 +7565,14 @@ function _subIdentityHint(name, phone, editIdx) {
   return "";
 }
 
+/** ★ 결정 222(3-3 · Codex P2) — 확인 상자를 띄운 뒤 입력칸을 고치면 상자의 안내가 낡는다. 띄울 때의 값을 기억해 두고,
+ *  저장확정 때 값이 달라졌으면 저장하지 않고 상자를 새 값으로 다시 띄운다(안내도 다시 계산). */
+function _inlineSubSnapshot() {
+  return ["inlineSubName", "inlineSubPhone", "inlineSubIncomeName", "inlineSubJumin", "inlineSubAddr",
+    "inlineSubBankName", "inlineSubBankAccount", "inlineSubAccountHolder", "inlineSubEditIdx"]
+    .map((id) => (document.getElementById(id)?.value || "").trim()).join("\u0001");
+}
+
 async function saveInlineSubAccount() {
   const name = (document.getElementById("inlineSubName")?.value || "").trim();
   const phoneLast8 = (document.getElementById("inlineSubPhone")?.value || "").replace(/[^0-9]/g, "");
@@ -7620,12 +7628,19 @@ async function saveInlineSubAccount() {
     </div>
   `;
   formArea.insertAdjacentHTML("beforeend", confirmHtml);
+  document.getElementById("inlineSubConfirm").dataset.snap = _inlineSubSnapshot();
   // 확인창으로 스크롤
   document.getElementById("inlineSubConfirm").scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 /** 타계정 저장 확정 (확인 단계 후 실행) */
 async function confirmSaveInlineSubAccount() {
+  const _box = document.getElementById("inlineSubConfirm");
+  if (_box && _box.dataset.snap !== undefined && _box.dataset.snap !== _inlineSubSnapshot()) {
+    // 확인 상자를 띄운 뒤 값이 바뀌었다 — 바뀐 값으로 다시 확인받는다(저장하지 않음).
+    showToast("입력이 바뀌어 다시 확인해 주세요");
+    return saveInlineSubAccount();
+  }
   const name = (document.getElementById("inlineSubName")?.value || "").trim();
   const phoneLast8 = (document.getElementById("inlineSubPhone")?.value || "").replace(/[^0-9]/g, "");
   const phone = "010" + phoneLast8;
