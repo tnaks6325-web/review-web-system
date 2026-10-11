@@ -131,5 +131,30 @@ function observeSubAccountsWrite({ owner, prev, next, source = '' }, db = pool) 
   })();
 }
 
-module.exports = { MAX_SUBS, MODE_KEY, getMode, evaluateSubAccountsChange, observeSubAccountsWrite,
+/**
+ * ★ 결정 224(신원 기준 3-4a) — 구매양식이 명의 정보를 **스스로** 바꾸거나 등록을 요구한 사건을 센다(관찰만).
+ *   code: order_enrich_sub(타계정 빈칸 자동 채움) · order_need_sub_register(제출 관문이 타계정 등록 요구) ·
+ *         precheck_need_sub_register(제출 전 대조가 등록 요구) · order_form_register(구매양식에서 타계정 등록) ·
+ *         order_bank_fill(본인 계좌 빈칸 자동 채움) · order_income_save(소득 정보 자동 저장)
+ *   기다리지 않고, 어떤 실패도 삼킨다. 스위치가 off 면 남기지 않는다. 이름·번호는 남기지 않는다.
+ */
+function recordEvent({ source = '', ownerId = null, code, subIndex = null }, db = pool) {
+  return (async () => {
+    try {
+      if (!code) return false;
+      const mode = await getMode(db);
+      if (mode === 'off') return false;
+      await db.query(
+        `INSERT INTO identity_rule_observations (source, owner_reviewer_id, rule_code, sub_index, mode)
+         VALUES ($1, $2::uuid, $3, $4, $5)`,
+        [String(source || ''), ownerId ? String(ownerId) : null, String(code), subIndex == null ? null : subIndex, mode]);
+      return true;
+    } catch (err) {
+      logger.warn(`[identity-rules] 사건 기록 실패(무영향): ${err.code || ''} ${err.message}`);
+      return false;
+    }
+  })();
+}
+
+module.exports = { MAX_SUBS, MODE_KEY, getMode, evaluateSubAccountsChange, observeSubAccountsWrite, recordEvent,
   _test: { nameKey, phone8Of, sig, _resetModeCacheForTest } };

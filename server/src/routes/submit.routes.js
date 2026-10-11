@@ -973,6 +973,8 @@ router.post('/order', async (req, res, next) => {
           }, { mode: 'submit', skipDetailChecks: String(b.identityConfirmed) === 'true' });
 
           if (_verdict.status === 'NEED_SUB_REGISTER') {
+            // 결정 224 — 관찰: 제출 관문이 타계정 등록을 요구한 횟수(기다리지 않음·실패 무시)
+            try { require('../services/identityRules.service').recordEvent({ source: 'order_submit', ownerId: _rv.id, code: 'order_need_sub_register' }); } catch (_) { /* noop */ }
             return res.json({
               ok: false, code: 'NEED_SUB_REGISTER',
               identity: _verdict.identity, reasons: _verdict.reasons,
@@ -1021,7 +1023,11 @@ router.post('/order', async (req, res, next) => {
                 }
                 return dirty ? subs : null;
               }, { source: 'order_enrich' });
-              if (_res.changed) logger.info(`[order-identity] 타계정 자동보강: ${_idPhone8} ${_target.name || ''}`);
+              if (_res.changed) {
+                logger.info(`[order-identity] 타계정 자동보강: ${_idPhone8} ${_target.name || ''}`);
+                // 결정 224 — 관찰: 구매양식이 타계정 빈칸을 스스로 채운 횟수
+                try { require('../services/identityRules.service').recordEvent({ source: 'order_submit', ownerId: _rv.id, code: 'order_enrich_sub', subIndex: _verdict.subIndex }); } catch (_) { /* noop */ }
+              }
             } catch (enrichErr) {
               logger.warn(`[order-identity] 타계정 자동보강 실패(무시): ${enrichErr.message}`);
             }

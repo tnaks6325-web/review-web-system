@@ -259,7 +259,12 @@ async function handleReviewerProfile(body = {}) {
     address,                                   // saveAddress
     kakaoId,                                   // saveKakaoId
     ownerReviewerId,                           // 서명 리뷰어 세션 사용 시 UUID 스코프
+    origin,                                    // 결정 224 — 'order_form' = 구매양식이 보낸 저장(관찰용 표시)
   } = body;
+  const _fromOrderForm = String(origin || '') === 'order_form';
+  const _event = (code, rows) => {
+    try { for (const r of (rows || [])) if (r && r.id) require('./identityRules.service').recordEvent({ source: 'order_form', ownerId: r.id, code }); } catch (_) { /* noop */ }
+  };
   const p8 = (phone8 || '').replace(/[^0-9]/g, '');
   if (p8.length !== 8) return { ok: false, error: '전화번호 뒤 8자리 필요' };
   const scopedById = /^[0-9a-f-]{36}$/i.test(String(ownerReviewerId || ''));
@@ -348,7 +353,8 @@ async function handleReviewerProfile(body = {}) {
         }
       });
       return subs;
-    }, { source: 'profile' });
+    }, { source: _fromOrderForm ? 'order_form_register' : 'profile' });
+    if (_fromOrderForm) _event('order_form_register', [{ id: owner.id }]);   // 결정 224 — 관찰
     return { ok: true };
   }
 
@@ -358,6 +364,17 @@ async function handleReviewerProfile(body = {}) {
     const info = incomeInfo || {};
     const incType = (incomeName || info.incomeType || info.incomeName || '').trim();
     const resNum  = (residentNum || jumin || info.residentNum || info.jumin || '').replace(/[^0-9]/g, '');
+    // 결정 224 — 관찰: 구매양식이 소득 정보를 **실제로 바꾸는** 경우만 센다(같은 값 재저장은 세지 않음 · Codex P2)
+    let _incChanged = [];
+    if (_fromOrderForm && (incType || resNum)) {
+      try {
+        _incChanged = (await pool.query(
+          `SELECT id FROM reviewers WHERE ${scopeColumn} = $3
+             AND ((NULLIF($1, '') IS NOT NULL AND income_type IS DISTINCT FROM $1)
+               OR (NULLIF($2, '') IS NOT NULL AND resident_num IS DISTINCT FROM $2))`,
+          [incType, resNum, scopeValue])).rows;
+      } catch (_) { _incChanged = []; }
+    }
     const _incRes = await pool.query(
       `UPDATE reviewers SET
          income_type  = COALESCE(NULLIF($1, ''), income_type),
@@ -367,6 +384,7 @@ async function handleReviewerProfile(body = {}) {
       [incType, resNum, scopeValue]
     );
     _syncCardsSoon(_incRes && _incRes.rows, 'income');
+    if (_incChanged.length) _event('order_income_save', _incChanged);   // 결정 224 — 관찰(실제로 바뀐 경우만)
     return { ok: true };
   }
 
@@ -382,6 +400,16 @@ async function handleReviewerProfile(body = {}) {
     //   다른 계좌일 때만" 타계정에 기록하는 것과 정면으로 어긋나던 경로 — manualOrder 의 blank-only 규율과 같다.
     // ★ 미전송(undefined) = 종전 덮어쓰기 = 내정보 화면의 계좌 "변경"은 동작 불변(완화가 아니라 범위 축소).
     const fillOnly = onlyIfEmpty === true || String(onlyIfEmpty) === 'true';
+    // 결정 224 — 관찰: 구매양식의 "빈 칸만 채우기"가 실제로 빈 칸을 채우는지(기다리지 않음·실패 무시)
+    let _bankWasEmpty = [];
+    if (fillOnly && (bn || ba || ah)) {
+      try {
+        _bankWasEmpty = (await pool.query(
+          `SELECT id FROM reviewers WHERE ${scopeColumn} = $1
+             AND (COALESCE(bank_name,'') = '' OR COALESCE(bank_account,'') = '' OR COALESCE(account_holder,'') = '')`,
+          [scopeValue])).rows;
+      } catch (_) { _bankWasEmpty = []; }
+    }
     const _bankRes = await pool.query(
       `UPDATE reviewers SET
          bank_name      = CASE WHEN $4::bool AND COALESCE(bank_name, '')      <> '' THEN bank_name
@@ -395,6 +423,7 @@ async function handleReviewerProfile(body = {}) {
       [bn, ba, ah, fillOnly, scopeValue]
     );
     _syncCardsSoon(_bankRes && _bankRes.rows, 'bank');
+    if (_bankWasEmpty.length) _event('order_bank_fill', _bankWasEmpty);   // 결정 224 — 관찰
     return { ok: true, fillOnly };
   }
 
