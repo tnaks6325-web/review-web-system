@@ -984,7 +984,6 @@ async function createOrderLedgerEntry(input) {
     campaignHold, // 참여형 홀드 확정 문맥 {applicationId, campaignId, phone8, holdToken} | undefined
     sameDayDuplicateGuard, // 구매양식의 오늘 동일 제출 차단(선택 입력)
     source = 'order_submit', // 호출 시 확정한 접수 출처도 최초 INSERT와 함께 보존한다.
-    sessionOwnerReviewerId = null, // 결정 221 — 신청 없는 주문: 서명된 리뷰어 세션의 소유자(검증은 호출부)
   } = input;
   // ★ D4(#5): osid 폴백 dedupKey를 쓰려면 먼저 id가 필요 → INSERT(dedup_key NULL) 후 osid 포함 키 계산·UPDATE.
   const ORDER_INSERT_SQL = `INSERT INTO order_submissions
@@ -1075,22 +1074,31 @@ async function createOrderLedgerEntry(input) {
           [orderSubmissionId, campaignHold.applicationId]
         );
       }
-      // ★★ 결정 221 — 주문에 참여 명의 카드 번호를 새긴다(게이트가 검증한 카드 > 신청행에 새긴 카드).
-      //   ★ 기록만 한다 — SAVEPOINT 격리: 어떤 실패도 주문 INSERT 를 되돌리지 않는다(주문 손실 0 규율).
-      //   ★ 신청행 소유자와 주문 소유자가 다르면 옮기지 않는다(남의 카드가 붙지 않게).
+      // ★★ 결정 221 — 주문에 참여 명의 카드 번호를 새긴다.
+      //   ★ 명의 게이트가 검증한 결과가 있으면 **그 카드만** 쓴다(없으면 비운다) — 게이트가 다른 명의를 골랐는데
+      //     신청행 카드가 붙으면 주문의 명의 해시와 카드가 서로 다른 사람을 가리킨다(레드팀 5).
+      //   ★ 게이트 결과가 없을 때만 신청행 카드를 옮기되, 신청행·주문 소유자가 **둘 다 있고 같을 때만**.
+      //   ★ 기록만 한다 — SAVEPOINT 격리: 어떤 실패도 주문 INSERT 를 되돌리지 않는다(주문 손실 0 규율). 잠금 대기 1초 상한.
       try {
         await client.query('SAVEPOINT card_copy');
-        await client.query(
-          `UPDATE order_submissions os
-              SET participant_card_id = COALESCE($3::uuid, ca.participant_card_id)
-             FROM campaign_applications ca
-            WHERE os.id = $1 AND ca.id = $2
-              AND os.participant_card_id IS NULL
-              AND COALESCE($3::uuid, ca.participant_card_id) IS NOT NULL
-              AND (os.owner_reviewer_id IS NULL OR ca.owner_reviewer_id IS NULL
-                   OR os.owner_reviewer_id = ca.owner_reviewer_id)`,
-          [orderSubmissionId, campaignHold.applicationId, campaignHold.identityBinding?.participantCardId || null]
-        );
+        await client.query("SET LOCAL lock_timeout = '1s'");
+        if (campaignHold.identityBinding) {
+          if (campaignHold.identityBinding.participantCardId) {
+            await client.query(
+              `UPDATE order_submissions SET participant_card_id = $2::uuid
+                WHERE id = $1 AND participant_card_id IS NULL`,
+              [orderSubmissionId, campaignHold.identityBinding.participantCardId]);
+          }
+        } else {
+          await client.query(
+            `UPDATE order_submissions os
+                SET participant_card_id = ca.participant_card_id
+               FROM campaign_applications ca
+              WHERE os.id = $1 AND ca.id = $2
+                AND os.participant_card_id IS NULL AND ca.participant_card_id IS NOT NULL
+                AND os.owner_reviewer_id IS NOT NULL AND os.owner_reviewer_id = ca.owner_reviewer_id`,
+            [orderSubmissionId, campaignHold.applicationId]);
+        }
         await client.query('RELEASE SAVEPOINT card_copy');
       } catch (cardErr) {
         try { await client.query('ROLLBACK TO SAVEPOINT card_copy'); } catch (_) { /* noop */ }
@@ -1151,21 +1159,6 @@ async function createOrderLedgerEntry(input) {
   }
 
   if (duplicateOrderSubmissionId) return { duplicateOrderSubmissionId };
-
-  // ★★ 결정 221 — 신청 없는 주문(비참여 경로)에도 "누구의 주문인지"를 새긴다. 근거 = 서명된 리뷰어 세션의 소유자.
-  //   종전에는 이 경로의 주문에 소유자가 비어 있어(10-02~ 309건) 내역·입금이 연락처로 다시 추측해야 했다.
-  //   ★ 기록만 한다 — 주문은 이미 저장됐다. 실패는 경고만 남긴다. 이미 소유자가 있으면 덮지 않는다.
-  if (!campaignHold && orderSubmissionId && sessionOwnerReviewerId) {
-    try {
-      await db.query(
-        `UPDATE order_submissions SET owner_reviewer_id = $2::uuid
-          WHERE id = $1 AND owner_reviewer_id IS NULL
-            AND EXISTS (SELECT 1 FROM reviewers r WHERE r.id = $2::uuid)`,
-        [orderSubmissionId, String(sessionOwnerReviewerId)]);
-    } catch (ownerErr) {
-      logger.warn(`[orderLedger] 신청 없는 주문 소유자 기록 실패(주문은 보존): ${ownerErr.code || ''} ${ownerErr.message} os=${orderSubmissionId}`);
-    }
-  }
 
   // 탈시트 구매양식: 주문원장과 홀드 확정까지만 같은 트랜잭션으로 남긴다.
   // 이후 RAW 행 배정·시트 동기화 큐는 실행하지 않는다.
