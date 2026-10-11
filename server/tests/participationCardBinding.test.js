@@ -31,10 +31,14 @@ function wiring() {
   const apply = fs.readFileSync(path.resolve(__dirname, '../src/routes/campaign.routes.js')).toString('utf8').replace(/\u0000/g, '');
   const at = apply.indexOf("SAVEPOINT card_bind");
   assert(at > 0, 'apply 카드 기록은 SAVEPOINT 로 격리');
-  const block = apply.slice(at, at + 3500);
+  const block = apply.slice(at, at + 4500);
   assert(/ROLLBACK TO SAVEPOINT card_bind/.test(block), '실패 시 SAVEPOINT 로 되돌리고 참여는 계속');
   assert(/verifyReviewerSession\(tok\)/.test(block) && /String\(sessionOwner\) === String\(reg\.rows\[0\]\.id\)/.test(block), '서명된 세션 소유자 = 참여 본계정일 때만(레드팀 1·3)');
   assert(/SET LOCAL lock_timeout = '1s'/.test(block), '잠금 대기 상한');
+  // 결정 223 — 카드를 못 찾으면 그 자리에서 그 사람 카드를 한 번 맞추고 다시 찾는다(가입 직후 · Codex P2)
+  const ensureAt = block.indexOf('if (!cardId) {');
+  assert(ensureAt > 0 && /syncCardsAfterWrite\(client, reg\.rows\[0\]\.id, \{ source: 'apply' \}\)/.test(block.slice(ensureAt, ensureAt + 600))
+    && /cardId = await _cardsSvc\.findParticipationCard\(/.test(block.slice(ensureAt, ensureAt + 700)), '카드 없으면 맞추고 다시 찾기');
   const rb = block.indexOf("set_config('lock_timeout', $1, true)"), rl = block.indexOf("RELEASE SAVEPOINT card_bind"), sp0 = block.indexOf("current_setting('lock_timeout')");
   assert(sp0 > 0 && rb > sp0 && rl > rb, '잠금 상한은 SAVEPOINT 안에서 읽고 RELEASE 전에 되돌린다(Codex P1)');
   for (const re of [/o\.phone8 = \$2 AND o\.id <> \$1::uuid/, /sub->>'phone'.*= \$2/s, /reviewer_phone_changes c WHERE c\.old_phone8 = \$2/, /reviewer_identity_aliases a JOIN reviewer_identities i/]) {
@@ -43,7 +47,7 @@ function wiring() {
   assert(/CASE WHEN \$4 THEN COALESCE\(owner_reviewer_id, \$2::uuid\) ELSE owner_reviewer_id END/.test(block), '유일할 때만 · 이미 있으면 덮지 않는다');
   assert(/owner_reviewer_id IS NULL OR owner_reviewer_id = \$2::uuid/.test(block), '다른 소유자 행에는 카드도 쓰지 않는다');
   const commitAt = apply.indexOf("await client.query('COMMIT');", at);
-  assert(commitAt > at && commitAt - at < 4000, '카드 기록은 같은 트랜잭션 COMMIT 직전');
+  assert(commitAt > at && commitAt - at < 5000, '카드 기록은 같은 트랜잭션 COMMIT 직전');
   const insertAt = apply.lastIndexOf('INSERT INTO campaign_applications', at);
   assert(insertAt > 0 && at - insertAt < 3500, '홀드 INSERT 뒤에 기록');
   const idx = fs.readFileSync(path.resolve(__dirname, '../index.js'), 'utf8');
