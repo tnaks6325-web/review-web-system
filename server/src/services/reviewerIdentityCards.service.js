@@ -318,6 +318,15 @@ async function mutateSubAccounts(reviewerId, mutate, opts = {}) {
     await client.query('BEGIN');
     const out = await mutateSubAccountsInTx(client, reviewerId, mutate, opts);
     await client.query('COMMIT');
+    // ★ 결정 222 — 명의 규칙 관찰(3-1). 저장이 **확정된 뒤** 따로 돌린다 — 기다리지 않고, 어떤 실패도 저장에 닿지 않는다.
+    if (out && out.changed) {
+      try {
+        require('./identityRules.service').observeSubAccountsWrite({
+          owner: { id: reviewerId, name: out.reviewer && out.reviewer.name, phone: out.reviewer && out.reviewer.phone },
+          prev: asSubs(out.reviewer && out.reviewer.sub_accounts), next: out.subs, source: opts.source || 'write',
+        }, opts.db || pool);
+      } catch (_) { /* 관찰은 저장에 영향 0 */ }
+    }
     return out;
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }

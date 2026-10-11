@@ -8,7 +8,7 @@
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
-const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware, adminOrMasterMiddleware, masterOnlyMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
 const svc = require('../services/trackB.service');
 const participants = require('../services/participants.service');
@@ -2064,6 +2064,34 @@ router.post('/settings/inspect-messages', authMiddleware, adminOrMasterMiddlewar
       [IM.SETTING_KEY, JSON.stringify(clean)]
     );
     res.json({ ok: true, messages: IM.merge(clean) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: '저장에 실패했습니다.' });
+  }
+});
+
+/* ★ 결정 222 — 명의 규칙 스위치(신원 기준 3-1). off = 끔 · observe = 막지 않고 "막았을 저장"만 기록.
+   배포 없이 바로 바뀐다(서버가 30초마다 다시 읽음). 비상 시 환경변수 IDENTITY_RULES_MODE=off 가 이 값을 이긴다.
+   ★ 마스터만 — 리뷰어 저장 규칙 전체를 바꾸는 스위치다. */
+router.get('/settings/identity-rules-mode', authMiddleware, masterOnlyMiddleware, async (req, res) => {
+  try {
+    const IR = require('../services/identityRules.service');
+    const { rows } = await pool.query(
+      `SELECT rule_code, COUNT(*)::int AS n FROM identity_rule_observations
+        WHERE created_at > NOW() - INTERVAL '14 days' GROUP BY 1 ORDER BY 2 DESC`).catch(() => ({ rows: [] }));
+    res.json({ ok: true, mode: await IR.getMode(), forced: !!process.env.IDENTITY_RULES_MODE, last14d: rows });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: '명의 규칙 상태를 불러오지 못했습니다.' });
+  }
+});
+router.post('/settings/identity-rules-mode', authMiddleware, masterOnlyMiddleware, async (req, res) => {
+  try {
+    const mode = String((req.body || {}).mode || '').trim();
+    if (!['off', 'observe'].includes(mode)) return res.status(400).json({ ok: false, error: 'off 또는 observe 만 고를 수 있습니다.' });
+    await pool.query(
+      `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+      [require('../services/identityRules.service').MODE_KEY, mode]);
+    res.json({ ok: true, mode, note: '30초 안에 반영됩니다.' });
   } catch (err) {
     res.status(500).json({ ok: false, error: '저장에 실패했습니다.' });
   }
