@@ -1074,6 +1074,46 @@ async function createOrderLedgerEntry(input) {
           [orderSubmissionId, campaignHold.applicationId]
         );
       }
+      // ★★ 결정 221 — 주문에 참여 명의 카드 번호를 새긴다.
+      //   ★ 명의 게이트가 검증한 결과가 있으면 **그 카드만** 쓴다(없으면 비운다) — 게이트가 다른 명의를 골랐는데
+      //     신청행 카드가 붙으면 주문의 명의 해시와 카드가 서로 다른 사람을 가리킨다(레드팀 5).
+      //   ★ 게이트 결과가 없을 때만 신청행 카드를 옮기되, 신청행·주문 소유자가 **둘 다 있고 같을 때만**.
+      //   ★ 기록만 한다 — SAVEPOINT 격리: 어떤 실패도 주문 INSERT 를 되돌리지 않는다(주문 손실 0 규율). 잠금 대기 1초 상한.
+      //   ★ lock_timeout 은 SAVEPOINT 가 아니라 트랜잭션 범위다 — RELEASE 뒤 반드시 원래 값으로 되돌린다.
+      //     안 되돌리면 바로 다음 홀드 확정(FOR UPDATE)까지 1초 상한이 걸려 "주문은 들어갔는데 자리 미확정"이 된다(Codex P1).
+      //   ★ 게이트 결과에 카드 칸이 **아예 없으면**(구버전 게이트) 게이트 결과가 없는 것과 같게 본다(Codex P1).
+      const _bindingHasCard = !!campaignHold.identityBinding
+        && Object.prototype.hasOwnProperty.call(campaignHold.identityBinding, 'participantCardId');
+      let _prevLockTimeout = null;
+      try {
+        await client.query('SAVEPOINT card_copy');
+        // 읽기도 SAVEPOINT 안에서 — 밖에서 실패하면 되돌릴 지점이 없어 트랜잭션(=주문)이 통째로 죽는다.
+        _prevLockTimeout = (await client.query("SELECT current_setting('lock_timeout') AS v")).rows[0].v;
+        await client.query("SET LOCAL lock_timeout = '1s'");
+        if (_bindingHasCard) {
+          if (campaignHold.identityBinding.participantCardId) {
+            await client.query(
+              `UPDATE order_submissions SET participant_card_id = $2::uuid
+                WHERE id = $1 AND participant_card_id IS NULL`,
+              [orderSubmissionId, campaignHold.identityBinding.participantCardId]);
+          }
+        } else {
+          await client.query(
+            `UPDATE order_submissions os
+                SET participant_card_id = ca.participant_card_id
+               FROM campaign_applications ca
+              WHERE os.id = $1 AND ca.id = $2
+                AND os.participant_card_id IS NULL AND ca.participant_card_id IS NOT NULL
+                AND os.owner_reviewer_id IS NOT NULL AND os.owner_reviewer_id = ca.owner_reviewer_id`,
+            [orderSubmissionId, campaignHold.applicationId]);
+        }
+        // 되돌리기는 RELEASE 전에(SAVEPOINT 안) — 혹시 실패해도 아래 ROLLBACK TO 로 격리된다.
+        await client.query("SELECT set_config('lock_timeout', $1, true)", [_prevLockTimeout]);
+        await client.query('RELEASE SAVEPOINT card_copy');
+      } catch (cardErr) {
+        try { await client.query('ROLLBACK TO SAVEPOINT card_copy'); } catch (_) { /* noop */ }
+        logger.warn(`[orderLedger] 명의 카드 기록 실패(주문은 보존): ${cardErr.code || ''} ${cardErr.message} os=${orderSubmissionId}`);
+      }
       await client.query('SAVEPOINT hold_confirm');
       try {
         const { confirmHoldInTx } = require('./campaignHold.service'); // 지연 require(순환 방지 — 기존 패턴)

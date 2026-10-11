@@ -354,6 +354,27 @@ async function loadActiveCards(db, ownerId) {
 }
 
 /**
+ * 참여 명의 카드 하나를 고른다(결정 221 — 참여하는 순간 카드 번호를 새긴다).
+ * 본인 참여 = 이름(공백 무시)이 같은 활성 본인 카드 1장. 타계정 참여 = 이름+번호 8자리가 같은 활성 타계정 카드 1장.
+ * ★ 정확히 하나가 아니면 null(모름) — 추측해서 고르지 않는다. 조회 오류는 호출부가 SAVEPOINT 로 격리한다.
+ * ★ 타계정 참여를 본인 카드로 접지 않는다 — 참여 단계가 본인 번호와 같은 타계정 참여를 이미 막는다(레드팀 9).
+ */
+async function findParticipationCard(db, ownerId, { isSub, name, phone }) {
+  if (!ownerId || !nameKey(str(name))) return null;
+  const { rows } = await db.query(
+    `SELECT id, kind, name_key, phone8 FROM reviewer_identity_cards
+      WHERE owner_reviewer_id = $1 AND status = 'active'`, [ownerId]);
+  if (!isSub) {
+    const self = rows.filter((c) => c.kind === 'self' && c.name_key === nameKey(str(name)));
+    return self.length === 1 ? String(self[0].id) : null;
+  }
+  const p8 = phone8Of(phone);
+  if (!p8) return null;
+  const hit = rows.filter((c) => c.kind === 'sub' && c.name_key === nameKey(str(name)) && c.phone8 === p8);
+  return hit.length === 1 ? String(hit[0].id) : null;
+}
+
+/**
  * 목록의 타계정 칸마다 카드 번호를 짝짓는다(순수 함수).
  * @returns Map<index, cardId> + misses[{index, reason}]
  *   reason: no_name_or_phone(카드가 안 만들어지는 칸) · duplicate_in_list(같은 명의 칸이 둘) ·
@@ -398,4 +419,4 @@ function mapSubsToCards(reviewer, cards) {
 
 module.exports = { buildCardsFromReviewer, syncOwnerCards, planOwnerSync, reconcileCards,
   findSubIndex, syncCardsAfterWrite, mutateSubAccountsInTx, mutateSubAccounts,
-  cardKeysEnabled, loadActiveCards, mapSubsToCards, _test: { nameKey, phone8Of } };
+  cardKeysEnabled, loadActiveCards, mapSubsToCards, findParticipationCard, _test: { nameKey, phone8Of } };

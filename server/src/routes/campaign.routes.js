@@ -2358,6 +2358,54 @@ async function _applyParticipation(req, res, next, campPre) {
         [ins.rows[0].id, codeIdentity.ownerReviewerId, codeIdentity.id]
       );
     }
+    // ★★ 결정 221(신원 기준 재정립 1단계) — 참여하는 순간 "누구의 어느 명의 카드"인지 새긴다. 이후 구매양식은 이름·번호로
+    //   다시 추측하지 않고 이 번호를 따라간다(인소민 건: 본인과 똑같은 타계정 칸 때문에 추측이 실패해 막혔다).
+    //   ★ 기록만 한다 — 어떤 실패도 참여를 막지 않는다(SAVEPOINT 격리, 082 규율). 모르면 NULL(읽는 쪽은 종전 방식).
+    //   ★ 근거 = 요청에 실린 **서명된 리뷰어 세션**의 소유자가 이 참여의 본계정(reg)과 같을 때만(레드팀 1·3).
+    //     번호만 믿으면 타계정 세션·번호 겹침(다른 소유자 타계정 76건)에서 남의 카드가 붙는다. 세션 없으면 기록하지 않는다.
+    //   ★ owner_reviewer_id 는 이미 내역·입금이 정답으로 읽는 칸이다 — 159 백필과 같은 "번호가 이 소유자에게만 속함"
+    //     (다른 소유자 본인·타계정·번호 변경 이력·코드 별칭 어디에도 없음)일 때만 쓰고, 이미 있으면 덮지 않는다.
+    //   ★ 잠금 대기 1초 상한 — 카드 맞추기와 겹치면 기다리지 않고 기록만 건너뛴다(레드팀 7).
+    let _prevLockTimeout = null;
+    try {
+      await client.query('SAVEPOINT card_bind');
+      _prevLockTimeout = (await client.query("SELECT current_setting('lock_timeout') AS v")).rows[0].v;
+      let sessionOwner = null;
+      try {
+        const tok = req.headers['x-reviewer-token'];
+        if (tok) sessionOwner = require('../services/reviewerSession.service').verifyReviewerSession(tok).ownerReviewerId || null;
+      } catch (_) { sessionOwner = null; }
+      if (sessionOwner && String(sessionOwner) === String(reg.rows[0].id)) {
+        await client.query("SET LOCAL lock_timeout = '1s'");
+        const cardId = await require('../services/reviewerIdentityCards.service').findParticipationCard(
+          client, reg.rows[0].id, { isSub: isSubApply, name: insName, phone: insPhone });
+        const own = await client.query(
+          `SELECT NOT EXISTS (SELECT 1 FROM reviewers o WHERE o.phone8 = $2 AND o.id <> $1::uuid)
+              AND NOT EXISTS (
+                SELECT 1 FROM reviewers o
+                  CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(o.sub_accounts) = 'array'
+                                                              THEN o.sub_accounts ELSE '[]'::jsonb END) sub
+                 WHERE o.id <> $1::uuid
+                   AND RIGHT(regexp_replace(COALESCE(sub->>'phone', ''), '[^0-9]', '', 'g'), 8) = $2)
+              AND NOT EXISTS (SELECT 1 FROM reviewer_phone_changes c WHERE c.old_phone8 = $2 AND c.reviewer_id <> $1::uuid)
+              AND NOT EXISTS (SELECT 1 FROM reviewer_identity_aliases a JOIN reviewer_identities i ON i.id = a.identity_id
+                               WHERE a.phone8 = $2 AND i.owner_reviewer_id <> $1::uuid) AS unique_owner`,
+          [reg.rows[0].id, p8]);
+        const uniqueOwner = !!(own.rows[0] && own.rows[0].unique_owner);
+        await client.query(
+          `UPDATE campaign_applications
+              SET owner_reviewer_id = CASE WHEN $4 THEN COALESCE(owner_reviewer_id, $2::uuid) ELSE owner_reviewer_id END,
+                  participant_card_id = $3::uuid
+            WHERE id = $1 AND (owner_reviewer_id IS NULL OR owner_reviewer_id = $2::uuid)`,
+          [ins.rows[0].id, reg.rows[0].id, cardId, uniqueOwner]);
+      }
+      // lock_timeout 은 트랜잭션 범위 — RELEASE 전에(SAVEPOINT 안) 원래 값으로 되돌린다(Codex P1 · 원장과 같은 규율).
+      await client.query("SELECT set_config('lock_timeout', $1, true)", [_prevLockTimeout]);
+      await client.query('RELEASE SAVEPOINT card_bind');
+    } catch (bindErr) {
+      try { await client.query('ROLLBACK TO SAVEPOINT card_bind'); } catch (_) { /* noop */ }
+      logger.warn(`[campaign/apply] 명의 카드 기록 실패(참여는 계속): ${bindErr.code || ''} ${bindErr.message}`);
+    }
     await client.query('COMMIT');
     logger.info(`[campaign/apply] 홀드 생성 camp=${id} app=${ins.rows[0].id} phone8=***${holdP8.slice(-4)}` +
       (isSubApply ? ` sub(owner=***${p8.slice(-4)})` : '') + (chosenOpt ? ' opt=' + chosenOpt.opt_key : ''));
