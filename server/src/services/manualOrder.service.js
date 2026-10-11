@@ -139,14 +139,19 @@ async function ensureExternalReviewer(f, { db = pool } = {}) {
   //   — 이미 등록된 리뷰어의 계좌를 카톡으로 받은 값으로 갈아치우면 정산 사고가 난다.
   // ★ 대상은 phone(UNIQUE)으로 지목한다. phone8은 GENERATED·비유니크라 동일 phone8 타인 행을 건드릴 수 있다.
   try {
-    await db.query(
+    const _fillRes = await db.query(
       `UPDATE reviewers SET
          address        = CASE WHEN COALESCE(address,'')        = '' THEN $2 ELSE address END,
          bank_name      = CASE WHEN COALESCE(bank_name,'')      = '' THEN $3 ELSE bank_name END,
          bank_account   = CASE WHEN COALESCE(bank_account,'')   = '' THEN $4 ELSE bank_account END,
          account_holder = CASE WHEN COALESCE(account_holder,'') = '' THEN $5 ELSE account_holder END
-       WHERE phone = $1`,
+       WHERE phone = $1
+       RETURNING id`,
       [phoneDigits, f.address || '', f.bank || '', f.account || '', f.depositor || '']);
+    // 결정 223 — 저장 뒤 카드 바로 맞추기. 트랜잭션 안(커넥션)이면 확정 전이라 건너뛴다(10분 거울이 맞춘다).
+    if (typeof db.connect === 'function') {
+      try { for (const row of (_fillRes && _fillRes.rows) || []) require('./reviewerIdentityCards.service').syncOwnerCardsSoon(row.id, { source: 'external_order' }); } catch (_) { /* noop */ }
+    }
   } catch (e) { warnings.push('주소·계좌 저장 중 일부 실패(제출은 계속)'); }
 
   return { registered: true, linkedOwner: null, ownerPhone8: null, warnings };

@@ -53,6 +53,7 @@ async function registerReviewer({ name, phone, consent, sheetId, kakaoId, requir
       ON CONFLICT (phone) DO NOTHING
       RETURNING *
     `, [name.trim(), cleanPhone, true, kakao || '']);
+    if (result.rowCount > 0) _syncCardsSoon(result.rows, 'register');   // 결정 223 — 새 가입자 본인 카드를 바로 만든다
 
     if (result.rowCount === 0) {
       // 번호 중복 — 기존 레코드 조회
@@ -357,13 +358,15 @@ async function handleReviewerProfile(body = {}) {
     const info = incomeInfo || {};
     const incType = (incomeName || info.incomeType || info.incomeName || '').trim();
     const resNum  = (residentNum || jumin || info.residentNum || info.jumin || '').replace(/[^0-9]/g, '');
-    await pool.query(
+    const _incRes = await pool.query(
       `UPDATE reviewers SET
          income_type  = COALESCE(NULLIF($1, ''), income_type),
          resident_num = COALESCE(NULLIF($2, ''), resident_num)
-       WHERE ${scopeColumn} = $3`,
+       WHERE ${scopeColumn} = $3
+       RETURNING id`,
       [incType, resNum, scopeValue]
     );
+    _syncCardsSoon(_incRes && _incRes.rows, 'income');
     return { ok: true };
   }
 
@@ -379,7 +382,7 @@ async function handleReviewerProfile(body = {}) {
     //   다른 계좌일 때만" 타계정에 기록하는 것과 정면으로 어긋나던 경로 — manualOrder 의 blank-only 규율과 같다.
     // ★ 미전송(undefined) = 종전 덮어쓰기 = 내정보 화면의 계좌 "변경"은 동작 불변(완화가 아니라 범위 축소).
     const fillOnly = onlyIfEmpty === true || String(onlyIfEmpty) === 'true';
-    await pool.query(
+    const _bankRes = await pool.query(
       `UPDATE reviewers SET
          bank_name      = CASE WHEN $4::bool AND COALESCE(bank_name, '')      <> '' THEN bank_name
                                ELSE COALESCE(NULLIF($1, ''), bank_name) END,
@@ -387,16 +390,19 @@ async function handleReviewerProfile(body = {}) {
                                ELSE COALESCE(NULLIF($2, ''), bank_account) END,
          account_holder = CASE WHEN $4::bool AND COALESCE(account_holder, '') <> '' THEN account_holder
                                ELSE COALESCE(NULLIF($3, ''), account_holder) END
-       WHERE ${scopeColumn} = $5`,
+       WHERE ${scopeColumn} = $5
+       RETURNING id`,
       [bn, ba, ah, fillOnly, scopeValue]
     );
+    _syncCardsSoon(_bankRes && _bankRes.rows, 'bank');
     return { ok: true, fillOnly };
   }
 
   if (action === 'saveAddress') {
     // 본인 주소 저장(빈 문자열이면 초기화 허용)
     const addr = (address == null ? '' : address).toString().trim();
-    await pool.query(`UPDATE reviewers SET address = $1 WHERE ${scopeColumn} = $2`, [addr, scopeValue]);
+    const _addrRes = await pool.query(`UPDATE reviewers SET address = $1 WHERE ${scopeColumn} = $2 RETURNING id`, [addr, scopeValue]);
+    _syncCardsSoon(_addrRes && _addrRes.rows, 'address');
     return { ok: true };
   }
 
@@ -410,6 +416,14 @@ async function handleReviewerProfile(body = {}) {
   }
 
   return { ok: false, error: '알 수 없는 action' };
+}
+
+/** 결정 223 — 본인 정보 저장 뒤 그 리뷰어 카드를 바로 맞춘다(기다리지 않음 · 실패는 저장 무영향). */
+function _syncCardsSoon(rows, source) {
+  try {
+    const cards = require('./reviewerIdentityCards.service');
+    for (const r of (rows || [])) if (r && r.id) cards.syncOwnerCardsSoon(r.id, { source });
+  } catch (_) { /* 카드 맞추기는 저장에 영향 0 — 10분 거울이 따라잡는다 */ }
 }
 
 module.exports = {
