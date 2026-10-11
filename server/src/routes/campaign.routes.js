@@ -2366,8 +2366,10 @@ async function _applyParticipation(req, res, next, campPre) {
     //   ★ owner_reviewer_id 는 이미 내역·입금이 정답으로 읽는 칸이다 — 159 백필과 같은 "번호가 이 소유자에게만 속함"
     //     (다른 소유자 본인·타계정·번호 변경 이력·코드 별칭 어디에도 없음)일 때만 쓰고, 이미 있으면 덮지 않는다.
     //   ★ 잠금 대기 1초 상한 — 카드 맞추기와 겹치면 기다리지 않고 기록만 건너뛴다(레드팀 7).
+    let _prevLockTimeout = null;
     try {
       await client.query('SAVEPOINT card_bind');
+      _prevLockTimeout = (await client.query("SELECT current_setting('lock_timeout') AS v")).rows[0].v;
       let sessionOwner = null;
       try {
         const tok = req.headers['x-reviewer-token'];
@@ -2397,6 +2399,8 @@ async function _applyParticipation(req, res, next, campPre) {
             WHERE id = $1 AND (owner_reviewer_id IS NULL OR owner_reviewer_id = $2::uuid)`,
           [ins.rows[0].id, reg.rows[0].id, cardId, uniqueOwner]);
       }
+      // lock_timeout 은 트랜잭션 범위 — RELEASE 전에(SAVEPOINT 안) 원래 값으로 되돌린다(Codex P1 · 원장과 같은 규율).
+      await client.query("SELECT set_config('lock_timeout', $1, true)", [_prevLockTimeout]);
       await client.query('RELEASE SAVEPOINT card_bind');
     } catch (bindErr) {
       try { await client.query('ROLLBACK TO SAVEPOINT card_bind'); } catch (_) { /* noop */ }

@@ -35,6 +35,8 @@ function wiring() {
   assert(/ROLLBACK TO SAVEPOINT card_bind/.test(block), '실패 시 SAVEPOINT 로 되돌리고 참여는 계속');
   assert(/verifyReviewerSession\(tok\)/.test(block) && /String\(sessionOwner\) === String\(reg\.rows\[0\]\.id\)/.test(block), '서명된 세션 소유자 = 참여 본계정일 때만(레드팀 1·3)');
   assert(/SET LOCAL lock_timeout = '1s'/.test(block), '잠금 대기 상한');
+  const rb = block.indexOf("set_config('lock_timeout', $1, true)"), rl = block.indexOf("RELEASE SAVEPOINT card_bind"), sp0 = block.indexOf("current_setting('lock_timeout')");
+  assert(sp0 > 0 && rb > sp0 && rl > rb, '잠금 상한은 SAVEPOINT 안에서 읽고 RELEASE 전에 되돌린다(Codex P1)');
   for (const re of [/o\.phone8 = \$2 AND o\.id <> \$1::uuid/, /sub->>'phone'.*= \$2/s, /reviewer_phone_changes c WHERE c\.old_phone8 = \$2/, /reviewer_identity_aliases a JOIN reviewer_identities i/]) {
     assert(re.test(block), '소유자 기록은 159 와 같은 유일 소유자 판정: ' + re);
   }
@@ -61,6 +63,7 @@ async function ledgerCases() {
         if (/SAVEPOINT card_copy/.test(sql) && !/RELEASE|ROLLBACK/.test(sql)) return { rows: [] };
         if (/participant_card_id = ca\.participant_card_id/.test(sql) && failCardCopy) { const e = new Error('boom'); e.code = '42703'; throw e; }
         if (/INSERT INTO order_submissions/.test(sql)) return { rows: [{ id: 'os-1' }] };
+        if (/current_setting\('lock_timeout'\)/.test(sql)) return { rows: [{ v: '7s' }] };
         return { rows: [], rowCount: 0 };
       },
       release() {},
@@ -85,6 +88,23 @@ async function ledgerCases() {
     const cp = sqls.findIndex((s) => /SAVEPOINT card_copy/.test(s));
     const hc = sqls.findIndex((s) => /SAVEPOINT hold_confirm/.test(s));
     assert(cp > 0 && hc > cp, '카드 기록은 홀드 확정 전');
+  }
+  {
+    // Codex P1 — 1초 잠금 상한은 카드 기록에만. 홀드 확정 전에 원래 값으로 되돌린다.
+    const log = await run({ failCardCopy: false, binding: null });
+    const sqls = log.map((x) => x.sql);
+    const sp = sqls.findIndex((s) => /^SAVEPOINT card_copy/.test(s.trim()));
+    const read = sqls.findIndex((s) => /current_setting\('lock_timeout'\)/.test(s));
+    const restore = log.findIndex((x) => /set_config\('lock_timeout', \$1, true\)/.test(x.sql) && x.params && x.params[0] === '7s');
+    const rel = sqls.findIndex((s) => /RELEASE SAVEPOINT card_copy/.test(s));
+    const hc = sqls.findIndex((s) => /SAVEPOINT hold_confirm/.test(s));
+    assert(sp >= 0 && read > sp, '원래 값 읽기는 SAVEPOINT 안에서');
+    assert(restore > read && restore < rel && rel < hc, '원래 잠금 상한을 RELEASE 전에 되돌리고 그 뒤에 홀드 확정');
+  }
+  {
+    // Codex P1 — 구버전 게이트 결과(카드 칸 자체가 없음)는 결과 없음과 같게 → 신청행 카드(두 소유자 같을 때)
+    const log = await run({ failCardCopy: false, binding: { ownerReviewerId: OWNER, participantIdentityKeyHash: 'h' } });
+    assert(log.some((x) => /participant_card_id = ca\.participant_card_id/.test(x.sql)), '카드 칸 없는 게이트 결과는 신청행 카드로');
   }
   {
     const log = await run({ failCardCopy: false, binding: { ownerReviewerId: OWNER, participantIdentityKeyHash: 'h', participantCardId: 'card-gate' } });

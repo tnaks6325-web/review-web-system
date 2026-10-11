@@ -21,3 +21,8 @@ BEGIN
       FOREIGN KEY (participant_card_id) REFERENCES reviewer_identity_cards(id) ON DELETE SET NULL NOT VALID;
   END IF;
 END $$;
+-- 카드 삭제(소유자 삭제 CASCADE) 때 ON DELETE SET NULL 이 큰 표를 통째로 훑지 않게 기록된 행만 색인(Codex P2).
+CREATE INDEX IF NOT EXISTS idx_campaign_applications_participant_card
+  ON campaign_applications (participant_card_id) WHERE participant_card_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_order_submissions_participant_card
+  ON order_submissions (participant_card_id) WHERE participant_card_id IS NOT NULL;
