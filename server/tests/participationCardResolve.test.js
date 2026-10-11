@@ -56,10 +56,13 @@ const ctx = { ownerReviewerId: OWNER, applicationId: 15219, campaignId: 'camp', 
   assert.strictEqual(r.selected.type, 'sub');
   assert.strictEqual(r.selected.name, '인소윤');
   assert.strictEqual(r.selected.cardId, 'card-sub');
-  // 신청행 이름·번호가 어긋나 있어도 카드 번호가 이긴다(이름·번호로 다시 추측하지 않는다)
-  reset({ app: { applicant_name: '엉뚱한이름', applicant_phone: '010-0000-0000', phone8: '00000000', participant_card_id: 'card-sub' } });
+  // 신청행 이름이 어긋나 있어도 카드 번호가 이긴다(이름으로 다시 추측하지 않는다)
+  reset({ app: { applicant_name: '엉뚱한이름', applicant_phone: '010-9778-4335', phone8: '97784335', participant_card_id: 'card-sub' } });
   r = await identity.resolveApplicationIdentity(ctx);
-  assert.strictEqual(r.selected.name, '인소윤', '카드 번호가 있으면 이름·번호 추측을 하지 않는다');
+  assert.strictEqual(r.selected.name, '인소윤', '카드 번호가 있으면 이름으로 다시 찾지 않는다');
+  // 타계정 카드 번호가 참여 기록 번호와 다르면 카드를 쓰지 않는다(레드팀 10) → 종전 방식 → 맞는 명의 없음
+  reset({ app: { applicant_name: '엉뚱한이름', applicant_phone: '010-0000-0000', phone8: '00000000', participant_card_id: 'card-sub' } });
+  await assert.rejects(identity.resolveApplicationIdentity(ctx), (e) => e.code === 'SELECTED_IDENTITY_AMBIGUOUS', '번호가 다르면 카드로 고르지 않는다');
   console.log('PASS 카드 번호가 있으면 그 카드만 따라간다');
 
   // ③ 카드가 지금 목록에 없으면(이름 변경 등) 종전 방식으로 폴백 — 막지 않는다
@@ -84,4 +87,39 @@ const ctx = { ownerReviewerId: OWNER, applicationId: 15219, campaignId: 'camp', 
   });
   await assert.rejects(identity.resolveApplicationIdentity(ctx), (e) => e.code === 'SELECTED_IDENTITY_AMBIGUOUS');
   console.log('PASS 본인 아닌 중복 칸은 종전처럼 막는다');
+
+  // ⑥ 합친 명의: 그 명의가 합쳐 들어간 카드가 후보에 있을 때만 뺀다(레드팀 4)
+  reset({
+    subs: [{ name: '박가족', phone: '010-6000-0001' }, { name: '김가족', phone: '010-6000-0001' }],
+    cards: [
+      { id: 'card-self', kind: 'self', name_key: '인소민', phone8: '41494334', status: 'active', merged_into: null },
+      { id: 'card-park', kind: 'sub', name_key: '박가족', phone8: '60000001', status: 'active', merged_into: null },
+      { id: 'card-kim', kind: 'sub', name_key: '김가족', phone8: '60000001', status: 'merged', merged_into: 'card-other' },
+    ],
+    app: { applicant_name: '', applicant_phone: '010-6000-0001', phone8: '60000001', participant_card_id: null },
+  });
+  await assert.rejects(identity.resolveApplicationIdentity(ctx), (e) => e.code === 'SELECTED_IDENTITY_AMBIGUOUS', '다른 카드로 합쳐진 이름 다른 명의는 빼지 않는다');
+  reset({
+    subs: [{ name: '박가족', phone: '010-6000-0001' }, { name: '박 가족', phone: '010-6000-0001 ' }],
+    cards: [
+      { id: 'card-self', kind: 'self', name_key: '인소민', phone8: '41494334', status: 'active', merged_into: null },
+      { id: 'card-park', kind: 'sub', name_key: '박가족', phone8: '60000001', status: 'active', merged_into: null },
+    ],
+    app: { applicant_name: '박가족', applicant_phone: '010-6000-0001', phone8: '60000001', participant_card_id: null },
+  });
+  // 같은 이름·번호 두 칸은 목록 중복(카드 1장) — 합침이 아니므로 종전처럼 막힌다
+  await assert.rejects(identity.resolveApplicationIdentity(ctx), (e) => e.code === 'SELECTED_IDENTITY_AMBIGUOUS');
+  // 담당자가 박가족(옛 번호)을 박가족(새 번호) 카드로 합쳤다 → 이름으로만 찾을 때 둘 다 걸려도 합쳐 들어간 카드로 확정
+  reset({
+    subs: [{ name: '박가족', phone: '010-6000-0001' }, { name: '박가족', phone: '010-6000-0009' }],
+    cards: [
+      { id: 'card-self', kind: 'self', name_key: '인소민', phone8: '41494334', status: 'active', merged_into: null },
+      { id: 'card-park', kind: 'sub', name_key: '박가족', phone8: '60000001', status: 'active', merged_into: null },
+      { id: 'card-old', kind: 'sub', name_key: '박가족', phone8: '60000009', status: 'merged', merged_into: 'card-park' },
+    ],
+    app: { applicant_name: '박가족', applicant_phone: '010-1111-1111', phone8: '11111111', participant_card_id: null },
+  });
+  r = await identity.resolveApplicationIdentity(ctx);
+  assert.strictEqual(r.selected.cardId, 'card-park', '합쳐 들어간 카드가 후보에 있으면 합쳐진 칸을 뺀다');
+  console.log('PASS 합친 명의는 합쳐 들어간 카드가 후보에 있을 때만 뺀다');
 })().catch((e) => { console.error(e); process.exit(1); });
