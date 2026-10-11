@@ -15969,7 +15969,7 @@ function _rvImSharedHtml(x,xi){
   const pair = sides.length===2 ? `${sides[0]}<span class="rvimvs">같은 번호</span>${sides[1]}` : sides.join('');
   return `<div class="rvimg">${head}<div class="rvimpair"${sides.length===2?'':' style="grid-template-columns:1fr"'}>${pair}</div>
     <div class="rvimft" style="flex-direction:column;align-items:stretch">
-      <label for="rvimMemo${xi}" style="font-size:12px;color:var(--muted);font-weight:700">메모 (예: 가족이 한 폰을 씀 · 본인께 확인함)</label>
+      <label for="rvimMemo${xi}" style="font-size:12px;color:var(--muted);font-weight:700">메모 (예: 같은 사람이 두 계정에 등록 · 본인께 확인함)</label>
       <input class="rvimmemo" id="rvimMemo${xi}" maxlength="500" value="${esc((STATE.rvImMemo||{})[x.groupKey]||'')}" oninput="_rvImMemoSet(${xi},this.value)" placeholder="확인한 내용을 적어 두면 다음 사람이 다시 묻지 않습니다">
       <div><button class="btn pri" type="button" onclick="_rvImSharedOk(${xi})">확인함으로 표시</button></div></div></div>`;
 }
