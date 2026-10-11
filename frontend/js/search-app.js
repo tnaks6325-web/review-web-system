@@ -8830,7 +8830,8 @@ async function _registerSubAccountFromOrder(auth, idn) {
       bankAccount: (idn.bankAccount || "").trim(),
       accountHolder: (idn.accountHolder || "").trim(),
     });
-    const r = await gasPost({ action: "saveSubAccounts", name: auth.name, phone8: auth.phone8, subAccounts: JSON.stringify(subs) });
+    // origin = 구매양식에서 등록했다는 표시(결정 224 — 관찰용, 동작 무변경)
+    const r = await gasPost({ action: "saveSubAccounts", name: auth.name, phone8: auth.phone8, subAccounts: JSON.stringify(subs), origin: "order_form" });
     if (r?.ok) {
       if (window._reviewerProfile) window._reviewerProfile.subAccounts = subs;
       return { ok: true, registered: true };
@@ -9572,7 +9573,8 @@ async function submitOrderForm() {
             action:     "saveIncomeInfo",
             phone8:     myPhone8Inc,
             incomeName: saveIncomeName,
-            jumin:      saveJumin.replace(/[^0-9]/g, "") // 숫자만 전송
+            jumin:      saveJumin.replace(/[^0-9]/g, ""), // 숫자만 전송
+            origin:     "order_form",   // 결정 224 — 관찰용 표시(동작 무변경)
           };
           gasPost(incPayload)
             .then(r => { if(r?.ok) console.log("[saveIncomeInfo] 저장 완료:", saveIncomeName); })

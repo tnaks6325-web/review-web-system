@@ -390,7 +390,7 @@ router.post('/identity-precheck', imageApiLimiter, bindProfileOwnerWhenEnabled, 
 
     const profileScope = req.reviewer && req.reviewer.ownerReviewerId;
     const { rows } = await pool.query(
-      `SELECT name, phone, phone8, address, bank_name, bank_account, account_holder, sub_accounts
+      `SELECT id, name, phone, phone8, address, bank_name, bank_account, account_holder, sub_accounts
        FROM reviewers WHERE ${profileScope ? 'id' : 'phone8'} = $1 LIMIT 1`, [profileScope || p8]
     );
     if (rows.length === 0) return res.json({ ok: false, error: '등록된 리뷰어가 아닙니다.' });
@@ -413,6 +413,10 @@ router.post('/identity-precheck', imageApiLimiter, bindProfileOwnerWhenEnabled, 
     for (let i = 0; i < orders.length; i++) {
       const r = await resolveOrderIdentity(reviewer, orders[i] || {}, { mode: 'precheck' });
       results.push({ idx: i, ...r });
+      // 결정 224 — 관찰: 제출 전 대조가 타계정 등록을 요구한 횟수(기다리지 않음·실패 무시)
+      if (r && r.status === 'NEED_SUB_REGISTER') {
+        try { require('../services/identityRules.service').recordEvent({ source: 'precheck', ownerId: reviewer.id, code: 'precheck_need_sub_register' }); } catch (_) { /* noop */ }
+      }
     }
     res.json({ ok: true, profileMissing: [], results });
   } catch (err) {
