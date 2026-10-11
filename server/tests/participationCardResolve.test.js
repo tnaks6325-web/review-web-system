@@ -60,9 +60,11 @@ const ctx = { ownerReviewerId: OWNER, applicationId: 15219, campaignId: 'camp', 
   reset({ app: { applicant_name: '엉뚱한이름', applicant_phone: '010-9778-4335', phone8: '97784335', participant_card_id: 'card-sub' } });
   r = await identity.resolveApplicationIdentity(ctx);
   assert.strictEqual(r.selected.name, '인소윤', '카드 번호가 있으면 이름으로 다시 찾지 않는다');
-  // 타계정 카드 번호가 참여 기록 번호와 다르면 카드를 쓰지 않는다(레드팀 10) → 종전 방식 → 맞는 명의 없음
-  reset({ app: { applicant_name: '엉뚱한이름', applicant_phone: '010-0000-0000', phone8: '00000000', participant_card_id: 'card-sub' } });
-  await assert.rejects(identity.resolveApplicationIdentity(ctx), (e) => e.code === 'SELECTED_IDENTITY_AMBIGUOUS', '번호가 다르면 카드로 고르지 않는다');
+  // 신청 당시 번호가 지금 카드와 달라도 카드가 이긴다 — 카드는 고정 번호다(Codex P1). 연락처는 신청 당시 값
+  reset({ app: { applicant_name: '인소윤', applicant_phone: '010-0000-0000', phone8: '00000000', participant_card_id: 'card-sub' } });
+  r = await identity.resolveApplicationIdentity(ctx);
+  assert.strictEqual(r.selected.cardId, 'card-sub', '번호가 달라도 카드를 버리고 다시 추측하지 않는다');
+  assert.strictEqual(r.selected.phone, '010-0000-0000', '타계정 연락처는 신청 당시 값(종전 규칙)');
   console.log('PASS 카드 번호가 있으면 그 카드만 따라간다');
 
   // ③ 카드가 지금 목록에 없으면(이름 변경 등) 종전 방식으로 폴백 — 막지 않는다
@@ -122,4 +124,9 @@ const ctx = { ownerReviewerId: OWNER, applicationId: 15219, campaignId: 'camp', 
   r = await identity.resolveApplicationIdentity(ctx);
   assert.strictEqual(r.selected.cardId, 'card-park', '합쳐 들어간 카드가 후보에 있으면 합쳐진 칸을 뺀다');
   console.log('PASS 합친 명의는 합쳐 들어간 카드가 후보에 있을 때만 뺀다');
+
+  // 제출 게이트: 카드를 못 골랐으면 participantCardId 칸을 싣지 않는다(Codex P2 — null 이면 원장이 신청행 카드를 버린다)
+  const submitSrc = require('fs').readFileSync(require('path').resolve(__dirname, '../src/routes/submit.routes.js'), 'utf8');
+  assert(/\.\.\.\(verifiedIdentity\.context\.selected\.cardId \? \{ participantCardId: verifiedIdentity\.context\.selected\.cardId \} : \{\}\)/.test(submitSrc), '못 고른 카드는 칸째 생략');
+  console.log('PASS 제출 게이트 — 못 고른 카드는 싣지 않는다');
 })().catch((e) => { console.error(e); process.exit(1); });

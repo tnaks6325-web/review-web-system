@@ -491,10 +491,9 @@ async function resolveApplicationIdentity({ ownerReviewerId, applicationId, camp
     throw new ReviewerOrderIdentityError('SELECTED_IDENTITY_AMBIGUOUS', '참여 시 선택한 명의를 하나로 확정할 수 없습니다. 내정보를 확인해주세요.', 409);
   }
   if (!candidates.length && app.participant_card_id) {
+    // ★ 카드 번호는 고정 번호다 — 지금 값이 신청 당시와 달라도 카드를 버리고 이름·번호로 다시 추측하지 않는다(Codex P1).
+    //   (타계정 카드는 이름·번호가 바뀌면 새 카드가 되므로 여기서 걸리는 카드는 같은 명의다. 연락처는 아래에서 신청 당시 값을 쓴다.)
     candidates = identities.filter((item) => item.cardId && String(item.cardId) === String(app.participant_card_id));
-    // 타계정 카드의 번호가 참여 기록 번호와 다르면 카드를 쓰지 않는다 — 카드 이름 + 신청 번호가 섞인 명의가 생긴다(레드팀 10).
-    if (candidates.length === 1 && candidates[0].type === 'sub'
-        && phone8(candidates[0].phone) !== phone8(app.phone8 || app.applicant_phone)) candidates = [];
     if (candidates.length !== 1) candidates = [];
   }
   if (!candidates.length) {

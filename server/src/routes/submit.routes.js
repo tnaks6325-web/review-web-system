@@ -901,8 +901,9 @@ router.post('/order', async (req, res, next) => {
           ownerReviewerId: verifiedIdentity.context.owner.id,
           participantIdentityId: verifiedIdentity.context.selected.participantIdentityId || null,
           participantIdentityKeyHash: verifiedIdentity.approval.selectedIdentityHash,
-          // 결정 221 — 게이트가 확정한 명의의 카드 번호(없으면 null → 원장이 신청행 카드를 쓴다)
-          participantCardId: verifiedIdentity.context.selected.cardId || null,
+          // 결정 221 — 게이트가 확정한 명의의 카드 번호. 못 골랐으면 칸 자체를 싣지 않는다 →
+          //   원장이 신청행 카드(두 소유자 같을 때)를 쓴다. null 을 실으면 이미 아는 카드가 버려진다(Codex P2).
+          ...(verifiedIdentity.context.selected.cardId ? { participantCardId: verifiedIdentity.context.selected.cardId } : {}),
         };
       } catch (gateErr) {
         if (gateErr instanceof reviewerOrderIdentity.ReviewerOrderIdentityError) {
