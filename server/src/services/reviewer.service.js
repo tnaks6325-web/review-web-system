@@ -364,6 +364,17 @@ async function handleReviewerProfile(body = {}) {
     const info = incomeInfo || {};
     const incType = (incomeName || info.incomeType || info.incomeName || '').trim();
     const resNum  = (residentNum || jumin || info.residentNum || info.jumin || '').replace(/[^0-9]/g, '');
+    // 결정 224 — 관찰: 구매양식이 소득 정보를 **실제로 바꾸는** 경우만 센다(같은 값 재저장은 세지 않음 · Codex P2)
+    let _incChanged = [];
+    if (_fromOrderForm && (incType || resNum)) {
+      try {
+        _incChanged = (await pool.query(
+          `SELECT id FROM reviewers WHERE ${scopeColumn} = $3
+             AND ((NULLIF($1, '') IS NOT NULL AND income_type IS DISTINCT FROM $1)
+               OR (NULLIF($2, '') IS NOT NULL AND resident_num IS DISTINCT FROM $2))`,
+          [incType, resNum, scopeValue])).rows;
+      } catch (_) { _incChanged = []; }
+    }
     const _incRes = await pool.query(
       `UPDATE reviewers SET
          income_type  = COALESCE(NULLIF($1, ''), income_type),
@@ -373,7 +384,7 @@ async function handleReviewerProfile(body = {}) {
       [incType, resNum, scopeValue]
     );
     _syncCardsSoon(_incRes && _incRes.rows, 'income');
-    if (_fromOrderForm) _event('order_income_save', _incRes && _incRes.rows);   // 결정 224 — 관찰
+    if (_incChanged.length) _event('order_income_save', _incChanged);   // 결정 224 — 관찰(실제로 바뀐 경우만)
     return { ok: true };
   }
 

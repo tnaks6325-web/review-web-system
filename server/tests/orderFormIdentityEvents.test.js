@@ -46,8 +46,24 @@ const read = (f) => fs.readFileSync(path.resolve(__dirname, '..', f), 'utf8');
     assert(q.some((s) => /UPDATE reviewers SET[\s\S]*bank_name/.test(s)), label + ' 저장(UPDATE)은 그대로 실행');
     assert.strictEqual(q.some((s) => /INSERT INTO identity_rule_observations/.test(s)), expectEvent, label + ' 사건 기록 여부');
   }
+  // 소득: 값이 실제로 바뀔 때만 사건(Codex P2) · 저장은 그대로
+  for (const [label, changedRows, expectEvent] of [['값 바뀜', [{ id: OWNER }], true], ['같은 값 재저장', [], false]]) {
+    const q = [];
+    pool.query = async (sql) => {
+      q.push(String(sql));
+      if (/IS DISTINCT FROM/.test(sql)) return { rows: changedRows };
+      if (/UPDATE reviewers SET[\s\S]*income_type/.test(sql)) return { rows: [{ id: OWNER }], rowCount: 1 };
+      return { rows: [] };
+    };
+    IR._test._resetModeCacheForTest();
+    const r = await rv.handleReviewerProfile({ action: 'saveIncomeInfo', phone8: '41490001', ownerReviewerId: OWNER, incomeName: '갑', jumin: '9001011234567', origin: 'order_form' });
+    await new Promise((res) => setTimeout(res, 30));
+    assert.strictEqual(r.ok, true);
+    assert(q.some((s) => /UPDATE reviewers SET[\s\S]*income_type/.test(s)), label + ' 저장 그대로');
+    assert.strictEqual(q.some((s) => /INSERT INTO identity_rule_observations/.test(s)), expectEvent, label + ' 사건 여부');
+  }
   pool.query = origQuery; pool.connect = origConnect;
-  console.log('PASS 계좌 빈칸 채우기 — 빈 칸 있을 때만 사건 · 저장 동작 불변');
+  console.log('PASS 계좌·소득 — 실제로 바뀔 때만 사건 · 저장 동작 불변');
 
   // 배선: 관찰 표시만 더했고 동작 분기는 그대로
   const sub = read('src/routes/submit.routes.js');
