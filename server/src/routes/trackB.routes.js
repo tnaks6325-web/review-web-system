@@ -2075,10 +2075,17 @@ router.post('/settings/inspect-messages', authMiddleware, adminOrMasterMiddlewar
 router.get('/settings/identity-rules-mode', authMiddleware, masterOnlyMiddleware, async (req, res) => {
   try {
     const IR = require('../services/identityRules.service');
-    const { rows } = await pool.query(
-      `SELECT rule_code, COUNT(*)::int AS n FROM identity_rule_observations
-        WHERE created_at > NOW() - INTERVAL '14 days' GROUP BY 1 ORDER BY 2 DESC`).catch(() => ({ rows: [] }));
-    res.json({ ok: true, mode: await IR.getMode(), forced: !!process.env.IDENTITY_RULES_MODE, last14d: rows });
+    // ★ 관찰 기록을 못 읽으면 0건으로 꾸미지 않는다 — "확인 불가"로 알린다(0건으로 보이면 차단을 잘못 켤 수 있다 · Codex P2).
+    let observations;
+    try {
+      const { rows } = await pool.query(
+        `SELECT rule_code, COUNT(*)::int AS n FROM identity_rule_observations
+          WHERE created_at > NOW() - INTERVAL '14 days' GROUP BY 1 ORDER BY 2 DESC`);
+      observations = { available: true, last14d: rows };
+    } catch (obsErr) {
+      observations = { available: false, last14d: null, error: '관찰 기록을 읽지 못했습니다(확인 불가 — 0건이 아닙니다).' };
+    }
+    res.json({ ok: true, mode: await IR.getMode(), forced: !!process.env.IDENTITY_RULES_MODE, observations });
   } catch (err) {
     res.status(500).json({ ok: false, error: '명의 규칙 상태를 불러오지 못했습니다.' });
   }

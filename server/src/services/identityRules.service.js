@@ -56,7 +56,10 @@ async function evaluateSubAccountsChange(db, { owner, prev, next }) {
   const prevList = asSubs(prev), nextList = asSubs(next);
   const prevCount = new Map();
   prevList.forEach((s) => { const k = sig(s && s.name, s && s.phone); if (k) prevCount.set(k, (prevCount.get(k) || 0) + 1); });
-  const prevPhones = new Set(prevList.map((s) => phone8Of(s && s.phone)).filter(Boolean));
+  // 빈 칸(이름·번호 중 하나라도 없음)은 칸 순번이 아니라 **값**으로 센다 — 순서만 바뀐 저장을 새 위반으로 세지 않는다(Codex P2).
+  const blankKey = (s) => `${nameKey(s && s.name)}|${String(s && s.phone == null ? '' : s.phone).replace(/\D/g, '')}`;
+  const prevBlank = new Map();
+  prevList.forEach((s) => { if (!sig(s && s.name, s && s.phone)) { const b = blankKey(s); prevBlank.set(b, (prevBlank.get(b) || 0) + 1); } });
   const selfSig = sig(owner && owner.name, owner && owner.phone);
 
   if (nextList.length > MAX_SUBS && nextList.length > prevList.length) out.push({ code: 'limit', index: null });
@@ -65,8 +68,10 @@ async function evaluateSubAccountsChange(db, { owner, prev, next }) {
   nextList.forEach((s, index) => {
     const k = sig(s && s.name, s && s.phone);
     if (!k) {
-      const was = prevList[index] && !sig(prevList[index].name, prevList[index].phone);
-      if (!was) out.push({ code: 'missing_name_or_phone', index });
+      const b = blankKey(s);
+      const left = prevBlank.get(b) || 0;
+      if (left > 0) prevBlank.set(b, left - 1);
+      else out.push({ code: 'missing_name_or_phone', index });
       return;
     }
     const n = (seen.get(k) || 0) + 1; seen.set(k, n);
@@ -74,8 +79,9 @@ async function evaluateSubAccountsChange(db, { owner, prev, next }) {
     if (!isNew) return;   // 이미 있던 칸 — 담당자 정리 대상(기존 데이터는 문제 삼지 않는다)
     if (k === selfSig) out.push({ code: 'same_as_self', index });
     else if (n > 1) out.push({ code: 'duplicate_in_list', index });
-    const p8 = phone8Of(s.phone);
-    if (!prevPhones.has(p8)) newPhones.push({ p8, index });
+    // 새로 생긴 명의(이름+번호)는 번호가 내 목록에 이미 있었어도 다른 리뷰어와 겹치는지 본다(Codex P2).
+    // 기존 칸 이름만 바꾼 저장도 새 명의로 세어진다 — 차단(3-1b) 때 다룰지 관찰 결과로 정한다.
+    newPhones.push({ p8: phone8Of(s.phone), index });
   });
   if (newPhones.length && owner && owner.id) {
     const phones = [...new Set(newPhones.map((x) => x.p8))];

@@ -43,10 +43,17 @@ const codes = (v) => v.map((x) => x.code).sort();
   assert(v.every((x) => x.otherOwnerId === OTHER), '겹친 소유자 기록');
   v = await ev(db(others), [{ name: '을', phone: '010-3000-0001' }], [{ name: '을', phone: '010-3000-0001' }, { name: '병', phone: '010-5000-0001' }]);
   assert.deepStrictEqual(codes(v), [], '이미 있던 번호(기존 겹침 76건 같은)는 새 위반이 아니다');
+  v = await ev(db(others), [{ name: '을', phone: '010-3000-0001' }], [{ name: '을', phone: '010-3000-0001' }, { name: '정', phone: '010-3000-0001' }]);
+  assert.deepStrictEqual(codes(v), ['other_owner_sub_phone'], '같은 번호 새 이름 칸도 다른 리뷰어 겹침이면 센다');
   // ⑥ 상한 · ⑦ 빈 칸
   const eleven = Array.from({ length: 11 }, (_, i) => ({ name: '이' + i, phone: '010-7000-00' + String(10 + i) }));
   assert(codes(await ev(db(), eleven.slice(0, 10), eleven)).includes('limit'));
   assert.deepStrictEqual(codes(await ev(db(), [], [{ name: '', phone: '010-1' }])), ['missing_name_or_phone']);
+  // Codex P2 — 빈 칸은 값으로 센다: 순서만 바뀌면 위반 아님 / 다른 빈 칸으로 바꾸면 위반
+  const blankPrev = [{ name: '정상', phone: '010-8000-0001' }, { name: '', phone: '010-1' }];
+  assert.deepStrictEqual(codes(await ev(db(), blankPrev, [{ name: '', phone: '010-1' }])), [], '앞 칸을 지워 빈 칸이 앞으로 와도 새 위반 아님');
+  assert.deepStrictEqual(codes(await ev(db(), blankPrev, [{ name: '정상', phone: '010-8000-0001' }, { name: '이름만', phone: '' }])), ['missing_name_or_phone'], '다른 빈 칸으로 바뀌면 센다');
+
   console.log('PASS 규칙 7종 — 새로 생긴 위반만 · 번호 같고 이름 다르면 허용 · 기존 칸 면제');
 
   // 모드: 기본 관찰 · 설정 off · 비상 스위치 · 조회 실패는 관찰(막지 않음)
@@ -108,6 +115,7 @@ const codes = (v) => v.map((x) => x.code).sort();
   const tb = fs.readFileSync(path.resolve(__dirname, '../src/routes/trackB.routes.js'), 'utf8');
   assert(/router\.post\('\/settings\/identity-rules-mode', authMiddleware, masterOnlyMiddleware/.test(tb), '스위치는 마스터만');
   assert(/\['off', 'observe'\]\.includes\(mode\)/.test(tb), '차단(enforce)은 아직 고를 수 없다(관찰 확인 뒤 3-1b)');
+  assert(/available: false, last14d: null/.test(tb) && !/\.catch\(\(\) => \(\{ rows: \[\] \}\)\)/.test(tb.slice(tb.indexOf('identity-rules-mode'), tb.indexOf('identity-rules-mode') + 1500)), '관찰 기록 못 읽으면 0건이 아니라 확인 불가');
   const mig = fs.readFileSync(path.resolve(__dirname, '../migrations/183_identity_rule_observations.sql'), 'utf8');
   assert(/CREATE TABLE IF NOT EXISTS identity_rule_observations/.test(mig) && !/ALTER TABLE/.test(mig), '183 은 새 기록 표만');
   console.log('PASS 배선 — 마스터 전용 스위치 · enforce 미노출 · 추가만');
