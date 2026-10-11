@@ -144,10 +144,13 @@ async function loadOwnerProfile(ownerReviewerId, db = pool) {
   //   과거 구매 기록과의 짝이 끊기지 않는다. 짝이 확실한 칸만 카드 번호, 나머지는 옛 이름표(막지 않는다).
   let cardByIndex = new Map();
   let mergedByIndex = new Map();
+  let selfCardId = null;   // 결정 221 — 본인도 카드 번호를 가진다(참여 기록의 카드 번호로 고르기 위해)
   if (cards.cardKeysEnabled()) {
     try {
       const active = await cards.loadActiveCards(db, owner.id);
       if (active) {
+        const selfCards = active.filter((c) => c.kind === 'self' && c.status === 'active');
+        if (selfCards.length === 1) selfCardId = String(selfCards[0].id);
         const mapped = cards.mapSubsToCards(owner, active);
         cardByIndex = mapped.byIndex;
         mergedByIndex = mapped.merged || new Map();
@@ -166,6 +169,8 @@ async function loadOwnerProfile(ownerReviewerId, db = pool) {
   const selfCode = byMember.get(0);
   identities.push({
     identityKey: selfCode ? `identity:${selfCode.id}` : 'self',
+    // ★ identityKey 는 그대로 둔다(승인 토큰·과거 주문 해시가 여기에 묶여 있다). 카드 번호는 따로 싣는다.
+    cardId: selfCardId,
     participantIdentityId: selfCode && selfCode.id || null,
     memberNo: 0,
     type: 'self',
@@ -429,6 +434,22 @@ async function saveIdentityAddress(ownerReviewerId, identityKey, address) {
   } finally { client.release(); }
 }
 
+// ★★ 결정 221 — 카드 번호가 없는 예전 참여를 이름·번호로 찾을 때도 **명의 카드와 같은 규칙**으로 후보를 접는다.
+//   ① 본인과 이름(공백 무시)+번호 8자리가 같은 타계정 칸 = 본인(카드 planOwnerSync ①·mapSubsToCards same_as_self, 결정 176).
+//      종전에는 이 칸이 별개 후보로 세어져 "하나로 확정할 수 없습니다"로 막혔다(인소민 건 — 참여 단계는 이미 본인 참여였다).
+//   ② 담당자가 합친 명의(merged)는 합쳐지지 않은 후보가 남을 때 뺀다(참여 화면도 합친 명의를 숨긴다 — campaign.html loadSubs).
+//   ★ 이름이 다른 명의는 접지 않는다(결정 174 완화 금지 ③). 접고도 여럿이면 종전처럼 막는다.
+function foldSameAsSelfAndMerged(candidates, identities) {
+  const self = identities.find((item) => item.type === 'self');
+  const selfSig = self && cleanName(self.name) && phone8(self.phone) ? `${cleanName(self.name)}|${phone8(self.phone)}` : '';
+  let out = candidates;
+  if (selfSig && out.some((item) => item.type === 'self')) {
+    out = out.filter((item) => item.type === 'self' || `${cleanName(item.name)}|${phone8(item.phone)}` !== selfSig);
+  }
+  if (out.length > 1 && out.some((item) => !item.merged)) out = out.filter((item) => !item.merged);
+  return out;
+}
+
 async function resolveApplicationIdentity({ ownerReviewerId, applicationId, campaignId, holdToken }, db = pool) {
   const { owner, identities } = await loadOwnerProfile(ownerReviewerId, db);
   const appId = Number(applicationId);
@@ -437,7 +458,7 @@ async function resolveApplicationIdentity({ ownerReviewerId, applicationId, camp
   }
   const { rows } = await db.query(
     `SELECT ca.id, ca.campaign_id, ca.applicant_name, ca.applicant_phone, ca.phone8,
-            ca.owner_phone8, ca.owner_reviewer_id, ca.participant_identity_id,
+            ca.owner_phone8, ca.owner_reviewer_id, ca.participant_identity_id, ca.participant_card_id,
             ca.status, ca.expires_at, rc.multi_account_mode
        FROM campaign_applications ca
        JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
@@ -457,6 +478,12 @@ async function resolveApplicationIdentity({ ownerReviewerId, applicationId, camp
   if (app.participant_identity_id) {
     candidates = identities.filter((item) => String(item.participantIdentityId || '') === String(app.participant_identity_id));
   }
+  // ★★ 결정 221(신원 기준 재정립 2단계) — 참여할 때 새긴 명의 카드 번호가 있으면 그 카드만 본다.
+  //   이름·번호로 다시 추측하지 않는다. 카드가 지금 목록에 없으면(이름·번호 변경·합침) 아래 종전 방식으로 찾는다(막지 않는다).
+  if (!candidates.length && app.participant_card_id) {
+    candidates = identities.filter((item) => item.cardId && String(item.cardId) === String(app.participant_card_id));
+    if (candidates.length !== 1) candidates = [];
+  }
   if (!candidates.length) {
     const appName = cleanName(app.applicant_name);
     const appPhone = phone8(app.phone8 || app.applicant_phone);
@@ -466,6 +493,7 @@ async function resolveApplicationIdentity({ ownerReviewerId, applicationId, camp
     if (!candidates.length && appName) candidates = identities.filter((item) => cleanName(item.name) === appName);
     if (!candidates.length && appPhone) candidates = identities.filter((item) => phone8(item.phone) === appPhone);
   }
+  if (candidates.length > 1) candidates = foldSameAsSelfAndMerged(candidates, identities);
   if (candidates.length !== 1) {
     throw new ReviewerOrderIdentityError('SELECTED_IDENTITY_AMBIGUOUS', '참여 시 선택한 명의를 하나로 확정할 수 없습니다. 내정보를 확인해주세요.', 409);
   }

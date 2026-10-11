@@ -901,6 +901,8 @@ router.post('/order', async (req, res, next) => {
           ownerReviewerId: verifiedIdentity.context.owner.id,
           participantIdentityId: verifiedIdentity.context.selected.participantIdentityId || null,
           participantIdentityKeyHash: verifiedIdentity.approval.selectedIdentityHash,
+          // 결정 221 — 게이트가 확정한 명의의 카드 번호(없으면 null → 원장이 신청행 카드를 쓴다)
+          participantCardId: verifiedIdentity.context.selected.cardId || null,
         };
       } catch (gateErr) {
         if (gateErr instanceof reviewerOrderIdentity.ReviewerOrderIdentityError) {
