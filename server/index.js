@@ -46,6 +46,8 @@ const REQUIRED_SCHEMA = [
   ['order_submissions', 'repurchase_work_key'],    // 144 — 재참여 가드(없으면 fail-open으로 제한이 조용히 풀림)
   ['order_submissions', 'campaign_was_late'],      // 149 — 취소 뒤에도 지각 주문 작업 로그 이력 보존
   ['order_submissions', 'participant_identity_key_hash'], // 158 — 검증된 참여 명의에 묶인 주문정보 추천·제출 원장 기록
+  ['campaign_applications', 'participant_card_id'], // 182 — 참여 명의 카드 기록(결정 221 · 없으면 apply 기록이 SAVEPOINT 로 조용히 빠진다)
+  ['order_submissions', 'participant_card_id'],    // 182 — 주문에 참여 명의 카드 복사
   ['recruit_campaigns', 'repurchase_days'],        // 148 — 공고별 재참여 기간 저장·apply/카드 판정
   ['trackb_advertiser_links', 'login_required'],   // 083 — 광고주 링크 로그인 게이트·업체관리 링크/계정 카드
   ['recruit_campaigns', 'reviewer_hidden'],        // 085 — 공개 /list WHERE 절(없으면 리뷰어 공고목록 전면 42703)

@@ -2358,6 +2358,29 @@ async function _applyParticipation(req, res, next, campPre) {
         [ins.rows[0].id, codeIdentity.ownerReviewerId, codeIdentity.id]
       );
     }
+    // ★★ 결정 221(신원 기준 재정립 1단계) — 참여하는 순간 "누구의 어느 명의 카드"인지 새긴다. 이후 구매양식은 이름·번호로
+    //   다시 추측하지 않고 이 번호를 따라간다(인소민 건: 본인과 똑같은 타계정 칸 때문에 추측이 실패해 막혔다).
+    //   ★ 기록만 한다 — 어떤 실패도 참여를 막지 않는다(SAVEPOINT 격리, 082 규율). 모르면 NULL(읽는 쪽은 종전 방식).
+    //   ★ 소유자 = 이 참여의 로그인 본계정(reg, owner_phone8 과 같은 근거). 같은 phone8 리뷰어가 둘 이상이면 기록하지 않는다.
+    //   ★ 코드 명의 경로(codeIdentity)가 이미 쓴 소유자는 덮지 않는다(COALESCE).
+    try {
+      await client.query('SAVEPOINT card_bind');
+      const ownerCount = await client.query('SELECT COUNT(*)::int AS n FROM reviewers WHERE phone8 = $1', [p8]);
+      if (ownerCount.rows[0] && ownerCount.rows[0].n === 1) {
+        const cardId = await require('../services/reviewerIdentityCards.service').findParticipationCard(
+          client, reg.rows[0].id, { isSub: isSubApply, name: insName, phone: insPhone });
+        await client.query(
+          `UPDATE campaign_applications
+              SET owner_reviewer_id = COALESCE(owner_reviewer_id, $2::uuid),
+                  participant_card_id = $3::uuid
+            WHERE id = $1 AND (owner_reviewer_id IS NULL OR owner_reviewer_id = $2::uuid)`,
+          [ins.rows[0].id, reg.rows[0].id, cardId]);
+      }
+      await client.query('RELEASE SAVEPOINT card_bind');
+    } catch (bindErr) {
+      try { await client.query('ROLLBACK TO SAVEPOINT card_bind'); } catch (_) { /* noop */ }
+      logger.warn(`[campaign/apply] 명의 카드 기록 실패(참여는 계속): ${bindErr.code || ''} ${bindErr.message}`);
+    }
     await client.query('COMMIT');
     logger.info(`[campaign/apply] 홀드 생성 camp=${id} app=${ins.rows[0].id} phone8=***${holdP8.slice(-4)}` +
       (isSubApply ? ` sub(owner=***${p8.slice(-4)})` : '') + (chosenOpt ? ' opt=' + chosenOpt.opt_key : ''));

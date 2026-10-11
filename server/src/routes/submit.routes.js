@@ -1102,6 +1102,12 @@ router.post('/order', async (req, res, next) => {
      * 미러를 건너뛰며, 아래에서 반드시 workboard_apply를 enqueue한다.
      */
     const skipSheetMirrorForWrite = !!orderScope.sheetless || queuedWorkboardApply;
+    // ★ 결정 221 — 신청 없는 주문의 소유자 기록용. 서명된 리뷰어 세션이 있을 때만(없거나 무효면 종전 그대로 — 막지 않는다).
+    let _sessionOwnerReviewerId = null;
+    if (!holdCtx && req.headers['x-reviewer-token']) {
+      try { _sessionOwnerReviewerId = verifyReviewerSession(req.headers['x-reviewer-token']).ownerReviewerId || null; }
+      catch (_) { _sessionOwnerReviewerId = null; }
+    }
     const ledger = await createOrderLedgerEntry({
       sheetId: orderScope.sheetId,
       tabName: orderScope.tabName,
@@ -1123,6 +1129,7 @@ router.post('/order', async (req, res, next) => {
       // crossDay: 실제로 시트 claim을 건너뛴 모든 경로는 날짜를 넘는 같은 구매도 막는다.
       // workboard_apply 대상도 원장 단계에서 claim을 만들지 않으므로 sheetless와 같은 보호가 필요하다.
       sameDayDuplicateGuard: { sheetId: orderScope.sheetId, tabName: orderScope.tabName, campaignId: holdCtx && holdCtx.campaignId, orderData, crossDay: skipSheetMirrorForWrite },
+      sessionOwnerReviewerId: _sessionOwnerReviewerId,
     });
 
     if (ledger && ledger.duplicateOrderSubmissionId) {
