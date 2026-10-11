@@ -6974,9 +6974,18 @@ function _buildIncomePersonBtns(cid, profileData) {
   if (profileData) _selectCardIncomePerson(cid, selfBtn, profileData, -1);
 }
 
+/** 1번 카드 소득신고 명의자가 "본인"으로 골라져 있는가. 모르면 false — 세금 정보라 모르면 본인 칸을 덮지 않는다(결정 220). */
+function _firstCardIncomeIsSelf() {
+  const cid = _orderCardIds[0];
+  const btnsWrap = cid ? document.getElementById(cid + "_incomePersonBtns") : null;
+  return !!btnsWrap && btnsWrap.dataset.personIdx === "-1";
+}
+
 /** 카드에서 명의자 선택 시 입력란 자동 채우기 */
 function _selectCardIncomePerson(cid, selectedBtn, profileData, personIdx) {
   const btnsWrap = document.getElementById(cid + "_incomePersonBtns");
+  // ★ 고른 명의자(-1 = 본인, 0+ = 타계정 순번)를 기억한다 — 제출 뒤 본인 소득정보 저장 여부를 이것으로 정한다(결정 220).
+  if (btnsWrap) btnsWrap.dataset.personIdx = String(personIdx);
   if (btnsWrap) {
     btnsWrap.querySelectorAll("button").forEach(b => {
       b.style.background   = "#fff";
@@ -9508,7 +9517,10 @@ async function submitOrderForm() {
   }
 
   // ★ v9.14: 소득신고 정보 저장 (1번 카드 명의 기준으로 인애드명단에 영구 저장, 백그라운드)
-  if (successCount > 0 && window._incomeType === "소득신고") {
+  // ★★ 결정 220 — 1번 카드에서 **본인**을 골랐을 때만 본인 소득정보에 저장한다. 종전에는 타계정을 골라도
+  //   그 사람의 소득명의·주민번호로 로그인 리뷰어 본인 칸을 덮었다(본인 주민번호 = 이름 다른 타계정 주민번호 25명).
+  //   계좌는 같은 이유로 2026-08-19 에 빈 칸만 채우게 바꿨다(결정 141 보강). 타계정 소득정보는 내정보 타계정 칸에서 고친다.
+  if (successCount > 0 && window._incomeType === "소득신고" && _firstCardIncomeIsSelf()) {
     try {
       const firstOrder = orders[0];
       const saveIncomeName = firstOrder?.incomeName || "";
