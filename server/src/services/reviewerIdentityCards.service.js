@@ -201,7 +201,9 @@ const CARD_SELECT = `SELECT id, kind, status, name, name_key, phone, phone8, ${C
  * ★ 잠금 순서 = reviewers 행 먼저, 카드 나중(순환 대기 방지).
  */
 async function syncOwnerCards(client, reviewer, { source = 'sync' } = {}) {
-  const { rows: existing } = await client.query(`${CARD_SELECT} WHERE owner_reviewer_id = $1 FOR UPDATE`, [reviewer.id]);
+  // ★ 결정 223 — FOR NO KEY UPDATE: 카드 행은 참여·주문 기록(182 외래키 FOR KEY SHARE)이 가리킨다. FOR UPDATE 면
+  //   카드 맞추기와 참여 카드 기록이 서로 기다린다(레드팀 7). 카드 맞추기는 키(id)를 바꾸지 않으므로 이것으로 충분하다.
+  const { rows: existing } = await client.query(`${CARD_SELECT} WHERE owner_reviewer_id = $1 FOR NO KEY UPDATE`, [reviewer.id]);
   const ops = planOwnerSync(reviewer, existing);
   if (!ops.length) return { inserted: 0, updated: 0, removed: 0, reactivated: 0 };
   return _applyOps(client, reviewer.id, ops, source);
@@ -254,6 +256,34 @@ async function reconcileCards({ db = pool, dryRun = true, by = '', lockTimeoutMs
   }
   logger.info(`[identity-cards] reconcile by=${String(by).slice(0, 40)} drifted=${out.drifted} fixed=${out.fixed} ins=${out.inserted} upd=${out.updated} rm=${out.removed} re=${out.reactivated} busy=${out.busy} failed=${out.failed.length}`);
   return out;
+}
+
+/**
+ * ★ 결정 223(신원 기준 3-2) — 본인 정보(주소·계좌·소득명의·가입)를 바꾼 **뒤** 그 리뷰어 카드만 바로 맞춘다.
+ *   종전에는 10분 거울(reconcileCards)이 따라잡을 때까지 카드가 옛 값이었다 — 새 가입자의 첫 참여는 본인 카드가
+ *   아직 없어 참여 명의 카드가 기록되지 않았다(결정 221 1단계).
+ * ★ 저장이 확정된 뒤 따로 돈다 — 기다리지 않고, 어떤 실패도 저장에 닿지 않는다(실패하면 10분 거울이 맞춘다).
+ *   잠금 대기 2초 상한 · 리뷰어 행 FOR NO KEY UPDATE(참여·주문 INSERT 를 막지 않음) — reconcileCards 한 사람분과 같다.
+ * 반환 Promise 는 테스트용이다.
+ */
+function syncOwnerCardsSoon(ownerId, { source = 'write', db = pool } = {}) {
+  return (async () => {
+    if (!ownerId || !cardKeysEnabled()) return { ok: false, skipped: true };
+    let client;
+    try {
+      client = await db.connect();
+      await client.query('BEGIN');
+      await client.query(`SELECT set_config('lock_timeout', '2000ms', true)`);
+      const { rows } = await client.query(`${REVIEWER_SELECT} WHERE id = $1 FOR NO KEY UPDATE`, [ownerId]);
+      const c = rows.length ? await syncOwnerCards(client, rows[0], { source }) : null;
+      await client.query('COMMIT');
+      return { ok: true, ...(c || {}) };
+    } catch (err) {
+      if (client) { try { await client.query('ROLLBACK'); } catch (_) { /* noop */ } }
+      logger.warn(`[identity-cards] 저장 뒤 카드 바로 맞추기 실패(저장 무영향 · 10분 거울이 맞춘다): ${err && err.code || ''} ${err && err.message}`);
+      return { ok: false, code: err && err.code || null };
+    } finally { if (client) client.release(); }
+  })();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -428,4 +458,4 @@ function mapSubsToCards(reviewer, cards) {
 
 module.exports = { buildCardsFromReviewer, syncOwnerCards, planOwnerSync, reconcileCards,
   findSubIndex, syncCardsAfterWrite, mutateSubAccountsInTx, mutateSubAccounts,
-  cardKeysEnabled, loadActiveCards, mapSubsToCards, findParticipationCard, _test: { nameKey, phone8Of } };
+  cardKeysEnabled, loadActiveCards, mapSubsToCards, findParticipationCard, syncOwnerCardsSoon, _test: { nameKey, phone8Of } };

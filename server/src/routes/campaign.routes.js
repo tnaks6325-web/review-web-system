@@ -2377,8 +2377,18 @@ async function _applyParticipation(req, res, next, campPre) {
       } catch (_) { sessionOwner = null; }
       if (sessionOwner && String(sessionOwner) === String(reg.rows[0].id)) {
         await client.query("SET LOCAL lock_timeout = '1s'");
-        const cardId = await require('../services/reviewerIdentityCards.service').findParticipationCard(
+        const _cardsSvc = require('../services/reviewerIdentityCards.service');
+        let cardId = await _cardsSvc.findParticipationCard(
           client, reg.rows[0].id, { isSub: isSubApply, name: insName, phone: insPhone });
+        // ★ 결정 223 — 카드를 못 찾으면(가입 직후 카드 맞추기가 늦거나 실패) 이 자리에서 그 사람 카드를 한 번 맞추고
+        //   다시 찾는다(Codex P2). syncCardsAfterWrite 는 자체 SAVEPOINT 로 격리되고 throw 하지 않는다.
+        if (!cardId) {
+          const _s = await _cardsSvc.syncCardsAfterWrite(client, reg.rows[0].id, { source: 'apply' });
+          if (_s && _s.ok && (_s.inserted || _s.updated || _s.reactivated)) {
+            cardId = await _cardsSvc.findParticipationCard(
+              client, reg.rows[0].id, { isSub: isSubApply, name: insName, phone: insPhone });
+          }
+        }
         const own = await client.query(
           `SELECT NOT EXISTS (SELECT 1 FROM reviewers o WHERE o.phone8 = $2 AND o.id <> $1::uuid)
               AND NOT EXISTS (
