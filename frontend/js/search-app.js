@@ -7542,6 +7542,29 @@ async function deleteInlineSubAccount(idx) {
 }
 
 /** 인라인 타계정 저장 (추가/수정) */
+/** ★ 결정 222(3-3) — 타계정 저장 확인 단계의 미리 알림. 지금은 막지 않는다(서버 명의 규칙은 관찰 모드).
+ *  화면에서 알 수 있는 두 가지만: 본인과 이름·번호가 같은 칸 / 이미 있는 타계정과 같은 칸. 이름은 띄어쓰기 무시.
+ *  다른 리뷰어 번호와 겹치는지는 개인정보라 화면에서 보지 않는다(서버가 판정). */
+function _subIdentityHint(name, phone, editIdx) {
+  const nk = (v) => String(v || "").replace(/\s+/g, "");
+  const p8 = (v) => { const d = String(v || "").replace(/[^0-9]/g, ""); return d.length >= 8 ? d.slice(-8) : ""; };
+  const sig = (n, p) => (nk(n) && p8(p)) ? nk(n) + "|" + p8(p) : "";
+  const mine = sig(name, phone);
+  if (!mine) return "";
+  const prof = window._reviewerProfile || {};
+  const auth = (typeof _getReviewerSession === "function" ? _getReviewerSession() : null) || {};
+  const selfSig = sig(prof.name || auth.name, prof.phone || auth.phone8);
+  const box = (msg) => `<div id="inlineSubHint" style="background:#FEF2F2;border:1px solid #FCA5A5;border-radius:8px;padding:9px 11px;margin-bottom:10px;font-size:.72rem;color:#B91C1C;line-height:1.55">${msg}</div>`;
+  if (selfSig && mine === selfSig) {
+    return box("⚠️ <strong>본인 정보와 같아요.</strong> 본인을 타계정으로 다시 등록하면 구매양식에서 명의 확인이 꼬일 수 있어요.<br>다른 배송지로 받으려면 <strong>구매양식 배송주소에 직접</strong> 적어 주세요.");
+  }
+  const subs = (typeof _parseSubAccounts === "function" ? _parseSubAccounts(prof.subAccounts) : []) || [];
+  if (subs.some((s, i) => i !== editIdx && sig(s && s.name, s && s.phone) === mine)) {
+    return box("⚠️ <strong>이미 같은 이름·번호의 타계정이 있어요.</strong> 같은 명의는 한 번만 등록해 주세요.");
+  }
+  return "";
+}
+
 async function saveInlineSubAccount() {
   const name = (document.getElementById("inlineSubName")?.value || "").trim();
   const phoneLast8 = (document.getElementById("inlineSubPhone")?.value || "").replace(/[^0-9]/g, "");
@@ -7585,6 +7608,7 @@ async function saveInlineSubAccount() {
           <span style="font-size:.8rem;font-weight:700;color:#DC2626">${escHtml(juminFormatted)}</span>
         </div>
       </div>
+      ${_subIdentityHint(name, phone, editIdx)}
       <div style="font-size:.7rem;color:#B45309;text-align:center;margin-bottom:10px;line-height:1.5">
         이 정보가 정확히 맞는지 확인해주세요<br>
         <strong>*전화번호 오타, 주민번호 오타 확인 필수</strong>
