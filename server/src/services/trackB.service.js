@@ -4284,12 +4284,63 @@ class HideRowError extends Error {
 // 주문(구매양식) 취소와 같은 트랜잭션 안에서 돌 수 있도록 client 를 주입받는다.
 // 실패는 반환이 아니라 throw 로 알린다 — 반환으로 접으면 바깥의 주문 취소가 그대로 커밋되어
 // "주문은 취소됐는데 작업표 행은 그대로"인 단절이 생긴다.
+/**
+ * ★★ 결정 227 — 행 삭제 보충 줄이 이어받을 **계획 칸 값**과 배정 표식(option_text)을 계산한다.
+ * 값 = 화면 합성과 같은 순서(현재 앵커 편집 → 물리행 앵커 편집 → 줄 값). 이어받는 칸 = `planCellHeaders`.
+ * ★ SAVEPOINT 격리 + 절대 throw 없음 — 실패하면 { cells:{}, optionText:null }(= 종전 빈 줄).
+ */
+async function _inheritSlotPlanInTx(client, { sheetId, tabName, row, headers }) {
+  const empty = { cells: {}, optionText: null };
+  if (!row) return empty;
+  let planHeaders = [];
+  try { planHeaders = require('../utils/worktablePlan').planCellHeaders(headers); } catch (_) { planHeaders = []; }
+  const rj = (row.row_json && typeof row.row_json === 'object') ? row.row_json : {};
+  const optionText = String(row.option_text == null ? '' : row.option_text).trim() || null;
+  if (!planHeaders.length) return { cells: {}, optionText };
+  const pairs = [];
+  const anchor = _deriveAnchor(row);
+  if (anchor) pairs.push(anchor);
+  const rowAnchorId = _rowAnchorId(row);
+  if (rowAnchorId && !(anchor && anchor.type === 'manual' && anchor.value === rowAnchorId)) pairs.push({ type: 'manual', value: rowAnchorId });
+  const overlay = new Map();   // header → 값(앞 앵커 우선)
+  if (pairs.length) {
+    await client.query('SAVEPOINT slot_plan_inherit');
+    try {
+      const { rows: edits } = await client.query(
+        `SELECT anchor_type, anchor_value, field, value_text
+           FROM participant_edits
+          WHERE sheet_id=$1 AND tab_name=$2 AND reverted_at IS NULL AND kind='text'
+            AND field = ANY($3::text[])
+            AND (anchor_type, anchor_value) IN (SELECT * FROM UNNEST($4::text[], $5::text[]))
+          ORDER BY created_at DESC, id DESC`,
+        [sheetId, tabName, planHeaders.map(h => 'col:' + h), pairs.map(p => p.type), pairs.map(p => p.value)]);
+      await client.query('RELEASE SAVEPOINT slot_plan_inherit');
+      for (const p of pairs) {
+        for (const e of edits) {
+          if (e.anchor_type !== p.type || e.anchor_value !== p.value) continue;
+          const h = String(e.field).slice(4);
+          if (!overlay.has(h)) overlay.set(h, String(e.value_text == null ? '' : e.value_text));
+        }
+      }
+    } catch (e) {
+      try { await client.query('ROLLBACK TO SAVEPOINT slot_plan_inherit'); } catch (_) {}
+      logger.warn(`[trackB] 보충 줄 계획 이어받기 — 편집 조회 실패(줄 값만 잇는다): ${e.message}`);
+    }
+  }
+  const cells = {};
+  for (const h of planHeaders) {
+    const v = overlay.has(h) ? overlay.get(h) : String(rj[h] == null ? '' : rj[h]);
+    if (String(v).trim()) cells[h] = String(v);
+  }
+  return { cells, optionText };
+}
+
 async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expectedRevision }) {
     // 작업표 행과 리뷰어 참여내역은 같은 참여 단위다. 기존처럼 화면 오버레이만
     // 숨기면 review_index/order_submissions 쪽의 "내 참여내역"이 남아 서로 다른
     // 사실을 말하게 된다. 행을 잠근 뒤, 이 행에만 연결된 신원·참여 링크를 함께 해제한다.
     const { rows } = await client.query(
-      `SELECT id, seq, phone8, row_json, order_submission_id, sheet_id, tab_name, identity_key, source, first_seen_at, updated_at::text AS revision
+      `SELECT id, seq, phone8, row_json, order_submission_id, sheet_id, tab_name, identity_key, source, first_seen_at, updated_at::text AS revision, recipient_name, option_text
          FROM campaign_participants
         WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL
         FOR UPDATE`,
@@ -4460,6 +4511,20 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
     const blank = {};
     headers.forEach(h => { blank[h] = ''; });
     if (dateHeader) blank[dateHeader] = finalDateLabel;
+    /* ★★ 결정 227(2026-10-12 제주도아) — 보충 줄은 지운 줄의 **계획 칸**(상품·옵션·리뷰옵션·배송구분 등)과
+         배정 표식(option_text)을 이어받는다. 종전에는 전부 비운 줄을 만들어 "어느 상품 자리인지"가 사라졌다 —
+         순차진행 작업에서 옥돔 자리 5개가 상품 없는 빈 줄이 되어 맨 뒤 날짜로 밀렸고, 담당자가 손으로 다시 적었다.
+       ★ 값 = 화면에 보이던 값(편집 오버레이 → 줄 값) — 담당자가 고쳐 둔 상품도 그대로 잇는다.
+         채워진 줄이면 그 주문이 실제로 고른 상품이 곧 비워진 자리다(처음 채울 때 상품 칸·표식을 실제 선택으로 맞춘다 — 043 보강).
+       ★ 번호·구매일자·주문 칸은 잇지 않는다(번호 = 재번호, 날짜 = relay, 주문 칸 = 빈 자리).
+       ★ SAVEPOINT 격리 + 절대 throw 없음 — 이어받기 실패로 행 삭제·주문 취소가 롤백되면 안 된다(실패 = 종전 빈 줄).
+       ★ 끄는 스위치 `WORKTABLE_SLOT_PLAN_INHERIT=0` = 종전(전부 빈 줄). */
+    let inheritedOptionText = null;
+    if (shouldReplenish && process.env.WORKTABLE_SLOT_PLAN_INHERIT !== '0') {
+      const inherited = await _inheritSlotPlanInTx(client, { sheetId, tabName, row, headers });
+      for (const [h, v] of Object.entries(inherited.cells)) blank[h] = v;
+      inheritedOptionText = inherited.optionText;
+    }
     // ★★ 다음 번호는 **표 전체**(소프트삭제·비활성 줄 포함)에서 골라야 한다 — `uq_participants_seq`
     //   는 부분 인덱스가 아니라 지워진 줄의 번호도 영구히 점유한다. 살아있는 줄(`tabRows`)만 보고
     //   고르면, 예전에 [♻ 중복 정리]·[🧹 줄 정리] 등으로 소프트삭제된 줄이 그 위 번호를 쥐고 있을 때
@@ -4475,15 +4540,15 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
       for (let attempt = 0; attempt < 5 && !replacement; attempt++) {
         const tryInsert = await client.query(
           `INSERT INTO campaign_participants
-             (sheet_id, tab_gid, tab_name, seq, start_date, row_json, source, updated_by, updated_at)
+             (sheet_id, tab_gid, tab_name, seq, start_date, row_json, option_text, source, updated_by, updated_at)
            SELECT $1, $2, $3,
                   COALESCE(MAX(seq) FILTER (WHERE seq < ${participants.MANUAL_SEQ_BASE}), 0) + 1,
-                  $4, $5::jsonb, 'worktable', $6, NOW()
+                  $4, $5::jsonb, $7, 'worktable', $6, NOW()
              FROM campaign_participants WHERE sheet_id = $1 AND tab_name = $3
            ON CONFLICT (sheet_id, tab_name, seq) DO NOTHING
            RETURNING id, seq`,
           [sheetId, (tabRows[0] && tabRows[0].tab_gid) || null, tabName,
-            finalDateLabel || null, JSON.stringify(blank), String(by).slice(0, 100)]);
+            finalDateLabel || null, JSON.stringify(blank), String(by).slice(0, 100), inheritedOptionText]);
         if (tryInsert.rows.length) replacement = tryInsert;
       }
       if (!replacement) throw new HideRowError('replacement_slot_failed');

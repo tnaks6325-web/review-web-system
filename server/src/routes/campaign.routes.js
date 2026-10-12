@@ -18,6 +18,7 @@ const {
   fetchSequentialCampaignIds,
   withoutOwnHold,
   liveOptions,
+  optionTotalBalance,
   timeStrToMinutes,
   kstDayStartUtc,
   kstTodayAt,
@@ -3733,13 +3734,19 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
     });
     // 🧩 옵션별 현황(061 3단계 관제): 옵션 뷰(정원·잔여·상태) + 금액 포함(관리자 전용)
     let options = [];
+    // ★ 결정 227: 공고 총원 ↔ 상품별 남은 자리 합 어긋남(관리자 경고 재료) — 없으면 null(화면 무표시).
+    let quotaBalance = null;
     try {
       const { rows: camps } = await pool.query('SELECT * FROM recruit_campaigns WHERE id = $1', [id]);
       if (camps.length && camps[0].participation_mode) {
         const now = new Date();
         const _sm = await deriveSchedules(pool, tabsOfCampaigns([camps[0]]), now);
-        const st = computeCampaignState(camps[0], (await fetchCampaignCounts(pool, [id], now)).get(id), now, scheduleFor(_sm, camps[0]));
+        const _cnt = (await fetchCampaignCounts(pool, [id], now)).get(id);
+        const _sch = scheduleFor(_sm, camps[0]);
+        const st = computeCampaignState(camps[0], _cnt, now, _sch);
         options = await _loadOptionViews(pool, id, st, now);
+        try { quotaBalance = optionTotalBalance(totalQuotaUsage(camps[0], _cnt || {}, _sch), options); }
+        catch (balErr) { logger.warn('[campaign/admin/applications] 총원·상품 정원 대조 실패(무표시): ' + balErr.message); }
       }
     } catch (optErr) { logger.warn('[campaign/admin/applications] 옵션 집계 실패: ' + optErr.message); }
 
@@ -3853,7 +3860,7 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
       }
     } catch (siErr) { logger.warn('[campaign/admin/applications] 시트 대조 실패: ' + siErr.message); }
 
-    res.json({ ok: true, data: controlRows, count: controlRows.length, options, sheetInfo });
+    res.json({ ok: true, data: controlRows, count: controlRows.length, quotaBalance, options, sheetInfo });
   } catch (err) {
     next(err);
   }
