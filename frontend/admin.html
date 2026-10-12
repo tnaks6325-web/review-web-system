@@ -1797,7 +1797,7 @@ body{ letter-spacing:-.01em; }
      ★ index-app.js **앞**에 둔다: 전역 이름을 여기서 노출하므로 순서가 바뀌면 뒤에 오는 선언이 덮는다. -->
 <script src="js/admin-settings.js"></script>
 
-<script src="js/index-app.js"></script>
+<script src="js/index-app.js?v=20261012-optpause"></script>
 
 <!-- ★ 파일 존재 확인 모달 -->
      인애드 등록 모달 — 한 화면 통합
@@ -1947,14 +1947,14 @@ body{ letter-spacing:-.01em; }
      모집공고 관리 (recruit) JS
      ══════════════════════════════════════════════════════ -->
 <script src="js/recruit-modal.js?v=20260916-direct-delivery"></script>
-<script src="js/campaign-cards.js?v=20260916-direct-delivery"></script>
+<script src="js/campaign-cards.js?v=20261012-optpause"></script>
 <!-- 공고별 참여 리뷰어 관리(블랙리스트 건별, 091) — 카드 [🚫 리뷰어] 버튼이 여는 공유 모달.
      campaign-cards.js 뒤에 로드해도 무방(버튼 렌더 시점에 window.ReviewerGate 존재만 본다). -->
 <script src="js/campaign-reviewer-gate.js"></script>
 <!-- 날짜별 모집인원 조절 + 차수(095) — 카드 [📅 인원] 버튼이 여는 공유 모달(workdesk.html 과 한 벌) -->
 <script src="js/campaign-daily-plan.js?v=20261012-seqdays"></script>
 <script src="js/campaign-workdetail.js"></script>
-<script src="js/index-recruit.js?v=20261012-seqdays"></script>
+<script src="js/index-recruit.js?v=20261012-optpause"></script>
 
 <!-- ══════════════════════════════════════════════════════
      Phase 1-2: search.html 블랙리스트 배너 (공지 배너)
@@ -1963,7 +1963,9 @@ body{ letter-spacing:-.01em; }
 <!-- ══════════════════════════════════════════════════════
      💰 입금처리 패널 JavaScript
      ══════════════════════════════════════════════════════ -->
-<script src="js/index-payment.js"></script>
+<script src="js/index-payment.js?v=20261012-optpause"></script>
+<!-- ★ 결정 229: 상품 품절 알림 팝업(리뷰웹시스템[3버전]과 한 벌) -->
+<script src="js/option-alert-prompt.js?v=20261012"></script>
 
 <!-- ══════════════════════════════════════════════════════
      📒 주문 원장(DB 주체) 인라인 뷰어/편집 JavaScript

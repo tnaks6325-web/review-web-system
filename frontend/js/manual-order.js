@@ -357,7 +357,7 @@
     const left = o.remaining == null ? '정원 없음' : (o.status === 'soldout' ? `마감(${o.used}/${o.recruitTotal})` : '남은 ' + o.remaining);
     const today = (o.status !== 'soldout' && o.todayRemaining != null && (o.remaining == null || o.todayRemaining < o.remaining))
       ? ' · 오늘 ' + o.todayRemaining : '';
-    return _optName(o) + ' · ' + left + today;
+    return _optName(o) + ' · ' + left + today + (o.status === 'paused' ? ' · 품절로 일시 멈춤' : '');   // ★ 결정 229: 안내만(고르는 것은 막지 않는다)
   }
   function optCell(it, i) {
     if (!OPTS.length) return '';

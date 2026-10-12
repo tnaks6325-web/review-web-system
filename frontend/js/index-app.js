@@ -992,11 +992,25 @@ function enterAdminScreen() {
     setTimeout(connectSSE, 500);
   }
 
+  // ★ 결정 229: 상품 품절 알림 팝업 — 리뷰웹시스템[3버전]과 같은 모듈 · 받는 사람 = 내부 직원 전원(서버가 권한을 다시 본다)
+  if (['master', 'admin', 'staff'].includes(role)) {
+    const _oaSp = { api: _optAlertApi, name: name || '' };
+    if (window.OptionAlertPrompt) window.OptionAlertPrompt.start(_oaSp); else window.__OPTALERT_PENDING = _oaSp;
+  }
+
   // ── 신규 작업 오더 배지/알림 폴링 시작 ──
   if (typeof startWorkOrderBadgePoll === 'function') startWorkOrderBadgePoll();
 }
+/** 품절 알림 모듈용 호출기 — 리뷰웹시스템[3버전] `api()` 와 같은 모양(JSON 을 돌려주고, 실패해도 던지지 않는다). */
+async function _optAlertApi(path, opts) {
+  const o = Object.assign({ headers: {} }, opts || {});
+  o.headers['Authorization'] = 'Bearer ' + (sessionStorage.getItem('admin_token') || '');
+  if (o.body) o.headers['Content-Type'] = 'application/json';
+  try { const r = await fetch(API_BASE_URL + path, o); return await r.json(); } catch (_) { return null; }
+}
 function exitAdmin() {
   clearAdminSession();
+  window.__OPTALERT_PENDING = null; if (window.OptionAlertPrompt) window.OptionAlertPrompt.stop();
   if (typeof disconnectSSE === 'function') disconnectSSE();
   if (typeof stopWorkOrderBadgePoll === 'function') stopWorkOrderBadgePoll();
   showScreen("screenGate");

@@ -378,10 +378,14 @@
     if (!opts.length) return '';
     const open = opts.filter(o => o.status === 'open').length;
     // ★ 결정 212: 순차진행의 대기(waiting) 선택지는 마감이 아니다 — "N종 마감"에 세지 않는다.
-    const done = opts.filter(o => o.status !== 'open' && o.status !== 'waiting').length;
+    // ★ 결정 229: 품절로 잠시 멈춘(paused) 선택지도 마감이 아니다 — 따로 센다(담당자가 다시 열 수 있다).
+    const done = opts.filter(o => o.status !== 'open' && o.status !== 'waiting' && o.status !== 'paused').length;
+    const paused = opts.filter(o => o.status === 'paused').length;
     const imminent = opts.some(o => o.status === 'open' && o.remaining != null && o.remaining <= 3);
     let hint = '';
-    if (open === 0) hint = '전체 마감';
+    if (open === 0 && paused > 0 && done === 0) hint = '일시 멈춤';
+    else if (open === 0) hint = '전체 마감';
+    else if (paused > 0) hint = paused + '종 일시 멈춤' + (done > 0 ? ' · ' + done + '종 마감' : '');
     else if (done > 0) hint = done + '종 마감';
     else if (imminent) hint = '곧 마감';
     return `<div class="poptchip" style="font-size:.68rem;font-weight:700;color:#4B5563;background:#F3F4F6;border-radius:7px;padding:4px 8px;margin-top:6px;display:inline-block">🧩 옵션 ${opts.length}종${hint ? ` · <b style="color:#B45309">${_esc(hint)}</b>` : ''}</div>`;

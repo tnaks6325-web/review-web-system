@@ -134,7 +134,17 @@ async function cancelOrderByReviewer({ sheetId, tabName, rowIndex, phone8 = '', 
     notified = !!note;
   } catch (e) { logger.warn(`[reviewer-cancel] 문의방 안내 실패(무시): ${(e && e.message) || e}`); }
 
-  logger.info(`[reviewer-cancel] tab=${tabName} row=${rowIndex} order=${gate.orderSubmissionId} reason=${reasonKey || '-'} log=${logged} cs=${notified}`);
+  /* ★ 결정 229: "품절이라 구매하지 못했어요" = 품절 신고 — 다른 리뷰어 2명이면 그 상품을 자동으로 멈추고 관리자 전원에게 알린다.
+       커밋 뒤 후처리(실패해도 취소는 유효) · 판정·쓰기는 campaignOptionPause 단일 출처. */
+  let soldout = null;
+  if (String(reasonKey || '') === 'soldout') {
+    try {
+      const r = await require('./campaignOptionPause.service').recordSoldoutReport({ orderSubmissionId: gate.orderSubmissionId, phone8, pool: db });
+      soldout = r && r.action ? r.action : null;
+    } catch (e) { logger.warn(`[reviewer-cancel] 품절 신고 처리 실패(무시): ${(e && e.message) || e}`); }
+  }
+
+  logger.info(`[reviewer-cancel] tab=${tabName} row=${rowIndex} order=${gate.orderSubmissionId} reason=${reasonKey || '-'} log=${logged} cs=${notified}${soldout ? ` soldout=${soldout}` : ''}`);
   return { ok: true, logged, notified, orderSubmissionId: gate.orderSubmissionId };
 }
 

@@ -2464,6 +2464,15 @@ function _buildOptRowEl(data) {
     '<input class="rform-input rf-opt-rt" type="number" min="0" placeholder="총">' +
     '<input class="rform-input rf-opt-dl" type="number" min="0" placeholder="일">' +
     '<span class="rf-opt-acts">' + lastBtn + '</span>';
+  /* ★ 결정 229: 품절로 잠시 멈춘 상품 — 여기서 저장해도 멈춤은 그대로다(멈춤은 상태와 따로 저장된다).
+       다시 여는 곳을 말해 준다(작업보드 작업 조건 카드 · 품절 알림). 표시만 — 저장 값 무접촉. */
+  if (status !== "closed" && (d.pausedAt || d.paused_at)) {
+    row.title = "품절로 잠시 멈춘 상품입니다 — 다시 열기는 작업보드 「작업 조건」 카드나 품절 알림에서 합니다(여기서 저장해도 멈춤은 그대로예요).";
+    const pb = document.createElement("span");
+    pb.textContent = "일시 멈춤";
+    pb.style.cssText = "font-size:.62rem;font-weight:800;color:#B42318;background:#FDE4E1;border-radius:6px;padding:1px 6px;white-space:nowrap;align-self:center";
+    row.querySelector(".rf-opt-acts").prepend(pb);
+  }
   const rt = d.recruitTotal ?? d.recruit_total, dl = d.dailyLimit ?? d.daily_limit, pay = d.payAmount ?? d.pay_amount;
   // 상품명은 옵션 테이블에 없던 값 — 넘겨받지 않았으면 바로 위 행에서 따라온다(반복 입력 제거)
   row.querySelector(".rf-opt-prod").value = d.productName ?? d.product_name ?? _lastOptProductName();
@@ -4908,7 +4917,7 @@ function _campOptionTable(options, rows, now, today, kstDay) {
     if (r.status === "submitted" && r.submitted_at && kstDay(Date.parse(r.submitted_at)) === today) agg[k].todaySub++;
   });
   const escT = s => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const stTxt = { open: ["진행중", "#065F46", "#D1FAE5"], soldout: ["마감", "#B91C1C", "#FEE2E2"], today_done: ["오늘마감", "#92400E", "#FEF3C7"], waiting: ["대기 · 앞 상품 마감 후", "#8A5A00", "#FFF1D6"], closed: ["마감", "#6B7280", "#F3F4F6"] };
+  const stTxt = { open: ["진행중", "#065F46", "#D1FAE5"], soldout: ["마감", "#B91C1C", "#FEE2E2"], today_done: ["오늘마감", "#92400E", "#FEF3C7"], waiting: ["대기 · 앞 상품 마감 후", "#8A5A00", "#FFF1D6"], closed: ["마감", "#6B7280", "#F3F4F6"], paused: ["일시 멈춤 · 품절", "#B42318", "#FDE4E1"] };   // ★ 결정 229
   const th = t => `<th style="text-align:${t.a || "left"};font-weight:800;color:#6B7280;padding:5px 8px;border-bottom:1px solid #E5E7EB;white-space:nowrap">${t.l}</th>`;
   const td = (v, a) => `<td style="text-align:${a || "left"};padding:5px 8px;border-bottom:1px solid #F3F4F6;white-space:nowrap">${v}</td>`;
   const body = options.map(o => {

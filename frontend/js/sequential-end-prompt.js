@@ -88,7 +88,8 @@
     var rows = list.map(function (it, i) {
       var sel = S.sel[it.campaignId] || '';
       if (sel) picked++;
-      var shorts = (it.shortages || []).map(function (x) { return '<span>' + esc(x.optKey) + ' ' + (x.n | 0) + '건</span>'; }).join('');
+      // ★ 결정 229: 품절로 멈춘 상품은 표시 — 추가 모집 전에 작업 조건 카드에서 다시 열어야 그날 받을 수 있다
+      var shorts = (it.shortages || []).map(function (x) { return '<span' + (x.paused ? ' title="품절로 멈춘 상품 — 추가 모집 전에 작업 조건 카드에서 다시 열어야 받을 수 있어요" style="background:#fde4e1;color:#b42318"' : '') + '>' + esc(x.optKey) + ' ' + (x.n | 0) + '건' + (x.paused ? ' · 품절 멈춤' : '') + '</span>'; }).join('');
       return '<div class="se-item' + (sel ? ' picked' : '') + '">' + thumbHtml(it) +
         '<div class="se-body"><div class="se-top"><b>' + esc(it.title) + '</b><span class="se-tag">' + (it.total | 0) + '건 모자람</span></div>' +
         '<div class="se-meta">정규 일정 ' + esc(fmtMD(it.end)) + ' 끝 · 상품별 모자란 건수</div>' +

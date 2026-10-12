@@ -2072,6 +2072,14 @@
   .tp3grid.c3.fold .wdcsmini-pane{height:auto;max-height:none;min-height:0}
   .tp3grid.c3.fold .wdcsmini-body{display:none}
   .cndchip{display:inline-block;background:var(--chip,#eef4ff);color:var(--p,#2456c9);border-radius:5px;padding:0 6px;font-size:10px;font-weight:700;vertical-align:1px}
+  .cndsales{display:grid;gap:4px}
+  .cndsalerow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
+  .cndsalenm{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cndsale{display:inline-block;border-radius:5px;padding:0 6px;font-size:10px;font-weight:700;vertical-align:1px}
+  .cndsale.on{background:#e7f6ee;color:#137a43}
+  .cndsale.off{background:#fde4e1;color:#b42318}
+  .cndsalebtn{font:inherit;font-size:11px;border-radius:6px;border:1px solid var(--line,#dfe3ea);background:#fff;color:inherit;padding:1px 7px;cursor:pointer}
+  .cndsalebtn.stop{border-color:#e8a29a;color:#b42318}
   .rv2 .rv2c{min-width:0;min-height:0;display:flex;flex-direction:column;
              border:1px solid var(--line);border-radius:9px;background:var(--card2);padding:8px}
   .rv2 .rv2b{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}
@@ -3044,6 +3052,7 @@ function _dropSession(msg){ sessionStorage.removeItem('admin_token'); try{ local
   if(typeof _wbOrderLiveStop==='function') _wbOrderLiveStop();
   window.__SHORTAGE_PENDING=null; if(window.ShortagePrompt) window.ShortagePrompt.stop();
   window.__SEQEND_PENDING=null; if(window.SequentialEndPrompt) window.SequentialEndPrompt.stop();
+  window.__OPTALERT_PENDING=null; if(window.OptionAlertPrompt) window.OptionAlertPrompt.stop();
   // ★ 401 → 재로그인도 계정이 바뀔 수 있는 경로다. logout 과 같은 계정 귀속 상태를 비운다
   //   (안 비우면 다음 계정이 이전 계정의 열린 줄을 보고, 그것이 그 계정 서버 행에 저장된다).
   Object.assign(STATE,{ role:'',name:'',brandId:null,advName:'',advWork:null,advQ:'',advF:'all',brandNew:null,brandEdit:null,cur:null,tabs:[],
@@ -3151,7 +3160,9 @@ async function boot(){
   if(_isInternalRole()){ const _sp={ api, name: STATE.name };
     if(window.ShortagePrompt) window.ShortagePrompt.start(_sp); else window.__SHORTAGE_PENDING=_sp;
     // ★ 결정 228: 순서대로 진행한 공고의 「정규 일정 끝」 팝업 — 같은 받는 사람·같은 시작 규율
-    if(window.SequentialEndPrompt) window.SequentialEndPrompt.start(_sp); else window.__SEQEND_PENDING=_sp; }
+    if(window.SequentialEndPrompt) window.SequentialEndPrompt.start(_sp); else window.__SEQEND_PENDING=_sp;
+    // ★ 결정 229: 상품 품절 알림 — 받는 사람 = 내부 직원 전원(사용자 확정 "리뷰어를 제외한 관리자들 전체")
+    if(window.OptionAlertPrompt) window.OptionAlertPrompt.start(_sp); else window.__OPTALERT_PENDING=_sp; }
   // 공유 링크 실패는 조용히 홈으로 떨어지지 않는다 — 왜 못 열었는지(폐기·담당 밖) 말한다.
   if(_SHARE_ERR){ const msg=_SHARE_ERR; _SHARE_ERR=''; setTimeout(()=>alert(msg),50); }
 }
@@ -3286,6 +3297,7 @@ function logout(){
   if(typeof _wbOrderLiveStop==='function') _wbOrderLiveStop();
   window.__SHORTAGE_PENDING=null; if(window.ShortagePrompt) window.ShortagePrompt.stop();
   window.__SEQEND_PENDING=null; if(window.SequentialEndPrompt) window.SequentialEndPrompt.stop();
+  window.__OPTALERT_PENDING=null; if(window.OptionAlertPrompt) window.OptionAlertPrompt.stop();
   _pmLoadGeneration+=1;
   _pmLoadInFlight=null;
   sessionStorage.removeItem('admin_token');
@@ -7523,7 +7535,36 @@ function _condCardHtml(wd,d,m){
     `${(()=>{const gate=_cndFixGate(cd,'displayName');return gate.can
       ? `<button type="button" class="cndprod" onclick="_cndFix('displayName')" title="${esc(gate.tip)}">${esc(prod)||'<span class="cnna">—</span>'}</button>`
       : `<div class="cndprod" title="${esc(prod)}">${esc(prod)||'<span class="cnna">—</span>'}</div>`;})()}`+
-    `<dl class="cndl">${rows}</dl>${woRows}</div>`;
+    `<dl class="cndl">${rows}${_cndSalesRow(cd)}</dl>${woRows}</div>`;
+}
+/* ★ 결정 229: 상품 품절 일시 멈춤 — 상품별 판매 상태 + [품절로 멈추기]/[다시 열기].
+   ★ 서버가 준 `optionSales` 를 그리기만 한다(판정 사본 0) · null/빈 목록(구버전 서버·공고 없음) = 줄을 그리지 않는다.
+   ★ 광고주에게는 서버 렌즈가 값을 보내지 않는다(여기서도 한 번 더 막는다).
+   ★ 멈춰도 이미 참여 중인 사람·작업표·하루 인원은 그대로다 — 새 신청만 막힌다. */
+function _cndSalesRow(cd){
+  const list=Array.isArray(cd&&cd.optionSales)?cd.optionSales:[];
+  if(!list.length||STATE.role==='advertiser'||!cd.campaignId) return '';
+  const items=list.map((o,i)=>{
+    const st=o.paused
+      ?`<span class="cndsale off" title="새 신청을 받지 않습니다${o.pausedBy?` — ${esc(o.pausedReason==='auto_soldout'?'품절 신고 2명으로 자동':o.pausedBy)}`:''}">${o.pausedReason==='auto_soldout'?'자동 멈춤':'멈춤'}</span>`
+      :`<span class="cndsale on">판매 중</span>`;
+    const rep=(!o.paused&&o.reports>0)?`<span class="cndchip" title="리뷰어가 품절이라 취소한 신고입니다 — 다른 리뷰어 2명이면 자동으로 멈춥니다.">신고 ${Number(o.reports)}</span>`:'';
+    const btn=STATE.canEdit?`<button type="button" class="cndsalebtn${o.paused?'':' stop'}" onclick="_cndSale(${i})">${o.paused?'다시 열기':'품절로 멈추기'}</button>`:'';
+    return `<div class="cndsalerow"><span class="cndsalenm" title="${esc(o.optKey)}">${esc(o.optKey)}</span>${st}${rep}${btn}</div>`;
+  }).join('');
+  return `<dt>상품 판매</dt><dd class="cndsales">${items}</dd>`;
+}
+async function _cndSale(i){
+  const cd=STATE.wd&&STATE.wd.condition; const o=cd&&Array.isArray(cd.optionSales)?cd.optionSales[i]:null;
+  if(!o||!cd.campaignId) return;
+  const pause=!o.paused;
+  if(!confirm(pause
+    ?`「${o.optKey}」 상품의 새 신청을 멈출까요?\n이미 참여 중인 사람은 그대로 진행합니다. 다시 열 때까지 리뷰어 화면에 「일시 멈춤」으로 보입니다.`
+    :`「${o.optKey}」 상품을 다시 열까요?\n새 신청을 다시 받고, 쌓인 품절 신고는 정리됩니다.`)) return;
+  let j=null;
+  try{ j=await api(`/api/trackb/campaigns/${encodeURIComponent(cd.campaignId)}/option-pause`,{method:'POST',body:JSON.stringify({optKey:o.optKey,paused:pause})}); }catch(_){ j=null; }
+  if(!j||!j.ok){ alert((j&&j.error)||'처리하지 못했습니다. 잠시 후 다시 시도해주세요.'); return; }
+  await reloadWorkdesk();
 }
 /* [미설정] 창구 — 항목마다 **이미 있는 창구**로 보낸다(새 저장 경로 0).
    quota  총건수·일건수 → [📅 모집인원 조절](정원 창구 · 차수·이월·날짜별 조절을 아는 유일한 곳)
@@ -17363,6 +17404,14 @@ function _wbOrderLiveSchedule(data, delay, backup){
   };
   _wbOrderLiveTimer=setTimeout(run,Math.max(0,Number(delay)||0));
 }
+/* ★ 결정 229: 품절 멈춤·다시 열기가 일어나면(팝업에서 · 다른 사람이) 보고 있는 작업보드가 그 공고일 때만 다시 그린다.
+   편집 중이면 건드리지 않는다(입력 보호 — 카드 줄은 다음 갱신 때 맞춰진다). */
+window.__onOptionPauseChanged=function(cid){
+  const cd=STATE.wd&&STATE.wd.condition;
+  if(!cid||!cd||String(cd.campaignId||'')!==String(cid)) return;
+  if(typeof _wbOrderEditing==='function'&&_wbOrderEditing()) return;
+  reloadWorkdesk();
+};
 function _wbOrderLiveStart(){
   _wbOrderLiveStop();
   if(!window.EventSource||!token()||!['master','admin','staff'].includes(STATE.role)) return;
@@ -17370,6 +17419,13 @@ function _wbOrderLiveStart(){
     _wbOrderLiveSource=new EventSource(API_BASE+'/api/trackb/events?token='+encodeURIComponent(token()));
     _wbOrderLiveSource.addEventListener('order_submit',ev=>{
       try{ const data=JSON.parse(ev.data||'{}'); _wbOrderLiveSchedule(data,1800,!!data.queued); }catch(_){ }
+    });
+    // ★ 결정 229: 상품 품절 알림 — 팝업을 다시 읽고, 보고 있는 작업보드의 공고면 작업조건 카드도 새로 그린다
+    _wbOrderLiveSource.addEventListener('option_alert',ev=>{
+      try{ const data=JSON.parse(ev.data||'{}');
+        if(window.OptionAlertPrompt) window.OptionAlertPrompt.refresh();
+        if(typeof window.__onOptionPauseChanged==='function') window.__onOptionPauseChanged(data.campaignId);
+      }catch(_){ }
     });
   }catch(_){ _wbOrderLiveSource=null; }
 }
@@ -19101,13 +19157,14 @@ window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';
      /api/reviewer/* 에 도달 자체가 불가능 → /api/trackb/settings/* 프록시). -->
 <script>window.ADMIN_SETTINGS_API = '/api/trackb/settings';</script>
 <script src="/js/admin-settings.js?v=20260819-reviewer-home-banner"></script>
-<script src="js/campaign-cards.js?v=20260916-direct-delivery"></script>
+<script src="js/campaign-cards.js?v=20261012-optpause"></script>
 <!-- 공고별 참여 리뷰어 관리(블랙리스트 건별, 091) — 공유 모달(admin.html 과 한 벌) -->
 <script src="js/campaign-reviewer-gate.js"></script>
 <!-- 날짜별 모집인원 조절 + 차수(095) — 카드 [📅 인원] 버튼이 여는 공유 모달(admin.html 과 한 벌) -->
 <script src="js/campaign-daily-plan.js?v=20261012-seqdays"></script>
 <script src="js/shortage-prompt.js?v=20261002"></script>
-<script src="js/sequential-end-prompt.js?v=20261012"></script>
+<script src="js/sequential-end-prompt.js?v=20261012-optpause"></script>
+<script src="js/option-alert-prompt.js?v=20261012"></script>
 <!-- 참여 후 작업내용 4카드 공용 렌더러 — 발행 모달 오른쪽 "리뷰어가 보는 실제 화면" 미리보기가
      이것으로 그려진다. 없으면 `_renderPreview` 가 조용히 그 카드를 건너뛰어(window.CampWorkDetail 체크)
      리뷰웹시스템[3버전]에서만 미리보기가 비어 보인다(실측). -->
@@ -19117,8 +19174,8 @@ window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';
      네임스페이스로 돌린다(인트라넷 SSO 토큰은 /api/manual-order/* 에 도달 자체가 불가능
      → /api/trackb/manual-order/* 프록시, 권한은 AE 또는 편집 허용 admin). -->
 <script>window.MANUAL_ORDER_API = '/api/trackb/manual-order';</script>
-<script src="js/manual-order.js?v=20260820-trackb-proxy"></script>
-<script src="js/index-recruit.js?v=20261012-seqdays"></script>
+<script src="js/manual-order.js?v=20261012-optpause"></script>
+<script src="js/index-recruit.js?v=20261012-optpause"></script>
 <script>
 /* index-recruit.js 가 admin.html 전역으로 기대하는 6개를 리뷰웹시스템[3버전] 것으로 잇는다.
    ★ 함수를 베끼지 않고 **이름만 연결**한다 — 로직은 여전히 한 벌이다. */

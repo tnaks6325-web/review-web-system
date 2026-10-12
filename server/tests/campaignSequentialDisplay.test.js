@@ -120,9 +120,9 @@ ok('저장: 미전달이면 기존 사진 유지(COALESCE)', /thumbnail_url=COAL
   && /\(typeof o\.thumbnailUrl === 'string'\) \? o\.thumbnailUrl : null/.test(routes));
 ok('목록·상세가 같은 표시 함수(_applySequentialDisplay)를 쓴다', (routes.match(/_applySequentialDisplay\(view, (optViews|opts)\);/g) || []).length === 2);
 ok('공개 선택지 뷰에 사진·지금 모집 표시', /thumbnailUrl: v\.thumbnailUrl \|\| '',\n\s*sequenceCurrent: v\.sequenceCurrent === true/.test(routes));
-ok('목록·상세 선택지 SELECT 에 thumbnail_url', /product_name, unit_kind, thumbnail_url\n\s*FROM campaign_options WHERE campaign_id = ANY\(\$1\)/.test(routes)
-  && /inflow_guide_images, thumbnail_url\n\s*FROM campaign_options WHERE campaign_id=\$1/.test(routes));
-ok('관리자 프리필에 thumbnailUrl', /thumbnail_url AS "thumbnailUrl"\n\s*FROM campaign_options WHERE campaign_id=\$1/.test(routes));
+ok('목록·상세 선택지 SELECT 에 thumbnail_url', /product_name, unit_kind, thumbnail_url(?:, paused_at)?\n\s*FROM campaign_options WHERE campaign_id = ANY\(\$1\)/.test(routes)
+  && /inflow_guide_images, thumbnail_url(?:, paused_at)?\n\s*FROM campaign_options WHERE campaign_id=\$1/.test(routes));
+ok('관리자 프리필에 thumbnailUrl', /thumbnail_url AS "thumbnailUrl"(?:, paused_at AS "pausedAt", paused_reason AS "pausedReason")?\n\s*FROM campaign_options WHERE campaign_id=\$1/.test(routes));
 ok('참여 후 화면: 순차진행(공고 기준)이면 내가 고른 상품 표시 — 고른 선택지가 닫혀도(Codex P2)', /joinedDisplay: joinedView/.test(routes) && /selectedOption && options\.some\(o => o && o\.sequential\)/.test(routes));
 ok('"지금 모집" 줄은 공고가 열려 있을 때만(Codex P2)', /if \(d\.nowRecruiting && view\.state === 'open'\) view\.nowRecruiting = d\.nowRecruiting/.test(routes));
 ok('저장 응답에 상품 사진 저장 가능 표시(배포 시차 판별 · Codex P2)', (routes.match(/optionThumbnails: true/g) || []).length === 2);

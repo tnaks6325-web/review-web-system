@@ -336,10 +336,16 @@ async function _applyOptionRenames(client, campaignId, options, keep) {
   for (let i = 0; i < plan.length; i++) {
     await client.query('UPDATE campaign_options SET opt_key=$3, updated_at=NOW() WHERE campaign_id=$1 AND opt_key=$2', [campaignId, plan[i].from, tmp(i)]);
     await client.query('UPDATE campaign_applications SET option_key=$3 WHERE campaign_id=$1 AND option_key=$2', [campaignId, plan[i].from, tmp(i)]);
+    // ★ 결정 229: 품절 신고·알림도 상품 이름을 따라간다(안 바꾸면 이름을 바꾼 뒤 신고가 처음부터 다시 세진다)
+    await client.query('UPDATE campaign_option_soldout_reports SET opt_key=$3 WHERE campaign_id=$1 AND opt_key=$2', [campaignId, plan[i].from, tmp(i)]);
+    await client.query('UPDATE campaign_option_alerts SET opt_key=$3 WHERE campaign_id=$1 AND opt_key=$2', [campaignId, plan[i].from, tmp(i)]);
   }
   for (let i = 0; i < plan.length; i++) {
     await client.query('UPDATE campaign_options SET opt_key=$3, updated_at=NOW() WHERE campaign_id=$1 AND opt_key=$2', [campaignId, tmp(i), plan[i].to]);
     await client.query('UPDATE campaign_applications SET option_key=$3 WHERE campaign_id=$1 AND option_key=$2', [campaignId, tmp(i), plan[i].to]);
+    // ★ 결정 229: 품절 신고·알림도 상품 이름을 따라간다(안 바꾸면 이름을 바꾼 뒤 신고가 처음부터 다시 세진다)
+    await client.query('UPDATE campaign_option_soldout_reports SET opt_key=$3 WHERE campaign_id=$1 AND opt_key=$2', [campaignId, tmp(i), plan[i].to]);
+    await client.query('UPDATE campaign_option_alerts SET opt_key=$3 WHERE campaign_id=$1 AND opt_key=$2', [campaignId, tmp(i), plan[i].to]);
   }
   if (plan.length) logger.info('[campaign/options] 선택지 이름 변경 ' + campaignId + ' ' + plan.map(r => r.from + ' → ' + r.to).join(', '));
   return plan;
@@ -353,6 +359,8 @@ async function _saveCampaignOptions(campaignId, options) {
     await client.query('BEGIN');
     const { rows: lock } = await client.query('SELECT id FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [campaignId]);
     if (!lock.length) { await client.query('ROLLBACK'); return; }
+    // ★ 결정 229(코드리뷰 P2): 지운·마감 상품에 남은 품절 신고·알림을 먼저 정리 — 이름 바꾸기가 "알림은 상품마다 하나"에 걸리지 않게
+    await require('../services/campaignOptionPause.service').closeStaleForCampaign(client, campaignId);
     await _applyOptionRenames(client, campaignId, options, keep);
     for (const o of options) {
       await client.query(
@@ -384,6 +392,8 @@ async function _saveCampaignOptions(campaignId, options) {
         await client.query('DELETE FROM campaign_options WHERE campaign_id=$1 AND opt_key=$2', [campaignId, e.opt_key]);
       }
     }
+    // ★ 결정 229: 이번 저장으로 지우거나 마감한 상품의 품절 신고·알림 정리(같은 이름으로 다시 열면 처음부터 센다)
+    await require('../services/campaignOptionPause.service').closeStaleForCampaign(client, campaignId);
     await client.query('COMMIT');
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
@@ -631,7 +641,7 @@ function _applyCurrentFee(view, schedules, now) {
 async function _loadOptionViews(db, campaignId, campState, now = new Date()) {
   const { rows } = await db.query(
     `SELECT opt_key, option_url, pay_amount, recruit_total, daily_limit, status,
-            product_name, unit_kind, inflow_guide_html, inflow_guide_images, thumbnail_url
+            product_name, unit_kind, inflow_guide_html, inflow_guide_images, thumbnail_url, paused_at
        FROM campaign_options WHERE campaign_id=$1 ORDER BY (status='closed'), sort_order, id`,
     [campaignId]);
   if (!rows.length) return [];
@@ -654,7 +664,7 @@ async function _loadOptionViews(db, campaignId, campState, now = new Date()) {
  */
 async function _optionChangeViews(db, campaignId, app, now = new Date()) {
   const { rows } = await db.query(
-    `SELECT opt_key, pay_amount, recruit_total, daily_limit, status, sort_order
+    `SELECT opt_key, pay_amount, recruit_total, daily_limit, status, sort_order, paused_at
        FROM campaign_options WHERE campaign_id=$1 ORDER BY (status='closed'), sort_order, id`, [campaignId]);
   const appliedToday = !!(app && app.applied_at && new Date(app.applied_at) >= kstDayStartUtc(now));
   const counts = withoutOwnHold(await fetchOptionCounts(db, campaignId, now), app && app.option_key, appliedToday);
@@ -674,7 +684,7 @@ function _publicOptionView(v) {
     unitKind: v.unitKind || 'option',
     remaining: v.remaining,           // null=무제한
     todayRemaining: v.todayRemaining, // null=옵션 일일제한 없음
-    status: v.status,                 // open|soldout|today_done|closed|waiting(순차진행 — 앞 선택지 마감 후 열림)
+    status: v.status,                 // open|soldout|today_done|closed|waiting(순차진행 — 앞 선택지 마감 후 열림)|paused(결정 229 품절 일시 멈춤)
     selectable: v.selectable,
     // ★ 결정 214: 선택지별 사진·지금 모집 중 표시(민감정보 아님 — 참여 전 카드가 쓴다)
     thumbnailUrl: v.thumbnailUrl || '',
@@ -728,7 +738,7 @@ async function _fetchOptionsForCampaigns(db, ids, now = new Date()) {
   const list = (ids || []).filter(Boolean);
   if (!list.length) return out;
   const { rows: optRows } = await db.query(
-    `SELECT campaign_id, opt_key, pay_amount, recruit_total, daily_limit, status, product_name, unit_kind, thumbnail_url
+    `SELECT campaign_id, opt_key, pay_amount, recruit_total, daily_limit, status, product_name, unit_kind, thumbnail_url, paused_at
        FROM campaign_options WHERE campaign_id = ANY($1) ORDER BY campaign_id, (status='closed'), sort_order, id`, [list]);
   if (!optRows.length) return out;
   // ★ 결정 210: 선택지 카운트는 단일 출처(fetchOptionCountsBatch — 공고 밖 주문 포함)로 센다.
@@ -750,7 +760,7 @@ async function _loadOptionsRaw(db, campaignId) {
             daily_limit AS "dailyLimit", sort_order AS "sortOrder", status,
             product_name AS "productName", unit_kind AS "unitKind",
             inflow_guide_html AS "inflowGuideHtml", inflow_guide_images AS "inflowGuideImages",
-            thumbnail_url AS "thumbnailUrl"
+            thumbnail_url AS "thumbnailUrl", paused_at AS "pausedAt", paused_reason AS "pausedReason"
        FROM campaign_options WHERE campaign_id=$1 ORDER BY (status='closed'), sort_order, id`,
     [campaignId]);
   // ★ 응답 직전 재정화(§03-E 이중 적용) — 저장 시 정화본이라도 옛 행·직접 DB 수정분을 신뢰하지 않는다.
@@ -1831,6 +1841,9 @@ router.post('/:id/change-option', applyLimiter, async (req, res, next) => {
       if (ov.status === 'waiting') {
         return res.status(409).json({ ok: false, reason: 'option_waiting', option: _publicOptionView(ov), error: _waitingMsg(ov) });
       }
+      if (ov.status === 'paused') {   // ★ 결정 229: 품절 일시 멈춤 — 마감과 다른 말(담당자가 다시 열 수 있다)
+        return res.status(409).json({ ok: false, reason: 'option_paused', option: _publicOptionView(ov), error: '지금은 품절로 잠시 멈춘 상품이에요. 다른 상품을 선택해주세요.' });
+      }
       const reason = ov.status === 'soldout' ? 'option_soldout' : (ov.status === 'today_done' ? 'option_today_done' : 'option_closed');
       return res.status(409).json({ ok: false, reason, option: _publicOptionView(ov), error: '선택한 옵션은 마감되었어요. 다른 옵션을 선택해주세요.' });
     }
@@ -1985,7 +1998,7 @@ async function _applyParticipation(req, res, next, campPre) {
     let chosenOpt = null;
     {
       const { rows: allOpts } = await client.query(
-        `SELECT opt_key, pay_amount, recruit_total, daily_limit, status
+        `SELECT opt_key, pay_amount, recruit_total, daily_limit, status, paused_at
            FROM campaign_options WHERE campaign_id = $1 ORDER BY (status='closed'), sort_order, id`, [id]);
       // ★★ 옵션 공고 판정은 **살아있는 옵션 기준**(`liveOptions` 단일 출처, 2026-08-07 우레온 건).
       //   종전엔 closed 포함 `allOpts.length` 로 판정해, 관리자가 잘못 생긴 옵션을 정리(마감)하면
@@ -2012,6 +2025,9 @@ async function _applyParticipation(req, res, next, campPre) {
           await client.query('ROLLBACK');
           if (ov.status === 'waiting') {
             return res.status(409).json({ ok: false, reason: 'option_waiting', option: _publicOptionView(ov), error: _waitingMsg(ov) });
+          }
+          if (ov.status === 'paused') {   // ★ 결정 229: 품절 일시 멈춤 — 마감과 다른 말(담당자가 다시 열 수 있다)
+            return res.status(409).json({ ok: false, reason: 'option_paused', option: _publicOptionView(ov), error: '지금은 품절로 잠시 멈춘 상품이에요. 다른 상품을 선택해주세요.' });
           }
           const reason = ov.status === 'soldout' ? 'option_soldout' : (ov.status === 'today_done' ? 'option_today_done' : 'option_closed');
           return res.status(409).json({ ok: false, reason, option: _publicOptionView(ov), error: '선택한 옵션은 마감되었어요. 다른 옵션을 선택해주세요.' });
@@ -4044,6 +4060,7 @@ router.post('/admin/:id/options/merge', authMiddleware, adminOrMasterMiddleware,
       }
     }
     if (confirm) {
+      await require('../services/campaignOptionPause.service').closeStaleForCampaign(client, id);   // ★ 결정 229: 합쳐 없앤 상품의 신고·알림 정리
       await client.query('COMMIT');
       _listCache = { at: 0, rows: null, countsMap: null, feeMap: null };
       logger.info('[campaign/options/merge] ' + id + ' ' + result.map(r => r.from + ' → ' + r.to).join(', ') + ' by ' + ((req.admin && req.admin.name) || '?'));
