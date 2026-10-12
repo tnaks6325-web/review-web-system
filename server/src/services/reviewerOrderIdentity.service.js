@@ -663,15 +663,16 @@ function resolvedValue(raw, stored, mode, verdict) {
 //   'full'   = 가림 없는 전체 번호가 본인 번호와 같음 → 이름은 "받는 사람 이름만 다름"으로 맞춘다.
 //   'masked' = 가린 번호의 보이는 자리가 본인 번호와 맞음 → 자동 승인하지 않고, 연락처를 내 번호로 채운 뒤
 //              [내 주문이 맞습니다]로 확인받는다(manualConfirm 이 그 번호가 정말 본인 번호인지 다시 본다).
-// ★ 레드팀 반영: 이름 한 글자 오인식 후보는 종전 보정 경로가 먼저다 · 가린 번호는 자리까지 맞아야 하고(isMaskedOwnerPhone)
-//   주소가 등록 주소와 확실히 다르면(mismatch) 증거가 부족해 종전 판정에 맡긴다.
+// ★ 레드팀 반영: 이름 한 글자 오인식 후보는 종전 보정 경로가 먼저다 · 가린 번호는 자리까지 맞아야 한다(isMaskedOwnerPhone).
+// ★ 사용자 확정 2026-10-12 (나): 가린 번호 + 배송지가 등록 주소와 확실히 달라도 확인 단계로 둔다(막지 않음) —
+//   문의 0건이 우선이다. 대신 delivery_address_changed 를 함께 남겨, 확인 때 수취인·연락처 가림을 실제 값으로 고치게 한다.
 function ownerPhoneRecipientKind(selectedScore, selected) {
   if (!selected || selected.type !== 'self' || selectedScore.parts.name.verdict !== 'mismatch') return '';
   const rawName = selectedScore.fields.recipient || selectedScore.fields.orderer;
   if (plainNameOcrCorrectionCandidate(rawName, selected.name) || maskedNameOcrNearMiss(rawName, selected.name)) return '';
   const raw = String(selectedScore.fields.phone || '').trim();
   if (isOwnerPhoneRecipient(selected.phone || selected.phone8, raw)) return 'full';
-  if (isMaskedOwnerPhone(selected.phone, raw) && selectedScore.parts.address.verdict !== 'mismatch') return 'masked';
+  if (isMaskedOwnerPhone(selected.phone, raw)) return 'masked';
   return '';
 }
 function rescoreIdentity(score) {
@@ -718,6 +719,9 @@ async function evaluateSelectedIdentity(extracted, selected, allIdentities, opti
     for (const code of ['selected_identity_conflict', 'selected_identity_partial_conflict', 'insufficient_independent_matches']) {
       const i = reasonCodes.indexOf(code);
       if (i >= 0) reasonCodes.splice(i, 1);
+    }
+    if (selectedScore.parts.address.verdict === 'mismatch' && !reasonCodes.includes('delivery_address_changed')) {
+      reasonCodes.push('delivery_address_changed');
     }
     reasonCodes.push('owner_phone_recipient_masked');
   }

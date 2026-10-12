@@ -145,10 +145,19 @@ const other = {
     // 보이는 자리가 다르면 예외 아님
     const other = await evaluateSelectedIdentity({ recipient:'이영희', phone:'010-****-9999', address:'' }, me, [me], opt);
     assert.ok(!other.reasonCodes.includes('owner_phone_recipient_masked'));
-    // 가린 번호 + 등록 주소와 확실히 다른 주소 = 증거 부족 → 종전 판정
+    // 가린 번호 + 등록 주소와 확실히 다른 주소 = 막지 않고 확인 단계(사용자 확정 2026-10-12 (나)) · 다른 배송지 사유도 남긴다
     const far = await evaluateSelectedIdentity({ recipient:'이영희', phone:'010-****-2222', address:'부산 해운대구 센텀로 5 1203호' }, me, [me], opt);
-    assert.ok(!far.reasonCodes.includes('owner_phone_recipient_masked'));
-    assert.strictEqual(far.status, 'MISMATCH', JSON.stringify(far));
+    assert.strictEqual(far.status, 'REVIEW', JSON.stringify(far));
+    assert.ok(far.reasonCodes.includes('owner_phone_recipient_masked'));
+    assert.ok(far.reasonCodes.includes('delivery_address_changed'));
+    assert.ok(!far.reasonCodes.includes('selected_identity_conflict'));
+    assert.strictEqual(far.resolved.phone, me.phone);
+    // 같은 단지 다른 동·호수(가림 주소)도 같은 취급
+    const unit = await evaluateSelectedIdentity({ recipient:'이영희', phone:'010-****-2222', address:'서울 강남구 테헤란로 10 103동 ***호' }, me, [me], opt);
+    assert.notStrictEqual(unit.status, 'MISMATCH', JSON.stringify(unit));
+    // 캡처 증거 없이(입력칸 재검사 기본값)는 여전히 켜지지 않는다
+    const noRule = await evaluateSelectedIdentity({ recipient:'이영희', phone:'010-****-2222', address:'부산 해운대구 센텀로 5 1203호' }, me, [me], { useGemini:false });
+    assert.strictEqual(noRule.status, 'MISMATCH', JSON.stringify(noRule));
     // 가린 번호 + 다른 저장 명의와 맞음 = 종전대로 차단
     const sub = { identityKey:'sub:x', type:'sub', name:'박지민', phone:'010-3333-4444', address:'부산 해운대구 센텀로 5 1203호' };
     const comp = await evaluateSelectedIdentity({ recipient:'박지민', phone:'010-****-2222', address:'' }, me, [me, sub], opt);

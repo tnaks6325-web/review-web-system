@@ -459,6 +459,20 @@ async function test(name, fn) { await fn(); passed++; console.log('  ✓ ' + nam
       const filled = { recipient:'다른이름', phone:reviewed.resolved.phone, address:'서울 본인주소' };
       const manual = await identity.manualConfirm({ ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken, formFields:filled }, reviewer);
       await identity.verifyApprovalForSubmission({ ...base, ...filled, identityApprovalToken:manual.approvalToken }, reviewer);
+      // 사용자 확정 2026-10-12 (나) — 가린 번호 + 등록 주소와 다른 배송지도 막지 않는다: 내 번호 + 받는 사람 실제 이름으로 확인 한 번
+      const away = { recipient:'다*이름', phone:'010-****-1010', address:'부산 해운대구 센텀로 5 1203호' };
+      proof = identity.issueExtractionProof({ imageHash:'2'.repeat(64), extracted:away, ok:true });
+      const awayReviewed = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted:away }, reviewer);
+      assert.strictEqual(awayReviewed.status, 'REVIEW', JSON.stringify(awayReviewed));
+      assert.ok(awayReviewed.reasonCodes.includes('owner_phone_recipient_masked'));
+      assert.strictEqual(awayReviewed.approvalToken, '');
+      // 받는 사람 이름 가림(*)이 남아 있으면 다른 배송지 규칙대로 실제 이름을 요구한다(화면도 가림 칸을 먼저 고치게 한다)
+      await assert.rejects(identity.manualConfirm({ ...base, mode:'review', manualConfirmed:true, reviewToken:awayReviewed.reviewToken,
+        formFields:{ recipient:'다*이름', phone:'010-1010-1010', address:away.address } }, reviewer),
+        (err) => err.code === 'IDENTITY_FIELDS_REQUIRED');
+      const awayFilled = { recipient:'다른이름', phone:awayReviewed.resolved.phone, address:away.address };
+      const awayManual = await identity.manualConfirm({ ...base, mode:'review', manualConfirmed:true, reviewToken:awayReviewed.reviewToken, formFields:awayFilled }, reviewer);
+      await identity.verifyApprovalForSubmission({ ...base, ...awayFilled, identityApprovalToken:awayManual.approvalToken }, reviewer);
       // 레드팀 P0 — 캡처 증거가 없는 경로(사진 없음)에서는 본인 번호 예외가 켜지지 않는다(종전 판정 그대로)
       const audN = audits.length;
       await identity.manualConfirm({ ...base, mode:'no_capture', manualConfirmed:true,
