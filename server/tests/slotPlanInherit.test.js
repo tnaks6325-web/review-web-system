@@ -187,7 +187,7 @@ const insertOf = log => log.find(l => l.sql.startsWith('INSERT INTO campaign_par
   {
     const c = stubClient({ cands: [row('b36', 36, ''), row('b37', 37, '')], overlays: [{ anchor_value: 'b36', value_text: '2. 참옥돔' }] });
     const r = await pick(c, '3. 고등어살');
-    ok('★ 고등어 주문은 손 글씨 「옥돔」 줄을 피해 진짜 빈 줄로', r.rows[0] && r.rows[0].id === 'b37' && r.rowOverlay === '');
+    ok('★ 고등어 주문은 손 글씨 「옥돔」 줄을 피해 진짜 빈 줄로', r.rows[0] && r.rows[0].id === 'b37' && r.rowOverlay === null);
   }
   {
     // 고등어 줄은 동났고(리뷰옵션 포토), 남은 것은 오늘 날짜 손 글씨 「옥돔」 줄과 내일 날짜 계획 없는 빈 줄 — 둘 다 리뷰옵션 없음
@@ -208,6 +208,18 @@ const insertOf = log => log.find(l => l.sql.startsWith('INSERT INTO campaign_par
     };
     const r = await pick(c, '3. 고등어살');
     ok('★ 리뷰옵션이 달라도 계획 없는 빈 줄을 다른 상품 자리(손 글씨)보다 먼저 — 날짜가 늦어도', r.rows[0] && r.rows[0].id === 'b3' && r.productKey === '3. 고등어살');
+  }
+  {
+    // Codex P2: 담당자가 미리 적힌 상품을 **일부러 지운** 줄(빈 편집) — 지워진 상품으로 보면 안 된다
+    const cands = [row('e1', 11, '1. 은갈치'), { id: 'x', seq: 3, option_text: '', row_json: { 구매일자: '', 상품: '2. 참옥돔', 리뷰옵션: '' } },
+      { id: 'y', seq: 9, option_text: '', row_json: { 구매일자: '', 상품: '2. 참옥돔', 리뷰옵션: '' } }];
+    const c = stubClient({ cands, overlays: [{ anchor_value: 'x', value_text: '' }] });
+    const q0 = c.query.bind(c);
+    c.query = async (sql, params) => (/SELECT DISTINCT btrim\(option_text\) AS l/.test(String(sql)) ? { rows: [{ l: '1. 은갈치' }, { l: '3. 고등어살' }] } : q0(sql, params));
+    const r = await pick(c, '2. 참옥돔');
+    ok('★ 담당자가 비워 둔 줄은 지워진 상품으로 보지 않는다(줄 칸의 옛 상품 무시)', r.rows[0] && r.rows[0].id === 'y');
+    const r2 = await pick(stubClient({ cands: [{ id: 'x', seq: 3, option_text: '', row_json: { 구매일자: '', 상품: '' } }], overlays: [{ anchor_value: 'x', value_text: '' }] }), '2. 참옥돔');
+    ok('비워 둔 줄에 들어가면 그 사실(빈 값)을 쓰기 단계에 넘긴다(null 아님)', r2.rowOverlay === '');
   }
   {
     const c = stubClient({ cands: [row('b36', 36, '')], overlays: [{ anchor_value: 'b36', value_text: '2. 참옥돔' }] });
@@ -237,11 +249,12 @@ const insertOf = log => log.find(l => l.sql.startsWith('INSERT INTO campaign_par
 
   console.log('[4] 손 글씨 내림 배선');
   const sl = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'sheetlessOrder.service.js'), 'utf8');
-  const blk = sl.slice(sl.indexOf('결정 227 — 처음 채운 빈 줄에'), sl.indexOf('결정 227 — 처음 채운 빈 줄에') + 2200);
-  ok('★ 상품 단위로 짝지어 처음 채운 줄만', /if \(productOverwrite && claimedRowOverlay && cur\[0\] && cur\[0\]\.id\)/.test(blk));
+  const blk = sl.slice(sl.indexOf('결정 227 — 처음 채운 빈 줄에'), sl.indexOf('결정 227 — 처음 채운 빈 줄에') + 3600);
+  ok('★ 상품 단위로 짝지어 처음 채운 줄만 · 손 글씨가 있을 때만(빈 값 포함)', /if \(productOverwrite && claimedRowOverlay !== null && cur\[0\] && cur\[0\]\.id\)/.test(blk));
   ok('★ 지우지 않고 취소 표시만(기록 보존)', /UPDATE participant_edits SET reverted_at = NOW\(\), reverted_by = 'system:order-fill'/.test(blk) && !/DELETE FROM participant_edits/.test(blk));
-  ok('그 줄의 물리행 앵커 상품 칸만', /anchor_type = 'manual' AND anchor_value = \$3[\s\S]{0,80}field = \$4/.test(blk) && /'col:' \+ PRODUCT_HEADER/.test(blk));
-  ok('같은 상품(표기만 다름)이면 그대로 둔다', /sameProduct/.test(blk) && /if \(!sameProduct\)/.test(blk));
+  ok('★ 줄을 잠근 뒤 다시 읽고, 지금 보이는 값이 산 상품과 다를 때만(Codex P2)', /SELECT id::text AS id, value_text FROM participant_edits/.test(blk) && /if \(act\.length && !sameAsBought\(act\[0\]\.value_text\)\)/.test(blk));
+  ok('★ 다시 읽은 편집만 내린다(id 고정 — 그사이 새로 고친 값은 무접촉)', /WHERE id::text = ANY\(\$1::text\[\]\) AND reverted_at IS NULL/.test(blk) && !/AND field = \$4 AND reverted_at IS NULL`,\s*\[sheetId, tabName, String\(cur\[0\]\.id\), 'col:' \+ PRODUCT_HEADER\]\);\s*await client\.query\('RELEASE/.test(blk));
+  ok('비워 둔 손 글씨(빈 값)도 산 상품과 다른 것으로 본다', /const sameAsBought = v => !!String\(v \|\| ''\)\.trim\(\) &&/.test(blk));
   ok('SAVEPOINT 격리(주문 기록을 실패시키지 않는다)', /SAVEPOINT slot_overlay_retire/.test(blk) && /ROLLBACK TO SAVEPOINT slot_overlay_retire/.test(blk));
 
   console.log('[5] 총원 ↔ 상품별 남은 자리');
