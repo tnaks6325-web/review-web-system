@@ -119,11 +119,21 @@ async function syncApplicationFromWorkboard({ sheetId, tabName, rowId, field, by
         WHERE id = $1 AND sheet_id = $2 AND tab_name = $3 AND deleted_at IS NULL`, [rowId, sheetId, tabName]);
     const row = pr[0];
     if (!row || !row.order_submission_id) return { synced: false, reason: 'no_order' };
+    // 어느 공고인지만 먼저(잠금 없이) — 잠글 행을 알아야 한다.
+    const { rows: ap0 } = await client.query(
+      `SELECT DISTINCT campaign_id FROM campaign_applications
+        WHERE order_submission_id = $1 AND status = 'submitted' AND option_key IS NOT NULL`, [row.order_submission_id]);
+    if (ap0.length !== 1) return { synced: false, reason: ap0.length ? 'ambiguous_application' : 'no_application' };
+    // ★ 잠금 순서 = 다른 옵션 쓰기와 같다(공고 행 → 신청 행). 참여 기록·지금 보이는 값은 **잠근 뒤에** 읽는다 —
+    //   두 담당자가 같은 칸을 거의 동시에 고치면 뒤에 들어온 맞추기가 앞의 것을 기다렸다가 **마지막 편집**을 읽는다(Codex P2).
+    await client.query('BEGIN');
+    await client.query('SELECT id FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [ap0[0].campaign_id]);
+    const done = async (out) => { await client.query('COMMIT'); return out; };
     const { rows: ap } = await client.query(
       `SELECT id, campaign_id, option_key FROM campaign_applications
         WHERE order_submission_id = $1 AND status = 'submitted' AND option_key IS NOT NULL
-        ORDER BY id DESC LIMIT 2`, [row.order_submission_id]);
-    if (ap.length !== 1) return { synced: false, reason: ap.length ? 'ambiguous_application' : 'no_application' };
+        ORDER BY id DESC LIMIT 2 FOR UPDATE`, [row.order_submission_id]);
+    if (ap.length !== 1) return done({ synced: false, reason: ap.length ? 'ambiguous_application' : 'no_application' });
     const app = ap[0];
     // 지금 보이는 값 — 읽는 쪽(workdeskTab)과 같은 순서: 주문 앵커 편집 위에 물리행 앵커 편집을 밑에 깐다.
     const { rows: ed } = await client.query(
@@ -135,13 +145,10 @@ async function syncApplicationFromWorkboard({ sheetId, tabName, rowId, field, by
     const rj = row.row_json && typeof row.row_json === 'object' ? row.row_json : {};
     const shown = ed.length ? ed[0].value_text : rj[header];
     const opts = await _loadOptions(client, app.campaign_id);
-    if (opts.length < 2) return { synced: false, reason: 'single_option' };
+    if (opts.length < 2) return done({ synced: false, reason: 'single_option' });
     const target = matchOption(shown, opts);
-    if (!target) return { synced: false, reason: 'unmatched', mentioned: [...mentionedOptions(shown, opts)].length };
-    if (target === app.option_key) return { synced: false, reason: 'same' };
-    // 잠금 순서 = 다른 옵션 쓰기와 같다(공고 행 → 신청 행). 조건부 UPDATE — 그 사이 누가 바꿨으면 0행(덮지 않는다).
-    await client.query('BEGIN');
-    await client.query('SELECT id FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [app.campaign_id]);
+    if (!target) return done({ synced: false, reason: 'unmatched', mentioned: [...mentionedOptions(shown, opts)].length });
+    if (target === app.option_key) return done({ synced: false, reason: 'same' });
     const upd = await client.query(
       `UPDATE campaign_applications SET option_key = $3
         WHERE id = $1 AND option_key = $2 AND status = 'submitted' RETURNING id`, [app.id, app.option_key, target]);

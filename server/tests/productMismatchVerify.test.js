@@ -163,6 +163,9 @@ t('4a 「상품」 칸을 킹으로 고치면 참여 기록이 퀸더블 → 킹
   const iLock = log.findIndex(x => /FROM recruit_campaigns WHERE id = \$1 FOR UPDATE/.test(x.sql));
   const iUpd = log.findIndex(x => /^UPDATE campaign_applications SET option_key = \$3/.test(x.sql));
   assert.ok(iLock >= 0 && iUpd > iLock, '잠금 순서: 공고 행 → 신청 행');
+  const iEdit = log.findIndex(x => /FROM participant_edits/.test(x.sql));
+  const iApp = log.findIndex((x, k) => k > iLock && /FROM campaign_applications[\s\S]*FOR UPDATE/.test(x.sql));
+  assert.ok(iEdit > iLock && iApp > iLock, '★ 지금 보이는 값·참여 기록은 잠근 뒤에 읽는다(동시 편집 시 마지막 편집을 따른다 — Codex P2)');
   assert.deepStrictEqual(log[iUpd].params, [10, MAT[2].optKey, MAT[3].optKey]);
   assert.ok(/AND option_key = \$2 AND status = 'submitted'/.test(log[iUpd].sql), '그 사이 바뀌었으면 덮지 않는다');
 });
