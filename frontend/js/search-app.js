@@ -7756,7 +7756,7 @@ function _renderInlineSubList(subs) {
    ★ 참여형 공고 화면(embed)·배치·네이버+쿠팡 모드는 대상 아님 — 상품은 홀드가 정한다.
    ★ onclick 에 상품명을 넣지 않는다 — 인덱스만(위임 리스너).
    ══════════════════════════════════════════════════════ */
-const _OFP = { products: [], pick: {}, ai: {}, aiDone: {}, capName: {}, open: {}, bound: false };
+const _OFP = { products: [], pick: {}, ai: {}, aiDone: {}, capName: {}, capOpt: {}, open: {}, bound: false };
 
 function _ofpActive() {
   return _OFP.products.length >= 2 && !_EMBED_CTX && !_BATCH && !window._ncMode && !_PREVIEW_MODE;
@@ -7777,8 +7777,9 @@ async function _ofpLoad(sheetId, tabName) {
   _orderCardIds.forEach(_ofpRender);
 }
 
-function _ofpOnExtracted(cid, label, rawName) {
+function _ofpOnExtracted(cid, label, rawName, rawOption) {
   _OFP.capName[cid] = rawName || "";
+  _OFP.capOpt[cid] = rawOption || "";   // ★ 결정 230: 캡처의 옵션 글자(사이즈·색상) — 참여 공고 제출 때 서버가 고른 상품과 대조
   _OFP.aiDone[cid] = true;
   const ok = label && _OFP.products.indexOf(label) >= 0 ? label : "";
   _OFP.ai[cid] = ok;
@@ -7789,8 +7790,102 @@ function _ofpOnExtracted(cid, label, rawName) {
 
 function _ofpOnCaptureCleared(cid) {
   if (_OFP.pick[cid] && _OFP.pick[cid] === _OFP.ai[cid]) delete _OFP.pick[cid];
-  delete _OFP.ai[cid]; delete _OFP.aiDone[cid]; delete _OFP.capName[cid]; delete _OFP.open[cid];
+  delete _OFP.ai[cid]; delete _OFP.aiDone[cid]; delete _OFP.capName[cid]; delete _OFP.capOpt[cid]; delete _OFP.open[cid];
   _ofpRender(cid);
+}
+
+/* ★ 결정 230 — 「잘못 구매한 것 같아요」 확인 창(사용자 확정 2026-10-12: 고른 상품과 다른 상품을 샀으면 제출 불가).
+   서버가 PRODUCT_MISMATCH(캡처 속 상품 ≠ 참여할 때 고른 상품)를 돌려주면 띄운다. 리뷰어가 고른 키를 돌려주고, 닫으면 null.
+   · 「고른 상품을 샀어요」 → 그 키로 다시 제출(서버가 접수하고 담당자 확인용 기록을 남긴다)
+   · 「캡처대로 다른 상품을 샀어요」 → 창 안에서 바로 "잘못 구매 · 제출할 수 없어요" 경고를 보이고, 그 키로 다시 보내
+     **서버가 막는다**(PRODUCT_WRONG_PURCHASE — 화면을 믿지 않는다 · 담당자 확인용 기록).
+   ★ 선택지는 서버가 준 두 개뿐 — 화면이 다른 값을 지어내지 않는다.
+   ★ 참여 공고 화면 안(iframe — 내용 높이만큼 길어진다)에서는 화면 고정 창이 틀 한가운데(화면 밖)에 그려진다 →
+     지금 보이는 자리에 놓는다(_pmvPlace · 코드리뷰). */
+function _pmvPlace(ov) {
+  try {
+    if (window.self === window.top) return;
+    const box = ov.querySelector(".pmv-box");
+    const docH = Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0);
+    ov.classList.add("pmv-in-frame");
+    ov.style.height = docH + "px";
+    let visTop = window.scrollY || 0, visH = window.innerHeight;
+    let placed = false;
+    try {
+      const fe = window.frameElement;            // 같은 출처(참여 공고 화면)일 때만 읽힌다
+      if (fe) {
+        const r = fe.getBoundingClientRect(), ph = window.parent.innerHeight;
+        visTop = Math.max(0, -r.top);
+        visH = Math.max(120, Math.min(r.bottom, ph) - Math.max(r.top, 0));
+        placed = true;
+      }
+    } catch (_) { placed = false; }
+    const bh = box.offsetHeight || 0;
+    // 폰(≤640px)은 바텀시트 — 지금 보이는 자리의 **아래 끝**에 붙인다 / 넓은 화면은 보이는 자리 가운데.
+    const sheet = window.innerWidth <= 640;
+    const want = sheet ? (visTop + visH - bh) : (visTop + (visH - bh) / 2);
+    box.style.marginTop = Math.max(sheet ? 0 : 8, Math.min(docH - bh, want)) + "px";
+    if (!placed) box.scrollIntoView({ block: "center" });   // 틀 밖을 못 읽으면 창 쪽으로 화면을 옮긴다
+  } catch (_) { /* 위치를 못 정해도 창은 뜬다 */ }
+}
+
+function _pmvAsk(res, orderNo) {
+  return new Promise((resolve) => {
+    const cap = (res && res.captured) || {}, cho = (res && res.chosen) || {};
+    if (!cap.key || !cho.key) { resolve(null); return; }
+    const esc = (v) => (typeof escHtml === "function" ? escHtml(String(v || "")) : String(v || "").replace(/[&<>"']/g, ""));
+    const choL = cho.label || cho.key, capL = cap.label || cap.key;
+    const ov = document.createElement("div");
+    ov.className = "modal-overlay pmv-overlay";
+    ov.setAttribute("role", "dialog"); ov.setAttribute("aria-modal", "true"); ov.setAttribute("aria-labelledby", "pmvTitle");
+    const opts = [{ key: cho.key, label: choL, tag: "참여할 때 고른 상품", wrong: false },
+                  { key: cap.key, label: capL, tag: res.basis === "price" ? "결제금액이 같은 상품" : "캡처에 보이는 상품", wrong: true }];
+    ov.innerHTML =
+      '<div class="modal-box pmv-box"><div class="modal-header pmv-head"><h3 id="pmvTitle">' + (orderNo ? orderNo + "번째 주문 · " : "") + '잘못 구매한 것 같아요</h3></div>'
+      + '<div class="modal-body">'
+      + (res.basis === "price"
+          ? '<p class="pmv-lead">캡처의 결제금액 <b class="pmv-cap">' + esc(Number(res.paid || 0).toLocaleString("ko-KR")) + '원</b>이 참여할 때 고른 <b>' + esc(choL) + '</b>가 아니라 <b class="pmv-cap">' + esc(capL) + '</b> 가격과 같아요.</p>'
+          : '<p class="pmv-lead">참여할 때 고른 상품은 <b>' + esc(choL) + '</b>인데, 올린 주문 캡처에는 <b class="pmv-cap">' + esc(capL) + '</b>(으)로 보여요.</p>')
+      + '<p class="pmv-q">실제로 산 상품을 골라 주세요.</p>'
+      + '<div class="ofp-list pmv-list" role="radiogroup" aria-labelledby="pmvTitle">'
+      + opts.map((o, k) => '<button type="button" class="ofp-opt' + (o.wrong ? ' pmv-wrong-opt' : '') + '" role="radio" aria-checked="false" data-pmv="' + k + '">'
+          + '<span class="ofp-radio"></span><span class="ofp-nm">' + esc(o.label) + '</span><span class="ofp-match">' + o.tag + '</span></button>').join("")
+      + '</div>'
+      + '<div class="pmv-warn" role="alert" hidden><b>잘못 구매한 주문이에요.</b> 참여할 때 고른 상품과 다른 상품을 사서 이 주문은 제출할 수 없어요. 담당자에게 문의해 주세요.</div>'
+      + '<p class="pmv-note">캡처를 잘못 읽은 것이라면 참여할 때 고른 상품을 골라 주세요.</p>'
+      + '<div class="modal-actions"><button type="button" class="btn-ghost" data-pmv-cancel>취소</button>'
+      + '<button type="button" class="btn-primary" data-pmv-ok disabled>제출</button></div>'
+      + '</div></div>';
+    let sel = -1, done = false;
+    const okBtn = ov.querySelector("[data-pmv-ok]"), warn = ov.querySelector(".pmv-warn"), note = ov.querySelector(".pmv-note");
+    const finish = (v) => { if (done) return; done = true; try { ov.remove(); } catch (_) {} document.removeEventListener("keydown", onKey); resolve(v); };
+    const onKey = (e) => { if (e.key === "Escape") finish(null); };
+    ov.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-pmv]");
+      if (b) {
+        sel = Number(b.getAttribute("data-pmv"));
+        ov.querySelectorAll("[data-pmv]").forEach(x => x.setAttribute("aria-checked", x === b ? "true" : "false"));
+        const wrong = opts[sel].wrong;
+        warn.hidden = !wrong; note.hidden = wrong;
+        okBtn.disabled = false;
+        okBtn.textContent = wrong ? "확인 (제출 안 됨)" : "제출";
+        okBtn.classList.toggle("pmv-btn-stop", wrong);
+        // 페이지 공통 버튼 규칙(!important)이 이기지 않게 색은 그 자리에서 직접 준다
+        if (wrong) okBtn.style.setProperty("background", "#d92d20", "important"); else okBtn.style.removeProperty("background");
+        ov.querySelectorAll("[data-pmv] .ofp-radio").forEach((r, k) => {
+          if (k === sel && wrong) { r.style.setProperty("background", "#d92d20", "important"); r.style.setProperty("border-color", "#d92d20", "important"); }
+          else { r.style.removeProperty("background"); r.style.removeProperty("border-color"); }
+        });
+        return;
+      }
+      if (e.target.closest("[data-pmv-cancel]") || e.target === ov) { finish(null); return; }
+      if (e.target.closest("[data-pmv-ok]") && sel >= 0) finish(opts[sel].key);
+    });
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(ov);
+    _pmvPlace(ov);
+    const first = ov.querySelector("[data-pmv]"); if (first) first.focus({ preventScroll: true });
+  });
 }
 
 function _ofpRender(cid) {
@@ -8141,7 +8236,7 @@ async function _callCardExtractAi(cid, base64, mimeType) {
     st.extractToken = json.extractToken || "";
     st.imageHash = json.imageHash || "";
     st.extracted = { orderNumber: json.orderNumber||"", recipient: json.recipient||"", phone: json.phone||"", address: json.address||"", price: json.price||"", orderer:json.orderer||"", store:json.store||"" };
-    _ofpOnExtracted(cid, json.productLabel || "", json.productName || "");
+    _ofpOnExtracted(cid, json.productLabel || "", json.productName || "", typeof json.productOption === "string" ? json.productOption : "");
     // extractToken은 AI 원본 추출값의 해시에 결속된다. 서버가 가림정보를 보완한
     // st.extracted와 섞지 않고 재확인 때 동일 증명을 검증할 수 있도록 원본을 보존한다.
     st.proofExtracted = { ...st.extracted };
@@ -9282,6 +9377,10 @@ async function submitOrderForm() {
       // ★ 2026-10-02 B안: 고른 상품 + 캡처에서 읽은 상품명(서버가 짝지어 다르면 로그에 남긴다)
       selectedProduct:    _ofpActive() ? (_OFP.pick[cid] || "") : "",
       productCaptureName: _ofpActive() ? (_OFP.capName[cid] || "") : "",
+      // ★ 결정 230: 캡처 판독값 원본 — 참여 공고(홀드) 제출일 때만 아래 payload 가 싣는다
+      productCaptureRaw:    _OFP.capName[cid] || "",
+      productCaptureOptRaw: _OFP.capOpt[cid] || "",
+      productCapturePriceRaw: (_cardAiState[cid] && _cardAiState[cid].extracted && _cardAiState[cid].extracted.price) || "",
       identityConfirmed:  false
       ,saveShoppingId: !!document.getElementById(cid+"_saveIdChk")?.checked
     };
@@ -9400,7 +9499,11 @@ async function submitOrderForm() {
       extractedPhone:     o.extractedPhone     || "",
       extractedAddress:   o.extractedAddress   || "",
       selectedProduct:    o.selectedProduct    || "",
-      productCaptureName: o.productCaptureName || "",
+      // ★ 결정 230: 참여 공고(홀드) 제출이면 캡처에서 읽은 상품명·옵션을 함께 보낸다 — 서버가 고른 상품과 다르면
+      //   PRODUCT_MISMATCH 로 되묻는다(아래). 홀드가 없는 구매양식은 종전 값(B안) 그대로.
+      productCaptureName: o.productCaptureName || ((bh || (_EMBED_CTX && _EMBED_CTX.app)) ? (o.productCaptureRaw || "") : ""),
+      productCaptureOption: (bh || (_EMBED_CTX && _EMBED_CTX.app)) ? (o.productCaptureOptRaw || "") : "",
+      productCapturePrice:  (bh || (_EMBED_CTX && _EMBED_CTX.app)) ? (o.productCapturePriceRaw || "") : "",
       identityConfirmed:  o.identityConfirmed ? "true" : "false",
       identityApprovalToken: o.identityApprovalToken || "",
       // ★ 참여형 캠페인 홀드 확정 문맥(M2) — embed 진입일 때만 전송. 서버가 소유권 3중검증 후 확정
@@ -9428,6 +9531,27 @@ async function submitOrderForm() {
         } catch(e2) { throw new Error("서버 연결 실패"); }
       }
       if (!res) throw new Error("서버 응답이 없습니다.");
+
+      // ★ 결정 230: 캡처 속 상품이 고른 상품과 다르다 — 실제로 산 상품을 고르게 하고 그 값으로 다시 제출한다.
+      //   (그 상품 자리가 없으면 서버가 PRODUCT_UNAVAILABLE 로 막고, 아래 공통 실패 처리가 그 문구를 보여준다)
+      if (!res.ok && res.code === "PRODUCT_MISMATCH") {
+        const picked = await _pmvAsk(res, orders.length > 1 ? (i + 1) : 0);
+        if (!picked) {
+          showToast((orders.length > 1 ? `${i+1}번째 주문은 ` : "") + "제출하지 않았어요. 산 상품을 확인한 뒤 다시 제출해 주세요.", "warning");
+          results.push({ phone8: bh ? bh.phone8 : "", name: bh ? bh.name : "", ok: false, error: "산 상품 확인이 필요해 제출하지 않았어요" });
+          continue;
+        }
+        payload.confirmedProductKey = picked;
+        try { res = await gasPost(payload, 30000); } catch(_) { throw new Error("서버 연결 실패 (상품 확인 후 제출)"); }
+        if (!res) throw new Error("서버 응답이 없습니다.");
+      }
+      // ★ 결정 230: 잘못 구매(고른 상품과 다른 상품) — 서버가 막았다. 경고로 알리고 이 주문은 제출하지 않는다.
+      if (!res.ok && res.code === "PRODUCT_WRONG_PURCHASE") {
+        const wmsg = res.error || "참여할 때 고른 상품과 다른 상품을 구매해 제출할 수 없어요. 담당자에게 문의해 주세요.";
+        showToast((orders.length > 1 ? `${i+1}번째 주문: ` : "") + wmsg, "error");
+        results.push({ phone8: bh ? bh.phone8 : "", name: bh ? bh.name : "", ok: false, error: "잘못 구매 — " + wmsg });
+        continue;
+      }
 
       // ★ 서버 신원게이트 판정 처리 (precheck와 판정이 달라진 경우의 탈출구 —
       //   예: 앞 주문 제출로 타계정 정보가 자동보강되어 뒤 주문 판정이 바뀐 경우)

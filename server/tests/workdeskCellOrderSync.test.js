@@ -622,7 +622,8 @@ t('8e 응답에 throughWrite 를 함께 실어 보낸다(프론트가 실패를 
   const body = read('routes/trackB.routes.js');
   const i = body.indexOf("router.post('/workdesk/edit'");
   const fn = body.slice(i, body.indexOf("router.post('/workdesk/revert'"));
-  assert.ok(/json\({ \.\.\.out, throughWrite }\)/.test(fn));
+  // 결정 230: 상품 칸 → 참여 기록 맞춤 결과(applicationSync)가 뒤에 붙을 수 있다 — throughWrite 동봉 요구는 그대로
+  assert.ok(/json\({ \.\.\.out, throughWrite(, \w+)* }\)/.test(fn));
 });
 
 await ta('8f ★★ 라우터 스택 실검사 — /workdesk/edit 핸들러가 실제로 through-write 를 호출한다', async () => {
