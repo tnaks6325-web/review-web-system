@@ -141,12 +141,17 @@
     S.busy = true; render();
     var gen = S.gen;
     try {
-      var j = await S.api(BASE + '/apply', { method: 'POST', body: JSON.stringify({ decisions: decisions }) });
-      if (gen !== S.gen) return;
-      var res = (j && j.results) || [];
+      // ★ Codex P2: 50개씩 나눠 보내고(서버 상한) · 서버가 통째로 실패하면 "반영했습니다"로 접지 않는다(고른 값 유지)
+      var res = [];
+      for (var bi = 0; bi < decisions.length; bi += 50) {
+        var j = await S.api(BASE + '/apply', { method: 'POST', body: JSON.stringify({ decisions: decisions.slice(bi, bi + 50) }) });
+        if (gen !== S.gen) return;
+        if (!j || !j.ok) throw new Error((j && j.error) || '서버가 반영하지 못했습니다');
+        res = res.concat(j.results || []);
+      }
       var ok = res.filter(function (r) { return r.ok; }).length, bad = res.filter(function (r) { return !r.ok; });
       message('반영했습니다 · ' + ok + '건', bad.length ? (bad.length + '건은 반영하지 못했습니다 — ' + (bad[0].error || '')) : '', bad.length > 0);
-      S.sel = {};
+      res.forEach(function (r) { if (r.ok) delete S.sel[r.campaignId]; });
     } catch (e) {
       message('반영하지 못했습니다', (e && e.message) || '', true);
     } finally {

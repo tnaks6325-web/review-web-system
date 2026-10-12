@@ -245,7 +245,7 @@ const flat = s => s.days.map(d => `${d.date.slice(5)}:${d.optKey}${d.amount}`).j
   ok('★ P0-3: 상품 하루 건수가 비면 공고 하루 인원 · 둘 다 없으면 경고 로그', /\(Number\(o\.daily_limit\) \|\| 0\) > 0 \? Number\(o\.daily_limit\) : \(Number\(c\.daily_limit\) \|\| 0\)/.test(csSrc) && /순차진행 일정표를 만들 수 없음/.test(csSrc));
   ok('★ P0: 지난 날 고정 기록을 일정표가 읽는다', /\['sequential_extra', 'sequential_frozen'\]/.test(csSrc) && /frozen,\s*\n\s*isClosedDay/.test(csSrc));
   ok('P2-9: 저장점은 계산이 끝난 뒤 해제', /out\.set\(id, sch\);\s*\}\s*if \(sp\) \{ try \{ await db\.query\('RELEASE SAVEPOINT seq_days'\)/.test(csSrc));
-  ok('★ 지난 날 고정 작업 — 어제까지 · 공고별 잠금 · 멱등 · 매일 0시 5분 + 켜질 때', /d\.date < today && !d\.frozen && !d\.extra/.test(se) && /seq_freeze:/.test(se) && /if \(seen\.has\(d\.date\)\) continue;/.test(se)
+  ok('★ 지난 날 고정 작업 — 어제까지 · 공고별 잠금 · 멱등 · 매일 0시 5분 + 켜질 때', /d\.date < today && !d\.frozen\);/.test(se) && /seq_freeze:/.test(se) && /if \(seen\.has\(d\.date\)\) continue;/.test(se)
     && /'5 0 \* \* \*'/.test(rd('src/jobs/cron.js')) && /runFreeze\('startup'\)/.test(rd('src/jobs/cron.js')));
   ok('★ P0-2: 총원 재배분에서 일정이 지난 상품은 정원 고정', (rd('src/services/linkedRecruitQuota.service.js').match(/allocateOptionQuotas\(await _sequentialPastAsClosed\(/g) || []).length === 2);
   ok('★ P1-1: 어제 부족 인원 팝업은 순차진행 공고를 묻지 않는다', /if \(seqSet\.has\(String\(c\.id\)\)\) continue;/.test(rd('src/services/campaignShortage.service.js')));
@@ -257,6 +257,41 @@ const flat = s => s.days.map(d => `${d.date.slice(5)}:${d.optKey}${d.amount}`).j
   ok('P2-5: 작업표 날짜 맞추기도 손 글씨 상품을 본다', /SAVEPOINT relay_hand/.test(rd('src/services/sheetlessDailyPlan.service.js')));
   ok('P2-10: 차례 아닌 상품 거절 문구 = 여는 날', /function _waitingMsg\(ov\)/.test(cr) && (cr.match(/error: _waitingMsg\(ov\)/g) || []).length === 2);
   ok('P2-11: 화면 파일 버전 표기를 올렸다(옛 조절 창이 남지 않게)', /campaign-daily-plan\.js\?v=20261012-seqdays/.test(wd));
+
+  console.log('[8] Codex 리뷰 반영');
+  {
+    const o2 = [{ optKey: 'A', recruitTotal: 5, dailyLimit: 5 }, { optKey: 'B', recruitTotal: 5, dailyLimit: 5 }];
+    const fzX = [{ date: '2026-09-01', optKey: 'A', base: 5, amount: 5, idx: 0 }, { date: '2026-09-02', optKey: 'B', base: 5, amount: 5, idx: 1 },
+      { date: '2026-10-13', optKey: 'A', base: 5, amount: 5, idx: 0, extra: true }];
+    const ex = [{ after: '2026-10-12', shortages: [{ optKey: 'A', n: 7, idx: 0 }] }];
+    const s1 = buildSequentialSchedule({ startDate: '2026-09-01', options: [{ optKey: 'A', recruitTotal: 5, dailyLimit: 2 }, o2[1]], isClosedDay: () => false, frozen: fzX, extras: ex });
+    ok('★ P1: 지난 추가 모집 날도 고정 — 하루 건수를 2로 바꿔도 10/13(5건)이 다시 나뉘지 않고 남은 2건만 이어 간다',
+      s1.byDate.get('2026-10-13').amount === 5 && s1.byDate.get('2026-10-14').amount === 2 && s1.end === '2026-10-14' && s1.regularEnd === '2026-09-02');
+    const s3 = buildSequentialSchedule({ startDate: '2026-09-01', options: [o2[0], { optKey: 'B', recruitTotal: 8, dailyLimit: 5 }], isClosedDay: () => false, frozen: fzX, extras: ex });
+    ok('★ 추가 모집이 시작된 뒤 정원을 늘려도 정규 일정이 되살아나지 않는다(B 추가 날 없음 · A 남은 2건만)', !s3.days.some(d => d.date > '2026-10-13' && d.optKey === 'B') && s3.byDate.get('2026-10-14').optKey === 'A');
+    const s2 = buildSequentialSchedule({ startDate: '2026-09-01', options: [{ optKey: 'A2', recruitTotal: 5, dailyLimit: 5 }, o2[1]], isClosedDay: () => false, frozen: fzX.slice(0, 2), extras: ex });
+    ok('★ P1: 상품 이름이 바뀌어도 추가 모집 일정이 사라지지 않는다(기록된 순번으로 찾음)', s2.byDate.get('2026-10-13') && s2.byDate.get('2026-10-13').optKey === 'A2');
+    const se2 = rd('src/services/campaignSequentialEnd.service.js');
+    ok('추가 모집 기록에 상품 순번(idx)을 남긴다 · 지난 추가 날도 고정 기록(extra)', /idx: order\.indexOf\(x\.optKey\)/.test(se2) && /d\.date < today && !d\.frozen\);/.test(se2) && /\.\.\.\(d\.extra \? \{ extra: true \} : \{\}\)/.test(se2));
+    ok('★ P2: 잠근 뒤 모자란 건수를 다시 센다', /listSequentialEnds\(admin, \{ db: client, campaignIds: \[campaignId\] \}\)/.test(se2) && /it\.shortages = fresh\.shortages/.test(se2));
+    ok('P2: 50개 넘게 오면 조용히 자르지 않고 거절 · 화면은 50개씩 나눠 보낸다', /e\.code = 'too_many'/.test(se2) && /decisions\.slice\(bi, bi \+ 50\)/.test(fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'js', 'sequential-end-prompt.js'), 'utf8')));
+    ok('P2: 서버가 통째로 실패하면 "반영했습니다"로 접지 않는다', /if \(!j \|\| !j\.ok\) throw new Error/.test(fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'js', 'sequential-end-prompt.js'), 'utf8')));
+    ok('★ P2: 순차진행 판정 실패는 "모름" — 어제 부족 팝업이 묻지 않는다', /failed\.failed = true/.test(csSrc) && /seqSet\.failed\) return/.test(rd('src/services/campaignShortage.service.js')));
+    ok('P2: 미리보기의 오늘 몫도 바꾼 일정표로 다시 잰다', /caps2\.sequentialDayRoom = \(td && tu\)/.test(plan));
+    ok('P2: 작업표 상품 어긋남을 로그·조절 창 안내로 말한다', /순차진행 작업표 — 상품이 일정과 다른 줄/.test(plan) && /rebuild\.productMismatch\) > 0/.test(cdp));
+    // 앞날 예상: 마감 상품의 날 = 0 · 다른 상품 오늘 주문은 오늘 상품 사용량에 안 얹는다
+    const closedO2 = buildSequentialSchedule({ startDate: '2026-10-08', options: [OPTS[0], { ...OPTS[1], closed: true }, OPTS[2]], isClosedDay: d => !!closedKindOn(camp, d) });
+    const rowsC = [{ opt_key: '은갈치', recruit_total: 10, daily_limit: 5, status: 'active' }, { opt_key: '옥돔', recruit_total: 5, daily_limit: 5, status: 'closed' }, { opt_key: '고등어', recruit_total: 15, daily_limit: 5, status: 'active' }];
+    const capsP = CS.optionCapsFromViews(CS.computeOptionViews(rowsC, new Map([['은갈치', { submitted: 5 }]]), null, { sequential: closedO2, today: '2026-10-12' }));
+    const cP = { participation_mode: true, status: 'active', daily_limit: 5, recruit_total: 100, window_start: '00:00', window_end: '23:59', start_date: '2026-10-08', skip_weekends: true };
+    const pjP = CS.projectDailyQuotas(cP, { submittedAll: 5, submittedBeforeToday: 5, activeHolds: 0, todaySubmitted: 0, todayActiveHolds: 0, plans: null, optionCaps: capsP }, { now: new Date('2026-10-12T01:00:00Z') });
+    const d13 = pjP.days.find(d => d.date === '2026-10-13');
+    ok('★ P2: 마감 상품(옥돔)의 날은 예상 0 — 작업표 줄을 깔지 않는다', d13 && d13.quota === 0);
+    const capsL = CS.optionCapsFromViews(CS.computeOptionViews(rows, cnt({ '옥돔': { todaySubmitted: 2, submitted: 2 } }), null, { sequential: s, today: '2026-10-08' }));
+    const pjL = CS.projectDailyQuotas({ ...cP }, { submittedAll: 2, submittedBeforeToday: 0, activeHolds: 0, todaySubmitted: 2, todayActiveHolds: 0, plans: null, optionCaps: capsL }, { now: new Date('2026-10-08T01:00:00Z') });
+    const later = pjL.days.find(d => d.date === '2026-10-12');
+    ok('★ P2: 오늘(10/8 은갈치) 들어온 다른 상품 주문 2건은 은갈치 사용량에 안 얹힌다 — 10/12 은갈치 예상 5(3 아님)', later && later.optKey === '은갈치' && later.quota === 5);
+  }
 
   console.log(`\n${failed ? '❌' : '✅'} campaignSequentialDays: ${n - failed}/${n}`);
   process.exit(failed ? 1 : 0);

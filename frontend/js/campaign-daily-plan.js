@@ -2450,6 +2450,9 @@
            그대로다. 조용히 "저장 완료"라고 말하면 "왜 스케줄이 안 바뀌지"가 원인 불명으로 남는다. */
         toast('조절은 저장됐지만 오늘 이후 자리 재구성에 실패했습니다 — '
               + (j.worktableSync.rebuild.message || '매일 새벽 4시 20분에 자동으로 다시 맞춥니다(날짜별 인원이나 공고 설정을 다시 바꿔도 그때 맞춰집니다)'), 'warning');
+      } else if (j.worktableSync && j.worktableSync.rebuild && Number(j.worktableSync.rebuild.productMismatch) > 0) {
+        /* ★ 결정 228(Codex P2): 순서대로 진행하는 공고에서 그날 상품 줄이 모자라 다른 상품 줄을 날짜에 맞췄다 — 조용히 넘기지 않는다 */
+        toast('저장했습니다 — 다만 작업보드 ' + j.worktableSync.rebuild.productMismatch + '줄은 상품이 날짜별 일정과 다릅니다. 작업보드에서 그 줄의 상품을 확인해 주세요', 'warning');
       } else if (j.worktableSync && j.worktableSync.rowAudit) {
         /* ★ 작업표 줄이 총건수보다 많은 상태 — 이번 조절이 만든 것이 아닐 수 있어 저장은 막지
            않지만(서버도 거부하지 않는다), 조용히 "저장 완료"로 넘기면 홈 목록의 인원 숫자가

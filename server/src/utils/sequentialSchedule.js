@@ -88,42 +88,74 @@ function buildSequentialSchedule({ startDate, options, isClosedDay = null, plans
     // 이름이 바뀐 상품은 기록된 순번으로 같은 상품을 찾는다(못 찾으면 기록 이름 그대로 — 지금 상품과 겹치지 않는다)
     let key = String(f.optKey);
     if (!opts.some(o => o.optKey === key) && Number.isInteger(f.idx) && opts[f.idx]) key = opts[f.idx].optKey;
-    fz.push({ date: f.date, optKey: key, base: Math.max(0, Math.floor(_num(f.base))), amount: Math.max(0, Math.floor(_num(f.amount))), idx: f.idx });
+    fz.push({ date: f.date, optKey: key, base: Math.max(0, Math.floor(_num(f.base))), amount: Math.max(0, Math.floor(_num(f.amount))), idx: f.idx, extra: f.extra === true });
   }
   fz.sort((a, b) => (a.date < b.date ? -1 : 1));
   let regQueue = opts.map(o => ({ optKey: o.optKey, units: o.recruitTotal }));
   let regFrom = startDate;
+  const fzReg = fz.filter(f => !f.extra);
+  const fzExtra = fz.filter(f => f.extra);
+  for (const f of fz) days.push({ date: f.date, optKey: f.optKey, amount: f.amount, base: f.base, reduced: f.amount < f.base, extra: f.extra, frozen: true });
   if (fz.length) {
     const consumed = new Map();
-    for (const f of fz) {
-      consumed.set(f.optKey, (consumed.get(f.optKey) || 0) + f.base);
-      days.push({ date: f.date, optKey: f.optKey, amount: f.amount, base: f.base, reduced: f.amount < f.base, extra: false, frozen: true });
+    for (const f of fzReg) consumed.set(f.optKey, (consumed.get(f.optKey) || 0) + f.base);
+    if (fzReg.length) {
+      const lastR = fzReg[fzReg.length - 1];
+      // 마지막 고정 상품의 위치(이름이 바뀌었으면 기록된 순번) — 그보다 앞 상품으로는 되돌아가지 않는다
+      let startIdx = opts.findIndex(o => o.optKey === lastR.optKey);
+      if (startIdx < 0) startIdx = Number.isInteger(lastR.idx) ? Math.min(Math.max(0, lastR.idx), opts.length) : opts.length;
+      regQueue = opts.slice(startIdx)
+        .map(o => ({ optKey: o.optKey, units: Math.max(0, _num(o.recruitTotal) - (consumed.get(o.optKey) || 0)) }));
     }
-    const lastF = fz[fz.length - 1];
-    // 마지막 고정 상품의 위치(이름이 바뀌었으면 기록된 순번) — 그보다 앞 상품으로는 되돌아가지 않는다
-    let startIdx = opts.findIndex(o => o.optKey === lastF.optKey);
-    if (startIdx < 0) startIdx = Number.isInteger(lastF.idx) ? Math.min(Math.max(0, lastF.idx), opts.length) : opts.length;
-    regQueue = opts.slice(startIdx)
-      .map(o => ({ optKey: o.optKey, units: Math.max(0, _num(o.recruitTotal) - (consumed.get(o.optKey) || 0)) }));
-    regFrom = _addDays(lastF.date, 1);
+    // 정규 일정의 남은 날은 마지막 고정 날 다음부터(추가 모집이 시작됐으면 정규는 이미 끝난 것 — 남은 정규 건은 없다)
+    regQueue = fzExtra.length ? [] : regQueue;
+    regFrom = _addDays(fz[fz.length - 1].date, 1);
     if (regFrom < startDate) regFrom = startDate;
   }
   const reg = lay(regQueue, regFrom, false);
   if (reg.overflow) return null;
-  const regularEnd = reg.last || (fz.length ? fz[fz.length - 1].date : null);
-  let end = regularEnd;
-  for (const ex of (Array.isArray(extras) ? extras : [])) {
-    if (!ex || !Array.isArray(ex.shortages)) continue;
-    const q = liveOpts.map(o => {
-      const s = ex.shortages.find(x => x && x.optKey === o.optKey);
-      return { optKey: o.optKey, units: s ? Math.max(0, Math.floor(_num(s.n))) : 0 };
-    }).filter(x => x.units > 0);
-    if (!q.length) continue;
-    // 추가 모집은 「정규(또는 앞 추가) 일정 끝」과 「결정한 날」 중 늦은 날의 **다음 날**부터
-    const after = [end, /^\d{4}-\d{2}-\d{2}$/.test(String(ex.after || '')) ? ex.after : null].filter(Boolean).sort().pop();
-    const r = lay(q, _addDays(after, 1), true);
-    if (r.overflow) return null;
-    if (r.last) end = r.last;
+  const regularEnd = fzExtra.length
+    ? (fzReg.length ? fzReg[fzReg.length - 1].date : null)
+    : (reg.last || (fz.length ? fz[fz.length - 1].date : null));
+  let end = reg.last || (fz.length ? fz[fz.length - 1].date : regularEnd);
+  // 추가 모집의 상품 이름이 바뀌었으면 기록된 순번(idx)으로 같은 상품을 찾는다(Codex P1 — 이름 바꾸기에 추가 일정이 사라지지 않게)
+  const keyOfShort = sh => {
+    if (!sh || !sh.optKey) return null;
+    if (opts.some(o => o.optKey === sh.optKey)) return sh.optKey;
+    return (Number.isInteger(sh.idx) && opts[sh.idx]) ? opts[sh.idx].optKey : null;
+  };
+  const exList = (Array.isArray(extras) ? extras : []).filter(ex => ex && Array.isArray(ex.shortages));
+  const afterOf = ex => (/^\d{4}-\d{2}-\d{2}$/.test(String(ex.after || '')) ? ex.after : null);
+  if (fzExtra.length) {
+    /* ★ Codex P1 — 추가 모집으로 **이미 지나간 날도 고정**한다. 고정이 있으면 추가 모집 전체를 한 줄로 보고,
+         상품별 (결정한 건수 합 − 고정된 추가 날 소진)만 마지막 고정 날·마지막 결정일 다음부터 이어 간다
+         (나중에 하루 건수를 고쳐도 끝난 추가 날이 다시 나뉘지 않는다). */
+    const want = new Map();
+    for (const ex of exList) for (const sh of ex.shortages) {
+      const k = keyOfShort(sh); if (!k) continue;
+      want.set(k, (want.get(k) || 0) + Math.max(0, Math.floor(_num(sh.n))));
+    }
+    for (const f of fzExtra) want.set(f.optKey, (want.get(f.optKey) || 0) - f.base);
+    const q = liveOpts.map(o => ({ optKey: o.optKey, units: Math.max(0, want.get(o.optKey) || 0) })).filter(x => x.units > 0);
+    const after = [end, ...exList.map(afterOf)].filter(Boolean).sort().pop();
+    if (q.length) {
+      const r = lay(q, _addDays(after, 1), true);
+      if (r.overflow) return null;
+      if (r.last) end = r.last;
+    }
+  } else {
+    for (const ex of exList) {
+      const q = liveOpts.map(o => {
+        const units = ex.shortages.filter(sh => keyOfShort(sh) === o.optKey).reduce((a, sh) => a + Math.max(0, Math.floor(_num(sh.n))), 0);
+        return { optKey: o.optKey, units };
+      }).filter(x => x.units > 0);
+      if (!q.length) continue;
+      // 추가 모집은 「정규(또는 앞 추가) 일정 끝」과 「결정한 날」 중 늦은 날의 **다음 날**부터
+      const after = [end, afterOf(ex)].filter(Boolean).sort().pop();
+      const r = lay(q, _addDays(after, 1), true);
+      if (r.overflow) return null;
+      if (r.last) end = r.last;
+    }
   }
   days.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   const byDate = new Map(days.map(x => [x.date, x]));

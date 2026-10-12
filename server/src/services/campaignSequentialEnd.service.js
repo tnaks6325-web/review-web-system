@@ -86,7 +86,7 @@ async function listSequentialEnds(admin, opts = {}) {
     const shortages = views.filter(v => v.remaining !== null && v.remaining > 0).map(v => ({ optKey: v.optKey, n: v.remaining }));
     if (!shortages.length) continue;
     items.push({ campaignId: id, title: String(c.title || ''), thumbnailUrl: String(c.thumbnail_url || ''),
-      end: sch.end, regularEnd: sch.regularEnd, shortages, total: shortages.reduce((a, x) => a + x.n, 0) });
+      end: sch.end, regularEnd: sch.regularEnd, shortages, total: shortages.reduce((a, x) => a + x.n, 0), optionOrder: sch.optionOrder });
   }
   return { ok: true, items, today };
 }
@@ -96,8 +96,10 @@ async function listSequentialEnds(admin, opts = {}) {
  * ★ 서버가 다시 계산한 값으로만 반영(화면 숫자 불신) · 받는 사람이 아닌 공고는 거절 · 공고마다 독립 트랜잭션.
  */
 async function applySequentialEnds(admin, decisions) {
-  const list = Array.isArray(decisions) ? decisions.slice(0, 50) : [];
+  const list = Array.isArray(decisions) ? decisions : [];
   if (!list.length) { const e = new Error('반영할 결정이 없습니다.'); e.code = 'empty'; throw e; }
+  // ★ Codex P2: 조용히 자르지 않는다 — 화면은 50개씩 나눠 보낸다(어제 부족 팝업과 같은 규율)
+  if (list.length > 50) { const e = new Error('한 번에 50개까지 반영할 수 있습니다.'); e.code = 'too_many'; throw e; }
   const results = [];
   for (const d of list) {
     const campaignId = String((d && d.campaignId) || '');
@@ -113,14 +115,22 @@ async function applySequentialEnds(admin, decisions) {
       const { rows: lock } = await client.query('SELECT id, status FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [campaignId]);
       if (!lock.length || lock[0].status !== 'active') throw Object.assign(new Error('게시 중인 공고가 아닙니다.'), { code: 'not_active' });
       // 같은 일정 끝의 [추가 모집]은 한 번만(담당자·AE 동시 반영) — [끝내기]의 중복은 위 게시 중 확인이 막는다
+      /* ★ Codex P2: 잠근 **뒤** 모자란 건수를 다시 센다 — 잠그기 전 계산과 사이에 들어온 구매·수기 주문을 반영
+           (낡은 큰 숫자로 추가 모집을 넘치게 잡지 않는다). 일정 끝이 바뀌었으면 거절. */
+      const fresh = ((await listSequentialEnds(admin, { db: client, campaignIds: [campaignId] })).items || [])[0];
+      if (!fresh || fresh.end !== it.end) throw Object.assign(new Error('그사이 상황이 바뀌었습니다 — 다시 확인해 주세요.'), { code: 'changed' });
+      it.shortages = fresh.shortages; it.total = fresh.total;
       const { rows: dup } = await client.query(
         `SELECT 1 FROM campaign_plan_events WHERE campaign_id = $1 AND action = $2 AND detail->>'end' = $3 LIMIT 1`,
         [campaignId, ACTIONS.extra, it.end]);
       if (dup.length) throw Object.assign(new Error('다른 담당자가 방금 처리했습니다.'), { code: 'already' });
       const actor = String((admin && admin.name) || 'admin').slice(0, 100);
+      // ★ Codex P1: 상품 순번(idx)도 남긴다 — 나중에 상품 이름이 바뀌어도 일정표가 같은 상품을 찾는다
+      const order = (fresh.optionOrder || []);
+      const shortages = it.shortages.map(x => ({ ...x, idx: order.indexOf(x.optKey) }));
       const detail = action === 'extra'
-        ? { end: it.end, after: st.kstTodayStr(), shortages: it.shortages }
-        : { end: it.end, shortages: it.shortages };
+        ? { end: it.end, after: st.kstTodayStr(), shortages }
+        : { end: it.end, shortages };
       await client.query(
         `INSERT INTO campaign_plan_events (campaign_id, actor, action, detail) VALUES ($1,$2,$3,$4::jsonb)`,
         [campaignId, actor, ACTIONS[action], JSON.stringify(detail)]);
@@ -166,7 +176,8 @@ async function freezeSequentialPast({ db = pool, now = new Date() } = {}) {
   for (const id of seq) {
     const sch = seq.plans && seq.plans.get(id);
     if (!sch) continue;
-    const want = sch.days.filter(d => d.date < today && !d.frozen && !d.extra);
+    // ★ Codex P1: 추가 모집으로 지나간 날도 고정한다(extra 표시) — 하루 건수를 나중에 고쳐도 끝난 추가 날이 다시 나뉘지 않게
+    const want = sch.days.filter(d => d.date < today && !d.frozen);
     if (!want.length) continue;
     const client = await pool.connect();
     try {
@@ -180,7 +191,7 @@ async function freezeSequentialPast({ db = pool, now = new Date() } = {}) {
         if (seen.has(d.date)) continue;
         await client.query(
           `INSERT INTO campaign_plan_events (campaign_id, actor, action, detail) VALUES ($1,'system','sequential_frozen',$2::jsonb)`,
-          [id, JSON.stringify({ date: d.date, optKey: d.optKey, base: d.base, amount: d.amount, idx: sch.optionOrder.indexOf(d.optKey) })]);
+          [id, JSON.stringify({ date: d.date, optKey: d.optKey, base: d.base, amount: d.amount, idx: sch.optionOrder.indexOf(d.optKey), ...(d.extra ? { extra: true } : {}) })]);
         n++;
       }
       await client.query('COMMIT');

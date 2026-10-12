@@ -336,6 +336,8 @@ async function _relayInTx(client, camp, today, by) {
   const { relayWorktableToProjection } = require('./sheetlessDailyPlan.service');
   const r = await relayWorktableToProjection({ client, sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name,
     days: projection.days, today: projection.today || today, by });
+  // ★ 결정 228(Codex P2): 그날 상품 줄이 모자라 다른 상품 줄을 옮겼으면 말한다(작업 로그 · 조절 창 안내)
+  if (r && r.productMismatch > 0) logger.warn(`[campaignPlan] 순차진행 작업표 — 상품이 일정과 다른 줄 ${r.productMismatch}개를 날짜에 맞춤 camp=${camp.id}`);
   return { ...r, endDate: projection.endDate, truncated: projection.truncated };
 }
 
@@ -411,8 +413,12 @@ async function previewPlanProjection(campaignId, body) {
       const sch2 = await loadSequentialSchedule(pool, camp.id, { planPatch: () => ({ ...plans }) });
       if (sch2) {
         const caps2 = counts.optionCaps.slice();
-        caps2.sequentialDayRoom = counts.optionCaps.sequentialDayRoom;
         caps2.sequentialUsed = counts.optionCaps.sequentialUsed;
+        caps2.sequentialOthersToday = counts.optionCaps.sequentialOthersToday;
+        // ★ Codex P2: 오늘 몫도 바꾼 일정표로 다시 잰다(오늘 5→3 미리보기가 그대로 5로 보이지 않게)
+        const td = sch2.byDate.get(kstTodayStr());
+        const tu = td && (counts.optionCaps.sequentialUsed || {})[td.optKey];
+        caps2.sequentialDayRoom = (td && tu) ? Math.max(0, Math.min(td.amount, (Number(tu.recruitTotal) || 0) - Math.max(0, (Number(tu.used) || 0) - (Number(tu.todayUsed) || 0)))) : 0;
         caps2.sequentialSchedule = sch2;
         pjCounts = { ...pjCounts, optionCaps: caps2 };
       }

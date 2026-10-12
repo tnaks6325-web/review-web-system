@@ -971,9 +971,12 @@ function projectDailyQuotas(c, counts, opts = {}) {
         if (d2 === todayStr) {
           const st = computeCampaignState(c, cnt, now, null);
           quota = Math.max(0, Number(st.dailyQuota) || 0);
-          if (u) u.used = Math.max(u.used, (u.used - (Number(u.todayUsed) || 0)) + quota);
+          // ★ Codex P2: 오늘 정원엔 다른 상품 오늘 주문이 얹혀 있다 — 오늘 상품 사용량엔 그 상품 몫만 더한다
+          const own = Math.max(0, quota - (Number(seqCaps.sequentialOthersToday) || 0));
+          if (u) u.used = Math.max(u.used, (u.used - (Number(u.todayUsed) || 0)) + own);
         } else {
-          quota = u ? Math.max(0, Math.min(x.amount, (Number(u.recruitTotal) || 0) - (Number(u.used) || 0))) : x.amount;
+          // ★ Codex P2: 살아 있는 상품 사용량에 없는 상품 = 마감 상품의 날 → 0(그날은 팔 상품이 없다 — 작업표 줄도 깔지 않는다)
+          quota = u ? Math.max(0, Math.min(x.amount, (Number(u.recruitTotal) || 0) - (Number(u.used) || 0))) : 0;
           if (u) u.used += quota;
         }
         if (rt > 0) quota = Math.min(quota, Math.max(0, rt - before2));
@@ -1764,7 +1767,9 @@ async function fetchSequentialCampaignIds(db, campaignIds) {
   } catch (e) {
     if (sp) await db.query('ROLLBACK TO SAVEPOINT seq_options').catch(() => {});
     try { require('../utils/logger').logger.warn(`[campaignState] 순차진행 판정 조회 실패(종전 동작): ${e.message}`); } catch (_) {}
-    return new Set();
+    // ★ Codex P2: 실패를 "순차진행 없음"과 구분할 수 있게 표시한다(fail-closed 가 필요한 곳 — 어제 부족 팝업 — 이 본다)
+    const failed = new Set(); failed.failed = true; failed.plans = new Map();
+    return failed;
   }
 }
 

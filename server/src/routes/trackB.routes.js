@@ -1681,7 +1681,7 @@ router.post('/sequential-end-prompts/apply', authMiddleware, internalMiddleware,
   try {
     res.json(await require('../services/campaignSequentialEnd.service').applySequentialEnds(req.admin, (req.body || {}).decisions));
   } catch (e) {
-    const status = e.code === 'empty' ? 400 : 500;
+    const status = ['empty', 'too_many'].includes(e.code) ? 400 : 500;
     if (status === 500) logger.warn('[sequential-end-prompts/apply] 실패: ' + e.message);
     res.status(status).json({ ok: false, code: e.code || null, error: status === 400 ? e.message : '반영에 실패했습니다: ' + e.message });
   }

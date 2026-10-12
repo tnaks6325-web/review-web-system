@@ -310,7 +310,7 @@ async function listShortages(admin, opts = {}) {
        여기서 "오늘 더하기"를 물으면 새 규칙과 정면으로 어긋나고, [📅 인원] 저장 검사가 늘리기를 거절한다. 판정 실패 = 묻지 않음(fail-closed). */
   let seqSet = null;
   try { seqSet = await st.fetchSequentialCampaignIds(db, ids.map(String)); } catch (_) { seqSet = null; }
-  if (!seqSet) return { ok: true, items: [], date: yesterday };
+  if (!seqSet || seqSet.failed) return { ok: true, items: [], date: yesterday };   // 판정 실패 = 모름 = 묻지 않는다(Codex P2)
   const [wos, decided, countsMap, optCapped, unknownTime] = await Promise.all([
     linkedWorkOrdersForCampaigns(db, ids, ['created_by']).catch(() => new Map()),
     _decidedFor(db, ids, yesterday),
