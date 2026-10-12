@@ -430,6 +430,38 @@ async function test(name, fn) { await fn(); passed++; console.log('  ✓ ' + nam
     assert.strictEqual(manual.mode, 'match_error');
   });
 
+  // 결정 226 — 본인으로 참여, 받는 사람만 다른 이름(본인 번호). 막히지 않아야 한다(문의 0).
+  await test('본인 번호 주문: 전체 번호면 바로 승인 · 가린 번호면 내 번호로 채워 확인 한 번(결정 226)', async () => {
+    applicationIdentity = 'self';
+    try {
+      const full = { recipient:'다른이름', phone:'010-1010-1010', address:'서울 본인주소' };
+      let proof = identity.issueExtractionProof({ imageHash:'5'.repeat(64), extracted:full, ok:true });
+      const matched = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted:full }, reviewer);
+      assert.strictEqual(matched.status, 'MATCH', JSON.stringify(matched));
+      assert.strictEqual(matched.resolved.recipient, '다른이름', '받는 사람 이름은 그대로');
+      await identity.verifyApprovalForSubmission({ ...base, ...full, identityApprovalToken:matched.approvalToken }, reviewer);
+
+      const masked = { recipient:'다*이름', phone:'010-****-1010', address:'서울 본인주소' };
+      proof = identity.issueExtractionProof({ imageHash:'4'.repeat(64), extracted:masked, ok:true });
+      const reviewed = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted:masked }, reviewer);
+      assert.strictEqual(reviewed.status, 'REVIEW', JSON.stringify(reviewed));
+      assert.ok(reviewed.reasonCodes.includes('owner_phone_recipient_masked'));
+      assert.strictEqual(reviewed.approvalToken, '', '가린 번호는 자동 승인하지 않는다');
+      assert.strictEqual(reviewed.resolved.phone, '010-1010-1010', '가린 연락처를 내 번호로 채워 돌려준다');
+      // 내 번호가 아닌 번호로 바꿔 확인하면 거부
+      await assert.rejects(identity.manualConfirm({ ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken,
+        formFields:{ recipient:'다른이름', phone:'010-9999-8888', address:'서울 본인주소' } }, reviewer),
+        (err) => err.code === 'IDENTITY_FIELDS_REQUIRED');
+      // 가린 채로 확인해도 거부
+      await assert.rejects(identity.manualConfirm({ ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken,
+        formFields:{ recipient:'다른이름', phone:'010-****-1010', address:'서울 본인주소' } }, reviewer),
+        (err) => err.code === 'IDENTITY_FIELDS_REQUIRED');
+      const filled = { recipient:'다른이름', phone:reviewed.resolved.phone, address:'서울 본인주소' };
+      const manual = await identity.manualConfirm({ ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken, formFields:filled }, reviewer);
+      await identity.verifyApprovalForSubmission({ ...base, ...filled, identityApprovalToken:manual.approvalToken }, reviewer);
+    } finally { applicationIdentity = 'sub'; }
+  });
+
   console.log(`\n✅ reviewerOrderIdentityFlow: ${passed}개 통과`);
 })().catch((err) => { console.error('❌', err.stack || err.message); process.exitCode = 1; })
   .finally(async () => { pool.query = originalQuery; await pool.end(); });

@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const pool = require('../db/pool');
 const cards = require('./reviewerIdentityCards.service');
 const { syncCardsAfterWrite } = cards;
-const { addressSame, addressHeuristic, normAddress } = require('./identity.service');
+const { addressSame, addressHeuristic, normAddress, isOwnerPhoneRecipient } = require('./identity.service');
 const { logger } = require('../utils/logger');
 
 const MASK_RE = /[*＊●○◯◉•·xX]/;
@@ -659,10 +659,36 @@ function resolvedValue(raw, stored, mode, verdict) {
   return value;
 }
 
+// 결정 226 — 본인 명의로 참여했고 받는 사람 이름만 다른 주문이 본인 번호로 왔는지.
+//   'full'   = 가림 없는 전체 번호가 본인 번호와 같음 → 이름은 "받는 사람 이름만 다름"으로 맞춘다.
+//   'masked' = 가린 번호의 보이는 자리가 본인 번호와 맞음 → 자동 승인하지 않고, 연락처를 내 번호로 채운 뒤
+//              [내 주문이 맞습니다]로 확인받는다(manualConfirm 이 그 번호가 정말 본인 번호인지 다시 본다).
+function ownerPhoneRecipientKind(selectedScore, selected) {
+  if (!selected || selected.type !== 'self' || selectedScore.parts.name.verdict !== 'mismatch') return '';
+  const raw = String(selectedScore.fields.phone || '').trim();
+  if (isOwnerPhoneRecipient(selected.phone || selected.phone8, raw)) return 'full';
+  if (MASK_RE.test(raw) && maskedCompatible(raw, selected.phone, 'phone')) return 'masked';
+  return '';
+}
+function rescoreIdentity(score) {
+  const { name, address } = score.parts;
+  score.matches = Object.values(score.parts).filter((p) => p.verdict === 'match').length;
+  score.conflicts = Object.entries({ name, address })
+    .filter(([, p]) => p.verdict === 'mismatch').map(([key, p]) => `${key}:${p.reason}`);
+  score.score = score.matches * 10 - score.conflicts.length * 20 + (address.score || 0);
+}
+
 async function evaluateSelectedIdentity(extracted, selected, allIdentities, options = {}) {
   const selectedScore = await scoreIdentity(extracted, selected, options);
   let status = 'REVIEW';
   const reasonCodes = [];
+  const ownerPhone = ownerPhoneRecipientKind(selectedScore, selected);
+  if (ownerPhone) {
+    selectedScore.parts.name = ownerPhone === 'full'
+      ? { verdict: 'match', reason: '본인 번호로 받은 주문(받는 사람 이름만 다름)' }
+      : { verdict: 'uncertain', reason: '받는 사람 이름이 달라요 — 가려진 연락처를 내 번호로 채워 확인해주세요' };
+    rescoreIdentity(selectedScore);
+  }
   if (selectedScore.conflicts.length) {
     const addressConflict = selectedScore.parts.address.verdict === 'mismatch';
     // 배송지는 명의 자체가 아니다. 선택한 참여 명의의 이름이 맞으면 다른 동·호수도
@@ -680,10 +706,22 @@ async function evaluateSelectedIdentity(extracted, selected, allIdentities, opti
   if (selectedScore.parts.phone.verdict === 'contact') {
     reasonCodes.push('delivery_contact_changed');
   }
+  if (ownerPhone === 'full') reasonCodes.push('owner_phone_recipient');
+  if (ownerPhone === 'masked') {
+    // 가린 번호는 내 번호인지 확정할 수 없다 — 자동 승인도 차단도 하지 않고 확인 단계로 둔다.
+    status = 'REVIEW';
+    for (const code of ['selected_identity_conflict', 'selected_identity_partial_conflict', 'insufficient_independent_matches']) {
+      const i = reasonCodes.indexOf(code);
+      if (i >= 0) reasonCodes.splice(i, 1);
+    }
+    reasonCodes.push('owner_phone_recipient_masked');
+  }
 
   let competingIdentity = null;
   for (const identity of allIdentities) {
     if (identity.identityKey === selected.identityKey) continue;
+    // 결정 226 — 본인 번호 주문이면 본인 번호를 쓰는 다른 이름 칸(정리 전 잔여)은 경쟁 명의가 아니다.
+    if (ownerPhone && phone8(identity.phone) && phone8(identity.phone) === phone8(selected.phone)) continue;
     const other = await scoreIdentity(extracted, identity, { useGemini: false });
     // 같은 소유자 안에서 이름이 같은 명의 = 같은 사람의 중복 등록(실사고 2026-09-24: 번호만 다른
     // 두 칸 중 주소 빈 칸으로 참여 → 주소 있는 칸이 "다른 명의"로 잡혀 차단). 차단하지 않고
@@ -697,8 +735,9 @@ async function evaluateSelectedIdentity(extracted, selected, allIdentities, opti
       // 선택 명의 자체도 독립 필드 2개 이상 명확히 맞으면 중복 저장정보 때문에 생긴
       // 애매 판정이다. 사용자가 허용한 수동확인 경로로 보낸다. 선택 명의가 부족하거나
       // 충돌하는데 다른 명의가 맞는 경우만 결정적 오명의로 차단한다.
+      // 결정 226 — 본인 번호 주문은 다른 칸이 비슷해도 막지 않고 확인 단계로 둔다(번호가 사람을 정한다).
       if ((!selectedScore.conflicts.length && selectedScore.matches >= 2)
-          || reasonCodes.includes('delivery_address_changed')) {
+          || reasonCodes.includes('delivery_address_changed') || ownerPhone) {
         status = 'REVIEW';
         reasonCodes.push('multiple_identity_candidates');
       } else {
@@ -880,6 +919,15 @@ async function manualConfirm(body, reviewer) {
         );
       }
       reasonCodes.push('identity_value_confirmed');
+    }
+    if (reasonCodes.includes('owner_phone_recipient_masked')
+        && !isOwnerPhoneRecipient(context.selected.phone || context.selected.phone8, body.formFields?.phone)) {
+      // 결정 226 — 가린 번호로 온 다른 이름 주문은 연락처가 정말 내 번호일 때만 본인 주문으로 받는다.
+      throw new ReviewerOrderIdentityError(
+        'IDENTITY_FIELDS_REQUIRED',
+        '받는 사람 이름이 내 이름과 달라요. 연락처를 내 정보에 등록한 내 번호로 채운 뒤 다시 눌러주세요(연락처 아래 [내 정보에서 선택]).',
+        409
+      );
     }
   } else if (mode === 'form_edit') {
     // 필드 수정은 기존 승인토큰을 제출에 그대로 재사용하지 않는다. 다만 그 토큰으로

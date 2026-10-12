@@ -205,6 +205,21 @@ function findSubAccount(subs, name, phone8) {
   return null;
 }
 
+/**
+ * 결정 226 — 본인 등록번호로 받은 주문 = 본인 주문(받는 사람 이름만 다름). 사용자 확정 2026-10-12.
+ * ★ 가림 없는 전체 번호(10자리 이상)가 본인 번호와 같을 때만 참이다 — 가림·자릿수 부족이면 false(닫힌 쪽).
+ *   가린 번호는 구매양식 명의 확인이 "내 번호로 채움 → 확인"(reviewerOrderIdentity)으로 따로 다룬다.
+ * ★ 구매양식의 두 판정(옛 판정 resolveOrderIdentity · 참여 명의 확인 evaluateSelectedIdentity)이 함께 쓴다 — 사본 금지.
+ */
+const OWNER_PHONE_MASK_RE = /[*＊●○◯◉•·xX]/;
+function isOwnerPhoneRecipient(ownerPhone, orderPhone) {
+  const raw = String(orderPhone || '');
+  if (!raw.trim() || OWNER_PHONE_MASK_RE.test(raw)) return false;
+  const d = raw.replace(/\D/g, '');
+  const own = normPhone8(ownerPhone);
+  return d.length >= 10 && d.length <= 12 && own.length === 8 && d.slice(-8) === own;
+}
+
 /* ── 신원 판별 엔진 ─────────────────────────────────────── */
 
 /**
@@ -282,6 +297,21 @@ async function resolveOrderIdentity(reviewer, order, opts = {}) {
     if (!addrBad(addrCheck.verdict) && acctOk) {
       return { status: 'SELF', subIndex: -1, reasons: [], identity };
     }
+    if (addrBad(addrCheck.verdict)) reasons.push(`등록 주소와 상이: ${addrCheck.reason}`);
+    if (!acctOk) reasons.push('등록 계좌(계좌번호/예금주)와 상이');
+    if (reasons.length === 0) return { status: 'SELF', subIndex: -1, reasons: [], identity };
+    return { status: 'NEED_CONFIRM', subIndex: -1, reasons, identity };
+  }
+
+  // ── 1b) 본인 번호로 받은 주문 = 본인 주문(받는 사람 이름만 다름) — 결정 226 ──
+  // ★ 타계정 매칭보다 먼저 본다: 본인 번호를 쓰는 다른 이름 칸(정리 전 잔여)이나 번호만 같은 칸으로 새지 않게.
+  //   주소·계좌 검사는 1) 본인과 똑같이 한다. 다른 번호의 판정은 아래 그대로다.
+  if (isOwnerPhoneRecipient(reviewer.phone || reviewer.phone8, pickedPhone)) {
+    if (skipDetail) return { status: 'SELF', subIndex: -1, reasons: [], identity };
+    const addrCheck = await addressSame(reviewer.address, idAddr, { name: identity.name, phone: identity.phone, useGemini });
+    const acctOk = (idAcct && normAccount(reviewer.bank_account) === idAcct)
+      || (idHolder && idHolder === normName(reviewer.account_holder));
+    if (!addrBad(addrCheck.verdict) && acctOk) return { status: 'SELF', subIndex: -1, reasons: [], identity };
     if (addrBad(addrCheck.verdict)) reasons.push(`등록 주소와 상이: ${addrCheck.reason}`);
     if (!acctOk) reasons.push('등록 계좌(계좌번호/예금주)와 상이');
     if (reasons.length === 0) return { status: 'SELF', subIndex: -1, reasons: [], identity };
@@ -370,4 +400,5 @@ module.exports = {
   extractHo, extractDong, bigramJaccard,
   addressHeuristic, addressSame, pickIdField,
   profileMissing, participationProfileMissing, resolveOrderIdentity, findSubAccount,
+  isOwnerPhoneRecipient,
 };
