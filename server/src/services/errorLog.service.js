@@ -177,8 +177,10 @@ async function logAbnormal(p = {}) {
     const step = p.step || '';
     // ★ 표의 CHECK(026: category·source 허용값 = 아래 두 사전의 키)를 벗어난 값은 버리지 말고 추론값으로 바꿔 저장한다.
     //   (2026-10-12 실측: source:'validation' 한 곳이 CHECK 위반으로 7월부터 매번 기록 실패 — 무신호)
-    const category = CATEGORY_PHRASES[p.category] ? p.category : classify(error);
-    const source = SOURCE_PHRASES[p.source] ? p.source : inferSource(category, flow, step);
+    //   own-property 로만 판정 — 'constructor'·'__proto__' 같은 상속 키를 허용값으로 착각하지 않게.
+    const _own = (o, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
+    const category = _own(CATEGORY_PHRASES, p.category) ? p.category : classify(error);
+    const source = _own(SOURCE_PHRASES, p.source) ? p.source : inferSource(category, flow, step);
     const severity = ['warn', 'error', 'critical'].includes(p.severity) ? p.severity : 'error';
 
     const flowKo = FLOW_LABELS[flow] || FLOW_LABELS.unknown;

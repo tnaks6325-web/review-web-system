@@ -11,6 +11,7 @@ delete process.env.ERRORLOG_AI_ENRICH;
 const pool = require('../src/db/pool');
 const EL = require('../src/services/errorLog.service');
 const root = path.resolve(__dirname, '..');
+const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 
 // 1) 사전 키 = 표 CHECK 허용값(026)
 const mig = fs.readFileSync(path.join(root, 'migrations/026_error_logs.sql'), 'utf8');
@@ -40,7 +41,7 @@ for (const f of files) {
     calls++;
     for (const [key, dict] of [['category', EL.CATEGORY_PHRASES], ['source', EL.SOURCE_PHRASES]]) {
       const v = m[1].match(new RegExp('\\b' + key + ":\\s*'([^']*)'"));
-      if (v) assert(dict[v[1]], `${path.relative(root, f)}: ${key}:'${v[1]}' 는 표 CHECK 허용값이 아니다`);
+      if (v) assert(own(dict, v[1]), `${path.relative(root, f)}: ${key}:'${v[1]}' 는 표 CHECK 허용값이 아니다`);
     }
   }
 }
@@ -57,9 +58,14 @@ console.log('PASS 호출 ' + calls + '곳 — 문자열 category/source 모두 �
     const ins = seen.find((x) => /INSERT INTO error_logs/.test(x.sql));
     assert(ins, 'INSERT 실행');
     const [, , , , , category, source] = ins.params;
-    assert(EL.CATEGORY_PHRASES[category] && EL.SOURCE_PHRASES[source], `저장값 허용 범위: ${category}/${source}`);
+    assert(own(EL.CATEGORY_PHRASES, category) && own(EL.SOURCE_PHRASES, source), `저장값 허용 범위: ${category}/${source}`);
     assert.strictEqual(category, 'validation', '잘못된 category 는 오류 내용으로 다시 분류');
     assert.strictEqual(source, 'server');
+    // 상속 키('constructor'·'__proto__')를 허용값으로 착각하지 않는다(Codex P2)
+    seen.length = 0;
+    await EL.logAbnormal({ flow: 'order_submit', step: 'y', category: 'constructor', source: '__proto__', error: new Error('필수 값 검증 실패') });
+    const p1 = seen.find((x) => /INSERT INTO error_logs/.test(x.sql)).params;
+    assert.deepStrictEqual([p1[5], p1[6]], ['validation', 'server'], '상속 키는 추론값으로');
     // 허용값은 그대로 존중
     seen.length = 0;
     await EL.logAbnormal({ flow: 'order_submit', step: 'identity_confirm_override', category: 'validation', source: 'server', severity: 'warn', error: new Error('신원 유사도 경고 확인 후 제출 (리뷰어 확인 완료)') });
