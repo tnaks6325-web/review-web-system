@@ -42,18 +42,20 @@ const restore = () => { pool.query = origQuery; pool.connect = origConnect; };
     ok('비상 스위치(allow) — 종전 A안(타계정 추가)으로 돌아간다', connectCalls === 1);
     delete process.env.SAME_PHONE_REGISTER_MODE;
 
-    // 다른 리뷰어의 타계정 번호 — 그 번호의 이름만 알려주고 그 타계정을 올린 본계정 이름은 알려주지 않는다
+    // 다른 리뷰어의 타계정 번호 — 막되 이름은 알려주지 않는다(타계정 이름도, 그 타계정을 올린 본계정 이름도)
     let subParams = null, subSql = '';
     pool.query = async (sql, params) => {
-      if (/jsonb_array_elements/.test(sql)) { subParams = params; subSql = String(sql); return { rows: [{ sub_name: '박가족' }] }; }
+      if (/jsonb_array_elements/.test(sql)) { subParams = params; subSql = String(sql); return { rows: [{ '?column?': 1 }] }; }
       throw new Error('차단 뒤 다른 쿼리 금지');
     };
     const sub = await reviewer.registerReviewer({ name: '홍길동', phone: '010-7586-0135', consent: true });
-    ok('타계정 번호 가입은 거부 · 그 번호의 이름 안내', sub.ok === false && sub.reason === 'phone_registered_as_sub_account'
-      && /'박가족' 이름으로 등록돼/.test(sub.error) && sub.registeredName === '박가족');
+    ok('타계정 번호 가입은 거부 · 이름은 알려주지 않는다(사용자 확정 (가) — 이름+번호가 로그인 열쇠)',
+      sub.ok === false && sub.reason === 'phone_registered_as_sub_account'
+      && !Object.hasOwn(sub, 'registeredName') && !/'[^']+' 이름으로/.test(sub.error) && /등록할 때 쓴 이름/.test(sub.error));
     ok('본계정 이름(mainName)은 응답에 없다', !Object.hasOwn(sub, 'mainName'));
-    ok('본계정 전체 번호와 같은 타계정(정리 대상)은 이 검사에서 빼고 본계정 경로가 판정', subParams && subParams[1] === '01075860135'
-      && /regexp_replace\(COALESCE\(r\.phone,''\)[^\n]*<> \$2/.test(subSql));
+    ok('그 전체 번호의 본계정이 어디든 있으면 타계정 검사를 건너뛰고 본계정 경로가 판정(Codex P1 — 남의 타계정 이름 안내 금지)',
+      subParams && subParams[1] === '01075860135'
+      && /NOT EXISTS \(SELECT 1 FROM reviewers m\s+WHERE regexp_replace\(COALESCE\(m\.phone,''\), '\[\^0-9\]', '', 'g'\) = \$2\)/.test(subSql));
   } finally { restore(); }
 
   console.log('\n▶ 담당자 수동 접수 · 화면 배선\n');
@@ -61,8 +63,8 @@ const restore = () => { pool.query = origQuery; pool.connect = origConnect; };
   ok('수동 접수는 가입 거부(다른 이름)를 실패로 끝내지 않고 그 리뷰어로 연결(경고만)',
     /reg\.reason === 'phone_registered_other_name'\)\s*\{[\s\S]{0,300}?warnings\.push\([\s\S]{0,200}?\}\s*else if \(!reg\.ok\)/.test(mo));
   const front = fs.readFileSync(path.resolve(__dirname, '../../frontend/js/search-app.js'), 'utf8');
-  const br = front.match(/data\.reason === "phone_registered_other_name"\) \{([\s\S]*?)\} else if/);
-  ok('구매양식 가입 화면 — 로그인 탭으로 옮겨 가입된 이름을 채우고 안내', br && /_switchAuthTab\("login"\)/.test(br[1])
+  const br = front.match(/data\.reason === "phone_registered_as_sub_account" \|\| data\.reason === "phone_registered_other_name"\)\) \{([\s\S]*?)\} else if/);
+  ok('구매양식 가입 화면 — 두 거부 모두 로그인 탭으로 옮겨 번호(·가입된 이름)를 채우고 안내(Codex P2)', br && /_switchAuthTab\("login"\)/.test(br[1])
     && /data\.registeredName/.test(br[1]) && /_showLoginErr\(/.test(br[1]));
   ok('구매양식 가입 화면 — 서버 안내(error)를 읽는다', /_showRegErr\(\(data && \(data\.error \|\| data\.message\)\)/.test(front));
 

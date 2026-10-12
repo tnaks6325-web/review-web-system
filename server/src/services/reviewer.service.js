@@ -34,23 +34,24 @@ async function registerReviewer({ name, phone, consent, sheetId, kakaoId, requir
     // phone8 신원축이 둘로 갈라진다. 저장 형태가 구형 문자열/비정상 값이어도 조회가 죽지 않게
     // JSON 배열만 펼쳐 확인하고, 이름과 무관하게 번호 뒤 8자리 충돌을 차단한다.
     // ★ 결정 226 C — 그 번호의 **주인 본계정**이 있으면(본인 번호를 쓰는 같은 번호 타계정 = 정리 대상) 이 검사가 아니라
-    //   아래 본계정 경로(ON CONFLICT)가 판정한다(가입된 이름 = 본계정 이름). 그래서 본계정 **전체 번호**와 같은 타계정만 뺀다
-    //   — 뒤 8자리만 같고 앞자리가 다른 본계정이면 아래 INSERT 가 성공해 phone8 이 둘로 갈리므로 그때는 종전대로 여기서 막는다.
+    //   아래 본계정 경로(ON CONFLICT)가 판정한다(가입된 이름 = 본계정 이름). 그래서 그 **전체 번호**의 본계정이 어디든 있으면
+    //   타계정 검사를 건너뛴다(Codex P1 — 남의 타계정 칸에 같은 번호가 있어도 그 이름을 안내하면 남의 계정으로 로그인하게 된다).
+    //   뒤 8자리만 같고 앞자리가 다른 본계정이면 아래 INSERT 가 성공해 phone8 이 둘로 갈리므로 그때는 종전대로 여기서 막는다.
     const { rows: subOwnerRows } = await pool.query(
-      `SELECT TRIM(COALESCE(sub.value->>'name','')) AS sub_name
+      `SELECT 1
          FROM reviewers r
          CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.sub_accounts)='array'
                                            THEN r.sub_accounts ELSE '[]'::jsonb END) AS sub(value)
         WHERE RIGHT(regexp_replace(COALESCE(sub.value->>'phone',''), '[^0-9]', '', 'g'), 8) = $1
-          AND regexp_replace(COALESCE(r.phone,''), '[^0-9]', '', 'g') <> $2
+          AND NOT EXISTS (SELECT 1 FROM reviewers m
+                           WHERE regexp_replace(COALESCE(m.phone,''), '[^0-9]', '', 'g') = $2)
         LIMIT 1`, [phone8, cleanPhone]);
     if (subOwnerRows.length > 0) {
-      // 결정 226 C — 그 번호로 등록된 **이름**만 알려준다(그 번호를 타계정으로 올린 본계정 이름은 알려주지 않는다).
-      const subName = String(subOwnerRows[0].sub_name || '').trim();
-      const error = subName
-        ? `이 번호는 이미 '${subName}' 이름으로 등록돼 있어요. 로그인 화면에서 이름을 '${subName}' 그대로 넣고 로그인해 주세요.`
-        : '이 번호는 이미 타계정으로 등록되어 있어 새 리뷰어로 등록할 수 없습니다. 타계정 정보를 삭제한 뒤 다시 시도해주세요.';
-      return { ok: false, reason: 'phone_registered_as_sub_account', field: 'name', registeredName: subName, error, message: error };
+      // 결정 226 C (가)(사용자 확정 2026-10-12) — 타계정 번호는 **이름을 알려주지 않는다**. 로그인이 이름+번호 뒤 8자리라
+      //   이름을 알려주면 번호만 아는 사람이 본계정 주인의 계좌·주소까지 보게 된다(Codex 보안 P1). 본계정 이름은 공개 조회가
+      //   이미 알려주므로 아래 본계정 경로만 이름을 안내한다. 가족 본인은 자기 이름을 안다.
+      const error = '이 번호는 다른 리뷰어의 타계정으로 등록돼 있어요. 로그인 화면에서 등록할 때 쓴 이름으로 로그인해 주세요.';
+      return { ok: false, reason: 'phone_registered_as_sub_account', field: 'name', error, message: error };
     }
 
     // UNIQUE(phone) 제약을 활용한 중복 처리

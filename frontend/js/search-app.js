@@ -1870,11 +1870,12 @@ async function _submitRegister(name, phone, p1, p2, kakaoId) {
       if (ni) ni.value = name;
 
       await doSearch();
-    } else if (data && data.reason === "phone_registered_as_sub_account") {
-      _showRegErr(data.error || "다른 리뷰어의 타계정으로 이미 등록된 번호입니다.");
-    } else if (data && data.reason === "phone_registered_other_name") {
-      // 결정 226 C — 같은 번호는 이미 가입된 이름으로만 쓴다. 로그인 탭으로 옮겨 번호·가입된 이름을 채우고 안내를 그 탭에 띄운다.
-      const _regMsg = data.error || "이미 가입된 번호입니다. 로그인 탭에서 가입한 이름으로 로그인해주세요.";
+    } else if (data && (data.reason === "phone_registered_as_sub_account" || data.reason === "phone_registered_other_name")) {
+      // 결정 226 C — 같은 번호는 이미 등록된 이름으로만 쓴다. 로그인 탭으로 옮겨 번호(·서버가 알려준 이름)를 채우고 안내를 그 탭에 띄운다
+      //   (Codex P2 — 등록 탭에만 띄우면 탭을 옮기는 순간 안내가 지워진다).
+      const _regMsg = data.error || (data.reason === "phone_registered_as_sub_account"
+        ? "다른 리뷰어의 타계정으로 이미 등록된 번호입니다."
+        : "이미 가입된 번호입니다. 로그인 탭에서 가입한 이름으로 로그인해주세요.");
       _switchAuthTab("login");
       const loginPhoneEl = document.getElementById("loginPhoneInput");
       if (loginPhoneEl) loginPhoneEl.value = p1 + p2;

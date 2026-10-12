@@ -13,12 +13,12 @@ const source = fs.readFileSync(
 );
 
 const branch = source.match(
-  /else if \(data && data\.reason === "phone_registered_as_sub_account"\) \{([\s\S]*?)\}\s*else if \(data && data\.reason === "phone_registered_other_name"\)/
+  /else if \(data && \(data\.reason === "phone_registered_as_sub_account" \|\| data\.reason === "phone_registered_other_name"\)\) \{([\s\S]*?)\}\s*else if \(data && data\.isDuplicate\)/
 );
 
-assert(branch, '타계정 충돌 전용 분기가 다른 이름 가입 분기보다 먼저 있어야 합니다.');
+assert(branch, '타계정 충돌·다른 이름 가입 분기가 중복번호 분기보다 먼저 있어야 합니다.');
 assert(
-  branch[1].includes('_showRegErr(data.error || "다른 리뷰어의 타계정으로 이미 등록된 번호입니다.")'),
+  branch[1].includes('"다른 리뷰어의 타계정으로 이미 등록된 번호입니다."') && /_showLoginErr\(_regMsg\)/.test(branch[1]),
   '타계정 충돌은 서버 안내(그 번호의 이름)를, 없으면 확정된 안전 문구를 표시해야 합니다.'
 );
 assert(
