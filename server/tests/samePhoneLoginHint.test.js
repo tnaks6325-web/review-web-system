@@ -26,17 +26,15 @@ const restore = () => { pool.query = origQuery; pool.connect = origConnect; };
     ok('본계정 번호면 본계정 이름 안내', a.ok === false && /'김본인' 이름으로 가입돼/.test(a.error) && a.field === 'name');
     ok('"같은 번호로 추가 등록" 유도 문구는 없다', !/추가 등록/.test(a.error));
 
-    // 다른 리뷰어의 타계정 번호(본계정 아님) — 그 타계정 이름 안내(그 이름으로 로그인 가능)
+    // 다른 리뷰어의 타계정 번호(본계정 아님) — 이름은 알려주지 않는다(사용자 확정 (가) · Codex 보안 P1)
     pool.query = loginStub({ subOwners: [{ id: 'r2', name: '최주인', phone: '01099998888', sub_accounts: [{ name: '박가족', phone: '010-1234-5678' }] }] });
     const b = await reviewer.verifyReviewer('홍길동', '12345678');
-    ok('타계정 번호면 그 타계정 이름 안내', /'박가족' 이름으로 가입돼/.test(b.error) && !/최주인/.test(b.error));
+    ok('타계정 번호면 이름 없이 안내(타계정 이름·본계정 이름 모두 비노출)', b.ok === false && !/박가족|최주인/.test(b.error) && /타계정으로 등록/.test(b.error));
 
-    // 같은 번호에 이름이 여럿 — 단정하지 않는다
-    pool.query = loginStub({ subOwners: [
-      { id: 'r2', name: '최주인', phone: '01099998888', sub_accounts: [{ name: '박가족', phone: '01012345678' }] },
-      { id: 'r3', name: '정주인', phone: '01077776666', sub_accounts: [{ name: '강가족', phone: '01012345678' }] }] });
+    // 같은 번호의 본계정이 둘(앞자리만 다름) — 그 이름으로도 로그인이 안 되므로 이름을 고르지 않는다(Codex P2)
+    pool.query = loginStub({ selfRows: [{ name: '김본인' }, { name: '김본인' }] });
     const c = await reviewer.verifyReviewer('홍길동', '12345678');
-    ok('이름이 여럿이면 이름을 고르지 않고 일반 안내', c.ok === false && !/박가족|강가족/.test(c.error));
+    ok('로그인 대상이 하나가 아니면 이름 없이 일반 안내', c.ok === false && !/김본인/.test(c.error));
 
     // 번호가 없으면 종전 안내 그대로
     pool.query = loginStub({});
