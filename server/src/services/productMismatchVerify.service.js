@@ -5,45 +5,39 @@
  *   무조건 기록**된다(061 옵션 서버권위). 실제로 다른 상품을 사면 담당자가 캡처·금액을 보고 작업표를 손으로 고쳤고,
  *   참여 기록은 옛 상품 그대로 남아 상품별 인원 세기가 어긋났다(45일 1,022건 중 4건 — 탄소매트 퀸더블→킹 등).
  *
- * 사용자 확정:
- *   ① (가) 캡처에서 읽은 상품이 **다른 상품 하나**를 분명히 가리키면 제출 전에 리뷰어에게 묻고,
- *          리뷰어가 고른 "실제로 산 상품"으로 참여 기록·주문·작업표를 함께 기록한다.
- *   ② (나) 그 상품 자리가 없으면(정원·하루 한도·품절 멈춤·차례 아님·마감) **제출을 막고** 담당자 문의로 안내한다.
+ * 사용자 확정(2026-10-12, 같은 날 ①·② 를 아래로 바꿈):
+ *   ① 캡처에서 읽은 상품이 공고의 **다른 상품 하나**를 분명히 가리키면(글자 — 못 정하면 결제금액이 다른 상품 하나의 가격과
+ *      정확히 같을 때), 아무것도 쓰기 전에
+ *      "잘못 구매한 것 같아요" 경고로 실제로 산 상품을 묻는다(캡처 상품 / 참여할 때 고른 상품).
+ *   ② 리뷰어가 **고른 상품과 다른 상품**을 샀다고 답하면 = 잘못 구매 → **제출 불가**(담당자 문의 안내 + 이상로그).
+ *      고른 상품을 샀다고 답하면(AI 가 잘못 읽음) 그대로 접수하고, 담당자가 볼 수 있게 이상로그(warn)를 남긴다.
+ *      ⇒ 참여 기록·원장의 상품은 **언제나 참여할 때 고른 상품**이다(홀드를 다른 상품으로 옮기지 않는다).
  *   ③ (가) 담당자가 작업표 「상품」(·상품옵션) 칸을 고치면 그 리뷰어의 참여 기록도 따라 바꾼다(되돌리면 같이 돌아간다).
  *
  * ★★ 완화 금지
- *   · 상품 바꾸기 판정은 구매 전 옵션 변경(`campaign.routes` `changeHoldOption`)을 **그대로** 탄다 — 정원·하루 한도·
- *     순차진행 차례(212·228)·품절 멈춤(229)·잠금 순서가 한 곳에 있다. 여기서 자리 판정을 다시 만들지 말 것.
  *   · 글자 → 상품은 `utils/productCaptureMatch` 하나 — **둘 이상 걸리면 묻지 않는다**(모르면 아무 일도 안 일어난다).
+ *   · ② 의 판정은 **서버가** 한다 — 화면이 보낸 `confirmedProductKey` 가 홀드 상품과 다르면 막는다(화면을 믿지 않는다).
  *   · ③ 은 **참여 기록만** 바꾼다. 주문 원장(`order_submissions.selected_opt_key·selected_product`)에 작업표 값을
  *     되쓰지 않는다 — 결정 018 「원장은 리뷰어가 고른 값이 진실」(역주입 금지) 그대로.
- *   · 판정 실패·조회 실패는 **종전 동작**(fail-open) — 접수를 막는 것은 ② 하나뿐이다.
- * 끄는 스위치(env): `CAMPAIGN_PRODUCT_VERIFY=0` → ①·③ 모두 즉시 종전.
+ *   · 판정 실패·조회 실패·판독값 없음은 **종전 동작**(fail-open) — 막는 것은 리뷰어가 "다른 상품을 샀다"고 답한 경우뿐.
+ * 끄는 스위치(env): `CAMPAIGN_PRODUCT_VERIFY=0` → ①②③ 모두 즉시 종전.
  */
 'use strict';
 
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const { mentionedOptions, capturedOtherOption, matchOption } = require('../utils/productCaptureMatch');
+const _won = (v) => { const n = parseInt(String(v == null ? '' : v).replace(/[^0-9]/g, ''), 10); return Number.isFinite(n) && n > 0 ? n : 0; };
 
 let _pool = null;
 function getPool() { return _pool || pool; }
 function __setPoolForTest(p) { _pool = p; }
-let _campRoutes = null;
-function _changeHoldOption(args) {
-  const fn = _campRoutes ? _campRoutes.changeHoldOption : require('../routes/campaign.routes').changeHoldOption;
-  return fn(args);
-}
-function __setCampaignRoutesForTest(r) { _campRoutes = r; }
 
 function isEnabled() { return String(process.env.CAMPAIGN_PRODUCT_VERIFY || '').trim() !== '0'; }
 
-/** 자리가 없어 막는 거절 사유(②) — change-option 의 거절 사유와 같은 말. */
-const UNAVAILABLE_REASONS = new Set(['option_soldout', 'option_today_done', 'option_closed', 'option_paused', 'option_waiting', 'option_invalid']);
-
 async function _loadOptions(db, campaignId) {
   const { rows } = await db.query(
-    `SELECT opt_key, product_name, status FROM campaign_options WHERE campaign_id = $1 ORDER BY (status='closed'), sort_order, id`,
+    `SELECT opt_key, product_name, status, pay_amount FROM campaign_options WHERE campaign_id = $1 ORDER BY (status='closed'), sort_order, id`,
     [String(campaignId)]);
   return rows;
 }
@@ -52,10 +46,12 @@ async function _loadOptions(db, campaignId) {
 function _label(key) { return String(key || ''); }
 
 /**
- * ① 주문 제출 때 판정 — 쓰기 0.
- * @returns {Promise<{action:'none'}|{action:'keep'}|{action:'prompt',chosen,captured}|{action:'switch',newKey}>}
+ * ①② 주문 제출 때 판정 — 쓰기 0.
+ * @returns {Promise<{action:'none'}|{action:'keep', capturedKey}|{action:'prompt',basis:'text'|'price',paid?,chosen,captured}|{action:'wrong',chosen,bought,error}>}
+ *   keep  = 리뷰어가 "고른 상품을 샀다"고 확인(캡처를 AI 가 다르게 읽음) → 접수 + 이상로그
+ *   wrong = 리뷰어가 "다른 상품을 샀다"고 확인 → 잘못 구매 · 제출 불가
  */
-async function decideAtSubmit({ holdCtx, captureText, confirmedKey, db = getPool() }) {
+async function decideAtSubmit({ holdCtx, captureText, captureOption = '', capturePrice = '', confirmedKey, db = getPool() }) {
   if (!isEnabled()) return { action: 'none' };
   if (!holdCtx || !holdCtx.verified || !holdCtx.optionKey || holdCtx.doneKind) return { action: 'none' };
   try {
@@ -64,38 +60,34 @@ async function decideAtSubmit({ holdCtx, captureText, confirmedKey, db = getPool
     const held = String(holdCtx.optionKey);
     const confirmed = String(confirmedKey == null ? '' : confirmedKey).trim();
     if (confirmed) {
-      if (confirmed === held) return { action: 'keep' };
+      if (confirmed === held) return { action: 'keep', capturedKey: capturedOtherOption(captureText, opts, held, { shortText: captureOption }) || '' };
       // 화면이 보낸 값은 **그 공고의 상품일 때만** 받는다(지어낸 값 차단) — 아니면 종전대로 고른 상품.
-      return opts.some(o => o.opt_key === confirmed) ? { action: 'switch', newKey: confirmed } : { action: 'none' };
+      if (!opts.some(o => o.opt_key === confirmed)) return { action: 'none' };
+      return {
+        action: 'wrong', chosen: { key: held, label: _label(held) }, bought: { key: confirmed, label: _label(confirmed) },
+        error: `참여할 때 고른 「${_label(held)}」와 다른 「${_label(confirmed)}」를 구매했어요. 잘못 구매한 주문은 제출할 수 없어요. 담당자에게 문의해 주세요.`,
+      };
     }
-    const other = capturedOtherOption(captureText, opts, held);
-    if (!other) return { action: 'none' };
-    return { action: 'prompt', chosen: { key: held, label: _label(held) }, captured: { key: other, label: _label(other) } };
+    // 약한 이름(사이즈 `L`·`100`·`킹`)은 캡처의 **옵션 글자**에서만 낱말 일치로 본다 — 상품명 속 모델번호로 걸리지 않게.
+    const other = capturedOtherOption(captureText, opts, held, { shortText: captureOption });
+    if (other) return { action: 'prompt', basis: 'text', chosen: { key: held, label: _label(held) }, captured: { key: other, label: _label(other) } };
+    // ② 결제금액 — 글자로 **어느 상품인지 못 정했을 때만**, 캡처 금액이 고른 상품 가격과 다르고 **다른 상품 하나의 가격과 정확히 같으면**.
+    //   (운영 캡처 117건 실측: 글자만 = 실제 잘못 구매 4건 중 2건 · 글자+금액 = 4건 모두 · 정상 113건 경고 0.
+    //    금액만 쓰면 쿠폰 3,000원이 다른 상품 가격과 우연히 같아진 정상 5건이 걸렸다 — 글자가 고른 상품을 말하면 금액은 보지 않는다.)
+    const read = matchOption(captureText, opts, { shortText: captureOption });
+    const paid = _won(capturePrice);
+    const pays = opts.map(o => _won(o.pay_amount));
+    if (!read && paid && new Set(pays.filter(Boolean)).size >= 2) {
+      const heldPay = _won((opts.find(o => o.opt_key === held) || {}).pay_amount);
+      const same = opts.filter(o => o.opt_key !== held && _won(o.pay_amount) === paid);
+      if (heldPay && paid !== heldPay && same.length === 1) {
+        return { action: 'prompt', basis: 'price', paid, chosen: { key: held, label: _label(held) }, captured: { key: same[0].opt_key, label: _label(same[0].opt_key) } };
+      }
+    }
+    return { action: 'none' };
   } catch (e) {
     logger.warn(`[product-verify] 판정 실패 — 종전대로 접수: ${(e && e.message) || e}`);
     return { action: 'none' };
-  }
-}
-
-/**
- * ① 리뷰어가 "실제로 산 상품"을 골랐을 때 홀드를 그 상품으로 옮긴다(구매 전 옵션 변경과 같은 판정·잠금).
- * @returns {Promise<{ok:true}|{ok:false, blocked:true, reason, error}|{ok:false, blocked:false, reason}>}
- *   blocked = ② 자리가 없어 제출을 막아야 함 / blocked:false = 옮기지 못했지만 막을 일은 아님(만료 등 → 종전대로 접수)
- */
-async function switchToActual({ holdCtx, newKey }) {
-  try {
-    const out = await _changeHoldOption({ id: holdCtx.campaignId, p8: holdCtx.phone8, token: holdCtx.holdToken, newKey, via: 'order-actual-product' });
-    const body = (out && out.body) || {};
-    if (body.ok) return { ok: true };
-    if (UNAVAILABLE_REASONS.has(body.reason)) {
-      return {
-        ok: false, blocked: true, reason: body.reason,
-        error: `실제로 산 「${_label(newKey)}」는 지금 자리가 없어 접수할 수 없어요. 담당자에게 문의해 주세요.`,
-      };
-    }
-    return { ok: false, blocked: false, reason: body.reason || ('http_' + (out && out.code)) };
-  } catch (e) {
-    return { ok: false, blocked: false, reason: 'exception', message: (e && e.message) || String(e) };
   }
 }
 
@@ -104,7 +96,7 @@ function isProductColumn(header) {
   const h = String(header || '').trim();
   if (!h) return false;
   const ledger = require('./orderLedger.service');
-  if (h === ledger.PRODUCT_HEADER) return true;
+  if (ledger.productWriteColumns([h]).includes(0)) return true;   // 「상품」 칸 — 매퍼 파생(사본 금지)
   const { isReviewOptionHeader } = require('../utils/reviewType');
   return ledger.optionWriteColumns([h]).includes(0) && !isReviewOptionHeader(h);
 }
@@ -119,8 +111,9 @@ async function syncApplicationFromWorkboard({ sheetId, tabName, rowId, field, by
   if (!isEnabled()) return { synced: false, reason: 'disabled' };
   const header = typeof field === 'string' && field.startsWith('col:') ? field.slice(4) : '';
   if (!isProductColumn(header)) return { synced: false, reason: 'not_product_column' };
-  const client = await db.connect();
+  let client = null;
   try {
+    client = await db.connect();   // ★ try 안 — 연결 실패가 이미 저장된 편집을 "저장 실패"로 보이게 하지 않게(코드리뷰)
     const { rows: pr } = await client.query(
       `SELECT id, order_submission_id, row_json FROM campaign_participants
         WHERE id = $1 AND sheet_id = $2 AND tab_name = $3 AND deleted_at IS NULL`, [rowId, sheetId, tabName]);
@@ -159,15 +152,14 @@ async function syncApplicationFromWorkboard({ sheetId, tabName, rowId, field, by
     try { require('../routes/campaign.routes').invalidateListCache(); } catch (_) { /* noop */ }
     return { synced: true, from: app.option_key, to: target, applicationId: app.id };
   } catch (e) {
-    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    if (client) { try { await client.query('ROLLBACK'); } catch (_) { /* noop */ } }
     logger.warn(`[product-verify] 참여 기록 맞추기 실패(무시): ${(e && e.message) || e}`);
     return { synced: false, reason: 'exception' };
   } finally {
-    client.release();
+    if (client) client.release();
   }
 }
 
 module.exports = {
-  isEnabled, decideAtSubmit, switchToActual, syncApplicationFromWorkboard, isProductColumn,
-  UNAVAILABLE_REASONS, __setPoolForTest, __setCampaignRoutesForTest,
+  isEnabled, decideAtSubmit, syncApplicationFromWorkboard, isProductColumn, __setPoolForTest,
 };

@@ -1797,11 +1797,11 @@ router.post('/:id/cancel', applyLimiter, async (req, res, next) => {
 // POST /api/campaign/:id/change-option — 구매(제출) 전 옵션 변경 (phone8+holdToken 이중 열쇠, 061)
 //   ★ 잠금 계층 = apply와 동일(recruit_campaigns 행 FOR UPDATE → 신청 행) → 소진 경합/교착 없음.
 //   ★ 만료시각(expires_at)은 연장하지 않음(자리 갈아타기 악용 방지, PRD §07). 새 옵션 자리 확보 실패 시 기존 유지.
-async function _changeHoldOption({ id, p8, token, newKey, via = 'change-option' }) {
-  p8 = String(p8 || '').replace(/\D/g, '').slice(-8);
-  token = String(token || '').trim();
-  newKey = _normOptKey(newKey);
-  const res = _resCollector();
+router.post('/:id/change-option', applyLimiter, async (req, res, next) => {
+  const { id } = req.params;
+  const p8 = String(req.body.phone8 || '').replace(/\D/g, '').slice(-8);
+  const token = String(req.body.holdToken || '').trim();
+  const newKey = _normOptKey(req.body.optionKey);
   if (p8.length !== 8 || !token) return res.status(400).json({ ok: false, error: 'phone8(8자리)과 holdToken이 필요합니다.' });
   if (!newKey) return res.status(400).json({ ok: false, error: '변경할 옵션을 선택해주세요.' });
 
@@ -1856,30 +1856,13 @@ async function _changeHoldOption({ id, p8, token, newKey, via = 'change-option' 
       [app.id, id, token, newKey]);
     if (!upd.rows.length) { await client.query('ROLLBACK'); return res.status(409).json({ ok: false, reason: 'not_changeable', error: '옵션 변경에 실패했어요. 다시 시도해주세요.' }); }
     await client.query('COMMIT');
-    logger.info(`[campaign/${via}] camp=${id} app=${app.id} ${app.option_key || '∅'}→${newKey} phone8=***${p8.slice(-4)}`);
+    logger.info(`[campaign/change-option] camp=${id} app=${app.id} ${app.option_key || '∅'}→${newKey} phone8=***${p8.slice(-4)}`);
     return res.json({ ok: true, optionKey: newKey, previousOptionKey: app.option_key || null, option: ov });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
-    throw err;
+    return next(err);
   } finally {
     client.release();
-  }
-}
-
-/** 응답을 모으는 작은 그릇 — _changeHoldOption 이 라우트 밖(주문 제출)에서도 같은 판정·같은 문구를 쓰게 한다. */
-function _resCollector() {
-  const r = { code: 200, body: null };
-  r.status = (c) => { r.code = c; return r; };
-  r.json = (b) => { r.body = b; return r; };
-  return r;
-}
-
-router.post('/:id/change-option', applyLimiter, async (req, res, next) => {
-  try {
-    const out = await _changeHoldOption({ id: req.params.id, p8: req.body.phone8, token: req.body.holdToken, newKey: req.body.optionKey });
-    return res.status(out.code).json(out.body);
-  } catch (err) {
-    return next(err);
   }
 });
 
@@ -4434,10 +4417,6 @@ async function _addApplicationToSheet(campaign, applicant) {
 
   logger.info(`[campaign/sheet] 행 추가 완료: ${linked_tab_name} - ${applicant.name} (행 ${headerRowIdx + 1 + nextNum})`);
 }
-
-/* ★ 결정 230: 주문 제출 때 "실제로 산 상품"으로 바꾸는 것도 구매 전 옵션 변경과 **같은 판정·같은 잠금**을 탄다(사본 금지).
-   반환 { code, body } — body 는 change-option 응답과 같은 모양(ok·reason·error). */
-router.changeHoldOption = _changeHoldOption;
 
 // 공고 목록 5초 캐시 비우기 — 다른 기능이 정원을 바꾼 직후 화면이 옛 숫자를 다시 그리지 않게(어제 부족 인원 팝업 — 코덱스 리뷰)
 router.invalidateListCache = function () { _listCache = { at: 0, rows: null, countsMap: null, feeMap: null }; };

@@ -1083,7 +1083,8 @@ router.post('/workdesk/edit', authMiddleware, async (req, res, next) => {
     let applicationSync = null;
     if (out.ok && (role === 'master' || role === 'admin' || role === 'staff')) {
       applicationSync = await require('../services/productMismatchVerify.service')
-        .syncApplicationFromWorkboard({ sheetId, tabName, rowId, field, by: _by(req) });
+        .syncApplicationFromWorkboard({ sheetId, tabName, rowId, field, by: _by(req) })
+        .catch(() => ({ synced: false, reason: 'exception' }));   // 편집은 이미 저장됨 — 응답을 실패로 바꾸지 않는다
     }
     res.status(out.ok ? 200 : (out.error === 'concurrent_edit_conflict' ? 409 : 400)).json({ ...out, throughWrite, applicationSync });
   } catch (err) { next(err); }
@@ -1099,7 +1100,8 @@ router.post('/workdesk/revert', authMiddleware, async (req, res, next) => {
     let applicationSync = null;
     if (out && out.ok && (role === 'master' || role === 'admin' || role === 'staff')) {
       applicationSync = await require('../services/productMismatchVerify.service')
-        .syncApplicationFromWorkboard({ sheetId, tabName, rowId, field, by: _by(req) });
+        .syncApplicationFromWorkboard({ sheetId, tabName, rowId, field, by: _by(req) })
+        .catch(() => ({ synced: false, reason: 'exception' }));   // 편집은 이미 저장됨 — 응답을 실패로 바꾸지 않는다
     }
     res.json({ ...out, applicationSync });
   } catch (err) { next(err); }

@@ -1235,10 +1235,20 @@ body.col-resizing .col-drag-handle{pointer-events:auto!important}
 .ofp-match{flex-shrink:0;font-size:.66rem;font-weight:700;color:var(--p-d,#1b64da);background:#fff;border:1px solid #b9d3fb;border-radius:999px;padding:1px 7px}
 .ofp-more{justify-self:start;font:inherit;font-size:.78rem;color:var(--t2,#4B5563);background:none;border:0;padding:2px;cursor:pointer;text-decoration:underline;text-underline-offset:3px;text-decoration-color:#c4cad6}
 @media (prefers-reduced-motion:reduce){.ofp-opt,.ofp-radio{transition:none}}
-/* ★ 결정 230 — 「실제로 산 상품」 확인 창(.modal-* 틀 + .ofp-opt 단추 재사용) */
-.pmv-box{max-width:400px}
-.pmv-box .modal-header h3{font-size:.98rem;line-height:1.4;word-break:keep-all}
-.pmv-lead{font-size:.86rem;line-height:1.6;color:var(--t1,#111827);margin:0 0 12px;word-break:keep-all;overflow-wrap:anywhere}
+/* ★ 결정 230 — 「잘못 구매한 것 같아요」 확인 창(.modal-* 틀 + .ofp-opt 단추 재사용) */
+.pmv-box{max-width:420px}
+.pmv-box .pmv-head{background:#fff4e5!important;border-bottom-color:#f5d9a8!important}
+.pmv-box .pmv-head h3{font-size:.98rem;line-height:1.4;word-break:keep-all;color:#8a4b00}
+.pmv-lead{font-size:.86rem;line-height:1.6;color:var(--t1,#111827);margin:0 0 6px;word-break:keep-all;overflow-wrap:anywhere}
 .pmv-lead b{color:var(--p-d,#1b64da)}
+.pmv-lead b.pmv-cap{color:#b42318}
+.pmv-q{font-size:.84rem;font-weight:700;color:var(--t1,#111827);margin:0 0 10px}
+.pmv-wrong-opt[aria-checked="true"]{border-color:#d92d20;background:#fef3f2}
+.pmv-wrong-opt[aria-checked="true"] .ofp-radio{border-color:#d92d20!important;background:#d92d20!important}
+.pmv-wrong-opt .ofp-match{color:#b42318;border-color:#f5c2be}
+.pmv-warn{margin:10px 0 0;padding:10px 12px;border-radius:10px;background:#fef3f2;border:1px solid #f5c2be;color:#912018;font-size:.8rem;line-height:1.55;word-break:keep-all}
 .pmv-note{font-size:.74rem;line-height:1.5;color:var(--t2,#4B5563);margin:10px 0 0;word-break:keep-all}
 .pmv-box .modal-actions .btn-primary:disabled{opacity:.45;cursor:not-allowed;transform:none;box-shadow:none}
+.pmv-box .modal-actions .btn-primary.pmv-btn-stop{background:#d92d20!important;box-shadow:none!important}
+/* 참여 공고 틀 안: 문서 전체를 덮고 창은 _pmvPlace 가 보이는 자리에 놓는다(폰 바텀시트 규칙의 !important 를 이긴다) */
+.pmv-overlay.pmv-in-frame{position:absolute!important;inset:auto!important;top:0!important;left:0!important;right:0!important;align-items:flex-start!important;padding:0!important}

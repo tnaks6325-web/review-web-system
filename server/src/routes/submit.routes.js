@@ -873,38 +873,40 @@ router.post('/order', async (req, res, next) => {
       });
     }
 
-    /* ★★ 결정 230 — 고른 상품 ≠ 실제 산 상품(사용자 확정 2026-10-12 ①(가)·②(나)).
+    /* ★★ 결정 230 — 고른 상품 ≠ 실제 산 상품(사용자 확정 2026-10-12: 잘못 구매는 제출 불가).
        캡처에서 읽은 상품(화면이 보낸 AI 판독값)이 공고의 **다른 상품 하나**를 분명히 가리키면, 아무것도 쓰기 전에
-       리뷰어에게 묻는다(PRODUCT_MISMATCH). 리뷰어가 고른 "실제로 산 상품"(confirmedProductKey)이 다르면
-       구매 전 옵션 변경과 **같은 판정·잠금**으로 홀드를 옮긴 뒤 종전 경로로 접수한다 → 참여 기록·원장·작업표가 함께 그 상품.
-       ★ 그 상품 자리가 없으면 ②(나) 제출을 막고 담당자 문의로 안내(PRODUCT_UNAVAILABLE).
-       ★ 판독값 없음·못 맞춤·조회 실패·만료 등 = 종전 동작(fail-open). 옛 화면은 판독값을 보내지 않아 무변화.
+       "잘못 구매한 것 같아요"로 실제로 산 상품을 묻는다(PRODUCT_MISMATCH).
+       · 리뷰어가 **다른 상품**을 샀다고 답함(confirmedProductKey ≠ 홀드 상품) → 잘못 구매 = 제출 불가(PRODUCT_WRONG_PURCHASE) + 이상로그.
+       · 리뷰어가 **고른 상품**을 샀다고 답함 → AI 가 잘못 읽은 것으로 보고 종전대로 접수 + 이상로그(warn — 담당자 확인용).
+       ★ 홀드 상품은 바꾸지 않는다 — 참여 기록·원장의 상품은 언제나 참여할 때 고른 상품.
+       ★ 판독값 없음·못 맞춤·조회 실패 = 종전 동작(fail-open). 옛 화면은 판독값을 보내지 않아 무변화.
        ★ 위 멱등 게이트 **뒤**에 둔다 — 이미 접수된 홀드의 재전송을 다시 묻지 않는다. */
     if (holdCtx && holdCtx.verified && holdCtx.optionKey) {
       const pv = require('../services/productMismatchVerify.service');
       const captureText = [b.productCaptureName, b.productCaptureOption]
         .map(v => String(v == null ? '' : v).slice(0, 300).trim()).filter(Boolean).join(' ');
-      const decision = await pv.decideAtSubmit({ holdCtx, captureText, confirmedKey: b.confirmedProductKey });
+      const captureOption = String(b.productCaptureOption == null ? '' : b.productCaptureOption).slice(0, 300).trim();
+      const decision = await pv.decideAtSubmit({ holdCtx, captureText, captureOption, capturePrice: b.productCapturePrice, confirmedKey: b.confirmedProductKey });
       if (decision.action === 'prompt') {
         return res.json({
-          ok: false, code: 'PRODUCT_MISMATCH', chosen: decision.chosen, captured: decision.captured,
-          error: `캡처에는 「${decision.captured.label}」로 보여요. 실제로 산 상품을 골라 주세요.`,
+          ok: false, code: 'PRODUCT_MISMATCH', basis: decision.basis, paid: decision.paid || 0, chosen: decision.chosen, captured: decision.captured,
+          error: decision.basis === 'price'
+            ? `캡처의 결제금액 ${Number(decision.paid).toLocaleString('ko-KR')}원이 참여할 때 고른 「${decision.chosen.label}」가 아니라 「${decision.captured.label}」 가격과 같아요. 실제로 산 상품을 골라 주세요.`
+            : `참여할 때 고른 상품은 「${decision.chosen.label}」인데 캡처에는 「${decision.captured.label}」로 보여요. 실제로 산 상품을 골라 주세요.`,
         });
       }
-      if (decision.action === 'switch') {
-        const fromKey = holdCtx.optionKey;
-        const sw = await pv.switchToActual({ holdCtx, newKey: decision.newKey });
-        if (sw.ok) {
-          await _authoritativeHold(holdCtx);   // 옮긴 상품의 단위 종류·상품명·옵션을 다시 읽는다(같은 단일 출처)
-          logger.info(`[submit/order] 실제로 산 상품으로 변경 app=${holdCtx.applicationId} ${fromKey} → ${holdCtx.optionKey}`);
-        } else if (sw.blocked) {
-          return res.json({ ok: false, code: 'PRODUCT_UNAVAILABLE', reason: sw.reason, error: sw.error });
-        } else {
-          logAbnormal({
-            flow: 'order_submit', step: 'actual_product_switch_failed', category: 'validation', source: 'server', severity: 'warn',
-            error: new Error(`실제로 산 상품으로 옮기지 못해 고른 상품으로 접수(${sw.reason})`),
-            context: { campaignId: holdCtx.campaignId, applicationId: holdCtx.applicationId, from: fromKey, to: decision.newKey },
-          });
+      if (decision.action === 'wrong' || decision.action === 'keep') {
+        logAbnormal({
+          flow: 'order_submit', step: decision.action === 'wrong' ? 'wrong_product_purchase' : 'capture_product_differs_confirmed',
+          category: 'validation', source: 'server', severity: 'warn',
+          error: new Error(decision.action === 'wrong'
+            ? `잘못 구매로 제출 막음 — 고른 상품 「${decision.chosen.label}」 · 산 상품 「${decision.bought.label}」`
+            : `캡처는 다른 상품으로 읽혔으나 리뷰어가 고른 상품이 맞다고 확인 — 고른 「${holdCtx.optionKey}」 · 캡처 「${decision.capturedKey || '?'}」`),
+          context: { campaignId: holdCtx.campaignId, applicationId: holdCtx.applicationId, sheetId, tabName,
+                     loginPhone8: _idPhone8 ? '***' + _idPhone8.slice(-4) : '' },
+        });
+        if (decision.action === 'wrong') {
+          return res.json({ ok: false, code: 'PRODUCT_WRONG_PURCHASE', chosen: decision.chosen, bought: decision.bought, error: decision.error });
         }
       }
     }
