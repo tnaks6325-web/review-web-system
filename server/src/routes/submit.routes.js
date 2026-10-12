@@ -991,7 +991,7 @@ router.post('/order', async (req, res, next) => {
           // 리뷰어가 경고 확인 후 제출(identityConfirmed) — 통과시키되 이상로그로 관리자 가시성 확보
           if (String(b.identityConfirmed) === 'true') {
             logAbnormal({
-              flow: 'order_submit', step: 'identity_confirm_override', source: 'validation',
+              flow: 'order_submit', step: 'identity_confirm_override', category: 'validation', source: 'server', severity: 'warn',
               error: new Error('신원 유사도 경고 확인 후 제출 (리뷰어 확인 완료)'),
               context: { sheetId, tabName, loginPhone8: _idPhone8, recipient: recipient || '' },
             });
