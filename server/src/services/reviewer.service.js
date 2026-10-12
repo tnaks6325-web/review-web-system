@@ -182,7 +182,19 @@ async function verifyReviewer(name, phone8) {
   }
 
   // 3) 매칭 실패 — 원인별 세부 에러 메시지
-  // 입력한 번호가 이미 다른 사람의 타계정으로 등록되어 있는지 확인
+  // ★ 결정 226 B(사용자 확정 2026-10-12) — 번호는 맞고 이름이 다르면 **그 번호로 가입된 이름**을 알려준다
+  //   (타인이 남의 번호로 로그인할 일은 없다 · 같은 번호로 다른 이름을 새로 만드는 길은 닫혔다).
+  //   본계정 번호가 먼저다 — 본인 번호를 쓰는 같은 번호 타계정(정리 대상)이 있어도 가입된 이름은 본계정 이름이다.
+  const loginHint = (registered) =>
+    `이 번호는 '${registered}' 이름으로 가입돼 있어요. 이름을 '${registered}' 그대로 넣고 로그인해 주세요.`;
+  const { rows: phoneRows } = await pool.query(
+    'SELECT name FROM reviewers WHERE phone8 = $1 LIMIT 2', [p8]
+  );
+  const selfNames = [...new Set(phoneRows.map((r) => String(r.name || '').trim()).filter(Boolean))];
+  if (selfNames.length === 1) return { ok: false, error: loginHint(selfNames[0]), field: 'name' };
+
+  // 입력한 번호가 다른 사람의 타계정으로 등록되어 있는지 확인
+  const subNames = new Set();
   for (const row of subRows) {
     try {
       const subs = typeof row.sub_accounts === 'string' ? JSON.parse(row.sub_accounts) : row.sub_accounts;
@@ -190,21 +202,14 @@ async function verifyReviewer(name, phone8) {
       for (const sub of subs) {
         const subPhone = (sub.phone || '').replace(/[^0-9]/g, '');
         const subPhone8 = subPhone.length >= 8 ? subPhone.slice(-8) : subPhone;
-        if (subPhone8 === p8) {
-          // ★ A안: 같은 번호 자체는 허용. 다만 입력 이름이 등록된 이름이 아니면 가입/타계정추가 유도
-          return { ok: false, error: '이 번호로 등록된 이름이 아닙니다. 이름을 확인하시거나, 등록 탭에서 같은 번호로 추가 등록해주세요.', field: 'name' };
-        }
+        if (subPhone8 === p8 && String(sub.name || '').trim()) subNames.add(String(sub.name).trim());
       }
     } catch (_) { continue; }
   }
-
-  // 번호가 DB에 존재하는지 확인 (번호는 맞으나 이름이 다른 경우)
-  const { rows: phoneRows } = await pool.query(
-    'SELECT name FROM reviewers WHERE phone8 = $1 LIMIT 1', [p8]
-  );
-  if (phoneRows.length > 0) {
-    // 전화번호로 등록된 계정은 있으나 이름이 일치하지 않음 → 이름 확인 유도
-    return { ok: false, error: '입력하신 전화번호로 등록된 계정이 있으나 이름이 일치하지 않습니다. 이름을 다시 확인해주세요.', field: 'name' };
+  if (subNames.size === 1) return { ok: false, error: loginHint([...subNames][0]), field: 'name' };
+  if (subNames.size > 1 || phoneRows.length > 0) {
+    // 같은 번호에 이름이 여럿(정리 전 잔여) — 어느 이름인지 단정하지 않는다.
+    return { ok: false, error: '입력하신 전화번호로 등록된 계정이 있으나 이름이 일치하지 않습니다. 가입할 때 쓴 이름으로 다시 입력해주세요.', field: 'name' };
   }
 
   // 이름이 DB에 존재하는지 확인 (이름은 맞으나 번호가 다른 경우)
