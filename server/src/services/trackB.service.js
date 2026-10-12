@@ -3323,6 +3323,9 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       reviewTypeMixed: rtMixed,
       reviewTypeMix: rtMixed ? rtMix.map(m => ({ type: m.type, label: reviewTypeLabel(m.type) || m.type, quantity: m.quantity })) : null,
       campaignId: c ? c.id : null,
+      /* ★ 결정 229: 상품별 판매 상태(품절 일시 멈춤·쌓인 신고) — 작업조건 카드 [품절로 멈추기]/[다시 열기] 줄.
+           null = 못 읽음/공고 없음 → 카드는 그 줄을 그리지 않는다(구버전 서버와 같은 화면). */
+      optionSales: c ? await require('./campaignOptionPause.service').optionSalesForCampaign(db, c.id) : null,
       campaignCount: camps.length,
       workOrderId: (wo && wo.id) || null,   // [미설정] → 작업오더 수정 창구를 열 때만 쓴다
     };

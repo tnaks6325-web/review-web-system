@@ -195,7 +195,7 @@ t('⑤ 외부모집 수동제출도 같은 규율(product 단위면 옵션 칸 �
 
 // ── 읽기 경로 정화·컬럼 ───────────────────────────────────────────
 t('읽기 경로 SELECT 에 새 컬럼 합류(뷰·프리필)', () => {
-  assert.match(routes, /product_name, unit_kind, inflow_guide_html, inflow_guide_images, thumbnail_url\n\s*FROM campaign_options WHERE campaign_id=\$1/);
+  assert.match(routes, /product_name, unit_kind, inflow_guide_html, inflow_guide_images, thumbnail_url(?:, paused_at)?\n\s*FROM campaign_options WHERE campaign_id=\$1/);
   assert.match(routes, /product_name AS "productName", unit_kind AS "unitKind"/);
   assert.match(routes, /inflow_guide_html AS "inflowGuideHtml", inflow_guide_images AS "inflowGuideImages"/);
 });

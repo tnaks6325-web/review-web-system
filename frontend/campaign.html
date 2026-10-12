@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
   <script src="api.js"></script>
-  <script src="js/campaign-cards.js?v=20260916-direct-delivery"></script>
+  <script src="js/campaign-cards.js?v=20261012-optpause"></script>
   <script src="js/campaign-workdetail.js"></script>
   <style>
     :root{ --p:#3182f6; --p-light:#e8f1fe; --p-dark:#1b64da; --ok:#12b886; --ok-light:#D1FAE5;
@@ -811,6 +811,8 @@ function _optRemainText(o){
   // ★ 관리자 미리보기 '모집중 가정' — 마감 상태를 잔여 문구로 드러내지 않는다(진행 화면 확인이 목적)
   if(_pvOpenSim() && o.status !== 'open') return '모집중 가정(미리보기)';
   if(o.status === 'soldout' || o.status === 'closed') return '마감';
+  // ★ 결정 229: 품절로 잠시 멈춘 상품 — 담당자가 확인 뒤 다시 열 수 있다(마감과 다른 말)
+  if(o.status === 'paused') return '품절로 잠시 멈춤';
   // ★ 결정 228 순차진행 일정표: 상품마다 정해진 날에만 열린다 — 날짜로 말한다(없으면 정규 일정 뒤 추가 모집 결정 대기)
   if(o.seqDays && o.status === 'today_done') return o.opensOn ? '오늘 마감 (' + _seqMD(o.opensOn) + ' 다시)' : '오늘 마감';
   if(o.seqDays && o.status === 'waiting') return (o.remaining != null ? o.remaining + '자리 · ' : '') + (o.opensOn ? _seqMD(o.opensOn) + ' 시작' : '추가 모집 결정 대기');
@@ -837,6 +839,7 @@ function _optBadgeHtml(o, isCur){
   if(_pvOpenSim()) return '';   // ★ 모집중 가정: 마감 배지를 붙이지 않는다
   if(o.status === 'soldout' || o.status === 'closed') return '<span class="obadge soldout">마감</span>';
   if(o.status === 'today_done') return '<span class="obadge soldout">오늘마감</span>';
+  if(o.status === 'paused') return '<span class="obadge soldout">일시 멈춤</span>';   // ★ 결정 229
   if(o.status === 'waiting') return '<span class="obadge wait">대기</span>';
   if(o.remaining != null && o.remaining <= 3) return '<span class="obadge hot">임박</span>';
   return '';
@@ -1379,9 +1382,10 @@ async function _doApply(optionKey, sub){
     }
     if(j.reason === 'not_registered'){ toast('리뷰어 등록 후 참여할 수 있어요'); setTimeout(()=>location.href='/search.html#register', 900); return; }
     // 옵션 관련 사유 → 옵션 상태 갱신 후 선택 시트 재오픈
-    if(['option_required','option_invalid','option_soldout','option_today_done','option_unavailable','option_waiting'].includes(j.reason)){
+    if(['option_required','option_invalid','option_soldout','option_today_done','option_unavailable','option_waiting','option_paused'].includes(j.reason)){
       toast(j.reason === 'option_required' ? '참여할 옵션을 선택해주세요'
         : j.reason === 'option_waiting' ? '앞 상품이 마감된 뒤에 열리는 상품이에요. 지금 모집 중인 상품을 선택해주세요'
+        : j.reason === 'option_paused' ? '품절로 잠시 멈춘 상품이에요. 다른 상품을 선택해주세요'
         : '선택한 옵션이 마감됐어요. 다른 옵션을 선택해주세요');
       await loadCampaign();
       const pickable = ((_camp && _camp.options) || []).filter(o => o.selectable);
@@ -1445,6 +1449,7 @@ async function _doChangeOption(newKey){
       return;
     }
     if(j.reason === 'option_waiting'){ toast('앞 상품이 마감된 뒤에 열리는 상품이에요'); await enterJoined(); return; }
+    if(j.reason === 'option_paused'){ toast('품절로 잠시 멈춘 상품이에요. 다른 상품을 선택해주세요'); await enterJoined(); return; }   // ★ 결정 229
     if(['option_soldout','option_today_done','option_closed','option_invalid'].includes(j.reason)){
       toast('그 옵션은 마감됐어요. 다른 옵션을 선택해주세요'); await enterJoined(); return;
     }

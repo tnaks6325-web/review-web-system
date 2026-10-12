@@ -101,6 +101,9 @@ const REQUIRED_SCHEMA = [
   ['campaign_options', 'inflow_guide_html'],
   ['campaign_options', 'inflow_guide_images'],
   ['campaign_options', 'thumbnail_url'],          // 181 — 선택지별 사진(순차진행 공고의 지금 모집 상품 사진, 결정 214)
+  ['campaign_options', 'paused_at'],              // 184 — 상품 품절 일시 멈춤(결정 229) — 참여 게이트·공개 목록 SELECT
+  ['campaign_options', 'paused_reason'],
+  ['campaign_options', 'paused_by'],
   ['recruit_campaigns', 'carry_mode'],            // 098 — 공고 create/update INSERT·SET + 공개 /list 명시 SELECT(없으면 발행·수정·목록 42703)
   ['recruit_campaigns', 'carry_strategy'],        // 139 — 이월 배치 전략(next/spread/extend)·공개 /list 상태엔진 입력
   // 130 — 보관(폐기). 공개 /list·관리자 /admin/list 의 WHERE 절에 들어가므로 컬럼이 없으면
@@ -144,6 +147,8 @@ const REQUIRED_SCHEMA = [
 // 이 표 자체가 없으면 새 V2 탭에서 리뷰·입금 상태를 안전하게 처리할 수 없으므로
 // 컬럼 프리플라이트와 함께 부팅을 막는다.
 const REQUIRED_TABLES = [
+  'campaign_option_soldout_reports',              // 184 — 리뷰어 품절 신고(상품 이름 바꾸기 tx 가 함께 고친다 — 없으면 공고 저장이 죽는다)
+  'campaign_option_alerts',                       // 184 — 관리자 전원 품절 알림
   'review_reminder_states',
   'review_reminder_deliveries',
   'reviewer_identity_match_audits',                // 147 — 캡처/수동 명의확인 비식별 감사기록

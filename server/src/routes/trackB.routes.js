@@ -1687,6 +1687,39 @@ router.post('/sequential-end-prompts/apply', authMiddleware, internalMiddleware,
   }
 });
 
+/* ══ 결정 229 — 상품 품절 일시 멈춤 · 관리자 전원 품절 알림 ══════════════════════════════════════
+   ★ 내부 직원(마스터·관리자·AE) 전원 — 사용자 확정("리뷰어를 제외한 관리자들 전체"). 광고주·리뷰어는 닿지 않는다.
+   ★ 판정·쓰기는 전부 campaignOptionPause.service(단일 출처) — 화면은 그리기와 누른 것 전달만. */
+router.get('/option-alerts', authMiddleware, internalMiddleware, async (req, res) => {
+  try {
+    res.json(await require('../services/campaignOptionPause.service').listOpenAlerts());
+  } catch (e) {
+    logger.warn('[option-alerts] 조회 실패(팝업 미표시): ' + e.message);
+    res.json({ ok: false, items: [], error: '품절 알림 조회에 실패했습니다.' });
+  }
+});
+router.post('/option-alerts/:id/resolve', authMiddleware, internalMiddleware, async (req, res) => {
+  try {
+    const out = await require('../services/campaignOptionPause.service')
+      .resolveAlert({ id: req.params.id, action: String((req.body || {}).action || ''), by: _by(req) });
+    res.status(out.ok ? 200 : (out.code || 400)).json(out);
+  } catch (e) {
+    logger.warn('[option-alerts/resolve] 실패: ' + e.message);
+    res.status(500).json({ ok: false, error: '처리하지 못했습니다. 잠시 후 다시 시도해주세요.' });
+  }
+});
+router.post('/campaigns/:id/option-pause', authMiddleware, internalMiddleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const out = await require('../services/campaignOptionPause.service')
+      .setOptionPaused({ campaignId: String(req.params.id), optKey: b.optKey, op: b.paused === true ? 'pause' : (b.paused === false ? 'resume' : ''), by: _by(req) });
+    res.status(out.ok ? 200 : (out.code || 400)).json(out);
+  } catch (e) {
+    logger.warn('[option-pause] 실패: ' + e.message);
+    res.status(500).json({ ok: false, error: '처리하지 못했습니다. 잠시 후 다시 시도해주세요.' });
+  }
+});
+
 router.get('/campaigns/:id/daily-plan', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { getPlanOverview } = require('../services/campaignPlan.service');

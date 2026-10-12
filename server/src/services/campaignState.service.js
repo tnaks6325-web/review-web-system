@@ -1576,6 +1576,9 @@ function optionTotalBalance(usage, views) {
 }
 
 /** 선택지 하나가 그날 받을 수 있는 수 = min(일건수, 남은 정원). 정원 무제한이면 일건수. */
+/** 결정 229 끄는 스위치 — 0 이면 품절 멈춤을 무시한다(= 전부 열림 · fail-open). 신고·알림 쪽(campaignOptionPause)과 같은 환경변수. */
+const OPTION_PAUSE_ENABLED = process.env.CAMPAIGN_OPTION_PAUSE !== '0';
+
 function _optionDayRoom(o) {
   const dl = Number(o.dailyLimit) || 0;
   const rt = Number(o.recruitTotal) || 0;
@@ -1609,7 +1612,7 @@ function optionDayCapacity(caps) {
  * @param campState computeCampaignState 결과(캠페인 게이트 반영 — 옵션이 열려도 캠페인이 닫히면 못 뽑음)
  * @returns { optKey, payAmount, recruitTotal, dailyLimit,
  *            used, remaining(null=무제한), todayUsed, todayRemaining(null=제한없음),
- *            status: 'open'|'soldout'|'today_done'|'closed', selectable }
+ *            status: 'open'|'soldout'|'today_done'|'closed'|'paused'(결정 229 품절 일시 멈춤), selectable, paused? }
  */
 function computeOptionView(opt, cnt, campState, viewOpts = null) {
   const c = cnt || { activeHolds: 0, todayActiveHolds: 0, submitted: 0, todaySubmitted: 0 };
@@ -1631,6 +1634,11 @@ function computeOptionView(opt, cnt, campState, viewOpts = null) {
   else if (remaining !== null && remaining <= 0) status = 'soldout';           // 정원 소진
   else if (todayRemaining !== null && todayRemaining <= 0) status = 'today_done'; // 오늘 소진(내일 재개)
   else status = 'open';
+  /* ★★ 결정 229: 품절 일시 멈춤 — 상태(status)와 따로 둔 칸(paused_at). 마감·정원 소진이 아니면 '멈춤'이 이긴다(고를 수 없음).
+       ★ 'closed' 로 접지 않는다 — liveOptions(상품을 고르는 공고인가)는 멈춘 상품도 살아 있는 것으로 봐야 한다
+         (전부 멈췄을 때 상품 없이 참여되는 구멍). 조회에 칸이 없으면(하루 몫 재료 등) 종전 그대로 = 인원·예상 무접촉. */
+  const paused = OPTION_PAUSE_ENABLED && !!opt.paused_at && status !== 'closed';
+  if (paused && (status === 'open' || status === 'today_done')) status = 'paused';
 
   // 실제 선택 가능 = 옵션 open AND 캠페인 상태가 신청 가능(open) — 캠페인이 닫히면 옵션도 못 뽑음
   const campOpen = !campState || campState.state === 'open';
@@ -1654,6 +1662,7 @@ function computeOptionView(opt, cnt, campState, viewOpts = null) {
     externalUsed: Math.max(0, Number(c.externalOrders) || 0),   // 그중 공고 밖 주문 수(관리자 표시용)
     status,
     selectable: status === 'open' && campOpen,
+    ...(paused ? { paused: true } : {}),
   };
 }
 
@@ -1705,8 +1714,8 @@ function computeOptionViews(rows, countsMap, campState, { sequential = false, to
         const byDaily = Math.max(0, amt - (Number(v.todayUsed) || 0));
         v.dailyLimit = amt;
         v.todayRemaining = v.remaining !== null ? Math.min(byDaily, v.remaining) : byDaily;
-        v.status = (v.remaining !== null && v.remaining <= 0) ? 'soldout' : (v.todayRemaining <= 0 ? 'today_done' : 'open');
-        v.selectable = v.status === 'open' && campOpen;
+        v.status = (v.remaining !== null && v.remaining <= 0) ? 'soldout' : (v.paused ? 'paused' : (v.todayRemaining <= 0 ? 'today_done' : 'open'));
+        v.selectable = v.status === 'open' && campOpen;   // ★ 결정 229: 오늘 상품이 멈춰 있으면 오늘은 받지 않는다(날짜는 그대로 차지)
         if (v.status !== 'soldout') v.sequenceCurrent = true;
         // 오늘 몫을 다 받았으면 화면이 "언제 다시 열리는지"를 말할 수 있게 — 이 상품의 다음 날(없으면 null)
         const tm = new Date(Date.parse(t + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10);

@@ -367,9 +367,9 @@ async function tabOptionChoices(db, { sheetId, tabName } = {}, now = new Date())
     }
     if (!pick) return null;
     const { rows: opts } = await db.query(
-      `SELECT opt_key, product_name, unit_kind, recruit_total, daily_limit, status
+      `SELECT opt_key, product_name, unit_kind, recruit_total, daily_limit, status, paused_at
          FROM campaign_options WHERE campaign_id = $1 AND COALESCE(status, 'active') <> 'closed'
-        ORDER BY sort_order, id`, [pick.id]);
+        ORDER BY sort_order, id`, [pick.id]);   // ★ 결정 229: 멈춤은 안내로만(수기 주문은 담당자 판단 — 막지 않는다)
     if (!opts.length) return null;
     const { fetchOptionCounts, computeOptionViews, fetchSequentialCampaignIds, sequentialFor } = require('./campaignState.service');
     const counts = await fetchOptionCounts(db, pick.id, now);

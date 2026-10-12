@@ -880,10 +880,15 @@ function connectSSE() {
     };
 
     // 이벤트별 핸들러
-    ['review_submit', 'order_submit', 'order_update', 'work_order_new', 'reviewer_alert', 'image_extract', 'image_upload', 'index_build', 'system', 'dirty_detected', 'smart_build_done', 'dirty_auto_built', 'cs_new_inquiry', 'cs_message', 'review_edit_request'].forEach(function(evtType) {
+    ['review_submit', 'order_submit', 'order_update', 'work_order_new', 'reviewer_alert', 'image_extract', 'image_upload', 'index_build', 'system', 'dirty_detected', 'smart_build_done', 'dirty_auto_built', 'cs_new_inquiry', 'cs_message', 'review_edit_request', 'option_alert'].forEach(function(evtType) {
       _sseSource.addEventListener(evtType, function(event) {
         try {
           const data = JSON.parse(event.data);
+          // ★ 결정 229: 상품 품절 알림 — 팝업 모듈이 서버에서 다시 읽는다(알림센터에는 쌓지 않는다 — 팝업이 1차 통로)
+          if (evtType === 'option_alert') {
+            if (window.OptionAlertPrompt) { try { window.OptionAlertPrompt.refresh(); } catch(_){} }
+            return;
+          }
           // ★ C/S 문의 이벤트: 새 문의만 알림센터에 표시, 갱신은 전용 핸들러가 처리
           if (evtType === 'cs_new_inquiry' || evtType === 'cs_message') {
             if (evtType === 'cs_new_inquiry') _addNotification(data);

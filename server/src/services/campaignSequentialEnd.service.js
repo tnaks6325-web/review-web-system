@@ -70,7 +70,7 @@ async function listSequentialEnds(admin, opts = {}) {
     linkedWorkOrdersForCampaigns(db, sIds, ['created_by']).catch(() => new Map()),
     _decided(db, sIds),
     st.fetchOptionCountsBatch(db, sIds, now),
-    db.query(`SELECT campaign_id, opt_key, recruit_total, status FROM campaign_options
+    db.query(`SELECT campaign_id, opt_key, recruit_total, status, paused_at FROM campaign_options
                WHERE campaign_id::text = ANY($1::text[]) ORDER BY campaign_id, (status='closed'), sort_order, id`, [sIds]).then(r => r.rows),
   ]);
   const items = [];
@@ -83,7 +83,8 @@ async function listSequentialEnds(admin, opts = {}) {
     const cm = counts.get(c.id) || counts.get(id) || new Map();
     const views = optRows.filter(o => String(o.campaign_id) === id && String(o.status || 'active') !== 'closed')
       .map(o => st.computeOptionView(o, cm.get(o.opt_key), null, { ignoreDailyLimit: true }));
-    const shortages = views.filter(v => v.remaining !== null && v.remaining > 0).map(v => ({ optKey: v.optKey, n: v.remaining }));
+    // ★ 결정 229(코드리뷰 P2): 품절로 멈춘 상품은 표시를 붙인다 — 그대로 추가 모집을 잡으면 그날은 아무도 고를 수 없다
+    const shortages = views.filter(v => v.remaining !== null && v.remaining > 0).map(v => ({ optKey: v.optKey, n: v.remaining, ...(v.paused ? { paused: true } : {}) }));
     if (!shortages.length) continue;
     items.push({ campaignId: id, title: String(c.title || ''), thumbnailUrl: String(c.thumbnail_url || ''),
       end: sch.end, regularEnd: sch.regularEnd, shortages, total: shortages.reduce((a, x) => a + x.n, 0), optionOrder: sch.optionOrder });
