@@ -7756,7 +7756,7 @@ function _renderInlineSubList(subs) {
    ★ 참여형 공고 화면(embed)·배치·네이버+쿠팡 모드는 대상 아님 — 상품은 홀드가 정한다.
    ★ onclick 에 상품명을 넣지 않는다 — 인덱스만(위임 리스너).
    ══════════════════════════════════════════════════════ */
-const _OFP = { products: [], pick: {}, ai: {}, aiDone: {}, capName: {}, open: {}, bound: false };
+const _OFP = { products: [], pick: {}, ai: {}, aiDone: {}, capName: {}, capOpt: {}, open: {}, bound: false };
 
 function _ofpActive() {
   return _OFP.products.length >= 2 && !_EMBED_CTX && !_BATCH && !window._ncMode && !_PREVIEW_MODE;
@@ -7777,8 +7777,9 @@ async function _ofpLoad(sheetId, tabName) {
   _orderCardIds.forEach(_ofpRender);
 }
 
-function _ofpOnExtracted(cid, label, rawName) {
+function _ofpOnExtracted(cid, label, rawName, rawOption) {
   _OFP.capName[cid] = rawName || "";
+  _OFP.capOpt[cid] = rawOption || "";   // ★ 결정 230: 캡처의 옵션 글자(사이즈·색상) — 참여 공고 제출 때 서버가 고른 상품과 대조
   _OFP.aiDone[cid] = true;
   const ok = label && _OFP.products.indexOf(label) >= 0 ? label : "";
   _OFP.ai[cid] = ok;
@@ -7789,8 +7790,54 @@ function _ofpOnExtracted(cid, label, rawName) {
 
 function _ofpOnCaptureCleared(cid) {
   if (_OFP.pick[cid] && _OFP.pick[cid] === _OFP.ai[cid]) delete _OFP.pick[cid];
-  delete _OFP.ai[cid]; delete _OFP.aiDone[cid]; delete _OFP.capName[cid]; delete _OFP.open[cid];
+  delete _OFP.ai[cid]; delete _OFP.aiDone[cid]; delete _OFP.capName[cid]; delete _OFP.capOpt[cid]; delete _OFP.open[cid];
   _ofpRender(cid);
+}
+
+/* ★ 결정 230 — 「실제로 산 상품」 확인 창(사용자 확정 2026-10-12 ①(가)).
+   서버가 PRODUCT_MISMATCH(캡처 속 상품 ≠ 고른 상품)를 돌려주면 띄운다. 고른 키를 돌려주고, 닫으면 null.
+   ★ 선택지는 서버가 준 두 개뿐(캡처 상품·처음 고른 상품) — 화면이 다른 값을 지어내지 않는다(서버가 다시 검사한다).
+   ★ 모양은 구매양식 「구매한 상품」 고르기(.ofp-opt)와 같은 단추를 쓴다. */
+function _pmvAsk(res, orderNo) {
+  return new Promise((resolve) => {
+    const cap = (res && res.captured) || {}, cho = (res && res.chosen) || {};
+    if (!cap.key || !cho.key) { resolve(null); return; }
+    const esc = (v) => (typeof escHtml === "function" ? escHtml(String(v || "")) : String(v || "").replace(/[&<>"']/g, ""));
+    const ov = document.createElement("div");
+    ov.className = "modal-overlay pmv-overlay";
+    ov.setAttribute("role", "dialog"); ov.setAttribute("aria-modal", "true"); ov.setAttribute("aria-labelledby", "pmvTitle");
+    const opts = [{ key: cap.key, label: cap.label || cap.key, tag: "캡처에 보이는 상품" },
+                  { key: cho.key, label: cho.label || cho.key, tag: "처음 고른 상품" }];
+    ov.innerHTML =
+      '<div class="modal-box pmv-box"><div class="modal-header"><h3 id="pmvTitle">' + (orderNo ? orderNo + "번째 주문 · " : "") + '실제로 산 상품을 골라 주세요</h3></div>'
+      + '<div class="modal-body">'
+      + '<p class="pmv-lead">올린 주문 캡처에는 <b>' + esc(cap.label || cap.key) + '</b>(으)로 보여요.<br>처음 고른 상품과 달라요. 실제로 산 상품으로 기록돼요.</p>'
+      + '<div class="ofp-list pmv-list" role="radiogroup">'
+      + opts.map((o, k) => '<button type="button" class="ofp-opt" role="radio" aria-checked="false" data-pmv="' + k + '">'
+          + '<span class="ofp-radio"></span><span class="ofp-nm">' + esc(o.label) + '</span><span class="ofp-match">' + o.tag + '</span></button>').join("")
+      + '</div>'
+      + '<p class="pmv-note">고른 상품의 자리가 없으면 접수되지 않아요. 그때는 담당자에게 문의해 주세요.</p>'
+      + '<div class="modal-actions"><button type="button" class="btn-ghost" data-pmv-cancel>취소</button>'
+      + '<button type="button" class="btn-primary" data-pmv-ok disabled>이 상품으로 제출</button></div>'
+      + '</div></div>';
+    let sel = -1, done = false;
+    const okBtn = ov.querySelector("[data-pmv-ok]");
+    const finish = (v) => { if (done) return; done = true; try { ov.remove(); } catch (_) {} document.removeEventListener("keydown", onKey); resolve(v); };
+    const onKey = (e) => { if (e.key === "Escape") finish(null); };
+    ov.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-pmv]");
+      if (b) {
+        sel = Number(b.getAttribute("data-pmv"));
+        ov.querySelectorAll("[data-pmv]").forEach(x => x.setAttribute("aria-checked", x === b ? "true" : "false"));
+        okBtn.disabled = false; return;
+      }
+      if (e.target.closest("[data-pmv-cancel]") || e.target === ov) { finish(null); return; }
+      if (e.target.closest("[data-pmv-ok]") && sel >= 0) finish(opts[sel].key);
+    });
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(ov);
+    const first = ov.querySelector("[data-pmv]"); if (first) first.focus();
+  });
 }
 
 function _ofpRender(cid) {
@@ -8141,7 +8188,7 @@ async function _callCardExtractAi(cid, base64, mimeType) {
     st.extractToken = json.extractToken || "";
     st.imageHash = json.imageHash || "";
     st.extracted = { orderNumber: json.orderNumber||"", recipient: json.recipient||"", phone: json.phone||"", address: json.address||"", price: json.price||"", orderer:json.orderer||"", store:json.store||"" };
-    _ofpOnExtracted(cid, json.productLabel || "", json.productName || "");
+    _ofpOnExtracted(cid, json.productLabel || "", json.productName || "", json.productOption || "");
     // extractToken은 AI 원본 추출값의 해시에 결속된다. 서버가 가림정보를 보완한
     // st.extracted와 섞지 않고 재확인 때 동일 증명을 검증할 수 있도록 원본을 보존한다.
     st.proofExtracted = { ...st.extracted };
@@ -9282,6 +9329,9 @@ async function submitOrderForm() {
       // ★ 2026-10-02 B안: 고른 상품 + 캡처에서 읽은 상품명(서버가 짝지어 다르면 로그에 남긴다)
       selectedProduct:    _ofpActive() ? (_OFP.pick[cid] || "") : "",
       productCaptureName: _ofpActive() ? (_OFP.capName[cid] || "") : "",
+      // ★ 결정 230: 캡처 판독값 원본 — 참여 공고(홀드) 제출일 때만 아래 payload 가 싣는다
+      productCaptureRaw:    _OFP.capName[cid] || "",
+      productCaptureOptRaw: _OFP.capOpt[cid] || "",
       identityConfirmed:  false
       ,saveShoppingId: !!document.getElementById(cid+"_saveIdChk")?.checked
     };
@@ -9400,7 +9450,10 @@ async function submitOrderForm() {
       extractedPhone:     o.extractedPhone     || "",
       extractedAddress:   o.extractedAddress   || "",
       selectedProduct:    o.selectedProduct    || "",
-      productCaptureName: o.productCaptureName || "",
+      // ★ 결정 230: 참여 공고(홀드) 제출이면 캡처에서 읽은 상품명·옵션을 함께 보낸다 — 서버가 고른 상품과 다르면
+      //   PRODUCT_MISMATCH 로 되묻는다(아래). 홀드가 없는 구매양식은 종전 값(B안) 그대로.
+      productCaptureName: o.productCaptureName || ((bh || (_EMBED_CTX && _EMBED_CTX.app)) ? (o.productCaptureRaw || "") : ""),
+      productCaptureOption: (bh || (_EMBED_CTX && _EMBED_CTX.app)) ? (o.productCaptureOptRaw || "") : "",
       identityConfirmed:  o.identityConfirmed ? "true" : "false",
       identityApprovalToken: o.identityApprovalToken || "",
       // ★ 참여형 캠페인 홀드 확정 문맥(M2) — embed 진입일 때만 전송. 서버가 소유권 3중검증 후 확정
@@ -9428,6 +9481,20 @@ async function submitOrderForm() {
         } catch(e2) { throw new Error("서버 연결 실패"); }
       }
       if (!res) throw new Error("서버 응답이 없습니다.");
+
+      // ★ 결정 230: 캡처 속 상품이 고른 상품과 다르다 — 실제로 산 상품을 고르게 하고 그 값으로 다시 제출한다.
+      //   (그 상품 자리가 없으면 서버가 PRODUCT_UNAVAILABLE 로 막고, 아래 공통 실패 처리가 그 문구를 보여준다)
+      if (!res.ok && res.code === "PRODUCT_MISMATCH") {
+        const picked = await _pmvAsk(res, orders.length > 1 ? (i + 1) : 0);
+        if (!picked) {
+          showToast((orders.length > 1 ? `${i+1}번째 주문은 ` : "") + "제출하지 않았어요. 산 상품을 확인한 뒤 다시 제출해 주세요.", "warning");
+          results.push({ phone8: bh ? bh.phone8 : "", name: bh ? bh.name : "", ok: false, error: "산 상품 확인이 필요해 제출하지 않았어요" });
+          continue;
+        }
+        payload.confirmedProductKey = picked;
+        try { res = await gasPost(payload, 30000); } catch(_) { throw new Error("서버 연결 실패 (상품 확인 후 제출)"); }
+        if (!res) throw new Error("서버 응답이 없습니다.");
+      }
 
       // ★ 서버 신원게이트 판정 처리 (precheck와 판정이 달라진 경우의 탈출구 —
       //   예: 앞 주문 제출로 타계정 정보가 자동보강되어 뒤 주문 판정이 바뀐 경우)

@@ -1078,7 +1078,14 @@ router.post('/workdesk/edit', authMiddleware, async (req, res, next) => {
         throughWrite = { attempted: true, ok: false, reason: 'exception', message: e.message };
       }
     }
-    res.status(out.ok ? 200 : (out.error === 'concurrent_edit_conflict' ? 409 : 400)).json({ ...out, throughWrite });
+    // ★ 결정 230 ③(가): 상품 칸을 고치면 그 리뷰어의 참여 기록(상품별 인원 세기)도 따라 바꾼다 — 커밋 뒤 별도 tx.
+    //   주문 원장에는 되쓰지 않는다(결정 018). 실패해도 편집 결과는 그대로(무시 · 로그).
+    let applicationSync = null;
+    if (out.ok && (role === 'master' || role === 'admin' || role === 'staff')) {
+      applicationSync = await require('../services/productMismatchVerify.service')
+        .syncApplicationFromWorkboard({ sheetId, tabName, rowId, field, by: _by(req) });
+    }
+    res.status(out.ok ? 200 : (out.error === 'concurrent_edit_conflict' ? 409 : 400)).json({ ...out, throughWrite, applicationSync });
   } catch (err) { next(err); }
 });
 router.post('/workdesk/revert', authMiddleware, async (req, res, next) => {
@@ -1087,7 +1094,14 @@ router.post('/workdesk/revert', authMiddleware, async (req, res, next) => {
     if (!sheetId || !tabName || !rowId || !field) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId, field 필수' });
     const g = await _ensureWorkdeskCellEditScope(req, { sheetId, tabName, field }); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
     const out = await svc.revertWorkdeskEdit({ sheetId, tabName, rowId, field, by: _by(req) });
-    res.json(out);
+    // ★ 결정 230 ③: 되돌리면 참여 기록도 지금 보이는 값(대개 처음 고른 상품)으로 돌아간다.
+    const role = _role(req);
+    let applicationSync = null;
+    if (out && out.ok && (role === 'master' || role === 'admin' || role === 'staff')) {
+      applicationSync = await require('../services/productMismatchVerify.service')
+        .syncApplicationFromWorkboard({ sheetId, tabName, rowId, field, by: _by(req) });
+    }
+    res.json({ ...out, applicationSync });
   } catch (err) { next(err); }
 });
 

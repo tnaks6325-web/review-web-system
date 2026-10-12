@@ -1235,3 +1235,10 @@ body.col-resizing .col-drag-handle{pointer-events:auto!important}
 .ofp-match{flex-shrink:0;font-size:.66rem;font-weight:700;color:var(--p-d,#1b64da);background:#fff;border:1px solid #b9d3fb;border-radius:999px;padding:1px 7px}
 .ofp-more{justify-self:start;font:inherit;font-size:.78rem;color:var(--t2,#4B5563);background:none;border:0;padding:2px;cursor:pointer;text-decoration:underline;text-underline-offset:3px;text-decoration-color:#c4cad6}
 @media (prefers-reduced-motion:reduce){.ofp-opt,.ofp-radio{transition:none}}
+/* ★ 결정 230 — 「실제로 산 상품」 확인 창(.modal-* 틀 + .ofp-opt 단추 재사용) */
+.pmv-box{max-width:400px}
+.pmv-box .modal-header h3{font-size:.98rem;line-height:1.4;word-break:keep-all}
+.pmv-lead{font-size:.86rem;line-height:1.6;color:var(--t1,#111827);margin:0 0 12px;word-break:keep-all;overflow-wrap:anywhere}
+.pmv-lead b{color:var(--p-d,#1b64da)}
+.pmv-note{font-size:.74rem;line-height:1.5;color:var(--t2,#4B5563);margin:10px 0 0;word-break:keep-all}
+.pmv-box .modal-actions .btn-primary:disabled{opacity:.45;cursor:not-allowed;transform:none;box-shadow:none}

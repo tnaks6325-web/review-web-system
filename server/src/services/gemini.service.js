@@ -185,6 +185,7 @@ const EXTRACT_PROMPT = `당신은 한국 온라인 쇼핑몰 주문 캡쳐 이�
   "price": "결제금액/상품금액",
   "orderer": "주문자 이름",
   "productName": "상품명",
+  "productOption": "주문한 상품의 옵션(사이즈·색상·모델 등 화면에 보이는 그대로, 없으면 빈 문자열)",
   "orderDate": "주문일자",
   "store": "쇼핑몰명 (네이버, 쿠팡, 11번가 등)"
 }
@@ -209,7 +210,8 @@ const EXTRACT_PROMPT = `당신은 한국 온라인 쇼핑몰 주문 캡쳐 이�
 - 이미지가 주문 캡쳐가 아닌 경우 모든 필드를 빈 문자열로 반환`;
 
 // 프롬프트·화면 규칙이 달라지면 접두를 올려 옛 오인식 캐시가 새 판독을 가로막지 않게 한다.
-const EXTRACT_CACHE_VERSION = 'extract3';
+// extract4 (결정 230): productOption 칸 추가 — 옛 캐시는 이 칸이 없어 고른 상품 확인(①)이 그 이미지에서 꺼진다.
+const EXTRACT_CACHE_VERSION = 'extract4';
 // Gemini inline 요청 한도(20MB)에 JSON/프롬프트 여유를 남긴 실제 base64 문자 예산.
 const EXTRACT_INLINE_CHAR_BUDGET = 18 * 1024 * 1024;
 
@@ -533,7 +535,7 @@ async function verifyAddressMatch(naverInfo, coupangInfo) {
 function _fallbackParse(text) {
   const result = {
     orderNumber: '', recipient: '', phone: '', address: '',
-    price: '', orderer: '', productName: '', orderDate: '', store: '',
+    price: '', orderer: '', productName: '', productOption: '', orderDate: '', store: '',
   };
 
   const patterns = {
@@ -544,6 +546,7 @@ function _fallbackParse(text) {
     price:       /["']?price["']?\s*:\s*["']([^"']+)["']/i,
     orderer:     /["']?orderer["']?\s*:\s*["']([^"']+)["']/i,
     productName: /["']?productName["']?\s*:\s*["']([^"']+)["']/i,
+    productOption: /["']?productOption["']?\s*:\s*["']([^"']+)["']/i,
     orderDate:   /["']?orderDate["']?\s*:\s*["']([^"']+)["']/i,
     store:       /["']?store["']?\s*:\s*["']([^"']+)["']/i,
   };

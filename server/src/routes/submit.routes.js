@@ -873,6 +873,42 @@ router.post('/order', async (req, res, next) => {
       });
     }
 
+    /* ★★ 결정 230 — 고른 상품 ≠ 실제 산 상품(사용자 확정 2026-10-12 ①(가)·②(나)).
+       캡처에서 읽은 상품(화면이 보낸 AI 판독값)이 공고의 **다른 상품 하나**를 분명히 가리키면, 아무것도 쓰기 전에
+       리뷰어에게 묻는다(PRODUCT_MISMATCH). 리뷰어가 고른 "실제로 산 상품"(confirmedProductKey)이 다르면
+       구매 전 옵션 변경과 **같은 판정·잠금**으로 홀드를 옮긴 뒤 종전 경로로 접수한다 → 참여 기록·원장·작업표가 함께 그 상품.
+       ★ 그 상품 자리가 없으면 ②(나) 제출을 막고 담당자 문의로 안내(PRODUCT_UNAVAILABLE).
+       ★ 판독값 없음·못 맞춤·조회 실패·만료 등 = 종전 동작(fail-open). 옛 화면은 판독값을 보내지 않아 무변화.
+       ★ 위 멱등 게이트 **뒤**에 둔다 — 이미 접수된 홀드의 재전송을 다시 묻지 않는다. */
+    if (holdCtx && holdCtx.verified && holdCtx.optionKey) {
+      const pv = require('../services/productMismatchVerify.service');
+      const captureText = [b.productCaptureName, b.productCaptureOption]
+        .map(v => String(v == null ? '' : v).slice(0, 300).trim()).filter(Boolean).join(' ');
+      const decision = await pv.decideAtSubmit({ holdCtx, captureText, confirmedKey: b.confirmedProductKey });
+      if (decision.action === 'prompt') {
+        return res.json({
+          ok: false, code: 'PRODUCT_MISMATCH', chosen: decision.chosen, captured: decision.captured,
+          error: `캡처에는 「${decision.captured.label}」로 보여요. 실제로 산 상품을 골라 주세요.`,
+        });
+      }
+      if (decision.action === 'switch') {
+        const fromKey = holdCtx.optionKey;
+        const sw = await pv.switchToActual({ holdCtx, newKey: decision.newKey });
+        if (sw.ok) {
+          await _authoritativeHold(holdCtx);   // 옮긴 상품의 단위 종류·상품명·옵션을 다시 읽는다(같은 단일 출처)
+          logger.info(`[submit/order] 실제로 산 상품으로 변경 app=${holdCtx.applicationId} ${fromKey} → ${holdCtx.optionKey}`);
+        } else if (sw.blocked) {
+          return res.json({ ok: false, code: 'PRODUCT_UNAVAILABLE', reason: sw.reason, error: sw.error });
+        } else {
+          logAbnormal({
+            flow: 'order_submit', step: 'actual_product_switch_failed', category: 'validation', source: 'server', severity: 'warn',
+            error: new Error(`실제로 산 상품으로 옮기지 못해 고른 상품으로 접수(${sw.reason})`),
+            context: { campaignId: holdCtx.campaignId, applicationId: holdCtx.applicationId, from: fromKey, to: decision.newKey },
+          });
+        }
+      }
+    }
+
     const _newIdentityGate = reviewerOrderIdentity.isEnabled() && !!(holdCtx && holdCtx.verified);
     let verifiedIdentityBinding = null;
     if (_newIdentityGate) {
