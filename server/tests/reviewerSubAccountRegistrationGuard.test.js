@@ -24,7 +24,7 @@ async function withQuery(handler, run) {
   await withQuery(async (sql, params) => {
     if (/jsonb_array_elements/.test(sql)) {
       ok('타계정 충돌은 이름이 아닌 전화번호 뒤 8자리로 조회한다', params[0] === '75860135');
-      return { rows: [{ '?column?': 1 }], rowCount: 1 };
+      return { rows: [{ sub_name: '' }], rowCount: 1 };
     }
     if (/INSERT INTO reviewers/.test(sql)) throw new Error('차단된 타계정 번호로 INSERT가 실행되면 안 됩니다');
     throw new Error('예상하지 못한 쿼리');

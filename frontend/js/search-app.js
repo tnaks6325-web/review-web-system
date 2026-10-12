@@ -1871,7 +1871,16 @@ async function _submitRegister(name, phone, p1, p2, kakaoId) {
 
       await doSearch();
     } else if (data && data.reason === "phone_registered_as_sub_account") {
-      _showRegErr("다른 리뷰어의 타계정으로 이미 등록된 번호입니다.");
+      _showRegErr(data.error || "다른 리뷰어의 타계정으로 이미 등록된 번호입니다.");
+    } else if (data && data.reason === "phone_registered_other_name") {
+      // 결정 226 C — 같은 번호는 이미 가입된 이름으로만 쓴다. 로그인 탭으로 옮겨 번호·가입된 이름을 채우고 안내를 그 탭에 띄운다.
+      const _regMsg = data.error || "이미 가입된 번호입니다. 로그인 탭에서 가입한 이름으로 로그인해주세요.";
+      _switchAuthTab("login");
+      const loginPhoneEl = document.getElementById("loginPhoneInput");
+      if (loginPhoneEl) loginPhoneEl.value = p1 + p2;
+      const loginNameEl = document.getElementById("loginNameInput");
+      if (loginNameEl && data.registeredName) loginNameEl.value = data.registeredName;
+      _showLoginErr(_regMsg);
     } else if (data && data.isDuplicate) {
       // 중복 전화번호 → 로그인 탭으로 자동 전환 + 전화번호 pre-fill
       _showRegErr("이미 등록된 전화번호입니다. 로그인 탭에서 로그인해주세요.");
@@ -1887,7 +1896,7 @@ async function _submitRegister(name, phone, p1, p2, kakaoId) {
         if (loginNameEl) loginNameEl.focus();
       }, 900);
     } else {
-      _showRegErr((data && data.message) || "등록 중 오류가 발생했습니다.");
+      _showRegErr((data && (data.error || data.message)) || "등록 중 오류가 발생했습니다.");
     }
   } catch (e) {
     _showRegErr("오류: " + e.message);

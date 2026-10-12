@@ -2,6 +2,11 @@ const pool = require('../db/pool');
 const { mutateSubAccounts } = require('./reviewerIdentityCards.service');
 const { normalizeKakaoId, KAKAO_ID_HINT } = require('../utils/kakaoId');
 
+/** 결정 226 C — 같은 번호·다른 이름 가입 처리. 기본 'block'(막고 가입된 이름 안내) · 비상 시 SAME_PHONE_REGISTER_MODE=allow(종전 타계정 자동 추가). */
+function samePhoneRegisterMode() {
+  return String(process.env.SAME_PHONE_REGISTER_MODE || '').trim().toLowerCase() === 'allow' ? 'allow' : 'block';
+}
+
 /**
  * 리뷰어 등록 (GAS: registerReviewer)
  */
@@ -28,22 +33,24 @@ async function registerReviewer({ name, phone, consent, sheetId, kakaoId, requir
     // 반면 다른 본계정의 타계정으로 먼저 등록된 번호를 새 본계정으로 만들면, 로그인·검색·정산의
     // phone8 신원축이 둘로 갈라진다. 저장 형태가 구형 문자열/비정상 값이어도 조회가 죽지 않게
     // JSON 배열만 펼쳐 확인하고, 이름과 무관하게 번호 뒤 8자리 충돌을 차단한다.
+    // ★ 결정 226 C — 그 번호의 **주인 본계정**이 있으면(본인 번호를 쓰는 같은 번호 타계정 = 정리 대상) 이 검사가 아니라
+    //   아래 본계정 경로(ON CONFLICT)가 판정한다(가입된 이름 = 본계정 이름). 그래서 본계정 **전체 번호**와 같은 타계정만 뺀다
+    //   — 뒤 8자리만 같고 앞자리가 다른 본계정이면 아래 INSERT 가 성공해 phone8 이 둘로 갈리므로 그때는 종전대로 여기서 막는다.
     const { rows: subOwnerRows } = await pool.query(
-      `SELECT 1
+      `SELECT TRIM(COALESCE(sub.value->>'name','')) AS sub_name
          FROM reviewers r
-        WHERE EXISTS (
-          SELECT 1
-            FROM jsonb_array_elements(CASE WHEN jsonb_typeof(r.sub_accounts)='array'
+         CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.sub_accounts)='array'
                                            THEN r.sub_accounts ELSE '[]'::jsonb END) AS sub(value)
-           WHERE RIGHT(regexp_replace(COALESCE(sub.value->>'phone',''), '[^0-9]', '', 'g'), 8) = $1
-        )
-        LIMIT 1`, [phone8]);
+        WHERE RIGHT(regexp_replace(COALESCE(sub.value->>'phone',''), '[^0-9]', '', 'g'), 8) = $1
+          AND regexp_replace(COALESCE(r.phone,''), '[^0-9]', '', 'g') <> $2
+        LIMIT 1`, [phone8, cleanPhone]);
     if (subOwnerRows.length > 0) {
-      return {
-        ok: false,
-        reason: 'phone_registered_as_sub_account',
-        error: '이 번호는 이미 타계정으로 등록되어 있어 새 리뷰어로 등록할 수 없습니다. 타계정 정보를 삭제한 뒤 다시 시도해주세요.',
-      };
+      // 결정 226 C — 그 번호로 등록된 **이름**만 알려준다(그 번호를 타계정으로 올린 본계정 이름은 알려주지 않는다).
+      const subName = String(subOwnerRows[0].sub_name || '').trim();
+      const error = subName
+        ? `이 번호는 이미 '${subName}' 이름으로 등록돼 있어요. 로그인 화면에서 이름을 '${subName}' 그대로 넣고 로그인해 주세요.`
+        : '이 번호는 이미 타계정으로 등록되어 있어 새 리뷰어로 등록할 수 없습니다. 타계정 정보를 삭제한 뒤 다시 시도해주세요.';
+      return { ok: false, reason: 'phone_registered_as_sub_account', field: 'name', registeredName: subName, error, message: error };
     }
 
     // UNIQUE(phone) 제약을 활용한 중복 처리
@@ -75,8 +82,15 @@ async function registerReviewer({ name, phone, consent, sheetId, kakaoId, requir
         return { ok: true, name: newName, phone: cleanPhone, alreadyRegistered: true };
       }
 
-      // ★ A안: 같은 번호 + 다른 이름 → 타계정(sub_account)으로 추가하고 등록 허용
-      //   (각 이름이 자기 이름으로 로그인 + 같은 번호 참여 조회 가능)
+      // ★ 결정 226 C(사용자 확정 2026-10-12) — 같은 번호 + 다른 이름은 가입을 막고 **이미 가입된 이름**을 알려준다.
+      //   종전 A안(타계정 자동 추가)이 "같은 번호 타계정"을 만들어 신원확인 오류의 원인이 됐다. 번호를 아는 것만으로
+      //   남의 계정에 이름을 붙일 수 있던 길(reviewerCampaignEditor 레드팀 #1)도 함께 닫힌다.
+      //   비상 스위치: 환경변수 SAME_PHONE_REGISTER_MODE=allow → 종전 A안.
+      if (samePhoneRegisterMode() === 'block') {
+        const error = `이 번호는 이미 '${existingName}' 이름으로 가입돼 있어요. 로그인 화면에서 이름을 '${existingName}' 그대로 넣고 로그인해 주세요.`;
+        return { ok: false, reason: 'phone_registered_other_name', field: 'name', registeredName: existingName, error, message: error };
+      }
+      // (allow) 종전 A안: 같은 번호 + 다른 이름 → 타계정(sub_account)으로 추가하고 등록 허용
       // ★ 조각 2-2(결정 177): 잠금 → 다시 읽기 → 없을 때만 추가(동시 저장 유실 방지 · 카드 즉시 맞춤).
       const p8 = cleanPhone.slice(-8);
       await mutateSubAccounts(existing.id, (subs) => {
