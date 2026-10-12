@@ -8321,6 +8321,10 @@ function _renderIdentityMatchState(cid, status, reasons, canManual) {
     const dupName = String(_activeIdentityContext?.selectedIdentity?.name || "").trim() || "같은";
     box.innerHTML = '<div style="margin-bottom:8px">' + _safeText("내 정보에 " + dupName + " 이름의 명의가 두 번 저장돼 있어 자동으로 확인하지 못했습니다. 참여한 명의의 주문이 맞다면 [내 주문이 맞습니다]를 눌러주세요.") + '</div>' + box.innerHTML;
   }
+  // 결정 226 — 가린 번호로 온 다른 이름 주문: 서버가 연락처를 내 번호로 채워 돌려준다(resolved). 내 번호면 확인 한 번으로 통과.
+  else if (!st.approvalToken && (st.identityReasonCodes || []).includes("owner_phone_recipient_masked")) {
+    box.innerHTML = '<div style="margin-bottom:8px">' + _safeText("받는 사람 이름이 내 이름과 달라요. 가려진 연락처를 내 정보에 등록한 내 번호로 채웠어요. 내 번호로 받은 주문이 맞다면 [내 주문이 맞습니다]를 눌러주세요.") + '</div>' + box.innerHTML;
+  }
   if (!st.approvalToken && !canManual && !st.identityBusy) box.innerHTML += '<button type="button" class="identity-issue-link" onclick="_retrySubmissionIdentity(\'' + cid + '\')">'
     + (needsNewCapture ? '다른 캡처 올리기' : st.lastBase64 ? '캡처 다시 분석하기' : '구매 캡처 선택하기') + '</button>';
   _syncSubmissionIdentityAction();

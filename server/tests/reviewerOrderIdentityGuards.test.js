@@ -60,7 +60,7 @@ ok('★ 제출 단계는 타계정을 공고 설정으로 막지 않는다(참�
   !/selected\.type === 'sub' && !app\.multi_account_mode/.test(service)
   && !/throw new ReviewerOrderIdentityError\(\s*'SUB_ACCOUNT_NOT_ALLOWED'/.test(service));
 ok('다른 명의만 맞으면 하드 차단하고 선택 명의도 충분히 맞으면 수동확인으로 보낸다',
-  /other\.matches >= 2[\s\S]{0,500}?multiple_identity_candidates[\s\S]{0,220}?status = 'MISMATCH'/.test(service));
+  /other\.matches >= 2[\s\S]{0,1400}?multiple_identity_candidates[\s\S]{0,220}?status = 'MISMATCH'/.test(service));
 // 배송지 예외/명의 불일치 차단은 reviewerOrderIdentity.test.js와 Flow 테스트에서
 // 실제 판정 및 승인토큰 검증으로 확인한다.
 ok('가림 주소는 모든 연속 가림문자를 제거해 비교한다',

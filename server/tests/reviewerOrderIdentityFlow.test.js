@@ -430,6 +430,63 @@ async function test(name, fn) { await fn(); passed++; console.log('  ✓ ' + nam
     assert.strictEqual(manual.mode, 'match_error');
   });
 
+  // 결정 226 — 본인으로 참여, 받는 사람만 다른 이름(본인 번호). 막히지 않아야 한다(문의 0).
+  await test('본인 번호 주문: 전체 번호면 바로 승인 · 가린 번호면 내 번호로 채워 확인 한 번(결정 226)', async () => {
+    applicationIdentity = 'self';
+    try {
+      const full = { recipient:'다른이름', phone:'010-1010-1010', address:'서울 본인주소' };
+      let proof = identity.issueExtractionProof({ imageHash:'5'.repeat(64), extracted:full, ok:true });
+      const matched = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted:full }, reviewer);
+      assert.strictEqual(matched.status, 'MATCH', JSON.stringify(matched));
+      assert.strictEqual(matched.resolved.recipient, '다른이름', '받는 사람 이름은 그대로');
+      await identity.verifyApprovalForSubmission({ ...base, ...full, identityApprovalToken:matched.approvalToken }, reviewer);
+
+      const masked = { recipient:'다*이름', phone:'010-****-1010', address:'서울 본인주소' };
+      proof = identity.issueExtractionProof({ imageHash:'4'.repeat(64), extracted:masked, ok:true });
+      const reviewed = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted:masked }, reviewer);
+      assert.strictEqual(reviewed.status, 'REVIEW', JSON.stringify(reviewed));
+      assert.ok(reviewed.reasonCodes.includes('owner_phone_recipient_masked'));
+      assert.strictEqual(reviewed.approvalToken, '', '가린 번호는 자동 승인하지 않는다');
+      assert.strictEqual(reviewed.resolved.phone, '010-1010-1010', '가린 연락처를 내 번호로 채워 돌려준다');
+      // 내 번호가 아닌 번호로 바꿔 확인하면 거부
+      await assert.rejects(identity.manualConfirm({ ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken,
+        formFields:{ recipient:'다른이름', phone:'010-9999-8888', address:'서울 본인주소' } }, reviewer),
+        (err) => err.code === 'IDENTITY_FIELDS_REQUIRED');
+      // 가린 채로 확인해도 거부
+      await assert.rejects(identity.manualConfirm({ ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken,
+        formFields:{ recipient:'다른이름', phone:'010-****-1010', address:'서울 본인주소' } }, reviewer),
+        (err) => err.code === 'IDENTITY_FIELDS_REQUIRED');
+      const filled = { recipient:'다른이름', phone:reviewed.resolved.phone, address:'서울 본인주소' };
+      const manual = await identity.manualConfirm({ ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken, formFields:filled }, reviewer);
+      await identity.verifyApprovalForSubmission({ ...base, ...filled, identityApprovalToken:manual.approvalToken }, reviewer);
+      // 사용자 확정 2026-10-12 (나) — 가린 번호 + 등록 주소와 다른 배송지도 막지 않는다: 내 번호 + 받는 사람 실제 이름으로 확인 한 번
+      const away = { recipient:'다*이름', phone:'010-****-1010', address:'부산 해운대구 센텀로 5 1203호' };
+      proof = identity.issueExtractionProof({ imageHash:'2'.repeat(64), extracted:away, ok:true });
+      const awayReviewed = await identity.matchCapture({ ...base, extractToken:proof.extractToken, extracted:away }, reviewer);
+      assert.strictEqual(awayReviewed.status, 'REVIEW', JSON.stringify(awayReviewed));
+      assert.ok(awayReviewed.reasonCodes.includes('owner_phone_recipient_masked'));
+      assert.strictEqual(awayReviewed.approvalToken, '');
+      // 받는 사람 이름 가림(*)이 남아 있으면 다른 배송지 규칙대로 실제 이름을 요구한다(화면도 가림 칸을 먼저 고치게 한다)
+      await assert.rejects(identity.manualConfirm({ ...base, mode:'review', manualConfirmed:true, reviewToken:awayReviewed.reviewToken,
+        formFields:{ recipient:'다*이름', phone:'010-1010-1010', address:away.address } }, reviewer),
+        (err) => err.code === 'IDENTITY_FIELDS_REQUIRED');
+      const awayFilled = { recipient:'다른이름', phone:awayReviewed.resolved.phone, address:away.address };
+      const awayManual = await identity.manualConfirm({ ...base, mode:'review', manualConfirmed:true, reviewToken:awayReviewed.reviewToken, formFields:awayFilled }, reviewer);
+      await identity.verifyApprovalForSubmission({ ...base, ...awayFilled, identityApprovalToken:awayManual.approvalToken }, reviewer);
+      // 레드팀 P0 — 캡처 증거가 없는 경로(사진 없음)에서는 본인 번호 예외가 켜지지 않는다(종전 판정 그대로)
+      const audN = audits.length;
+      await identity.manualConfirm({ ...base, mode:'no_capture', manualConfirmed:true,
+        formFields:{ recipient:'남의이름', phone:'010-1010-1010', address:'서울 본인주소' } }, reviewer).catch(() => null);
+      assert.ok(!audits.slice(audN).some((a) => /owner_phone_recipient/.test(String(a[8]))), '사진 없음 경로에 본인 번호 예외 사유가 없다');
+      // 가린 연락처를 그대로 둔 입력칸은 어떤 경로로도 본인 번호 예외 승인이 안 된다
+      const bad = { recipient:'남의이름', phone:'010-****-1010', address:'서울 본인주소' };
+      const proof2 = identity.issueExtractionProof({ imageHash:'3'.repeat(64), extracted:bad, ok:true });
+      await assert.rejects(identity.manualConfirm({ ...base, mode:'match_error', manualConfirmed:true,
+        extractToken:proof2.extractToken, extracted:bad, formFields:bad }, reviewer),
+        (err) => err.code === 'IDENTITY_FIELDS_REQUIRED');
+    } finally { applicationIdentity = 'sub'; }
+  });
+
   console.log(`\n✅ reviewerOrderIdentityFlow: ${passed}개 통과`);
 })().catch((err) => { console.error('❌', err.stack || err.message); process.exitCode = 1; })
   .finally(async () => { pool.query = originalQuery; await pool.end(); });

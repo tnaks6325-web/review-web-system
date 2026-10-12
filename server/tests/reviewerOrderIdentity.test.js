@@ -96,18 +96,95 @@ const other = {
     assert.ok(r2.reasonCodes.includes('plain_name_ocr_correction'));
   });
 
-  // PR #1486 리뷰 P1: 같은 번호·주소를 쓰는 가족 명의가 있어도 본인 이름 한 글자 오인식은 막지 않는다.
-  await test('같은 번호·주소의 가족 명의가 있어도 본인 이름 한 글자 오인식은 확인 단계로 둔다', async () => {
+  // PR #1486 리뷰 P1: 같은 번호·주소를 쓰는 다른 이름 칸이 있어도 본인 이름 한 글자 오인식은 막지 않는다.
+  // ★ 결정 226(사용자 확정 2026-10-12)으로 기대값이 바뀌었다 — 종전엔 본인 번호로 온 다른 이름(이영희) 캡처를
+  //   MISMATCH 로 막았지만, 이제 본인 번호로 받은 주문은 본인 주문(받는 사람 이름만 다름)이다. 결정 222 B 폐기.
+  await test('본인 번호로 받은 주문은 이름이 달라도 본인 주문이다(결정 226)', async () => {
     const me = { identityKey:'self', type:'self', name:'김수만', phone:'010-1111-2222', address:'서울 강남구 테헤란로 10 101동 502호' };
-    const family = { identityKey:'sub:family', type:'sub', name:'이영희', phone:me.phone, address:me.address };
+    const samePhone = { identityKey:'sub:family', type:'sub', name:'이영희', phone:me.phone, address:me.address };
+    // 이름 한 글자 오인식은 종전 보정 경로가 먼저다(레드팀 P2 — 틀린 이름이 그대로 남지 않게)
     const r = await evaluateSelectedIdentity({ recipient:'김슈만', phone:me.phone, address:me.address },
-      me, [me, family], { useGemini:false, allowPlainNameCorrection:true });
+      me, [me, samePhone], { useGemini:false, allowPlainNameCorrection:true, ownerPhoneRule:true });
     assert.strictEqual(r.status, 'REVIEW', JSON.stringify(r));
     assert.ok(r.reasonCodes.includes('plain_name_ocr_correction'));
-    // 가족 명의(이영희) 본인의 캡처는 여전히 차단
+    // 정리 전 잔여 — 본인 번호를 쓰는 다른 이름 칸이 있어도 그 칸은 경쟁 명의가 아니다
     const r2 = await evaluateSelectedIdentity({ recipient:'이영희', phone:me.phone, address:me.address },
-      me, [me, family], { useGemini:false, allowPlainNameCorrection:true });
-    assert.strictEqual(r2.status, 'MISMATCH', JSON.stringify(r2));
+      me, [me, samePhone], { useGemini:false, allowPlainNameCorrection:true, ownerPhoneRule:true });
+    assert.strictEqual(r2.status, 'MATCH', JSON.stringify(r2));
+    // 캡처 증거 없이(입력칸 재검사 기본값) 켜지지 않는다
+    const r2b = await evaluateSelectedIdentity({ recipient:'이영희', phone:me.phone, address:me.address },
+      me, [me, samePhone], { useGemini:false });
+    assert.notStrictEqual(r2b.status, 'MATCH', JSON.stringify(r2b));
+    assert.strictEqual(r2.resolved.recipient, '이영희', '받는 사람 이름은 그대로 둔다');
+    // 저장 주소가 없어도(결정 181로 흔함) 막히지 않는다
+    const noAddr = { ...me, address:'' };
+    const r3 = await evaluateSelectedIdentity({ recipient:'이영희', phone:me.phone, address:'부산 해운대구 센텀로 5 1203호' },
+      noAddr, [noAddr], { useGemini:false, ownerPhoneRule:true });
+    assert.notStrictEqual(r3.status, 'MISMATCH', JSON.stringify(r3));
+    // 배송지가 등록 주소와 다르면 본인 이름과 똑같이 확인 단계(막지 않음)
+    const r4 = await evaluateSelectedIdentity({ recipient:'이영희', phone:me.phone, address:'부산 해운대구 센텀로 5 1203호' },
+      me, [me], { useGemini:false, ownerPhoneRule:true });
+    assert.strictEqual(r4.status, 'REVIEW', JSON.stringify(r4));
+    assert.ok(r4.reasonCodes.includes('delivery_address_changed'));
+  });
+
+  await test('가린 번호로 온 다른 이름 주문은 내 번호로 채워 확인 단계 — 자리까지 맞을 때만(결정 226)', async () => {
+    const me = { identityKey:'self', type:'self', name:'김수만', phone:'010-1111-2222', address:'서울 강남구 테헤란로 10 101동 502호' };
+    const opt = { useGemini:false, ownerPhoneRule:true };
+    for (const address of [me.address, '']) {
+      const r = await evaluateSelectedIdentity({ recipient:'이*희', phone:'010-****-2222', address }, me, [me], opt);
+      assert.strictEqual(r.status, 'REVIEW', address + ' ' + JSON.stringify(r));
+      assert.ok(r.reasonCodes.includes('owner_phone_recipient_masked'));
+      assert.strictEqual(r.resolved.phone, me.phone, '가린 연락처는 내 번호로 채워 돌려준다');
+    }
+    // 레드팀 P0 — 느슨한 가림은 예외가 아니다(종전 판정 = 차단)
+    for (const phone of ['010-****-****', '010-****-**22', '010-****-22', '****-2222']) {
+      const r = await evaluateSelectedIdentity({ recipient:'홍길동', phone, address:'' }, me, [me], opt);
+      assert.ok(!r.reasonCodes.includes('owner_phone_recipient_masked'), phone);
+    }
+    // 보이는 자리가 다르면 예외 아님
+    const other = await evaluateSelectedIdentity({ recipient:'이영희', phone:'010-****-9999', address:'' }, me, [me], opt);
+    assert.ok(!other.reasonCodes.includes('owner_phone_recipient_masked'));
+    // 가린 번호 + 등록 주소와 확실히 다른 주소 = 막지 않고 확인 단계(사용자 확정 2026-10-12 (나)) · 다른 배송지 사유도 남긴다
+    const far = await evaluateSelectedIdentity({ recipient:'이영희', phone:'010-****-2222', address:'부산 해운대구 센텀로 5 1203호' }, me, [me], opt);
+    assert.strictEqual(far.status, 'REVIEW', JSON.stringify(far));
+    assert.ok(far.reasonCodes.includes('owner_phone_recipient_masked'));
+    assert.ok(far.reasonCodes.includes('delivery_address_changed'));
+    assert.ok(!far.reasonCodes.includes('selected_identity_conflict'));
+    assert.strictEqual(far.resolved.phone, me.phone);
+    // 같은 단지 다른 동·호수(가림 주소)도 같은 취급
+    const unit = await evaluateSelectedIdentity({ recipient:'이영희', phone:'010-****-2222', address:'서울 강남구 테헤란로 10 103동 ***호' }, me, [me], opt);
+    assert.notStrictEqual(unit.status, 'MISMATCH', JSON.stringify(unit));
+    // 캡처 증거 없이(입력칸 재검사 기본값)는 여전히 켜지지 않는다
+    const noRule = await evaluateSelectedIdentity({ recipient:'이영희', phone:'010-****-2222', address:'부산 해운대구 센텀로 5 1203호' }, me, [me], { useGemini:false });
+    assert.strictEqual(noRule.status, 'MISMATCH', JSON.stringify(noRule));
+    // 가린 번호 + 다른 저장 명의와 맞음 = 종전대로 차단
+    const sub = { identityKey:'sub:x', type:'sub', name:'박지민', phone:'010-3333-4444', address:'부산 해운대구 센텀로 5 1203호' };
+    const comp = await evaluateSelectedIdentity({ recipient:'박지민', phone:'010-****-2222', address:'' }, me, [me, sub], opt);
+    assert.notStrictEqual(comp.status, 'MATCH', JSON.stringify(comp));
+    // Codex P1 — 같은 집 주소의 다른 저장 명의와 이름·주소가 맞으면 가린 번호여도 차단(확인 단계로 두면 내 번호 채운 확인에서 승인된다)
+    const housemate = { identityKey:'sub:h', type:'sub', name:'박지민', phone:'010-3333-4444', address:me.address };
+    const comp2 = await evaluateSelectedIdentity({ recipient:'박지민', phone:'010-****-2222', address:me.address }, me, [me, housemate], opt);
+    assert.strictEqual(comp2.status, 'MISMATCH', JSON.stringify(comp2));
+    assert.ok(comp2.reasonCodes.includes('other_owner_identity_matches'));
+    assert.ok(!comp2.reasonCodes.includes('owner_phone_recipient_masked'));
+    // 그 명의가 없으면 같은 캡처는 확인 단계(본인 번호 주문)
+    const alone = await evaluateSelectedIdentity({ recipient:'박지민', phone:'010-****-2222', address:me.address }, me, [me], opt);
+    assert.strictEqual(alone.status, 'REVIEW', JSON.stringify(alone));
+  });
+
+  await test('본인 번호 예외는 다른 번호·타계정 참여에는 적용되지 않는다(결정 226)', async () => {
+    const me = { identityKey:'self', type:'self', name:'김수만', phone:'010-1111-2222', address:'서울 강남구 테헤란로 10 101동 502호' };
+    const sub = { identityKey:'sub:x', type:'sub', name:'박지민', phone:'010-3333-4444', address:'부산 해운대구 센텀로 5 1203호' };
+    // 다른 번호 + 다른 이름 = 종전대로 차단
+    const r = await evaluateSelectedIdentity({ recipient:'홍길동', phone:'010-5555-6666', address:me.address }, me, [me, sub], { useGemini:false, ownerPhoneRule:true });
+    assert.strictEqual(r.status, 'MISMATCH', JSON.stringify(r));
+    // 타계정으로 참여했는데 본인 번호·다른 이름 = 예외 아님(종전 판정)
+    const r2 = await evaluateSelectedIdentity({ recipient:'홍길동', phone:me.phone, address:sub.address }, sub, [me, sub], { useGemini:false, ownerPhoneRule:true });
+    assert.ok(!r2.reasonCodes.includes('owner_phone_recipient'));
+    // 가림 없는 전체 번호만 — 자릿수 부족(뒤 8자리만)은 예외 아님
+    const r3 = await evaluateSelectedIdentity({ recipient:'홍길동', phone:'11112222', address:'부산 해운대구 센텀로 5 1203호' }, me, [me], { useGemini:false, ownerPhoneRule:true });
+    assert.ok(!r3.reasonCodes.includes('owner_phone_recipient'));
   });
 
   // 실사고 2026-09-24: 같은 사람이 번호만 달리해 두 번 등록(참여 칸은 주소 없음) → 다른 칸이 "다른 명의"로 잡혀 차단.
