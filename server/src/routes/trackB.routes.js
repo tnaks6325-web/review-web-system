@@ -1611,9 +1611,12 @@ function _cdpFail(res, err) {
     // 무시트 원장 전용 조작이 전환 전 대상에 닿으면 500으로 숨기지 말고 전환 상태를 안내한다.
     not_sheetless: 409,
     stale_client: 409,   // 배포 전 열어 둔 옛 조절 창의 여러 날 저장 — 새로고침 요청
+    // ★ 결정 228: 순차진행 일정표 공고의 날짜별 인원 — 늘리기·상품 없는 날 막음 / 줄이기는 두 번 확인 뒤(confirmReduce)
+    sequential_over: 422, sequential_no_product: 422, sequential_reduce_needs_confirm: 409,
   };
   if (err && err.code && codes[err.code]) {
-    res.status(codes[err.code]).json({ ok: false, code: err.code, error: err.message, ...(err.floor != null ? { floor: err.floor } : {}) });
+    res.status(codes[err.code]).json({ ok: false, code: err.code, error: err.message, ...(err.floor != null ? { floor: err.floor } : {}),
+      ...(Array.isArray(err.reduce) ? { reduce: err.reduce } : {}) });
     return true;
   }
   return false;
@@ -1664,6 +1667,26 @@ router.get('/campaigns/:id/quota-balance', authMiddleware, internalMiddleware, a
     res.json({ ok: false, quotaBalance: null });
   }
 });
+// ★★ 결정 228 — 순차진행 공고의 「정규 일정 끝」 팝업(공고 담당자 + 작업오더 보낸 AE). 목록은 읽기 전용,
+//   [추가 모집] = 일정표에 이어 붙이기 기록 · [그대로 끝내기] = 공고 마감. 내부 직원만. 조회 실패 = 팝업 미표시.
+router.get('/sequential-end-prompts', authMiddleware, internalMiddleware, async (req, res) => {
+  try {
+    res.json(await require('../services/campaignSequentialEnd.service').listSequentialEnds(req.admin));
+  } catch (e) {
+    logger.warn('[sequential-end-prompts] 조회 실패(팝업 미표시): ' + e.message);
+    res.json({ ok: false, items: [], error: '정규 일정 끝 조회에 실패했습니다.' });
+  }
+});
+router.post('/sequential-end-prompts/apply', authMiddleware, internalMiddleware, async (req, res) => {
+  try {
+    res.json(await require('../services/campaignSequentialEnd.service').applySequentialEnds(req.admin, (req.body || {}).decisions));
+  } catch (e) {
+    const status = e.code === 'empty' ? 400 : 500;
+    if (status === 500) logger.warn('[sequential-end-prompts/apply] 실패: ' + e.message);
+    res.status(status).json({ ok: false, code: e.code || null, error: status === 400 ? e.message : '반영에 실패했습니다: ' + e.message });
+  }
+});
+
 router.get('/campaigns/:id/daily-plan', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { getPlanOverview } = require('../services/campaignPlan.service');

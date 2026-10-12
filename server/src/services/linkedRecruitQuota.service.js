@@ -420,6 +420,25 @@ function allocateOptionQuotas(options, target, usedByKey = new Map()) {
   return new Map(active.map((r, index) => [r.opt_key, min[index] + add[index]]));
 }
 
+/**
+ * ★★ 결정 228(레드팀 P0-2) — 순차진행 일정표 공고에서 총원이 바뀌어 상품별 정원을 다시 나눌 때, **일정이 이미 지나간 상품**
+ *   (오늘 상품보다 순서가 앞선 상품)은 닫힌 상품처럼 정원을 그대로 둔다. 원래 정원 비율로 나누면 끝난 은갈치가 몫을 받아
+ *   다시 열린다(30→25 실측: 은갈치 10→15). 일정표를 못 읽으면 그대로(종전 배분).
+ */
+async function _sequentialPastAsClosed(client, campaignId, options) {
+  try {
+    const { loadSequentialSchedule, kstTodayStr } = require('./campaignState.service');
+    const sch = await loadSequentialSchedule(client, campaignId);
+    if (!sch || !Array.isArray(sch.optionOrder)) return options;
+    const today = kstTodayStr();
+    const nextDay = sch.days.find(d => d.date >= today);
+    const curIdx = nextDay ? sch.optionOrder.indexOf(nextDay.optKey) : sch.optionOrder.length;
+    if (curIdx <= 0) return options;
+    const past = new Set(sch.optionOrder.slice(0, curIdx));
+    return options.map(o => (past.has(o.opt_key) && o.status !== 'closed') ? { ...o, status: 'closed' } : o);
+  } catch (_) { return options; }
+}
+
 async function linkedWorkOrder(client, campaign) {
   const sourceId = String(campaign.source_work_order_id || '').trim();
   const { rows } = await client.query(
@@ -483,7 +502,7 @@ async function assertWorkOrderQuota({ workOrderId, recruitTotal }) {
     );
     // 활성/마감 옵션의 하한도 미리 검사한다. 검사는 통과했는데 실제 작업오더만
     // 저장되고 옵션 동기화가 실패하는 반쪽 저장을 막는다.
-    allocateOptionQuotas(options, quota(recruitTotal), await usedByOption(client, campaign.id));
+    allocateOptionQuotas(await _sequentialPastAsClosed(client, campaign.id, options), quota(recruitTotal), await usedByOption(client, campaign.id));
     await client.query('SAVEPOINT linked_recruit_assert_rounds');
     try {
       const { rows: rounds } = await client.query(
@@ -596,7 +615,7 @@ async function syncWorkOrderRecruitTotal({ workOrderId, recruitTotal }) {
     const { rows: options } = await client.query(
       `SELECT opt_key, recruit_total, status, sort_order FROM campaign_options WHERE campaign_id=$1 ORDER BY sort_order, id FOR UPDATE`, [campaign.id]
     );
-    const nextOptions = allocateOptionQuotas(options, total, await usedByOption(client, campaign.id));
+    const nextOptions = allocateOptionQuotas(await _sequentialPastAsClosed(client, campaign.id, options), total, await usedByOption(client, campaign.id));
     for (const [optKey, optionTotal] of nextOptions) {
       await client.query('UPDATE campaign_options SET recruit_total=$3, updated_at=NOW() WHERE campaign_id=$1 AND opt_key=$2', [campaign.id, optKey, optionTotal]);
     }

@@ -12,7 +12,7 @@
 'use strict';
 
 const {
-  fetchCampaignCounts, fetchOptionCounts, fetchSequentialCampaignIds,
+  fetchCampaignCounts, fetchOptionCounts, fetchSequentialCampaignIds, sequentialFor,
   computeOptionViews, totalQuotaUsage, optionTotalBalance,
 } = require('./campaignState.service');
 const { deriveSchedules, tabsOfCampaigns, scheduleFor } = require('./campaignSchedule.service');
@@ -37,7 +37,7 @@ async function loadQuotaBalance(db, campaignId, now = new Date()) {
   const sch = scheduleFor(sm, c);
   const cnt = (await fetchCampaignCounts(db, [id], now)).get(id) || {};
   const counts = await fetchOptionCounts(db, id, now);
-  const sequential = (await fetchSequentialCampaignIds(db, [id])).has(id);
+  const sequential = sequentialFor(await fetchSequentialCampaignIds(db, [id]), id);   // ★ 결정 228
   const views = computeOptionViews(optRows, counts, null, { sequential });
   const bal = optionTotalBalance(totalQuotaUsage(c, cnt, sch), views);
   return bal ? { campaignId: id, title: String(c.title || ''), ...bal } : null;

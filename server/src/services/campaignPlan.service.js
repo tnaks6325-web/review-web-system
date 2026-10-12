@@ -402,7 +402,23 @@ async function previewPlanProjection(campaignId, body) {
   for (const x of rawRemove) { const date = String(x || '').trim(); if (DATE_RE.test(date)) delete plans[date]; }
   // 바꾼 게 없으면 계획 모양도 그대로(빈 {} 로 바꾸면 '계획 없음'과 다르게 계산될 수 있다)
   const touched = rawSet.length + rawRemove.length > 0;
-  const projection = projectDailyQuotas(camp, touched ? { ...counts, plans } : counts, { schedule, maxDays: PROJECTION_DAYS });
+  let pjCounts = touched ? { ...counts, plans } : counts;
+  /* ★ 결정 228(레드팀 P2-1) — 순차진행 일정표 공고는 바꾼 계획(0명 밀림·주말 열기·줄이기)을 **일정표에도** 얹어 미리 본다.
+       숫자만 바꾸면 미리보기에서는 그날이 그대로 5명이고 종료일도 그대로였다(저장한 뒤에야 밀림). 실패 = 종전 미리보기. */
+  if (touched && counts.optionCaps && counts.optionCaps.sequentialSchedule) {
+    try {
+      const { loadSequentialSchedule } = require('./campaignState.service');
+      const sch2 = await loadSequentialSchedule(pool, camp.id, { planPatch: () => ({ ...plans }) });
+      if (sch2) {
+        const caps2 = counts.optionCaps.slice();
+        caps2.sequentialDayRoom = counts.optionCaps.sequentialDayRoom;
+        caps2.sequentialUsed = counts.optionCaps.sequentialUsed;
+        caps2.sequentialSchedule = sch2;
+        pjCounts = { ...pjCounts, optionCaps: caps2 };
+      }
+    } catch (_) { /* 종전 미리보기 */ }
+  }
+  const projection = projectDailyQuotas(camp, pjCounts, { schedule, maxDays: PROJECTION_DAYS });
   return { projection };
 }
 
@@ -597,6 +613,40 @@ async function savePlans(campaignId, body, actor, opts) {
         if (t) {
           if (r.todayCount < 0 || r.todayCount > MAX_DAY_COUNT) { const e = new Error('인원 값이 올바르지 않습니다.'); e.code = 'bad_count'; throw e; }
           t.count = r.todayCount;
+        }
+      }
+    }
+
+    /* ★★ 결정 228 — 순차진행 일정표 공고의 날짜별 인원(사용자 확정 2026-10-12):
+         0명 = 쉬는 날(뒤 상품 일정이 하루씩 밀린다) · 그날 상품 몫보다 적은 수 = **두 번 확인한 뒤에만**(confirmReduce)
+         그날 그만큼만 받는다(모자란 건 정규 일정 끝에 다시 정한다) · 더 큰 수 · 상품이 없는 날의 1명 이상 = 막는다.
+         검사 기준 = 이번 저장을 얹은 일정표에서 그날의 상품 몫(base) — 0명·해제가 같이 오면 밀린 뒤의 날짜로 본다. */
+    {
+      const { loadSequentialSchedule } = require('./campaignState.service');
+      const seqSchedule = await loadSequentialSchedule(client, campaignId, { planPatch: pm => {
+        for (const d of remove) delete pm[d];
+        // ★ 저장하려는 값을 그대로 얹는다 — 0 = 쉬는 날(밀림) · 1명 이상 = 그날 연다(주말을 여는 저장 포함 · 레드팀 P2-2). 몫은 day.base 로 본다.
+        for (const x of set) pm[x.date] = x.count;
+        return pm;
+      } });
+      if (seqSchedule) {
+        const needConfirm = [];
+        for (const x of set) {
+          if (x.count === 0) continue;
+          const day = seqSchedule.byDate.get(x.date) || null;
+          if (!day) {
+            const e = new Error(`${x.date} 에는 열 상품이 없습니다 — 순서대로 진행하는 공고는 상품별 일정이 끝나면 정규 일정 끝 팝업에서 추가 모집을 정합니다.`);
+            e.code = 'sequential_no_product'; e.date = x.date; throw e;
+          }
+          if (x.count > day.base) {
+            const e = new Error(`${x.date} 은 ${day.optKey} ${day.base}건인 날입니다 — 순서대로 진행하는 공고는 상품별 하루 건수보다 늘릴 수 없습니다. 하루 건수를 바꾸려면 [공고 수정]에서 그 상품의 하루 건수를 고쳐 주세요.`);
+            e.code = 'sequential_over'; e.date = x.date; e.base = day.base; e.optKey = day.optKey; throw e;
+          }
+          if (x.count < day.base) needConfirm.push({ date: x.date, optKey: day.optKey, base: day.base, count: x.count, short: day.base - x.count });
+        }
+        if (needConfirm.length && b.confirmReduce !== true) {
+          const e = new Error('순서대로 진행하는 공고에서 그날 상품 건수를 줄이면, 줄인 만큼은 모자란 채 다음 상품으로 넘어가고 정규 일정이 끝난 뒤 다시 정해야 합니다.');
+          e.code = 'sequential_reduce_needs_confirm'; e.reduce = needConfirm; throw e;
         }
       }
     }

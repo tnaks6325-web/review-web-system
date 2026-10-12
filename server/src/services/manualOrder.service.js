@@ -368,11 +368,11 @@ async function tabOptionChoices(db, { sheetId, tabName } = {}, now = new Date())
          FROM campaign_options WHERE campaign_id = $1 AND COALESCE(status, 'active') <> 'closed'
         ORDER BY sort_order, id`, [pick.id]);
     if (!opts.length) return null;
-    const { fetchOptionCounts, computeOptionViews, fetchSequentialCampaignIds } = require('./campaignState.service');
+    const { fetchOptionCounts, computeOptionViews, fetchSequentialCampaignIds, sequentialFor } = require('./campaignState.service');
     const counts = await fetchOptionCounts(db, pick.id, now);
     /* ★ 결정 212: 공고 화면과 같은 목록 뷰(순차진행이면 선택지 일건수 미사용 · 뒤 선택지 waiting 표시).
        관리자 수기 주문은 순서 잠금과 무관하다 — 상태는 안내로만 쓰고 고르는 것을 막지 않는다. */
-    const sequential = (await fetchSequentialCampaignIds(db, [pick.id])).has(String(pick.id));
+    const sequential = sequentialFor(await fetchSequentialCampaignIds(db, [pick.id]), pick.id);   // ★ 결정 228
     const views = computeOptionViews(opts, counts, null, { sequential });
     return {
       campaignId: pick.id,

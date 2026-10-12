@@ -4890,6 +4890,11 @@ async function campBlogReject(idx) {
 
 /** 🧩 관제 옵션별 현황표(061 3단계): 옵션 뷰(정원·상태) + 신청행 기반 오늘 집계.
  *  옵션 미등록 캠페인은 빈 문자열(표 미노출). */
+function _seqMDk(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || "")); if (!m) return String(iso || "");
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  return (+m[2]) + "/" + (+m[3]) + "(" + "일월화수목금토"[d.getUTCDay()] + ")";
+}
 function _campOptionTable(options, rows, now, today, kstDay) {
   if (!options || !options.length) return "";
   const agg = {};
@@ -4908,7 +4913,9 @@ function _campOptionTable(options, rows, now, today, kstDay) {
   const td = (v, a) => `<td style="text-align:${a || "left"};padding:5px 8px;border-bottom:1px solid #F3F4F6;white-space:nowrap">${v}</td>`;
   const body = options.map(o => {
     const a = agg[o.optKey] || { todayHold: 0, todaySub: 0, cumSub: 0 };
-    const s = stTxt[o.status] || stTxt.open;
+    let s = stTxt[o.status] || stTxt.open;
+    // ★ 결정 228: 날짜별 상품 일정표 공고는 대기 상품이 열리는 날을 말한다(없으면 정규 일정 뒤 추가 모집 결정 대기)
+    if (o.seqDays && o.status === "waiting") s = [o.opensOn ? "대기 · " + _seqMDk(o.opensOn) + " 시작" : "대기 · 추가 모집 결정", s[1], s[2]];
     const rt = o.recruitTotal ? o.recruitTotal + "명" : "무제한";
     const pay = o.payAmount ? Number(o.payAmount).toLocaleString() + "원" : "-";
     return `<tr>${td("<b>" + escT(o.optKey) + "</b>")}${td(pay, "right")}${td(String(a.todayHold), "center")}${td(String(a.todaySub), "center")}${td(String(a.cumSub), "center")}${td(rt, "center")}${td(`<span style="font-size:.62rem;font-weight:800;background:${s[2]};color:${s[1]};border-radius:6px;padding:2px 7px">${s[0]}</span>`, "center")}</tr>`;

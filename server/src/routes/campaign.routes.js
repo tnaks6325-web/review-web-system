@@ -16,6 +16,7 @@ const {
   computeOptionView,
   computeOptionViews,
   fetchSequentialCampaignIds,
+  sequentialFor,   // ★ 결정 228 — 순차진행 일정표 꺼내기
   withoutOwnHold,
   liveOptions,
   timeStrToMinutes,
@@ -636,7 +637,7 @@ async function _loadOptionViews(db, campaignId, campState, now = new Date()) {
   if (!rows.length) return [];
   const counts = await fetchOptionCounts(db, campaignId, now);
   // ★ 결정 212: 순차진행 공고는 앞 선택지가 찰 때까지 뒤 선택지를 잠근다(판정 단일 출처 = computeOptionViews).
-  const sequential = (await fetchSequentialCampaignIds(db, [campaignId])).has(String(campaignId));
+  const sequential = sequentialFor(await fetchSequentialCampaignIds(db, [campaignId]), campaignId);   // ★ 결정 228: 일정표 | true | false
   // ★ 134: 선택지별 유입가이드는 리뷰어 화면(work-detail)으로 나가는 HTML이므로 **응답 직전 재정화**
   //   (저장 시 1차 정화와 이중 적용 — §03-E 규율. 옛 행·직접 DB 수정분을 신뢰하지 않는다).
   return computeOptionViews(rows, counts, campState, { sequential }).map(v => {
@@ -657,7 +658,7 @@ async function _optionChangeViews(db, campaignId, app, now = new Date()) {
        FROM campaign_options WHERE campaign_id=$1 ORDER BY (status='closed'), sort_order, id`, [campaignId]);
   const appliedToday = !!(app && app.applied_at && new Date(app.applied_at) >= kstDayStartUtc(now));
   const counts = withoutOwnHold(await fetchOptionCounts(db, campaignId, now), app && app.option_key, appliedToday);
-  const sequential = (await fetchSequentialCampaignIds(db, [campaignId])).has(String(campaignId));
+  const sequential = sequentialFor(await fetchSequentialCampaignIds(db, [campaignId]), campaignId);   // ★ 결정 228
   return { rows, views: computeOptionViews(rows, counts, { state: 'open' }, { sequential }) };
 }
 
@@ -678,7 +679,19 @@ function _publicOptionView(v) {
     // ★ 결정 214: 선택지별 사진·지금 모집 중 표시(민감정보 아님 — 참여 전 카드가 쓴다)
     thumbnailUrl: v.thumbnailUrl || '',
     sequenceCurrent: v.sequenceCurrent === true,
+    // ★ 결정 228: 날짜별 상품 일정표 공고 — 대기 상품이 처음 열리는 날 · 오늘 상품이 다음에 열리는 날(없으면 null)
+    ...(v.seqDays ? { seqDays: true, opensOn: v.opensOn || null } : {}),
   };
+}
+
+/** ★ 결정 228: 차례가 아닌 상품을 고를 때 거절 문구 — 일정표 공고는 여는 날로 말한다(212 대체 규칙이면 종전 문구). */
+function _waitingMsg(ov) {
+  if (ov && ov.seqDays) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ov.opensOn || ''));
+    return m ? `아직 차례가 아닌 상품이에요. ${Number(m[2])}/${Number(m[3])}에 열려요.`
+      : '아직 차례가 아닌 상품이에요. 정규 일정이 끝난 뒤 담당자가 추가 모집 여부를 정해요.';
+  }
+  return '아직 차례가 아닌 상품이에요. 앞 상품이 마감되면 열려요.';
 }
 
 /** ★ 결정 214: 순차진행 공고의 참여 전 제목·사진을 지금 모집 중인 상품으로 바꾼다(단일 출처 utils/sequentialDisplay).
@@ -725,7 +738,7 @@ async function _fetchOptionsForCampaigns(db, ids, now = new Date()) {
   for (const row of optRows) {
     if (!out.has(row.campaign_id)) out.set(row.campaign_id, []);
     out.get(row.campaign_id).push({ row, cnt: (cntBy.get(row.campaign_id) || new Map()).get(row.opt_key),
-      sequential: seqIds.has(String(row.campaign_id)) });
+      sequential: sequentialFor(seqIds, row.campaign_id) });   // ★ 결정 228: 일정표 | true | false
   }
   return out;
 }
@@ -1281,7 +1294,7 @@ router.get('/list', async (req, res, next) => {
         // ★ 살아있는 옵션이 하나도 없으면(= 관리자가 옵션 구조를 정리한 공고) 옵션 자체를 노출하지 않는다 —
         //   apply 게이트와 같은 `liveOptions` 판정이라 "카드엔 옵션 N종인데 참여는 옵션을 안 받는" 불일치가 없다.
         const optViews = computeOptionViews(opts.map(o => o.row), new Map(opts.map(o => [o.row.opt_key, o.cnt])), view,
-          { sequential: opts.some(o => o.sequential) });
+          { sequential: (opts.find(o => o.sequential) || {}).sequential || false });   // ★ 결정 228: 일정표를 그대로
         if (liveOptions(optViews).length) {
           view.options = optViews.map(_publicOptionView);
           _applySequentialDisplay(view, optViews);   // ★ 결정 214
@@ -1816,7 +1829,7 @@ router.post('/:id/change-option', applyLimiter, async (req, res, next) => {
     if (ov.status !== 'open') {
       await client.query('ROLLBACK');
       if (ov.status === 'waiting') {
-        return res.status(409).json({ ok: false, reason: 'option_waiting', option: _publicOptionView(ov), error: '아직 차례가 아닌 상품이에요. 앞 상품이 마감되면 열려요.' });
+        return res.status(409).json({ ok: false, reason: 'option_waiting', option: _publicOptionView(ov), error: _waitingMsg(ov) });
       }
       const reason = ov.status === 'soldout' ? 'option_soldout' : (ov.status === 'today_done' ? 'option_today_done' : 'option_closed');
       return res.status(409).json({ ok: false, reason, option: _publicOptionView(ov), error: '선택한 옵션은 마감되었어요. 다른 옵션을 선택해주세요.' });
@@ -1993,12 +2006,12 @@ async function _applyParticipation(req, res, next, campPre) {
         }
         const optCounts = await fetchOptionCounts(client, id, now);
         // ★ 결정 212: 순차진행이면 앞 선택지가 찰 때까지 뒤 선택지는 waiting(목록 뷰 단일 출처로 계산).
-        const sequential = (await fetchSequentialCampaignIds(client, [id])).has(String(id));
+        const sequential = sequentialFor(await fetchSequentialCampaignIds(client, [id]), id);   // ★ 결정 228
         const ov = computeOptionViews(allOpts, optCounts, st, { sequential }).find(v => v.optKey === chosenOpt.opt_key);
         if (ov.status !== 'open') {
           await client.query('ROLLBACK');
           if (ov.status === 'waiting') {
-            return res.status(409).json({ ok: false, reason: 'option_waiting', option: _publicOptionView(ov), error: '아직 차례가 아닌 상품이에요. 앞 상품이 마감되면 열려요.' });
+            return res.status(409).json({ ok: false, reason: 'option_waiting', option: _publicOptionView(ov), error: _waitingMsg(ov) });
           }
           const reason = ov.status === 'soldout' ? 'option_soldout' : (ov.status === 'today_done' ? 'option_today_done' : 'option_closed');
           return res.status(409).json({ ok: false, reason, option: _publicOptionView(ov), error: '선택한 옵션은 마감되었어요. 다른 옵션을 선택해주세요.' });
