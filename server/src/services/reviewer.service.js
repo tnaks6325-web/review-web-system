@@ -182,7 +182,23 @@ async function verifyReviewer(name, phone8) {
   }
 
   // 3) 매칭 실패 — 원인별 세부 에러 메시지
-  // 입력한 번호가 이미 다른 사람의 타계정으로 등록되어 있는지 확인
+  // ★ 결정 226 B(사용자 확정 2026-10-12 · (가)) — 번호는 맞고 이름이 다르면 **그 번호의 본계정 이름**만 알려준다.
+  //   본계정 이름은 공개 조회(/api/reviewer/lookup, 사용자 확정으로 유지)가 이미 알려준다. **타계정 이름은 알려주지 않는다** —
+  //   이름 + 번호 뒤 8자리가 로그인 열쇠라, 알려주면 번호만 아는 사람이 본계정 주인의 계좌·주소까지 본다(Codex 보안 P1).
+  //   그 이름으로 로그인되는 본계정이 **딱 하나**일 때만 이름을 안내한다(둘이면 위 AMBIGUOUS 로 막혀 막다른 안내가 된다 — Codex P2).
+  //   "등록 탭에서 같은 번호로 추가 등록" 유도는 없앴다(같은 번호·다른 이름 가입은 막힌다 — 2단계 ①).
+  const { rows: phoneRows } = await pool.query(
+    'SELECT name FROM reviewers WHERE phone8 = $1 LIMIT 2', [p8]
+  );
+  const registered = phoneRows.length === 1 ? String(phoneRows[0].name || '').trim() : '';
+  if (registered) {
+    return { ok: false, error: `이 번호는 '${registered}' 이름으로 가입돼 있어요. 이름을 '${registered}' 그대로 넣고 로그인해 주세요.`, field: 'name' };
+  }
+  if (phoneRows.length > 0) {
+    return { ok: false, error: '입력하신 전화번호로 등록된 계정이 있으나 이름이 일치하지 않습니다. 가입할 때 쓴 이름으로 다시 입력해주세요.', field: 'name' };
+  }
+
+  // 입력한 번호가 다른 사람의 타계정으로 등록되어 있는지 확인 — 이름은 알려주지 않는다
   for (const row of subRows) {
     try {
       const subs = typeof row.sub_accounts === 'string' ? JSON.parse(row.sub_accounts) : row.sub_accounts;
@@ -191,20 +207,10 @@ async function verifyReviewer(name, phone8) {
         const subPhone = (sub.phone || '').replace(/[^0-9]/g, '');
         const subPhone8 = subPhone.length >= 8 ? subPhone.slice(-8) : subPhone;
         if (subPhone8 === p8) {
-          // ★ A안: 같은 번호 자체는 허용. 다만 입력 이름이 등록된 이름이 아니면 가입/타계정추가 유도
-          return { ok: false, error: '이 번호로 등록된 이름이 아닙니다. 이름을 확인하시거나, 등록 탭에서 같은 번호로 추가 등록해주세요.', field: 'name' };
+          return { ok: false, error: '이 번호는 다른 리뷰어의 타계정으로 등록돼 있어요. 등록할 때 쓴 이름으로 다시 입력해주세요.', field: 'name' };
         }
       }
     } catch (_) { continue; }
-  }
-
-  // 번호가 DB에 존재하는지 확인 (번호는 맞으나 이름이 다른 경우)
-  const { rows: phoneRows } = await pool.query(
-    'SELECT name FROM reviewers WHERE phone8 = $1 LIMIT 1', [p8]
-  );
-  if (phoneRows.length > 0) {
-    // 전화번호로 등록된 계정은 있으나 이름이 일치하지 않음 → 이름 확인 유도
-    return { ok: false, error: '입력하신 전화번호로 등록된 계정이 있으나 이름이 일치하지 않습니다. 이름을 다시 확인해주세요.', field: 'name' };
   }
 
   // 이름이 DB에 존재하는지 확인 (이름은 맞으나 번호가 다른 경우)
