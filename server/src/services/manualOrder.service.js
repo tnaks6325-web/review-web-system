@@ -128,7 +128,10 @@ async function ensureExternalReviewer(f, { db = pool } = {}) {
   // ── 본인 건 or 소유자 미확인 → 명의(수취인) 기준 등록 ──
   const regName = String((isSub ? f.recipient : (f.reviewerName || f.recipient)) || '').trim();
   const reg = await registerReviewer({ name: regName, phone: phoneDigits, consent: true });
-  if (!reg.ok) { warnings.push(`리뷰어 등록 실패: ${reg.error}`); return { registered: false, linkedOwner: null, ownerPhone8: null, warnings }; }
+  if (!reg.ok && reg.reason === 'phone_registered_other_name') {
+    // 결정 226 — 그 번호의 리뷰어가 이미 있다(이름만 다름). 같은 번호 타계정을 만들지 않고 그 리뷰어 주문으로 둔다.
+    warnings.push(`이 번호는 이미 '${reg.registeredName}' 리뷰어의 번호라 그 리뷰어로 연결했습니다(받는 사람 '${regName}' · 같은 번호 타계정은 만들지 않음)`);
+  } else if (!reg.ok) { warnings.push(`리뷰어 등록 실패: ${reg.error}`); return { registered: false, linkedOwner: null, ownerPhone8: null, warnings }; }
   if (reg.addedAsSubAccount) {
     warnings.push(`이 번호는 이미 '${reg.mainName}' 리뷰어의 번호라 타계정으로 추가되었습니다`);
   }
