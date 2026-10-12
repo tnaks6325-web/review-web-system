@@ -4890,27 +4890,6 @@ async function campBlogReject(idx) {
 
 /** 🧩 관제 옵션별 현황표(061 3단계): 옵션 뷰(정원·상태) + 신청행 기반 오늘 집계.
  *  옵션 미등록 캠페인은 빈 문자열(표 미노출). */
-/** ⚠ 결정 227 — 공고 총원 ↔ 상품별 남은 자리 합 어긋남 안내(관리자 전용).
- *  판정은 서버 `campaignState.optionTotalBalance` 하나 — 화면은 받은 숫자를 문장으로만 바꾼다(계산 사본 금지).
- *  ★ 값이 없으면(구버전 서버·어긋남 없음·판정 불가) 빈 문자열 = 종전 화면 그대로. */
-function _campQuotaBalanceNote(qb) {
-  if (!qb || typeof qb !== "object" || !Number(qb.gap) && !(Array.isArray(qb.over) && qb.over.length)) return "";
-  const escT = s => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const gap = Number(qb.gap) || 0;
-  const over = Array.isArray(qb.over) ? qb.over : [];
-  const overTxt = over.length
-    ? over.map(o => `<b>${escT(o.optKey)}</b> ${Number(o.used) || 0}/${Number(o.recruitTotal) || 0}명(정원보다 ${Number(o.overBy) || 0}명 많음)`).join(" · ")
-    : "";
-  let head;
-  if (gap > 0) head = `상품별로는 <b>${Number(qb.optionRemaining) || 0}자리</b>가 남았는데 공고 총원 기준 남은 자리는 <b>${Number(qb.totalRemaining) || 0}자리</b>입니다 — 공고가 상품 ${gap}자리를 덜 채운 채 마감됩니다.`;
-  else if (gap < 0) head = `공고 총원까지 <b>${Number(qb.totalRemaining) || 0}자리</b>가 남았는데 상품별로 받을 수 있는 자리는 <b>${Number(qb.optionRemaining) || 0}자리</b>입니다 — 이대로면 총원을 ${-gap}자리 못 채웁니다.`;
-  else head = `정원보다 많이 팔린 상품이 있습니다.`;
-  const fix = gap > 0 ? "총원을 늘릴지, 덜 채운 채 끝낼지 업체와 정해 주세요." : (gap < 0 ? "상품 정원을 늘리거나 닫은 상품을 다시 열지, 총원을 줄일지 정해 주세요." : "");
-  return `<div style="margin:2px 0 8px;padding:8px 10px;border:1px solid #FCD34D;background:#FFFBEB;border-radius:8px;font-size:.72rem;line-height:1.5;color:#92400E">
-    ⚠ ${head}${overTxt ? `<div style="margin-top:2px">${overTxt}</div>` : ""}${fix ? `<div style="margin-top:2px;color:#78350F">${fix}</div>` : ""}
-  </div>`;
-}
-
 function _campOptionTable(options, rows, now, today, kstDay) {
   if (!options || !options.length) return "";
   const agg = {};
@@ -5129,8 +5108,7 @@ async function _loadCampControl(campId) {
     // 📝 127 블로그 승인 대기 큐 — blog_pending 행이 있을 때만 표가 뜬다
     const blogQueueHtml = _campBlogQueue(rows, campId);
     // 🧩 옵션별 현황표(061 3단계) — 옵션 등록 캠페인만
-    // ⚠ 결정 227: 공고 총원과 상품별 남은 자리 합이 어긋나면 표 바로 위에 한 줄로 알린다(서버 판정 — 없으면 무표시).
-    const optTableHtml = _campQuotaBalanceNote(j.quotaBalance) + _campOptionTable(j.options || [], items, now, today, kstDay);
+    const optTableHtml = _campOptionTable(j.options || [], items, now, today, kstDay);
     // 👥 타계정 묶음(063): 소유자별 건수 — "한 리뷰어가 실제 몇 건 진행 중인가"를 즉시 파악(사재기 관측)
     const ownerTableHtml = _campOwnerTable(items, now);
     // 📋 시트 대조 — "시트엔 100행인데 확정 99" / "하루 완결이라 시트 일정 미적용"을 여기서 확인

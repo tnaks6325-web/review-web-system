@@ -7,13 +7,14 @@
  *   ② 담당자가 빈 줄 상품 칸에 손으로 적은 값(물리행 앵커 편집)을 줄 고르기가 보지 않았고, 다른 상품 주문이 그 줄에
  *      들어가면 화면에는 손 글씨가 그대로 보였다(위드프렌즈 10/1 사고와 같은 모양).
  *   ③ 공고 총원과 상품별 남은 자리 합이 어긋나도(1번 상품 6/5) 아무도 몰랐다 — 마지막 날 10명이 아니라 9명에서 닫혔다.
+ *      → 작업보드를 열 때마다 팝업(사용자 확정 2026-10-12 — 화면에 상시 줄을 차지하지 않는다).
  * 고정:
  *   [1] 계획 칸 판정(planCellHeaders) — 상품·옵션·리뷰옵션·배송구분·회수·차수 / 결제금액·옵션금액·비고(옵션확인) 제외
  *   [2] 보충 줄이 계획 칸·배정 표식을 잇는다(편집 오버레이 → 줄 값) · 조회 실패 = 줄 값만 · 끄는 스위치 = 종전 빈 줄
  *   [3] 줄 고르기가 손 글씨 상품을 계획으로 본다 · 다른 상품 손 글씨 줄은 뒤로 · 옵션 키 선택은 무접촉
  *   [4] 손 글씨 내림 배선(지우지 않고 reverted · 상품 2종 짝지은 경우만 · SAVEPOINT)
  *   [5] 총원 ↔ 상품별 남은 자리 대조(optionTotalBalance) — 실측 값 그대로 · 모르면 null
- *   [6] 관리자 화면 안내 문장(vm 실행) · 배선
+ *   [6] 작업보드를 열 때마다 팝업(vm 실행) · 배선   [7] 서버 창구 실제 실행(스텁 DB)
  * 실행: node tests/slotPlanInherit.test.js
  */
 'use strict';
@@ -259,20 +260,58 @@ const insertOf = log => log.find(l => l.sql.startsWith('INSERT INTO campaign_par
   ok('모르면 말하지 않는다 — 정원 무제한 선택지', optionTotalBalance(usage(50, 41), [view('A', 0, 3, 'open'), view('B', 10, 2, 'open')]) === null);
   ok('입력 없음 = null(throw 없음)', optionTotalBalance(null, null) === null);
 
-  console.log('[6] 관리자 화면 안내 · 배선');
-  const fe = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'js', 'index-recruit.js'), 'utf8');
-  const fnSrc = fe.slice(fe.indexOf('function _campQuotaBalanceNote'), fe.indexOf('function _campOptionTable'));
-  const ctx = {}; vm.createContext(ctx); vm.runInContext(fnSrc + '\nthis.f=_campQuotaBalanceNote;', ctx);
-  ok('값 없음(구버전 서버·어긋남 없음) = 빈 문자열', ctx.f(null) === '' && ctx.f(undefined) === '' && ctx.f({ gap: 0, over: [] }) === '');
+  console.log('[6] 작업보드 열 때마다 팝업 · 서버 창구');
+  const wd = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
+  const fnSrc = wd.slice(wd.indexOf('function _wdQuotaAlertText'), wd.indexOf('function _wdQuotaAlertClose'));
+  const ctx = { esc: s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])) };
+  vm.createContext(ctx); vm.runInContext(fnSrc + '\nthis.f=_wdQuotaAlertText;', ctx);
+  ok('값 없음·어긋남 없음 = 팝업 없음(null)', ctx.f(null) === null && ctx.f({ gap: 0, over: [] }) === null);
   const html = ctx.f(b);
-  ok('★ gap>0: 남은 자리 두 숫자 + 넘친 상품 + 할 일', /10자리/.test(html) && /9자리/.test(html) && /1번<\/b> 6\/5명\(정원보다 1명 많음\)/.test(html) && /총원을 늘릴지/.test(html));
+  ok('★ gap>0: 남은 자리 두 숫자 + 넘친 상품 + 할 일', /10자리/.test(html) && /9자리/.test(html) && /<b>1번<\/b> 6\/5명 — 정원보다 1명 많음/.test(html) && /총원을 늘릴지/.test(html));
   ok('gap<0: 총원을 못 채운다는 문장', /총원을 5자리 못 채웁니다/.test(ctx.f(neg)));
   ok('상품 이름은 이스케이프', !/<x>/.test(ctx.f({ gap: 1, optionRemaining: 1, totalRemaining: 0, over: [{ optKey: '<x>', used: 2, recruitTotal: 1, overBy: 1 }] })));
-  ok('옵션별 현황 표 바로 위에 붙는다', /_campQuotaBalanceNote\(j\.quotaBalance\) \+ _campOptionTable\(/.test(fe));
-  const rt = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'campaign.routes.js'), 'latin1');
-  ok('관제 응답이 quotaBalance 를 싣는다(판정은 서버 단일 출처)', /quotaBalance = optionTotalBalance\(totalQuotaUsage\(camps\[0\], _cnt \|\| \{\}, _sch\), options\)/.test(rt)
-    && /quotaBalance, options, sheetInfo \}\)/.test(rt));
-  ok('대조 실패는 무표시(관제 응답을 깨지 않는다)', /catch \(balErr\)/.test(rt));
+  ok('★ 작업보드를 열 때마다 묻는다(selTab) — 조건 카드 저장 뒤 다시 읽기는 제외',
+    /const _qbSkip=STATE\._qbSkipOnce===t; STATE\._qbSkipOnce=null;\s*if\(!t\.archived && !_qbSkip\) _wdQuotaAlert\(t\);/.test(wd)
+    && /STATE\._qbSkipOnce=STATE\.cur; selTab\(i,\{nav:true\}\);/.test(wd));
+  const alertFn = wd.slice(wd.indexOf('async function _wdQuotaAlert('), wd.indexOf('function _wdQuotaAlertText'));
+  ok('광고주 화면 무표시 · 공고 없는 작업 무표시', /STATE\.role==='advertiser'/.test(alertFn) && /if\(!cid\) return;/.test(alertFn));
+  ok('★ 응답 전에 다른 작업으로 옮겼으면 띄우지 않는다', /STATE\.cur!==t\) return;/.test(alertFn));
+  ok('판정은 서버 창구 하나(화면 계산 사본 없음)', /\/api\/trackb\/campaigns\/'\+encodeURIComponent\(cid\)\+'\/quota-balance'/.test(alertFn) && !/optionRemaining\s*=/.test(wd));
+  ok('★ 공고 [참여 관리] 화면에는 줄을 넣지 않는다(사용자 확정)', !/quotaBalance/.test(fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'js', 'index-recruit.js'), 'utf8')));
+  const rt = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'trackB.routes.js'), 'utf8');
+  ok('서버 창구 = 내부 직원만 · 실패는 팝업 미표시', /router\.get\('\/campaigns\/:id\/quota-balance', authMiddleware, internalMiddleware/.test(rt) && /quotaBalance: null \}\)/.test(rt));
+  const qs = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'campaignQuotaBalance.service.js'), 'utf8');
+  ok('게시 중 참여형 공고만 · 판정 단일 출처', /c\.status !== 'active'/.test(qs) && /optionTotalBalance\(totalQuotaUsage\(c, cnt, sch\), views\)/.test(qs));
+
+  console.log('[7] 서버 창구 실제 실행(스텁 DB)');
+  {
+    const Q = require('../src/services/campaignQuotaBalance.service');
+    const cs = require('../src/services/campaignState.service');
+    const sc = require('../src/services/campaignSchedule.service');
+    const keep = { ...cs }, keepSc = { ...sc };
+    // 실제 판정 함수는 그대로 두고, DB 조회만 가짜로
+    const camp = { id: 'c1', title: '가짜 50건', participation_mode: true, status: 'active', recruit_total: 50, daily_limit: 22 };
+    const db = { query: async (sql) => /FROM recruit_campaigns/.test(sql) ? { rows: [camp] }
+      : /FROM campaign_options/.test(sql) ? { rows: [
+        { opt_key: '1번', recruit_total: 5, daily_limit: 3, status: 'active' },
+        { opt_key: 'E', recruit_total: 45, daily_limit: 10, status: 'active' }] } : { rows: [] } };
+    const counts = new Map([['1번', { submitted: 6, activeHolds: 0 }], ['E', { submitted: 35, activeHolds: 0 }]]);
+    // require 시점에 구조분해한 함수를 쓰므로, 모듈 캐시를 바꿔 다시 불러온다
+    const qPath = require.resolve('../src/services/campaignQuotaBalance.service');
+    delete require.cache[qPath];
+    cs.fetchCampaignCounts = async () => new Map([['c1', { submittedAll: 41, activeHolds: 0 }]]);
+    cs.fetchOptionCounts = async () => counts;
+    cs.fetchSequentialCampaignIds = async () => new Set();
+    sc.deriveSchedules = async () => new Map(); sc.scheduleFor = () => null; sc.tabsOfCampaigns = () => [];
+    const Q2 = require('../src/services/campaignQuotaBalance.service');
+    const r = await Q2.loadQuotaBalance(db, 'c1');
+    ok('★ 실측 모양: 총원 9 · 상품별 10 · 1번 초과', r && r.totalRemaining === 9 && r.optionRemaining === 10 && r.gap === 1 && r.over[0].optKey === '1번' && r.title === '가짜 50건');
+    camp.status = 'draft';
+    ok('멈춘 공고(게시 중 아님) = null', (await Q2.loadQuotaBalance(db, 'c1')) === null);
+    camp.status = 'active'; camp.archived_at = new Date();
+    ok('보관 공고 = null', (await Q2.loadQuotaBalance(db, 'c1')) === null);
+    Object.assign(cs, keep); Object.assign(sc, keepSc); delete require.cache[qPath]; void Q;
+  }
 
   console.log(`\n${failed ? '❌' : '✅'} slotPlanInherit: ${n - failed}/${n}`);
   process.exit(failed ? 1 : 0);
