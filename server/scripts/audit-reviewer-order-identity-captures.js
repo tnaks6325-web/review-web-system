@@ -176,7 +176,7 @@ async function main() {
         recipient: row.submitted_recipient,
         phone: row.submitted_phone,
         address: row.submitted_address,
-      }, ctx.selected, ctx.identities, { useGemini: false });
+      }, ctx.selected, ctx.identities, { useGemini: false, ownerPhoneRule: true }); // 결정 226 — 운영 판정과 같은 규칙
       if (reference.status === 'MISMATCH' || reference.competingIdentity) {
         report.reference.MISMATCH_SKIPPED++;
         continue;
@@ -200,7 +200,7 @@ async function main() {
         const imageHash = hashImageBase64(base64);
         const extracted = await extractOrderFromImage(base64, file.mimeType || 'image/jpeg');
         auditStage = 'identity_match';
-        const verdict = await evaluateSelectedIdentity(extracted, ctx.selected, ctx.identities, { useGemini: true });
+        const verdict = await evaluateSelectedIdentity(extracted, ctx.selected, ctx.identities, { useGemini: true, ownerPhoneRule: true });
         report.outcome[verdict.status] = (report.outcome[verdict.status] || 0) + 1;
         for (const reason of verdict.reasonCodes || []) report.reasonCodes[reason] = (report.reasonCodes[reason] || 0) + 1;
         if (MASK_RE.test(String(extracted.address || '')) && verdict.resolved.address === ctx.selected.address) {

@@ -129,6 +129,13 @@ function ok(name, fn) {
     const withSub = { ...reviewer, sub_accounts: reviewer.sub_accounts.concat([{ name: '홍길동', phone: '010-8592-6325' }]) };
     const r2 = await resolveOrderIdentity(withSub, { ...base, recipient: '홍길동', phone: '010-8592-6325', extractedPhone: '010-8592-6325' });
     assert.strictEqual(r2.status, 'SUB');
+    // Codex P1 — 가린 번호인데 받는 사람이 저장된 타계정 이름(다른 번호)이면 종전대로 그 타계정
+    const withOther = { ...reviewer, sub_accounts: reviewer.sub_accounts.concat([{ name: '홍길동', phone: '010-3333-4444' }]) };
+    const rmo = await resolveOrderIdentity(withOther, { ...base, recipient: '홍길동', phone: '010-8592-6325', extractedPhone: '010-****-6325' });
+    assert.strictEqual(rmo.status, 'SUB');
+    // 전체 번호가 본인 번호면 이름이 타계정과 같아도 본인(번호가 사람을 정한다 — 카드 흐름 'full' 과 같음)
+    const rfo = await resolveOrderIdentity(withOther, { ...base, recipient: '홍길동', phone: '010-8592-6325', extractedPhone: '010-8592-6325' });
+    assert.strictEqual(rfo.status, 'SELF');
     // 주소·계좌가 다르면 본인과 똑같이 확인(NEED_CONFIRM) — 등록 요구가 아님
     const r3 = await resolveOrderIdentity(reviewer, {
       recipient: '홍길동', phone: '010-8592-6325', extractedPhone: '010-8592-6325', address: '부산시 다른로 999호',

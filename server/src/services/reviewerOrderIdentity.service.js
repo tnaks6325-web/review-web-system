@@ -744,8 +744,15 @@ async function evaluateSelectedIdentity(extracted, selected, allIdentities, opti
       // 선택 명의 자체도 독립 필드 2개 이상 명확히 맞으면 중복 저장정보 때문에 생긴
       // 애매 판정이다. 사용자가 허용한 수동확인 경로로 보낸다. 선택 명의가 부족하거나
       // 충돌하는데 다른 명의가 맞는 경우만 결정적 오명의로 차단한다.
-      // 결정 226 — 본인 번호 주문은 다른 칸이 비슷해도 막지 않고 확인 단계로 둔다(번호가 사람을 정한다).
-      if ((!selectedScore.conflicts.length && selectedScore.matches >= 2)
+      // 결정 226 — 가린 번호는 내 번호인지 확정이 아니다. 다른 저장 명의(이름·주소)와 맞으면 그 명의의 주문으로 보고
+      //   종전대로 막는다(Codex P1) — 확인 단계로 두면 입력칸에 내 번호를 채운 확인에서 'full' 로 바뀌어 승인된다.
+      if (ownerPhone === 'masked') {
+        status = 'MISMATCH';
+        const i = reasonCodes.indexOf('owner_phone_recipient_masked');
+        if (i >= 0) reasonCodes.splice(i, 1);
+        reasonCodes.push('other_owner_identity_matches');
+      // 결정 226 — 본인 번호(전체) 주문은 다른 칸이 비슷해도 막지 않고 확인 단계로 둔다(번호가 사람을 정한다).
+      } else if ((!selectedScore.conflicts.length && selectedScore.matches >= 2)
           || reasonCodes.includes('delivery_address_changed') || ownerPhone === 'full') {
         status = 'REVIEW';
         reasonCodes.push('multiple_identity_candidates');

@@ -328,8 +328,10 @@ async function resolveOrderIdentity(reviewer, order, opts = {}) {
   // ★ 이름·번호가 정확히 맞는 타계정이 있으면 종전대로 그 타계정(2)으로 둔다(레드팀 P1 — 전용 계좌·빈칸 보강 유지).
   const _ownerPhone = reviewer.phone || reviewer.phone8;
   const _exPhone = String(order.extractedPhone || '').trim();
+  // 가린 번호는 내 번호 확정이 아니다 — 받는 사람 이름이 저장된 타계정 이름이면 종전대로 그 타계정(아래 2)으로 본다(Codex P1).
+  const maskedNamedSub = !!idName && subs.some((sub) => normName(sub && sub.name) === idName);
   const ownerPhoneOrder = isOwnerPhoneRecipient(_ownerPhone, _exPhone)
-    || (isMaskedOwnerPhone(reviewer.phone, _exPhone) && isOwnerPhoneRecipient(_ownerPhone, order.phone));
+    || (!maskedNamedSub && isMaskedOwnerPhone(reviewer.phone, _exPhone) && isOwnerPhoneRecipient(_ownerPhone, order.phone));
   const exactSub = ownerPhoneOrder && idName
     && subs.some((sub) => normName(sub && sub.name) === idName && normPhone8(sub && sub.phone) === selfPhone);
   if (ownerPhoneOrder && !exactSub) {

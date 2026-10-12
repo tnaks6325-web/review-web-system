@@ -162,6 +162,15 @@ const other = {
     const sub = { identityKey:'sub:x', type:'sub', name:'박지민', phone:'010-3333-4444', address:'부산 해운대구 센텀로 5 1203호' };
     const comp = await evaluateSelectedIdentity({ recipient:'박지민', phone:'010-****-2222', address:'' }, me, [me, sub], opt);
     assert.notStrictEqual(comp.status, 'MATCH', JSON.stringify(comp));
+    // Codex P1 — 같은 집 주소의 다른 저장 명의와 이름·주소가 맞으면 가린 번호여도 차단(확인 단계로 두면 내 번호 채운 확인에서 승인된다)
+    const housemate = { identityKey:'sub:h', type:'sub', name:'박지민', phone:'010-3333-4444', address:me.address };
+    const comp2 = await evaluateSelectedIdentity({ recipient:'박지민', phone:'010-****-2222', address:me.address }, me, [me, housemate], opt);
+    assert.strictEqual(comp2.status, 'MISMATCH', JSON.stringify(comp2));
+    assert.ok(comp2.reasonCodes.includes('other_owner_identity_matches'));
+    assert.ok(!comp2.reasonCodes.includes('owner_phone_recipient_masked'));
+    // 그 명의가 없으면 같은 캡처는 확인 단계(본인 번호 주문)
+    const alone = await evaluateSelectedIdentity({ recipient:'박지민', phone:'010-****-2222', address:me.address }, me, [me], opt);
+    assert.strictEqual(alone.status, 'REVIEW', JSON.stringify(alone));
   });
 
   await test('본인 번호 예외는 다른 번호·타계정 참여에는 적용되지 않는다(결정 226)', async () => {
