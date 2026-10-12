@@ -1171,6 +1171,32 @@ function _channelChoices(template) {
   return CASH_RECEIPT_CHANNELS.map(c => ({ key: c.key, label: c.label, custom: false })).concat(custom);
 }
 
+/**
+ * 작업표 줄에서 **계획이 적는 칸**(planToSheetValues 가 줄마다 채우는 칸 중 번호·구매일자 제외)의 헤더 목록.
+ *
+ * ★ 왜 필요한가(2026-10-12 제주도아): 줄을 지우면 빈 줄 하나를 보충하는데, 그 줄이 상품·옵션·리뷰옵션을
+ *   모두 비운 채 만들어져 "어느 상품 자리인지"가 사라졌다 → 순차진행 작업표에서 옥돔 자리가 통째로 없어졌다.
+ *   보충 줄이 지운 줄의 계획 칸을 이어받을 때 이 목록을 쓴다.
+ * ★ 판정은 worktableCreate.planToSheetValues 와 같은 재료 — 열 역할은 `classifyHeaders`(매퍼 파생 단일 출처),
+ *   리뷰옵션은 `isReviewOptionHeader`, 배송구분·회수 칸은 worktablePlan 상수. 키워드 규칙을 새로 만들지 않는다.
+ * @param {string[]} headers
+ * @returns {string[]}
+ */
+function planCellHeaders(headers) {
+  const list = Array.isArray(headers) ? headers.filter(Boolean) : [];
+  if (!list.length) return [];
+  const roles = new Set(['option', 'product', 'option_1', 'option_2', 'round', 'review_option_instruction']);
+  const out = [];
+  for (const c of classifyHeaders(list)) {
+    const h = c.header;
+    if (!h) continue;
+    if (roles.has(c.role) || isReviewOptionHeader(h) || h === DELIVERY_KIND_HEADER || RECALL_HEADERS.includes(h)) {
+      if (!out.includes(list[c.index])) out.push(list[c.index]);
+    }
+  }
+  return out;
+}
+
 module.exports = {
   buildWorktablePlan, buildColumns, distributeDates, distributeOptions, normalizeProductDistributionMode,
   distributeReviewTypes, reviewMixFromWorkOrder, optionReviewMixesFromWorkOrder,
@@ -1178,6 +1204,7 @@ module.exports = {
   REVIEW_SUBMIT_HEADER, ensureReviewColumn,
   productKeysFromWorkOrder,   // 138 — 상품 축 판정(작업오더 기준)
   DELIVERY_KIND_HEADER, RECALL_HEADERS,
+  planCellHeaders,   // 결정 227 — 행 삭제 보충 줄이 이어받는 계획 칸
   deliveryMixFromWorkOrder, recallInfoFromWorkOrder, distributeDeliveryTypes,
   optionKeysFromWorkOrder, stagedSelectionsFromWorkOrder, ensureStagedColumns, channelFromUrl, channelLabel, sheetDateStr,
   evalWorkTypeTrigger, workTypeTriggerReason,

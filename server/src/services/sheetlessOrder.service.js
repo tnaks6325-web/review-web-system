@@ -298,8 +298,44 @@ async function _pickOpenSlot(client, { sheetId, tabName, workboardId, scheduledO
      ${where}
      ORDER BY cp.seq LIMIT ${PICK_CANDIDATE_CAP}`, [sheetId, tabName, workboardId, key, orderSubmissionId]);
   if (cands.length) {
-    const optTier = r => {
+    /* ★★ 결정 227(2026-10-12 제주도아) — 상품 단위 선택이면 **담당자가 빈 줄 상품 칸에 손으로 적은 값**(물리행 앵커 편집)도
+         그 줄의 상품 계획으로 본다. 종전에는 배정 표식(option_text)만 봐서, 손 글씨가 「옥돔」인 빈 줄에 고등어 주문이
+         들어가면 화면에는 손 글씨(옥돔)가 그대로 보였다(위드프렌즈 10/1 사고와 같은 모양).
+       ★ 계획 = 배정 표식 → 손 글씨 → 줄의 상품 칸 순. 손 글씨 조회 실패 = 종전 판정(SAVEPOINT 격리 · throw 없음).
+       ★ 옵션 키가 있는 선택(1·2차 옵션)은 종전 그대로(이 갈래 무접촉). */
+    const overlayById = new Map();
+    let productHeader = '';
+    if (!key && productPick) {
+      try { productHeader = require('./orderLedger.service').PRODUCT_HEADER; } catch (_) { productHeader = ''; }
+      if (productHeader && process.env.WORKTABLE_SLOT_OVERLAY_PLAN !== '0') {
+        await client.query('SAVEPOINT slot_pick_overlay');
+        try {
+          const { rows: ov } = await client.query(
+            `SELECT DISTINCT ON (anchor_value) anchor_value, value_text
+               FROM participant_edits
+              WHERE sheet_id = $1 AND tab_name = $2 AND anchor_type = 'manual' AND field = $3
+                AND kind = 'text' AND reverted_at IS NULL AND anchor_value = ANY($4::text[])
+              ORDER BY anchor_value, created_at DESC, id DESC`,
+            [sheetId, tabName, 'col:' + productHeader, cands.map(r => String(r.id))]);
+          await client.query('RELEASE SAVEPOINT slot_pick_overlay');
+          // ★ 빈 값도 담는다(Codex P2) — 담당자가 미리 적힌 상품을 **일부러 지운** 것도 지시다. 빼면 지운 상품으로 판정된다.
+          for (const o of ov) overlayById.set(String(o.anchor_value), String(o.value_text == null ? '' : o.value_text).trim());
+        } catch (e) {
+          try { await client.query('ROLLBACK TO SAVEPOINT slot_pick_overlay'); } catch (_) {}
+          logger.warn(`[sheetlessOrder] 빈 줄 손 글씨 상품 조회 실패(배정 표식만 본다): ${e.message}`);
+        }
+      }
+    }
+    // 고른 줄의 손 글씨(없으면 null · 빈 값 = 담당자가 비워 둠) — 쓰기 단계가 다시 확인한다
+    const _rowOverlayOf = rows => (rows.length && overlayById.has(String(rows[0].id))) ? overlayById.get(String(rows[0].id)) : null;
+    const planOf = r => {
       const ot = String(r.option_text == null ? '' : r.option_text).trim();
+      if (ot || key || !productPick) return ot;
+      if (overlayById.has(String(r.id))) return overlayById.get(String(r.id));   // 빈 값 = 담당자가 비워 둠
+      return productHeader ? String(((r.row_json || {})[productHeader]) == null ? '' : (r.row_json || {})[productHeader]).trim() : '';
+    };
+    const optTier = r => {
+      const ot = planOf(r);
       if (key) return ot === key ? 0 : 1;
       return ot ? 1 : 0;
     };
@@ -311,7 +347,7 @@ async function _pickOpenSlot(client, { sheetId, tabName, workboardId, scheduledO
     let productKey = '';
     let productWrite = '';   // 처음 채우는 줄에 적을 값 — 짝지은 작업표 표기, 못 지으면 고른 상품 원문(상품 2종 이상일 때만)
     if (!key && productPick) {
-      const labels = [...new Set(cands.map(r => String(r.option_text == null ? '' : r.option_text).trim()).filter(Boolean))];
+      const labels = [...new Set(cands.map(planOf).filter(Boolean))];
       let allLabels = labels;
       try {
         const { rows: lr } = await client.query(
@@ -334,7 +370,7 @@ async function _pickOpenSlot(client, { sheetId, tabName, workboardId, scheduledO
       if (rvHeader) {
         const counts = new Map();
         const tally = (rj) => { const v = String(((rj || {})[rvHeader]) == null ? '' : (rj || {})[rvHeader]).trim(); if (v) counts.set(v, (counts.get(v) || 0) + 1); };
-        cands.filter(r => String(r.option_text || '').trim() === productKey).forEach(r => tally(r.row_json));
+        cands.filter(r => planOf(r) === productKey).forEach(r => tally(r.row_json));
         if (!counts.size) {
           try {
             const { rows: fr } = await client.query(
@@ -347,15 +383,19 @@ async function _pickOpenSlot(client, { sheetId, tabName, workboardId, scheduledO
         wantRv = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '';
       }
       const prodTier = r => {
-        const ot = String(r.option_text == null ? '' : r.option_text).trim();
+        const ot = planOf(r);
         if (ot === productKey) return 0;
         const rv = rvHeader ? String(((r.row_json || {})[rvHeader]) == null ? '' : (r.row_json || {})[rvHeader]).trim() : '';
         const sameRv = !wantRv || rv === wantRv;
-        return ot ? (sameRv ? 2 : 3) : (sameRv ? 1 : 3);
+        // ★ 결정 227: 리뷰옵션까지 다르면 **계획이 없는 빈 줄**(3)을 **다른 상품 자리**(4)보다 먼저 —
+        //   종전엔 둘이 같은 순위라 날짜가 앞선 다른 상품 자리(예: 손 글씨 「옥돔」)를 가져갔다.
+        return ot ? (sameRv ? 2 : 4) : (sameRv ? 1 : 3);
       };
-      return { rows: await lockFirst(rank(cands, prodTier)), relabelFrom: '', productKey, productWrite };
+      const rows = await lockFirst(rank(cands, prodTier));
+      return { rows, relabelFrom: '', productKey, productWrite, rowOverlay: _rowOverlayOf(rows) };
     }
-    return { rows: await lockFirst(rank(cands, optTier)), relabelFrom: '', productKey: '', productWrite };
+    const rows = await lockFirst(rank(cands, optTier));
+    return { rows, relabelFrom: '', productKey: '', productWrite, rowOverlay: _rowOverlayOf(rows) };
   }
 
   if (!key || process.env.WORKTABLE_OPTION_RELABEL === '0') return { rows: [], relabelFrom: '' };
@@ -474,6 +514,7 @@ async function writeOrderToWorktable({
   // 방금 빈 줄을 새로 골랐는지 · 그 줄에 맞춘 상품 표기(2026-10-01)
   let freshClaim = false;
   let claimedProductKey = '';
+  let claimedRowOverlay = null;   // 결정 227 — 고른 빈 줄에 담당자가 손으로 적어 둔 상품(null = 없음 · '' = 비워 둠)
 
   // ── 작업표 줄에 병합 ────────────────────────────────────────────────
   //   ★ 행 잠금(FOR UPDATE) — 같은 줄에 동시에 두 건이 들어오는 경우는 claim 이 막지만,
@@ -634,6 +675,7 @@ async function writeOrderToWorktable({
         cur = picked.rows;
         freshClaim = cur.length > 0;
         claimedProductKey = picked.productWrite || '';
+        claimedRowOverlay = picked.rowOverlay == null ? null : String(picked.rowOverlay);
         relabelFrom = picked.relabelFrom;
       }
       if (!cur.length) {
@@ -722,6 +764,41 @@ async function writeOrderToWorktable({
       if (persisted.rowCount !== 1) {
         await client.query('ROLLBACK');
         return { ok: false, reason: 'workboard_row_not_linked', message: '선점한 작업표 행을 갱신하지 못했습니다.' };
+      }
+      /* ★★ 결정 227 — 처음 채운 빈 줄에 담당자가 손으로 적어 둔 상품이 **실제로 산 상품과 다르면** 그 손 글씨를 내린다.
+           화면은 손 글씨를 줄 값보다 먼저 보여 주므로, 남겨 두면 고등어를 산 사람이 「옥돔」으로 보인다(업체 화면 포함).
+         ★ 지우지 않는다 — 기록은 남기고 '취소됨'(reverted_by='system:order-fill')으로만 둔다(편집 이력에서 보인다).
+         ★ 상품 단위 + 상품 2종 이상으로 짝지은 경우(productOverwrite)만. 같은 상품(표기만 다름)이면 그대로 둔다.
+         ★ SAVEPOINT 격리 + throw 없음 — 이것 때문에 주문 기록이 실패하면 안 된다. */
+      if (productOverwrite && claimedRowOverlay !== null && cur[0] && cur[0].id) {
+        const n = v => String(v || '').replace(/\s+/g, '').toLowerCase();
+        const sameAsBought = v => !!String(v || '').trim() && (n(v) === n(claimedProductKey)
+          || n(resolveProductLabel(v, [claimedProductKey])) === n(claimedProductKey));
+        await client.query('SAVEPOINT slot_overlay_retire');
+        try {
+          const { PRODUCT_HEADER } = require('./orderLedger.service');
+          /* ★ 줄을 잠근 지금 **다시 읽는다**(Codex P2) — 고를 때 본 손 글씨가 그사이 바뀌었을 수 있다.
+               지금 보이는 값(가장 최근 편집)이 산 상품과 같으면 그대로 두고, 다르면 **지금 읽은 편집만** 내린다
+               (id 로 고정 — 이 사이에 담당자가 새로 고친 값은 건드리지 않는다). */
+          const { rows: act } = await client.query(
+            `SELECT id::text AS id, value_text FROM participant_edits
+              WHERE sheet_id = $1 AND tab_name = $2 AND anchor_type = 'manual' AND anchor_value = $3
+                AND field = $4 AND reverted_at IS NULL
+              ORDER BY created_at DESC, participant_edits.id DESC`,
+            [sheetId, tabName, String(cur[0].id), 'col:' + PRODUCT_HEADER]);
+          let retired = 0;
+          if (act.length && !sameAsBought(act[0].value_text)) {
+            const r = await client.query(
+              `UPDATE participant_edits SET reverted_at = NOW(), reverted_by = 'system:order-fill'
+                WHERE id::text = ANY($1::text[]) AND reverted_at IS NULL`, [act.map(x => x.id)]);
+            retired = r.rowCount;
+          }
+          await client.query('RELEASE SAVEPOINT slot_overlay_retire');
+          if (retired) logger.info(`[sheetlessOrder] 빈 줄 손 글씨 상품 내림 tab=${tabName} seq=${seq} ${act[0].value_text || '(비워 둠)'} → ${claimedProductKey} n=${retired} os=${orderSubmissionId}`);
+        } catch (e) {
+          try { await client.query('ROLLBACK TO SAVEPOINT slot_overlay_retire'); } catch (_) {}
+          logger.warn(`[sheetlessOrder] 빈 줄 손 글씨 상품 내림 실패(주문 기록은 계속): ${e.message}`);
+        }
       }
     } else {
       // 행 번호가 명시됐어도 없는 번호에 일반 주문 행을 만들면, 오래된 행배정 값 하나가

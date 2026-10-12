@@ -1653,6 +1653,17 @@ router.post('/shortage-prompts/apply', authMiddleware, internalMiddleware, async
   }
 });
 
+// ★★ 결정 227 — 공고 총원 ↔ 상품별 남은 자리 합 어긋남. 작업보드를 열 때마다 화면이 묻고, 어긋났으면 팝업으로 알린다
+//   (사용자 확정 2026-10-12: 화면에 상시 줄을 차지하지 않는다). 내부 직원만(광고주·리뷰어 차단). 실패 = 팝업 미표시(fail-soft).
+router.get('/campaigns/:id/quota-balance', authMiddleware, internalMiddleware, async (req, res) => {
+  try {
+    const quotaBalance = await require('../services/campaignQuotaBalance.service').loadQuotaBalance(pool, String(req.params.id));
+    res.json({ ok: true, quotaBalance });
+  } catch (e) {
+    logger.warn('[quota-balance] 조회 실패(팝업 미표시): ' + e.message);
+    res.json({ ok: false, quotaBalance: null });
+  }
+});
 router.get('/campaigns/:id/daily-plan', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { getPlanOverview } = require('../services/campaignPlan.service');

@@ -1470,6 +1470,40 @@ function withoutOwnHold(countsMap, optionKey, appliedToday) {
   return out;
 }
 
+/**
+ * ★★ 결정 227 — 공고 총원과 **상품별 남은 자리 합**이 어긋났는지(관리자 경고 재료). 순수 함수.
+ *
+ * 왜 필요한가(2026-10-12 위드프렌즈 50건): 수정 배포 전 1번 상품이 정원 5를 넘겨 6명 팔렸고, 그 1명이 공고 총원 50을
+ * 먼저 차지해 마지막 날 HD2200 이 10명이 아니라 9명에서 닫혔다. 작업표·하루 몫 상한은 상품별로 10을 말하고 공고는 9에서
+ * 멈춰, 담당자는 이유를 모른 채 총원을 손으로 늘렸다.
+ * - gap > 0 : 상품별로는 자리가 더 남았는데 총원이 먼저 찬다(어느 상품이 정원을 넘겼거나 총원이 상품 정원 합보다 작다).
+ * - gap < 0 : 총원까지 자리가 남았는데 상품별로 받을 수 있는 자리가 모자란다(선택지를 닫았거나 정원 합이 총원보다 작다).
+ * ★ 모르면 말하지 않는다(null) — 총량 사용량을 모름(known=false)·총원 0·정원 무제한 선택지가 섞임·선택지 없음.
+ * ★ 판정 재료는 단일 출처 그대로: 총량 = `totalQuotaUsage`, 선택지 사용량·남은 자리 = `computeOptionViews`(공고 밖 주문 포함 — 210).
+ * @param {object} usage   totalQuotaUsage 결과
+ * @param {Array}  views   computeOptionViews 결과
+ * @returns {null|{cap:number, used:number, totalRemaining:number, optionRemaining:number, gap:number,
+ *                 over:Array<{optKey:string, used:number, recruitTotal:number, overBy:number}>}}
+ */
+function optionTotalBalance(usage, views) {
+  if (!usage || usage.known === false) return null;
+  const cap = Number(usage.cap) || 0;
+  const list = (Array.isArray(views) ? views : []).filter(Boolean);
+  if (!(cap > 0) || !list.length) return null;
+  const live = list.filter(v => v.status !== 'closed');
+  if (live.some(v => !(Number(v.recruitTotal) > 0))) return null;
+  const used = Math.max(0, Number(usage.used) || 0);
+  const totalRemaining = Math.max(0, cap - used);
+  const optionRemaining = live.reduce((a, v) => a + Math.max(0, (Number(v.recruitTotal) || 0) - (Number(v.used) || 0)), 0);
+  const over = list
+    .filter(v => Number(v.recruitTotal) > 0 && (Number(v.used) || 0) > Number(v.recruitTotal))
+    .map(v => ({ optKey: v.optKey, used: Number(v.used) || 0, recruitTotal: Number(v.recruitTotal),
+      overBy: (Number(v.used) || 0) - Number(v.recruitTotal) }));
+  const gap = optionRemaining - totalRemaining;
+  if (gap === 0 && !over.length) return null;
+  return { cap, used, totalRemaining, optionRemaining, gap, over };
+}
+
 /** 선택지 하나가 그날 받을 수 있는 수 = min(일건수, 남은 정원). 정원 무제한이면 일건수. */
 function _optionDayRoom(o) {
   const dl = Number(o.dailyLimit) || 0;
@@ -1647,6 +1681,7 @@ module.exports = {
   computeOptionViews,
   fetchSequentialCampaignIds,
   optionCapsFromViews,
+  optionTotalBalance,
   withoutOwnHold,
   liveOptions,
   dailyQuota,
