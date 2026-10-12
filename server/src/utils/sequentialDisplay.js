@@ -78,7 +78,8 @@ function swapTitle(title, views, target) {
  */
 function sequentialDisplay(base, views) {
   const list = Array.isArray(views) ? views : [];
-  const cur = list.find(v => v && v.sequential && v.sequenceCurrent);
+  // ★ 결정 228: 오늘 열 상품이 없는 날은 다음으로 열릴 상품(sequenceNext)으로 보여 준다(첫 상품 제목으로 돌아가지 않게)
+  const cur = list.find(v => v && v.sequential && v.sequenceCurrent) || list.find(v => v && v.sequential && v.sequenceNext);
   if (!cur) return null;
   const b = base || {};
   const r = swapTitle(b.title, list, cur);

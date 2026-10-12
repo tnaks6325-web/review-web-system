@@ -12,7 +12,9 @@
  */
 
 // 주말 미게시(104) 판정은 게시 차단과 같은 함수를 쓴다(사본 금지 — 카드 표기 ≡ apply 게이트).
-const { isWeekendClosedOn } = require('./campaignWeekend.service');
+const { isWeekendClosedOn, closedKindOn } = require('./campaignWeekend.service');
+// ★ 결정 228: 순차진행 = 날짜별 상품 일정표(단일 출처 — 참여·하루 몫·앞날 예상·작업표·관리자 화면이 같은 표를 본다).
+const { buildSequentialSchedule, nextDateFor: _seqNextDateFor } = require('../utils/sequentialSchedule');
 
 const KST_OFFSET_MS = 9 * 3600 * 1000; // Asia/Seoul 고정 +9 (DST 없음)
 
@@ -501,8 +503,14 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
         //   다음 날 자동 이월되지 않는다(095 불변식 — 없으면 시트 20인 다음 날이 35로 열린다).
         : Math.max(0, Math.min(plannedThrough(sch, todayStr) + planDeltaThrough(sch, counts.plans || null, todayStr),
             sch.totalSlots) - submittedBefore))
-    : dailyQuota(c, submittedBefore, counts.carry && { ...counts.carry, today: todayStr },
-        { today: todayStr, plans: counts.plans || null }, eff, optionDayCapacity(counts.optionCaps));
+    : (_seqDayRoom(counts.optionCaps) !== null
+        /* ★★ 결정 228: 순차진행 일정표 공고 = 오늘 상품의 그날 몫이 곧 오늘 정원(공고 하루 인원·이월은 쓰지 않는다 —
+             못 채운 건은 넘기지 않고 정규 일정 끝에 담당자가 정한다). 0명 조절일·줄여 받는 날은 일정표가 이미 반영했다.
+             총량 clamp 는 유지(총원을 넘겨 열지 않는다). */
+        ? Math.max(0, Math.min(_seqDayRoom(counts.optionCaps) + (Number(counts.optionCaps.sequentialOthersToday) || 0),
+            eff.recruitTotal > 0 ? eff.recruitTotal - submittedBefore : Infinity))
+        : dailyQuota(c, submittedBefore, counts.carry && { ...counts.carry, today: todayStr },
+            { today: todayStr, plans: counts.plans || null }, eff, optionDayCapacity(counts.optionCaps)));
   // 동일 탭을 공유한 재발행 공고는 표의 채움 수가 탭 전체 수다. 호출부가 탭 전체 정원·신청·홀드를
   // 함께 전달하면 각 공고에 같은 표 수를 개별 정원으로 적용하지 않고 공유 정원으로 판정한다.
   const tableTodayQuota = Number(counts.tableTodayQuota);
@@ -543,7 +551,7 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
     //   (조절 50을 "+10 이월"로 표기하면 관리자가 이월 사고로 오해).
     // ★ 기준선은 그 공고의 "평소 그날 인원" — 시트 일정 공고는 **시트의 그날 행 수**이지
     //   daily_limit 이 아니다(둘은 아무 관계가 없어 근거 없는 "+15 이월" 칩이 뜬다).
-    carryAdded: ovToday !== null ? 0
+    carryAdded: (ovToday !== null || _seqDayRoom(counts.optionCaps) !== null) ? 0   // ★ 결정 228: 일정표 공고엔 이월이 없다
       : Math.max(0, quota - (sch ? (Number(sch.byDate[todayStr]) || 0) : eff.dailyLimit)),
     todayPlanned: ovToday,                 // 오늘의 명시 조절값(없으면 null)
     planAdjusted: ovToday !== null,        // 카드 "조절됨" 표시 재료(관리자 전용 소비)
@@ -940,6 +948,50 @@ function projectDailyQuotas(c, counts, opts = {}) {
   const from = (sd && sd > todayStr) ? sd : todayStr;
   const closedOn = d => isWeekendClosedOn(c, d, plans) || planOverrideFor(plans, d) === 0;
 
+  /* ★★ 결정 228 — 순차진행 일정표 공고는 일정표가 곧 앞날 예상이다(오늘 = 실제 정원, 앞날 = 그날 상품의 몫을 그 상품
+       남은 정원으로 자름). 못 채운 건을 넘기지 않으므로 일정표 끝에서 멈춘다(정규 일정 뒤는 담당자 결정 — 추가 모집이면
+       일정표에 이어 붙는다). 날마다 상품(optKey)을 함께 실어 작업표 날짜 맞추기가 상품까지 맞춘다. */
+  const seqCaps = (cnt.optionCaps && cnt.optionCaps.sequentialSchedule) ? cnt.optionCaps : null;
+  if (seqCaps) {
+    const sch = seqCaps.sequentialSchedule;
+    const used = {};
+    for (const [k, u] of Object.entries(seqCaps.sequentialUsed || {})) used[k] = { ...u };
+    const days = [];
+    let endDate = null, truncated = false, before2 = Number(cnt.submittedBeforeToday) || 0;
+    const last = sch.end;
+    let d2 = todayStr;
+    while (last && d2 <= last) {
+      if (days.length >= maxDays) { truncated = true; break; }
+      if (rt > 0 && before2 >= rt) break;
+      const x = sch.byDate.get(d2) || null;
+      const closed = d2 < from || !x;
+      let quota = 0;
+      if (!closed) {
+        const u = used[x.optKey];
+        if (d2 === todayStr) {
+          const st = computeCampaignState(c, cnt, now, null);
+          quota = Math.max(0, Number(st.dailyQuota) || 0);
+          // ★ Codex P2: 오늘 정원엔 다른 상품 오늘 주문이 얹혀 있다 — 오늘 상품 사용량엔 그 상품 몫만 더한다
+          const own = Math.max(0, quota - (Number(seqCaps.sequentialOthersToday) || 0));
+          if (u) u.used = Math.max(u.used, (u.used - (Number(u.todayUsed) || 0)) + own);
+        } else {
+          // ★ Codex P2: 살아 있는 상품 사용량에 없는 상품 = 마감 상품의 날 → 0(그날은 팔 상품이 없다 — 작업표 줄도 깔지 않는다)
+          quota = u ? Math.max(0, Math.min(x.amount, (Number(u.recruitTotal) || 0) - (Number(u.used) || 0))) : 0;
+          if (u) u.used += quota;
+        }
+        if (rt > 0) quota = Math.min(quota, Math.max(0, rt - before2));
+      }
+      if (d2 >= from) {
+        days.push({ date: d2, quota, planned: planOverrideFor(plans, d2), closed, optKey: x ? x.optKey : null });
+        if (quota > 0) endDate = d2;
+      }
+      before2 += quota;
+      d2 = addIsoDays(d2, 1);
+    }
+    return { today: todayStr, from, days, endDate: rt > 0 ? endDate : null, remaining: rt > 0 ? Math.max(0, rt - (Number(cnt.submittedBeforeToday) || 0)) : null,
+      truncated, sequential: { regularEnd: sch.regularEnd, end: sch.end } };
+  }
+
   let before = Number(cnt.submittedBeforeToday) || 0;
   let carrySince = cnt.carry ? (Number(cnt.carry.submittedSince) || 0) : 0;
   /* ★ 결정 210: 선택지별 하루 몫 상한을 날마다 따라간다 — 선택지 사용량을 복사해 두고, 그날 채워진 인원을
@@ -1224,6 +1276,8 @@ const OPTION_DAY_CAP_ENABLED = process.env.CAMPAIGN_OPTION_DAY_CAP !== '0';
 const OPTION_EXTERNAL_ENABLED = process.env.CAMPAIGN_OPTION_EXTERNAL_ORDERS !== '0';
 // ★ 결정 212: 인트라넷 투입방식 '순차진행' 오더의 공고는 선택지를 순서대로 연다. 끄면(=0) 즉시 종전(전부 동시에 열림).
 const SEQUENTIAL_OPTIONS_ENABLED = process.env.CAMPAIGN_SEQUENTIAL_OPTIONS !== '0';
+// ★ 결정 228: 순차진행 = 날짜별 상품 일정표(상품마다 정원÷하루 건수 일 · 하루 한 상품). 끄면(=0) 결정 212(앞 상품이 차면 다음) 규칙.
+const SEQUENTIAL_DAYS_ENABLED = process.env.CAMPAIGN_SEQUENTIAL_DAYS !== '0';
 
 function _normOptLabel(s) { return String(s || '').replace(/\s+/g, '').toLowerCase(); }
 
@@ -1404,7 +1458,9 @@ async function fetchOptionCounts(db, campaignId, now = new Date()) {
  * ★★ fail-soft null = 상한 미적용(종전). 잠금 tx 안이면 SAVEPOINT 격리.
  */
 async function _loadOptionDayCaps(db, ids, now = new Date()) {
-  if (!OPTION_DAY_CAP_ENABLED || !ids || !ids.length || !db || typeof db.query !== 'function') return null;
+  // ★ 결정 228(레드팀 P2-7): 상품별 하루 몫 상한 스위치를 꺼도 **순차진행 일정표 공고**는 재료를 싣는다(아래에서 그 공고만 남긴다) —
+  //   안 실으면 상품 선택만 일정표를 따르고 공고 정원·앞날 예상·작업표는 옛 경로를 타 숫자가 갈린다.
+  if (!ids || !ids.length || !db || typeof db.query !== 'function') return null;
   const inClient = typeof db.release === 'function';
   let sp = false;
   if (inClient) {
@@ -1428,8 +1484,9 @@ async function _loadOptionDayCaps(db, ids, now = new Date()) {
          → optionCapsFromViews 가 그 선택지의 하루 몫을 "남은 정원 전부"로 둔다(상한은 Σ 남은 정원 — 유한 유지). */
       const seqIds = await fetchSequentialCampaignIds(db, [...live.keys()]);
       for (const [cid, opts] of live) {
+        if (!OPTION_DAY_CAP_ENABLED && !(seqIds.plans && seqIds.plans.get(String(cid)))) continue;   // 꺼져 있으면 일정표 공고만
         const cm = counts.get(cid) || new Map();
-        out.set(cid, optionCapsFromViews(computeOptionViews(opts, cm, null, { sequential: seqIds.has(cid) })));
+        out.set(cid, optionCapsFromViews(computeOptionViews(opts, cm, null, { sequential: sequentialFor(seqIds, cid), today: kstTodayStr(now) })));
       }
     }
     if (sp) { try { await db.query('RELEASE SAVEPOINT opt_day_caps'); } catch (_) {} }
@@ -1448,6 +1505,20 @@ async function _loadOptionDayCaps(db, ids, now = new Date()) {
  *   공고가 열리고 앞날 예상·작업표 날짜가 생긴다.
  */
 function optionCapsFromViews(views) {
+  /* ★★ 결정 228: 일정표 공고 = 오늘 상품 하나만 상한 재료가 되고, 공고 하루 몫은 그 상품의 그날 몫(`sequentialDayRoom`).
+       오늘 상품이 없으면(쉬는 날·일정 밖) 0. 앞날 예상이 같은 일정표를 쓰도록 일정표·상품 사용량을 함께 싣는다. */
+  if (views && views.sequentialSchedule) {
+    const live = (views || []).filter(v => v && v.status !== 'closed');
+    const cur = live.find(v => v.sequenceCurrent);
+    const caps = cur ? [{ key: cur.optKey, recruitTotal: cur.recruitTotal, dailyLimit: cur.dailyLimit,
+      usedBefore: Math.max(0, cur.used - cur.todayUsed), todayUsed: cur.todayUsed }] : [];
+    caps.sequentialDayRoom = cur ? _optionDayRoom(caps[0]) : 0;
+    // ★ 레드팀 P2-4: 오늘 들어온 **다른 상품** 주문(지각 제출·수기·외부)은 오늘 상품 자리를 깎지 않는다 — 공고 오늘 정원에 그만큼 얹는다
+    caps.sequentialOthersToday = live.filter(v => v !== cur).reduce((a, v) => a + Math.max(0, Number(v.todayUsed) || 0), 0);
+    caps.sequentialSchedule = views.sequentialSchedule;
+    caps.sequentialUsed = Object.fromEntries(live.map(v => [v.optKey, { used: v.used, todayUsed: v.todayUsed, recruitTotal: v.recruitTotal }]));
+    return caps;
+  }
   return (views || []).filter(v => v && v.status !== 'closed').map(v => ({
     key: v.optKey, recruitTotal: v.recruitTotal,
     dailyLimit: v.sequential ? v.recruitTotal : v.dailyLimit,
@@ -1515,7 +1586,13 @@ function _optionDayRoom(o) {
  * 공고 하루 몫 상한 = 선택지마다 그날 받을 수 있는 수의 합. 순수 함수.
  * null = 상한 없음(재료 없음 · 선택지 없음 · 하루 제한 없는 선택지가 하나라도 있음 — 모르면 자르지 않는다).
  */
+/** 결정 228 일정표 공고의 오늘 몫(없으면 null = 일정표 공고 아님). */
+function _seqDayRoom(caps) {
+  return (caps && Number.isFinite(caps.sequentialDayRoom)) ? Math.max(0, caps.sequentialDayRoom) : null;
+}
+
 function optionDayCapacity(caps) {
+  if (_seqDayRoom(caps) !== null) return _seqDayRoom(caps);   // ★ 결정 228
   if (!OPTION_DAY_CAP_ENABLED || !Array.isArray(caps) || !caps.length) return null;
   let sum = 0;
   for (const o of caps) {
@@ -1596,7 +1673,7 @@ function computeOptionView(opt, cnt, campState, viewOpts = null) {
  * @param campState computeCampaignState 결과 또는 null
  * @param o.sequential 연결 작업오더 투입방식이 순차진행인가(fetchSequentialCampaignIds)
  */
-function computeOptionViews(rows, countsMap, campState, { sequential = false } = {}) {
+function computeOptionViews(rows, countsMap, campState, { sequential = false, today = null } = {}) {
   const list = Array.isArray(rows) ? rows : [];
   const cm = countsMap instanceof Map ? countsMap : new Map();
   const live = liveOptions(list);
@@ -1604,10 +1681,51 @@ function computeOptionViews(rows, countsMap, campState, { sequential = false } =
      종전(살아있는 2개 이상 조건)은 이때 순차 표시를 통째로 꺼, 리뷰어 제목이 저장 제목(이미 닫힌 상품)으로 돌아가고
      참여자 화면 제목이 비었다. 잠글 뒤 선택지는 없지만 "지금 모집 중" 표시와 일건수 미사용은 그대로 유지한다.
      (선택지 행이 1개뿐인 공고 = 처음부터 단일 상품 = 종전 그대로.) */
-  const seq = !!sequential && SEQUENTIAL_OPTIONS_ENABLED
-    && list.length >= 2 && live.length >= 1 && live.every(r => Math.max(0, Number(r.recruit_total) || 0) > 0);
+  const seq = !!sequential && SEQUENTIAL_OPTIONS_ENABLED && live.length >= 1
+    /* ★ 결정 228: 일정표가 오면 살아 있는 상품이 하나뿐이어도(앞 상품을 마감했거나 마감 행이 빠진 목록) 일정표를 따른다 —
+         종전 조건(행 2개 이상)이면 하루 몫 재료(마감 행 제외 목록)에서 일정표가 꺼져 공고 정원이 공고 하루 인원으로 돌아간다. */
+    && ((sequential && typeof sequential === 'object' && SEQUENTIAL_DAYS_ENABLED)
+      || (list.length >= 2 && live.every(r => Math.max(0, Number(r.recruit_total) || 0) > 0)));
   const views = list.map(r => computeOptionView(r, cm.get(r.opt_key), campState, seq ? { ignoreDailyLimit: true } : null));
   if (!seq) return views;
+  /* ★★ 결정 228 — 날짜별 상품 일정표(`sequential` 이 일정표 객체로 오면). 오늘 상품만 그 상품의 그날 몫으로 열고,
+       나머지는 대기(다음으로 열리는 날 `opensOn` — 없으면 null = 정규 일정 뒤 추가 모집 결정 대기).
+       일정표를 못 만든 공고(시작일·하루 건수 없음 · 조회 실패 · 끄는 스위치)는 아래 종전(212) 규칙. */
+  const schedule = (sequential && typeof sequential === 'object' && SEQUENTIAL_DAYS_ENABLED) ? sequential : null;
+  if (schedule) {
+    const t = today || kstTodayStr(new Date());
+    const day = (schedule.byDate && schedule.byDate.get(t)) || null;
+    const campOpen = !campState || campState.state === 'open';
+    for (const v of views) {
+      if (v.status === 'closed') continue;
+      v.sequential = true;
+      v.seqDays = true;
+      if (day && v.optKey === day.optKey) {
+        const amt = Math.max(0, Number(day.amount) || 0);
+        const byDaily = Math.max(0, amt - (Number(v.todayUsed) || 0));
+        v.dailyLimit = amt;
+        v.todayRemaining = v.remaining !== null ? Math.min(byDaily, v.remaining) : byDaily;
+        v.status = (v.remaining !== null && v.remaining <= 0) ? 'soldout' : (v.todayRemaining <= 0 ? 'today_done' : 'open');
+        v.selectable = v.status === 'open' && campOpen;
+        if (v.status !== 'soldout') v.sequenceCurrent = true;
+        // 오늘 몫을 다 받았으면 화면이 "언제 다시 열리는지"를 말할 수 있게 — 이 상품의 다음 날(없으면 null)
+        const tm = new Date(Date.parse(t + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10);
+        v.opensOn = _seqNextDateFor(schedule, v.optKey, tm);
+      } else if (v.status !== 'soldout') {
+        v.status = 'waiting';
+        v.selectable = false;
+        v.opensOn = _seqNextDateFor(schedule, v.optKey, t);
+      }
+    }
+    // ★ 레드팀 P2-10: 오늘 열 상품이 없는 날(주말·쉬는 날·오늘 몫 소진 전 정원 마감 등)에는 **다음으로 열릴 상품**을 표시용으로 표시한다
+    //   (제목·사진이 첫 상품으로 돌아가지 않게). 고르기·하루 몫에는 쓰지 않는다(sequenceCurrent 아님).
+    if (!views.some(v => v.sequenceCurrent)) {
+      const nx = views.filter(v => v.status === 'waiting' && v.opensOn).sort((a, b) => (a.opensOn < b.opensOn ? -1 : 1))[0];
+      if (nx) nx.sequenceNext = true;
+    }
+    views.sequentialSchedule = schedule;
+    return views;
+  }
   let current = false;
   for (const v of views) {
     if (v.status === 'closed') continue;
@@ -1643,12 +1761,94 @@ async function fetchSequentialCampaignIds(db, campaignIds) {
     for (const [cid, r] of m) {
       if (String((r && r.product_distribution_mode) || '').trim().toLowerCase() === 'sequential') out.add(String(cid));
     }
+    // ★ 결정 228: 날짜별 상품 일정표를 함께 싣는다(`sequentialFor` 로 꺼내 computeOptionViews 에 넘긴다). 실패 = 빈 Map = 212 규칙.
+    out.plans = (SEQUENTIAL_DAYS_ENABLED && out.size) ? await _loadSequentialSchedules(db, [...out]) : new Map();
     return out;
   } catch (e) {
     if (sp) await db.query('ROLLBACK TO SAVEPOINT seq_options').catch(() => {});
     try { require('../utils/logger').logger.warn(`[campaignState] 순차진행 판정 조회 실패(종전 동작): ${e.message}`); } catch (_) {}
-    return new Set();
+    // ★ Codex P2: 실패를 "순차진행 없음"과 구분할 수 있게 표시한다(fail-closed 가 필요한 곳 — 어제 부족 팝업 — 이 본다)
+    const failed = new Set(); failed.failed = true; failed.plans = new Map();
+    return failed;
   }
+}
+
+/**
+ * ★★ 결정 228 — 순차진행 공고의 날짜별 상품 일정표 일괄 로드 → Map(campaignId(String) → schedule | null).
+ * 재료 = 공고(시작일·주말 제외) · 살아 있는 상품(순서·정원·하루 건수) · 날짜별 계획(0 = 쉬는 날 · 줄여 받기) ·
+ *   추가 모집 결정(`campaign_plan_events.action='sequential_extra'`). 쉬는 날 판정은 `closedKindOn` 단일 출처.
+ * ★★ fail-open: 조회 실패 = 빈 Map = 212 규칙(앞 상품이 차면 다음). 잠금 tx 안이면 SAVEPOINT 격리(082).
+ */
+async function _loadSequentialSchedules(db, ids, { planPatch = null } = {}) {
+  const out = new Map();
+  if (!ids || !ids.length || !db || typeof db.query !== 'function') return out;
+  const inClient = typeof db.release === 'function';
+  let sp = false;
+  if (inClient) {
+    try { await db.query('SAVEPOINT seq_days'); sp = true; } catch (_) { /* tx 밖 클라이언트 */ }
+  }
+  try {
+    const { rows: camps } = await db.query(
+      `SELECT id, to_char(start_date, 'YYYY-MM-DD') AS start_date, skip_weekends, daily_limit
+         FROM recruit_campaigns WHERE id::text = ANY($1::text[])`, [ids]);
+    const { rows: opts } = await db.query(
+      `SELECT campaign_id, opt_key, recruit_total, daily_limit, status
+         FROM campaign_options WHERE campaign_id::text = ANY($1::text[])
+        ORDER BY campaign_id, sort_order, id`, [ids]);
+    const { rows: ev } = await db.query(
+      `SELECT campaign_id, action, detail FROM campaign_plan_events
+        WHERE campaign_id::text = ANY($1::text[]) AND action = ANY($2::text[])
+        ORDER BY created_at, id`, [ids, ['sequential_extra', 'sequential_frozen']]);
+    const plans = (await _loadPlanMaps(db, camps.map(c => c.id))) || new Map();
+    // ★ 레드팀 P2-9: 저장점은 **모든 조회·계산이 끝난 뒤** 해제한다 — 해제 뒤 오류에서 없는 저장점으로 되돌리면 tx 전체가 25P02 로 죽는다.
+    for (const c of camps) {
+      const id = String(c.id);
+      /* ★ 마감 상품도 순서에는 남긴다(closed) — 고정 뒤 이어 가기의 기준. 앞으로 까는 데에는 빠진다.
+         ★ 레드팀 P0-3: 상품 하루 건수가 비면 **공고 하루 인원**을 그 상품의 하루 건수로 쓴다(조용히 212 로 떨어지지 않게).
+           둘 다 비면 일정표를 만들 수 없다 → 212(경고 로그). */
+      const all = opts.filter(o => String(o.campaign_id) === id)
+        .map(o => ({ optKey: o.opt_key, recruitTotal: Number(o.recruit_total) || 0,
+          dailyLimit: (Number(o.daily_limit) || 0) > 0 ? Number(o.daily_limit) : (Number(c.daily_limit) || 0),
+          closed: String(o.status || 'active') === 'closed' }));
+      let pm = plans.get(c.id) || plans.get(id) || null;
+      if (typeof planPatch === 'function') pm = planPatch(pm ? { ...pm } : {});   // 저장 검사용 — 저장하려는 계획을 얹어 본다
+      const mine = ev.filter(e => String(e.campaign_id) === id);
+      const extras = mine.filter(e => e.action === 'sequential_extra').map(e => (e && e.detail) || {});
+      const frozen = mine.filter(e => e.action === 'sequential_frozen').map(e => (e && e.detail) || {});
+      const sch = buildSequentialSchedule({
+        startDate: c.start_date, options: all, plans: pm, extras, frozen,
+        isClosedDay: d => !!closedKindOn(c, d, pm),
+      });
+      if (!sch && all.some(o => !o.closed)) {
+        try { require('../utils/logger').logger.warn(`[campaignState] 순차진행 일정표를 만들 수 없음(시작일·하루 건수 확인) camp=${id} — 212 규칙`); } catch (_) {}
+      }
+      out.set(id, sch);
+    }
+    if (sp) { try { await db.query('RELEASE SAVEPOINT seq_days'); } catch (_) {} }
+    return out;
+  } catch (e) {
+    if (sp) { try { await db.query('ROLLBACK TO SAVEPOINT seq_days'); } catch (_) {} }
+    try { require('../utils/logger').logger.warn(`[campaignState] 순차진행 일정표 조회 실패(212 규칙): ${e.message}`); } catch (_) {}
+    return new Map();
+  }
+}
+
+/**
+ * ★ 결정 228 — 한 공고의 일정표(순차진행이 아니거나 못 만들면 null). [📅 인원] 저장 검사가 **저장하려는 계획을 얹은**
+ *   일정표를 볼 때 쓴다(planPatch). 단일 출처 = _loadSequentialSchedules(같은 SQL·같은 쉬는 날 판정).
+ */
+async function loadSequentialSchedule(db, campaignId, { planPatch = null } = {}) {
+  const ids = await fetchSequentialCampaignIds(db, [campaignId]);
+  if (!ids.has(String(campaignId))) return null;
+  if (!SEQUENTIAL_DAYS_ENABLED) return null;
+  return (await _loadSequentialSchedules(db, [String(campaignId)], { planPatch })).get(String(campaignId)) || null;
+}
+
+/** fetchSequentialCampaignIds 결과에서 그 공고의 computeOptionViews `sequential` 값을 꺼낸다 — 일정표 | true | false. */
+function sequentialFor(seqIds, campaignId) {
+  const id = String(campaignId == null ? '' : campaignId);
+  if (!seqIds || typeof seqIds.has !== 'function' || !seqIds.has(id)) return false;
+  return (seqIds.plans && seqIds.plans.get(id)) || true;
 }
 
 /**
@@ -1680,6 +1880,8 @@ module.exports = {
   computeOptionView,
   computeOptionViews,
   fetchSequentialCampaignIds,
+  sequentialFor,
+  loadSequentialSchedule,
   optionCapsFromViews,
   optionTotalBalance,
   withoutOwnHold,

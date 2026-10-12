@@ -306,6 +306,11 @@ async function listShortages(admin, opts = {}) {
   if (!cands.length) return { ok: true, items: [], date: yesterday };
   const ids = cands.map(c => c.id);
   const { linkedWorkOrdersForCampaigns } = require('./linkedRecruitQuota.service');
+  /* ★★ 결정 228(레드팀 P1-1) — 순차진행 공고는 묻지 않는다: 못 채운 건을 다음 날에 얹지 않고 정규 일정 끝 팝업에서 정한다.
+       여기서 "오늘 더하기"를 물으면 새 규칙과 정면으로 어긋나고, [📅 인원] 저장 검사가 늘리기를 거절한다. 판정 실패 = 묻지 않음(fail-closed). */
+  let seqSet = null;
+  try { seqSet = await st.fetchSequentialCampaignIds(db, ids.map(String)); } catch (_) { seqSet = null; }
+  if (!seqSet || seqSet.failed) return { ok: true, items: [], date: yesterday };   // 판정 실패 = 모름 = 묻지 않는다(Codex P2)
   const [wos, decided, countsMap, optCapped, unknownTime] = await Promise.all([
     linkedWorkOrdersForCampaigns(db, ids, ['created_by']).catch(() => new Map()),
     _decidedFor(db, ids, yesterday),
@@ -330,6 +335,7 @@ async function listShortages(admin, opts = {}) {
   const items = [];
   for (const c of cands) {
     if (decided.has(c.id)) continue;
+    if (seqSet.has(String(c.id))) continue;   // ★ 결정 228
     // ★ 상품별 하루 한도가 걸린 공고는 어제 실제로 열 수 있던 인원이 공고 전체 인원보다 적을 수 있다 → 묻지 않는다.
     //   한도 조회 실패(null)도 모름이라 묻지 않는다(코덱스 리뷰).
     if (optCapped === null || optCapped.has(String(c.id))) continue;

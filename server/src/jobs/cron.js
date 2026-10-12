@@ -662,6 +662,27 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
+  // ── 순차진행 지난 날 고정(결정 228 · 레드팀 P0): 매일 0시 5분 + 서버 켜진 뒤 1분 ──
+  //   어제까지의 「그날 상품」을 기록해, 설정이 바뀌어도 지난 날이 당겨지거나 끝난 상품이 다시 열리지 않게 한다.
+  //   빠져도 일정표는 설정으로 계산된다(종전 동작). 되돌리기 = Railway `CAMPAIGN_SEQUENTIAL_FREEZE_CRON=0`.
+  if (process.env.CAMPAIGN_SEQUENTIAL_FREEZE_CRON !== '0') {
+    let sfRunning = false;
+    const runFreeze = async (by) => {
+      if (sfRunning) return;
+      sfRunning = true;
+      try {
+        const { freezeSequentialPast } = require('../services/campaignSequentialEnd.service');
+        const { withJobLock } = require('../utils/jobLock');
+        const r = await withJobLock('campaign_sequential_freeze', () => freezeSequentialPast());
+        if (r && r.frozen) logger.info(`[CRON-SequentialFreeze:${by}] 공고 ${r.campaigns} · 고정 ${r.frozen}일 · 실패 ${r.failed || 0}`);
+      } catch (err) {
+        logger.error(`[CRON-SequentialFreeze:${by}] error: ${err.message}`);
+      } finally { sfRunning = false; }
+    };
+    cron.schedule(process.env.CAMPAIGN_SEQUENTIAL_FREEZE_SCHEDULE || '5 0 * * *', () => { void runFreeze('cron'); }, { timezone: 'Asia/Seoul' });
+    setTimeout(() => { void runFreeze('startup'); }, 60 * 1000).unref?.();
+  }
+
   // ── 완료된 큐 항목 정리: 매일 새벽 3시 (24시간 이상 경과) ──
   cron.schedule('0 3 * * *', async () => {
     try {

@@ -811,6 +811,9 @@ function _optRemainText(o){
   // ★ 관리자 미리보기 '모집중 가정' — 마감 상태를 잔여 문구로 드러내지 않는다(진행 화면 확인이 목적)
   if(_pvOpenSim() && o.status !== 'open') return '모집중 가정(미리보기)';
   if(o.status === 'soldout' || o.status === 'closed') return '마감';
+  // ★ 결정 228 순차진행 일정표: 상품마다 정해진 날에만 열린다 — 날짜로 말한다(없으면 정규 일정 뒤 추가 모집 결정 대기)
+  if(o.seqDays && o.status === 'today_done') return o.opensOn ? '오늘 마감 (' + _seqMD(o.opensOn) + ' 다시)' : '오늘 마감';
+  if(o.seqDays && o.status === 'waiting') return (o.remaining != null ? o.remaining + '자리 · ' : '') + (o.opensOn ? _seqMD(o.opensOn) + ' 시작' : '추가 모집 결정 대기');
   if(o.status === 'today_done') return '오늘 마감 (내일 가능)';
   // ★ 결정 212 순차진행: 앞 상품이 마감돼야 열리는 상품
   if(o.status === 'waiting') return (o.remaining != null ? o.remaining + '자리 · ' : '') + '앞 상품 마감 후 열림';
@@ -818,6 +821,11 @@ function _optRemainText(o){
   parts.push(o.remaining == null ? '여유' : (o.remaining + '자리 남음'));
   if(o.todayRemaining != null) parts.push('오늘 ' + o.todayRemaining + '자리');
   return parts.join(' · ');
+}
+function _seqMD(iso){
+  const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso||'')); if(!m) return String(iso||'');
+  const d=new Date(Date.UTC(+m[1],+m[2]-1,+m[3]));
+  return (+m[2])+'/'+(+m[3])+'('+'일월화수목금토'[d.getUTCDay()]+')';
 }
 function _optSubText(o){
   let t = _optRemainText(o);

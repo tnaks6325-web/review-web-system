@@ -45,7 +45,7 @@
     var r = await fetch(_apiBase() + path, opt);
     var j = await r.json().catch(function () { return null; });
     if (!j) throw new Error('HTTP ' + r.status);
-    if (!j.ok) { var e = new Error(j.error || 'HTTP ' + r.status); e.code = j.code; e.floor = j.floor; throw e; }
+    if (!j.ok) { var e = new Error(j.error || 'HTTP ' + r.status); e.code = j.code; e.floor = j.floor; e.reduce = j.reduce; throw e; }
     return j;
   }
 
@@ -2415,10 +2415,27 @@
     S.saving = true;
     document.getElementById('cdpSaveBtn').disabled = true;
     try {
-      var j = await _req('POST', EP + encodeURIComponent(S.campId) + '/daily-plan',
-        { set: set, remove: remove, note: S.notes.join(' / ').slice(0, 500),
+      var _body = { set: set, remove: remove, note: S.notes.join(' / ').slice(0, 500),
           clientMode: S.pj ? 'projection' : 'balance',   // 새 화면 표식(서버의 배포 시차 가드 — 없으면 옛 화면으로 본다)
-          ...(apply > 0 ? { carryApply: apply } : {}) });
+          ...(apply > 0 ? { carryApply: apply } : {}) };
+      var j;
+      try {
+        j = await _req('POST', EP + encodeURIComponent(S.campId) + '/daily-plan', _body);
+      } catch (e1) {
+        /* ★★ 결정 228(사용자 확정 2026-10-12) — 순서대로 진행하는 공고에서 그날 상품 건수를 줄이면 **두 번 연달아 확인**한 뒤에만
+             저장한다(서버가 confirmReduce 없이는 거절하고 줄어드는 날 목록을 돌려준다). 하나라도 취소하면 저장하지 않는다. */
+        if (!e1 || e1.code !== 'sequential_reduce_needs_confirm') throw e1;
+        var lines = (e1.reduce || []).map(function (x) {
+          return '· ' + fmtMD(x.date) + ' ' + x.optKey + ' ' + x.base + '건 → ' + x.count + '건 (' + x.short + '건 모자람)';
+        }).join('\n');
+        var ok1 = window.confirm('순서대로 진행하는 공고입니다.\n\n' + lines
+          + '\n\n줄인 만큼은 모자란 채 다음 상품으로 넘어가고, 정규 일정이 끝난 뒤 추가 모집 여부를 다시 정해야 합니다.\n계속할까요?');
+        if (!ok1) { toast('저장하지 않았습니다'); S.saving = false; render(); return; }
+        var ok2 = window.confirm('정말 수정하시겠습니까?');
+        if (!ok2) { toast('저장하지 않았습니다'); S.saving = false; render(); return; }
+        _body.confirmReduce = true;
+        j = await _req('POST', EP + encodeURIComponent(S.campId) + '/daily-plan', _body);
+      }
       S.notes = [];
       applyOverview(j);
       if (j.worktableProjection && j.worktableProjection.ok === false) {
@@ -2433,6 +2450,9 @@
            그대로다. 조용히 "저장 완료"라고 말하면 "왜 스케줄이 안 바뀌지"가 원인 불명으로 남는다. */
         toast('조절은 저장됐지만 오늘 이후 자리 재구성에 실패했습니다 — '
               + (j.worktableSync.rebuild.message || '매일 새벽 4시 20분에 자동으로 다시 맞춥니다(날짜별 인원이나 공고 설정을 다시 바꿔도 그때 맞춰집니다)'), 'warning');
+      } else if (j.worktableSync && j.worktableSync.rebuild && Number(j.worktableSync.rebuild.productMismatch) > 0) {
+        /* ★ 결정 228(Codex P2): 순서대로 진행하는 공고에서 그날 상품 줄이 모자라 다른 상품 줄을 날짜에 맞췄다 — 조용히 넘기지 않는다 */
+        toast('저장했습니다 — 다만 작업보드 ' + j.worktableSync.rebuild.productMismatch + '줄은 상품이 날짜별 일정과 다릅니다. 작업보드에서 그 줄의 상품을 확인해 주세요', 'warning');
       } else if (j.worktableSync && j.worktableSync.rowAudit) {
         /* ★ 작업표 줄이 총건수보다 많은 상태 — 이번 조절이 만든 것이 아닐 수 있어 저장은 막지
            않지만(서버도 거부하지 않는다), 조용히 "저장 완료"로 넘기면 홈 목록의 인원 숫자가

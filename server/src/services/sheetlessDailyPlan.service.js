@@ -53,6 +53,7 @@ async function relayWorktableToProjection({ client, sheetId, tabName, days = [],
   const anchor = String(today || '').match(/^(\d{4})-(\d{2})/);
   const parseOpts = { fallbackAnchor: anchor ? { y: Number(anchor[1]), m: Number(anchor[2]) } : undefined };
   const want = new Map();
+  const wantKey = new Map();   // ★ 결정 228: 순차진행 일정표 — 그날 상품(optKey)
   let beyond = 0;
   for (const x of days || []) {
     const date = String((x && x.date) || '');
@@ -63,9 +64,10 @@ async function relayWorktableToProjection({ client, sheetId, tabName, days = [],
        지난 줄로 먼저 쓰인다. → 적은 표기를 다시 읽어 같은 날이 나오는 날만 맞춘다(그 뒤 날은 가까워지면 맞춘다). */
     if (parseDateColumn([_kstDateLabel(date)], parseOpts)[0] !== date) { beyond += q; continue; }
     want.set(date, q);
+    if (x && x.optKey) wantKey.set(date, String(x.optKey));
   }
   const { rows } = await client.query(
-    `SELECT id, seq, reviewer_name, recipient_name, phone8, order_submission_id, row_json
+    `SELECT id, seq, reviewer_name, recipient_name, phone8, order_submission_id, row_json, option_text
        FROM campaign_participants
       WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE
       ORDER BY seq FOR UPDATE`, [sheetId, tabName]);
@@ -79,9 +81,48 @@ async function relayWorktableToProjection({ client, sheetId, tabName, days = [],
   const parsed = parseDateColumn(rows.map(r => String((r.row_json || {})[dateHeader] || '')), parseOpts);
   // ★ 빈 줄 판정은 단일 출처(utils/rowNumbering.isFilledRow — 게이지·번호 정리와 같은 네 칸)
   const { isFilledRow } = require('../utils/rowNumbering');
+  /* ★★ 결정 228 — 순차진행 일정표(날마다 optKey)면 **그날 상품의 빈 줄**을 그날로 옮긴다. 줄의 상품 = 배정 표식 → 상품 칸.
+       표식이 일정표 상품 이름과 표기만 다르면 짝짓기(`resolveProductLabel` — 정확일치 → 하나로 정해지는 포함 관계)로 맞춘다.
+       ★ 날짜만 옮긴다(상품 칸·표식은 건드리지 않는다 — 결정 182) · 그 상품 빈 줄이 모자라면 상품 없는 빈 줄 → 다른 상품 빈 줄 순
+       (줄 수는 지킨다 — 상품이 어긋난 채 옮긴 수는 productMismatch 로 말한다). */
+  const seqMode = wantKey.size > 0;
+  let rowKey = () => '';
+  if (seqMode) {
+    let PRODUCT_HEADER = '상품';
+    try { PRODUCT_HEADER = require('./orderLedger.service').PRODUCT_HEADER || '상품'; } catch (_) {}
+    const { resolveProductLabel } = require('./sheetlessOrder.service');
+    const keys = [...new Set(wantKey.values())];
+    /* ★ 레드팀 P2-5: 담당자가 빈 줄 상품 칸에 손으로 적은 값(물리행 앵커 편집)도 본다 — 주문이 들어갈 줄을 고르는 곳
+         (sheetlessOrder._pickOpenSlot · 결정 227)과 같은 순서(배정 표식 → 손 글씨(빈 값 = 비워 둠) → 상품 칸). 조회 실패 = 손 글씨 없이. */
+    const hand = new Map();
+    try {
+      await client.query('SAVEPOINT relay_hand');
+      const { rows: ov } = await client.query(
+        `SELECT DISTINCT ON (anchor_value) anchor_value, value_text FROM participant_edits
+          WHERE sheet_id = $1 AND tab_name = $2 AND anchor_type = 'manual' AND field = $3 AND kind = 'text'
+            AND reverted_at IS NULL AND anchor_value = ANY($4::text[])
+          ORDER BY anchor_value, created_at DESC, id DESC`,
+        [sheetId, tabName, 'col:' + PRODUCT_HEADER, rows.map(r => String(r.id))]);
+      await client.query('RELEASE SAVEPOINT relay_hand');
+      for (const o of ov || []) hand.set(String(o.anchor_value), String(o.value_text == null ? '' : o.value_text).trim());
+    } catch (_) { try { await client.query('ROLLBACK TO SAVEPOINT relay_hand'); } catch (__) { /* noop */ } }
+    const labelOf = r => {
+      const ot = String(r.option_text || '').trim();
+      if (ot) return ot;
+      if (hand.has(String(r.id))) return hand.get(String(r.id));
+      return String(((r.row_json || {})[PRODUCT_HEADER]) || '').trim();
+    };
+    const memo = new Map();
+    rowKey = r => {
+      const l = labelOf(r);
+      if (!l) return '';
+      if (!memo.has(l)) memo.set(l, keys.includes(l) ? l : (resolveProductLabel(l, keys) || '?'));
+      return memo.get(l);
+    };
+  }
   const slots = rows.map((r, i) => ({
     id: r.id, seq: Number(r.seq) || 0, date: parsed[i] || '', rawDate: String((r.row_json || {})[dateHeader] || ''),
-    empty: !isFilledRow(r),
+    empty: !isFilledRow(r), key: seqMode ? rowKey(r) : '',
   }));
   /* ★ 날짜 칸에 날짜가 아닌 글자(예: "보류")를 사람이 적어 둔 빈 줄은 건드리지 않는다 — 날짜 없음으로 보면
      가장 먼저 덮이거나 지워진다(빈 칸만 채운다 — 결정 018). */
@@ -91,14 +132,15 @@ async function relayWorktableToProjection({ client, sheetId, tabName, days = [],
   const need = new Map();
   for (const [d, q] of want) need.set(d, Math.max(0, q - (fixed.get(d) || 0)));
 
-  // 이미 맞는 날짜에 있는 빈 줄은 필요한 만큼 그 자리에 둔다
+  // 이미 맞는 날짜에 있는 빈 줄은 필요한 만큼 그 자리에 둔다(★ 결정 228: 순차진행이면 그날 상품 줄만 그대로 둔다)
   const keptOn = new Map();
   const pool = [];
   for (const s of slots) {
     if (!s.empty || s.memo) continue;
     const n = need.get(s.date) || 0;
     const k = keptOn.get(s.date) || 0;
-    if (s.date && k < n) keptOn.set(s.date, k + 1);
+    const fits = !seqMode || !wantKey.has(s.date) || s.key === wantKey.get(s.date);
+    if (s.date && k < n && fits) keptOn.set(s.date, k + 1);
     else pool.push(s);
   }
   // 옮길 줄 순서: 날짜 없음 → 지난 날 → 앞날(번호 순) — 가까운 앞날 줄을 흔들지 않는다
@@ -106,10 +148,20 @@ async function relayWorktableToProjection({ client, sheetId, tabName, days = [],
   pool.sort((a, b) => (tier(a) - tier(b)) || (a.seq - b.seq));
   const changed = [];
   let shortage = 0;
+  let productMismatch = 0;
+  // 그날에 옮길 줄: 순차진행이면 그날 상품 줄 → 상품 없는 줄 → 다른 상품 줄 순(각각 날짜 없음·지난 날·앞날·번호 순 유지)
+  const takeFor = d => {
+    if (!seqMode || !wantKey.has(d)) return pool.shift();
+    const k = wantKey.get(d);
+    let i = pool.findIndex(x => x.key === k);
+    if (i < 0) i = pool.findIndex(x => !x.key);
+    if (i < 0) { i = 0; productMismatch++; }
+    return pool.splice(i, 1)[0];
+  };
   for (const d of [...need.keys()].sort()) {
     let left = (need.get(d) || 0) - (keptOn.get(d) || 0);
     while (left > 0 && pool.length) {
-      const s = pool.shift();
+      const s = takeFor(d);
       const label = _kstDateLabel(d);
       if (s.rawDate !== label) changed.push({ id: s.id, value: label });
       left--;
@@ -134,6 +186,7 @@ async function relayWorktableToProjection({ client, sheetId, tabName, days = [],
   }
   return { ok: true, dateHeader, moved: changed.filter(c => c.value).length,
     cleared: changed.filter(c => !c.value).length, shortage,
+    ...(seqMode ? { productMismatch } : {}),
     beyond,                                           // 연도 없는 표기로 아직 적을 수 없는 먼 날 인원(가까워지면 맞춘다)
     kept: slots.filter(s => s.memo).length };         // 날짜 칸에 글자가 있어 그대로 둔 빈 줄
 }
