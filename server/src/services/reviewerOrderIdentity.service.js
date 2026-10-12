@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const pool = require('../db/pool');
 const cards = require('./reviewerIdentityCards.service');
 const { syncCardsAfterWrite } = cards;
-const { addressSame, addressHeuristic, normAddress, isOwnerPhoneRecipient } = require('./identity.service');
+const { addressSame, addressHeuristic, normAddress, isOwnerPhoneRecipient, isMaskedOwnerPhone } = require('./identity.service');
 const { logger } = require('../utils/logger');
 
 const MASK_RE = /[*＊●○◯◉•·xX]/;
@@ -663,11 +663,15 @@ function resolvedValue(raw, stored, mode, verdict) {
 //   'full'   = 가림 없는 전체 번호가 본인 번호와 같음 → 이름은 "받는 사람 이름만 다름"으로 맞춘다.
 //   'masked' = 가린 번호의 보이는 자리가 본인 번호와 맞음 → 자동 승인하지 않고, 연락처를 내 번호로 채운 뒤
 //              [내 주문이 맞습니다]로 확인받는다(manualConfirm 이 그 번호가 정말 본인 번호인지 다시 본다).
+// ★ 레드팀 반영: 이름 한 글자 오인식 후보는 종전 보정 경로가 먼저다 · 가린 번호는 자리까지 맞아야 하고(isMaskedOwnerPhone)
+//   주소가 등록 주소와 확실히 다르면(mismatch) 증거가 부족해 종전 판정에 맡긴다.
 function ownerPhoneRecipientKind(selectedScore, selected) {
   if (!selected || selected.type !== 'self' || selectedScore.parts.name.verdict !== 'mismatch') return '';
+  const rawName = selectedScore.fields.recipient || selectedScore.fields.orderer;
+  if (plainNameOcrCorrectionCandidate(rawName, selected.name) || maskedNameOcrNearMiss(rawName, selected.name)) return '';
   const raw = String(selectedScore.fields.phone || '').trim();
   if (isOwnerPhoneRecipient(selected.phone || selected.phone8, raw)) return 'full';
-  if (MASK_RE.test(raw) && maskedCompatible(raw, selected.phone, 'phone')) return 'masked';
+  if (isMaskedOwnerPhone(selected.phone, raw) && selectedScore.parts.address.verdict !== 'mismatch') return 'masked';
   return '';
 }
 function rescoreIdentity(score) {
@@ -682,11 +686,12 @@ async function evaluateSelectedIdentity(extracted, selected, allIdentities, opti
   const selectedScore = await scoreIdentity(extracted, selected, options);
   let status = 'REVIEW';
   const reasonCodes = [];
-  const ownerPhone = ownerPhoneRecipientKind(selectedScore, selected);
+  // 결정 226 예외는 **캡처 증거**가 있을 때만 켠다(options.ownerPhoneRule) — 리뷰어가 적은 입력칸만으로는 켜지 않는다(레드팀 P0).
+  const ownerPhone = options.ownerPhoneRule ? ownerPhoneRecipientKind(selectedScore, selected) : '';
   if (ownerPhone) {
     selectedScore.parts.name = ownerPhone === 'full'
       ? { verdict: 'match', reason: '본인 번호로 받은 주문(받는 사람 이름만 다름)' }
-      : { verdict: 'uncertain', reason: '받는 사람 이름이 달라요 — 가려진 연락처를 내 번호로 채워 확인해주세요' };
+      : { verdict: 'uncertain', reason: '받는 사람 이름만 다름(내 번호인지 확인 필요)' };
     rescoreIdentity(selectedScore);
   }
   if (selectedScore.conflicts.length) {
@@ -737,7 +742,7 @@ async function evaluateSelectedIdentity(extracted, selected, allIdentities, opti
       // 충돌하는데 다른 명의가 맞는 경우만 결정적 오명의로 차단한다.
       // 결정 226 — 본인 번호 주문은 다른 칸이 비슷해도 막지 않고 확인 단계로 둔다(번호가 사람을 정한다).
       if ((!selectedScore.conflicts.length && selectedScore.matches >= 2)
-          || reasonCodes.includes('delivery_address_changed') || ownerPhone) {
+          || reasonCodes.includes('delivery_address_changed') || ownerPhone === 'full') {
         status = 'REVIEW';
         reasonCodes.push('multiple_identity_candidates');
       } else {
@@ -824,7 +829,7 @@ async function matchCapture(body, reviewer) {
   const extract = verifyExtractionProof(body.extractToken, body.extracted || {});
   if (!extract.extractOk) throw new ReviewerOrderIdentityError('AI_EXTRACT_FAILED', 'AI 분석에 실패했습니다. 수동 확인을 선택할 수 있습니다.', 409);
   const verdict = await evaluateSelectedIdentity(body.extracted || {}, context.selected, context.identities, {
-    useGemini: true, allowPlainNameCorrection: true,
+    useGemini: true, allowPlainNameCorrection: true, ownerPhoneRule: true,
   });
   let approvalToken = '';
   let reviewToken = '';
@@ -874,6 +879,9 @@ async function manualConfirm(body, reviewer) {
   const mode = String(body.mode || 'review');
   let imageHash = '', extractedHash = '', boundHash = submissionIdentityHash(body.formFields || {});
   let reasonCodes = [];
+  // 결정 226 — 입력칸 재검사에서 본인 번호 예외를 켤지: 캡처가 그 근거를 보였을 때만(review 토큰 사유 · 다시 검증한 캡처).
+  let ownerPhoneEvidence = false;
+  const OWNER_PHONE_CODES = ['owner_phone_recipient', 'owner_phone_recipient_masked'];
   if (mode === 'review') {
     const review = verifyScoped(body.reviewToken, PURPOSE_MATCH_REVIEW);
     if (String(review.ownerReviewerId) !== String(context.owner.id)
@@ -885,6 +893,7 @@ async function manualConfirm(body, reviewer) {
     imageHash = review.imageHash; extractedHash = review.extractedFieldsHash;
     boundHash = submissionIdentityHash(body.formFields || {});
     reasonCodes = Array.isArray(review.reasonCodes) ? review.reasonCodes : [];
+    ownerPhoneEvidence = reasonCodes.some((code) => OWNER_PHONE_CODES.includes(code));
     if (reasonCodes.some((code) =>
       ['masked_name_ocr_correction', 'plain_name_ocr_correction'].includes(code))) {
       // ★ 결정 219 — "목록에서 골랐음" 기록(savedIdentitySelections)은 보지 않는다. 그 기록은 화면이
@@ -947,6 +956,10 @@ async function manualConfirm(body, reviewer) {
     }
     imageHash = extract.imageHash; extractedHash = extract.fieldsHash;
     reasonCodes = ['identity_fields_edited_after_approval'];
+    const priorCapture = await evaluateSelectedIdentity(body.extracted || {}, context.selected, context.identities, {
+      useGemini: false, ownerPhoneRule: true,
+    });
+    ownerPhoneEvidence = priorCapture.reasonCodes.some((code) => OWNER_PHONE_CODES.includes(code));
   } else if (mode === 'ai_error') {
     const extract = verifyExtractionProof(body.extractToken, body.extracted || {});
     if (extract.extractOk) throw new ReviewerOrderIdentityError('MANUAL_MODE_INVALID', 'AI 분석 성공 건은 명의 매칭 결과를 먼저 확인해주세요.', 409);
@@ -962,8 +975,9 @@ async function manualConfirm(body, reviewer) {
     //   입력칸을 내 정보로 채우면 남의 주문 캡처도 통과했다(2026-09-24 실측 우회). 네트워크 오류로도
     //   이 경로에 들어오므로 악용이 아니어도 캡처 확인이 통째로 빠질 수 있었다.
     const captureCheck = await evaluateSelectedIdentity(body.extracted || {}, context.selected, context.identities, {
-      useGemini: false, allowPlainNameCorrection: true,
+      useGemini: false, allowPlainNameCorrection: true, ownerPhoneRule: true,
     });
+    ownerPhoneEvidence = captureCheck.reasonCodes.some((code) => OWNER_PHONE_CODES.includes(code));
     if (captureCheck.status === 'MISMATCH') {
       await audit({ context, status: 'MISMATCH', approvalMode: mode,
         reasonCodes: ['identity_match_unavailable', ...captureCheck.reasonCodes], imageHash, extractedHash });
@@ -976,7 +990,14 @@ async function manualConfirm(body, reviewer) {
     throw new ReviewerOrderIdentityError('MANUAL_MODE_INVALID', '지원하지 않는 수동 확인 방식입니다.', 400);
   }
 
-  const check = await evaluateSelectedIdentity(body.formFields || {}, context.selected, context.identities, { useGemini: false });
+  const check = await evaluateSelectedIdentity(body.formFields || {}, context.selected, context.identities, {
+    useGemini: false, ownerPhoneRule: ownerPhoneEvidence,
+  });
+  if (check.reasonCodes.includes('owner_phone_recipient_masked')) {
+    // 입력칸 연락처가 아직 가림이면 본인 번호 예외로 승인하지 않는다(레드팀 P0) — 실제 번호를 채워야 한다.
+    throw new ReviewerOrderIdentityError('IDENTITY_FIELDS_REQUIRED',
+      '받는 사람 이름이 내 이름과 달라요. 연락처를 내 정보에 등록한 내 번호로 채운 뒤 다시 눌러주세요(연락처 아래 [내 정보에서 선택]).', 409);
+  }
   // 결정 219 — 선택 기록이 아니라 값으로 판단한다(위 review 단계와 같은 기준).
   const explicitlyConfirmedPlainName = reasonCodes.includes('plain_name_ocr_correction')
     && !!cleanName(context.selected.name)

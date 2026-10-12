@@ -111,38 +111,33 @@ function ok(name, fn) {
     assert.strictEqual(r.status, 'SELF');
   });
 
-  // 결정 226 — 본인 번호(가림 없는 전체)로 받은 주문 = 본인 주문(받는 사람 이름만 다름). 타계정 등록 요구 없음.
-  await ok('SELF: 본인 번호로 받은 다른 이름 주문 — 타계정 등록 요구 없이 본인(결정 226)', async () => {
-    const r = await resolveOrderIdentity(reviewer, {
-      recipient: '홍길동', phone: '010-8592-6325', address: '서면팰리스 728호',
-      bank: 'KEB하나', account: '338-910330-03807', depositor: '김수만',
-    });
+  // 결정 226 — 캡처에서 읽은 번호가 본인 번호면 본인 주문(받는 사람 이름만 다름). 타계정 등록 요구 없음.
+  await ok('SELF: 캡처 번호가 본인 번호인 다른 이름 주문 — 타계정 등록 요구 없이 본인(결정 226)', async () => {
+    const base = { address: '서면팰리스 728호', bank: 'KEB하나', account: '338-910330-03807', depositor: '김수만' };
+    const r = await resolveOrderIdentity(reviewer, { ...base, recipient: '홍길동', phone: '010-8592-6325', extractedPhone: '010-8592-6325' });
     assert.strictEqual(r.status, 'SELF');
     assert.strictEqual(r.subIndex, -1);
-    // 본인 번호를 쓰는 다른 이름 칸(정리 전 잔여)이 있어도 그 칸이 아니라 본인
-    const r2 = await resolveOrderIdentity({ ...reviewer, sub_accounts: reviewer.sub_accounts.concat([{ name: '홍길동', phone: '010-8592-6325' }]) }, {
-      recipient: '홍길동', phone: '010-8592-6325', address: '서면팰리스 728호',
-      bank: 'KEB하나', account: '338-910330-03807', depositor: '김수만',
-    });
-    assert.strictEqual(r2.status, 'SELF');
-    // 주소·계좌가 다르면 본인과 똑같이 확인(NEED_CONFIRM) — 등록 요구(NEED_SUB_REGISTER)가 아님
+    // 가린 캡처 번호가 자리까지 맞고 입력칸이 본인 번호면 본인
+    const rm = await resolveOrderIdentity(reviewer, { ...base, recipient: '홍길동', phone: '010-8592-6325', extractedPhone: '010-****-6325' });
+    assert.strictEqual(rm.status, 'SELF');
+    // 레드팀 P1 — 입력칸 번호만으로는 예외가 켜지지 않는다(캡처 번호 없음 · 느슨한 가림)
+    for (const extractedPhone of ['', '010-****-****']) {
+      const rx = await resolveOrderIdentity(reviewer, { ...base, recipient: '홍길동', phone: '010-8592-6325', extractedPhone });
+      assert.strictEqual(rx.status, 'NEED_SUB_REGISTER', extractedPhone);
+    }
+    // 레드팀 P1 — 이름·번호가 정확히 맞는 타계정이 있으면 종전대로 그 타계정
+    const withSub = { ...reviewer, sub_accounts: reviewer.sub_accounts.concat([{ name: '홍길동', phone: '010-8592-6325' }]) };
+    const r2 = await resolveOrderIdentity(withSub, { ...base, recipient: '홍길동', phone: '010-8592-6325', extractedPhone: '010-8592-6325' });
+    assert.strictEqual(r2.status, 'SUB');
+    // 주소·계좌가 다르면 본인과 똑같이 확인(NEED_CONFIRM) — 등록 요구가 아님
     const r3 = await resolveOrderIdentity(reviewer, {
-      recipient: '홍길동', phone: '010-8592-6325', address: '부산시 다른로 999호',
+      recipient: '홍길동', phone: '010-8592-6325', extractedPhone: '010-8592-6325', address: '부산시 다른로 999호',
       bank: '우리', account: '555666777', depositor: '다른예금주',
     });
     assert.strictEqual(r3.status, 'NEED_CONFIRM');
     assert.strictEqual(r3.subIndex, -1);
-    // 가린 번호는 폼에 적은 값으로 본다(폼도 가려져 있으면 예외 아님)
-    const r4 = await resolveOrderIdentity(reviewer, {
-      recipient: '홍길동', phone: '010-****-6325', extractedPhone: '010-****-6325', address: '서면팰리스 728호',
-      bank: 'KEB하나', account: '338-910330-03807', depositor: '김수만',
-    });
-    assert.strictEqual(r4.status, 'NEED_SUB_REGISTER');
     // 다른 번호 + 다른 이름은 종전대로 등록 유도
-    const r5 = await resolveOrderIdentity(reviewer, {
-      recipient: '홍길동', phone: '010-7777-1234', address: '서면팰리스 728호',
-      bank: 'KEB하나', account: '338-910330-03807', depositor: '김수만',
-    });
+    const r5 = await resolveOrderIdentity(reviewer, { ...base, recipient: '홍길동', phone: '010-7777-1234', extractedPhone: '010-7777-1234' });
     assert.strictEqual(r5.status, 'NEED_SUB_REGISTER');
   });
 

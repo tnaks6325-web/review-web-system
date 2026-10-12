@@ -459,6 +459,17 @@ async function test(name, fn) { await fn(); passed++; console.log('  ✓ ' + nam
       const filled = { recipient:'다른이름', phone:reviewed.resolved.phone, address:'서울 본인주소' };
       const manual = await identity.manualConfirm({ ...base, mode:'review', manualConfirmed:true, reviewToken:reviewed.reviewToken, formFields:filled }, reviewer);
       await identity.verifyApprovalForSubmission({ ...base, ...filled, identityApprovalToken:manual.approvalToken }, reviewer);
+      // 레드팀 P0 — 캡처 증거가 없는 경로(사진 없음)에서는 본인 번호 예외가 켜지지 않는다(종전 판정 그대로)
+      const audN = audits.length;
+      await identity.manualConfirm({ ...base, mode:'no_capture', manualConfirmed:true,
+        formFields:{ recipient:'남의이름', phone:'010-1010-1010', address:'서울 본인주소' } }, reviewer).catch(() => null);
+      assert.ok(!audits.slice(audN).some((a) => /owner_phone_recipient/.test(String(a[8]))), '사진 없음 경로에 본인 번호 예외 사유가 없다');
+      // 가린 연락처를 그대로 둔 입력칸은 어떤 경로로도 본인 번호 예외 승인이 안 된다
+      const bad = { recipient:'남의이름', phone:'010-****-1010', address:'서울 본인주소' };
+      const proof2 = identity.issueExtractionProof({ imageHash:'3'.repeat(64), extracted:bad, ok:true });
+      await assert.rejects(identity.manualConfirm({ ...base, mode:'match_error', manualConfirmed:true,
+        extractToken:proof2.extractToken, extracted:bad, formFields:bad }, reviewer),
+        (err) => err.code === 'IDENTITY_FIELDS_REQUIRED');
     } finally { applicationIdentity = 'sub'; }
   });
 

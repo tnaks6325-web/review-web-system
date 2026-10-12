@@ -219,6 +219,25 @@ function isOwnerPhoneRecipient(ownerPhone, orderPhone) {
   const own = normPhone8(ownerPhone);
   return d.length >= 10 && d.length <= 12 && own.length === 8 && d.slice(-8) === own;
 }
+/**
+ * 결정 226 — 가린 번호가 본인 번호와 **자리까지** 맞는지(레드팀 P0: 느슨한 비교는 `010-****-****` 도 맞음으로 봤다).
+ * ★ 가림 포함 길이가 본인 번호 전체 자릿수와 같고, 보이는 숫자는 같은 자리끼리 모두 같고,
+ *   앞 3자리(010) 밖에서 보이는 숫자가 4개 이상일 때만 참. 그 밖은 false(닫힌 쪽 — 종전 판정).
+ */
+function isMaskedOwnerPhone(ownerPhone, orderPhone) {
+  const raw = String(orderPhone || '');
+  if (!OWNER_PHONE_MASK_RE.test(raw)) return false;
+  const a = raw.replace(/[^0-9*＊●○◯◉•·xX]/g, '');
+  const own = String(ownerPhone || '').replace(/\D/g, '');
+  if (own.length < 10 || a.length !== own.length) return false;
+  let visibleTail = 0;
+  for (let i = 0; i < a.length; i++) {
+    if (OWNER_PHONE_MASK_RE.test(a[i])) continue;
+    if (a[i] !== own[i]) return false;
+    if (i >= 3) visibleTail += 1;
+  }
+  return visibleTail >= 4;
+}
 
 /* ── 신원 판별 엔진 ─────────────────────────────────────── */
 
@@ -304,9 +323,16 @@ async function resolveOrderIdentity(reviewer, order, opts = {}) {
   }
 
   // ── 1b) 본인 번호로 받은 주문 = 본인 주문(받는 사람 이름만 다름) — 결정 226 ──
-  // ★ 타계정 매칭보다 먼저 본다: 본인 번호를 쓰는 다른 이름 칸(정리 전 잔여)이나 번호만 같은 칸으로 새지 않게.
-  //   주소·계좌 검사는 1) 본인과 똑같이 한다. 다른 번호의 판정은 아래 그대로다.
-  if (isOwnerPhoneRecipient(reviewer.phone || reviewer.phone8, pickedPhone)) {
+  // ★ 근거는 **캡처에서 읽은 번호**만 쓴다(레드팀 P1): 입력칸 번호는 본인 번호가 미리 채워져 있어 증거가 아니다.
+  //   전체 번호가 본인 번호 · 또는 가린 번호가 본인 번호와 자리까지 맞고 입력칸이 본인 번호일 때만.
+  // ★ 이름·번호가 정확히 맞는 타계정이 있으면 종전대로 그 타계정(2)으로 둔다(레드팀 P1 — 전용 계좌·빈칸 보강 유지).
+  const _ownerPhone = reviewer.phone || reviewer.phone8;
+  const _exPhone = String(order.extractedPhone || '').trim();
+  const ownerPhoneOrder = isOwnerPhoneRecipient(_ownerPhone, _exPhone)
+    || (isMaskedOwnerPhone(reviewer.phone, _exPhone) && isOwnerPhoneRecipient(_ownerPhone, order.phone));
+  const exactSub = ownerPhoneOrder && idName
+    && subs.some((sub) => normName(sub && sub.name) === idName && normPhone8(sub && sub.phone) === selfPhone);
+  if (ownerPhoneOrder && !exactSub) {
     if (skipDetail) return { status: 'SELF', subIndex: -1, reasons: [], identity };
     const addrCheck = await addressSame(reviewer.address, idAddr, { name: identity.name, phone: identity.phone, useGemini });
     const acctOk = (idAcct && normAccount(reviewer.bank_account) === idAcct)
@@ -400,5 +426,5 @@ module.exports = {
   extractHo, extractDong, bigramJaccard,
   addressHeuristic, addressSame, pickIdField,
   profileMissing, participationProfileMissing, resolveOrderIdentity, findSubAccount,
-  isOwnerPhoneRecipient,
+  isOwnerPhoneRecipient, isMaskedOwnerPhone,
 };
