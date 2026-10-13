@@ -112,7 +112,7 @@ ok('최소 날짜 종수 상수는 2 유지', SCH.MIN_DISTINCT_DATES === 2);
   const rec = readF('js/index-recruit.js');
 
   ok('관제 응답에 시트 대조(sheetInfo)가 실린다',
-    /sheetInfo = \{/.test(rt) && /options, sheetInfo \}\)/.test(rt));
+    /sheetInfo = \{/.test(rt) && /options, sheetInfo(, directSummary)? \}\)/.test(rt));
   ok('로스터는 인덱스 행 수로 센다(시트 재읽기 없음 = 쿼터 0)',
     /SELECT COUNT\(\*\)::int AS n FROM review_index WHERE sheet_id = \$1 AND tab_name = \$2/.test(rt));
   ok('★ 시트 대조 실패가 관제를 깨지 않는다(fail-soft)',

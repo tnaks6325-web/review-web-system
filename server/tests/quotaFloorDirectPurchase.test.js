@@ -16,9 +16,10 @@ const read = (rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
       ...real,
       fetchCampaignCounts: async () => new Map([['c1', { submittedAll: 2, activeHolds: 1, todaySubmitted: 1, todayActiveHolds: 1, linked, ...extra }]]),
       TABLE_QUOTA_MODE: extra.__mode || 'on',
-      fetchOptionCounts: async (_db, _id, _now, opts) => {
+      loadDirectOrderCounts: async () => (extra.__direct ? new Map([['c1', extra.__direct]]) : null),
+      loadExternalOptionOrders: async (_db, _ids, _now, opts) => {
         assert.ok(opts && opts.excludeApplicationDuplicates, 'floor drops manual duplicates of participation purchases');
-        return new Map([['A', { externalOrders: 3 }], ['B', { externalOrders: 0 }]]);
+        return extra.__extFail ? null : new Map([['c1', new Map([['A', { n: 3, today: 1 }], ['B', { n: 0, today: 0 }]])]]);
       },
     };
     delete require.cache[require.resolve('../src/services/quotaFloor.service')];
@@ -42,6 +43,12 @@ const read = (rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
   row.participation_mode = true;
   const m = await fake({ ok: true, orders: 0 }).optionDirectOrders(db, 'c1');
   assert.deepEqual([...m], [['A', 3]], 'per-option direct purchases come from the engine attribution (externalOrders)');
+  const qfFail = fake({ ok: true, orders: 0 }, { __extFail: true });
+  assert.equal(await qfFail.optionDirectOrderStats(db, 'c1'), null, 'option lookup failure is unknown (null), not zero');
+  assert.deepEqual([...(await qfFail.optionDirectOrders(db, 'c1'))], [], 'floor falls back to applications only on failure');
+  // 확정 + 바로 구매 — 주문 없이 수동 확정한 참여가 있어도 과소하지 않게(Codex PR #1626)
+  f = await fake({ ok: true, orders: 13, ordersToday: 0 }, { submittedAll: 10, todaySubmitted: 0, __direct: { n: 5, today: 2 } }).campaignUsedFloor(db, 'c1');
+  assert.deepEqual([f.total, f.direct], [16, 5], '10 confirmations (2 without orders) + 5 direct + 1 hold');
   require.cache[stPath].exports = real;
 
   // ② 잠금 트랜잭션 안 호출은 SAVEPOINT 로 격리(실패해도 트랜잭션을 죽이지 않는다)
@@ -58,7 +65,7 @@ const read = (rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
   assert.ok(/used = Math\.max\(used, f\.total\)/.test(plan) && /code = 'quota_unknown'/.test(plan), '회차 빼기 하한 + 모르면 막음');
   const routes = read('src/routes/campaign.routes.js');
   assert.ok(/used\.length \|\| directByOpt\.get\(e\.opt_key\) > 0/.test(routes), '바로 구매만 있는 상품은 지우지 않고 닫는다');
-  assert.ok(/바로 구매 \$\{f\.orders\}건이 있어 삭제할 수 없습니다/.test(routes), '바로 구매만 있는 공고 삭제 금지');
+  assert.ok(/바로 구매 \$\{f\.direct\}건이 있어 삭제할 수 없습니다/.test(routes), '바로 구매만 있는 공고 삭제 금지');
   assert.ok(/if \(!f\.known\) throw new Error\('연결 작업표 주문 조회 실패'\)/.test(routes), '공고 삭제: 모르면 지우지 않는다');
   assert.ok(/campaignUsedFloor\(fc, id\)/.test(routes), '공고 삭제 확인은 체크아웃 커넥션(주문 수 캐시 우회)');
   assert.ok(/displayRecruitTotal\(cur\[0\]\?\.recruit_total, cur\[0\]\?\.wo_total\)/.test(lrq), '모를 때 비교 기준 = 지금 적용 중인 정원(작업오더 대체값 포함)');
