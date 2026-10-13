@@ -15,6 +15,9 @@
  *   · 글자는 소문자 + 한글·영문·숫자만 남긴다(`HA-HD1590` → `hahd1590`).
  *   · 이름·낱말은 "안에 들어 있으면" 걸린다. 단 숫자만·한글 두 글자 이하·영문 세 글자 이하인 **약한 이름**(`킹`·`L`·`100`)은
  *     캡처 쪽에 **그 낱말이 따로** 있어야 걸린다(`킹사이즈`·`polo`·`KS-100` 속 글자로 걸리지 않게).
+ *   · ★ 영문만으로 된 약한 이름(`F`·`S`·`XL`)은 **앞뒤에 다른 영문 글자가 없으면** 한글·숫자에 붙어 있어도 걸린다
+ *     (사용자 확정 2026-10-13 · 결정 234 — 캡처 실측 `진간장F`·`F1개`·상품명 쪽 `F`). `Fresh` 속 `F`·`XL` 속 `L` 은 여전히 안 걸린다.
+ *     둘 이상 선택지에 같은 글자가 있으면 그 글자는 구별 근거가 아니다(아래 df·알맹이 규칙 그대로) → 다른 구별 낱말 또는 사람 확인.
  *   · 숫자만 있는 짧은 낱말(번호 `1.`·`2.`)은 버린다.
  *   · 여러 선택지에 함께 있는 낱말(`배송메세지00`·`누쓰쓰`)은 버린다 — 구분에 쓸모가 없다.
  *   · 모든 선택지에 똑같이 붙은 앞·뒤 글자도 떼고 남은 알맹이(`퀸더블`)로 본다.
@@ -70,7 +73,10 @@ function mentionedOptions(text, options, { shortText } = {}) {
   const shortTokens = new Set(_tokens(shortText === undefined ? text : shortText));
   if (shortText !== undefined && !String(shortText || '').trim()) for (const t of allTokens) if (!/^\d+$/.test(t)) shortTokens.add(t);
   // ★ 하나의 대조 규칙 — 약한 이름은 낱말 일치만, 나머지는 포함. (코드리뷰 Blocker: ①② 에 이 보호가 빠져 있었다)
-  const hit = (n) => (_weak(n) ? shortTokens.has(n) : T.includes(n));
+  // ★ 결정 234: 영문만 약한 이름은 캡처 글자 전체에서 "앞뒤가 영문이 아닌 자리"로도 찾는다(숫자·한글 약한 이름은 종전).
+  const rawLower = String(text || '').toLowerCase();
+  const latinBound = (n) => /^[a-z]{1,3}$/.test(n) && new RegExp('(^|[^a-z])' + n + '($|[^a-z])').test(rawLower);
+  const hit = (n) => (_weak(n) ? (shortTokens.has(n) || latinBound(n)) : T.includes(n));
   // 짧은 글자가 이름 **안에** 있는 방향(작업표 칸 값 `4. 킹(분리난방)` → 긴 공고 이름) — 글자 자체가 약하면 쓰지 않는다.
   const inside = (n) => !_weak(T) && n.includes(T);
   // ★ 근거는 두 단계 — **강한 근거**(이름·알맹이 통째·구별 낱말 전부)가 하나라도 있으면 그것만 본다.
