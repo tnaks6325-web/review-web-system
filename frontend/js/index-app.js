@@ -946,6 +946,8 @@ async function submitAdminLogin() {
 }
 
 function enterAdminScreen() {
+  // 관리자 화면 = 직원 전용 → 확장 프로그램 필수 설치 검사(js/product-reader-gate.js, 2026-10-13)
+  try { window.productReaderGate && window.productReaderGate({ isStaff: true }); } catch (_) { }
   const rem  = getAdminSessionRemaining();
   const name = getAdminName();
   const role = getAdminRole();
