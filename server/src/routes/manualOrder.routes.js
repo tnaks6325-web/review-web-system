@@ -79,7 +79,8 @@ router.post('/preview', authMiddleware, adminOrMasterMiddleware, async (req, res
 });
 
 // ── 제출 ─────────────────────────────────────────────────────
-// body: { sheetId, tabName, gid, campaignId?, items:[{fields, optionKey?, targetApplicationId?}] }
+// body: { sheetId, tabName, gid, campaignId?, productCheck?, allowProductMismatch?,
+//         items:[{fields, optionKey?, targetApplicationId?, captureName?, captureOption?}] }
 // ★ 건별 독립 처리 — 일부 실패해도 성공 건은 접수된다(카톡 재수집 비용 회피).
 router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
@@ -140,6 +141,41 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
          (이미 산 주문의 기록이 비는 쪽이 더 나쁘다 — 오늘 몫 초과와 같은 규율). 상품이 하나뿐이면 자동. */
     const optionAware = b.optionAware === true;
     const optCtx = !campaignId ? await tabOptionChoices(pool, { sheetId, tabName }) : null;
+
+    /* ★★ 결정 236 ⑤ — 담당자 수동 입력도 상품 확인을 거친다(사용자 확정 2026-10-13).
+       결제금액·붙인 캡처 글자·그 연락처의 최근 참여 신청이 **고른 상품과 다른 상품**을 가리키면, 배치를 시작하기 전에
+       **쓰기 0건**으로 되돌려 확인을 받는다(재참여·오늘 몫 사전 판정과 같은 이유 — 부분 처리를 남기지 않는다).
+       확인(allowProductMismatch) 후 접수한 줄은 결과에 경고를 남기고 이상로그(manual_product_mismatch_confirmed)를 쓴다 — (가) 막지 않는다
+       (리뷰어 화면은 잘못 구매를 "담당자에게 문의"로 보낸다 — 담당자까지 막으면 그 주문을 넣을 길이 없다).
+       ★ 새 화면(productCheck:true)만 — 옛 화면(배포 직후 캐시)은 종전대로(결정 211 과 같은 규율). 판정 실패 = 걸지 않음. */
+    const productCheckOn = b.productCheck === true;
+    const allowProductMismatch = b.allowProductMismatch === true;
+    const _checkCampaignId = campaignId || (optCtx && optCtx.campaignId) || null;
+    let productFlags = [];
+    if (productCheckOn && _checkCampaignId) {
+      const pv = require('../services/productMismatchVerify.service');
+      productFlags = await pv.checkManualEntries({
+        campaignId: _checkCampaignId,
+        // 접수 단계에서 어차피 거절될 줄(필수 칸 빔·전화 자릿수 이상)은 확인창에 올리지 않는다(코드리뷰).
+        items: items.map((it, i) => {
+          const f = (it && it.fields) || {};
+          const _pd = String(f.phone == null ? '' : f.phone).replace(/[^0-9]/g, '');
+          if (['recipient', 'phone', 'address', 'bank', 'account', 'depositor'].some(k => !String(f[k] == null ? '' : f[k]).trim())
+              || (_pd.length !== 11 && _pd.length !== 10)) return null;
+          const asked = String((it && it.optionKey) || '');
+          const auto = (!campaignId && !asked && optCtx && optCtx.choices.length === 1) ? optCtx.choices[0].optKey : '';
+          return { index: i, name: f.recipient || '', chosenKey: asked || auto, targetApplicationId: (it && it.targetApplicationId) || null,
+                   price: f.price, captureName: (it && it.captureName) || '', captureOption: (it && it.captureOption) || '', phone8: phone8Of(f.phone) };
+        }).filter(Boolean),
+      }).catch(() => []);
+      if (productFlags.length && !allowProductMismatch) {
+        return res.json({
+          ok: false, needConfirm: 'product_check', flagged: productFlags,
+          error: `${productFlags.length}건의 상품을 확인해 주세요 — 고른 상품과 다른 상품을 샀거나, 다른 공고에 참여 신청한 연락처입니다.`,
+        });
+      }
+    }
+    const _flagAt = new Map(productFlags.map(x => [x.index, x]));
 
     const adminName = (req.admin && req.admin.name) || '';
     const results = [];
@@ -205,6 +241,18 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
         //   이번에 문제가 된 상태(정원을 넘긴 줄 모름)가 그대로 되돌아온다.
         if (allowOverDaily && r && r.ok) {
           r.warnings = (r.warnings || []).concat('오늘 모집인원을 초과해 접수했습니다(관리자 확인됨)');
+        }
+        const pf = _flagAt.get(i);
+        if (r && r.ok && pf) {
+          r.warnings = (r.warnings || []).concat(`상품 확인 경고를 확인하고 접수(관리자 확인됨): ${pf.notes.join(' · ')}`);
+          try {
+            require('../services/errorLog.service').logAbnormal({
+              flow: 'order_submit', step: 'manual_product_mismatch_confirmed', category: 'validation', source: 'server', severity: 'warn',
+              fingerprintKey: 'os-' + (r.orderSubmissionId || ''),   // 주문마다 따로(지문은 숫자를 지운다)
+              error: new Error(`수동 입력 상품 확인 경고를 담당자가 확인하고 접수 — 고른 「${pf.chosen || '?'}」 · ${pf.notes.join(' · ')} · 주문 ${r.orderSubmissionId || '?'} · by ${adminName || '?'}`),
+              context: { sheetId, tabName, campaignId: _checkCampaignId, orderSubmissionId: r.orderSubmissionId || null },
+            });
+          } catch (_) { /* 기록 실패는 접수에 영향 없음 */ }
         }
         if (r && r.ok && itemOver) {
           const ch = optCtx.choices.find(c => c.optKey === itemOptKey);

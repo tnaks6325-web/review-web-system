@@ -957,7 +957,8 @@ console.log('\nJ. 일 정원 확인 게이트');
   //   생겼다(over_daily 재확인 때 이미 확정된 repurchase 확인 상태를 잃지 않게). allowOverDaily
   //   가 true 로 재전송된다는 원래 의미는 그대로다 — repurchaseGuard.test.js 가 그 값을 고정.
   ok('J23 프론트가 확인창을 띄우고 allowOverDaily 로 재전송한다',
-    /needConfirm === 'over_daily'/.test(fe) && /post\(true,/.test(fe));
+    // 결정 236: 확인 단계 반복 처리 — over_daily 확인 뒤 _overDailyOk=true 로 같은 재전송 줄을 탄다(의미 불변)
+    /needConfirm === 'over_daily'/.test(fe) && (/post\(true,/.test(fe) || /_overDailyOk = true;[\s\S]{0,2500}out = await post\(_overDailyOk, _repurchaseOk\);/.test(fe)));
   ok('J24 ★ 취소하면 아무것도 보내지 않는다', /if \(!okGo\)/.test(fe));
 }
 

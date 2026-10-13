@@ -20,7 +20,16 @@
  *   · ③ 은 **참여 기록만** 바꾼다. 주문 원장(`order_submissions.selected_opt_key·selected_product`)에 작업표 값을
  *     되쓰지 않는다 — 결정 018 「원장은 리뷰어가 고른 값이 진실」(역주입 금지) 그대로.
  *   · 판정 실패·조회 실패·판독값 없음은 **종전 동작**(fail-open) — 막는 것은 리뷰어가 "다른 상품을 샀다"고 답한 경우뿐.
- * 끄는 스위치(env): `CAMPAIGN_PRODUCT_VERIFY=0` → ①②③ 모두 즉시 종전.
+ * 끄는 스위치(env): `CAMPAIGN_PRODUCT_VERIFY=0` → ①②③④⑤ 모두 즉시 종전.
+ *
+ * 결정 236 (사용자 확정 2026-10-13 — 위드프렌즈 재현 뒤 남은 틈 두 개):
+ *   ④ 리뷰어가 "고른 상품이 맞다"고 답했는데 **결제금액이 다른 상품 하나의 가격과 정확히 같으면**(상품 가격 2종 이상 ·
+ *      고른 상품 가격과 다름) 한 번 더 묻는다 — "○○를 주문했다고 하셨지만 결제금액 N원은 △△ 결제금액이에요"
+ *      (PRODUCT_PRICE_RECHECK). 다시 확인한 뒤에도 "맞다"(priceRecheckAck)면 (가) 접수 + 담당자 확인용 이상로그
+ *      — 쿠폰 할인으로 다른 상품 가격과 우연히 같아지는 정상 구매가 있어(117건 시험 중 의류 5건) 막지 않는다.
+ *   ⑤ 담당자 수동 입력(외부모집 수동제출)도 같은 판정을 거친다 — 결제금액 · 붙인 캡처의 글자 · 그 연락처가 최근 참여
+ *      신청 때 고른 상품(다른 공고 포함). 걸리면 **쓰기 0건**으로 되돌려 확인을 받고(needConfirm:'product_check'),
+ *      확인하면 (가) 접수 + 이상로그(리뷰어가 "담당자에게 문의"로 오는 길이라 담당자까지 막으면 넣을 길이 없다).
  */
 'use strict';
 
@@ -44,25 +53,55 @@ async function _loadOptions(db, campaignId) {
 
 /** 화면에 보일 상품 이름 — 공고에 적힌 이름 그대로(리뷰어가 참여할 때 본 이름). */
 function _label(key) { return String(key || ''); }
+const _wonText = (n) => Number(n || 0).toLocaleString('ko-KR');
+
+/**
+ * 결제금액 근거 — 단일 출처(리뷰어 제출 ①④ · 담당자 수동 입력 ⑤가 같이 쓴다).
+ * 상품 가격이 2종 이상이고, 결제금액이 고른 상품 가격과 다르며, **다른 상품 하나의 가격과 정확히 같을 때만** 그 상품을 돌려준다.
+ * 가격이 같은 상품끼리·어느 가격과도 안 맞는 금액(쿠폰 등)·고른 상품 가격 모름 = null(근거 없음 — 묻지 않는다).
+ */
+function priceOtherOption(opts, heldKey, paidRaw) {
+  const paid = _won(paidRaw);
+  if (!paid || !Array.isArray(opts)) return null;
+  if (new Set(opts.map(o => _won(o.pay_amount)).filter(Boolean)).size < 2) return null;
+  const heldPay = _won((opts.find(o => o.opt_key === heldKey) || {}).pay_amount);
+  if (!heldPay || paid === heldPay) return null;
+  const same = opts.filter(o => o.opt_key !== heldKey && _won(o.pay_amount) === paid);
+  return same.length === 1 ? { key: same[0].opt_key, paid, heldPay } : null;
+}
 
 /**
  * ①② 주문 제출 때 판정 — 쓰기 0.
- * @returns {Promise<{action:'none'}|{action:'keep', capturedKey}|{action:'prompt',basis:'text'|'price',paid?,chosen,captured}|{action:'wrong',chosen,bought,error}>}
- *   keep  = 리뷰어가 "고른 상품을 샀다"고 확인(캡처를 AI 가 다르게 읽음) → 접수 + 이상로그
- *   wrong = 리뷰어가 "다른 상품을 샀다"고 확인 → 잘못 구매 · 제출 불가
+ * @returns {Promise<{action:'none'}|{action:'keep', capturedKey, priceOther?, paid?}|{action:'recheck',paid,chosen,captured,error}|{action:'prompt',basis:'text'|'price',paid?,chosen,captured}|{action:'wrong',chosen,bought,error}>}
+ *   keep    = 리뷰어가 "고른 상품을 샀다"고 확인(캡처를 AI 가 다르게 읽음) → 접수 + 이상로그
+ *             (priceOther 가 있으면 = 결제금액이 다른 상품 가격인데 다시 확인하고도 "맞다" — ④)
+ *   recheck = "고른 상품을 샀다"고 했는데 결제금액이 다른 상품 하나의 가격 → 한 번 더 묻는다(④ · 쓰기 0)
+ *   wrong   = 리뷰어가 "다른 상품을 샀다"고 확인 → 잘못 구매 · 제출 불가
  */
-async function decideAtSubmit({ holdCtx, captureText, captureOption = '', capturePrice = '', confirmedKey, db = getPool() }) {
+async function decideAtSubmit({ holdCtx, captureText, captureOption = '', capturePrice = '', confirmedKey, priceAck = false, db = getPool() }) {
   if (!isEnabled()) return { action: 'none' };
   if (!holdCtx || !holdCtx.verified || !holdCtx.optionKey || holdCtx.doneKind) return { action: 'none' };
   try {
     const opts = await _loadOptions(db, holdCtx.campaignId);
     if (opts.length < 2) return { action: 'none' };
     const held = String(holdCtx.optionKey);
-    const confirmed = String(confirmedKey == null ? '' : confirmedKey).trim();
+    // 화면이 보낸 값은 **그 공고의 상품일 때만** 답으로 받는다 — 아니면 답이 없는 것으로 보고 아래 판정을 그대로 한다
+    // (결정 236 코드리뷰: 지어낸 값으로 경고·다시 묻기를 기록 없이 건너뛰지 못하게).
+    const _c = String(confirmedKey == null ? '' : confirmedKey).trim();
+    const confirmed = _c && opts.some(o => o.opt_key === _c) ? _c : '';
     if (confirmed) {
-      if (confirmed === held) return { action: 'keep', capturedKey: capturedOtherOption(captureText, opts, held, { shortText: captureOption }) || '' };
-      // 화면이 보낸 값은 **그 공고의 상품일 때만** 받는다(지어낸 값 차단) — 아니면 종전대로 고른 상품.
-      if (!opts.some(o => o.opt_key === confirmed)) return { action: 'none' };
+      if (confirmed === held) {
+        const capturedKey = capturedOtherOption(captureText, opts, held, { shortText: captureOption }) || '';
+        // ④ "고른 상품이 맞다"는 답을 결제금액으로 한 번 더 확인한다 — 다시 확인하고도 맞다면(priceAck) 접수 + 이상로그.
+        const po = priceOtherOption(opts, held, capturePrice);
+        if (po && !priceAck) {
+          return {
+            action: 'recheck', paid: po.paid, chosen: { key: held, label: _label(held) }, captured: { key: po.key, label: _label(po.key) },
+            error: `「${_label(held)}」를 주문했다고 하셨지만, 결제금액 ${_wonText(po.paid)}원은 「${_label(po.key)}」 결제금액이에요. 잘못 구매한 것으로 보여요. 주문 내역을 다시 확인해 주세요.`,
+          };
+        }
+        return { action: 'keep', capturedKey, priceOther: po ? po.key : '', paid: po ? po.paid : 0 };
+      }
       return {
         action: 'wrong', chosen: { key: held, label: _label(held) }, bought: { key: confirmed, label: _label(confirmed) },
         error: `참여할 때 고른 「${_label(held)}」와 다른 「${_label(confirmed)}」를 구매했어요. 잘못 구매한 주문은 제출할 수 없어요. 담당자에게 문의해 주세요.`,
@@ -75,14 +114,9 @@ async function decideAtSubmit({ holdCtx, captureText, captureOption = '', captur
     //   (운영 캡처 117건 실측: 글자만 = 실제 잘못 구매 4건 중 2건 · 글자+금액 = 4건 모두 · 정상 113건 경고 0.
     //    금액만 쓰면 쿠폰 3,000원이 다른 상품 가격과 우연히 같아진 정상 5건이 걸렸다 — 글자가 고른 상품을 말하면 금액은 보지 않는다.)
     const read = matchOption(captureText, opts, { shortText: captureOption });
-    const paid = _won(capturePrice);
-    const pays = opts.map(o => _won(o.pay_amount));
-    if (!read && paid && new Set(pays.filter(Boolean)).size >= 2) {
-      const heldPay = _won((opts.find(o => o.opt_key === held) || {}).pay_amount);
-      const same = opts.filter(o => o.opt_key !== held && _won(o.pay_amount) === paid);
-      if (heldPay && paid !== heldPay && same.length === 1) {
-        return { action: 'prompt', basis: 'price', paid, chosen: { key: held, label: _label(held) }, captured: { key: same[0].opt_key, label: _label(same[0].opt_key) } };
-      }
+    const po = read ? null : priceOtherOption(opts, held, capturePrice);
+    if (po) {
+      return { action: 'prompt', basis: 'price', paid: po.paid, chosen: { key: held, label: _label(held) }, captured: { key: po.key, label: _label(po.key) } };
     }
     return { action: 'none' };
   } catch (e) {
@@ -167,6 +201,83 @@ async function syncApplicationFromWorkboard({ sheetId, tabName, rowId, field, by
   }
 }
 
+/**
+ * ⑤ 담당자 수동 입력(외부모집 수동제출) 상품 확인 — 쓰기 0. 결정 236.
+ * @param {{campaignId:string, items:Array<{index:number, name?:string, chosenKey?:string, targetApplicationId?:string|number,
+ *          price?:string, captureName?:string, captureOption?:string, phone8?:string}>}} p
+ * @returns {Promise<Array<{index:number, name:string, chosen:string, notes:string[], kinds:string[], suggestKey:string}>>} 걸린 줄만
+ *   kinds ⊂ price | capture | application — 화면이 확인창 첫 줄을 고른다(신청 기록만이면 "산 상품이 다르다"고 말하지 않는다).
+ * ★ 12시간(운영 실측 2026-10-13 · 지난 30일 수동 입력 145건): 3일이면 14건이 걸리고 그중 12건이 20~68시간 전 무관한 공고의
+ *   만료 신청이었다(오경고). 12시간이면 2건 — 둘 다 확인할 만한 건(1시간 전 다른 공고 신청 · 4시간 전 같은 브랜드 다른 맛).
+ * 근거 세 가지(하나라도 걸리면 그 줄):
+ *   · 결제금액 — priceOtherOption(리뷰어 제출과 같은 규칙)
+ *   · 붙인 캡처의 글자 — capturedOtherOption(리뷰어 제출과 같은 규칙 · 둘 이상 걸리면 모름)
+ *   · 참여 신청 기록 — 그 연락처가 최근 12시간 안에 신청만 하고 접수되지 않은 신청(applied·expired)이 있는데
+ *     **이 공고·이 상품과 맞는 것이 하나도 없으면** 가장 최근 신청을 알린다(다른 공고 포함 — 조○○ 사례).
+ *     공고 화면에서 신청을 골라 확정하는 경우(targetApplicationId)는 그 신청이 곧 고른 상품이라 보지 않는다.
+ * ★ fail-open — 조회 실패·근거 없음은 걸지 않는다(종전대로 접수).
+ */
+async function checkManualEntries({ campaignId, items, db = getPool() }) {
+  if (!isEnabled() || !campaignId || !Array.isArray(items) || !items.length) return [];
+  let opts = [];
+  try { opts = await _loadOptions(db, campaignId); } catch (e) {
+    logger.warn(`[product-verify] 수동 입력 상품 목록 조회 실패 — 종전대로 접수: ${(e && e.message) || e}`);
+    return [];
+  }
+  const out = [];
+  for (const it of items) {
+    try {
+      let chosen = String(it.chosenKey || '');
+      if (it.targetApplicationId) {
+        const { rows } = await db.query(`SELECT option_key FROM campaign_applications WHERE id = $1 AND campaign_id = $2`,
+          [String(it.targetApplicationId), String(campaignId)]);
+        if (rows[0] && rows[0].option_key) chosen = String(rows[0].option_key);
+      }
+      const notes = [], kinds = [];
+      let suggestKey = '';
+      // 고른 상품이 이 공고 목록에 없으면(삭제·오타) 금액·캡처 근거는 보지 않는다 — 그 줄은 접수 단계가 따로 거른다.
+      if (chosen && opts.length >= 2 && opts.some(o => o.opt_key === chosen)) {
+        const po = priceOtherOption(opts, chosen, it.price);
+        if (po) {
+          notes.push(`결제금액 ${_wonText(po.paid)}원은 「${_label(po.key)}」 가격입니다(고른 상품 가격 ${_wonText(po.heldPay)}원)`); kinds.push('price');
+          suggestKey = po.key;
+        }
+        const capText = [it.captureName, it.captureOption].map(v => String(v == null ? '' : v).slice(0, 300).trim()).filter(Boolean).join(' ');
+        const other = capText ? capturedOtherOption(capText, opts, chosen, { shortText: String(it.captureOption || '').slice(0, 300) }) : '';
+        if (other) {
+          notes.push(`구매 캡처에는 「${_label(other)}」로 보입니다`); kinds.push('capture');
+          if (!suggestKey) suggestKey = other;
+        }
+      }
+      const p8 = String(it.phone8 || '').replace(/\D/g, '').slice(-8);
+      if (!it.targetApplicationId && p8.length === 8) {
+        const { rows: apps } = await db.query(
+          `SELECT a.campaign_id, a.option_key, a.applied_at, rc.title
+             FROM campaign_applications a JOIN recruit_campaigns rc ON rc.id = a.campaign_id
+            WHERE a.phone8 = $1 AND a.status IN ('applied','expired') AND a.applied_at > NOW() - interval '12 hours'
+              AND a.order_submission_id IS NULL AND a.late_order_id IS NULL
+            ORDER BY a.applied_at DESC`, [p8]);   // ★ 늦게라도 주문이 붙은 만료 신청은 "신청만 한 기록"이 아니다(Codex 리뷰) · 12시간 창 전체를 본다
+        const fits = (a) => String(a.campaign_id) === String(campaignId)
+          && (!chosen || !a.option_key || String(a.option_key) === chosen);
+        if (apps.length && !apps.some(fits)) {
+          const a = apps[0];
+          const kst = a.applied_at ? new Date(new Date(a.applied_at).getTime() + 9 * 3600 * 1000) : null;   // 한국 날짜(서버 시간대 무관)
+          const when = kst && !isNaN(kst) ? `${kst.getUTCMonth() + 1}/${kst.getUTCDate()} ${String(kst.getUTCHours()).padStart(2, '0')}:${String(kst.getUTCMinutes()).padStart(2, '0')}` : '최근';
+          const opt = a.option_key ? `「${_label(a.option_key)}」` : '';
+          notes.push(String(a.campaign_id) === String(campaignId)
+            ? `이 연락처는 ${when} 참여 신청 때 ${opt}을(를) 골랐습니다`
+            : `이 연락처는 ${when} 다른 공고 「${String(a.title || '').slice(0, 30)}」에 ${opt ? opt + '(으)로 ' : ''}참여 신청했습니다`);
+          kinds.push('application');
+        }
+      }
+      if (notes.length) out.push({ index: it.index, name: String(it.name || ''), chosen, notes, kinds, suggestKey });
+    } catch (e) {
+      logger.warn(`[product-verify] 수동 입력 상품 확인 실패(그 줄은 종전대로): ${(e && e.message) || e}`);
+    }
+  }
+  return out;
+}
+
 module.exports = {
-  isEnabled, decideAtSubmit, syncApplicationFromWorkboard, isProductColumn, __setPoolForTest,
+  isEnabled, decideAtSubmit, syncApplicationFromWorkboard, isProductColumn, priceOtherOption, checkManualEntries, __setPoolForTest,
 };

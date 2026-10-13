@@ -55,6 +55,11 @@ const STEP_LABELS = {
   db_query:      'DB 조회',
   folder_create: '폴더 생성',
   auth:          '인증',
+  // 결정 230·236 — 고른 상품 ≠ 산 상품(담당자 확인용)
+  wrong_product_purchase:             '잘못 구매(고른 상품과 다른 상품) — 제출 막음',
+  capture_product_differs_confirmed:  '캡처는 다른 상품 — 리뷰어가 고른 상품이 맞다고 확인',
+  capture_price_mismatch_confirmed:   '결제금액이 다른 상품 가격 — 리뷰어가 다시 확인하고도 맞다고 함',
+  manual_product_mismatch_confirmed:  '수동 입력 상품 확인 경고 — 담당자가 확인하고 접수',
 };
 
 // category: 무엇이(어떤 종류의) 에러가
@@ -130,10 +135,14 @@ function inferSource(category, flow, step) {
 /**
  * 중복 그룹핑 fingerprint (메시지 내 숫자/ID 정규화 후 해시)
  */
-function fingerprint({ flow, step, category, source, message_raw }) {
+function fingerprint({ flow, step, category, source, message_raw, key }) {
   const norm = String(message_raw || '').replace(/\d+/g, '#').slice(0, 160);
+  // key(선택) — 숫자를 지우지 않고 그대로 넣는다. 사람마다 따로 남겨야 하는 확인 기록용(결정 236 · Codex 리뷰).
+  //   ★ key 가 없으면 종전과 같은 입력 = 기존 활성 기록의 지문이 바뀌지 않는다.
+  const parts = [flow, step, category, source, norm];
+  if (key != null && String(key) !== '') parts.push('k:' + String(key).slice(0, 80));
   return crypto.createHash('sha1')
-    .update([flow, step, category, source, norm].join('|'))
+    .update(parts.join('|'))
     .digest('hex')
     .slice(0, 16);
 }
@@ -191,7 +200,7 @@ async function logAbnormal(p = {}) {
     const error_code = String((error && (error.code || error.name || error.status || error.statusCode)) || '');
     const stack = (error && error.stack ? String(error.stack) : '').split('\n').slice(0, 6).join('\n');
     const context = p.context && typeof p.context === 'object' ? p.context : {};
-    const fp = fingerprint({ flow, step, category, source, message_raw });
+    const fp = fingerprint({ flow, step, category, source, message_raw, key: p.fingerprintKey });
 
     // ── 기존 파이프라인 병행 (제거하지 않음) ──
     logger.error(`[이상로그] ${message_ko} | ${flow}/${step || '-'} | ${message_raw}`);

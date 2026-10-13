@@ -359,6 +359,10 @@
       ? ' · 오늘 ' + o.todayRemaining : '';
     return _optName(o) + ' · ' + left + today + (o.status === 'paused' ? ' · 품절로 일시 멈춤' : '');   // ★ 결정 229: 안내만(고르는 것은 막지 않는다)
   }
+  /** 결정 236 ⑤ — 상품 확인에 걸린 이유(제출을 취소한 뒤). 상품·결제금액·연락처를 고치면 사라진다. */
+  function _productWarnHtml(it) {
+    return (it.productWarn || []).map(m => `<div class="mo-msg e">⚠ 상품 확인: ${esc(m)}</div>`);
+  }
   function optCell(it, i) {
     if (!OPTS.length) return '';
     const o = _optOf(it);
@@ -369,6 +373,7 @@
           ? `이 상품은 남은 자리가 ${o.remaining}개라 이 줄부터 정원을 넘습니다`
           : `이미 찬 상품입니다(${o.used}/${o.recruitTotal})`} — 이미 산 주문이라 확인 후 등록합니다</label>`;
     else if (o.todayRemaining === 0) msg = '<div class="mo-msg w">⚠ 오늘 몫은 찼지만 총 정원은 남아 있습니다 — 그대로 등록됩니다</div>';
+    msg += _productWarnHtml(it).join('');
     if (OPTS.length === 1) return `<td style="min-width:180px"><span class="mo-bdg grn">자동</span> ${esc(_optName(OPTS[0]))}${msg}</td>`;
     return `<td style="min-width:220px">
       <select class="mo-appsel" id="moOpt${i}" aria-label="${i + 1}번 줄 상품" onchange="ManualOrder.pickOption(${i},this.value)">
@@ -377,7 +382,7 @@
   }
   function pickOption(i, key) {
     const it = ROWS[i]; if (!it) return;
-    it.optKey = key || ''; it.optFullAck = false;
+    it.optKey = key || ''; it.optFullAck = false; it.productWarn = null;
     renderPreview();
     const el = document.getElementById('moOpt' + i); if (el) el.focus();
   }
@@ -405,6 +410,8 @@
     const msgs = []
       .concat((it.errors || []).map(m => `<div class="mo-msg e">✕ ${esc(m)}</div>`))
       .concat((it.warnings || []).map(m => `<div class="mo-msg w">⚠ ${esc(m)}</div>`))
+      // ★ 결정 236 ⑤: 서버 상품 확인에 걸린 줄(제출을 취소한 뒤) — 상품 칸이 있으면 그 아래(optCell), 없으면(공고 화면 경로) 여기
+      .concat(OPTS.length ? [] : _productWarnHtml(it))
       .join('');
     const inp = (k, w) => `<input class="mo-in" style="${w ? 'min-width:' + w : ''}" value="${esc(f[k] == null ? '' : f[k])}"
         oninput="ManualOrder.edit(${i},'${k}',this.value)">`;
@@ -493,7 +500,7 @@
   }
 
   function pickApplication(i, id) {
-    const row = ROWS[i]; if (row) row.targetApplicationId = id || '';
+    const row = ROWS[i]; if (row) { row.targetApplicationId = id || ''; row.productWarn = null; }
   }
 
   const REQUIRED = ['reviewerName', 'recipient', 'phone', 'address', 'bank', 'account', 'depositor', 'price'];
@@ -501,6 +508,7 @@
   // 셀 인라인 수정 — 값만 바꾸고 표는 다시 그리지 않는다(입력 중 포커스 유실 방지)
   function edit(i, key, val) {
     const it = ROWS[i]; if (!it) return;
+    if (key === 'price' || key === 'phone') it.productWarn = null;
     it.fields[key] = (key === 'price') ? (parseInt(String(val).replace(/[^0-9]/g, ''), 10) || null) : val;
     if (key === 'reviewerName' || key === 'recipient') {
       const n = s => String(s || '').replace(/\s+/g, '');
@@ -525,6 +533,8 @@
       // ★ 상품(옵션) 칸의 안내는 그 칸이 따로 관리한다(결정 211) — 마지막 칸의 문구만 지운다.
       const cell = tr.lastElementChild;
       if (cell) cell.querySelectorAll('.mo-msg').forEach(el => el.remove());
+      // ★ 결정 236: 상품 확인 이유는 상품 칸에 붙는다 — 금액·연락처를 고쳐 지웠으면 그 칸의 문구도 지운다(Codex 리뷰)
+      if (!it.productWarn) tr.querySelectorAll('.mo-msg').forEach(el => { if (/^⚠ 상품 확인:/.test(el.textContent)) el.remove(); });
       if (cell && bad) {
         const d = document.createElement('div');
         d.className = 'mo-msg e';
@@ -582,6 +592,29 @@
     });
   }
 
+  /** 줄에 붙은 캡처를 AI 로 읽는다 — 진행 중이면 그 약속을 그대로 돌려준다(제출이 기다릴 수 있게 · 결정 236 Codex 리뷰).
+   *  실패해도 첨부는 유지(슬래시양식이 정본). */
+  function readCapture(row) {
+    if (!row || !row.capture) return Promise.resolve();
+    if (row.extract) return Promise.resolve();
+    if (row.extractPending) return row.extractPending;
+    const cap = row.capture;
+    row.extractPending = (async () => {
+      try {
+        const r = await api('/api/image/image-extract', { method: 'POST', body: JSON.stringify({ imageBase64: cap.base64, mimeType: cap.mime }) });
+        if (r && r.ok && row.capture === cap) row.extract = r;
+      } catch (_) { /* 추출 실패는 무시 */ }
+      finally { if (row.capture === cap) row.extractPending = null; }
+    })();
+    return row.extractPending;
+  }
+  /** 제출 전에 캡처 판독이 끝나기를 기다린다 — 판독 전에 보내면 캡처 글자 근거가 빠진 채 접수된다(결정 236).
+   *  1단계 보관함에서 판독이 끝나기 전에 배정된 줄도 여기서 다시 읽는다. 최대 25초(넘으면 판독 없이 보낸다 = 종전). */
+  async function awaitCaptureReads(rows) {
+    const jobs = rows.filter(r => r && r.capture && !r.extract).map(readCapture);
+    if (!jobs.length) return;
+    await Promise.race([Promise.all(jobs), new Promise(res => setTimeout(res, 25000))]);
+  }
   function attach(i, file) {
     const row = ROWS[i]; if (!row) return;
     (async () => {
@@ -589,16 +622,15 @@
       if (!shrunk || !shrunk.base64) { alert('이미지를 읽지 못했습니다.'); return; }
       const b64 = shrunk.base64;
       row.capture = { base64: b64, mime: shrunk.mime };
+      row.productWarn = null;   // 캡처가 바뀌면 상품 확인 이유도 다시 판정한다(결정 236)
       renderPreview();
       // 캡처에서 주문번호 등 자동 인식(실패해도 첨부는 유지)
-      try {
-        const r = await api('/api/image/image-extract', { method: 'POST', body: JSON.stringify({ imageBase64: b64, mimeType: shrunk.mime }) });
-        if (r && r.ok) {
-          row.extract = r;
-          if (r.orderNumber && !row.fields.orderNum) row.fields.orderNum = r.orderNumber;
-          renderPreview();
-        }
-      } catch (_) { /* 추출 실패는 무시 — 슬래시양식이 정본 */ }
+      row.extract = null;
+      await readCapture(row);
+      if (row.extract) {
+        if (row.extract.orderNumber && !row.fields.orderNum) row.fields.orderNum = row.extract.orderNumber;
+        renderPreview();
+      }
     })();
   }
 
@@ -610,7 +642,9 @@
     if (!confirm(`${targets.length}건을 제출합니다.\n리뷰어 자동 등록${CTX.campaignId ? ' · 모집 정원 차감' : ''}이 함께 진행됩니다.`)) return;
     BUSY = true;
     const btn = document.getElementById('moSubmit');
-    if (btn) { btn.disabled = true; btn.textContent = '제출 중…'; }
+    if (btn) { btn.disabled = true; btn.textContent = '캡처 읽는 중…'; }
+    await awaitCaptureReads(targets.map(x => x.r));
+    if (btn) btn.textContent = '제출 중…';
 
     // ★ 오늘 정원 초과는 **막지 않고 확인만 받는다**(사용자 확정 2026-08-19). 서버가 배치를
     //   시작하기 전에 판정해 `needConfirm`으로 되돌리므로, 이 시점까지 **쓰기는 0건**이다.
@@ -625,57 +659,85 @@
         allowRepurchase: allowRepurchase === true,
         force: force === true,
         optionAware: OPTS.length > 0,   // ★ 결정 211: 서버가 "안 고름·마감 미확인"을 막는 것은 이 화면에서 온 요청만
+        productCheck: true,              // ★ 결정 236 ⑤: 상품 확인(결제금액·캡처·참여 신청) — 이 화면에서 온 요청만
+        allowProductMismatch: _productOk,
         items: (subset ? subset.map(i => targets[i]) : targets)
           .map(x => ({ fields: x.r.fields, optionKey: x.r.optKey || x.r.fields.optionKey || '', optionFullAck: x.r.optFullAck === true,
-                       targetApplicationId: x.r.targetApplicationId || null })),
+                       targetApplicationId: x.r.targetApplicationId || null,
+                       captureName: (x.r.extract && x.r.extract.productName) || '',
+                       captureOption: (x.r.extract && typeof x.r.extract.productOption === 'string') ? x.r.extract.productOption : '' })),
       }),
     });
 
     let out;
     let _repurchaseOk = false;
     let _overDailyOk = false;
+    let _productOk = false;
     try {
       out = await post(false, false);
-      // ★ 재참여(재구매) 기간 제한 — "같은 작업(탭)"에 최근 며칠 안에 같은 연락처로 이미 접수된
-      //   건이 있으면 서버가 **쓰기 0건**으로 되돌린다. 다른 사람인데 번호만 같은 경우가 있어
-      //   막지 않고 확인만 받는다(사용자 확정 2026-08-24) — over_daily와 같은 확인창 흐름.
-      if (out && out.needConfirm === 'repurchase_window') {
-        const list = (out.blocked || []).map(b => {
-          const d = b.availableFrom ? new Date(b.availableFrom).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short' }) : '?';
-          return `· ${b.name || '(이름없음)'} — ${d} 이후 재참여 가능`;
-        }).join('\n');
-        const okGo = confirm(
-          `${(out.blocked || []).length}건이 최근 며칠 안에 이 작업에 이미 참여한 연락처예요.\n\n${list}\n\n`
-          + `다른 사람인데 번호만 같은 경우가 아니라면 [취소]하고 확인해주세요.\n`
-          + `[확인] 그대로 강제 접수합니다.\n`
-          + `[취소] 아무것도 접수되지 않았습니다.`);
-        if (!okGo) {
-          BUSY = false;
-          if (btn) { btn.disabled = false; btn.textContent = targets.length + '건 제출'; }
-          return;   // 서버는 아직 아무것도 쓰지 않았다
-        }
-        _repurchaseOk = true;
-        out = await post(false, true);
-      }
-      if (out && out.needConfirm === 'over_daily') {
-        const q = out.quota || {};
-        // ★ 외부모집은 **이미 구매가 끝난 건의 사후 등록**이다 — 취소해도 구매가 되돌아가지
-        //   않고 기록만 빠진다. 그래서 "진행할까요?"(취소가 안전해 보이는 질문)가 아니라
-        //   "초과로 기록됩니다"(고지) + 취소의 실제 의미를 문장으로 말한다(사용자 지적 2026-08-19).
-        const okGo = confirm(
-          `오늘 모집인원을 넘겨 기록됩니다.\n\n`
-          + `· 오늘 정원 ${q.quota}명 중 ${q.todayCount}명 접수됨 (남은 자리 ${q.remaining}명)\n`
-          + `· 지금 접수 ${q.want}건 → ${q.over}명 초과\n\n`
-          + `이미 구매가 끝난 건이라 접수를 미뤄도 구매는 취소되지 않습니다.\n`
-          + `[확인] 초과 상태로 그대로 기록합니다.\n`
-          + `[취소] 이 건은 시스템에 남지 않습니다 — 나중에 다시 접수해야 합니다.`);
-        if (!okGo) {
-          BUSY = false;
-          if (btn) { btn.disabled = false; btn.textContent = targets.length + '건 제출'; }
-          return;   // 서버는 아직 아무것도 쓰지 않았다
-        }
-        _overDailyOk = true;
-        out = await post(true, _repurchaseOk);
+      // ★ 확인 단계(재참여 → 오늘 몫 → 상품 확인)는 서버가 요청마다 다시 판정한다 — 확인 뒤 다시 보낸 응답이
+      //   앞 단계를 새로 돌려줄 수 있다(창이 열린 사이 정원·재참여 상태가 바뀜). 그래서 돌아온 needConfirm 을
+      //   **순서와 무관하게 반복 처리**한다. 같은 단계를 두 번 확인하지는 않는다(무한 반복 방지 · Codex 리뷰).
+      for (let _gate = 0; out && out.needConfirm && _gate < 6; _gate++) {
+        if (out.needConfirm === 'repurchase_window' && !_repurchaseOk) {
+          const list = (out.blocked || []).map(b => {
+            const d = b.availableFrom ? new Date(b.availableFrom).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short' }) : '?';
+            return `· ${b.name || '(이름없음)'} — ${d} 이후 재참여 가능`;
+          }).join('\n');
+          const okGo = confirm(
+            `${(out.blocked || []).length}건이 최근 며칠 안에 이 작업에 이미 참여한 연락처예요.\n\n${list}\n\n`
+            + `다른 사람인데 번호만 같은 경우가 아니라면 [취소]하고 확인해주세요.\n`
+            + `[확인] 그대로 강제 접수합니다.\n`
+            + `[취소] 아무것도 접수되지 않았습니다.`);
+          if (!okGo) {
+            BUSY = false;
+            if (btn) { btn.disabled = false; btn.textContent = targets.length + '건 제출'; }
+            return;   // 서버는 아직 아무것도 쓰지 않았다
+          }
+          _repurchaseOk = true;
+        } else if (out.needConfirm === 'over_daily' && !_overDailyOk) {
+          const q = out.quota || {};
+          // ★ 외부모집은 **이미 구매가 끝난 건의 사후 등록**이다 — 취소해도 구매가 되돌아가지
+          //   않고 기록만 빠진다. 그래서 "진행할까요?"(취소가 안전해 보이는 질문)가 아니라
+          //   "초과로 기록됩니다"(고지) + 취소의 실제 의미를 문장으로 말한다(사용자 지적 2026-08-19).
+          const okGo = confirm(
+            `오늘 모집인원을 넘겨 기록됩니다.\n\n`
+            + `· 오늘 정원 ${q.quota}명 중 ${q.todayCount}명 접수됨 (남은 자리 ${q.remaining}명)\n`
+            + `· 지금 접수 ${q.want}건 → ${q.over}명 초과\n\n`
+            + `이미 구매가 끝난 건이라 접수를 미뤄도 구매는 취소되지 않습니다.\n`
+            + `[확인] 초과 상태로 그대로 기록합니다.\n`
+            + `[취소] 이 건은 시스템에 남지 않습니다 — 나중에 다시 접수해야 합니다.`);
+          if (!okGo) {
+            BUSY = false;
+            if (btn) { btn.disabled = false; btn.textContent = targets.length + '건 제출'; }
+            return;   // 서버는 아직 아무것도 쓰지 않았다
+          }
+          _overDailyOk = true;
+        } else if (out.needConfirm === 'product_check' && !_productOk) {
+          // ★ 결정 236 ⑤: 고른 상품과 다른 상품을 산 것으로 보이는 줄 — 서버가 **쓰기 0건**으로 되돌린다.
+          //   (가) 확인하면 그대로 접수하고 담당자 확인 기록을 남긴다 · 취소하면 그 줄에 이유를 붙여 표로 돌아간다(상품을 고쳐 다시 제출).
+          const flagged = out.flagged || [];
+          const list = flagged.map(f => `· ${f.name || '(이름없음)'}${f.chosen ? ` — 고른 상품 「${f.chosen}」` : ''}\n   ${(f.notes || []).join('\n   ')}`).join('\n');
+          // 신청 기록만 걸린 줄뿐이면 "다른 상품을 샀다"고 단정하지 않는다(코드리뷰)
+          const onlyApp = flagged.every(f => Array.isArray(f.kinds) && f.kinds.length && f.kinds.every(k => k === 'application'));
+          const okGo = confirm(
+            (onlyApp ? `${flagged.length}건은 방금 다른 상품·공고로 참여 신청한 연락처예요. 넣으려는 상품이 맞는지 확인해 주세요.`
+                     : `${flagged.length}건이 고른 상품과 다른 상품을 산 것으로 보여요.`)
+            + `\n\n${list}\n\n`
+            + `[확인] 확인했고 그대로 접수합니다(담당자 확인 기록이 남습니다).\n`
+            + `[취소] 아무것도 접수되지 않았습니다 — 표에서 상품을 고친 뒤 다시 제출하세요.`);
+          if (!okGo) {
+            for (const f of flagged) {
+              const t = targets[f.index];
+              if (t && t.r) t.r.productWarn = (f.notes || []).slice();
+            }
+            BUSY = false;
+            renderPreview();
+            return;   // 서버는 아직 아무것도 쓰지 않았다
+          }
+          _productOk = true;
+        } else break;
+        out = await post(_overDailyOk, _repurchaseOk);
       }
       // ★ 같은 구매로 보이는 건(24시간 내 같은 연락처 · 같은 주문번호·연락처 — 결정 193)은 서버가 **그 건만**
       //   접수하지 않고 되돌린다(나머지는 이미 접수됨). 다른 구매가 맞는 경우가 있어 막다른 길로 두지 않고,
@@ -702,7 +764,8 @@
               out.okCount = out.results.filter(r => r && r.ok).length;
               out.failCount = out.results.length - out.okCount;
             } else {
-              alert('다시 접수 실패: ' + ((out2 && (out2.error || out2.needConfirm)) || '오류') + '\n(처음 접수된 건은 그대로입니다)');
+              alert('다시 접수 실패: ' + ((out2 && (out2.error || out2.needConfirm)) || '오류') + '\n(처음 접수된 건은 그대로입니다)'
+                + (out2 && out2.needConfirm === 'product_check' ? '\n상품 확인이 필요한 건입니다 — 그 줄만 다시 붙여넣어 제출하면 확인창이 뜹니다.' : ''));
             }
           } catch (e) { alert('다시 접수 실패: ' + e.message + '\n(처음 접수된 건은 그대로입니다)'); }
         }

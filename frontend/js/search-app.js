@@ -7801,7 +7801,11 @@ function _ofpOnCaptureCleared(cid) {
      **서버가 막는다**(PRODUCT_WRONG_PURCHASE — 화면을 믿지 않는다 · 담당자 확인용 기록).
    ★ 선택지는 서버가 준 두 개뿐 — 화면이 다른 값을 지어내지 않는다.
    ★ 참여 공고 화면 안(iframe — 내용 높이만큼 길어진다)에서는 화면 고정 창이 틀 한가운데(화면 밖)에 그려진다 →
-     지금 보이는 자리에 놓는다(_pmvPlace · 코드리뷰). */
+     지금 보이는 자리에 놓는다(_pmvPlace · 코드리뷰).
+   ★ 결정 236 ④ mode="recheck" — 서버가 PRODUCT_PRICE_RECHECK("고른 상품이 맞다"고 했는데 결제금액이 다른 상품 가격)를
+     돌려주면 같은 창으로 한 번 더 묻는다: "○○를 주문했다고 하셨지만 결제금액 N원은 △△ 결제금액이에요".
+     닫기 = 「다시 확인할게요」(제출 안 함) · 고른 상품 = 다시 확인하고도 맞다(priceRecheckAck → 접수 + 담당자 확인 기록) ·
+     금액이 같은 상품 = 잘못 구매(서버가 막는다). */
 function _pmvPlace(ov) {
   try {
     if (window.self === window.top) return;
@@ -7829,31 +7833,38 @@ function _pmvPlace(ov) {
   } catch (_) { /* 위치를 못 정해도 창은 뜬다 */ }
 }
 
-function _pmvAsk(res, orderNo) {
+function _pmvAsk(res, orderNo, mode) {
   return new Promise((resolve) => {
     const cap = (res && res.captured) || {}, cho = (res && res.chosen) || {};
     if (!cap.key || !cho.key) { resolve(null); return; }
     const esc = (v) => (typeof escHtml === "function" ? escHtml(String(v || "")) : String(v || "").replace(/[&<>"']/g, ""));
     const choL = cho.label || cho.key, capL = cap.label || cap.key;
+    const recheck = mode === "recheck";
+    const paidTxt = esc(Number(res.paid || 0).toLocaleString("ko-KR"));
     const ov = document.createElement("div");
     ov.className = "modal-overlay pmv-overlay";
     ov.setAttribute("role", "dialog"); ov.setAttribute("aria-modal", "true"); ov.setAttribute("aria-labelledby", "pmvTitle");
     const opts = [{ key: cho.key, label: choL, tag: "참여할 때 고른 상품", wrong: false },
-                  { key: cap.key, label: capL, tag: res.basis === "price" ? "결제금액이 같은 상품" : "캡처에 보이는 상품", wrong: true }];
+                  { key: cap.key, label: capL, tag: (recheck || res.basis === "price") ? "결제금액이 같은 상품" : "캡처에 보이는 상품", wrong: true }];
     ov.innerHTML =
-      '<div class="modal-box pmv-box"><div class="modal-header pmv-head"><h3 id="pmvTitle">' + (orderNo ? orderNo + "번째 주문 · " : "") + '잘못 구매한 것 같아요</h3></div>'
+      '<div class="modal-box pmv-box"><div class="modal-header pmv-head"><h3 id="pmvTitle">' + (orderNo ? orderNo + "번째 주문 · " : "")
+      + (recheck ? '결제금액을 다시 확인해 주세요' : '잘못 구매한 것 같아요') + '</h3></div>'
       + '<div class="modal-body">'
-      + (res.basis === "price"
-          ? '<p class="pmv-lead">캡처의 결제금액 <b class="pmv-cap">' + esc(Number(res.paid || 0).toLocaleString("ko-KR")) + '원</b>이 참여할 때 고른 <b>' + esc(choL) + '</b>가 아니라 <b class="pmv-cap">' + esc(capL) + '</b> 가격과 같아요.</p>'
+      + (recheck
+          ? '<p class="pmv-lead"><b>' + esc(choL) + '</b>를 주문했다고 하셨지만, 결제금액 <b class="pmv-cap">' + paidTxt + '원</b>은 <b class="pmv-cap">' + esc(capL) + '</b> 결제금액이에요. 잘못 구매한 것으로 보여요.</p>'
+          : res.basis === "price"
+          ? '<p class="pmv-lead">캡처의 결제금액 <b class="pmv-cap">' + paidTxt + '원</b>이 참여할 때 고른 <b>' + esc(choL) + '</b>가 아니라 <b class="pmv-cap">' + esc(capL) + '</b> 가격과 같아요.</p>'
           : '<p class="pmv-lead">참여할 때 고른 상품은 <b>' + esc(choL) + '</b>인데, 올린 주문 캡처에는 <b class="pmv-cap">' + esc(capL) + '</b>(으)로 보여요.</p>')
-      + '<p class="pmv-q">실제로 산 상품을 골라 주세요.</p>'
+      + '<p class="pmv-q">' + (recheck ? '주문 내역을 다시 확인하고, 실제로 산 상품을 골라 주세요.' : '실제로 산 상품을 골라 주세요.') + '</p>'
       + '<div class="ofp-list pmv-list" role="radiogroup" aria-labelledby="pmvTitle">'
       + opts.map((o, k) => '<button type="button" class="ofp-opt' + (o.wrong ? ' pmv-wrong-opt' : '') + '" role="radio" aria-checked="false" data-pmv="' + k + '">'
           + '<span class="ofp-radio"></span><span class="ofp-nm">' + esc(o.label) + '</span><span class="ofp-match">' + o.tag + '</span></button>').join("")
       + '</div>'
       + '<div class="pmv-warn" role="alert" hidden><b>잘못 구매한 주문이에요.</b> 참여할 때 고른 상품과 다른 상품을 사서 이 주문은 제출할 수 없어요. 담당자에게 문의해 주세요.</div>'
-      + '<p class="pmv-note">캡처를 잘못 읽은 것이라면 참여할 때 고른 상품을 골라 주세요.</p>'
-      + '<div class="modal-actions"><button type="button" class="btn-ghost" data-pmv-cancel>취소</button>'
+      + '<p class="pmv-note">' + (recheck
+          ? '할인·쿠폰 때문에 금액만 같은 것이고 고른 상품이 맞다면 그대로 제출돼요. 담당자가 결제금액을 확인합니다.'
+          : '캡처를 잘못 읽은 것이라면 참여할 때 고른 상품을 골라 주세요.') + '</p>'
+      + '<div class="modal-actions"><button type="button" class="btn-ghost" data-pmv-cancel>' + (recheck ? '다시 확인할게요' : '취소') + '</button>'
       + '<button type="button" class="btn-primary" data-pmv-ok disabled>제출</button></div>'
       + '</div></div>';
     let sel = -1, done = false;
@@ -7868,7 +7879,7 @@ function _pmvAsk(res, orderNo) {
         const wrong = opts[sel].wrong;
         warn.hidden = !wrong; note.hidden = wrong;
         okBtn.disabled = false;
-        okBtn.textContent = wrong ? "확인 (제출 안 됨)" : "제출";
+        okBtn.textContent = wrong ? "확인 (제출 안 됨)" : (recheck ? "이 상품이 맞아요 · 제출" : "제출");
         okBtn.classList.toggle("pmv-btn-stop", wrong);
         // 페이지 공통 버튼 규칙(!important)이 이기지 않게 색은 그 자리에서 직접 준다
         if (wrong) okBtn.style.setProperty("background", "#d92d20", "important"); else okBtn.style.removeProperty("background");
@@ -9543,6 +9554,20 @@ async function submitOrderForm() {
         }
         payload.confirmedProductKey = picked;
         try { res = await gasPost(payload, 30000); } catch(_) { throw new Error("서버 연결 실패 (상품 확인 후 제출)"); }
+        if (!res) throw new Error("서버 응답이 없습니다.");
+      }
+      // ★ 결정 236 ④: "고른 상품이 맞다"고 했는데 결제금액이 다른 상품 가격 — 한 번 더 묻는다.
+      //   다시 확인하고도 맞다 → priceRecheckAck 로 접수(담당자 확인 기록) · 금액이 같은 상품 → 그 키로 보내 서버가 막는다 · 닫기 → 제출 안 함.
+      if (!res.ok && res.code === "PRODUCT_PRICE_RECHECK") {
+        const again = await _pmvAsk(res, orders.length > 1 ? (i + 1) : 0, "recheck");
+        if (!again) {
+          showToast((orders.length > 1 ? `${i+1}번째 주문은 ` : "") + "제출하지 않았어요. 주문 내역(결제금액)을 다시 확인한 뒤 제출해 주세요.", "warning");
+          results.push({ phone8: bh ? bh.phone8 : "", name: bh ? bh.name : "", ok: false, error: "결제금액 확인이 필요해 제출하지 않았어요" });
+          continue;
+        }
+        if (res.chosen && again === res.chosen.key) payload.priceRecheckAck = "true";
+        else payload.confirmedProductKey = again;
+        try { res = await gasPost(payload, 30000); } catch(_) { throw new Error("서버 연결 실패 (결제금액 확인 후 제출)"); }
         if (!res) throw new Error("서버 응답이 없습니다.");
       }
       // ★ 결정 230: 잘못 구매(고른 상품과 다른 상품) — 서버가 막았다. 경고로 알리고 이 주문은 제출하지 않는다.
