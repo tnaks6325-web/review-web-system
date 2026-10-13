@@ -218,6 +218,12 @@ async function getPlanOverview(campaignId) {
     plannerProgressSource = 'worktable_filled';
   }
 
+  // ★ 결정 240 — 구글시트 작업(무시트 아님)은 작업표 채움을 못 읽으므로, 누적 확정에 바로 구매(연결 주문)를 정원 엔진 셈으로 넣는다.
+  //   날짜별 칸은 그대로(시트 작업은 운영 0곳 — 2026-10-13 실측). 공유 작업표·조회 실패는 종전(공고 참여만).
+  if (plannerProgressSource === 'applications' && quotaCounts) {
+    const c = require('./quotaFloor.service').confirmedWithDirect(quotaCounts);
+    if (c.attributable && c.total > plannerSubmittedAll) { plannerSubmittedAll = c.total; plannerProgressSource = 'applications_and_orders'; }
+  }
   const applicationSubmittedAll = Number(allQ[0] && allQ[0].n) || 0;
   const quotaMaterial = quotaCounts || {
     submittedAll: applicationSubmittedAll,

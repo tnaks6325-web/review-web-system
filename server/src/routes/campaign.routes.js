@@ -2897,6 +2897,13 @@ async function _adminCampaignList(req, res, next) {
           todayHold: cnt.todayActiveHolds,
           todaySubmitted: cnt.todaySubmitted,
           totalConfirmed: cnt.submittedAll,
+          // ★ 결정 240 — 바로 구매까지 넣은 확정 수(정원 엔진 셈 · 날짜 = 구매양식 제출 시각 KST).
+          //   directCountable=false(공유 작업표·연결 없음·조회 실패) 면 공고 참여만 — 화면이 그 사실을 말한다.
+          //   위 두 칸(공고 참여만)은 구버전 화면 호환·진단용으로 그대로 둔다.
+          ...(() => {
+            const c = require('../services/quotaFloor.service').confirmedWithDirect(cnt);
+            return { todayConfirmedAll: c.today, totalConfirmedAll: c.total, directCountable: c.attributable, directShared: c.sharedTab };
+          })(),
           late: lateMap.get(r.id) || 0,
           blogPending: blogPendingMap.get(r.id) || 0,   // 127: 승인 대기(블로그) — 카드 관제 배지
         },
@@ -3988,7 +3995,24 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
       }
     } catch (siErr) { logger.warn('[campaign/admin/applications] 시트 대조 실패: ' + siErr.message); }
 
-    res.json({ ok: true, data: controlRows, count: controlRows.length, options, sheetInfo });
+    // ★ 결정 240 — 관제 화면의 "오늘·누적" 과 상품별 표에 바로 구매(공고 참여 없이 낸 주문)를 함께 싣는다.
+    //   셈은 정원 엔진·하한과 같다(quotaFloor). 실패는 null — 화면은 종전(공고 참여만)으로 그리고 그 사실을 말한다.
+    let directSummary = null;
+    try {
+      const qf = require('../services/quotaFloor.service');
+      const c = qf.confirmedWithDirect((await fetchCampaignCounts(pool, [id])).get(id) || {});
+      const byOpt = {};
+      for (const [k, v] of await qf.optionDirectOrderStats(pool, id)) byOpt[k] = v;
+      directSummary = {
+        countable: c.attributable, shared: c.sharedTab,
+        todayConfirmed: c.today, totalConfirmed: c.total,
+        todayDirect: Math.max(0, c.today - c.todayApplications), totalDirect: Math.max(0, c.total - c.applications),
+        byOption: byOpt,
+      };
+    } catch (e) {
+      logger.warn(`[campaign/applications] 바로 구매 요약 실패(공고 참여만 표시) camp=${id}: ${e.message}`);
+    }
+    res.json({ ok: true, data: controlRows, count: controlRows.length, options, sheetInfo, directSummary });
   } catch (err) {
     next(err);
   }

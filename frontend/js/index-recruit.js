@@ -4904,7 +4904,7 @@ function _seqMDk(iso) {
   const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
   return (+m[2]) + "/" + (+m[3]) + "(" + "일월화수목금토"[d.getUTCDay()] + ")";
 }
-function _campOptionTable(options, rows, now, today, kstDay) {
+function _campOptionTable(options, rows, now, today, kstDay, directByOpt) {
   if (!options || !options.length) return "";
   const agg = {};
   (rows || []).forEach(r => {
@@ -4922,12 +4922,15 @@ function _campOptionTable(options, rows, now, today, kstDay) {
   const td = (v, a) => `<td style="text-align:${a || "left"};padding:5px 8px;border-bottom:1px solid #F3F4F6;white-space:nowrap">${v}</td>`;
   const body = options.map(o => {
     const a = agg[o.optKey] || { todayHold: 0, todaySub: 0, cumSub: 0 };
+    // ★ 결정 240: 바로 구매(그 상품으로 확정된 공고 밖 주문)도 오늘 제출·누적 확정에 넣고, 몇 건인지 옆에 적는다.
+    const dx = (directByOpt && directByOpt[o.optKey]) || null;
+    const dTxt = n => n ? ` <span style="color:#6B7280;font-size:.64rem" title="바로 구매(공고 참여 없이 낸 주문)">(바로 ${n})</span>` : "";
     let s = stTxt[o.status] || stTxt.open;
     // ★ 결정 228: 날짜별 상품 일정표 공고는 대기 상품이 열리는 날을 말한다(없으면 정규 일정 뒤 추가 모집 결정 대기)
     if (o.seqDays && o.status === "waiting") s = [o.opensOn ? "대기 · " + _seqMDk(o.opensOn) + " 시작" : "대기 · 추가 모집 결정", s[1], s[2]];
     const rt = o.recruitTotal ? o.recruitTotal + "명" : "무제한";
     const pay = o.payAmount ? Number(o.payAmount).toLocaleString() + "원" : "-";
-    return `<tr>${td("<b>" + escT(o.optKey) + "</b>")}${td(pay, "right")}${td(String(a.todayHold), "center")}${td(String(a.todaySub), "center")}${td(String(a.cumSub), "center")}${td(rt, "center")}${td(`<span style="font-size:.62rem;font-weight:800;background:${s[2]};color:${s[1]};border-radius:6px;padding:2px 7px">${s[0]}</span>`, "center")}</tr>`;
+    return `<tr>${td("<b>" + escT(o.optKey) + "</b>")}${td(pay, "right")}${td(String(a.todayHold), "center")}${td(String(a.todaySub + (dx ? dx.today : 0)) + dTxt(dx && dx.today), "center")}${td(String(a.cumSub + (dx ? dx.n : 0)) + dTxt(dx && dx.n), "center")}${td(rt, "center")}${td(`<span style="font-size:.62rem;font-weight:800;background:${s[2]};color:${s[1]};border-radius:6px;padding:2px 7px">${s[0]}</span>`, "center")}</tr>`;
   }).join("");
   return `<div style="margin:2px 0 12px">
     <div style="font-size:.74rem;font-weight:800;color:#5B21B6;margin-bottom:5px">🧩 옵션별 현황</div>
@@ -5120,11 +5123,16 @@ async function _loadCampControl(campId) {
     // 👥 타계정(063): 명의 phone8 ≠ 소유자 phone8 = 타계정 건. 오늘 타계정 건수도 함께 표기.
     const _isSubRow = r => !!(r.owner_phone8 && String(r.owner_phone8) !== String(r.phone8));
     const todaySubCnt = items.filter(r => r.applied_at && kstDay(Date.parse(r.applied_at)) === today && _isSubRow(r)).length;
-    if (stats) stats.textContent = `오늘 · 진행중 ${holds} / 제출 ${subs} / 만료 ${exps}` + (todaySubCnt ? ` / 타계정 ${todaySubCnt}` : "");
+    // ★ 결정 240: 바로 구매(공고 참여 없이 구매양식으로 낸 주문 · 제출 시각 기준)도 오늘·누적에 함께 말한다.
+    const ds = j.directSummary || null;
+    const directTxt = !ds ? "" : (ds.countable
+      ? ` · 바로 구매 오늘 ${ds.todayDirect} / 누적 ${ds.totalDirect} (확정 합계 누적 ${ds.totalConfirmed})`
+      : (ds.shared ? " · 바로 구매: 공유 작업이라 나눌 수 없음" : ""));
+    if (stats) stats.textContent = `오늘 · 진행중 ${holds} / 제출 ${subs} / 만료 ${exps}` + (todaySubCnt ? ` / 타계정 ${todaySubCnt}` : "") + directTxt;
     // 📝 127 블로그 승인 대기 큐 — blog_pending 행이 있을 때만 표가 뜬다
     const blogQueueHtml = _campBlogQueue(rows, campId);
     // 🧩 옵션별 현황표(061 3단계) — 옵션 등록 캠페인만
-    const optTableHtml = _campOptionTable(j.options || [], items, now, today, kstDay);
+    const optTableHtml = _campOptionTable(j.options || [], items, now, today, kstDay, ds && ds.countable ? (ds.byOption || {}) : null);
     // 👥 타계정 묶음(063): 소유자별 건수 — "한 리뷰어가 실제 몇 건 진행 중인가"를 즉시 파악(사재기 관측)
     const ownerTableHtml = _campOwnerTable(items, now);
     // 📋 시트 대조 — "시트엔 100행인데 확정 99" / "하루 완결이라 시트 일정 미적용"을 여기서 확인

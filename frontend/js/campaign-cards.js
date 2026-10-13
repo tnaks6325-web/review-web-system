@@ -441,7 +441,9 @@
     // 레거시 공고는 작업오더 모집인원을 표시용 총정원으로 내려준다.
     // 원본 recruit_total=0은 무제한 정책값이라 여기서 덮어쓰지 않는다.
     const total = Number(c.display_recruit_total) || Number(c.recruit_total) || 0;
-    const done = (c.ops && Number(c.ops.totalConfirmed)) || 0;
+    // ★ 결정 240: 폴백 분자도 바로 구매(공고 참여 없이 낸 주문)까지 — 구버전 서버(칸 없음)는 종전 값.
+    const done = (c.ops && Number(c.ops.totalConfirmedAll != null ? c.ops.totalConfirmedAll : c.ops.totalConfirmed)) || 0;
+    const appsDone = (c.ops && Number(c.ops.totalConfirmed)) || 0;
     // ★★ 1단계(표 기준 누적): 분자 = 작업보드 표의 "채워진 줄"(archiveSuggest.filled — 서버가
     //   rowNumbering.filledSql 로 센 값 = 작업보드 게이지와 같은 판정). null/부재 = 셀 수 없음 →
     //   종전(공고 확정)으로 폴백하고 툴팁이 그 사실을 말한다(0 위장·거짓 "표 기준" 표기 금지).
@@ -450,8 +452,10 @@
     const tf = (sug && Number.isFinite(Number(sug.filled))) ? Number(sug.filled) : null;
     const n = tf != null ? tf : done;
     const tip = tf != null
-      ? `작업보드 표에 채워진 줄 ${tf}줄 (표 ${Number(sug.total) || 0}줄) · 공고를 거쳐 확정된 건 ${done}명 · 차수·이월 칩은 공고 확정 기준`
-      : '표 기준 집계를 받지 못해 공고 확정 기준으로 표기 중';
+      ? `작업보드 표에 채워진 줄 ${tf}줄 (표 ${Number(sug.total) || 0}줄) · 공고를 거쳐 확정된 건 ${appsDone}명 · 바로 구매 포함 확정 ${done}명`
+      : (c.ops && c.ops.totalConfirmedAll != null && c.ops.directCountable
+        ? `표 기준 집계를 받지 못해 확정 기준(바로 구매 포함 ${done}명 · 그중 공고 참여 ${appsDone}명)으로 표기 중`
+        : '표 기준 집계를 받지 못해 공고 확정 기준으로 표기 중(바로 구매 미포함)');
     // ★ 출처는 툴팁이 말한다 — [표] 배지는 제거(사용자 확정 2026-08-20).
     const totTxt = `<span title="${_esc(tip)}">`
       + (total > 0 ? `총 <b>${n}</b>/${total}명` : (n ? `누적 <b>${n}</b>명` : '총 <b>0</b>명'))
@@ -496,7 +500,9 @@
   function _roundsLine(c) {
     const rs = Array.isArray(c.rounds) ? c.rounds : [];
     if (rs.length < 2) return '';
-    const conf = (c.ops && Number(c.ops.totalConfirmed)) || 0;
+    // ★ 결정 240: 차수 진행도 바로 구매까지 센 확정 수 — 구버전 서버(칸 없음)는 종전(공고 참여만).
+    const conf = (c.ops && Number(c.ops.totalConfirmedAll != null ? c.ops.totalConfirmedAll : c.ops.totalConfirmed)) || 0;
+    const sharedNote = c.ops && c.ops.directShared ? ' · 공유 작업이라 바로 구매는 나눌 수 없어 공고 참여만' : '';
     let prev = 0;
     const chips = rs.map(r => {
       const cnt = Number(r.count) || 0;
@@ -506,7 +512,7 @@
       return `<span class="rchip${done ? ' done' : ''}" title="${_esc((r.startDate ? r.startDate + ' 시작' : '') + (r.label ? ' · ' + r.label : ''))}">${r.roundNo}차 ${got}/${cnt}${done ? ' 완료' : ''}</span>`;
     }).join('');
     const total = Number(c.display_recruit_total) || Number(c.recruit_total) || prev;
-    return `<div class="prounds">${chips}<span>총 ${conf}/${total}</span></div>`;
+    return `<div class="prounds">${chips}<span title="${_esc('바로 구매 포함 확정' + sharedNote)}">총 ${conf}/${total}</span></div>`;
   }
 
   /** ↗ 작업보드 바로가기(새 탭) — 관리자 카드의 게이지 줄 오른쪽.

@@ -36,6 +36,32 @@ function _n(v) {
 }
 
 /**
+ * 확정 수(홀드 제외)에 바로 구매를 넣은 값 — 정원 엔진 counts 하나로 계산하는 순수 함수(결정 240 화면 숫자 · 결정 239 하한 공용).
+ *   total = max(제출 확정, 연결 주문) · today = max(오늘 확정, 오늘 연결 주문)(구매양식 제출 시각 KST).
+ *   attributable=false(공유 작업표·연결 없음·조회 실패·원장 셈 꺼짐) 면 공고 참여만 — 화면은 그 사실을 말한다.
+ */
+function confirmedWithDirect(counts) {
+  const cnt = counts || {};
+  const L = cnt.linked;
+  const linkedOk = !!(L && L.ok && !L.noTab);
+  const attributable = linkedOk && !L.sharedTab;
+  const submitted = _n(cnt.submittedAll);
+  const todaySubmitted = _n(cnt.todaySubmitted);
+  const orders = attributable ? _n(L.orders) : null;
+  const ordersToday = attributable ? _n(L.ordersToday) : 0;
+  return {
+    total: Math.max(submitted, orders || 0),
+    today: Math.max(todaySubmitted, ordersToday),
+    applications: submitted,
+    todayApplications: todaySubmitted,
+    orders,
+    attributable,
+    sharedTab: !!(linkedOk && L.sharedTab),
+    linkedOk,
+  };
+}
+
+/**
  * @returns {Promise<{total:number, today:number, applications:number, todayApplications:number,
  *   orders:number|null, sharedTab:boolean, known:boolean}>}
  */
@@ -51,27 +77,21 @@ async function _campaignUsedFloor(db, campaignId, now) {
     return { total: 0, today: 0, applications: 0, todayApplications: 0, orders: null, sharedTab: false, known: true };
   }
   const counts = (await st.fetchCampaignCounts(db, [campaignId], now)).get(campaignId) || {};
-  const L = counts.linked;
-  const linkedOk = !!(L && L.ok && !L.noTab);
-  const attributable = linkedOk && !L.sharedTab;
-  const submitted = _n(counts.submittedAll);
+  const c = confirmedWithDirect(counts);
   const holds = _n(counts.activeHolds);
-  const todaySubmitted = _n(counts.todaySubmitted);
   const todayHolds = _n(counts.todayActiveHolds);
-  const orders = attributable ? _n(L.orders) : null;
   // ★ known 은 "주문 기록을 실제로 받았나"로 정한다(Codex PR #1625) — 게이트 모드(observe 등)가 known 을 true 로 꾸미지 않게.
   //   연결 작업표가 없거나 참여형이 아닌(레거시) 공고는 셀 주문이 없다 = known.
   //   운영 킬스위치 CAMPAIGN_TABLE_QUOTA=off 는 주문 원장 셈 자체를 끈 상태 — 하한도 공고 참여만(줄이기를 영구히 막지 않는다).
   const expectsLinked = rows[0].participation_mode === true && !!(rows[0].linked_sheet_id && rows[0].linked_tab_name);
-  const known = !expectsLinked || st.TABLE_QUOTA_MODE === 'off' || linkedOk;
-  const ordersToday = attributable ? _n(L.ordersToday) : 0;
+  const known = !expectsLinked || st.TABLE_QUOTA_MODE === 'off' || c.linkedOk;
   return {
-    total: Math.max(submitted, orders || 0) + holds,
-    today: Math.max(todaySubmitted, ordersToday) + todayHolds,
-    applications: submitted + holds,
-    todayApplications: todaySubmitted + todayHolds,
-    orders,
-    sharedTab: !!(linkedOk && L.sharedTab),
+    total: c.total + holds,
+    today: c.today + todayHolds,
+    applications: c.applications + holds,
+    todayApplications: c.todayApplications + todayHolds,
+    orders: c.orders,
+    sharedTab: c.sharedTab,
     known,
   };
 }
@@ -82,15 +102,26 @@ async function optionDirectOrders(db, campaignId, now = new Date()) {
 }
 
 async function _optionDirectOrders(db, campaignId, now) {
+  const out = new Map();
+  for (const [key, v] of await _optionDirectOrderStats(db, campaignId, now)) if (v.n > 0) out.set(key, v.n);
+  return out;
+}
+
+/** 상품별 바로 구매 {n, today}(Map optKey → …) — 관리자 상품별 현황표용. 하한과 같은 셈(공고 참여 주문의 수동 중복 제외). */
+async function optionDirectOrderStats(db, campaignId, now = new Date()) {
+  return _isolated(db, 'qf_option_stats', () => _optionDirectOrderStats(db, campaignId, now));
+}
+
+async function _optionDirectOrderStats(db, campaignId, now) {
   const st = require('./campaignState.service');
   const out = new Map();
   // 공고 참여 주문과 같은 구매를 수동으로 또 넣은 줄은 빼고 센다 — 공고 참여 수에 이미 들어 있다(Codex PR #1625).
   const counts = await st.fetchOptionCounts(db, campaignId, now, { excludeApplicationDuplicates: true });
   for (const [key, c] of counts) {
     const n = _n(c && c.externalOrders);
-    if (n > 0) out.set(key, n);
+    if (n > 0) out.set(key, { n, today: _n(c && c.todayExternalOrders) });
   }
   return out;
 }
 
-module.exports = { campaignUsedFloor, optionDirectOrders };
+module.exports = { confirmedWithDirect, campaignUsedFloor, optionDirectOrders, optionDirectOrderStats };

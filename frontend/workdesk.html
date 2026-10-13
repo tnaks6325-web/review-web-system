@@ -14489,7 +14489,8 @@ async function _homeLoad(){
       if(!(r && r.ok && Array.isArray(r.data))) return;
       // 참여형 = 상태엔진 값(state), 레거시 = status 로만 판단(상태엔진 미적용) — admin/list 응답 계약 그대로
       const open=r.data.filter(c=>c.state==='open' || (!c.state && c.status==='active')).length;
-      let today=0; for(const c of r.data){ if(c.ops && Number.isFinite(c.ops.todaySubmitted)) today+=c.ops.todaySubmitted; }
+      // ★ 결정 240: 바로 구매(구매양식 제출 시각 기준)까지 센 오늘 확정 — 공유 작업은 서버가 공고 참여만 실어 이중 합산이 없다.
+      let today=0; for(const c of r.data){ const v=c.ops&&(c.ops.todayConfirmedAll!=null?c.ops.todayConfirmedAll:c.ops.todaySubmitted); if(Number.isFinite(v)) today+=v; }
       const e1=document.getElementById('hmStOpen'); if(e1) e1.textContent=String(open);
       const e2=document.getElementById('hmStToday'); if(e2) e2.textContent=String(today);
     }),
