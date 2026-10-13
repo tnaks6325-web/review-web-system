@@ -316,6 +316,23 @@ const read = (p) => fs.readFileSync(path.resolve(__dirname, '..', p), 'utf8');
       const sw = await fold.runFromSwitch({ db, env: { SAME_PHONE_FOLD_MODE: `undo_all:${ap.applyRunId}` } });
       assert.strictEqual(sw.skipped, 'already_undone');
     });
+    await test('같은 주소를 두 이름이 쓰면 추가 배송지에 둘 다 남는다', async () => {
+      const G = 'f6f6f6f6-f6f6-4f6f-8f6f-f6f6f6f6f6f6';
+      try {
+        await db.query(`INSERT INTO reviewers (id, name, phone, address, sub_accounts) VALUES ($1, '강본인', '010-7878-1111', '서울 집', $2::jsonb)`,
+          [G, JSON.stringify([{ name: '강하나', phone: '010-7878-1111', address: '대전 본가 1동' }, { name: '강두리', phone: '01078781111', address: '대전 본가 1동' },
+            { name: '강셋째', phone: '010-7878-1111', address: '대전 XX구 가림' }])]);
+        await cards.reconcileCards({ db, dryRun: false, by: 'test' });
+        const p4 = await fold.preview({ db });
+        await fold.apply({ previewRunId: p4.runId, db, retryDelayMs: 10 });
+        const rows = (await db.query(`SELECT recipient, address FROM reviewer_delivery_addresses WHERE owner_reviewer_id = $1 ORDER BY recipient`, [G])).rows;
+        assert.deepStrictEqual(rows.map((x) => x.recipient), ['강두리', '강하나'], 'x 가림 주소는 남기지 않는다');
+      } finally {
+        await db.query(`DELETE FROM reviewer_delivery_addresses WHERE owner_reviewer_id = $1`, [G]);
+        await db.query(`DELETE FROM reviewer_identity_decisions WHERE owner_reviewer_id = $1`, [G]);
+        await db.query(`DELETE FROM reviewers WHERE id = $1`, [G]);
+      }
+    });
     await test('타계정 카드가 아직 없으면 지우지 않고(no_sub_card) 다음에 다시 시도한다', async () => {
       const E = 'f5f5f5f5-f5f5-4f5f-8f5f-f5f5f5f5f5f5';
       try {

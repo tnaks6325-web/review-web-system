@@ -51,6 +51,18 @@ const read = (p) => fs.readFileSync(path.resolve(__dirname, '..', p), 'utf8');
     assert.ok(r.reasonCodes.includes('owner_phone_recipient_masked'));
     assert.ok(!r.reasonCodes.includes('delivery_address_changed'));
   });
+  await test('가린 주소가 추가 배송지와 맞으면 그 주소로 펼친다(집 주소로 덮지 않음)', async () => {
+    const r = await evaluateSelectedIdentity({ recipient: '정본인', phone: '010-7171-2222', address: '전북 전주시 완산구 효자로 ** 푸른빌라 3동 105호' },
+      self(true), [self(true)], opt);
+    assert.strictEqual(r.selectedScore.parts.address.verdict, 'match');
+    assert.strictEqual(r.resolved.address, PARENTS);
+  });
+  await test('추가 배송지는 승인 증명에 묶인다 · 없으면 종전과 같은 해시', async () => {
+    const { profileHash } = require('../src/services/reviewerOrderIdentity.service')._test;
+    const plain = { identityKey: 'self', name: '정본인', phone: '010-7171-2222', address: HOME };
+    assert.strictEqual(profileHash({ ...plain, deliveryAddresses: [] }), profileHash(plain));
+    assert.notStrictEqual(profileHash({ ...plain, deliveryAddresses: [{ recipient: '이가족', address: PARENTS }] }), profileHash(plain));
+  });
   await test('타계정 참여에는 추가 배송지를 쓰지 않는다', async () => {
     const sub = { identityKey: 'sub:x', type: 'sub', name: '박다른', phone: '010-7373-4444', address: HOME,
       deliveryAddresses: [{ id: '1', recipient: '이가족', address: PARENTS }] };
@@ -97,6 +109,8 @@ const read = (p) => fs.readFileSync(path.resolve(__dirname, '..', p), 'utf8');
     const out = await fold.loadDeliveryAddresses({ query: async () => { const e = new Error('x'); e.code = '42P01'; throw e; } }, 'o');
     assert.deepStrictEqual(out, []);
     assert.ok(/\['reviewer_delivery_addresses', 'address_key'\]/.test(read('index.js')));
+    // 정리는 x·X 가림 주소도 추가 배송지로 남기지 않는다(명의 확인 MASK_RE 와 같은 규칙)
+    assert.ok(/const ADDR_MASK_RE = \/\[\*＊●○◯◉•·xX\]\/;/.test(read('src/services/reviewerIdentityFold.service.js')));
   });
 
   console.log(`\n✅ deliveryAddressExtra: ${passed}개 통과`);

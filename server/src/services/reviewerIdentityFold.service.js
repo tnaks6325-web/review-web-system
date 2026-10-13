@@ -36,7 +36,7 @@ const MAX_SUB_SLOTS = 50;   // reviewer.service saveSubAccounts 상한과 같다
 // 타계정 칸의 주민번호는 화면·시기에 따라 키 이름이 다르다(Codex P1) — 판정·기록 모두 이 키들을 함께 본다.
 const JUMIN_KEYS = ['jumin', 'residentNo', 'resident_num', 'residentNum'];
 const juminOf = (s) => { for (const k of JUMIN_KEYS) if (s && digits(s[k])) return digits(s[k]); return ''; };
-const ADDR_MASK_RE = /[*＊●○◯◉•]/;
+const ADDR_MASK_RE = /[*＊●○◯◉•·xX]/;   // reviewerOrderIdentity MASK_RE 와 같다(x·X 가림 포함 · Codex P2)
 // identity.service normAddress 와 같은 규칙(소문자 · 기호→공백 · 공백 압축) — 추가 배송지 중복 막기 키
 const addrKey = (v) => String(v == null ? '' : v).toLowerCase().replace(/[()\[\],./·]/g, ' ').replace(/\s+/g, ' ').trim();
 const sigHash = (name, phone) => stableHash(`fold|${nk(name)}|${p8(phone)}`).slice(0, 32);
@@ -241,7 +241,7 @@ async function _foldOne(client, { ownerId, sig, by, runId }) {
   if (slotAddr && !ADDR_MASK_RE.test(slotAddr) && addrKey(slotAddr) !== addrKey(owner.address)) {
     const { rows: [da] } = await client.query(
       `INSERT INTO reviewer_delivery_addresses (owner_reviewer_id, recipient, address, address_key, source, decision_id)
-       VALUES ($1, $2, $3, $4, 'fold', $5) ON CONFLICT (owner_reviewer_id, address_key) DO NOTHING RETURNING id`,
+       VALUES ($1, $2, $3, $4, 'fold', $5) ON CONFLICT (owner_reviewer_id, address_key, recipient) DO NOTHING RETURNING id`,
       [ownerId, String(slot.name || '').trim(), slotAddr, addrKey(slotAddr), decisionId]);
     deliveryAddress = da ? String(da.id) : 'existing';
   }
@@ -386,14 +386,14 @@ async function undoFoldInTx(client, d) {
   restored.slot = !!out.changed;
   // 정리 때 만든 추가 배송지는 지운다(칸이 돌아왔으니 그 주소는 타계정 칸에 다시 있다).
   //   같은 주소를 가진 다른 정리(아직 살아 있는 것)가 있으면 지우지 않고 그 정리 몫으로 넘긴다(같은 주소는 한 줄만 저장하므로).
-  const { rows: mine } = await client.query(`SELECT id, address_key FROM reviewer_delivery_addresses WHERE decision_id = $1`, [d.id]);
+  const { rows: mine } = await client.query(`SELECT id, recipient, address_key FROM reviewer_delivery_addresses WHERE decision_id = $1`, [d.id]);
   restored.deliveryAddresses = 0;
   if (mine.length) {
     const { rows: others } = await client.query(
-      `SELECT id, snapshot->'sub'->>'address' AS address FROM reviewer_identity_decisions
+      `SELECT id, snapshot->'sub'->>'address' AS address, snapshot->'sub'->>'name' AS name FROM reviewer_identity_decisions
         WHERE kind = 'fold_self' AND owner_reviewer_id = $1 AND undone_at IS NULL AND id <> $2`, [d.owner_reviewer_id, d.id]);
     for (const row of mine) {
-      const heir = others.find((o) => addrKey(o.address) === row.address_key);
+      const heir = others.find((o) => addrKey(o.address) === row.address_key && String(o.name || '').trim() === row.recipient);
       if (heir) await client.query(`UPDATE reviewer_delivery_addresses SET decision_id = $2 WHERE id = $1`, [row.id, heir.id]);
       else { await client.query(`DELETE FROM reviewer_delivery_addresses WHERE id = $1`, [row.id]); restored.deliveryAddresses++; }
     }

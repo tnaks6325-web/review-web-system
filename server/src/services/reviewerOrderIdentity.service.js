@@ -60,12 +60,17 @@ function submissionIdentityHash(value = {}) {
   }));
 }
 function profileHash(identity) {
-  return stableHash(JSON.stringify({
+  const base = {
     identityKey: identity.identityKey,
     name: cleanName(identity.name),
     phone8: phone8(identity.phone),
     address: normAddress(identity.address),
-  }));
+  };
+  // 결정 226 — 추가 배송지도 승인 근거이므로 승인 증명에 묶는다(그 사이 정리를 되돌려 주소가 없어지면 다시 확인 · Codex P2).
+  //   추가 배송지가 없는 명의는 종전과 같은 해시(배포 순간 진행 중 승인을 깨지 않는다).
+  const extras = Array.isArray(identity.deliveryAddresses) ? identity.deliveryAddresses : [];
+  if (extras.length) base.deliveryAddresses = extras.map((a) => `${cleanName(a.recipient)}|${normAddress(a.address)}`).sort();
+  return stableHash(JSON.stringify(base));
 }
 function hashImageBase64(base64) {
   const clean = String(base64 || '').replace(/^data:[^;]+;base64,/, '').replace(/\s+/g, '');
@@ -710,6 +715,7 @@ async function evaluateSelectedIdentity(extracted, selected, allIdentities, opti
         : await addressSame(raw, extra.address, { name: selected.name, phone: selected.phone, useGemini: !!options.useGemini });
       if (v && v.verdict === 'match') {
         selectedScore.parts.address = { verdict: 'match', score: v.score || 1, reason: '등록된 추가 배송지와 일치' };
+        selectedScore.matchedAddress = extra.address;
         rescoreIdentity(selectedScore);
         reasonCodes.push('registered_delivery_address');
         break;
@@ -806,7 +812,8 @@ async function evaluateSelectedIdentity(extracted, selected, allIdentities, opti
   const resolved = {
     recipient: resolvedValue(selectedScore.fields.recipient || selectedScore.fields.orderer, selected.name, 'name', selectedScore.parts.name.verdict),
     phone: resolvedValue(selectedScore.fields.phone, selected.phone, 'phone', selectedScore.parts.phone.verdict),
-    address: resolvedValue(selectedScore.fields.address, selected.address, 'address', selectedScore.parts.address.verdict),
+    // 추가 배송지와 맞았으면 가림 주소를 그 주소로 펼친다(본계정 집 주소로 덮지 않는다 · Codex P1).
+    address: resolvedValue(selectedScore.fields.address, selectedScore.matchedAddress || selected.address, 'address', selectedScore.parts.address.verdict),
   };
   return { status, reasonCodes, selectedScore, competingIdentity, resolved };
 }
@@ -1171,5 +1178,5 @@ module.exports = {
   manualConfirm,
   verifyApprovalForSubmission,
   rebindLegacySubHashes,
-  _test: { legacyIdentityKey, stableHash },
+  _test: { legacyIdentityKey, stableHash, profileHash },
 };
