@@ -1326,7 +1326,15 @@ router.get('/popular-status', applyLimiter, async (req, res, next) => {
   try {
     const p8 = String(req.query.phone8 || '').replace(/\D/g, '').slice(-8);
     if (p8.length !== 8) return res.status(400).json({ ok: false, error: 'phone8이 필요합니다.' });
-    res.json({ ok: true, ...(await loadPopularCreditState(pool, p8)) });
+    let state;
+    try {
+      state = await loadPopularCreditState(pool, p8);
+    } catch (e) {
+      // apply 게이트와 같은 폴백 — 바로 구매(결정 238) 조회 실패 시 종전 계산.
+      logger.warn('[campaign/popular-status] 바로 구매 포함 계산 실패(종전 계산으로): ' + e.message);
+      state = await loadPopularCreditState(pool, p8, { includeDirectPurchases: false });
+    }
+    res.json({ ok: true, ...state });
   } catch (err) {
     next(err);
   }
@@ -2198,7 +2206,44 @@ async function _applyParticipation(req, res, next, campPre) {
                        WHERE os1.id = campaign_applications.order_submission_id AND os1.deleted_at IS NULL))))
             ORDER BY (status <> 'submitted') DESC, submitted_at DESC NULLS LAST
             LIMIT 1`, [id, p8, holdP8, reg.rows[0].id]);
+        // ★ 바로 구매도 센다(결정 238) — 공고 참여 없이 구매양식 링크로 낸 주문은 위 참여 표에 없다.
+        //   리뷰어 카드(my-repurchase-status)와 같은 단일 출처(checkRepurchaseStatusForAccounts)로
+        //   소유 증명된 다른 명의(본계정 + 코드 신원)의 이 작업 주문 이력을 재참여 기간으로 판정한다.
+        //   이 조회만 실패하면 종전 판정(위 참여 표)은 그대로 살린다 — 안쪽 SAVEPOINT 로 따로 접는다.
+        let directLocked = null;
+        if (!other.length || other[0].status === 'submitted') {
+          try {
+            await client.query('SAVEPOINT one_per_person_direct');
+            const { loadVerifiedOwnerPhones } = require('../services/directPurchaseParticipation.service');
+            const { checkRepurchaseStatusForAccounts } = require('../utils/repurchaseGuard');
+            const otherPhones = (await loadVerifiedOwnerPhones(client, {
+              ownerPhone8: p8, ownerReviewerId: reg.rows[0].id,
+            })).filter(x => x !== holdP8);
+            if (otherPhones.length) {
+              const st = await checkRepurchaseStatusForAccounts(client, {
+                campaignIds: [id], phone8List: otherPhones, ownerPhone8: p8, ownerReviewerId: reg.rows[0].id,
+              });
+              for (const byCampaign of st.values()) {
+                const s0 = byCampaign.get(String(id));
+                if (s0 && s0.status === 'locked'
+                  && (!directLocked || s0.availableFrom > directLocked.availableFrom)) directLocked = s0;
+              }
+            }
+            await client.query('RELEASE SAVEPOINT one_per_person_direct');
+          } catch (e) {
+            directLocked = null;
+            try { await client.query('ROLLBACK TO SAVEPOINT one_per_person_direct'); } catch (_e) { /* noop */ }
+            logger.warn('[campaign/apply] 1인 1회 바로 구매 판정 실패(fail-open): ' + e.message);
+          }
+        }
         await client.query('RELEASE SAVEPOINT one_per_person');
+        if (directLocked) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({
+            ok: false, reason: 'one_per_person', availableFrom: directLocked.availableFrom,
+            error: '이 공고는 1인 1회예요 — 다른 명의로 이미 참여했어요.',
+          });
+        }
         if (other.length) {
           const o = other[0];
           let blocked = o.status !== 'submitted';
@@ -2279,7 +2324,18 @@ async function _applyParticipation(req, res, next, campPre) {
       await client.query('ROLLBACK');
       return res.status(409).json({ ok: false, reason: 'hold_cap', error: '동시에 참여 가능한 캠페인은 2개까지예요.' });
     }
-    if (Number(caps.rows[0].today_submitted) >= (parseInt(process.env.CAMPAIGN_DAILY_APPLY_CAP || '10', 10) || 10)) {
+    // ★ 바로 구매(결정 238)도 그 명의의 오늘 참여로 센다. 조회 실패는 fail-open(종전 계산 그대로).
+    let todayDirect = 0;
+    try {
+      await client.query('SAVEPOINT direct_daily');
+      const { countDirectPurchasesSince } = require('../services/directPurchaseParticipation.service');
+      todayDirect = await countDirectPurchasesSince(client, { phone8: holdP8, sinceIso: dayStartIso });
+      await client.query('RELEASE SAVEPOINT direct_daily');
+    } catch (e) {
+      try { await client.query('ROLLBACK TO SAVEPOINT direct_daily'); } catch (_e) { /* noop */ }
+      logger.warn('[campaign/apply] 바로 구매 하루 상한 집계 실패(fail-open): ' + e.message);
+    }
+    if (Number(caps.rows[0].today_submitted) + todayDirect >= (parseInt(process.env.CAMPAIGN_DAILY_APPLY_CAP || '10', 10) || 10)) {
       await client.query('ROLLBACK');
       return res.status(429).json({ ok: false, reason: 'daily_apply_cap', error: '오늘 구매양식 제출까지 완료한 참여 횟수를 넘었어요.' });
     }
@@ -2300,9 +2356,21 @@ async function _applyParticipation(req, res, next, campPre) {
     // 타계정 하루 한도는 「타계정 허용」 공고의 설정이다(1인 1회 공고는 한 사람 한 번이라 의미 없음).
     if (isSubApply && !onePerPerson && Number(camp.multi_daily_limit) > 0) {
       const { countCampaignSubDailyUsage } = require('../services/campaignSubAccountLimit.service');
-      const used = await countCampaignSubDailyUsage(client, {
+      let used = await countCampaignSubDailyUsage(client, {
         campaignId: id, ownerPhone8: p8, dayStartIso,
       });
+      // ★ 바로 구매(결정 238)도 센다 — 소유 증명된 다른 명의의 오늘 이 공고 작업표 주문. 조회 실패는 fail-open.
+      try {
+        await client.query('SAVEPOINT direct_sub_daily');
+        const { countCampaignSubDirectPurchasesSince } = require('../services/directPurchaseParticipation.service');
+        used += await countCampaignSubDirectPurchasesSince(client, {
+          campaignId: id, ownerPhone8: p8, ownerReviewerId: reg.rows[0].id, sinceIso: dayStartIso,
+        });
+        await client.query('RELEASE SAVEPOINT direct_sub_daily');
+      } catch (e) {
+        try { await client.query('ROLLBACK TO SAVEPOINT direct_sub_daily'); } catch (_e) { /* noop */ }
+        logger.warn('[campaign/apply] 바로 구매 타계정 한도 집계 실패(fail-open): ' + e.message);
+      }
       if (used >= Number(camp.multi_daily_limit)) {
         await client.query('ROLLBACK');
         return res.status(409).json({ ok: false, reason: 'sub_daily_limit',
@@ -2314,7 +2382,17 @@ async function _applyParticipation(req, res, next, campPre) {
     //   인기상품 1건을 허용한다. 기간을 벗어난 미사용 참여권은 별도 이관 없이 즉시 만료된다.
     //   기존 선행우선순위 데이터는 삭제하지 않고 무시해 롤백 가능성을 보존한다.
     if (camp.is_popular === true) {
-      const creditState = await loadPopularCreditState(client, holdP8);
+      // 바로 구매(결정 238)까지 센 참여권. 그 조회가 실패하면 종전 계산(참여 표만)으로 접는다.
+      let creditState;
+      try {
+        await client.query('SAVEPOINT popular_direct');
+        creditState = await loadPopularCreditState(client, holdP8);
+        await client.query('RELEASE SAVEPOINT popular_direct');
+      } catch (e) {
+        try { await client.query('ROLLBACK TO SAVEPOINT popular_direct'); } catch (_e) { /* noop */ }
+        logger.warn('[campaign/apply] 바로 구매 포함 인기 참여권 계산 실패(종전 계산으로): ' + e.message);
+        creditState = await loadPopularCreditState(client, holdP8, { includeDirectPurchases: false });
+      }
       if (!canUsePopularCredit(creditState)) {
         await client.query('ROLLBACK');
         return res.status(403).json({ ok: false, reason: 'popular_locked', normalDone: creditState.normalDone, popularUsed: creditState.popularUsed,
