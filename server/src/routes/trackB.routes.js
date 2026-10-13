@@ -304,7 +304,7 @@ router.post('/campaigns/:id/capture-product-fill', authMiddleware, adminOrMaster
       if (b.confirm !== true) return res.status(400).json({ ok: false, code: 'confirm_required', error: '미리보기를 확인한 뒤 confirm:true 로 실행하세요.' });
       return res.json(await fill.applyCaptureProducts({ campaignId, picks: b.picks, by: _by(req) }));
     }
-    return res.json(await fill.previewCaptureProducts({ campaignId, limit: b.limit }));
+    return res.json(await fill.previewCaptureProducts({ campaignId, limit: b.limit, offset: b.offset }));
   } catch (err) {
     if (err && (err instanceof fill.CaptureFillError || err.name === 'ProductColumnError' || err.constructor && err.constructor.name === 'ProductColumnError')) {
       return res.status(400).json({ ok: false, code: err.code, error: err.message });

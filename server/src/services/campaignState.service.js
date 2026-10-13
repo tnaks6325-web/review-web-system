@@ -1368,13 +1368,13 @@ async function _loadExternalOptionOrders(db, ids, now = new Date()) {
                  AND os.submitted_at >= COALESCE((rc.start_date::text || 'T00:00:00+09:00')::timestamptz, rc.created_at))
            )
           LEFT JOIN LATERAL (
-            SELECT cpo.option_text, cpo.row_json FROM campaign_participants cpo
+            SELECT cpo.option_text, cpo.row_json, cpo.sheet_id, cpo.tab_name FROM campaign_participants cpo
              WHERE cpo.order_submission_id = os.id AND cpo.deleted_at IS NULL AND cpo.active
              ORDER BY cpo.seq LIMIT 1
           ) cp ON TRUE
           LEFT JOIN LATERAL (
             SELECT pe0.value_text FROM participant_edits pe0
-             WHERE pe0.sheet_id = rc.linked_sheet_id AND pe0.tab_name = rc.linked_tab_name
+             WHERE pe0.sheet_id = cp.sheet_id AND pe0.tab_name = cp.tab_name
                AND pe0.anchor_type = 'order' AND pe0.anchor_value = os.id::text
                AND pe0.field = 'col:상품' AND pe0.reverted_at IS NULL
              ORDER BY pe0.created_at DESC, pe0.id DESC LIMIT 1

@@ -57,45 +57,73 @@ async function _loadCampaign(db, campaignId) {
   return { camp: c, options: opts };
 }
 
-/** 상품을 모르는(결정 210·233 귀속 실패) 신청 없는 주문 + 그 작업표 줄. 범위는 _loadExternalOptionOrders 와 같다. */
+/**
+ * 상품을 모르는(결정 210·232 귀속 실패) 신청 없는 주문 + 그 작업표 줄.
+ * ★ 범위는 상품별 사용 수(_loadExternalOptionOrders)와 **같은 규칙**이어야 고칠 수 있는 것과 세는 것이 일치한다(Codex 리뷰):
+ *   공고 좌표 ∪ 연결 탭 좌표(이름 또는 탭 번호 · 시작일 이후) · 공유 탭(활성 공고 둘 이상)의 탭 좌표 제외 ·
+ *   취소된 주문도 살아 있는 줄이 가리키면 포함 · 늦은 구매로 확정된 주문 제외.
+ * 줄마다 상태를 붙인다: dupRows(같은 주문이 여러 줄 — 어느 줄인지 모름) · filledUnmatched(칸에 값이 있으나 상품을 못 가름 — 덮지 않음).
+ */
 async function _loadTargets(db, camp, options) {
   const { rows } = await db.query(`
     SELECT os.id, os.capture_file_id, os.selected_opt_key, os.selected_product,
            (os.submitted_at AT TIME ZONE 'Asia/Seoul')::date::text AS day,
-           cp.id AS row_id, cp.seq, cp.option_text, cp.row_json->>'상품' AS row_product, pe.value_text AS edited_product
+           cp.id AS row_id, cp.seq, cp.tab_name AS row_tab, cp.option_text, cp.row_json->>'상품' AS row_product,
+           pe.value_text AS edited_product,
+           COUNT(*) OVER (PARTITION BY os.id) AS row_count
       FROM recruit_campaigns rc
+      JOIN LATERAL (
+        SELECT COUNT(*) AS n FROM recruit_campaigns rc2
+         WHERE rc2.participation_mode AND rc2.status = 'active' AND rc2.archived_at IS NULL
+           AND rc2.linked_sheet_id = rc.linked_sheet_id
+           AND (rc2.linked_tab_name = rc.linked_tab_name
+                OR (NULLIF(rc.linked_tab_gid,'') IS NOT NULL AND NULLIF(rc2.linked_tab_gid,'') = NULLIF(rc.linked_tab_gid,'')))
+      ) shared ON TRUE
       JOIN order_submissions os
-        ON os.deleted_at IS NULL AND os.campaign_application_id IS NULL
+        ON os.campaign_application_id IS NULL
        AND ((os.sheet_id = 'campaign:' || rc.id AND os.tab_name = 'campaign:' || rc.id)
-         OR (os.sheet_id = rc.linked_sheet_id AND os.tab_name = rc.linked_tab_name
+         OR (shared.n <= 1
+             AND os.sheet_id = rc.linked_sheet_id
+             AND (os.tab_name = rc.linked_tab_name
+                  OR (NULLIF(rc.linked_tab_gid,'') IS NOT NULL AND NULLIF(os.tab_gid,'') = NULLIF(rc.linked_tab_gid,'')))
              AND os.submitted_at >= COALESCE((rc.start_date::text || 'T00:00:00+09:00')::timestamptz, rc.created_at)))
       JOIN campaign_participants cp
         ON cp.order_submission_id = os.id AND cp.deleted_at IS NULL AND cp.active
-       AND cp.sheet_id = rc.linked_sheet_id AND cp.tab_name = rc.linked_tab_name
+       AND cp.sheet_id = rc.linked_sheet_id
+       AND (cp.tab_name = rc.linked_tab_name
+            OR (NULLIF(rc.linked_tab_gid,'') IS NOT NULL AND NULLIF(cp.tab_gid,'') = NULLIF(rc.linked_tab_gid,'')))
       LEFT JOIN LATERAL (
         SELECT pe0.value_text FROM participant_edits pe0
-         WHERE pe0.sheet_id = rc.linked_sheet_id AND pe0.tab_name = rc.linked_tab_name
+         WHERE pe0.sheet_id = cp.sheet_id AND pe0.tab_name = cp.tab_name
            AND pe0.anchor_type = 'order' AND pe0.anchor_value = os.id::text
            AND pe0.field = 'col:상품' AND pe0.reverted_at IS NULL
          ORDER BY pe0.created_at DESC, pe0.id DESC LIMIT 1
       ) pe ON TRUE
      WHERE rc.id = $1
        AND NOT EXISTS (SELECT 1 FROM campaign_applications la WHERE la.late_order_id = os.id AND la.status = 'submitted')
-     ORDER BY cp.seq`, [camp.id]);
+     ORDER BY cp.seq, os.id`, [camp.id]);
   const { matchOrderOption } = require('./campaignState.service');
   const seen = new Set();
-  return rows.filter(r => {
-    if (seen.has(String(r.id))) return false;
+  const out = [];
+  for (const r of rows) {
+    if (seen.has(String(r.id))) continue;
     seen.add(String(r.id));
-    return !matchOrderOption(options, {
+    if (matchOrderOption(options, {
       editedProduct: r.edited_product, selectedOptKey: r.selected_opt_key, selectedProduct: r.selected_product,
       optionText: r.option_text, rowProduct: r.row_product,
-    });
-  });
+    })) continue;
+    r.dupRows = Number(r.row_count) > 1;
+    r.filledUnmatched = !!(String(r.row_product || '').trim() || String(r.edited_product || '').trim());
+    out.push(r);
+  }
+  return out;
 }
 
 async function _readOne(t, options, samples) {
   const base = { orderId: String(t.id), seq: Number(t.seq), day: t.day };
+  // ★ 적용할 수 없는 줄은 AI 를 돌리지 않고 그렇게 말한다(미리보기에서 고른 것이 적용에서 거절되는 막다른 길 방지 — Codex 리뷰)
+  if (t.dupRows) return { ...base, status: 'duplicate_rows', applicable: false };
+  if (t.filledUnmatched) return { ...base, status: 'filled_unmatched', applicable: false, read: String(t.edited_product || t.row_product || '') };
   if (!t.capture_file_id) return { ...base, status: 'no_capture' };
   let file;
   try { file = await deps.download(String(t.capture_file_id)); }
@@ -103,7 +131,7 @@ async function _readOne(t, options, samples) {
   let ex;
   try {
     const b64 = Buffer.from(file.buffer).toString('base64');
-    ex = await deps.extract(b64, file.mimeType || 'image/jpeg', { samples });
+    ex = await deps.extract(b64, file.mimeType || 'image/jpeg', { samples, allowProductOnly: true });
   } catch (e) { return { ...base, status: 'read_failed', error: String(e && e.message || e).slice(0, 120) }; }
   const name = String((ex && ex.productName) || '').trim();
   const opt = String((ex && ex.productOption) || '').trim();
@@ -117,12 +145,13 @@ async function _readOne(t, options, samples) {
 }
 
 /** ① 미리보기 — 쓰기 0건. */
-async function previewCaptureProducts({ campaignId, limit = MAX_ITEMS } = {}) {
+async function previewCaptureProducts({ campaignId, limit = MAX_ITEMS, offset = 0 } = {}) {
   const db = getPool();
   const { camp, options } = await _loadCampaign(db, campaignId);
   const targets = await _loadTargets(db, camp, options);
   const lim = Math.min(Math.max(parseInt(limit, 10) || MAX_ITEMS, 1), MAX_ITEMS);
-  const work = targets.slice(0, lim);
+  const off = Math.max(0, parseInt(offset, 10) || 0);
+  const work = targets.slice(off, off + lim);
   const samples = work.some(t => t.capture_file_id) ? await deps.samples() : [];
   const items = new Array(work.length);
   let next = 0;
@@ -132,7 +161,9 @@ async function previewCaptureProducts({ campaignId, limit = MAX_ITEMS } = {}) {
   return {
     ok: true, campaignId: camp.id, title: camp.title,
     options: options.map(o => ({ optKey: o.opt_key, productName: o.product_name || o.opt_key, status: o.status || 'active' })),
-    total: targets.length, scanned: work.length, truncated: Math.max(0, targets.length - work.length),
+    total: targets.length, offset: off, scanned: work.length,
+    truncated: Math.max(0, targets.length - off - work.length),
+    nextOffset: off + work.length < targets.length ? off + work.length : null,   // 다음 묶음(앞쪽 미해결 줄이 뒤를 막지 않게 — Codex 리뷰)
     matched: count('matched'),
     needsHuman: work.length - count('matched'),
     items,
@@ -161,10 +192,15 @@ async function applyCaptureProducts({ campaignId, picks = [], by = 'system' } = 
     const o = optByKey.get(p.optKey);
     if (!t) { results.push({ ...p, ok: false, reason: 'not_target', message: '이미 상품을 아는 주문이거나 이 공고 주문이 아닙니다' }); continue; }
     if (!o) { results.push({ ...p, ok: false, reason: 'unknown_option', message: '이 공고 상품이 아닙니다' }); continue; }
-    if (String(t.row_product || '').trim() || String(t.edited_product || '').trim()) {
+    if (t.dupRows) { results.push({ ...p, ok: false, reason: 'duplicate_rows', message: '같은 주문이 작업표 여러 줄에 있어 어느 줄인지 정할 수 없습니다(중복 정리 먼저)' }); continue; }
+    if (t.filledUnmatched) {
       results.push({ ...p, ok: false, reason: 'already_filled', message: '상품 칸이 이미 채워져 있어 덮지 않았습니다' }); continue;
     }
-    todo.push({ ...p, seq: Number(t.seq), rowId: t.row_id, product: o.product_name || o.opt_key });
+    // ★ 같은 상품 이름을 여러 선택지가 쓰면(옵션 단위) 편집 기록에는 선택지를 하나로 가리키는 값(opt_key)을 남긴다 —
+    //   상품 이름만 남기면 귀속이 둘 이상에 걸려 "모름"이 된다(Codex 리뷰). 표의 「상품」 칸에는 상품 이름을 적는다.
+    const sharedName = o.product_name && options.filter(x => x.product_name === o.product_name).length > 1;
+    todo.push({ ...p, seq: Number(t.seq), rowId: t.row_id, rowTab: t.row_tab,
+      product: o.product_name || o.opt_key, editValue: sharedName ? o.opt_key : (o.product_name || o.opt_key) });
   }
   if (!todo.length) return { ok: true, campaignId: camp.id, written: 0, results };
 
@@ -185,7 +221,7 @@ async function applyCaptureProducts({ campaignId, picks = [], by = 'system' } = 
       const { rows } = await client.query(
         `SELECT id, row_json FROM campaign_participants
           WHERE id = $1 AND sheet_id = $2 AND tab_name = $3 AND deleted_at IS NULL AND active
-            AND order_submission_id = $4::uuid FOR UPDATE`, [p.rowId, sheetId, tabName, p.orderId]);
+            AND order_submission_id = $4::uuid FOR UPDATE`, [p.rowId, sheetId, p.rowTab || tabName, p.orderId]);
       if (!rows.length) { results.push({ ...p, ok: false, reason: 'row_gone', message: '작업표 줄이 바뀌어 적지 않았습니다' }); continue; }
       const rj = (rows[0].row_json && typeof rows[0].row_json === 'object') ? rows[0].row_json : {};
       const patch = {};
@@ -195,7 +231,7 @@ async function applyCaptureProducts({ campaignId, picks = [], by = 'system' } = 
       }
       const { rows: ed } = await client.query(
         `SELECT 1 FROM participant_edits WHERE sheet_id=$1 AND tab_name=$2 AND anchor_type='order' AND anchor_value=$3
-            AND field=$4 AND reverted_at IS NULL LIMIT 1`, [sheetId, tabName, p.orderId, field]);
+            AND field=$4 AND reverted_at IS NULL LIMIT 1`, [sheetId, p.rowTab || tabName, p.orderId, field]);
       if (ed.length) { results.push({ ...p, ok: false, reason: 'already_filled', message: '상품 칸이 이미 채워져 있어 덮지 않았습니다' }); continue; }
       if (Object.keys(patch).length) {
         await client.query(
@@ -207,7 +243,7 @@ async function applyCaptureProducts({ campaignId, picks = [], by = 'system' } = 
       await client.query(
         `INSERT INTO participant_edits (sheet_id, tab_name, anchor_type, anchor_value, field, kind, value_bool, value_text, created_by)
          VALUES ($1,$2,'order',$3,$4,'text',NULL,$5,$6)`,
-        [sheetId, tabName, p.orderId, field, p.product,
+        [sheetId, p.rowTab || tabName, p.orderId, field, p.editValue,
          (p.source === 'manual' ? `수동지정(${String(by).slice(0, 60)})` : actor).slice(0, 100)]);
       results.push({ ...p, ok: true });
       written++;

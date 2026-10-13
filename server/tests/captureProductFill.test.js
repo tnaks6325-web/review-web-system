@@ -24,7 +24,7 @@ function stubPool(targetRows, log) {
   };
   return { query: q, connect: async () => ({ query: q, release() {} }) };
 }
-const T = (id, extra = {}) => ({ id, capture_file_id: 'f' + id, selected_opt_key: '', selected_product: '', day: '2026-09-03', row_id: 'r' + id, seq: Number(id), option_text: null, row_product: null, edited_product: null, ...extra });
+const T = (id, extra = {}) => ({ id, capture_file_id: 'f' + id, selected_opt_key: '', selected_product: '', day: '2026-09-03', row_id: 'r' + id, seq: Number(id), row_tab: 'T', option_text: null, row_product: null, edited_product: null, row_count: 1, ...extra });
 
 (async () => {
   await ok('귀속: 사람이 작업보드에서 고친 상품 칸(편집 기록)이 맨 앞 — 줄 계획 표기보다 앞선다', async () => {
@@ -41,7 +41,7 @@ const T = (id, extra = {}) => ({ id, capture_file_id: 'f' + id, selected_opt_key
     fill.__setDepsForTest({
       samples: async () => [],
       download: async (id) => { if (id === 'f4') throw new Error('drive 403'); return { buffer: Buffer.from(id), mimeType: 'image/png' }; },
-      extract: async (b64) => reads[Buffer.from(b64, 'base64').toString()],
+      extract: async (b64, mime, opts) => { assert.equal(opts.allowProductOnly, true, '상품만 찍힌 캡처도 읽게'); return reads[Buffer.from(b64, 'base64').toString()]; },
     });
     const r = await fill.previewCaptureProducts({ campaignId: 'c1' });
     const by = Object.fromEntries(r.items.map(i => [i.orderId, i]));
@@ -98,6 +98,47 @@ const T = (id, extra = {}) => ({ id, capture_file_id: 'f' + id, selected_opt_key
     const src = require('fs').readFileSync(require('path').resolve(__dirname, '../src/routes/trackB.routes.js'), 'utf8');
     assert(/router\.post\('\/campaigns\/:id\/capture-product-fill', authMiddleware, adminOrMasterMiddleware/.test(src));
     assert(/b\.mode === 'apply'[\s\S]{0,120}b\.confirm !== true/.test(src));
+  });
+  await ok('Codex 리뷰: 같은 주문 여러 줄 · 칸에 값 있는데 못 가름 = 적용 불가로 표시(AI 안 돌림) · 다음 묶음', async () => {
+    let calls = 0;
+    fill.__setPoolForTest(stubPool([T('1', { row_count: 2 }), T('2', { row_product: '진간장(옛표기)' }), T('3'), T('4')], []));
+    fill.__setDepsForTest({ samples: async () => [], download: async () => ({ buffer: Buffer.from('x'), mimeType: 'image/png' }),
+      extract: async () => { calls++; return { productName: '풍성한 진간장 S 13L', productOption: '' }; } });
+    const r = await fill.previewCaptureProducts({ campaignId: 'c1', limit: 3 });
+    const by = Object.fromEntries(r.items.map(i => [i.orderId, i]));
+    assert.equal(by['1'].status, 'duplicate_rows'); assert.equal(by['1'].applicable, false);
+    assert.equal(by['2'].status, 'filled_unmatched'); assert.equal(by['2'].applicable, false);
+    assert.equal(by['3'].status, 'matched'); assert.equal(calls, 1, '적용 불가 줄은 AI 를 돌리지 않는다');
+    assert.equal(r.nextOffset, 3);
+    const r2 = await fill.previewCaptureProducts({ campaignId: 'c1', limit: 3, offset: 3 });
+    assert.deepEqual(r2.items.map(i => i.orderId), ['4']); assert.equal(r2.nextOffset, null);
+  });
+  await ok('Codex 리뷰: 같은 상품 이름을 여러 선택지가 쓰면 편집 기록엔 선택지 키(opt_key) — 귀속이 하나로 정해진다', async () => {
+    const opts2 = [{ opt_key: '샴푸 · 500ml', product_name: '샴푸' }, { opt_key: '샴푸 · 1L', product_name: '샴푸' }, { opt_key: '린스', product_name: '린스' }];
+    const log = [];
+    const p = stubPool([T('1')], log);
+    const q0 = p.query;
+    p.query = async (sql, params) => (/FROM campaign_options WHERE campaign_id/.test(String(sql)) ? { rows: opts2 } : q0(sql, params));
+    p.connect = async () => ({ query: p.query, release() {} });
+    fill.__setPoolForTest(p);
+    fill.__setDepsForTest({ ensureColumn: async () => ({ headers: ['상품', '옵션'] }), rebuild: async () => {} });
+    await fill.applyCaptureProducts({ campaignId: 'c1', picks: [{ orderId: '1', optKey: '샴푸 · 1L' }] });
+    const ins = log.find(x => /INSERT INTO participant_edits/.test(x.s));
+    assert.equal(ins.params[4], '샴푸 · 1L');
+    assert.equal(st.matchOrderOption(opts2, { editedProduct: ins.params[4] }), '샴푸 · 1L');
+    const upd = log.find(x => /UPDATE campaign_participants SET row_json/.test(x.s));
+    assert.equal(JSON.parse(upd.params[1])['상품'], '샴푸', '표의 상품 칸엔 상품 이름');
+  });
+  await ok('Codex 리뷰: 범위가 상품별 사용 수와 같다 — 공유 탭 제외 · 취소됐어도 살아 있는 줄 · 탭 이름 또는 번호', async () => {
+    const src = require('fs').readFileSync(require('path').resolve(__dirname, '../src/services/captureProductFill.service.js'), 'utf8');
+    const q = src.slice(src.indexOf('async function _loadTargets('), src.indexOf('async function _readOne('));
+    assert(/shared\.n <= 1/.test(q)); assert(!/os\.deleted_at IS NULL/.test(q));
+    assert(/NULLIF\(os\.tab_gid,''\) = NULLIF\(rc\.linked_tab_gid,''\)/.test(q) && /NULLIF\(cp\.tab_gid,''\) = NULLIF\(rc\.linked_tab_gid,''\)/.test(q));
+  });
+  await ok('Codex 리뷰: AI 판독 — 상품만 찍힌 캡처는 이 기능에서만 허용(리뷰어 제출 경로는 종전대로 실패) · 그 결과는 캐시하지 않음', async () => {
+    const src = require('fs').readFileSync(require('path').resolve(__dirname, '../src/services/gemini.service.js'), 'utf8');
+    assert(/const productOnly = allBlank && opts\.allowProductOnly === true/.test(src));
+    assert(/if \(allBlank && !productOnly\)/.test(src) && /if \(!productOnly\) _putToCache/.test(src));
   });
   console.log(`\n✅ captureProductFill: ${passed} passed`);
 })().catch(e => { console.error(e); process.exit(1); });
