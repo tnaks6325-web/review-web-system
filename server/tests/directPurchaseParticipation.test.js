@@ -94,5 +94,15 @@ function stubDb(handlers) {
     assert.ok(/\{ includeDirectPurchases: true, \.\.\.options \}/.test(pc), '리뷰어 판정(loadPopularCreditState)은 바로 구매 포함');
   }
 
+  // ⑥ 공고 판정 — 구매 시점에 이미 있던 공고 우선(나중 공고의 인기 여부 소급 금지) · phone8 인덱스 표현식 일치
+  {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'directPurchaseParticipation.service.js'), 'utf8');
+    assert.ok(/ORDER BY \(rc\.created_at <= os\.submitted_at\) DESC/.test(src), 'campaign existing at purchase time wins');
+    const mig = fs.readFileSync(path.join(__dirname, '..', 'migrations', '168_reviewer_home_lookup_indexes.sql'), 'utf8');
+    const expr = "RIGHT(regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g'), 8)";
+    assert.ok(mig.includes(expr), 'idx_os_phone8_all expression');
+    assert.ok(src.includes(expr.replace('COALESCE(phone', 'COALESCE(os.phone')), 'service phone8 literal matches idx_os_phone8_all');
+  }
+
   console.log('directPurchaseParticipation: passed');
 })().catch((err) => { console.error(err); process.exitCode = 1; });

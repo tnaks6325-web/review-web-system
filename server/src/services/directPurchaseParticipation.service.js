@@ -15,6 +15,8 @@
  * ★ 연결 안 된 번호의 구매는 세지 않는다(모르는 구매로 사람을 막지 않는다). 호출부는 조회 실패를 fail-open 으로 접는다.
  */
 
+// ★ OS_PHONE8 은 migration 168 표현식 인덱스 idx_os_phone8_all 과 글자 그대로 같아야 한다 — 그래야 참여 잠금 안의
+//   명의별 조회가 원장 전체 스캔 대신 인덱스를 탄다(운영 EXPLAIN 2026-10-13: Bitmap Index Scan on idx_os_phone8_all).
 const OS_PHONE8 = `RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)`;
 const DIRECT_PURCHASE_WHERE = `os.campaign_application_id IS NULL AND os.deleted_at IS NULL`;
 
@@ -101,7 +103,9 @@ async function loadDirectPurchaseCreditEvents(q, { phones = null, from, to }) {
            FROM recruit_campaigns rc
           WHERE rc.participation_mode IS TRUE
             AND rc.linked_sheet_id = os.sheet_id AND rc.linked_tab_name = os.tab_name
-          ORDER BY rc.created_at DESC NULLS LAST, rc.id DESC
+          -- 같은 작업표에 공고가 여러 개(차수 재발행)면 구매 시점에 이미 있던 가장 최근 공고로 본다 —
+          -- 나중에 만든 공고의 인기 여부가 지난 구매에 소급되지 않게(Codex PR #1623).
+          ORDER BY (rc.created_at <= os.submitted_at) DESC NULLS LAST, rc.created_at DESC NULLS LAST, rc.id DESC
           LIMIT 1
        ) camp ON TRUE
       WHERE ${DIRECT_PURCHASE_WHERE}
