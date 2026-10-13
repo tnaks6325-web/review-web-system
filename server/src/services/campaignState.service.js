@@ -1320,7 +1320,10 @@ function matchOrderOption(options, order) {
  * ★ 늦은 구매로 신청이 확정(submitted)된 주문은 신청 쪽에서 이미 센다 → 제외(이중계수 방지).
  * ★★ fail-soft null(= 종전: 세지 않음). 잠금 tx 안에서는 SAVEPOINT 로 격리(082 — 실패 쿼리가 tx 를 죽이지 않게).
  */
-async function _loadExternalOptionOrders(db, ids, now = new Date()) {
+// opts.excludeApplicationDuplicates: 공고 참여 주문과 같은 구매(주문번호+연락처)를 수동으로 또 넣은 바로 구매는 빼고 센다.
+//   결정 239 하한(quotaFloor)만 켠다 — 참여 게이트·화면은 종전 그대로(운영 실측 2026-10-13: 이런 중복 22건).
+async function _loadExternalOptionOrders(db, ids, now = new Date(), opts = null) {
+  const excludeAppDup = !!(opts && opts.excludeApplicationDuplicates);
   if (!OPTION_EXTERNAL_ENABLED || TABLE_QUOTA_MODE === 'off' || !ids || !ids.length || !db || typeof db.query !== 'function') return null;
   const inClient = typeof db.release === 'function';
   let sp = false;
@@ -1382,7 +1385,14 @@ async function _loadExternalOptionOrders(db, ids, now = new Date()) {
          WHERE rc.id = ANY($1) AND rc.participation_mode
            AND NOT EXISTS (SELECT 1 FROM campaign_applications la
                             WHERE la.late_order_id = os.id AND la.status = 'submitted')
-         ORDER BY rc.id, ${ORDER_PURCHASE_KEY_SQL}, os.submitted_at`, [withOpts, dayStart]);
+           AND NOT ($3::boolean AND os.dedup_key LIKE 'num:%' AND EXISTS (
+                 SELECT 1 FROM order_submissions ao
+                   JOIN campaign_applications ca2 ON ca2.id = ao.campaign_application_id
+                  WHERE ca2.campaign_id = rc.id AND ca2.status = 'submitted' AND ao.deleted_at IS NULL
+                    AND ao.dedup_key = os.dedup_key
+                    AND RIGHT(regexp_replace(COALESCE(ao.phone, ''), '[^0-9]', '', 'g'), 8)
+                      = RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)))
+         ORDER BY rc.id, ${ORDER_PURCHASE_KEY_SQL}, os.submitted_at`, [withOpts, dayStart, excludeAppDup]);
       for (const r of rows || []) {
         if (!r || !optsBy.has(r.campaign_id)) continue;
         const key = matchOrderOption(optsBy.get(r.campaign_id), {
@@ -1411,7 +1421,7 @@ async function _loadExternalOptionOrders(db, ids, now = new Date()) {
  * cnt = { activeHolds, todayActiveHolds, submitted, todaySubmitted [, externalOrders, todayExternalOrders] }
  * ★★ 선택지 카운트의 **단일 출처** — 참여 게이트(fetchOptionCounts)·공개 목록·공고 하루 몫 상한이 모두 이것을 쓴다.
  */
-async function fetchOptionCountsBatch(db, campaignIds, now = new Date()) {
+async function fetchOptionCountsBatch(db, campaignIds, now = new Date(), opts = null) {
   const out = new Map();
   const ids = (campaignIds || []).filter(Boolean);
   if (!ids.length) return out;
@@ -1439,7 +1449,7 @@ async function fetchOptionCountsBatch(db, campaignIds, now = new Date()) {
       todaySubmitted: Number(r.today_submitted) || 0,
     });
   }
-  const ext = await _loadExternalOptionOrders(db, ids, now);
+  const ext = await _loadExternalOptionOrders(db, ids, now, opts);
   if (ext) {
     for (const [cid, m] of ext) {
       if (!out.has(cid)) out.set(cid, new Map());
@@ -1456,9 +1466,9 @@ async function fetchOptionCountsBatch(db, campaignIds, now = new Date()) {
 /**
  * 한 캠페인의 옵션별 카운트 → Map optKey → cnt (fetchOptionCountsBatch 의 공고 1개 판).
  */
-async function fetchOptionCounts(db, campaignId, now = new Date()) {
+async function fetchOptionCounts(db, campaignId, now = new Date(), opts = null) {
   if (!campaignId) return new Map();
-  return (await fetchOptionCountsBatch(db, [campaignId], now)).get(campaignId) || new Map();
+  return (await fetchOptionCountsBatch(db, [campaignId], now, opts)).get(campaignId) || new Map();
 }
 
 /**

@@ -62,7 +62,17 @@ async function _todayUsed(db, campaignId, dayStartUtcIso) {
        FROM campaign_applications WHERE campaign_id = $1`,
     [campaignId, dayStartUtcIso]);
   const r = rows[0] || {};
-  return (Number(r.today_submitted) || 0) + (Number(r.today_holds) || 0);
+  const apps = (Number(r.today_submitted) || 0) + (Number(r.today_holds) || 0);
+  // ★ 결정 239 — 오늘 바로 구매(구매양식 제출 시각 기준)도 오늘 쓴 자리다: max(오늘 확정, 오늘 연결 주문) + 오늘 유효 홀드.
+  //   조회 실패·공유 작업표는 종전(공고 참여만). 잠금 tx 안이어도 정원 엔진이 SAVEPOINT 로 격리한다.
+  try {
+    const { campaignUsedFloor } = require('./quotaFloor.service');
+    const f = await campaignUsedFloor(db, campaignId);
+    return Math.max(apps, f.today);
+  } catch (e) {
+    logger.warn(`[campaignPlan] 오늘 바로 구매 집계 실패(공고 참여만으로) camp=${campaignId}: ${e.message}`);
+    return apps;
+  }
 }
 
 /* ── 조회(모달 재료) ─────────────────────────────────────── */
@@ -1039,7 +1049,17 @@ async function removeLastRound(campaignId, actor) {
       `SELECT COUNT(*) FILTER (WHERE status = 'submitted')                                  AS submitted,
               COUNT(*) FILTER (WHERE status = 'applied' AND expires_at > NOW())              AS holds
          FROM campaign_applications WHERE campaign_id = $1`, [campaignId]);
-    const used = (Number(subQ[0] && subQ[0].submitted) || 0) + (Number(subQ[0] && subQ[0].holds) || 0);
+    let used = (Number(subQ[0] && subQ[0].submitted) || 0) + (Number(subQ[0] && subQ[0].holds) || 0);
+    // ★ 결정 239 — 바로 구매도 이미 쓴 자리다(정원 엔진 셈). 주문 기록을 모르면 빼지 않는다(fail-closed).
+    {
+      const { campaignUsedFloor } = require('./quotaFloor.service');
+      const f = await campaignUsedFloor(client, campaignId);
+      if (!f.known) {
+        const e = new Error('작업표 주문 기록을 확인하지 못해 차수를 제거할 수 없습니다. 잠시 후 다시 시도해주세요.');
+        e.code = 'quota_unknown'; throw e;
+      }
+      used = Math.max(used, f.total);
+    }
     if (newTotal < used) {
       const e = new Error(`이미 ${used}명이 확정·진행 중이라 ${last.round_no}차를 제거할 수 없습니다(제거 후 총량 ${newTotal}).`);
       e.code = 'below_confirmed'; throw e;

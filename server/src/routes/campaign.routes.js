@@ -380,13 +380,20 @@ async function _saveCampaignOptions(campaignId, options) {
          (typeof o.thumbnailUrl === 'string') ? o.thumbnailUrl : null]);
     }
     const { rows: existing } = await client.query('SELECT opt_key FROM campaign_options WHERE campaign_id=$1', [campaignId]);
+    // ★ 결정 239 — 바로 구매(정원 엔진이 그 상품에 귀속한 공고 밖 주문)만 있는 상품도 지우지 않고 닫는다.
+    //   지우면 그 구매의 상품 귀속이 사라져 남은 자리·상품별 정원이 틀어진다. 조회 실패는 빈 Map(종전 판정).
+    let directByOpt = new Map();
+    if (existing.some(e => !keep.has(e.opt_key))) {
+      try { directByOpt = await require('../services/quotaFloor.service').optionDirectOrders(client, campaignId); }
+      catch (e) { logger.warn(`[campaign/options] 바로 구매 귀속 조회 실패(종전 판정) camp=${campaignId}: ${e.message}`); }
+    }
     for (const e of existing) {
       if (keep.has(e.opt_key)) continue;
       const { rows: used } = await client.query(
         `SELECT 1 FROM campaign_applications
           WHERE campaign_id=$1 AND option_key=$2 AND status IN ('applied','submitted') LIMIT 1`,
         [campaignId, e.opt_key]);
-      if (used.length) {
+      if (used.length || directByOpt.get(e.opt_key) > 0) {
         await client.query("UPDATE campaign_options SET status='closed', updated_at=NOW() WHERE campaign_id=$1 AND opt_key=$2", [campaignId, e.opt_key]);
       } else {
         await client.query('DELETE FROM campaign_options WHERE campaign_id=$1 AND opt_key=$2', [campaignId, e.opt_key]);
@@ -3737,6 +3744,27 @@ router.delete('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req,
       return res.status(503).json({ ok: false, code: 'unknown_history',
         error: '참여 이력을 확인하지 못해 삭제를 보류했습니다. 잠시 후 다시 시도하거나 [보관]을 이용하세요.' });
     }
+    /* ★ 결정 239 — 바로 구매(공고 참여 없이 이 공고 작업표에 낸 주문)도 참여 이력이다. 정원 엔진 셈(시작일 이후·공유 작업표 제외).
+       세지 못하면 지우지 않는다(위와 같은 fail-closed). */
+    if (_apps === 0) {
+      // 체크아웃한 커넥션으로 센다 — pool 경로의 주문 수 캐시(최대 10초)를 거치지 않게(파괴적 작업은 최신 값으로, Codex PR #1625).
+      let fc = null;
+      try {
+        fc = await pool.connect();
+        const f = await require('../services/quotaFloor.service').campaignUsedFloor(fc, id);
+        if (!f.known) throw new Error('연결 작업표 주문 조회 실패');
+        if (f.orders > 0) {
+          return res.status(409).json({ ok: false, code: 'has_applications', count: f.orders,
+            error: `바로 구매 ${f.orders}건이 있어 삭제할 수 없습니다 — 대신 [📦 보관]으로 목록에서 내리세요(데이터는 그대로 남고 언제든 되돌릴 수 있습니다).` });
+        }
+      } catch (e) {
+        logger.warn(`[campaign] 삭제 전 바로 구매 조회 실패 — 삭제 보류 camp=${id}: ${e.message}`);
+        return res.status(503).json({ ok: false, code: 'unknown_history',
+          error: '참여 이력을 확인하지 못해 삭제를 보류했습니다. 잠시 후 다시 시도하거나 [보관]을 이용하세요.' });
+      } finally {
+        if (fc) fc.release();
+      }
+    }
     if (_apps > 0) {
       return res.status(409).json({ ok: false, code: 'has_applications', count: _apps,
         error: `참여 이력이 ${_apps}건 있어 삭제할 수 없습니다 — 대신 [📦 보관]으로 목록에서 내리세요(데이터는 그대로 남고 언제든 되돌릴 수 있습니다).` });
@@ -4282,7 +4310,10 @@ router.post('/admin/:id/blog-approve', authMiddleware, adminOrMasterMiddleware, 
         `SELECT COUNT(*) FILTER (WHERE status='submitted') AS sub,
                 COUNT(*) FILTER (WHERE status='applied' AND expires_at > NOW()) AS holds
            FROM campaign_applications WHERE campaign_id = $1`, [id]);
-      const used = (Number(u[0].sub) || 0) + (Number(u[0].holds) || 0);
+      let used = (Number(u[0].sub) || 0) + (Number(u[0].holds) || 0);
+      // ★ 결정 239 — 바로 구매도 쓴 자리다(정원 엔진 셈). 조회 실패는 종전(공고 참여만) — 승인은 담당자 확인 단계.
+      try { used = Math.max(used, (await require('../services/quotaFloor.service').campaignUsedFloor(client, id)).total); }
+      catch (e) { logger.warn(`[campaign/blog-approve] 바로 구매 집계 실패(공고 참여만) camp=${id}: ${e.message}`); }
       if (used >= total) {
         await client.query('ROLLBACK');
         return res.status(409).json({ ok: false, reason: 'capacity_full', used, total,
@@ -4299,7 +4330,9 @@ router.post('/admin/:id/blog-approve', authMiddleware, adminOrMasterMiddleware, 
           `SELECT COUNT(*) FILTER (WHERE status='submitted') AS sub,
                   COUNT(*) FILTER (WHERE status='applied' AND expires_at > NOW()) AS holds
              FROM campaign_applications WHERE campaign_id = $1 AND option_key = $2`, [id, a.option_key]);
-        const optUsed = (Number(ou[0].sub) || 0) + (Number(ou[0].holds) || 0);
+        let optUsed = (Number(ou[0].sub) || 0) + (Number(ou[0].holds) || 0);
+        try { optUsed += (await require('../services/quotaFloor.service').optionDirectOrders(client, id)).get(a.option_key) || 0; }
+        catch (e) { logger.warn(`[campaign/blog-approve] 상품 바로 구매 집계 실패(공고 참여만) camp=${id}: ${e.message}`); }
         if (optUsed >= optTotal) {
           await client.query('ROLLBACK');
           return res.status(409).json({ ok: false, reason: 'option_full', optionKey: a.option_key,
