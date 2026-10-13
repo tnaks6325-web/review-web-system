@@ -333,6 +333,26 @@ const read = (p) => fs.readFileSync(path.resolve(__dirname, '..', p), 'utf8');
         await db.query(`DELETE FROM reviewers WHERE id = $1`, [G]);
       }
     });
+    await test('되돌릴 때 같은 칸이 다른 주소로 이미 다시 생겼으면 추가 배송지를 지우지 않는다', async () => {
+      const H2 = 'f7f7f7f7-f7f7-4f7f-8f7f-f7f7f7f7f7f7';
+      try {
+        await db.query(`INSERT INTO reviewers (id, name, phone, address, sub_accounts) VALUES ($1, '문본인', '010-7979-1111', '서울 집', $2::jsonb)`,
+          [H2, JSON.stringify([{ name: '문가족', phone: '010-7979-1111', address: '광주 본가 2동' }])]);
+        await cards.reconcileCards({ db, dryRun: false, by: 'test' });
+        const p5 = await fold.preview({ db });
+        await fold.apply({ previewRunId: p5.runId, db, retryDelayMs: 10 });
+        // 리뷰어가 같은 이름·번호 칸을 다른 주소로 다시 만듦
+        await db.query(`UPDATE reviewers SET sub_accounts = $2::jsonb WHERE id = $1`, [H2, JSON.stringify([{ name: '문가족', phone: '010-7979-1111', address: '제주 새집' }])]);
+        const dec = (await db.query(`SELECT id FROM reviewer_identity_decisions WHERE owner_reviewer_id = $1 AND kind = 'fold_self'`, [H2])).rows[0].id;
+        await merge.undoDecision({ decisionId: String(dec), by: 'tester', db });
+        const rows = (await db.query(`SELECT address FROM reviewer_delivery_addresses WHERE owner_reviewer_id = $1`, [H2])).rows;
+        assert.deepStrictEqual(rows.map((x) => x.address), ['광주 본가 2동'], '원래 주소는 남는다');
+      } finally {
+        await db.query(`DELETE FROM reviewer_delivery_addresses WHERE owner_reviewer_id = $1`, [H2]);
+        await db.query(`DELETE FROM reviewer_identity_decisions WHERE owner_reviewer_id = $1`, [H2]);
+        await db.query(`DELETE FROM reviewers WHERE id = $1`, [H2]);
+      }
+    });
     await test('타계정 카드가 아직 없으면 지우지 않고(no_sub_card) 다음에 다시 시도한다', async () => {
       const E = 'f5f5f5f5-f5f5-4f5f-8f5f-f5f5f5f5f5f5';
       try {

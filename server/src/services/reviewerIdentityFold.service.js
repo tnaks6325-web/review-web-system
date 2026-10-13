@@ -388,7 +388,10 @@ async function undoFoldInTx(client, d) {
   //   같은 주소를 가진 다른 정리(아직 살아 있는 것)가 있으면 지우지 않고 그 정리 몫으로 넘긴다(같은 주소는 한 줄만 저장하므로).
   const { rows: mine } = await client.query(`SELECT id, recipient, address_key FROM reviewer_delivery_addresses WHERE decision_id = $1`, [d.id]);
   restored.deliveryAddresses = 0;
-  if (mine.length) {
+  // 칸이 실제로 돌아왔거나, 이미 있던 같은 칸이 그 주소를 갖고 있을 때만 지운다(Codex P2 — 다른 주소로 다시 만든 칸이면 주소를 잃는다).
+  const sameSlotNow = asSubs(out.subs).find((x) => x && nk(x.name) === nk(sub.name) && p8(x.phone) === p8(sub.phone));
+  const addressBack = restored.slot || (sameSlotNow && addrKey(sameSlotNow.address) === addrKey(sub.address));
+  if (mine.length && addressBack) {
     const { rows: others } = await client.query(
       `SELECT id, snapshot->'sub'->>'address' AS address, snapshot->'sub'->>'name' AS name FROM reviewer_identity_decisions
         WHERE kind = 'fold_self' AND owner_reviewer_id = $1 AND undone_at IS NULL AND id <> $2`, [d.owner_reviewer_id, d.id]);

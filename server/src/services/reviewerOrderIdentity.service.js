@@ -7,6 +7,7 @@ const { addressSame, addressHeuristic, normAddress, isOwnerPhoneRecipient, isMas
 const { logger } = require('../utils/logger');
 
 const MASK_RE = /[*＊●○◯◉•·xX]/;
+const MAX_EXTRA_ADDRESS_COMPARE = 20;   // 추가 배송지 비교 상한(한 요청의 비교량 제한)
 const MASK_RUN_RE = /[*＊●○◯◉•·xX]+/g;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PURPOSE_EXTRACT = 'reviewer_capture_extract';
@@ -705,21 +706,43 @@ async function evaluateSelectedIdentity(extracted, selected, allIdentities, opti
   }
   // 결정 226 — 본계정 추가 배송지(합친 타계정 주소). 본인 명의 참여이고 받는 사람이 본인으로 인정될 때(본인 이름 또는 본인 번호)
   //   등록 주소와 달라도 추가 배송지와 같으면 등록 주소로 본다 — "다른 배송지 확인" 단계를 거치지 않는다.
-  const extraAddrs = selected && selected.type === 'self' && Array.isArray(selected.deliveryAddresses) ? selected.deliveryAddresses : [];
-  if (extraAddrs.length && selectedScore.parts.address.verdict !== 'match'
-      && (selectedScore.parts.name.verdict === 'match' || ownerPhone)) {
+  const extraAddrs = (selected && selected.type === 'self' && Array.isArray(selected.deliveryAddresses) ? selected.deliveryAddresses : [])
+    .filter((x) => x && String(x.address || '').trim()).slice(0, MAX_EXTRA_ADDRESS_COMPARE);
+  let maskedAddressAmbiguous = false;
+  const useExtra = (addr, v) => {
+    selectedScore.parts.address = { verdict: 'match', score: (v && v.score) || 1, reason: '등록된 추가 배송지와 일치' };
+    selectedScore.matchedAddress = addr;
+    rescoreIdentity(selectedScore);
+    reasonCodes.push('registered_delivery_address');
+  };
+  if (extraAddrs.length && (selectedScore.parts.name.verdict === 'match' || ownerPhone)) {
     const raw = selectedScore.fields.address;
-    for (const extra of extraAddrs) {
-      if (!raw || !extra || !extra.address) continue;
-      const v = MASK_RE.test(raw) ? maskedAddressVerdict(raw, extra.address)
-        : await addressSame(raw, extra.address, { name: selected.name, phone: selected.phone, useGemini: !!options.useGemini });
-      if (v && v.verdict === 'match') {
-        selectedScore.parts.address = { verdict: 'match', score: v.score || 1, reason: '등록된 추가 배송지와 일치' };
-        selectedScore.matchedAddress = extra.address;
+    if (raw && MASK_RE.test(raw)) {
+      // 가린 주소: 집 주소와 추가 배송지를 모두 대 보고 **정확히 하나**만 맞을 때만 그 주소로 펼친다(Codex P2 —
+      //   가린 동·호수가 두 주소에 똑같이 맞으면 어느 쪽인지 모른다 → 확인 단계에서 실제 주소를 고르게 한다).
+      const cands = [{ address: selected.address, primary: true }, ...extraAddrs.map((x) => ({ address: x.address }))]
+        .filter((c) => String(c.address || '').trim());
+      const hits = cands.filter((c) => maskedAddressVerdict(raw, c.address).verdict === 'match');
+      if (hits.length > 1) {
+        maskedAddressAmbiguous = true;
+        selectedScore.parts.address = { verdict: 'uncertain', score: 0, reason: '가린 주소가 등록 주소 여러 개와 맞음' };
         rescoreIdentity(selectedScore);
-        reasonCodes.push('registered_delivery_address');
-        break;
+      } else if (hits.length === 1 && !hits[0].primary) {
+        useExtra(hits[0].address, maskedAddressVerdict(raw, hits[0].address));
       }
+    } else if (raw && selectedScore.parts.address.verdict !== 'match') {
+      // AI 비교는 한 번만(Codex P2 — 추가 배송지가 많아도 요청 하나가 AI 호출을 수십 번 내지 않게): 휴리스틱으로 먼저 전부 본다.
+      let hit = null; let firstUncertain = null;
+      for (const extra of extraAddrs) {
+        const h = addressHeuristic(raw, extra.address);
+        if (h.verdict === 'match') { hit = { extra, v: h }; break; }
+        if (h.verdict === 'uncertain' && !firstUncertain) firstUncertain = extra;
+      }
+      if (!hit && firstUncertain && options.useGemini) {
+        const v = await addressSame(raw, firstUncertain.address, { name: selected.name, phone: selected.phone, useGemini: true });
+        if (v && v.verdict === 'match') hit = { extra: firstUncertain, v };
+      }
+      if (hit) useExtra(hit.extra.address, hit.v);
     }
   }
   if (selectedScore.conflicts.length) {
@@ -808,6 +831,11 @@ async function evaluateSelectedIdentity(extracted, selected, allIdentities, opti
         ? '가림 이름의 노출 글자 1개가 다르게 인식됨'
         : '이름 1글자가 다르게 인식됨',
     };
+  }
+  // 가린 주소가 등록 주소 여러 개에 맞으면 자동 승인하지 않는다 — 확인 단계에서 가림 없는 실제 주소를 고르게 한다.
+  if (maskedAddressAmbiguous) {
+    if (status === 'MATCH') status = 'REVIEW';
+    reasonCodes.push('masked_address_ambiguous');
   }
   const resolved = {
     recipient: resolvedValue(selectedScore.fields.recipient || selectedScore.fields.orderer, selected.name, 'name', selectedScore.parts.name.verdict),
@@ -1059,6 +1087,9 @@ async function manualConfirm(body, reviewer) {
     if (check.competingIdentity) details.push('다른 저장 명의와 일치');
     throw new ReviewerOrderIdentityError('IDENTITY_MISMATCH',
       `선택 명의의 주문인지 확인할 수 없습니다: ${details.join(' · ')}. 수취인과 연락처를 확인해주세요.`, 409);
+  }
+  if (check.reasonCodes.includes('masked_address_ambiguous')) {
+    throw new ReviewerOrderIdentityError('IDENTITY_FIELDS_REQUIRED', '배송주소가 가려져 있어 어느 주소인지 알 수 없어요. 「내 정보에서 선택」으로 실제 배송주소를 골라주세요.', 409);
   }
   if (check.reasonCodes.includes('delivery_address_changed')
       && [check.selectedScore.fields.recipient, check.selectedScore.fields.phone].some((v) => MASK_RE.test(v))) {

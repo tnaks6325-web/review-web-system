@@ -275,11 +275,17 @@ function pickIdField(extracted, formValue, { isPhone = false } = {}) {
 async function _registeredAddressCheck(reviewer, idAddr, opts, addrBad) {
   const main = await addressSame(reviewer.address, idAddr, opts);
   if (!addrBad(main.verdict)) return main;
-  const extras = Array.isArray(reviewer.deliveryAddresses) ? reviewer.deliveryAddresses : [];
-  for (const extra of extras) {
-    const addr = extra && (extra.address || extra);
-    if (!addr || typeof addr !== 'string') continue;
-    const v = await addressSame(addr, idAddr, opts);
+  const extras = (Array.isArray(reviewer.deliveryAddresses) ? reviewer.deliveryAddresses : [])
+    .map((extra) => extra && (extra.address || extra)).filter((addr) => addr && typeof addr === 'string').slice(0, 20);
+  // AI 비교는 한 번만(Codex P2 — 제출 전 대조는 주문 5건 × 추가 배송지 수만큼 AI 를 부를 수 있었다): 휴리스틱으로 먼저 전부 본다.
+  let firstUncertain = null;
+  for (const addr of extras) {
+    const h = addressHeuristic(addr, idAddr);
+    if (!addrBad(h.verdict)) return { ...h, reason: '등록된 추가 배송지와 일치' };
+    if (h.verdict === 'uncertain' && !firstUncertain) firstUncertain = addr;
+  }
+  if (firstUncertain && opts.useGemini) {
+    const v = await addressSame(firstUncertain, idAddr, opts);
     if (!addrBad(v.verdict)) return { ...v, reason: '등록된 추가 배송지와 일치' };
   }
   return main;
