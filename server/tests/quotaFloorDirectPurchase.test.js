@@ -74,3 +74,10 @@ const read = (rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
 
   console.log('quotaFloorDirectPurchase: passed');
 })().catch((err) => { console.error(err); process.exitCode = 1; });
+
+// 결정 244 — 상품 단위 외부 주문 집계는 공고 참여 주문의 수동 중복을 **기본으로** 뺀다(게이트·화면·하한 단일 셈).
+{
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'services', 'campaignState.service.js'), 'utf8');
+  require('assert').ok(/const excludeAppDup = !\(opts && opts\.excludeApplicationDuplicates === false\);/.test(src), 'option external orders exclude manual duplicates by default');
+  console.log('quotaFloorDirectPurchase(244): passed');
+}

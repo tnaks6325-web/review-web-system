@@ -1443,10 +1443,12 @@ async function listDirectOrders(db, campaignId, { limit = 500 } = {}) {
   } catch (_) { return null; }
 }
 
-// opts.excludeApplicationDuplicates: 공고 참여 주문과 같은 구매(주문번호+연락처)를 수동으로 또 넣은 바로 구매는 빼고 센다.
-//   결정 239 하한(quotaFloor)만 켠다 — 참여 게이트·화면은 종전 그대로(운영 실측 2026-10-13: 이런 중복 22건).
+// ★ 결정 244 — 공고 참여 주문과 같은 구매(주문번호+연락처)를 담당자가 수동으로 또 넣은 바로 구매는 **항상** 빼고 센다.
+//   공고 단위 집계(_loadLinkedOrderCounts)는 구매 키 DISTINCT 로 이미 한 번만 세는데, 상품 단위만 공고 참여(submitted) + 외부 주문을
+//   더해 같은 구매를 두 번 셌다 → 상품이 실제보다 일찍 마감될 수 있었다(운영 실측 2026-10-14: 해당 상품 1개 · 보관 공고).
+//   결정 239 에서 하한(quotaFloor)만 켰던 것을 참여 게이트·화면까지 넓힌다(단일 셈). opts.excludeApplicationDuplicates === false 로만 끈다(진단용).
 async function _loadExternalOptionOrders(db, ids, now = new Date(), opts = null) {
-  const excludeAppDup = !!(opts && opts.excludeApplicationDuplicates);
+  const excludeAppDup = !(opts && opts.excludeApplicationDuplicates === false);
   if (!OPTION_EXTERNAL_ENABLED || TABLE_QUOTA_MODE === 'off' || !ids || !ids.length || !db || typeof db.query !== 'function') return null;
   const inClient = typeof db.release === 'function';
   let sp = false;
