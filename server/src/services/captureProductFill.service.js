@@ -64,7 +64,7 @@ async function _loadCampaign(db, campaignId) {
  *   취소된 주문도 살아 있는 줄이 가리키면 포함 · 늦은 구매로 확정된 주문 제외.
  * 줄마다 상태를 붙인다: dupRows(같은 주문이 여러 줄 — 어느 줄인지 모름) · filledUnmatched(칸에 값이 있으나 상품을 못 가름 — 덮지 않음).
  */
-async function _loadTargets(db, camp, options) {
+async function _loadTargets(db, camp, options, onlyOrderId = null) {
   const { rows } = await db.query(`
     SELECT os.id, os.capture_file_id, os.selected_opt_key, os.selected_product,
            (os.submitted_at AT TIME ZONE 'Asia/Seoul')::date::text AS day,
@@ -100,8 +100,9 @@ async function _loadTargets(db, camp, options) {
          ORDER BY pe0.created_at DESC, pe0.id DESC LIMIT 1
       ) pe ON TRUE
      WHERE rc.id = $1
+       AND ($2::uuid IS NULL OR os.id = $2::uuid)
        AND NOT EXISTS (SELECT 1 FROM campaign_applications la WHERE la.late_order_id = os.id AND la.status = 'submitted')
-     ORDER BY cp.seq, os.id`, [camp.id]);
+     ORDER BY cp.seq, os.id`, [camp.id, onlyOrderId]);
   const { matchOrderOption } = require('./campaignState.service');
   const seen = new Set();
   const out = [];
@@ -261,4 +262,42 @@ async function applyCaptureProducts({ campaignId, picks = [], by = 'system' } = 
   return { ok: true, campaignId: camp.id, written, columnAdded: !!(col && col.headerAdded), backfilled: (col && col.backfillCount) || 0, rebuildError, results };
 }
 
-module.exports = { previewCaptureProducts, applyCaptureProducts, CaptureFillError, __setPoolForTest, __setDepsForTest };
+/**
+ * 결정 237 — 리뷰어 제출 순간: 상품을 고르지 않은 주문이면 **제출 때 이미 읽은 캡처 상품 글자**로 한 상품이 확실할 때만 채운다.
+ *   추가 AI 호출·사진 내려받기 없음(화면이 제출 전에 판독한 값). 사람이 고른 값이 있으면 대상이 아니다(_loadTargets 귀속 판정).
+ *   적는 곳 = 편집 기록 1건(작업 로그 'AI 캡처판독(제출 시)') — 작업표 표시·상품별 사용 수가 이 기록을 본다.
+ *   row_json·장부 재생성은 하지 않는다(제출마다 장부를 다시 만들지 않게). 원장 selected_product 무접촉(결정 018).
+ * ★ 무엇이든 실패하면 조용히 건너뛴다(접수와 무관 · 응답 뒤에 돈다). 끄는 스위치 env CAPTURE_PRODUCT_ON_SUBMIT=0.
+ * @returns {{written:boolean, skipped?:string, optKey?:string}}
+ */
+async function fillFromSubmitCapture({ orderSubmissionId, sheetId, tabName, captureName = '', captureOption = '', by = '제출 시' } = {}) {
+  if (process.env.CAPTURE_PRODUCT_ON_SUBMIT === '0') return { written: false, skipped: 'disabled' };
+  const name = String(captureName || '').slice(0, 300).trim();
+  const opt = String(captureOption || '').slice(0, 300).trim();
+  if (!orderSubmissionId || !sheetId || !tabName || (!name && !opt)) return { written: false, skipped: 'no_input' };
+  const db = getPool();
+  const ctx = await require('./manualOrder.service').tabOptionChoices(db, { sheetId, tabName });
+  if (!ctx || !ctx.campaignId) return { written: false, skipped: 'no_campaign' };
+  let loaded;
+  try { loaded = await _loadCampaign(db, ctx.campaignId); } catch (_) { return { written: false, skipped: 'not_multi_product' }; }
+  const { camp, options } = loaded;
+  const t = (await _loadTargets(db, camp, options, String(orderSubmissionId)))[0];
+  if (!t) return { written: false, skipped: 'not_target' };            // 이미 상품을 앎 · 줄 아직 없음 등
+  if (t.dupRows || t.filledUnmatched) return { written: false, skipped: t.dupRows ? 'duplicate_rows' : 'filled_unmatched' };
+  const { matchOption } = require('../utils/productCaptureMatch');
+  const key = matchOption(`${name} ${opt}`.trim(), options, { shortText: opt });
+  if (!key) return { written: false, skipped: 'ambiguous' };
+  const o = options.find(x => x.opt_key === key);
+  const sharedName = o.product_name && options.filter(x => x.product_name === o.product_name).length > 1;
+  const value = sharedName ? o.opt_key : (o.product_name || o.opt_key);
+  const field = PRODUCT_FIELD();
+  const { rowCount } = await db.query(
+    `INSERT INTO participant_edits (sheet_id, tab_name, anchor_type, anchor_value, field, kind, value_bool, value_text, created_by)
+     SELECT $1,$2,'order',$3,$4,'text',NULL,$5,$6
+      WHERE NOT EXISTS (SELECT 1 FROM participant_edits WHERE sheet_id=$1 AND tab_name=$2 AND anchor_type='order'
+                          AND anchor_value=$3 AND field=$4 AND reverted_at IS NULL)`,
+    [sheetId, t.row_tab || tabName, String(orderSubmissionId), field, value, `AI 캡처판독(${String(by).slice(0, 60)})`.slice(0, 100)]);
+  return rowCount ? { written: true, optKey: key } : { written: false, skipped: 'already_filled' };
+}
+
+module.exports = { previewCaptureProducts, applyCaptureProducts, fillFromSubmitCapture, CaptureFillError, __setPoolForTest, __setDepsForTest };

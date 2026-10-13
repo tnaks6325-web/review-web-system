@@ -2796,6 +2796,19 @@ table.wbl-t td.nc .rest.on{position:static;transform:none;opacity:1;margin:0 0 0
 .wbl-chk input{margin-top:2px}
 .wbl-chk .sub{display:block;font-weight:400;color:var(--warn);margin-top:2px}
 .wbl-df{display:flex;gap:8px;justify-content:flex-end;padding:12px 16px;background:var(--card2);border-top:1px solid var(--line)}
+/* 결정 237 — 캡처로 상품 찾기 창 */
+#cfOv .cf-dlg{width:min(780px,100%);max-height:min(720px,90vh);display:flex;flex-direction:column}
+#cfOv .cf-dlg .wbl-db{flex:1;min-height:0;overflow:auto}
+#cfOv .cf-tw{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+#cfOv .cf-t{width:100%;border-collapse:collapse;font-size:11.5px}
+#cfOv .cf-t th{position:sticky;top:0;background:var(--card2);color:var(--muted);font-size:10.5px;font-weight:750;text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
+#cfOv .cf-t td{padding:6px 9px;border-bottom:1px solid var(--line);vertical-align:middle}
+#cfOv .cf-t tr:last-child td{border-bottom:none}
+#cfOv .cf-t td.num{font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--muted)}
+#cfOv .cf-sel{font:inherit;font-size:11.5px;padding:4px 6px;border:1px solid var(--line2);border-radius:7px;background:var(--card);color:var(--ink);max-width:240px}
+#cfOv .cf-bd{display:inline-block;font-size:10px;font-weight:800;border-radius:6px;padding:2px 7px;white-space:nowrap}
+#cfOv .cf-bd.g{background:#ECFDF3;color:#067647}#cfOv .cf-bd.a{background:#FFFAEB;color:#B54708}#cfOv .cf-bd.x{background:var(--card2);color:var(--faint)}
+#cfOv .cf-na{font-size:10.5px;color:var(--faint)}
 /* 줄별 [⋯] 더보기 — **body 직속**(표는 가로 스크롤 컨테이너라 안에 그리면 잘린다: 공고 카드 [⋯]와 같은 처방).
    ★ 색은 리터럴 폴백을 함께 둔다(테마 변수 없는 호스트에서도 같은 모양). */
 .wbl-menu{position:fixed;z-index:9500;min-width:168px;background:var(--card,#fff);border:1px solid var(--line,#e5e7eb);
@@ -7852,14 +7865,82 @@ function _wdQuotaAlertShow(qb,cid){
   ov.innerHTML=`<div class="wbl-dlg" role="alertdialog" aria-labelledby="wdQbH" style="max-width:480px">`+
     `<div class="wbl-dh" id="wdQbH">⚠ 공고 총원과 상품별 남은 자리가 맞지 않습니다</div>`+
     `<div class="wbl-db">${body}</div>`+
-    `<div class="wbl-df"><button class="wbl-b" id="wdQbOpen">공고 수정</button>`+
+    `<div class="wbl-df">${_cfCanUse(qb)?'<button class="wbl-b" id="wdQbFill" title="상품을 모르는 주문의 구매 캡처를 읽어 어느 상품인지 찾습니다(결과를 보고 적용)">📷 캡처로 상품 찾기</button>':''}`+
+    `<button class="wbl-b" id="wdQbOpen">공고 수정</button>`+
     `<button class="wbl-b pri" id="wdQbOk">확인</button></div></div>`;
   document.body.appendChild(ov);
   document.getElementById('wdQbOk').onclick=_wdQuotaAlertClose;
+  const fb=document.getElementById('wdQbFill'); if(fb) fb.onclick=()=>{ _wdQuotaAlertClose(); openCaptureFill(cid); };
   document.getElementById('wdQbOpen').onclick=()=>{ _wdQuotaAlertClose(); openRecruitModal(cid); };
   STATE._wdQbEsc=e=>{ if(e.key==='Escape') _wdQuotaAlertClose(); };
   document.addEventListener('keydown',STATE._wdQbEsc);
   document.getElementById('wdQbOk').focus();
+}
+
+/* ══ 결정 237 — [📷 캡처로 상품 찾기] (어긋남 팝업에서) ════════════════════════════════════════
+   상품을 모르는 주문의 구매 캡처를 서버가 AI 로 읽어(결정 232 미리보기 — 쓰기 0) 줄마다 상품을 제안하고,
+   담당자가 표를 보고 고친 뒤 [적용]하면 그대로 적는다(AI 재실행 없음). 확정은 미리 골라 두고, 애매·캡처 없음은 사람이 고른다.
+   ★ 서버 게이트 adminOrMaster 와 1:1 — AE 에게는 버튼을 그리지 않는다(눌러도 막히는 버튼 금지).
+   ★ 상품별 남은 자리가 더 큰 쪽(gap>0 = 상품 모르는 주문이 원인일 수 있음)에서만 보인다. */
+function _cfCanUse(qb){ return (STATE.role==='master'||STATE.role==='admin') && qb && Number(qb.gap)>0; }
+const _CF_LABEL={ matched:['확정','g'], ambiguous:['애매 — 골라 주세요','a'], no_capture:['캡처 없음 — 골라 주세요','a'],
+  no_product_text:['사진에 상품 글자 없음','a'], download_failed:['사진을 못 불러옴','a'], read_failed:['사진을 못 읽음','a'],
+  duplicate_rows:['같은 주문이 여러 줄 — 중복 정리 먼저','x'], filled_unmatched:['상품 칸에 다른 값 — 표에서 직접 수정','x'] };
+function _cfClose(){ const o=document.getElementById('cfOv'); if(o) o.remove();
+  if(STATE._cfEsc){ document.removeEventListener('keydown',STATE._cfEsc); STATE._cfEsc=null; } }
+function _cfShell(inner, foot){
+  let ov=document.getElementById('cfOv');
+  if(!ov){ ov=document.createElement('div'); ov.className='wbl-ov'; ov.id='cfOv'; document.body.appendChild(ov);
+    STATE._cfEsc=e=>{ if(e.key==='Escape') _cfClose(); }; document.addEventListener('keydown',STATE._cfEsc); }
+  ov.innerHTML=`<div class="wbl-dlg cf-dlg" role="dialog" aria-labelledby="cfH">`+
+    `<div class="wbl-dh" id="cfH">📷 캡처로 상품 찾기</div><div class="wbl-db">${inner}</div><div class="wbl-df">${foot}</div></div>`;
+}
+async function openCaptureFill(cid, offset){
+  STATE._cf=null;
+  _cfShell(`<p style="margin:0">상품을 모르는 주문의 구매 캡처를 읽고 있습니다… 사진이 많으면 1~2분 걸릴 수 있습니다.</p>`,
+    `<button class="wbl-b" onclick="_cfClose()">닫기</button>`);
+  const j=await api('/api/trackb/campaigns/'+encodeURIComponent(cid)+'/capture-product-fill',
+    {method:'POST',body:JSON.stringify({mode:'preview',offset:Number(offset)||0})}).catch(()=>null);
+  if(!document.getElementById('cfOv')) return;   // 기다리는 사이 닫았으면 그대로
+  if(!j||!j.ok){ _cfShell(`<p style="margin:0;color:var(--bad)">캡처를 읽지 못했습니다: ${esc((j&&j.error)||'서버 오류')}</p>`,
+    `<button class="wbl-b" onclick="_cfClose()">닫기</button>`); return; }
+  const picks={}; (j.items||[]).forEach(it=>{ if(it.status==='matched'&&it.optKey) picks[it.orderId]=it.optKey; });
+  STATE._cf={cid, data:j, picks};
+  _cfRender();
+}
+function _cfPick(orderId, v){ const cf=STATE._cf; if(!cf) return; if(v) cf.picks[orderId]=v; else delete cf.picks[orderId]; _cfRender(); }
+function _cfRender(){
+  const cf=STATE._cf; if(!cf) return; const d=cf.data, items=d.items||[], opts=d.options||[];
+  if(!items.length){ _cfShell(`<p style="margin:0">상품을 모르는 주문이 없습니다. 어긋남의 원인이 다른 곳(상품 정원·총원 설정)에 있을 수 있습니다.</p>`,
+    `<button class="wbl-b pri" onclick="_cfClose()">확인</button>`); return; }
+  const rows=items.map(it=>{
+    const [lab,cls]=_CF_LABEL[it.status]||[it.status,'a'];
+    const off=it.applicable===false;
+    const sel=off?'<span class="cf-na">적용 불가</span>':`<select class="cf-sel" aria-label="${esc(it.seq)}번 줄 상품" onchange="_cfPick('${esc(it.orderId)}',this.value)">`+
+      `<option value="">선택 안 함</option>${opts.map(o=>`<option value="${esc(o.optKey)}"${cf.picks[it.orderId]===o.optKey?' selected':''}>${esc(o.productName)}</option>`).join('')}</select>`;
+    return `<tr><td class="num">${esc(it.seq)}</td><td class="num">${esc(String(it.day||'').slice(5))}</td>`+
+      `<td>${esc(it.read||'')}</td><td><span class="cf-bd ${cls}">${esc(lab)}</span></td><td>${sel}</td></tr>`;
+  }).join('');
+  const n=Object.keys(cf.picks).length, matched=items.filter(i=>i.status==='matched').length;
+  _cfShell(`<p style="margin:0 0 8px">상품을 모르는 주문 <b>${d.total}건</b> 중 ${items.length}건을 읽었습니다. 시스템이 확정한 <b>${matched}건</b>은 미리 골라 두었습니다 — 나머지는 캡처를 보고 골라 주세요. 고른 줄만 작업표 「상품」 칸에 적고, 작업 로그에 남습니다.</p>`+
+    `<div class="cf-tw"><table class="cf-t"><thead><tr><th>줄</th><th>구매일</th><th>캡처에서 읽은 글자</th><th>판정</th><th>상품</th></tr></thead><tbody>${rows}</tbody></table></div>`,
+    `${d.nextOffset!=null?`<button class="wbl-b" onclick="openCaptureFill('${esc(cf.cid)}',${Number(d.nextOffset)})">다음 묶음 읽기</button>`:''}`+
+    `<span style="flex:1"></span><button class="wbl-b" onclick="_cfClose()">닫기</button>`+
+    `<button class="wbl-b pri" id="cfApply" ${n?'':'disabled'} onclick="_cfApply()">${n}건 적용</button>`);
+}
+async function _cfApply(){
+  const cf=STATE._cf; if(!cf) return; const items=cf.data.items||[];
+  const picks=items.filter(it=>cf.picks[it.orderId]).map(it=>({ orderId:it.orderId, optKey:cf.picks[it.orderId],
+    source:(it.status==='matched'&&it.optKey===cf.picks[it.orderId])?'capture':'manual' }));
+  if(!picks.length) return;
+  const b=document.getElementById('cfApply'); if(b){ b.disabled=true; b.textContent='적용 중…'; }
+  const r=await api('/api/trackb/campaigns/'+encodeURIComponent(cf.cid)+'/capture-product-fill',
+    {method:'POST',body:JSON.stringify({mode:'apply',confirm:true,picks})}).catch(()=>null);
+  if(!r||!r.ok){ if(b){ b.disabled=false; b.textContent=picks.length+'건 적용'; } alert('적용하지 못했습니다: '+((r&&r.error)||'서버 오류')); return; }
+  const fails=(r.results||[]).filter(x=>!x.ok);
+  _cfClose();
+  toast(`상품 ${r.written}건을 채웠습니다`+(fails.length?` · ${fails.length}건은 적지 않음(${esc(fails[0].message||fails[0].reason||'')})`:''));
+  try{ if(STATE.cur) await _wdQuotaAlert(STATE.cur); }catch(_){ }
 }
 
 /* 발주 연결 줄 — 전폭 띠(.wobar)를 없애고 작업 조건 카드 **맨 아래 한 줄**로(사용자 확정).

@@ -1365,6 +1365,17 @@ router.post('/order', async (req, res, next) => {
         orderSubmissionId: ledger.orderSubmissionId,
       }).catch(e => logger.warn(`[submit/order] 상품 불일치 로그 실패(무시): ${e.message}`));
     }
+    /* ★ 결정 237 — 상품을 고르지 않은 주문(홀드 없음·화면 선택 없음)은 제출 때 읽은 캡처 상품 글자로 한 상품이 확실할 때만 채운다.
+       응답 뒤에 돈다(접수 지연 0) · 실패·애매 = 아무것도 안 함. 판정·대상 확인은 captureProductFill 단일 출처. */
+    if (!(holdCtx && (holdCtx.productName || holdCtx.optionKey)) && !formPickedProduct && (b.productCaptureName || b.productCaptureOption)) {
+      const _cap = { orderSubmissionId: ledger.orderSubmissionId, sheetId: orderScope.sheetId, tabName: orderScope.tabName,
+        captureName: b.productCaptureName, captureOption: b.productCaptureOption, by: '제출 시' };
+      setImmediate(() => {
+        require('../services/captureProductFill.service').fillFromSubmitCapture(_cap)
+          .then(r => { if (r && r.written) logger.info(`[submit/order] 제출 캡처로 상품 채움 os=${_cap.orderSubmissionId} → ${r.optKey}`); })
+          .catch(e => logger.warn(`[submit/order] 제출 캡처 상품 채움 실패(무시): ${e.message}`));
+      });
+    }
     res.json({
       ok: true,
       dbSaved: true,
