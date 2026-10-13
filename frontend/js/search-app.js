@@ -5232,37 +5232,68 @@ function openFormLink(btnEl) {
  * ★ 결정 243 — 인기 공고 구매양식을 "참여하기" 없이 열었을 때 참여권 안내(사용자 확정 2026-10-14 "1.나").
  *   참여권이 없으면 양식 위에 안내 창: [참여하러 가기](공고 상세) / [이미 구매했어요 — 그래도 제출하기](창 닫기).
  *   ★ 막지 않는다 — 이미 결제한 사람의 기록이 사라지지 않게. 그렇게 낸 구매는 서버가 규칙 위반으로 표시한다(결정 242).
+ *   ★ 모양은 이 화면의 기존 확인 창(상품 확인 창 · modal-overlay/modal-box/modal-actions)과 같은 문법 — 새 스타일을 만들지 않는다.
+ *   ★ 주문 카드를 여러 장 내면 카드마다 참여권 1장이 든다 — 제출할 때 카드 수 > 남은 참여권이면 한 번 더 안내한다(Codex PR #1629).
  *   ★ 다건(홀드 일괄) 제출·조회 실패·옛 서버(404)는 아무것도 하지 않는다.
  */
-async function _orderFormPopularGate({ sheetId, tabName, token }) {
+let _POPULAR_GATE = null;   // { campaignId, title, credits, acked } — 인기 공고 양식일 때만
+function _popularGateModal(info, { cards = 1 } = {}) {
+  return new Promise((resolve) => {
+    if (document.getElementById("ofPopularGate")) { resolve(true); return; }
+    const esc = t => String(t || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    const credits = Math.max(0, Number(info.credits) || 0);
+    const lead = credits <= 0
+      ? "지금 계정에는 쓸 수 있는 참여권이 없어요."
+      : "남은 참여권은 " + credits + "장인데 주문을 " + cards + "건 내려고 해요. 주문 1건마다 참여권 1장이 들어요.";
+    const ov = document.createElement("div");
+    ov.id = "ofPopularGate";
+    ov.className = "modal-overlay";
+    ov.setAttribute("role", "dialog"); ov.setAttribute("aria-modal", "true"); ov.setAttribute("aria-labelledby", "ofPopularTitle");
+    ov.innerHTML = '<div class="modal-box"><div class="modal-header"><h3 id="ofPopularTitle">인기 공고는 참여권이 있어야 해요</h3></div>'
+      + '<div class="modal-body">'
+      + '<p>' + esc(info.title) + '</p>'
+      + '<p>이 공고는 최근 1일 안에 일반 공고 구매를 제출한 참여권이 있어야 참여할 수 있어요. ' + esc(lead) + '</p>'
+      + '<p><b>아직 사지 않았다면</b> 공고에서 [참여하기]로 참여 가능 여부를 먼저 확인해 주세요.</p>'
+      + '<p style="font-size:.8rem;opacity:.8">그래도 제출하면 접수는 되지만, 참여권 없이 산 구매로 표시되어 담당자가 확인한 뒤 처리해요.</p>'
+      + '<div class="modal-actions"><button type="button" class="btn-ghost" data-pg-continue>이미 구매했어요 — 그래도 제출하기</button>'
+      + '<a class="btn-primary" data-pg-go style="text-decoration:none;text-align:center" href="campaign.html?id=' + encodeURIComponent(info.campaignId) + '">참여하러 가기</a></div>'
+      + '</div></div>';
+    const finish = (v) => { try { ov.remove(); } catch (_) {} document.removeEventListener("keydown", onKey); resolve(v); };
+    const onKey = (e) => { if (e.key === "Escape") finish(true); };
+    ov.addEventListener("click", (e) => {
+      if (e.target.closest("[data-pg-continue]")) { info.acked = Math.max(Number(info.acked) || 0, cards); finish(true); }
+      else if (e.target.closest("[data-pg-go]")) finish(false);
+    });
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(ov);
+    const c = ov.querySelector("[data-pg-continue]"); if (c) { try { c.focus(); } catch (_) {} }
+  });
+}
+
+async function _orderFormPopularGate({ sheetId, tabName, gid, token }) {
   try {
     if (typeof _BATCH !== "undefined" && _BATCH && Array.isArray(_BATCH.holds) && _BATCH.holds.length) return;
     const base = (typeof API_BASE_URL !== "undefined" && API_BASE_URL) ? API_BASE_URL : "";
     const r = await fetch(base + "/api/campaign/order-form-gate?sheetId=" + encodeURIComponent(sheetId || "")
-      + "&tabName=" + encodeURIComponent(tabName || ""), { headers: { "X-Reviewer-Token": token } });
+      + "&tabName=" + encodeURIComponent(tabName || "") + "&gid=" + encodeURIComponent(gid || ""),
+      { headers: { "X-Reviewer-Token": token } });
     if (!r.ok) return;
     const j = await r.json();
-    if (!j || !j.gate || !j.campaignId) return;
-    if (document.getElementById("ofPopularGate")) return;
-    const esc = t => String(t || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-    const ov = document.createElement("div");
-    ov.id = "ofPopularGate";
-    ov.setAttribute("role", "dialog");
-    ov.setAttribute("aria-modal", "true");
-    ov.style.cssText = "position:fixed;inset:0;z-index:100000;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:16px";
-    ov.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:420px;width:100%;padding:22px 20px;box-shadow:0 20px 50px rgba(0,0,0,.25);font-size:.92rem;line-height:1.6;color:#1F2937">
-      <div style="font-size:1.05rem;font-weight:800;margin-bottom:8px">🔥 인기 공고는 참여권이 있어야 해요</div>
-      <div style="color:#4B5563;margin-bottom:6px">${esc(j.title)}</div>
-      <div style="margin-bottom:14px">이 공고는 최근 1일 안에 일반 공고 구매를 제출한 참여권이 있어야 참여할 수 있어요. 지금 계정에는 쓸 수 있는 참여권이 없어요.<br>
-        <b>아직 사지 않았다면</b> 공고에서 [참여하기]로 참여 가능 여부를 먼저 확인해 주세요.</div>
-      <a id="ofPopularGo" href="campaign.html?id=${encodeURIComponent(j.campaignId)}" style="display:block;text-align:center;background:#EA580C;color:#fff;font-weight:800;border-radius:10px;padding:12px;text-decoration:none;margin-bottom:8px">참여하러 가기</a>
-      <button type="button" id="ofPopularContinue" style="display:block;width:100%;background:#F3F4F6;color:#374151;font-weight:700;border:0;border-radius:10px;padding:11px;cursor:pointer">이미 구매했어요 — 그래도 제출하기</button>
-      <div style="font-size:.76rem;color:#6B7280;margin-top:8px">그래도 제출하면 접수는 되지만, 참여권 없이 산 구매로 표시되어 담당자가 확인한 뒤 처리해요.</div>
-    </div>`;
-    document.body.appendChild(ov);
-    const btn = document.getElementById("ofPopularContinue");
-    if (btn) { btn.onclick = () => ov.remove(); try { btn.focus(); } catch (_) {} }
+    if (!j || !j.popular || !j.campaignId) return;
+    _POPULAR_GATE = { campaignId: j.campaignId, title: j.title || "", credits: Math.max(0, Number(j.credits) || 0), acked: 0 };
+    if (_POPULAR_GATE.credits <= 0) _popularGateModal(_POPULAR_GATE, { cards: 1 });
   } catch (_) { /* 안내일 뿐 — 실패는 조용히 지나간다 */ }
+}
+
+/** 제출 직전: 인기 공고 양식에서 주문 카드 수가 남은 참여권보다 많고 아직 안내하지 않았으면 한 번 안내. false = 참여하러 감(제출 중단). */
+async function _popularGateBeforeSubmit() {
+  try {
+    const g = _POPULAR_GATE;
+    if (!g) return true;
+    const cards = Math.max(1, (typeof _orderCardIds !== "undefined" && Array.isArray(_orderCardIds)) ? _orderCardIds.length : 1);
+    if (cards <= g.credits || cards <= (Number(g.acked) || 0)) return true;
+    return await _popularGateModal(g, { cards });
+  } catch (_) { return true; }
 }
 
 /**
@@ -5417,7 +5448,7 @@ function initOrderFormMode() {
   // ★ 결정 243: "참여하기" 없이 연 구매양식이 인기 공고면 참여권을 먼저 확인(없으면 안내 · 막지 않음).
   //   양식은 그대로 뜨고 안내 창만 위에 얹는다(판정은 서버 단일 출처 · 실패는 조용히 지나감).
   if (!(_EMBED_CTX && _EMBED_CTX.app) && !_PREVIEW_MODE && authSession && authSession.reviewerToken) {
-    _orderFormPopularGate({ sheetId, tabName, token: authSession.reviewerToken });
+    _orderFormPopularGate({ sheetId, tabName, gid, token: authSession.reviewerToken });
   }
 
   // ── 다건 카드 초기화: 기존 카드 제거 후 첫 번째 카드 생성 ──
@@ -9180,6 +9211,8 @@ function _finishPreviewSubmit() {
 async function submitOrderForm() {
   // ★ 최종 방어선: 재제출 등 팝업을 건너뛰는 내부 호출까지 포함해 미리보기에서는 주문이 절대 생성되지 않는다.
   if (_PREVIEW_MODE) { _finishPreviewSubmit(); return; }
+  // ★ 결정 243: 인기 공고 양식 — 카드 수가 남은 참여권보다 많으면 한 번 안내(막지 않음 · [참여하러 가기]를 고르면 제출하지 않고 이동)
+  if (!(await _popularGateBeforeSubmit())) { try { location.href = "campaign.html?id=" + encodeURIComponent(_POPULAR_GATE.campaignId); } catch (_) {} return; }
   window._capUploads = [];   // 캡처 첨부/업로드 추적 초기화(재제출 시 이전 결과 잔존 방지)
   if (window._submitOrderFormInProgress) { console.warn("[submitOrderForm] 진행 중 — 무시"); return; }
   window._submitOrderFormInProgress = true;
