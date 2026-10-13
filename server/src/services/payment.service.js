@@ -317,9 +317,16 @@ async function listPaymentTargets(opts = {}) {
       && _holderKey(formAcct.accountHolder) === _holderKey(registeredAcct.accountHolder));
     // ★ 이름으로만 찾은 타계정(번호 없음 — subPhone8 null)은 빼다: 회차 스냅샷이 'self' 로 박제돼
     //   다음 대조가 소유자 본계좌와 비교해 **회차 전체가 다운로드 불가**가 된다(리뷰 지적 — 기존 결함이 이 길로 열린다).
-    const regTargetable = !!registeredAcct && !(registeredAcct.isSub && registeredAcct.subPhone8 === null);
-    const preferRegistered = !!(formFirst && regComplete && sameHolder && regTargetable
-      && normalizeAccount(formAcct.bankAccount) !== normalizeAccount(registeredAcct.bankAccount)
+    // ★ 전용 계좌 없이 소유자 계좌를 물려 쓰는 타계정도 뺀다 — 소유자가 본계좌를 바꾸면 감사 트리거가 그 타계정에도
+    //   변경 줄을 남겨(migration 125) "주문 뒤 변경"으로 잡히고, 타계정 건이 소유자의 새 계좌로 돌아간다(Codex P1).
+    const regTargetable = !!registeredAcct
+      && !(registeredAcct.isSub && (registeredAcct.subPhone8 === null || registeredAcct.inheritsOwner));
+    // 은행·계좌번호를 **함께** 비교한다 — 계좌번호는 맞고 은행만 틀리게 적었다가 내정보에서 은행만 고친 경우도 잡는다(Codex P2)
+    const _bankKey = name => { const b = resolveBank(name); return b ? b.code : String(name || '').replace(/\s+/g, ''); };
+    const regDiffersFull = !!(formFirst && regComplete && (
+      normalizeAccount(formAcct.bankAccount) !== normalizeAccount(registeredAcct.bankAccount)
+      || _bankKey(formAcct.bankName) !== _bankKey(registeredAcct.bankName)));
+    const preferRegistered = !!(formFirst && regComplete && sameHolder && regTargetable && regDiffersFull
       && (formFailed || regChangedAfterOrder));
     const useForm = formFirst && !preferRegistered;
     const acct = useForm
@@ -823,7 +830,8 @@ async function _loadAccounts(phone8s) {
             COALESCE(r.name, '')                                             AS "ownerName",
             COALESCE(NULLIF(btrim(s->>'bankName'),''),   r.bank_name)        AS "bankName",
             COALESCE(NULLIF(btrim(s->>'bankAccount'),''), r.bank_account)    AS "bankAccount",
-            COALESCE(NULLIF(btrim(s->>'accountHolder'),''), r.account_holder) AS "accountHolder"
+            COALESCE(NULLIF(btrim(s->>'accountHolder'),''), r.account_holder) AS "accountHolder",
+            (NULLIF(btrim(s->>'bankAccount'),'') IS NULL)                    AS "inheritsOwner"
        FROM reviewers r, jsonb_array_elements(
               CASE WHEN jsonb_typeof(r.sub_accounts) = 'array' THEN r.sub_accounts ELSE '[]'::jsonb END) s
       WHERE RIGHT(regexp_replace(COALESCE(s->>'phone',''), '[^0-9]', '', 'g'), 8) = ANY($1)`,
@@ -842,7 +850,9 @@ async function _loadAccounts(phone8s) {
       //   같은 소유자가 본인 명의 + 타계정 명의로 여러 건 참여하면 화면이 "누구 계좌인지" 말할 수 없다(실사고).
       map[p8] = { reviewerId: s.reviewerId, bankName: s.bankName || '', bankAccount: s.bankAccount || '', accountHolder: s.accountHolder || '',
                   ownerReviewerId: s.reviewerId, participantIdentityId: null,
-                  isSub: true, name: s.name || '', ownerName: s.ownerName || '' };
+                  isSub: true, name: s.name || '', ownerName: s.ownerName || '',
+                  // 전용 계좌가 비어 소유자 계좌를 물려 쓰는 타계정(결정 231 — 소유자 계좌 변경으로 이 건을 돌리지 않는다)
+                  inheritsOwner: !!s.inheritsOwner };
     } else {
       map.ambiguousPhone8s.add(p8);
     }
@@ -1031,6 +1041,7 @@ async function _loadOwnerAccountsByRow(rows) {
       bankAccount:   (sub && String(sub.bankAccount || '').trim())   || owner.bankAccount || '',
       accountHolder: (sub && String(sub.accountHolder || '').trim()) || owner.accountHolder || '',
       isSub: !!sub, source,
+      inheritsOwner: !!sub && !String(sub.bankAccount || '').trim(),
       name: (sub && String(sub.name || '').trim()) || owner.name || '',
       ownerName: owner.name || '',
       // ★ 지목 대상 = 그 명의 항목이 실제로 등록돼 있을 때만 타계정, 아니면 소유자 본계좌.

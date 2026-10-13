@@ -12275,9 +12275,10 @@ async function _pmLoad(force){
   /* ★ 결정 231: **이미 실패한 계좌 그대로**인 줄은 처음에 체크를 풀어 둔다 — 같은 계좌로 최대 10번까지 실패가
        되풀이됐다. 사람이 다시 체크한 줄(pmRetryOk)은 다음 조회에서도 존중한다. 판정은 서버 경고(failed_account) 그대로. */
   STATE.pmExcluded = STATE.pmExcluded || {};
-  const _retryOk = STATE.pmRetryOk || (STATE.pmRetryOk = new Set());
+  // 승인은 **그때의 실패 횟수**에 묶는다 — 다시 담은 회차가 또 실패하면 횟수가 늘어 다시 기본 해제(Codex P1)
+  const _retryOk = (STATE.pmRetryOk instanceof Map) ? STATE.pmRetryOk : (STATE.pmRetryOk = new Map());
   for(const it of STATE.pmItems){
-    if((it.warnings||[]).includes('failed_account') && !_retryOk.has(_pmKey(it))) STATE.pmExcluded[_pmKey(it)] = true;
+    if((it.warnings||[]).includes('failed_account') && _retryOk.get(_pmKey(it)) !== Number(it.failedAccountCount||0)) STATE.pmExcluded[_pmKey(it)] = true;
   }
   STATE.pmFinEx = t.finishedExcluded||null; STATE.pmFinUnknown = !!t.finishedUnavailable;
   // 과거 버전에서 저장된 입금 열 정보가 비어 실패한 회차는 화면을 열 때 한 번만 자동 보완한다.
@@ -12931,8 +12932,8 @@ function _pmToggle(idx, on){
   if(on) delete STATE.pmExcluded[key]; else STATE.pmExcluded[key]=true;
   // 이전 실패 계좌 줄을 사람이 직접 다시 담았다 — 다음 조회에서 기본 해제로 되돌리지 않는다(결정 231)
   if((it.warnings||[]).includes('failed_account')){
-    const ok = STATE.pmRetryOk || (STATE.pmRetryOk = new Set());
-    if(on) ok.add(key); else ok.delete(key);
+    const ok = (STATE.pmRetryOk instanceof Map) ? STATE.pmRetryOk : (STATE.pmRetryOk = new Map());
+    if(on) ok.set(key, Number(it.failedAccountCount||0)); else ok.delete(key);
   }
   _pmRender();
 }

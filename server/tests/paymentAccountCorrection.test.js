@@ -118,6 +118,21 @@ const run = (opts, fn) => withStubPool(handler(opts), async svc => fn((await svc
       assert.strictEqual(it.bankAccount, FORM_BAD, '소유자 본계좌 변경은 타계정 건의 근거가 아니다');
     }));
 
+  await ta('1e1 ★ 전용 계좌 없이 소유자 계좌를 물려 쓰는 타계정은 바꾸지 않는다(소유자 변경 시 트리거가 타계정 줄도 남긴다)', () =>
+    run({ subRows: [{ phone8: '29893727', reviewerId: RID, name: '임혜정', ownerName: '소유자',
+                      bankName: '하나은행', bankAccount: REG_GOOD, accountHolder: '임혜정', inheritsOwner: true }],
+          failedRows: failed(),
+          auditRows: [{ reviewerId: RID, sub: '29893727', at: '2026-10-08T10:00:00+09:00' }] }, it => {
+      assert.strictEqual(it.bankAccount, FORM_BAD, '물려 쓰는 소유자 계좌로 돌리면 안 된다');
+      assert.ok(it.warnings.includes('failed_account'));
+    }));
+
+  await ta('1e3 계좌번호는 같고 은행만 고친 경우도 고친 쪽으로', () =>
+    run({ ownRows: own({ bankName: '농협', bankAccount: FORM_BAD }), failedRows: failed() }, it => {
+      assert.strictEqual(it.bankName, '농협');
+      assert.strictEqual(it.accountMismatch.using, 'registered');
+    }));
+
   await ta('1e2 타계정 명의 항목이 주문 뒤 바뀌었으면 고친 계좌', () =>
     run({ subRows: [{ phone8: '29893727', reviewerId: RID, name: '임혜정', ownerName: '소유자',
                       bankName: '하나은행', bankAccount: REG_GOOD, accountHolder: '임혜정' }],
@@ -133,7 +148,7 @@ const run = (opts, fn) => withStubPool(handler(opts), async svc => fn((await svc
 
   t('1g ★ 이름으로만 찾은 타계정(번호 없음)은 예외에서 뺀다 — 회차 스냅샷이 self 로 박제돼 다운로드가 막힌다', () => {
     const src = fs.readFileSync(SRC('services/payment.service.js'), 'utf8');
-    assert.ok(/const regTargetable = !!registeredAcct && !\(registeredAcct\.isSub && registeredAcct\.subPhone8 === null\);/.test(src));
+    assert.ok(/!\(registeredAcct\.isSub && \(registeredAcct\.subPhone8 === null \|\| registeredAcct\.inheritsOwner\)\)/.test(src));
     assert.ok(/sameHolder && regTargetable/.test(src));
     // 변경 기록 조회는 인덱스를 타는 uuid 비교
     assert.ok(/WHERE reviewer_id = ANY\(\$1::uuid\[\]\)/.test(src));
@@ -170,8 +185,9 @@ const run = (opts, fn) => withStubPool(handler(opts), async svc => fn((await svc
   console.log('\n§4 화면 · 안내문');
   const WD = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
   t('4a 이전 실패 계좌 줄은 처음에 체크 해제 · 사람이 다시 담으면 존중', () => {
-    assert.ok(/includes\('failed_account'\) && !_retryOk\.has\(_pmKey\(it\)\)\) STATE\.pmExcluded\[_pmKey\(it\)\] = true/.test(WD));
-    assert.ok(/if\(on\) ok\.add\(key\); else ok\.delete\(key\);/.test(WD));
+    // 승인은 그때의 실패 횟수에 묶인다 — 다시 실패하면 횟수가 늘어 다시 기본 해제(Codex P1)
+    assert.ok(/includes\('failed_account'\) && _retryOk\.get\(_pmKey\(it\)\) !== Number\(it\.failedAccountCount\|\|0\)\) STATE\.pmExcluded\[_pmKey\(it\)\] = true/.test(WD));
+    assert.ok(/if\(on\) ok\.set\(key, Number\(it\.failedAccountCount\|\|0\)\); else ok\.delete\(key\);/.test(WD));
   });
   t('4a2 ★ 작업 목록·선택 키는 체크 해제와 무관하게 만든다(실패 계좌 줄만 남은 작업이 사라지지 않게)', () => {
     assert.strictEqual((WD.match(/_pmWorkEntries\([^()]*,_pmOn\)/g) || []).length, 0, '작업 목록을 _pmOn 으로 만들면 체크가 다 풀린 작업이 사라진다');
