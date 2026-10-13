@@ -348,6 +348,29 @@ async function handleReviewerProfile(body = {}) {
       return { ok: false, code: 'identity_accounts_locked',
         error: '코드가 부여된 타계정은 여기서 변경할 수 없습니다. 관리자 코드 관리 절차를 이용해주세요.' };
     }
+    const sig = (sub) => `${String(sub && sub.name || '').replace(/\s+/g, '')}|${String(sub && sub.phone || '').replace(/\D/g, '').slice(-8)}`;
+    // ★ 결정 226 3·4단계 — 같은 번호 정리로 지운 칸을 옛 화면(정리 전에 열어 둔 내정보)이 통째 저장으로 되살리지 않게 뺀다.
+    //   지금 목록에 이미 있는 칸(담당자가 되돌렸거나 다시 넣은 칸)은 건드리지 않는다. 조회 실패는 종전대로 저장(막지 않음).
+    let foldedSigs = new Set();
+    try {
+      const { rows: folded } = await pool.query(
+        `SELECT snapshot->'sub'->>'name' AS name, snapshot->'sub'->>'phone' AS phone FROM reviewer_identity_decisions
+          WHERE kind = 'fold_self' AND owner_reviewer_id = $1 AND undone_at IS NULL`, [owner.id]);
+      foldedSigs = new Set(folded.map((f) => sig(f)));
+    } catch (_) { foldedSigs = new Set(); }
+    let droppedBefore = 0;
+    if (foldedSigs.size) {
+      // 검사(같은 연락처 한 번만 등)보다 먼저 뺀다 — 되살아날 칸 때문에 정상 저장이 거부되지 않게.
+      let curSigs = new Set();
+      try {
+        const { rows: [cur] } = await pool.query('SELECT sub_accounts FROM reviewers WHERE id = $1', [owner.id]);
+        const list = cur && cur.sub_accounts;
+        curSigs = new Set((Array.isArray(list) ? list : []).map((x) => sig(x)));
+      } catch (_) { curSigs = new Set(); }
+      const keep = subs.filter((sub) => !foldedSigs.has(sig(sub)) || curSigs.has(sig(sub)));
+      droppedBefore = subs.length - keep.length;
+      subs.length = 0; subs.push(...keep);
+    }
     const phone8s = new Set();
     for (const sub of subs) {
       const subPhone8 = String(sub && sub.phone || '').replace(/[^0-9]/g, '').slice(-8);
@@ -358,9 +381,21 @@ async function handleReviewerProfile(body = {}) {
     // 명의의 공통 아이디는 전용 PATCH 경로에서만 변경한다. 구버전/캐시된 프로필 화면이
     // shoppingId 필드를 싣지 않은 채 타계정의 다른 항목을 수정해도 기존 아이디를 잃지 않게
     // 정확한 이름+전화 매칭을 우선하고, 이름/전화 자체를 편집한 1개 행은 같은 인덱스로 보존한다.
-    const sig = (sub) => `${String(sub && sub.name || '').replace(/\s+/g, '')}|${String(sub && sub.phone || '').replace(/\D/g, '').slice(-8)}`;
-    await mutateSubAccounts(owner.id, (currentSubs) => {
+    let droppedFolded = 0;
+    await mutateSubAccounts(owner.id, async (currentSubs) => {
       const usedOld = new Set();
+      // 잠금을 잡은 뒤 한 번 더 — 위에서 읽은 뒤 잠금을 기다리는 사이에 정리가 끝났을 수 있다(레드팀 2).
+      try {
+        const { rows: folded } = await pool.query(
+          `SELECT snapshot->'sub'->>'name' AS name, snapshot->'sub'->>'phone' AS phone FROM reviewer_identity_decisions
+            WHERE kind = 'fold_self' AND owner_reviewer_id = $1 AND undone_at IS NULL`, [owner.id]);
+        for (const f of folded) foldedSigs.add(sig(f));
+      } catch (_) { /* 조회 실패는 앞서 읽은 목록으로 */ }
+      if (foldedSigs.size) {
+        const keep = subs.filter((sub) => !foldedSigs.has(sig(sub)) || currentSubs.some((old) => sig(old) === sig(sub)));
+        droppedFolded += subs.length - keep.length;
+        subs.length = 0; subs.push(...keep);
+      }
       subs.forEach((sub, idx) => {
         let oldIdx = currentSubs.findIndex((old, i) => !usedOld.has(i) && sig(old) === sig(sub));
         if (oldIdx < 0 && currentSubs[idx] && !usedOld.has(idx)) oldIdx = idx;
@@ -376,6 +411,11 @@ async function handleReviewerProfile(body = {}) {
       return subs;
     }, { source: _fromOrderForm ? 'order_form_register' : 'profile' });
     if (_fromOrderForm) _event('order_form_register', [{ id: owner.id }]);   // 결정 224 — 관찰
+    // 본계정으로 합친 칸을 다시 넣으려 했으면 알린다(조용히 빠지지 않게 · 화면은 ok 로 처리 — 막지 않는다).
+    if (droppedBefore + droppedFolded > 0) {
+      return { ok: true, foldedSkipped: droppedBefore + droppedFolded,
+        message: '본계정과 같은 번호의 타계정은 본계정으로 합쳐져 있어 다시 저장하지 않았어요.' };
+    }
     return { ok: true };
   }
 

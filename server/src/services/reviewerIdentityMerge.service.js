@@ -273,7 +273,13 @@ async function undoDecision({ decisionId, by = '', db = pool } = {}) {
     if (!d) throw new IdentityMergeError('bad_decision', '되돌릴 판단을 찾을 수 없습니다.', 404);
     if (d.undone_at) throw new IdentityMergeError('already_undone', '이미 되돌린 판단입니다.', 409);
     const restored = { cards: 0, cleared: [] };
-    if (d.kind === 'merge') {
+    if (d.kind === 'fold_self') {
+      // 결정 226 3·4단계 — 같은 번호 타계정 정리 되돌리기(카드 → 칸 → 옮긴 기록 순 · reviewerIdentityFold)
+      const r = await require('./reviewerIdentityFold.service').undoFoldInTx(client, d);
+      restored.cards = r.restored && r.restored.card ? 1 : 0;
+      restored.slot = !!(r.restored && r.restored.slot);
+      restored.rows = r.restored ? r.restored.rows : 0;
+    } else if (d.kind === 'merge') {
       await client.query('SELECT id FROM reviewers WHERE id = $1 FOR NO KEY UPDATE', [d.owner_reviewer_id]);
       const { rows: keepRows } = await client.query(
         `SELECT id, kind, name, phone, status FROM reviewer_identity_cards WHERE id = $1 FOR UPDATE`, [d.kept_card_id]);
@@ -314,7 +320,7 @@ async function listDecisions({ db = pool, limit = 50 } = {}) {
   const { rows } = await db.query(
     `SELECT d.id, d.kind, d.owner_reviewer_id, r.name AS owner_name, d.group_key, d.memo, d.filled,
             d.decided_by, d.decided_at, d.undone_by, d.undone_at,
-            k.name AS kept_name, k.phone AS kept_phone,
+            k.name AS kept_name, k.phone AS kept_phone, d.snapshot->'sub'->>'name' AS fold_name,
             (SELECT COALESCE(json_agg(json_build_object('name', m.name, 'phone', m.phone)), '[]'::json)
                FROM reviewer_identity_cards m WHERE m.id = ANY(d.merged_card_ids)) AS merged
        FROM reviewer_identity_decisions d
@@ -325,6 +331,7 @@ async function listDecisions({ db = pool, limit = 50 } = {}) {
     decisionId: String(d.id), kind: d.kind, ownerId: d.owner_reviewer_id ? String(d.owner_reviewer_id) : null, ownerName: d.owner_name || '',
     phone8: d.kind === 'shared_phone_ok' ? String(d.group_key).split('|')[1] || '' : '',
     kept: d.kept_name ? { name: d.kept_name, phone: d.kept_phone } : null, merged: d.merged || [],
+    foldedName: d.kind === 'fold_self' ? String(d.fold_name || '') : '',
     memo: d.memo, filled: Object.keys(d.filled || {}), decidedBy: d.decided_by, decidedAt: d.decided_at,
     undone: !!d.undone_at, undoneBy: d.undone_by || '', undoneAt: d.undone_at,
   })) };
