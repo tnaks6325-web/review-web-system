@@ -61,7 +61,7 @@ ok('저장: 참여형(isPart) 블록 안에서만 전송 — 레거시 공고 �
 // ── 관제 ──
 ok('관제: 타계정 판정은 owner_phone8 ≠ phone8(서버 파생값 기준)', /_isSubRow = r => !!\(r\.owner_phone8 && String\(r\.owner_phone8\) !== String\(r\.phone8\)\)/.test(recruit));
 ok('관제: 헤더 통계에 오늘 타계정 건수', /타계정 \$\{todaySubCnt\}/.test(recruit));
-ok('관제: 소유자 묶음표(_campOwnerTable) 정의 + 렌더', /function _campOwnerTable\(rows, now\)/.test(recruit) && /optTableHtml \+ ownerTableHtml \+ items/.test(recruit));
+ok('관제: 소유자 묶음표(_campOwnerTable) 정의 + 렌더', /function _campOwnerTable\(rows, now\)/.test(recruit) && /optTableHtml \+ (directTableHtml \+ )?ownerTableHtml \+ items/.test(recruit));
 ok('관제 묶음표: 타계정 건 있는 소유자만 노출(본계정 단독은 제외)', /filter\(g => g\.sub > 0\)/.test(recruit));
 ok('관제 묶음표: 전화번호는 뒤4자리만 표기(PII 최소화)', /\$\{g\.owner\.slice\(-4\)\}/.test(recruit) && !/\$\{g\.owner\}</.test(recruit));
 ok('관제 행: 타계정 배지에 소유자 뒤4자리 병기', /타 · 본계정 \*\*\*" \+ String\(r\.owner_phone8\)\.slice\(-4\)/.test(recruit));

@@ -3400,8 +3400,11 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             cp.is_submitted AS submitted, cp.is_paid AS paid, cp.source,
             cp.order_submission_id, cp.identity_key, cp.row_json, cp.submit_col, cp.submit_col2,
             cp.updated_at::text AS revision,
-            purpose_app.id AS "popularPurposeApplicationId",
-            purpose_app.phone8 AS "popularPurposePhone8"
+            -- ★ 결정 241: 바로 구매 줄도 "인기 참여용" 라벨 대상 — 참여권 이벤트 id('os:'+주문 id)·주문 연락처로 맞춘다.
+            COALESCE(purpose_app.id::text, CASE WHEN purpose_order.id IS NOT NULL AND purpose_order.campaign_application_id IS NULL
+                                                THEN 'os:' || purpose_order.id::text END) AS "popularPurposeApplicationId",
+            COALESCE(purpose_app.phone8, CASE WHEN purpose_order.id IS NOT NULL AND purpose_order.campaign_application_id IS NULL
+                                              THEN RIGHT(regexp_replace(COALESCE(purpose_order.phone, ''), '[^0-9]', '', 'g'), 8) END) AS "popularPurposePhone8"
        FROM campaign_participants cp
        LEFT JOIN order_submissions purpose_order
          ON purpose_order.id = cp.order_submission_id AND purpose_order.deleted_at IS NULL
@@ -3427,7 +3430,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   if (showEdits) {
     try {
       const phones = [...new Set(roster.map((row) => String(row.popularPurposePhone8 || '')).filter(Boolean))];
-      const matches = await loadPopularCreditMatches(db, phones);
+      const matches = await loadPopularCreditMatches(db, phones, { includeDirectPurchases: true });
       popularPurposeIds = matches.matchedNormalIds;
     } catch (e) {
       logger.warn(`[trackB] 인기상품 목적 라벨 판정 실패 sheet=${sheetId} tab=${tabName}: ${e.message}`);

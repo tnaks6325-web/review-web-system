@@ -1320,24 +1320,8 @@ function matchOrderOption(options, order) {
  * ★ 늦은 구매로 신청이 확정(submitted)된 주문은 신청 쪽에서 이미 센다 → 제외(이중계수 방지).
  * ★★ fail-soft null(= 종전: 세지 않음). 잠금 tx 안에서는 SAVEPOINT 로 격리(082 — 실패 쿼리가 tx 를 죽이지 않게).
  */
-/**
- * ★ 결정 240(Codex PR #1626) — 공고별 **바로 구매만**(공고 참여 연결 없음 · 지각 확정에 묶인 주문 아님 · 공고 참여 주문과 같은 구매의 수동 중복 아님) 수.
- *   관리자 화면 숫자·하한(quotaFloor.confirmedWithDirect)만 쓴다 — 참여 게이트의 `_loadLinkedOrderCounts` 는 건드리지 않는다(핫패스 무접촉).
- *   범위는 그 로더와 같다: campaign: 좌표 + 연결 작업표(공고 시작일 이후) · 구매 키 중복 제거 · 취소는 살아 있는 작업표 줄이 가리킬 때만.
- *   공유 작업표는 탭 좌표를 귀속하지 않는다(호출부가 sharedTab 이면 쓰지 않음). 실패는 null(모름).
- * @returns {Promise<Map<string,{n:number,today:number}>|null>}
- */
-async function loadDirectOrderCounts(db, ids, now = new Date()) {
-  if (TABLE_QUOTA_MODE === 'off' || !ids || !ids.length || !db || typeof db.query !== 'function') return null;
-  const inClient = typeof db.release === 'function';
-  let sp = false;
-  if (inClient) { try { await db.query('SAVEPOINT direct_orders'); sp = true; } catch (_) { /* tx 밖 클라이언트 */ } }
-  try {
-    const dayStart = kstDayStartUtc(now).toISOString();
-    const { rows } = await db.query(`
-      SELECT rc.id,
-             COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL})::int AS n,
-             COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL}) FILTER (WHERE os.submitted_at >= $2)::int AS today
+/* 바로 구매 범위(결정 240) — loadDirectOrderCounts·listDirectOrders 가 같은 FROM/WHERE 를 쓴다($1 = 공고 id 배열). */
+const DIRECT_ORDER_SCOPE_SQL = `
         FROM recruit_campaigns rc
         JOIN order_submissions os
           ON ${ORDER_COUNTED_SQL}
@@ -1360,6 +1344,27 @@ async function loadDirectOrderCounts(db, ids, now = new Date()) {
                   AND ao.dedup_key = os.dedup_key
                   AND RIGHT(regexp_replace(COALESCE(ao.phone, ''), '[^0-9]', '', 'g'), 8)
                     = RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)))
+`;
+
+/**
+ * ★ 결정 240(Codex PR #1626) — 공고별 **바로 구매만**(공고 참여 연결 없음 · 지각 확정에 묶인 주문 아님 · 공고 참여 주문과 같은 구매의 수동 중복 아님) 수.
+ *   관리자 화면 숫자·하한(quotaFloor.confirmedWithDirect)만 쓴다 — 참여 게이트의 `_loadLinkedOrderCounts` 는 건드리지 않는다(핫패스 무접촉).
+ *   범위는 그 로더와 같다: campaign: 좌표 + 연결 작업표(공고 시작일 이후) · 구매 키 중복 제거 · 취소는 살아 있는 작업표 줄이 가리킬 때만.
+ *   공유 작업표는 탭 좌표를 귀속하지 않는다(호출부가 sharedTab 이면 쓰지 않음). 실패는 null(모름).
+ * @returns {Promise<Map<string,{n:number,today:number}>|null>}
+ */
+async function loadDirectOrderCounts(db, ids, now = new Date()) {
+  if (TABLE_QUOTA_MODE === 'off' || !ids || !ids.length || !db || typeof db.query !== 'function') return null;
+  const inClient = typeof db.release === 'function';
+  let sp = false;
+  if (inClient) { try { await db.query('SAVEPOINT direct_orders'); sp = true; } catch (_) { /* tx 밖 클라이언트 */ } }
+  try {
+    const dayStart = kstDayStartUtc(now).toISOString();
+    const { rows } = await db.query(`
+      SELECT rc.id,
+             COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL})::int AS n,
+             COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL}) FILTER (WHERE os.submitted_at >= $2)::int AS today
+        ${DIRECT_ORDER_SCOPE_SQL}
        GROUP BY rc.id`, [ids, dayStart]);
     if (sp) { try { await db.query('RELEASE SAVEPOINT direct_orders'); } catch (_) {} }
     const m = new Map(ids.map(id => [id, { n: 0, today: 0 }]));
@@ -1369,6 +1374,47 @@ async function loadDirectOrderCounts(db, ids, now = new Date()) {
     if (sp) { try { await db.query('ROLLBACK TO SAVEPOINT direct_orders'); } catch (_) {} }
     return null;
   }
+}
+
+/**
+ * ★ 결정 241 — 한 공고의 바로 구매 목록(참여 관리 화면 "바로 구매" 묶음). loadDirectOrderCounts 와 같은 범위·같은 구매 키(한 구매 = 한 줄).
+ * 실패는 null. 연락처는 끝 4자리만 내린다.
+ */
+async function listDirectOrders(db, campaignId, { limit = 500 } = {}) {
+  if (TABLE_QUOTA_MODE === 'off' || !campaignId || !db || typeof db.query !== 'function') return null;
+  try {
+    const { rows } = await db.query(`
+      SELECT * FROM (
+        SELECT DISTINCT ON (${ORDER_PURCHASE_KEY_SQL})
+               os.id, COALESCE(NULLIF(BTRIM(os.orderer), ''), NULLIF(BTRIM(os.recipient), ''), cp.reviewer_name) AS name,
+               RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 4) AS phone4,
+               os.submitted_at, os.source,
+               -- 상품 = 담당자가 고친 상품 > 고른 상품 > 작업표 줄 상품(운영 바로 구매의 80% 는 주문 칸이 비어 작업표에만 있다)
+               COALESCE(NULLIF(pe.value_text, ''), NULLIF(os.selected_product, ''), NULLIF(os.selected_opt_key, ''),
+                        NULLIF(cp.option_text, ''), NULLIF(cp.row_json->>'상품', ''), NULLIF(cp.product_name, '')) AS product,
+               cp.seq AS row_seq
+        ${DIRECT_ORDER_SCOPE_SQL.replace('WHERE rc.id = ANY($1)', `LEFT JOIN LATERAL (
+            SELECT cpo.reviewer_name, cpo.option_text, cpo.row_json, cpo.product_name, cpo.seq, cpo.sheet_id, cpo.tab_name
+              FROM campaign_participants cpo
+             WHERE cpo.order_submission_id = os.id AND cpo.deleted_at IS NULL AND cpo.active
+             ORDER BY cpo.seq LIMIT 1
+          ) cp ON TRUE
+          LEFT JOIN LATERAL (
+            SELECT pe0.value_text FROM participant_edits pe0
+             WHERE pe0.sheet_id = cp.sheet_id AND pe0.tab_name = cp.tab_name
+               AND pe0.anchor_type = 'order' AND pe0.anchor_value = os.id::text
+               AND pe0.field = 'col:상품' AND pe0.reverted_at IS NULL
+             ORDER BY pe0.created_at DESC, pe0.id DESC LIMIT 1
+          ) pe ON TRUE
+       WHERE rc.id = ANY($1)`)}
+        ORDER BY ${ORDER_PURCHASE_KEY_SQL}, os.submitted_at
+      ) x ORDER BY x.submitted_at DESC NULLS LAST LIMIT $2`, [[campaignId], Math.max(1, Math.min(2000, Number(limit) || 500))]);
+    return rows.map(r => ({
+      orderId: String(r.id), name: String(r.name || ''), phone4: String(r.phone4 || ''),
+      submittedAt: r.submitted_at, product: String(r.product || ''), rowSeq: r.row_seq == null ? null : Number(r.row_seq),
+      source: r.source === 'admin_external' ? 'manual' : 'link',
+    }));
+  } catch (_) { return null; }
 }
 
 // opts.excludeApplicationDuplicates: 공고 참여 주문과 같은 구매(주문번호+연락처)를 수동으로 또 넣은 바로 구매는 빼고 센다.
@@ -1993,6 +2039,7 @@ module.exports = {
   __resetPlanCacheForTest,
   TABLE_QUOTA_MODE,
   loadDirectOrderCounts,
+  listDirectOrders,
   loadExternalOptionOrders: _loadExternalOptionOrders,
   COUNT_BASIS,
   _mergeCountBasis,

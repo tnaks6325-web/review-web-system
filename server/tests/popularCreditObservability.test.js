@@ -19,9 +19,11 @@ assert(creditService.includes('COALESCE(ca.is_popular_snapshot, rc.is_popular)')
 assert(creditService.includes('ca.submitted_at BETWEEN $1 AND $2'), 'shared matcher must use the rolling one-day window');
 assert(routes.includes("scope: 'rolling_1_day_snapshot_based_current_state'"), 'audit must describe the same rolling one-day window');
 assert(creditService.includes('const credit = queue.credits[queue.next]'), 'shared matcher must consume FIFO credits in linear time');
-assert(routes.includes('loadPopularCreditMatches(pool, null, { evaluatedAt })'), 'audit must use the shared matcher');
+// 결정 241: 관리자 집계도 리뷰어 판정과 같은 셈(바로 구매 포함) — 공유 매처 그대로.
+assert(routes.includes('loadPopularCreditMatches(pool, null, { evaluatedAt, includeDirectPurchases: true })'), 'audit must use the shared matcher');
 assert(routes.includes('popular_purpose: purposeMatches.matchedNormalIds.has(String(r.id))'), 'control API must use the shared purpose marker');
-assert(trackB.includes('purpose_app.id AS "popularPurposeApplicationId"'), 'workdesk marker must follow the linked order application');
+assert(/COALESCE\(purpose_app\.id::text,[\s\S]{0,200}'os:' \|\| purpose_order\.id::text END\) AS "popularPurposeApplicationId"/.test(trackB),
+  'workdesk marker must follow the linked order application (direct purchase rows: os:<order id>)');
 assert(trackB.includes("popularPurpose: showEdits && popularPurposeIds.has(String(r.popularPurposeApplicationId || ''))"),
   'workdesk marker must use the shared matcher and remain internal-only');
 assert(control.includes('🔥 인기상품목적 참여건'), 'control UI must label the matched entry');

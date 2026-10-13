@@ -1454,7 +1454,8 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, _adminCampaig
 router.get('/admin/popular-credit-audit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const evaluatedAt = new Date();
-    const matches = await loadPopularCreditMatches(pool, null, { evaluatedAt });
+    // ★ 결정 241 — 리뷰어 판정(결정 238)과 같은 셈: 바로 구매도 일반/인기 참여로 센다.
+    const matches = await loadPopularCreditMatches(pool, null, { evaluatedAt, includeDirectPurchases: true });
     const data = {
       total_popular_uses: matches.popularEvents.length,
       submitted_uses: matches.popularEvents.filter((event) => event.status === 'submitted').length,
@@ -3863,7 +3864,7 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
       [id]
     );
     const purposeMatches = await loadPopularCreditMatches(pool,
-      [...new Set(rows.map((row) => String(row.phone8 || '')).filter(Boolean))], { evaluatedAt });
+      [...new Set(rows.map((row) => String(row.phone8 || '')).filter(Boolean))], { evaluatedAt, includeDirectPurchases: true });
     /* 주문 표시는 작업 로그와 같은 서버 판정값을 쓴다. 초과시간을 브라우저에서 다시 계산하면
        시간대/반올림 차이로 두 화면이 갈릴 수 있어 초 단위 정수까지 여기서 확정한다. */
     const controlRows = rows.map(r => {
@@ -4012,11 +4013,14 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
       const stats = c.attributable ? await qf.optionDirectOrderStats(pool, id) : new Map();
       let byOpt = null;
       if (stats) { byOpt = {}; for (const [k, v] of stats) byOpt[k] = v; }
+      // ★ 결정 241 — 바로 구매한 사람 목록(같은 셈 · 한 구매 = 한 줄). 공유 작업표·실패는 null(화면이 "나눌 수 없음/확인 못 함").
+      const rowsDirect = c.attributable ? await require('../services/campaignState.service').listDirectOrders(pool, id) : null;
       directSummary = {
         countable: c.attributable, shared: c.sharedTab,
         todayConfirmed: c.today, totalConfirmed: c.total,
         todayDirect: c.directToday, totalDirect: c.direct,
         byOption: byOpt,
+        rows: rowsDirect,
       };
     } catch (e) {
       logger.warn(`[campaign/applications] 바로 구매 요약 실패(공고 참여만 표시) camp=${id}: ${e.message}`);
