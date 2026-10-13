@@ -1378,6 +1378,9 @@ router.post('/order', async (req, res, next) => {
           .catch(e => logger.warn(`[submit/order] 제출 캡처 상품 채움 실패(무시): ${e.message}`));
       });
     }
+    /* ★ 결정 242 — 공고 참여 없이 바로 낸 구매는 응답 뒤에 공고 참여 규칙 위반을 판정해 표시만 남긴다(막지 않음 · 실패 = 표시 없음).
+       홀드로 확정된 주문은 판정 대상이 아니다(서비스가 campaign_application_id 로 다시 거른다). */
+    if (!holdCtx) require('../services/directPurchaseRules.service').judgeLater(ledger.orderSubmissionId, 'submit');
     res.json({
       ok: true,
       dbSaved: true,

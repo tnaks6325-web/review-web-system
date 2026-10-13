@@ -2909,7 +2909,10 @@ async function _adminCampaignList(req, res, next) {
           //   위 두 칸(공고 참여만)은 구버전 화면 호환·진단용으로 그대로 둔다.
           ...(() => {
             const c = require('../services/quotaFloor.service').confirmedWithDirect(cnt, _directMap ? _directMap.get(r.id) : null);
-            return { todayConfirmedAll: c.today, totalConfirmedAll: c.total, directCountable: c.attributable, directShared: c.sharedTab };
+            const dmr = _directMap ? _directMap.get(r.id) : null;
+            return { todayConfirmedAll: c.today, totalConfirmedAll: c.total, directCountable: c.attributable, directShared: c.sharedTab,
+              // 결정 242: 규칙 위반 표시가 붙은 바로 구매 수(카드 주황 배지) — 공유 작업표는 귀속할 수 없어 0
+              ruleViolations: c.attributable && dmr ? (Number(dmr.flagged) || 0) : 0 };
           })(),
           late: lateMap.get(r.id) || 0,
           blogPending: blogPendingMap.get(r.id) || 0,   // 127: 승인 대기(블로그) — 카드 관제 배지

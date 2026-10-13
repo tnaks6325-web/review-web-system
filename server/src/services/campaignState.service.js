@@ -1363,12 +1363,14 @@ async function loadDirectOrderCounts(db, ids, now = new Date()) {
     const { rows } = await db.query(`
       SELECT rc.id,
              COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL})::int AS n,
-             COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL}) FILTER (WHERE os.submitted_at >= $2)::int AS today
+             COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL}) FILTER (WHERE os.submitted_at >= $2)::int AS today,
+             -- 결정 242: 규칙 위반 표시가 붙은 바로 구매 수(공고 카드 배지)
+             COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL}) FILTER (WHERE jsonb_array_length(COALESCE(os.rule_flags, '[]'::jsonb)) > 0)::int AS flagged
         ${DIRECT_ORDER_SCOPE_SQL}
        GROUP BY rc.id`, [ids, dayStart]);
     if (sp) { try { await db.query('RELEASE SAVEPOINT direct_orders'); } catch (_) {} }
-    const m = new Map(ids.map(id => [id, { n: 0, today: 0 }]));
-    for (const r of rows || []) if (r && r.id != null) m.set(r.id, { n: Number(r.n) || 0, today: Number(r.today) || 0 });
+    const m = new Map(ids.map(id => [id, { n: 0, today: 0, flagged: 0 }]));
+    for (const r of rows || []) if (r && r.id != null) m.set(r.id, { n: Number(r.n) || 0, today: Number(r.today) || 0, flagged: Number(r.flagged) || 0 });
     return m;
   } catch (e) {
     if (sp) { try { await db.query('ROLLBACK TO SAVEPOINT direct_orders'); } catch (_) {} }
@@ -1380,6 +1382,11 @@ async function loadDirectOrderCounts(db, ids, now = new Date()) {
  * ★ 결정 241 — 한 공고의 바로 구매 목록(참여 관리 화면 "바로 구매" 묶음). loadDirectOrderCounts 와 같은 범위·같은 구매 키(한 구매 = 한 줄).
  * 실패는 null. 연락처는 끝 4자리만 내린다.
  */
+function _ruleLabel(code) {
+  const { RULE_LABELS } = require('./directPurchaseRules.service');
+  return RULE_LABELS[code] || (code ? String(code) : '');
+}
+
 async function listDirectOrders(db, campaignId, { limit = 500 } = {}) {
   if (TABLE_QUOTA_MODE === 'off' || !campaignId || !db || typeof db.query !== 'function') return null;
   try {
@@ -1389,7 +1396,7 @@ async function listDirectOrders(db, campaignId, { limit = 500 } = {}) {
                os.id, COALESCE(NULLIF(BTRIM(os.orderer), ''), NULLIF(BTRIM(os.recipient), ''), cp.reviewer_name) AS name,
                RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 4) AS phone4,
                RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) AS phone8,
-               os.submitted_at, os.source,
+               os.submitted_at, os.source, os.rule_flags,
                -- 상품 = 담당자가 고친 상품 > 고른 상품 > 작업표 줄 상품(운영 바로 구매의 80% 는 주문 칸이 비어 작업표에만 있다)
                COALESCE(NULLIF(pe.value_text, ''), NULLIF(os.selected_product, ''), NULLIF(os.selected_opt_key, ''),
                         NULLIF(cp.option_text, ''), NULLIF(cp.row_json->>'상품', ''), NULLIF(cp.product_name, '')) AS product,
@@ -1420,6 +1427,8 @@ async function listDirectOrders(db, campaignId, { limit = 500 } = {}) {
       // 담당자 손을 거친 주문(외부모집 수동제출 admin_external · 진단 수동추가 manual)은 수동, 나머지는 구매양식 링크(Codex PR #1627)
       source: (r.source === 'admin_external' || r.source === 'manual') ? 'manual' : 'link',
       phone8: String(r.phone8 || ''),   // ★ 서버 안에서만(인기 참여용 표시 계산) — 라우트가 응답 전에 지운다
+      // 결정 242: 규칙 위반 표시(사람이 읽는 이름). null = 판정 전·판정 실패(모름) — 화면은 아무것도 그리지 않는다.
+      ruleFlags: Array.isArray(r.rule_flags) ? r.rule_flags.map(f => _ruleLabel(f && f.code)).filter(Boolean) : null,
     }));
   } catch (_) { return null; }
 }

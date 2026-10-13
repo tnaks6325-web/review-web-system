@@ -718,6 +718,8 @@ async function submitExternalOrder({
 
   logger.info(`[manual-order] 외부제출 tab=${tabName} name=${f.recipient} osid=${ledger.orderSubmissionId}`
     + (application ? ` app=${application.applicationId}` : '') + ` by=${adminName || '?'}`);
+  // ★ 결정 242 — 공고 참여로 묶이지 않은 바로 구매면 응답 뒤에 규칙 위반을 판정해 표시만 남긴다(막지 않음).
+  if (!application) require('./directPurchaseRules.service').judgeLater(ledger.orderSubmissionId, 'manual');
 
   let captureSession = null;
   try {
