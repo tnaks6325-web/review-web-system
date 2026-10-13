@@ -62,6 +62,13 @@ mo.tabOptionChoices = async () => ({ campaignId: 'c1', choices: [] });
     assert(/setImmediate\(/.test(blk) && /\.catch\(/.test(blk));
     assert(src.indexOf('fillFromSubmitCapture(_cap)') < src.indexOf('res.json({\n      ok: true,\n      dbSaved: true'), '응답 직전에 예약(처리는 응답 뒤)');
   });
+  await ok('Codex 리뷰: 화면이 홀드 없는 제출에도 캡처 원본 글자를 싣는다(안 실으면 자동 채우기가 영영 안 돈다)', async () => {
+    const sa = fs.readFileSync(path.resolve(__dirname, '../../frontend/js/search-app.js'), 'utf8');
+    assert(/productCaptureName: o\.productCaptureName \|\| o\.productCaptureRaw \|\| "",/.test(sa));
+    assert(/productCaptureOption: o\.productCaptureOptRaw \|\| "",/.test(sa));
+    const sr = fs.readFileSync(path.resolve(__dirname, '../src/routes/submit.routes.js'), 'utf8');
+    assert(/if \(holdCtx && holdCtx\.verified && holdCtx\.optionKey\)/.test(sr), '결정 230 홀드 대조는 홀드가 있을 때만(영향 없음)');
+  });
   mo.tabOptionChoices = realTab;
   console.log(`\n✅ captureProductOnSubmit: ${passed} passed`);
 })().catch(e => { console.error(e); process.exit(1); });

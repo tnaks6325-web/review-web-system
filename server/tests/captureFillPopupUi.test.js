@@ -52,6 +52,25 @@ const PREVIEW = { ok: true, total: 3, nextOffset: null, options: [{ optKey: 'F',
     assert.deepEqual(ap.picks, [{ orderId: 'o1', optKey: 'F', source: 'capture' }, { orderId: 'o2', optKey: 'S', source: 'manual' }]);
     assert(/2건을 채웠습니다/.test(log.toast[0])); assert(!els.cfOv, '적용 뒤 창 닫힘');
   });
+  await ok('Codex 리뷰: 다음 묶음으로 넘어가도 앞에서 고른 줄을 유지하고 함께 적용한다', async () => {
+    const P2 = { ok: true, total: 4, nextOffset: null, options: PREVIEW.options, items: [{ orderId: 'o4', seq: 300, day: '2026-09-06', status: 'matched', optKey: 'S', read: 'S' }] };
+    const { ctx, els, log } = harness('admin', (b) => b.mode === 'preview' ? (b.offset ? P2 : { ...PREVIEW, nextOffset: 3 }) : { ok: true, written: 3, results: [] });
+    await ctx.openCaptureFill('c1', 0);
+    ctx._cfPick('o2', 'S');
+    await ctx.openCaptureFill('c1', 3, true);
+    assert(/앞 묶음에서 고른 2건 포함/.test(els.cfOv.innerHTML)); assert(/3건 적용/.test(els.cfOv.innerHTML));
+    await ctx._cfApply();
+    const ap = log.api.find(x => x[1].mode === 'apply')[1];
+    assert.deepEqual(ap.picks.map(p => p.orderId).sort(), ['o1', 'o2', 'o4']);
+  });
+  await ok('Codex 리뷰: 같은 상품 이름을 여러 옵션이 쓰면 옵션 이름까지 보인다', async () => {
+    const P3 = { ok: true, total: 1, nextOffset: null, options: [{ optKey: '샴푸 · 500ml', productName: '샴푸' }, { optKey: '샴푸 · 1L', productName: '샴푸' }, { optKey: '린스', productName: '린스' }],
+      items: [{ orderId: 'o1', seq: 1, day: '2026-09-05', status: 'ambiguous', read: '샴푸' }] };
+    const { ctx, els } = harness('admin', () => P3);
+    await ctx.openCaptureFill('c1', 0);
+    const h = els.cfOv.innerHTML;
+    assert(/샴푸 · 샴푸 · 500ml/.test(h) && /샴푸 · 샴푸 · 1L/.test(h)); assert(/>린스</.test(h));
+  });
   await ok('미리보기 실패 → 실패를 말한다(조용한 실패 금지)', async () => {
     const { ctx, els } = harness('admin', () => ({ ok: false, error: '권한 없음' }));
     await ctx.openCaptureFill('c1', 0);

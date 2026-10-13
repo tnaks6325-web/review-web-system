@@ -9512,8 +9512,10 @@ async function submitOrderForm() {
       selectedProduct:    o.selectedProduct    || "",
       // ★ 결정 230: 참여 공고(홀드) 제출이면 캡처에서 읽은 상품명·옵션을 함께 보낸다 — 서버가 고른 상품과 다르면
       //   PRODUCT_MISMATCH 로 되묻는다(아래). 홀드가 없는 구매양식은 종전 값(B안) 그대로.
-      productCaptureName: o.productCaptureName || ((bh || (_EMBED_CTX && _EMBED_CTX.app)) ? (o.productCaptureRaw || "") : ""),
-      productCaptureOption: (bh || (_EMBED_CTX && _EMBED_CTX.app)) ? (o.productCaptureOptRaw || "") : "",
+      //   ★ 결정 237: 홀드 없는 제출도 캡처 원본 글자를 싣는다 — 상품을 고르지 않은 제출이면 서버가 이 글자로 한 상품이 확실할 때만
+      //     상품 칸을 채운다(응답 뒤 · 서버의 홀드 대조(결정 230)는 홀드가 있을 때만이라 영향 없음).
+      productCaptureName: o.productCaptureName || o.productCaptureRaw || "",
+      productCaptureOption: o.productCaptureOptRaw || "",
       productCapturePrice:  (bh || (_EMBED_CTX && _EMBED_CTX.app)) ? (o.productCapturePriceRaw || "") : "",
       identityConfirmed:  o.identityConfirmed ? "true" : "false",
       identityApprovalToken: o.identityApprovalToken || "",

@@ -7895,7 +7895,9 @@ function _cfShell(inner, foot){
   ov.innerHTML=`<div class="wbl-dlg cf-dlg" role="dialog" aria-labelledby="cfH">`+
     `<div class="wbl-dh" id="cfH">📷 캡처로 상품 찾기</div><div class="wbl-db">${inner}</div><div class="wbl-df">${foot}</div></div>`;
 }
-async function openCaptureFill(cid, offset){
+async function openCaptureFill(cid, offset, keep){
+  // ★ 다음 묶음으로 넘어가도 앞 묶음에서 고른 줄을 잃지 않는다(Codex 리뷰) — 고른 값과 그 줄 정보를 모아 둔다.
+  const prev=(keep&&STATE._cf&&STATE._cf.cid===cid)?STATE._cf:null;
   STATE._cf=null;
   _cfShell(`<p style="margin:0">상품을 모르는 주문의 구매 캡처를 읽고 있습니다… 사진이 많으면 1~2분 걸릴 수 있습니다.</p>`,
     `<button class="wbl-b" onclick="_cfClose()">닫기</button>`);
@@ -7904,8 +7906,9 @@ async function openCaptureFill(cid, offset){
   if(!document.getElementById('cfOv')) return;   // 기다리는 사이 닫았으면 그대로
   if(!j||!j.ok){ _cfShell(`<p style="margin:0;color:var(--bad)">캡처를 읽지 못했습니다: ${esc((j&&j.error)||'서버 오류')}</p>`,
     `<button class="wbl-b" onclick="_cfClose()">닫기</button>`); return; }
-  const picks={}; (j.items||[]).forEach(it=>{ if(it.status==='matched'&&it.optKey) picks[it.orderId]=it.optKey; });
-  STATE._cf={cid, data:j, picks};
+  const picks=prev?{...prev.picks}:{}; const seen=prev?{...prev.seen}:{};
+  (j.items||[]).forEach(it=>{ seen[it.orderId]=it; if(it.status==='matched'&&it.optKey&&!(it.orderId in picks)) picks[it.orderId]=it.optKey; });
+  STATE._cf={cid, data:j, picks, seen};
   _cfRender();
 }
 function _cfPick(orderId, v){ const cf=STATE._cf; if(!cf) return; if(v) cf.picks[orderId]=v; else delete cf.picks[orderId]; _cfRender(); }
@@ -7916,20 +7919,24 @@ function _cfRender(){
   const rows=items.map(it=>{
     const [lab,cls]=_CF_LABEL[it.status]||[it.status,'a'];
     const off=it.applicable===false;
+    // ★ 같은 상품 이름을 여러 옵션이 쓰면 옵션 이름(optKey)까지 보여야 고를 수 있다(Codex 리뷰)
+    const lbl=o=>opts.filter(x=>x.productName===o.productName).length>1?`${o.productName} · ${o.optKey}`:o.productName;
     const sel=off?'<span class="cf-na">적용 불가</span>':`<select class="cf-sel" aria-label="${esc(it.seq)}번 줄 상품" onchange="_cfPick('${esc(it.orderId)}',this.value)">`+
-      `<option value="">선택 안 함</option>${opts.map(o=>`<option value="${esc(o.optKey)}"${cf.picks[it.orderId]===o.optKey?' selected':''}>${esc(o.productName)}</option>`).join('')}</select>`;
+      `<option value="">선택 안 함</option>${opts.map(o=>`<option value="${esc(o.optKey)}"${cf.picks[it.orderId]===o.optKey?' selected':''}>${esc(lbl(o))}</option>`).join('')}</select>`;
     return `<tr><td class="num">${esc(it.seq)}</td><td class="num">${esc(String(it.day||'').slice(5))}</td>`+
       `<td>${esc(it.read||'')}</td><td><span class="cf-bd ${cls}">${esc(lab)}</span></td><td>${sel}</td></tr>`;
   }).join('');
   const n=Object.keys(cf.picks).length, matched=items.filter(i=>i.status==='matched').length;
+  const carried=Object.keys(cf.picks).filter(id=>!items.some(i=>i.orderId===id)).length;
   _cfShell(`<p style="margin:0 0 8px">상품을 모르는 주문 <b>${d.total}건</b> 중 ${items.length}건을 읽었습니다. 시스템이 확정한 <b>${matched}건</b>은 미리 골라 두었습니다 — 나머지는 캡처를 보고 골라 주세요. 고른 줄만 작업표 「상품」 칸에 적고, 작업 로그에 남습니다.</p>`+
     `<div class="cf-tw"><table class="cf-t"><thead><tr><th>줄</th><th>구매일</th><th>캡처에서 읽은 글자</th><th>판정</th><th>상품</th></tr></thead><tbody>${rows}</tbody></table></div>`,
-    `${d.nextOffset!=null?`<button class="wbl-b" onclick="openCaptureFill('${esc(cf.cid)}',${Number(d.nextOffset)})">다음 묶음 읽기</button>`:''}`+
+    `${carried?`<span class="cf-na">앞 묶음에서 고른 ${carried}건 포함</span>`:''}`+
+    `${d.nextOffset!=null?`<button class="wbl-b" onclick="openCaptureFill('${esc(cf.cid)}',${Number(d.nextOffset)},true)">다음 묶음 읽기</button>`:''}`+
     `<span style="flex:1"></span><button class="wbl-b" onclick="_cfClose()">닫기</button>`+
     `<button class="wbl-b pri" id="cfApply" ${n?'':'disabled'} onclick="_cfApply()">${n}건 적용</button>`);
 }
 async function _cfApply(){
-  const cf=STATE._cf; if(!cf) return; const items=cf.data.items||[];
+  const cf=STATE._cf; if(!cf) return; const items=Object.values(cf.seen||{});
   const picks=items.filter(it=>cf.picks[it.orderId]).map(it=>({ orderId:it.orderId, optKey:cf.picks[it.orderId],
     source:(it.status==='matched'&&it.optKey===cf.picks[it.orderId])?'capture':'manual' }));
   if(!picks.length) return;
