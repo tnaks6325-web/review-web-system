@@ -306,7 +306,10 @@ async function extractOrderFromImage(base64Data, mimeType = 'image/jpeg', opts =
     // 핵심 필드가 전부 공란이면 추출 실패로 간주 — 빈 결과를 성공/캐시로 남기지 않는다.
     const _v = k => String(extracted[k] || '').trim();
     const allBlank = !['orderNumber', 'recipient', 'phone', 'address', 'price'].some(_v);
-    if (allBlank) {
+    // ★ 결정 232: 상품만 찍힌(잘린) 캡처도 상품 판독 용도로는 쓸모가 있다 — 그 호출부만 opts.allowProductOnly 로 허용.
+    //   기본(리뷰어 제출 경로)은 종전 그대로 실패. 상품만 있는 결과는 캐시에 넣지 않는다(같은 사진의 기본 호출이 성공으로 읽지 않게).
+    const productOnly = allBlank && opts.allowProductOnly === true && (_v('productName') || _v('productOption'));
+    if (allBlank && !productOnly) {
       logger.warn(`[Gemini] 추출 결과 전 필드 공란 (key=${usedKey}, 응답길이=${text.length})`);
       throw new Error('주문 정보를 인식하지 못했습니다. 주문 캡처 이미지가 맞는지 확인 후 다시 시도해주세요.');
     }
@@ -316,8 +319,8 @@ async function extractOrderFromImage(base64Data, mimeType = 'image/jpeg', opts =
 
     const finalResult = { ok: true, ...extracted };
 
-    // ── 4번: 결과 캐시 저장 (성공한 결과만) ──
-    _putToCache(cacheHash, finalResult);
+    // ── 4번: 결과 캐시 저장 (성공한 결과만 · 상품만 있는 결과는 제외 — 결정 232) ──
+    if (!productOnly) _putToCache(cacheHash, finalResult);
 
     return { ...finalResult, elapsed };
   } catch (err) {
