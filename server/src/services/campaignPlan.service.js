@@ -221,8 +221,15 @@ async function getPlanOverview(campaignId) {
   // ★ 결정 240 — 구글시트 작업(무시트 아님)은 작업표 채움을 못 읽으므로, 누적 확정에 바로 구매(연결 주문)를 정원 엔진 셈으로 넣는다.
   //   날짜별 칸은 그대로(시트 작업은 운영 0곳 — 2026-10-13 실측). 공유 작업표·조회 실패는 종전(공고 참여만).
   if (plannerProgressSource === 'applications' && quotaCounts) {
-    const c = require('./quotaFloor.service').confirmedWithDirect(quotaCounts);
-    if (c.attributable && c.total > plannerSubmittedAll) { plannerSubmittedAll = c.total; plannerProgressSource = 'applications_and_orders'; }
+    let _dm = null;
+    try { _dm = await require('./campaignState.service').loadDirectOrderCounts(pool, [camp.id]); } catch (_) { _dm = null; }
+    const c = require('./quotaFloor.service').confirmedWithDirect(quotaCounts, _dm && _dm.get(camp.id));
+    if (c.attributable && c.total > plannerSubmittedAll) {
+      plannerSubmittedAll = c.total;
+      // 오늘 칸도 같이 — 누적만 올리면 화면이 "누적 − 오늘"을 어제까지 실적으로 읽어 오늘 바로 구매가 과거로 간다(Codex PR #1626).
+      plannerByDateSubmitted = { ...plannerByDateSubmitted, [today]: Math.max(plannerByDateSubmitted[today] || 0, c.today) };
+      plannerProgressSource = 'applications_and_orders';
+    }
   }
   const applicationSubmittedAll = Number(allQ[0] && allQ[0].n) || 0;
   const quotaMaterial = quotaCounts || {

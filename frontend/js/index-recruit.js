@@ -5126,13 +5126,13 @@ async function _loadCampControl(campId) {
     // ★ 결정 240: 바로 구매(공고 참여 없이 구매양식으로 낸 주문 · 제출 시각 기준)도 오늘·누적에 함께 말한다.
     const ds = j.directSummary || null;
     const directTxt = !ds ? "" : (ds.countable
-      ? ` · 바로 구매 오늘 ${ds.todayDirect} / 누적 ${ds.totalDirect} (확정 합계 누적 ${ds.totalConfirmed})`
+      ? ` · 바로 구매 오늘 ${ds.todayDirect} / 누적 ${ds.totalDirect} (확정 합계 누적 ${ds.totalConfirmed})` + (ds.byOption ? "" : " · 상품별 바로 구매는 확인 못 함")
       : (ds.shared ? " · 바로 구매: 공유 작업이라 나눌 수 없음" : ""));
     if (stats) stats.textContent = `오늘 · 진행중 ${holds} / 제출 ${subs} / 만료 ${exps}` + (todaySubCnt ? ` / 타계정 ${todaySubCnt}` : "") + directTxt;
     // 📝 127 블로그 승인 대기 큐 — blog_pending 행이 있을 때만 표가 뜬다
     const blogQueueHtml = _campBlogQueue(rows, campId);
     // 🧩 옵션별 현황표(061 3단계) — 옵션 등록 캠페인만
-    const optTableHtml = _campOptionTable(j.options || [], items, now, today, kstDay, ds && ds.countable ? (ds.byOption || {}) : null);
+    const optTableHtml = _campOptionTable(j.options || [], items, now, today, kstDay, ds && ds.countable && ds.byOption ? ds.byOption : null);
     // 👥 타계정 묶음(063): 소유자별 건수 — "한 리뷰어가 실제 몇 건 진행 중인가"를 즉시 파악(사재기 관측)
     const ownerTableHtml = _campOwnerTable(items, now);
     // 📋 시트 대조 — "시트엔 100행인데 확정 99" / "하루 완결이라 시트 일정 미적용"을 여기서 확인

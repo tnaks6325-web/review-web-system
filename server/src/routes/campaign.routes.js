@@ -2826,6 +2826,12 @@ async function _adminCampaignList(req, res, next) {
     } catch (e) {
       logger.warn(`[campaign] admin/list 유입방식 폴백 실패(칩 없이 계속): ${e.message}`);
     }
+    // ★ 결정 240 — 공고별 바로 구매 수(관리자 카드·홈 숫자 재료). 참여 게이트 집계와 분리된 조회 · 실패는 null(종전 max 셈으로 접힘).
+    let _directMap = null;
+    try {
+      const _pIds = rows.filter(r => r.participation_mode).map(r => r.id);
+      if (_pIds.length) _directMap = await require('../services/campaignState.service').loadDirectOrderCounts(pool, _pIds, now);
+    } catch (e) { logger.warn(`[campaign] admin/list 바로 구매 집계 실패(종전 셈): ${e.message}`); }
     const data = rows.map(r => {
       const displayTotal = displayTotals.get(r.id) || { total: Number(r.recruit_total) || 0, source: 'campaign' };
       const _sug = _archiveSuggest ? (_archiveSuggest.get(r.id) || null) : null;
@@ -2901,7 +2907,7 @@ async function _adminCampaignList(req, res, next) {
           //   directCountable=false(공유 작업표·연결 없음·조회 실패) 면 공고 참여만 — 화면이 그 사실을 말한다.
           //   위 두 칸(공고 참여만)은 구버전 화면 호환·진단용으로 그대로 둔다.
           ...(() => {
-            const c = require('../services/quotaFloor.service').confirmedWithDirect(cnt);
+            const c = require('../services/quotaFloor.service').confirmedWithDirect(cnt, _directMap ? _directMap.get(r.id) : null);
             return { todayConfirmedAll: c.today, totalConfirmedAll: c.total, directCountable: c.attributable, directShared: c.sharedTab };
           })(),
           late: lateMap.get(r.id) || 0,
@@ -3760,9 +3766,9 @@ router.delete('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req,
         fc = await pool.connect();
         const f = await require('../services/quotaFloor.service').campaignUsedFloor(fc, id);
         if (!f.known) throw new Error('연결 작업표 주문 조회 실패');
-        if (f.orders > 0) {
-          return res.status(409).json({ ok: false, code: 'has_applications', count: f.orders,
-            error: `바로 구매 ${f.orders}건이 있어 삭제할 수 없습니다 — 대신 [📦 보관]으로 목록에서 내리세요(데이터는 그대로 남고 언제든 되돌릴 수 있습니다).` });
+        if (f.direct > 0) {
+          return res.status(409).json({ ok: false, code: 'has_applications', count: f.direct,
+            error: `바로 구매 ${f.direct}건이 있어 삭제할 수 없습니다 — 대신 [📦 보관]으로 목록에서 내리세요(데이터는 그대로 남고 언제든 되돌릴 수 있습니다).` });
         }
       } catch (e) {
         logger.warn(`[campaign] 삭제 전 바로 구매 조회 실패 — 삭제 보류 camp=${id}: ${e.message}`);
@@ -4000,13 +4006,16 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
     let directSummary = null;
     try {
       const qf = require('../services/quotaFloor.service');
-      const c = qf.confirmedWithDirect((await fetchCampaignCounts(pool, [id])).get(id) || {});
-      const byOpt = {};
-      for (const [k, v] of await qf.optionDirectOrderStats(pool, id)) byOpt[k] = v;
+      const _dm = await require('../services/campaignState.service').loadDirectOrderCounts(pool, [id]);
+      const c = qf.confirmedWithDirect((await fetchCampaignCounts(pool, [id])).get(id) || {}, _dm && _dm.get(id));
+      // byOption=null = 상품별 조회 실패(모름) — 화면은 상품표를 공고 참여만으로 그리고 그 사실을 말한다.
+      const stats = c.attributable ? await qf.optionDirectOrderStats(pool, id) : new Map();
+      let byOpt = null;
+      if (stats) { byOpt = {}; for (const [k, v] of stats) byOpt[k] = v; }
       directSummary = {
         countable: c.attributable, shared: c.sharedTab,
         todayConfirmed: c.today, totalConfirmed: c.total,
-        todayDirect: Math.max(0, c.today - c.todayApplications), totalDirect: Math.max(0, c.total - c.applications),
+        todayDirect: c.directToday, totalDirect: c.direct,
         byOption: byOpt,
       };
     } catch (e) {

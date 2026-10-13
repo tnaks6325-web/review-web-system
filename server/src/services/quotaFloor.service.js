@@ -40,7 +40,7 @@ function _n(v) {
  *   total = max(제출 확정, 연결 주문) · today = max(오늘 확정, 오늘 연결 주문)(구매양식 제출 시각 KST).
  *   attributable=false(공유 작업표·연결 없음·조회 실패·원장 셈 꺼짐) 면 공고 참여만 — 화면은 그 사실을 말한다.
  */
-function confirmedWithDirect(counts) {
+function confirmedWithDirect(counts, directCounts = null) {
   const cnt = counts || {};
   const L = cnt.linked;
   const linkedOk = !!(L && L.ok && !L.noTab);
@@ -49,11 +49,18 @@ function confirmedWithDirect(counts) {
   const todaySubmitted = _n(cnt.todaySubmitted);
   const orders = attributable ? _n(L.orders) : null;
   const ordersToday = attributable ? _n(L.ordersToday) : 0;
+  // ★ 확정 + 바로 구매(Codex PR #1626) — 주문 없이 수동 확정한 참여가 있으면 max(확정, 주문)은 과소다.
+  //   directCounts = campaignState.loadDirectOrderCounts 의 그 공고 값({n, today}). 없으면(조회 실패) 종전 max 로 접는다.
+  const hasDirect = attributable && !!directCounts && Number.isFinite(Number(directCounts.n));
+  const direct = attributable ? (hasDirect ? _n(directCounts.n) : Math.max(0, (orders || 0) - submitted)) : 0;
+  const directToday = attributable ? (hasDirect ? _n(directCounts.today) : Math.max(0, ordersToday - todaySubmitted)) : 0;
   return {
-    total: Math.max(submitted, orders || 0),
-    today: Math.max(todaySubmitted, ordersToday),
+    total: submitted + direct,
+    today: todaySubmitted + directToday,
     applications: submitted,
     todayApplications: todaySubmitted,
+    direct,
+    directToday,
     orders,
     attributable,
     sharedTab: !!(linkedOk && L.sharedTab),
@@ -77,7 +84,8 @@ async function _campaignUsedFloor(db, campaignId, now) {
     return { total: 0, today: 0, applications: 0, todayApplications: 0, orders: null, sharedTab: false, known: true };
   }
   const counts = (await st.fetchCampaignCounts(db, [campaignId], now)).get(campaignId) || {};
-  const c = confirmedWithDirect(counts);
+  const dm = await st.loadDirectOrderCounts(db, [campaignId], now);
+  const c = confirmedWithDirect(counts, dm && dm.get(campaignId));
   const holds = _n(counts.activeHolds);
   const todayHolds = _n(counts.todayActiveHolds);
   // ★ known 은 "주문 기록을 실제로 받았나"로 정한다(Codex PR #1625) — 게이트 모드(observe 등)가 known 을 true 로 꾸미지 않게.
@@ -90,6 +98,7 @@ async function _campaignUsedFloor(db, campaignId, now) {
     today: c.today + todayHolds,
     applications: c.applications + holds,
     todayApplications: c.todayApplications + todayHolds,
+    direct: c.direct,
     orders: c.orders,
     sharedTab: c.sharedTab,
     known,
@@ -103,7 +112,9 @@ async function optionDirectOrders(db, campaignId, now = new Date()) {
 
 async function _optionDirectOrders(db, campaignId, now) {
   const out = new Map();
-  for (const [key, v] of await _optionDirectOrderStats(db, campaignId, now)) if (v.n > 0) out.set(key, v.n);
+  const stats = await _optionDirectOrderStats(db, campaignId, now);
+  if (!stats) return out;   // 조회 실패 = 종전 하한(공고 참여만) — 정원 엔진의 fail-soft 와 같은 방향
+  for (const [key, v] of stats) if (v.n > 0) out.set(key, v.n);
   return out;
 }
 
@@ -112,14 +123,17 @@ async function optionDirectOrderStats(db, campaignId, now = new Date()) {
   return _isolated(db, 'qf_option_stats', () => _optionDirectOrderStats(db, campaignId, now));
 }
 
+/* null = 조회 실패(모름) — 화면은 상품별 바로 구매를 0 으로 꾸미지 않고 "확인 못 함"을 말한다(Codex PR #1626). */
 async function _optionDirectOrderStats(db, campaignId, now) {
   const st = require('./campaignState.service');
-  const out = new Map();
+  if (st.TABLE_QUOTA_MODE === 'off') return new Map();
   // 공고 참여 주문과 같은 구매를 수동으로 또 넣은 줄은 빼고 센다 — 공고 참여 수에 이미 들어 있다(Codex PR #1625).
-  const counts = await st.fetchOptionCounts(db, campaignId, now, { excludeApplicationDuplicates: true });
-  for (const [key, c] of counts) {
-    const n = _n(c && c.externalOrders);
-    if (n > 0) out.set(key, { n, today: _n(c && c.todayExternalOrders) });
+  const ext = await st.loadExternalOptionOrders(db, [campaignId], now, { excludeApplicationDuplicates: true });
+  if (!ext) return null;
+  const out = new Map();
+  for (const [key, v] of (ext.get(campaignId) || new Map())) {
+    const n = _n(v && v.n);
+    if (n > 0) out.set(key, { n, today: _n(v && v.today) });
   }
   return out;
 }
