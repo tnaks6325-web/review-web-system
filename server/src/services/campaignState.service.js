@@ -1295,7 +1295,9 @@ function _normOptLabel(s) { return String(s || '').replace(/\s+/g, '').toLowerCa
 function matchOrderOption(options, order) {
   const all = (options || []).filter(o => o && typeof o.opt_key === 'string' && o.opt_key);
   if (!all.length || !order) return null;
-  for (const raw of [order.selectedOptKey, order.selectedProduct, order.optionText, order.rowProduct]) {
+  // ★ 결정 232: 사람이 작업보드에서 고친 「상품」 칸(편집 기록 — row_json 에는 안 남는다)이 맨 앞이다.
+  //   빼면 담당자가 상품을 적어 줘도 상품별 숫자가 그대로다(간장 38건 실측). 캡처 판독 채우기도 같은 기록을 남긴다.
+  for (const raw of [order.editedProduct, order.selectedOptKey, order.selectedProduct, order.optionText, order.rowProduct]) {
     const c = _normOptLabel(raw);
     if (!c) continue;
     const exact = all.filter(o => c === _normOptLabel(o.opt_key) || (o.product_name && c === _normOptLabel(o.product_name)));
@@ -1341,7 +1343,7 @@ async function _loadExternalOptionOrders(db, ids, now = new Date()) {
       const { rows } = await db.query(`
         SELECT DISTINCT ON (rc.id, ${ORDER_PURCHASE_KEY_SQL})
                rc.id AS campaign_id, os.selected_opt_key, os.selected_product,
-               cp.option_text, cp.row_json->>'상품' AS row_product,
+               cp.option_text, cp.row_json->>'상품' AS row_product, pe.value_text AS edited_product,
                (os.submitted_at >= $2) AS is_today
           FROM recruit_campaigns rc
           JOIN LATERAL (
@@ -1370,6 +1372,13 @@ async function _loadExternalOptionOrders(db, ids, now = new Date()) {
              WHERE cpo.order_submission_id = os.id AND cpo.deleted_at IS NULL AND cpo.active
              ORDER BY cpo.seq LIMIT 1
           ) cp ON TRUE
+          LEFT JOIN LATERAL (
+            SELECT pe0.value_text FROM participant_edits pe0
+             WHERE pe0.sheet_id = rc.linked_sheet_id AND pe0.tab_name = rc.linked_tab_name
+               AND pe0.anchor_type = 'order' AND pe0.anchor_value = os.id::text
+               AND pe0.field = 'col:상품' AND pe0.reverted_at IS NULL
+             ORDER BY pe0.created_at DESC, pe0.id DESC LIMIT 1
+          ) pe ON TRUE
          WHERE rc.id = ANY($1) AND rc.participation_mode
            AND NOT EXISTS (SELECT 1 FROM campaign_applications la
                             WHERE la.late_order_id = os.id AND la.status = 'submitted')
@@ -1378,7 +1387,7 @@ async function _loadExternalOptionOrders(db, ids, now = new Date()) {
         if (!r || !optsBy.has(r.campaign_id)) continue;
         const key = matchOrderOption(optsBy.get(r.campaign_id), {
           selectedOptKey: r.selected_opt_key, optionText: r.option_text,
-          selectedProduct: r.selected_product, rowProduct: r.row_product,
+          selectedProduct: r.selected_product, rowProduct: r.row_product, editedProduct: r.edited_product,
         });
         if (!key) continue;
         if (!out.has(r.campaign_id)) out.set(r.campaign_id, new Map());

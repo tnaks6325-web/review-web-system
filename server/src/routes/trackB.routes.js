@@ -292,6 +292,27 @@ router.post('/workdesk/tab-finish', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ── 결정 232: 상품 모르는 주문의 구매 캡처를 AI 로 읽어 작업표 「상품」 칸 채우기 — adminOrMaster ──
+//   mode 'preview' = 캡처 판독 + 상품 짝짓기 결과만(쓰기 0) · mode 'apply' = confirm:true + 사람이 본 picks 그대로 적기.
+//   ★ AI 비용 때문에 크론 없이 사람이 필요할 때만. 전사 데이터 쓰기라 adminOrMaster 로 좁힌다.
+router.post('/campaigns/:id/capture-product-fill', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  const fill = require('../services/captureProductFill.service');
+  try {
+    const b = req.body || {};
+    const campaignId = String(req.params.id || '');
+    if (b.mode === 'apply') {
+      if (b.confirm !== true) return res.status(400).json({ ok: false, code: 'confirm_required', error: '미리보기를 확인한 뒤 confirm:true 로 실행하세요.' });
+      return res.json(await fill.applyCaptureProducts({ campaignId, picks: b.picks, by: _by(req) }));
+    }
+    return res.json(await fill.previewCaptureProducts({ campaignId, limit: b.limit }));
+  } catch (err) {
+    if (err && (err instanceof fill.CaptureFillError || err.name === 'ProductColumnError' || err.constructor && err.constructor.name === 'ProductColumnError')) {
+      return res.status(400).json({ ok: false, code: err.code, error: err.message });
+    }
+    next(err);
+  }
+});
+
 // ── 작업 자동 마감(수동 실행·미리보기) — adminOrMaster ──────────────────────────────
 //   평상시엔 크론이 돈다(10분). 이 라우트는 **진단·수동 실행** 창구다("왜 아직 안 넘어갔지?").
 //   ★★ **`auto` 를 body 에서 받지 않는다** — 검수 확인 게이트를 우회하는 값은 서버 코드만
