@@ -150,7 +150,7 @@ const read = (p) => fs.readFileSync(path.resolve(__dirname, '..', p), 'utf8');
   const subsA = [
     { name: '이가족', phone: '010-7171-2222', bankName: '국민은행', bankAccount: '123-45', accountHolder: '정본인', address: '부모님 댁', jumin: '900101-1234567' },
     { name: '박다른', phone: '010-7373-4444' },
-    { name: '정본인', phone: '01071712222' },
+    { name: '정본인', phone: '01071712222', residentNo: '900101-1234567' },
     { name: '최동명', phone: '010-7171-2222' },
   ];
   await db.query(`INSERT INTO reviewers (id, name, phone, bank_name, bank_account, account_holder, resident_num, sub_accounts)
@@ -258,6 +258,16 @@ const read = (p) => fs.readFileSync(path.resolve(__dirname, '..', p), 'utf8');
       assert.strictEqual((await fold.dismissNotice(A, { db })).dismissed, 2);
       assert.strictEqual((await fold.pendingNotice(A, { db })).notice, null);
     });
+    await test('옛 키(residentNo)의 주민번호도 기록에 담지 않는다', async () => {
+      const snap = (await db.query(`SELECT snapshot FROM reviewer_identity_decisions WHERE owner_reviewer_id = $1 AND kind = 'fold_self' AND snapshot->>'type' = 'duplicate'`, [A])).rows[0].snapshot;
+      assert.strictEqual(snap.sub.residentNo, ''); assert.deepStrictEqual(snap.juminKeys, ['residentNo']);
+      assert.ok(!/1234567/.test(JSON.stringify(snap)));
+    });
+    await test('정리 뒤 리뷰어가 맨 앞에 칸을 더함(되돌릴 때 순번이 달라지는 경우)', async () => {
+      await db.query(`UPDATE reviewers SET sub_accounts = $2::jsonb WHERE id = $1`,
+        [A, JSON.stringify([{ name: '신규칸', phone: '010-7676-1111' }, ...(await subsNow())])]);
+      await cards.reconcileCards({ db, dryRun: false, by: 'test' });
+    });
     await test('판단 내역에 보이고, 하나 되돌리면 칸·카드·기록이 원래대로(주민번호는 본계정 값으로)', async () => {
       const list = (await merge.listDecisions({ db })).decisions.filter((d) => d.ownerId === A);
       const famDec = list.find((d) => d.foldedName === '이가족');
@@ -265,14 +275,16 @@ const read = (p) => fs.readFileSync(path.resolve(__dirname, '..', p), 'utf8');
       const u = await merge.undoDecision({ decisionId: famDec.decisionId, by: 'tester', db });
       assert.ok(u.ok && u.restored.slot && u.restored.cards === 1, JSON.stringify(u));
       const subs = await subsNow();
-      assert.deepStrictEqual(subs.map((s) => s.name), ['이가족', '박다른', '최동명']);
-      assert.strictEqual(subs[0].address, '부모님 댁');
-      assert.strictEqual(String(subs[0].jumin).replace(/\D/g, ''), '9001011234567');
+      // 원래 바로 뒤 칸(박다른) 앞자리로 — 새로 더한 칸이 앞에 있어도 이웃 옆에 돌아간다
+      assert.deepStrictEqual(subs.map((s) => s.name), ['신규칸', '이가족', '박다른', '최동명']);
+      assert.strictEqual(subs[1].address, '부모님 댁');
+      assert.strictEqual(String(subs[1].jumin).replace(/\D/g, ''), '9001011234567');
       assert.strictEqual((await cardOf(A, '이가족')).status, 'active');
       const r1 = await orderRow(oCard);
       assert.strictEqual(String(r1.participant_card_id), String(famCard.id));
       assert.strictEqual(r1.participant_identity_key_hash, H(`card:${famCard.id}`));
-      assert.strictEqual((await orderRow(oLegacyPark)).participant_identity_key_hash, H(roi._test.legacyIdentityKey('박다른', '010-7373-4444', 1)));
+      // 옛 값(순번 1)을 그대로 되돌리면 그 자리는 이제 '신규칸' — 되돌린 목록의 지금 순번(2)으로 다시 계산해야 한다(Codex P1)
+      assert.strictEqual((await orderRow(oLegacyPark)).participant_identity_key_hash, H(roi._test.legacyIdentityKey('박다른', '010-7373-4444', 2)));
       assert.strictEqual((await orderRow(oOther)).participant_identity_key_hash, H('self'), '원래 본인 기록은 그대로');
       assert.strictEqual(String((await db.query('SELECT participant_card_id FROM campaign_applications WHERE id = $1', [app])).rows[0].participant_card_id), String(famCard.id));
       await cards.reconcileCards({ db, dryRun: false, by: 'test' });
@@ -281,9 +293,30 @@ const read = (p) => fs.readFileSync(path.resolve(__dirname, '..', p), 'utf8');
     await test('실행 전체 되돌리기 — 남은 정리(완전 중복)도 원래 자리로 · 다시 돌려도 같음', async () => {
       const r = await fold.undoRun({ applyRunId: ap.applyRunId, db });
       assert.ok(r.summary.undone >= 1 && r.summary.failed === 0, JSON.stringify(r.summary));
-      assert.deepStrictEqual((await subsNow()).map((s) => s.name), ['이가족', '박다른', '정본인', '최동명']);
+      const after = await subsNow();
+      assert.deepStrictEqual(after.map((s) => s.name), ['신규칸', '이가족', '박다른', '정본인', '최동명']);
+      assert.strictEqual(String(after[3].residentNo).replace(/\D/g, ''), '9001011234567', '옛 키 자리에 본계정 주민번호로');
       const sw = await fold.runFromSwitch({ db, env: { SAME_PHONE_FOLD_MODE: `undo_all:${ap.applyRunId}` } });
       assert.strictEqual(sw.skipped, 'already_undone');
+    });
+    await test('되돌릴 때 같은 이름·번호의 살아 있는 카드가 이미 있으면 기록을 그 카드로 돌린다(Codex P2)', async () => {
+      await db.query(`UPDATE reviewers SET sub_accounts = $2::jsonb WHERE id = $1`, [D, JSON.stringify([{ name: '오가족', phone: '010-7575-6666' }])]);
+      await cards.reconcileCards({ db, dryRun: false, by: 'test' });
+      const dCard = await cardOf(D, '오가족');
+      const o = (await db.query(`INSERT INTO order_submissions (sheet_id, tab_name, owner_reviewer_id, phone, recipient, participant_identity_key_hash, participant_card_id)
+         VALUES ('t','t',$1,'010-7575-6666','오가족',$2,$3) RETURNING id`, [D, H(`card:${dCard.id}`), dCard.id])).rows[0].id;
+      const p2 = await fold.preview({ db });
+      const a2 = await fold.apply({ previewRunId: p2.runId, db, retryDelayMs: 10 });
+      assert.strictEqual(a2.results.find((r) => r.ownerId === D).result, 'folded');
+      // 그 사이 같은 이름·번호 카드가 새로 살아남(담당자가 다시 넣는 등)
+      const live = (await db.query(`INSERT INTO reviewer_identity_cards (owner_reviewer_id, kind, name, name_key, phone, phone8, source)
+         VALUES ($1, 'sub', '오가족', '오가족', '010-7575-6666', '75756666', 'test') RETURNING id`, [D])).rows[0].id;
+      const dec = (await db.query(`SELECT id FROM reviewer_identity_decisions WHERE owner_reviewer_id = $1 AND kind = 'fold_self' AND undone_at IS NULL`, [D])).rows[0].id;
+      const u = await merge.undoDecision({ decisionId: String(dec), by: 'tester', db });
+      assert.ok(u.ok);
+      const r = await orderRow(o);
+      assert.strictEqual(String(r.participant_card_id), String(live));
+      assert.strictEqual(r.participant_identity_key_hash, H(`card:${live}`));
     });
   } finally {
     await cleanup();

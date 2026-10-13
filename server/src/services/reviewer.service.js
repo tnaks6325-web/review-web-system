@@ -382,15 +382,22 @@ async function handleReviewerProfile(body = {}) {
     // shoppingId 필드를 싣지 않은 채 타계정의 다른 항목을 수정해도 기존 아이디를 잃지 않게
     // 정확한 이름+전화 매칭을 우선하고, 이름/전화 자체를 편집한 1개 행은 같은 인덱스로 보존한다.
     let droppedFolded = 0;
-    await mutateSubAccounts(owner.id, async (currentSubs) => {
+    await mutateSubAccounts(owner.id, async (currentSubs, _rv, txClient) => {
       const usedOld = new Set();
       // 잠금을 잡은 뒤 한 번 더 — 위에서 읽은 뒤 잠금을 기다리는 사이에 정리가 끝났을 수 있다(레드팀 2).
+      //   ★ 같은 트랜잭션 커넥션으로 읽는다 — 풀에서 또 빌리면 동시 저장이 풀을 다 잡았을 때 서로 기다린다(Codex P2).
+      //   실패하면 트랜잭션이 깨지므로 SAVEPOINT 로 감싼다.
       try {
-        const { rows: folded } = await pool.query(
+        await txClient.query('SAVEPOINT fold_sig_read');
+        const { rows: folded } = await txClient.query(
           `SELECT snapshot->'sub'->>'name' AS name, snapshot->'sub'->>'phone' AS phone FROM reviewer_identity_decisions
             WHERE kind = 'fold_self' AND owner_reviewer_id = $1 AND undone_at IS NULL`, [owner.id]);
         for (const f of folded) foldedSigs.add(sig(f));
-      } catch (_) { /* 조회 실패는 앞서 읽은 목록으로 */ }
+        await txClient.query('RELEASE SAVEPOINT fold_sig_read');
+      } catch (_) {
+        try { await txClient.query('ROLLBACK TO SAVEPOINT fold_sig_read'); } catch (__) { /* noop */ }
+        /* 조회 실패는 앞서 읽은 목록으로 */
+      }
       if (foldedSigs.size) {
         const keep = subs.filter((sub) => !foldedSigs.has(sig(sub)) || currentSubs.some((old) => sig(old) === sig(sub)));
         droppedFolded += subs.length - keep.length;

@@ -32,6 +32,9 @@ const stableHash = (v) => crypto.createHash('sha256').update(String(v == null ? 
 const legacyP8 = (v) => { const d = digits(v); return d.length >= 8 ? d.slice(-8) : d; };   // reviewerOrderIdentity.phone8 과 같음(짧은 번호는 그대로)
 const legacyKey = (name, phone, index) => `sub:${stableHash(`${nk(name)}|${legacyP8(phone)}|${Number(index)}`).slice(0, 24)}`;
 const SELF_HASH = stableHash('self');
+// 타계정 칸의 주민번호는 화면·시기에 따라 키 이름이 다르다(Codex P1) — 판정·기록 모두 이 키들을 함께 본다.
+const JUMIN_KEYS = ['jumin', 'residentNo', 'resident_num', 'residentNum'];
+const juminOf = (s) => { for (const k of JUMIN_KEYS) if (s && digits(s[k])) return digits(s[k]); return ''; };
 const sigHash = (name, phone) => stableHash(`fold|${nk(name)}|${p8(phone)}`).slice(0, 32);
 const groupKeyOf = (ownerId, name, phone) => `fold|${ownerId}|${sigHash(name, phone)}`;
 function asSubs(value) {
@@ -66,7 +69,7 @@ function classifyOwner(owner, ctx = {}) {
     if (!nk(s.name)) reasons.push('no_name');
     if (!blank(bankAccount) && (digits(bankAccount) !== digits(owner.bank_account)
         || bankKey(bankName) !== bankKey(owner.bank_name) || nk(holder) !== nk(owner.account_holder))) reasons.push('account_diff');
-    if (digits(s.jumin) && digits(s.jumin) !== digits(owner.resident_num)) reasons.push('jumin_diff');
+    if (juminOf(s) && JUMIN_KEYS.some((k) => digits(s[k]) && digits(s[k]) !== digits(owner.resident_num))) reasons.push('jumin_diff');
     if (!blank(shoppingId) && String(shoppingId).trim() !== String(owner.shopping_id || '').trim()) reasons.push('shopping_diff');
     // 담당자 합치기(179)에서 다른 카드가 이 칸 카드로 합쳐 들어와 있으면 건드리지 않는다(합친 묶음이 갈 곳을 잃는다).
     if (!sameName && ctx.mergeKeptSigs && ctx.mergeKeptSigs.has(`${nk(s.name)}|${p8(s.phone)}`)) reasons.push('merge_target');
@@ -159,12 +162,14 @@ async function _foldOne(client, { ownerId, sig, by, runId }) {
     ? ownerCards.find((c) => c.kind === 'sub' && c.status === 'active' && c.name_key === nk(slot.name) && c.phone8 === p8(slot.phone)) || null
     : null;
 
-  const juminSame = !!digits(slot.jumin);
+  // 주민번호는 기록에 담지 않는다 — 대상 칸은 비었거나 본계정과 같으므로 "어느 키에 있었는지"만 남긴다.
+  const juminKeys = JUMIN_KEYS.filter((k) => digits(slot[k]));
+  const juminSame = juminKeys.length > 0;
   const saved = { ...slot };
-  if (juminSame) saved.jumin = '';
+  for (const k of juminKeys) saved[k] = '';
   // 앞뒤 칸 표시(이름·번호 해시) — 되돌릴 때 다른 정리가 먼저 되돌려져 순번이 달라져도 원래 자리를 찾는다.
   const near = (s) => (s && typeof s === 'object' ? sigHash(s.name, s.phone) : null);
-  const snapshot = { index, type: verdict.type, sub: saved, juminSameAsOwner: juminSame,
+  const snapshot = { index, type: verdict.type, sub: saved, juminSameAsOwner: juminSame, juminKeys,
     prevSig: index > 0 ? near(subs[index - 1]) : null, nextSig: near(subs[index + 1]),
     subCardId: subCard ? String(subCard.id) : null, selfCardId: String(selfCard.id), runId: runId || null };
   const { rows: [dec] } = await client.query(
@@ -308,8 +313,10 @@ async function undoFoldInTx(client, d) {
   const sub = { ...(snap.sub || {}) };
   const { rows: [owner] } = await client.query(`SELECT id, resident_num, sub_accounts FROM reviewers WHERE id = $1 FOR NO KEY UPDATE`, [d.owner_reviewer_id]);
   if (!owner) return { result: 'gone' };
-  if (snap.juminSameAsOwner) sub.jumin = owner.resident_num || '';
+  if (snap.juminSameAsOwner) for (const k of (snap.juminKeys && snap.juminKeys.length ? snap.juminKeys : ['jumin'])) sub[k] = owner.resident_num || '';
   const restored = { card: false, slot: false, rows: 0 };
+  // 되살린 칸이 쓸 카드 — 같은 이름·번호의 살아 있는 카드가 이미 있으면(되살리기 23505) 그 카드로 기록을 돌린다(Codex P2).
+  let restoredCardId = snap.subCardId || null;
   if (snap.subCardId) {
     await client.query(`SELECT id FROM reviewer_identity_cards WHERE owner_reviewer_id = $1 FOR NO KEY UPDATE`, [d.owner_reviewer_id]);
     const sp = 'fold_undo_card';
@@ -323,6 +330,10 @@ async function undoFoldInTx(client, d) {
     } catch (err) {
       await client.query(`ROLLBACK TO SAVEPOINT ${sp}`);
       if (!err || err.code !== '23505') throw err;     // 같은 이름·번호 카드가 이미 살아 있다 — 그 카드를 쓴다
+      const { rows: [live] } = await client.query(
+        `SELECT id FROM reviewer_identity_cards WHERE owner_reviewer_id = $1 AND status = 'active' AND name_key = $2 AND phone8 = $3 LIMIT 1`,
+        [d.owner_reviewer_id, nk(sub.name), p8(sub.phone)]);
+      restoredCardId = live ? String(live.id) : null;
     }
   }
   const out = await cards.mutateSubAccountsInTx(client, d.owner_reviewer_id, (list) => {
@@ -337,19 +348,41 @@ async function undoFoldInTx(client, d) {
     return list;
   }, { source: 'fold_undo' });
   restored.slot = !!out.changed;
+  // ★ 옛 칸 순번 이름표는 기록된 옛 값을 그대로 되돌리지 않고 **되돌린 뒤의 목록 순번으로 다시 계산**한다(Codex P1) —
+  //   정리 뒤 리뷰어가 칸을 더하거나 지웠으면 같은 순번이 다른 명의를 가리킨다. 이름표 → (이름·번호) 칸을 찾아 지금 순번으로.
+  const finalList = asSubs(out.subs);
+  const legacyNow = (hash) => {
+    for (let k = 0; k < finalList.length; k++) {
+      const x = finalList[k];
+      if (!x || typeof x !== 'object') continue;
+      for (let c = 0; c <= finalList.length; c++) {
+        if (stableHash(legacyKey(x.name, x.phone, c)) === hash) return stableHash(legacyKey(x.name, x.phone, k));
+      }
+    }
+    return null;
+  };
+  const subCardHash = snap.subCardId ? stableHash(`card:${snap.subCardId}`) : null;
+  const restoreHash = (h) => {
+    if (h && subCardHash && h === subCardHash) return restoredCardId ? stableHash(`card:${restoredCardId}`) : SELF_HASH;
+    return legacyNow(h) || h;
+  };
+  const restoreCard = (c) => (c && snap.subCardId && String(c) === String(snap.subCardId) ? restoredCardId : c);
   const { rows: moves } = await client.query(
     `SELECT table_name, row_id, old_card_id, new_card_id, old_hash, new_hash FROM reviewer_identity_fold_moves WHERE decision_id = $1 ORDER BY id DESC`, [d.id]);
   for (const m of moves) {
     if (m.table_name === 'order_submissions') {
+      const shift = String(m.old_card_id || '') === String(m.new_card_id || '') && m.old_hash !== m.new_hash;
+      const toCard = shift ? m.new_card_id : restoreCard(m.old_card_id);
+      const toHash = shift ? (legacyNow(m.new_hash) || m.old_hash) : restoreHash(m.old_hash);
       const r = await client.query(
         `UPDATE order_submissions SET participant_card_id = $2, participant_identity_key_hash = $3
           WHERE id = $1::uuid AND participant_card_id IS NOT DISTINCT FROM $4 AND participant_identity_key_hash IS NOT DISTINCT FROM $5`,
-        [m.row_id, m.old_card_id, m.old_hash, m.new_card_id, m.new_hash]);
+        [m.row_id, toCard, toHash, m.new_card_id, m.new_hash]);
       restored.rows += r.rowCount;
     } else {
       const r = await client.query(
         `UPDATE campaign_applications SET participant_card_id = $2 WHERE id = $1::int AND participant_card_id IS NOT DISTINCT FROM $3`,
-        [m.row_id, m.old_card_id, m.new_card_id]);
+        [m.row_id, restoreCard(m.old_card_id), m.new_card_id]);
       restored.rows += r.rowCount;
     }
   }

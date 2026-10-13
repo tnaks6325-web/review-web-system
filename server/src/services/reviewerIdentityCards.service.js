@@ -332,7 +332,7 @@ async function mutateSubAccountsInTx(client, reviewerId, mutate, { source = 'wri
   if (!rows.length) { const e = new Error('리뷰어를 찾을 수 없습니다.'); e.code = 'reviewer_not_found'; throw e; }
   const reviewer = rows[0];
   const current = asSubs(reviewer.sub_accounts).map((s) => (s && typeof s === 'object' ? { ...s } : s));
-  const next = await mutate(current, reviewer);
+  const next = await mutate(current, reviewer, client);   // 세 번째 인자 = 이 트랜잭션 커넥션(콜백 안 조회가 풀에서 또 빌리지 않게)
   if (!Array.isArray(next)) return { changed: false, reviewer, subs: asSubs(reviewer.sub_accounts), cards: null };
   const same = JSON.stringify(next) === JSON.stringify(asSubs(reviewer.sub_accounts));
   if (same) return { changed: false, reviewer, subs: next, cards: null };
