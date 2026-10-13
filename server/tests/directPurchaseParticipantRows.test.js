@@ -9,7 +9,7 @@ const read = (rel) => fs.readFileSync(path.join(__dirname, '..', '..', rel), 'ut
 
 const st = read('server/src/services/campaignState.service.js');
 // ① 목록과 개수는 같은 범위(단일 출처 SQL)
-assert.equal((st.match(/\$\{DIRECT_ORDER_SCOPE_SQL/g) || []).length, 2, 'count + list share DIRECT_ORDER_SCOPE_SQL');
+assert.equal((st.match(/\$\{DIRECT_ORDER_SCOPE_SQL/g) || []).length, 3, 'count + flagged count + list share DIRECT_ORDER_SCOPE_SQL');
 assert.ok(/SELECT DISTINCT ON \(\$\{ORDER_PURCHASE_KEY_SQL\}\)[\s\S]{0,200}AS name/.test(st), 'one purchase = one row');
 assert.ok(/RIGHT\(regexp_replace\(COALESCE\(os\.phone, ''\), '\[\^0-9\]', '', 'g'\), 4\) AS phone4/.test(st), 'only last 4 digits leave the server');
 assert.ok(/NULLIF\(cp\.row_json->>'상품', ''\)/.test(st), 'product falls back to the worktable row');

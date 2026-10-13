@@ -188,6 +188,8 @@ async function checkRepurchaseWindowBatch(dbOrClient, { sheetId, tabName, campai
 async function checkRepurchaseConflictAt(dbOrClient, {
   sheetId, tabName, campaignId, phone8, days: campaignDays,
   targetSubmittedAt, excludeApplicationId, excludeOrderSubmissionId,
+  // onlyBefore: 대상 시각 **이전** 기록만 충돌로 본다(결정 242 — 바로 구매 위반 표시는 뒤에 온 구매 쪽에 붙는다).
+  onlyBefore = false,
 } = {}) {
   const days = repurchaseDays(campaignDays);
   const p8 = phone8Of(phone8);
@@ -224,6 +226,7 @@ async function checkRepurchaseConflictAt(dbOrClient, {
           )
           AND os.submitted_at > $5::timestamptz - make_interval(days => $4)
           AND os.submitted_at < $5::timestamptz + make_interval(days => $4)
+          AND (NOT $9::boolean OR os.submitted_at < $5::timestamptz)
        UNION ALL
        SELECT ca.submitted_at
          FROM campaign_applications ca
@@ -238,13 +241,14 @@ async function checkRepurchaseConflictAt(dbOrClient, {
           ))
           AND ca.submitted_at > $5::timestamptz - make_interval(days => $4)
           AND ca.submitted_at < $5::timestamptz + make_interval(days => $4)
+          AND (NOT $9::boolean OR ca.submitted_at < $5::timestamptz)
      )
      SELECT submitted_at
        FROM history
       ORDER BY ABS(EXTRACT(EPOCH FROM (submitted_at - $5::timestamptz)))
       LIMIT 1`,
     [sheetId || null, tabName || null, p8, days, target, campaignId || null,
-      excludeApplicationId || null, excludeOrderSubmissionId || null]
+      excludeApplicationId || null, excludeOrderSubmissionId || null, onlyBefore === true]
   );
   return {
     blocked: rows.length > 0,

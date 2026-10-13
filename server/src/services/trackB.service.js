@@ -3678,8 +3678,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       // 운영 목적 분류는 내부 작업보드 로그에서만 보인다. 광고주 렌즈에는 노출하지 않는다.
       popularPurpose: showEdits && popularPurposeIds.has(String(r.popularPurposeApplicationId || '')),
       // 결정 242: 바로 구매 규칙 위반(사람이 읽는 이름 목록) — 내부 작업보드만, 광고주 렌즈에는 싣지 않는다.
-      ...(showEdits && Array.isArray(r.ruleFlags) && r.ruleFlags.length
-        ? { ruleFlags: r.ruleFlags.map(f => require('./directPurchaseRules.service').RULE_LABELS[f && f.code] || String((f && f.code) || '')).filter(Boolean) }
+      //   작업표 줄 단위라 판정한 공고와 무관하게 그 줄의 판정을 그대로 보인다(같은 표의 같은 구매).
+      ...(showEdits && r.ruleFlags && Array.isArray(r.ruleFlags.flags) && r.ruleFlags.flags.length
+        ? { ruleFlags: r.ruleFlags.flags.map(f => require('./directPurchaseRules.service').RULE_LABELS[f && f.code] || String((f && f.code) || '')).filter(Boolean) }
         : {}),
     };
     /* ★ 행마다 같은 판정을 실어 보낸다 — 제출물 미리보기 목록이 "채워진 줄"을 화면에서 다시

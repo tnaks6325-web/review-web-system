@@ -1363,14 +1363,22 @@ async function loadDirectOrderCounts(db, ids, now = new Date()) {
     const { rows } = await db.query(`
       SELECT rc.id,
              COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL})::int AS n,
-             COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL}) FILTER (WHERE os.submitted_at >= $2)::int AS today,
-             -- 결정 242: 규칙 위반 표시가 붙은 바로 구매 수(공고 카드 배지)
-             COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL}) FILTER (WHERE jsonb_array_length(COALESCE(os.rule_flags, '[]'::jsonb)) > 0)::int AS flagged
+             COUNT(DISTINCT ${ORDER_PURCHASE_KEY_SQL}) FILTER (WHERE os.submitted_at >= $2)::int AS today
         ${DIRECT_ORDER_SCOPE_SQL}
        GROUP BY rc.id`, [ids, dayStart]);
+    // 결정 242: 규칙 위반 표시가 붙은 바로 구매 수(공고 카드 배지) — 목록(listDirectOrders)과 **같은 대표 줄**(구매 키별 가장 이른 기록)과
+    //   **이 공고 기준 판정**만 센다(Codex PR #1628: 중복 기록·작업표 재사용 공고에서 카드와 목록이 갈리지 않게).
+    const { rows: fRows } = await db.query(`
+      SELECT x.id, COUNT(*) FILTER (WHERE x.rf->>'campaignId' = x.id
+                                     AND jsonb_array_length(COALESCE(x.rf->'flags', '[]'::jsonb)) > 0)::int AS flagged
+        FROM (SELECT DISTINCT ON (rc.id, ${ORDER_PURCHASE_KEY_SQL}) rc.id, os.rule_flags AS rf
+                ${DIRECT_ORDER_SCOPE_SQL}
+               ORDER BY rc.id, ${ORDER_PURCHASE_KEY_SQL}, os.submitted_at) x
+       GROUP BY x.id`, [ids]);
     if (sp) { try { await db.query('RELEASE SAVEPOINT direct_orders'); } catch (_) {} }
-    const m = new Map(ids.map(id => [id, { n: 0, today: 0, flagged: 0 }]));
-    for (const r of rows || []) if (r && r.id != null) m.set(r.id, { n: Number(r.n) || 0, today: Number(r.today) || 0, flagged: Number(r.flagged) || 0 });
+    const flaggedBy = new Map((fRows || []).map(r => [r.id, Number(r.flagged) || 0]));
+    const m = new Map(ids.map(id => [id, { n: 0, today: 0, flagged: flaggedBy.get(id) || 0 }]));
+    for (const r of rows || []) if (r && r.id != null) m.set(r.id, { n: Number(r.n) || 0, today: Number(r.today) || 0, flagged: flaggedBy.get(r.id) || 0 });
     return m;
   } catch (e) {
     if (sp) { try { await db.query('ROLLBACK TO SAVEPOINT direct_orders'); } catch (_) {} }
@@ -1428,7 +1436,9 @@ async function listDirectOrders(db, campaignId, { limit = 500 } = {}) {
       source: (r.source === 'admin_external' || r.source === 'manual') ? 'manual' : 'link',
       phone8: String(r.phone8 || ''),   // ★ 서버 안에서만(인기 참여용 표시 계산) — 라우트가 응답 전에 지운다
       // 결정 242: 규칙 위반 표시(사람이 읽는 이름). null = 판정 전·판정 실패(모름) — 화면은 아무것도 그리지 않는다.
-      ruleFlags: Array.isArray(r.rule_flags) ? r.rule_flags.map(f => _ruleLabel(f && f.code)).filter(Boolean) : null,
+      //   이 공고 기준으로 판정한 것만(작업표 재사용 공고의 다른 공고 판정은 보이지 않게).
+      ruleFlags: (r.rule_flags && r.rule_flags.campaignId === campaignId && Array.isArray(r.rule_flags.flags))
+        ? r.rule_flags.flags.map(f => _ruleLabel(f && f.code)).filter(Boolean) : null,
     }));
   } catch (_) { return null; }
 }

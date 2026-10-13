@@ -90,7 +90,7 @@ async function judgeDirectPurchase(db, orderSubmissionId) {
   if (validPhone) {
     const r = await guard.checkRepurchaseConflictAt(db, {
       sheetId: o.sheet_id, tabName: o.tab_name, campaignId: camp.id, phone8: p8, days: camp.repurchase_days,
-      targetSubmittedAt: o.submitted_at, excludeOrderSubmissionId: o.id,
+      targetSubmittedAt: o.submitted_at, excludeOrderSubmissionId: o.id, onlyBefore: true,
     });
     repurchaseBlocked = !!(r && r.blocked);
   }
@@ -102,10 +102,10 @@ async function judgeDirectPurchase(db, orderSubmissionId) {
     for (const other of others) {
       const r = await guard.checkRepurchaseConflictAt(db, {
         sheetId: o.sheet_id, tabName: o.tab_name, campaignId: camp.id, phone8: other, days: camp.repurchase_days,
-        targetSubmittedAt: o.submitted_at, excludeOrderSubmissionId: o.id,
+        targetSubmittedAt: o.submitted_at, excludeOrderSubmissionId: o.id, onlyBefore: true,
       });
       // 다른 명의의 **이전** 참여·구매만 이 구매의 위반이다(뒤에 온 것은 그 구매 쪽에서 판정된다)
-      if (r && r.blocked && r.conflictingSubmittedAt && new Date(r.conflictingSubmittedAt) < at) { onePerPersonBlocked = true; break; }
+      if (r && r.blocked) { onePerPersonBlocked = true; break; }
     }
   }
 
@@ -139,8 +139,9 @@ async function judgeDirectPurchase(db, orderSubmissionId) {
     popularCredits: validPhone ? popularCredits : 0,
     todayBefore, dailyCap: _dailyCap(),
   });
+  // 어느 공고 기준으로 판정했는지 함께 남긴다 — 작업표를 다시 쓰는 옛 공고 카드·목록에 새 공고 기준 위반이 보이지 않게(Codex PR #1628).
   await db.query('UPDATE order_submissions SET rule_flags = $2::jsonb WHERE id = $1::uuid AND campaign_application_id IS NULL',
-    [o.id, JSON.stringify(flags)]);
+    [o.id, JSON.stringify({ campaignId: camp.id, flags })]);
   return { judged: true, flags, campaignId: camp.id };
 }
 

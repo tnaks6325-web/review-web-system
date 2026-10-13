@@ -541,10 +541,13 @@
     // 📝 127: 보라 원 = 블로그 승인 대기 건수 — blog 공고에서 "반드시 눌러야 하는" 신호는 승인 대기다.
     const blogPend = (c.ops && Number(c.ops.blogPending)) || 0;
     const ruleBad = (c.ops && Number(c.ops.ruleViolations)) || 0;
+    // null = 위반 수를 확인하지 못함(조회 실패) — 0 으로 꾸미지 않고 회색 "?" (칸이 없는 구버전 서버는 undefined → 표시 없음)
+    const ruleUnknown = !!(c.ops && c.participation_mode && c.ops.ruleViolations === null);
     const bdg = (late > 0 ? `<span class="bdg" title="지각 접수 ${late}건 — 수동확정이 필요합니다">${late}</span>` : '')
       + (blogPend > 0 ? `<span class="bdg bdg-blog" style="background:#7C3AED" title="블로그 참여 신청 ${blogPend}건 — 승인 대기 중">${blogPend}</span>` : '')
       // ★ 결정 242: 주황 원 = 공고 참여 규칙에 걸린 바로 구매 수(막지 않고 표시만) — 참여 관리의 바로 구매 목록에서 확인
-      + (ruleBad > 0 ? `<span class="bdg bdg-rule" style="background:#EA580C" title="규칙 위반 바로 구매 ${ruleBad}건 — [로그] → 참여 관리의 바로 구매 목록에서 확인하세요(입금 여부는 담당자가 정합니다)">${ruleBad}</span>` : '');
+      + (ruleBad > 0 ? `<span class="bdg bdg-rule" style="background:#EA580C" title="규칙 위반 바로 구매 ${ruleBad}건 — [로그] → 참여 관리의 바로 구매 목록에서 확인하세요(입금 여부는 담당자가 정합니다)">${ruleBad}</span>`
+        : ruleUnknown ? '<span class="bdg bdg-rule" style="background:#9CA3AF" title="규칙 위반 바로 구매 수를 확인하지 못했습니다 — 잠시 후 새로고침해 주세요">?</span>' : '');
     const on = (c.status || 'draft') === 'active';
     const pubToggle = c.archived_at
       ? '<span class="ppub" title="보관된 공고입니다 — [⋯] → [↩ 보관 해제] 후 게시할 수 있어요">보관</span>'

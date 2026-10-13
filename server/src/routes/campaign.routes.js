@@ -2911,8 +2911,9 @@ async function _adminCampaignList(req, res, next) {
             const c = require('../services/quotaFloor.service').confirmedWithDirect(cnt, _directMap ? _directMap.get(r.id) : null);
             const dmr = _directMap ? _directMap.get(r.id) : null;
             return { todayConfirmedAll: c.today, totalConfirmedAll: c.total, directCountable: c.attributable, directShared: c.sharedTab,
-              // 결정 242: 규칙 위반 표시가 붙은 바로 구매 수(카드 주황 배지) — 공유 작업표는 귀속할 수 없어 0
-              ruleViolations: c.attributable && dmr ? (Number(dmr.flagged) || 0) : 0 };
+              // 결정 242: 규칙 위반 표시가 붙은 바로 구매 수(카드 주황 배지) — 공유 작업표는 귀속할 수 없어 0.
+              //   조회 실패는 null(모름) — 카드가 깨끗하게 보이지 않게 "?" 로 그린다(Codex PR #1628).
+              ruleViolations: !c.attributable ? 0 : (dmr ? (Number(dmr.flagged) || 0) : null) };
           })(),
           late: lateMap.get(r.id) || 0,
           blogPending: blogPendingMap.get(r.id) || 0,   // 127: 승인 대기(블로그) — 카드 관제 배지
