@@ -3391,7 +3391,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             ria.round, NULL::text AS option, ria.product_name AS product,
             ria.is_submitted AS submitted, FALSE AS paid, 'archive'::text AS source,
             NULL::uuid AS order_submission_id, NULL::text AS identity_key, ria.row_json, ria.submit_col, ria.submit_col2,
-            NULL::uuid AS "popularPurposeApplicationId", NULL::text AS "popularPurposePhone8"
+            NULL::uuid AS "popularPurposeApplicationId", NULL::text AS "popularPurposePhone8", NULL::jsonb AS "ruleFlags"
        FROM review_index_archive ria
       WHERE ria.sheet_id=$1 AND ria.tab_name=$2
       ORDER BY ria.row_index`
@@ -3404,7 +3404,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             COALESCE(purpose_app.id::text, CASE WHEN purpose_order.id IS NOT NULL AND purpose_order.campaign_application_id IS NULL
                                                 THEN 'os:' || purpose_order.id::text END) AS "popularPurposeApplicationId",
             COALESCE(purpose_app.phone8, CASE WHEN purpose_order.id IS NOT NULL AND purpose_order.campaign_application_id IS NULL
-                                              THEN RIGHT(regexp_replace(COALESCE(purpose_order.phone, ''), '[^0-9]', '', 'g'), 8) END) AS "popularPurposePhone8"
+                                              THEN RIGHT(regexp_replace(COALESCE(purpose_order.phone, ''), '[^0-9]', '', 'g'), 8) END) AS "popularPurposePhone8",
+            -- 결정 242: 바로 구매 규칙 위반 표시(내부 작업보드만)
+            CASE WHEN purpose_order.campaign_application_id IS NULL THEN purpose_order.rule_flags END AS "ruleFlags"
        FROM campaign_participants cp
        LEFT JOIN order_submissions purpose_order
          ON purpose_order.id = cp.order_submission_id AND purpose_order.deleted_at IS NULL
@@ -3675,6 +3677,11 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       source: r.source, hasOrder: !!r.order_submission_id,
       // 운영 목적 분류는 내부 작업보드 로그에서만 보인다. 광고주 렌즈에는 노출하지 않는다.
       popularPurpose: showEdits && popularPurposeIds.has(String(r.popularPurposeApplicationId || '')),
+      // 결정 242: 바로 구매 규칙 위반(사람이 읽는 이름 목록) — 내부 작업보드만, 광고주 렌즈에는 싣지 않는다.
+      //   작업표 줄 단위라 판정한 공고와 무관하게 그 줄의 판정을 그대로 보인다(같은 표의 같은 구매).
+      ...(showEdits && r.ruleFlags && Array.isArray(r.ruleFlags.flags) && r.ruleFlags.flags.length
+        ? { ruleFlags: r.ruleFlags.flags.map(f => require('./directPurchaseRules.service').RULE_LABELS[f && f.code] || String((f && f.code) || '')).filter(Boolean) }
+        : {}),
     };
     /* ★ 행마다 같은 판정을 실어 보낸다 — 제출물 미리보기 목록이 "채워진 줄"을 화면에서 다시
        세지 않게(사본 0). 게이지 분자(`filledCount`)와 **같은 호출**이라 갈릴 수가 없다. */
