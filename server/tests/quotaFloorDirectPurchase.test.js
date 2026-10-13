@@ -81,3 +81,10 @@ const read = (rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
   require('assert').ok(/const excludeAppDup = !\(opts && opts\.excludeApplicationDuplicates === false\);/.test(src), 'option external orders exclude manual duplicates by default');
   console.log('quotaFloorDirectPurchase(244): passed');
 }
+{
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'services', 'campaignState.service.js'), 'utf8');
+  const body = src.slice(src.indexOf('async function _loadExternalOptionOrders('), src.indexOf('async function fetchOptionCountsBatch('));
+  require('assert').ok(/ca2\.status = 'submitted' AND ao\.deleted_at IS NULL[\s\S]{0,300}AND ca2\.option_key IS NOT NULL/.test(body),
+    'drop the manual copy only when the matched application is itself counted on an option (Codex PR #1630)');
+  console.log('quotaFloorDirectPurchase(244-option): passed');
+}

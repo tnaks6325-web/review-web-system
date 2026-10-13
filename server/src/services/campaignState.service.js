@@ -1514,6 +1514,9 @@ async function _loadExternalOptionOrders(db, ids, now = new Date(), opts = null)
                  SELECT 1 FROM order_submissions ao
                    JOIN campaign_applications ca2 ON ca2.id = ao.campaign_application_id
                   WHERE ca2.campaign_id = rc.id AND ca2.status = 'submitted' AND ao.deleted_at IS NULL
+                    -- 그 공고 참여가 실제로 상품에 세어질 때만 뺀다 — 상품 없이 확정된 참여(option_key NULL)는 상품 셈에 없으므로
+                    -- 수동 줄의 상품 귀속이 유일한 상품 셈이다(Codex PR #1630)
+                    AND ca2.option_key IS NOT NULL
                     AND ao.dedup_key = os.dedup_key
                     AND RIGHT(regexp_replace(COALESCE(ao.phone, ''), '[^0-9]', '', 'g'), 8)
                       = RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)))
