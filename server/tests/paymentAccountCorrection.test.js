@@ -68,7 +68,7 @@ function handler(o = {}) {
       return { rows: o.auditRows || [] };
     }
     if (/FROM order_submissions/.test(sql) && !/FROM unnest/.test(sql)) return { rows: [{
-      sheetId: 'S1', tabName: 'T1', sheetRow: 18, price: '16000', feeSnapshot: null, orderedAt: ORDERED,
+      sheetId: 'S1', tabName: 'T1', sheetRow: 18, price: '16000', feeSnapshot: null, orderedAt: ORDERED, orderUpdatedAt: o.orderUpdatedAt || null,
       bank: '하나은행', account: o.formAccount || FORM_BAD, depositor: o.formHolder || '임혜정' }] };
     return { rows: [] };
   };
@@ -125,6 +125,20 @@ const run = (opts, fn) => withStubPool(handler(opts), async svc => fn((await svc
       assert.strictEqual(it.bankAccount, REG_GOOD);
     }));
 
+  await ta('1f 주문 기록이 내정보 변경보다 나중에 수정됐으면(관리자가 양식 계좌를 고친 경우) 양식 계좌 유지', () =>
+    run({ ownRows: own(), orderUpdatedAt: '2026-10-09T09:00:00+09:00',
+          auditRows: [{ reviewerId: RID, sub: '', at: '2026-10-08T10:00:00+09:00' }] }, it => {
+      assert.strictEqual(it.bankAccount, FORM_BAD);
+    }));
+
+  t('1g ★ 이름으로만 찾은 타계정(번호 없음)은 예외에서 뺀다 — 회차 스냅샷이 self 로 박제돼 다운로드가 막힌다', () => {
+    const src = fs.readFileSync(SRC('services/payment.service.js'), 'utf8');
+    assert.ok(/const regTargetable = !!registeredAcct && !\(registeredAcct\.isSub && registeredAcct\.subPhone8 === null\);/.test(src));
+    assert.ok(/sameHolder && regTargetable/.test(src));
+    // 변경 기록 조회는 인덱스를 타는 uuid 비교
+    assert.ok(/WHERE reviewer_id = ANY\(\$1::uuid\[\]\)/.test(src));
+  });
+
   console.log('\n§2 실패한 계좌로 되풀이 송금하지 않는다');
 
   await ta('2a ★★ 실패한 계좌 그대로(고객이 안 고침) → failed_account 경고 + 횟수, 막지는 않는다', () =>
@@ -158,6 +172,12 @@ const run = (opts, fn) => withStubPool(handler(opts), async svc => fn((await svc
   t('4a 이전 실패 계좌 줄은 처음에 체크 해제 · 사람이 다시 담으면 존중', () => {
     assert.ok(/includes\('failed_account'\) && !_retryOk\.has\(_pmKey\(it\)\)\) STATE\.pmExcluded\[_pmKey\(it\)\] = true/.test(WD));
     assert.ok(/if\(on\) ok\.add\(key\); else ok\.delete\(key\);/.test(WD));
+  });
+  t('4a2 ★ 작업 목록·선택 키는 체크 해제와 무관하게 만든다(실패 계좌 줄만 남은 작업이 사라지지 않게)', () => {
+    assert.strictEqual((WD.match(/_pmWorkEntries\([^()]*,_pmOn\)/g) || []).length, 0, '작업 목록을 _pmOn 으로 만들면 체크가 다 풀린 작업이 사라진다');
+    assert.ok(/const _pmSelectableRow = it => it\.payable && !_pmNeedsMemo\(it\);/.test(WD));
+    // 다운로드는 여전히 체크된 줄(_pmOn)만
+    assert.ok(/_pmVisibleItems\(\)\.filter\(it=>it\.bank===bank && _pmOn\(it\)\)/.test(WD));
   });
   t('4b 안내줄이 "리뷰어가 고친 계좌로 보냅니다"를 말한다(서버 using 값으로만 갈린다)', () => {
     assert.ok(/mm\.using==='registered' && r/.test(WD) && /리뷰어가 내정보에서 고친 계좌로 보냅니다/.test(WD));

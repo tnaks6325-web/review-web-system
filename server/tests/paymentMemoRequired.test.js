@@ -50,7 +50,7 @@ function load() {
   S._toast = m => S.calls.push(['toast', m]);
   vm.createContext(S);
   vm.runInContext([
-    constSource('_pmNeedsMemo'), constSource('_pmOn'), constSource('_pmKey'), constSource('PM_MANAGER_NICK'),
+    constSource('_pmNeedsMemo'), constSource('_pmOn'), constSource('_pmSelectableRow'), constSource('_pmKey'), constSource('PM_MANAGER_NICK'),
     ...['_pmWorkKey', '_pmManagerName', '_pmManagerMatch', '_pmFilterItems', '_pmFilterState', '_pmWorkEntries',
       '_pmNormQ', '_pmMatchWork', '_pmMemoWorkEntries', '_pmMemoWorkRowsHtml', '_pmQueueMemoFix', '_pmOpenMemoWork',
       '_pmHoldMemoWorks', '_runPendingCndFix', '_pmUnassignedWorks', '_pmHoldWorkEntries'].map(sourceOf),

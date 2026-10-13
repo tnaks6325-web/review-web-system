@@ -350,7 +350,7 @@ test('transfer batch drawer sits below the rows and opens itself when a batch ne
 
 /* 결정 217: 왼쪽 작업 목록 = 문제 있는 작업이 위(사용자 확정), 그 안에서는 가나다. 드래그 범위도 같은 순서. */
 test('visible work list puts works with problems first and keeps name order inside each group', () => {
-  const sb = { STATE: { pmWorkQ: '' }, _pmOn: it => it.payable };   // _pmOn 은 STATE.pmExcluded 를 보므로 스텁(이 검사는 순서만 본다)
+  const sb = { STATE: { pmWorkQ: '' }, _pmOn: it => it.payable, _pmSelectableRow: it => it.payable };   // _pmOn 은 STATE.pmExcluded 를 보므로 스텁(이 검사는 순서만 본다)
   vm.createContext(sb);
   vm.runInContext(constSource('PM_MANAGER_NICK') + '\n' + ['_pmWorkKey', '_pmManagerName', '_pmManagerMatch', '_pmWorkEntries', '_pmNormQ', '_pmMatchWork', '_pmWorkFlags', '_pmVisibleWorkEntries'].map(sourceOf).join('\n')
     + '\nconst _pmWorkHasFlag = ' + workdesk.match(/^const _pmWorkHasFlag = (.*)$/m)[1] + '\nthis._pmWorkHasFlag=_pmWorkHasFlag;', sb);

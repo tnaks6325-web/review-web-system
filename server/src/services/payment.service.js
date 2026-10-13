@@ -306,12 +306,19 @@ async function listPaymentTargets(opts = {}) {
     const rowKey = key + '||' + r.rowIndex;
     const failedSet = failedAcctMap[rowKey] || null;
     const formFailed = !!(formFirst && failedSet && failedSet.has(normalizeAccount(formAcct.bankAccount)));
-    const orderedAt = (ord && ord.orderedAt) || (linkedForm && linkedForm.orderedAt) || null;
+    // 양식 계좌의 "마지막으로 정해진 시각" = 제출 시각과 주문 기록 수정 시각 중 늦은 쪽 — 관리자가 주문 기록에서
+    // 양식 계좌를 나중에 고쳤다면 그보다 먼저 바뀐 내정보 계좌로 덮지 않는다(리뷰 지적 · 보수적으로 접는다).
+    const _later = (a, b) => (!a ? b || null : !b ? a : (new Date(a).getTime() >= new Date(b).getTime() ? a : b));
+    const orderedAt = ord ? _later(ord.orderedAt, ord.orderUpdatedAt)
+      : linkedForm ? _later(linkedForm.orderedAt, linkedForm.orderUpdatedAt) : null;
     const regChangedAt = regComplete ? _acctChangedAt(acctChangeMap, registeredAcct, r.phone8) : null;
     const regChangedAfterOrder = !!(regChangedAt && orderedAt && new Date(regChangedAt).getTime() > new Date(orderedAt).getTime());
     const sameHolder = !!(formFirst && regComplete
       && _holderKey(formAcct.accountHolder) === _holderKey(registeredAcct.accountHolder));
-    const preferRegistered = !!(formFirst && regComplete && sameHolder
+    // ★ 이름으로만 찾은 타계정(번호 없음 — subPhone8 null)은 빼다: 회차 스냅샷이 'self' 로 박제돼
+    //   다음 대조가 소유자 본계좌와 비교해 **회차 전체가 다운로드 불가**가 된다(리뷰 지적 — 기존 결함이 이 길로 열린다).
+    const regTargetable = !!registeredAcct && !(registeredAcct.isSub && registeredAcct.subPhone8 === null);
+    const preferRegistered = !!(formFirst && regComplete && sameHolder && regTargetable
       && normalizeAccount(formAcct.bankAccount) !== normalizeAccount(registeredAcct.bankAccount)
       && (formFailed || regChangedAfterOrder));
     const useForm = formFirst && !preferRegistered;
@@ -655,6 +662,7 @@ async function _loadOrderPrices(sheetIds, tabNames) {
     `SELECT sheet_id AS "sheetId", tab_name AS "tabName", sheet_row AS "sheetRow",
             price, review_fee_snapshot AS "feeSnapshot",
             delivery_review_fee_mix_snapshot AS "deliveryReviewFeeMixSnapshot", submitted_at AS "orderedAt",
+            updated_at AS "orderUpdatedAt",
             -- ★ 그 건의 구매양식으로 **리뷰어가 직접 적어 낸 계좌**(035). 등록 계좌를 못 찾을 때의
             --   마지막 근거다 — 이걸 안 보면 시트에 계좌가 멀쩡히 있는 건도 영구 보류된다.
             bank AS "bank", account AS "account", depositor AS "depositor"
@@ -666,7 +674,7 @@ async function _loadOrderPrices(sheetIds, tabNames) {
   for (const o of rows) {
     map[o.sheetId + '||' + o.tabName + '||' + o.sheetRow] = {
       price: o.price, feeSnapshot: o.feeSnapshot, deliveryReviewFeeMixSnapshot: o.deliveryReviewFeeMixSnapshot,
-      orderDate: toKstDate(o.orderedAt), orderedAt: o.orderedAt || null,
+      orderDate: toKstDate(o.orderedAt), orderedAt: o.orderedAt || null, orderUpdatedAt: o.orderUpdatedAt || null,
       bank: o.bank || '', account: o.account || '', depositor: o.depositor || '',
     };
   }
@@ -692,7 +700,7 @@ async function _loadLinkedFormAccounts(rows) {
     const { rows: found } = await pool.query(
       `SELECT t.sheet_id AS "sheetId", t.tab_name AS "tabName", t.row_index AS "rowIndex",
               os.bank AS "bank", os.account AS "account", os.depositor AS "depositor",
-              os.submitted_at AS "orderedAt"
+              os.submitted_at AS "orderedAt", os.updated_at AS "orderUpdatedAt"
          FROM unnest($1::text[], $2::text[], $3::int[]) AS t(sheet_id, tab_name, row_index)
          JOIN campaign_participants cp
            ON cp.sheet_id = t.sheet_id AND cp.tab_name = t.tab_name AND cp.seq = t.row_index
@@ -704,7 +712,8 @@ async function _loadLinkedFormAccounts(rows) {
     for (const o of found) {
       const k = o.sheetId + '||' + o.tabName + '||' + o.rowIndex;
       if (out[k]) { out[k] = null; continue; }   // 한 줄에 둘 이상 = 모호 → 쓰지 않는다
-      out[k] = { bank: o.bank || '', account: o.account || '', depositor: o.depositor || '', orderedAt: o.orderedAt || null };
+      out[k] = { bank: o.bank || '', account: o.account || '', depositor: o.depositor || '',
+                 orderedAt: o.orderedAt || null, orderUpdatedAt: o.orderUpdatedAt || null };
     }
   } catch (e) {
     try { require('../utils/logger').logger.warn(`[payment] 연결 주문 계좌 조회 실패(무시): ${e.message}`); } catch (_) {}
@@ -750,13 +759,15 @@ async function _loadFailedAccounts(rows) {
  */
 async function _loadAccountChangeTimes(reviewerIds) {
   const out = {};
-  const ids = [...new Set((reviewerIds || []).map(String))];
+  // uuid 만 — 인덱스를 타도록 `reviewer_id = ANY(uuid[])` 로 묻는다(문자열 비교는 인덱스를 못 탄다)
+  const ids = [...new Set((reviewerIds || []).map(String))]
+    .filter(v => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v));
   if (!ids.length) return out;
   try {
     const { rows } = await pool.query(
       `SELECT reviewer_id::text AS "reviewerId", COALESCE(sub_phone8, '') AS "sub", max(changed_at) AS "at"
          FROM reviewer_account_change_audit
-        WHERE reviewer_id::text = ANY($1::text[])
+        WHERE reviewer_id = ANY($1::uuid[])
         GROUP BY 1, 2`, [ids]);
     for (const x of rows) out[x.reviewerId + '|' + x.sub] = x.at;
   } catch (e) {

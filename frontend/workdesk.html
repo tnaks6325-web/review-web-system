@@ -12310,6 +12310,10 @@ const _pmKey = it => it.sheetId+'||'+it.tabName+'||'+it.rowIndex;
      (한 곳만 따로 막으면 "목록엔 없는데 파일엔 들어감"이 된다). */
 const _pmNeedsMemo = it => (it.warnings||[]).includes('no_memo');
 const _pmOn  = it => it.payable && !_pmNeedsMemo(it) && !STATE.pmExcluded[_pmKey(it)];
+/* 작업 목록에 **올라갈 수 있는** 줄 — `_pmOn` 에서 "사람이(또는 기본으로) 체크를 푼 것"만 뺀 것(결정 231 리뷰 지적).
+   ★ 작업 목록·선택 키는 이것으로 만든다 — `_pmOn` 으로 만들면 체크가 전부 풀린 작업(예: 실패 계좌 줄만 남은 작업)이
+     담당자 칩·작업 토글 한 번에 목록·표에서 통째로 사라져 다시 담을 길이 없다. 다운로드·합계는 여전히 `_pmOn`. */
+const _pmSelectableRow = it => it.payable && !_pmNeedsMemo(it);
 const _pmNum = n => (Number(n)||0).toLocaleString();
 
 function _pmWorkKey(it){ return String((it&&it.sheetId)||'')+'||'+String((it&&it.tabName)||''); }
@@ -12406,7 +12410,7 @@ function _pmSelectManager(manager){
   const filter=_pmFilterState();
   STATE.pmWorkScrollTop=null;
   filter.manager=manager||'';
-  filter.workKeys=_pmWorkEntries(STATE.pmItems||[],filter.manager,_pmOn).map(([key])=>key);
+  filter.workKeys=_pmWorkEntries(STATE.pmItems||[],filter.manager,_pmSelectableRow).map(([key])=>key);
   _pmRender();
 }
 function _pmToggleWorkKeys(selectedKeys, allKeys, workKey){
@@ -12426,14 +12430,14 @@ function _pmWorkKeyRange(allKeys, fromKey, toKey){
 }
 function _pmApplyWorkSelection(workKey, selectedValue){
   const filter=_pmFilterState();
-  const allKeys=_pmWorkEntries(STATE.pmItems||[],filter.manager,_pmOn).map(([key])=>key);
+  const allKeys=_pmWorkEntries(STATE.pmItems||[],filter.manager,_pmSelectableRow).map(([key])=>key);
   filter.workKeys=_pmSetWorkSelection(filter.workKeys,allKeys,workKey,selectedValue);
 }
 function _pmStartWorkDrag(event, workKey){
   if(event.button!==0) return;
   event.preventDefault();
   const filter=_pmFilterState();
-  const allKeys=_pmWorkEntries(STATE.pmItems||[],filter.manager,_pmOn).map(([key])=>key);
+  const allKeys=_pmWorkEntries(STATE.pmItems||[],filter.manager,_pmSelectableRow).map(([key])=>key);
   const selected=new Set(filter.workKeys===null ? allKeys : filter.workKeys);
   STATE.pmWorkDrag={ selected:!selected.has(workKey), seen:new Set(), lastWorkKey:null };
   _pmDragSelectWork(event,workKey);
@@ -12477,7 +12481,7 @@ function _pmToggleWork(workKey){
   const workList=$('#pmbody .pmworklist');
   STATE.pmWorkScrollTop=workList ? workList.scrollTop : null;
   const filter=_pmFilterState();
-  const allKeys=_pmWorkEntries(STATE.pmItems||[],filter.manager,_pmOn).map(([key])=>key);
+  const allKeys=_pmWorkEntries(STATE.pmItems||[],filter.manager,_pmSelectableRow).map(([key])=>key);
   filter.workKeys=_pmToggleWorkKeys(filter.workKeys,allKeys,workKey);
   _pmRender();
 }
@@ -12516,7 +12520,7 @@ function _pmVisibleWorkEntries(items, manager){
   const q=_pmNormQ(STATE.pmWorkQ);
   const flags=_pmWorkFlags(items);
   const bad=key=>_pmWorkHasFlag(flags.get(key))?1:0;
-  return _pmWorkEntries(items,manager,_pmOn).filter(e=>_pmMatchWork(e,q))
+  return _pmWorkEntries(items,manager,_pmSelectableRow).filter(e=>_pmMatchWork(e,q))
     .map((e,i)=>[e,i]).sort((a,b)=>bad(b[0][0])-bad(a[0][0]) || a[1]-b[1]).map(([e])=>e);
 }
 /** 보류만 있는 작업 — 고를 줄이 하나도 없고(전부 보류) 입금명 문제도 아닌 작업. */
@@ -12540,7 +12544,7 @@ function _pmJumpWork(i){
  *  ★ 보류(계좌·은행)로만 빠진 작업은 여기 없다 — 입금명을 정해도 고를 게 없다(그건 보완 카드가 말한다).
  *  ★ 한 작업 안에 입금명 있는 줄이 섞여 있으면 그 작업은 평소처럼 고를 수 있고, 없는 줄만 표에서 막힌다. */
 function _pmMemoWorkEntries(items, manager){
-  const selectable=new Set(_pmWorkEntries(items,manager,_pmOn).map(([key])=>key));
+  const selectable=new Set(_pmWorkEntries(items,manager,_pmSelectableRow).map(([key])=>key));
   return _pmWorkEntries(items,manager,it=>it.payable && _pmNeedsMemo(it)).filter(([key])=>!selectable.has(key));
 }
 /* [입금명 필요] 줄 — 고르는 대신 그 작업의 작업 화면으로 가서 입금명 설정 창을 바로 연다.
@@ -12584,7 +12588,7 @@ function _pmHoldMemoWorks(allItems){
   _pmMemoWorkEntries(allItems,'').forEach(([key])=>seen.add(key));
   const filter=_pmFilterState();
   if(filter.workKeys!==null || !seen.size) return;
-  const allKeys=_pmWorkEntries(allItems,filter.manager,_pmOn).map(([key])=>key);
+  const allKeys=_pmWorkEntries(allItems,filter.manager,_pmSelectableRow).map(([key])=>key);
   if(allKeys.some(key=>seen.has(key))) filter.workKeys=allKeys.filter(key=>!seen.has(key));
 }
 /* 작업 행 HTML — 전체 렌더와 검색 중 목록-only 렌더가 **같은 한 벌**을 쓴다(사본을 두면
@@ -12607,7 +12611,7 @@ function _pmRenderWorkList(){
   if(!wrap) return;                       // 입금관리 화면이 아니면 무동작
   const allItems=STATE.pmItems||[];
   const filter=_pmFilterState();
-  const allKeys=_pmWorkEntries(allItems,filter.manager,_pmOn).map(([key])=>key);
+  const allKeys=_pmWorkEntries(allItems,filter.manager,_pmSelectableRow).map(([key])=>key);
   const selectedKeys=new Set(filter.workKeys===null ? allKeys : filter.workKeys);
   const works=_pmVisibleWorkEntries(allItems,filter.manager);
   const rows=_pmWorkRowsHtml(allItems,works,selectedKeys);
@@ -12630,7 +12634,7 @@ function _pmFilterBar(allItems, extra){
   const filter=_pmFilterState();
   const managers=[...new Set((allItems||[]).map(it=>_pmManagerName(it.manager)).filter(Boolean))]
     .sort((a,b)=>a.localeCompare(b,'ko'));
-  const works=_pmWorkEntries(allItems,filter.manager,_pmOn);
+  const works=_pmWorkEntries(allItems,filter.manager,_pmSelectableRow);
   const allWorkKeys=works.map(([key])=>key);
   const selectedKeys=new Set(filter.workKeys===null ? allWorkKeys : filter.workKeys.filter(key=>allWorkKeys.includes(key)));
   if(filter.workKeys!==null) filter.workKeys=[...selectedKeys];
@@ -12648,7 +12652,7 @@ function _pmFilterBar(allItems, extra){
    ★ 다운로드 대상 = 선택된 작업들의 체크된 입금 항목만(C스타일 규칙). */
 function _pmBarHtml(allItems){
   const filter=_pmFilterState();
-  const allWorkKeys=_pmWorkEntries(allItems,filter.manager,_pmOn).map(([key])=>key);
+  const allWorkKeys=_pmWorkEntries(allItems,filter.manager,_pmSelectableRow).map(([key])=>key);
   const selCount=filter.workKeys===null ? allWorkKeys.length : filter.workKeys.filter(key=>allWorkKeys.includes(key)).length;
   const selectedItems=_pmFilterItems(allItems,filter).filter(_pmOn);
   const selectedTotal=_pmSelectedPaymentTotal(allItems,filter,_pmOn);
