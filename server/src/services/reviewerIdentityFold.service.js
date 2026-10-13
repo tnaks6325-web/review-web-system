@@ -265,7 +265,8 @@ async function apply({ previewRunId, db = pool, by = 'switch', lockTimeoutMs = 2
     `INSERT INTO reviewer_identity_fold_runs (mode, summary) VALUES ('apply', $1::jsonb) RETURNING id`,
     [JSON.stringify({ previewRunId: String(id) })]);
   const applyRunId = String(me.id);
-  const tag = `${String(by).slice(0, 30)}:apply#${applyRunId}`;
+  // 담당자 「판단 내역」의 담당자 칸에 그대로 보인다 — 사람이 아니라 스위치 실행임을 알 수 있게.
+  const tag = by === 'switch' ? `자동 정리 #${applyRunId}` : `${String(by).slice(0, 30)} #${applyRunId}`;
   let todo = (run.items || []).filter((x) => x.status === 'ready');
   const results = [];
   for (let pass = 0; pass < 3 && todo.length; pass++) {
@@ -356,7 +357,7 @@ async function undoFoldInTx(client, d) {
 }
 
 /** 한 실행이 만든 정리를 전부 되돌린다(비상 스위치 undo_all:<실행 번호>). */
-async function undoRun({ applyRunId, db = pool, by = 'switch', lockTimeoutMs = 2000 } = {}) {
+async function undoRun({ applyRunId, db = pool, by = '자동 되돌리기', lockTimeoutMs = 2000 } = {}) {
   const id = Number(applyRunId);
   if (!Number.isSafeInteger(id) || id < 1) throw new IdentityFoldError('bad_run', '실행 번호가 올바르지 않습니다.');
   const { rows: list } = await db.query(
