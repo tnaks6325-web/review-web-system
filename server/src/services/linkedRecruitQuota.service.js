@@ -481,7 +481,34 @@ async function usedByOption(client, campaignId) {
       GROUP BY option_key`,
     [campaignId]
   );
-  return new Map(rows.map(row => [row.option_key, quota(row.used)]));
+  const used = new Map(rows.map(row => [row.option_key, quota(row.used)]));
+  // ★ 결정 239 — 바로 구매(정원 엔진이 그 상품에 귀속한 공고 밖 주문)도 그 상품이 쓴 자리다.
+  //   조회 실패는 종전(공고 참여만) — 정원 엔진 자체가 fail-soft 로 귀속을 비운다.
+  const { optionDirectOrders } = require('./quotaFloor.service');
+  for (const [key, n] of await optionDirectOrders(client, campaignId)) used.set(key, (used.get(key) || 0) + n);
+  return used;
+}
+
+/**
+ * ★ 결정 239 — 총 정원 하한 = max(종전 공고 참여 수, 정원 엔진의 공고 참여 + 바로 구매).
+ *   연결 작업표 주문을 모르면(조회 실패) 줄이기만 막는다 — 늘리기·그대로 저장은 종전대로 통과.
+ */
+async function _assertTotalFloor(client, campaignId, recruitTotal) {
+  const { rows: used } = await client.query(
+    `SELECT COUNT(*)::int AS used FROM campaign_applications WHERE campaign_id=$1 AND status IN ('applied','submitted')`, [campaignId]
+  );
+  const { campaignUsedFloor } = require('./quotaFloor.service');
+  const f = await campaignUsedFloor(client, campaignId);
+  if (!f.known) {
+    const { rows: cur } = await client.query('SELECT recruit_total FROM recruit_campaigns WHERE id=$1', [campaignId]);
+    if (quota(recruitTotal) < quota(cur[0]?.recruit_total)) {
+      throw quotaError('작업표 주문 기록을 확인하지 못해 정원을 줄일 수 없습니다. 잠시 후 다시 시도해주세요.', 'recruit_quota_unknown');
+    }
+  }
+  const floor = Math.max(quota(used[0]?.used), f.total);
+  if (quota(recruitTotal) < floor) {
+    throw quotaError(`이미 참여 또는 진행 중인 인원(바로 구매 포함 ${floor}명)보다 낮게 정원을 설정할 수 없습니다.`, 'recruit_quota_below_used');
+  }
 }
 
 async function assertWorkOrderQuota({ workOrderId, recruitTotal }) {
@@ -492,10 +519,7 @@ async function assertWorkOrderQuota({ workOrderId, recruitTotal }) {
     if (!rows.length) { await client.query('ROLLBACK'); return null; }
     const campaign = await linkedCampaign(client, rows[0]);
     if (!campaign) { await client.query('ROLLBACK'); return null; }
-    const { rows: used } = await client.query(
-      `SELECT COUNT(*)::int AS used FROM campaign_applications WHERE campaign_id=$1 AND status IN ('applied','submitted')`, [campaign.id]
-    );
-    if (quota(recruitTotal) < quota(used[0]?.used)) throw quotaError('이미 참여 또는 진행 중인 인원보다 낮게 정원을 설정할 수 없습니다.', 'recruit_quota_below_used');
+    await _assertTotalFloor(client, campaign.id, recruitTotal);
     await assertWorktableSlotsInTx(client, campaign, quota(recruitTotal));
     const { rows: options } = await client.query(
       `SELECT opt_key, recruit_total, status, sort_order FROM campaign_options WHERE campaign_id=$1 ORDER BY sort_order, id FOR UPDATE`, [campaign.id]
@@ -532,10 +556,7 @@ async function assertCampaignRecruitTotal({ campaignId, recruitTotal }) {
     );
     if (!rows.length) { await client.query('ROLLBACK'); return null; }
     const campaign = rows[0];
-    const { rows: used } = await client.query(
-      `SELECT COUNT(*)::int AS used FROM campaign_applications WHERE campaign_id=$1 AND status IN ('applied','submitted')`, [campaign.id]
-    );
-    if (quota(recruitTotal) < quota(used[0]?.used)) throw quotaError('이미 참여 또는 진행 중인 인원보다 낮게 정원을 설정할 수 없습니다.', 'recruit_quota_below_used');
+    await _assertTotalFloor(client, campaign.id, recruitTotal);
     await assertWorktableSlotsInTx(client, campaign, quota(recruitTotal));
     await client.query('ROLLBACK');
     return { campaignId: campaign.id };
@@ -588,10 +609,7 @@ async function syncWorkOrderRecruitTotal({ workOrderId, recruitTotal }) {
     const campaign = await linkedCampaign(client, rows[0]);
     if (!campaign) { await client.query('ROLLBACK'); return { linked: false }; }
     const total = quota(recruitTotal);
-    const { rows: used } = await client.query(
-      `SELECT COUNT(*)::int AS used FROM campaign_applications WHERE campaign_id=$1 AND status IN ('applied','submitted')`, [campaign.id]
-    );
-    if (total < quota(used[0]?.used)) throw quotaError('이미 참여 또는 진행 중인 인원보다 낮게 정원을 설정할 수 없습니다.', 'recruit_quota_below_used');
+    await _assertTotalFloor(client, campaign.id, total);
     // 차수 원장이 있는 공고는 recruit_total만 쓰면 다음 공고 수정에서 차수 합계가 다시
     // 덮어쓴다. 1차를 목표-후속차수 합계로 갱신해 세 저장값을 같은 값으로 유지한다.
     let rounds = [];
