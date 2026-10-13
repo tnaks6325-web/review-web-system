@@ -276,7 +276,7 @@ async function _registeredAddressCheck(reviewer, idAddr, opts, addrBad) {
   const main = await addressSame(reviewer.address, idAddr, opts);
   if (!addrBad(main.verdict)) return main;
   const extras = (Array.isArray(reviewer.deliveryAddresses) ? reviewer.deliveryAddresses : [])
-    .map((extra) => extra && (extra.address || extra)).filter((addr) => addr && typeof addr === 'string').slice(0, 20);
+    .map((extra) => extra && (extra.address || extra)).filter((addr) => addr && typeof addr === 'string');
   // AI 비교는 한 번만(Codex P2 — 제출 전 대조는 주문 5건 × 추가 배송지 수만큼 AI 를 부를 수 있었다): 휴리스틱으로 먼저 전부 본다.
   let firstUncertain = null;
   for (const addr of extras) {

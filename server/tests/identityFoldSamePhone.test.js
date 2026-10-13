@@ -347,6 +347,15 @@ const read = (p) => fs.readFileSync(path.resolve(__dirname, '..', p), 'utf8');
         await merge.undoDecision({ decisionId: String(dec), by: 'tester', db });
         const rows = (await db.query(`SELECT address FROM reviewer_delivery_addresses WHERE owner_reviewer_id = $1`, [H2])).rows;
         assert.deepStrictEqual(rows.map((x) => x.address), ['광주 본가 2동'], '원래 주소는 남는다');
+        // 다시 원래 주소로 고쳐 또 정리 → 남아 있던 줄을 이번 정리 몫으로 가져와, 되돌리면 지워진다(Codex P2)
+        await db.query(`UPDATE reviewers SET sub_accounts = $2::jsonb WHERE id = $1`, [H2, JSON.stringify([{ name: '문가족', phone: '010-7979-1111', address: '광주 본가 2동' }])]);
+        await cards.reconcileCards({ db, dryRun: false, by: 'test' });
+        const p6 = await fold.preview({ db });
+        await fold.apply({ previewRunId: p6.runId, db, retryDelayMs: 10 });
+        const dec2 = (await db.query(`SELECT id FROM reviewer_identity_decisions WHERE owner_reviewer_id = $1 AND kind = 'fold_self' AND undone_at IS NULL`, [H2])).rows[0].id;
+        assert.strictEqual(String((await db.query(`SELECT decision_id FROM reviewer_delivery_addresses WHERE owner_reviewer_id = $1`, [H2])).rows[0].decision_id), String(dec2));
+        await merge.undoDecision({ decisionId: String(dec2), by: 'tester', db });
+        assert.strictEqual((await db.query(`SELECT count(*)::int n FROM reviewer_delivery_addresses WHERE owner_reviewer_id = $1`, [H2])).rows[0].n, 0);
       } finally {
         await db.query(`DELETE FROM reviewer_delivery_addresses WHERE owner_reviewer_id = $1`, [H2]);
         await db.query(`DELETE FROM reviewer_identity_decisions WHERE owner_reviewer_id = $1`, [H2]);

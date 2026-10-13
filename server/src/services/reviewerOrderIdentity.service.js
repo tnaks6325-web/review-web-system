@@ -7,7 +7,6 @@ const { addressSame, addressHeuristic, normAddress, isOwnerPhoneRecipient, isMas
 const { logger } = require('../utils/logger');
 
 const MASK_RE = /[*＊●○◯◉•·xX]/;
-const MAX_EXTRA_ADDRESS_COMPARE = 20;   // 추가 배송지 비교 상한(한 요청의 비교량 제한)
 const MASK_RUN_RE = /[*＊●○◯◉•·xX]+/g;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PURPOSE_EXTRACT = 'reviewer_capture_extract';
@@ -707,7 +706,7 @@ async function evaluateSelectedIdentity(extracted, selected, allIdentities, opti
   // 결정 226 — 본계정 추가 배송지(합친 타계정 주소). 본인 명의 참여이고 받는 사람이 본인으로 인정될 때(본인 이름 또는 본인 번호)
   //   등록 주소와 달라도 추가 배송지와 같으면 등록 주소로 본다 — "다른 배송지 확인" 단계를 거치지 않는다.
   const extraAddrs = (selected && selected.type === 'self' && Array.isArray(selected.deliveryAddresses) ? selected.deliveryAddresses : [])
-    .filter((x) => x && String(x.address || '').trim()).slice(0, MAX_EXTRA_ADDRESS_COMPARE);
+    .filter((x) => x && String(x.address || '').trim());   // 휴리스틱은 전부 본다 — 비싼 AI 만 한 번으로 제한(Codex P2)
   let maskedAddressAmbiguous = false;
   const useExtra = (addr, v) => {
     selectedScore.parts.address = { verdict: 'match', score: (v && v.score) || 1, reason: '등록된 추가 배송지와 일치' };
@@ -720,8 +719,11 @@ async function evaluateSelectedIdentity(extracted, selected, allIdentities, opti
     if (raw && MASK_RE.test(raw)) {
       // 가린 주소: 집 주소와 추가 배송지를 모두 대 보고 **정확히 하나**만 맞을 때만 그 주소로 펼친다(Codex P2 —
       //   가린 동·호수가 두 주소에 똑같이 맞으면 어느 쪽인지 모른다 → 확인 단계에서 실제 주소를 고르게 한다).
+      // 같은 주소를 두 받는 사람이 쓰면 줄이 둘이다 — 주소로 합친 뒤 센다(Codex P2). 집 주소와 같은 추가 배송지는 집 주소로 본다.
+      const seen = new Set();
       const cands = [{ address: selected.address, primary: true }, ...extraAddrs.map((x) => ({ address: x.address }))]
-        .filter((c) => String(c.address || '').trim());
+        .filter((c) => String(c.address || '').trim())
+        .filter((c) => { const k = normAddress(c.address); if (seen.has(k)) return false; seen.add(k); return true; });
       const hits = cands.filter((c) => maskedAddressVerdict(raw, c.address).verdict === 'match');
       if (hits.length > 1) {
         maskedAddressAmbiguous = true;

@@ -65,12 +65,18 @@ const read = (p) => fs.readFileSync(path.resolve(__dirname, '..', p), 'utf8');
     assert.ok(r.reasonCodes.includes('masked_address_ambiguous'));
     assert.ok(/\*/.test(r.resolved.address), '어느 주소로도 펼치지 않는다');
   });
+  await test('같은 주소를 두 받는 사람이 써도 가린 주소는 하나로 보고 펼친다', async () => {
+    const two = { ...self(false), deliveryAddresses: [{ id: '1', recipient: '이가족', address: PARENTS }, { id: '2', recipient: '이둘째', address: PARENTS }] };
+    const r = await evaluateSelectedIdentity({ recipient: '이가족', phone: '010-7171-2222', address: '전북 전주시 완산구 효자로 ** 푸른빌라 3동 105호' }, two, [two], opt);
+    assert.ok(!r.reasonCodes.includes('masked_address_ambiguous'));
+    assert.strictEqual(r.resolved.address, PARENTS);
+  });
   await test('AI 주소 비교는 추가 배송지 수와 상관없이 최대 한 번(휴리스틱 먼저)', async () => {
     const roi = read('src/services/reviewerOrderIdentity.service.js');
     assert.ok(/addressHeuristic\(raw, extra\.address\)[\s\S]{0,400}if \(!hit && firstUncertain && options\.useGemini\)/.test(roi));
     const id = read('src/services/identity.service.js');
     assert.ok(/addressHeuristic\(addr, idAddr\)[\s\S]{0,300}if \(firstUncertain && opts\.useGemini\)/.test(id));
-    assert.ok(/MAX_EXTRA_ADDRESS_COMPARE = 20/.test(roi));
+    assert.ok(!/MAX_EXTRA_ADDRESS_COMPARE|\.slice\(0, 20\)/.test(roi + id), '휴리스틱 비교는 자르지 않는다(AI 만 한 번)');
   });
   await test('추가 배송지는 승인 증명에 묶인다 · 없으면 종전과 같은 해시', async () => {
     const { profileHash } = require('../src/services/reviewerOrderIdentity.service')._test;

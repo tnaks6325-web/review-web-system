@@ -241,7 +241,12 @@ async function _foldOne(client, { ownerId, sig, by, runId }) {
   if (slotAddr && !ADDR_MASK_RE.test(slotAddr) && addrKey(slotAddr) !== addrKey(owner.address)) {
     const { rows: [da] } = await client.query(
       `INSERT INTO reviewer_delivery_addresses (owner_reviewer_id, recipient, address, address_key, source, decision_id)
-       VALUES ($1, $2, $3, $4, 'fold', $5) ON CONFLICT (owner_reviewer_id, address_key, recipient) DO NOTHING RETURNING id`,
+       VALUES ($1, $2, $3, $4, 'fold', $5)
+       ON CONFLICT (owner_reviewer_id, address_key, recipient) DO UPDATE SET decision_id = EXCLUDED.decision_id
+        -- 앞서 되돌린 정리가 남겨 둔 줄이면 이번 정리 몫으로 가져온다(다음 되돌리기가 지울 수 있게 · Codex P2).
+        WHERE reviewer_delivery_addresses.decision_id IS NULL
+           OR EXISTS (SELECT 1 FROM reviewer_identity_decisions x WHERE x.id = reviewer_delivery_addresses.decision_id AND x.undone_at IS NOT NULL)
+       RETURNING id`,
       [ownerId, String(slot.name || '').trim(), slotAddr, addrKey(slotAddr), decisionId]);
     deliveryAddress = da ? String(da.id) : 'existing';
   }
