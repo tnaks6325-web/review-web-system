@@ -1352,6 +1352,49 @@ router.get('/popular-status', applyLimiter, async (req, res, next) => {
 //   판정 단일 출처 = utils/repurchaseGuard(apply 게이트와 같은 기준 — 카드는 열려 있는데 참여는
 //   거부되는 불일치를 만들지 않는다). ★ 참여 이력이 아예 없는 공고는 응답 맵에 없다(=평소 카드).
 //   ★ 라우트 등록 순서: GET '/:id' 보다 앞이어야 함 — 뒤에 두면 '/:id'가 이 경로를 id로 삼킨다.
+// GET /api/campaign/order-form-gate?sheetId=&tabName= — 구매양식을 "참여하기" 없이 열 때 인기 공고 참여권 확인(결정 243).
+//   사용자 확정 2026-10-14 "1.나" — 링크는 막지 않고, 양식을 열 때 참여권이 없으면 먼저 알려 준다(사기 전에 걸러지게).
+//   판정은 참여 버튼과 같은 단일 출처(popularCredit · 결정 238 바로 구매 포함). 본계정 로그인 = 소유 증명된 모든 명의 중 하나라도
+//   참여권이 있으면 통과 / 타계정 로그인 = 그 명의만. ★ 막지 않는다 — 화면이 [그래도 제출하기] 를 준다(결제 뒤 기록이 사라지지 않게).
+//   ★ 실패·모름은 gate:false(fail-open) — 우리 쪽 오류로 리뷰어를 막지 않는다. 바로 구매는 결정 242 위반 표시가 뒤에서 잡는다.
+//   ★ 라우트 등록 순서: GET '/:id' 보다 앞이어야 한다.
+router.get('/order-form-gate', reviewerSessionMiddleware, applyLimiter, async (req, res, next) => {
+  try {
+    const sheetId = String(req.query.sheetId || '').trim();
+    const tabName = String(req.query.tabName || '').trim();
+    const gid = String(req.query.gid || '').trim();
+    if (!sheetId || (!tabName && !gid)) return res.json({ ok: true, gate: false });
+    // 탭 이름이 바뀐 뒤에도 옛 링크(gid 보존)가 같은 공고를 찾게 — 이름 또는 gid(빈 값 안전) 매칭(Codex PR #1629)
+    const { rows: cRows } = await pool.query(
+      `SELECT id, title, is_popular FROM recruit_campaigns
+        WHERE participation_mode IS TRUE AND linked_sheet_id = $1
+          AND ((linked_tab_name = $2 AND $2 <> '') OR (NULLIF(linked_tab_gid, '') IS NOT NULL AND linked_tab_gid = NULLIF($3, '')))
+        ORDER BY (linked_tab_name = $2) DESC, created_at DESC NULLS LAST, id DESC LIMIT 1`, [sheetId, tabName, gid]);
+    const camp = cRows[0];
+    if (!camp || camp.is_popular !== true) return res.json({ ok: true, gate: false });
+    const { rows: rRows } = await pool.query('SELECT phone8 FROM reviewers WHERE id = $1 LIMIT 1', [req.reviewer.ownerReviewerId]);
+    const ownerP8 = String((rRows[0] && rRows[0].phone8) || '').replace(/\D/g, '').slice(-8);
+    let phones;
+    if (req.reviewer.loginKind === 'sub') {
+      phones = [String(req.reviewer.loginPhone8 || '').replace(/\D/g, '').slice(-8)];
+    } else {
+      const { loadVerifiedOwnerPhones } = require('../services/directPurchaseParticipation.service');
+      phones = await loadVerifiedOwnerPhones(pool, { ownerPhone8: ownerP8, ownerReviewerId: req.reviewer.ownerReviewerId });
+    }
+    phones = phones.filter(p => /^\d{8}$/.test(p));
+    // 남은 참여권 수(명의 합) — 화면이 주문 카드 수와 비교한다(카드 1건 = 참여권 1장 · Codex PR #1629).
+    let credits = 0;
+    for (const p8 of phones) {
+      const st = await loadPopularCreditState(pool, p8);
+      if (canUsePopularCredit(st)) credits += Math.max(0, Number(st.credits) || 0);
+    }
+    res.json({ ok: true, popular: true, gate: credits <= 0, credits, campaignId: camp.id, title: String(camp.title || '') });
+  } catch (err) {
+    logger.warn('[campaign/order-form-gate] 판정 실패(열어 둠): ' + err.message);
+    res.json({ ok: true, gate: false, unknown: true });
+  }
+});
+
 router.get('/my-repurchase-status', reviewerSessionMiddleware, applyLimiter, async (req, res, next) => {
   try {
     const ids = String(req.query.ids || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 100);
