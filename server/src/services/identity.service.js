@@ -268,6 +268,29 @@ function pickIdField(extracted, formValue, { isPhone = false } = {}) {
  *   status: 'SELF' | 'SUB' | 'NEED_CONFIRM' | 'NEED_SUB_REGISTER'
  *   identity: 타계정 등록 유도용 파싱된 신원 { name, phone, address, bankName, bankAccount, accountHolder }
  */
+/**
+ * 결정 226 — 본인 명의 주문의 주소 대조: 등록 주소가 다르면 본계정 추가 배송지(합친 타계정 주소 · reviewer.deliveryAddresses)도 본다.
+ * 호출자가 reviewer.deliveryAddresses 를 채운다(없으면 종전과 같다).
+ */
+async function _registeredAddressCheck(reviewer, idAddr, opts, addrBad) {
+  const main = await addressSame(reviewer.address, idAddr, opts);
+  if (!addrBad(main.verdict)) return main;
+  const extras = (Array.isArray(reviewer.deliveryAddresses) ? reviewer.deliveryAddresses : [])
+    .map((extra) => extra && (extra.address || extra)).filter((addr) => addr && typeof addr === 'string');
+  // AI 비교는 한 번만(Codex P2 — 제출 전 대조는 주문 5건 × 추가 배송지 수만큼 AI 를 부를 수 있었다): 휴리스틱으로 먼저 전부 본다.
+  let firstUncertain = null;
+  for (const addr of extras) {
+    const h = addressHeuristic(addr, idAddr);
+    if (!addrBad(h.verdict)) return { ...h, reason: '등록된 추가 배송지와 일치' };
+    if (h.verdict === 'uncertain' && !firstUncertain) firstUncertain = addr;
+  }
+  if (firstUncertain && opts.useGemini) {
+    const v = await addressSame(firstUncertain, idAddr, opts);
+    if (!addrBad(v.verdict)) return { ...v, reason: '등록된 추가 배송지와 일치' };
+  }
+  return main;
+}
+
 async function resolveOrderIdentity(reviewer, order, opts = {}) {
   const mode = opts.mode === 'submit' ? 'submit' : 'precheck';
   const useGemini = mode !== 'submit';
@@ -308,7 +331,7 @@ async function resolveOrderIdentity(reviewer, order, opts = {}) {
       && ((idPhone && idPhone === selfPhone) || sameNameCount === 1)) {
     if (skipDetail) return { status: 'SELF', subIndex: -1, reasons: [], identity };
     // 주소 대조
-    const addrCheck = await addressSame(reviewer.address, idAddr, { name: identity.name, phone: identity.phone, useGemini });
+    const addrCheck = await _registeredAddressCheck(reviewer, idAddr, { name: identity.name, phone: identity.phone, useGemini }, addrBad);
     // 계좌 대조: 계좌번호 일치 또는 예금주=등록 예금주
     const acctOk = (idAcct && normAccount(reviewer.bank_account) === idAcct)
       || (idHolder && idHolder === normName(reviewer.account_holder));
@@ -336,7 +359,7 @@ async function resolveOrderIdentity(reviewer, order, opts = {}) {
     && subs.some((sub) => normName(sub && sub.name) === idName && normPhone8(sub && sub.phone) === selfPhone);
   if (ownerPhoneOrder && !exactSub) {
     if (skipDetail) return { status: 'SELF', subIndex: -1, reasons: [], identity };
-    const addrCheck = await addressSame(reviewer.address, idAddr, { name: identity.name, phone: identity.phone, useGemini });
+    const addrCheck = await _registeredAddressCheck(reviewer, idAddr, { name: identity.name, phone: identity.phone, useGemini }, addrBad);
     const acctOk = (idAcct && normAccount(reviewer.bank_account) === idAcct)
       || (idHolder && idHolder === normName(reviewer.account_holder));
     if (!addrBad(addrCheck.verdict) && acctOk) return { status: 'SELF', subIndex: -1, reasons: [], identity };

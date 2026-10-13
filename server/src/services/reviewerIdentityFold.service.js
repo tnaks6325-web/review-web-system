@@ -36,6 +36,9 @@ const MAX_SUB_SLOTS = 50;   // reviewer.service saveSubAccounts 상한과 같다
 // 타계정 칸의 주민번호는 화면·시기에 따라 키 이름이 다르다(Codex P1) — 판정·기록 모두 이 키들을 함께 본다.
 const JUMIN_KEYS = ['jumin', 'residentNo', 'resident_num', 'residentNum'];
 const juminOf = (s) => { for (const k of JUMIN_KEYS) if (s && digits(s[k])) return digits(s[k]); return ''; };
+const ADDR_MASK_RE = /[*＊●○◯◉•·xX]/;   // reviewerOrderIdentity MASK_RE 와 같다(x·X 가림 포함 · Codex P2)
+// identity.service normAddress 와 같은 규칙(소문자 · 기호→공백 · 공백 압축) — 추가 배송지 중복 막기 키
+const addrKey = (v) => String(v == null ? '' : v).toLowerCase().replace(/[()\[\],./·]/g, ' ').replace(/\s+/g, ' ').trim();
 const sigHash = (name, phone) => stableHash(`fold|${nk(name)}|${p8(phone)}`).slice(0, 32);
 const groupKeyOf = (ownerId, name, phone) => `fold|${ownerId}|${sigHash(name, phone)}`;
 function asSubs(value) {
@@ -48,7 +51,7 @@ class IdentityFoldError extends Error {
   constructor(code, message) { super(message); this.code = code; }
 }
 
-const REVIEWER_COLS = 'id, name, phone, resident_num, bank_name, bank_account, account_holder, shopping_id, reviewer_no, sub_accounts';
+const REVIEWER_COLS = 'id, name, phone, address, resident_num, bank_name, bank_account, account_holder, shopping_id, reviewer_no, sub_accounts';
 
 /**
  * 한 소유자의 같은 번호 칸을 판정한다(순수 함수 · DB 미접근).
@@ -231,6 +234,22 @@ async function _foldOne(client, { ownerId, sig, by, runId }) {
       moved.shifted++;
     }
   }
+  // ⑤-0 받는 주소를 본계정 추가 배송지로(사용자 확정 2026-10-13 (나)) — 구매양식에서 계속 고를 수 있고 등록 주소로 인정된다.
+  //   본계정 주소와 같거나 가림(*)이면 남기지 않는다. 실패하면 정리 자체를 되돌린다(주소를 잃은 채 칸을 지우지 않는다).
+  let deliveryAddress = null;
+  const slotAddr = String(slot.address || '').trim();
+  if (slotAddr && !ADDR_MASK_RE.test(slotAddr) && addrKey(slotAddr) !== addrKey(owner.address)) {
+    const { rows: [da] } = await client.query(
+      `INSERT INTO reviewer_delivery_addresses (owner_reviewer_id, recipient, address, address_key, source, decision_id)
+       VALUES ($1, $2, $3, $4, 'fold', $5)
+       ON CONFLICT (owner_reviewer_id, address_key, recipient) DO UPDATE SET decision_id = EXCLUDED.decision_id
+        -- 앞서 되돌린 정리가 남겨 둔 줄이면 이번 정리 몫으로 가져온다(다음 되돌리기가 지울 수 있게 · Codex P2).
+        WHERE reviewer_delivery_addresses.decision_id IS NULL
+           OR EXISTS (SELECT 1 FROM reviewer_identity_decisions x WHERE x.id = reviewer_delivery_addresses.decision_id AND x.undone_at IS NOT NULL)
+       RETURNING id`,
+      [ownerId, String(slot.name || '').trim(), slotAddr, addrKey(slotAddr), decisionId]);
+    deliveryAddress = da ? String(da.id) : 'existing';
+  }
   // ⑤ 카드 merged → 칸 지우기(이 순서여야 거울이 카드를 되살리지 않는다)
   if (subCard) {
     await client.query(
@@ -243,7 +262,7 @@ async function _foldOne(client, { ownerId, sig, by, runId }) {
     list.splice(i, 1);
     return list;
   }, { source: 'fold_self' });
-  return { result: 'folded', decisionId: String(decisionId), moved };
+  return { result: 'folded', decisionId: String(decisionId), moved, deliveryAddress };
 }
 
 async function _inTx(db, lockTimeoutMs, fn) {
@@ -370,6 +389,23 @@ async function undoFoldInTx(client, d) {
     return list;
   }, { source: 'fold_undo' });
   restored.slot = !!out.changed;
+  // 정리 때 만든 추가 배송지는 지운다(칸이 돌아왔으니 그 주소는 타계정 칸에 다시 있다).
+  //   같은 주소를 가진 다른 정리(아직 살아 있는 것)가 있으면 지우지 않고 그 정리 몫으로 넘긴다(같은 주소는 한 줄만 저장하므로).
+  const { rows: mine } = await client.query(`SELECT id, recipient, address_key FROM reviewer_delivery_addresses WHERE decision_id = $1`, [d.id]);
+  restored.deliveryAddresses = 0;
+  // 칸이 실제로 돌아왔거나, 이미 있던 같은 칸이 그 주소를 갖고 있을 때만 지운다(Codex P2 — 다른 주소로 다시 만든 칸이면 주소를 잃는다).
+  const sameSlotNow = asSubs(out.subs).find((x) => x && nk(x.name) === nk(sub.name) && p8(x.phone) === p8(sub.phone));
+  const addressBack = restored.slot || (sameSlotNow && addrKey(sameSlotNow.address) === addrKey(sub.address));
+  if (mine.length && addressBack) {
+    const { rows: others } = await client.query(
+      `SELECT id, snapshot->'sub'->>'address' AS address, snapshot->'sub'->>'name' AS name FROM reviewer_identity_decisions
+        WHERE kind = 'fold_self' AND owner_reviewer_id = $1 AND undone_at IS NULL AND id <> $2`, [d.owner_reviewer_id, d.id]);
+    for (const row of mine) {
+      const heir = others.find((o) => addrKey(o.address) === row.address_key && String(o.name || '').trim() === row.recipient);
+      if (heir) await client.query(`UPDATE reviewer_delivery_addresses SET decision_id = $2 WHERE id = $1`, [row.id, heir.id]);
+      else { await client.query(`DELETE FROM reviewer_delivery_addresses WHERE id = $1`, [row.id]); restored.deliveryAddresses++; }
+    }
+  }
   // ★ 옛 칸 순번 이름표는 기록된 옛 값을 그대로 되돌리지 않고 **되돌린 뒤의 목록 순번으로 다시 계산**한다(Codex P1) —
   //   정리 뒤 리뷰어가 칸을 더하거나 지웠으면 같은 순번이 다른 명의를 가리킨다. 이름표 → (이름·번호) 칸을 찾아 지금 순번으로.
   const finalList = asSubs(out.subs);
@@ -484,6 +520,21 @@ async function runFromSwitch({ db = pool, env = process.env } = {}) {
   return r;
 }
 
+/**
+ * 본계정 추가 배송지 목록(구매양식 고르기·명의 확인용). 표가 없거나 조회가 실패하면 빈 목록(종전 동작 — 막지 않는다).
+ */
+async function loadDeliveryAddresses(db, ownerId) {
+  if (!ownerId) return [];
+  try {
+    const { rows } = await db.query(
+      `SELECT id, recipient, address FROM reviewer_delivery_addresses WHERE owner_reviewer_id = $1 ORDER BY id`, [ownerId]);
+    return rows.map((r) => ({ id: String(r.id), recipient: r.recipient || '', address: r.address || '' }));
+  } catch (err) {
+    if (!err || !['42P01', '42703'].includes(err.code)) logger.warn(`[identity-fold] 추가 배송지 조회 실패(빈 목록으로): ${err && err.code || ''} ${err && err.message}`);
+    return [];
+  }
+}
+
 // ── 본계정 로그인 팝업(사용자 확정 2026-10-13) ───────────────────────────────
 /** 그 소유자의 아직 안 본 정리 안내 — 합친 타계정 이름(본인 계정에만 보여 준다). */
 async function pendingNotice(ownerId, { db = pool } = {}) {
@@ -507,5 +558,5 @@ async function dismissNotice(ownerId, { db = pool } = {}) {
 
 module.exports = {
   IdentityFoldError, classifyOwner, preview, apply, undoFoldInTx, undoRun, parseMode, runFromSwitch,
-  pendingNotice, dismissNotice, _test: { legacyKey, sigHash, groupKeyOf, SELF_HASH, remapLegacyHash },
+  pendingNotice, dismissNotice, loadDeliveryAddresses, _test: { legacyKey, sigHash, groupKeyOf, SELF_HASH, remapLegacyHash },
 };

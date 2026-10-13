@@ -144,6 +144,8 @@ const REQUIRED_SCHEMA = [
   // 185 — 같은 번호 타계정 정리(결정 226). 없으면 담당자 「판단 내역」이 42703 으로 안 열리고 리뷰어 저장 경로가 정리 칸을 못 거른다.
   ['reviewer_identity_decisions', 'snapshot'],
   ['reviewer_identity_decisions', 'notice_dismissed_at'],
+  // 186 — 본계정 추가 배송지. 정리(fold)가 이 표에 주소를 남기지 못하면 정리 자체가 되돌려진다 — 표 없이 서버가 뜨지 않게.
+  ['reviewer_delivery_addresses', 'address_key'],
 ];
 
 // V2 상태 표시는 열 이름 추측을 하지 않고, 생성 시점의 위치를 이 표에 고정한다.
