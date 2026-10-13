@@ -73,9 +73,23 @@ function mentionedOptions(text, options, { shortText } = {}) {
   const shortTokens = new Set(_tokens(shortText === undefined ? text : shortText));
   if (shortText !== undefined && !String(shortText || '').trim()) for (const t of allTokens) if (!/^\d+$/.test(t)) shortTokens.add(t);
   // ★ 하나의 대조 규칙 — 약한 이름은 낱말 일치만, 나머지는 포함. (코드리뷰 Blocker: ①② 에 이 보호가 빠져 있었다)
-  // ★ 결정 234: 영문만 약한 이름은 캡처 글자 전체에서 "앞뒤가 영문이 아닌 자리"로도 찾는다(숫자·한글 약한 이름은 종전).
+  // ★ 결정 234: 영문만 약한 이름은 캡처 글자 전체에서 "따로 쓴 표식"으로도 찾는다(숫자·한글 약한 이름은 종전).
+  //   표식 = 앞이 영문·숫자가 아니고 뒤가 영문이 아닌 자리 — `진간장F`·`F1개` ✓ / `Fresh`·`XL` 의 L ✗ ·
+  //   `13L`·`1L`(숫자 뒤 단위) ✗ (Codex 리뷰). 선택지 이름들에서도 **같은 기준**으로 세어 한 선택지에만 있을 때만 쓴다
+  //   (`진간장 F 13L` · `진간장 F500ml` 은 둘 다 F 표식 → 근거 아님 — Codex 리뷰).
   const rawLower = String(text || '').toLowerCase();
-  const latinBound = (n) => /^[a-z]{1,3}$/.test(n) && new RegExp('(^|[^a-z])' + n + '($|[^a-z])').test(rawLower);
+  const markRe = (n) => new RegExp('(^|[^a-z0-9])' + n + '($|[^a-z])');
+  const markOwners = new Map();
+  const markOwnerCount = (n) => {
+    if (!markOwners.has(n)) markOwners.set(n, opts.filter(o => markRe(n).test(`${o.key} ${o.product}`.toLowerCase())).length);
+    return markOwners.get(n);
+  };
+  const boundHits = new Set();   // 따로 쓴 표식으로 찾은 글자 — 아래 겹침 판정에서 강한 근거 글자 속 일부로 지우지 않는다(Codex 리뷰)
+  const latinBound = (n) => {
+    if (!/^[a-z]{1,3}$/.test(n) || markOwnerCount(n) !== 1 || !markRe(n).test(rawLower)) return false;
+    boundHits.add(n);
+    return true;
+  };
   const hit = (n) => (_weak(n) ? (shortTokens.has(n) || latinBound(n)) : T.includes(n));
   // 짧은 글자가 이름 **안에** 있는 방향(작업표 칸 값 `4. 킹(분리난방)` → 긴 공고 이름) — 글자 자체가 약하면 쓰지 않는다.
   const inside = (n) => !_weak(T) && n.includes(T);
@@ -153,7 +167,7 @@ function mentionedOptions(text, options, { shortText } = {}) {
   const out = new Set(strong);
   for (const [key, toks] of weakEv) {
     if (out.has(key)) continue;
-    if (toks.some(t => !strongStr.some(st => st.includes(t)))) out.add(key);
+    if (toks.some(t => boundHits.has(t) || !strongStr.some(st => st.includes(t)))) out.add(key);
   }
   return out;
 }

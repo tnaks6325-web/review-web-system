@@ -38,4 +38,19 @@ ok('숫자·한글 약한 이름은 종전 규칙(모델번호 100 · 킹사이�
   assert.equal(matchOption('킹사이즈 침대', bed, { shortText: '' }), '');
   void ks;
 });
+ok('Codex 리뷰: 숫자 뒤 단위(1L·13L)는 사이즈 L 이 아니다 · F1개 는 그대로', () => {
+  const sz = ['티셔츠 S', '티셔츠 M', '티셔츠 L'].map(k => ({ opt_key: k, product_name: '티셔츠' }));
+  assert.equal(matchOption('티셔츠 1L 보틀 증정', sz, { shortText: '' }), '');
+  assert.equal(matchOption('티셔츠 13L', sz, { shortText: '' }), '');
+  assert.equal(m('풍성한 진간장 F1개, 13L'), SOY[0].opt_key);
+});
+ok('Codex 리뷰: 선택지 이름에서도 같은 기준으로 센다 — F 13L · F500ml 은 둘 다 F → F 로는 못 정함', () => {
+  const o2 = ['진간장 F 13L', '진간장 F500ml', '진간장 13L'].map(k => ({ opt_key: k, product_name: k }));
+  assert.equal(matchOption('진간장 F1개', o2, { shortText: '1개' }), '');
+});
+ok('Codex 리뷰: 강한 근거 글자 속 F(Fresh)와 따로 쓴 F1개 는 다르다 — 두 상품이 보이면 모름', () => {
+  const o3 = [{ opt_key: 'Fresh tomato', product_name: 'Fresh tomato' }, { opt_key: '상품 F', product_name: '상품 F' }];
+  assert.equal(matchOption('Fresh tomato F1개', o3, { shortText: '' }), '');
+  assert.equal(matchOption('Fresh tomato 1개', o3, { shortText: '' }), 'Fresh tomato');
+});
 console.log(`\n✅ productCaptureMatchGluedLetter: ${passed} passed`);
