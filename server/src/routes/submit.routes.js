@@ -880,13 +880,16 @@ router.post('/order', async (req, res, next) => {
        · 리뷰어가 **고른 상품**을 샀다고 답함 → AI 가 잘못 읽은 것으로 보고 종전대로 접수 + 이상로그(warn — 담당자 확인용).
        ★ 홀드 상품은 바꾸지 않는다 — 참여 기록·원장의 상품은 언제나 참여할 때 고른 상품.
        ★ 판독값 없음·못 맞춤·조회 실패 = 종전 동작(fail-open). 옛 화면은 판독값을 보내지 않아 무변화.
-       ★ 위 멱등 게이트 **뒤**에 둔다 — 이미 접수된 홀드의 재전송을 다시 묻지 않는다. */
+       ★ 위 멱등 게이트 **뒤**에 둔다 — 이미 접수된 홀드의 재전송을 다시 묻지 않는다.
+       ★ 결정 236 ④ — "고른 상품이 맞다"고 답했는데 결제금액이 다른 상품 하나의 가격이면 한 번 더 묻는다(PRODUCT_PRICE_RECHECK · 쓰기 0).
+         다시 확인하고도 맞다(priceRecheckAck)면 접수 + 이상로그(capture_price_mismatch_confirmed). */
     if (holdCtx && holdCtx.verified && holdCtx.optionKey) {
       const pv = require('../services/productMismatchVerify.service');
       const captureText = [b.productCaptureName, b.productCaptureOption]
         .map(v => String(v == null ? '' : v).slice(0, 300).trim()).filter(Boolean).join(' ');
       const captureOption = String(b.productCaptureOption == null ? '' : b.productCaptureOption).slice(0, 300).trim();
-      const decision = await pv.decideAtSubmit({ holdCtx, captureText, captureOption, capturePrice: b.productCapturePrice, confirmedKey: b.confirmedProductKey });
+      const decision = await pv.decideAtSubmit({ holdCtx, captureText, captureOption, capturePrice: b.productCapturePrice, confirmedKey: b.confirmedProductKey,
+        priceAck: b.priceRecheckAck === true || b.priceRecheckAck === 'true' });
       if (decision.action === 'prompt') {
         return res.json({
           ok: false, code: 'PRODUCT_MISMATCH', basis: decision.basis, paid: decision.paid || 0, chosen: decision.chosen, captured: decision.captured,
@@ -895,13 +898,26 @@ router.post('/order', async (req, res, next) => {
             : `참여할 때 고른 상품은 「${decision.chosen.label}」인데 캡처에는 「${decision.captured.label}」로 보여요. 실제로 산 상품을 골라 주세요.`,
         });
       }
+      if (decision.action === 'recheck') {
+        // 옛 화면(이 코드를 모름)은 이 문구를 실패 알림으로 보여 주고 제출을 멈춘다 — 새로고침하면 다시 묻는 창이 뜬다.
+        return res.json({
+          ok: false, code: 'PRODUCT_PRICE_RECHECK', paid: decision.paid, chosen: decision.chosen, captured: decision.captured,
+          error: decision.error + ' (화면을 새로고침한 뒤 다시 제출해 주세요)',
+        });
+      }
       if (decision.action === 'wrong' || decision.action === 'keep') {
+        const _priceKeep = decision.action === 'keep' && !!decision.priceOther;
         logAbnormal({
-          flow: 'order_submit', step: decision.action === 'wrong' ? 'wrong_product_purchase' : 'capture_product_differs_confirmed',
+          flow: 'order_submit',
+          step: decision.action === 'wrong' ? 'wrong_product_purchase' : (_priceKeep ? 'capture_price_mismatch_confirmed' : 'capture_product_differs_confirmed'),
           category: 'validation', source: 'server', severity: 'warn',
+          // 같은 상품 쌍이라도 신청마다 따로 남긴다(지문은 숫자를 지우므로 신청 번호를 key 로 — Codex 리뷰)
+          fingerprintKey: decision.action === 'wrong' ? '' : 'app-' + holdCtx.applicationId,
           error: new Error(decision.action === 'wrong'
             ? `잘못 구매로 제출 막음 — 고른 상품 「${decision.chosen.label}」 · 산 상품 「${decision.bought.label}」`
-            : `캡처는 다른 상품으로 읽혔으나 리뷰어가 고른 상품이 맞다고 확인 — 고른 「${holdCtx.optionKey}」 · 캡처 「${decision.capturedKey || '?'}」`),
+            : _priceKeep
+              ? `결제금액 ${Number(decision.paid || 0).toLocaleString('ko-KR')}원이 다른 상품 가격인데 리뷰어가 다시 확인하고도 고른 상품이 맞다고 함 — 고른 「${holdCtx.optionKey}」 · 금액이 같은 「${decision.priceOther}」${decision.capturedKey ? ` · 캡처 「${decision.capturedKey}」` : ''} · 신청 #${holdCtx.applicationId}`
+              : `캡처는 다른 상품으로 읽혔으나 리뷰어가 고른 상품이 맞다고 확인 — 고른 「${holdCtx.optionKey}」 · 캡처 「${decision.capturedKey || '?'}」 · 신청 #${holdCtx.applicationId}`),
           context: { campaignId: holdCtx.campaignId, applicationId: holdCtx.applicationId, sheetId, tabName,
                      loginPhone8: _idPhone8 ? '***' + _idPhone8.slice(-4) : '' },
         });

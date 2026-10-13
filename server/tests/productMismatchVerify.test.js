@@ -237,7 +237,7 @@ t('5e 리뷰어 화면: 홀드 제출에만 판독값 · PRODUCT_MISMATCH 면 �
   assert.ok(/productCapturePrice:  \(bh \|\| \(_EMBED_CTX && _EMBED_CTX\.app\)\)/.test(f), '캡처 금액도 홀드 제출에만');
   const i = f.indexOf('res.code === "PRODUCT_MISMATCH"');
   assert.ok(i > 0);
-  const blk = f.slice(i, i + 1600);
+  const blk = f.slice(i, i + 3400);   // 결정 236: 사이에 결제금액 다시 묻기 블록이 들어와 범위만 넓힘(검사 의미 불변)
   assert.ok(/await _pmvAsk\(/.test(blk) && /payload\.confirmedProductKey = picked/.test(blk));
   assert.ok(/res\.code === "PRODUCT_WRONG_PURCHASE"[\s\S]{0,500}continue;/.test(blk), '잘못 구매는 실패로 남기고 다음 주문으로');
   assert.ok(i < f.indexOf('res.code === "NEED_CONFIRM"'), '다시 낸 응답도 아래 신원 처리가 이어 받는다');

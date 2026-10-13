@@ -327,7 +327,8 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   ok(`needConfirm === 'repurchase_window' 분기 존재`, fe.includes(`out.needConfirm === 'repurchase_window'`));
   ok('allowRepurchase 를 요청 본문에 싣는다', fe.includes('allowRepurchase: allowRepurchase === true'));
   ok('★★ over_daily 재확인 체인에서도 재참여 확인 상태(_repurchaseOk)를 잃지 않는다(연쇄 확인 시 우회 방지)',
-    fe.includes('post(true, _repurchaseOk)'));
+    // 결정 236: 확인 단계를 반복 처리로 바꿔 재전송이 한 곳 — 받은 확인(_overDailyOk·_repurchaseOk)을 모두 싣는다(의미 불변)
+    fe.includes('post(true, _repurchaseOk)') || /_overDailyOk = true;[\s\S]{0,2500}out = await post\(_overDailyOk, _repurchaseOk\);/.test(fe));
   ok('확인 취소 시 쓰기 0건(서버 재호출 없이 return)',
     /needConfirm === 'repurchase_window'[\s\S]{0,900}if \(!okGo\) \{[\s\S]{0,200}return;/.test(fe));
 
