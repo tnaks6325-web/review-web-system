@@ -544,42 +544,48 @@ const owner = (over = {}) => Object.assign({
 
   const WD = () => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
 
-  t('5a ★ 안내줄 렌더 3갈래 — 예금주 다름 / 계좌만 다름 / 등록 계좌 없음', () => {
+  /* ★ 간소화(사용자 요청 2026-10-13 · 결정 233): 노란 안내줄은 **예금주가 다른 사람일 때만** 한 줄.
+       같은 사람의 다른 계좌 · 등록 계좌 없음은 이름 옆 표시(_pmAcctChipHtml) + 마우스 올림 설명으로 옮겼다.
+       검사 의미: "예금주가 다르면 두 계좌를 함께 보여주며 콕 집는다"는 그대로(강화 — 한 줄이라 놓치기 어렵다). */
+  t('5a ★ 안내줄 — 예금주가 다를 때만 한 줄 · 그 밖은 이름 옆 표시와 설명(간소화)', () => {
     const vm = require('vm');
-    const fn = WD().match(/function _pmAcctMismatchHtml\(mm\)\{[\s\S]*?\n\}/);
-    assert.ok(fn, '_pmAcctMismatchHtml 이 있어야 한다');
+    const src = WD();
+    const fn = src.match(/function _pmAcctMismatchHtml\(mm\)\{[\s\S]*?\n\}/);
+    const chip = src.match(/function _pmAcctChipHtml\(mm\)\{[\s\S]*?\n\}/);
+    assert.ok(fn && chip, '_pmAcctMismatchHtml · _pmAcctChipHtml 이 있어야 한다');
     const ctx = { esc: s => String(s == null ? '' : s).replace(/[&<>"]/g,
       c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])) };
-    vm.createContext(ctx); vm.runInContext(fn[0] + ';', ctx);
+    vm.createContext(ctx); vm.runInContext(fn[0] + ';' + chip[0] + ';', ctx);
 
     const diffHolder = ctx._pmAcctMismatchHtml({
       form: { bankName: '국민', accountTail: '9824', accountHolder: '김솔지' },
       registered: { bankName: '신한', accountTail: '9898', accountHolder: '정재석', name: '정재석', isSub: false },
-      holderDiffers: true });
+      holderDiffers: true, using: 'form' });
     assert.ok(diffHolder.includes('9824') && diffHolder.includes('9898'), '두 계좌를 모두 보여준다');
     assert.ok(diffHolder.includes('예금주가 다른 사람입니다'), '예금주가 다르면 그 사실을 콕 집는다');
+    assert.ok(diffHolder.includes('보류'), '체크를 풀면 보류된다는 사실');
 
-    const diffAcct = ctx._pmAcctMismatchHtml({
-      form: { bankName: '국민', accountTail: '1234', accountHolder: '배미정' },
+    const diffAcct = { form: { bankName: '국민', accountTail: '1234', accountHolder: '배미정' },
       registered: { bankName: '국민', accountTail: '6216', accountHolder: '배미정', name: '배미정', isSub: false },
-      holderDiffers: false });
-    assert.ok(diffAcct.includes('계좌번호가 다릅니다') && !diffAcct.includes('예금주가 다른'),
-      '같은 사람의 다른 계좌는 다르게 말한다');
+      holderDiffers: false, using: 'form' };
+    assert.strictEqual(ctx._pmAcctMismatchHtml(diffAcct), '', '같은 사람의 다른 계좌는 노란 줄을 그리지 않는다');
+    const c1 = ctx._pmAcctChipHtml(diffAcct);
+    assert.ok(c1.includes('계좌 확인') && c1.includes('1234') && c1.includes('6216'), '이름 옆 표시 설명에 두 계좌');
 
-    const noReg = ctx._pmAcctMismatchHtml({
-      form: { bankName: '케이뱅크', accountTail: '2639', accountHolder: '최영순' }, registered: null });
-    assert.ok(noReg.includes('등록된 계좌가 없습니다'), '등록 계좌 부재와 불일치를 구분해 말한다');
-    assert.ok(!noReg.includes('등록 계좌 —'), '없는 계좌를 지어내지 않는다');
+    const noReg = { form: { bankName: '케이뱅크', accountTail: '2639', accountHolder: '최영순' }, registered: null, using: 'form' };
+    assert.strictEqual(ctx._pmAcctMismatchHtml(noReg), '');
+    const c2 = ctx._pmAcctChipHtml(noReg);
+    assert.ok(c2.includes('등록된 계좌가 없습니다') && !c2.includes('등록 계좌:'), '없는 계좌를 지어내지 않는다');
 
-    // ★ 사용자 확정 문구 — 체크를 풀면 그 건이 회차에서 빠진다는 사실
-    for (const h of [diffHolder, diffAcct, noReg]) {
-      assert.ok(h.includes('체크박스를 풀면 해당 건 입금은') && h.includes('보류'), '보류 안내 문구');
-    }
+    assert.ok(ctx._pmAcctChipHtml({ using: 'registered', form: { accountTail: '4380' }, registered: { accountTail: '3807' } }).includes('고친 계좌'));
+    assert.ok(ctx._pmAcctChipHtml({ using: 'workboard', staff: { accountTail: '8376' }, form: { accountTail: '8937' } }).includes('고친 계좌'));
     assert.strictEqual(ctx._pmAcctMismatchHtml(null), '', '값이 없으면 아무것도 그리지 않는다');
+    assert.strictEqual(ctx._pmAcctChipHtml(null), '');
 
     const xss = ctx._pmAcctMismatchHtml({
-      form: { bankName: '<img src=x onerror=alert(1)>', accountTail: '1', accountHolder: 'a' }, registered: null });
+      form: { bankName: '<img src=x onerror=alert(1)>', accountTail: '1', accountHolder: 'a' }, registered: null, holderDiffers: true });
     assert.ok(!xss.includes('<img'), '외부발 문자열은 escape 한다');
+    assert.ok(!ctx._pmAcctChipHtml({ form: { accountHolder: '"><img src=x>' }, registered: null }).includes('<img'), '설명도 escape');
   });
 
   t('5b ★ 배지·안내줄은 accountMismatch 기준(accountSource 로 띄우면 거의 모든 행에 붙어 신호가 묻힌다)', () => {

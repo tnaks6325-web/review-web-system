@@ -258,6 +258,8 @@ async function listPaymentTargets(opts = {}) {
     rows.filter(r => !orderMap[r.sheetId + '||' + r.tabName + '||' + r.rowIndex]));
   // ★ 결정 231 재료 — 이 줄에서 이미 이체 실패한 계좌 · 등록 계좌가 마지막으로 바뀐 시각(둘 다 실패해도 종전 동작)
   const failedAcctMap = await _loadFailedAccounts(rows);
+  // ★ 결정 233 재료 — 직원이 작업보드에서 고친 은행·계좌번호·예금주(조회 실패 = 빈 결과 = 종전 동작)
+  const wbAcctMap = await _loadWorkboardAccountEdits(rows);
   const acctChangeMap = await _loadAccountChangeTimes([
     ...Object.values(acctMap), ...Object.values(ownerAcctMap)].map(a => a && a.reviewerId).filter(Boolean));
 
@@ -306,11 +308,11 @@ async function listPaymentTargets(opts = {}) {
     const rowKey = key + '||' + r.rowIndex;
     const failedSet = failedAcctMap[rowKey] || null;
     const formFailed = !!(formFirst && failedSet && failedSet.has(normalizeAccount(formAcct.bankAccount)));
-    // 양식 계좌의 "마지막으로 정해진 시각" = 제출 시각과 주문 기록 수정 시각 중 늦은 쪽 — 관리자가 주문 기록에서
-    // 양식 계좌를 나중에 고쳤다면 그보다 먼저 바뀐 내정보 계좌로 덮지 않는다(리뷰 지적 · 보수적으로 접는다).
-    const _later = (a, b) => (!a ? b || null : !b ? a : (new Date(a).getTime() >= new Date(b).getTime() ? a : b));
-    const orderedAt = ord ? _later(ord.orderedAt, ord.orderUpdatedAt)
-      : linkedForm ? _later(linkedForm.orderedAt, linkedForm.orderUpdatedAt) : null;
+    // 양식 계좌가 정해진 시각 = **제출 시각만**(결정 233). ★ updated_at·last_edit_seq 는 쓰지 않는다(완화 금지) —
+    // 둘 다 계좌가 아닌 칸(결제금액·주소·연락처·구매일자) 편집이나 미러·역동기화에도 바뀌어, 직원·고객이 고친 계좌가
+    // 늘 "더 옛것"으로 밀렸다(실측: 이노크아든 70 의 8/20 직원 수정이 무시됨 · 리뷰 지적: 결제금액만 고쳐도 옛 계좌로 회귀).
+    // 작업보드 셀 편집은 은행·계좌·예금주를 원장에 되쓰지 않으므로 양식 계좌 자체는 제출 뒤 바뀌지 않는다.
+    const orderedAt = (ord && ord.orderedAt) || (linkedForm && linkedForm.orderedAt) || null;
     const regChangedAt = regComplete ? _acctChangedAt(acctChangeMap, registeredAcct, r.phone8) : null;
     const regChangedAfterOrder = !!(regChangedAt && orderedAt && new Date(regChangedAt).getTime() > new Date(orderedAt).getTime());
     const sameHolder = !!(formFirst && regComplete
@@ -322,14 +324,14 @@ async function listPaymentTargets(opts = {}) {
     const regTargetable = !!registeredAcct
       && !(registeredAcct.isSub && (registeredAcct.subPhone8 === null || registeredAcct.inheritsOwner));
     // 은행·계좌번호를 **함께** 비교한다 — 계좌번호는 맞고 은행만 틀리게 적었다가 내정보에서 은행만 고친 경우도 잡는다(Codex P2)
-    const _bankKey = name => { const b = resolveBank(name); return b ? b.code : String(name || '').replace(/\s+/g, ''); };
+    const _bankKey = _bankKeyOf;
     const regDiffersFull = !!(formFirst && regComplete && (
       normalizeAccount(formAcct.bankAccount) !== normalizeAccount(registeredAcct.bankAccount)
       || _bankKey(formAcct.bankName) !== _bankKey(registeredAcct.bankName)));
     const preferRegistered = !!(formFirst && regComplete && sameHolder && regTargetable && regDiffersFull
       && (formFailed || regChangedAfterOrder));
     const useForm = formFirst && !preferRegistered;
-    const acct = useForm
+    const acctBase = useForm
       // 신원 추적 필드(누가 참여했나)는 **등록DB 기준을 유지**한다 — 계좌(어디로 보내나)와 별개다.
       ? { ...formAcct,
           ownerReviewerId: (registeredAcct && registeredAcct.ownerReviewerId) || null,
@@ -350,7 +352,7 @@ async function listPaymentTargets(opts = {}) {
       accountHolder: registeredAcct.accountHolder || '',
       name: registeredAcct.name || '', isSub: !!registeredAcct.isSub } : null;
     // `using` = 실제로 보내는 쪽('form' 양식 / 'registered' 리뷰어가 고친 등록 계좌) — 화면 안내 첫 줄이 이것으로 갈린다.
-    const acctMismatch = preferRegistered
+    const mismatchBase = preferRegistered
       ? { form: _mmForm, registered: _mmReg, holderDiffers: false, using: 'registered',
           reason: formFailed ? 'form_failed' : 'registered_changed' }
       : !useForm ? null
@@ -364,6 +366,50 @@ async function listPaymentTargets(opts = {}) {
               using: 'form',
             }
           : null;   // ← 같으면 아무 말도 하지 않는다
+
+    /* ★★★ 직원이 작업보드에서 고친 계좌(은행·계좌번호·예금주 칸) — **마지막에 바뀐 값이 이긴다**
+         (사용자 확정 2026-10-13 · 결정 233 "직원이든 고객이든 마지막에 적용된 값을 우선").
+         왜(실사고): 이노크아든 70 — 8/20 직원이 작업보드에서 계좌를 고쳤는데 입금은 옛 계좌로 9번 더 나가 전부 실패.
+         작업보드 셀 편집은 은행·계좌·예금주를 주문 원장에 되쓰지 않는다(orderLedger — 금전 오염 위험, 그대로 둔다).
+         그래서 입금관리가 **작업보드에 보이는 값**을 직접 읽는다(결제금액을 작업보드 표시값으로 읽는 것과 같은 규율).
+       ★ 고친 칸만 바꾸고 나머지는 지금 쓰는 근거(양식 → 등록)에서 채운다. 셋이 다 차야 인정(반쪽 거부).
+       ★ 비교 시각 — 지금 고른 값이 정해진 때: 양식 = max(제출, 주문 기록 수정) · 등록 = 감사표 마지막 변경.
+         직원 수정이 그보다 나중이면 직원 값. 고객이 그 뒤에 내정보를 또 고쳤다면(231 조건 충족 시) 고객 값.
+       ★ 지목할 등록 리뷰어가 없으므로 `reviewerId` 를 만들지 않는다(157 — 스냅샷 대조 unverifiable).
+       ★ 모호한 줄(같은 주문·신원이 여러 줄)은 쓰지 않는다 — 작업보드 오버레이와 같은 판단. */
+    const wbEdit = wbAcctMap[rowKey] || null;
+    // 지금 고른 값이 정해진 시각 — 이보다 **나중에 고친 칸만** 직원 값으로 바꾼다(칸마다 따로 — 옛 은행 칸 수정이
+    // 더 최근의 고객 수정을 덮지 않게: 리뷰 지적).
+    const chosenAt = preferRegistered ? regChangedAt : useForm ? orderedAt : (acctBase && acctBase === registeredAcct ? regChangedAt : orderedAt);
+    const _newer = f => !!(wbEdit && wbEdit[f] && wbEdit[f].value
+      && (!chosenAt || new Date(wbEdit[f].at).getTime() > new Date(chosenAt).getTime()));
+    let staffAcct = null, staffAt = null;
+    if (wbEdit && (_newer('bank') || _newer('account') || _newer('holder'))) {
+      // ★ 안 고친 칸은 **지금 실제로 쓰는 계좌**(acctBase)에서 채운다 — 양식에서 채우면 예금주만 다시 적어도
+      //   리뷰어가 고친 등록 계좌가 옛 양식 계좌로 되돌아간다(리뷰 지적).
+      const base = acctBase || formAcct || registeredAcct || null;
+      const pick = (f, baseVal) => _newer(f) ? wbEdit[f].value : baseVal;
+      const sBank = String(pick('bank', base && base.bankName) || '').trim();
+      const sAcct = normalizeAccount(pick('account', base && base.bankAccount) || '');
+      const sHolder = String(pick('holder', base && base.accountHolder) || '').trim();
+      for (const f of ['bank', 'account', 'holder']) if (_newer(f) && (!staffAt || new Date(wbEdit[f].at) > new Date(staffAt))) staffAt = wbEdit[f].at;
+      if (sBank && sAcct && sHolder) staffAcct = { reviewerId: null, bankName: sBank, bankAccount: sAcct, accountHolder: sHolder,
+        isSub: false, source: 'workboard', name: String(r.reviewerName || ''), ownerName: '',
+        ownerReviewerId: (registeredAcct && registeredAcct.ownerReviewerId) || null,
+        participantIdentityId: (registeredAcct && registeredAcct.participantIdentityId) || null };
+    }
+    const useStaff = !!(staffAcct && (!acctBase
+      || normalizeAccount(staffAcct.bankAccount) !== normalizeAccount(acctBase.bankAccount)
+      || _bankKeyOf(staffAcct.bankName) !== _bankKeyOf(acctBase.bankName)
+      || _holderKey(staffAcct.accountHolder) !== _holderKey(acctBase.accountHolder)));
+    const acct = useStaff ? staffAcct : acctBase;
+    const acctMismatch = useStaff
+      ? { using: 'workboard', editedAt: staffAt,
+          staff: { bankName: staffAcct.bankName, accountTail: staffAcct.bankAccount.slice(-4), accountHolder: staffAcct.accountHolder },
+          form: _mmForm, registered: _mmReg,
+          // 예금주가 구매양식·등록 계좌 어느 쪽과도 다르면 빨간 경고(사람이 정한 값이라 따르되 한 번 더 보여준다)
+          holderDiffers: ![formAcct, registeredAcct].filter(Boolean).some(a => _holderKey(a.accountHolder) === _holderKey(staffAcct.accountHolder)) }
+      : mismatchBase;
 
     // 상품비 = 관리자가 현재 작업보드에서 확인하는 표시값.
     // ★ campaign_participants 물리값 + participant_edits 오버레이를 작업보드 표와 같은 규칙으로
@@ -482,6 +528,8 @@ async function listPaymentTargets(opts = {}) {
       isSub: acct ? !!acct.isSub : false,
       // 이 계좌로 이 줄이 이미 실패한 횟수(0 = 없음) — 화면이 "이전에 실패한 계좌 N회"를 말한다
       failedAccountCount: failedAgainCount,
+      // 관리자가 본 송금 계좌의 지문 — 회차 만들 때 그대로인지 대조한다(결정 233)
+      payoutFp: acct ? snapshotFingerprint(acct.bankName, account, acct.accountHolder) : '',
       // ★ 계좌 **명의**(누구 이름으로 등록된 계좌인가) — 시트의 이름 칸(`reviewerName`)은
       //   탭마다 주문자/수취인 중 무엇이 잡혔는지 달라 명의 판별에 쓸 수 없다.
       //   타계정이면 `accountOwner` 가 그 명의를 등록한 소유자(본계정) 이름.
@@ -669,7 +717,7 @@ async function _loadOrderPrices(sheetIds, tabNames) {
     `SELECT sheet_id AS "sheetId", tab_name AS "tabName", sheet_row AS "sheetRow",
             price, review_fee_snapshot AS "feeSnapshot",
             delivery_review_fee_mix_snapshot AS "deliveryReviewFeeMixSnapshot", submitted_at AS "orderedAt",
-            updated_at AS "orderUpdatedAt",
+
             -- ★ 그 건의 구매양식으로 **리뷰어가 직접 적어 낸 계좌**(035). 등록 계좌를 못 찾을 때의
             --   마지막 근거다 — 이걸 안 보면 시트에 계좌가 멀쩡히 있는 건도 영구 보류된다.
             bank AS "bank", account AS "account", depositor AS "depositor"
@@ -681,7 +729,7 @@ async function _loadOrderPrices(sheetIds, tabNames) {
   for (const o of rows) {
     map[o.sheetId + '||' + o.tabName + '||' + o.sheetRow] = {
       price: o.price, feeSnapshot: o.feeSnapshot, deliveryReviewFeeMixSnapshot: o.deliveryReviewFeeMixSnapshot,
-      orderDate: toKstDate(o.orderedAt), orderedAt: o.orderedAt || null, orderUpdatedAt: o.orderUpdatedAt || null,
+      orderDate: toKstDate(o.orderedAt), orderedAt: o.orderedAt || null,
       bank: o.bank || '', account: o.account || '', depositor: o.depositor || '',
     };
   }
@@ -707,7 +755,7 @@ async function _loadLinkedFormAccounts(rows) {
     const { rows: found } = await pool.query(
       `SELECT t.sheet_id AS "sheetId", t.tab_name AS "tabName", t.row_index AS "rowIndex",
               os.bank AS "bank", os.account AS "account", os.depositor AS "depositor",
-              os.submitted_at AS "orderedAt", os.updated_at AS "orderUpdatedAt"
+              os.submitted_at AS "orderedAt"
          FROM unnest($1::text[], $2::text[], $3::int[]) AS t(sheet_id, tab_name, row_index)
          JOIN campaign_participants cp
            ON cp.sheet_id = t.sheet_id AND cp.tab_name = t.tab_name AND cp.seq = t.row_index
@@ -720,7 +768,7 @@ async function _loadLinkedFormAccounts(rows) {
       const k = o.sheetId + '||' + o.tabName + '||' + o.rowIndex;
       if (out[k]) { out[k] = null; continue; }   // 한 줄에 둘 이상 = 모호 → 쓰지 않는다
       out[k] = { bank: o.bank || '', account: o.account || '', depositor: o.depositor || '',
-                 orderedAt: o.orderedAt || null, orderUpdatedAt: o.orderUpdatedAt || null };
+                 orderedAt: o.orderedAt || null };
     }
   } catch (e) {
     try { require('../utils/logger').logger.warn(`[payment] 연결 주문 계좌 조회 실패(무시): ${e.message}`); } catch (_) {}
@@ -788,6 +836,104 @@ function _acctChangedAt(changeMap, reg, rowPhone8) {
   const sub = reg.isSub ? String(reg.subPhone8 || rowPhone8 || '') : '';
   return changeMap[String(reg.reviewerId) + '|' + sub] || null;
 }
+/** 은행 비교 키 — 은행 코드(resolveBank), 모르는 표기는 공백 뺀 원문 */
+function _bankKeyOf(name) { const b = resolveBank(name); return b ? b.code : String(name || '').replace(/\s+/g, ''); }
+
+/**
+ * 직원이 작업보드에서 고친 계좌 칸(결정 233) → 줄별 `{ bank?:{value,at}, account?:{value,at}, holder?:{value,at} }`.
+ * ★ 앵커·모호 판단은 작업보드 오버레이(paymentWorkboardAmount)와 같은 규칙 — 그 줄의 살아있는 참여행 하나를 고르고
+ *   주문 → 수동 → 신원 순으로 앵커를 정한다. 같은 주문·신원이 여러 줄이면 **쓰지 않는다**(남의 줄 값 오염 방지).
+ * ★ 칸은 표준 이름(은행·은행명·계좌번호·계좌·예금주)만. 빈 값은 "수정 없음". 한 역할에 칸 둘이면 그 줄은 안 쓴다.
+ * ★ 조회 실패 = 빈 결과(종전 동작 그대로 — 입금대상 목록이 죽으면 안 된다).
+ */
+async function _loadWorkboardAccountEdits(rows) {
+  const out = {};
+  if (!rows || !rows.length) return out;
+  try {
+    const { rows: found } = await pool.query(
+      `WITH t AS (
+         SELECT * FROM unnest($1::text[], $2::text[], $3::int[]) AS t(sheet_id, tab_name, row_index)
+       ), sel AS (
+         SELECT t.sheet_id, t.tab_name, t.row_index, cp.id, cp.order_submission_id, cp.source, cp.identity_key
+           FROM t JOIN LATERAL (
+             SELECT cp.id, cp.order_submission_id, cp.source, cp.identity_key
+               FROM campaign_participants cp
+              WHERE cp.sheet_id = t.sheet_id AND cp.tab_name = t.tab_name AND cp.seq = t.row_index
+                AND cp.deleted_at IS NULL AND cp.active = TRUE
+              ORDER BY cp.updated_at DESC, cp.id DESC LIMIT 1) cp ON TRUE
+       ), anc AS (
+         SELECT sel.*,
+                CASE WHEN order_submission_id IS NOT NULL THEN 'order'
+                     WHEN source = 'manual' THEN 'manual'
+                     WHEN NULLIF(identity_key, '') IS NOT NULL THEN 'identity' ELSE 'manual' END AS atype,
+                CASE WHEN order_submission_id IS NOT NULL THEN order_submission_id::text
+                     WHEN source = 'manual' THEN id::text
+                     WHEN NULLIF(identity_key, '') IS NOT NULL THEN identity_key ELSE id::text END AS aval,
+                CASE WHEN order_submission_id IS NOT NULL THEN
+                       (SELECT count(*) FROM campaign_participants x WHERE x.sheet_id = sel.sheet_id AND x.tab_name = sel.tab_name
+                          AND x.order_submission_id = sel.order_submission_id AND x.deleted_at IS NULL AND x.active = TRUE) > 1
+                     WHEN source IS DISTINCT FROM 'manual' AND NULLIF(identity_key, '') IS NOT NULL THEN
+                       (SELECT count(*) FROM campaign_participants x WHERE x.sheet_id = sel.sheet_id AND x.tab_name = sel.tab_name
+                          AND x.identity_key = sel.identity_key AND x.deleted_at IS NULL AND x.active = TRUE) > 1
+                     ELSE FALSE END AS ambiguous
+           FROM sel)
+       -- 두 층: ① 지금 앵커(주문·신원·수동) ② 그 줄 자체(수동 앵커 = 참여행 id) — 수동 줄일 때 적은 편집이
+       --   나중에 주문·신원에 연결돼도 작업보드는 계속 보여준다(paymentWorkboardAmount 와 같은 겹침 · 리뷰 지적).
+       --   칸마다 ① 이 있으면 ①, 없으면 ②.
+       SELECT DISTINCT ON (a.sheet_id, a.tab_name, a.row_index, lower(pe.field))
+              a.sheet_id AS "sheetId", a.tab_name AS "tabName", a.row_index AS "rowIndex", a.ambiguous AS "ambiguous",
+              lower(pe.field) AS "field", pe.value_text AS "value", pe.created_at AS "at"
+         FROM anc a
+         JOIN participant_edits pe
+           ON pe.sheet_id = a.sheet_id AND pe.tab_name = a.tab_name
+          AND ((pe.anchor_type = a.atype AND pe.anchor_value = a.aval)
+            OR (pe.anchor_type = 'manual' AND pe.anchor_value = a.id::text))
+          AND pe.reverted_at IS NULL AND pe.kind = 'text' AND pe.field LIKE 'col:%'
+          AND lower(pe.field) IN ('col:은행', 'col:은행명', 'col:계좌번호', 'col:계좌', 'col:예금주', 'col:bank', 'col:account', 'col:depositor')
+        ORDER BY a.sheet_id, a.tab_name, a.row_index, lower(pe.field),
+                 (pe.anchor_type = a.atype AND pe.anchor_value = a.aval) DESC, pe.created_at DESC`,
+      [rows.map(r => r.sheetId), rows.map(r => r.tabName), rows.map(r => r.rowIndex)]);
+    if (!found.length) return out;
+    // ★ 표준 작업표 칸 이름만 읽는다(정확히 일치) — 분류기로 넓게 잡으면 "계좌비고·계좌확인" 같은 메모 칸이
+    //   계좌번호로 읽혀 메모 속 숫자가 송금 계좌가 된다(리뷰 지적).
+    const ROLE = { 'col:은행': 'bank', 'col:은행명': 'bank', 'col:계좌번호': 'account', 'col:계좌': 'account', 'col:예금주': 'holder',
+                   'col:bank': 'bank', 'col:account': 'account', 'col:depositor': 'holder' };
+    // ★ 지금 작업보드에 **보이는 칸**만 — 이름을 바꾸거나 지운 칸에 남은 옛 편집은 화면에 안 보이니 송금에도 쓰지 않는다(리뷰 지적).
+    //   칸 목록 = 작업보드 그리드와 같은 근원(raw_sheet_tabs.detected_headers). 못 읽으면 그 탭은 안 쓴다(fail-closed = 종전 동작).
+    const tabs = [...new Set(found.map(f => f.sheetId + '\u0000' + f.tabName))];
+    const headersByTab = new Map();
+    // (orderLedger.tabDetectedHeaders 와 같은 조회 — 그 모듈은 풀을 처음 한 번 붙잡아 두므로 여기서는 이 서비스의 풀로 묻는다)
+    const { rows: hdrRows } = await pool.query(
+      `SELECT DISTINCT ON (sheet_id, tab_name) sheet_id AS "sheetId", tab_name AS "tabName", detected_headers AS "headers"
+         FROM raw_sheet_tabs
+        WHERE (sheet_id, tab_name) IN (SELECT * FROM unnest($1::text[], $2::text[]))
+        ORDER BY sheet_id, tab_name`,
+      [tabs.map(t => t.split('\u0000')[0]), tabs.map(t => t.split('\u0000')[1])]);
+    for (const h of hdrRows) {
+      headersByTab.set(h.sheetId + '\u0000' + h.tabName,
+        new Set((Array.isArray(h.headers) ? h.headers : []).map(x => 'col:' + String(x == null ? '' : x).trim().toLowerCase())));
+    }
+    const skip = new Set();
+    for (const f of found) {
+      const k = f.sheetId + '||' + f.tabName + '||' + f.rowIndex;
+      if (f.ambiguous) { skip.add(k); continue; }
+      const visible = headersByTab.get(f.sheetId + '\u0000' + f.tabName);
+      if (!visible || !visible.has(f.field)) continue;
+      const key = ROLE[f.field];
+      const v = String(f.value == null ? '' : f.value).trim();
+      if (!key || !v) continue;
+      if (key === 'account' && normalizeAccount(v).length < 6) continue;   // 숫자가 거의 없는 값은 계좌가 아니다
+      const e = out[k] || (out[k] = {});
+      if (e[key]) { skip.add(k); continue; }   // 한 역할에 칸 둘(은행·은행명 등) = 어느 쪽인지 모른다 → 그 줄은 안 쓴다
+      e[key] = { value: v, at: f.at };
+    }
+    for (const k of skip) delete out[k];
+  } catch (e) {
+    try { require('../utils/logger').logger.warn(`[payment] 작업보드 계좌 수정 조회 실패(무시): ${e.message}`); } catch (_) {}
+  }
+  return out;
+}
+
 /** 예금주 비교 키 — 공백만 무시(이름 자체는 정확히 같아야 한다) */
 function _holderKey(v) { return String(v || '').replace(/\s+/g, ''); }
 
@@ -1221,7 +1367,16 @@ async function createBatch({ bank, rows, by }) {
     if (!it) { skipped.push({ key: k, reason: 'not_target' }); continue; }
     if (!it.payable) { skipped.push({ key: k, reason: it.issues[0] || 'blocked' }); continue; }
     if (it.bank !== bank) { skipped.push({ key: k, reason: 'other_bank' }); continue; }
+    /* ★★ 관리자가 화면에서 본 송금 계좌로 묶는다(결정 233 · Codex 보안 리뷰 P1) — 목록을 띄운 뒤 누군가 작업보드
+         계좌 칸을 바꾸면, 다시 계산한 대상은 관리자가 **본 적 없는 계좌**가 된다. 화면이 보낸 지문(payoutFp)과 다르면
+         회차를 통째로 만들지 않는다(fail-closed — 일부만 빼면 "받았다"고 착각한다). 지문이 없는 옛 화면은 종전대로. */
+    if (w.payoutFp != null && String(w.payoutFp) !== String(it.payoutFp || '')) {
+      skipped.push({ key: k, reason: 'account_changed' }); continue;
+    }
     picked.push(it);
+  }
+  if (skipped.some(s => s.reason === 'account_changed')) {
+    return { ok: false, error: '화면을 연 뒤 송금 계좌가 바뀐 건이 있습니다 — 새로고침해서 바뀐 계좌를 확인한 뒤 다시 받아 주세요.', skipped };
   }
   if (!picked.length) return { ok: false, error: '담을 수 있는 건이 없습니다.', skipped };
 
