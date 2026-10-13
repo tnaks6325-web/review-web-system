@@ -43,9 +43,29 @@ const state = (events) => calculatePopularCreditState(events, NOW);
     'the old 21 minus 5 history does not preserve 16 credits after the retroactive cutoff');
 
   let params;
-  const db = { query: async (_sql, values) => { params = values; return { rows: [{ ...normal(10, 1), phone8: '12345678' }] }; } };
+  let directParams = null;
+  const isDirectSql = (sql) => /FROM order_submissions os/.test(sql);
+  const db = { query: async (sql, values) => {
+    if (isDirectSql(sql)) { directParams = values; return { rows: [] }; }
+    params = values; return { rows: [{ ...normal(10, 1), phone8: '12345678' }] };
+  } };
   const loaded = await loadPopularCreditState(db, '12345678', { evaluatedAt: NOW });
   assert.equal(loaded.credits, 1, 'database events use the same calculation');
+  // 결정 238 — 바로 구매(공고 참여 없이 낸 주문)도 리뷰어 판정에서 일반/인기 참여로 센다.
+  assert.ok(directParams, 'reviewer credit state also reads direct purchases');
+  assert.equal(new Date(directParams[0]).toISOString(), ago(24), 'direct purchases use the same 24-hour cutoff');
+  assert.deepEqual(directParams[2], ['12345678'], 'direct purchases are scoped to the same identity');
+  const withDirect = (directRows) => ({ query: async (sql) => (isDirectSql(sql)
+    ? { rows: directRows.map((r) => ({ ...r, phone8: '12345678' })) } : { rows: [] }) });
+  assert.equal((await loadPopularCreditState(withDirect([{ ...normal('os:7', 2), status: 'submitted' }]), '12345678', { evaluatedAt: NOW })).credits, 1,
+    'a direct purchase on a normal campaign worktable earns one credit');
+  assert.equal((await loadPopularCreditState(withDirect([normal('os:7', 3), popular('os:8', 1)]), '12345678', { evaluatedAt: NOW })).credits, 0,
+    'a direct purchase on a popular campaign worktable consumes the credit');
+  directParams = null;
+  await loadPopularCreditState(db, '12345678', { evaluatedAt: NOW, includeDirectPurchases: false });
+  assert.equal(directParams, null, 'includeDirectPurchases:false keeps the legacy calculation (fallback path)');
+  assert.deepEqual(calculatePopularCreditState([normal('os:2', 5), normal(1, 5), popular(3, 1)], NOW),
+    { normalDone: 2, popularUsed: 1, credits: 1, validityDays: 1 }, 'mixed numeric and prefixed ids sort without NaN');
   assert.equal(new Date(params[0]).toISOString(), ago(24), 'database query starts at the rolling 24-hour cutoff');
   assert.equal(new Date(params[1]).toISOString(), NOW.toISOString(), 'database query does not include future events');
   assert.deepEqual(params[2], ['12345678'], 'credit accounting is isolated by participating identity');

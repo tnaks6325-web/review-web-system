@@ -6,6 +6,14 @@ function _time(value) {
   return Number.isFinite(time) ? time : null;
 }
 
+// 같은 시각이면 id 순. 바로 구매 이벤트 id 는 'os:<번호>' 라 숫자 비교가 NaN 이 되지 않게 문자열로 폴백한다.
+function _idOrder(a, b) {
+  const na = Number(a || 0);
+  const nb = Number(b || 0);
+  if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+  return String(a || '').localeCompare(String(b || ''));
+}
+
 function _emptyState() {
   return { normalDone: 0, popularUsed: 0, credits: 0, validityDays: POPULAR_CREDIT_VALIDITY_DAYS };
 }
@@ -24,7 +32,7 @@ function calculatePopularCreditMatches(events, evaluatedAt = new Date()) {
     .map((event) => ({ ...event, phone8: String(event.phone8 || ''), eventAtMs: _time(event.event_at) }))
     .filter((event) => event.eventAtMs !== null && event.eventAtMs >= cutoffMs && event.eventAtMs <= evaluatedAtMs)
     .sort((a, b) => a.phone8.localeCompare(b.phone8)
-      || a.eventAtMs - b.eventAtMs || Number(a.id || 0) - Number(b.id || 0));
+      || a.eventAtMs - b.eventAtMs || _idOrder(a.id, b.id));
 
   const states = new Map();
   const queues = new Map();
@@ -63,7 +71,9 @@ function calculatePopularCreditState(events, evaluatedAt = new Date()) {
   return matches.states.values().next().value || _emptyState();
 }
 
-async function loadPopularCreditMatches(db, reviewerPhone8s = null, { evaluatedAt = new Date() } = {}) {
+// includeDirectPurchases: 공고 참여 없이 바로 낸 구매(결정 238)도 일반/인기 참여로 센다.
+//   리뷰어 판정(참여 게이트·popular-status)만 켠다 — 관리자 집계·목적 라벨은 종전 그대로(후속 단계).
+async function loadPopularCreditMatches(db, reviewerPhone8s = null, { evaluatedAt = new Date(), includeDirectPurchases = false } = {}) {
   const evaluatedAtMs = _time(evaluatedAt);
   if (evaluatedAtMs === null) throw new TypeError('evaluatedAt must be a valid date');
   const evaluatedAtDate = new Date(evaluatedAtMs);
@@ -94,12 +104,15 @@ async function loadPopularCreditMatches(db, reviewerPhone8s = null, { evaluatedA
             AND COALESCE(ca.applied_at, ca.submitted_at) BETWEEN $1 AND $2)
         )
       ORDER BY ca.phone8, event_at, ca.id`, params);
-  return calculatePopularCreditMatches(rows, evaluatedAtDate);
+  if (!includeDirectPurchases) return calculatePopularCreditMatches(rows, evaluatedAtDate);
+  const { loadDirectPurchaseCreditEvents } = require('./directPurchaseParticipation.service');
+  const direct = await loadDirectPurchaseCreditEvents(db, { phones: scopedPhones, from: cutoff, to: evaluatedAtDate });
+  return calculatePopularCreditMatches(rows.concat(direct), evaluatedAtDate);
 }
 
 async function loadPopularCreditState(db, reviewerPhone8, options = {}) {
   const phone8 = String(reviewerPhone8 || '');
-  const matches = await loadPopularCreditMatches(db, [phone8], options);
+  const matches = await loadPopularCreditMatches(db, [phone8], { includeDirectPurchases: true, ...options });
   return matches.states.get(phone8) || _emptyState();
 }
 
