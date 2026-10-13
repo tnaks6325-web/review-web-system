@@ -4015,6 +4015,15 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
       if (stats) { byOpt = {}; for (const [k, v] of stats) byOpt[k] = v; }
       // ★ 결정 241 — 바로 구매한 사람 목록(같은 셈 · 한 구매 = 한 줄). 공유 작업표·실패는 null(화면이 "나눌 수 없음/확인 못 함").
       const rowsDirect = c.attributable ? await require('../services/campaignState.service').listDirectOrders(pool, id) : null;
+      // 바로 구매 줄의 "인기상품목적" 표시 — 작업보드와 같은 공유 매처('os:'+주문 id). 실패는 표시 없음(종전).
+      if (Array.isArray(rowsDirect) && rowsDirect.length) {
+        try {
+          const dm = await loadPopularCreditMatches(pool,
+            [...new Set(rowsDirect.map(r => r.phone8).filter(p => /^\d{8}$/.test(p)))], { evaluatedAt, includeDirectPurchases: true });
+          for (const r of rowsDirect) r.popularPurpose = dm.matchedNormalIds.has('os:' + r.orderId);
+        } catch (e) { logger.warn(`[campaign/applications] 바로 구매 인기 목적 판정 실패 camp=${id}: ${e.message}`); }
+      }
+      if (Array.isArray(rowsDirect)) for (const r of rowsDirect) delete r.phone8;   // 전체 번호는 내리지 않는다
       directSummary = {
         countable: c.attributable, shared: c.sharedTab,
         todayConfirmed: c.today, totalConfirmed: c.total,

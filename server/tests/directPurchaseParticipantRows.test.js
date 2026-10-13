@@ -35,4 +35,13 @@ const html = ctx._campDirectTable({ countable: true, totalDirect: 3, rows: [
 assert.ok(/&lt;b&gt;x&lt;\/b&gt;/.test(html) && /\*\*\*0007/.test(html) && /7행/.test(html) && /담당자 수동제출/.test(html), html);
 assert.ok(/최근 1건만 보입니다\(전체 3건\)/.test(html), 'truncation is stated');
 
+// ④ Codex PR #1627 — 연락처 없는 주문은 참여권 매칭 제외 · 진단 수동추가는 수동 · 작업표 줄은 이 공고 표만 · 바로 구매 줄 인기 목적 표시
+const dp = read('server/src/services/directPurchaseParticipation.service.js');
+assert.ok(/AND \$\{OS_PHONE8\} ~ '\^\[0-9\]\{8\}\$'/.test(dp), 'phone-less orders never share credits');
+assert.ok(/\(r\.source === 'admin_external' \|\| r\.source === 'manual'\) \? 'manual' : 'link'/.test(st), 'diag manual orders are manual');
+assert.ok(/SELECT cpo\.reviewer_name[\s\S]{0,400}AND cpo\.sheet_id = rc\.linked_sheet_id/.test(st), 'fallback row restricted to campaign worktable');
+assert.ok(/r\.popularPurpose = dm\.matchedNormalIds\.has\('os:' \+ r\.orderId\)/.test(routes) && /delete r\.phone8/.test(routes), 'direct rows get the shared purpose marker; full phone stripped');
+const html2 = ctx._campDirectTable({ countable: true, totalDirect: 1, rows: [{ submittedAt: null, name: 'a', phone4: '1', product: '', rowSeq: null, source: 'link', popularPurpose: true }] });
+assert.ok(/🔥 인기상품목적 참여건/.test(html2), 'badge rendered');
+
 console.log('directPurchaseParticipantRows: passed');

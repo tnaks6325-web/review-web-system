@@ -110,6 +110,8 @@ async function loadDirectPurchaseCreditEvents(q, { phones = null, from, to }) {
        ) camp ON TRUE
       WHERE ${DIRECT_PURCHASE_WHERE}
         AND os.submitted_at BETWEEN $1 AND $2
+        -- 연락처가 8자리 번호가 아닌 주문은 명의를 알 수 없다 — 그런 주문끼리 참여권을 주고받지 않게 뺀다(Codex PR #1627).
+        AND ${OS_PHONE8} ~ '^[0-9]{8}$'
         ${phoneClause}`, params);
   return rows;
 }

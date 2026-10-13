@@ -4956,7 +4956,7 @@ function _campDirectTable(ds) {
   const th = t => `<th style="text-align:${t.a || "left"};font-weight:800;color:#6B7280;padding:5px 8px;border-bottom:1px solid #E5E7EB;white-space:nowrap">${t.l}</th>`;
   const td = (v, a) => `<td style="text-align:${a || "left"};padding:5px 8px;border-bottom:1px solid #F3F4F6;white-space:nowrap">${v}</td>`;
   const src = { link: "구매양식 링크", manual: "담당자 수동제출" };
-  const body = ds.rows.map(r => `<tr>${td(fmt(r.submittedAt))}${td("<b>" + escT(r.name || "(이름 없음)") + "</b>")}${td(r.phone4 ? "***" + escT(r.phone4) : "")}${td(escT(r.product || "-"))}${td(r.rowSeq != null ? r.rowSeq + "행" : "-", "center")}${td(src[r.source] || escT(r.source), "center")}</tr>`).join("");
+  const body = ds.rows.map(r => `<tr>${td(fmt(r.submittedAt))}${td("<b>" + escT(r.name || "(이름 없음)") + "</b>" + (r.popularPurpose ? ' <span style="font-size:.62rem;font-weight:800;background:#FFEDD5;color:#C2410C;border-radius:6px;padding:1px 6px" title="이 구매로 얻은 참여권이 이후 인기상품 참여에 실제로 쓰였습니다">🔥 인기상품목적 참여건</span>' : ""))}${td(r.phone4 ? "***" + escT(r.phone4) : "")}${td(escT(r.product || "-"))}${td(r.rowSeq != null ? r.rowSeq + "행" : "-", "center")}${td(src[r.source] || escT(r.source), "center")}</tr>`).join("");
   const more = ds.rows.length < (Number(ds.totalDirect) || 0) ? note(`최근 ${ds.rows.length}건만 보입니다(전체 ${ds.totalDirect}건).`) : "";
   return box(`<div style="overflow-x:auto;max-height:320px;overflow-y:auto"><table style="width:100%;border-collapse:collapse;font-size:.72rem">
       <thead><tr>${th({ l: "구매양식 제출" })}${th({ l: "이름" })}${th({ l: "연락처" })}${th({ l: "상품" })}${th({ l: "작업표", a: "center" })}${th({ l: "경로", a: "center" })}</tr></thead>

@@ -1388,6 +1388,7 @@ async function listDirectOrders(db, campaignId, { limit = 500 } = {}) {
         SELECT DISTINCT ON (${ORDER_PURCHASE_KEY_SQL})
                os.id, COALESCE(NULLIF(BTRIM(os.orderer), ''), NULLIF(BTRIM(os.recipient), ''), cp.reviewer_name) AS name,
                RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 4) AS phone4,
+               RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) AS phone8,
                os.submitted_at, os.source,
                -- 상품 = 담당자가 고친 상품 > 고른 상품 > 작업표 줄 상품(운영 바로 구매의 80% 는 주문 칸이 비어 작업표에만 있다)
                COALESCE(NULLIF(pe.value_text, ''), NULLIF(os.selected_product, ''), NULLIF(os.selected_opt_key, ''),
@@ -1397,6 +1398,10 @@ async function listDirectOrders(db, campaignId, { limit = 500 } = {}) {
             SELECT cpo.reviewer_name, cpo.option_text, cpo.row_json, cpo.product_name, cpo.seq, cpo.sheet_id, cpo.tab_name
               FROM campaign_participants cpo
              WHERE cpo.order_submission_id = os.id AND cpo.deleted_at IS NULL AND cpo.active
+               -- 이 공고의 연결 작업표 줄만 — 다른 작업표에 남은 같은 주문 링크의 이름·상품을 보이지 않게(Codex PR #1627)
+               AND cpo.sheet_id = rc.linked_sheet_id
+               AND (cpo.tab_name = rc.linked_tab_name
+                    OR (NULLIF(rc.linked_tab_gid,'') IS NOT NULL AND NULLIF(cpo.tab_gid,'') = NULLIF(rc.linked_tab_gid,'')))
              ORDER BY cpo.seq LIMIT 1
           ) cp ON TRUE
           LEFT JOIN LATERAL (
@@ -1412,7 +1417,9 @@ async function listDirectOrders(db, campaignId, { limit = 500 } = {}) {
     return rows.map(r => ({
       orderId: String(r.id), name: String(r.name || ''), phone4: String(r.phone4 || ''),
       submittedAt: r.submitted_at, product: String(r.product || ''), rowSeq: r.row_seq == null ? null : Number(r.row_seq),
-      source: r.source === 'admin_external' ? 'manual' : 'link',
+      // 담당자 손을 거친 주문(외부모집 수동제출 admin_external · 진단 수동추가 manual)은 수동, 나머지는 구매양식 링크(Codex PR #1627)
+      source: (r.source === 'admin_external' || r.source === 'manual') ? 'manual' : 'link',
+      phone8: String(r.phone8 || ''),   // ★ 서버 안에서만(인기 참여용 표시 계산) — 라우트가 응답 전에 지운다
     }));
   } catch (_) { return null; }
 }
