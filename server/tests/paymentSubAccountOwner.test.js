@@ -511,7 +511,8 @@ const owner = (over = {}) => Object.assign({
     assert.ok(/os\.sheet_row = cp\.seq/.test(body), '줄 번호 일치 가드');
     assert.ok(/os\.deleted_at IS NULL/.test(body) && /cp\.deleted_at IS NULL/.test(body), '취소·삭제 줄 제외');
     assert.ok(!/price|review_fee_snapshot/.test(body), '금액 재료를 싣지 않는다');
-    assert.ok(/_orderAccount\(ord \|\| linkedFormMap\[/.test(src), '계좌 근거로만 쓴다');
+    // 결정 231: 연결 주문은 한 번 꺼내(linkedForm) 계좌 근거와 주문 시각에만 쓴다 — 의미 불변
+    assert.ok(/const linkedForm = linkedFormMap\[/.test(src) && /_orderAccount\(ord \|\| linkedForm, r\)/.test(src), '계좌 근거로만 쓴다');
   });
 
   console.log('\n§4 배선');

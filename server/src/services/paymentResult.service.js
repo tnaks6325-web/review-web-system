@@ -1032,7 +1032,7 @@ async function reconcileAmountMismatch({ batchId, uploadId, itemId, resultSeq, n
 const FAIL_NOTICE =
   '리뷰비 이체가 처리되지 않았습니다.\n' +
   '등록하신 계좌 정보(은행 · 계좌번호 · 예금주)를 다시 확인해 주세요.\n' +
-  '내정보에서 계좌를 수정하시면 다음 이체 때 자동으로 다시 시도됩니다.';
+  '내정보에서 계좌를 수정하시면 다음 이체 때 수정하신 계좌로 다시 시도됩니다.';   // 결정 231 — 고친 계좌가 실제로 쓰인다
 
 /** 실패 건에 1:1문의 안내 전송 + `notified_at` 기록. ★ 절대 throw 하지 않는다(반영은 이미 커밋됐다). */
 async function _notifyFailures(items, by) {

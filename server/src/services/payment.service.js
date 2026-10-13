@@ -256,6 +256,10 @@ async function listPaymentTargets(opts = {}) {
   // 좌표로 못 찾은 행만 — 모집공고 경유 주문은 원장 좌표가 `campaign:<공고ID>` 라 위 조회에 안 걸린다.
   const linkedFormMap = await _loadLinkedFormAccounts(
     rows.filter(r => !orderMap[r.sheetId + '||' + r.tabName + '||' + r.rowIndex]));
+  // ★ 결정 231 재료 — 이 줄에서 이미 이체 실패한 계좌 · 등록 계좌가 마지막으로 바뀐 시각(둘 다 실패해도 종전 동작)
+  const failedAcctMap = await _loadFailedAccounts(rows);
+  const acctChangeMap = await _loadAccountChangeTimes([
+    ...Object.values(acctMap), ...Object.values(ownerAcctMap)].map(a => a && a.reviewerId).filter(Boolean));
 
   const items = rows.map(r => {
     const key = r.sheetId + '||' + r.tabName;
@@ -286,8 +290,45 @@ async function listPaymentTargets(opts = {}) {
          회차 스냅샷 대조에서 `unverifiable` 로 빠져야 다운로드가 막히지 않는다.
        ★ 되돌리기 = env `PAYMENT_FORM_ACCOUNT_FIRST=0` (코드 변경 0). */
     // ★ 계좌 근거로만 쓴다 — 상품비·리뷰비 스냅샷(`ord`)에는 섞지 않는다(금액 불변).
-    const formAcct = _orderAccount(ord || linkedFormMap[key + '||' + r.rowIndex] || null, r);
-    const useForm = _formAccountFirst() && !!formAcct;
+    const linkedForm = linkedFormMap[key + '||' + r.rowIndex] || null;
+    const formAcct = _orderAccount(ord || linkedForm, r);
+    const formFirst = _formAccountFirst() && !!formAcct;
+    /* ★★★ 예외 — **리뷰어가 고친 계좌를 쓴다** (사용자 확정 2026-10-13 · 결정 231)
+         왜(실사고 임혜정 고양이사료 18·간장 398): 9/25 양식에 계좌를 13자리로 잘못 적어 이체 실패 →
+         10/8 내정보에서 고쳤지만 위 규칙이 **그 주문의 양식 계좌를 계속 이기게 해** 10/12 또 실패(간장은 4회).
+         실패 안내문은 "내정보에서 고치면 다음 이체 때 다시 시도"라 리뷰어에게 막다른 길이었다.
+       조건(셋 다): ① 등록 계좌가 온전하고 양식 계좌와 다르다 ② **예금주가 같다**(같은 사람이 고친 것 —
+         157 사고처럼 예금주가 다른 경우는 양식이 계속 이긴다) ③ 양식 계좌가 **이 줄에서 이미 이체 실패**했거나,
+         등록 계좌가 **그 주문 뒤에** 바뀌었다(`reviewer_account_change_audit` — DB 트리거가 모든 변경을 남긴다).
+       ★ 타계정은 그 명의 항목의 변경만 본다(소유자 본계좌 변경으로 타계정 건을 바꾸지 않는다). */
+    const regComplete = !!(registeredAcct && normalizeAccount(registeredAcct.bankAccount)
+      && String(registeredAcct.bankName || '').trim() && String(registeredAcct.accountHolder || '').trim());
+    const rowKey = key + '||' + r.rowIndex;
+    const failedSet = failedAcctMap[rowKey] || null;
+    const formFailed = !!(formFirst && failedSet && failedSet.has(normalizeAccount(formAcct.bankAccount)));
+    // 양식 계좌의 "마지막으로 정해진 시각" = 제출 시각과 주문 기록 수정 시각 중 늦은 쪽 — 관리자가 주문 기록에서
+    // 양식 계좌를 나중에 고쳤다면 그보다 먼저 바뀐 내정보 계좌로 덮지 않는다(리뷰 지적 · 보수적으로 접는다).
+    const _later = (a, b) => (!a ? b || null : !b ? a : (new Date(a).getTime() >= new Date(b).getTime() ? a : b));
+    const orderedAt = ord ? _later(ord.orderedAt, ord.orderUpdatedAt)
+      : linkedForm ? _later(linkedForm.orderedAt, linkedForm.orderUpdatedAt) : null;
+    const regChangedAt = regComplete ? _acctChangedAt(acctChangeMap, registeredAcct, r.phone8) : null;
+    const regChangedAfterOrder = !!(regChangedAt && orderedAt && new Date(regChangedAt).getTime() > new Date(orderedAt).getTime());
+    const sameHolder = !!(formFirst && regComplete
+      && _holderKey(formAcct.accountHolder) === _holderKey(registeredAcct.accountHolder));
+    // ★ 이름으로만 찾은 타계정(번호 없음 — subPhone8 null)은 빼다: 회차 스냅샷이 'self' 로 박제돼
+    //   다음 대조가 소유자 본계좌와 비교해 **회차 전체가 다운로드 불가**가 된다(리뷰 지적 — 기존 결함이 이 길로 열린다).
+    // ★ 전용 계좌 없이 소유자 계좌를 물려 쓰는 타계정도 뺀다 — 소유자가 본계좌를 바꾸면 감사 트리거가 그 타계정에도
+    //   변경 줄을 남겨(migration 125) "주문 뒤 변경"으로 잡히고, 타계정 건이 소유자의 새 계좌로 돌아간다(Codex P1).
+    const regTargetable = !!registeredAcct
+      && !(registeredAcct.isSub && (registeredAcct.subPhone8 === null || registeredAcct.inheritsOwner));
+    // 은행·계좌번호를 **함께** 비교한다 — 계좌번호는 맞고 은행만 틀리게 적었다가 내정보에서 은행만 고친 경우도 잡는다(Codex P2)
+    const _bankKey = name => { const b = resolveBank(name); return b ? b.code : String(name || '').replace(/\s+/g, ''); };
+    const regDiffersFull = !!(formFirst && regComplete && (
+      normalizeAccount(formAcct.bankAccount) !== normalizeAccount(registeredAcct.bankAccount)
+      || _bankKey(formAcct.bankName) !== _bankKey(registeredAcct.bankName)));
+    const preferRegistered = !!(formFirst && regComplete && sameHolder && regTargetable && regDiffersFull
+      && (formFailed || regChangedAfterOrder));
+    const useForm = formFirst && !preferRegistered;
     const acct = useForm
       // 신원 추적 필드(누가 참여했나)는 **등록DB 기준을 유지**한다 — 계좌(어디로 보내나)와 별개다.
       ? { ...formAcct,
@@ -304,17 +345,23 @@ async function listPaymentTargets(opts = {}) {
       accountTail: normalizeAccount(formAcct.bankAccount).slice(-4),
       accountHolder: formAcct.accountHolder || '',
     } : null;
-    const acctMismatch = !useForm ? null
+    const _mmReg = registeredAcct ? { bankName: registeredAcct.bankName || '',
+      accountTail: normalizeAccount(registeredAcct.bankAccount).slice(-4),
+      accountHolder: registeredAcct.accountHolder || '',
+      name: registeredAcct.name || '', isSub: !!registeredAcct.isSub } : null;
+    // `using` = 실제로 보내는 쪽('form' 양식 / 'registered' 리뷰어가 고친 등록 계좌) — 화면 안내 첫 줄이 이것으로 갈린다.
+    const acctMismatch = preferRegistered
+      ? { form: _mmForm, registered: _mmReg, holderDiffers: false, using: 'registered',
+          reason: formFailed ? 'form_failed' : 'registered_changed' }
+      : !useForm ? null
       : !registeredAcct
-        ? { form: _mmForm, registered: null, holderDiffers: false }
+        ? { form: _mmForm, registered: null, holderDiffers: false, using: 'form' }
         : normalizeAccount(formAcct.bankAccount) !== normalizeAccount(registeredAcct.bankAccount)
           ? {
               form: _mmForm,
-              registered: { bankName: registeredAcct.bankName || '',
-                            accountTail: normalizeAccount(registeredAcct.bankAccount).slice(-4),
-                            accountHolder: registeredAcct.accountHolder || '',
-                            name: registeredAcct.name || '', isSub: !!registeredAcct.isSub },
+              registered: _mmReg,
               holderDiffers: String(formAcct.accountHolder || '').trim() !== String(registeredAcct.accountHolder || '').trim(),
+              using: 'form',
             }
           : null;   // ← 같으면 아무 말도 하지 않는다
 
@@ -395,6 +442,12 @@ async function listPaymentTargets(opts = {}) {
     /* ★ 양식 계좌 ≠ 등록DB 계좌 — **경고만**(사용자 확정 2026-09-21: 보류시키지 않는다).
        화면이 두 계좌를 나란히 보여주고, 담당자가 체크를 풀면 그 건만 회차에서 빠진다. */
     if (acctMismatch) warnings.push('account_form_override');
+    /* ★★ 이 줄에서 **이미 이체 실패한 계좌 그대로** 다시 보내려는 경우(사용자 확정 2026-10-13 · 결정 231) —
+         같은 줄이 같은 계좌로 최대 10번까지 실패를 반복했다(계좌를 아무도 안 고쳤는데 매 회차 다시 담겼다).
+       ★ 막지(issues) 않고 경고로 둔다 — 은행 쪽 일시 오류였을 수 있어 담당자가 체크하면 다시 담을 수 있어야 한다.
+         화면이 이 경고가 붙은 줄을 **처음에 체크 해제** 상태로 둔다(사람이 확인 후 담는다). */
+    const failedAgainCount = (failedSet && account) ? (failedSet.get(account) || 0) : 0;
+    if (failedAgainCount > 0) warnings.push('failed_account');
     /* ★★ 리뷰비 0 = **리뷰비 없는 작업**이다 — 경고하지 않는다(사용자 확정 2026-08-24).
        종전에는 "근거(feeSource)를 못 찾으면" 경고했는데, 공고가 없는 옛 작업은 근거가 구조적으로
        없어 상시 경고로 뒤덮였다(실측: 보완 목록 37개 작업 대부분). 이 계정은 **상품비만 주는
@@ -427,6 +480,8 @@ async function listPaymentTargets(opts = {}) {
       bankAccount: account,
       accountHolder: acct ? (acct.accountHolder || '') : '',
       isSub: acct ? !!acct.isSub : false,
+      // 이 계좌로 이 줄이 이미 실패한 횟수(0 = 없음) — 화면이 "이전에 실패한 계좌 N회"를 말한다
+      failedAccountCount: failedAgainCount,
       // ★ 계좌 **명의**(누구 이름으로 등록된 계좌인가) — 시트의 이름 칸(`reviewerName`)은
       //   탭마다 주문자/수취인 중 무엇이 잡혔는지 달라 명의 판별에 쓸 수 없다.
       //   타계정이면 `accountOwner` 가 그 명의를 등록한 소유자(본계정) 이름.
@@ -614,6 +669,7 @@ async function _loadOrderPrices(sheetIds, tabNames) {
     `SELECT sheet_id AS "sheetId", tab_name AS "tabName", sheet_row AS "sheetRow",
             price, review_fee_snapshot AS "feeSnapshot",
             delivery_review_fee_mix_snapshot AS "deliveryReviewFeeMixSnapshot", submitted_at AS "orderedAt",
+            updated_at AS "orderUpdatedAt",
             -- ★ 그 건의 구매양식으로 **리뷰어가 직접 적어 낸 계좌**(035). 등록 계좌를 못 찾을 때의
             --   마지막 근거다 — 이걸 안 보면 시트에 계좌가 멀쩡히 있는 건도 영구 보류된다.
             bank AS "bank", account AS "account", depositor AS "depositor"
@@ -625,7 +681,7 @@ async function _loadOrderPrices(sheetIds, tabNames) {
   for (const o of rows) {
     map[o.sheetId + '||' + o.tabName + '||' + o.sheetRow] = {
       price: o.price, feeSnapshot: o.feeSnapshot, deliveryReviewFeeMixSnapshot: o.deliveryReviewFeeMixSnapshot,
-      orderDate: toKstDate(o.orderedAt),
+      orderDate: toKstDate(o.orderedAt), orderedAt: o.orderedAt || null, orderUpdatedAt: o.orderUpdatedAt || null,
       bank: o.bank || '', account: o.account || '', depositor: o.depositor || '',
     };
   }
@@ -650,7 +706,8 @@ async function _loadLinkedFormAccounts(rows) {
   try {
     const { rows: found } = await pool.query(
       `SELECT t.sheet_id AS "sheetId", t.tab_name AS "tabName", t.row_index AS "rowIndex",
-              os.bank AS "bank", os.account AS "account", os.depositor AS "depositor"
+              os.bank AS "bank", os.account AS "account", os.depositor AS "depositor",
+              os.submitted_at AS "orderedAt", os.updated_at AS "orderUpdatedAt"
          FROM unnest($1::text[], $2::text[], $3::int[]) AS t(sheet_id, tab_name, row_index)
          JOIN campaign_participants cp
            ON cp.sheet_id = t.sheet_id AND cp.tab_name = t.tab_name AND cp.seq = t.row_index
@@ -662,13 +719,77 @@ async function _loadLinkedFormAccounts(rows) {
     for (const o of found) {
       const k = o.sheetId + '||' + o.tabName + '||' + o.rowIndex;
       if (out[k]) { out[k] = null; continue; }   // 한 줄에 둘 이상 = 모호 → 쓰지 않는다
-      out[k] = { bank: o.bank || '', account: o.account || '', depositor: o.depositor || '' };
+      out[k] = { bank: o.bank || '', account: o.account || '', depositor: o.depositor || '',
+                 orderedAt: o.orderedAt || null, orderUpdatedAt: o.orderUpdatedAt || null };
     }
   } catch (e) {
     try { require('../utils/logger').logger.warn(`[payment] 연결 주문 계좌 조회 실패(무시): ${e.message}`); } catch (_) {}
   }
   return out;
 }
+
+/**
+ * 이 줄에서 **이미 이체 실패한 계좌** → 실패 횟수 (결정 231).
+ * ★ 취소된 회차는 세지 않는다. 계좌는 숫자만으로 비교(normalizeAccount).
+ * ★ 조회 실패 = 빈 결과(종전 동작 그대로 — 입금대상 목록이 죽으면 안 된다).
+ */
+async function _loadFailedAccounts(rows) {
+  const out = {};
+  if (!rows || !rows.length) return out;
+  try {
+    const { rows: found } = await pool.query(
+      `SELECT pi.sheet_id AS "sheetId", pi.tab_name AS "tabName", pi.row_index AS "rowIndex",
+              pi.bank_account AS "account", count(*)::int AS "n"
+         FROM unnest($1::text[], $2::text[], $3::int[]) AS t(sheet_id, tab_name, row_index)
+         JOIN payment_batch_items pi
+           ON pi.sheet_id = t.sheet_id AND pi.tab_name = t.tab_name AND pi.row_index = t.row_index
+         JOIN payment_batches pb ON pb.id = pi.batch_id
+        WHERE pi.status = 'failed' AND pb.status <> 'cancelled'
+        GROUP BY 1, 2, 3, 4`,
+      [rows.map(r => r.sheetId), rows.map(r => r.tabName), rows.map(r => r.rowIndex)]);
+    for (const f of found) {
+      const a = normalizeAccount(f.account || '');
+      if (!a) continue;
+      const k = f.sheetId + '||' + f.tabName + '||' + f.rowIndex;
+      const m = out[k] || (out[k] = new Map());
+      m.set(a, (m.get(a) || 0) + Number(f.n || 0));
+    }
+  } catch (e) {
+    try { require('../utils/logger').logger.warn(`[payment] 실패 계좌 조회 실패(무시): ${e.message}`); } catch (_) {}
+  }
+  return out;
+}
+
+/**
+ * 등록 계좌가 마지막으로 바뀐 시각 — `reviewer_account_change_audit`(DB 트리거가 본계좌·타계정 변경을 모두 남긴다).
+ * 키 = `<reviewerId>|<sub_phone8 또는 ''>`. ★ 조회 실패 = 빈 결과(예외 조건이 안 켜질 뿐 = 종전 동작).
+ */
+async function _loadAccountChangeTimes(reviewerIds) {
+  const out = {};
+  // uuid 만 — 인덱스를 타도록 `reviewer_id = ANY(uuid[])` 로 묻는다(문자열 비교는 인덱스를 못 탄다)
+  const ids = [...new Set((reviewerIds || []).map(String))]
+    .filter(v => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v));
+  if (!ids.length) return out;
+  try {
+    const { rows } = await pool.query(
+      `SELECT reviewer_id::text AS "reviewerId", COALESCE(sub_phone8, '') AS "sub", max(changed_at) AS "at"
+         FROM reviewer_account_change_audit
+        WHERE reviewer_id = ANY($1::uuid[])
+        GROUP BY 1, 2`, [ids]);
+    for (const x of rows) out[x.reviewerId + '|' + x.sub] = x.at;
+  } catch (e) {
+    try { require('../utils/logger').logger.warn(`[payment] 계좌 변경 기록 조회 실패(무시): ${e.message}`); } catch (_) {}
+  }
+  return out;
+}
+/** 그 등록 계좌 자체의 마지막 변경 시각 — 타계정은 **그 명의 항목**만(소유자 본계좌 변경을 끌어오지 않는다) */
+function _acctChangedAt(changeMap, reg, rowPhone8) {
+  if (!reg || !reg.reviewerId) return null;
+  const sub = reg.isSub ? String(reg.subPhone8 || rowPhone8 || '') : '';
+  return changeMap[String(reg.reviewerId) + '|' + sub] || null;
+}
+/** 예금주 비교 키 — 공백만 무시(이름 자체는 정확히 같아야 한다) */
+function _holderKey(v) { return String(v || '').replace(/\s+/g, ''); }
 
 /**
  * 그 건의 구매양식으로 제출된 계좌(order_submissions.bank/account/depositor).
@@ -709,7 +830,8 @@ async function _loadAccounts(phone8s) {
             COALESCE(r.name, '')                                             AS "ownerName",
             COALESCE(NULLIF(btrim(s->>'bankName'),''),   r.bank_name)        AS "bankName",
             COALESCE(NULLIF(btrim(s->>'bankAccount'),''), r.bank_account)    AS "bankAccount",
-            COALESCE(NULLIF(btrim(s->>'accountHolder'),''), r.account_holder) AS "accountHolder"
+            COALESCE(NULLIF(btrim(s->>'accountHolder'),''), r.account_holder) AS "accountHolder",
+            (NULLIF(btrim(s->>'bankAccount'),'') IS NULL)                    AS "inheritsOwner"
        FROM reviewers r, jsonb_array_elements(
               CASE WHEN jsonb_typeof(r.sub_accounts) = 'array' THEN r.sub_accounts ELSE '[]'::jsonb END) s
       WHERE RIGHT(regexp_replace(COALESCE(s->>'phone',''), '[^0-9]', '', 'g'), 8) = ANY($1)`,
@@ -728,7 +850,9 @@ async function _loadAccounts(phone8s) {
       //   같은 소유자가 본인 명의 + 타계정 명의로 여러 건 참여하면 화면이 "누구 계좌인지" 말할 수 없다(실사고).
       map[p8] = { reviewerId: s.reviewerId, bankName: s.bankName || '', bankAccount: s.bankAccount || '', accountHolder: s.accountHolder || '',
                   ownerReviewerId: s.reviewerId, participantIdentityId: null,
-                  isSub: true, name: s.name || '', ownerName: s.ownerName || '' };
+                  isSub: true, name: s.name || '', ownerName: s.ownerName || '',
+                  // 전용 계좌가 비어 소유자 계좌를 물려 쓰는 타계정(결정 231 — 소유자 계좌 변경으로 이 건을 돌리지 않는다)
+                  inheritsOwner: !!s.inheritsOwner };
     } else {
       map.ambiguousPhone8s.add(p8);
     }
@@ -917,6 +1041,7 @@ async function _loadOwnerAccountsByRow(rows) {
       bankAccount:   (sub && String(sub.bankAccount || '').trim())   || owner.bankAccount || '',
       accountHolder: (sub && String(sub.accountHolder || '').trim()) || owner.accountHolder || '',
       isSub: !!sub, source,
+      inheritsOwner: !!sub && !String(sub.bankAccount || '').trim(),
       name: (sub && String(sub.name || '').trim()) || owner.name || '',
       ownerName: owner.name || '',
       // ★ 지목 대상 = 그 명의 항목이 실제로 등록돼 있을 때만 타계정, 아니면 소유자 본계좌.
@@ -1644,4 +1769,5 @@ module.exports = {
   buildWorkbook, batchFileName, batchFileFormat,
   saveTransferSetting, saveReviewerAccount, checkBatchAccountSnapshots, reconcileAccountSnapshots,
   compareAccountSnapshot, accountFingerprint, resolveWorkManager, flagPriceOutliers, PaymentFixError,
+  _acctChangedAt, _holderKey,
 };
