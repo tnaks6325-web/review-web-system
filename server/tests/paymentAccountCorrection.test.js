@@ -195,6 +195,11 @@ const run = (opts, fn) => withStubPool(handler(opts), async svc => fn((await svc
     // 다운로드는 여전히 체크된 줄(_pmOn)만
     assert.ok(/_pmVisibleItems\(\)\.filter\(it=>it\.bank===bank && _pmOn\(it\)\)/.test(WD));
   });
+  t('4a3 화면 배치가 바뀌어도(결정 217 되돌림) 실패 계좌 건수를 안내 줄과 표 줄이 말한다', () => {
+    assert.ok(/const failedAgain = _pmFilterItems\(allItems,\{manager:_pmFilterState\(\)\.manager\}\)\.filter\(it=>it\.payable && \(it\.warnings\|\|\[\]\)\.includes\('failed_account'\)\)/.test(WD));
+    assert.ok(/이미 이체가 실패한 계좌 그대로인 \$\{failedAgain\.length\}건/.test(WD));
+    assert.ok(/이전 실패 계좌 \$\{Number\(it\.failedAccountCount\)\}회/.test(WD));
+  });
   t('4b 안내줄이 "리뷰어가 고친 계좌로 보냅니다"를 말한다(서버 using 값으로만 갈린다)', () => {
     assert.ok(/mm\.using==='registered' && r/.test(WD) && /리뷰어가 내정보에서 고친 계좌로 보냅니다/.test(WD));
   });
