@@ -465,6 +465,21 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
+  // ── 같은 번호 타계정 정리 스위치(결정 226 3·4단계 · migration 185) ──
+  //   Railway `SAME_PHONE_FOLD_MODE` — 없음/off = 아무것도 안 함 · preview · apply:<미리보기 번호> · undo_all:<실행 번호>.
+  //   ★ 값을 바꾸면 Railway 가 다시 배포한다 → 기동 90초 뒤 한 번만 돈다(작업 잠금 · 끝난 실행은 다시 하지 않음).
+  //   ★ 실패해도 서버·다른 작업에 영향 0(로그만). 끝나면 스위치를 off 로 돌린다.
+  if (process.env.SAME_PHONE_FOLD_MODE && process.env.SAME_PHONE_FOLD_MODE !== 'off') {
+    setTimeout(async () => {
+      try {
+        const r = await require('../services/reviewerIdentityFold.service').runFromSwitch();
+        logger.info(`[CRON-IdentityFold] ${JSON.stringify(r && (r.summary || r)).slice(0, 400)}`);
+      } catch (err) {
+        logger.error(`[CRON-IdentityFold] error: ${err.code || ''} ${err.message}`);
+      }
+    }, Number(process.env.SAME_PHONE_FOLD_DELAY_MS) || 90 * 1000);
+  }
+
   // ── Phase 4: campaign_participants를 review_index에서 주기 최신화(DB를 살아있는 원본화): 기본 OFF ──
   //   PARTICIPANTS_AUTO_SYNC=1 에서만. 시트 재읽기 0(DB→DB 복사)·라이브 소비처 없음(shadow) → 무영향.
   //   수동편집(source='manual') 행은 보존. 이미 가져온 탭만 대상(규모 작음).

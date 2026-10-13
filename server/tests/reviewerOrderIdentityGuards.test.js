@@ -67,7 +67,7 @@ ok('가림 주소는 모든 연속 가림문자를 제거해 비교한다',
   /MASK_RUN_RE = \/\[\*＊●○◯◉•·xX\]\+\/g/.test(service)
   && /replace\(MASK_RUN_RE, ' '\)/.test(service));
 ok('타계정 편집 API는 전용 경로의 shoppingId를 구버전 화면에서도 보존한다',
-  /mutateSubAccounts\(owner\.id, \(currentSubs\)/.test(reviewerServiceSource)
+  /mutateSubAccounts\(owner\.id, (async )?\(currentSubs[,)]/.test(reviewerServiceSource)
   && /sub\.shoppingId = String\(savedId\)/.test(reviewerServiceSource));
 ok('등록 타계정 존재 시(1인 1회·타계정 허용 공통) 명의 선택을 옵션보다 먼저 연다',
   /if\(acctChoiceEnabled\(\)\)[\s\S]{0,180}?if\(\(_subs \|\| \[\]\)\.length\) return openAcctSheet\(null, 'option'\)/.test(campaign));

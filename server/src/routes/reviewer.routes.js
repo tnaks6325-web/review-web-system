@@ -779,6 +779,26 @@ router.get('/my-status', async (req, res, next) => {
   }
 });
 
+// GET /api/reviewer/identity-fold-notice — 같은 번호 타계정을 본계정으로 합친 안내(결정 226 · 사용자 확정 2026-10-13).
+//   로그인한 본계정에만 합친 타계정 이름을 돌려준다. 조회 실패는 안내 없음으로 접는다(홈 사용을 막지 않는다).
+router.get('/identity-fold-notice', reviewerSessionMiddleware, async (req, res) => {
+  try {
+    // 본계정 로그인에만 — 다른 번호의 타계정으로 들어온 사람(가족 등)에게 본계정 쪽 안내를 보여 주거나 대신 끄게 하지 않는다.
+    if (req.reviewer.loginKind !== 'self') return res.json({ ok: true, notice: null });
+    res.json(await require('../services/reviewerIdentityFold.service').pendingNotice(req.reviewer.ownerReviewerId));
+  } catch (err) {
+    logger.warn(`[identity-fold] 안내 조회 실패(안내 없음으로): ${err.code || ''} ${err.message}`);
+    res.json({ ok: true, notice: null });
+  }
+});
+// POST /api/reviewer/identity-fold-notice/dismiss — [다시 보지 않기]. 다른 기기에서도 다시 뜨지 않게 서버에 남긴다.
+router.post('/identity-fold-notice/dismiss', reviewerSessionMiddleware, async (req, res, next) => {
+  try {
+    if (req.reviewer.loginKind !== 'self') return res.json({ ok: true, dismissed: 0 });
+    res.json(await require('../services/reviewerIdentityFold.service').dismissNotice(req.reviewer.ownerReviewerId));
+  } catch (err) { next(err); }
+});
+
 // GET /api/reviewer/overdue-review-warning — 로그인 시 보여줄 가장 오래된 리뷰 미제출 1건.
 // 구매양식 제출 뒤 10일이 지난 주문 중 현재 리뷰내역의 참여행과 연결된 건만 고른다.
 // 경고 표시 여부는 캠페인 참여 제한과 무관하며 이 API는 읽기만 수행한다.
