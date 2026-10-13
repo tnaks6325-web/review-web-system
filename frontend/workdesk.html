@@ -3150,6 +3150,8 @@ async function boot(){
   if(me.exp && me.exp*1000 < Date.now())   // 만료 토큰 → 만료 신원 배지+빈 목록 유령 화면 대신 즉시 재로그인
     return _dropSession('세션이 만료되었습니다. 다시 로그인하세요. (인트라넷에서 "리뷰웹시스템[3버전]" 버튼으로 오면 자동 로그인)');
   if(!STATE.role){ sessionStorage.removeItem('admin_token'); return renderLogin(); }   // 깨진/위조 토큰 → 빈 셸 대신 로그인
+  // 직원(관리자·AE)만 확장 프로그램 필수 설치 — 광고주(업체) 화면은 제외(js/product-reader-gate.js, 2026-10-13)
+  try { window.productReaderGate && window.productReaderGate({ isStaff: STATE.role !== 'advertiser' }); } catch (_) { }
   // 새로고침은 현재 브라우저 항목을 다시 읽되, 다른 계정이 남긴 이력은 복원하지 않는다.
   if(!_GO && _VIEW!=='logs' && _navCanRestore(history.state)) _navRestoreState(history.state);
   _consumeGo();   // 리뷰어 로그 딥링크 → 작업보드 탭 + 해당 리뷰어 행 지정(셸 렌더 전에 세팅해야 loadTabs가 집어감)
@@ -19073,6 +19075,7 @@ window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';
      `/api/trackb/tabs` 는 양쪽에서 닿는 유일한 목록이라 여기서만 재기준한다(목록 사본 0). */
   window.RECRUIT_TABS_API = '/api/trackb/tabs';</script>
 <script src="api.js"></script>
+<script src="js/product-reader-gate.js"></script>
 <script src="js/drive-thumb.js"></script>
 <!-- 작업오더 상세 렌더러 — 관리자 대시보드(index-app.js)에서 이관한 공유 모듈.
      첨부 이미지 임베드·라이트박스·섹션 추출이 전부 여기 한 벌뿐이다. -->
