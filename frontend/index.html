@@ -2679,7 +2679,7 @@ async function _partInfoLoadBrief(list, done, requestSeq){
       '<div style="display:flex;gap:7px;align-items:flex-start;background:#FEF2F2;border:1px solid #FECACA;border-radius:9px;padding:8px 10px;margin-bottom:8px">' +
       '<span style="flex:none;font-size:.78rem">⚠️</span><div style="min-width:0">' +
       '<div style="font-size:.76rem;color:#B91C1C;font-weight:800;line-height:1.5">리뷰비 이체가 처리되지 않았어요</div>' +
-      '<div style="font-size:.7rem;color:#374151;margin-top:2px">등록하신 계좌 정보(은행 · 계좌번호 · 예금주)를 확인해 주세요. 수정하시면 다음 이체 때 다시 시도됩니다.</div>' +
+      '<div style="font-size:.7rem;color:#374151;margin-top:2px">등록하신 계좌 정보(은행 · 계좌번호 · 예금주)를 확인해 주세요. 수정하시면 다음 이체 때 수정하신 계좌로 다시 시도됩니다.</div>' +
       '<button onclick="_partInfoGoAccount()" style="margin-top:6px;border:1.5px solid #FECACA;background:#fff;color:#B91C1C;font-size:.72rem;font-weight:800;border-radius:9px;padding:6px 11px;cursor:pointer">내 계좌 정보 수정하기</button>' +
       '</div></div>');
     if (brief.productLines) rows.push(_partInfoRow('상품', escHtml(brief.productLines).replace(/\n/g,'<br>')));

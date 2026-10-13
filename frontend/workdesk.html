@@ -2260,6 +2260,7 @@
 .pmmmtag{margin-left:6px;font-size:10px;padding:1px 5px;border-radius:999px;background:#FDEFC7;color:#8A5A00}
 .pmmmtag.bad{background:#FDE7E7;color:#B42318}
 .pmmmchip{display:inline-block;margin-left:4px;font-size:10px;padding:1px 5px;border-radius:999px;background:#FDEFC7;color:#8A5A00}
+.pmmmchip.bad{background:#FAE9E7;color:#B3382E}
 /* ── 작업 그룹 머리줄 — 같은 작업의 반복 값을 한 줄로 올린다(줄마다 되풀이 금지) ── */
 .pmtable tr.pmhide{display:none}
 .pmtable tr.pmgrp>td{background:#F3F6FB;border-top:2px solid #D9E1EC;padding:6px 9px!important}
@@ -12066,6 +12067,15 @@ function _pmAcctMismatchHtml(mm){
   if(!mm) return '';
   const f = mm.form || {}, r = mm.registered || null;
   const acct = a => `${esc(a.bankName||'')} …${esc(a.accountTail||'')}`.trim();
+  /* 결정 231: 서버가 `using:'registered'` 를 주면 **리뷰어가 내정보에서 고친 계좌**로 보낸다
+     (양식 계좌로 이미 실패했거나 주문 뒤 내정보 계좌가 바뀌었고, 예금주가 같을 때). 판정은 서버 — 화면은 말만 한다. */
+  if(mm.using==='registered' && r){
+    const why = mm.reason==='form_failed' ? '구매양식 계좌로는 이미 이체가 실패했습니다' : '주문 뒤 내정보 계좌가 바뀌었습니다';
+    return `<div class="pmmmbox"><div class="pmmmhead">✅ 리뷰어가 내정보에서 고친 계좌로 보냅니다 — ${why}</div>`
+      + `<div class="pmmmline">보낼 곳(등록 계좌${r.isSub&&r.name?` · ${esc(r.name)} 명의`:''}) — <b>${esc(r.accountHolder||'-')}</b> · ${acct(r)}</div>`
+      + `<div class="pmmmline">구매양식 계좌 — <b>${esc(f.accountHolder||'-')}</b> · ${acct(f)}<span class="pmmmtag">계좌번호가 다릅니다</span></div>`
+      + `<div class="pmmmfoot">체크박스를 풀면 해당 건 입금은 <b>보류</b>됩니다.</div></div>`;
+  }
   const head = r
     ? `⚠ 작업보드(구매양식)에 적힌 계좌로 보냅니다 — <b>등록된 계좌와 다릅니다</b>`
     : `⚠ 작업보드(구매양식)에 적힌 계좌로 보냅니다 — 이 리뷰어는 <b>등록된 계좌가 없습니다</b>`;
@@ -12262,6 +12272,13 @@ async function _pmLoad(force){
     return;
   }
   STATE.pmItems = t.items||[]; STATE.pmSum = t.summary||{}; STATE.pmBatches = (b&&b.ok?b.items:[])||[];
+  /* ★ 결정 231: **이미 실패한 계좌 그대로**인 줄은 처음에 체크를 풀어 둔다 — 같은 계좌로 최대 10번까지 실패가
+       되풀이됐다. 사람이 다시 체크한 줄(pmRetryOk)은 다음 조회에서도 존중한다. 판정은 서버 경고(failed_account) 그대로. */
+  STATE.pmExcluded = STATE.pmExcluded || {};
+  const _retryOk = STATE.pmRetryOk || (STATE.pmRetryOk = new Set());
+  for(const it of STATE.pmItems){
+    if((it.warnings||[]).includes('failed_account') && !_retryOk.has(_pmKey(it))) STATE.pmExcluded[_pmKey(it)] = true;
+  }
   STATE.pmFinEx = t.finishedExcluded||null; STATE.pmFinUnknown = !!t.finishedUnavailable;
   // 과거 버전에서 저장된 입금 열 정보가 비어 실패한 회차는 화면을 열 때 한 번만 자동 보완한다.
   // 새 결과 파일은 result-auto-apply(안에서 같은 반영 계산) 경로에서 즉시 기록하므로, 이 경로는 기록 실패 이력에만 해당한다.
@@ -12480,17 +12497,18 @@ function _pmWorkFlags(items){
   const m=new Map();
   for(const it of items||[]){
     const k=_pmWorkKey(it); let f=m.get(k);
-    if(!f) m.set(k, f={hold:0, outlier:0, acct:0});
+    if(!f) m.set(k, f={hold:0, outlier:0, acct:0, failed:0});
     if(!it.payable) f.hold++;
     if((it.warnings||[]).includes('price_outlier')) f.outlier++;
     if(it.accountMismatch) f.acct++;
+    if(it.payable && (it.warnings||[]).includes('failed_account')) f.failed++;
   }
   return m;
 }
-const _pmWorkHasFlag = f => !!f && (f.hold+f.outlier+f.acct)>0;
+const _pmWorkHasFlag = f => !!f && (f.hold+f.outlier+f.acct+(f.failed||0))>0;
 function _pmWorkFlagsHtml(f){
   if(!_pmWorkHasFlag(f)) return '<span class="pmwflags"><span class="pmwflag ok">정상</span></span>';
-  return `<span class="pmwflags">${f.hold?`<span class="pmwflag bad" title="파일에서 빠지는 보류 줄">보류 ${f.hold}</span>`:''}${f.outlier?`<span class="pmwflag warn" title="단독 이상금액 — 같은 작업 대부분과 크게 다른 금액이 있습니다(자동으로 막지는 않음)">금액 확인 ${f.outlier}</span>`:''}${f.acct?`<span class="pmwflag warn" title="구매양식 계좌와 등록 계좌가 다른 줄">계좌 확인 ${f.acct}</span>`:''}</span>`;
+  return `<span class="pmwflags">${f.hold?`<span class="pmwflag bad" title="파일에서 빠지는 보류 줄">보류 ${f.hold}</span>`:''}${f.outlier?`<span class="pmwflag warn" title="단독 이상금액 — 같은 작업 대부분과 크게 다른 금액이 있습니다(자동으로 막지는 않음)">금액 확인 ${f.outlier}</span>`:''}${f.acct?`<span class="pmwflag warn" title="구매양식 계좌와 등록 계좌가 다른 줄">계좌 확인 ${f.acct}</span>`:''}${f.failed?`<span class="pmwflag bad" title="이미 이체가 실패한 계좌 그대로인 줄 — 처음에는 체크가 풀려 있습니다">실패 계좌 ${f.failed}</span>`:''}</span>`;
 }
 /* ★ 보이는 작업 목록 = 문제 있는 작업이 위(사용자 확정 2026-10-08), 그 안에서는 종전 가나다 순.
    드래그 범위도 이 목록 순서를 쓴다(보이는 순서와 끌어 고르는 순서가 같아야 한다). */
@@ -12735,7 +12753,7 @@ function _pmTargetTable(items){
     if(foldSeen.has(g.key)) continue;
     foldSeen.add(g.key);
     const problem = g.items.some(it=>!it.payable || it.accountMismatch
-      || (it.warnings||[]).some(w=>w==='price_outlier' || w==='no_memo' || w==='account_form_override'));
+      || (it.warnings||[]).some(w=>w==='price_outlier' || w==='no_memo' || w==='account_form_override' || w==='failed_account'));
     if(!problem) fold[g.key]=true;
   }
   // 그 작업의 모든 줄이 같은 값일 때만 그 값을 돌려준다(다르면 null = 줄마다 그린다)
@@ -12797,7 +12815,8 @@ function _pmTargetTable(items){
       <td class="pmdim"></td>
       <td>${bankSig!==null?'':bankBadge(it)}</td>
       <td>${esc(it.reviewerName)}${it.isSub?`<span class="pmauto"${_pmAcctSrcTip(it)}>타계정</span>`:''}${
-        mm?`<span class="pmmmchip" title="아래 줄에서 보낼 계좌를 확인하세요">계좌 확인</span>`:''}</td>
+        mm?`<span class="pmmmchip" title="아래 줄에서 보낼 계좌를 확인하세요">계좌 확인</span>`:''}${
+        it.failedAccountCount?`<span class="pmmmchip bad" title="이 줄은 이 계좌로 이미 ${Number(it.failedAccountCount)}번 이체가 실패했습니다 — 처음에는 체크가 풀려 있습니다. 고객이 계좌를 고치면 고친 계좌로 나가고, 은행 쪽 일시 오류였다면 체크해서 다시 담으세요.">이전 실패 계좌 ${Number(it.failedAccountCount)}회</span>`:''}</td>
       <td>${esc(it.startDate)}</td>
       <td class="mono">${esc(it.bankOfficial||it.bankName||'-')} ${esc(it.bankAccount||'')}</td>
       <td>${esc(it.accountHolder||'-')}</td>
@@ -12906,6 +12925,11 @@ function _pmToggle(idx, on){
   const it=(STATE.pmItems||[])[idx]; if(!it) return;
   const key=_pmKey(it);
   if(on) delete STATE.pmExcluded[key]; else STATE.pmExcluded[key]=true;
+  // 이전 실패 계좌 줄을 사람이 직접 다시 담았다 — 다음 조회에서 기본 해제로 되돌리지 않는다(결정 231)
+  if((it.warnings||[]).includes('failed_account')){
+    const ok = STATE.pmRetryOk || (STATE.pmRetryOk = new Set());
+    if(on) ok.add(key); else ok.delete(key);
+  }
   _pmRender();
 }
 
