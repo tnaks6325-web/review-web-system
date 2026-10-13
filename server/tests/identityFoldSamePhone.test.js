@@ -45,6 +45,10 @@ const read = (p) => fs.readFileSync(path.resolve(__dirname, '..', p), 'utf8');
     assert.deepStrictEqual(r({ name: '이가족', phone: '01011112222' }, { coded: true }), ['coded_identity']);
     assert.deepStrictEqual(r({ name: '이가족', phone: '01011112222' }, {}, { reviewer_no: 7 }), ['coded_identity']);
     assert.deepStrictEqual(r({ name: '이가족', phone: '01011112222', bank_account: '999' }), ['account_diff'], '옛 snake_case 칸');
+    assert.deepStrictEqual(r({ name: '이가족', phone: '01011112222', bankName: '신한은행' }), ['account_diff'], '계좌번호 없이 은행만 다름');
+    assert.deepStrictEqual(r({ name: '이가족', phone: '01011112222', accountHolder: '이가족' }), ['account_diff'], '예금주만 다름');
+    assert.strictEqual(one({ name: '이가족', phone: '01011112222', bankName: '국민', accountHolder: '김본인' }).status, 'ready');
+    assert.deepStrictEqual(r({ name: '이가족', phone: '01011112222', residentNo: '850101-2000000' }), ['jumin_diff'], '옛 키 주민번호');
     assert.deepStrictEqual(r({ name: '이가족', phone: '01011112222', shopping_id: 'other' }), ['shopping_diff'], '옛 snake_case 칸');
     assert.deepStrictEqual(r({ name: '이가족', phone: '01011112222' }, { mergeKeptSigs: new Set(['이가족|11112222']) }), ['merge_target']);
     const two = fold.classifyOwner({ ...owner, sub_accounts: [{ name: '이가족', phone: '01011112222' }, { name: '이가족', phone: '010-1111-2222' }] }, {});
@@ -61,6 +65,11 @@ const read = (p) => fs.readFileSync(path.resolve(__dirname, '..', p), 'utf8');
       assert.strictEqual(fold._test.legacyKey(n, p, i), roi._test.legacyIdentityKey(n, p, i));
     }
     assert.strictEqual(fold._test.SELF_HASH, roi._test.stableHash('self'));
+    // 되돌릴 때 옛 순번 이름표 다시 계산 — 옛 순번이 지금 목록보다 길어도(그 사이 칸이 지워짐) 찾는다
+    const list = [{ name: '가', phone: '010-1000-0001' }, { name: '나', phone: '010-1000-0002' }];
+    const H = roi._test.stableHash;
+    assert.strictEqual(fold._test.remapLegacyHash(list, H(roi._test.legacyIdentityKey('나', '010-1000-0002', 5))), H(roi._test.legacyIdentityKey('나', '010-1000-0002', 1)));
+    assert.strictEqual(fold._test.remapLegacyHash(list, H(roi._test.legacyIdentityKey('다', '010-1000-0003', 0))), null);
   });
   await test('스위치 — 모르는 값은 아무것도 하지 않는다', async () => {
     assert.deepStrictEqual(fold.parseMode(''), { mode: 'off' });
@@ -298,6 +307,31 @@ const read = (p) => fs.readFileSync(path.resolve(__dirname, '..', p), 'utf8');
       assert.strictEqual(String(after[3].residentNo).replace(/\D/g, ''), '9001011234567', '옛 키 자리에 본계정 주민번호로');
       const sw = await fold.runFromSwitch({ db, env: { SAME_PHONE_FOLD_MODE: `undo_all:${ap.applyRunId}` } });
       assert.strictEqual(sw.skipped, 'already_undone');
+    });
+    await test('타계정 카드가 아직 없으면 지우지 않고(no_sub_card) 다음에 다시 시도한다', async () => {
+      const E = 'f5f5f5f5-f5f5-4f5f-8f5f-f5f5f5f5f5f5';
+      try {
+        await db.query(`INSERT INTO reviewers (id, name, phone, sub_accounts) VALUES ($1, '유본인', '010-7777-8888', $2::jsonb)`,
+          [E, JSON.stringify([{ name: '유가족', phone: '010-7777-8888' }])]);
+        await cards.reconcileCards({ db, dryRun: false, by: 'test' });
+        await db.query(`DELETE FROM reviewer_identity_cards WHERE owner_reviewer_id = $1 AND kind = 'sub'`, [E]);
+        const p3 = await fold.preview({ db });
+        const a3 = await fold.apply({ previewRunId: p3.runId, db, retryDelayMs: 10 });
+        assert.strictEqual(a3.results.find((x) => x.ownerId === E).result, 'no_sub_card');
+        assert.strictEqual((await subsNow(E)).length, 1);
+        // 남은 칸이 있는 실행은 끝난 것으로 보지 않는다 — 스위치가 이어서 시도
+        const sw = await fold.runFromSwitch({ db, env: { SAME_PHONE_FOLD_MODE: `apply:${p3.runId}` } });
+        assert.notStrictEqual(sw && sw.skipped, 'already_applied');
+      } finally {
+        await db.query(`DELETE FROM reviewer_identity_decisions WHERE owner_reviewer_id = $1`, [E]);
+        await db.query(`DELETE FROM reviewers WHERE id = $1`, [E]);
+      }
+    });
+    await test('실패가 남은 전체 되돌리기는 끝난 것으로 보지 않는다', async () => {
+      const { rows: [u] } = await db.query(`INSERT INTO reviewer_identity_fold_runs (mode, finished_at, summary) VALUES ('undo_all', NOW(), '{"applyRunId":"987654","failed":1}') RETURNING id`);
+      const sw = await fold.runFromSwitch({ db, env: { SAME_PHONE_FOLD_MODE: 'undo_all:987654' } });
+      assert.notStrictEqual(sw && sw.skipped, 'already_undone');
+      await db.query(`DELETE FROM reviewer_identity_fold_runs WHERE id = $1`, [u.id]);
     });
     await test('되돌릴 때 같은 이름·번호의 살아 있는 카드가 이미 있으면 기록을 그 카드로 돌린다(Codex P2)', async () => {
       await db.query(`UPDATE reviewers SET sub_accounts = $2::jsonb WHERE id = $1`, [D, JSON.stringify([{ name: '오가족', phone: '010-7575-6666' }])]);

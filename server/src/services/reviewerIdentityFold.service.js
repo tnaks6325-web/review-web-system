@@ -32,6 +32,7 @@ const stableHash = (v) => crypto.createHash('sha256').update(String(v == null ? 
 const legacyP8 = (v) => { const d = digits(v); return d.length >= 8 ? d.slice(-8) : d; };   // reviewerOrderIdentity.phone8 과 같음(짧은 번호는 그대로)
 const legacyKey = (name, phone, index) => `sub:${stableHash(`${nk(name)}|${legacyP8(phone)}|${Number(index)}`).slice(0, 24)}`;
 const SELF_HASH = stableHash('self');
+const MAX_SUB_SLOTS = 50;   // reviewer.service saveSubAccounts 상한과 같다
 // 타계정 칸의 주민번호는 화면·시기에 따라 키 이름이 다르다(Codex P1) — 판정·기록 모두 이 키들을 함께 본다.
 const JUMIN_KEYS = ['jumin', 'residentNo', 'resident_num', 'residentNum'];
 const juminOf = (s) => { for (const k of JUMIN_KEYS) if (s && digits(s[k])) return digits(s[k]); return ''; };
@@ -67,8 +68,10 @@ function classifyOwner(owner, ctx = {}) {
     const reasons = [];
     const sameName = nk(s.name) !== '' && nk(s.name) === nk(owner.name);
     if (!nk(s.name)) reasons.push('no_name');
-    if (!blank(bankAccount) && (digits(bankAccount) !== digits(owner.bank_account)
-        || bankKey(bankName) !== bankKey(owner.bank_name) || nk(holder) !== nk(owner.account_holder))) reasons.push('account_diff');
+    // 계좌 세 칸은 따로 저장될 수 있다 — 하나라도 값이 있고 본계정과 다르면 예외(Codex P2: 계좌번호만 비고 은행·예금주가 다른 칸).
+    if ((!blank(bankAccount) && digits(bankAccount) !== digits(owner.bank_account))
+        || (!blank(bankName) && bankKey(bankName) !== bankKey(owner.bank_name))
+        || (!blank(holder) && nk(holder) !== nk(owner.account_holder))) reasons.push('account_diff');
     if (juminOf(s) && JUMIN_KEYS.some((k) => digits(s[k]) && digits(s[k]) !== digits(owner.resident_num))) reasons.push('jumin_diff');
     if (!blank(shoppingId) && String(shoppingId).trim() !== String(owner.shopping_id || '').trim()) reasons.push('shopping_diff');
     // 담당자 합치기(179)에서 다른 카드가 이 칸 카드로 합쳐 들어와 있으면 건드리지 않는다(합친 묶음이 갈 곳을 잃는다).
@@ -161,6 +164,9 @@ async function _foldOne(client, { ownerId, sig, by, runId }) {
   const subCard = verdict.type === 'name_diff'
     ? ownerCards.find((c) => c.kind === 'sub' && c.status === 'active' && c.name_key === nk(slot.name) && c.phone8 === p8(slot.phone)) || null
     : null;
+  // 카드가 아직 안 따라왔으면(거울 지연·실패) 지우지 않는다 — 그 카드로 묶인 기록을 못 옮기고 되돌릴 번호도 잃는다(Codex P1).
+  //   10분 거울이 맞춘 뒤 같은 미리보기로 다시 돌리면 정리된다.
+  if (verdict.type === 'name_diff' && !subCard) return { result: 'no_sub_card' };
 
   // 주민번호는 기록에 담지 않는다 — 대상 칸은 비었거나 본계정과 같으므로 "어느 키에 있었는지"만 남긴다.
   const juminKeys = JUMIN_KEYS.filter((k) => digits(slot[k]));
@@ -292,7 +298,7 @@ async function apply({ previewRunId, db = pool, by = 'switch', lockTimeoutMs = 2
   for (const it of todo) results.push({ ownerId: it.ownerId, index: it.index, result: 'busy' });
   const count = (k) => results.filter((r) => r.result === k).length;
   const summary = { previewRunId: String(id), folded: count('folded'), alreadyDone: count('already_done'), stale: count('stale'),
-    wait: count('wait'), busy: count('busy'), failed: count('failed'), noSelfCard: count('no_self_card'),
+    wait: count('wait'), busy: count('busy'), failed: count('failed'), noSelfCard: count('no_self_card'), noSubCard: count('no_sub_card'),
     ordersMoved: results.reduce((a, r) => a + (r.moved ? r.moved.orders : 0), 0),
     applicationsMoved: results.reduce((a, r) => a + (r.moved ? r.moved.applications : 0), 0),
     hashesShifted: results.reduce((a, r) => a + (r.moved ? r.moved.shifted : 0), 0) };
@@ -301,6 +307,22 @@ async function apply({ previewRunId, db = pool, by = 'switch', lockTimeoutMs = 2
       decisionId: r.decisionId || null, code: r.code || null, reasons: r.reasons || null })))]);
   logger.info(`[identity-fold] apply run=${applyRunId} ${JSON.stringify(summary)}`);
   return { ok: true, applyRunId, summary, results };
+}
+
+/**
+ * 옛 칸 순번 이름표(해시)가 가리키는 칸을 목록에서 찾아 **그 칸의 지금 순번** 이름표로 바꾼다. 못 찾으면 null.
+ * ★ 옛 순번은 지금 목록 길이보다 클 수 있다(그 사이 칸이 지워짐 · Codex P1) — 타계정 최대 50칸 범위를 모두 본다.
+ */
+function remapLegacyHash(list, hash) {
+  if (!hash) return null;
+  for (let k = 0; k < list.length; k++) {
+    const x = list[k];
+    if (!x || typeof x !== 'object') continue;
+    for (let c = 0; c <= Math.max(list.length, MAX_SUB_SLOTS); c++) {
+      if (stableHash(legacyKey(x.name, x.phone, c)) === hash) return stableHash(legacyKey(x.name, x.phone, k));
+    }
+  }
+  return null;
 }
 
 /**
@@ -351,16 +373,7 @@ async function undoFoldInTx(client, d) {
   // ★ 옛 칸 순번 이름표는 기록된 옛 값을 그대로 되돌리지 않고 **되돌린 뒤의 목록 순번으로 다시 계산**한다(Codex P1) —
   //   정리 뒤 리뷰어가 칸을 더하거나 지웠으면 같은 순번이 다른 명의를 가리킨다. 이름표 → (이름·번호) 칸을 찾아 지금 순번으로.
   const finalList = asSubs(out.subs);
-  const legacyNow = (hash) => {
-    for (let k = 0; k < finalList.length; k++) {
-      const x = finalList[k];
-      if (!x || typeof x !== 'object') continue;
-      for (let c = 0; c <= finalList.length; c++) {
-        if (stableHash(legacyKey(x.name, x.phone, c)) === hash) return stableHash(legacyKey(x.name, x.phone, k));
-      }
-    }
-    return null;
-  };
+  const legacyNow = (hash) => remapLegacyHash(finalList, hash);
   const subCardHash = snap.subCardId ? stableHash(`card:${snap.subCardId}`) : null;
   const restoreHash = (h) => {
     if (h && subCardHash && h === subCardHash) return restoredCardId ? stableHash(`card:${restoredCardId}`) : SELF_HASH;
@@ -454,12 +467,17 @@ async function runFromSwitch({ db = pool, env = process.env } = {}) {
     }
     if (sw.mode === 'apply') {
       const { rows } = await db.query(
-        `SELECT id FROM reviewer_identity_fold_runs WHERE mode = 'apply' AND summary->>'previewRunId' = $1 AND finished_at IS NOT NULL LIMIT 1`, [sw.runId]);
+        // 남은 칸(잠금 대기·실패·카드 지연)이 없을 때만 끝난 것으로 본다 — 남았으면 재기동 때 이어서 시도한다(이미 한 칸은 already_done).
+        `SELECT id FROM reviewer_identity_fold_runs WHERE mode = 'apply' AND summary->>'previewRunId' = $1 AND finished_at IS NOT NULL
+            AND COALESCE((summary->>'busy')::int, 0) = 0 AND COALESCE((summary->>'failed')::int, 0) = 0
+            AND COALESCE((summary->>'noSubCard')::int, 0) = 0 LIMIT 1`, [sw.runId]);
       if (rows.length) return { ok: true, skipped: 'already_applied', runId: String(rows[0].id) };
       return apply({ previewRunId: sw.runId, db });
     }
     const { rows } = await db.query(
-      `SELECT id FROM reviewer_identity_fold_runs WHERE mode = 'undo_all' AND summary->>'applyRunId' = $1 AND finished_at IS NOT NULL LIMIT 1`, [sw.runId]);
+      // 실패가 남은 되돌리기는 끝난 것으로 보지 않는다 — 재기동 때 남은 판단을 다시 되돌린다(Codex P1).
+      `SELECT id FROM reviewer_identity_fold_runs WHERE mode = 'undo_all' AND summary->>'applyRunId' = $1 AND finished_at IS NOT NULL
+          AND COALESCE((summary->>'failed')::int, 0) = 0 LIMIT 1`, [sw.runId]);
     if (rows.length) return { ok: true, skipped: 'already_undone', runId: String(rows[0].id) };
     return undoRun({ applyRunId: sw.runId, db });
   });
@@ -489,5 +507,5 @@ async function dismissNotice(ownerId, { db = pool } = {}) {
 
 module.exports = {
   IdentityFoldError, classifyOwner, preview, apply, undoFoldInTx, undoRun, parseMode, runFromSwitch,
-  pendingNotice, dismissNotice, _test: { legacyKey, sigHash, groupKeyOf, SELF_HASH },
+  pendingNotice, dismissNotice, _test: { legacyKey, sigHash, groupKeyOf, SELF_HASH, remapLegacyHash },
 };

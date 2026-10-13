@@ -141,6 +141,9 @@ const REQUIRED_SCHEMA = [
   ['recruit_campaigns', 'workboard_id'],
   ['order_submissions', 'workboard_id'],
   ['campaign_participants', 'workboard_id'],
+  // 185 — 같은 번호 타계정 정리(결정 226). 없으면 담당자 「판단 내역」이 42703 으로 안 열리고 리뷰어 저장 경로가 정리 칸을 못 거른다.
+  ['reviewer_identity_decisions', 'snapshot'],
+  ['reviewer_identity_decisions', 'notice_dismissed_at'],
 ];
 
 // V2 상태 표시는 열 이름 추측을 하지 않고, 생성 시점의 위치를 이 표에 고정한다.
