@@ -409,6 +409,8 @@ router.post('/identity-precheck', imageApiLimiter, bindProfileOwnerWhenEnabled, 
 
     // 카드 최대 5장(MAX_ORDER_CARDS)과 동일 상한 — Gemini 호출 폭 제한
     const orders = Array.isArray(req.body?.orders) ? req.body.orders.slice(0, 5) : [];
+    // 결정 226 — 본계정 추가 배송지도 등록 주소로 대조(제출 관문과 같은 기준). 조회 실패는 빈 목록.
+    reviewer.deliveryAddresses = await require('../services/reviewerIdentityFold.service').loadDeliveryAddresses(pool, reviewer.id);
     const results = [];
     for (let i = 0; i < orders.length; i++) {
       const r = await resolveOrderIdentity(reviewer, orders[i] || {}, { mode: 'precheck' });

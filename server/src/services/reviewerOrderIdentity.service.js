@@ -209,6 +209,9 @@ async function loadOwnerProfile(ownerReviewerId, db = pool) {
       accountHolder: sub.accountHolder || sub.account_holder || '',
     });
   });
+  // 결정 226 — 같은 번호 타계정을 합치며 남긴 본계정 추가 배송지. 본계정 명의에만 붙는다(타계정 참여에는 섞지 않는다 · 181 ④).
+  //   표가 없거나 조회가 실패하면 빈 목록(종전 동작).
+  identities[0].deliveryAddresses = await require('./reviewerIdentityFold.service').loadDeliveryAddresses(db, owner.id);
   return { owner, identities };
 }
 
@@ -695,6 +698,24 @@ async function evaluateSelectedIdentity(extracted, selected, allIdentities, opti
       : { verdict: 'uncertain', reason: '받는 사람 이름만 다름(내 번호인지 확인 필요)' };
     rescoreIdentity(selectedScore);
   }
+  // 결정 226 — 본계정 추가 배송지(합친 타계정 주소). 본인 명의 참여이고 받는 사람이 본인으로 인정될 때(본인 이름 또는 본인 번호)
+  //   등록 주소와 달라도 추가 배송지와 같으면 등록 주소로 본다 — "다른 배송지 확인" 단계를 거치지 않는다.
+  const extraAddrs = selected && selected.type === 'self' && Array.isArray(selected.deliveryAddresses) ? selected.deliveryAddresses : [];
+  if (extraAddrs.length && selectedScore.parts.address.verdict !== 'match'
+      && (selectedScore.parts.name.verdict === 'match' || ownerPhone)) {
+    const raw = selectedScore.fields.address;
+    for (const extra of extraAddrs) {
+      if (!raw || !extra || !extra.address) continue;
+      const v = MASK_RE.test(raw) ? maskedAddressVerdict(raw, extra.address)
+        : await addressSame(raw, extra.address, { name: selected.name, phone: selected.phone, useGemini: !!options.useGemini });
+      if (v && v.verdict === 'match') {
+        selectedScore.parts.address = { verdict: 'match', score: v.score || 1, reason: '등록된 추가 배송지와 일치' };
+        rescoreIdentity(selectedScore);
+        reasonCodes.push('registered_delivery_address');
+        break;
+      }
+    }
+  }
   if (selectedScore.conflicts.length) {
     const addressConflict = selectedScore.parts.address.verdict === 'mismatch';
     // 배송지는 명의 자체가 아니다. 선택한 참여 명의의 이름이 맞으면 다른 동·호수도
@@ -830,6 +851,10 @@ async function getParticipationIdentityContext(body, reviewer) {
   return {
     ok: true, enabled: isEnabled(), multiAccountMode: !!context.application.multi_account_mode,
     selectedIdentity: publicIdentity(context.selected, { includeBank: true }),
+    // 본계정으로 참여할 때만 — 「내 정보에서 선택」·주소 고르기에 본계정 주소와 함께 나온다.
+    deliveryAddresses: context.selected.type === 'self'
+      ? (context.selected.deliveryAddresses || []).map((a) => ({ id: a.id, recipient: a.recipient, address: a.address }))
+      : [],
     savedIdentities: savedIdentities.map((identity) => publicIdentity(identity, { includeBank: true })),
     orderInfoSuggestions,
   };

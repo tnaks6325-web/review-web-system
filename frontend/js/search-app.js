@@ -234,6 +234,14 @@ function _scopedSavedOrderIdentities() {
   if (selected?.type === "sub") {
     identities = identities.filter((item) => item.identityKey === selected.identityKey);
     if (!identities.length) identities = [selected];
+  } else if (selected) {
+    // 결정 226 — 본계정 추가 배송지(같은 번호 타계정을 합치며 남긴 받는 사람·주소). 본계정 참여에만 붙는다.
+    //   연락처는 본계정 번호(그 타계정 번호가 본계정 번호였다). 아이디·계좌는 없다(그 고르기에는 안 나온다).
+    (Array.isArray(_activeIdentityContext?.deliveryAddresses) ? _activeIdentityContext.deliveryAddresses : []).forEach((item) => {
+      if (!item || !String(item.address || "").trim()) return;
+      identities.push({ identityKey: "delivery:" + item.id, type: "delivery", name: item.recipient || selected.name || "",
+        phone: selected.phone || "", address: item.address });
+    });
   }
   return identities;
 }
@@ -275,7 +283,7 @@ function _renderSavedOrderInfoPickers() {
         option.dataset.field = field;
         option.dataset.savedIdentityKey = item.identityKey;
         option.textContent = (item.name || "저장 정보") + " · "
-          + (item.type === "sub" ? "타계정" : "본계정") + " — " + item[spec.key];
+          + (item.type === "sub" ? "타계정" : item.type === "delivery" ? "추가 배송지" : "본계정") + " — " + item[spec.key];
         option.addEventListener("click", () => window._applySavedOrderInfo(option));
         menu.appendChild(option);
       });
@@ -326,6 +334,9 @@ function _addressChoices() {
     byKey.set(key, item); list.push(item);
   };
   add(sel.address, true, 0);
+  // 결정 226 — 본계정 추가 배송지도 이 명의의 저장 주소다(본계정 참여에만).
+  if (sel.type !== "sub") (Array.isArray(_activeIdentityContext?.deliveryAddresses) ? _activeIdentityContext.deliveryAddresses : [])
+    .forEach((item) => add(item && item.address, true, 0));
   (_orderInfoSuggestions || []).forEach((s) => add(s && s.address, false, Number(s && s.useCount) || 1));
   list.sort((a, b) => (b.saved - a.saved) || (b.uses - a.uses));
   return list.slice(0, 3);

@@ -147,6 +147,7 @@ const read = (p) => fs.readFileSync(path.resolve(__dirname, '..', p), 'utf8');
   const D = 'f4f4f4f4-f4f4-4f4f-8f4f-f4f4f4f4f4f4';
   const ids = [A, B, C, D];
   const cleanup = async () => {
+    await db.query(`DELETE FROM reviewer_delivery_addresses WHERE owner_reviewer_id = ANY($1::uuid[])`, [ids]).catch(() => {});
     await db.query(`DELETE FROM reviewer_identity_decisions WHERE owner_reviewer_id = ANY($1::uuid[])`, [ids]);
     await db.query(`DELETE FROM campaign_applications WHERE owner_reviewer_id = ANY($1::uuid[])`, [ids]);
     await db.query(`DELETE FROM order_submissions WHERE owner_reviewer_id = ANY($1::uuid[])`, [ids]);
@@ -234,6 +235,11 @@ const read = (p) => fs.readFileSync(path.resolve(__dirname, '..', p), 'utf8');
       const snap = (await db.query(`SELECT snapshot FROM reviewer_identity_decisions WHERE owner_reviewer_id = $1 AND kind = 'fold_self' ORDER BY id LIMIT 1`, [A])).rows[0].snapshot;
       assert.strictEqual(snap.sub.address, '부모님 댁'); assert.strictEqual(snap.index, 0);
       assert.strictEqual(snap.sub.jumin, '', '되돌리기 기록에 주민번호를 담지 않는다'); assert.strictEqual(snap.juminSameAsOwner, true);
+      // 결정 226 (나) — 받는 주소는 본계정 추가 배송지로 남는다(구매양식 고르기·명의 확인)
+      const extra = (await db.query(`SELECT recipient, address, source FROM reviewer_delivery_addresses WHERE owner_reviewer_id = $1`, [A])).rows;
+      assert.deepStrictEqual(extra, [{ recipient: '이가족', address: '부모님 댁', source: 'fold' }]);
+      const prof = await roi.loadOwnerProfile(A, db);
+      assert.deepStrictEqual(prof.identities[0].deliveryAddresses.map((x) => x.address), ['부모님 댁']);
     });
     await test('같은 미리보기로 다시 돌려도 결과가 같다 · 스위치는 끝난 실행을 다시 하지 않는다', async () => {
       const again = await fold.apply({ previewRunId: pv.runId, db, retryDelayMs: 10 });
@@ -287,6 +293,8 @@ const read = (p) => fs.readFileSync(path.resolve(__dirname, '..', p), 'utf8');
       // 원래 바로 뒤 칸(박다른) 앞자리로 — 새로 더한 칸이 앞에 있어도 이웃 옆에 돌아간다
       assert.deepStrictEqual(subs.map((s) => s.name), ['신규칸', '이가족', '박다른', '최동명']);
       assert.strictEqual(subs[1].address, '부모님 댁');
+      assert.strictEqual((await db.query(`SELECT count(*)::int n FROM reviewer_delivery_addresses WHERE owner_reviewer_id = $1`, [A])).rows[0].n, 0,
+        '칸이 돌아오면 추가 배송지는 지운다');
       assert.strictEqual(String(subs[1].jumin).replace(/\D/g, ''), '9001011234567');
       assert.strictEqual((await cardOf(A, '이가족')).status, 'active');
       const r1 = await orderRow(oCard);

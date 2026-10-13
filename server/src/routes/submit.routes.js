@@ -1019,6 +1019,8 @@ router.post('/order', async (req, res, next) => {
 
           // ★ mode:'submit' = Gemini 미사용(핫패스 지연/비결정성 차단 — Gemini는 precheck 전용),
           //   uncertain은 통과·mismatch만 차단. identityConfirmed면 주소/계좌 상세대조 생략(분류만).
+          // 결정 226 — 본계정 추가 배송지(합친 타계정 주소)도 등록 주소로 대조한다. 조회 실패는 빈 목록(종전 동작).
+          _rv.deliveryAddresses = await require('../services/reviewerIdentityFold.service').loadDeliveryAddresses(pool, _rv.id);
           const _verdict = await resolveOrderIdentity(_rv, {
             recipient, phone, address, bank, account, depositor,
             extractedRecipient: b.extractedRecipient || '',
