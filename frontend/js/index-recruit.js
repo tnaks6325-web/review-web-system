@@ -4941,6 +4941,28 @@ function _campOptionTable(options, rows, now, today, kstDay, directByOpt) {
   </div>`;
 }
 
+/** 🛒 바로 구매 묶음(결정 241): 공고 참여 없이 구매양식 링크·담당자 수동제출로 들어온 구매 — 위 목록(공고 참여)에는 없다.
+ *  재료 = 서버 directSummary.rows(정원 엔진과 같은 셈 · 한 구매 = 한 줄). 공유 작업은 나눌 수 없다고 말하고, 실패는 확인 못 함. */
+function _campDirectTable(ds) {
+  if (!ds) return "";
+  const box = inner => `<div style="margin:2px 0 12px">
+    <div style="font-size:.74rem;font-weight:800;color:#9A3412;margin-bottom:5px">🛒 바로 구매 — 공고 참여 없이 구매양식으로 들어온 구매</div>${inner}</div>`;
+  const note = t => `<div style="font-size:.72rem;color:#6B7280;padding:6px 2px">${t}</div>`;
+  if (!ds.countable) return ds.shared ? box(note("한 작업표에 공고가 여러 개라 어느 공고의 바로 구매인지 나눌 수 없습니다.")) : "";
+  if (!Array.isArray(ds.rows)) return box(note("바로 구매 목록을 불러오지 못했습니다. 잠시 후 다시 열어 주세요."));
+  if (!ds.rows.length) return box(note("바로 구매가 없습니다."));
+  const escT = s => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const fmt = iso => iso ? new Date(iso).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+  const th = t => `<th style="text-align:${t.a || "left"};font-weight:800;color:#6B7280;padding:5px 8px;border-bottom:1px solid #E5E7EB;white-space:nowrap">${t.l}</th>`;
+  const td = (v, a) => `<td style="text-align:${a || "left"};padding:5px 8px;border-bottom:1px solid #F3F4F6;white-space:nowrap">${v}</td>`;
+  const src = { link: "구매양식 링크", manual: "담당자 수동제출" };
+  const body = ds.rows.map(r => `<tr>${td(fmt(r.submittedAt))}${td("<b>" + escT(r.name || "(이름 없음)") + "</b>" + (r.popularPurpose ? ' <span style="font-size:.62rem;font-weight:800;background:#FFEDD5;color:#C2410C;border-radius:6px;padding:1px 6px" title="이 구매로 얻은 참여권이 이후 인기상품 참여에 실제로 쓰였습니다">🔥 인기상품목적 참여건</span>' : ""))}${td(r.phone4 ? "***" + escT(r.phone4) : "")}${td(escT(r.product || "-"))}${td(r.rowSeq != null ? r.rowSeq + "행" : "-", "center")}${td(src[r.source] || escT(r.source), "center")}</tr>`).join("");
+  const more = ds.rows.length < (Number(ds.totalDirect) || 0) ? note(`최근 ${ds.rows.length}건만 보입니다(전체 ${ds.totalDirect}건).`) : "";
+  return box(`<div style="overflow-x:auto;max-height:320px;overflow-y:auto"><table style="width:100%;border-collapse:collapse;font-size:.72rem">
+      <thead><tr>${th({ l: "구매양식 제출" })}${th({ l: "이름" })}${th({ l: "연락처" })}${th({ l: "상품" })}${th({ l: "작업표", a: "center" })}${th({ l: "경로", a: "center" })}</tr></thead>
+      <tbody>${body}</tbody></table></div>${more}`);
+}
+
 /** 👥 소유자별 묶음표(063 3단계): 타계정 건이 있는 소유자만 노출(본계정 단독 참여자는 기존 목록으로 충분).
  *  묶음 키 = owner_phone8(서버 파생). 이름은 그 소유자의 본계정 행(phone8===owner_phone8)에서 취하고,
  *  없으면(타계정만 참여) 뒤4자리로 표기. 옵션표와 동일한 표 문법. */
@@ -5135,10 +5157,11 @@ async function _loadCampControl(campId) {
     const optTableHtml = _campOptionTable(j.options || [], items, now, today, kstDay, ds && ds.countable && ds.byOption ? ds.byOption : null);
     // 👥 타계정 묶음(063): 소유자별 건수 — "한 리뷰어가 실제 몇 건 진행 중인가"를 즉시 파악(사재기 관측)
     const ownerTableHtml = _campOwnerTable(items, now);
+    const directTableHtml = _campDirectTable(ds);
     // 📋 시트 대조 — "시트엔 100행인데 확정 99" / "하루 완결이라 시트 일정 미적용"을 여기서 확인
     const sheetHtml = _campSheetInfo(j.sheetInfo);
     if (!items.length) {
-      body.innerHTML = blogQueueHtml + sheetHtml + optTableHtml + `<div style="padding:30px;text-align:center;color:#9CA3AF">참여 이력이 없습니다.</div>`;
+      body.innerHTML = blogQueueHtml + sheetHtml + optTableHtml + directTableHtml + `<div style="padding:30px;text-align:center;color:#9CA3AF">공고 참여 이력이 없습니다.</div>`;
       return;
     }
     const chip = (bg, fg, tx) => `<span style="font-size:.66rem;font-weight:800;background:${bg};color:${fg};border-radius:6px;padding:2px 8px;white-space:nowrap">${tx}</span>`;
@@ -5154,7 +5177,7 @@ async function _loadCampControl(campId) {
     const autoNote = items.some(r => r.dismissed_by === "auto")
       ? `<div style="margin:2px 0 8px;padding:7px 10px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;font-size:.72rem;color:#4B5563">🚫 <b>미참여(자동)</b>·<b>취소 · 자동정리</b> = 구매시간이 만료됐거나 취소된 건 중 <b>연결된 구매 제출이 하나도 없어</b> 시스템이 정리한 건입니다. 나중에 구매 제출이 도착하면 자동으로 다시 목록에 올라옵니다. 실제 구매를 확인했다면 [✅ 구매확인]을 누르세요.</div>`
       : "";
-    body.innerHTML = blogQueueHtml + sheetHtml + autoNote + optTableHtml + ownerTableHtml + items.sort((a, b) => new Date(b.applied_at) - new Date(a.applied_at)).map(r => {
+    body.innerHTML = blogQueueHtml + sheetHtml + autoNote + optTableHtml + directTableHtml + ownerTableHtml + items.sort((a, b) => new Date(b.applied_at) - new Date(a.applied_at)).map(r => {
       const holdValid = r.status === "applied" && r.expires_at && Date.parse(r.expires_at) > now;
       const dismissed = !!r.dismissed_at;   // 취소확정(미참여) — 종료 마커
       // 126: 시스템이 정리한 건(주문 흔적 0인 만료)과 사람이 판단한 건을 **구분해서 표기**한다.
