@@ -46,12 +46,11 @@ async function campaignUsedFloor(db, campaignId, now = new Date()) {
 async function _campaignUsedFloor(db, campaignId, now) {
   const st = require('./campaignState.service');
   const { rows } = await db.query(
-    'SELECT id, linked_sheet_id, linked_tab_name, recruit_total FROM recruit_campaigns WHERE id = $1', [campaignId]);
+    'SELECT id, participation_mode, linked_sheet_id, linked_tab_name, recruit_total FROM recruit_campaigns WHERE id = $1', [campaignId]);
   if (!rows.length) {
     return { total: 0, today: 0, applications: 0, todayApplications: 0, orders: null, sharedTab: false, known: true };
   }
   const counts = (await st.fetchCampaignCounts(db, [campaignId], now)).get(campaignId) || {};
-  const usage = st.totalQuotaUsage(rows[0], counts);
   const L = counts.linked;
   const linkedOk = !!(L && L.ok && !L.noTab);
   const attributable = linkedOk && !L.sharedTab;
@@ -60,6 +59,11 @@ async function _campaignUsedFloor(db, campaignId, now) {
   const todaySubmitted = _n(counts.todaySubmitted);
   const todayHolds = _n(counts.todayActiveHolds);
   const orders = attributable ? _n(L.orders) : null;
+  // ★ known 은 "주문 기록을 실제로 받았나"로 정한다(Codex PR #1625) — 게이트 모드(observe 등)가 known 을 true 로 꾸미지 않게.
+  //   연결 작업표가 없거나 참여형이 아닌(레거시) 공고는 셀 주문이 없다 = known.
+  //   운영 킬스위치 CAMPAIGN_TABLE_QUOTA=off 는 주문 원장 셈 자체를 끈 상태 — 하한도 공고 참여만(줄이기를 영구히 막지 않는다).
+  const expectsLinked = rows[0].participation_mode === true && !!(rows[0].linked_sheet_id && rows[0].linked_tab_name);
+  const known = !expectsLinked || st.TABLE_QUOTA_MODE === 'off' || linkedOk;
   const ordersToday = attributable ? _n(L.ordersToday) : 0;
   return {
     total: Math.max(submitted, orders || 0) + holds,
@@ -68,7 +72,7 @@ async function _campaignUsedFloor(db, campaignId, now) {
     todayApplications: todaySubmitted + todayHolds,
     orders,
     sharedTab: !!(linkedOk && L.sharedTab),
-    known: usage.known,
+    known,
   };
 }
 
@@ -80,7 +84,8 @@ async function optionDirectOrders(db, campaignId, now = new Date()) {
 async function _optionDirectOrders(db, campaignId, now) {
   const st = require('./campaignState.service');
   const out = new Map();
-  const counts = await st.fetchOptionCounts(db, campaignId, now);
+  // 공고 참여 주문과 같은 구매를 수동으로 또 넣은 줄은 빼고 센다 — 공고 참여 수에 이미 들어 있다(Codex PR #1625).
+  const counts = await st.fetchOptionCounts(db, campaignId, now, { excludeApplicationDuplicates: true });
   for (const [key, c] of counts) {
     const n = _n(c && c.externalOrders);
     if (n > 0) out.set(key, n);

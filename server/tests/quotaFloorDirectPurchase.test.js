@@ -15,19 +15,31 @@ const read = (rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
     require.cache[stPath].exports = {
       ...real,
       fetchCampaignCounts: async () => new Map([['c1', { submittedAll: 2, activeHolds: 1, todaySubmitted: 1, todayActiveHolds: 1, linked, ...extra }]]),
-      totalQuotaUsage: (c, counts) => ({ known: !!(counts.linked && counts.linked.ok) }),
-      fetchOptionCounts: async () => new Map([['A', { externalOrders: 3 }], ['B', { externalOrders: 0 }]]),
+      TABLE_QUOTA_MODE: extra.__mode || 'on',
+      fetchOptionCounts: async (_db, _id, _now, opts) => {
+        assert.ok(opts && opts.excludeApplicationDuplicates, 'floor drops manual duplicates of participation purchases');
+        return new Map([['A', { externalOrders: 3 }], ['B', { externalOrders: 0 }]]);
+      },
     };
     delete require.cache[require.resolve('../src/services/quotaFloor.service')];
     return require('../src/services/quotaFloor.service');
   };
-  const db = { query: async () => ({ rows: [{ id: 'c1', linked_sheet_id: 'S', linked_tab_name: 'T', recruit_total: 10 }] }) };
+  const row = { id: 'c1', participation_mode: true, linked_sheet_id: 'S', linked_tab_name: 'T', recruit_total: 10 };
+  const db = { query: async () => ({ rows: [row] }) };
   let f = await fake({ ok: true, orders: 7, ordersToday: 4 }).campaignUsedFloor(db, 'c1');
   assert.deepEqual([f.total, f.today, f.known], [8, 5, true], 'max(submitted 2, orders 7) + holds 1 / max(1, 4) + 1');
   f = await fake({ ok: true, orders: 7, ordersToday: 4, sharedTab: true }).campaignUsedFloor(db, 'c1');
   assert.deepEqual([f.total, f.sharedTab], [3, true], 'shared worktable: orders are not attributed (applications only)');
   f = await fake({ ok: false }).campaignUsedFloor(db, 'c1');
   assert.equal(f.known, false, 'order lookup failure is reported as unknown (callers block reductions)');
+  f = await fake({ ok: false }, { __mode: 'observe' }).campaignUsedFloor(db, 'c1');
+  assert.equal(f.known, false, 'observe mode does not turn a failed lookup into known');
+  f = await fake(null, { __mode: 'off' }).campaignUsedFloor(db, 'c1');
+  assert.equal(f.known, true, 'operator kill switch off = applications only, reductions not blocked forever');
+  row.participation_mode = false;
+  f = await fake({ ok: true, noTab: true }).campaignUsedFloor(db, 'c1');
+  assert.equal(f.known, true, 'legacy (non-participation) campaign has no linked orders to count — deletable');
+  row.participation_mode = true;
   const m = await fake({ ok: true, orders: 0 }).optionDirectOrders(db, 'c1');
   assert.deepEqual([...m], [['A', 3]], 'per-option direct purchases come from the engine attribution (externalOrders)');
   require.cache[stPath].exports = real;
@@ -48,6 +60,8 @@ const read = (rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
   assert.ok(/used\.length \|\| directByOpt\.get\(e\.opt_key\) > 0/.test(routes), '바로 구매만 있는 상품은 지우지 않고 닫는다');
   assert.ok(/바로 구매 \$\{f\.orders\}건이 있어 삭제할 수 없습니다/.test(routes), '바로 구매만 있는 공고 삭제 금지');
   assert.ok(/if \(!f\.known\) throw new Error\('연결 작업표 주문 조회 실패'\)/.test(routes), '공고 삭제: 모르면 지우지 않는다');
+  assert.ok(/campaignUsedFloor\(fc, id\)/.test(routes), '공고 삭제 확인은 체크아웃 커넥션(주문 수 캐시 우회)');
+  assert.ok(/displayRecruitTotal\(cur\[0\]\?\.recruit_total, cur\[0\]\?\.wo_total\)/.test(lrq), '모를 때 비교 기준 = 지금 적용 중인 정원(작업오더 대체값 포함)');
   assert.ok(/campaignUsedFloor\(client, id\)\)\.total/.test(routes) && /optionDirectOrders\(client, id\)\)\.get\(a\.option_key\)/.test(routes),
     '블로그 승인 자리 확인(공고·상품)');
 

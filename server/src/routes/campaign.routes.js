@@ -3747,8 +3747,11 @@ router.delete('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req,
     /* ★ 결정 239 — 바로 구매(공고 참여 없이 이 공고 작업표에 낸 주문)도 참여 이력이다. 정원 엔진 셈(시작일 이후·공유 작업표 제외).
        세지 못하면 지우지 않는다(위와 같은 fail-closed). */
     if (_apps === 0) {
+      // 체크아웃한 커넥션으로 센다 — pool 경로의 주문 수 캐시(최대 10초)를 거치지 않게(파괴적 작업은 최신 값으로, Codex PR #1625).
+      let fc = null;
       try {
-        const f = await require('../services/quotaFloor.service').campaignUsedFloor(pool, id);
+        fc = await pool.connect();
+        const f = await require('../services/quotaFloor.service').campaignUsedFloor(fc, id);
         if (!f.known) throw new Error('연결 작업표 주문 조회 실패');
         if (f.orders > 0) {
           return res.status(409).json({ ok: false, code: 'has_applications', count: f.orders,
@@ -3758,6 +3761,8 @@ router.delete('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req,
         logger.warn(`[campaign] 삭제 전 바로 구매 조회 실패 — 삭제 보류 camp=${id}: ${e.message}`);
         return res.status(503).json({ ok: false, code: 'unknown_history',
           error: '참여 이력을 확인하지 못해 삭제를 보류했습니다. 잠시 후 다시 시도하거나 [보관]을 이용하세요.' });
+      } finally {
+        if (fc) fc.release();
       }
     }
     if (_apps > 0) {

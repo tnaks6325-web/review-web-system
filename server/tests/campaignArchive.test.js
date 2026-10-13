@@ -40,7 +40,11 @@ let _poolCalls = [];
 let _poolHandler = () => ({ rows: [] });
 require.cache[_poolPath] = {
   id: _poolPath, filename: _poolPath, loaded: true,
-  exports: { query: async (sql, params) => { _poolCalls.push({ sql, params }); return _poolHandler(sql, params); } },
+  exports: {
+    query: async (sql, params) => { _poolCalls.push({ sql, params }); return _poolHandler(sql, params); },
+    // 결정 239: 공고 삭제 전 바로 구매 확인은 체크아웃 커넥션으로 센다(주문 수 캐시 우회) — 같은 핸들러로 응답.
+    connect: async () => ({ query: async (sql, params) => { _poolCalls.push({ sql, params }); return _poolHandler(sql, params); }, release() {} }),
+  },
 };
 
 let passed = 0;

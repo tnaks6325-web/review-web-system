@@ -500,8 +500,16 @@ async function _assertTotalFloor(client, campaignId, recruitTotal) {
   const { campaignUsedFloor } = require('./quotaFloor.service');
   const f = await campaignUsedFloor(client, campaignId);
   if (!f.known) {
-    const { rows: cur } = await client.query('SELECT recruit_total FROM recruit_campaigns WHERE id=$1', [campaignId]);
-    if (quota(recruitTotal) < quota(cur[0]?.recruit_total)) {
+    // 지금 적용 중인 정원(공고 값, 0이면 연결 작업오더 값)과 비교한다 — 공고 값 0 인 작업오더 정원 공고도 줄이기를 막게(Codex PR #1625).
+    //   호출 순서: 작업오더 저장 경로는 이 검사(assertWorkOrderQuota)를 작업오더 UPDATE 전에 부른다.
+    const { rows: cur } = await client.query(
+      `SELECT rc.recruit_total,
+              (SELECT MAX(wo.recruit_count) FROM work_orders wo
+                WHERE wo.deleted_at IS NULL
+                  AND ((wo.linked_campaign_id = rc.id AND rc.id <> '') OR (wo.id = rc.source_work_order_id AND rc.source_work_order_id <> ''))) AS wo_total
+         FROM recruit_campaigns rc WHERE rc.id=$1`, [campaignId]);
+    const current = displayRecruitTotal(cur[0]?.recruit_total, cur[0]?.wo_total).total;
+    if (quota(recruitTotal) < current) {
       throw quotaError('작업표 주문 기록을 확인하지 못해 정원을 줄일 수 없습니다. 잠시 후 다시 시도해주세요.', 'recruit_quota_unknown');
     }
   }
