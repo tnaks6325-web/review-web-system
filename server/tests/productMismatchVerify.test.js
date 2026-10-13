@@ -233,7 +233,10 @@ t('5d 캡처 AI 가 옵션 칸을 읽고 캐시 접두를 올렸다', () => {
 });
 t('5e 리뷰어 화면: 홀드 제출에만 판독값 · PRODUCT_MISMATCH 면 경고 창 → confirmedProductKey 로 다시 · PRODUCT_WRONG_PURCHASE 면 제출 안 함', () => {
   const f = readFront('js/search-app.js');
-  assert.ok(/productCaptureOption: \(bh \|\| \(_EMBED_CTX && _EMBED_CTX\.app\)\)/.test(f));
+  // 결정 237: 캡처 상품 글자(이름·옵션)는 홀드 없는 제출에도 싣는다(상품 안 고른 제출의 상품 칸 채우기 재료).
+  //   서버의 다른 상품 대조(decideAtSubmit)는 홀드가 있을 때만이라 판정 범위는 그대로 — 금액은 여전히 홀드 제출에만.
+  assert.ok(/productCaptureOption: o\.productCaptureOptRaw \|\| "",/.test(f));
+  assert.ok(/if \(holdCtx && holdCtx\.verified && holdCtx\.optionKey\)/.test(fs.readFileSync(path.join(__dirname, '..', 'src/routes/submit.routes.js'), 'utf8')), '서버 대조는 홀드 제출에만');
   assert.ok(/productCapturePrice:  \(bh \|\| \(_EMBED_CTX && _EMBED_CTX\.app\)\)/.test(f), '캡처 금액도 홀드 제출에만');
   const i = f.indexOf('res.code === "PRODUCT_MISMATCH"');
   assert.ok(i > 0);
