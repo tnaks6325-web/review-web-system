@@ -5229,6 +5229,43 @@ function openFormLink(btnEl) {
 }
 
 /**
+ * ★ 결정 243 — 인기 공고 구매양식을 "참여하기" 없이 열었을 때 참여권 안내(사용자 확정 2026-10-14 "1.나").
+ *   참여권이 없으면 양식 위에 안내 창: [참여하러 가기](공고 상세) / [이미 구매했어요 — 그래도 제출하기](창 닫기).
+ *   ★ 막지 않는다 — 이미 결제한 사람의 기록이 사라지지 않게. 그렇게 낸 구매는 서버가 규칙 위반으로 표시한다(결정 242).
+ *   ★ 다건(홀드 일괄) 제출·조회 실패·옛 서버(404)는 아무것도 하지 않는다.
+ */
+async function _orderFormPopularGate({ sheetId, tabName, token }) {
+  try {
+    if (typeof _BATCH !== "undefined" && _BATCH && Array.isArray(_BATCH.holds) && _BATCH.holds.length) return;
+    const base = (typeof API_BASE_URL !== "undefined" && API_BASE_URL) ? API_BASE_URL : "";
+    const r = await fetch(base + "/api/campaign/order-form-gate?sheetId=" + encodeURIComponent(sheetId || "")
+      + "&tabName=" + encodeURIComponent(tabName || ""), { headers: { "X-Reviewer-Token": token } });
+    if (!r.ok) return;
+    const j = await r.json();
+    if (!j || !j.gate || !j.campaignId) return;
+    if (document.getElementById("ofPopularGate")) return;
+    const esc = t => String(t || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    const ov = document.createElement("div");
+    ov.id = "ofPopularGate";
+    ov.setAttribute("role", "dialog");
+    ov.setAttribute("aria-modal", "true");
+    ov.style.cssText = "position:fixed;inset:0;z-index:100000;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:16px";
+    ov.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:420px;width:100%;padding:22px 20px;box-shadow:0 20px 50px rgba(0,0,0,.25);font-size:.92rem;line-height:1.6;color:#1F2937">
+      <div style="font-size:1.05rem;font-weight:800;margin-bottom:8px">🔥 인기 공고는 참여권이 있어야 해요</div>
+      <div style="color:#4B5563;margin-bottom:6px">${esc(j.title)}</div>
+      <div style="margin-bottom:14px">이 공고는 최근 1일 안에 일반 공고 구매를 제출한 참여권이 있어야 참여할 수 있어요. 지금 계정에는 쓸 수 있는 참여권이 없어요.<br>
+        <b>아직 사지 않았다면</b> 공고에서 [참여하기]로 참여 가능 여부를 먼저 확인해 주세요.</div>
+      <a id="ofPopularGo" href="campaign.html?id=${encodeURIComponent(j.campaignId)}" style="display:block;text-align:center;background:#EA580C;color:#fff;font-weight:800;border-radius:10px;padding:12px;text-decoration:none;margin-bottom:8px">참여하러 가기</a>
+      <button type="button" id="ofPopularContinue" style="display:block;width:100%;background:#F3F4F6;color:#374151;font-weight:700;border:0;border-radius:10px;padding:11px;cursor:pointer">이미 구매했어요 — 그래도 제출하기</button>
+      <div style="font-size:.76rem;color:#6B7280;margin-top:8px">그래도 제출하면 접수는 되지만, 참여권 없이 산 구매로 표시되어 담당자가 확인한 뒤 처리해요.</div>
+    </div>`;
+    document.body.appendChild(ov);
+    const btn = document.getElementById("ofPopularContinue");
+    if (btn) { btn.onclick = () => ov.remove(); try { btn.focus(); } catch (_) {} }
+  } catch (_) { /* 안내일 뿐 — 실패는 조용히 지나간다 */ }
+}
+
+/**
  * 페이지 로드 시 URL 파라미터에 mode=form 이 있으면
  * 구매양식 전용 화면을 표시하고 true 반환 (일반 초기화 스킵)
  */
@@ -5376,6 +5413,12 @@ function initOrderFormMode() {
 
   // ★ 임베드(M2): 크롬 숨김 + 높이 보고 + 입력값 저장/복원 활성화
   if (_EMBED_CTX) _activateEmbedMode();
+
+  // ★ 결정 243: "참여하기" 없이 연 구매양식이 인기 공고면 참여권을 먼저 확인(없으면 안내 · 막지 않음).
+  //   양식은 그대로 뜨고 안내 창만 위에 얹는다(판정은 서버 단일 출처 · 실패는 조용히 지나감).
+  if (!(_EMBED_CTX && _EMBED_CTX.app) && !_PREVIEW_MODE && authSession && authSession.reviewerToken) {
+    _orderFormPopularGate({ sheetId, tabName, token: authSession.reviewerToken });
+  }
 
   // ── 다건 카드 초기화: 기존 카드 제거 후 첫 번째 카드 생성 ──
   _orderCardIds = [];
