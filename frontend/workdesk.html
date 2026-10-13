@@ -2261,6 +2261,9 @@
 .pmmmtag.bad{background:#FDE7E7;color:#B42318}
 .pmmmchip{display:inline-block;margin-left:4px;font-size:10px;padding:1px 5px;border-radius:999px;background:#FDEFC7;color:#8A5A00}
 .pmmmchip.bad{background:#FAE9E7;color:#B3382E}
+.pmmmchip.ok{background:#E8F1FD;color:#2A5BA8;cursor:help}
+.pmmmbox.slim{padding:6px 10px;font-size:11.5px;line-height:1.5}
+.pmmmbox.slim .pmmmalt{color:#8B94A1}
 /* ── 작업 그룹 머리줄 — 같은 작업의 반복 값을 한 줄로 올린다(줄마다 되풀이 금지) ── */
 .pmtable tr.pmhide{display:none}
 .pmtable tr.pmgrp>td{background:#F3F6FB;border-top:2px solid #D9E1EC;padding:6px 9px!important}
@@ -12064,34 +12067,27 @@ function _pmAcctSrcTip(it){
      두 계좌가 같으면 서버가 아예 안 보내므로 이 함수는 호출되지 않는다.
    ★ 마지막 줄은 사용자 확정 문구 — 체크를 풀면 그 건이 회차에서 빠진다는 사실을 말한다. */
 function _pmAcctMismatchHtml(mm){
-  if(!mm) return '';
-  const f = mm.form || {}, r = mm.registered || null;
+  /* ★ 간소화(사용자 요청 2026-10-13 · 결정 233): 직원은 "누가 고쳤나"가 아니라 "맞는 계좌로 나가나"만 본다.
+       → 노란 안내줄은 **예금주가 다른 사람일 때만**(엉뚱한 사람에게 송금될 수 있는 유일한 신호) 한 줄로 그린다.
+       나머지(고객·직원이 고친 계좌, 양식≠등록)는 이름 옆 작은 표시 + 마우스 올림 설명(_pmAcctChipHtml)만.
+     ★ 판정은 서버(accountMismatch) — 화면은 말만 한다. */
+  if(!mm || !mm.holderDiffers) return '';
+  const f = mm.form || {}, r = mm.registered || null, st = mm.staff || null;
   const acct = a => `${esc(a.bankName||'')} …${esc(a.accountTail||'')}`.trim();
-  /* 결정 231: 서버가 `using:'registered'` 를 주면 **리뷰어가 내정보에서 고친 계좌**로 보낸다
-     (양식 계좌로 이미 실패했거나 주문 뒤 내정보 계좌가 바뀌었고, 예금주가 같을 때). 판정은 서버 — 화면은 말만 한다. */
-  if(mm.using==='registered' && r){
-    const why = mm.reason==='form_failed' ? '구매양식 계좌로는 이미 이체가 실패했습니다' : '주문 뒤 내정보 계좌가 바뀌었습니다';
-    return `<div class="pmmmbox"><div class="pmmmhead">✅ 리뷰어가 내정보에서 고친 계좌로 보냅니다 — ${why}</div>`
-      + `<div class="pmmmline">보낼 곳(등록 계좌${r.isSub&&r.name?` · ${esc(r.name)} 명의`:''}) — <b>${esc(r.accountHolder||'-')}</b> · ${acct(r)}</div>`
-      + `<div class="pmmmline">구매양식 계좌 — <b>${esc(f.accountHolder||'-')}</b> · ${acct(f)}<span class="pmmmtag">계좌번호가 다릅니다</span></div>`
-      + `<div class="pmmmfoot">체크박스를 풀면 해당 건 입금은 <b>보류</b>됩니다.</div></div>`;
-  }
-  const head = r
-    ? `⚠ 작업보드(구매양식)에 적힌 계좌로 보냅니다 — <b>등록된 계좌와 다릅니다</b>`
-    : `⚠ 작업보드(구매양식)에 적힌 계좌로 보냅니다 — 이 리뷰어는 <b>등록된 계좌가 없습니다</b>`;
-  const tag = r
-    ? (mm.holderDiffers
-        ? `<span class="pmmmtag bad">예금주가 다른 사람입니다</span>`
-        : `<span class="pmmmtag">계좌번호가 다릅니다</span>`)
-    : '';
-  const regLine = r
-    ? `<div class="pmmmline">등록 계좌${r.isSub&&r.name?` (${esc(r.name)} 명의)`:''} — `
-      + `<b>${esc(r.accountHolder||'-')}</b> · ${acct(r)}${tag}</div>`
-    : '';
-  return `<div class="pmmmbox"><div class="pmmmhead">${head}</div>`
-    + `<div class="pmmmline">보낼 곳 — <b>${esc(f.accountHolder||'-')}</b> · ${acct(f)}</div>`
-    + regLine
-    + `<div class="pmmmfoot">체크박스를 풀면 해당 건 입금은 <b>보류</b>됩니다.</div></div>`;
+  const send = mm.using==='workboard' && st ? st : mm.using==='registered' && r ? r : f;
+  const other = send===f ? r : f;
+  return `<div class="pmmmbox slim">⚠ <b>예금주가 다른 사람입니다</b> — 보낼 곳 <b>${esc(send.accountHolder||'-')}</b> · ${acct(send)}`
+    + (other && other.accountTail ? ` <span class="pmmmalt">(${send===f?'등록 계좌':'구매양식'} ${esc(other.accountHolder||'-')} · ${acct(other)})</span>` : '')
+    + ` — 맞는지 확인 후 담으세요(체크를 풀면 보류)</div>`;
+}
+/** 이름 옆 작은 표시 — 계좌가 바뀐 이유는 마우스 올림 설명으로만(노란 상자 대신) */
+function _pmAcctChipHtml(mm){
+  if(!mm) return '';
+  const f = mm.form || {}, r = mm.registered || null, st = mm.staff || null;
+  const t = a => a ? `${a.accountHolder||'-'} · ${a.bankName||''} …${a.accountTail||''}` : '';
+  if(mm.using==='workboard' && st) return `<span class="pmmmchip ok" title="${esc(`직원이 작업보드에서 고친 계좌로 보냅니다 — ${t(st)}${f.accountTail?` (구매양식: ${t(f)})`:''}`)}">고친 계좌</span>`;
+  if(mm.using==='registered' && r) return `<span class="pmmmchip ok" title="${esc(`리뷰어가 내정보에서 고친 계좌로 보냅니다 — ${t(r)} (구매양식: ${t(f)})`)}">고친 계좌</span>`;
+  return `<span class="pmmmchip" title="${esc(r ? `구매양식 계좌로 보냅니다 — ${t(f)} (등록 계좌: ${t(r)})` : `구매양식 계좌로 보냅니다 — 등록된 계좌가 없습니다`)}">계좌 확인</span>`;
 }
 const PAY_FIX_KIND = {
   no_bank:'work', bank_unknown:'account', no_account:'account', no_holder:'account',
@@ -12725,15 +12721,16 @@ function _pmTargetTable(items){
       /* ★ 계좌 안내줄 — **서버가 말할 때만**(`accountMismatch`) 그린다. 양식 계좌가 기본 경로라
            `accountSource==='order'` 로 배지를 띄우면 거의 모든 행에 붙어 신호가 묻힌다. */
       const mm = it.accountMismatch || null;
-      const mmRow = mm
-        ? `<tr class="${on?'':'off'}${hidden?' pmhide':''} pmmm" data-pg="${i}"><td></td><td colspan="10">${_pmAcctMismatchHtml(mm)}</td></tr>`
+      const mmHtml = mm ? _pmAcctMismatchHtml(mm) : '';   // 예금주가 다를 때만 한 줄(간소화 — 결정 233)
+      const mmRow = mmHtml
+        ? `<tr class="${on?'':'off'}${hidden?' pmhide':''} pmmm" data-pg="${i}"><td></td><td colspan="10">${mmHtml}</td></tr>`
         : '';
       return `<tr class="${on?'':'off'}${hidden?' pmhide':''}" data-pg="${i}">
       <td>${!it.payable?'—':_pmNeedsMemo(it)?'<input type="checkbox" disabled title="입금명(통장표시)을 정해야 선택할 수 있습니다 — 통장표시 칸의 [미설정]을 누르세요">':`<input type="checkbox" ${on?'checked':''} onchange="_pmToggle(${idx},this.checked)">`}</td>
       <td class="pmdim"></td>
       <td>${bankSig!==null?'':bankBadge(it)}</td>
       <td>${esc(it.reviewerName)}${it.isSub?`<span class="pmauto"${_pmAcctSrcTip(it)}>타계정</span>`:''}${
-        mm?`<span class="pmmmchip" title="아래 줄에서 보낼 계좌를 확인하세요">계좌 확인</span>`:''}${
+        mm ? _pmAcctChipHtml(mm) : ''}${
         it.failedAccountCount?`<span class="pmmmchip bad" title="이 줄은 이 계좌로 이미 ${Number(it.failedAccountCount)}번 이체가 실패했습니다 — 처음에는 체크가 풀려 있습니다. 고객이 계좌를 고치면 고친 계좌로 나가고, 은행 쪽 일시 오류였다면 체크해서 다시 담으세요.">이전 실패 계좌 ${Number(it.failedAccountCount)}회</span>`:''}</td>
       <td>${esc(it.startDate)}</td>
       <td class="mono">${esc(it.bankOfficial||it.bankName||'-')} ${esc(it.bankAccount||'')}</td>
@@ -13184,7 +13181,8 @@ function _pmDownloadConfirmText(label, picked){
 
 async function _pmDownload(bank){
   const picked = _pmVisibleItems().filter(it=>it.bank===bank && _pmOn(it));
-  const rows = picked.map(it=>({sheetId:it.sheetId, tabName:it.tabName, rowIndex:it.rowIndex}));
+  // payoutFp = 지금 화면에 보이는 송금 계좌의 지문 — 그 사이 계좌가 바뀌면 서버가 회차를 만들지 않는다(결정 233)
+  const rows = picked.map(it=>({sheetId:it.sheetId, tabName:it.tabName, rowIndex:it.rowIndex, payoutFp:it.payoutFp}));
   if(!rows.length){ toast('담을 건이 없습니다.'); return; }
   const label = (PAY_BANKS.find(b=>b[0]===bank)||[])[1]||bank;
   if(!confirm(_pmDownloadConfirmText(label, picked))) return;

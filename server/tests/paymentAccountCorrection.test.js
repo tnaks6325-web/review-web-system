@@ -59,6 +59,12 @@ function handler(o = {}) {
       sheetId: 'S1', tabName: 'T1', label: '고양이사료', transferBank: '케이뱅크', depositName: '사료망고', goodsCostType: '' }] };
     if (/jsonb_array_elements/.test(sql)) return { rows: o.subRows || [] };
     if (/FROM reviewers WHERE phone8/.test(sql) && !/AS "subAccounts"/.test(sql)) return { rows: o.ownRows || [] };
+    if (/FROM raw_sheet_tabs/.test(sql)) return { rows: [{ sheetId: 'S1', tabName: 'T1',
+      headers: o.headers || ['번호', '이름', '은행', '계좌번호', '예금주', '은행명', '계좌비고'] }] };
+    if (/JOIN participant_edits pe/.test(sql)) {
+      if (o.throwWb) throw new Error('wb boom');
+      return { rows: o.wbRows || [] };
+    }
     if (/JOIN payment_batch_items pi/.test(sql)) {
       if (o.throwFailed) throw new Error('failed boom');
       return { rows: o.failedRows || [] };
@@ -68,7 +74,7 @@ function handler(o = {}) {
       return { rows: o.auditRows || [] };
     }
     if (/FROM order_submissions/.test(sql) && !/FROM unnest/.test(sql)) return { rows: [{
-      sheetId: 'S1', tabName: 'T1', sheetRow: 18, price: '16000', feeSnapshot: null, orderedAt: ORDERED, orderUpdatedAt: o.orderUpdatedAt || null,
+      sheetId: 'S1', tabName: 'T1', sheetRow: 18, price: '16000', feeSnapshot: null, orderedAt: ORDERED, lastEditSeq: o.lastEditSeq || null,
       bank: '하나은행', account: o.formAccount || FORM_BAD, depositor: o.formHolder || '임혜정' }] };
     return { rows: [] };
   };
@@ -140,10 +146,10 @@ const run = (opts, fn) => withStubPool(handler(opts), async svc => fn((await svc
       assert.strictEqual(it.bankAccount, REG_GOOD);
     }));
 
-  await ta('1f 주문 기록이 내정보 변경보다 나중에 수정됐으면(관리자가 양식 계좌를 고친 경우) 양식 계좌 유지', () =>
-    run({ ownRows: own(), orderUpdatedAt: '2026-10-09T09:00:00+09:00',
+  await ta('1f ★ 계좌가 아닌 칸 편집(last_edit_seq·updated_at)은 양식 시각을 바꾸지 않는다 — 고객이 고친 계좌 유지', () =>
+    run({ ownRows: own(), lastEditSeq: String(Date.parse('2026-10-09T09:00:00+09:00')),
           auditRows: [{ reviewerId: RID, sub: '', at: '2026-10-08T10:00:00+09:00' }] }, it => {
-      assert.strictEqual(it.bankAccount, FORM_BAD);
+      assert.strictEqual(it.bankAccount, REG_GOOD, '결제금액·주소만 고쳐도 옛 양식 계좌로 돌아가면 안 된다(리뷰 지적)');
     }));
 
   t('1g ★ 이름으로만 찾은 타계정(번호 없음)은 예외에서 뺀다 — 회차 스냅샷이 self 로 박제돼 다운로드가 막힌다', () => {
@@ -153,6 +159,102 @@ const run = (opts, fn) => withStubPool(handler(opts), async svc => fn((await svc
     // 변경 기록 조회는 인덱스를 타는 uuid 비교
     assert.ok(/WHERE reviewer_id = ANY\(\$1::uuid\[\]\)/.test(src));
   });
+
+  console.log('\n§1W 직원이 작업보드에서 고친 계좌 — 마지막에 바뀐 값이 이긴다 (결정 233)');
+  const wb = (field, value, at, amb = false) => ({ sheetId: 'S1', tabName: 'T1', rowIndex: 18, ambiguous: amb, field, value, at });
+
+  await ta('1W-a ★★ 직원이 양식 뒤에 고친 계좌로 보낸다(실사고 이노크아든 70 형태)', () =>
+    run({ wbRows: [wb('col:계좌번호', '1234-5678-90123', '2026-10-01T10:00:00+09:00')] }, it => {
+      assert.strictEqual(it.bankAccount, '1234567890123');
+      assert.strictEqual(it.bankName, '하나은행', '안 고친 칸은 지금 근거(양식)에서 채운다');
+      assert.strictEqual(it.accountMismatch.using, 'workboard');
+      assert.strictEqual(it.accountSource, 'workboard');
+      assert.strictEqual(it.accountRef, null, '지목할 등록 리뷰어가 없다(스냅샷 대조 unverifiable)');
+    }));
+
+  await ta('1W-b ★★ 고객이 그 뒤에 내정보를 고쳤으면 고객 값(간장 398 형태 — 마지막 값 우선)', () =>
+    run({ ownRows: own(), failedRows: failed(),
+          auditRows: [{ reviewerId: RID, sub: '', at: '2026-10-08T10:00:00+09:00' }],
+          wbRows: [wb('col:은행', '농협', '2026-10-01T10:00:00+09:00'), wb('col:계좌번호', '3020000009823', '2026-10-01T10:00:00+09:00')] }, it => {
+      assert.strictEqual(it.bankAccount, REG_GOOD);
+      assert.strictEqual(it.accountMismatch.using, 'registered');
+    }));
+
+  await ta('1W-c 직원이 고객보다 나중에 고쳤으면 직원 값', () =>
+    run({ ownRows: own(), failedRows: failed(),
+          auditRows: [{ reviewerId: RID, sub: '', at: '2026-10-08T10:00:00+09:00' }],
+          wbRows: [wb('col:계좌번호', '3020000009823', '2026-10-10T10:00:00+09:00')] }, it => {
+      assert.strictEqual(it.bankAccount, '3020000009823');
+      assert.strictEqual(it.accountMismatch.using, 'workboard');
+    }));
+
+  await ta('1W-d ★★ 다른 칸(결제금액 등)을 나중에 고쳐도 직원의 계좌 수정은 유지(이노크아든 재발 방지 — 리뷰 지적)', () =>
+    run({ lastEditSeq: String(Date.parse('2026-10-05T10:00:00+09:00')),
+          wbRows: [wb('col:계좌번호', '3020000009823', '2026-10-01T10:00:00+09:00')] }, it => {
+      assert.strictEqual(it.bankAccount, '3020000009823');
+    }));
+
+  await ta('1W-h ★★ 예금주만 다시 적어도 지금 쓰는 계좌(고객이 고친 등록 계좌)가 옛 양식 계좌로 돌아가지 않는다(리뷰 지적)', () =>
+    run({ ownRows: own(), failedRows: failed(),
+          wbRows: [wb('col:예금주', '임혜정', '2026-10-12T10:00:00+09:00')] }, it => {
+      assert.strictEqual(it.bankAccount, REG_GOOD);
+    }));
+
+  await ta('1W-i ★ 칸마다 시각을 따로 본다 — 옛 은행 칸 수정이 더 최근의 고객 수정을 덮지 않는다', () =>
+    run({ ownRows: own(), failedRows: failed(),
+          auditRows: [{ reviewerId: RID, sub: '', at: '2026-10-08T10:00:00+09:00' }],
+          wbRows: [wb('col:은행', '농협', '2026-10-01T10:00:00+09:00'), wb('col:예금주', '임혜정', '2026-10-12T10:00:00+09:00')] }, it => {
+      assert.strictEqual(it.bankName, '하나은행', '10/1 은행 수정은 10/8 고객 수정보다 옛것');
+      assert.strictEqual(it.bankAccount, REG_GOOD);
+    }));
+
+  await ta('1W-j ★ 한 역할에 칸 둘(은행·은행명)·메모성 칸·숫자 없는 계좌는 쓰지 않는다', async () => {
+    await run({ wbRows: [wb('col:은행', '농협', '2026-10-01T10:00:00+09:00'), wb('col:은행명', '국민', '2026-10-01T10:00:00+09:00'),
+                         wb('col:계좌번호', '3020000009823', '2026-10-01T10:00:00+09:00')] }, it => assert.strictEqual(it.bankAccount, FORM_BAD));
+    await run({ wbRows: [wb('col:계좌비고', '3020000009823', '2026-10-01T10:00:00+09:00')] }, it => assert.strictEqual(it.bankAccount, FORM_BAD));
+    await run({ wbRows: [wb('col:계좌번호', '확인완료', '2026-10-01T10:00:00+09:00')] }, it => assert.strictEqual(it.bankAccount, FORM_BAD));
+  });
+
+  await ta('1W-e 예금주만 고쳐도 반영하고, 구매양식·등록 어느 쪽과도 다르면 빨간 경고', () =>
+    run({ ownRows: own(), wbRows: [wb('col:예금주', '박다른', '2026-10-01T10:00:00+09:00')] }, it => {
+      assert.strictEqual(it.accountHolder, '박다른');
+      assert.strictEqual(it.bankAccount, FORM_BAD, '계좌번호는 양식 그대로');
+      assert.strictEqual(it.accountMismatch.holderDiffers, true);
+    }));
+
+  await ta('1W-f 모호한 줄(같은 주문·신원이 여러 줄)·빈 값·조회 실패는 무시(종전 동작)', async () => {
+    await run({ wbRows: [wb('col:계좌번호', '3020000009823', '2026-10-01T10:00:00+09:00', true)] }, it => assert.strictEqual(it.bankAccount, FORM_BAD));
+    await run({ wbRows: [wb('col:계좌번호', '   ', '2026-10-01T10:00:00+09:00')] }, it => assert.strictEqual(it.bankAccount, FORM_BAD));
+    await run({ throwWb: true }, it => assert.strictEqual(it.bankAccount, FORM_BAD));
+  });
+
+  await ta('1W-g 직원 값이 지금 쓰는 계좌와 같으면 아무 말도 하지 않는다', () =>
+    run({ wbRows: [wb('col:계좌번호', FORM_BAD, '2026-10-01T10:00:00+09:00')] }, it => {
+      assert.ok(!it.accountMismatch || it.accountMismatch.using !== 'workboard');
+    }));
+
+  await ta('1W-k ★ 지금 작업보드에 안 보이는 칸(이름 변경·삭제)의 옛 편집은 쓰지 않는다 · 영문 칸 이름은 읽는다', async () => {
+    await run({ headers: ['번호', '이름', '은행', '예금주'], wbRows: [wb('col:계좌번호', '3020000009823', '2026-10-01T10:00:00+09:00')] },
+      it => assert.strictEqual(it.bankAccount, FORM_BAD, '안 보이는 칸의 값을 송금에 쓰면 안 된다'));
+    await run({ headers: ['no', 'name', 'bank', 'account', 'depositor'], wbRows: [wb('col:account', '3020000009823', '2026-10-01T10:00:00+09:00')] },
+      it => assert.strictEqual(it.bankAccount, '3020000009823'));
+  });
+
+  t('1W-l ★ 수동 줄일 때 적은 편집(그 줄 자체 = 참여행 id 앵커)도 읽고, 칸마다 지금 앵커 편집이 우선', () => {
+    const src = fs.readFileSync(SRC('services/payment.service.js'), 'utf8');
+    assert.ok(/OR \(pe\.anchor_type = 'manual' AND pe\.anchor_value = a\.id::text\)\)/.test(src));
+    assert.ok(/\(pe\.anchor_type = a\.atype AND pe\.anchor_value = a\.aval\) DESC, pe\.created_at DESC/.test(src));
+  });
+
+  await ta('1W-m ★★ 관리자가 본 계좌와 회차를 만들 때 계좌가 다르면 회차를 만들지 않는다(보안 — 목록을 띄운 뒤 작업보드 계좌가 바뀐 경우)', () =>
+    withStubPool(handler({ wbRows: [wb('col:계좌번호', '3020000009823', '2026-10-01T10:00:00+09:00')] }), async svc => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.ok(it.payoutFp && it.payoutFp.length === 64, '송금 계좌 지문을 화면에 싣는다');
+      const stale = await svc.createBatch({ bank: 'kbank', rows: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 18, payoutFp: 'x'.repeat(64) }], by: 't' });
+      assert.strictEqual(stale.ok, false);
+      assert.ok(stale.skipped.some(x => x.reason === 'account_changed'));
+      assert.ok(/새로고침/.test(stale.error));
+    }));
 
   console.log('\n§2 실패한 계좌로 되풀이 송금하지 않는다');
 
@@ -199,6 +301,12 @@ const run = (opts, fn) => withStubPool(handler(opts), async svc => fn((await svc
     assert.ok(/const failedAgain = _pmFilterItems\(allItems,\{manager:_pmFilterState\(\)\.manager\}\)\.filter\(it=>it\.payable && \(it\.warnings\|\|\[\]\)\.includes\('failed_account'\)\)/.test(WD));
     assert.ok(/이미 이체가 실패한 계좌 그대로인 \$\{failedAgain\.length\}건/.test(WD));
     assert.ok(/이전 실패 계좌 \$\{Number\(it\.failedAccountCount\)\}회/.test(WD));
+  });
+  t('4F 다운로드 요청이 화면에 보이는 송금 계좌 지문(payoutFp)을 보낸다', () => {
+    assert.ok(/rowIndex:it\.rowIndex, payoutFp:it\.payoutFp\}/.test(WD));
+  });
+  t('4W 안내줄이 "직원이 작업보드에서 고친 계좌로 보냅니다"를 말한다(서버 using 값으로만)', () => {
+    assert.ok(/mm\.using==='workboard' && st/.test(WD) && /직원이 작업보드에서 고친 계좌로 보냅니다/.test(WD));
   });
   t('4b 안내줄이 "리뷰어가 고친 계좌로 보냅니다"를 말한다(서버 using 값으로만 갈린다)', () => {
     assert.ok(/mm\.using==='registered' && r/.test(WD) && /리뷰어가 내정보에서 고친 계좌로 보냅니다/.test(WD));
