@@ -56,3 +56,31 @@ test('옵션 없는 새 v2 상품도 상품 원본만으로 허용한다', () =>
   assert.equal(result.structured, true);
   assert.equal(JSON.parse(result.json)[0].name, '간장');
 });
+
+test('옵션 이름이 비어 와도 받는다 — 인트라넷은 값만 보낸다(2026-10-14 실사고: 옵션 있는 리뷰오더가 전부 400)', () => {
+  const list = [{
+    name: '가습기', product_mode: 'opt', option_schema_version: 2, base: { pay: 0, count: 0 },
+    options: [
+      { option_1: { name: '', value: '화이트' }, label: '화이트', pay: 30000, count: 10 },
+      { option_1: { name: '  ', value: '블랙' }, option_2: { name: '', value: '대형' }, label: '블랙', pay: 30000, count: 5 },
+    ],
+  }];
+  const [p] = JSON.parse(normalizeProductOptionsJson(JSON.stringify(list)).json);
+  assert.deepEqual(p.options[0].option_1, { name: '옵션', value: '화이트' });
+  assert.deepEqual(p.options[1].option_2, { name: '옵션2', value: '대형' });
+  assert.equal(p.options[1].label, '블랙 + 대형');
+  // 값은 여전히 필수
+  assert.throws(() => normalizeProductOptionsJson(JSON.stringify([{ ...list[0], options: [{ option_1: { name: '', value: '' }, pay: 1, count: 1 }] }])),
+    err => err instanceof ProductOptionsError && /1차 옵션값/.test(err.message));
+});
+
+test('옵션 이름을 채운 상품 구성은 작업표 계획에서 옵션 줄이 선다', () => {
+  const { stagedSelectionsFromWorkOrder } = require('../src/utils/worktablePlan');
+  const list = [{ name: '가습기', product_mode: 'opt', option_schema_version: 2, base: { pay: 0, count: 0 },
+    options: [{ option_1: { name: '', value: '화이트' }, label: '화이트', pay: 1, count: 3 }] }];
+  const json = normalizeProductOptionsJson(JSON.stringify(list)).json;
+  assert.match(json, /"name":"옵션"/);
+  const rows = stagedSelectionsFromWorkOrder({ product_options_json: json });
+  assert.equal(rows.length, 1, '이름 없는 옵션은 작업표 계획에서 통째로 빠진다');
+  assert.equal(rows[0].option1Name, '옵션');
+});

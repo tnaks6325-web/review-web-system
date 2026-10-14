@@ -35,6 +35,9 @@ function hasStructuredOption(list) {
       && product.options.some(option => option && (option.option_1 !== undefined || option.option_2 !== undefined))));
 }
 
+const DEFAULT_OPTION1_NAME = '옵션';
+const DEFAULT_OPTION2_NAME = '옵션2';
+
 function derivedLabel(option1, option2) {
   return option2 ? `${option1} + ${option2}` : option1;
 }
@@ -209,8 +212,11 @@ function normalizeProductOptionsJson(raw, { requireStructured = false } = {}) {
       if (option.option_3 !== undefined) {
         throw new ProductOptionsError('옵션은 최대 2단계까지만 지원합니다.');
       }
+      // ★ 옵션 「이름」(예: 컬러)은 비어 오면 기본 이름으로 채운다 — 인트라넷 리뷰오더는 2026-09-01 화면 단순화로
+      //   이름 칸 없이 값만 보낸다. 필수로 막으면 옵션 있는 리뷰오더가 전부 400 으로 리뷰웹에 못 들어온다
+      //   (2026-10-14 실사고 「친구사이_가습기,온풍기」). 작업표 계획(worktablePlan)은 이름이 있어야 옵션 줄을 세우므로 빈 값으로 두지 않는다.
       const option1 = {
-        name: text(option.option_1.name, '1차 옵션명', { required: true, max: 100 }),
+        name: text(option.option_1.name, '1차 옵션명', { max: 100 }) || DEFAULT_OPTION1_NAME,
         value: text(option.option_1.value, '1차 옵션값', { required: true, max: 200 }),
       };
       let option2;
@@ -219,7 +225,7 @@ function normalizeProductOptionsJson(raw, { requireStructured = false } = {}) {
           throw new ProductOptionsError('2차 옵션 형식이 올바르지 않습니다.');
         }
         option2 = {
-          name: text(option.option_2.name, '2차 옵션명', { required: true, max: 100 }),
+          name: text(option.option_2.name, '2차 옵션명', { max: 100 }) || DEFAULT_OPTION2_NAME,
           value: text(option.option_2.value, '2차 옵션값', { required: true, max: 200 }),
         };
       }
