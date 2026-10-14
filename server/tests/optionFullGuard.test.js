@@ -134,6 +134,16 @@ const TWO = [{ opt_key: '3. 퀸더블', product_name: '3. 퀸더블' }, { opt_ke
     } finally { delete process.env.DIRECT_PURCHASE_OPTION_FULL_FLAG; }
   });
 
+  await ok('구매 시각 기준 자리 — 그사이 만료된 신청도 그때 살아 있었으면 센다(applied·expired 중 expires_at > 구매 시각)', () => {
+    const src = read('server/src/services/directPurchaseRules.service.js');
+    assert.ok(/status IN \('applied', 'expired'\) AND expires_at > \$3 AND NOT \(phone8 = \$4 AND \$4 <> ''\)/.test(src));
+    assert.ok(!/expires_at > NOW\(\)/.test(src.slice(src.indexOf('async function optionFullAtPurchase'), src.indexOf('async function judgeDirectPurchase'))));
+  });
+  await ok('공고 참여 좌표(campaign:<id>)에 남은 바로 구매는 그 공고로 판정(정원 셈과 같은 공고)', () => {
+    const src = read('server/src/services/directPurchaseRules.service.js');
+    assert.ok(/const _vm = \/\^campaign:\(\.\+\)\$\/\.exec\(String\(o\.sheet_id \|\| ''\)\);/.test(src));
+    assert.ok(/\(_vm && o\.tab_name === o\.sheet_id\)[\s\S]{0,300}WHERE rc\.id = \$1 AND rc\.participation_mode IS TRUE LIMIT 1`, \[_vm\[1\]\]\)/.test(src));
+  });
   await ok('정원 엔진 스위치(CAMPAIGN_OPTION_EXTERNAL_ORDERS=0)가 꺼져 있으면 이 항목만 false — throw 로 다른 위반 표시까지 지우지 않는다', () => {
     const out = execFileSync(process.execPath, ['-e', `
       const r = require(${JSON.stringify(path.join(__dirname, '../src/services/directPurchaseRules.service'))});
@@ -155,7 +165,8 @@ const TWO = [{ opt_key: '3. 퀸더블', product_name: '3. 퀸더블' }, { opt_ke
   await ok('참여 버튼과 같은 셈(fetchOptionCounts + computeOptionViews 의 soldout) · 짝짓기 matchOrderOption · 양식 선택지 listProductChoices', () => {
     assert.ok(/st\.fetchOptionCounts\(db, camp\.id, now\)/.test(ofsSrc) && /st\.computeOptionViews\(optRows, counts, null, \{ sequential \}\)/.test(ofsSrc));
     assert.ok(/v\.status === 'soldout'/.test(ofsSrc));
-    assert.ok(/st\.matchOrderOption\(optRows, \{ selectedProduct: label \}\)/.test(ofsSrc) && /listProductChoices\(db, sheetId, tabName\)/.test(ofsSrc));
+    assert.ok(/st\.matchOrderOption\(optRows, \{ selectedProduct: label \}\)/.test(ofsSrc));
+    assert.ok(/listProductChoices\(db, camp\.linked_sheet_id \|\| sheetId, camp\.linked_tab_name \|\| tabName\)/.test(ofsSrc), '탭 이름이 바뀐 옛 링크도 공고의 지금 탭으로 선택지를 읽는다');
   });
   await ok('보관·마감 공고·안내 스위치 끔·정원 있는 상품 없음·공고 여럿인 작업표·실패 = null(안내·거절 없음 · fail-open)', () => {
     assert.ok(/camp\.archived_at \|\| camp\.status !== 'active'/.test(ofsSrc) && /ORDER_FORM_OPTION_FULL_NOTICE === '0'/.test(ofsSrc));
@@ -218,6 +229,7 @@ const TWO = [{ opt_key: '3. 퀸더블', product_name: '3. 퀸더블' }, { opt_ke
     assert.ok(/ofs\.publicView\(camp \? await ofs\.loadFormOptionFull\(pool, camp, \{ sheetId, tabName \}\) : null\)/.test(gate));
     assert.ok(/return res\.json\(\{ ok: true, gate: false, \.\.\.of \}\)/.test(gate));
     assert.ok(/title: String\(camp\.title \|\| ''\), \.\.\.of \}\)/.test(gate));
+    assert.ok(/let of = \{\};/.test(gate) && /res\.json\(\{ ok: true, gate: false, unknown: true, \.\.\.of \}\)/.test(gate), '참여권 조회가 실패해도 정원 재료는 버리지 않는다');
   });
 
   console.log('[6] 화면');
@@ -229,7 +241,11 @@ const TWO = [{ opt_key: '3. 퀸더블', product_name: '3. 퀸더블' }, { opt_ke
     assert.ok(/\(block \? \(multi \? '다른 상품 고르기' : '닫기'\) : '이미 구매했어요 — 그래도 제출하기'\)/.test(ui));
   });
   await ok('거절 모드 제출 직전 — 다시 받아 온 뒤 찬 상품이 있으면 제출하지 않는다("stop") · 일부 카드만 찼으면 [나머지 주문만 제출] · 공고 보기만 이동("go")', () => {
-    assert.ok(/if \(g\.blocking !== false\) \{\s*await _optionFullRefresh\(\);/.test(ui));
+    assert.ok(/async function _optionFullBeforeSubmit\(\) \{\s*try \{\s*await _optionFullRefresh\(\);/.test(ui), '제출 직전 항상 다시 받아 온다(첫 요청 대기 포함)');
+    assert.ok(/if \(_OPTION_FULL_PENDING\) \{ try \{ await _OPTION_FULL_PENDING; \} catch \(_\) \{\} \}/.test(ui), '첫 요청이 끝나기 전에 제출하면 기다린다');
+    assert.ok(/_OPTION_FULL_PENDING = _orderFormPopularGate\(/.test(sa));
+    assert.ok(/async function _orderFormPopularGate\(\{ sheetId, tabName, gid, token \}\) \{\s*_OPTION_FULL_SRC = \{ sheetId, tabName, gid, token \};/.test(ui), '첫 요청이 실패해도 다시 받을 주소를 기억');
+    assert.ok(/if \(g\.blocking !== false\) \{\s*const g2 = _OPTION_FULL;/.test(ui));
     assert.ok(/const partial = \(!g2\.singleFull && hitCards\.length && hitCards\.length < picks\.length\) \? hitCards : null;/.test(ui));
     assert.ok(/if \(v === "rest" && partial\) return true;\s*return v === false \? "go" : "stop";/.test(ui));
     assert.ok(/data-of-rest>나머지 주문만 제출/.test(ui));

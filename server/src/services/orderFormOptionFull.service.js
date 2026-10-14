@@ -68,9 +68,11 @@ async function loadFormOptionFull(db, camp, { sheetId, tabName, choices = null }
     const sequential = st.sequentialFor(await st.fetchSequentialCampaignIds(db, [camp.id]), camp.id);
     const views = st.computeOptionViews(optRows, counts, null, { sequential });
     const fullKeys = new Set(views.filter(v => v && v.status === 'soldout').map(v => v.optKey));
-    let ch = Array.isArray(choices) ? choices : [];
-    if (!Array.isArray(choices) && fullKeys.size && tabName) {
-      try { ch = await require('./sheetlessOrder.service').listProductChoices(db, sheetId, tabName); }
+    // 양식 선택지 — 이미 읽은 값이 있으면 재사용, 없거나 비었으면 **공고에 연결된 지금 탭 이름**으로 읽는다
+    //   (탭 이름이 바뀐 옛 링크는 주소의 탭 이름으로 못 찾는다 — gid 로 공고를 찾은 뒤 그 공고의 탭으로 · Codex PR #1641)
+    let ch = (Array.isArray(choices) && choices.length) ? choices : [];
+    if (!ch.length && fullKeys.size && (camp.linked_tab_name || tabName)) {
+      try { ch = await require('./sheetlessOrder.service').listProductChoices(db, camp.linked_sheet_id || sheetId, camp.linked_tab_name || tabName); }
       catch (_) { ch = []; }
     }
     const keyOf = label => st.matchOrderOption(optRows, { selectedProduct: label });

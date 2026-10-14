@@ -5301,11 +5301,15 @@ function _optionFullOnPick(label) {
 }
 
 let _OPTION_FULL_SRC = null;   // { sheetId, tabName, gid, token } — 제출 직전 다시 받아 오기용
+let _OPTION_FULL_PENDING = null;   // 양식을 열 때 보낸 첫 요청(제출이 그보다 빠르면 기다린다 — Codex PR #1641)
 
-/** 정원 찬 상품 재료를 다시 받아 온다(실패하면 지금 값 그대로). */
+/** 정원 찬 상품 재료를 다시 받아 온다(실패하면 지금 값 그대로). 처음엔 없던 찬 상품도 새로 잡는다. */
 async function _optionFullRefresh() {
   try {
-    const src = _OPTION_FULL_SRC; if (!src || !_OPTION_FULL) return;
+    if (_OPTION_FULL_PENDING) { try { await _OPTION_FULL_PENDING; } catch (_) {} }
+    const src = _OPTION_FULL_SRC; if (!src) return;
+    if (typeof window !== "undefined" && window._ncMode) return;
+    if (typeof _BATCH !== "undefined" && _BATCH && Array.isArray(_BATCH.holds) && _BATCH.holds.length) return;   // 홀드 일괄 제출은 대상 아님
     const base = (typeof API_BASE_URL !== "undefined" && API_BASE_URL) ? API_BASE_URL : "";
     const r = await fetch(base + "/api/campaign/order-form-gate?sheetId=" + encodeURIComponent(src.sheetId || "")
       + "&tabName=" + encodeURIComponent(src.tabName || "") + "&gid=" + encodeURIComponent(src.gid || ""),
@@ -5314,9 +5318,10 @@ async function _optionFullRefresh() {
     const j = await r.json();
     const of = j && j.optionFull;
     if (!of || !of.campaignId || !Array.isArray(of.fullProducts)) { _OPTION_FULL = null; return; }   // 이제 찬 상품 없음
-    _OPTION_FULL.fullProducts = of.fullProducts.map(x => String(x || ""));
-    _OPTION_FULL.singleFull = of.singleFull === true;
-    _OPTION_FULL.blocking = of.blocking === true;
+    const prev = _OPTION_FULL;
+    _OPTION_FULL = { campaignId: of.campaignId, title: of.title || "", fullProducts: of.fullProducts.map(x => String(x || "")),
+      singleFull: of.singleFull === true, singleName: String(of.singleName || ""), blocking: of.blocking === true,
+      acked: (prev && prev.acked) || {}, singleAcked: !!(prev && prev.singleAcked) };
     if (typeof _ofpActive === "function" && _ofpActive()) _orderCardIds.forEach(_ofpRender);
   } catch (_) { /* 지금 값 그대로 */ }
 }
@@ -5325,12 +5330,12 @@ async function _optionFullRefresh() {
  *  거절 모드: 정원 찬 상품을 고른 카드가 있거나 상품 하나짜리 양식의 그 상품이 찼으면 **제출하지 않는다**(서버도 같은 판정으로 거절한다). */
 async function _optionFullBeforeSubmit() {
   try {
+    await _optionFullRefresh();   // 첫 요청을 기다리고, 열어 둔 사이 찬 상품·늘어난 정원을 다시 받아 온다(Codex PR #1641)
     const g = _OPTION_FULL;
     if (!g) return true;
     const picks = (typeof _ofpActive === "function" && _ofpActive())
       ? _orderCardIds.map(c => _OFP.pick[c] || "").filter(Boolean) : [];
     if (g.blocking !== false) {
-      await _optionFullRefresh();   // 양식을 연 뒤 담당자가 정원을 늘렸으면 막지 않는다(코드리뷰)
       const g2 = _OPTION_FULL;
       if (!g2) return true;
       const hitCards = picks.map((label, k) => _optionFullIs(label) ? k + 1 : 0).filter(Boolean);
@@ -5392,6 +5397,7 @@ function _popularGateModal(info, { cards = 1 } = {}) {
 }
 
 async function _orderFormPopularGate({ sheetId, tabName, gid, token }) {
+  _OPTION_FULL_SRC = { sheetId, tabName, gid, token };   // 첫 요청이 실패해도 제출 직전에 다시 받아 올 수 있게
   try {
     if (typeof _BATCH !== "undefined" && _BATCH && Array.isArray(_BATCH.holds) && _BATCH.holds.length) return;
     const base = (typeof API_BASE_URL !== "undefined" && API_BASE_URL) ? API_BASE_URL : "";
@@ -5403,7 +5409,6 @@ async function _orderFormPopularGate({ sheetId, tabName, gid, token }) {
     if (!j) return;
     // ★ 결정 252: 정원 찬 상품 안내 재료(인기 여부와 무관). 옛 서버는 이 필드가 없다 = 안내 없음.
     const of = (typeof window !== "undefined" && window._ncMode) ? null : j.optionFull;   // 네이버+쿠팡 모드는 대상 아님(서버도 같음)
-    _OPTION_FULL_SRC = { sheetId, tabName, gid, token };
     _OPTION_FULL = (of && of.campaignId && Array.isArray(of.fullProducts))
       ? { campaignId: of.campaignId, title: of.title || "", fullProducts: of.fullProducts.map(x => String(x || "")),
           singleFull: of.singleFull === true, singleName: String(of.singleName || ""), blocking: of.blocking === true, acked: {} }
@@ -5587,7 +5592,7 @@ function initOrderFormMode() {
   // ★ 결정 243: "참여하기" 없이 연 구매양식이 인기 공고면 참여권을 먼저 확인(없으면 안내 · 막지 않음).
   //   양식은 그대로 뜨고 안내 창만 위에 얹는다(판정은 서버 단일 출처 · 실패는 조용히 지나감).
   if (!(_EMBED_CTX && _EMBED_CTX.app) && !_PREVIEW_MODE && authSession && authSession.reviewerToken) {
-    _orderFormPopularGate({ sheetId, tabName, gid, token: authSession.reviewerToken });
+    _OPTION_FULL_PENDING = _orderFormPopularGate({ sheetId, tabName, gid, token: authSession.reviewerToken });
   }
 
   // ── 다건 카드 초기화: 기존 카드 제거 후 첫 번째 카드 생성 ──

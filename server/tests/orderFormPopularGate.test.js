@@ -19,10 +19,12 @@ assert.ok(/gate: credits <= 0, credits/.test(g), 'returns remaining credits so t
 // 결정 252: 공고 찾기는 구매양식 정원 판정과 같은 함수(orderFormOptionFull.findFormCampaign)로 옮겼다 — 같은 SQL(검사 의미 불변)
 assert.ok(/ofs\.findFormCampaign\(pool, \{ sheetId, tabName, gid \}\)/.test(g), 'campaign lookup = shared finder');
 assert.ok(/NULLIF\(linked_tab_gid, ''\) IS NOT NULL AND linked_tab_gid = NULLIF\(\$3, ''\)/.test(read('server/src/services/orderFormOptionFull.service.js')), 'renamed tab: gid match (blank-safe)');
-assert.ok(/res\.json\(\{ ok: true, gate: false, unknown: true \}\)/.test(g), 'failure opens (fail-open)');
+// 결정 252: 실패 응답에도 이미 계산한 정원 재료(...of)를 싣는다 — 참여권은 여전히 gate:false(열어 둠 · 검사 의미 불변)
+assert.ok(/res\.json\(\{ ok: true, gate: false, unknown: true(, \.\.\.of)? \}\)/.test(g), 'failure opens (fail-open)');
 
 const sa = read('frontend/js/search-app.js');
-assert.ok(/if \(!\(_EMBED_CTX && _EMBED_CTX\.app\) && !_PREVIEW_MODE && authSession && authSession\.reviewerToken\) \{\s*_orderFormPopularGate/.test(sa),
+// 결정 252: 호출 결과(첫 요청)를 _OPTION_FULL_PENDING 에 담는다 — 호출 조건은 그대로(검사 의미 불변)
+assert.ok(/if \(!\(_EMBED_CTX && _EMBED_CTX\.app\) && !_PREVIEW_MODE && authSession && authSession\.reviewerToken\) \{\s*(_OPTION_FULL_PENDING = )?_orderFormPopularGate/.test(sa),
   'only forms opened without a hold (participation path untouched)');
 const fn = sa.slice(sa.indexOf('let _POPULAR_GATE = null;'), sa.indexOf('function initOrderFormMode('));
 assert.ok(/_BATCH\.holds\.length\) return;/.test(fn), 'batch hold submissions skip');

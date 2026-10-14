@@ -79,11 +79,13 @@ async function optionFullAtPurchase(db, campaignId, order) {
   const isBefore = x => { const t = new Date(x.submittedAt).getTime(); return t < at || (t === at && x.orderId < mine.orderId); };
   const extBefore = collected.filter(x => x.key === mine.key && x.orderId !== mine.orderId && isBefore(x)).length;
   // 이 구매자 본인이 잡아 둔 살아 있는 자리(같은 연락처의 applied)는 "앞선 다른 사람 자리"가 아니다 — 자기 자리로 오탐하지 않게(코드리뷰)
+  // 구매 **시각 기준**으로 자리를 센다 — 판정은 응답 뒤라 그사이 만료·정리된 자리를 빠뜨리지 않게(Codex PR #1641):
+  //   제출 완료 + 구매 시각에 아직 살아 있던 신청(applied·expired 중 expires_at > 구매 시각). 취소는 언제 됐는지 몰라 세지 않는다(모르면 넘침이 아님).
   const { rows } = await db.query(
     `SELECT COUNT(*)::int AS n FROM campaign_applications
       WHERE campaign_id = $1 AND option_key = $2 AND applied_at < $3
         AND (status = 'submitted'
-             OR (status = 'applied' AND expires_at > NOW() AND NOT (phone8 = $4 AND $4 <> '')))`,
+             OR (status IN ('applied', 'expired') AND expires_at > $3 AND NOT (phone8 = $4 AND $4 <> '')))`,
     [campaignId, mine.key, order.submitted_at, String(order.phone8 || '')]);
   return extBefore + (Number(rows[0] && rows[0].n) || 0) >= cap;
 }
@@ -101,12 +103,19 @@ async function judgeDirectPurchase(db, orderSubmissionId) {
   const o = oRows[0];
   if (!o) return { judged: false, reason: 'not_found' };
   if (o.campaign_application_id || o.deleted_at) return { judged: false, reason: 'not_direct' };
-  const { rows: cRows } = await db.query(
-    `SELECT rc.id, rc.is_popular, rc.multi_account_mode, rc.repurchase_days, rc.linked_sheet_id, rc.linked_tab_name
-       FROM recruit_campaigns rc
-      WHERE rc.participation_mode IS TRUE AND rc.linked_sheet_id = $1 AND rc.linked_tab_name = $2
-      ORDER BY ${require('./directPurchaseParticipation.service').campaignAtPurchaseOrderSql('$3')}
-      LIMIT 1`, [o.sheet_id, o.tab_name, o.submitted_at]);
+  // ★ 결정 252(Codex PR #1641): 공고 참여 좌표(campaign:<id>)에 남은 바로 구매(홀드 확정 실패)는 그 공고로 바로 찾는다 —
+  //   정원 셈(loadExternalOptionOrders)이 이 좌표를 그 공고 주문으로 세므로 판정도 같은 공고를 본다.
+  const _vm = /^campaign:(.+)$/.exec(String(o.sheet_id || ''));
+  const { rows: cRows } = (_vm && o.tab_name === o.sheet_id)
+    ? await db.query(
+      `SELECT rc.id, rc.is_popular, rc.multi_account_mode, rc.repurchase_days, rc.linked_sheet_id, rc.linked_tab_name
+         FROM recruit_campaigns rc WHERE rc.id = $1 AND rc.participation_mode IS TRUE LIMIT 1`, [_vm[1]])
+    : await db.query(
+      `SELECT rc.id, rc.is_popular, rc.multi_account_mode, rc.repurchase_days, rc.linked_sheet_id, rc.linked_tab_name
+         FROM recruit_campaigns rc
+        WHERE rc.participation_mode IS TRUE AND rc.linked_sheet_id = $1 AND rc.linked_tab_name = $2
+        ORDER BY ${require('./directPurchaseParticipation.service').campaignAtPurchaseOrderSql('$3')}
+        LIMIT 1`, [o.sheet_id, o.tab_name, o.submitted_at]);
   const camp = cRows[0];
   if (!camp) return { judged: false, reason: 'no_campaign' };
 

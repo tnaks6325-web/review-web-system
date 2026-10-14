@@ -1359,6 +1359,7 @@ router.get('/popular-status', applyLimiter, async (req, res, next) => {
 //   ★ 실패·모름은 gate:false(fail-open) — 우리 쪽 오류로 리뷰어를 막지 않는다. 바로 구매는 결정 242 위반 표시가 뒤에서 잡는다.
 //   ★ 라우트 등록 순서: GET '/:id' 보다 앞이어야 한다.
 router.get('/order-form-gate', reviewerSessionMiddleware, applyLimiter, async (req, res, next) => {
+  let of = {};   // 결정 252: 정원 찬 상품 재료 — 참여권 조회가 실패해도 버리지 않는다(Codex PR #1641)
   try {
     const sheetId = String(req.query.sheetId || '').trim();
     const tabName = String(req.query.tabName || '').trim();
@@ -1369,7 +1370,7 @@ router.get('/order-form-gate', reviewerSessionMiddleware, applyLimiter, async (r
     const camp = await ofs.findFormCampaign(pool, { sheetId, tabName, gid });
     // ★ 결정 252: 정원 찬 상품 재료(인기 여부와 무관 — 일반 공고에서도 싣는다 · 제출 거절과 같은 함수). 없으면 필드를 싣지 않는다(옛 화면 무영향).
     const optionFull = ofs.publicView(camp ? await ofs.loadFormOptionFull(pool, camp, { sheetId, tabName }) : null);
-    const of = optionFull ? { optionFull } : {};
+    of = optionFull ? { optionFull } : {};
     if (!camp || camp.is_popular !== true) return res.json({ ok: true, gate: false, ...of });
     const { rows: rRows } = await pool.query('SELECT phone8 FROM reviewers WHERE id = $1 LIMIT 1', [req.reviewer.ownerReviewerId]);
     const ownerP8 = String((rRows[0] && rRows[0].phone8) || '').replace(/\D/g, '').slice(-8);
@@ -1390,7 +1391,7 @@ router.get('/order-form-gate', reviewerSessionMiddleware, applyLimiter, async (r
     res.json({ ok: true, popular: true, gate: credits <= 0, credits, campaignId: camp.id, title: String(camp.title || ''), ...of });
   } catch (err) {
     logger.warn('[campaign/order-form-gate] 판정 실패(열어 둠): ' + err.message);
-    res.json({ ok: true, gate: false, unknown: true });
+    res.json({ ok: true, gate: false, unknown: true, ...of });
   }
 });
 
