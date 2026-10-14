@@ -1378,19 +1378,23 @@ router.post('/order', async (req, res, next) => {
     }
     /* ★ 결정 237 — 상품을 고르지 않은 주문(홀드 없음·화면 선택 없음)은 제출 때 읽은 캡처 상품 글자로 한 상품이 확실할 때만 채운다.
        응답 뒤에 돈다(접수 지연 0) · 실패·애매 = 아무것도 안 함. 판정·대상 확인은 captureProductFill 단일 출처. */
+    let _judgeAfterCapFill = false;
     if (!(holdCtx && (holdCtx.productName || holdCtx.optionKey)) && !formPickedProduct && (b.productCaptureName || b.productCaptureOption)) {
+      _judgeAfterCapFill = true;
       const _cap = { orderSubmissionId: ledger.orderSubmissionId, sheetId: orderScope.sheetId, tabName: orderScope.tabName,
         captureName: b.productCaptureName, captureOption: b.productCaptureOption, by: '제출 시' };
       setImmediate(() => {
         require('../services/captureProductFill.service').fillFromSubmitCapture(_cap)
           .then(r => { if (r && r.written) logger.info(`[submit/order] 제출 캡처로 상품 채움 os=${_cap.orderSubmissionId} → ${r.optKey}`); })
-          .catch(e => logger.warn(`[submit/order] 제출 캡처 상품 채움 실패(무시): ${e.message}`));
+          .catch(e => logger.warn(`[submit/order] 제출 캡처 상품 채움 실패(무시): ${e.message}`))
+          // ★ 결정 252: 규칙 판정(정원 넘친 상품 구매)은 캡처로 상품이 정해진 **뒤에** — 먼저 돌면 상품을 몰라 "위반 없음"으로 굳는다(코드리뷰)
+          .finally(() => require('../services/directPurchaseRules.service').judgeLater(_cap.orderSubmissionId, 'submit'));
       });
     }
     /* ★ 결정 242 — 공고 참여 없이 바로 낸 구매는 응답 뒤에 공고 참여 규칙 위반을 판정해 표시만 남긴다(막지 않음 · 실패 = 표시 없음).
        저장된 모든 주문을 넘긴다 — 홀드 확정이 실패해 공고 참여에 묶이지 못한 주문도 바로 구매다(Codex PR #1628).
        공고 참여로 확정된 주문은 서비스가 campaign_application_id 로 거른다. */
-    require('../services/directPurchaseRules.service').judgeLater(ledger.orderSubmissionId, 'submit');
+    if (!_judgeAfterCapFill) require('../services/directPurchaseRules.service').judgeLater(ledger.orderSubmissionId, 'submit');
     res.json({
       ok: true,
       dbSaved: true,

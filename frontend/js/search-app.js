@@ -5240,10 +5240,11 @@ let _POPULAR_GATE = null;   // { campaignId, title, credits, acked } — 인기 
 // ★ 결정 252: 정원이 찬 상품 안내 재료 { campaignId, title, fullProducts:[양식 표기], singleFull, singleName, acked:{표기:true} }
 let _OPTION_FULL = null;
 
-/** 정원이 찬 상품 안내 창 — 막지 않는다(이미 결제한 리뷰어의 기록이 사라지지 않게 · 결정 243 과 같은 모양). true = 계속 · false = 공고로 감. */
+/** 정원이 찬 상품 안내 창 — 막지 않는다(이미 결제한 리뷰어의 기록이 사라지지 않게 · 결정 243 과 같은 모양).
+ *  true = 계속 · false = 공고로 감 · "busy" = 다른 안내 창이 떠 있어 이번엔 띄우지 못함(안내한 것으로 치지 않는다). */
 function _optionFullModal(info, name) {
   return new Promise((resolve) => {
-    if (document.getElementById("ofOptionFull") || document.getElementById("ofPopularGate")) { resolve(true); return; }
+    if (document.getElementById("ofOptionFull") || document.getElementById("ofPopularGate")) { resolve("busy"); return; }
     const esc = t => String(t || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
     const ov = document.createElement("div");
     ov.id = "ofOptionFull";
@@ -5274,7 +5275,8 @@ function _optionFullOnPick(label) {
   const g = _OPTION_FULL;
   if (!g || !label || !Array.isArray(g.fullProducts) || g.fullProducts.indexOf(label) < 0 || g.acked[label]) return;
   g.acked[label] = true;
-  _optionFullModal(g, label);
+  // 다른 안내 창 때문에 못 띄웠으면 "안내함"을 되돌린다 — 제출 직전 확인에서 다시 묻는다(코드리뷰)
+  _optionFullModal(g, label).then(v => { if (v === "busy") delete g.acked[label]; });
 }
 
 /** 제출 직전: 아직 안내하지 않은 정원 찬 상품이 있으면 한 번 안내. false = 공고로 감(제출 중단). */
@@ -5287,11 +5289,15 @@ async function _optionFullBeforeSubmit() {
     for (const label of picks) {
       if (g.fullProducts.indexOf(label) < 0 || g.acked[label]) continue;
       g.acked[label] = true;
-      if (!(await _optionFullModal(g, label))) return false;
+      const v = await _optionFullModal(g, label);
+      if (v === "busy") { delete g.acked[label]; continue; }
+      if (!v) return false;
     }
     if (g.singleFull && !g.singleAcked) {
       g.singleAcked = true;
-      if (!(await _optionFullModal(g, g.singleName || g.title || ""))) return false;
+      const v = await _optionFullModal(g, g.singleName || g.title || "");
+      if (v === "busy") g.singleAcked = false;
+      else if (!v) return false;
     }
     return true;
   } catch (_) { return true; }
@@ -5351,8 +5357,9 @@ async function _orderFormPopularGate({ sheetId, tabName, gid, token }) {
     }
     // 상품 고르기가 없는 양식(상품 하나) — 그 상품이 찼으면 열 때 바로 안내
     if (_OPTION_FULL && _OPTION_FULL.singleFull) {
-      _OPTION_FULL.singleAcked = true;
-      _optionFullModal(_OPTION_FULL, _OPTION_FULL.singleName || _OPTION_FULL.title);
+      const g = _OPTION_FULL;
+      g.singleAcked = true;
+      _optionFullModal(g, g.singleName || g.title).then(v => { if (v === "busy") g.singleAcked = false; });
     }
     // 응답 전에 이미 골라 둔 상품(캡처 자동 선택 등)도 확인
     if (_OPTION_FULL && typeof _ofpActive === "function" && _ofpActive()) _orderCardIds.forEach(c => _optionFullOnPick(_OFP.pick[c]));

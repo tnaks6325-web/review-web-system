@@ -91,12 +91,14 @@ const TWO = [{ opt_key: '3. 퀸더블', product_name: '3. 퀸더블' }, { opt_ke
       }
       if (/FROM campaign_applications/.test(sql) && /COUNT/.test(sql)) {
         assert.strictEqual(params[1], KEY, '같은 상품의 공고 참여만 센다');
+        assert.strictEqual(params[3], '73000001', '구매자 본인 연락처를 넘겨 자기 자리를 뺀다');
+        assert.ok(/NOT \(phone8 = \$4 AND \$4 <> ''\)/.test(sql), '본인이 잡아 둔 살아 있는 자리는 앞선 자리로 세지 않는다');
         return { rows: [{ n: apps }] };
       }
       throw new Error('unexpected sql: ' + sql.slice(0, 80));
     },
   });
-  const me = { id: 'o-me', submitted_at: AT };
+  const me = { id: 'o-me', submitted_at: AT, phone8: '73000001' };
   const before = (id) => ({ id, at: '2026-10-02T05:00:00.000Z', p: KEY });
   const after = (id) => ({ id, at: '2026-10-02T07:00:00.000Z', p: KEY });
   await ok('정원 2 · 앞에 바로 구매 1 + 공고 참여 1 → 이 구매는 정원 찬 뒤(true)', async () => {
@@ -112,6 +114,11 @@ const TWO = [{ opt_key: '3. 퀸더블', product_name: '3. 퀸더블' }, { opt_ke
     assert.strictEqual(await rules.optionFullAtPurchase(mkDb({ ext: [before('o1'), before('o2')], apps: 5 }), 'c1', me), false);
     assert.strictEqual(await rules.optionFullAtPurchase(mkDb({ ext: [{ id: 'o-me', at: AT, p: '모르는 상품' }], apps: 5 }), 'c1', me), false);
   });
+  await ok('같은 시각이면 주문 id 순(결정적) — id 가 앞선 것만 "앞"', async () => {
+    const same = (id) => ({ id, at: AT, p: KEY });
+    assert.strictEqual(await rules.optionFullAtPurchase(mkDb({ cap: 1, ext: [same('o-a'), { id: 'o-me', at: AT, p: KEY }] }), 'c1', me), true);
+    assert.strictEqual(await rules.optionFullAtPurchase(mkDb({ cap: 1, ext: [same('o-z'), { id: 'o-me', at: AT, p: KEY }] }), 'c1', me), false);
+  });
   await ok('정원 0(무제한) → false', async () => {
     assert.strictEqual(await rules.optionFullAtPurchase(mkDb({ cap: 0, ext: [before('o1'), { id: 'o-me', at: AT, p: KEY }], apps: 9 }), 'c1', me), false);
   });
@@ -125,6 +132,21 @@ const TWO = [{ opt_key: '3. 퀸더블', product_name: '3. 퀸더블' }, { opt_ke
       assert.strictEqual(await rules.optionFullAtPurchase(db, 'c1', me), false);
       assert.strictEqual(db.calls.length, 0);
     } finally { delete process.env.DIRECT_PURCHASE_OPTION_FULL_FLAG; }
+  });
+
+  await ok('정원 엔진 스위치(CAMPAIGN_OPTION_EXTERNAL_ORDERS=0)가 꺼져 있으면 이 항목만 false — throw 로 다른 위반 표시까지 지우지 않는다', () => {
+    const out = execFileSync(process.execPath, ['-e', `
+      const r = require(${JSON.stringify(path.join(__dirname, '../src/services/directPurchaseRules.service'))});
+      const db = { calls: 0, async query() { this.calls++; return { rows: [] }; } };
+      r.optionFullAtPurchase(db, 'c1', { id: 'x', submitted_at: new Date() }).then(v => console.log(JSON.stringify({ v, calls: db.calls })), e => console.log('THROW ' + e.message));`],
+    { env: { ...process.env, CAMPAIGN_OPTION_EXTERNAL_ORDERS: '0' } }).toString().trim();
+    assert.strictEqual(out, '{"v":false,"calls":0}');
+  });
+  await ok('캡처로 상품을 채우는 제출은 채운 **뒤에** 판정(먼저 돌면 "위반 없음"으로 굳는다)', () => {
+    const sr = read('server/src/routes/submit.routes.js');
+    assert.ok(/_judgeAfterCapFill = true;/.test(sr));
+    assert.ok(/\.finally\(\(\) => require\('\.\.\/services\/directPurchaseRules\.service'\)\.judgeLater\(_cap\.orderSubmissionId, 'submit'\)\)/.test(sr));
+    assert.ok(/if \(!_judgeAfterCapFill\) require\('\.\.\/services\/directPurchaseRules\.service'\)\.judgeLater\(ledger\.orderSubmissionId, 'submit'\);/.test(sr));
   });
 
   console.log('[5] 구매양식 안내 재료(서버 배선)');
@@ -170,6 +192,11 @@ const TWO = [{ opt_key: '3. 퀸더블', product_name: '3. 퀸더블' }, { opt_ke
     const i2 = sa.indexOf('if (!(await _optionFullBeforeSubmit()))');
     assert.ok(i1 > 0 && i2 > i1 && i2 - i1 < 600);
     assert.ok(/if \(!\(await _optionFullBeforeSubmit\(\)\)\) \{ try \{ location\.href = "campaign\.html\?id=" \+ encodeURIComponent\(_OPTION_FULL\.campaignId\); \} catch \(_\) \{\} return; \}/.test(sa));
+  });
+  await ok('다른 안내 창 때문에 못 띄우면("busy") 안내한 것으로 치지 않는다 — 제출 직전에 다시 묻는다', () => {
+    assert.ok(/getElementById\("ofPopularGate"\)\) \{ resolve\("busy"\); return; \}/.test(ui));
+    assert.ok(/_optionFullModal\(g, label\)\.then\(v => \{ if \(v === "busy"\) delete g\.acked\[label\]; \}\);/.test(ui));
+    assert.ok(/if \(v === "busy"\) \{ delete g\.acked\[label\]; continue; \}/.test(ui));
   });
   await ok('상품을 고를 때·캡처로 골라 둘 때 안내(함수가 없으면 아무것도 안 함)', () => {
     assert.ok(/if \(typeof _optionFullOnPick === "function"\) _optionFullOnPick\(_OFP\.pick\[c\]\);/.test(sa));

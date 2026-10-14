@@ -1456,6 +1456,9 @@ async function listDirectOrders(db, campaignId, { limit = 500 } = {}) {
 //   결정 239 에서 하한(quotaFloor)만 켰던 것을 참여 게이트·화면까지 넓힌다(단일 셈). opts.excludeApplicationDuplicates === false 로만 끈다(진단용).
 //   opts.collectOrders(배열)를 주면 센 주문을 한 줄씩 담는다 {campaignId, orderId, key, submittedAt} — 결정 252 넘친 구매 표시가
 //   "이 주문이 어느 상품 자리로 세어졌나"를 같은 셈에서 꺼내 쓴다(대표 줄만 · 같은 구매 중복·공고 참여 중복은 담기지 않는다).
+/** 바로 구매를 상품에 세는가(결정 210 스위치 · 표 셈 모드) — 꺼져 있으면 _loadExternalOptionOrders 는 null(= 모름이 아니라 "세지 않음"). */
+function externalOptionCountEnabled() { return OPTION_EXTERNAL_ENABLED && TABLE_QUOTA_MODE !== 'off'; }
+
 async function _loadExternalOptionOrders(db, ids, now = new Date(), opts = null) {
   const excludeAppDup = !(opts && opts.excludeApplicationDuplicates === false);
   const collect = (opts && Array.isArray(opts.collectOrders)) ? opts.collectOrders : null;
@@ -2083,6 +2086,7 @@ module.exports = {
   loadDirectOrderCounts,
   listDirectOrders,
   loadExternalOptionOrders: _loadExternalOptionOrders,
+  externalOptionCountEnabled,
   COUNT_BASIS,
   _mergeCountBasis,
   __resetTableQuotaCacheForTest,

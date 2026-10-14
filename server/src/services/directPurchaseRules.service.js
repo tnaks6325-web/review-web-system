@@ -60,10 +60,12 @@ function collectFlags({ registered, repurchaseBlocked, onePerPersonBlocked, popu
  */
 async function optionFullAtPurchase(db, campaignId, order) {
   if (process.env.DIRECT_PURCHASE_OPTION_FULL_FLAG === '0') return false;
+  const st = require('./campaignState.service');
+  // 정원 엔진이 바로 구매를 상품에 세지 않게 꺼져 있으면(결정 210 스위치) 이 항목만 빠진다 — 다른 위반 표시까지 NULL 로 만들지 않는다(코드리뷰)
+  if (!st.externalOptionCountEnabled()) return false;
   const { rows: optRows } = await db.query(
     'SELECT opt_key, recruit_total FROM campaign_options WHERE campaign_id = $1', [campaignId]);
   if (!optRows.length) return false;
-  const st = require('./campaignState.service');
   const collected = [];
   const ext = await st.loadExternalOptionOrders(db, [campaignId], new Date(), { collectOrders: collected });
   if (ext === null) throw new Error('상품 정원 셈 조회 실패');
@@ -73,12 +75,16 @@ async function optionFullAtPurchase(db, campaignId, order) {
   const cap = Number(opt && opt.recruit_total) || 0;
   if (!(cap > 0)) return false;
   const at = new Date(order.submitted_at).getTime();
-  const extBefore = collected.filter(x => x.key === mine.key && x.orderId !== mine.orderId
-    && new Date(x.submittedAt).getTime() < at).length;
+  // 같은 시각이면 주문 id 순 — 같은 ms 의 두 주문이 서로를 "앞"으로 세지 않는 일이 없게(결정적 순서)
+  const isBefore = x => { const t = new Date(x.submittedAt).getTime(); return t < at || (t === at && x.orderId < mine.orderId); };
+  const extBefore = collected.filter(x => x.key === mine.key && x.orderId !== mine.orderId && isBefore(x)).length;
+  // 이 구매자 본인이 잡아 둔 살아 있는 자리(같은 연락처의 applied)는 "앞선 다른 사람 자리"가 아니다 — 자기 자리로 오탐하지 않게(코드리뷰)
   const { rows } = await db.query(
     `SELECT COUNT(*)::int AS n FROM campaign_applications
       WHERE campaign_id = $1 AND option_key = $2 AND applied_at < $3
-        AND (status = 'submitted' OR (status = 'applied' AND expires_at > NOW()))`, [campaignId, mine.key, order.submitted_at]);
+        AND (status = 'submitted'
+             OR (status = 'applied' AND expires_at > NOW() AND NOT (phone8 = $4 AND $4 <> '')))`,
+    [campaignId, mine.key, order.submitted_at, String(order.phone8 || '')]);
   return extBefore + (Number(rows[0] && rows[0].n) || 0) >= cap;
 }
 

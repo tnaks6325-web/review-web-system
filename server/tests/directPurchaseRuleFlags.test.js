@@ -35,8 +35,13 @@ assert.ok(/JSON\.stringify\(\{ campaignId: camp\.id, flags \}\)/.test(s), 'store
 assert.ok(/DIRECT_PURCHASE_RULE_FLAGS === '0'/.test(s) && /setImmediate/.test(s), 'after response · kill switch');
 
 // ③ 훅 — 바로 구매 두 길(구매양식 링크·담당자 수동제출)
-assert.ok(/\n    require\('\.\.\/services\/directPurchaseRules\.service'\)\.judgeLater\(ledger\.orderSubmissionId, 'submit'\)/.test(read('server/src/routes/submit.routes.js')),
-  'every saved purchase is judged (failed hold confirmation leaves a direct purchase)');
+// 결정 252: 캡처로 상품을 채우는 제출은 채운 뒤(.finally)에 판정 — 그 밖의 모든 제출은 곧바로. 어느 쪽이든 모든 저장된 구매가 판정된다(검사 의미 불변).
+{
+  const sr = read('server/src/routes/submit.routes.js');
+  assert.ok(/\n    if \(!_judgeAfterCapFill\) require\('\.\.\/services\/directPurchaseRules\.service'\)\.judgeLater\(ledger\.orderSubmissionId, 'submit'\)/.test(sr)
+    && /_judgeAfterCapFill = true;[\s\S]{0,1200}\.finally\(\(\) => require\('\.\.\/services\/directPurchaseRules\.service'\)\.judgeLater\(_cap\.orderSubmissionId, 'submit'\)\)/.test(sr),
+    'every saved purchase is judged (failed hold confirmation leaves a direct purchase)');
+}
 assert.ok(/if \(!application\) require\('\.\/directPurchaseRules\.service'\)\.judgeLater\(ledger\.orderSubmissionId, 'manual'\)/.test(read('server/src/services/manualOrder.service.js')));
 assert.ok(/"campaignId"/.test(read('server/migrations/187_order_rule_flags.sql')) && /ADD COLUMN IF NOT EXISTS rule_flags JSONB/.test(read('server/migrations/187_order_rule_flags.sql')));
 assert.ok(/\['order_submissions', 'rule_flags'\]/.test(read('server/index.js')), 'schema preflight');

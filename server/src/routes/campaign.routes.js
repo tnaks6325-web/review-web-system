@@ -1370,7 +1370,7 @@ async function _orderFormOptionFull(camp, sheetId, tabName) {
     const { rows: optRows } = await pool.query(
       `SELECT opt_key, option_url, pay_amount, recruit_total, daily_limit, status, product_name, unit_kind, thumbnail_url, paused_at
          FROM campaign_options WHERE campaign_id = $1 ORDER BY (status='closed'), sort_order, id`, [camp.id]);
-    if (!optRows.length) return null;
+    if (!optRows.some(o => Number(o.recruit_total) > 0)) return null;   // 정원 있는 상품이 없으면 찰 일이 없다(조회 생략)
     const now = new Date();
     const counts = await fetchOptionCounts(pool, camp.id, now);
     const sequential = sequentialFor(await fetchSequentialCampaignIds(pool, [camp.id]), camp.id);
