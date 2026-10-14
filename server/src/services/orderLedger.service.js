@@ -989,8 +989,8 @@ async function createOrderLedgerEntry(input) {
   const ORDER_INSERT_SQL = `INSERT INTO order_submissions
       (sheet_id, tab_name, gid, tab_gid, orderer, recipient, user_id, phone, address,
        order_num, date_str, selected_opt_key, bank, account, depositor, price, memo, blog_url,
-       selected_product, source, dedup_key, mirror_status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,NULL,'pending')
+       selected_product, source, dedup_key, mirror_status, delivery_memo)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,NULL,'pending',$21)
      RETURNING id`;
   const orderInsertParams = [
     sheetId,
@@ -1015,6 +1015,8 @@ async function createOrderLedgerEntry(input) {
        원장에 남겨야 무시트 재기록·큐 재시도·reconcile 이 같은 값을 다시 쓴다(_osRowToOrderData). */
     orderData.selectedProduct || '',
     source || 'order_submit',
+    // 결정 245 — 캡처에서 읽은 배송메세지(작업표 칸으로는 보내지 않는다 · 작업보드 미리보기 전용).
+    orderData.deliveryMemo || '',
   ];
 
   let orderSubmissionId;

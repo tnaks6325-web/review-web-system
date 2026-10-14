@@ -142,7 +142,8 @@ async function replaceCapture({ sheetId, tabName, rowId, imageBase64, mimeType, 
     } else {
       await client.query(
         `UPDATE order_submissions
-            SET capture_file_id=$2, capture_uploaded_at=NOW(), updated_at=NOW()
+            SET capture_file_id=$2, capture_uploaded_at=NOW(), updated_at=NOW(),
+                delivery_memo=''   -- 결정 245: 옛 사진에서 읽은 배송메세지는 새 사진과 맞지 않는다(재판독은 하지 않는다)
           WHERE id=$1 AND deleted_at IS NULL`, [orderId, uploaded.id]);
       await client.query('COMMIT');
       committed = true;

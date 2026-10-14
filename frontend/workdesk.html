@@ -348,6 +348,9 @@
   .rvpane .rvhd .rvsub{font-weight:600;letter-spacing:0;text-transform:none;color:var(--faint);font-size:10.5px;margin-left:auto}
   .rvwho{font-size:12.5px;font-weight:750;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .rvwho span{font-weight:600;color:var(--faint);font-size:11px;margin-left:5px}
+  .rvmemo{display:flex;gap:6px;align-items:baseline;font-size:11.5px;margin:-4px 0 8px;min-width:0}
+  .rvmemok{flex:none;font-weight:700;color:var(--faint);font-size:10.5px}
+  .rvmemov{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .rvnone{min-height:190px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;
           border:1px dashed var(--line2);border-radius:10px;background:var(--card2);text-align:center;padding:16px}
   .rvnone b{font-size:13px;font-weight:750;color:var(--muted)}
@@ -7028,7 +7031,10 @@ function _rvRender2(pane){
   const r=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(STATE.rvSel));
   if(!r){ _rvFill(pane, hd+`<div class="rvnone"><b>행을 선택하세요</b><span>표의 행을 클릭하거나 ↑↓ 키로 이동하면 그 줄의 구매 캡처·리뷰 캡처가 여기 표시됩니다.</span></div>`); return; }
   const who=_rvWho(r);
-  const who2=`<div class="rvwho">${esc(who||'—')}${_rvNoHtml(r)}</div>`;
+  /* 결정 245 — 구매캡처에서 AI 가 읽은 배송메세지 한 줄(서버가 싣는 줄만 · 없으면 그리지 않는다). */
+  const memo=String((r&&r.deliveryMemo)||'').trim();
+  const who2=`<div class="rvwho">${esc(who||'—')}${_rvNoHtml(r)}</div>`
+    +(memo?`<div class="rvmemo" title="구매캡처에서 AI가 읽은 배송메세지(배송요청사항·배송메모)"><span class="rvmemok">배송메세지</span><span class="rvmemov" title="${esc(memo)}">${esc(memo)}</span></div>`:'');
   if(STATE.rvImgs===null){ _rvFill(pane, hd+who2+`<div class="rvnone"><b>제출물을 불러오지 못했습니다</b><span>잠시 후 다시 시도해 주세요.</span></div>`); return; }
   const files=(STATE.rvImgs&&STATE.rvImgs[String(r.seq)])||[];
   /* 기본 두 칸에서는 종전처럼 제목을 생략한다. 내부 현영 대상은 세 갈래를 구분해야 하므로
@@ -11243,7 +11249,10 @@ async function _capSubmit(){
     if(isRev) body.oldFileId=_capCurrent(st); else body.expectFileId=String(st.pre.currentFileId||'');
     const out=await api(K.post,{method:'POST',body:JSON.stringify(body)});
     if(!out||!out.ok) throw new Error(_capErr(out&&out.error,K.label+'를 저장하지 못했습니다.'));
-    const t=st.t; _capClose();
+    const t=st.t; const rowId=st.row&&st.row.id; _capClose();
+    /* 결정 245 — 구매캡처를 바꾸면 서버가 배송메세지를 비운다. 명단 전체를 다시 받지 않으므로 그 줄의 값도 여기서 지운다
+       (안 지우면 새 사진 옆에 옛 사진의 메세지·공동현관 번호가 그대로 남는다 · Codex P2). */
+    if(!isRev&&rowId){ const rr=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(rowId)); if(rr) delete rr.deliveryMemo; }
     toast(isRev
       ? (out.oldTrashed?'리뷰캡처를 교체했습니다 · 이전 사진은 휴지통으로 옮겼습니다':'리뷰캡처를 교체했습니다 · 이전 사진은 드라이브에 남겨 두었습니다')
       : out.replaced

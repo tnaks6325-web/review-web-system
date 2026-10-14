@@ -229,7 +229,7 @@ t('5c 작업표 편집·되돌리기 둘 다 커밋 뒤 참여 기록을 맞추�
 t('5d 캡처 AI 가 옵션 칸을 읽고 캐시 접두를 올렸다', () => {
   const g = read('src/services/gemini.service.js');
   assert.ok(/"productOption":/.test(g));
-  assert.ok(/EXTRACT_CACHE_VERSION = 'extract4'/.test(g));
+  assert.ok(/EXTRACT_CACHE_VERSION = 'extract([4-9]|[1-9]\d+)'/.test(g));   // 4 이상(결정 245 가 5 로 올림)
 });
 t('5e 리뷰어 화면: 홀드 제출에만 판독값 · PRODUCT_MISMATCH 면 경고 창 → confirmedProductKey 로 다시 · PRODUCT_WRONG_PURCHASE 면 제출 안 함', () => {
   const f = readFront('js/search-app.js');
