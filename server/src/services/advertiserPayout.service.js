@@ -16,17 +16,15 @@ async function setAdvertiserPayout({ sheetId, tabName, enabled, by } = {}) {
   if (!sheetId || !tabName) return { ok: false, error: 'bad_request' };
   const on = enabled === true || enabled === 'true' || enabled === 1 || enabled === '1';
   const { rows } = await pool.query(
-    `SELECT COALESCE(tc.sheetless, FALSE) AS sheetless, tc.tab_gid AS "tabGid",
-            -- ★ 연결된 업체 **전부**(한 작업에 여럿일 수 있다 — 전부 계좌를 보게 되므로 저장 뒤 화면이 이름을 모두 말한다)
-            (SELECT array_agg(DISTINCT a.name) FROM advertiser_campaigns ac JOIN advertisers a ON a.id = ac.advertiser_id
-              WHERE ac.deleted_at IS NULL AND ac.sheet_id = tc.sheet_id
-                AND (ac.tab_gid IS NULL OR ac.tab_gid::text = tc.tab_gid::text)) AS "advertiserNames"
+    `SELECT COALESCE(tc.sheetless, FALSE) AS sheetless, tc.tab_gid AS "tabGid"
        FROM tab_configs tc WHERE tc.sheet_id = $1 AND tc.tab_name = $2 LIMIT 1`,
     [sheetId, tabName]);
   if (!rows.length) return { ok: false, error: 'tab_not_found' };
   const t = rows[0];
   if (on && !t.sheetless) return { ok: false, error: 'not_sheetless' };
-  const names = Array.isArray(t.advertiserNames) ? t.advertiserNames.filter(Boolean) : [];
+  // ★ 주인 업체 = trackB.advertiserForTab(탭 지정 > 시트 전체) — 계좌를 보고 입금일을 적는 쪽과 **같은 판정**(Codex 리뷰).
+  const owner = await require('./trackB.service').advertiserForTab({ sheetId, tabName });
+  const names = owner && owner.name ? [owner.name] : [];
   if (on && !names.length) return { ok: false, error: 'no_advertiser' };
   await pool.query(
     `UPDATE tab_configs SET advertiser_payout = $3, advertiser_payout_by = $4, advertiser_payout_at = NOW(), updated_at = NOW()

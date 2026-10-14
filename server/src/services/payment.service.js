@@ -489,7 +489,8 @@ async function listPaymentTargets(opts = {}) {
          맨 앞 사유로 둔다(createBatch 가 issues[0] 을 건너뛴 사유로 말한다). 모르면(조회 실패) 보내지 않는다(fail-closed —
          업체도 보내고 우리도 보내면 되돌릴 수 없다). */
     if (advPayoutTabs === null) issues.unshift('advertiser_payout_unknown');
-    else if (advPayoutTabs.has(key)) issues.unshift('advertiser_pays');
+    else if (advPayoutTabs.paid.has(key)) issues.unshift('advertiser_pays');
+    else if (advPayoutTabs.orphan.has(key)) issues.unshift('advertiser_pays_orphan');   // 보류로 목록에 남긴다(입금 주체 확인 필요)
     // 통장표시가 없어도 이체 자체는 되지만(양식상 필수 아님) 리뷰어가 무슨 돈인지 모른다 → 경고만.
     if (!memo) warnings.push('no_memo');
     /* ★ 양식 계좌 ≠ 등록DB 계좌 — **경고만**(사용자 확정 2026-09-21: 보류시키지 않는다).
@@ -1292,15 +1293,24 @@ async function _loadOwnerAccountsByRow(rows) {
  * ★ 저장소는 tab_configs 한 칸(migration 189) — 이체은행·입금명과 같은 "탭 단위 이체설정" 자리다.
  */
 
-/** 업체 직접 입금 작업 키 집합('sheetId||tabName'). 조회 실패 = null(호출부가 전 건 보류로 접는다 · fail-closed). */
+/** 업체 직접 입금 작업 키('sheetId||tabName') — { paid: 지금 주인 업체가 있는 작업, orphan: 스위치는 켜졌는데 주인 업체가 없는 작업 }.
+ *  ★ 주인 = trackB.advertiserForTab(탭 지정 > 시트 전체 — 화면 노출·입금 기록과 같은 판정). 켠 뒤 업체 연결을 지우면
+ *    아무도 보내지 못하는데 우리 목록에서도 조용히 빠지는 막다른 길이 된다(Codex 리뷰) → orphan 은 **보류로 목록에 남겨** 말한다.
+ *  조회 실패 = null(호출부가 전 건 보류로 접는다 · fail-closed). */
 async function _loadAdvertiserPayoutTabs(sheetIds, tabNames) {
-  if (!sheetIds.length) return new Set();
+  const out = { paid: new Set(), orphan: new Set() };
+  if (!sheetIds.length) return out;
   try {
     const { rows } = await pool.query(
       `SELECT sheet_id AS "sheetId", tab_name AS "tabName" FROM tab_configs
         WHERE sheet_id = ANY($1) AND tab_name = ANY($2) AND advertiser_payout = TRUE`,
       [sheetIds, tabNames]);
-    return new Set(rows.map(r => r.sheetId + '||' + r.tabName));
+    const tb = rows.length ? require('./trackB.service') : null;   // 지연 require(순환 방지)
+    for (const r of rows) {
+      const owner = await tb.advertiserForTab({ sheetId: r.sheetId, tabName: r.tabName });
+      (owner && owner.id ? out.paid : out.orphan).add(r.sheetId + '||' + r.tabName);
+    }
+    return out;
   } catch (e) {
     logger.warn('[payment] 업체 직접 입금 작업 조회 실패(전 건 보류): ' + e.message);
     return null;
@@ -1465,8 +1475,9 @@ async function createBatch({ bank, rows, by }) {
         /* ★★ 결정 247 — 잠근 줄에서 **다시** 본다(대상 목록은 잠그기 전에 계산했다):
              ① 그 사이 업체 직접 입금으로 바뀐 작업 ② 작업표 입금 칸에 이미 날짜가 있는 줄(업체가 기록했는데 장부 재생성이
              밀려 review_index 가 아직 미입금인 경우 — 그대로 담으면 업체와 우리가 둘 다 보낸다). 걸리면 그 건만 건너뛴다. */
+        // FOR SHARE — 스위치 저장(UPDATE)과 직렬화한다(켜는 중이면 끝날 때까지 기다렸다가 켜진 값을 본다).
         const { rows: payerRows } = await client.query(
-          `SELECT advertiser_payout FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`, [it.sheetId, it.tabName]);
+          `SELECT advertiser_payout FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1 FOR SHARE`, [it.sheetId, it.tabName]);
         const lateReason = (payerRows[0] && payerRows[0].advertiser_payout === true) ? 'advertiser_pays'
           : (lockRows[0] && String(lockRows[0].paidCell == null ? '' : lockRows[0].paidCell).trim()) ? 'already_paid' : '';
         if (lateReason) {

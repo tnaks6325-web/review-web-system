@@ -1273,6 +1273,11 @@ router.post('/workdesk/deposit-date', authMiddleware, async (req, res, next) => 
       if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
       const g = await _ensureThreadScope(req, sheetId, tabName);
       if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+      // ★ 그리고 **지금 주인 업체**여야 한다(탭 지정 > 시트 전체 — 화면 노출과 같은 판정 · Codex 리뷰).
+      const owner = await svc.advertiserForTab({ sheetId: String(sheetId), tabName: String(tabName) }).catch(() => null);
+      if (!owner || String(owner.id) !== String((req.admin && req.admin.advertiser_id) || '')) {
+        return res.status(403).json({ ok: false, error: '이 작업의 업체가 아닙니다.' });
+      }
       advertiser = true;
     } else if (!['master', 'admin', 'staff'].includes(role)) {
       return res.status(403).json({ ok: false, error: '권한 없음' });
@@ -1287,7 +1292,7 @@ router.post('/workdesk/deposit-date', authMiddleware, async (req, res, next) => 
     const code = out.ok ? 200
       : (out.error === 'not_sheetless' ? 409
         : (out.error === 'concurrent_edit_conflict' ? 409
-          : (['advertiser_payout_off', 'our_payout', 'not_own_entry', 'review_not_submitted'].includes(out.error) ? 403 : 400)));
+          : (['advertiser_payout_off', 'our_payout', 'not_own_entry', 'review_not_submitted', 'not_payout_target'].includes(out.error) ? 403 : 400)));
     res.status(code).json(out);
   } catch (err) { next(err); }
 });

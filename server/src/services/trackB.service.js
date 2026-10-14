@@ -2732,6 +2732,12 @@ function _isAdvertiserRestrictedHeader(header) {
    ★ 차단 목록(_isAdvertiserRestrictedHeader)은 그대로다 — 원본 열은 계속 빠지고, 이 세 칸은 입금 판정 결과로만 채운다. */
 const ADV_PAYOUT_HEADERS = ['은행', '계좌번호', '예금주'];
 const ADV_PAYOUT_FIELD = { '은행': 'bank', '계좌번호': 'account', '예금주': 'holder' };
+/* 그 줄의 송금 계좌(없으면 null). ★ 줄 번호(seq)에 더해 **명의(phone8)까지** 같아야 한다 — 장부가 늦은 사이 빈 줄이 다른 사람에게
+   재배정되면 남의 계좌가 엉뚱한 줄에 보인다(리뷰 반영). 다르면 null(fail-closed). 화면 노출·기록 잠금·서버 기록 검사가 같이 쓴다. */
+function _advPayoutAcct(advPayout, r) {
+  const a0 = advPayout && advPayout.accounts ? advPayout.accounts.get(Number(r.seq)) : null;
+  return (a0 && String(a0.phone8 || '') !== '' && String(a0.phone8) === String(r.phone8 == null ? '' : r.phone8)) ? a0 : null;
+}
 
 function _isAdvertiserUserIdHeader(header) {
   // 주문원장에 값을 쓰는 것과 같은 분류를 사용한다. 일반 '상품아이디'·'비고(아이디확인)'는
@@ -3667,8 +3673,11 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
        ④ 대상 = 리뷰 제출 끝 + 미입금 줄만(입금일을 기록하면 계좌가 가려진다)
        ★ 계좌 조회 실패 = 계좌 칸을 비우고 사실을 싣는다(지어내지 않는다) · 잠금 재료 조회 실패 = 기록 창구를 전부 잠근다(fail-closed). */
   let advPayout = null;
+  /* ★ 소유 판정은 **지금 주인 업체 한 곳**(advertiserForTab: 탭 지정 > 시트 전체) — canAccessTab 은 시트 전체 소유를 먼저 통과시켜
+       탭을 다른 업체로 옮긴 경우 옛 주인에게도 계좌가 보인다(Codex 리뷰). */
   if (role === 'advertiser' && !archived && advHeaders && !brandId && advertiserId && meta[0] && meta[0].advertiserPayout === true
-      && meta[0].sheetless === true && await advOwnsTab()) {
+      && meta[0].sheetless === true
+      && String(((await advertiserForTab({ sheetId, tabName }).catch(() => null)) || {}).id || '') === String(advertiserId)) {
     advPayout = { accounts: new Map(), unavailable: false, lockAll: '', batchSeqs: new Set(), advEntries: new Map() };
     try {
       advPayout.accounts = await require('./payment.service').advertiserPayoutAccounts({ sheetId, tabName });
@@ -3839,10 +3848,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       for (const h of advHeaders) {
         // 결정 247 — 송금 계좌 세 칸은 원본 행이 아니라 입금 판정 결과에서만 채운다(원본 열 값이 섞이지 않게).
         if (advPayout && Object.prototype.hasOwnProperty.call(ADV_PAYOUT_FIELD, h)) {
-          // ★ 줄 번호(seq)에 더해 **명의(phone8)까지** 같아야 싣는다 — 장부가 늦은 사이 빈 줄이 다른 사람에게 재배정되면
-          //   남의 계좌가 엉뚱한 줄에 보인다(리뷰 반영). 다르면 비운다(fail-closed).
-          const a0 = advPayout.accounts.get(Number(r.seq));
-          const a = (a0 && String(a0.phone8 || '') !== '' && String(a0.phone8) === String(r.phone8 == null ? '' : r.phone8)) ? a0 : null;
+          const a = _advPayoutAcct(advPayout, r);
           let v = a ? (a[ADV_PAYOUT_FIELD[h]] || '') : '';
           // 결정 231 — 우리가 이 계좌로 이체해 이미 실패한 적이 있으면 업체에게도 알린다(은행 칸 옆 표시).
           if (a && h === '은행' && a.failed) v = (v ? v + ' ' : '') + '(⚠ 이체 실패 이력 — 리뷰어에게 계좌 확인)';
@@ -3866,7 +3872,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
                 : advPayout.batchSeqs.has(Number(r.seq)) ? 'our_payout'
                   : (paidVal && !byAdv) ? 'not_own'
                     // 새 날짜는 리뷰 제출이 끝난 줄에만(서버가 같은 판정을 트랜잭션 안에서 다시 한다) — 업체가 넣은 값 비우기는 그대로 연다.
-                    : (!paidVal && !reviewSubmitted) ? 'not_submitted' : '';
+                    : (!paidVal && !reviewSubmitted) ? 'not_submitted'
+                      // 그리고 **계좌가 보이는 줄에만**(입금 대상 = 계좌를 받은 줄 · Codex 리뷰). 계좌 조회 실패면 전부 잠근다.
+                      : (!paidVal && !_advPayoutAcct(advPayout, r)) ? (advPayout.unavailable ? 'unknown' : 'no_account') : '';
         syn.depositEditable = !lock;
         if (lock) syn.depositLock = lock;
         syn.depositByAdvertiser = byAdv;
@@ -5019,6 +5027,14 @@ async function setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by = 'adm
   catch (_) { sheetless = false; }
   if (!sheetless) return { ok: false, error: 'not_sheetless' };
 
+  /* 결정 247 — 업체가 **새 날짜**를 적을 수 있는 줄 = 업체 화면에 계좌가 보이는 줄(입금 대상)과 같은 판정(Codex 리뷰).
+     대상 계산은 큰 조회라 트랜잭션 앞에서 한 번 하고, 잠근 행과 명의(phone8)까지 맞춰 본다. 계산 실패 = 거부(fail-closed). */
+  let advCandidates = null;
+  if (advertiser && !clearing) {
+    try { advCandidates = await require('./payment.service').advertiserPayoutAccounts({ sheetId, tabName }); }
+    catch (e) { return { ok: false, error: 'lookup_failed', message: e.message }; }
+  }
+
   const client = await db.connect();
   let ctx = null;
   try {
@@ -5064,8 +5080,9 @@ async function setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by = 'adm
     if (advertiser) {
       const advPrefix = '업체#' + String(advertiserId || '') + ':';
       if (!advertiserId) { await client.query('ROLLBACK'); return { ok: false, error: 'not_own_entry' }; }
+      // FOR SHARE — 스위치 끄기(UPDATE)와 직렬화한다. 끄는 중이면 끝날 때까지 기다렸다가 꺼진 값을 보고 거부한다(Codex 리뷰).
       const { rows: fl } = await client.query(
-        `SELECT advertiser_payout FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`, [sheetId, tabName]);
+        `SELECT advertiser_payout FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1 FOR SHARE`, [sheetId, tabName]);
       if (!(fl[0] && fl[0].advertiser_payout === true)) { await client.query('ROLLBACK'); return { ok: false, error: 'advertiser_payout_off' }; }
       const { rows: bi } = await client.query(
         `SELECT 1 FROM payment_batch_items
@@ -5093,6 +5110,7 @@ async function setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by = 'adm
           fulfilled = require('./reviewObligation.service').classifyCell(submitHeader ? rj[submitHeader] : '', !!submitHeader) === 'fulfilled';
         }
         if (cl.length || !fulfilled) { await client.query('ROLLBACK'); return { ok: false, error: 'review_not_submitted' }; }
+        if (!_advPayoutAcct({ accounts: advCandidates }, row)) { await client.query('ROLLBACK'); return { ok: false, error: 'not_payout_target' }; }
       }
       if (prev) {
         const { rows: own } = await client.query(

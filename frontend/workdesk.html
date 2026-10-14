@@ -9787,6 +9787,7 @@ const _ADV_DEPOSIT_LOCK={
   no_column:'이 작업표에 입금 칸이 없습니다 — 담당자에게 문의해 주세요',
   unknown:'지금은 입금 기록 가능 여부를 확인하지 못했습니다 — 새로고침해 주세요',
   not_submitted:'리뷰 제출이 끝난 줄에만 입금일을 기록할 수 있습니다',
+  no_account:'계좌가 보이는 줄에만 입금일을 기록할 수 있습니다 — 계좌가 비어 있으면 담당자에게 문의해 주세요',
   column_mismatch:'이 작업의 입금 칸 설정이 맞지 않아 기록할 수 없습니다 — 담당자에게 문의해 주세요',
 };
 function _isAdvPayout(){ const ap=STATE.wd&&STATE.wd.advertiserPayout; return STATE.role==='advertiser'&&!!(ap&&ap.on); }
@@ -9854,6 +9855,7 @@ const _DEPOSIT_ERRORS={
   our_payout:'저희가 이 줄의 입금을 이미 처리하고 있습니다 — 담당자에게 문의해 주세요.',
   not_own_entry:'저희가 기록한 입금일이라 업체 화면에서는 고칠 수 없습니다 — 담당자에게 문의해 주세요.',
   review_not_submitted:'리뷰 제출이 끝난 줄에만 입금일을 기록할 수 있습니다.',
+  not_payout_target:'계좌가 보이는 줄에만 입금일을 기록할 수 있습니다 — 새로고침해 주세요.',
 };
 function _depositErrText(r){
   const code=r&&r.error;
@@ -12234,6 +12236,7 @@ const PAY_ISSUE_LABEL = {
   no_bank:'이체은행 미지정', no_reviewer:'리뷰어 정보 없음', bank_unknown:'은행명 인식불가',
   no_account:'계좌 미등록', no_holder:'예금주 미등록', no_price:'결제금액 조회안됨', zero_amount:'금액 0원',
   advertiser_pays:'업체 직접 입금 작업', advertiser_payout_unknown:'입금 주체 확인 실패(새로고침)',
+  advertiser_pays_orphan:'업체 직접 입금인데 연결된 업체 없음 — 작업 조건 › 입금 주체 확인',
 };
 const PAY_BANKS = [['kbank','케이뱅크'],['hana','하나은행']];
 /* 보완 창구 분류 — ★ 사유마다 "고치는 곳"이 다르다.
