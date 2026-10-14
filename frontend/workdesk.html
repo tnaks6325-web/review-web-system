@@ -7764,7 +7764,7 @@ function _cndPayerModal(cd){
     title:'💰 입금 주체 — 누가 페이백을 보내나요?',
     body:`<div class="cndchips" id="cndPayerChips">${opts.map(([v,l])=>`<button type="button" class="wbl-b${(v==='1')===cur?' on':''}" data-v="${v}" onclick="_cndPayerPick(this)">${esc(l)}</button>`).join('')}</div>`+
       `<div class="cndnote"><b>업체 직접 입금</b>으로 바꾸면<br>`+
-      `· 이 작업을 가진 업체의 <b>대표 링크</b> 작업보드에 <b>은행·계좌번호·예금주</b>가 보입니다(리뷰 제출이 끝나고 아직 입금 안 된 줄만 · 브랜드 링크에는 안 보입니다)<br>`+
+      `· 이 작업에 연결된 업체의 작업보드(<b>대표 링크·업체 로그인</b>)에 <b>은행·계좌번호·예금주</b>가 보입니다(리뷰 제출이 끝나고 아직 입금 안 된 줄만 · 브랜드 링크에는 안 보입니다)<br>`+
       `· 업체가 입금 칸을 우클릭해 <b>입금일을 기록</b>합니다 — 리뷰어 화면에 입금 날짜가 표시됩니다<br>`+
       `· <b>우리 입금관리 목록과 이체 파일에서 빠집니다</b>(이중 입금 방지)<br>`+
       `<span style="color:#B91C1C">⚠ 업체 링크는 로그인 없이 열립니다 — 링크를 가진 사람은 참여자 계좌를 보게 됩니다. 믿을 수 있는 담당자에게만 링크를 주세요.</span></div>`,
@@ -7772,10 +7772,16 @@ function _cndPayerModal(cd){
     onSave: async ()=>{
       const sel=document.querySelector('#cndPayerChips .wbl-b.on');
       if(!sel){ _toast('입금 주체를 선택해 주세요.'); return false; }
+      const on=sel.dataset.v==='1';
+      /* ★ 끌 때는 확인을 받는다(리뷰 반영) — 입금일이 아직 기록 안 된 줄이 **바로 우리 입금 목록으로 돌아온다**.
+           업체가 이미 보냈는데 날짜만 안 적은 줄을 우리가 또 보내면 이중 입금이다. */
+      if(cur && !on && !confirm('업체 직접 입금을 끕니다.\n\n· 입금일이 기록되지 않은 줄이 바로 우리 입금관리 목록으로 돌아옵니다\n· 업체가 이미 보냈는데 날짜만 안 적은 줄이 있는지 먼저 업체에 확인해 주세요(그대로 보내면 이중 입금)\n· 업체 화면의 계좌 칸·입금일 기록은 바로 닫힙니다\n\n진행할까요?')) return false;
       const t=STATE.cur;
       const r=await api('/api/trackb/payment/advertiser-payout',{method:'POST',
-        body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,enabled:sel.dataset.v==='1'})}).catch(()=>null);
+        body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,enabled:on})}).catch(()=>null);
       if(!r||!r.ok){ _toast(_PAYER_ERRORS[r&&r.error]||('저장하지 못했습니다'+(r&&r.error?' — '+r.error:''))); return false; }
+      // 연결된 업체가 여럿이면 전부 계좌를 보게 된다 — 누구에게 열렸는지 이름으로 말한다.
+      if(on && Array.isArray(r.advertiserNames) && r.advertiserNames.length) setTimeout(()=>_toast('계좌가 보이는 업체: '+r.advertiserNames.join(', ')),900);
       return true;
     }
   });
@@ -9780,6 +9786,8 @@ const _ADV_DEPOSIT_LOCK={
   no_anchor:'이 줄은 아직 주문 정보가 없어 입금을 기록할 수 없습니다',
   no_column:'이 작업표에 입금 칸이 없습니다 — 담당자에게 문의해 주세요',
   unknown:'지금은 입금 기록 가능 여부를 확인하지 못했습니다 — 새로고침해 주세요',
+  not_submitted:'리뷰 제출이 끝난 줄에만 입금일을 기록할 수 있습니다',
+  column_mismatch:'이 작업의 입금 칸 설정이 맞지 않아 기록할 수 없습니다 — 담당자에게 문의해 주세요',
 };
 function _isAdvPayout(){ const ap=STATE.wd&&STATE.wd.advertiserPayout; return STATE.role==='advertiser'&&!!(ap&&ap.on); }
 function _depositMenuBlockReason(td, row){
@@ -9845,6 +9853,7 @@ const _DEPOSIT_ERRORS={
   advertiser_payout_off:'이 작업은 지금 업체 직접 입금 작업이 아닙니다 — 새로고침해 주세요.',
   our_payout:'저희가 이 줄의 입금을 이미 처리하고 있습니다 — 담당자에게 문의해 주세요.',
   not_own_entry:'저희가 기록한 입금일이라 업체 화면에서는 고칠 수 없습니다 — 담당자에게 문의해 주세요.',
+  review_not_submitted:'리뷰 제출이 끝난 줄에만 입금일을 기록할 수 있습니다.',
 };
 function _depositErrText(r){
   const code=r&&r.error;

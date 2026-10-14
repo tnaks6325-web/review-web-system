@@ -55,6 +55,9 @@ function payHandler(o = {}) {
       sheetId: 'S1', tabName: 'T1', rowIndex: 7, reviewerName: '김혜진', phone8: '83540507',
       startDate: '10 / 14 (수)', productName: '미소 누룽지', amountCells: { '결제금액': '11,850' },
     }] };
+    if (/SELECT advertiser_payout FROM tab_configs/.test(sql)) return { rows: [{ advertiser_payout: !!o.lockFlag }] };
+    if (/AS "paidCell"/.test(sql)) return { rows: [{ id: 'cp1', paidCell: o.paidCell || '' }] };
+    if (/INSERT INTO payment_batches/.test(sql)) return { rows: [{ id: 'b1' }] };
     if (/advertiser_payout = TRUE/.test(sql)) {
       if (o.throwFlag) throw new Error('flag boom');
       return { rows: o.flagOn ? [{ sheetId: 'S1', tabName: 'T1' }] : [] };
@@ -112,6 +115,8 @@ function payHandler(o = {}) {
       assert.strictEqual(a.holder, '김혜진');
       assert.ok(/우리/.test(a.bank));
       assert.strictEqual(m.get(8), undefined, '대상이 아닌 줄은 계좌가 없다');
+      assert.strictEqual(a.phone8, '83540507', '화면 줄과 명의를 맞춰 보기 위해 phone8 을 싣는다');
+      assert.strictEqual(a.failed, false);
     }));
 
   await ta('1f ★★ 회차 만들기 — 화면이 보낸 줄이어도 advertiser_pays 사유로 건너뛴다', () =>
@@ -122,9 +127,23 @@ function payHandler(o = {}) {
       assert.strictEqual(sk[0] && sk[0].reason, 'advertiser_pays', '건너뛴 사유 = 업체 직접 입금: ' + JSON.stringify(r));
     }));
 
+  await ta('1g ★★ 회차 만들기 — 목록 계산 뒤 스위치가 켜졌으면 잠근 줄에서 다시 보고 건너뛴다', () =>
+    withStubPool(payHandler({ flagOn: false, lockFlag: true }), 'services/payment.service', async svc => {
+      const r = await svc.createBatch({ bank: 'kbank', rows: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 7 }], by: 't' });
+      assert.notStrictEqual(r.ok, true);
+      assert.strictEqual(r.skipped[0].reason, 'advertiser_pays');
+    }));
+  await ta('1h ★★ 회차 만들기 — 작업표 입금 칸에 이미 날짜가 있으면(장부가 늦은 경우) 담지 않는다', () =>
+    withStubPool(payHandler({ flagOn: false, paidCell: '10/15' }), 'services/payment.service', async svc => {
+      const r = await svc.createBatch({ bank: 'kbank', rows: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 7 }], by: 't' });
+      assert.notStrictEqual(r.ok, true);
+      assert.strictEqual(r.skipped[0].reason, 'already_paid');
+    }));
+
   console.log('\n§2 스위치 저장 — 막다른 길을 만들지 않는다');
   const tabRow = (o) => (sql) => {
-    if (/FROM tab_configs tc WHERE tc\.sheet_id/.test(sql)) return { rows: o.noTab ? [] : [{ sheetless: o.sheetless !== false, tabGid: '1', advertiserName: o.adv === undefined ? '스마트윈' : o.adv }] };
+    if (/FROM tab_configs tc WHERE tc\.sheet_id/.test(sql)) return { rows: o.noTab ? [] : [{ sheetless: o.sheetless !== false, tabGid: '1',
+      advertiserNames: o.adv === undefined ? ['스마트윈', '스마트윈2'] : (o.adv ? [o.adv] : null) }] };
     if (/UPDATE tab_configs SET advertiser_payout/.test(sql)) return { rows: [], rowCount: 1 };
     return { rows: [] };
   };
@@ -143,6 +162,7 @@ function payHandler(o = {}) {
     withStubPool(tabRow({}), 'services/advertiserPayout.service', async (svc, calls) => {
       const r = await svc.setAdvertiserPayout({ sheetId: 'S', tabName: 'T', enabled: true, by: '관리자' });
       assert.strictEqual(r.ok, true); assert.strictEqual(r.enabled, true); assert.strictEqual(r.advertiserName, '스마트윈');
+      assert.deepStrictEqual(r.advertiserNames, ['스마트윈', '스마트윈2'], '연결된 업체 전부를 돌려준다(전부 계좌를 보게 된다)');
       const up = calls.find(c => /UPDATE tab_configs SET advertiser_payout/.test(c.sql));
       assert.deepStrictEqual(up.params, ['S', 'T', true, '관리자']);
     }));
@@ -172,7 +192,9 @@ function payHandler(o = {}) {
         if (/SELECT submit_col2 AS h FROM review_index/.test(s)) return { rows: [{ h: '입금일' }] };
         if (/SELECT advertiser_payout FROM tab_configs/.test(s)) return { rows: sc.flag === false ? [{ advertiser_payout: false }] : [{ advertiser_payout: true }] };
         if (/SELECT 1 FROM payment_batch_items/.test(s)) return { rows: sc.ourBatch ? [{ '?column?': 1 }] : [] };
-        if (/created_by LIKE '업체:%'/.test(s)) return { rows: sc.ownValue == null ? [] : [{ value_text: sc.ownValue }] };
+        if (/left\(created_by, length\(\$6\)\) = \$6/.test(s)) { sc.ownPrefix = params[5]; return { rows: sc.ownValue == null ? [] : [{ value_text: sc.ownValue }] }; }
+        if (/FROM review_closed_targets/.test(s)) return { rows: sc.closed ? [{ '?column?': 1 }] : [] };
+        if (/FROM reviewer_participations/.test(s)) return { rows: [{ review_obligation_status: sc.notSubmitted ? 'pending' : 'fulfilled' }] };
         if (/UPDATE campaign_participants SET row_json/.test(s)) return { rowCount: 1, rows: [] };
         if (/UPDATE participant_edits SET reverted_at/.test(s)) return { rowCount: 1, rows: [] };
         if (/INSERT INTO participant_edits/.test(s)) return { rows: [{ id: 7 }] };
@@ -192,13 +214,13 @@ function payHandler(o = {}) {
   }
   const writes = p => p.q.filter(x => /^(UPDATE|INSERT|DELETE)/.test(x.s));
   const dep = (sc, date, adv = true) => { const p = makePool(sc); svc.__setPoolForTest(p);
-    return svc.setWorkdeskDepositDate({ sheetId: 'S', tabName: 'T', rowId: 'row-1', date, by: adv ? '업체:스마트윈' : '망고', advertiser: adv }).then(r => ({ r, p })); };
+    return svc.setWorkdeskDepositDate({ sheetId: 'S', tabName: 'T', rowId: 'row-1', date, by: adv ? '업체#adv_1:스마트윈' : '망고', advertiser: adv, advertiserId: adv ? 'adv_1' : '' }).then(r => ({ r, p, sc })); };
   try {
     await ta('3a 빈 칸에 기록 — 업체 이름으로 편집기록이 남는다', async () => {
       const { r, p } = await dep({ prev: '' }, '2026-10-15');
       assert.strictEqual(r.ok, true); assert.strictEqual(r.value, '10/15');
       const ins = p.q.find(x => /INSERT INTO participant_edits/.test(x.s) && x.params[4] === 'col:입금일');
-      assert.strictEqual(ins.params[6], '업체:스마트윈');
+      assert.strictEqual(ins.params[6], '업체#adv_1:스마트윈', '업체 id 까지 남긴다(같은 이름·여러 업체 구분)');
     });
     await ta('3b ★ 스위치를 끈 뒤의 요청은 거부(쓰기 0건)', async () => {
       const { r, p } = await dep({ prev: '', flag: false }, '2026-10-15');
@@ -214,9 +236,18 @@ function payHandler(o = {}) {
       const b = await dep({ prev: '10/12', ownValue: '10/11' }, '2026-10-15');
       assert.strictEqual(b.r.error, 'not_own_entry', '업체 기록이 있어도 지금 칸 값과 다르면(그 뒤 다른 기록) 거부');
     });
-    await ta('3e 업체가 넣은 값은 업체가 지울 수 있다', async () => {
-      const { r } = await dep({ prev: '10/15', ownValue: '10/15' }, '');
+    await ta('3e 업체가 넣은 값은 업체가 지울 수 있다 — 소유 판정은 **그 업체 id** 기준', async () => {
+      const { r, sc } = await dep({ prev: '10/15', ownValue: '10/15' }, '');
       assert.strictEqual(r.ok, true); assert.strictEqual(r.cleared, true);
+      assert.strictEqual(sc.ownPrefix, '업체#adv_1:', '다른 업체의 기록과 섞이지 않게 접두어에 업체 id');
+    });
+    await ta('3g ★ 리뷰 제출 전 줄에는 새 입금일을 기록하지 못한다(비우기는 된다)', async () => {
+      const a = await dep({ prev: '', notSubmitted: true }, '2026-10-15');
+      assert.strictEqual(a.r.error, 'review_not_submitted'); assert.strictEqual(writes(a.p).length, 0);
+      const c = await dep({ prev: '', closed: true }, '2026-10-15');
+      assert.strictEqual(c.r.error, 'review_not_submitted', '미작성 종결 줄도 막는다');
+      const b = await dep({ prev: '10/15', ownValue: '10/15', notSubmitted: true }, '');
+      assert.strictEqual(b.r.ok, true, '업체가 잘못 넣은 값은 거둬들일 수 있어야 한다');
     });
     await ta('3f 내부 담당자 경로는 종전 그대로(업체 검사를 타지 않는다)', async () => {
       const { r, p } = await dep({ prev: '10/12' }, '', false);
@@ -230,22 +261,28 @@ function payHandler(o = {}) {
   const routes = read('src/routes/trackB.routes.js');
   const html = fs.readFileSync(path.join(ROOT, '..', 'frontend', 'workdesk.html'), 'utf8');
   await ta('4a ★★ 계좌 칸은 소유 업체 대표 링크만 — 브랜드 세션·남의 업체(작업보드는 모든 업체가 열람) 제외', () => {
-    assert.match(tb, /role === 'advertiser' && !archived && advHeaders && !brandId && meta\[0\] && meta\[0\]\.advertiserPayout === true\s*\n\s*&& await advOwnsTab\(\)/);
+    assert.match(tb, /role === 'advertiser' && !archived && advHeaders && !brandId && advertiserId && meta\[0\] && meta\[0\]\.advertiserPayout === true\s*\n\s*&& meta\[0\]\.sheetless === true && await advOwnsTab\(\)/);
+    // 명의(phone8)까지 맞아야 싣는다 — 줄 재배정 시 남의 계좌 노출 방지
+    assert.match(tb, /String\(a0\.phone8\) === String\(r\.phone8 == null \? '' : r\.phone8\)/);
+    // 업체 응답 meta 에서 내부 정산 값 제거
+    assert.match(tb, /if \(role === 'advertiser'\) \{ delete _resMeta\.depositName; delete _resMeta\.tabReviewFee; delete _resMeta\.tabTransferBank; delete _resMeta\.advertiserPayout; \}/);
   });
   await ta('4b ★★ 원본 은행·계좌·예금주 열은 계속 차단 — 세 칸은 입금 판정 결과로만 채운다', () => {
     assert.match(tb, /\|\| \/은행\|bank\/\.test\(key\)/);
-    assert.match(tb, /if \(advPayout && Object\.prototype\.hasOwnProperty\.call\(ADV_PAYOUT_FIELD, h\)\) \{\s*\n\s*const a = advPayout\.accounts\.get\(Number\(r\.seq\)\);/);
+    assert.match(tb, /if \(advPayout && Object\.prototype\.hasOwnProperty\.call\(ADV_PAYOUT_FIELD, h\)\) \{[\s\S]{0,400}?const a0 = advPayout\.accounts\.get\(Number\(r\.seq\)\);/);
     assert.match(tb, /advertiserPayoutAccounts\(\{ sheetId, tabName \}\)/);
   });
   await ta('4c 잠금 재료 조회 실패 = 기록 창구 전부 잠금(fail-closed)', () => {
-    assert.match(tb, /advPayout\.lockAll = true;/);
-    assert.match(tb, /: advPayout\.lockAll \? 'unknown'/);
+    assert.match(tb, /advPayout\.lockAll = 'unknown';/);
+    assert.match(tb, /if \(!tabPaidHeader \|\| writeHeader !== tabPaidHeader\) advPayout\.lockAll = 'column_mismatch';/);
+    assert.match(tb, /: advPayout\.lockAll \? advPayout\.lockAll/);
+    assert.match(tb, /: \(!paidVal && !reviewSubmitted\) \? 'not_submitted'/);
   });
   await ta('4d 라우트 — 브랜드 세션 403 · 소유 스코프 · 스위치는 관리자 전용', () => {
     const dd = routes.slice(routes.indexOf("router.post('/workdesk/deposit-date'"), routes.indexOf("router.get('/workdesk/cell-edits'"));
     assert.match(dd, /req\.admin\.brand_id\) return res\.status\(403\)/);
     assert.match(dd, /await _ensureThreadScope\(req, sheetId, tabName\)/);
-    assert.match(dd, /advertiser \? \('업체:'/);
+    assert.match(dd, /advertiser \? \('업체#' \+ advertiserId \+ ':'/);
     assert.match(routes, /router\.post\('\/payment\/advertiser-payout', authMiddleware, adminOrMasterMiddleware/);
   });
   await ta('4e 업체 렌즈는 화이트리스트라 입금 주체(advertiserPayout)가 업체 작업 조건에 나가지 않는다', () => {
@@ -264,7 +301,7 @@ function payHandler(o = {}) {
     vm.runInContext(html.match(/function _depositMenuBlockReason\(td, row\)\{[\s\S]*?\n\}/)[0], sb);
     const f = vm.runInContext('_depositMenuBlockReason', sb);
     assert.strictEqual(f({}, { depositEditable: true }), '');
-    for (const k of ['our_payout', 'not_own', 'ambiguous', 'no_anchor', 'no_column', 'unknown']) {
+    for (const k of ['our_payout', 'not_own', 'ambiguous', 'no_anchor', 'no_column', 'unknown', 'not_submitted', 'column_mismatch']) {
       assert.ok(f({}, { depositEditable: false, depositLock: k }).length > 5, '사유 문구 없음: ' + k);
     }
     sb.STATE = { role: 'advertiser', wd: {} };

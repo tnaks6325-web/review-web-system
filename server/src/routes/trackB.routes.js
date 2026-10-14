@@ -1278,13 +1278,16 @@ router.post('/workdesk/deposit-date', authMiddleware, async (req, res, next) => 
       return res.status(403).json({ ok: false, error: '권한 없음' });
     }
     if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
-    // 업체 기록은 편집기록에 "업체:<이름>" 으로 남는다 — 업체가 넣은 값인지(지우기 허용) 판정의 근거다.
-    const by = advertiser ? ('업체:' + String((req.admin && (req.admin.name || req.admin.advertiser_id)) || '')).slice(0, 100) : _by(req);
-    const out = await svc.setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by, advertiser });
+    // 업체 기록은 편집기록에 "업체#<업체id>:<이름>" 으로 남는다 — **그 업체가** 넣은 값인지(고치기·지우기 허용) 판정의 근거다.
+    //   ★ 업체 id 를 넣는다 — 한 작업에 업체가 여럿 연결되거나 이름이 같아도 남의 업체 기록을 고치지 못하게(리뷰 반영).
+    const advertiserId = advertiser ? String((req.admin && req.admin.advertiser_id) || '') : '';
+    if (advertiser && !advertiserId) return res.status(403).json({ ok: false, error: '업체 정보가 없는 세션입니다.' });
+    const by = advertiser ? ('업체#' + advertiserId + ':' + String((req.admin && req.admin.name) || '')).slice(0, 100) : _by(req);
+    const out = await svc.setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by, advertiser, advertiserId });
     const code = out.ok ? 200
       : (out.error === 'not_sheetless' ? 409
         : (out.error === 'concurrent_edit_conflict' ? 409
-          : (['advertiser_payout_off', 'our_payout', 'not_own_entry'].includes(out.error) ? 403 : 400)));
+          : (['advertiser_payout_off', 'our_payout', 'not_own_entry', 'review_not_submitted'].includes(out.error) ? 403 : 400)));
     res.status(code).json(out);
   } catch (err) { next(err); }
 });

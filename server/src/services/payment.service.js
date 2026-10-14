@@ -1324,6 +1324,8 @@ async function advertiserPayoutAccounts({ sheetId, tabName } = {}) {
       bank: it.bankOfficial || it.bankName || '',
       account: it.bankAccount || '',
       holder: it.accountHolder || '',
+      phone8: it.phone8 || '',                          // 화면 줄과 명의까지 맞을 때만 싣는다(trackB.workdeskTab)
+      failed: Number(it.failedAccountCount || 0) > 0,   // 결정 231 — 이 계좌로 이미 이체 실패
     });
   }
   return map;
@@ -1456,9 +1458,22 @@ async function createBatch({ bank, rows, by }) {
       await client.query('SAVEPOINT sp_item');
       try {
         // Serialize with manual closure; a stale payment list cannot enqueue a closed row.
-        await client.query(`SELECT id FROM campaign_participants
+        const { rows: lockRows } = await client.query(`SELECT id, row_json ->> COALESCE(submit_col2, '') AS "paidCell"
+            FROM campaign_participants
           WHERE sheet_id=$1 AND tab_name=$2 AND seq=$3 AND active=TRUE AND deleted_at IS NULL FOR UPDATE`,
         [it.sheetId, it.tabName, it.rowIndex]);
+        /* ★★ 결정 247 — 잠근 줄에서 **다시** 본다(대상 목록은 잠그기 전에 계산했다):
+             ① 그 사이 업체 직접 입금으로 바뀐 작업 ② 작업표 입금 칸에 이미 날짜가 있는 줄(업체가 기록했는데 장부 재생성이
+             밀려 review_index 가 아직 미입금인 경우 — 그대로 담으면 업체와 우리가 둘 다 보낸다). 걸리면 그 건만 건너뛴다. */
+        const { rows: payerRows } = await client.query(
+          `SELECT advertiser_payout FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`, [it.sheetId, it.tabName]);
+        const lateReason = (payerRows[0] && payerRows[0].advertiser_payout === true) ? 'advertiser_pays'
+          : (lockRows[0] && String(lockRows[0].paidCell == null ? '' : lockRows[0].paidCell).trim()) ? 'already_paid' : '';
+        if (lateReason) {
+          await client.query('RELEASE SAVEPOINT sp_item');
+          skipped.push({ key: it.sheetId + '||' + it.tabName + '||' + it.rowIndex, reason: lateReason });
+          continue;
+        }
         const closed = await client.query(`SELECT 1 FROM review_closed_targets
           WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3`, [it.sheetId, it.tabName, it.rowIndex]);
         if (closed.rows.length) {
