@@ -92,6 +92,10 @@ const base = { title: '10/14 테스트 공고', status: 'draft' };
   const lrq = require('../src/services/linkedRecruitQuota.service');
   ok('★ 잠그고 확인한 정규화 값(_srcWoId)을 그대로 저장한다(Codex PR #1632)', /\n\s*_srcWoId,\s*\/\/ ★ 결정 246/.test(src)
     && !/\n\s*source_work_order_id \|\| '',\n/.test(src.slice(src.indexOf("router.post('/admin/create'"), src.indexOf("router.put('/admin/:id'"))));
+  { const putSrc = src.slice(src.indexOf("router.put('/admin/:id', authMiddleware"), src.indexOf("router.delete('/admin/:id'"));
+    ok('★ 수정(PUT)은 작업오더 연결을 바꾸지 않는다($31=null 유지 — Codex PR #1632)',
+      /\n\s*null,\s*\/\/ \$31 ★ 결정 246/.test(putSrc) && !/source_work_order_id \?\? null/.test(putSrc)
+      && /let woId = c0\.source_work_order_id \|\| '';/.test(putSrc)); }
   ok('생성은 단일 출처 잠금·확인을 쓴다', /_lrq\.lockWorkOrderCampaigns\(_insClient, \[_srcWoId\]\)/.test(src)
     && /_lrq\.liveCampaignForWorkOrders\(_insClient, \[_srcWoId\]\)/.test(src));
   const liveFn = lrqSrc.slice(lrqSrc.indexOf('async function liveCampaignForWorkOrders'), lrqSrc.indexOf('async function workOrderIdsForCampaign'));
@@ -157,8 +161,10 @@ const base = { title: '10/14 테스트 공고', status: 'draft' };
   const futureTok = (sub) => 'h.' + Buffer.from(JSON.stringify({ sub, exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64') + '.s';
   const fetched = [];
   const ctx = { localStorage: store(), sessionStorage: store(), JSON, Date, Number, String, URLSearchParams, API_BASE_URL: 'http://api',
+    AbortController, clearTimeout, setTimeout: (fn, ms) => setTimeout(fn, ctx.__fastTimeout ? 5 : ms), Error,
     atob: (x) => Buffer.from(x, 'base64').toString('binary'),
     fetch: async (url, opts) => {
+      if (ctx.__hang) return new Promise((_, rej) => opts.signal.addEventListener('abort', () => { const e = new Error('aborted'); e.name = 'AbortError'; rej(e); }));
       if (/\/api\/reviewer\/verify/.test(url)) return { ok: true, status: 200, json: async () => ({ ok: true, name: 'A', reviewerToken: 'fresh' }) };
       fetched.push({ url, token: opts.headers['X-Reviewer-Token'] });
       return { status: fetched.length === 1 && ctx.__first401 ? 401 : 200, json: async () => ({ ok: true, files: [] }) }; } };
@@ -198,6 +204,12 @@ const base = { title: '10/14 테스트 공고', status: 'draft' };
   ok('★ 갱신해도 공용 홈 신원(B)을 덮어쓰지 않는다(persist:false)', ctx.localStorage.getItem('iad_reviewer_user') === userKeyB);
   ok('창을 열 때도 이 탭 목록의 주인을 쓴다', /const user = _reEditTabUser \|\| getSavedUser\(\);/.test(fnSrc('openReviewEditModal')));
   ok('목록을 그린 신원을 기억한다', /_reEditTabUser = \{ \.\.\.user \};/.test(html));
+  ctx.__hang = true; ctx.__fastTimeout = true;
+  vm.runInContext(`_reEditTabUser = { name:'A', phone8:'11110063', reviewerToken:'${futureTok('A')}' };`, ctx);
+  const hung = await vm.runInContext(`_reEditFetchMyFiles({ phone8:'11110063', sheetId:'s', tabName:'t', rowIndex:182 }).then(()=>'resolved', e=>e.message)`, ctx);
+  ctx.__hang = false; ctx.__fastTimeout = false;
+  ok('★ 응답이 끊기면 제한 시간 뒤 오류로 끝난다(무한 "불러오는 중" 방지)', /응답이 늦어지고/.test(hung), hung);
+  ok('제한 시간은 gasGet 과 같은 30초', /setTimeout\(\(\) => ctl\.abort\(\), 30000\)/.test(fnSrc('_reEditFetchMyFiles')));
   ok('다른 화면의 갱신은 종전 그대로 공용 세션을 맞춘다(기본값)', /if \(!opts \|\| opts\.syncShared !== false\) syncSearchSession\(next\);/.test(html));
 
   console.log(`\nworkOrderSingleCampaign: ${passed} passed`);

@@ -3510,7 +3510,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         if (c0 && !c0.linked_sheet_id && !c0.linked_tab_name) {
           // 정방향 링크가 없으면 역방향(work_orders.linked_campaign_id)으로도 찾는다 —
           // 옛 경로로 만든 공고는 source_work_order_id 가 비어 있을 수 있다.
-          let woId = source_work_order_id || c0.source_work_order_id || '';
+          let woId = c0.source_work_order_id || '';   // ★ 결정 246: 본문 값은 쓰지 않는다(수정은 오더 연결을 바꾸지 않음)
           if (!woId) {
             const { rows: back } = await pool.query(
               `SELECT id FROM work_orders
@@ -3711,7 +3711,8 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         (hold_ttl_min === undefined || hold_ttl_min === null || hold_ttl_min === '') ? null : Number(hold_ttl_min),
         wdPrepared !== undefined,          // $29: work_detail 교체 여부(undefined=유지)
         wdPrepared === undefined ? null : wdPrepared, // $30: 새 값(null=비움)
-        source_work_order_id ?? null,
+        null,   // $31 ★ 결정 246: 수정은 작업오더 연결(source_work_order_id)을 바꾸지 않는다(null=유지) — 바꿔 끼우면
+                //    잠금·중복 확인 없이 같은 오더에 살아 있는 공고가 둘이 된다(Codex PR #1632). 화면도 수정 때 보내지 않는다.
         (start_date === undefined || start_date === null) ? null : String(start_date), // $32: null=유지, ''=제거, 날짜=설정
         (multi_account_mode === undefined || multi_account_mode === null) ? null : multi_account_mode === true, // $33 ★ 063: null=유지
         (multi_daily_limit === undefined || multi_daily_limit === null || multi_daily_limit === '') ? null : Math.max(0, Number(multi_daily_limit) || 0), // $34

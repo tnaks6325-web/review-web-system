@@ -2441,8 +2441,18 @@ async function _reEditFetchMyFiles(c){
     if (next) user = _reEditTabUser = next;
   }
   const qs = new URLSearchParams({ phone8:c.phone8, sheetId:c.sheetId, tabName:c.tabName, rowIndex:String(c.rowIndex) });
-  const call = (token) => fetch(API_BASE_URL + '/api/review-edit/my-files?' + qs.toString(),
-    { headers: token ? { 'X-Reviewer-Token': token } : {} });
+  // ★ gasGet 과 같은 30초 제한 — 응답이 끊기면 "불러오는 중…"에 영영 머물지 않고 오류를 보인다(Codex PR #1632).
+  const call = async (token) => {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 30000);
+    try {
+      return await fetch(API_BASE_URL + '/api/review-edit/my-files?' + qs.toString(),
+        { headers: token ? { 'X-Reviewer-Token': token } : {}, signal: ctl.signal });
+    } catch (e) {
+      if (e && e.name === 'AbortError') throw new Error('응답이 늦어지고 있습니다. 잠시 후 다시 열어 주세요.');
+      throw e;
+    } finally { clearTimeout(timer); }
+  };
   let r = await call(user && user.reviewerToken);
   if (r.status === 401) {
     const next = await _refreshReviewerHomeSession(user, local);
