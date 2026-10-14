@@ -30,6 +30,10 @@ const REQUIRED_SCHEMA = [
   ['reviewer_history_control', 'coverage_epoch'],
   ['workdesk_review_resolutions', 'resolution'],
   ['review_closed_targets', 'resolution_id'],
+  ['campaign_applications', 'purchase_qty'],      // 190 — 참여 게이트 UPDATE·단계 셈·주문 전파(결정 253 · 없으면 단계 공고 참여가 죽는다)
+  ['campaign_applications', 'qty_tier_amount'],   // 190
+  ['order_submissions', 'purchase_qty'],          // 190 — 홀드 확정 UPDATE 가 쓴다(없으면 주문 확정 문장이 통째로 실패)
+  ['order_submissions', 'qty_tier_amount'],       // 190
   ['order_submissions', 'delivery_memo'],          // 188 — 캡처 배송메세지(주문 저장 INSERT·구매캡처 교체·작업보드 명단이 읽고 쓴다)
   ['order_submissions', 'rule_flags'],              // 187 — 바로 구매 규칙 위반 표시(작업보드·공고 카드·참여 관리 읽기)
   ['reviewers', 'kakao_id'],                       // 170 — 리뷰어 가입 INSERT·내정보 저장(없으면 가입 전면 42703)
@@ -155,6 +159,7 @@ const REQUIRED_SCHEMA = [
 // 이 표 자체가 없으면 새 V2 탭에서 리뷰·입금 상태를 안전하게 처리할 수 없으므로
 // 컬럼 프리플라이트와 함께 부팅을 막는다.
 const REQUIRED_TABLES = [
+  'campaign_qty_tiers',                           // 190 — 참여 게이트·이름 바꾸기 tx·합치기가 읽는다(결정 253 · 없으면 참여·공고 저장이 죽는다)
   'campaign_option_soldout_reports',              // 184 — 리뷰어 품절 신고(상품 이름 바꾸기 tx 가 함께 고친다 — 없으면 공고 저장이 죽는다)
   'campaign_option_alerts',                       // 184 — 관리자 전원 품절 알림
   'review_reminder_states',
