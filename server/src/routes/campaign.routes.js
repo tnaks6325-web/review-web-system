@@ -1358,46 +1358,6 @@ router.get('/popular-status', applyLimiter, async (req, res, next) => {
 //   참여권이 있으면 통과 / 타계정 로그인 = 그 명의만. ★ 막지 않는다 — 화면이 [그래도 제출하기] 를 준다(결제 뒤 기록이 사라지지 않게).
 //   ★ 실패·모름은 gate:false(fail-open) — 우리 쪽 오류로 리뷰어를 막지 않는다. 바로 구매는 결정 242 위반 표시가 뒤에서 잡는다.
 //   ★ 라우트 등록 순서: GET '/:id' 보다 앞이어야 한다.
-/**
- * ★ 결정 252 — 구매양식에서 고를 수 있는 상품 중 **정원이 찬** 것(양식 표기 그대로) · 양식에 상품 고르기가 없을 때 그 하나가 찼는지.
- *   판정 = 참여 버튼과 같은 단일 출처(`fetchOptionCounts` + `computeOptionViews` 의 soldout — 공고 참여 + 바로 구매).
- *   양식 표기 → 상품 = `matchOrderOption`(바로 구매를 세는 것과 같은 짝짓기 · 상품 1개 공고는 표기와 무관).
- *   ★ 안내일 뿐 — 막지 않는다. 실패·모름 = null(안내 없음 · fail-open).
- */
-async function _orderFormOptionFull(camp, sheetId, tabName) {
-  try {
-    if (!camp || camp.archived_at || process.env.ORDER_FORM_OPTION_FULL_NOTICE === '0') return null;
-    const { rows: optRows } = await pool.query(
-      `SELECT opt_key, option_url, pay_amount, recruit_total, daily_limit, status, product_name, unit_kind, thumbnail_url, paused_at
-         FROM campaign_options WHERE campaign_id = $1 ORDER BY (status='closed'), sort_order, id`, [camp.id]);
-    if (!optRows.some(o => Number(o.recruit_total) > 0)) return null;   // 정원 있는 상품이 없으면 찰 일이 없다(조회 생략)
-    const now = new Date();
-    const counts = await fetchOptionCounts(pool, camp.id, now);
-    const sequential = sequentialFor(await fetchSequentialCampaignIds(pool, [camp.id]), camp.id);
-    const views = computeOptionViews(optRows, counts, null, { sequential });
-    const full = new Set(views.filter(v => v && v.status === 'soldout').map(v => v.optKey));
-    if (!full.size) return { campaignId: camp.id, fullProducts: [], singleFull: false };
-    const { matchOrderOption } = require('../services/campaignState.service');
-    let choices = [];
-    if (tabName) {
-      try { choices = await require('../services/sheetlessOrder.service').listProductChoices(pool, sheetId, tabName); }
-      catch (_) { choices = []; }
-    }
-    const keyOf = label => matchOrderOption(optRows, { selectedProduct: label });
-    const fullProducts = choices.filter(label => full.has(keyOf(label)));
-    // 양식에 상품 고르기가 안 뜨는 경우(상품 표기 1개 이하) — 그 주문이 세어질 상품 하나가 찼나
-    let singleKey = null;
-    if (choices.length < 2) singleKey = choices.length === 1 ? keyOf(choices[0]) : (optRows.length === 1 ? optRows[0].opt_key : null);
-    const singleFull = !!(singleKey && full.has(singleKey));
-    const single = singleFull ? optRows.find(o => o.opt_key === singleKey) : null;
-    return { campaignId: camp.id, fullProducts, singleFull,
-      ...(single ? { singleName: String(single.product_name || single.opt_key || '') } : {}) };
-  } catch (e) {
-    logger.warn('[campaign/order-form-gate] 상품 정원 확인 실패(안내 없음): ' + e.message);
-    return null;
-  }
-}
-
 router.get('/order-form-gate', reviewerSessionMiddleware, applyLimiter, async (req, res, next) => {
   try {
     const sheetId = String(req.query.sheetId || '').trim();
@@ -1405,15 +1365,11 @@ router.get('/order-form-gate', reviewerSessionMiddleware, applyLimiter, async (r
     const gid = String(req.query.gid || '').trim();
     if (!sheetId || (!tabName && !gid)) return res.json({ ok: true, gate: false });
     // 탭 이름이 바뀐 뒤에도 옛 링크(gid 보존)가 같은 공고를 찾게 — 이름 또는 gid(빈 값 안전) 매칭(Codex PR #1629)
-    const { rows: cRows } = await pool.query(
-      `SELECT id, title, is_popular, archived_at FROM recruit_campaigns
-        WHERE participation_mode IS TRUE AND linked_sheet_id = $1
-          AND ((linked_tab_name = $2 AND $2 <> '') OR (NULLIF(linked_tab_gid, '') IS NOT NULL AND linked_tab_gid = NULLIF($3, '')))
-        ORDER BY (linked_tab_name = $2) DESC, created_at DESC NULLS LAST, id DESC LIMIT 1`, [sheetId, tabName, gid]);
-    const camp = cRows[0];
-    // ★ 결정 252: 정원 찬 상품 안내 재료(인기 여부와 무관 — 일반 공고에서도 싣는다). 없으면 필드를 싣지 않는다(옛 화면 무영향).
-    const optionFull = camp ? await _orderFormOptionFull(camp, sheetId, tabName) : null;
-    const of = optionFull ? { optionFull: { ...optionFull, title: String(camp.title || '') } } : {};
+    const ofs = require('../services/orderFormOptionFull.service');
+    const camp = await ofs.findFormCampaign(pool, { sheetId, tabName, gid });
+    // ★ 결정 252: 정원 찬 상품 재료(인기 여부와 무관 — 일반 공고에서도 싣는다 · 제출 거절과 같은 함수). 없으면 필드를 싣지 않는다(옛 화면 무영향).
+    const optionFull = ofs.publicView(camp ? await ofs.loadFormOptionFull(pool, camp, { sheetId, tabName }) : null);
+    const of = optionFull ? { optionFull } : {};
     if (!camp || camp.is_popular !== true) return res.json({ ok: true, gate: false, ...of });
     const { rows: rRows } = await pool.query('SELECT phone8 FROM reviewers WHERE id = $1 LIMIT 1', [req.reviewer.ownerReviewerId]);
     const ownerP8 = String((rRows[0] && rRows[0].phone8) || '').replace(/\D/g, '').slice(-8);

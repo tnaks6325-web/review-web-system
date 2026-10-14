@@ -1,5 +1,5 @@
 /**
- * 결정 252 — 정원 찬 상품 바로 구매: 상품 1개 공고는 표기와 무관하게 센다 · 구매양식 안내 · 작업보드 ⚠ "정원 넘친 상품 구매".
+ * 결정 252 — 정원 찬 상품 바로 구매: 상품 1개 공고는 표기와 무관하게 센다 · 구매양식 접수 거절 · 작업보드 ⚠ "정원 넘친 상품 구매".
  *
  * 발단(운영 2026-10-14): 고양이사료 1번 상품 126/100(10/2 구매양식 링크 바로 구매 25명 — 정원을 보지 않는 길) ·
  *   블랑카우 크림(상품 1개 공고) 바로 구매 29건 중 15건을 "이름 표기가 달라" 상품에 못 세어 200 중 185로 보임.
@@ -8,8 +8,8 @@
  *   [2] 끄는 스위치 CAMPAIGN_OPTION_SINGLE_FALLBACK=0 = 종전
  *   [3] 위반 코드·이름(option_full) — 표시 문구는 서버 이름표 하나
  *   [4] 구매 시점에 이미 정원이 찼나(optionFullAtPurchase · 스텁 DB 로 실제 실행) — 마지막 자리는 위반 아님 · 셈에 안 들어간 주문은 아님 · 모름은 throw
- *   [5] 구매양식 안내 재료(서버 배선) — 참여 버튼과 같은 셈(soldout) · 실패 = 안내 없음
- *   [6] 화면 — 막지 않는다 · 상품마다 한 번 · 제출 직전 확인 · 옛 서버(필드 없음) = 안내 없음
+ *   [5] 구매양식 정원 판정(서버) — 참여 버튼과 같은 셈(soldout) · 안내와 거절이 같은 함수 · 쓰기 전 거절 · 모르면 받음 · 스위치
+ *   [6] 화면 — 「모집 끝」 표시 · 거절 창(그래도 제출하기 없음) · 제출 직전 다시 막음 · 서버 거절 처리 · 스위치를 끄면 종전 안내
  */
 'use strict';
 const assert = require('assert');
@@ -149,56 +149,101 @@ const TWO = [{ opt_key: '3. 퀸더블', product_name: '3. 퀸더블' }, { opt_ke
     assert.ok(/if \(!_judgeAfterCapFill\) require\('\.\.\/services\/directPurchaseRules\.service'\)\.judgeLater\(ledger\.orderSubmissionId, 'submit'\);/.test(sr));
   });
 
-  console.log('[5] 구매양식 안내 재료(서버 배선)');
-  const r = read('server/src/routes/campaign.routes.js');
-  const fn = r.slice(r.indexOf('async function _orderFormOptionFull'), r.indexOf("router.get('/order-form-gate'"));
-  const gate = r.slice(r.indexOf("router.get('/order-form-gate'"), r.indexOf('\n});', r.indexOf("router.get('/order-form-gate'")));
-  await ok('참여 버튼과 같은 셈(fetchOptionCounts + computeOptionViews 의 soldout)', () => {
-    assert.ok(/fetchOptionCounts\(pool, camp\.id, now\)/.test(fn) && /computeOptionViews\(optRows, counts, null, \{ sequential \}\)/.test(fn));
-    assert.ok(/v\.status === 'soldout'/.test(fn));
+  console.log('[5] 구매양식 정원 판정(서버 — 안내와 거절이 같은 함수)');
+  const ofsSrc = read('server/src/services/orderFormOptionFull.service.js');
+  const ofs = require('../src/services/orderFormOptionFull.service');
+  await ok('참여 버튼과 같은 셈(fetchOptionCounts + computeOptionViews 의 soldout) · 짝짓기 matchOrderOption · 양식 선택지 listProductChoices', () => {
+    assert.ok(/st\.fetchOptionCounts\(db, camp\.id, now\)/.test(ofsSrc) && /st\.computeOptionViews\(optRows, counts, null, \{ sequential \}\)/.test(ofsSrc));
+    assert.ok(/v\.status === 'soldout'/.test(ofsSrc));
+    assert.ok(/st\.matchOrderOption\(optRows, \{ selectedProduct: label \}\)/.test(ofsSrc) && /listProductChoices\(db, sheetId, tabName\)/.test(ofsSrc));
   });
-  await ok('양식 표기 → 상품은 바로 구매를 세는 것과 같은 짝짓기(matchOrderOption) · 양식 선택지는 같은 함수(listProductChoices)', () => {
-    assert.ok(/matchOrderOption\(optRows, \{ selectedProduct: label \}\)/.test(fn) && /listProductChoices\(pool, sheetId, tabName\)/.test(fn));
+  await ok('보관 공고·안내 스위치 끔·정원 있는 상품 없음·실패 = null(안내·거절 없음 · fail-open)', () => {
+    assert.ok(/camp\.archived_at/.test(ofsSrc) && /ORDER_FORM_OPTION_FULL_NOTICE === '0'/.test(ofsSrc));
+    assert.ok(/if \(!optRows\.some\(o => Number\(o\.recruit_total\) > 0\)\) return null;/.test(ofsSrc));
+    const lf = ofsSrc.slice(ofsSrc.indexOf('async function loadFormOptionFull'), ofsSrc.indexOf('function publicView'));
+    assert.ok(/catch \(e\) \{[\s\S]*return null;/.test(lf));
   });
-  await ok('보관 공고·스위치 끔·실패 = null(안내 없음 · fail-open)', () => {
-    assert.ok(/camp\.archived_at/.test(fn) && /ORDER_FORM_OPTION_FULL_NOTICE === '0'/.test(fn));
-    assert.ok(/catch \(e\) \{[\s\S]*return null;/.test(fn));
+  await ok('화면에 내보낼 때 내부 재료(상품 행·키)는 지운다', () => {
+    const pub = ofs.publicView({ campaignId: 'c', fullProducts: [], singleFull: false, blocking: true, _optRows: [1], _fullKeys: new Set(), _singleKey: 'k', _choices: [] });
+    assert.deepStrictEqual(Object.keys(pub).sort(), ['blocking', 'campaignId', 'fullProducts', 'singleFull']);
   });
-  await ok('일반 공고에도 싣고, 인기 공고 응답에도 싣는다(참여권 판정은 무접촉)', () => {
+  await ok('거절 스위치 ORDER_FORM_OPTION_FULL_BLOCK=0 → 거절 없음(DB 조회도 없음) · 응답 blocking:false = 화면은 안내만', async () => {
+    process.env.ORDER_FORM_OPTION_FULL_BLOCK = '0';
+    try {
+      const db = { async query() { throw new Error('조회하면 안 됨'); } };
+      assert.strictEqual(await ofs.submitBlock(db, { sheetId: 's', tabName: 't', gid: '', picked: 'x' }), null);
+      assert.strictEqual(ofs.blockingEnabled(), false);
+    } finally { delete process.env.ORDER_FORM_OPTION_FULL_BLOCK; }
+    assert.strictEqual(ofs.blockingEnabled(), true);
+  });
+  await ok('거절 판정 — 고른 상품이 찼으면 거절 · 상품 하나짜리 양식은 그 하나 · 여러 상품인데 안 골랐으면 받음 · 실패는 받음', () => {
+    const sb = ofsSrc.slice(ofsSrc.indexOf('async function submitBlock'), ofsSrc.indexOf('const BLOCK_MESSAGE'));
+    assert.ok(/if \(picked\) key = require\('\.\/campaignState\.service'\)\.matchOrderOption\(info\._optRows, \{ selectedProduct: picked \}\);/.test(sb));
+    assert.ok(/else if \(info\._choices\.length < 2\) key = info\._singleKey;/.test(sb));
+    assert.ok(/if \(!key \|\| !info\._fullKeys\.has\(key\)\) return null;/.test(sb));
+    assert.ok(/catch \(e\) \{[\s\S]*return null;/.test(sb));
+    assert.strictEqual(ofs.BLOCK_MESSAGE, '모집이 끝난 상품이라 접수할 수 없어요. 이미 결제했다면 쿠팡에서 주문을 취소해 주세요.');
+  });
+  const sr = read('server/src/routes/submit.routes.js');
+  await ok('제출: 아무것도 쓰기 전에 거절(원장 쓰기보다 앞) · 홀드(공고 참여)는 대상 아님 · 막힌 시도는 담당자 확인 기록', () => {
+    const bi = sr.indexOf("const blocked = await ofs.submitBlock(pool,");
+    assert.ok(bi > 0 && bi < sr.indexOf('const ledger = await createOrderLedgerEntry({'));
+    assert.ok(/if \(!\(holdCtx && \(holdCtx\.productName \|\| holdCtx\.optionKey\)\)\) \{\s*const ofs = require\('\.\.\/services\/orderFormOptionFull\.service'\);/.test(sr));
+    assert.ok(/picked: formPickedProduct \}\);\s*if \(blocked\) \{/.test(sr), '판정 결과가 있으면 바로 거절 분기');
+    const blk = sr.slice(sr.indexOf('      if (blocked) {'), sr.indexOf("error: ofs.BLOCK_MESSAGE });") + 30);
+    assert.ok(/return res\.json\(\{ ok: false, code: 'OPTION_FULL'/.test(blk) && !/createOrderLedgerEntry/.test(blk), '거절 분기는 쓰기 없이 응답하고 끝난다');
+    assert.ok(/eventType: 'order_option_full_blocked'/.test(sr));
+    assert.ok(/return res\.json\(\{ ok: false, code: 'OPTION_FULL', product: blocked\.name, campaignId: blocked\.campaignId, error: ofs\.BLOCK_MESSAGE \}\);/.test(sr));
+  });
+  await ok('담당자 확인 기록 문구(오류내용·조치안내)', () => {
+    const d = require('../src/services/reviewerEventLog.service').describeEvent
+      || null;
+    const ev = read('server/src/services/reviewerEventLog.service.js');
+    assert.ok(/case 'order_option_full_blocked':/.test(ev) && /쿠팡 주문 취소를 안내/.test(ev));
+    if (d) { const x = d({ eventType: 'order_option_full_blocked', context: { product: 'A', orderNum: '1' } }); assert.ok(/정원이 찬 상품\(A\)/.test(x.problem)); }
+  });
+  await ok('양식 응답 — 일반 공고에도 싣고 인기 공고 응답에도 싣는다(참여권 판정 무접촉) · 같은 함수', () => {
+    const r = read('server/src/routes/campaign.routes.js');
+    const gate = r.slice(r.indexOf("router.get('/order-form-gate'"), r.indexOf('\n});', r.indexOf("router.get('/order-form-gate'")));
+    assert.ok(/ofs\.publicView\(camp \? await ofs\.loadFormOptionFull\(pool, camp, \{ sheetId, tabName \}\) : null\)/.test(gate));
     assert.ok(/return res\.json\(\{ ok: true, gate: false, \.\.\.of \}\)/.test(gate));
-    assert.ok(/gate: credits <= 0, credits, campaignId: camp\.id, title: String\(camp\.title \|\| ''\), \.\.\.of \}\)/.test(gate));
+    assert.ok(/title: String\(camp\.title \|\| ''\), \.\.\.of \}\)/.test(gate));
   });
 
   console.log('[6] 화면');
   const sa = read('frontend/js/search-app.js');
   const ui = sa.slice(sa.indexOf('let _OPTION_FULL = null;'), sa.indexOf('function initOrderFormMode('));
-  await ok('막지 않는다 — [그래도 제출하기] = 계속(true) · 닫기·Esc 도 계속', () => {
-    assert.ok(/data-of-continue/.test(ui) && /if \(e\.target\.closest\("\[data-of-continue\]"\)\) finish\(true\);/.test(ui));
-    assert.ok(/if \(e\.key === "Escape"\) finish\(true\);/.test(ui));
+  await ok('거절 모드 창 — "접수할 수 없어요" · 취소 안내 · [그래도 제출하기] 없음(닫기/다른 상품 고르기 · 참여 가능한 상품 보기)', () => {
+    assert.ok(/block \? '모집이 끝나 접수할 수 없어요'/.test(ui));
+    assert.ok(/이미 결제했다면 쿠팡에서 주문을 취소해 주세요/.test(ui));
+    assert.ok(/\(block \? \(multi \? '다른 상품 고르기' : '닫기'\) : '이미 구매했어요 — 그래도 제출하기'\)/.test(ui));
   });
-  await ok('기존 구매양식 창 모양(새 스타일 없음)', () => {
-    assert.ok(/ov\.id = "ofOptionFull";\s*ov\.className = "modal-overlay";/.test(ui) && /class="modal-box"/.test(ui) && /class="modal-actions"/.test(ui));
+  await ok('거절 모드 제출 직전 — 찬 상품이 있으면 제출하지 않는다("stop") · 공고 보기만 이동("go")', () => {
+    assert.ok(/if \(g\.blocking !== false\) \{\s*const hit = picks\.find\(_optionFullIs\) \|\| \(g\.singleFull \? \(g\.singleName \|\| g\.title \|\| ""\) : ""\);\s*if \(!hit\) return true;\s*const v = await _optionFullModal\(g, hit\);\s*return v === false \? "go" : "stop";/.test(ui));
+    assert.ok(/const _ofr = await _optionFullBeforeSubmit\(\);\s*if \(_ofr !== true\) \{ if \(_ofr === "go"\)/.test(sa));
   });
-  await ok('상품마다 한 번만 묻는다 · 정원 찬 상품만', () => {
-    assert.ok(/g\.fullProducts\.indexOf\(label\) < 0 \|\| g\.acked\[label\]\) return;\s*g\.acked\[label\] = true;/.test(ui));
-  });
-  await ok('옛 서버(필드 없음) = 안내 없음 · 인기 안내가 먼저(겹치지 않게)', () => {
-    assert.ok(/_OPTION_FULL = \(of && of\.campaignId && Array\.isArray\(of\.fullProducts\)\)/.test(ui));
-    assert.ok(/if \(document\.getElementById\("ofOptionFull"\) \|\| document\.getElementById\("ofPopularGate"\)\)/.test(ui));
-    assert.ok(ui.indexOf('await _popularGateModal(_POPULAR_GATE, { cards: 1 })') < ui.indexOf('_OPTION_FULL.singleFull) {'));
-  });
-  await ok('제출 직전 확인은 인기 공고 확인 뒤 · 공고로 가면 제출하지 않는다', () => {
+  await ok('제출 직전 확인은 인기 공고 확인 뒤', () => {
     const i1 = sa.indexOf('if (!(await _popularGateBeforeSubmit()))');
-    const i2 = sa.indexOf('if (!(await _optionFullBeforeSubmit()))');
+    const i2 = sa.indexOf('const _ofr = await _optionFullBeforeSubmit();');
     assert.ok(i1 > 0 && i2 > i1 && i2 - i1 < 600);
-    assert.ok(/if \(!\(await _optionFullBeforeSubmit\(\)\)\) \{ try \{ location\.href = "campaign\.html\?id=" \+ encodeURIComponent\(_OPTION_FULL\.campaignId\); \} catch \(_\) \{\} return; \}/.test(sa));
   });
-  await ok('다른 안내 창 때문에 못 띄우면("busy") 안내한 것으로 치지 않는다 — 제출 직전에 다시 묻는다', () => {
-    assert.ok(/getElementById\("ofPopularGate"\)\) \{ resolve\("busy"\); return; \}/.test(ui));
+  await ok('서버가 거절(OPTION_FULL)하면 그 주문은 제출하지 않음으로 처리', () => {
+    assert.ok(/if \(!res\.ok && res\.code === "OPTION_FULL"\) \{[\s\S]{0,400}results\.push\([\s\S]{0,200}continue;/.test(sa));
+  });
+  await ok('상품 고르기에 "모집 끝" 표시 · 응답이 오면 다시 그림', () => {
+    assert.ok(/_optionFullIs\(P\[i\]\) \? '<span class="ofp-match ofp-full"/.test(sa));
+    assert.ok(/blocking: of\.blocking === true, acked: \{\} \}\s*: null;\s*if \(_OPTION_FULL && typeof _ofpActive === "function" && _ofpActive\(\)\) _orderCardIds\.forEach\(_ofpRender\);/.test(ui));
+  });
+  await ok('안내 모드(스위치로 거절을 끈 때)는 종전 — 상품마다 한 번 · busy 면 다시 묻기', () => {
+    assert.ok(/if \(g\.acked\[label\]\) return;\s*g\.acked\[label\] = true;/.test(ui));
     assert.ok(/_optionFullModal\(g, label\)\.then\(v => \{ if \(v === "busy"\) delete g\.acked\[label\]; \}\);/.test(ui));
-    assert.ok(/if \(v === "busy"\) \{ delete g\.acked\[label\]; continue; \}/.test(ui));
   });
-  await ok('상품을 고를 때·캡처로 골라 둘 때 안내(함수가 없으면 아무것도 안 함)', () => {
+  await ok('기존 구매양식 창 모양(새 스타일 없음) · 옛 서버(필드 없음) = 아무것도 안 함 · 인기 안내와 겹치지 않음', () => {
+    assert.ok(/ov\.id = "ofOptionFull";\s*ov\.className = "modal-overlay";/.test(ui) && /class="modal-box"/.test(ui) && /class="modal-actions"/.test(ui));
+    assert.ok(/_OPTION_FULL = \(of && of\.campaignId && Array\.isArray\(of\.fullProducts\)\)/.test(ui));
+    assert.ok(/getElementById\("ofPopularGate"\)\) \{ resolve\("busy"\); return; \}/.test(ui));
+  });
+  await ok('상품을 고를 때·캡처로 골라 둘 때 알림(함수가 없으면 아무것도 안 함)', () => {
     assert.ok(/if \(typeof _optionFullOnPick === "function"\) _optionFullOnPick\(_OFP\.pick\[c\]\);/.test(sa));
     assert.ok(/if \(_OFP\.pick\[cid\] === ok && typeof _optionFullOnPick === "function"\) _optionFullOnPick\(ok\);/.test(sa));
   });

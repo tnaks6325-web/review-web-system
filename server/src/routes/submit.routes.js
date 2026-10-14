@@ -1136,6 +1136,26 @@ router.post('/order', async (req, res, next) => {
         logger.warn(`[submit/order] 상품 선택 확인 실패 — 종전대로 접수: ${pickErr.message}`);
       }
     }
+    /* ★★ 결정 252 — 정원이 찬 상품은 구매양식(공고 참여 없이 바로 낸 구매)으로 받지 않는다(사용자 확정 2026-10-15
+         "모집이 끝났다면 수용하지 않게 · 이미 샀다면 그대로 제출하지 못하도록" — 결정 242·243 의 "막지 않음"을 이 경우만 뒤집는다).
+       ★ 아무것도 쓰기 전에 판정한다(원장·작업표·캡처 세션 0). 판정은 양식 안내와 같은 함수(orderFormOptionFull.submitBlock — 참여 버튼과 같은 셈).
+       ★ 홀드로 들어온 공고 참여는 대상 아님(자리를 잡고 산 사람). 상품을 정할 수 없거나 조회 실패면 받는다(작업보드 ⚠ 가 잡는다).
+       ★ 막힌 시도는 담당자 확인 기록(reviewer_event_logs · order_option_full_blocked)에 남긴다 — 이미 결제한 사람의 문의를 찾을 수 있게. */
+    if (!(holdCtx && (holdCtx.productName || holdCtx.optionKey))) {
+      const ofs = require('../services/orderFormOptionFull.service');
+      const blocked = await ofs.submitBlock(pool, { sheetId: orderScope.sheetId, tabName: orderScope.tabName, gid: orderScope.gid || gid || '', picked: formPickedProduct });
+      if (blocked) {
+        logger.warn(`[submit/order] 정원 찬 상품 접수 거절 camp=${blocked.campaignId} 상품=${blocked.name} p8=${String(loginPhone8 || '').slice(-4)}`);
+        require('../services/reviewerEventLog.service').logReviewerEvent({
+          sheetId: orderScope.sheetId, tabName: orderScope.tabName,
+          reviewerName: String(loginName || recipient || ''), phone8: String(loginPhone8 || ''),
+          eventType: 'order_option_full_blocked', severity: 'warn',
+          message: `『${orderScope.tabName}』에 ${String(loginName || recipient || '리뷰어')} 리뷰어가 정원이 찬 상품(${blocked.name})으로 구매양식을 내려다 접수가 막혔습니다.`,
+          context: { product: blocked.name, campaignId: blocked.campaignId, orderNum: String(orderNum || '').slice(0, 60), price: String(price || '').slice(0, 30) },
+        }).catch(e => logger.warn(`[submit/order] 접수 거절 기록 실패(무시): ${e.message}`));
+        return res.json({ ok: false, code: 'OPTION_FULL', product: blocked.name, campaignId: blocked.campaignId, error: ofs.BLOCK_MESSAGE });
+      }
+    }
     /* ★★ 구매일자가 빈 채로 오면 서버가 오늘(KST)을 채운다 — 관리자 수기 주문과 **같은 함수**(manualOrder.todayKstDateStr).
        빈 문자열은 매퍼가 "그 칸을 지우는 쓰기"로 내보내(결정 017 — 공유 매퍼는 고치지 않는다) 작업표에 미리 적힌
        구매일자를 지우고, 날짜별 계획 물량 계산까지 틀어진다(2026-10-08 E2E 실측). 리뷰어 화면은 항상 오늘 날짜를 보내므로

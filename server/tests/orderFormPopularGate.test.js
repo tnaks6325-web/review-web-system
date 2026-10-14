@@ -16,7 +16,9 @@ assert.ok(/camp\.is_popular !== true\) return res\.json\(\{ ok: true, gate: fals
 assert.ok(/loadVerifiedOwnerPhones/.test(g) && /req\.reviewer\.loginKind === 'sub'/.test(g), 'owner login: any verified name · sub login: that name only');
 assert.ok(/loadPopularCreditState\(pool, p8\)/.test(g) && /canUsePopularCredit\(st\)/.test(g), 'same single source as the apply gate');
 assert.ok(/gate: credits <= 0, credits/.test(g), 'returns remaining credits so the form can compare against order cards');
-assert.ok(/NULLIF\(linked_tab_gid, ''\) IS NOT NULL AND linked_tab_gid = NULLIF\(\$3, ''\)/.test(g), 'renamed tab: gid match (blank-safe)');
+// 결정 252: 공고 찾기는 구매양식 정원 판정과 같은 함수(orderFormOptionFull.findFormCampaign)로 옮겼다 — 같은 SQL(검사 의미 불변)
+assert.ok(/ofs\.findFormCampaign\(pool, \{ sheetId, tabName, gid \}\)/.test(g), 'campaign lookup = shared finder');
+assert.ok(/NULLIF\(linked_tab_gid, ''\) IS NOT NULL AND linked_tab_gid = NULLIF\(\$3, ''\)/.test(read('server/src/services/orderFormOptionFull.service.js')), 'renamed tab: gid match (blank-safe)');
 assert.ok(/res\.json\(\{ ok: true, gate: false, unknown: true \}\)/.test(g), 'failure opens (fail-open)');
 
 const sa = read('frontend/js/search-app.js');
