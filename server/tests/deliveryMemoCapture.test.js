@@ -56,7 +56,8 @@ const roi = require('../src/services/reviewerOrderIdentity.service');
   assert.ok(/ADD COLUMN IF NOT EXISTS delivery_memo TEXT NOT NULL DEFAULT ''/.test(read('server/migrations/188_order_delivery_memo.sql')));
   assert.ok(/\['order_submissions', 'delivery_memo'\]/.test(read('server/index.js')), 'schema preflight');
   const tb = read('server/src/services/trackB.service.js');
-  assert.ok(/if \(\(showEdits \|\| \(advertiserOrder && await advOwnsTab\(\)\)\) && String\(r\.deliveryMemo/.test(tb), 'advertiser only on own tab and matched order row');
+  assert.ok(/if \(\(showEdits \|\| \(advertiserOrder && _sameSheetRow\(r\.seq, advertiserOrder\.sheetRow\) && await advOwnsTab\(\)\)\)/.test(tb), 'advertiser only on own tab and on this exact order row');
+  assert.ok(/if \(_advOwns && brandId\) _advOwns = await brandTabAllowed\(\{ brandId, advertiserId, sheetId, tabName \}\)\.catch\(\(\) => false\);/.test(tb), 'brand session: assigned tabs only');
   assert.ok(/await canAccessTab\(\{ role, staffName, advertiserId, sheetId, tabName \}\)\.catch\(\(\) => false\)/.test(tb), 'ownership lookup failure = hidden');
   // 판독 응답이 JSON 으로 안 풀려도 배송메세지를 건진다
   const fbStart = g.indexOf('function _fallbackParse');
@@ -113,19 +114,25 @@ async function pg() {
     const o1 = await ins(1, '문 앞에 놓아주세요');
     const o2 = await ins(99, '경비실에 맡겨주세요');   // 업체: 기록된 줄(99)과 명단 줄(2)이 다르다 → 싣지 않는다
     const o3 = await ins(3, '');
-    for (const [seq, oid] of [[1, o1], [2, o2], [3, o3]]) {
+    // 4번 줄 = 1번 주문이 옛 중복으로 함께 연결된 줄(기록 행은 1) — 업체에는 1번 줄에만 보여야 한다
+    for (const [seq, oid] of [[1, o1], [2, o2], [3, o3], [4, o1]]) {
       await pool.query(`INSERT INTO campaign_participants (sheet_id, tab_name, seq, reviewer_name, order_submission_id, active)
                         VALUES ($1,$2,$3,$5,$4,TRUE)`, [sid, tab, seq, oid, '가짜' + seq]);
     }
     const memoBySeq = (res) => Object.fromEntries((res.roster || []).map(r => [r.seq, r.deliveryMemo]));
     const inner = memoBySeq(await tb.workdeskTab({ sheetId: sid, tabName: tab, role: 'master' }));
-    assert.deepEqual(inner, { 1: '문 앞에 놓아주세요', 2: '경비실에 맡겨주세요', 3: undefined }, 'internal sees memo; blank → absent');
+    assert.deepEqual(inner, { 1: '문 앞에 놓아주세요', 2: '경비실에 맡겨주세요', 3: undefined, 4: '문 앞에 놓아주세요' }, 'internal sees memo; blank → absent');
     const other = memoBySeq(await tb.workdeskTab({ sheetId: sid, tabName: tab, role: 'advertiser', advertiserId: 'dm-adv-other', allowAllWorkdesk: true }));
-    assert.deepEqual(other, { 1: undefined, 2: undefined, 3: undefined }, 'another advertiser (not owner) sees no memo');
+    assert.deepEqual(other, { 1: undefined, 2: undefined, 3: undefined, 4: undefined }, 'another advertiser (not owner) sees no memo');
     await pool.query(`INSERT INTO advertisers (id, name) VALUES ('dm-adv-own','가짜업체') ON CONFLICT DO NOTHING`);
     await pool.query(`INSERT INTO advertiser_campaigns (advertiser_id, sheet_id) VALUES ('dm-adv-own',$1)`, [sid]);
     const adv = memoBySeq(await tb.workdeskTab({ sheetId: sid, tabName: tab, role: 'advertiser', advertiserId: 'dm-adv-own', allowAllWorkdesk: true }));
-    assert.deepEqual(adv, { 1: '문 앞에 놓아주세요', 2: undefined, 3: undefined }, 'owner advertiser only on matched order row');
+    assert.deepEqual(adv, { 1: '문 앞에 놓아주세요', 2: undefined, 3: undefined, 4: undefined }, 'owner advertiser only on the exact order row (not the stale duplicate)');
+    // 브랜드 링크 세션 — 같은 업체라도 그 브랜드에 배정된 탭만
+    const brandView = async (brandId) => memoBySeq(await tb.workdeskTab({ sheetId: sid, tabName: tab, role: 'advertiser', advertiserId: 'dm-adv-own', brandId, allowAllWorkdesk: true }));
+    assert.deepEqual(await brandView('dm-brand-b'), { 1: undefined, 2: undefined, 3: undefined, 4: undefined }, 'unassigned brand sees no memo');
+    await pool.query(`INSERT INTO trackb_brand_tab_map (brand_id, advertiser_id, sheet_id, tab_name) VALUES ('dm-brand-a','dm-adv-own',$1,$2)`, [sid, tab]);
+    assert.deepEqual(await brandView('dm-brand-a'), adv, 'assigned brand = owner view');
     // 구매캡처 교체 — 같은 UPDATE 를 실제 DB 에 실행(드라이브 없이 SQL 만)
     const svcSrc = read('server/src/services/purchaseCaptureReplace.service.js');
     const upd = svcSrc.match(/`(UPDATE order_submissions\s+SET capture_file_id=\$2[\s\S]*?)`/)[1].replace(/--[^\n]*/g, '');
@@ -138,6 +145,7 @@ async function pg() {
     await pool.query(`DELETE FROM order_submissions WHERE sheet_id=$1`, [sid]).catch(() => {});
     await pool.query(`DELETE FROM tab_configs WHERE sheet_id=$1`, [sid]).catch(() => {});
     await pool.query(`DELETE FROM advertiser_campaigns WHERE sheet_id=$1`, [sid]).catch(() => {});
+    await pool.query(`DELETE FROM trackb_brand_tab_map WHERE sheet_id=$1`, [sid]).catch(() => {});
     await pool.query(`DELETE FROM advertisers WHERE id='dm-adv-own'`).catch(() => {});
     await pool.end().catch(() => {});
   }

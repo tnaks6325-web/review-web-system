@@ -3647,6 +3647,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       _advOwns = role === 'advertiser'
         ? await canAccessTab({ role, staffName, advertiserId, sheetId, tabName }).catch(() => false)
         : false;
+      // 094 와 같은 규율 — 브랜드 링크 세션은 소유 탭 중에서도 그 브랜드에 배정된 탭만(_ensureThreadScope 와 동일 판정).
+      if (_advOwns && brandId) _advOwns = await brandTabAllowed({ brandId, advertiserId, sheetId, tabName }).catch(() => false);
     }
     return _advOwns;
   };
@@ -3700,7 +3702,10 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
        업체는 전화번호·아이디와 같은 규율 — 주문이 실제 기록된 물리행까지 맞을 때(advertiserOrder)만 싣는다.
        ★ 그리고 **그 업체가 소유한 작업일 때만**(canAccessTab) — 작업보드 표는 allowAllWorkdesk 로 모든 업체가 열람하지만
          배송메세지에는 공동현관 비밀번호 같은 글이 있어 남의 작업에서는 보이지 않게 한다(Codex P1). 판정 실패 = 안 보임. */
-    if ((showEdits || (advertiserOrder && await advOwnsTab())) && String(r.deliveryMemo || '').trim()) syn.deliveryMemo = String(r.deliveryMemo).trim();
+    //   ★ 같은 주문이 진짜 줄과 옛 중복 줄에 함께 연결된 경우가 있어 advertiserOrder(주문 단위)만으로는 부족하다 —
+    //     **이 줄**의 물리행이 주문의 기록 행과 같을 때만 싣는다(Codex P2).
+    if ((showEdits || (advertiserOrder && _sameSheetRow(r.seq, advertiserOrder.sheetRow) && await advOwnsTab()))
+        && String(r.deliveryMemo || '').trim()) syn.deliveryMemo = String(r.deliveryMemo).trim();
     /* ★ 행마다 같은 판정을 실어 보낸다 — 제출물 미리보기 목록이 "채워진 줄"을 화면에서 다시
        세지 않게(사본 0). 게이지 분자(`filledCount`)와 **같은 호출**이라 갈릴 수가 없다. */
     syn.filled = _isFilledRow(syn);
