@@ -336,6 +336,63 @@ async function cleanupOverflowEmptyWorktableSlots({ dryRun = true, limit = 200, 
 const LINKED_WO_ON = `((NULLIF(w.linked_campaign_id, '') = c.id) OR (NULLIF(c.source_work_order_id, '') = w.id))`;
 const LINKED_WO_ORDER = `(NULLIF(w.linked_campaign_id, '') = c.id) DESC, w.updated_at DESC`;
 
+/* ★★ 결정 246 — 작업오더 하나에 살아 있는(보관 안 된) 모집공고는 하나. 공고 생성과 보관 해제가 같이 쓴다.
+   ★ 짝짓기는 위 LINKED_WO_ON(역방향·정방향 둘 다) — 정방향만 보면 역방향으로만 이어진 옛 공고를 놓친다(Codex PR #1632).
+   ★ 확인은 반드시 lockWorkOrderCampaigns 를 쥔 같은 트랜잭션 안에서 — 잠금 밖 확인은 동시 생성 둘 다 통과(완화 금지). */
+const workOrderCampaignLockKey = (woId) => 'recruit_campaign_wo:' + String(woId || '').trim();
+const _woIdList = (ids) => [...new Set((ids || []).map(x => String(x || '').trim()).filter(Boolean))].sort();
+
+/** 같은 오더끼리 직렬화 — 여러 오더면 정렬 순서로 잡아 교착을 피한다. */
+async function lockWorkOrderCampaigns(db, woIds) {
+  for (const id of _woIdList(woIds)) {
+    await db.query('SELECT pg_advisory_xact_lock(hashtext($1))', [workOrderCampaignLockKey(id)]);
+  }
+}
+
+/** 그 오더(들)에 짝지어진 살아 있는 공고 1건(가장 먼저 만든 것) — 없으면 null. */
+async function liveCampaignForWorkOrders(db, woIds, excludeCampaignId) {
+  const ids = _woIdList(woIds);
+  if (!ids.length) return null;
+  const { rows } = await db.query(
+    `SELECT c.id, c.title FROM recruit_campaigns c
+      WHERE c.archived_at IS NULL AND c.id <> $2
+        AND (NULLIF(c.source_work_order_id, '') = ANY($1::text[])
+             OR EXISTS (SELECT 1 FROM work_orders w
+                         WHERE w.id = ANY($1::text[]) AND w.deleted_at IS NULL AND ${LINKED_WO_ON}))
+      ORDER BY c.created_at ASC NULLS LAST, c.id ASC LIMIT 1`,
+    [ids, String(excludeCampaignId || '')]);
+  return rows[0] || null;
+}
+
+/**
+ * 작업오더의 역방향 링크(linked_campaign_id)를 **바꾸는** 쓰기 전 검사 — 같은 트랜잭션의 client 로 부른다.
+ * ★ 결정 246: 역방향 링크도 짝짓기(LINKED_WO_ON)의 한쪽이라, 살아 있는 공고 A 와 짝인 오더를 B 로 돌리면
+ *   잠금·확인 없이 A·B 둘 다 그 오더의 살아 있는 공고가 된다(Codex PR #1632).
+ * ★ 값이 그대로(또는 빈 값 = 변경 없음)면 검사하지 않는다 — 상태 변경 등이 현재 값을 다시 보내도 막지 않게.
+ * @returns {Promise<null|{status:number, body:object}>} null = 진행, 아니면 그대로 응답한다.
+ */
+async function guardWorkOrderLinkChange(client, woId, nextCampaignId) {
+  const next = String(nextCampaignId == null ? '' : nextCampaignId).trim();
+  if (!next || !woId) return null;
+  const { rows } = await client.query('SELECT linked_campaign_id FROM work_orders WHERE id = $1 FOR UPDATE', [woId]);
+  if (!rows.length || String(rows[0].linked_campaign_id || '').trim() === next) return null;
+  await lockWorkOrderCampaigns(client, [woId]);
+  const live = await liveCampaignForWorkOrders(client, [woId], next);
+  if (!live) return null;
+  return { status: 409, body: { ok: false, code: 'WORK_ORDER_CAMPAIGN_EXISTS', campaignId: live.id,
+    error: `이 작업오더에는 살아 있는 모집공고 「${live.title || live.id}」가 이미 있습니다 — 그 공고를 보관하거나 삭제한 뒤에 연결을 바꾸세요.` } };
+}
+
+/** 그 공고에 짝지어진 오더 id 들(정방향 + 역방향). */
+async function workOrderIdsForCampaign(db, campaignId) {
+  const { rows } = await db.query(
+    `SELECT NULLIF(c.source_work_order_id, '') AS id FROM recruit_campaigns c WHERE c.id = $1
+     UNION
+     SELECT w.id FROM recruit_campaigns c JOIN work_orders w ON ${LINKED_WO_ON}
+      WHERE c.id = $1 AND w.deleted_at IS NULL`, [campaignId]);
+  return _woIdList(rows.map(r => r.id));
+}
+
 /**
  * 공고들에 연결된 작업오더 일괄 조회 → Map(campaignId → 그 오더의 요청 컬럼).
  *
@@ -669,6 +726,11 @@ module.exports = {
   displayRecruitTotalForCampaign,
   linkedWorkOrderForCampaign,
   linkedWorkOrdersForCampaigns,
+  workOrderCampaignLockKey,
+  lockWorkOrderCampaigns,
+  liveCampaignForWorkOrders,
+  workOrderIdsForCampaign,
+  guardWorkOrderLinkChange,
   worktableSlotDelta,
   syncWorktableSlotsInTx,
   firstRoundQuota,

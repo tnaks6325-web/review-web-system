@@ -3155,7 +3155,34 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       if (errs.length) return res.status(400).json({ ok: false, error: '참여형 활성화 불가: ' + errs.join(', ') });
     }
 
-    const { rows } = await pool.query(
+    /* ★ 결정 246: 작업오더 하나에 살아 있는 모집공고는 하나 — 두 담당자가 같은 오더 화면을
+       열어 둔 채 1분 사이에 둘 다 [공고 만들기]를 눌러 같은 작업표를 가리키는 공고가 두 장
+       생겼다(2026-10-13 실사례: 하나는 게시, 하나는 임시저장 — 숫자는 같은 작업표라 똑같이 보임).
+       화면의 버튼 숨김(linked_campaign_id)은 열어 둔 옛 화면을 못 막으므로 서버가 막는다.
+       ★ 같은 오더 생성끼리 직렬화(advisory xact lock) — 확인과 저장 사이에 다른 생성이 끼지 못하게.
+       ★ 보관(archived)된 공고는 세지 않는다 — 다시 모집할 길을 막지 않는다(막다른 길 방지).
+         대신 보관 해제가 같은 키로 같은 검사를 한다(campaignArchive.unarchiveCampaign — 우회 경로 차단).
+       ★ 짝짓기는 역방향(work_orders.linked_campaign_id)까지 — linkedRecruitQuota 단일 출처(Codex PR #1632).
+       ★ 오더 없이 만드는 공고(source_work_order_id 빈 값)는 종전 그대로 — 검사·잠금 없음. */
+    const _srcWoId = String(source_work_order_id || '').trim();
+    const _insClient = _srcWoId ? await pool.connect() : null;
+    let rows;
+    try {
+      if (_insClient) {
+        await _insClient.query('BEGIN');
+        const _lrq = require('../services/linkedRecruitQuota.service');
+        await _lrq.lockWorkOrderCampaigns(_insClient, [_srcWoId]);
+        const _dup = await _lrq.liveCampaignForWorkOrders(_insClient, [_srcWoId]);
+        const dupRows = _dup ? [_dup] : [];
+        if (dupRows.length) {
+          await _insClient.query('ROLLBACK');
+          return res.status(409).json({
+            ok: false, code: 'WORK_ORDER_CAMPAIGN_EXISTS', campaignId: dupRows[0].id,
+            error: `이 작업오더로 만든 모집공고가 이미 있습니다 — 「${dupRows[0].title || dupRows[0].id}」. 새로 만들지 말고 그 공고를 열어 수정해 주세요.`,
+          });
+        }
+      }
+    ({ rows } = await (_insClient || pool).query(
       `INSERT INTO recruit_campaigns
        (id, title, channel, channel_custom, manager, time_range, delivery_type,
         review_fee, badges, notes, chat_url, status, sort_order,
@@ -3201,7 +3228,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         Number.isFinite(Number(close_buffer_min)) && close_buffer_min !== null && close_buffer_min !== undefined && close_buffer_min !== '' ? Number(close_buffer_min) : 10,
         Number.isFinite(Number(hold_ttl_min)) && hold_ttl_min !== null && hold_ttl_min !== undefined && hold_ttl_min !== '' ? Number(hold_ttl_min) : 30,
         _prepWorkDetail(work_detail) ?? null,
-        source_work_order_id || '',
+        _srcWoId,   // ★ 결정 246: 잠그고 확인한 바로 그 값(앞뒤 공백 정규화)을 저장 — 원문을 저장하면 다음 확인이 못 찾는다
         start_date || null,
         multi_account_mode === true,                            // ★ 063 §09-1: 기본 [불가]
         Math.max(0, Number(multi_daily_limit) || 0),            // ★ 063 §09-5: 0=무제한
@@ -3223,7 +3250,14 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         storeRecallProduct,
         repurchaseDaysState.value,
       ]
-    );
+    ));
+      if (_insClient) await _insClient.query('COMMIT');
+    } catch (insErr) {
+      if (_insClient) await _insClient.query('ROLLBACK').catch(() => {});
+      throw insErr;
+    } finally {
+      if (_insClient) _insClient.release();
+    }
     require('../services/cashReceiptContext.service')
       .invalidateCashReceiptContext(rows[0].linked_sheet_id, rows[0].linked_tab_name);
     // ★ 061: 상품옵션 저장(제공 시). 원자 저장(캠페인 락) — 실패 시 응답에 경고 표면화(조용한 정원 오염 방지, 레드 #7).
@@ -3476,7 +3510,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         if (c0 && !c0.linked_sheet_id && !c0.linked_tab_name) {
           // 정방향 링크가 없으면 역방향(work_orders.linked_campaign_id)으로도 찾는다 —
           // 옛 경로로 만든 공고는 source_work_order_id 가 비어 있을 수 있다.
-          let woId = source_work_order_id || c0.source_work_order_id || '';
+          let woId = c0.source_work_order_id || '';   // ★ 결정 246: 본문 값은 쓰지 않는다(수정은 오더 연결을 바꾸지 않음)
           if (!woId) {
             const { rows: back } = await pool.query(
               `SELECT id FROM work_orders
@@ -3677,7 +3711,8 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         (hold_ttl_min === undefined || hold_ttl_min === null || hold_ttl_min === '') ? null : Number(hold_ttl_min),
         wdPrepared !== undefined,          // $29: work_detail 교체 여부(undefined=유지)
         wdPrepared === undefined ? null : wdPrepared, // $30: 새 값(null=비움)
-        source_work_order_id ?? null,
+        null,   // $31 ★ 결정 246: 수정은 작업오더 연결(source_work_order_id)을 바꾸지 않는다(null=유지) — 바꿔 끼우면
+                //    잠금·중복 확인 없이 같은 오더에 살아 있는 공고가 둘이 된다(Codex PR #1632). 화면도 수정 때 보내지 않는다.
         (start_date === undefined || start_date === null) ? null : String(start_date), // $32: null=유지, ''=제거, 날짜=설정
         (multi_account_mode === undefined || multi_account_mode === null) ? null : multi_account_mode === true, // $33 ★ 063: null=유지
         (multi_daily_limit === undefined || multi_daily_limit === null || multi_daily_limit === '') ? null : Math.max(0, Number(multi_daily_limit) || 0), // $34

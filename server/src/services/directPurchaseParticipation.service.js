@@ -82,6 +82,19 @@ async function countCampaignSubDirectPurchasesSince(q, { campaignId, ownerPhone8
 }
 
 /**
+ * 바로 구매 한 건이 "어느 공고의 구매인가" — 같은 작업표를 가리키는 공고가 여럿일 때의 단일 순서.
+ *   ① 구매 시점에 이미 있던 공고 ② 그중 가장 최근 ③ id(같은 시각 동률 고정).
+ * ★ 규칙 판정(directPurchaseRules)과 인기 참여권(loadDirectPurchaseCreditEvents)이 같이 쓴다 — 둘이 갈리면
+ *   위반 표시와 참여권이 서로 다른 공고 기준이 된다. 별칭은 rc 고정.
+ * ★★ 나중에 바뀌는 값(status·published_at)을 순서에 넣지 않는다 — 넣으면 공고를 임시저장으로 되돌리거나
+ *   게시하는 순간 지난 구매의 기준 공고(인기 참여권 소비/적립)가 소급해 바뀐다(결정 246, Codex PR #1632 2회 지적).
+ *   같은 오더로 임시저장 공고가 하나 더 생기던 사고는 생성 쪽(오더당 살아 있는 공고 하나)에서 막는다.
+ */
+function campaignAtPurchaseOrderSql(atExpr) {
+  return `(rc.created_at <= ${atExpr}) DESC NULLS LAST, rc.created_at DESC NULLS LAST, rc.id DESC`;
+}
+
+/**
  * 인기 참여권 계산용 바로 구매 이벤트 — popularCredit.service 의 이벤트 행과 같은 모양.
  * 일반 공고 작업표의 바로 구매 = 일반 참여(참여권 적립), 인기 공고 작업표의 바로 구매 = 인기 참여(참여권 소비).
  * id 는 공고 참여 id 와 겹치지 않게 'os:' 를 붙인다.
@@ -105,7 +118,7 @@ async function loadDirectPurchaseCreditEvents(q, { phones = null, from, to }) {
             AND rc.linked_sheet_id = os.sheet_id AND rc.linked_tab_name = os.tab_name
           -- 같은 작업표에 공고가 여러 개(차수 재발행)면 구매 시점에 이미 있던 가장 최근 공고로 본다 —
           -- 나중에 만든 공고의 인기 여부가 지난 구매에 소급되지 않게(Codex PR #1623).
-          ORDER BY (rc.created_at <= os.submitted_at) DESC NULLS LAST, rc.created_at DESC NULLS LAST, rc.id DESC
+          ORDER BY ${campaignAtPurchaseOrderSql('os.submitted_at')}
           LIMIT 1
        ) camp ON TRUE
       WHERE ${DIRECT_PURCHASE_WHERE}
@@ -121,4 +134,5 @@ module.exports = {
   countDirectPurchasesSince,
   countCampaignSubDirectPurchasesSince,
   loadDirectPurchaseCreditEvents,
+  campaignAtPurchaseOrderSql,
 };

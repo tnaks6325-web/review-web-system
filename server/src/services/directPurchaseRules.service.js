@@ -64,7 +64,7 @@ async function judgeDirectPurchase(db, orderSubmissionId) {
     `SELECT rc.id, rc.is_popular, rc.multi_account_mode, rc.repurchase_days, rc.linked_sheet_id, rc.linked_tab_name
        FROM recruit_campaigns rc
       WHERE rc.participation_mode IS TRUE AND rc.linked_sheet_id = $1 AND rc.linked_tab_name = $2
-      ORDER BY (rc.created_at <= $3) DESC NULLS LAST, rc.created_at DESC NULLS LAST, rc.id DESC
+      ORDER BY ${require('./directPurchaseParticipation.service').campaignAtPurchaseOrderSql('$3')}
       LIMIT 1`, [o.sheet_id, o.tab_name, o.submitted_at]);
   const camp = cRows[0];
   if (!camp) return { judged: false, reason: 'no_campaign' };

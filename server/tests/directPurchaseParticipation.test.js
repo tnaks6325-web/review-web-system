@@ -97,7 +97,12 @@ function stubDb(handlers) {
   // ⑥ 공고 판정 — 구매 시점에 이미 있던 공고 우선(나중 공고의 인기 여부 소급 금지) · phone8 인덱스 표현식 일치
   {
     const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'directPurchaseParticipation.service.js'), 'utf8');
-    assert.ok(/ORDER BY \(rc\.created_at <= os\.submitted_at\) DESC/.test(src), 'campaign existing at purchase time wins');
+    // 결정 246: 순서는 단일 출처 함수(검사 의미 불변 — 순서 그대로 · 두 곳이 같은 함수를 쓰는지 고정)
+    assert.ok(/ORDER BY \$\{campaignAtPurchaseOrderSql\('os\.submitted_at'\)\}/.test(src), 'campaign existing at purchase time wins');
+    const { campaignAtPurchaseOrderSql } = require('../src/services/directPurchaseParticipation.service');
+    assert.equal(campaignAtPurchaseOrderSql('X'),
+      "(rc.created_at <= X) DESC NULLS LAST, rc.created_at DESC NULLS LAST, rc.id DESC",
+      'existing-at-purchase first, then newest — no mutable status/published_at keys (decision 246)');
     const mig = fs.readFileSync(path.join(__dirname, '..', 'migrations', '168_reviewer_home_lookup_indexes.sql'), 'utf8');
     const expr = "RIGHT(regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g'), 8)";
     assert.ok(mig.includes(expr), 'idx_os_phone8_all expression');
