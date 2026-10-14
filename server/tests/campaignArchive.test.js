@@ -149,7 +149,9 @@ console.log('\n[D] 살아 있는 참여가 있으면 보관 거부');
     ok('이미 보관된 공고는 멱등 성공', out4.ok === true && out4.already === true);
 
     // 해제
-    const db5 = stub((sql) => /UPDATE recruit_campaigns/.test(sql) ? { rows: [{ id: 'c1' }] } : { rows: [] });
+    // 결정 246: 해제는 먼저 행을 잠그고 보관 상태를 확인한다(이미 해제면 즉시 already) — 스텁도 보관 행을 돌려준다.
+    const db5 = stub((sql) => /UPDATE recruit_campaigns/.test(sql) ? { rows: [{ id: 'c1' }] }
+      : /SELECT archived_at FROM recruit_campaigns WHERE id = \$1 FOR UPDATE/.test(sql) ? { rows: [{ archived_at: '2026-01-01' }] } : { rows: [] });
     const out5 = await svc.unarchiveCampaign(db5, 'c1');
     ok('보관 해제', out5.ok === true && !out5.already);
     ok('★ 해제는 archived_by 를 지우지 않는다(누가 보관했나의 유일한 기록)',

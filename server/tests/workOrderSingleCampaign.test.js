@@ -90,6 +90,8 @@ const base = { title: '10/14 테스트 공고', status: 'draft' };
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'campaign.routes.js'), 'utf8');
   const lrqSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'linkedRecruitQuota.service.js'), 'utf8');
   const lrq = require('../src/services/linkedRecruitQuota.service');
+  ok('★ 잠그고 확인한 정규화 값(_srcWoId)을 그대로 저장한다(Codex PR #1632)', /\n\s*_srcWoId,\s*\/\/ ★ 결정 246/.test(src)
+    && !/\n\s*source_work_order_id \|\| '',\n/.test(src.slice(src.indexOf("router.post('/admin/create'"), src.indexOf("router.put('/admin/:id'"))));
   ok('생성은 단일 출처 잠금·확인을 쓴다', /_lrq\.lockWorkOrderCampaigns\(_insClient, \[_srcWoId\]\)/.test(src)
     && /_lrq\.liveCampaignForWorkOrders\(_insClient, \[_srcWoId\]\)/.test(src));
   const liveFn = lrqSrc.slice(lrqSrc.indexOf('async function liveCampaignForWorkOrders'), lrqSrc.indexOf('async function workOrderIdsForCampaign'));
@@ -124,6 +126,15 @@ const base = { title: '10/14 테스트 공고', status: 'draft' };
   out = await arch.unarchiveCampaign(d.db, 'c_old');
   ok('살아 있는 다른 공고가 없으면 해제 + 커밋', out.ok === true && d.log.includes('COMMIT') && d.rel() === 1
     && d.log.findIndex(q => /SET archived_at = NULL/.test(q)) < d.log.indexOf('COMMIT'));
+  { // 이미 해제된 공고(재시도) — 검사·UPDATE 없이 즉시 already
+    const log = []; const c = { query: async (sql) => { sql = String(sql); log.push(sql);
+      if (/SELECT archived_at FROM recruit_campaigns WHERE id = \$1 FOR UPDATE/.test(sql)) return { rows: [{ archived_at: null }] };
+      return { rows: [{ id: 'x' }] }; }, release: () => {} };
+    const o = await arch.unarchiveCampaign({ connect: async () => c }, 'c_live');
+    ok('★ 이미 해제된 공고는 즉시 already(UPDATE 없음 — 사이에 보관+새 공고가 끼어도 무검사 해제 불가)',
+      o.ok === true && o.already === true && !log.some(q => /SET archived_at = NULL/.test(q)) && log.includes('ROLLBACK'), log);
+    ok('해제 전 행 잠금(FOR UPDATE)', /FOR UPDATE/.test(log[1] || ''));
+  }
   d = mkDb([], []);
   out = await arch.unarchiveCampaign(d.db, 'c_old');
   ok('오더 없는 공고는 잠금·확인 없이 종전 그대로', out.ok === true && !d.log.some(q => /pg_advisory_xact_lock|c\.id <> \$2/.test(q)));
@@ -156,7 +167,7 @@ const base = { title: '10/14 테스트 공고', status: 'draft' };
   ctx.localStorage.setItem('rapp_reviewer_auth', shared);
   vm.createContext(ctx);
   // ★ 갱신 함수는 스텁하지 않고 실제 본문을 돌린다(스텁하면 공용 세션 쓰기가 가려진다 — Codex PR #1632).
-  vm.runInContext(`const USER_KEY="iad_reviewer_user"; const HOME_SESSION_KEY="iad_reviewer_home_session"; let synced = 0;
+  vm.runInContext(`const USER_KEY="iad_reviewer_user"; const HOME_SESSION_KEY="iad_reviewer_home_session"; let synced = 0; var _reEditTabUser = null;
     function syncSearchSession(u){ synced++; localStorage.setItem("rapp_reviewer_auth", JSON.stringify({ phone8:u.phone8, reviewerToken:u.reviewerToken })); }`, ctx);
   vm.runInContext(fnSrc('_refreshReviewerHomeSession'), ctx);
   vm.runInContext(fnSrc('getSavedUser', 'function '), ctx);
@@ -171,12 +182,22 @@ const base = { title: '10/14 테스트 공고', status: 'draft' };
   await vm.runInContext(`_reEditFetchMyFiles({ phone8:'11110063', sheetId:'s', tabName:'t', rowIndex:182 })`, ctx);
   ok('401 이면 토큰 갱신 후 한 번 다시', fetched.length === 2 && fetched[1].token === 'fresh', fetched);
   ok('★ 갱신해도 공용 세션(B)은 그대로 — syncShared:false', ctx.localStorage.getItem('rapp_reviewer_auth') === shared && vm.runInContext('synced', ctx) === 0);
-  ok('이 탭의 홈 신원은 새 토큰으로 갱신', JSON.parse(ctx.localStorage.getItem('iad_reviewer_user')).reviewerToken === 'fresh');
+  ok('저장소의 홈 신원은 건드리지 않는다(persist:false — 다른 탭 신원 보호)', JSON.parse(ctx.localStorage.getItem('iad_reviewer_user')).reviewerToken === futureTok('A'));
   // 만료 토큰으로 창을 열 때(선갱신)도 공용 세션 무접촉
   ctx.localStorage.setItem('iad_reviewer_user', JSON.stringify({ name: 'A', phone8: '11110063', reviewerToken: 'expired' }));
   fetched.length = 0; ctx.__first401 = false;
   await vm.runInContext(`_reEditFetchMyFiles({ phone8:'11110063', sheetId:'s', tabName:'t', rowIndex:182 })`, ctx);
   ok('★ 만료 토큰 선갱신도 공용 세션 무접촉', fetched[0].token === 'fresh' && ctx.localStorage.getItem('rapp_reviewer_auth') === shared && vm.runInContext('synced', ctx) === 0);
+  // 다른 탭이 리뷰 내역에 B 로 로그인 → USER_KEY 가 B. 이 탭에 그려진 목록의 주인(A)으로 부른다.
+  vm.runInContext(`_reEditTabUser = { name:'A', phone8:'11110063', reviewerToken:'expiredA' };`, ctx);
+  ctx.localStorage.setItem('iad_reviewer_user', JSON.stringify({ name: 'B', phone8: '22229999', reviewerToken: futureTok('B') }));
+  const userKeyB = ctx.localStorage.getItem('iad_reviewer_user');
+  fetched.length = 0;
+  await vm.runInContext(`_reEditFetchMyFiles({ phone8:'11110063', sheetId:'s', tabName:'t', rowIndex:182 })`, ctx);
+  ok('★ 다른 탭 로그인(B)이 있어도 이 탭 목록의 주인(A) 신원으로 갱신·호출', fetched.length === 1 && fetched[0].token === 'fresh', fetched);
+  ok('★ 갱신해도 공용 홈 신원(B)을 덮어쓰지 않는다(persist:false)', ctx.localStorage.getItem('iad_reviewer_user') === userKeyB);
+  ok('창을 열 때도 이 탭 목록의 주인을 쓴다', /const user = _reEditTabUser \|\| getSavedUser\(\);/.test(fnSrc('openReviewEditModal')));
+  ok('목록을 그린 신원을 기억한다', /_reEditTabUser = \{ \.\.\.user \};/.test(html));
   ok('다른 화면의 갱신은 종전 그대로 공용 세션을 맞춘다(기본값)', /if \(!opts \|\| opts\.syncShared !== false\) syncSearchSession\(next\);/.test(html));
 
   console.log(`\nworkOrderSingleCampaign: ${passed} passed`);

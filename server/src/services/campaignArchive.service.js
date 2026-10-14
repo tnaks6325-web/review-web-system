@@ -64,8 +64,15 @@ async function unarchiveCampaign(db, id) {
   try {
     if (client) await client.query('BEGIN');
     const lrq = require('./linkedRecruitQuota.service');
-    const { rows: cur } = await q.query('SELECT archived_at FROM recruit_campaigns WHERE id = $1', [id]);
-    const woIds = (cur[0] && cur[0].archived_at) ? await lrq.workOrderIdsForCampaign(q, id) : [];
+    // 행 잠금 — 확인과 해제 사이에 다른 담당자가 보관·해제를 끼워 넣지 못하게.
+    const { rows: cur } = await q.query('SELECT archived_at FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [id]);
+    if (!cur.length || !cur[0].archived_at) {
+      // ★ 이미 해제됨(재시도)·없음은 여기서 끝낸다 — 계속 가면 그 사이 보관+새 공고가 생겼을 때
+      //   검사·잠금 없이 해제 UPDATE 가 맞아떨어진다(Codex PR #1632).
+      if (client) await client.query('ROLLBACK');
+      return cur.length ? { ok: true, already: true } : { ok: false, code: 'not_found', error: '캠페인을 찾을 수 없습니다.' };
+    }
+    const woIds = await lrq.workOrderIdsForCampaign(q, id);
     if (woIds.length) {
       await lrq.lockWorkOrderCampaigns(q, woIds);
       const live = await lrq.liveCampaignForWorkOrders(q, woIds, id);

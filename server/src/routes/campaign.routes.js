@@ -3228,7 +3228,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         Number.isFinite(Number(close_buffer_min)) && close_buffer_min !== null && close_buffer_min !== undefined && close_buffer_min !== '' ? Number(close_buffer_min) : 10,
         Number.isFinite(Number(hold_ttl_min)) && hold_ttl_min !== null && hold_ttl_min !== undefined && hold_ttl_min !== '' ? Number(hold_ttl_min) : 30,
         _prepWorkDetail(work_detail) ?? null,
-        source_work_order_id || '',
+        _srcWoId,   // ★ 결정 246: 잠그고 확인한 바로 그 값(앞뒤 공백 정규화)을 저장 — 원문을 저장하면 다음 확인이 못 찾는다
         start_date || null,
         multi_account_mode === true,                            // ★ 063 §09-1: 기본 [불가]
         Math.max(0, Number(multi_daily_limit) || 0),            // ★ 063 §09-5: 0=무제한
