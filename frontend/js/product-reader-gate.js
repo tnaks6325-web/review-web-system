@@ -85,13 +85,21 @@
     document.body.appendChild(wrap);
   }
 
+  /** 시험 전용 주소는 잠그지 않는다 — Railway PR 미리보기(확장 externally_connectable 밖이라 설치자도 PING 불가)와
+   *  내 컴퓨터 서버. 여기는 가짜 데이터로 화면을 확인하는 곳이지 직원 업무 화면이 아니다(PR #1633 리뷰). */
+  function isTestHost(host) {
+    host = String(host || '');
+    return /^test-review-wdb-web-review-web-system-pr-\d+\.up\.railway\.app$/.test(host) || host === 'localhost' || host === '127.0.0.1';
+  }
+
   /** 직원 화면 진입 때 부른다. opts.isStaff 가 true 일 때만 검사한다(리뷰어·광고주 제외). */
   window.productReaderGate = async function (opts) {
     if (!PRODUCT_READER_REQUIRED || !opts || !opts.isStaff) return;
+    if (isTestHost(location.hostname)) return;
     var kind = browserKind();
     if (kind !== 'supported') { showNote(); return; }
     var version = await pingExtension();
     if (!version) showGate();
   };
-  window.productReaderGate._internals = { browserKind: browserKind, pingExtension: pingExtension, EXTENSION_ID: EXTENSION_ID, isRequired: function () { return PRODUCT_READER_REQUIRED; } };
+  window.productReaderGate._internals = { browserKind: browserKind, isTestHost: isTestHost, pingExtension: pingExtension, EXTENSION_ID: EXTENSION_ID, isRequired: function () { return PRODUCT_READER_REQUIRED; } };
 })();
