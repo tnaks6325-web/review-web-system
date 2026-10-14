@@ -1215,7 +1215,10 @@ function _reviewerTokenFresh(token) {
   } catch (_) { return false; }
 }
 
-async function _refreshReviewerHomeSession(user) {
+/* opts.syncShared === false: 이 탭의 홈 신원만 갱신하고 공용 리뷰어 세션(rapp_reviewer_auth)은 건드리지 않는다
+   — 수정요청 창이 쓴다(다른 탭의 구매양식 로그인을 이 탭 리뷰어로 바꾸지 않게, 결정 246 · Codex PR #1632).
+   기본값(미지정)은 종전 그대로 동기화한다. */
+async function _refreshReviewerHomeSession(user, opts) {
   if (!user || !user.name || !user.phone8) return null;
   const r = await fetch(API_BASE_URL + "/api/reviewer/verify?phone8=" + encodeURIComponent(user.phone8)
     + "&name=" + encodeURIComponent(user.name));
@@ -1224,7 +1227,7 @@ async function _refreshReviewerHomeSession(user) {
   const next = { ...user, name:j.name || user.name, phone:j.phone || user.phone, reviewerToken:j.reviewerToken };
   const store = next.adminPreview ? sessionStorage : localStorage;
   store.setItem(next.adminPreview ? HOME_SESSION_KEY : USER_KEY, JSON.stringify(next));
-  syncSearchSession(next);
+  if (!opts || opts.syncShared !== false) syncSearchSession(next);
   return next;
 }
 
@@ -2425,13 +2428,14 @@ function _reEditEnsureOverlay(){
    리뷰 내역 목록·참여정보(participation-brief)와 같은 관용구(만료면 갱신 후 1회 재시도). */
 async function _reEditFetchMyFiles(c){
   let user = getSavedUser();
-  if (!_reviewerTokenFresh(user && user.reviewerToken)) user = (await _refreshReviewerHomeSession(user)) || user;
+  const local = { syncShared:false };   // 갱신해도 공용 세션은 그대로(아래 주석)
+  if (!_reviewerTokenFresh(user && user.reviewerToken)) user = (await _refreshReviewerHomeSession(user, local)) || user;
   const qs = new URLSearchParams({ phone8:c.phone8, sheetId:c.sheetId, tabName:c.tabName, rowIndex:String(c.rowIndex) });
   const call = (token) => fetch(API_BASE_URL + '/api/review-edit/my-files?' + qs.toString(),
     { headers: token ? { 'X-Reviewer-Token': token } : {} });
   let r = await call(user && user.reviewerToken);
   if (r.status === 401) {
-    const next = await _refreshReviewerHomeSession(user);
+    const next = await _refreshReviewerHomeSession(user, local);
     if (next && next.reviewerToken) r = await call(next.reviewerToken);
   }
   return r.json().catch(() => ({ ok:false, error:'조회에 실패했습니다.' }));

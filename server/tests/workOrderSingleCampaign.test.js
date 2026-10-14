@@ -147,14 +147,18 @@ const base = { title: '10/14 테스트 공고', status: 'draft' };
   const fetched = [];
   const ctx = { localStorage: store(), sessionStorage: store(), JSON, Date, Number, String, URLSearchParams, API_BASE_URL: 'http://api',
     atob: (x) => Buffer.from(x, 'base64').toString('binary'),
-    fetch: async (url, opts) => { fetched.push({ url, token: opts.headers['X-Reviewer-Token'] });
+    fetch: async (url, opts) => {
+      if (/\/api\/reviewer\/verify/.test(url)) return { ok: true, status: 200, json: async () => ({ ok: true, name: 'A', reviewerToken: 'fresh' }) };
+      fetched.push({ url, token: opts.headers['X-Reviewer-Token'] });
       return { status: fetched.length === 1 && ctx.__first401 ? 401 : 200, json: async () => ({ ok: true, files: [] }) }; } };
   ctx.localStorage.setItem('iad_reviewer_user', JSON.stringify({ name: 'A', phone8: '11110063', reviewerToken: futureTok('A') }));
   const shared = JSON.stringify({ name: 'B', phone8: '22229999', reviewerToken: futureTok('B') });
   ctx.localStorage.setItem('rapp_reviewer_auth', shared);
   vm.createContext(ctx);
-  vm.runInContext(`const USER_KEY="iad_reviewer_user"; const HOME_SESSION_KEY="iad_reviewer_home_session";
-    let refreshed = 0; async function _refreshReviewerHomeSession(u){ refreshed++; return { ...u, reviewerToken: 'fresh' }; }`, ctx);
+  // ★ 갱신 함수는 스텁하지 않고 실제 본문을 돌린다(스텁하면 공용 세션 쓰기가 가려진다 — Codex PR #1632).
+  vm.runInContext(`const USER_KEY="iad_reviewer_user"; const HOME_SESSION_KEY="iad_reviewer_home_session"; let synced = 0;
+    function syncSearchSession(u){ synced++; localStorage.setItem("rapp_reviewer_auth", JSON.stringify({ phone8:u.phone8, reviewerToken:u.reviewerToken })); }`, ctx);
+  vm.runInContext(fnSrc('_refreshReviewerHomeSession'), ctx);
   vm.runInContext(fnSrc('getSavedUser', 'function '), ctx);
   vm.runInContext(fnSrc('_reviewerTokenFresh', 'function '), ctx);
   vm.runInContext(fnSrc('_reEditFetchMyFiles'), ctx);
@@ -165,7 +169,15 @@ const base = { title: '10/14 테스트 공고', status: 'draft' };
   ok('응답을 돌려준다', res && res.ok === true);
   fetched.length = 0; ctx.__first401 = true;
   await vm.runInContext(`_reEditFetchMyFiles({ phone8:'11110063', sheetId:'s', tabName:'t', rowIndex:182 })`, ctx);
-  ok('401 이면 토큰 갱신 후 한 번 다시', fetched.length === 2 && fetched[1].token === 'fresh' && vm.runInContext('refreshed', ctx) === 1, fetched);
+  ok('401 이면 토큰 갱신 후 한 번 다시', fetched.length === 2 && fetched[1].token === 'fresh', fetched);
+  ok('★ 갱신해도 공용 세션(B)은 그대로 — syncShared:false', ctx.localStorage.getItem('rapp_reviewer_auth') === shared && vm.runInContext('synced', ctx) === 0);
+  ok('이 탭의 홈 신원은 새 토큰으로 갱신', JSON.parse(ctx.localStorage.getItem('iad_reviewer_user')).reviewerToken === 'fresh');
+  // 만료 토큰으로 창을 열 때(선갱신)도 공용 세션 무접촉
+  ctx.localStorage.setItem('iad_reviewer_user', JSON.stringify({ name: 'A', phone8: '11110063', reviewerToken: 'expired' }));
+  fetched.length = 0; ctx.__first401 = false;
+  await vm.runInContext(`_reEditFetchMyFiles({ phone8:'11110063', sheetId:'s', tabName:'t', rowIndex:182 })`, ctx);
+  ok('★ 만료 토큰 선갱신도 공용 세션 무접촉', fetched[0].token === 'fresh' && ctx.localStorage.getItem('rapp_reviewer_auth') === shared && vm.runInContext('synced', ctx) === 0);
+  ok('다른 화면의 갱신은 종전 그대로 공용 세션을 맞춘다(기본값)', /if \(!opts \|\| opts\.syncShared !== false\) syncSearchSession\(next\);/.test(html));
 
   console.log(`\nworkOrderSingleCampaign: ${passed} passed`);
 
