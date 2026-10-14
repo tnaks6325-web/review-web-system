@@ -19,7 +19,7 @@ function load(ua, chromeRuntime, required) {
   const appended = [];
   const document = { getElementById: id => appended.find(n => n.id === id) || null, createElement: () => ({ setAttribute() {}, appendChild() {}, addEventListener() {} }), body: { appendChild: n => appended.push(n) } };
   const window = { chrome: chromeRuntime ? { runtime: chromeRuntime } : undefined };
-  const src = required ? gateSrc.replace('var PRODUCT_READER_REQUIRED = false;', 'var PRODUCT_READER_REQUIRED = true;') : gateSrc;
+  const src = gateSrc.replace(/var PRODUCT_READER_REQUIRED = (true|false);/, 'var PRODUCT_READER_REQUIRED = ' + (required ? 'true' : 'false') + ';');
   vm.runInNewContext(src, { window, document, navigator: { userAgent: ua }, setTimeout, clearTimeout, Promise, location: { reload() {} } });
   return { gate: window.productReaderGate, appended };
 }
@@ -47,6 +47,7 @@ const missing = { sendMessage: (id, msg, cb) => cb(undefined), lastError: { mess
   t = load(SAFARI, null, true); await t.gate({ isStaff: true });
   ok('사파리 직원 → 막지 않고 안내 문구만(같은 id 1개)', t.appended.length === 1);
 
+  ok('스위치 선언이 한 줄로 있다(검사가 값을 바꿔 끼울 수 있어야 함)', (gateSrc.match(/var PRODUCT_READER_REQUIRED = (true|false);/g) || []).length === 1);
   ok('PING 만 보낸다', /sendMessage\(EXTENSION_ID, \{ type: 'PING' \}/.test(gateSrc) && !/type: '(LIST|READ)'/.test(gateSrc));
   ok('작업데스크: 광고주 제외로 호출', /window\.productReaderGate\(\{ isStaff: STATE\.role !== 'advertiser' \}\)/.test(workdesk));
   ok('관리자 화면: 진입 때 호출', /function enterAdminScreen\(\) \{\s*\/\/[^\n]*\n\s*try \{ window\.productReaderGate && window\.productReaderGate\(\{ isStaff: true \}\)/.test(indexApp));

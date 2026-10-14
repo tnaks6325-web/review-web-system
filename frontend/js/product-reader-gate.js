@@ -7,11 +7,11 @@
  *   · 리뷰어·광고주 화면은 대상이 아니다 — 호출하는 쪽이 isStaff 로 알려 준다(광고주 역할은 false).
  *
  * 설치 여부: 확장 1.0.4 의 externally_connectable PING(버전만 답함). 1.0.3 은 답하지 않는다.
- * ★ PRODUCT_READER_REQUIRED 는 1.0.4 웹스토어 심사 통과 뒤에만 true 로 바꾼다 — 먼저 켜면 1.0.3 설치자도 막힌다.
+ * ★ PRODUCT_READER_REQUIRED — 1.0.4 웹스토어 게시 확인 뒤 2026-10-14 true 로 켰다(1.0.3 은 PING 에 답하지 않는다).
  * ★ 즉시 끄기: 이 값을 false 로 되돌려 배포(프론트 자동 배포 ~20초).
  * ============================================================ */
 (function () {
-  var PRODUCT_READER_REQUIRED = false;
+  var PRODUCT_READER_REQUIRED = true;   // 2026-10-14 켬 — 확장 1.0.4 웹스토어 게시 확인(업데이트 서버 version=1.0.4)
   var EXTENSION_ID = 'hlhphdglgkacdbbknpfmaoklcbinnaoe';
   var STORE_URL = 'https://chromewebstore.google.com/detail/' + EXTENSION_ID;
   var GUIDE_URL = 'https://inadd-system.pages.dev/static/product-reader-install-guide.html';
@@ -78,7 +78,9 @@
     reload.type = 'button';
     reload.addEventListener('click', function () { location.reload(); });
     var sub = el('p', 'margin:0;font-size:11.5px;color:#7a879b', '설치한 뒤 이 화면을 새로고침하면 인식됩니다. 크롬·웨일·엣지 모두 같은 웹스토어에서 설치합니다.');
-    card.appendChild(h); card.appendChild(p); card.appendChild(actions); card.appendChild(reload); card.appendChild(sub);
+    // 1.0.3 설치자는 PING 에 답하지 않는다 — 브라우저 자동 업데이트(1.0.4) 전까지 이 화면이 보일 수 있어 안내한다.
+    var old = el('p', 'margin:0;font-size:11.5px;color:#7a879b', '이미 설치했는데 계속 보이면 확장 프로그램이 아직 새 버전으로 바뀌지 않은 것입니다. 브라우저를 완전히 껐다 켠 뒤 다시 열어 주세요.');
+    card.appendChild(h); card.appendChild(p); card.appendChild(actions); card.appendChild(reload); card.appendChild(sub); card.appendChild(old);
     wrap.appendChild(card);
     document.body.appendChild(wrap);
   }
