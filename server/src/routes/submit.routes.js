@@ -1146,7 +1146,9 @@ router.post('/order', async (req, res, next) => {
                         selectedOptKey: sheetOptKey, blogUrl: (holdCtx && holdCtx.blogUrl) || '',
                         /* ★ 138 — 리뷰어가 고른 **상품**은 옵션과 별개의 칸(「상품」)에 적는다.
                            옵션 칸을 비우는 위 규율은 그대로 두고, 사라지던 값을 여기로 흘려보낸다. */
-                        selectedProduct: (holdCtx && holdCtx.productName) || formPickedProduct || '' };
+                        selectedProduct: (holdCtx && holdCtx.productName) || formPickedProduct || '',
+                        /* 결정 245 — 캡처에서 AI 가 읽은 배송메세지. 서버 서명에서만 꺼낸다(없거나 틀리면 '' · 제출은 막지 않는다). */
+                        deliveryMemo: reviewerOrderIdentity.readDeliveryMemoProof(b.deliveryMemoToken) };
     // 통폐합 pilot/enabled에서 workboard_id가 연결된 작업만 큐 반영으로 전환한다.
     // 실패·미이관·legacy는 기존 무시트 즉시 반영을 그대로 탄다.
     let queuedWorkboardApply = false;

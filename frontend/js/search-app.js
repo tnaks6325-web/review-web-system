@@ -8177,7 +8177,7 @@ function onCardImgDrop(e, cid) {
 
 function removeCardImg(cid) {
   const st = _cardAiState[cid];
-  if (st) { if (st.abortCtrl) { st.abortCtrl.abort(); st.abortCtrl = null; } if (st.countdownId) { clearInterval(st.countdownId); st.countdownId = null; } st.analysisRequestId=(Number(st.analysisRequestId)||0)+1; st.lastBase64=""; st.lastMime=""; st.extracted=null; st.proofExtracted=null; st.extractToken=""; st.approvalToken=""; st.priorApprovalToken=""; st.reviewToken=""; st.matchError=false; }
+  if (st) { if (st.abortCtrl) { st.abortCtrl.abort(); st.abortCtrl = null; } if (st.countdownId) { clearInterval(st.countdownId); st.countdownId = null; } st.analysisRequestId=(Number(st.analysisRequestId)||0)+1; st.lastBase64=""; st.lastMime=""; st.extracted=null; st.proofExtracted=null; st.extractToken=""; st.deliveryMemoToken=""; st.approvalToken=""; st.priorApprovalToken=""; st.reviewToken=""; st.matchError=false; }
   if (st) { st.identityBusy = false; st.identityStatus = ""; st.identityCanManual = false; st.identityChecks = []; st.identityReasonCodes = []; st.savedIdentitySelections = {}; }
   _resetSavedIdentityPickerLabels(cid);
   _syncSubmissionIdentityAction();
@@ -8261,7 +8261,7 @@ async function _callCardExtractAi(cid, base64, mimeType) {
   st.analysisRequestId = requestId;
   // 새 캡처를 분석하기 시작하는 순간 이전 캡처의 추출/검토/승인 증명은 모두 폐기한다.
   // 새 분석이 실패해도 과거 승인토큰으로 제출되는 stale-capture 우회를 막는다.
-  st.extracted = null; st.proofExtracted = null; st.extractToken = ""; st.imageHash = "";
+  st.extracted = null; st.proofExtracted = null; st.extractToken = ""; st.imageHash = ""; st.deliveryMemoToken = "";
   st.approvalToken = ""; st.priorApprovalToken = ""; st.reviewToken = ""; st.matchError = false;
   st.savedIdentitySelections = {};
   _resetSavedIdentityPickerLabels(cid);
@@ -8331,6 +8331,7 @@ async function _callCardExtractAi(cid, base64, mimeType) {
 
     st.extractToken = json.extractToken || "";
     st.imageHash = json.imageHash || "";
+    st.deliveryMemoToken = json.deliveryMemoToken || "";   // 결정 245: 배송메세지 — 서버 서명 그대로 제출에 싣는다
     st.extracted = { orderNumber: json.orderNumber||"", recipient: json.recipient||"", phone: json.phone||"", address: json.address||"", price: json.price||"", orderer:json.orderer||"", store:json.store||"" };
     _ofpOnExtracted(cid, json.productLabel || "", json.productName || "", typeof json.productOption === "string" ? json.productOption : "");
     // extractToken은 AI 원본 추출값의 해시에 결속된다. 서버가 가림정보를 보완한
@@ -9479,6 +9480,7 @@ async function submitOrderForm() {
       productCaptureRaw:    _OFP.capName[cid] || "",
       productCaptureOptRaw: _OFP.capOpt[cid] || "",
       productCapturePriceRaw: (_cardAiState[cid] && _cardAiState[cid].extracted && _cardAiState[cid].extracted.price) || "",
+      deliveryMemoToken:  (_cardAiState[cid] && _cardAiState[cid].deliveryMemoToken) || "",
       identityConfirmed:  false
       ,saveShoppingId: !!document.getElementById(cid+"_saveIdChk")?.checked
     };
@@ -9604,6 +9606,8 @@ async function submitOrderForm() {
       productCaptureName: o.productCaptureName || o.productCaptureRaw || "",
       productCaptureOption: o.productCaptureOptRaw || "",
       productCapturePrice:  (bh || (_EMBED_CTX && _EMBED_CTX.app)) ? (o.productCapturePriceRaw || "") : "",
+      // ★ 결정 245: 캡처에서 AI 가 읽은 배송메세지(서버 서명) — 서버가 서명에서만 글을 꺼내 주문에 남긴다.
+      deliveryMemoToken:  o.deliveryMemoToken || "",
       identityConfirmed:  o.identityConfirmed ? "true" : "false",
       identityApprovalToken: o.identityApprovalToken || "",
       // ★ 참여형 캠페인 홀드 확정 문맥(M2) — embed 진입일 때만 전송. 서버가 소유권 3중검증 후 확정

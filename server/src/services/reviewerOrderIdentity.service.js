@@ -12,6 +12,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const PURPOSE_EXTRACT = 'reviewer_capture_extract';
 const PURPOSE_MATCH_REVIEW = 'reviewer_identity_review';
 const PURPOSE_APPROVAL = 'reviewer_identity_approval';
+const PURPOSE_DELIVERY_MEMO = 'reviewer_capture_delivery_memo';
+const DELIVERY_MEMO_MAX = 200;
 
 class ReviewerOrderIdentityError extends Error {
   constructor(code, message, status = 400, extra = {}) {
@@ -109,6 +111,23 @@ function issueExtractionProof({ imageHash, extracted, ok, errorCode = '' }) {
     errorCode: String(errorCode || '').slice(0, 80),
   }, '15m');
   return { extractToken: token, imageHash: String(imageHash || ''), extractedFieldsHash: fieldsHash(normalized) };
+}
+/* 결정 245 — 캡처에서 AI 가 읽은 배송메세지를 서버 서명에 담아 돌려준다. 제출 때 이 서명에서만 글을 꺼내므로
+   화면에서 글을 바꿔 보내도 원장에는 AI 가 읽은 글만 남는다. 명의 확인 검사(fieldsObject)와는 별개라
+   새로고침하지 않은 옛 화면(서명 없음)도 막지 않는다 — 그 주문은 배송메세지가 빈칸으로 남을 뿐이다. */
+function cleanDeliveryMemo(value) {
+  return String(value == null ? '' : value).replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, DELIVERY_MEMO_MAX);
+}
+function issueDeliveryMemoProof(memo) {
+  const text = cleanDeliveryMemo(memo);
+  if (!text) return '';
+  return signScoped({ purpose: PURPOSE_DELIVERY_MEMO, memo: text }, '12h');
+}
+/** 서명이 없거나 틀리거나 만료됐으면 '' — 어떤 경우에도 제출을 막지 않는다(fail-open: 기록만 빈다). */
+function readDeliveryMemoProof(token) {
+  if (!token) return '';
+  try { return cleanDeliveryMemo(verifyScoped(token, PURPOSE_DELIVERY_MEMO).memo); }
+  catch (_) { return ''; }
 }
 function verifyExtractionProof(token, extracted) {
   const p = verifyScoped(token, PURPOSE_EXTRACT);
@@ -1194,6 +1213,8 @@ module.exports = {
   hashImageBase64,
   issueExtractionProof,
   verifyExtractionProof,
+  issueDeliveryMemoProof,
+  readDeliveryMemoProof,
   loadOwnerProfile,
   getSecureProfile,
   saveShoppingId,

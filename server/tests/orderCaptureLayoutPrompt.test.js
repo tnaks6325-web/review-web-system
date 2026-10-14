@@ -32,7 +32,7 @@ ok('가림 별표를 보존한다', /별표\(\*\)[\s\S]{0,100}그대로 보존/.
 ok('보이지 않는 주문자를 수취인으로 복사하지 않는다', /주문자 이름이 따로 없으면[\s\S]{0,100}orderer를 빈 문자열/.test(src));
 ok('실제 결제 총액을 우선한다', /실제 "총 결제금액" 또는 "주문금액"을 우선/.test(src));
 ok('프롬프트 변경은 새 캐시 접두를 사용한다',
-  /const EXTRACT_CACHE_VERSION = 'extract4'/.test(src)   // 결정 230: productOption 칸 추가로 올림
+  /const EXTRACT_CACHE_VERSION = 'extract([4-9]|[1-9]\d+)'/.test(src)   // 결정 230: productOption 칸 추가로 4 · 결정 245: deliveryMemo 로 5(그 뒤 올림도 허용)
   && /EXTRACT_CACHE_VERSION \+ ':' \+ sampleSig \+ ':' \+ base64Data/.test(src));
 
 console.log('\n등록 예시의 실제 주문정보 추출 연결');

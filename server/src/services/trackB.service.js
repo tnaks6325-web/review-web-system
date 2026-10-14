@@ -3391,7 +3391,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             ria.round, NULL::text AS option, ria.product_name AS product,
             ria.is_submitted AS submitted, FALSE AS paid, 'archive'::text AS source,
             NULL::uuid AS order_submission_id, NULL::text AS identity_key, ria.row_json, ria.submit_col, ria.submit_col2,
-            NULL::uuid AS "popularPurposeApplicationId", NULL::text AS "popularPurposePhone8", NULL::jsonb AS "ruleFlags"
+            NULL::uuid AS "popularPurposeApplicationId", NULL::text AS "popularPurposePhone8", NULL::jsonb AS "ruleFlags",
+            NULL::text AS "deliveryMemo"
        FROM review_index_archive ria
       WHERE ria.sheet_id=$1 AND ria.tab_name=$2
       ORDER BY ria.row_index`
@@ -3406,7 +3407,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             COALESCE(purpose_app.phone8, CASE WHEN purpose_order.id IS NOT NULL AND purpose_order.campaign_application_id IS NULL
                                               THEN RIGHT(regexp_replace(COALESCE(purpose_order.phone, ''), '[^0-9]', '', 'g'), 8) END) AS "popularPurposePhone8",
             -- 결정 242: 바로 구매 규칙 위반 표시(내부 작업보드만)
-            CASE WHEN purpose_order.campaign_application_id IS NULL THEN purpose_order.rule_flags END AS "ruleFlags"
+            CASE WHEN purpose_order.campaign_application_id IS NULL THEN purpose_order.rule_flags END AS "ruleFlags",
+            -- 결정 245: 캡처에서 읽은 배송메세지(제출물 미리보기 한 줄) — 업체에는 아래에서 주문 줄이 맞을 때만 싣는다.
+            purpose_order.delivery_memo AS "deliveryMemo"
        FROM campaign_participants cp
        LEFT JOIN order_submissions purpose_order
          ON purpose_order.id = cp.order_submission_id AND purpose_order.deleted_at IS NULL
@@ -3683,6 +3686,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
         ? { ruleFlags: r.ruleFlags.flags.map(f => require('./directPurchaseRules.service').RULE_LABELS[f && f.code] || String((f && f.code) || '')).filter(Boolean) }
         : {}),
     };
+    /* 결정 245 — 구매캡처에서 AI 가 읽은 배송메세지(사용자 확정 2026-10-14 ㄴ: 업체 화면에도).
+       업체는 전화번호·아이디와 같은 규율 — 주문이 실제 기록된 물리행까지 맞을 때(advertiserOrder)만 싣는다. */
+    if ((showEdits || advertiserOrder) && String(r.deliveryMemo || '').trim()) syn.deliveryMemo = String(r.deliveryMemo).trim();
     /* ★ 행마다 같은 판정을 실어 보낸다 — 제출물 미리보기 목록이 "채워진 줄"을 화면에서 다시
        세지 않게(사본 0). 게이지 분자(`filledCount`)와 **같은 호출**이라 갈릴 수가 없다. */
     syn.filled = _isFilledRow(syn);

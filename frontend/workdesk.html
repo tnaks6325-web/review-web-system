@@ -348,6 +348,9 @@
   .rvpane .rvhd .rvsub{font-weight:600;letter-spacing:0;text-transform:none;color:var(--faint);font-size:10.5px;margin-left:auto}
   .rvwho{font-size:12.5px;font-weight:750;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .rvwho span{font-weight:600;color:var(--faint);font-size:11px;margin-left:5px}
+  .rvmemo{display:flex;gap:6px;align-items:baseline;font-size:11.5px;margin:-4px 0 8px;min-width:0}
+  .rvmemok{flex:none;font-weight:700;color:var(--faint);font-size:10.5px}
+  .rvmemov{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .rvnone{min-height:190px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;
           border:1px dashed var(--line2);border-radius:10px;background:var(--card2);text-align:center;padding:16px}
   .rvnone b{font-size:13px;font-weight:750;color:var(--muted)}
@@ -7028,7 +7031,10 @@ function _rvRender2(pane){
   const r=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(STATE.rvSel));
   if(!r){ _rvFill(pane, hd+`<div class="rvnone"><b>행을 선택하세요</b><span>표의 행을 클릭하거나 ↑↓ 키로 이동하면 그 줄의 구매 캡처·리뷰 캡처가 여기 표시됩니다.</span></div>`); return; }
   const who=_rvWho(r);
-  const who2=`<div class="rvwho">${esc(who||'—')}${_rvNoHtml(r)}</div>`;
+  /* 결정 245 — 구매캡처에서 AI 가 읽은 배송메세지 한 줄(서버가 싣는 줄만 · 없으면 그리지 않는다). */
+  const memo=String((r&&r.deliveryMemo)||'').trim();
+  const who2=`<div class="rvwho">${esc(who||'—')}${_rvNoHtml(r)}</div>`
+    +(memo?`<div class="rvmemo" title="구매캡처에서 AI가 읽은 배송메세지(배송요청사항·배송메모)"><span class="rvmemok">배송메세지</span><span class="rvmemov" title="${esc(memo)}">${esc(memo)}</span></div>`:'');
   if(STATE.rvImgs===null){ _rvFill(pane, hd+who2+`<div class="rvnone"><b>제출물을 불러오지 못했습니다</b><span>잠시 후 다시 시도해 주세요.</span></div>`); return; }
   const files=(STATE.rvImgs&&STATE.rvImgs[String(r.seq)])||[];
   /* 기본 두 칸에서는 종전처럼 제목을 생략한다. 내부 현영 대상은 세 갈래를 구분해야 하므로
