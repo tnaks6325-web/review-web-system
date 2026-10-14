@@ -83,15 +83,17 @@ async function countCampaignSubDirectPurchasesSince(q, { campaignId, ownerPhone8
 
 /**
  * 바로 구매 한 건이 "어느 공고의 구매인가" — 같은 작업표를 가리키는 공고가 여럿일 때의 단일 순서.
- *   ① 임시저장(draft)이 아닌 공고 우선 — 리뷰어에게 열린 적 없는 공고가 판정·참여권 기준이 되지 않게
- *      (결정 246: 같은 오더로 1분 뒤 임시저장 공고가 하나 더 생기자 "가장 최근"이 그쪽을 집었다).
+ *   ① 구매 시점에 이미 있던 공고 우선 — ★ 맨 앞이어야 한다: 상태는 나중에 바뀌는 값이라 앞에 두면
+ *      옛 공고를 임시저장으로 되돌리는 순간 지난 구매의 기준 공고가 소급해 바뀐다(Codex PR #1632).
+ *   ② 같은 쪽(둘 다 구매 전에 있던) 안에서는 임시저장(draft)이 아닌 공고 우선 — 결정 246: 같은 오더로
+ *      1분 뒤 임시저장 공고가 하나 더 생기자 "가장 최근"이 리뷰어에게 열린 적 없는 그쪽을 집었다.
  *      임시저장 공고뿐이면 그것으로 본다(정렬일 뿐 거르지 않는다 — 판정이 "모름"으로 남지 않게).
- *   ② 구매 시점에 이미 있던 공고 우선 ③ 그중 가장 최근 ④ id(같은 시각 동률 고정).
+ *   ③ 그중 가장 최근 ④ id(같은 시각 동률 고정).
  * ★ 규칙 판정(directPurchaseRules)과 인기 참여권(loadDirectPurchaseCreditEvents)이 같이 쓴다 — 둘이 갈리면
  *   위반 표시와 참여권이 서로 다른 공고 기준이 된다. 별칭은 rc 고정.
  */
 function campaignAtPurchaseOrderSql(atExpr) {
-  return `(rc.status IS DISTINCT FROM 'draft') DESC, (rc.created_at <= ${atExpr}) DESC NULLS LAST, rc.created_at DESC NULLS LAST, rc.id DESC`;
+  return `(rc.created_at <= ${atExpr}) DESC NULLS LAST, (rc.status IS DISTINCT FROM 'draft') DESC, rc.created_at DESC NULLS LAST, rc.id DESC`;
 }
 
 /**

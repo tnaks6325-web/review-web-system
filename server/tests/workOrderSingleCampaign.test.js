@@ -90,6 +90,34 @@ const base = { title: '10/14 테스트 공고', status: 'draft' };
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'campaign.routes.js'), 'utf8');
   ok('확인 조건에 archived_at IS NULL', /WHERE source_work_order_id = \$1 AND archived_at IS NULL/.test(src));
 
+  console.log('\n[D2] 보관 해제도 같은 검사·같은 잠금(생성 검사 우회 차단 — Codex PR #1632)');
+  const arch = require('../src/services/campaignArchive.service');
+  ok('잠금 키는 한 곳(생성·해제 공용)', arch.workOrderCampaignLockKey(' wo_1 ') === 'recruit_campaign_wo:wo_1'
+    && /workOrderCampaignLockKey\(_srcWoId\)/.test(src));
+  const mkDb = (srcWo, live) => {
+    const log = []; let rel = 0;
+    const c = { query: async (sql) => { sql = String(sql); log.push(sql);
+      if (/SELECT source_work_order_id FROM recruit_campaigns WHERE id = \$1 AND archived_at IS NOT NULL/.test(sql)) return { rows: srcWo ? [{ source_work_order_id: srcWo }] : [] };
+      if (/AND archived_at IS NULL AND id <> \$2/.test(sql)) return { rows: live };
+      if (/UPDATE recruit_campaigns SET archived_at = NULL/.test(sql)) return { rows: [{ id: 'c_old' }] };
+      return { rows: [] }; }, release: () => { rel++; } };
+    return { db: { connect: async () => c }, log, rel: () => rel };
+  };
+  let d = mkDb('wo_1', [{ id: 'c_new', title: '새 공고' }]);
+  let out = await arch.unarchiveCampaign(d.db, 'c_old');
+  ok('★ 같은 오더에 살아 있는 공고가 있으면 해제 거절(이름 안내)', out.ok === false && out.code === 'work_order_campaign_exists' && /새 공고/.test(out.error), out);
+  ok('★ 해제 UPDATE 를 하지 않는다', !d.log.some(q => /SET archived_at = NULL/.test(q)));
+  ok('잠금 → 확인 순서 · 되돌림 · 반납', d.log.findIndex(q => /pg_advisory_xact_lock/.test(q)) > -1
+    && d.log.findIndex(q => /pg_advisory_xact_lock/.test(q)) < d.log.findIndex(q => /id <> \$2/.test(q))
+    && d.log.includes('ROLLBACK') && d.rel() === 1);
+  d = mkDb('wo_1', []);
+  out = await arch.unarchiveCampaign(d.db, 'c_old');
+  ok('살아 있는 다른 공고가 없으면 해제 + 커밋', out.ok === true && d.log.includes('COMMIT') && d.rel() === 1
+    && d.log.findIndex(q => /SET archived_at = NULL/.test(q)) < d.log.indexOf('COMMIT'));
+  d = mkDb('', []);
+  out = await arch.unarchiveCampaign(d.db, 'c_old');
+  ok('오더 없는 공고는 잠금·확인 없이 종전 그대로', out.ok === true && !d.log.some(q => /pg_advisory_xact_lock|id <> \$2/.test(q)));
+
   console.log('\n[E] 수정요청 창 — 부르기 직전에 이 탭의 리뷰어로 세션을 맞춘다');
   const html = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'index.html'), 'utf8');
   const fnSrc = (name) => {
@@ -104,6 +132,11 @@ const base = { title: '10/14 테스트 공고', status: 'draft' };
   ok('창을 열 때 맞춘 리뷰어로 phone8 을 정한다', /const user = await _reEditSyncSession\(\);/.test(open));
   ok('★ 서버 호출 직전에 다시 맞춘다(창을 연 뒤 다른 탭 로그인 대비)',
     load.indexOf('await _reEditSyncSession()') > -1 && load.indexOf('await _reEditSyncSession()') < load.indexOf("action:'reviewEditMyFiles'"));
+
+  for (const [fn, action] of [['_reEditSubmit', "action:'reviewEditRequest'"], ['_reEditCancel', "action:'reviewEditCancel'"], ['_reEditLoadMyRequests', "action:'reviewEditMyRequests'"]]) {
+    const b = fnSrc(fn);
+    ok(`★ ${fn}: 서버 호출 직전에 맞춘다(Codex PR #1632)`, b.indexOf('await _reEditSyncSession()') > -1 && b.indexOf('await _reEditSyncSession()') < b.indexOf(action));
+  }
 
   // 실행 — 공용 세션이 다른 사람(B)이어도 맞춘 뒤엔 화면의 리뷰어(A) 토큰이 된다.
   const store = () => { const m = new Map(); return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k) }; };

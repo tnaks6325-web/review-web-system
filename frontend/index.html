@@ -2421,7 +2421,8 @@ function _reEditEnsureOverlay(){
    (rapp_reviewer_auth — 구매양식·공고 화면과 같이 쓰는 값)의 토큰을 붙인다. 리뷰 내역은
    이 탭의 리뷰어(getSavedUser) 토큰으로 직접 부르므로, 다른 탭에서 다른 사람으로 구매양식에
    로그인하면 목록은 A, 수정 창은 B 로 갈려 "로그인한 리뷰어의 제출 내역만…"(403)이 난다
-   (2026-10-14 실사례). 부르기 직전마다 이 탭의 리뷰어로 맞춘다 — goToSubmit 과 같은 관용구. */
+   (2026-10-14 실사례). 부르기 직전마다(창 열기·파일 조회·교체 요청·취소·내 요청 내역) 이 탭의 리뷰어로
+   맞춘다 — 창을 연 뒤 다른 탭 로그인에도 버티게(Codex PR #1632). goToSubmit 과 같은 관용구. */
 async function _reEditSyncSession(){
   let user = getSavedUser();
   if (!user || !user.phone8) return user;
@@ -2551,6 +2552,7 @@ async function _reEditSubmit(){
   const reasonEl = document.getElementById('reEditReason');
   const reason = reasonEl ? reasonEl.value : '';
   try{
+    await _reEditSyncSession();
     const res = await gasPostUpload({
       action:'reviewEditRequest', phone8:c.phone8, sheetId:c.sheetId, tabName:c.tabName, gid:c.gid,
       rowIndex:c.rowIndex, oldFileId:_reEditTargetOldId, reason,
@@ -2570,6 +2572,7 @@ async function _reEditCancel(id){
   const c = _reEditCtx; if (!c) return;
   if (!confirm('이 수정요청을 취소할까요?')) return;
   try{
+    await _reEditSyncSession();
     const res = await gasPost({ action:'reviewEditCancel', phone8:c.phone8, requestId:id });
     if (!res || res.ok === false) throw new Error((res && res.error) || '취소에 실패했습니다.');
     showToast('요청을 취소했습니다.');
@@ -2581,6 +2584,7 @@ async function _reEditLoadMyRequests(){
   const c = _reEditCtx; const el = document.getElementById('reEditMyReqs');
   if (!c || !el) return;
   try{
+    await _reEditSyncSession();
     const res = await gasGet({ action:'reviewEditMyRequests', phone8:c.phone8 });
     const reqs = (res && res.requests) || [];
     if (reqs.length === 0){ el.innerHTML = ''; return; }
