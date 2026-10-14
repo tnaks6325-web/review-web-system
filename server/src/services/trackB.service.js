@@ -1811,9 +1811,12 @@ function _mergeIntranetQuoteHistory(legacy, history, liveRow, liveQuote) {
     entries.push({ capturedAt: _intranetIso(h.snapshot.updated_at || h.snapshot.created_at), payload: _mapQuoteFull(h.snapshot) });
   }
   entries.push({ capturedAt: _intranetIso(liveRow.updated_at || liveRow.created_at), payload: liveQuote });
+  // ★ 같은 내용 판정은 화면에 그려지는 값 전부(_mapQuoteFull 결과 전체)로 한다 — _quoteHash 는 유효기간·담당자 등을
+  //   빼고 보므로, 그것만 고친 저장이 "같다"로 접히면 지금 견적서가 빠지고 옛 값이 최신처럼 보인다(코덱스 리뷰 P1).
+  //   같으면 앞의 것을 뒤의 것으로 바꾼다 — 마지막 탭은 언제나 지금 견적서다.
   const out = [];
   for (const e of entries) {
-    if (out.length && _quoteHash(out[out.length - 1].payload) === _quoteHash(e.payload)) continue;
+    if (out.length && JSON.stringify(out[out.length - 1].payload) === JSON.stringify(e.payload)) { out[out.length - 1] = e; continue; }
     out.push(e);
   }
   return out.slice(-30).map((e, i) => ({ version: i + 1, capturedAt: e.capturedAt, payload: e.payload }));
@@ -1840,8 +1843,13 @@ async function quoteDocForTab({ sheetId, tabName, role = 'master', advertiserId 
       'SELECT version, payload, captured_at AS "capturedAt", content_hash AS "hash" FROM trackb_quote_snapshots WHERE sales_id=$1 ORDER BY version ASC LIMIT 30', [link.salesId]);
     legacy = lr;
   }
+  // 장마다 인트라넷 이력을 함께(최대 6개씩) 받는다 — 하나씩 기다리면 인트라넷이 느릴 때 장 수 × 5초가 쌓인다(코덱스 리뷰 P2).
+  const histories = [];
+  for (let i = 0; i < rows.length; i += 6) {
+    histories.push(...await Promise.all(rows.slice(i, i + 6).map(r => _intranetQuoteHistory(r.id))));
+  }
   const docs = [];
-  for (const row of rows) {
+  for (const [rowIndex, row] of rows.entries()) {
     const quote = _mapQuoteFull(row);
     const key = multi && row.id ? `${link.salesId}#${row.id}` : link.salesId;
     const mine = multi ? legacy.filter(v => v.payload && String(v.payload.quoteNumber || '') === quote.quoteNumber && quote.quoteNumber) : [];
@@ -1850,7 +1858,7 @@ async function quoteDocForTab({ sheetId, tabName, role = 'master', advertiserId 
       'SELECT version, payload, captured_at AS "capturedAt" FROM trackb_quote_snapshots WHERE sales_id=$1 ORDER BY version ASC LIMIT 30', [key]);
     // ★ 버전 탭의 출처 = 인트라넷 견적서 이력(고칠 때마다 직전 내용을 인트라넷이 보관 — 빠짐없음).
     //   이력이 없거나(아직 안 고침·구버전 인트라넷) 조회 실패면 종전 리뷰웹 스냅샷(열어 본 시점 기록)으로 접는다.
-    const history = await _intranetQuoteHistory(row.id);
+    const history = histories[rowIndex];
     const versions = history
       ? _mergeIntranetQuoteHistory([...mine, ...vr], history, row, quote)
       : [...mine, ...vr].slice(-30).map((r, i) => ({ version: i + 1, capturedAt: r.capturedAt, payload: r.payload }));

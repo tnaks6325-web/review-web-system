@@ -76,6 +76,18 @@ async function run() {
   ok(vs.every(v => !('memo' in v.payload) && !JSON.stringify(v.payload).includes('내부 메모')), 'C1: 내부 메모는 어떤 버전에도 실리지 않는다');
   ok(vs.every(v => !JSON.stringify(v).includes('가상관리자')), 'C2: 고친 사람 이름은 실리지 않는다');
 
+  // ═══ D. 유효기간·담당자만 고친 저장도 지금 견적서가 마지막 탭(코덱스 리뷰 P1) ═══
+  const savedLive = { ...LIVE };
+  HISTORY.unshift({ id: 'v3', version: 3, replaced_at: Date.parse('2026-10-14T10:13:00Z'), replaced_by_name: '가상관리자',
+    snapshot: { ...LIVE } });
+  LIVE.valid_period = '견적일로부터 30일'; LIVE.updated_at = '2026-10-14 10:13:00';
+  svc.__setPoolForTest(docPool());
+  doc = await svc.quoteDocForTab({ sheetId: 'X', tabName: 'S1', role: 'admin' });
+  vs = doc.docs[0].versions;
+  ok(vs[vs.length - 1].payload.validPeriod === '견적일로부터 30일', 'D1: 마지막 탭 = 지금 견적서(유효기간만 바뀌어도 옛 값이 최신처럼 보이지 않는다)');
+  ok(vs.length === 5 && vs[vs.length - 2].payload.validPeriod !== '견적일로부터 30일', 'D2: 유효기간만 바뀐 버전도 따로 남는다');
+  HISTORY.shift(); Object.assign(LIVE, savedLive);
+
   // ═══ B ═══
   for (const m of ['empty', 'down', 'old-intranet']) {
     mode = m;
@@ -85,6 +97,26 @@ async function run() {
     ok(vs.length === 2 && vs[0].payload.totalAmount === 99999 && vs[1].payload.totalAmount === 256664, `B(${m}): 종전 리뷰웹 스냅샷 그대로`);
     ok(doc.proxyDown === false, `B(${m}): 이력 조회 실패를 인트라넷 장애로 표시하지 않는다(견적서 본문은 받았다)`);
   }
+
+  // ═══ E. 여러 장이면 이력 요청을 함께 보낸다(코덱스 리뷰 P2) ═══
+  mode = 'history';
+  const many = [0, 1, 2, 3].map(n => ({ ...LIVE, id: `m${n}`, quote_number: `Q-M${n}`, quote_date: `2026-10-0${n + 1}` }));
+  let inFlight = 0, peak = 0;
+  const prevFetch = global.fetch;
+  global.fetch = async (url) => {
+    const u = String(url);
+    if (/\/api\/tables\/quotes\?where=sales_id=S1/.test(u)) return { ok: true, json: async () => ({ data: many }) };
+    if (/\/versions\?full=1/.test(u)) {
+      inFlight++; peak = Math.max(peak, inFlight);
+      await new Promise(r => setTimeout(r, 50)); inFlight--;
+      return { ok: true, json: async () => ({ versions: [] }) };
+    }
+    return prevFetch(url);
+  };
+  svc.__setPoolForTest(docPool());
+  doc = await svc.quoteDocForTab({ sheetId: 'X', tabName: 'S1', role: 'admin' });
+  ok(doc.docs.length === 4 && peak === 4, `E1: 4장의 이력 요청이 동시에 나간다(동시 ${peak})`);
+  global.fetch = prevFetch;
 
   global.fetch = savedFetch;
   console.log(`✅ quoteHistoryFromIntranet: ${pass} cases passed`);
