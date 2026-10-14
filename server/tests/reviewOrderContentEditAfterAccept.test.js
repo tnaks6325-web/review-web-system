@@ -383,6 +383,29 @@ async function run() {
       assert.ok(msg.includes(name), '안내에 "' + name + '" 이 없다(손으로 적은 목록이 남아 있다): ' + msg));
   });
 
+  // ★ 구매수량 단계(2026-10-14) — 인트라넷이 단계 없는 오더에 빈 단계 키를 실어 보내도 접수된 오더가 잠기면 안 된다(결정 167 재현 방지).
+  await t('★ 구매수량: 빈 단계 키(qty_tiers:null)가 실려 와도 허용 칸 수정은 통과한다', async () => {
+    const order = baseOrder({ product_options_json: REAL_OPTIONS });
+    const withEmpty = JSON.parse(REAL_OPTIONS).map(p => Object.assign({}, p, { qty_tiers: null }));
+    const { res } = await call(order, Object.assign({}, BODY, {
+      product_options_json: JSON.stringify(withEmpty), review_guide: '새 리뷰 가이드',
+    }));
+    assert.strictEqual(res.statusCode, 200, 'status=' + res.statusCode + ' body=' + JSON.stringify(res.body));
+    assert.deepStrictEqual(res.body.edited_fields, ['review_guide']);
+  });
+
+  await t('★ 구매수량: 접수 뒤 단계를 새로 넣으면 상품 구성 잠금으로 409 — 쓰기 0건', async () => {
+    const order = baseOrder({ product_options_json: REAL_OPTIONS });
+    const withTiers = JSON.parse(REAL_OPTIONS).map(p => {
+      const total = p.product_mode === 'opt' ? p.options.reduce((a, o) => a + Number(o.count || 0), 0) : Number(p.base.count || 0);
+      return Object.assign({}, p, { qty_tiers: { mode: 'common', rows: [{ qty: 1, people: total, amount: 1000 }] } });
+    });
+    const { res, updates } = await call(order, Object.assign({}, BODY, { product_options_json: JSON.stringify(withTiers) }));
+    assert.strictEqual(res.statusCode, 409, 'status=' + res.statusCode + ' body=' + JSON.stringify(res.body));
+    assert.strictEqual(updates.length, 0, '거부인데 UPDATE 가 나갔다');
+    assert.ok(res.body.blocked_fields.includes('product_options_json'), JSON.stringify(res.body.blocked_fields));
+  });
+
   console.log(`\nreviewOrderContentEditAfterAccept: ${pass} 통과 / ${fail} 실패`);
   process.exit(fail ? 1 : 0);
 }

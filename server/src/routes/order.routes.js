@@ -14,6 +14,7 @@ const {
 const {
   ProductOptionsError,
   normalizeProductOptionsJson,
+  rawHasQtyTiers,
 } = require('../services/productOptions.service');
 const jwt = require('jsonwebtoken');
 const pool = require('../db/pool');
@@ -445,6 +446,18 @@ router.post('/intake', async (req, res, next) => {
         return res.status(400).json({ ok: false, error: err.message });
       }
       throw err;
+    }
+    // ★ 출처 계약 없는 옛 접수도 구매수량 단계가 실려 오면 정규화를 거친다 — 검증 안 된 단계가 저장되지 않게(구매수량 ①).
+    //   단계가 없으면 지금처럼 원문 그대로(동작 불변).
+    if (!sourceContract && rawHasQtyTiers(b.product_options_json)) {
+      try {
+        b._normalized_product_options_json = normalizeProductOptionsJson(b.product_options_json).json;
+      } catch (err) {
+        if (err instanceof ProductOptionsError) {
+          return res.status(400).json({ ok: false, code: err.code, error: err.message });
+        }
+        throw err;
+      }
     }
     if (sourceContract) {
       try {
@@ -1264,6 +1277,19 @@ async function _intakeUpdateHandler(req, res, next) {
     }
     if (cur[0].status === 'done') {
       return res.status(409).json({ ok: false, error: '완료된 작업오더는 수정할 수 없습니다.' });
+    }
+
+    // ★ 이 옛 수정 경로는 상품 구성을 정규화 없이 그대로 쓴다. 구매수량 단계가 실려 오면 그때만 정규화·검증한다
+    //   (검증 안 된 단계 저장 금지 · 빈 단계 키는 지워 잠금 비교 모양을 예전과 같게 — 결정 167). 단계가 없으면 동작 불변.
+    if (b.product_options_json !== undefined && rawHasQtyTiers(b.product_options_json)) {
+      try {
+        b.product_options_json = normalizeProductOptionsJson(b.product_options_json).json;
+      } catch (err) {
+        if (err instanceof ProductOptionsError) {
+          return res.status(400).json({ ok: false, code: err.code, error: err.message });
+        }
+        throw err;
+      }
     }
 
     // 배송유형은 단일 입력값이고 택배발송대행 여부는 그 파생값이다. 구형 인트라넷이
@@ -2132,6 +2158,16 @@ router.put('/admin/edit', authMiddleware, adminOrMasterMiddleware, async (req, r
       const _rc = _recallFields(b, deliveryType);
       b.recall_courier = _rc.courier;
       b.recall_product = _rc.product;
+    }
+
+    // ★ 관리자 수정도 구매수량 단계가 실려 오면 정규화·검증한다(검증 안 된 단계 저장 금지). 단계가 없으면 동작 불변.
+    if (b.product_options_json !== undefined && rawHasQtyTiers(b.product_options_json)) {
+      try {
+        b.product_options_json = normalizeProductOptionsJson(b.product_options_json).json;
+      } catch (err) {
+        if (err instanceof ProductOptionsError) return res.status(400).json({ ok: false, code: err.code, error: err.message });
+        throw err;
+      }
     }
 
     const sets = [], vals = [], changes = [];
