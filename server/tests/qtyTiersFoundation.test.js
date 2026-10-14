@@ -92,8 +92,25 @@ test('값 형식 거부 — 방식·구매방법·수량 범위·소수', () => 
 test('구버전(라벨만) 배열 — 단계가 실리면 거부, 빈 단계 키는 바이트 그대로', () => {
   const legacy = [{ name: '옛 상품', label: '블랙', qty_tiers: { mode: 'common', rows: [{ qty: 1, people: 1, amount: 1 }] } }];
   fails(legacy, /단계형\(v2\) 상품 원본에서만/);
-  const raw = JSON.stringify([{ name: '옛 상품', label: '블랙', qty_tiers: null }]);
-  assert.equal(normalizeProductOptionsJson(raw).json, raw);
+  const raw = JSON.stringify([{ name: '옛 상품', label: '블랙' }]);
+  assert.equal(normalizeProductOptionsJson(raw).json, raw, '단계 키가 없으면 원문 바이트 그대로');
+  for (const empty of [null, '', { rows: [] }]) {
+    const withEmpty = JSON.stringify([{ name: '옛 상품', label: '블랙', qty_tiers: empty }]);
+    assert.equal(normalizeProductOptionsJson(withEmpty).json, raw, '빈 단계 키는 지운다(PR #1637 리뷰)');
+  }
+});
+
+test('공통 방식의 옵션 금액 비교는 기존 읽기 규칙(op.pay || base.pay) — 기본가를 물려받은 옵션도 같은 금액', () => {
+  const p = product({ base: { pay: 13000, count: 0, daily: 0 }, qty_tiers: { mode: 'common', rows: [{ qty: 1, people: 100, amount: 13000 }] } });
+  p.options[0].pay = 0;   // 기본가 13000 을 물려받음 — 화이트는 13000 을 직접 적음
+  assert.equal(norm([p])[0].qty_tiers.mode, 'common');
+});
+
+test('옵션별 방식 줄 수 — 옵션 61개 × 2단계도 받는다(옵션 상한 200 과 맞춤)', () => {
+  const opts = Array.from({ length: 61 }, (_, i) => opt('색' + i, 10000 + i * 100, 2));
+  const rows = opts.flatMap(o => [{ option: o.label, qty: 2, people: 1, amount: 1 }, { option: o.label, qty: 1, people: 1, amount: 1 }]);
+  const [p] = norm([product({ options: opts, qty_tiers: { mode: 'by_option', rows } })]);
+  assert.equal(p.qty_tiers.rows.length, 122);
 });
 
 test('rawHasQtyTiers — 키가 있을 때만 참(빈 값 포함), 못 읽는 원문은 거짓', () => {

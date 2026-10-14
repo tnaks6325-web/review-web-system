@@ -1,5 +1,7 @@
 'use strict';
 
+const { payAmountsFromWorkOrder } = require('../utils/workOrderPayAmounts');
+
 // 상품·옵션 원본은 인트라넷에서 구조화한 값이 진실원본이다. label은 기존
 // 단일 옵션 소비처를 위한 파생 호환값일 뿐, 이 서비스가 label을 역분해하지 않는다.
 class ProductOptionsError extends Error {
@@ -82,7 +84,6 @@ function tierInt(value, label, min, max) {
 }
 
 const countOf = node => Math.max(0, Math.floor(Number(node?.count) || 0));
-const payOf = node => Math.max(0, Math.floor(Number(node?.pay) || 0));
 
 /** product = 이미 정규화된 상품(options 의 label 이 채워진 상태). 반환 undefined = 단계 없음(키 삭제). */
 function normalizeQtyTiers(raw, product, productIndex) {
@@ -94,7 +95,8 @@ function normalizeQtyTiers(raw, product, productIndex) {
   const buyMethod = raw.buy_method === undefined || raw.buy_method === null || raw.buy_method === '' ? 'qty' : String(raw.buy_method);
   if (!QTY_TIER_BUY_METHODS.has(buyMethod)) throw new ProductOptionsError(`${where} 구매 방법은 qty 또는 option 이어야 합니다.`);
   if (!Array.isArray(raw.rows)) throw new ProductOptionsError(`${where} 목록이 올바르지 않습니다.`);
-  if (raw.rows.length > 60) throw new ProductOptionsError(`${where}는 최대 60줄까지 입력할 수 있습니다.`);
+  // 옵션별 방식은 옵션마다 줄이 생긴다 — 상품 계약의 옵션 상한(200)× 옵션당 단계(10)까지 받는다.
+  if (raw.rows.length > 2000) throw new ProductOptionsError(`${where}는 최대 2000줄까지 입력할 수 있습니다.`);
 
   const options = Array.isArray(product.options) ? product.options : [];
   const labels = new Map(options.map(o => [o.label, o]));
@@ -131,7 +133,8 @@ function normalizeQtyTiers(raw, product, productIndex) {
 
   const sumPeople = list => list.reduce((a, r) => a + r.people, 0);
   if (mode === 'common') {
-    if (product.product_mode === 'opt' && new Set(options.map(payOf)).size > 1) {
+    // ★ 옵션 금액은 기존 읽기 규칙(`op.pay || base.pay`, workOrderPayAmounts) 그대로 본다 — 해석을 둘로 만들지 않는다.
+    if (product.product_mode === 'opt' && new Set(payAmountsFromWorkOrder([product]).units.map(u => u.payAmount)).size > 1) {
       throw new ProductOptionsError(`${where}: 옵션별 결제금액이 달라 옵션별로 나눠 입력해야 합니다.`);
     }
     const total = product.product_mode === 'opt' ? options.reduce((a, o) => a + countOf(o), 0) : countOf(product.base);
@@ -166,6 +169,18 @@ function normalizeProductOptionsJson(raw, { requireStructured = false } = {}) {
     // 구버전(라벨만) 배열은 바이트 그대로 둔다 — 단, 구매수량 단계는 단계형(v2) 원본에서만 받는다(검증 없이 저장 금지).
     if (list.some(product => product && typeof product === 'object' && !isEmptyQtyTiers(product.qty_tiers))) {
       throw new ProductOptionsError('구매수량 단계는 단계형(v2) 상품 원본에서만 보낼 수 있습니다.');
+    }
+    // ★ 빈 단계 키는 구버전 배열에서도 지운다 — 남기면 접수된 옛 오더의 잠금 비교 모양이 바뀌어 모든 수정이 409(결정 167·248).
+    //   빈 단계 키가 없으면 지금처럼 원문 바이트 그대로.
+    const hasEmptyKey = list.some(product => product && typeof product === 'object' && !Array.isArray(product)
+      && Object.prototype.hasOwnProperty.call(product, 'qty_tiers'));
+    if (hasEmptyKey) {
+      const stripped = list.map(product => {
+        if (!product || typeof product !== 'object' || Array.isArray(product)) return product;
+        const { qty_tiers: _empty, ...rest } = product;
+        return rest;
+      });
+      return { json: JSON.stringify(stripped), value: stripped, structured: false };
     }
     return { json: typeof raw === 'string' ? raw : JSON.stringify(list), value: list, structured: false };
   }
