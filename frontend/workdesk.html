@@ -2041,7 +2041,7 @@
   .cndwarnbox{background:var(--warn-soft);border:1px solid #f3e2c4;border-radius:9px;padding:9px 11px;
               font-size:11.5px;color:var(--ink);margin-bottom:11px;line-height:1.5}
   /* 리뷰타입 칩 선택 표시(미니 팝업) */
-  #cndRtChips .wbl-b.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  #cndRtChips .wbl-b.on,#cndPayerChips .wbl-b.on{background:var(--accent);color:#fff;border-color:var(--accent)}
   /* 발주 줄 — 전폭 띠(.wobar) 폐기, 카드 맨 아래 한 줄 */
   .tp3wo.lk{margin-top:auto;font-size:10.5px;color:var(--muted)}
   .tp3wo.lk .nm{font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto}
@@ -7535,6 +7535,8 @@ function _condCardHtml(wd,d,m){
     ['이체은행','bank',  cd.transferBankLabel?`${esc(cd.transferBankLabel)}`+
       (cd.bankSource==='auto'?' <span class="cndchip" title="작업오더 물건비에서 자동 판정된 값입니다(현금→하나은행 · 계산서/수수료→케이뱅크). 직접 정하려면 누르세요.">자동</span>':''):null],
     ['리뷰타입','rtype', _cndRtypeHtml(cd)],
+    /* 결정 247 — 누가 페이백을 보내나. 업체 직접 입금이면 업체 화면에 계좌가 보이고 우리 입금관리에서 빠진다(내부 전용 행). */
+    ['입금 주체','payer', cd.advertiserPayout===true?'🏢 업체 직접 입금':'우리 입금'],
   ]/* ★ 광고주 표기 항목(사용자 확정 2026-08-23) — 작업명·메인URL·일정·구매시간·총건수·일건수·
        결제금액·구매채널·유입방식·리뷰타입. 나머지(다계정·현금영수증·리뷰비·입금명)는 내부 전용이라
        **서버 렌즈가 이미 값을 안 보내지만**, 빈 행까지 그리면 「—」 네 줄이 남으므로 여기서 뺀다. */
@@ -7622,6 +7624,9 @@ function _cndFixGate(cd,kind){
     if(cd.campaignId) return {can:true,tip:'모집인원 조절 창을 엽니다 — 정원은 차수·이월·날짜별 조절과 함께 그곳에서 정합니다.'};
     return {can:true,tip:'모집공고 설정을 엽니다 — 연결 작업오더 값은 미리 채우기만 하며 정원은 공고에서 저장합니다.'};
   }
+  if(kind==='payer') return isAdmin
+    ? {can:true,tip:'누가 페이백을 보낼지 정합니다 — 업체 직접 입금이면 업체 화면에 계좌가 보이고 우리 입금관리에서 빠집니다.'}
+    : {can:false,tip:'입금 주체는 관리자만 바꿀 수 있습니다.'};
   if(kind==='fee'||kind==='memo'||kind==='bank'){
     const what = kind==='fee'?'리뷰비':kind==='memo'?'입금명':'이체은행';
     if(cd.campaignId) return {can:true,tip:'모집공고 수정 창을 엽니다 — 저장하면 이 작업 조건과 공고 카드에 함께 반영됩니다.'};
@@ -7641,6 +7646,7 @@ async function _cndFix(kind){
   const cd=(STATE.wd&&STATE.wd.condition)||null; if(!cd) return;
   const g=_cndFixGate(cd,kind); if(!g.can){ _toast(g.tip); return; }
   if(kind==='tab') return _cndCashModal();
+  if(kind==='payer') return _cndPayerModal(cd);
   if(kind==='quota'){
     if(cd.campaignId) return openCurrentCampaignDailyPlan();
     return _cndPublish(cd);                                 // 작업오더 값은 공고 프리필로만 사용
@@ -7743,6 +7749,44 @@ function _cndBankModal(cd){
     }
   });
 }
+/* ══ 입금 주체 — 업체 직접 입금 스위치 (결정 247 · 사용자 확정 2026-10-14) ══════════════════════
+   ★ 저장 창구 하나(POST /api/trackb/payment/advertiser-payout · 관리자 전용). 공고와 무관한 탭 설정이다.
+   ★ 켜기 전에 무엇이 바뀌는지와 **업체 링크는 로그인 없이 열린다**는 위험을 그대로 말한다(조용히 계좌를 열지 않는다). */
+const _PAYER_ERRORS={
+  not_sheetless:'구글시트를 아직 쓰는 작업이라 켤 수 없습니다 — 업체 입금일 기록은 시트 없이 운영하는 작업에서만 됩니다.',
+  no_advertiser:'이 작업에 연결된 업체가 없어 켤 수 없습니다 — 업체관리에서 작업을 업체에 먼저 연결해 주세요.',
+  tab_not_found:'이 작업의 설정을 찾지 못했습니다 — 새로고침 후 다시 시도해 주세요.',
+};
+function _cndPayerModal(cd){
+  const cur=cd&&cd.advertiserPayout===true;
+  const opts=[['0','우리 입금'],['1','🏢 업체 직접 입금']];
+  _cndMini({
+    title:'💰 입금 주체 — 누가 페이백을 보내나요?',
+    body:`<div class="cndchips" id="cndPayerChips">${opts.map(([v,l])=>`<button type="button" class="wbl-b${(v==='1')===cur?' on':''}" data-v="${v}" onclick="_cndPayerPick(this)">${esc(l)}</button>`).join('')}</div>`+
+      `<div class="cndnote"><b>업체 직접 입금</b>으로 바꾸면<br>`+
+      `· 이 작업에 연결된 업체의 작업보드(<b>대표 링크·업체 로그인</b>)에 <b>은행·계좌번호·예금주</b>가 보입니다(리뷰 제출이 끝나고 아직 입금 안 된 줄만 · 브랜드 링크에는 안 보입니다)<br>`+
+      `· 업체가 입금 칸을 우클릭해 <b>입금일을 기록</b>합니다 — 리뷰어 화면에 입금 날짜가 표시됩니다<br>`+
+      `· <b>우리 입금관리 목록과 이체 파일에서 빠집니다</b>(이중 입금 방지)<br>`+
+      `<span style="color:#B91C1C">⚠ 업체 링크는 로그인 없이 열립니다 — 링크를 가진 사람은 참여자 계좌를 보게 됩니다. 믿을 수 있는 담당자에게만 링크를 주세요.</span></div>`,
+    savedMsg:'입금 주체를 저장했습니다',
+    onSave: async ()=>{
+      const sel=document.querySelector('#cndPayerChips .wbl-b.on');
+      if(!sel){ _toast('입금 주체를 선택해 주세요.'); return false; }
+      const on=sel.dataset.v==='1';
+      /* ★ 끌 때는 확인을 받는다(리뷰 반영) — 입금일이 아직 기록 안 된 줄이 **바로 우리 입금 목록으로 돌아온다**.
+           업체가 이미 보냈는데 날짜만 안 적은 줄을 우리가 또 보내면 이중 입금이다. */
+      if(cur && !on && !confirm('업체 직접 입금을 끕니다.\n\n· 입금일이 기록되지 않은 줄이 바로 우리 입금관리 목록으로 돌아옵니다\n· 업체가 이미 보냈는데 날짜만 안 적은 줄이 있는지 먼저 업체에 확인해 주세요(그대로 보내면 이중 입금)\n· 업체 화면의 계좌 칸·입금일 기록은 바로 닫힙니다\n\n진행할까요?')) return false;
+      const t=STATE.cur;
+      const r=await api('/api/trackb/payment/advertiser-payout',{method:'POST',
+        body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,enabled:on})}).catch(()=>null);
+      if(!r||!r.ok){ _toast(_PAYER_ERRORS[r&&r.error]||('저장하지 못했습니다'+(r&&r.error?' — '+r.error:''))); return false; }
+      // 연결된 업체가 여럿이면 전부 계좌를 보게 된다 — 누구에게 열렸는지 이름으로 말한다.
+      if(on && Array.isArray(r.advertiserNames) && r.advertiserNames.length) setTimeout(()=>_toast('계좌가 보이는 업체: '+r.advertiserNames.join(', ')),900);
+      return true;
+    }
+  });
+}
+function _cndPayerPick(el){ document.querySelectorAll('#cndPayerChips .wbl-b').forEach(b=>b.classList.remove('on')); el.classList.add('on'); }
 function _cndBkPick(el){ document.querySelectorAll('#cndBkChips .wbl-b').forEach(b=>b.classList.remove('on')); el.classList.add('on'); }
 function _cndRtPick(el){ document.querySelectorAll('#cndRtChips .wbl-b').forEach(b=>b.classList.remove('on')); el.classList.add('on'); }
 /* 공고 발행 — 이 작업(탭)·작업오더 프리필로 발행 모달을 연다. 발행하면 CAMP_ON_SAVED 훅이
@@ -7761,7 +7805,7 @@ async function _cndPublish(cd){
 /* 공용 미니 팝업 — 현금영수증 팝업과 같은 계약(body 직속 · 바깥 클릭으로 안 닫힘 · Esc 해제) */
 function _cndMiniClose(){ const o=document.getElementById('cndMiniOv'); if(o) o.remove();
   if(STATE._cndMiniEsc){ document.removeEventListener('keydown',STATE._cndMiniEsc); STATE._cndMiniEsc=null; } }
-function _cndMini({title,body,onSave}){
+function _cndMini({title,body,onSave,savedMsg}){
   _cndMiniClose();
   const ov=document.createElement('div'); ov.className='wbl-ov'; ov.id='cndMiniOv';
   ov.innerHTML=`<div class="wbl-dlg" style="max-width:460px"><div class="wbl-dh">${title}</div>`+
@@ -7771,7 +7815,7 @@ function _cndMini({title,body,onSave}){
   document.body.appendChild(ov);
   document.getElementById('cndMiniSave').onclick=async ()=>{
     const ok=await onSave();
-    if(ok){ _cndMiniClose(); _toast('저장됨 — 공고를 발행하면 공고 값이 우선합니다'); _cndReload(); }
+    if(ok){ _cndMiniClose(); _toast(savedMsg||'저장됨 — 공고를 발행하면 공고 값이 우선합니다'); _cndReload(); }
   };
   STATE._cndMiniEsc=e=>{ if(e.key==='Escape') _cndMiniClose(); };
   document.addEventListener('keydown',STATE._cndMiniEsc);
@@ -8776,6 +8820,9 @@ function _workdeskStatusKind(header){
      ★ 목록만 보던 시절, 헤더가 그냥 `리뷰` 인 탭에서는 **시스템이 그 칸에 제출 시각을 쓰는데 화면만
        "평범한 칸"으로 보여** 직접 타이핑은 열려 있고 [📎 관리자 수동 리뷰제출] 은 안 뜨는 상태가 됐다
        (2026-08-21 실측). 이름 목록을 늘려 때우지 말 것 — 탭마다 헤더가 다르다. */
+  /* 결정 247 — 업체 직접 입금 작업의 업체 화면: 서버가 준 그 탭의 입금 칸(업체 응답에는 statusCols 가 없다). */
+  const ap=(STATE.wd&&STATE.wd.advertiserPayout)||null;
+  if(ap&&ap.paidHeader&&String(ap.paidHeader).trim()===h) return 'payment';
   const sc=(STATE.wd&&STATE.wd.statusCols)||null;
   if(sc){
     if(String(sc.submit||'').trim()===h) return 'review';
@@ -8883,7 +8930,9 @@ function buildGrid(wd){
          일련번호를 그대로 복사시키면 화면에서 고친 표기가 붙여넣는 순간 다시 깨진다 → 보이는 값을 복사한다.
          ★ 입금 칸은 건드리지 않는다(여러 날짜가 한 칸에 들어가는 등 성격이 달라 종전 정본 복사를 유지). */
       if(statusKind==='review') editv=disp;
-      const cellE = canE || (advTrackE && _isTrackingField(field));   // 업체는 송장 칸만 편집 가능
+      const cellE = canE || (advTrackE && _isTrackingField(field))   // 업체는 송장 칸만 편집 가능
+        // 결정 247 — 업체 직접 입금 작업은 입금 칸도(잠긴 상태 칸 그대로 · 우클릭 달력만). 판정은 서버(`depositEditable`).
+        || (statusKind==='payment' && STATE.role==='advertiser' && r.depositEditable===true);
       /* 주문자·수취인 칸 안내 — 고치면 원장·리뷰 내역까지 실제 반영된다는 것을 미리 알린다
          (2026-08-24, 모르는 채로 고쳐 예상 밖 결과를 보는 것 방지). */
       const idKind = (!locked && field.indexOf('col:')===0) ? _identityFieldKind(field.slice(4)) : null;
@@ -8971,6 +9020,7 @@ function buildGrid(wd){
       <button class="btn xs" onclick="openGHidMenu(event)">숨긴 열${nHid?` <b style="color:var(--accent-deep)">${nHid}</b>`:' 0'}</button>
       ${hasFilt?`<button class="btn xs" style="color:var(--warn);border-color:color-mix(in srgb,var(--warn) 35%,var(--line))" onclick="clearGFilters()">필터 초기화 ✕</button>`:''}
       ${(!STATE.canEdit&&_canEditCells())?`<span class="gsmsg" title="다른 칸은 열람 전용입니다">택배송장 칸은 입력할 수 있습니다 — 셀 우클릭 → ✏️ 이 셀 편집</span>`:''}
+      ${_isAdvPayout()?`<span class="gsmsg show advpay" title="은행·계좌번호·예금주는 리뷰 제출이 끝나고 아직 입금하지 않은 줄에만 보입니다. 입금일을 기록하면 그 줄의 계좌는 가려집니다.">💰 업체 직접 입금 작업 — 입금 후 입금 칸 우클릭 → 입금일 기록${wd.advertiserPayout.accountsUnavailable?' · ⚠ 계좌를 불러오지 못했습니다(새로고침)':''}</span>`:''}
       ${STATE.canEdit?`<button class="btn xs" onclick="addCustomColumnPrompt()">＋ 열 추가</button><span id="emoBtnBox">${_emoBtnHtml()}</span>`:''}
       ${_folBarHtml()}
       <output id="gselstat" class="gselstat" aria-live="polite" hidden></output></div>
@@ -9728,7 +9778,26 @@ function _menuCellHistory(){
    ★ 저장 경로는 서버 `/api/trackb/workdesk/deposit-date` 하나(내부 담당자 · 무시트 전용).
    ★ 저장 뒤에는 **전체 재조회**한다 — 입금 칸 하나로 입금완료 수·게이지·정산 카드가 함께 움직여
      부분 갱신이면 화면이 거짓말을 한다(구매일자 달력과 같은 규율). */
+/* 결정 247 — 업체 직접 입금 작업에서 업체가 입금일을 못 기록하는 사유(서버 `depositLock` 코드 → 사람이 겪는 말). */
+const _ADV_DEPOSIT_LOCK={
+  our_payout:'저희가 이 줄의 입금을 이미 처리하고 있습니다 — 담당자에게 문의해 주세요',
+  not_own:'저희가 기록한 입금일이라 업체 화면에서는 고칠 수 없습니다 — 담당자에게 문의해 주세요',
+  ambiguous:'같은 주문이 여러 줄이라 어느 줄의 입금인지 정할 수 없습니다 — 담당자에게 문의해 주세요',
+  no_anchor:'이 줄은 아직 주문 정보가 없어 입금을 기록할 수 없습니다',
+  no_column:'이 작업표에 입금 칸이 없습니다 — 담당자에게 문의해 주세요',
+  unknown:'지금은 입금 기록 가능 여부를 확인하지 못했습니다 — 새로고침해 주세요',
+  not_submitted:'리뷰 제출이 끝난 줄에만 입금일을 기록할 수 있습니다',
+  no_account:'계좌가 보이는 줄에만 입금일을 기록할 수 있습니다 — 계좌가 비어 있으면 담당자에게 문의해 주세요',
+  column_mismatch:'이 작업의 입금 칸 설정이 맞지 않아 기록할 수 없습니다 — 담당자에게 문의해 주세요',
+};
+function _isAdvPayout(){ const ap=STATE.wd&&STATE.wd.advertiserPayout; return STATE.role==='advertiser'&&!!(ap&&ap.on); }
 function _depositMenuBlockReason(td, row){
+  if(STATE.role==='advertiser'){
+    if(!_isAdvPayout()) return '입금 처리는 내부 담당자만 할 수 있습니다';
+    if(!row) return '이 줄의 참여자 정보를 찾지 못했습니다';
+    if(row.depositEditable!==true) return _ADV_DEPOSIT_LOCK[row.depositLock]||'이 줄은 입금을 기록할 수 없습니다';
+    return '';
+  }
   if(!_isInternalRole()) return '입금 처리는 내부 담당자만 할 수 있습니다';
   if(!(STATE.wd&&STATE.wd.meta&&STATE.wd.meta.sheetless)) return '구글시트를 아직 쓰는 작업이라 입금 칸은 시트에서 고쳐야 합니다';
   if(!row) return '이 줄의 참여자 정보를 찾지 못했습니다';
@@ -9754,7 +9823,10 @@ function _wdDpSaveDeposit(iso){
       _wdDpClose();
       if(r&&r.ok){
         if(r.unchanged){ toast('입금 값이 이미 같아 그대로 두었습니다'); return; }
-        const msg=clearing
+        const msg=_isAdvPayout()
+          ? (clearing ? `입금일을 비웠습니다 — 리뷰어 화면의 입금 날짜도 사라집니다`
+                      : `입금일 기록: ${r.value||''} — 리뷰어 화면에 입금 날짜가 표시됩니다`)
+          : clearing
           ? `입금일을 비웠습니다 — 리뷰어 입금표시가 사라지고 입금관리 대상으로 돌아갑니다`
           : `입금일 확정: ${r.value||''} — 리뷰어에게 페이백 날짜가 표시되고 입금관리 대상에서 빠집니다`;
         toast(msg + (r.ledger==='deferred' ? ' (장부 반영은 잠시 뒤 자동 완료)' : ''));
@@ -9778,6 +9850,12 @@ const _DEPOSIT_ERRORS={
   row_not_found:'그 줄을 찾지 못했습니다 — 새로고침 후 다시 시도해 주세요.',
   bad_date:'날짜를 달력에서 골라 주세요.',
   concurrent_edit_conflict:'같은 줄에 다른 처리가 진행 중입니다 — 잠시 후 다시 시도해 주세요.',
+  // 결정 247 — 업체 기록 거부(서버가 트랜잭션 안에서 다시 본 결과)
+  advertiser_payout_off:'이 작업은 지금 업체 직접 입금 작업이 아닙니다 — 새로고침해 주세요.',
+  our_payout:'저희가 이 줄의 입금을 이미 처리하고 있습니다 — 담당자에게 문의해 주세요.',
+  not_own_entry:'저희가 기록한 입금일이라 업체 화면에서는 고칠 수 없습니다 — 담당자에게 문의해 주세요.',
+  review_not_submitted:'리뷰 제출이 끝난 줄에만 입금일을 기록할 수 있습니다.',
+  not_payout_target:'계좌가 보이는 줄에만 입금일을 기록할 수 있습니다 — 새로고침해 주세요.',
 };
 function _depositErrText(r){
   const code=r&&r.error;
@@ -9785,6 +9863,10 @@ function _depositErrText(r){
 }
 function _wdDpClearDeposit(){
   const S=_wdDpState; if(!S||S.busy) return;
+  if(_isAdvPayout()){
+    if(!confirm('이 줄의 입금일을 비웁니다.\n\n· 리뷰어 화면의 입금 날짜가 사라집니다\n· 지운 값은 기록에 남습니다\n\n진행할까요?')) return;
+    _wdDpSaveDeposit(''); return;
+  }
   if(!confirm('이 줄의 입금일을 비웁니다.\n\n· 리뷰어 화면의 입금완료·페이백 날짜가 사라집니다\n· 입금관리 대상 목록에 다시 나타납니다\n· 지운 값은 셀 편집기록에 남습니다\n\n진행할까요?')) return;
   _wdDpSaveDeposit('');
 }
@@ -10243,8 +10325,9 @@ function _openCellMenu(x,y,td){
         ? row('📎','리뷰 대신 제출',"openManualReviewSubmission()",!!reviewBlockReason,false,
               reviewBlockReason||'리뷰 캡처를 붙여넣으면 이 리뷰어의 리뷰제출이 완료 처리됩니다')
         : (isPayCell
-          ? row('💰','입금수정',"openDepositEdit()",!!payBlockReason,false,
-                payBlockReason||'달력에서 입금일을 고르거나 비웁니다 — 리뷰어 페이백 표시·입금관리 대상이 함께 바뀝니다')
+          ? row('💰',_isAdvPayout()?'입금일 기록':'입금수정',"openDepositEdit()",!!payBlockReason,false,
+                payBlockReason||(_isAdvPayout()?'입금한 날짜를 달력에서 고릅니다 — 리뷰어 화면에 입금 날짜가 표시됩니다'
+                  :'달력에서 입금일을 고르거나 비웁니다 — 리뷰어 페이백 표시·입금관리 대상이 함께 바뀝니다'))
           : (one?row(isDateCol?'📅':'✏️', isDateCol?'날짜 선택':'이 셀 편집',"_menuEditCell()",!editable,false,editable?'':_cellLockReason(td,selectedRow)):'')))
     + (isReviewCell ? row('⏹','미작성 종결','_menuCloseReview()',resolutionBlocked||!!(selectedRow&&selectedRow.reviewResolution),false,
         '미작성으로 종결합니다. 제출완료로 세지 않으며 추가 제출·독촉·지급대상에서 제외합니다')
@@ -12152,6 +12235,8 @@ async function renderCsView(){
 const PAY_ISSUE_LABEL = {
   no_bank:'이체은행 미지정', no_reviewer:'리뷰어 정보 없음', bank_unknown:'은행명 인식불가',
   no_account:'계좌 미등록', no_holder:'예금주 미등록', no_price:'결제금액 조회안됨', zero_amount:'금액 0원',
+  advertiser_pays:'업체 직접 입금 작업', advertiser_payout_unknown:'입금 주체 확인 실패(새로고침)',
+  advertiser_pays_orphan:'업체 직접 입금인데 연결된 업체 없음 — 작업 조건 › 입금 주체 확인',
 };
 const PAY_BANKS = [['kbank','케이뱅크'],['hana','하나은행']];
 /* 보완 창구 분류 — ★ 사유마다 "고치는 곳"이 다르다.
@@ -12346,6 +12431,13 @@ function _pmFinishedNoteHtml(){
   return `<div class="pmnote">🏁 마감된 작업 <b>${Number(f.works)||0}개</b>의 <b>${Number(f.rows)||0}건</b>은 목록에서 뺐습니다${f.payable?` — 이 중 <b>지금 입금 가능한 ${Number(f.payable)}건</b>이 있습니다`:''}. <button class="btn sm" onclick="_pmToggleFinished()">보기</button></div>`;
 }
 
+/* 결정 247 — 업체가 직접 입금하는 작업은 서버가 목록에서 뺀다(이체 회차에도 안 담긴다). 뺀 사실만 한 줄로 말한다. */
+function _pmAdvPaidNoteHtml(){
+  const a=STATE.pmAdvPaidEx;
+  if(!a||!a.rows) return '';
+  return `<div class="pmnote">🏢 업체가 직접 입금하는 작업 <b>${Number(a.works)||0}개</b>의 <b>${Number(a.rows)||0}건</b>은 목록에서 뺐습니다 — 업체가 작업보드에서 입금일을 기록합니다(작업 조건 › 입금 주체).</div>`;
+}
+
 async function _pmLoad(force){
   // 한 브라우저에서도 메뉴 재클릭·새로고침이 같은 대형 집계를 중복 호출하지 않게 한다.
   // 쓰기 성공 뒤 force=true이면 쓰기 전에 시작된 조회를 버리고 새 요청을 대표값으로 바꾼다.
@@ -12384,6 +12476,7 @@ async function _pmLoad(force){
     if((it.warnings||[]).includes('failed_account') && _retryOk.get(_pmKey(it)) !== Number(it.failedAccountCount||0)) STATE.pmExcluded[_pmKey(it)] = true;
   }
   STATE.pmFinEx = t.finishedExcluded||null; STATE.pmFinUnknown = !!t.finishedUnavailable;
+  STATE.pmAdvPaidEx = t.advertiserPaidExcluded||null;
   // 과거 버전에서 저장된 입금 열 정보가 비어 실패한 회차는 화면을 열 때 한 번만 자동 보완한다.
   // 새 결과 파일은 result-auto-apply(안에서 같은 반영 계산) 경로에서 즉시 기록하므로, 이 경로는 기록 실패 이력에만 해당한다.
   const legacyFailed = STATE.pmBatches.filter(batch => batch.status === 'applied'
@@ -12745,7 +12838,7 @@ function _pmRender(){
         <h2 class="pmh2">이체 회차</h2>
         ${_pmBatchTable(STATE.pmBatches||[])}
       </section>
-      ${_pmFinishedNoteHtml()}
+      ${_pmFinishedNoteHtml()}${_pmAdvPaidNoteHtml()}
       ${blocked.length?`<div class="pmnote">⚠ <b>보류 ${blocked.length}건</b>은 파일에서 빠집니다 — 아래에서 사유를 바로 보완할 수 있습니다.</div>`:''}
       ${noMemo.length?`<div class="pmnote">⚠ <b>통장표시가 없는 건 ${noMemo.length}건</b>은 선택할 수 없습니다(리뷰어 통장에 이름이 안 찍히므로) — 작업 선택의 <b>[입금명 필요]</b> 줄을 누르면 작업 화면에서 입금명 설정 창이 바로 열립니다.</div>`:''}
       ${failedAgain.length?`<div class="pmnote">⚠ <b>이미 이체가 실패한 계좌 그대로인 ${failedAgain.length}건</b>은 체크를 풀어 두었습니다 — 고객이 내정보에서 계좌를 고치면 고친 계좌로 다시 담기고, 은행 쪽 일시 오류였다면 아래 표에서 체크해 다시 담으세요.</div>`:''}
@@ -14321,7 +14414,7 @@ async function _bnSave(){
   // ★ 여기서 화면을 갈아타지 않는다(사용자는 은행 이름 탭에 그대로 머문다).
   try{
     const t = await api(_pmTargetsUrl());
-    if(t && t.ok){ STATE.pmItems=t.items||[]; STATE.pmSum=t.summary||{}; STATE.pmFinEx=t.finishedExcluded||null; STATE.pmFinUnknown=!!t.finishedUnavailable; }
+    if(t && t.ok){ STATE.pmItems=t.items||[]; STATE.pmSum=t.summary||{}; STATE.pmFinEx=t.finishedExcluded||null; STATE.pmFinUnknown=!!t.finishedUnavailable; STATE.pmAdvPaidEx=t.advertiserPaidExcluded||null; }
   }catch(_){}
   STATE.bn = {
     rows:(r.banks||[]).map(b=>({ ...b, aliases:(b.aliases||[]).map(a=>({...a})) })),

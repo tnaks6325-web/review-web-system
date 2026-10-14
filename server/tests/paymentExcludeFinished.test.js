@@ -112,7 +112,7 @@ function handler(opts = {}) {
   const rt = fs.readFileSync(SRC('routes/trackB.routes.js'), 'utf8');
   const wd = fs.readFileSync(FE('workdesk.html'), 'utf8');
   t('2a ★ 회차 만들기는 마감 작업도 포함해 다시 계산한다', () =>
-    assert.ok(/listPaymentTargets\(\{ includeFinished: true \}\)/.test(pay)));
+    assert.ok(/listPaymentTargets\(\{ includeFinished: true(, includeAdvertiserPaid: true)? \}\)/.test(pay)));
   t('2b 마감 판정은 trackB.service 한 곳(사본 금지)', () => {
     assert.ok(/isTabFinishedIn\(fin\.map/.test(pay));
     assert.ok(!/FROM trackb_tab_finished/.test(pay), 'payment.service 가 마감 표를 직접 읽지 않는다');

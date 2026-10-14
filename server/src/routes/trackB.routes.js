@@ -1258,15 +1258,41 @@ router.post('/workdesk/review-submit-date', authMiddleware, adminOrMasterMiddlew
 /* 내부 담당자 수동 입금처리 (무시트 전용 · master/admin/staff) — 우클릭 [💰 입금수정].
    ★ 입금 칸은 직접 편집이 잠긴 상태 칸이라 값을 고칠 창구가 없었다. 여기가 그 유일한 창구다.
    ★ `date` 가 빈 값이면 **칸을 비운다**(입금 취소·오기입 정정) — 지운 값은 셀 편집기록에 남는다.
-   ★ 내부 담당자에게만 허용한다. 입금 표시는 정산·리뷰어 화면까지 바꾸므로 광고주는 계속 차단한다. */
-router.post('/workdesk/deposit-date', authMiddleware, internalMiddleware, async (req, res, next) => {
+   ★ 내부 담당자에게 허용한다. 입금 표시는 정산·리뷰어 화면까지 바꾸므로 광고주는 기본 차단이다.
+   ★★ 예외 = **업체 직접 입금 작업**(결정 247 · 사용자 확정 2026-10-14) — 그 작업을 **소유한 업체의 대표 링크**만.
+      ① 브랜드 링크 세션은 열람 전용이라 막는다(사용자 확정 3번 권장) ② 탭 스코프는 스레드·송장 편집과 **같은 게이트**
+      (`_ensureThreadScope` = canAccessTab + 브랜드 배정 — 작업보드 표는 모든 업체가 열람하므로 소유 판정이 필수)
+      ③ 스위치 켜짐·우리 이체 회차 없음·업체가 넣은 값만 지우기는 서비스가 **같은 트랜잭션 안에서** 다시 본다. */
+router.post('/workdesk/deposit-date', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, rowId, date } = req.body || {};
+    const role = _role(req);
+    let advertiser = false;
+    if (role === 'advertiser') {
+      if (req.admin && req.admin.brand_id) return res.status(403).json({ ok: false, error: '브랜드 링크는 열람 전용입니다.' });
+      if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
+      const g = await _ensureThreadScope(req, sheetId, tabName);
+      if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+      // ★ 그리고 **지금 주인 업체**여야 한다(탭 지정 > 시트 전체 — 화면 노출과 같은 판정 · Codex 리뷰).
+      const owner = await svc.advertiserForTab({ sheetId: String(sheetId), tabName: String(tabName) }).catch(() => null);
+      if (!owner || String(owner.id) !== String((req.admin && req.admin.advertiser_id) || '')) {
+        return res.status(403).json({ ok: false, error: '이 작업의 업체가 아닙니다.' });
+      }
+      advertiser = true;
+    } else if (!['master', 'admin', 'staff'].includes(role)) {
+      return res.status(403).json({ ok: false, error: '권한 없음' });
+    }
     if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
-    const out = await svc.setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by: _by(req) });
+    // 업체 기록은 편집기록에 "업체#<업체id>:<이름>" 으로 남는다 — **그 업체가** 넣은 값인지(고치기·지우기 허용) 판정의 근거다.
+    //   ★ 업체 id 를 넣는다 — 한 작업에 업체가 여럿 연결되거나 이름이 같아도 남의 업체 기록을 고치지 못하게(리뷰 반영).
+    const advertiserId = advertiser ? String((req.admin && req.admin.advertiser_id) || '') : '';
+    if (advertiser && !advertiserId) return res.status(403).json({ ok: false, error: '업체 정보가 없는 세션입니다.' });
+    const by = advertiser ? ('업체#' + advertiserId + ':' + String((req.admin && req.admin.name) || '')).slice(0, 100) : _by(req);
+    const out = await svc.setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by, advertiser, advertiserId });
     const code = out.ok ? 200
       : (out.error === 'not_sheetless' ? 409
-        : (out.error === 'concurrent_edit_conflict' ? 409 : 400));
+        : (out.error === 'concurrent_edit_conflict' ? 409
+          : (['advertiser_payout_off', 'our_payout', 'not_own_entry', 'review_not_submitted', 'not_payout_target'].includes(out.error) ? 403 : 400)));
     res.status(code).json(out);
   } catch (err) { next(err); }
 });
@@ -3635,7 +3661,8 @@ router.get('/payment/targets', authMiddleware, adminOrMasterMiddleware, async (r
       includeFinished: String(req.query.includeFinished || '') === '1',
     });
     res.json({ ok: true, items: out.items, summary: out.summary,
-      finishedExcluded: out.finishedExcluded || null, finishedUnavailable: !!out.finishedUnavailable });
+      finishedExcluded: out.finishedExcluded || null, finishedUnavailable: !!out.finishedUnavailable,
+      advertiserPaidExcluded: out.advertiserPaidExcluded || null });
   } catch (err) {
     if (err && err.code === 'payment_target_timeout') {
       return res.status(504).json({ ok: false, code: err.code, error: err.message });
@@ -3783,6 +3810,17 @@ router.post('/payment/transfer-setting', authMiddleware, adminOrMasterMiddleware
       (out.reviewFee !== undefined ? ` · 리뷰비 ${out.reviewFee == null ? '미설정' : out.reviewFee}` : ''));
     res.json(out);
   } catch (err) { _payFix(res, err, next); }
+});
+
+// 업체 직접 입금 스위치(결정 247) — 켜면 우리 입금관리에서 빠지고, 소유 업체가 계좌를 보고 입금일을 기록한다.
+//   ★ 관리자 전용(이체설정과 같은 게이트 — 계좌를 외부에 여는 결정이다). 끄기는 언제든 된다.
+router.post('/payment/advertiser-payout', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const out = await require('../services/advertiserPayout.service').setAdvertiserPayout({ sheetId: b.sheetId, tabName: b.tabName, enabled: b.enabled, by: _by(req) });
+    if (out.ok) logger.info(`[payment] 업체 직접 입금 ${out.enabled ? '켬' : '끔'} by ${_by(req)} — ${b.tabName}${out.advertiserName ? ` (업체 ${out.advertiserName})` : ''}`);
+    res.status(out.ok ? 200 : (out.error === 'tab_not_found' ? 404 : (out.error === 'bad_request' ? 400 : 409))).json(out);
+  } catch (err) { next(err); }
 });
 
 // 리뷰어 단위 — 은행명 · 계좌번호 · 예금주(그 리뷰어의 모든 행이 함께 풀린다)

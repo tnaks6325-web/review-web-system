@@ -69,6 +69,7 @@ const REQUIRED_SCHEMA = [
   ['work_orders', 'work_series_id'],              // 136 — 같은 작업의 차수 계열(원본 수신·작업표 생성)
   ['work_orders', 'work_round'],                  // 136 — 차수 표기(원본 수신·작업표 생성)
   ['tab_configs', 'workboard_schema_version'],    // 137 — 탭별 V2 상태열 바인딩의 규격 고정
+  ['tab_configs', 'advertiser_payout'],           // 189 — 업체 직접 입금 작업(입금대상 추출·업체 계좌 열람이 읽는다)
   ['work_orders', 'intake_idempotency_key'],      // 102 — 네트워크 재시도 키
   ['work_orders', 'intranet_advertiser_id'],      // 102 — 원본 광고주 식별자
   ['work_orders', 'intranet_advertiser_name'],    // 102 — 원본 광고주명 스냅샷

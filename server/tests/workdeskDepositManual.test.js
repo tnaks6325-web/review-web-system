@@ -173,7 +173,12 @@ async function run() {
 
     // ── F. 라우트 배선 ──
     const routes = fs.readFileSync(path.join(ROOT, 'src', 'routes', 'trackB.routes.js'), 'utf8');
-    assert.ok(/deposit-date', authMiddleware, internalMiddleware/.test(routes), '입금 수정 = 내부 담당자(master/admin/staff), 광고주는 차단한다');
+    /* 입금 수정 = 내부 담당자(master/admin/staff). 광고주는 기본 차단 — 예외는 결정 247(업체 직접 입금 작업의 소유 업체 대표 링크)뿐이고,
+       그 판정(브랜드 세션 차단 · 소유 스코프 · 스위치/회차/본인 기록)은 tests/advertiserPayout.test.js 가 고정한다. */
+    const dd = routes.slice(routes.indexOf("router.post('/workdesk/deposit-date'"), routes.indexOf("router.get('/workdesk/cell-edits'"));
+    assert.ok(/else if \(!\['master', 'admin', 'staff'\]\.includes\(role\)\)/.test(dd), '내부 역할 외에는 403');
+    assert.ok(/req\.admin\.brand_id\) return res\.status\(403\)/.test(dd), '브랜드 링크는 입금 기록 불가');
+    assert.ok(/await _ensureThreadScope\(req, sheetId, tabName\)/.test(dd), '업체는 소유 탭 스코프를 통과해야 한다');
     const ce = routes.indexOf("router.get('/workdesk/cell-edits'");
     assert.ok(ce >= 0, 'cell-edits 라우트 존재');
     const ceBody = routes.slice(ce, routes.indexOf('router.', ce + 10));
@@ -186,7 +191,7 @@ async function run() {
     assert.ok(!/class="revb"/.test(html), '↩ 되돌리기 버튼은 제거됐다(버튼으로 되돌릴 수 없다)');
     assert.ok(!/편집 되돌리기/.test(html), '우클릭 메뉴의 되돌리기 항목도 없다');
     assert.ok(!/function revertCell\(/.test(html) && !/function _revertSelection\(/.test(html), '되돌리기 실행부도 남기지 않는다');
-    assert.ok(/row\('💰','입금수정',"openDepositEdit\(\)"/.test(html), '입금 칸의 주 행동 = [💰 입금수정]');
+    assert.ok(/row\('💰',_isAdvPayout\(\)\?'입금일 기록':'입금수정',"openDepositEdit\(\)"/.test(html), '입금 칸의 주 행동 = [💰 입금수정](업체 직접 입금 작업의 업체는 [입금일 기록])');
     assert.ok(/const isPayCell = one && statusKind==='payment';/.test(html), '입금 칸 판정(한 칸 선택일 때)');
     assert.ok(/api\('\/api\/trackb\/workdesk\/deposit-date'/.test(html), '저장 경로는 전용 API 하나');
     assert.ok(/onclick="_wdDpClearDeposit\(\)"/.test(html), '달력에 [입금일 비우기]');

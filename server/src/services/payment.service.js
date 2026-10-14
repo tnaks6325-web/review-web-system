@@ -262,6 +262,8 @@ async function listPaymentTargets(opts = {}) {
   const wbAcctMap = await _loadWorkboardAccountEdits(rows);
   const acctChangeMap = await _loadAccountChangeTimes([
     ...Object.values(acctMap), ...Object.values(ownerAcctMap)].map(a => a && a.reviewerId).filter(Boolean));
+  // ★ 결정 247 재료 — 업체가 직접 입금하는 작업(조회 실패 = null = 전 건 보류 · fail-closed)
+  const advPayoutTabs = await _loadAdvertiserPayoutTabs(sheetIds, tabNames);
 
   const items = rows.map(r => {
     const key = r.sheetId + '||' + r.tabName;
@@ -483,6 +485,12 @@ async function listPaymentTargets(opts = {}) {
     }
     if (!productPrice) issues.push('no_price');
     if (amount <= 0) issues.push('zero_amount');
+    /* ★★ 업체 직접 입금 작업(결정 247 · 사용자 확정 2026-10-14) — 업체가 페이백을 보내므로 **우리는 보내지 않는다**.
+         맨 앞 사유로 둔다(createBatch 가 issues[0] 을 건너뛴 사유로 말한다). 모르면(조회 실패) 보내지 않는다(fail-closed —
+         업체도 보내고 우리도 보내면 되돌릴 수 없다). */
+    if (advPayoutTabs === null) issues.unshift('advertiser_payout_unknown');
+    else if (advPayoutTabs.paid.has(key)) issues.unshift('advertiser_pays');
+    else if (advPayoutTabs.orphan.has(key)) issues.unshift('advertiser_pays_orphan');   // 보류로 목록에 남긴다(입금 주체 확인 필요)
     // 통장표시가 없어도 이체 자체는 되지만(양식상 필수 아님) 리뷰어가 무슨 돈인지 모른다 → 경고만.
     if (!memo) warnings.push('no_memo');
     /* ★ 양식 계좌 ≠ 등록DB 계좌 — **경고만**(사용자 확정 2026-09-21: 보류시키지 않는다).
@@ -570,14 +578,26 @@ async function listPaymentTargets(opts = {}) {
      ★ **모르면 빼지 않는다(fail-open)** — 마감 조회가 실패하면 전부 보여주고 `finishedUnavailable` 로 알린다.
      ★ 회차 만들기(createBatch)는 `includeFinished:true` 로 부른다 — 사람이 펼쳐서 고른 건은 담을 수 있어야 한다. */
   let shown = items, finishedExcluded = null, finishedUnavailable = false;
+  /* ★ 업체 직접 입금 작업(결정 247)은 입금관리 목록에서 뺀다 — 우리가 챙길 건이 아니다(보류 목록에 섞으면 진짜 보류를 가린다).
+       ★ 조용히 빼지 않는다 — 뺀 건수(`advertiserPaidExcluded`)를 싣고 화면이 한 줄로 말한다.
+       ★ 업체 계좌 열람(advertiserPayoutAccounts)·회차 만들기는 `includeAdvertiserPaid:true` 로 부른다(사유를 말하기 위해). */
+  let advertiserPaidExcluded = null;
+  if (!opts.includeAdvertiserPaid) {
+    const out = items.filter(it => (it.issues || []).includes('advertiser_pays'));
+    if (out.length) {
+      const outSet = new Set(out);
+      shown = shown.filter(it => !outSet.has(it));
+      advertiserPaidExcluded = { rows: out.length, works: new Set(out.map(it => it.sheetId + '||' + it.tabName)).size };
+    }
+  }
   if (!opts.includeFinished) {
     const tb = require('./trackB.service');   // 지연 require — trackB.service 도 이 모듈을 부른다(순환 방지)
     const fin = await tb.finishedTabsMap();
     if (fin.ok) {
-      const out = items.filter(it => tb.isTabFinishedIn(fin.map, it.sheetId, it.tabName, it.tabGid));
+      const out = shown.filter(it => tb.isTabFinishedIn(fin.map, it.sheetId, it.tabName, it.tabGid));
       if (out.length) {
         const outSet = new Set(out);
-        shown = items.filter(it => !outSet.has(it));
+        shown = shown.filter(it => !outSet.has(it));
         finishedExcluded = {
           rows: out.length,
           works: new Set(out.map(it => it.sheetId + '||' + it.tabName)).size,
@@ -588,7 +608,7 @@ async function listPaymentTargets(opts = {}) {
       finishedUnavailable = true;
     }
   }
-  return { items: shown, summary: _summarize(shown), finishedExcluded, finishedUnavailable };
+  return { items: shown, summary: _summarize(shown), finishedExcluded, finishedUnavailable, advertiserPaidExcluded };
 }
 
 /**
@@ -1266,6 +1286,61 @@ async function _loadOwnerAccountsByRow(rows) {
   return out;
 }
 
+/* ══ 업체 직접 입금 작업 (결정 247 · 사용자 확정 2026-10-14 "모두 권장") ══════════════════════════════
+ * 업체가 참여자 페이백을 직접 보내는 작업. 켜면 ① 우리 입금관리·이체 회차에서 빠지고 ② 그 작업을 소유한 업체(대표 링크)가
+ * 작업보드에서 송금 계좌를 보고 입금일을 기록한다(trackB.service.workdeskTab · setWorkdeskDepositDate).
+ * ★ 스위치 저장은 advertiserPayout.service — 이 파일(M1 본체)은 payment_* 표에만 쓴다(paymentBatch 회귀가드).
+ * ★ 저장소는 tab_configs 한 칸(migration 189) — 이체은행·입금명과 같은 "탭 단위 이체설정" 자리다.
+ */
+
+/** 업체 직접 입금 작업 키('sheetId||tabName') — { paid: 지금 주인 업체가 있는 작업, orphan: 스위치는 켜졌는데 주인 업체가 없는 작업 }.
+ *  ★ 주인 = trackB.advertiserForTab(탭 지정 > 시트 전체 — 화면 노출·입금 기록과 같은 판정). 켠 뒤 업체 연결을 지우면
+ *    아무도 보내지 못하는데 우리 목록에서도 조용히 빠지는 막다른 길이 된다(Codex 리뷰) → orphan 은 **보류로 목록에 남겨** 말한다.
+ *  조회 실패 = null(호출부가 전 건 보류로 접는다 · fail-closed). */
+async function _loadAdvertiserPayoutTabs(sheetIds, tabNames) {
+  const out = { paid: new Set(), orphan: new Set() };
+  if (!sheetIds.length) return out;
+  try {
+    const { rows } = await pool.query(
+      `SELECT sheet_id AS "sheetId", tab_name AS "tabName" FROM tab_configs
+        WHERE sheet_id = ANY($1) AND tab_name = ANY($2) AND advertiser_payout = TRUE`,
+      [sheetIds, tabNames]);
+    const tb = rows.length ? require('./trackB.service') : null;   // 지연 require(순환 방지)
+    for (const r of rows) {
+      const owner = await tb.advertiserForTab({ sheetId: r.sheetId, tabName: r.tabName });
+      (owner && owner.id ? out.paid : out.orphan).add(r.sheetId + '||' + r.tabName);
+    }
+    return out;
+  } catch (e) {
+    logger.warn('[payment] 업체 직접 입금 작업 조회 실패(전 건 보류): ' + e.message);
+    return null;
+  }
+}
+
+/**
+ * 업체 화면에 보여줄 송금 계좌 — **우리가 입금할 때 쓰는 바로 그 계좌**(listPaymentTargets 판정 단일 출처:
+ * 구매양식 → 리뷰어가 고친 계좌 → 직원이 고친 계좌, 마지막 값 우선 · 결정 157·231·233). 시트에 처음 적힌 계좌를
+ * 따로 읽으면 "고쳤는데 옛 계좌로 이체"(2026-10-13 사고)가 업체 쪽에서 다시 난다.
+ * ★ 대상 = 리뷰 제출이 끝났고 아직 입금이 안 된 줄만(사용자 확정 1번 권장) — 입금일을 기록하면 목록에서 빠져 계좌도 가려진다.
+ * @returns {Promise<Map<number,{bank:string,account:string,holder:string}>>} rowIndex(seq) → 계좌
+ */
+async function advertiserPayoutAccounts({ sheetId, tabName } = {}) {
+  const map = new Map();
+  if (!sheetId || !tabName) return map;
+  const { items } = await listPaymentTargets({ sheetId, tabName, includeFinished: true, includeAdvertiserPaid: true });
+  for (const it of items || []) {
+    if (it.sheetId !== sheetId || it.tabName !== tabName) continue;
+    map.set(Number(it.rowIndex), {
+      bank: it.bankOfficial || it.bankName || '',
+      account: it.bankAccount || '',
+      holder: it.accountHolder || '',
+      phone8: it.phone8 || '',                          // 화면 줄과 명의까지 맞을 때만 싣는다(trackB.workdeskTab)
+      failed: Number(it.failedAccountCount || 0) > 0,   // 결정 231 — 이 계좌로 이미 이체 실패
+    });
+  }
+  return map;
+}
+
 /**
  * 탭 메타 — 표시명(리뷰어 노출 규칙과 동일, 시트제목 미사용) + **탭 단위 이체설정** + 작업오더 물건비.
  *
@@ -1356,7 +1431,8 @@ async function createBatch({ bank, rows, by }) {
 
   // 화면 값은 신뢰하지 않는다 — 대상 목록을 서버에서 다시 계산해 교집합만 담는다.
   // ★ 마감 작업도 포함해 계산한다 — 화면에서 펼쳐 고른 건을 '대상 아님'으로 튕기지 않게.
-  const { items: fresh } = await listPaymentTargets({ includeFinished: true });
+  // ★ 업체 직접 입금 작업도 포함해 계산한다 — 담지 않되 '대상 아님'이 아니라 그 사유(advertiser_pays)로 말한다(결정 247).
+  const { items: fresh } = await listPaymentTargets({ includeFinished: true, includeAdvertiserPaid: true });
   const freshMap = new Map(fresh.map(it => [it.sheetId + '||' + it.tabName + '||' + it.rowIndex, it]));
 
   const picked = [];
@@ -1392,9 +1468,23 @@ async function createBatch({ bank, rows, by }) {
       await client.query('SAVEPOINT sp_item');
       try {
         // Serialize with manual closure; a stale payment list cannot enqueue a closed row.
-        await client.query(`SELECT id FROM campaign_participants
+        const { rows: lockRows } = await client.query(`SELECT id, row_json ->> COALESCE(submit_col2, '') AS "paidCell"
+            FROM campaign_participants
           WHERE sheet_id=$1 AND tab_name=$2 AND seq=$3 AND active=TRUE AND deleted_at IS NULL FOR UPDATE`,
         [it.sheetId, it.tabName, it.rowIndex]);
+        /* ★★ 결정 247 — 잠근 줄에서 **다시** 본다(대상 목록은 잠그기 전에 계산했다):
+             ① 그 사이 업체 직접 입금으로 바뀐 작업 ② 작업표 입금 칸에 이미 날짜가 있는 줄(업체가 기록했는데 장부 재생성이
+             밀려 review_index 가 아직 미입금인 경우 — 그대로 담으면 업체와 우리가 둘 다 보낸다). 걸리면 그 건만 건너뛴다. */
+        // FOR SHARE — 스위치 저장(UPDATE)과 직렬화한다(켜는 중이면 끝날 때까지 기다렸다가 켜진 값을 본다).
+        const { rows: payerRows } = await client.query(
+          `SELECT advertiser_payout FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1 FOR SHARE`, [it.sheetId, it.tabName]);
+        const lateReason = (payerRows[0] && payerRows[0].advertiser_payout === true) ? 'advertiser_pays'
+          : (lockRows[0] && String(lockRows[0].paidCell == null ? '' : lockRows[0].paidCell).trim()) ? 'already_paid' : '';
+        if (lateReason) {
+          await client.query('RELEASE SAVEPOINT sp_item');
+          skipped.push({ key: it.sheetId + '||' + it.tabName + '||' + it.rowIndex, reason: lateReason });
+          continue;
+        }
         const closed = await client.query(`SELECT 1 FROM review_closed_targets
           WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3`, [it.sheetId, it.tabName, it.rowIndex]);
         if (closed.rows.length) {
@@ -1925,4 +2015,5 @@ module.exports = {
   saveTransferSetting, saveReviewerAccount, checkBatchAccountSnapshots, reconcileAccountSnapshots,
   compareAccountSnapshot, accountFingerprint, resolveWorkManager, flagPriceOutliers, PaymentFixError,
   _acctChangedAt, _holderKey,
+  advertiserPayoutAccounts, _loadAdvertiserPayoutTabs,
 };

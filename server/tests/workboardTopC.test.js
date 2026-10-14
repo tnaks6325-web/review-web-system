@@ -583,7 +583,7 @@ t('★ 정원 — 공고가 있으면 모집인원 조절, 없으면 작업오�
     && /return _cndPublish\(cd\)/.test(blk);
 })());
 t('★ 미니 팝업은 body 직속 · Esc 리스너는 닫을 때 해제 · 저장 실패는 팝업 유지', (() => {
-  const m = fnBody(wd, 'function _cndMini({title,body,onSave}){');
+  const m = fnBody(wd, 'function _cndMini({title,body,onSave,savedMsg}){');
   return /document\.body\.appendChild\(ov\)/.test(m)
     && /removeEventListener\('keydown',STATE\._cndMiniEsc\)/.test(wd)
     && /const ok=await onSave\(\);\s*\n?\s*if\(ok\)\{/.test(m);

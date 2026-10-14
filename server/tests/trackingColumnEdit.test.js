@@ -148,7 +148,9 @@ const BODY = (field) => ({ sheetId: 's1', tabName: 't1', rowId: 'r1', field, val
   console.log('\n4) 화면 배선');
   t('★ 셀 편집 가능 판정은 행 단위가 아니라 칸 단위(canE || 송장)', () => {
     assert.match(workdesk, /const advTrackE = !canE && STATE\.role==='advertiser' && r\.trackingEditable===true;/);
-    assert.match(workdesk, /const cellE = canE \|\| \(advTrackE && _isTrackingField\(field\)\);/);
+    assert.match(workdesk, /const cellE = canE \|\| \(advTrackE && _isTrackingField\(field\)\)/);
+    // 결정 247: 업체가 더 여는 칸은 입금 칸 하나뿐이고, 서버 행 판정(depositEditable)이 있을 때만이다(검사 의미 불변 + 확장 고정).
+    assert.match(workdesk, /\|\| \(statusKind==='payment' && STATE\.role==='advertiser' && r\.depositEditable===true\);/);
     /* ★ 순서만 고정한다: locked → cellE → return cellE.
        고정 폭 창(`{0,120}`)으로 자르면 그 사이에 주석 한 줄만 들어와도 조용히 빨개진다
        (2026-08-23 리뷰제출 표기 보완에서 실제로 밟았다 — 검사 의미는 그대로다). */
