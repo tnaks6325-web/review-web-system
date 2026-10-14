@@ -927,6 +927,55 @@ router.post('/order', async (req, res, next) => {
       }
     }
 
+    /* ★★ 2026-10-02 B안 — 구매양식 링크로 들어온 리뷰어가 고른 **상품**.
+         홀드가 있으면 홀드 값이 이긴다(서버 권위 · 종전 그대로). 홀드가 없을 때만 화면 값을 받되,
+         **그 작업의 상품 선택지에 있는 값만** 받는다(resolveProductLabel 정확·포함 일치 — 지어낸 값 차단).
+         ★ 못 맞추거나 조회가 실패하면 '' = 종전 동작(상품을 모른 채 접수) — 제출을 막지 않는다
+           (구버전 화면·배포 순서 차이에서 접수가 끊기면 안 된다. 고르기 강제는 화면이 한다). */
+    let formPickedProduct = '';
+    let formCaptureProduct = '';
+    let formChoices = null;   // 결정 252: 아래 정원 판정이 같은 선택지를 다시 읽지 않게
+    if (!(holdCtx && holdCtx.productName) && (b.selectedProduct || b.productCaptureName)) {
+      try {
+        const so = require('../services/sheetlessOrder.service');
+        const choices = await so.listProductChoices(pool, orderScope.sheetId, orderScope.tabName);
+        formChoices = choices;
+        if (choices.length) {
+          formPickedProduct = so.resolveProductLabel(String(b.selectedProduct || '').slice(0, 300), choices);
+          formCaptureProduct = so.resolveProductLabel(String(b.productCaptureName || '').slice(0, 300), choices);
+        }
+      } catch (pickErr) {
+        logger.warn(`[submit/order] 상품 선택 확인 실패 — 종전대로 접수: ${pickErr.message}`);
+      }
+    }
+    /* ★★ 결정 252 — 정원이 찬 상품은 구매양식(공고 참여 없이 바로 낸 구매)으로 받지 않는다(사용자 확정 2026-10-15
+         "모집이 끝났다면 수용하지 않게 · 이미 샀다면 그대로 제출하지 못하도록" — 결정 242·243 의 "막지 않음"을 이 경우만 뒤집는다).
+       ★ **아무것도 쓰기 전에** 판정한다 — 신원 확인(타계정 정보 보강·관찰 기록)보다 앞(코드리뷰). 원장·작업표·캡처 세션 0.
+         판정은 양식 안내와 같은 함수(orderFormOptionFull.submitBlock — 참여 버튼과 같은 셈 · 본인 자리·같은 구매 제외 · 1.5초 넘기면 받음).
+       ★ 홀드 문맥이 있는 제출(공고 참여)·네이버+쿠팡 모드는 대상 아님. 상품을 정할 수 없거나 조회 실패면 받는다(작업보드 ⚠ 가 잡는다).
+       ★ 막힌 시도는 담당자 확인 기록(reviewer_event_logs · order_option_full_blocked)에 남긴다 — 이미 결제한 사람의 문의를 찾을 수 있게(같은 연락처·주문번호는 10분에 한 번). */
+    if (!holdCtx && !ncMode) {
+      const ofs = require('../services/orderFormOptionFull.service');
+      const blocked = await ofs.submitBlock(pool, { sheetId: orderScope.sheetId, tabName: orderScope.tabName, gid: orderScope.gid || gid || '',
+        picked: formPickedProduct, choices: formChoices, phones: [loginPhone8, phone], orderNum });
+      if (blocked) {
+        logger.warn(`[submit/order] 정원 찬 상품 접수 거절 camp=${blocked.campaignId} 상품=${blocked.name} p8=${String(loginPhone8 || '').slice(-4)}`);
+        const _blkP8 = String(loginPhone8 || phone || '').replace(/[^0-9]/g, '').slice(-8);
+        pool.query(`SELECT 1 FROM reviewer_event_logs WHERE event_type = 'order_option_full_blocked' AND phone8 = $1
+                     AND COALESCE(context->>'orderNum','') = $2 AND occurred_at > NOW() - INTERVAL '10 minutes' LIMIT 1`,
+          [_blkP8, String(orderNum || '').slice(0, 60)])
+          .then(({ rows }) => rows.length ? null : require('../services/reviewerEventLog.service').logReviewerEvent({
+          sheetId: orderScope.sheetId, tabName: orderScope.tabName,
+          reviewerName: String(loginName || recipient || ''), phone8: _blkP8,
+          eventType: 'order_option_full_blocked', severity: 'warn',
+          message: `『${orderScope.tabName}』에 ${String(loginName || recipient || '리뷰어')} 리뷰어가 정원이 찬 상품(${blocked.name})으로 구매양식을 내려다 접수가 막혔습니다.`,
+          context: { product: blocked.name, campaignId: blocked.campaignId, orderNum: String(orderNum || '').slice(0, 60), price: String(price || '').slice(0, 30) },
+        }))
+          .catch(e => logger.warn(`[submit/order] 접수 거절 기록 실패(무시): ${e.message}`));
+        return res.json({ ok: false, code: 'OPTION_FULL', product: blocked.name, campaignId: blocked.campaignId, error: ofs.BLOCK_MESSAGE });
+      }
+    }
+
     const _newIdentityGate = reviewerOrderIdentity.isEnabled() && !!(holdCtx && holdCtx.verified);
     let verifiedIdentityBinding = null;
     if (_newIdentityGate) {
@@ -1117,45 +1166,6 @@ router.post('/order', async (req, res, next) => {
 
     // ★ 101: 블로그 주소는 **홀드에서 읽은 서버값만** 싣는다(요청 본문 미신뢰 — 옵션과 같은 규율).
     //   홀드가 없거나(레거시·관리자 경유) 리뷰체험단이면 undefined = 시트 '블로그URL' 칸 무접촉.
-    /* ★★ 2026-10-02 B안 — 구매양식 링크로 들어온 리뷰어가 고른 **상품**.
-         홀드가 있으면 홀드 값이 이긴다(서버 권위 · 종전 그대로). 홀드가 없을 때만 화면 값을 받되,
-         **그 작업의 상품 선택지에 있는 값만** 받는다(resolveProductLabel 정확·포함 일치 — 지어낸 값 차단).
-         ★ 못 맞추거나 조회가 실패하면 '' = 종전 동작(상품을 모른 채 접수) — 제출을 막지 않는다
-           (구버전 화면·배포 순서 차이에서 접수가 끊기면 안 된다. 고르기 강제는 화면이 한다). */
-    let formPickedProduct = '';
-    let formCaptureProduct = '';
-    if (!(holdCtx && holdCtx.productName) && (b.selectedProduct || b.productCaptureName)) {
-      try {
-        const so = require('../services/sheetlessOrder.service');
-        const choices = await so.listProductChoices(pool, orderScope.sheetId, orderScope.tabName);
-        if (choices.length) {
-          formPickedProduct = so.resolveProductLabel(String(b.selectedProduct || '').slice(0, 300), choices);
-          formCaptureProduct = so.resolveProductLabel(String(b.productCaptureName || '').slice(0, 300), choices);
-        }
-      } catch (pickErr) {
-        logger.warn(`[submit/order] 상품 선택 확인 실패 — 종전대로 접수: ${pickErr.message}`);
-      }
-    }
-    /* ★★ 결정 252 — 정원이 찬 상품은 구매양식(공고 참여 없이 바로 낸 구매)으로 받지 않는다(사용자 확정 2026-10-15
-         "모집이 끝났다면 수용하지 않게 · 이미 샀다면 그대로 제출하지 못하도록" — 결정 242·243 의 "막지 않음"을 이 경우만 뒤집는다).
-       ★ 아무것도 쓰기 전에 판정한다(원장·작업표·캡처 세션 0). 판정은 양식 안내와 같은 함수(orderFormOptionFull.submitBlock — 참여 버튼과 같은 셈).
-       ★ 홀드로 들어온 공고 참여는 대상 아님(자리를 잡고 산 사람). 상품을 정할 수 없거나 조회 실패면 받는다(작업보드 ⚠ 가 잡는다).
-       ★ 막힌 시도는 담당자 확인 기록(reviewer_event_logs · order_option_full_blocked)에 남긴다 — 이미 결제한 사람의 문의를 찾을 수 있게. */
-    if (!(holdCtx && (holdCtx.productName || holdCtx.optionKey))) {
-      const ofs = require('../services/orderFormOptionFull.service');
-      const blocked = await ofs.submitBlock(pool, { sheetId: orderScope.sheetId, tabName: orderScope.tabName, gid: orderScope.gid || gid || '', picked: formPickedProduct });
-      if (blocked) {
-        logger.warn(`[submit/order] 정원 찬 상품 접수 거절 camp=${blocked.campaignId} 상품=${blocked.name} p8=${String(loginPhone8 || '').slice(-4)}`);
-        require('../services/reviewerEventLog.service').logReviewerEvent({
-          sheetId: orderScope.sheetId, tabName: orderScope.tabName,
-          reviewerName: String(loginName || recipient || ''), phone8: String(loginPhone8 || ''),
-          eventType: 'order_option_full_blocked', severity: 'warn',
-          message: `『${orderScope.tabName}』에 ${String(loginName || recipient || '리뷰어')} 리뷰어가 정원이 찬 상품(${blocked.name})으로 구매양식을 내려다 접수가 막혔습니다.`,
-          context: { product: blocked.name, campaignId: blocked.campaignId, orderNum: String(orderNum || '').slice(0, 60), price: String(price || '').slice(0, 30) },
-        }).catch(e => logger.warn(`[submit/order] 접수 거절 기록 실패(무시): ${e.message}`));
-        return res.json({ ok: false, code: 'OPTION_FULL', product: blocked.name, campaignId: blocked.campaignId, error: ofs.BLOCK_MESSAGE });
-      }
-    }
     /* ★★ 구매일자가 빈 채로 오면 서버가 오늘(KST)을 채운다 — 관리자 수기 주문과 **같은 함수**(manualOrder.todayKstDateStr).
        빈 문자열은 매퍼가 "그 칸을 지우는 쓰기"로 내보내(결정 017 — 공유 매퍼는 고치지 않는다) 작업표에 미리 적힌
        구매일자를 지우고, 날짜별 계획 물량 계산까지 틀어진다(2026-10-08 E2E 실측). 리뷰어 화면은 항상 오늘 날짜를 보내므로

@@ -5245,7 +5245,7 @@ let _OPTION_FULL = null;
 /** 정원이 찬 상품 창(결정 243 과 같은 모양).
  *  blocking = 접수할 수 없다고 알리고 [닫기 · 다른 상품 고르기] / [참여 가능한 상품 보기]만 준다(그래도 제출하기 없음).
  *  돌려주는 값: true = 닫음(계속 이 화면) · false = 공고로 감 · "busy" = 다른 창이 떠 있어 이번엔 띄우지 못함. */
-function _optionFullModal(info, name) {
+function _optionFullModal(info, name, partial = null) {
   return new Promise((resolve) => {
     if (document.getElementById("ofOptionFull") || document.getElementById("ofPopularGate")) { resolve("busy"); return; }
     const esc = t => String(t || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -5264,14 +5264,17 @@ function _optionFullModal(info, name) {
           + '<p style="font-size:.8rem;opacity:.8">아직 사지 않았다면 사지 말고, 공고에서 참여할 수 있는 상품을 확인해 주세요.</p>'
         : '<p>이 상품은 정원이 다 찼어요. <b>아직 사지 않았다면</b> 사지 말고, 공고에서 참여할 수 있는 상품을 확인해 주세요.</p>'
           + '<p style="font-size:.8rem;opacity:.8">이미 샀다면 그대로 제출하세요. 접수는 되지만, 정원이 찬 뒤 산 구매로 표시되어 담당자가 확인한 뒤 처리해요.</p>')
+      + (partial ? '<p><b>' + esc(partial.join(", ")) + '번째 주문</b>은 접수되지 않아요. 나머지 주문만 낼 수 있어요.</p>' : '')
       + '<div class="modal-actions"><button type="button" class="btn-ghost" data-of-continue>'
       + (block ? (multi ? '다른 상품 고르기' : '닫기') : '이미 구매했어요 — 그래도 제출하기') + '</button>'
+      + (partial ? '<button type="button" class="btn-ghost" data-of-rest>나머지 주문만 제출</button>' : '')
       + '<a class="btn-primary" data-of-go style="text-decoration:none;text-align:center" href="campaign.html?id=' + encodeURIComponent(info.campaignId) + '">참여 가능한 상품 보기</a></div>'
       + '</div></div>';
     const finish = (v) => { try { ov.remove(); } catch (_) {} document.removeEventListener("keydown", onKey); resolve(v); };
     const onKey = (e) => { if (e.key === "Escape") finish(true); };
     ov.addEventListener("click", (e) => {
       if (e.target.closest("[data-of-continue]")) finish(true);
+      else if (e.target.closest("[data-of-rest]")) finish("rest");
       else if (e.target.closest("[data-of-go]")) finish(false);
     });
     document.addEventListener("keydown", onKey);
@@ -5297,6 +5300,27 @@ function _optionFullOnPick(label) {
   _optionFullModal(g, label).then(v => { if (v === "busy") delete g.acked[label]; });
 }
 
+let _OPTION_FULL_SRC = null;   // { sheetId, tabName, gid, token } — 제출 직전 다시 받아 오기용
+
+/** 정원 찬 상품 재료를 다시 받아 온다(실패하면 지금 값 그대로). */
+async function _optionFullRefresh() {
+  try {
+    const src = _OPTION_FULL_SRC; if (!src || !_OPTION_FULL) return;
+    const base = (typeof API_BASE_URL !== "undefined" && API_BASE_URL) ? API_BASE_URL : "";
+    const r = await fetch(base + "/api/campaign/order-form-gate?sheetId=" + encodeURIComponent(src.sheetId || "")
+      + "&tabName=" + encodeURIComponent(src.tabName || "") + "&gid=" + encodeURIComponent(src.gid || ""),
+      { headers: { "X-Reviewer-Token": src.token } });
+    if (!r.ok) return;
+    const j = await r.json();
+    const of = j && j.optionFull;
+    if (!of || !of.campaignId || !Array.isArray(of.fullProducts)) { _OPTION_FULL = null; return; }   // 이제 찬 상품 없음
+    _OPTION_FULL.fullProducts = of.fullProducts.map(x => String(x || ""));
+    _OPTION_FULL.singleFull = of.singleFull === true;
+    _OPTION_FULL.blocking = of.blocking === true;
+    if (typeof _ofpActive === "function" && _ofpActive()) _orderCardIds.forEach(_ofpRender);
+  } catch (_) { /* 지금 값 그대로 */ }
+}
+
 /** 제출 직전 확인. true = 제출 · "go" = 공고로 감 · "stop" = 이 화면에 머묾(제출 안 함).
  *  거절 모드: 정원 찬 상품을 고른 카드가 있거나 상품 하나짜리 양식의 그 상품이 찼으면 **제출하지 않는다**(서버도 같은 판정으로 거절한다). */
 async function _optionFullBeforeSubmit() {
@@ -5306,9 +5330,16 @@ async function _optionFullBeforeSubmit() {
     const picks = (typeof _ofpActive === "function" && _ofpActive())
       ? _orderCardIds.map(c => _OFP.pick[c] || "").filter(Boolean) : [];
     if (g.blocking !== false) {
-      const hit = picks.find(_optionFullIs) || (g.singleFull ? (g.singleName || g.title || "") : "");
+      await _optionFullRefresh();   // 양식을 연 뒤 담당자가 정원을 늘렸으면 막지 않는다(코드리뷰)
+      const g2 = _OPTION_FULL;
+      if (!g2) return true;
+      const hitCards = picks.map((label, k) => _optionFullIs(label) ? k + 1 : 0).filter(Boolean);
+      const hit = (hitCards.length ? picks[hitCards[0] - 1] : "") || (g2.singleFull ? (g2.singleName || g2.title || "") : "");
       if (!hit) return true;
-      const v = await _optionFullModal(g, hit);
+      // 여러 장 중 일부만 찬 상품이면 나머지는 낼 수 있게(서버가 카드마다 거절한다) — 1번 카드는 지울 수 없어 막다른 길이 된다(코드리뷰)
+      const partial = (!g2.singleFull && hitCards.length && hitCards.length < picks.length) ? hitCards : null;
+      const v = await _optionFullModal(g2, hit, partial);
+      if (v === "rest" && partial) return true;
       return v === false ? "go" : "stop";
     }
     for (const label of picks) {
@@ -5371,7 +5402,8 @@ async function _orderFormPopularGate({ sheetId, tabName, gid, token }) {
     const j = await r.json();
     if (!j) return;
     // ★ 결정 252: 정원 찬 상품 안내 재료(인기 여부와 무관). 옛 서버는 이 필드가 없다 = 안내 없음.
-    const of = j.optionFull;
+    const of = (typeof window !== "undefined" && window._ncMode) ? null : j.optionFull;   // 네이버+쿠팡 모드는 대상 아님(서버도 같음)
+    _OPTION_FULL_SRC = { sheetId, tabName, gid, token };
     _OPTION_FULL = (of && of.campaignId && Array.isArray(of.fullProducts))
       ? { campaignId: of.campaignId, title: of.title || "", fullProducts: of.fullProducts.map(x => String(x || "")),
           singleFull: of.singleFull === true, singleName: String(of.singleName || ""), blocking: of.blocking === true, acked: {} }

@@ -157,14 +157,15 @@ const TWO = [{ opt_key: '3. 퀸더블', product_name: '3. 퀸더블' }, { opt_ke
     assert.ok(/v\.status === 'soldout'/.test(ofsSrc));
     assert.ok(/st\.matchOrderOption\(optRows, \{ selectedProduct: label \}\)/.test(ofsSrc) && /listProductChoices\(db, sheetId, tabName\)/.test(ofsSrc));
   });
-  await ok('보관 공고·안내 스위치 끔·정원 있는 상품 없음·실패 = null(안내·거절 없음 · fail-open)', () => {
-    assert.ok(/camp\.archived_at/.test(ofsSrc) && /ORDER_FORM_OPTION_FULL_NOTICE === '0'/.test(ofsSrc));
+  await ok('보관·마감 공고·안내 스위치 끔·정원 있는 상품 없음·공고 여럿인 작업표·실패 = null(안내·거절 없음 · fail-open)', () => {
+    assert.ok(/camp\.archived_at \|\| camp\.status !== 'active'/.test(ofsSrc) && /ORDER_FORM_OPTION_FULL_NOTICE === '0'/.test(ofsSrc));
+    assert.ok(/if \(\(await _liveCampaignsOnTab\(db, camp\)\) > 1\) return null;/.test(ofsSrc));
     assert.ok(/if \(!optRows\.some\(o => Number\(o\.recruit_total\) > 0\)\) return null;/.test(ofsSrc));
     const lf = ofsSrc.slice(ofsSrc.indexOf('async function loadFormOptionFull'), ofsSrc.indexOf('function publicView'));
     assert.ok(/catch \(e\) \{[\s\S]*return null;/.test(lf));
   });
   await ok('화면에 내보낼 때 내부 재료(상품 행·키)는 지운다', () => {
-    const pub = ofs.publicView({ campaignId: 'c', fullProducts: [], singleFull: false, blocking: true, _optRows: [1], _fullKeys: new Set(), _singleKey: 'k', _choices: [] });
+    const pub = ofs.publicView({ campaignId: 'c', fullProducts: [], singleFull: false, blocking: true, _optRows: [1], _fullKeys: new Set(), _singleKey: 'k', _choices: [], _views: new Map() });
     assert.deepStrictEqual(Object.keys(pub).sort(), ['blocking', 'campaignId', 'fullProducts', 'singleFull']);
   });
   await ok('거절 스위치 ORDER_FORM_OPTION_FULL_BLOCK=0 → 거절 없음(DB 조회도 없음) · 응답 blocking:false = 화면은 안내만', async () => {
@@ -177,19 +178,28 @@ const TWO = [{ opt_key: '3. 퀸더블', product_name: '3. 퀸더블' }, { opt_ke
     assert.strictEqual(ofs.blockingEnabled(), true);
   });
   await ok('거절 판정 — 고른 상품이 찼으면 거절 · 상품 하나짜리 양식은 그 하나 · 여러 상품인데 안 골랐으면 받음 · 실패는 받음', () => {
-    const sb = ofsSrc.slice(ofsSrc.indexOf('async function submitBlock'), ofsSrc.indexOf('const BLOCK_MESSAGE'));
+    const sb = ofsSrc.slice(ofsSrc.indexOf('async function _submitBlock'), ofsSrc.indexOf('const BLOCK_MESSAGE'));
     assert.ok(/if \(picked\) key = require\('\.\/campaignState\.service'\)\.matchOrderOption\(info\._optRows, \{ selectedProduct: picked \}\);/.test(sb));
     assert.ok(/else if \(info\._choices\.length < 2\) key = info\._singleKey;/.test(sb));
     assert.ok(/if \(!key \|\| !info\._fullKeys\.has\(key\)\) return null;/.test(sb));
     assert.ok(/catch \(e\) \{[\s\S]*return null;/.test(sb));
+    assert.ok(/Promise\.race\(\[_submitBlock\(db, args\), timeout\]\)/.test(sb) && /if \(r === 'timeout'\)[^\n]*return null;/.test(sb), '제한 시간을 넘기면 받는다');
     assert.strictEqual(ofs.BLOCK_MESSAGE, '모집이 끝난 상품이라 접수할 수 없어요. 이미 결제했다면 쿠팡에서 주문을 취소해 주세요.');
   });
+  await ok('본인 것 빼고 센다 — 같은 구매가 이미 있으면 받음(원장 중복 처리) · 본인이 잡아 둔 살아 있는 자리는 남의 자리 아님(코드리뷰 🔴)', () => {
+    const sb = ofsSrc.slice(ofsSrc.indexOf('async function _submitBlock'), ofsSrc.indexOf('async function submitBlock'));
+    assert.ok(/os\.dedup_key = \$1[\s\S]{0,200}= ANY\(\$2::text\[\]\) LIMIT 1`, \[`num:\$\{num\}`, p8s\]\);\s*if \(rows\.length\) return null;/.test(sb));
+    assert.ok(/status = 'applied' AND expires_at > NOW\(\)\s*AND \(phone8 = ANY\(\$3::text\[\]\) OR owner_phone8 = ANY\(\$3::text\[\]\)\)/.test(sb));
+    assert.ok(/if \(cap > 0 && used < cap\) return null;/.test(sb));
+  });
   const sr = read('server/src/routes/submit.routes.js');
-  await ok('제출: 아무것도 쓰기 전에 거절(원장 쓰기보다 앞) · 홀드(공고 참여)는 대상 아님 · 막힌 시도는 담당자 확인 기록', () => {
+  await ok('제출: 아무것도 쓰기 전에 거절 — 신원 확인(정보 보강·기록)과 원장 쓰기보다 앞 · 홀드 문맥·네이버+쿠팡은 대상 아님 · 막힌 시도는 담당자 확인 기록', () => {
     const bi = sr.indexOf("const blocked = await ofs.submitBlock(pool,");
-    assert.ok(bi > 0 && bi < sr.indexOf('const ledger = await createOrderLedgerEntry({'));
-    assert.ok(/if \(!\(holdCtx && \(holdCtx\.productName \|\| holdCtx\.optionKey\)\)\) \{\s*const ofs = require\('\.\.\/services\/orderFormOptionFull\.service'\);/.test(sr));
-    assert.ok(/picked: formPickedProduct \}\);\s*if \(blocked\) \{/.test(sr), '판정 결과가 있으면 바로 거절 분기');
+    assert.ok(bi > 0 && bi < sr.indexOf('const _newIdentityGate = reviewerOrderIdentity.isEnabled()') && bi < sr.indexOf('const ledger = await createOrderLedgerEntry({'));
+    assert.ok(/if \(!holdCtx && !ncMode\) \{\s*const ofs = require\('\.\.\/services\/orderFormOptionFull\.service'\);/.test(sr));
+    assert.ok(/picked: formPickedProduct, choices: formChoices, phones: \[loginPhone8, phone\], orderNum \}\);/.test(sr));
+    assert.ok(/AND occurred_at > NOW\(\) - INTERVAL '10 minutes' LIMIT 1/.test(sr), '같은 연락처·주문번호는 10분에 한 번만 기록');
+    assert.ok(/orderNum \}\);\s*if \(blocked\) \{/.test(sr), '판정 결과가 있으면 바로 거절 분기');
     const blk = sr.slice(sr.indexOf('      if (blocked) {'), sr.indexOf("error: ofs.BLOCK_MESSAGE });") + 30);
     assert.ok(/return res\.json\(\{ ok: false, code: 'OPTION_FULL'/.test(blk) && !/createOrderLedgerEntry/.test(blk), '거절 분기는 쓰기 없이 응답하고 끝난다');
     assert.ok(/eventType: 'order_option_full_blocked'/.test(sr));
@@ -218,8 +228,11 @@ const TWO = [{ opt_key: '3. 퀸더블', product_name: '3. 퀸더블' }, { opt_ke
     assert.ok(/이미 결제했다면 쿠팡에서 주문을 취소해 주세요/.test(ui));
     assert.ok(/\(block \? \(multi \? '다른 상품 고르기' : '닫기'\) : '이미 구매했어요 — 그래도 제출하기'\)/.test(ui));
   });
-  await ok('거절 모드 제출 직전 — 찬 상품이 있으면 제출하지 않는다("stop") · 공고 보기만 이동("go")', () => {
-    assert.ok(/if \(g\.blocking !== false\) \{\s*const hit = picks\.find\(_optionFullIs\) \|\| \(g\.singleFull \? \(g\.singleName \|\| g\.title \|\| ""\) : ""\);\s*if \(!hit\) return true;\s*const v = await _optionFullModal\(g, hit\);\s*return v === false \? "go" : "stop";/.test(ui));
+  await ok('거절 모드 제출 직전 — 다시 받아 온 뒤 찬 상품이 있으면 제출하지 않는다("stop") · 일부 카드만 찼으면 [나머지 주문만 제출] · 공고 보기만 이동("go")', () => {
+    assert.ok(/if \(g\.blocking !== false\) \{\s*await _optionFullRefresh\(\);/.test(ui));
+    assert.ok(/const partial = \(!g2\.singleFull && hitCards\.length && hitCards\.length < picks\.length\) \? hitCards : null;/.test(ui));
+    assert.ok(/if \(v === "rest" && partial\) return true;\s*return v === false \? "go" : "stop";/.test(ui));
+    assert.ok(/data-of-rest>나머지 주문만 제출/.test(ui));
     assert.ok(/const _ofr = await _optionFullBeforeSubmit\(\);\s*if \(_ofr !== true\) \{ if \(_ofr === "go"\)/.test(sa));
   });
   await ok('제출 직전 확인은 인기 공고 확인 뒤', () => {
@@ -237,6 +250,9 @@ const TWO = [{ opt_key: '3. 퀸더블', product_name: '3. 퀸더블' }, { opt_ke
   await ok('안내 모드(스위치로 거절을 끈 때)는 종전 — 상품마다 한 번 · busy 면 다시 묻기', () => {
     assert.ok(/if \(g\.acked\[label\]\) return;\s*g\.acked\[label\] = true;/.test(ui));
     assert.ok(/_optionFullModal\(g, label\)\.then\(v => \{ if \(v === "busy"\) delete g\.acked\[label\]; \}\);/.test(ui));
+  });
+  await ok('네이버+쿠팡 모드는 대상 아님(화면)', () => {
+    assert.ok(/window\._ncMode\) \? null : j\.optionFull;/.test(ui));
   });
   await ok('기존 구매양식 창 모양(새 스타일 없음) · 옛 서버(필드 없음) = 아무것도 안 함 · 인기 안내와 겹치지 않음', () => {
     assert.ok(/ov\.id = "ofOptionFull";\s*ov\.className = "modal-overlay";/.test(ui) && /class="modal-box"/.test(ui) && /class="modal-actions"/.test(ui));
