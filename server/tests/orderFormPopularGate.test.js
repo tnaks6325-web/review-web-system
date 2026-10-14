@@ -11,7 +11,8 @@ const gi = r.indexOf("router.get('/order-form-gate'");
 assert.ok(gi > 0 && gi < r.indexOf("router.get('/:id'"), 'registered before /:id');
 const g = r.slice(gi, r.indexOf('\n});', gi));
 assert.ok(/reviewerSessionMiddleware/.test(g), 'signed reviewer session only (no phone parameter trust)');
-assert.ok(/camp\.is_popular !== true\) return res\.json\(\{ ok: true, gate: false \}\)/.test(g), 'only popular campaigns');
+// 결정 252: 일반 공고 응답에도 정원 찬 상품 안내 재료(...of)를 싣는다 — 참여권 안내는 여전히 인기 공고만(검사 의미 불변)
+assert.ok(/camp\.is_popular !== true\) return res\.json\(\{ ok: true, gate: false(, \.\.\.of)? \}\)/.test(g), 'only popular campaigns');
 assert.ok(/loadVerifiedOwnerPhones/.test(g) && /req\.reviewer\.loginKind === 'sub'/.test(g), 'owner login: any verified name · sub login: that name only');
 assert.ok(/loadPopularCreditState\(pool, p8\)/.test(g) && /canUsePopularCredit\(st\)/.test(g), 'same single source as the apply gate');
 assert.ok(/gate: credits <= 0, credits/.test(g), 'returns remaining credits so the form can compare against order cards');

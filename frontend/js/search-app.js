@@ -5237,6 +5237,65 @@ function openFormLink(btnEl) {
  *   ★ 다건(홀드 일괄) 제출·조회 실패·옛 서버(404)는 아무것도 하지 않는다.
  */
 let _POPULAR_GATE = null;   // { campaignId, title, credits, acked } — 인기 공고 양식일 때만
+// ★ 결정 252: 정원이 찬 상품 안내 재료 { campaignId, title, fullProducts:[양식 표기], singleFull, singleName, acked:{표기:true} }
+let _OPTION_FULL = null;
+
+/** 정원이 찬 상품 안내 창 — 막지 않는다(이미 결제한 리뷰어의 기록이 사라지지 않게 · 결정 243 과 같은 모양). true = 계속 · false = 공고로 감. */
+function _optionFullModal(info, name) {
+  return new Promise((resolve) => {
+    if (document.getElementById("ofOptionFull") || document.getElementById("ofPopularGate")) { resolve(true); return; }
+    const esc = t => String(t || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    const ov = document.createElement("div");
+    ov.id = "ofOptionFull";
+    ov.className = "modal-overlay";
+    ov.setAttribute("role", "dialog"); ov.setAttribute("aria-modal", "true"); ov.setAttribute("aria-labelledby", "ofOptionFullTitle");
+    ov.innerHTML = '<div class="modal-box"><div class="modal-header"><h3 id="ofOptionFullTitle">이 상품은 모집이 끝났어요</h3></div>'
+      + '<div class="modal-body">'
+      + '<p><b>' + esc(name) + '</b></p>'
+      + '<p>이 상품은 정원이 다 찼어요. <b>아직 사지 않았다면</b> 사지 말고, 공고에서 참여할 수 있는 상품을 확인해 주세요.</p>'
+      + '<p style="font-size:.8rem;opacity:.8">이미 샀다면 그대로 제출하세요. 접수는 되지만, 정원이 찬 뒤 산 구매로 표시되어 담당자가 확인한 뒤 처리해요.</p>'
+      + '<div class="modal-actions"><button type="button" class="btn-ghost" data-of-continue>이미 구매했어요 — 그래도 제출하기</button>'
+      + '<a class="btn-primary" data-of-go style="text-decoration:none;text-align:center" href="campaign.html?id=' + encodeURIComponent(info.campaignId) + '">참여 가능한 상품 보기</a></div>'
+      + '</div></div>';
+    const finish = (v) => { try { ov.remove(); } catch (_) {} document.removeEventListener("keydown", onKey); resolve(v); };
+    const onKey = (e) => { if (e.key === "Escape") finish(true); };
+    ov.addEventListener("click", (e) => {
+      if (e.target.closest("[data-of-continue]")) finish(true);
+      else if (e.target.closest("[data-of-go]")) finish(false);
+    });
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(ov);
+    const c = ov.querySelector("[data-of-continue]"); if (c) { try { c.focus(); } catch (_) {} }
+  });
+}
+
+/** 고른(또는 캡처로 골라 둔) 상품이 정원이 찼으면 한 번 안내한다(상품마다 한 번). */
+function _optionFullOnPick(label) {
+  const g = _OPTION_FULL;
+  if (!g || !label || !Array.isArray(g.fullProducts) || g.fullProducts.indexOf(label) < 0 || g.acked[label]) return;
+  g.acked[label] = true;
+  _optionFullModal(g, label);
+}
+
+/** 제출 직전: 아직 안내하지 않은 정원 찬 상품이 있으면 한 번 안내. false = 공고로 감(제출 중단). */
+async function _optionFullBeforeSubmit() {
+  try {
+    const g = _OPTION_FULL;
+    if (!g) return true;
+    const picks = (typeof _ofpActive === "function" && _ofpActive())
+      ? _orderCardIds.map(c => _OFP.pick[c] || "").filter(Boolean) : [];
+    for (const label of picks) {
+      if (g.fullProducts.indexOf(label) < 0 || g.acked[label]) continue;
+      g.acked[label] = true;
+      if (!(await _optionFullModal(g, label))) return false;
+    }
+    if (g.singleFull && !g.singleAcked) {
+      g.singleAcked = true;
+      if (!(await _optionFullModal(g, g.singleName || g.title || ""))) return false;
+    }
+    return true;
+  } catch (_) { return true; }
+}
 function _popularGateModal(info, { cards = 1 } = {}) {
   return new Promise((resolve) => {
     if (document.getElementById("ofPopularGate")) { resolve(true); return; }
@@ -5279,9 +5338,24 @@ async function _orderFormPopularGate({ sheetId, tabName, gid, token }) {
       { headers: { "X-Reviewer-Token": token } });
     if (!r.ok) return;
     const j = await r.json();
-    if (!j || !j.popular || !j.campaignId) return;
-    _POPULAR_GATE = { campaignId: j.campaignId, title: j.title || "", credits: Math.max(0, Number(j.credits) || 0), acked: 0 };
-    if (_POPULAR_GATE.credits <= 0) _popularGateModal(_POPULAR_GATE, { cards: 1 });
+    if (!j) return;
+    // ★ 결정 252: 정원 찬 상품 안내 재료(인기 여부와 무관). 옛 서버는 이 필드가 없다 = 안내 없음.
+    const of = j.optionFull;
+    _OPTION_FULL = (of && of.campaignId && Array.isArray(of.fullProducts))
+      ? { campaignId: of.campaignId, title: of.title || "", fullProducts: of.fullProducts.map(x => String(x || "")),
+          singleFull: of.singleFull === true, singleName: String(of.singleName || ""), acked: {} }
+      : null;
+    if (j.popular && j.campaignId) {
+      _POPULAR_GATE = { campaignId: j.campaignId, title: j.title || "", credits: Math.max(0, Number(j.credits) || 0), acked: 0 };
+      if (_POPULAR_GATE.credits <= 0 && !(await _popularGateModal(_POPULAR_GATE, { cards: 1 }))) return;
+    }
+    // 상품 고르기가 없는 양식(상품 하나) — 그 상품이 찼으면 열 때 바로 안내
+    if (_OPTION_FULL && _OPTION_FULL.singleFull) {
+      _OPTION_FULL.singleAcked = true;
+      _optionFullModal(_OPTION_FULL, _OPTION_FULL.singleName || _OPTION_FULL.title);
+    }
+    // 응답 전에 이미 골라 둔 상품(캡처 자동 선택 등)도 확인
+    if (_OPTION_FULL && typeof _ofpActive === "function" && _ofpActive()) _orderCardIds.forEach(c => _optionFullOnPick(_OFP.pick[c]));
   } catch (_) { /* 안내일 뿐 — 실패는 조용히 지나간다 */ }
 }
 
@@ -7871,6 +7945,7 @@ function _ofpOnExtracted(cid, label, rawName, rawOption) {
   // 리뷰어가 이미 직접 골랐으면 덮지 않는다(사람이 정한 값)
   if (ok && !_OFP.pick[cid]) { _OFP.pick[cid] = ok; _OFP.open[cid] = false; }
   _ofpRender(cid);
+  if (_OFP.pick[cid] === ok && typeof _optionFullOnPick === "function") _optionFullOnPick(ok);   // ★ 결정 252: 캡처로 골라 둔 상품이 정원이 찼으면 안내
 }
 
 function _ofpOnCaptureCleared(cid) {
@@ -7999,6 +8074,7 @@ function _ofpRender(cid) {
       if (!(i >= 0) || !_OFP.products[i]) return;
       _OFP.pick[c] = _OFP.products[i];
       _ofpRender(c);
+      if (typeof _optionFullOnPick === "function") _optionFullOnPick(_OFP.pick[c]);   // ★ 결정 252: 정원 찬 상품이면 안내
     });
   }
   const P = _OFP.products, pick = _OFP.pick[cid] || "", ai = _OFP.ai[cid] || "";
@@ -9214,6 +9290,8 @@ async function submitOrderForm() {
   if (_PREVIEW_MODE) { _finishPreviewSubmit(); return; }
   // ★ 결정 243: 인기 공고 양식 — 카드 수가 남은 참여권보다 많으면 한 번 안내(막지 않음 · [참여하러 가기]를 고르면 제출하지 않고 이동)
   if (!(await _popularGateBeforeSubmit())) { try { location.href = "campaign.html?id=" + encodeURIComponent(_POPULAR_GATE.campaignId); } catch (_) {} return; }
+  // ★ 결정 252: 정원이 찬 상품이면 한 번 안내(막지 않음 · [참여 가능한 상품 보기]를 고르면 제출하지 않고 공고로)
+  if (!(await _optionFullBeforeSubmit())) { try { location.href = "campaign.html?id=" + encodeURIComponent(_OPTION_FULL.campaignId); } catch (_) {} return; }
   window._capUploads = [];   // 캡처 첨부/업로드 추적 초기화(재제출 시 이전 결과 잔존 방지)
   if (window._submitOrderFormInProgress) { console.warn("[submitOrderForm] 진행 중 — 무시"); return; }
   window._submitOrderFormInProgress = true;
