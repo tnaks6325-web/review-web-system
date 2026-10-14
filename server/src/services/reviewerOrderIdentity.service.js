@@ -118,16 +118,24 @@ function issueExtractionProof({ imageHash, extracted, ok, errorCode = '' }) {
 function cleanDeliveryMemo(value) {
   return String(value == null ? '' : value).replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, DELIVERY_MEMO_MAX);
 }
-function issueDeliveryMemoProof(memo) {
+/* ★ 서명은 **그 캡처에서 함께 읽은 주문번호**에 묶는다(Codex P2) — 다른 캡처의 서명을 다른 주문 제출에 붙이면
+   주문번호가 달라 버려진다. 주문번호를 못 읽은 캡처는 서명을 내지 않는다(묶을 데가 없다 → 빈칸). */
+const orderNoKey = (v) => String(v == null ? '' : v).replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+function issueDeliveryMemoProof(memo, orderNumber) {
   const text = cleanDeliveryMemo(memo);
-  if (!text) return '';
-  return signScoped({ purpose: PURPOSE_DELIVERY_MEMO, memo: text }, '12h');
+  const order = orderNoKey(orderNumber);
+  if (!text || !order) return '';
+  return signScoped({ purpose: PURPOSE_DELIVERY_MEMO, memo: text, order }, '12h');
 }
-/** 서명이 없거나 틀리거나 만료됐으면 '' — 어떤 경우에도 제출을 막지 않는다(fail-open: 기록만 빈다). */
-function readDeliveryMemoProof(token) {
+/** 서명이 없거나 틀리거나 만료됐거나 제출한 주문번호와 다르면 '' — 어떤 경우에도 제출을 막지 않는다(fail-open: 기록만 빈다). */
+function readDeliveryMemoProof(token, orderNumber) {
   if (!token) return '';
-  try { return cleanDeliveryMemo(verifyScoped(token, PURPOSE_DELIVERY_MEMO).memo); }
-  catch (_) { return ''; }
+  try {
+    const p = verifyScoped(token, PURPOSE_DELIVERY_MEMO);
+    const order = orderNoKey(orderNumber);
+    if (!p.order || !order || p.order !== order) return '';
+    return cleanDeliveryMemo(p.memo);
+  } catch (_) { return ''; }
 }
 function verifyExtractionProof(token, extracted) {
   const p = verifyScoped(token, PURPOSE_EXTRACT);

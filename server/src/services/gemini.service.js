@@ -542,7 +542,7 @@ async function verifyAddressMatch(naverInfo, coupangInfo) {
 function _fallbackParse(text) {
   const result = {
     orderNumber: '', recipient: '', phone: '', address: '',
-    price: '', orderer: '', productName: '', productOption: '', orderDate: '', store: '',
+    price: '', orderer: '', productName: '', productOption: '', orderDate: '', store: '', deliveryMemo: '',
   };
 
   const patterns = {
@@ -556,6 +556,7 @@ function _fallbackParse(text) {
     productOption: /["']?productOption["']?\s*:\s*["']([^"']+)["']/i,
     orderDate:   /["']?orderDate["']?\s*:\s*["']([^"']+)["']/i,
     store:       /["']?store["']?\s*:\s*["']([^"']+)["']/i,
+    deliveryMemo: /["']?deliveryMemo["']?\s*:\s*["']([^"']+)["']/i,   // 결정 245
   };
 
   for (const [key, regex] of Object.entries(patterns)) {

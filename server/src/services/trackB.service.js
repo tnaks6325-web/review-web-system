@@ -3640,6 +3640,16 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     WHERE sheet_id=$1 AND tab_name=$2 AND lifecycle_status='active'`,[sheetId,tabName])).rows;
   const obligationMap=new Map(obligations.map(r=>[String(r.campaign_participant_id),r]));
   let reviewSubmitCellCount = 0;
+  // 결정 245 — 업체 배송메세지 표시용 소유 판정(필요할 때 한 번만 · 실패하면 false).
+  let _advOwns = null;
+  const advOwnsTab = async () => {
+    if (_advOwns === null) {
+      _advOwns = role === 'advertiser'
+        ? await canAccessTab({ role, staffName, advertiserId, sheetId, tabName }).catch(() => false)
+        : false;
+    }
+    return _advOwns;
+  };
   let paymentCellCount = 0;
   // 진행 현황의 금액도 "제출완료"와 정확히 같은 작업표 리뷰제출 칸을 기준으로 한다.
   // is_submitted 플래그만 보면 재투영 전 카드 건수와 표의 제출 칸이 다시 갈릴 수 있다.
@@ -3687,8 +3697,10 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
         : {}),
     };
     /* 결정 245 — 구매캡처에서 AI 가 읽은 배송메세지(사용자 확정 2026-10-14 ㄴ: 업체 화면에도).
-       업체는 전화번호·아이디와 같은 규율 — 주문이 실제 기록된 물리행까지 맞을 때(advertiserOrder)만 싣는다. */
-    if ((showEdits || advertiserOrder) && String(r.deliveryMemo || '').trim()) syn.deliveryMemo = String(r.deliveryMemo).trim();
+       업체는 전화번호·아이디와 같은 규율 — 주문이 실제 기록된 물리행까지 맞을 때(advertiserOrder)만 싣는다.
+       ★ 그리고 **그 업체가 소유한 작업일 때만**(canAccessTab) — 작업보드 표는 allowAllWorkdesk 로 모든 업체가 열람하지만
+         배송메세지에는 공동현관 비밀번호 같은 글이 있어 남의 작업에서는 보이지 않게 한다(Codex P1). 판정 실패 = 안 보임. */
+    if ((showEdits || (advertiserOrder && await advOwnsTab())) && String(r.deliveryMemo || '').trim()) syn.deliveryMemo = String(r.deliveryMemo).trim();
     /* ★ 행마다 같은 판정을 실어 보낸다 — 제출물 미리보기 목록이 "채워진 줄"을 화면에서 다시
        세지 않게(사본 0). 게이지 분자(`filledCount`)와 **같은 호출**이라 갈릴 수가 없다. */
     syn.filled = _isFilledRow(syn);

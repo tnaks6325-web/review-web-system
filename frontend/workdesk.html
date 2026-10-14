@@ -11249,7 +11249,10 @@ async function _capSubmit(){
     if(isRev) body.oldFileId=_capCurrent(st); else body.expectFileId=String(st.pre.currentFileId||'');
     const out=await api(K.post,{method:'POST',body:JSON.stringify(body)});
     if(!out||!out.ok) throw new Error(_capErr(out&&out.error,K.label+'를 저장하지 못했습니다.'));
-    const t=st.t; _capClose();
+    const t=st.t; const rowId=st.row&&st.row.id; _capClose();
+    /* 결정 245 — 구매캡처를 바꾸면 서버가 배송메세지를 비운다. 명단 전체를 다시 받지 않으므로 그 줄의 값도 여기서 지운다
+       (안 지우면 새 사진 옆에 옛 사진의 메세지·공동현관 번호가 그대로 남는다 · Codex P2). */
+    if(!isRev&&rowId){ const rr=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(rowId)); if(rr) delete rr.deliveryMemo; }
     toast(isRev
       ? (out.oldTrashed?'리뷰캡처를 교체했습니다 · 이전 사진은 휴지통으로 옮겼습니다':'리뷰캡처를 교체했습니다 · 이전 사진은 드라이브에 남겨 두었습니다')
       : out.replaced

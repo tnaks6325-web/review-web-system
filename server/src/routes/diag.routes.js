@@ -656,7 +656,7 @@ router.post('/image-extract', imageApiLimiter, async (req, res, next) => {
     } catch (_) { productLabel = ''; }
     // 결정 245 — 배송메세지는 서명에 담아 준다(제출 때 서버가 이 서명에서만 꺼낸다). 서명 실패도 판독 응답을 막지 않는다.
     let deliveryMemoToken = '';
-    try { deliveryMemoToken = result.ok ? reviewerOrderIdentity.issueDeliveryMemoProof(result.deliveryMemo) : ''; } catch (_) { deliveryMemoToken = ''; }
+    try { deliveryMemoToken = result.ok ? reviewerOrderIdentity.issueDeliveryMemoProof(result.deliveryMemo, result.orderNumber) : ''; } catch (_) { deliveryMemoToken = ''; }
     res.json({ ...result, ...proof, productLabel, deliveryMemoToken });
   } catch (err) {
     logger.error(`[image-extract] ${err.message}`);

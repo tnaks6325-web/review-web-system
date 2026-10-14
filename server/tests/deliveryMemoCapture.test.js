@@ -15,17 +15,21 @@ const roi = require('../src/services/reviewerOrderIdentity.service');
 
 // ── A. 서명 ──
 {
-  const t = roi.issueDeliveryMemoProof('  문 앞에 놓아주세요\n공동현관 #1234  ');
+  const t = roi.issueDeliveryMemoProof('  문 앞에 놓아주세요\n공동현관 #1234  ', '2026101412345');
   assert.ok(t, 'memo → token');
-  assert.equal(roi.readDeliveryMemoProof(t), '문 앞에 놓아주세요 공동현관 #1234', 'control chars/space folded');
-  assert.equal(roi.issueDeliveryMemoProof(''), '', 'blank memo → no token');
-  assert.equal(roi.issueDeliveryMemoProof(null), '');
-  assert.equal(roi.readDeliveryMemoProof(''), '', 'no token → blank (old screen)');
-  assert.equal(roi.readDeliveryMemoProof(t.slice(0, -3) + 'abc'), '', 'tampered → blank');
-  assert.equal(roi.readDeliveryMemoProof('not-a-jwt'), '', 'garbage → blank, never throws');
+  assert.equal(roi.readDeliveryMemoProof(t, '2026101412345'), '문 앞에 놓아주세요 공동현관 #1234', 'control chars/space folded');
+  assert.equal(roi.readDeliveryMemoProof(t, ' 2026-1014-12345 '), '문 앞에 놓아주세요 공동현관 #1234', 'order number compared by letters/digits only');
+  assert.equal(roi.readDeliveryMemoProof(t, '2026101499999'), '', 'token from another capture (different order) → blank');
+  assert.equal(roi.readDeliveryMemoProof(t, ''), '', 'no order number on submit → blank');
+  assert.equal(roi.issueDeliveryMemoProof('문 앞', ''), '', 'capture without order number → no token (nothing to bind)');
+  assert.equal(roi.issueDeliveryMemoProof('', '1'), '', 'blank memo → no token');
+  assert.equal(roi.issueDeliveryMemoProof(null, '1'), '');
+  assert.equal(roi.readDeliveryMemoProof('', '1'), '', 'no token → blank (old screen)');
+  assert.equal(roi.readDeliveryMemoProof(t.slice(0, -3) + 'abc', '2026101412345'), '', 'tampered → blank');
+  assert.equal(roi.readDeliveryMemoProof('not-a-jwt', '1'), '', 'garbage → blank, never throws');
   const extractTok = roi.issueExtractionProof({ imageHash: 'h', extracted: {}, ok: true }).extractToken;
-  assert.equal(roi.readDeliveryMemoProof(extractTok), '', 'other purpose token → blank');
-  const long = roi.readDeliveryMemoProof(roi.issueDeliveryMemoProof('가'.repeat(500)));
+  assert.equal(roi.readDeliveryMemoProof(extractTok, '1'), '', 'other purpose token → blank');
+  const long = roi.readDeliveryMemoProof(roi.issueDeliveryMemoProof('가'.repeat(500), 'A1'), 'a-1');
   assert.equal(long.length, 200, 'capped at 200');
   // 명의 확인 해시(7칸)는 배송메세지와 무관 — 새로고침 안 한 화면이 EXTRACT_FIELDS_TAMPERED 로 막히지 않는다
   assert.equal(roi.fieldsHash({ recipient: 'a' }), roi.fieldsHash({ recipient: 'a', deliveryMemo: 'x' }));
@@ -37,9 +41,9 @@ const roi = require('../src/services/reviewerOrderIdentity.service');
   assert.ok(/"deliveryMemo": "배송요청사항\/배송메모/.test(g), 'prompt asks for deliveryMemo');
   assert.ok(/const EXTRACT_CACHE_VERSION = 'extract5';/.test(g), 'cache prefix bumped (old cache lacks the field)');
   const d = read('server/src/routes/diag.routes.js');
-  assert.ok(/issueDeliveryMemoProof\(result\.deliveryMemo\)/.test(d) && /productLabel, deliveryMemoToken \}\)/.test(d), 'extract response carries signed memo');
+  assert.ok(/issueDeliveryMemoProof\(result\.deliveryMemo, result\.orderNumber\)/.test(d) && /productLabel, deliveryMemoToken \}\)/.test(d), 'extract response carries signed memo');
   const sr = read('server/src/routes/submit.routes.js');
-  assert.ok(/deliveryMemo: reviewerOrderIdentity\.readDeliveryMemoProof\(b\.deliveryMemoToken\)/.test(sr), 'submit takes memo only from the signature');
+  assert.ok(/deliveryMemo: reviewerOrderIdentity\.readDeliveryMemoProof\(b\.deliveryMemoToken, orderNum\)/.test(sr), 'submit takes memo only from the signature');
   const ol = read('server/src/services/orderLedger.service.js');
   const m = ol.match(/const ORDER_INSERT_SQL = `INSERT INTO order_submissions\s*\(([\s\S]*?)\)\s*VALUES \(([\s\S]*?)\)\s*RETURNING id`/);
   assert.ok(m, 'insert sql found');
@@ -52,7 +56,20 @@ const roi = require('../src/services/reviewerOrderIdentity.service');
   assert.ok(/ADD COLUMN IF NOT EXISTS delivery_memo TEXT NOT NULL DEFAULT ''/.test(read('server/migrations/188_order_delivery_memo.sql')));
   assert.ok(/\['order_submissions', 'delivery_memo'\]/.test(read('server/index.js')), 'schema preflight');
   const tb = read('server/src/services/trackB.service.js');
-  assert.ok(/if \(\(showEdits \|\| advertiserOrder\) && String\(r\.deliveryMemo/.test(tb), 'advertiser only when order row matches');
+  assert.ok(/if \(\(showEdits \|\| \(advertiserOrder && await advOwnsTab\(\)\)\) && String\(r\.deliveryMemo/.test(tb), 'advertiser only on own tab and matched order row');
+  assert.ok(/await canAccessTab\(\{ role, staffName, advertiserId, sheetId, tabName \}\)\.catch\(\(\) => false\)/.test(tb), 'ownership lookup failure = hidden');
+  // 판독 응답이 JSON 으로 안 풀려도 배송메세지를 건진다
+  const fbStart = g.indexOf('function _fallbackParse');
+  const fbSrc = g.slice(fbStart, g.indexOf('\n}\n', fbStart) + 2);
+  assert.ok(/deliveryMemo: ''/.test(fbSrc) && /deliveryMemo: \/\["'\]\?deliveryMemo/.test(fbSrc), 'fallback parser covers deliveryMemo');
+  const fbFn = new Function(fbSrc + '; return _fallbackParse;')();
+  assert.equal(fbFn('{"orderNumber": "1", "deliveryMemo": "경비실에 맡겨주세요", oops').deliveryMemo, '경비실에 맡겨주세요');
+  // 옛 구매양식(admin.html ?mode=form)도 서명을 싣는다
+  const ia = read('frontend/js/index-app.js');
+  assert.ok(/_aiDeliveryMemoToken = json\.deliveryMemoToken \|\| "";/.test(ia) && /deliveryMemoToken: _aiDeliveryMemoToken \|\| ""/.test(ia), 'legacy form forwards token');
+  assert.equal((ia.match(/_aiDeliveryMemoToken = "";/g) || []).length, 3, 'legacy form: declared blank, cleared on reset and on new analysis');
+  // 구매캡처 교체 뒤 화면 명단에서도 지운다(명단을 다시 받지 않으므로)
+  assert.ok(/if\(!isRev&&rowId\)\{ const rr=\(STATE\.wd&&STATE\.wd\.roster\|\|\[\]\)\.find\(x=>String\(x\.id\)===String\(rowId\)\); if\(rr\) delete rr\.deliveryMemo; \}/.test(read('frontend/workdesk.html')), 'replace clears memo in the open preview');
   assert.ok(/NULL::text AS "deliveryMemo"/.test(tb) && /purpose_order\.delivery_memo AS "deliveryMemo"/.test(tb), 'both roster queries carry the column');
   const sa = read('frontend/js/search-app.js');
   assert.ok(/st\.deliveryMemoToken = json\.deliveryMemoToken \|\| "";/.test(sa));
@@ -103,8 +120,12 @@ async function pg() {
     const memoBySeq = (res) => Object.fromEntries((res.roster || []).map(r => [r.seq, r.deliveryMemo]));
     const inner = memoBySeq(await tb.workdeskTab({ sheetId: sid, tabName: tab, role: 'master' }));
     assert.deepEqual(inner, { 1: '문 앞에 놓아주세요', 2: '경비실에 맡겨주세요', 3: undefined }, 'internal sees memo; blank → absent');
-    const adv = memoBySeq(await tb.workdeskTab({ sheetId: sid, tabName: tab, role: 'advertiser', allowAllWorkdesk: true }));
-    assert.deepEqual(adv, { 1: '문 앞에 놓아주세요', 2: undefined, 3: undefined }, 'advertiser only on matched order row');
+    const other = memoBySeq(await tb.workdeskTab({ sheetId: sid, tabName: tab, role: 'advertiser', advertiserId: 'dm-adv-other', allowAllWorkdesk: true }));
+    assert.deepEqual(other, { 1: undefined, 2: undefined, 3: undefined }, 'another advertiser (not owner) sees no memo');
+    await pool.query(`INSERT INTO advertisers (id, name) VALUES ('dm-adv-own','가짜업체') ON CONFLICT DO NOTHING`);
+    await pool.query(`INSERT INTO advertiser_campaigns (advertiser_id, sheet_id) VALUES ('dm-adv-own',$1)`, [sid]);
+    const adv = memoBySeq(await tb.workdeskTab({ sheetId: sid, tabName: tab, role: 'advertiser', advertiserId: 'dm-adv-own', allowAllWorkdesk: true }));
+    assert.deepEqual(adv, { 1: '문 앞에 놓아주세요', 2: undefined, 3: undefined }, 'owner advertiser only on matched order row');
     // 구매캡처 교체 — 같은 UPDATE 를 실제 DB 에 실행(드라이브 없이 SQL 만)
     const svcSrc = read('server/src/services/purchaseCaptureReplace.service.js');
     const upd = svcSrc.match(/`(UPDATE order_submissions\s+SET capture_file_id=\$2[\s\S]*?)`/)[1].replace(/--[^\n]*/g, '');
@@ -116,6 +137,8 @@ async function pg() {
     await pool.query(`DELETE FROM campaign_participants WHERE sheet_id=$1`, [sid]).catch(() => {});
     await pool.query(`DELETE FROM order_submissions WHERE sheet_id=$1`, [sid]).catch(() => {});
     await pool.query(`DELETE FROM tab_configs WHERE sheet_id=$1`, [sid]).catch(() => {});
+    await pool.query(`DELETE FROM advertiser_campaigns WHERE sheet_id=$1`, [sid]).catch(() => {});
+    await pool.query(`DELETE FROM advertisers WHERE id='dm-adv-own'`).catch(() => {});
     await pool.end().catch(() => {});
   }
 }

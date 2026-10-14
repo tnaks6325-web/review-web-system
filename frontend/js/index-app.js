@@ -5854,6 +5854,7 @@ function selectBankItem(name) {
 
 
 let _aiExtracted = null; // 마지막 추출 결과 저장
+let _aiDeliveryMemoToken = ""; // 결정 245: 배송메세지 서버 서명(제출에 그대로 싣는다)
 
 /** 파일 인풋 변경 */
 function onImgSelected(input) {
@@ -5897,6 +5898,7 @@ function _resetImgUI() {
   const asteriskWarn = document.getElementById("ofAiAsteriskWarn");
   if (asteriskWarn) asteriskWarn.style.display = "none";
   _aiExtracted = null;
+  _aiDeliveryMemoToken = "";
   // ai-filled 클래스 제거
   ["of_recipient","of_phone","of_address"].forEach(id => {
     document.getElementById(id)?.classList.remove("ai-filled");
@@ -5956,6 +5958,7 @@ async function _callExtractOrderImage(base64, mimeType) {
   // 로딩 표시
   document.getElementById("ofAiLoading").classList.add("show");
   document.getElementById("ofAiError").style.display = "none";
+  _aiDeliveryMemoToken = "";   // 새 캡처 판독 — 이전 캡처의 배송메세지 서명은 버린다
 
   try {
     // ★ [Node.js 이관] gasPostUpload()를 통해 API 서버로 전송 (업로드 진행률 표시)
@@ -5985,6 +5988,7 @@ async function _callExtractOrderImage(base64, mimeType) {
     }
 
     // 추출 결과 저장 및 표시
+    _aiDeliveryMemoToken = json.deliveryMemoToken || "";
     _aiExtracted = {
       orderNumber: json.orderNumber || "",
       recipient:   json.recipient   || "",
@@ -6336,7 +6340,8 @@ async function submitOrderForm() {
     bank, account, depositor, price,
     orderNum, memo,
     dateStr,
-    incomeName, residentNo
+    incomeName, residentNo,
+    deliveryMemoToken: _aiDeliveryMemoToken || ""   // 결정 245
   };
 
   // 버튼은 이미 함수 상단에서 비활성화됨 — 텍스트만 "제출 중..."으로 업데이트
