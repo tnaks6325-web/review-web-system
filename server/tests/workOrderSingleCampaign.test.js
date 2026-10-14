@@ -143,6 +143,38 @@ const base = { title: '10/14 테스트 공고', status: 'draft' };
   out = await arch.unarchiveCampaign(d.db, 'c_old');
   ok('오더 없는 공고는 잠금·확인 없이 종전 그대로', out.ok === true && !d.log.some(q => /pg_advisory_xact_lock|c\.id <> \$2/.test(q)));
 
+  console.log('\n[F] 작업오더의 연결 공고(역방향 링크)를 바꾸는 쓰기도 같은 잠금·확인(Codex PR #1632)');
+  { const orderRoutes = require('../src/routes/order.routes');
+    const h = (method, p) => { const l = orderRoutes.stack.find(x => x.route && x.route.path === p && x.route.methods[method]); return l.route.stack[l.route.stack.length - 1].handle; };
+    const upd = h('put', '/admin/update');
+    const runUpd = (body, cur, live) => new Promise((resolve) => {
+      calls = [];
+      const answerF = (sql) => {
+        if (/SELECT linked_campaign_id FROM work_orders WHERE id = \$1 FOR UPDATE/.test(sql)) return { rows: cur === undefined ? [] : [{ linked_campaign_id: cur }] };
+        if (/c\.archived_at IS NULL AND c\.id <> \$2/.test(sql)) return { rows: live };
+        if (/UPDATE work_orders SET/.test(sql)) return { rows: [{ id: body.id }] };
+        return { rows: [] };
+      };
+      client.query = async (sql) => { calls.push({ via: 'client', sql: String(sql) }); return answerF(String(sql)); };
+      const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(b) { resolve({ status: this.statusCode, body: b }); return this; } };
+      upd({ body, admin: { name: 't' } }, res, (err) => resolve({ status: 'next', err }));
+    });
+    let r = await runUpd({ id: 'wo_1', linked_campaign_id: 'camp_B' }, 'camp_A', [{ id: 'camp_A', title: '살아 있는 A' }]);
+    ok('★ 살아 있는 공고가 있는 오더를 다른 공고로 돌리면 409', r.status === 409 && r.body.code === 'WORK_ORDER_CAMPAIGN_EXISTS' && /살아 있는 A/.test(r.body.error), r);
+    ok('★ 오더를 바꾸지 않는다', !calls.some(c => /UPDATE work_orders SET/.test(c.sql)) && calls.some(c => c.sql === 'ROLLBACK'));
+    r = await runUpd({ id: 'wo_1', linked_campaign_id: 'camp_A' }, 'camp_A', [{ id: 'camp_X', title: 'x' }]);
+    ok('같은 값을 다시 보내면 검사 없이 통과(상태 변경 등이 막히지 않게)', r.status === 200 && !calls.some(c => /pg_advisory_xact_lock/.test(c.sql))
+      && calls.some(c => /UPDATE work_orders SET/.test(c.sql)) && calls.some(c => c.sql === 'COMMIT'));
+    r = await runUpd({ id: 'wo_1', chat_room_url: 'https://x' }, 'camp_A', []);
+    ok('연결 공고를 안 보내면 종전 그대로', r.status === 200 && !calls.some(c => /FOR UPDATE|pg_advisory_xact_lock/.test(c.sql)));
+    r = await runUpd({ id: 'wo_1', linked_campaign_id: 'camp_B' }, '', []);
+    ok('공고 생성 직후 정상 연결(다른 살아 있는 공고 없음)은 통과', r.status === 200 && calls.some(c => /pg_advisory_xact_lock/.test(c.sql))
+      && calls.findIndex(c => /pg_advisory_xact_lock/.test(c.sql)) < calls.findIndex(c => /UPDATE work_orders SET/.test(c.sql)));
+    const orderSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'order.routes.js'), 'utf8');
+    ok('상태 변경 경로도 같은 검사', (orderSrc.match(/guardWorkOrderLinkChange\(_lc, b\.id, b\.linked_campaign_id\)/g) || []).length === 2);
+    client.query = async (sql) => { calls.push({ via: 'client', sql: String(sql) }); return answer(String(sql)); };
+  }
+
   console.log('\n[E] 수정요청 창 — 파일 조회는 이 탭의 리뷰어 토큰을 직접 싣고, 공용 세션은 건드리지 않는다');
   const html = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'index.html'), 'utf8');
   const fnSrc = (name, prefix = 'async function ') => {

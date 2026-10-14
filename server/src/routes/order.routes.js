@@ -1536,7 +1536,14 @@ router.put('/admin/status', authMiddleware, adminOrMasterMiddleware, async (req,
 
     // ※ NULLIF($n,'') : 빈 문자열은 "변경 없음"으로 처리해 기존 값 유실 방지
     //    (프론트가 입력칸 값을 항상 전송하므로 COALESCE 만으로는 빈값이 기존값을 덮어씀)
-    const { rows } = await pool.query(
+    // ★ 결정 246: 연결 공고(linked_campaign_id)를 바꾸면 같은 잠금·확인(오더당 살아 있는 공고 하나) — 한 트랜잭션.
+    const _lc = await pool.connect();
+    let rows;
+    try {
+      await _lc.query('BEGIN');
+      const _g = await require('../services/linkedRecruitQuota.service').guardWorkOrderLinkChange(_lc, b.id, b.linked_campaign_id);
+      if (_g) { await _lc.query('ROLLBACK'); return res.status(_g.status).json(_g.body); }
+    ({ rows } = await _lc.query(
       `UPDATE work_orders SET
          status = $2,
          admin_memo = COALESCE(NULLIF($3, ''), admin_memo),
@@ -1554,7 +1561,14 @@ router.put('/admin/status', authMiddleware, adminOrMasterMiddleware, async (req,
         b.linked_campaign_id !== undefined ? b.linked_campaign_id : null,
         req.admin?.name || '',
       ]
-    );
+    ));
+      await _lc.query('COMMIT');
+    } catch (e) {
+      await _lc.query('ROLLBACK').catch(() => {});
+      throw e;
+    } finally {
+      _lc.release();
+    }
     res.json({ ok: true, data: rows[0] });
   } catch (err) {
     next(err);
@@ -2009,7 +2023,14 @@ router.put('/admin/update', authMiddleware, adminOrMasterMiddleware, async (req,
     if (!b.id) return res.status(400).json({ ok: false, error: 'id가 필요합니다.' });
 
     // ※ NULLIF($n,'') : 빈 문자열은 "변경 없음" (기존 값 유실 방지)
-    const { rows } = await pool.query(
+    // ★ 결정 246: 연결 공고(linked_campaign_id)를 바꾸면 같은 잠금·확인(오더당 살아 있는 공고 하나) — 한 트랜잭션.
+    const _lc = await pool.connect();
+    let rows;
+    try {
+      await _lc.query('BEGIN');
+      const _g = await require('../services/linkedRecruitQuota.service').guardWorkOrderLinkChange(_lc, b.id, b.linked_campaign_id);
+      if (_g) { await _lc.query('ROLLBACK'); return res.status(_g.status).json(_g.body); }
+    ({ rows } = await _lc.query(
       `UPDATE work_orders SET
          chat_room_url = COALESCE(NULLIF($2, ''), chat_room_url),
          admin_memo = COALESCE(NULLIF($3, ''), admin_memo),
@@ -2023,7 +2044,14 @@ router.put('/admin/update', authMiddleware, adminOrMasterMiddleware, async (req,
         b.admin_memo !== undefined ? b.admin_memo : null,
         b.linked_campaign_id !== undefined ? b.linked_campaign_id : null,
       ]
-    );
+    ));
+      await _lc.query('COMMIT');
+    } catch (e) {
+      await _lc.query('ROLLBACK').catch(() => {});
+      throw e;
+    } finally {
+      _lc.release();
+    }
     if (rows.length === 0) {
       return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
     }
