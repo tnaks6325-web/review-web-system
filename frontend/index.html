@@ -2417,10 +2417,25 @@ function _reEditEnsureOverlay(){
   document.body.appendChild(ovl);
 }
 
+/* ★ 결정 246: 수정요청 창의 서버 호출(gasGet/gasPost)은 api.js 가 **공용 리뷰어 세션**
+   (rapp_reviewer_auth — 구매양식·공고 화면과 같이 쓰는 값)의 토큰을 붙인다. 리뷰 내역은
+   이 탭의 리뷰어(getSavedUser) 토큰으로 직접 부르므로, 다른 탭에서 다른 사람으로 구매양식에
+   로그인하면 목록은 A, 수정 창은 B 로 갈려 "로그인한 리뷰어의 제출 내역만…"(403)이 난다
+   (2026-10-14 실사례). 부르기 직전마다 이 탭의 리뷰어로 맞춘다 — goToSubmit 과 같은 관용구. */
+async function _reEditSyncSession(){
+  let user = getSavedUser();
+  if (!user || !user.phone8) return user;
+  if (!_reviewerTokenFresh(user.reviewerToken)) {
+    try { user = (await _refreshReviewerHomeSession(user)) || user; } catch (_) { /* 만료면 서버가 다시 로그인하라고 알린다 */ }
+  }
+  syncSearchSession(user);
+  return user;
+}
+
 async function openReviewEditModal(regId){
   const item = window._reEditReg[regId];
   if (!item) return;
-  const user = getSavedUser();
+  const user = await _reEditSyncSession();
   const phone8 = (user && user.phone8) ? String(user.phone8).replace(/[^0-9]/g,'') : '';
   if (phone8.length !== 8){ showToast('로그인 정보가 없어 조회할 수 없습니다.'); return; }
   _reEditCtx = { phone8, sheetId:item.sheetId, tabName:item.tabName, gid:item.gid, rowIndex:item.rowIndex, label:item.label };
@@ -2441,6 +2456,7 @@ function closeReviewEditModal(){
 async function _reEditLoadFiles(){
   const c = _reEditCtx; if (!c) return;
   try{
+    await _reEditSyncSession();
     const res = await gasGet({ action:'reviewEditMyFiles', phone8:c.phone8, sheetId:c.sheetId, tabName:c.tabName, rowIndex:c.rowIndex });
     if (!res || res.ok === false) throw new Error((res && res.error) || '조회에 실패했습니다.');
     _reEditFiles = res.files || [];

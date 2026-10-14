@@ -22,7 +22,8 @@ for (const code of ['popular_no_credit', 'unregistered', 'repurchase_window', 'o
 // ② 서비스 계약
 const s = read('server/src/services/directPurchaseRules.service.js');
 assert.ok(/if \(o\.campaign_application_id \|\| o\.deleted_at\) return \{ judged: false, reason: 'not_direct' \}/.test(s), 'participation orders are never flagged');
-assert.ok(/ORDER BY \(rc\.created_at <= \$3\) DESC/.test(s), 'campaign existing at purchase time (same rule as credit events)');
+// 결정 246: 공고 선택 순서는 참여권 이벤트와 같은 단일 출처 함수(검사 의미 강화 — 임시저장 공고 후순위까지)
+assert.ok(/ORDER BY \$\{require\('\.\/directPurchaseParticipation\.service'\)\.campaignAtPurchaseOrderSql\('\$3'\)\}/.test(s), 'campaign existing at purchase time (same rule as credit events)');
 assert.ok(/loadPopularCreditState\(db, p8, \{ evaluatedAt: new Date\(at\.getTime\(\) - 1\) \}\)/.test(s), 'credit evaluated just before this purchase');
 assert.ok(/checkRepurchaseConflictAt/.test(s) && (s.match(/excludeOrderSubmissionId: o\.id, onlyBefore: true/g) || []).length === 2,
   'repurchase guard single source, excludes itself, earlier records only (later purchase carries the flag)');

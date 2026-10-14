@@ -3155,7 +3155,33 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       if (errs.length) return res.status(400).json({ ok: false, error: '참여형 활성화 불가: ' + errs.join(', ') });
     }
 
-    const { rows } = await pool.query(
+    /* ★ 결정 246: 작업오더 하나에 살아 있는 모집공고는 하나 — 두 담당자가 같은 오더 화면을
+       열어 둔 채 1분 사이에 둘 다 [공고 만들기]를 눌러 같은 작업표를 가리키는 공고가 두 장
+       생겼다(2026-10-13 실사례: 하나는 게시, 하나는 임시저장 — 숫자는 같은 작업표라 똑같이 보임).
+       화면의 버튼 숨김(linked_campaign_id)은 열어 둔 옛 화면을 못 막으므로 서버가 막는다.
+       ★ 같은 오더 생성끼리 직렬화(advisory xact lock) — 확인과 저장 사이에 다른 생성이 끼지 못하게.
+       ★ 보관(archived)된 공고는 세지 않는다 — 다시 모집할 길을 막지 않는다(막다른 길 방지).
+       ★ 오더 없이 만드는 공고(source_work_order_id 빈 값)는 종전 그대로 — 검사·잠금 없음. */
+    const _srcWoId = String(source_work_order_id || '').trim();
+    const _insClient = _srcWoId ? await pool.connect() : null;
+    let rows;
+    try {
+      if (_insClient) {
+        await _insClient.query('BEGIN');
+        await _insClient.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['recruit_campaign_wo:' + _srcWoId]);
+        const { rows: dupRows } = await _insClient.query(
+          `SELECT id, title FROM recruit_campaigns
+            WHERE source_work_order_id = $1 AND archived_at IS NULL
+            ORDER BY created_at ASC LIMIT 1`, [_srcWoId]);
+        if (dupRows.length) {
+          await _insClient.query('ROLLBACK');
+          return res.status(409).json({
+            ok: false, code: 'WORK_ORDER_CAMPAIGN_EXISTS', campaignId: dupRows[0].id,
+            error: `이 작업오더로 만든 모집공고가 이미 있습니다 — 「${dupRows[0].title || dupRows[0].id}」. 새로 만들지 말고 그 공고를 열어 수정해 주세요.`,
+          });
+        }
+      }
+    ({ rows } = await (_insClient || pool).query(
       `INSERT INTO recruit_campaigns
        (id, title, channel, channel_custom, manager, time_range, delivery_type,
         review_fee, badges, notes, chat_url, status, sort_order,
@@ -3223,7 +3249,14 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         storeRecallProduct,
         repurchaseDaysState.value,
       ]
-    );
+    ));
+      if (_insClient) await _insClient.query('COMMIT');
+    } catch (insErr) {
+      if (_insClient) await _insClient.query('ROLLBACK').catch(() => {});
+      throw insErr;
+    } finally {
+      if (_insClient) _insClient.release();
+    }
     require('../services/cashReceiptContext.service')
       .invalidateCashReceiptContext(rows[0].linked_sheet_id, rows[0].linked_tab_name);
     // ★ 061: 상품옵션 저장(제공 시). 원자 저장(캠페인 락) — 실패 시 응답에 경고 표면화(조용한 정원 오염 방지, 레드 #7).
