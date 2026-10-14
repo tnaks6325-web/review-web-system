@@ -3162,6 +3162,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
        ★ 같은 오더 생성끼리 직렬화(advisory xact lock) — 확인과 저장 사이에 다른 생성이 끼지 못하게.
        ★ 보관(archived)된 공고는 세지 않는다 — 다시 모집할 길을 막지 않는다(막다른 길 방지).
          대신 보관 해제가 같은 키로 같은 검사를 한다(campaignArchive.unarchiveCampaign — 우회 경로 차단).
+       ★ 짝짓기는 역방향(work_orders.linked_campaign_id)까지 — linkedRecruitQuota 단일 출처(Codex PR #1632).
        ★ 오더 없이 만드는 공고(source_work_order_id 빈 값)는 종전 그대로 — 검사·잠금 없음. */
     const _srcWoId = String(source_work_order_id || '').trim();
     const _insClient = _srcWoId ? await pool.connect() : null;
@@ -3169,11 +3170,10 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
     try {
       if (_insClient) {
         await _insClient.query('BEGIN');
-        await _insClient.query('SELECT pg_advisory_xact_lock(hashtext($1))', [require('../services/campaignArchive.service').workOrderCampaignLockKey(_srcWoId)]);
-        const { rows: dupRows } = await _insClient.query(
-          `SELECT id, title FROM recruit_campaigns
-            WHERE source_work_order_id = $1 AND archived_at IS NULL
-            ORDER BY created_at ASC LIMIT 1`, [_srcWoId]);
+        const _lrq = require('../services/linkedRecruitQuota.service');
+        await _lrq.lockWorkOrderCampaigns(_insClient, [_srcWoId]);
+        const _dup = await _lrq.liveCampaignForWorkOrders(_insClient, [_srcWoId]);
+        const dupRows = _dup ? [_dup] : [];
         if (dupRows.length) {
           await _insClient.query('ROLLBACK');
           return res.status(409).json({

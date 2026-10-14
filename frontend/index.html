@@ -2417,26 +2417,30 @@ function _reEditEnsureOverlay(){
   document.body.appendChild(ovl);
 }
 
-/* ★ 결정 246: 수정요청 창의 서버 호출(gasGet/gasPost)은 api.js 가 **공용 리뷰어 세션**
-   (rapp_reviewer_auth — 구매양식·공고 화면과 같이 쓰는 값)의 토큰을 붙인다. 리뷰 내역은
-   이 탭의 리뷰어(getSavedUser) 토큰으로 직접 부르므로, 다른 탭에서 다른 사람으로 구매양식에
-   로그인하면 목록은 A, 수정 창은 B 로 갈려 "로그인한 리뷰어의 제출 내역만…"(403)이 난다
-   (2026-10-14 실사례). 부르기 직전마다(창 열기·파일 조회·교체 요청·취소·내 요청 내역) 이 탭의 리뷰어로
-   맞춘다 — 창을 연 뒤 다른 탭 로그인에도 버티게(Codex PR #1632). goToSubmit 과 같은 관용구. */
-async function _reEditSyncSession(){
+/* ★ 결정 246: 수정요청 창에서 리뷰어 세션을 보는 호출은 파일 조회(my-files) 하나뿐이다(교체 요청·취소·내 요청
+   내역은 phone8 기반). gasGet 은 api.js 가 **공용 리뷰어 세션**(rapp_reviewer_auth — 구매양식·공고 화면과 같이
+   쓰는 값)의 토큰을 붙이므로, 다른 탭에서 다른 사람으로 구매양식에 로그인하면 목록은 A, 이 창은 B 로 갈려
+   "로그인한 리뷰어의 제출 내역만…"(403)이 난다(2026-10-14 실사례). 공용 값을 A 로 덮어쓰면 이번엔 그 탭이
+   반대로 틀어지므로(Codex PR #1632) 공용 값은 건드리지 않고 **이 탭의 리뷰어 토큰을 직접 실어** 부른다 —
+   리뷰 내역 목록·참여정보(participation-brief)와 같은 관용구(만료면 갱신 후 1회 재시도). */
+async function _reEditFetchMyFiles(c){
   let user = getSavedUser();
-  if (!user || !user.phone8) return user;
-  if (!_reviewerTokenFresh(user.reviewerToken)) {
-    try { user = (await _refreshReviewerHomeSession(user)) || user; } catch (_) { /* 만료면 서버가 다시 로그인하라고 알린다 */ }
+  if (!_reviewerTokenFresh(user && user.reviewerToken)) user = (await _refreshReviewerHomeSession(user)) || user;
+  const qs = new URLSearchParams({ phone8:c.phone8, sheetId:c.sheetId, tabName:c.tabName, rowIndex:String(c.rowIndex) });
+  const call = (token) => fetch(API_BASE_URL + '/api/review-edit/my-files?' + qs.toString(),
+    { headers: token ? { 'X-Reviewer-Token': token } : {} });
+  let r = await call(user && user.reviewerToken);
+  if (r.status === 401) {
+    const next = await _refreshReviewerHomeSession(user);
+    if (next && next.reviewerToken) r = await call(next.reviewerToken);
   }
-  syncSearchSession(user);
-  return user;
+  return r.json().catch(() => ({ ok:false, error:'조회에 실패했습니다.' }));
 }
 
 async function openReviewEditModal(regId){
   const item = window._reEditReg[regId];
   if (!item) return;
-  const user = await _reEditSyncSession();
+  const user = getSavedUser();
   const phone8 = (user && user.phone8) ? String(user.phone8).replace(/[^0-9]/g,'') : '';
   if (phone8.length !== 8){ showToast('로그인 정보가 없어 조회할 수 없습니다.'); return; }
   _reEditCtx = { phone8, sheetId:item.sheetId, tabName:item.tabName, gid:item.gid, rowIndex:item.rowIndex, label:item.label };
@@ -2457,8 +2461,7 @@ function closeReviewEditModal(){
 async function _reEditLoadFiles(){
   const c = _reEditCtx; if (!c) return;
   try{
-    await _reEditSyncSession();
-    const res = await gasGet({ action:'reviewEditMyFiles', phone8:c.phone8, sheetId:c.sheetId, tabName:c.tabName, rowIndex:c.rowIndex });
+    const res = await _reEditFetchMyFiles(c);
     if (!res || res.ok === false) throw new Error((res && res.error) || '조회에 실패했습니다.');
     _reEditFiles = res.files || [];
     _reEditPending = res.pending || [];
@@ -2552,7 +2555,6 @@ async function _reEditSubmit(){
   const reasonEl = document.getElementById('reEditReason');
   const reason = reasonEl ? reasonEl.value : '';
   try{
-    await _reEditSyncSession();
     const res = await gasPostUpload({
       action:'reviewEditRequest', phone8:c.phone8, sheetId:c.sheetId, tabName:c.tabName, gid:c.gid,
       rowIndex:c.rowIndex, oldFileId:_reEditTargetOldId, reason,
@@ -2572,7 +2574,6 @@ async function _reEditCancel(id){
   const c = _reEditCtx; if (!c) return;
   if (!confirm('이 수정요청을 취소할까요?')) return;
   try{
-    await _reEditSyncSession();
     const res = await gasPost({ action:'reviewEditCancel', phone8:c.phone8, requestId:id });
     if (!res || res.ok === false) throw new Error((res && res.error) || '취소에 실패했습니다.');
     showToast('요청을 취소했습니다.');
@@ -2584,7 +2585,6 @@ async function _reEditLoadMyRequests(){
   const c = _reEditCtx; const el = document.getElementById('reEditMyReqs');
   if (!c || !el) return;
   try{
-    await _reEditSyncSession();
     const res = await gasGet({ action:'reviewEditMyRequests', phone8:c.phone8 });
     const reqs = (res && res.requests) || [];
     if (reqs.length === 0){ el.innerHTML = ''; return; }

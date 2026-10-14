@@ -54,31 +54,25 @@ async function archiveCampaign(db, id, by) {
   return { ok: true, archivedAt: (rows[0] && rows[0].archived_at) || null };
 }
 
-/** 같은 작업오더 공고 생성·보관 해제가 함께 쥐는 잠금 키(결정 246) — 두 곳이 다른 키를 쓰면 서로 못 막는다. */
-const workOrderCampaignLockKey = (woId) => 'recruit_campaign_wo:' + String(woId || '').trim();
-
 /** 보관 해제 — 비상구라 게이트는 하나뿐: ★ 결정 246 같은 작업오더에 살아 있는 다른 공고가 있으면 거절.
  *  (보관 → 같은 오더로 새 공고 → 옛 공고 해제 = 살아 있는 공고 두 장 — 생성 쪽 검사를 우회하는 길, Codex PR #1632.)
- *  생성과 같은 잠금 키를 쥔 트랜잭션 안에서 확인 → 해제한다. 오더 없는 공고는 종전 그대로.
+ *  생성과 같은 잠금·같은 짝짓기(linkedRecruitQuota 단일 출처)로 확인 → 해제한다. 오더 없는 공고는 종전 그대로.
  *  0행은 "되돌렸습니다"로 꾸미지 않는다. */
 async function unarchiveCampaign(db, id) {
   const client = typeof db.connect === 'function' ? await db.connect() : null;
   const q = client || db;
   try {
     if (client) await client.query('BEGIN');
-    const { rows: src } = await q.query(
-      'SELECT source_work_order_id FROM recruit_campaigns WHERE id = $1 AND archived_at IS NOT NULL', [id]);
-    const woId = String((src[0] && src[0].source_work_order_id) || '').trim();
-    if (woId) {
-      await q.query('SELECT pg_advisory_xact_lock(hashtext($1))', [workOrderCampaignLockKey(woId)]);
-      const { rows: live } = await q.query(
-        `SELECT id, title FROM recruit_campaigns
-          WHERE source_work_order_id = $1 AND archived_at IS NULL AND id <> $2
-          ORDER BY created_at ASC LIMIT 1`, [woId, id]);
-      if (live.length) {
+    const lrq = require('./linkedRecruitQuota.service');
+    const { rows: cur } = await q.query('SELECT archived_at FROM recruit_campaigns WHERE id = $1', [id]);
+    const woIds = (cur[0] && cur[0].archived_at) ? await lrq.workOrderIdsForCampaign(q, id) : [];
+    if (woIds.length) {
+      await lrq.lockWorkOrderCampaigns(q, woIds);
+      const live = await lrq.liveCampaignForWorkOrders(q, woIds, id);
+      if (live) {
         if (client) await client.query('ROLLBACK');
-        return { ok: false, code: 'work_order_campaign_exists', campaignId: live[0].id,
-          error: `같은 작업오더로 살아 있는 모집공고가 이미 있습니다 — 「${live[0].title || live[0].id}」. 그 공고를 보관하거나 삭제한 뒤에 보관을 해제하세요.` };
+        return { ok: false, code: 'work_order_campaign_exists', campaignId: live.id,
+          error: `같은 작업오더로 살아 있는 모집공고가 이미 있습니다 — 「${live.title || live.id}」. 그 공고를 보관하거나 삭제한 뒤에 보관을 해제하세요.` };
       }
     }
     const { rows } = await q.query(
@@ -155,5 +149,4 @@ async function archiveSuggestions(db, campaigns) {
   }
 }
 
-module.exports = {
-  workOrderCampaignLockKey, archiveCampaign, unarchiveCampaign, archiveBlockers, archiveSuggestions };
+module.exports = { archiveCampaign, unarchiveCampaign, archiveBlockers, archiveSuggestions };

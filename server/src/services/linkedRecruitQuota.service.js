@@ -336,6 +336,44 @@ async function cleanupOverflowEmptyWorktableSlots({ dryRun = true, limit = 200, 
 const LINKED_WO_ON = `((NULLIF(w.linked_campaign_id, '') = c.id) OR (NULLIF(c.source_work_order_id, '') = w.id))`;
 const LINKED_WO_ORDER = `(NULLIF(w.linked_campaign_id, '') = c.id) DESC, w.updated_at DESC`;
 
+/* ★★ 결정 246 — 작업오더 하나에 살아 있는(보관 안 된) 모집공고는 하나. 공고 생성과 보관 해제가 같이 쓴다.
+   ★ 짝짓기는 위 LINKED_WO_ON(역방향·정방향 둘 다) — 정방향만 보면 역방향으로만 이어진 옛 공고를 놓친다(Codex PR #1632).
+   ★ 확인은 반드시 lockWorkOrderCampaigns 를 쥔 같은 트랜잭션 안에서 — 잠금 밖 확인은 동시 생성 둘 다 통과(완화 금지). */
+const workOrderCampaignLockKey = (woId) => 'recruit_campaign_wo:' + String(woId || '').trim();
+const _woIdList = (ids) => [...new Set((ids || []).map(x => String(x || '').trim()).filter(Boolean))].sort();
+
+/** 같은 오더끼리 직렬화 — 여러 오더면 정렬 순서로 잡아 교착을 피한다. */
+async function lockWorkOrderCampaigns(db, woIds) {
+  for (const id of _woIdList(woIds)) {
+    await db.query('SELECT pg_advisory_xact_lock(hashtext($1))', [workOrderCampaignLockKey(id)]);
+  }
+}
+
+/** 그 오더(들)에 짝지어진 살아 있는 공고 1건(가장 먼저 만든 것) — 없으면 null. */
+async function liveCampaignForWorkOrders(db, woIds, excludeCampaignId) {
+  const ids = _woIdList(woIds);
+  if (!ids.length) return null;
+  const { rows } = await db.query(
+    `SELECT c.id, c.title FROM recruit_campaigns c
+      WHERE c.archived_at IS NULL AND c.id <> $2
+        AND (NULLIF(c.source_work_order_id, '') = ANY($1::text[])
+             OR EXISTS (SELECT 1 FROM work_orders w
+                         WHERE w.id = ANY($1::text[]) AND w.deleted_at IS NULL AND ${LINKED_WO_ON}))
+      ORDER BY c.created_at ASC NULLS LAST, c.id ASC LIMIT 1`,
+    [ids, String(excludeCampaignId || '')]);
+  return rows[0] || null;
+}
+
+/** 그 공고에 짝지어진 오더 id 들(정방향 + 역방향). */
+async function workOrderIdsForCampaign(db, campaignId) {
+  const { rows } = await db.query(
+    `SELECT NULLIF(c.source_work_order_id, '') AS id FROM recruit_campaigns c WHERE c.id = $1
+     UNION
+     SELECT w.id FROM recruit_campaigns c JOIN work_orders w ON ${LINKED_WO_ON}
+      WHERE c.id = $1 AND w.deleted_at IS NULL`, [campaignId]);
+  return _woIdList(rows.map(r => r.id));
+}
+
 /**
  * 공고들에 연결된 작업오더 일괄 조회 → Map(campaignId → 그 오더의 요청 컬럼).
  *
@@ -669,6 +707,10 @@ module.exports = {
   displayRecruitTotalForCampaign,
   linkedWorkOrderForCampaign,
   linkedWorkOrdersForCampaigns,
+  workOrderCampaignLockKey,
+  lockWorkOrderCampaigns,
+  liveCampaignForWorkOrders,
+  workOrderIdsForCampaign,
   worktableSlotDelta,
   syncWorktableSlotsInTx,
   firstRoundQuota,

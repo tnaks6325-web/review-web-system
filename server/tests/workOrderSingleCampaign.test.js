@@ -23,7 +23,7 @@ let calls = [];          // [{via:'pool'|'client', sql}]
 let existing = [];       // 같은 오더로 이미 있는 공고
 let released = 0;
 const answer = (sql) => {
-  if (/FROM recruit_campaigns\s+WHERE source_work_order_id = \$1 AND archived_at IS NULL/.test(sql)) return { rows: existing };
+  if (/FROM recruit_campaigns c\s+WHERE c\.archived_at IS NULL AND c\.id <> \$2/.test(sql)) return { rows: existing };
   if (/INSERT INTO recruit_campaigns/.test(sql)) return { rows: [{ id: 'camp_new', status: 'draft', recruit_total: 60, linked_sheet_id: '', linked_tab_name: '' }] };
   return { rows: [] };
 };
@@ -71,7 +71,7 @@ const base = { title: '10/14 테스트 공고', status: 'draft' };
   calls = []; released = 0; existing = [];
   await run({ ...base, source_work_order_id: 'wo_1' });
   const iLock = calls.findIndex(c => /pg_advisory_xact_lock/.test(c.sql));
-  const iChk = calls.findIndex(c => /WHERE source_work_order_id = \$1 AND archived_at IS NULL/.test(c.sql));
+  const iChk = calls.findIndex(c => /FROM recruit_campaigns c\s+WHERE c\.archived_at IS NULL AND c\.id <> \$2/.test(c.sql));
   const iIns = calls.findIndex(c => /INSERT INTO recruit_campaigns/.test(c.sql));
   const iCommit = calls.findIndex(c => c.sql === 'COMMIT');
   ok('★ 잠금 → 확인 → 저장 → 커밋 순서', iLock > -1 && iLock < iChk && iChk < iIns && iIns < iCommit, { iLock, iChk, iIns, iCommit });
@@ -81,85 +81,91 @@ const base = { title: '10/14 테스트 공고', status: 'draft' };
   console.log('\n[C] 오더 없이 만드는 공고는 종전 그대로');
   calls = []; released = 0; existing = [{ id: 'camp_old', title: 'x' }];
   await run({ ...base });
-  ok('잠금·확인 없음', !calls.some(c => /pg_advisory_xact_lock|archived_at IS NULL/.test(c.sql)));
+  ok('잠금·확인 없음', !calls.some(c => /pg_advisory_xact_lock|c\.archived_at IS NULL AND c\.id <> \$2/.test(c.sql)));
   const iInsC = calls.findIndex(c => /INSERT INTO recruit_campaigns/.test(c.sql));
   ok('저장은 기존처럼 pool 로(저장 전에 연결을 따로 잡지 않는다)', iInsC > -1 && calls[iInsC].via === 'pool'
     && !calls.slice(0, iInsC).some(c => c.via !== 'pool'));
 
-  console.log('\n[D] 보관된 공고는 세지 않는다(다시 모집할 길을 막지 않음)');
+  console.log('\n[D] 짝짓기 — 정방향·역방향 둘 다, 보관된 공고는 세지 않는다');
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'campaign.routes.js'), 'utf8');
-  ok('확인 조건에 archived_at IS NULL', /WHERE source_work_order_id = \$1 AND archived_at IS NULL/.test(src));
+  const lrqSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'linkedRecruitQuota.service.js'), 'utf8');
+  const lrq = require('../src/services/linkedRecruitQuota.service');
+  ok('생성은 단일 출처 잠금·확인을 쓴다', /_lrq\.lockWorkOrderCampaigns\(_insClient, \[_srcWoId\]\)/.test(src)
+    && /_lrq\.liveCampaignForWorkOrders\(_insClient, \[_srcWoId\]\)/.test(src));
+  const liveFn = lrqSrc.slice(lrqSrc.indexOf('async function liveCampaignForWorkOrders'), lrqSrc.indexOf('async function workOrderIdsForCampaign'));
+  ok('★ 역방향 링크(work_orders.linked_campaign_id)까지 본다(LINKED_WO_ON — Codex PR #1632)', /\$\{LINKED_WO_ON\}/.test(liveFn)
+    && /NULLIF\(c\.source_work_order_id, ''\) = ANY\(\$1::text\[\]\)/.test(liveFn));
+  ok('보관된 공고는 세지 않는다(다시 모집할 길)', /c\.archived_at IS NULL/.test(liveFn));
+  ok('잠금 키 한 곳', lrq.workOrderCampaignLockKey(' wo_1 ') === 'recruit_campaign_wo:wo_1');
+  { const log = []; await lrq.lockWorkOrderCampaigns({ query: async (q, p) => { log.push(p[0]); return { rows: [] }; } }, ['wo_b', 'wo_a', 'wo_b', '']);
+    ok('여러 오더는 정렬·중복 제거해 잠근다(교착 방지)', JSON.stringify(log) === JSON.stringify(['recruit_campaign_wo:wo_a', 'recruit_campaign_wo:wo_b']), log); }
 
   console.log('\n[D2] 보관 해제도 같은 검사·같은 잠금(생성 검사 우회 차단 — Codex PR #1632)');
   const arch = require('../src/services/campaignArchive.service');
-  ok('잠금 키는 한 곳(생성·해제 공용)', arch.workOrderCampaignLockKey(' wo_1 ') === 'recruit_campaign_wo:wo_1'
-    && /workOrderCampaignLockKey\(_srcWoId\)/.test(src));
-  const mkDb = (srcWo, live) => {
+  const mkDb = (woIds, live) => {
     const log = []; let rel = 0;
     const c = { query: async (sql) => { sql = String(sql); log.push(sql);
-      if (/SELECT source_work_order_id FROM recruit_campaigns WHERE id = \$1 AND archived_at IS NOT NULL/.test(sql)) return { rows: srcWo ? [{ source_work_order_id: srcWo }] : [] };
-      if (/AND archived_at IS NULL AND id <> \$2/.test(sql)) return { rows: live };
+      if (/SELECT archived_at FROM recruit_campaigns WHERE id = \$1/.test(sql)) return { rows: [{ archived_at: '2026-10-01' }] };
+      if (/UNION/.test(sql) && /source_work_order_id/.test(sql)) return { rows: woIds.map(id => ({ id })) };
+      if (/c\.archived_at IS NULL AND c\.id <> \$2/.test(sql)) return { rows: live };
       if (/UPDATE recruit_campaigns SET archived_at = NULL/.test(sql)) return { rows: [{ id: 'c_old' }] };
       return { rows: [] }; }, release: () => { rel++; } };
     return { db: { connect: async () => c }, log, rel: () => rel };
   };
-  let d = mkDb('wo_1', [{ id: 'c_new', title: '새 공고' }]);
+  let d = mkDb(['wo_1'], [{ id: 'c_new', title: '새 공고' }]);
   let out = await arch.unarchiveCampaign(d.db, 'c_old');
   ok('★ 같은 오더에 살아 있는 공고가 있으면 해제 거절(이름 안내)', out.ok === false && out.code === 'work_order_campaign_exists' && /새 공고/.test(out.error), out);
   ok('★ 해제 UPDATE 를 하지 않는다', !d.log.some(q => /SET archived_at = NULL/.test(q)));
   ok('잠금 → 확인 순서 · 되돌림 · 반납', d.log.findIndex(q => /pg_advisory_xact_lock/.test(q)) > -1
-    && d.log.findIndex(q => /pg_advisory_xact_lock/.test(q)) < d.log.findIndex(q => /id <> \$2/.test(q))
+    && d.log.findIndex(q => /pg_advisory_xact_lock/.test(q)) < d.log.findIndex(q => /c\.id <> \$2/.test(q))
     && d.log.includes('ROLLBACK') && d.rel() === 1);
-  d = mkDb('wo_1', []);
+  ok('★ 해제 대상의 오더는 정방향·역방향 둘 다로 찾는다', d.log.some(q => /UNION/.test(q) && /JOIN work_orders w ON/.test(q)));
+  d = mkDb(['wo_1'], []);
   out = await arch.unarchiveCampaign(d.db, 'c_old');
   ok('살아 있는 다른 공고가 없으면 해제 + 커밋', out.ok === true && d.log.includes('COMMIT') && d.rel() === 1
     && d.log.findIndex(q => /SET archived_at = NULL/.test(q)) < d.log.indexOf('COMMIT'));
-  d = mkDb('', []);
+  d = mkDb([], []);
   out = await arch.unarchiveCampaign(d.db, 'c_old');
-  ok('오더 없는 공고는 잠금·확인 없이 종전 그대로', out.ok === true && !d.log.some(q => /pg_advisory_xact_lock|id <> \$2/.test(q)));
+  ok('오더 없는 공고는 잠금·확인 없이 종전 그대로', out.ok === true && !d.log.some(q => /pg_advisory_xact_lock|c\.id <> \$2/.test(q)));
 
-  console.log('\n[E] 수정요청 창 — 부르기 직전에 이 탭의 리뷰어로 세션을 맞춘다');
+  console.log('\n[E] 수정요청 창 — 파일 조회는 이 탭의 리뷰어 토큰을 직접 싣고, 공용 세션은 건드리지 않는다');
   const html = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'index.html'), 'utf8');
-  const fnSrc = (name) => {
-    const i = html.indexOf('async function ' + name + '(');
+  const fnSrc = (name, prefix = 'async function ') => {
+    const i = html.indexOf(prefix + name + '(');
     assert(i > -1, name + ' 없음');
-    let depth = 0, j = html.indexOf('{', i);
+    let depth = 0; const j = html.indexOf('{', i);
     for (let k = j; k < html.length; k++) { if (html[k] === '{') depth++; else if (html[k] === '}' && --depth === 0) return html.slice(i, k + 1); }
     throw new Error('본문 끝 못 찾음');
   };
-  const open = fnSrc('openReviewEditModal');
-  const load = fnSrc('_reEditLoadFiles');
-  ok('창을 열 때 맞춘 리뷰어로 phone8 을 정한다', /const user = await _reEditSyncSession\(\);/.test(open));
-  ok('★ 서버 호출 직전에 다시 맞춘다(창을 연 뒤 다른 탭 로그인 대비)',
-    load.indexOf('await _reEditSyncSession()') > -1 && load.indexOf('await _reEditSyncSession()') < load.indexOf("action:'reviewEditMyFiles'"));
+  ok('파일 조회는 gasGet(공용 세션 토큰) 대신 _reEditFetchMyFiles', /const res = await _reEditFetchMyFiles\(c\);/.test(fnSrc('_reEditLoadFiles'))
+    && !/action:'reviewEditMyFiles'/.test(html));
+  ok('★ 공용 세션을 덮어쓰지 않는다(다른 탭이 반대로 틀어짐 — Codex PR #1632)', !/syncSearchSession/.test(fnSrc('_reEditFetchMyFiles'))
+    && !/syncSearchSession/.test(fnSrc('openReviewEditModal')));
 
-  for (const [fn, action] of [['_reEditSubmit', "action:'reviewEditRequest'"], ['_reEditCancel', "action:'reviewEditCancel'"], ['_reEditLoadMyRequests', "action:'reviewEditMyRequests'"]]) {
-    const b = fnSrc(fn);
-    ok(`★ ${fn}: 서버 호출 직전에 맞춘다(Codex PR #1632)`, b.indexOf('await _reEditSyncSession()') > -1 && b.indexOf('await _reEditSyncSession()') < b.indexOf(action));
-  }
-
-  // 실행 — 공용 세션이 다른 사람(B)이어도 맞춘 뒤엔 화면의 리뷰어(A) 토큰이 된다.
   const store = () => { const m = new Map(); return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k) }; };
-  const ctx = { localStorage: store(), sessionStorage: store(), JSON, Date, Number, String, atob: (s) => Buffer.from(s, 'base64').toString('binary') };
   const futureTok = (sub) => 'h.' + Buffer.from(JSON.stringify({ sub, exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64') + '.s';
+  const fetched = [];
+  const ctx = { localStorage: store(), sessionStorage: store(), JSON, Date, Number, String, URLSearchParams, API_BASE_URL: 'http://api',
+    atob: (x) => Buffer.from(x, 'base64').toString('binary'),
+    fetch: async (url, opts) => { fetched.push({ url, token: opts.headers['X-Reviewer-Token'] });
+      return { status: fetched.length === 1 && ctx.__first401 ? 401 : 200, json: async () => ({ ok: true, files: [] }) }; } };
   ctx.localStorage.setItem('iad_reviewer_user', JSON.stringify({ name: 'A', phone8: '11110063', reviewerToken: futureTok('A') }));
-  ctx.localStorage.setItem('rapp_reviewer_auth', JSON.stringify({ name: 'B', phone8: '22229999', reviewerToken: futureTok('B') }));
+  const shared = JSON.stringify({ name: 'B', phone8: '22229999', reviewerToken: futureTok('B') });
+  ctx.localStorage.setItem('rapp_reviewer_auth', shared);
   vm.createContext(ctx);
   vm.runInContext(`const USER_KEY="iad_reviewer_user"; const HOME_SESSION_KEY="iad_reviewer_home_session";
-    function _prepareReviewerLocalSession(){ sessionStorage.removeItem("rapp_reviewer_auth"); sessionStorage.removeItem(HOME_SESSION_KEY); }
-    let refreshed = 0; async function _refreshReviewerHomeSession(u){ refreshed++; return null; }`, ctx);
-  for (const name of ['getSavedUser', '_reviewerTokenFresh', 'syncSearchSession']) {
-    const i = html.indexOf('function ' + name + '(');
-    let depth = 0, j = html.indexOf('{', i), body;
-    for (let k = j; k < html.length; k++) { if (html[k] === '{') depth++; else if (html[k] === '}' && --depth === 0) { body = html.slice(i, k + 1); break; } }
-    vm.runInContext(body, ctx);
-  }
-  vm.runInContext(fnSrc('_reEditSyncSession'), ctx);
-  const u = await vm.runInContext('_reEditSyncSession()', ctx);
-  const auth = JSON.parse(ctx.localStorage.getItem('rapp_reviewer_auth'));
-  ok('★ 공용 세션이 화면의 리뷰어(A)로 바뀐다', auth.phone8 === '11110063' && auth.reviewerToken === futureTok('A'), auth);
-  ok('돌려준 리뷰어도 A', u && u.phone8 === '11110063');
-  ok('유효한 토큰이면 새로 발급받지 않는다', vm.runInContext('refreshed', ctx) === 0);
+    let refreshed = 0; async function _refreshReviewerHomeSession(u){ refreshed++; return { ...u, reviewerToken: 'fresh' }; }`, ctx);
+  vm.runInContext(fnSrc('getSavedUser', 'function '), ctx);
+  vm.runInContext(fnSrc('_reviewerTokenFresh', 'function '), ctx);
+  vm.runInContext(fnSrc('_reEditFetchMyFiles'), ctx);
+  const res = await vm.runInContext(`_reEditFetchMyFiles({ phone8:'11110063', sheetId:'s', tabName:'t', rowIndex:182 })`, ctx);
+  ok('★ 화면의 리뷰어(A) 토큰으로 부른다', fetched.length === 1 && fetched[0].token === futureTok('A') && /\/api\/review-edit\/my-files\?/.test(fetched[0].url)
+    && /phone8=11110063/.test(fetched[0].url) && /rowIndex=182/.test(fetched[0].url), fetched);
+  ok('★ 공용 세션(B)은 그대로', ctx.localStorage.getItem('rapp_reviewer_auth') === shared);
+  ok('응답을 돌려준다', res && res.ok === true);
+  fetched.length = 0; ctx.__first401 = true;
+  await vm.runInContext(`_reEditFetchMyFiles({ phone8:'11110063', sheetId:'s', tabName:'t', rowIndex:182 })`, ctx);
+  ok('401 이면 토큰 갱신 후 한 번 다시', fetched.length === 2 && fetched[1].token === 'fresh' && vm.runInContext('refreshed', ctx) === 1, fetched);
 
   console.log(`\nworkOrderSingleCampaign: ${passed} passed`);
 
