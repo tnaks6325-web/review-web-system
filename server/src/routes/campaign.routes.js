@@ -1359,19 +1359,19 @@ router.get('/popular-status', applyLimiter, async (req, res, next) => {
 //   ★ 실패·모름은 gate:false(fail-open) — 우리 쪽 오류로 리뷰어를 막지 않는다. 바로 구매는 결정 242 위반 표시가 뒤에서 잡는다.
 //   ★ 라우트 등록 순서: GET '/:id' 보다 앞이어야 한다.
 router.get('/order-form-gate', reviewerSessionMiddleware, applyLimiter, async (req, res, next) => {
+  let of = {};   // 결정 252: 정원 찬 상품 재료 — 참여권 조회가 실패해도 버리지 않는다(Codex PR #1641)
   try {
     const sheetId = String(req.query.sheetId || '').trim();
     const tabName = String(req.query.tabName || '').trim();
     const gid = String(req.query.gid || '').trim();
     if (!sheetId || (!tabName && !gid)) return res.json({ ok: true, gate: false });
     // 탭 이름이 바뀐 뒤에도 옛 링크(gid 보존)가 같은 공고를 찾게 — 이름 또는 gid(빈 값 안전) 매칭(Codex PR #1629)
-    const { rows: cRows } = await pool.query(
-      `SELECT id, title, is_popular FROM recruit_campaigns
-        WHERE participation_mode IS TRUE AND linked_sheet_id = $1
-          AND ((linked_tab_name = $2 AND $2 <> '') OR (NULLIF(linked_tab_gid, '') IS NOT NULL AND linked_tab_gid = NULLIF($3, '')))
-        ORDER BY (linked_tab_name = $2) DESC, created_at DESC NULLS LAST, id DESC LIMIT 1`, [sheetId, tabName, gid]);
-    const camp = cRows[0];
-    if (!camp || camp.is_popular !== true) return res.json({ ok: true, gate: false });
+    const ofs = require('../services/orderFormOptionFull.service');
+    const camp = await ofs.findFormCampaign(pool, { sheetId, tabName, gid });
+    // ★ 결정 252: 정원 찬 상품 재료(인기 여부와 무관 — 일반 공고에서도 싣는다 · 제출 거절과 같은 함수). 없으면 필드를 싣지 않는다(옛 화면 무영향).
+    const optionFull = ofs.publicView(camp ? await ofs.loadFormOptionFull(pool, camp, { sheetId, tabName }) : null);
+    of = optionFull ? { optionFull } : {};
+    if (!camp || camp.is_popular !== true) return res.json({ ok: true, gate: false, ...of });
     const { rows: rRows } = await pool.query('SELECT phone8 FROM reviewers WHERE id = $1 LIMIT 1', [req.reviewer.ownerReviewerId]);
     const ownerP8 = String((rRows[0] && rRows[0].phone8) || '').replace(/\D/g, '').slice(-8);
     let phones;
@@ -1388,10 +1388,10 @@ router.get('/order-form-gate', reviewerSessionMiddleware, applyLimiter, async (r
       const st = await loadPopularCreditState(pool, p8);
       if (canUsePopularCredit(st)) credits += Math.max(0, Number(st.credits) || 0);
     }
-    res.json({ ok: true, popular: true, gate: credits <= 0, credits, campaignId: camp.id, title: String(camp.title || '') });
+    res.json({ ok: true, popular: true, gate: credits <= 0, credits, campaignId: camp.id, title: String(camp.title || ''), ...of });
   } catch (err) {
     logger.warn('[campaign/order-form-gate] 판정 실패(열어 둠): ' + err.message);
-    res.json({ ok: true, gate: false, unknown: true });
+    res.json({ ok: true, gate: false, unknown: true, ...of });
   }
 });
 

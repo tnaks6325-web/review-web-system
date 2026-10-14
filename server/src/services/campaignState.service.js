@@ -1274,6 +1274,8 @@ function __resetHoldCacheForTest() { _blCache = { at: 0, carry: null, hold: null
 // 킬스위치(env): CAMPAIGN_OPTION_DAY_CAP=0 → ① 끔 · CAMPAIGN_OPTION_EXTERNAL_ORDERS=0 → ② 끔(즉시 종전).
 const OPTION_DAY_CAP_ENABLED = process.env.CAMPAIGN_OPTION_DAY_CAP !== '0';
 const OPTION_EXTERNAL_ENABLED = process.env.CAMPAIGN_OPTION_EXTERNAL_ORDERS !== '0';
+// ★ 결정 252: 상품 1개 공고의 바로 구매는 표기와 무관하게 그 상품으로 센다. 끄면(=0) 종전(이름이 맞을 때만).
+const OPTION_SINGLE_FALLBACK_ENABLED = process.env.CAMPAIGN_OPTION_SINGLE_FALLBACK !== '0';
 // ★ 결정 212: 인트라넷 투입방식 '순차진행' 오더의 공고는 선택지를 순서대로 연다. 끄면(=0) 즉시 종전(전부 동시에 열림).
 const SEQUENTIAL_OPTIONS_ENABLED = process.env.CAMPAIGN_SEQUENTIAL_OPTIONS !== '0';
 // ★ 결정 228: 순차진행 = 날짜별 상품 일정표(상품마다 정원÷하루 건수 일 · 하루 한 상품). 끄면(=0) 결정 212(앞 상품이 차면 다음) 규칙.
@@ -1309,6 +1311,11 @@ function matchOrderOption(options, order) {
     });
     if (part.length === 1) return part[0].opt_key;
   }
+  // ★★ 결정 252 — 상품이 하나뿐인 공고(마감 상품 포함 전체 1개)는 이름 표기가 달라도·비어 있어도 그 상품이다.
+  //   그 공고 범위의 바로 구매는 공고 전체 수에 이미 들어간다 → 상품 셈도 같아야 한다. 표기가 달라(「…1개, 200ml」 vs
+  //   「쿠팡 … 쿠팡상품번호…」) 세지 못하면 상품이 실제보다 비어 보여 정원을 넘겨 받는다(블랑카우 크림 운영 실측: 200 중 15명 누락).
+  //   ★ 결정 210 「대충 비슷하면 귀속 금지」의 예외가 아니다 — 잘못 마감시킬 다른 상품이 없다. 2개 이상이면 종전 그대로.
+  if (OPTION_SINGLE_FALLBACK_ENABLED && all.length === 1) return all[0].opt_key;
   return null;
 }
 
@@ -1447,8 +1454,14 @@ async function listDirectOrders(db, campaignId, { limit = 500 } = {}) {
 //   공고 단위 집계(_loadLinkedOrderCounts)는 구매 키 DISTINCT 로 이미 한 번만 세는데, 상품 단위만 공고 참여(submitted) + 외부 주문을
 //   더해 같은 구매를 두 번 셌다 → 상품이 실제보다 일찍 마감될 수 있었다(운영 실측 2026-10-14: 해당 상품 1개 · 보관 공고).
 //   결정 239 에서 하한(quotaFloor)만 켰던 것을 참여 게이트·화면까지 넓힌다(단일 셈). opts.excludeApplicationDuplicates === false 로만 끈다(진단용).
+//   opts.collectOrders(배열)를 주면 센 주문을 한 줄씩 담는다 {campaignId, orderId, key, submittedAt} — 결정 252 넘친 구매 표시가
+//   "이 주문이 어느 상품 자리로 세어졌나"를 같은 셈에서 꺼내 쓴다(대표 줄만 · 같은 구매 중복·공고 참여 중복은 담기지 않는다).
+/** 바로 구매를 상품에 세는가(결정 210 스위치 · 표 셈 모드) — 꺼져 있으면 _loadExternalOptionOrders 는 null(= 모름이 아니라 "세지 않음"). */
+function externalOptionCountEnabled() { return OPTION_EXTERNAL_ENABLED && TABLE_QUOTA_MODE !== 'off'; }
+
 async function _loadExternalOptionOrders(db, ids, now = new Date(), opts = null) {
   const excludeAppDup = !(opts && opts.excludeApplicationDuplicates === false);
+  const collect = (opts && Array.isArray(opts.collectOrders)) ? opts.collectOrders : null;
   if (!OPTION_EXTERNAL_ENABLED || TABLE_QUOTA_MODE === 'off' || !ids || !ids.length || !db || typeof db.query !== 'function') return null;
   const inClient = typeof db.release === 'function';
   let sp = false;
@@ -1470,7 +1483,7 @@ async function _loadExternalOptionOrders(db, ids, now = new Date(), opts = null)
     if (withOpts.length) {
       const { rows } = await db.query(`
         SELECT DISTINCT ON (rc.id, ${ORDER_PURCHASE_KEY_SQL})
-               rc.id AS campaign_id, os.selected_opt_key, os.selected_product,
+               rc.id AS campaign_id, os.id AS order_id, os.submitted_at, os.selected_opt_key, os.selected_product,
                cp.option_text, cp.row_json->>'상품' AS row_product, pe.value_text AS edited_product,
                (os.submitted_at >= $2) AS is_today
           FROM recruit_campaigns rc
@@ -1528,6 +1541,7 @@ async function _loadExternalOptionOrders(db, ids, now = new Date(), opts = null)
           selectedProduct: r.selected_product, rowProduct: r.row_product, editedProduct: r.edited_product,
         });
         if (!key) continue;
+        if (collect) collect.push({ campaignId: r.campaign_id, orderId: String(r.order_id), key, submittedAt: r.submitted_at });
         if (!out.has(r.campaign_id)) out.set(r.campaign_id, new Map());
         const m = out.get(r.campaign_id);
         const cur = m.get(key) || { n: 0, today: 0 };
@@ -2072,6 +2086,7 @@ module.exports = {
   loadDirectOrderCounts,
   listDirectOrders,
   loadExternalOptionOrders: _loadExternalOptionOrders,
+  externalOptionCountEnabled,
   COUNT_BASIS,
   _mergeCountBasis,
   __resetTableQuotaCacheForTest,

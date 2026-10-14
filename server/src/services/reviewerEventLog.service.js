@@ -148,6 +148,11 @@ function describeEvent(row = {}) {
         problem: `리뷰어가 고른 상품(${at(c.picked) || '?'})이 구매 캡처에서 읽은 상품(${at(c.capture) || '?'})과 다름.`,
         action: '구매 캡처를 열어 실제로 산 상품을 확인하고, 다르면 작업보드 상품 칸을 고쳐주세요.',
       };
+    case 'order_option_full_blocked':
+      return {
+        problem: `정원이 찬 상품(${at(c.product) || '?'})으로 구매양식을 내려다 접수가 막힘${at(c.orderNum) ? `(주문번호 ${at(c.orderNum)})` : ''}.`,
+        action: '리뷰어에게는 쿠팡 주문 취소를 안내했습니다. 업체가 추가분을 받기로 했다면 공고 정원을 늘리거나 담당자 수동 입력으로 넣어주세요.',
+      };
     case 'order_no_capture':
       return { problem: '구매양식을 제출했으나, 구매캡쳐를 첨부하지 않았음.', action: '구매캡쳐 보완 필요.' };
     case 'capture_replaced':
