@@ -170,7 +170,7 @@ function normalizeProductOptionsJson(raw, { requireStructured = false } = {}) {
     if (list.some(product => product && typeof product === 'object' && !isEmptyQtyTiers(product.qty_tiers))) {
       throw new ProductOptionsError('구매수량 단계는 단계형(v2) 상품 원본에서만 보낼 수 있습니다.');
     }
-    // ★ 빈 단계 키는 구버전 배열에서도 지운다 — 남기면 접수된 옛 오더의 잠금 비교 모양이 바뀌어 모든 수정이 409(결정 167·248).
+    // ★ 빈 단계 키는 구버전 배열에서도 지운다 — 남기면 접수된 옛 오더의 잠금 비교 모양이 바뀌어 모든 수정이 409(결정 167·249).
     //   빈 단계 키가 없으면 지금처럼 원문 바이트 그대로.
     const hasEmptyKey = list.some(product => product && typeof product === 'object' && !Array.isArray(product)
       && Object.prototype.hasOwnProperty.call(product, 'qty_tiers'));

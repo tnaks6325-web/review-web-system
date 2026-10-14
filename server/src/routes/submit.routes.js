@@ -1139,9 +1139,16 @@ router.post('/order', async (req, res, next) => {
     /* ★★ 구매일자가 빈 채로 오면 서버가 오늘(KST)을 채운다 — 관리자 수기 주문과 **같은 함수**(manualOrder.todayKstDateStr).
        빈 문자열은 매퍼가 "그 칸을 지우는 쓰기"로 내보내(결정 017 — 공유 매퍼는 고치지 않는다) 작업표에 미리 적힌
        구매일자를 지우고, 날짜별 계획 물량 계산까지 틀어진다(2026-10-08 E2E 실측). 리뷰어 화면은 항상 오늘 날짜를 보내므로
-       정상 제출은 무변화 — 화면을 거치지 않은 제출·옛 화면만 구제한다. */
-    const effectiveDateStr = String(dateStr == null ? '' : dateStr).trim()
-      || require('../services/manualOrder.service').todayKstDateStr();
+       정상 제출은 무변화 — 화면을 거치지 않은 제출·옛 화면만 구제한다.
+       ★★ 결정 248: 구매일자는 **항상 서버의 오늘(KST)** 이다 — 화면이 보낸 값은 쓰지 않는다. 화면 값은 리뷰어
+       휴대폰 시계로 만든 것이라, 시계가 늦거나 시간대가 다르면 자정 직후 제출이 **전날**로 적힌다(2026-10-14 실측:
+       0시 14분 제출이 10/13 으로 기록 → 공고 카드 "표 9 / 10" 인데 오늘 모집 완료). 하루 정원·작업표 오늘 채움은
+       서버 KST 날짜로 세므로, 구매일자도 같은 시계를 써야 둘이 갈리지 않는다. 다르면 로그만 남긴다. */
+    const effectiveDateStr = require('../services/manualOrder.service').todayKstDateStr();
+    const _clientDateStr = String(dateStr == null ? '' : dateStr).trim();
+    if (_clientDateStr && _clientDateStr.replace(/\s+/g, '') !== effectiveDateStr.replace(/\s+/g, '')) {
+      logger.warn(`[submit/order] 화면 구매일자(${_clientDateStr})가 서버 오늘(${effectiveDateStr})과 달라 서버 날짜로 기록 — 리뷰어 기기 시계 확인`);
+    }
     const orderData = { orderer: _orderer, recipient, userId, phone, address, bank, account, depositor, price, dateStr: effectiveDateStr, orderNum, memo,
                         selectedOptKey: sheetOptKey, blogUrl: (holdCtx && holdCtx.blogUrl) || '',
                         /* ★ 138 — 리뷰어가 고른 **상품**은 옵션과 별개의 칸(「상품」)에 적는다.
