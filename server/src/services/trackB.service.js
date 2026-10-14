@@ -1780,6 +1780,44 @@ async function _settlementLinkForTab(sheetId, tabName) {
        FROM trackb_settlement_links WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL LIMIT 1`, [sheetId, tabName]);
   return rows[0] || null;
 }
+// 인트라넷 견적서 이력 — 고치기 직전 견적서 행들(오래된 순). 이력이 없거나 조회 실패면 null.
+//   GET /api/quotes/:id/versions?full=1 (인트라넷 서버 키로 읽기 전용 허용). 구버전 인트라넷은 이 경로가 없어 null.
+async function _intranetQuoteHistory(quoteId) {
+  if (!quoteId) return null;
+  try {
+    const j = await _intranetGet(`/api/quotes/${encodeURIComponent(quoteId)}/versions?full=1`);
+    const list = (Array.isArray(j && j.versions) ? j.versions : []).filter(v => v && v.snapshot && typeof v.snapshot === 'object');
+    if (!list.length) return null;
+    return list.slice().sort((a, b) => (Number(a.version) || 0) - (Number(b.version) || 0));
+  } catch (_) {
+    return null;
+  }
+}
+// 인트라넷 저장 시각('YYYY-MM-DD HH:MM:SS', UTC) → ISO. 리뷰웹 스냅샷 시각과 같은 모양으로 맞춘다.
+function _intranetIso(v) {
+  const s = String(v || '').trim();
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/.test(s)) return s.replace(' ', 'T') + 'Z';
+  return s;
+}
+// 버전 탭 = [이 기능 전 리뷰웹 기록(첫 수정 이전 것만)] + [인트라넷 이력] + [지금 견적서].
+//   바로 앞과 내용·상태가 같은 기록은 한 번만 보인다. 최대 30개(오래된 것부터 버림), 번호는 다시 매긴다.
+function _mergeIntranetQuoteHistory(legacy, history, liveRow, liveQuote) {
+  const firstEditAt = Number(history[0].replaced_at) || 0;
+  const entries = (legacy || [])
+    .filter(v => v && v.payload && v.capturedAt && firstEditAt && new Date(v.capturedAt).getTime() < firstEditAt)
+    .map(v => ({ capturedAt: v.capturedAt, payload: v.payload }));
+  for (const h of history) {
+    entries.push({ capturedAt: _intranetIso(h.snapshot.updated_at || h.snapshot.created_at), payload: _mapQuoteFull(h.snapshot) });
+  }
+  entries.push({ capturedAt: _intranetIso(liveRow.updated_at || liveRow.created_at), payload: liveQuote });
+  const out = [];
+  for (const e of entries) {
+    if (out.length && _quoteHash(out[out.length - 1].payload) === _quoteHash(e.payload)) continue;
+    out.push(e);
+  }
+  return out.slice(-30).map((e, i) => ({ version: i + 1, capturedAt: e.capturedAt, payload: e.payload }));
+}
 // 견적서 문서(버전 이력 포함). 광고주 게이트 통과 못 하면 hidden(내용 미포함).
 async function quoteDocForTab({ sheetId, tabName, role = 'master', advertiserId = null, brandId = null } = {}) {
   if (!sheetId || !tabName) throw new Error('quoteDocForTab: sheetId, tabName 필수');
@@ -1810,7 +1848,12 @@ async function quoteDocForTab({ sheetId, tabName, role = 'master', advertiserId 
     await _snapshotQuote(key, quote, { seedHash: mine.length ? mine[mine.length - 1].hash : null });
     const { rows: vr } = await getPool().query(
       'SELECT version, payload, captured_at AS "capturedAt" FROM trackb_quote_snapshots WHERE sales_id=$1 ORDER BY version ASC LIMIT 30', [key]);
-    const versions = [...mine, ...vr].slice(-30).map((r, i) => ({ version: i + 1, capturedAt: r.capturedAt, payload: r.payload }));
+    // ★ 버전 탭의 출처 = 인트라넷 견적서 이력(고칠 때마다 직전 내용을 인트라넷이 보관 — 빠짐없음).
+    //   이력이 없거나(아직 안 고침·구버전 인트라넷) 조회 실패면 종전 리뷰웹 스냅샷(열어 본 시점 기록)으로 접는다.
+    const history = await _intranetQuoteHistory(row.id);
+    const versions = history
+      ? _mergeIntranetQuoteHistory([...mine, ...vr], history, row, quote)
+      : [...mine, ...vr].slice(-30).map((r, i) => ({ version: i + 1, capturedAt: r.capturedAt, payload: r.payload }));
     // 스냅샷이 아직 없는데 라이브 견적은 있는 경우(insert 실패 등) 라이브를 v1처럼 노출(fail-soft).
     if (!versions.length && quote) versions.push({ version: 1, capturedAt: null, payload: quote });
     docs.push({ quoteNumber: quote.quoteNumber, workName: quote.workName, totalAmount: quote.totalAmount, status: quote.status, versions });
