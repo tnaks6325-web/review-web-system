@@ -60,10 +60,13 @@ ok('종전 예외 코드(마지막 자식 무조건 접근) 제거', !/btn\.chil
 
 console.log('\n[2] 구매양식 제출 — 구매일자가 비면 오늘(KST)');
 const sub = fs.readFileSync(path.join(__dirname, '../src/routes/submit.routes.js'), 'utf8');
-ok('빈 구매일자 = 관리자 수기 주문과 같은 함수(todayKstDateStr)로 채움', /const effectiveDateStr = String\(dateStr == null \? '' : dateStr\)\.trim\(\)\s*\|\| require\('\.\.\/services\/manualOrder\.service'\)\.todayKstDateStr\(\);/.test(sub));
+ok('구매일자 = 항상 서버 오늘(KST) · 관리자 수기 주문과 같은 함수(결정 215 → 248 강화)', /const effectiveDateStr = require\('\.\.\/services\/manualOrder\.service'\)\.todayKstDateStr\(\);/.test(sub));
+ok('★ 248: 화면이 보낸 구매일자로 정하지 않는다(휴대폰 시계가 늦으면 자정 직후가 전날로 적힌다)', !/const effectiveDateStr = String\(dateStr/.test(sub) && !/effectiveDateStr = [^;]*_clientDateStr/.test(sub));
+ok('★ 248: 화면 날짜와 다르면 로그만 남긴다', /_clientDateStr[\s\S]{0,200}!== effectiveDateStr[\s\S]{0,40}logger\.warn/.test(sub));
 ok('orderData 는 채운 값을 쓴다(빈 dateStr 를 그대로 넘기지 않음)', /const orderData = \{[^}]*dateStr: effectiveDateStr,/.test(sub) && !/const orderData = \{[^}]*depositor, price, dateStr, orderNum/.test(sub));
 const { todayKstDateStr } = require('../src/services/manualOrder.service');
 ok('채우는 형식 = 리뷰어 화면과 같은 "M / D (요일)"', todayKstDateStr(new Date('2026-10-08T05:00:00Z')) === '10 / 8 (목)');
+ok('★ 248 실측 재현: KST 10/14 0시 14분(UTC 10/13 15:14) 제출 = 10/14', todayKstDateStr(new Date('2026-10-13T15:14:43Z')) === '10 / 14 (수)');
 const wd = fs.readFileSync(path.join(__dirname, '../../frontend/js/search-app.js'), 'utf8');
 ok('리뷰어 화면이 보내는 형식도 같다(드리프트 감시)', /const dateStr = `\$\{now\.getMonth\(\)\+1\} \/ \$\{now\.getDate\(\)\} \(\$\{days\[now\.getDay\(\)\]\}\)`/.test(wd));
 
