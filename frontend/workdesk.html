@@ -6689,8 +6689,8 @@ function _tcell(r, field, val){   // 편집 가능 텍스트 셀
   return `<td><span class="ecell${edited?' edited':''}" data-val="${esc(v)}" onclick="beginEdit(this,'${r.id}','${field}')">${esc(v||'—')}</span></td>`;
 }
 function _bcell(r, field, val){   // 제출/입금 토글 셀
-  // 미입금은 「–」 없이 공란(사용자 요청 2026-10-15). 제출 칸은 종전대로.
-  const off = field==='is_paid' ? '&nbsp;' : '–';   // 칸 크기는 유지(눌러서 바꾸는 자리)
+  // 미입금·미제출은 「–」 없이 공란(사용자 요청 2026-10-15) — 칸 크기는 유지(눌러서 바꾸는 자리)
+  const off = '&nbsp;';
   if(!STATE.canEdit || r.editable===false) return `<td><span class="chk ${val?'y':'n'}">${val?'✓':off}</span></td>`;
   const edited=(r.editedFields||[]).includes(field);
   return `<td><span class="chk ${val?'y':'n'} clk${edited?' edited':''}" onclick="toggleBool('${r.id}','${field}',${val?'true':'false'})">${val?'✓':off}</span></td>`;
@@ -8902,8 +8902,8 @@ function buildGrid(wd){
     const eCell=(field, disp, edited, extraCls, styleI, editv, hist)=> {
       const statusKind=_workdeskStatusKindForField(field);
       const locked=!!statusKind;
-      /* 빈 입금 칸은 아무것도 그리지 않는다(사용자 요청 2026-10-15 — 「—」·잠금 점 없이 공란). 값이 있으면 종전대로. */
-      const emptyPay = statusKind==='payment' && !disp;
+      /* 빈 상태 칸(입금·리뷰제출)은 아무것도 그리지 않는다(사용자 요청 2026-10-15 — 「—」·잠금 점 없이 공란). 값이 있으면 종전대로. */
+      const emptyPay = !!statusKind && !disp;
       /* 리뷰제출 칸은 편집이 잠겨 있어 `data-val`(편집 정본)을 읽는 곳이 **복사 하나뿐**이다(`_cellCopyText`).
          일련번호를 그대로 복사시키면 화면에서 고친 표기가 붙여넣는 순간 다시 깨진다 → 보이는 값을 복사한다.
          ★ 입금 칸은 건드리지 않는다(여러 날짜가 한 칸에 들어가는 등 성격이 달라 종전 정본 복사를 유지). */
@@ -9383,8 +9383,8 @@ function _paintGridCell(r, field, td){
   td.classList.toggle('edited', ed); td.classList.toggle('gempty', !disp); if(isOk) td.classList.toggle('gok', !!disp);
   td.setAttribute('data-val', editv!=null?editv:disp);   // 편집 대상 값(다음 클릭 시 입력 초기값)
   td.setAttribute('title', disp||'');   // 축약된 전체값 = 호버 툴팁
-  // 빈 입금 칸은 공란(rowHtml 의 emptyPay 와 같은 규칙 — 사용자 요청 2026-10-15)
-  const emptyPay=_workdeskStatusKind(h)==='payment' && !disp;
+  // 빈 상태 칸(입금·리뷰제출)은 공란(rowHtml 의 emptyPay 와 같은 규칙 — 사용자 요청 2026-10-15)
+  const emptyPay=!!_workdeskStatusKind(h) && !disp;
   td.innerHTML=`${emptyPay?'':esc(disp||'—')}${hasHist?_ehistMark(r.id, field):''}`;
   _syncGridColumnWidths();
 }
