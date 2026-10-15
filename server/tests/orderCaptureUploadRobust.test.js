@@ -33,8 +33,11 @@ const EM = srv('src/middleware/error.middleware.js');
 
 // 업로드 블록(제출 루프 안)만 잘라서 본다 — 파일 전체로 보면 무관한 곳의 문자열이 대신 통과한다.
 const UP = (() => {
-  const i = SA.indexOf('window._capUploadChain');
-  assert.ok(i > 0, '업로드 순차 큐가 없다');
+  // 결정 255: 업로드 한 장 규칙이 함수(_runCapUpload)로 묶여 큐 바로 앞에 있다 — 그 함수부터 본다(검사 의미 불변).
+  const q = SA.indexOf('window._capUploadChain');
+  assert.ok(q > 0, '업로드 순차 큐가 없다');
+  const f = SA.lastIndexOf('const _runCapUpload', q);
+  const i = f > 0 && q - f < 6000 ? f : q;
   return SA.slice(i, SA.indexOf('_renderCaptureChecklist();', i));
 })();
 

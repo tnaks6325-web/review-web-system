@@ -40,14 +40,18 @@ async function issueForOrder({ orderSubmissionId, captureSheetId = '', captureTa
   return { id: rows[0].id, token, orderSubmissionId: rows[0].orderSubmissionId, expiresAt: rows[0].expiresAt };
 }
 
-async function inspectForUpload({ sessionId, sessionToken, orderSubmissionId }) {
+/**
+ * @param {number} [captureIndex=1] 1 = 첫 장(종전) · 2 = 두 번째 장(결정 255). 2 는 그 칸(capture_file_id_2)만 본다.
+ */
+async function inspectForUpload({ sessionId, sessionToken, orderSubmissionId, captureIndex = 1 }) {
   if (!sessionId || !sessionToken || !orderSubmissionId) {
     return { ok: false, code: 'capture_session_required' };
   }
   const { rows } = await _db().query(
     `SELECT ps.id, ps.status, ps.capture_sheet_id AS "captureSheetId",
             ps.capture_tab_name AS "captureTabName", ps.capture_file_id AS "sessionFileId",
-            os.id AS "orderSubmissionId", os.capture_file_id AS "orderFileId"
+            os.id AS "orderSubmissionId", os.capture_file_id AS "orderFileId",
+            os.capture_file_id_2 AS "orderFileId2"
        FROM purchase_submission_sessions ps
        JOIN order_submissions os ON os.id = ps.order_submission_id
       WHERE ps.id = $1 AND ps.order_submission_id = $2
@@ -58,14 +62,16 @@ async function inspectForUpload({ sessionId, sessionToken, orderSubmissionId }) 
   );
   if (!rows.length) return { ok: false, code: 'capture_session_invalid' };
   const row = rows[0];
+  const second = Number(captureIndex) === 2;
   return {
     ok: true,
     sessionId: row.id,
     orderSubmissionId: row.orderSubmissionId,
     captureSheetId: row.captureSheetId || '',
     captureTabName: row.captureTabName || '',
-    alreadyCompleted: !!(row.orderFileId || row.sessionFileId),
-    captureFileId: row.orderFileId || row.sessionFileId || '',
+    // 두 번째 장은 그 칸만 본다 — 첫 장이 이미 연결됐다고 두 번째 장을 막지 않는다(세션 파일 칸은 첫 장 전용).
+    alreadyCompleted: second ? !!row.orderFileId2 : !!(row.orderFileId || row.sessionFileId),
+    captureFileId: second ? (row.orderFileId2 || '') : (row.orderFileId || row.sessionFileId || ''),
   };
 }
 
@@ -126,6 +132,46 @@ async function completeCapture({ sessionId, sessionToken, orderSubmissionId, cap
   }
 }
 
+/**
+ * 두 번째 장 연결(결정 255) — 첫 장(completeCapture)과 **같은 주문 단위 잠금·같은 세션 검증**, 먼저 연결된 파일이 이긴다.
+ * ★ 세션 상태(status·capture_file_id)와 capture_uploaded_at 은 건드리지 않는다 — 그 값들은 첫 장의 완료·누락 판정 재료다.
+ */
+async function completeCapture2({ sessionId, sessionToken, orderSubmissionId, captureFileId }) {
+  const db = _db();
+  const client = typeof db.connect === 'function' ? await db.connect() : db;
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`purchase_capture:${orderSubmissionId}`]);
+    const { rows } = await client.query(
+      `SELECT ps.id, os.capture_file_id_2 AS "orderFileId2"
+         FROM purchase_submission_sessions ps
+         JOIN order_submissions os ON os.id=ps.order_submission_id
+        WHERE ps.id=$1 AND ps.order_submission_id=$2 AND ps.token_hash=$3
+          AND ps.expires_at > NOW() AND os.deleted_at IS NULL
+        FOR UPDATE OF os`,
+      [sessionId, orderSubmissionId, _hash(sessionToken)]
+    );
+    if (!rows.length) { await client.query('ROLLBACK'); return { ok: false, code: 'capture_session_invalid' }; }
+    if (rows[0].orderFileId2 && String(rows[0].orderFileId2) !== String(captureFileId)) {
+      await client.query('ROLLBACK');
+      return { ok: true, alreadyCompleted: true, captureFileId: rows[0].orderFileId2 };
+    }
+    await client.query(
+      `UPDATE order_submissions
+          SET capture_file_id_2=$2, capture2_uploaded_at=COALESCE(capture2_uploaded_at,NOW()), updated_at=NOW()
+        WHERE id=$1 AND deleted_at IS NULL`,
+      [orderSubmissionId, captureFileId]
+    );
+    await client.query('COMMIT');
+    return { ok: true, captureFileId };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    throw err;
+  } finally {
+    if (client !== db && typeof client.release === 'function') client.release();
+  }
+}
+
 async function markFailed({ sessionId, orderSubmissionId, code }) {
   try {
     await _db().query(
@@ -137,4 +183,4 @@ async function markFailed({ sessionId, orderSubmissionId, code }) {
   } catch (_) { /* 원 실패를 덮지 않는다 */ }
 }
 
-module.exports = { issueForOrder, inspectForUpload, markUploading, completeCapture, markFailed, __setPoolForTest, _hash };
+module.exports = { issueForOrder, inspectForUpload, markUploading, completeCapture, completeCapture2, markFailed, __setPoolForTest, _hash };

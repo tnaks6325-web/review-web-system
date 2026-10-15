@@ -87,7 +87,7 @@ function candidateSql({ oneFile = false } = {}) {
          rs.slot_key     AS "slotKey",
          COALESCE(rs.uploaded_at, rs.created_at) AS "uploadedAt",
          CASE WHEN EXISTS (SELECT 1 FROM order_submissions oc
-                            WHERE oc.capture_file_id = rs.file_id
+                            WHERE (oc.capture_file_id = rs.file_id OR oc.capture_file_id_2 = rs.file_id)
                               AND oc.deleted_at IS NOT NULL)
               THEN 'order_canceled' ELSE 'index_row_gone' END AS reason
     FROM review_submissions rs
@@ -95,13 +95,13 @@ function candidateSql({ oneFile = false } = {}) {
      AND COALESCE(rs.uploaded_at, rs.created_at) < NOW() - ($1 || ' days')::interval
      AND (
            EXISTS (SELECT 1 FROM order_submissions oc
-                    WHERE oc.capture_file_id = rs.file_id
+                    WHERE (oc.capture_file_id = rs.file_id OR oc.capture_file_id_2 = rs.file_id)
                       AND oc.deleted_at IS NOT NULL)
         OR (rs.review_index_id IS NOT NULL
             AND NOT EXISTS (SELECT 1 FROM review_index ri WHERE ri.id = rs.review_index_id))
          )
      AND NOT EXISTS (SELECT 1 FROM order_submissions ol
-                      WHERE ol.capture_file_id = rs.file_id AND ol.deleted_at IS NULL)
+                      WHERE (ol.capture_file_id = rs.file_id OR ol.capture_file_id_2 = rs.file_id) AND ol.deleted_at IS NULL)
      AND NOT EXISTS (SELECT 1 FROM review_index rl
                       WHERE rl.review_file_id = rs.file_id)
      AND NOT EXISTS (SELECT 1 FROM review_inspections ins
@@ -248,7 +248,7 @@ const TOMB_SQL = `
      AND NOT EXISTS (SELECT 1 FROM review_submissions rs
                       WHERE rs.file_id = t.file_id AND COALESCE(rs.slot_key,'') <> 'trashed')
      AND NOT EXISTS (SELECT 1 FROM order_submissions os
-                      WHERE os.capture_file_id = t.file_id AND os.deleted_at IS NULL)
+                      WHERE (os.capture_file_id = t.file_id OR os.capture_file_id_2 = t.file_id) AND os.deleted_at IS NULL)   -- 결정 255: 2장째도 원장 참조
    ORDER BY t.recorded_at ASC
    LIMIT $2`;
 
@@ -328,6 +328,8 @@ async function scanFolderOrphans({ sheetId, tabName, limit = null } = {}) {
     `SELECT rs.file_id AS id FROM review_submissions rs WHERE rs.file_id = ANY($1::text[])
       UNION
      SELECT os.capture_file_id FROM order_submissions os WHERE os.capture_file_id = ANY($1::text[])
+      UNION
+     SELECT os2.capture_file_id_2 FROM order_submissions os2 WHERE os2.capture_file_id_2 = ANY($1::text[])   -- 결정 255: 2장째도 아는 파일
       UNION
      SELECT ri.review_file_id FROM review_index ri WHERE ri.review_file_id = ANY($1::text[])
       UNION

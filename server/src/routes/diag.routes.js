@@ -627,7 +627,10 @@ router.post('/image-extract', imageApiLimiter, async (req, res, next) => {
     try {
       extractionSamples = await require('../services/reviewInspect.service').loadOrderExtractionSamples();
     } catch (_) { extractionSamples = []; }
-    const result = await extractOrderFromImage(imageBase64, mimeType || 'image/jpeg', { samples: extractionSamples });
+    /* 결정 255 — 구매캡처 두 번째 장 판독: 배송메세지·상품만 있어도 성공으로 받고(allowSecondCapture),
+       명의 확인 증명에는 쓰지 않는다(화면이 첫 장 증명만 제출에 싣는다). */
+    const secondCapture = Number(req.body && req.body.captureIndex) === 2;
+    const result = await extractOrderFromImage(imageBase64, mimeType || 'image/jpeg', { samples: extractionSamples, allowSecondCapture: secondCapture });
     // result: { ok, orderNumber, recipient, phone, address, price, orderer, productName, orderDate, store, elapsed }
 
     // ── SSE 알림: AI 분석 완료 ──
@@ -656,7 +659,10 @@ router.post('/image-extract', imageApiLimiter, async (req, res, next) => {
     } catch (_) { productLabel = ''; }
     // 결정 245 — 배송메세지는 서명에 담아 준다(제출 때 서버가 이 서명에서만 꺼낸다). 서명 실패도 판독 응답을 막지 않는다.
     let deliveryMemoToken = '';
-    try { deliveryMemoToken = result.ok ? reviewerOrderIdentity.issueDeliveryMemoProof(result.deliveryMemo, result.orderNumber) : ''; } catch (_) { deliveryMemoToken = ''; }
+    // 두 번째 장에는 주문번호가 안 찍히는 게 보통이라, 그때만 화면이 첫 장·입력칸에서 보낸 주문번호(orderNumberHint)에 묶는다.
+    //   ★ 제출 때 서명의 주문번호가 제출한 주문번호와 같아야만 쓰이므로(readDeliveryMemoProof) 다른 주문으로 옮겨 붙일 수 없다.
+    const memoOrder = result.orderNumber || (secondCapture ? String((req.body && req.body.orderNumberHint) || '').trim() : '');
+    try { deliveryMemoToken = result.ok ? reviewerOrderIdentity.issueDeliveryMemoProof(result.deliveryMemo, memoOrder) : ''; } catch (_) { deliveryMemoToken = ''; }
     res.json({ ...result, ...proof, productLabel, deliveryMemoToken });
   } catch (err) {
     logger.error(`[image-extract] ${err.message}`);
@@ -689,6 +695,10 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
     const { imageBase64, mimeType, fileName, displayName, round,
             orderSubmissionId, captureSessionId, captureSessionToken } = req.body;
     if (!imageBase64) return res.json({ ok: false, error: '이미지 데이터가 필요합니다.' });
+    /* 결정 255 — 구매캡처 두 번째 장(선택). 1 = 종전 첫 장(기본 · 옛 화면은 이 값을 안 보낸다) / 2 = 두 번째 장.
+       두 번째 장은 같은 세션 검증을 거치되 자기 칸(capture_file_id_2)에만 연결하고, 첫 장의 세션 상태는 건드리지 않는다. */
+    const captureIndex = Number(req.body.captureIndex) === 2 ? 2 : 1;
+    const second = captureIndex === 2;
 
     // 구매캡처는 서버가 주문 응답으로 발급한 세션과 주문 ID가 모두 맞아야 한다.
     // 이름·최근시각 추정이나 클라이언트가 보낸 폴더 URL은 신뢰하지 않는다.
@@ -696,14 +706,16 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
       sessionId: captureSessionId,
       sessionToken: captureSessionToken,
       orderSubmissionId,
+      captureIndex,
     });
     if (!uploadCtx.ok) {
       return res.status(403).json({ ok: false, code: uploadCtx.code, error: '구매캡처 제출 세션이 유효하지 않습니다. 구매양식을 다시 열어주세요.' });
     }
     if (uploadCtx.alreadyCompleted) {
-      return res.json({ ok: true, alreadyCompleted: true, fileId: uploadCtx.captureFileId });
+      return res.json({ ok: true, alreadyCompleted: true, fileId: uploadCtx.captureFileId, captureIndex });
     }
-    const claimed = await purchaseSessions.markUploading({ sessionId: captureSessionId, orderSubmissionId });
+    // 두 번째 장은 세션의 "업로드 중" 표시를 쓰지 않는다(그 표시는 첫 장 전용) — 동시 업로드는 연결 단계의 주문 잠금이 가른다.
+    const claimed = second ? true : await purchaseSessions.markUploading({ sessionId: captureSessionId, orderSubmissionId });
     if (!claimed) {
       return res.status(409).json({ ok: false, code: 'capture_upload_in_progress', retryable: true, error: '같은 구매캡처가 이미 업로드 중입니다.' });
     }
@@ -735,7 +747,8 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
     const baseName = (dot > 0 ? rawName.slice(0, dot) : rawName).slice(0, 80) || '주문캡처';
     const ext = (dot > 0 ? rawName.slice(dot + 1) : 'jpg').replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'jpg';
     // 같은 주문의 네트워크 재시도는 같은 파일명으로 수렴하고, 동명이인의 파일은 충돌하지 않는다.
-    const finalFileName = `${baseName}__${String(orderSubmissionId).slice(0, 8)}_${String(captureSessionId).slice(0, 8)}.${ext}`;
+    // ★ 두 번째 장은 이름에 _2 를 붙인다 — 같은 이름이면 아래 중복 정리가 **첫 장을 휴지통으로** 보낸다(결정 255).
+    const finalFileName = `${baseName}${second ? '_2' : ''}__${String(orderSubmissionId).slice(0, 8)}_${String(captureSessionId).slice(0, 8)}.${ext}`;
     try {
       await driveService.trashDuplicateFile(targetFolderId, finalFileName);
     } catch (trashErr) {
@@ -752,7 +765,7 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
     // ── 캡처↔주문 연결 — 세션+주문ID 정확일치, 주문 단위 직렬화 ──
     let finalLinkedFileId = uploaded.id;
     try {
-      const linked = await purchaseSessions.completeCapture({
+      const linked = await purchaseSessions[second ? 'completeCapture2' : 'completeCapture']({
         sessionId: captureSessionId,
         sessionToken: captureSessionToken,
         orderSubmissionId,
@@ -766,7 +779,7 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
         catch (cleanupErr) { logger.warn(`[image-upload] 동시 업로드 패배 파일 정리 실패: ${cleanupErr.message}`); }
       }
     } catch (linkErr) {
-      await purchaseSessions.markFailed({ sessionId: captureSessionId, orderSubmissionId, code: linkErr.code || 'db_link_failed' });
+      if (!second) await purchaseSessions.markFailed({ sessionId: captureSessionId, orderSubmissionId, code: linkErr.code || 'db_link_failed' });
       logger.error(`[image-upload] 캡처↔주문 연결 실패: ${linkErr.message}`);
       return res.status(503).json({
         ok: false,
@@ -786,6 +799,7 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
 
     res.json({
       ok: true,
+      captureIndex,
       fileId: finalLinkedFileId,
       alreadyCompleted: finalLinkedFileId !== uploaded.id,
       fileName: uploaded.name,
@@ -794,7 +808,7 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
       captureFolderUrl: captureFolderUrl || '',
     });
   } catch (err) {
-    await purchaseSessions.markFailed({
+    if (!(req.body && Number(req.body.captureIndex) === 2)) await purchaseSessions.markFailed({
       sessionId: req.body && req.body.captureSessionId,
       orderSubmissionId: req.body && req.body.orderSubmissionId,
       code: err.code || 'upload_failed',

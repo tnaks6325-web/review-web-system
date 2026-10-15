@@ -1201,8 +1201,9 @@ router.get('/workdesk/purchase-capture', authMiddleware, internalMiddleware, asy
 });
 router.post('/workdesk/purchase-capture/replace', authMiddleware, internalMiddleware, imageApiLimiter, async (req, res, next) => {
   try {
-    const { sheetId, tabName, rowId, imageBase64, mimeType, expectFileId } = req.body || {};
-    const out = await _captureReplace.replaceCapture({ sheetId, tabName, rowId, imageBase64, mimeType, expectFileId, by: _by(req) });
+    const { sheetId, tabName, rowId, imageBase64, mimeType, expectFileId, captureIndex } = req.body || {};
+    const out = await _captureReplace.replaceCapture({ sheetId, tabName, rowId, imageBase64, mimeType, expectFileId,
+      captureIndex: Number(captureIndex) === 2 ? 2 : 1, by: _by(req) });   // 결정 255 — 2 = 두 번째 장
     res.status(out.ok ? 200 : (_CAPTURE_REPLACE_STATUS[out.error] || 400)).json(out);
   } catch (err) { next(err); }
 });

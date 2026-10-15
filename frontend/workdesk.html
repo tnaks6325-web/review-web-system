@@ -11130,7 +11130,7 @@ async function _manualReviewDateOnly(){
 const _CAP_MAX_ONE=8*1024*1024, _CAP_SHRINK_OVER=3*1024*1024;
 let _capState=null;
 /* 리뷰캡처 교체(사용자 확정 2026-10-01)도 **같은 팝오버**를 쓴다 — 다른 것은 서버 주소·문구·"고를 사진 목록"뿐.
-   ★ 리뷰는 한 줄에 여러 장일 수 있어 바꿀 한 장을 고르고(oldFileId), 구매는 주문당 한 장(expectFileId). */
+   ★ 리뷰는 한 줄에 여러 장일 수 있어 바꿀 한 장을 고르고(oldFileId), 구매는 주문당 최대 두 장(결정 255 — 1장째/2장째를 고르고 expectFileId). */
 const _CAP_KIND={
   cap:{icon:'🛒',label:'구매캡처',get:'/api/trackb/workdesk/purchase-capture',post:'/api/trackb/workdesk/purchase-capture/replace',checking:'이 줄의 구매기록을 확인하는 중…'},
   rev:{icon:'🖼',label:'리뷰캡처',get:'/api/trackb/workdesk/review-capture',post:'/api/trackb/workdesk/review-capture/replace',checking:'이 줄의 리뷰캡처를 불러오는 중…'},
@@ -11139,7 +11139,7 @@ function _capKind(st){ return _CAP_KIND[(st&&st.kind)||'cap']; }
 function _capReviewFiles(st){ return (st&&st.pre&&st.pre.ok&&Array.isArray(st.pre.files))?st.pre.files:[]; }
 function _capCurrent(st){
   if(!st||!st.pre||!st.pre.ok) return '';
-  if(st.kind!=='rev') return String(st.pre.currentFileId||'');
+  if(st.kind!=='rev') return String((st.pick===1?st.pre.currentFileId2:st.pre.currentFileId)||'');   // 결정 255: pick 1 = 2장째
   const f=_capReviewFiles(st)[st.pick||0]; return f?String(f.fileId||''):'';
 }
 /* 리뷰: 사진이 없거나 대기 중 교체요청이 있으면 막는다(사유를 말한다). 판정은 여기 한 곳. */
@@ -11222,6 +11222,11 @@ function _capRender(){
   const picker=(ready&&isRev&&files.length>1)
     ? `<div class="wcp-pick"><div class="wcp-cap">바꿀 사진을 고르세요 (${files.length}장)</div><div class="wcp-picks">${
         files.map((f,i)=>`<button type="button" class="wcp-pk${i===(st.pick||0)?' on':''}" onclick="_capPick(${i})"${st.saving?' disabled':''} title="${i+1}번째 사진"><img src="${esc(_rvUrl(f.fileId))}" alt="" loading="lazy"><span>${i+1}</span></button>`).join('')
+      }</div></div>`
+    /* 결정 255 — 구매캡처는 주문당 최대 두 장: 1장째/2장째 중 바꿀(또는 2장째를 새로 올릴) 칸을 고른다. */
+    : (ready&&!isRev)
+    ? `<div class="wcp-pick"><div class="wcp-cap">바꿀 사진을 고르세요 (구매캡처는 최대 2장)</div><div class="wcp-picks">${
+        [st.pre.currentFileId,st.pre.currentFileId2].map((fid,i)=>`<button type="button" class="wcp-pk${i===(st.pick===1?1:0)?' on':''}" onclick="_capPick(${i})"${st.saving?' disabled':''} title="${i+1}장째${fid?'':' — 없음(새로 올리기)'}">${fid?`<img src="${esc(_rvUrl(fid))}" alt="" loading="lazy">`:'<span style="font-size:11px;color:var(--faint)">없음</span>'}<span>${i+1}</span></button>`).join('')
       }</div></div>`:'';
   box.innerHTML=
     `<div class="wrp-hd"><b>${K.icon} ${K.label} ${verb}</b><span class="wrp-who" title="${esc(st.name||'')}">${esc(st.name||'참여자')}</span></div>`
@@ -11252,7 +11257,15 @@ function openCaptureReplaceFromMenu(){
   _capOpen(rowId, td);
 }
 /* 창구 ② 제출물 미리보기 구매 칸 */
-function openCaptureReplaceFromPane(btn){ if(btn&&btn.blur) btn.blur(); _capOpen(STATE.rvSel, btn); }
+function openCaptureReplaceFromPane(btn){
+  if(btn&&btn.blur) btn.blur();
+  /* 결정 255 — 미리보기에서 보고 있던 구매캡처가 2장째면 그 칸을 골라 연다(서버 값을 받은 뒤 파일로 맞춘다). */
+  const r=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(STATE.rvSel));
+  const caps=r?_rvKindFiles((STATE.rvImgs&&STATE.rvImgs[String(r.seq)])||[],'cap'):[];
+  const shown=caps[Math.min((STATE.rvIdx&&STATE.rvIdx.cap)||0,Math.max(0,caps.length-1))];
+  _capOpen(STATE.rvSel, btn);
+  if(_capState) _capState.wantFid=shown?String(shown.fileId||''):'';
+}
 /* 리뷰캡처 교체 창구 ① 표 우클릭 ② 미리보기 리뷰 칸 — 미리보기에서 보던 그 장을 먼저 고른다. */
 function openReviewReplaceFromMenu(){ const rowId=STATE._gMenuRowId, td=_selAnchorTd(); _closeCellMenu(); _capOpen(rowId, td, 'rev'); }
 function openReviewReplaceFromPane(btn){ if(btn&&btn.blur) btn.blur(); _capOpen(STATE.rvSel, btn, 'rev', (STATE.rvIdx&&STATE.rvIdx.rev)||0); }
@@ -11294,7 +11307,9 @@ function _capOpen(rowId, anchorEl, kind, pick){
   const want=_capState;
   api(`${K.get}?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&rowId=${encodeURIComponent(row.id)}`)
     .then(r=>{ if(_capState===want){ _capState.pre=(r&&typeof r.ok==='boolean')?r:{ok:false,error:'unknown'}; if(r&&r.ok&&r.name) _capState.name=r.name;
-      if(r&&r.ok&&Array.isArray(r.files)&&_capState.pick>=r.files.length) _capState.pick=0; _capRender(); } })
+      if(r&&r.ok&&Array.isArray(r.files)&&_capState.pick>=r.files.length) _capState.pick=0;
+      if(r&&r.ok&&_capState.kind==='cap'&&_capState.wantFid&&String(r.currentFileId2||'')===_capState.wantFid) _capState.pick=1;   // 결정 255
+      _capRender(); } })
     .catch(()=>{ if(_capState===want){ _capState.pre={ok:false,error:'network'}; _capRender(); } });
 }
 /* 교체 뒤 제출물 미리보기만 다시 받는다 — 보던 줄 선택은 그대로 둔다. */
@@ -11312,18 +11327,18 @@ async function _capSubmit(){
     const enc=await _capEncode(st.file);
     const K=_capKind(st), isRev=st.kind==='rev';
     const body={sheetId:st.t.sheetId,tabName:st.t.tabName,rowId:st.row.id,imageBase64:enc.b64,mimeType:enc.mime};
-    if(isRev) body.oldFileId=_capCurrent(st); else body.expectFileId=String(st.pre.currentFileId||'');
+    if(isRev) body.oldFileId=_capCurrent(st); else { body.expectFileId=_capCurrent(st); body.captureIndex=(st.pick===1?2:1); }   // 결정 255
     const out=await api(K.post,{method:'POST',body:JSON.stringify(body)});
     if(!out||!out.ok) throw new Error(_capErr(out&&out.error,K.label+'를 저장하지 못했습니다.'));
     const t=st.t; const rowId=st.row&&st.row.id; _capClose();
     /* 결정 245 — 구매캡처를 바꾸면 서버가 배송메세지를 비운다. 명단 전체를 다시 받지 않으므로 그 줄의 값도 여기서 지운다
        (안 지우면 새 사진 옆에 옛 사진의 메세지·공동현관 번호가 그대로 남는다 · Codex P2). */
-    if(!isRev&&rowId){ const rr=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(rowId)); if(rr) delete rr.deliveryMemo; }
+    if(!isRev&&rowId&&st.pick!==1){ const rr=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(rowId)); if(rr) delete rr.deliveryMemo; }   // 2장째 교체는 배송메세지를 안 비운다(서버와 같게)
     toast(isRev
       ? (out.oldTrashed?'리뷰캡처를 교체했습니다 · 이전 사진은 휴지통으로 옮겼습니다':'리뷰캡처를 교체했습니다 · 이전 사진은 드라이브에 남겨 두었습니다')
       : out.replaced
-      ? (out.oldTrashed?'구매캡처를 교체했습니다 · 이전 사진은 휴지통으로 옮겼습니다':'구매캡처를 교체했습니다 · 이전 사진은 드라이브에 남겨 두었습니다')
-      : '구매캡처를 올렸습니다');
+      ? (out.oldTrashed?`구매캡처${st.pick===1?' 2장째':''}를 교체했습니다 · 이전 사진은 휴지통으로 옮겼습니다`:`구매캡처${st.pick===1?' 2장째':''}를 교체했습니다 · 이전 사진은 드라이브에 남겨 두었습니다`)
+      : `구매캡처${st.pick===1?' 2장째':''}를 올렸습니다`);
     await _capRefreshImages(t);
   }catch(e){
     if(_capState===st){ st.saving=false; st.err=(e&&e.message)?e.message:'처리에 실패했습니다.'; _capRender(); }
