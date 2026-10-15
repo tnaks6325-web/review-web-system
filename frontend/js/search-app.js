@@ -8345,6 +8345,7 @@ function _takeCardImgFiles(files, cid) {
   if (!imgs.length) { showToast("이미지 파일만 업로드 가능합니다.", true); return; }
   if (imgs.length > 2) showToast("구매캡처는 최대 2장까지 올릴 수 있어 앞의 두 장만 받았습니다.");
   removeCardImg2(cid);
+  if (imgs[0].size > 10 * 1024 * 1024) { showToast("이미지 크기는 10MB 이하여야 합니다.", true); return; }   // 첫 장이 거부되면 둘째 장도 받지 않는다
   // 둘째 장 판독은 첫 장 판독이 끝난 뒤에 — 그래야 첫 장에서 읽은 주문번호에 배송메세지 서명을 묶을 수 있다.
   if (imgs[1]) _setCardImg2(imgs[1], cid, { deferAi: true });
   _processCardImgFile(imgs[0], cid).then(() => {
@@ -8439,7 +8440,8 @@ async function _callCardExtractAi2(cid) {
   const say = (t) => { if (lb && st.img2 === img && img.req === req) lb.textContent = t; };
   img.busy = true; img.tried = true; say("2장째 · AI 확인 중…");
   const ctx = window._orderFormCtx || {};
-  const orderHint = String(document.getElementById(cid + "_orderNumber")?.value || st.extracted?.orderNumber || "").trim();
+  // 첫 장에서 AI 가 읽은 주문번호를 먼저(입력칸은 그다음) — 입력칸의 옛 값에 묶이면 제출 때 번호가 달라 배송메세지가 버려진다.
+  const orderHint = String(st.extracted?.orderNumber || document.getElementById(cid + "_orderNumber")?.value || "").trim();
   let json = null;
   try {
     json = await gasPostUpload({ action: "extractOrderImage", imageBase64: img.dataUrl.split(",")[1], mimeType: img.mime,
@@ -8453,7 +8455,7 @@ async function _callCardExtractAi2(cid) {
   if (typeof _ofpOnExtracted === "function" && !_OFP.capName[cid] && json.productName) {
     _ofpOnExtracted(cid, json.productLabel || "", json.productName || "", typeof json.productOption === "string" ? json.productOption : "");
   }
-  say(json.deliveryMemo ? "2장째 첨부됨 · 배송메세지 확인 ✓" : "2장째 첨부됨 ✓");
+  say(img.memoToken ? "2장째 첨부됨 · 배송메세지 확인 ✓" : "2장째 첨부됨 ✓");   // 서명이 있을 때만 "확인" — 제출 때 실제로 쓰이는 것만 말한다
 }
 
 /** ★ Promise 반환 — 일괄 첨부가 한 장씩 순차 처리(리미터 보호)하려면 완료를 기다려야 한다.
@@ -10045,22 +10047,25 @@ async function submitOrderForm() {
             await new Promise(r2 => setTimeout(r2, wait));
           }
           if (!upJson?.ok) console.warn(`[이미지 업로드 ${_idx}-${captureIndex}] 최종 실패:`, upErrLast && upErrLast.message);
-          return !!upJson?.ok;
+          return upJson?.ok ? upJson : null;
         };
         /* ★★ 순차 큐: 카드별 업로드를 동시에 쏘면 무인증 IP 리미터(분당)에 한꺼번에 부딪혀
            **뒤 카드의 캡처가 통째로 유실**된다. 제출 자체는 막지 않으므로(await 없음) 리뷰어 대기 0.
            ★ 업로드 직전 축소(본문 상한) · 413 은 한 번 더 줄여 즉시 재시도 · 429 는 62초 대기 — 규칙은 _runCapUpload 한 곳.
            ★ 끝내 실패하면 조용히 넘어가지 않고 알린다 — 실패하면 서버가 "구매캡쳐 미첨부"로 감지해 잘못된 독촉이 나간다. */
         window._capUploadChain = (window._capUploadChain || Promise.resolve()).then(async () => {
+          let first = null;
           try {
-            if (await _runCapUpload(_imgCtx, 1)) _capSlot.status = "ok";
+            first = await _runCapUpload(_imgCtx, 1);
+            if (first) _capSlot.status = "ok";
             else {
               _capSlot.status = "fail";
               try { showToast(`${_idx}번째 주문의 구매캡쳐 업로드에 실패했습니다. 네트워크 확인 후 캡처를 다시 첨부해주세요.`, "error"); } catch(_) {}
             }
           } catch(upErr) { _capSlot.status = "fail"; console.warn(`[이미지 업로드 ${_idx}] 백그라운드 오류:`, upErr.message); }
-          // 결정 255 — 두 번째 장(선택)은 첫 장 뒤에 이어서 올린다(같은 세션 · 자기 칸에만 연결).
-          if (o.img2Src && o.img2Src.startsWith("data:")) {
+          /* 결정 255 — 두 번째 장(선택)은 첫 장이 **성공한 뒤에만** 이어서 올린다(같은 세션 · 자기 칸에만 연결).
+             ★ 첫 장 응답에 captureIndex 가 있어야(= 두 장을 아는 서버) 올린다 — 옛 서버는 둘째 장을 첫 장으로 볼 수 있다(배포 시차). */
+          if (first && Number(first.captureIndex) === 1 && o.img2Src && o.img2Src.startsWith("data:")) {
             _capSlot.status2 = "uploading";
             try {
               const ok2 = await _runCapUpload({ dataUrl: o.img2Src, base64: o.img2Src.split(",")[1], mime: o.img2Mime || "image/jpeg", recipient: o.recipient, orderer: o.orderer }, 2);

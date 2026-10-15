@@ -663,7 +663,8 @@ router.post('/image-extract', imageApiLimiter, async (req, res, next) => {
     //   ★ 제출 때 서명의 주문번호가 제출한 주문번호와 같아야만 쓰이므로(readDeliveryMemoProof) 다른 주문으로 옮겨 붙일 수 없다.
     const memoOrder = result.orderNumber || (secondCapture ? String((req.body && req.body.orderNumberHint) || '').trim() : '');
     try { deliveryMemoToken = result.ok ? reviewerOrderIdentity.issueDeliveryMemoProof(result.deliveryMemo, memoOrder) : ''; } catch (_) { deliveryMemoToken = ''; }
-    res.json({ ...result, ...proof, productLabel, deliveryMemoToken });
+    // ★ 두 번째 장 판독에는 명의 확인 증명을 싣지 않는다(결정 255 — 명의 확인은 첫 장만 · 빈 칸 증명이 매칭 경로에 쓰이지 않게).
+    res.json(secondCapture ? { ...result, productLabel, deliveryMemoToken } : { ...result, ...proof, productLabel, deliveryMemoToken });
   } catch (err) {
     logger.error(`[image-extract] ${err.message}`);
     logAbnormal({
@@ -748,11 +749,17 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
     const ext = (dot > 0 ? rawName.slice(dot + 1) : 'jpg').replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'jpg';
     // 같은 주문의 네트워크 재시도는 같은 파일명으로 수렴하고, 동명이인의 파일은 충돌하지 않는다.
     // ★ 두 번째 장은 이름에 _2 를 붙인다 — 같은 이름이면 아래 중복 정리가 **첫 장을 휴지통으로** 보낸다(결정 255).
-    const finalFileName = `${baseName}${second ? '_2' : ''}__${String(orderSubmissionId).slice(0, 8)}_${String(captureSessionId).slice(0, 8)}.${ext}`;
-    try {
-      await driveService.trashDuplicateFile(targetFolderId, finalFileName);
-    } catch (trashErr) {
-      logger.warn(`[image-upload] 중복 파일 처리 실패 (무시): ${trashErr.message}`);
+    //   두 번째 장은 요청마다 다른 꼬리를 붙이고 이름 기준 중복 정리를 하지 않는다 — 재시도 요청이 겹치면 같은 이름 정리가
+    //   **먼저 연결된 파일을 휴지통으로** 보낼 수 있다(코드 리뷰). 연결 경쟁에서 진 파일은 아래 패배 정리·고아 정리가 치운다.
+    const finalFileName = second
+      ? `${baseName}_2__${String(orderSubmissionId).slice(0, 8)}_${String(captureSessionId).slice(0, 8)}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}.${ext}`
+      : `${baseName}__${String(orderSubmissionId).slice(0, 8)}_${String(captureSessionId).slice(0, 8)}.${ext}`;
+    if (!second) {
+      try {
+        await driveService.trashDuplicateFile(targetFolderId, finalFileName);
+      } catch (trashErr) {
+        logger.warn(`[image-upload] 중복 파일 처리 실패 (무시): ${trashErr.message}`);
+      }
     }
 
     // ── 4단계: 파일 업로드 ──

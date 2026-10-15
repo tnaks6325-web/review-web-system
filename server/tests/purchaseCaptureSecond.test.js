@@ -84,7 +84,8 @@ const FRONT = p => fs.readFileSync(path.join(ROOT, '..', 'frontend', p), 'utf8')
   const up = diag.slice(diag.indexOf("router.post('/image-upload'"), diag.indexOf("// POST /api/image/review-precheck"));
   await ta('2a captureIndex 2 = 이름에 _2(같은 이름이면 중복 정리가 첫 장을 휴지통으로 보낸다) · 자기 연결 함수', () => {
     assert.match(up, /const captureIndex = Number\(req\.body\.captureIndex\) === 2 \? 2 : 1;/);
-    assert.match(up, /\$\{baseName\}\$\{second \? '_2' : ''\}__/);
+    assert.match(up, /`\$\{baseName\}_2__\$\{String\(orderSubmissionId\)\.slice\(0, 8\)\}_\$\{String\(captureSessionId\)\.slice\(0, 8\)\}_\$\{Date\.now\(\)\.toString\(36\)\}/, '두 번째 장 = _2 + 요청마다 다른 꼬리');
+    assert.match(up, /if \(!second\) \{\s*\n\s*try \{\s*\n\s*await driveService\.trashDuplicateFile/, '두 번째 장은 이름 기준 중복 정리를 하지 않는다(겹친 재시도가 먼저 연결된 파일을 지우지 않게)');
     assert.match(up, /purchaseSessions\[second \? 'completeCapture2' : 'completeCapture'\]/);
     assert.match(up, /captureIndex,\n\s*\}\);/, '세션 조회에 칸 번호를 넘긴다');
   });
@@ -105,6 +106,9 @@ const FRONT = p => fs.readFileSync(path.join(ROOT, '..', 'frontend', p), 'utf8')
     assert.match(g, /if \(!productOnly && !secondOnly\) _putToCache/);
     assert.match(diag, /allowSecondCapture: secondCapture/);
   });
+  await ta('3a2 ★ 두 번째 장 판독 응답에는 명의 확인 증명을 싣지 않는다', () => {
+    assert.match(diag, /res\.json\(secondCapture \? \{ \.\.\.result, productLabel, deliveryMemoToken \} : \{ \.\.\.result, \.\.\.proof, productLabel, deliveryMemoToken \}\);/);
+  });
   await ta('3b 두 번째 장 배송메세지 서명은 주문번호가 없을 때만 화면이 보낸 주문번호에 묶는다(제출 때 주문번호 일치 검사 그대로)', () => {
     assert.match(diag, /const memoOrder = result\.orderNumber \|\| \(secondCapture \? String\(\(req\.body && req\.body\.orderNumberHint\) \|\| ''\)\.trim\(\) : ''\);/);
   });
@@ -124,7 +128,8 @@ const FRONT = p => fs.readFileSync(path.join(ROOT, '..', 'frontend', p), 'utf8')
   await ta('4a 제출물 미리보기 — 두 번째 장도 같은 줄에 이어 싣는다(첫 장 → 두 번째 장)', () => {
     assert.match(tb, /os\.capture_file_id_2, os\.capture2_uploaded_at,/);
     assert.match(tb, /\(os\.capture_file_id IS NOT NULL OR os\.capture_file_id_2 IS NOT NULL\)/);
-    assert.match(tb, /if \(o\.capture_file_id\) push\(seq, o\.capture_file_id, 'order_capture'[\s\S]{0,80}\n\s*if \(o\.capture_file_id_2\) push\(seq, o\.capture_file_id_2, 'order_capture'/);
+    assert.match(tb, /if \(o\.capture_file_id\) push\(seq, o\.capture_file_id, 'order_capture'/);
+    assert.match(tb, /if \(o\.capture_file_id && o\.capture_file_id_2\) push\(seq, o\.capture_file_id_2, 'order_capture'/, '첫 장이 없으면 둘째 장만 "있음"으로 보이지 않게');
   });
   await ta('4b 직원 교체 — 2장째는 그 칸만 바꾸고 배송메세지를 안 비운다 · 실제 실행', async () => {
     const rep = require('../src/services/purchaseCaptureReplace.service');
@@ -183,6 +188,8 @@ const FRONT = p => fs.readFileSync(path.join(ROOT, '..', 'frontend', p), 'utf8')
     const f = sa.slice(sa.indexOf('async function _callCardExtractAi2('), sa.indexOf('/** ★ Promise 반환'));
     assert.ok(!/approvalToken|extractToken|imageHash|identity/.test(f), '2장째 판독이 명의 확인 상태를 바꾸면 안 된다');
     assert.match(f, /captureIndex: 2, orderNumberHint: orderHint/);
+    assert.match(f, /const orderHint = String\(st\.extracted\?\.orderNumber \|\| document\.getElementById/, 'AI 가 읽은 주문번호를 먼저');
+    assert.match(f, /say\(img\.memoToken \? "2장째 첨부됨 · 배송메세지 확인 ✓"/, '서명이 있을 때만 확인 표시');
     assert.match(f, /!_OFP\.capName\[cid\] && json\.productName/);
   });
   await ta('5c 제출 — 2장째 사진·서명을 싣고, 업로드는 첫 장 뒤에 captureIndex 2 로', () => {
@@ -190,6 +197,7 @@ const FRONT = p => fs.readFileSync(path.join(ROOT, '..', 'frontend', p), 'utf8')
     assert.match(sa, /deliveryMemoToken2: o\.deliveryMemoToken2 \|\| ""/);
     const q = sa.slice(sa.indexOf('window._capUploadChain = (window._capUploadChain'), sa.indexOf('}).catch(() => {});   // 한 건의 예외가 큐를 끊지 않게'));
     assert.ok(q.indexOf('_runCapUpload(_imgCtx, 1)') < q.indexOf('}, 2);'), '첫 장 다음에 두 번째 장');
+    assert.match(q, /if \(first && Number\(first\.captureIndex\) === 1 && o\.img2Src/, '첫 장 성공 + 두 장을 아는 서버일 때만 둘째 장');
     assert.match(sa, /captureSessionToken:_capSession\.token, captureIndex \};/);
   });
   await ta('5d 직원 교체 창 — 1장째/2장째 고르기 · 미리보기에서 보던 장으로 열기', () => {

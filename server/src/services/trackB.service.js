@@ -3016,7 +3016,8 @@ async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false } =
     // 결정 255 — 구매캡처 두 번째 장(있으면)도 같은 줄에 이어 싣는다(미리보기가 1/2 · 2/2 로 넘겨 본다). 순서 = 첫 장 → 두 번째 장.
     for (const [seq, o] of matched) {
       if (o.capture_file_id) push(seq, o.capture_file_id, 'order_capture', o.capture_uploaded_at);
-      if (o.capture_file_id_2) push(seq, o.capture_file_id_2, 'order_capture', o.capture2_uploaded_at || o.capture_uploaded_at);
+      // 첫 장이 없으면 싣지 않는다 — 누락 감지(capture_uploaded_at)와 같은 말을 하게(첫 장 미첨부 독촉이 나가는데 미리보기만 "있음"이 되지 않게).
+      if (o.capture_file_id && o.capture_file_id_2) push(seq, o.capture_file_id_2, 'order_capture', o.capture2_uploaded_at || o.capture_uploaded_at);
     }
   }
   return Object.fromEntries(out);

@@ -70,6 +70,7 @@ const REQUIRED_SCHEMA = [
   ['work_orders', 'work_round'],                  // 136 — 차수 표기(원본 수신·작업표 생성)
   ['tab_configs', 'workboard_schema_version'],    // 137 — 탭별 V2 상태열 바인딩의 규격 고정
   ['order_submissions', 'capture_file_id_2'],     // 191 — 구매캡처 두 번째 장(업로드·미리보기·정리가 읽는다)
+  ['order_submissions', 'capture2_uploaded_at'],  // 191 — 두 번째 장 연결 시각
   ['work_orders', 'intake_idempotency_key'],      // 102 — 네트워크 재시도 키
   ['work_orders', 'intranet_advertiser_id'],      // 102 — 원본 광고주 식별자
   ['work_orders', 'intranet_advertiser_name'],    // 102 — 원본 광고주명 스냅샷
