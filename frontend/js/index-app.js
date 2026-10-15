@@ -7577,6 +7577,12 @@ function requestTcSave() {
   _tcCurrent._pendingNcMode       = document.getElementById("tcNcModeCheck").checked;
   _tcCurrent._pendingDepositName  = document.getElementById("tcDepositNameInput").value.trim();
   _tcCurrent._pendingTransferBank = (document.querySelector("#tcOptTransferBank .tc-opt.sel") || {}).dataset?.val ?? "";
+  // 결정 247 — 업체입금에서 다른 값으로 바꾸면 미기록 줄이 우리 입금 목록으로 돌아온다 → 확인
+  _tcCurrent._bankDisableAck = false;
+  if (String(_tcCurrent.transferBank || "").replace(/\s/g, "") === "업체입금" && _tcCurrent._pendingTransferBank !== "업체입금") {
+    if (!confirm("이체은행을 업체입금에서 다른 값으로 바꿉니다.\n\n· 입금일이 기록되지 않은 줄이 바로 우리 입금관리 목록으로 돌아옵니다\n· 업체가 이미 보냈는데 날짜만 안 적은 줄이 있는지 먼저 업체에 확인해 주세요(그대로 보내면 이중 입금)\n\n진행할까요?")) return;
+    _tcCurrent._bankDisableAck = true;
+  }
   _tcCurrent._pendingIncomeType   = (document.querySelector("#tcOptIncomeType .tc-opt.sel")   || {}).dataset?.val ?? "";  // ★ v9.14
   _tcCurrent._pendingProviderMemo = (document.getElementById("tcProviderMemoInput")?.value ?? "").replace(/\s+$/g, "");  // 제공정보 메모 (끝 공백만 제거)
 
@@ -7672,6 +7678,8 @@ async function confirmTcSave() {
     ncMode:       _tcCurrent._pendingNcMode ? "true" : "false",
     depositName:  _tcCurrent._pendingDepositName  ?? "",
     transferBank: _tcCurrent._pendingTransferBank ?? "",
+    // 결정 247 — 업체입금을 끄는 저장은 확인을 받은 표시가 있어야 서버가 반영한다(없으면 업체입금 유지)
+    transferBankDisableAck: _tcCurrent._bankDisableAck === true,
     incomeType:   _tcCurrent._pendingIncomeType   ?? "",   // ★ v9.14: 진행방식 (undefined → 기존값 보존, "" → 빈값으로 저장)
     providerMemo: _tcCurrent._pendingProviderMemo ?? ""    // 제공정보 메모 (구매양식 제출화면 표시)
   };
@@ -7693,6 +7701,8 @@ async function confirmTcSave() {
 
     if (json.ok) {
       console.log("[TC] 저장 완료. tabName:", json.tabName, "updated:", json.updated, "row:", json.row);
+      // 결정 247 — 서버가 업체입금을 유지했으면 그 사실을 말한다(화면 값과 갈린 채 두지 않는다)
+      if (json.transferBankKept) { showToast(json.transferBankNotice || "이체은행 업체입금은 그대로 두었습니다.", "error"); _tcCurrent._pendingTransferBank = json.transferBankKept; }
 
       // ★ 캡처폴더 URL이 변경된 경우 updateFolderUrls로 별도 저장
       const prevCaptureUrl = _tcCurrent.captureFolderUrl || "";
@@ -10622,6 +10632,11 @@ async function _saveTabField(t, fieldMap, round) {
     if (round) payload.round = round;
     const res = await gasPost(payload);
     if (res.error) { showToast(res.error, "error"); return false; }
+    // 결정 247 — 업체입금 작업은 확인 없이 다른 은행으로 바뀌지 않는다(서버가 유지) — 로컬 값도 서버 값으로 맞추고 말한다
+    if (res.transferBankKept && fieldMap.transferBank !== undefined) {
+      fieldMap = { ...fieldMap, transferBank: res.transferBankKept };
+      setTimeout(() => showToast(res.transferBankNotice || "이체은행 업체입금은 그대로 두었습니다.", "error"), 600);
+    }
     // 로컬 데이터 즉시 반영
     const origTab = (_tabDashData?.tabs||[]).find(x => x.sheet_id===t.sheet_id && x.tab_name===t.tab_name);
     if (round) {

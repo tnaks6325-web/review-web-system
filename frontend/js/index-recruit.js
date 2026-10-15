@@ -634,6 +634,7 @@ function _optColumnCheckItems() {
  *   근거를 못 찾으면 기본 안내로 되돌린다(빈 값 = "모른다"를 숨기지 않는다).
  */
 function _rfTransferHint(goodsCostType) {
+  window._rfLastGoodsCost = goodsCostType;   // 업체입금에서 다른 은행으로 돌아갈 때 안내를 되살리는 재료
   const el = document.getElementById("rf_transfer_bank_hint");
   if (!el) return;
   const base = "현금이체 → 하나은행 · 수수료(세금계산서) → 케이뱅크";
@@ -648,10 +649,25 @@ function _rfTransferHint(goodsCostType) {
   el.style.color = "#127A5E";
 }
 
+/* 결정 247 — 이체은행 「업체입금」 안내(작업보드 탭 설정 창의 _ADV_PAYOUT_NOTE_HTML 과 같은 말). */
+const RF_ADV_PAYOUT_NOTE = "업체가 페이백을 직접 보냅니다 — 업체 작업보드에 입금할 줄의 은행·계좌번호·예금주가 보이고 업체가 입금일을 기록합니다. 우리 입금관리·이체 파일에서는 빠집니다. ⚠ 업체 링크는 로그인 없이 열려 링크를 가진 사람은 계좌를 봅니다.";
+const RF_ADV_PAYOUT_OFF_CONFIRM = "이체은행을 업체입금에서 다른 값으로 바꿉니다.\n\n· 입금일이 기록되지 않은 줄이 바로 우리 입금관리 목록으로 돌아옵니다\n· 업체가 이미 보냈는데 날짜만 안 적은 줄이 있는지 먼저 업체에 확인해 주세요(그대로 보내면 이중 입금)\n· 업체 화면의 계좌 칸·입금일 기록은 바로 닫힙니다\n\n진행할까요?";
+function _rfAdvPayoutHint(val) {
+  // 안내 줄이 없는 모양(설정 표 레이아웃)은 업체입금일 때만 보이는 전용 줄을 쓴다.
+  const adv = document.getElementById("rf_transfer_bank_adv");
+  if (adv) { adv.textContent = RF_ADV_PAYOUT_NOTE; adv.hidden = val !== "advertiser"; }
+  if (val !== "advertiser") { _rfTransferHint(window._rfLastGoodsCost); return; }
+  const el = document.getElementById("rf_transfer_bank_hint");
+  if (!el) return;
+  el.textContent = RF_ADV_PAYOUT_NOTE;
+  el.style.color = "#B3382E";
+}
+
 function _rfPickTransferBank(val) {
   const box = document.getElementById("rf_transfer_bank_btns");
   if (!box) return false;
-  const v = (val === "kbank" || val === "hana") ? val : "";
+  const v = (val === "kbank" || val === "hana" || val === "advertiser") ? val : "";
+  window._rfOrigTransferBank = v;   // 불러온 값 — 업체입금에서 바꿀 때 저장 직전 확인을 받는다
   const btn = box.querySelector(`.rchan-btn[data-val="${v}"]`);
   if (!btn) return false;
   selectRfBtn("transfer_bank", btn);
@@ -3821,6 +3837,7 @@ function selectRfBtn(group, btn) {
     /* ★ 086: 빈 값 = 자동(작업오더 물건비 판정). 서버에서 ''는 NULL 로 되돌아간다. */
     const el = document.getElementById('rf_transfer_bank');
     if (el) el.value = val || '';
+    _rfAdvPayoutHint(val || '');   // 결정 247 — 업체입금이면 무엇이 바뀌는지·위험을 안내 줄에 말한다
   } else if (group === 'review_type') {
     /* ★ 087: 빈 값 = 미지정. 서버에서 ''는 NULL(해제)로 해석된다(CASE 센티널). */
     const el = document.getElementById('rf_review_type');
@@ -5609,6 +5626,11 @@ async function saveRecruitPostImpl() {
          빈 문자열은 서버에서 '자동으로 되돌리기'로 해석된다(CASE 센티널). */
       if (document.getElementById("rf_transfer_bank_btns")) {
         payload.transfer_bank = document.getElementById("rf_transfer_bank")?.value || "";
+        // 결정 247 — 업체입금을 끄면 미기록 줄이 바로 우리 입금 목록으로 돌아온다 → 이중 입금 확인
+        if (window._rfOrigTransferBank === "advertiser" && payload.transfer_bank !== "advertiser") {
+          if (!confirm(RF_ADV_PAYOUT_OFF_CONFIRM)) { _rfSaveBlocked("이체은행 변경을 취소했습니다 — 저장하지 않았습니다."); return; }
+          payload.transfer_bank_disable_ack = true;   // 서버는 이 표시가 있을 때만 업체입금을 끈다
+        }
         payload.transfer_memo = (document.getElementById("rf_transfer_memo")?.value || "").trim();
       }
       const _cbRaw = document.getElementById("rf_close_buffer").value;
@@ -5714,6 +5736,13 @@ async function saveRecruitPostImpl() {
       throw new Error(String(saved.error || "저장이 반영되지 않았습니다."));
     }
     const newCampId = saved && saved.data && saved.data.id;
+    /* 결정 247 — 업체입금 저장 확인(배포 시차·유지 규칙). ① 업체입금을 고르고 저장했는데 그 값을 모르는 서버였다 → 저장 안 됨을 말한다
+       ② 서버가 업체입금을 유지했다(확인 없이 끄는 저장 · 업체입금 작업에 새 공고) → 그 사실을 말한다. */
+    if (saved && payload.transfer_bank === "advertiser" && !(saved.advertiserPayoutBank && saved.data && saved.data.transfer_bank === "advertiser")) {
+      setTimeout(() => showToast("이체은행 「업체입금」이 저장되지 않았습니다 — 서버 업데이트 중일 수 있습니다. 잠시 뒤 다시 저장해 주세요.", "error"), 900);
+    } else if (saved && saved.transferBankKept) {
+      setTimeout(() => showToast(saved.transferBankNotice || "이체은행 업체입금은 그대로 두었습니다.", "error"), 900);
+    }
     /* ★ 작업오더에서 프리필로 만든 신규 공고면 → 그 오더에 linked_campaign_id 역연결 */
     if (!_recruitEditId && _woPrefillOrderId && newCampId) {
       try {

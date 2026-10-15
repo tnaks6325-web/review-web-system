@@ -73,7 +73,12 @@ function _prepWorkDetail(wd) {
  */
 function _normTransferBank(v) {
   const s = String(v == null ? '' : v).trim().toLowerCase();
-  return (s === 'kbank' || s === 'hana') ? s : null;
+  // 결정 247(2026-10-15) — 'advertiser' = 업체입금(업체가 페이백을 직접 보낸다 · 우리 이체에서 빠진다).
+  return (s === 'kbank' || s === 'hana' || s === 'advertiser') ? s : null;
+}
+/* 업체입금을 고를 수 있는 공고인가(시트 없는 연결 작업 + 주인 업체) — 못 고르면 저장 전체를 막고 이유를 말한다(막다른 길 방지). */
+async function _advertiserPayoutGate(sheetId, tabName) {
+  return require('../services/advertiserPayout.service').checkAdvertiserPayoutAllowed({ sheetId, tabName });
 }
 
 function _genCampaignId() {
@@ -3126,6 +3131,26 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         logger.info(`[campaign] 연결탭 자동 보정(생성): wo=${source_work_order_id} → ${wo.tabName}`);
       }
     }
+    /* ★ 결정 247 — 이체은행 「업체입금」 쓰기 규칙(advertiserPayout.guardTransferBankWrite 단일 출처).
+         새 공고는 그 작업의 **가장 최근 공고**가 되어 이체은행 판정을 넘겨받는다 — 그래서 "지금 그 작업의 실제 값"과 비교한다:
+         ① 업체입금으로 켜기 = 고를 수 있는 작업만 ② 지금 업체입금인 작업에 다른 은행(기본 자동 포함)으로 새 공고 = 화면 확인 표시가
+         없으면 **업체입금을 이어받는다**(조용히 꺼지면 업체가 보낸 미기록 줄이 우리 입금 목록으로 돌아온다 · Codex 리뷰). */
+    let _createTransferBank = transfer_bank;
+    let _createBankKept = null;
+    if (transfer_bank !== undefined && lSheet && lTab) {
+      const pay = require('../services/payment.service');
+      const curCamp = await pay.campaignForTab(lSheet, lTab).catch(() => null);
+      const { rows: curTab } = await pool.query(
+        'SELECT transfer_bank FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1', [lSheet, lTab]);
+      const curEff = pay.advertiserPaysFrom(curCamp && curCamp.transferBank, curTab[0] && curTab[0].transfer_bank) ? 'advertiser' : '';
+      const g = await require('../services/advertiserPayout.service').guardTransferBankWrite({
+        current: curEff, incoming: _normTransferBank(transfer_bank) || '', ack: req.body.transfer_bank_disable_ack, sheetId: lSheet, tabName: lTab });
+      if (g.action === 'reject') return res.status(400).json({ ok: false, code: 'ADVERTISER_PAYOUT_NOT_ALLOWED', error: g.message });
+      if (g.action === 'keep') { _createTransferBank = 'advertiser'; _createBankKept = g; }
+    } else if (_normTransferBank(transfer_bank) === 'advertiser') {
+      const g = await _advertiserPayoutGate(lSheet, lTab);   // 연결 작업이 없으면 no_tab
+      if (!g.ok) return res.status(400).json({ ok: false, code: 'ADVERTISER_PAYOUT_NOT_ALLOWED', error: g.message });
+    }
     const effectiveSkipWeekends = sourceWorkOrder
       ? sourceWorkOrder.skipWeekends
       : requestedSkipWeekends;
@@ -3235,7 +3260,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         (sub_hold_ttl_min === undefined || sub_hold_ttl_min === null || sub_hold_ttl_min === '')
           ? 15 : Math.max(1, Number(sub_hold_ttl_min) || 15),   // ★ 063 §09-2: 타계정 15분(133, ≥1 클램프 — 0=즉시만료 footgun 차단)
         reviewer_hidden === true,                               // ★ 085: 기본 FALSE(공개) — 명시로만 숨김
-        _normTransferBank(transfer_bank),                       // ★ 086: 빈 값=NULL(작업오더 물건비에서 자동 판정)
+        _normTransferBank(_createTransferBank),                 // ★ 086: 빈 값=NULL(작업오더 물건비에서 자동 판정) · 247 업체입금 이어받기
         (transfer_memo === undefined || transfer_memo === null) ? null : String(transfer_memo).trim(), // ★ 086
         normalizedReviewType,                                   // ★ 087: 판정 불가·미전송=NULL(기존 동작)
         JSON.stringify(normalizedReviewType === 'mixed' ? (reviewMixState.mix || []) : []),
@@ -3301,7 +3326,10 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         logger.warn('[campaign/create] 달력 프리필 실패(공고는 발행됨): ' + e.message);
       }
     }
-    res.json({ ok: true, optionThumbnails: true /* ★ 결정 214: 상품 사진 저장을 아는 서버(배포 시차 판별) */, data: rows[0], options: await _loadOptionsRaw(pool, rows[0].id),
+    res.json({ ok: true, optionThumbnails: true /* ★ 결정 214: 상품 사진 저장을 아는 서버(배포 시차 판별) */,
+      advertiserPayoutBank: true /* ★ 결정 247: 이체은행 업체입금을 아는 서버(배포 시차 판별) */,
+      ...(_createBankKept ? { transferBankKept: 'advertiser', transferBankNotice: _createBankKept.notice } : {}),
+      data: rows[0], options: await _loadOptionsRaw(pool, rows[0].id),
       feeSchedules: await _loadFeeSchedules(pool, rows[0].id),
       ...(optionsWarning ? { optionsWarning } : {}), ...(feeWarning ? { feeWarning } : {}),
       ...(quotaSync ? { quotaSync } : {}),
@@ -3546,6 +3574,41 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       }
     }
 
+    /* ★ 결정 247 — 이체은행 「업체입금」 쓰기 규칙(advertiserPayout.guardTransferBankWrite 단일 출처).
+         ① 업체입금으로 켜기 = 고를 수 있는 작업만 — **연결 작업을 바꿀 때도 다시** 본다(Codex 리뷰)
+         ② 업체입금 끄기 = 화면이 확인을 받은 표시(transfer_bank_disable_ack)가 있을 때만. 없으면(업체입금을 모르는 옛 화면) 유지. */
+    let _updTransferBank = transfer_bank;
+    let _updBankKept = null;
+    {
+      const { rows: tbRows } = await pool.query(
+        'SELECT transfer_bank, linked_sheet_id, linked_tab_name FROM recruit_campaigns WHERE id = $1', [id]);
+      const tb0 = tbRows[0] || {};
+      const effSheet = intentionallyUnlinked ? '' : (lSheet || tb0.linked_sheet_id || '');
+      const effTab = intentionallyUnlinked ? '' : (lTab || tb0.linked_tab_name || '');
+      const tabChanged = effSheet !== String(tb0.linked_sheet_id || '') || effTab !== String(tb0.linked_tab_name || '');
+      // 이 공고가 그 작업의 이체은행을 정하는 공고(가장 최근)라면 **작업의 실제 값**(공고 → 탭)과 비교한다 —
+      // 공고는 자동인데 탭이 업체입금인 작업에서 이 공고에 은행을 넣으면 그것도 업체입금을 끄는 저장이다.
+      let curEff = tb0.transfer_bank;
+      if (tb0.linked_sheet_id && tb0.linked_tab_name) {
+        const pay = require('../services/payment.service');
+        const latest = await pay.campaignForTab(tb0.linked_sheet_id, tb0.linked_tab_name).catch(() => null);
+        if (latest && String(latest.id) === String(id)) {
+          const { rows: tr } = await pool.query(
+            'SELECT transfer_bank FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1', [tb0.linked_sheet_id, tb0.linked_tab_name]);
+          if (pay.advertiserPaysFrom(tb0.transfer_bank, tr[0] && tr[0].transfer_bank)) curEff = 'advertiser';
+        }
+      }
+      const curAdv = String(curEff || '') === 'advertiser';
+      // 바꾸지 않는 저장이어도 업체입금 공고의 연결 작업이 바뀌면 그 작업이 고를 수 있는 작업인지 본다
+      const incoming = (transfer_bank === undefined || transfer_bank === null)
+        ? (curAdv && tabChanged ? 'advertiser' : undefined)
+        : (_normTransferBank(transfer_bank) || '');
+      const g = await require('../services/advertiserPayout.service').guardTransferBankWrite({
+        current: curEff, incoming, ack: req.body.transfer_bank_disable_ack, sheetId: effSheet, tabName: effTab, recheck: tabChanged });
+      if (g.action === 'reject') return res.status(400).json({ ok: false, code: 'ADVERTISER_PAYOUT_NOT_ALLOWED', error: g.message });
+      if (g.action === 'keep') { _updTransferBank = undefined; _updBankKept = g; }
+    }
+
     // ★ 참여형 활성화 게이트(심판 J7): COALESCE 편집으로 status='active' 우회 방지.
     //   이 라우트가 바꿀 수 있는 게이트 입력(연결탭·시간창·일일건수)을 본문값으로 병합해 판정.
     if (status === 'active') {
@@ -3718,7 +3781,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         (multi_daily_limit === undefined || multi_daily_limit === null || multi_daily_limit === '') ? null : Math.max(0, Number(multi_daily_limit) || 0), // $34
         (sub_hold_ttl_min === undefined || sub_hold_ttl_min === null || sub_hold_ttl_min === '') ? null : Math.max(1, Number(sub_hold_ttl_min) || 15), // $35
         (reviewer_hidden === undefined || reviewer_hidden === null) ? null : reviewer_hidden === true, // $36 ★ 085: null=유지
-        (transfer_bank === undefined || transfer_bank === null) ? null : (_normTransferBank(transfer_bank) || ''), // $37 ★ 086
+        (_updTransferBank === undefined || _updTransferBank === null) ? null : (_normTransferBank(_updTransferBank) || ''), // $37 ★ 086 · 247 업체입금 유지 규칙
         (transfer_memo === undefined || transfer_memo === null) ? null : String(transfer_memo).trim(),            // $38 ★ 086
         // $39 ★ 087: undefined/null=유지. ''=미지정으로 해제. 판정 불가값도 ''(=해제) —
         //   모르는 문자열을 그대로 저장하면 화면·검수가 각자 다르게 해석한다.
@@ -3805,7 +3868,10 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     const worktableRelay = rows[0].participation_mode
       ? await require('../services/campaignPlan.service').relayCampaignWorktable(id, { by: req.admin?.name || 'admin' })
       : null;
-    res.json({ ok: true, optionThumbnails: true /* ★ 결정 214: 상품 사진 저장을 아는 서버(배포 시차 판별) */, data: rows[0], options: await _loadOptionsRaw(pool, id),
+    res.json({ ok: true, optionThumbnails: true /* ★ 결정 214: 상품 사진 저장을 아는 서버(배포 시차 판별) */,
+      advertiserPayoutBank: true /* ★ 결정 247: 이체은행 업체입금을 아는 서버(배포 시차 판별) */,
+      ...(_updBankKept ? { transferBankKept: 'advertiser', transferBankNotice: _updBankKept.notice } : {}),
+      data: rows[0], options: await _loadOptionsRaw(pool, id),
       ...(worktableRelay ? { worktableRelay } : {}),
       feeSchedules: await _loadFeeSchedules(pool, id),
       ...(optionsWarning ? { optionsWarning } : {}), ...(feeWarning ? { feeWarning } : {}),
