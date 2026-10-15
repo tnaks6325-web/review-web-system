@@ -5565,6 +5565,46 @@ async function finishedTabsMap() {
   }
 }
 
+/**
+ * ★ 결정 254 — 원본 작업오더가 인트라넷에서 삭제된 작업(살아 있는 오더가 하나도 없는 작업) → 홈 작업 목록 "원본 오더 삭제됨" 주석.
+ *   손대지 않은 빈 작업은 오더 삭제 때 자동으로 정리되므로(workTabDelete.autoCleanupDeletedOrderTab) 여기 남는 것은 주문·편집이 있는 작업이다.
+ *   ★ 실패 = ok:false(주석 없이 계속 — 모르는 것을 "삭제 안 됨"으로 꾸미지 않는다).
+ */
+async function sourceOrderDeletedMap() {
+  try {
+    // 지워진 오더의 작업 좌표 = 직접 연결(linked_tab_*) ∪ Track B 링크(trackb_work_order_links) — 둘 다 "그 오더의 작업"이다(Codex PR #1646)
+    const { rows } = await getPool().query(
+      `WITH d AS (
+         SELECT w.linked_tab_sheet_id AS s, w.linked_tab_name AS n, NULLIF(w.linked_tab_gid,'') AS g, w.deleted_at, w.deleted_by_name, w.deleted_by
+           FROM work_orders w
+          WHERE w.deleted_at IS NOT NULL AND COALESCE(w.linked_tab_sheet_id,'') <> '' AND COALESCE(w.linked_tab_name,'') <> ''
+         UNION ALL
+         SELECT l.sheet_id, l.tab_name, NULL, w.deleted_at, w.deleted_by_name, w.deleted_by
+           FROM trackb_work_order_links l JOIN work_orders w ON w.id = l.work_order_id
+          WHERE w.deleted_at IS NOT NULL AND l.deleted_at IS NULL
+       )
+       SELECT d.s AS "sheetId", d.n AS "tabName", MAX(d.g) AS "tabGid", MAX(d.deleted_at) AS "deletedAt",
+              (ARRAY_AGG(COALESCE(NULLIF(d.deleted_by_name,''), d.deleted_by, '') ORDER BY d.deleted_at DESC))[1] AS "deletedBy"
+         FROM d
+        WHERE NOT EXISTS (SELECT 1 FROM work_orders w2 WHERE w2.deleted_at IS NULL
+                           AND w2.linked_tab_sheet_id = d.s AND w2.linked_tab_name = d.n)
+          AND NOT EXISTS (SELECT 1 FROM trackb_work_order_links l JOIN work_orders w3 ON w3.id = l.work_order_id AND w3.deleted_at IS NULL
+                           WHERE l.sheet_id = d.s AND l.tab_name = d.n AND l.deleted_at IS NULL)
+        GROUP BY 1, 2`);
+    const map = {};
+    for (const r of rows) {
+      const v = { deletedAt: r.deletedAt, deletedBy: r.deletedBy || '' };
+      map[_FIN_KEY(r.sheetId, r.tabName)] = v;
+      const g = String(r.tabGid == null ? '' : r.tabGid).trim();
+      if (g) map[_FIN_GKEY(r.sheetId, g)] = v;   // 탭 이름이 바뀐 뒤에도(마감·공고 주석과 같은 이름 → gid 폴백)
+    }
+    return { ok: true, map };
+  } catch (err) {
+    logger.warn(`[trackB] sourceOrderDeletedMap 실패(주석 없이 계속): ${err.message}`);
+    return { ok: false, map: {} };
+  }
+}
+
 /** 마감/복귀. finish=true 는 **검수 확인(inspected)** 없이는 거부한다(사용자 확정 ㉠ — 서버가 최종 방어).
  *  멱등: 이미 마감된 탭 재마감·마감 아닌 탭 복귀 모두 no-op 성공. 활성 1건은 부분 유니크가 보장.
  *
@@ -6396,7 +6436,7 @@ module.exports = {
   setWorkdeskAdvertiserOrder,
   getWorkdeskWorktabs,
   setWorkdeskWorktabs,
-  finishedTabsMap, isTabFinishedIn,
+  finishedTabsMap, isTabFinishedIn, sourceOrderDeletedMap,
   setTabFinished,
   autoFinishEligibleTabs,
   tabStatsMap,

@@ -111,9 +111,12 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
       //   ★ fresh=1 = 공고를 방금 저장한 직후의 재조회(30초 캐시를 건너뛴다). 없으면 발행하고도
       //     한동안 [＋공고발행]이 그대로 남아 "저장이 안 된 것"으로 보인다.
       const camps = req.query.stats === '1' ? await svc.tabCampaignsMap({ force: req.query.fresh === '1' }) : null;
+      // ★ 결정 254: 원본 오더가 인트라넷에서 삭제된 작업 주석(홈 작업 목록 전용 · 실패 = 주석 없음)
+      const sod = req.query.stats === '1' ? await svc.sourceOrderDeletedMap() : null;
       if (!fin.ok) out.finishedUnavailable = true;
       if (stats && !stats.ok) out.statsUnavailable = true;
       if (camps && !camps.ok) out.campaignsUnavailable = true;
+      if (sod && !sod.ok) out.sourceOrderDeletedUnavailable = true;   // 결정 254: 실패를 알려 화면이 기존 표시를 덮지 않게
       for (const t of tabs) {
         // 이름 우선 → gid 폴백(운영 중 탭 리네임으로 마감이 조용히 풀리는 것 방지)
         const g = String(t.tabGid == null ? '' : t.tabGid).trim();
@@ -127,6 +130,10 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
         if (camps) {
           const c = camps.map[`${t.sheetId}\t${t.tabName}`] || (g ? camps.map[`${t.sheetId}\tgid:${g}`] : null);
           if (c && c.length) t.campaigns = c;
+        }
+        if (sod) {
+          const d = sod.map[`${t.sheetId}\t${t.tabName}`] || (g ? sod.map[`${t.sheetId}\tgid:${g}`] : null);
+          if (d) t.sourceOrderDeleted = d;
         }
       }
     }

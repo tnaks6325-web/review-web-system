@@ -1220,7 +1220,13 @@ router.delete('/intake/:id', async (req, res, next) => {
     }
     // 이미 삭제됨 → 멱등 처리 (재시도 안전)
     if (cur[0].deleted_at) {
-      return res.json({ ok: true, id, alreadyDeleted: true });
+      res.json({ ok: true, id, alreadyDeleted: true });
+      // ★ 결정 254(Codex PR #1646): 지난번 정리가 재배포·일시 오류로 못 돌았어도 다시 보낸 삭제 요청이 정리를 다시 시도한다(멱등 — 이미 지웠으면 no_tab)
+      setImmediate(() => {
+        require('../services/workTabDelete.service').autoCleanupDeletedOrderTab(id, { by: '인트라넷 오더 삭제(재시도)' })
+          .catch(e => logger.warn(`[order] 오더 삭제 후 작업 정리 재시도 실패(무시): ${e.message}`));
+      });
+      return;
     }
 
     await pool.query(
@@ -1235,6 +1241,13 @@ router.delete('/intake/:id', async (req, res, next) => {
 
     logger.info(`[order] 인트라넷 작업오더 삭제: ${id} (by ${b.deleted_by || '?'})`);
     res.json({ ok: true, id });
+    /* ★★ 결정 254 — 그 오더가 만든 작업이 손대지 않은 빈 작업이면 함께 정리한다(응답 뒤 · 절대 throw 없음).
+       지우고 다시 올리면 빈 작업보드가 남아 같은 작업이 두 개로 보이던 문제(10/7 탄소매트·10/14 라자가구). 손댄 작업은 남기고 홈 목록에 "원본 오더 삭제됨". */
+    const _by = `인트라넷 오더 삭제(${(b.deleted_by_name || b.deleted_by || '').toString().trim() || '?'})`;
+    setImmediate(() => {
+      require('../services/workTabDelete.service').autoCleanupDeletedOrderTab(id, { by: _by })
+        .catch(e => logger.warn(`[order] 오더 삭제 후 작업 정리 실패(무시): ${e.message}`));
+    });
   } catch (err) {
     next(err);
   }
@@ -2350,6 +2363,14 @@ router.delete('/admin/delete', authMiddleware, adminOrMasterMiddleware, async (r
 
     logger.info(`[order] 관리자 작업오더 삭제: ${id} (by ${deletedBy}), 인트라넷 전파=${delivered}`);
     res.json({ ok: true, id, intranetDeleted: delivered, deliverError });
+    // ★ 결정 254: 리뷰웹 관리자 삭제도 인트라넷 삭제와 같이 손대지 않은 빈 작업을 정리한다(응답 뒤 · throw 없음)
+    if (!o.deleted_at) {
+      const _by = `리뷰웹 오더 삭제(${deletedBy || '?'})`;
+      setImmediate(() => {
+        require('../services/workTabDelete.service').autoCleanupDeletedOrderTab(id, { by: _by })
+          .catch(e => logger.warn(`[order] 오더 삭제 후 작업 정리 실패(무시): ${e.message}`));
+      });
+    }
   } catch (err) {
     next(err);
   }
