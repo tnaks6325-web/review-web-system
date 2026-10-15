@@ -2041,7 +2041,7 @@
   .cndwarnbox{background:var(--warn-soft);border:1px solid #f3e2c4;border-radius:9px;padding:9px 11px;
               font-size:11.5px;color:var(--ink);margin-bottom:11px;line-height:1.5}
   /* 리뷰타입 칩 선택 표시(미니 팝업) */
-  #cndRtChips .wbl-b.on,#cndPayerChips .wbl-b.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  #cndRtChips .wbl-b.on,#cndBkChips .wbl-b.on{background:var(--accent);color:#fff;border-color:var(--accent)}
   /* 발주 줄 — 전폭 띠(.wobar) 폐기, 카드 맨 아래 한 줄 */
   .tp3wo.lk{margin-top:auto;font-size:10.5px;color:var(--muted)}
   .tp3wo.lk .nm{font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto}
@@ -7535,8 +7535,6 @@ function _condCardHtml(wd,d,m){
     ['이체은행','bank',  cd.transferBankLabel?`${esc(cd.transferBankLabel)}`+
       (cd.bankSource==='auto'?' <span class="cndchip" title="작업오더 물건비에서 자동 판정된 값입니다(현금→하나은행 · 계산서/수수료→케이뱅크). 직접 정하려면 누르세요.">자동</span>':''):null],
     ['리뷰타입','rtype', _cndRtypeHtml(cd)],
-    /* 결정 247 — 누가 페이백을 보내나. 업체 직접 입금이면 업체 화면에 계좌가 보이고 우리 입금관리에서 빠진다(내부 전용 행). */
-    ['입금 주체','payer', cd.advertiserPayout===true?'🏢 업체 직접 입금':'우리 입금'],
   ]/* ★ 광고주 표기 항목(사용자 확정 2026-08-23) — 작업명·메인URL·일정·구매시간·총건수·일건수·
        결제금액·구매채널·유입방식·리뷰타입. 나머지(다계정·현금영수증·리뷰비·입금명)는 내부 전용이라
        **서버 렌즈가 이미 값을 안 보내지만**, 빈 행까지 그리면 「—」 네 줄이 남으므로 여기서 뺀다. */
@@ -7624,9 +7622,6 @@ function _cndFixGate(cd,kind){
     if(cd.campaignId) return {can:true,tip:'모집인원 조절 창을 엽니다 — 정원은 차수·이월·날짜별 조절과 함께 그곳에서 정합니다.'};
     return {can:true,tip:'모집공고 설정을 엽니다 — 연결 작업오더 값은 미리 채우기만 하며 정원은 공고에서 저장합니다.'};
   }
-  if(kind==='payer') return isAdmin
-    ? {can:true,tip:'누가 페이백을 보낼지 정합니다 — 업체 직접 입금이면 업체 화면에 계좌가 보이고 우리 입금관리에서 빠집니다.'}
-    : {can:false,tip:'입금 주체는 관리자만 바꿀 수 있습니다.'};
   if(kind==='fee'||kind==='memo'||kind==='bank'){
     const what = kind==='fee'?'리뷰비':kind==='memo'?'입금명':'이체은행';
     if(cd.campaignId) return {can:true,tip:'모집공고 수정 창을 엽니다 — 저장하면 이 작업 조건과 공고 카드에 함께 반영됩니다.'};
@@ -7646,7 +7641,6 @@ async function _cndFix(kind){
   const cd=(STATE.wd&&STATE.wd.condition)||null; if(!cd) return;
   const g=_cndFixGate(cd,kind); if(!g.can){ _toast(g.tip); return; }
   if(kind==='tab') return _cndCashModal();
-  if(kind==='payer') return _cndPayerModal(cd);
   if(kind==='quota'){
     if(cd.campaignId) return openCurrentCampaignDailyPlan();
     return _cndPublish(cd);                                 // 작업오더 값은 공고 프리필로만 사용
@@ -7727,66 +7721,37 @@ function _cndRtypeModal(cd){
   document.querySelectorAll('#cndRtChips .wbl-b').forEach(b=>{ if(b.dataset.v===curLb) b.classList.add('on'); });
 }
 /* 이체은행 — 탭 설정(공고가 없을 때). 저장 창구는 리뷰비·입금명과 **같은** transfer-setting.
-   ★ 선택지는 서버가 받는 값 그대로(자동/hana/kbank) — 다른 은행을 넣으면 서버가 거부한다.
+   ★ 선택지는 서버가 받는 값 그대로(자동/hana/kbank/advertiser) — 다른 은행을 넣으면 서버가 거부한다.
+   ★ 결정 247 — 'advertiser' = 업체입금(업체가 페이백을 직접 보낸다 · 모집공고 이체은행과 같은 선택지).
    ★ '자동'은 값을 비우는 것 = 작업오더 물건비 판정으로 되돌린다(지우기가 아니라 되돌리기). */
+/* 결정 247 — 이체은행 「업체입금」 안내(탭 설정 창 · 모집공고 창이 같은 말을 한다: recruit-modal.js 의 RF_ADV_PAYOUT_NOTE). */
+const _ADV_PAYOUT_NOTE_HTML=`<div class="cndnote"><b>🏢 업체입금</b>을 고르면 업체가 페이백을 직접 보냅니다 —<br>`+
+  `· 이 작업을 가진 업체의 작업보드(대표 링크·업체 로그인)에 <b>은행·계좌번호·예금주</b>가 보입니다(리뷰 제출 끝 + 미입금 줄만 · 브랜드 링크 제외)<br>`+
+  `· 업체가 입금 칸을 우클릭해 <b>입금일을 기록</b>합니다 · <b>우리 입금관리·이체 파일에서는 빠집니다</b><br>`+
+  `<span style="color:#B91C1C">⚠ 업체 링크는 로그인 없이 열립니다 — 링크를 가진 사람은 참여자 계좌를 봅니다.</span></div>`;
+const _ADV_PAYOUT_OFF_CONFIRM='업체입금을 다른 이체은행으로 바꿉니다.\n\n· 입금일이 기록되지 않은 줄이 바로 우리 입금관리 목록으로 돌아옵니다\n· 업체가 이미 보냈는데 날짜만 안 적은 줄이 있는지 먼저 업체에 확인해 주세요(그대로 보내면 이중 입금)\n· 업체 화면의 계좌 칸·입금일 기록은 바로 닫힙니다\n\n진행할까요?';
 function _cndBankModal(cd){
   const cur = cd.bankSource==='campaign'||cd.bankSource==='tab' ? (cd.transferBank||'') : '';
-  const opts=[['','🔄 자동(작업오더 물건비)'],['hana','🟩 하나은행'],['kbank','🟦 케이뱅크']];
+  const opts=[['','🔄 자동(작업오더 물건비)'],['hana','🟩 하나은행'],['kbank','🟦 케이뱅크'],['advertiser','🏢 업체입금']];
   _cndMini({
     title:'🏦 이체은행 — 탭 설정',
     body: `<div class="cndchips" id="cndBkChips">${opts.map(([v,l])=>`<button type="button" class="wbl-b${v===cur?' on':''}" data-v="${esc(v)}" onclick="_cndBkPick(this)">${esc(l)}</button>`).join('')}</div>`+
       `<div class="cndnote">이체 파일을 어느 은행 서식으로 뽑을지 정합니다 — <b>입금관리</b>가 이 값을 씁니다.<br>`+
       `자동으로 두면 작업오더의 물건비를 따릅니다(현금 → 하나은행 · 계산서/수수료 → 케이뱅크).<br>`+
-      `아직 모집공고가 없어 <b>탭 설정</b>에 저장합니다 — 공고를 발행하면 <b>공고 값이 우선</b>합니다(자동).</div>`,
+      `아직 모집공고가 없어 <b>탭 설정</b>에 저장합니다 — 공고를 발행하면 <b>공고 값이 우선</b>합니다(자동).</div>`+
+      _ADV_PAYOUT_NOTE_HTML,
     onSave: async ()=>{
       const sel=document.querySelector('#cndBkChips .wbl-b.on');
       if(!sel){ _toast('이체은행을 선택해 주세요.'); return false; }
+      if(cur==='advertiser' && sel.dataset.v!=='advertiser' && !confirm(_ADV_PAYOUT_OFF_CONFIRM)) return false;
       const t=STATE.cur;
       const r=await api('/api/trackb/payment/transfer-setting',{method:'POST',
         body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,bank:sel.dataset.v})}).catch(()=>null);
-      if(!r||!r.ok){ _toast('저장하지 못했습니다'+(r&&r.error?' — '+r.error:'')); return false; }
+      if(!r||!r.ok){ _toast(r&&r.error?r.error:'저장하지 못했습니다'); return false; }
       return true;
     }
   });
 }
-/* ══ 입금 주체 — 업체 직접 입금 스위치 (결정 247 · 사용자 확정 2026-10-14) ══════════════════════
-   ★ 저장 창구 하나(POST /api/trackb/payment/advertiser-payout · 관리자 전용). 공고와 무관한 탭 설정이다.
-   ★ 켜기 전에 무엇이 바뀌는지와 **업체 링크는 로그인 없이 열린다**는 위험을 그대로 말한다(조용히 계좌를 열지 않는다). */
-const _PAYER_ERRORS={
-  not_sheetless:'구글시트를 아직 쓰는 작업이라 켤 수 없습니다 — 업체 입금일 기록은 시트 없이 운영하는 작업에서만 됩니다.',
-  no_advertiser:'이 작업에 연결된 업체가 없어 켤 수 없습니다 — 업체관리에서 작업을 업체에 먼저 연결해 주세요.',
-  tab_not_found:'이 작업의 설정을 찾지 못했습니다 — 새로고침 후 다시 시도해 주세요.',
-};
-function _cndPayerModal(cd){
-  const cur=cd&&cd.advertiserPayout===true;
-  const opts=[['0','우리 입금'],['1','🏢 업체 직접 입금']];
-  _cndMini({
-    title:'💰 입금 주체 — 누가 페이백을 보내나요?',
-    body:`<div class="cndchips" id="cndPayerChips">${opts.map(([v,l])=>`<button type="button" class="wbl-b${(v==='1')===cur?' on':''}" data-v="${v}" onclick="_cndPayerPick(this)">${esc(l)}</button>`).join('')}</div>`+
-      `<div class="cndnote"><b>업체 직접 입금</b>으로 바꾸면<br>`+
-      `· 이 작업에 연결된 업체의 작업보드(<b>대표 링크·업체 로그인</b>)에 <b>은행·계좌번호·예금주</b>가 보입니다(리뷰 제출이 끝나고 아직 입금 안 된 줄만 · 브랜드 링크에는 안 보입니다)<br>`+
-      `· 업체가 입금 칸을 우클릭해 <b>입금일을 기록</b>합니다 — 리뷰어 화면에 입금 날짜가 표시됩니다<br>`+
-      `· <b>우리 입금관리 목록과 이체 파일에서 빠집니다</b>(이중 입금 방지)<br>`+
-      `<span style="color:#B91C1C">⚠ 업체 링크는 로그인 없이 열립니다 — 링크를 가진 사람은 참여자 계좌를 보게 됩니다. 믿을 수 있는 담당자에게만 링크를 주세요.</span></div>`,
-    savedMsg:'입금 주체를 저장했습니다',
-    onSave: async ()=>{
-      const sel=document.querySelector('#cndPayerChips .wbl-b.on');
-      if(!sel){ _toast('입금 주체를 선택해 주세요.'); return false; }
-      const on=sel.dataset.v==='1';
-      /* ★ 끌 때는 확인을 받는다(리뷰 반영) — 입금일이 아직 기록 안 된 줄이 **바로 우리 입금 목록으로 돌아온다**.
-           업체가 이미 보냈는데 날짜만 안 적은 줄을 우리가 또 보내면 이중 입금이다. */
-      if(cur && !on && !confirm('업체 직접 입금을 끕니다.\n\n· 입금일이 기록되지 않은 줄이 바로 우리 입금관리 목록으로 돌아옵니다\n· 업체가 이미 보냈는데 날짜만 안 적은 줄이 있는지 먼저 업체에 확인해 주세요(그대로 보내면 이중 입금)\n· 업체 화면의 계좌 칸·입금일 기록은 바로 닫힙니다\n\n진행할까요?')) return false;
-      const t=STATE.cur;
-      const r=await api('/api/trackb/payment/advertiser-payout',{method:'POST',
-        body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,enabled:on})}).catch(()=>null);
-      if(!r||!r.ok){ _toast(_PAYER_ERRORS[r&&r.error]||('저장하지 못했습니다'+(r&&r.error?' — '+r.error:''))); return false; }
-      // 연결된 업체가 여럿이면 전부 계좌를 보게 된다 — 누구에게 열렸는지 이름으로 말한다.
-      if(on && Array.isArray(r.advertiserNames) && r.advertiserNames.length) setTimeout(()=>_toast('계좌가 보이는 업체: '+r.advertiserNames.join(', ')),900);
-      return true;
-    }
-  });
-}
-function _cndPayerPick(el){ document.querySelectorAll('#cndPayerChips .wbl-b').forEach(b=>b.classList.remove('on')); el.classList.add('on'); }
 function _cndBkPick(el){ document.querySelectorAll('#cndBkChips .wbl-b').forEach(b=>b.classList.remove('on')); el.classList.add('on'); }
 function _cndRtPick(el){ document.querySelectorAll('#cndRtChips .wbl-b').forEach(b=>b.classList.remove('on')); el.classList.add('on'); }
 /* 공고 발행 — 이 작업(탭)·작업오더 프리필로 발행 모달을 연다. 발행하면 CAMP_ON_SAVED 훅이
@@ -12235,8 +12200,8 @@ async function renderCsView(){
 const PAY_ISSUE_LABEL = {
   no_bank:'이체은행 미지정', no_reviewer:'리뷰어 정보 없음', bank_unknown:'은행명 인식불가',
   no_account:'계좌 미등록', no_holder:'예금주 미등록', no_price:'결제금액 조회안됨', zero_amount:'금액 0원',
-  advertiser_pays:'업체 직접 입금 작업', advertiser_payout_unknown:'입금 주체 확인 실패(새로고침)',
-  advertiser_pays_orphan:'업체 직접 입금인데 연결된 업체 없음 — 작업 조건 › 입금 주체 확인',
+  advertiser_pays:'업체 직접 입금 작업', advertiser_payout_unknown:'업체입금 여부 확인 실패(새로고침)',
+  advertiser_pays_orphan:'이체은행이 업체입금인데 연결된 업체 없음 — 이체은행 확인',
 };
 const PAY_BANKS = [['kbank','케이뱅크'],['hana','하나은행']];
 /* 보완 창구 분류 — ★ 사유마다 "고치는 곳"이 다르다.
@@ -12435,7 +12400,7 @@ function _pmFinishedNoteHtml(){
 function _pmAdvPaidNoteHtml(){
   const a=STATE.pmAdvPaidEx;
   if(!a||!a.rows) return '';
-  return `<div class="pmnote">🏢 업체가 직접 입금하는 작업 <b>${Number(a.works)||0}개</b>의 <b>${Number(a.rows)||0}건</b>은 목록에서 뺐습니다 — 업체가 작업보드에서 입금일을 기록합니다(작업 조건 › 입금 주체).</div>`;
+  return `<div class="pmnote">🏢 업체가 직접 입금하는 작업 <b>${Number(a.works)||0}개</b>의 <b>${Number(a.rows)||0}건</b>은 목록에서 뺐습니다 — 업체가 작업보드에서 입금일을 기록합니다(이체은행 = 업체입금).</div>`;
 }
 
 async function _pmLoad(force){

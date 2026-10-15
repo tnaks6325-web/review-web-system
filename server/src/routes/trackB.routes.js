@@ -3762,6 +3762,8 @@ router.post('/payment/batch/:id/cancel', authMiddleware, adminOrMasterMiddleware
 const _PAY_FIX_STATUS = {
   bad_target: 400, empty: 400, bad_bank: 400, bad_bank_name: 400, bad_reviewer: 400,
   campaign_mismatch: 409, tab_not_found: 404, reviewer_not_found: 404, sub_not_found: 404, sub_ambiguous: 409,
+  // 결정 247 — 이체은행 업체입금을 고를 수 없는 작업(advertiserPayout.service)
+  no_tab: 409, not_sheetless: 409, no_advertiser: 409,
 };
 function _payFix(res, err, next) {
   if (err && err.code && _PAY_FIX_STATUS[err.code]) {
@@ -3810,17 +3812,6 @@ router.post('/payment/transfer-setting', authMiddleware, adminOrMasterMiddleware
       (out.reviewFee !== undefined ? ` · 리뷰비 ${out.reviewFee == null ? '미설정' : out.reviewFee}` : ''));
     res.json(out);
   } catch (err) { _payFix(res, err, next); }
-});
-
-// 업체 직접 입금 스위치(결정 247) — 켜면 우리 입금관리에서 빠지고, 소유 업체가 계좌를 보고 입금일을 기록한다.
-//   ★ 관리자 전용(이체설정과 같은 게이트 — 계좌를 외부에 여는 결정이다). 끄기는 언제든 된다.
-router.post('/payment/advertiser-payout', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const b = req.body || {};
-    const out = await require('../services/advertiserPayout.service').setAdvertiserPayout({ sheetId: b.sheetId, tabName: b.tabName, enabled: b.enabled, by: _by(req) });
-    if (out.ok) logger.info(`[payment] 업체 직접 입금 ${out.enabled ? '켬' : '끔'} by ${_by(req)} — ${b.tabName}${out.advertiserName ? ` (업체 ${out.advertiserName})` : ''}`);
-    res.status(out.ok ? 200 : (out.error === 'tab_not_found' ? 404 : (out.error === 'bad_request' ? 400 : 409))).json(out);
-  } catch (err) { next(err); }
 });
 
 // 리뷰어 단위 — 은행명 · 계좌번호 · 예금주(그 리뷰어의 모든 행이 함께 풀린다)

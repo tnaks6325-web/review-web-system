@@ -262,8 +262,9 @@ async function listPaymentTargets(opts = {}) {
   const wbAcctMap = await _loadWorkboardAccountEdits(rows);
   const acctChangeMap = await _loadAccountChangeTimes([
     ...Object.values(acctMap), ...Object.values(ownerAcctMap)].map(a => a && a.reviewerId).filter(Boolean));
-  // ★ 결정 247 재료 — 업체가 직접 입금하는 작업(조회 실패 = null = 전 건 보류 · fail-closed)
-  const advPayoutTabs = await _loadAdvertiserPayoutTabs(sheetIds, tabNames);
+  // ★ 결정 247 재료 — 업체가 직접 입금하는 작업(이체은행 = 업체입금 · 판정 실패 = null = 전 건 보류 · fail-closed)
+  const advPayoutTabs = await _classifyAdvertiserPayout(
+    [...new Set(rows.map(r => r.sheetId + '||' + r.tabName))], campMap, tabMap);
 
   const items = rows.map(r => {
     const key = r.sheetId + '||' + r.tabName;
@@ -1289,32 +1290,58 @@ async function _loadOwnerAccountsByRow(rows) {
 /* ══ 업체 직접 입금 작업 (결정 247 · 사용자 확정 2026-10-14 "모두 권장") ══════════════════════════════
  * 업체가 참여자 페이백을 직접 보내는 작업. 켜면 ① 우리 입금관리·이체 회차에서 빠지고 ② 그 작업을 소유한 업체(대표 링크)가
  * 작업보드에서 송금 계좌를 보고 입금일을 기록한다(trackB.service.workdeskTab · setWorkdeskDepositDate).
- * ★ 스위치 저장은 advertiserPayout.service — 이 파일(M1 본체)은 payment_* 표에만 쓴다(paymentBatch 회귀가드).
- * ★ 저장소는 tab_configs 한 칸(migration 189) — 이체은행·입금명과 같은 "탭 단위 이체설정" 자리다.
+ * ★ 2026-10-15 — 업체 직접 입금 = **이체은행 선택지 「업체입금」**(아래 advertiserPaysFrom). 따로 둔 스위치(migration 189 칸)는 쓰지 않는다.
  */
 
-/** 업체 직접 입금 작업 키('sheetId||tabName') — { paid: 지금 주인 업체가 있는 작업, orphan: 스위치는 켜졌는데 주인 업체가 없는 작업 }.
- *  ★ 주인 = trackB.advertiserForTab(탭 지정 > 시트 전체 — 화면 노출·입금 기록과 같은 판정). 켠 뒤 업체 연결을 지우면
- *    아무도 보내지 못하는데 우리 목록에서도 조용히 빠지는 막다른 길이 된다(Codex 리뷰) → orphan 은 **보류로 목록에 남겨** 말한다.
- *  조회 실패 = null(호출부가 전 건 보류로 접는다 · fail-closed). */
-async function _loadAdvertiserPayoutTabs(sheetIds, tabNames) {
+/* ★ 업체입금 = 이체은행 선택지 하나(2026-10-15 사용자 요청 — 따로 둔 "입금 주체" 스위치를 없앴다).
+ *   공고: `recruit_campaigns.transfer_bank='advertiser'` / 탭: `tab_configs.transfer_bank='업체입금'`(탭은 한글 라벨 관례).
+ *   ★ normalizeBankChoice 는 그대로 kbank|hana 만 돌려준다 — 이체 파일 서식 판정이라 '업체입금'이 은행으로 새면 안 된다. */
+const ADVERTISER_PAYOUT = 'advertiser';
+const ADVERTISER_PAYOUT_LABEL = '업체입금';
+function isAdvertiserPayoutChoice(v) {
+  const s = String(v == null ? '' : v).replace(/\s/g, '').toLowerCase();
+  return s === ADVERTISER_PAYOUT || s === ADVERTISER_PAYOUT_LABEL;
+}
+/** 그 작업이 업체 직접 입금인가 — **이체은행과 같은 순서**(공고에 사람이 정한 값 → 탭 설정). 공고가 하나/케이를 명시했으면 탭 값은 보지 않는다. */
+function advertiserPaysFrom(campRaw, tabRaw) {
+  if (isAdvertiserPayoutChoice(campRaw)) return true;
+  if (normalizeBankChoice(campRaw)) return false;
+  return isAdvertiserPayoutChoice(tabRaw);
+}
+
+/** 업체 직접 입금 작업 분류 — { paid: 지금 주인 업체가 있는 작업, orphan: 업체입금인데 주인 업체가 없는 작업 }.
+ *  재료 = 대상 계산이 이미 읽은 그 공고(campMap)·탭 설정(tabMap) — 판정 사본 0.
+ *  ★ 주인 = trackB.advertiserForTab(탭 지정 > 시트 전체 — 화면 노출·입금 기록과 같은 판정). 업체 연결을 지우면
+ *    아무도 보내지 못하는데 우리 목록에서도 조용히 빠지는 막다른 길이 된다 → orphan 은 **보류로 목록에 남겨** 말한다.
+ *  ★ 탭 설정 조회가 실패했으면(탭의 업체입금을 모른다) null = 전 건 보류(fail-closed — 업체도 보내고 우리도 보내면 되돌릴 수 없다). */
+async function _classifyAdvertiserPayout(keys, campMap, tabMap) {
   const out = { paid: new Set(), orphan: new Set() };
-  if (!sheetIds.length) return out;
+  if (tabMap && tabMap.failed) return null;
   try {
-    const { rows } = await pool.query(
-      `SELECT sheet_id AS "sheetId", tab_name AS "tabName" FROM tab_configs
-        WHERE sheet_id = ANY($1) AND tab_name = ANY($2) AND advertiser_payout = TRUE`,
-      [sheetIds, tabNames]);
-    const tb = rows.length ? require('./trackB.service') : null;   // 지연 require(순환 방지)
-    for (const r of rows) {
-      const owner = await tb.advertiserForTab({ sheetId: r.sheetId, tabName: r.tabName });
-      (owner && owner.id ? out.paid : out.orphan).add(r.sheetId + '||' + r.tabName);
+    const tb = require('./trackB.service');   // 지연 require(순환 방지)
+    for (const key of keys) {
+      const camp = campMap[key] || null, tab = tabMap[key] || null;
+      if (!advertiserPaysFrom(camp && camp.transferBank, tab && tab.transferBank)) continue;
+      const [sheetId, tabName] = key.split('||');
+      const owner = await tb.advertiserForTab({ sheetId, tabName });
+      (owner && owner.id ? out.paid : out.orphan).add(key);
     }
     return out;
   } catch (e) {
-    logger.warn('[payment] 업체 직접 입금 작업 조회 실패(전 건 보류): ' + e.message);
+    logger.warn('[payment] 업체 직접 입금 판정 실패(전 건 보류): ' + e.message);
     return null;
   }
+}
+
+/** 잠금 안에서 다시 보는 업체 직접 입금 여부 — 대상 계산(_loadCampaigns)과 **같은 공고**(연결 탭의 가장 최근 공고)·탭 설정을
+ *  FOR SHARE 로 읽는다(공고 수정·탭 이체설정 저장과 직렬화 — 바꾸는 중이면 끝난 뒤 값을 본다). */
+async function advertiserPayoutLocked(client, sheetId, tabName) {
+  const { rows: t } = await client.query(
+    `SELECT transfer_bank FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1 FOR SHARE`, [sheetId, tabName]);
+  const { rows: c } = await client.query(
+    `SELECT transfer_bank FROM recruit_campaigns WHERE linked_sheet_id=$1 AND linked_tab_name=$2
+      ORDER BY created_at DESC LIMIT 1 FOR SHARE`, [sheetId, tabName]);
+  return advertiserPaysFrom(c[0] && c[0].transfer_bank, t[0] && t[0].transfer_bank);
 }
 
 /**
@@ -1386,7 +1413,11 @@ async function _loadTabMeta(sheetIds, tabNames) {
         sheetUrl: tabSheetUrl({ sheetId: t.sheetId, tabGid: t.tabGid }),
       };
     }
-  } catch (e) { logger.warn('[payment] 탭 메타 조회 실패(탭명 사용): ' + e.message); }
+  } catch (e) {
+    logger.warn('[payment] 탭 메타 조회 실패(탭명 사용): ' + e.message);
+    // 결정 247 — 탭 설정의 업체입금을 모르게 됐다는 표시(대상 계산이 전 건 보류로 접는다). 열거되지 않게 둔다.
+    Object.defineProperty(map, 'failed', { value: true, enumerable: false });
+  }
   return map;
 }
 
@@ -1475,10 +1506,9 @@ async function createBatch({ bank, rows, by }) {
         /* ★★ 결정 247 — 잠근 줄에서 **다시** 본다(대상 목록은 잠그기 전에 계산했다):
              ① 그 사이 업체 직접 입금으로 바뀐 작업 ② 작업표 입금 칸에 이미 날짜가 있는 줄(업체가 기록했는데 장부 재생성이
              밀려 review_index 가 아직 미입금인 경우 — 그대로 담으면 업체와 우리가 둘 다 보낸다). 걸리면 그 건만 건너뛴다. */
-        // FOR SHARE — 스위치 저장(UPDATE)과 직렬화한다(켜는 중이면 끝날 때까지 기다렸다가 켜진 값을 본다).
-        const { rows: payerRows } = await client.query(
-          `SELECT advertiser_payout FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1 FOR SHARE`, [it.sheetId, it.tabName]);
-        const lateReason = (payerRows[0] && payerRows[0].advertiser_payout === true) ? 'advertiser_pays'
+        // FOR SHARE — 공고 수정·탭 이체설정 저장과 직렬화한다(업체입금으로 바꾸는 중이면 끝난 뒤 값을 본다).
+        const lateAdv = await advertiserPayoutLocked(client, it.sheetId, it.tabName);
+        const lateReason = lateAdv ? 'advertiser_pays'
           : (lockRows[0] && String(lockRows[0].paidCell == null ? '' : lockRows[0].paidCell).trim()) ? 'already_paid' : '';
         if (lateReason) {
           await client.query('RELEASE SAVEPOINT sp_item');
@@ -1868,8 +1898,15 @@ async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo, r
   // 빈 값 = 지움(자동 판정으로 되돌림) / 모르는 표기는 거부(추측 저장 금지)
   let bankCode = null;
   if (touchBank && String(bank || '').trim() !== '') {
-    bankCode = normalizeBankChoice(bank);
-    if (!bankCode) throw new PaymentFixError('bad_bank', '이체은행은 케이뱅크 또는 하나은행만 지정할 수 있습니다.');
+    if (isAdvertiserPayoutChoice(bank)) {
+      // 결정 247 — 업체입금은 고를 수 있는 작업인지 먼저 본다(시트 없는 작업 + 주인 업체 있음).
+      const chk = await require('./advertiserPayout.service').checkAdvertiserPayoutAllowed({ sheetId: sid, tabName: tab });
+      if (!chk.ok) throw new PaymentFixError(chk.error, chk.message);
+      bankCode = ADVERTISER_PAYOUT;
+    } else {
+      bankCode = normalizeBankChoice(bank);
+      if (!bankCode) throw new PaymentFixError('bad_bank', '이체은행은 케이뱅크·하나은행·업체입금 중에서만 지정할 수 있습니다.');
+    }
   }
   const memoText = touchMemo ? normalizeMemo(String(memo || '')) : null;
 
@@ -1917,7 +1954,7 @@ async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo, r
             review_fee    = CASE WHEN $7::bool THEN $8::int ELSE review_fee END,
             updated_at    = NOW()
       WHERE sheet_id = $1 AND tab_name = $2`,
-    [sid, tab, touchBank, bankCode ? tabBankLabel(bankCode) : '', touchMemo, memoText, touchFee, feeVal]);
+    [sid, tab, touchBank, bankCode === ADVERTISER_PAYOUT ? ADVERTISER_PAYOUT_LABEL : (bankCode ? tabBankLabel(bankCode) : ''), touchMemo, memoText, touchFee, feeVal]);
   if (!rowCount) throw new PaymentFixError('tab_not_found', '탭 설정이 없어 저장하지 못했습니다(작업오더 접수 전 탭일 수 있습니다).');
   return { ok: true, target: 'tab', bank: bankCode, memo: memoText || '', reviewFee: touchFee ? feeVal : undefined };
 }
@@ -2015,5 +2052,6 @@ module.exports = {
   saveTransferSetting, saveReviewerAccount, checkBatchAccountSnapshots, reconcileAccountSnapshots,
   compareAccountSnapshot, accountFingerprint, resolveWorkManager, flagPriceOutliers, PaymentFixError,
   _acctChangedAt, _holderKey,
-  advertiserPayoutAccounts, _loadAdvertiserPayoutTabs,
+  advertiserPayoutAccounts, advertiserPayoutLocked, advertiserPaysFrom, isAdvertiserPayoutChoice,
+  ADVERTISER_PAYOUT, ADVERTISER_PAYOUT_LABEL, _classifyAdvertiserPayout,
 };

@@ -73,7 +73,12 @@ function _prepWorkDetail(wd) {
  */
 function _normTransferBank(v) {
   const s = String(v == null ? '' : v).trim().toLowerCase();
-  return (s === 'kbank' || s === 'hana') ? s : null;
+  // 결정 247(2026-10-15) — 'advertiser' = 업체입금(업체가 페이백을 직접 보낸다 · 우리 이체에서 빠진다).
+  return (s === 'kbank' || s === 'hana' || s === 'advertiser') ? s : null;
+}
+/* 업체입금을 고를 수 있는 공고인가(시트 없는 연결 작업 + 주인 업체) — 못 고르면 저장 전체를 막고 이유를 말한다(막다른 길 방지). */
+async function _advertiserPayoutGate(sheetId, tabName) {
+  return require('../services/advertiserPayout.service').checkAdvertiserPayoutAllowed({ sheetId, tabName });
 }
 
 function _genCampaignId() {
@@ -3126,6 +3131,11 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         logger.info(`[campaign] 연결탭 자동 보정(생성): wo=${source_work_order_id} → ${wo.tabName}`);
       }
     }
+    // ★ 결정 247 — 이체은행 업체입금은 고를 수 있는 작업에서만(연결 작업이 시트 없는 작업 + 주인 업체 있음).
+    if (_normTransferBank(transfer_bank) === 'advertiser') {
+      const g = await _advertiserPayoutGate(lSheet, lTab);
+      if (!g.ok) return res.status(400).json({ ok: false, code: 'ADVERTISER_PAYOUT_NOT_ALLOWED', error: g.message });
+    }
     const effectiveSkipWeekends = sourceWorkOrder
       ? sourceWorkOrder.skipWeekends
       : requestedSkipWeekends;
@@ -3543,6 +3553,19 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       const displayTab = intentionallyUnlinked ? '' : (lTab || displayScope.linked_tab_name || '');
       if (!displaySheet || !displayTab) {
         return res.status(400).json({ ok: false, error: '작업보드 표시명은 연결된 작업보드에서만 설정할 수 있습니다.' });
+      }
+    }
+
+    // ★ 결정 247 — 이체은행을 **업체입금으로 바꿀 때만** 고를 수 있는 작업인지 본다(이미 업체입금인 공고의 다른 칸 저장은 막지 않는다).
+    if (_normTransferBank(transfer_bank) === 'advertiser') {
+      const { rows: tbRows } = await pool.query(
+        'SELECT transfer_bank, linked_sheet_id, linked_tab_name FROM recruit_campaigns WHERE id = $1', [id]);
+      const tb0 = tbRows[0] || {};
+      if (String(tb0.transfer_bank || '') !== 'advertiser') {
+        const g = await _advertiserPayoutGate(
+          intentionallyUnlinked ? '' : (lSheet || tb0.linked_sheet_id || ''),
+          intentionallyUnlinked ? '' : (lTab || tb0.linked_tab_name || ''));
+        if (!g.ok) return res.status(400).json({ ok: false, code: 'ADVERTISER_PAYOUT_NOT_ALLOWED', error: g.message });
       }
     }
 

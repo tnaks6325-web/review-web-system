@@ -3193,13 +3193,18 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
        공고를 그대로**(`payment.service.campaignForTab`) 가져와 같은 판정 함수로 고른다.
        순서 = 공고(사람이 정한 값) → 탭 설정 → 작업오더 물건비 자동판정(현금→하나 · 계산서/수수료→케이뱅크).
        ★ `auto` 는 **사람이 정하지 않았다**는 뜻이라 화면이 그 사실을 말한다(조용한 추정 금지). */
-    const { normalizeBankChoice, bankFromGoodsCostType, BANK_LABEL, campaignForTab } = require('./payment.service');
+    const { normalizeBankChoice, bankFromGoodsCostType, BANK_LABEL, campaignForTab,
+            advertiserPaysFrom, isAdvertiserPayoutChoice, ADVERTISER_PAYOUT, ADVERTISER_PAYOUT_LABEL } = require('./payment.service');
     const txCamp = await campaignForTab(sheetId, tabName).catch(() => null);
     const campBank = normalizeBankChoice(txCamp && txCamp.transferBank);
     const tabBank  = normalizeBankChoice(meta.tabTransferBank);
     const autoBank = bankFromGoodsCostType((wo && wo.goodsCostType) || '');
-    const transferBank = campBank || tabBank || autoBank || null;
-    const bankSource = campBank ? 'campaign' : tabBank ? 'tab' : transferBank ? 'auto' : null;
+    /* 결정 247 — 이체은행 = 업체입금이면 그 값이 이체은행 칸에 그대로 보인다(판정 = advertiserPaysFrom 단일 출처, 입금 대상과 같은 공고). */
+    const advertiserPayout = advertiserPaysFrom(txCamp && txCamp.transferBank, meta.tabTransferBank);
+    const advFromCamp = advertiserPayout && isAdvertiserPayoutChoice(txCamp && txCamp.transferBank);
+    const transferBank = advertiserPayout ? ADVERTISER_PAYOUT : (campBank || tabBank || autoBank || null);
+    const bankSource = advertiserPayout ? (advFromCamp ? 'campaign' : 'tab')
+      : campBank ? 'campaign' : tabBank ? 'tab' : transferBank ? 'auto' : null;
 
     const { resolveReviewType, reviewTypeLabel, normalizeReviewType, parseWorkOrderReviewType,
             isFreeChoiceReviewType, FREE_CHOICE_REVIEW_LABEL } = require('../utils/reviewType');
@@ -3372,12 +3377,12 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
          되고, 정작 이체 서식에는 공고 값이 찍혀 화면과 파일이 갈린다(사용자 확정 2026-08-20:
          공고를 나중에 만들면 공고 설정값이 우선한다). */
       depositName: ((memoCamp && memoCamp.transferMemo) || meta.depositName || '') || null,
-      /* 결정 247 — 업체 직접 입금 작업인가(내부 카드의 「입금 주체」). 업체 렌즈(_condAdvertiserLens)는 화이트리스트라 나가지 않는다. */
-      advertiserPayout: meta.advertiserPayout === true,
+      /* 결정 247 — 업체 직접 입금 작업인가(이체은행 = 업체입금). 업체 렌즈(_condAdvertiserLens)는 화이트리스트라 나가지 않는다. */
+      advertiserPayout,
       /* 이체은행 — 값·라벨·출처를 함께 싣는다(화면이 판정을 다시 하지 않게).
          null = 정할 근거가 없음 = [미설정](작업오더 물건비도 비어 자동판정이 안 된 경우). */
       transferBank, bankSource,
-      transferBankLabel: transferBank ? (BANK_LABEL[transferBank] || transferBank) : null,
+      transferBankLabel: advertiserPayout ? ADVERTISER_PAYOUT_LABEL : (transferBank ? (BANK_LABEL[transferBank] || transferBank) : null),
       /* 판정값 — 혼합은 행 단위로 정할 수 없어 null(검수·슬롯이 보는 값, 규율 불변). */
       reviewType: rtKey,
       /* 표기값 — 혼합이면 '혼합' + 조합(아래 reviewTypeMix). 둘 다 없으면 null = [미설정]. */
@@ -3423,7 +3428,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             tc.source_of_truth AS "sourceOfTruth", COALESCE(tc.sheetless, FALSE) AS sheetless,
             COALESCE(tc.tab_gid, ima.tab_gid) AS "tabGid", tc.capture_slots AS "captureSlots",
             tc.deposit_name AS "depositName", tc.review_fee AS "tabReviewFee",
-            tc.transfer_bank AS "tabTransferBank", COALESCE(tc.advertiser_payout, FALSE) AS "advertiserPayout", TRUE AS archived,
+            tc.transfer_bank AS "tabTransferBank", TRUE AS archived,
             ima.archived_at AS "archivedAt", ima.archived_by AS "archivedBy"
        FROM index_master_archive ima
        LEFT JOIN tab_configs tc ON tc.sheet_id=ima.sheet_id AND tc.tab_name=ima.tab_name
@@ -3433,7 +3438,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             tc.source_of_truth AS "sourceOfTruth", COALESCE(tc.sheetless, FALSE) AS sheetless,
             tc.tab_gid AS "tabGid", tc.capture_slots AS "captureSlots",
             tc.deposit_name AS "depositName", tc.review_fee AS "tabReviewFee",
-            tc.transfer_bank AS "tabTransferBank", COALESCE(tc.advertiser_payout, FALSE) AS "advertiserPayout"
+            tc.transfer_bank AS "tabTransferBank"
        FROM tab_configs tc WHERE tc.sheet_id=$1 AND tc.tab_name=$2 LIMIT 1`, [sheetId, tabName]);
   const { rows: wo } = await db.query(
     `SELECT id, title, product_option AS "productOption", product_options_json AS "productOptionsJson",
@@ -3726,8 +3731,11 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   let advPayout = null;
   /* ★ 소유 판정은 **지금 주인 업체 한 곳**(advertiserForTab: 탭 지정 > 시트 전체) — canAccessTab 은 시트 전체 소유를 먼저 통과시켜
        탭을 다른 업체로 옮긴 경우 옛 주인에게도 계좌가 보인다(Codex 리뷰). */
-  if (role === 'advertiser' && !archived && advHeaders && !brandId && advertiserId && meta[0] && meta[0].advertiserPayout === true
-      && meta[0].sheetless === true
+  if (role === 'advertiser' && !archived && advHeaders && !brandId && advertiserId && meta[0] && meta[0].sheetless === true
+      // 업체 직접 입금 = 이체은행 업체입금(입금 대상 계산과 같은 공고 → 탭 순서 · 판정 실패 = 아님 = 계좌를 보이지 않는다)
+      && await (async () => { const p = require('./payment.service');
+        const c = await p.campaignForTab(sheetId, tabName).catch(() => undefined);
+        return c !== undefined && p.advertiserPaysFrom(c && c.transferBank, meta[0].tabTransferBank); })()
       && String(((await advertiserForTab({ sheetId, tabName }).catch(() => null)) || {}).id || '') === String(advertiserId)) {
     advPayout = { accounts: new Map(), unavailable: false, lockAll: '', batchSeqs: new Set(), advEntries: new Map() };
     try {
@@ -4047,7 +4055,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   };
   /* 업체 응답의 meta 에서 내부 정산 값(입금명·리뷰비·이체은행·입금 주체)을 뺀다 — 화면은 업체에게 이 값을 쓰지 않는다(리뷰 반영 · 종전부터 새던 값). */
   const _resMeta = { ...(meta[0] || {}) };
-  if (role === 'advertiser') { delete _resMeta.depositName; delete _resMeta.tabReviewFee; delete _resMeta.tabTransferBank; delete _resMeta.advertiserPayout; }
+  if (role === 'advertiser') { delete _resMeta.depositName; delete _resMeta.tabReviewFee; delete _resMeta.tabTransferBank; }
   const res = { role, maskPII, archived: !!archived, meta: _resMeta, detail: wo[0] || null, counts, roster: out,
     sourceOfTruth: (meta[0] && meta[0].sourceOfTruth) || 'sheet' };   // 진실원천(cutover 상태) 표시용
   if (showEdits) {
@@ -5131,10 +5139,9 @@ async function setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by = 'adm
     if (advertiser) {
       const advPrefix = '업체#' + String(advertiserId || '') + ':';
       if (!advertiserId) { await client.query('ROLLBACK'); return { ok: false, error: 'not_own_entry' }; }
-      // FOR SHARE — 스위치 끄기(UPDATE)와 직렬화한다. 끄는 중이면 끝날 때까지 기다렸다가 꺼진 값을 보고 거부한다(Codex 리뷰).
-      const { rows: fl } = await client.query(
-        `SELECT advertiser_payout FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1 FOR SHARE`, [sheetId, tabName]);
-      if (!(fl[0] && fl[0].advertiser_payout === true)) { await client.query('ROLLBACK'); return { ok: false, error: 'advertiser_payout_off' }; }
+      // FOR SHARE — 공고 수정·탭 이체설정 저장과 직렬화한다. 업체입금을 끄는 중이면 끝난 뒤 꺼진 값을 보고 거부한다(Codex 리뷰).
+      const advOn = await require('./payment.service').advertiserPayoutLocked(client, sheetId, tabName);
+      if (!advOn) { await client.query('ROLLBACK'); return { ok: false, error: 'advertiser_payout_off' }; }
       const { rows: bi } = await client.query(
         `SELECT 1 FROM payment_batch_items
           WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3 AND status IN ('pending','paid') LIMIT 1`,
