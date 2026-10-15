@@ -49,7 +49,10 @@ const svc = require('../src/services/workTabDelete.service');
         if (/FROM campaign_participants WHERE sheet_id=\$1 AND tab_name=\$2\s+AND \(order_submission_id IS NOT NULL/.test(sql)) return { rows: [{ x: !!hits.filled }] };
         if (/AS live,/.test(sql)) return { rows: [{ live: hits.liveCampaign ? 1 : 0, used: hits.usedCampaign ? 1 : 0 }] };
         if (/FROM work_orders w WHERE w\.deleted_at IS NULL AND w\.linked_tab_sheet_id=\$1/.test(sql)) return { rows: [{ x: !!hits.liveOrder }] };
-        if (/^UPDATE work_orders SET linked_tab_sheet_id=''/.test(sql.trim())) return { rows: [{ id: 'wo1', title: '가짜 오더', status: 'reviewing', created_by: 'x' }], rowCount: 1 };
+        if (/^UPDATE work_orders SET linked_tab_sheet_id=''/.test(sql.trim())) return { rows: [{ id: 'wo1', title: '가짜 오더', status: 'reviewing', created_by: 'x', live: !!hits.raceLiveOrder }], rowCount: 1 };
+        if (/^DELETE FROM campaign_participants/.test(sql.trim())) return { rows: [{ f: !!hits.raceFilled }], rowCount: 1 };
+        if (/^DELETE FROM recruit_campaigns/.test(sql.trim())) return { rows: hits.raceLiveCampaign ? [{ live: true }] : [], rowCount: hits.raceLiveCampaign ? 1 : 0 };
+        if (hits.raceTable && new RegExp('^DELETE FROM ' + hits.raceTable + ' ').test(sql.trim())) return { rows: [], rowCount: 1 };
         if (/^DELETE|^UPDATE|^INSERT/.test(sql.trim())) return { rows: [], rowCount: 0 };
         return { rows: [] };
       },
@@ -92,6 +95,34 @@ const svc = require('../src/services/workTabDelete.service');
       assert.strictEqual(out.workOrdersUnlinked, 1);
     } finally { memo.pushIntranetMemo = orig; memo.appendMemoLog = origLog; }
   });
+  for (const [label, hits, reason] of [
+    ['판정 뒤 셀 편집이 끼어들면', { raceTable: 'participant_edits' }, 'participant_edits'],
+    ['판정 뒤 메모가 끼어들면', { raceTable: 'trackb_tab_memos' }, 'trackb_tab_memos'],
+    ['판정 뒤 줄이 채워지면', { raceFilled: 1 }, 'filled_rows'],
+    ['판정 뒤 살아 있는 오더가 연결되면', { raceLiveOrder: 1 }, 'live_work_order'],
+    ['판정 뒤 보관 안 된 공고가 생기면', { raceLiveCampaign: 1 }, 'live_campaign'],
+  ]) {
+    await ok(`${label} 지운 결과로 잡아 통째로 되돌린다(COMMIT 없음) → ${reason}`, async () => {
+      const { log, pool } = mkPool(hits);
+      const out = await svc.deleteTask({ sheetId: 's', tabName: 't', confirm: true, onlyIfUntouched: true, notifyIntranet: false, pool });
+      assert.strictEqual(out.ok, false); assert.strictEqual(out.code, 'not_untouched'); assert.strictEqual(out.raced, true);
+      assert.ok(out.reasons.includes(reason), JSON.stringify(out.reasons));
+      assert.ok(log.includes('ROLLBACK') && !log.includes('COMMIT'));
+    });
+  }
+  await ok('자동 정리는 주문 기록과 같은 탭 잠금을 **먼저** 잡는다(사람의 삭제는 종전 잠금만)', async () => {
+    const { log, pool } = mkPool({});
+    await svc.deleteTask({ sheetId: 's', tabName: 't', confirm: true, onlyIfUntouched: true, notifyIntranet: false, pool });
+    const i1 = log.findIndex(q => /pg_advisory_xact_lock\(hashtext\(\$1\)\)/.test(q));
+    const i2 = log.findIndex(q => /pg_advisory_xact_lock\(hashtext\(\$1\), hashtext\(\$2\)\)/.test(q));
+    assert.ok(i1 >= 0 && i2 > i1, '탭 잠금 → 삭제 잠금 순서');
+    const src = read('server/src/services/workTabDelete.service.js');
+    assert.ok(/pg_advisory_xact_lock\(hashtext\(\$1\)\)', \[`sheetless_worktable:\$\{sheetId\}:\$\{tabName\}`\]/.test(src));
+    assert.ok(/pg_advisory_xact_lock\(hashtext\(\$1\)\)',\s*\[`sheetless_worktable:\$\{sheetId\}:\$\{tabName\}`\]/.test(read('server/src/services/sheetlessOrder.service.js')), '주문 기록과 같은 열쇠');
+    const { log: log2, pool: pool2 } = mkPool({});
+    await svc.deleteTask({ sheetId: 's', tabName: 't', confirm: true, pool: pool2 });
+    assert.ok(!log2.some(q => /pg_advisory_xact_lock\(hashtext\(\$1\)\)/.test(q)), '사람의 삭제는 종전 그대로');
+  });
   await ok('사람의 [작업 삭제](onlyIfUntouched 없음)는 종전 — 판정 쿼리 0', async () => {
     const { log, pool } = mkPool({ order_submissions: 1, liveCampaign: 1 });
     const out = await svc.deleteTask({ sheetId: 's', tabName: 't', confirm: true, pool });
@@ -117,6 +148,11 @@ const svc = require('../src/services/workTabDelete.service');
     assert.ok(!/deleteDrive/.test(f));
   });
 
+  await ok('리뷰웹 관리자 오더 삭제도 같은 자동 정리(새로 지운 경우만)', () => {
+    const r = read('server/src/routes/order.routes.js');
+    assert.ok(/if \(!o\.deleted_at\) \{\s*const _by = `리뷰웹 오더 삭제\(\$\{deletedBy \|\| '\?'\}\)`;\s*setImmediate\(\(\) => \{\s*require\('\.\.\/services\/workTabDelete\.service'\)\.autoCleanupDeletedOrderTab\(id, \{ by: _by \}\)/.test(r));
+  });
+
   console.log('[4] 홈 목록 "원본 오더 삭제됨"');
   await ok('살아 있는 오더(직접 연결·링크)가 없을 때만 · 실패 = ok:false', () => {
     const t = read('server/src/services/trackB.service.js');
@@ -135,6 +171,13 @@ const svc = require('../src/services/workTabDelete.service');
     assert.ok(/const sod=t\.sourceOrderDeleted\?`<span class="wbl-s-sub"[^`]*title="\$\{esc\(/.test(w));
     assert.ok(/>원본 오더 삭제됨<\/span>`:'';/.test(w));
     assert.ok(/<td data-label="상태">\$\{st\}\$\{sod\}<\/td>/.test(w));
+    assert.ok(!/인트라넷에서 이 작업의 원본 오더가 삭제/.test(w), '문구는 중립(리뷰웹 관리자 삭제·배포 전 삭제도 있다)');
+  });
+  await ok('작업바 다시 불러오기에도 표시가 유지(이월) · 조회 실패면 덮지 않음 · 성공이면 없어진 표시 반영', () => {
+    const w = read('frontend/workdesk.html');
+    assert.ok(/if\(t\.sourceOrderDeleted\) _prevSod\[k\]=t\.sourceOrderDeleted;/.test(w) && /if\(!t\.sourceOrderDeleted\)\{ const d=_prevSod\[k\]; if\(d\) t\.sourceOrderDeleted=d; \}/.test(w));
+    assert.ok(/if\(!r\.sourceOrderDeletedUnavailable\) t\.sourceOrderDeleted=n\.sourceOrderDeleted\|\|null;/.test(w));
+    assert.ok(/if \(sod && !sod\.ok\) out\.sourceOrderDeletedUnavailable = true;/.test(read('server/src/routes/trackB.routes.js')));
   });
 
   console.log(`\n✅ orderDeleteTabCleanup: ${passed} passed`);

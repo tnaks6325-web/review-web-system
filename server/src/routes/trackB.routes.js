@@ -116,6 +116,7 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
       if (!fin.ok) out.finishedUnavailable = true;
       if (stats && !stats.ok) out.statsUnavailable = true;
       if (camps && !camps.ok) out.campaignsUnavailable = true;
+      if (sod && !sod.ok) out.sourceOrderDeletedUnavailable = true;   // 결정 254: 실패를 알려 화면이 기존 표시를 덮지 않게
       for (const t of tabs) {
         // 이름 우선 → gid 폴백(운영 중 탭 리네임으로 마감이 조용히 풀리는 것 방지)
         const g = String(t.tabGid == null ? '' : t.tabGid).trim();

@@ -2357,6 +2357,14 @@ router.delete('/admin/delete', authMiddleware, adminOrMasterMiddleware, async (r
 
     logger.info(`[order] 관리자 작업오더 삭제: ${id} (by ${deletedBy}), 인트라넷 전파=${delivered}`);
     res.json({ ok: true, id, intranetDeleted: delivered, deliverError });
+    // ★ 결정 254: 리뷰웹 관리자 삭제도 인트라넷 삭제와 같이 손대지 않은 빈 작업을 정리한다(응답 뒤 · throw 없음)
+    if (!o.deleted_at) {
+      const _by = `리뷰웹 오더 삭제(${deletedBy || '?'})`;
+      setImmediate(() => {
+        require('../services/workTabDelete.service').autoCleanupDeletedOrderTab(id, { by: _by })
+          .catch(e => logger.warn(`[order] 오더 삭제 후 작업 정리 실패(무시): ${e.message}`));
+      });
+    }
   } catch (err) {
     next(err);
   }
