@@ -6519,11 +6519,12 @@ function _buildCoupangCardHtml(cid) {
            ondragover="event.preventDefault();this.classList.add('drag-over')"
            ondragleave="this.classList.remove('drag-over')"
            ondrop="onCardImgDrop(event,'${cid}')">
-        <input type="file" accept="image/*" id="${cid}_imgInput" onchange="onCardImgSelected(this,'${cid}')">
+        <input type="file" accept="image/*" multiple id="${cid}_imgInput" onchange="onCardImgSelected(this,'${cid}')">
         <span class="oiz-icon">📷</span>
         <div class="oiz-title" style="font-size:.82rem">주문완료 화면을 캡처해 올려주세요</div>
         <div class="oiz-sub">구매 확인·리뷰비 정산의 <b>증빙 자료</b>입니다 · 동일인 자동 검증</div>
         <div class="oiz-sub" style="margin-top:3px;color:#3182f6">💡 올리시면 주문번호·결제금액이 자동 입력됩니다</div>
+        <div class="oiz-sub" style="margin-top:3px">📷 한 화면에 다 안 담기면 <b>두 장을 한 번에</b> 골라 주세요(최대 2장 · 배송메세지까지)</div>
       </div>
       <div class="of-img-preview" id="${cid}_imgPreview" style="display:none;align-items:center;gap:10px;margin-bottom:8px">
         <div style="position:relative;flex-shrink:0">
@@ -6532,10 +6533,9 @@ function _buildCoupangCardHtml(cid) {
         </div>
         <span id="${cid}_imgLabel" style="font-size:.75rem;color:#6B7280">이미지 첨부됨</span>
       </div>
-      <!-- ★ 결정 255: 구매캡처 2장째(선택) — 아이폰 등은 구매내역이 한 화면에 다 안 담긴다(배송메세지 잘림). 첫 장을 올린 뒤에 보인다. -->
+      <!-- ★ 결정 255: 구매캡처 2장째(선택) — 아이폰 등은 구매내역이 한 화면에 다 안 담긴다(배송메세지 잘림).
+           사진 칸에서 두 장을 한 번에 고르면 둘째 장이 여기 보인다(별도 추가 버튼 없음 · 사용자 요청 2026-10-16). -->
       <div class="of-img2" id="${cid}_img2Box" style="display:none;margin:-2px 0 8px">
-        <input type="file" accept="image/*" id="${cid}_img2Input" style="display:none" onchange="onCardImg2Selected(this,'${cid}')">
-        <button type="button" id="${cid}_img2Add" onclick="document.getElementById('${cid}_img2Input').click()" style="width:100%;padding:9px 10px;border:1.5px dashed #b9d3f6;border-radius:9px;background:#f5f9ff;color:#2563c9;font-size:.76rem;font-weight:700;cursor:pointer;text-align:left">＋ 구매캡처 2장째 추가 <span style="font-weight:500;color:#6b7280">(선택 · 한 화면에 다 안 담길 때 — 배송메세지 등)</span></button>
         <div class="of-img-preview" id="${cid}_img2Preview" style="display:none;align-items:center;gap:10px">
           <div style="position:relative;flex-shrink:0">
             <img id="${cid}_img2Thumb" src="" alt="구매캡처 2장째" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1.5px solid #FEE2E2">
@@ -6835,11 +6835,12 @@ function _buildOrderCardHtml(cid, idx, type) {
            ondragover="event.preventDefault();this.classList.add('drag-over')"
            ondragleave="this.classList.remove('drag-over')"
            ondrop="onCardImgDrop(event,'${cid}')">
-        <input type="file" accept="image/*" id="${cid}_imgInput" onchange="onCardImgSelected(this,'${cid}')">
+        <input type="file" accept="image/*" multiple id="${cid}_imgInput" onchange="onCardImgSelected(this,'${cid}')">
         <span class="oiz-icon">📷</span>
         <div class="oiz-title" style="font-size:.82rem">주문완료 화면을 캡처해 올려주세요</div>
         <div class="oiz-sub">구매 확인·리뷰비 정산의 <b>증빙 자료</b>입니다</div>
         <div class="oiz-sub" style="margin-top:3px;color:#3182f6">💡 올리시면 주문번호·결제금액이 자동 입력됩니다</div>
+        <div class="oiz-sub" style="margin-top:3px">📷 한 화면에 다 안 담기면 <b>두 장을 한 번에</b> 골라 주세요(최대 2장 · 배송메세지까지)</div>
       </div>
       <div class="of-img-preview" id="${cid}_imgPreview" style="display:none;align-items:center;gap:10px;margin-bottom:8px">
         <div style="position:relative;flex-shrink:0">
@@ -6848,10 +6849,9 @@ function _buildOrderCardHtml(cid, idx, type) {
         </div>
         <span id="${cid}_imgLabel" style="font-size:.75rem;color:#6B7280">이미지 첨부됨</span>
       </div>
-      <!-- ★ 결정 255: 구매캡처 2장째(선택) — 아이폰 등은 구매내역이 한 화면에 다 안 담긴다(배송메세지 잘림). 첫 장을 올린 뒤에 보인다. -->
+      <!-- ★ 결정 255: 구매캡처 2장째(선택) — 아이폰 등은 구매내역이 한 화면에 다 안 담긴다(배송메세지 잘림).
+           사진 칸에서 두 장을 한 번에 고르면 둘째 장이 여기 보인다(별도 추가 버튼 없음 · 사용자 요청 2026-10-16). -->
       <div class="of-img2" id="${cid}_img2Box" style="display:none;margin:-2px 0 8px">
-        <input type="file" accept="image/*" id="${cid}_img2Input" style="display:none" onchange="onCardImg2Selected(this,'${cid}')">
-        <button type="button" id="${cid}_img2Add" onclick="document.getElementById('${cid}_img2Input').click()" style="width:100%;padding:9px 10px;border:1.5px dashed #b9d3f6;border-radius:9px;background:#f5f9ff;color:#2563c9;font-size:.76rem;font-weight:700;cursor:pointer;text-align:left">＋ 구매캡처 2장째 추가 <span style="font-weight:500;color:#6b7280">(선택 · 한 화면에 다 안 담길 때 — 배송메세지 등)</span></button>
         <div class="of-img-preview" id="${cid}_img2Preview" style="display:none;align-items:center;gap:10px">
           <div style="position:relative;flex-shrink:0">
             <img id="${cid}_img2Thumb" src="" alt="구매캡처 2장째" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1.5px solid #cce0fb">
@@ -8335,16 +8335,31 @@ function _syncAllSharedBeforeSubmit() {
 
 function onCardImgSelected(input, cid) {
   if (!input.files || !input.files[0]) return;
-  _processCardImgFile(input.files[0], cid);
+  _takeCardImgFiles([...input.files], cid);
+}
+
+/* 결정 255 — 사진 칸 하나에서 **한 번에 두 장까지** 받는다(사용자 요청 2026-10-16: 별도 추가 버튼 없이).
+   고른 순서대로 첫 장 = 주인공(명의 확인·주문번호·금액) · 둘째 장 = 보탬(배송메세지 등). 세 장 이상이면 앞의 두 장만. */
+function _takeCardImgFiles(files, cid) {
+  const imgs = (files || []).filter(f => f && String(f.type || "").startsWith("image/"));
+  if (!imgs.length) { showToast("이미지 파일만 업로드 가능합니다.", true); return; }
+  if (imgs.length > 2) showToast("구매캡처는 최대 2장까지 올릴 수 있어 앞의 두 장만 받았습니다.");
+  removeCardImg2(cid);
+  // 둘째 장 판독은 첫 장 판독이 끝난 뒤에 — 그래야 첫 장에서 읽은 주문번호에 배송메세지 서명을 묶을 수 있다.
+  if (imgs[1]) _setCardImg2(imgs[1], cid, { deferAi: true });
+  _processCardImgFile(imgs[0], cid).then(() => {
+    const st = _cardAiState[cid];
+    if (st && st.img2 && !st.img2.memoToken && !st.img2.busy && !st.img2.tried) _callCardExtractAi2(cid);
+  });
 }
 
 function onCardImgDrop(e, cid) {
   e.preventDefault();
   const zone = document.getElementById(cid + "_imgZone");
   if (zone) zone.classList.remove("drag-over");
-  const file = e.dataTransfer?.files?.[0];
-  if (!file || !file.type.startsWith("image/")) { showToast("이미지 파일만 업로드 가능합니다.", true); return; }
-  _processCardImgFile(file, cid);
+  const files = [...(e.dataTransfer?.files || [])];
+  if (!files.length) { showToast("이미지 파일만 업로드 가능합니다.", true); return; }
+  _takeCardImgFiles(files, cid);
 }
 
 function removeCardImg(cid) {
@@ -8390,10 +8405,10 @@ function removeCardImg(cid) {
    ★ 첫 장이 주인공이다 — 명의 확인·주문번호·결제금액 자동 입력은 종전대로 첫 장만 본다.
    ★ 2장째는 첫 장에 없는 정보만 보탠다: 배송메세지(서버 서명 · 주문번호에 묶임), 상품명(첫 장에서 못 읽었을 때만).
    ★ 판독이 실패해도 사진은 함께 제출된다(증빙 · 제출물 미리보기 2/2). */
-function onCardImg2Selected(input, cid) {
-  const file = input.files && input.files[0]; if (!file) return;
-  if (!String(file.type || "").startsWith("image/")) { showToast("이미지 파일만 업로드 가능합니다.", true); input.value = ""; return; }
-  if (file.size > 10 * 1024 * 1024) { showToast("이미지 크기는 10MB 이하여야 합니다.", true); input.value = ""; return; }
+function _setCardImg2(file, cid, opts = {}) {
+  if (!file) return;
+  if (!String(file.type || "").startsWith("image/")) { showToast("이미지 파일만 업로드 가능합니다.", true); return; }
+  if (file.size > 10 * 1024 * 1024) { showToast("2장째 이미지가 10MB를 넘어 받지 않았습니다.", true); return; }
   const st = _cardAiState[cid]; if (!st) return;
   const reader = new FileReader();
   reader.onload = (ev) => {
@@ -8401,8 +8416,9 @@ function onCardImg2Selected(input, cid) {
     st.img2 = { dataUrl, mime: file.type || "image/jpeg", memoToken: "", req: ((st.img2 && st.img2.req) || 0) + 1, busy: false };
     const th = document.getElementById(cid + "_img2Thumb"); if (th) th.src = dataUrl;
     const pv = document.getElementById(cid + "_img2Preview"); if (pv) pv.style.display = "flex";
-    const ad = document.getElementById(cid + "_img2Add"); if (ad) ad.style.display = "none";
-    _callCardExtractAi2(cid);
+    const bx = document.getElementById(cid + "_img2Box"); if (bx) bx.style.display = "";
+    if (opts.deferAi) { const lb = document.getElementById(cid + "_img2Label"); if (lb) lb.textContent = "2장째 · 첫 장 확인 뒤 읽습니다"; }
+    else _callCardExtractAi2(cid);
   };
   reader.readAsDataURL(file);
 }
@@ -8410,10 +8426,9 @@ function onCardImg2Selected(input, cid) {
 function removeCardImg2(cid) {
   const st = _cardAiState[cid];
   if (st) st.img2 = null;
-  const inp = document.getElementById(cid + "_img2Input"); if (inp) inp.value = "";
   const th = document.getElementById(cid + "_img2Thumb"); if (th) th.src = "";
   const pv = document.getElementById(cid + "_img2Preview"); if (pv) pv.style.display = "none";
-  const ad = document.getElementById(cid + "_img2Add"); if (ad) ad.style.display = "";
+  const bx = document.getElementById(cid + "_img2Box"); if (bx) bx.style.display = "none";
   const lb = document.getElementById(cid + "_img2Label"); if (lb) lb.textContent = "2장째 첨부됨";
 }
 
@@ -8422,7 +8437,7 @@ async function _callCardExtractAi2(cid) {
   const req = img.req;
   const lb = document.getElementById(cid + "_img2Label");
   const say = (t) => { if (lb && st.img2 === img && img.req === req) lb.textContent = t; };
-  img.busy = true; say("2장째 · AI 확인 중…");
+  img.busy = true; img.tried = true; say("2장째 · AI 확인 중…");
   const ctx = window._orderFormCtx || {};
   const orderHint = String(document.getElementById(cid + "_orderNumber")?.value || st.extracted?.orderNumber || "").trim();
   let json = null;
@@ -8454,7 +8469,6 @@ function _processCardImgFile(file, cid) {
         document.getElementById(cid+"_imgThumb").src = dataUrl;
         document.getElementById(cid+"_imgPreview").style.display = "flex";
         document.getElementById(cid+"_imgZone").style.display = "none";
-        { const b2 = document.getElementById(cid+"_img2Box"); if (b2) b2.style.display = ""; }   // 결정 255: 2장째 칸은 첫 장 뒤에
         document.getElementById(cid+"_aiResult").classList.remove("show");
         document.getElementById(cid+"_aiError").style.display = "none";
         const lbl = document.getElementById(cid+"_imgLabel"); if (lbl) lbl.textContent = file.name + " · AI 분석 중…";

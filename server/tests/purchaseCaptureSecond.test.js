@@ -166,10 +166,18 @@ const FRONT = p => fs.readFileSync(path.join(ROOT, '..', 'frontend', p), 'utf8')
 
   console.log('\n§5 화면');
   const sa = FRONT('js/search-app.js');
-  await ta('5a 리뷰어 카드 두 모양 모두에 2장째 칸 · 첫 장 뒤에 보인다 · 첫 장을 빼면 2장째도 빠진다', () => {
+  await ta('5a 사진 칸 하나에서 한 번에 두 장(별도 추가 버튼 없음 · 사용자 요청) · 2장째 칸은 둘째 장이 있을 때만 · 첫 장을 빼면 2장째도 빠진다', () => {
+    assert.strictEqual((sa.match(/<input type="file" accept="image\/\*" multiple id="\$\{cid\}_imgInput"/g) || []).length, 2, '두 카드 모양 모두 여러 장 선택');
     assert.strictEqual((sa.match(/id="\$\{cid\}_img2Box"/g) || []).length, 2);
-    assert.match(sa, /const b2 = document\.getElementById\(cid\+"_img2Box"\); if \(b2\) b2\.style\.display = "";/);
+    assert.ok(!/_img2Add|_img2Input/.test(sa), '별도 추가 버튼·입력칸이 없다');
+    assert.match(sa, /if \(imgs\.length > 2\) showToast\(/, '세 장 이상은 앞의 두 장만');
+    assert.match(sa, /_takeCardImgFiles\(\[\.\.\.input\.files\], cid\)/);
+    assert.match(sa, /_takeCardImgFiles\(files, cid\);/, '끌어놓기도 같은 규칙');
     assert.match(sa, /removeCardImg2\(cid\); \{ const b2 = document\.getElementById\(cid \+ "_img2Box"\); if \(b2\) b2\.style\.display = "none"; \}/);
+  });
+  await ta('5a2 둘째 장 판독은 첫 장 판독이 끝난 뒤(주문번호에 배송메세지 서명을 묶기 위해)', () => {
+    assert.match(sa, /_setCardImg2\(imgs\[1\], cid, \{ deferAi: true \}\);/);
+    assert.match(sa, /_processCardImgFile\(imgs\[0\], cid\)\.then\(/);
   });
   await ta('5b 2장째 판독은 명의 증명을 건드리지 않는다(첫 장 증명만 제출) · 상품명은 첫 장에 없을 때만', () => {
     const f = sa.slice(sa.indexOf('async function _callCardExtractAi2('), sa.indexOf('/** ★ Promise 반환'));
