@@ -106,6 +106,13 @@ const UNTOUCHED_BLOCK_TABLES = [
  */
 const SETTLEMENT_AUTO_BY = '자동(작업오더)';   // order.routes 접수 자동 연결과 같은 표기
 
+/* 채워진 줄 = 공용 판정(rowNumbering.filledSql — 주문이 붙었거나 이름·수취인·연락처 중 하나라도 값) + 제출·입금 표시.
+   ★ 배정만 되고 아직 주문 전인 줄(이름·연락처만 있는 줄)도 채워진 줄이다(Codex PR #1646 — 좁은 사본 금지). */
+function _filledRowSql(alias) {
+  const { filledSql } = require('../utils/rowNumbering');
+  return `(${filledSql(alias)} OR ${alias}.is_submitted OR ${alias}.is_paid)`;
+}
+
 async function _untouchedReasons(q, sheetId, tabName) {
   const reasons = [];
   const { rows: tc } = await q(`SELECT COALESCE(sheetless, FALSE) AS sl FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2`, [sheetId, tabName]);
@@ -120,10 +127,14 @@ async function _untouchedReasons(q, sheetId, tabName) {
                      AND COALESCE(linked_by,'') <> $3) AS x`, [sheetId, tabName, SETTLEMENT_AUTO_BY]);
   if (sl[0] && sl[0].x) reasons.push('trackb_settlement_links');
   const { rows: filled } = await q(
-    `SELECT EXISTS (SELECT 1 FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2
-                     AND (order_submission_id IS NOT NULL OR is_submitted OR is_paid)) AS x`, [sheetId, tabName]);
+    `SELECT EXISTS (SELECT 1 FROM campaign_participants cp WHERE cp.sheet_id=$1 AND cp.tab_name=$2
+                     AND ${_filledRowSql('cp')}) AS x`, [sheetId, tabName]);
   if (filled[0] && filled[0].x) reasons.push('filled_rows');
   // 연결 공고 — 보관 안 된 공고가 있거나, 참여 신청·공고 주문이 하나라도 있으면 지우지 않는다(deleteTask 의 공고 삭제와 같은 범위)
+  // 탭 이름이 비어 있는 연결 공고는 어느 작업 것인지 모른다 — 자동으로 지우지 않는다(Codex PR #1646 · 모르면 손대지 않는다)
+  const { rows: amb } = await q(
+    `SELECT EXISTS (SELECT 1 FROM recruit_campaigns WHERE linked_sheet_id=$1 AND COALESCE(linked_tab_name,'') = '') AS x`, [sheetId]);
+  if (amb[0] && amb[0].x) reasons.push('ambiguous_campaign');
   const { rows: rc } = await q(
     `SELECT COUNT(*) FILTER (WHERE rc.archived_at IS NULL) AS live,
             COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM campaign_applications a WHERE a.campaign_id = rc.id)
@@ -493,8 +504,8 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, del
     for (const t of DELETE_TABLES) {
       if (onlyIfUntouched === true && t === 'campaign_participants') {
         const r = await client.query(
-          `DELETE FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2
-           RETURNING (order_submission_id IS NOT NULL OR is_submitted OR is_paid) AS f`, [sheetId, tabName]);
+          `DELETE FROM campaign_participants cp WHERE cp.sheet_id=$1 AND cp.tab_name=$2
+           RETURNING ${_filledRowSql('cp')} AS f`, [sheetId, tabName]);
         if ((r.rows || []).some(x => x && x.f)) raced.push('filled_rows');
         if (r && r.rowCount) { deleted[t] = r.rowCount; totalRows += r.rowCount; }
         continue;

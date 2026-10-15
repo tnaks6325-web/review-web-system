@@ -1220,7 +1220,13 @@ router.delete('/intake/:id', async (req, res, next) => {
     }
     // 이미 삭제됨 → 멱등 처리 (재시도 안전)
     if (cur[0].deleted_at) {
-      return res.json({ ok: true, id, alreadyDeleted: true });
+      res.json({ ok: true, id, alreadyDeleted: true });
+      // ★ 결정 254(Codex PR #1646): 지난번 정리가 재배포·일시 오류로 못 돌았어도 다시 보낸 삭제 요청이 정리를 다시 시도한다(멱등 — 이미 지웠으면 no_tab)
+      setImmediate(() => {
+        require('../services/workTabDelete.service').autoCleanupDeletedOrderTab(id, { by: '인트라넷 오더 삭제(재시도)' })
+          .catch(e => logger.warn(`[order] 오더 삭제 후 작업 정리 재시도 실패(무시): ${e.message}`));
+      });
+      return;
     }
 
     await pool.query(

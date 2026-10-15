@@ -131,7 +131,10 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
           const c = camps.map[`${t.sheetId}\t${t.tabName}`] || (g ? camps.map[`${t.sheetId}\tgid:${g}`] : null);
           if (c && c.length) t.campaigns = c;
         }
-        if (sod && sod.map[`${t.sheetId}\t${t.tabName}`]) t.sourceOrderDeleted = sod.map[`${t.sheetId}\t${t.tabName}`];
+        if (sod) {
+          const d = sod.map[`${t.sheetId}\t${t.tabName}`] || (g ? sod.map[`${t.sheetId}\tgid:${g}`] : null);
+          if (d) t.sourceOrderDeleted = d;
+        }
       }
     }
     res.json(out);

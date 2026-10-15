@@ -35,6 +35,14 @@ const svc = require('../src/services/workTabDelete.service');
     assert.ok(/'자동\(작업오더\)'\]\);/.test(read('server/src/routes/order.routes.js')), '접수 자동 연결 표기가 같다');
   });
 
+  await ok('채워진 줄 = 공용 판정(rowNumbering.filledSql — 배정만 되고 주문 전인 이름·연락처 줄도 채워진 줄) · 판정과 결과 검증이 같은 식', () => {
+    const s = read('server/src/services/workTabDelete.service.js');
+    assert.ok(/const \{ filledSql \} = require\('\.\.\/utils\/rowNumbering'\);\s*return `\(\$\{filledSql\(alias\)\} OR \$\{alias\}\.is_submitted OR \$\{alias\}\.is_paid\)`;/.test(s));
+    assert.ok(/AND \$\{_filledRowSql\('cp'\)\}\) AS x`/.test(s) && /RETURNING \$\{_filledRowSql\('cp'\)\} AS f`/.test(s));
+    const { filledSql } = require('../src/utils/rowNumbering');
+    assert.ok(/reviewer_name/.test(filledSql('cp')) && /phone8/.test(filledSql('cp')), '공용 판정이 이름·연락처를 본다');
+  });
+
   console.log('[2] deleteTask(onlyIfUntouched) — 스텁 pool 로 실제 실행');
   const mkPool = (hits = {}) => {
     const log = [];
@@ -46,7 +54,8 @@ const svc = require('../src/services/workTabDelete.service');
         const m = /SELECT EXISTS \(SELECT 1 FROM (\w+) WHERE sheet_id=\$1 AND tab_name=\$2\) AS x/.exec(sql);
         if (m) return { rows: [{ x: !!hits[m[1]] }] };
         if (/FROM trackb_settlement_links WHERE sheet_id=\$1 AND tab_name=\$2/.test(sql)) return { rows: [{ x: !!hits.manualSettlement }] };
-        if (/FROM campaign_participants WHERE sheet_id=\$1 AND tab_name=\$2\s+AND \(order_submission_id IS NOT NULL/.test(sql)) return { rows: [{ x: !!hits.filled }] };
+        if (/FROM campaign_participants cp WHERE cp\.sheet_id=\$1 AND cp\.tab_name=\$2/.test(sql) && /^SELECT EXISTS/.test(sql.trim())) return { rows: [{ x: !!hits.filled }] };
+        if (/COALESCE\(linked_tab_name,''\) = ''/.test(sql)) return { rows: [{ x: !!hits.ambiguous }] };
         if (/AS live,/.test(sql)) return { rows: [{ live: hits.liveCampaign ? 1 : 0, used: hits.usedCampaign ? 1 : 0 }] };
         if (/FROM work_orders w WHERE w\.deleted_at IS NULL AND w\.linked_tab_sheet_id=\$1/.test(sql)) return { rows: [{ x: !!hits.liveOrder }] };
         if (/^UPDATE work_orders SET linked_tab_sheet_id=''/.test(sql.trim())) return { rows: [{ id: 'wo1', title: '가짜 오더', status: 'reviewing', created_by: 'x', live: !!hits.raceLiveOrder }], rowCount: 1 };
@@ -68,6 +77,7 @@ const svc = require('../src/services/workTabDelete.service');
     ['보관 안 된 공고가 있으면', { liveCampaign: 1 }, 'live_campaign'],
     ['공고에 참여·주문이 있으면', { usedCampaign: 1 }, 'campaign_used'],
     ['이어 쓰는 살아 있는 오더가 있으면', { liveOrder: 1 }, 'live_work_order'],
+    ['탭 이름이 비어 있는 공고가 같은 시트에 있으면(어느 작업 것인지 모름)', { ambiguous: 1 }, 'ambiguous_campaign'],
     ['시트 기반 작업이면', { sheetBased: 1 }, 'sheet_based'],
   ]) {
     await ok(`${label} 지우지 않는다(쓰기 0) → ${reason}`, async () => {
@@ -141,6 +151,7 @@ const svc = require('../src/services/workTabDelete.service');
     assert.ok(/confirm: true, onlyIfUntouched: true, notifyIntranet: false/.test(f));
     assert.ok(/catch \(e\) \{[\s\S]*return \{ ok: false, code: 'error'/.test(f));
     assert.ok(/WHERE id=\$1 AND deleted_at IS NOT NULL/.test(f), '지워진 오더만');
+    assert.ok(/res\.json\(\{ ok: true, id, alreadyDeleted: true \}\);\s*\/\/[^\n]*\n\s*setImmediate\(\(\) => \{\s*require\('\.\.\/services\/workTabDelete\.service'\)\.autoCleanupDeletedOrderTab\(id,/.test(d), '다시 보낸 삭제 요청도 정리를 다시 시도(멱등)');
   });
   await ok('자동 정리는 드라이브·구글시트 무접촉(deleteDrive 넘기지 않음)', () => {
     const s = read('server/src/services/workTabDelete.service.js');
@@ -158,13 +169,15 @@ const svc = require('../src/services/workTabDelete.service');
     const t = read('server/src/services/trackB.service.js');
     const f = t.slice(t.indexOf('async function sourceOrderDeletedMap'), t.indexOf('/** 마감/복귀.'));
     assert.ok(/NOT EXISTS \(SELECT 1 FROM work_orders w2 WHERE w2\.deleted_at IS NULL/.test(f));
+    assert.ok(/FROM trackb_work_order_links l JOIN work_orders w ON w\.id = l\.work_order_id\s*WHERE w\.deleted_at IS NOT NULL AND l\.deleted_at IS NULL/.test(f), 'Track B 링크로 붙은 지워진 오더도');
+    assert.ok(/map\[_FIN_GKEY\(r\.sheetId, g\)\] = v;/.test(f));
     assert.ok(/NOT EXISTS \(SELECT 1 FROM trackb_work_order_links l JOIN work_orders w3/.test(f));
     assert.ok(/return \{ ok: false, map: \{\} \};/.test(f));
   });
   await ok('목록 응답은 홈 전용(stats=1) · 걸러진 탭에만 싣는다', () => {
     const r = read('server/src/routes/trackB.routes.js');
     assert.ok(/const sod = req\.query\.stats === '1' \? await svc\.sourceOrderDeletedMap\(\) : null;/.test(r));
-    assert.ok(/if \(sod && sod\.map\[`\$\{t\.sheetId\}\\t\$\{t\.tabName\}`\]\) t\.sourceOrderDeleted = /.test(r));
+    assert.ok(/const d = sod\.map\[`\$\{t\.sheetId\}\\t\$\{t\.tabName\}`\] \|\| \(g \? sod\.map\[`\$\{t\.sheetId\}\\tgid:\$\{g\}`\] : null\);\s*if \(d\) t\.sourceOrderDeleted = d;/.test(r), '이름 → gid 폴백');
   });
   await ok('화면: 상태 칸에 표시 · 값 없으면 그리지 않음 · 문구 이스케이프', () => {
     const w = read('frontend/workdesk.html');
