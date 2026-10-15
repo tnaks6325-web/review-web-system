@@ -181,11 +181,21 @@ async function listPaymentTargets(opts = {}) {
                 AND pe.field = 'is_paid' AND pe.kind = 'bool' AND pe.value_bool = FALSE
                 AND pe.reverted_at IS NULL AND pe.created_at > pr.paid_at))`,
   ];
+  /* ★ 결정 247(2026-10-15 사용자 요청 "업체입금이면 리뷰 등록 여부와 상관없이 계좌 상시 공개") — **업체 화면 계좌 전용 모드**.
+       리뷰 제출·입금·회차·종결·현금영수증 같은 "지금 보낼 건인가" 조건을 모두 빼고, 그 작업의 **모든 참여 줄**의 송금 계좌만 계산한다.
+       계좌 판정(양식 → 고친 계좌 → 직원이 고친 칸, 마지막 값 우선)은 아래 같은 코드를 그대로 탄다(사본 0).
+       ★ 한 작업 지정이 필수다(sheetId+tabName) — 이 모드의 결과는 **이체 대상이 아니다**. 회차 만들기·입금관리는 이 모드를 쓰지 않는다. */
+  const accountsOnly = opts.accountsForAllRows === true;
+  if (accountsOnly) {
+    if (!opts.sheetId || !opts.tabName) throw new Error('accountsForAllRows: sheetId·tabName 필수');
+    where.length = 0;
+    where.push('ri.row_index IS NOT NULL', "COALESCE(ri.phone8,'') <> ''", '$1::text[] IS NOT NULL');   // $1 은 다른 모드의 미입금 조건 자리(형 추론용)
+  }
   if (opts.sheetId) { params.push(opts.sheetId); where.push(`ri.sheet_id = $${params.length}`); }
   if (opts.tabName) { params.push(opts.tabName); where.push(`ri.tab_name = $${params.length}`); }
 
   const pageSize = 2000;
-  const resultLimit = 2000;
+  const resultLimit = accountsOnly ? 10000 : 2000;
   const limitParam = params.length + 1;
   const offsetParam = params.length + 2;
   const candidateSql =
@@ -226,7 +236,7 @@ async function listPaymentTargets(opts = {}) {
   while (rows.length < resultLimit) {
     const { rows: pageRows } = await pool.query(candidateSql, [...params, pageSize, offset]);
     if (!pageRows.length) break;
-    const eligibleRows = await filterReceiptEligiblePaymentRows(pool, pageRows);
+    const eligibleRows = accountsOnly ? pageRows : await filterReceiptEligiblePaymentRows(pool, pageRows);
     rows.push(...eligibleRows.slice(0, resultLimit - rows.length));
     if (pageRows.length < pageSize) break;
     offset += pageRows.length;
@@ -1348,13 +1358,13 @@ async function advertiserPayoutLocked(client, sheetId, tabName) {
  * 업체 화면에 보여줄 송금 계좌 — **우리가 입금할 때 쓰는 바로 그 계좌**(listPaymentTargets 판정 단일 출처:
  * 구매양식 → 리뷰어가 고친 계좌 → 직원이 고친 계좌, 마지막 값 우선 · 결정 157·231·233). 시트에 처음 적힌 계좌를
  * 따로 읽으면 "고쳤는데 옛 계좌로 이체"(2026-10-13 사고)가 업체 쪽에서 다시 난다.
- * ★ 대상 = 리뷰 제출이 끝났고 아직 입금이 안 된 줄만(사용자 확정 1번 권장) — 입금일을 기록하면 목록에서 빠져 계좌도 가려진다.
+ * ★ 대상 = 그 작업의 **모든 참여 줄**(사용자 요청 2026-10-15 — 리뷰 등록·입금 여부와 상관없이 상시 공개 · 종전 "리뷰 제출 + 미입금만"을 바꿈).
  * @returns {Promise<Map<number,{bank:string,account:string,holder:string}>>} rowIndex(seq) → 계좌
  */
 async function advertiserPayoutAccounts({ sheetId, tabName } = {}) {
   const map = new Map();
   if (!sheetId || !tabName) return map;
-  const { items } = await listPaymentTargets({ sheetId, tabName, includeFinished: true, includeAdvertiserPaid: true });
+  const { items } = await listPaymentTargets({ sheetId, tabName, includeFinished: true, includeAdvertiserPaid: true, accountsForAllRows: true });
   for (const it of items || []) {
     if (it.sheetId !== sheetId || it.tabName !== tabName) continue;
     map.set(Number(it.rowIndex), {

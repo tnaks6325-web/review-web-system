@@ -7733,7 +7733,7 @@ function _cndRtypeModal(cd){
    ★ '자동'은 값을 비우는 것 = 작업오더 물건비 판정으로 되돌린다(지우기가 아니라 되돌리기). */
 /* 결정 247 — 이체은행 「업체입금」 안내(탭 설정 창 · 모집공고 창이 같은 말을 한다: recruit-modal.js 의 RF_ADV_PAYOUT_NOTE). */
 const _ADV_PAYOUT_NOTE_HTML=`<div class="cndnote"><b>🏢 업체입금</b>을 고르면 업체가 페이백을 직접 보냅니다 —<br>`+
-  `· 이 작업을 가진 업체의 작업보드(대표 링크·업체 로그인)에 <b>은행·계좌번호·예금주</b>가 보입니다(리뷰 제출 끝 + 미입금 줄만 · 브랜드 링크 제외)<br>`+
+  `· 이 작업을 가진 업체의 작업보드(대표 링크·업체 로그인)에 <b>은행·계좌번호·예금주</b>가 보입니다(참여한 모든 줄 · 리뷰 등록·입금 여부와 상관없이 상시 · 브랜드 링크 제외)<br>`+
   `· 업체가 입금 칸을 우클릭해 <b>입금일을 기록</b>합니다 · <b>우리 입금관리·이체 파일에서는 빠집니다</b><br>`+
   `<span style="color:#B91C1C">⚠ 업체 링크는 로그인 없이 열립니다 — 링크를 가진 사람은 참여자 계좌를 봅니다.</span></div>`;
 const _ADV_PAYOUT_OFF_CONFIRM='업체입금을 다른 이체은행으로 바꿉니다.\n\n· 입금일이 기록되지 않은 줄이 바로 우리 입금관리 목록으로 돌아옵니다\n· 업체가 이미 보냈는데 날짜만 안 적은 줄이 있는지 먼저 업체에 확인해 주세요(그대로 보내면 이중 입금)\n· 업체 화면의 계좌 칸·입금일 기록은 바로 닫힙니다\n\n진행할까요?';
@@ -8994,7 +8994,7 @@ function buildGrid(wd){
       <button class="btn xs" onclick="openGHidMenu(event)">숨긴 열${nHid?` <b style="color:var(--accent-deep)">${nHid}</b>`:' 0'}</button>
       ${hasFilt?`<button class="btn xs" style="color:var(--warn);border-color:color-mix(in srgb,var(--warn) 35%,var(--line))" onclick="clearGFilters()">필터 초기화 ✕</button>`:''}
       ${(!STATE.canEdit&&_canEditCells())?`<span class="gsmsg" title="다른 칸은 열람 전용입니다">택배송장 칸은 입력할 수 있습니다 — 셀 우클릭 → ✏️ 이 셀 편집</span>`:''}
-      ${_isAdvPayout()?`<span class="gsmsg show advpay" title="은행·계좌번호·예금주는 리뷰 제출이 끝나고 아직 입금하지 않은 줄에만 보입니다. 입금일을 기록하면 그 줄의 계좌는 가려집니다.">💰 업체 직접 입금 작업 — 입금 후 입금 칸 우클릭 → 입금일 기록${wd.advertiserPayout.accountsUnavailable?' · ⚠ 계좌를 불러오지 못했습니다(새로고침)':''}</span>`:''}
+      ${_isAdvPayout()?`<span class="gsmsg show advpay" title="은행·계좌번호·예금주는 참여한 모든 줄에 늘 보입니다(리뷰 등록·입금 여부와 상관없이). 입금일은 리뷰 제출이 끝난 줄에 기록할 수 있습니다.">💰 업체 직접 입금 작업 — 입금 후 입금 칸 우클릭 → 입금일 기록${wd.advertiserPayout.accountsUnavailable?' · ⚠ 계좌를 불러오지 못했습니다(새로고침)':''}</span>`:''}
       ${STATE.canEdit?`<button class="btn xs" onclick="addCustomColumnPrompt()">＋ 열 추가</button><span id="emoBtnBox">${_emoBtnHtml()}</span>`:''}
       ${_folBarHtml()}
       <output id="gselstat" class="gselstat" aria-live="polite" hidden></output></div>
