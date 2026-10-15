@@ -114,6 +114,20 @@ function payHandler(o = {}) {
       assert.strictEqual(r.items[0].payable, false);
     }));
 
+  await ta('1e0 ★★ 업체 화면 계좌는 리뷰 등록·입금 여부와 상관없이 모든 참여 줄(사용자 요청 2026-10-15) — 이체 대상 조회는 종전 조건 그대로', () =>
+    withStubPool(payHandler({ flagOn: true }), 'services/payment.service', async (svc, calls) => {
+      await svc.advertiserPayoutAccounts({ sheetId: 'S1', tabName: 'T1' });
+      const cand = c => /FROM review_index ri/.test(c.sql) && /manual_paid AS MATERIALIZED/.test(c.sql);   // 대상 후보 조회(금액 표본 조회 제외)
+      const acctSql = calls.filter(cand).map(c => c.sql).join('\n');
+      assert.ok(acctSql && !/ri\.is_submitted = TRUE/.test(acctSql), '리뷰 제출 조건 없음');
+      assert.ok(!/payment_batch_items pi/.test(acctSql), '입금·회차 조건 없음');
+      calls.length = 0;
+      await svc.listPaymentTargets();
+      const paySql = calls.filter(cand).map(c => c.sql).join('\n');
+      assert.ok(/ri\.is_submitted = TRUE/.test(paySql), '이체 대상 조회는 리뷰 제출 조건을 유지');
+      await assert.rejects(svc.listPaymentTargets({ accountsForAllRows: true }), /sheetId/, '계좌 전용 모드는 한 작업 지정 필수');
+    }));
+
   await ta('1e ★ 업체 화면 계좌 = 입금 판정이 고른 바로 그 계좌(rowIndex 별)', () =>
     withStubPool(payHandler({ flagOn: true }), 'services/payment.service', async svc => {
       const m = await svc.advertiserPayoutAccounts({ sheetId: 'S1', tabName: 'T1' });
@@ -123,7 +137,7 @@ function payHandler(o = {}) {
       assert.strictEqual(a.account, ACCT);
       assert.strictEqual(a.holder, '김혜진');
       assert.ok(/우리/.test(a.bank));
-      assert.strictEqual(m.get(8), undefined, '대상이 아닌 줄은 계좌가 없다');
+      assert.strictEqual(m.get(8), undefined, '참여 기록(장부)이 없는 줄은 계좌가 없다');
       assert.strictEqual(a.phone8, '83540507', '화면 줄과 명의를 맞춰 보기 위해 phone8 을 싣는다');
       assert.strictEqual(a.failed, false);
     }));
