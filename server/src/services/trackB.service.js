@@ -5565,6 +5565,33 @@ async function finishedTabsMap() {
   }
 }
 
+/**
+ * ★ 결정 254 — 원본 작업오더가 인트라넷에서 삭제된 작업(살아 있는 오더가 하나도 없는 작업) → 홈 작업 목록 "원본 오더 삭제됨" 주석.
+ *   손대지 않은 빈 작업은 오더 삭제 때 자동으로 정리되므로(workTabDelete.autoCleanupDeletedOrderTab) 여기 남는 것은 주문·편집이 있는 작업이다.
+ *   ★ 실패 = ok:false(주석 없이 계속 — 모르는 것을 "삭제 안 됨"으로 꾸미지 않는다).
+ */
+async function sourceOrderDeletedMap() {
+  try {
+    const { rows } = await getPool().query(
+      `SELECT w.linked_tab_sheet_id AS "sheetId", w.linked_tab_name AS "tabName",
+              MAX(w.deleted_at) AS "deletedAt",
+              (ARRAY_AGG(COALESCE(NULLIF(w.deleted_by_name,''), w.deleted_by, '') ORDER BY w.deleted_at DESC))[1] AS "deletedBy"
+         FROM work_orders w
+        WHERE w.deleted_at IS NOT NULL AND COALESCE(w.linked_tab_sheet_id,'') <> '' AND COALESCE(w.linked_tab_name,'') <> ''
+          AND NOT EXISTS (SELECT 1 FROM work_orders w2 WHERE w2.deleted_at IS NULL
+                           AND w2.linked_tab_sheet_id = w.linked_tab_sheet_id AND w2.linked_tab_name = w.linked_tab_name)
+          AND NOT EXISTS (SELECT 1 FROM trackb_work_order_links l JOIN work_orders w3 ON w3.id = l.work_order_id AND w3.deleted_at IS NULL
+                           WHERE l.sheet_id = w.linked_tab_sheet_id AND l.tab_name = w.linked_tab_name AND l.deleted_at IS NULL)
+        GROUP BY 1, 2`);
+    const map = {};
+    for (const r of rows) map[_FIN_KEY(r.sheetId, r.tabName)] = { deletedAt: r.deletedAt, deletedBy: r.deletedBy || '' };
+    return { ok: true, map };
+  } catch (err) {
+    logger.warn(`[trackB] sourceOrderDeletedMap 실패(주석 없이 계속): ${err.message}`);
+    return { ok: false, map: {} };
+  }
+}
+
 /** 마감/복귀. finish=true 는 **검수 확인(inspected)** 없이는 거부한다(사용자 확정 ㉠ — 서버가 최종 방어).
  *  멱등: 이미 마감된 탭 재마감·마감 아닌 탭 복귀 모두 no-op 성공. 활성 1건은 부분 유니크가 보장.
  *
@@ -6396,7 +6423,7 @@ module.exports = {
   setWorkdeskAdvertiserOrder,
   getWorkdeskWorktabs,
   setWorkdeskWorktabs,
-  finishedTabsMap, isTabFinishedIn,
+  finishedTabsMap, isTabFinishedIn, sourceOrderDeletedMap,
   setTabFinished,
   autoFinishEligibleTabs,
   tabStatsMap,

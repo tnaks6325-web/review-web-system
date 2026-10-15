@@ -86,6 +86,53 @@ const DELETE_TABLES = [
   'tab_configs',
 ];
 
+/* ── 결정 254: 자동 정리(인트라넷 오더 삭제) 때 "사람이 손댄 작업"으로 보는 표 ─────────
+   하나라도 그 작업 행이 있으면 자동으로 지우지 않는다(표시만). 모두 DELETE_TABLES 안에 있어야 한다(가드).
+   ★ 구조용(계획 빈 줄·열 구성·장부·시트 미러·등록행·이벤트 로그·공유 주소)은 여기 넣지 않는다 — 접수만 해도 생긴다. */
+const UNTOUCHED_BLOCK_TABLES = [
+  'participant_edits', 'workdesk_participant_deletions',
+  'review_submissions', 'review_inspections', 'review_edit_requests', 'review_report_links',
+  'order_submissions', 'participation_links', 'reverse_sync_proposals',
+  'trackb_tab_threads', 'trackb_tab_memos', 'trackb_tab_closeouts', 'trackb_tab_finished',
+  'trackb_settlement_links', 'trackb_brand_tab_map', 'trackb_tab_brand_managers',
+  'trackb_cell_colors', 'trackb_custom_columns',
+];
+
+/**
+ * 결정 254 — 이 작업이 "접수만 되고 아무도 손대지 않은 빈 작업"인가. 걸리는 이유 목록(빈 배열 = 자동으로 지워도 된다).
+ * ★ 판정은 fail-closed — 모르면(조회 실패) 이유로 친다(호출부 트랜잭션이 실패를 그대로 받는다).
+ */
+async function _untouchedReasons(q, sheetId, tabName) {
+  const reasons = [];
+  const { rows: tc } = await q(`SELECT COALESCE(sheetless, FALSE) AS sl FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2`, [sheetId, tabName]);
+  if (!tc.length) reasons.push('not_registered');
+  else if (tc[0].sl !== true) reasons.push('sheet_based');
+  for (const t of UNTOUCHED_BLOCK_TABLES) {
+    const { rows } = await q(`SELECT EXISTS (SELECT 1 FROM ${t} WHERE sheet_id=$1 AND tab_name=$2) AS x`, [sheetId, tabName]);
+    if (rows[0] && rows[0].x) reasons.push(t);
+  }
+  const { rows: filled } = await q(
+    `SELECT EXISTS (SELECT 1 FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2
+                     AND (order_submission_id IS NOT NULL OR is_submitted OR is_paid)) AS x`, [sheetId, tabName]);
+  if (filled[0] && filled[0].x) reasons.push('filled_rows');
+  // 연결 공고 — 보관 안 된 공고가 있거나, 참여 신청·공고 주문이 하나라도 있으면 지우지 않는다(deleteTask 의 공고 삭제와 같은 범위)
+  const { rows: rc } = await q(
+    `SELECT COUNT(*) FILTER (WHERE rc.archived_at IS NULL) AS live,
+            COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM campaign_applications a WHERE a.campaign_id = rc.id)
+                              OR EXISTS (SELECT 1 FROM order_submissions o WHERE o.sheet_id = 'campaign:' || rc.id)) AS used
+       FROM recruit_campaigns rc
+      WHERE rc.linked_sheet_id=$1 AND COALESCE(NULLIF(rc.linked_tab_name,''), $2)=$2`, [sheetId, tabName]);
+  if (rc[0] && Number(rc[0].live) > 0) reasons.push('live_campaign');
+  if (rc[0] && Number(rc[0].used) > 0) reasons.push('campaign_used');
+  // 이 작업을 가리키는 살아 있는 작업오더가 있으면(다른 오더가 이어 쓰는 중) 지우지 않는다
+  const { rows: wo } = await q(
+    `SELECT EXISTS (SELECT 1 FROM work_orders w WHERE w.deleted_at IS NULL AND w.linked_tab_sheet_id=$1 AND w.linked_tab_name=$2)
+         OR EXISTS (SELECT 1 FROM trackb_work_order_links l JOIN work_orders w ON w.id = l.work_order_id AND w.deleted_at IS NULL
+                     WHERE l.sheet_id=$1 AND l.tab_name=$2 AND l.deleted_at IS NULL) AS x`, [sheetId, tabName]);
+  if (wo[0] && wo[0].x) reasons.push('live_work_order');
+  return reasons;
+}
+
 /* ── 돈 기록 — 기본은 거부, `forcePayment` 두 번째 확인일 때만 함께 삭제 ────────
    ★ 삭제 순서가 계약이다: `payment_account_mismatch_reconciliations.batch_item_id` 가
      `payment_batch_items` 를 **ON DELETE RESTRICT** 로 잡고 있어(119), 그 대조 이력을 먼저
@@ -313,7 +360,8 @@ async function previewTaskDelete({ sheetId, tabName, pool } = {}) {
 /**
  * 실행 — 한 트랜잭션. 확인(`confirm===true`) 없이는 아무것도 지우지 않는다.
  */
-async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, deleteDrive = false, by = 'admin', pool } = {}) {
+async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, deleteDrive = false, by = 'admin', pool,
+  onlyIfUntouched = false, notifyIntranet = true } = {}) {
   _args(sheetId, tabName);
   if (confirm !== true) return { ok: false, code: 'confirm_required', error: '삭제 확인이 필요합니다.' };
 
@@ -324,6 +372,15 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, del
     // 같은 작업을 두 사람이 동시에 지우거나, 지우는 중에 주문이 들어오는 것을 막는다.
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [String(sheetId), String(tabName)]);
 
+    /* ★★ 결정 254: 자동 정리(사람의 미리보기 없음)는 **잠근 뒤 같은 트랜잭션 안에서** "손대지 않은 빈 작업"인지 다시 본다 —
+         하나라도 걸리면 쓰기 0건으로 돌려준다(주문·편집·공고 참여가 그사이 들어와도 지우지 않는다). */
+    if (onlyIfUntouched === true) {
+      const reasons = await _untouchedReasons((t, p) => client.query(t, p), sheetId, tabName);
+      if (reasons.length) {
+        await client.query('ROLLBACK');
+        return { ok: false, code: 'not_untouched', reasons };
+      }
+    }
     // ★★ 돈 기록은 트랜잭션 안에서 다시 센다 — 미리보기 이후에 회차에 담겼을 수 있다(TOCTOU).
     const money = await _moneyRows((t, p) => client.query(t, p), sheetId, tabName);
     if (money.length && forcePayment !== true) {
@@ -470,7 +527,7 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, del
        `tab_deleted_at` 은 인트라넷이 그 필드를 읽도록 고친 뒤에야 보인다. 반면 처리메모
        webhook 은 **지금 있는 채널**이라 인트라넷 배포 없이 그 자리에서 주황 메모로 뜬다.
        ★ 실행부는 `intranetMemo.service` 한 벌(사본 금지) · fail-soft(절대 throw 없음). */
-    const orderNotices = await _notifyOrdersTabDeleted(wo.rows || [], tabName, by);
+    const orderNotices = await _notifyOrdersTabDeleted(wo.rows || [], tabName, by, { push: notifyIntranet !== false });
 
     return {
       ok: true, sheetId, tabName, deleted, totalRows, recordedTombstones, driveTrashed, orderNotices,
@@ -490,7 +547,7 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, del
  *   + 기존 처리메모 webhook 으로 push(인트라넷 수신부 무변경).
  * ★ 절대 throw 없음 — 삭제는 이미 커밋됐다.
  */
-async function _notifyOrdersTabDeleted(orders, tabName, by) {
+async function _notifyOrdersTabDeleted(orders, tabName, by, { push = true } = {}) {
   if (!Array.isArray(orders) || !orders.length) return [];
   const { pushIntranetMemo, appendMemoLog } = require('./intranetMemo.service');
   const at = new Date().toISOString();
@@ -498,8 +555,11 @@ async function _notifyOrdersTabDeleted(orders, tabName, by) {
   const out = [];
   for (const o of orders) {
     let delivered = false, deliverError = null;
-    try { ({ delivered, deliverError } = await pushIntranetMemo(o, memo, by, at)); }
-    catch (e) { deliverError = (e && e.message) || String(e); }
+    // ★ 결정 254: 인트라넷에서 이미 지운 오더에는 메모를 보내지 않는다(기록만 남긴다).
+    if (push) {
+      try { ({ delivered, deliverError } = await pushIntranetMemo(o, memo, by, at)); }
+      catch (e) { deliverError = (e && e.message) || String(e); }
+    } else deliverError = 'skipped_order_deleted';
     try { await appendMemoLog(_db(), o.id, { memo, by, at, delivered, error: deliverError, kind: 'tab_deleted' }); }
     catch (_) { /* fail-soft */ }
     out.push({ id: o.id, title: o.title, delivered, error: deliverError });
@@ -577,4 +637,28 @@ async function deleteOrphanCampaigns({ ids, confirm, by = 'admin', pool } = {}) 
   } finally { client.release(); }
 }
 
-module.exports = { previewTaskDelete, deleteTask, DRIVE_FOLDER_KINDS, findOrphanCampaigns, deleteOrphanCampaigns, DELETE_TABLES, MONEY_TABLES, KEEP_TABLES, __setPoolForTest };
+/**
+ * ★★ 결정 254 — 인트라넷에서 작업오더를 지웠을 때 그 오더가 만든 작업이 **손대지 않은 빈 작업**이면 함께 정리한다(사용자 확정 2026-10-15 "가").
+ *   주문·편집·리뷰·메모·공고 참여 등 하나라도 있으면 지우지 않는다 — 홈 작업 목록에 "원본 오더 삭제됨"으로 보인다(tabStats 주석).
+ *   ★ 절대 throw 없음(오더 삭제는 이미 끝났다) · 드라이브·구글시트 무접촉 · 인트라넷 메모 푸시 없음(기록만).
+ *   ★ 끄는 스위치 INTAKE_DELETE_TAB_CLEANUP=0.
+ */
+async function autoCleanupDeletedOrderTab(workOrderId, { by = 'intranet-order-delete', pool } = {}) {
+  if (!workOrderId || process.env.INTAKE_DELETE_TAB_CLEANUP === '0') return { ok: false, code: 'skipped' };
+  const db = pool || _db();
+  try {
+    const { rows } = await db.query(
+      `SELECT linked_tab_sheet_id AS s, linked_tab_name AS n FROM work_orders WHERE id=$1 AND deleted_at IS NOT NULL`, [workOrderId]);
+    const w = rows[0];
+    if (!w || !w.s || !w.n) return { ok: false, code: 'no_tab' };
+    const out = await deleteTask({ sheetId: w.s, tabName: w.n, confirm: true, onlyIfUntouched: true, notifyIntranet: false, by, pool: db });
+    if (out && out.ok) logger.info(`[workTabDelete] 인트라넷 오더 삭제로 빈 작업 정리 wo=${workOrderId} "${w.n}" 행 ${out.totalRows}`);
+    else logger.info(`[workTabDelete] 인트라넷 오더 삭제 — 작업은 남김 wo=${workOrderId} "${w.n}" (${(out && (out.reasons || [out.code]).join(',')) || '?'})`);
+    return out;
+  } catch (e) {
+    logger.warn(`[workTabDelete] 인트라넷 오더 삭제 후 작업 정리 실패(작업은 남김) wo=${workOrderId}: ${e && e.message}`);
+    return { ok: false, code: 'error', error: e && e.message };
+  }
+}
+
+module.exports = { previewTaskDelete, deleteTask, autoCleanupDeletedOrderTab, UNTOUCHED_BLOCK_TABLES, DRIVE_FOLDER_KINDS, findOrphanCampaigns, deleteOrphanCampaigns, DELETE_TABLES, MONEY_TABLES, KEEP_TABLES, __setPoolForTest };

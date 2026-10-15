@@ -1235,6 +1235,13 @@ router.delete('/intake/:id', async (req, res, next) => {
 
     logger.info(`[order] 인트라넷 작업오더 삭제: ${id} (by ${b.deleted_by || '?'})`);
     res.json({ ok: true, id });
+    /* ★★ 결정 254 — 그 오더가 만든 작업이 손대지 않은 빈 작업이면 함께 정리한다(응답 뒤 · 절대 throw 없음).
+       지우고 다시 올리면 빈 작업보드가 남아 같은 작업이 두 개로 보이던 문제(10/7 탄소매트·10/14 라자가구). 손댄 작업은 남기고 홈 목록에 "원본 오더 삭제됨". */
+    const _by = `인트라넷 오더 삭제(${(b.deleted_by_name || b.deleted_by || '').toString().trim() || '?'})`;
+    setImmediate(() => {
+      require('../services/workTabDelete.service').autoCleanupDeletedOrderTab(id, { by: _by })
+        .catch(e => logger.warn(`[order] 오더 삭제 후 작업 정리 실패(무시): ${e.message}`));
+    });
   } catch (err) {
     next(err);
   }
