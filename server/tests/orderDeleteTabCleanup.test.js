@@ -23,8 +23,16 @@ const svc = require('../src/services/workTabDelete.service');
     for (const t of svc.UNTOUCHED_BLOCK_TABLES) assert.ok(svc.DELETE_TABLES.includes(t), t);
   });
   await ok('주문·편집·리뷰·메모·마감·정산 연결은 반드시 판정 대상', () => {
-    for (const t of ['order_submissions', 'participant_edits', 'review_submissions', 'trackb_tab_memos', 'trackb_tab_threads', 'trackb_tab_finished', 'trackb_settlement_links', 'workdesk_participant_deletions'])
+    for (const t of ['order_submissions', 'participant_edits', 'review_submissions', 'trackb_tab_memos', 'trackb_tab_threads', 'trackb_tab_finished', 'workdesk_participant_deletions'])
       assert.ok(svc.UNTOUCHED_BLOCK_TABLES.includes(t), t);
+  });
+
+  await ok('정산 계약 연결은 접수 자동 연결(자동(작업오더))은 빼고 사람이 연결한 것만 손댄 것으로 본다', () => {
+    const s = read('server/src/services/workTabDelete.service.js');
+    assert.ok(!svc.UNTOUCHED_BLOCK_TABLES.includes('trackb_settlement_links'));
+    assert.ok(/const SETTLEMENT_AUTO_BY = '자동\(작업오더\)';/.test(s));
+    assert.ok(/AND COALESCE\(linked_by,''\) <> \$3\) AS x`, \[sheetId, tabName, SETTLEMENT_AUTO_BY\]\);\s*if \(sl\[0\] && sl\[0\]\.x\) reasons\.push\('trackb_settlement_links'\);/.test(s));
+    assert.ok(/'자동\(작업오더\)'\]\);/.test(read('server/src/routes/order.routes.js')), '접수 자동 연결 표기가 같다');
   });
 
   console.log('[2] deleteTask(onlyIfUntouched) — 스텁 pool 로 실제 실행');
@@ -37,6 +45,7 @@ const svc = require('../src/services/workTabDelete.service');
         if (/SELECT COALESCE\(sheetless, FALSE\) AS sl FROM tab_configs/.test(sql)) return { rows: hits.notRegistered ? [] : [{ sl: !hits.sheetBased }] };
         const m = /SELECT EXISTS \(SELECT 1 FROM (\w+) WHERE sheet_id=\$1 AND tab_name=\$2\) AS x/.exec(sql);
         if (m) return { rows: [{ x: !!hits[m[1]] }] };
+        if (/FROM trackb_settlement_links WHERE sheet_id=\$1 AND tab_name=\$2/.test(sql)) return { rows: [{ x: !!hits.manualSettlement }] };
         if (/FROM campaign_participants WHERE sheet_id=\$1 AND tab_name=\$2\s+AND \(order_submission_id IS NOT NULL/.test(sql)) return { rows: [{ x: !!hits.filled }] };
         if (/AS live,/.test(sql)) return { rows: [{ live: hits.liveCampaign ? 1 : 0, used: hits.usedCampaign ? 1 : 0 }] };
         if (/FROM work_orders w WHERE w\.deleted_at IS NULL AND w\.linked_tab_sheet_id=\$1/.test(sql)) return { rows: [{ x: !!hits.liveOrder }] };
@@ -52,6 +61,7 @@ const svc = require('../src/services/workTabDelete.service');
     ['주문이 있으면', { order_submissions: 1 }, 'order_submissions'],
     ['사람이 고친 칸이 있으면', { participant_edits: 1 }, 'participant_edits'],
     ['채워진 줄이 있으면', { filled: 1 }, 'filled_rows'],
+    ['사람이 정산 계약을 연결했으면', { manualSettlement: 1 }, 'trackb_settlement_links'],
     ['보관 안 된 공고가 있으면', { liveCampaign: 1 }, 'live_campaign'],
     ['공고에 참여·주문이 있으면', { usedCampaign: 1 }, 'campaign_used'],
     ['이어 쓰는 살아 있는 오더가 있으면', { liveOrder: 1 }, 'live_work_order'],

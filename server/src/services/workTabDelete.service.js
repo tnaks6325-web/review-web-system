@@ -88,13 +88,15 @@ const DELETE_TABLES = [
 
 /* ── 결정 254: 자동 정리(인트라넷 오더 삭제) 때 "사람이 손댄 작업"으로 보는 표 ─────────
    하나라도 그 작업 행이 있으면 자동으로 지우지 않는다(표시만). 모두 DELETE_TABLES 안에 있어야 한다(가드).
-   ★ 구조용(계획 빈 줄·열 구성·장부·시트 미러·등록행·이벤트 로그·공유 주소)은 여기 넣지 않는다 — 접수만 해도 생긴다. */
+   ★ 구조용(계획 빈 줄·열 구성·장부·시트 미러·등록행·이벤트 로그·공유 주소)은 여기 넣지 않는다 — 접수만 해도 생긴다.
+   ★ 정산 계약 연결(trackb_settlement_links)은 접수 때 자동으로 생기므로(linked_by '자동(작업오더)') 표째 넣지 않고,
+     사람이 직접 연결한 행만 따로 본다(_untouchedReasons · 운영 실측 2026-10-15: 빈 작업 2건 모두 자동 연결만 있었다). */
 const UNTOUCHED_BLOCK_TABLES = [
   'participant_edits', 'workdesk_participant_deletions',
   'review_submissions', 'review_inspections', 'review_edit_requests', 'review_report_links',
   'order_submissions', 'participation_links', 'reverse_sync_proposals',
   'trackb_tab_threads', 'trackb_tab_memos', 'trackb_tab_closeouts', 'trackb_tab_finished',
-  'trackb_settlement_links', 'trackb_brand_tab_map', 'trackb_tab_brand_managers',
+  'trackb_brand_tab_map', 'trackb_tab_brand_managers',
   'trackb_cell_colors', 'trackb_custom_columns',
 ];
 
@@ -102,6 +104,8 @@ const UNTOUCHED_BLOCK_TABLES = [
  * 결정 254 — 이 작업이 "접수만 되고 아무도 손대지 않은 빈 작업"인가. 걸리는 이유 목록(빈 배열 = 자동으로 지워도 된다).
  * ★ 판정은 fail-closed — 모르면(조회 실패) 이유로 친다(호출부 트랜잭션이 실패를 그대로 받는다).
  */
+const SETTLEMENT_AUTO_BY = '자동(작업오더)';   // order.routes 접수 자동 연결과 같은 표기
+
 async function _untouchedReasons(q, sheetId, tabName) {
   const reasons = [];
   const { rows: tc } = await q(`SELECT COALESCE(sheetless, FALSE) AS sl FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2`, [sheetId, tabName]);
@@ -111,6 +115,10 @@ async function _untouchedReasons(q, sheetId, tabName) {
     const { rows } = await q(`SELECT EXISTS (SELECT 1 FROM ${t} WHERE sheet_id=$1 AND tab_name=$2) AS x`, [sheetId, tabName]);
     if (rows[0] && rows[0].x) reasons.push(t);
   }
+  const { rows: sl } = await q(
+    `SELECT EXISTS (SELECT 1 FROM trackb_settlement_links WHERE sheet_id=$1 AND tab_name=$2
+                     AND COALESCE(linked_by,'') <> $3) AS x`, [sheetId, tabName, SETTLEMENT_AUTO_BY]);
+  if (sl[0] && sl[0].x) reasons.push('trackb_settlement_links');
   const { rows: filled } = await q(
     `SELECT EXISTS (SELECT 1 FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2
                      AND (order_submission_id IS NOT NULL OR is_submitted OR is_paid)) AS x`, [sheetId, tabName]);
@@ -661,4 +669,7 @@ async function autoCleanupDeletedOrderTab(workOrderId, { by = 'intranet-order-de
   }
 }
 
-module.exports = { previewTaskDelete, deleteTask, autoCleanupDeletedOrderTab, UNTOUCHED_BLOCK_TABLES, DRIVE_FOLDER_KINDS, findOrphanCampaigns, deleteOrphanCampaigns, DELETE_TABLES, MONEY_TABLES, KEEP_TABLES, __setPoolForTest };
+// untouchedReasons = 진단용(읽기만) — 기존 작업이 자동 정리 기준에 맞는지 미리 볼 때.
+module.exports = { previewTaskDelete, deleteTask, autoCleanupDeletedOrderTab, UNTOUCHED_BLOCK_TABLES,
+  untouchedReasons: (db, sheetId, tabName) => _untouchedReasons((t, p) => db.query(t, p), sheetId, tabName),
+  DRIVE_FOLDER_KINDS, findOrphanCampaigns, deleteOrphanCampaigns, DELETE_TABLES, MONEY_TABLES, KEEP_TABLES, __setPoolForTest };
