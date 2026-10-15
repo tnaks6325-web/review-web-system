@@ -5627,8 +5627,10 @@ async function saveRecruitPostImpl() {
       if (document.getElementById("rf_transfer_bank_btns")) {
         payload.transfer_bank = document.getElementById("rf_transfer_bank")?.value || "";
         // 결정 247 — 업체입금을 끄면 미기록 줄이 바로 우리 입금 목록으로 돌아온다 → 이중 입금 확인
-        if (window._rfOrigTransferBank === "advertiser" && payload.transfer_bank !== "advertiser"
-            && !confirm(RF_ADV_PAYOUT_OFF_CONFIRM)) { _rfSaveBlocked("이체은행 변경을 취소했습니다 — 저장하지 않았습니다."); return; }
+        if (window._rfOrigTransferBank === "advertiser" && payload.transfer_bank !== "advertiser") {
+          if (!confirm(RF_ADV_PAYOUT_OFF_CONFIRM)) { _rfSaveBlocked("이체은행 변경을 취소했습니다 — 저장하지 않았습니다."); return; }
+          payload.transfer_bank_disable_ack = true;   // 서버는 이 표시가 있을 때만 업체입금을 끈다
+        }
         payload.transfer_memo = (document.getElementById("rf_transfer_memo")?.value || "").trim();
       }
       const _cbRaw = document.getElementById("rf_close_buffer").value;
@@ -5734,6 +5736,13 @@ async function saveRecruitPostImpl() {
       throw new Error(String(saved.error || "저장이 반영되지 않았습니다."));
     }
     const newCampId = saved && saved.data && saved.data.id;
+    /* 결정 247 — 업체입금 저장 확인(배포 시차·유지 규칙). ① 업체입금을 고르고 저장했는데 그 값을 모르는 서버였다 → 저장 안 됨을 말한다
+       ② 서버가 업체입금을 유지했다(확인 없이 끄는 저장 · 업체입금 작업에 새 공고) → 그 사실을 말한다. */
+    if (saved && payload.transfer_bank === "advertiser" && !(saved.advertiserPayoutBank && saved.data && saved.data.transfer_bank === "advertiser")) {
+      setTimeout(() => showToast("이체은행 「업체입금」이 저장되지 않았습니다 — 서버 업데이트 중일 수 있습니다. 잠시 뒤 다시 저장해 주세요.", "error"), 900);
+    } else if (saved && saved.transferBankKept) {
+      setTimeout(() => showToast(saved.transferBankNotice || "이체은행 업체입금은 그대로 두었습니다.", "error"), 900);
+    }
     /* ★ 작업오더에서 프리필로 만든 신규 공고면 → 그 오더에 linked_campaign_id 역연결 */
     if (!_recruitEditId && _woPrefillOrderId && newCampId) {
       try {

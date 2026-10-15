@@ -7743,11 +7743,13 @@ function _cndBankModal(cd){
     onSave: async ()=>{
       const sel=document.querySelector('#cndBkChips .wbl-b.on');
       if(!sel){ _toast('이체은행을 선택해 주세요.'); return false; }
-      if(cur==='advertiser' && sel.dataset.v!=='advertiser' && !confirm(_ADV_PAYOUT_OFF_CONFIRM)) return false;
+      const disabling = cur==='advertiser' && sel.dataset.v!=='advertiser';
+      if(disabling && !confirm(_ADV_PAYOUT_OFF_CONFIRM)) return false;
       const t=STATE.cur;
       const r=await api('/api/trackb/payment/transfer-setting',{method:'POST',
-        body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,bank:sel.dataset.v})}).catch(()=>null);
+        body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,bank:sel.dataset.v,disableAck:disabling})}).catch(()=>null);
       if(!r||!r.ok){ _toast(r&&r.error?r.error:'저장하지 못했습니다'); return false; }
+      if(r.transferBankKept) setTimeout(()=>_toast(r.transferBankNotice||'이체은행 업체입금은 그대로 두었습니다.'),900);
       return true;
     }
   });

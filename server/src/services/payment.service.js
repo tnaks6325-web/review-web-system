@@ -1885,7 +1885,7 @@ class PaymentFixError extends Error {
  *        bank/memo/reviewFee 는 **undefined = 변경 없음**, `''`(또는 null) = 지움(자동/미설정으로 되돌림).
  * @returns {{ok:true, target:'campaign'|'tab', bank:string|null, memo:string, reviewFee:number|null}}
  */
-async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo, reviewFee }) {
+async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo, reviewFee, disableAck }) {
   const sid = String(sheetId || '').trim();
   const tab = String(tabName || '').trim();
   if (!sid || !tab) throw new PaymentFixError('bad_target', '작업(시트·탭)이 지정되지 않았습니다.');
@@ -1899,10 +1899,7 @@ async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo, r
   let bankCode = null;
   if (touchBank && String(bank || '').trim() !== '') {
     if (isAdvertiserPayoutChoice(bank)) {
-      // 결정 247 — 업체입금은 고를 수 있는 작업인지 먼저 본다(시트 없는 작업 + 주인 업체 있음).
-      const chk = await require('./advertiserPayout.service').checkAdvertiserPayoutAllowed({ sheetId: sid, tabName: tab });
-      if (!chk.ok) throw new PaymentFixError(chk.error, chk.message);
-      bankCode = ADVERTISER_PAYOUT;
+      bankCode = ADVERTISER_PAYOUT;   // 고를 수 있는 작업인지는 아래 공통 규칙(guardTransferBankWrite)이 본다
     } else {
       bankCode = normalizeBankChoice(bank);
       if (!bankCode) throw new PaymentFixError('bad_bank', '이체은행은 케이뱅크·하나은행·업체입금 중에서만 지정할 수 있습니다.');
@@ -1931,6 +1928,19 @@ async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo, r
     campId = rows[0].id;
   }
 
+  /* 결정 247 — 이체은행 쓰기 공통 규칙(켜기 = 고를 수 있는 작업만 · 끄기 = 확인 표시가 있을 때만, 없으면 업체입금 유지). */
+  let bankKept = null;
+  let touchBankEff = touchBank;
+  if (touchBank) {
+    const { rows: curRows } = campId
+      ? await pool.query('SELECT transfer_bank FROM recruit_campaigns WHERE id = $1', [campId])
+      : await pool.query('SELECT transfer_bank FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1', [sid, tab]);
+    const g = await require('./advertiserPayout.service').guardTransferBankWrite({
+      current: curRows[0] ? curRows[0].transfer_bank : null, incoming: bankCode || '', ack: disableAck, sheetId: sid, tabName: tab });
+    if (g.action === 'reject') throw new PaymentFixError(g.error, g.message);
+    if (g.action === 'keep') { touchBankEff = false; bankKept = g; }
+  }
+
   if (campId) {
     // ★ 이 두 칸만 UPDATE — 공고의 다른 설정은 절대 건드리지 않는다(축약 폼 클로버 금지).
     // ★ 공고의 `review_fee` 는 **구간표(082)가 없을 때의 그 공고 금액**이다 — 구간이 있으면
@@ -1941,8 +1951,9 @@ async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo, r
               transfer_memo = CASE WHEN $4::bool THEN $5::text ELSE transfer_memo END,
               review_fee    = CASE WHEN $6::bool THEN COALESCE($7::int, 0) ELSE review_fee END
         WHERE id = $1`,
-      [campId, touchBank, bankCode, touchMemo, memoText, touchFee, feeVal]);
-    return { ok: true, target: 'campaign', bank: bankCode, memo: memoText || '', reviewFee: touchFee ? (feeVal == null ? 0 : feeVal) : undefined };
+      [campId, touchBankEff, bankCode, touchMemo, memoText, touchFee, feeVal]);
+    return { ok: true, target: 'campaign', bank: bankKept ? ADVERTISER_PAYOUT : bankCode, memo: memoText || '', reviewFee: touchFee ? (feeVal == null ? 0 : feeVal) : undefined,
+      ...(bankKept ? { transferBankKept: bankKept.kept, transferBankNotice: bankKept.notice } : {}) };
   }
 
   // 탭 설정 — ★ 표기는 **한글 라벨**(관리자 대시보드 탭설정이 그 형식을 그대로 비교해 배지를 그린다)
@@ -1954,9 +1965,10 @@ async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo, r
             review_fee    = CASE WHEN $7::bool THEN $8::int ELSE review_fee END,
             updated_at    = NOW()
       WHERE sheet_id = $1 AND tab_name = $2`,
-    [sid, tab, touchBank, bankCode === ADVERTISER_PAYOUT ? ADVERTISER_PAYOUT_LABEL : (bankCode ? tabBankLabel(bankCode) : ''), touchMemo, memoText, touchFee, feeVal]);
+    [sid, tab, touchBankEff, bankCode === ADVERTISER_PAYOUT ? ADVERTISER_PAYOUT_LABEL : (bankCode ? tabBankLabel(bankCode) : ''), touchMemo, memoText, touchFee, feeVal]);
   if (!rowCount) throw new PaymentFixError('tab_not_found', '탭 설정이 없어 저장하지 못했습니다(작업오더 접수 전 탭일 수 있습니다).');
-  return { ok: true, target: 'tab', bank: bankCode, memo: memoText || '', reviewFee: touchFee ? feeVal : undefined };
+  return { ok: true, target: 'tab', bank: bankKept ? ADVERTISER_PAYOUT : bankCode, memo: memoText || '', reviewFee: touchFee ? feeVal : undefined,
+    ...(bankKept ? { transferBankKept: bankKept.kept, transferBankNotice: bankKept.notice } : {}) };
 }
 
 /**

@@ -3807,6 +3807,7 @@ router.post('/payment/transfer-setting', authMiddleware, adminOrMasterMiddleware
       // ★ `reviewFee` 도 **undefined = 변경 없음** 계약 그대로 넘긴다(칸이 없는 화면이
       //   저장해도 리뷰비가 조용히 지워지지 않는다 — 옵션표·이체설정과 같은 원칙).
       bank: b.bank, memo: b.memo, reviewFee: b.reviewFee,
+      disableAck: b.disableAck,   // 결정 247 — 업체입금을 끄는 저장은 화면 확인 표시가 있을 때만
     });
     logger.info(`[payment] 이체설정 저장 by ${_by(req)} — ${b.tabName} → ${out.target}/${out.bank || '자동'}` +
       (out.reviewFee !== undefined ? ` · 리뷰비 ${out.reviewFee == null ? '미설정' : out.reviewFee}` : ''));

@@ -225,6 +225,33 @@ function payHandler(o = {}) {
       assert.strictEqual(up.params[2], 'advertiser');
     }));
 
+  console.log('\n§2-1 이체은행 쓰기 공통 규칙 — 켜기는 검사, 끄기는 확인 표시가 있을 때만');
+  await ta('2f guardTransferBankWrite — 켜기 검사 · 확인 없는 끄기는 유지 · 확인 있는 끄기는 반영 · 연결 작업 변경 재검사', () =>
+    withStubPool(tabRow({ sheetless: false }), 'services/advertiserPayout.service', async svc => {
+      const G = svc.guardTransferBankWrite;
+      assert.strictEqual((await G({ current: '', incoming: 'advertiser', sheetId: 'S', tabName: 'T' })).action, 'reject', '시트 기반 작업은 켜기 거부');
+      const k = await G({ current: '업체입금', incoming: '하나은행', sheetId: 'S', tabName: 'T' });
+      assert.strictEqual(k.action, 'keep'); assert.strictEqual(k.kept, '업체입금'); assert.ok(/그대로/.test(k.notice));
+      assert.strictEqual((await G({ current: 'advertiser', incoming: '', ack: true })).action, 'write', '확인하면 끈다');
+      assert.strictEqual((await G({ current: 'advertiser', incoming: 'advertiser', sheetId: 'S', tabName: 'T' })).action, 'write', '같은 값 저장은 통과');
+      assert.strictEqual((await G({ current: 'advertiser', incoming: 'advertiser', sheetId: 'S', tabName: 'T', recheck: true })).action, 'reject', '연결 작업이 바뀌면 다시 검사');
+      assert.strictEqual((await G({ current: 'kbank', incoming: undefined })).action, 'write', '이체은행을 안 보내면 그대로');
+    }));
+  await ta('2g 탭 이체설정 — 확인 없이 업체입금을 끄는 저장은 이체은행만 유지하고 그 사실을 돌려준다', () =>
+    withStubPool((sql) => {
+      if (/SELECT transfer_bank FROM tab_configs/.test(sql)) return { rows: [{ transfer_bank: '업체입금' }] };
+      if (/UPDATE tab_configs/.test(sql)) return { rows: [], rowCount: 1 };
+      return { rows: [] };
+    }, 'services/payment.service', async (svc, calls) => {
+      const r = await svc.saveTransferSetting({ sheetId: 'S', tabName: 'T', bank: 'kbank', memo: '새입금명' });
+      assert.strictEqual(r.transferBankKept, '업체입금'); assert.strictEqual(r.bank, 'advertiser');
+      const up = calls.find(c => /UPDATE tab_configs/.test(c.sql));
+      assert.strictEqual(up.params[2], false, '이체은행 칸은 건드리지 않는다');
+      assert.strictEqual(up.params[4], true, '다른 칸(입금명)은 저장된다');
+      const r2 = await svc.saveTransferSetting({ sheetId: 'S', tabName: 'T', bank: 'kbank', disableAck: true });
+      assert.strictEqual(r2.bank, 'kbank'); assert.ok(!r2.transferBankKept);
+    }));
+
   console.log('\n§3 업체 입금 기록 — 같은 트랜잭션 안에서 다시 본다');
   _owner = { id: 'adv_1', name: '스마트윈' };
   const svc = require('../src/services/trackB.service');
@@ -374,12 +401,23 @@ function payHandler(o = {}) {
   await ta('4f 모집공고 저장 — advertiser 를 받고, 업체입금으로 바꿀 때 고를 수 있는 작업인지 본다 · 화면 세 곳에 선택지', () => {
     const camp = read('src/routes/campaign.routes.js');
     assert.match(camp, /return \(s === 'kbank' \|\| s === 'hana' \|\| s === 'advertiser'\) \? s : null;/);
-    assert.strictEqual((camp.match(/await _advertiserPayoutGate\(/g) || []).length, 2, '생성·수정 두 곳');
+    assert.strictEqual((camp.match(/guardTransferBankWrite\(\{/g) || []).length, 2, '생성·수정 두 곳이 공통 규칙을 탄다');
+    assert.match(camp, /ack: req\.body\.transfer_bank_disable_ack/);
+    assert.match(camp, /recheck: tabChanged/, '연결 작업이 바뀌면 다시 검사');
+    assert.match(camp, /advertiserPayoutBank: true/, '배포 시차 판별용 표시');
     assert.match(camp, /code: 'ADVERTISER_PAYOUT_NOT_ALLOWED'/);
     const rm = fs.readFileSync(path.join(ROOT, '..', 'frontend', 'js', 'recruit-modal.js'), 'utf8');
     assert.strictEqual((rm.match(/data-group="transfer_bank" data-val="advertiser"/g) || []).length, 3, '모집공고 창 세 가지 모양 모두');
     const ir = fs.readFileSync(path.join(ROOT, '..', 'frontend', 'js', 'index-recruit.js'), 'utf8');
     assert.match(ir, /window\._rfOrigTransferBank === "advertiser" && payload\.transfer_bank !== "advertiser"/, '끌 때 확인');
+    assert.match(ir, /payload\.transfer_bank_disable_ack = true;/, '확인하면 서버에 표시를 보낸다');
+    assert.match(ir, /saved\.advertiserPayoutBank && saved\.data && saved\.data\.transfer_bank === "advertiser"/, '모르는 서버에 저장되면 말한다');
+    const tc = read('src/routes/tabconfig.routes.js');
+    assert.match(tc, /guardTransferBankWrite\(\{[\s\S]{0,200}ack: b\.transferBankDisableAck/, '관리자 대시보드 탭 설정 경로도 공통 규칙');
+    const ia = fs.readFileSync(path.join(ROOT, '..', 'frontend', 'js', 'index-app.js'), 'utf8');
+    assert.match(ia, /transferBankDisableAck: _tcCurrent\._bankDisableAck === true/);
+    assert.match(fs.readFileSync(path.join(ROOT, '..', 'frontend', 'admin.html'), 'utf8'), /data-val="업체입금"/, '탭 설정 창도 업체입금을 표시할 수 있다');
+    assert.match(html, /disableAck:disabling/, '작업보드 탭 이체은행 창도 확인 표시를 보낸다');
     assert.ok(!/입금 주체/.test(html.replace(/<!--[\s\S]*?-->/g, '')) || !/'payer'/.test(html), '입금 주체 칸은 없앴다');
     assert.ok(!/_cndPayerModal/.test(html));
     assert.match(html, /\['advertiser','🏢 업체입금'\]/, '탭 이체은행 창에도 같은 선택지');

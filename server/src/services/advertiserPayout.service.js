@@ -33,4 +33,32 @@ async function checkAdvertiserPayoutAllowed({ sheetId, tabName } = {}) {
   return { ok: true, advertiserName: owner.name || '' };
 }
 
-module.exports = { checkAdvertiserPayoutAllowed, ADVERTISER_PAYOUT_MESSAGES: MESSAGES };
+/* 업체입금 판정(공고·탭 값 어떤 표기든) — payment.service 와 같은 규칙. 순환 require 를 피하려고 여기 둔다. */
+function _isAdv(v) {
+  const s = String(v == null ? '' : v).replace(/\s/g, '').toLowerCase();
+  return s === 'advertiser' || s === '업체입금';
+}
+const KEPT_NOTICE = '이 작업은 이체은행이 「업체입금」이라 그대로 두었습니다 — 바꾸려면 모집공고 설정이나 작업보드 › 작업 조건 › 이체은행에서 확인 후 바꿔 주세요.';
+
+/**
+ * 이체은행 쓰기 공통 규칙(결정 247 · Codex 리뷰) — **모든** 이체은행 저장 경로(모집공고 생성·수정 · 탭 설정 /api/tab/config ·
+ * 탭 이체설정 transfer-setting)가 이 판정을 거친다.
+ *  - 업체입금으로 **켜는** 쓰기 = 고를 수 있는 작업인지 검사(아니면 거부). 연결 작업이 바뀌어도 다시 검사(`recheck`).
+ *  - 업체입금을 **끄는** 쓰기 = 화면이 확인을 받았다는 표시(`ack`)가 있을 때만. 없으면(업체입금을 모르는 옛 화면·다른 칸만 고친 저장)
+ *    **업체입금을 그대로 둔다** — 조용히 꺼지면 업체가 이미 보낸 미기록 줄이 우리 입금 목록으로 돌아와 이중 입금이 된다.
+ * @returns {Promise<{action:'write'}|{action:'keep', kept:string, notice:string}|{action:'reject', error:string, message:string}>}
+ */
+async function guardTransferBankWrite({ current, incoming, ack = false, sheetId, tabName, recheck = false } = {}) {
+  if (incoming === undefined || incoming === null) return { action: 'write' };
+  const curAdv = _isAdv(current), inAdv = _isAdv(incoming);
+  if (inAdv && (!curAdv || recheck)) {
+    const g = await checkAdvertiserPayoutAllowed({ sheetId, tabName });
+    if (!g.ok) return { action: 'reject', error: g.error, message: g.message };
+  }
+  if (curAdv && !inAdv && !(ack === true || ack === 'true' || ack === 1 || ack === '1')) {
+    return { action: 'keep', kept: String(current), notice: KEPT_NOTICE };
+  }
+  return { action: 'write' };
+}
+
+module.exports = { checkAdvertiserPayoutAllowed, guardTransferBankWrite, ADVERTISER_PAYOUT_MESSAGES: MESSAGES };

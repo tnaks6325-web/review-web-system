@@ -288,10 +288,26 @@ router.post('/config', authMiddleware, internalOnlyMiddleware, tabConfigWriteSco
       campaign_name:b.campaignName !== undefined ? b.campaignName : undefined,
     };
 
+    /* 결정 247 — 이체은행 「업체입금」 쓰기 규칙(켜기 = 고를 수 있는 작업만 · 끄기 = 확인 표시가 있을 때만, 없으면 유지).
+       ★ 관리자 대시보드의 탭 설정 창·간편 입력은 업체입금을 모른다 — 다른 칸만 고쳐도 transferBank 를 같이 보내므로
+         여기서 막지 않으면 업체입금이 조용히 꺼진다(Codex 리뷰). */
+    let bankKept = null;
+    if (fields.transfer_bank !== undefined) {
+      const { rows: curRows } = await pool.query(
+        'SELECT transfer_bank FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1', [sheetId, tabName]);
+      const g = await require('../services/advertiserPayout.service').guardTransferBankWrite({
+        current: curRows[0] ? curRows[0].transfer_bank : null, incoming: fields.transfer_bank,
+        ack: b.transferBankDisableAck, sheetId, tabName });
+      if (g.action === 'reject') return res.json({ error: g.message, code: g.error });
+      if (g.action === 'keep') { fields.transfer_bank = undefined; bankKept = g; }
+      else if (require('../services/payment.service').isAdvertiserPayoutChoice(fields.transfer_bank)) fields.transfer_bank = '업체입금';   // 표기 하나로
+    }
+
     // undefined 필드 제거 (기존값 보존)
     const updateEntries = Object.entries(fields).filter(([, v]) => v !== undefined);
 
     if (updateEntries.length === 0) {
+      if (bankKept) return res.json({ ok: true, tabName, sheetId, transferBankKept: bankKept.kept, transferBankNotice: bankKept.notice });
       return res.json({ error: '업데이트할 필드가 없습니다.' });
     }
 
@@ -311,7 +327,8 @@ router.post('/config', authMiddleware, internalOnlyMiddleware, tabConfigWriteSco
     `;
 
     await pool.query(sql, [sheetId, tabName, ...values]);
-    res.json({ ok: true, tabName, sheetId });
+    res.json({ ok: true, tabName, sheetId,
+      ...(bankKept ? { transferBankKept: bankKept.kept, transferBankNotice: bankKept.notice } : {}) });
   } catch (err) {
     next(err);
   }
