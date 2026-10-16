@@ -2684,7 +2684,7 @@ async function _showUnpaidReviewersPopup(sheetId, tabName, rc, pc, round) {
             <i class="fas fa-check" style="margin-right:6px"></i>확인
           </button>
           <button onclick="_goToSheetForPayment('${escHtml(sheetId)}','${escHtml(tabName)}')" style="padding:10px 20px;background:linear-gradient(135deg,#0ca678,#047857);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(5,150,105,.3)">
-            <i class="fas fa-external-link-alt" style="margin-right:6px"></i>입금처리 하러가기
+            <i class="fas fa-link" style="margin-right:6px"></i>입금처리 하러가기
           </button>
         </div>
       </div>
@@ -2926,7 +2926,7 @@ async function loadAdminDashboard() {
           : "";
         const _tabSheetUrl2 = _buildTabUrl(t.sheetUrl, t.sheetId, t.tabGid);
         const tabNameHtml = _tabSheetUrl2
-          ? `<a class="dash-tab-link" href="${escHtml(_tabSheetUrl2)}" target="_blank" title="${escHtml(_tabSheetUrl2)}">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_overdueBadge2}`
+          ? `<a class="dash-tab-link" href="${escHtml(_tabSheetUrl2)}" target="_blank" title="${escHtml(_tabSheetUrl2)}">${escHtml(t.tab)} <i class="fas fa-link dash-tab-ext"></i></a>${_overdueBadge2}`
           : `<span>${escHtml(t.tab)}</span>${_overdueBadge2}`;
 
         const _manualSD = _getManualStartDate(tabKey);
@@ -2998,7 +2998,7 @@ async function loadAdminDashboard() {
               ? `<span class="badge-overdue"><i class="fas fa-fire" style="font-size:.55rem"></i> D+${_rdOvDays2}</span>` : "";
             const _rdTabSheetUrl2 = _buildTabUrl(t.sheetUrl, t.sheetId, t.tabGid);
             const rdTabNameHtml2 = _rdTabSheetUrl2
-              ? `<a class="dash-tab-link" href="${escHtml(_rdTabSheetUrl2)}" target="_blank" title="${escHtml(_rdTabSheetUrl2)}">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_rdOverdueBadge2}`
+              ? `<a class="dash-tab-link" href="${escHtml(_rdTabSheetUrl2)}" target="_blank" title="${escHtml(_rdTabSheetUrl2)}">${escHtml(t.tab)} <i class="fas fa-link dash-tab-ext"></i></a>${_rdOverdueBadge2}`
               : `<span>${escHtml(t.tab)}</span>${_rdOverdueBadge2}`;
             let rdStateHtml = "";
             if (isRoundClosed)    rdStateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
@@ -3194,7 +3194,7 @@ function renderDashboard(data) {
         : "";
       const _tabSheetUrl = _buildTabUrl(t.sheetUrl, t.sheetId, t.tabGid);
       const tabNameHtml = _tabSheetUrl
-        ? `<a class="dash-tab-link" href="${escHtml(_tabSheetUrl)}" target="_blank" title="${escHtml(_tabSheetUrl)}">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_overdueBadge}`
+        ? `<a class="dash-tab-link" href="${escHtml(_tabSheetUrl)}" target="_blank" title="${escHtml(_tabSheetUrl)}">${escHtml(t.tab)} <i class="fas fa-link dash-tab-ext"></i></a>${_overdueBadge}`
         : `<span>${escHtml(t.tab)}</span>${_overdueBadge}`;
       const _manualSD2 = _getManualStartDate(tabKey);
       const _effectiveSD2 = _manualSD2 || t.startDate || "";
@@ -3254,7 +3254,7 @@ function renderDashboard(data) {
             ? `<span class="badge-overdue"><i class="fas fa-fire" style="font-size:.55rem"></i> D+${_rdOvDays}</span>` : "";
           const _rdTabSheetUrl = _buildTabUrl(t.sheetUrl, t.sheetId, t.tabGid);
           const rdTabNameHtml = _rdTabSheetUrl
-            ? `<a class="dash-tab-link" href="${escHtml(_rdTabSheetUrl)}" target="_blank" title="${escHtml(_rdTabSheetUrl)}">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_rdOverdueBadge}`
+            ? `<a class="dash-tab-link" href="${escHtml(_rdTabSheetUrl)}" target="_blank" title="${escHtml(_rdTabSheetUrl)}">${escHtml(t.tab)} <i class="fas fa-link dash-tab-ext"></i></a>${_rdOverdueBadge}`
             : `<span>${escHtml(t.tab)}</span>${_rdOverdueBadge}`;
           let rdStateHtml = "";
           if (isRoundClosed) rdStateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
@@ -3358,7 +3358,7 @@ async function _unhideTab(sheetId, tabGid, el) {
     if (data.error) throw new Error(data.error);
     // 성공 → 아이콘을 정상 링크로 교체
     const url = `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=${tabGid}`;
-    el.outerHTML = `<a href="${url}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${url}" style="color:#4285F4;font-size:.72rem;margin-left:2px;text-decoration:none"><i class="fas fa-external-link-alt"></i></a>`;
+    el.outerHTML = `<a href="${url}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${url}" style="color:#4285F4;font-size:.72rem;margin-left:2px;text-decoration:none"><i class="fas fa-link"></i></a>`;
     // 숨김탭 배지 제거
     const parent = el.closest ? el.closest('label') || el.parentElement : el.parentElement;
     if (parent) {
@@ -5376,7 +5376,7 @@ function openFormLink(btnEl) {
     btnEl.innerHTML = '<i class="fas fa-check"></i>';
     setTimeout(() => {
       btnEl.classList.remove("copied");
-      btnEl.innerHTML = '<i class="fas fa-external-link-alt"></i>';
+      btnEl.innerHTML = '<i class="fas fa-link"></i>';
     }, 2500);
   };
 
@@ -9481,7 +9481,7 @@ async function archiveAutoDetect() {
           ? `<span title="탭 삭제됨" style="color:#9CA3AF;font-size:.72rem;margin-left:2px"><i class="fas fa-unlink"></i></span>`
           : t.hidden
           ? `<span title="숨김 탭 (클릭하여 표시)" style="color:#9CA3AF;font-size:.72rem;margin-left:2px;cursor:pointer" onclick="event.stopPropagation();_unhideTab('${escHtml(camp.sheetId)}','${escHtml(t.tabGid)}',this)"><i class="fas fa-eye-slash"></i></span>`
-          : (sheetUrl ? `<a href="${escHtml(sheetUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${t.liveTabName ? '현재: '+escHtml(t.liveTabName) : escHtml(sheetUrl)}" style="color:#4285F4;font-size:.72rem;margin-left:2px;text-decoration:none"><i class="fas fa-external-link-alt"></i></a>` : '');
+          : (sheetUrl ? `<a href="${escHtml(sheetUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${t.liveTabName ? '현재: '+escHtml(t.liveTabName) : escHtml(sheetUrl)}" style="color:#4285F4;font-size:.72rem;margin-left:2px;text-decoration:none"><i class="fas fa-link"></i></a>` : '');
         const renamedBadge = t.liveTabName
           ? `<span style="background:#DBEAFE;color:#1D4ED8;padding:1px 4px;border-radius:3px;font-size:.62rem;margin-left:2px" title="현재: ${escHtml(t.liveTabName)}">이름변경</span>`
           : '';
@@ -9732,7 +9732,7 @@ async function dashboardArchiveDetect() {
           ? `<span title="탭 삭제됨" style="color:#9CA3AF;font-size:.72rem;margin-left:2px"><i class="fas fa-unlink"></i></span>`
           : t.hidden
           ? `<span title="숨김 탭 (클릭하여 표시)" style="color:#9CA3AF;font-size:.72rem;margin-left:2px;cursor:pointer" onclick="event.stopPropagation();_unhideTab('${escHtml(camp.sheetId)}','${escHtml(t.tabGid)}',this)"><i class="fas fa-eye-slash"></i></span>`
-          : (sheetUrl2 ? `<a href="${escHtml(sheetUrl2)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${t.liveTabName ? '현재: '+escHtml(t.liveTabName) : escHtml(sheetUrl2)}" style="color:#4285F4;font-size:.72rem;margin-left:2px;text-decoration:none"><i class="fas fa-external-link-alt"></i></a>` : '');
+          : (sheetUrl2 ? `<a href="${escHtml(sheetUrl2)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${t.liveTabName ? '현재: '+escHtml(t.liveTabName) : escHtml(sheetUrl2)}" style="color:#4285F4;font-size:.72rem;margin-left:2px;text-decoration:none"><i class="fas fa-link"></i></a>` : '');
         const renamedBadge2 = t.liveTabName
           ? `<span style="background:#DBEAFE;color:#1D4ED8;padding:1px 4px;border-radius:3px;font-size:.62rem;margin-left:2px" title="현재: ${escHtml(t.liveTabName)}">이름변경</span>`
           : '';
@@ -10028,7 +10028,7 @@ async function loadUnrecognizedTabs() {
         </div>
         <div style="display:flex;align-items:center;gap:8px;margin-top:3px;padding-left:${t.status === 'pending' ? '23px' : '0'}">
           <span style="font-size:.72rem;color:var(--t3)"><i class="fas fa-file-alt" style="margin-right:3px"></i>${escHtml(t.campaign_name || '미분류')}</span>
-          ${t.sheet_id ? `<a href="https://docs.google.com/spreadsheets/d/${t.sheet_id}/edit${t.tab_gid ? '#gid=' + t.tab_gid : ''}" target="_blank" rel="noopener" style="font-size:.7rem;color:#3B82F6;text-decoration:none;flex-shrink:0" title="구글시트에서 열기"><i class="fas fa-external-link-alt"></i> 시트</a>` : ''}
+          ${t.sheet_id ? `<a href="https://docs.google.com/spreadsheets/d/${t.sheet_id}/edit${t.tab_gid ? '#gid=' + t.tab_gid : ''}" target="_blank" rel="noopener" style="font-size:.7rem;color:#3B82F6;text-decoration:none;flex-shrink:0" title="구글시트에서 열기"><i class="fas fa-link"></i> 시트</a>` : ''}
           ${t.sample_rows ? `<details style="display:inline"><summary style="font-size:.7rem;color:#4593fc;cursor:pointer;display:inline">샘플 데이터 보기</summary><div style="max-height:200px;overflow:auto;margin-top:6px;font-size:.68rem;background:#F9FAFB;border-radius:6px;padding:8px"><table style="border-collapse:collapse;width:100%">${_buildUnrecogSampleTable(t.sample_rows)}</table></div></details>` : ''}
         </div>
       </div>`;
@@ -11174,7 +11174,7 @@ function _cellVal(t, col) {
     const hasGid = t.tab_gid;
     const finalUrl = url ? (hasGid ? url.replace(/[#?].*$/, '') + '#gid=' + t.tab_gid : url) : '';
     const linkIcon = finalUrl
-      ? `<a href="${escHtml(finalUrl)}" target="_blank" style="color:#3182f6" title="${escHtml(finalUrl)}"><i class="fas fa-external-link-alt"></i></a>`
+      ? `<a href="${escHtml(finalUrl)}" target="_blank" style="color:#3182f6" title="${escHtml(finalUrl)}"><i class="fas fa-link"></i></a>`
       : '';
     // (⚠ 시트링크 수동보정 버튼·더블클릭 보정 창은 결정 186 87번에서 제거 — 링크 아이콘만 남긴다)
     if (!url) return '<span style="color:#D1D5DB">—</span>';
