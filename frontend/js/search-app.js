@@ -4459,7 +4459,7 @@ async function loadAdminDashboard() {
 
         const _tabSheetUrl = _buildTabUrl(t.sheetUrl, t.sheetId, t.tabGid);
         const tabNameHtml = _tabSheetUrl
-          ? `<a class="dash-tab-link" href="${escHtml(_tabSheetUrl)}" target="_blank" title="${escHtml(_tabSheetUrl)}">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>`
+          ? `<a class="dash-tab-link" href="${escHtml(_tabSheetUrl)}" target="_blank" title="${escHtml(_tabSheetUrl)}">${escHtml(t.tab)} <i class="fas fa-link dash-tab-ext"></i></a>`
           : `<span>${escHtml(t.tab)}</span>`;
 
         // 시작일 배지
@@ -4722,7 +4722,7 @@ function _buildTabRowHtml(t, tabKey, isClosedTab, tabNameHtml, startDateHtml, tR
       : qeWrap('주문시간대', false, timeCell)}
     ${qeWrap('리뷰타입', !!t.reviewType, reviewCell)}
     <div style="display:flex;align-items:center;justify-content:center;overflow:hidden;padding:0 2px">
-      <button class="form-link-btn" data-tc="${tcAttr}" onclick="event.stopPropagation();openFormLink(this)" title="구매양식 링크 열기"><i class="fas fa-external-link-alt"></i></button>
+      <button class="form-link-btn" data-tc="${tcAttr}" onclick="event.stopPropagation();openFormLink(this)" title="구매양식 링크 열기"><i class="fas fa-link"></i></button>
     </div>
     ${qeWrap('담당자', !!t.manager, managerCell, 'justify-content:center')}
     <div class="dash-tab-bar-col">
@@ -5145,7 +5145,7 @@ document.addEventListener("click", function(e) {
  * tcAttr(JSON 문자열)에서 sheetId, gid, tabName, displayName 추출 → URL 생성 → 클립보드 복사
  */
 /**
- * 대시보드 행의 [↗] 버튼 클릭 시 호출
+ * 대시보드 행의 [구매양식 링크 열기] 버튼 클릭 시 호출
  * data-tc 속성에서 인덱스 정보 읽기 → 구매양식 URL 생성 → 새 탭으로 열기 + 링크 복사
  */
 function openFormLink(btnEl) {
@@ -5200,7 +5200,7 @@ function openFormLink(btnEl) {
     btnEl.innerHTML = '<i class="fas fa-check"></i>';
     setTimeout(() => {
       btnEl.classList.remove("copied");
-      btnEl.innerHTML = '<i class="fas fa-external-link-alt"></i>';
+      btnEl.innerHTML = '<i class="fas fa-link"></i>';
     }, 2500);
   };
 

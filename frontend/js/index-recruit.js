@@ -965,7 +965,7 @@ async function refreshRecruitCashReceipt() {
   }
 }
 
-/* 상품 페이지를 새 탭에서 — 리뷰어 앱 모달의 [바로가기 ↗]와 동일 */
+/* 상품 페이지를 새 탭에서 — 리뷰어 앱 모달의 [바로가기]와 동일 */
 function openRecruitProductUrl() {
   const u = (document.getElementById("rf_product_url")?.value || "").trim();
   if (/^https?:\/\//i.test(u)) window.open(u, "_blank", "noopener");

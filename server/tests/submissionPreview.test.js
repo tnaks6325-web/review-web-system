@@ -245,8 +245,8 @@ console.log('\nG) 구매 캡처·리뷰 캡처 = 폴더 바로가기');
   const calls = [];
   sb._folState = (t, src, kind) => { calls.push([src, kind]); return { on: kind !== 'review', tip: kind === 'review' ? '아직 폴더가 생성되지 않았습니다' : kind + ' 폴더 열기' }; };
   const h = sb._rvStatHtml();
-  ok('★ 요약 줄이 폴더 창구 — 열 수 있으면 onclick + ↗',
-    /class="s lk"[^>]*onclick="_rvOpenFolder\('capture'\)"/.test(h) && /↗/.test(h), h);
+  ok('★ 요약 줄이 폴더 창구 — 열 수 있으면 onclick(대각선 화살표 장식 없음)',
+    /class="s lk"[^>]*onclick="_rvOpenFolder\('capture'\)"/.test(h) && !/\u2197/.test(h), h);
   ok('★ 열 수 없으면 onclick 을 만들지 않는다(눌러도 아무 일 없는 자리 금지) + 사유 툴팁',
     !/_rvOpenFolder\('review'\)/.test(h) && /폴더를 열 수 없습니다 — 아직 폴더가 생성되지 않았습니다/.test(h), h);
   ok('★ 판정은 _folState 재사용(사본 0) — 작업보드 재료(cur)로 묻는다',

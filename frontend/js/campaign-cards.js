@@ -221,13 +221,13 @@
       .pcard .pg-row{display:flex;justify-content:space-between;align-items:baseline;font-size:.66rem}
       .pcard .pg-lb{color:#6B7280;font-weight:700}
       .pcard .pg-vl{font-weight:800;font-variant-numeric:tabular-nums;color:#111827}
-      /* 게이지 줄 오른쪽 = [값][↗ 작업보드]. pg-row 는 space-between 2칸이라 ↗ 을 세 번째
+      /* 게이지 줄 오른쪽 = [값][작업보드]. pg-row 는 space-between 2칸이라 버튼을 세 번째
          자식으로 넣으면 값이 가운데로 밀린다 → 오른쪽 둘을 한 묶음으로 감싼다.
          ★ 이 블록은 템플릿 리터럴 안이다 — 주석에 백틱·달러중괄호를 쓰면 CSS 가 그 자리에서
            끊기고 뒤가 JS 로 파싱된다(실측: ReferenceError). */
       .pcard .pg-rt{display:flex;align-items:baseline;gap:5px;min-width:0}
       .pcard .pgwb{flex:0 0 auto;align-self:center;border:1px solid #D3DAE6;background:#fff;color:#2563EB;
-        border-radius:6px;font-size:.62rem;font-weight:900;line-height:1;padding:2px 5px;cursor:pointer}
+        border-radius:6px;font-size:.62rem;font-weight:800;line-height:1;padding:2px 5px;white-space:nowrap;cursor:pointer}
       .pcard .pgwb:hover{background:#EFF4FF;border-color:#A9C2F5}
       .pcard .pgwb[disabled]{opacity:.35;cursor:default;color:#6B7280}
       .pcard .pg-vl b{color:#1b64da;font-size:.86rem}
@@ -515,7 +515,7 @@
     return `<div class="prounds">${chips}<span title="${_esc('바로 구매 포함 확정' + sharedNote)}">총 ${conf}/${total}</span></div>`;
   }
 
-  /** ↗ 작업보드 바로가기(새 탭) — 관리자 카드의 게이지 줄 오른쪽.
+  /** [작업보드] 바로가기(새 탭) — 관리자 카드의 게이지 줄 오른쪽.
    *  ★ 재료는 이미 카드에 있는 연결 탭(linked_*) 뿐이고, 이동은 리뷰어 로그가 쓰는 딥링크
    *    (`workdesk.html#go={s,t,g}&sso=`) 재사용이라 **서버 변경 0**이다.
    *  ★ 작업표가 아직 없는 공고는 **비활성 + 사유**(눌러도 아무 일 없는 버튼을 두지 않는다).
@@ -524,13 +524,13 @@
     const stop = 'event.stopPropagation();event.preventDefault();';
     const linked = !!(c && c.linked_sheet_id && c.linked_tab_name);
     if (!linked) {
-      return '<button type="button" class="pgwb" disabled title="이 공고에 연결된 작업표가 아직 없습니다 — 접수 또는 첫 주문 때 만들어집니다">↗</button>';
+      return '<button type="button" class="pgwb" disabled title="이 공고에 연결된 작업표가 아직 없습니다 — 접수 또는 첫 주문 때 만들어집니다">작업보드</button>';
     }
     if (!_realAdminTok()) {
-      return '<button type="button" class="pgwb" disabled title="작업보드는 관리자 로그인이 필요합니다">↗</button>';
+      return '<button type="button" class="pgwb" disabled title="작업보드는 관리자 로그인이 필요합니다">작업보드</button>';
     }
     return `<button type="button" class="pgwb" onclick="${stop}CampCards.openWorkdesk('${_esc(c.id)}')"
-      title="작업보드를 새 탭으로 열기 — ${_esc(c.linked_tab_name)}">↗</button>`;
+      title="작업보드를 새 탭으로 열기 — ${_esc(c.linked_tab_name)}">작업보드</button>`;
   }
 
   function _adminActions(c) {
@@ -810,7 +810,7 @@
       ? `<div class="pgauge${pubFull ? ' full' : ''}"${todayFilled != null ? ` title="작업표에 오늘 채워진 줄 ${pubN}명 / 오늘 정원 ${quota}명 · 공고를 거쳐 확정된 건 ${today}명"` : ''}><div class="pg-row"><span class="pg-lb">${isDaily ? '오늘 모집' : '모집 현황'}</span><span class="pg-vl"><b>${pubN}</b> / ${quota}명${isDaily ? ' 완료' : ''}</span></div><div class="pg-track"><div class="pg-fill" style="width:${pubPct}%"></div></div></div>`
       : '';
     if (admin) {
-      // ↗ 작업보드 바로가기 — 게이지 유무·상태와 무관하게 **같은 자리**에 둔다(두 갈래 공용 조각)
+      // [작업보드] 바로가기 — 게이지 유무·상태와 무관하게 **같은 자리**에 둔다(두 갈래 공용 조각)
       const wbBtn = _worktableBtn(c);
       // 관리자 게이지 = 같은 자리에 확정/진행중을 나눠 담는다(리뷰어는 단색 1구간).
       //   진행중 = 유효 홀드 = 지금 15분 타이머를 안고 구매 중인 사람 → 가장 시간에 민감한 값.
@@ -1165,7 +1165,7 @@
         <div style="display:flex;gap:6px">
           <input id="cae_landing" class="cae-in" type="text" style="flex:1;min-width:0" placeholder="https://">
           <button type="button" id="caeProdFetch" class="cae-btn gho" style="white-space:nowrap" title="이 URL에서 상품명·가격·썸네일 자동 가져오기 (쿠팡은 봇차단으로 자동 불가)">가져오기</button>
-          <button type="button" id="caeLandingOpen" class="cae-btn gho" style="white-space:nowrap" title="상품 페이지를 새 탭에서 열기 — 이미지 우클릭 → 이미지 주소 복사 후 아래 썸네일에 붙여넣기">바로가기 ↗</button>
+          <button type="button" id="caeLandingOpen" class="cae-btn gho" style="white-space:nowrap" title="상품 페이지를 새 탭에서 열기 — 이미지 우클릭 → 이미지 주소 복사 후 아래 썸네일에 붙여넣기">바로가기</button>
         </div>
         <div class="cae-note">[가져오기]: 상품명·썸네일 자동 채움(쿠팡 외 몰). 쿠팡은 봇차단이라 썸네일은 페이지 열어 이미지주소 붙여넣기·수동입력.</div>
         <label class="cae-lb">썸네일 URL <span style="font-weight:400;color:#9CA3AF">(비우면 제거)</span></label>
@@ -1477,7 +1477,7 @@
     return ctx;
   }
 
-  /** ↗ 작업보드를 새 탭으로 — 리뷰어 로그의 딥링크(`#go=`)와 **같은 방식**(신규 엔드포인트 0).
+  /** 작업보드를 새 탭으로 — 리뷰어 로그의 딥링크(`#go=`)와 **같은 방식**(신규 엔드포인트 0).
    *  ★★ `window.open` 은 **await 앞에서** 부른다 — 비동기 뒤에 열면 브라우저가 팝업으로 막는다
    *    (폴더 바로가기에서 실측한 규율). 문맥을 못 구하면 열어 둔 창을 닫고 사유를 말한다.
    *  ★ 토큰을 프래그먼트로 함께 넘긴다: 새 탭은 sessionStorage 를 물려받지 못해 로그인 화면으로

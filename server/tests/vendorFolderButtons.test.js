@@ -352,7 +352,7 @@ async function run() {
     /* ★★ 사용자 확정 2026-08-21 — 구매캡처·리뷰캡처 바로가기는 **제출물 미리보기 칸 제목**으로
        옮겼다. 상단 줄에 남는 것은 현금영수증 하나뿐이다(창구를 두 곳에 두지 않는다). */
     t('★ 상단 줄 = 현금영수증 하나(구매·리뷰는 제출물 미리보기로 이동)',
-      b.length === 1 && !b[0].dis && /🧾 현금영수증 ↗/.test(b[0].label), JSON.stringify(b.map(x => x.label)));
+      b.length === 1 && !b[0].dis && b[0].label === '🧾 현금영수증', JSON.stringify(b.map(x => x.label)));
     t('★ 상단 줄에 구매캡처·리뷰캡처 버튼이 되살아나지 않는다',
       !/구매캡처/.test(html) && !/리뷰캡처/.test(html));
     t('★ 갱신 대상 id(folBar) + folbig 클래스', /id="folBar"/.test(html) && /wbl-fol folbig/.test(html));
