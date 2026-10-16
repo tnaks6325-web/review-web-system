@@ -6519,11 +6519,12 @@ function _buildCoupangCardHtml(cid) {
            ondragover="event.preventDefault();this.classList.add('drag-over')"
            ondragleave="this.classList.remove('drag-over')"
            ondrop="onCardImgDrop(event,'${cid}')">
-        <input type="file" accept="image/*" id="${cid}_imgInput" onchange="onCardImgSelected(this,'${cid}')">
+        <input type="file" accept="image/*" multiple id="${cid}_imgInput" onchange="onCardImgSelected(this,'${cid}')">
         <span class="oiz-icon">📷</span>
         <div class="oiz-title" style="font-size:.82rem">주문완료 화면을 캡처해 올려주세요</div>
         <div class="oiz-sub">구매 확인·리뷰비 정산의 <b>증빙 자료</b>입니다 · 동일인 자동 검증</div>
         <div class="oiz-sub" style="margin-top:3px;color:#3182f6">💡 올리시면 주문번호·결제금액이 자동 입력됩니다</div>
+        <div class="oiz-sub" style="margin-top:3px">📷 한 화면에 다 안 담기면 <b>두 장을 한 번에</b> 골라 주세요(최대 2장 · 배송메세지까지)</div>
       </div>
       <div class="of-img-preview" id="${cid}_imgPreview" style="display:none;align-items:center;gap:10px;margin-bottom:8px">
         <div style="position:relative;flex-shrink:0">
@@ -6531,6 +6532,17 @@ function _buildCoupangCardHtml(cid) {
           <button class="oip-remove" onclick="removeCardImg('${cid}')" title="이미지 제거"><i class="fas fa-times"></i></button>
         </div>
         <span id="${cid}_imgLabel" style="font-size:.75rem;color:#6B7280">이미지 첨부됨</span>
+      </div>
+      <!-- ★ 결정 255: 구매캡처 2장째(선택) — 아이폰 등은 구매내역이 한 화면에 다 안 담긴다(배송메세지 잘림).
+           사진 칸에서 두 장을 한 번에 고르면 둘째 장이 여기 보인다(별도 추가 버튼 없음 · 사용자 요청 2026-10-16). -->
+      <div class="of-img2" id="${cid}_img2Box" style="display:none;margin:-2px 0 8px">
+        <div class="of-img-preview" id="${cid}_img2Preview" style="display:none;align-items:center;gap:10px">
+          <div style="position:relative;flex-shrink:0">
+            <img id="${cid}_img2Thumb" src="" alt="구매캡처 2장째" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1.5px solid #FEE2E2">
+            <button class="oip-remove" onclick="removeCardImg2('${cid}')" title="2장째 제거"><i class="fas fa-times"></i></button>
+          </div>
+          <span id="${cid}_img2Label" style="font-size:.75rem;color:#6B7280">2장째 첨부됨</span>
+        </div>
       </div>
       <div class="ofc-ai-loading" id="${cid}_aiLoading">
         <i class="fas fa-circle-notch fa-spin" style="flex-shrink:0"></i>
@@ -6823,11 +6835,12 @@ function _buildOrderCardHtml(cid, idx, type) {
            ondragover="event.preventDefault();this.classList.add('drag-over')"
            ondragleave="this.classList.remove('drag-over')"
            ondrop="onCardImgDrop(event,'${cid}')">
-        <input type="file" accept="image/*" id="${cid}_imgInput" onchange="onCardImgSelected(this,'${cid}')">
+        <input type="file" accept="image/*" multiple id="${cid}_imgInput" onchange="onCardImgSelected(this,'${cid}')">
         <span class="oiz-icon">📷</span>
         <div class="oiz-title" style="font-size:.82rem">주문완료 화면을 캡처해 올려주세요</div>
         <div class="oiz-sub">구매 확인·리뷰비 정산의 <b>증빙 자료</b>입니다</div>
         <div class="oiz-sub" style="margin-top:3px;color:#3182f6">💡 올리시면 주문번호·결제금액이 자동 입력됩니다</div>
+        <div class="oiz-sub" style="margin-top:3px">📷 한 화면에 다 안 담기면 <b>두 장을 한 번에</b> 골라 주세요(최대 2장 · 배송메세지까지)</div>
       </div>
       <div class="of-img-preview" id="${cid}_imgPreview" style="display:none;align-items:center;gap:10px;margin-bottom:8px">
         <div style="position:relative;flex-shrink:0">
@@ -6835,6 +6848,17 @@ function _buildOrderCardHtml(cid, idx, type) {
           <button class="oip-remove" onclick="removeCardImg('${cid}')" title="이미지 제거"><i class="fas fa-times"></i></button>
         </div>
         <span id="${cid}_imgLabel" style="font-size:.75rem;color:#6B7280">이미지 첨부됨</span>
+      </div>
+      <!-- ★ 결정 255: 구매캡처 2장째(선택) — 아이폰 등은 구매내역이 한 화면에 다 안 담긴다(배송메세지 잘림).
+           사진 칸에서 두 장을 한 번에 고르면 둘째 장이 여기 보인다(별도 추가 버튼 없음 · 사용자 요청 2026-10-16). -->
+      <div class="of-img2" id="${cid}_img2Box" style="display:none;margin:-2px 0 8px">
+        <div class="of-img-preview" id="${cid}_img2Preview" style="display:none;align-items:center;gap:10px">
+          <div style="position:relative;flex-shrink:0">
+            <img id="${cid}_img2Thumb" src="" alt="구매캡처 2장째" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1.5px solid #cce0fb">
+            <button class="oip-remove" onclick="removeCardImg2('${cid}')" title="2장째 제거"><i class="fas fa-times"></i></button>
+          </div>
+          <span id="${cid}_img2Label" style="font-size:.75rem;color:#6B7280">2장째 첨부됨</span>
+        </div>
       </div>
       <div class="ofc-ai-loading" id="${cid}_aiLoading">
         <i class="fas fa-circle-notch fa-spin" style="flex-shrink:0"></i>
@@ -8311,16 +8335,32 @@ function _syncAllSharedBeforeSubmit() {
 
 function onCardImgSelected(input, cid) {
   if (!input.files || !input.files[0]) return;
-  _processCardImgFile(input.files[0], cid);
+  _takeCardImgFiles([...input.files], cid);
+}
+
+/* 결정 255 — 사진 칸 하나에서 **한 번에 두 장까지** 받는다(사용자 요청 2026-10-16: 별도 추가 버튼 없이).
+   고른 순서대로 첫 장 = 주인공(명의 확인·주문번호·금액) · 둘째 장 = 보탬(배송메세지 등). 세 장 이상이면 앞의 두 장만. */
+function _takeCardImgFiles(files, cid) {
+  const imgs = (files || []).filter(f => f && String(f.type || "").startsWith("image/"));
+  if (!imgs.length) { showToast("이미지 파일만 업로드 가능합니다.", true); return; }
+  if (imgs.length > 2) showToast("구매캡처는 최대 2장까지 올릴 수 있어 앞의 두 장만 받았습니다.");
+  removeCardImg2(cid);
+  if (imgs[0].size > 10 * 1024 * 1024) { showToast("이미지 크기는 10MB 이하여야 합니다.", true); return; }   // 첫 장이 거부되면 둘째 장도 받지 않는다
+  // 둘째 장 판독은 첫 장 판독이 끝난 뒤에 — 그래야 첫 장에서 읽은 주문번호에 배송메세지 서명을 묶을 수 있다.
+  if (imgs[1]) _setCardImg2(imgs[1], cid, { deferAi: true });
+  _processCardImgFile(imgs[0], cid).then(() => {
+    const st = _cardAiState[cid];
+    if (st && st.img2 && !st.img2.memoToken && !st.img2.busy && !st.img2.tried) _callCardExtractAi2(cid);
+  });
 }
 
 function onCardImgDrop(e, cid) {
   e.preventDefault();
   const zone = document.getElementById(cid + "_imgZone");
   if (zone) zone.classList.remove("drag-over");
-  const file = e.dataTransfer?.files?.[0];
-  if (!file || !file.type.startsWith("image/")) { showToast("이미지 파일만 업로드 가능합니다.", true); return; }
-  _processCardImgFile(file, cid);
+  const files = [...(e.dataTransfer?.files || [])];
+  if (!files.length) { showToast("이미지 파일만 업로드 가능합니다.", true); return; }
+  _takeCardImgFiles(files, cid);
 }
 
 function removeCardImg(cid) {
@@ -8330,6 +8370,7 @@ function removeCardImg(cid) {
   _resetSavedIdentityPickerLabels(cid);
   _syncSubmissionIdentityAction();
   _ofpOnCaptureCleared(cid);
+  removeCardImg2(cid); { const b2 = document.getElementById(cid + "_img2Box"); if (b2) b2.style.display = "none"; }   // 결정 255: 첫 장을 빼면 2장째도 함께 뺀다(2장째만 남는 주문을 만들지 않는다)
   const inp  = document.getElementById(cid + "_imgInput");  if (inp) inp.value = "";
   const prev = document.getElementById(cid + "_imgPreview"); if (prev) { prev.style.display="none"; document.getElementById(cid+"_imgThumb").src=""; }
   const zone = document.getElementById(cid + "_imgZone");   if (zone) zone.style.display = "";
@@ -8359,6 +8400,62 @@ function removeCardImg(cid) {
   // oninput 핸들러 복원 (price)
   const priceEl = document.getElementById(cid+"_price");
   if (priceEl) priceEl.setAttribute("oninput", `formatPriceInput(this);this.classList.remove('ai-filled');this.dataset.userEdited='1';_ofClearError('${cid}_price')`);
+}
+
+/* ══ 결정 255: 구매캡처 2장째(선택) ═══════════════════════════════════════════
+   ★ 첫 장이 주인공이다 — 명의 확인·주문번호·결제금액 자동 입력은 종전대로 첫 장만 본다.
+   ★ 2장째는 첫 장에 없는 정보만 보탠다: 배송메세지(서버 서명 · 주문번호에 묶임), 상품명(첫 장에서 못 읽었을 때만).
+   ★ 판독이 실패해도 사진은 함께 제출된다(증빙 · 제출물 미리보기 2/2). */
+function _setCardImg2(file, cid, opts = {}) {
+  if (!file) return;
+  if (!String(file.type || "").startsWith("image/")) { showToast("이미지 파일만 업로드 가능합니다.", true); return; }
+  if (file.size > 10 * 1024 * 1024) { showToast("2장째 이미지가 10MB를 넘어 받지 않았습니다.", true); return; }
+  const st = _cardAiState[cid]; if (!st) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const dataUrl = ev.target.result;
+    st.img2 = { dataUrl, mime: file.type || "image/jpeg", memoToken: "", req: ((st.img2 && st.img2.req) || 0) + 1, busy: false };
+    const th = document.getElementById(cid + "_img2Thumb"); if (th) th.src = dataUrl;
+    const pv = document.getElementById(cid + "_img2Preview"); if (pv) pv.style.display = "flex";
+    const bx = document.getElementById(cid + "_img2Box"); if (bx) bx.style.display = "";
+    if (opts.deferAi) { const lb = document.getElementById(cid + "_img2Label"); if (lb) lb.textContent = "2장째 · 첫 장 확인 뒤 읽습니다"; }
+    else _callCardExtractAi2(cid);
+  };
+  reader.readAsDataURL(file);
+}
+
+function removeCardImg2(cid) {
+  const st = _cardAiState[cid];
+  if (st) st.img2 = null;
+  const th = document.getElementById(cid + "_img2Thumb"); if (th) th.src = "";
+  const pv = document.getElementById(cid + "_img2Preview"); if (pv) pv.style.display = "none";
+  const bx = document.getElementById(cid + "_img2Box"); if (bx) bx.style.display = "none";
+  const lb = document.getElementById(cid + "_img2Label"); if (lb) lb.textContent = "2장째 첨부됨";
+}
+
+async function _callCardExtractAi2(cid) {
+  const st = _cardAiState[cid]; const img = st && st.img2; if (!img || !img.dataUrl) return;
+  const req = img.req;
+  const lb = document.getElementById(cid + "_img2Label");
+  const say = (t) => { if (lb && st.img2 === img && img.req === req) lb.textContent = t; };
+  img.busy = true; img.tried = true; say("2장째 · AI 확인 중…");
+  const ctx = window._orderFormCtx || {};
+  // 첫 장에서 AI 가 읽은 주문번호를 먼저(입력칸은 그다음) — 입력칸의 옛 값에 묶이면 제출 때 번호가 달라 배송메세지가 버려진다.
+  const orderHint = String(st.extracted?.orderNumber || document.getElementById(cid + "_orderNumber")?.value || "").trim();
+  let json = null;
+  try {
+    json = await gasPostUpload({ action: "extractOrderImage", imageBase64: img.dataUrl.split(",")[1], mimeType: img.mime,
+      sheetId: ctx.sheetId || "", tabName: ctx.tabName || "", captureIndex: 2, orderNumberHint: orderHint }, 35000);
+  } catch (_) { json = null; }
+  if (st.img2 !== img || img.req !== req) return;   // 그 사이 바꾸거나 뺐다
+  img.busy = false;
+  if (!json || !json.ok) { say("2장째 첨부됨 · 내용은 읽지 못했지만 사진은 함께 제출됩니다"); return; }
+  img.memoToken = json.deliveryMemoToken || "";
+  // 상품명 — 첫 장에서 못 읽었을 때만 2장째 판독값을 쓴다(첫 장 값·리뷰어가 고른 상품은 덮지 않는다).
+  if (typeof _ofpOnExtracted === "function" && !_OFP.capName[cid] && json.productName) {
+    _ofpOnExtracted(cid, json.productLabel || "", json.productName || "", typeof json.productOption === "string" ? json.productOption : "");
+  }
+  say(img.memoToken ? "2장째 첨부됨 · 배송메세지 확인 ✓" : "2장째 첨부됨 ✓");   // 서명이 있을 때만 "확인" — 제출 때 실제로 쓰이는 것만 말한다
 }
 
 /** ★ Promise 반환 — 일괄 첨부가 한 장씩 순차 처리(리미터 보호)하려면 완료를 기다려야 한다.
@@ -8487,6 +8584,9 @@ async function _callCardExtractAi(cid, base64, mimeType) {
     st.proofExtracted = { ...st.extracted };
     await _matchCardIdentity(cid, requestId);
     if (st.analysisRequestId !== requestId) return;
+
+    // 결정 255: 2장째를 먼저 올려 주문번호를 몰라 배송메세지 서명이 비었으면, 첫 장 판독이 끝난 지금 다시 읽는다.
+    if (st.img2 && st.img2.dataUrl && !st.img2.memoToken && !st.img2.busy) _callCardExtractAi2(cid);
 
     // 주문번호 자동 입력
     if (st.extracted.orderNumber) {
@@ -9632,6 +9732,10 @@ async function submitOrderForm() {
       productCaptureOptRaw: _OFP.capOpt[cid] || "",
       productCapturePriceRaw: (_cardAiState[cid] && _cardAiState[cid].extracted && _cardAiState[cid].extracted.price) || "",
       deliveryMemoToken:  (_cardAiState[cid] && _cardAiState[cid].deliveryMemoToken) || "",
+      // ★ 결정 255: 구매캡처 두 번째 장(선택) — 사진과 그 사진에서 읽은 배송메세지 서명. 첫 장이 없으면 싣지 않는다.
+      img2Src:            (document.getElementById(cid+"_imgThumb")?.src || "").startsWith("data:") ? (_cardAiState[cid]?.img2?.dataUrl || "") : "",
+      img2Mime:           _cardAiState[cid]?.img2?.mime || "",
+      deliveryMemoToken2: _cardAiState[cid]?.img2?.memoToken || "",
       identityConfirmed:  false
       ,saveShoppingId: !!document.getElementById(cid+"_saveIdChk")?.checked
     };
@@ -9759,6 +9863,8 @@ async function submitOrderForm() {
       productCapturePrice:  (bh || (_EMBED_CTX && _EMBED_CTX.app)) ? (o.productCapturePriceRaw || "") : "",
       // ★ 결정 245: 캡처에서 AI 가 읽은 배송메세지(서버 서명) — 서버가 서명에서만 글을 꺼내 주문에 남긴다.
       deliveryMemoToken:  o.deliveryMemoToken || "",
+      // ★ 결정 255: 첫 장에 배송메세지가 없으면(잘림) 서버가 두 번째 장의 서명을 쓴다.
+      deliveryMemoToken2: o.deliveryMemoToken2 || "",
       identityConfirmed:  o.identityConfirmed ? "true" : "false",
       identityApprovalToken: o.identityApprovalToken || "",
       // ★ 참여형 캠페인 홀드 확정 문맥(M2) — embed 진입일 때만 전송. 서버가 소유권 3중검증 후 확정
@@ -9909,56 +10015,64 @@ async function submitOrderForm() {
         const _idx = i + 1;
         /* ★★ 순차 큐: 카드별 업로드를 동시에 쏘면 무인증 IP 리미터(분당)에 한꺼번에 부딪혀
            **뒤 카드의 캡처가 통째로 유실**된다. 제출 자체는 막지 않으므로(await 없음) 리뷰어 대기 0. */
+        /* 결정 255 — 구매캡처 업로드 한 장(첫 장 = captureIndex 1 · 두 번째 장 = 2). 축소·재시도 규칙은 두 장이 같다. 성공이면 true. */
+        const _runCapUpload = async (_imgCtx, captureIndex) => {
+          let b64 = _imgCtx.base64, mime = _imgCtx.mime;
+          const _BUD = (window.ImageShrink && window.ImageShrink.UPLOAD_BUDGET) || 6000000;
+          if (b64.length > _BUD && window.ImageShrink) {
+            const small = await window.ImageShrink.fromDataUrl(_imgCtx.dataUrl, 1920, 0.8);
+            const sb = small ? (small.split(",")[1] || "") : "";
+            if (sb) { b64 = sb; mime = "image/jpeg"; }
+          }
+          const _ext = (m) => m==="image/png"?"png":m==="image/webp"?"webp":"jpg";
+          const namePart = [_imgCtx.recipient||_imgCtx.orderer, _imgCtx.orderer!==_imgCtx.recipient?_imgCtx.orderer:""].filter(Boolean).join("_")||"주문캡처";
+          const _capSession = res && res.captureSession;
+          if (!_capSession || !_capSession.id || !_capSession.token) throw new Error("구매캡처 제출 세션을 발급받지 못했습니다.");
+          const upPayload = { action:"uploadOrderImage", imageBase64:b64, mimeType:mime, fileName:namePart+"."+_ext(mime), displayName:ctx.displayName||"", tabName:ctx.tabName, round:ctx.round||"", sheetId:ctx.sheetId||"", orderSubmissionId:_osId, captureSessionId:_capSession.id, captureSessionToken:_capSession.token, captureIndex };
+          let upJson = null, upErrLast = null, shrunkFor413 = false;
+          for (let attempt = 0; attempt < 4; attempt++) {
+            upJson = null;
+            try { upJson = await gasPostUpload(upPayload, 180000); if (upJson?.ok) break; upErrLast = new Error(upJson?.error || "업로드 응답 오류"); }
+            catch (e) { upErrLast = e; }
+            const st = (upJson && upJson._httpStatus) || 0;
+            const tooLarge = st === 413 || /too large|용량이 초과|entity\.too\.large/i.test(String((upJson && upJson.error) || ""));
+            if (tooLarge && !shrunkFor413 && window.ImageShrink) {
+              shrunkFor413 = true;
+              const smaller = await window.ImageShrink.fromDataUrl(_imgCtx.dataUrl, 1280, 0.7);
+              const sb2 = smaller ? (smaller.split(",")[1] || "") : "";
+              if (sb2) { upPayload.imageBase64 = sb2; upPayload.mimeType = "image/jpeg"; upPayload.fileName = namePart + ".jpg"; continue; }
+            }
+            if (attempt >= 3) break;
+            const wait = st === 429 ? 62000 : 1500 * Math.pow(2, attempt);
+            await new Promise(r2 => setTimeout(r2, wait));
+          }
+          if (!upJson?.ok) console.warn(`[이미지 업로드 ${_idx}-${captureIndex}] 최종 실패:`, upErrLast && upErrLast.message);
+          return upJson?.ok ? upJson : null;
+        };
+        /* ★★ 순차 큐: 카드별 업로드를 동시에 쏘면 무인증 IP 리미터(분당)에 한꺼번에 부딪혀
+           **뒤 카드의 캡처가 통째로 유실**된다. 제출 자체는 막지 않으므로(await 없음) 리뷰어 대기 0.
+           ★ 업로드 직전 축소(본문 상한) · 413 은 한 번 더 줄여 즉시 재시도 · 429 는 62초 대기 — 규칙은 _runCapUpload 한 곳.
+           ★ 끝내 실패하면 조용히 넘어가지 않고 알린다 — 실패하면 서버가 "구매캡쳐 미첨부"로 감지해 잘못된 독촉이 나간다. */
         window._capUploadChain = (window._capUploadChain || Promise.resolve()).then(async () => {
+          let first = null;
           try {
-            let b64 = _imgCtx.base64, mime = _imgCtx.mime;
-            /* ★★ 업로드 직전 축소: 서버 본문 상한 10MB 인데 base64 는 원본의 약 1.33배라
-               7.5MB 넘는 캡처는 413 으로 전부 실패한다(요즘 폰 전체화면 캡처가 그 구간).
-               예산 안이면 원본 그대로 보낸다 — 증빙 화질을 이유 없이 깎지 않는다.
-               ★ AI 추출은 첨부 시점에 **원본**으로 이미 끝났으므로 판독 정확도에 영향 없다. */
-            const _BUD = (window.ImageShrink && window.ImageShrink.UPLOAD_BUDGET) || 6000000;
-            if (b64.length > _BUD && window.ImageShrink) {
-              const small = await window.ImageShrink.fromDataUrl(_imgCtx.dataUrl, 1920, 0.8);
-              const sb = small ? (small.split(",")[1] || "") : "";
-              if (sb) { b64 = sb; mime = "image/jpeg"; }   // 축소 실패는 원본 시도(첨부를 막지 않는다)
-            }
-            const _ext = (m) => m==="image/png"?"png":m==="image/webp"?"webp":"jpg";
-            const namePart = [_imgCtx.recipient||_imgCtx.orderer, _imgCtx.orderer!==_imgCtx.recipient?_imgCtx.orderer:""].filter(Boolean).join("_")||"주문캡처";
-            const _capSession = res && res.captureSession;
-            if (!_capSession || !_capSession.id || !_capSession.token) throw new Error("구매캡처 제출 세션을 발급받지 못했습니다.");
-            // 서버 발급 세션+주문ID를 함께 보내며 서버는 세션에 고정된 작업 좌표만 사용한다.
-            const upPayload = { action:"uploadOrderImage", imageBase64:b64, mimeType:mime, fileName:namePart+"."+_ext(mime), displayName:ctx.displayName||"", tabName:ctx.tabName, round:ctx.round||"", sheetId:ctx.sheetId||"", orderSubmissionId:_osId, captureSessionId:_capSession.id, captureSessionToken:_capSession.token };
-            // ★ 재시도: 이 업로드가 실패하면 서버는 capture_uploaded_at 이 비어 있어
-            //   "구매캡쳐 미첨부"로 자동 감지한다 → 실제로는 첨부한 리뷰어에게 잘못된 독촉이 나간다.
-            //   과거엔 1회 실패 시 console.warn 만 하고 조용히 끝나 이 오탐의 주원인이었다.
-            let upJson = null, upErrLast = null, shrunkFor413 = false;
-            for (let attempt = 0; attempt < 4; attempt++) {
-              upJson = null;
-              try { upJson = await gasPostUpload(upPayload, 180000); if (upJson?.ok) break; upErrLast = new Error(upJson?.error || "업로드 응답 오류"); }
-              catch (e) { upErrLast = e; }
-              const st = (upJson && upJson._httpStatus) || 0;
-              // 구버전 백엔드는 413 을 200+error 로 접어 보낸다 → 문구로도 한 번 더 알아본다.
-              const tooLarge = st === 413 || /too large|용량이 초과|entity\.too\.large/i.test(String((upJson && upJson.error) || ""));
-              /* ★ 413(본문 초과) — 기다려도 절대 통과하지 않는다. 한 번만 더 줄여서 즉시 재시도. */
-              if (tooLarge && !shrunkFor413 && window.ImageShrink) {
-                shrunkFor413 = true;
-                const smaller = await window.ImageShrink.fromDataUrl(_imgCtx.dataUrl, 1280, 0.7);
-                const sb2 = smaller ? (smaller.split(",")[1] || "") : "";
-                if (sb2) { upPayload.imageBase64 = sb2; upPayload.mimeType = "image/jpeg"; upPayload.fileName = namePart + ".jpg"; continue; }
-              }
-              if (attempt >= 3) break;
-              /* ★★ 429(분당 상한) — 짧은 백오프는 **전부 같은 창 안**이라 세 번 다 실패한다.
-                 창이 지나야 풀리므로 62초 기다린다(완료화면은 '업로드 중'을 유지해 창을 닫지 않게 안내). */
-              const wait = st === 429 ? 62000 : 1500 * Math.pow(2, attempt);   // 1.5s → 3s → 6s
-              await new Promise(r2 => setTimeout(r2, wait));
-            }
-            // ★ 끝내 실패하면 조용히 넘어가지 않고 알린다 — 리뷰어는 첨부했다고 믿고 창을 닫아버린다.
-            if (!upJson?.ok) {
-              console.warn(`[이미지 업로드 ${_idx}] 최종 실패:`, upErrLast && upErrLast.message);
+            first = await _runCapUpload(_imgCtx, 1);
+            if (first) _capSlot.status = "ok";
+            else {
               _capSlot.status = "fail";
               try { showToast(`${_idx}번째 주문의 구매캡쳐 업로드에 실패했습니다. 네트워크 확인 후 캡처를 다시 첨부해주세요.`, "error"); } catch(_) {}
-            } else { _capSlot.status = "ok"; }
+            }
           } catch(upErr) { _capSlot.status = "fail"; console.warn(`[이미지 업로드 ${_idx}] 백그라운드 오류:`, upErr.message); }
+          /* 결정 255 — 두 번째 장(선택)은 첫 장이 **성공한 뒤에만** 이어서 올린다(같은 세션 · 자기 칸에만 연결).
+             ★ 첫 장 응답에 captureIndex 가 있어야(= 두 장을 아는 서버) 올린다 — 옛 서버는 둘째 장을 첫 장으로 볼 수 있다(배포 시차). */
+          if (first && Number(first.captureIndex) === 1 && o.img2Src && o.img2Src.startsWith("data:")) {
+            _capSlot.status2 = "uploading";
+            try {
+              const ok2 = await _runCapUpload({ dataUrl: o.img2Src, base64: o.img2Src.split(",")[1], mime: o.img2Mime || "image/jpeg", recipient: o.recipient, orderer: o.orderer }, 2);
+              _capSlot.status2 = ok2 ? "ok" : "fail";
+              if (!ok2) { try { showToast(`${_idx}번째 주문의 구매캡처 2장째 업로드에 실패했습니다 — 담당자에게 사진을 보내주세요.`, "error"); } catch(_) {} }
+            } catch (e2) { _capSlot.status2 = "fail"; console.warn(`[이미지 업로드 ${_idx}-2] 백그라운드 오류:`, e2.message); }
+          }
           try { _renderCaptureChecklist(); } catch(_) {}   // 완료화면이 떠 있으면 즉시 반영
         }).catch(() => {});   // 한 건의 예외가 큐를 끊지 않게
       }

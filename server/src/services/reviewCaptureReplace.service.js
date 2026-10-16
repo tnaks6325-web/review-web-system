@@ -96,7 +96,7 @@ async function _oldFileStillUsed(db, fileId) {
     const { rows } = await db.query(
       `SELECT 1 FROM review_submissions WHERE file_id=$1
        UNION ALL SELECT 1 FROM review_index WHERE review_file_id=$1
-       UNION ALL SELECT 1 FROM order_submissions WHERE capture_file_id=$1 AND deleted_at IS NULL
+       UNION ALL SELECT 1 FROM order_submissions WHERE (capture_file_id=$1 OR capture_file_id_2=$1) AND deleted_at IS NULL
        LIMIT 1`, [fileId]);
     return rows.length > 0;
   } catch (_) { return true; }

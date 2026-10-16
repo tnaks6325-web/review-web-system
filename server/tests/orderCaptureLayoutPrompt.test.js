@@ -40,7 +40,7 @@ const diag = fs.readFileSync(path.join(__dirname, '../src/routes/diag.routes.js'
 const inspect = fs.readFileSync(path.join(__dirname, '../src/services/reviewInspect.service.js'), 'utf8');
 ok('image-extract가 구매캡처 기준이미지를 로드해 추출 함수에 전달한다',
   /loadOrderExtractionSamples\(\)/.test(diag)
-  && /extractOrderFromImage\(imageBase64,[\s\S]{0,120}\{ samples: extractionSamples \}/.test(diag));
+  && /extractOrderFromImage\(imageBase64,[\s\S]{0,120}\{ samples: extractionSamples(, allowSecondCapture: secondCapture)? \}/.test(diag));
 ok('주문추출에는 구매확정 예시를 제외하고 최근 4장만 사용한다',
   /async function loadOrderExtractionSamples\(\)[\s\S]{0,500}filter\(s => s\.kind === 'order_capture'\)[\s\S]{0,300}_trimSamples\([\s\S]{0,80}, 4\)/.test(inspect));
 ok('예시 개인정보 복사 금지와 마지막 대상만 판독하도록 구분한다',

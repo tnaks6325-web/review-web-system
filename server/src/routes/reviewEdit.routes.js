@@ -393,7 +393,7 @@ router.get('/participation-brief', reviewerSessionMiddleware, async (req, res) =
     let purchaseCapture = null;
     try {
       const { rows: caps } = await pool.query(
-        `SELECT os.capture_file_id, os.capture_uploaded_at, os.submitted_at
+        `SELECT os.capture_file_id, os.capture_uploaded_at, os.submitted_at, os.capture_file_id_2
            FROM campaign_participants cp
            JOIN order_submissions os
              ON os.id = cp.order_submission_id
@@ -422,6 +422,8 @@ router.get('/participation-brief', reviewerSessionMiddleware, async (req, res) =
       if (caps.length) {
         purchaseCapture = {
           fileId: String(caps[0].capture_file_id || ''),
+          // 결정 255 — 구매캡처 두 번째 장(없으면 ''). 같은 소유권 검증을 통과한 같은 주문의 칸이다.
+          fileId2: String(caps[0].capture_file_id_2 || ''),
           uploadedAt: caps[0].capture_uploaded_at || caps[0].submitted_at || null,
         };
       }

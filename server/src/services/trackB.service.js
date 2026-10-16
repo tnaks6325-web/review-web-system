@@ -2994,9 +2994,10 @@ async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false } =
   const _gid = tabCfg.gid || '';
   const { rows: capOrders } = await db.query(
     `SELECT os.id, os.sheet_row, os.capture_file_id, os.capture_uploaded_at,
+            os.capture_file_id_2, os.capture2_uploaded_at,
             os.order_num, os.phone, os.recipient, os.orderer
        FROM order_submissions os
-      WHERE os.deleted_at IS NULL AND os.capture_file_id IS NOT NULL
+      WHERE os.deleted_at IS NULL AND (os.capture_file_id IS NOT NULL OR os.capture_file_id_2 IS NOT NULL)
         AND ((os.sheet_id = $1 AND os.tab_name = $2)
           OR EXISTS (SELECT 1 FROM recruit_campaigns rc
                       WHERE os.sheet_id = 'campaign:' || rc.id AND os.tab_name = 'campaign:' || rc.id
@@ -3012,7 +3013,12 @@ async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false } =
         WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.deleted_at IS NULL`,
       [sheetId, tabName]).catch(() => ({ rows: [] }));
     const matched = require('../utils/rowOrderMatch').matchRowsToOrders(capRows, capOrders);
-    for (const [seq, o] of matched) push(seq, o.capture_file_id, 'order_capture', o.capture_uploaded_at);
+    // 결정 255 — 구매캡처 두 번째 장(있으면)도 같은 줄에 이어 싣는다(미리보기가 1/2 · 2/2 로 넘겨 본다). 순서 = 첫 장 → 두 번째 장.
+    for (const [seq, o] of matched) {
+      if (o.capture_file_id) push(seq, o.capture_file_id, 'order_capture', o.capture_uploaded_at);
+      // 첫 장이 없으면 싣지 않는다 — 누락 감지(capture_uploaded_at)와 같은 말을 하게(첫 장 미첨부 독촉이 나가는데 미리보기만 "있음"이 되지 않게).
+      if (o.capture_file_id && o.capture_file_id_2) push(seq, o.capture_file_id_2, 'order_capture', o.capture2_uploaded_at || o.capture_uploaded_at);
+    }
   }
   return Object.fromEntries(out);
 }

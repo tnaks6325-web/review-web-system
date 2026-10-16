@@ -281,8 +281,9 @@ async function _runLinking(planned, result) {
       /* ★★ 한 파일이 여러 주문의 증빙이 되지 않게 — 이미 다른 주문이 그 파일을 쓰고 있으면 건너뛴다.
          (같은 이름으로 여러 번 올린 탭에서 도달 가능하다.) */
       const { rows: dup } = await db().query(
+        // 결정 255: 2장째로 연결된 파일(같은 주문 포함)을 첫 장으로 또 붙이지 않는다.
         `SELECT id FROM order_submissions
-          WHERE capture_file_id = $1 AND id <> $2 AND deleted_at IS NULL LIMIT 1`,
+          WHERE deleted_at IS NULL AND ((capture_file_id = $1 AND id <> $2) OR capture_file_id_2 = $1) LIMIT 1`,
         [it.fileId, it.id]
       );
       if (dup.length) { result.conflicts++; result.skippedItems.push({ ...it, skip: 'file_already_linked' }); continue; }

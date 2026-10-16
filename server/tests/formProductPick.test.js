@@ -57,7 +57,7 @@ function stubDb({ sheetless = true, camp = [], wt = [], fail = false } = {}) {
   ok('로그 문구가 고른 것·캡처 것을 말한다', /A/.test(d.problem) && /B/.test(d.problem) && /작업보드/.test(d.action));
   const dg = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'diag.routes.js'), 'utf8');
   ok('캡처 판독이 그 작업 상품으로 짝지은 productLabel 을 돌려준다(fail-open)',
-    /res\.json\(\{ \.\.\.result, \.\.\.proof, productLabel(, deliveryMemoToken)? \}\)/.test(dg) && /catch \(_\) \{ productLabel = ''; \}/.test(dg));
+    /\{ \.\.\.result, \.\.\.proof, productLabel(, deliveryMemoToken)? \}\)/.test(dg) /* 결정 255: 두 번째 장 응답 분기 앞에 있어도 같은 계약 */ && /catch \(_\) \{ productLabel = ''; \}/.test(dg));
   const tc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'tabconfig.routes.js'), 'utf8');
   ok('선택지 창구는 같은 함수를 쓴다', /router\.get\('\/product-choices'[\s\S]{0,700}listProductChoices\(pool, sheetId, tabName\)/.test(tc));
 

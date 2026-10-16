@@ -1185,7 +1185,9 @@ router.post('/order', async (req, res, next) => {
                            옵션 칸을 비우는 위 규율은 그대로 두고, 사라지던 값을 여기로 흘려보낸다. */
                         selectedProduct: (holdCtx && holdCtx.productName) || formPickedProduct || '',
                         /* 결정 245 — 캡처에서 AI 가 읽은 배송메세지. 서버 서명에서만 꺼내고, 서명의 주문번호가 이 제출의 주문번호와 같을 때만(없거나 틀리면 '' · 제출은 막지 않는다). */
-                        deliveryMemo: reviewerOrderIdentity.readDeliveryMemoProof(b.deliveryMemoToken, orderNum) };
+                        /* 결정 255 — 첫 장에 배송메세지가 없으면(잘림) 두 번째 장에서 읽은 서명을 쓴다. 규칙은 같다(주문번호 일치 · 실패해도 제출은 막지 않음). */
+                        deliveryMemo: reviewerOrderIdentity.readDeliveryMemoProof(b.deliveryMemoToken, orderNum)
+                          || reviewerOrderIdentity.readDeliveryMemoProof(b.deliveryMemoToken2, orderNum) };
     // 통폐합 pilot/enabled에서 workboard_id가 연결된 작업만 큐 반영으로 전환한다.
     // 실패·미이관·legacy는 기존 무시트 즉시 반영을 그대로 탄다.
     let queuedWorkboardApply = false;

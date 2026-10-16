@@ -41,7 +41,7 @@ const roi = require('../src/services/reviewerOrderIdentity.service');
   assert.ok(/"deliveryMemo": "배송요청사항\/배송메모/.test(g), 'prompt asks for deliveryMemo');
   assert.ok(/const EXTRACT_CACHE_VERSION = 'extract5';/.test(g), 'cache prefix bumped (old cache lacks the field)');
   const d = read('server/src/routes/diag.routes.js');
-  assert.ok(/issueDeliveryMemoProof\(result\.deliveryMemo, result\.orderNumber\)/.test(d) && /productLabel, deliveryMemoToken \}\)/.test(d), 'extract response carries signed memo');
+  assert.ok(/issueDeliveryMemoProof\(result\.deliveryMemo, memoOrder\)/.test(d) && /const memoOrder = result\.orderNumber \|\| \(secondCapture \?/.test(d) && /productLabel, deliveryMemoToken \}\)/.test(d), 'extract response carries signed memo');
   const sr = read('server/src/routes/submit.routes.js');
   assert.ok(/deliveryMemo: reviewerOrderIdentity\.readDeliveryMemoProof\(b\.deliveryMemoToken, orderNum\)/.test(sr), 'submit takes memo only from the signature');
   const ol = read('server/src/services/orderLedger.service.js');
@@ -70,7 +70,8 @@ const roi = require('../src/services/reviewerOrderIdentity.service');
   assert.ok(/_aiDeliveryMemoToken = json\.deliveryMemoToken \|\| "";/.test(ia) && /deliveryMemoToken: _aiDeliveryMemoToken \|\| ""/.test(ia), 'legacy form forwards token');
   assert.equal((ia.match(/_aiDeliveryMemoToken = "";/g) || []).length, 3, 'legacy form: declared blank, cleared on reset and on new analysis');
   // 구매캡처 교체 뒤 화면 명단에서도 지운다(명단을 다시 받지 않으므로)
-  assert.ok(/if\(!isRev&&rowId\)\{ const rr=\(STATE\.wd&&STATE\.wd\.roster\|\|\[\]\)\.find\(x=>String\(x\.id\)===String\(rowId\)\); if\(rr\) delete rr\.deliveryMemo; \}/.test(read('frontend/workdesk.html')), 'replace clears memo in the open preview');
+  // 결정 255: 첫 장 교체일 때만 지운다(2장째 교체는 서버도 배송메세지를 안 비운다) — 검사 의미 불변
+  assert.ok(/if\(!isRev&&rowId&&st\.pick!==1\)\{ const rr=\(STATE\.wd&&STATE\.wd\.roster\|\|\[\]\)\.find\(x=>String\(x\.id\)===String\(rowId\)\); if\(rr\) delete rr\.deliveryMemo; \}/.test(read('frontend/workdesk.html')), 'replace clears memo in the open preview');
   assert.ok(/NULL::text AS "deliveryMemo"/.test(tb) && /purpose_order\.delivery_memo AS "deliveryMemo"/.test(tb), 'both roster queries carry the column');
   const sa = read('frontend/js/search-app.js');
   assert.ok(/st\.deliveryMemoToken = json\.deliveryMemoToken \|\| "";/.test(sa));
