@@ -252,7 +252,6 @@
   .fol.rev{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 32%,transparent);background:var(--warn-soft)}
   .fol.off{color:var(--faint);border-color:var(--line);background:var(--card2);cursor:default}
   .fol:hover:not(.off){filter:brightness(.96)}
-  .fol .up{font-size:9px;opacity:.75}
   .fol.big{font-size:11px;padding:4px 10px;border-radius:8px}
   .folhead{display:inline-flex;gap:6px;align-items:center}
   /* 화면 B(작업 상세) — 헤더·요약 스트립을 본문 데이터 폭과 같은 값으로 캡(광고주 화면만).
@@ -2126,7 +2125,6 @@
   /* ★ 폴더 바로가기(요약 줄·칸 제목) — 표 윗줄 버튼을 대체한 자리라 "눌린다"가 보여야 한다. */
   .rvstat .s.lk{cursor:pointer}
   .rvstat .s.lk:hover{background:var(--chip,#eef4ff);border-color:var(--p,#2456c9)}
-  .rvstat .s .ext{opacity:.55;font-weight:700}
   /* ═══ 그리드 컬럼 ▾ 메뉴 · 행 그룹 헤더 ═══ */
   /* 헤더 클릭 필터: ▾ 아이콘 제거, 컬럼명 자체가 트리거. 호버=깔때기 힌트(절대배치=폭 무증가) · 필터중=밑줄+색 · 정렬중=화살표 */
   .th-in{display:flex;align-items:center;gap:4px;position:relative;padding-right:1px} .th-in .lbl{overflow:hidden;text-overflow:ellipsis}
@@ -2502,7 +2500,7 @@ table.lgtable.pm-unconfirmed-two-row-table{width:100%;min-width:0;table-layout:f
 .gdb{min-width:0;flex:1}
 .gdt{font-size:14px;font-weight:730;letter-spacing:-.012em;margin-bottom:3px}
 .gdd{font-size:12.5px;color:var(--t3,#8B94A1);line-height:1.5}
-.gdgo{flex:none;color:var(--t3,#8B94A1);font-size:14px;margin-top:2px}
+.gdgo{flex:none;color:var(--t3,#8B94A1);font-size:11px;font-weight:700;white-space:nowrap;margin-top:2px}
 .gdcard:hover .gdgo{color:var(--acc,#2563A8)}
 #gdhead .mh{max-width:1120px}
 
@@ -3784,7 +3782,7 @@ function _awFolderBtns(it, big){
   //   ★ URL 검증은 내부 렌더러와 **같은 규칙**(_folUrlOk) — esc 는 속성 탈출만 막고
   //     `javascript:` 같은 스킴은 그대로 실행된다. 검증 실패는 미연결과 같은 회색 자리.
   const b=(url,cls,ic,label)=> _folUrlOk(url)
-    ? `<a class="fol ${cls}${big?' big':''}" href="${esc(url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${label} 폴더 열기 (Google Drive)">${ic} ${big?label+' 폴더':cls==='buy'?'구매':'리뷰'} <span class="up">↗</span></a>`
+    ? `<a class="fol ${cls}${big?' big':''}" href="${esc(url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${label} 폴더 열기 (Google Drive)">${ic} ${big?label+' 폴더':cls==='buy'?'구매':'리뷰'}</a>`
     : `<span class="fol off${big?' big':''}" title="폴더가 아직 연결되지 않았습니다 — 담당자에게 문의하세요">${ic} —</span>`;
   return b(it.captureFolderUrl,'buy','🛒','구매캡쳐')+b(it.folderUrl,'rev','📸','리뷰캡쳐');
 }
@@ -4759,7 +4757,7 @@ function _ddRender(){
         <td class="num">${esc(_ddDay(t.lastDupAt))}</td>
         <td class="num">${t.done ? `✅ 정리함${t.removedRows ? ` ${esc(String(t.removedRows))}줄` : ''}`
           : `<button class="wbl-b" onclick="ddPickScan(${i})">확인·정리</button>`}</td>
-        <td class="num"><button class="wbl-b" title="그 작업 화면으로 이동" onclick="ddOpenTab(${i})">↗</button></td></tr>`).join('');
+        <td class="num"><button class="wbl-b" title="그 작업 화면으로 이동" onclick="ddOpenTab(${i})">이동</button></td></tr>`).join('');
     b.innerHTML += `<div class="wbl-facts" style="margin-top:10px"><b>🔎 전체 작업 점검</b> —
         무시트 작업 ${esc(String(sc.scanned))}개 중 <b>${esc(String((sc.tabs || []).length))}개 작업</b>에
         정리 대상 <b>${esc(String(sc.totalRemoveRows || 0))}줄</b> · 보류 ${esc(String(sc.totalSkipped || 0))}건
@@ -4769,7 +4767,7 @@ function _ddRender(){
       ${(sc.tabs || []).length ? `<table class="wbl-t"><thead><tr><th>작업</th><th>표 줄</th><th>정리 대상</th><th>보류</th><th>최근 발생</th><th>확인</th><th>이동</th></tr></thead>
         <tbody>${list}</tbody></table>
         <div class="wbl-facts">[확인·정리]를 누르면 <b>이 창에서 그 작업의 미리보기</b>가 열립니다 — 확인 후 정리하고
-          [← 점검 목록으로] 돌아와 다음 작업을 이어서 처리하세요. [↗]는 그 작업 화면으로 이동합니다.
+          [← 점검 목록으로] 돌아와 다음 작업을 이어서 처리하세요. [이동]은 그 작업 화면으로 이동합니다.
           ${sc.doneTabs ? `<b>${esc(String(sc.doneTabs))}개 작업 정리 완료</b> · ` : ''}남은 작업
           ${esc(String((sc.tabs || []).filter(t => !t.done).length))}개</div>`
         : `<div class="wbl-facts">중복이 남아 있는 작업이 없습니다.</div>`}
@@ -6106,7 +6104,7 @@ function _folBtnsInner(t,i,src,big,kinds){
   const b=(kind,label)=>{
     const st=_folState(t,src,kind);
     return st.on
-      ? `<button class="wbl-b" onclick="event.stopPropagation();openTabFolder(${i},'${kind}'${arg})" title="${esc(st.tip)}">${label}${big?' ↗':''}</button>`
+      ? `<button class="wbl-b" onclick="event.stopPropagation();openTabFolder(${i},'${kind}'${arg})" title="${esc(st.tip)}">${label}</button>`
       : `<button class="wbl-b dis" disabled onclick="event.stopPropagation()" title="${esc(st.tip)}">${label}</button>`;
   };
   const L=big?{capture:'🛒 구매캡처',review:'📸 리뷰캡처',receipt:'🧾 현금영수증'}
@@ -6932,13 +6930,13 @@ function _rvStatHtml(){
     }
   }
   /* ★★ 이 줄이 곧 **폴더 바로가기**다(사용자 확정 2026-08-21) — 표 윗줄에 있던
-     [🛒 구매캡처 ↗][📸 리뷰캡처 ↗] 버튼을 여기로 옮겼다. 판정은 `_folState` 한 곳이라
+     [🛒 구매캡처][📸 리뷰캡처] 버튼을 여기로 옮겼다. 판정은 `_folState` 한 곳이라
      버튼 시절과 열리는 폴더·비활성 사유가 같다. 광고주는 그리지 않는다(/tab-folders 는 내부 전용). */
   const one=(ic,lb,n,kind,itemDen=den)=>{
     const st=(STATE.role!=='advertiser'&&STATE.cur)?_folState(STATE.cur,'cur',kind):null;
     const cls=`s${n==null?' unk':''}${st&&st.on?' lk':''}`;
     const at=st?` title="${esc(st.on?st.tip:('폴더를 열 수 없습니다 — '+st.tip))}"${st.on?` onclick="_rvOpenFolder('${kind}')"`:''}`:'';
-    return `<div class="${cls}"${at}><span class="ic">${ic}</span><span class="lb">${lb}${st&&st.on?'<span class="ext"> ↗</span>':''}</span>`+
+    return `<div class="${cls}"${at}><span class="ic">${ic}</span><span class="lb">${lb}</span>`+
       `<span class="nm">${n==null?'?':n}<small> / ${kind==='receipt'?itemDen:(itemDen||'?')}</small></span></div>`;
   };
   return `<div class="rvstat">${one('🛒','구매 캡처',cap,'capture')}${one('📷','리뷰 캡처',rev,'review')}${showReceipt?one('🧾','현금영수증',receipt,'receipt',receiptDen):''}</div>`;
@@ -14474,7 +14472,7 @@ function _gdRender(){
           items.map(g=>`<a class="gdcard" href="/docs/${encodeURIComponent(g.file)}" target="_blank" rel="noopener">
             <div class="gdic">${g.icon}</div>
             <div class="gdb"><div class="gdt">${esc(g.title)}</div><div class="gdd">${esc(g.desc)}</div></div>
-            <div class="gdgo">↗</div></a>`).join('')
+            <div class="gdgo">열기</div></a>`).join('')
         }</div></div>`;
       }).join('');
 }
@@ -16776,7 +16774,7 @@ function _renderLogsBody(q){
     // 조치 버튼은 표에서 제거하고 펼침 패널로 이동한다([확인] 버튼 제거 요청).
     //   여기서 _logOpenWorkdesk/_cancelLogOrder/_resolveLog/_canResolveLog 를 참조 = 회귀가드 대상.
     const acts=[];
-    if(l.sheetId&&l.tabName) acts.push(`<button class="btn xs" onclick="event.stopPropagation();_logOpenWorkdesk(${l.id})" title="이 리뷰어의 행이 있는 작업보드를 새 탭으로 엽니다">작업보드 ↗</button>`);
+    if(l.sheetId&&l.tabName) acts.push(`<button class="btn xs" onclick="event.stopPropagation();_logOpenWorkdesk(${l.id})" title="이 리뷰어의 행이 있는 작업보드를 새 탭으로 엽니다">작업보드</button>`);
     if(!resolved && _canResolveLog()){
       if(_LOG_CANCELABLE.has(l.eventType)) acts.push(`<button class="btn xs" style="border-color:#FCA5A5;color:#B91C1C" onclick="event.stopPropagation();_cancelLogOrder(${l.id})" title="시트에서 지운 것이 '주문취소'였다면 — 다시 기록되지 않습니다">취소 처리</button>`);
       if(_LOG_REVERTIBLE.has(l.eventType)) acts.push(`<button class="btn xs" style="border-color:#93C5FD;color:#1D4ED8" onclick="event.stopPropagation();_revertRouteLog(${l.id})" title="자동 이동이 오판이었다면 — 파일을 원래 칸(폴더)으로 되돌립니다">↩ 원위치</button>`);
@@ -16808,7 +16806,7 @@ function _toggleLogRow(id){ const d=document.getElementById('lgdetail-'+id); if(
   const ch=document.getElementById('lgchev-'+id); if(ch) ch.textContent=open?'▴':'▾'; }
 function _logViewImage(fileId){ if(!/^[-\w]{20,}$/.test(String(fileId||'')))return; const url=_logImgUrl(fileId);
   let ov=document.getElementById('lgimgov'); if(!ov){ ov=document.createElement('div'); ov.id='lgimgov'; ov.className='modalov'; ov.addEventListener('click',e=>{ if(e.target===ov) ov.remove(); }); document.body.appendChild(ov); }
-  ov.innerHTML=`<div class="modalbox" style="width:auto;max-width:96vw"><div class="modalhd"><b>제출 캡처</b> <a class="btn xs" href="${url}" target="_blank" rel="noopener">새 탭 ↗</a> <button class="btn xs" onclick="document.getElementById('lgimgov').remove()">닫기</button></div><div class="modalbd" style="text-align:center"><img src="${url}" style="max-width:92vw;max-height:80vh;border-radius:8px"></div></div>`;
+  ov.innerHTML=`<div class="modalbox" style="width:auto;max-width:96vw"><div class="modalhd"><b>제출 캡처</b> <a class="btn xs" href="${url}" target="_blank" rel="noopener">새 탭</a> <button class="btn xs" onclick="document.getElementById('lgimgov').remove()">닫기</button></div><div class="modalbd" style="text-align:center"><img src="${url}" style="max-width:92vw;max-height:80vh;border-radius:8px"></div></div>`;
 }
 // 로그 → 그 리뷰어가 있는 작업보드를 새 탭으로. 탭 지정+행 강조 정보를 프래그먼트(#)로 넘긴다
 //   — 프래그먼트는 서버 로그·Referer에 안 실려 연락처가 새지 않고, 도착 즉시 주소창에서 제거된다.

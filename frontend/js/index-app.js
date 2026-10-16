@@ -2148,7 +2148,7 @@ function _raRenderSummary(byType, totalCritical) {
     '<div style="display:flex;align-items:center;gap:6px;font-weight:800;color:#DC2626"><i class="fas fa-exclamation-triangle"></i> 리뷰어 중요알림'
     + '<span style="margin-left:auto;font-size:.72rem;background:#DC2626;color:#fff;border-radius:999px;padding:1px 9px">총 ' + totalCritical + '건</span></div>'
     + lines
-    + '<button onclick="openWorkdeskLogs()" style="width:100%;margin-top:9px;padding:7px;border:none;background:#DC2626;color:#fff;border-radius:8px;font-size:.78rem;font-weight:700;cursor:pointer">리뷰웹시스템[3버전]에서 처리 ↗</button>';
+    + '<button onclick="openWorkdeskLogs()" style="width:100%;margin-top:9px;padding:7px;border:none;background:#DC2626;color:#fff;border-radius:8px;font-size:.78rem;font-weight:700;cursor:pointer">리뷰웹시스템[3버전]에서 처리</button>';
 }
 // SSE 'reviewer_alert' 수신 훅 (index-payment.js connectSSE 에서 호출)
 function _onReviewerAlertSSE() {
@@ -5314,7 +5314,7 @@ document.addEventListener("click", function(e) {
  * tcAttr(JSON 문자열)에서 sheetId, gid, tabName, displayName 추출 → URL 생성 → 클립보드 복사
  */
 /**
- * 대시보드 행의 [↗] 버튼 클릭 시 호출
+ * 대시보드 행의 [구매양식 링크 열기] 버튼 클릭 시 호출
  * data-tc 속성에서 인덱스 정보 읽기 → 구매양식 URL 생성 → 새 탭으로 열기 + 링크 복사
  */
 function openFormLink(btnEl) {

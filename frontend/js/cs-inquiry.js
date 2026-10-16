@@ -524,7 +524,7 @@ async function csReloadConversation(threadId) {
                      phone8: t.reviewerPhone8 || '', name: t.reviewerName || '', sheetTitle: t.companyLabel || '' };
         camp.innerHTML = `<i class="fas fa-tag" style="font-size:.68rem"></i> ` +
           `<a href="#" class="cs-camp-link" onclick="csOpenWorkboard(event)"` +
-          ` title="이 작업의 작업보드를 새 탭으로 엽니다 — 이 리뷰어의 행을 찾아 표시합니다">${label} ↗</a>${sheet}`;
+          ` title="이 작업의 작업보드를 새 탭으로 엽니다 — 이 리뷰어의 행을 찾아 표시합니다">${label}</a>${sheet}`;
       } else {
         _csGoCtx = null;
         camp.innerHTML = `<i class="fas fa-tag" style="font-size:.68rem"></i> ${label}${sheet}`;

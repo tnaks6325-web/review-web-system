@@ -5145,7 +5145,7 @@ document.addEventListener("click", function(e) {
  * tcAttr(JSON 문자열)에서 sheetId, gid, tabName, displayName 추출 → URL 생성 → 클립보드 복사
  */
 /**
- * 대시보드 행의 [↗] 버튼 클릭 시 호출
+ * 대시보드 행의 [구매양식 링크 열기] 버튼 클릭 시 호출
  * data-tc 속성에서 인덱스 정보 읽기 → 구매양식 URL 생성 → 새 탭으로 열기 + 링크 복사
  */
 function openFormLink(btnEl) {
