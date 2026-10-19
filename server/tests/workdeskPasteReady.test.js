@@ -31,6 +31,32 @@ const P = ctx.window.PasteReady;
     const hf = P.html({ file: { onchange: 'X(event)', multiple: true } });
     assert.match(hf, /<input type="file" accept="image\/\*" multiple hidden onchange="X\(event\)">/);
   });
+  await t('사전 확인 중(wait) = 회색 · 누르기 막힘 · "준비됨" 문구 없음', () => {
+    const h = P.html({ wait: '확인하는 중' });
+    assert.match(h, /prz prz-wait/); assert.match(h, /<button type="button" class="prz-cell prz-paste" disabled>/);
+    assert.ok(!/data-prz="paste"/.test(h) && !/하면 여기에 들어가요/.test(h));
+  });
+  await t('맥은 ⌘V 로 안내한다(키캡·상태 줄·실패 안내)', async () => {
+    const c2 = { window: { addEventListener() {} }, console, setTimeout, clearTimeout, navigator: { platform: 'MacIntel' }, File: ctx.File,
+      document: Object.assign({}, ctx.document) };
+    vm.createContext(c2); vm.runInContext(pr, c2);
+    const M = c2.window.PasteReady, h = M.html({});
+    assert.match(h, /<kbd>⌘<\/kbd>\+<kbd>V<\/kbd>/); assert.match(h, /지금 <b>⌘V<\/b> 하면/); assert.ok(!/Ctrl/.test(h));
+    assert.match((await M.readClipboard()).msg, /⌘V 를 눌러주세요/);
+  });
+  await t('클립보드를 읽는 사이 칸이 닫히면 결과를 버린다 — 엉뚱한 줄·받는 사람에 붙지 않게', async () => {
+    let got = 0, handler = null;
+    const btn = { _przBound: false, isConnected: true, addEventListener: (_e, f) => { handler = f; } };
+    const host = { isConnected: true, classList: { add() {} }, querySelector: () => btn };
+    ctx.navigator.clipboard = { read: async () => [{ types: ['image/png'], getType: async () => ({}) }] };
+    P.bind(host, () => { got++; });
+    host.isConnected = false;
+    await handler({ preventDefault() {}, stopPropagation() {} });
+    assert.equal(got, 0);
+    host.isConnected = true;
+    await handler({ preventDefault() {}, stopPropagation() {} });
+    assert.equal(got, 1);
+  });
   await t('창이 앞에 없으면 "다른 창" 상태(html.prz-blur) — hasFocus 기준', () => {
     ctx.document.hasFocus = () => false; P._syncFocus(); assert.ok(cls.has('prz-blur'));
     ctx.document.hasFocus = () => true; P._syncFocus(); assert.ok(!cls.has('prz-blur'));
@@ -46,7 +72,7 @@ const P = ctx.window.PasteReady;
     const r = await P.readClipboard(); assert.equal(r.files.length, 1); assert.match(r.files[0].name, /^붙여넣기_\d{6}\.png$/);
   });
   await t('작업보드 3칸이 부품을 쓰고, 받는 함수는 각 칸의 기존 함수 그대로(장수·용량·사전확인 사본 0)', () => {
-    assert.match(wd, /PasteReady\.html\(\{compact:!!n, dropSub:`최대 \$\{_MR_MAX_FILES\}장`\}\)/);
+    assert.match(wd, /PasteReady\.html\(pre==='loading' \? \{compact:!!n, wait:'제출 가능 여부를 확인하는 중[^']*'\} : \{compact:!!n, dropSub:`최대 \$\{_MR_MAX_FILES\}장`\}\)/, '사전 확인 중엔 "준비됨"을 띄우지 않는다');
     assert.match(wd, /PasteReady\.bind\(dz, _manualReviewTake, toast\)/);
     assert.match(wd, /PasteReady\.html\(\{compact:!!st\.file, dropSub:'한 장'\}\)/);
     assert.match(wd, /PasteReady\.bind\(dz, _capTake, toast\)/);
@@ -55,7 +81,7 @@ const P = ctx.window.PasteReady;
     assert.ok(wd.indexOf('js/paste-ready.js') > 0 && wd.indexOf('js/paste-ready.js') < wd.indexOf('js/manual-order.js'), '부품이 수동 주문보다 먼저 실린다');
   });
   await t('부품이 안 실렸을 때(옛 캐시 등)는 종전 문구로 그린다 — 빈 칸이 되지 않는다', () => {
-    assert.match(wd, /window\.PasteReady[^\n]*\n[^\n]*PasteReady\.html\(\{compact:!!n[\s\S]{0,400}로 리뷰 캡처를 붙여넣으세요/);
+    assert.match(wd, /window\.PasteReady   \/\/ 결정 264[\s\S]{0,900}로 리뷰 캡처를 붙여넣으세요/);
     assert.match(wd, /로 새 \$\{K\.label\}를 붙여넣으세요/);
     assert.match(mo, /window\.PasteReady[\s\S]{0,300}여기에 <b>Ctrl\+V<\/b> 하거나 이미지를 끌어다 놓으세요/);
   });

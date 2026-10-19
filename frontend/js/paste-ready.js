@@ -51,7 +51,17 @@ html.prz-blur .prz-host{border-color:#fbbf24 !important;box-shadow:0 0 0 3px rgb
 .prz.compact .prz-sub,.prz.compact .prz-ic{display:none}
 .prz.compact .prz-keys kbd{min-width:18px;padding:1px 4px;font-size:10px}
 .prz.compact+.prz-state{margin-top:4px}
+/* 사전 확인 중(받을 수 없는 동안) = 회색 · 누르기 막힘 */
+.prz.prz-wait .prz-cell{opacity:.55}
+.prz.prz-wait button.prz-cell{cursor:wait}
+.prz-state.prz-wait{color:var(--faint,#94a3b8)}
+.prz-state.prz-wait .prz-dot{background:#cbd5e1;animation:none}
+html.prz-blur .prz-state.prz-wait{color:var(--faint,#94a3b8)}
 `;
+  /* 맥은 붙여넣기가 ⌘V 다 — 글자·키캡·안내 문구를 기기에 맞춘다(Codex 리뷰). */
+  const MAC = /Mac|iPhone|iPad|iPod/i.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent || '');
+  const KEY = MAC ? '⌘' : 'Ctrl';
+  const KEYV = MAC ? '⌘V' : 'Ctrl+V';
   function injectCss() {
     if (document.getElementById('przCss')) return;
     const s = document.createElement('style'); s.id = 'przCss'; s.textContent = CSS;
@@ -78,6 +88,7 @@ html.prz-blur .prz-host{border-color:#fbbf24 !important;box-shadow:0 0 0 3px rgb
    * @param {boolean} [o.compact]  사진이 이미 있을 때(한 줄 막대)
    * @param {string}  [o.dropSub]  [끌어다 놓기] 아래 작은 글씨(예: "최대 5장")
    * @param {{onchange:string, multiple?:boolean}} [o.file]  원래 파일 고르기가 있던 칸만 — [파일 선택] 칸을 그린다
+   * @param {string}  [o.wait]  아직 받을 수 없을 때(사전 확인 중 등)의 안내 — "준비됨"을 띄우지 않는다(Codex 리뷰: 따라 붙여넣으면 버려진다)
    */
   function html(o) {
     o = o || {};
@@ -86,24 +97,30 @@ html.prz-blur .prz-host{border-color:#fbbf24 !important;box-shadow:0 0 0 3px rgb
       ? `<label class="prz-cell prz-file"><span class="prz-ic">📁</span><b>파일 선택</b><span class="prz-sub">내 PC에서</span>`
         + `<input type="file" accept="image/*"${o.file.multiple ? ' multiple' : ''} hidden onchange="${o.file.onchange}"></label>`
       : '';
+    if (o.wait) {
+      return `<div class="prz prz-wait${o.compact ? ' compact' : ''}">`
+        + `<button type="button" class="prz-cell prz-paste" disabled><span class="prz-keys"><kbd>${KEY}</kbd>+<kbd>V</kbd></span><b>붙여넣기</b><span class="prz-sub">잠시만요</span></button>`
+        + `<div class="prz-cell prz-drop"><span class="prz-ic">📥</span><b>끌어다 놓기</b><span class="prz-sub">잠시만요</span></div>`
+        + `</div><div class="prz-state prz-wait" aria-live="polite"><span class="prz-dot"></span><span>${o.wait}</span></div>`;
+    }
     return `<div class="prz${o.compact ? ' compact' : ''}">`
       + `<button type="button" class="prz-cell prz-paste" data-prz="paste" title="눌러도 붙여넣어져요">`
-      + `<span class="prz-keys"><kbd>Ctrl</kbd>+<kbd>V</kbd></span><b>붙여넣기</b><span class="prz-sub">누르거나 키보드로</span></button>`
+      + `<span class="prz-keys"><kbd>${KEY}</kbd>+<kbd>V</kbd></span><b>붙여넣기</b><span class="prz-sub">누르거나 키보드로</span></button>`
       + `<div class="prz-cell prz-drop"><span class="prz-ic">📥</span><b>끌어다 놓기</b><span class="prz-sub">${o.dropSub || '사진을 여기로'}</span></div>`
       + file
       + `</div>`
       + `<div class="prz-state" aria-live="polite"><span class="prz-dot"></span>`
-      + `<span class="prz-on">지금 <b>Ctrl+V</b> 하면 여기에 들어가요</span>`
-      + `<span class="prz-off">다른 창을 보고 있어요 — 이 창을 한 번 누른 뒤 <b>Ctrl+V</b></span></div>`;
+      + `<span class="prz-on">지금 <b>${KEYV}</b> 하면 여기에 들어가요</span>`
+      + `<span class="prz-off">다른 창을 보고 있어요 — 이 창을 한 번 누른 뒤 <b>${KEYV}</b></span></div>`;
   }
 
   /** 클립보드 사진 읽기. 성공 = {files:[File]} · 실패 = {files:[], msg} (조용히 실패하지 않는다) */
   async function readClipboard() {
-    const KEY = '키보드에서 Ctrl+V 를 눌러주세요.';
-    if (!(navigator.clipboard && navigator.clipboard.read)) return { files: [], msg: '이 브라우저는 눌러서 붙여넣기를 못 해요. ' + KEY };
+    const HINT = '키보드에서 ' + KEYV + ' 를 눌러주세요.';
+    if (!(navigator.clipboard && navigator.clipboard.read)) return { files: [], msg: '이 브라우저는 눌러서 붙여넣기를 못 해요. ' + HINT };
     let items;
     try { items = await navigator.clipboard.read(); }
-    catch (_) { return { files: [], msg: '브라우저가 클립보드 읽기를 막았어요. ' + KEY }; }
+    catch (_) { return { files: [], msg: '브라우저가 클립보드 읽기를 막았어요. ' + HINT }; }
     const files = [];
     const stamp = new Date().toTimeString().slice(0, 8).replace(/:/g, '');
     for (const it of items || []) {
@@ -142,11 +159,14 @@ html.prz-blur .prz-host{border-color:#fbbf24 !important;box-shadow:0 0 0 3px rgb
       btn.addEventListener('click', async ev => {
         ev.preventDefault(); ev.stopPropagation();
         const r = await readClipboard();
+        // ★ 읽는 동안(권한 창 대기 등) 그 칸이 닫히거나 다른 줄·사람의 칸으로 바뀌었으면 버린다 —
+        //   받는 함수는 "지금 열린" 칸의 상태를 보므로, 그대로 넘기면 엉뚱한 줄·받는 사람에 붙는다(Codex 리뷰).
+        if (!host.isConnected || !btn.isConnected) return;
         if (r.files.length) onFiles(r.files);
         else if (r.msg) (notify || (m => console.warn(m)))(r.msg);
       });
     }
   }
 
-  window.PasteReady = { html, bind, flash, readClipboard, _syncFocus: syncFocus };
+  window.PasteReady = { html, bind, flash, readClipboard, KEYV, _syncFocus: syncFocus };
 })();
