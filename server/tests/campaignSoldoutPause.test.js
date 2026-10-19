@@ -21,8 +21,8 @@ const RF = p => fs.readFileSync(path.join(__dirname, '..', '..', p), 'utf8');
 const svc = require('../src/services/campaignOptionPause.service');
 
 /** 공고 하나·상품 목록·신고·알림을 가진 가짜 DB — 서비스가 보내는 SQL 만 흉내 낸다(모르는 SQL = 실패). */
-function mkDb({ options = [], paused = false, reports = 0, alerts = [] } = {}) {
-  const st = { camp: { paused, reason: '', by: '', rulesChanged: 0 }, options, reportsOpen: reports, alerts, events: [], sql: [] };
+function mkDb({ options = [], paused = false, reports = 0, alerts = [], participation = true, archived = false } = {}) {
+  const st = { camp: { paused, reason: '', by: '', rulesChanged: 0, participation, archived }, options, reportsOpen: reports, alerts, events: [], sql: [] };
   const q = async (sql, p = []) => {
     const s = String(sql).trim();
     st.sql.push(s);
@@ -31,8 +31,12 @@ function mkDb({ options = [], paused = false, reports = 0, alerts = [] } = {}) {
     if (/SELECT 1 FROM campaign_options WHERE campaign_id = \$1 AND COALESCE\(status,'active'\) <> 'closed' LIMIT 1/.test(s)) {
       return { rows: st.options.filter(o => o.status !== 'closed').length ? [{}] : [] };
     }
+    if (/SELECT soldout_paused_at, participation_mode, archived_at FROM recruit_campaigns WHERE id = \$1/.test(s)) {
+      return { rows: [{ soldout_paused_at: st.camp.paused ? new Date() : null, participation_mode: st.camp.participation, archived_at: st.camp.archived ? new Date() : null }] };
+    }
     if (/^UPDATE recruit_campaigns SET soldout_paused_at = NOW\(\)/.test(s)) {
-      if (st.camp.paused) return { rows: [] };
+      if (!/participation_mode = TRUE AND archived_at IS NULL/.test(s)) throw new Error('멈춤 UPDATE 에 참여형·보관 조건이 없다');
+      if (st.camp.paused || !st.camp.participation || st.camp.archived) return { rows: [] };
       Object.assign(st.camp, { paused: true, reason: p[1], by: p[2] }); st.camp.rulesChanged++; return { rows: [{ id: p[0] }] };
     }
     if (/^UPDATE recruit_campaigns SET soldout_paused_at = NULL/.test(s)) {
@@ -57,7 +61,8 @@ function mkDb({ options = [], paused = false, reports = 0, alerts = [] } = {}) {
     if (/UPDATE campaign_option_soldout_reports SET cleared_at = NOW\(\) WHERE campaign_id = \$1 AND opt_key = \$2/.test(s)) { if (p[1] === '') st.reportsOpen = 0; return { rows: [] }; }
     // 작업조건 카드 재료(optionSalesForCampaign)
     if (/FROM recruit_campaigns rc WHERE rc\.id = \$1/.test(s)) {
-      return { rows: [{ soldout_paused_at: st.camp.paused ? new Date() : null, soldout_paused_reason: st.camp.reason, soldout_paused_by: st.camp.by, reports: st.reportsOpen }] };
+      return { rows: [{ soldout_paused_at: st.camp.paused ? new Date() : null, soldout_paused_reason: st.camp.reason, soldout_paused_by: st.camp.by, reports: st.reportsOpen,
+        participation_mode: st.camp.participation, archived_at: st.camp.archived ? new Date() : null }] };
     }
     if (/FROM campaign_options co\s+WHERE co\.campaign_id = \$1 AND COALESCE\(co\.status,'active'\) <> 'closed'/.test(s)) {
       return { rows: st.options.filter(o => o.status !== 'closed').map(o => ({ opt_key: o.opt_key, paused_at: null, paused_reason: '', paused_by: '', reports: 0 })) };
@@ -97,6 +102,15 @@ function mkDb({ options = [], paused = false, reports = 0, alerts = [] } = {}) {
     db = mkDb({ options: [{ opt_key: 'A', status: 'active' }], paused: true });
     r = await svc.setOptionPaused({ campaignId: 'c1', whole: true, op: 'resume', by: 'kim', pool: db });
     ok('★ 멈춘 뒤 상품이 생겨도 다시 열기는 된다(막다른 길 없음)', r.ok && r.changed && !db.st.camp.paused);
+    db = mkDb({ paused: true });
+    r = await svc.setOptionPaused({ campaignId: 'c1', optKey: '', op: 'resume', by: 'kim', pool: db });
+    ok('★ 옛 카드(배포 순간)의 이름 빈 [다시 열기]도 공고 전체로 받는다', r.ok && r.changed && !db.st.camp.paused);
+    db = mkDb({ participation: false });
+    r = await svc.setOptionPaused({ campaignId: 'c1', whole: true, op: 'pause', by: 'kim', pool: db });
+    ok('★ 옛 방식(참여형 아님) 공고는 멈추지 않는다 — 신청 경로에 게이트가 없어 거짓 멈춤이 된다(409)', r.ok === false && r.code === 409 && !db.st.camp.paused);
+    db = mkDb({ archived: true });
+    r = await svc.setOptionPaused({ campaignId: 'c1', whole: true, op: 'pause', by: 'kim', pool: db });
+    ok('보관한 공고도 멈추지 않는다(409)', r.ok === false && r.code === 409 && !db.st.camp.paused);
   }
 
   console.log('[2] 알림');
@@ -117,8 +131,8 @@ function mkDb({ options = [], paused = false, reports = 0, alerts = [] } = {}) {
     r = await svc.resolveAlert({ id: 5, action: 'not_soldout', by: 'kim', pool: db });
     ok('★ 종류가 안 맞는 버튼(늦은 화면) = stale 거절 — 자동 멈춤을 조용히 덮지 않는다', r.ok === false && r.stale === true && db.st.camp.paused);
     const src = R('src/services/campaignOptionPause.service.js');
-    ok('알림 목록: 공고 전체 알림의 멈춤 = 공고 행 칸 · wholeCampaign = 상품 없는 공고만', /paused: r\.opt_key === '' \? !!r\.soldout_paused_at : !!r\.paused_at/.test(src)
-      && /wholeCampaign: r\.opt_key === '' && !r\.whole_has_live/.test(src));
+    ok('알림 목록: 공고 전체 알림의 멈춤 = 공고 행 칸 · wholeCampaign = 멈춰 있으면 언제나 / 아니면 참여형 && 상품 없음', /paused: r\.opt_key === '' \? !!r\.soldout_paused_at : !!r\.paused_at/.test(src)
+      && /wholeCampaign: r\.opt_key === '' && \(!!r\.soldout_paused_at \|\| \(r\.participation_mode === true && !r\.whole_has_live\)\)/.test(src));
   }
 
   console.log('[3] 작업조건 카드 재료');
@@ -131,6 +145,10 @@ function mkDb({ options = [], paused = false, reports = 0, alerts = [] } = {}) {
     ok('상품 있는 공고 = 종전 그대로(공고 전체 줄 없음)', list.length === 2 && !list.some(o => o.whole));
     list = await svc.optionSalesForCampaign(mkDb({ options: [{ opt_key: 'A', status: 'active' }], paused: true }), 'c1');
     ok('★ 멈춘 뒤 상품이 생긴 공고 = 공고 전체 줄을 맨 앞에 남긴다([다시 열기]가 사라지지 않게)', list.length === 2 && list[0].whole === true && list[0].paused === true);
+    list = await svc.optionSalesForCampaign(mkDb({ participation: false }), 'c1');
+    ok('★ 옛 방식 공고 = 공고 전체 줄 없음(멈출 수 없는 버튼을 보이지 않는다)', list.length === 0);
+    list = await svc.optionSalesForCampaign(mkDb({ archived: true }), 'c1');
+    ok('보관한 공고 = 공고 전체 줄 없음', list.length === 0);
     const bad = { query: async () => { throw new Error('db down'); } };
     ok('조회 실패 = null(카드는 줄을 그리지 않는다 — 종전 규율)', (await svc.optionSalesForCampaign(bad, 'c1')) === null);
   }
@@ -147,7 +165,7 @@ function mkDb({ options = [], paused = false, reports = 0, alerts = [] } = {}) {
     const tb = R('src/routes/trackB.routes.js');
     ok('멈춤 경로: whole 은 true 를 명시했을 때만', /whole: b\.whole === true/.test(tb));
     const idx = R('index.js');
-    ok('필수 스키마: 공고 전체 멈춤 칸', /\['recruit_campaigns', 'soldout_paused_at'\]/.test(idx) && /\['recruit_campaigns', 'soldout_paused_by'\]/.test(idx));
+    ok('필수 스키마: 공고 전체 멈춤 칸 3개', ['at', 'by', 'reason'].every(k => idx.includes(`['recruit_campaigns', 'soldout_paused_${k}']`)));
     const mig = R('migrations/190_campaign_soldout_pause.sql');
     ok('190: 추가만(ADD COLUMN IF NOT EXISTS 3개 · 다른 문장 없음)', (mig.match(/ADD COLUMN IF NOT EXISTS soldout_paused_/g) || []).length === 3
       && !/^\s*(UPDATE|DELETE|DROP|CREATE)/im.test(mig));
@@ -159,7 +177,8 @@ function mkDb({ options = [], paused = false, reports = 0, alerts = [] } = {}) {
     const pr = RF('frontend/js/option-alert-prompt.js');
     ok('알림 창: 공고 전체 알림은 멈춤 버튼 · 상품 생긴 공고만 [확인했어요]', /if \(!it\.hasOptions && !it\.wholeCampaign\)/.test(pr));
     const camp = RF('frontend/campaign.html');
-    ok('리뷰어 상세: 참여 버튼 = 품절로 잠시 멈춤 · 거절 문구', /c\.soldoutPaused === true\)\{ jb\.disabled = true; jb\.textContent = '품절로 잠시 멈춤'/.test(camp) && /campaign_paused:'/.test(camp));
+    ok('리뷰어 상세: 참여 버튼 = 품절로 잠시 멈춤 · 거절 문구 · 거절 뒤에도 표시 유지', /c\.soldoutPaused === true\)\{ jb\.disabled = true; jb\.textContent = '품절로 잠시 멈춤'/.test(camp) && /campaign_paused:'/.test(camp)
+      && /finally\{[^\n]*\n\s+if\(c && c\.state==='open' && c\.soldoutPaused === true\)/.test(camp));
     const cc = RF('frontend/js/campaign-cards.js');
     ok('카드: 멈춤 표시 · 참여 버튼 끔 · 참여 가능 공고보다 뒤로', /function _soldoutPaused\(c\)/.test(cc) && /c\.state === 'open' && _soldoutPaused\(c\)\) \{/.test(cc)
       && /c\.state === 'open' && _soldoutPaused\(c\)\) \? 2/.test(cc));

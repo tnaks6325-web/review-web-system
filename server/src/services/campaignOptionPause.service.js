@@ -136,7 +136,8 @@ async function recordSoldoutReport({ orderSubmissionId, phone8 = '', pool: dbPoo
           `UPDATE campaign_options SET paused_at = NOW(), paused_reason = 'auto_soldout', paused_by = 'system:soldout-report', updated_at = NOW()
             WHERE campaign_id = $1 AND opt_key = $2 AND paused_at IS NULL AND COALESCE(status,'active') <> 'closed'
             RETURNING id`, [tgt.campaignId, tgt.optKey]);
-      action = up.rows.length ? 'auto_paused' : 'already_paused';
+      // ★ 공고 전체: 0행 = 멈출 수 없는 공고(옛 방식·보관 — 참여 게이트가 없다) → 종전처럼 알림만(이미 멈춤은 위에서 걸렀다)
+      action = up.rows.length ? 'auto_paused' : (tgt.optKey === WHOLE ? 'reported' : 'already_paused');
     }
     // 이미 멈춰 있는 상품에 들어온 신고는 새 알림을 띄우지 않는다(멈춘 걸 다시 알릴 일이 없다 — 다시 열 때 신고는 정리된다).
     let alert = null;
@@ -162,9 +163,11 @@ async function recordSoldoutReport({ orderSubmissionId, phone8 = '', pool: dbPoo
  * ★ updated_at 은 건드리지 않는다(공고 수정 충돌 판정·동기화가 그 값을 본다 — 멈춤은 공고 설정 변경이 아니다).
  */
 function _pauseWholeRow(client, cid, reason, who) {
+  // ★ 참여형·보관 안 한 공고만(코드리뷰 P2) — 옛 방식(participation_mode=false) 공고의 신청 경로에는 멈춤 게이트가 없어
+  //   멈춤이 기록만 되고 신청은 계속 들어온다(멈췄다고 믿게 만드는 거짓 버튼).
   return client.query(
     `UPDATE recruit_campaigns SET soldout_paused_at = NOW(), soldout_paused_reason = $2, soldout_paused_by = $3, quota_rules_changed_at = NOW()
-      WHERE id = $1 AND soldout_paused_at IS NULL RETURNING id`, [cid, reason, who]);
+      WHERE id = $1 AND soldout_paused_at IS NULL AND participation_mode = TRUE AND archived_at IS NULL RETURNING id`, [cid, reason, who]);
 }
 
 /** 결정 259: 살아 있는(마감 아닌) 상품이 있는 공고인가 — 있으면 공고 전체가 아니라 상품별로 멈춘다. */
@@ -180,6 +183,12 @@ async function _setWholePausedInTx(client, cid, op, who) {
   if (op === 'pause') {
     if (await _hasLiveOptions(client, cid)) {
       return { ok: false, code: 409, error: '상품을 나눈 공고예요. 상품별로 멈춰 주세요(새로고침하면 상품 줄이 보여요).' };
+    }
+    const { rows: cr } = await client.query(
+      `SELECT soldout_paused_at, participation_mode, archived_at FROM recruit_campaigns WHERE id = $1`, [cid]);
+    const c = cr[0] || {};
+    if (!c.soldout_paused_at && (c.participation_mode !== true || c.archived_at)) {
+      return { ok: false, code: 409, error: '이 공고는 품절 멈춤을 쓸 수 없어요(옛 방식이거나 보관한 공고). 공고 상태를 마감으로 바꿔 주세요.' };
     }
     changed = (await _pauseWholeRow(client, cid, 'manual', who)).rows.length > 0;
   } else {
@@ -267,6 +276,9 @@ async function _setPausedInTx(client, cid, key, op, who) {
 async function setOptionPaused({ campaignId, optKey, op, whole = false, by = '', pool: dbPool } = {}) {
   if (!ENABLED && op !== 'resume') return { ok: false, code: 400, error: '지금은 품절 멈춤 기능이 꺼져 있어요.' };
   const cid = String(campaignId || '').trim();
+  // ★ 다시 열기는 이름이 빈 요청도 공고 전체로 받는다(코드리뷰 P2 — 배포 순간 옛 카드가 {optKey:''}로 보낸다).
+  //   다시 열기는 새 신청을 막지 않는 쪽이라 "명시해야만"의 이유(공고를 통째로 멈추는 실수)에 걸리지 않는다. 멈추기는 여전히 명시만.
+  if (op === 'resume' && optKey === '') whole = true;
   const key = whole === true ? WHOLE : String(optKey == null ? '' : optKey);
   if (!cid || (!key && whole !== true) || (op !== 'pause' && op !== 'resume')) return { ok: false, code: 400, error: '잘못된 요청입니다.' };
   const db = dbPool || pool;
@@ -300,7 +312,7 @@ async function listOpenAlerts({ pool: dbPool } = {}) {
   const { rows } = await db.query(
     `SELECT a.id, a.campaign_id, a.opt_key, a.kind, a.report_count, a.created_at, a.updated_at,
             rc.title, rc.thumbnail_url, rc.manager, rc.linked_tab_name, rc.status AS camp_status, rc.archived_at,
-            rc.soldout_paused_at, rc.soldout_paused_reason,
+            rc.soldout_paused_at, rc.soldout_paused_reason, rc.participation_mode,
             (a.opt_key = '' AND EXISTS (SELECT 1 FROM campaign_options lo WHERE lo.campaign_id = a.campaign_id
                                           AND COALESCE(lo.status,'active') <> 'closed')) AS whole_has_live,
             co.status AS opt_status, co.paused_at, co.paused_reason, co.thumbnail_url AS opt_thumb,
@@ -326,7 +338,9 @@ async function listOpenAlerts({ pool: dbPool } = {}) {
       hasOptions: r.opt_key !== '',
       // ★ 결정 259: 상품을 나누지 않은 공고 = 공고 전체를 멈출 수 있다(화면이 [품절로 멈추기]/[다시 열기]를 그린다).
       //   그사이 상품이 생긴 공고는 공고 전체로 멈추지 않는다 → 종전 [확인했어요]. 옛 화면은 이 필드를 몰라 종전대로 [확인했어요].
-      wholeCampaign: r.opt_key === '' && !r.whole_has_live,
+      //   ★ 멈춰 있으면 언제나 공고 전체(코드리뷰 P2 — 멈춘 뒤 상품이 생겨도 [다시 열기]를 보여 준다 · [확인했어요]로 닫히면 멈춘 채 아무도 모른다).
+      //   ★ 옛 방식(참여형 아님) 공고는 멈출 수 없다 → 종전 [확인했어요].
+      wholeCampaign: r.opt_key === '' && (!!r.soldout_paused_at || (r.participation_mode === true && !r.whole_has_live)),
     });
   }
   if (gone.length) {
@@ -427,7 +441,7 @@ async function optionSalesForCampaign(db, campaignId) {
   try {
     const q = (db || pool);
     const { rows: camp } = await q.query(
-      `SELECT rc.soldout_paused_at, rc.soldout_paused_reason, rc.soldout_paused_by,
+      `SELECT rc.soldout_paused_at, rc.soldout_paused_reason, rc.soldout_paused_by, rc.participation_mode, rc.archived_at,
               (SELECT COUNT(*) FROM campaign_option_soldout_reports r
                 WHERE r.campaign_id = rc.id AND r.opt_key = '' AND r.cleared_at IS NULL) AS reports
          FROM recruit_campaigns rc WHERE rc.id = $1`, [campaignId]);
@@ -443,7 +457,8 @@ async function optionSalesForCampaign(db, campaignId) {
       pausedReason: r.paused_reason || '', pausedBy: r.paused_by || '', reports: Number(r.reports) || 0,
     }));
     const c = camp[0];
-    if (c && (!list.length || c.soldout_paused_at)) {
+    // ★ 참여형·보관 안 한 공고만 새로 멈출 수 있다(옛 방식 공고엔 멈춤 게이트가 없다 — 코드리뷰 P2) · 멈춰 있으면 언제나(다시 열기)
+    if (c && (c.soldout_paused_at || (!list.length && c.participation_mode === true && !c.archived_at))) {
       list.unshift({
         optKey: WHOLE, whole: true, paused: !!c.soldout_paused_at, pausedAt: c.soldout_paused_at || null,
         pausedReason: c.soldout_paused_reason || '', pausedBy: c.soldout_paused_by || '', reports: Number(c.reports) || 0,

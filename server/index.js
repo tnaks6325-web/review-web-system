@@ -151,6 +151,7 @@ const REQUIRED_SCHEMA = [
   // 190 — 공고 전체 품절 멈춤(결정 259). 작업조건 카드·품절 알림·멈추기가 이 칸을 명시 SELECT/UPDATE 한다(없으면 42703).
   ['recruit_campaigns', 'soldout_paused_at'],
   ['recruit_campaigns', 'soldout_paused_by'],
+  ['recruit_campaigns', 'soldout_paused_reason'],
 ];
 
 // V2 상태 표시는 열 이름 추측을 하지 않고, 생성 시점의 위치를 이 표에 고정한다.

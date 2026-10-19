@@ -1432,7 +1432,8 @@ async function _doApply(optionKey, sub){
     toast(msg);
     await loadCampaign(); // 카운터/상태 갱신
   }catch(e){ toast('오류: ' + e.message); }
-  finally{ if($('vPre').style.display !== 'none'){ const c=_camp; $('joinBtn').disabled = !(c && c.state==='open'); $('joinBtn').textContent='참여하기'; } }
+  finally{ if($('vPre').style.display !== 'none'){ const c=_camp; $('joinBtn').disabled = !(c && c.state==='open'); $('joinBtn').textContent='참여하기';
+    if(c && c.state==='open' && c.soldoutPaused === true){ $('joinBtn').disabled = true; $('joinBtn').textContent = '품절로 잠시 멈춤'; } } }   // 결정 259: 거절 뒤에도 멈춤 표시 유지
 }
 
 async function _doChangeOption(newKey){
