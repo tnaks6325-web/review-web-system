@@ -173,8 +173,12 @@ function mkDb({ options = [], paused = false, reports = 0, alerts = [], particip
     ok('멈춤이 공고 updated_at 을 건드리지 않는다(공고 수정 충돌 판정 무접촉)', !/soldout_paused_at = (NOW\(\)|NULL)[^`]*updated_at/.test(R('src/services/campaignOptionPause.service.js')));
 
     const wd = RF('frontend/workdesk.html');
-    ok('작업조건 카드: 줄 이름 품절유무 · 판매 중 표시 없음 · 공고 전체 줄은 이름 없이 · whole:true 로 보냄', /<dt>품절유무<\/dt>/.test(wd) && !/판매 중<\/span>/.test(wd)
+    ok('작업조건 카드(B안): 줄 이름 품절유무 · 판매 중·멈춤 배지 없음 · 버튼 [멈추기]/[열기] · 공고 전체 줄은 이름 없이 · whole:true 로 보냄',
+      /<dt>품절유무<\/dt>/.test(wd) && !/판매 중<\/span>/.test(wd) && !/class="cndsale /.test(wd)
+      && /\$\{o\.paused\?'열기':'멈추기'\}<\/button>/.test(wd)
       && /const nm=o\.whole\?'':/.test(wd) && /o\.whole\?\{whole:true,paused:pause\}:\{optKey:o\.optKey,paused:pause\}/.test(wd));
+    ok('작업조건 카드(B안): 상품마다 버튼까지 한 줄(줄바꿈 없음 · 긴 이름은 …)', /\.cndsalerow\{[^}]*flex-wrap:nowrap/.test(wd) && /\.cndsalenm\{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\}/.test(wd)
+      && /\.cndsalebtn\{flex:none;white-space:nowrap/.test(wd));
     const pr = RF('frontend/js/option-alert-prompt.js');
     ok('알림 창: 공고 전체 알림은 멈춤 버튼 · 상품 생긴 공고만 [확인했어요]', /if \(!it\.hasOptions && !it\.wholeCampaign\)/.test(pr));
     const camp = RF('frontend/campaign.html');
