@@ -1121,24 +1121,6 @@
       </div>
     </div>
 
-    <!-- 리뷰어 앱 공고수정 로그인 — 인트라넷에서 관리자로 지정된 직원만 (결정 257) -->
-    <div id="campEditLoginOvl" style="display:none;position:fixed;inset:0;z-index:100002;background:rgba(17,24,39,.5);align-items:center;justify-content:center;padding:20px">
-      <div style="background:#fff;border-radius:16px;width:320px;max-width:94vw;padding:18px 18px 16px;box-shadow:0 20px 50px rgba(0,0,0,.3)">
-        <div style="font-weight:800;font-size:.95rem;margin-bottom:4px">✏️ 관리자로 공고 수정</div>
-        <div style="font-size:.72rem;color:#6B7280;line-height:1.5;margin-bottom:12px"><b>인트라넷 아이디·비밀번호</b>로 로그인하세요. 인트라넷에서 관리자로 지정된 직원만 모집공고 카드를 고칠 수 있어요.</div>
-        <input id="celId" placeholder="인트라넷 아이디" autocomplete="username"
-               style="width:100%;font:inherit;font-size:.85rem;border:1px solid #E5E7EB;border-radius:9px;padding:9px 11px;margin-bottom:7px;outline:none">
-        <input id="celPw" type="password" placeholder="비밀번호" autocomplete="current-password"
-               onkeydown="if(event.key==='Enter')doCampEditLogin()"
-               style="width:100%;font:inherit;font-size:.85rem;border:1px solid #E5E7EB;border-radius:9px;padding:9px 11px;outline:none">
-        <div id="celErr" style="display:none;font-size:.72rem;color:#DC2626;margin-top:7px;line-height:1.45"></div>
-        <div style="display:flex;gap:7px;margin-top:13px">
-          <button onclick="closeCampEditLogin()" style="flex:1;font:inherit;font-size:.82rem;font-weight:750;background:#F1F2F6;color:#191F28;border:none;border-radius:9px;padding:9px 0;cursor:pointer">취소</button>
-          <button id="celGo" onclick="doCampEditLogin()" style="flex:1;font:inherit;font-size:.82rem;font-weight:750;background:#1B64DA;color:#fff;border:none;border-radius:9px;padding:9px 0;cursor:pointer">로그인</button>
-        </div>
-      </div>
-    </div>
-
     <!-- Footer -->
     <div class="home-footer">
       <a href="/admin">관리자이신가요? 관리자 페이지 →</a>
@@ -4350,5 +4332,24 @@ function closeOnboard(){ const o=document.getElementById('onboard'); if(o) o.cla
 <!-- C/S 대화 안의 리뷰캡처 교체요청 카드 — 관리자·리뷰어 화면 공용 렌더러 -->
 <script src="js/cs-review-edit-card.js"></script>
 <script src="js/reviewer-cs.js"></script>
+    <!-- 리뷰어 앱 공고수정 로그인 — 인트라넷에서 관리자로 지정된 직원만 (결정 257).
+         ★ body 직속: 로그인 전 화면(viewLogin)·홈(viewHome) 어느 쪽에서 눌러도 보여야 한다 — viewHome 안에 두면 로그인 전엔 숨은 부모에 갇힌다. -->
+    <div id="campEditLoginOvl" style="display:none;position:fixed;inset:0;z-index:100002;background:rgba(17,24,39,.5);align-items:center;justify-content:center;padding:20px">
+      <div style="background:#fff;border-radius:16px;width:320px;max-width:94vw;padding:18px 18px 16px;box-shadow:0 20px 50px rgba(0,0,0,.3)">
+        <div style="font-weight:800;font-size:.95rem;margin-bottom:4px">✏️ 관리자로 공고 수정</div>
+        <div style="font-size:.72rem;color:#6B7280;line-height:1.5;margin-bottom:12px"><b>인트라넷 아이디·비밀번호</b>로 로그인하세요. 인트라넷에서 관리자로 지정된 직원만 모집공고 카드를 고칠 수 있어요.</div>
+        <input id="celId" placeholder="인트라넷 아이디" autocomplete="username"
+               style="width:100%;font:inherit;font-size:.85rem;border:1px solid #E5E7EB;border-radius:9px;padding:9px 11px;margin-bottom:7px;outline:none">
+        <input id="celPw" type="password" placeholder="비밀번호" autocomplete="current-password"
+               onkeydown="if(event.key==='Enter')doCampEditLogin()"
+               style="width:100%;font:inherit;font-size:.85rem;border:1px solid #E5E7EB;border-radius:9px;padding:9px 11px;outline:none">
+        <div id="celErr" style="display:none;font-size:.72rem;color:#DC2626;margin-top:7px;line-height:1.45"></div>
+        <div style="display:flex;gap:7px;margin-top:13px">
+          <button onclick="closeCampEditLogin()" style="flex:1;font:inherit;font-size:.82rem;font-weight:750;background:#F1F2F6;color:#191F28;border:none;border-radius:9px;padding:9px 0;cursor:pointer">취소</button>
+          <button id="celGo" onclick="doCampEditLogin()" style="flex:1;font:inherit;font-size:.82rem;font-weight:750;background:#1B64DA;color:#fff;border:none;border-radius:9px;padding:9px 0;cursor:pointer">로그인</button>
+        </div>
+      </div>
+    </div>
+
 </body>
 </html>

@@ -166,6 +166,12 @@ const fakeIntranet = (user) => async () => ({
     return run('', {}) === false && run('?staff=1', {}) === true && run('?staff=0', {}) === false
       && run('', { rapp_staff_entry: '1' }) === true && run('', { rapp_camp_edit_token: 't' }) === true;
   })());
+  ok('프론트: 공고수정 로그인 창은 viewHome 밖(로그인 전 화면에서도 보인다 — Codex PR #1655)', (() => {
+    const o = idx.indexOf('id="campEditLoginOvl"'), h = idx.indexOf('id="viewHome"');
+    // viewHome 블록이 닫힌 뒤(=문서 끝 쪽 body 직속)에 있어야 한다
+    return o > 0 && h > 0 && o > idx.lastIndexOf('id="viewHome"') && idx.slice(o).indexOf('</body>') > 0 && idx.slice(o, idx.indexOf('</body>', o)).indexOf('id="viewHome"') < 0
+      && idx.lastIndexOf('<div id="campEditLoginOvl"') > idx.lastIndexOf('<div class="home-footer">');
+  })());
   ok('프론트: 옛 마스터 명단 UI 제거', !/function loadCampEditors/.test(app) && !/loadCampEditors\(\)/.test(app));
 
   // ── ④ 리뷰어 앱 모달: 유입가이드 확인 + 마감 공고 진행과정 미리보기 ──
