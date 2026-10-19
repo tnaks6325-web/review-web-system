@@ -989,8 +989,8 @@ async function createOrderLedgerEntry(input) {
   const ORDER_INSERT_SQL = `INSERT INTO order_submissions
       (sheet_id, tab_name, gid, tab_gid, orderer, recipient, user_id, phone, address,
        order_num, date_str, selected_opt_key, bank, account, depositor, price, memo, blog_url,
-       selected_product, source, dedup_key, mirror_status, delivery_memo)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,NULL,'pending',$21)
+       selected_product, source, dedup_key, mirror_status, delivery_memo, delivery_memo_check)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,NULL,'pending',$21,$22)
      RETURNING id`;
   const orderInsertParams = [
     sheetId,
@@ -1017,6 +1017,8 @@ async function createOrderLedgerEntry(input) {
     source || 'order_submit',
     // 결정 245 — 캡처에서 읽은 배송메세지(작업표 칸으로는 보내지 않는다 · 작업보드 미리보기 전용).
     orderData.deliveryMemo || '',
+    // 결정 260 — 필수 배송메세지 확인 결과(''=해당 없음 · 'ok' · 'staff_review' — 작업보드 🚩).
+    orderData.deliveryMemoCheck || '',
   ];
 
   let orderSubmissionId;

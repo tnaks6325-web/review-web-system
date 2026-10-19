@@ -1194,6 +1194,34 @@ router.post('/order', async (req, res, next) => {
                         selectedProduct: (holdCtx && holdCtx.productName) || formPickedProduct || '',
                         /* 결정 245 — 캡처에서 AI 가 읽은 배송메세지. 서버 서명에서만 꺼내고, 서명의 주문번호가 이 제출의 주문번호와 같을 때만(없거나 틀리면 '' · 제출은 막지 않는다). */
                         deliveryMemo: reviewerOrderIdentity.readDeliveryMemoProof(b.deliveryMemoToken, orderNum) };
+    /* ★★ 결정 260 — 공고의 「필수 배송메세지」(예: 00)가 캡처 배송메세지에 없으면 접수하지 않는다(사용자 확정 2026-10-19).
+       판정 대상은 **위에서 정한 orderData.deliveryMemo 하나**(서명에서만 꺼낸 값 = 원장에 남는 값) — 화면 값을 따로 믿지 않는다.
+       ★ 리뷰어가 두 번 막힌 뒤 「직원 확인 요청」으로 다시 보내면(deliveryMemoStaffReview) 받되 'staff_review' 로 남긴다(작업보드 🚩).
+       ★ 아무것도 쓰기 전에 둔다. 공고 조회 실패(null) = 막지 않는다(fail-open + warn) · 필수 글자 없는 공고 = 종전 그대로. */
+    {
+      const rdm = require('../services/requiredDeliveryMemo.service');
+      const rdmRequired = await rdm.requiredForSubmission({ holdCtx, sheetId: orderScope.sheetId, tabName: orderScope.tabName });
+      const rdmDecision = rdm.decide({
+        required: rdmRequired, memo: orderData.deliveryMemo,
+        staffReviewRequested: b.deliveryMemoStaffReview === true || b.deliveryMemoStaffReview === 'true',
+      });
+      if (rdmDecision.action === 'block') {
+        logger.info(`[submit/order] 필수 배송메세지 「${rdmDecision.required}」 미확인으로 접수 안 함 — ${orderScope.tabName} (읽힌 메세지 ${rdmDecision.readMemo ? '있음' : '없음'})`);
+        return res.json({ ok: false, code: 'DELIVERY_MEMO_REQUIRED', required: rdmDecision.required,
+          readMemo: rdmDecision.readMemo, error: rdmDecision.error });
+      }
+      if (rdmDecision.action === 'ok') orderData.deliveryMemoCheck = 'ok';
+      if (rdmDecision.action === 'staff_review') {
+        orderData.deliveryMemoCheck = 'staff_review';
+        logAbnormal({
+          flow: 'order_submit', step: 'delivery_memo_staff_review', category: 'validation', source: 'server', severity: 'warn',
+          fingerprintKey: 'os-' + String(orderNum || '').slice(0, 60),
+          error: new Error(`필수 배송메세지 「${rdmDecision.required}」 미확인 — 리뷰어가 직원 확인 요청으로 제출(작업보드 🚩 확인 필요)`),
+          context: { sheetId: orderScope.sheetId, tabName: orderScope.tabName, campaignId: holdCtx && holdCtx.campaignId,
+                     loginPhone8: _idPhone8 ? '***' + _idPhone8.slice(-4) : '' },
+        });
+      }
+    }
     // 통폐합 pilot/enabled에서 workboard_id가 연결된 작업만 큐 반영으로 전환한다.
     // 실패·미이관·legacy는 기존 무시트 즉시 반영을 그대로 탄다.
     let queuedWorkboardApply = false;

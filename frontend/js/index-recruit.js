@@ -3319,7 +3319,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   });
   const _skipWeekendsEl = document.getElementById("rf_skip_weekends");
   if (_skipWeekendsEl) _skipWeekendsEl.checked = false;
-  const _cashReceiptRequiredEl = document.getElementById("rf_cash_receipt_required"); if (_cashReceiptRequiredEl) _cashReceiptRequiredEl.checked = false;
+  const _cashReceiptRequiredEl = document.getElementById("rf_cash_receipt_required"); if (_cashReceiptRequiredEl) _cashReceiptRequiredEl.checked = false; { const _rdmEl = document.getElementById("rf_required_delivery_memo"); if (_rdmEl) _rdmEl.value = ""; }   // 결정 260
   rfSetChatRoom(false);
   // 혼합 리뷰 프리필은 동적으로 생성되는 입력칸의 진실원본이다. 새 모달을 열 때 이전 공고의
   // 수량이 섞이지 않도록 함께 초기화한다.
@@ -3423,6 +3423,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
       /* ★ 135: 부속정보 프리필. 조합은 [{type,quantity}] 배열(서버 정규화값) 그대로 온다. */
       _rfFillDeliveryDetail(c.delivery_type_mix, c.recall_courier, c.recall_product, c.delivery_review_fee_mix);
       const _cashReceiptRequiredEl = document.getElementById("rf_cash_receipt_required"); if (_cashReceiptRequiredEl) _cashReceiptRequiredEl.checked = c.cash_receipt_required === true;
+      /* 결정 260: 필수 배송메세지(예: 00) — 빈 값 = 확인 안 함 */
+      { const _rdmEl = document.getElementById("rf_required_delivery_memo"); if (_rdmEl) _rdmEl.value = c.required_delivery_memo || ""; }
 
       /* 담당자 */
       const mgrVal = c.manager || "";
@@ -5313,6 +5315,7 @@ const _RF_DIFF_FIELDS = [
   ["channel_custom",    "구매채널"],
   ["time_range",        "구매시간대"],
   ["delivery_type",     "배송유형"],
+  ["required_delivery_memo", "필수 배송메세지"],   // 결정 260
   ["review_fee",        "리뷰비"],
   ["notes",             "유의사항"],
   ["chat_url",          "카톡 팀채팅방"],
@@ -5477,6 +5480,9 @@ async function saveRecruitPostImpl() {
     // ★ 135: 회수·혼합 부속정보 — 부속 칸이 있는 화면에서만 실린다(빈 객체 = 미전송 = 서버 유지).
     ..._rfDeliveryDetailPayload(),
     cash_receipt_required: !!document.getElementById("rf_cash_receipt_required")?.checked,
+    // ★ 결정 260: 필수 배송메세지 — 입력칸이 있는 화면에서만 싣는다(미전송 = 서버 유지 · 옛 화면이 저장해도 안 지워진다).
+    ...(document.getElementById("rf_required_delivery_memo")
+      ? { required_delivery_memo: document.getElementById("rf_required_delivery_memo").value.trim() } : {}),
     review_fee:     Number(document.getElementById("rf_review_fee").value) || 0,
     badges:         _recruitBadges,
     // ★ 유의사항(notes)은 **입력칸이 있는 화면에서만** 전송한다(옵션표·리뷰타입과 같은 원칙).
@@ -5772,6 +5778,11 @@ async function saveRecruitPostImpl() {
     if (saved && saved.optionThumbnails !== true && Array.isArray(payload.options)
         && payload.options.some(o => o && o.thumbnailUrl)) {
       _changed.unshift("⚠ 상품 사진은 저장되지 않았습니다 — 서버 업데이트가 끝난 뒤(1~2분) 다시 저장해주세요");
+    }
+    /* ★ 결정 260: 필수 배송메세지 — 안 저장되면 "00 확인"이 조용히 꺼진다. 서버 경고 또는 서버가 이 칸을 모를 때(배포 시차) 알린다. */
+    if (saved && (saved.requiredMemoWarning
+        || (payload.required_delivery_memo && !(saved.data && Object.prototype.hasOwnProperty.call(saved.data, "required_delivery_memo"))))) {
+      _changed.unshift("⚠ 필수 배송메세지가 저장되지 않았습니다 — 1~2분 뒤 다시 저장해주세요");
     }
 
     /* ★ 버튼 ✓ → 모달 닫힘 → 화면 가운데 안내(시안 C 확정) 로 시선이 이어진다.

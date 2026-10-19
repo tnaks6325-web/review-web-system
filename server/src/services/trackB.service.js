@@ -3461,7 +3461,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             ria.is_submitted AS submitted, FALSE AS paid, 'archive'::text AS source,
             NULL::uuid AS order_submission_id, NULL::text AS identity_key, ria.row_json, ria.submit_col, ria.submit_col2,
             NULL::uuid AS "popularPurposeApplicationId", NULL::text AS "popularPurposePhone8", NULL::jsonb AS "ruleFlags",
-            NULL::text AS "deliveryMemo"
+            NULL::text AS "deliveryMemo", NULL::text AS "deliveryMemoCheck"
        FROM review_index_archive ria
       WHERE ria.sheet_id=$1 AND ria.tab_name=$2
       ORDER BY ria.row_index`
@@ -3478,7 +3478,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             -- 결정 242: 바로 구매 규칙 위반 표시(내부 작업보드만)
             CASE WHEN purpose_order.campaign_application_id IS NULL THEN purpose_order.rule_flags END AS "ruleFlags",
             -- 결정 245: 캡처에서 읽은 배송메세지(제출물 미리보기 한 줄) — 업체에는 아래에서 주문 줄이 맞을 때만 싣는다.
-            purpose_order.delivery_memo AS "deliveryMemo"
+            purpose_order.delivery_memo AS "deliveryMemo",
+            -- 결정 260: 필수 배송메세지 확인 결과('staff_review' = 확인 안 된 채 직원 확인 요청으로 받음 · 내부 작업보드만 🚩)
+            purpose_order.delivery_memo_check AS "deliveryMemoCheck"
        FROM campaign_participants cp
        LEFT JOIN order_submissions purpose_order
          ON purpose_order.id = cp.order_submission_id AND purpose_order.deleted_at IS NULL
@@ -3824,6 +3826,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     //     **이 줄**의 물리행이 주문의 기록 행과 같을 때만 싣는다(Codex P2).
     if ((showEdits || (advertiserOrder && _sameSheetRow(r.seq, advertiserOrder.sheetRow) && await advOwnsTab()))
         && String(r.deliveryMemo || '').trim()) syn.deliveryMemo = String(r.deliveryMemo).trim();
+    /* 결정 260 — 필수 배송메세지가 확인 안 된 채 「직원 확인 요청」으로 받은 주문(🚩). 반려(주문 취소)는 직원 몫이라 내부에만 싣는다. */
+    if (showEdits && r.deliveryMemoCheck === 'staff_review') syn.deliveryMemoCheck = 'staff_review';
     /* ★ 행마다 같은 판정을 실어 보낸다 — 제출물 미리보기 목록이 "채워진 줄"을 화면에서 다시
        세지 않게(사본 0). 게이지 분자(`filledCount`)와 **같은 호출**이라 갈릴 수가 없다. */
     syn.filled = _isFilledRow(syn);

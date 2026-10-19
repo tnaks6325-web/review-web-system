@@ -6379,6 +6379,24 @@ async function submitOrderForm() {
       }
     }
     if (!res) throw new Error("서버 응답이 없습니다. 잠시 후 다시 시도해주세요.");
+    /* ★ 결정 260: 필수 배송메세지 미확인 — 같은 주문번호로 두 번째부터 「직원 확인 요청」으로 받을 수 있다(search-app 과 같은 규칙). */
+    if (!res.ok && res.code === "DELIVERY_MEMO_REQUIRED") {
+      const rk = "rdm:" + String(ctx.tabName || "") + "|" + String(orderNum || "").replace(/[^0-9A-Za-z]/g, "");
+      let rn = 0;
+      try { rn = parseInt(sessionStorage.getItem(rk) || "0", 10) || 0; } catch (_) {}
+      rn = Math.max(rn, window._rdmMem && window._rdmMem[rk] || 0) + 1;
+      (window._rdmMem = window._rdmMem || {})[rk] = rn;
+      try { sessionStorage.setItem(rk, String(rn)); } catch (_) {}
+      if (rn >= 2 && confirm(`배송메세지 「${res.required || ""}」이(가) 이번에도 캡처에서 확인되지 않았어요.\n\n`
+          + `주문할 때 배송메세지를 분명히 넣었다면 「직원 확인 요청」으로 제출할 수 있어요.\n`
+          + `직원이 캡처를 직접 확인하고, 배송메세지가 없으면 반려(주문 취소)될 수 있어요.\n\n직원 확인 요청으로 제출할까요?`)) {
+        payload.deliveryMemoStaffReview = "true";
+        res = await gasPost(payload);
+        if (!res) throw new Error("서버 응답이 없습니다. 잠시 후 다시 시도해주세요.");
+      } else if (rn < 2) {
+        res = { ok: false, error: (res.error || "필수 배송메세지가 캡처에서 확인되지 않았어요.") + " 한 번 더 확인되지 않으면 직원 확인 요청으로 제출할 수 있어요." };
+      }
+    }
     if (res && res.ok) {
 
       // ── 2단계: 이미지가 있으면 드라이브에 업로드 (백그라운드, 실패해도 제출 완료) ──
