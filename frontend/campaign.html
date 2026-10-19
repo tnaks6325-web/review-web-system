@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
   <script src="api.js"></script>
-  <script src="js/campaign-cards.js?v=20261012-optpause"></script>
+  <script src="js/campaign-cards.js?v=20261019-camppause"></script>
   <script src="js/campaign-workdetail.js"></script>
   <style>
     :root{ --p:#3182f6; --p-light:#e8f1fe; --p-dark:#1b64da; --ok:#12b886; --ok-light:#D1FAE5;
@@ -556,6 +556,8 @@ function renderPre(){
   // 옵션 등록 캠페인인데 선택 가능한 옵션이 0이면 캠페인이 open이어도 마감 표시(리뷰 나잇 #1)
   const copts = c.options || [];
   if(st==='open' && copts.length && !copts.some(o=>o.selectable)){ jb.disabled = true; jb.textContent = '옵션 마감'; }
+  // ★ 결정 259: 공고 전체 품절 멈춤 — 서버(apply 게이트)가 막는다 · 버튼도 같은 사실을 보여준다
+  if(st==='open' && c.soldoutPaused === true){ jb.disabled = true; jb.textContent = '품절로 잠시 멈춤'; $('preFootNote').textContent = '다시 열리면 참여할 수 있어요'; }
   // ★ 미리보기 '모집중 가정': 마감·휴무일·게시 전 공고는 실제 상태가 잠겨 있어 정작 확인하려는
   //   "모집중일 때 리뷰어가 보는 화면"을 볼 수 없다 → 관리자에게만 열린 모습으로 보여준다(클릭은 여전히 차단).
   //   위 상태·옵션 판정을 모두 끝낸 뒤 마지막에 덮어써야 일관되게 열린 화면이 된다.
@@ -1400,6 +1402,7 @@ async function _doApply(optionKey, sub){
     const msg = {
       preopen:'아직 오픈 전이에요', cutoff:'오늘 참여가 마감됐어요', daily_done:'오늘 인원이 모두 찼어요',
       soft_full:'잔여 대기 중이에요 — 자리가 나면 열려요', closed:'모집이 종료됐어요',
+      campaign_paused:'지금은 품절로 잠시 멈춘 공고예요. 다시 열리면 참여할 수 있어요',   // 결정 259
       already_today:'오늘은 이 캠페인에 이미 참여 이력이 있어요(내일 가능)',
       already_submitted:'이미 참여 완료한 캠페인이에요',
       duplicate_hold:'이미 참여 중이에요', hold_cap:'동시에 참여 가능한 캠페인은 2개까지예요',
@@ -1429,7 +1432,8 @@ async function _doApply(optionKey, sub){
     toast(msg);
     await loadCampaign(); // 카운터/상태 갱신
   }catch(e){ toast('오류: ' + e.message); }
-  finally{ if($('vPre').style.display !== 'none'){ const c=_camp; $('joinBtn').disabled = !(c && c.state==='open'); $('joinBtn').textContent='참여하기'; } }
+  finally{ if($('vPre').style.display !== 'none'){ const c=_camp; $('joinBtn').disabled = !(c && c.state==='open'); $('joinBtn').textContent='참여하기';
+    if(c && c.state==='open' && c.soldoutPaused === true){ $('joinBtn').disabled = true; $('joinBtn').textContent = '품절로 잠시 멈춤'; } } }   // 결정 259: 거절 뒤에도 멈춤 표시 유지
 }
 
 async function _doChangeOption(newKey){

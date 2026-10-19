@@ -4,7 +4,8 @@
  * 리뷰어가 "품절이라 구매하지 못했어요"로 취소하면 관리자 전원(마스터·관리자·AE)에게 띄운다.
  *   - 신고 1명     → [품절로 멈추기] / [품절 아님] / [1시간 뒤]
  *   - 신고 2명     → 서버가 이미 그 상품을 멈췄다 → [다시 열기] / [멈춘 채로 두기] / [1시간 뒤]
- *   - 상품을 나누지 않은 공고 → 멈출 상품이 없다 → [확인했어요] / [1시간 뒤]
+ *   - 상품을 나누지 않은 공고 → ★ 결정 259: **공고 전체**를 같은 버튼으로 멈춘다(서버가 wholeCampaign=true 를 싣는다).
+ *     그사이 상품이 생긴 공고(wholeCampaign=false)만 종전 [확인했어요] / [1시간 뒤]
  * 한 사람이 처리하면 모두에게서 사라진다(서버가 알림을 닫고 실시간 통로로 다시 읽게 한다).
  * 사용자 확정 (가): 화면 팝업 + 컴퓨터 알림(브라우저 알림 — 처음 한 번 허용 필요, 이 창이 열려 있을 때만).
  *
@@ -88,11 +89,12 @@
       : '<span class="oa-tag">품절 신고 ' + (it.reportCount | 0) + '명</span>';
     var lead, acts;
     var dis = S.busy ? ' disabled' : '';
-    if (!it.hasOptions) {
+    var unit = it.hasOptions ? '이 상품' : '이 공고';   // 결정 259: 공고 전체
+    if (!it.hasOptions && !it.wholeCampaign) {
       lead = '상품을 나누지 않은 공고라 상품만 멈출 수 없어요. 정말 품절이면 공고를 멈추거나 인원을 조절해 주세요.';
       acts = '<button type="button" class="oa-b pri" data-i="' + i + '" data-a="ack"' + dis + '>확인했어요</button>';
     } else if (auto) {
-      lead = '다른 리뷰어 ' + (it.reportCount | 0) + '명이 품절이라 취소해서 이 상품의 새 신청을 멈췄어요. 이미 참여 중인 사람은 그대로 진행해요.';
+      lead = '다른 리뷰어 ' + (it.reportCount | 0) + '명이 품절이라 취소해서 ' + unit + '의 새 신청을 멈췄어요. 이미 참여 중인 사람은 그대로 진행해요.';
       acts = '<button type="button" class="oa-b pri" data-i="' + i + '" data-a="reopen"' + dis + '>다시 열기 — 재고가 있어요</button>' +
         '<button type="button" class="oa-b" data-i="' + i + '" data-a="keep"' + dis + '>멈춘 채로 두기</button>';
     } else {
@@ -103,7 +105,7 @@
     acts += '<button type="button" class="oa-b" data-i="' + i + '" data-a="snooze"' + dis + '>1시간 뒤 다시</button>';
     return '<div class="oa-item' + (auto ? ' auto' : '') + '">' + thumbHtml(it) +
       '<div class="oa-body"><div class="oa-top"><b>' + esc(it.title) + '</b>' + tag + '</div>' +
-      (it.hasOptions ? '<div class="oa-opt">상품: ' + esc(it.optKey) + '</div>' : '') +
+      (it.hasOptions ? '<div class="oa-opt">상품: ' + esc(it.optKey) + '</div>' : (it.wholeCampaign ? '<div class="oa-opt">공고 전체(상품을 나누지 않은 공고)</div>' : '')) +
       '<div class="oa-meta">' + esc(lead) + '</div>' +
       '<div class="oa-meta">' + esc([it.manager ? '담당 ' + it.manager : '', it.tabName ? '작업 ' + it.tabName : '', fmtTime(it.updatedAt || it.createdAt)].filter(Boolean).join(' · ')) + '</div>' +
       '<div class="oa-acts">' + acts + '</div></div></div>';

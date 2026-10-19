@@ -372,6 +372,12 @@
    *  모바일 2열 그리드용 컴팩트 카드 — 썸네일 정사각 전체노출·우상단 채널/배송 배지·
    *  바로참여는 시간 오른쪽·참여인원 게이지(A)·상태별 오버레이/푸터.
    *  모집중(시간창 안)은 썸네일 중앙 "오늘 구매마감까지" 카운트다운(cutoffAt), 오픈전은 "오픈까지"(opensAt). */
+  /** ★ 결정 259: 공고 전체 품절 멈춤 — 공개 목록은 soldoutPaused(서버 스위치 반영), 관리자 목록은 원본 칸. */
+  function _soldoutPaused(c) { return !!(c && (c.soldoutPaused === true || c.soldout_paused_at)); }
+  function _pauseChip(c) {
+    if (!_soldoutPaused(c)) return '';
+    return `<div class="ppausechip" style="font-size:.68rem;font-weight:700;color:#B45309;background:#FEF3C7;border-radius:7px;padding:4px 8px;margin-top:6px;display:inline-block">품절로 잠시 멈춤</div>`;
+  }
   // 카드 옵션 요약 칩(061 2단계): 옵션 N종 + 마감/임박 힌트. 상세는 campaign.html에서 옵션별 잔여 표시.
   function _optChip(c) {
     const opts = (c && c.options) || [];
@@ -885,7 +891,10 @@
     const restDay = c.stateReason === 'rest_day';
     const ended = c.stateReason === 'schedule_ended';
     let footer = '';
-    if (c.state === 'open' && repurchaseLocked) {
+    if (c.state === 'open' && _soldoutPaused(c)) {
+      // ★ 결정 259: 서버(apply 게이트)가 막는다 — 버튼도 그 사실을 보여준다(열려 보이는데 눌러도 거부 금지).
+      footer = `<button type="button" class="pbtn off">품절로 잠시 멈춤</button><div class="pnote">다시 열리면 참여할 수 있어요</div>`;
+    } else if (c.state === 'open' && repurchaseLocked) {
       // ★ 참여는 실제로 서버(apply 게이트)에서 막히므로, 버튼도 그 사실을 보여준다 —
       //   안 그러면 "카드는 열려 보이는데 눌러도 거부"라는 헷갈리는 상태가 된다.
       footer = `<button type="button" class="pbtn off">재참여 대기 중</button><div class="pnote">재참여 가능일 이후 다시 참여할 수 있어요</div>`;
@@ -917,6 +926,7 @@
         <div class="pbody">
           <h3 class="ptitle">${_esc(c.title || '(제목 없음)')}</h3>
           <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">${isBlogCard ? '승인제' : '바로참여'}</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>
+          ${_pauseChip(c)}
           ${gauge}
           ${_roundsLine(c)}
           ${_adminSpec(c)}
@@ -951,7 +961,8 @@
   const _AVAIL_RANK = { open: 0, preopen: 1, soft_full: 1, cutoff: 2, daily_done: 2, weekend_unpublished: 2, closed: 3 };
   function sortByAvailability(list) {
     return (list || [])
-      .map((c, i) => ({ c, i, r: _AVAIL_RANK[c && c.state] != null ? _AVAIL_RANK[c.state] : 1 }))
+      // ★ 결정 259: 품절로 멈춘 공고는 지금 참여할 수 없다 — 오늘 마감과 같은 등급(2)
+      .map((c, i) => ({ c, i, r: (c && c.state === 'open' && _soldoutPaused(c)) ? 2 : (_AVAIL_RANK[c && c.state] != null ? _AVAIL_RANK[c.state] : 1) }))
       .sort((a, b) => (a.r - b.r) || (a.i - b.i))   // 안정 정렬(원래 순서를 tie-break로)
       .map(x => x.c);
   }

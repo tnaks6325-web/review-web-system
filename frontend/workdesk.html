@@ -2078,12 +2078,9 @@
   .tp3grid.c3.fold .wdcsmini-body{display:none}
   .cndchip{display:inline-block;background:var(--chip,#eef4ff);color:var(--p,#2456c9);border-radius:5px;padding:0 6px;font-size:10px;font-weight:700;vertical-align:1px}
   .cndsales{display:grid;gap:4px}
-  .cndsalerow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
-  .cndsalenm{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .cndsale{display:inline-block;border-radius:5px;padding:0 6px;font-size:10px;font-weight:700;vertical-align:1px}
-  .cndsale.on{background:#e7f6ee;color:#137a43}
-  .cndsale.off{background:#fde4e1;color:#b42318}
-  .cndsalebtn{font:inherit;font-size:11px;border-radius:6px;border:1px solid var(--line,#dfe3ea);background:#fff;color:inherit;padding:1px 7px;cursor:pointer}
+  .cndsalerow{display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:nowrap;min-width:0}   /* 상품마다 버튼까지 한 줄(사용자 확정 2026-10-19 B안) */
+  .cndsalenm{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cndsalebtn{flex:none;white-space:nowrap;font:inherit;font-size:11px;border-radius:6px;border:1px solid var(--line,#dfe3ea);background:#fff;color:inherit;padding:1px 7px;cursor:pointer}
   .cndsalebtn.stop{border-color:#e8a29a;color:#b42318}
   .rv2 .rv2c{min-width:0;min-height:0;display:flex;flex-direction:column;
              border:1px solid var(--line);border-radius:9px;background:var(--card2);padding:8px}
@@ -7624,29 +7621,37 @@ function _condCardHtml(wd,d,m){
 /* ★ 결정 229: 상품 품절 일시 멈춤 — 상품별 판매 상태 + [품절로 멈추기]/[다시 열기].
    ★ 서버가 준 `optionSales` 를 그리기만 한다(판정 사본 0) · null/빈 목록(구버전 서버·공고 없음) = 줄을 그리지 않는다.
    ★ 광고주에게는 서버 렌즈가 값을 보내지 않는다(여기서도 한 번 더 막는다).
-   ★ 멈춰도 이미 참여 중인 사람·작업표·하루 인원은 그대로다 — 새 신청만 막힌다. */
+   ★ 멈춰도 이미 참여 중인 사람·작업표·하루 인원은 그대로다 — 새 신청만 막힌다.
+   ★ 결정 259: 상품을 나누지 않은 공고는 서버가 **공고 전체 줄**(whole:true · 이름 '')을 싣는다 → 「공고 전체」로 그리고
+     누르면 whole:true 로 보낸다(이름 없는 요청은 서버가 거절 — 공고를 통째로 멈추려면 명시해야 한다). */
 function _cndSalesRow(cd){
   const list=Array.isArray(cd&&cd.optionSales)?cd.optionSales:[];
   if(!list.length||STATE.role==='advertiser'||!cd.campaignId) return '';
+  /* ★ 사용자 확정 2026-10-19(B안): 줄 이름 「품절유무」 · 「판매 중」·「멈춤」 배지 없음 — 상태는 버튼 글자로만([멈추기] = 열려 있음 / [열기] = 멈춤).
+     상품마다 **버튼까지 한 줄**(긴 이름은 「…」 · 마우스를 올리면 전체 이름). 공고 전체 줄은 이름 없이 버튼만.
+     보여줄 것이 없는 줄(버튼 없음 — 보관·읽기 전용 · 신고도 없음)은 그리지 않는다. */
   const items=list.map((o,i)=>{
-    const st=o.paused
-      ?`<span class="cndsale off" title="새 신청을 받지 않습니다${o.pausedBy?` — ${esc(o.pausedReason==='auto_soldout'?'품절 신고 2명으로 자동':o.pausedBy)}`:''}">${o.pausedReason==='auto_soldout'?'자동 멈춤':'멈춤'}</span>`
-      :`<span class="cndsale on">판매 중</span>`;
+    const why=o.paused?`멈춤 — 새 신청을 받지 않습니다${o.pausedBy?` (${o.pausedReason==='auto_soldout'?'품절 신고 2명으로 자동':o.pausedBy})`:''}`:'';
     const rep=(!o.paused&&o.reports>0)?`<span class="cndchip" title="리뷰어가 품절이라 취소한 신고입니다 — 다른 리뷰어 2명이면 자동으로 멈춥니다.">신고 ${Number(o.reports)}</span>`:'';
-    const btn=STATE.canEdit?`<button type="button" class="cndsalebtn${o.paused?'':' stop'}" onclick="_cndSale(${i})">${o.paused?'다시 열기':'품절로 멈추기'}</button>`:'';
-    return `<div class="cndsalerow"><span class="cndsalenm" title="${esc(o.optKey)}">${esc(o.optKey)}</span>${st}${rep}${btn}</div>`;
+    const btn=STATE.canEdit?`<button type="button" class="cndsalebtn${o.paused?'':' stop'}" onclick="_cndSale(${i})" title="${esc((o.whole?'공고 전체':o.optKey)+(o.paused?` · ${why} — 누르면 다시 엽니다`:' · 누르면 새 신청을 멈춥니다'))}">${o.paused?'열기':'멈추기'}</button>`:'';
+    const nm=o.whole?'':`<span class="cndsalenm" title="${esc(o.optKey+(why?` · ${why}`:''))}">${esc(o.optKey)}</span>`;
+    if(!btn&&!rep) return '';
+    return `<div class="cndsalerow">${nm}${rep}${btn}</div>`;
   }).join('');
-  return `<dt>상품 판매</dt><dd class="cndsales">${items}</dd>`;
+  if(!items) return '';
+  return `<dt>품절유무</dt><dd class="cndsales">${items}</dd>`;
 }
 async function _cndSale(i){
   const cd=STATE.wd&&STATE.wd.condition; const o=cd&&Array.isArray(cd.optionSales)?cd.optionSales[i]:null;
   if(!o||!cd.campaignId) return;
   const pause=!o.paused;
+  const who=o.whole?'이 공고':`「${o.optKey}」 상품`;
   if(!confirm(pause
-    ?`「${o.optKey}」 상품의 새 신청을 멈출까요?\n이미 참여 중인 사람은 그대로 진행합니다. 다시 열 때까지 리뷰어 화면에 「일시 멈춤」으로 보입니다.`
-    :`「${o.optKey}」 상품을 다시 열까요?\n새 신청을 다시 받고, 쌓인 품절 신고는 정리됩니다.`)) return;
+    ?`${who}의 새 신청을 멈출까요?\n이미 참여 중인 사람은 그대로 진행합니다. 다시 열 때까지 리뷰어 화면에 「${o.whole?'품절로 잠시 멈춤':'일시 멈춤'}」으로 보입니다.`
+    :`${o.whole?'이 공고를':`「${o.optKey}」 상품을`} 다시 열까요?\n새 신청을 다시 받고, 쌓인 품절 신고는 정리됩니다.`)) return;
   let j=null;
-  try{ j=await api(`/api/trackb/campaigns/${encodeURIComponent(cd.campaignId)}/option-pause`,{method:'POST',body:JSON.stringify({optKey:o.optKey,paused:pause})}); }catch(_){ j=null; }
+  const body=o.whole?{whole:true,paused:pause}:{optKey:o.optKey,paused:pause};   // 결정 259
+  try{ j=await api(`/api/trackb/campaigns/${encodeURIComponent(cd.campaignId)}/option-pause`,{method:'POST',body:JSON.stringify(body)}); }catch(_){ j=null; }
   if(!j||!j.ok){ alert((j&&j.error)||'처리하지 못했습니다. 잠시 후 다시 시도해주세요.'); return; }
   await reloadWorkdesk();
 }
@@ -19325,14 +19330,14 @@ window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';
      /api/reviewer/* 에 도달 자체가 불가능 → /api/trackb/settings/* 프록시). -->
 <script>window.ADMIN_SETTINGS_API = '/api/trackb/settings';</script>
 <script src="/js/admin-settings.js?v=20260819-reviewer-home-banner"></script>
-<script src="js/campaign-cards.js?v=20261012-optpause"></script>
+<script src="js/campaign-cards.js?v=20261019-camppause"></script>
 <!-- 공고별 참여 리뷰어 관리(블랙리스트 건별, 091) — 공유 모달(admin.html 과 한 벌) -->
 <script src="js/campaign-reviewer-gate.js"></script>
 <!-- 날짜별 모집인원 조절 + 차수(095) — 카드 [📅 인원] 버튼이 여는 공유 모달(admin.html 과 한 벌) -->
 <script src="js/campaign-daily-plan.js?v=20261012-seqdays"></script>
 <script src="js/shortage-prompt.js?v=20261002"></script>
 <script src="js/sequential-end-prompt.js?v=20261012-optpause"></script>
-<script src="js/option-alert-prompt.js?v=20261012"></script>
+<script src="js/option-alert-prompt.js?v=20261019-camppause"></script>
 <!-- 참여 후 작업내용 4카드 공용 렌더러 — 발행 모달 오른쪽 "리뷰어가 보는 실제 화면" 미리보기가
      이것으로 그려진다. 없으면 `_renderPreview` 가 조용히 그 카드를 건너뛰어(window.CampWorkDetail 체크)
      리뷰웹시스템[3버전]에서만 미리보기가 비어 보인다(실측). -->
