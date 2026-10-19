@@ -812,6 +812,9 @@ const PUBLIC_FIELDS_PARTICIPATION = [
   'work_kind',  // ★ 101: 블로그 공고면 참여 시 블로그 주소를 받아야 한다(작업 종류 — 민감정보 아님)
 ];
 
+/** 결정 258: 품절 멈춤 서비스(끄는 스위치 ENABLED 단일 출처) — 지연 require(서비스가 db pool 을 끌어온다). */
+function _optionPause() { return require('../services/campaignOptionPause.service'); }
+
 function _pick(row, fields) {
   const out = {};
   for (const f of fields) if (row[f] !== undefined) out[f] = row[f];
@@ -874,6 +877,9 @@ function _publicView(row, counts, now, schedule) {
     nextWorkDate: st.nextWorkDate || null,
     // daily_done 카드의 "다시 열릴 때까지" 카운트다운 기준(오늘의 opensAt은 이미 지난 시각)
     reopensAt: st.reopensAt || null,
+    // ★ 결정 258: 공고 전체 품절 멈춤 — state 는 그대로 두고 표시만 얹는다(판정은 apply 게이트 · 같은 칸·같은 스위치).
+    //   옛 화면은 이 필드를 몰라 [참여하기]를 그리지만 누르면 서버가 campaign_paused 로 거절한다.
+    soldoutPaused: !!row.soldout_paused_at && _optionPause().ENABLED,
   };
 }
 
@@ -1254,7 +1260,8 @@ router.get('/list', async (req, res, next) => {
                participation_mode, thumbnail_url, daily_limit, recruit_total,
                window_start, window_end, close_buffer_min, hold_ttl_min, start_date,
                multi_account_mode, sub_hold_ttl_min, is_popular,
-               carry_mode, carry_strategy, skip_weekends, cash_receipt_required  -- ★ 098/139: 상태엔진 입력. 빠지면 목록·apply 정원이 갈린다.
+               carry_mode, carry_strategy, skip_weekends, cash_receipt_required,  -- ★ 098/139: 상태엔진 입력. 빠지면 목록·apply 정원이 갈린다.
+               soldout_paused_at  -- ★ 결정 258: 공고 전체 품절 멈춤(카드 표시 — apply 게이트와 같은 칸)
                            --   정원, apply(SELECT *)는 보류 정원을 봐서 "카드는 열렸는데 참여 거부"
         FROM recruit_campaigns
         WHERE status IN ('active', 'closed')
@@ -2054,6 +2061,12 @@ async function _applyParticipation(req, res, next, campPre) {
     if (st.state !== 'open') {
       await client.query('ROLLBACK');
       return res.status(409).json({ ok: false, reason: st.state, state: st, error: '지금은 신청할 수 없습니다.' });
+    }
+    // ★★ 결정 258: 공고 전체 품절 멈춤 — 상태 엔진은 그대로 두고(하루 인원·앞날 예상 불변) **새 신청만** 여기서 막는다.
+    //   상품별 멈춤(option_paused)과 같은 자리·같은 규율. 끄는 스위치(CAMPAIGN_OPTION_PAUSE=0)면 열림(fail-open — 184 와 같다).
+    if (camp.soldout_paused_at && _optionPause().ENABLED) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ ok: false, reason: 'campaign_paused', error: '지금은 품절로 잠시 멈춘 공고예요. 다시 열리면 참여할 수 있어요.' });
     }
 
     // ★ 상품옵션 게이트(061): 옵션이 "등록된" 캠페인이면 선택 필수(전부 마감이어도 option_key=NULL 우회 금지, 리뷰 #3).

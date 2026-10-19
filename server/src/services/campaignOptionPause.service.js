@@ -13,6 +13,13 @@
  * ★ 하루 인원·앞날 예상·작업표는 건드리지 않는다(일시 멈춤 — 다시 열면 그대로 이어진다). 순차진행은 멈춘 상품도 자기 날짜를 차지한다.
  * ★ 잠금 순서 = 공고 행 → 상품 행(180/184 트리거가 공고 행을 고친다 — 순서를 뒤집으면 공고 저장과 교착).
  * ★ 신고 처리는 취소가 끝난 **뒤** 후처리 — 실패해도 취소를 되돌리지 않는다(이미 끝난 일).
+ *
+ * ★★ 결정 259(사용자 확정 2026-10-19): **상품을 나누지 않은 공고도 멈춘다** — 상품 이름 '' = 공고 전체(WHOLE).
+ *   멈춤 칸은 공고 행(recruit_campaigns.soldout_paused_*)에 있다 · 신고·알림 원장은 184 표 그대로(opt_key '').
+ *   - 멈춤은 **참여 게이트에서만** 막는다(campaign.routes apply) — 상태 엔진(computeCampaignState)·하루 인원·앞날 예상은
+ *     건드리지 않는다(상품 멈춤과 같은 규율 · 그 판정을 읽는 18곳이 흔들리지 않게).
+ *   - [품절로 멈추기]는 살아 있는 상품이 없는 공고에서만 받는다(상품이 있으면 상품별로 멈춘다).
+ *     ★ [다시 열기]는 언제나 받는다 — 멈춘 뒤 상품이 생겨도 풀 길이 사라지지 않게(카드도 그 줄을 계속 그린다).
  */
 'use strict';
 
@@ -20,6 +27,7 @@ const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 
 const AUTO_PAUSE_REPORTERS = 2;      // 사용자 확정 (나) — 다른 리뷰어 2명
+const WHOLE = '';                    // 결정 259: 상품 이름 '' = 공고 전체(상품을 나누지 않은 공고)
 // 끄는 스위치 — 신고·알림·멈추기를 끈다. 판정(campaignState.computeOptionView)도 같은 환경변수로 멈춤을 무시한다(= 전부 다시 열림).
 // 다시 열기는 꺼져 있어도 허용한다(코드리뷰 P1).
 const ENABLED = process.env.CAMPAIGN_OPTION_PAUSE !== '0';
@@ -114,14 +122,20 @@ async function recordSoldoutReport({ orderSubmissionId, phone8 = '', pool: dbPoo
     const reporters = Number(cnt[0].who) || 0;
     let action = 'reported';
     // ★ 코드리뷰 P2: 이미 멈춘 상품(손으로 멈춤 포함)이면 신고 수와 무관하게 다시 알리지 않는다 — 신고는 쌓아 둔다
-    const pausedNow = tgt.optKey ? (await client.query(
-      `SELECT 1 FROM campaign_options WHERE campaign_id = $1 AND opt_key = $2 AND paused_at IS NOT NULL`, [tgt.campaignId, tgt.optKey])).rows.length > 0 : false;
+    //   ★ 결정 259: 상품을 나누지 않은 공고(optKey '')는 공고 행의 멈춤 칸을 본다.
+    const pausedNow = tgt.optKey === WHOLE
+      ? (await client.query(
+        `SELECT 1 FROM recruit_campaigns WHERE id = $1 AND soldout_paused_at IS NOT NULL`, [tgt.campaignId])).rows.length > 0
+      : (await client.query(
+        `SELECT 1 FROM campaign_options WHERE campaign_id = $1 AND opt_key = $2 AND paused_at IS NOT NULL`, [tgt.campaignId, tgt.optKey])).rows.length > 0;
     if (pausedNow) action = 'already_paused';
-    else if (tgt.optKey && reporters >= AUTO_PAUSE_REPORTERS) {
-      const up = await client.query(
-        `UPDATE campaign_options SET paused_at = NOW(), paused_reason = 'auto_soldout', paused_by = 'system:soldout-report', updated_at = NOW()
-          WHERE campaign_id = $1 AND opt_key = $2 AND paused_at IS NULL AND COALESCE(status,'active') <> 'closed'
-          RETURNING id`, [tgt.campaignId, tgt.optKey]);
+    else if (reporters >= AUTO_PAUSE_REPORTERS) {
+      const up = tgt.optKey === WHOLE
+        ? await _pauseWholeRow(client, tgt.campaignId, 'auto_soldout', 'system:soldout-report')
+        : await client.query(
+          `UPDATE campaign_options SET paused_at = NOW(), paused_reason = 'auto_soldout', paused_by = 'system:soldout-report', updated_at = NOW()
+            WHERE campaign_id = $1 AND opt_key = $2 AND paused_at IS NULL AND COALESCE(status,'active') <> 'closed'
+            RETURNING id`, [tgt.campaignId, tgt.optKey]);
       action = up.rows.length ? 'auto_paused' : 'already_paused';
     }
     // 이미 멈춰 있는 상품에 들어온 신고는 새 알림을 띄우지 않는다(멈춘 걸 다시 알릴 일이 없다 — 다시 열 때 신고는 정리된다).
@@ -142,8 +156,61 @@ async function recordSoldoutReport({ orderSubmissionId, phone8 = '', pool: dbPoo
   }
 }
 
+/**
+ * 결정 259: 공고 전체 멈춤 쓰기(공고 행 — 호출자가 이미 잠갔다). 이미 멈춰 있으면 0행.
+ * ★ 인원 규칙 변경 시각도 남긴다 — 멈춰서 못 채운 어제 인원을 "어제 부족" 팝업(결정 202)이 따로 묻지 않게(184 트리거와 같은 뜻).
+ * ★ updated_at 은 건드리지 않는다(공고 수정 충돌 판정·동기화가 그 값을 본다 — 멈춤은 공고 설정 변경이 아니다).
+ */
+function _pauseWholeRow(client, cid, reason, who) {
+  return client.query(
+    `UPDATE recruit_campaigns SET soldout_paused_at = NOW(), soldout_paused_reason = $2, soldout_paused_by = $3, quota_rules_changed_at = NOW()
+      WHERE id = $1 AND soldout_paused_at IS NULL RETURNING id`, [cid, reason, who]);
+}
+
+/** 결정 259: 살아 있는(마감 아닌) 상품이 있는 공고인가 — 있으면 공고 전체가 아니라 상품별로 멈춘다. */
+async function _hasLiveOptions(db, cid) {
+  const { rows } = await db.query(
+    `SELECT 1 FROM campaign_options WHERE campaign_id = $1 AND COALESCE(status,'active') <> 'closed' LIMIT 1`, [cid]);
+  return rows.length > 0;
+}
+
+/** 결정 259: 공고 전체 멈춤·다시 열기 — _setPausedInTx 의 '' 갈래(같은 트랜잭션·같은 정리 규칙). */
+async function _setWholePausedInTx(client, cid, op, who) {
+  let changed = false;
+  if (op === 'pause') {
+    if (await _hasLiveOptions(client, cid)) {
+      return { ok: false, code: 409, error: '상품을 나눈 공고예요. 상품별로 멈춰 주세요(새로고침하면 상품 줄이 보여요).' };
+    }
+    changed = (await _pauseWholeRow(client, cid, 'manual', who)).rows.length > 0;
+  } else {
+    const r = await client.query(
+      `UPDATE recruit_campaigns SET soldout_paused_at = NULL, soldout_paused_reason = '', soldout_paused_by = '', quota_rules_changed_at = NOW()
+        WHERE id = $1 AND soldout_paused_at IS NOT NULL RETURNING id`, [cid]);
+    changed = r.rows.length > 0;
+    await client.query(
+      `UPDATE campaign_option_soldout_reports SET cleared_at = NOW() WHERE campaign_id = $1 AND opt_key = '' AND cleared_at IS NULL`, [cid]);
+  }
+  const a = await client.query(
+    `UPDATE campaign_option_alerts SET resolved_at = NOW(), resolved_by = $2, resolution = $3, updated_at = NOW()
+      WHERE campaign_id = $1 AND opt_key = '' AND resolved_at IS NULL`, [cid, who, op === 'pause' ? 'paused' : 'reopened']);
+  if (changed) {
+    await client.query('SAVEPOINT camp_pause_log');
+    try {
+      await client.query(
+        `INSERT INTO campaign_plan_events (campaign_id, actor, action, detail) VALUES ($1, $2, $3, $4::jsonb)`,
+        [cid, who, op === 'pause' ? 'campaign_paused' : 'campaign_resumed', JSON.stringify({ whole: true })]);
+      await client.query('RELEASE SAVEPOINT camp_pause_log');
+    } catch (e) {
+      await client.query('ROLLBACK TO SAVEPOINT camp_pause_log');
+      logger.warn(`[option-pause] 기록 실패(멈춤은 유효): ${(e && e.message) || e}`);
+    }
+  }
+  return { ok: true, changed, alertsClosed: a.rowCount || 0, paused: op === 'pause' };
+}
+
 /** 멈춤·다시 열기 본체 — 호출자가 공고 행을 잠근 트랜잭션 안에서 부른다(잠금 순서: 공고 → 상품). */
 async function _setPausedInTx(client, cid, key, op, who) {
+  if (key === WHOLE) return _setWholePausedInTx(client, cid, op, who);   // 결정 259
   const { rows: opt } = await client.query(
     `SELECT opt_key, status, paused_at FROM campaign_options WHERE campaign_id = $1 AND opt_key = $2 FOR UPDATE`, [cid, key]);
   if (!opt.length) return { ok: false, code: 404, error: '상품을 찾을 수 없어요. 새로고침 후 다시 확인해주세요.' };
@@ -191,15 +258,17 @@ async function _setPausedInTx(client, cid, key, op, who) {
 /**
  * 담당자가 상품을 멈추거나 다시 연다(작업보드 작업조건 카드).
  * @param {'pause'|'resume'} op
+ * @param {boolean} whole 결정 259 — true 면 공고 전체(상품을 나누지 않은 공고). ★ 명시해야만 공고 전체다
+ *   (상품 이름이 빠진 요청이 공고를 통째로 멈추지 않게 — 빈 이름은 종전처럼 거절).
  * ★ 다시 열면 그 상품의 쌓인 신고·열린 알림을 정리한다(다음 품절은 처음부터 다시 센다).
  * ★ 멈추면 그 상품의 열린 알림도 정리한다(담당자가 이미 판단했다).
  * ★ 끄는 스위치가 꺼져 있어도 **다시 열기는 허용**한다(코드리뷰 P1 — 이미 멈춘 상품을 풀 길이 사라지지 않게).
  */
-async function setOptionPaused({ campaignId, optKey, op, by = '', pool: dbPool } = {}) {
+async function setOptionPaused({ campaignId, optKey, op, whole = false, by = '', pool: dbPool } = {}) {
   if (!ENABLED && op !== 'resume') return { ok: false, code: 400, error: '지금은 품절 멈춤 기능이 꺼져 있어요.' };
   const cid = String(campaignId || '').trim();
-  const key = String(optKey == null ? '' : optKey);
-  if (!cid || !key || (op !== 'pause' && op !== 'resume')) return { ok: false, code: 400, error: '잘못된 요청입니다.' };
+  const key = whole === true ? WHOLE : String(optKey == null ? '' : optKey);
+  if (!cid || (!key && whole !== true) || (op !== 'pause' && op !== 'resume')) return { ok: false, code: 400, error: '잘못된 요청입니다.' };
   const db = dbPool || pool;
   const who = String(by || '').slice(0, 100);
   const client = await db.connect();
@@ -211,7 +280,7 @@ async function setOptionPaused({ campaignId, optKey, op, by = '', pool: dbPool }
     if (!out.ok) { await client.query('ROLLBACK'); return out; }
     await client.query('COMMIT');
     if (out.changed || out.alertsClosed) _emit({ campaignId: cid, kind: op === 'pause' ? 'paused' : 'resumed' });
-    logger.info(`[option-pause] ${op} camp=${cid} opt=${key} by=${who} changed=${out.changed}`);
+    logger.info(`[option-pause] ${op} camp=${cid} opt=${key || '(공고 전체)'} by=${who} changed=${out.changed}`);
     return { ok: true, changed: out.changed, paused: out.paused };
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
@@ -231,6 +300,9 @@ async function listOpenAlerts({ pool: dbPool } = {}) {
   const { rows } = await db.query(
     `SELECT a.id, a.campaign_id, a.opt_key, a.kind, a.report_count, a.created_at, a.updated_at,
             rc.title, rc.thumbnail_url, rc.manager, rc.linked_tab_name, rc.status AS camp_status, rc.archived_at,
+            rc.soldout_paused_at, rc.soldout_paused_reason,
+            (a.opt_key = '' AND EXISTS (SELECT 1 FROM campaign_options lo WHERE lo.campaign_id = a.campaign_id
+                                          AND COALESCE(lo.status,'active') <> 'closed')) AS whole_has_live,
             co.status AS opt_status, co.paused_at, co.paused_reason, co.thumbnail_url AS opt_thumb,
             (co.id IS NOT NULL) AS opt_exists
        FROM campaign_option_alerts a
@@ -249,7 +321,12 @@ async function listOpenAlerts({ pool: dbPool } = {}) {
       reportCount: Number(r.report_count) || 0, createdAt: r.created_at, updatedAt: r.updated_at,
       title: r.title || '', thumbnailUrl: r.opt_thumb || r.thumbnail_url || '', manager: r.manager || '',
       tabName: r.linked_tab_name || '', campaignActive: r.camp_status === 'active',
-      paused: !!r.paused_at, pausedReason: r.paused_reason || '', hasOptions: r.opt_key !== '',
+      paused: r.opt_key === '' ? !!r.soldout_paused_at : !!r.paused_at,
+      pausedReason: (r.opt_key === '' ? r.soldout_paused_reason : r.paused_reason) || '',
+      hasOptions: r.opt_key !== '',
+      // ★ 결정 259: 상품을 나누지 않은 공고 = 공고 전체를 멈출 수 있다(화면이 [품절로 멈추기]/[다시 열기]를 그린다).
+      //   그사이 상품이 생긴 공고는 공고 전체로 멈추지 않는다 → 종전 [확인했어요]. 옛 화면은 이 필드를 몰라 종전대로 [확인했어요].
+      wholeCampaign: r.opt_key === '' && !r.whole_has_live,
     });
   }
   if (gone.length) {
@@ -288,7 +365,8 @@ async function resolveAlert({ id, action, by = '', pool: dbPool } = {}) {
     const a = rows[0];
     if (!a) { await client.query('ROLLBACK'); return { ok: false, code: 404, error: '알림을 찾을 수 없어요.' }; }
     if (a.resolved_at) { await client.query('ROLLBACK'); return { ok: true, already: true, resolvedBy: a.resolved_by || '', resolution: a.resolution || '' }; }
-    const allowed = a.opt_key ? (ACTIONS_BY_KIND[a.kind] || []) : ['ack'];
+    // ★ 결정 259: 공고 전체 알림도 종류별 버튼을 받는다 · [확인했어요]는 옛 화면(배포 순간)을 위해 계속 받는다.
+    const allowed = a.opt_key ? (ACTIONS_BY_KIND[a.kind] || []) : [...(ACTIONS_BY_KIND[a.kind] || []), 'ack'];
     if (!allowed.includes(action)) {
       await client.query('ROLLBACK');
       return { ok: false, code: 409, stale: true, error: a.kind === 'auto_paused'
@@ -339,21 +417,39 @@ async function closeStaleForCampaign(client, campaignId) {
       WHERE x.campaign_id = $1 AND x.cleared_at IS NULL AND x.opt_key <> '' AND ${gone}`, [campaignId]);
 }
 
-/** 작업조건 카드용 상품 판매 상태(살아 있는 상품만). 실패 = null(카드는 그 줄을 그리지 않는다). */
+/**
+ * 작업조건 카드용 상품 판매 상태(살아 있는 상품만). 실패 = null(카드는 그 줄을 그리지 않는다).
+ * ★ 결정 259: 살아 있는 상품이 없는 공고 — 또는 공고 전체가 멈춰 있는 공고 — 는 맨 앞에 **공고 전체 줄**
+ *   ({ optKey: '', whole: true })을 싣는다. 멈춘 뒤 상품이 생겨도 그 줄이 남아 [다시 열기]가 사라지지 않는다.
+ */
 async function optionSalesForCampaign(db, campaignId) {
   if (!ENABLED || !campaignId) return null;
   try {
-    const { rows } = await (db || pool).query(
+    const q = (db || pool);
+    const { rows: camp } = await q.query(
+      `SELECT rc.soldout_paused_at, rc.soldout_paused_reason, rc.soldout_paused_by,
+              (SELECT COUNT(*) FROM campaign_option_soldout_reports r
+                WHERE r.campaign_id = rc.id AND r.opt_key = '' AND r.cleared_at IS NULL) AS reports
+         FROM recruit_campaigns rc WHERE rc.id = $1`, [campaignId]);
+    const { rows } = await q.query(
       `SELECT co.opt_key, co.paused_at, co.paused_reason, co.paused_by,
               (SELECT COUNT(*) FROM campaign_option_soldout_reports r
                 WHERE r.campaign_id = co.campaign_id AND r.opt_key = co.opt_key AND r.cleared_at IS NULL) AS reports
          FROM campaign_options co
         WHERE co.campaign_id = $1 AND COALESCE(co.status,'active') <> 'closed'
         ORDER BY co.sort_order, co.id`, [campaignId]);
-    return rows.map(r => ({
+    const list = rows.map(r => ({
       optKey: r.opt_key, paused: !!r.paused_at, pausedAt: r.paused_at || null,
       pausedReason: r.paused_reason || '', pausedBy: r.paused_by || '', reports: Number(r.reports) || 0,
     }));
+    const c = camp[0];
+    if (c && (!list.length || c.soldout_paused_at)) {
+      list.unshift({
+        optKey: WHOLE, whole: true, paused: !!c.soldout_paused_at, pausedAt: c.soldout_paused_at || null,
+        pausedReason: c.soldout_paused_reason || '', pausedBy: c.soldout_paused_by || '', reports: Number(c.reports) || 0,
+      });
+    }
+    return list;
   } catch (e) {
     logger.warn(`[option-pause] 상품 판매 상태 조회 실패(카드 줄 생략): ${(e && e.message) || e}`);
     return null;
@@ -363,6 +459,7 @@ async function optionSalesForCampaign(db, campaignId) {
 module.exports = {
   AUTO_PAUSE_REPORTERS,
   ENABLED,
+  WHOLE,
   recordSoldoutReport,
   setOptionPaused,
   closeStaleForCampaign,

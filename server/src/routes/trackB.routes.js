@@ -1807,7 +1807,9 @@ router.post('/campaigns/:id/option-pause', authMiddleware, internalMiddleware, a
   try {
     const b = req.body || {};
     const out = await require('../services/campaignOptionPause.service')
-      .setOptionPaused({ campaignId: String(req.params.id), optKey: b.optKey, op: b.paused === true ? 'pause' : (b.paused === false ? 'resume' : ''), by: _by(req) });
+      .setOptionPaused({ campaignId: String(req.params.id), optKey: b.optKey, op: b.paused === true ? 'pause' : (b.paused === false ? 'resume' : ''),
+        whole: b.whole === true,   // 결정 259: 공고 전체(상품을 나누지 않은 공고) — 명시했을 때만
+        by: _by(req) });
     res.status(out.ok ? 200 : (out.code || 400)).json(out);
   } catch (e) {
     logger.warn('[option-pause] 실패: ' + e.message);

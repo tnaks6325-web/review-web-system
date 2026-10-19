@@ -69,6 +69,11 @@ const { buildSequentialSchedule } = require('../src/utils/sequentialSchedule');
         if (/FROM order_submissions os/.test(s)) { const o = orders[p[0]]; return { rows: o ? [o] : [] }; }
         if (/SELECT opt_key, status FROM campaign_options WHERE campaign_id = \$1/.test(s)) return { rows: (options[p[0]] || []).map(k => typeof k === 'string' ? { opt_key: k, status: 'active' } : k) };
         if (/SELECT 1 FROM campaign_options WHERE campaign_id = \$1 AND opt_key = \$2 AND paused_at IS NOT NULL/.test(s)) return { rows: st.paused.has(p[0] + '|' + p[1]) ? [{}] : [] };
+        // 결정 259: 상품을 나누지 않은 공고 = 공고 행의 멈춤 칸(키 'camp|')
+        if (/SELECT 1 FROM recruit_campaigns WHERE id = \$1 AND soldout_paused_at IS NOT NULL/.test(s)) return { rows: st.paused.has(p[0] + '|') ? [{}] : [] };
+        if (/UPDATE recruit_campaigns SET soldout_paused_at = NOW\(\)/.test(s)) {
+          const k = p[0] + '|'; if (st.paused.has(k)) return { rows: [] }; st.paused.add(k); st.wholeBy = p[2]; st.wholeReason = p[1]; return { rows: [{ id: p[0] }] };
+        }
         if (/^(BEGIN|COMMIT|ROLLBACK)/.test(s.trim())) return { rows: [] };
         if (/SELECT id FROM recruit_campaigns WHERE id = \$1 FOR UPDATE/.test(s)) return { rows: [{ id: p[0] }] };
         if (/INSERT INTO campaign_option_soldout_reports/.test(s)) {
@@ -100,6 +105,7 @@ const { buildSequentialSchedule } = require('../src/utils/sequentialSchedule');
         o7: { campaign_id: 'c4', app_key: '마감A', sel_key: null }, o8: { campaign_id: 'c4', app_key: '마감A', sel_key: null },
         o9: { campaign_id: 'c3', app_key: '없는 이름', sel_key: null },
         o10: { campaign_id: 'c1', app_key: 'B', sel_key: null },
+        o11: { campaign_id: 'c2', app_key: null, sel_key: null }, o12: { campaign_id: 'c2', app_key: null, sel_key: null },
       },
       options: { c1: ['A', 'B'], c2: [], c3: ['단일'], c4: [{ opt_key: '마감A', status: 'closed' }, { opt_key: '진행B', status: 'active' }] },
     });
@@ -114,7 +120,7 @@ const { buildSequentialSchedule } = require('../src/utils/sequentialSchedule');
     r = await svc.recordSoldoutReport({ orderSubmissionId: 'o4', phone8: '44440000', pool: db });
     ok('★ 어느 상품인지 모르면 멈추지 않는다(짐작 금지)', r.action === 'unknown_option' && db.st.reports.length === 3);
     r = await svc.recordSoldoutReport({ orderSubmissionId: 'o5', phone8: '55550000', pool: db });
-    ok('상품을 나누지 않은 공고 = 알림만(멈출 상품 없음)', r.action === 'reported' && !db.st.paused.has('c2|') && db.st.alerts.some(a => a.camp === 'c2' && a.opt === ''));
+    ok('상품을 나누지 않은 공고 — 신고 1명 = 알림만(결정 259 이후에도 1명은 멈추지 않음)', r.action === 'reported' && !db.st.paused.has('c2|') && db.st.alerts.some(a => a.camp === 'c2' && a.opt === ''));
     r = await svc.recordSoldoutReport({ orderSubmissionId: 'o6', phone8: '66660000', pool: db });
     ok('상품이 하나뿐이면 그 상품으로 센다', r.action === 'reported' && db.st.reports.some(x => x.camp === 'c3' && x.opt === '단일'));
     ok('신고 2명 기준 = 2(사용자 확정 (나))', svc.AUTO_PAUSE_REPORTERS === 2);
@@ -127,6 +133,12 @@ const { buildSequentialSchedule } = require('../src/utils/sequentialSchedule');
     const nAlerts = db.st.alerts.length;
     r = await svc.recordSoldoutReport({ orderSubmissionId: 'o10', phone8: '10100000', pool: db });
     ok('이미 멈춘 상품(손으로 멈춤)에 온 첫 신고 = 알림 없음(코드리뷰 P2)', r.action === 'already_paused' && db.st.alerts.length === nAlerts);
+    // ★ 결정 259: 상품을 나누지 않은 공고도 다른 리뷰어 2명이면 **공고 전체**를 자동으로 멈춘다(사용자 확정 2026-10-19 "똑같이 적용")
+    r = await svc.recordSoldoutReport({ orderSubmissionId: 'o11', phone8: '55550000', pool: db });
+    ok('공고 전체: 같은 리뷰어의 두 번째 주문 = 여전히 1명', r.action === 'reported' && r.reporters === 1 && !db.st.paused.has('c2|'));
+    r = await svc.recordSoldoutReport({ orderSubmissionId: 'o12', phone8: '12120000', pool: db });
+    ok('★ 공고 전체: 다른 리뷰어 2명 = 자동 멈춤(공고 행) · 알림은 하나로 올라감', r.action === 'auto_paused' && db.st.paused.has('c2|')
+      && db.st.wholeReason === 'auto_soldout' && db.st.alerts.filter(a => a.camp === 'c2').length === 1 && db.st.alerts.find(a => a.camp === 'c2').kind === 'auto_paused');
     const bad = { query: async () => { throw new Error('db down'); }, connect: async () => { throw new Error('db down'); } };
     r = await svc.recordSoldoutReport({ orderSubmissionId: 'o1', pool: bad });
     ok('DB 오류 = 예외 없이 error(취소는 그대로 유효)', r.ok === false && r.action === 'error');
