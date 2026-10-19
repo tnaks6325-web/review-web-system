@@ -64,6 +64,11 @@ async function unarchiveCampaign(db, id) {
   try {
     if (client) await client.query('BEGIN');
     const lrq = require('./linkedRecruitQuota.service');
+    // ★ 잠금 순서(2026-10-20 · 완화 금지): L1(오더 단위) → 공고 행. 종전엔 공고 행 → L1 이라
+    //   L1 을 먼저 쥐고 공고 행을 기다리는 인원 동기화와 교착할 수 있었다. 잠그기 전 짝을 읽어 L1 을 먼저 잡고,
+    //   잠근 뒤 짝이 달라졌으면(그 사이 연결 변경) 다시 시도하게 한다.
+    const preWoIds = await lrq.workOrderIdsForCampaign(q, id);
+    if (preWoIds.length) await lrq.lockWorkOrderCampaigns(q, preWoIds);
     // 행 잠금 — 확인과 해제 사이에 다른 담당자가 보관·해제를 끼워 넣지 못하게.
     const { rows: cur } = await q.query('SELECT archived_at FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [id]);
     if (!cur.length || !cur[0].archived_at) {
@@ -73,8 +78,12 @@ async function unarchiveCampaign(db, id) {
       return cur.length ? { ok: true, already: true } : { ok: false, code: 'not_found', error: '캠페인을 찾을 수 없습니다.' };
     }
     const woIds = await lrq.workOrderIdsForCampaign(q, id);
+    if (woIds.some(w => !preWoIds.includes(w))) {
+      if (client) await client.query('ROLLBACK');
+      return { ok: false, code: 'link_changed_retry', error: '작업오더 연결이 방금 바뀌었습니다. 다시 시도해 주세요.' };
+    }
     if (woIds.length) {
-      await lrq.lockWorkOrderCampaigns(q, woIds);
+      await lrq.lockWorkOrderCampaigns(q, woIds);   // 이미 쥐었으면 그대로(같은 트랜잭션 재진입)
       const live = await lrq.liveCampaignForWorkOrders(q, woIds, id);
       if (live) {
         if (client) await client.query('ROLLBACK');

@@ -137,7 +137,9 @@ const base = { title: '10/14 테스트 공고', status: 'draft' };
     const o = await arch.unarchiveCampaign({ connect: async () => c }, 'c_live');
     ok('★ 이미 해제된 공고는 즉시 already(UPDATE 없음 — 사이에 보관+새 공고가 끼어도 무검사 해제 불가)',
       o.ok === true && o.already === true && !log.some(q => /SET archived_at = NULL/.test(q)) && log.includes('ROLLBACK'), log);
-    ok('해제 전 행 잠금(FOR UPDATE)', /FOR UPDATE/.test(log[1] || ''));
+    // 2026-10-20 잠금 순서(L1 → 행): 짝 읽기 → L1 → 공고 행 FOR UPDATE — 의미 강화(행 잠금 + 순서)
+    { const iL1 = log.findIndex(q => /pg_advisory_xact_lock/.test(q)); const iRow = log.findIndex(q => /FROM recruit_campaigns WHERE id = \$1 FOR UPDATE/.test(q));
+      ok('해제 전 행 잠금(FOR UPDATE) · L1 이 행 잠금보다 먼저', iRow > -1 && iL1 > -1 && iL1 < iRow, log); }
   }
   d = mkDb([], []);
   out = await arch.unarchiveCampaign(d.db, 'c_old');
@@ -150,7 +152,8 @@ const base = { title: '10/14 테스트 공고', status: 'draft' };
     const runUpd = (body, cur, live) => new Promise((resolve) => {
       calls = [];
       const answerF = (sql) => {
-        if (/SELECT linked_campaign_id FROM work_orders WHERE id = \$1 FOR UPDATE/.test(sql)) return { rows: cur === undefined ? [] : [{ linked_campaign_id: cur }] };
+        // 2026-10-20: 잠그지 않은 선읽기(같은 값 빠른 통과) + L1 뒤 FOR UPDATE 재확인 — 둘 다 같은 현재값
+        if (/SELECT linked_campaign_id FROM work_orders WHERE id = \$1( FOR UPDATE)?$/.test(sql)) return { rows: cur === undefined ? [] : [{ linked_campaign_id: cur }] };
         if (/c\.archived_at IS NULL AND c\.id <> \$2/.test(sql)) return { rows: live };
         if (/UPDATE work_orders SET/.test(sql)) return { rows: [{ id: body.id }] };
         return { rows: [] };

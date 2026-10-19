@@ -28,6 +28,7 @@ const _client = {
       return { rows: [{ id: 'camp1', source_work_order_id: 'wo1', linked_sheet_id: 'wt_x', linked_tab_name: '탭' }] };
     }
     if (/FROM work_orders/.test(sql) && /FOR UPDATE/.test(sql)) return { rows: [{ id: 'wo1', linked_campaign_id: 'camp1' }] };
+    if (/UNION/.test(sql) && /JOIN work_orders w ON/.test(sql)) return { rows: [{ id: 'wo1' }] };   // 2026-10-20: L1 을 먼저 잡으려 잠그기 전 짝 읽기
     if (/FROM tab_configs/.test(sql)) return { rows: [{ s: true }] };   // 무시트 탭
     if (/FROM campaign_participants/.test(sql)) return { rows: [] };
     return { rows: [] };
