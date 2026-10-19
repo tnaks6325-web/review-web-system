@@ -987,7 +987,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
       const { rows: matched } = await pool.query(sql, params);
       const linked = matched[0];
       // ★ 1단계: 읽은 뒤 그 사이 다른 요청이 번호를 올렸다 — 0행을 성공으로 접지 않는다(완화 금지).
-      if (!linked) return _sourceRevisionRaceResponse(res, sourceReviewOrderId, source);
+      if (!linked) return await _sourceRevisionRaceResponse(res, sourceReviewOrderId, source);
       /* ★★ 결제금액이 바뀌었으면 연결 모집공고까지 반영한다(사용자 확정 2026-09-21).
          리뷰어가 보는 금액은 공고에 있어, 여기서 멈추면 "저장됐는데 화면은 옛 금액" 이 된다.
          ★ **절대 throw 하지 않는다** — 전파 실패가 이미 끝난 원본 저장을 되돌리면 안 된다.
@@ -1124,7 +1124,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
       ]
     );
     const updated = rows[0];
-    if (!updated) return _sourceRevisionRaceResponse(res, sourceReviewOrderId, source);
+    if (!updated) return await _sourceRevisionRaceResponse(res, sourceReviewOrderId, source);
     await syncWorkOrderRecruitTotal({ workOrderId: updated.id, recruitTotal: updated.recruit_count });
     _emitWorkOrderNew(updated, { event: 'source_revision', source_revision: source.sourceRevision });
     res.json({ ok: true, data: updated });

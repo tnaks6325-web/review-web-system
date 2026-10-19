@@ -21,9 +21,9 @@ const read = (rel) => fs.readFileSync(path.join(__dirname, '..', 'src', rel), 'u
   assert.ok(/Number\(existing\.source_revision \|\| 0\) === sourceContract\.sourceRevision\s*\? 'revision_already_applied' : 'source_exists'/.test(ord), 'POST 재전송도 같은 code');
   assert.ok(/AND COALESCE\(source_revision, 0\) = \$\{add\(currentRevision\)\}/.test(ord), '부분 수정 UPDATE 번호 조건');
   assert.ok(/WHERE id = \$1 AND source_review_order_id = \$40 AND COALESCE\(source_revision, 0\) = \$46/.test(ord), '전체 수정 UPDATE 번호 조건');
-  assert.ok(/if \(!linked\) return _sourceRevisionRaceResponse\(res, sourceReviewOrderId, source\);/.test(ord), '부분 수정 0행 = 성공으로 접지 않음');
-  assert.ok(/if \(!updated\) return _sourceRevisionRaceResponse\(res, sourceReviewOrderId, source\);/.test(ord), '전체 수정 0행 = 성공으로 접지 않음');
-  const fullAt = ord.indexOf('if (!updated) return _sourceRevisionRaceResponse');
+  assert.ok(/if \(!linked\) return await _sourceRevisionRaceResponse\(res, sourceReviewOrderId, source\);/.test(ord), '부분 수정 0행 = 성공으로 접지 않음(await — 실패가 next 로 간다, Codex P2)');
+  assert.ok(/if \(!updated\) return await _sourceRevisionRaceResponse\(res, sourceReviewOrderId, source\);/.test(ord), '전체 수정 0행 = 성공으로 접지 않음(await)');
+  const fullAt = ord.indexOf('if (!updated) return await _sourceRevisionRaceResponse');
   assert.ok(fullAt > 0 && fullAt < ord.indexOf('await syncWorkOrderRecruitTotal({ workOrderId: updated.id', fullAt), '0행이면 인원 동기화 전에 끝낸다');
 
   const L1 = /lockWorkOrderCampaigns\(/;
@@ -37,7 +37,15 @@ const read = (rel) => fs.readFileSync(path.join(__dirname, '..', 'src', rel), 'u
   order(lrq, 'assertWorkOrderQuota', /FROM work_orders WHERE id=\$1 FOR UPDATE/);
   order(lrq, 'syncWorkOrderRecruitTotal', /FROM work_orders WHERE id=\$1 FOR UPDATE/);
   order(lrq, 'syncCampaignRecruitTotal', /FROM recruit_campaigns WHERE id=\$1 FOR UPDATE/);
-  order(lrq, 'guardWorkOrderLinkChange', /FROM work_orders WHERE id = \$1 FOR UPDATE/);
+  { // 연결 변경 검사: 같은 값 = 행 잠금 유지(L1 없이 · 그 사이 바뀌면 409) · 바꾸는 경로 = L1 → 행 잠금 (Codex PR #1660 P1)
+    const st = lrq.indexOf('async function guardWorkOrderLinkChange(');
+    const body = lrq.slice(st, lrq.indexOf('\n}\n', st));
+    const sameAt = body.indexOf("=== next) {");
+    const sameBranch = body.slice(sameAt, body.indexOf('\n  }\n', sameAt));
+    assert.ok(/FOR UPDATE/.test(sameBranch) && !/lockWorkOrderCampaigns/.test(sameBranch) && /WORK_ORDER_LINK_CHANGED/.test(sameBranch), '같은 값 경로: 행 잠금 유지·L1 없음·바뀌면 409');
+    const rest = body.slice(sameAt + sameBranch.length);
+    assert.ok(rest.search(/lockWorkOrderCampaigns\(/) > -1 && rest.search(/lockWorkOrderCampaigns\(/) < rest.search(/FOR UPDATE/), '바꾸는 경로: L1 이 행 잠금보다 먼저');
+  }
   assert.ok(/if \(!preWoIds\.includes\(order\.id\)\)/.test(lrq), '공고 쪽 동기화: 잠근 뒤 짝이 바뀌면 재시도');
   order(read('services/campaignArchive.service.js'), 'unarchiveCampaign', /FROM recruit_campaigns WHERE id = \$1 FOR UPDATE/);
   const pay = read('services/campaignPayAmountSync.service.js');
@@ -118,6 +126,27 @@ async function pgDeadlock() {
       }
     }
     assert.equal(deadlocks, 0, '교착 0');
+    // ★ Codex P1: 같은 값 재전송(행 잠금) 중에 다른 쪽이 연결을 바꾸면 — 바꾼 값이 되돌려지지 않는다
+    const camp2 = camp + '_b';
+    await pool.query(`INSERT INTO recruit_campaigns (id, title) VALUES ($1, '가짜 공고 B')`, [camp2]);
+    const a = await pool.connect(), b = await pool.connect();
+    try {
+      await a.query('BEGIN'); await b.query('BEGIN');
+      assert.equal(await lrq.guardWorkOrderLinkChange(a, wo, camp), null, 'A: 같은 값 = 통과(행 잠금 쥠)');
+      const bDone = (async () => {   // B: A→B 로 바꾸려 함 — A 가 끝날 때까지 행 잠금에서 기다린다
+        const g = await lrq.guardWorkOrderLinkChange(b, wo, camp2);
+        if (g) { await b.query('ROLLBACK'); return g; }
+        await b.query('UPDATE work_orders SET linked_campaign_id=$2 WHERE id=$1', [wo, camp2]);
+        await b.query('COMMIT'); return null;
+      })();
+      await new Promise(r => setTimeout(r, 300));
+      await a.query(`UPDATE work_orders SET linked_campaign_id = COALESCE(NULLIF($2, ''), linked_campaign_id) WHERE id=$1`, [wo, camp]);
+      await a.query('COMMIT');
+      const g = await bDone;
+      const fin = (await pool.query('SELECT linked_campaign_id FROM work_orders WHERE id=$1', [wo])).rows[0].linked_campaign_id;
+      // B 는 A 뒤에 처리 — 살아 있는 공고(camp)가 있으니 409 로 막히거나, 막히지 않았다면 B 의 값이 남아야 한다(A 가 되돌리지 않음)
+      assert.ok((g && g.status === 409) || fin === camp2, `경합 결과 일관: ${JSON.stringify(g)} / ${fin}`);
+    } finally { a.release(); b.release(); await pool.query('DELETE FROM recruit_campaigns WHERE id=$1', [camp2]).catch(() => {}); }
     console.log(`sourceRevisionSafety: PG deadlock test passed (${ok} ok, 0 deadlocks)`);
   } finally {
     await pool.query('DELETE FROM campaign_options WHERE campaign_id=$1', [camp]).catch(() => {});

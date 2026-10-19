@@ -376,10 +376,19 @@ async function liveCampaignForWorkOrders(db, woIds, excludeCampaignId) {
 async function guardWorkOrderLinkChange(client, woId, nextCampaignId) {
   const next = String(nextCampaignId == null ? '' : nextCampaignId).trim();
   if (!next || !woId) return null;
-  // ★ 같은 값(=변경 없음)은 잠그지 않은 읽기로 빠르게 통과 — 종전 계약(같은 값이면 잠금 없음) 유지.
   const { rows: pre } = await client.query('SELECT linked_campaign_id FROM work_orders WHERE id = $1', [woId]);
-  if (!pre.length || String(pre[0].linked_campaign_id || '').trim() === next) return null;
-  await lockWorkOrderCampaigns(client, [woId]);                       // L1 먼저
+  if (!pre.length) return null;
+  if (String(pre[0].linked_campaign_id || '').trim() === next) {
+    /* ★ 같은 값(=변경 없음): 종전처럼 **오더 행을 잠근 채** 진행한다(L1 없이 — 종전 계약 그대로).
+       잠그지 않고 돌려보내면 그 사이 다른 저장이 연결을 바꾼 뒤 호출자의 UPDATE 가 옛 값을 되써
+       그 변경이 조용히 사라진다(Codex PR #1660 P1). 잠근 뒤 값이 바뀌어 있으면 L1 을 행 잠금 뒤에
+       잡게 되므로(교착 순서) 진행하지 않고 다시 시도하게 한다. */
+    const { rows: locked } = await client.query('SELECT linked_campaign_id FROM work_orders WHERE id = $1 FOR UPDATE', [woId]);
+    if (!locked.length || String(locked[0].linked_campaign_id || '').trim() === next) return null;
+    return { status: 409, body: { ok: false, code: 'WORK_ORDER_LINK_CHANGED',
+      error: '작업오더의 연결 공고가 방금 바뀌었습니다. 새로고침한 뒤 다시 시도해 주세요.' } };
+  }
+  await lockWorkOrderCampaigns(client, [woId]);                       // 바꾸는 경로 = L1 먼저 → 행 잠금
   const { rows } = await client.query('SELECT linked_campaign_id FROM work_orders WHERE id = $1 FOR UPDATE', [woId]);
   if (!rows.length || String(rows[0].linked_campaign_id || '').trim() === next) return null;
   const live = await liveCampaignForWorkOrders(client, [woId], next);
