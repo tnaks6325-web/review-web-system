@@ -2,8 +2,8 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
-const { registerLimiter, imageApiLimiter, campaignTokenLimiter } = require('../middleware/rateLimit.middleware');
-const { issueCampaignToken } = require('../services/reviewerCampaignEditor.service');
+const { registerLimiter, imageApiLimiter, intranetLoginLimiter } = require('../middleware/rateLimit.middleware');
+const { issueCampaignTokenForIntranetAdmin } = require('../services/reviewerCampaignEditor.service');
 const {
   registerReviewer,
   verifyReviewer,
@@ -214,21 +214,20 @@ router.post('/register', registerLimiter, async (req, res, next) => {
   }
 });
 
-// POST /api/reviewer/campaign-token — 리뷰어 앱 공고수정 스코프 토큰 발급
-//   허용명단(마스터 관리)에 있는 리뷰어에게만 공고 전용·2h 토큰 발급.
-//   무인증 공개 경로지만 verifyReviewer(이름+phone8) + active 명단 이중 게이트 + 리미터.
-router.post('/campaign-token', campaignTokenLimiter, async (req, res, next) => {
+// POST /api/reviewer/campaign-token-intranet — 리뷰어 앱 "관리자로 공고 수정"(결정 257)
+//   인트라넷 아이디·비밀번호 → 인트라넷 관리자(작업보드와 같은 판정)면 공고 전용·2h 스코프 토큰.
+//   종전 phone8 허용명단 발급(POST /campaign-token)은 폐지 — 낡은 화면이 부르면 404 로 조용히 권한 없음 처리된다.
+//   리미터 = 작업보드 인트라넷 로그인과 같은 intranetLoginLimiter(무차별 대입 차단).
+router.post('/campaign-token-intranet', intranetLoginLimiter, async (req, res, next) => {
   try {
-    const { name, phone8 } = req.body || {};
-    const result = await issueCampaignToken(name, phone8);
-    // 미허용/불일치는 401(존재 여부 노출 최소화)
-    if (!result.ok) return res.status(401).json(result);
+    const b = req.body || {};
+    const result = await issueCampaignTokenForIntranetAdmin(b.username || b.name, b.password || b.pw);
+    if (!result.ok) return res.status(result.reason === 'service_key' ? 503 : 401).json(result);
     res.json(result);
   } catch (err) {
     next(err);
   }
 });
-
 // 관리자 등록리뷰어DB에서 새 탭으로 연 리뷰어 홈의 로그인 교환.
 // 교환권은 Track B의 adminOrMaster 경로에서만 발급되고 5분 뒤 만료된다.
 // 브라우저 공용 localStorage 대신 새 탭의 sessionStorage에만 저장하게 해 관리자 화면을 건드리지 않는다.

@@ -67,45 +67,40 @@ ok('만료 토큰 거부(핵심 계약)', (() => {
   return runAuth(exp, 'PUT', '/api/campaign', '/admin/abc').status === 401;
 })());
 
-// ── ② 토큰 발급 이중 게이트 (pool 스텁 — reviewers 직접매칭 + 명단) ──
-// _reviewerRows = "직접 메인 계정 정확일치" 결과(sub_account 경로는 애초에 쿼리 안 함=주입 방어)
-let _reviewerRows = [{ name: '김수만' }];
-let _isEditorRows = [{ x: 1 }];
-require.cache[require.resolve('../src/db/pool')] = {
-  id: require.resolve('../src/db/pool'), exports: {
-    query: async (q) => {
-      if (/reviewer_campaign_editors/.test(q)) return { rows: _isEditorRows };
-      if (/FROM reviewers/.test(q)) return { rows: _reviewerRows };
-      return { rows: [] };
-    },
-  },
-};
+// ── ② 토큰 발급 = 인트라넷 관리자 판정(결정 257) — 인트라넷 응답 스텁(가짜 fetch)으로 실제 실행 ──
+process.env.INTRANET_SSO_ADMIN_USERS = 'boss';
+process.env.INTRANET_SSO_ADMIN_GROUPS = '콘텐츠운영팀|체험단파트';
 delete require.cache[require.resolve('../src/services/reviewerCampaignEditor.service')];
 const svc = require('../src/services/reviewerCampaignEditor.service');
-
-ok('_norm8: 하이픈·11자리 → 뒤 8자리', svc._norm8('010-8592-6325') === '85926325' && svc._norm8('85926325') === '85926325');
+const fakeIntranet = (user) => async () => ({
+  ok: !!user, json: async () => (user ? { data: user } : { error: '아이디 또는 비밀번호가 올바르지 않습니다.' }),
+});
 
 (async () => {
-  _reviewerRows = [{ name: '김수만' }]; _isEditorRows = [{ x: 1 }];
-  const good = await svc.issueCampaignToken('김수만', '01085926325');
-  ok('발급: 직접매칭+명단 통과 시 토큰 발급', good.ok === true && !!good.token);
+  const good = await svc.issueCampaignTokenForIntranetAdmin('boss', 'pw', fakeIntranet({ username: 'boss', display_name: '김수만', department: '경영', role: 'user' }));
+  ok('발급: 인트라넷 지정 관리자(아이디) → 토큰', good.ok === true && !!good.token && good.name === '김수만');
   const dec = jwt.verify(good.token, process.env.JWT_SECRET);
-  ok('발급 토큰 클레임: role=admin(하향) · via=reviewer_campaign · phone8(재검증키)',
-    dec.role === 'admin' && dec.via === 'reviewer_campaign' && dec.phone8 === '85926325');
+  ok('발급 토큰 클레임: role=admin(하향) · via=reviewer_campaign · iu · ia=true · phone8 없음',
+    dec.role === 'admin' && dec.via === 'reviewer_campaign' && dec.iu === 'boss' && dec.ia === true && !('phone8' in dec));
   ok('발급 토큰은 스코프 격리를 그대로 통과(공고 PUT만, DELETE 차단)',
     runAuth(good.token, 'PUT', '/api/campaign', '/admin/x').nexted === true &&
     runAuth(good.token, 'DELETE', '/api/campaign', '/admin/x').status === 403);
+  ok('저장 시점 재확인: 새 토큰 통과 · 옛 phone8 토큰 거절',
+    svc.isIntranetAdminCampaignToken(dec) === true &&
+    svc.isIntranetAdminCampaignToken({ via: 'reviewer_campaign', role: 'admin', phone8: '85926325' }) === false &&
+    svc.isIntranetAdminCampaignToken({ via: 'intranet', role: 'admin', iu: 'boss', ia: true }) === false);
 
-  // 레드팀 #1: 직접 메인 일치 없음(=이름 불일치/서브계정 주입) → 명단에 있어도 미발급
-  _reviewerRows = []; _isEditorRows = [{ x: 1 }];
-  const badId = await svc.issueCampaignToken('사칭이름', '85926325');
-  ok('거부: 직접 메인 계정 불일치(서브계정 주입 우회 차단)', badId.ok === false && !badId.token);
+  const grp = await svc.issueCampaignTokenForIntranetAdmin('kim', 'pw', fakeIntranet({ username: 'kim', display_name: '김체험', department: '콘텐츠운영팀', part: '체험단파트' }));
+  ok('발급: 인트라넷 관리자 그룹(부서|파트) → 토큰', grp.ok === true && !!grp.token);
 
-  _reviewerRows = [{ name: '김수만' }]; _isEditorRows = [];
-  const notEd = await svc.issueCampaignToken('김수만', '85926325');
-  ok('거부: 실 리뷰어지만 허용명단 밖 → 미발급', notEd.ok === false && !notEd.token);
+  const staff = await svc.issueCampaignTokenForIntranetAdmin('lee', 'pw', fakeIntranet({ username: 'lee', display_name: '이직원', department: 'AE', role: 'admin' }));
+  ok('거부: 일반 직원(인트라넷 자체 role=admin 이어도 자기신고라 불인정) → 미발급 · 사유 not_admin',
+    staff.ok === false && !staff.token && staff.reason === 'not_admin');
 
-  ok('거부 메시지는 존재여부 노출 최소화(동일 문구)', badId.error === notEd.error);
+  const bad = await svc.issueCampaignTokenForIntranetAdmin('boss', 'wrong', fakeIntranet(null));
+  ok('거부: 인트라넷 자격 불일치 → 미발급', bad.ok === false && !bad.token);
+  const empty = await svc.issueCampaignTokenForIntranetAdmin('', '', fakeIntranet(null));
+  ok('거부: 빈 입력 → 미발급', empty.ok === false && !empty.token);
 
   // ── ③ 배선 grep ──
   const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
@@ -130,8 +125,8 @@ ok('_norm8: 하이픈·11자리 → 뒤 8자리', svc._norm8('010-8592-6325') ==
     return !/linked_/.test(setClause) && !/participation_mode/.test(setClause)
       && !/work_detail/.test(setClause) && !/deadline/.test(setClause) && !/chat_url/.test(setClause);
   })());
-  ok('#3: 스코프 핸들러가 사용 시점 isActiveEditor(phone8) 재검증',
-    /_scopedCampaignEdit[\s\S]*?isActiveEditor\(p8\)/.test(camp));
+  ok('#3: 스코프 핸들러가 사용 시점 인트라넷 관리자 토큰(iu·ia) 재확인',
+    /async function _scopedCampaignEdit[\s\S]{0,200}isIntranetAdminCampaignToken\(req\.admin\)/.test(camp));
   ok('자율주문: auto_order=true면 구매시간 명시적 null(전환), 아니면 빈값=현재값 유지',
     /autoOrder = b\.auto_order === true/.test(camp) && /autoOrder \? null : keep\(b\.window_start/.test(camp));
   ok('#2: 참여형 공고만 스코프 편집 허용(레거시 미접촉)',
@@ -149,13 +144,35 @@ ok('_norm8: 하이픈·11자리 → 뒤 8자리', svc._norm8('010-8592-6325') ==
   })());
   const idx = readF('index.html');
   const app = readF('js/index-app.js');
-  ok('라우트: 발급=리미터 붙은 공개 POST /campaign-token', /campaign-token', campaignTokenLimiter/.test(rev));
-  ok('라우트: 명단관리=masterOnly (/api/admin/campaign-editors)',
-    /campaign-editors', authMiddleware, masterOnlyMiddleware/.test(adm));
+  ok('라우트: 발급=인트라넷 로그인 리미터 붙은 POST /campaign-token-intranet', /campaign-token-intranet', intranetLoginLimiter/.test(rev));
+  ok('라우트: 옛 phone8 발급·명단관리 폐지', !/'\/campaign-token',/.test(rev) && !/campaign-editors', authMiddleware/.test(adm));
   ok('프론트: _adminTok에 rapp_camp_edit_token 병합', /rapp_camp_edit_token/.test(cc));
-  ok('프론트: 로그인 시 토큰 발급 시도 + 로그아웃 시 제거',
-    /maybeFetchCampEditToken/.test(idx) && /removeItem\("rapp_camp_edit_token"\)/.test(idx));
-  ok('프론트: 마스터 명단 UI(설정 탭 loadCampEditors)', /function loadCampEditors/.test(app) && /loadCampEditors\(\)/.test(app));
+  ok('프론트: "관리자로 공고 수정" 로그인 → 인트라넷 발급 경로 · 로그아웃 시 제거',
+    /openCampEditLogin\(\)/.test(idx) && /\/api\/reviewer\/campaign-token-intranet/.test(idx) && /removeItem\("rapp_camp_edit_token"\)/.test(idx));
+  ok('프론트: 리뷰어 로그인 때 서버에 묻지 않는다(자동 발급 폐지)', !/\/api\/reviewer\/campaign-token"/.test(idx));
+  ok('프론트: [공고 수정] 버튼은 기본 숨김(모든 리뷰어에게 보이지 않음) — 2곳 모두',
+    (idx.match(/class="rc-edit-login" style="display:none"/g) || []).length === 2 && !/class="rc-edit-login"(?! style="display:none")/.test(idx));
+  ok('프론트: 직원용 주소(?staff=1) 또는 받은 열쇠가 있을 때만 보인다', (() => {
+    const m = idx.match(/function _campEditEntryAllowed\(\) \{[\s\S]*?\n\}/);
+    if (!m) return false;
+    const vm = require('vm');
+    const run = (search, store) => {
+      const ss = new Map(Object.entries(store || {}));
+      const ctx = { URLSearchParams, location: { search, pathname: '/', hash: '' }, history: { replaceState() {} },
+        sessionStorage: { getItem: k => (ss.has(k) ? ss.get(k) : null), setItem: (k, v) => ss.set(k, String(v)) } };
+      vm.runInNewContext(m[0] + '\nthis.r=_campEditEntryAllowed();', ctx);
+      return ctx.r;
+    };
+    return run('', {}) === false && run('?staff=1', {}) === true && run('?staff=0', {}) === false
+      && run('', { rapp_staff_entry: '1' }) === true && run('', { rapp_camp_edit_token: 't' }) === true;
+  })());
+  ok('프론트: 공고수정 로그인 창은 viewHome 밖(로그인 전 화면에서도 보인다 — Codex PR #1655)', (() => {
+    const o = idx.indexOf('id="campEditLoginOvl"'), h = idx.indexOf('id="viewHome"');
+    // viewHome 블록이 닫힌 뒤(=문서 끝 쪽 body 직속)에 있어야 한다
+    return o > 0 && h > 0 && o > idx.lastIndexOf('id="viewHome"') && idx.slice(o).indexOf('</body>') > 0 && idx.slice(o, idx.indexOf('</body>', o)).indexOf('id="viewHome"') < 0
+      && idx.lastIndexOf('<div id="campEditLoginOvl"') > idx.lastIndexOf('<div class="home-footer">');
+  })());
+  ok('프론트: 옛 마스터 명단 UI 제거', !/function loadCampEditors/.test(app) && !/loadCampEditors\(\)/.test(app));
 
   // ── ④ 리뷰어 앱 모달: 유입가이드 확인 + 마감 공고 진행과정 미리보기 ──
   ok('축약뷰에 work_detail 포함(읽기전용 프리필) — 수정 모달에서 유입가이드 육안 확인',

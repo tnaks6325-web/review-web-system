@@ -26,7 +26,7 @@ const {
 const { deriveSchedules, tabsOfCampaigns, scheduleFor, describeTabDates } = require('../services/campaignSchedule.service');
 const { sequentialDisplay, joinedDisplay } = require('../utils/sequentialDisplay');   // ★ 결정 214
 const { sanitizeWorkDetail, sanitizeGuideHtml, sanitizeGuideImages, GUIDE_IMAGE_FIELDS } = require('../utils/sanitizeGuideHtml');
-const { isActiveEditor } = require('../services/reviewerCampaignEditor.service');
+const { isIntranetAdminCampaignToken } = require('../services/reviewerCampaignEditor.service');
 const {
   normalizeFeeSchedules, currentReviewFee, resolveReviewFee, kstDateStr,
 } = require('../utils/campaignFee');
@@ -1003,12 +1003,11 @@ function _scopedEditorView(row) {
  *  레드팀 #2/#6 방어: **안전 필드 화이트리스트만** UPDATE(linked_*·participation_mode·
  *  source_work_order_id·work_detail·chat_url·notes·deadline 등 절대 미변경 = 교차테넌트
  *  PII 오배정·participation 플립·deadline 소실 원천 차단). 참여형 공고만 대상.
- *  레드팀 #3 방어: 사용 시점 isActiveEditor(phone8) 재검증 → 명단 제외 즉시 차단. */
+ *  ★ 결정 257: 인트라넷 관리자 로그인으로 받은 토큰(iu + ia:true)만 통과 — 옛 phone8 명단 토큰은 거절. */
 async function _scopedCampaignEdit(req, res) {
   const { id } = req.params;
-  const p8 = req.admin && req.admin.phone8;
-  if (!p8 || !(await isActiveEditor(p8))) {
-    return res.status(403).json({ ok: false, error: '공고수정 권한이 없습니다. (허용 명단에서 제외되었을 수 있습니다)' });
+  if (!isIntranetAdminCampaignToken(req.admin)) {
+    return res.status(403).json({ ok: false, error: '공고수정 권한이 없습니다. 리뷰어 앱에서 "관리자로 공고 수정"으로 다시 로그인해 주세요.' });
   }
   const { rows: cur } = await pool.query('SELECT * FROM recruit_campaigns WHERE id = $1', [id]);
   if (!cur.length) return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
