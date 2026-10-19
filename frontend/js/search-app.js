@@ -1000,6 +1000,7 @@ function _batchMountDropzone() {
   });
   document.addEventListener("paste", e => {
     if (!_BATCH) return;
+    if (!box.isConnected || !box.offsetParent) return;   // 이 칸이 안 보이는 화면(리뷰 제출 등)의 붙여넣기는 받지 않는다 — 숨은 카드로 새지 않게
     const imgs = [...((e.clipboardData && e.clipboardData.items) || [])]
       .filter(i => i.type && i.type.startsWith("image/")).map(i => i.getAsFile()).filter(Boolean);
     if (imgs.length) { e.preventDefault(); _batchTakeFiles(imgs); }   // 이미지일 때만 가로챔(텍스트 붙여넣기 보존)
@@ -1937,6 +1938,7 @@ document.addEventListener("DOMContentLoaded", () => {
   hideLoading();
   bindEnter();
   bindDragDrop();
+  bindPasteUpload();
   // ★ mode=form / s= 파라미터 감지 → 구매양식 전용 화면 진입
   if (initOrderFormMode()) return; // 구매양식 모드이면 이후 일반 초기화 스킵
 
@@ -2768,7 +2770,7 @@ function _renderMultiImageSlots(items) {
         <div class="mr-slot-title">${escHtml(productLabel)}${escHtml(optTxt)}</div>
         <span class="mr-slot-status wait" id="mrSlotStatus_${idx}">대기</span>
       </div>
-      <div class="mr-slot-dropzone" id="mrDz_${idx}"
+      <div class="mr-slot-dropzone" id="mrDz_${idx}" onclick="_zoneTap(event,this)"
            ondragover="event.preventDefault();this.classList.add('drag-over')"
            ondragleave="this.classList.remove('drag-over')"
            ondrop="_mrOnDrop(event,${idx})">
@@ -2779,6 +2781,7 @@ function _renderMultiImageSlots(items) {
           <span>클릭 또는 드래그 · JPG/PNG/WebP</span>
         </div>
         <div class="mr-slot-preview hidden" id="mrPreview_${idx}"></div>
+        ${_dzSplitHtml()}
       </div>
       <textarea class="mr-slot-memo" id="mrMemo_${idx}" rows="1"
                 placeholder="비고 - 블로그체험단인 경우 포스팅URL (선택)" style="margin-top:8px"></textarea>`;
@@ -2823,13 +2826,14 @@ function _renderCaptureSlots(item, slots, paneCard) {
     const slotEl = document.createElement("div");
     slotEl.className = "mr-slot";
     slotEl.id = `csSlot_${slot.key}`;
+    if (isDone) slotEl.dataset.submitted = "1";   // 붙여넣기 기본 대상(비어 있는 첫 칸)에서 이미 제출한 칸은 건너뛴다(결정 263)
     slotEl.innerHTML = `
       <div class="mr-slot-header">
         <div class="mr-slot-num">${isReceipt ? ++receiptIndex : ++reviewIndex}</div>
         <div class="mr-slot-title">${escHtml(slot.label || slot.key)}${optional ? ' <span style="font-size:.72rem;color:#B45309;font-weight:700">(선택 · 발행 확정 후 제출)</span>' : ''}${isDone ? ' <span style="font-size:.72rem;color:#16a34a;font-weight:600">(이미 제출 — 다시 올리면 교체)</span>' : ''}</div>
         ${statusHtml}
       </div>
-      <div class="mr-slot-dropzone" id="csDz_${slot.key}"
+      <div class="mr-slot-dropzone" id="csDz_${slot.key}" onclick="_zoneTap(event,this)"
            ondragover="event.preventDefault();this.classList.add('drag-over')"
            ondragleave="this.classList.remove('drag-over')"
            ondrop="_csOnDrop(event,'${slot.key}')">
@@ -2840,6 +2844,7 @@ function _renderCaptureSlots(item, slots, paneCard) {
           <span>클릭 또는 드래그 · JPG/PNG/WebP</span>
         </div>
         <div class="mr-slot-preview hidden" id="csPreview_${slot.key}"></div>
+        ${_dzSplitHtml()}
       </div>
       ${optionalHint}
       <div id="csGuide_${slot.key}"></div>`;
@@ -3472,6 +3477,7 @@ function goStep(n) {
       : '<i class="fas fa-paper-plane"></i> 제출하기';
   }
   if (n === 3) _updateReceiptStepActions();
+  _pastePaint();   // 단계가 바뀌면 붙여넣기 대상 칸 표시도 그 단계 기준으로
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -3676,6 +3682,131 @@ function bindDragDrop() {
 }
 function onFilesSelected(e) { addFiles(Array.from(e.target.files)); e.target.value = ""; }
 
+/* ── 사진 칸 3분할(PC): 왼쪽 Ctrl+V 붙여넣기 · 가운데 끌어다 놓기 · 오른쪽 파일 추가 (2026-10-20) ──
+ *  사용자 요청: "저장 없이 Ctrl+V 로 바로 붙여넣기 · 어딜 누르고 붙여넣어야 하는지 불분명 · 선택했다는 시각적 표시 ·
+ *  클릭 시 바로 파일탐색기를 열지 말 것 · 영역을 3분할(좌 Ctrl+V / 중앙 끌어다놓기 / 우 파일추가)".
+ *  ★ PC(마우스)만 3분할을 보인다 — 휴대폰은 Ctrl+V·끌어다 놓기가 없어 종전대로 누르면 바로 사진 고르기(화면 불변).
+ *  ★ 넣는 길은 클릭·드래그와 같은 addFiles / _mrAddFiles / _csAddFiles — 형식·10MB·AI 사전확인 사본 0.
+ *  ★ 선택된 칸 = 마지막으로 누른 칸 · 아직 안 눌렀으면 비어 있는 첫 칸. 실선 파란 테두리 + 왼쪽 칸 "✓ 선택됨"(css .paste-target).
+ *  ★ 파일 탐색기는 오른쪽 [파일 추가]만 연다. 칸의 다른 곳을 누르면 그 칸을 선택만 한다.
+ *  ★ Ctrl+V 는 화면 어디서나 → 선택된 칸. 클립보드에 사진이 없으면 가로채지 않는다(비고란 글자 붙여넣기 그대로).
+ *  ★ 지금 보이는 단계 화면의 보이는 칸에서만 받는다 — 구매양식 일괄 캡처(_batchMountDropzone)와 겹쳐 받지 않는다. */
+const _PASTE_ZONE_SEL = "#dropZone, .mr-slot-dropzone";
+let _pasteZoneId = "";
+function _isPcPointer() {
+  try { return window.matchMedia("(hover:hover) and (pointer:fine)").matches; } catch (_) { return false; }
+}
+function _pasteZones() {
+  const pane = document.querySelector(".step-pane.active");
+  if (!pane || !pane.offsetParent) return [];
+  return [...pane.querySelectorAll(_PASTE_ZONE_SEL)].filter(z => z.id && z.offsetParent);
+}
+function _pasteZoneFiles(z) {
+  if (z.id === "dropZone") return S.files || [];
+  let m = z.id.match(/^mrDz_(\d+)$/); if (m) return (S.filesByIdx && S.filesByIdx[m[1]]) || [];
+  m = z.id.match(/^csDz_(.+)$/);     if (m) return (S.filesBySlot && S.filesBySlot[m[1]]) || [];
+  return [];
+}
+/** 사용자가 누른 칸이 먼저 · 아니면 "비어 있는 첫 칸"(이미 제출한 칸은 비어 보여도 건너뛴다 — 덮어쓰기 방지).
+ *  ★ 자동으로 고른 칸은 _pasteZoneId 에 적지 않는다 — 적으면 한 칸이 찬 뒤에도 같은 칸에 계속 쌓인다(누른 칸만 기억). */
+function _pasteTargetZone() {
+  const zones = _pasteZones(); if (!zones.length) return null;
+  const done = z => { const sl = z.closest && z.closest(".mr-slot"); return !!(sl && sl.dataset.submitted === "1"); };
+  return zones.find(z => z.id === _pasteZoneId) || zones.find(z => !_pasteZoneFiles(z).length && !done(z))
+    || zones.find(z => !done(z)) || zones[0];
+}
+function _pastePaint() {
+  const t = _pasteTargetZone();
+  document.querySelectorAll(".paste-target").forEach(z => { if (z !== t) z.classList.remove("paste-target"); });
+  if (t && !t.classList.contains("paste-target")) t.classList.add("paste-target");
+}
+function _pasteZoneLabel(z) {
+  if (z.id === "dropZone") return "리뷰 캡처";
+  const slot = z.closest(".mr-slot");
+  const num = slot && slot.querySelector(".mr-slot-num"), tt = slot && slot.querySelector(".mr-slot-title");
+  const title = tt ? String((tt.firstChild && tt.firstChild.textContent) || tt.textContent || "").trim() : "";
+  return (num ? num.textContent.trim() + "번 " : "") + (title || "사진");
+}
+function _zonePickerInput(z) {
+  if (z.id === "dropZone") return document.getElementById("imgInput");
+  let m = z.id.match(/^mrDz_(\d+)$/); if (m) return document.getElementById("mrFile_" + m[1]);
+  m = z.id.match(/^csDz_(.+)$/);     if (m) return document.getElementById("csFile_" + m[1]);
+  return null;
+}
+/** 3분할 막대(PC 전용 — css 가 휴대폰에서 숨긴다). 칸마다 하나씩, 미리보기 뒤에 둔다(사진이 있으면 한 줄로 줄어든다). */
+function _dzSplitHtml() {
+  return '<div class="dz-split">'
+    + '<button type="button" class="ds-cell ds-paste" data-act="paste"><i class="fas fa-paste"></i><b>Ctrl+V</b><span class="ds-sub">캡처 후 붙여넣기</span></button>'
+    + '<div class="ds-cell ds-drop"><i class="fas fa-hand-pointer"></i><b>끌어다 놓기</b><span class="ds-sub">사진을 여기로</span></div>'
+    + '<button type="button" class="ds-cell ds-file" data-act="file"><i class="fas fa-folder-open"></i><b>파일 추가</b><span class="ds-sub">내 PC에서 고르기</span></button>'
+    + '</div>';
+}
+/** 사진 칸을 눌렀을 때. PC = 3분할(왼쪽 붙여넣기 · 오른쪽 파일 추가 · 그 밖은 선택만) / 휴대폰 = 종전대로 바로 사진 고르기. */
+function _zoneTap(e, z) {
+  if (!z) return;
+  const cell = e && e.target && e.target.closest && e.target.closest(".ds-cell");
+  if (!cell && e && e.target && e.target.closest && e.target.closest("button")) return;   // 사진 삭제(×) 등은 각자 처리
+  if (!_isPcPointer()) {
+    if (e && e.target && e.target.tagName === "INPUT") return;   // 칸을 덮은 파일 입력을 직접 누른 경우 = 브라우저가 이미 연다
+    const inp = _zonePickerInput(z); if (inp) inp.click();
+    return;
+  }
+  _pasteZoneId = z.id; _pastePaint();
+  const act = cell && cell.dataset.act;
+  if (act === "file") { const inp = _zonePickerInput(z); if (inp) inp.click(); }
+  else if (act === "paste") _zonePasteFromClipboard(z);
+}
+/** 왼쪽 [Ctrl+V] 칸을 눌렀을 때 — 그 칸을 선택하고 클립보드 사진을 바로 읽어 넣는다.
+ *  못 읽으면(권한 거절·미지원·사진 없음) 이유와 "키보드 Ctrl+V" 를 안내 — 칸은 이미 선택돼 있어 Ctrl+V 가 그리로 간다. */
+async function _zonePasteFromClipboard(z) {
+  const KEY_HINT = "키보드에서 Ctrl+V 를 눌러주세요 — 선택한 칸에 들어갑니다.";
+  if (!(navigator.clipboard && navigator.clipboard.read)) { showToast("이 브라우저는 눌러서 붙여넣기를 못 해요. " + KEY_HINT, "info", 5000); return; }
+  let items;
+  try { items = await navigator.clipboard.read(); }
+  catch (_) { showToast("브라우저가 클립보드 읽기를 막았어요. " + KEY_HINT, "warning", 5000); return; }
+  const blobs = [];
+  for (const it of items || []) {
+    const ty = (it.types || []).find(t => t.startsWith("image/"));
+    if (ty) { try { blobs.push(await it.getType(ty)); } catch (_) {} }
+  }
+  if (!blobs.length) { showToast("클립보드에 사진이 없어요. 먼저 화면을 캡처(Win+Shift+S)한 뒤 Ctrl+V 를 누르거나 다시 눌러주세요.", "warning", 5000); return; }
+  _pasteInto(z, blobs);
+}
+/** 붙여넣은 사진(클립보드 Blob/File)을 그 칸에 넣는다 — 클릭·드래그와 같은 함수로.
+ *  ★ 성공 안내는 실제로 받아들여진 장수만(10MB 초과·형식 불가·읽기 실패는 넣는 함수가 각자 오류 안내). */
+async function _pasteInto(z, imgs) {
+  // 클립보드 사진은 이름이 없거나 모두 image.png 라 구분되게 다시 붙인다(내용은 그대로)
+  const stamp = new Date().toTimeString().slice(0, 8).replace(/:/g, "");
+  const files = imgs.map((f, k) => {
+    const ext = String((f.type || "image/png").split("/")[1] || "png").replace("jpeg", "jpg");
+    try { return new File([f], `붙여넣기_${stamp}${imgs.length > 1 ? "_" + (k + 1) : ""}.${ext}`, { type: f.type || "image/png" }); } catch (_) { return f; }
+  });
+  const before = _pasteZoneFiles(z).length;
+  let m;
+  if (z.id === "dropZone") await addFiles(files);
+  else if ((m = z.id.match(/^mrDz_(\d+)$/))) await _mrAddFiles(Number(m[1]), files);
+  else if ((m = z.id.match(/^csDz_(.+)$/))) await _csAddFiles(m[1], files);
+  else return;
+  const took = _pasteZoneFiles(z).length - before;
+  if (took > 0) showToast(`붙여넣은 사진 ${took}장을 「${_pasteZoneLabel(z)}」 칸에 넣었어요`, "success");
+  _pastePaint();
+}
+function bindPasteUpload() {
+  // 칸이 새로 그려지거나(다건·슬롯 전환) 사진이 들어가 "비어 있는 첫 칸"이 바뀌면 표시를 다시 맞춘다
+  let raf = 0;
+  new MutationObserver(() => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; _pastePaint(); }); })
+    .observe(document.body, { childList: true, subtree: true });
+  document.addEventListener("paste", e => {
+    if (!_pasteZones().length) return;
+    const imgs = [...((e.clipboardData && e.clipboardData.items) || [])]
+      .filter(i => i.kind === "file" && i.type && i.type.startsWith("image/")).map(i => i.getAsFile()).filter(Boolean);
+    if (!imgs.length) return;                 // 사진이 아니면 그대로(글자 붙여넣기 보존)
+    e.preventDefault();
+    const z = _pasteTargetZone(); if (!z) return;
+    _pasteInto(z, imgs);
+  });
+}
+
 /**
  * ★ 개선: 파일 선택 즉시 Base64 변환 후 { file, b64, size, type, name } 객체로 저장
  *   → submitReview() 시점에 File 참조가 만료되는 Android WebView 문제 방지
@@ -3719,7 +3850,7 @@ function renderPreviews() {
   });
   const add = document.createElement("div"); add.className = "prev-add";
   add.innerHTML = '<i class="fas fa-plus"></i><span>추가</span>';
-  add.onclick = e => { e.stopPropagation(); document.getElementById("imgInput").click(); };
+  add.onclick = e => { e.stopPropagation(); document.getElementById("imgInput").click(); };   // 휴대폰 전용(PC 는 3분할 [파일 추가] — css 로 숨김)
   prev.appendChild(add);
 }
 
