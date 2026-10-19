@@ -166,8 +166,8 @@ function mkDb({ options = [], paused = false, reports = 0, alerts = [], particip
     ok('멈춤 경로: whole 은 true 를 명시했을 때만', /whole: b\.whole === true/.test(tb));
     const idx = R('index.js');
     ok('필수 스키마: 공고 전체 멈춤 칸 3개', ['at', 'by', 'reason'].every(k => idx.includes(`['recruit_campaigns', 'soldout_paused_${k}']`)));
-    const mig = R('migrations/190_campaign_soldout_pause.sql');
-    ok('190: 추가만(ADD COLUMN IF NOT EXISTS 3개 · 다른 문장 없음)', (mig.match(/ADD COLUMN IF NOT EXISTS soldout_paused_/g) || []).length === 3
+    const mig = R('migrations/193_campaign_soldout_pause.sql');
+    ok('193: 추가만(ADD COLUMN IF NOT EXISTS 3개 · 다른 문장 없음)', (mig.match(/ADD COLUMN IF NOT EXISTS soldout_paused_/g) || []).length === 3
       && !/^\s*(UPDATE|DELETE|DROP|CREATE)/im.test(mig));
     ok('status 칸에 paused 를 쓰지 않는다(공고 수정 저장이 멈춤을 풀지 않게)', !/status\s*=\s*'paused'/.test(R('src/services/campaignOptionPause.service.js')));
     ok('멈춤이 공고 updated_at 을 건드리지 않는다(공고 수정 충돌 판정 무접촉)', !/soldout_paused_at = (NOW\(\)|NULL)[^`]*updated_at/.test(R('src/services/campaignOptionPause.service.js')));

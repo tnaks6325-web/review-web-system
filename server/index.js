@@ -148,7 +148,7 @@ const REQUIRED_SCHEMA = [
   ['reviewer_identity_decisions', 'notice_dismissed_at'],
   // 186 — 본계정 추가 배송지. 정리(fold)가 이 표에 주소를 남기지 못하면 정리 자체가 되돌려진다 — 표 없이 서버가 뜨지 않게.
   ['reviewer_delivery_addresses', 'address_key'],
-  // 190 — 공고 전체 품절 멈춤(결정 259). 작업조건 카드·품절 알림·멈추기가 이 칸을 명시 SELECT/UPDATE 한다(없으면 42703).
+  // 193 — 공고 전체 품절 멈춤(결정 259). 작업조건 카드·품절 알림·멈추기가 이 칸을 명시 SELECT/UPDATE 한다(없으면 42703).
   ['recruit_campaigns', 'soldout_paused_at'],
   ['recruit_campaigns', 'soldout_paused_by'],
   ['recruit_campaigns', 'soldout_paused_reason'],
