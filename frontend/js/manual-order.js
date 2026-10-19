@@ -100,6 +100,7 @@
 .mo-pick{display:inline-block;margin-top:3px;font-size:9.5px;font-weight:700;color:#6B7280;text-decoration:underline;cursor:pointer}
 .mo-drop{border:1.5px dashed #cce0fb;border-radius:11px;background:#F7FAFF;padding:14px 12px;text-align:center;cursor:pointer;outline:none}
 .mo-drop:focus,.mo-drop.over{border-color:#3182f6;background:#EBF3FE}
+.mo-drop.prz-host{padding:6px 6px 8px;cursor:default}
 .mo-drop .ic{font-size:19px;line-height:1}
 .mo-drop .t{font-size:11.5px;color:#4B5563;margin-top:4px}
 .mo-stage{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}
@@ -185,9 +186,11 @@
              ondragover="event.preventDefault();this.classList.add('over')"
              ondragleave="this.classList.remove('over')"
              ondrop="ManualOrder.onDrop(event)">
-          <div class="ic">🧾</div>
+          ${window.PasteReady   /* 결정 264: [Ctrl+V 붙여넣기 | 끌어다 놓기 | 파일 선택] + "지금 Ctrl+V 하면 여기에" 상태 줄 */
+            ? PasteReady.html({ dropSub: '여러 장 가능', file: { onchange: 'ManualOrder.onStageFiles(event)', multiple: true } })
+            : `<div class="ic">🧾</div>
           <div class="t">여기에 <b>Ctrl+V</b> 하거나 이미지를 끌어다 놓으세요 · 여러 장 가능</div>
-          <label class="mo-pick">파일 선택<input type="file" accept="image/*" multiple hidden onchange="ManualOrder.onStageFiles(event)"></label>
+          <label class="mo-pick">파일 선택<input type="file" accept="image/*" multiple hidden onchange="ManualOrder.onStageFiles(event)"></label>`}
         </div>
         <div class="mo-stage" id="moStage"></div>
         <div class="mo-hint">
@@ -197,6 +200,7 @@
       </div>`,
       `<span class="sp"></span><button class="mo-btn pri" onclick="ManualOrder.parse()">다음 — 자동으로 나누기</button>`);
     renderStage();
+    if (window.PasteReady) PasteReady.bind(document.getElementById('moDrop'), _stageAll, window.toast);
     setTimeout(() => { const t = document.getElementById('moText'); if (t) t.focus(); }, 40);
   }
 
@@ -246,27 +250,44 @@
   function unstage(i) { STAGED.splice(i, 1); renderStage(); }
 
   /** 텍스트 칸에 이미지가 붙여넣어지면 캡처로 받는다(관리자는 그냥 Ctrl+V만 한다) */
+  /** 1단계 보관함에 넣는 길은 이 한 곳 — 붙여넣기·끌어놓기·파일 선택·[Ctrl+V] 칸 누르기 모두. 받았다는 표시(초록 깜빡임)도 여기서. */
+  function _stageAll(files) {
+    const imgs = Array.from(files || []).filter(f => f && f.type && f.type.indexOf('image/') === 0);
+    if (!imgs.length) return;
+    imgs.forEach(stageImage);
+    if (window.PasteReady) PasteReady.flash(document.getElementById('moDrop'));
+  }
   function onTextPaste(ev) {
     const imgs = _imagesFrom(ev.clipboardData);
     if (!imgs.length) return;          // 평범한 텍스트 붙여넣기는 그대로
     ev.preventDefault();
-    imgs.forEach(stageImage);
+    _stageAll(imgs);
   }
   function onStagePaste(ev) {
     const imgs = _imagesFrom(ev.clipboardData);
     if (!imgs.length) return;
     ev.preventDefault();
-    imgs.forEach(stageImage);
+    _stageAll(imgs);
   }
+  /* ★ 1단계 화면이 떠 있으면 칸을 먼저 누르지 않아도 Ctrl+V 사진이 보관함으로 — "지금 Ctrl+V 하면 여기에" 표시와 실제를 맞춘다(결정 264).
+     칸·글자칸이 이미 처리했으면(defaultPrevented) 건너뛴다 · 사진이 없으면 가로채지 않는다(글자 붙여넣기 그대로). */
+  document.addEventListener('paste', ev => {
+    if (ev.defaultPrevented) return;
+    const z = document.getElementById('moDrop');
+    if (!z || !z.offsetParent) return;
+    const imgs = _imagesFrom(ev.clipboardData);
+    if (!imgs.length) return;
+    ev.preventDefault();
+    _stageAll(imgs);
+  });
   function onDrop(ev) {
     ev.preventDefault();
     const el = document.getElementById('moDrop');
     if (el) el.classList.remove('over');
-    Array.from((ev.dataTransfer && ev.dataTransfer.files) || [])
-      .filter(f => f.type && f.type.indexOf('image/') === 0).forEach(stageImage);
+    _stageAll((ev.dataTransfer && ev.dataTransfer.files) || []);
   }
   function onStageFiles(ev) {
-    Array.from((ev.target && ev.target.files) || []).forEach(stageImage);
+    _stageAll((ev.target && ev.target.files) || []);
     ev.target.value = '';
   }
   function _imagesFrom(cd) {
