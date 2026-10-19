@@ -1000,6 +1000,7 @@ function _batchMountDropzone() {
   });
   document.addEventListener("paste", e => {
     if (!_BATCH) return;
+    if (!box.isConnected || !box.offsetParent) return;   // 이 칸이 안 보이는 화면(리뷰 제출 등)의 붙여넣기는 받지 않는다 — 숨은 카드로 새지 않게
     const imgs = [...((e.clipboardData && e.clipboardData.items) || [])]
       .filter(i => i.type && i.type.startsWith("image/")).map(i => i.getAsFile()).filter(Boolean);
     if (imgs.length) { e.preventDefault(); _batchTakeFiles(imgs); }   // 이미지일 때만 가로챔(텍스트 붙여넣기 보존)
@@ -1937,6 +1938,7 @@ document.addEventListener("DOMContentLoaded", () => {
   hideLoading();
   bindEnter();
   bindDragDrop();
+  bindPasteUpload();
   // ★ mode=form / s= 파라미터 감지 → 구매양식 전용 화면 진입
   if (initOrderFormMode()) return; // 구매양식 모드이면 이후 일반 초기화 스킵
 
@@ -2777,6 +2779,7 @@ function _renderMultiImageSlots(items) {
         <div class="mr-slot-dz-hint" id="mrDzHint_${idx}">
           <i class="fas fa-cloud-upload-alt"></i>
           <span>클릭 또는 드래그 · JPG/PNG/WebP</span>
+          <em class="dz-paste-tip">또는 캡처 후 Ctrl+V</em>
         </div>
         <div class="mr-slot-preview hidden" id="mrPreview_${idx}"></div>
       </div>
@@ -2838,6 +2841,7 @@ function _renderCaptureSlots(item, slots, paneCard) {
         <div class="mr-slot-dz-hint" id="csDzHint_${slot.key}">
           <i class="fas fa-cloud-upload-alt"></i>
           <span>클릭 또는 드래그 · JPG/PNG/WebP</span>
+          <em class="dz-paste-tip">또는 캡처 후 Ctrl+V</em>
         </div>
         <div class="mr-slot-preview hidden" id="csPreview_${slot.key}"></div>
       </div>
@@ -3472,6 +3476,7 @@ function goStep(n) {
       : '<i class="fas fa-paper-plane"></i> 제출하기';
   }
   if (n === 3) _updateReceiptStepActions();
+  _pastePaint();   // 단계가 바뀌면 붙여넣기 대상 칸 표시도 그 단계 기준으로
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -3675,6 +3680,75 @@ function bindDragDrop() {
   });
 }
 function onFilesSelected(e) { addFiles(Array.from(e.target.files)); e.target.value = ""; }
+
+/* ── Ctrl+V 붙여넣기(리뷰 제출 화면 · 2026-10-20) ──
+ *  캡처한 뒤 파일로 저장하지 않고 화면 어디서나 Ctrl+V → "붙여넣기 대상" 칸으로 들어간다.
+ *  ★ 넣는 길은 클릭·드래그와 같은 addFiles / _mrAddFiles / _csAddFiles — 형식·10MB·AI 사전확인 사본 0.
+ *  ★ 대상 = 마지막으로 마우스를 올렸거나 누른 칸 · 없으면 비어 있는 첫 칸. 대상 칸에는 파란 테두리 +
+ *    "Ctrl+V 하면 여기에 들어가요"(PC 만 — css .paste-target). "어디를 누르고 붙여넣나"가 안 보이던 문제.
+ *  ★ 클립보드에 사진이 없으면 가로채지 않는다(비고란 글자 붙여넣기 그대로).
+ *  ★ 지금 보이는 단계 화면의 보이는 칸에서만 받는다 — 구매양식 일괄 캡처(_batchMountDropzone)와 겹쳐 받지 않는다. */
+const _PASTE_ZONE_SEL = "#dropZone, .mr-slot-dropzone";
+let _pasteZoneId = "";
+function _pasteZones() {
+  const pane = document.querySelector(".step-pane.active");
+  if (!pane || !pane.offsetParent) return [];
+  return [...pane.querySelectorAll(_PASTE_ZONE_SEL)].filter(z => z.id && z.offsetParent);
+}
+function _pasteZoneFiles(z) {
+  if (z.id === "dropZone") return S.files || [];
+  let m = z.id.match(/^mrDz_(\d+)$/); if (m) return (S.filesByIdx && S.filesByIdx[m[1]]) || [];
+  m = z.id.match(/^csDz_(.+)$/);     if (m) return (S.filesBySlot && S.filesBySlot[m[1]]) || [];
+  return [];
+}
+function _pasteTargetZone() {
+  const zones = _pasteZones(); if (!zones.length) return null;
+  return zones.find(z => z.id === _pasteZoneId) || zones.find(z => !_pasteZoneFiles(z).length) || zones[0];
+}
+function _pastePaint() {
+  const t = _pasteTargetZone();
+  document.querySelectorAll(".paste-target").forEach(z => { if (z !== t) z.classList.remove("paste-target"); });
+  if (t && !t.classList.contains("paste-target")) t.classList.add("paste-target");
+}
+function _pasteZoneLabel(z) {
+  if (z.id === "dropZone") return "리뷰 캡처";
+  const slot = z.closest(".mr-slot");
+  const num = slot && slot.querySelector(".mr-slot-num"), tt = slot && slot.querySelector(".mr-slot-title");
+  const title = tt ? String((tt.firstChild && tt.firstChild.textContent) || tt.textContent || "").trim() : "";
+  return (num ? num.textContent.trim() + "번 " : "") + (title || "사진");
+}
+function bindPasteUpload() {
+  const pick = e => { const z = e.target && e.target.closest && e.target.closest(_PASTE_ZONE_SEL);
+    if (z && z.id && z.id !== _pasteZoneId && _pasteZones().includes(z)) { _pasteZoneId = z.id; _pastePaint(); } };
+  document.addEventListener("pointerover", pick);
+  document.addEventListener("focusin", pick);
+  // 칸이 새로 그려지거나(다건·슬롯 전환) 사진이 들어가 "비어 있는 첫 칸"이 바뀌면 표시를 다시 맞춘다
+  let raf = 0;
+  new MutationObserver(() => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; _pastePaint(); }); })
+    .observe(document.body, { childList: true, subtree: true });
+  document.addEventListener("paste", e => {
+    if (!_pasteZones().length) return;
+    const imgs = [...((e.clipboardData && e.clipboardData.items) || [])]
+      .filter(i => i.kind === "file" && i.type && i.type.startsWith("image/")).map(i => i.getAsFile()).filter(Boolean);
+    if (!imgs.length) return;                 // 사진이 아니면 그대로(글자 붙여넣기 보존)
+    e.preventDefault();
+    const z = _pasteTargetZone(); if (!z) return;
+    // 클립보드 사진은 이름이 모두 image.png 라 구분되게 다시 붙인다(내용은 그대로)
+    const stamp = new Date().toTimeString().slice(0, 8).replace(/:/g, "");
+    const files = imgs.map((f, k) => {
+      const ext = String(f.type.split("/")[1] || "png").replace("jpeg", "jpg");
+      try { return new File([f], `붙여넣기_${stamp}${imgs.length > 1 ? "_" + (k + 1) : ""}.${ext}`, { type: f.type }); } catch (_) { return f; }
+    });
+    _pasteZoneId = z.id;
+    let m;
+    if (z.id === "dropZone") addFiles(files);
+    else if ((m = z.id.match(/^mrDz_(\d+)$/))) _mrAddFiles(Number(m[1]), files);
+    else if ((m = z.id.match(/^csDz_(.+)$/))) _csAddFiles(m[1], files);
+    else return;
+    showToast(`붙여넣은 사진 ${files.length}장을 「${_pasteZoneLabel(z)}」 칸에 넣었어요`, "success");
+    _pastePaint();
+  });
+}
 
 /**
  * ★ 개선: 파일 선택 즉시 Base64 변환 후 { file, b64, size, type, name } 객체로 저장
