@@ -9124,7 +9124,8 @@ let   _dashPollTabSnap = {}; // { "sheetId||tabName": { done: bool, total: int }
 
 /** 탭 완료 여부 판정 (대시보드 표시 기준과 동일) */
 function _isTabComplete(t) {
-  return t.isClosed || (t.pending === 0 && t.total > 0);
+  // ★ 작업보드 🏁 마감(workFinished)도 ⬛ 마감과 같이 "이미 끝남" — 폴링 완료 알림 대상이 아니다(결정 255).
+  return t.isClosed || t.workFinished === true || (t.pending === 0 && t.total > 0);
 }
 
 /** 현재 stats에서 스냅샷 생성 */
