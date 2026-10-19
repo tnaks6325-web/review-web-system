@@ -58,20 +58,23 @@ function _leaf(v) {
  * 공유 상태 → { 경로: 정규화 값 }.
  * @param {object} state 작업오더 행 또는 인트라넷 payload 모양(칸 이름 = sharedFields key)
  * @param {{useRenames?: boolean}} [opts] mine 을 펼칠 때만 true — prev_name/prev_label 로 base 경로에 맞춘다
- * @returns {{ paths: Map<string,string>, renames: Array<{kind:string,from:string,to:string,product?:string}>, hasProducts: boolean }}
+ * @returns {{ paths: Map<string,string>, meta: Map<string,object>, renames: Array<{kind:string,from:string,to:string,product?:string}>, hasProducts: boolean }}
  */
 function flattenState(state, { useRenames = false } = {}) {
   const s = state || {};
   const paths = new Map();
+  const meta = new Map();   // 경로 → { kind: 'field'|'product'|'option'|'leaf', key? } — 이름에 '.' 이 있어도 경로 종류를 글자로 추측하지 않게
   const renames = [];
   for (const f of SHARED_FIELDS) {
     if (f.owner === 'derived') continue;
     if (!Object.prototype.hasOwnProperty.call(s, f.key)) continue;
     paths.set('f:' + f.key, canon(f.key, s[f.key]));
+    meta.set('f:' + f.key, { kind: 'field', key: f.key });
   }
   const products = Object.prototype.hasOwnProperty.call(s, 'product_options_json') ? _parseProducts(s.product_options_json) : null;
   if (products && !Array.isArray(products)) {
     paths.set('products:legacy', products.legacyText);
+    meta.set('products:legacy', { kind: 'legacy' });
   } else if (products) {
     for (const p of products) {
       if (!p || typeof p !== 'object') continue;
@@ -82,9 +85,11 @@ function flattenState(state, { useRenames = false } = {}) {
       if (prev && prev !== name) renames.push({ kind: 'product', from: prev, to: name });
       const pBase = 'p:' + pk;
       paths.set(pBase, '1');
+      meta.set(pBase, { kind: 'product' });
       for (const [k, v] of Object.entries(p)) {
         if (PRODUCT_SKIP.has(k)) continue;
         paths.set(`${pBase}.${k}`, k === 'qty_tiers' ? CANON.json(v) : _leaf(v));
+        meta.set(`${pBase}.${k}`, { kind: 'leaf', key: k, parent: pBase });
       }
       for (const op of (Array.isArray(p.options) ? p.options : [])) {
         const label = _optionKey(op);
@@ -94,14 +99,16 @@ function flattenState(state, { useRenames = false } = {}) {
         if (prevLabel && prevLabel !== label) renames.push({ kind: 'option', product: name, from: prevLabel, to: label });
         const oBase = `${pBase}|o:${ok}`;
         paths.set(oBase, '1');
+        meta.set(oBase, { kind: 'option' });
         for (const [k, v] of Object.entries(op || {})) {
           if (OPTION_SKIP.has(k)) continue;
           paths.set(`${oBase}.${k}`, _leaf(v));
+          meta.set(`${oBase}.${k}`, { kind: 'leaf', key: k, parent: oBase });
         }
       }
     }
   }
-  return { paths, renames, hasProducts: !!products };
+  return { paths, meta, renames, hasProducts: !!products };
 }
 
 /** 경로의 주인 — 칸이면 표의 주인, 상품·옵션은 공유. */
@@ -128,6 +135,7 @@ function planSharedPatch({ base, mine, theirs, origin, forceMine = [] }) {
   const get = (st, k, productLike) => (st.paths.has(k) ? st.paths.get(k) : (productLike && st.hasProducts ? ABSENT : undefined));
 
   const out = { writes: [], conflicts: [], readOnly: [], same: [], renames: M.renames };
+  const metaOf = (path) => M.meta.get(path) || B.meta.get(path) || T.meta.get(path) || null;
   for (const path of [...all].sort()) {
     const productLike = !path.startsWith('f:');
     const m = get(M, path, productLike);
@@ -135,7 +143,7 @@ function planSharedPatch({ base, mine, theirs, origin, forceMine = [] }) {
     const b = get(B, path, productLike);
     if (m === b) continue;                             // ① 손대지 않은 칸
     const t = get(T, path, productLike);
-    const row = { path, base: b, mine: m, theirs: t };
+    const row = { path, base: b, mine: m, theirs: t, meta: metaOf(path) };
     if (pathOwner(path) === 'intranet' && !intranetMayWrite) { out.readOnly.push(row); continue; }   // ②
     if (t === m) { out.same.push(row); continue; }                                                   // ③
     if (t === b || force.has(path)) { out.writes.push(row); continue; }                              // ④

@@ -32,6 +32,10 @@ const { normalizeReviewTypeMix } = require('../utils/reviewTypeMix');
 const { deliveryBaseType, parseDeliveryType, canonicalDeliveryValue, isCourierProxyDelivery } = require('../utils/deliveryType');
 const { normalizeDeliveryTypeMix } = require('../utils/deliveryTypeMix');
 const { workKindForStore } = require('../utils/workKind');   // 099 — 체험단 종류(리뷰/블로그)
+// 양방향 동기화(결정 263) — 칸 목록·스위치·공유 저장 단일 출처
+const { SHARED_FIELDS } = require('../utils/sharedFields');
+const { readBidirSwitch } = require('../utils/bidirSwitch');
+const { applySharedPatch } = require('../services/sharedPatch.service');
 const { assertWorkOrderQuota, syncWorkOrderRecruitTotal } = require('../services/linkedRecruitQuota.service');
 const { projectIntranetAdvertiser, ensureTabOwnership, ADVERTISER_NAME_CONFLICT } = require('../services/advertiserProjection.service');
 
@@ -825,6 +829,92 @@ async function _sourceRevisionRaceResponse(res, sourceReviewOrderId, source) {
   });
 }
 
+/* ── 양방향 원본 수정(결정 263 · 3단계) ───────────────────────────────────────────────── */
+/** 인트라넷 본문 → 공유 상태(저장 형태). 값 계산은 종전 원본 수정과 같은 `_sourceContentNextValues`(사본 0). */
+function _sourceSharedMine(b, derived, source) {
+  const v = _sourceContentNextValues(b, derived);
+  const mine = {};
+  for (const f of SHARED_FIELDS) if (Object.prototype.hasOwnProperty.call(v, f.key)) mine[f.key] = v[f.key];
+  mine.product_options_json = v.product_options_json;
+  mine.product_option = v.product_option;
+  mine.sales_id = String(b.sales_id || '').trim();
+  mine.quote_id = String(b.quote_id || '').trim();
+  mine.contract_number = String(b.contract_number || '').trim();
+  mine.intranet_advertiser_id = source.intranetAdvertiserId;
+  if (b.purchase_channel_custom !== undefined) mine.purchase_channel_custom = _isTrue(b.purchase_channel_custom);
+  if (b.required_delivery_memo !== undefined) mine.required_delivery_memo = String(b.required_delivery_memo || '').trim();
+  return mine;
+}
+
+/** 같은 트랜잭션 안에서 원본 번호 규칙(결정 262)을 그대로 검사한다 — 잠근 행 기준. */
+function _sourceRevisionPreHook(source) {
+  return async (client, wo) => {
+    const cur = Number(wo.source_revision || 0);
+    if (cur === source.sourceRevision && wo.intake_idempotency_key === source.idempotencyKey) {
+      return { status: 200, body: { ok: true, data: wo, idempotent: true } };
+    }
+    if (source.sourceRevision <= cur) {
+      return { status: 409, body: { ok: false,
+        code: source.sourceRevision === cur ? 'revision_already_applied' : 'revision_stale',
+        error: '이미 처리된 원본 버전입니다. 최신 원본을 다시 확인해 주세요.', work_order_id: wo.id, source_revision: cur } };
+    }
+    if (source.sourceRevision !== cur + 1) {
+      return { status: 409, body: { ok: false, code: 'revision_gap',
+        error: '원본 리뷰오더 버전이 순서대로 전달되지 않았습니다.', work_order_id: wo.id, source_revision: cur } };
+    }
+    return null;
+  };
+}
+
+async function _intakeSourceBidir(res, { b, source, current, optionsJson, deliveryType, courierProxy, requester }) {
+  const bid = (b.bidir && typeof b.bidir === 'object' && !Array.isArray(b.bidir)) ? b.bidir : null;
+  // ★ 기준 버전이 없으면 저장하지 않는다 — 기준 없이 쓰면 그 사이 리뷰웹에서 고친 값을 조용히 덮는다.
+  //   구버전 인트라넷(bidir 블록 없음)은 마지막으로 받아 간 버전(intranet_acked_version)을 기준으로 쓴다.
+  const baseVersion = Number(bid && bid.base_sync_version) || Number(current.intranet_acked_version) || 0;
+  if (!baseVersion) {
+    return res.status(409).json({ ok: false, code: 'edit_base_required', work_order_id: current.id,
+      error: '리뷰웹과 연결된 오더입니다. 수정 창을 닫고 다시 열어 주세요.' });
+  }
+  const out = await applySharedPatch({
+    workOrderId: current.id,
+    mine: _sourceSharedMine(b, { optionsJson, deliveryType, courierProxy }, source),
+    baseVersion,
+    origin: 'intranet',
+    opId: bid && bid.op_id ? String(bid.op_id).slice(0, 120) : '',
+    actor: requester || '인트라넷',
+    forceMine: bid && Array.isArray(bid.force_mine) ? bid.force_mine.map(String).slice(0, 200) : [],
+    preHook: _sourceRevisionPreHook(source),
+    extraSets: {
+      source_revision: source.sourceRevision,
+      intake_idempotency_key: source.idempotencyKey,
+      intranet_advertiser_name: source.intranetAdvertiserName,
+      intranet_advertiser_contact: source.intranetAdvertiserContact,
+      intranet_advertiser_business_number: source.intranetAdvertiserBusinessNumber,
+    },
+  });
+  if (out.status === 200 && out.body && out.body.ok && !out.body.idempotent && out.body.data) {
+    _emitWorkOrderNew(out.body.data, { event: 'source_bidir_edit', source_revision: source.sourceRevision });
+  }
+  if (out.status === 200 && out.body && !out.body.data) out.body.data = current;   // 인트라넷은 응답의 작업오더 ID 를 읽는다
+  return res.status(out.status).json(out.body);
+}
+
+/** 관찰 모드 — 판정만 하고 기록한다(쓰기 0). 실패해도 종전 경로를 막지 않는다. */
+async function _observeSourceBidir({ b, current, optionsJson, deliveryType, courierProxy }) {
+  try {
+    const bid = (b.bidir && typeof b.bidir === 'object') ? b.bidir : null;
+    const baseVersion = Number(bid && bid.base_sync_version) || Number(current.intranet_acked_version) || Number(current.sync_version) || 0;
+    const { rows } = await pool.query('SELECT state FROM work_order_shared_snapshots WHERE work_order_id = $1 AND sync_version = $2', [current.id, baseVersion]);
+    if (!rows.length) { logger.info(`[bidir/observe] ${current.id} 기준 스냅숏 없음(버전 ${baseVersion})`); return; }
+    const { planSharedPatch } = require('../utils/sharedPatchPlan');
+    const plan = planSharedPatch({ base: rows[0].state, mine: _sourceSharedMine(b, { optionsJson, deliveryType, courierProxy }, normalizeReviewOrderSourceContract(b)),
+      theirs: require('../services/sharedPatch.service').readSharedState(current), origin: 'intranet' });
+    logger.info(`[bidir/observe] ${current.id} 쓰기 ${plan.writes.length} · 충돌 ${plan.conflicts.length} · ${[...plan.writes, ...plan.conflicts].map(x => x.path).join(', ').slice(0, 300)}`);
+  } catch (e) {
+    logger.warn(`[bidir/observe] ${current.id} 판정 실패(종전 경로 계속): ${e.message}`);
+  }
+}
+
 async function _intakeSourceRevisionHandler(req, res, next) {
   try {
     await _ensureTables();
@@ -891,6 +981,17 @@ async function _intakeSourceRevisionHandler(req, res, next) {
     if (String(current.work_series_id || '') !== String(source.workSeriesId || '')
       || Number(current.work_round || 1) !== Number(source.workRound || 1)) {
       return res.status(409).json({ ok: false, code: 'work_round_immutable', error: '기존 작업오더의 작업 계열과 차수는 수정할 수 없습니다. 차수 추가를 사용하세요.', work_order_id: current.id });
+    }
+
+    /* ★★ 양방향(결정 263 · 3단계) — 연결된 오더(`bidir_state='on'`)는 공유 저장 단일 출처로 간다.
+       스위치(`app_settings.bidir_sync.in2rw`)가 apply 일 때만. off·비상 스위치면 종전 경로 그대로(오늘 동작),
+       observe 면 판정만 기록하고 종전 경로로 계속 간다. 연결 안 된 오더는 언제나 종전 경로. */
+    if (current.bidir_state === 'on') {
+      const sw = await readBidirSwitch(pool);
+      if (sw.in2rw === 'apply') {
+        return await _intakeSourceBidir(res, { b, source, current, optionsJson, deliveryType, courierProxy, requester: String(b.requester_name || b.created_by || '').trim() });
+      }
+      if (sw.in2rw === 'observe') await _observeSourceBidir({ b, current, optionsJson, deliveryType, courierProxy });
     }
 
     // 접수·게시 기준이 확정된 오더는 원본에서 내용을 바꾸지 못한다.
@@ -1134,6 +1235,40 @@ async function _intakeSourceRevisionHandler(req, res, next) {
 }
 
 router.put('/intake/source/:sourceReviewOrderId', _intakeSourceRevisionHandler);
+
+// ═══════════════════════════════════════════════════════════
+// 양방향 수정 기준(결정 263 · 3단계) — 인트라넷 수정 창이 열 때 부른다(X-Intake-Key).
+// GET /api/order/intake/source/:sourceReviewOrderId/shared
+//   → { bidir_state, sync_version, writable: [칸], field_owner: {칸: 주인}, capabilities: { bidir_v1 } }
+// ★ 읽기만 한다. 연결 안 된 오더도 200(bidir_state 로 판단) — 인트라넷이 종전 경로로 저장한다.
+// ═══════════════════════════════════════════════════════════
+router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) => {
+  try {
+    await _ensureTables();
+    const expected = process.env.ORDER_INTAKE_KEY;
+    if (!expected) return res.status(503).json({ ok: false, error: 'intake key is not configured (ORDER_INTAKE_KEY).' });
+    if (!_intakeKeyMatches(req.headers['x-intake-key'], expected)) return res.status(401).json({ ok: false, error: 'Unauthorized.' });
+    const sid = String(req.params.sourceReviewOrderId || '').trim();
+    const { rows } = await pool.query(
+      `SELECT id, bidir_state, sync_version, deleted_at FROM work_orders WHERE source_review_order_id = $1 LIMIT 1`, [sid]);
+    if (!rows.length || rows[0].deleted_at) return res.status(404).json({ ok: false, error: '작업오더를 찾을 수 없습니다.' });
+    const sw = await readBidirSwitch(pool);
+    const { PHASE3_SHARED_FIELDS, INTRANET_EDITABLE_AFTER_ACCEPT } = require('../services/sharedPatch.service');
+    const active = rows[0].bidir_state === 'on' && sw.in2rw === 'apply';
+    res.json({
+      ok: true,
+      work_order_id: rows[0].id,
+      bidir_state: rows[0].bidir_state,
+      bidir_active: active,
+      sync_version: Number(rows[0].sync_version || 0),
+      writable: active ? [...PHASE3_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT] : null,
+      field_owner: Object.fromEntries(SHARED_FIELDS.map(f => [f.key, f.owner])),
+      capabilities: { bidir_v1: true },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // ═══════════════════════════════════════════════════════════
 // 외부(인트라넷) 보낸 오더 조회 — 공유 시크릿 인증 (JWT 불필요)
@@ -2250,13 +2385,44 @@ router.put('/admin/edit', authMiddleware, adminOrMasterMiddleware, async (req, r
     }
     if (sets.length === 0) return res.json({ ok: true, data: o, unchanged: true, changed: [] });
 
+    /* ★★ 양방향(결정 263 · 3단계) — 연결된 오더(`bidir_state='on'` · 스위치 apply)의 관리자 수정.
+       ① 인트라넷 고유 칸(작업명·시작일·담당 등)은 리뷰웹에서 보기 전용 → 400(사용자 확정 D5)
+       ② 양방향 글 칸은 공유 저장 단일 출처로 — 버전 조건부 쓰기 + 공고 반영 + 스냅숏이 한 트랜잭션
+       ③ 둘을 한 번에 섞어 보내면 나눠 저장하게 한다(두 트랜잭션으로 갈라 반쪽만 남는 일 방지)
+       스위치가 꺼져 있거나 연결 안 된 오더는 종전 그대로. */
+    let bidirSaved = null;
+    if (o.bidir_state === 'on' && (await readBidirSwitch(pool)).in2rw === 'apply') {
+      const { PHASE3_SHARED_FIELDS, readSharedState } = require('../services/sharedPatch.service');
+      const { ownerOf } = require('../utils/sharedFields');
+      const label = c => ADMIN_EDIT_LABELS[c.field] || c.field;
+      const owned = changes.filter(c => ownerOf(c.field) === 'intranet');
+      if (owned.length) {
+        return res.status(400).json({ ok: false, code: 'intranet_owned', fields: owned.map(c => c.field),
+          error: `인트라넷 리뷰오더에서만 고칠 수 있는 칸입니다: ${owned.map(label).join(', ')} — 인트라넷에서 고쳐주세요.` });
+      }
+      const shared = changes.filter(c => PHASE3_SHARED_FIELDS.includes(c.field));
+      if (shared.length && shared.length !== changes.length) {
+        return res.status(400).json({ ok: false, code: 'split_save',
+          error: `인트라넷과 함께 맞추는 칸(${shared.map(label).join(', ')})과 나머지 칸(${changes.filter(c => !shared.includes(c)).map(label).join(', ')})은 따로 저장해 주세요.` });
+      }
+      if (shared.length) {
+        const mine = readSharedState(o);
+        for (const c of shared) mine[c.field] = String(b[c.field]);
+        const out = await applySharedPatch({
+          workOrderId: id, mine, baseVersion: Number(o.sync_version || 0), origin: 'rw_admin', actor: req.admin?.name || '',
+        });
+        if (out.status !== 200 || !out.body.ok) return res.status(out.status).json(out.body);
+        bidirSaved = out.body.data || o;
+      }
+    }
+
     const recruitChange = changes.find(change => change.field === 'recruit_count');
     if (recruitChange) {
       await assertWorkOrderQuota({ workOrderId: id, recruitTotal: recruitChange.to });
     }
 
     vals.push(id);
-    const { rows: upd } = await pool.query(
+    const { rows: upd } = bidirSaved ? { rows: [bidirSaved] } : await pool.query(
       `UPDATE work_orders SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${i} RETURNING *`,
       vals
     );

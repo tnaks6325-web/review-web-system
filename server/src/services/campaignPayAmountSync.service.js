@@ -180,6 +180,18 @@ async function syncCampaignPayAmount({ workOrderId, productOptionsJson, by = 'so
  *   여기서 규칙을 또 만들지 않는다. 다만 **빈 값만** 거른다.
  * ★ **절대 throw 하지 않는다** · 쓰기 표면 = `recruit_campaigns.thumbnail_url` 한 칸.
  */
+/**
+ * 썸네일 쓰기 본체 — **호출부의 트랜잭션 안에서**(잠금·커밋은 호출부 몫). 종전 래퍼와 양방향 공유 저장(결정 263)이 같이 쓴다.
+ * @param {object} camp 이미 잠근 공고({id})
+ */
+async function syncCampaignThumbnailInTx(client, camp, url) {
+  const { rowCount } = await client.query(
+    `UPDATE recruit_campaigns SET thumbnail_url = $2, updated_at = NOW()
+      WHERE id = $1 AND COALESCE(thumbnail_url,'') <> $2`, [camp.id, url]);
+  if (!rowCount) return { applied: false, reason: 'already_same', campaignId: camp.id };
+  return { applied: true, campaignId: camp.id };
+}
+
 async function syncCampaignThumbnail({ workOrderId, thumbnailUrl, by = 'source' } = {}) {
   const url = String(thumbnailUrl == null ? '' : thumbnailUrl).trim();
   if (!url) return { applied: false, reason: 'empty' };
@@ -202,13 +214,10 @@ async function syncCampaignThumbnail({ workOrderId, thumbnailUrl, by = 'source' 
     const camp = await linkedCampaign(client, woRows[0]);
     if (!camp) { await client.query('ROLLBACK'); return { applied: false, reason: 'no_campaign' }; }
 
-    const { rowCount } = await client.query(
-      `UPDATE recruit_campaigns SET thumbnail_url = $2, updated_at = NOW()
-        WHERE id = $1 AND COALESCE(thumbnail_url,'') <> $2`, [camp.id, url]);
+    const out = await syncCampaignThumbnailInTx(client, camp, url);
     await client.query('COMMIT');
-    if (!rowCount) return { applied: false, reason: 'already_same', campaignId: camp.id };
-    logger.info(`[campaign/thumb-sync] ${camp.id} 썸네일 갱신 by ${by}`);
-    return { applied: true, campaignId: camp.id };
+    if (out.applied) logger.info(`[campaign/thumb-sync] ${camp.id} 썸네일 갱신 by ${by}`);
+    return out;
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     logger.warn(`[campaign/thumb-sync] 전파 실패(원본 수정은 유지): ${(e && e.message) || e}`);
@@ -246,6 +255,96 @@ function normalizeInflowType(v) {
   return (s === 'guide' || s === 'link') ? s : '';
 }
 
+/**
+ * 유입방식·유입가이드 쓰기 본체 — **호출부의 트랜잭션 안에서**(잠금·커밋·되돌리기는 호출부 몫).
+ * ★ `applied:false` 면 호출부가 **반드시 되돌린다** — guide_missing 은 이미 쓴 뒤 검사한 결과라 커밋하면
+ *   "가이드 없는 가이드유입" 이 남는다(완화 금지 규율 그대로).
+ */
+async function syncCampaignInflowInTx(client, camp, { nextType, commonGuide, productOptionsJson, hasGuideEdit, hasUnitEdit }) {
+  const { rows: wdRows } = await client.query(
+    'SELECT work_detail FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [camp.id]);
+  let wd = wdRows[0] && wdRows[0].work_detail;
+  if (typeof wd === 'string') { try { wd = JSON.parse(wd); } catch (_) { wd = null; } }
+  if (!wd || typeof wd !== 'object' || Array.isArray(wd)) wd = {};
+
+  const compose = require('../utils/inflowGuideCompose');
+  let optionsChanged = 0;
+
+  // ── 선택지별 유입가이드 ────────────────────────────────────────────────────
+  if (hasUnitEdit) {
+    const { payAmountsFromWorkOrder } = require('../utils/workOrderPayAmounts');
+    const parsed = payAmountsFromWorkOrder(productOptionsJson);
+    const wanted = new Map();
+    for (const u of parsed.units) {
+      /* ★★ 공고의 선택지 키는 **옵션명, 옵션이 없는 상품이면 상품명**이다(137 `unit_kind='product'`).
+         금액 전파는 옵션 없는 공고를 다른 경로로 처리해 `optKey` 만 보지만, 가이드는 상품 단위
+         선택지에도 붙어야 한다 — 상품명까지 키로 잡지 않으면 복합유형 작업에서 그 선택지의
+         가이드가 통째로 안 따라가고, 곧바로 아래 "가이드유입인데 빈 선택지" 검사에 걸린다. */
+      const key = u.optKey || u.productName;
+      if (!key) continue;
+      const src = u.optKey ? u.src : compose.productUnitSrc(u.src);
+      wanted.set(key, compose.composeUnitGuide(src));
+    }
+    if (wanted.size) {
+      const { rows: liveOpts } = await client.query(
+        `SELECT opt_key, inflow_guide_html, inflow_guide_images
+           FROM campaign_options WHERE campaign_id = $1 AND status <> 'closed'`, [camp.id]);
+      for (const o of liveOpts) {
+        const next = wanted.get(o.opt_key);
+        if (!next) continue;
+        const curImgs = JSON.stringify(Array.isArray(o.inflow_guide_images) ? o.inflow_guide_images : []);
+        const nextImgs = JSON.stringify(next.images);
+        if (String(o.inflow_guide_html || '') === next.html && curImgs === nextImgs) continue;
+        await client.query(
+          `UPDATE campaign_options
+              SET inflow_guide_html = $3, inflow_guide_images = $4::jsonb, updated_at = NOW()
+            WHERE campaign_id = $1 AND opt_key = $2`,
+          [camp.id, o.opt_key, next.html, nextImgs]);
+        optionsChanged += 1;
+      }
+    }
+  }
+
+  // ── 공통 유입가이드 · 유입방식 ─────────────────────────────────────────────
+  const nextWd = Object.assign({}, wd);
+  let wdChanged = false;
+  if (hasGuideEdit) {
+    const html = compose.composeCommonGuide(
+      commonGuide && commonGuide.text, commonGuide && commonGuide.images);
+    if (String(wd.inflowGuideHtml || '') !== html) { nextWd.inflowGuideHtml = html; wdChanged = true; }
+  }
+  if (nextType && String(wd.inflowType || '') !== nextType) { nextWd.inflowType = nextType; wdChanged = true; }
+  if (wdChanged) {
+    await client.query(
+      'UPDATE recruit_campaigns SET work_detail = $2::jsonb, updated_at = NOW() WHERE id = $1',
+      [camp.id, JSON.stringify(nextWd)]);
+  }
+
+  if (!wdChanged && !optionsChanged) {
+    return { applied: false, reason: 'already_same', campaignId: camp.id };
+  }
+
+  // ── 가이드유입 검사(전파가 끝난 상태로) ───────────────────────────────────
+  const effectiveType = nextType || normalizeInflowType(wd.inflowType);
+  if (effectiveType === 'guide') {
+    const { rows: liveOpts } = await client.query(
+      `SELECT opt_key, product_name, inflow_guide_html, inflow_guide_images
+         FROM campaign_options WHERE campaign_id = $1 AND status <> 'closed'`, [camp.id]);
+    if (liveOpts.length) {
+      const missing = liveOpts
+        .filter(o => !String(o.inflow_guide_html || '').trim()
+          && !(Array.isArray(o.inflow_guide_images) && o.inflow_guide_images.length))
+        .map(o => o.opt_key || o.product_name || '이름 없는 선택지');
+      if (missing.length) {
+        return { applied: false, reason: 'guide_missing', campaignId: camp.id, detail: { missing } };
+      }
+    } else if (!String(nextWd.inflowGuideHtml || '').trim()) {
+      return { applied: false, reason: 'guide_missing', campaignId: camp.id, detail: { missing: ['공통 유입가이드'] } };
+    }
+  }
+  return { applied: true, campaignId: camp.id, inflowType: effectiveType, options: optionsChanged, workDetail: wdChanged };
+}
+
 async function syncCampaignInflow({ workOrderId, inflowType, commonGuide, productOptionsJson, by = 'source' } = {}) {
   const nextType = normalizeInflowType(inflowType);
   const hasGuideEdit = commonGuide !== undefined;
@@ -270,94 +369,15 @@ async function syncCampaignInflow({ workOrderId, inflowType, commonGuide, produc
     const camp = await linkedCampaign(client, woRows[0]);
     if (!camp) { await client.query('ROLLBACK'); return { applied: false, reason: 'no_campaign' }; }
 
-    const { rows: wdRows } = await client.query(
-      'SELECT work_detail FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [camp.id]);
-    let wd = wdRows[0] && wdRows[0].work_detail;
-    if (typeof wd === 'string') { try { wd = JSON.parse(wd); } catch (_) { wd = null; } }
-    if (!wd || typeof wd !== 'object' || Array.isArray(wd)) wd = {};
-
-    const compose = require('../utils/inflowGuideCompose');
-    let optionsChanged = 0;
-
-    // ── 선택지별 유입가이드 ────────────────────────────────────────────────────
-    if (hasUnitEdit) {
-      const { payAmountsFromWorkOrder } = require('../utils/workOrderPayAmounts');
-      const parsed = payAmountsFromWorkOrder(productOptionsJson);
-      const wanted = new Map();
-      for (const u of parsed.units) {
-        /* ★★ 공고의 선택지 키는 **옵션명, 옵션이 없는 상품이면 상품명**이다(137 `unit_kind='product'`).
-           금액 전파는 옵션 없는 공고를 다른 경로로 처리해 `optKey` 만 보지만, 가이드는 상품 단위
-           선택지에도 붙어야 한다 — 상품명까지 키로 잡지 않으면 복합유형 작업에서 그 선택지의
-           가이드가 통째로 안 따라가고, 곧바로 아래 "가이드유입인데 빈 선택지" 검사에 걸린다. */
-        const key = u.optKey || u.productName;
-        if (!key) continue;
-        const src = u.optKey ? u.src : compose.productUnitSrc(u.src);
-        wanted.set(key, compose.composeUnitGuide(src));
-      }
-      if (wanted.size) {
-        const { rows: liveOpts } = await client.query(
-          `SELECT opt_key, inflow_guide_html, inflow_guide_images
-             FROM campaign_options WHERE campaign_id = $1 AND status <> 'closed'`, [camp.id]);
-        for (const o of liveOpts) {
-          const next = wanted.get(o.opt_key);
-          if (!next) continue;
-          const curImgs = JSON.stringify(Array.isArray(o.inflow_guide_images) ? o.inflow_guide_images : []);
-          const nextImgs = JSON.stringify(next.images);
-          if (String(o.inflow_guide_html || '') === next.html && curImgs === nextImgs) continue;
-          await client.query(
-            `UPDATE campaign_options
-                SET inflow_guide_html = $3, inflow_guide_images = $4::jsonb, updated_at = NOW()
-              WHERE campaign_id = $1 AND opt_key = $2`,
-            [camp.id, o.opt_key, next.html, nextImgs]);
-          optionsChanged += 1;
-        }
-      }
-    }
-
-    // ── 공통 유입가이드 · 유입방식 ─────────────────────────────────────────────
-    const nextWd = Object.assign({}, wd);
-    let wdChanged = false;
-    if (hasGuideEdit) {
-      const html = compose.composeCommonGuide(
-        commonGuide && commonGuide.text, commonGuide && commonGuide.images);
-      if (String(wd.inflowGuideHtml || '') !== html) { nextWd.inflowGuideHtml = html; wdChanged = true; }
-    }
-    if (nextType && String(wd.inflowType || '') !== nextType) { nextWd.inflowType = nextType; wdChanged = true; }
-    if (wdChanged) {
-      await client.query(
-        'UPDATE recruit_campaigns SET work_detail = $2::jsonb, updated_at = NOW() WHERE id = $1',
-        [camp.id, JSON.stringify(nextWd)]);
-    }
-
-    if (!wdChanged && !optionsChanged) {
+    const out = await syncCampaignInflowInTx(client, camp, { nextType, commonGuide, productOptionsJson, hasGuideEdit, hasUnitEdit });
+    if (!out.applied) {
+      // ★ 바꿀 것이 없거나(already_same) 가이드가 빈 채로 가이드유입이 되려 하면(guide_missing) 통째로 되돌린다(종전 동작).
       await client.query('ROLLBACK');
-      return { applied: false, reason: 'already_same', campaignId: camp.id };
+      return out;
     }
-
-    // ── 가이드유입 검사(전파가 끝난 상태로) ───────────────────────────────────
-    const effectiveType = nextType || normalizeInflowType(wd.inflowType);
-    if (effectiveType === 'guide') {
-      const { rows: liveOpts } = await client.query(
-        `SELECT opt_key, product_name, inflow_guide_html, inflow_guide_images
-           FROM campaign_options WHERE campaign_id = $1 AND status <> 'closed'`, [camp.id]);
-      if (liveOpts.length) {
-        const missing = liveOpts
-          .filter(o => !String(o.inflow_guide_html || '').trim()
-            && !(Array.isArray(o.inflow_guide_images) && o.inflow_guide_images.length))
-          .map(o => o.opt_key || o.product_name || '이름 없는 선택지');
-        if (missing.length) {
-          await client.query('ROLLBACK');
-          return { applied: false, reason: 'guide_missing', campaignId: camp.id, detail: { missing } };
-        }
-      } else if (!String(nextWd.inflowGuideHtml || '').trim()) {
-        await client.query('ROLLBACK');
-        return { applied: false, reason: 'guide_missing', campaignId: camp.id, detail: { missing: ['공통 유입가이드'] } };
-      }
-    }
-
     await client.query('COMMIT');
-    logger.info(`[campaign/inflow-sync] ${camp.id} 유입 반영(방식 ${nextType || '유지'} · 선택지 ${optionsChanged}) by ${by}`);
-    return { applied: true, campaignId: camp.id, inflowType: effectiveType, options: optionsChanged, workDetail: wdChanged };
+    logger.info(`[campaign/inflow-sync] ${camp.id} 유입 반영(방식 ${nextType || '유지'} · 선택지 ${out.options}) by ${by}`);
+    return out;
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     logger.warn(`[campaign/inflow-sync] 전파 실패(원본 수정은 유지): ${(e && e.message) || e}`);
@@ -381,6 +401,46 @@ async function syncCampaignInflow({ workOrderId, inflowType, commonGuide, produc
  */
 /** 구매시간대 문장이 **시간 제한 없음**을 뜻하나 — 판정은 모집공고 화면(`index-recruit.js` `rfIsFreeTime`)과 **같은 규칙**이다(사본 0). */
 function _isFreeTimeText(text) { return /자유|자율/.test(String(text || '')); }
+
+/**
+ * 구매시간대 쓰기 본체 — **호출부의 트랜잭션 안에서**(잠금·커밋·되돌리기는 호출부 몫). 규칙은 아래 래퍼 설명 그대로.
+ * @param {{textOnlyWhenLegacy?: boolean}} [opts] 레거시(참여형 아님) 공고에서 글자(`time_range`)만이라도 맞출지 —
+ *   양방향 공유 저장(결정 263)만 켠다. 시간창 개념이 없는 공고라 시각 칸은 건드리지 않는다.
+ */
+async function syncCampaignPurchaseWindowInTx(client, camp, purchaseTime, { textOnlyWhenLegacy = false } = {}) {
+  const { parsePurchaseTime } = require('../utils/purchaseTimeWindow');
+  const text = String(purchaseTime == null ? '' : purchaseTime).trim();
+  if (!text) return { applied: false, reason: 'empty' };
+  const free = _isFreeTimeText(text);
+  const win = free ? null : parsePurchaseTime(text);
+  if (!free && !win) return { applied: false, reason: 'unparsed' };
+  const { rows } = await client.query(
+    'SELECT participation_mode FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [camp.id]);
+  if (!rows.length || rows[0].participation_mode !== true) {
+    if (!textOnlyWhenLegacy || !rows.length) return { applied: false, reason: 'not_participation', campaignId: camp.id };
+    const { rowCount } = await client.query(
+      `UPDATE recruit_campaigns SET time_range = $2, updated_at = NOW() WHERE id = $1 AND COALESCE(time_range,'') <> $2`,
+      [camp.id, text]);
+    return rowCount ? { applied: true, campaignId: camp.id, timeRange: text, textOnly: true }
+      : { applied: false, reason: 'already_same', campaignId: camp.id, timeRange: text };
+  }
+  const startAt = free ? null : win.start + ':00';
+  const endAt = free ? null : (win.end === '24:00' ? '24:00:00' : win.end + ':00');
+  const { rowCount } = await client.query(
+    /* ★★★ `::time` 캐스팅을 빼지 말 것 — 파라미터는 text 로 오고 컬럼은 TIME 이라
+       PostgreSQL 이 `column "window_start" is of type time but expression is of type text`
+       로 **거부한다**(진짜 PG 로 돌려 보고서야 잡았다 — 스텁은 SQL 을 해석하지 않아 통과시킨다).
+       비교 쪽은 `window_start::text` 로 이미 문자열이라 그대로 둔다.
+       ★ 자유시간은 두 시각이 **NULL** 이다 — 비교는 `COALESCE(...,'')` 로 양쪽 모두 빈 문자열에 맞춘다. */
+    `UPDATE recruit_campaigns SET window_start = $2::time, window_end = $3::time,
+            time_range = $4, updated_at = NOW()
+      WHERE id = $1 AND (COALESCE(window_start::text,'') <> COALESCE($2,'')
+                      OR COALESCE(window_end::text,'')   <> COALESCE($3,'')
+                      OR COALESCE(time_range,'')         <> $4)`,
+    [camp.id, startAt, endAt, text]);
+  if (!rowCount) return { applied: false, reason: 'already_same', campaignId: camp.id, window: win, timeRange: text };
+  return { applied: true, campaignId: camp.id, window: win, timeRange: text, freeTime: free };
+}
 
 async function syncCampaignPurchaseWindow({ workOrderId, purchaseTime, by = 'source' } = {}) {
   const { parsePurchaseTime } = require('../utils/purchaseTimeWindow');
@@ -415,31 +475,11 @@ async function syncCampaignPurchaseWindow({ workOrderId, purchaseTime, by = 'sou
     const camp = await linkedCampaign(client, woRows[0]);
     if (!camp) { await client.query('ROLLBACK'); return { applied: false, reason: 'no_campaign' }; }
 
-    const { rows } = await client.query(
-      'SELECT participation_mode FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [camp.id]);
-    if (!rows.length || rows[0].participation_mode !== true) {
-      await client.query('ROLLBACK');
-      return { applied: false, reason: 'not_participation', campaignId: camp.id };
-    }
-
-    const startAt = free ? null : win.start + ':00';
-    const endAt = free ? null : (win.end === '24:00' ? '24:00:00' : win.end + ':00');
-    const { rowCount } = await client.query(
-      /* ★★★ `::time` 캐스팅을 빼지 말 것 — 파라미터는 text 로 오고 컬럼은 TIME 이라
-         PostgreSQL 이 `column "window_start" is of type time but expression is of type text`
-         로 **거부한다**(진짜 PG 로 돌려 보고서야 잡았다 — 스텁은 SQL 을 해석하지 않아 통과시킨다).
-         비교 쪽은 `window_start::text` 로 이미 문자열이라 그대로 둔다.
-         ★ 자유시간은 두 시각이 **NULL** 이다 — 비교는 `COALESCE(...,'')` 로 양쪽 모두 빈 문자열에 맞춘다. */
-      `UPDATE recruit_campaigns SET window_start = $2::time, window_end = $3::time,
-              time_range = $4, updated_at = NOW()
-        WHERE id = $1 AND (COALESCE(window_start::text,'') <> COALESCE($2,'')
-                        OR COALESCE(window_end::text,'')   <> COALESCE($3,'')
-                        OR COALESCE(time_range,'')         <> $4)`,
-      [camp.id, startAt, endAt, text]);
+    const out = await syncCampaignPurchaseWindowInTx(client, camp, text);
+    if (out.reason === 'not_participation') { await client.query('ROLLBACK'); return out; }
     await client.query('COMMIT');
-    if (!rowCount) return { applied: false, reason: 'already_same', campaignId: camp.id, window: win, timeRange: text };
-    logger.info(`[campaign/time-sync] ${camp.id} 시간창 ${free ? '자유(제한 없음)' : win.start + '~' + win.end} · 글자 "${text}" by ${by}`);
-    return { applied: true, campaignId: camp.id, window: win, timeRange: text, freeTime: free };
+    if (out.applied) logger.info(`[campaign/time-sync] ${camp.id} 시간창 ${out.freeTime ? '자유(제한 없음)' : win.start + '~' + win.end} · 글자 "${text}" by ${by}`);
+    return out;
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     logger.warn(`[campaign/time-sync] 전파 실패(원본 수정은 유지): ${(e && e.message) || e}`);
@@ -514,6 +554,10 @@ module.exports = {
   syncCampaignPayAmount,
   syncCampaignThumbnail,
   syncCampaignInflow,
+  // ★ 양방향 공유 저장(결정 263) — 같은 쓰기 본체를 호출부 트랜잭션 안에서
+  syncCampaignThumbnailInTx,
+  syncCampaignInflowInTx,
+  syncCampaignPurchaseWindowInTx,
   syncCampaignPurchaseWindow,
   normalizeInflowType,
   campaignSyncNotice,

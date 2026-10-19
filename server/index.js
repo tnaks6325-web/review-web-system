@@ -152,6 +152,12 @@ const REQUIRED_SCHEMA = [
   ['recruit_campaigns', 'soldout_paused_at'],
   ['recruit_campaigns', 'soldout_paused_by'],
   ['recruit_campaigns', 'soldout_paused_reason'],
+  // 194 — 양방향 동기화(결정 263 · 3단계): 원본 수정 분기·관리자 수정 분기·/intake/source/:id/shared 가 읽는다
+  ['work_orders', 'bidir_state'],
+  ['work_orders', 'sync_version'],
+  ['work_orders', 'intranet_acked_version'],
+  ['work_orders', 'purchase_channel_custom'],
+  ['work_orders', 'required_delivery_memo'],
 ];
 
 // V2 상태 표시는 열 이름 추측을 하지 않고, 생성 시점의 위치를 이 표에 고정한다.
@@ -172,6 +178,8 @@ const REQUIRED_TABLES = [
   'workboard_consolidation_backup_records',
   'workboard_consolidation_link_events',
   'workboard_consolidation_targets',
+  'work_order_shared_snapshots',                  // 194 — 양방향 공유 저장의 3방향 기준(없으면 연결된 오더 저장이 409/500)
+  'shared_sync_outbox',                           // 194 — 리뷰웹발 공유 저장의 인트라넷 전송 대기열
 ];
 
 async function _runOneMigration(pool, sql) {

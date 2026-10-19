@@ -6,7 +6,7 @@
  *
  * ★ 지키는 것:
  *   ① 194 는 가산 전용 — 칸·표·색인을 더하기만(IF NOT EXISTS). DROP·UPDATE·DELETE·트리거·함수·백필 0
- *   ② 2단계에서는 아무 코드도 새 칸·표를 읽지 않는다 → REQUIRED_SCHEMA 미등록(실패해도 기동 계속)
+ *   ② 새 칸·표를 읽는 코드가 생기면 그 칸·표는 REQUIRED_SCHEMA·REQUIRED_TABLES 에 등록돼 있어야 한다(3단계부터 등록)
  *   ③ 새 칸 기본값 = 꺼짐(bidir_state 'off', 버전 0) — 마이그레이션만으로 동작이 바뀌지 않는다
  *   ④ 스위치는 fail-closed — 없음·깨짐·모르는 값·읽기 실패 = 전부 꺼짐 · BIDIR_HARD_OFF=1 최우선 · 10초 캐시
  *   ⑤ (PGTEST_URL) 실제 PG 에 두 번 적용해도 성공(멱등) · 기존 행 값 불변 — 트랜잭션 안에서 하고 되돌린다
@@ -41,15 +41,20 @@ const NEW_COLS = [['work_orders', 'sync_version'], ['work_orders', 'bidir_state'
     for (const [tb, c] of NEW_COLS) assert.ok(new RegExp(`ALTER TABLE ${tb} ADD COLUMN IF NOT EXISTS ${c}\\b`).test(code), `${tb}.${c}`);
   });
 
-  await t('② 2단계는 새 칸·표를 필수 스키마로 등록하지 않는다(읽는 코드가 없다)', () => {
+  await t('② 새 칸·표를 읽는 코드가 있으면 그 칸·표는 전부 필수 스키마에 등록돼 있다(3단계부터)', () => {
+    // ★ 2단계에서는 "읽는 코드 0 → 미등록" 이었다. 3단계(결정 263)에서 원본 수정·관리자 수정·/shared 가 읽기 시작해 등록했다.
+    //   이 가드는 반대 방향 드리프트(읽는 코드는 있는데 미등록 → 마이그레이션 실패 시 기동은 되고 그 기능만 500)를 막는다.
     const req = INDEX.slice(INDEX.indexOf('const REQUIRED_SCHEMA'), INDEX.indexOf('];', INDEX.indexOf('const REQUIRED_SCHEMA')));
-    for (const [, c] of NEW_COLS) assert.ok(!req.includes(`'${c}'`), c + ' 가 필수 스키마에 있다');
+    const reqT = INDEX.slice(INDEX.indexOf('const REQUIRED_TABLES'), INDEX.indexOf('];', INDEX.indexOf('const REQUIRED_TABLES')));
     const src = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap(d => d.isDirectory() ? src(path.join(dir, d.name)) : [path.join(dir, d.name)]);
-    const readers = src(path.join(__dirname, '../src')).filter(f => f.endsWith('.js'))
-      .filter(f => /\b(sync_version|bidir_state|intranet_acked_version|work_order_shared_snapshots|shared_sync_outbox|work_order_option_links|campaign_option_price_history|inflow_guide_doc)\b/
-        .test(fs.readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')))   // 주석은 읽는 코드가 아니다
-      .map(f => path.relative(path.join(__dirname, '..'), f));
-    assert.deepStrictEqual(readers, [], '2단계에서 새 칸·표를 읽는 코드가 생겼다 — 그 단계에서 REQUIRED_SCHEMA 등록을 함께 할 것');
+    const code = src(path.join(__dirname, '../src')).filter(f => f.endsWith('.js'))
+      .map(f => fs.readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')).join('\n');   // 주석은 읽는 코드가 아니다
+    for (const [tb, c] of NEW_COLS) {
+      if (new RegExp(`\\b${c}\\b`).test(code)) assert.ok(req.includes(`['${tb}', '${c}']`), `${tb}.${c} 를 읽는 코드가 있는데 필수 스키마에 없다`);
+    }
+    for (const tb of NEW_TABLES) {
+      if (new RegExp(`\\b${tb}\\b`).test(code)) assert.ok(reqT.includes(`'${tb}'`), `${tb} 를 읽는 코드가 있는데 필수 표에 없다`);
+    }
   });
 
   await t('③ 기본값 = 꺼짐', () => {
