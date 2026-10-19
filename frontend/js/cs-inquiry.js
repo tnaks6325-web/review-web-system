@@ -728,11 +728,20 @@ async function _reCall(path, body) {
   const res = await fetch(base + _reApiBase() + path, { method: 'POST', headers, body: JSON.stringify(body) });
   return res.json().catch(() => ({ ok: false, error: '응답을 읽지 못했습니다.' }));
 }
+/* ★ 같은 요청을 처리하는 중이면 다시 보내지 않는다(2026-10-19 실측 — 승인이 6~9초 걸리는 동안 같은 승인이
+   거의 동시에 6번 들어갔다. 서버가 이중 승인을 막아 한 번만 처리됐지만 나머지는 헛요청이다).
+   대화창 카드·교체요청 팝업·관리자 대시보드가 모두 이 두 함수를 거치므로 여기 한 곳에서 막는다. */
+const _reInflight = new Set();
 async function csApproveReviewEdit(requestId, opts) {
   if (!requestId) return;
   opts = opts || {};
+  if (_reInflight.has(String(requestId))) { showToast('처리 중입니다. 잠시만 기다려 주세요.'); return false; }
   if (!opts.skipConfirm && !confirm('이 교체요청을 승인할까요?\n\n· 리뷰 캡처가 새 파일로 교체됩니다(기존 파일은 보관 폴더로).\n· 리뷰어 채팅에 승인 안내가 자동으로 전송됩니다.')) return false;
-  const r = await _reCall('/approve', { id: requestId });
+  _reInflight.add(String(requestId));
+  let r;
+  try { r = await _reCall('/approve', { id: requestId }); }
+  catch (e) { r = { ok: false, error: (e && e.message) || '네트워크 오류' }; }
+  finally { _reInflight.delete(String(requestId)); }
   if (r && r.ok) {
     showToast('승인했습니다. 리뷰어에게 안내가 전송되었습니다.');
     if (!opts.skipReload) csReloadAfterReviewEdit();
@@ -750,7 +759,12 @@ async function csRejectReviewEdit(requestId, opts) {
     : prompt('반려 사유를 입력하세요.\n(리뷰어 채팅에 그대로 전송됩니다)');
   if (note === null) return false;
   if (!String(note).trim()) { showToast('반려 사유를 입력해 주세요.', true); return; }
-  const r = await _reCall('/reject', { id: requestId, note: String(note).trim() });
+  if (_reInflight.has(String(requestId))) { showToast('처리 중입니다. 잠시만 기다려 주세요.'); return false; }
+  _reInflight.add(String(requestId));
+  let r;
+  try { r = await _reCall('/reject', { id: requestId, note: String(note).trim() }); }
+  catch (e) { r = { ok: false, error: (e && e.message) || '네트워크 오류' }; }
+  finally { _reInflight.delete(String(requestId)); }
   if (r && r.ok) {
     showToast('반려했습니다. 사유가 리뷰어에게 전송되었습니다.');
     if (!opts.skipReload) csReloadAfterReviewEdit();

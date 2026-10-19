@@ -89,7 +89,7 @@ async function _verifyRowOwnership(phoneList, sheetId, tabName, rowIndex) {
  *   review-upload 와 동일 규칙: 기본 'review' 슬롯은 [리뷰] 바로 아래, 그 외는 라벨 서브폴더.
  * @returns {{ reviewFolderId, targetFolderId, stagingFolderId, campaignLabel }}
  */
-async function _resolveFolders(sheetId, tabName, slot) {
+async function _resolveFolders(sheetId, tabName, slot, { withStaging = true } = {}) {
   const rootFolderId = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
   if (!rootFolderId) throw new Error('AI_REVIEW_FOLDER_ID 미설정');
 
@@ -145,11 +145,12 @@ async function _resolveFolders(sheetId, tabName, slot) {
   //   ★ folder-audit(탭별 [리뷰] 재귀 스캔)는 [리뷰] 밖이라 승인 전 파일을 안 셈.
   //   ★ relocate-orphan-reviews(전역 키워드 검색)는 리뷰형식 파일명만 대상 → 스테이징
   //     파일명을 비리뷰형식(수정대기_*)으로 두어 승인 전 [리뷰]로 승격/링크되는 것을 막는다.
+  //   ★ 승인(withStaging:false)은 스테이징 폴더가 필요 없다 — Drive 검색 1회를 아낀다(캐시가 식었을 때).
   const rootFolderIdForStaging = rootFolderId;
-  const staging = await driveService.getOrCreateSubFolder(rootFolderIdForStaging, '[리뷰수정대기]');
+  const staging = withStaging ? await driveService.getOrCreateSubFolder(rootFolderIdForStaging, '[리뷰수정대기]') : null;
 
   const campaignLabel = cfg.display_name || cfg.campaign_name || tabName;
-  return { reviewFolderId, targetFolderId, stagingFolderId: staging.id, campaignLabel };
+  return { reviewFolderId, targetFolderId, stagingFolderId: staging ? staging.id : null, campaignLabel };
 }
 
 /**
@@ -720,6 +721,37 @@ router.get('/list', authMiddleware, adminOrMasterMiddleware, async (req, res) =>
   }
 });
 
+/**
+ * 승인된 요청의 구 파일: 휴지통이 아니라 [리뷰교체보관] 폴더로 이동 + 규칙 파일명(보관 목적).
+ * ★ **응답을 보낸 뒤** 돈다(2026-10-19 — 승인 대기를 줄이려고 요청 안에서 뺐다). 커밋 뒤의 비치명적 단계라
+ *   종전에도 실패를 무시했다 — 실패하면 구 파일이 [리뷰] 폴더에 남는다(링크는 이미 새 파일로 바뀌었다 → 고아 캡처 정리 A 대상).
+ * ★ 절대 throw 하지 않는다(응답 뒤라 잡아 줄 곳이 없다 — 처리되지 않은 rejection 은 프로세스를 흔든다).
+ */
+function _archiveOldFileAfterReply(committed) {
+  if (!committed || !committed.old_file_id) return;
+  setImmediate(async () => {
+    try {
+      const archiveId = await _resolveArchiveFolder();
+      const oldMeta = await driveService.getFileParents(committed.old_file_id);
+      const oldParents = Array.isArray(oldMeta.parents) ? oldMeta.parents : [];
+      const archName = _archiveName(committed, committed.old_file_name);
+      if (!oldParents.includes(archiveId)) {
+        try {
+          await driveService.moveAndRenameFile(committed.old_file_id, archiveId, oldParents.join(',') || undefined, archName);
+          return;
+        } catch (e) {
+          logger.warn(`[review-edit] 보관 이동+이름 한 번에 실패(2단계로 재시도): ${e.message}`);
+        }
+        await driveService.moveFile(committed.old_file_id, archiveId, oldParents.join(',') || undefined);
+      }
+      try { await driveService.renameFile(committed.old_file_id, archName); }
+      catch (e) { logger.warn(`[review-edit] 보관 파일 rename 실패(무시): ${e.message}`); }
+    } catch (e) {
+      logger.warn(`[review-edit] 구 파일 보관 이동 실패(무시): ${e.message}`);
+    }
+  });
+}
+
 // POST /api/review-edit/approve  body: { id, note? }
 //   ★ Drive 연산(비트랜잭셔널)은 트랜잭션 "밖"에서 먼저(멱등) 수행하고, 짧은 트랜잭션에서만
 //     FOR UPDATE 재검증 + DB 포인터 스왑 + 상태확정 → 커밋 → 구 파일 [리뷰교체보관] 이동(커밋 후·비치명적).
@@ -740,7 +772,7 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
     // 요청 당시 저장된 폴더를 신뢰하지 않고 현재 슬롯 역할로 다시 계산한다.
     // 배포 전에 생성된 영수증 교체요청의 공개 [리뷰] 하위 target_folder_id도 여기서 교정된다.
     const targetFolderId = (await _resolveFolders(
-      r0.sheet_id, r0.tab_name, r0.slot_key || 'review'
+      r0.sheet_id, r0.tab_name, r0.slot_key || 'review', { withStaging: false }
     )).targetFolderId;
 
     // 2) 새 파일을 대상 폴더로 이동(멱등: 이미 대상이면 skip) + 정식 리뷰 파일명으로 rename
@@ -748,9 +780,6 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
     const meta = await driveService.getFileParents(r0.new_file_id);
     if (meta && meta.trashed) return res.json({ ok: false, error: '스테이징 파일이 삭제되어 승인할 수 없습니다.' });
     const parents = Array.isArray(meta && meta.parents) ? meta.parents : [];
-    if (!parents.includes(targetFolderId)) {
-      await driveService.moveFile(r0.new_file_id, targetFolderId, parents[0] || r0.new_parent_id);
-    }
     /* ★ 정식명의 이름도 업로드와 **같은 해석**(그 행의 수취인)을 쓴다 — 여기만 참여자 이름으로 두면
        "처음 제출은 수취인인데 한 번 교체하면 주문자로 바뀌는" 드리프트가 생긴다.
        못 찾으면 종전대로 요청에 적힌 이름으로 접는다(파일명 때문에 승인이 막히면 안 된다). */
@@ -758,8 +787,21 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
       (await recipientNameForRow({ db: pool, sheetId: r0.sheet_id, tabName: r0.tab_name, rowIndex: r0.row_index }))
       || r0.reviewer_name || '익명';
     const finalName = driveService.generateReviewFileName(_finalOwner, 1, 'image/jpeg');
-    try { await driveService.renameFile(r0.new_file_id, finalName); }
-    catch (e) { logger.warn(`[review-edit] 새 파일 rename 실패(무시): ${e.message}`); }
+    /* ★ 이동 + 정식명 변경을 **Drive 왕복 1회**로(2026-10-19 실측 승인 1건 5.7~9.1초 — 순차 Drive 왕복이 지배).
+       한 번에 실패하면 종전 2단계로 폴백한다: 이동 실패 = 승인 실패(종전과 같다) · 이름 변경 실패 = 무시(종전과 같다). */
+    if (!parents.includes(targetFolderId)) {
+      try {
+        await driveService.moveAndRenameFile(r0.new_file_id, targetFolderId, parents[0] || r0.new_parent_id, finalName);
+      } catch (e) {
+        logger.warn(`[review-edit] 이동+이름 변경 한 번에 실패(2단계로 재시도): ${e.message}`);
+        await driveService.moveFile(r0.new_file_id, targetFolderId, parents[0] || r0.new_parent_id);
+        try { await driveService.renameFile(r0.new_file_id, finalName); }
+        catch (e2) { logger.warn(`[review-edit] 새 파일 rename 실패(무시): ${e2.message}`); }
+      }
+    } else {
+      try { await driveService.renameFile(r0.new_file_id, finalName); }
+      catch (e) { logger.warn(`[review-edit] 새 파일 rename 실패(무시): ${e.message}`); }
+    }
     const finalUrl = r0.new_file_url || `https://drive.google.com/file/d/${r0.new_file_id}/view`;
 
     // 3) 짧은 트랜잭션: FOR UPDATE 재검증(이중승인 차단) + DB 포인터 스왑 + 상태확정
@@ -814,21 +856,8 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
       client.release();
     }
 
-    // 4) 구 파일: 휴지통이 아니라 [리뷰교체보관] 폴더로 이동 + 규칙 파일명(보관 목적, 커밋 후·비치명적)
-    try {
-      if (committed.old_file_id) {
-        const archiveId = await _resolveArchiveFolder();
-        const oldMeta = await driveService.getFileParents(committed.old_file_id);
-        const oldParents = Array.isArray(oldMeta.parents) ? oldMeta.parents : [];
-        if (!oldParents.includes(archiveId)) {
-          await driveService.moveFile(committed.old_file_id, archiveId, oldParents.join(',') || undefined);
-        }
-        try { await driveService.renameFile(committed.old_file_id, _archiveName(committed, committed.old_file_name)); }
-        catch (e) { logger.warn(`[review-edit] 보관 파일 rename 실패(무시): ${e.message}`); }
-      }
-    } catch (e) {
-      logger.warn(`[review-edit] 구 파일 보관 이동 실패(무시): ${e.message}`);
-    }
+    // 4) 구 파일 [리뷰교체보관] 이동은 **응답을 보낸 뒤**에 한다(아래 _archiveOldFileAfterReply) — 비치명적 단계라
+    //    승인 결과와 무관하고, Drive 왕복 2~3회가 승인 대기 시간을 늘리던 자리다(2026-10-19 실측).
 
     // 현금영수증 교체본은 입금 조건에 직접 영향을 주므로 승인 요청 안에서 바로 재검수한다.
     // 실패 시 위 pending 원장이 남아 다음 스윕 또는 내부 정상 승인으로 처리할 수 있다.
@@ -870,6 +899,7 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
     await csBridge.postReviewEditDecision(committed, 'approved', note ? _sanitizeReason(note) : '', req.admin?.name || '관리자');
 
     res.json({ ok: true });
+    _archiveOldFileAfterReply(committed);
   } catch (err) {
     logger.error(`[review-edit] approve 실패: ${err.message}`);
     res.json({ ok: false, error: err.message || '승인 처리 중 오류가 발생했습니다.' });
