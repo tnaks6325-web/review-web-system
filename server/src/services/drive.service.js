@@ -146,6 +146,38 @@ async function listFolderContents(folderId, mimeType = null) {
 /**
  * 파일/폴더 이름 변경 (OAuth 우선 → SA 폴백)
  */
+/**
+ * 이동 + 이름 변경을 **files.update 한 번**으로(교체요청 승인 — 2026-10-19 실측 승인 1건 5.7~9.1초, Drive 왕복이 지배).
+ * moveFile·renameFile 을 따로 부르면 왕복 2회다. 실패하면 예외를 그대로 올린다 — 호출부가 종전 2단계 경로로 폴백한다.
+ */
+async function moveAndRenameFile(fileId, newParentId, oldParentId, newName) {
+  const updateParams = {
+    fileId,
+    addParents: newParentId,
+    removeParents: oldParentId,
+    requestBody: { name: newName },
+    fields: 'id, parents, name',
+    supportsAllDrives: true,
+  };
+  const oauth = _getOAuthDrive();
+  if (oauth) {
+    try {
+      const res = await oauth.files.update(updateParams);
+      logger.info(`[Drive] 이동+이름 변경: ${fileId} → parent ${newParentId} "${newName}" (OAuth)`);
+      return res.data;
+    } catch (oauthErr) {
+      logger.warn(`[Drive] OAuth 이동+이름 변경 실패 (SA 재시도): ${oauthErr.message}`);
+    }
+  }
+  const sa = _getReadDrive();
+  if (sa) {
+    const res = await sa.files.update(updateParams);
+    logger.info(`[Drive] 이동+이름 변경: ${fileId} → parent ${newParentId} "${newName}" (SA)`);
+    return res.data;
+  }
+  throw new Error('Google Drive API가 설정되지 않았습니다. (OAuth 또는 SA 필요)');
+}
+
 async function renameFile(fileId, newName) {
   const updateParams = {
     fileId,
@@ -1498,6 +1530,7 @@ module.exports = {
   downloadFile,
   createFolder,
   renameFile,
+  moveAndRenameFile,
   moveFile,
   copyFile,
   getFileParents,
