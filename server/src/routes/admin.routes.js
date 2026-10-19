@@ -527,6 +527,12 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
     const campMap = new Map(); // sheetId → { campaign, total, submitted, tabs:[] }
     let grandTotal = 0, grandSubmitted = 0;
 
+    // ★ 작업보드 🏁 마감(trackb_tab_finished)을 이 옛 대시보드에도 **표시만** 한다(2026-10-19 사용자 확정 · 결정 255).
+    //   tab_configs.is_closed 는 건드리지 않는다(결정 087: 그 플래그는 다른 소비처 동작을 바꾼다).
+    //   판정 = trackB 의 finishedTabsMap/isTabFinishedIn 단일 출처(이름 → gid 폴백). 조회 실패 = 표시 없음 + 응답에 고지.
+    const trackB = require('../services/trackB.service');
+    const fin = await trackB.finishedTabsMap();
+
     tabs.forEach(t => {
       const groupKey  = t.sheetId; // sheetId 기준 그룹핑
       const campName  = t.campaignName || t.tcCampaignName || '미분류';
@@ -591,6 +597,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
         tcRound,
         roundList,
         isClosed:    !!t.isClosed,
+        workFinished: trackB.isTabFinishedIn(fin.map, t.sheetId, t.tabName, t.tabGid),
         closedRounds: t.closedRounds || '',
         displayName: t.displayName || '',
         manager:     t.manager || '',
@@ -646,6 +653,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
         pending:   grandTotal - grandSubmitted,
       },
       closedTabs,
+      ...(fin.ok ? {} : { workFinishedUnavailable: true }),
       indexBuiltAt,
       buildLock,
       cron,

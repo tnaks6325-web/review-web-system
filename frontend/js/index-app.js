@@ -2476,7 +2476,7 @@ function _checkAllCompleteTabs(stats) {
   (stats || []).forEach(c => {
     (c.tabs || []).forEach(t => {
       const tabKey = (t.sheetId || "") + "||" + (t.tab || "");
-      const isClosed = _closedSet.has(tabKey);
+      const isClosed = _isShownClosed(tabKey);
       if (isClosed) return;
       const isTabDone = (t.total > 0 && t.pending === 0);
       const isPaidDone = (t.paidCount !== undefined && t.rowCount > 0 && t.paidCount >= t.rowCount);
@@ -2767,12 +2767,14 @@ async function loadAdminDashboard() {
 
     _closedSet    = new Set();
     _closedRoundSet = new Set(); // ★ 차수 단위 마감 Set
+    _workFinSet = new Set();     // ★ 작업보드 🏁 마감(표시 전용 · 결정 255)
     stats.forEach(c => {
       (c.tabs || []).forEach(t => {
         if (t.isClosed) {
           const key = (t.sheetId || "") + "||" + (t.tab || "");
           _closedSet.add(key);
         }
+        if (t.workFinished) _workFinSet.add((t.sheetId || "") + "||" + (t.tab || ""));
         // ★ 차수별 마감: closedRounds "1차,2차" → Set에 "sheetId||tabName||1차" 추가
         if (t.closedRounds) {
           const rounds = t.closedRounds.split(',').map(s => s.trim()).filter(Boolean);
@@ -2872,14 +2874,14 @@ async function loadAdminDashboard() {
       // 마감업체 판정 (기존 로직 유지)
       const isCampDone = c.closedOnly === true || (c.tabs.length > 0 && c.tabs.every(t => {
         const key = (t.sheetId||"")+"||"+(t.tab||"");
-        return _closedSet.has(key) || (t.total > 0 && t.pending === 0);
+        return _isShownClosed(key) || (t.total > 0 && t.pending === 0);
       }));
-      const hasClosed = c.closedOnly === true || c.tabs.some(t => _closedSet.has((t.sheetId||"")+"||"+(t.tab||"")));
+      const hasClosed = c.closedOnly === true || c.tabs.some(t => _isShownClosed((t.sheetId||"")+"||"+(t.tab||"")));
 
       c.tabs.forEach(t => {
         const tRate     = _pct(t.submitted, t.total);
         const tabKey    = (t.sheetId || "") + "||" + (t.tab || "");
-        const isClosedTab = _closedSet.has(tabKey);
+        const isClosedTab = _isShownClosed(tabKey);
         const isTabDone = (t.total > 0 && t.pending === 0);
         const isPaidDone2 = (t.paidCount !== undefined && t.rowCount > 0 && t.paidCount >= t.rowCount);
         const isAllComplete2 = isTabDone && isPaidDone2 && !isClosedTab;
@@ -2947,7 +2949,7 @@ async function loadAdminDashboard() {
         const total = t.total || 0;
         let stateHtml = "";
         if (isClosedTab) {
-          stateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
+          stateHtml = _closedLblHtml(tabKey);
         } else if (isTabDone) {
           stateHtml = `<span class="bar-lbl-center">✓ 완료</span>`;
         } else if (tuip > 0 || chuihap > 0) {
@@ -3001,7 +3003,7 @@ async function loadAdminDashboard() {
               ? `<a class="dash-tab-link" href="${escHtml(_rdTabSheetUrl2)}" target="_blank" title="${escHtml(_rdTabSheetUrl2)}">${escHtml(t.tab)} <i class="fas fa-link dash-tab-ext"></i></a>${_rdOverdueBadge2}`
               : `<span>${escHtml(t.tab)}</span>${_rdOverdueBadge2}`;
             let rdStateHtml = "";
-            if (isRoundClosed)    rdStateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
+            if (isRoundClosed)    rdStateHtml = _closedLblHtml(tabKey, rdTabKey2);
             else if (rdDone)      rdStateHtml = `<span class="bar-lbl-center">✓ 완료</span>`;
             else if ((rd.tuip||0) > 0 || (rd.chuihap||0) > 0) {
               const rdTotal = rd.total || 0;
@@ -3164,14 +3166,14 @@ function renderDashboard(data) {
     const campStripe = _campIdx2 % 2 === 0 ? "camp-stripe-even" : "camp-stripe-odd";
     const allDone = c.closedOnly === true || c.tabs.every(t => {
       const key = (t.sheetId||"")+"||"+(t.tab||"");
-      return _closedSet.has(key) || (t.total > 0 && t.pending === 0);
+      return _isShownClosed(key) || (t.total > 0 && t.pending === 0);
     });
-    const hasClosed = c.closedOnly === true || c.tabs.some(t => _closedSet.has((t.sheetId||"")+"||"+(t.tab||"")));
+    const hasClosed = c.closedOnly === true || c.tabs.some(t => _isShownClosed((t.sheetId||"")+"||"+(t.tab||"")));
 
     c.tabs.forEach(t => {
       const tRate      = _pct(t.submitted, t.total);
       const tabKey     = (t.sheetId||"")+"||"+(t.tab||"");
-      const isClosedTab = _closedSet.has(tabKey);
+      const isClosedTab = _isShownClosed(tabKey);
       const isTabDone  = (t.total > 0 && t.pending === 0);
       const isPaidDone = (t.paidCount !== undefined && t.rowCount > 0 && t.paidCount >= t.rowCount);
       const isAllComplete = isTabDone && isPaidDone && !isClosedTab;  // ★ 제출+입금 모두 100%
@@ -3204,7 +3206,7 @@ function renderDashboard(data) {
       const tuip = t.tuip||0, chuihap = t.chuihap||0;
       const total = t.total || 0;
       let stateHtml = "";
-      if (isClosedTab)  stateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
+      if (isClosedTab)  stateHtml = _closedLblHtml(tabKey);
       else if (isTabDone) stateHtml = `<span class="bar-lbl-center">✓ 완료</span>`;
       else if (tuip > 0 || chuihap > 0) {
         const leftHtml  = tuip > 0 ? `<span class="bar-lbl-left"><i class="fas fa-user-plus"></i> 투입중 ${tuip}/${total}</span>` : `<span class="bar-lbl-left"></span>`;
@@ -3257,7 +3259,7 @@ function renderDashboard(data) {
             ? `<a class="dash-tab-link" href="${escHtml(_rdTabSheetUrl)}" target="_blank" title="${escHtml(_rdTabSheetUrl)}">${escHtml(t.tab)} <i class="fas fa-link dash-tab-ext"></i></a>${_rdOverdueBadge}`
             : `<span>${escHtml(t.tab)}</span>${_rdOverdueBadge}`;
           let rdStateHtml = "";
-          if (isRoundClosed) rdStateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
+          if (isRoundClosed) rdStateHtml = _closedLblHtml(tabKey, rdTabKey);
           else if (rdDone) rdStateHtml = `<span class="bar-lbl-center">✓ 완료</span>`;
           else if ((rd.tuip||0) > 0 || (rd.chuihap||0) > 0) {
             const rdTotal2 = rd.total || 0;
@@ -3613,7 +3615,7 @@ function _buildTabRowHtml(t, tabKey, isSubRow, isClosedTab, tabNameHtml, startDa
 
   return `
     <div class="closed-cb-wrap">
-      <input type="checkbox" class="closed-cb" data-tabkey="${escHtml(tabKey)}" ${isClosedTab ? "checked" : ""} onclick="event.stopPropagation()">
+      <input type="checkbox" class="closed-cb" data-tabkey="${escHtml(tabKey)}" ${_savedClosed(tabKey) ? "checked" : ""} onclick="event.stopPropagation()">
     </div>
     <div class="dash-tab-campaign">${campaignCell}</div>
     <div class="dash-tab-name">${tabNameHtml}</div>
@@ -4772,6 +4774,18 @@ function toggleHideClosedTab() {
 // 마감된 tabKey Set — dashboard API 응답의 isClosed 값으로 채워짐
 let _closedSet = new Set();
 let _closedRoundSet = new Set(); // ★ 차수 단위 마감 Set: "sheetId||tabName||round"
+// ★ 작업보드 🏁 마감(전사 공통 · trackb_tab_finished) — 이 대시보드에는 **표시만** 한다(결정 255).
+//   ⬛ 마감(is_closed)과 섞지 않는다: 체크박스·[실행] 변경 판정은 _closedSet(저장된 ⬛ 마감)만 본다.
+let _workFinSet = new Set();
+function _isShownClosed(key) { return _closedSet.has(key) || _workFinSet.has(key); }
+function _savedClosed(key) {
+  const p = String(key || "").split("||");
+  return p.length > 2 ? (_closedSet.has(p[0] + "||" + p[1]) || _closedRoundSet.has(key)) : _closedSet.has(key);
+}
+function _closedLblHtml(tabKey, roundKey) {
+  if (_closedSet.has(tabKey) || (roundKey && _closedRoundSet.has(roundKey)) || !_workFinSet.has(tabKey)) return `<span class="bar-lbl-center">⬛ 마감</span>`;
+  return `<span class="bar-lbl-center" title="작업보드에서 마감된 작업입니다 — 작업보드 홈의 마감 보관함에 있습니다.">🏁 마감</span>`;
+}
 
 // 마감 모드 ON/OFF
 let _closedMode = false;
@@ -9110,7 +9124,8 @@ let   _dashPollTabSnap = {}; // { "sheetId||tabName": { done: bool, total: int }
 
 /** 탭 완료 여부 판정 (대시보드 표시 기준과 동일) */
 function _isTabComplete(t) {
-  return t.isClosed || (t.pending === 0 && t.total > 0);
+  // ★ 작업보드 🏁 마감(workFinished)도 ⬛ 마감과 같이 "이미 끝남" — 폴링 완료 알림 대상이 아니다(결정 255).
+  return t.isClosed || t.workFinished === true || (t.pending === 0 && t.total > 0);
 }
 
 /** 현재 stats에서 스냅샷 생성 */
