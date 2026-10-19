@@ -2779,9 +2779,9 @@ function _renderMultiImageSlots(items) {
         <div class="mr-slot-dz-hint" id="mrDzHint_${idx}">
           <i class="fas fa-cloud-upload-alt"></i>
           <span>클릭 또는 드래그 · JPG/PNG/WebP</span>
-          <em class="dz-paste-tip">또는 캡처 후 Ctrl+V</em>
         </div>
         <div class="mr-slot-preview hidden" id="mrPreview_${idx}"></div>
+        ${_dzSplitHtml()}
       </div>
       <textarea class="mr-slot-memo" id="mrMemo_${idx}" rows="1"
                 placeholder="비고 - 블로그체험단인 경우 포스팅URL (선택)" style="margin-top:8px"></textarea>`;
@@ -2841,9 +2841,9 @@ function _renderCaptureSlots(item, slots, paneCard) {
         <div class="mr-slot-dz-hint" id="csDzHint_${slot.key}">
           <i class="fas fa-cloud-upload-alt"></i>
           <span>클릭 또는 드래그 · JPG/PNG/WebP</span>
-          <em class="dz-paste-tip">또는 캡처 후 Ctrl+V</em>
         </div>
         <div class="mr-slot-preview hidden" id="csPreview_${slot.key}"></div>
+        ${_dzSplitHtml()}
       </div>
       ${optionalHint}
       <div id="csGuide_${slot.key}"></div>`;
@@ -3681,12 +3681,13 @@ function bindDragDrop() {
 }
 function onFilesSelected(e) { addFiles(Array.from(e.target.files)); e.target.value = ""; }
 
-/* ── 사진 칸: 클릭 = 칸 선택 + [바로 붙여넣기 / 파일에서 고르기] 선택지 · Ctrl+V 붙여넣기 (2026-10-20) ──
+/* ── 사진 칸 3분할(PC): 왼쪽 Ctrl+V 붙여넣기 · 가운데 끌어다 놓기 · 오른쪽 파일 추가 (2026-10-20) ──
  *  사용자 요청: "저장 없이 Ctrl+V 로 바로 붙여넣기 · 어딜 누르고 붙여넣어야 하는지 불분명 · 선택했다는 시각적 표시 ·
- *  클릭 시 바로 파일탐색기를 열지 말고 붙여넣기/파일탐색기 선택지를 줄 것".
- *  ★ PC(마우스)만 선택지를 띄운다 — 휴대폰은 Ctrl+V 가 없어 종전대로 누르면 바로 사진 고르기(화면 불변).
+ *  클릭 시 바로 파일탐색기를 열지 말 것 · 영역을 3분할(좌 Ctrl+V / 중앙 끌어다놓기 / 우 파일추가)".
+ *  ★ PC(마우스)만 3분할을 보인다 — 휴대폰은 Ctrl+V·끌어다 놓기가 없어 종전대로 누르면 바로 사진 고르기(화면 불변).
  *  ★ 넣는 길은 클릭·드래그와 같은 addFiles / _mrAddFiles / _csAddFiles — 형식·10MB·AI 사전확인 사본 0.
- *  ★ 선택된 칸 = 마지막으로 누른 칸 · 아직 안 눌렀으면 비어 있는 첫 칸. 실선 파란 테두리 + "✓ 선택됨" 알약(css .paste-target).
+ *  ★ 선택된 칸 = 마지막으로 누른 칸 · 아직 안 눌렀으면 비어 있는 첫 칸. 실선 파란 테두리 + 왼쪽 칸 "✓ 선택됨"(css .paste-target).
+ *  ★ 파일 탐색기는 오른쪽 [파일 추가]만 연다. 칸의 다른 곳을 누르면 그 칸을 선택만 한다.
  *  ★ Ctrl+V 는 화면 어디서나 → 선택된 칸. 클립보드에 사진이 없으면 가로채지 않는다(비고란 글자 붙여넣기 그대로).
  *  ★ 지금 보이는 단계 화면의 보이는 칸에서만 받는다 — 구매양식 일괄 캡처(_batchMountDropzone)와 겹쳐 받지 않는다. */
 const _PASTE_ZONE_SEL = "#dropZone, .mr-slot-dropzone";
@@ -3727,40 +3728,34 @@ function _zonePickerInput(z) {
   m = z.id.match(/^csDz_(.+)$/);     if (m) return document.getElementById("csFile_" + m[1]);
   return null;
 }
-/** 사진 칸(또는 단건 "추가" 칸)을 눌렀을 때. PC = 칸 선택 + 선택지 / 휴대폰 = 종전대로 바로 사진 고르기. */
+/** 3분할 막대(PC 전용 — css 가 휴대폰에서 숨긴다). 칸마다 하나씩, 미리보기 뒤에 둔다(사진이 있으면 한 줄로 줄어든다). */
+function _dzSplitHtml() {
+  return '<div class="dz-split">'
+    + '<button type="button" class="ds-cell ds-paste" data-act="paste"><i class="fas fa-paste"></i><b>Ctrl+V</b><span class="ds-sub">캡처 후 붙여넣기</span></button>'
+    + '<div class="ds-cell ds-drop"><i class="fas fa-hand-pointer"></i><b>끌어다 놓기</b><span class="ds-sub">사진을 여기로</span></div>'
+    + '<button type="button" class="ds-cell ds-file" data-act="file"><i class="fas fa-folder-open"></i><b>파일 추가</b><span class="ds-sub">내 PC에서 고르기</span></button>'
+    + '</div>';
+}
+/** 사진 칸을 눌렀을 때. PC = 3분할(왼쪽 붙여넣기 · 오른쪽 파일 추가 · 그 밖은 선택만) / 휴대폰 = 종전대로 바로 사진 고르기. */
 function _zoneTap(e, z) {
   if (!z) return;
-  if (e && e.target && e.target.closest && e.target.closest("button, .zone-chooser")) return;   // 삭제(×)·선택지 버튼은 각자 처리
+  const cell = e && e.target && e.target.closest && e.target.closest(".ds-cell");
+  if (!cell && e && e.target && e.target.closest && e.target.closest("button")) return;   // 사진 삭제(×) 등은 각자 처리
   if (!_isPcPointer()) {
     if (e && e.target && e.target.tagName === "INPUT") return;   // 칸을 덮은 파일 입력을 직접 누른 경우 = 브라우저가 이미 연다
     const inp = _zonePickerInput(z); if (inp) inp.click();
     return;
   }
   _pasteZoneId = z.id; _pastePaint();
-  _zcOpen(z);
+  const act = cell && cell.dataset.act;
+  if (act === "file") { const inp = _zonePickerInput(z); if (inp) inp.click(); }
+  else if (act === "paste") _zonePasteFromClipboard(z);
 }
-function _zcClose() { document.querySelectorAll(".zone-chooser").forEach(x => x.remove()); }
-function _zcOpen(z) {
-  _zcClose();
-  const box = document.createElement("div");
-  box.className = "zone-chooser";
-  box.innerHTML = '<button type="button" class="zc-x" title="닫기" aria-label="닫기"><i class="fas fa-times"></i></button>'
-    + '<div class="zc-tt">이 칸에 사진을 어떻게 넣을까요?</div>'
-    + '<div class="zc-btns">'
-    + '<button type="button" class="zc-b zc-paste"><i class="fas fa-paste"></i> 바로 붙여넣기</button>'
-    + '<button type="button" class="zc-b zc-file"><i class="fas fa-folder-open"></i> 파일에서 고르기</button>'
-    + '</div>'
-    + '<div class="zc-sub">캡처한 뒤 키보드 <b>Ctrl+V</b> 를 눌러도 이 칸에 들어가요</div>';
-  box.addEventListener("click", ev => ev.stopPropagation());
-  box.querySelector(".zc-x").onclick = () => _zcClose();
-  box.querySelector(".zc-file").onclick = () => { _zcClose(); const inp = _zonePickerInput(z); if (inp) inp.click(); };
-  box.querySelector(".zc-paste").onclick = () => { _zcClose(); _zcPasteFromClipboard(z); };
-  z.appendChild(box);
-}
-/** [바로 붙여넣기] — 브라우저 클립보드에서 사진을 읽는다. 못 읽으면(권한 거절·미지원·사진 없음) 이유와 Ctrl+V 를 안내. */
-async function _zcPasteFromClipboard(z) {
+/** 왼쪽 [Ctrl+V] 칸을 눌렀을 때 — 그 칸을 선택하고 클립보드 사진을 바로 읽어 넣는다.
+ *  못 읽으면(권한 거절·미지원·사진 없음) 이유와 "키보드 Ctrl+V" 를 안내 — 칸은 이미 선택돼 있어 Ctrl+V 가 그리로 간다. */
+async function _zonePasteFromClipboard(z) {
   const KEY_HINT = "키보드에서 Ctrl+V 를 눌러주세요 — 선택한 칸에 들어갑니다.";
-  if (!(navigator.clipboard && navigator.clipboard.read)) { showToast("이 브라우저는 버튼으로 붙여넣기를 못 해요. " + KEY_HINT, "info", 5000); return; }
+  if (!(navigator.clipboard && navigator.clipboard.read)) { showToast("이 브라우저는 눌러서 붙여넣기를 못 해요. " + KEY_HINT, "info", 5000); return; }
   let items;
   try { items = await navigator.clipboard.read(); }
   catch (_) { showToast("브라우저가 클립보드 읽기를 막았어요. " + KEY_HINT, "warning", 5000); return; }
@@ -3769,7 +3764,7 @@ async function _zcPasteFromClipboard(z) {
     const ty = (it.types || []).find(t => t.startsWith("image/"));
     if (ty) { try { blobs.push(await it.getType(ty)); } catch (_) {} }
   }
-  if (!blobs.length) { showToast("클립보드에 사진이 없어요. 먼저 화면을 캡처(Win+Shift+S)한 뒤 다시 눌러주세요.", "warning", 5000); return; }
+  if (!blobs.length) { showToast("클립보드에 사진이 없어요. 먼저 화면을 캡처(Win+Shift+S)한 뒤 Ctrl+V 를 누르거나 다시 눌러주세요.", "warning", 5000); return; }
   _pasteInto(z, blobs);
 }
 /** 붙여넣은 사진(클립보드 Blob/File)을 그 칸에 넣는다 — 클릭·드래그와 같은 함수로. */
@@ -3790,9 +3785,6 @@ function _pasteInto(z, imgs) {
   _pastePaint();
 }
 function bindPasteUpload() {
-  // 선택지 밖을 누르거나 Esc → 선택지만 닫는다(칸 선택은 유지)
-  document.addEventListener("click", e => { if (!(e.target.closest && e.target.closest(".zone-chooser, " + _PASTE_ZONE_SEL + ", .prev-add"))) _zcClose(); });
-  document.addEventListener("keydown", e => { if (e.key === "Escape") _zcClose(); });
   // 칸이 새로 그려지거나(다건·슬롯 전환) 사진이 들어가 "비어 있는 첫 칸"이 바뀌면 표시를 다시 맞춘다
   let raf = 0;
   new MutationObserver(() => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; _pastePaint(); }); })
@@ -3803,7 +3795,6 @@ function bindPasteUpload() {
       .filter(i => i.kind === "file" && i.type && i.type.startsWith("image/")).map(i => i.getAsFile()).filter(Boolean);
     if (!imgs.length) return;                 // 사진이 아니면 그대로(글자 붙여넣기 보존)
     e.preventDefault();
-    _zcClose();
     const z = _pasteTargetZone(); if (!z) return;
     _pasteInto(z, imgs);
   });
@@ -3852,7 +3843,7 @@ function renderPreviews() {
   });
   const add = document.createElement("div"); add.className = "prev-add";
   add.innerHTML = '<i class="fas fa-plus"></i><span>추가</span>';
-  add.onclick = e => { e.stopPropagation(); _zoneTap(e, document.getElementById("dropZone")); };   // PC = 선택지 · 휴대폰 = 바로 고르기
+  add.onclick = e => { e.stopPropagation(); document.getElementById("imgInput").click(); };   // 휴대폰 전용(PC 는 3분할 [파일 추가] — css 로 숨김)
   prev.appendChild(add);
 }
 

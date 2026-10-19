@@ -582,9 +582,10 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
               <i class="fas fa-cloud-upload-alt"></i>
               <p>클릭하거나 이미지를 드래그하세요</p>
               <span>JPG · PNG · GIF · WebP / 최대 10MB / 복수 선택 가능</span>
-              <em class="dz-paste-tip">캡처한 뒤 저장하지 않고 <b>Ctrl+V</b>로 바로 붙여넣어도 돼요</em>
             </div>
             <div id="dzPreview" class="dz-preview hidden"></div>
+            <!-- PC 전용 3분할(좌 Ctrl+V · 중앙 끌어다 놓기 · 우 파일 추가) — search-app.js _dzSplitHtml 과 같은 모양(결정 263) -->
+            <div class="dz-split"><button type="button" class="ds-cell ds-paste" data-act="paste"><i class="fas fa-paste"></i><b>Ctrl+V</b><span class="ds-sub">캡처 후 붙여넣기</span></button><div class="ds-cell ds-drop"><i class="fas fa-hand-pointer"></i><b>끌어다 놓기</b><span class="ds-sub">사진을 여기로</span></div><button type="button" class="ds-cell ds-file" data-act="file"><i class="fas fa-folder-open"></i><b>파일 추가</b><span class="ds-sub">내 PC에서 고르기</span></button></div>
           </div>
 
           <div class="memo-wrap">

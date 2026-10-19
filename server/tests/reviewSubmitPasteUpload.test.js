@@ -1,5 +1,5 @@
 'use strict';
-// 결정 263: 리뷰 제출 화면 — 칸 클릭 = 선택 + [바로 붙여넣기/파일에서 고르기](PC) · Ctrl+V · 클릭/드래그와 같은 넣는 길 · 글자 붙여넣기 보존.
+// 결정 263: 리뷰 제출 화면 사진 칸 3분할(PC: 좌 Ctrl+V · 중앙 끌어다 놓기 · 우 파일 추가) · Ctrl+V · 클릭/드래그와 같은 넣는 길 · 글자 붙여넣기 보존.
 // 실행: node tests/reviewSubmitPasteUpload.test.js
 const assert = require('assert');
 const fs = require('fs');
@@ -20,23 +20,32 @@ t('붙여넣기는 클릭·드래그와 같은 함수로만 넣는다(형식·10
   assert.match(b, /_csAddFiles\(m\[1\], files\)/);
   assert.ok(!/fileToBase64|S\.files\.push/.test(b), '붙여넣기 전용 저장 경로를 만들지 않는다');
   assert.match(grab('bindPasteUpload'), /_pasteInto\(z, imgs\);/, 'Ctrl+V 도 같은 길');
-  assert.match(grab('_zcPasteFromClipboard'), /_pasteInto\(z, blobs\);/, '[바로 붙여넣기] 도 같은 길');
+  assert.match(grab('_zonePasteFromClipboard'), /_pasteInto\(z, blobs\);/, '왼쪽 [Ctrl+V] 누르기도 같은 길');
 });
-t('칸 클릭: PC = 선택 + 선택지(파일 탐색기 즉시 열지 않음) · 휴대폰 = 종전대로 바로 고르기', () => {
+t('3분할: 왼쪽 Ctrl+V = 선택+붙여넣기 · 오른쪽 파일 추가만 파일 탐색기 · 그 밖은 선택만 · 휴대폰 = 종전대로 바로 고르기', () => {
   const b = grab('_zoneTap');
-  const i = b.indexOf('if (!_isPcPointer())'), j = b.indexOf('_zcOpen(z);');
-  assert.ok(i > 0 && j > i && /_pasteZoneId = z\.id; _pastePaint\(\);\s*\n\s*_zcOpen\(z\);/.test(b));
-  assert.match(b.slice(i, j), /inp\.click\(\)/);
-  assert.match(b, /closest\("button, \.zone-chooser"\)\) return;/, '삭제(×)·선택지 버튼은 칸 클릭으로 처리하지 않는다');
+  const i = b.indexOf('if (!_isPcPointer())'), j = b.indexOf('_pasteZoneId = z.id; _pastePaint();');
+  assert.ok(i > 0 && j > i);
+  assert.match(b.slice(i, j), /inp\.click\(\)/, '휴대폰 = 바로 고르기');
+  const pc = b.slice(j);
+  assert.match(pc, /if \(act === "file"\) \{ const inp = _zonePickerInput\(z\); if \(inp\) inp\.click\(\); \}/);
+  assert.match(pc, /else if \(act === "paste"\) _zonePasteFromClipboard\(z\);/);
+  assert.equal((pc.match(/inp\.click\(\)/g) || []).length, 1, 'PC 에서 파일 탐색기는 [파일 추가]만');
+  assert.match(b, /if \(!cell && [^\n]*closest\("button"\)\) return;/, '사진 삭제(×)는 칸 클릭으로 처리하지 않는다');
+  const split = grab('_dzSplitHtml');
+  const order = ['data-act="paste"', 'ds-drop', 'data-act="file"'].map(x => split.indexOf(x));
+  assert.ok(order[0] > 0 && order[0] < order[1] && order[1] < order[2], '좌 Ctrl+V · 중앙 끌어다 놓기 · 우 파일 추가');
+  assert.ok(/<b>Ctrl\+V<\/b>/.test(split) && /<b>끌어다 놓기<\/b>/.test(split) && /<b>파일 추가<\/b>/.test(split));
+  const htmlSplit = (html.match(/<div class="dz-split">[\s\S]*?<\/div><\/div>|<div class="dz-split">.*<\/button><\/div>/) || [''])[0];
+  assert.ok(htmlSplit && htmlSplit.replace(/\s+/g, '') === split.match(/'([^']*)'/g).map(x => x.slice(1, -1)).join('').replace(/\s+/g, ''), '단건 칸(html)과 슬롯 칸(js)의 3분할 모양이 같다');
   assert.match(html, /<div id="dropZone" class="drop-zone" onclick="_zoneTap\(event,this\)">/);
   assert.equal((js.match(/class="mr-slot-dropzone" id="(?:mrDz_\$\{idx\}|csDz_\$\{slot\.key\})" onclick="_zoneTap\(event,this\)"/g) || []).length, 2);
-  assert.match(css, /@media \(hover:hover\) and \(pointer:fine\)\{[\s\S]*?\.mr-slot-dropzone input\[type=file\]\{pointer-events:none\}/);
-  const o = grab('_zcOpen');
-  assert.ok(/바로 붙여넣기/.test(o) && /파일에서 고르기/.test(o) && /inp\.click\(\)/.test(o));
+  assert.equal((js.match(/\$\{_dzSplitHtml\(\)\}/g) || []).length, 2, '다건·슬롯 칸 둘 다 3분할');
+  assert.match(css, /\.dz-split\{display:none\}[\s\S]*@media \(hover:hover\) and \(pointer:fine\)\{[\s\S]*?\.mr-slot-dropzone input\[type=file\]\{pointer-events:none\}[\s\S]*?\.dz-split\{display:grid;grid-template-columns:1fr 1fr 1fr/);
 });
-t('[바로 붙여넣기] 실패는 조용히 넘기지 않는다 — 미지원·권한 거절·사진 없음 각각 안내', () => {
-  const b = grab('_zcPasteFromClipboard');
-  assert.ok(/버튼으로 붙여넣기를 못 해요/.test(b) && /클립보드 읽기를 막았어요/.test(b) && /클립보드에 사진이 없어요/.test(b));
+t('[Ctrl+V] 누르기 실패는 조용히 넘기지 않는다 — 미지원·권한 거절·사진 없음 각각 안내', () => {
+  const b = grab('_zonePasteFromClipboard');
+  assert.ok(/눌러서 붙여넣기를 못 해요/.test(b) && /클립보드 읽기를 막았어요/.test(b) && /클립보드에 사진이 없어요/.test(b));
 });
 t('사진이 없으면 가로채지 않는다 — preventDefault 는 사진 확인 뒤(비고란 글자 붙여넣기 보존)', () => {
   const b = grab('bindPasteUpload');
@@ -63,12 +72,11 @@ t('대상 칸 = 고른 칸 → 없으면 비어 있는 첫 칸 → 없으면 첫
   vm.runInContext('_pasteZoneId=""; S.filesByIdx={0:[1],1:[1]}; S.filesBySlot={receipt:[1]}', ctx);
   assert.equal(vm.runInContext('_pasteTargetZone().id', ctx), 'mrDz_0', '모두 찼으면 첫 칸');
 });
-t('화면 표시: 안내 줄 + 대상 칸 알약 — PC(마우스)에서만', () => {
-  assert.match(html, /class="dz-paste-tip">[^<]*<b>Ctrl\+V<\/b>/);
-  assert.equal((js.match(/<em class="dz-paste-tip">또는 캡처 후 Ctrl\+V<\/em>/g) || []).length, 2, '다건·슬롯 칸 둘 다');
-  assert.match(css, /\.dz-paste-tip\{display:none[\s\S]*@media \(hover:hover\) and \(pointer:fine\)\{\s*\.dz-paste-tip\{display:block\}/);
-  assert.match(css, /\.paste-target \.dz-paste-tip::before\{content:"✓ 선택됨 · Ctrl\+V 하면 여기에 들어가요"/);
-  assert.match(js, /클릭 또는 드래그 · JPG\/PNG\/WebP/, '현금영수증 안내서 가드 문구 유지');
+t('선택 표시: 선택된 칸 테두리 + 왼쪽 칸 "✓ 선택됨" — PC 에서만 · 휴대폰은 종전 안내 그대로', () => {
+  assert.match(css, /\.paste-target \.ds-paste \.ds-sub::before\{content:"✓ 선택됨 · 여기로 들어가요"/);
+  assert.match(css, /#dropZone \.dz-placeholder,\.mr-slot-dropzone \.mr-slot-dz-hint,#dropZone \.prev-add\{display:none!important\}/);
+  assert.match(js, /클릭 또는 드래그 · JPG\/PNG\/WebP/, '현금영수증 안내서 가드 문구 유지(휴대폰 안내)');
+  assert.match(html, /클릭하거나 이미지를 드래그하세요/);
 });
 t('시작 시 연결 · 단계 전환 때 표시 갱신', () => {
   assert.match(js, /bindDragDrop\(\);\n\s*bindPasteUpload\(\);/);
