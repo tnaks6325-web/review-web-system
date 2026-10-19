@@ -2081,7 +2081,6 @@
   .cndsalerow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
   .cndsalenm{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .cndsale{display:inline-block;border-radius:5px;padding:0 6px;font-size:10px;font-weight:700;vertical-align:1px}
-  .cndsale.on{background:#e7f6ee;color:#137a43}
   .cndsale.off{background:#fde4e1;color:#b42318}
   .cndsalebtn{font:inherit;font-size:11px;border-radius:6px;border:1px solid var(--line,#dfe3ea);background:#fff;color:inherit;padding:1px 7px;cursor:pointer}
   .cndsalebtn.stop{border-color:#e8a29a;color:#b42318}
@@ -7630,16 +7629,20 @@ function _condCardHtml(wd,d,m){
 function _cndSalesRow(cd){
   const list=Array.isArray(cd&&cd.optionSales)?cd.optionSales:[];
   if(!list.length||STATE.role==='advertiser'||!cd.campaignId) return '';
+  /* ★ 사용자 확정 2026-10-19: 줄 이름 「품절유무」 · 「판매 중」 표시 없음(멈췄을 때만 「멈춤」) · 공고 전체 줄은 이름 없이 버튼만.
+     상품을 나눈 공고는 상품마다 한 줄(상품명 + 멈춤/신고 + 버튼). 보여줄 것이 없는 줄(열려 있고 버튼도 없음)은 그리지 않는다. */
   const items=list.map((o,i)=>{
     const st=o.paused
       ?`<span class="cndsale off" title="새 신청을 받지 않습니다${o.pausedBy?` — ${esc(o.pausedReason==='auto_soldout'?'품절 신고 2명으로 자동':o.pausedBy)}`:''}">${o.pausedReason==='auto_soldout'?'자동 멈춤':'멈춤'}</span>`
-      :`<span class="cndsale on">판매 중</span>`;
+      :'';
     const rep=(!o.paused&&o.reports>0)?`<span class="cndchip" title="리뷰어가 품절이라 취소한 신고입니다 — 다른 리뷰어 2명이면 자동으로 멈춥니다.">신고 ${Number(o.reports)}</span>`:'';
-    const btn=STATE.canEdit?`<button type="button" class="cndsalebtn${o.paused?'':' stop'}" onclick="_cndSale(${i})">${o.paused?'다시 열기':'품절로 멈추기'}</button>`:'';
-    const nm=o.whole?'공고 전체':o.optKey;
-    return `<div class="cndsalerow"><span class="cndsalenm" title="${esc(o.whole?'상품을 나누지 않은 공고 — 공고 전체의 새 신청을 멈추거나 다시 엽니다':o.optKey)}">${esc(nm)}</span>${st}${rep}${btn}</div>`;
+    const btn=STATE.canEdit?`<button type="button" class="cndsalebtn${o.paused?'':' stop'}" onclick="_cndSale(${i})" title="${esc(o.whole?'공고 전체의 새 신청을 멈추거나 다시 엽니다':o.optKey)}">${o.paused?'다시 열기':'품절로 멈추기'}</button>`:'';
+    const nm=o.whole?'':`<span class="cndsalenm" title="${esc(o.optKey)}">${esc(o.optKey)}</span>`;
+    if(!nm&&!st&&!rep&&!btn) return '';
+    return `<div class="cndsalerow">${nm}${st}${rep}${btn}</div>`;
   }).join('');
-  return `<dt>상품 판매</dt><dd class="cndsales">${items}</dd>`;
+  if(!items) return '';
+  return `<dt>품절유무</dt><dd class="cndsales">${items}</dd>`;
 }
 async function _cndSale(i){
   const cd=STATE.wd&&STATE.wd.condition; const o=cd&&Array.isArray(cd.optionSales)?cd.optionSales[i]:null;
