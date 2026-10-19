@@ -11,13 +11,15 @@ const js = fs.readFileSync(path.join(FE, 'js', 'search-app.js'), 'utf8');
 const css = fs.readFileSync(path.join(FE, 'css', 'search.css'), 'utf8');
 const html = fs.readFileSync(path.join(FE, 'search.html'), 'utf8');
 let passed = 0; const t = (n, f) => { f(); passed++; console.log('PASS ' + n); };
-const grab = name => { const m = js.match(new RegExp('function ' + name + '\\([^)]*\\) \\{[\\s\\S]*?\\n\\}')); assert.ok(m, name); return m[0]; };
+const grab = name => { const m = js.match(new RegExp('(?:async )?function ' + name + '\\([^)]*\\) \\{[\\s\\S]*?\\n\\}')); assert.ok(m, name); return m[0]; };
 
 t('붙여넣기는 클릭·드래그와 같은 함수로만 넣는다(형식·10MB·AI 사전확인 사본 0)', () => {
   const b = grab('_pasteInto');
-  assert.match(b, /if \(z\.id === "dropZone"\) addFiles\(files\);/);
-  assert.match(b, /_mrAddFiles\(Number\(m\[1\]\), files\)/);
-  assert.match(b, /_csAddFiles\(m\[1\], files\)/);
+  assert.match(b, /if \(z\.id === "dropZone"\) await addFiles\(files\);/);
+  assert.match(b, /await _mrAddFiles\(Number\(m\[1\]\), files\)/);
+  assert.match(b, /await _csAddFiles\(m\[1\], files\)/);
+  assert.match(b, /const took = _pasteZoneFiles\(z\)\.length - before;\s*\n\s*if \(took > 0\) showToast\(`붙여넣은 사진 \$\{took\}장/, '성공 안내는 실제로 받아들여진 장수만');
+  assert.ok(!/_pasteZoneId = /.test(b), '자동으로 고른 칸을 기억하지 않는다(한 칸에 계속 쌓이지 않게)');
   assert.ok(!/fileToBase64|S\.files\.push/.test(b), '붙여넣기 전용 저장 경로를 만들지 않는다');
   assert.match(grab('bindPasteUpload'), /_pasteInto\(z, imgs\);/, 'Ctrl+V 도 같은 길');
   assert.match(grab('_zonePasteFromClipboard'), /_pasteInto\(z, blobs\);/, '왼쪽 [Ctrl+V] 누르기도 같은 길');
@@ -61,7 +63,9 @@ t('구매양식 일괄 캡처 붙여넣기는 그 칸이 보일 때만 — 숨�
   assert.match(b, /if \(!_BATCH\) return;\s*\n\s*if \(!box\.isConnected \|\| !box\.offsetParent\) return;/);
 });
 t('대상 칸 = 고른 칸 → 없으면 비어 있는 첫 칸 → 없으면 첫 칸', () => {
-  const zones = [{ id: 'mrDz_0', offsetParent: 1 }, { id: 'mrDz_1', offsetParent: 1 }, { id: 'csDz_receipt', offsetParent: 1 }];
+  const sl = sub => ({ dataset: { submitted: sub ? '1' : '' } });
+  const zones = [{ id: 'mrDz_0', offsetParent: 1, closest: () => sl(false) }, { id: 'mrDz_1', offsetParent: 1, closest: () => sl(false) },
+    { id: 'csDz_receipt', offsetParent: 1, closest: () => sl(false) }];
   const ctx = { S: { files: [], filesByIdx: { 0: [1] }, filesBySlot: {} }, _pasteZoneId: '',
     document: { querySelector: () => ({ offsetParent: 1, querySelectorAll: () => zones }) } };
   vm.createContext(ctx);
@@ -71,6 +75,12 @@ t('대상 칸 = 고른 칸 → 없으면 비어 있는 첫 칸 → 없으면 첫
   assert.equal(vm.runInContext('_pasteTargetZone().id', ctx), 'csDz_receipt', '마우스로 고른 칸이 먼저');
   vm.runInContext('_pasteZoneId=""; S.filesByIdx={0:[1],1:[1]}; S.filesBySlot={receipt:[1]}', ctx);
   assert.equal(vm.runInContext('_pasteTargetZone().id', ctx), 'mrDz_0', '모두 찼으면 첫 칸');
+  vm.runInContext('S.filesByIdx={}; S.filesBySlot={}', ctx);
+  zones[0].closest = () => sl(true);
+  assert.equal(vm.runInContext('_pasteTargetZone().id', ctx), 'mrDz_1', '이미 제출한 칸은 비어 보여도 건너뛴다(덮어쓰기 방지)');
+  vm.runInContext('_pasteZoneId="mrDz_0"', ctx);
+  assert.equal(vm.runInContext('_pasteTargetZone().id', ctx), 'mrDz_0', '제출한 칸도 직접 누르면 대상(교체)');
+  assert.match(js, /if \(isDone\) slotEl\.dataset\.submitted = "1";/);
 });
 t('선택 표시: 선택된 칸 테두리 + 왼쪽 칸 "✓ 선택됨" — PC 에서만 · 휴대폰은 종전 안내 그대로', () => {
   assert.match(css, /\.paste-target \.ds-paste \.ds-sub::before\{content:"✓ 선택됨 · 여기로 들어가요"/);

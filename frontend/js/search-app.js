@@ -2826,6 +2826,7 @@ function _renderCaptureSlots(item, slots, paneCard) {
     const slotEl = document.createElement("div");
     slotEl.className = "mr-slot";
     slotEl.id = `csSlot_${slot.key}`;
+    if (isDone) slotEl.dataset.submitted = "1";   // 붙여넣기 기본 대상(비어 있는 첫 칸)에서 이미 제출한 칸은 건너뛴다(결정 263)
     slotEl.innerHTML = `
       <div class="mr-slot-header">
         <div class="mr-slot-num">${isReceipt ? ++receiptIndex : ++reviewIndex}</div>
@@ -3706,9 +3707,13 @@ function _pasteZoneFiles(z) {
   m = z.id.match(/^csDz_(.+)$/);     if (m) return (S.filesBySlot && S.filesBySlot[m[1]]) || [];
   return [];
 }
+/** 사용자가 누른 칸이 먼저 · 아니면 "비어 있는 첫 칸"(이미 제출한 칸은 비어 보여도 건너뛴다 — 덮어쓰기 방지).
+ *  ★ 자동으로 고른 칸은 _pasteZoneId 에 적지 않는다 — 적으면 한 칸이 찬 뒤에도 같은 칸에 계속 쌓인다(누른 칸만 기억). */
 function _pasteTargetZone() {
   const zones = _pasteZones(); if (!zones.length) return null;
-  return zones.find(z => z.id === _pasteZoneId) || zones.find(z => !_pasteZoneFiles(z).length) || zones[0];
+  const done = z => { const sl = z.closest && z.closest(".mr-slot"); return !!(sl && sl.dataset.submitted === "1"); };
+  return zones.find(z => z.id === _pasteZoneId) || zones.find(z => !_pasteZoneFiles(z).length && !done(z))
+    || zones.find(z => !done(z)) || zones[0];
 }
 function _pastePaint() {
   const t = _pasteTargetZone();
@@ -3767,21 +3772,23 @@ async function _zonePasteFromClipboard(z) {
   if (!blobs.length) { showToast("클립보드에 사진이 없어요. 먼저 화면을 캡처(Win+Shift+S)한 뒤 Ctrl+V 를 누르거나 다시 눌러주세요.", "warning", 5000); return; }
   _pasteInto(z, blobs);
 }
-/** 붙여넣은 사진(클립보드 Blob/File)을 그 칸에 넣는다 — 클릭·드래그와 같은 함수로. */
-function _pasteInto(z, imgs) {
+/** 붙여넣은 사진(클립보드 Blob/File)을 그 칸에 넣는다 — 클릭·드래그와 같은 함수로.
+ *  ★ 성공 안내는 실제로 받아들여진 장수만(10MB 초과·형식 불가·읽기 실패는 넣는 함수가 각자 오류 안내). */
+async function _pasteInto(z, imgs) {
   // 클립보드 사진은 이름이 없거나 모두 image.png 라 구분되게 다시 붙인다(내용은 그대로)
   const stamp = new Date().toTimeString().slice(0, 8).replace(/:/g, "");
   const files = imgs.map((f, k) => {
     const ext = String((f.type || "image/png").split("/")[1] || "png").replace("jpeg", "jpg");
     try { return new File([f], `붙여넣기_${stamp}${imgs.length > 1 ? "_" + (k + 1) : ""}.${ext}`, { type: f.type || "image/png" }); } catch (_) { return f; }
   });
-  _pasteZoneId = z.id;
+  const before = _pasteZoneFiles(z).length;
   let m;
-  if (z.id === "dropZone") addFiles(files);
-  else if ((m = z.id.match(/^mrDz_(\d+)$/))) _mrAddFiles(Number(m[1]), files);
-  else if ((m = z.id.match(/^csDz_(.+)$/))) _csAddFiles(m[1], files);
+  if (z.id === "dropZone") await addFiles(files);
+  else if ((m = z.id.match(/^mrDz_(\d+)$/))) await _mrAddFiles(Number(m[1]), files);
+  else if ((m = z.id.match(/^csDz_(.+)$/))) await _csAddFiles(m[1], files);
   else return;
-  showToast(`붙여넣은 사진 ${files.length}장을 「${_pasteZoneLabel(z)}」 칸에 넣었어요`, "success");
+  const took = _pasteZoneFiles(z).length - before;
+  if (took > 0) showToast(`붙여넣은 사진 ${took}장을 「${_pasteZoneLabel(z)}」 칸에 넣었어요`, "success");
   _pastePaint();
 }
 function bindPasteUpload() {
