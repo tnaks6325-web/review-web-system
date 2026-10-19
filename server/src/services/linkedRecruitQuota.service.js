@@ -371,12 +371,17 @@ async function liveCampaignForWorkOrders(db, woIds, excludeCampaignId) {
  * ★ 값이 그대로(또는 빈 값 = 변경 없음)면 검사하지 않는다 — 상태 변경 등이 현재 값을 다시 보내도 막지 않게.
  * @returns {Promise<null|{status:number, body:object}>} null = 진행, 아니면 그대로 응답한다.
  */
+/* ★★ 잠금 순서(2026-10-20 1단계 · 완화 금지): **L1 오더 단위 잠금(recruit_campaign_wo:) → 행 잠금**.
+   반대 순서(행 → L1)가 한 곳이라도 남으면, L1 을 먼저 쥔 다른 저장과 서로 기다리며 교착(40P01)한다. */
 async function guardWorkOrderLinkChange(client, woId, nextCampaignId) {
   const next = String(nextCampaignId == null ? '' : nextCampaignId).trim();
   if (!next || !woId) return null;
+  // ★ 같은 값(=변경 없음)은 잠그지 않은 읽기로 빠르게 통과 — 종전 계약(같은 값이면 잠금 없음) 유지.
+  const { rows: pre } = await client.query('SELECT linked_campaign_id FROM work_orders WHERE id = $1', [woId]);
+  if (!pre.length || String(pre[0].linked_campaign_id || '').trim() === next) return null;
+  await lockWorkOrderCampaigns(client, [woId]);                       // L1 먼저
   const { rows } = await client.query('SELECT linked_campaign_id FROM work_orders WHERE id = $1 FOR UPDATE', [woId]);
   if (!rows.length || String(rows[0].linked_campaign_id || '').trim() === next) return null;
-  await lockWorkOrderCampaigns(client, [woId]);
   const live = await liveCampaignForWorkOrders(client, [woId], next);
   if (!live) return null;
   return { status: 409, body: { ok: false, code: 'WORK_ORDER_CAMPAIGN_EXISTS', campaignId: live.id,
@@ -580,6 +585,7 @@ async function assertWorkOrderQuota({ workOrderId, recruitTotal }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    await lockWorkOrderCampaigns(client, [workOrderId]);              // ★ L1 먼저(잠금 순서 · 2026-10-20)
     const { rows } = await client.query('SELECT id, linked_campaign_id FROM work_orders WHERE id=$1 FOR UPDATE', [workOrderId]);
     if (!rows.length) { await client.query('ROLLBACK'); return null; }
     const campaign = await linkedCampaign(client, rows[0]);
@@ -645,10 +651,16 @@ async function syncCampaignRecruitTotal({ campaignId, recruitTotal, skipWorktabl
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // ★ L1 먼저(잠금 순서 · 2026-10-20) — 종전엔 공고 행 → 오더 행 순이라 오더 쪽 저장(오더 행 → 공고 행)과 반대였다.
+    const preWoIds = await workOrderIdsForCampaign(client, campaignId);
+    await lockWorkOrderCampaigns(client, preWoIds);
     const { rows } = await client.query('SELECT id, source_work_order_id, linked_sheet_id, linked_tab_name FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [campaignId]);
     if (!rows.length) { await client.query('ROLLBACK'); return { linked: false }; }
     const order = await linkedWorkOrder(client, rows[0]);
     if (!order) { await client.query('ROLLBACK'); return { linked: false }; }
+    if (!preWoIds.includes(order.id)) {   // 잠그기 전 읽은 짝과 다르다 = 그 사이 연결이 바뀌었다 → 그 오더의 L1 을 안 쥐었다
+      throw quotaError('작업오더 연결이 방금 바뀌었습니다. 다시 저장해 주세요.', 'recruit_quota_link_changed');
+    }
     const total = quota(recruitTotal);
     await client.query(
       `UPDATE work_orders SET linked_campaign_id=$2, recruit_count=$3, updated_at=NOW() WHERE id=$1`,
@@ -669,6 +681,7 @@ async function syncWorkOrderRecruitTotal({ workOrderId, recruitTotal }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    await lockWorkOrderCampaigns(client, [workOrderId]);              // ★ L1 먼저(잠금 순서 · 2026-10-20)
     const { rows } = await client.query('SELECT id, linked_campaign_id FROM work_orders WHERE id=$1 FOR UPDATE', [workOrderId]);
     if (!rows.length) { await client.query('ROLLBACK'); return { linked: false }; }
     const campaign = await linkedCampaign(client, rows[0]);

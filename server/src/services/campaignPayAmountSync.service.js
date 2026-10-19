@@ -80,6 +80,8 @@ async function syncCampaignPayAmount({ workOrderId, productOptionsJson, by = 'so
 
   try {
     await client.query('BEGIN');
+    // ★ L1 먼저(잠금 순서 · 2026-10-20 · 완화 금지) — 오더 행 → 공고 행 잠금 전에 오더 단위 잠금.
+    await require('./linkedRecruitQuota.service').lockWorkOrderCampaigns(client, [workOrderId]);
     const { rows: woRows } = await client.query(
       'SELECT id, linked_campaign_id FROM work_orders WHERE id = $1 FOR UPDATE', [workOrderId]);
     if (!woRows.length) { await client.query('ROLLBACK'); return { applied: false, reason: 'order_not_found' }; }
@@ -191,6 +193,8 @@ async function syncCampaignThumbnail({ workOrderId, thumbnailUrl, by = 'source' 
   }
   try {
     await client.query('BEGIN');
+    // ★ L1 먼저(잠금 순서 · 2026-10-20 · 완화 금지) — 오더 행 → 공고 행 잠금 전에 오더 단위 잠금.
+    await require('./linkedRecruitQuota.service').lockWorkOrderCampaigns(client, [workOrderId]);
     const { rows: woRows } = await client.query(
       'SELECT id, linked_campaign_id FROM work_orders WHERE id = $1 FOR UPDATE', [workOrderId]);
     if (!woRows.length) { await client.query('ROLLBACK'); return { applied: false, reason: 'order_not_found' }; }
@@ -257,6 +261,8 @@ async function syncCampaignInflow({ workOrderId, inflowType, commonGuide, produc
   }
   try {
     await client.query('BEGIN');
+    // ★ L1 먼저(잠금 순서 · 2026-10-20 · 완화 금지) — 오더 행 → 공고 행 잠금 전에 오더 단위 잠금.
+    await require('./linkedRecruitQuota.service').lockWorkOrderCampaigns(client, [workOrderId]);
     const { rows: woRows } = await client.query(
       'SELECT id, linked_campaign_id FROM work_orders WHERE id = $1 FOR UPDATE', [workOrderId]);
     if (!woRows.length) { await client.query('ROLLBACK'); return { applied: false, reason: 'order_not_found' }; }
@@ -400,6 +406,8 @@ async function syncCampaignPurchaseWindow({ workOrderId, purchaseTime, by = 'sou
   }
   try {
     await client.query('BEGIN');
+    // ★ L1 먼저(잠금 순서 · 2026-10-20 · 완화 금지) — 오더 행 → 공고 행 잠금 전에 오더 단위 잠금.
+    await require('./linkedRecruitQuota.service').lockWorkOrderCampaigns(client, [workOrderId]);
     const { rows: woRows } = await client.query(
       'SELECT id, linked_campaign_id FROM work_orders WHERE id = $1 FOR UPDATE', [workOrderId]);
     if (!woRows.length) { await client.query('ROLLBACK'); return { applied: false, reason: 'order_not_found' }; }

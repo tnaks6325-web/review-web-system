@@ -499,6 +499,12 @@ router.post('/intake', async (req, res, next) => {
         }
         return res.status(409).json({
           ok: false,
+          /* ★ 1단계(2026-10-20): 같은 원본·같은 번호인데 키(=내용 해시)가 다르다 = 그 번호는 **다른 내용으로 이미 반영됐다**
+             (인트라넷이 응답을 못 받아 실패로 알고 내용을 고쳐 다시 보낸 경우). 인트라넷은 이 code 를 보고 번호 +1 로
+             최신 내용을 다시 보낸다 — 멱등 성공으로 접으면 그 수정이 조용히 사라진다(완화 금지). */
+          code: existing.source_review_order_id === sourceContract.sourceReviewOrderId
+            && Number(existing.source_revision || 0) === sourceContract.sourceRevision
+            ? 'revision_already_applied' : 'source_exists',
           error: '동일 원본 오더가 이미 수신되었습니다. 원본 수정은 수정 동기화로 처리해야 합니다.',
           work_order_id: existing.id,
           source_revision: existing.source_revision,
@@ -800,6 +806,25 @@ function _sourceEditAllowedAfterAccept(column, current, nextOptionsJson) {
 // work-order id.  This deliberately updates only source-owned values: the
 // receiving team keeps control of status, assignee, notes, sheet/tab links,
 // and the advertiser/portal projection once it has been accepted.
+/** ★ 1단계(2026-10-20) — 원본 수정 UPDATE 가 0행 = 읽은 뒤 그 사이 다른 요청이 먼저 처리했다(같은 번호 동시 전송 등).
+ *  같은 시도(번호·키 같음)면 멱등 성공, 아니면 409 — 0행을 성공으로 접으면 저장 안 된 수정이 "전송됨" 이 된다. */
+async function _sourceRevisionRaceResponse(res, sourceReviewOrderId, source) {
+  const { rows } = await pool.query(
+    'SELECT * FROM work_orders WHERE source_review_order_id = $1 LIMIT 1', [sourceReviewOrderId]);
+  const cur = rows[0];
+  if (cur && Number(cur.source_revision || 0) === source.sourceRevision
+      && cur.intake_idempotency_key === source.idempotencyKey) {
+    return res.json({ ok: true, data: cur, idempotent: true });
+  }
+  return res.status(409).json({
+    ok: false,
+    code: cur && Number(cur.source_revision || 0) === source.sourceRevision ? 'revision_already_applied' : 'revision_race',
+    error: '같은 오더의 다른 수정이 먼저 처리됐습니다. 다시 시도해 주세요.',
+    work_order_id: cur ? cur.id : null,
+    source_revision: cur ? Number(cur.source_revision || 0) : null,
+  });
+}
+
 async function _intakeSourceRevisionHandler(req, res, next) {
   try {
     await _ensureTables();
@@ -909,6 +934,9 @@ async function _intakeSourceRevisionHandler(req, res, next) {
     if (source.sourceRevision <= currentRevision) {
       return res.status(409).json({
         ok: false,
+        /* ★ 1단계(2026-10-20): 같은 번호인데 키(=내용)가 다르면 그 번호는 이미 다른 내용으로 반영됐다 →
+           인트라넷이 번호 +1 로 최신 내용을 다시 보낸다(조용한 유실 방지 · 완화 금지). 더 옛 번호는 그냥 낡은 요청. */
+        code: source.sourceRevision === currentRevision ? 'revision_already_applied' : 'revision_stale',
         error: '이미 처리된 원본 버전입니다. 최신 원본을 다시 확인해 주세요.',
         work_order_id: current.id,
         source_revision: currentRevision,
@@ -917,6 +945,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
     if (source.sourceRevision !== currentRevision + 1) {
       return res.status(409).json({
         ok: false,
+        code: 'revision_gap',
         error: '원본 리뷰오더 버전이 순서대로 전달되지 않았습니다.',
         work_order_id: current.id,
         source_revision: currentRevision,
@@ -953,9 +982,12 @@ async function _intakeSourceRevisionHandler(req, res, next) {
            intranet_advertiser_business_number = ${add(source.intranetAdvertiserBusinessNumber)},
            updated_at = NOW()
          WHERE id = $1 AND source_review_order_id = ${add(sourceReviewOrderId)}
+           AND COALESCE(source_revision, 0) = ${add(currentRevision)}
          RETURNING *`;
       const { rows: matched } = await pool.query(sql, params);
       const linked = matched[0];
+      // ★ 1단계: 읽은 뒤 그 사이 다른 요청이 번호를 올렸다 — 0행을 성공으로 접지 않는다(완화 금지).
+      if (!linked) return _sourceRevisionRaceResponse(res, sourceReviewOrderId, source);
       /* ★★ 결제금액이 바뀌었으면 연결 모집공고까지 반영한다(사용자 확정 2026-09-21).
          리뷰어가 보는 금액은 공고에 있어, 여기서 멈추면 "저장됐는데 화면은 옛 금액" 이 된다.
          ★ **절대 throw 하지 않는다** — 전파 실패가 이미 끝난 원본 저장을 되돌리면 안 된다.
@@ -1070,7 +1102,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
          delivery_type_mix = $41, recall_courier = $42, recall_product = $43, product_distribution_mode = $44,
          thumbnail_url = $45,
          updated_at = NOW()
-       WHERE id = $1 AND source_review_order_id = $40
+       WHERE id = $1 AND source_review_order_id = $40 AND COALESCE(source_revision, 0) = $46
        RETURNING *`,
       [
         current.id,
@@ -1088,9 +1120,11 @@ async function _intakeSourceRevisionHandler(req, res, next) {
         _deliveryMixJson(b, deliveryType), _recallFields(b, deliveryType).courier, _recallFields(b, deliveryType).product,
         _productDistributionMode(b.product_distribution_mode),
         _thumbnailUrl(b.thumbnail_url),
+        currentRevision,                                   // $46 ★ 1단계: 읽은 번호 그대로일 때만 쓴다
       ]
     );
     const updated = rows[0];
+    if (!updated) return _sourceRevisionRaceResponse(res, sourceReviewOrderId, source);
     await syncWorkOrderRecruitTotal({ workOrderId: updated.id, recruitTotal: updated.recruit_count });
     _emitWorkOrderNew(updated, { event: 'source_revision', source_revision: source.sourceRevision });
     res.json({ ok: true, data: updated });
