@@ -74,7 +74,8 @@ const { buildSequentialSchedule } = require('../src/utils/sequentialSchedule');
         if (/UPDATE recruit_campaigns SET soldout_paused_at = NOW\(\)/.test(s)) {
           const k = p[0] + '|'; if (st.paused.has(k)) return { rows: [] }; st.paused.add(k); st.wholeBy = p[2]; st.wholeReason = p[1]; return { rows: [{ id: p[0] }] };
         }
-        if (/^(BEGIN|COMMIT|ROLLBACK)/.test(s.trim())) return { rows: [] };
+        if (/^(BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE SAVEPOINT)/.test(s.trim())) return { rows: [] };
+        if (/INSERT INTO campaign_plan_events/.test(s)) { st.events.push({ camp: p[0], actor: p[1], action: p[2] }); return { rows: [] }; }
         if (/SELECT id FROM recruit_campaigns WHERE id = \$1 FOR UPDATE/.test(s)) return { rows: [{ id: p[0] }] };
         if (/INSERT INTO campaign_option_soldout_reports/.test(s)) {
           if (st.reports.some(r => r.order === p[2])) return { rows: [] };
@@ -106,8 +107,10 @@ const { buildSequentialSchedule } = require('../src/utils/sequentialSchedule');
         o9: { campaign_id: 'c3', app_key: '없는 이름', sel_key: null },
         o10: { campaign_id: 'c1', app_key: 'B', sel_key: null },
         o11: { campaign_id: 'c2', app_key: null, sel_key: null }, o12: { campaign_id: 'c2', app_key: null, sel_key: null },
+        o13: { campaign_id: 'c5', app_key: '옛 상품', sel_key: null },
       },
-      options: { c1: ['A', 'B'], c2: [], c3: ['단일'], c4: [{ opt_key: '마감A', status: 'closed' }, { opt_key: '진행B', status: 'active' }] },
+      options: { c1: ['A', 'B'], c2: [], c3: ['단일'], c4: [{ opt_key: '마감A', status: 'closed' }, { opt_key: '진행B', status: 'active' }],
+        c5: [{ opt_key: '옛 상품', status: 'closed' }] },
     });
     let r = await svc.recordSoldoutReport({ orderSubmissionId: 'o1', phone8: '11110000', pool: db });
     ok('1번째 신고 = 알림만(멈추지 않음)', r.action === 'reported' && r.reporters === 1 && db.st.paused.size === 0 && db.st.alerts[0].kind === 'soldout_report');
@@ -139,6 +142,9 @@ const { buildSequentialSchedule } = require('../src/utils/sequentialSchedule');
     r = await svc.recordSoldoutReport({ orderSubmissionId: 'o12', phone8: '12120000', pool: db });
     ok('★ 공고 전체: 다른 리뷰어 2명 = 자동 멈춤(공고 행) · 알림은 하나로 올라감', r.action === 'auto_paused' && db.st.paused.has('c2|')
       && db.st.wholeReason === 'auto_soldout' && db.st.alerts.filter(a => a.camp === 'c2').length === 1 && db.st.alerts.find(a => a.camp === 'c2').kind === 'auto_paused');
+    ok('★ 공고 전체 자동 멈춤 = 활동 기록 campaign_paused(system:soldout-report — Codex P2)', db.st.events.some(e => e.camp === 'c2' && e.action === 'campaign_paused' && e.actor === 'system:soldout-report'));
+    r = await svc.recordSoldoutReport({ orderSubmissionId: 'o13', phone8: '13130000', pool: db });
+    ok('★ 상품이 전부 마감인 공고 = 공고 전체로 센다(옵션 없이 참여되는 공고 — Codex P1)', r.action === 'reported' && db.st.reports.some(x => x.camp === 'c5' && x.opt === ''));
     const bad = { query: async () => { throw new Error('db down'); }, connect: async () => { throw new Error('db down'); } };
     r = await svc.recordSoldoutReport({ orderSubmissionId: 'o1', pool: bad });
     ok('DB 오류 = 예외 없이 error(취소는 그대로 유효)', r.ok === false && r.action === 'error');

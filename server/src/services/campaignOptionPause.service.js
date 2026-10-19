@@ -66,7 +66,10 @@ async function _resolveOrderTarget(db, orderSubmissionId) {
   const { rows: opts } = await db.query(
     `SELECT opt_key, status FROM campaign_options WHERE campaign_id = $1`, [r.campaign_id]);
   const cid = String(r.campaign_id);
-  if (!opts.length) return { campaignId: cid, optKey: '' };   // 상품을 나누지 않은 공고 — 알림만
+  if (!opts.length) return { campaignId: cid, optKey: '' };   // 상품을 나누지 않은 공고 — 결정 259: 공고 전체
+  // ★ 결정 259(Codex P1): 상품이 **전부 마감**인 공고도 옵션 없이 참여되는 공고다(liveOptions 0 — apply 와 같은 판정)
+  //   → 공고 전체로 센다. 살아 있는 상품이 하나라도 있으면 종전 규칙(마감 상품 = 멈출 것 없음 · 짐작 금지) 그대로.
+  if (!opts.some(o => String(o.status || 'active') !== 'closed')) return { campaignId: cid, optKey: WHOLE };
   const byKey = new Map(opts.map(o => [o.opt_key, o]));
   const given = [r.app_key, r.sel_key].filter(Boolean);
   const k = given.find(x => byKey.has(x));
@@ -138,6 +141,19 @@ async function recordSoldoutReport({ orderSubmissionId, phone8 = '', pool: dbPoo
             RETURNING id`, [tgt.campaignId, tgt.optKey]);
       // ★ 공고 전체: 0행 = 멈출 수 없는 공고(옛 방식·보관 — 참여 게이트가 없다) → 종전처럼 알림만(이미 멈춤은 위에서 걸렀다)
       action = up.rows.length ? 'auto_paused' : (tgt.optKey === WHOLE ? 'reported' : 'already_paused');
+      // ★ 결정 259(Codex P2): 공고 전체 자동 멈춤도 활동 기록을 남긴다(언제·왜 신청이 멈췄는지) — 기록 실패가 멈춤을 되돌리지 않게 SAVEPOINT.
+      if (tgt.optKey === WHOLE && up.rows.length) {
+        await client.query('SAVEPOINT camp_autopause_log');
+        try {
+          await client.query(
+            `INSERT INTO campaign_plan_events (campaign_id, actor, action, detail) VALUES ($1, $2, $3, $4::jsonb)`,
+            [tgt.campaignId, 'system:soldout-report', 'campaign_paused', JSON.stringify({ whole: true, auto: true, reporters })]);
+          await client.query('RELEASE SAVEPOINT camp_autopause_log');
+        } catch (e) {
+          await client.query('ROLLBACK TO SAVEPOINT camp_autopause_log');
+          logger.warn(`[option-pause] 자동 멈춤 기록 실패(멈춤은 유효): ${(e && e.message) || e}`);
+        }
+      }
     }
     // 이미 멈춰 있는 상품에 들어온 신고는 새 알림을 띄우지 않는다(멈춘 걸 다시 알릴 일이 없다 — 다시 열 때 신고는 정리된다).
     let alert = null;
