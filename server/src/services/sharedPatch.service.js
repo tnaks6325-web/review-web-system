@@ -60,9 +60,18 @@ function writablePath(row, origin) {
   return m.kind === 'leaf' && m.key === 'url';
 }
 
-function _label(path) {
+/** 사람이 읽는 칸 이름 — 내부 경로(`p:상품|o:옵션.key`)를 그대로 보이지 않는다. 상품·옵션은 이름까지만. */
+function _label(rowOrPath) {
+  const row = typeof rowOrPath === 'string' ? { path: rowOrPath } : rowOrPath;
+  const path = row.path;
   if (path.startsWith('f:')) { const f = FIELD_BY_KEY.get(path.slice(2)); return f ? f.label : path.slice(2); }
-  if (path.startsWith('p:')) return '상품·옵션(' + path.slice(2).replace('|o:', ' / ') + ')';
+  if (path.startsWith('p:')) {
+    const owner = (row.meta && row.meta.parent) || path;
+    const [prod, opt] = owner.slice(2).split('|o:');
+    const name = String(prod || '').trim();
+    return `상품·옵션(${name && name !== '-' ? name : '상품'}${opt ? ' / ' + opt : ''})`;
+  }
+  if (path.startsWith('products:')) return '상품·옵션';
   return path;
 }
 
@@ -241,13 +250,13 @@ async function applySharedPatch(p) {
     const blocked = [...plan.writes, ...plan.conflicts].filter(w => !writablePath(w, p.origin));
     if (blocked.length) {
       return await _abort(client, 409, { ok: false, code: 'field_not_editable', sync_version: curVersion,
-        fields: blocked.map(w => ({ path: w.path, label: _label(w.path) })),
-        error: `이 칸은 아직 여기서 바꿀 수 없습니다: ${[...new Set(blocked.map(w => _label(w.path)))].join(', ')}` });
+        fields: blocked.map(w => ({ path: w.path, label: _label(w) })),
+        error: `이 칸은 아직 여기서 바꿀 수 없습니다: ${[...new Set(blocked.map(w => _label(w)))].join(', ')}` });
     }
     if (plan.conflicts.length || plan.readOnly.length) {
       return await _abort(client, 409, { ok: false, code: 'field_conflict', sync_version: curVersion,
-        conflicts: plan.conflicts.map(c => ({ ...c, label: _label(c.path) })),
-        readOnly: plan.readOnly.map(c => ({ ...c, label: _label(c.path) })),
+        conflicts: plan.conflicts.map(c => ({ ...c, label: _label(c) })),
+        readOnly: plan.readOnly.map(c => ({ ...c, label: _label(c) })),
         error: '다른 곳에서 같은 칸이 먼저 바뀌었습니다. 어느 값을 남길지 골라 주세요.' });
     }
 

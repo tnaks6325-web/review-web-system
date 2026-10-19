@@ -1239,7 +1239,7 @@ router.put('/intake/source/:sourceReviewOrderId', _intakeSourceRevisionHandler);
 // ═══════════════════════════════════════════════════════════
 // 양방향 수정 기준(결정 263 · 3단계) — 인트라넷 수정 창이 열 때 부른다(X-Intake-Key).
 // GET /api/order/intake/source/:sourceReviewOrderId/shared
-//   → { bidir_state, sync_version, writable: [칸], field_owner: {칸: 주인}, capabilities: { bidir_v1 } }
+//   → { bidir_state, sync_version, writable: [칸], intake_view: {칸: 현재 값}, field_owner: {칸: 주인}, capabilities: { bidir_v1 } }
 // ★ 읽기만 한다. 연결 안 된 오더도 200(bidir_state 로 판단) — 인트라넷이 종전 경로로 저장한다.
 // ═══════════════════════════════════════════════════════════
 router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) => {
@@ -1250,10 +1250,10 @@ router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) 
     if (!_intakeKeyMatches(req.headers['x-intake-key'], expected)) return res.status(401).json({ ok: false, error: 'Unauthorized.' });
     const sid = String(req.params.sourceReviewOrderId || '').trim();
     const { rows } = await pool.query(
-      `SELECT id, bidir_state, sync_version, deleted_at FROM work_orders WHERE source_review_order_id = $1 LIMIT 1`, [sid]);
+      `SELECT * FROM work_orders WHERE source_review_order_id = $1 LIMIT 1`, [sid]);
     if (!rows.length || rows[0].deleted_at) return res.status(404).json({ ok: false, error: '작업오더를 찾을 수 없습니다.' });
     const sw = await readBidirSwitch(pool);
-    const { PHASE3_SHARED_FIELDS, INTRANET_EDITABLE_AFTER_ACCEPT } = require('../services/sharedPatch.service');
+    const { PHASE3_SHARED_FIELDS, INTRANET_EDITABLE_AFTER_ACCEPT, readSharedState } = require('../services/sharedPatch.service');
     const active = rows[0].bidir_state === 'on' && sw.in2rw === 'apply';
     res.json({
       ok: true,
@@ -1262,6 +1262,10 @@ router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) 
       bidir_active: active,
       sync_version: Number(rows[0].sync_version || 0),
       writable: active ? [...PHASE3_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT] : null,
+      /* ★★ 이 버전의 공유 값(저장 형태 그대로) — 인트라넷 수정 창은 이 값으로 연다.
+         안 그러면 창이 인트라넷 사본(리뷰웹에서 고친 글 칸이 아직 안 온 값)으로 열리고, 손대지 않은 칸이
+         "인트라넷이 되돌렸다" 로 읽혀 리뷰웹 수정을 조용히 덮는다(로컬 E2E 실측 2026-10-20). */
+      intake_view: active ? readSharedState(rows[0]) : null,
       field_owner: Object.fromEntries(SHARED_FIELDS.map(f => [f.key, f.owner])),
       capabilities: { bidir_v1: true },
     });
