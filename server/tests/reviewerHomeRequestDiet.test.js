@@ -108,7 +108,7 @@ function extractFn(src, name) {
     let fetches = 0; const ss = storage(); let shown = null;
     const banner = { style: {} };
     const ctx = { sessionStorage: ss, document: { getElementById: id => (id === 'adminModeBanner' ? banner : null) },
-      refreshAdminModeBanner() {}, fetch: async () => { fetches++; return { ok: false, status: 401 }; } };
+      refreshAdminModeBanner() {}, _syncCampEditEntry() {}, fetch: async () => { fetches++; return { ok: false, status: 401 }; } };
     vm.runInNewContext(extractFn(html, '_setCampEditBanner') + '\n' + extractFn(html, 'maybeFetchCampEditToken') + '\nthis.f=maybeFetchCampEditToken;', ctx);
     ctx.f({ name: '가', phone8: '12345678' });
     assert.equal(fetches, 0, '요청 없음');
