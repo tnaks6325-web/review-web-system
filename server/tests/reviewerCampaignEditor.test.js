@@ -150,6 +150,22 @@ const fakeIntranet = (user) => async () => ({
   ok('프론트: "관리자로 공고 수정" 로그인 → 인트라넷 발급 경로 · 로그아웃 시 제거',
     /openCampEditLogin\(\)/.test(idx) && /\/api\/reviewer\/campaign-token-intranet/.test(idx) && /removeItem\("rapp_camp_edit_token"\)/.test(idx));
   ok('프론트: 리뷰어 로그인 때 서버에 묻지 않는다(자동 발급 폐지)', !/\/api\/reviewer\/campaign-token"/.test(idx));
+  ok('프론트: [공고 수정] 버튼은 기본 숨김(모든 리뷰어에게 보이지 않음) — 2곳 모두',
+    (idx.match(/class="rc-edit-login" style="display:none"/g) || []).length === 2 && !/class="rc-edit-login"(?! style="display:none")/.test(idx));
+  ok('프론트: 직원용 주소(?staff=1) 또는 받은 열쇠가 있을 때만 보인다', (() => {
+    const m = idx.match(/function _campEditEntryAllowed\(\) \{[\s\S]*?\n\}/);
+    if (!m) return false;
+    const vm = require('vm');
+    const run = (search, store) => {
+      const ss = new Map(Object.entries(store || {}));
+      const ctx = { URLSearchParams, location: { search, pathname: '/', hash: '' }, history: { replaceState() {} },
+        sessionStorage: { getItem: k => (ss.has(k) ? ss.get(k) : null), setItem: (k, v) => ss.set(k, String(v)) } };
+      vm.runInNewContext(m[0] + '\nthis.r=_campEditEntryAllowed();', ctx);
+      return ctx.r;
+    };
+    return run('', {}) === false && run('?staff=1', {}) === true && run('?staff=0', {}) === false
+      && run('', { rapp_staff_entry: '1' }) === true && run('', { rapp_camp_edit_token: 't' }) === true;
+  })());
   ok('프론트: 옛 마스터 명단 UI 제거', !/function loadCampEditors/.test(app) && !/loadCampEditors\(\)/.test(app));
 
   // ── ④ 리뷰어 앱 모달: 유입가이드 확인 + 마감 공고 진행과정 미리보기 ──

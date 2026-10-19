@@ -757,8 +757,8 @@
       <div class="home-section-title rc-title-row">
         <span><i class="fas fa-bullhorn" style="color:var(--p)"></i> 모집공고</span>
         <span class="rc-title-tools">
-          <!-- 결정 257: 인트라넷 관리자만 — 누르면 인트라넷 로그인 → 카드에 [✏️ 관리자 수정] -->
-          <button type="button" class="rc-edit-login" title="인트라넷 관리자만 공고를 고칠 수 있어요" onclick="openCampEditLogin()"><i class="fas fa-pen"></i> 공고 수정</button>
+          <!-- 결정 257: 인트라넷 관리자만 — 직원용 주소(?staff=1)로 들어온 탭에서만 보인다(일반 리뷰어 화면엔 없음) -->
+          <button type="button" class="rc-edit-login" style="display:none" title="인트라넷 관리자만 공고를 고칠 수 있어요" onclick="openCampEditLogin()"><i class="fas fa-pen"></i> 공고 수정</button>
           <span class="rc-viewtoggle">
             <button type="button" class="rc-vt-list" title="행으로 보기" onclick="setRecruitView('row')"><i class="fas fa-list"></i></button>
             <button type="button" class="rc-vt-card" title="카드로 보기" onclick="setRecruitView('card')"><i class="fas fa-table-cells-large"></i></button>
@@ -1104,8 +1104,8 @@
       <div class="home-section-title rc-title-row">
         <span><i class="fas fa-bullhorn" style="color:var(--p)"></i> 모집공고</span>
         <span class="rc-title-tools">
-          <!-- 결정 257: 인트라넷 관리자만 — 누르면 인트라넷 로그인 → 카드에 [✏️ 관리자 수정] -->
-          <button type="button" class="rc-edit-login" title="인트라넷 관리자만 공고를 고칠 수 있어요" onclick="openCampEditLogin()"><i class="fas fa-pen"></i> 공고 수정</button>
+          <!-- 결정 257: 인트라넷 관리자만 — 직원용 주소(?staff=1)로 들어온 탭에서만 보인다(일반 리뷰어 화면엔 없음) -->
+          <button type="button" class="rc-edit-login" style="display:none" title="인트라넷 관리자만 공고를 고칠 수 있어요" onclick="openCampEditLogin()"><i class="fas fa-pen"></i> 공고 수정</button>
           <span class="rc-viewtoggle">
             <button type="button" class="rc-vt-list" title="행으로 보기" onclick="setRecruitView('row')"><i class="fas fa-list"></i></button>
             <button type="button" class="rc-vt-card" title="카드로 보기" onclick="setRecruitView('card')"><i class="fas fa-table-cells-large"></i></button>
@@ -1425,7 +1425,31 @@ function maybeFetchCampEditToken() {
   let tok = "";
   try { tok = sessionStorage.getItem("rapp_camp_edit_token") || ""; } catch (_) {}
   _setCampEditBanner(!!tok);
+  _syncCampEditEntry();
 }
+/* ★ [공고 수정] 버튼은 **직원용 주소(?staff=1)로 들어온 탭**에서만 보인다(사용자 확정 2026-10-19 —
+   모든 리뷰어 화면에 보여선 안 된다). 한 번 들어오면 그 탭이 닫힐 때까지 기억하고, 주소에서는 표시를 지운다.
+   이미 공고수정 열쇠를 받은 탭도 보인다(다시 로그인할 길). 그 밖의 리뷰어에게는 버튼 자체가 없다. */
+function _campEditEntryAllowed() {
+  let on = false;
+  try {
+    const q = new URLSearchParams(location.search);
+    if (q.get("staff") === "1") {
+      sessionStorage.setItem("rapp_staff_entry", "1");
+      q.delete("staff");
+      const qs = q.toString();
+      history.replaceState(null, "", location.pathname + (qs ? "?" + qs : "") + location.hash);
+    }
+    on = sessionStorage.getItem("rapp_staff_entry") === "1" || !!sessionStorage.getItem("rapp_camp_edit_token");
+  } catch (_) { on = false; }
+  return on;
+}
+function _syncCampEditEntry() {
+  const on = _campEditEntryAllowed();
+  document.querySelectorAll(".rc-edit-login").forEach(b => { b.style.display = on ? "" : "none"; });
+  return on;
+}
+document.addEventListener("DOMContentLoaded", () => { try { _syncCampEditEntry(); } catch (_) {} });
 function openCampEditLogin() {
   const o = document.getElementById("campEditLoginOvl");
   if (!o) return;
