@@ -2187,6 +2187,8 @@
   :is(#wdRevPop,#wdCapPop) .wrp-drop{border:1.5px dashed var(--line,#cbd5e1);border-radius:10px;background:var(--card2,#f8fafc);padding:14px 10px;text-align:center;min-height:86px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;gap:4px}
   :is(#wdRevPop,#wdCapPop) .wrp-drop.over{border-color:#2563eb;background:#eff6ff}
   :is(#wdRevPop,#wdCapPop) .wrp-drop.has{padding:9px;min-height:0;text-align:left}
+  :is(#wdRevPop,#wdCapPop) .wrp-drop.prz-host{padding:6px 6px 8px;min-height:0;justify-content:flex-start}
+  :is(#wdRevPop,#wdCapPop) .wrp-drop.prz-host .wrp-cnt{margin:4px 2px 6px;font-size:11px;color:var(--faint,#64748b)}
   :is(#wdRevPop,#wdCapPop) .wrp-ico{font-size:20px;line-height:1}
   :is(#wdRevPop,#wdCapPop) .wrp-msg{font-size:12.5px;color:var(--t1,#0f172a)}
   :is(#wdRevPop,#wdCapPop) .wrp-sub{font-size:11px;color:var(--faint,#94a3b8)}
@@ -2877,6 +2879,8 @@ table.wbl-t td.nc .rest.on{position:static;transform:none;opacity:1;margin:0 0 0
   padding:9px 10px;font-size:11px;color:var(--faint,#94a3b8);text-align:center}
 #rmOv .rmatt.over{border-color:#2563eb;background:#eff6ff}
 #rmOv .rmatt.has{text-align:left;padding:8px}
+#rmOv .rmatt.prz-host{padding:5px 5px 7px;color:inherit}
+#rmOv .rmatt.prz-host .rmths{margin-bottom:6px}
 #rmOv .rmths{display:flex;flex-wrap:wrap;gap:6px}
 #rmOv .rmth{position:relative;width:58px;height:58px;border-radius:8px;overflow:hidden;border:1px solid var(--line,#e2e8f0);background:#fff}
 #rmOv .rmth img{width:100%;height:100%;object-fit:cover;display:block}
@@ -10834,7 +10838,7 @@ function _rmTake(list){
   if(!_RM||_RM.busy) return;
   const imgs=[...(list||[])].filter(f=>f&&String(f.type||'').startsWith('image/'));
   if(!imgs.length) return;
-  let err='';
+  let err=''; const n0=_RM.files.length;
   for(const f of imgs){
     if(_RM.files.length>=_RM_MAX_FILES){ err=`사진은 최대 ${_RM_MAX_FILES}장까지 첨부할 수 있습니다.`; break; }
     if(f.size>_RM_MAX_ONE){ err='한 장당 8MB까지 첨부할 수 있습니다.'; continue; }
@@ -10842,7 +10846,9 @@ function _rmTake(list){
     const item={ name:f.name||'capture.png', thumb, url:'', busy:true, err:'' };
     _RM.files.push(item); _rmUpload(f,item);
   }
+  const grew=_RM.files.length>n0;
   _RM.attErr=err; _rmPaintAtt(); _rmPaintFoot();
+  if(grew&&window.PasteReady) PasteReady.flash(document.getElementById('rmAtt'));
 }
 function _rmB64(file){ return new Promise((res,rej)=>{ const r=new FileReader();
   r.onerror=()=>rej(new Error('파일을 읽지 못했습니다.')); r.onload=()=>{ const s=String(r.result||''); res(s.slice(s.indexOf(',')+1)); };
@@ -10868,6 +10874,16 @@ function _rmPaintAtt(){
   const a=document.getElementById('rmAtt'); if(!a||!_RM) return;
   const fs=_RM.files||[];
   a.className='rmatt'+(fs.length?' has':'');
+  if(window.PasteReady){   // 결정 264: [Ctrl+V 붙여넣기 | 끌어다 놓기] + 상태 줄 · 파일 고르기 창구는 두지 않는다(결정 136 과 같은 규율)
+    a.innerHTML=(fs.length?`<div class="rmths">${fs.map((f,i)=>`<div class="rmth${f.err?' bad':''}" title="${esc(f.err||f.name)}">
+         ${f.thumb?`<img src="${esc(f.thumb)}" alt="">`:''}
+         ${f.busy?'<span class="rmbusy">올리는 중</span>':(f.err?'<span class="rmbusy">실패</span>':'')}
+         <button class="rmx" type="button" onclick="_rmDropAt(${i})" title="빼기">×</button></div>`).join('')}</div>`:'')
+      + PasteReady.html({compact:!!fs.length, dropSub:`최대 ${_RM_MAX_FILES}장`})
+      + (_RM.attErr?`<div class="rmwhy" style="margin-top:4px"><b>${esc(_RM.attErr)}</b></div>`:'');
+    PasteReady.bind(a, _rmTake, toast);
+    _rmPlace(); return;
+  }
   a.innerHTML= fs.length
     ? `<div class="rmths">${fs.map((f,i)=>`<div class="rmth${f.err?' bad':''}" title="${esc(f.err||f.name)}">
          ${f.thumb?`<img src="${esc(f.thumb)}" alt="">`:''}
@@ -11001,7 +11017,9 @@ function _manualReviewTake(list){
     try{ f._url=URL.createObjectURL(f); }catch(_){ f._url=''; }
     next.push(f);
   }
+  const grew=next.length>st.files.length;
   st.files=next; st.err=err; _manualReviewRender();
+  if(grew&&window.PasteReady) PasteReady.flash(document.getElementById('wrpDrop'));   // 받았다는 표시(초록 깜빡임)
 }
 function _manualReviewDrop(i){
   const st=_manualReviewState; if(!st||st.saving) return;
@@ -11056,7 +11074,9 @@ function _manualReviewRender(){
         + `<button class="btn pri wrp-exgo" type="button" onclick="_manualReviewSubmitExisting()"${st.saving?' disabled':''}>이 캡처로 제출 처리</button>`
         + `<div class="wrp-exnote">새로 붙여넣으면 캡처가 한 벌 더 쌓입니다 — 위 캡처가 맞으면 그대로 처리하세요.</div></div>`:'')
     + (blocked?'':`<div class="wrp-drop${n?' has':''}" id="wrpDrop">${
-        n ? `<div class="wrp-ths">${thumbs}</div><div class="wrp-cnt">이미지 ${n}장 · 더 붙여넣을 수 있습니다</div>`
+        window.PasteReady   // 결정 264: [Ctrl+V 붙여넣기 | 끌어다 놓기] + "지금 Ctrl+V 하면 여기에" 상태 줄(파일 고르기 창구는 두지 않는다 — 결정 136)
+          ? (n ? `<div class="wrp-ths">${thumbs}</div><div class="wrp-cnt">이미지 ${n}장</div>` : '') + PasteReady.html({compact:!!n, dropSub:`최대 ${_MR_MAX_FILES}장`})
+          : n ? `<div class="wrp-ths">${thumbs}</div><div class="wrp-cnt">이미지 ${n}장 · 더 붙여넣을 수 있습니다</div>`
           : `<div class="wrp-ico">📋</div><div class="wrp-msg"><b>Ctrl</b>(⌘)<b>+V</b> 로 리뷰 캡처를 붙여넣으세요</div><div class="wrp-sub">끌어다 놓아도 됩니다 · 최대 ${_MR_MAX_FILES}장</div>`}</div>`)
     + (st.err?`<div class="wrp-err">${esc(st.err)}</div>`:'')
     + `<div class="wrp-ft"><span class="wrp-note">${st.saving?'처리 중…':'제출하면 리뷰제출 열에 지금 시각이 기록되고 리뷰어 참여내역도 제출 완료가 됩니다'}</span>`
@@ -11073,6 +11093,7 @@ function _manualReviewRender(){
     dz.addEventListener('dragover',e=>{ if(e.dataTransfer&&[...(e.dataTransfer.types||[])].includes('Files')){ e.preventDefault(); dz.classList.add('over'); } });
     dz.addEventListener('dragleave',()=>dz.classList.remove('over'));
     dz.addEventListener('drop',e=>{ e.preventDefault(); dz.classList.remove('over'); _manualReviewTake(e.dataTransfer&&e.dataTransfer.files); });
+    if(window.PasteReady) PasteReady.bind(dz, _manualReviewTake, toast);   // [Ctrl+V 붙여넣기] 칸 누르기 = 같은 받는 함수
   }
   try{ box.focus({preventScroll:true}); }catch(_){ }
 }
@@ -11232,6 +11253,7 @@ function _capTake(list){
   if(st.file&&st.file._url){ try{ URL.revokeObjectURL(st.file._url); }catch(_){ } }
   try{ f._url=URL.createObjectURL(f); }catch(_){ f._url=''; }
   st.file=f; st.err=imgs.length>1?'사진은 한 장만 붙일 수 있어 첫 장만 받았습니다.':''; _capRender();
+  if(window.PasteReady) PasteReady.flash(document.getElementById('wcpDrop'));
 }
 /* 큰 캡처는 보내기 전에 줄인다(긴 변 2400px · JPEG) — 본문 상한에 걸려 실패하지 않게. */
 function _capEncode(file){
@@ -11284,7 +11306,9 @@ function _capRender(){
         curUrl?`<div class="wcp-img"><img src="${esc(curUrl)}" alt="지금 ${K.label}" loading="lazy"></div>`:'<div class="wcp-img none">없음</div>'}</div>`
       + `<span class="wcp-arrow">→</span><div class="wcp-side"><div class="wcp-cap">새 사진</div>${
         st.file?`<div class="wcp-img"><img src="${esc(st.file._url||'')}" alt="새 ${K.label}"></div>`:'<div class="wcp-img none">아래에 붙여넣기</div>'}</div></div>`
-      + `<div class="wrp-drop" id="wcpDrop"><div class="wrp-msg"><b>Ctrl</b>(⌘)<b>+V</b> 로 새 ${K.label}를 붙여넣으세요</div><div class="wrp-sub">끌어다 놓아도 됩니다 · 한 장</div></div>`:'')
+      + `<div class="wrp-drop" id="wcpDrop">${window.PasteReady   // 결정 264(파일 고르기 창구는 두지 않는다 — 결정 192)
+          ? PasteReady.html({compact:!!st.file, dropSub:'한 장'})
+          : `<div class="wrp-msg"><b>Ctrl</b>(⌘)<b>+V</b> 로 새 ${K.label}를 붙여넣으세요</div><div class="wrp-sub">끌어다 놓아도 됩니다 · 한 장</div>`}</div>`:'')
     + (st.err?`<div class="wrp-err">${esc(st.err)}</div>`:'')
     + `<div class="wrp-ft"><span class="wrp-note">${st.saving?'저장 중…':(cur?('이전 사진은 드라이브 휴지통으로 옮겨집니다(30일 안에 복구 가능)'+(isRev?' · 새 사진은 리뷰 검수를 다시 받습니다':'')):'새 사진이 이 주문의 구매캡처로 저장됩니다')}</span>`
     + `<button class="btn" type="button" onclick="_capClose()"${st.saving?' disabled':''}>취소</button>`
@@ -11295,6 +11319,7 @@ function _capRender(){
     dz.addEventListener('dragover',e=>{ if(e.dataTransfer&&[...(e.dataTransfer.types||[])].includes('Files')){ e.preventDefault(); dz.classList.add('over'); } });
     dz.addEventListener('dragleave',()=>dz.classList.remove('over'));
     dz.addEventListener('drop',e=>{ e.preventDefault(); dz.classList.remove('over'); _capTake(e.dataTransfer&&e.dataTransfer.files); });
+    if(window.PasteReady) PasteReady.bind(dz, _capTake, toast);
   }
   try{ box.focus({preventScroll:true}); }catch(_){ }
 }
@@ -19393,7 +19418,9 @@ window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';
      네임스페이스로 돌린다(인트라넷 SSO 토큰은 /api/manual-order/* 에 도달 자체가 불가능
      → /api/trackb/manual-order/* 프록시, 권한은 AE 또는 편집 허용 admin). -->
 <script>window.MANUAL_ORDER_API = '/api/trackb/manual-order';</script>
-<script src="js/manual-order.js?v=20261013-prodcheck"></script>
+<!-- 사진 칸 공용 "Ctrl+V 준비됨" 장치(결정 264) — manual-order.js 보다 먼저 -->
+<script src="js/paste-ready.js?v=20261020-przready"></script>
+<script src="js/manual-order.js?v=20261020-przready"></script>
 <script src="js/index-recruit.js?v=20261012-optpause"></script>
 <script>
 /* index-recruit.js 가 admin.html 전역으로 기대하는 6개를 리뷰웹시스템[3버전] 것으로 잇는다.

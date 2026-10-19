@@ -225,7 +225,9 @@ t('4b 수동 입력 화면: productCheck·allowProductMismatch·캡처 글자를
   assert.ok(/it\.productWarn \|\| \[\]/.test(f), '취소한 줄은 표에 이유가 보인다');
   assert.ok(/onlyApp/.test(blk) && /방금 다른 상품·공고로 참여 신청한 연락처예요/.test(blk), '신청 기록만 걸리면 "다른 상품을 샀다"고 단정하지 않는다');
   assert.ok(/row\.targetApplicationId = id \|\| ''; row\.productWarn = null;/.test(f) && /row\.productWarn = null;   \/\/ 캡처가 바뀌면/.test(f));
-  assert.ok(/manual-order\.js\?v=20261013-prodcheck/.test(readFront('workdesk.html')), '옛 파일을 재사용하지 않게 판 올림');
+  // 판 문자열은 뒤 변경(결정 264 등)이 다시 올린다 — "이 변경 이후 판"인지만 본다(검사 의미 불변)
+  { const m = readFront('workdesk.html').match(/manual-order\.js\?v=(\d{8})-/);
+    assert.ok(m && Number(m[1]) >= 20261013, '옛 파일을 재사용하지 않게 판 올림'); }
 });
 t('4d ★ 확인 기록 지문: key 가 있으면 숫자가 달라도 따로(신청·주문마다) · key 가 없으면 종전과 같은 지문(기존 활성 기록 불변)', () => {
   const { fingerprint } = require('../src/services/errorLog.service');
