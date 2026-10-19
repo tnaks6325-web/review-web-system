@@ -5304,7 +5304,9 @@ async function _finReopen(tab){
      (AE 는 담당 업체 작업만). 홈은 읽기 + 이동 + 마감만 하고 처리 로직 사본을 두지 않는다. */
 function _finVisible(){
   const fin=STATE.finTab==='fin';
-  let list=(STATE.tabs||[]).filter(t=>isFinished(t)===fin);
+  // ★ 결정 258: 작업검색·예전 마감에서 읽기 전용으로 붙인 보관 작업(archived)은 홈 목록·건수에 넣지 않는다
+  //   (🏁 기록이 없는데 [↩ 진행중으로 복귀]가 붙는 가짜 마감 줄이 된다).
+  let list=(STATE.tabs||[]).filter(t=>!t.archived&&isFinished(t)===fin);
   const mgr=STATE.finMgr||'';
   if(mgr) list=list.filter(t=>((t.stats&&t.stats.manager)||'')===mgr);
   const q=(STATE.finQ||'').trim().toLowerCase();
@@ -5995,7 +5997,7 @@ function _finBodyHtml(){
 function _finRenderList(){
   const host=document.getElementById('wblMount'); if(!host) return;
   const fin=STATE.finTab==='fin';
-  const all=STATE.tabs||[];
+  const all=(STATE.tabs||[]).filter(t=>!t.archived);   // 결정 258: 보관 작업은 홈 건수에서 뺀다(_finVisible 과 같은 기준)
   const nRun=all.filter(t=>!isFinished(t)).length, nFin=all.filter(t=>isFinished(t)).length;
   // ★ 히어로 "진행 중 작업"도 **여기서만** 쓴다 — 두 곳에서 세면 마감 직후 히어로는 3, 목록은 2로 갈린다
   //   (실제로 브라우저 검증이 이 어긋남을 잡았다). 같은 재료·한 명의 writer = 구조적으로 일치.
@@ -6267,10 +6269,12 @@ function _finLegacyHtml(){
   if(!L.length) return '';
   const q=String(STATE.finQ||'').trim().toLowerCase();
   const rows=L.map((t,i)=>({t,i})).filter(({t})=>!q||`${t.displayName||''} ${t.tabName||''} ${t.campaignName||''}`.toLowerCase().includes(q));
-  const tr=({t,i})=>{ const d=String(t.archivedAt||t.closedAt||'').slice(0,10)||'—';
+  // 날짜는 한국시간 기준(_lkRegistrationDate — UTC 앞 10자를 자르면 새벽 보관분이 전날로 보인다).
+  // "자료 없음"은 첫 칸에도 둔다 — 좁은 화면(≤720px)은 표의 2·3번째 칸을 숨긴다.
+  const tr=({t,i})=>{ const d=_lkRegistrationDate(t.archivedAt||t.closedAt)||'—';
     return t.hasArchive
       ? `<tr class="fin" onclick="_finOpenLegacy(${i})"><td>${esc(t.displayName||t.tabName)}</td><td>${esc(t.campaignName||'—')}</td><td class="nh" style="white-space:nowrap">${esc(d)}</td></tr>`
-      : `<tr class="fin" style="cursor:default" title="보관된 자료가 없어 열 수 없습니다"><td>${esc(t.displayName||t.tabName)}</td><td>${esc(t.campaignName||'—')}</td><td class="nh" style="white-space:nowrap">자료 없음</td></tr>`; };
+      : `<tr class="fin" style="cursor:default" title="보관된 자료가 없어 열 수 없습니다"><td>${esc(t.displayName||t.tabName)} <span class="wbl-legacy-sub">· 자료 없음</span></td><td>${esc(t.campaignName||'—')}</td><td class="nh" style="white-space:nowrap">자료 없음</td></tr>`; };
   return `<details class="wbl-legacy"${STATE.legacyOpen?' open':''} ontoggle="STATE.legacyOpen=this.open">
     <summary>📦 예전 마감 작업 <b>${L.length}</b>건 <span class="wbl-legacy-sub">— 옛 관리자 대시보드에서 ⬛ 마감한 작업 · 줄을 누르면 읽기 전용으로 열립니다</span></summary>
     ${rows.length?`<div class="wbl-tw"><table class="wbl-t"><thead><tr><th>작업명</th><th>업체 · 시트</th><th class="nh">마감(보관)일</th></tr></thead><tbody>${rows.map(tr).join('')}</tbody></table></div>`
@@ -6279,11 +6283,11 @@ function _finLegacyHtml(){
 }
 function _finOpenLegacy(i){
   const t0=(STATE.legacyClosed||[])[i]; if(!t0||!t0.hasArchive) return;
-  // 작업검색 wPickSearch 의 *마감 작업 열기와 같은 규칙 — 이미 붙어 있으면 그 줄을, 없으면 읽기 전용으로 붙인다.
-  let k=STATE.tabs.findIndex(x=>x.archived&&_favKey(x)===_favKey(t0));
-  if(k<0){ STATE.tabs.push(Object.assign({},t0,{archived:true,finished:true})); k=STATE.tabs.length-1; }
-  STATE.wSeg=(STATE.tabs[k].advertiserName||'');
-  selTab(k);
+  // ★ 홈 화면에는 작업보드 본문(#main)이 없다 → selTab 을 바로 부르면 안 열린다. 홈 목록 열기(openTaskFromHome)와
+  //   같은 pendingTab 계약으로 작업보드로 넘긴다. 작업보드가 목록을 새로 받은 뒤 못 찾은 예약 탭은 그 객체를
+  //   그대로 붙여 연다 → archived:true 가 실려 작업검색의 *마감 작업과 똑같이 읽기 전용으로 열린다.
+  STATE.pendingTab=Object.assign({},t0,{archived:true,finished:true,tabGid:t0.tabGid||'',spreadsheetTitle:t0.spreadsheetTitle||''});
+  switchView('workdesk');
 }
 /* ══ M2: "열린 작업" 줄(0단) — 브라우저 탭처럼 열어둔 작업만 · 개인별 ═══════════════════
    ★ 저장은 **계정 귀속 서버 원장**(migration 089) — 다른 PC 에서 로그인해도 그대로다(브라우저보다 나은 점).

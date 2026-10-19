@@ -71,9 +71,9 @@ process.env.JWT_SECRET = 'test-legacy-closed';
   const grab = name => { const m = html.match(new RegExp('(?:async )?function ' + name + '\\([^)]*\\)\\{[\\s\\S]*?\\n\\}')); assert.ok(m, name); return m[0]; };
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const ctx = { STATE: { tabs: [], finQ: '' }, esc, api: async () => ({ ok: true, tabs: [] }), document: { getElementById: () => null },
-    selTab(k) { ctx.picked = k; }, _favKey: x => x.sheetId + '\t' + x.tabName };
+    switchView(v) { ctx.view = v; }, _favKey: x => x.sheetId + '\t' + x.tabName };
   vm.createContext(ctx);
-  vm.runInContext(['_finLegacyHtml', '_finOpenLegacy', '_finRenderLegacy', '_finLegacyRetry'].map(grab).join('\n') + '\n' + grab('_finLoadLegacy'), ctx);
+  vm.runInContext(['_finLegacyHtml', '_finOpenLegacy', '_finRenderLegacy', '_finLegacyRetry', '_lkRegistrationDate'].map(grab).join('\n') + '\n' + grab('_finLoadLegacy'), ctx);
   await t('목록 렌더: 건수·읽기 전용 안내 · 자료 없는 작업은 못 연다고 말한다 · onclick 은 인덱스만', async () => {
     ctx.STATE.legacyClosed = [
       { sheetId: 's1', tabName: "x'),alert(1),('", displayName: '<b>A</b>', campaignName: '캠페인A', archivedAt: '2026-09-03T00:00:00Z', hasArchive: true },
@@ -84,8 +84,16 @@ process.env.JWT_SECRET = 'test-legacy-closed';
     assert.match(h, /onclick="_finOpenLegacy\(0\)"/);
     assert.ok(!/alert\(1\)/.test(h.replace(/&#39;/g, '')) || !/onclick="[^"]*alert/.test(h), '탭명이 onclick 에 들어가지 않는다');
     assert.ok(!/<b>A<\/b>/.test(h), '이름은 이스케이프');
-    assert.match(h, /자료 없음/);
+    assert.match(h, /<td>표시B <span class="wbl-legacy-sub">· 자료 없음<\/span><\/td>/, '좁은 화면에서도 보이는 첫 칸에 "자료 없음"');
     assert.ok(!/_finOpenLegacy\(1\)/.test(h), '보관 자료 없는 줄은 열기 없음');
+  });
+  await t('날짜는 한국시간 — 새벽(UTC 전날) 보관분이 전날로 보이지 않는다', async () => {
+    ctx.STATE.legacyClosed = [{ sheetId: 's9', tabName: 'x', archivedAt: '2026-09-02T16:30:00.000Z', hasArchive: true }];
+    assert.match(vm.runInContext('_finLegacyHtml()', ctx), />2026-09-03</);
+    ctx.STATE.legacyClosed = [
+      { sheetId: 's1', tabName: "x'),alert(1),('", displayName: '<b>A</b>', campaignName: '캠페인A', archivedAt: '2026-09-03T00:00:00Z', hasArchive: true },
+      { sheetId: 's1', tabName: '옛마감B', displayName: '표시B', campaignName: '업체가', closedAt: '2026-08-21', hasArchive: false },
+    ];
   });
   await t('검색어로 거른다(이름·업체)', async () => {
     ctx.STATE.finQ = '업체가';
@@ -93,11 +101,18 @@ process.env.JWT_SECRET = 'test-legacy-closed';
     assert.ok(/표시B/.test(h) && !/_finOpenLegacy\(0\)/.test(h));
     ctx.STATE.finQ = '';
   });
-  await t('열기 = 작업검색의 *마감 작업과 같은 규칙(읽기 전용으로 붙여 selTab) · 두 번 열어도 한 줄', async () => {
-    vm.runInContext('_finOpenLegacy(0); _finOpenLegacy(0); _finOpenLegacy(1);', ctx);
-    assert.equal(ctx.STATE.tabs.length, 1);
-    assert.ok(ctx.STATE.tabs[0].archived === true && ctx.STATE.tabs[0].finished === true);
-    assert.equal(ctx.picked, 0);
+  await t('열기 = 홈 목록 열기와 같은 pendingTab 계약(작업보드로 넘김 · 읽기 전용 표시 실림) · 자료 없는 줄은 무반응', async () => {
+    vm.runInContext('_finOpenLegacy(1);', ctx);
+    assert.ok(!ctx.view && !ctx.STATE.pendingTab, '자료 없는 줄은 열지 않는다');
+    vm.runInContext('_finOpenLegacy(0);', ctx);
+    assert.equal(ctx.view, 'workdesk', '홈에서 selTab 을 바로 부르지 않고 작업보드로 넘긴다(#main 없음)');
+    const pt = ctx.STATE.pendingTab;
+    assert.ok(pt.archived === true && pt.finished === true && pt.sheetId === 's1');
+    assert.equal(ctx.STATE.tabs.length, 0, '홈 목록 배열에 끼워 넣지 않는다');
+  });
+  await t('보관 작업(archived)은 홈 목록·건수에 끼지 않는다 — 가짜 🏁 줄 금지', async () => {
+    assert.match(grab('_finVisible'), /filter\(t=>!t\.archived&&isFinished\(t\)===fin\)/);
+    assert.match(grab('_finRenderList'), /const all=\(STATE\.tabs\|\|\[\]\)\.filter\(t=>!t\.archived\);/);
   });
   await t('조회 실패는 "없음"으로 꾸미지 않는다 — 다시 시도 안내', async () => {
     ctx.STATE.legacyClosed = null;
