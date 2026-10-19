@@ -49,6 +49,6 @@ const exec = grab('execClosed');
 t('[실행] 변경 판정은 🏁 를 보지 않는다', !/_workFinSet|_isShownClosed/.test(exec));
 t('폴링 완료 알림도 🏁 마감을 끝난 것으로 본다', /function _isTabComplete\(t\) \{[\s\S]*?t\.workFinished === true/.test(app));
 t('응답의 workFinished 로 집합을 채운다', /if \(t\.workFinished\) _workFinSet\.add\(/.test(app));
-t('스크립트 캐시 버전 갱신', /js\/index-app\.js\?v=20261019-workfin2/.test(F('admin.html')));
+t('스크립트 캐시 버전 갱신(결정 255 이후)', /js\/index-app\.js\?v=20261019-/.test(F('admin.html')));
 
 console.log(`\n✅ adminDashboardWorkFinished: ${pass}/${pass}\n`);

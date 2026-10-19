@@ -102,24 +102,22 @@ function extractFn(src, name) {
     assert.match(src, /setInterval\(\(\) => refreshUnread\(true\), 20000\)/);
   });
 
-  // ── 6. 공고수정 권한: 거절은 10분 기억, 새 로그인은 다시 확인 ──
-  await t('공고수정 권한 거절(401)은 같은 탭에서 10분 다시 묻지 않고, 새 로그인은 기억을 지운다', async () => {
+  // ── 6. 공고수정 권한(결정 257): 리뷰어 로그인 때 서버에 묻지 않는다 — 받아 둔 열쇠만 배너에 반영 ──
+  await t('공고수정 권한은 리뷰어 로그인마다 요청하지 않고, 이 탭에 받아 둔 열쇠가 있을 때만 배너를 켠다', async () => {
     const html = FE('index.html');
-    let fetches = 0; const ss = storage();
-    const ctx = { sessionStorage: ss, document: { getElementById: () => null }, API_BASE_URL: 'x', JSON, Date, String, Number,
+    let fetches = 0; const ss = storage(); let shown = null;
+    const banner = { style: {} };
+    const ctx = { sessionStorage: ss, document: { getElementById: id => (id === 'adminModeBanner' ? banner : null) },
       refreshAdminModeBanner() {}, fetch: async () => { fetches++; return { ok: false, status: 401 }; } };
-    vm.runInNewContext(extractFn(html, '_campEditDenyKey') + '\n' + extractFn(html, 'maybeFetchCampEditToken') + '\nthis.f=maybeFetchCampEditToken;', ctx);
-    const u = { name: '가', phone8: '12345678' };
-    await ctx.f(u); await ctx.f(u);
-    assert.equal(fetches, 1, '두 번째는 요청 없음');
-    await ctx.f({ name: '나', phone8: '87654321' });
-    assert.equal(fetches, 2, '다른 계정은 다시 확인');
-    ctx.fetch = async () => { fetches++; return { ok: false, status: 500 }; };
-    ss.removeItem('rapp_camp_edit_deny');
-    await ctx.f(u); await ctx.f(u);
-    assert.equal(fetches, 4, '서버 오류는 기억하지 않는다(다음에 다시 확인)');
-    assert.match(extractFn(html, 'doLogin'), /sessionStorage\.removeItem\(_campEditDenyKey\(\)\)/);
-    assert.ok(!/const CAMP_EDIT_DENY_KEY/.test(html), '선언 전 접근 오류가 나는 const 를 쓰지 않는다');
+    vm.runInNewContext(extractFn(html, '_setCampEditBanner') + '\n' + extractFn(html, 'maybeFetchCampEditToken') + '\nthis.f=maybeFetchCampEditToken;', ctx);
+    ctx.f({ name: '가', phone8: '12345678' });
+    assert.equal(fetches, 0, '요청 없음');
+    assert.equal(banner.style.display, 'none', '열쇠 없으면 배너 숨김');
+    ss.setItem('rapp_camp_edit_token', 'tok');
+    ctx.f({ name: '가', phone8: '12345678' });
+    assert.equal(fetches, 0);
+    assert.equal(banner.style.display, 'flex', '열쇠 있으면 배너 표시');
+    assert.ok(!/_campEditDenyKey/.test(html), '폐지된 거절 기억 키를 남기지 않는다');
   });
 
   // ── 7. 리뷰내역: 옛 조회 상태를 10분 기억해 확인 요청을 생략 ──

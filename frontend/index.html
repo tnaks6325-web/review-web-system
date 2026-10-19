@@ -553,6 +553,9 @@
   .rc-title-row{ justify-content:space-between; }
   .rc-viewtoggle{ display:inline-flex; background:#ECEDF2; border-radius:11px; padding:3px; gap:2px; flex-shrink:0; }
   .rc-viewtoggle button{ width:36px; height:30px; border:none; background:none; border-radius:9px; color:var(--t3); font-size:.9rem; cursor:pointer; transition:.15s; display:grid; place-items:center; }
+  .rc-title-tools{ display:inline-flex; align-items:center; gap:8px; }
+  .rc-edit-login{ border:1px solid #E5E8EB; background:#fff; color:var(--t3); font:inherit; font-size:.72rem; font-weight:700; border-radius:9px; padding:6px 9px; cursor:pointer; white-space:nowrap; }
+  .rc-edit-login:hover{ color:#3182f6; border-color:#C9DCFB; }
   .rc-viewtoggle button.on{ background:#fff; color:#3182f6; box-shadow:0 1px 4px rgba(17,24,40,.12); }
 
   /* ===== 모집공고 카드 재디자인 (시안 C) ===== */
@@ -753,9 +756,13 @@
     <div class="home-section">
       <div class="home-section-title rc-title-row">
         <span><i class="fas fa-bullhorn" style="color:var(--p)"></i> 모집공고</span>
-        <span class="rc-viewtoggle">
-          <button type="button" class="rc-vt-list" title="행으로 보기" onclick="setRecruitView('row')"><i class="fas fa-list"></i></button>
-          <button type="button" class="rc-vt-card" title="카드로 보기" onclick="setRecruitView('card')"><i class="fas fa-table-cells-large"></i></button>
+        <span class="rc-title-tools">
+          <!-- 결정 257: 인트라넷 관리자만 — 누르면 인트라넷 로그인 → 카드에 [✏️ 관리자 수정] -->
+          <button type="button" class="rc-edit-login" title="인트라넷 관리자만 공고를 고칠 수 있어요" onclick="openCampEditLogin()"><i class="fas fa-pen"></i> 공고 수정</button>
+          <span class="rc-viewtoggle">
+            <button type="button" class="rc-vt-list" title="행으로 보기" onclick="setRecruitView('row')"><i class="fas fa-list"></i></button>
+            <button type="button" class="rc-vt-card" title="카드로 보기" onclick="setRecruitView('card')"><i class="fas fa-table-cells-large"></i></button>
+          </span>
         </span>
       </div>
       <div class="rc-kind-tabs">
@@ -832,7 +839,7 @@
   </div>
 
   <div class="content-area">
-    <!-- 관리자 권한모드 배너 (공고수정 허용 명단에 든 리뷰어에게만 표시) -->
+    <!-- 관리자 권한모드 배너 (인트라넷 관리자로 "관리자로 공고 수정" 로그인한 경우에만 표시 · 결정 257) -->
     <div id="adminModeBanner" style="display:none;align-items:center;gap:8px;background:linear-gradient(135deg,#1B64DA,#3182F6);color:#fff;border-radius:12px;padding:10px 14px;margin-bottom:10px;box-shadow:0 2px 10px rgba(27,100,218,.25)">
       <i class="fas fa-user-shield" style="font-size:1.1rem"></i>
       <div style="flex:1;line-height:1.35">
@@ -1096,9 +1103,13 @@
     <div class="home-section" id="sectionRecruit">
       <div class="home-section-title rc-title-row">
         <span><i class="fas fa-bullhorn" style="color:var(--p)"></i> 모집공고</span>
-        <span class="rc-viewtoggle">
-          <button type="button" class="rc-vt-list" title="행으로 보기" onclick="setRecruitView('row')"><i class="fas fa-list"></i></button>
-          <button type="button" class="rc-vt-card" title="카드로 보기" onclick="setRecruitView('card')"><i class="fas fa-table-cells-large"></i></button>
+        <span class="rc-title-tools">
+          <!-- 결정 257: 인트라넷 관리자만 — 누르면 인트라넷 로그인 → 카드에 [✏️ 관리자 수정] -->
+          <button type="button" class="rc-edit-login" title="인트라넷 관리자만 공고를 고칠 수 있어요" onclick="openCampEditLogin()"><i class="fas fa-pen"></i> 공고 수정</button>
+          <span class="rc-viewtoggle">
+            <button type="button" class="rc-vt-list" title="행으로 보기" onclick="setRecruitView('row')"><i class="fas fa-list"></i></button>
+            <button type="button" class="rc-vt-card" title="카드로 보기" onclick="setRecruitView('card')"><i class="fas fa-table-cells-large"></i></button>
+          </span>
         </span>
       </div>
       <div class="rc-kind-tabs">
@@ -1107,6 +1118,24 @@
       </div>
       <div id="recruitPreviewList2" class="rc-list">
         <div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
+      </div>
+    </div>
+
+    <!-- 리뷰어 앱 공고수정 로그인 — 인트라넷에서 관리자로 지정된 직원만 (결정 257) -->
+    <div id="campEditLoginOvl" style="display:none;position:fixed;inset:0;z-index:100002;background:rgba(17,24,39,.5);align-items:center;justify-content:center;padding:20px">
+      <div style="background:#fff;border-radius:16px;width:320px;max-width:94vw;padding:18px 18px 16px;box-shadow:0 20px 50px rgba(0,0,0,.3)">
+        <div style="font-weight:800;font-size:.95rem;margin-bottom:4px">✏️ 관리자로 공고 수정</div>
+        <div style="font-size:.72rem;color:#6B7280;line-height:1.5;margin-bottom:12px"><b>인트라넷 아이디·비밀번호</b>로 로그인하세요. 인트라넷에서 관리자로 지정된 직원만 모집공고 카드를 고칠 수 있어요.</div>
+        <input id="celId" placeholder="인트라넷 아이디" autocomplete="username"
+               style="width:100%;font:inherit;font-size:.85rem;border:1px solid #E5E7EB;border-radius:9px;padding:9px 11px;margin-bottom:7px;outline:none">
+        <input id="celPw" type="password" placeholder="비밀번호" autocomplete="current-password"
+               onkeydown="if(event.key==='Enter')doCampEditLogin()"
+               style="width:100%;font:inherit;font-size:.85rem;border:1px solid #E5E7EB;border-radius:9px;padding:9px 11px;outline:none">
+        <div id="celErr" style="display:none;font-size:.72rem;color:#DC2626;margin-top:7px;line-height:1.45"></div>
+        <div style="display:flex;gap:7px;margin-top:13px">
+          <button onclick="closeCampEditLogin()" style="flex:1;font:inherit;font-size:.82rem;font-weight:750;background:#F1F2F6;color:#191F28;border:none;border-radius:9px;padding:9px 0;cursor:pointer">취소</button>
+          <button id="celGo" onclick="doCampEditLogin()" style="flex:1;font:inherit;font-size:.82rem;font-weight:750;background:#1B64DA;color:#fff;border:none;border-radius:9px;padding:9px 0;cursor:pointer">로그인</button>
+        </div>
       </div>
     </div>
 
@@ -1385,38 +1414,59 @@ async function doHomeAdminLogin() {
   }
 }
 
-// 함수 선언은 끌어올려지므로 스크립트 어느 시점에 불려도 안전하다(const 는 선언 전 접근 시 오류).
-function _campEditDenyKey() { return "rapp_camp_edit_deny"; }
-async function maybeFetchCampEditToken(user) {
-  const setBanner = (on) => {
-    const b = document.getElementById("adminModeBanner");
-    if (b) b.style.display = on ? "flex" : "none";
-    if (on) refreshAdminModeBanner();
-  };
+// ★ 결정 257: 리뷰어 앱 공고수정은 **인트라넷 관리자 로그인**으로만 연다(종전 phone8 허용명단·자동 발급 폐지).
+//   리뷰어 로그인 시에는 서버에 묻지 않고, 이 탭에 이미 받아 둔 공고수정 열쇠가 있으면 배너만 맞춘다.
+function _setCampEditBanner(on) {
+  const b = document.getElementById("adminModeBanner");
+  if (b) b.style.display = on ? "flex" : "none";
+  if (on) refreshAdminModeBanner();
+}
+function maybeFetchCampEditToken() {
+  let tok = "";
+  try { tok = sessionStorage.getItem("rapp_camp_edit_token") || ""; } catch (_) {}
+  _setCampEditBanner(!!tok);
+}
+function openCampEditLogin() {
+  const o = document.getElementById("campEditLoginOvl");
+  if (!o) return;
+  const e = document.getElementById("celErr");
+  if (e) e.style.display = "none";
+  o.style.display = "flex";
+  setTimeout(() => { const i = document.getElementById("celId"); if (i) i.focus(); }, 40);
+}
+function closeCampEditLogin() {
+  const o = document.getElementById("campEditLoginOvl");
+  if (o) o.style.display = "none";
+}
+/** 인트라넷 관리자 → 공고 전용 열쇠(2시간). 리뷰어 세션은 건드리지 않는다 — 실패해도 보던 화면 그대로. */
+async function doCampEditLogin() {
+  const id = (document.getElementById("celId").value || "").trim();
+  const pw = document.getElementById("celPw").value || "";
+  const err = document.getElementById("celErr");
+  const go = document.getElementById("celGo");
+  const fail = (m) => { if (err) { err.textContent = m; err.style.display = "block"; } };
+  if (!id || !pw) { fail("인트라넷 아이디와 비밀번호를 입력해주세요."); return; }
+  go.disabled = true; go.textContent = "확인 중…";
   try {
-    const phone8 = user && user.phone8;
-    const name = user && user.name;
-    if (!phone8 || !name) { sessionStorage.removeItem("rapp_camp_edit_token"); setBanner(false); return; }
-    // 허용명단에 없는 리뷰어(대부분)는 홈을 열 때마다 거절(401)을 받는다 — 같은 탭에서 10분 안에 다시
-    // 묻지 않는다. 새로 로그인하면 이 기억을 지워 바로 다시 확인한다(doLogin).
-    let deny = null;
-    try { deny = JSON.parse(sessionStorage.getItem(_campEditDenyKey()) || "null"); } catch (_) {}
-    if (deny && deny.p8 === String(phone8) && Date.now() - Number(deny.at) < 10 * 60 * 1000) {
-      sessionStorage.removeItem("rapp_camp_edit_token"); setBanner(false); return;
-    }
-    const r = await fetch(API_BASE_URL + "/api/reviewer/campaign-token", {
+    const r = await fetch(API_BASE_URL + "/api/reviewer/campaign-token-intranet", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, phone8 }),
+      body: JSON.stringify({ username: id, password: pw }),
     });
-    if (!r.ok) {   // 비허용자=401 → 조용히
-      if (r.status === 401) { try { sessionStorage.setItem(_campEditDenyKey(), JSON.stringify({ p8: String(phone8), at: Date.now() })); } catch (_) {} }
-      sessionStorage.removeItem("rapp_camp_edit_token"); setBanner(false); return;
-    }
-    const j = await r.json();
-    if (j && j.ok && j.token) { sessionStorage.setItem("rapp_camp_edit_token", j.token); setBanner(true); }
-    else { sessionStorage.removeItem("rapp_camp_edit_token"); setBanner(false); }
-  } catch (_) { /* 네트워크 오류 시 권한 없음으로 취급 */ sessionStorage.removeItem("rapp_camp_edit_token"); setBanner(false); }
+    let j = null; try { j = await r.json(); } catch (_) {}
+    if (r.status === 429) throw new Error("로그인 시도가 너무 많아요. 잠시 후 다시 시도해주세요.");
+    if (!r.ok || !j || !j.ok || !j.token) throw new Error((j && j.error) || "로그인에 실패했습니다.");
+    sessionStorage.setItem("rapp_camp_edit_token", j.token);
+    document.getElementById("celPw").value = "";
+    closeCampEditLogin();
+    _setCampEditBanner(true);
+    showToast("공고 수정을 열었어요 — 카드의 [✏️ 관리자 수정]을 누르세요.");
+    if (typeof loadRecruitPreview === "function") loadRecruitPreview();
+  } catch (e) {
+    fail(e && e.message ? e.message : "로그인에 실패했습니다.");
+  } finally {
+    go.disabled = false; go.textContent = "로그인";
+  }
 }
 
 /** /search 페이지와 세션 동기화 */
@@ -1446,7 +1496,6 @@ async function doLogin() {
   const phone = document.getElementById("loginPhone").value.replace(/[^0-9]/g, "");
   if (!name) { showToast("이름을 입력해주세요"); document.getElementById("loginName").focus(); return; }
   if (!phone || phone.length !== 8) { showToast("전화번호 뒤 8자리를 입력해주세요"); return; }
-  try { sessionStorage.removeItem(_campEditDenyKey()); } catch (_) {}   // 새 로그인은 공고수정 권한을 바로 다시 확인
 
   const btn = document.querySelector(".login-btn");
   btn.disabled = true;

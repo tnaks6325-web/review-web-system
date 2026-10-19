@@ -87,9 +87,15 @@ async function loginStaff(name, pw) {
 //     미설정(빈) = 전 직원 허용(현행 유지 — env 설정 시점부터 게이트 활성).
 //   JWT name = 인트라넷 display_name(한글 실명) → advertisers.inad_pm(TRIM) 스코프 매칭과 정합.
 // ═══════════════════════════════════════════════════════════
-async function loginIntranet(name, pw, _fetch = fetch) {
+/**
+ * 인트라넷 자격 확인 + 관리자/AE 판정만 한다(토큰 발급 없음 · 진입 게이트 없음).
+ *   loginIntranet(작업보드 로그인)과 reviewerCampaignEditor(리뷰어 앱 공고수정, 결정 257)가
+ *   **같은 판정**을 쓰도록 떼어 낸 단일 출처. 반환: {ok:true, display, username, iUser, iRole, iDept, iPart,
+ *   isAdmin, isAe, matchGroups} | {ok:false, error, reason?}
+ */
+async function verifyIntranetIdentity(name, pw, _fetch = fetch) {
   if (!name || !pw) {
-    return { success: false, error: '이름과 비밀번호를 입력하세요.' };
+    return { ok: false, error: '이름과 비밀번호를 입력하세요.' };
   }
   const base = (process.env.INTRANET_API_BASE || 'https://inadd-system.pages.dev').trim().replace(/\/$/, '');
   // 서버간 인증 헤더(X-Api-Key = INTRANET_API_KEY): 인트라넷 API 가드가 활성화되면(INADD_SESSION_SECRET/
@@ -115,7 +121,7 @@ async function loginIntranet(name, pw, _fetch = fetch) {
     // 구 응답(최상위 사용자 레코드)도 계속 수용해 서버 배포 순서에 따른 SSO 단절을 막는다.
     if (body && typeof body === 'object' && body.data && typeof body.data === 'object') body = body.data;
   } catch (_) {
-    return { success: false, error: '인트라넷 인증 서버에 연결할 수 없습니다.' };
+    return { ok: false, error: '인트라넷 인증 서버에 연결할 수 없습니다.' };
   } finally { clearTimeout(timer); }
   if (!resp.ok || !body || !body.username) {
     /* ★ 실패 사유를 뭉개지 말 것 — 운영자가 조치할 대상이 완전히 다르다(실측으로 겪음).
@@ -124,13 +130,13 @@ async function loginIntranet(name, pw, _fetch = fetch) {
        그냥 "비밀번호가 틀렸다"로 보이면 멀쩡한 계정으로 몇 번이고 다시 시도하게 된다. */
     const raw = String((body && body.error) || '').trim();
     if (/unauthorized/i.test(raw)) {
-      return { success: false, error: '인트라넷 서버가 이 요청을 거부했습니다(서버 간 인증 키 확인 필요 — INTRANET_API_KEY).', reason: 'service_key' };
+      return { ok: false, error: '인트라넷 서버가 이 요청을 거부했습니다(서버 간 인증 키 확인 필요 — INTRANET_API_KEY).', reason: 'service_key' };
     }
-    return { success: false, error: raw || '이름 또는 비밀번호가 올바르지 않습니다.', reason: 'credentials' };
+    return { ok: false, error: raw || '이름 또는 비밀번호가 올바르지 않습니다.', reason: 'credentials' };
   }
   const display = String(body.display_name || body.username).trim();
   if (!display) {
-    return { success: false, error: '인트라넷 계정에 표시 이름이 없습니다. 관리자에게 문의하세요.' };
+    return { ok: false, error: '인트라넷 계정에 표시 이름이 없습니다. 관리자에게 문의하세요.' };
   }
   const _csv = v => String(v || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
   const iRole = String(body.role || 'user').trim().toLowerCase();
@@ -152,6 +158,16 @@ async function loginIntranet(name, pw, _fetch = fetch) {
   // 작업오더 접수·공고 삭제 같은 권한을 열면 비AE 직원도 통과한다. 기본은 정확한 `AE` 부서이며,
   // 조직명이 다르면 INTRANET_SSO_AE_GROUPS(부서 또는 부서|파트 CSV)로 지정한다.
   const isAe = _matchGroups(process.env.INTRANET_SSO_AE_GROUPS || 'AE');
+  return { ok: true, display, username: String(body.username), iUser, iRole, iDept, iPart, isAdmin, isAe, matchGroups: _matchGroups };
+}
+
+async function loginIntranet(name, pw, _fetch = fetch) {
+  const v = await verifyIntranetIdentity(name, pw, _fetch);
+  if (!v.ok) return { success: false, error: v.error, ...(v.reason ? { reason: v.reason } : {}) };
+  const { display, iRole, isAdmin, isAe } = v;
+  const _csv = x => String(x || '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
+  const _matchGroups = v.matchGroups;
+  const body = { username: v.username };
   // 진입 게이트 — 우선순위: 승격(admin) 은 항상 통과 → ① 그룹(부서|파트) 규칙(설정 시) → ② role 규칙(① 미설정 시) → 둘 다 미설정 = 전 직원.
   //   INTRANET_SSO_ALLOWED_GROUPS: 로그인 시점 인트라넷 직원DB의 department/part 로 판정(개인 수동등록 불필요·인사이동 자동 반영).
   if (!isAdmin) {
@@ -569,6 +585,7 @@ async function changeMasterPw(currentMasterPw, newPw) {
 }
 
 module.exports = {
+  verifyIntranetIdentity,
   loginAdmin,
   loginStaff,
   loginIntranet,
