@@ -760,6 +760,12 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
   const { id, note } = req.body;
   if (!id) return res.json({ ok: false, error: 'id가 필요합니다.' });
 
+  // 단계별 소요(ms) — 승인 대기가 어디서 생기는지 운영 기록으로 보려고(2026-10-20 실측). 응답 직전 한 줄만 남긴다.
+  const _tStart = Date.now();
+  let _tPrev = _tStart;
+  const _steps = [];
+  const _lap = (k) => { const n = Date.now(); _steps.push(`${k}=${n - _tPrev}`); _tPrev = n; };
+
   try {
     // 0) 사전 로드(락 없음) — Drive 이동을 트랜잭션 밖에서 하기 위한 정보 확보
     const { rows: pre } = await pool.query('SELECT * FROM review_edit_requests WHERE id = $1', [id]);
@@ -767,6 +773,7 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
     if (!r0) return res.json({ ok: false, error: '요청을 찾을 수 없습니다.' });
     if (r0.status !== 'pending') return res.json({ ok: false, error: `이미 처리된 요청입니다 (${r0.status}).`, status: r0.status });
     if (!r0.new_file_id) return res.json({ ok: false, error: '스테이징된 새 파일이 없습니다.' });
+    _lap('load');
 
     // 1) 대상 폴더 확보(트랜잭션 밖) — 요청 이후 폴더가 이동/재생성됐어도 현재 [리뷰]로 배치
     // 요청 당시 저장된 폴더를 신뢰하지 않고 현재 슬롯 역할로 다시 계산한다.
@@ -774,12 +781,14 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
     const targetFolderId = (await _resolveFolders(
       r0.sheet_id, r0.tab_name, r0.slot_key || 'review', { withStaging: false }
     )).targetFolderId;
+    _lap('folders');
 
     // 2) 새 파일을 대상 폴더로 이동(멱등: 이미 대상이면 skip) + 정식 리뷰 파일명으로 rename
     //    (스테이징 중엔 비리뷰형식 이름이었으므로 승인 시점에 정식명으로 되돌린다)
     const meta = await driveService.getFileParents(r0.new_file_id);
     if (meta && meta.trashed) return res.json({ ok: false, error: '스테이징 파일이 삭제되어 승인할 수 없습니다.' });
     const parents = Array.isArray(meta && meta.parents) ? meta.parents : [];
+    _lap('parents');
     /* ★ 정식명의 이름도 업로드와 **같은 해석**(그 행의 수취인)을 쓴다 — 여기만 참여자 이름으로 두면
        "처음 제출은 수취인인데 한 번 교체하면 주문자로 바뀌는" 드리프트가 생긴다.
        못 찾으면 종전대로 요청에 적힌 이름으로 접는다(파일명 때문에 승인이 막히면 안 된다). */
@@ -787,6 +796,7 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
       (await recipientNameForRow({ db: pool, sheetId: r0.sheet_id, tabName: r0.tab_name, rowIndex: r0.row_index }))
       || r0.reviewer_name || '익명';
     const finalName = driveService.generateReviewFileName(_finalOwner, 1, 'image/jpeg');
+    _lap('name');
     /* ★ 이동 + 정식명 변경을 **Drive 왕복 1회**로(2026-10-19 실측 승인 1건 5.7~9.1초 — 순차 Drive 왕복이 지배).
        한 번에 실패하면 종전 2단계로 폴백한다: 이동 실패 = 승인 실패(종전과 같다) · 이름 변경 실패 = 무시(종전과 같다). */
     if (!parents.includes(targetFolderId)) {
@@ -803,6 +813,7 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
       catch (e) { logger.warn(`[review-edit] 새 파일 rename 실패(무시): ${e.message}`); }
     }
     const finalUrl = r0.new_file_url || `https://drive.google.com/file/d/${r0.new_file_id}/view`;
+    _lap('move');
 
     // 3) 짧은 트랜잭션: FOR UPDATE 재검증(이중승인 차단) + DB 포인터 스왑 + 상태확정
     const client = await pool.connect();
@@ -855,6 +866,7 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
     } finally {
       client.release();
     }
+    _lap('db');
 
     // 4) 구 파일 [리뷰교체보관] 이동은 **응답을 보낸 뒤**에 한다(아래 _archiveOldFileAfterReply) — 비치명적 단계라
     //    승인 결과와 무관하고, Drive 왕복 2~3회가 승인 대기 시간을 늘리던 자리다(2026-10-19 실측).
@@ -889,6 +901,7 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
     } catch (e) {
       logger.warn(`[review-edit] 교체 영수증 즉시 재검수 실패(pending 유지): ${e.message}`);
     }
+    _lap('receipt');
 
     // 5) 관리자 위젯 실시간 갱신
     try { sse.broadcast('review_edit_request', { message: '리뷰 수정요청 승인 완료', requestId: id, action: 'approved' }); } catch (_) {}
@@ -897,6 +910,8 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
     //    ★ 여기(서비스 호출)라서 **어느 화면에서 눌렀든** 똑같이 간다(기존 관리자페이지 포함).
     //    ★ 커넥션을 반납한 뒤에 부른다(csBridge 는 같은 풀에서 새 커넥션을 얻는다).
     await csBridge.postReviewEditDecision(committed, 'approved', note ? _sanitizeReason(note) : '', req.admin?.name || '관리자');
+    _lap('notify');
+    logger.info(`[review-edit] approve 단계별 ms: ${_steps.join(' ')} 합계=${Date.now() - _tStart}`);
 
     res.json({ ok: true });
     _archiveOldFileAfterReply(committed);
