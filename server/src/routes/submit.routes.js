@@ -200,6 +200,14 @@ router.post('/review', async (req, res, next) => {
       if (!ownsTarget) {
         return res.status(403).json({ ok: false, code: 'REVIEW_SUBMIT_TARGET_FORBIDDEN', error: '이 구매양식의 리뷰를 제출할 권한이 없습니다.' });
       }
+      // ★ 결정 256: 🏁 마감된 작업은 리뷰어 본인 제출을 받지 않는다(최종 방어는 lockTarget — 여기는 이른 안내).
+      //   조회 실패는 fail-open(여기서 막지 않는다) — lockTarget 이 트랜잭션 안에서 다시 본다.
+      try {
+        const _rct = require('../services/reviewCompletionTransaction.service');
+        if (await _rct.isWorkFinished(pool, { sheetId, tabName })) {
+          return res.status(409).json({ ok: false, retryable: false, code: 'REVIEW_TARGET_ARCHIVED', error: _rct.FINISHED_MSG });
+        }
+      } catch (_) { /* fail-open */ }
     }
 
     const closedReminder = await require('../services/reviewReminder.service')
