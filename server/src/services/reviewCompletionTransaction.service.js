@@ -2,6 +2,17 @@
 
 function fail(code,message){return Object.assign(new Error(message),{code});}
 
+// ★ 결정 256: 작업보드 🏁 마감(trackb_tab_finished)된 작업에는 **리뷰어 본인 제출**을 받지 않는다.
+//   판정 단일 출처 = reviewObligation.finishedTabSql(이름 + gid 폴백 · 복귀하면 다시 열린다).
+//   직원 대신 제출(리뷰어 세션 없는 내부 토큰 경로)은 막지 않는다 — 늦게 낸 리뷰를 받아 주는 비상구.
+const FINISHED_MSG='마감된 작업이라 리뷰를 제출할 수 없어요. 담당자에게 문의해 주세요.';
+async function isWorkFinished(db,{sheetId,tabName}) {
+  const {finishedTabSql}=require('./reviewObligation.service');
+  const gid="(SELECT NULLIF(btrim(tc.tab_gid),'') FROM tab_configs tc WHERE tc.sheet_id=$1 AND tc.tab_name=$2 LIMIT 1)";
+  const {rows}=await db.query(`SELECT ${finishedTabSql('$1','$2',gid)} AS fin`,[sheetId,tabName]);
+  return !!(rows[0]&&rows[0].fin);
+}
+
 // Match cancellation: order -> participant -> index. The caller owns COMMIT/ROLLBACK.
 async function lockTarget(client,{sheetId,tabName,rowIndex,reviewerSession}) {
   const params=[sheetId,tabName,rowIndex];
@@ -24,6 +35,7 @@ async function lockTarget(client,{sheetId,tabName,rowIndex,reviewerSession}) {
   if(!config || config.is_closed || archive.rows.length || locked.some(r=>rounds.includes(String(r.round||'').trim()))) {
     throw fail('REVIEW_TARGET_ARCHIVED','마감된 작업에는 리뷰를 제출할 수 없습니다.');
   }
+  if(reviewerSession && await isWorkFinished(client,{sheetId,tabName})) throw fail('REVIEW_TARGET_ARCHIVED',FINISHED_MSG);
   const closed=await client.query('SELECT 1 FROM review_closed_targets WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3',params);
   if(closed.rows.length) throw fail('REVIEW_CLOSED_NO_REVIEW','미작성으로 종결된 작업입니다.');
   if(locked.some(r=>['미제출','미작성 종결','취소건'].includes(String(r.row_json?.[r.submit_col]??'').trim()))) {
@@ -37,4 +49,4 @@ async function lockTarget(client,{sheetId,tabName,rowIndex,reviewerSession}) {
   }
   return index;
 }
-module.exports={lockTarget};
+module.exports={lockTarget,isWorkFinished,FINISHED_MSG};
