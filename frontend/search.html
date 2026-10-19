@@ -575,7 +575,7 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
             </div>
           </div>
 
-          <div id="dropZone" class="drop-zone" onclick="document.getElementById('imgInput').click()">
+          <div id="dropZone" class="drop-zone" onclick="_zoneTap(event,this)">
             <input type="file" id="imgInput" accept="image/*" multiple style="display:none"
                    onchange="onFilesSelected(event)"/>
             <div id="dzPlaceholder" class="dz-placeholder">

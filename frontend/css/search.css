@@ -470,13 +470,30 @@ input,textarea,button{font-family:inherit}
 /* Ctrl+V 붙여넣기 대상 칸 표시(2026-10-20) — 마우스 쓰는 기기(PC)에서만. 휴대폰은 Ctrl+V 가 없어 띄우지 않는다. */
 .dz-paste-tip{display:none;font-style:normal;font-size:.76rem;color:var(--t3);margin-top:6px}
 .mr-slot-dz-hint .dz-paste-tip{margin-top:2px}
+#dropZone{position:relative}
 @media (hover:hover) and (pointer:fine){
   .dz-paste-tip{display:block}
-  /* 대상 칸 = 실선 파란 테두리 + 안내 줄이 알약 모양 "지금 Ctrl+V 하면 여기에 들어가요"로 바뀐다(아이콘·글자를 가리지 않게 줄 안에서) */
-  #dropZone.paste-target,.mr-slot-dropzone.paste-target{border-color:var(--p);border-style:solid;background:var(--p-l)}
+  /* PC: 칸 위 투명 파일 입력이 클릭을 먹지 않게 — 클릭은 칸(_zoneTap)이 받아 선택지를 띄운다(입력은 [파일에서 고르기]가 연다) */
+  .mr-slot-dropzone input[type=file]{pointer-events:none}
+  /* 선택된 칸 = 실선 파란 테두리 + 바깥 고리 + 안내 줄이 알약 "✓ 선택됨 · Ctrl+V 하면 여기에 들어가요"(아이콘·글자를 가리지 않게 줄 안에서) */
+  #dropZone.paste-target,.mr-slot-dropzone.paste-target{border-color:var(--p);border-style:solid;background:var(--p-l);box-shadow:0 0 0 4px rgba(49,130,246,.18)}
   .paste-target .dz-paste-tip{font-size:0}
-  .paste-target .dz-paste-tip::before{content:"📋 지금 Ctrl+V 하면 여기에 들어가요";display:inline-block;font-size:.72rem;font-weight:700;color:#fff;background:var(--p);border-radius:999px;padding:2px 10px;white-space:nowrap}
+  .paste-target .dz-paste-tip::before{content:"✓ 선택됨 · Ctrl+V 하면 여기에 들어가요";display:inline-block;font-size:.72rem;font-weight:700;color:#fff;background:var(--p);border-radius:999px;padding:2px 10px;white-space:nowrap}
 }
+/* 칸을 눌렀을 때 뜨는 선택지(PC 전용 — 휴대폰은 띄우지 않는다) */
+.zone-chooser{position:absolute;inset:0;z-index:3;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:10px;
+  background:rgba(255,255,255,.97);cursor:default}
+.zone-chooser .zc-tt{font-size:.8rem;font-weight:700;color:var(--t2)}
+.zone-chooser .zc-btns{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+.zone-chooser .zc-b{display:inline-flex;align-items:center;gap:6px;border-radius:10px;padding:8px 14px;font-size:.84rem;font-weight:700;cursor:pointer;border:1.5px solid var(--p);font-family:inherit}
+.zone-chooser .zc-paste{background:var(--p);color:#fff}
+.zone-chooser .zc-paste:hover{background:var(--p-d)}
+.zone-chooser .zc-file{background:#fff;color:var(--p)}
+.zone-chooser .zc-file:hover{background:var(--p-l)}
+.zone-chooser .zc-sub{font-size:.72rem;color:var(--t3)}
+.zone-chooser .zc-x{position:absolute;top:6px;right:8px;border:0;background:none;color:var(--t3);font-size:.9rem;cursor:pointer;padding:4px}
+.mr-slot-dropzone .zone-chooser{gap:6px;padding:8px}
+.mr-slot-dropzone .zone-chooser .zc-tt{display:none}
 .mr-slot-preview{display:flex;flex-wrap:wrap;gap:8px;padding:10px}
 .mr-slot-thumb{position:relative;flex-shrink:0}
 .mr-slot-thumb img{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1.5px solid var(--border);display:block}
