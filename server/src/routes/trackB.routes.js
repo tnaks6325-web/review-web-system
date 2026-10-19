@@ -165,6 +165,31 @@ router.get('/workdesk/archived-search', authMiddleware, async (req, res, next) =
   } catch (err) { next(err); }
 });
 
+// ── 마감 보관함 "예전 마감 작업" — 옛 관리자 대시보드 ⬛ 마감(tab_configs.is_closed) 목록 (결정 258) ──
+//   ★ 읽기 전용 · 쓰기 0 — 옛 마감을 🏁(trackb_tab_finished)로 옮기지 않는다(결정 255: ⬛/🏁 을 섞지 않는다).
+//     대부분 이미 보관(index_master_archive)돼 있어 열면 작업검색의 *마감 작업과 같은 읽기 전용 경로로 열린다.
+//   ★ 권한·노출은 archived-search 와 같다(내부 운영 정보 — 광고주·리뷰어 차단). 담당 스코프는 두지 않는다(검색과 동일).
+router.get('/workdesk/legacy-closed', authMiddleware, async (req, res, next) => {
+  try {
+    const role = _role(req);
+    if (!['master', 'admin', 'staff'].includes(role)) return res.status(403).json({ ok: false, error: '권한 없음' });
+    const { rows } = await pool.query(
+      `SELECT tc.sheet_id AS "sheetId", tc.tab_name AS "tabName",
+              COALESCE(NULLIF(ima.tab_gid, ''), tc.tab_gid) AS "tabGid",
+              COALESCE(NULLIF(tc.display_name, ''), tc.tab_name) AS "displayName",
+              COALESCE(NULLIF(ima.campaign_name, ''), tc.campaign_name, '') AS "campaignName",
+              ima.archived_at AS "archivedAt", tc.updated_at AS "closedAt",
+              (ima.sheet_id IS NOT NULL) AS "hasArchive"
+         FROM tab_configs tc
+         LEFT JOIN index_master_archive ima ON ima.sheet_id = tc.sheet_id AND ima.tab_name = tc.tab_name
+        WHERE tc.is_closed
+        ORDER BY COALESCE(ima.archived_at, tc.updated_at) DESC NULLS LAST, tc.tab_name
+        LIMIT 2000`);
+    res.set('Cache-Control', 'private, no-store');
+    res.json({ ok: true, tabs: rows.map(t => ({ ...t, archived: true })) });
+  } catch (err) { next(err); }
+});
+
 // ── 홈 [저장폴더] 현영 버튼 — [리뷰]/{현금영수증} 서브폴더 해석 ──────────────────────
 //   현영 서브폴더는 업로드 시 즉석 생성되고 URL 이 어디에도 저장돼 있지 않다(리뷰·구매캡처와 다른 점).
 //   ★ find-only — 여기서 폴더를 만들지 않는다(사용자 확정 Q2). 폴더 생성 경로는 업로드(review-upload)·
