@@ -176,13 +176,13 @@ t('마이그레이션이 멱등이고 소급 재삽입하지 않는다', () => {
 /* ── 3) 사본 금지 — 관리자 대시보드와 같은 코드 ────────────── */
 console.log('\n3) 단일 출처(사본 드리프트 방지)');
 const HTML = F('workdesk.html');
-const ADM = F('admin.html');   // 옛 관리자 대시보드 폐기(결정 267) — 이제 이동 정류장이다. 모달·CSS 사본이 되살아나지 않았는지만 본다.
+// 옛 관리자 대시보드 폐기(결정 267) — admin.html 진입 경로까지 삭제 — 두 번째 사본이 생길 화면 자체가 없다(아래에서 파일 부재를 본다).
 const MODAL = F('js/recruit-modal.js');
 const REC = F('js/index-recruit.js');
 
 t('★ 발행·수정 모달 마크업은 공유 모듈 한 벌뿐', () => {
-  assert.strictEqual((ADM.match(/id="rf_title"/g) || []).length, 0,
-    'admin.html 에 인라인 모달이 남아 있으면 두 벌이 된다');
+  assert.ok(!require('fs').existsSync(require('path').join(__dirname, '../../frontend/admin.html')),
+    'admin.html 이 되살아나면 인라인 모달 두 벌이 될 수 있다');
   // ★ 세는 대상은 **살아 있는 마크업 한 벌**이다 — 모듈 안의 `<template id="rf_legacy_*_markup">` 는
   //   브라우저가 inert 로 다루는 보관용 조각이라 document 에 id 가 등록되지 않는다(중복 id 아님).
   //   단순 문자열 계수로 두면 그 보관 조각 때문에 이 가드가 조용히 빨개진다.
@@ -196,7 +196,7 @@ t('★ 발행·수정 모달 마크업은 공유 모듈 한 벌뿐', () => {
 });
 t('모달 CSS도 모듈에 함께 있다(스타일 없이 뜨는 것 방지)', () => {
   assert.ok(/\.rf-split\{/.test(MODAL), '모듈에 CSS 없음');
-  assert.ok(!/^\.rf-split\{/m.test(ADM), 'admin.html 에 CSS 가 남아 있음');
+  assert.ok(!/^\.rf-split\{/m.test(HTML), '작업보드에 모달 CSS 사본이 있음');
 });
 t('리뷰웹시스템[3버전]이 공유 모듈을 로드한다(옛 대시보드 폐기 — 결정 267)', () => {
   ['js/recruit-modal.js', 'js/campaign-cards.js', 'js/index-recruit.js'].forEach(f => {

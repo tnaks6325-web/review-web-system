@@ -454,8 +454,8 @@ console.log('\nD. 프론트 배선');
 }
 {
   // 옛 대시보드 작업 탭 관리의 [🧾 수동제출]과 리뷰어 홈 칩은 결정 186 54번에서 제거(옛 입구 제거와 짝).
-  // 옛 관리자 대시보드 폐기(결정 267) — D19(index-app.js 수동제출 진입 없음)는 파일째 삭제로 대체. admin.html 은 이동 정류장으로 남아 D22 로 계속 본다.
-  [['admin.html', F('admin.html')], ['index.html', F('index.html')]].forEach(([name, html]) => {
+  // 옛 관리자 대시보드 폐기(결정 267) — D19(index-app.js 수동제출 진입 없음)는 파일째 삭제로 대체. admin.html 은 진입 경로까지 삭제(파일 없음) — D22 는 남은 리뷰어 홈만 본다.
+  [['index.html', F('index.html')]].forEach(([name, html]) => {
     ok(`D22 ${name} 은 manual-order.js 를 싣지 않는다(옛 입구 제거 — 싣으면 칩·버튼이 막다른 길)`, !html.includes('js/manual-order.js'));
   });
   const wd = F('workdesk.html');

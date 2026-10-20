@@ -216,11 +216,9 @@ t('17. listReviewerEvents가 phone8·tabGid를 내려준다(프론트 계약)', 
 
 // ── 6) #view=logs 딥링크 소비 ────────────────
 //   옛 관리자 대시보드 폐기(결정 267) — 대시보드 중요알림 요약 카드(index-app.js, 옛 18·19·21번)는 화면째 사라졌다.
-//   옛 주소(/admin#view=logs)는 이동 정류장(admin.html)이 해시째 작업보드로 넘기므로, 작업보드가 그 해시를 소비하는지만 본다.
-t('20. 리뷰웹시스템[3버전]이 #view=logs 를 소비한다 · 옛 주소 정류장이 해시를 넘긴다', () => {
+//   옛 관리자 대시보드 폐기(결정 267) — admin.html 진입 경로까지 삭제(옛 주소 /admin 은 리뷰어 홈으로 떨어진다) — 작업보드가 #view=logs 를 소비하는지만 본다.
+t('20. 리뷰웹시스템[3버전]이 #view=logs 를 소비한다', () => {
   assert.ok(/_VIEW==='logs'/.test(HTML) && /STATE\.view='logs'/.test(HTML), 'workdesk 가 #view=logs 를 소비해야 함');
-  const stub = fs.readFileSync(path.join(__dirname, '../../frontend/admin.html'), 'utf8');
-  assert.ok(/'workdesk\.html' \+ location\.hash/.test(stub), '옛 주소 정류장이 해시를 버리면 #view=logs 딥링크가 끊긴다');
 });
 
 // ── 7) 리뷰웹시스템[3버전] 리뷰어 로그 — [확인] 제거 + 펼침행 이미지 미리보기 ──

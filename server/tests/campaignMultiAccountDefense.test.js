@@ -18,7 +18,7 @@ const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
 const routes = read('src/routes/campaign.routes.js');
 const submit = read('src/routes/submit.routes.js');
 const index = read('index.js');
-const adminHtml = read('../frontend/js/recruit-modal.js') + '\n' + read('../frontend/admin.html');
+const adminHtml = read('../frontend/js/recruit-modal.js');   // 옛 관리자 대시보드 폐기(결정 267) — admin.html 진입 경로까지 삭제
 const recruitJs = read('../frontend/js/index-recruit.js');
 
 let passed = 0;

@@ -144,7 +144,7 @@ const fakeIntranet = (user) => async () => ({
   })());
   const idx = readF('index.html');
   // 옛 관리자 대시보드 폐기(결정 267) — index-app.js 가 없어져, 옛 명단 UI 재유입은 프론트 전체에서 본다.
-  const _fe = require('fs').readdirSync(require('path').join(__dirname, '../../frontend/js')).filter(f => f.endsWith('.js')).map(f => readF('js/' + f)).concat([readF('workdesk.html'), idx, readF('admin.html')]).join('\n');
+  const _fe = require('fs').readdirSync(require('path').join(__dirname, '../../frontend/js')).filter(f => f.endsWith('.js')).map(f => readF('js/' + f)).concat([readF('workdesk.html'), idx]).join('\n');   // 옛 관리자 대시보드 폐기(결정 267) — admin.html 진입 경로까지 삭제
   ok('라우트: 발급=인트라넷 로그인 리미터 붙은 POST /campaign-token-intranet', /campaign-token-intranet', intranetLoginLimiter/.test(rev));
   ok('라우트: 옛 phone8 발급·명단관리 폐지', !/'\/campaign-token',/.test(rev) && !/campaign-editors', authMiddleware/.test(adm));
   ok('프론트: _adminTok에 rapp_camp_edit_token 병합', /rapp_camp_edit_token/.test(cc));

@@ -85,11 +85,11 @@ function stubResp({ status = 200, ctype = 'image/jpeg', clen, body = Buffer.from
   const ord = read('src/routes/order.routes.js');
   const prod = read('src/routes/product.routes.js');
   const recjs = readF('js/index-recruit.js');
-  const adm = readF('js/recruit-modal.js') + '\n' + readF('admin.html');
+  const adm = readF('js/recruit-modal.js');   // 옛 관리자 대시보드 폐기(결정 267) — admin.html 진입 경로까지 삭제
 
   ok('배선: guide-image imageUrl 분기가 thumbFetch 사용', /fetchThumbFromUrl/.test(ord) && /b\.imageUrl/.test(ord));
   ok('배선: base64가 오면 URL 분기 미진입(기존 계약 불변)', /\(!b\.imageBase64 \|\| !String\(b\.imageBase64\)\.trim\(\)\) && b\.imageUrl/.test(ord));
-  ok('프론트: rf_thumb_url 입력 + 가져오기 버튼(admin.html)', /rf_thumb_url/.test(adm) && /fetchCampThumbFromUrl/.test(adm));
+  ok('프론트: rf_thumb_url 입력 + 가져오기 버튼(공고 모달)', /rf_thumb_url/.test(adm) && /fetchCampThumbFromUrl/.test(adm));
   ok('프론트: fetchCampThumbFromUrl → guide-image imageUrl 재사용(신규 API 없음)', /function fetchCampThumbFromUrl/.test(recjs) && /imageUrl: url/.test(recjs) && /\/api\/order\/guide-image/.test(recjs));
   ok('안내: 쿠팡 403 힌트가 이미지 주소 경로로 안내', /이미지 주소 복사/.test(prod));
 

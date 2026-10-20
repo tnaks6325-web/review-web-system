@@ -240,7 +240,7 @@ t('검색 화면에 옛 대시보드 탭 설정 팝오버 사본이 남아 있�
    `resolveReviewType` 이 null 로 떨어진다 = "설정했는데 검수는 미지정"(2026-08-06 사고의 입구).
    옛 관리자 대시보드 폐기(결정 267)로 탭 설정 팝오버·빠른편집·인라인 셀렉트 창구(admin.html·index-app.js)는 없어졌다. */
 t('★ 옛 대시보드 탭 설정 팝오버가 어느 화면에도 남아 있지 않다',
-  ['admin.html', 'workdesk.html', 'search.html', 'index.html'].every(f => !/id="tcOptReview"/.test(F(f))));
+  ['workdesk.html', 'search.html', 'index.html'].every(f => !/id="tcOptReview"/.test(F(f))));   // 옛 관리자 대시보드 폐기(결정 267) — admin.html 진입 경로까지 삭제
 t('★ search-app 의 빠른편집은 그 화면 팝오버(#tcOptReview)에서 읽는다(사본 0)',
   /querySelectorAll\('#tcOptReview \.tc-opt'\)/.test(F('js/search-app.js'))
   && !/\['실배송','빈박스','구매확정','믹스'\]/.test(F('js/search-app.js')));
@@ -249,7 +249,7 @@ t('★ 옛 값 배지는 화면에서 사라지지 않는다(색 맵·CSS 유지
   /'실배송': 'tc-review-실배송'/.test(F('js/search-app.js'))
   && ['css/search.css'].every(f => /\.tc-review-실배송\{/.test(F(f))));
 t('★ 라벨 어휘 통일 — 화면에 "리뷰유형" 표기가 남아 있지 않다',
-  ['admin.html', 'workdesk.html', 'js/work-order-detail.js'].every(f => !F(f).includes('리뷰유형')));
+  ['workdesk.html', 'js/work-order-detail.js'].every(f => !F(f).includes('리뷰유형')));   // 옛 관리자 대시보드 폐기(결정 267) — admin.html 진입 경로까지 삭제
 
 /* ── 9) 정리 화면 — 리뷰웹시스템[3버전]에서 부를 수 있어야 한다 ── */
 console.log('\n9) 리뷰타입 정리 화면');

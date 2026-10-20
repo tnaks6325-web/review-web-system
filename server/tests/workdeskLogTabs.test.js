@@ -107,10 +107,10 @@ t('작업보드 프록시는 기본 제외 · includeAdminUi 로만 포함',
 /* ── 4) 창구 단일화 — 관리자 대시보드 흔적 0 ───────────────── */
 console.log('\n4) 관리자 대시보드 「오류디버깅」 제거');
 // 옛 관리자 대시보드 폐기(결정 267) — admin.html·index-app.js 가 화면째 없어져 「오류디버깅」 흔적 0 은 자명하다.
-//   대신 옛 대시보드 화면 코드가 되살아나지 않았는지만 본다(admin.html = 이동 정류장, index-app.js 없음).
+//   대신 옛 대시보드 화면 코드가 되살아나지 않았는지만 본다(admin.html·index-app.js 둘 다 없음 — 옛 관리자 대시보드 폐기(결정 267) — admin.html 진입 경로까지 삭제).
 t('옛 대시보드 화면 코드가 남아 있지 않다(오류디버깅 탭 포함)',
   !require('fs').existsSync(require('path').join(__dirname, '../../frontend/js/index-app.js'))
-  && !/data-tab="errorlogs"|id="tab-errorlogs"|id="errorLogListWrap"/.test(F('admin.html')));
+  && !require('fs').existsSync(require('path').join(__dirname, '../../frontend/admin.html')));
 
 /* ── 5) 프론트 배선 ───────────────────────────────────────── */
 console.log('\n5) 리뷰웹시스템[3버전] 배선');
