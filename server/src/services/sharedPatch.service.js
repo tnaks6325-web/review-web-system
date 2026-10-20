@@ -36,6 +36,9 @@ const PHASE5_SHARED_FIELDS = Object.freeze(['review_fee']);
 /** 7단계-② 인원·일건수 — 총모집·일 진행 건수·리뷰타입 혼합 수량(유형 구성은 그대로일 때만 · `writablePath`).
  *  상품 구성 안의 인원·일건수·혼합 수량은 경로로 연다. */
 const PHASE7Q_SHARED_FIELDS = Object.freeze(['recruit_count', 'daily_count', 'review_type_mix']);
+/** 7단계-④ ④ 리뷰타입(한 종류 ↔ 섞어 쓰기 · 섞는 종류) — 바뀌면 작업표 빈 줄 리뷰옵션을 새 비율로 다시 나눈다(채운 줄·손으로 고친 줄 그대로).
+ *  리뷰타입 혼합 수량의 **종류 구성** 변경도 이 칸을 아는 저장에서만 연다(수량만 바뀌는 것은 7단계-②). */
+const PHASE7R_SHARED_FIELDS = Object.freeze(['review_type']);
 /** 7단계-③ 주말 제외(주말·공휴일 모집 닫힘 + 작업표 빈 줄 날짜) — 참·거짓만(빈 값 = "아직 안 정함" 은 쓰지 않는다). */
 const PHASE7W_SHARED_FIELDS = Object.freeze(['skip_weekends']);
 /** 7단계-④ 상품·옵션 더하기·지우기(마감) — 칸이 아니라 상품 구성 경로의 표시. 수정 창 잠금 해제 목록에도 이 이름으로 나간다.
@@ -44,17 +47,17 @@ const STRUCTURE_FIELD = 'product_structure';
 /** 7단계-④ ③ 상품·옵션 이름 바꾸기 — 보내는 쪽이 원래 이름(prev_name/prev_label)을 실은 줄만. 수정 창 잠금 해제 목록에도 이 이름. */
 const RENAME_FIELD = 'product_rename';
 /** 리뷰웹 → 인트라넷으로 보내는 칸(수정 창이 리뷰웹 값으로 덮는 칸과 같다). 상품 구성·합계·요약은 금액이 함께 움직이는 짝. */
-const PUSH_VIEW_KEYS = Object.freeze([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, 'pay_amount', 'product_options_json', 'product_option']);
+const PUSH_VIEW_KEYS = Object.freeze([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, ...PHASE7R_SHARED_FIELDS, 'pay_amount', 'product_options_json', 'product_option']);
 /** 인트라넷 고유 칸 중 접수 뒤에도 고칠 수 있는 것 — 종전 원본 수정 허용 목록·계약 후속 매칭과 같은 범위. */
 const INTRANET_EDITABLE_AFTER_ACCEPT = Object.freeze([
   'title', 'manager_name', 'inflow_keyword', 'sales_id', 'quote_id', 'contract_number', 'intranet_advertiser_id',
 ]);
 /** 리뷰웹발 수정(관리자 오더 수정)이 쓸 수 있는 칸 — 인트라넷 고유는 제외. */
 const WRITABLE_BY_ORIGIN = {
-  intranet: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
-  reconcile: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
+  intranet: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, ...PHASE7R_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
+  reconcile: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, ...PHASE7R_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
   rw_admin: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS]),
-  campaign: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD]),   // 4단계-2 공고 편집 창(campaignSharedSave) — 리뷰웹발이라 인트라넷 고유 칸은 제외
+  campaign: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, ...PHASE7R_SHARED_FIELDS]),   // 4단계-2 공고 편집 창(campaignSharedSave) — 리뷰웹발이라 인트라넷 고유 칸은 제외
 };
 const KNOWN_CHANNELS = new Set(['쿠팡', '네이버', '올리브영', '카카오메이커스']);
 const SNAPSHOT_KEYS = Object.freeze([...SHARED_FIELDS.map(f => f.key), 'product_options_json', 'product_option']);
@@ -101,10 +104,10 @@ function _mixQuantityOnly(bv, mv) {
 }
 
 /** 옵션 없는 상품의 base 칸 — 금액·인원·일건수·혼합 수량(유형 그대로)만 바뀌었는가(7단계-②). */
-function _baseQuantityOrPayOnly(row) {
+function _baseQuantityOrPayOnly(row, allowMixTypes = false) {
   const b = _jsonObj(row.base), m = _jsonObj(row.mine);
   if (!b || !m) return false;
-  if (JSON.stringify(b.review_type_mix ?? null) !== JSON.stringify(m.review_type_mix ?? null)
+  if (!allowMixTypes && JSON.stringify(b.review_type_mix ?? null) !== JSON.stringify(m.review_type_mix ?? null)
       && !_mixQuantityOnly(JSON.stringify(b.review_type_mix ?? []), JSON.stringify(m.review_type_mix ?? []))) return false;
   const strip = o => { const c = { ...o }; delete c.pay; delete c.count; delete c.daily; delete c.daily_limit; delete c.dailyLimit; delete c.review_type_mix; return CANON.json(c); };
   return strip(b) === strip(m);
@@ -142,8 +145,11 @@ function writablePath(row, origin) {
   // 마감된 선택지(양쪽 다 마감)의 칸은 못 고친다 — 인원은 이미 참여한 수로 굳었다. 다시 열기(closed 칸이 풀림)는 아래에서.
   if (row.parentClosed) return false;
   if (m.kind === 'leaf' && m.key === 'closed') return !row.noStructure && set.has(STRUCTURE_FIELD) && _truthy(row.base) && !_truthy(row.mine);
+  // 7단계-④ ④ 리뷰타입·섞는 종류 — 리뷰타입을 아는 저장만(noReviewType = 옛 인트라넷 창)
+  const typesOk = set.has('review_type') && !row.noReviewType;
   if (m.kind === 'field') {
-    if (m.key === 'review_type_mix') return set.has(m.key) && _mixQuantityOnly(row.base, row.mine);
+    if (m.key === 'review_type') return typesOk;
+    if (m.key === 'review_type_mix') return set.has(m.key) && (_mixQuantityOnly(row.base, row.mine) || typesOk);
     // 7단계-③ 주말 제외 — 참·거짓으로만 바꾼다(비우기 = "아직 안 정함" 은 연결된 오더에서 둘 수 없다)
     if (m.key === 'skip_weekends') return set.has(m.key) && _isBoolValue(row.mine);
     return set.has(m.key);
@@ -160,8 +166,8 @@ function writablePath(row, origin) {
   if (m.key === 'pay' && isOption) return row.base !== ABSENT && row.mine !== ABSENT;
   // 7단계-② 인원·일건수(옵션) — 옵션이 원래 있고 지금도 있을 때만(옵션 더하기·지우기는 구조 단계)
   if (['count', 'daily', 'daily_limit', 'dailyLimit'].includes(m.key) && isOption) return row.base !== ABSENT && row.mine !== ABSENT && set.has('recruit_count');
-  if (m.key === 'review_type_mix' && isOption) return row.base !== ABSENT && row.mine !== ABSENT && set.has('review_type_mix') && _mixQuantityOnly(row.base, row.mine);
-  if (m.key === 'base' && !isOption) return _onlyBasePayDiffers(row) || (set.has('recruit_count') && _baseQuantityOrPayOnly(row));
+  if (m.key === 'review_type_mix' && isOption) return row.base !== ABSENT && row.mine !== ABSENT && set.has('review_type_mix') && (_mixQuantityOnly(row.base, row.mine) || typesOk);
+  if (m.key === 'base' && !isOption) return _onlyBasePayDiffers(row) || (set.has('recruit_count') && _baseQuantityOrPayOnly(row, typesOk));
   return false;
 }
 
@@ -173,7 +179,7 @@ const _truthy = v => v === 'true' || v === '1' || v === true;
  *   parentClosed = 기준에서도 보낸 값에서도 마감인 선택지의 칸.
  *   noStructure  = 구조를 모르는 옛 인트라넷 창.
  */
-function markStructureRows(plan, base, mine, { structureCapable = true, renameCapable = true, theirs = null } = {}) {
+function markStructureRows(plan, base, mine, { structureCapable = true, renameCapable = true, reviewTypeCapable = true, theirs = null } = {}) {
   const { flattenState } = require('../utils/sharedPatchPlan');
   const T = theirs ? flattenState(theirs) : null;
   const renamed = renamedParents(mine);
@@ -185,6 +191,7 @@ function markStructureRows(plan, base, mine, { structureCapable = true, renameCa
   const productOf = path => { const at = path.indexOf('|o:'); return at < 0 ? null : path.slice(0, at); };
   for (const w of rows) {
     const m = w.meta || {};
+    if (!reviewTypeCapable) w.noReviewType = true;
     if (!structureCapable) {
       w.noStructure = true;
       // 구조를 모르는 창은 마감 표시를 안 보낸다 — 기준에서 마감인 줄의 칸은 그 창이 고쳐도 마감 줄 칸이다(재검토 2026-10-21: 인원 3 → 8 이 마감 상태로 써졌다)
@@ -329,7 +336,7 @@ function _display(path, v) {
 function _pushBackKeys(mine, saved) {
   const { canon } = require('../utils/sharedFields');
   // 7단계 칸(인원·주말)도 — 옛 창이 보낸 값을 버린 저장이면 인트라넷 사본이 낡았으니 받아 가게 한다(검토 2026-10-21)
-  const keys = [...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS].filter(k => mine && Object.prototype.hasOwnProperty.call(mine, k)
+  const keys = [...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, ...PHASE7R_SHARED_FIELDS].filter(k => mine && Object.prototype.hasOwnProperty.call(mine, k)
     && canon(k, mine[k]) !== canon(k, saved[k]));
   if (mine && mine.pay_amount !== undefined && mine.pay_amount !== null && mine.pay_amount !== ''
       && canon('pay_amount', mine.pay_amount) !== canon('pay_amount', saved.pay_amount)) keys.push('pay_amount');
@@ -631,7 +638,7 @@ async function _projectPayInTx(client, camp, prev, next, actor) {
 async function _projectGuideInTx(client, camp, prev, next) {
   const { canonGuideKey } = require('../utils/guideCanon');
   const rowsOf = st => {
-    const pre = require('../utils/woCampaignPrefill.generated')._woCampaignPrefill(JSON.parse(JSON.stringify(st || {})));
+    const pre = _prefillOf(st);
     return (pre.options || []).map(o => ({ key: `${String(o.productName || '').trim()}|${o.unitKind === 'product' ? '' : String(o.optKey || '').trim()}`,
       name: o.optKey || o.productName, html: o.inflowGuideHtml || '', images: Array.isArray(o.inflowGuideImages) ? o.inflowGuideImages : [] }));
   };
@@ -689,6 +696,18 @@ async function _guideMissingInTx(client, camp) {
 }
 
 const _num = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+/**
+ * 오더 상태 → 발행 프리필(공고 값) 단일 경로.
+ * ★ 오더의 혼합 수량(review_type_mix)은 글자(JSON)로 올 수 있다(인트라넷 전송·오더 칸 읽기) — 그대로 넣으면 프리필이 글자를 그대로 돌려줘
+ *   공고 칸(배열만 허용 · recruit_campaigns_review_type_mix_is_array)이 저장 전체를 거부한다. 여기서 배열로 푼다(못 풀면 빈 목록).
+ */
+function _prefillOf(st) {
+  const src = JSON.parse(JSON.stringify(st || {}));
+  if (typeof src.review_type_mix === 'string') { try { src.review_type_mix = JSON.parse(src.review_type_mix || '[]'); } catch (_) { src.review_type_mix = []; } }
+  if (!Array.isArray(src.review_type_mix) && src.review_type_mix != null) src.review_type_mix = [];
+  return require('../utils/woCampaignPrefill.generated')._woCampaignPrefill(src);
+}
+
 const _mixSum = v => {
   let raw = v; if (typeof raw === 'string') { try { raw = JSON.parse(raw || '[]'); } catch (_) { return null; } }
   return Array.isArray(raw) ? raw.reduce((a, e) => a + Math.max(0, Math.floor(Number(e && e.quantity) || 0)), 0) : 0;
@@ -707,7 +726,7 @@ function validateQuantities(next, qtyProducts) {
     if (_tiersOn(byName(n))) return { code: 'quantity_tiers_locked', error: '구매수량 단계를 쓰는 상품은 아직 인원을 바꿀 수 없습니다(구조 단계에서 엽니다). 인원은 그대로 두고 저장해 주세요.' };
   }
   if (CANON.deliveryMix(next.delivery_type_mix)) {
-    return { code: 'quantity_delivery_mix_locked', error: '배송 혼합(실배송·빈박스) 작업은 아직 인원을 바꿀 수 없습니다(구조 단계에서 엽니다).' };
+    return { code: 'quantity_delivery_mix_locked', error: '배송 혼합(실배송·빈박스) 작업은 접수 뒤 인원·리뷰타입·상품 구성을 바꿀 수 없습니다. 새 리뷰오더로 만들어 주세요.' };
   }
   const total = Math.max(0, Math.floor(_num(next.recruit_count)));
   if (products.length) {
@@ -756,7 +775,7 @@ async function _projectQuantityInTx(client, camp, prev, next, { preferRetireIds 
     await client.query('ROLLBACK TO SAVEPOINT p7q_rounds').catch(() => {});
     if (e.code !== '42P01') throw e;
   }
-  const prefill = st => require('../utils/woCampaignPrefill.generated')._woCampaignPrefill(JSON.parse(JSON.stringify(st || {})));
+  const prefill = _prefillOf;
   const pp = prefill(prev), pn = prefill(next);
   const prevTotal = Math.max(0, Math.floor(_num(prev.recruit_count))), total = Math.max(0, Math.floor(_num(next.recruit_count)));
   try {
@@ -813,7 +832,7 @@ async function _projectQuantityInTx(client, camp, prev, next, { preferRetireIds 
  * ★ 수가 안 맞으면 null(모른다 — 호출부가 거부한다).
  */
 function _unitsOf(state) {
-  const pre = require('../utils/woCampaignPrefill.generated')._woCampaignPrefill(JSON.parse(JSON.stringify(state || {})));
+  const pre = _prefillOf(state);
   const rows = pre.options || [];
   const raw = [];
   for (const prod of _parseList(state && state.product_options_json) || []) {
@@ -1129,6 +1148,27 @@ async function _projectStructureInTx(client, camp, prev, next, structure = {}) {
   return { applied: true, removedKeys, closedKeys, preferRetireIds };
 }
 
+/** 7단계-④ ④ 리뷰타입 → 공고 행(키 · 빈 값 = 자율) · 혼합 수량(발행 프리필 값) · 한 종류면 옵션 혼합 비움 · 구매확정 배지 다시 계산 · 작업 탭 리뷰타입(검수 기준). */
+async function _projectReviewTypeInTx(client, camp, next) {
+  const { normalizeReviewType } = require('../utils/reviewType');
+  const { normalizeRecruitBadges } = require('../utils/recruitBadges');
+  const pre = _prefillOf(next);
+  const key = normalizeReviewType(next.review_type) || '';
+  const isFree = CANON.reviewType(next.review_type) === '' ;
+  const mix = key === 'mixed' && Array.isArray(pre.review_type_mix) ? pre.review_type_mix : [];
+  const { rows } = await client.query('SELECT badges, channel, cash_receipt_required FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [camp.id]);
+  const c = rows[0] || {};
+  const badges = normalizeRecruitBadges(c.badges, { cashReceiptRequired: c.cash_receipt_required === true, channel: c.channel, reviewType: key, reviewTypeMix: mix });
+  await client.query(`UPDATE recruit_campaigns SET review_type = $2, review_type_mix = $3::jsonb, badges = $4::jsonb, updated_at = NOW() WHERE id = $1`,
+    [camp.id, isFree ? null : key, JSON.stringify(mix), JSON.stringify(badges)]);
+  if (key !== 'mixed') await client.query(`UPDATE campaign_options SET review_type_mix = '[]'::jsonb, updated_at = NOW() WHERE campaign_id = $1 AND review_type_mix <> '[]'::jsonb`, [camp.id]);
+  if (camp.linked_sheet_id && camp.linked_tab_name) {
+    await client.query(`UPDATE tab_configs SET review_type = $3, updated_at = NOW() WHERE sheet_id = $1 AND tab_name = $2`,
+      [camp.linked_sheet_id, camp.linked_tab_name, String(next.review_type == null ? '' : next.review_type)]);
+  }
+  return { applied: true };
+}
+
 /** 공고 반영 — 쓴 칸만. 거부 사유가 있으면 {reject} 를 돌려 호출부가 통째로 되돌린다.
  *  @param {object} [extra] { prev: 저장 전 상태(금액 비교) · payTouched · actor } */
 async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTouched, extra = {}) {
@@ -1166,6 +1206,17 @@ async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTo
     if (r.applied) applied.push('quantity');
     if (r.after) after = { ...(after || {}), ...r.after, relay: !!((after && after.relay) || r.after.relay) };
   }
+  // 7단계-④ ④ 리뷰타입 → 공고(리뷰타입·혼합 수량·옵션 혼합·구매확정 배지) · 작업 탭 리뷰타입
+  if (extra.reviewTypeChanged) {
+    const r = await _projectReviewTypeInTx(client, camp, next);
+    if (r.applied) applied.push('review_type');
+  }
+  // 7단계-④ ④ 작업표 빈 줄 리뷰옵션 다시 나누기 — 리뷰타입·혼합 수량·인원이 바뀐 저장(사용자 확정 3.가 — 인원만 바뀌어도)
+  if (extra.reviewTypeChanged || extra.quantityChanged) {
+    const r = await require('./reviewOptionRedistribute.service').redistributeReviewOptionsInTx(client, camp, next, { by: 'bidir-review-type', prevReviewType: (extra.prev || {}).review_type });
+    if (r.reject) return { reject: { kind: 'quantity', out: { applied: false, reason: r.reject.code }, error: r.reject.error } };
+    if (r.applied) { applied.push('review_options'); after = { ...(after || {}), reviewOptions: r.worktable }; }
+  }
   if (extra.guideTouched) {
     const r = await _projectGuideInTx(client, camp, extra.prev || {}, next);
     if (r.reject) return { reject: r.reject };
@@ -1177,7 +1228,7 @@ async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTo
     if (r.applied) applied.push('pay');
   }
   const proj = projectOrderToCampaign(next);
-  const prefill = require('../utils/woCampaignPrefill.generated')._woCampaignPrefill(JSON.parse(JSON.stringify(next)));
+  const prefill = _prefillOf(next);
 
   if (has('thumbnail_url') && String(next.thumbnail_url || '').trim()) {
     const r = await sync.syncCampaignThumbnailInTx(client, camp, String(next.thumbnail_url).trim());
@@ -1369,7 +1420,8 @@ async function applySharedPatch(p) {
 
     // 7단계-④ — 상품·옵션 더하기·지우기 표시(구조를 모르는 옛 인트라넷 창은 그 경로를 막는다)
     const structureCapable = p.origin !== 'intranet' || p.structureCapable === true;
-    markStructureRows(plan, base, p.mine, { structureCapable, renameCapable: p.origin !== 'intranet' || p.renameCapable === true, theirs });
+    markStructureRows(plan, base, p.mine, { structureCapable, renameCapable: p.origin !== 'intranet' || p.renameCapable === true,
+      reviewTypeCapable: p.origin !== 'intranet' || p.reviewTypeCapable === true, theirs });
     // ★ 구조를 모르는 옛 인트라넷 창 — 마감 표시(그 창은 마감을 모른다)와 마감 줄 안의 칸은 "안 보낸 칸" 으로 버린다(금액·인원과 같은 장치 · 검토 2026-10-21).
     //   안 버리면 마감 줄이 생긴 오더는 옛 창에서 저장할 때마다 막힌다(인트라넷을 되돌리면 그 오더들이 전부 저장 불가).
     if (!structureCapable) {
@@ -1379,6 +1431,18 @@ async function applySharedPatch(p) {
         plan.writes = plan.writes.filter(w => !isOldClosed(w));
         plan.conflicts = plan.conflicts.filter(w => !isOldClosed(w));
         logger.info(`[bidir/apply] ${wo.id} 구조를 모르는 옛 인트라넷 저장 — 마감 칸은 받지 않음: ${dc.join(', ')}`);
+      }
+    }
+    // ★ 7단계-④ ④ 같은 장치 — 리뷰타입을 모르는 옛 인트라넷 창(`bidir.reviewtype` 없음)은 리뷰웹이 바꾼 리뷰타입을 모른 채 옛 사본 값을 다시 보낸다
+    //   (그 창은 리뷰타입 칸이 잠겨 있어 사람이 바꾼 값일 수 없다) → 리뷰타입 때문에만 막히는 칸은 받지 않는다(기록).
+    //   안 버리면 리뷰웹에서 리뷰타입을 한 번 바꾼 오더는 옛 창에서 저장할 때마다 409(검토 2026-10-21).
+    if (p.origin === 'intranet' && p.reviewTypeCapable !== true) {
+      const isOldType = w => w.noReviewType && !writablePath(w, p.origin) && writablePath({ ...w, noReviewType: false }, p.origin);
+      const dt = [...plan.writes, ...plan.conflicts].filter(isOldType).map(w => w.path);
+      if (dt.length) {
+        plan.writes = plan.writes.filter(w => !isOldType(w));
+        plan.conflicts = plan.conflicts.filter(w => !isOldType(w));
+        logger.info(`[bidir/apply] ${wo.id} 리뷰타입을 모르는 옛 인트라넷 저장 — 리뷰타입 칸은 받지 않음: ${dt.join(', ')}`);
       }
     }
     const meanwhile = [...plan.writes, ...plan.conflicts].filter(w => w.closedMeanwhile);
@@ -1409,7 +1473,7 @@ async function applySharedPatch(p) {
       await client.query('COMMIT');
       return { status: 200, body: { ok: true, noop: true, sync_version: curVersion } };
     }
-    const { next, productsTouched, urlTouched, guideTouched, quantityTouched, payTouched, payProducts, qtyProducts, missed, structure, structureTouched } = applyWrites(theirs, p.mine, plan.writes);
+    let { next, productsTouched, urlTouched, guideTouched, quantityTouched, payTouched, payProducts, qtyProducts, missed, structure, structureTouched } = applyWrites(theirs, p.mine, plan.writes);
     if (missed.length) {
       return await _abort(client, 409, { ok: false, code: 'write_unmatched', sync_version: curVersion, fields: missed.map(path => ({ path, label: _label(path) })),
         error: `상품·옵션 짝을 찾지 못해 저장하지 않았습니다: ${[...new Set(missed.map(path => _label(path)))].join(', ')}. 창을 닫고 다시 열어 주세요.` });
@@ -1422,8 +1486,39 @@ async function applySharedPatch(p) {
       closure = await _closeRemovedInTx(client, camp, theirs, next, structure);
       if (closure.reject) return await _abort(client, 409, { ok: false, code: closure.reject.out.reason, sync_version: curVersion, error: closure.reject.error });
     }
+    const reviewTypeWritten = plan.writes.some(w => w.meta && w.meta.kind === 'field' && w.meta.key === 'review_type');
+    // ★ 접수 뒤 영구 금지 작업(배송 혼합·회수 · 블로그 · 구매수량 단계)은 리뷰타입·섞는 종류를 못 바꾼다 — 창 목록(/shared writable)만 숨기면
+    //   그 목록을 안 보는 저장(옛 창·직접 호출)이 그대로 쓴다. 서버가 다시 막는다(검토 2026-10-21 · 판정 단일 출처 structurePermanentlyLocked).
+    const typeSetWritten = reviewTypeWritten || plan.writes.some(w => w.meta && ((w.meta.key === 'review_type_mix' && !_mixQuantityOnly(w.base, w.mine))
+      || (w.meta.kind === 'leaf' && w.meta.key === 'base' && !_baseQuantityOrPayOnly(w, false) && _baseQuantityOrPayOnly(w, true))));
+    if (typeSetWritten && structurePermanentlyLocked(theirs)) {
+      return await _abort(client, 409, { ok: false, code: 'review_type_locked', sync_version: curVersion,
+        error: '배송 혼합·회수, 블로그, 구매수량 단계가 있는 작업은 접수 뒤 리뷰타입을 바꿀 수 없습니다. 바꿔야 하면 새 리뷰오더로 접수해 주세요.' });
+    }
+    // 7단계-④ ④ — 한 종류(또는 자율)로 바꾸면 남은 섞어 쓰기 수량을 함께 비운다(공고 창 저장과 같은 규칙 · 안 비우면 옛 혼합이 배지·작업표에 남는다)
+    if (reviewTypeWritten && CANON.reviewType(next.review_type) !== 'mixed') {
+      next.review_type_mix = [];
+      const pl = _parseList(next.product_options_json);
+      if (pl) {
+        let ch = false;
+        for (const x of pl) {
+          if (!x || typeof x !== 'object') continue;
+          // 글자(JSON)로 실린 혼합 수량도 비운다(검토 2026-10-21 — 배열만 보면 글자 사본이 남는다)
+          const live = v => (Array.isArray(v) ? v.length > 0 : (typeof v === 'string' && v.trim() !== '' && v.trim() !== '[]'));
+          if (x.base && live(x.base.review_type_mix)) { x.base = { ...x.base, review_type_mix: [] }; ch = true; }
+          for (const o of Array.isArray(x.options) ? x.options : []) if (o && live(o.review_type_mix)) { o.review_type_mix = []; ch = true; }
+        }
+        if (ch) { next.product_options_json = JSON.stringify(pl); productsTouched = true; }
+      }
+    }
+    // 섞어 쓰기로 바꾸는데 마감 줄이 있으면 거부 — 마감 줄 참여자의 리뷰타입을 나눌 수 없다(마감 = 섞어 쓰기 작업 불가와 같은 규칙 · structure_close_mixed)
+    if (reviewTypeWritten && CANON.reviewType(next.review_type) === 'mixed'
+        && (_parseList(next.product_options_json) || []).some(x => x && (_truthy(x.closed) || (Array.isArray(x.options) && x.options.some(o => o && _truthy(o.closed)))))) {
+      return await _abort(client, 409, { ok: false, code: 'review_type_closed_mixed', sync_version: curVersion,
+        error: '마감된 옵션이 있는 작업은 리뷰타입을 섞어 쓰기로 바꿀 수 없습니다 — 마감된 옵션에 이미 참여한 분의 리뷰타입을 나눌 수 없습니다.' });
+    }
     const qtyFieldWritten = plan.writes.some(w => w.meta && w.meta.kind === 'field' && PHASE7Q_SHARED_FIELDS.includes(w.meta.key));
-    const quantityChanged = quantityTouched || qtyFieldWritten;
+    const quantityChanged = quantityTouched || qtyFieldWritten || reviewTypeWritten;
     if (quantityChanged) {
       const qErr = validateQuantities(next, new Set([...qtyProducts].map(n => (structure.productRenameMap && structure.productRenameMap.get(n)) || n)));
       if (qErr) return await _abort(client, 409, { ok: false, code: qErr.code, sync_version: curVersion, error: qErr.error });
@@ -1435,6 +1530,7 @@ async function applySharedPatch(p) {
       next.product_option = r.text != null ? r.text : theirs.product_option;
     }
     const writtenKeys = new Set(plan.writes.filter(w => w.path.startsWith('f:')).map(w => w.path.slice(2)));
+    if (reviewTypeWritten && CANON.reviewType(next.review_type) !== 'mixed') writtenKeys.add('review_type_mix');
     if (closure.addTotal) writtenKeys.add('recruit_count');   // 마감으로 되살린 인원만큼 총모집이 늘었다
     // 인원이 바뀐 상품도 상품구입비(금액 × 인원)가 바뀐다 — 결제합계·요약 문장을 같이 다시 만든다
     const costProducts = new Set([...payProducts, ...qtyProducts]);
@@ -1490,7 +1586,7 @@ async function applySharedPatch(p) {
     let campaign = { applied: [] };
     if (camp && plan.writes.length) {
       campaign = await projectToCampaignInTx(client, camp, next, writtenKeys, productsTouched,
-        { prev: theirs, payTouched, urlTouched, guideTouched, quantityChanged, structureTouched, structure, actor: p.actor || p.origin });
+        { prev: theirs, payTouched, urlTouched, guideTouched, quantityChanged, structureTouched, structure, reviewTypeChanged: reviewTypeWritten || writtenKeys.has('review_type_mix'), actor: p.actor || p.origin });
       if (campaign.reject) {
         const { campaignSyncNotice } = require('./campaignPayAmountSync.service');
         return await _abort(client, 409, { ok: false, code: 'campaign_rejected', sync_version: curVersion,
@@ -1518,6 +1614,12 @@ async function applySharedPatch(p) {
       const lrq = require('./linkedRecruitQuota.service');
       try { if (campaign.after.worktable) campaign.after.rebuilt = await lrq.rebuildWorktableProjection(campaign.after.worktable, 'bidir-quota'); }
       catch (e) { logger.warn(`[bidir/apply] ${wo.id} 작업표 장부 다시 만들기 실패(저장은 끝남): ${e.message}`); }
+      // 리뷰옵션을 다시 나눴으면 장부도(검수가 장부의 리뷰옵션을 읽는다) — 줄 수 맞추기에서 이미 다시 만들었으면 건너뛴다
+      try {
+        if (campaign.after.reviewOptions && !(campaign.after.rebuilt && campaign.after.rebuilt.projection)) {
+          campaign.after.rebuilt = await lrq.rebuildWorktableProjection(campaign.after.reviewOptions, 'bidir-review-type', true);
+        }
+      } catch (e) { logger.warn(`[bidir/apply] ${wo.id} 리뷰옵션 장부 다시 만들기 실패(저장은 끝남): ${e.message}`); }
       if (campaign.after.relay) {
         try { campaign.after.relayResult = await require('./campaignPlan.service').relayCampaignWorktable(camp.id, { by: 'bidir-quota' }); }
         catch (e) { logger.warn(`[bidir/apply] ${wo.id} 작업표 날짜 다시 배치 실패(저장은 끝남): ${e.message}`); }
@@ -1594,5 +1696,5 @@ async function linkSharedOrder({ workOrderId, actor = '', dryRun = false, db } =
 
 module.exports = {
   applySharedPatch, linkSharedOrder, readSharedState, sanitizeRenames, renamedParents, renameShapeError, RENAME_FIELD, applyWrites, writablePath, projectToCampaignInTx, derivePayFields, validateQuantities, markStructureRows, STRUCTURE_FIELD, structureOpenFor, structurePermanentlyLocked,
-  PHASE3_SHARED_FIELDS, PHASE5_SHARED_FIELDS, PHASE7Q_SHARED_FIELDS, PHASE7W_SHARED_FIELDS, PUSH_VIEW_KEYS, WRITABLE_BY_ORIGIN, INTRANET_EDITABLE_AFTER_ACCEPT, NEXT_VERSION_SQL, _pushBackKeys,
+  PHASE3_SHARED_FIELDS, PHASE5_SHARED_FIELDS, PHASE7Q_SHARED_FIELDS, PHASE7W_SHARED_FIELDS, PHASE7R_SHARED_FIELDS, PUSH_VIEW_KEYS, WRITABLE_BY_ORIGIN, INTRANET_EDITABLE_AFTER_ACCEPT, NEXT_VERSION_SQL, _pushBackKeys, _prefillOf,
 };

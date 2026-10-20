@@ -325,7 +325,7 @@ async function structureBlocked({ campaignId, store, normOpts, body, db } = {}) 
 }
 
 /** 7단계-④ ② 공유 저장으로 보내는 구조 변경(나머지는 아직 막힘). */
-const STRUCTURE_SHARED_LABELS = new Set(['옵션·상품 추가', '옵션·상품 삭제', '옵션 마감·다시 열기', '옵션·상품 이름', '상품 이름']);   // ③ 이름 바꾸기 포함
+const STRUCTURE_SHARED_LABELS = new Set(['옵션·상품 추가', '옵션·상품 삭제', '옵션 마감·다시 열기', '옵션·상품 이름', '상품 이름', '리뷰타입']);   // ③ 이름 바꾸기 · ④ 리뷰타입 포함
 
 /** 공고 마감 줄(참여한 수로 굳은 옵션)의 인원 합 — 공고 창·리뷰어 앱 총모집(열린 줄만)을 공고 총모집과 같은 기준으로 맞출 때 더한다(7단계-④). */
 async function closedRecruitSum(db, campaignId) {

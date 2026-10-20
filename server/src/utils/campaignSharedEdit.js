@@ -766,6 +766,15 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
     mine.skip_weekends = b.skip_weekends;
     changed.push('주말 제외');
   }
+  // ⑦ 7단계-④ ④ 리뷰타입 — 기준(오더)과도 지금 공고 값과도 다를 때만(주말과 같은 규칙 · 창은 공고 값으로 열린다). 오더는 인트라넷 표기(포토·혼합·자율리뷰)로.
+  if (b.review_type !== undefined && b.review_type !== null) {
+    const want = CANON.reviewType(b.review_type);
+    if (want !== CANON.reviewType(base.review_type) && want !== CANON.reviewType((camp || {}).review_type)) {
+      const { reviewTypeLabel } = require('./reviewType');
+      mine.review_type = want ? (reviewTypeLabel(want) || String(b.review_type)) : '자율리뷰';
+      changed.push('리뷰타입');
+    }
+  }
   // ⑥ 7단계-④ 상품·옵션 더하기·지우기·다시 열기(판정 — 반영은 금액·인원 계획 뒤)
   const st = _planStructureEdit({ products, baseRows, liveCampOpts, body: b, guideInflow });
   unmappable.push(...st.unmappable);

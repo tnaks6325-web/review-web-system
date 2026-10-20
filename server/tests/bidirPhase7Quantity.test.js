@@ -45,7 +45,10 @@ const OPT_PRODUCTS = [
   assert.equal(SP.writablePath(row('count', 'p:탈취제|o:블랙', '5', '6'), 'intranet'), true);
   assert.equal(SP.writablePath(row('daily', 'p:탈취제|o:블랙', '1', '2'), 'campaign'), true);
   assert.equal(SP.writablePath(row('count', 'p:탈취제|o:블랙', require('../src/utils/sharedPatchPlan').ABSENT, '6'), 'intranet'), false, '새 옵션 = 구조 단계');
-  assert.equal(SP.writablePath({ meta: { kind: 'field', key: 'review_type_mix' }, base: '[{"type":"포토","quantity":5}]', mine: '[{"type":"텍스트","quantity":5}]' }, 'intranet'), false, '유형 구성이 바뀌면 = 구조 단계');
+  // 유형 구성 바꾸기는 7단계-④ ④ 부터 리뷰타입을 아는 저장만(옛 인트라넷 창 noReviewType = 막힘 · 검사 의미: 모르는 창은 계속 막힌다)
+  assert.equal(SP.writablePath({ meta: { kind: 'field', key: 'review_type_mix' }, base: '[{"type":"포토","quantity":5}]', mine: '[{"type":"텍스트","quantity":5}]', noReviewType: true }, 'intranet'), false, '리뷰타입을 모르는 창 = 유형 구성 바꾸기 막힘');
+  assert.equal(SP.writablePath({ meta: { kind: 'field', key: 'review_type_mix' }, base: '[{"type":"포토","quantity":5}]', mine: '[{"type":"텍스트","quantity":5}]' }, 'intranet'), true, '리뷰타입을 아는 창 = 유형 구성 바꾸기 됨');
+  assert.equal(SP.writablePath({ meta: { kind: 'field', key: 'review_type_mix' }, base: '[{"type":"포토","quantity":5}]', mine: '[{"type":"텍스트","quantity":5}]' }, 'rw_admin'), false, '관리자 오더 수정은 아직 못 바꾼다');
   assert.equal(SP.writablePath({ meta: { kind: 'field', key: 'review_type_mix' }, base: '[{"type":"포토","quantity":5}]', mine: '[{"type":"포토","quantity":7}]' }, 'intranet'), true, '수량만 = 통과');
 }
 

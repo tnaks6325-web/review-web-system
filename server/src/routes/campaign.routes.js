@@ -3751,6 +3751,21 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       const { rows: wk } = await pool.query('SELECT skip_weekends FROM work_orders WHERE id = $1', [bidirEdit.link.wo.id]);
       _bxWeekendAlign = wk.length && (wk[0].skip_weekends === true || wk[0].skip_weekends === false) ? wk[0].skip_weekends : null;
     }
+    /* ★ 7단계-④ ④(검토 2026-10-21): 리뷰타입도 주말과 같은 장치 — 이 기능 전에는 연결 공고 리뷰타입을 공고 창이 직접 써서 오더·공고가 갈라져 있을 수 있다.
+       사람이 공고 값을 오더 값으로 되돌리면 공유 저장은 쓸 것이 없다 — 그때만 공고 리뷰타입·혼합 수량을 오더 값(발행 프리필)으로 맞춘다. 오더와 다른 값은 쓰지 않는다. */
+    let _bxReviewTypeAlign = null, _bxReviewMixAlign = null;
+    if (_bx && review_type !== undefined && review_type !== null) {
+      const { rows: rt } = await pool.query('SELECT * FROM work_orders WHERE id = $1', [bidirEdit.link.wo.id]);
+      if (rt.length) {
+        const orderKey = normalizeReviewType(rt[0].review_type) || '';
+        if ((normalizeReviewType(review_type) || '') === orderKey) {
+          const sp = require('../services/sharedPatch.service');
+          _bxReviewTypeAlign = orderKey;
+          const pm = orderKey === 'mixed' ? sp._prefillOf(sp.readSharedState(rt[0])).review_type_mix : [];
+          _bxReviewMixAlign = Array.isArray(pm) ? pm : [];
+        }
+      }
+    }
     if (_bx && normOpts) {
       await require('../services/campaignSharedSave.service')
         .protectOptionLeaves({ normOpts, link: bidirEdit.link, baseVersion: req.body && req.body.bidir_base_sync_version });
@@ -3878,9 +3893,9 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         (transfer_memo === undefined || transfer_memo === null) ? null : String(transfer_memo).trim(),            // $38 ★ 086
         // $39 ★ 087: undefined/null=유지. ''=미지정으로 해제. 판정 불가값도 ''(=해제) —
         //   모르는 문자열을 그대로 저장하면 화면·검수가 각자 다르게 해석한다.
-        (review_type === undefined || review_type === null) ? null : (normalizeReviewType(review_type) || ''),
+        _bx ? _bxReviewTypeAlign : ((review_type === undefined || review_type === null) ? null : (normalizeReviewType(review_type) || '')),   // 7단계-④ ④ 연결 공고는 공유 저장이 쓴다(오더 값으로 되돌릴 때만 맞추기)
         // $40: undefined=유지, []=혼합 해제, 배열=검증된 유형별 수량.
-        (_bx || reviewMixForStore === null) ? null : JSON.stringify(reviewMixForStore),   // 7단계-②: 연결 공고의 혼합 수량은 공유 저장이
+        _bx ? (_bxReviewMixAlign === null ? null : JSON.stringify(_bxReviewMixAlign)) : (reviewMixForStore === null ? null : JSON.stringify(reviewMixForStore)),   // 7단계-②: 연결 공고의 혼합 수량은 공유 저장이(리뷰타입 맞추기 때만 오더 값)
         // $41 ★ 098: 이월 반영 방식 — undefined/null/알 수 없는 값 = 유지(COALESCE), 'auto'|'hold'만 설정.
         //   세그먼트 UI 없는 화면은 아예 전송하지 않으므로 옛 화면 저장이 설정을 되돌리지 않는다.
         ['auto', 'hold'].includes(carry_mode) ? carry_mode : null,

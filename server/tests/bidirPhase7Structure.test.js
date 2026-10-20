@@ -266,7 +266,7 @@ async function pg() {
     // ── ① 아직 막힌 구조 변경(이름·배송 한 종류끼리·리뷰타입 = 다음 순서) · 영구 금지 ──
     // 옵션 이름 바꾸기는 ③ 에서 열렸다 — bidirPhase7Rename 이 본다
     await blocked('배송 한 종류끼리', b => { b.delivery_type = '빈박스'; }, 'structure_linked_pending', '배송 방식');
-    await blocked('리뷰타입', b => { b.review_type = '텍스트'; }, 'structure_linked_pending', '리뷰타입');
+    // 리뷰타입 바꾸기는 ④ 에서 열렸다 — bidirPhase7ReviewType 이 본다
     await blocked('배송 혼합', b => { b.delivery_type = '혼합'; b.delivery_type_mix = [{ type: 'real', quantity: 10 }, { type: 'empty', quantity: 10 }];
       b.delivery_review_fee_mix = [{ type: 'real', reviewFee: 1000 }, { type: 'empty', reviewFee: 1000 }]; }, 'structure_new_order', '배송 방식');
     await blocked('체험단 종류', b => { b.work_kind = 'blog'; }, 'structure_new_order', '체험단 종류');
