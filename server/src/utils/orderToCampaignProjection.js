@@ -143,4 +143,4 @@ function compareOrderCampaign(order, campaign, optionRows) {
   return out;
 }
 
-module.exports = { projectOrderToCampaign, readCampaignShared, compareOrderCampaign, SCALAR_KEYS, OPTION_KEYS };
+module.exports = { projectOrderToCampaign, readCampaignShared, compareOrderCampaign, optionShape: _optionShape, SCALAR_KEYS, OPTION_KEYS };

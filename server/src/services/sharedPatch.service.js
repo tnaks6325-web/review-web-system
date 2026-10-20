@@ -36,6 +36,7 @@ const WRITABLE_BY_ORIGIN = {
   intranet: new Set([...PHASE3_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
   reconcile: new Set([...PHASE3_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
   rw_admin: new Set(PHASE3_SHARED_FIELDS),
+  campaign: new Set(PHASE3_SHARED_FIELDS),   // 4단계-2 공고 편집 창(campaignSharedSave) — 리뷰웹발이라 인트라넷 고유 칸은 제외
 };
 const KNOWN_CHANNELS = new Set(['쿠팡', '네이버', '올리브영', '카카오메이커스']);
 const SNAPSHOT_KEYS = Object.freeze([...SHARED_FIELDS.map(f => f.key), 'product_options_json', 'product_option']);
@@ -218,7 +219,7 @@ async function _abort(client, status, body) {
  * @param {string} p.workOrderId
  * @param {object} p.mine        보낸 공유 상태(저장 형태 · 칸 이름 = 작업오더 칸)
  * @param {number} p.baseVersion 수정 화면을 연 시점의 버전
- * @param {'intranet'|'rw_admin'|'reconcile'} p.origin
+ * @param {'intranet'|'rw_admin'|'reconcile'|'campaign'} p.origin
  * @param {string} [p.opId] 같은 저장 재전송 판별
  * @param {string} [p.actor]
  * @param {string[]} [p.forceMine] 사람이 "내 값" 을 고른 경로

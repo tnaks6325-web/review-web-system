@@ -3253,6 +3253,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   window._recruitEditLoaded = null;   // ★ 064: 이전 편집의 로드값(sort_order 등)이 새 공고에 새는 것 방지
   window._recruitEditLoadedOpts = null;  // 저장 후 "바뀐 항목" 대조용 옵션표 원본(로드 실패 시 null=대조 안 함)
   window._recruitEditLoadedFees = null;
+  window._rfBidirBase = null;   // ★ 양방향 4단계-2: 창을 연 시점의 리뷰오더 공유 버전(연결 공고만)
   _rfLastScheduledPurchaseWindow = { start: "", end: "" };
   if (typeof recruitSaveBlockClear === "function") recruitSaveBlockClear();  // 지난번 차단 사유 잔류 방지
   _rfLinkedMiss = null; _rfSugCache = [];   // 지난 공고의 "탭 못 찾음" 사유가 새 모달에 남지 않게(로드보다 먼저)
@@ -3398,6 +3399,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
         throw new Error("편집용 전체 공고 정보를 받지 못했습니다. 저장할 수 없습니다.");
       }
       window._recruitEditLoaded = c;   // ★ 064: sort_order 등 "UI 없는 서버 ||0 강제 필드"의 로드값 보존용
+      /* ★ 양방향 4단계-2(결정 263): 리뷰오더와 맞춰지는 공고면 창을 연 시점의 버전을 기억했다가 저장 때 그대로 보낸다.
+         안 보내면 서버는 "옛 화면" 으로 보고, 공통 칸이 지금 값과 다르면 저장을 막는다(창을 연 뒤 인트라넷이 고친 값을 덮지 않게). */
+      window._rfBidirBase = (json && json.bidir && Number(json.bidir.sync_version) > 0) ? Number(json.bidir.sync_version) : null;
       /* ★ 차수 원장 잠금 — 서버가 총모집 전송값을 무시하는지 **열 때부터** 안다(null=모름). */
       window._rfRoundsLock = (json && json.roundsLock && typeof json.roundsLock === "object") ? json.roundsLock : null;
       window._recruitEditLoadedOpts = json.options || [];   // 저장 후 "바뀐 항목" 대조용(옵션표 원본)
@@ -5704,6 +5708,7 @@ async function saveRecruitPostImpl() {
   btn.innerHTML = '<span class="rf-spin"></span> 저장 중…';
   let _ok = false;   // 성공하면 버튼을 원복하지 않는다(✓ 저장됨 → 모달 닫힘으로 이어진다)
 
+  if (_recruitEditId && window._rfBidirBase) payload.bidir_base_sync_version = window._rfBidirBase;
   try {
     let res;
     if (_recruitEditId) {
@@ -5759,6 +5764,16 @@ async function saveRecruitPostImpl() {
        토스트가 아니라 가운데 안내(campSaveFeedback)의 목록 첫 줄로(#604 토스트 예산 규율). */
     if (saved && saved.recruitTotalLocked === true) {
       _changed.unshift("⚠ 총모집은 차수 원장이 관리해 변경되지 않음 — [📅 인원]의 차수 추가/제거로");
+    }
+    /* ★ 양방향 4단계-2: 리뷰오더와 맞춰지는 칸을 고쳤으면 리뷰오더에도 갔다고 말하고, 창을 연 뒤 리뷰오더 쪽에서 먼저 바뀐 칸을
+       지금 값으로 덮었으면 무엇을 덮었는지 보여준다(사용자 확정 2026-10-20 — 나중에 저장한 값 · 확인만). */
+    if (saved && saved.shared) {
+      const _ow = Array.isArray(saved.shared.overwritten) ? saved.shared.overwritten : [];
+      _ow.slice().reverse().forEach(o => {
+        _changed.unshift(`⚠ ${o.label} — 리뷰오더에서 먼저 바뀐 값(${String(o.before || "").slice(0, 60)})을 지금 저장한 값으로 바꿨습니다`);
+      });
+      const _sc = Array.isArray(saved.shared.changed) ? saved.shared.changed : [];
+      if (_sc.length) _changed.unshift(`🔗 리뷰오더(인트라넷)에도 반영: ${_sc.join(", ")}`);
     }
     /* ★ 2026-10-06: 총 건수를 늘려 "가득 차서 자동 마감"됐던 공고가 다시 열린 경우 — 조용히 바뀌지 않게 고지 */
     if (saved && saved.reopened === true) {

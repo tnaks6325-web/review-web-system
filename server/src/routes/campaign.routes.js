@@ -1024,6 +1024,9 @@ async function _scopedCampaignEdit(req, res) {
   }
 
   const b = req.body || {};
+  // ★ 양방향 4단계-2: 연결 공고의 공유 칸(썸네일·구매시간·랜딩)은 이 화면(기준 버전을 모름)에서 바꾸지 못한다 — 같은 값이면 통과.
+  const sharedBlock = await require('../services/campaignSharedSave.service').scopedEditSharedBlock({ campaignId: id, body: b });
+  if (sharedBlock) return res.status(sharedBlock.status).json(sharedBlock.body);
   const keep = (v, curV) => (v === undefined || v === null || v === '') ? curV : v;
   const numOr = (v, curV) => (v === undefined || v === null || v === '') ? curV : (Number(v) || 0);
   const title = (b.title !== undefined && String(b.title).trim() !== '') ? String(b.title).trim() : c.title;
@@ -1634,10 +1637,18 @@ async function getCampaignDetail(req, res, next) {
       } catch (e) {
         logger.warn(`[campaign] 작업오더 프리필(혼합 조합·유입방식·시작일·안내값) 실패 camp=${id}: ${e.message}`);
       }
+      /* ★ 양방향 4단계-2: 연결 공고면 창을 연 시점의 공유 버전을 함께 준다 — 저장 때 그대로 돌려보내야(bidir_base_sync_version)
+         창을 연 뒤 인트라넷이 고친 칸을 옛 화면 값으로 덮지 않는다. 연결 판정 실패 = 없음(종전 화면 그대로). */
+      let bidir = null;
+      try {
+        const link = await require('../services/campaignSharedSave.service').findBidirLink(pool, id);
+        if (link) bidir = { linked: true, sync_version: Number(link.wo.sync_version) || 0, work_order_id: link.wo.id };
+      } catch (e) { logger.warn(`[campaign/detail] 양방향 연결 확인 실패(없음으로): ${e.message}`); }
       return res.json({
         ok: true,
         data: { ...rows[0], repurchase_days: repurchaseDays(rows[0].repurchase_days), workboard_display_name: workboardDisplayName },
         options, feeSchedules, orderReviewTypeMix, orderInflowType, orderStartDate, orderCampaignContent, roundsLock,
+        ...(bidir ? { bidir } : {}),
       });
     }
     const now = new Date();
@@ -3691,6 +3702,23 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       await assertCampaignRecruitTotal({ campaignId: id, recruitTotal: Number(_rtEff) || 0 });
     }
 
+    /* ★★ 양방향 4단계-2(결정 263) — 연결 공고의 공유 글 칸은 작업오더 공유 저장으로 먼저 보낸다(`campaignSharedSave`).
+       그 뒤 아래 UPDATE 는 그 칸을 쓰지 않는다(`_bx`) — 창을 연 뒤 인트라넷이 고친 칸을 옛 화면 값으로 되돌리지 않게.
+       스위치(campaign_edit)가 꺼져 있거나 연결 공고가 아니면 `_bx=false` = 종전 저장 그대로.
+       ★ 모든 검증이 끝난 뒤 여기서 부른다 — 공유 저장은 따로 커밋되므로, 앞선 검증 실패로 반쪽 저장이 남지 않게. */
+    const bidirEdit = await require('../services/campaignSharedSave.service')
+      .applyCampaignSharedSave({ campaignId: id, body: req.body, actor: req.admin?.name || '' });
+    if (bidirEdit.response) return res.status(bidirEdit.response.status).json(bidirEdit.response.body);
+    const _bx = bidirEdit.active === true;
+    // 참여형 공고의 시간창은 구매시간 글자에서 나온다(공유 저장이 계산). 글자를 안 고쳤고 화면 시각이 그 글자와 맞으며
+    // 그 사이 글자도 안 바뀌었으면(windowsWritable) 종전처럼 화면 시각을 쓴다 — 시각이 비어 있던 공고가 저장으로 바로잡힌다.
+    const _bxWin = _bx && bidirEdit.participation && !bidirEdit.windowsWritable;
+    const _bxLanding = _bx && bidirEdit.landingShared; // 랜딩은 링크유입일 때만 공유 칸
+    if (_bx && normOpts) {
+      await require('../services/campaignSharedSave.service')
+        .protectOptionLeaves({ normOpts, link: bidirEdit.link, baseVersion: req.body && req.body.bidir_base_sync_version });
+    }
+
     const { rows } = await pool.query(
       `UPDATE recruit_campaigns SET
         title = COALESCE($2, title),
@@ -3727,7 +3755,14 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
                           ELSE $26::time END,
         close_buffer_min = COALESCE($27, close_buffer_min),
         hold_ttl_min = COALESCE($28, hold_ttl_min),
-        work_detail = CASE WHEN $29::boolean THEN $30::jsonb ELSE work_detail END,
+        -- ★ 양방향 4단계-2: 연결 공고($52)면 공유 하위 칸(리뷰가이드·특이사항·두 사진·유입방식)은 지금 DB 값을 되살린다(오른쪽이 이긴다).
+        work_detail = CASE WHEN $29::boolean THEN
+                        (CASE WHEN $52::boolean AND $30::jsonb IS NOT NULL
+                              THEN $30::jsonb || COALESCE((SELECT jsonb_object_agg(k, work_detail->k)
+                                                             FROM unnest(ARRAY['reviewGuide','specialNotes','reviewGuideImages','specialNotesImages','inflowType']) AS k
+                                                            WHERE work_detail ? k), '{}'::jsonb)
+                              ELSE $30::jsonb END)
+                      ELSE work_detail END,
         source_work_order_id = COALESCE($31, source_work_order_id),
         start_date = CASE WHEN $32::text IS NULL THEN start_date
                           WHEN $32::text = '' THEN NULL
@@ -3768,20 +3803,20 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
        RETURNING *`,
       [
         id,
-        title, channel, channel_custom, manager, time_range,
+        title, _bx ? null : channel, _bx ? null : channel_custom, manager, _bx ? null : time_range,   // ★ 4단계-2: 연결 공고면 공유 칸은 위 공유 저장이 쓴다
         delivery_type, review_fee || 0,
         badgesForStore === null ? null : JSON.stringify(badgesForStore),
         notes, chat_url, status, sort_order || 0,
         max_slots || 0, deadline || null, description,
         lSheet, lTab, lGid,   // ★ 자동 보정값(빈 값이면 COALESCE로 기존값 유지 — 종전과 동일)
         (participation_mode === undefined || participation_mode === null) ? null : participation_mode === true,
-        thumbnail_url ?? null,
-        landing_url ?? null,
+        _bx ? null : (thumbnail_url ?? null),
+        _bxLanding ? null : (landing_url ?? null),
         (daily_limit === undefined || daily_limit === null || daily_limit === '') ? null : Number(daily_limit) || 0,
         (_rtEff === undefined || _rtEff === null || _rtEff === '') ? null : Number(_rtEff) || 0,
         // ★ 062: ''=시간창 비움(자율주문 전환), null/undefined=유지 — 구 COALESCE는 비움 불가였음
-        (_wsEff === undefined || _wsEff === null) ? null : String(_wsEff),
-        (_weEff === undefined || _weEff === null) ? null : String(_weEff),
+        (_bxWin || _wsEff === undefined || _wsEff === null) ? null : String(_wsEff),
+        (_bxWin || _weEff === undefined || _weEff === null) ? null : String(_weEff),
         (close_buffer_min === undefined || close_buffer_min === null || close_buffer_min === '') ? null : Number(close_buffer_min),
         (hold_ttl_min === undefined || hold_ttl_min === null || hold_ttl_min === '') ? null : Number(hold_ttl_min),
         wdPrepared !== undefined,          // $29: work_detail 교체 여부(undefined=유지)
@@ -3818,6 +3853,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         ['next', 'spread', 'extend'].includes(carry_strategy) ? carry_strategy : null,
         repurchaseDaysState.value,                                // $50 ★ 148: null=유지, 0=제한 없음
         deliveryReviewFeeMixForStore === null ? null : JSON.stringify(deliveryReviewFeeMixForStore), // $51 ★ 152
+        _bx,                                                       // $52 ★ 4단계-2: work_detail 공유 하위 칸은 DB 값 유지
       ]
     );
 
@@ -3890,7 +3926,9 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       ...(quotaSync ? { quotaSync } : {}),
       // ★ 095: 차수 공고라 총모집 전송값을 무시했음을 화면에 알린다(진행상품 표 hidden 재전송 케이스)
       ...(_rtLocked ? { recruitTotalLocked: true } : {}),
-      ...(_reopened ? { reopened: true } : {}) });
+      ...(_reopened ? { reopened: true } : {}),
+      // ★ 4단계-2: 공유 저장 결과(바뀐 칸·덮인 리뷰오더 값) — 화면이 "나중에 저장한 값" 알림을 그린다
+      ...(bidirEdit.shared ? { shared: bidirEdit.shared } : {}) });
   } catch (err) {
     next(err);
   }
