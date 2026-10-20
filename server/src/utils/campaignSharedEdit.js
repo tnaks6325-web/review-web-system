@@ -621,8 +621,72 @@ function driftFromCampaign(camp, body) {
   return Object.keys(sent).filter(k => norm(k, sent[k]) !== norm(k, now[k])).map(k => LABELS[k] || k);
 }
 
+/**
+ * 7단계-④ — 공고 창 저장이 연결 공고의 **구조**를 바꾸는가(옵션 구성·상품 방식·배송 방식·리뷰타입 종류·체험단 종류).
+ * `store` = 라우트가 정규화한 저장 값(undefined/null = 안 보냄 = 유지). 인원·혼합 수량은 7단계-② 공유 저장이 맡아 여기서 보지 않는다.
+ * `permanent` = 접수 뒤에는 바꾸지 않는 변경(사용자 확정 2026-10-21 「4.가」 — 체험단 종류 전환·배송 혼합·회수: 작업표 모양이 달라진다 · 운영 0건).
+ * ★ 순수 함수 — DB 없음.
+ * @returns {Array<{label:string, permanent:boolean}>}
+ */
+function structureChangesFromCampaign({ camp, campOptions = [], store = {}, normOpts = null } = {}) {
+  const { deliveryBaseType } = require('./deliveryType');
+  const c = camp || {};
+  const s = store || {};
+  const out = [];
+  const add = (label, permanent = false) => {
+    const hit = out.find(x => x.label === label);
+    if (hit) hit.permanent = hit.permanent || permanent; else out.push({ label, permanent });
+  };
+  const sent = v => v !== undefined && v !== null;
+
+  if (sent(s.work_kind) && CANON.workKind(s.work_kind) !== CANON.workKind(c.work_kind)) add('체험단 종류', true);
+
+  // 배송 — 기본형이 바뀌거나 같은 기본형 안에서 글자가 바뀌면 구조. 혼합·회수가 끼면 접수 뒤에는 못 바꾼다.
+  //   부속정보(혼합 수량·회수 정보)는 그 기본형일 때만 본다 — 기본형이 아니면 라우트가 빈 값으로 지우므로 남아 있던 옛 값과 비교하면 헛걸린다.
+  const SPECIAL = new Set(['혼합', '회수']);
+  const curBase = deliveryBaseType(c.delivery_type) || '';
+  const nextBase = sent(s.delivery_type) ? (deliveryBaseType(s.delivery_type) || '') : curBase;
+  if (nextBase !== curBase) add('배송 방식', SPECIAL.has(nextBase) || SPECIAL.has(curBase));
+  else if (sent(s.delivery_type) && _t(s.delivery_type) !== _t(c.delivery_type)) add('배송 방식', SPECIAL.has(curBase));
+  if (curBase === '혼합' && nextBase === '혼합' && sent(s.delivery_type_mix)
+      && CANON.deliveryMix(s.delivery_type_mix) !== CANON.deliveryMix(c.delivery_type_mix)) add('배송 혼합', true);
+  if (curBase === '회수' && nextBase === '회수'
+      && ((sent(s.recall_courier) && _t(s.recall_courier) !== _t(c.recall_courier))
+        || (sent(s.recall_product) && _t(s.recall_product) !== _t(c.recall_product)))) add('회수 정보', true);
+
+  // 리뷰타입 — 종류만(수량은 7단계-②). 섞어 쓰기 안에서 섞는 종류가 바뀌어도 구조.
+  const curRt = CANON.reviewType(c.review_type);
+  const nextRt = sent(s.review_type) ? CANON.reviewType(s.review_type) : curRt;
+  if (nextRt !== curRt) add('리뷰타입');
+  else if (curRt === 'mixed' && sent(s.review_type_mix)) {
+    const types = v => [...new Set(_mixArray(v).map(e => String(e.type)))].sort().join(',');
+    if (types(s.review_type_mix) !== types(c.review_type_mix)) add('리뷰타입');
+  }
+
+  // 옵션·상품 구성 — 지금 공고 옵션 줄(지운 줄 제외)과 화면이 보낸 줄
+  if (Array.isArray(normOpts)) {
+    const cur = new Map((campOptions || []).filter(r => _t(r.status) !== 'deleted').map(r => [_t(r.opt_key), r]));
+    const sentKeys = new Set(normOpts.map(o => o.optKey));
+    const renamedFrom = new Set();
+    for (const o of normOpts) {
+      const r = cur.get(o.optKey);
+      if (!r) {
+        const prev = o.prevOptKey && o.prevOptKey !== o.optKey ? o.prevOptKey : '';
+        if (prev && cur.has(prev) && !sentKeys.has(prev)) { renamedFrom.add(prev); add('옵션·상품 이름'); }
+        else add('옵션·상품 추가');
+        continue;
+      }
+      if (_t(o.productName) !== _t(r.product_name)) add('상품 이름');
+      if ((o.unitKind === 'product' ? 'product' : 'option') !== (_t(r.unit_kind) === 'product' ? 'product' : 'option')) add('상품 방식(옵션 있음·없음)');
+      if (o.status && o.status !== (_t(r.status) === 'closed' ? 'closed' : 'active')) add('옵션 마감·다시 열기');
+    }
+    for (const k of cur.keys()) if (!sentKeys.has(k) && !renamedFrom.has(k)) add('옵션·상품 삭제');
+  }
+  return out;
+}
+
 module.exports = {
   planCampaignSharedEdit, driftFromCampaign, campaignViewOf, campaignRowView, bodyView, replaceReviewSection, norm, landingIsShared,
-  planCampaignMoneyEdit, moneyDriftFromCampaign,
+  planCampaignMoneyEdit, moneyDriftFromCampaign, structureChangesFromCampaign,
   WD_KEYS, TOP_KEYS, LABELS,
 };

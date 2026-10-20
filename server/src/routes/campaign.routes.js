@@ -3742,6 +3742,18 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
        그 뒤 아래 UPDATE 는 그 칸을 쓰지 않는다(`_bx`) — 창을 연 뒤 인트라넷이 고친 칸을 옛 화면 값으로 되돌리지 않게.
        스위치(campaign_edit)가 꺼져 있거나 연결 공고가 아니면 `_bx=false` = 종전 저장 그대로.
        ★ 모든 검증이 끝난 뒤 여기서 부른다 — 공유 저장은 따로 커밋되므로, 앞선 검증 실패로 반쪽 저장이 남지 않게. */
+    // ★ 7단계-④(사전 점검 2026-10-21): 연결 공고의 구조(옵션 더하기·지우기·이름·마감, 상품 방식, 배송 방식, 리뷰타입 종류, 체험단 종류)는
+    //   공고만 바뀌고 오더·인트라넷에는 안 갔다(조용한 갈라짐). 스위치와 상관없이 여기서 막는다 — 모든 쓰기보다 앞.
+    const structBlock = await require('../services/campaignSharedSave.service').structureBlocked({
+      campaignId: id, normOpts,
+      store: {
+        work_kind, delivery_type, delivery_type_mix: deliveryMixForStore,
+        recall_courier: recallCourierForStore, recall_product: recallProductForStore,
+        review_type: (review_type === undefined || review_type === null) ? null : (normalizeReviewType(review_type) || ''),
+        review_type_mix: reviewMixForStore,
+      },
+    });
+    if (structBlock) return res.status(structBlock.status).json(structBlock.body);
     // ★ 7단계-②(검토 2026-10-21): 스위치가 꺼져 있어도 연결 오더의 인원은 공유 칸 — 종전 저장으로 쓰면 오더 총모집이 버전·전송 없이 바뀐다
     const countsPaused = await require('../services/campaignSharedSave.service').countsBlockedWhileSwitchOff({ campaignId: id, body: req.body });
     if (countsPaused) return res.status(countsPaused.status).json(countsPaused.body);
@@ -4450,6 +4462,11 @@ router.post('/admin/:id/options/merge', authMiddleware, adminOrMasterMiddleware,
   const confirm = req.body && req.body.confirm === true;
   if (!pairs.length) return res.status(400).json({ ok: false, error: 'pairs(from,to) 필수' });
   if (pairs.length > 50) return res.status(400).json({ ok: false, error: '한 번에 50쌍까지' });
+  // ★ 7단계-④: 리뷰오더와 연결된 공고는 옵션 구성을 공고에서만 바꾸지 않는다(오더·인트라넷과 갈라진다). 판정 실패 = 연결로 본다.
+  if (await require('../services/campaignSharedSave.service').bidirOrderLinked(id)) {
+    return res.status(409).json({ ok: false, code: 'structure_linked_pending',
+      error: '리뷰오더와 연결된 공고라 여기서 옵션을 합칠 수 없습니다. 인트라넷 리뷰오더와 함께 맞추는 기능을 준비하고 있습니다.' });
+  }
   const client = await pool.connect();
   try {
     await client.query('BEGIN');

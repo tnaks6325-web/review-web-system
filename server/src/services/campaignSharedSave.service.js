@@ -23,7 +23,7 @@
 const getPool = () => require('../db/pool');
 const { logger } = require('../utils/logger');
 const { readBidirSwitch } = require('../utils/bidirSwitch');
-const { planCampaignSharedEdit, driftFromCampaign, landingIsShared, campaignRowView, planCampaignMoneyEdit, moneyDriftFromCampaign } = require('../utils/campaignSharedEdit');
+const { planCampaignSharedEdit, driftFromCampaign, landingIsShared, campaignRowView, planCampaignMoneyEdit, moneyDriftFromCampaign, structureChangesFromCampaign } = require('../utils/campaignSharedEdit');
 
 // inflowGuideHtml = 옛 공고 공통 유입가이드(공유 저장의 유입 투영이 쓴다) — 편집 저장이 미리 읽은 옛 값으로 되돌리지 않게 함께 지킨다(검토 2026-10-20).
 // payAmount = 옵션 없는 공고의 상품 금액(5단계 — 공유 저장의 금액 투영이 쓴다 · 화면은 보내지 않는다).
@@ -193,6 +193,12 @@ async function scopedEditSharedBlock({ campaignId, body, db } = {}) {
   const link = await findBidirLink(pool, campaignId);
   if (!link) return null;
   const b = body || {};
+  // ★ 7단계-④: 배송 방식은 작업표 구조 — 스위치와 상관없이 이 화면(기준 버전을 모름)에서는 바꾸지 못한다(같은 값이면 통과).
+  const struct = structureChangesFromCampaign({ camp: link.camp, store: { delivery_type: b.delivery_type } }).map(x => x.label);
+  if (struct.length) {
+    return { status: 409, body: { ok: false, code: 'shared_field_scoped', fields: struct,
+      error: `리뷰오더와 연결된 공고라 ${struct.join(', ')}${_topic(struct[struct.length - 1])} 리뷰어 앱에서 바꿀 수 없습니다.` } };
+  }
   // ★ 7단계-②(검토 2026-10-21): 스위치가 꺼져 있어도 연결 오더(bidir_state='on')의 인원은 공유 칸이다 — 여기서 바꾸면
   //   syncCampaignRecruitTotal 이 오더 총모집을 버전·전송 없이 써서 인트라넷이 영영 모른다. 인원 칸은 스위치와 상관없이 막는다.
   if (sw.campaign_edit !== 'on') {
@@ -265,6 +271,38 @@ async function countsBlockedWhileSwitchOff({ campaignId, body, db } = {}) {
   return cnt.length ? _countsPausedBlock(cnt) : null;
 }
 
+/** 받침 있으면 '은', 없으면 '는'(한글이 아니면 '는'). */
+function _topic(word) {
+  const code = String(word || '').trim().slice(-1).charCodeAt(0) - 0xAC00;
+  return code >= 0 && code <= 11171 && code % 28 !== 0 ? '은' : '는';
+}
+
+/**
+ * 7단계-④ — 연결 오더가 있는 공고(스위치와 상관없이)의 구조 변경을 막는다(쓰기 0).
+ * 지금은 공고만 바뀌고 오더·인트라넷에는 안 가는 틈이다(옵션 더하기·지우기·이름, 배송 방식, 리뷰타입, 체험단 종류 — 사전 점검 2026-10-21).
+ * ★ 접수 뒤 영구 금지(체험단 종류 전환·배송 혼합·회수)는 "새 리뷰오더로" 안내, 나머지는 함께 맞추는 기능이 열릴 때까지 같은 409.
+ * ★ 연결 판정이 실패하면 예외(저장 실패 = 막힌 쪽) — 이 검사는 모든 쓰기보다 앞에 있다.
+ * @param {{campaignId:string, store:object, normOpts:Array|null, db?:object}} a
+ * @returns {Promise<null|{status:number, body:object}>}
+ */
+async function structureBlocked({ campaignId, store, normOpts, db } = {}) {
+  const pool = db || getPool();
+  const link = await findBidirLink(pool, campaignId);
+  if (!link) return null;
+  const { rows: campOptions } = await pool.query(
+    'SELECT opt_key, product_name, unit_kind, status FROM campaign_options WHERE campaign_id = $1', [campaignId]);
+  const ch = structureChangesFromCampaign({ camp: link.camp, campOptions, store, normOpts });
+  if (!ch.length) return null;
+  const perm = ch.filter(x => x.permanent).map(x => x.label);
+  if (perm.length) {
+    return { status: 409, body: { ok: false, code: 'structure_new_order', fields: perm,
+      error: `접수된 리뷰오더와 연결된 공고라 ${perm.join('·')}${_topic(perm[perm.length - 1])} 바꿀 수 없습니다. 작업표 모양 자체가 달라지는 변경이라 새 리뷰오더로 만들어 주세요.` } };
+  }
+  const rest = ch.map(x => x.label);
+  return { status: 409, body: { ok: false, code: 'structure_linked_pending', fields: rest,
+    error: `리뷰오더와 연결된 공고라 ${rest.join('·')}${_topic(rest[rest.length - 1])} 아직 이 창에서 바꿀 수 없습니다. 인트라넷 리뷰오더와 함께 맞추는 기능을 준비하고 있습니다.` } };
+}
+
 /** 연결 오더가 있는가(스위치와 상관없이) — 차수처럼 인원을 바꾸는 옛 경로를 막는 데 쓴다. 판정 실패 = true(fail-closed). */
 async function bidirOrderLinked(campaignId, db) {
   try { return !!(await findBidirLink(db || getPool(), campaignId)); }
@@ -287,4 +325,4 @@ async function bidirLinkActive(campaignId, db) {
   }
 }
 
-module.exports = { applyCampaignSharedSave, protectOptionLeaves, scopedEditSharedBlock, findBidirLink, bidirLinkActive, bidirOrderLinked, countsBlockedWhileSwitchOff, WD_SHARED_KEYS };
+module.exports = { applyCampaignSharedSave, protectOptionLeaves, scopedEditSharedBlock, findBidirLink, bidirLinkActive, bidirOrderLinked, countsBlockedWhileSwitchOff, structureBlocked, WD_SHARED_KEYS };
