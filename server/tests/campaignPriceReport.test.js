@@ -17,7 +17,7 @@ process.env.JWT_SECRET = 'test-price-report';
     CREATE TABLE recruit_campaigns (id TEXT PRIMARY KEY, title TEXT, thumbnail_url TEXT, manager TEXT, linked_tab_name TEXT,
       work_detail JSONB, archived_at TIMESTAMPTZ, status TEXT DEFAULT 'active', updated_at TIMESTAMPTZ DEFAULT NOW());
     CREATE TABLE campaign_options (id SERIAL PRIMARY KEY, campaign_id TEXT, opt_key TEXT, pay_amount INTEGER DEFAULT 0,
-      status TEXT DEFAULT 'active', thumbnail_url TEXT, updated_at TIMESTAMPTZ DEFAULT NOW());
+      status TEXT DEFAULT 'active', thumbnail_url TEXT, product_name TEXT, unit_kind TEXT, updated_at TIMESTAMPTZ DEFAULT NOW());
     CREATE TABLE campaign_applications (id SERIAL PRIMARY KEY, campaign_id TEXT, option_key TEXT, order_submission_id INTEGER, applied_at TIMESTAMPTZ DEFAULT NOW());
     CREATE TABLE order_submissions (id SERIAL PRIMARY KEY, sheet_id TEXT, campaign_application_id INTEGER, selected_opt_key TEXT);
     CREATE TABLE campaign_plan_events (id SERIAL PRIMARY KEY, campaign_id TEXT, actor TEXT, action TEXT, detail JSONB);
@@ -31,10 +31,10 @@ process.env.JWT_SECRET = 'test-price-report';
 
   await db.exec(`
     INSERT INTO recruit_campaigns (id, title, manager, linked_tab_name, work_detail) VALUES
-      ('c1', '<b>탈취제</b>', '망고', '8/3 탈취제', '{"productLines":"탈취제 - A - 결제금액 9,190원"}'),
+      ('c1', '<b>탈취제</b>', '망고', '8/3 탈취제', '{"productLines":"탈취제 - A - 결제금액 9,190원\\n탈취제 - B - 결제금액 11,000원"}'),
       ('c2', '간장', '만두', '간장 100건', '{"productLines":"간장 1L - 결제금액 12,000원","payAmount":12000}'),
       ('c3', '샴푸', '', '샴푸', '{"productLines":"샴푸 - 결제금액 9,000원\\n린스 - 결제금액 8,000원"}');
-    INSERT INTO campaign_options (campaign_id, opt_key, pay_amount) VALUES ('c1', 'A', 9190), ('c1', 'B', 11000);
+    INSERT INTO campaign_options (campaign_id, opt_key, pay_amount, product_name, unit_kind) VALUES ('c1', 'A', 9190, '탈취제', 'option'), ('c1', 'B', 11000, '탈취제', 'option');
   `);
   let oid = 0;
   const order = async (cid, optKey) => {
@@ -86,6 +86,8 @@ process.env.JWT_SECRET = 'test-price-report';
     assert.deepStrictEqual([r.ok, r.resolution, r.oldAmount, r.newAmount], [true, 'edited', 9190, 8900]);
     const opts = (await db.query(`SELECT opt_key, pay_amount FROM campaign_options WHERE campaign_id='c1' ORDER BY opt_key`)).rows;
     assert.deepStrictEqual(opts.map(o => o.pay_amount), [8900, 11000]);
+    // ★ 실측(2026-10-21): 리뷰어 화면이 함께 보여 주는 안내 글의 그 상품 줄도 바뀐다(다른 줄은 그대로)
+    assert.strictEqual((await one(`SELECT work_detail FROM recruit_campaigns WHERE id='c1'`)).work_detail.productLines, '탈취제 - A - 결제금액 8,900원\n탈취제 - B - 결제금액 11,000원');
     const card = await svc.priceReportsForCampaign(P, 'c1');
     assert.deepStrictEqual(card.open, []);
     assert.deepStrictEqual(card.history.map(h => [h.optKey, h.resolution, h.oldAmount, h.newAmount, h.by]), [['A', 'edited', 9190, 8900, '관리자갑']]);
