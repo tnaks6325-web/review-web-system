@@ -83,6 +83,12 @@ function writablePath(row, origin) {
   if (m.kind === 'field') return set.has(m.key);
   if (m.kind !== 'leaf') return false;
   if (m.key === 'url') return true;
+  // 6단계 — 선택지별 유입가이드 {글, 사진}(옵션 guide · 옵션 없는 상품 guide). 옵션·상품 자체를 더하고 지우는 것은 여전히 막힘(그 경로가 따로 판정된다).
+  if (m.key === 'guide') {
+    // "옵션 없음" 류 라벨 옵션의 가이드는 프리필(리뷰어 화면 투영)이 상품 자리를 읽어 공고에 갈 길이 없다 — 막는다(조용히 갈라지지 않게)
+    const lab = String(m.parent || '').split('|o:')[1];
+    return !(lab !== undefined && /^(옵션\s*없음|없음|단일(상품)?|해당\s*없음)$/.test(String(lab).trim()));
+  }
   const isOption = String(m.parent || '').includes('|o:');
   if (m.key === 'pay' && isOption) return row.base !== ABSENT && row.mine !== ABSENT;
   if (m.key === 'base' && !isOption) return _onlyBasePayDiffers(row);
@@ -97,7 +103,7 @@ function _leafTarget(w) {
     const at = owner.indexOf('|o:');
     return { pName: at < 0 ? owner : owner.slice(0, at), oLabel: at < 0 ? '' : owner.slice(at + 3), leaf: m.key };
   }
-  const r = /^p:(.+?)(?:\|o:(.+))?\.(url|pay|base)$/.exec(w.path);
+  const r = /^p:(.+?)(?:\|o:(.+))?\.(url|pay|base|guide)$/.exec(w.path);
   return r ? { pName: r[1], oLabel: r[2] || '', leaf: r[3] } : null;
 }
 
@@ -110,7 +116,8 @@ function _label(rowOrPath) {
     const owner = (row.meta && row.meta.parent) || path;
     const [prod, opt] = owner.slice(2).split('|o:');
     const name = String(prod || '').trim();
-    return `상품·옵션(${name && name !== '-' ? name : '상품'}${opt ? ' / ' + opt : ''})`;
+    const what = /\.guide$/.test(path) ? '유입가이드' : '상품·옵션';
+    return `${what}(${name && name !== '-' ? name : '상품'}${opt ? ' / ' + opt : ''})`;
   }
   if (path.startsWith('products:')) return '상품·옵션';
   return path;
@@ -121,6 +128,10 @@ function _display(path, v) {
   if (v === ABSENT || v === undefined) return '(없음)';
   if (v === null || v === '') return '(빈칸)';
   if (path === 'f:guide_images') { const l = _parseList(v); if (l) return l.length ? `사진 ${l.length}장` : '(사진 없음)'; }
+  if (/\.guide$/.test(path)) {
+    try { const g = JSON.parse(String(v)); const t = String(g && g.text || '').trim(); const n = Array.isArray(g && g.images) ? g.images.length : 0;
+      return `${t ? (t.length > 200 ? t.slice(0, 200) + '…' : t) : '(글 없음)'}${n ? ` · 사진 ${n}장` : ''}`; } catch (_) { /* 원문 */ }
+  }
   const s = String(v);
   return s.length > 300 ? s.slice(0, 300) + '…' : s;
 }
@@ -151,6 +162,7 @@ function applyWrites(theirs, mine, writes) {
   const next = JSON.parse(JSON.stringify(theirs || {}));
   let productsTouched = false;
   let urlTouched = false;
+  let guideTouched = false;
   const payProducts = new Set();
   const missed = [];
   const nextProducts = _parseList(next.product_options_json);
@@ -169,8 +181,10 @@ function applyWrites(theirs, mine, writes) {
       if (!to || !mo) { missed.push(w.path); continue; }
       if (leaf === 'url') { to.url = mo.url; urlTouched = true; }
       else if (leaf === 'pay') { to.pay = mo.pay; payProducts.add(pName); }
+      else if (leaf === 'guide') { if (mo.guide === undefined) delete to.guide; else to.guide = mo.guide; guideTouched = true; }
       else { missed.push(w.path); continue; }
     } else if (leaf === 'url') { tp.url = mp.url; urlTouched = true; }
+    else if (leaf === 'guide') { if (mp.guide === undefined) delete tp.guide; else tp.guide = mp.guide; guideTouched = true; }
     else if (leaf === 'base') {
       const tb = tp.base && typeof tp.base === 'object' ? tp.base : {};
       const mb = mp.base && typeof mp.base === 'object' ? mp.base : {};
@@ -183,7 +197,7 @@ function applyWrites(theirs, mine, writes) {
     next.product_options_json = JSON.stringify(nextProducts);
     if (mine && mine.product_option !== undefined) next.product_option = mine.product_option;
   }
-  return { next, productsTouched, urlTouched, payTouched: payProducts.size > 0, payProducts, missed };
+  return { next, productsTouched, urlTouched, guideTouched, payTouched: payProducts.size > 0, payProducts, missed };
 }
 
 /** 상품 하나의 상품구입비 — 인트라넷 totals 와 같은 규칙(옵션 금액이 비면 상품 기본 금액 · `workOrderPayAmounts` 와 같다).
@@ -308,6 +322,68 @@ async function _projectPayInTx(client, camp, prev, next, actor) {
   return { applied: true };
 }
 
+/**
+ * 선택지 가이드 → 공고 옵션 줄(같은 트랜잭션 · 6단계).
+ * ★ 줄 열쇠·가이드는 발행 프리필 투영(`projectOrderToCampaign` = `_woOptionRows`/`_woUnitGuide`)에서 — 같은 이름 옵션이 두 상품에 있으면
+ *   프리필이 상품명을 붙인 열쇠를 만든다(공고 opt_key 와 같다). 짝짓기는 금액 투영과 같은 규칙(상품 줄은 상품명까지 · 마감 줄 제외).
+ * ★ 바뀐 줄만 쓴다(나머지는 공고 창 저장 모양 그대로). 공고에 살아 있는 옵션 줄이 0개면(옵션 없는 공고) 줄별 가이드를 둘 자리가 없다 — 건너뛴다(기록).
+ *   줄은 있는데 그 선택지 줄만 못 찾으면 통째로 거부(오더만 바뀌고 넘어가지 않게). 가이드유입인데 빈 줄이 생기면 거부(`guide_missing`).
+ */
+async function _projectGuideInTx(client, camp, prev, next) {
+  const { canonGuideKey } = require('../utils/guideCanon');
+  const rowsOf = st => {
+    const pre = require('../utils/woCampaignPrefill.generated')._woCampaignPrefill(JSON.parse(JSON.stringify(st || {})));
+    return (pre.options || []).map(o => ({ key: `${String(o.productName || '').trim()}|${o.unitKind === 'product' ? '' : String(o.optKey || '').trim()}`,
+      name: o.optKey || o.productName, html: o.inflowGuideHtml || '', images: Array.isArray(o.inflowGuideImages) ? o.inflowGuideImages : [] }));
+  };
+  const before = new Map(rowsOf(prev).map(r => [r.key, r]));
+  const nextRows = rowsOf(next);
+  const changed = nextRows.filter(r => { const b = before.get(r.key); return !b || canonGuideKey(b.html, b.images) !== canonGuideKey(r.html, r.images); });
+  if (!nextRows.length) {
+    // 옛 형식 오더(상품 모드 표시 없음 · 옵션 1개 이하)는 프리필이 선택지 줄을 만들지 않는다 — 공고에 줄이 있으면 짝을 지을 근거가 없다(거부)
+    const { rows: anyLive } = await client.query(`SELECT 1 FROM campaign_options WHERE campaign_id = $1 AND COALESCE(status,'active') <> 'closed' LIMIT 1`, [camp.id]);
+    if (anyLive.length) return { reject: { kind: 'inflow', out: { applied: false, reason: 'option_key_mismatch' },
+      error: '선택지 가이드를 저장하지 않았습니다 — 옛 형식 리뷰오더라 모집공고의 상품 줄과 짝을 지을 수 없습니다. 모집공고에서 직접 고쳐 주세요.' } };
+    return { applied: false };
+  }
+  if (!changed.length) return { applied: false };
+  const { rows: live } = await client.query(
+    `SELECT id, opt_key, product_name, unit_kind, inflow_guide_html, inflow_guide_images FROM campaign_options
+      WHERE campaign_id = $1 AND COALESCE(status,'active') <> 'closed' ORDER BY id FOR UPDATE`, [camp.id]);
+  if (!live.length) {
+    logger.info(`[bidir/apply] ${camp.id} 옵션 줄이 없는 공고 — 선택지 가이드는 공고에 둘 자리가 없어 건너뜀: ${changed.map(r => r.name).join(', ')}`);
+    return { applied: false };
+  }
+  let n = 0;
+  for (const r of changed) {
+    const [pName, optKey] = r.key.split('|');
+    const hits = live.filter(x => (String(x.unit_kind || '') === 'product'
+      ? optKey === '' && (x.opt_key === pName || String(x.product_name || '').trim() === pName)
+      : optKey !== '' && x.opt_key === optKey));
+    if (!hits.length) {
+      return { reject: { kind: 'inflow', out: { applied: false, reason: 'option_key_mismatch', detail: { unmatched: [r.name] } },
+        error: `선택지 가이드를 저장하지 않았습니다 — 모집공고에서 「${r.name}」 줄을 찾지 못했습니다(공고 쪽 상품 줄 이름이 다릅니다). 모집공고의 상품 줄 이름을 리뷰오더와 맞춘 뒤 다시 저장해 주세요.` } };
+    }
+    for (const h of hits) {
+      if (canonGuideKey(h.inflow_guide_html, h.inflow_guide_images) === canonGuideKey(r.html, r.images)) continue;
+      await client.query('UPDATE campaign_options SET inflow_guide_html = $2, inflow_guide_images = $3::jsonb, updated_at = NOW() WHERE id = $1',
+        [h.id, r.html, JSON.stringify(r.images)]);
+      n += 1;
+    }
+  }
+  // 가이드유입 검사(쓴 뒤 상태로)
+  const { rows: wdr } = await client.query('SELECT work_detail FROM recruit_campaigns WHERE id = $1', [camp.id]);
+  const wd = (wdr[0] && wdr[0].work_detail && typeof wdr[0].work_detail === 'object') ? wdr[0].work_detail : {};
+  if (String(wd.inflowType || '') === 'guide') {
+    const { rows: after } = await client.query(
+      `SELECT opt_key, product_name, inflow_guide_html, inflow_guide_images FROM campaign_options WHERE campaign_id = $1 AND COALESCE(status,'active') <> 'closed'`, [camp.id]);
+    const missing = after.filter(o => !String(o.inflow_guide_html || '').trim() && !(Array.isArray(o.inflow_guide_images) && o.inflow_guide_images.length))
+      .map(o => o.opt_key || o.product_name || '이름 없는 선택지');
+    if (missing.length) return { reject: { kind: 'inflow', out: { applied: false, reason: 'guide_missing', detail: { missing } } } };
+  }
+  return { applied: n > 0 };
+}
+
 /** 공고 반영 — 쓴 칸만. 거부 사유가 있으면 {reject} 를 돌려 호출부가 통째로 되돌린다.
  *  @param {object} [extra] { prev: 저장 전 상태(금액 비교) · payTouched · actor } */
 async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTouched, extra = {}) {
@@ -318,6 +394,11 @@ async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTo
     const r = await require('./campaignFeeChange.service').applyFeeChangeInTx(client, camp, next.review_fee);
     if (r.reject) return { reject: { kind: 'fee', out: { applied: false, reason: r.reject.reason }, error: r.reject.error } };
     if (r.applied) applied.push('review_fee');
+  }
+  if (extra.guideTouched) {
+    const r = await _projectGuideInTx(client, camp, extra.prev || {}, next);
+    if (r.reject) return { reject: r.reject };
+    if (r.applied) applied.push('unit_guide');
   }
   if (extra.payTouched) {
     const r = await _projectPayInTx(client, camp, extra.prev || {}, next, extra.actor || '');
@@ -419,6 +500,7 @@ async function _abort(client, status, body) {
  * @param {'block'|'last_writer'} [p.conflictPolicy] 겹친 칸 처리 — block(기본, 409 쓰기 0) · last_writer(이번 저장 값으로 쓰고 overwritten 으로 알림)
  * @param {(client, wo) => Promise<null|{status,body}>} [p.preHook] 같은 트랜잭션에서 먼저 검사(원본 번호 등)
  * @param {object} [p.extraSets] 공유 칸이 아닌 같이 쓸 칸(원본 번호·키 등 — EXTRA_COLUMNS 만)
+ * @param {boolean} [p.guideCapable] false = 선택지 가이드를 모르는 옛 인트라넷 저장(가이드 칸은 받지 않는다 · 6단계)
  * @param {boolean} [p.moneyCapable] false = 금액을 모르는 옛 인트라넷 저장(금액 칸은 받지 않는다 · 5단계 배포 순서 안전장치)
  * @param {object} [p.db] 시험용 pool
  */
@@ -463,6 +545,21 @@ async function applySharedPatch(p) {
     /* ★ 배포 순서 안전장치(5단계 · 검토 2026-10-20) — 금액을 모르는 옛 인트라넷(저장 본문에 `bidir.money` 표시 없음)은 리뷰비·상품 금액을
        인트라넷 사본 값(리뷰웹에서 바뀐 금액을 못 받은 옛 값)으로 늘 다시 보낸다. 그대로 쓰면 저장할 때마다 리뷰웹 금액이 옛 값으로 되돌아간다.
        → 그 저장의 금액 경로는 "안 보낸 칸" 으로 버린다(인원 등 다른 칸이 섞인 base 변경은 그대로 막힘 판정으로 간다). */
+    /* ★ 6단계 같은 장치 — 가이드를 모르는 인트라넷(`bidir.guide` 없음)은 옛 사본 가이드를 다시 보낸다 → 가이드 경로는 받지 않는다.
+       새 인트라넷도 링크유입이면 가이드를 아예 안 싣는다(인트라넷 화면 규칙) — "없음" 을 "지웠다" 로 읽지 않는다(검토 · 사전 점검 🔴2). */
+    if (p.origin === 'intranet') {
+      const isGuide = w => w.meta && w.meta.kind === 'leaf' && w.meta.key === 'guide';
+      const linkInflow = String((p.mine && p.mine.inflow_type) || '').trim() !== 'guide';
+      // ★ 옛 인트라넷의 가이드 차이는 "낡은 사본" 과 "진짜 수정" 을 가를 근거가 없다(옛 화면은 리뷰웹 가이드를 받지 못해 창 자체가 낡은 값으로 열린다).
+      //   막으면 리뷰웹이 가이드를 한 번 바꾼 뒤로 그 오더의 옛 화면 저장이 전부 막힌다 → 버린다(기록). 그래서 배포는 인트라넷 먼저(결정 263 5·6단계).
+      const dropGuide = w => isGuide(w) && (p.guideCapable === false || (linkInflow && w.mine === ABSENT));
+      const dropped = [...plan.writes, ...plan.conflicts].filter(dropGuide).map(w => w.path);
+      if (dropped.length) {
+        plan.writes = plan.writes.filter(w => !dropGuide(w));
+        plan.conflicts = plan.conflicts.filter(w => !dropGuide(w));
+        logger.info(`[bidir/apply] ${wo.id} 가이드 칸은 받지 않음(${p.guideCapable === false ? '가이드를 모르는 옛 인트라넷' : '링크유입이라 안 실음'}): ${dropped.join(', ')}`);
+      }
+    }
     let droppedMoney = [];
     if (p.moneyCapable === false) {
       const isMoney = w => { const m = w.meta || {};
@@ -498,7 +595,7 @@ async function applySharedPatch(p) {
       await client.query('COMMIT');
       return { status: 200, body: { ok: true, noop: true, sync_version: curVersion } };
     }
-    const { next, productsTouched, urlTouched, payTouched, payProducts, missed } = applyWrites(theirs, p.mine, plan.writes);
+    const { next, productsTouched, urlTouched, guideTouched, payTouched, payProducts, missed } = applyWrites(theirs, p.mine, plan.writes);
     if (missed.length) {
       return await _abort(client, 409, { ok: false, code: 'write_unmatched', sync_version: curVersion, fields: missed.map(path => ({ path, label: _label(path) })),
         error: `상품·옵션 짝을 찾지 못해 저장하지 않았습니다: ${[...new Set(missed.map(path => _label(path)))].join(', ')}. 창을 닫고 다시 열어 주세요.` });
@@ -547,7 +644,7 @@ async function applySharedPatch(p) {
     let campaign = { applied: [] };
     if (camp && plan.writes.length) {
       campaign = await projectToCampaignInTx(client, camp, next, writtenKeys, productsTouched,
-        { prev: theirs, payTouched, urlTouched, actor: p.actor || p.origin });
+        { prev: theirs, payTouched, urlTouched, guideTouched, actor: p.actor || p.origin });
       if (campaign.reject) {
         const { campaignSyncNotice } = require('./campaignPayAmountSync.service');
         return await _abort(client, 409, { ok: false, code: 'campaign_rejected', sync_version: curVersion,

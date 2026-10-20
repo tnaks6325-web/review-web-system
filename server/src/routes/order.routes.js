@@ -900,6 +900,8 @@ async function _intakeSourceBidir(res, { b, source, current, optionsJson, delive
     conflictPolicy: 'last_writer',   // 겹친 칸 = 나중에 저장한 값 + 덮인 값 알림(사용자 확정 2026-10-20)
     // ★ 5단계: 금액(리뷰비·상품 금액)은 금액을 아는 인트라넷(수신·수정 창이 금액을 받는 판)만 쓴다 — 옛 인트라넷은 옛 사본 금액을 늘 다시 보낸다.
     moneyCapable: !!(bid && (bid.money === 1 || bid.money === true || bid.money === '1')),
+    // ★ 6단계: 선택지 가이드도 같은 장치 — 가이드를 받는 인트라넷만(옛 인트라넷은 옛 사본 가이드를 다시 보낸다)
+    guideCapable: !!(bid && (bid.guide === 1 || bid.guide === true || bid.guide === '1')),
     preHook: _sourceRevisionPreHook(source),
     extraSets: {
       source_revision: source.sourceRevision,

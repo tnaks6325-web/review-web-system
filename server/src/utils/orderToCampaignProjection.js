@@ -12,21 +12,23 @@
 
 const { _woCampaignPrefill } = require('./woCampaignPrefill.generated');
 const { CANON } = require('./sharedFields');
+const { canonGuide, imageKey } = require('./guideCanon');
+
+function _jsonArr(v) {
+  if (v == null || v === '') return [];
+  try { const a = typeof v === 'string' ? JSON.parse(v) : v; return Array.isArray(a) ? a : []; } catch (_) { return []; }
+}
 
 const _s = (v) => (v == null ? '' : String(v)).trim();
 
 function _mix(v) { return CANON.reviewTypeMix(v); }
 
-/** 가이드 HTML 비교용 — 공고 저장 시 서버 정화가 따옴표 등 문자 참조를 풀어 저장한다(`&quot;` → `"`).
- *  같은 글을 표기만 다르게 적은 것을 차이로 세지 않는다(운영 대조 실측: 도마뱀 먹이 가이드). 비교 전용. */
-function _html(v) {
-  return _s(v)
-    .replace(/&quot;/g, '"').replace(/&#0?39;|&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
-    .replace(/\s+/g, ' ').trim();
-}
 
 function _optionShape(r) {
   const unitKind = _s(r.unitKind) || 'option';
+  // ★ 6단계: 선택지 가이드는 글자 모양이 아니라 {글, 사진(파일 id)} 로 비교한다 — 서버 투영(글만 + 사진 목록)과
+  //   공고 창 저장(글 + 끝에 <img> + 사진 목록)은 리뷰어에게 똑같이 보인다(`utils/guideCanon`).
+  const g = canonGuide(r.inflowGuideHtml, Array.isArray(r.inflowGuideImages) ? r.inflowGuideImages : _jsonArr(r.inflowGuideImages));
   // ★ 상품 단위 줄(옵션 없는 상품)은 공고가 opt_key 에 상품명을 넣어 저장한다(발행 폼 규칙) —
   //   비교 열쇠는 상품명 하나로 맞춘다. 안 맞추면 같은 줄이 "있음/없음" 두 줄로 갈린다(운영 대조 실측).
   const optKey = unitKind === 'product' ? '' : _s(r.optKey);
@@ -39,8 +41,8 @@ function _optionShape(r) {
     recruit_total: CANON.int(r.recruitTotal),
     daily_limit: CANON.int(r.dailyLimit),
     review_type_mix: _mix(r.reviewTypeMix),
-    inflow_guide_html: _html(r.inflowGuideHtml),
-    inflow_guide_images: CANON.json(r.inflowGuideImages),
+    inflow_guide_html: g.text,
+    inflow_guide_images: g.images.map(imageKey).join(','),
   };
 }
 

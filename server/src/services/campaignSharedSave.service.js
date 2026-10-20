@@ -15,8 +15,8 @@
 // ★ 5단계 — 리뷰비·결제금액(옵션표 금액 · 옵션 없는 공고의 상품 안내 금액)도 같은 공유 저장으로 보낸다(`planCampaignMoneyEdit`).
 //   리뷰비 기간표는 연결 공고에서 직접 고치지 않는다(사용자 확정 2026-10-20) — 리뷰비 칸을 바꾸면 "오늘부터 새 금액" 구간이 저절로 생긴다.
 //   화면이 보낸 기간표가 지금과 다르면 409(쓰기 0), 같으면 기존 저장이 기간표를 다시 쓰지 않는다(그 사이 생긴 구간을 지우지 않게).
-// ★ 옵션표의 옵션 URL·옵션별 유입가이드는 공유 저장 대상이 아니다(6·7단계). 다만 창을 연 뒤 리뷰오더 쪽에서 바뀐
-//   옵션 칸을 손대지 않은 화면 값으로 되돌리지 않게 `protectOptionLeaves` 가 지금 DB 값을 남긴다(금액 포함).
+// ★ 6단계 — 가이드유입 공고의 선택지 유입가이드도 공유 저장으로 보낸다({글, 사진} · `planCampaignMoneyEdit`).
+//   옵션 URL 은 아직 공고 전용(7단계). 창을 연 뒤 리뷰오더 쪽에서 바뀐 옵션 칸은 `protectOptionLeaves` 가 지금 DB 값을 남긴다(금액·가이드 포함).
 // ═══════════════════════════════════════════════════════════════════════════
 'use strict';
 
@@ -157,9 +157,11 @@ async function protectOptionLeaves({ normOpts, link, baseVersion, db } = {}) {
     return [`${String(r.product_name || '').trim()}|${unit === 'product' ? '' : String(r.opt_key || '').trim()}`, r];
   }));
   const { optionShape: shape } = require('../utils/orderToCampaignProjection');
-  const LEAVES = [['option_url', 'optionUrl', r => r.option_url || ''], ['inflow_guide_html', 'inflowGuideHtml', r => r.inflow_guide_html || ''],
-    ['inflow_guide_images', 'inflowGuideImages', r => (Array.isArray(r.inflow_guide_images) ? r.inflow_guide_images : [])],
+  const LEAVES = [['option_url', 'optionUrl', r => r.option_url || ''],
     ['pay_amount', 'payAmount', r => Math.max(0, Math.floor(Number(r.pay_amount) || 0))]];   // 5단계 — 창을 연 뒤 리뷰오더에서 바뀐 금액
+  // ★ 6단계: 가이드는 글·사진 한 묶음으로 본다(비교 = {글, 사진 파일 id} · 지킬 때는 HTML·사진 목록을 함께 지금 DB 값으로) —
+  //   한쪽만 되살리면 옛 HTML 끝의 <img> 와 새 사진 목록이 섞여 보인다.
+  const gKey = x => JSON.stringify([x.inflow_guide_html, x.inflow_guide_images]);
   const kept = [];
   for (const o of normOpts) {
     const mine = shape({ productName: o.productName, optKey: o.optKey, unitKind: o.unitKind, optionUrl: o.optionUrl,
@@ -168,6 +170,11 @@ async function protectOptionLeaves({ normOpts, link, baseVersion, db } = {}) {
     if (!b || !c || !raw) continue;
     for (const [leaf, field, rawOf] of LEAVES) {
       if (mine[leaf] === b[leaf] && c[leaf] !== b[leaf]) { o[field] = rawOf(raw); kept.push(`${mine.name}·${leaf}`); }
+    }
+    if (gKey(mine) === gKey(b) && gKey(c) !== gKey(b)) {
+      o.inflowGuideHtml = raw.inflow_guide_html || '';
+      o.inflowGuideImages = Array.isArray(raw.inflow_guide_images) ? raw.inflow_guide_images : [];
+      kept.push(`${mine.name}·유입가이드`);
     }
   }
   if (kept.length) logger.info(`[bidir/campaign] ${link.camp.id} 창을 연 뒤 리뷰오더 쪽에서 바뀐 옵션 칸은 지금 값 유지: ${kept.join(', ')}`);

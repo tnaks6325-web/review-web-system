@@ -29,6 +29,7 @@ const ALLOW = {
   'services/payment.service.js|saveTransferSetting|recruit_campaigns': '연결 공고면 바뀌는 리뷰비를 거부한다(bidirLinkActive · 5단계) — 이체은행·통장표시는 공유 칸 아님',
   'services/sharedPatch.service.js|_projectPayInTx|recruit_campaigns': '공유 저장 투영(옵션 없는 공고의 상품 금액 · 5단계)',
   'services/sharedPatch.service.js|_projectPayInTx|campaign_options': '공유 저장 투영(옵션 금액 · 금액 이력과 함께 · 5단계)',
+  'services/sharedPatch.service.js|_projectGuideInTx|campaign_options': '공유 저장 투영(선택지 유입가이드 · 바뀐 줄만 · 6단계)',
   'services/campaignPayAmountSync.service.js|syncCampaignPayAmount|campaign_options': '옛 원본 수정 경로의 전파(금액) — 연결+apply 오더는 _intakeSourceBidir 로 갈라져 여기 오지 않는다',
   'routes/order.routes.js|_intakeSourceRevisionHandler|work_orders': '연결+apply 면 그 앞에서 _intakeSourceBidir 로 갈라진다(종전 경로 = 연결 안 됨·스위치 off)',
   'services/campaignPayAmountSync.service.js|syncCampaignPayAmount|recruit_campaigns': '옛 원본 수정 경로의 전파(금액 — 5단계)',

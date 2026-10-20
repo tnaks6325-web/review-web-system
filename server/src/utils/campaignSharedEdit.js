@@ -248,6 +248,49 @@ function _bodyOptKey(o) {
   return `${pn}|${unit === 'product' ? '' : ok}`;
 }
 
+/** 그 줄의 가이드가 실제로 읽히는 자리 — 발행 프리필 `_woUnitGuide` 와 같다: 옵션 줄 = 그 옵션(단 "옵션 없음" 류 라벨은 상품),
+ *  상품 줄 = 상품(`productUnitSrc` 가 base 를 가리키는 옛 초안이면 base 는 금액·인원 칸이라 여기서 못 고친다 → null). */
+function _guideTarget(products, src) {
+  const compose = require('./inflowGuideCompose');
+  const prod = products[src.i];
+  if (!prod) return null;
+  if (src.j >= 0) {
+    const op = prod.options[src.j];
+    const lab = String(op && op.label || '').replace(/\|/g, '').trim();
+    const isNone = !lab || /^(옵션\s*없음|없음|단일(상품)?|해당\s*없음)$/.test(lab);
+    // "옵션 없음" 류 라벨 줄은 프리필이 상품 자리를 읽는데 인트라넷은 옵션 자리에 싣는다 — 어느 쪽에 써도 다음 저장이 되돌린다(검토 2026-10-20) → 못 고침
+    return isNone ? null : { i: src.i, j: src.j };
+  }
+  return compose.productUnitSrc(prod) === prod ? { i: src.i, j: -1 } : null;
+}
+
+function _setGuide(products, t, guide) {
+  const node = t.j >= 0 ? products[t.i].options[t.j] : products[t.i];
+  // 비운 가이드도 칸은 남긴다({글:'', 사진:[]}) — 칸을 지우면 인트라넷 수신이 "안 실었다" 로 읽어 옛 가이드를 남긴다(검토 2026-10-20)
+  node.guide = guide === null ? { text: '', images: [] } : guide;
+}
+
+/** 공고 창 한 줄의 가이드 → 오더 가이드(바뀌었을 때만). 인트라넷 화면 규칙과 같게 빈 가이드는 칸을 지운다. */
+function _planGuideEdit({ products, src, srcCount, rowCount, o, name, baseRow, dbRow }) {
+  const compose = require('./inflowGuideCompose');
+  const { canonGuide, imageKey } = require('./guideCanon');
+  const imgs = Array.isArray(o.inflowGuideImages) ? o.inflowGuideImages : [];
+  const sent = canonGuide(o.inflowGuideHtml, imgs);
+  const shapeKey = g => JSON.stringify([g.text, g.images.map(imageKey).join(',')]);
+  // 손대지 않음 = 창을 연 시점 오더 투영과 같거나, 창이 불러온 지금 공고 값과 같다(공고에서만 고쳐 둔 옛 가이드를 저장 한 번에 오더로 끌어오지 않는다 · 검토 2026-10-20)
+  if (baseRow && shapeKey(sent) === JSON.stringify([baseRow.inflow_guide_html, baseRow.inflow_guide_images])) return {};
+  if (dbRow && dbRow.inflow_guide_html !== undefined && shapeKey(sent) === shapeKey(canonGuide(dbRow.inflow_guide_html, Array.isArray(dbRow.inflow_guide_images) ? dbRow.inflow_guide_images : []))) return {};
+  if (!products || !src || srcCount !== rowCount) return { unmappable: { label: `유입가이드(${name})`, want: shapeKey(sent), got: '' } };
+  const t = _guideTarget(products, src);
+  const cur = t ? (t.j >= 0 ? products[t.i].options[t.j] : products[t.i]) : (src.j >= 0 ? products[src.i].options[src.j] : products[src.i]);
+  const now = compose.composeUnitGuide(t ? cur : compose.productUnitSrc(products[src.i]));
+  const was = canonGuide(now.html, now.images);
+  if (shapeKey(was) === shapeKey(sent)) return {};               // 손대지 않음
+  if (!t) return { unmappable: { label: `유입가이드(${name}) — 옛 형식 오더`, want: shapeKey(sent), got: shapeKey(was) } };
+  const guide = (!sent.text && !sent.images.length) ? null : { text: sent.text, images: sent.images };
+  return { guide, target: t, wantKey: shapeKey(sent) };
+}
+
 /**
  * @param {{ baseState:object, camp:object, body:object, campOptions?:object[] }} p
  * @returns {{ mine:object, changed:string[], unmappable:Array<{key,label,want,got}>, keepProductLines:boolean }}
@@ -274,6 +317,9 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
   const liveCampOpts = (campOptions || []).filter(r => String(r.status || '') !== 'deleted');
   let edited = null;
   const want = new Map();   // 줄 열쇠 → 화면이 보낸 금액
+  const guideWant = new Map();   // 줄 열쇠 → 화면이 보낸 가이드(투영 비교 모양)
+  const wdIn = b.work_detail && typeof b.work_detail === 'object' && b.work_detail.inflowType !== undefined ? b.work_detail.inflowType : base.inflow_type;
+  const guideInflow = String(wdIn || '').trim() === 'guide';
 
   if (Array.isArray(b.options) && baseRows.length && liveCampOpts.length) {
     // ② 옵션 있는 공고 — 옵션표 금액
@@ -294,10 +340,22 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
         }
         continue;
       }
+      const src = srcs[k];
+      // ── 6단계: 선택지 유입가이드(가이드유입 공고만 — 링크유입 공고의 가이드는 오더가 싣지 않는 공고 전용 값) ──
+      if (guideInflow && (o.inflowGuideHtml !== undefined || o.inflowGuideImages !== undefined)) {
+        const dbRow = liveCampOpts.find(r => String(r.opt_key || '') === String(o.optKey ?? o.opt_key ?? '').trim());
+        const gEdit = _planGuideEdit({ products, src, srcCount: srcs.length, rowCount: baseRows.length, o, name: baseRows[k].name, baseRow: baseRows[k], dbRow });
+        if (gEdit.unmappable) unmappable.push({ key, ...gEdit.unmappable });
+        else if (gEdit.guide !== undefined) {
+          if (!edited) edited = JSON.parse(JSON.stringify(products));
+          _setGuide(edited, gEdit.target, gEdit.guide);
+          guideWant.set(key, gEdit.wantKey);
+          changed.push(`유입가이드(${baseRows[k].name})`);
+        }
+      }
       const pay = Math.max(0, Math.floor(Number(o.payAmount ?? o.pay_amount) || 0));
       if (CANON.int(pay) === baseRows[k].pay_amount) continue;  // 손대지 않음
       const label = `결제금액(${baseRows[k].name})`;
-      const src = srcs[k];
       if (!products || !src || srcs.length !== baseRows.length) { unmappable.push({ key, label, want: String(pay), got: baseRows[k].pay_amount }); continue; }
       if (_hasTiers(products[src.i])) { unmappable.push({ key, label: `${label} — 구매수량 단계 상품`, want: String(pay), got: baseRows[k].pay_amount }); continue; }
       if (!edited) edited = JSON.parse(JSON.stringify(products));
@@ -311,6 +369,10 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
         const got = after.get(r.key);
         const expect = want.has(r.key) ? want.get(r.key) : r.pay_amount;
         if (!got || got.pay_amount !== expect) unmappable.push({ key: r.key, label: `결제금액(${r.name})`, want: expect, got: got ? got.pay_amount : '' });
+        // 가이드 왕복 — 되돌린 오더 값을 다시 투영하면 화면이 보낸 {글, 사진} 이 그대로 나와야 한다(안 바꾼 줄은 그대로여야 한다)
+        const gotGuide = got ? JSON.stringify([got.inflow_guide_html, got.inflow_guide_images]) : '';
+        const expectGuide = guideWant.has(r.key) ? guideWant.get(r.key) : JSON.stringify([r.inflow_guide_html, r.inflow_guide_images]);
+        if (gotGuide !== expectGuide) unmappable.push({ key: r.key, label: `유입가이드(${r.name})`, want: expectGuide, got: gotGuide });
       }
     }
   } else if (!liveCampOpts.length && b.work_detail && typeof b.work_detail === 'object'
