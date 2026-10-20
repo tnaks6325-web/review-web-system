@@ -143,8 +143,17 @@ async function cancelOrderByReviewer({ sheetId, tabName, rowIndex, phone8 = '', 
       soldout = r && r.action ? r.action : null;
     } catch (e) { logger.warn(`[reviewer-cancel] 품절 신고 처리 실패(무시): ${(e && e.message) || e}`); }
   }
+  /* ★ 결정 266: "화면과 가격이 달라요" = 가격 신고 — 다른 리뷰어 2명이면 관리자 전원 팝업(금액은 사람이 고친다 · 자동 변경 없음).
+       커밋 뒤 후처리(실패해도 취소는 유효) · 판정·쓰기는 campaignPriceReport 단일 출처. */
+  let priceReport = null;
+  if (String(reasonKey || '') === 'price') {
+    try {
+      const r = await require('./campaignPriceReport.service').recordPriceReport({ orderSubmissionId: gate.orderSubmissionId, phone8, pool: db });
+      priceReport = r && r.action ? r.action : null;
+    } catch (e) { logger.warn(`[reviewer-cancel] 가격 신고 처리 실패(무시): ${(e && e.message) || e}`); }
+  }
 
-  logger.info(`[reviewer-cancel] tab=${tabName} row=${rowIndex} order=${gate.orderSubmissionId} reason=${reasonKey || '-'} log=${logged} cs=${notified}${soldout ? ` soldout=${soldout}` : ''}`);
+  logger.info(`[reviewer-cancel] tab=${tabName} row=${rowIndex} order=${gate.orderSubmissionId} reason=${reasonKey || '-'} log=${logged} cs=${notified}${soldout ? ` soldout=${soldout}` : ''}${priceReport ? ` price=${priceReport}` : ''}`);
   return { ok: true, logged, notified, orderSubmissionId: gate.orderSubmissionId };
 }
 
