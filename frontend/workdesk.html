@@ -2078,6 +2078,10 @@
   .tp3grid.c3.fold .wdcsmini-body{display:none}
   .cndchip{display:inline-block;background:var(--chip,#eef4ff);color:var(--p,#2456c9);border-radius:5px;padding:0 6px;font-size:10px;font-weight:700;vertical-align:1px}
   .cndsales{display:grid;gap:4px}
+  .cndprice{display:grid;gap:3px}
+  .cndl dd.cndprice{white-space:normal;overflow:visible;text-overflow:clip;min-width:0}
+  .cndpricehist{font-size:11px;font-weight:600;color:var(--muted);line-height:1.45;white-space:normal;overflow-wrap:anywhere}
+  .cndpricehist b{color:var(--ink)}
   .cndsalerow{display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:nowrap;min-width:0}   /* 상품마다 버튼까지 한 줄(사용자 확정 2026-10-19 B안) */
   .cndsalenm{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .cndsalebtn{flex:none;white-space:nowrap;font:inherit;font-size:11px;border-radius:6px;border:1px solid var(--line,#dfe3ea);background:#fff;color:inherit;padding:1px 7px;cursor:pointer}
@@ -3078,6 +3082,7 @@ function _dropSession(msg){ sessionStorage.removeItem('admin_token'); try{ local
   window.__SHORTAGE_PENDING=null; if(window.ShortagePrompt) window.ShortagePrompt.stop();
   window.__SEQEND_PENDING=null; if(window.SequentialEndPrompt) window.SequentialEndPrompt.stop();
   window.__OPTALERT_PENDING=null; if(window.OptionAlertPrompt) window.OptionAlertPrompt.stop();
+  window.__PRICEALERT_PENDING=null; if(window.PriceAlertPrompt) window.PriceAlertPrompt.stop();
   window.__STAFFNOTICE_PENDING=null; if(window.StaffNoticePrompt) window.StaffNoticePrompt.stop();
   // ★ 401 → 재로그인도 계정이 바뀔 수 있는 경로다. logout 과 같은 계정 귀속 상태를 비운다
   //   (안 비우면 다음 계정이 이전 계정의 열린 줄을 보고, 그것이 그 계정 서버 행에 저장된다).
@@ -3191,6 +3196,8 @@ async function boot(){
     if(window.SequentialEndPrompt) window.SequentialEndPrompt.start(_sp); else window.__SEQEND_PENDING=_sp;
     // ★ 결정 229: 상품 품절 알림 — 받는 사람 = 내부 직원 전원(사용자 확정 "리뷰어를 제외한 관리자들 전체")
     if(window.OptionAlertPrompt) window.OptionAlertPrompt.start(_sp); else window.__OPTALERT_PENDING=_sp;
+    // ★ 결정 266: 가격 신고 알림(다른 리뷰어 2명) — 받는 사람 = 품절 알림과 같은 내부 직원 전원
+    if(window.PriceAlertPrompt) window.PriceAlertPrompt.start(_sp); else window.__PRICEALERT_PENDING=_sp;
     // ★ 결정 265: 직원 공지(옛 관리자 대시보드 로그인 팝업 이관) — 받는 사람(대상 이름) 판정은 서버
     if(window.StaffNoticePrompt) window.StaffNoticePrompt.start(_sp); else window.__STAFFNOTICE_PENDING=_sp; }
   // 공유 링크 실패는 조용히 홈으로 떨어지지 않는다 — 왜 못 열었는지(폐기·담당 밖) 말한다.
@@ -3331,6 +3338,7 @@ function logout(){
   _pmLoadGeneration+=1;
   _pmLoadInFlight=null;
   window.__STAFFNOTICE_PENDING=null; if(window.StaffNoticePrompt) window.StaffNoticePrompt.stop();
+  window.__PRICEALERT_PENDING=null; if(window.PriceAlertPrompt) window.PriceAlertPrompt.stop();
   sessionStorage.removeItem('admin_token');
   // ★★ 접속 링크 세션은 **주소에 남은 해시가 곧 열쇠**다(A안). 여기서 지우지 않으면 바로 이어지는
   //   boot() 이 그 토큰을 다시 교환해 **로그아웃이 되지 않는다**(공용 PC에서 다음 사람이 그대로 입장).
@@ -7624,7 +7632,7 @@ function _condCardHtml(wd,d,m){
     `${(()=>{const gate=_cndFixGate(cd,'displayName');return gate.can
       ? `<button type="button" class="cndprod" onclick="_cndFix('displayName')" title="${esc(gate.tip)}">${esc(prod)||'<span class="cnna">—</span>'}</button>`
       : `<div class="cndprod" title="${esc(prod)}">${esc(prod)||'<span class="cnna">—</span>'}</div>`;})()}`+
-    `<dl class="cndl">${rows}${_cndSalesRow(cd)}</dl>${woRows}</div>`;
+    `<dl class="cndl">${rows}${_cndSalesRow(cd)}${_cndPriceRow(cd)}</dl>${woRows}</div>`;
 }
 /* ★ 결정 229: 상품 품절 일시 멈춤 — 상품별 판매 상태 + [품절로 멈추기]/[다시 열기].
    ★ 서버가 준 `optionSales` 를 그리기만 한다(판정 사본 0) · null/빈 목록(구버전 서버·공고 없음) = 줄을 그리지 않는다.
@@ -7648,6 +7656,26 @@ function _cndSalesRow(cd){
   }).join('');
   if(!items) return '';
   return `<dt>품절유무</dt><dd class="cndsales">${items}</dd>`;
+}
+/* ★ 결정 266: 가격 신고 — 상품별 쌓인 신고 수 + 최근 처리 이력(고침 전→후 · 그대로 · 보류 · 누가 · 언제).
+   ★ 서버가 준 `priceReports` 를 그리기만 한다 · null/신고·이력 모두 없음 = 줄을 그리지 않는다(구버전 서버와 같은 화면).
+   ★ 광고주에게는 서버 렌즈가 값을 보내지 않는다(여기서도 한 번 더 막는다).
+   ★ 금액 고치기는 팝업(다른 리뷰어 2명)에서만 — 카드에서 금액을 고치려면 종전 [결제금액] → 모집공고 수정. */
+function _cndPriceRow(cd){
+  const pr=cd&&cd.priceReports;
+  if(!pr||STATE.role==='advertiser'||!cd.campaignId) return '';
+  const open=Array.isArray(pr.open)?pr.open:[], hist=Array.isArray(pr.history)?pr.history:[];
+  if(!open.length&&!hist.length) return '';
+  const won=n=>n==null?'':Number(n).toLocaleString('ko-KR')+'원';
+  const when=t=>{ const d=new Date(t); return isNaN(d.getTime())?'':`${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
+  const nm=k=>k?`「${k}」 `:'';
+  const chips=open.map(o=>`<span class="cndchip" title="리뷰어가 「화면과 가격이 달라요」로 취소한 신고입니다 — 다른 리뷰어 2명이면 관리자 모두에게 팝업이 뜹니다.">${esc(o.optKey?o.optKey+' ':'')}신고 ${Number(o.reports)}명</span>`).join(' ');
+  const lines=hist.map(h=>{
+    const what=h.resolution==='edited'?`${won(h.oldAmount)?esc(won(h.oldAmount))+' → ':''}<b>${esc(won(h.newAmount))}</b> 고침`
+      :h.resolution==='kept'?`금액 맞음 — 그대로${h.oldAmount!=null?` (${esc(won(h.oldAmount))})`:''}`:'결정 보류';
+    return `<div class="cndpricehist">${esc(when(h.at))} · ${esc(nm(h.optKey))}${what}${h.by?` · ${esc(h.by)}`:''}</div>`;
+  }).join('');
+  return `<dt>가격 신고</dt><dd class="cndprice">${chips?`<div>${chips}</div>`:''}${lines}</dd>`;
 }
 async function _cndSale(i){
   const cd=STATE.wd&&STATE.wd.condition; const o=cd&&Array.isArray(cd.optionSales)?cd.optionSales[i]:null;
@@ -17677,6 +17705,13 @@ function _wbOrderLiveStart(){
         if(typeof window.__onOptionPauseChanged==='function') window.__onOptionPauseChanged(data.campaignId);
       }catch(_){ }
     });
+    // ★ 결정 266: 가격 신고 알림 — 팝업을 다시 읽고, 보고 있는 작업보드의 공고면 작업조건 카드(가격 신고 줄)도 새로 그린다
+    _wbOrderLiveSource.addEventListener('price_alert',ev=>{
+      try{ const data=JSON.parse(ev.data||'{}');
+        if(window.PriceAlertPrompt) window.PriceAlertPrompt.refresh();
+        if(typeof window.__onOptionPauseChanged==='function') window.__onOptionPauseChanged(data.campaignId);
+      }catch(_){ }
+    });
   }catch(_){ _wbOrderLiveSource=null; }
 }
 window.addEventListener('beforeunload',_wbOrderLiveStop);
@@ -19415,6 +19450,7 @@ window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';
 <script src="js/shortage-prompt.js?v=20261002"></script>
 <script src="js/sequential-end-prompt.js?v=20261012-optpause"></script>
 <script src="js/option-alert-prompt.js?v=20261019-camppause"></script>
+<script src="js/price-alert-prompt.js?v=20261020"></script>
 <script src="js/staff-notice-prompt.js?v=20261020"></script>
 <!-- 참여 후 작업내용 4카드 공용 렌더러 — 발행 모달 오른쪽 "리뷰어가 보는 실제 화면" 미리보기가
      이것으로 그려진다. 없으면 `_renderPreview` 가 조용히 그 카드를 건너뛰어(window.CampWorkDetail 체크)

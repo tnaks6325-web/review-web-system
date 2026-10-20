@@ -1817,6 +1817,29 @@ router.post('/campaigns/:id/option-pause', authMiddleware, internalMiddleware, a
   }
 });
 
+/* ══ 결정 266 — 리뷰어 가격 신고 · 관리자 전원 팝업 · 금액 수정 이력 ═══════════════════════════════
+   ★ 품절 알림과 같은 대상(내부 직원 전원 — 사용자 확정 "관리자가 수정") · 광고주·리뷰어는 닿지 않는다.
+   ★ 판정·쓰기는 전부 campaignPriceReport.service(단일 출처) — 화면은 그리기와 누른 것 전달만. */
+router.get('/price-alerts', authMiddleware, internalMiddleware, async (req, res) => {
+  try {
+    res.json(await require('../services/campaignPriceReport.service').listOpenAlerts());
+  } catch (e) {
+    logger.warn('[price-alerts] 조회 실패(팝업 미표시): ' + e.message);
+    res.json({ ok: false, items: [], error: '가격 신고 알림 조회에 실패했습니다.' });
+  }
+});
+router.post('/price-alerts/:id/resolve', authMiddleware, internalMiddleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const out = await require('../services/campaignPriceReport.service')
+      .resolveAlert({ id: req.params.id, action: String(b.action || ''), amount: b.amount, by: _by(req) });
+    res.status(out.ok ? 200 : (out.code || 400)).json(out);
+  } catch (e) {
+    logger.warn('[price-alerts/resolve] 실패: ' + e.message);
+    res.status(500).json({ ok: false, error: '처리하지 못했습니다. 잠시 후 다시 시도해주세요.' });
+  }
+});
+
 router.get('/campaigns/:id/daily-plan', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { getPlanOverview } = require('../services/campaignPlan.service');
