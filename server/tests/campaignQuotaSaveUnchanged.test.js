@@ -90,8 +90,11 @@ console.log('\n[A] skipWorktable — 슬롯 맞추기만 건너뛴다');
   console.log('\n[C] 공고 수정 — 값이 달라졌을 때만 게이트');
   ok('UPDATE 앞에서 이전 총정원을 읽는다',
     /SELECT recruit_total(, status)? FROM recruit_campaigns WHERE id = \$1/.test(put));   // 2026-10-06: 총 건수 증량 재개 판정을 위해 status 를 함께 읽는다(검사 의미 불변)
+  // 7단계-④(결정 263): 연결 공고 + 연결 저장 켜짐이면 공유 저장이 같은 트랜잭션에서 하한·작업표를 본다 — 앞 단 검사는 그때만 건너뛴다(검사 의미 불변)
   ok('★ assert 는 _rtChanged 일 때만 탄다(전송 여부가 아니라 변경 여부)',
-    /if \(_rtChanged\) \{\s*\n\s*await assertCampaignRecruitTotal\(/.test(put));
+    /if \(_rtChanged && !_sharedTotals\) \{\s*\n\s*await assertCampaignRecruitTotal\(/.test(put));
+  ok('★ 앞 단 검사를 건너뛰는 것은 연결 공고 + 연결 저장 켜짐일 때뿐',
+    /const _sharedTotals = _linkedTotals && \(await require\('\.\.\/utils\/bidirSwitch'\)\.readBidirSwitch\(pool\)\)\.campaign_edit === 'on';/.test(put));
   ok('★ 이전 값을 못 읽으면 검사하는 쪽으로 접는다(fail-closed)',
     /_rtChanged = _rtSent && \(_rtPrev === null \|\|/.test(put));
   ok('★ 동기화도 같은 판정으로 슬롯만 건너뛴다',

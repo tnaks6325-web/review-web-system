@@ -356,7 +356,12 @@ async function _applyOptionRenames(client, campaignId, options, keep) {
   return plan;
 }
 
-async function _saveCampaignOptions(campaignId, options) {
+/**
+ * @param {{linked?: boolean}} [opts] linked = 리뷰오더와 맞춰지는 공고(공유 저장이 켜진 저장) — 줄 구성(더하기·지우기·마감·다시 열기·이름)은
+ *   공유 저장이 오더와 함께 이미 맞췄다(7단계-④). 여기서는 **있는 줄의 칸만** 쓴다: 없는 줄은 만들지 않고, 화면에 없는 줄은 지우거나 닫지 않고,
+ *   마감 상태는 그대로 둔다(창을 연 뒤 인트라넷이 더하거나 지우거나 마감한 줄을 낡은 창이 되돌리지 않게 · 검토 2026-10-21).
+ */
+async function _saveCampaignOptions(campaignId, options, { linked = false } = {}) {
   if (!Array.isArray(options)) return; // 미전달=변경 없음
   const keep = new Set(options.map(o => o.optKey));
   const client = await pool.connect();
@@ -366,7 +371,13 @@ async function _saveCampaignOptions(campaignId, options) {
     if (!lock.length) { await client.query('ROLLBACK'); return; }
     // ★ 결정 229(코드리뷰 P2): 지운·마감 상품에 남은 품절 신고·알림을 먼저 정리 — 이름 바꾸기가 "알림은 상품마다 하나"에 걸리지 않게
     await require('../services/campaignOptionPause.service').closeStaleForCampaign(client, campaignId);
-    await _applyOptionRenames(client, campaignId, options, keep);
+    if (linked) {
+      const { rows: have } = await client.query(`SELECT opt_key FROM campaign_options WHERE campaign_id=$1 AND COALESCE(status,'active') <> 'deleted'`, [campaignId]);
+      const haveKeys = new Set(have.map(r => r.opt_key));
+      options = options.filter(o => haveKeys.has(o.optKey)).map(o => ({ ...o, status: null }));
+    } else {
+      await _applyOptionRenames(client, campaignId, options, keep);
+    }
     // ★ 결정 263 5단계(사용자 확정 2026-10-20 「모든 공고」) — 금액이 바뀐 옵션은 이력을 남긴다(잘못구매 판정이 신청 시각 금액을 쓴다).
     const { rows: prevPays } = await client.query('SELECT id, opt_key, pay_amount FROM campaign_options WHERE campaign_id=$1', [campaignId]);
     const prevPayByKey = new Map(prevPays.map(r => [r.opt_key, r]));
@@ -401,7 +412,7 @@ async function _saveCampaignOptions(campaignId, options) {
       catch (e) { logger.warn(`[campaign/options] 바로 구매 귀속 조회 실패(종전 판정) camp=${campaignId}: ${e.message}`); }
     }
     for (const e of existing) {
-      if (keep.has(e.opt_key)) continue;
+      if (linked || keep.has(e.opt_key)) continue;   // 연결 공고 = 줄을 지우거나 닫는 것은 공유 저장만
       const { rows: used } = await client.query(
         `SELECT 1 FROM campaign_applications
           WHERE campaign_id=$1 AND option_key=$2 AND status IN ('applied','submitted') LIMIT 1`,
@@ -1061,6 +1072,8 @@ async function _scopedCampaignEdit(req, res) {
     const { roundsLockRecruitTotal } = require('../services/campaignPlan.service');
     if (await roundsLockRecruitTotal(id)) recruit_total = c.recruit_total;
   } catch (_) { /* 기존 동작 */ }
+  // 7단계-④: 연결 오더가 있으면 총모집은 이 저장이 쓰지 않는다(화면 값은 열린 줄 합계라 마감 줄 인원이 빠져 있다 — 하한 검사에도 쓰지 않는다)
+  if (countsShared) recruit_total = c.recruit_total;
   const sort_order = numOr(b.sort_order, c.sort_order);
   const max_slots = numOr(b.max_slots, c.max_slots);
   // ★ 098(확정 ③): 이월 반영 방식은 허용명단 리뷰어도 변경 가능 — 이미 일건수(daily_limit)를
@@ -3726,6 +3739,12 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
          확정 정책이므로(41/40), 그 상태를 "저장 불가"로 대접하지 않는다.
        ★ **줄이려는 조작은 종전대로 막는다** — 값이 달라질 때만 게이트를 건너뛰지 않는다.
        ★ 이전 값을 못 읽으면(조회 실패·행 없음) **검사하는 쪽으로 접는다**(fail-closed). */
+    // ★ 7단계-④(검토 2026-10-21): 공고 창 총모집은 열린 줄만 더한 값이다 — 리뷰오더와 연결된 공고는 마감 줄 인원(이미 참여한 수)까지가
+    //   공고·오더 총모집이라, 비교·하한 검사 전에 더한다(안 더하면 마감이 생긴 공고는 제목만 고쳐도 하한 검사에 걸리고, 스위치가 꺼져 있으면 총모집이 버전 없이 줄어든다).
+    const _linkedTotals = await require('../services/campaignSharedSave.service').bidirOrderLinked(id);
+    if (_linkedTotals && _rtEff !== undefined && _rtEff !== null && _rtEff !== '') {
+      _rtEff = (Number(_rtEff) || 0) + await require('../services/campaignSharedSave.service').closedRecruitSum(pool, id);
+    }
     let _rtPrev = null;
     let _statusPrev = null;   // 2026-10-06: 총 건수 증량 시 "가득 차서 자동 마감"만 다시 열기 위해 직전 상태도 읽는다
     try {
@@ -3734,7 +3753,10 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     } catch (_) { _rtPrev = null; }
     const _rtSent = _rtEff !== undefined && _rtEff !== null && _rtEff !== '';
     const _rtChanged = _rtSent && (_rtPrev === null || (Number(_rtEff) || 0) !== _rtPrev);
-    if (_rtChanged) {
+    // ★ 7단계-④(재검토 2026-10-21): 연결 공고 + 연결 저장 켜짐이면 이 앞 단 하한·작업표 검사를 건너뛴다 — 공유 저장이 마감 반영(지운 줄의 참여 수 되살림) 뒤
+    //   같은 트랜잭션에서 하한·작업표를 다시 본다(`_projectQuantityInTx`). 여기서 화면 값으로 보면 참여자 있는 옵션을 지우는 저장이 막힌다(남은 자리 < 지우는 옵션 참여 수).
+    const _sharedTotals = _linkedTotals && (await require('../utils/bidirSwitch').readBidirSwitch(pool)).campaign_edit === 'on';
+    if (_rtChanged && !_sharedTotals) {
       await assertCampaignRecruitTotal({ campaignId: id, recruitTotal: Number(_rtEff) || 0 });
     }
 
@@ -3745,7 +3767,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     // ★ 7단계-④(사전 점검 2026-10-21): 연결 공고의 구조(옵션 더하기·지우기·이름·마감, 상품 방식, 배송 방식, 리뷰타입 종류, 체험단 종류)는
     //   공고만 바뀌고 오더·인트라넷에는 안 갔다(조용한 갈라짐). 스위치와 상관없이 여기서 막는다 — 모든 쓰기보다 앞.
     const structBlock = await require('../services/campaignSharedSave.service').structureBlocked({
-      campaignId: id, normOpts,
+      campaignId: id, normOpts, body: req.body,
       store: {
         work_kind, delivery_type, delivery_type_mix: deliveryMixForStore,
         recall_courier: recallCourierForStore, recall_product: recallProductForStore,
@@ -3881,7 +3903,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         _bxLanding ? null : (landing_url ?? null),
         // ★ 7단계-②: 연결 공고의 일 진행 건수·총모집은 위 공유 저장이 쓴다(오더·작업표 줄과 함께)
         (_bx || daily_limit === undefined || daily_limit === null || daily_limit === '') ? null : Number(daily_limit) || 0,
-        (_bx || _rtEff === undefined || _rtEff === null || _rtEff === '') ? null : Number(_rtEff) || 0,
+        (_bx || _linkedTotals || _rtEff === undefined || _rtEff === null || _rtEff === '') ? null : Number(_rtEff) || 0,   // 연결 오더가 있으면 총모집은 공유 저장만(스위치 꺼짐 = 바뀐 값은 위에서 409)
         // ★ 062: ''=시간창 비움(자율주문 전환), null/undefined=유지 — 구 COALESCE는 비움 불가였음
         (_bxWin || _wsEff === undefined || _wsEff === null) ? null : String(_wsEff),
         (_bxWin || _weEff === undefined || _weEff === null) ? null : String(_weEff),
@@ -3935,7 +3957,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       .invalidateCashReceiptContext(rows[0].linked_sheet_id, rows[0].linked_tab_name);
     // ★ 061: 상품옵션 교체(배열 전달 시에만). 원자 저장(캠페인 락), 참여자 있는 옵션은 삭제 대신 closed(기록 보호).
     let optionsWarning = null;
-    if (normOpts) { try { await _saveCampaignOptions(id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/update] ' + optionsWarning); } }
+    if (normOpts) { try { await _saveCampaignOptions(id, normOpts, { linked: _bx }); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/update] ' + optionsWarning); } }
     if (hasWorkboardDisplayName) {
       rows[0].workboard_display_name = await _saveWorkboardDisplayName({
         sheetId: rows[0].linked_sheet_id, tabName: rows[0].linked_tab_name, displayName: workboardDisplayName,

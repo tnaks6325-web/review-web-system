@@ -313,7 +313,7 @@ function _setDaily(node, v) {
   if (node.dailyLimit !== undefined) node.dailyLimit = v;
 }
 
-function _planQuantityEdit({ base, products, baseRows, liveCampOpts, body, edited }) {
+function _planQuantityEdit({ base, products, baseRows, liveCampOpts, body, edited, suppressTotals = false }) {
   const out = { mine: {}, changed: [], unmappable: [], edited: null };
   const int = v => Math.max(0, Math.floor(Number(v) || 0));
   const pre = _woCampaignPrefill(JSON.parse(JSON.stringify(base)));
@@ -399,6 +399,7 @@ function _planQuantityEdit({ base, products, baseRows, liveCampOpts, body, edite
   }
   if (!touched && !(body.review_type_mix !== undefined && body.review_type_mix !== null
       && CANON.reviewTypeMix(_mixArray(body.review_type_mix)) !== CANON.reviewTypeMix(_mixArray(pre.review_type_mix)))) {
+    if (suppressTotals) return out;   // 7단계-④ 상품·옵션을 더하거나 지운 저장 — 합계 검사는 구조를 반영한 뒤 한 번 한다
     // 공고 칸만 바꾸고 옵션 줄은 그대로 = 합계와 달라진다(③)
     const tOnly = hasOptRows && body.recruit_total !== undefined && body.recruit_total !== null && body.recruit_total !== '' && CANON.int(body.recruit_total) !== CANON.int(pre.recruit_total);
     if (tOnly) out.unmappable.push({ key: 'recruit_total', label: '총모집 — 옵션별 인원 합계가 총모집이 되도록 맞춰 주세요', want: CANON.int(body.recruit_total), got: CANON.int(pre.recruit_total) });
@@ -420,12 +421,12 @@ function _planQuantityEdit({ base, products, baseRows, liveCampOpts, body, edite
     if (daily > 0) out.mine.daily_count = daily;
     out.edited = ed;
   }
-  // 공고 총모집·일건수를 바꿨으면 합계와 같아야 한다(③)
-  if (hasOptRows && body.recruit_total !== undefined && body.recruit_total !== null && body.recruit_total !== ''
+  // 공고 총모집·일건수를 바꿨으면 합계와 같아야 한다(③) — 상품·옵션을 더하거나 지운 저장은 구조를 반영한 뒤 따로 본다
+  if (!suppressTotals && hasOptRows && body.recruit_total !== undefined && body.recruit_total !== null && body.recruit_total !== ''
       && CANON.int(body.recruit_total) !== CANON.int(pre.recruit_total) && int(body.recruit_total) !== total) {
     out.unmappable.push({ key: 'recruit_total', label: `총모집 — 옵션별 인원 합계(${total}명)가 총모집(${int(body.recruit_total)}명)이 되도록 맞춰 주세요`, want: CANON.int(body.recruit_total), got: String(total) });
   }
-  if (hasOptRows && body.daily_limit !== undefined && body.daily_limit !== null && body.daily_limit !== ''
+  if (!suppressTotals && hasOptRows && body.daily_limit !== undefined && body.daily_limit !== null && body.daily_limit !== ''
       && CANON.int(body.daily_limit) !== CANON.int(pre.daily_limit) && daily > 0 && int(body.daily_limit) !== daily) {
     out.unmappable.push({ key: 'daily_limit', label: `일 진행 건수 — 옵션별 일건수 합계(${daily})가 일 진행 건수(${int(body.daily_limit)})가 되도록 맞춰 주세요`, want: CANON.int(body.daily_limit), got: String(daily) });
   }
@@ -439,6 +440,147 @@ function _planQuantityEdit({ base, products, baseRows, liveCampOpts, body, edite
 }
 
 /**
+ * 7단계-④ 공고 창 상품·옵션 더하기·지우기·다시 열기 → 오더 상품 구성(사용자 확정 2026-10-21).
+ *   판정만 한다(`plan`) — 오더 반영은 `applyStructurePlan` 이 금액·인원 계획을 마친 상품 구성 위에 한다(자리 번호가 밀리지 않게).
+ *   지운 줄 = 오더에서 뺀다(참여자가 있으면 공유 저장이 마감으로 되살린다) · 더한 줄 = 오더에 새 옵션(같은 상품) 또는 새 상품 ·
+ *   마감 줄을 다시 열기 = 마감 표시를 뗀다(인원은 그 줄 칸).
+ * ★ 이름 바꾸기·상품 이름·마감시키기(지우기로 한다)·옵션 없는 공고는 담지 않는다(unmappable).
+ */
+function _planStructureEdit({ products, baseRows, liveCampOpts, body, guideInflow }) {
+  const out = { any: false, removes: [], adds: [], reopens: [], unmappable: [], changed: [] };
+  if (!Array.isArray(body.options)) return out;
+  if (!products || !(liveCampOpts.length > 0 && baseRows.length > 0)) {
+    // 오더 상품 구성과 공고 줄을 짝지을 수 없는 오더(상품 정보 없음 · 옛 형식 · 옵션 줄 없는 공고) — 화면이 공고 줄을 더하거나 지우거나
+    //   마감·다시 열기를 하면 오더에 담을 수 없다(종전엔 공고 줄만 바뀌었다 · 검토 2026-10-21). 손대지 않은 저장은 통과.
+    const live = new Map(liveCampOpts.map(r => [String(r.opt_key || ''), String(r.status || 'active') === 'closed' ? 'closed' : 'active']));
+    const sent = new Map(body.options.filter(o => o && typeof o === 'object')
+      .map(o => [String(o.optKey ?? o.opt_key ?? '').replace(/\|/g, '').trim(), o.status === 'closed' ? 'closed' : (o.status === 'active' ? 'active' : null)]));
+    const diff = [...sent.keys()].some(k => !live.has(k)) || [...live.keys()].some(k => !sent.has(k))
+      || [...sent].some(([k, st]) => st && live.has(k) && live.get(k) !== st);
+    if (diff) out.unmappable.push({ key: 'options', label: '상품·옵션 더하기·지우기 — 이 리뷰오더는 상품 구성과 공고 줄을 짝지을 수 없어 공고에서 바꿀 수 없습니다(리뷰오더에서 바꿔 주세요)', want: '', got: '' });
+    return out;
+  }
+  const sentKeys = new Map();
+  for (const o of body.options) if (o && typeof o === 'object') sentKeys.set(_bodyOptKey(o), o);
+  const baseByKey = new Map(baseRows.map((r, k) => [r.key, k]));
+  const srcs = _rowSources(products);
+  const hasOptRows = true;
+  const prevOf = o => String(o.prevOptKey ?? o.prev_opt_key ?? '').replace(/\|/g, '').trim();
+  const renamedFrom = new Set();
+  for (const [key, o] of sentKeys) {
+    if (baseByKey.has(key)) continue;
+    const prev = prevOf(o);
+    const wasRow = prev && baseRows.find(r => r.key.split('|')[1] === prev || (r.unit_kind === 'product' && r.key.split('|')[0] === prev));
+    if (wasRow && !sentKeys.has(wasRow.key) && prev !== String(o.optKey ?? o.opt_key ?? '').trim()) {
+      renamedFrom.add(wasRow.key);
+      out.unmappable.push({ key, label: `이름 바꾸기(${prev} → ${String(o.optKey ?? o.opt_key ?? '').trim()}) — 다음 단계에서 엽니다`, want: key, got: wasRow.key });
+      continue;
+    }
+    if (!hasOptRows) { out.unmappable.push({ key, label: '옵션 없는 공고에 상품·옵션 더하기 — 옵션 있음·없음 바꾸기와 함께 엽니다', want: key, got: '' }); continue; }
+    const pName = String(o.productName ?? o.product_name ?? '').replace(/\|/g, '').trim();
+    const unit = String(o.unitKind ?? o.unit_kind ?? '') === 'product' ? 'product' : 'option';
+    const same = products.find(p => p && String(p.name || '').replace(/\|/g, '').trim() === (unit === 'product' ? (pName || String(o.optKey ?? o.opt_key ?? '').trim()) : pName));
+    if (same && (unit === 'product' || !(Array.isArray(same.options) && same.options.length))) {
+      out.unmappable.push({ key, label: unit === 'product'
+        ? `상품 추가(${pName}) — 같은 이름의 상품이 이미 있습니다`
+        : `옵션 추가(${pName}) — 옵션 없는 상품에 옵션 더하기는 옵션 있음·없음 바꾸기와 함께 엽니다`, want: key, got: '' });
+      continue;
+    }
+    out.adds.push(o);
+  }
+  if (hasOptRows) {
+    baseRows.forEach((r, k) => {
+      if (sentKeys.has(r.key) || renamedFrom.has(r.key)) return;
+      out.removes.push({ src: srcs[k], name: r.name, closed: r.status === 'closed' });
+    });
+    for (const [key, o] of sentKeys) {
+      const k = baseByKey.get(key);
+      if (k === undefined) continue;
+      const st = o.status === 'closed' ? 'closed' : (o.status === 'active' ? 'active' : null);
+      if (!st || st === baseRows[k].status) continue;
+      if (st === 'active') out.reopens.push({ src: srcs[k], name: baseRows[k].name, o });
+      else out.unmappable.push({ key, label: `마감(${baseRows[k].name}) — 참여자가 있는 옵션은 지우면 마감으로 남습니다. 지우기로 해 주세요`, want: 'closed', got: 'active' });
+    }
+  }
+  if (srcs.length !== baseRows.length && (out.removes.length || out.reopens.length)) {
+    out.unmappable.push({ key: 'options', label: '상품·옵션 — 리뷰오더 상품 구성과 공고 줄을 짝지을 수 없습니다', want: '', got: '' });
+  }
+  for (const r of out.removes) if (_hasTiers(products[r.src.i])) out.unmappable.push({ key: r.name, label: `${r.name} — 구매수량 단계 상품은 접수 뒤 더하거나 지울 수 없습니다`, want: '', got: '' });
+  out.guideInflow = guideInflow;
+  out.any = out.adds.length + out.removes.length + out.reopens.length > 0;
+  out.removes.forEach(r => out.changed.push(`삭제(${r.name})`));
+  out.adds.forEach(o => out.changed.push(`추가(${String(o.optKey ?? o.opt_key ?? o.productName ?? '').trim()})`));
+  out.reopens.forEach(r => out.changed.push(`다시 열기(${r.name})`));
+  return out;
+}
+
+/** 구조 계획을 상품 구성 사본(금액·인원 계획까지 반영된 것)에 적용한다. 자리(src)는 원래 상품 구성 기준이라 같은 사본의 노드 참조로 옮긴다. */
+function applyStructurePlan(ed, st) {
+  const int = v => Math.max(0, Math.floor(Number(v) || 0));
+  const { canonGuide } = require('./guideCanon');
+  const dropNodes = new Set();
+  for (const r of st.removes) {
+    const prod = r.src && ed[r.src.i];
+    if (!prod) continue;
+    dropNodes.add(r.src.j >= 0 ? prod.options[r.src.j] : prod);
+  }
+  for (const r of st.reopens) {
+    const prod = r.src && ed[r.src.i];
+    if (!prod) continue;
+    const node = r.src.j >= 0 ? prod.options[r.src.j] : prod;
+    delete node.closed;
+    const tgt = r.src.j >= 0 ? node : (prod.base = prod.base && typeof prod.base === 'object' ? prod.base : {});
+    const rt = r.o.recruitTotal ?? r.o.recruit_total, dl = r.o.dailyLimit ?? r.o.daily_limit;
+    if (rt !== undefined) tgt.count = int(rt);
+    if (dl !== undefined) _setDaily(tgt, int(dl));
+  }
+  let list = ed.filter(p => !dropNodes.has(p)).map(p => {
+    if (!Array.isArray(p.options) || !p.options.length) return p;
+    const kept = p.options.filter(o => !dropNodes.has(o));
+    return kept.length ? { ...p, options: kept } : null;   // 옵션을 다 지운 상품 = 상품째 지움
+  }).filter(Boolean);
+  const nameOf = p => String(p && p.name || '').replace(/\|/g, '').trim();
+  for (const o of st.adds) {
+    const pName = String(o.productName ?? o.product_name ?? '').replace(/\|/g, '').trim();
+    const unit = String(o.unitKind ?? o.unit_kind ?? '') === 'product' ? 'product' : 'option';
+    const optKey = String(o.optKey ?? o.opt_key ?? '').replace(/\|/g, '').trim();
+    const pay = int(o.payAmount ?? o.pay_amount), count = int(o.recruitTotal ?? o.recruit_total), daily = int(o.dailyLimit ?? o.daily_limit);
+    const mix = _mixArray(o.reviewTypeMix ?? o.review_type_mix);
+    const url = String(o.optionUrl ?? o.option_url ?? '').trim();
+    const g = canonGuide(o.inflowGuideHtml ?? o.inflow_guide_html ?? '', o.inflowGuideImages ?? o.inflow_guide_images ?? []);
+    const guide = st.guideInflow && (g.text || g.images.length) ? { guide: { text: g.text, images: g.images } } : {};
+    if (unit === 'product') {
+      list.push({ name: pName || optKey, url, option_schema_version: 2, product_mode: 'none', ...guide,
+        base: { pay, count, daily, review_type_mix: mix }, options: [] });
+      continue;
+    }
+    const opt = { option_1: { name: '옵션', value: optKey }, label: optKey, url, pay, count, daily, review_type_mix: mix, ...guide };
+    const at = list.findIndex(p => nameOf(p) === pName && Array.isArray(p.options) && p.options.length);
+    if (at >= 0) list[at] = { ...list[at], options: [...list[at].options, opt] };
+    else list.push({ name: pName, url, option_schema_version: 2, product_mode: 'opt', base: { pay: 0, count: 0, daily: 0, review_type_mix: [] }, options: [opt] });
+  }
+  let total = 0, daily = 0;
+  for (const p of list) {
+    const opts = Array.isArray(p.options) ? p.options : [];
+    const b0 = p.base && typeof p.base === 'object' ? p.base : {};
+    if (opts.length) for (const op of opts) { total += int(op.count); daily += int(op.daily ?? op.daily_limit ?? op.dailyLimit); }
+    else { total += int(b0.count); daily += int(b0.daily ?? b0.daily_limit ?? b0.dailyLimit); }
+  }
+  return { products: list, total, daily };
+}
+
+/** 마감 줄(참여한 수로 굳은 옵션·상품)의 인원 합 — 공고 창 총모집은 열린 줄만 더한 값이라(진행상품 표 규칙) 오더 총모집과 비교하기 전에 더한다. */
+function closedCountSum(products) {
+  const int = v => Math.max(0, Math.floor(Number(v) || 0));
+  return (Array.isArray(products) ? products : []).reduce((a, p) => {
+    if (!p || typeof p !== 'object') return a;
+    const opts = Array.isArray(p.options) ? p.options : [];
+    if (opts.length) return a + opts.filter(o => o && o.closed === true).reduce((x, o) => x + int(o.count), 0);
+    return a + (p.closed === true ? int(p.base && p.base.count) : 0);
+  }, 0);
+}
+
+/**
  * @param {{ baseState:object, camp:object, body:object, campOptions?:object[] }} p
  * @returns {{ mine:object, changed:string[], unmappable:Array<{key,label,want,got}>, keepProductLines:boolean }}
  */
@@ -446,7 +588,12 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
   const { projectOrderToCampaign } = require('./orderToCampaignProjection');
   const { distinctAmountsInText } = require('../services/campaignPayAmountSync.service');
   const base = JSON.parse(JSON.stringify(baseState || {}));
-  const b = body || {};
+  let b = body || {};
+  // 공고 창은 열린 줄 중 하나라도 일건수가 비면(0) 일 진행 건수를 0 으로 보낸다(진행상품 표 규칙 — "모름") — 0 으로 바꿨다고 읽지 않는다(검토 2026-10-21)
+  if (Array.isArray(b.options) && Number(b.daily_limit) === 0 && b.daily_limit !== '' && b.daily_limit !== null
+      && b.options.some(o => o && o.status !== 'closed' && !(Number(o.dailyLimit ?? o.daily_limit) > 0))) {
+    b = { ...b }; delete b.daily_limit;
+  }
   const mine = {};
   const changed = [];
   const unmappable = [];
@@ -565,12 +712,35 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
     mine.skip_weekends = b.skip_weekends;
     changed.push('주말 제외');
   }
-  // ④ 7단계-② 인원·일건수·리뷰타입 혼합 수량
-  const q = _planQuantityEdit({ base, products, baseRows, liveCampOpts, body: b, edited });
+  // ⑥ 7단계-④ 상품·옵션 더하기·지우기·다시 열기(판정 — 반영은 금액·인원 계획 뒤)
+  const st = _planStructureEdit({ products, baseRows, liveCampOpts, body: b, guideInflow });
+  unmappable.push(...st.unmappable);
+  // ④ 7단계-② 인원·일건수·리뷰타입 혼합 수량 — 공고 창 총모집(열린 줄만)에 마감 줄 인원을 더해 오더 총모집과 같은 기준으로
+  const baseClosed = closedCountSum(products);
+  const sentRt = b.recruit_total !== undefined && b.recruit_total !== null && b.recruit_total !== '';
+  const bq = baseClosed && sentRt ? { ...b, recruit_total: Math.max(0, Math.floor(Number(b.recruit_total) || 0)) + baseClosed } : b;
+  const q = _planQuantityEdit({ base, products, baseRows, liveCampOpts, body: bq, edited, suppressTotals: st.any });
   unmappable.push(...q.unmappable);
   changed.push(...q.changed);
   Object.assign(mine, q.mine);
   if (q.edited) edited = q.edited;
+  if (st.any && products) {
+    const r = applyStructurePlan(edited || JSON.parse(JSON.stringify(products)), st);
+    edited = r.products;
+    changed.push(...st.changed);
+    mine.recruit_count = r.total;
+    if (r.daily > 0) mine.daily_count = r.daily;
+    const int = v => Math.max(0, Math.floor(Number(v) || 0));
+    const sentTop = v => v !== undefined && v !== null && v !== '';
+    // 공고 총모집(열린 줄만) + 마감 줄 인원 = 구조를 반영한 합계여야 한다(지운 줄에 참여자가 있으면 저장 때 그 수만큼 더해진다)
+    const openTotal = r.total - closedCountSum(r.products);
+    if (sentTop(b.recruit_total) && int(b.recruit_total) !== openTotal) {
+      unmappable.push({ key: 'recruit_total', label: `총모집 — 열린 상품·옵션 인원 합계(${openTotal}명)가 총모집(${int(b.recruit_total)}명)이 되도록 맞춰 주세요`, want: CANON.int(b.recruit_total), got: String(openTotal) });
+    }
+    if (sentTop(b.daily_limit) && r.daily > 0 && int(b.daily_limit) !== r.daily) {
+      unmappable.push({ key: 'daily_limit', label: `일 진행 건수 — 상품·옵션 일건수 합계(${r.daily})가 일 진행 건수(${int(b.daily_limit)})가 되도록 맞춰 주세요`, want: CANON.int(b.daily_limit), got: String(r.daily) });
+    }
+  }
   if (edited && !unmappable.length) mine.product_options_json = JSON.stringify(edited);
   return { mine, changed, unmappable, keepProductLines };
 }
@@ -583,7 +753,9 @@ function moneyDriftFromCampaign(camp, body, campOptions = []) {
   const out = [];
   if (b.review_fee !== undefined && b.review_fee !== null && CANON.int(b.review_fee) !== CANON.int(c.review_fee)) out.push('리뷰비');
   // 7단계-② — 총모집·일 진행 건수·옵션 인원(옛 화면은 기준 버전을 몰라 받지 않는다)
-  if (b.recruit_total !== undefined && b.recruit_total !== null && b.recruit_total !== '' && CANON.int(b.recruit_total) !== CANON.int(c.recruit_total)) out.push('총모집');
+  // 공고 창 총모집은 열린 줄만 — 마감 줄 인원(공고 옵션 줄 status closed)을 더해 공고 총모집과 비교한다(7단계-④)
+  const closedRt = (campOptions || []).filter(r => String(r.status || '') === 'closed').reduce((a, r) => a + Math.max(0, Math.floor(Number(r.recruit_total) || 0)), 0);
+  if (b.recruit_total !== undefined && b.recruit_total !== null && b.recruit_total !== '' && CANON.int(Number(b.recruit_total) + closedRt) !== CANON.int(c.recruit_total)) out.push('총모집');
   if (b.daily_limit !== undefined && b.daily_limit !== null && b.daily_limit !== '' && CANON.int(b.daily_limit) !== CANON.int(c.daily_limit)) out.push('일 진행 건수');
   // 7단계-③ — 주말 제외(옛 화면은 기준 버전을 몰라 받지 않는다)
   if (typeof b.skip_weekends === 'boolean' && b.skip_weekends !== (c.skip_weekends === true)) out.push('주말 제외');
@@ -687,6 +859,6 @@ function structureChangesFromCampaign({ camp, campOptions = [], store = {}, norm
 
 module.exports = {
   planCampaignSharedEdit, driftFromCampaign, campaignViewOf, campaignRowView, bodyView, replaceReviewSection, norm, landingIsShared,
-  planCampaignMoneyEdit, moneyDriftFromCampaign, structureChangesFromCampaign,
+  planCampaignMoneyEdit, moneyDriftFromCampaign, structureChangesFromCampaign, applyStructurePlan, closedCountSum,
   WD_KEYS, TOP_KEYS, LABELS,
 };

@@ -125,10 +125,12 @@ assert.equal(regenerateSummary({ prevJson: JSON.stringify(OPT_PRODUCTS), prevTex
   assert.equal(p.unmappable.length, 1, '금액이 여러 개 = 못 정함');
   p = E.planCampaignMoneyEdit({ baseState: b1, camp: { work_detail: { productLines: '단일 - 결제금액 14,000원' } }, body: { work_detail: { productLines: '단일(새 문장) - 결제금액 12,000원' } }, campOptions: [] });
   assert.equal(p.keepProductLines, false); assert.equal(p.unmappable.length, 1, '창을 연 뒤 금액이 바뀌었는데 다른 문장도 고침 = 새로고침(수정을 조용히 버리지 않는다)');
-  // 옵션 이름과 금액을 함께 바꿈 = 못 정함 · 이름만 바꿈 = 통과(금액 공유 대상 아님)
+  // 옵션 이름과 금액을 함께 바꿈 = 못 정함 · 이름만 바꿈 = 7단계-④ 부터 구조(이름 바꾸기 단계 전까지 못 정함 — 종전엔 공고에만 써져 오더와 갈라졌다)
   const renamed = bodyOpts().map(o => (o.optKey === '블랙' ? { ...o, optKey: '블랙2', prevOptKey: '블랙' } : o));
-  assert.equal(E.planCampaignMoneyEdit({ baseState: base, camp: {}, body: { options: renamed }, campOptions }).unmappable.length, 0);
-  assert.equal(E.planCampaignMoneyEdit({ baseState: base, camp: {}, body: { options: renamed.map(o => (o.optKey === '블랙2' ? { ...o, payAmount: 1 } : o)) }, campOptions }).unmappable.length, 1);
+  const rn = E.planCampaignMoneyEdit({ baseState: base, camp: {}, body: { options: renamed }, campOptions }).unmappable;
+  assert.equal(rn.length, 1); assert.ok(/이름 바꾸기/.test(rn[0].label), JSON.stringify(rn));
+  const rnPay = E.planCampaignMoneyEdit({ baseState: base, camp: {}, body: { options: renamed.map(o => (o.optKey === '블랙2' ? { ...o, payAmount: 1 } : o)) }, campOptions }).unmappable;
+  assert.ok(rnPay.some(u => /이름과 금액을 함께/.test(u.label)), '이름+금액 = 못 정함: ' + JSON.stringify(rnPay));
   // 옛 화면(기준 없음) 금액 판정
   assert.deepEqual(E.moneyDriftFromCampaign({ review_fee: 1000 }, { review_fee: 1000 }), []);
   assert.deepEqual(E.moneyDriftFromCampaign({ review_fee: 1000 }, { review_fee: 1200 }), ['리뷰비']);

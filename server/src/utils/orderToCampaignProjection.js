@@ -43,7 +43,26 @@ function _optionShape(r) {
     review_type_mix: _mix(r.reviewTypeMix),
     inflow_guide_html: g.text,
     inflow_guide_images: g.images.map(imageKey).join(','),
+    // 7단계-④ — 마감(참여자가 있어 지우지 않고 닫은 선택지). 오더는 그 줄에 closed:true, 공고는 status='closed'.
+    status: r.closed === true || String(r.status || '') === 'closed' ? 'closed' : 'active',
   };
+}
+
+/**
+ * 7단계-④ — 오더 상품 구성의 선택지 줄마다 마감 여부(발행 프리필 `_woOptionRows` 와 **같은 순서** — 상품 차례, 옵션 차례,
+ * 옵션 없는 상품은 이름이 있을 때만 한 줄). 프리필은 마감을 모르므로 같은 순서로 짝지어 붙인다.
+ */
+function unitClosedFlags(productOptionsJson) {
+  let arr = null;
+  try { const p = typeof productOptionsJson === 'string' ? JSON.parse(productOptionsJson || '[]') : productOptionsJson; if (Array.isArray(p)) arr = p; } catch (_) { /* 없음 */ }
+  const out = [];
+  for (const prod of arr || []) {
+    if (!prod || typeof prod !== 'object') continue;
+    const opts = Array.isArray(prod.options) ? prod.options : [];
+    if (opts.length) for (const op of opts) out.push(!!(op && op.closed === true));
+    else if (String(prod.name || '').replace(/\|/g, '').trim()) out.push(prod.closed === true);
+  }
+  return out;
 }
 
 /** 작업오더 → 공고에 기대되는 공유 값. */
@@ -68,7 +87,10 @@ function projectOrderToCampaign(order) {
     skip_weekends: (order && (order.skip_weekends === null || order.skip_weekends === undefined || order.skip_weekends === '')) ? 'unset' : (p.skip_weekends ? '1' : '0'),
     channel: _s(p.channel),
     landing_url: _s(p.landing_url),
-    options: (p.options || []).map(_optionShape),
+    options: (() => {
+      const closed = unitClosedFlags(order && order.product_options_json);
+      return (p.options || []).map((o, i) => _optionShape({ ...o, closed: closed[i] === true }));
+    })(),
   };
 }
 
@@ -97,7 +119,7 @@ function readCampaignShared(c, optionRows) {
       .map(o => _optionShape({
         productName: o.product_name, optKey: o.opt_key, unitKind: o.unit_kind, optionUrl: o.option_url,
         payAmount: o.pay_amount, recruitTotal: o.recruit_total, dailyLimit: o.daily_limit,
-        reviewTypeMix: o.review_type_mix, inflowGuideHtml: o.inflow_guide_html, inflowGuideImages: o.inflow_guide_images,
+        reviewTypeMix: o.review_type_mix, inflowGuideHtml: o.inflow_guide_html, inflowGuideImages: o.inflow_guide_images, status: o.status,
       })),
   };
 }
@@ -106,7 +128,7 @@ const SCALAR_KEYS = ['time_range', 'review_fee', 'recruit_total', 'daily_limit',
   'recall_courier', 'recall_product', 'review_type', 'review_type_mix', 'work_kind', 'thumbnail_url', 'skip_weekends',
   'channel', 'landing_url'];
 const OPTION_KEYS = ['unit_kind', 'option_url', 'pay_amount', 'recruit_total', 'daily_limit', 'review_type_mix',
-  'inflow_guide_html', 'inflow_guide_images'];
+  'inflow_guide_html', 'inflow_guide_images', 'status'];
 
 /**
  * @returns {Array<{field:string, kind:'diff'|'fill', order:string, campaign:string}>}
@@ -147,4 +169,4 @@ function compareOrderCampaign(order, campaign, optionRows) {
   return out;
 }
 
-module.exports = { projectOrderToCampaign, readCampaignShared, compareOrderCampaign, optionShape: _optionShape, SCALAR_KEYS, OPTION_KEYS };
+module.exports = { projectOrderToCampaign, readCampaignShared, compareOrderCampaign, optionShape: _optionShape, unitClosedFlags, SCALAR_KEYS, OPTION_KEYS };

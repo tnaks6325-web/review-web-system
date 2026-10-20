@@ -906,6 +906,8 @@ async function _intakeSourceBidir(res, { b, source, current, optionsJson, delive
     countsCapable: !!(bid && (bid.counts === 1 || bid.counts === true || bid.counts === '1')),
     // ★ 7단계-③: 주말 제외도 같은 장치 — 주말을 받는 인트라넷만(옛 인트라넷은 잠긴 주말 칸의 옛 사본 값을 다시 보낸다)
     weekendsCapable: !!(bid && (bid.weekends === 1 || bid.weekends === true || bid.weekends === '1')),
+    // ★ 7단계-④: 상품·옵션 더하기·지우기는 그것을 아는 인트라넷 창만(옛 창은 그 버튼이 잠겨 있다 — 보내면 종전처럼 409)
+    structureCapable: !!(bid && (bid.structure === 1 || bid.structure === true || bid.structure === '1')),
     preHook: _sourceRevisionPreHook(source),
     extraSets: {
       source_revision: source.sourceRevision,
@@ -1265,6 +1267,35 @@ router.put('/intake/source/:sourceReviewOrderId', _intakeSourceRevisionHandler);
 //   → { bidir_state, sync_version, writable: [칸], intake_view: {칸: 현재 값}, field_owner: {칸: 주인}, capabilities: { bidir_v1 } }
 // ★ 읽기만 한다. 연결 안 된 오더도 200(bidir_state 로 판단) — 인트라넷이 종전 경로로 저장한다.
 // ═══════════════════════════════════════════════════════════
+/** 오더의 선택지(상품 이름 · 옵션 표기)별 이미 참여·구매한 수(0 은 뺀다). 조회 실패 = [](확인창 안내만 빠진다 — 판정은 저장 때 서버가 한다). */
+async function _optionUsedForOrder(wo) {
+  try {
+    const { liveCampaignForWorkOrders, usedByOption } = require('../services/linkedRecruitQuota.service');
+    const camp = await liveCampaignForWorkOrders(pool, [wo.id]);
+    if (!camp) return [];
+    const used = await usedByOption(pool, camp.id);
+    const { _woCampaignPrefill } = require('../utils/woCampaignPrefill.generated');
+    const { optionKey } = require('../utils/sharedPatchPlan');
+    const rows = _woCampaignPrefill(JSON.parse(JSON.stringify(wo))).options || [];
+    let list = [];
+    try { list = JSON.parse(wo.product_options_json || '[]'); } catch (_) { list = []; }
+    const raw = [];
+    for (const prod of Array.isArray(list) ? list : []) {
+      if (!prod || typeof prod !== 'object') continue;
+      const pName = String(prod.name || '').trim();
+      const opts = Array.isArray(prod.options) ? prod.options : [];
+      if (opts.length) opts.forEach(op => raw.push({ product: pName, option: optionKey(op) }));
+      else if (pName.replace(/\|/g, '').trim()) raw.push({ product: pName, option: '' });
+    }
+    if (!rows.length || rows.length !== raw.length) return [];
+    return rows.map((r, i) => ({ ...raw[i], used: used.get(r.unitKind === 'product' ? String(r.productName || '').trim() : String(r.optKey || '').trim()) || 0 }))
+      .filter(x => x.used > 0);
+  } catch (e) {
+    logger.warn(`[order/shared] ${wo.id} 선택지별 참여 수 조회 실패(확인창 안내만 빠짐): ${e.message}`);
+    return [];
+  }
+}
+
 router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) => {
   try {
     await _ensureTables();
@@ -1276,8 +1307,9 @@ router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) 
       `SELECT * FROM work_orders WHERE source_review_order_id = $1 LIMIT 1`, [sid]);
     if (!rows.length || rows[0].deleted_at) return res.status(404).json({ ok: false, error: '작업오더를 찾을 수 없습니다.' });
     const sw = await readBidirSwitch(pool);
-    const { WRITABLE_BY_ORIGIN, readSharedState } = require('../services/sharedPatch.service');
+    const { WRITABLE_BY_ORIGIN, readSharedState, STRUCTURE_FIELD, structureOpenFor } = require('../services/sharedPatch.service');
     const active = rows[0].bidir_state === 'on' && sw.in2rw === 'apply';
+    const structureOpen = active ? await structureOpenFor(pool, rows[0]) : false;
     res.json({
       ok: true,
       work_order_id: rows[0].id,
@@ -1285,11 +1317,14 @@ router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) 
       bidir_active: active,
       sync_version: Number(rows[0].sync_version || 0),
       // 인트라넷 수정 창은 이 목록으로 잠금을 푼다(접수 뒤 잠금 목록에 더한다 · 5단계 리뷰비 포함). 상품 구성 안의 결제금액·주소는 키 단위로 이미 열려 있다.
-      writable: active ? [...WRITABLE_BY_ORIGIN.intranet] : null,
+      // ★ 7단계-④: 상품·옵션 더하기·지우기는 공고에 옵션 줄이 있는 작업만 연다(옵션 없이 상품 하나로 도는 공고는 옵션 있음·없음 바꾸기 단계 — 열면 저장 때 막힌다)
+      writable: active ? [...WRITABLE_BY_ORIGIN.intranet].filter(f => f !== STRUCTURE_FIELD || structureOpen) : null,
       /* ★★ 이 버전의 공유 값(저장 형태 그대로) — 인트라넷 수정 창은 이 값으로 연다.
          안 그러면 창이 인트라넷 사본(리뷰웹에서 고친 글 칸이 아직 안 온 값)으로 열리고, 손대지 않은 칸이
          "인트라넷이 되돌렸다" 로 읽혀 리뷰웹 수정을 조용히 덮는다(로컬 E2E 실측 2026-10-20). */
       intake_view: active ? readSharedState(rows[0]) : null,
+      // ★ 7단계-④: 선택지별 이미 참여·구매한 수 — 수정 창 확인창이 "지우면 마감으로 남는다" 를 미리 말한다(지울 때 서버가 같은 수로 다시 판정한다).
+      option_used: active ? await _optionUsedForOrder(rows[0]) : null,
       field_owner: Object.fromEntries(SHARED_FIELDS.map(f => [f.key, f.owner])),
       capabilities: { bidir_v1: true },
     });

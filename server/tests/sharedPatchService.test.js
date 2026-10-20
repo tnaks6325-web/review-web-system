@@ -177,20 +177,21 @@ async function pg() {
     const v4 = Number(w.sync_version);
     const k2 = { ...keep, review_guide: '[리뷰등록 가이드]\n사진 7장', special_notes: '리뷰웹 두 번째 수정' };
 
-    // ── 아직 못 고치는 칸(모집인원) → 막힘, 쓰기 0 ──
+    // ── 인원을 모르는 옛 인트라넷 창(bidir.counts 없음)의 모집인원 → 받지 않는다(7단계-② 배포 순서 장치), 쓰기 0 · 인트라넷이 다시 받아 간다 ──
     const ne = await put(6, `${sid}:6:h`, { ...k2, recruit_count: 20 }, { base_sync_version: v4 });
-    assert.equal(ne.body.code, 'field_not_editable', JSON.stringify(ne.body));
+    assert.equal(ne.status, 200, JSON.stringify(ne.body)); assert.deepEqual(ne.body.applied, [], JSON.stringify(ne.body));
+    assert.equal(ne.body.push_back, true, '보낸 인원이 저장과 달라 인트라넷 사본을 다시 맞춘다');
     assert.equal(Number((await wo()).recruit_count), 10);
 
     // ── 공고가 거부(읽지 못한 구매시간) → 오더까지 되돌림 ──
-    const rj = await put(6, `${sid}:6:i`, { ...k2, purchase_time: '아무때나 말고 적당히' }, { base_sync_version: v4 });
+    const rj = await put(7, `${sid}:7:i`, { ...k2, purchase_time: '아무때나 말고 적당히' }, { base_sync_version: v4 });
     assert.equal(rj.body.code, 'campaign_rejected', JSON.stringify(rj.body));
     assert.ok(/구매시간대/.test(rj.body.error));
     w = await wo();
     assert.equal(w.purchase_time, '14:00 ~ 17:00', '오더도 안 바뀐다');
     assert.equal(Number(w.sync_version), v4);
     // 가이드 없는 가이드유입 → 거부
-    const gm = await put(6, `${sid}:6:j`, { ...k2, inflow_type: 'guide', inflow_guide: '' }, { base_sync_version: v4 });
+    const gm = await put(7, `${sid}:7:j`, { ...k2, inflow_type: 'guide', inflow_guide: '' }, { base_sync_version: v4 });
     assert.equal(gm.body.code, 'campaign_rejected', JSON.stringify(gm.body));
     assert.equal((await wo()).inflow_type, 'link');
 
@@ -201,13 +202,15 @@ async function pg() {
     const own = await ae({ id: w.id, title: '리뷰웹에서 바꾼 작업명' });
     if (own.status !== 401 && own.status !== 403) {
       assert.equal(own.body.code, 'intranet_owned', JSON.stringify(own.body));
-      // ★ 7단계 🔴3: 작업표 칸(총모집)도 공유 칸 — 공유 저장으로 가서 아직 안 연 칸이면 409 · 쓰기 0(종전: 버전 없이 그대로 써졌다)
+      // ★ 7단계 🔴3: 작업표 칸도 공유 칸 — 공유 저장으로 가서 아직 안 연 칸(리뷰타입 = 7단계-④ 구조)이면 409 · 쓰기 0(종전: 버전 없이 그대로 써졌다)
+      //   (총모집은 7단계-② 에서 열렸다 — 여기서는 아직 안 연 칸으로 막힘을 본다)
       const vBefore = Number((await wo()).sync_version);
-      const mix = await ae({ id: w.id, review_guide: '관리자 리뷰가이드', recruit_count: 12 });
+      const mix = await ae({ id: w.id, review_guide: '관리자 리뷰가이드', review_type: '텍스트' });
       assert.equal(mix.body.code, 'field_not_editable', JSON.stringify(mix.body));
-      const rcOnly = await ae({ id: w.id, recruit_count: 12 });
+      const rcOnly = await ae({ id: w.id, review_type: '텍스트' });
       assert.equal(rcOnly.body.code, 'field_not_editable', JSON.stringify(rcOnly.body));
-      assert.notEqual(Number((await wo()).recruit_count), 12, '쓰기 0'); assert.equal(Number((await wo()).sync_version), vBefore);
+      assert.equal((await wo()).review_type, '포토', '쓰기 0'); assert.equal((await wo()).review_guide !== '관리자 리뷰가이드', true, '같이 보낸 글 칸도 쓰기 0');
+      assert.equal(Number((await wo()).sync_version), vBefore);
       const der = await ae({ id: w.id, courier_proxy: true });
       assert.equal(der.body.code, 'derived_field', JSON.stringify(der.body));
       const okE = await ae({ id: w.id, review_guide: '[리뷰등록 가이드]\n관리자가 고친 가이드' });

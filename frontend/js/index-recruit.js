@@ -3173,7 +3173,10 @@ function _rfCountChanges(payload) {
   const out = { lines: [], delta: 0, daily: false };
   if (!loaded || !payload) return out;
   const num = v => (v === undefined || v === null || String(v).trim() === "" || !Number.isFinite(Number(v))) ? null : Number(v);
-  const rtA = num(payload.recruit_total), rtB = num(loaded.recruit_total);
+  // 7단계-④ 리뷰오더와 맞춰지는 공고는 총모집에 마감 줄 인원(참여한 수)까지 든다 — 확인창 숫자도 저장 결과와 같게
+  const closedRt = window._rfBidirBase && Array.isArray(payload.options)
+    ? payload.options.filter(o => o && o.status === "closed").reduce((a, o) => a + (Number(o.recruitTotal ?? o.recruit_total) || 0), 0) : 0;
+  const rtA = num(payload.recruit_total) === null ? null : num(payload.recruit_total) + closedRt, rtB = num(loaded.recruit_total);
   if (rtA !== null && rtB !== null && rtA !== rtB) { out.lines.push("총모집 " + rtB + "명 → " + rtA + "명"); out.delta = rtA - rtB; }
   const dlA = num(payload.daily_limit), dlB = num(loaded.daily_limit);
   if (dlA !== null && dlB !== null && dlA !== dlB) { out.lines.push("일 진행 건수 " + dlB + "건 → " + dlA + "건"); out.daily = true; }
@@ -3182,6 +3185,23 @@ function _rfCountChanges(payload) {
       const was = window._recruitEditLoadedOpts.find(x => String(x.optKey ?? x.opt_key ?? "") === String(o.optKey || ""));
       const a = num(o.recruitTotal ?? o.recruit_total), b = was ? num(was.recruitTotal ?? was.recruit_total) : null;
       if (a !== null && b !== null && a !== b) out.lines.push("인원(" + (o.optKey || o.productName) + ") " + b + "명 → " + a + "명");
+    });
+  }
+  // 7단계-④ — 상품·옵션 더하기·지우기·다시 열기(이름을 바꾼 줄은 원래 이름(prevOptKey)으로 짝짓는다)
+  if (Array.isArray(payload.options) && Array.isArray(window._recruitEditLoadedOpts)) {
+    const keyOf = o => String((o && (o.optKey ?? o.opt_key)) || "");
+    const was = window._recruitEditLoadedOpts;
+    const kept = new Set(payload.options.flatMap(o => [keyOf(o), String(o.prevOptKey || "")]).filter(Boolean));
+    was.forEach(w => {
+      if (kept.has(keyOf(w)) || String(w.status || "active") === "closed") return;
+      out.lines.push("삭제: " + keyOf(w) + " — 참여한 분이 있으면 지우지 않고 마감으로 남습니다");
+      out.structure = true; out.structureLines = (out.structureLines || 0) + 1;
+    });
+    payload.options.forEach(o => {
+      const w = was.find(x => keyOf(x) === keyOf(o) || (o.prevOptKey && keyOf(x) === String(o.prevOptKey)));
+      const n = num(o.recruitTotal ?? o.recruit_total);
+      if (!w) { out.lines.push("추가: " + keyOf(o) + (n !== null ? " (" + n + "명)" : "")); out.structure = true; out.structureLines = (out.structureLines || 0) + 1; }
+      else if (String(w.status || "active") === "closed" && o.status === "active") { out.lines.push("다시 열기: " + keyOf(o) + (n !== null ? " (" + n + "명)" : "")); out.structure = true; out.structureLines = (out.structureLines || 0) + 1; }
     });
   }
   // 7단계-③ — 주말 제외(빈 줄 구매일이 다시 배치된다)
@@ -5786,11 +5806,12 @@ async function saveRecruitPostImpl() {
     // 7단계-② — 인원(총모집·일 진행 건수·옵션 인원)은 작업표 줄과 구매일 배치까지 바뀐다
     const _cnt = _rfCountChanges(payload);
     if (_money.length || _cnt.lines.length) {
-      const _hasCnt = _cnt.lines.length > (_cnt.weekends ? 1 : 0), _hasWk = !!_cnt.weekends;
-      const _what = [_money.length ? "금액" : "", _hasCnt ? "인원" : "", _hasWk ? "주말 설정" : ""].filter(Boolean).join("·") + "을";
+      const _hasCnt = _cnt.lines.length - (_cnt.weekends ? 1 : 0) - (_cnt.structureLines || 0) > 0, _hasWk = !!_cnt.weekends;
+      const _what = [_cnt.structure ? "상품·옵션" : "", _money.length ? "금액" : "", _hasCnt ? "인원" : "", _hasWk ? "주말 설정" : ""].filter(Boolean).join("·") + "을";
       const _notes = [];
       if (_money.length) _notes.push("결제금액을 바꾸면 리뷰어 화면 금액이 바로 바뀝니다. 이미 참여한 분은 참여할 때 금액으로 잘못구매를 판정합니다."
         + "\n리뷰비는 오늘부터 참여하는 분에게 새 금액이 적용되고, 이미 참여한 분은 참여할 때 금액 그대로입니다.");
+      if (_cnt.structure) _notes.push("더한 상품·옵션은 리뷰어 화면에 바로 생깁니다. 이미 참여한 분이 있는 상품·옵션을 지우면 지우지 않고 마감으로 남고(인원 = 참여한 수), 그만큼 총모집에 남습니다.");
       if (_cnt.delta > 0) _notes.push("작업표에 빈 줄이 " + _cnt.delta + "줄 늘어납니다.");
       else if (_cnt.delta < 0) _notes.push("작업표의 빈 줄이 " + (-_cnt.delta) + "줄 정리됩니다. 이미 참여한 분의 줄은 지우지 않습니다(참여 인원보다 적게는 줄일 수 없습니다).");
       if (_cnt.daily) _notes.push("일 진행 건수를 바꾸면 작업표에서 아직 참여자가 없는 빈 줄의 구매일을 다시 배치합니다.");

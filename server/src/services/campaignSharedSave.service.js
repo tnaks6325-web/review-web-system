@@ -192,7 +192,10 @@ async function scopedEditSharedBlock({ campaignId, body, db } = {}) {
   const sw = await readBidirSwitch(pool);
   const link = await findBidirLink(pool, campaignId);
   if (!link) return null;
-  const b = body || {};
+  const b0 = body || {};
+  // 7단계-④: 리뷰어 앱(공고 창과 같은 화면) 총모집은 열린 줄만 — 마감 줄 인원을 더해 공고 총모집과 같은 기준으로 비교한다
+  const closedRt = (b0.recruit_total !== undefined && b0.recruit_total !== null && b0.recruit_total !== '') ? await closedRecruitSum(pool, campaignId) : 0;
+  const b = closedRt ? { ...b0, recruit_total: (Number(b0.recruit_total) || 0) + closedRt } : b0;
   // ★ 7단계-④: 배송 방식은 작업표 구조 — 스위치와 상관없이 이 화면(기준 버전을 모름)에서는 바꾸지 못한다(같은 값이면 통과).
   const struct = structureChangesFromCampaign({ camp: link.camp, store: { delivery_type: b.delivery_type } }).map(x => x.label);
   if (struct.length) {
@@ -255,10 +258,13 @@ async function countsBlockedWhileSwitchOff({ campaignId, body, db } = {}) {
   if ((await readBidirSwitch(pool)).campaign_edit === 'on') return null;
   const link = await findBidirLink(pool, campaignId);
   if (!link) return null;
-  const b = body || {};
+  const b0 = body || {};
+  const { rows } = await pool.query(`SELECT opt_key, recruit_total, daily_limit, status FROM campaign_options WHERE campaign_id = $1 AND status <> 'deleted'`, [campaignId]);
+  // 7단계-④ 공고 창 총모집은 열린 줄만 — 마감 줄 인원을 더해 공고 총모집과 같은 기준으로 본다
+  const closedRt = rows.filter(r => String(r.status) === 'closed').reduce((a, r) => a + (Number(r.recruit_total) || 0), 0);
+  const b = (closedRt && b0.recruit_total !== undefined && b0.recruit_total !== null && b0.recruit_total !== '') ? { ...b0, recruit_total: (Number(b0.recruit_total) || 0) + closedRt } : b0;
   const cnt = _countFieldsChanged(link.camp, b);
   if (Array.isArray(b.options)) {
-    const { rows } = await pool.query(`SELECT opt_key, recruit_total, daily_limit FROM campaign_options WHERE campaign_id = $1 AND status <> 'deleted'`, [campaignId]);
     const byKey = new Map(rows.map(r => [String(r.opt_key || ''), r]));
     const sent = v => v !== undefined && v !== null && v !== '';
     for (const o of b.options) {
@@ -285,7 +291,7 @@ function _topic(word) {
  * @param {{campaignId:string, store:object, normOpts:Array|null, db?:object}} a
  * @returns {Promise<null|{status:number, body:object}>}
  */
-async function structureBlocked({ campaignId, store, normOpts, db } = {}) {
+async function structureBlocked({ campaignId, store, normOpts, body, db } = {}) {
   const pool = db || getPool();
   const link = await findBidirLink(pool, campaignId);
   if (!link) return null;
@@ -298,9 +304,34 @@ async function structureBlocked({ campaignId, store, normOpts, db } = {}) {
     return { status: 409, body: { ok: false, code: 'structure_new_order', fields: perm,
       error: `접수된 리뷰오더와 연결된 공고라 ${perm.join('·')}${_topic(perm[perm.length - 1])} 바꿀 수 없습니다. 작업표 모양 자체가 달라지는 변경이라 새 리뷰오더로 만들어 주세요.` } };
   }
-  const rest = ch.map(x => x.label);
-  return { status: 409, body: { ok: false, code: 'structure_linked_pending', fields: rest,
-    error: `리뷰오더와 연결된 공고라 ${rest.join('·')}${_topic(rest[rest.length - 1])} 아직 이 창에서 바꿀 수 없습니다. 인트라넷 리뷰오더와 함께 맞추는 기능을 준비하고 있습니다.` } };
+  // ② 상품·옵션 더하기·지우기·다시 열기는 공유 저장으로 간다(오더·작업표·인트라넷까지) — 연결 저장이 켜져 있고 기준 버전을 아는 창에서만.
+  const rest = ch.filter(x => !STRUCTURE_SHARED_LABELS.has(x.label)).map(x => x.label);
+  if (rest.length) {
+    return { status: 409, body: { ok: false, code: 'structure_linked_pending', fields: rest,
+      error: `리뷰오더와 연결된 공고라 ${rest.join('·')}${_topic(rest[rest.length - 1])} 아직 이 창에서 바꿀 수 없습니다. 인트라넷 리뷰오더와 함께 맞추는 기능을 준비하고 있습니다.` } };
+  }
+  const shared = ch.map(x => x.label);
+  // 영구 금지 작업(배송 혼합·회수 · 블로그 · 구매수량 단계)은 더하기·지우기도 새 리뷰오더로(재검토 2026-10-21 — 종전엔 "구조 단계에서 엽니다" 로 거부됐다)
+  if (require('./sharedPatch.service').structurePermanentlyLocked(require('./sharedPatch.service').readSharedState(link.wo))) {
+    return { status: 409, body: { ok: false, code: 'structure_new_order', fields: shared,
+      error: `접수된 리뷰오더와 연결된 공고라 이 작업(배송 혼합·회수, 블로그, 구매수량 단계 중 하나)은 ${shared.join('·')}${_topic(shared[shared.length - 1])} 할 수 없습니다. 새 리뷰오더로 만들어 주세요.` } };
+  }
+  if ((await readBidirSwitch(pool)).campaign_edit !== 'on') return _countsPausedBlock(shared);
+  if (!(Number(body && body.bidir_base_sync_version) > 0)) {
+    return { status: 409, body: { ok: false, code: 'stale_editor', fields: shared,
+      error: `리뷰오더와 맞춰지는 공고라 이 창에서는 ${shared.join('·')}${_topic(shared[shared.length - 1])} 할 수 없습니다. 모집공고 편집 창(전체 편집)을 새로 열어 주세요.` } };
+  }
+  return null;
+}
+
+/** 7단계-④ ② 공유 저장으로 보내는 구조 변경(나머지는 아직 막힘). */
+const STRUCTURE_SHARED_LABELS = new Set(['옵션·상품 추가', '옵션·상품 삭제', '옵션 마감·다시 열기']);
+
+/** 공고 마감 줄(참여한 수로 굳은 옵션)의 인원 합 — 공고 창·리뷰어 앱 총모집(열린 줄만)을 공고 총모집과 같은 기준으로 맞출 때 더한다(7단계-④). */
+async function closedRecruitSum(db, campaignId) {
+  const { rows } = await (db || getPool()).query(
+    `SELECT COALESCE(SUM(recruit_total), 0)::int AS n FROM campaign_options WHERE campaign_id = $1 AND status = 'closed'`, [campaignId]);
+  return Number(rows[0] && rows[0].n) || 0;
 }
 
 /** 연결 오더가 있는가(스위치와 상관없이) — 차수처럼 인원을 바꾸는 옛 경로를 막는 데 쓴다. 판정 실패 = true(fail-closed). */
@@ -325,4 +356,4 @@ async function bidirLinkActive(campaignId, db) {
   }
 }
 
-module.exports = { applyCampaignSharedSave, protectOptionLeaves, scopedEditSharedBlock, findBidirLink, bidirLinkActive, bidirOrderLinked, countsBlockedWhileSwitchOff, structureBlocked, WD_SHARED_KEYS };
+module.exports = { applyCampaignSharedSave, protectOptionLeaves, scopedEditSharedBlock, findBidirLink, bidirLinkActive, bidirOrderLinked, countsBlockedWhileSwitchOff, structureBlocked, closedRecruitSum, WD_SHARED_KEYS };
