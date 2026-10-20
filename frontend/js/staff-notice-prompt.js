@@ -66,10 +66,13 @@
     var required = raw.indexOf('[필수열람]') >= 0;
     var text = required ? raw.split('[필수열람]').join('').trim() : raw;
     var id = Number(n.id) || 0;
+    var linked = false;
     var html = esc(text).replace(/(https?:\/\/[^\s"'<>]+)/g, function (u) {
+      linked = true;
       return '<a href="' + u + '" target="_blank" rel="noopener" data-doc="' + id + '"' + (S.gate[id] ? ' class="done"' : '') + '>' + u + '</a>';
     });
-    return { html: html, required: required, gated: required && /https?:\/\//.test(text) };
+    // 잠금은 실제로 링크가 그려졌을 때만 — "https://" 만 덜 적힌 공지가 [확인]을 영영 잠그지 않게.
+    return { html: html, required: required, gated: required && linked };
   }
 
   function visibleItems() {

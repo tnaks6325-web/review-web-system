@@ -181,6 +181,13 @@ process.env.JWT_SECRET = 'test-staff-notice';
     assert.ok(!ov());
   });
 
+  await t('필수열람인데 주소가 덜 적혀 링크가 안 그려지면 [확인]을 잠그지 않는다(영영 못 누르는 막다른 길 0)', async () => {
+    const half = SN._bodyHtml({ id: 9, content: '[필수열람]\n주소 https:// 나중에 붙임' });
+    assert.ok(half.required && !half.gated && half.html.indexOf('<a ') < 0);
+    const full = SN._bodyHtml({ id: 9, content: '[필수열람]\n주소 https://docs.example.com/a' });
+    assert.ok(full.required && full.gated && full.html.indexOf('<a href="https://docs.example.com/a"') >= 0);
+  });
+
   // ── 배선 ──
   const wdk = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
   await t('작업보드 배선: 내부 직원 접속 때 시작 · 로그아웃/세션만료 때 멈춤 · 스크립트 로드', async () => {
