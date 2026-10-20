@@ -31,7 +31,7 @@ process.env.JWT_SECRET = 'test-price-report';
 
   await db.exec(`
     INSERT INTO recruit_campaigns (id, title, manager, linked_tab_name, work_detail) VALUES
-      ('c1', '<b>탈취제</b>', '망고', '8/3 탈취제', '{"productLines":"탈취제 - A - 결제금액 9,190원"}'),
+      ('c1', '<b>탈취제</b>', '망고', '8/3 탈취제', '{"productLines":"탈취제 - A - 결제금액 9,190원\\n탈취제 - B - 결제금액 11,000원"}'),
       ('c2', '간장', '만두', '간장 100건', '{"productLines":"간장 1L - 결제금액 12,000원","payAmount":12000}'),
       ('c3', '샴푸', '', '샴푸', '{"productLines":"샴푸 - 결제금액 9,000원\\n린스 - 결제금액 8,000원"}');
     INSERT INTO campaign_options (campaign_id, opt_key, pay_amount) VALUES ('c1', 'A', 9190), ('c1', 'B', 11000);
@@ -86,6 +86,8 @@ process.env.JWT_SECRET = 'test-price-report';
     assert.deepStrictEqual([r.ok, r.resolution, r.oldAmount, r.newAmount], [true, 'edited', 9190, 8900]);
     const opts = (await db.query(`SELECT opt_key, pay_amount FROM campaign_options WHERE campaign_id='c1' ORDER BY opt_key`)).rows;
     assert.deepStrictEqual(opts.map(o => o.pay_amount), [8900, 11000]);
+    // ★ 실측(2026-10-21): 리뷰어 화면이 함께 보여 주는 안내 글의 그 상품 줄도 바뀐다(다른 줄은 그대로)
+    assert.strictEqual((await one(`SELECT work_detail FROM recruit_campaigns WHERE id='c1'`)).work_detail.productLines, '탈취제 - A - 결제금액 8,900원\n탈취제 - B - 결제금액 11,000원');
     const card = await svc.priceReportsForCampaign(P, 'c1');
     assert.deepStrictEqual(card.open, []);
     assert.deepStrictEqual(card.history.map(h => [h.optKey, h.resolution, h.oldAmount, h.newAmount, h.by]), [['A', 'edited', 9190, 8900, '관리자갑']]);

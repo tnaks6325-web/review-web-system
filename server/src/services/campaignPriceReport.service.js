@@ -204,7 +204,20 @@ async function _writePriceInTx(client, cid, optKey, amount) {
     const r = await client.query(
       `UPDATE campaign_options SET pay_amount = $3, updated_at = NOW()
         WHERE campaign_id = $1 AND opt_key = $2 AND COALESCE(status,'active') <> 'closed' RETURNING id`, [cid, optKey, amount]);
-    return r.rows.length ? { ok: true } : { ok: false, code: 409, error: '상품이 마감됐거나 사라졌어요. 새로고침 후 다시 확인해주세요.' };
+    if (!r.rows.length) return { ok: false, code: 409, error: '상품이 마감됐거나 사라졌어요. 새로고침 후 다시 확인해주세요.' };
+    // ★ 실측(2026-10-21): 리뷰어 공고 화면은 선택 상품 금액과 함께 안내 글(상품별 「결제금액 N원」 줄)도 보여 준다 —
+    //   그 상품 줄도 같이 고친다(안 고치면 한 화면에 8,500원·9,190원이 같이 뜬다). 규칙은 인트라넷 금액 전파와 같은 함수.
+    const { rows: wr } = await client.query('SELECT work_detail FROM recruit_campaigns WHERE id = $1', [cid]);
+    const wdo = _parseWd(wr[0] && wr[0].work_detail);
+    if (wdo) {
+      const before = String(wdo.productLines == null ? '' : wdo.productLines);
+      const after = _sync().replaceOptionAmountInProductLines(before, optKey, amount);
+      if (after !== before) {
+        await client.query('UPDATE recruit_campaigns SET work_detail = $2::jsonb, updated_at = NOW() WHERE id = $1',
+          [cid, JSON.stringify(Object.assign({}, wdo, { productLines: after }))]);
+      }
+    }
+    return { ok: true };
   }
   const { rows } = await client.query('SELECT work_detail FROM recruit_campaigns WHERE id = $1', [cid]);
   const wd = _parseWd(rows[0] && rows[0].work_detail);

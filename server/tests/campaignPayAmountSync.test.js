@@ -109,6 +109,30 @@ async function run() {
     assert.deepStrictEqual(w.map(x => x.params[2]).sort((a, b) => a - b), [9190, 12000]);
   });
 
+  await t('② 옵션 있는 공고 — 안내 글의 그 상품 줄 금액도 같이 바꾼다(결정 266 실측 — 리뷰어 화면에 옛 금액이 남지 않게)', async () => {
+    const wd = { productLines: '핫팩 - 레드 - 결제금액 8,000원\n핫팩 - 블루 - 결제금액 8,000원\n핫팩 - 미니 레드 - 결제금액 5,000원', payAmount: 0 };
+    const q = stub({ liveOptions: [{ opt_key: '레드', pay_amount: 8000 }, { opt_key: '블루', pay_amount: 8000 }], workDetail: JSON.stringify(wd) });
+    const out = await svc.syncCampaignPayAmount({ workOrderId: 'wo_1', productOptionsJson: OPTS });
+    assert.strictEqual(out.applied, true, JSON.stringify(out));
+    const w = writes(q);
+    const wdW = w.filter(x => /UPDATE recruit_campaigns SET work_detail/.test(x.sql));
+    assert.strictEqual(wdW.length, 1);
+    const saved = JSON.parse(wdW[0].params[1]);
+    assert.strictEqual(saved.productLines, '핫팩 - 레드 - 결제금액 9,190원\n핫팩 - 블루 - 결제금액 12,000원\n핫팩 - 미니 레드 - 결제금액 5,000원');
+    // 잠금 순서: 공고 행 → 상품 행
+    const iCamp = q.findIndex(x => /SELECT work_detail FROM recruit_campaigns WHERE id = \$1 FOR UPDATE/.test(x.sql));
+    const iOpt = q.findIndex(x => /FROM campaign_options[\s\S]*FOR UPDATE/.test(x.sql));
+    assert.ok(iCamp > -1 && iCamp < iOpt, '공고 행을 상품 행보다 먼저 잠그지 않았다');
+  });
+
+  await t('줄 바꾸기 규칙: 옵션명 줄만 · 「미니 블랙」은 「블랙」으로 안 바뀜 · 못 찾으면 그대로', async () => {
+    const f = svc.replaceOptionAmountInProductLines;
+    assert.strictEqual(f('블랙 - 결제금액 9,190원\n미니 블랙 - 결제금액 5,000원', '블랙', 8500), '블랙 - 결제금액 8,500원\n미니 블랙 - 결제금액 5,000원');
+    assert.strictEqual(f('탈취제 - 블랙 800ml - 결제금액 9,190원', '블랙 800ml', 8500), '탈취제 - 블랙 800ml - 결제금액 8,500원');
+    assert.strictEqual(f('자유롭게 쓴 안내 9,190원', '블랙', 8500), '자유롭게 쓴 안내 9,190원');
+    assert.strictEqual(f('블랙 - 결제금액 9,190원', '', 8500), '블랙 - 결제금액 9,190원');
+  });
+
   await t('② 같은 값이면 쓰지 않는다(no-op)', async () => {
     const q = stub({ liveOptions: [{ opt_key: '레드', pay_amount: 9190 }, { opt_key: '블루', pay_amount: 12000 }] });
     const out = await svc.syncCampaignPayAmount({ workOrderId: 'wo_1', productOptionsJson: OPTS });
