@@ -138,7 +138,7 @@ function writablePath(row, origin) {
   }
   if (row.covered) return !row.noStructure && set.has(STRUCTURE_FIELD);
   // 7단계-④ ③ 이름 바꾸기 — 원래 이름을 실은 줄의 이름 칸(상품 name · 옵션 label/option_1/option_2). 마감 줄은 못 바꾼다.
-  if (row.rename) return !row.noRename && !row.parentClosed && !row.closedMeanwhile && set.has(RENAME_FIELD);
+  if (row.rename) return !row.noRename && !row.parentClosed && !row.renameClosed && !row.closedMeanwhile && set.has(RENAME_FIELD);
   // 마감된 선택지(양쪽 다 마감)의 칸은 못 고친다 — 인원은 이미 참여한 수로 굳었다. 다시 열기(closed 칸이 풀림)는 아래에서.
   if (row.parentClosed) return false;
   if (m.kind === 'leaf' && m.key === 'closed') return !row.noStructure && set.has(STRUCTURE_FIELD) && _truthy(row.base) && !_truthy(row.mine);
@@ -195,6 +195,7 @@ function markStructureRows(plan, base, mine, { structureCapable = true, renameCa
     if (moved.has(m.parent) || (productOf(m.parent) && moved.has(productOf(m.parent)))) { w.covered = true; continue; }
     if (renamed.has(m.parent) && (m.parent.includes('|o:') ? ['label', 'option_1', 'option_2'] : ['name']).includes(m.key)) {
       w.rename = true;
+      if (closedIn(B, m.parent)) w.renameClosed = true;   // 기준에서 마감인 줄은 다시 열면서 이름을 바꿀 수도 없다(재검토 2026-10-21)
       if (!renameCapable) w.noRename = true;
     }
     if (m.key !== 'closed' && closedIn(B, m.parent) && closedIn(M, m.parent)) w.parentClosed = true;
@@ -242,6 +243,44 @@ function sanitizeRenames(base, mine) {
     }
   }
   return changed ? { ...mine, product_options_json: JSON.stringify(list) } : mine;
+}
+
+/**
+ * 이름 바꾸기 모양 검사(재검토 2026-10-21) — 한 번에 담을 수 없는 이름 바꾸기는 거부한다(못 담으면 오더와 공고가 어긋난다):
+ *   · 맞바꾸기·이어 바꾸기·지우는 줄의 이름 쓰기 = 새 이름이 기준의 다른 상품·옵션 이름(지우는 것 포함)과 같음
+ *   · 원래 이름(또는 이름)이 보낸 목록 안에서 겹침 = 이름 바꾸기 + 같은 이름 새로 더하기
+ * @returns {string|null} 거부 문구
+ */
+function renameShapeError(base, mine) {
+  const list = _parseList(mine && mine.product_options_json);
+  if (!list) return null;
+  const bl = (_parseList(base && base.product_options_json) || []).filter(p => p && typeof p === 'object');
+  const nm = p => String(p && p.name || '').trim();
+  const keyP = p => String(p && p.prev_name || '').trim() || nm(p);
+  const keyO = o => String(o && o.prev_label || '').trim() || optionKey(o);
+  const live = list.filter(p => p && typeof p === 'object');
+  const pk = live.map(keyP);
+  const dupP = pk.find((k, i) => k && pk.indexOf(k) !== i);
+  if (dupP) return `「${dupP}」을 다른 이름으로 바꾸면서 같은 이름의 상품을 새로 더할 수는 없습니다. 하나씩 나눠 저장해 주세요.`;
+  for (const p of live) {
+    const prevName = String(p.prev_name || '').trim();
+    if (prevName && prevName !== nm(p) && bl.some(b => nm(b) === nm(p) && nm(b) !== prevName)) {
+      return `상품 이름 「${prevName} → ${nm(p)}」: 새 이름이 이 오더의 다른 상품 이름(지우는 상품 포함)과 같습니다. 맞바꾸기·지운 이름 다시 쓰기는 한 번에 할 수 없습니다 — 먼저 겹치지 않는 이름으로 저장한 뒤 다시 바꿔 주세요.`;
+    }
+    const opts = Array.isArray(p.options) ? p.options : [];
+    const ok = opts.map(keyO);
+    const dupO = ok.find((k, i) => k && ok.indexOf(k) !== i);
+    if (dupO) return `「${nm(p)}」의 「${dupO}」을 다른 이름으로 바꾸면서 같은 이름의 옵션을 새로 더할 수는 없습니다. 하나씩 나눠 저장해 주세요.`;
+    const bp = bl.find(b => nm(b) === keyP(p));
+    const bLabels = (bp && Array.isArray(bp.options) ? bp.options : []).map(optionKey);
+    for (const o of opts) {
+      const pl = String(o && o.prev_label || '').trim();
+      if (pl && pl !== optionKey(o) && bLabels.some(l => l === optionKey(o) && l !== pl)) {
+        return `옵션 이름 「${pl} → ${optionKey(o)}」: 새 이름이 「${nm(p)}」의 다른 옵션 이름(지우는 옵션 포함)과 같습니다. 맞바꾸기·지운 이름 다시 쓰기는 한 번에 할 수 없습니다 — 먼저 겹치지 않는 이름으로 저장한 뒤 다시 바꿔 주세요.`;
+      }
+    }
+  }
+  return null;
 }
 
 /** 쓰기 행의 상품·옵션 이름 — 판정이 붙인 경로 종류(meta.parent)에서 읽는다(이름 속 '.' 을 글자로 추측하지 않게). */
@@ -426,21 +465,25 @@ function applyWrites(theirs, mine, writes) {
   // 7단계-④ ③ 이름 바꾸기 — 옵션 먼저(상품 원래 이름으로 찾는다), 상품 나중
   structure.renamedOptions = []; structure.renamedProducts = [];
   const renameParents = [...new Set(renames.map(w => w.meta.parent))].sort((a, b) => (b.includes('|o:') ? 1 : 0) - (a.includes('|o:') ? 1 : 0));
+  // ★ 대상을 원래 이름으로 **먼저 다 찾아 두고** 나중에 한꺼번에 쓴다(제자리에서 바꾸며 찾으면 앞에서 바꾼 줄이 뒤에서 잘못 잡힌다 · 재검토 2026-10-21)
+  const renameJobs = [];
   for (const parent of renameParents) {
     const key = parent.slice(2); const at = key.indexOf('|o:');
     const pName = at < 0 ? key : key.slice(0, at), oLabel = at < 0 ? '' : key.slice(at + 3);
     const tp = nextProducts && nextProducts.find(x => pNameOf(x) === pName);
     const mp = mineProducts.find(x => mineKeyP(x) === pName);
-    if (!tp || !mp) { renames.filter(w => w.meta.parent === parent).forEach(w => missed.push(w.path)); continue; }
-    if (oLabel) {
-      const to = (tp.options || []).find(o => optionKey(o) === oLabel);
-      const mo = (mp.options || []).find(o => mineKeyO(o) === oLabel);
-      if (!to || !mo) { renames.filter(w => w.meta.parent === parent).forEach(w => missed.push(w.path)); continue; }
-      for (const k of ['label', 'option_1', 'option_2']) { if (mo[k] === undefined) delete to[k]; else to[k] = JSON.parse(JSON.stringify(mo[k])); }
-      structure.renamedOptions.push({ pName, from: oLabel, to: optionKey(to) });
+    const to = oLabel && tp ? (tp.options || []).find(o => optionKey(o) === oLabel) : null;
+    const mo = oLabel && mp ? (mp.options || []).find(o => mineKeyO(o) === oLabel) : null;
+    if (!tp || !mp || (oLabel && (!to || !mo))) { renames.filter(w => w.meta.parent === parent).forEach(w => missed.push(w.path)); continue; }
+    renameJobs.push({ pName, oLabel, tp, mp, to, mo });
+  }
+  for (const j of renameJobs) {
+    if (j.oLabel) {
+      for (const k of ['label', 'option_1', 'option_2']) { if (j.mo[k] === undefined) delete j.to[k]; else j.to[k] = JSON.parse(JSON.stringify(j.mo[k])); }
+      structure.renamedOptions.push({ pName: j.pName, from: j.oLabel, to: optionKey(j.to) });
     } else {
-      tp.name = pNameOf(mp);
-      structure.renamedProducts.push({ from: pName, to: tp.name });
+      j.tp.name = pNameOf(j.mp);
+      structure.renamedProducts.push({ from: j.pName, to: j.tp.name });
     }
     productsTouched = true;
   }
@@ -838,7 +881,8 @@ async function _closeRemovedInTx(client, camp, theirs, next, structure) {
   for (const r of structure.removedOptions) {
     const n = usedOf(r.pName, r.oLabel);
     if (!n) continue;
-    const tp = products.find(p => pNameOf(p) === r.pName);
+    // 같은 저장에서 상품 이름도 바꿨으면 바뀐 이름으로 찾는다(재검토 2026-10-21 — 못 찾고 건너뛰면 "방금 참여한 사람" 으로 영영 막혔다)
+    const tp = products.find(p => pNameOf(p) === ((structure.productRenameMap && structure.productRenameMap.get(r.pName)) || r.pName));
     if (!tp) continue;
     if (!Array.isArray(tp.options)) tp.options = [];
     tp.options.splice(Math.min(r.index, tp.options.length), 0, asClosed(r.entry, n));
@@ -916,7 +960,7 @@ function validateStructure(next, structure) {
     const o = p && (p.options || []).find(x => optionKey(x) === a.oLabel);
     const ak = o ? keysOf(o) : new Set([nk(a.oLabel)]);
     const hit = structure.removedOptions.find(r => r.pName === a.pName && [...keysOf(r.entry)].some(k => ak.has(k)));
-    if (hit) return { code: 'structure_rename_pending', error: `「${hit.oLabel}」을 지우고 「${a.oLabel}」을 더한 저장은 이름 바꾸기로 봅니다 — 이름 바꾸기는 다음 단계에서 엽니다. 창을 닫고 다시 열어 주세요.` };
+    if (hit) return { code: 'structure_rename_pending', error: `「${hit.oLabel}」을 지우고 「${a.oLabel}」을 더한 저장은 이름 바꾸기로 봅니다 — 지우고 더하면 참여 기록이 이어지지 않습니다. 이름 칸에서 바로 고치는 수정 창(최신 화면)으로 다시 열어 주세요.` };
   }
   const products = _parseList(next.product_options_json) || [];
   const pNameOf = p => String(p && p.name || '').trim();
@@ -1011,7 +1055,7 @@ async function _projectStructureInTx(client, camp, prev, next, structure = {}) {
     if (b.productRenamed) productNameFix.push({ optKey: u.optKey, from: b.productRenamed.from, to: b.productRenamed.to });
   }
   if (renamePlan.length || productNameFix.length) {
-    const { rows: cur0 } = await client.query(`SELECT opt_key FROM campaign_options WHERE campaign_id = $1`, [camp.id]);
+    const { rows: cur0 } = await client.query(`SELECT opt_key FROM campaign_options WHERE campaign_id = $1 AND COALESCE(status,'active') <> 'deleted'`, [camp.id]);
     const curKeys = new Set(cur0.map(r => r.opt_key));
     const leaving = new Set(renamePlan.map(r => r.from));
     for (const r of renamePlan) {
@@ -1270,6 +1314,8 @@ async function applySharedPatch(p) {
     const base = baseRows[0].state;
     // 7단계-④ ③ — 기준에 없는 원래 이름(prev_name/prev_label)은 이름 바꾸기가 아니다(재전송 등) — 지우고 판정한다
     p = { ...p, mine: sanitizeRenames(base, p.mine) };
+    const rnErr = renameShapeError(base, p.mine);
+    if (rnErr) return await _abort(client, 409, { ok: false, code: 'structure_rename_conflict', sync_version: curVersion, error: rnErr });
     const plan = planSharedPatch({ base, mine: p.mine, theirs, origin: p.origin, forceMine: p.forceMine || [] });
 
     /* ★ 배포 순서 안전장치(5단계 · 검토 2026-10-20) — 금액을 모르는 옛 인트라넷(저장 본문에 `bidir.money` 표시 없음)은 리뷰비·상품 금액을
@@ -1547,6 +1593,6 @@ async function linkSharedOrder({ workOrderId, actor = '', dryRun = false, db } =
 }
 
 module.exports = {
-  applySharedPatch, linkSharedOrder, readSharedState, sanitizeRenames, renamedParents, RENAME_FIELD, applyWrites, writablePath, projectToCampaignInTx, derivePayFields, validateQuantities, markStructureRows, STRUCTURE_FIELD, structureOpenFor, structurePermanentlyLocked,
+  applySharedPatch, linkSharedOrder, readSharedState, sanitizeRenames, renamedParents, renameShapeError, RENAME_FIELD, applyWrites, writablePath, projectToCampaignInTx, derivePayFields, validateQuantities, markStructureRows, STRUCTURE_FIELD, structureOpenFor, structurePermanentlyLocked,
   PHASE3_SHARED_FIELDS, PHASE5_SHARED_FIELDS, PHASE7Q_SHARED_FIELDS, PHASE7W_SHARED_FIELDS, PUSH_VIEW_KEYS, WRITABLE_BY_ORIGIN, INTRANET_EDITABLE_AFTER_ACCEPT, NEXT_VERSION_SQL, _pushBackKeys,
 };

@@ -228,6 +228,41 @@ async function pg() {
     const s9 = await A.snap();
     out = await A.intranet(edited(await A.wo(), x => ren(x, '탈취제 맥스', '블랙 매트', '블랙 X')), { rename: true });
     assert.equal(out.status, 409, JSON.stringify(out.body)); assert.equal(await A.snap(), s9);
+    // ══ 재검토 2026-10-21 ══ (지금: 탈취제 맥스 = 블랙 매트(마감·1) · 화이트(신형) · 두번째 리뉴얼)
+    const sB = await A.snap();
+    const conflict = async (label, fn) => {
+      const o2 = await A.intranet(edited(await A.wo(), fn), { rename: true });
+      assert.equal(o2.status, 409, label + ': ' + JSON.stringify(o2.body)); assert.equal(await A.snap(), sB, label + ' — 쓰기 0');
+      return o2.body;
+    };
+    // 맞바꾸기 · 이어 바꾸기 · 지우는 옵션 이름 쓰기 · 이름 바꾸고 같은 이름 새로 더하기
+    await A.intranet(edited(await A.wo(), x => x[0].options.push({ option_1: { name: '옵션', value: '그레이' }, label: '그레이', url: '', pay: 1000, count: 2, daily: 1, review_type_mix: [] })), { rename: true });
+    const sB2 = await A.snap();
+    let cb = await A.intranet(edited(await A.wo(), x => { ren(x, '탈취제 맥스', '화이트(신형)', '그레이'); ren(x, '탈취제 맥스', '그레이', '화이트(신형)'); }), { rename: true });
+    assert.equal(cb.status, 409, JSON.stringify(cb.body)); assert.equal(cb.body.code, 'structure_rename_conflict'); assert.equal(await A.snap(), sB2, '맞바꾸기 쓰기 0');
+    cb = await A.intranet(edited(await A.wo(), x => { ren(x, '탈취제 맥스', '화이트(신형)', '그레이'); ren(x, '탈취제 맥스', '그레이', '실버'); }), { rename: true });
+    assert.equal(cb.body.code, 'structure_rename_conflict', '이어 바꾸기: ' + JSON.stringify(cb.body)); assert.equal(await A.snap(), sB2);
+    cb = await A.intranet(edited(await A.wo(), x => { ren(x, '탈취제 맥스', '화이트(신형)', '그레이'); x[0].options = x[0].options.filter(y => y.prev_label || y.label !== '그레이'); }), { rename: true });
+    assert.equal(cb.body.code, 'structure_rename_conflict', '지우는 옵션 이름 쓰기: ' + JSON.stringify(cb.body)); assert.equal(await A.snap(), sB2);
+    cb = await A.intranet(edited(await A.wo(), x => { ren(x, '탈취제 맥스', '그레이', '실버');
+      x[0].options.push({ option_1: { name: '옵션', value: '그레이' }, label: '그레이', url: '', pay: 1000, count: 1, daily: 0, review_type_mix: [] }); }), { rename: true });
+    assert.equal(cb.body.code, 'structure_rename_conflict', '이름 바꾸고 같은 이름 더하기: ' + JSON.stringify(cb.body)); assert.equal(await A.snap(), sB2);
+    // 마감 줄을 다시 열면서 이름 바꾸기 = 못 함
+    cb = await A.intranet(edited(await A.wo(), x => { const y = x[0].options.find(z => z.label === '블랙 매트'); delete y.closed; y.count = 4; ren(x, '탈취제 맥스', '블랙 매트', '블랙 새것'); }), { rename: true });
+    assert.equal(cb.status, 409, JSON.stringify(cb.body)); assert.equal(await A.snap(), sB2);
+    // 상품 이름 바꾸기 + 참여자 있는 옵션 지우기 한 번에 = 마감으로 되살림(막다른 길 아님)
+    await A.apply({ key: '그레이', count: 1 });
+    out = await A.intranet(edited(await A.wo(), x => { x[0].prev_name = '탈취제 맥스'; x[0].name = '탈취제 울트라'; x[0].options = x[0].options.filter(y => y.label !== '그레이'); }), { rename: true });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    const pu = (await A.prods())[0];
+    assert.equal(pu.name, '탈취제 울트라'); assert.equal(pu.options.find(y => y.label === '그레이').closed, true);
+    assert.equal((await A.opts()).get('그레이').status, 'closed'); assert.equal((await A.opts()).get('그레이').product_name, '탈취제 울트라');
+    // 공고 창 맞바꾸기 = 못 정함 · 마감 줄이 섞인 상품의 상품 이름만 바꾸기 = 됨
+    r = await put(b => { const a1 = b.options.find(y => y.optKey === '화이트(신형)'); a1.optKey = '두번째 리뉴얼'; const a2 = b.options.find(y => y.optKey === '두번째 리뉴얼' && y !== a1); if (a2) a2.optKey = '화이트(신형)'; });
+    assert.equal(r.status, 409, JSON.stringify(r.body));
+    r = await put(b => { b.options.filter(y => y.productName === '탈취제 울트라').forEach(y => { y.productName = '탈취제 프로'; }); });
+    ok(r, '마감 줄 섞인 상품 이름');
+    assert.equal((await A.prods())[0].name, '탈취제 프로'); assert.equal((await A.opts()).get('블랙 매트').product_name, '탈취제 프로');
     console.log('bidirPhase7Rename: PG passed');
   } finally {
     srv.close();
