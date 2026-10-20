@@ -367,7 +367,15 @@ async function _saveCampaignOptions(campaignId, options) {
     // ★ 결정 229(코드리뷰 P2): 지운·마감 상품에 남은 품절 신고·알림을 먼저 정리 — 이름 바꾸기가 "알림은 상품마다 하나"에 걸리지 않게
     await require('../services/campaignOptionPause.service').closeStaleForCampaign(client, campaignId);
     await _applyOptionRenames(client, campaignId, options, keep);
+    // ★ 결정 263 5단계(사용자 확정 2026-10-20 「모든 공고」) — 금액이 바뀐 옵션은 이력을 남긴다(잘못구매 판정이 신청 시각 금액을 쓴다).
+    const { rows: prevPays } = await client.query('SELECT id, opt_key, pay_amount FROM campaign_options WHERE campaign_id=$1', [campaignId]);
+    const prevPayByKey = new Map(prevPays.map(r => [r.opt_key, r]));
     for (const o of options) {
+      const was = prevPayByKey.get(o.optKey);
+      if (was && Number(was.pay_amount) !== Number(o.payAmount)) {
+        await require('../services/campaignPriceHistory.service').recordOptionPriceChangeInTx(client,
+          { campaignId, optionId: was.id, oldPay: was.pay_amount, newPay: o.payAmount, actor: '모집공고 편집' });
+      }
       await client.query(
         `INSERT INTO campaign_options (campaign_id, opt_key, option_url, pay_amount, recruit_total, daily_limit, review_type_mix, sort_order, status,
                                       product_name, unit_kind, inflow_guide_html, inflow_guide_images, thumbnail_url, updated_at)
@@ -1027,6 +1035,8 @@ async function _scopedCampaignEdit(req, res) {
   // ★ 양방향 4단계-2: 연결 공고의 공유 칸(썸네일·구매시간·랜딩)은 이 화면(기준 버전을 모름)에서 바꾸지 못한다 — 같은 값이면 통과.
   const sharedBlock = await require('../services/campaignSharedSave.service').scopedEditSharedBlock({ campaignId: id, body: b });
   if (sharedBlock) return res.status(sharedBlock.status).json(sharedBlock.body);
+  // ★ 5단계: 연결 공고면 리뷰비 칸은 이 저장이 쓰지 않는다(위에서 바뀐 값은 막혔다 — 같은 값을 다시 쓰다 그 사이 바뀐 리뷰비를 되돌리지 않게).
+  const feeShared = await require('../services/campaignSharedSave.service').bidirLinkActive(id);
   const keep = (v, curV) => (v === undefined || v === null || v === '') ? curV : v;
   const numOr = (v, curV) => (v === undefined || v === null || v === '') ? curV : (Number(v) || 0);
   const title = (b.title !== undefined && String(b.title).trim() !== '') ? String(b.title).trim() : c.title;
@@ -1065,7 +1075,7 @@ async function _scopedCampaignEdit(req, res) {
 
   const { rows } = await pool.query(
     `UPDATE recruit_campaigns SET
-       title=$2, status=$3, delivery_type=$4, review_fee=$5, time_range=$6,
+       title=$2, status=$3, delivery_type=$4, review_fee=CASE WHEN $17::boolean THEN review_fee ELSE $5 END, time_range=$6,
        thumbnail_url=$7, landing_url=$8, window_start=$9, window_end=$10,
        daily_limit=$11, recruit_total=$12, sort_order=$13, max_slots=$14,
        carry_mode=$15, carry_strategy=$16,
@@ -1074,7 +1084,7 @@ async function _scopedCampaignEdit(req, res) {
      WHERE id=$1 RETURNING *`,
     [id, title, status, delivery_type, review_fee, time_range,
      thumbnail_url, landing_url, window_start || null, window_end || null,
-     daily_limit, recruit_total, sort_order, max_slots, carry_mode, carry_strategy]
+     daily_limit, recruit_total, sort_order, max_slots, carry_mode, carry_strategy, feeShared]
   );
   // ★ 095(Codex P1): 잠금 검사와 UPDATE 사이 "첫 차수 추가" 경합 자가치유(PUT 본 라우트와 동일)
   try {
@@ -3773,12 +3783,15 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         close_buffer_min = COALESCE($27, close_buffer_min),
         hold_ttl_min = COALESCE($28, hold_ttl_min),
         -- ★ 양방향 4단계-2: 연결 공고($52)면 공유 하위 칸(리뷰가이드·특이사항·두 사진·유입방식)은 지금 DB 값을 되살린다(오른쪽이 이긴다).
+        --   ★ 5단계: 상품 금액(payAmount)은 공유 저장의 투영이 쓴다 — 화면은 보내지 않으므로 DB 값 유지. 상품 안내 글(productLines)은
+        --     창을 연 뒤 리뷰오더에서 금액이 바뀐 경우($54)에만 DB 값 유지(옛 화면 금액으로 되돌리지 않게).
         --   ★ 연결 공고에서 화면이 work_detail 을 null(비움)로 보내도 공유 하위 칸까지 지우지 않는다(그때는 통째 유지).
         work_detail = CASE WHEN $29::boolean THEN
                         (CASE WHEN $52::boolean AND $30::jsonb IS NULL THEN work_detail
                               WHEN $52::boolean
                               THEN $30::jsonb || COALESCE((SELECT jsonb_object_agg(k, work_detail->k)
-                                                             FROM unnest(ARRAY['reviewGuide','specialNotes','reviewGuideImages','specialNotesImages','inflowType','inflowGuideHtml']) AS k
+                                                             FROM unnest(ARRAY['reviewGuide','specialNotes','reviewGuideImages','specialNotesImages','inflowType','inflowGuideHtml','payAmount']
+                                                                         || CASE WHEN $54::boolean THEN ARRAY['productLines'] ELSE ARRAY[]::text[] END) AS k
                                                             WHERE work_detail ? k), '{}'::jsonb)
                               ELSE $30::jsonb END)
                       ELSE work_detail END,
@@ -3823,7 +3836,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       [
         id,
         title, _bx ? null : channel, _bx ? null : channel_custom, manager, _bx ? null : time_range,   // ★ 4단계-2: 연결 공고면 공유 칸은 위 공유 저장이 쓴다
-        delivery_type, review_fee || 0,
+        delivery_type, _bx ? null : (review_fee || 0),   // ★ 5단계: 연결 공고의 리뷰비는 위 공유 저장이 쓴다(지난 참여 금액 고정과 함께)
         badgesForStore === null ? null : JSON.stringify(badgesForStore),
         notes, chat_url, status, sort_order || 0,
         max_slots || 0, deadline || null, description,
@@ -3874,6 +3887,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         deliveryReviewFeeMixForStore === null ? null : JSON.stringify(deliveryReviewFeeMixForStore), // $51 ★ 152
         _bx,                                                       // $52 ★ 4단계-2: work_detail 공유 하위 칸은 DB 값 유지
         (_bx && bidirEdit.windowsWritable) ? String(bidirEdit.windowsBaseText || '') : null,   // $53 ★ 4단계-2: 시각을 쓸 조건 글자
+        _bx && bidirEdit.keepProductLines === true,                // $54 ★ 5단계: 상품 안내 글은 지금 DB 값 유지
       ]
     );
 
@@ -3895,7 +3909,9 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     await _ensureLinkedWorktableDeliveryColumns(id, 'update');   // ★ 135: 회수·혼합 → 연결 작업표에 부속 열 보장(fail-soft)
     // ★ 082: 기간별 리뷰비 구간 교체(배열 전달 시에만 — 미전달=기존 구간 유지).
     //   구간표 UI 가 없는 화면(리뷰어앱 인라인 편집 등)이 저장해도 구간이 사라지지 않는다.
-    const normFees = normalizeFeeSchedules(fee_schedules);
+    // ★ 5단계: 연결 공고는 기간표를 다시 쓰지 않는다 — 화면 값이 지금과 같을 때만 여기까지 온다(공유 저장이 다르면 409).
+    //   다시 쓰면 그 사이 리뷰오더가 리뷰비를 바꿔 생긴 "오늘부터 새 금액" 구간이 옛 화면 목록으로 지워진다.
+    const normFees = _bx ? null : normalizeFeeSchedules(fee_schedules);
     let feeWarning = null;
     if (normFees) { try { await _saveFeeSchedules(id, normFees); } catch (e) { feeWarning = '리뷰비 구간 저장 실패: ' + e.message; logger.warn('[campaign/update] ' + feeWarning); } }
     // ★ 095(Codex P1): 잠금 검사(pool)와 UPDATE 사이에 "첫 차수 추가"가 끼면 낡은 총모집이

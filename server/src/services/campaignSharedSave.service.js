@@ -12,18 +12,23 @@
 // ★★ 겹친 칸 = 나중에 저장한 값(사용자 확정 2026-10-20) — 덮인 인트라넷 값은 응답 `shared.overwritten` 으로 화면이 보여준다.
 // ★ 되돌릴 수 없는 칸(왕복 검사 실패) = 409 `campaign_field_unmappable`(쓰기 0).
 // ★ 스위치 `bidir_sync.campaign_edit='on'` 일 때만. 꺼져 있으면 종전 저장 그대로(연결돼 있어도).
-// ★ 옵션표(옵션 URL·옵션별 유입가이드)는 공유 저장 대상이 아니다(5·7단계). 다만 창을 연 뒤 리뷰오더 쪽에서 바뀐
-//   옵션 칸을 손대지 않은 화면 값으로 되돌리지 않게 `protectOptionLeaves` 가 지금 DB 값을 남긴다.
+// ★ 5단계 — 리뷰비·결제금액(옵션표 금액 · 옵션 없는 공고의 상품 안내 금액)도 같은 공유 저장으로 보낸다(`planCampaignMoneyEdit`).
+//   리뷰비 기간표는 연결 공고에서 직접 고치지 않는다(사용자 확정 2026-10-20) — 리뷰비 칸을 바꾸면 "오늘부터 새 금액" 구간이 저절로 생긴다.
+//   화면이 보낸 기간표가 지금과 다르면 409(쓰기 0), 같으면 기존 저장이 기간표를 다시 쓰지 않는다(그 사이 생긴 구간을 지우지 않게).
+// ★ 옵션표의 옵션 URL·옵션별 유입가이드는 공유 저장 대상이 아니다(6·7단계). 다만 창을 연 뒤 리뷰오더 쪽에서 바뀐
+//   옵션 칸을 손대지 않은 화면 값으로 되돌리지 않게 `protectOptionLeaves` 가 지금 DB 값을 남긴다(금액 포함).
 // ═══════════════════════════════════════════════════════════════════════════
 'use strict';
 
 const getPool = () => require('../db/pool');
 const { logger } = require('../utils/logger');
 const { readBidirSwitch } = require('../utils/bidirSwitch');
-const { planCampaignSharedEdit, driftFromCampaign, landingIsShared, campaignRowView } = require('../utils/campaignSharedEdit');
+const { planCampaignSharedEdit, driftFromCampaign, landingIsShared, campaignRowView, planCampaignMoneyEdit, moneyDriftFromCampaign } = require('../utils/campaignSharedEdit');
 
 // inflowGuideHtml = 옛 공고 공통 유입가이드(공유 저장의 유입 투영이 쓴다) — 편집 저장이 미리 읽은 옛 값으로 되돌리지 않게 함께 지킨다(검토 2026-10-20).
-const WD_SHARED_KEYS = Object.freeze(['reviewGuide', 'specialNotes', 'reviewGuideImages', 'specialNotesImages', 'inflowType', 'inflowGuideHtml']);
+// payAmount = 옵션 없는 공고의 상품 금액(5단계 — 공유 저장의 금액 투영이 쓴다 · 화면은 보내지 않는다).
+// productLines(상품 안내 글)는 여기 없다 — 창을 연 뒤 리뷰오더에서 금액이 바뀐 경우에만 따로($54) 지금 값을 남긴다(평소엔 화면 글이 저장된다).
+const WD_SHARED_KEYS = Object.freeze(['reviewGuide', 'specialNotes', 'reviewGuideImages', 'specialNotesImages', 'inflowType', 'inflowGuideHtml', 'payAmount']);
 
 function _wd(camp) {
   let wd = camp && camp.work_detail;
@@ -61,18 +66,40 @@ async function applyCampaignSharedSave({ campaignId, body, actor, db } = {}) {
   const { camp, wo } = link;
   const b = body || {};
   const base = Number(b.bidir_base_sync_version) || 0;
+  let keepProductLines = false;
   const strip = (shared, windowsWritable = false) => ({
     active: true, link, shared, windowsWritable, windowsBaseText: String(camp.time_range || ''),
     participation: camp.participation_mode === true,
     landingShared: landingIsShared({ inflow_type: wo.inflow_type }, b),
+    keepProductLines,
   });
+  const { rows: campOptions } = await pool.query('SELECT * FROM campaign_options WHERE campaign_id = $1', [campaignId]);
+
+  // 리뷰비 기간표 — 연결 공고에서는 직접 고치지 않는다(지금과 같으면 통과 · 기존 저장이 다시 쓰지 않는다).
+  if (Array.isArray(b.fee_schedules)) {
+    const { normalizeFeeSchedules } = require('../utils/campaignFee');
+    const { rows: cur } = await pool.query(
+      `SELECT to_char(effective_from,'YYYY-MM-DD') AS "effectiveFrom", review_fee AS "reviewFee"
+         FROM campaign_fee_schedules WHERE campaign_id = $1 ORDER BY effective_from`, [campaignId]);
+    const key = list => (list || []).map(r => `${r.effectiveFrom}~${Number(r.reviewFee)}`).join('|');
+    if (key(normalizeFeeSchedules(b.fee_schedules)) !== key(cur)) {
+      return { response: { status: 409, body: { ok: false, code: 'fee_schedule_linked',
+        error: '리뷰오더와 맞춰지는 공고라 기간별 리뷰비를 직접 고칠 수 없습니다. 리뷰비 칸만 바꾸면 "오늘부터 새 금액" 이 저절로 들어갑니다. 창을 새로고침한 뒤 다시 저장해 주세요.' } } };
+    }
+  }
 
   if (!base) {
     // 옛 화면 — 기준이 없으니 공유 칸은 "지금 값 그대로" 일 때만 저장을 이어 간다.
     const drift = driftFromCampaign(camp, b);
+    const money = moneyDriftFromCampaign(camp, b, campOptions);
+    if (money.length && !drift.length) {
+      return { response: { status: 409, body: { ok: false, code: 'stale_editor', fields: money,
+        error: `리뷰오더와 맞춰지는 공고라 이 창에서는 ${money.join('·')}을 바꿀 수 없습니다. 모집공고 편집 창(전체 편집)을 새로 열어 바꾸거나 리뷰오더에서 바꿔 주세요.` } } };
+    }
     if (drift.length) {
-      return { response: { status: 409, body: { ok: false, code: 'stale_editor', fields: drift,
-        error: `리뷰오더와 맞춰지는 공고입니다. 이 창은 옛 화면이라 공통 칸(${drift.join(', ')})을 저장할 수 없습니다. 새로고침한 뒤 다시 열어 저장해 주세요.` } } };
+      const all = [...drift, ...money];
+      return { response: { status: 409, body: { ok: false, code: 'stale_editor', fields: all,
+        error: `리뷰오더와 맞춰지는 공고입니다. 이 창은 옛 화면이라 공통 칸(${all.join(', ')})을 저장할 수 없습니다. 새로고침한 뒤 다시 열어 저장해 주세요.` } } };
     }
     return strip(null);
   }
@@ -84,6 +111,11 @@ async function applyCampaignSharedSave({ campaignId, body, actor, db } = {}) {
       error: '공고 창을 연 뒤 기준 정보가 사라졌습니다. 창을 닫고 다시 열어 주세요.' } } };
   }
   const plan = planCampaignSharedEdit({ baseState: snap[0].state, camp, body: b });
+  const money = planCampaignMoneyEdit({ baseState: snap[0].state, camp, body: b, campOptions });
+  plan.unmappable.push(...money.unmappable);
+  Object.assign(plan.mine, money.mine);
+  plan.changed.push(...money.changed);
+  keepProductLines = money.keepProductLines;
   if (plan.unmappable.length) {
     const labels = [...new Set(plan.unmappable.map(u => u.label))];
     return { response: { status: 409, body: { ok: false, code: 'campaign_field_unmappable', fields: plan.unmappable,
@@ -126,11 +158,12 @@ async function protectOptionLeaves({ normOpts, link, baseVersion, db } = {}) {
   }));
   const { optionShape: shape } = require('../utils/orderToCampaignProjection');
   const LEAVES = [['option_url', 'optionUrl', r => r.option_url || ''], ['inflow_guide_html', 'inflowGuideHtml', r => r.inflow_guide_html || ''],
-    ['inflow_guide_images', 'inflowGuideImages', r => (Array.isArray(r.inflow_guide_images) ? r.inflow_guide_images : [])]];
+    ['inflow_guide_images', 'inflowGuideImages', r => (Array.isArray(r.inflow_guide_images) ? r.inflow_guide_images : [])],
+    ['pay_amount', 'payAmount', r => Math.max(0, Math.floor(Number(r.pay_amount) || 0))]];   // 5단계 — 창을 연 뒤 리뷰오더에서 바뀐 금액
   const kept = [];
   for (const o of normOpts) {
     const mine = shape({ productName: o.productName, optKey: o.optKey, unitKind: o.unitKind, optionUrl: o.optionUrl,
-      inflowGuideHtml: o.inflowGuideHtml, inflowGuideImages: o.inflowGuideImages });
+      inflowGuideHtml: o.inflowGuideHtml, inflowGuideImages: o.inflowGuideImages, payAmount: o.payAmount });
     const b = baseOpts.get(mine.key), c = curByKey.get(mine.key), raw = rawByKey.get(mine.key);
     if (!b || !c || !raw) continue;
     for (const [leaf, field, rawOf] of LEAVES) {
@@ -154,6 +187,8 @@ async function scopedEditSharedBlock({ campaignId, body, db } = {}) {
   const t = v => String(v == null ? '' : v).trim();
   if (b.thumbnail_url !== undefined && t(b.thumbnail_url) !== t(now.thumbnail_url)) changed.push('썸네일');
   if (b.time_range !== undefined && t(b.time_range) !== t(now.time_range)) changed.push('구매시간');
+  if (b.review_fee !== undefined && b.review_fee !== null && b.review_fee !== ''
+      && (Number(b.review_fee) || 0) !== (Number(link.camp.review_fee) || 0)) changed.push('리뷰비');
   if (b.auto_order === true || (b.window_start !== undefined && b.window_start !== '' && b.window_start !== null)
       || (b.window_end !== undefined && b.window_end !== '' && b.window_end !== null)) {
     const hh = v => { const m = /^(\d{1,2}):(\d{2})/.exec(t(v)); return m ? `${m[1].padStart(2, '0')}:${m[2]}` : ''; };
@@ -168,4 +203,17 @@ async function scopedEditSharedBlock({ campaignId, body, db } = {}) {
     error: `리뷰오더와 맞춰지는 칸(${[...new Set(changed)].join(', ')})은 리뷰어 앱에서 바꿀 수 없습니다. 관리자 화면이나 리뷰오더에서 고쳐 주세요.` } };
 }
 
-module.exports = { applyCampaignSharedSave, protectOptionLeaves, scopedEditSharedBlock, findBidirLink, WD_SHARED_KEYS };
+/** 이 공고가 지금 양방향 연결(스위치 campaign_edit=on)인가 — 옛 경로가 리뷰비 같은 공유 칸을 쓰지 않게 고르는 데 쓴다.
+ *  ★ 판정 실패 = true(연결로 본다 · fail-closed) — 돈을 쓰는 경로라, DB 가 잠깐 흔들린 사이 지난 참여 고정 없이 리뷰비가 써지면 안 된다(검토 2026-10-20). */
+async function bidirLinkActive(campaignId, db) {
+  try {
+    const pool = db || getPool();
+    if ((await readBidirSwitch(pool)).campaign_edit !== 'on') return false;
+    return !!(await findBidirLink(pool, campaignId));
+  } catch (e) {
+    logger.warn(`[bidir/campaign] ${campaignId} 연결 판정 실패 — 연결 공고로 보고 리뷰비 쓰기를 막는다: ${(e && e.message) || e}`);
+    return true;
+  }
+}
+
+module.exports = { applyCampaignSharedSave, protectOptionLeaves, scopedEditSharedBlock, findBidirLink, bidirLinkActive, WD_SHARED_KEYS };

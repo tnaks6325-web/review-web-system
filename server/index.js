@@ -180,6 +180,7 @@ const REQUIRED_TABLES = [
   'workboard_consolidation_targets',
   'work_order_shared_snapshots',                  // 194 — 양방향 공유 저장의 3방향 기준(없으면 연결된 오더 저장이 409/500)
   'shared_sync_outbox',                           // 194 — 리뷰웹발 공유 저장의 인트라넷 전송 대기열
+  'campaign_option_price_history',                // 194 — 옵션 결제금액 이력(5단계 · 잘못구매 판정은 신청 시각 금액 — 쓰기·읽기 모두 실패해도 지금 금액으로 접힌다)
 ];
 
 async function _runOneMigration(pool, sql) {

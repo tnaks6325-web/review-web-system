@@ -9,7 +9,7 @@
  * ★★ 되돌린 값은 **다시 투영해 관리자가 보낸 값이 그대로 나오는지 확인**한다(왕복 검사). 안 나오면 그 칸은
  *    `unmappable` — 저장하지 않고 사람에게 말한다(추측해 근사값을 쓰지 않는다).
  * ★ 대상 칸(3단계 글 칸과 같은 범위): 리뷰가이드·특이사항·두 사진 묶음·유입방식(work_detail) · 썸네일 · 구매시간 ·
- *   상품 페이지(랜딩) · 구매채널. 옵션표(옵션 URL·옵션별 유입가이드·금액·인원)는 다음 단계(5·7) — 여기서는 다루지 않는다.
+ *   상품 페이지(랜딩) · 구매채널. 5단계부터 리뷰비·결제금액(`planCampaignMoneyEdit`). 옵션 URL·옵션별 유입가이드·인원은 6·7단계.
  * ★ 순수 모듈 — DB·잠금 없음.
  */
 'use strict';
@@ -200,6 +200,177 @@ function planCampaignSharedEdit({ baseState, camp, body }) {
   return { mine, changed: changed.map(k => LABELS[k] || k), unmappable, windowsWritable };
 }
 
+/* ── 5단계 — 리뷰비 · 결제금액(결정 263 · 사용자 확정 D2·D3) ─────────────────────────────────────────────
+   공고 창의 리뷰비 칸 = 작업오더 review_fee. 옵션표 금액 = 작업오더 상품 구성의 그 줄 금액(옵션 `pay` · 옵션 없는 상품 `base.pay`).
+   옵션 없는 공고는 상품 안내 글(productLines)의 `결제금액 N원` 이 리뷰어가 보는 금액이다.
+   ★ 손댄 칸 판정은 창을 연 시점(기준 스냅숏)의 투영 값과 비교한다(위 글 칸과 같은 규칙) — 그 사이 리뷰오더에서 바뀐 금액을
+     옛 화면 값으로 되돌리지 않는다(옵션표는 `protectOptionLeaves`, 상품 안내 글은 keepProductLines 가 지금 값을 남긴다).
+   ★ 되돌린 값은 다시 투영해 화면 값이 그대로 나오는지 본다(왕복 검사) — 안 나오면 unmappable(추측하지 않는다).
+   ★ 구매수량 단계를 쓰는 상품의 금액은 리뷰오더에서만 고친다(단계별 금액 계산이 따로 있다). */
+
+const _payAmountsFromWorkOrder = (j) => require('./workOrderPayAmounts').payAmountsFromWorkOrder(j);
+
+function _parseProducts(raw) {
+  if (Array.isArray(raw)) return JSON.parse(JSON.stringify(raw));
+  try { const v = JSON.parse(String(raw || '')); return Array.isArray(v) ? v : null; } catch (_) { return null; }
+}
+
+function _hasTiers(p) {
+  const t = p && p.qty_tiers;
+  if (t == null) return false;
+  if (Array.isArray(t)) return t.length > 0;
+  return typeof t === 'object' ? Object.keys(t).length > 0 : String(t).trim() !== '';
+}
+
+/** 발행 프리필 `_woOptionRows` 와 같은 순서로 "그 줄이 상품 구성의 어느 자리에서 나왔나" 를 적는다(줄 i ↔ 자리 i). */
+function _rowSources(products) {
+  const out = [];
+  products.forEach((prod, i) => {
+    if (!prod || typeof prod !== 'object') return;
+    const opts = Array.isArray(prod.options) ? prod.options : [];
+    if (opts.length) opts.forEach((op, j) => out.push({ i, j }));
+    else if (String(prod.name || '').replace(/\|/g, '').trim()) out.push({ i, j: -1 });
+  });
+  return out;
+}
+
+function _setPay(products, src, pay) {
+  const prod = products[src.i];
+  if (src.j >= 0) prod.options[src.j].pay = pay;
+  else prod.base = { ...(prod.base && typeof prod.base === 'object' ? prod.base : {}), pay };
+}
+
+/** 공고 창 옵션 한 줄의 비교 열쇠 — 투영(`orderToCampaignProjection.optionShape`)과 같은 규칙. */
+function _bodyOptKey(o) {
+  const pn = String(o.productName ?? o.product_name ?? '').replace(/\|/g, '').trim();
+  const unit = String(o.unitKind ?? o.unit_kind ?? '') === 'product' ? 'product' : 'option';
+  const ok = String(o.optKey ?? o.opt_key ?? '').replace(/\|/g, '').trim();
+  return `${pn}|${unit === 'product' ? '' : ok}`;
+}
+
+/**
+ * @param {{ baseState:object, camp:object, body:object, campOptions?:object[] }} p
+ * @returns {{ mine:object, changed:string[], unmappable:Array<{key,label,want,got}>, keepProductLines:boolean }}
+ */
+function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
+  const { projectOrderToCampaign } = require('./orderToCampaignProjection');
+  const { distinctAmountsInText } = require('../services/campaignPayAmountSync.service');
+  const base = JSON.parse(JSON.stringify(baseState || {}));
+  const b = body || {};
+  const mine = {};
+  const changed = [];
+  const unmappable = [];
+  let keepProductLines = false;
+
+  // ① 리뷰비
+  if (b.review_fee !== undefined && b.review_fee !== null) {
+    const sent = CANON.int(b.review_fee);
+    const was = CANON.int(_woCampaignPrefill(JSON.parse(JSON.stringify(base))).review_fee);
+    if (sent !== was) { mine.review_fee = Number(sent) || 0; changed.push('리뷰비'); }
+  }
+
+  const products = _parseProducts(base.product_options_json);
+  const baseRows = projectOrderToCampaign(base).options;
+  const liveCampOpts = (campOptions || []).filter(r => String(r.status || '') !== 'deleted');
+  let edited = null;
+  const want = new Map();   // 줄 열쇠 → 화면이 보낸 금액
+
+  if (Array.isArray(b.options) && baseRows.length && liveCampOpts.length) {
+    // ② 옵션 있는 공고 — 옵션표 금액
+    const byKey = new Map(baseRows.map((r, k) => [r.key, k]));
+    const srcs = products ? _rowSources(products) : [];
+    for (const o of b.options) {
+      if (!o || typeof o !== 'object') continue;
+      const key = _bodyOptKey(o);
+      const k = byKey.get(key);
+      if (k === undefined) {
+        // 오더에 없는 줄 — 이름을 바꾼 줄이면 원래 줄(prevOptKey)의 금액과 같아야 한다. 이름과 금액을 함께 바꾸면 오더와 짝을 지을 수 없다
+        // (옵션 저장이 금액을 그대로 써 오더·공고가 갈라진다 · 검토 2026-10-20). 새로 더한 줄(원래 줄 없음)은 공고 전용이라 그대로 둔다.
+        const prev = String(o.prevOptKey ?? o.prev_opt_key ?? '').replace(/\|/g, '').trim();
+        const was = prev ? liveCampOpts.find(r => String(r.opt_key || '') === prev) : null;
+        const pay = Math.max(0, Math.floor(Number(o.payAmount ?? o.pay_amount) || 0));
+        if (was && CANON.int(pay) !== CANON.int(was.pay_amount)) {
+          unmappable.push({ key, label: `결제금액(${prev} → ${String(o.optKey || '').trim()}) — 이름과 금액을 함께 바꿈`, want: String(pay), got: CANON.int(was.pay_amount) });
+        }
+        continue;
+      }
+      const pay = Math.max(0, Math.floor(Number(o.payAmount ?? o.pay_amount) || 0));
+      if (CANON.int(pay) === baseRows[k].pay_amount) continue;  // 손대지 않음
+      const label = `결제금액(${baseRows[k].name})`;
+      const src = srcs[k];
+      if (!products || !src || srcs.length !== baseRows.length) { unmappable.push({ key, label, want: String(pay), got: baseRows[k].pay_amount }); continue; }
+      if (_hasTiers(products[src.i])) { unmappable.push({ key, label: `${label} — 구매수량 단계 상품`, want: String(pay), got: baseRows[k].pay_amount }); continue; }
+      if (!edited) edited = JSON.parse(JSON.stringify(products));
+      _setPay(edited, src, pay);
+      want.set(key, CANON.int(pay));
+      changed.push(label);
+    }
+    if (edited) {
+      const after = new Map(projectOrderToCampaign({ ...base, product_options_json: JSON.stringify(edited) }).options.map(r => [r.key, r]));
+      for (const r of baseRows) {
+        const got = after.get(r.key);
+        const expect = want.has(r.key) ? want.get(r.key) : r.pay_amount;
+        if (!got || got.pay_amount !== expect) unmappable.push({ key: r.key, label: `결제금액(${r.name})`, want: expect, got: got ? got.pay_amount : '' });
+      }
+    }
+  } else if (!liveCampOpts.length && b.work_detail && typeof b.work_detail === 'object'
+      && Object.prototype.hasOwnProperty.call(b.work_detail, 'productLines')) {
+    // ③ 옵션 없는 공고(공고 옵션 줄 0개 — 단일 상품은 발행 프리필이 줄을 만들어도 공고에는 저장하지 않는다) — 상품 안내 글의 금액
+    const wd = (camp && camp.work_detail && typeof camp.work_detail === 'object') ? camp.work_detail : {};
+    const sentAmts = distinctAmountsInText(b.work_detail.productLines);
+    const nowAmts = distinctAmountsInText(wd.productLines);
+    const baseAmts = _payAmountsFromWorkOrder(base.product_options_json).distinct;
+    const same = (x, y) => x.length === y.length && x.every((v, i) => v === y[i]);
+    if (!same(sentAmts, nowAmts)) {
+      if (same(sentAmts, baseAmts) && !same(nowAmts, baseAmts)) {
+        // 창을 연 뒤 리뷰오더에서 바뀐 금액 — 지금 값 유지. 단 금액 말고 다른 문장까지 고쳤으면 통째 유지가 그 수정을 버리므로 새로고침을 받는다(검토 2026-10-20).
+        const stripAmt = t => String(t == null ? '' : t).replace(/결제금액\s*[\d,]+\s*원/g, '결제금액 #원').replace(/\s+/g, ' ').trim();
+        if (stripAmt(b.work_detail.productLines) === stripAmt(wd.productLines)) keepProductLines = true;
+        else unmappable.push({ key: 'productLines', label: '상품 안내 — 창을 연 뒤 리뷰오더에서 금액이 바뀌었습니다. 새로고침한 뒤 다시 고쳐 주세요', want: sentAmts.join(','), got: nowAmts.join(',') });
+      }
+      else {
+        const units = _payAmountsFromWorkOrder(base.product_options_json).units;
+        const label = '결제금액';
+        if (sentAmts.length !== 1 || !products || units.length !== 1 || _hasTiers(products.find(p => p && String(p.name || '').replace(/\|/g, '').trim() === units[0].productName))) {
+          unmappable.push({ key: 'productLines', label: `${label} — 상품 안내에 금액이 여러 개이거나 상품이 둘 이상`, want: sentAmts.join(','), got: nowAmts.join(',') });
+        } else {
+          const srcs = _rowSources(products);
+          if (srcs.length !== 1) unmappable.push({ key: 'productLines', label, want: String(sentAmts[0]), got: nowAmts.join(',') });
+          else {
+            edited = JSON.parse(JSON.stringify(products));
+            _setPay(edited, srcs[0], sentAmts[0]);
+            if (_payAmountsFromWorkOrder(JSON.stringify(edited)).single !== sentAmts[0]) {
+              unmappable.push({ key: 'productLines', label, want: String(sentAmts[0]), got: nowAmts.join(',') });
+              edited = null;
+            } else changed.push(label);
+          }
+        }
+      }
+    }
+  }
+  if (edited && !unmappable.length) mine.product_options_json = JSON.stringify(edited);
+  return { mine, changed, unmappable, keepProductLines };
+}
+
+/** 옛 화면(기준 버전 없음)의 금액 판정 — 지금 공고 값과 다른 금액 칸 이름(있으면 저장 거부). */
+function moneyDriftFromCampaign(camp, body, campOptions = []) {
+  const { distinctAmountsInText } = require('../services/campaignPayAmountSync.service');
+  const b = body || {};
+  const c = camp || {};
+  const out = [];
+  if (b.review_fee !== undefined && b.review_fee !== null && CANON.int(b.review_fee) !== CANON.int(c.review_fee)) out.push('리뷰비');
+  const live = (campOptions || []).filter(r => String(r.status || '') !== 'deleted');
+  if (Array.isArray(b.options) && live.length) {
+    const now = new Map(live.map(r => [String(r.opt_key || ''), CANON.int(r.pay_amount)]));
+    if (b.options.some(o => o && now.has(String(o.optKey ?? o.opt_key ?? '').trim())
+        && now.get(String(o.optKey ?? o.opt_key ?? '').trim()) !== CANON.int(o.payAmount ?? o.pay_amount ?? 0))) out.push('결제금액');
+  } else if (!live.length && b.work_detail && typeof b.work_detail === 'object' && Object.prototype.hasOwnProperty.call(b.work_detail, 'productLines')) {
+    const wd = c.work_detail && typeof c.work_detail === 'object' ? c.work_detail : {};
+    if (distinctAmountsInText(b.work_detail.productLines).join(',') !== distinctAmountsInText(wd.productLines).join(',')) out.push('결제금액');
+  }
+  return out;
+}
+
 /** 랜딩이 공유 칸인가 — 저장 뒤 유입방식이 링크유입이면(화면이 보낸 유입방식 우선). */
 function landingIsShared(baseState, body) {
   const wd = body && body.work_detail && typeof body.work_detail === 'object' ? body.work_detail : null;
@@ -216,5 +387,6 @@ function driftFromCampaign(camp, body) {
 
 module.exports = {
   planCampaignSharedEdit, driftFromCampaign, campaignViewOf, campaignRowView, bodyView, replaceReviewSection, norm, landingIsShared,
+  planCampaignMoneyEdit, moneyDriftFromCampaign,
   WD_KEYS, TOP_KEYS, LABELS,
 };

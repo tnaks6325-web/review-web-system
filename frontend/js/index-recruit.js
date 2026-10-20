@@ -3125,6 +3125,48 @@ function onFeeScheduleToggle(on) {
   renderFeeSchedule();
 }
 
+/** ★ 양방향 5단계(결정 263 · 사용자 확정 2026-10-20): 리뷰오더와 맞춰지는 공고는 기간별 리뷰비를 직접 고치지 않는다.
+ *  리뷰비 칸만 바꾸면 서버가 "오늘부터 새 금액" 구간을 넣고 지난 참여 금액을 고정한다 — 표는 보기 전용으로 둔다.
+ *  (저장도 기간표를 보내지 않는다 — 창을 연 뒤 생긴 구간을 옛 표로 지우지 않게.) 연결 아닌 공고는 종전 그대로. */
+function _rfApplyFeeLinkLock() {
+  const linked = !!(_recruitEditId && window._rfBidirBase);
+  const sec = document.getElementById("rf_fee_sched_section");
+  [document.getElementById("rf_fee_sched_on"), document.getElementById("rf_fee_sched_toggle")].forEach(el => { if (el) el.disabled = linked; });
+  if (sec) sec.querySelectorAll("input,button").forEach(el => { el.disabled = linked; });
+  let note = document.getElementById("rf_fee_link_note");
+  if (linked && !note && sec && sec.parentNode) {
+    note = document.createElement("div");
+    note.id = "rf_fee_link_note";
+    note.className = "rf-help";
+    note.textContent = "리뷰오더와 맞춰지는 공고라 기간별 리뷰비는 직접 고칠 수 없습니다 — 리뷰비 칸만 바꾸면 오늘부터 새 금액이 저절로 들어가고, 이미 참여한 분은 참여할 때 금액 그대로입니다.";
+    sec.parentNode.insertBefore(note, sec);
+  }
+  if (note) note.hidden = !linked;
+}
+
+/** ★ 양방향 5단계: 연결 공고에서 바뀌는 금액(리뷰비·옵션 금액·옵션 없는 공고의 상품 안내 금액) — 저장 전 확인창 목록. */
+function _rfMoneyChanges(payload) {
+  const loaded = window._recruitEditLoaded;
+  if (!loaded || !payload) return [];
+  const won = v => Number(v || 0).toLocaleString() + "원";
+  const out = [];
+  if (payload.review_fee !== undefined && Number(payload.review_fee || 0) !== Number(loaded.review_fee || 0)) out.push("리뷰비 " + won(loaded.review_fee) + " → " + won(payload.review_fee));
+  if (Array.isArray(payload.options) && Array.isArray(window._recruitEditLoadedOpts)) {
+    payload.options.forEach(o => {
+      const was = window._recruitEditLoadedOpts.find(x => String(x.optKey ?? x.opt_key ?? "") === String(o.optKey || ""));
+      if (was && Number(was.payAmount ?? was.pay_amount ?? 0) !== Number(o.payAmount || 0)) {
+        out.push("결제금액(" + (o.optKey || o.productName) + ") " + won(was.payAmount ?? was.pay_amount) + " → " + won(o.payAmount));
+      }
+    });
+  }
+  if ((!Array.isArray(payload.options) || !payload.options.length) && payload.work_detail && typeof payload.work_detail === "object") {
+    const amts = t => (String(t || "").match(/결제금액\s*([\d,]+)\s*원/g) || []).map(m => m.replace(/[^\d]/g, "")).sort().join(",");
+    const before = amts((loaded.work_detail || {}).productLines), after = amts(payload.work_detail.productLines);
+    if (before !== after) out.push("결제금액(상품 안내) " + (before || "없음") + " → " + (after || "없음"));
+  }
+  return out;
+}
+
 /** 표 → 저장 payload 배열. 날짜·금액이 비면 그 줄은 제외(부분 입력 중 저장 방해 금지). */
 function readFeeRows() {
   const out = [];
@@ -3265,6 +3307,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   window._recruitEditLoadedOpts = null;  // 저장 후 "바뀐 항목" 대조용 옵션표 원본(로드 실패 시 null=대조 안 함)
   window._recruitEditLoadedFees = null;
   window._rfBidirBase = null;   // ★ 양방향 4단계-2: 창을 연 시점의 리뷰오더 공유 버전(연결 공고만)
+  _rfApplyFeeLinkLock();        // ★ 5단계: 지난 공고의 보기 전용 잠금을 푼다
   _rfLastScheduledPurchaseWindow = { start: "", end: "" };
   if (typeof recruitSaveBlockClear === "function") recruitSaveBlockClear();  // 지난번 차단 사유 잔류 방지
   _rfLinkedMiss = null; _rfSugCache = [];   // 지난 공고의 "탭 못 찾음" 사유가 새 모달에 남지 않게(로드보다 먼저)
@@ -3422,6 +3465,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
       document.getElementById("rf_review_fee").value   = c.review_fee || "";
       // 📅 082: 리뷰비 구간 프리필 — 구간이 있으면 스위치가 자동으로 켜진다(없으면 종전 화면 그대로)
       if (typeof renderFeeRows === "function") renderFeeRows(json.feeSchedules || []);
+      _rfApplyFeeLinkLock();   // ★ 5단계: 리뷰오더와 맞춰지는 공고면 기간표 보기 전용
       // The compact editor intentionally does not render the legacy public-note
       // textarea.  Treat it as an optional compatibility field so an older
       // campaign cannot abort loading before its product and guide values are
@@ -5704,10 +5748,22 @@ async function saveRecruitPostImpl() {
   /* 📅 기간별 리뷰비(082) — ★ 구간표 UI가 있는 페이지에서만 전송(없으면 미전송=서버가 기존 구간 유지).
      옵션표·work_detail과 같은 원칙: 축약 화면의 저장이 설정을 조용히 지우지 않게 한다.
      스위치를 끄면 빈 배열을 보내 구간을 제거한다(= 기본 리뷰비 한 값으로 복귀). */
-  if (document.getElementById("rf_fee_rows")) {
+  //   ★ 양방향 5단계: 리뷰오더와 맞춰지는 공고는 보내지 않는다(보기 전용 · 리뷰비 칸이 구간을 만든다).
+  if (document.getElementById("rf_fee_rows") && !(_recruitEditId && window._rfBidirBase)) {
     const _feeChk = renderFeeSchedule();
     if (_feeChk.dup) { _rfSaveBlocked("리뷰비 구간의 시작일이 중복됐어요 — 날짜를 다르게 하거나 삭제해주세요."); return; }
     payload.fee_schedules = document.getElementById("rf_fee_sched_on")?.checked ? readFeeRows() : [];
+  }
+
+  /* ★ 양방향 5단계(사용자 확정 D3): 리뷰오더와 맞춰지는 공고의 결제금액·리뷰비는 리뷰어 화면과 리뷰오더까지 바로 바뀐다 — 저장 전에 확인받는다. */
+  if (_recruitEditId && window._rfBidirBase) {
+    const _money = _rfMoneyChanges(payload);
+    if (_money.length && !confirm("금액을 바꿉니다 — 리뷰오더(인트라넷)에도 같이 바뀝니다.\n\n· " + _money.join("\n· ")
+      + "\n\n결제금액을 바꾸면 리뷰어 화면 금액이 바로 바뀝니다. 이미 참여한 분은 참여할 때 금액으로 잘못구매를 판정합니다."
+      + "\n리뷰비는 오늘부터 참여하는 분에게 새 금액이 적용되고, 이미 참여한 분은 참여할 때 금액 그대로입니다.\n\n저장할까요?")) {
+      _rfSaveBlocked("금액 변경을 취소했습니다 — 저장하지 않았습니다.");
+      return;
+    }
   }
 
   /* 저장 직전에 "무엇이 바뀌었나"를 계산해 둔다 — 모달을 닫은 뒤엔 폼 값을 읽을 수 없다 */

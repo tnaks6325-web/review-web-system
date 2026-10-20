@@ -843,6 +843,14 @@ function _sourceSharedMine(b, derived, source) {
   mine.intranet_advertiser_id = source.intranetAdvertiserId;
   if (b.purchase_channel_custom !== undefined) mine.purchase_channel_custom = _isTrue(b.purchase_channel_custom);
   if (b.required_delivery_memo !== undefined) mine.required_delivery_memo = String(b.required_delivery_memo || '').trim();
+  // ★ 5단계 — 금액은 **보냈을 때만**(blank-only): 빈 칸을 0원으로 읽으면 리뷰비 칸을 비운 저장 한 번에 리뷰비가 0원이 되고
+  //   지난 참여 금액 고정까지 돈다. 결제합계도 안 보냈으면 리뷰웹이 차이로 계산한다.
+  const blank = v => v === undefined || v === null || String(v).trim() === '';
+  if (blank(b.review_fee)) delete mine.review_fee;
+  if (blank(b.pay_amount)) delete mine.pay_amount;
+  // 상품 구성을 안 보낸 저장(인트라넷이 리뷰웹 상품 구성과 짝을 못 지어 금액 칸을 잠근 경우) = 상품 구성은 그대로.
+  //   빈 글자로 읽으면 "상품을 전부 지웠다" 로 판정된다.
+  if (b.product_options_json === undefined || b.product_options_json === null) { delete mine.product_options_json; delete mine.product_option; }
   return mine;
 }
 
@@ -877,13 +885,21 @@ async function _intakeSourceBidir(res, { b, source, current, optionsJson, delive
   }
   const out = await applySharedPatch({
     workOrderId: current.id,
-    mine: _sourceSharedMine(b, { optionsJson, deliveryType, courierProxy }, source),
+    mine: (() => {
+      const m = _sourceSharedMine(b, { optionsJson, deliveryType, courierProxy }, source);
+      // 인트라넷 수정 창이 리뷰웹 상품 구성과 짝을 못 지어 금액 칸을 잠갔다(`bidir.skip_products`) — 그 저장의 상품 구성·합계·요약은 받지 않는다.
+      //   인트라넷 사본은 옛 금액일 수 있어 그대로 받으면 리뷰웹 금액이 되돌아간다(검토 2026-10-20).
+      if (bid && (bid.skip_products === 1 || bid.skip_products === true)) { delete m.product_options_json; delete m.product_option; delete m.pay_amount; }
+      return m;
+    })(),
     baseVersion,
     origin: 'intranet',
     opId: bid && bid.op_id ? String(bid.op_id).slice(0, 120) : '',
     actor: requester || '인트라넷',
     forceMine: bid && Array.isArray(bid.force_mine) ? bid.force_mine.map(String).slice(0, 200) : [],
     conflictPolicy: 'last_writer',   // 겹친 칸 = 나중에 저장한 값 + 덮인 값 알림(사용자 확정 2026-10-20)
+    // ★ 5단계: 금액(리뷰비·상품 금액)은 금액을 아는 인트라넷(수신·수정 창이 금액을 받는 판)만 쓴다 — 옛 인트라넷은 옛 사본 금액을 늘 다시 보낸다.
+    moneyCapable: !!(bid && (bid.money === 1 || bid.money === true || bid.money === '1')),
     preHook: _sourceRevisionPreHook(source),
     extraSets: {
       source_revision: source.sourceRevision,
@@ -1254,7 +1270,7 @@ router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) 
       `SELECT * FROM work_orders WHERE source_review_order_id = $1 LIMIT 1`, [sid]);
     if (!rows.length || rows[0].deleted_at) return res.status(404).json({ ok: false, error: '작업오더를 찾을 수 없습니다.' });
     const sw = await readBidirSwitch(pool);
-    const { PHASE3_SHARED_FIELDS, INTRANET_EDITABLE_AFTER_ACCEPT, readSharedState } = require('../services/sharedPatch.service');
+    const { WRITABLE_BY_ORIGIN, readSharedState } = require('../services/sharedPatch.service');
     const active = rows[0].bidir_state === 'on' && sw.in2rw === 'apply';
     res.json({
       ok: true,
@@ -1262,7 +1278,8 @@ router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) 
       bidir_state: rows[0].bidir_state,
       bidir_active: active,
       sync_version: Number(rows[0].sync_version || 0),
-      writable: active ? [...PHASE3_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT] : null,
+      // 인트라넷 수정 창은 이 목록으로 잠금을 푼다(접수 뒤 잠금 목록에 더한다 · 5단계 리뷰비 포함). 상품 구성 안의 결제금액·주소는 키 단위로 이미 열려 있다.
+      writable: active ? [...WRITABLE_BY_ORIGIN.intranet] : null,
       /* ★★ 이 버전의 공유 값(저장 형태 그대로) — 인트라넷 수정 창은 이 값으로 연다.
          안 그러면 창이 인트라넷 사본(리뷰웹에서 고친 글 칸이 아직 안 온 값)으로 열리고, 손대지 않은 칸이
          "인트라넷이 되돌렸다" 로 읽혀 리뷰웹 수정을 조용히 덮는다(로컬 E2E 실측 2026-10-20). */

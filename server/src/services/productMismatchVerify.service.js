@@ -44,11 +44,19 @@ function __setPoolForTest(p) { _pool = p; }
 
 function isEnabled() { return String(process.env.CAMPAIGN_PRODUCT_VERIFY || '').trim() !== '0'; }
 
-async function _loadOptions(db, campaignId) {
+/**
+ * @param {Date|string|null} [at] 신청 시각 — 주면 결제금액을 **그 시각의 금액**으로 바꿔 돌려준다(결정 263 5단계 · D3).
+ *   금액을 중간에 바꾼 공고에서, 바꾸기 전에 신청해 옛 금액으로 정상 구매한 리뷰어가 "다른 상품 가격" 으로 걸리지 않게.
+ *   이력이 없는 옵션·조회 실패 = 지금 금액(종전 동작).
+ */
+async function _loadOptions(db, campaignId, at = null) {
   const { rows } = await db.query(
-    `SELECT opt_key, product_name, status, pay_amount FROM campaign_options WHERE campaign_id = $1 ORDER BY (status='closed'), sort_order, id`,
+    `SELECT id, opt_key, product_name, status, pay_amount FROM campaign_options WHERE campaign_id = $1 ORDER BY (status='closed'), sort_order, id`,
     [String(campaignId)]);
-  return rows;
+  if (!at || !rows.length) return rows;
+  const hist = await require('./campaignPriceHistory.service').optionPricesAt(db, campaignId, at);
+  if (!hist.size) return rows;
+  return rows.map(r => (hist.has(Number(r.id)) ? { ...r, pay_amount: hist.get(Number(r.id)) } : r));
 }
 
 /** 화면에 보일 상품 이름 — 공고에 적힌 이름 그대로(리뷰어가 참여할 때 본 이름). */
@@ -82,7 +90,7 @@ async function decideAtSubmit({ holdCtx, captureText, captureOption = '', captur
   if (!isEnabled()) return { action: 'none' };
   if (!holdCtx || !holdCtx.verified || !holdCtx.optionKey || holdCtx.doneKind) return { action: 'none' };
   try {
-    const opts = await _loadOptions(db, holdCtx.campaignId);
+    const opts = await _loadOptions(db, holdCtx.campaignId, holdCtx.appliedAt || null);
     if (opts.length < 2) return { action: 'none' };
     const held = String(holdCtx.optionKey);
     // 화면이 보낸 값은 **그 공고의 상품일 때만** 답으로 받는다 — 아니면 답이 없는 것으로 보고 아래 판정을 그대로 한다

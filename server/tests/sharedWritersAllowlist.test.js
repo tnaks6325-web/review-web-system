@@ -15,14 +15,21 @@ const path = require('path');
 const SRC = path.join(__dirname, '..', 'src');
 const SHARED = {
   work_orders: ['review_guide', 'special_notes', 'guide_images', 'inflow_guide', 'inflow_type', 'thumbnail_url', 'purchase_time',
-    'product_url', 'purchase_channel', 'purchase_channel_custom', 'required_delivery_memo', 'product_options_json'],
-  recruit_campaigns: ['work_detail', 'thumbnail_url', 'time_range', 'window_start', 'window_end', 'landing_url', 'channel', 'channel_custom'],
-  campaign_options: ['option_url', 'inflow_guide_html', 'inflow_guide_images'],
+    'product_url', 'purchase_channel', 'purchase_channel_custom', 'required_delivery_memo', 'product_options_json',
+    'review_fee', 'pay_amount', 'product_option'],   // 5단계 — 리뷰비 · 결제합계 · 상품 요약 문장
+  recruit_campaigns: ['work_detail', 'thumbnail_url', 'time_range', 'window_start', 'window_end', 'landing_url', 'channel', 'channel_custom',
+    'review_fee'],   // 5단계
+  campaign_options: ['option_url', 'inflow_guide_html', 'inflow_guide_images', 'pay_amount'],   // 5단계 — 옵션 결제금액
 };
 /** 파일|함수(또는 라우트)|표 → 왜 괜찮은가. */
 const ALLOW = {
-  'routes/campaign.routes.js|_scopedCampaignEdit|recruit_campaigns': '연결 공고면 scopedEditSharedBlock 이 공유 칸 변경을 먼저 막는다(③)',
-  'routes/campaign.routes.js|/admin/:id|recruit_campaigns': '연결 공고면 applyCampaignSharedSave 뒤 공유 칸 매개변수를 비운다(_bx · $52)',
+  'routes/campaign.routes.js|_scopedCampaignEdit|recruit_campaigns': '연결 공고면 scopedEditSharedBlock 이 공유 칸 변경을 먼저 막는다(③) · 리뷰비는 같은 값도 다시 쓰지 않는다($17)',
+  'routes/campaign.routes.js|/admin/:id|recruit_campaigns': '연결 공고면 applyCampaignSharedSave 뒤 공유 칸 매개변수를 비운다(_bx · $52 · 리뷰비 $8)',
+  'services/campaignFeeChange.service.js|applyFeeChangeInTx|recruit_campaigns': '공유 저장 투영(리뷰비 — 지난 참여 금액 고정 · 구간과 함께 · 5단계)',
+  'services/payment.service.js|saveTransferSetting|recruit_campaigns': '연결 공고면 바뀌는 리뷰비를 거부한다(bidirLinkActive · 5단계) — 이체은행·통장표시는 공유 칸 아님',
+  'services/sharedPatch.service.js|_projectPayInTx|recruit_campaigns': '공유 저장 투영(옵션 없는 공고의 상품 금액 · 5단계)',
+  'services/sharedPatch.service.js|_projectPayInTx|campaign_options': '공유 저장 투영(옵션 금액 · 금액 이력과 함께 · 5단계)',
+  'services/campaignPayAmountSync.service.js|syncCampaignPayAmount|campaign_options': '옛 원본 수정 경로의 전파(금액) — 연결+apply 오더는 _intakeSourceBidir 로 갈라져 여기 오지 않는다',
   'routes/order.routes.js|_intakeSourceRevisionHandler|work_orders': '연결+apply 면 그 앞에서 _intakeSourceBidir 로 갈라진다(종전 경로 = 연결 안 됨·스위치 off)',
   'services/campaignPayAmountSync.service.js|syncCampaignPayAmount|recruit_campaigns': '옛 원본 수정 경로의 전파(금액 — 5단계)',
   'services/campaignPayAmountSync.service.js|syncCampaignThumbnailInTx|recruit_campaigns': '공유 저장 투영 본체(트랜잭션 안) + 옛 래퍼',
@@ -90,6 +97,11 @@ function scan() {
   const camp = fs.readFileSync(path.join(SRC, 'routes/campaign.routes.js'), 'utf8');
   assert.match(camp, /scopedEditSharedBlock\(\{ campaignId: id, body: b \}\)/);
   assert.match(camp, /\.applyCampaignSharedSave\(\{ campaignId: id, body: req\.body/);
+  // 5단계 — 리뷰비를 쓰는 옛 경로들
+  assert.match(camp, /review_fee=CASE WHEN \$17::boolean THEN review_fee ELSE \$5 END/, '리뷰어앱 스코프 편집: 연결 공고면 리뷰비를 다시 쓰지 않는다');
+  const pay = fs.readFileSync(path.join(SRC, 'services/payment.service.js'), 'utf8');
+  const sts = pay.slice(pay.indexOf('async function saveTransferSetting('), pay.indexOf('async function saveTransferSetting(') + 6000);
+  assert.ok(sts.indexOf("'bidir_linked_fee'") > 0 && sts.indexOf("'bidir_linked_fee'") < sts.indexOf('UPDATE recruit_campaigns'), '입금관리 공고 리뷰비: 연결 공고면 쓰기 전에 거부');
 }
 
 // ④ 새 오더의 연결 판정(공고 발행 뒤) — 스위치 off 면 안 함 · 실패해도 발행 성공

@@ -152,4 +152,4 @@ function planSharedPatch({ base, mine, theirs, origin, forceMine = [] }) {
   return out;
 }
 
-module.exports = { flattenState, planSharedPatch, pathOwner, ABSENT };
+module.exports = { flattenState, planSharedPatch, pathOwner, ABSENT, optionKey: _optionKey };

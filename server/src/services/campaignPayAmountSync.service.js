@@ -93,7 +93,7 @@ async function syncCampaignPayAmount({ workOrderId, productOptionsJson, by = 'so
 
     // ── ㉮ 살아있는 공고 옵션이 있으면 옵션명으로 짝지어 숫자 칸만 갱신 ──────────────
     const { rows: liveOpts } = await client.query(
-      `SELECT opt_key, pay_amount FROM campaign_options
+      `SELECT id, opt_key, pay_amount FROM campaign_options
         WHERE campaign_id = $1 AND COALESCE(status,'active') <> 'closed' FOR UPDATE`, [camp.id]);
 
     if (liveOpts.length) {
@@ -111,6 +111,9 @@ async function syncCampaignPayAmount({ workOrderId, productOptionsJson, by = 'so
         await client.query(
           'UPDATE campaign_options SET pay_amount = $3, updated_at = NOW() WHERE campaign_id = $1 AND opt_key = $2',
           [camp.id, o.opt_key, next]);
+        // 결정 263 5단계 — 잘못구매 판정이 "신청한 시각의 금액" 을 찾게 이력을 남긴다(실패해도 전파는 계속).
+        await require('./campaignPriceHistory.service').recordOptionPriceChangeInTx(client,
+          { campaignId: camp.id, optionId: o.id, oldPay: o.pay_amount, newPay: next, actor: `리뷰오더(${by})` });
         changed += 1;
       }
       await client.query('COMMIT');

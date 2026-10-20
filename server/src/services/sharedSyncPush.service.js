@@ -19,7 +19,7 @@ const crypto = require('crypto');
 const getPool = () => require('../db/pool');
 const { logger } = require('../utils/logger');
 const { readBidirSwitch } = require('../utils/bidirSwitch');
-const { readSharedState, PHASE3_SHARED_FIELDS } = require('./sharedPatch.service');
+const { readSharedState, PUSH_VIEW_KEYS } = require('./sharedPatch.service');
 
 const BATCH = 20;
 const MAX_ATTEMPTS = 60;
@@ -48,11 +48,11 @@ function classifyResponse(status, body) {
   return { next: 'retry', result: code || result || `http_${status}` };
 }
 
-/** 보낼 본문 — 3단계 글 칸만(인트라넷 수정 창이 덮는 칸과 같다). */
+/** 보낼 본문 — 3단계 글 칸 + 5단계 금액(리뷰비 · 상품 구성 · 결제합계 · 상품 요약 문장). 인트라넷 수정 창이 덮는 칸과 같다. */
 function buildPushBody(wo) {
   const state = readSharedState(wo);
   const view = {};
-  for (const k of PHASE3_SHARED_FIELDS) if (Object.prototype.hasOwnProperty.call(state, k)) view[k] = state[k];
+  for (const k of PUSH_VIEW_KEYS) if (Object.prototype.hasOwnProperty.call(state, k)) view[k] = state[k];
   return { event: 'shared_state', source_review_order_id: String(wo.source_review_order_id || ''), work_order_id: wo.id, sync_version: Number(wo.sync_version), view };
 }
 

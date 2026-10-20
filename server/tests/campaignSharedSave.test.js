@@ -32,8 +32,13 @@ const read = (rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
   assert.match(put, /_bx,\s*\/\/ \$52/);
   const svc = read('src/services/campaignSharedSave.service.js');
   const svcKeys = svc.match(/WD_SHARED_KEYS = Object\.freeze\(\[([^\]]+)\]/)[1].replace(/[\s']/g, '');
-  const sqlKeys = put.match(/unnest\(ARRAY\[([^\]]+)\]\)/)[1].replace(/[\s']/g, '');
+  // ★ 5단계: 목록 뒤에 조건부 productLines($54)가 붙어 닫는 괄호가 뒤로 갔다 — 목록 자체 비교는 그대로(검사 의미 불변).
+  const sqlKeys = put.match(/unnest\(ARRAY\[([^\]]+)\]/)[1].replace(/[\s']/g, '');
   assert.equal(sqlKeys, svcKeys, 'SQL 공유 하위 칸 목록 = 서비스 목록');
+  assert.match(put, /\|\| CASE WHEN \$54::boolean THEN ARRAY\['productLines'\] ELSE ARRAY\[\]::text\[\] END\) AS k/, '상품 안내 글은 리뷰오더에서 금액이 바뀐 경우에만 DB 값 유지');
+  assert.match(put, /_bx && bidirEdit\.keepProductLines === true,\s*\/\/ \$54/);
+  assert.match(put, /delivery_type, _bx \? null : \(review_fee \|\| 0\),/, '연결 공고의 리뷰비는 공유 저장이 쓴다');
+  assert.match(put, /const normFees = _bx \? null : normalizeFeeSchedules\(fee_schedules\);/, '연결 공고는 기간표를 다시 쓰지 않는다');
   assert.match(svc, /if \(sw\.campaign_edit !== 'on'\) return \{ active: false \};/, '스위치 off = 종전 저장');
   const sc = r.slice(r.indexOf('async function _scopedCampaignEdit('), r.indexOf('async function _scopedCampaignEdit(') + 9000);
   assert.ok(sc.indexOf('scopedEditSharedBlock(') > 0 && sc.indexOf('scopedEditSharedBlock(') < sc.indexOf('UPDATE recruit_campaigns'), '리뷰어앱 스코프 편집도 공유 칸을 막는다');
@@ -48,7 +53,10 @@ const read = (rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
   assert.match(put, /if \(req\._bidirShared\) \{[\s\S]{0,300}shared: req\._bidirShared \}\);/, '실패 응답에도 공유 저장 결과');
   assert.match(ui, /window\._rfBidirBase = null;/, '다른 공고 열 때 지운다');
   const sp = read('src/services/sharedPatch.service.js');
-  assert.match(sp, /campaign: new Set\(PHASE3_SHARED_FIELDS\)/);
+  // ★ 5단계: 금액 칸(리뷰비)이 더해졌다 — 공고 창발은 여전히 인트라넷 고유 칸을 못 쓴다(검사 의미 불변 · 강화).
+  assert.match(sp, /campaign: new Set\(\[\.\.\.PHASE3_SHARED_FIELDS, \.\.\.PHASE5_SHARED_FIELDS\]\)/);
+  assert.doesNotMatch(sp.match(/\n  campaign: new Set\([^\n]*/)[0], /INTRANET_EDITABLE_AFTER_ACCEPT/, '공고 창발에 인트라넷 고유 칸 없음');
+  assert.match(sp, /const PHASE5_SHARED_FIELDS = Object\.freeze\(\['review_fee'\]\);/);
   console.log('campaignSharedSave: static passed');
 }
 
