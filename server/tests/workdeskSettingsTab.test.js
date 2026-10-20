@@ -113,7 +113,7 @@ t('★ 패널 노출 = 서버 게이트와 1:1(전사 설정은 AE 에게 안 �
   (() => {
     const m = /isAdmin \? \[([^\]]*)\] : \[([^\]]*)\]/.exec(wdk);
     if (!m) return false;
-    const adminOnly = ['business', 'aisamples', 'inspectmsg', 'worktable', 'homebanner', 'notice'];
+    const adminOnly = ['business', 'aisamples', 'inspectmsg', 'worktable', 'homebanner', 'notice', 'staffnotice'];   // staffnotice = 결정 265
     return adminOnly.every(p => m[1].includes(`'${p}'`) && !m[2].includes(`'${p}'`))
       && m[2].includes("'nickname'");
   })());
@@ -133,7 +133,7 @@ t('경로 매핑이 기본값·접미사 양쪽에 같은 키를 갖는다(한�
     const g = re => [...mod.matchAll(re)].map(m => m[1]);
     const a = g(/^\s{4}(\w+):\s+"\/api\//gm);
     const b = g(/^\s{4}(\w+):\s+"\/(?!api)/gm);
-    return a.length === 10 && a.join(',') === b.join(',');
+    return a.length === 13 && a.join(',') === b.join(',');   // 13 = 결정 265 직원 공지 3키 추가(검사 의미 불변)
   })());
 
 // 실제 실행 — 전역이 하나도 없는 가짜 DOM 에서 mount() 가 도는지

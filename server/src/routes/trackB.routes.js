@@ -2743,6 +2743,47 @@ router.post('/settings/manager-cleanup', authMiddleware, adminOrMasterMiddleware
 router.post('/settings/delivery-type-cleanup', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
   _setHandlers.deliveryTypeCleanup(req, res, next));
 
+/* ── 직원 공지(로그인 팝업) — 옛 관리자 대시보드에서 작업보드로 이관 (결정 265 · 사용자 확정 2026-10-20) ──
+   ★ 표·로직은 그대로다 — `admin_notices`·`admin_notice_reads` 와 `/api/admin/notices*` 핸들러에 위임한다(사본 0).
+   ★ Track B 경로에 두는 이유 = 위 설정과 같다(인트라넷 SSO 토큰은 `/api/admin/*` 미도달).
+   ★ 권한:
+       · 팝업(안 읽은 공지 조회 · 읽음 기록) = 내부인 전원(master/admin/staff) — 원본은 authMiddleware 만이지만 광고주는 받을 이유가 없다.
+       · 작성·수정·삭제·전체 목록 = adminOrMaster. 원본은 masterOnly 였으나 작업보드에는 마스터 로그인이 사실상 없다 —
+         관리자 판정은 결정 257 과 같은 인트라넷 지정 관리자(verifyIntranetIdentity)를 따른다.
+   ★ 화면 모듈(admin-settings.js)은 POST 두 개로 부른다 — 저장(id 있으면 수정)·삭제를 원본 PUT/DELETE 핸들러로 넘긴다. */
+const _staffNotice = {
+  unread: _delegate(_adminRoutes, 'get', '/notices/unread'),
+  read:   _delegate(_adminRoutes, 'post', '/notices/read'),
+  all:    _delegate(_adminRoutes, 'get', '/notices/all'),
+  create: _delegate(_adminRoutes, 'post', '/notices'),
+  update: _delegate(_adminRoutes, 'put', '/notices/:id'),
+  remove: _delegate(_adminRoutes, 'delete', '/notices/:id'),
+};
+function _staffNoticeId(req) {
+  const id = req.body && req.body.id;
+  if (id == null || id === '') return null;
+  return /^\d{1,9}$/.test(String(id)) ? String(id) : undefined;
+}
+router.get('/staff-notices/unread', authMiddleware, internalMiddleware, (req, res, next) =>
+  _staffNotice.unread(req, res, next));
+router.post('/staff-notices/read', authMiddleware, internalMiddleware, (req, res, next) =>
+  _staffNotice.read(req, res, next));
+router.get('/settings/staff-notices', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _staffNotice.all(req, res, next));
+router.post('/settings/staff-notices/save', authMiddleware, adminOrMasterMiddleware, (req, res, next) => {
+  const id = _staffNoticeId(req);
+  if (id === undefined) return res.status(400).json({ success: false, error: '공지 번호가 올바르지 않습니다.' });
+  if (id === null) return _staffNotice.create(req, res, next);
+  req.params = Object.assign({}, req.params, { id });
+  return _staffNotice.update(req, res, next);
+});
+router.post('/settings/staff-notices/delete', authMiddleware, adminOrMasterMiddleware, (req, res, next) => {
+  const id = _staffNoticeId(req);
+  if (!id) return res.status(400).json({ success: false, error: '공지 번호가 올바르지 않습니다.' });
+  req.params = Object.assign({}, req.params, { id });
+  return _staffNotice.remove(req, res, next);
+});
+
 /* ══════════════════════════════════════════════════════════════
    시스템 오류로그 — 리뷰웹시스템[3버전] 「로그」 탭의 두 번째 서브탭
 
