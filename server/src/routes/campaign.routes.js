@@ -3754,6 +3754,13 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     // 그 사이 글자도 안 바뀌었으면(windowsWritable) 종전처럼 화면 시각을 쓴다 — 시각이 비어 있던 공고가 저장으로 바로잡힌다.
     const _bxWin = _bx && bidirEdit.participation && !bidirEdit.windowsWritable;
     const _bxLanding = _bx && bidirEdit.landingShared; // 랜딩은 링크유입일 때만 공유 칸
+    /* ★ 7단계-③(검토 2026-10-21): 연결 공고의 주말 제외는 공유 저장이 쓴다. 다만 오더·공고가 이미 갈라진 공고에서 사람이 공고 값을
+       오더 값으로 되돌리면 공유 저장은 쓸 것이 없다(오더는 그대로) — 그때만 공고 칸을 오더 값으로 맞춘다. 오더와 다른 값은 절대 쓰지 않는다. */
+    let _bxWeekendAlign = null;
+    if (_bx && typeof skip_weekends === 'boolean') {
+      const { rows: wk } = await pool.query('SELECT skip_weekends FROM work_orders WHERE id = $1', [bidirEdit.link.wo.id]);
+      _bxWeekendAlign = wk.length && (wk[0].skip_weekends === true || wk[0].skip_weekends === false) ? wk[0].skip_weekends : null;
+    }
     if (_bx && normOpts) {
       await require('../services/campaignSharedSave.service')
         .protectOptionLeaves({ normOpts, link: bidirEdit.link, baseVersion: req.body && req.body.bidir_base_sync_version });
@@ -3890,7 +3897,8 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         // $42 ★ 099: undefined/null=유지. ''=미지정으로 해제. 파정 불가값도 ''(=해제)로 접지 않고
         //   workKindForStore 가 review 로 정규화한다(모르는 문자열이 blog 로 승격되는 일 없음).
         (work_kind === undefined || work_kind === null) ? null : workKindForStore(work_kind),
-        (skip_weekends === undefined || skip_weekends === null) ? null : skip_weekends === true,
+        (skip_weekends === undefined || skip_weekends === null) ? null
+          : (!_bx ? skip_weekends === true : (_bxWeekendAlign === (skip_weekends === true) ? _bxWeekendAlign : null)),   // 7단계-③: 연결 공고는 오더 값과 같을 때만(맞추기)
         (cash_receipt_required === undefined || cash_receipt_required === null) ? null : cash_receipt_required === true,
         intentionallyUnlinked,                                   // $45
         // $46~$48 ★ 135: null=유지 / []·''=해제(기본형을 벗어나면 위에서 그렇게 정해진다).

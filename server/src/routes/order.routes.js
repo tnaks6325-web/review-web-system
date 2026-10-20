@@ -904,6 +904,8 @@ async function _intakeSourceBidir(res, { b, source, current, optionsJson, delive
     guideCapable: !!(bid && (bid.guide === 1 || bid.guide === true || bid.guide === '1')),
     // ★ 7단계-②: 인원·일건수도 같은 장치 — 인원을 받는 인트라넷만(옛 인트라넷은 잠긴 인원 칸의 옛 사본 값을 다시 보낸다)
     countsCapable: !!(bid && (bid.counts === 1 || bid.counts === true || bid.counts === '1')),
+    // ★ 7단계-③: 주말 제외도 같은 장치 — 주말을 받는 인트라넷만(옛 인트라넷은 잠긴 주말 칸의 옛 사본 값을 다시 보낸다)
+    weekendsCapable: !!(bid && (bid.weekends === 1 || bid.weekends === true || bid.weekends === '1')),
     preHook: _sourceRevisionPreHook(source),
     extraSets: {
       source_revision: source.sourceRevision,

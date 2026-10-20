@@ -94,7 +94,7 @@ async function applyCampaignSharedSave({ campaignId, body, actor, db } = {}) {
     const money = moneyDriftFromCampaign(camp, b, campOptions);
     if (money.length && !drift.length) {
       return { response: { status: 409, body: { ok: false, code: 'stale_editor', fields: money,
-        error: `리뷰오더와 맞춰지는 공고라 이 창에서는 ${money.join('·')}을 바꿀 수 없습니다. 모집공고 편집 창(전체 편집)을 새로 열어 바꾸거나 리뷰오더에서 바꿔 주세요.` } } };
+        error: `리뷰오더와 맞춰지는 공고라 이 창에서는 다음 칸을 바꿀 수 없습니다: ${money.join('·')}. 모집공고 편집 창(전체 편집)을 새로 열어 바꾸거나 리뷰오더에서 바꿔 주세요.` } } };
     }
     if (drift.length) {
       const all = [...drift, ...money];
@@ -231,12 +231,13 @@ function _countFieldsChanged(camp, b) {
   const sent = v => v !== undefined && v !== null && v !== '';
   if (sent(b.recruit_total) && (Number(b.recruit_total) || 0) !== (Number(camp.recruit_total) || 0)) out.push('총모집');
   if (sent(b.daily_limit) && (Number(b.daily_limit) || 0) !== (Number(camp.daily_limit) || 0)) out.push('일 진행 건수');
+  if (typeof b.skip_weekends === 'boolean' && b.skip_weekends !== (camp.skip_weekends === true)) out.push('주말 제외');   // 7단계-③
   return out;
 }
 
 function _countsPausedBlock(fields) {
   return { status: 409, body: { ok: false, code: 'counts_link_paused', fields,
-    error: `리뷰오더와 연결된 공고의 인원(${fields.join(', ')})은 지금 이 화면에서 바꿀 수 없습니다 — 연결 저장이 잠시 꺼져 있습니다. 인트라넷 리뷰오더에서 바꾸거나, 연결 저장이 다시 켜진 뒤 고쳐 주세요.` } };
+    error: `리뷰오더와 연결된 공고의 작업표 칸(${fields.join(', ')})은 지금 이 화면에서 바꿀 수 없습니다 — 연결 저장이 잠시 꺼져 있습니다. 인트라넷 리뷰오더에서 바꾸거나, 연결 저장이 다시 켜진 뒤 고쳐 주세요.` } };
 }
 
 /**

@@ -557,6 +557,14 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
       }
     }
   }
+  // ⑤ 7단계-③ 주말 제외 — 참·거짓을 보냈고 기준(창을 연 버전)과 다를 때만(안 보냄 = 손대지 않음)
+  //   ★ "바꿨다" = 기준(오더)과도 지금 공고 값과도 다를 때 — 공고 창은 공고 값으로 열린다. 오더·공고가 이미 갈라진 공고에서 손대지 않은 저장이
+  //     오더를 공고 값으로 뒤집지 않게(검토 2026-10-21). 오더 값으로 되돌리는 토글은 공유 저장이 쓸 게 없어 공고 칸만 맞춘다(campaign.routes).
+  if (typeof b.skip_weekends === 'boolean' && b.skip_weekends !== (CANON.bool(base.skip_weekends) === '1')
+      && b.skip_weekends !== ((camp || {}).skip_weekends === true)) {
+    mine.skip_weekends = b.skip_weekends;
+    changed.push('주말 제외');
+  }
   // ④ 7단계-② 인원·일건수·리뷰타입 혼합 수량
   const q = _planQuantityEdit({ base, products, baseRows, liveCampOpts, body: b, edited });
   unmappable.push(...q.unmappable);
@@ -577,6 +585,8 @@ function moneyDriftFromCampaign(camp, body, campOptions = []) {
   // 7단계-② — 총모집·일 진행 건수·옵션 인원(옛 화면은 기준 버전을 몰라 받지 않는다)
   if (b.recruit_total !== undefined && b.recruit_total !== null && b.recruit_total !== '' && CANON.int(b.recruit_total) !== CANON.int(c.recruit_total)) out.push('총모집');
   if (b.daily_limit !== undefined && b.daily_limit !== null && b.daily_limit !== '' && CANON.int(b.daily_limit) !== CANON.int(c.daily_limit)) out.push('일 진행 건수');
+  // 7단계-③ — 주말 제외(옛 화면은 기준 버전을 몰라 받지 않는다)
+  if (typeof b.skip_weekends === 'boolean' && b.skip_weekends !== (c.skip_weekends === true)) out.push('주말 제외');
   const live = (campOptions || []).filter(r => String(r.status || '') !== 'deleted');
   if (Array.isArray(b.options) && live.length) {
     const now = new Map(live.map(r => [String(r.opt_key || ''), CANON.int(r.pay_amount)]));

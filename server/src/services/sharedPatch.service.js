@@ -36,18 +36,20 @@ const PHASE5_SHARED_FIELDS = Object.freeze(['review_fee']);
 /** 7단계-② 인원·일건수 — 총모집·일 진행 건수·리뷰타입 혼합 수량(유형 구성은 그대로일 때만 · `writablePath`).
  *  상품 구성 안의 인원·일건수·혼합 수량은 경로로 연다. */
 const PHASE7Q_SHARED_FIELDS = Object.freeze(['recruit_count', 'daily_count', 'review_type_mix']);
+/** 7단계-③ 주말 제외(주말·공휴일 모집 닫힘 + 작업표 빈 줄 날짜) — 참·거짓만(빈 값 = "아직 안 정함" 은 쓰지 않는다). */
+const PHASE7W_SHARED_FIELDS = Object.freeze(['skip_weekends']);
 /** 리뷰웹 → 인트라넷으로 보내는 칸(수정 창이 리뷰웹 값으로 덮는 칸과 같다). 상품 구성·합계·요약은 금액이 함께 움직이는 짝. */
-const PUSH_VIEW_KEYS = Object.freeze([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, 'pay_amount', 'product_options_json', 'product_option']);
+const PUSH_VIEW_KEYS = Object.freeze([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, 'pay_amount', 'product_options_json', 'product_option']);
 /** 인트라넷 고유 칸 중 접수 뒤에도 고칠 수 있는 것 — 종전 원본 수정 허용 목록·계약 후속 매칭과 같은 범위. */
 const INTRANET_EDITABLE_AFTER_ACCEPT = Object.freeze([
   'title', 'manager_name', 'inflow_keyword', 'sales_id', 'quote_id', 'contract_number', 'intranet_advertiser_id',
 ]);
 /** 리뷰웹발 수정(관리자 오더 수정)이 쓸 수 있는 칸 — 인트라넷 고유는 제외. */
 const WRITABLE_BY_ORIGIN = {
-  intranet: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
-  reconcile: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
-  rw_admin: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS]),
-  campaign: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS]),   // 4단계-2 공고 편집 창(campaignSharedSave) — 리뷰웹발이라 인트라넷 고유 칸은 제외
+  intranet: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
+  reconcile: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
+  rw_admin: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS]),
+  campaign: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS]),   // 4단계-2 공고 편집 창(campaignSharedSave) — 리뷰웹발이라 인트라넷 고유 칸은 제외
 };
 const KNOWN_CHANNELS = new Set(['쿠팡', '네이버', '올리브영', '카카오메이커스']);
 const SNAPSHOT_KEYS = Object.freeze([...SHARED_FIELDS.map(f => f.key), 'product_options_json', 'product_option']);
@@ -103,6 +105,12 @@ function _baseQuantityOrPayOnly(row) {
   return strip(b) === strip(m);
 }
 
+/** 참·거짓 값인가 — 판정 행은 정규화 값('1'·'0' · 빈 값 = 'unset')이다(sharedFields canon bool). */
+function _isBoolValue(v) {
+  if (v === ABSENT || v == null) return false;
+  return CANON.bool(v) === '1' || CANON.bool(v) === '0';
+}
+
 /** 7단계-② 인원 경로인가(총모집·일건수·혼합 수량 칸 · 옵션 count/daily/review_type_mix · base 의 인원 쪽 차이). */
 function _isQuantityPath(w) {
   const m = w.meta || {};
@@ -120,6 +128,8 @@ function writablePath(row, origin) {
   const m = row.meta || {};
   if (m.kind === 'field') {
     if (m.key === 'review_type_mix') return set.has(m.key) && _mixQuantityOnly(row.base, row.mine);
+    // 7단계-③ 주말 제외 — 참·거짓으로만 바꾼다(비우기 = "아직 안 정함" 은 연결된 오더에서 둘 수 없다)
+    if (m.key === 'skip_weekends') return set.has(m.key) && _isBoolValue(row.mine);
     return set.has(m.key);
   }
   if (m.kind !== 'leaf') return false;
@@ -172,6 +182,7 @@ function _display(path, v) {
   if (v === ABSENT || v === undefined) return '(없음)';
   if (v === null || v === '') return '(빈칸)';
   if (path === 'f:guide_images') { const l = _parseList(v); if (l) return l.length ? `사진 ${l.length}장` : '(사진 없음)'; }
+  if (path === 'f:skip_weekends') { const b = CANON.bool(v); return b === '1' ? '주말 제외' : b === '0' ? '주말 포함' : '(정하지 않음)'; }
   if (/\.guide$/.test(path)) {
     try { const g = JSON.parse(String(v)); const t = String(g && g.text || '').trim(); const n = Array.isArray(g && g.images) ? g.images.length : 0;
       return `${t ? (t.length > 200 ? t.slice(0, 200) + '…' : t) : '(글 없음)'}${n ? ` · 사진 ${n}장` : ''}`; } catch (_) { /* 원문 */ }
@@ -183,7 +194,8 @@ function _display(path, v) {
 /** 인트라넷발 저장 뒤 — 보낸 값(mine)과 저장 결과가 다른 공유 글 칸(인트라넷이 받아 가야 할 칸). 정규화 값으로 비교. */
 function _pushBackKeys(mine, saved) {
   const { canon } = require('../utils/sharedFields');
-  const keys = [...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS].filter(k => mine && Object.prototype.hasOwnProperty.call(mine, k)
+  // 7단계 칸(인원·주말)도 — 옛 창이 보낸 값을 버린 저장이면 인트라넷 사본이 낡았으니 받아 가게 한다(검토 2026-10-21)
+  const keys = [...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS].filter(k => mine && Object.prototype.hasOwnProperty.call(mine, k)
     && canon(k, mine[k]) !== canon(k, saved[k]));
   if (mine && mine.pay_amount !== undefined && mine.pay_amount !== null && mine.pay_amount !== ''
       && canon('pay_amount', mine.pay_amount) !== canon('pay_amount', saved.pay_amount)) keys.push('pay_amount');
@@ -570,11 +582,19 @@ async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTo
     if (r.applied) applied.push('review_fee');
   }
   let after = null;
+  // 7단계-③ 주말 제외 → 공고(주말·공휴일 모집 닫힘 판정 단일 출처 campaignWeekend 가 읽는 칸). 날짜별로 직접 정해 둔 인원은 그대로 두고
+  //   (사용자 확정 2026-10-21 「가」) 작업표 빈 줄 날짜만 커밋 뒤 다시 배치한다.
+  if (has('skip_weekends')) {
+    const want = CANON.bool(next.skip_weekends) === '1';   // 참·거짓 판정은 writablePath 와 같은 정규화(검토 2026-10-21)
+    const { rowCount } = await client.query(
+      'UPDATE recruit_campaigns SET skip_weekends = $2, updated_at = NOW() WHERE id = $1 AND skip_weekends IS DISTINCT FROM $2', [camp.id, want]);
+    if (rowCount) { applied.push('weekends'); after = { ...(after || {}), relay: true }; }
+  }
   if (extra.quantityChanged) {
     const r = await _projectQuantityInTx(client, camp, extra.prev || {}, next);
     if (r.reject) return { reject: r.reject };
     if (r.applied) applied.push('quantity');
-    after = r.after || null;
+    if (r.after) after = { ...(after || {}), ...r.after, relay: !!((after && after.relay) || r.after.relay) };
   }
   if (extra.guideTouched) {
     const r = await _projectGuideInTx(client, camp, extra.prev || {}, next);
@@ -751,6 +771,16 @@ async function applySharedPatch(p) {
         logger.info(`[bidir/apply] ${wo.id} 인원을 모르는 옛 인트라넷 저장 — 인원 칸은 받지 않음: ${dq.join(', ')}`);
       }
     }
+    // ★ 7단계-③ 같은 장치 — 주말을 모르는 인트라넷(`bidir.weekends` 없음)은 잠긴 주말 칸의 옛 사본 값을 다시 보낸다 → 받지 않는다(기록)
+    if (p.origin === 'intranet' && p.weekendsCapable === false) {
+      const isW = w => w.meta && w.meta.kind === 'field' && PHASE7W_SHARED_FIELDS.includes(w.meta.key);
+      const dw = [...plan.writes, ...plan.conflicts].filter(isW).map(w => w.path);
+      if (dw.length) {
+        plan.writes = plan.writes.filter(w => !isW(w));
+        plan.conflicts = plan.conflicts.filter(w => !isW(w));
+        logger.info(`[bidir/apply] ${wo.id} 주말을 모르는 옛 인트라넷 저장 — 주말 칸은 받지 않음`);
+      }
+    }
     let droppedMoney = [];
     if (p.moneyCapable === false) {
       const isMoney = w => { const m = w.meta || {};
@@ -818,7 +848,8 @@ async function applySharedPatch(p) {
     for (const k of writtenKeys) {
       if (!ORDER_COLUMNS.has(k) || !/^[a-z_]+$/.test(k)) continue;
       // JSON 칸(리뷰 혼합 수량)은 글자로 넘긴다 — 배열을 그대로 넘기면 드라이버가 PG 배열로 바꾼다
-      const v = (k === 'review_type_mix' && next[k] != null && typeof next[k] !== 'string') ? JSON.stringify(next[k]) : next[k];
+      let v = (k === 'review_type_mix' && next[k] != null && typeof next[k] !== 'string') ? JSON.stringify(next[k]) : next[k];
+      if (k === 'skip_weekends') v = CANON.bool(v) === '1';   // 7단계-③ 참·거짓만(writablePath 가 걸렀다 · 같은 정규화)
       sets.push(`${k} = ${add(v)}`);
     }
     if (productsTouched) {
@@ -951,5 +982,5 @@ async function linkSharedOrder({ workOrderId, actor = '', dryRun = false, db } =
 
 module.exports = {
   applySharedPatch, linkSharedOrder, readSharedState, applyWrites, writablePath, projectToCampaignInTx, derivePayFields, validateQuantities,
-  PHASE3_SHARED_FIELDS, PHASE5_SHARED_FIELDS, PHASE7Q_SHARED_FIELDS, PUSH_VIEW_KEYS, WRITABLE_BY_ORIGIN, INTRANET_EDITABLE_AFTER_ACCEPT, NEXT_VERSION_SQL, _pushBackKeys,
+  PHASE3_SHARED_FIELDS, PHASE5_SHARED_FIELDS, PHASE7Q_SHARED_FIELDS, PHASE7W_SHARED_FIELDS, PUSH_VIEW_KEYS, WRITABLE_BY_ORIGIN, INTRANET_EDITABLE_AFTER_ACCEPT, NEXT_VERSION_SQL, _pushBackKeys,
 };

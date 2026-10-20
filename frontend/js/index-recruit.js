@@ -3184,6 +3184,11 @@ function _rfCountChanges(payload) {
       if (a !== null && b !== null && a !== b) out.lines.push("인원(" + (o.optKey || o.productName) + ") " + b + "명 → " + a + "명");
     });
   }
+  // 7단계-③ — 주말 제외(빈 줄 구매일이 다시 배치된다)
+  if (typeof payload.skip_weekends === "boolean" && payload.skip_weekends !== (loaded.skip_weekends === true)) {
+    out.lines.push(payload.skip_weekends ? "주말 포함 → 주말 제외" : "주말 제외 → 주말 포함");
+    out.weekends = payload.skip_weekends ? "off" : "on";
+  }
   return out;
 }
 
@@ -5781,13 +5786,16 @@ async function saveRecruitPostImpl() {
     // 7단계-② — 인원(총모집·일 진행 건수·옵션 인원)은 작업표 줄과 구매일 배치까지 바뀐다
     const _cnt = _rfCountChanges(payload);
     if (_money.length || _cnt.lines.length) {
-      const _what = _money.length && _cnt.lines.length ? "금액·인원을" : _cnt.lines.length ? "인원을" : "금액을";
+      const _hasCnt = _cnt.lines.length > (_cnt.weekends ? 1 : 0), _hasWk = !!_cnt.weekends;
+      const _what = [_money.length ? "금액" : "", _hasCnt ? "인원" : "", _hasWk ? "주말 설정" : ""].filter(Boolean).join("·") + "을";
       const _notes = [];
       if (_money.length) _notes.push("결제금액을 바꾸면 리뷰어 화면 금액이 바로 바뀝니다. 이미 참여한 분은 참여할 때 금액으로 잘못구매를 판정합니다."
         + "\n리뷰비는 오늘부터 참여하는 분에게 새 금액이 적용되고, 이미 참여한 분은 참여할 때 금액 그대로입니다.");
       if (_cnt.delta > 0) _notes.push("작업표에 빈 줄이 " + _cnt.delta + "줄 늘어납니다.");
       else if (_cnt.delta < 0) _notes.push("작업표의 빈 줄이 " + (-_cnt.delta) + "줄 정리됩니다. 이미 참여한 분의 줄은 지우지 않습니다(참여 인원보다 적게는 줄일 수 없습니다).");
       if (_cnt.daily) _notes.push("일 진행 건수를 바꾸면 작업표에서 아직 참여자가 없는 빈 줄의 구매일을 다시 배치합니다.");
+      if (_cnt.weekends === "off") _notes.push("주말 제외로 바꾸면 오늘부터 주말·공휴일에는 모집이 닫히고, 작업표 빈 줄의 구매일이 다시 배치됩니다. 참여자가 채운 줄은 그대로이고, 날짜별로 직접 정해 둔 인원도 그대로입니다.");
+      else if (_cnt.weekends === "on") _notes.push("주말 포함으로 바꾸면 주말·공휴일에도 모집이 열리고, 작업표 빈 줄의 구매일이 다시 배치됩니다. 참여자가 채운 줄은 그대로이고, 날짜별로 직접 정해 둔 인원도 그대로입니다.");
       if (!confirm(_what + " 바꿉니다 — 리뷰오더(인트라넷)에도 같이 바뀝니다.\n\n· " + [..._money, ..._cnt.lines].join("\n· ")
         + "\n\n" + _notes.join("\n") + "\n\n저장할까요?")) {
         _rfSaveBlocked((_cnt.lines.length ? "변경" : "금액 변경") + "을 취소했습니다 — 저장하지 않았습니다.");
