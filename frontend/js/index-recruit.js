@@ -3245,6 +3245,17 @@ function _syncWorkboardDisplayNameInput() {
   input.placeholder = linked ? '예) 체크오 아르테미스 비타민 300정' : '연결된 작업보드에서만 설정할 수 있습니다.';
 }
 
+/** 양방향 4단계-2 — 공유 저장 결과 → 저장 안내 줄(덮인 값 먼저). */
+function _rfSharedNoticeLines(shared) {
+  const out = [];
+  const ow = Array.isArray(shared && shared.overwritten) ? shared.overwritten : [];
+  // 덮인 칸이 여럿이어도 한 줄 — 안내 상자는 3줄만 보여서 여러 줄이면 일부가 "외 N건" 에 숨는다.
+  if (ow.length) out.push(`⚠ 리뷰오더에서 먼저 바뀐 칸을 지금 저장한 값으로 바꿨습니다 — ${ow.map(o => `${o.label}(먼저 바뀐 값: ${String(o.before || "").slice(0, 40)})`).join(" · ")}`);
+  const sc = Array.isArray(shared && shared.changed) ? shared.changed : [];
+  if (sc.length) out.push(`🔗 리뷰오더(인트라넷)에도 반영: ${sc.join(", ")}`);
+  return out;
+}
+
 async function openRecruitModal(id, prefill, woOrderId) {
   _recruitEditId = id || null;
   _woPrefillOrderId = (!id && woOrderId) ? woOrderId : null;
@@ -5726,7 +5737,9 @@ async function saveRecruitPostImpl() {
     }
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.error || "저장 실패 (HTTP " + res.status + ")");
+      // 공통 칸은 리뷰오더에 먼저 저장된 뒤 나머지가 실패한 경우 — 덮인 값 안내가 사라지지 않게 오류 문구에 붙인다.
+      const _sl = errData && errData.shared ? _rfSharedNoticeLines(errData.shared) : [];
+      throw new Error((errData.error || "저장 실패 (HTTP " + res.status + ")") + (_sl.length ? "\n" + _sl.join("\n") : ""));
     }
     const saved = await res.json().catch(() => ({}));
     /* ★★ **상태코드만으로 성공을 판정하지 않는다** (2026-08-23 실사고) —
@@ -5765,16 +5778,6 @@ async function saveRecruitPostImpl() {
     if (saved && saved.recruitTotalLocked === true) {
       _changed.unshift("⚠ 총모집은 차수 원장이 관리해 변경되지 않음 — [📅 인원]의 차수 추가/제거로");
     }
-    /* ★ 양방향 4단계-2: 리뷰오더와 맞춰지는 칸을 고쳤으면 리뷰오더에도 갔다고 말하고, 창을 연 뒤 리뷰오더 쪽에서 먼저 바뀐 칸을
-       지금 값으로 덮었으면 무엇을 덮었는지 보여준다(사용자 확정 2026-10-20 — 나중에 저장한 값 · 확인만). */
-    if (saved && saved.shared) {
-      const _ow = Array.isArray(saved.shared.overwritten) ? saved.shared.overwritten : [];
-      _ow.slice().reverse().forEach(o => {
-        _changed.unshift(`⚠ ${o.label} — 리뷰오더에서 먼저 바뀐 값(${String(o.before || "").slice(0, 60)})을 지금 저장한 값으로 바꿨습니다`);
-      });
-      const _sc = Array.isArray(saved.shared.changed) ? saved.shared.changed : [];
-      if (_sc.length) _changed.unshift(`🔗 리뷰오더(인트라넷)에도 반영: ${_sc.join(", ")}`);
-    }
     /* ★ 2026-10-06: 총 건수를 늘려 "가득 차서 자동 마감"됐던 공고가 다시 열린 경우 — 조용히 바뀌지 않게 고지 */
     if (saved && saved.reopened === true) {
       _changed.unshift("✅ 모집을 다시 열었습니다 — 가득 차서 마감됐던 공고가 총 건수 증가로 모집중으로 돌아왔습니다");
@@ -5789,6 +5792,10 @@ async function saveRecruitPostImpl() {
       _changed.unshift("⚠ 상품 사진은 저장되지 않았습니다 — 서버 업데이트가 끝난 뒤(1~2분) 다시 저장해주세요");
     }
 
+    /* ★ 양방향 4단계-2: 리뷰오더와 맞춰지는 칸을 고쳤으면 리뷰오더에도 갔다고 말하고, 창을 연 뒤 리뷰오더 쪽에서 먼저 바뀐 칸을
+       지금 값으로 덮었으면 무엇을 덮었는지 보여준다(사용자 확정 2026-10-20 — 나중에 저장한 값 · 확인만).
+       ★ 다른 안내를 다 넣은 **뒤에** 맨 위로 — 안내 상자는 3줄만 보여서 뒤에 끼면 "외 N건" 에 숨는다(검토 2026-10-20). */
+    if (saved && saved.shared) _changed.unshift(..._rfSharedNoticeLines(saved.shared));
     /* ★ 버튼 ✓ → 모달 닫힘 → 화면 가운데 안내(시안 C 확정) 로 시선이 이어진다.
        안내 렌더러는 recruit-modal.js 한 벌 — 없으면(구버전 모듈) 종전 토스트로 폴백. */
     _ok = true;

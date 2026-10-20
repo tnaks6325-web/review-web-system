@@ -345,7 +345,10 @@ async function applySharedPatch(p) {
     }
     await client.query('COMMIT');
     if (overwritten.length) logger.info(`[bidir/apply] ${wo.id} 겹친 칸을 나중 저장 값으로(${p.origin}·${p.actor || ''}): ${overwritten.map(o => o.label).join(', ')}`);
-    return { status: 200, body: { ok: true, data: saved, sync_version: newVersion, applied: plan.writes.map(w => w.path), campaign_applied: campaign.applied, overwritten } };
+    // push_back = 저장 결과가 보낸 값과 달라 인트라넷이 받아 가야 하는가(인트라넷발만 의미 있음). false 면 인트라넷은 이 버전을
+    // 자기 사본과 같다고 적는다(remote_sync_version) — 안 적으면 늦게 도착한 옛 송신이 방금 저장한 수정을 되돌린다(검토 2026-10-20).
+    const pushBack = p.origin === 'intranet' && _pushBackKeys(p.mine, next).length > 0;   // 쓴 칸이 없어도(번호만) 사본이 다를 수 있다
+    return { status: 200, body: { ok: true, data: saved, sync_version: newVersion, push_back: pushBack, applied: plan.writes.map(w => w.path), campaign_applied: campaign.applied, overwritten } };
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     if (['40P01', '55P03', '57014'].includes(e && e.code)) {

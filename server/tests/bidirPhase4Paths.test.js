@@ -82,6 +82,10 @@ async function pg() {
     assert.equal((await pool.query('SELECT special_notes FROM work_orders WHERE id=$1', [ws.id])).rows[0].special_notes, '주의 없음', '쓰기 0');
     const title = await put(ws.id, { title: '옛 경로 제목' });
     assert.equal(title.status, 409, '작업명도 공유 칸(인트라넷 고유) — 원본 수정으로만');
+    for (const sneak of [{ courier_proxy: true }, { product_option: '1. 몰래 바꾼 상품' }, { delivery_type: '빈박스' }]) {
+      const r = await put(ws.id, sneak);
+      assert.equal(r.body.code, 'bidir_use_source', '배송·상품 글 사본도 막는다: ' + JSON.stringify(sneak));
+    }
     const memo = await put(ws.id, { chat_room_url: 'https://open.kakao.com/o/test' });
     assert.notEqual(memo.body.code, 'bidir_use_source', '공유 칸이 아니면 종전대로: ' + JSON.stringify(memo.body));
     await setSwitch('{"in2rw":"off"}');

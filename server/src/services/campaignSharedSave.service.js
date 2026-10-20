@@ -22,7 +22,8 @@ const { logger } = require('../utils/logger');
 const { readBidirSwitch } = require('../utils/bidirSwitch');
 const { planCampaignSharedEdit, driftFromCampaign, landingIsShared, campaignRowView } = require('../utils/campaignSharedEdit');
 
-const WD_SHARED_KEYS = Object.freeze(['reviewGuide', 'specialNotes', 'reviewGuideImages', 'specialNotesImages', 'inflowType']);
+// inflowGuideHtml = 옛 공고 공통 유입가이드(공유 저장의 유입 투영이 쓴다) — 편집 저장이 미리 읽은 옛 값으로 되돌리지 않게 함께 지킨다(검토 2026-10-20).
+const WD_SHARED_KEYS = Object.freeze(['reviewGuide', 'specialNotes', 'reviewGuideImages', 'specialNotesImages', 'inflowType', 'inflowGuideHtml']);
 
 function _wd(camp) {
   let wd = camp && camp.work_detail;
@@ -61,7 +62,7 @@ async function applyCampaignSharedSave({ campaignId, body, actor, db } = {}) {
   const b = body || {};
   const base = Number(b.bidir_base_sync_version) || 0;
   const strip = (shared, windowsWritable = false) => ({
-    active: true, link, shared, windowsWritable,
+    active: true, link, shared, windowsWritable, windowsBaseText: String(camp.time_range || ''),
     participation: camp.participation_mode === true,
     landingShared: landingIsShared({ inflow_type: wo.inflow_type }, b),
   });

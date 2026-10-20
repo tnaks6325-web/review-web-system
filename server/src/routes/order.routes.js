@@ -1470,8 +1470,8 @@ async function _intakeUpdateHandler(req, res, next) {
        공유 저장(applySharedPatch)을 건너뛰면 버전·스냅숏·공고 투영·인트라넷 송신이 모두 빠진다. 지금 인트라넷은 이 경로를
        쓰지 않는다(원본 수정 /intake/source/:id 만). 공유 칸이 아닌 칸만이면 종전대로. 조건은 원본 수정 분기와 같다. */
     if (cur[0].bidir_state === 'on' && (await readBidirSwitch(pool)).in2rw === 'apply') {
-      const sharedKeys = SHARED_FIELDS.map(f => f.key).filter(k => b[k] !== undefined);
-      if (b.product_options_json !== undefined) sharedKeys.push('product_options_json');
+      // courier_proxy 만 보내도 아래에서 배송유형·부속정보(공유 칸)를 다시 계산해 쓰고, product_option 은 상품 구성의 글 사본이다(검토 2026-10-20).
+      const sharedKeys = [...SHARED_FIELDS.map(f => f.key), 'product_options_json', 'product_option', 'courier_proxy'].filter(k => b[k] !== undefined);
       if (sharedKeys.length) {
         return res.status(409).json({ ok: false, code: 'bidir_use_source', fields: sharedKeys,
           error: '리뷰오더와 맞춰지는 오더입니다. 공통 칸은 인트라넷 리뷰오더 수정으로 바꿔 주세요.' });

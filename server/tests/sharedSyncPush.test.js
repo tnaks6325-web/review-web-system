@@ -26,6 +26,7 @@ const push = require('../src/services/sharedSyncPush.service');
   assert.equal(cr(404, { ok: false, code: 'unknown_source' }).next, 'dead');
   assert.equal(cr(409, { ok: false, code: 'held' }).next, 'retry', '못 보낸 인트라넷 수정 = 나중에 다시');
   assert.equal(cr(409, { ok: false, code: 'busy' }).next, 'retry');
+  assert.equal(cr(409, { ok: false, code: 'remote_mismatch' }).next, 'dead', '다른 작업오더 — 다시 보내도 안 맞는다');
   assert.equal(cr(0, { code: 'network' }).next, 'retry');
   assert.equal(cr(500, null).next, 'retry');
   assert.equal(cr(200, { ok: false }).next, 'retry', '"ok" 만으로 반영이라 보지 않는다(결과를 꼭 말해야)');
@@ -179,6 +180,7 @@ async function pg() {
     const i1 = await put(2, `${sid}:2:b`, { ...same, purchase_time: '14:00 ~ 17:00' }, { base_sync_version: v5 });
     assert.equal(i1.status, 200, JSON.stringify(i1.body));
     assert.equal((await ob()).length, before, '보낸 값 그대로 저장됐으면 되돌려 보내지 않는다(메아리 없음)');
+    assert.equal(i1.body.push_back, false, '인트라넷이 이 버전을 자기 사본 버전으로 적어도 된다는 신호');
     const v6 = Number((await wo()).sync_version);
     assert.equal(Number((await wo()).intranet_acked_version), v6);
 
@@ -195,6 +197,7 @@ async function pg() {
     const pend = (await ob()).filter(r => r.status === 'pending');
     assert.deepEqual(pend.map(r => Number(r.sync_version)), [v8], '합쳐진 결과를 인트라넷으로 되돌려 보낼 줄');
     assert.equal(Number(w.intranet_acked_version), ackBefore, '합쳐졌으면 인트라넷 사본은 아직 옛 값 — "안다" 를 올리지 않는다');
+    assert.equal(i2.body.push_back, true, '합쳐졌으면 인트라넷은 버전을 적지 않는다(되돌려 보낸 것이 stale 로 버려지지 않게)');
     sent.length = 0;
     reply = { status: 200, body: { ok: true, result: 'applied' } };
     await run();
@@ -202,9 +205,37 @@ async function pg() {
     assert.equal(sent[0].view.purchase_time, '15:00 ~ 18:00');
     assert.equal(Number((await wo()).intranet_acked_version), v8, '받아 간 뒤에 "안다" 를 올린다');
 
-    // ── 끊긴 처리기(sending 2분 넘음)는 다시 가져간다 · 연결 끊긴 오더 = 중단 ──
-    const a9 = await applySharedPatch({ workOrderId: w.id, mine: { ...readSharedState(await wo()), special_notes: '리뷰웹 9' }, baseVersion: v8, origin: 'rw_admin', actor: '관리자' });
-    await pool.query(`UPDATE shared_sync_outbox SET status = 'sending', updated_at = NOW() - INTERVAL '3 minutes' WHERE work_order_id = $1 AND sync_version = $2`, [w.id, a9.body.sync_version]);
+    // ── 보류는 30분 뒤 다시 확인(시도 횟수 안 늘림) — 켜진 뒤 저절로 간다 · 더 새 버전이 가면 옛 보류도 끝 ──
+    const a8 = await applySharedPatch({ workOrderId: w.id, mine: { ...readSharedState(await wo()), special_notes: '리뷰웹 8' }, baseVersion: v8, origin: 'rw_admin', actor: '관리자' });
+    const v8b = Number(a8.body.sync_version);
+    reply = { status: 503, body: { ok: false, code: 'receiver_off' } };
+    await run();
+    let pr = (await ob()).find(r => Number(r.sync_version) === v8b);
+    assert.equal(pr.status, 'parked');
+    const att = Number(pr.attempts);
+    sent.length = 0; await run();
+    assert.equal(sent.length, 0, '30분 안에는 다시 안 감');
+    await pool.query(`UPDATE shared_sync_outbox SET updated_at = NOW() - INTERVAL '31 minutes' WHERE id = $1`, [pr.id]);
+    reply = { status: 200, body: { ok: true, result: 'applied' } };
+    await run();
+    pr = (await ob()).find(r => Number(r.sync_version) === v8b);
+    assert.equal(pr.status, 'delivered', '수신이 켜지면 보류분이 저절로 간다');
+    assert.equal(Number(pr.attempts), att, '보류 재확인은 시도 횟수에 안 넣는다');
+    const v8c = v8b;
+
+    // ── 같은 프로세스에서 겹쳐 돌면 뒤 것은 건너뜀 ──
+    let release; const gate = new Promise(r => { release = r; });
+    const slow = async (u, i) => { await gate; return fakeFetch(u, i); };
+    await applySharedPatch({ workOrderId: w.id, mine: { ...readSharedState(await wo()), special_notes: '리뷰웹 8-2' }, baseVersion: v8c, origin: 'rw_admin', actor: '관리자' });
+    const first = run({ fetchImpl: slow });
+    await new Promise(r => setTimeout(r, 50));
+    assert.deepEqual(await run(), { skipped: 'running' });
+    release(); await first;
+    const v8d = Number((await wo()).sync_version);
+
+    // ── 끊긴 처리기(sending 5분 넘음)는 다시 가져간다 · 연결 끊긴 오더 = 중단 ──
+    const a9 = await applySharedPatch({ workOrderId: w.id, mine: { ...readSharedState(await wo()), special_notes: '리뷰웹 9' }, baseVersion: v8d, origin: 'rw_admin', actor: '관리자' });
+    await pool.query(`UPDATE shared_sync_outbox SET status = 'sending', updated_at = NOW() - INTERVAL '6 minutes' WHERE work_order_id = $1 AND sync_version = $2`, [w.id, a9.body.sync_version]);
     await run();
     assert.equal((await ob()).find(r => Number(r.sync_version) === Number(a9.body.sync_version)).status, 'delivered');
     const a10 = await applySharedPatch({ workOrderId: w.id, mine: { ...readSharedState(await wo()), special_notes: '리뷰웹 10' }, baseVersion: Number(a9.body.sync_version), origin: 'rw_admin', actor: '관리자' });

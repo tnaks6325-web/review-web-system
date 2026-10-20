@@ -9,7 +9,9 @@
 //    비밀값·주소가 없으면 보내지 않는다(쌓이기만 — 테스트 서버가 운영 인트라넷으로 보내지 않게).
 // ★ 응답별: applied/stale = delivered(+ 인트라넷이 이 버전을 안다고 적음) · held/busy·5xx·연결 실패 = 다시(점점 늦게) ·
 //   receiver_off/observed/서명·권한 거부 = parked(사람이 켠 뒤 다시 보낸다) · 404(모르는 원본) = dead.
-// ★ 송신 중(sending)이 2분 넘게 남아 있으면 다른 처리기가 다시 가져간다(중간에 끊긴 처리기).
+// ★ 송신 중(sending)이 5분 넘게 남아 있으면 다른 처리기가 다시 가져간다(중간에 끊긴 처리기). 한 번 돌기 최악 = 20줄 × 10초 = 200초라
+//   그보다 길게 잡고, 보내기 직전에 그 오더 줄의 시각을 갱신한다. 같은 프로세스 안에서는 앞 실행이 안 끝났으면 건너뛴다(cron 은 겹쳐 돈다).
+// ★ 보류(parked — 수신 꺼짐·관찰·서명/권한 거부)는 30분마다 다시 확인한다(켜진 뒤 저절로 간다). 보류 재확인은 시도 횟수에 넣지 않는다.
 // ═══════════════════════════════════════════════════════════════════════════
 'use strict';
 
@@ -41,6 +43,7 @@ function classifyResponse(status, body) {
   if (status === 200 && body && body.ok === true && (result === 'applied' || result === 'stale')) return { next: 'delivered', ack: true, result };
   if (code === 'receiver_off' || result === 'observed') return { next: 'parked', result: code || result };
   if (status === 404) return { next: 'dead', result: code || 'unknown_source' };
+  if (code === 'remote_mismatch') return { next: 'dead', result: code };   // 다른 작업오더에 붙은 원본 — 다시 보내도 안 맞는다
   if ([400, 401, 403].includes(status)) return { next: 'parked', result: code || `http_${status}` };
   return { next: 'retry', result: code || result || `http_${status}` };
 }
@@ -55,10 +58,12 @@ function buildPushBody(wo) {
 
 async function _claim(db) {
   const { rows } = await db.query(
-    `UPDATE shared_sync_outbox o SET status = 'sending', attempts = o.attempts + 1, updated_at = NOW()
+    `UPDATE shared_sync_outbox o SET status = 'sending', attempts = o.attempts + CASE WHEN o.status = 'parked' THEN 0 ELSE 1 END, updated_at = NOW()
       WHERE o.id IN (
         SELECT id FROM shared_sync_outbox
-         WHERE (status = 'pending' AND next_at <= NOW()) OR (status = 'sending' AND updated_at < NOW() - INTERVAL '2 minutes')
+         WHERE (status = 'pending' AND next_at <= NOW())
+            OR (status = 'sending' AND updated_at < NOW() - INTERVAL '5 minutes')
+            OR (status = 'parked' AND updated_at < NOW() - INTERVAL '30 minutes')
          ORDER BY next_at, id LIMIT $1 FOR UPDATE SKIP LOCKED)
       RETURNING o.*`, [BATCH]);
   return rows;
@@ -75,7 +80,15 @@ async function _finish(db, ids, status, err, nextAt) {
  * 한 번 돌린다(15초 cron). 반환 = 처리 요약.
  * @param {{ db?: object, fetchImpl?: Function, env?: object, now?: number }} [opts] 시험용
  */
+let _running = false;
+
 async function runSharedSyncPush(opts = {}) {
+  if (_running) return { skipped: 'running' };
+  _running = true;
+  try { return await _runOnce(opts); } finally { _running = false; }
+}
+
+async function _runOnce(opts) {
   const db = opts.db || getPool();
   const env = opts.env || process.env;
   const fetchImpl = opts.fetchImpl || fetch;
@@ -103,6 +116,8 @@ async function runSharedSyncPush(opts = {}) {
       }
       const body = buildPushBody(wo);
       const raw = JSON.stringify(body);
+      // 보내기 직전 시각 갱신 — 앞 오더들이 오래 걸려도 다른 처리기가 이 줄을 "끊긴 줄" 로 다시 가져가지 않게.
+      await db.query(`UPDATE shared_sync_outbox SET updated_at = NOW() WHERE id = ANY($1::bigint[]) AND status = 'sending'`, [ids]);
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), SEND_TIMEOUT_MS);
       let status = 0, resBody = null;
@@ -126,7 +141,7 @@ async function runSharedSyncPush(opts = {}) {
         // 이 버전까지는 인트라넷 사본이 같다 — 그 오더의 더 옛 대기 줄은 보낼 필요가 없다.
         await db.query(
           `UPDATE shared_sync_outbox SET status = 'superseded', updated_at = NOW()
-            WHERE work_order_id = $1 AND sync_version <= $2 AND status = 'pending'`, [woId, body.sync_version]);
+            WHERE work_order_id = $1 AND sync_version <= $2 AND status IN ('pending', 'parked')`, [woId, body.sync_version]);
         if (c.result === 'applied') {
           await db.query(
             `UPDATE work_orders SET intranet_acked_version = GREATEST(COALESCE(intranet_acked_version, 0), $2::bigint) WHERE id = $1`,

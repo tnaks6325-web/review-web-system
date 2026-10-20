@@ -3723,6 +3723,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       .applyCampaignSharedSave({ campaignId: id, body: req.body, actor: req.admin?.name || '' });
     if (bidirEdit.response) return res.status(bidirEdit.response.status).json(bidirEdit.response.body);
     const _bx = bidirEdit.active === true;
+    req._bidirShared = bidirEdit.shared || null;   // 이 뒤가 실패해도 공유 저장 결과(덮인 값)를 응답에 싣는다
     // 참여형 공고의 시간창은 구매시간 글자에서 나온다(공유 저장이 계산). 글자를 안 고쳤고 화면 시각이 그 글자와 맞으며
     // 그 사이 글자도 안 바뀌었으면(windowsWritable) 종전처럼 화면 시각을 쓴다 — 시각이 비어 있던 공고가 저장으로 바로잡힌다.
     const _bxWin = _bx && bidirEdit.participation && !bidirEdit.windowsWritable;
@@ -3760,19 +3761,24 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         landing_url = COALESCE($22, landing_url),
         daily_limit = COALESCE($23, daily_limit),
         recruit_total = COALESCE($24, recruit_total),
+        -- ★ 4단계-2: 연결 공고에서 화면 시각을 쓸 때($53 = 판정 때 본 구매시간 글자)는 그 사이 글자가 바뀌지 않았을 때만(문장 단위 원자).
         window_start = CASE WHEN $25::text IS NULL THEN window_start
+                            WHEN $53::text IS NOT NULL AND COALESCE(time_range, '') <> $53::text THEN window_start
                             WHEN $25::text = '' THEN NULL
                             ELSE $25::time END,
         window_end = CASE WHEN $26::text IS NULL THEN window_end
+                          WHEN $53::text IS NOT NULL AND COALESCE(time_range, '') <> $53::text THEN window_end
                           WHEN $26::text = '' THEN NULL
                           ELSE $26::time END,
         close_buffer_min = COALESCE($27, close_buffer_min),
         hold_ttl_min = COALESCE($28, hold_ttl_min),
         -- ★ 양방향 4단계-2: 연결 공고($52)면 공유 하위 칸(리뷰가이드·특이사항·두 사진·유입방식)은 지금 DB 값을 되살린다(오른쪽이 이긴다).
+        --   ★ 연결 공고에서 화면이 work_detail 을 null(비움)로 보내도 공유 하위 칸까지 지우지 않는다(그때는 통째 유지).
         work_detail = CASE WHEN $29::boolean THEN
-                        (CASE WHEN $52::boolean AND $30::jsonb IS NOT NULL
+                        (CASE WHEN $52::boolean AND $30::jsonb IS NULL THEN work_detail
+                              WHEN $52::boolean
                               THEN $30::jsonb || COALESCE((SELECT jsonb_object_agg(k, work_detail->k)
-                                                             FROM unnest(ARRAY['reviewGuide','specialNotes','reviewGuideImages','specialNotesImages','inflowType']) AS k
+                                                             FROM unnest(ARRAY['reviewGuide','specialNotes','reviewGuideImages','specialNotesImages','inflowType','inflowGuideHtml']) AS k
                                                             WHERE work_detail ? k), '{}'::jsonb)
                               ELSE $30::jsonb END)
                       ELSE work_detail END,
@@ -3867,6 +3873,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         repurchaseDaysState.value,                                // $50 ★ 148: null=유지, 0=제한 없음
         deliveryReviewFeeMixForStore === null ? null : JSON.stringify(deliveryReviewFeeMixForStore), // $51 ★ 152
         _bx,                                                       // $52 ★ 4단계-2: work_detail 공유 하위 칸은 DB 값 유지
+        (_bx && bidirEdit.windowsWritable) ? String(bidirEdit.windowsBaseText || '') : null,   // $53 ★ 4단계-2: 시각을 쓸 조건 글자
       ]
     );
 
@@ -3943,6 +3950,12 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       // ★ 4단계-2: 공유 저장 결과(바뀐 칸·덮인 리뷰오더 값) — 화면이 "나중에 저장한 값" 알림을 그린다
       ...(bidirEdit.shared ? { shared: bidirEdit.shared } : {}) });
   } catch (err) {
+    /* ★ 양방향 4단계-2: 공유 칸은 이미 따로 커밋됐는데 그 뒤가 실패한 경우 — 덮인 값 안내가 사라지지 않게 결과를 함께 싣는다.
+       (다시 저장해도 이미 같은 값이라 공유 저장이 아무 일도 안 해서, 여기서 놓치면 영영 안 보인다 — 검토 2026-10-20) */
+    if (req._bidirShared) {
+      logger.warn(`[campaign/update] 공유 칸 저장 뒤 나머지 저장 실패: ${err && err.message}`);
+      return res.status(500).json({ ok: false, error: `${(err && err.message) || '저장 실패'} — 단, 리뷰오더와 맞춰지는 칸은 이미 저장됐습니다. 나머지를 확인해 다시 저장해 주세요.`, shared: req._bidirShared });
+    }
     next(err);
   }
 });

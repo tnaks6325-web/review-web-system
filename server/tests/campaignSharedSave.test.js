@@ -27,8 +27,8 @@ const read = (rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
   assert.match(put, /title, _bx \? null : channel, _bx \? null : channel_custom, manager, _bx \? null : time_range,/);
   assert.match(put, /_bx \? null : \(thumbnail_url \?\? null\),\s*_bxLanding \? null : \(landing_url \?\? null\),/);
   assert.match(put, /\(_bxWin \|\| _wsEff === undefined/); assert.match(put, /\(_bxWin \|\| _weEff === undefined/);
-  assert.match(put, /WHEN \$52::boolean AND \$30::jsonb IS NOT NULL\s*THEN \$30::jsonb \|\| COALESCE\(\(SELECT jsonb_object_agg\(k, work_detail->k\)/);
-  assert.match(put, /ARRAY\['reviewGuide','specialNotes','reviewGuideImages','specialNotesImages','inflowType'\]/);
+  assert.match(put, /WHEN \$52::boolean AND \$30::jsonb IS NULL THEN work_detail\s*WHEN \$52::boolean\s*THEN \$30::jsonb \|\| COALESCE\(\(SELECT jsonb_object_agg\(k, work_detail->k\)/, '연결 공고: null 이면 통째 유지, 아니면 공유 하위 칸 DB 값');
+  assert.match(put, /WHEN \$53::text IS NOT NULL AND COALESCE\(time_range, ''\) <> \$53::text THEN window_start/, '시각은 그 사이 글자가 그대로일 때만');
   assert.match(put, /_bx,\s*\/\/ \$52/);
   const svc = read('src/services/campaignSharedSave.service.js');
   const svcKeys = svc.match(/WD_SHARED_KEYS = Object\.freeze\(\[([^\]]+)\]/)[1].replace(/[\s']/g, '');
@@ -42,7 +42,10 @@ const read = (rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
   assert.match(ui, /window\._rfBidirBase = \(json && json\.bidir && Number\(json\.bidir\.sync_version\) > 0\)/);
   assert.match(ui, /if \(_recruitEditId && window\._rfBidirBase\) payload\.bidir_base_sync_version = window\._rfBidirBase;/);
   assert.ok(ui.indexOf('payload.bidir_base_sync_version = window._rfBidirBase') < ui.indexOf('res = await fetch(_campApi(`/${_recruitEditId}`)'), '보내기 전에 싣는다');
-  assert.match(ui, /saved\.shared\.overwritten/, '덮인 값 알림');
+  assert.match(ui, /if \(saved && saved\.shared\) _changed\.unshift\(\.\.\._rfSharedNoticeLines\(saved\.shared\)\);/, '덮인 값 알림');
+  assert.ok(ui.indexOf('_changed.unshift(..._rfSharedNoticeLines(saved.shared))') > ui.lastIndexOf('_changed.unshift("✅ 모집을 다시 열었습니다'), '다른 안내를 다 넣은 뒤 맨 위로(3줄 상자에서 안 숨게)');
+  assert.match(ui, /errData && errData\.shared \? _rfSharedNoticeLines\(errData\.shared\)/, '나머지 저장이 실패해도 덮인 값 안내');
+  assert.match(put, /if \(req\._bidirShared\) \{[\s\S]{0,300}shared: req\._bidirShared \}\);/, '실패 응답에도 공유 저장 결과');
   assert.match(ui, /window\._rfBidirBase = null;/, '다른 공고 열 때 지운다');
   const sp = read('src/services/sharedPatch.service.js');
   assert.match(sp, /campaign: new Set\(PHASE3_SHARED_FIELDS\)/);
@@ -181,6 +184,22 @@ async function pg() {
     assert.equal(w.purchase_channel, '자사몰'); assert.equal(w.purchase_channel_custom, true); assert.equal(c.channel, '직접입력'); assert.equal(c.channel_custom, '자사몰');
     assert.equal(w.thumbnail_url, 'https://x/thumb2.jpg'); assert.equal(c.thumbnail_url, 'https://x/thumb2.jpg');
     assert.equal(w.product_url, 'https://www.coupang.com/vp/products/2'); assert.equal(c.landing_url, 'https://www.coupang.com/vp/products/2');
+
+    // ── 창을 연 뒤 인트라넷이 구매시간을 바꿈 → 손대지 않은 창 저장: 막히지 않고, 옛 시각으로 되돌리지 않는다 ──
+    ed = await openEditor();
+    const iT = await applySharedPatch({ workOrderId: (await wo()).id, mine: { ...readSharedState(await wo()), purchase_time: '15:00 ~ 19:00' }, baseVersion: Number((await wo()).sync_version), origin: 'intranet', actor: '인트라넷', conflictPolicy: 'last_writer' });
+    assert.equal(iT.status, 200, JSON.stringify(iT.body));
+    r = await save({ ...ed.body, title: '시간 경합 뒤 제목' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    c = await cRow();
+    assert.equal(c.time_range, '15:00 ~ 19:00'); assert.equal(String(c.window_start).slice(0, 5), '15:00', '옛 화면 시각(14:00)으로 안 되돌림');
+    assert.equal(c.title, '시간 경합 뒤 제목');
+    // 옛 공통 유입가이드(work_detail.inflowGuideHtml)도 공유 하위 칸으로 지킨다
+    await pool.query(`UPDATE recruit_campaigns SET work_detail = work_detail || '{"inflowGuideHtml":"<p>인트라넷 유입가이드</p>"}'::jsonb WHERE id = $1`, [camp]);
+    ed = await openEditor();
+    r = await save({ ...ed.body, title: '유입가이드 보호', work_detail: { ...ed.body.work_detail, inflowGuideHtml: '<p>옛 화면 값</p>' } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal((await cRow()).work_detail.inflowGuideHtml, '<p>인트라넷 유입가이드</p>', '연결 공고의 공통 유입가이드는 편집 저장이 덮지 않는다');
 
     // ── 되돌릴 수 없는 칸 = 409 쓰기 0(제목도 저장 안 됨) ──
     ed = await openEditor();
