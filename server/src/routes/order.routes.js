@@ -1454,7 +1454,7 @@ async function _intakeUpdateHandler(req, res, next) {
 
     // 현재 상태 확인 (존재/삭제/완료 여부)
     const { rows: cur } = await pool.query(
-      `SELECT id, status, deleted_at, delivery_type, courier_proxy, linked_campaign_id FROM work_orders WHERE id = $1 LIMIT 1`, [id]
+      `SELECT id, status, deleted_at, delivery_type, courier_proxy, linked_campaign_id, bidir_state FROM work_orders WHERE id = $1 LIMIT 1`, [id]
     );
     if (cur.length === 0) {
       return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
@@ -1466,6 +1466,17 @@ async function _intakeUpdateHandler(req, res, next) {
       return res.status(409).json({ ok: false, error: '완료된 작업오더는 수정할 수 없습니다.' });
     }
 
+    /* ★ 양방향 4단계-3(결정 263): 양방향 연결 오더의 공유 칸은 이 옛 경로(작업오더 ID 직접 수정)로 바꾸지 않는다 —
+       공유 저장(applySharedPatch)을 건너뛰면 버전·스냅숏·공고 투영·인트라넷 송신이 모두 빠진다. 지금 인트라넷은 이 경로를
+       쓰지 않는다(원본 수정 /intake/source/:id 만). 공유 칸이 아닌 칸만이면 종전대로. 조건은 원본 수정 분기와 같다. */
+    if (cur[0].bidir_state === 'on' && (await readBidirSwitch(pool)).in2rw === 'apply') {
+      const sharedKeys = SHARED_FIELDS.map(f => f.key).filter(k => b[k] !== undefined);
+      if (b.product_options_json !== undefined) sharedKeys.push('product_options_json');
+      if (sharedKeys.length) {
+        return res.status(409).json({ ok: false, code: 'bidir_use_source', fields: sharedKeys,
+          error: '리뷰오더와 맞춰지는 오더입니다. 공통 칸은 인트라넷 리뷰오더 수정으로 바꿔 주세요.' });
+      }
+    }
     // ★ 이 옛 수정 경로는 상품 구성을 정규화 없이 그대로 쓴다. 구매수량 단계가 실려 오면 그때만 정규화·검증한다
     //   (검증 안 된 단계 저장 금지 · 빈 단계 키는 지워 잠금 비교 모양을 예전과 같게 — 결정 167). 단계가 없으면 동작 불변.
     if (b.product_options_json !== undefined && rawHasQtyTiers(b.product_options_json)) {
