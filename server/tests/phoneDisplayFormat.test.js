@@ -68,7 +68,7 @@ const WIRED = {
     /\$\{dash\(_fmtPhone\(s\.phone\)\)\}/,                                          // 등록리뷰어DB 타계정
   ],
   'js/cs-inquiry.js': [/fmtPhone\(r\.reviewerPhone8/, /kv\('연락처', \(typeof fmtPhone/],
-  'js/index-app.js': [/escHtml\(\(typeof fmtPhone==='function'\?fmtPhone\(r\.phone\)/, /sPhoneFmt = \(typeof fmtPhone/],
+  // 'js/index-app.js' — 옛 관리자 대시보드 폐기(결정 267)로 파일째 삭제
   'js/search-app.js': [/rcPhone"\)\.textContent = \(typeof fmtPhone/, /rpmSelfPhone"\)\.textContent\s+= \(typeof fmtPhone/],
   'index.html': [/pf-ph">\$\{escHtml\(\(typeof fmtPhone/],
 };

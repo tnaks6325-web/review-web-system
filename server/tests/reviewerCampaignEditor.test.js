@@ -143,7 +143,8 @@ const fakeIntranet = (user) => async () => ({
     return !/chat_url/.test(body) && !/notes/.test(body) && !/linked_/.test(body) && !/source_work_order_id/.test(body);
   })());
   const idx = readF('index.html');
-  const app = readF('js/index-app.js');
+  // 옛 관리자 대시보드 폐기(결정 267) — index-app.js 가 없어져, 옛 명단 UI 재유입은 프론트 전체에서 본다.
+  const _fe = require('fs').readdirSync(require('path').join(__dirname, '../../frontend/js')).filter(f => f.endsWith('.js')).map(f => readF('js/' + f)).concat([readF('workdesk.html'), idx, readF('admin.html')]).join('\n');
   ok('라우트: 발급=인트라넷 로그인 리미터 붙은 POST /campaign-token-intranet', /campaign-token-intranet', intranetLoginLimiter/.test(rev));
   ok('라우트: 옛 phone8 발급·명단관리 폐지', !/'\/campaign-token',/.test(rev) && !/campaign-editors', authMiddleware/.test(adm));
   ok('프론트: _adminTok에 rapp_camp_edit_token 병합', /rapp_camp_edit_token/.test(cc));
@@ -172,7 +173,7 @@ const fakeIntranet = (user) => async () => ({
     return o > 0 && h > 0 && o > idx.lastIndexOf('id="viewHome"') && idx.slice(o).indexOf('</body>') > 0 && idx.slice(o, idx.indexOf('</body>', o)).indexOf('id="viewHome"') < 0
       && idx.lastIndexOf('<div id="campEditLoginOvl"') > idx.lastIndexOf('<div class="home-footer">');
   })());
-  ok('프론트: 옛 마스터 명단 UI 제거', !/function loadCampEditors/.test(app) && !/loadCampEditors\(\)/.test(app));
+  ok('프론트: 옛 마스터 명단 UI 제거', !/function loadCampEditors/.test(_fe) && !/loadCampEditors\(\)/.test(_fe));
 
   // ── ④ 리뷰어 앱 모달: 유입가이드 확인 + 마감 공고 진행과정 미리보기 ──
   ok('축약뷰에 work_detail 포함(읽기전용 프리필) — 수정 모달에서 유입가이드 육안 확인',

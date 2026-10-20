@@ -22,9 +22,8 @@ const ok = (name, cond) => { assert(cond, name); n++; console.log('  ✓ ' + nam
 const CH = require('../src/utils/cashReceiptChannels');
 const RI = require('../src/services/reviewInspect.service');
 const set = readF('js/admin-settings.js');
-const adm = readF('admin.html');
 const wdk = readF('workdesk.html');
-const idx = readF('js/index-app.js');
+// 옛 관리자 대시보드 폐기(결정 267) — admin.html·index-app.js 쪽 마운트/로드 단언은 뺐다. 패널은 리뷰웹시스템[3버전]만 띄운다.
 const diag = readS('routes/diag.routes.js');
 const gem = readS('services/gemini.service.js');
 const svc = readS('services/reviewInspect.service.js');
@@ -200,13 +199,11 @@ console.log('\n2) 서비스 실행');
     /if \(n < 0 \|\| n >= c\.urls\.length\) return;/.test(set));
   ok('썸네일 크기 상향(54x70) + 라이트박스 CSS 리터럴 고정',
     /\.as-smpth img\{width:54px;height:70px/.test(set) && /\.as-zoom\{position:fixed;inset:0;z-index:10050/.test(set));
-  ok('★ 두 화면 모두 같은 패널을 띄운다(관리자 대시보드 · 리뷰웹시스템[3버전])',
-    /panels: \[[^\]]*'aisamples'[^\]]*\], autoload: false/.test(adm)
-    && /isAdmin \? \[[^\]]*'aisamples'[^\]]*\]/.test(wdk));
+  ok('★ 리뷰웹시스템[3버전]이 같은 패널을 띄운다',
+    /isAdmin \? \[[^\]]*'aisamples'[^\]]*\]/.test(wdk));
   ok('★ 리뷰웹시스템[3버전]은 관리자에게만 — 저장이 adminOrMaster 라 AE 에겐 막다른 길이 된다',
     !/: \['nickname'[^\]]*'aisamples'/.test(wdk));
-  ok('관리자 대시보드 설정 탭 진입 시 값을 불러온다(autoload:false 호스트)',
-    /loadAiSamples\(\); \} catch\(_\)\{\}/.test(idx));
+  ok('마운트 시 값을 불러온다(LOADERS.aisamples)', /aisamples:\s*loadAiSamples/.test(set));
 
   console.log(`\n✅ aiSampleImages: ${n}개 통과`);
   process.exit(0);

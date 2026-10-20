@@ -655,7 +655,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   ok('★ m6: 분산 일수 상한(서버 120일 상한 선반영)', /untilN > 110/.test(modal));
   ok('★ Codex P2: 투영·행 기준일 = max(오늘, 시작일) — 오픈 전 날짜 소진 오표시 차단',
     /function baseDate\(\)/.test(modal) && /sd > S\.data\.today\) \? sd : S\.data\.today/.test(modal));
-  ok('admin.html 에 모듈 로드', /campaign-daily-plan\.js/.test(readF('admin.html')));
+  // 옛 관리자 대시보드 폐기(결정 267) — admin.html 모듈 로드 단언은 뺐다.
   ok('workdesk.html 에 모듈 로드', /campaign-daily-plan\.js/.test(readF('workdesk.html')));
   const workdesk = readF('workdesk.html');
   ok('★ 작업보드 [모집인원 조절]도 공용 모달만 연다(별도 스케줄 저장 경로 금지)',

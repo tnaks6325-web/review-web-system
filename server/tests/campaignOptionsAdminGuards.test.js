@@ -14,10 +14,11 @@ const path = require('path');
 const read = (p) => fs.readFileSync(path.join(__dirname, '..', '..', p), 'utf8');
 const readSrv = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
 
-const adminHtml = read('frontend/js/recruit-modal.js') + '\n' + read('frontend/admin.html');
+// 옛 관리자 대시보드 폐기(결정 267) — admin.html·index-app.js 삭제. 공고 모달은 recruit-modal.js, 작업오더 프리필은 work-order-detail.js 한 벌.
+const adminHtml = read('frontend/js/recruit-modal.js');
 const recruit = read('frontend/js/index-recruit.js');
-// _woOptionRows 는 공유 모듈(js/work-order-detail.js)로 이관 — 두 파일을 합쳐서 본다
-const app = read('frontend/js/index-app.js') + '\n' + read('frontend/js/work-order-detail.js');
+// _woOptionRows 는 공유 모듈(js/work-order-detail.js)로 이관
+const app = read('frontend/js/work-order-detail.js');
 const routes = readSrv('src/routes/campaign.routes.js');
 
 let passed = 0;

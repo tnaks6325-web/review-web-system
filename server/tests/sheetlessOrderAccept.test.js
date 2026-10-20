@@ -429,12 +429,7 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
       /작업오더 값 그대로 시스템 작업표를 만들고 곧바로 모집공고 설정으로 넘어갑니다/.test(wdN)
       && !/_woEditActions\(o\)\{[\s\S]{0,1600}_woAcceptSheetless/.test(wdN));
 
-    const ia = noLineComments(fs.readFileSync(path.join(__dirname, '..', '..', 'frontend/js/index-app.js'), 'utf8'));
-    const wa = /async function woAccept\(id, pickGid, linkAdvertiserId\) \{([\s\S]*?)\n\}/.exec(ia);
-    ok('관리자 대시보드 woAccept 선언 존재', !!wa);
-    // ★ gid 선검증으로 접수를 막던 막다른 길이 없어야 한다(서버는 무시트로 등록한다)
-    ok('gid 없다고 접수를 막지 않는다', !/작업시트탭URL에 gid가 없습니다/.test(wa[1]));
-    ok('관리자 대시보드도 공유 판정을 쓴다', /_woAcceptSheetless\(o\)/.test(wa[1]));
+    // 옛 관리자 대시보드 폐기(결정 267) — index-app.js 의 woAccept(관리자 대시보드 접수 창구) 검사는 화면째 사라져 뺐다. 접수 창구는 위 작업보드 하나다.
   }
 
   console.log(`\n총 ${passed}개 통과\n`);

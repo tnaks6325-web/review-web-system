@@ -428,9 +428,7 @@ function payHandler(o = {}) {
     assert.match(ir, /saved\.advertiserPayoutBank && saved\.data && saved\.data\.transfer_bank === "advertiser"/, '모르는 서버에 저장되면 말한다');
     const tc = read('src/routes/tabconfig.routes.js');
     assert.match(tc, /guardTransferBankWrite\(\{[\s\S]{0,200}ack: b\.transferBankDisableAck/, '관리자 대시보드 탭 설정 경로도 공통 규칙');
-    const ia = fs.readFileSync(path.join(ROOT, '..', 'frontend', 'js', 'index-app.js'), 'utf8');
-    assert.match(ia, /transferBankDisableAck: _tcCurrent\._bankDisableAck === true/);
-    assert.match(fs.readFileSync(path.join(ROOT, '..', 'frontend', 'admin.html'), 'utf8'), /data-val="업체입금"/, '탭 설정 창도 업체입금을 표시할 수 있다');
+    // 옛 관리자 대시보드 폐기(결정 267) — 옛 탭 설정 창(index-app.js _tcCurrent · admin.html 업체입금 칩) 화면 단언은 뺐다. 서버 공통 규칙(위 tabconfig)은 그대로 본다.
     assert.match(html, /disableAck:disabling/, '작업보드 탭 이체은행 창도 확인 표시를 보낸다');
     assert.ok(!/입금 주체/.test(html.replace(/<!--[\s\S]*?-->/g, '')) || !/'payer'/.test(html), '입금 주체 칸은 없앴다');
     assert.ok(!/_cndPayerModal/.test(html));

@@ -97,7 +97,8 @@ ok('관리자 미리보기가 같은 렌더러를 쓴다(모형 카드 아님)',
   const s = rd('js/index-recruit.js');
   assert.ok(s.includes('CampWorkDetail.renderInto'), 'renderInto 사용');
   assert.ok(!s.includes('참여 신청하기'), '옛 모형 카드 잔존');
-  assert.ok(rd('admin.html').includes('js/campaign-workdetail.js'), 'admin.html 모듈 로드');
+  // 옛 관리자 대시보드 폐기(결정 267) — 관리자 미리보기 호스트는 workdesk.html
+  assert.ok(rd('workdesk.html').includes('js/campaign-workdetail.js'), 'workdesk.html 모듈 로드');
 });
 
 ok('리뷰어앱 공고수정 모달: 파일 업로드 제거 + 유입가이드 미리보기 추가', () => {
@@ -110,7 +111,7 @@ ok('리뷰어앱 공고수정 모달: 파일 업로드 제거 + 유입가이드 
 });
 
 ok('공용 렌더러를 쓰는 모든 페이지가 스크립트를 로드한다', () => {
-  for (const f of ['campaign.html', 'admin.html', 'index.html', 'recruit.html']) {
+  for (const f of ['campaign.html', 'workdesk.html', 'index.html', 'recruit.html']) {   // admin.html → workdesk.html(결정 267)
     assert.ok(rd(f).includes('js/campaign-workdetail.js'), f + ' 미로드');
   }
 });

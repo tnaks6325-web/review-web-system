@@ -105,20 +105,12 @@ for (const [method, p] of [['POST', '/api/submit/debug-tabs'], ['GET', '/api/sub
 }
 ok('광고주 계정 관리는 3버전 입구가 남아 있다', exists('POST', '/api/trackb/advertiser-account'));
 ok('97·98번 잔류 입구는 남아 있다', exists('GET', '/api/campaign/admin/popular-credit-audit') && exists('POST', '/api/trackb/workdesk/auto-finish'));
-const admin = read('frontend/admin.html');
-ok('옛 대시보드: 진행률 패널 화면 없음', !/statsPanelOverlay/.test(admin));
-ok('옛 대시보드: [진행률] 버튼 없음', !/openStatsPanel|btn-tab-stats/.test(read('frontend/js/index-app.js')));
-// ★ 84-정정의 정정(Codex P1): index-stats.js 에는 블랙리스트·공지 배너 창도 있었다 — 파일째 지우면 그 버튼이 죽는다.
-const stats = read('frontend/js/index-stats.js');
-ok('진행률 패널 함수는 없다', !/function openStatsPanel|function _renderStatsPanel/.test(stats));
-ok('블랙리스트·공지 배너 창 함수는 남아 있고 옛 대시보드가 불러온다',
-  ['openBlPanel', 'closeBlPanel', 'loadBlacklist', 'addBlacklist', 'removeBlacklist', 'openNoticePanel', 'closeNoticePanel', 'saveNotice', 'clearNotice']
-    .every(fn => new RegExp('function ' + fn + '\\b').test(stats))
-  && /<script src="js\/index-stats\.js"><\/script>/.test(admin));
+// 옛 관리자 대시보드 폐기(결정 267) — admin.html 은 이동 정류장이 되고 index-app.js·index-stats.js 는 파일째 지웠다.
+//   [진행률] 패널·블랙리스트/공지 배너 창(index-stats.js) 검사는 화면과 함께 빠진다(작업보드는 자체 블랙리스트·홈 배너 설정을 쓴다).
+//   지운 파일이 정말 없는지·옛 주소가 어디로 가는지는 oldDashboardRetired.test.js 가 본다.
 
 /* ═══ 옛 대시보드 인라인 핸들러가 부르는 함수는 어딘가에 정의돼 있다 ═══
  * 공유 스크립트를 지울 때 같이 사라지는 버튼을 잡는다(이번에 실제로 놓쳤다). */
-const scripts = [...admin.matchAll(/<script src="([^"?]+)/g)].map(m => m[1]).filter(s => !/^https?:/.test(s));
 // 전역에서 부를 수 있는 함수만 센다(Codex P2): 옛 대시보드 스크립트를 **실제로 한 번 실행**(가짜 브라우저 객체)하고
 //   인라인 핸들러가 부르는 이름이 전역에서 함수인지 vm 안에서 typeof 로 확인한다.
 //   IIFE·DOMContentLoaded 안으로 숨은 함수는 여기서 undefined 로 잡힌다. 실행 중 오류는 스크립트 단위로 삼킨다
@@ -154,8 +146,9 @@ function checkPageHandlers(page) {
   const undef = [...called].filter(fn => !BUILTIN.has(fn) && !isGlobalFn(fn));
   return { called, undef };
 }
-// 옛 대시보드 + 리뷰어 제출 화면(103번 정리) + 참여형 공고 화면(같은 search-app.js 를 싣는다)
-for (const page of ['admin.html', 'search.html', 'campaign.html']) {
+// 리뷰어 제출 화면(103번 정리) + 참여형 공고 화면(같은 search-app.js 를 싣는다)
+//   + 리뷰웹시스템[3버전] — 옛 대시보드(admin.html)가 결정 267 로 빠지면서 그 자리를 작업보드가 이어받는다
+for (const page of ['search.html', 'campaign.html', 'workdesk.html']) {
   const r = checkPageHandlers(page);
   ok(`${page} 인라인 버튼이 부르는 함수 ${r.called.size}개가 모두 정의돼 있다` + (r.undef.length ? ' → 없음: ' + r.undef.join(', ') : ''), r.undef.length === 0);
 }
@@ -169,6 +162,5 @@ ok('106번: 리뷰제출 화면의 옛 조회식 로그인·단건 제출·호�
 ok('107번: 무인증 인애드명단 입구 제거 · 매핑 없음 · 리뷰어 양식은 후보 0건(자동 기록) 경로',
   !exists('GET', '/api/submit/get-inaed-list') && !mapNames.has('getInaedList')
   && /function _loadInaedList\(\) \{\s*_setOrdererDisabled\(false\);\s*_applyOrdererPicker\(\);/.test(read('frontend/js/search-app.js')));
-ok('104번: 옛 대시보드 고아 행 경고 띠·정리 버튼 없음', !/_handleOrphanRowsWarning|cleanOrphanRows|orphanRowsBanner/.test(read('frontend/js/index-app.js')));
 
 console.log(`\n✅ frontendActionMapRoutes: ${n}개 통과`);

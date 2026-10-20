@@ -11,7 +11,6 @@ function ok(label, condition) {
 
 const migration = read('migrations/151_admin_workboard_preferences.sql');
 const routes = read('src/routes/admin.routes.js');
-const client = read('../frontend/js/index-app.js');
 
 ok('사용자별 설정 테이블과 JSONB 폭 저장소를 만든다',
   /CREATE TABLE IF NOT EXISTS admin_workboard_preferences/i.test(migration) &&
@@ -27,19 +26,7 @@ ok('너비 키·최소값·상한을 서버에서 검증한다',
   /WORKBOARD_COLUMN_MIN_WIDTHS/.test(routes) && /formlink: 28/.test(routes) &&
   /income: 60/.test(routes) && /depositname: 80/.test(routes) &&
   /rounded >= minWidth && rounded <= 2000/.test(routes));
-ok('클라이언트는 서버값을 우선하고 오프라인에서는 기존 로컬값으로 폴백한다',
-  /function _savedColWidths\(\)/.test(client) &&
-  /_serverColWidths === null \? _readLocalColWidths\(\) : _serverColWidths/.test(client));
-ok('드래그 저장과 초기화 모두 순서 보장 서버 큐에 반영한다',
-  /void _queueServerColWidths\(data\)/.test(client) &&
-  /void _queueServerColWidths\(\{\}\)/.test(client) &&
-  /version !== _colWidthsSaveVersion/.test(client));
-ok('실패한 로컬 변경을 보존하고 재시도한다',
-  /COL_WIDTH_PENDING_LS_KEY/.test(client) && /const pending = _readPendingColWidths\(\)/.test(client) &&
-  /void _queueServerColWidths\(pending\)/.test(client));
-ok('환경설정 조회는 제한 시간 뒤 로컬 폴백으로 복귀한다',
-  /setTimeout\(\(\) => controller\.abort\(\), 4000\)/.test(client));
-ok('대시보드 첫 렌더링 전 서버 설정을 불러온다',
-  /_loadServerColWidths\(\)\.finally\(\(\) => loadAdminDashboard\(\)\)/.test(client));
+// 옛 관리자 대시보드 폐기(결정 267) — 열 너비를 쓰던 화면(index-app.js)이 없어져 클라이언트 검사는 뺐다.
+//   서버 경로(/api/admin/my-workboard-preferences)는 이번 폐기에서 남겨 두므로(서버 정리는 별도 단계) 위 서버 검사는 유지한다.
 
 if (failed) process.exit(1);

@@ -6,7 +6,7 @@ const path = require('path');
 const root = path.join(__dirname, '..', '..');
 const modal = fs.readFileSync(path.join(root, 'frontend', 'js', 'recruit-modal.js'), 'utf8');
 const workdesk = fs.readFileSync(path.join(root, 'frontend', 'workdesk.html'), 'utf8');
-const admin = fs.readFileSync(path.join(root, 'frontend', 'admin.html'), 'utf8');
+// 옛 관리자 대시보드 폐기(결정 267) — admin.html 과의 버전 일치 검사는 빠지고 작업보드 로드만 고정한다.
 
 const compactStart = modal.indexOf('<div class="rf-main rf-compact-main">');
 const compactEnd = modal.indexOf('<!-- /rf-compact-main -->', compactStart);
@@ -41,10 +41,8 @@ const assetTag = (html, file) => {
   return m ? (m[1] || '') : null;
 };
 ['recruit-modal.js', 'campaign-cards.js', 'index-recruit.js'].forEach(file => {
-  const w = assetTag(workdesk, file), a = assetTag(admin, file);
-  assert(w, `workdesk should load ${file}.`);
-  assert(a, `admin should load ${file}.`);
-  assert.strictEqual(w, a, `${file}: 두 화면이 서로 다른 버전을 로드하면 안 됩니다.`);
+  const w = assetTag(workdesk, file);
+  assert(w !== null, `workdesk should load ${file}.`);
 });
 
 console.log('recruitModalFinalRuntimeLayout: passed');

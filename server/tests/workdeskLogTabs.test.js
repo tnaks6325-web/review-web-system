@@ -12,7 +12,7 @@
  *     → 판정 순수함수를 **실행**해 그 예외가 살아 있는지 고정한다.
  *  ③ **창구 단일화** — 관리자 대시보드의 「오류디버깅」 화면이 남아 있으면 창구가 둘이 되고,
  *     index-app.js 에서 코드만 지우고 HTML 버튼을 남기면 **누르면 ReferenceError 로 죽는 탭**이 된다.
- *     → 두 화면(admin/index-app) 모두에서 흔적 0 을 고정한다(admin-siand 는 결정 186 44번 제거).
+ *     → 두 화면(admin/index-app) 모두에서 흔적 0 을 고정했다(admin-siand 는 결정 186 44번 제거 · 옛 대시보드는 결정 267 로 폐기).
  *  ④ **프리변수·사본** — 렌더 함수가 자기 스코프에 없는 변수를 참조하면 화면이 조용히 매달린다
  *     (리뷰검수 `isAdmin` 실측 사고). → 로그 뷰 렌더 블록을 **vm 으로 꺼내 실제 실행**한다.
  */
@@ -106,18 +106,11 @@ t('작업보드 프록시는 기본 제외 · includeAdminUi 로만 포함',
 
 /* ── 4) 창구 단일화 — 관리자 대시보드 흔적 0 ───────────────── */
 console.log('\n4) 관리자 대시보드 「오류디버깅」 제거');
-const IA = F('js/index-app.js');
-const ADMIN_HTML = F('admin.html');
-[['admin.html', ADMIN_HTML]].forEach(([nm, src]) => {   // (admin-siand.html 은 결정 186 44번에서 제거)
-  t(`${nm} — 탭 버튼 제거`, !/data-tab="errorlogs"/.test(src));
-  t(`${nm} — 패널 마크업 제거`, !/id="tab-errorlogs"/.test(src) && !/id="errorLogListWrap"/.test(src));
-});
-t('index-app.js — 오류디버깅 함수·상수 제거',
-  !/function loadErrorLogs/.test(IA) && !/ERRLOG_CAT_LABELS/.test(IA) && !/ERR_AGENTS/.test(IA));
-t('★ 죽은 호출 잔재 0 — 탭 분기·뱃지 호출도 함께 지웠다',
-  !/loadErrorLogs\(\)/.test(IA) && !/_updateErrorLogBadge/.test(IA) && !/errorLogBadge/.test(IA));
-t('제거 사유가 코드에 남아 있다(다음 사람이 되살리지 않게)',
-  /리뷰웹시스템\[3버전\] 「로그」/.test(IA) && /시스템 오류로그/.test(IA));
+// 옛 관리자 대시보드 폐기(결정 267) — admin.html·index-app.js 가 화면째 없어져 「오류디버깅」 흔적 0 은 자명하다.
+//   대신 옛 대시보드 화면 코드가 되살아나지 않았는지만 본다(admin.html = 이동 정류장, index-app.js 없음).
+t('옛 대시보드 화면 코드가 남아 있지 않다(오류디버깅 탭 포함)',
+  !require('fs').existsSync(require('path').join(__dirname, '../../frontend/js/index-app.js'))
+  && !/data-tab="errorlogs"|id="tab-errorlogs"|id="errorLogListWrap"/.test(F('admin.html')));
 
 /* ── 5) 프론트 배선 ───────────────────────────────────────── */
 console.log('\n5) 리뷰웹시스템[3버전] 배선');

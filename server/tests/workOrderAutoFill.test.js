@@ -49,7 +49,8 @@ ok('어디에도 없으면 빈 값', wm.pickWorkManager({ title: '7월 진행' }
 /* ═══ ② 구매채널 판정(프론트 순수함수를 실제로 실행) ═══ */
 // 작업오더 상세 렌더·담당자 매핑은 공유 모듈(js/work-order-detail.js)로 이관 —
 //   리뷰웹시스템[3버전]이 같은 상세를 쓰기 위함. 검사 의미는 그대로, 읽는 대상만 넓힌다.
-const appSrc = readF('js/index-app.js') + '\n' + readF('js/work-order-detail.js');
+// 옛 관리자 대시보드 폐기(결정 267) — index-app.js·admin.html 을 뺐다(검사 대상은 공유 모듈에 있다).
+const appSrc = readF('js/work-order-detail.js');
 const chanSrc = appSrc.slice(appSrc.indexOf('const WO_CHANNEL_HOSTS'), appSrc.indexOf('/** 작업오더에서 채널 추정'));
 const _chan = new Function(chanSrc + '\n return _woChannelFromUrl;')();
 
@@ -106,7 +107,7 @@ ok('★ 접수 시 탭 담당자는 매핑된 닉네임 — 담당AE 실명을 �
 
 /* ═══ 프론트 배선 ═══ */
 const rec = readF('js/index-recruit.js');
-const adm = readF('js/recruit-modal.js') + '\n' + readF('admin.html');   // 모달 마크업은 공유 모듈로 이관
+const adm = readF('js/recruit-modal.js');   // 모달 마크업은 공유 모듈로 이관
 
 ok('프리필에 채널·담당자·연결탭이 실린다',
   /String\(o && o\.purchase_channel \|\| ''\)\.trim\(\)/.test(appSrc)
