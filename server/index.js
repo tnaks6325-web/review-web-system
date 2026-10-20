@@ -160,6 +160,8 @@ const REQUIRED_SCHEMA = [
 const REQUIRED_TABLES = [
   'campaign_option_soldout_reports',              // 184 — 리뷰어 품절 신고(상품 이름 바꾸기 tx 가 함께 고친다 — 없으면 공고 저장이 죽는다)
   'campaign_option_alerts',                       // 184 — 관리자 전원 품절 알림
+  'campaign_price_reports',                       // 194 — 리뷰어 가격 신고(상품 이름 바꾸기 tx 가 함께 고친다 — 없으면 공고 저장이 죽는다)
+  'campaign_price_alerts',                        // 194 — 관리자 전원 가격 신고 알림·처리 이력
   'review_reminder_states',
   'review_reminder_deliveries',
   'reviewer_identity_match_audits',                // 147 — 캡처/수동 명의확인 비식별 감사기록

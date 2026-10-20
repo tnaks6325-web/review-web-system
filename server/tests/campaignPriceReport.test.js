@@ -134,6 +134,10 @@ process.env.JWT_SECRET = 'test-price-report';
     assert.ok(d.ok && d.resolution === 'deferred');
     assert.deepStrictEqual((await svc.priceReportsForCampaign(P, 'c1')).open.find(o => o.optKey === 'B'), { optKey: 'B', reports: 2 });
     assert.strictEqual((await svc.listOpenAlerts({ pool: P })).items.filter(x => x.optKey === 'B').length, 0);
+    // ★ 코드리뷰 P2: 이미 센 리뷰어가 또 취소해도 보류한 알림은 다시 뜨지 않는다(새 리뷰어만)
+    const same = await report('c1', 'B', '30000001');
+    assert.deepStrictEqual([same.action, same.reporters], ['reported', 2]);
+    assert.strictEqual((await svc.listOpenAlerts({ pool: P })).items.filter(x => x.optKey === 'B').length, 0);
     const r = await report('c1', 'B', '30000003');
     assert.deepStrictEqual([r.action, r.reporters], ['alerted', 3]);
     it = (await svc.listOpenAlerts({ pool: P })).items.find(x => x.optKey === 'B');
@@ -148,6 +152,9 @@ process.env.JWT_SECRET = 'test-price-report';
     await new Promise(r => setTimeout(r, 30));
     assert.strictEqual((await one(`SELECT resolution FROM campaign_price_alerts WHERE opt_key='B' ORDER BY id DESC LIMIT 1`)).resolution, 'gone');
     assert.ok(!(await svc.priceReportsForCampaign(P, 'c1')).history.some(x => x.resolution === 'gone'));
+    // ★ 코드리뷰 P2: 닫을 때 그 상품의 쌓인 신고도 정리한다 — 카드에 남지 않고, 다시 열어도 옛 신고를 세지 않는다
+    assert.strictEqual(Number((await one(`SELECT COUNT(*) n FROM campaign_price_reports WHERE campaign_id='c1' AND opt_key='B' AND cleared_at IS NULL`)).n), 0);
+    assert.ok(!(await svc.priceReportsForCampaign(P, 'c1')).open.some(o => o.optKey === 'B'));
     const r = await report('c1', 'B', '30000004');
     assert.strictEqual(r.action, 'unknown_option');
   });
@@ -194,6 +201,15 @@ process.env.JWT_SECRET = 'test-price-report';
     assert.ok(/\{ key: 'price', label: '화면과 가격이 달라요' \}/.test(src));
     assert.ok(/if \(String\(reasonKey \|\| ''\) === 'price'\) \{\s*try \{\s*const r = await require\('\.\/campaignPriceReport\.service'\)\.recordPriceReport/.test(src));
     assert.ok(src.indexOf("recordPriceReport") > src.indexOf('hideWorkdeskRow'), '취소(행 숨김) 뒤에 센다');
+  });
+  await t('★ 끄는 스위치가 꺼져 있으면 금액 고치기를 거절한다(남은 팝업·직접 호출) · 상품 이름 바꾸기가 신고·알림을 옮긴다 · 필수 스키마', async () => {
+    const src = R('src/services/campaignPriceReport.service.js');
+    assert.ok(/if \(action === 'edit'\) \{[\s\S]{0,260}if \(!ENABLED\) return \{ ok: false/.test(src));
+    const routes = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'campaign.routes.js'), 'latin1');
+    assert.strictEqual((routes.match(/UPDATE campaign_price_reports SET opt_key=\$3/g) || []).length, 2);
+    assert.strictEqual((routes.match(/UPDATE campaign_price_alerts SET opt_key=\$3/g) || []).length, 2);
+    const idx = R('index.js');
+    assert.ok(/'campaign_price_reports',/.test(idx) && /'campaign_price_alerts',/.test(idx));
   });
   await t('업체 렌즈는 가격 신고를 내보내지 않는다(화이트리스트) · 작업조건 재료에 실린다', async () => {
     const src = R('src/services/trackB.service.js');

@@ -114,10 +114,15 @@ async function recordPriceReport({ orderSubmissionId, phone8 = '', pool: dbPool 
     // ★ 공고 행 먼저 잠근다 — 같은 상품에 신고 두 건이 동시에 와도 알림은 하나다.
     const { rows: camp } = await client.query('SELECT id FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [tgt.campaignId]);
     if (!camp.length) { await client.query('ROLLBACK'); return { ok: false, action: 'no_campaign' }; }
+    // 이 리뷰어가 이미 세어진 사람인가(같은 사람의 두 번째 주문은 사람 수를 늘리지 않는다)
+    const who8 = String(phone8 || '').slice(-8);
+    const seen = who8 ? (await client.query(
+      `SELECT 1 FROM campaign_price_reports WHERE campaign_id = $1 AND opt_key = $2 AND cleared_at IS NULL AND reporter = $3 LIMIT 1`,
+      [tgt.campaignId, tgt.optKey, who8])).rows.length > 0 : false;
     const ins = await client.query(
       `INSERT INTO campaign_price_reports (campaign_id, opt_key, order_submission_id, reporter)
        VALUES ($1, $2, $3, $4) ON CONFLICT (order_submission_id) DO NOTHING RETURNING id`,
-      [tgt.campaignId, tgt.optKey, String(orderSubmissionId), String(phone8 || '').slice(-8)]);
+      [tgt.campaignId, tgt.optKey, String(orderSubmissionId), who8]);
     if (!ins.rows.length) { await client.query('ROLLBACK'); return { ok: true, action: 'duplicate' }; }
     // 같은 리뷰어(번호 끝 8자리)는 한 명 · 번호를 모르는 신고는 주문마다 한 명(모르는 것을 같은 사람으로 접지 않는다)
     const { rows: cnt } = await client.query(
@@ -126,7 +131,13 @@ async function recordPriceReport({ orderSubmissionId, phone8 = '', pool: dbPool 
         WHERE campaign_id = $1 AND opt_key = $2 AND cleared_at IS NULL`, [tgt.campaignId, tgt.optKey]);
     const reporters = Number(cnt[0].who) || 0;
     let alert = null;
-    if (reporters >= ALERT_REPORTERS) alert = await _upsertAlert(client, tgt.campaignId, tgt.optKey, reporters);
+    if (reporters >= ALERT_REPORTERS) {
+      // ★ 코드리뷰 P2: [결정 보류]로 닫은 뒤에는 **새 리뷰어**가 신고해야 다시 띄운다 — 이미 센 사람이 또 취소해도
+      //   "한 명이 더 신고하면 다시 뜬다"는 약속과 달리 같은 2명으로 다시 뜨면 안 된다. 열린 알림이 있으면 수만 맞춘다.
+      const { rows: openA } = await client.query(
+        `SELECT 1 FROM campaign_price_alerts WHERE campaign_id = $1 AND opt_key = $2 AND resolved_at IS NULL`, [tgt.campaignId, tgt.optKey]);
+      if (openA.length || !seen) alert = await _upsertAlert(client, tgt.campaignId, tgt.optKey, reporters);
+    }
     await client.query('COMMIT');
     logger.info(`[price-report] 가격 신고 camp=${tgt.campaignId} opt=${tgt.optKey || '-'} 신고자=${reporters}${alert ? ` → 알림 ${alert.id}` : ''}`);
     if (alert) _emit({ alertId: alert.id, kind: 'report', campaignId: tgt.campaignId });
@@ -170,11 +181,21 @@ async function listOpenAlerts({ pool: dbPool } = {}) {
       editable: !!cur.editable, notEditableWhy: cur.editable ? '' : (cur.why || ''),
     });
   }
-  if (gone.length) {
-    db.query(`UPDATE campaign_price_alerts SET resolved_at = NOW(), resolved_by = 'system', resolution = 'gone', updated_at = NOW()
-               WHERE id = ANY($1::bigint[]) AND resolved_at IS NULL`, [gone]).catch(() => {});
-  }
+  if (gone.length) _closeGone(db, gone).catch(() => {});
   return { ok: true, items };
+}
+
+/**
+ * 공고·상품이 사라졌거나 마감·보관된 알림을 닫고 **그 상품의 쌓인 신고도 정리**한다(코드리뷰 P2) —
+ * 신고만 남으면 카드에 계속 "신고 N명"이 보이고, 같은 이름으로 다시 열었을 때 옛 신고까지 센다.
+ */
+async function _closeGone(db, ids) {
+  const { rows } = await db.query(
+    `UPDATE campaign_price_alerts SET resolved_at = NOW(), resolved_by = 'system', resolution = 'gone', updated_at = NOW()
+      WHERE id = ANY($1::bigint[]) AND resolved_at IS NULL RETURNING campaign_id, opt_key`, [ids]);
+  for (const r of rows) {
+    await db.query(`UPDATE campaign_price_reports SET cleared_at = NOW() WHERE campaign_id = $1 AND opt_key = $2 AND cleared_at IS NULL`, [r.campaign_id, r.opt_key]);
+  }
 }
 
 /** 금액 쓰기 — 호출자가 공고 행을 잠근 트랜잭션 안에서 부른다(잠금 순서: 공고 → 상품). */
@@ -213,6 +234,8 @@ async function resolveAlert({ id, action, amount, by = '', pool: dbPool } = {}) 
   if (!['edit', 'keep', 'defer'].includes(action)) return { ok: false, code: 400, error: '잘못된 요청입니다.' };
   let next = null;
   if (action === 'edit') {
+    // ★ 코드리뷰 P2: 끄는 스위치가 꺼져 있으면 금액을 바꾸지 않는다(남아 있던 팝업·직접 호출 포함). 그대로/보류는 받는다(알림 정리).
+    if (!ENABLED) return { ok: false, code: 400, error: '지금은 가격 신고 기능이 꺼져 있어요. 금액은 모집공고 수정에서 고쳐 주세요.' };
     next = Number(amount);
     if (!Number.isInteger(next) || next <= 0 || next >= MAX_AMOUNT) {
       return { ok: false, code: 400, error: '금액은 1원부터 9,999,999원 사이의 숫자로 적어 주세요(1건당 금액).' };
@@ -233,7 +256,7 @@ async function resolveAlert({ id, action, amount, by = '', pool: dbPool } = {}) 
     const cid = String(a.campaign_id);
     const cur = await _currentPrice(client, cid, a.opt_key);
     if (cur.gone) {
-      await client.query(`UPDATE campaign_price_alerts SET resolved_at = NOW(), resolved_by = 'system', resolution = 'gone', updated_at = NOW() WHERE id = $1`, [aid]);
+      await _closeGone(client, [aid]);
       await client.query('COMMIT');
       _emit({ alertId: aid, kind: 'resolved', campaignId: cid });
       return { ok: false, code: 409, error: '공고나 상품이 마감·보관돼 알림을 닫았어요.' };
@@ -294,10 +317,14 @@ async function priceReportsForCampaign(db, campaignId) {
   if (!campaignId) return null;
   try {
     const q = db || pool;
+    // ★ 살아 있는 상품(또는 상품이 없을 때 공고 전체)의 신고만 — 마감·삭제된 상품의 남은 신고를 카드에 띄우지 않는다
     const { rows: open } = await q.query(
-      `SELECT opt_key, COUNT(DISTINCT COALESCE(NULLIF(reporter, ''), 'order:' || order_submission_id)) AS who
-         FROM campaign_price_reports WHERE campaign_id = $1 AND cleared_at IS NULL
-        GROUP BY opt_key ORDER BY opt_key`, [campaignId]);
+      `SELECT r.opt_key, COUNT(DISTINCT COALESCE(NULLIF(r.reporter, ''), 'order:' || r.order_submission_id)) AS who
+         FROM campaign_price_reports r
+        WHERE r.campaign_id = $1 AND r.cleared_at IS NULL
+          AND (EXISTS (SELECT 1 FROM campaign_options co WHERE co.campaign_id = r.campaign_id AND co.opt_key = r.opt_key AND COALESCE(co.status,'active') <> 'closed')
+               OR (r.opt_key = '' AND NOT EXISTS (SELECT 1 FROM campaign_options lo WHERE lo.campaign_id = r.campaign_id AND COALESCE(lo.status,'active') <> 'closed')))
+        GROUP BY r.opt_key ORDER BY r.opt_key`, [campaignId]);
     const { rows: hist } = await q.query(
       `SELECT opt_key, resolution, old_amount, new_amount, resolved_by, resolved_at
          FROM campaign_price_alerts

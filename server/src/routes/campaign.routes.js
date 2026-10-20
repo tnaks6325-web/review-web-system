@@ -344,6 +344,9 @@ async function _applyOptionRenames(client, campaignId, options, keep) {
     // ★ 결정 229: 품절 신고·알림도 상품 이름을 따라간다(안 바꾸면 이름을 바꾼 뒤 신고가 처음부터 다시 세진다)
     await client.query('UPDATE campaign_option_soldout_reports SET opt_key=$3 WHERE campaign_id=$1 AND opt_key=$2', [campaignId, plan[i].from, tmp(i)]);
     await client.query('UPDATE campaign_option_alerts SET opt_key=$3 WHERE campaign_id=$1 AND opt_key=$2', [campaignId, plan[i].from, tmp(i)]);
+    // ★ 결정 266: 가격 신고·알림(이력 포함)도 상품 이름을 따라간다(안 바꾸면 신고 2명이 이름 앞뒤로 갈려 알림이 안 뜬다)
+    await client.query('UPDATE campaign_price_reports SET opt_key=$3 WHERE campaign_id=$1 AND opt_key=$2', [campaignId, plan[i].from, tmp(i)]);
+    await client.query('UPDATE campaign_price_alerts SET opt_key=$3 WHERE campaign_id=$1 AND opt_key=$2', [campaignId, plan[i].from, tmp(i)]);
   }
   for (let i = 0; i < plan.length; i++) {
     await client.query('UPDATE campaign_options SET opt_key=$3, updated_at=NOW() WHERE campaign_id=$1 AND opt_key=$2', [campaignId, tmp(i), plan[i].to]);
@@ -351,6 +354,9 @@ async function _applyOptionRenames(client, campaignId, options, keep) {
     // ★ 결정 229: 품절 신고·알림도 상품 이름을 따라간다(안 바꾸면 이름을 바꾼 뒤 신고가 처음부터 다시 세진다)
     await client.query('UPDATE campaign_option_soldout_reports SET opt_key=$3 WHERE campaign_id=$1 AND opt_key=$2', [campaignId, tmp(i), plan[i].to]);
     await client.query('UPDATE campaign_option_alerts SET opt_key=$3 WHERE campaign_id=$1 AND opt_key=$2', [campaignId, tmp(i), plan[i].to]);
+    // ★ 결정 266: 가격 신고·알림(이력 포함)도 상품 이름을 따라간다(안 바꾸면 신고 2명이 이름 앞뒤로 갈려 알림이 안 뜬다)
+    await client.query('UPDATE campaign_price_reports SET opt_key=$3 WHERE campaign_id=$1 AND opt_key=$2', [campaignId, tmp(i), plan[i].to]);
+    await client.query('UPDATE campaign_price_alerts SET opt_key=$3 WHERE campaign_id=$1 AND opt_key=$2', [campaignId, tmp(i), plan[i].to]);
   }
   if (plan.length) logger.info('[campaign/options] 선택지 이름 변경 ' + campaignId + ' ' + plan.map(r => r.from + ' → ' + r.to).join(', '));
   return plan;
