@@ -58,6 +58,11 @@
     noticeDelete: "/api/reviewer/notices/delete",    // POST
     homeBanner: "/api/reviewer/home-banner/all",
     homeBannerSave: "/api/reviewer/home-banner/save",
+    /* 직원 공지(결정 265) — 옛 대시보드는 자체 모달(index-app.js openNoticeMgmt)을 써서 이 패널을 마운트하지 않는다.
+       POST 두 개(저장·삭제)는 Track B 에만 있으므로 기본값도 그 경로다. */
+    staffNoticesAll:   "/api/trackb/settings/staff-notices",
+    staffNoticeSave:   "/api/trackb/settings/staff-notices/save",
+    staffNoticeDelete: "/api/trackb/settings/staff-notices/delete",
   };
   var EP_SUFFIX = {
     nickname:     "/my-nickname",
@@ -70,6 +75,9 @@
     noticeDelete: "/notices/delete",
     homeBanner: "/home-banner",
     homeBannerSave: "/home-banner/save",
+    staffNoticesAll:   "/staff-notices",
+    staffNoticeSave:   "/staff-notices/save",
+    staffNoticeDelete: "/staff-notices/delete",
   };
   function _ep(key) {
     var base = window.ADMIN_SETTINGS_API;
@@ -2410,8 +2418,176 @@ async function saveGateCriteria() {
   }
 }
 
-  var PANELS = { nickname: _nicknameHtml, business: _businessHtml, aisamples: _aisamplesHtml, inspectmsg: _inspectmsgHtml, worktable: _worktableHtml, reviewtype: _reviewTypeHtml, managercleanup: _managerCleanupHtml, deliverycleanup: _deliveryCleanupHtml, capturelink: _captureLinkHtml, gatecriteria: _gateCriteriaHtml, homebanner: _homeBannerHtml, notice: _noticeHtml };
-  var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, aisamples: loadAiSamples, inspectmsg: loadInspectMessages, worktable: loadWorktableTemplate, reviewtype: loadReviewTypeCleanup, managercleanup: loadManagerCleanup, capturelink: loadCaptureLinkBackfill, gatecriteria: loadGateCriteria, homebanner: loadReviewerHomeBanner, notice: loadReviewerNoticesAdmin };
+/* ══════════════════════════════════════════════════════════════
+   📢 직원 공지 (결정 265 · 사용자 확정 2026-10-20)
+   옛 관리자 대시보드의 「공지사항 관리」(마스터 전용 모달)를 작업보드 설정으로 옮겼다.
+   쓴 공지는 대상 직원이 작업보드에 접속할 때 팝업으로 뜬다(js/staff-notice-prompt.js).
+   ★ 표·저장 로직은 그대로(admin_notices · /api/admin/notices* 핸들러 위임) — 화면만 새로.
+   ★ [필수열람] 은 본문 표시(마커)로 저장한다 — 팝업·옛 대시보드가 같은 마커를 읽는다(결정 001).
+     여기서는 체크박스로 넣고 빼게 해서 마커를 손으로 치지 않게 한다.
+   ══════════════════════════════════════════════════════════════ */
+let _snNotices = [];
+var SN_MARK = '[필수열람]';
+
+function _staffNoticeHtml() {
+  return `
+        <div style="min-width:0;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:16px 18px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">
+            <span style="font-size:.88rem;font-weight:700;color:var(--t1)"><i class="fas fa-bullhorn" style="color:#F59E0B;margin-right:6px"></i>직원 공지 <span style="font-size:.65rem;font-weight:400;color:#6B7280">(작업보드 접속 시 팝업)</span></span>
+            <div style="display:flex;gap:6px">
+              <button id="snWriteBtn" onclick="toggleStaffNoticeForm()" style="padding:4px 12px;background:#2563EB;color:#fff;border:none;border-radius:7px;font-size:.72rem;font-weight:700;cursor:pointer"><i class="fas fa-pen"></i> 작성</button>
+              <button onclick="loadStaffNotices()" style="padding:4px 10px;background:#F3F4F6;color:#374151;border:none;border-radius:7px;font-size:.72rem;font-weight:600;cursor:pointer"><i class="fas fa-sync-alt"></i> 새로고침</button>
+            </div>
+          </div>
+          <div style="font-size:.74rem;color:#6B7280;line-height:1.6;margin-bottom:10px">대상 직원이 작업보드에 들어오면 팝업으로 뜨고, [확인]을 누른 사람에게는 다시 뜨지 않습니다.</div>
+          <div id="snFormWrap" style="display:none;background:#FAFAFB;border:1px solid #EEF0F5;border-radius:10px;padding:12px;margin-bottom:12px">
+            <input type="hidden" id="snEditId" value="">
+            <input id="snTitle" type="text" placeholder="공지 제목" maxlength="200" style="width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box;margin-bottom:8px">
+            <textarea id="snContent" rows="5" placeholder="공지 내용 (문서 주소를 넣으면 팝업에서 링크로 바뀝니다)" style="width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:7px;font-size:.82rem;font-family:inherit;outline:none;box-sizing:border-box;resize:vertical;margin-bottom:8px"></textarea>
+            <label style="display:flex;align-items:flex-start;gap:6px;font-size:.76rem;color:var(--t2);cursor:pointer;margin-bottom:10px;line-height:1.5"><input type="checkbox" id="snRequired" style="margin-top:2px"> <span><b style="color:#B91C1C">필수열람</b> — 내용 속 문서 링크를 열어야 [확인]을 누를 수 있게 합니다 (링크가 없으면 잠그지 않습니다)</span></label>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+              <label style="flex:0 0 120px;font-size:.72rem;font-weight:600;color:#374151">보이는 기간(일)
+                <input id="snDays" type="number" min="1" max="365" value="7" style="display:block;width:100%;margin-top:3px;padding:7px 9px;border:1px solid #D1D5DB;border-radius:7px;font-size:.8rem;box-sizing:border-box"></label>
+              <label style="flex:1 1 220px;font-size:.72rem;font-weight:600;color:#374151">받는 사람 (비우면 전 직원 · 여러 명은 쉼표)
+                <input id="snTargets" type="text" placeholder="예: 박은비, 박세희" style="display:block;width:100%;margin-top:3px;padding:7px 9px;border:1px solid #D1D5DB;border-radius:7px;font-size:.8rem;box-sizing:border-box"></label>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:6px">
+              <button id="snCancelBtn" onclick="cancelStaffNoticeEdit()" style="padding:7px 14px;background:#fff;color:var(--t2);border:1px solid #D1D5DB;border-radius:7px;font-size:.78rem;font-weight:600;cursor:pointer">취소</button>
+              <button id="snSaveBtn" onclick="saveStaffNotice()" style="padding:7px 16px;background:#2563EB;color:#fff;border:none;border-radius:7px;font-size:.78rem;font-weight:700;cursor:pointer"><i class="fas fa-paper-plane"></i> 공지 올리기</button>
+            </div>
+          </div>
+          <div id="snList" style="max-height:420px;overflow-y:auto"><div style="text-align:center;color:#9CA3AF;font-size:.8rem;padding:10px">불러오는 중...</div></div>
+        </div>`;
+}
+
+async function loadStaffNotices() {
+  const wrap = document.getElementById("snList");
+  if (!wrap) return;
+  try {
+    const data = await _get('staffNoticesAll');
+    if (!data || data.success !== true) throw new Error((data && data.error) || "불러오기 실패");
+    _snNotices = data.notices || [];
+    _renderStaffNotices(_snNotices);
+    const live = _snNotices.filter(n => n.is_active && new Date(n.expires_at) > new Date()).length;
+    _setNavBadge('staffnotice', live ? (live + '건') : '없음', '');
+  } catch (err) {
+    wrap.innerHTML = `<div style="text-align:center;color:#EF4444;font-size:.8rem;padding:10px">오류: ${escHtml(err.message)}</div>`;
+  }
+}
+
+function _snDate(v) { const d = new Date(v); return isNaN(d.getTime()) ? '' : d.toLocaleDateString("ko-KR", { year:'2-digit', month:'2-digit', day:'2-digit' }); }
+
+function _renderStaffNotices(list) {
+  const wrap = document.getElementById("snList");
+  if (!wrap) return;
+  if (!list.length) {
+    wrap.innerHTML = '<div style="text-align:center;color:#9CA3AF;font-size:.8rem;padding:14px">올린 공지가 없습니다</div>';
+    return;
+  }
+  const now = new Date();
+  wrap.innerHTML = list.map(n => {
+    const live = n.is_active && new Date(n.expires_at) > now;
+    const raw = String(n.content || '');
+    const req = raw.indexOf(SN_MARK) >= 0;
+    const body = req ? raw.split(SN_MARK).join('').trim() : raw;
+    const targets = (n.target_names && n.target_names.length) ? n.target_names.join(', ') : '전 직원';
+    return `<div style="border:1px solid ${live ? '#BFDBFE' : '#E5E7EB'};background:${live ? '#fff' : '#F9FAFB'};border-radius:9px;padding:10px 12px;margin-bottom:8px;opacity:${live ? '1' : '.65'}">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap">
+        ${live ? '<span style="font-size:.62rem;background:#D1FAE5;color:#065F46;font-weight:700;padding:1px 5px;border-radius:5px">보이는 중</span>' : '<span style="font-size:.62rem;background:#F3F4F6;color:#6B7280;font-weight:700;padding:1px 5px;border-radius:5px">기간 끝남</span>'}
+        ${req ? '<span style="font-size:.62rem;background:#FEE2E2;color:#B91C1C;font-weight:700;padding:1px 5px;border-radius:5px">필수열람</span>' : ''}
+        <span style="font-weight:700;color:var(--t1);font-size:.83rem;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(n.title || '(제목 없음)')}</span>
+      </div>
+      <div style="font-size:.76rem;color:var(--t2);line-height:1.5;white-space:pre-wrap;word-break:break-word;margin-bottom:6px;max-height:4.5em;overflow:hidden">${escHtml(body)}</div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.68rem;color:#6B7280">
+        <span>받는 사람: ${escHtml(targets)}</span>
+        <span>${_snDate(n.created_at)} ~ ${_snDate(n.expires_at)}</span>
+        <span>작성 ${escHtml(n.created_by || '')}</span>
+        <span style="margin-left:auto;display:flex;gap:5px">
+          <button onclick="editStaffNotice(${Number(n.id) || 0})" style="padding:3px 9px;background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE;border-radius:6px;font-size:.68rem;font-weight:600;cursor:pointer">수정</button>
+          <button onclick="deleteStaffNotice(${Number(n.id) || 0})" style="padding:3px 9px;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:6px;font-size:.68rem;font-weight:600;cursor:pointer">삭제</button>
+        </span>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function toggleStaffNoticeForm() {
+  const wrap = document.getElementById("snFormWrap");
+  if (!wrap) return;
+  if (wrap.style.display === "none") {
+    wrap.style.display = "";
+    const t = document.getElementById("snTitle"); if (t) t.focus();
+  } else {
+    cancelStaffNoticeEdit();
+  }
+}
+
+function editStaffNotice(id) {
+  const n = _snNotices.find(x => Number(x.id) === Number(id));
+  if (!n) return;
+  const raw = String(n.content || '');
+  const req = raw.indexOf(SN_MARK) >= 0;
+  document.getElementById("snFormWrap").style.display = "";
+  document.getElementById("snEditId").value = String(n.id);
+  document.getElementById("snTitle").value = n.title || "";
+  document.getElementById("snContent").value = req ? raw.split(SN_MARK).join('').trim() : raw;
+  document.getElementById("snRequired").checked = req;
+  document.getElementById("snDays").value = n.display_days || 7;
+  document.getElementById("snTargets").value = (n.target_names || []).join(', ');
+  const s = document.getElementById("snSaveBtn"); if (s) s.innerHTML = '<i class="fas fa-check"></i> 수정 저장';
+  document.getElementById("snTitle").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function cancelStaffNoticeEdit() {
+  ["snEditId", "snTitle", "snContent", "snTargets"].forEach(k => { const el = document.getElementById(k); if (el) el.value = ""; });
+  const d = document.getElementById("snDays"); if (d) d.value = 7;
+  const r = document.getElementById("snRequired"); if (r) r.checked = false;
+  const s = document.getElementById("snSaveBtn"); if (s) s.innerHTML = '<i class="fas fa-paper-plane"></i> 공지 올리기';
+  const wrap = document.getElementById("snFormWrap"); if (wrap) wrap.style.display = "none";
+}
+
+async function saveStaffNotice() {
+  const id = (document.getElementById("snEditId") || {}).value || "";
+  const title = ((document.getElementById("snTitle") || {}).value || "").trim();
+  let content = ((document.getElementById("snContent") || {}).value || "").split(SN_MARK).join('').trim();
+  const required = !!(document.getElementById("snRequired") || {}).checked;
+  const display_days = parseInt((document.getElementById("snDays") || {}).value, 10) || 7;
+  const targetsRaw = ((document.getElementById("snTargets") || {}).value || "").trim();
+  const target_names = targetsRaw ? targetsRaw.split(',').map(x => x.trim()).filter(Boolean) : [];
+  if (!title) { showToast("제목을 입력하세요", true); return; }
+  if (!content) { showToast("내용을 입력하세요", true); return; }
+  if (required) content = SN_MARK + '\n' + content;
+  const btn = document.getElementById("snSaveBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const payload = { title, content, display_days, target_names };
+    if (id) payload.id = id;
+    const data = await _post('staffNoticeSave', payload);
+    if (!data || data.success !== true) throw new Error((data && data.error) || "저장 실패");
+    showToast(id ? "공지를 수정했습니다" : "공지를 올렸습니다 — 대상 직원이 다음에 접속하면 팝업으로 뜹니다");
+    cancelStaffNoticeEdit();
+    loadStaffNotices();
+  } catch (err) {
+    showToast("저장 오류: " + err.message, true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function deleteStaffNotice(id) {
+  if (!confirm("이 공지를 삭제하시겠습니까? 아직 확인하지 않은 직원에게도 더 이상 뜨지 않습니다.")) return;
+  try {
+    const data = await _post('staffNoticeDelete', { id });
+    if (!data || data.success !== true) throw new Error((data && data.error) || "삭제 실패");
+    showToast("공지를 삭제했습니다");
+    loadStaffNotices();
+  } catch (err) {
+    showToast("삭제 오류: " + err.message, true);
+  }
+}
+
+  var PANELS = { nickname: _nicknameHtml, business: _businessHtml, aisamples: _aisamplesHtml, inspectmsg: _inspectmsgHtml, worktable: _worktableHtml, reviewtype: _reviewTypeHtml, managercleanup: _managerCleanupHtml, deliverycleanup: _deliveryCleanupHtml, capturelink: _captureLinkHtml, gatecriteria: _gateCriteriaHtml, homebanner: _homeBannerHtml, notice: _noticeHtml, staffnotice: _staffNoticeHtml };
+  var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, aisamples: loadAiSamples, inspectmsg: loadInspectMessages, worktable: loadWorktableTemplate, reviewtype: loadReviewTypeCleanup, managercleanup: loadManagerCleanup, capturelink: loadCaptureLinkBackfill, gatecriteria: loadGateCriteria, homebanner: loadReviewerHomeBanner, notice: loadReviewerNoticesAdmin, staffnotice: loadStaffNotices };
   /* 목차 라벨·아이콘 — 시안 B(design-admin-settings-wireframe.html ?v=B).
      ★ 키는 PANELS 와 같은 이름을 쓴다(둘이 갈리면 목차에 빈 칸이 생긴다). */
   var PANEL_NAV = {
@@ -2427,6 +2603,7 @@ async function saveGateCriteria() {
     capturelink: { ic: '📎', nm: '구매 캡처 연결 복구' },
     gatecriteria: { ic: '🚫', nm: '블랙리스트 관리기준' },
     notice:    { ic: '📣', nm: '리뷰어 공지' },
+    staffnotice: { ic: '📢', nm: '직원 공지' },
   };
   var _navKeys = [];        // 이번 마운트에 그린 목차 키(순서 그대로)
 
@@ -2879,4 +3056,10 @@ async function saveGateCriteria() {
   window.cancelReviewerNoticeEdit = cancelReviewerNoticeEdit;
   window.toggleReviewerNotice = toggleReviewerNotice;
   window.deleteReviewerNotice = deleteReviewerNotice;
+  window.loadStaffNotices = loadStaffNotices;          /* 📢 직원 공지(결정 265) — 생성 HTML onclick 이 부른다 */
+  window.toggleStaffNoticeForm = toggleStaffNoticeForm;
+  window.editStaffNotice = editStaffNotice;
+  window.cancelStaffNoticeEdit = cancelStaffNoticeEdit;
+  window.saveStaffNotice = saveStaffNotice;
+  window.deleteStaffNotice = deleteStaffNotice;
 })();
