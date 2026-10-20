@@ -1864,6 +1864,11 @@ router.post('/campaigns/:id/rounds', authMiddleware, internalMiddleware, async (
   try {
     const { addRound, getPlanOverview } = require('../services/campaignPlan.service');
     const campaignId = String(req.params.id);
+    // ★ 7단계-②(사용자 확정 2026-10-20 ②): 리뷰오더와 맞춰지는 공고는 차수를 쓰지 않는다 — 옵션이 여럿이면 늘린 인원을 어느 옵션에 줄지
+    //   정할 근거가 없다. 인원은 공고 창·리뷰오더의 인원 칸에서(오더·작업표 줄과 함께 맞춘다). 연결 판정 실패 = 막음(fail-closed).
+    if (await require('../services/campaignSharedSave.service').bidirOrderLinked(campaignId)) {   // 스위치와 상관없이(인원은 공유 칸 · 검토 2026-10-21)
+      return res.status(409).json({ ok: false, code: 'rounds_bidir_linked', error: '리뷰오더와 맞춰지는 공고라 차수를 쓰지 않습니다. 모집공고 편집 창이나 리뷰오더에서 인원을 바꿔 주세요.' });
+    }
     const out = await addRound(campaignId, req.body, _by(req));
     /* ★ 7단계 🔴2(2026-10-20): 차수로 총 인원이 바뀌면 관리자 공고 창과 같은 한 곳(syncCampaignRecruitTotal)으로 연결 작업오더의 총모집과
        작업표 줄 수도 맞춘다 — 종전에는 공고 총량만 바뀌고 작업오더·작업표 줄은 옛 인원으로 남았다. 차수는 이미 저장됐으므로 실패는 알리기만 한다. */
@@ -1882,6 +1887,11 @@ router.delete('/campaigns/:id/rounds', authMiddleware, internalMiddleware, async
   try {
     const { removeLastRound, getPlanOverview } = require('../services/campaignPlan.service');
     const campaignId = String(req.params.id);
+    // ★ 7단계-②(사용자 확정 2026-10-20 ②): 리뷰오더와 맞춰지는 공고는 차수를 쓰지 않는다 — 옵션이 여럿이면 늘린 인원을 어느 옵션에 줄지
+    //   정할 근거가 없다. 인원은 공고 창·리뷰오더의 인원 칸에서(오더·작업표 줄과 함께 맞춘다). 연결 판정 실패 = 막음(fail-closed).
+    if (await require('../services/campaignSharedSave.service').bidirOrderLinked(campaignId)) {   // 스위치와 상관없이(인원은 공유 칸 · 검토 2026-10-21)
+      return res.status(409).json({ ok: false, code: 'rounds_bidir_linked', error: '리뷰오더와 맞춰지는 공고라 차수를 쓰지 않습니다. 모집공고 편집 창이나 리뷰오더에서 인원을 바꿔 주세요.' });
+    }
     const out = await removeLastRound(campaignId, _by(req));
     /* ★ 7단계 🔴2(2026-10-20): 차수로 총 인원이 바뀌면 관리자 공고 창과 같은 한 곳(syncCampaignRecruitTotal)으로 연결 작업오더의 총모집과
        작업표 줄 수도 맞춘다 — 종전에는 공고 총량만 바뀌고 작업오더·작업표 줄은 옛 인원으로 남았다. 차수는 이미 저장됐으므로 실패는 알리기만 한다. */

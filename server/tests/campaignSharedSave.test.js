@@ -54,7 +54,8 @@ const read = (rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
   assert.match(ui, /window\._rfBidirBase = null;/, '다른 공고 열 때 지운다');
   const sp = read('src/services/sharedPatch.service.js');
   // ★ 5단계: 금액 칸(리뷰비)이 더해졌다 — 공고 창발은 여전히 인트라넷 고유 칸을 못 쓴다(검사 의미 불변 · 강화).
-  assert.match(sp, /campaign: new Set\(\[\.\.\.PHASE3_SHARED_FIELDS, \.\.\.PHASE5_SHARED_FIELDS\]\)/);
+  // ★ 7단계-②: 인원 칸(총모집·일건수·혼합 수량)이 더해졌다 — 인트라넷 고유 칸 제외는 그대로(아래)
+  assert.match(sp, /campaign: new Set\(\[\.\.\.PHASE3_SHARED_FIELDS, \.\.\.PHASE5_SHARED_FIELDS, \.\.\.PHASE7Q_SHARED_FIELDS\]\)/);
   assert.doesNotMatch(sp.match(/\n  campaign: new Set\([^\n]*/)[0], /INTRANET_EDITABLE_AFTER_ACCEPT/, '공고 창발에 인트라넷 고유 칸 없음');
   assert.match(sp, /const PHASE5_SHARED_FIELDS = Object\.freeze\(\['review_fee'\]\);/);
   console.log('campaignSharedSave: static passed');

@@ -291,6 +291,153 @@ function _planGuideEdit({ products, src, srcCount, rowCount, o, name, baseRow, d
   return { guide, target: t, wantKey: shapeKey(sent) };
 }
 
+/** 리뷰 혼합 수량 → 저장 모양 배열([{type, quantity}] · 0 은 뺀다). */
+function _mixArray(v) {
+  const { normalizeReviewTypeMix } = require('./reviewTypeMix');
+  let raw = v;
+  if (typeof raw === 'string') { try { raw = JSON.parse(raw || '[]'); } catch (_) { raw = []; } }
+  const st = normalizeReviewTypeMix(Array.isArray(raw) ? raw : []);
+  return (st.mix || []).filter(e => Number(e.quantity) > 0);
+}
+
+/**
+ * 7단계-② 공고 창 인원 → 오더(사용자 확정 2026-10-20 ③: 오더는 "총모집 = 상품·옵션 인원 합계" — 무제한(0)·합계 다름은 담지 않는다).
+ *   옵션 줄 인원·일건수·혼합 수량 → 그 줄의 자리(옵션 count/daily · 상품 줄 base · "옵션 없음" 류 줄의 혼합 수량은 상품 base — 프리필이 읽는 자리).
+ *   옵션 줄 없는 공고 → 총모집·일건수·혼합 수량을 단일 선택지(상품 하나 · 옵션 하나 이하)의 자리로. 여럿이면 어느 것인지 정할 근거가 없다.
+ *   공고 총모집·일건수는 옵션 합계와 같아야 한다(바꾼 경우). 구매수량 단계 상품은 못 고친다(4단계).
+ */
+/** 일건수 자리 — 인트라넷은 `daily`, 옛 모양은 `daily_limit`/`dailyLimit`(프리필은 daily_limit 을 먼저 읽는다). 있는 키는 모두 같은 값으로. */
+function _setDaily(node, v) {
+  node.daily = v;
+  if (node.daily_limit !== undefined) node.daily_limit = v;
+  if (node.dailyLimit !== undefined) node.dailyLimit = v;
+}
+
+function _planQuantityEdit({ base, products, baseRows, liveCampOpts, body, edited }) {
+  const out = { mine: {}, changed: [], unmappable: [], edited: null };
+  const int = v => Math.max(0, Math.floor(Number(v) || 0));
+  const pre = _woCampaignPrefill(JSON.parse(JSON.stringify(base)));
+  const sentTop = v => v !== undefined && v !== null && v !== '';
+  if (!products || !products.length) {
+    // 상품 구성이 없는 오더 — 총모집·일 진행 건수는 오더 칸 그대로(종전에는 계획 없이 돌아가 "저장됨" 인데 아무 데도 안 바뀌었다 · 검토 2026-10-21)
+    if (sentTop(body.recruit_total) && CANON.int(body.recruit_total) !== CANON.int(pre.recruit_total)) {
+      if (int(body.recruit_total) === 0) out.unmappable.push({ key: 'recruit_total', label: '총모집 0(무제한)은 리뷰오더에 담을 수 없습니다', want: '0', got: CANON.int(pre.recruit_total) });
+      else { out.mine.recruit_count = int(body.recruit_total); out.changed.push('총모집'); }
+    }
+    if (sentTop(body.daily_limit) && CANON.int(body.daily_limit) !== CANON.int(pre.daily_limit)) { out.mine.daily_count = int(body.daily_limit); out.changed.push('일 진행 건수'); }
+    if (body.review_type_mix !== undefined && body.review_type_mix !== null
+        && CANON.reviewTypeMix(_mixArray(body.review_type_mix)) !== CANON.reviewTypeMix(_mixArray(pre.review_type_mix))) {
+      out.mine.review_type_mix = JSON.stringify(_mixArray(body.review_type_mix)); out.changed.push('리뷰타입 혼합 수량');
+    }
+    return out;
+  }
+  const srcs = _rowSources(products);
+  const ed = edited || JSON.parse(JSON.stringify(products));
+  let touched = false;
+  const nodeOf = (src, forMix) => {
+    const prod = ed[src.i];
+    if (src.j >= 0) {
+      const op = prod.options[src.j];
+      const lab = String(op && op.label || '').replace(/\|/g, '').trim();
+      const isNone = !lab || /^(옵션\s*없음|없음|단일(상품)?|해당\s*없음)$/.test(lab);
+      if (!(forMix && isNone)) return op;
+    }
+    if (!prod.base || typeof prod.base !== 'object') prod.base = {};
+    return prod.base;
+  };
+  const hasOptRows = liveCampOpts.length > 0 && baseRows.length > 0;
+  if (Array.isArray(body.options) && hasOptRows) {
+    const byKey = new Map(baseRows.map((r, k) => [r.key, k]));
+    for (const o of body.options) {
+      if (!o || typeof o !== 'object') continue;
+      const key = _bodyOptKey(o);
+      const k = byKey.get(key);
+      if (k === undefined) {
+        // 오더에 없는 줄 — 이름을 바꾼 줄이면 원래 줄(prevOptKey)의 인원·일건수와 같아야 한다(금액과 같은 막이 · 검토 2026-10-21).
+        //   이름과 인원을 함께 바꾸면 오더와 짝을 못 지어, 옵션 저장이 하한 검사·오더 반영 없이 인원을 그대로 쓴다.
+        const prev = String(o.prevOptKey ?? o.prev_opt_key ?? '').replace(/\|/g, '').trim();
+        const was = prev ? liveCampOpts.find(r => String(r.opt_key || '') === prev) : null;
+        const rt0 = o.recruitTotal ?? o.recruit_total, dl0 = o.dailyLimit ?? o.daily_limit;
+        if (was && ((rt0 !== undefined && CANON.int(rt0) !== CANON.int(was.recruit_total)) || (dl0 !== undefined && CANON.int(dl0) !== CANON.int(was.daily_limit)))) {
+          out.unmappable.push({ key, label: `인원(${prev} → ${String(o.optKey || '').trim()}) — 이름과 인원을 함께 바꿈. 이름을 먼저 바꿔 저장한 뒤 인원을 바꿔 주세요`, want: String(rt0), got: CANON.int(was.recruit_total) });
+        }
+        continue;
+      }
+      const br = baseRows[k];
+      const rt = int(o.recruitTotal ?? o.recruit_total), dl = int(o.dailyLimit ?? o.daily_limit);
+      const mxRaw = o.reviewTypeMix ?? o.review_type_mix;
+      // 안 보낸 칸 = 손대지 않음(인원 칸이 없는 화면·호출이 0 으로 읽혀 "무제한으로 바꿨다" 가 되지 않게)
+      const sentRt = (o.recruitTotal ?? o.recruit_total) !== undefined, sentDl = (o.dailyLimit ?? o.daily_limit) !== undefined;
+      const cntCh = sentRt && CANON.int(rt) !== br.recruit_total, dlCh = sentDl && CANON.int(dl) !== br.daily_limit;
+      const mxCh = mxRaw !== undefined && CANON.reviewTypeMix(_mixArray(mxRaw)) !== br.review_type_mix;
+      if (!cntCh && !dlCh && !mxCh) continue;
+      const label = `인원(${br.name})`;
+      const src = srcs[k];
+      if (!src || srcs.length !== baseRows.length) { out.unmappable.push({ key, label, want: String(rt), got: br.recruit_total }); continue; }
+      if (_hasTiers(products[src.i])) { out.unmappable.push({ key, label: `${label} — 구매수량 단계 상품(구조 단계에서 엽니다)`, want: String(rt), got: br.recruit_total }); continue; }
+      if (cntCh && rt === 0) { out.unmappable.push({ key, label: `${label} — 인원 0(무제한)은 리뷰오더에 담을 수 없습니다. 인원을 정해 주세요`, want: '0', got: br.recruit_total }); continue; }
+      if (cntCh) nodeOf(src, false).count = rt;
+      if (dlCh) _setDaily(nodeOf(src, false), dl);
+      if (mxCh) nodeOf(src, true).review_type_mix = _mixArray(mxRaw);
+      touched = true;
+      out.changed.push(label);
+    }
+  } else if (!hasOptRows) {
+    // 옵션 줄 없는 공고 — 공고 칸 = 단일 선택지
+    const one = srcs.length === 1 ? srcs[0] : null;
+    const tCh = body.recruit_total !== undefined && body.recruit_total !== null && body.recruit_total !== '' && CANON.int(body.recruit_total) !== CANON.int(pre.recruit_total);
+    const dCh = body.daily_limit !== undefined && body.daily_limit !== null && body.daily_limit !== '' && CANON.int(body.daily_limit) !== CANON.int(pre.daily_limit);
+    const mCh = body.review_type_mix !== undefined && body.review_type_mix !== null && CANON.reviewTypeMix(_mixArray(body.review_type_mix)) !== CANON.reviewTypeMix(_mixArray(pre.review_type_mix));
+    if ((tCh || dCh || mCh) && (!one || _hasTiers(products[one.i]))) {
+      out.unmappable.push({ key: 'recruit_total', label: '총모집·일 진행 건수 — 상품이 둘 이상이거나 구매수량 단계 상품이라 어느 상품의 인원인지 정할 수 없습니다', want: String(body.recruit_total), got: CANON.int(pre.recruit_total) });
+      return out;
+    }
+    if (tCh && int(body.recruit_total) === 0) { out.unmappable.push({ key: 'recruit_total', label: '총모집 0(무제한)은 리뷰오더에 담을 수 없습니다', want: '0', got: CANON.int(pre.recruit_total) }); return out; }
+    if (tCh) { nodeOf(one, false).count = int(body.recruit_total); touched = true; out.changed.push('총모집'); }
+    if (dCh) { _setDaily(nodeOf(one, false), int(body.daily_limit)); touched = true; out.changed.push('일 진행 건수'); }
+    if (mCh) { nodeOf(one, true).review_type_mix = _mixArray(body.review_type_mix); touched = true; }
+  }
+  if (!touched && !(body.review_type_mix !== undefined && body.review_type_mix !== null
+      && CANON.reviewTypeMix(_mixArray(body.review_type_mix)) !== CANON.reviewTypeMix(_mixArray(pre.review_type_mix)))) {
+    // 공고 칸만 바꾸고 옵션 줄은 그대로 = 합계와 달라진다(③)
+    const tOnly = hasOptRows && body.recruit_total !== undefined && body.recruit_total !== null && body.recruit_total !== '' && CANON.int(body.recruit_total) !== CANON.int(pre.recruit_total);
+    if (tOnly) out.unmappable.push({ key: 'recruit_total', label: '총모집 — 옵션별 인원 합계가 총모집이 되도록 맞춰 주세요', want: CANON.int(body.recruit_total), got: CANON.int(pre.recruit_total) });
+    // 일 진행 건수만 바꾸고 옵션별 일건수는 그대로 = 공고 칸은 공유 저장이 안 쓰고(_bx) 오더에도 못 담아 "저장됨" 인데 아무 데도 안 바뀐다(검토 2026-10-21)
+    const dOnly = hasOptRows && body.daily_limit !== undefined && body.daily_limit !== null && body.daily_limit !== '' && CANON.int(body.daily_limit) !== CANON.int(pre.daily_limit);
+    if (dOnly) out.unmappable.push({ key: 'daily_limit', label: '일 진행 건수 — 옵션별 일건수 합계가 일 진행 건수가 되도록 맞춰 주세요', want: CANON.int(body.daily_limit), got: CANON.int(pre.daily_limit) });
+    return out;
+  }
+  // 합계(오더 = 상품·옵션 인원 합계)
+  let total = 0, daily = 0;
+  for (const p of ed) {
+    const opts = Array.isArray(p.options) ? p.options : [];
+    const b0 = p.base && typeof p.base === 'object' ? p.base : {};
+    if (opts.length) for (const op of opts) { total += int(op.count); daily += int(op.daily ?? op.daily_limit ?? op.dailyLimit); }
+    else { total += int(b0.count); daily += int(b0.daily ?? b0.daily_limit ?? b0.dailyLimit); }
+  }
+  if (touched) {
+    out.mine.recruit_count = total;
+    if (daily > 0) out.mine.daily_count = daily;
+    out.edited = ed;
+  }
+  // 공고 총모집·일건수를 바꿨으면 합계와 같아야 한다(③)
+  if (hasOptRows && body.recruit_total !== undefined && body.recruit_total !== null && body.recruit_total !== ''
+      && CANON.int(body.recruit_total) !== CANON.int(pre.recruit_total) && int(body.recruit_total) !== total) {
+    out.unmappable.push({ key: 'recruit_total', label: `총모집 — 옵션별 인원 합계(${total}명)가 총모집(${int(body.recruit_total)}명)이 되도록 맞춰 주세요`, want: CANON.int(body.recruit_total), got: String(total) });
+  }
+  if (hasOptRows && body.daily_limit !== undefined && body.daily_limit !== null && body.daily_limit !== ''
+      && CANON.int(body.daily_limit) !== CANON.int(pre.daily_limit) && daily > 0 && int(body.daily_limit) !== daily) {
+    out.unmappable.push({ key: 'daily_limit', label: `일 진행 건수 — 옵션별 일건수 합계(${daily})가 일 진행 건수(${int(body.daily_limit)})가 되도록 맞춰 주세요`, want: CANON.int(body.daily_limit), got: String(daily) });
+  }
+  // 공고 리뷰타입 혼합 수량(유형 구성은 그대로일 때만 — 공유 저장이 판정)
+  if (body.review_type_mix !== undefined && body.review_type_mix !== null
+      && CANON.reviewTypeMix(_mixArray(body.review_type_mix)) !== CANON.reviewTypeMix(_mixArray(pre.review_type_mix))) {
+    out.mine.review_type_mix = JSON.stringify(_mixArray(body.review_type_mix));
+    out.changed.push('리뷰타입 혼합 수량');
+  }
+  return out;
+}
+
 /**
  * @param {{ baseState:object, camp:object, body:object, campOptions?:object[] }} p
  * @returns {{ mine:object, changed:string[], unmappable:Array<{key,label,want,got}>, keepProductLines:boolean }}
@@ -410,6 +557,12 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
       }
     }
   }
+  // ④ 7단계-② 인원·일건수·리뷰타입 혼합 수량
+  const q = _planQuantityEdit({ base, products, baseRows, liveCampOpts, body: b, edited });
+  unmappable.push(...q.unmappable);
+  changed.push(...q.changed);
+  Object.assign(mine, q.mine);
+  if (q.edited) edited = q.edited;
   if (edited && !unmappable.length) mine.product_options_json = JSON.stringify(edited);
   return { mine, changed, unmappable, keepProductLines };
 }
@@ -421,11 +574,22 @@ function moneyDriftFromCampaign(camp, body, campOptions = []) {
   const c = camp || {};
   const out = [];
   if (b.review_fee !== undefined && b.review_fee !== null && CANON.int(b.review_fee) !== CANON.int(c.review_fee)) out.push('리뷰비');
+  // 7단계-② — 총모집·일 진행 건수·옵션 인원(옛 화면은 기준 버전을 몰라 받지 않는다)
+  if (b.recruit_total !== undefined && b.recruit_total !== null && b.recruit_total !== '' && CANON.int(b.recruit_total) !== CANON.int(c.recruit_total)) out.push('총모집');
+  if (b.daily_limit !== undefined && b.daily_limit !== null && b.daily_limit !== '' && CANON.int(b.daily_limit) !== CANON.int(c.daily_limit)) out.push('일 진행 건수');
   const live = (campOptions || []).filter(r => String(r.status || '') !== 'deleted');
   if (Array.isArray(b.options) && live.length) {
     const now = new Map(live.map(r => [String(r.opt_key || ''), CANON.int(r.pay_amount)]));
     if (b.options.some(o => o && now.has(String(o.optKey ?? o.opt_key ?? '').trim())
         && now.get(String(o.optKey ?? o.opt_key ?? '').trim()) !== CANON.int(o.payAmount ?? o.pay_amount ?? 0))) out.push('결제금액');
+    // 안 보낸 칸은 비교하지 않는다(인원 칸이 없는 호출이 "0 으로 바꿨다" 로 읽히지 않게)
+    const rowOf = new Map(live.map(r => [String(r.opt_key || ''), r]));
+    if (b.options.some(o => {
+      const r = o && rowOf.get(String(o.optKey ?? o.opt_key ?? '').trim());
+      if (!r) return false;
+      const rt = o.recruitTotal ?? o.recruit_total, dl = o.dailyLimit ?? o.daily_limit;
+      return (rt !== undefined && CANON.int(rt) !== CANON.int(r.recruit_total)) || (dl !== undefined && CANON.int(dl) !== CANON.int(r.daily_limit));
+    })) out.push('옵션 인원');
   } else if (!live.length && b.work_detail && typeof b.work_detail === 'object' && Object.prototype.hasOwnProperty.call(b.work_detail, 'productLines')) {
     const wd = c.work_detail && typeof c.work_detail === 'object' ? c.work_detail : {};
     if (distinctAmountsInText(b.work_detail.productLines).join(',') !== distinctAmountsInText(wd.productLines).join(',')) out.push('결제금액');

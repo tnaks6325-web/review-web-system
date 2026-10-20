@@ -48,8 +48,10 @@ assert.equal(regenerateSummary({ prevJson: JSON.stringify(OPT_PRODUCTS), prevTex
   const okAll = (mine, origin) => rows(mine, origin).every(w => SP.writablePath(w, origin));
   assert.ok(okAll(edit(p => { p[0].options[0].pay = 16900; }), 'intranet'), '옵션 결제금액 = 연다');
   assert.ok(okAll(edit(p => { p[1].base.pay = 1000; }), 'campaign'), '옵션 없는 상품 base 의 pay 만 = 연다');
-  assert.ok(!okAll(edit(p => { p[1].base.count = 4; }), 'intranet'), '인원(base.count) = 아직 막힘(7단계)');
-  assert.ok(!okAll(edit(p => { p[0].options[0].count = 6; }), 'intranet'), '옵션 인원 = 막힘');
+  // 7단계-②(2026-10-20)에서 인원·일건수를 열었다 — 인원 경로 판정은 bidirPhase7Quantity 시험이 지킨다
+  assert.ok(okAll(edit(p => { p[1].base.count = 4; }), 'intranet'), '인원(base.count) = 7단계-②부터 연다');
+  assert.ok(okAll(edit(p => { p[0].options[0].count = 6; }), 'intranet'), '옵션 인원 = 7단계-②부터 연다');
+  assert.ok(!okAll(edit(p => { p[1].base.pay = 1; p[1].base.extra = 'x'; }), 'intranet'), 'base 의 다른 칸은 여전히 막힘');
   assert.ok(!okAll(edit(p => { p[1].qty_tiers = [{ qty: 2, pay: 1 }]; }), 'intranet'), '구매수량 단계 = 막힘');
   assert.ok(!okAll(edit(p => { p[0].options.pop(); }), 'intranet'), '옵션 지우기 = 막힘');
   assert.ok(okAll({ ...base, review_fee: 1500 }, 'campaign') && okAll({ ...base, review_fee: 1500 }, 'intranet'), '리뷰비 = 연다');

@@ -1037,6 +1037,9 @@ async function _scopedCampaignEdit(req, res) {
   if (sharedBlock) return res.status(sharedBlock.status).json(sharedBlock.body);
   // ★ 5단계: 연결 공고면 리뷰비 칸은 이 저장이 쓰지 않는다(위에서 바뀐 값은 막혔다 — 같은 값을 다시 쓰다 그 사이 바뀐 리뷰비를 되돌리지 않게).
   const feeShared = await require('../services/campaignSharedSave.service').bidirLinkActive(id);
+  // ★ 7단계-②(검토 2026-10-21): 연결 오더가 있으면 총모집·일건수도 이 저장이 쓰지 않는다(위에서 바뀐 값은 막혔다 — 처음 읽은 값을 다시 쓰다
+  //   그 사이 공유 저장이 바꾼 인원을 되돌리지 않게). 스위치와 상관없이(인원은 공유 칸).
+  const countsShared = await require('../services/campaignSharedSave.service').bidirOrderLinked(id);
   const keep = (v, curV) => (v === undefined || v === null || v === '') ? curV : v;
   const numOr = (v, curV) => (v === undefined || v === null || v === '') ? curV : (Number(v) || 0);
   const title = (b.title !== undefined && String(b.title).trim() !== '') ? String(b.title).trim() : c.title;
@@ -1081,14 +1084,14 @@ async function _scopedCampaignEdit(req, res) {
     `UPDATE recruit_campaigns SET
        title=$2, status=$3, delivery_type=$4, review_fee=CASE WHEN $17::boolean THEN review_fee ELSE $5 END, time_range=$6,
        thumbnail_url=$7, landing_url=$8, window_start=$9, window_end=$10,
-       daily_limit=$11, recruit_total=$12, sort_order=$13, max_slots=$14,
+       daily_limit=CASE WHEN $18::boolean THEN daily_limit ELSE $11 END, recruit_total=CASE WHEN $18::boolean THEN recruit_total ELSE $12 END, sort_order=$13, max_slots=$14,
        carry_mode=$15, carry_strategy=$16,
        published_at = CASE WHEN $3 = 'active' AND status IS DISTINCT FROM 'active' THEN NOW() ELSE published_at END,   -- 173: 스코프 편집으로 게시 전환해도 게시 시각을 남긴다(코덱스 리뷰)
        updated_at=NOW()
      WHERE id=$1 RETURNING *`,
     [id, title, status, delivery_type, review_fee, time_range,
      thumbnail_url, landing_url, window_start || null, window_end || null,
-     daily_limit, recruit_total, sort_order, max_slots, carry_mode, carry_strategy, feeShared]
+     daily_limit, recruit_total, sort_order, max_slots, carry_mode, carry_strategy, feeShared, countsShared]
   );
   // ★ 095(Codex P1): 잠금 검사와 UPDATE 사이 "첫 차수 추가" 경합 자가치유(PUT 본 라우트와 동일)
   try {
@@ -3739,6 +3742,9 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
        그 뒤 아래 UPDATE 는 그 칸을 쓰지 않는다(`_bx`) — 창을 연 뒤 인트라넷이 고친 칸을 옛 화면 값으로 되돌리지 않게.
        스위치(campaign_edit)가 꺼져 있거나 연결 공고가 아니면 `_bx=false` = 종전 저장 그대로.
        ★ 모든 검증이 끝난 뒤 여기서 부른다 — 공유 저장은 따로 커밋되므로, 앞선 검증 실패로 반쪽 저장이 남지 않게. */
+    // ★ 7단계-②(검토 2026-10-21): 스위치가 꺼져 있어도 연결 오더의 인원은 공유 칸 — 종전 저장으로 쓰면 오더 총모집이 버전·전송 없이 바뀐다
+    const countsPaused = await require('../services/campaignSharedSave.service').countsBlockedWhileSwitchOff({ campaignId: id, body: req.body });
+    if (countsPaused) return res.status(countsPaused.status).json(countsPaused.body);
     const bidirEdit = await require('../services/campaignSharedSave.service')
       .applyCampaignSharedSave({ campaignId: id, body: req.body, actor: req.admin?.name || '' });
     if (bidirEdit.response) return res.status(bidirEdit.response.status).json(bidirEdit.response.body);
@@ -3854,8 +3860,9 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         (participation_mode === undefined || participation_mode === null) ? null : participation_mode === true,
         _bx ? null : (thumbnail_url ?? null),
         _bxLanding ? null : (landing_url ?? null),
-        (daily_limit === undefined || daily_limit === null || daily_limit === '') ? null : Number(daily_limit) || 0,
-        (_rtEff === undefined || _rtEff === null || _rtEff === '') ? null : Number(_rtEff) || 0,
+        // ★ 7단계-②: 연결 공고의 일 진행 건수·총모집은 위 공유 저장이 쓴다(오더·작업표 줄과 함께)
+        (_bx || daily_limit === undefined || daily_limit === null || daily_limit === '') ? null : Number(daily_limit) || 0,
+        (_bx || _rtEff === undefined || _rtEff === null || _rtEff === '') ? null : Number(_rtEff) || 0,
         // ★ 062: ''=시간창 비움(자율주문 전환), null/undefined=유지 — 구 COALESCE는 비움 불가였음
         (_bxWin || _wsEff === undefined || _wsEff === null) ? null : String(_wsEff),
         (_bxWin || _weEff === undefined || _weEff === null) ? null : String(_weEff),
@@ -3876,7 +3883,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         //   모르는 문자열을 그대로 저장하면 화면·검수가 각자 다르게 해석한다.
         (review_type === undefined || review_type === null) ? null : (normalizeReviewType(review_type) || ''),
         // $40: undefined=유지, []=혼합 해제, 배열=검증된 유형별 수량.
-        reviewMixForStore === null ? null : JSON.stringify(reviewMixForStore),
+        (_bx || reviewMixForStore === null) ? null : JSON.stringify(reviewMixForStore),   // 7단계-②: 연결 공고의 혼합 수량은 공유 저장이
         // $41 ★ 098: 이월 반영 방식 — undefined/null/알 수 없는 값 = 유지(COALESCE), 'auto'|'hold'만 설정.
         //   세그먼트 UI 없는 화면은 아예 전송하지 않으므로 옛 화면 저장이 설정을 되돌리지 않는다.
         ['auto', 'hold'].includes(carry_mode) ? carry_mode : null,
@@ -3955,7 +3962,9 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     // ★ 정원이 안 바뀐 저장에서는 작업보드 슬롯 맞추기를 건너뛴다(위 게이트와 같은 판정).
     //   역방향 링크 백필은 그대로 수행된다. 차수 보정이 값을 바꿨을 수 있으므로 최종값으로 비교한다.
     const _rtSkipWorktable = _rtPrev !== null && (Number(rows[0].recruit_total) || 0) === _rtPrev;
-    try { quotaSync = await syncCampaignRecruitTotal({ campaignId: id, recruitTotal: rows[0].recruit_total, skipWorktable: _rtSkipWorktable }); }
+    /* ★ 7단계 🔴1: 연결 공고(_bx)는 총모집·작업표 줄을 위 공유 저장이 이미 맞췄다(버전·스냅숏·인트라넷 전송 포함) —
+       여기서 또 쓰면 버전 없이 오더 총모집을 덮는다. 연결 아닌 공고는 종전대로. */
+    if (!_bx) try { quotaSync = await syncCampaignRecruitTotal({ campaignId: id, recruitTotal: rows[0].recruit_total, skipWorktable: _rtSkipWorktable }); }
     catch (e) { logger.error('[campaign/update] 작업오더 정원 동기화 실패: ' + e.message); throw e; }
     /* ★ 결정 182 — 일건수·주말·시작일·총 인원·이월 방식이 바뀌면 날짜별 인원이 바뀐다 → 연결 무시트
        작업표의 빈 줄 날짜를 따라 맞춘다. 이미 맞으면 아무것도 안 바뀐다. ★ 절대 throw 없음(저장은 끝났다). */

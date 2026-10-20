@@ -158,14 +158,19 @@ async function protectOptionLeaves({ normOpts, link, baseVersion, db } = {}) {
   }));
   const { optionShape: shape } = require('../utils/orderToCampaignProjection');
   const LEAVES = [['option_url', 'optionUrl', r => r.option_url || ''],
-    ['pay_amount', 'payAmount', r => Math.max(0, Math.floor(Number(r.pay_amount) || 0))]];   // 5단계 — 창을 연 뒤 리뷰오더에서 바뀐 금액
+    ['pay_amount', 'payAmount', r => Math.max(0, Math.floor(Number(r.pay_amount) || 0))],   // 5단계 — 창을 연 뒤 리뷰오더에서 바뀐 금액
+    // 7단계-② — 창을 연 뒤 리뷰오더에서 바뀐 인원·일건수·혼합 수량
+    ['recruit_total', 'recruitTotal', r => Math.max(0, Math.floor(Number(r.recruit_total) || 0))],
+    ['daily_limit', 'dailyLimit', r => Math.max(0, Math.floor(Number(r.daily_limit) || 0))],
+    ['review_type_mix', 'reviewTypeMix', r => (Array.isArray(r.review_type_mix) ? r.review_type_mix : [])]];
   // ★ 6단계: 가이드는 글·사진 한 묶음으로 본다(비교 = {글, 사진 파일 id} · 지킬 때는 HTML·사진 목록을 함께 지금 DB 값으로) —
   //   한쪽만 되살리면 옛 HTML 끝의 <img> 와 새 사진 목록이 섞여 보인다.
   const gKey = x => JSON.stringify([x.inflow_guide_html, x.inflow_guide_images]);
   const kept = [];
   for (const o of normOpts) {
     const mine = shape({ productName: o.productName, optKey: o.optKey, unitKind: o.unitKind, optionUrl: o.optionUrl,
-      inflowGuideHtml: o.inflowGuideHtml, inflowGuideImages: o.inflowGuideImages, payAmount: o.payAmount });
+      inflowGuideHtml: o.inflowGuideHtml, inflowGuideImages: o.inflowGuideImages, payAmount: o.payAmount,
+      recruitTotal: o.recruitTotal, dailyLimit: o.dailyLimit, reviewTypeMix: o.reviewTypeMix });
     const b = baseOpts.get(mine.key), c = curByKey.get(mine.key), raw = rawByKey.get(mine.key);
     if (!b || !c || !raw) continue;
     for (const [leaf, field, rawOf] of LEAVES) {
@@ -185,10 +190,15 @@ async function protectOptionLeaves({ normOpts, link, baseVersion, db } = {}) {
 async function scopedEditSharedBlock({ campaignId, body, db } = {}) {
   const pool = db || getPool();
   const sw = await readBidirSwitch(pool);
-  if (sw.campaign_edit !== 'on') return null;
   const link = await findBidirLink(pool, campaignId);
   if (!link) return null;
   const b = body || {};
+  // ★ 7단계-②(검토 2026-10-21): 스위치가 꺼져 있어도 연결 오더(bidir_state='on')의 인원은 공유 칸이다 — 여기서 바꾸면
+  //   syncCampaignRecruitTotal 이 오더 총모집을 버전·전송 없이 써서 인트라넷이 영영 모른다. 인원 칸은 스위치와 상관없이 막는다.
+  if (sw.campaign_edit !== 'on') {
+    const cnt = _countFieldsChanged(link.camp, b);
+    return cnt.length ? _countsPausedBlock(cnt) : null;
+  }
   const now = campaignRowView(link.camp);
   const changed = [];
   const t = v => String(v == null ? '' : v).trim();
@@ -215,6 +225,54 @@ async function scopedEditSharedBlock({ campaignId, body, db } = {}) {
     error: `리뷰오더와 맞춰지는 칸(${[...new Set(changed)].join(', ')})은 리뷰어 앱에서 바꿀 수 없습니다. 관리자 화면이나 리뷰오더에서 고쳐 주세요.` } };
 }
 
+/** 공고 총모집·일 진행 건수가 바뀌었나(보낸 칸만 · 빈 값 = 안 보냄). */
+function _countFieldsChanged(camp, b) {
+  const out = [];
+  const sent = v => v !== undefined && v !== null && v !== '';
+  if (sent(b.recruit_total) && (Number(b.recruit_total) || 0) !== (Number(camp.recruit_total) || 0)) out.push('총모집');
+  if (sent(b.daily_limit) && (Number(b.daily_limit) || 0) !== (Number(camp.daily_limit) || 0)) out.push('일 진행 건수');
+  return out;
+}
+
+function _countsPausedBlock(fields) {
+  return { status: 409, body: { ok: false, code: 'counts_link_paused', fields,
+    error: `리뷰오더와 연결된 공고의 인원(${fields.join(', ')})은 지금 이 화면에서 바꿀 수 없습니다 — 연결 저장이 잠시 꺼져 있습니다. 인트라넷 리뷰오더에서 바꾸거나, 연결 저장이 다시 켜진 뒤 고쳐 주세요.` } };
+}
+
+/**
+ * 7단계-②(검토 2026-10-21) — 스위치(campaign_edit)가 꺼진 공고 창 저장이 연결 오더의 인원을 바꾸려 하면 막는다.
+ * 스위치가 켜져 있으면 null(공유 저장이 맡는다). 옵션 인원·일건수도 지금 공고 옵션 줄과 비교한다.
+ */
+async function countsBlockedWhileSwitchOff({ campaignId, body, db } = {}) {
+  const pool = db || getPool();
+  if ((await readBidirSwitch(pool)).campaign_edit === 'on') return null;
+  const link = await findBidirLink(pool, campaignId);
+  if (!link) return null;
+  const b = body || {};
+  const cnt = _countFieldsChanged(link.camp, b);
+  if (Array.isArray(b.options)) {
+    const { rows } = await pool.query(`SELECT opt_key, recruit_total, daily_limit FROM campaign_options WHERE campaign_id = $1 AND status <> 'deleted'`, [campaignId]);
+    const byKey = new Map(rows.map(r => [String(r.opt_key || ''), r]));
+    const sent = v => v !== undefined && v !== null && v !== '';
+    for (const o of b.options) {
+      const r = o && byKey.get(String(o.optKey ?? o.opt_key ?? '').trim());
+      if (!r) continue;
+      const rt = o.recruitTotal ?? o.recruit_total, dl = o.dailyLimit ?? o.daily_limit;
+      if ((sent(rt) && (Number(rt) || 0) !== (Number(r.recruit_total) || 0)) || (sent(dl) && (Number(dl) || 0) !== (Number(r.daily_limit) || 0))) { cnt.push('옵션 인원'); break; }
+    }
+  }
+  return cnt.length ? _countsPausedBlock(cnt) : null;
+}
+
+/** 연결 오더가 있는가(스위치와 상관없이) — 차수처럼 인원을 바꾸는 옛 경로를 막는 데 쓴다. 판정 실패 = true(fail-closed). */
+async function bidirOrderLinked(campaignId, db) {
+  try { return !!(await findBidirLink(db || getPool(), campaignId)); }
+  catch (e) {
+    logger.warn(`[bidir/campaign] ${campaignId} 연결 판정 실패 — 연결 공고로 보고 인원 쓰기를 막는다: ${(e && e.message) || e}`);
+    return true;
+  }
+}
+
 /** 이 공고가 지금 양방향 연결(스위치 campaign_edit=on)인가 — 옛 경로가 리뷰비 같은 공유 칸을 쓰지 않게 고르는 데 쓴다.
  *  ★ 판정 실패 = true(연결로 본다 · fail-closed) — 돈을 쓰는 경로라, DB 가 잠깐 흔들린 사이 지난 참여 고정 없이 리뷰비가 써지면 안 된다(검토 2026-10-20). */
 async function bidirLinkActive(campaignId, db) {
@@ -228,4 +286,4 @@ async function bidirLinkActive(campaignId, db) {
   }
 }
 
-module.exports = { applyCampaignSharedSave, protectOptionLeaves, scopedEditSharedBlock, findBidirLink, bidirLinkActive, WD_SHARED_KEYS };
+module.exports = { applyCampaignSharedSave, protectOptionLeaves, scopedEditSharedBlock, findBidirLink, bidirLinkActive, bidirOrderLinked, countsBlockedWhileSwitchOff, WD_SHARED_KEYS };

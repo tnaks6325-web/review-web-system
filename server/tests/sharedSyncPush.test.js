@@ -35,7 +35,9 @@ const push = require('../src/services/sharedSyncPush.service');
   assert.equal(backoffMs(1), 15000); assert.equal(backoffMs(2), 30000); assert.equal(backoffMs(40), 600000, '최대 10분');
   const body = buildPushBody({ id: 'wo_1', source_review_order_id: 'ro_1', sync_version: '1792000000000001', review_guide: 'g', special_notes: 'n', recruit_count: 9, title: 't', guide_images: '[]' });
   assert.equal(body.sync_version, 1792000000000001, 'BIGINT 글자 → 숫자');
-  assert.deepEqual(Object.keys(body.view).sort(), ['guide_images', 'review_guide', 'special_notes'], '글 칸만(모집인원·작업명 등은 보내지 않는다)');
+  // ★ 7단계-②(2026-10-20): 총모집도 보낸다(인원 양방향) — 인트라넷 고유 칸(작업명 등)은 여전히 보내지 않는다(검사 의미 유지)
+  assert.deepEqual(Object.keys(body.view).sort(), ['guide_images', 'recruit_count', 'review_guide', 'special_notes'], '공유 칸만(작업명 등 인트라넷 고유는 보내지 않는다)');
+  assert.ok(!Object.prototype.hasOwnProperty.call(body.view, 'title'));
   console.log('sharedSyncPush: pure passed');
 }
 
@@ -139,7 +141,8 @@ async function pg() {
     assert.equal(sent[0].sync_version, v2, '가장 새 버전');
     assert.equal(sent[0].source_review_order_id, sid);
     assert.equal(sent[0].view.special_notes, '리뷰웹 1'); assert.equal(sent[0].view.review_guide, '[리뷰등록 가이드]\n리뷰웹 2');
-    assert.ok(!('recruit_count' in sent[0].view));
+    assert.ok(!('title' in sent[0].view), '인트라넷 고유 칸(작업명)은 보내지 않는다');
+    assert.equal(Number(sent[0].view.recruit_count), Number((await wo()).recruit_count), '7단계-②: 총모집은 보낸다');
     assert.deepEqual((await ob()).map(r => r.status), ['delivered', 'delivered']);
     assert.equal(Number((await wo()).intranet_acked_version), v2, '반영됐으면 인트라넷이 이 버전을 안다');
 

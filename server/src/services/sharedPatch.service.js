@@ -33,18 +33,21 @@ const PHASE3_SHARED_FIELDS = Object.freeze([
 ]);
 /** 5단계에 양방향으로 여는 금액 칸 — 상품 구성 안의 결제금액은 칸이 아니라 경로(`writablePath`)로 연다. */
 const PHASE5_SHARED_FIELDS = Object.freeze(['review_fee']);
+/** 7단계-② 인원·일건수 — 총모집·일 진행 건수·리뷰타입 혼합 수량(유형 구성은 그대로일 때만 · `writablePath`).
+ *  상품 구성 안의 인원·일건수·혼합 수량은 경로로 연다. */
+const PHASE7Q_SHARED_FIELDS = Object.freeze(['recruit_count', 'daily_count', 'review_type_mix']);
 /** 리뷰웹 → 인트라넷으로 보내는 칸(수정 창이 리뷰웹 값으로 덮는 칸과 같다). 상품 구성·합계·요약은 금액이 함께 움직이는 짝. */
-const PUSH_VIEW_KEYS = Object.freeze([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, 'pay_amount', 'product_options_json', 'product_option']);
+const PUSH_VIEW_KEYS = Object.freeze([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, 'pay_amount', 'product_options_json', 'product_option']);
 /** 인트라넷 고유 칸 중 접수 뒤에도 고칠 수 있는 것 — 종전 원본 수정 허용 목록·계약 후속 매칭과 같은 범위. */
 const INTRANET_EDITABLE_AFTER_ACCEPT = Object.freeze([
   'title', 'manager_name', 'inflow_keyword', 'sales_id', 'quote_id', 'contract_number', 'intranet_advertiser_id',
 ]);
 /** 리뷰웹발 수정(관리자 오더 수정)이 쓸 수 있는 칸 — 인트라넷 고유는 제외. */
 const WRITABLE_BY_ORIGIN = {
-  intranet: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
-  reconcile: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
-  rw_admin: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS]),
-  campaign: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS]),   // 4단계-2 공고 편집 창(campaignSharedSave) — 리뷰웹발이라 인트라넷 고유 칸은 제외
+  intranet: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
+  reconcile: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
+  rw_admin: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS]),
+  campaign: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS]),   // 4단계-2 공고 편집 창(campaignSharedSave) — 리뷰웹발이라 인트라넷 고유 칸은 제외
 };
 const KNOWN_CHANNELS = new Set(['쿠팡', '네이버', '올리브영', '카카오메이커스']);
 const SNAPSHOT_KEYS = Object.freeze([...SHARED_FIELDS.map(f => f.key), 'product_options_json', 'product_option']);
@@ -74,13 +77,51 @@ function _onlyBasePayDiffers(row) {
   return strip(b) === strip(m);
 }
 
+/** 리뷰 혼합 수량의 유형 구성(포토·텍스트…) — 수량만 바뀌는지 판정용. 형식이 틀리면 null. */
+function _mixTypes(v) {
+  if (v === ABSENT) return null;
+  let raw = v;
+  if (typeof raw === 'string') { const t = raw.trim(); if (!t) return ''; try { raw = JSON.parse(t); } catch (_) { return null; } }
+  if (raw == null) return '';
+  if (!Array.isArray(raw)) return null;
+  return raw.filter(e => e && Number(e.quantity) > 0).map(e => String(e.type)).sort().join(',');
+}
+
+/** 7단계-② — 리뷰 혼합 수량은 **유형 구성이 그대로일 때만**(포토 3→5 는 되고, 텍스트를 새로 넣거나 빼는 것은 4단계 구조). */
+function _mixQuantityOnly(bv, mv) {
+  const b = _mixTypes(bv), m = _mixTypes(mv);
+  return b !== null && m !== null && b === m && b !== '';
+}
+
+/** 옵션 없는 상품의 base 칸 — 금액·인원·일건수·혼합 수량(유형 그대로)만 바뀌었는가(7단계-②). */
+function _baseQuantityOrPayOnly(row) {
+  const b = _jsonObj(row.base), m = _jsonObj(row.mine);
+  if (!b || !m) return false;
+  if (JSON.stringify(b.review_type_mix ?? null) !== JSON.stringify(m.review_type_mix ?? null)
+      && !_mixQuantityOnly(JSON.stringify(b.review_type_mix ?? []), JSON.stringify(m.review_type_mix ?? []))) return false;
+  const strip = o => { const c = { ...o }; delete c.pay; delete c.count; delete c.daily; delete c.daily_limit; delete c.dailyLimit; delete c.review_type_mix; return CANON.json(c); };
+  return strip(b) === strip(m);
+}
+
+/** 7단계-② 인원 경로인가(총모집·일건수·혼합 수량 칸 · 옵션 count/daily/review_type_mix · base 의 인원 쪽 차이). */
+function _isQuantityPath(w) {
+  const m = w.meta || {};
+  if (m.kind === 'field') return PHASE7Q_SHARED_FIELDS.includes(m.key);
+  if (m.kind !== 'leaf') return false;
+  if (['count', 'daily', 'daily_limit', 'dailyLimit', 'review_type_mix'].includes(m.key)) return true;
+  return m.key === 'base' && !_onlyBasePayDiffers(w);
+}
+
 /** 판정 행(경로 + 경로 종류)이 이 출처에서 쓸 수 있는가.
  *  상품 쪽 = 주소(url · 3단계) + 결제금액(5단계: 옵션 `pay` · 옵션 없는 상품 `base` 의 pay 만). 상품·옵션을 더하거나 지우는 것은 아직 못 한다. */
 function writablePath(row, origin) {
   const set = WRITABLE_BY_ORIGIN[origin];
   if (!set) return false;
   const m = row.meta || {};
-  if (m.kind === 'field') return set.has(m.key);
+  if (m.kind === 'field') {
+    if (m.key === 'review_type_mix') return set.has(m.key) && _mixQuantityOnly(row.base, row.mine);
+    return set.has(m.key);
+  }
   if (m.kind !== 'leaf') return false;
   if (m.key === 'url') return true;
   // 6단계 — 선택지별 유입가이드 {글, 사진}(옵션 guide · 옵션 없는 상품 guide). 옵션·상품 자체를 더하고 지우는 것은 여전히 막힘(그 경로가 따로 판정된다).
@@ -91,7 +132,10 @@ function writablePath(row, origin) {
   }
   const isOption = String(m.parent || '').includes('|o:');
   if (m.key === 'pay' && isOption) return row.base !== ABSENT && row.mine !== ABSENT;
-  if (m.key === 'base' && !isOption) return _onlyBasePayDiffers(row);
+  // 7단계-② 인원·일건수(옵션) — 옵션이 원래 있고 지금도 있을 때만(옵션 더하기·지우기는 구조 단계)
+  if (['count', 'daily', 'daily_limit', 'dailyLimit'].includes(m.key) && isOption) return row.base !== ABSENT && row.mine !== ABSENT && set.has('recruit_count');
+  if (m.key === 'review_type_mix' && isOption) return row.base !== ABSENT && row.mine !== ABSENT && set.has('review_type_mix') && _mixQuantityOnly(row.base, row.mine);
+  if (m.key === 'base' && !isOption) return _onlyBasePayDiffers(row) || (set.has('recruit_count') && _baseQuantityOrPayOnly(row));
   return false;
 }
 
@@ -103,7 +147,7 @@ function _leafTarget(w) {
     const at = owner.indexOf('|o:');
     return { pName: at < 0 ? owner : owner.slice(0, at), oLabel: at < 0 ? '' : owner.slice(at + 3), leaf: m.key };
   }
-  const r = /^p:(.+?)(?:\|o:(.+))?\.(url|pay|base|guide)$/.exec(w.path);
+  const r = /^p:(.+?)(?:\|o:(.+))?\.(url|pay|base|guide|count|daily|daily_limit|dailyLimit|review_type_mix)$/.exec(w.path);
   return r ? { pName: r[1], oLabel: r[2] || '', leaf: r[3] } : null;
 }
 
@@ -163,7 +207,9 @@ function applyWrites(theirs, mine, writes) {
   let productsTouched = false;
   let urlTouched = false;
   let guideTouched = false;
+  let quantityTouched = false;
   const payProducts = new Set();
+  const qtyProducts = new Set();
   const missed = [];
   const nextProducts = _parseList(next.product_options_json);
   const mineProducts = _parseList(mine && mine.product_options_json) || [];
@@ -182,14 +228,23 @@ function applyWrites(theirs, mine, writes) {
       if (leaf === 'url') { to.url = mo.url; urlTouched = true; }
       else if (leaf === 'pay') { to.pay = mo.pay; payProducts.add(pName); }
       else if (leaf === 'guide') { if (mo.guide === undefined) delete to.guide; else to.guide = mo.guide; guideTouched = true; }
+      else if (['count', 'daily', 'daily_limit', 'dailyLimit', 'review_type_mix'].includes(leaf)) {   // 7단계-② 인원·일건수·혼합 수량
+        if (mo[leaf] === undefined) delete to[leaf]; else to[leaf] = mo[leaf];
+        quantityTouched = true; qtyProducts.add(pName);
+      }
       else { missed.push(w.path); continue; }
     } else if (leaf === 'url') { tp.url = mp.url; urlTouched = true; }
     else if (leaf === 'guide') { if (mp.guide === undefined) delete tp.guide; else tp.guide = mp.guide; guideTouched = true; }
     else if (leaf === 'base') {
       const tb = tp.base && typeof tp.base === 'object' ? tp.base : {};
       const mb = mp.base && typeof mp.base === 'object' ? mp.base : {};
-      tp.base = { ...tb, pay: mb.pay };
-      payProducts.add(pName);
+      const nb = { ...tb, pay: mb.pay };
+      if (Number(tb.pay || 0) !== Number(mb.pay || 0)) payProducts.add(pName);
+      // 7단계-② — 판정이 base 인원 쪽 차이를 허락했으면(쓰기 경로) 인원·일건수·혼합 수량도 옮긴다
+      for (const k of ['count', 'daily', 'daily_limit', 'dailyLimit', 'review_type_mix']) {
+        if (JSON.stringify(tb[k] ?? null) !== JSON.stringify(mb[k] ?? null)) { if (mb[k] === undefined) delete nb[k]; else nb[k] = mb[k]; quantityTouched = true; qtyProducts.add(pName); }
+      }
+      tp.base = nb;
     } else { missed.push(w.path); continue; }
     productsTouched = true;
   }
@@ -197,7 +252,8 @@ function applyWrites(theirs, mine, writes) {
     next.product_options_json = JSON.stringify(nextProducts);
     if (mine && mine.product_option !== undefined) next.product_option = mine.product_option;
   }
-  return { next, productsTouched, urlTouched, guideTouched, payTouched: payProducts.size > 0, payProducts, missed };
+  // 인원이 바뀐 상품도 결제합계(상품구입비 = 금액 × 인원)가 바뀐다
+  return { next, productsTouched, urlTouched, guideTouched, quantityTouched, payTouched: payProducts.size > 0, payProducts, qtyProducts, missed };
 }
 
 /** 상품 하나의 상품구입비 — 인트라넷 totals 와 같은 규칙(옵션 금액이 비면 상품 기본 금액 · `workOrderPayAmounts` 와 같다).
@@ -384,6 +440,124 @@ async function _projectGuideInTx(client, camp, prev, next) {
   return { applied: n > 0 };
 }
 
+const _num = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+const _mixSum = v => {
+  let raw = v; if (typeof raw === 'string') { try { raw = JSON.parse(raw || '[]'); } catch (_) { return null; } }
+  return Array.isArray(raw) ? raw.reduce((a, e) => a + Math.max(0, Math.floor(Number(e && e.quantity) || 0)), 0) : 0;
+};
+function _tiersOn(p) { const t = p && p.qty_tiers; return t != null && (Array.isArray(t) ? t.length > 0 : (typeof t === 'object' ? Object.keys(t).length > 0 : String(t).trim() !== '')); }
+
+/**
+ * 7단계-② — 인원이 바뀐 저장의 정합 검사(쓰기 전 · 실패 = 409 쓰기 0). 사용자 확정 2026-10-20:
+ *   ③ 오더는 "총모집 = 상품·옵션 인원 합계" — 다른 모양은 담지 않는다 · ④ 배송 혼합·구매수량 단계 작업의 인원 변경은 4단계(구조)까지 막는다 ·
+ *   ① 리뷰타입 혼합 작업은 혼합 수량을 인원에 맞춰 같이 바꿨을 때만(합계 = 인원 · 옵션별도 같다).
+ */
+function validateQuantities(next, qtyProducts) {
+  const products = _parseList(next.product_options_json) || [];
+  const byName = n => products.find(p => p && String(p.name || '').trim() === n);
+  for (const n of qtyProducts || []) {
+    if (_tiersOn(byName(n))) return { code: 'quantity_tiers_locked', error: '구매수량 단계를 쓰는 상품은 아직 인원을 바꿀 수 없습니다(구조 단계에서 엽니다). 인원은 그대로 두고 저장해 주세요.' };
+  }
+  if (CANON.deliveryMix(next.delivery_type_mix)) {
+    return { code: 'quantity_delivery_mix_locked', error: '배송 혼합(실배송·빈박스) 작업은 아직 인원을 바꿀 수 없습니다(구조 단계에서 엽니다).' };
+  }
+  const total = Math.max(0, Math.floor(_num(next.recruit_count)));
+  if (products.length) {
+    let sum = 0, daily = 0;
+    for (const p of products) {
+      if (!p || typeof p !== 'object') continue;
+      const opts = Array.isArray(p.options) ? p.options : [];
+      const base = p.base && typeof p.base === 'object' ? p.base : {};
+      if (opts.length) for (const o of opts) { sum += _num(o && o.count); daily += _num(o && (o.daily ?? o.daily_limit ?? o.dailyLimit)); }
+      else { sum += _num(base.count); daily += _num(base.daily ?? base.daily_limit ?? base.dailyLimit); }
+      // 리뷰 혼합 수량(옵션·상품별)은 그 인원과 같아야 한다
+      for (const o of opts) {
+        const ms = _mixSum(o && o.review_type_mix);
+        if (ms && ms !== _num(o.count)) return { code: 'quantity_mix_mismatch', error: `「${String(p.name || '').trim()} / ${String(o.label || '').trim()}」 리뷰타입 수량 합계(${ms})가 인원(${_num(o.count)})과 다릅니다. 같이 맞춰 주세요.` };
+      }
+      if (!opts.length) { const ms = _mixSum(base.review_type_mix); if (ms && ms !== _num(base.count)) return { code: 'quantity_mix_mismatch', error: `「${String(p.name || '').trim()}」 리뷰타입 수량 합계(${ms})가 인원(${_num(base.count)})과 다릅니다. 같이 맞춰 주세요.` }; }
+    }
+    if (sum !== total) return { code: 'quantity_sum_mismatch', error: `총모집(${total}명)과 상품·옵션 인원 합계(${sum}명)가 다릅니다. 합계가 총모집이 되도록 맞춰 주세요.` };
+    if (next.daily_count != null && next.daily_count !== '' && daily > 0 && daily !== _num(next.daily_count)) {
+      return { code: 'quantity_daily_mismatch', error: `일 진행 건수(${_num(next.daily_count)})와 상품·옵션 일건수 합계(${daily})가 다릅니다. 같이 맞춰 주세요.` };
+    }
+  }
+  if (CANON.reviewType(next.review_type) === 'mixed') {
+    const ms = _mixSum(next.review_type_mix);
+    if (ms !== total) return { code: 'quantity_mix_mismatch', error: `리뷰타입 혼합 수량 합계(${ms})가 총모집(${total}명)과 다릅니다. 같이 맞춰 주세요.` };
+  }
+  return null;
+}
+
+/**
+ * 7단계-② 인원·일건수 → 공고(같은 트랜잭션). 기존 정원 장치를 그대로 쓴다(규칙 사본 0):
+ *   총 하한 = 참여·구매·바로 구매(`assertTotalFloorInTx`) · 옵션 하한 = 그 옵션 참여·구매(`usedByOption`) ·
+ *   작업표 줄 = 빈 줄만 지우고 새 줄은 빈 줄로(`syncWorktableSlotsInTx` — 채워진 줄보다 적게 못 줄인다).
+ * ★ 차수가 있는 공고는 거부(연결 공고는 차수를 막는다 · 사용자 확정 ②) · 날짜 다시 배치는 커밋 뒤(`after.relay`).
+ */
+async function _projectQuantityInTx(client, camp, prev, next) {
+  const lrq = require('./linkedRecruitQuota.service');
+  const reject = (reason, error) => ({ reject: { kind: 'quantity', out: { applied: false, reason }, error } });
+  // 차수 표가 없는 DB(42P01)는 차수 없음 — SAVEPOINT 로 감싸 실패가 트랜잭션을 깨지 않게(검토 2026-10-21)
+  await client.query('SAVEPOINT p7q_rounds');
+  try {
+    const { rows: rounds } = await client.query('SELECT 1 FROM campaign_rounds WHERE campaign_id = $1 LIMIT 1', [camp.id]);
+    await client.query('RELEASE SAVEPOINT p7q_rounds');
+    if (rounds.length) return reject('rounds_exist', '차수가 있는 공고는 인원을 차수로 관리합니다 — 연결된 작업에서는 인원 칸으로 바꿀 수 없습니다. 담당자에게 문의해 주세요.');
+  } catch (e) {
+    await client.query('ROLLBACK TO SAVEPOINT p7q_rounds').catch(() => {});
+    if (e.code !== '42P01') throw e;
+  }
+  const prefill = st => require('../utils/woCampaignPrefill.generated')._woCampaignPrefill(JSON.parse(JSON.stringify(st || {})));
+  const pp = prefill(prev), pn = prefill(next);
+  const prevTotal = Math.max(0, Math.floor(_num(prev.recruit_count))), total = Math.max(0, Math.floor(_num(next.recruit_count)));
+  try {
+    // 하한 — 오더 총모집이 바뀌었거나 공고 총모집이 줄어드는 경우(공고 값이 오더보다 컸던 공고에서 일건수만 바꿔도 공고 인원이 내려간다 · 검토 2026-10-21)
+    const campTotal = Math.max(0, Math.floor(_num(camp.recruit_total)));
+    if (total !== prevTotal || total < campTotal) await lrq.assertTotalFloorInTx(client, camp.id, total);
+    // 옵션 줄
+    const keyOf = o => `${String(o.productName || '').trim()}|${o.unitKind === 'product' ? '' : String(o.optKey || '').trim()}`;
+    const before = new Map((pp.options || []).map(o => [keyOf(o), o]));
+    const changed = (pn.options || []).filter(o => { const b = before.get(keyOf(o));
+      return !b || _num(b.recruitTotal) !== _num(o.recruitTotal) || _num(b.dailyLimit) !== _num(o.dailyLimit) || JSON.stringify(b.reviewTypeMix || []) !== JSON.stringify(o.reviewTypeMix || []); });
+    const { rows: optRows } = await client.query(
+      `SELECT id, opt_key, product_name, unit_kind, recruit_total, daily_limit FROM campaign_options WHERE campaign_id = $1 ORDER BY id FOR UPDATE`, [camp.id]);
+    if (changed.length && optRows.length) {
+      const used = await lrq.usedByOption(client, camp.id);
+      for (const o of changed) {
+        const k = keyOf(o); const [pName, optKey] = k.split('|');
+        const hits = optRows.filter(x => (String(x.unit_kind || '') === 'product'
+          ? optKey === '' && (x.opt_key === pName || String(x.product_name || '').trim() === pName)
+          : optKey !== '' && x.opt_key === optKey));
+        if (!hits.length) return reject('option_key_mismatch', `인원을 저장하지 않았습니다 — 모집공고에서 「${o.optKey || o.productName}」 줄을 찾지 못했습니다. 모집공고의 상품 줄 이름을 맞춘 뒤 다시 저장해 주세요.`);
+        for (const h of hits) {
+          const u = used.get(h.opt_key) || 0;
+          if (_num(o.recruitTotal) < u) return reject('option_below_used', `「${o.optKey || o.productName}」은 이미 ${u}명이 참여·구매해 ${_num(o.recruitTotal)}명으로 줄일 수 없습니다.`);
+          await client.query('UPDATE campaign_options SET recruit_total = $2, daily_limit = $3, review_type_mix = $4::jsonb, updated_at = NOW() WHERE id = $1',
+            [h.id, Math.max(0, Math.floor(_num(o.recruitTotal))), Math.max(0, Math.floor(_num(o.dailyLimit))), JSON.stringify(o.reviewTypeMix || [])]);
+        }
+      }
+    }
+    // 공고 칸 — 총모집·일건수·혼합 수량(발행 프리필과 같은 값)
+    const sets = []; const params = [camp.id];
+    const add = v => { params.push(v); return `$${params.length}`; };
+    if (total !== _num(camp.recruit_total)) sets.push(`recruit_total = ${add(total)}`);
+    if (_num(pn.daily_limit) !== _num(camp.daily_limit)) sets.push(`daily_limit = ${add(Math.max(0, Math.floor(_num(pn.daily_limit))))}`);
+    if (JSON.stringify(pn.review_type_mix || []) !== JSON.stringify(pp.review_type_mix || [])) sets.push(`review_type_mix = ${add(JSON.stringify(pn.review_type_mix || []))}::jsonb`);
+    if (sets.length) await client.query(`UPDATE recruit_campaigns SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $1`, params);
+    // 작업표 줄
+    let worktable = null;
+    if (total !== prevTotal || total !== campTotal) worktable = await lrq.syncWorktableSlotsInTx(client, camp, total, 'bidir-quota');
+    if (total > prevTotal) {
+      await require('./campaignHold.service').maybeReopenAfterQuotaIncrease(client, camp.id, prevTotal, { savepoint: true }).catch(() => false);
+    }
+    return { applied: sets.length > 0 || changed.length > 0 || !!worktable, after: { worktable, relay: total !== prevTotal || total !== campTotal || _num(pn.daily_limit) !== _num(pp.daily_limit) } };
+  } catch (e) {
+    if (e && /^recruit_quota/.test(String(e.code || ''))) return reject(e.code, e.message);
+    throw e;
+  }
+}
+
 /** 공고 반영 — 쓴 칸만. 거부 사유가 있으면 {reject} 를 돌려 호출부가 통째로 되돌린다.
  *  @param {object} [extra] { prev: 저장 전 상태(금액 비교) · payTouched · actor } */
 async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTouched, extra = {}) {
@@ -394,6 +568,13 @@ async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTo
     const r = await require('./campaignFeeChange.service').applyFeeChangeInTx(client, camp, next.review_fee);
     if (r.reject) return { reject: { kind: 'fee', out: { applied: false, reason: r.reject.reason }, error: r.reject.error } };
     if (r.applied) applied.push('review_fee');
+  }
+  let after = null;
+  if (extra.quantityChanged) {
+    const r = await _projectQuantityInTx(client, camp, extra.prev || {}, next);
+    if (r.reject) return { reject: r.reject };
+    if (r.applied) applied.push('quantity');
+    after = r.after || null;
   }
   if (extra.guideTouched) {
     const r = await _projectGuideInTx(client, camp, extra.prev || {}, next);
@@ -480,7 +661,7 @@ async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTo
       if (rowCount) applied.push('channel');
     }
   }
-  return { applied };
+  return { applied, after };
 }
 
 async function _abort(client, status, body) {
@@ -500,6 +681,7 @@ async function _abort(client, status, body) {
  * @param {'block'|'last_writer'} [p.conflictPolicy] 겹친 칸 처리 — block(기본, 409 쓰기 0) · last_writer(이번 저장 값으로 쓰고 overwritten 으로 알림)
  * @param {(client, wo) => Promise<null|{status,body}>} [p.preHook] 같은 트랜잭션에서 먼저 검사(원본 번호 등)
  * @param {object} [p.extraSets] 공유 칸이 아닌 같이 쓸 칸(원본 번호·키 등 — EXTRA_COLUMNS 만)
+ * @param {boolean} [p.countsCapable] false = 인원을 모르는 옛 인트라넷 저장(인원 칸은 받지 않는다 · 7단계-②)
  * @param {boolean} [p.guideCapable] false = 선택지 가이드를 모르는 옛 인트라넷 저장(가이드 칸은 받지 않는다 · 6단계)
  * @param {boolean} [p.moneyCapable] false = 금액을 모르는 옛 인트라넷 저장(금액 칸은 받지 않는다 · 5단계 배포 순서 안전장치)
  * @param {object} [p.db] 시험용 pool
@@ -560,6 +742,15 @@ async function applySharedPatch(p) {
         logger.info(`[bidir/apply] ${wo.id} 가이드 칸은 받지 않음(${p.guideCapable === false ? '가이드를 모르는 옛 인트라넷' : '링크유입이라 안 실음'}): ${dropped.join(', ')}`);
       }
     }
+    // ★ 7단계-② 같은 장치 — 인원을 모르는 인트라넷(`bidir.counts` 없음)은 잠긴 인원 칸의 옛 사본 값을 다시 보낸다 → 인원 경로는 받지 않는다(기록)
+    if (p.origin === 'intranet' && p.countsCapable === false) {
+      const dq = [...plan.writes, ...plan.conflicts].filter(_isQuantityPath).map(w => w.path);
+      if (dq.length) {
+        plan.writes = plan.writes.filter(w => !_isQuantityPath(w));
+        plan.conflicts = plan.conflicts.filter(w => !_isQuantityPath(w));
+        logger.info(`[bidir/apply] ${wo.id} 인원을 모르는 옛 인트라넷 저장 — 인원 칸은 받지 않음: ${dq.join(', ')}`);
+      }
+    }
     let droppedMoney = [];
     if (p.moneyCapable === false) {
       const isMoney = w => { const m = w.meta || {};
@@ -595,10 +786,16 @@ async function applySharedPatch(p) {
       await client.query('COMMIT');
       return { status: 200, body: { ok: true, noop: true, sync_version: curVersion } };
     }
-    const { next, productsTouched, urlTouched, guideTouched, payTouched, payProducts, missed } = applyWrites(theirs, p.mine, plan.writes);
+    const { next, productsTouched, urlTouched, guideTouched, quantityTouched, payTouched, payProducts, qtyProducts, missed } = applyWrites(theirs, p.mine, plan.writes);
     if (missed.length) {
       return await _abort(client, 409, { ok: false, code: 'write_unmatched', sync_version: curVersion, fields: missed.map(path => ({ path, label: _label(path) })),
         error: `상품·옵션 짝을 찾지 못해 저장하지 않았습니다: ${[...new Set(missed.map(path => _label(path)))].join(', ')}. 창을 닫고 다시 열어 주세요.` });
+    }
+    const qtyFieldWritten = plan.writes.some(w => w.meta && w.meta.kind === 'field' && PHASE7Q_SHARED_FIELDS.includes(w.meta.key));
+    const quantityChanged = quantityTouched || qtyFieldWritten;
+    if (quantityChanged) {
+      const qErr = validateQuantities(next, qtyProducts);
+      if (qErr) return await _abort(client, 409, { ok: false, code: qErr.code, sync_version: curVersion, error: qErr.error });
     }
     // 옛 인트라넷이 금액을 버린 저장인데 상품 주소가 바뀌었으면, 그 저장이 보낸 요약 문장(옛 금액이 적힌)을 쓰지 않는다
     if (droppedMoney.length && productsTouched) {
@@ -607,7 +804,9 @@ async function applySharedPatch(p) {
       next.product_option = r.text != null ? r.text : theirs.product_option;
     }
     const writtenKeys = new Set(plan.writes.filter(w => w.path.startsWith('f:')).map(w => w.path.slice(2)));
-    const derived = derivePayFields({ base, theirs, mine: p.mine, next, payProducts, origin: p.origin });
+    // 인원이 바뀐 상품도 상품구입비(금액 × 인원)가 바뀐다 — 결제합계·요약 문장을 같이 다시 만든다
+    const costProducts = new Set([...payProducts, ...qtyProducts]);
+    const derived = derivePayFields({ base, theirs, mine: p.mine, next, payProducts: costProducts, origin: p.origin });
     if (derived.payAmountNote) logger.info(`[bidir/apply] ${wo.id} 결제합계: 구매수량 단계 상품이라 차이를 계산하지 않음(${derived.payAmountNote})`);
     if (derived.pay_amount !== undefined) next.pay_amount = derived.pay_amount;
     if (derived.product_option !== undefined) next.product_option = derived.product_option;
@@ -616,11 +815,16 @@ async function applySharedPatch(p) {
     // ── 오더 쓰기(쓴 칸 + 함께 쓰는 칸) ──
     const sets = []; const params = [wo.id];
     const add = v => { params.push(v); return `$${params.length}`; };
-    for (const k of writtenKeys) if (ORDER_COLUMNS.has(k) && /^[a-z_]+$/.test(k)) sets.push(`${k} = ${add(next[k])}`);
+    for (const k of writtenKeys) {
+      if (!ORDER_COLUMNS.has(k) || !/^[a-z_]+$/.test(k)) continue;
+      // JSON 칸(리뷰 혼합 수량)은 글자로 넘긴다 — 배열을 그대로 넘기면 드라이버가 PG 배열로 바꾼다
+      const v = (k === 'review_type_mix' && next[k] != null && typeof next[k] !== 'string') ? JSON.stringify(next[k]) : next[k];
+      sets.push(`${k} = ${add(v)}`);
+    }
     if (productsTouched) {
       sets.push(`product_options_json = ${add(next.product_options_json)}`);
       if (next.product_option !== undefined) sets.push(`product_option = ${add(next.product_option)}`);
-      if (payTouched) sets.push(`pay_amount = ${add(Math.max(0, Math.floor(Number(next.pay_amount) || 0)))}`);
+      if (payTouched || quantityTouched) sets.push(`pay_amount = ${add(Math.max(0, Math.floor(Number(next.pay_amount) || 0)))}`);
     }
     for (const [k, v] of extra) sets.push(`${k} = ${add(v)}`);
     if (plan.writes.length) {
@@ -644,7 +848,7 @@ async function applySharedPatch(p) {
     let campaign = { applied: [] };
     if (camp && plan.writes.length) {
       campaign = await projectToCampaignInTx(client, camp, next, writtenKeys, productsTouched,
-        { prev: theirs, payTouched, urlTouched, guideTouched, actor: p.actor || p.origin });
+        { prev: theirs, payTouched, urlTouched, guideTouched, quantityChanged, actor: p.actor || p.origin });
       if (campaign.reject) {
         const { campaignSyncNotice } = require('./campaignPayAmountSync.service');
         return await _abort(client, 409, { ok: false, code: 'campaign_rejected', sync_version: curVersion,
@@ -667,6 +871,16 @@ async function applySharedPatch(p) {
           WHERE shared_sync_outbox.status IN ('delivered', 'superseded')`, [wo.id, newVersion]);
     }
     await client.query('COMMIT');
+    // 7단계-② 커밋 뒤 — 작업표 투영 장부 다시 만들기 · 빈 줄 날짜 다시 배치(정원 동기화와 같은 순서 · 탭 잠금은 자기 트랜잭션 · 실패해도 저장은 끝났다)
+    if (camp && campaign.after) {
+      const lrq = require('./linkedRecruitQuota.service');
+      try { if (campaign.after.worktable) campaign.after.rebuilt = await lrq.rebuildWorktableProjection(campaign.after.worktable, 'bidir-quota'); }
+      catch (e) { logger.warn(`[bidir/apply] ${wo.id} 작업표 장부 다시 만들기 실패(저장은 끝남): ${e.message}`); }
+      if (campaign.after.relay) {
+        try { campaign.after.relayResult = await require('./campaignPlan.service').relayCampaignWorktable(camp.id, { by: 'bidir-quota' }); }
+        catch (e) { logger.warn(`[bidir/apply] ${wo.id} 작업표 날짜 다시 배치 실패(저장은 끝남): ${e.message}`); }
+      }
+    }
     if (overwritten.length) logger.info(`[bidir/apply] ${wo.id} 겹친 칸을 나중 저장 값으로(${p.origin}·${p.actor || ''}): ${overwritten.map(o => o.label).join(', ')}`);
     // push_back = 저장 결과가 보낸 값과 달라 인트라넷이 받아 가야 하는가(인트라넷발만 의미 있음). false 면 인트라넷은 이 버전을
     // 자기 사본과 같다고 적는다(remote_sync_version) — 안 적으면 늦게 도착한 옛 송신이 방금 저장한 수정을 되돌린다(검토 2026-10-20).
@@ -736,6 +950,6 @@ async function linkSharedOrder({ workOrderId, actor = '', dryRun = false, db } =
 }
 
 module.exports = {
-  applySharedPatch, linkSharedOrder, readSharedState, applyWrites, writablePath, projectToCampaignInTx, derivePayFields,
-  PHASE3_SHARED_FIELDS, PHASE5_SHARED_FIELDS, PUSH_VIEW_KEYS, WRITABLE_BY_ORIGIN, INTRANET_EDITABLE_AFTER_ACCEPT, NEXT_VERSION_SQL, _pushBackKeys,
+  applySharedPatch, linkSharedOrder, readSharedState, applyWrites, writablePath, projectToCampaignInTx, derivePayFields, validateQuantities,
+  PHASE3_SHARED_FIELDS, PHASE5_SHARED_FIELDS, PHASE7Q_SHARED_FIELDS, PUSH_VIEW_KEYS, WRITABLE_BY_ORIGIN, INTRANET_EDITABLE_AFTER_ACCEPT, NEXT_VERSION_SQL, _pushBackKeys,
 };

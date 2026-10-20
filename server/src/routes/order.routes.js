@@ -902,6 +902,8 @@ async function _intakeSourceBidir(res, { b, source, current, optionsJson, delive
     moneyCapable: !!(bid && (bid.money === 1 || bid.money === true || bid.money === '1')),
     // ★ 6단계: 선택지 가이드도 같은 장치 — 가이드를 받는 인트라넷만(옛 인트라넷은 옛 사본 가이드를 다시 보낸다)
     guideCapable: !!(bid && (bid.guide === 1 || bid.guide === true || bid.guide === '1')),
+    // ★ 7단계-②: 인원·일건수도 같은 장치 — 인원을 받는 인트라넷만(옛 인트라넷은 잠긴 인원 칸의 옛 사본 값을 다시 보낸다)
+    countsCapable: !!(bid && (bid.counts === 1 || bid.counts === true || bid.counts === '1')),
     preHook: _sourceRevisionPreHook(source),
     extraSets: {
       source_revision: source.sourceRevision,
@@ -2471,7 +2473,8 @@ router.put('/admin/edit', authMiddleware, adminOrMasterMiddleware, async (req, r
       }
       if (shared.length) {
         const mine = readSharedState(o);
-        for (const c of shared) mine[c.field] = String(b[c.field]);
+        // 배열·객체 칸(리뷰타입 혼합 수량 등)은 JSON 글자로 — String() 은 "[object Object]" 로 깨진다(7단계-② 검토 2026-10-21)
+        for (const c of shared) mine[c.field] = (b[c.field] !== null && typeof b[c.field] === 'object') ? JSON.stringify(b[c.field]) : String(b[c.field]);
         const out = await applySharedPatch({
           workOrderId: id, mine, baseVersion: Number(o.sync_version || 0), origin: 'rw_admin', actor: req.admin?.name || '',
         });
@@ -2480,7 +2483,9 @@ router.put('/admin/edit', authMiddleware, adminOrMasterMiddleware, async (req, r
       }
     }
 
-    const recruitChange = changes.find(change => change.field === 'recruit_count');
+    // ★ 7단계-②(검토 2026-10-21): 공유 저장이 이미 하한 검사·공고 옵션 인원·작업표 줄까지 맞췄다 — 여기서 다시 돌면
+    //   옵션 인원을 기존 비율로 다시 나눠(allocateOptionQuotas) 오더 옵션 인원과 공고가 갈라지고, 그 쓰기는 버전·전송이 없다.
+    const recruitChange = bidirSaved ? null : changes.find(change => change.field === 'recruit_count');
     if (recruitChange) {
       await assertWorkOrderQuota({ workOrderId: id, recruitTotal: recruitChange.to });
     }
