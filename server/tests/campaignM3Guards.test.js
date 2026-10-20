@@ -8,10 +8,11 @@ const path = require('path');
 const readF = (p) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8');
 
 // 프리필 헬퍼는 공유 모듈(js/work-order-detail.js)로 이관 — 두 파일을 합쳐서 본다
-const app = readF('js/index-app.js') + '\n' + readF('js/work-order-detail.js');
+// 옛 관리자 대시보드 폐기(결정 267) — index-app.js 삭제. 작업오더 상세·발행 프리필은 공유 모듈(work-order-detail.js) 한 벌.
+const app = readF('js/work-order-detail.js');
 const recjs = readF('js/index-recruit.js');
 const modaljs = readF('js/recruit-modal.js');   // 공유 모달 마크업(미리보기 카드 부재 확인용)
-const adm = readF('js/recruit-modal.js') + '\n' + readF('admin.html');
+const adm = readF('js/recruit-modal.js');   // 옛 관리자 대시보드 폐기(결정 267) — 공고 모달 마크업은 recruit-modal.js 한 벌
 
 let passed = 0;
 function ok(name, cond) { assert(cond, name); passed++; console.log('  ✓ ' + name); }
@@ -108,6 +109,6 @@ ok('관제: 취소확정(dismissed)된 건은 버튼 미노출(다시 알림 안
 ok('썸네일: guide-image 인프라 재사용(신규 업로드 API 없음)', /\/api\/order\/guide-image/.test(recjs));
 ok('썸네일: 절대 프록시 URL 저장(교차 오리진 카드 표시)', /rf_thumbnail"\)\.value = j\.url/.test(recjs));
 ok('썸네일: 5MB 상한', /5 \* 1024 \* 1024/.test(recjs));
-ok('admin.html: 파일 입력·미리보기 존재', /rf_thumb_file/.test(adm) && /rf_thumb_preview/.test(adm));
+ok('공고 모달(recruit-modal.js): 파일 입력·미리보기 존재', /rf_thumb_file/.test(adm) && /rf_thumb_preview/.test(adm));
 
 console.log(`\n✅ campaignM3Guards: ${passed}개 통과`);

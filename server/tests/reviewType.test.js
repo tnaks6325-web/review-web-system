@@ -202,7 +202,7 @@ console.log('\n8) 프론트 배선');
 const MODAL = F('js/recruit-modal.js');
 const REC = F('js/index-recruit.js');
 const WOD = F('js/work-order-detail.js');
-const APP = F('js/index-app.js');
+// 옛 관리자 대시보드 폐기(결정 267) — index-app.js·admin.html 탭 설정 팝오버·css/index.css 는 화면째 사라졌다(입력 창구가 줄었을 뿐 검사 의미는 남은 창구에서 그대로).
 
 t('공고 모달에 리뷰타입 버튼군(표준 key 5종 + 미지정)',
   /id="rf_review_type_btns"/.test(MODAL)
@@ -235,44 +235,21 @@ t('★★ 프론트 프리필 표의 라벨이 서버 REVIEW_TYPES 와 일치(�
 
 // search.html 의 탭 설정 팝오버는 옛 대시보드 사본(그릴 자리 없음)이라 2026-10-05 제거(결정 186 103번) — 관리자 화면만 본다.
 t('검색 화면에 옛 대시보드 탭 설정 팝오버 사본이 남아 있지 않다', !/id="tcPopover"/.test(F('search.html')));
-t('탭 설정 팝오버 선택지가 새 목록(관리자 화면)', ['admin.html'].every(f => {
-  const s = F(f);
-  const block = (s.match(/<div class="tc-option-row" id="tcOptReview">([\s\S]*?)<\/div>/) || [, ''])[1];
-  return RT.REVIEW_TYPE_LABELS.every(l => block.includes(`data-val="${l}"`))
-      && !/data-val="실배송"/.test(block) && !/data-val="믹스"/.test(block);
-}));
 /* ★★ 2026-08-23 전수 점검 — **입력 창구가 전부 새 어휘여야 한다**.
    표시(배지)만 갱신하고 입력 창구를 옛 어휘로 두면, 거기서 고른 '실배송'이 그대로 저장되어
    `resolveReviewType` 이 null 로 떨어진다 = "설정했는데 검수는 미지정"(2026-08-06 사고의 입구).
-   창구를 하나라도 빠뜨리면 정리 도구(087)가 고친 값을 그 화면이 다시 되돌린다. */
-t('★ 탭 설정 팝오버 = 관리자 화면 새 목록 (admin-siand.html 은 결정 186 44번, search.html 사본은 103번에서 제거)',
-  ['admin.html'].every(f => {
-    const block = (F(f).match(/<div class="tc-option-row" id="tcOptReview">([\s\S]*?)<\/div>/) || [, ''])[1];
-    return RT.REVIEW_TYPE_LABELS.every(l => block.includes(`data-val="${l}"`))
-        && !/data-val="실배송"|data-val="빈박스"|data-val="믹스"/.test(block);
-  }));
-t('★ 관리자 대시보드 입력 2곳(빠른편집·인라인 셀렉트)은 목록을 다시 적지 않는다',
-  /const opts = _tcReviewOptions\(\)/.test(APP)
-  && /_inlineSelect\(t, "review_type", "reviewType", _tcReviewOptions\(\),/.test(APP)
-  && /RF_REVIEW_TYPE_LABELS\.map\(\(\[, l\]\) => l\)/.test(APP)
-  && !/\['실배송','빈박스','구매확정','믹스'\]/.test(APP)
-  && !/\["실배송","빈박스","구매확정","믹스"\]/.test(APP));
-t('★ 그 파생의 전제 — 관리자 화면이 index-recruit.js 를 로드한다',
-  ['admin.html'].every(f => /js\/index-recruit\.js/.test(F(f))));
+   옛 관리자 대시보드 폐기(결정 267)로 탭 설정 팝오버·빠른편집·인라인 셀렉트 창구(admin.html·index-app.js)는 없어졌다. */
+t('★ 옛 대시보드 탭 설정 팝오버가 어느 화면에도 남아 있지 않다',
+  ['workdesk.html', 'search.html', 'index.html'].every(f => !/id="tcOptReview"/.test(F(f))));   // 옛 관리자 대시보드 폐기(결정 267) — admin.html 진입 경로까지 삭제
 t('★ search-app 의 빠른편집은 그 화면 팝오버(#tcOptReview)에서 읽는다(사본 0)',
   /querySelectorAll\('#tcOptReview \.tc-opt'\)/.test(F('js/search-app.js'))
   && !/\['실배송','빈박스','구매확정','믹스'\]/.test(F('js/search-app.js')));
 /* (AE 작업오더 제출 폼 안내 검사 — staff.html 제거로 삭제 (staff.html 은 결정 186 49번에서 제거)) */
 t('★ 옛 값 배지는 화면에서 사라지지 않는다(색 맵·CSS 유지)',
-  /'실배송': 'tc-review-실배송'/.test(APP) && /'믹스': 'tc-review-믹스'/.test(APP)
-  && /'실배송': 'tc-review-실배송'/.test(F('js/search-app.js'))
-  /* ★ 인라인 셀렉트가 쓰는 색 맵도 같다 — 여기서 옛 값을 빼면 그 탭의 기존 설정이
-     회색으로 바래 "설정 없음"처럼 보인다(선택지에서만 빼고 표시는 남긴다는 규율). */
-  && ['실배송', '빈박스', '믹스'].every(v => new RegExp(`"${v}":"#`).test(APP))
-  && ['css/index.css', 'css/search.css'].every(f => /\.tc-review-실배송\{/.test(F(f))));
+  /'실배송': 'tc-review-실배송'/.test(F('js/search-app.js'))
+  && ['css/search.css'].every(f => /\.tc-review-실배송\{/.test(F(f))));
 t('★ 라벨 어휘 통일 — 화면에 "리뷰유형" 표기가 남아 있지 않다',
-  ['admin.html', 'workdesk.html',
-   'js/index-app.js', 'js/work-order-detail.js'].every(f => !F(f).includes('리뷰유형')));
+  ['workdesk.html', 'js/work-order-detail.js'].every(f => !F(f).includes('리뷰유형')));   // 옛 관리자 대시보드 폐기(결정 267) — admin.html 진입 경로까지 삭제
 
 /* ── 9) 정리 화면 — 리뷰웹시스템[3버전]에서 부를 수 있어야 한다 ── */
 console.log('\n9) 리뷰타입 정리 화면');

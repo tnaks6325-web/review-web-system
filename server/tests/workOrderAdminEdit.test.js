@@ -26,9 +26,8 @@ const ROOT = path.join(__dirname, '..', '..');
 const routesSrc = fs.readFileSync(path.join(ROOT, 'server/src/routes/order.routes.js'), 'utf8');
 const trackBSrc = fs.readFileSync(path.join(ROOT, 'server/src/routes/trackB.routes.js'), 'utf8');
 const wodSrc = fs.readFileSync(path.join(ROOT, 'frontend/js/work-order-detail.js'), 'utf8');
-const appSrc = fs.readFileSync(path.join(ROOT, 'frontend/js/index-app.js'), 'utf8');
+// 옛 관리자 대시보드 폐기(결정 267) — index-app.js(관리자 대시보드 수정 창구) 검사는 뺐다. 수정 창구는 workdesk 하나다.
 const wdSrc = fs.readFileSync(path.join(ROOT, 'frontend/workdesk.html'), 'utf8');
-const apiSrc = fs.readFileSync(path.join(ROOT, 'frontend/api.js'), 'utf8');
 
 let pass = 0, fail = 0;
 function t(name, fn) {
@@ -246,14 +245,7 @@ async function run() {
 
   t('⑤ 모달 정의는 공유 모듈 한 곳뿐(사본 금지)', () => {
     assert.strictEqual((wodSrc.match(/function woAdminEditModal/g) || []).length, 1);
-    assert.ok(!/function woAdminEditModal/.test(appSrc), 'index-app.js 에 사본');
     assert.ok(!/function woAdminEditModal/.test(wdSrc), 'workdesk.html 에 사본');
-  });
-
-  t('⑤ admin: woAdminEdit → orderAdminEdit + 목록 재조회', () => {
-    assert.ok(/action: "orderAdminEdit", id, \.\.\.fields/.test(appSrc), 'orderAdminEdit 저장 경로 없음');
-    assert.ok(/woAdminEdit\('\$\{o\.id\}'\)/.test(appSrc), '관리자 수정 버튼 없음');
-    assert.ok(/'orderAdminEdit':\s*\{ method: 'PUT',\s*path: '\/api\/order\/admin\/edit' \}/.test(apiSrc), 'api.js 매핑 없음');
   });
 
   t('⑤ workdesk: _woAdminEdit → /api/trackb/work-orders/edit + 버튼은 _woEditActions 안(허용명단 게이트 상속)', () => {

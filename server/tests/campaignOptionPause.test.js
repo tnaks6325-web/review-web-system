@@ -194,9 +194,7 @@ const { buildSequentialSchedule } = require('../src/utils/sequentialSchedule');
     ok('작업 조건 카드: 상품 판매 줄 + 확인창 + 다시 그리기', /\$\{rows\}\$\{_cndSalesRow\(cd\)\}/.test(wd) && /async function _cndSale\(i\)[\s\S]{0,900}confirm\([\s\S]{0,900}option-pause[\s\S]{0,300}reloadWorkdesk\(\)/.test(wd));
     ok('리뷰웹시스템: 팝업 시작·종료(로그아웃 2곳)·실시간 이벤트·스크립트', /OptionAlertPrompt\.start\(_sp\)/.test(wd) && (wd.match(/OptionAlertPrompt\.stop\(\)/g) || []).length === 2
       && /addEventListener\('option_alert'/.test(wd) && /js\/option-alert-prompt\.js\?v=/.test(wd));
-    const adm = RF('frontend/admin.html'), app = RF('frontend/js/index-app.js'), pay = RF('frontend/js/index-payment.js');
-    ok('관리자 대시보드: 스크립트·시작·종료·실시간 이벤트', /js\/option-alert-prompt\.js\?v=/.test(adm) && /OptionAlertPrompt\.start\(_oaSp\)/.test(app)
-      && /OptionAlertPrompt\.stop\(\)/.test(app) && /'option_alert'\]\.forEach/.test(pay) && /OptionAlertPrompt\.refresh\(\)/.test(pay));
+    // 옛 관리자 대시보드 폐기(결정 267) — 옛 대시보드 팝업 배선(admin.html·index-app.js·index-payment.js) 단언은 뺐다. 리뷰웹시스템 배선(위)은 그대로.
     const pr = RF('frontend/js/option-alert-prompt.js');
     ok('팝업: 판정 사본 없음(서버 목록 그대로) · 버튼 5종 · 컴퓨터 알림 · 같은 알림은 한 번만', /\/api\/trackb\/option-alerts/.test(pr)
       && ['reopen', 'keep', 'pause', 'not_soldout', 'ack'].every(a => pr.includes('data-a="' + a + '"'))

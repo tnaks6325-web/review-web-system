@@ -112,10 +112,10 @@ function completeDb({ existing = '' } = {}) {
 
   console.log('\n[D] 구형·신규·외부·보완 경로 계약');
   const modern = read('frontend/js/search-app.js');
-  const legacy = read('frontend/js/index-app.js');
+  // 옛 관리자 대시보드 폐기(결정 267) — 구형 구매양식(index-app.js)은 파일째 삭제, admin.html 의 옛 양식 링크는 search.html(신규)로 넘어간다.
   const manual = read('frontend/js/manual-order.js');
   const home = read('frontend/index.html');
-  for (const [label, src] of [['신규', modern], ['구형', legacy], ['외부수동', manual], ['홈보완', home]]) {
+  for (const [label, src] of [['신규', modern], ['외부수동', manual], ['홈보완', home]]) {
     await t(`${label} 경로가 주문ID+세션ID+세션토큰을 함께 보낸다`, async () => {
       assert.match(src, /orderSubmissionId/);
       assert.match(src, /captureSessionId/);

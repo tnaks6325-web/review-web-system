@@ -24,8 +24,7 @@ const svcSrc = readS('services/worktable.service.js');
 const routes = readS('routes/trackB.routes.js');
 const order = readS('routes/order.routes.js');
 const wdesk = readF('workdesk.html');
-const idxApp = readF('js/index-app.js');
-const adminHtml = readF('admin.html');
+// 옛 관리자 대시보드 폐기(결정 267) — index-app.js·admin.html 쪽 검사(관리자 접수 확인 문구·설정 탭 패널)는 화면째 사라져 뺐다.
 const setJs = readF('js/admin-settings.js');
 
 let n = 0;
@@ -233,9 +232,6 @@ ok('★★ 그래도 "접수된 오더 = linked_tab_* 보유" 불변식은 유�
   && /linked_tab_sheet_id = \$3/.test(order));
 // (AE 폼 staff.html 검사 3종 — 페이지 제거로 삭제, 결정 186 49번)
 // ★★ 탈 구글시트(2026-08-10): 시트URL 없는 오더는 막지 않고 **무시트로 접수**한다 — 화면은 확인만 받는다.
-ok('관리자 접수 안내 문구가 새 흐름을 알려준다(무시트 접수 확인)',
-  /구글시트 없이 시스템 작업표로 접수할까요\?/.test(idxApp)
-  && !/woNotice\("작업시트탭URL이 없습니다/.test(idxApp));
 
 /* ══════════════════════════════════════════════════════════
    E. 화면 배선 — 작업표는 "설정" 안에, 공유 모듈 한 벌
@@ -252,12 +248,9 @@ ok('리뷰웹시스템[3버전] 설정 패널 목록에 worktable 이 있다(관
   const m = /panels: isAdmin \? \[([^\]]*)\] : \[([^\]]*)\]/.exec(wdesk);
   return !!m && /'worktable'/.test(m[1]) && !/'worktable'/.test(m[2]);
 })());
-ok('관리자 대시보드 설정 탭에도 같은 패널이 뜬다(공유 모듈 — 두 화면이 갈라지지 않는다)',
-  /panels: \[[^\]]*'worktable'[^\]]*\], autoload: false/.test(adminHtml)
-  && /loadWorktableTemplate\(\)/.test(idxApp));
-ok('★ 화면은 설정 공유 모듈 한 벌 — workdesk/admin.html 에 사본 없음',
+ok('★ 화면은 설정 공유 모듈 한 벌 — workdesk 에 사본 없음',
   /WT_EP/.test(setJs) && /header-stats/.test(setJs)
-  && !/header-stats/.test(wdesk) && !/header-stats/.test(adminHtml));
+  && !/header-stats/.test(wdesk));
 ok('★ 리포트·표준열 경로는 재기준하지 않는다(두 화면이 같은 설정을 본다)',
   /\/api\/trackb\/worktable\/header-stats/.test(setJs)
   && /\/api\/trackb\/worktable\/template/.test(setJs));

@@ -12,7 +12,6 @@ const service = read('src/services/workboardConsolidation.service.js');
 // 전환 준비 입구 5개는 2026-10-02 제거(결정 186 71번 — 8/28 enabled 전환 완료). 상태 보기·비상 정지만 남는다.
 const route = read('src/routes/workboardConsolidation.routes.js');
 const app = read('src/app.js');
-const orderLedgerUi = read('../frontend/js/index-order-ledger.js');
 const submitRoute = read('src/routes/submit.routes.js');
 const manualOrder = read('src/services/manualOrder.service.js');
 let passed = 0;
@@ -41,8 +40,7 @@ ok('기존 120건 승인목록과 새 작업은 서로 다른 출처로 고정',
   /legacy_120/.test(safetyMigration) && /new_work/.test(safetyMigration) && /ensureNewWorkTarget/.test(service));
 ok('전체 전환 뒤 새 작업도 자동으로 enabled 상태가 됨',
   /source = 'new_work' AND workboard_id IS NOT NULL/.test(service));
-ok('주문 원장 화면에서 실패 이유와 개별 다시 처리를 제공',
-  /실패 이유/.test(orderLedgerUi) && /_olRetry/.test(orderLedgerUi) && /syncQueueRetry/.test(orderLedgerUi));
+// 옛 관리자 대시보드 폐기(결정 267) — 주문 원장 화면(index-order-ledger.js · 실패 이유·개별 다시 처리)은 화면째 사라졌다.
 ok('새 큐 제출은 sheetlessDone을 항상 채워 저장 후 500 오류를 막음',
   /sheetlessDone = \{ ok: true, queued: true \}/.test(submitRoute)
   && /sheetlessDone = \{ ok: false, reason: 'queue_enqueue_failed'/.test(submitRoute));

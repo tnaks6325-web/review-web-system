@@ -17,8 +17,9 @@ const wd = readF('js/campaign-workdetail.js');
 /* 설정탭 슬롯·업로드 로직은 공유 모듈(js/admin-settings.js)로 이관 — 리뷰웹시스템[3버전]과 한 벌.
    admin.html 은 마운트 지점만 들고 있으므로 함께 읽는다(검사 의미 불변). */
 const set = readF('js/admin-settings.js');
-const adm = readF('js/recruit-modal.js') + '\n' + readF('admin.html') + '\n' + set;
-const app = readF('js/index-app.js') + '\n' + set;
+// 옛 관리자 대시보드 폐기(결정 267) — admin.html·index-app.js 가 빠지고 공유 모듈 + 작업보드만 읽는다.
+const adm = readF('js/recruit-modal.js') + '\n' + set;
+const app = set;
 const rec = readF('js/index-recruit.js');
 const campHtml = readF('campaign.html');
 
@@ -124,8 +125,6 @@ ok('★ 채널 표의 모든 항목이 cap(id 접미사)·label·emoji 를 갖�
   }));
 ok('설정탭에 채널별 발행방법 이미지 업로드 칸(공유 모듈이 그리고, 두 화면이 마운트한다)',
   /function uploadCashReceiptGuide/.test(app)
-  && /id="adminSettingsMount"/.test(readF('admin.html'))
-  && /AdminSettings\.mount\('adminSettingsMount'[\s\S]{0,120}'business'/.test(readF('admin.html'))
   && /AdminSettings\.mount\('adminSettingsMount'[\s\S]{0,140}'business'/.test(readF('workdesk.html')));
 ok('업로드는 guide-image 인프라 재사용(신규 저장소 없음)',
   /\/api\/order\/guide-image/.test(app) && /cashreceipt_/.test(app));

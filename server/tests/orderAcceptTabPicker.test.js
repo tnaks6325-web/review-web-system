@@ -14,8 +14,8 @@
  *   ③ 자동 이름매칭 폴백은 없다 — 고르는 것은 항상 사람("잘못된 탭 연결이 빈칸보다 나쁨")
  *   ④ 팝업(woAcceptTabPicker)은 공유 모듈 한 벌이고, 시트에서 온 탭명을 onclick 문자열에
  *      넣지 않는다(textContent 만 — M1 실측 XSS 규율). 런타임 실행으로 확인한다.
- *   ⑤ 두 호스트(관리자 대시보드 index-app.js · 리뷰웹시스템[3버전] workdesk.html)가
- *      gidNotFound 에서 팝업을 열고, 고른 gid로 재접수를 배선한다
+ *   ⑤ 호스트(리뷰웹시스템[3버전] workdesk.html)가 gidNotFound 에서 팝업을 열고, 고른 gid로 재접수를 배선한다
+ *      (옛 관리자 대시보드 index-app.js 는 결정 267 로 폐기 — 호스트는 하나)
  */
 
 const fs = require('fs');
@@ -26,7 +26,6 @@ const vm = require('vm');
 const ROOT = path.join(__dirname, '..', '..');
 const routesSrc = fs.readFileSync(path.join(ROOT, 'server/src/routes/order.routes.js'), 'utf8');
 const wodSrc = fs.readFileSync(path.join(ROOT, 'frontend/js/work-order-detail.js'), 'utf8');
-const appSrc = fs.readFileSync(path.join(ROOT, 'frontend/js/index-app.js'), 'utf8');
 const wdSrc = fs.readFileSync(path.join(ROOT, 'frontend/workdesk.html'), 'utf8');
 
 let pass = 0, fail = 0;
@@ -130,15 +129,9 @@ t('④ confirm 거부 시 onPick 미호출(사람 확인 게이트)', () => {
   assert.strictEqual(picked, null, 'confirm 거부인데 onPick 호출됨');
 });
 
-console.log('\n[3] 호스트 배선 — 두 화면 모두');
+console.log('\n[3] 호스트 배선');
 
-t('⑤ index-app.js: gidNotFound → 팝업 → woAccept(id, g) 재시도', () => {
-  assert.ok(/r\.gidNotFound && typeof woAcceptTabPicker === "function"/.test(appSrc), 'gidNotFound 분기 없음');
-  // ★ 인자가 늘어도(광고주 연결 확인값 등) "고른 gid 로 재접수한다"는 계약은 같다.
-  assert.ok(/woAcceptTabPicker\(r, g => woAccept\(id, g[,)]/.test(appSrc), '재접수 배선 없음');
-  assert.ok(/gid: pickGid/.test(appSrc), '재접수 요청에 gid 미포함');
-});
-
+// 옛 관리자 대시보드 폐기(결정 267) — index-app.js 호스트 배선 검사는 파일째 삭제로 빠진다.
 t('⑤ workdesk.html: gidNotFound → 팝업 → _woAccept(id, g) 재시도 + body 에 gid', () => {
   assert.ok(/r&&r\.gidNotFound&&typeof woAcceptTabPicker==='function'/.test(wdSrc), 'gidNotFound 분기 없음');
   assert.ok(/woAcceptTabPicker\(r, g=>_woAccept\(id, g[,)]/.test(wdSrc), '재접수 배선 없음');
@@ -148,7 +141,6 @@ t('⑤ workdesk.html: gidNotFound → 팝업 → _woAccept(id, g) 재시도 + bo
 t('⑤ 팝업 사본 금지 — woAcceptTabPicker 정의는 공유 모듈 한 곳뿐', () => {
   const defRe = /function woAcceptTabPicker/g;
   assert.strictEqual((wodSrc.match(defRe) || []).length, 1, '공유 모듈 정의 1개 아님');
-  assert.ok(!/function woAcceptTabPicker/.test(appSrc), 'index-app.js 에 사본');
   assert.ok(!/function woAcceptTabPicker/.test(wdSrc), 'workdesk.html 에 사본');
 });
 

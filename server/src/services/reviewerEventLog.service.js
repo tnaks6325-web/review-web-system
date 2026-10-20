@@ -114,7 +114,7 @@ function describeEvent(row = {}) {
     case 'order_lost_manual':
       return {
         problem: `구매양식이 시트에서 반복 소실되어 자동 재기록을 중단함${at(c.row) ? `(마지막 기록 ${at(c.row)}행)` : ''}.`,
-        action: "수동 확인·입력이 필요(관리자 대시보드 '구매주문 시트반영 현황' 참조).",
+        action: "수동 확인·입력이 필요(리뷰웹시스템 작업표에서 해당 주문 확인).",
       };
     case 'identity_blocked_expired':
       return {
@@ -136,7 +136,7 @@ function describeEvent(row = {}) {
       return manual
         ? {
           problem: '구매양식을 제출했으나, 시트에 입력되지 못함.',
-          action: "자동 재기록이 중단되어 수동 입력이 필요(관리자 대시보드 '구매주문 시트반영 현황' 참조).",
+          action: "자동 재기록이 중단되어 수동 입력이 필요(리뷰웹시스템 작업표에서 해당 주문 확인).",
         }
         : {
           problem: `구매양식을 제출했으나, 아직 시트에 입력되지 못함${at(c.mirrorStatus) ? `(상태: ${at(c.mirrorStatus)})` : ''}.`,

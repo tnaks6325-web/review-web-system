@@ -13,7 +13,6 @@ const cards = readFrontend('js/campaign-cards.js');
 const recruit = readFrontend('js/index-recruit.js');
 const campaign = readFrontend('campaign.html');
 const searchApp = readFrontend('js/search-app.js');
-const indexApp  = readFrontend('js/index-app.js');   // 관리자 제출 경로(매핑 가드는 여기 남아 있다)
 const manualOrder = readServer('src/services/manualOrder.service.js');
 const apply = routes.slice(routes.indexOf('async function _applyParticipation'), routes.indexOf("router.post('/:id/apply'"));
 const flags = routes.slice(routes.indexOf("router.post('/admin/:id/flags'"), routes.indexOf("router.post('/admin/create'"));
@@ -47,12 +46,10 @@ assert.match(searchApp, /const isFormMode = [^\n]*params\.get\("mode"\) === "for
 // ★★ 탈 구글시트 이후(2026-08) 리뷰어 제출 경로는 **시트 좌표를 제출 조건으로 쓰지 않는다** —
 //   무시트 작업표에는 시트 탭이 없고, 서버가 캠페인·신청건·홀드 토큰으로 문맥을 확정한다.
 //   그래서 이 파일에서 고정할 것은 "매핑이 없으면 막는다"가 아니라 **홀드 문맥을 반드시 실어 보낸다**이다.
-//   같은 성격의 매핑 가드는 관리자 제출 경로(index-app.js)에 그대로 살아 있으므로 그쪽을 함께 본다.
+//   (옛 관리자 대시보드 제출 경로 index-app.js 의 매핑 가드 단언은 대시보드 폐기(결정 267)로 뺐다.)
 assert.match(searchApp, /캠페인·신청건·홀드 토큰으로 서버가 문맥을 확정한다/,
   'reviewer submit path documents that the server resolves context (sheet coords are not a precondition)');
 assert.match(searchApp, /holdToken: (bh\.holdToken|_EMBED_CTX\.holdToken)/,
   'reviewer submit payload carries the hold token so the server can resolve the campaign context');
-assert.match(indexApp, /if \(!ctx\.sheetId \|\| \(!ctx\.tabName && !ctx\.gid\)\)/,
-  'admin submit path still blocks on a missing sheet mapping instead of routing to the home screen');
 
 console.log('campaignPinnedPopular: passed');

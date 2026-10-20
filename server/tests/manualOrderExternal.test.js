@@ -454,9 +454,8 @@ console.log('\nD. 프론트 배선');
 }
 {
   // 옛 대시보드 작업 탭 관리의 [🧾 수동제출]과 리뷰어 홈 칩은 결정 186 54번에서 제거(옛 입구 제거와 짝).
-  const ia = F('js/index-app.js');
-  ok('D19 ★ 옛 대시보드에 수동제출 진입이 남아 있지 않다(막다른 버튼 금지)', !ia.includes('openManualOrderForTab'));
-  [['admin.html', F('admin.html')], ['index.html', F('index.html')]].forEach(([name, html]) => {
+  // 옛 관리자 대시보드 폐기(결정 267) — D19(index-app.js 수동제출 진입 없음)는 파일째 삭제로 대체. admin.html 은 진입 경로까지 삭제(파일 없음) — D22 는 남은 리뷰어 홈만 본다.
+  [['index.html', F('index.html')]].forEach(([name, html]) => {
     ok(`D22 ${name} 은 manual-order.js 를 싣지 않는다(옛 입구 제거 — 싣으면 칩·버튼이 막다른 길)`, !html.includes('js/manual-order.js'));
   });
   const wd = F('workdesk.html');
@@ -714,7 +713,7 @@ console.log('\nI. 1단계 캡처 첨부');
   const mo = F('js/manual-order.js');
 
   ok('I1 명칭이 "외부모집 수동제출" 로 통일', mo.includes('외부모집 수동제출') && !mo.includes('외부참여 수동제출'));
-  ['js/campaign-cards.js', 'js/index-app.js', 'js/index-recruit.js', 'index.html'].forEach(f => {
+  ['js/campaign-cards.js', 'workdesk.html', 'js/index-recruit.js', 'index.html'].forEach(f => {   // index-app.js 는 결정 267 로 삭제 → 작업보드로 대체
     ok(`I1-${f} 옛 명칭 잔여 없음`, !F(f).includes('외부참여 수동제출'));
   });
 

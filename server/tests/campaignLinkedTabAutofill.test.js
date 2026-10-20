@@ -26,7 +26,8 @@ const rt = readS('routes/campaign.routes.js');
 const mig = fs.readFileSync(path.join(__dirname, '..', 'migrations', '067_campaign_linked_tab_backfill.sql'), 'utf8');
 // 프리필 조립(_woCampaignPrefill)은 공유 모듈(js/work-order-detail.js)로 이관 —
 // 리뷰웹시스템[3버전]의 작업오더 탭이 같은 함수를 쓴다(사본 금지). 두 파일을 합쳐서 본다.
-const app = readF('js/index-app.js') + '\n' + readF('js/work-order-detail.js');
+// 옛 관리자 대시보드 폐기(결정 267) — index-app.js 삭제. 작업오더 상세·발행 프리필은 공유 모듈(work-order-detail.js) 한 벌.
+const app = readF('js/work-order-detail.js');
 const rec = readF('js/index-recruit.js');
 
 /* ═══ 서버 보정 헬퍼 ═══ */

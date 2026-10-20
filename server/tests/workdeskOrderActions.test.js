@@ -25,7 +25,7 @@ const S = (p) => fs.readFileSync(path.join(__dirname, '..', 'src', p), 'utf8');
 
 const HTML = F('workdesk.html');
 const WOD = F('js/work-order-detail.js');
-const APP = F('js/index-app.js');
+// 옛 관리자 대시보드 폐기(결정 267) — index-app.js 가 없어져 사본 금지·공유 프리필 검사는 workdesk 쪽만 남는다.
 const REC = F('js/index-recruit.js');
 const CAMP = F('campaign.html');
 const ORD = S('routes/order.routes.js');
@@ -47,17 +47,14 @@ t('공유 모듈이 라벨·설명·전이표·접수판정을 갖는다', () =>
     assert.ok(WOD.includes(s), '전역 미공개: ' + s));
 });
 
-t('★ 사본 금지 — workdesk·index-app 어디에도 두 번째 표가 없다', () => {
+t('★ 사본 금지 — workdesk 에 두 번째 표가 없다', () => {
   assert.ok(!/const WO_STATUS\s*=/.test(HTML), 'workdesk 에 WO_STATUS 사본이 되살아났다');
-  [HTML, APP].forEach((src, i) => {
-    ['WO_LABELS', 'WO_TRANSITIONS', 'WO_COLORS', 'WO_DELIVERY_TYPES', 'WO_CHANNEL_HOSTS'].forEach(n =>
-      assert.ok(!new RegExp('(const|let|var)\\s+' + n + '\\s*=').test(src),
-        (i ? 'index-app' : 'workdesk') + ' 에 ' + n + ' 사본이 있다'));
-  });
+  ['WO_LABELS', 'WO_TRANSITIONS', 'WO_COLORS', 'WO_DELIVERY_TYPES', 'WO_CHANNEL_HOSTS'].forEach(n =>
+    assert.ok(!new RegExp('(const|let|var)\\s+' + n + '\\s*=').test(HTML), 'workdesk 에 ' + n + ' 사본이 있다'));
   ['_woOptionRows', '_woFirstProductInfo', '_woBuildInflowHtml', '_woPlainGuideToHtml',
    '_woReviewImgHtml', '_woChannel', '_woChannelFromUrl', '_woCampaignPrefill'].forEach(n =>
-    assert.ok(!new RegExp('function\\s+' + n + '\\s*\\(').test(APP),
-      'index-app 에 ' + n + ' 사본이 남아 있다(공유 모듈로 이관됨)'));
+    assert.ok(!new RegExp('function\\s+' + n + '\\s*\\(').test(HTML),
+      'workdesk 에 ' + n + ' 사본이 있다(공유 모듈 work-order-detail.js 에만 있어야 한다)'));
 });
 
 t('★★ 화면 전이표 ⊆ 서버 전이표 — 화면이 통과시킨 버튼이 400 으로 튕기지 않는다', () => {
@@ -178,9 +175,8 @@ t('작업오더 → 공고 다리가 있다(연결 여부로 문구가 갈린다
   assert.ok(/_woCampaign\('\$\{id\}'\)/.test(body));
 });
 
-t('★ 프리필은 공유 모듈 — 관리자 대시보드와 같은 공고가 만들어진다', () => {
+t('★ 프리필은 공유 모듈(work-order-detail.js) 한 벌', () => {
   assert.ok(/_woCampaignPrefill\(o\)/.test(HTML), 'workdesk 가 공유 프리필을 쓰지 않는다');
-  assert.ok(/const prefill = _woCampaignPrefill\(o\);/.test(APP), 'index-app 이 공유 프리필을 쓰지 않는다');
   const i = HTML.indexOf('async function _woCampaign(id){');
   const body = HTML.slice(i, i + 1200);
   assert.ok(/o\.linked_campaign_id\) await openRecruitModal\(o\.linked_campaign_id, _woCampaignPrefill\(o\), id\)/.test(body),

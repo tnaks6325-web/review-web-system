@@ -17,9 +17,10 @@ const doc = readF('docs/현금영수증_발행방법_이미지_등록_안내.htm
 /* 설정탭 마크업·로직은 공유 모듈(js/admin-settings.js)로 이관 — admin.html 은 마운트만.
    안내서가 가르치는 라벨·문구가 제품에 실제로 있는지 보는 검사이므로 함께 읽는다. */
 const set = readF('js/admin-settings.js');
-const adm = readF('admin.html') + '\n' + set;
+// 옛 관리자 대시보드 폐기(결정 267) — admin.html·index-app.js 가 빠지고 공유 모듈(작업보드 설정 탭이 마운트)만 읽는다.
+const adm = set;
 const wd = readF('js/campaign-workdetail.js');
-const app = readF('js/index-app.js') + '\n' + set;
+const app = set;
 const sapp = readF('js/search-app.js');
 
 let n = 0;

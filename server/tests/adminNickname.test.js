@@ -25,8 +25,9 @@ const migration = read('migrations/078_admin_nicknames.sql');
    admin.html·admin-siand.html 은 마운트 지점만 들고 있으므로 "모듈 + 그 화면"으로 함께 본다
    (recruit-modal.js 를 뺐을 때 cashReceiptGuide 가드를 넓힌 것과 같은 방식 — 검사 의미는 불변). */
 const settingsJs = read('../frontend/js/admin-settings.js');
-const adminHtml = settingsJs + '\n' + read('../frontend/admin.html');
-const appJs = settingsJs + '\n' + read('../frontend/js/index-app.js');
+// 옛 관리자 대시보드 폐기(결정 267) — 설정 칸은 리뷰웹시스템[3버전](workdesk.html)이 같은 모듈로 마운트한다.
+const wdHtml = read('../frontend/workdesk.html');
+const adminHtml = settingsJs + '\n' + wdHtml;
 const apiJs = read('../frontend/api.js');
 
 let passed = 0;
@@ -95,17 +96,18 @@ console.log('\n② 메시지 마스킹(리뷰어 메시지는 손대지 않음)'
     ok('★ 시드는 기존 값을 덮지 않음(관리자가 바꾼 닉네임 보존)',
       /ON CONFLICT \(login_name\) DO NOTHING/.test(migration));
     ok('api.js 액션 매핑', /'adminMyNickname'/.test(apiJs) && /'adminSaveNickname'/.test(apiJs));
-    ok('설정 탭 UI(admin.html)', /id="myNicknameInput"/.test(adminHtml) && /saveMyNickname\(\)/.test(adminHtml));
-    ok('설정 탭 진입 시 로드', /loadMyNickname\(\);/.test(appJs) && /tabName === "settings"[\s\S]{0,400}loadMyNickname/.test(appJs));
-    ok('★ 마크업·로직은 공유 모듈 한 벌 — admin.html 은 마운트만(사본 금지) (admin-siand.html 은 결정 186 44번에서 제거)',
-      /id="adminSettingsMount"/.test(read('../frontend/admin.html'))
-      && !/id="myNicknameInput"/.test(read('../frontend/admin.html'))
-      && !/function saveMyNickname/.test(read('../frontend/js/index-app.js')));
+    ok('설정 탭 UI(공유 모듈)', /id="myNicknameInput"/.test(adminHtml) && /saveMyNickname\(\)/.test(adminHtml));
+    ok('설정 패널 마운트 시 로드(LOADERS.nickname)', /nickname:\s*loadMyNickname/.test(settingsJs)
+      && /AdminSettings\.mount\('adminSettingsMount',[\s\S]{0,200}'nickname'/.test(wdHtml));
+    ok('★ 마크업·로직은 공유 모듈 한 벌 — workdesk.html 은 마운트만(사본 금지)',
+      /id="adminSettingsMount"/.test(wdHtml)
+      && !/id="myNicknameInput"/.test(wdHtml)
+      && !/function saveMyNickname/.test(wdHtml));
     ok('★ 리뷰웹시스템[3버전]도 같은 모듈 — 서버 경로만 Track B 네임스페이스로 재기준',
       (() => { const w = read('../frontend/workdesk.html');
         return /js\/admin-settings\.js/.test(w)
           && /window\.ADMIN_SETTINGS_API\s*=\s*'\/api\/trackb\/settings'/.test(w); })());
-    ok('미설정 안내 문구(리뷰어에겐 "관리자"로 보임)', /관리자<\/b>로만? 보입니다/.test(appJs));
+    ok('미설정 안내 문구(리뷰어에겐 "관리자"로 보임)', /관리자<\/b>로만? 보입니다/.test(settingsJs));
 
     console.log(`\n✅ adminNickname: ${passed}개 통과\n`);
     process.exit(0);

@@ -301,12 +301,11 @@ const file = (over) => ({ id: 'F1', name: '김신혜.jpg', mimeType: 'image/jpeg
   /* ★★ 등록만으로는 **사람이 열 수 없다** — mount(elId,{panels:[...]}) 가 그 목록만 그리고,
      목차 토글도 그린 것만 본다. 실제로 코드리뷰가 이 구멍을 잡았다(서버·가드는 다 있는데 창구 0).
      그래서 두 호스트의 panels 배열에 키가 있는지까지 본다. */
-  const ADM = front('admin.html'), WD = front('workdesk.html');
+  // 옛 관리자 대시보드 폐기(결정 267) — 설정 패널 호스트는 리뷰웹시스템[3버전](workdesk.html) 하나.
+  const WD = front('workdesk.html');
   {
-    const admCall = ADM.slice(ADM.indexOf("AdminSettings.mount('adminSettingsMount'"), ADM.indexOf("AdminSettings.mount('adminSettingsMount'") + 260);
     const wdCall = WD.slice(WD.indexOf("AdminSettings.mount('adminSettingsMount'"), WD.indexOf("AdminSettings.mount('adminSettingsMount'") + 320);
-    ok("★★ 관리자 대시보드가 이 패널을 실제로 마운트한다", /'capturelink'/.test(admCall));
-    ok("★★ 리뷰웹시스템[3버전]도 마운트한다(한쪽만 넣으면 화면이 갈린다)", /'capturelink'/.test(wdCall));
+    ok("★★ 리뷰웹시스템[3버전]이 이 패널을 실제로 마운트한다", /'capturelink'/.test(wdCall));
     // AE 목록에는 넣지 않는다 — 서버가 adminOrMaster 라 눌러도 403 인 죽은 버튼이 된다.
     const aePart = wdCall.slice(wdCall.indexOf(':', wdCall.indexOf('isAdmin ?')));
     ok('★ AE 목록에는 넣지 않는다(서버 게이트와 1:1 — 죽은 버튼 금지)', !/'capturelink'/.test(aePart));
@@ -316,7 +315,7 @@ const file = (over) => ({ id: 'F1', name: '김신혜.jpg', mimeType: 'image/jpeg
        `PANELS` 에 있어도 어느 호스트의 `mount({panels:[...]})` 에도 없으면 사람이 열 방법이 없다
        (실제로 capturelink 가 그랬고, [✅ 리뷰타입 정리]는 그 상태로 오래 방치돼 있었다).
        ★ 어느 호스트에 두는지는 기능마다 다르므로 **최소 한 곳**만 요구한다. */
-    const hosts = ADM + '\n' + WD;   // (admin-siand.html 은 결정 186 44번에서 제거)
+    const hosts = WD;   // (admin-siand.html 은 결정 186 44번 · admin.html 은 결정 267 에서 제거)
     const keys = (/var PANELS = \{([^}]*)\}/.exec(AS) || [, ''])[1]
       .split(',').map(x => x.split(':')[0].trim()).filter(Boolean);
     ok('PANELS 키를 읽었다(3개 이상)', keys.length >= 3, keys.join('|'));

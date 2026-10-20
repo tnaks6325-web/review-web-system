@@ -5,10 +5,7 @@
  * 고정하는 것:
  *  - 서버: 신규 제출(submit/intake)·보완 재제출(my/update revision→submitted) 시 SSE work_order_new 발신
  *  - 페이로드 최소화: emit 헬퍼가 리뷰가이드/유입가이드 본문을 싣지 않음 (상세는 admin API로 조회)
- *  - 프론트: SSE 리스너 등록 + 단일 진입점(_woCheckNewOrders) 수렴 + 2분 폴링 폴백
- *  - 알림 카드는 자동 소멸 없음(클릭해야만 닫힘), 확인 기록은 localStorage(재접속에도 유지)
- *  - OS 알림 requireInteraction:true + 오더별 tag(중복 방지), 클릭 → 상세 모달
- *  - 구 중앙 팝업(_showNewOrderPopup) 완전 제거
+ *  - (프론트 알림 카드·OS 알림·SSE 수신은 옛 관리자 대시보드와 함께 결정 267 로 폐기 — 작업보드 nav 뱃지만 본다)
  */
 const assert = require('assert');
 const fs = require('fs');
@@ -18,8 +15,6 @@ const readF = (p) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend'
 
 const sse = readSrv('utils/sse.js');
 const orderRoutes = readSrv('routes/order.routes.js');
-const app = readF('js/index-app.js');
-const pay = readF('js/index-payment.js');
 
 let passed = 0;
 function ok(name, cond) { assert(cond, name); passed++; console.log('  ✓ ' + name); }
@@ -48,33 +43,10 @@ ok('order: 헬퍼가 sse.emitWorkOrderNew 위임 + try/catch best-effort',
   ok('order: AE 재제출 경로가 되살아나지 않았다', !orderRoutes.includes("router.put('/my/update'"));
 }
 
-// ── 프론트: index-payment.js (SSE 수신) ──
-ok('pay: 이벤트 배열에 work_order_new 등록', /'order_update', 'work_order_new'/.test(pay));
-ok('pay: _SSE_ICONS에 work_order_new 항목', /work_order_new:\{ icon/.test(pay));
-ok('pay: 수신 시 _onWorkOrderNewSSE 훅 호출(가드 포함)',
-  /evtType === 'work_order_new'[\s\S]{0,200}_onWorkOrderNewSSE === 'function'/.test(pay));
-
-// ── 프론트: index-app.js (카드·seen·모달·폴링) ──
-ok('app: 확인 기록 localStorage 키(wo_notif_seen_v1) — 재접속에도 미확인 유지', /wo_notif_seen_v1/.test(app));
-ok('app: seen 프루닝 = 생존 교집합(현재 submitted 목록 기준)', /function _woSeenPrune\(liveIds\)/.test(app));
-ok('app: OS 알림 requireInteraction:true (클릭 전까지 유지)', /requireInteraction: true/.test(app));
-ok('app: OS 알림 오더별 tag(중복 방지)', /tag: "wo_" \+ o\.id/.test(app));
-ok('app: OS 알림 4건 이상 = 요약 1건(알림 폭탄 방지)', /toNotify\.length > 3\) _woSendDesktopNotifBatch/.test(app));
-ok('app: 카드 클릭 → 확인 + 상세 모달', /function _woNotifCardClick\(id\) \{[\s\S]{0,200}openWoDetailModal\(id\)/.test(app));
-ok('app: 상세 모달은 _woDetailHtml(내용 전체) + 메모로그 렌더',
-  /function openWoDetailModal[\s\S]*?_woDetailHtml\(o\)/.test(app)
-  && /function openWoDetailModal[\s\S]*?_woMemoLogInner\(o\)/.test(app));
-ok('app: 폴링 폴백 = setInterval(_woCheckNewOrders)', /setInterval\(_woCheckNewOrders, _WO_BADGE_POLL_MS\)/.test(app));
-ok('app: SSE 재제출 수신 시 seen 해제 후 재알림', /data\.resubmitted\) _woSeenRemove\(data\.id\)/.test(app));
-ok('app: 구 중앙 팝업(_showNewOrderPopup) 완전 제거', !/_showNewOrderPopup/.test(app));
-ok('app: 구 카운트 증가 감지(_woLastNewCount) 제거', !/_woLastNewCount/.test(app));
-// 카드에 자동 소멸 타이머 없음 (클릭해야만 닫힘)
-{
-  const m = app.match(/function _woRenderNotifCard\([\s\S]*?\n\}/);
-  ok('app: 알림 카드에 자동 소멸 setTimeout 없음', !!m && !/setTimeout/.test(m[0]));
-}
-// 로그아웃 시 잔존 카드 정리
-ok('app: stopWorkOrderBadgePoll이 알림 스택 클리어',
-  /function stopWorkOrderBadgePoll\(\) \{[\s\S]{0,400}woNotifStack[\s\S]{0,200}innerHTML = ""/.test(app));
+// ── 프론트 ──
+// 옛 관리자 대시보드 폐기(결정 267) — 도착 알림 카드·OS 알림·SSE 수신(index-app.js·index-payment.js)은 화면째 사라졌다.
+//   서버 발신(work_order_new)은 그대로 남아 있다. 리뷰웹시스템[3버전]은 작업오더 nav 뱃지(🔵 대기 건수)로 보여 준다.
+ok('리뷰웹시스템[3버전]: 작업오더 nav 뱃지가 대기(submitted) 건수를 그린다',
+  /const n=\(STATE\.woCounts&&STATE\.woCounts\.submitted\)\|0; nb\.textContent=n>0\?\(' 🔵'\+n\):''/.test(readF('workdesk.html')));
 
 console.log(`\n✅ workOrderNotify: ${passed}개 통과`);

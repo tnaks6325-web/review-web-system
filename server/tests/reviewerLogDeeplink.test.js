@@ -214,37 +214,11 @@ t('17. listReviewerEvents가 phone8·tabGid를 내려준다(프론트 계약)', 
   assert.ok(/tab_gid AS "tabGid"/.test(sel), 'tabGid 미반환 → 딥링크 탭 지정 폴백 불가');
 });
 
-// ── 6) 관리자 대시보드 중요알림 = 유형별 요약 카드 ────────────────
-//   알림이 너무 많이 쌓여 관리가 안 되던 문제 → per-alert 스택 대신 유형별 건수 요약 1장.
-//   개별 확인·처리·이미지는 리뷰웹시스템[3버전] 리뷰어 로그 뷰에서 한다.
-const APP = fs.readFileSync(path.join(__dirname, '../../frontend/js/index-app.js'), 'utf8');
-
-t('18. 대시보드는 유형별 요약 카드로 그린다(per-alert 스택 제거)', () => {
-  assert.ok(/function _raRenderSummary/.test(APP), '요약 렌더 함수가 있어야 함');
-  assert.ok(/byTypeCritical/.test(APP), '서버 유형별 집계(byTypeCritical)를 사용해야 함');
-  assert.ok(!/_raOpenWorkdesk/.test(APP), 'per-alert 딥링크 카드는 제거돼야 함');
-  assert.ok(!/_raResolve\b/.test(APP) && !/_raCancelOrder/.test(APP), '개별 확인·취소 버튼은 대시보드에서 제거(처리는 작업보드)');
-});
-
-t('19. 요약은 카테고리로 묶고 미지 유형도 기타로 합산(조용한 누락 금지)', () => {
-  assert.ok(/const _RA_CATS =/.test(APP), '카테고리 매핑이 있어야 함');
-  assert.ok(/capture_mismatch/.test(APP) && /order_lost/.test(APP) && /order_no_capture/.test(APP), '주요 유형 매핑 누락');
-  assert.ok(/기타 중요알림/.test(APP), '매핑에 없는 유형은 기타로 합산해야 함');
-  assert.ok(/if \(!totalCritical\) \{ if \(card\) card\.remove\(\); return; \}/.test(APP), '0건이면 요약 카드를 제거해야 함');
-});
-
-t('20. 요약 카드는 리뷰웹시스템[3버전] 리뷰어 로그 뷰(#view=logs)를 연다(계약 왕복)', () => {
-  assert.ok(/function openWorkdeskLogs/.test(APP), '로그 뷰 오프너가 있어야 함');
-  assert.ok(/hash = "view=logs"/.test(APP), '#view=logs 딥링크여야 함');
-  assert.ok(/onclick="openWorkdeskLogs\(\)"/.test(APP), '카테고리·버튼이 로그 뷰를 열어야 함');
-  // workdesk boot 이 #view=logs 를 실제로 소비한다
+// ── 6) #view=logs 딥링크 소비 ────────────────
+//   옛 관리자 대시보드 폐기(결정 267) — 대시보드 중요알림 요약 카드(index-app.js, 옛 18·19·21번)는 화면째 사라졌다.
+//   옛 관리자 대시보드 폐기(결정 267) — admin.html 진입 경로까지 삭제(옛 주소 /admin 은 리뷰어 홈으로 떨어진다) — 작업보드가 #view=logs 를 소비하는지만 본다.
+t('20. 리뷰웹시스템[3버전]이 #view=logs 를 소비한다', () => {
   assert.ok(/_VIEW==='logs'/.test(HTML) && /STATE\.view='logs'/.test(HTML), 'workdesk 가 #view=logs 를 소비해야 함');
-});
-
-t('21. 요약 카드도 토큰을 URL 에 싣지 않는다(raw_sso 핸드오프)', () => {
-  const fn = APP.slice(APP.indexOf('function openWorkdeskLogs'), APP.indexOf('function _raEnsureStack'));
-  assert.ok(/localStorage\.setItem\("raw_sso"/.test(fn), 'raw_sso 핸드오프가 있어야 새 탭이 로그인 화면으로 안 떨어진다');
-  assert.ok(!/sso=/.test(fn), 'admin 경로에선 토큰을 URL 로 넘길 필요가 없다');
 });
 
 // ── 7) 리뷰웹시스템[3버전] 리뷰어 로그 — [확인] 제거 + 펼침행 이미지 미리보기 ──

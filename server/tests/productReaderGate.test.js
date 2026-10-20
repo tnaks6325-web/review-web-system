@@ -9,8 +9,7 @@ const vm = require('vm');
 const front = path.join(__dirname, '..', '..', 'frontend');
 const gateSrc = fs.readFileSync(path.join(front, 'js/product-reader-gate.js'), 'utf8');
 const workdesk = fs.readFileSync(path.join(front, 'workdesk.html'), 'utf8');
-const admin = fs.readFileSync(path.join(front, 'admin.html'), 'utf8');
-const indexApp = fs.readFileSync(path.join(front, 'js/index-app.js'), 'utf8');
+// 옛 관리자 대시보드 폐기(결정 267) — admin.html 은 작업보드로 보내는 정류장이라 잠금 대상 화면은 작업보드 하나다.
 
 let failed = 0;
 const ok = (m, c) => { if (c) console.log('  ✓ ' + m); else { failed++; console.log('  ✗ ' + m); } };
@@ -58,7 +57,6 @@ const missing = { sendMessage: (id, msg, cb) => cb(undefined), lastError: { mess
   ok('작업데스크: 잠금 스크립트가 첫 boot() 보다 먼저 읽힘(재방문·SSO 입장 우회 방지)', gateTag > 0 && bootCall > 0 && gateTag < bootCall);
   ok('PING 만 보낸다', /sendMessage\(EXTENSION_ID, \{ type: 'PING' \}/.test(gateSrc) && !/type: '(LIST|READ)'/.test(gateSrc));
   ok('작업데스크: 광고주 제외로 호출', /window\.productReaderGate\(\{ isStaff: STATE\.role !== 'advertiser' \}\)/.test(workdesk));
-  ok('관리자 화면: 진입 때 호출', /function enterAdminScreen\(\) \{\s*\/\/[^\n]*\n\s*try \{ window\.productReaderGate && window\.productReaderGate\(\{ isStaff: true \}\)/.test(indexApp));
-  ok('두 화면 모두 스크립트 로드', /<script src="js\/product-reader-gate\.js"><\/script>/.test(workdesk) && /<script src="js\/product-reader-gate\.js"><\/script>/.test(admin));
+  ok('작업데스크가 스크립트 로드', /<script src="js\/product-reader-gate\.js"><\/script>/.test(workdesk));
   if (failed) { console.log(`\n${failed}건 실패`); process.exit(1); }
 })();

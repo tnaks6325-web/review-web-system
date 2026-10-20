@@ -162,9 +162,9 @@ function routeBody(src, decl) {
     /function loadManagerCleanup\(\) \{ _setNavBadge\('managercleanup', '점검'\); \}/.test(AS));
   ok('전역 노출(onclick 이 부른다)', /window\.managerCleanupRun = managerCleanupRun/.test(AS));
   ok('시트발·DB발 문자열은 escape 해서 그린다', /escHtml\(r\.from\)/.test(AS) && /escHtml\(r\.to\)/.test(AS));
-  ok('관리자 화면 두 곳에 패널이 붙는다',
-    /'reviewtype','managercleanup'/.test(readF('workdesk.html'))
-    && /'reviewtype', 'managercleanup'/.test(readF('admin.html')));
+  // 옛 관리자 대시보드 폐기(결정 267) — 패널이 붙는 관리자 화면은 리뷰웹시스템[3버전] 하나다.
+  ok('리뷰웹시스템[3버전] 설정에 패널이 붙는다',
+    /'reviewtype','managercleanup'/.test(readF('workdesk.html')));
 
   console.log(`\n✅ managerNameCleanup — ${n} 케이스 통과`);
   process.exit(0);

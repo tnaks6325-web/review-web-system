@@ -176,13 +176,13 @@ t('마이그레이션이 멱등이고 소급 재삽입하지 않는다', () => {
 /* ── 3) 사본 금지 — 관리자 대시보드와 같은 코드 ────────────── */
 console.log('\n3) 단일 출처(사본 드리프트 방지)');
 const HTML = F('workdesk.html');
-const ADM = F('admin.html');
+// 옛 관리자 대시보드 폐기(결정 267) — admin.html 진입 경로까지 삭제 — 두 번째 사본이 생길 화면 자체가 없다(아래에서 파일 부재를 본다).
 const MODAL = F('js/recruit-modal.js');
 const REC = F('js/index-recruit.js');
 
 t('★ 발행·수정 모달 마크업은 공유 모듈 한 벌뿐', () => {
-  assert.strictEqual((ADM.match(/id="rf_title"/g) || []).length, 0,
-    'admin.html 에 인라인 모달이 남아 있으면 두 벌이 된다');
+  assert.ok(!require('fs').existsSync(require('path').join(__dirname, '../../frontend/admin.html')),
+    'admin.html 이 되살아나면 인라인 모달 두 벌이 될 수 있다');
   // ★ 세는 대상은 **살아 있는 마크업 한 벌**이다 — 모듈 안의 `<template id="rf_legacy_*_markup">` 는
   //   브라우저가 inert 로 다루는 보관용 조각이라 document 에 id 가 등록되지 않는다(중복 id 아님).
   //   단순 문자열 계수로 두면 그 보관 조각 때문에 이 가드가 조용히 빨개진다.
@@ -196,19 +196,16 @@ t('★ 발행·수정 모달 마크업은 공유 모듈 한 벌뿐', () => {
 });
 t('모달 CSS도 모듈에 함께 있다(스타일 없이 뜨는 것 방지)', () => {
   assert.ok(/\.rf-split\{/.test(MODAL), '모듈에 CSS 없음');
-  assert.ok(!/^\.rf-split\{/m.test(ADM), 'admin.html 에 CSS 가 남아 있음');
+  assert.ok(!/^\.rf-split\{/m.test(HTML), '작업보드에 모달 CSS 사본이 있음');
 });
-t('두 화면이 같은 모듈을 로드한다', () => {
+t('리뷰웹시스템[3버전]이 공유 모듈을 로드한다(옛 대시보드 폐기 — 결정 267)', () => {
   ['js/recruit-modal.js', 'js/campaign-cards.js', 'js/index-recruit.js'].forEach(f => {
-    assert.ok(ADM.includes(f), 'admin.html 이 ' + f + ' 미로드');
     assert.ok(HTML.includes(f), 'workdesk.html 이 ' + f + ' 미로드');
   });
 });
 t('모달 로드 순서 — 마크업이 저장 로직보다 먼저', () => {
-  [ADM, HTML].forEach((doc, i) => {
-    assert.ok(doc.indexOf('js/recruit-modal.js') < doc.indexOf('js/index-recruit.js'),
-      (i ? 'workdesk' : 'admin') + ': recruit-modal.js 가 index-recruit.js 뒤에 있으면 프리필이 필드를 못 찾는다');
-  });
+  assert.ok(HTML.indexOf('js/recruit-modal.js') < HTML.indexOf('js/index-recruit.js'),
+    'workdesk: recruit-modal.js 가 index-recruit.js 뒤에 있으면 프리필이 필드를 못 찾는다');
 });
 t('★ 리뷰웹시스템[3버전]은 목록·저장 로직을 베끼지 않고 그대로 호출', () => {
   assert.ok(/await (window\.)?loadRecruitList\(\)/.test(HTML), 'index-recruit.js 의 로더를 써야 한다');
@@ -218,8 +215,7 @@ t('★ 리뷰웹시스템[3버전]은 목록·저장 로직을 베끼지 않고 
 });
 t('★ 컨테이너 id 는 index-recruit.js 계약(recruitListWrap)을 따른다', () => {
   assert.ok(/id="recruitListWrap"/.test(HTML), '다른 id 를 쓰면 목록이 안 그려진다');
-  assert.ok(/id="recruitModalMount"/.test(HTML) && /id="recruitModalMount"/.test(ADM),
-    '두 화면 모두 마운트 지점이 있어야 한다');
+  assert.ok(/id="recruitModalMount"/.test(HTML), '모달 마운트 지점이 있어야 한다');   // admin.html 쪽은 결정 267 폐기로 뺐다
 });
 t('★ API 베이스만 갈아끼워 재사용(경로 하드코딩 제거)', () => {
   assert.ok(/function _campApi\(path\)/.test(REC), 'index-recruit.js 에 경로 헬퍼가 없다');
@@ -307,7 +303,6 @@ t('명단에서 빼는 것은 되돌리기 어려우니 확인을 받는다', ()
 /* ── 5) 작업오더 상세 = 팝업 아닌 펼침행 · 상세 렌더러는 한 벌 ─────── */
 console.log('\n5) 작업오더 상세(펼침행 · 공유 렌더러)');
 const WOD = F('js/work-order-detail.js');
-const APP = F('js/index-app.js');
 
 t('★ 팝업(_modal)이 아니라 표 안에서 펼친다', () => {
   assert.ok(/<tr class="wolrow" id="wolrow-\$\{i\}" onclick="_woToggle\(\$\{i\}\)"/.test(HTML),
@@ -340,20 +335,13 @@ t('★★ 펼침행 클래스는 `wol` 접두 — 작업보드 탭의 .worow/.wo
   assert.strictEqual((HTML.match(/\n  \.wochip\{/g) || []).length, 1, '.wochip 을 두 번 정의하면 뒤엣것이 이긴다');
 });
 
-t('★ 상세 본문은 관리자 대시보드와 **같은 렌더러**(사본 금지)', () => {
+t('★ 상세 본문은 공유 **렌더러 한 벌**(사본 금지)', () => {
   assert.ok(/_woDetailHtml\(o\)/.test(HTML), '리뷰웹시스템[3버전]이 공유 렌더러를 호출해야 한다');
   assert.ok(/function _woDetailHtml\(o\) \{/.test(WOD), '렌더러는 모듈에 있어야 한다');
-  assert.ok(!/function _woDetailHtml/.test(APP), 'index-app.js 에 사본이 남아 있다');
   assert.ok(!/function _woDetailHtml/.test(HTML), 'workdesk.html 에 사본을 만들면 안 된다');
 });
-t('두 화면이 같은 모듈을 로드한다(admin·workdesk) (admin-siand.html 은 결정 186 44번에서 제거)', () => {
-  ['admin.html'].forEach(p => {
-    const s = F(p);
-    // ★ 캐시버스팅 쿼리(?v=…)가 붙을 수 있다 — 고정하는 것은 **그 모듈을 로드한다**는 사실이다.
-    assert.ok(/<script src="js\/work-order-detail\.js(\?[^"]*)?"><\/script>/.test(s), p + ' 미로드');
-    assert.ok(s.indexOf('js/work-order-detail.js') < s.indexOf('js/index-app.js'),
-      p + ': 렌더러가 index-app.js 뒤에 있으면 호출 시점에 없다');
-  });
+t('리뷰웹시스템[3버전]이 렌더러 모듈을 로드한다 (admin-siand.html 은 결정 186 44번 · 옛 대시보드는 결정 267 로 폐기)', () => {
+  // ★ 캐시버스팅 쿼리(?v=…)가 붙을 수 있다 — 고정하는 것은 **그 모듈을 로드한다**는 사실이다.
   assert.ok(/<script src="js\/work-order-detail\.js(\?[^"]*)?"><\/script>/.test(HTML), 'workdesk 미로드');
 });
 t('★ 모듈은 호스트 전역에 기대지 않는다(리뷰웹시스템[3버전]엔 escHtml 이 없다)', () => {
@@ -384,7 +372,7 @@ t('★ 모듈은 호스트 전역에 기대지 않는다(리뷰웹시스템[3버
   assert.strictEqual(apiUses, apiGuarded * 2,
     'API_BASE_URL 을 typeof 가드 없이 쓰면 로드 순서가 다른 화면에서 ReferenceError 로 죽는다');
 });
-t('★ 전역 공개 — index-app.js 의 기존 호출부·onclick 문자열이 이름 그대로 쓴다', () => {
+t('★ 전역 공개 — 호출부·onclick 문자열이 이름 그대로 쓴다', () => {
   ['_woDetailHtml', 'woImageModal', '_woImgError', '_woKv', '_woGuideUrls', '_woManagerNick']
     .forEach(n => assert.ok(new RegExp(n + ': ' + n + '[,\\s]').test(WOD), '미공개: ' + n));
   assert.ok(/window\[k\] = EXPORTS\[k\]/.test(WOD));

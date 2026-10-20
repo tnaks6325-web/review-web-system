@@ -19,7 +19,8 @@ const doc = readF('docs/작업오더-모집공고_자동반영_와이어프레�
 // ★ 프리필 조립(_woCampaignPrefill)과 채널·옵션 헬퍼는 **공유 모듈**(js/work-order-detail.js)로
 //   이관됐다 — 리뷰웹시스템[3버전]의 작업오더 탭이 같은 함수를 쓰기 위해서다(사본 금지).
 //   그래서 '프리필 배선'은 두 파일을 합쳐서 본다(검사 의미는 불변).
-const app = readF('js/index-app.js') + '\n' + readF('js/work-order-detail.js');
+// 옛 관리자 대시보드 폐기(결정 267) — index-app.js 를 뺐다(검사 대상 마크업은 공유 모듈 work-order-detail.js 에 있다).
+const app = readF('js/work-order-detail.js');
 const rec = readF('js/index-recruit.js');   // openRecruitModal — prefill 적용
 const ord = readS('routes/order.routes.js');// accept — tab_configs 자동기입
 const trackB = readS('routes/trackB.routes.js');

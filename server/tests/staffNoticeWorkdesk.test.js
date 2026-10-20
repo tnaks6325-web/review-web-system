@@ -196,6 +196,18 @@ process.env.JWT_SECRET = 'test-staff-notice';
     assert.ok(/<script src="js\/staff-notice-prompt\.js\?v=\d{8}/.test(wdk));
   });
 
+  // ── 서버 SQL(옛 adminNoticeGate.test.js 에서 이관 — 옛 관리자 대시보드 폐기, 결정 267) ──
+  // pg 는 `($3::text || ' days')::interval` 의 $3 타입을 text·int 로 동시에 추론해
+  // "inconsistent types deduced for parameter $3"으로 항상 실패한다(실측) → make_interval 고정.
+  // 작업보드 직원 공지(trackB → admin.routes 핸들러 위임)가 같은 INSERT/UPDATE 를 탄다.
+  const adminRoutes = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'admin.routes.js'), 'utf8');
+  await t('notices INSERT/UPDATE는 make_interval 사용(타입 추론 충돌 없음)', async () => {
+    assert.ok((adminRoutes.match(/make_interval\(days => \$3::int\)/g) || []).length >= 2);
+  });
+  await t("구 '($3::text || days)::interval' 패턴 재유입 금지", async () => {
+    assert.ok(!/\$3::text \|\| ' days'/.test(adminRoutes));
+  });
+
   console.log(`\n✅ staffNoticeWorkdesk: ${passed}개 통과`);
   process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });

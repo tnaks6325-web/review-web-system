@@ -232,9 +232,10 @@ const IM = require('../src/utils/inspectMessages');
       '★ 카드에 줄 번호를 넣지 않는다(관리용 번호 — 리뷰어는 참여 순번·상품으로 안다)');
     ok('D4: ★ 사진 카드 재료 전달 + 리뷰어에게 줄 번호 미노출');
 
-    for (const host of ['admin.html', 'workdesk.html'])
+    // 옛 관리자 대시보드 폐기(결정 267) — 호스트는 리뷰웹시스템[3버전] 하나만 남는다.
+    for (const host of ['workdesk.html'])
       assert.ok(/'inspectmsg'/.test(readFront(host)), `${host} — 설정 패널 목록에 등록`);
-    ok('D5: 두 호스트(admin·리뷰웹시스템[3버전]) 모두 패널 노출');
+    ok('D5: 리뷰웹시스템[3버전] 설정에 패널 노출');
   }
 
   console.log(`\n✅ inspectMessageSettings 회귀가드 ${n}케이스 통과`);

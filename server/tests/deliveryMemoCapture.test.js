@@ -65,10 +65,7 @@ const roi = require('../src/services/reviewerOrderIdentity.service');
   assert.ok(/deliveryMemo: ''/.test(fbSrc) && /deliveryMemo: \/\["'\]\?deliveryMemo/.test(fbSrc), 'fallback parser covers deliveryMemo');
   const fbFn = new Function(fbSrc + '; return _fallbackParse;')();
   assert.equal(fbFn('{"orderNumber": "1", "deliveryMemo": "경비실에 맡겨주세요", oops').deliveryMemo, '경비실에 맡겨주세요');
-  // 옛 구매양식(admin.html ?mode=form)도 서명을 싣는다
-  const ia = read('frontend/js/index-app.js');
-  assert.ok(/_aiDeliveryMemoToken = json\.deliveryMemoToken \|\| "";/.test(ia) && /deliveryMemoToken: _aiDeliveryMemoToken \|\| ""/.test(ia), 'legacy form forwards token');
-  assert.equal((ia.match(/_aiDeliveryMemoToken = "";/g) || []).length, 3, 'legacy form: declared blank, cleared on reset and on new analysis');
+  // 옛 관리자 대시보드 폐기(결정 267) — 옛 구매양식(admin.html ?mode=form)은 search.html 로 넘어가므로 그 검사는 아래 search-app 검사가 맡는다.
   // 구매캡처 교체 뒤 화면 명단에서도 지운다(명단을 다시 받지 않으므로)
   assert.ok(/if\(!isRev&&rowId\)\{ const rr=\(STATE\.wd&&STATE\.wd\.roster\|\|\[\]\)\.find\(x=>String\(x\.id\)===String\(rowId\)\); if\(rr\) delete rr\.deliveryMemo; \}/.test(read('frontend/workdesk.html')), 'replace clears memo in the open preview');
   assert.ok(/NULL::text AS "deliveryMemo"/.test(tb) && /purpose_order\.delivery_memo AS "deliveryMemo"/.test(tb), 'both roster queries carry the column');

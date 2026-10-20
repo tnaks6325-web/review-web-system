@@ -223,16 +223,14 @@ const gate = require('../src/utils/reviewerGate');
   console.log('\n[G] 프론트 배선');
   const cards = read('../frontend/js/campaign-cards.js');
   const modal = read('../frontend/js/campaign-reviewer-gate.js');
-  const adminHtml = read('../frontend/admin.html');
+  // 옛 관리자 대시보드 폐기(결정 267) — admin.html·index-app.js 쪽 로드·마운트·탭전환 단언은 뺐다(리뷰웹시스템 쪽은 그대로).
   const workdesk = read('../frontend/workdesk.html');
   const campHtml = read('../frontend/campaign.html');
   const settings = read('../frontend/js/admin-settings.js');
-  const indexApp = read('../frontend/js/index-app.js');
 
   ok('카드 버튼: 참여형 + 모듈 존재 시만(모듈 없는 화면에 죽은 버튼 금지)',
     /c\.participation_mode && typeof window !== 'undefined' && window\.ReviewerGate/.test(cards));
   ok('카드 버튼 onclick 은 id 만 전달(기존 openCampControlById 관용구)', /ReviewerGate\.open\('\$\{id\}'\)/.test(cards));
-  ok('모듈 로드: admin.html', /campaign-reviewer-gate\.js/.test(adminHtml));
   ok('모듈 로드: workdesk.html', /campaign-reviewer-gate\.js/.test(workdesk));
   ok('★ 모달은 body 직속 마운트', /document\.body\.appendChild\(d\)/.test(modal));
   ok('★ 모듈 CSS 는 var() 폴백(테마 없는 호스트 대비)', /var\(--card,#fff\)/.test(modal));
@@ -260,7 +258,7 @@ const gate = require('../src/utils/reviewerGate');
     const i = src.indexOf("AdminSettings.mount('adminSettingsMount'");
     return i < 0 ? '' : src.slice(i, src.indexOf(')', src.indexOf('panels', i)) + 1);
   };
-  ok('admin.html 설정 마운트에 gatecriteria 포함', /'gatecriteria'/.test(_mountCall(adminHtml)));
+  ok('workdesk.html 설정 마운트에 gatecriteria 포함', /'gatecriteria'/.test(_mountCall(workdesk)));
   // ★ 2026-08 사용자 확정: 공고별 [🚫 참여 리뷰어 관리]를 AE 도 쓰므로, 그 판정 기준인
   //   gatecriteria 패널은 admin/staff **양쪽 마운트 목록**에 있어야 한다(한쪽만 있으면 AE 가
   //   기준을 못 보고 관리만 하게 된다). 다른 패널 목록이 늘어도 깨지지 않게 두 목록을 따로 본다.
@@ -273,7 +271,7 @@ const gate = require('../src/utils/reviewerGate');
     ok('workdesk 설정 마운트 — AE 목록에도 gatecriteria(관리 기준 = 그 기능과 같은 범위)',
       /gatecriteria/.test(staffList || ''));
   }
-  ok('admin 탭 전환 시 loadGateCriteria 호출', /loadGateCriteria\(\)/.test(indexApp));
+  ok('마운트 시 loadGateCriteria 로드(LOADERS)', /gatecriteria: loadGateCriteria/.test(settings));
   ok('전역 노출(onclick 이 부를 이름)', /window\.saveGateCriteria = saveGateCriteria/.test(settings));
 
   console.log(`\n✅ campaignReviewerGate: ${passed}개 통과`);
