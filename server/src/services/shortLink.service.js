@@ -38,49 +38,66 @@ async function ensureShortLink({ s, g, t, d, round, options } = {}) {
   // composite key: 동일 파라미터 조합 재사용 (round 포함)
   const compositeKey = `${s}|${g || ''}|${t}|${d || ''}|${rd}`;
 
-  const { rows: existing } = await pool.query(
-    'SELECT code, option_list FROM short_links WHERE composite_key = $1 LIMIT 1',
-    [compositeKey]
-  );
+  // ★ 같은 조합을 동시에 두 번 요청해도(버튼 연타·두 사람 동시) 코드는 하나만 생긴다 — composite_key 는 유니크 인덱스가
+  //   없어서(기존 데이터 그대로 둠) 조합별 트랜잭션 잠금으로 "조회 → 없으면 만들기"를 한 줄로 세운다(결정 268 · Codex P2).
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['short_links:' + compositeKey]);
 
-  if (existing.length > 0) {
-    const existCode = existing[0].code;
-    // optionList가 변경됐으면 업데이트
-    if (finalOptions.length > 0) {
-      const currentOptions = existing[0].option_list || [];
-      if (JSON.stringify(currentOptions) !== JSON.stringify(finalOptions)) {
-        await pool.query(
-          'UPDATE short_links SET option_list = $1 WHERE code = $2',
-          [JSON.stringify(finalOptions), existCode]
+    const { rows: existing } = await client.query(
+      'SELECT code, option_list FROM short_links WHERE composite_key = $1 LIMIT 1',
+      [compositeKey]
+    );
+
+    if (existing.length > 0) {
+      const existCode = existing[0].code;
+      // optionList가 변경됐으면 업데이트
+      if (finalOptions.length > 0) {
+        const currentOptions = existing[0].option_list || [];
+        if (JSON.stringify(currentOptions) !== JSON.stringify(finalOptions)) {
+          await client.query(
+            'UPDATE short_links SET option_list = $1 WHERE code = $2',
+            [JSON.stringify(finalOptions), existCode]
+          );
+        }
+      }
+      // round가 변경됐으면 업데이트
+      if (rd) {
+        await client.query(
+          'UPDATE short_links SET round = $1 WHERE code = $2',
+          [rd, existCode]
         );
       }
+      await client.query('COMMIT');
+      return { ok: true, code: existCode, reused: true };
     }
-    // round가 변경됐으면 업데이트
-    if (rd) {
-      await pool.query(
-        'UPDATE short_links SET round = $1 WHERE code = $2',
-        [rd, existCode]
-      );
-    }
-    return { ok: true, code: existCode, reused: true };
-  }
 
-  // 새 코드 생성 (중복 방지 루프)
-  for (let attempts = 0; attempts < 10; attempts++) {
-    const code = generateShortCode();
-    try {
-      await pool.query(
-        `INSERT INTO short_links (code, sheet_id, gid, tab_name, display_name, option_list, composite_key, round)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [code, s, g || '', t, d || '', finalOptions.length > 0 ? JSON.stringify(finalOptions) : null, compositeKey, rd]
-      );
-      return { ok: true, code, reused: false };
-    } catch (err) {
-      if (err.code === '23505') continue; // unique violation
-      throw err;
+    // 새 코드 생성 (중복 방지 루프) — 코드 충돌은 SAVEPOINT 로 그 INSERT 만 되돌리고 다시 뽑는다
+    for (let attempts = 0; attempts < 10; attempts++) {
+      const code = generateShortCode();
+      await client.query('SAVEPOINT sl_ins');
+      try {
+        await client.query(
+          `INSERT INTO short_links (code, sheet_id, gid, tab_name, display_name, option_list, composite_key, round)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [code, s, g || '', t, d || '', finalOptions.length > 0 ? JSON.stringify(finalOptions) : null, compositeKey, rd]
+        );
+        await client.query('COMMIT');
+        return { ok: true, code, reused: false };
+      } catch (err) {
+        if (err.code === '23505') { await client.query('ROLLBACK TO SAVEPOINT sl_ins'); continue; } // unique violation
+        throw err;
+      }
     }
+    await client.query('ROLLBACK');
+    return { ok: false, error: '단축 코드 생성 실패' };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw err;
+  } finally {
+    client.release();
   }
-  return { ok: false, error: '단축 코드 생성 실패' };
 }
 
 /**

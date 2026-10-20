@@ -28,24 +28,45 @@ async function ta(name, fn) {
 const ROOT = path.join(__dirname, '..');
 const read = p => fs.readFileSync(path.join(ROOT, p), 'utf8');
 
-// ── 가짜 pool: short_links · tab_configs 두 표만 흉내 ──
+// ── 가짜 pool: short_links · tab_configs 두 표만 흉내 + 조합별 잠금(pg_advisory_xact_lock) 흉내 ──
 function makePool() {
   const links = [];   // {code, sheet_id, gid, tab_name, display_name, option_list, composite_key, round}
   const tabs = [{ sheet_id: 'wt_a', tab_name: '작업A', tab_gid: '123', display_name: '작업A 표시' }];
   const calls = [];
+  const locks = new Map();   // key → Promise(현재 보유자가 끝나면 풀림)
+  const exec = async (sql, params = []) => {
+    calls.push(sql);
+    if (/FROM tab_configs/.test(sql)) return { rows: tabs.filter(t => t.sheet_id === params[0] && t.tab_name === params[1]).slice(0, 1) };
+    if (/SELECT code, option_list FROM short_links WHERE composite_key/.test(sql)) { await new Promise(r => setTimeout(r, 5)); return { rows: links.filter(l => l.composite_key === params[0]).slice(0, 1) }; }
+    if (/INSERT INTO short_links/.test(sql)) {
+      if (links.some(l => l.code === params[0])) { const e = new Error('dup'); e.code = '23505'; throw e; }
+      links.push({ code: params[0], sheet_id: params[1], gid: params[2], tab_name: params[3], display_name: params[4], option_list: params[5], composite_key: params[6], round: params[7] });
+      return { rows: [] };
+    }
+    if (/UPDATE short_links/.test(sql)) return { rows: [] };
+    throw new Error('예상 밖 쿼리: ' + sql);
+  };
   return {
     links, tabs, calls,
-    async query(sql, params = []) {
-      calls.push(sql);
-      if (/FROM tab_configs/.test(sql)) return { rows: tabs.filter(t => t.sheet_id === params[0] && t.tab_name === params[1]).slice(0, 1) };
-      if (/SELECT code, option_list FROM short_links WHERE composite_key/.test(sql)) return { rows: links.filter(l => l.composite_key === params[0]).slice(0, 1) };
-      if (/INSERT INTO short_links/.test(sql)) {
-        if (links.some(l => l.code === params[0])) { const e = new Error('dup'); e.code = '23505'; throw e; }
-        links.push({ code: params[0], sheet_id: params[1], gid: params[2], tab_name: params[3], display_name: params[4], option_list: params[5], composite_key: params[6], round: params[7] });
-        return { rows: [] };
-      }
-      if (/UPDATE short_links/.test(sql)) return { rows: [] };
-      throw new Error('예상 밖 쿼리: ' + sql);
+    query: exec,
+    async connect() {
+      let release = null;
+      return {
+        async query(sql, params) {
+          if (/^(BEGIN|SAVEPOINT|ROLLBACK TO SAVEPOINT)/.test(sql)) { calls.push(sql); return { rows: [] }; }
+          if (/^(COMMIT|ROLLBACK)$/.test(sql)) { calls.push(sql); if (release) { const f = release; release = null; f(); } return { rows: [] }; }
+          if (/pg_advisory_xact_lock/.test(sql)) {
+            calls.push(sql);
+            const key = params[0];
+            while (locks.has(key)) await locks.get(key);
+            let done; locks.set(key, new Promise(r => { done = r; }));
+            release = () => { locks.delete(key); done(); };
+            return { rows: [] };
+          }
+          return exec(sql, params);
+        },
+        release() {},
+      };
     },
   };
 }
@@ -82,6 +103,15 @@ function loadSvc(pool) {
     const now = await svc.ensureTabFormLink({ sheetId: 'wt_a', tabName: '작업A' });
     assert.strictEqual(now.code, old.code); assert.strictEqual(now.reused, true);
     assert.strictEqual(pool.links.length, 1);
+  });
+  await ta('같은 작업을 동시에 두 번(버튼 연타·두 사람) 눌러도 코드는 하나 — 조합별 트랜잭션 잠금', async () => {
+    const pool = makePool(); const svc = loadSvc(pool);
+    const [a, b] = await Promise.all([svc.ensureTabFormLink({ sheetId: 'wt_a', tabName: '작업A' }), svc.ensureTabFormLink({ sheetId: 'wt_a', tabName: '작업A' })]);
+    assert.strictEqual(a.code, b.code);
+    assert.strictEqual(pool.links.length, 1);
+    assert.ok(pool.calls.some(c => /pg_advisory_xact_lock\(hashtext\(\$1\)\)/.test(c)), '잠금을 건다');
+    const src = read('src/services/shortLink.service.js');
+    assert.match(src, /SELECT pg_advisory_xact_lock\(hashtext\(\$1\)\)', \['short_links:' \+ compositeKey\]/);
   });
   await ta('없는 작업은 404 · 빈 값은 400 (조용히 아무 링크나 만들지 않는다)', async () => {
     const pool = makePool(); const svc = loadSvc(pool);
@@ -156,6 +186,18 @@ function loadSvc(pool) {
     assert.doesNotMatch(f, /requestPermission/);
     assert.match(f, /esc\(title\)/); assert.match(f, /esc\(who\)/);
     assert.match(f, /_woSyncNavBadge\(\)/);
+  });
+  await ta('인트라넷 원본 수정(event 있음)은 "새 작업오더" 카드가 아니라 조용히 갱신만 — 보완 재제출은 카드', () => {
+    const i = wd.indexOf('function _woNewAlert(d){');
+    const f = wd.slice(i, i + 800);
+    assert.match(f, /if\(d\.event&&!d\.resubmitted\)\{ _woRefreshQuiet\(\); return; \}/);
+    const srv = read('src/routes/order.routes.js');
+    for (const ev of ['source_contract_match', 'source_partial_edit', 'source_revision']) assert.ok(srv.includes(ev), ev + ' 이벤트가 서버에 있다(이름이 바뀌면 이 거름이 깨진다)');
+  });
+  await ta('작업오더 목록·배지 갱신은 마지막 요청만 반영(_woReqSeq) · 버튼 연타 방지', () => {
+    assert.match(wd, /const seq=STATE\._woReqSeq=\(STATE\._woReqSeq\|\|0\)\+1;\s*const r=await api\('\/api\/trackb\/work-orders\/list'/);
+    assert.match(wd, /if\(seq!==STATE\._woReqSeq\) return;/);
+    assert.match(wd, /if\(copyFormLink\._busy\) return;/);
   });
   await ta('작업오더 목록 응답이 늦게 와도(다른 화면·로그아웃) 표를 그리지 않는다', () => {
     assert.match(wd, /if\(!\$\('#wohead'\)\|\|!\$\('#wobody'\)\)\{ _woSyncNavBadge\(\); return; \}\s*_renderWoHead\(\); _renderWoBody\(\);/);

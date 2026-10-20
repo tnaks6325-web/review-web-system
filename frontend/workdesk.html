@@ -3322,7 +3322,10 @@ async function copyAdvertiserLink(){
    ★ 복사가 막히면(권한·http) 주소를 창에 띄워 손으로 복사하게 한다 — 조용히 실패하지 않는다. */
 async function copyFormLink(){
   const t=STATE.cur; if(!t){ toast('작업을 먼저 여세요'); return; }
+  if(copyFormLink._busy) return;   // 연타 방지(서버도 조합별 잠금으로 코드 하나만 만든다)
+  copyFormLink._busy=true;
   let r=null; try{ r=await api('/api/trackb/form-link',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName})}); }catch(_){ r=null; }
+  finally{ copyFormLink._busy=false; }
   if(!(r&&r.ok&&r.code)){ alert('구매양식 링크를 만들지 못했습니다: '+((r&&r.error)||'서버 오류 — 잠시 뒤 다시 시도해 주세요')); return; }
   const url=API_BASE+'/r/'+encodeURIComponent(r.code);
   if(await _copyText(url)){ _shareLinkOk('구매양식 링크가 복사되었습니다', '리뷰어에게 보내면 로그인 뒤 이 작업의 구매양식을 냅니다'); return; }
@@ -11823,7 +11826,9 @@ async function _loadOrders(){
   const qs=new URLSearchParams();
   if(STATE.woStatus) qs.set('status',STATE.woStatus);
   if(STATE.woq) qs.set('q',STATE.woq);
+  const seq=STATE._woReqSeq=(STATE._woReqSeq||0)+1;
   const r=await api('/api/trackb/work-orders/list'+(qs.toString()?'?'+qs:''));
+  if(seq!==STATE._woReqSeq) return;   // ★ 늦게 도착한 옛 응답이 새 목록을 덮지 않게(새 작업오더 알림이 연달아 올 때 — Codex P2)
   const b=$('#wobody');
   if(!r||!r.ok){ if(b) b.innerHTML=`<div class="empty">작업오더를 불러오지 못했습니다.</div>`; return; }
   STATE.wo=r.data||[]; STATE.woCounts=r.counts||{};
@@ -11847,6 +11852,9 @@ function _woSyncNavBadge(){
 function _woNewAlert(d){
   if(!['master','admin'].includes(STATE.role)) return;
   d=d||{};
+  /* ★ 같은 이벤트가 인트라넷 원본 수정(source_revision · source_partial_edit · source_contract_match)에도 온다 —
+     그건 "새" 오더가 아니므로 카드 없이 목록·배지만 맞춘다(Codex P2). 신규 접수·보완 재제출만 카드. */
+  if(d.event&&!d.resubmitted){ _woRefreshQuiet(); return; }
   const app=$('#app'); if(!app) return;
   let box=$('#woNewBox');
   if(!box){ box=document.createElement('div'); box.id='woNewBox'; box.className='wonew'; app.appendChild(box); }
@@ -11863,8 +11871,13 @@ function _woNewAlert(d){
       n.onclick=()=>{ try{ window.focus(); switchView('orders'); n.close(); }catch(_){ } };
     }
   }catch(_){ }
-  if(STATE.view==='orders') _loadOrders();
-  else api('/api/trackb/work-orders/list?status=submitted').then(r=>{ if(r&&r.ok){ STATE.woCounts=r.counts||{}; _woSyncNavBadge(); } }).catch(()=>{});
+  _woRefreshQuiet();
+}
+/* 알림 뒤 목록·배지 갱신. ★ 응답 순서가 뒤바뀌어도 마지막 요청만 반영한다(_woReqSeq — _loadOrders 와 같은 순번). */
+function _woRefreshQuiet(){
+  if(STATE.view==='orders'){ _loadOrders(); return; }
+  const seq=STATE._woReqSeq=(STATE._woReqSeq||0)+1;
+  api('/api/trackb/work-orders/list?status=submitted').then(r=>{ if(seq!==STATE._woReqSeq) return; if(r&&r.ok){ STATE.woCounts=r.counts||{}; _woSyncNavBadge(); } }).catch(()=>{});
 }
 function _woNewClose(id){ const el=document.getElementById(id); if(el) el.remove(); }
 function _woNewOpen(id){ _woNewClose(id); switchView('orders'); }
