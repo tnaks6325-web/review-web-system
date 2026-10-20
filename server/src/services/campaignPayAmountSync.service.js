@@ -61,22 +61,30 @@ function replaceAmountInProductLines(text, nextAmount) {
 }
 
 /**
- * 상품을 나눈 공고의 안내 글에서 **그 상품 줄의 금액만** 바꾼다(결정 266 실측 2026-10-21).
- * ★ 발행 폼(`_syncPreviewFromOptRows`)이 상품마다 `[상품명 - ]옵션명 - 결제금액 N원` 한 줄을 쓰고, 리뷰어 공고 화면은
- *   선택한 상품 금액(숫자 칸)과 **이 글을 함께** 보여 준다 — 숫자 칸만 고치면 한 화면에 옛 금액·새 금액이 같이 뜬다.
- * ★ 줄 앞부분(「 - 결제금액」 앞)이 옵션명과 **같거나 「 - 옵션명」으로 끝나는 줄만** 고친다(「미니 블랙」 줄은 「블랙」으로 안 바뀐다).
+ * 상품을 나눈 공고의 안내 글에서 **그 상품이 만든 줄의 금액만** 바꾼다(결정 266 실측 2026-10-21).
+ * ★ 발행 폼(`_syncPreviewFromOptRows`)이 상품마다 `머리 - 결제금액 N원` 한 줄을 쓴다 —
+ *   머리 = 옵션 상품(unit_kind 'option') `[상품명 - ]옵션명` · 옵션 없는 상품(unit_kind 'product') `상품명`(= 키).
+ *   리뷰어 공고 화면은 선택 상품 금액(숫자 칸)과 **이 글을 함께** 보여 준다 — 숫자 칸만 고치면 옛 금액·새 금액이 같이 뜬다.
+ * ★★ 줄의 머리가 **그 상품의 머리와 정확히 같을 때만**, 그리고 **줄 끝의 「 - 결제금액 N원」만** 바꾼다(코드리뷰 P1 2건):
+ *   접미 비교는 「세트 - 블랙」 상품 줄을 「블랙」 옵션으로 오인하고, 첫 일치 치환은 이름 속 「결제금액 5,000원」을 바꾼다.
  *   못 찾으면 글을 그대로 둔다(사람이 자유롭게 쓴 글 — 짐작해서 고치지 않는다).
+ * @param {{optKey:string, productName?:string, unitKind?:string}} unit
  */
-function replaceOptionAmountInProductLines(text, optKey, nextAmount) {
+const PRODUCT_LINE_TAIL_RE = /^(.*) - 결제금액 [\d,]+원(\s*)$/;
+function optionLineHead(unit) {
+  const key = String((unit && unit.optKey) || '').trim();
+  const prod = String((unit && unit.productName) || '').trim();
+  if (unit && unit.unitKind === 'product') return prod || key;
+  return [prod, key].filter(Boolean).join(' - ');
+}
+function replaceOptionAmountInProductLines(text, unit, nextAmount) {
   const s = String(text == null ? '' : text);
-  const key = String(optKey == null ? '' : optKey).trim();
-  if (!key) return s;
+  const head = optionLineHead(unit);
+  if (!head) return s;
   return s.split('\n').map(line => {
-    const i = line.indexOf(' - 결제금액');
-    if (i < 0) return line;
-    const head = line.slice(0, i).trim();
-    if (head !== key && !head.endsWith(' - ' + key)) return line;
-    return line.replace(new RegExp(PRODUCT_LINE_PAY_RE.source), '결제금액 ' + Number(nextAmount).toLocaleString('en-US') + '원');
+    const m = line.match(PRODUCT_LINE_TAIL_RE);
+    if (!m || m[1].trim() !== head) return line;
+    return m[1] + ' - 결제금액 ' + Number(nextAmount).toLocaleString('en-US') + '원' + m[2];
   }).join('\n');
 }
 
@@ -118,7 +126,7 @@ async function syncCampaignPayAmount({ workOrderId, productOptionsJson, by = 'so
 
     // ── ㉮ 살아있는 공고 옵션이 있으면 옵션명으로 짝지어 숫자 칸 + 안내 글 그 상품 줄 갱신 ──────────────
     const { rows: liveOpts } = await client.query(
-      `SELECT opt_key, pay_amount FROM campaign_options
+      `SELECT opt_key, pay_amount, product_name, unit_kind FROM campaign_options
         WHERE campaign_id = $1 AND COALESCE(status,'active') <> 'closed' FOR UPDATE`, [camp.id]);
 
     if (liveOpts.length) {
@@ -136,7 +144,7 @@ async function syncCampaignPayAmount({ workOrderId, productOptionsJson, by = 'so
         const next = wanted.get(o.opt_key);
         if (next == null) { unmatched.push(o.opt_key); continue; }
         matched += 1;
-        if (lines != null) lines = replaceOptionAmountInProductLines(lines, o.opt_key, next);
+        if (lines != null) lines = replaceOptionAmountInProductLines(lines, { optKey: o.opt_key, productName: o.product_name, unitKind: o.unit_kind }, next);
         if (Number(o.pay_amount) === Number(next)) continue;
         await client.query(
           'UPDATE campaign_options SET pay_amount = $3, updated_at = NOW() WHERE campaign_id = $1 AND opt_key = $2',
@@ -555,5 +563,6 @@ module.exports = {
   distinctAmountsInText,
   replaceAmountInProductLines,
   replaceOptionAmountInProductLines,
+  optionLineHead,
   __setPoolForTest,
 };

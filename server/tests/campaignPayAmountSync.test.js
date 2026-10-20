@@ -111,7 +111,7 @@ async function run() {
 
   await t('② 옵션 있는 공고 — 안내 글의 그 상품 줄 금액도 같이 바꾼다(결정 266 실측 — 리뷰어 화면에 옛 금액이 남지 않게)', async () => {
     const wd = { productLines: '핫팩 - 레드 - 결제금액 8,000원\n핫팩 - 블루 - 결제금액 8,000원\n핫팩 - 미니 레드 - 결제금액 5,000원', payAmount: 0 };
-    const q = stub({ liveOptions: [{ opt_key: '레드', pay_amount: 8000 }, { opt_key: '블루', pay_amount: 8000 }], workDetail: JSON.stringify(wd) });
+    const q = stub({ liveOptions: [{ opt_key: '레드', pay_amount: 8000, product_name: '핫팩', unit_kind: 'option' }, { opt_key: '블루', pay_amount: 8000, product_name: '핫팩', unit_kind: 'option' }], workDetail: JSON.stringify(wd) });
     const out = await svc.syncCampaignPayAmount({ workOrderId: 'wo_1', productOptionsJson: OPTS });
     assert.strictEqual(out.applied, true, JSON.stringify(out));
     const w = writes(q);
@@ -125,12 +125,18 @@ async function run() {
     assert.ok(iCamp > -1 && iCamp < iOpt, '공고 행을 상품 행보다 먼저 잠그지 않았다');
   });
 
-  await t('줄 바꾸기 규칙: 옵션명 줄만 · 「미니 블랙」은 「블랙」으로 안 바뀜 · 못 찾으면 그대로', async () => {
+  await t('줄 바꾸기 규칙: 그 상품이 만든 줄(머리 정확히 일치)의 끝 금액만 · 접미·이름 속 금액 오인 0 · 못 찾으면 그대로', async () => {
     const f = svc.replaceOptionAmountInProductLines;
-    assert.strictEqual(f('블랙 - 결제금액 9,190원\n미니 블랙 - 결제금액 5,000원', '블랙', 8500), '블랙 - 결제금액 8,500원\n미니 블랙 - 결제금액 5,000원');
-    assert.strictEqual(f('탈취제 - 블랙 800ml - 결제금액 9,190원', '블랙 800ml', 8500), '탈취제 - 블랙 800ml - 결제금액 8,500원');
-    assert.strictEqual(f('자유롭게 쓴 안내 9,190원', '블랙', 8500), '자유롭게 쓴 안내 9,190원');
-    assert.strictEqual(f('블랙 - 결제금액 9,190원', '', 8500), '블랙 - 결제금액 9,190원');
+    const O = (optKey, productName, unitKind = 'option') => ({ optKey, productName, unitKind });
+    assert.strictEqual(f('블랙 - 결제금액 9,190원\n미니 블랙 - 결제금액 5,000원', O('블랙', ''), 8500), '블랙 - 결제금액 8,500원\n미니 블랙 - 결제금액 5,000원');
+    assert.strictEqual(f('탈취제 - 블랙 800ml - 결제금액 9,190원', O('블랙 800ml', '탈취제'), 8500), '탈취제 - 블랙 800ml - 결제금액 8,500원');
+    // 코드리뷰 P1: 옵션 없는 상품 「세트 - 블랙」 줄은 옵션 「블랙」(상품명 없음)으로 바뀌지 않는다
+    assert.strictEqual(f('블랙 - 결제금액 9,000원\n세트 - 블랙 - 결제금액 20,000원', O('블랙', ''), 8500), '블랙 - 결제금액 8,500원\n세트 - 블랙 - 결제금액 20,000원');
+    assert.strictEqual(f('세트 - 블랙 - 결제금액 20,000원', O('세트 - 블랙', '세트 - 블랙', 'product'), 18000), '세트 - 블랙 - 결제금액 18,000원');
+    // 코드리뷰 P1: 이름 속 「결제금액 5,000원」은 그대로 · 끝 금액만
+    assert.strictEqual(f('쿠폰 결제금액 5,000원 할인팩 - 결제금액 9,000원', O('쿠폰 결제금액 5,000원 할인팩', '', 'option'), 8000), '쿠폰 결제금액 5,000원 할인팩 - 결제금액 8,000원');
+    assert.strictEqual(f('자유롭게 쓴 안내 9,190원', O('블랙', ''), 8500), '자유롭게 쓴 안내 9,190원');
+    assert.strictEqual(f('블랙 - 결제금액 9,190원', O('', ''), 8500), '블랙 - 결제금액 9,190원');
   });
 
   await t('② 같은 값이면 쓰지 않는다(no-op)', async () => {
