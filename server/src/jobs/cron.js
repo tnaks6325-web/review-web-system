@@ -635,6 +635,14 @@ function startCronJobs() {
     catch (err) { logger.warn(`[CRON-OrderBatch] kick 실패(무시): ${err.message}`); }
   });
 
+  // ── 양방향 4단계(결정 263): 리뷰웹 → 인트라넷 공유 글 칸 송신 — 15초마다 ──
+  //   스위치(bidir_sync.push='on')·주소·전용 비밀값이 모두 있을 때만 보낸다(없으면 대기열에 쌓이기만).
+  //   여러 서버가 동시에 돌아도 줄 단위 SKIP LOCKED 로 나눠 가진다.
+  cron.schedule('*/15 * * * * *', async () => {
+    try { await require('../services/sharedSyncPush.service').runSharedSyncPush(); }
+    catch (err) { logger.warn(`[CRON-BidirPush] 실패(다음 주기에 다시): ${err.message}`); }
+  });
+
   // ── ★ A2+C2: 매시간 stuck/failed 자동 복구 ──
   cron.schedule('0 * * * *', async () => {
     try {

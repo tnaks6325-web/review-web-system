@@ -85,6 +85,13 @@ function _display(path, v) {
   return s.length > 300 ? s.slice(0, 300) + '…' : s;
 }
 
+/** 인트라넷발 저장 뒤 — 보낸 값(mine)과 저장 결과가 다른 공유 글 칸(인트라넷이 받아 가야 할 칸). 정규화 값으로 비교. */
+function _pushBackKeys(mine, saved) {
+  const { canon } = require('../utils/sharedFields');
+  return PHASE3_SHARED_FIELDS.filter(k => mine && Object.prototype.hasOwnProperty.call(mine, k)
+    && canon(k, mine[k]) !== canon(k, saved[k]));
+}
+
 function _parseList(v) {
   if (Array.isArray(v)) return JSON.parse(JSON.stringify(v));
   try { const p = JSON.parse(String(v || '')); return Array.isArray(p) ? p : null; } catch (_) { return null; }
@@ -299,7 +306,9 @@ async function applySharedPatch(p) {
         `SELECT GREATEST($1::bigint + 1, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000000)::bigint) AS v`, [curVersion]);
       const v = add(String(nv[0].v));
       sets.push(`sync_version = ${v}::bigint`);
-      if (p.origin === 'intranet') sets.push(`intranet_acked_version = ${v}::bigint`);
+      // 인트라넷이 이 버전을 "안다" 고 적는 것은 저장 결과가 보낸 값과 같을 때만 — 합쳐져 달라졌으면
+      // 인트라넷 사본은 아직 옛 값이다(받아 간 뒤 송신 처리기가 적는다). 기준 없는 옛 인트라넷 저장이 이 값을 기준으로 쓴다.
+      if (p.origin === 'intranet' && !_pushBackKeys(p.mine, next).length) sets.push(`intranet_acked_version = ${v}::bigint`);
     }
     const { rows: upd } = await client.query(
       `UPDATE work_orders SET ${sets.join(', ')}, updated_at = NOW()
@@ -324,9 +333,14 @@ async function applySharedPatch(p) {
         `INSERT INTO work_order_shared_snapshots (work_order_id, sync_version, origin, op_id, state, actor)
          VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
         [wo.id, newVersion, p.origin, String(p.opId || ''), JSON.stringify(readSharedState(saved)), String(p.actor || '')]);
-      if (p.origin !== 'intranet') {
-        await client.query(`INSERT INTO shared_sync_outbox (work_order_id, sync_version) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [wo.id, newVersion]);
-      }
+    }
+    // ── 인트라넷으로 보낼 거리(4단계) — 리뷰웹발은 항상, 인트라넷발은 저장 결과가 보낸 값과 다를 때만
+    //    (그 사이 리뷰웹이 고친 다른 칸과 합쳐진 경우). 같으면 쌓지 않는다 — 자기가 보낸 것을 되받는 메아리 방지.
+    if (p.origin !== 'intranet' ? plan.writes.length > 0 : (plan.writes.length > 0 && _pushBackKeys(p.mine, next).length > 0)) {
+      await client.query(
+        `INSERT INTO shared_sync_outbox (work_order_id, sync_version) VALUES ($1, $2)
+         ON CONFLICT (work_order_id, sync_version) DO UPDATE SET status = 'pending', attempts = 0, next_at = NOW(), last_error = '', updated_at = NOW()
+          WHERE shared_sync_outbox.status IN ('delivered', 'superseded')`, [wo.id, newVersion]);
     }
     await client.query('COMMIT');
     if (overwritten.length) logger.info(`[bidir/apply] ${wo.id} 겹친 칸을 나중 저장 값으로(${p.origin}·${p.actor || ''}): ${overwritten.map(o => o.label).join(', ')}`);
@@ -396,5 +410,5 @@ async function linkSharedOrder({ workOrderId, actor = '', dryRun = false, db } =
 
 module.exports = {
   applySharedPatch, linkSharedOrder, readSharedState, applyWrites, writablePath, projectToCampaignInTx,
-  PHASE3_SHARED_FIELDS, INTRANET_EDITABLE_AFTER_ACCEPT, NEXT_VERSION_SQL,
+  PHASE3_SHARED_FIELDS, INTRANET_EDITABLE_AFTER_ACCEPT, NEXT_VERSION_SQL, _pushBackKeys,
 };
