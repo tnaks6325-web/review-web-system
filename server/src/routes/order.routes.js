@@ -1473,7 +1473,10 @@ async function _intakeUpdateHandler(req, res, next) {
 
     // 현재 상태 확인 (존재/삭제/완료 여부)
     const { rows: cur } = await pool.query(
-      `SELECT id, status, deleted_at, delivery_type, courier_proxy, linked_campaign_id, bidir_state FROM work_orders WHERE id = $1 LIMIT 1`, [id]
+      `SELECT id, status, deleted_at, delivery_type, courier_proxy, linked_campaign_id, bidir_state, advertiser_id,
+              recruit_count, daily_count, daily_count_text, skip_weekends, holidays, review_type, review_type_mix, delivery_type_mix,
+              recall_courier, recall_product, work_kind, product_distribution_mode, start_date, product_options_json
+         FROM work_orders WHERE id = $1 LIMIT 1`, [id]
     );
     if (cur.length === 0) {
       return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
@@ -1494,6 +1497,21 @@ async function _intakeUpdateHandler(req, res, next) {
       if (sharedKeys.length) {
         return res.status(409).json({ ok: false, code: 'bidir_use_source', fields: sharedKeys,
           error: '리뷰오더와 맞춰지는 오더입니다. 공통 칸은 인트라넷 리뷰오더 수정으로 바꿔 주세요.' });
+      }
+    }
+    /* ★ 7단계 🔴5(2026-10-20): 접수된 오더(작업표·공고가 이미 만들어짐)의 작업표 칸은 이 옛 경로로도 바꾸지 않는다 — 원본 수정(/intake/source)은
+       접수 뒤 이 칸들을 409 로 막는데(SOURCE_EDIT_AFTER_ACCEPT) 이 경로만 잠금이 없어 작업표와 어긋날 수 있었다. 같은 값을 다시 보내는 것은 통과. */
+    if (isSourceEditLocked(cur[0])) {
+      const { FIELD_BY_KEY, canon } = require('../utils/sharedFields');
+      const same = (k, a, z) => (FIELD_BY_KEY.has(k) ? canon(k, a) === canon(k, z)
+        : JSON.stringify(a == null ? '' : (a instanceof Date ? a.toISOString().slice(0, 10) : a)) === JSON.stringify(z == null ? '' : z));
+      const WORKTABLE_KEYS = ['recruit_count', 'daily_count', 'daily_count_text', 'skip_weekends', 'holidays', 'review_type', 'review_type_mix',
+        'delivery_type', 'courier_proxy', 'delivery_type_mix', 'recall_courier', 'recall_product', 'work_kind', 'product_distribution_mode', 'start_date'];
+      const locked = WORKTABLE_KEYS.filter(k => b[k] !== undefined && !same(k, cur[0][k], b[k]));
+      if (b.product_options_json !== undefined && _productOptionsLockedChanged(cur[0].product_options_json, _requestOptionsJson(b))) locked.push('product_options_json');
+      if (locked.length) {
+        return res.status(409).json({ ok: false, code: 'accepted_worktable_locked', fields: locked,
+          error: '이미 접수돼 작업표가 만들어진 오더라 이 칸은 여기서 바꿀 수 없습니다: ' + locked.join(', ') });
       }
     }
     // ★ 이 옛 수정 경로는 상품 구성을 정규화 없이 그대로 쓴다. 구매수량 단계가 실려 오면 그때만 정규화·검증한다
@@ -2427,7 +2445,7 @@ router.put('/admin/edit', authMiddleware, adminOrMasterMiddleware, async (req, r
        스위치가 꺼져 있거나 연결 안 된 오더는 종전 그대로. */
     let bidirSaved = null;
     if (o.bidir_state === 'on' && (await readBidirSwitch(pool)).in2rw === 'apply') {
-      const { PHASE3_SHARED_FIELDS, readSharedState } = require('../services/sharedPatch.service');
+      const { readSharedState } = require('../services/sharedPatch.service');
       const { ownerOf } = require('../utils/sharedFields');
       const label = c => ADMIN_EDIT_LABELS[c.field] || c.field;
       const owned = changes.filter(c => ownerOf(c.field) === 'intranet');
@@ -2435,7 +2453,18 @@ router.put('/admin/edit', authMiddleware, adminOrMasterMiddleware, async (req, r
         return res.status(400).json({ ok: false, code: 'intranet_owned', fields: owned.map(c => c.field),
           error: `인트라넷 리뷰오더에서만 고칠 수 있는 칸입니다: ${owned.map(label).join(', ')} — 인트라넷에서 고쳐주세요.` });
       }
-      const shared = changes.filter(c => PHASE3_SHARED_FIELDS.includes(c.field));
+      /* ★ 7단계 🔴3(2026-10-20): 공유 칸이면 단계와 상관없이 전부 공유 저장으로 보낸다 — 종전에는 3단계 글 칸만 보내
+         작업표 칸(총모집·일일건수·배송·리뷰타입·상품옵션표)만 고친 저장이 버전·스냅숏·인트라넷 전송 없이 그대로 써졌다.
+         아직 열지 않은 칸은 공유 저장이 409(field_not_editable)로 막는다(조용히 쓰지 않는다).
+         택배대행·일일건수(텍스트)는 배송유형·일일건수에서 나오는 값이라 연결된 오더에서는 직접 못 고친다. */
+      const derivedOnly = changes.filter(c => c.field === 'courier_proxy' || c.field === 'daily_count_text');
+      if (derivedOnly.length) {
+        return res.status(400).json({ ok: false, code: 'derived_field', fields: derivedOnly.map(c => c.field),
+          error: `${derivedOnly.map(label).join(', ')}은 배송유형·일일건수에서 정해지는 칸이라 인트라넷과 연결된 오더에서는 직접 고칠 수 없습니다.` });
+      }
+      const { FIELD_BY_KEY } = require('../utils/sharedFields');
+      const isShared = c => FIELD_BY_KEY.has(c.field) || c.field === 'product_options_json' || c.field === 'product_option';
+      const shared = changes.filter(isShared);
       if (shared.length && shared.length !== changes.length) {
         return res.status(400).json({ ok: false, code: 'split_save',
           error: `인트라넷과 함께 맞추는 칸(${shared.map(label).join(', ')})과 나머지 칸(${changes.filter(c => !shared.includes(c)).map(label).join(', ')})은 따로 저장해 주세요.` });

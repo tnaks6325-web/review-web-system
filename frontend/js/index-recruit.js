@@ -5852,6 +5852,10 @@ async function saveRecruitPostImpl() {
        지금 값으로 덮었으면 무엇을 덮었는지 보여준다(사용자 확정 2026-10-20 — 나중에 저장한 값 · 확인만).
        ★ 다른 안내를 다 넣은 **뒤에** 맨 위로 — 안내 상자는 3줄만 보여서 뒤에 끼면 "외 N건" 에 숨는다(검토 2026-10-20). */
     if (saved && saved.shared) _changed.unshift(..._rfSharedNoticeLines(saved.shared));
+    /* ★ 7단계 🔴7(2026-10-20): 공고는 저장됐는데 옵션 표·기간별 리뷰비만 저장에 실패한 경우 — 서버가 경고를 실어 보내는데 화면이 버려
+       "저장됨" 으로만 보였다. 맨 위에 올려 다시 저장하게 한다(반쪽 저장을 조용히 넘기지 않는다). */
+    if (saved && saved.feeWarning) _changed.unshift("⚠ " + saved.feeWarning + " — 다시 저장해 주세요");
+    if (saved && saved.optionsWarning) _changed.unshift("⚠ " + saved.optionsWarning + " — 공고는 저장됐지만 옵션 표는 옛 값입니다. 다시 저장해 주세요");
     /* ★ 버튼 ✓ → 모달 닫힘 → 화면 가운데 안내(시안 C 확정) 로 시선이 이어진다.
        안내 렌더러는 recruit-modal.js 한 벌 — 없으면(구버전 모듈) 종전 토스트로 폴백. */
     _ok = true;

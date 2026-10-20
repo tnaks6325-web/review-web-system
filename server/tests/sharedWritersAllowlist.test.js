@@ -93,7 +93,11 @@ function scan() {
   const gate = upd.indexOf("if (cur[0].bidir_state === 'on' && (await readBidirSwitch(pool)).in2rw === 'apply')");
   assert.ok(gate > 0 && gate < upd.indexOf('UPDATE work_orders SET ${sets.join'), '옛 ID 직접 수정: 연결 오더 공유 칸은 쓰기 전에 막는다');
   assert.match(upd, /code: 'bidir_use_source'/);
-  assert.match(upd, /SELECT id, status, deleted_at, delivery_type, courier_proxy, linked_campaign_id, bidir_state FROM work_orders/);
+  // ★ 7단계 🔴5: 접수 뒤 잠금 판정 재료(광고주·작업표 칸)를 같이 읽는다 — 검사 의미 불변 + 잠금 줄 추가(강화)
+  assert.match(upd, /SELECT id, status, deleted_at, delivery_type, courier_proxy, linked_campaign_id, bidir_state, advertiser_id,/);
+  const lockAt = upd.indexOf('if (isSourceEditLocked(cur[0])) {');
+  assert.ok(lockAt > 0 && lockAt < upd.indexOf('UPDATE work_orders SET ${sets.join'), '옛 ID 직접 수정: 접수된 오더의 작업표 칸은 쓰기 전에 막는다');
+  assert.match(upd, /code: 'accepted_worktable_locked'/);
   assert.match(ord, /o\.bidir_state === 'on' && \(await readBidirSwitch\(pool\)\)\.in2rw === 'apply'/, '관리자 수정 갈림');
   const camp = fs.readFileSync(path.join(SRC, 'routes/campaign.routes.js'), 'utf8');
   assert.match(camp, /scopedEditSharedBlock\(\{ campaignId: id, body: b \}\)/);

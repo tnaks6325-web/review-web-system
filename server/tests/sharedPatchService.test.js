@@ -67,7 +67,7 @@ async function pg() {
     title: '가짜 양방향 오더', recruit_count: 10, review_fee: 1000, purchase_time: '13:00 ~ 18:00',
     review_guide: '[리뷰등록 가이드]\n사진 3장 올려주세요', special_notes: '주의 사항 없음',
     product_url: 'https://www.coupang.com/vp/products/1', inflow_type: 'link', purchase_channel: '쿠팡',
-    delivery_type: '실배송', review_type: '포토', requester_name: '가짜AE', ...extra });
+    delivery_type: '실배송', review_type: '포토', skip_weekends: false, requester_name: '가짜AE', ...extra });
   const setSwitch = async (v) => {
     await pool.query(`INSERT INTO app_settings (key, value) VALUES ('bidir_sync', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [v]);
     sw._resetBidirSwitchCacheForTest();
@@ -201,8 +201,15 @@ async function pg() {
     const own = await ae({ id: w.id, title: '리뷰웹에서 바꾼 작업명' });
     if (own.status !== 401 && own.status !== 403) {
       assert.equal(own.body.code, 'intranet_owned', JSON.stringify(own.body));
+      // ★ 7단계 🔴3: 작업표 칸(총모집)도 공유 칸 — 공유 저장으로 가서 아직 안 연 칸이면 409 · 쓰기 0(종전: 버전 없이 그대로 써졌다)
+      const vBefore = Number((await wo()).sync_version);
       const mix = await ae({ id: w.id, review_guide: '관리자 리뷰가이드', recruit_count: 12 });
-      assert.equal(mix.body.code, 'split_save', JSON.stringify(mix.body));
+      assert.equal(mix.body.code, 'field_not_editable', JSON.stringify(mix.body));
+      const rcOnly = await ae({ id: w.id, recruit_count: 12 });
+      assert.equal(rcOnly.body.code, 'field_not_editable', JSON.stringify(rcOnly.body));
+      assert.notEqual(Number((await wo()).recruit_count), 12, '쓰기 0'); assert.equal(Number((await wo()).sync_version), vBefore);
+      const der = await ae({ id: w.id, courier_proxy: true });
+      assert.equal(der.body.code, 'derived_field', JSON.stringify(der.body));
       const okE = await ae({ id: w.id, review_guide: '[리뷰등록 가이드]\n관리자가 고친 가이드' });
       assert.equal(okE.status, 200, JSON.stringify(okE.body));
       assert.ok(Number((await wo()).sync_version) > v4, '관리자 글 칸 수정도 버전이 오른다');

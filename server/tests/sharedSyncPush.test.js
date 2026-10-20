@@ -77,7 +77,7 @@ async function pg() {
     title: '가짜 송신 오더', recruit_count: 10, review_fee: 1000, purchase_time: '13:00 ~ 18:00',
     review_guide: '[리뷰등록 가이드]\n사진 3장 올려주세요', special_notes: '주의 사항 없음',
     product_url: 'https://www.coupang.com/vp/products/1', inflow_type: 'link', purchase_channel: '쿠팡',
-    delivery_type: '실배송', review_type: '포토', requester_name: '가짜AE', ...extra });
+    delivery_type: '실배송', review_type: '포토', skip_weekends: false, requester_name: '가짜AE', ...extra });
   const setSwitch = async (v) => {
     await pool.query(`INSERT INTO app_settings (key, value) VALUES ('bidir_sync', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [v]);
     sw._resetBidirSwitchCacheForTest();

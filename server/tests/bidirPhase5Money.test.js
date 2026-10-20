@@ -170,7 +170,7 @@ async function pg() {
       source_system: 'inadd_intranet', source_review_order_id: sid, source_revision: 1, idempotency_key: `${sid}:1:a`,
       title: '가짜 5단계 오더 ' + tag, recruit_count: 10, review_fee: 1000, purchase_time: '13:00 ~ 18:00',
       review_guide: '[리뷰등록 가이드]\n사진 3장', special_notes: '주의 없음', product_url: 'https://www.coupang.com/vp/products/5',
-      inflow_type: 'link', purchase_channel: '쿠팡', delivery_type: '실배송', review_type: '포토', requester_name: '가짜AE',
+      inflow_type: 'link', purchase_channel: '쿠팡', delivery_type: '실배송', review_type: '포토', skip_weekends: false, requester_name: '가짜AE',
       product_options_json: json, product_option: productSummaryText(json), pay_amount: 0, ...extra };
     const r = await call('POST', '/api/order/intake', payload);
     assert.equal(r.status, 200, JSON.stringify(r.body));

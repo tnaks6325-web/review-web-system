@@ -196,6 +196,11 @@ async function scopedEditSharedBlock({ campaignId, body, db } = {}) {
   if (b.time_range !== undefined && t(b.time_range) !== t(now.time_range)) changed.push('구매시간');
   if (b.review_fee !== undefined && b.review_fee !== null && b.review_fee !== ''
       && (Number(b.review_fee) || 0) !== (Number(link.camp.review_fee) || 0)) changed.push('리뷰비');
+  // 7단계 — 총모집·일건수는 작업표 칸(연결 오더와 같이 맞춘다). 이 화면은 기준 버전을 몰라 연결 공고에서는 바꾸지 못한다.
+  if (b.recruit_total !== undefined && b.recruit_total !== null && b.recruit_total !== ''
+      && (Number(b.recruit_total) || 0) !== (Number(link.camp.recruit_total) || 0)) changed.push('총모집');
+  if (b.daily_limit !== undefined && b.daily_limit !== null && b.daily_limit !== ''
+      && (Number(b.daily_limit) || 0) !== (Number(link.camp.daily_limit) || 0)) changed.push('일 진행 건수');
   if (b.auto_order === true || (b.window_start !== undefined && b.window_start !== '' && b.window_start !== null)
       || (b.window_end !== undefined && b.window_end !== '' && b.window_end !== null)) {
     const hh = v => { const m = /^(\d{1,2}):(\d{2})/.exec(t(v)); return m ? `${m[1].padStart(2, '0')}:${m[2]}` : ''; };

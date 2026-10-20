@@ -110,7 +110,7 @@ async function pg() {
       title: '가짜 공고편집 오더', recruit_count: 10, review_fee: 1000, purchase_time: '13:00 ~ 18:00',
       review_guide: '[리뷰등록 가이드]\n사진 3장 올려주세요\n\n[기타 안내]\n문의는 채팅방', special_notes: '주의 사항 없음',
       product_url: 'https://www.coupang.com/vp/products/1', inflow_type: 'link', purchase_channel: '쿠팡', thumbnail_url: 'https://x/thumb1.jpg',
-      delivery_type: '실배송', review_type: '포토', requester_name: '가짜AE',
+      delivery_type: '실배송', review_type: '포토', skip_weekends: false, requester_name: '가짜AE',
       product_options_json: JSON.stringify([{ name: '가짜 상품', url: 'https://www.coupang.com/vp/products/1', option_schema_version: 2, product_mode: 'none',
         base: { pay: 12000, count: 10, daily: 5, review_type_mix: [] }, options: [] }]) });
     assert.equal(c1.status, 200, JSON.stringify(c1.body));

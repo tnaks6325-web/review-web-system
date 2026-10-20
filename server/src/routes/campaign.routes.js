@@ -1072,6 +1072,10 @@ async function _scopedCampaignEdit(req, res) {
     const errs = _participationActivationErrors({ ...c, window_start, window_end, daily_limit });
     if (errs.length) return res.status(400).json({ ok: false, error: '참여형 활성화 불가: ' + errs.join(', ') });
   }
+  /* ★ 7단계 🔴4(2026-10-20): 총모집을 바꾸면 관리자 공고 창과 같은 검사 — 이미 참여·구매한 인원과 작업표에 채워진 줄보다 적게 못 줄인다.
+     종전에는 검사 없이 써서 정원이 참여 인원 아래로 내려가거나 작업오더·작업표 줄이 옛 인원으로 남았다. */
+  const rtChanged = (Number(recruit_total) || 0) !== (Number(c.recruit_total) || 0);
+  if (rtChanged) await assertCampaignRecruitTotal({ campaignId: id, recruitTotal: Number(recruit_total) || 0 });
 
   const { rows } = await pool.query(
     `UPDATE recruit_campaigns SET
@@ -1092,11 +1096,17 @@ async function _scopedCampaignEdit(req, res) {
     const fixed = await repairRecruitTotalFromRounds(id);
     if (fixed !== null) rows[0].recruit_total = fixed;
   } catch (_) { /* fail-soft */ }
+  // ★ 7단계 🔴4: 총모집이 바뀌었으면 관리자 공고 창과 같은 한 곳(syncCampaignRecruitTotal)으로 작업오더·작업표 줄을 맞춘다.
+  let quotaSync = null;
+  if (rtChanged && rows[0]) {
+    try { quotaSync = await syncCampaignRecruitTotal({ campaignId: id, recruitTotal: rows[0].recruit_total }); }
+    catch (e) { logger.error('[campaign/scoped-edit] 작업오더 정원 동기화 실패: ' + e.message); throw e; }
+  }
   // ★ 결정 182 — 일건수·이월 방식이 바뀌면 연결 작업표 빈 줄 날짜도 따라간다(절대 throw 없음).
   if (rows[0] && rows[0].participation_mode) {
     await require('../services/campaignPlan.service').relayCampaignWorktable(id, { by: 'reviewer-scoped-edit' });
   }
-  return res.json({ ok: true, data: rows[0] });
+  return res.json({ ok: true, data: rows[0], ...(quotaSync ? { quotaSync } : {}) });
 }
 
 // 오픈 러시 방어: 무인증 참여 엔드포인트 rate limit (신청 가부의 SoT는 서버 재검사)

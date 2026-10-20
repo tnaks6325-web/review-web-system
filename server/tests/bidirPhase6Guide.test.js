@@ -125,7 +125,7 @@ async function pg() {
     const pj = JSON.stringify(PRODUCTS);
     const payload = { source_system: 'inadd_intranet', source_review_order_id: sid, source_revision: 1, idempotency_key: `${sid}:1:a`,
       title: '가짜 6단계 오더', recruit_count: 10, review_fee: 1000, purchase_time: '13:00 ~ 18:00', review_guide: '[리뷰등록 가이드]\n사진 3장', special_notes: '없음',
-      product_url: 'https://www.coupang.com/vp/products/6', inflow_type: 'guide', purchase_channel: '쿠팡', delivery_type: '실배송', review_type: '포토', requester_name: '가짜AE',
+      product_url: 'https://www.coupang.com/vp/products/6', inflow_type: 'guide', purchase_channel: '쿠팡', delivery_type: '실배송', review_type: '포토', skip_weekends: false, requester_name: '가짜AE',
       product_options_json: pj, pay_amount: 100000 };
     const c1 = await call('POST', '/api/order/intake', payload);
     assert.equal(c1.status, 200, JSON.stringify(c1.body));

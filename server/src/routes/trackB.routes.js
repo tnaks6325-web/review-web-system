@@ -1865,6 +1865,14 @@ router.post('/campaigns/:id/rounds', authMiddleware, internalMiddleware, async (
     const { addRound, getPlanOverview } = require('../services/campaignPlan.service');
     const campaignId = String(req.params.id);
     const out = await addRound(campaignId, req.body, _by(req));
+    /* ★ 7단계 🔴2(2026-10-20): 차수로 총 인원이 바뀌면 관리자 공고 창과 같은 한 곳(syncCampaignRecruitTotal)으로 연결 작업오더의 총모집과
+       작업표 줄 수도 맞춘다 — 종전에는 공고 총량만 바뀌고 작업오더·작업표 줄은 옛 인원으로 남았다. 차수는 이미 저장됐으므로 실패는 알리기만 한다. */
+    try {
+      out.quotaSync = await require('../services/linkedRecruitQuota.service').syncCampaignRecruitTotal({ campaignId, recruitTotal: out.newTotal });
+    } catch (e) {
+      logger.error(`[trackb/rounds] ${campaignId} 차수 뒤 작업오더 정원 동기화 실패: ${e.message}`);
+      out.quotaSyncError = '차수는 저장됐지만 연결 작업오더·작업표 줄 수를 맞추지 못했습니다: ' + e.message;
+    }
     // 결정 182 — 총 인원이 바뀌면 날짜별 인원·종료일이 바뀐다 → 작업표 빈 줄 날짜도 따라간다.
     out.worktableRelay = await require('../services/campaignPlan.service').relayCampaignWorktable(campaignId, { by: _by(req) });
     res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId)) });
@@ -1875,6 +1883,14 @@ router.delete('/campaigns/:id/rounds', authMiddleware, internalMiddleware, async
     const { removeLastRound, getPlanOverview } = require('../services/campaignPlan.service');
     const campaignId = String(req.params.id);
     const out = await removeLastRound(campaignId, _by(req));
+    /* ★ 7단계 🔴2(2026-10-20): 차수로 총 인원이 바뀌면 관리자 공고 창과 같은 한 곳(syncCampaignRecruitTotal)으로 연결 작업오더의 총모집과
+       작업표 줄 수도 맞춘다 — 종전에는 공고 총량만 바뀌고 작업오더·작업표 줄은 옛 인원으로 남았다. 차수는 이미 저장됐으므로 실패는 알리기만 한다. */
+    try {
+      out.quotaSync = await require('../services/linkedRecruitQuota.service').syncCampaignRecruitTotal({ campaignId, recruitTotal: out.newTotal });
+    } catch (e) {
+      logger.error(`[trackb/rounds] ${campaignId} 차수 뒤 작업오더 정원 동기화 실패: ${e.message}`);
+      out.quotaSyncError = '차수는 저장됐지만 연결 작업오더·작업표 줄 수를 맞추지 못했습니다: ' + e.message;
+    }
     // 결정 182 — 총 인원이 바뀌면 날짜별 인원·종료일이 바뀐다 → 작업표 빈 줄 날짜도 따라간다.
     out.worktableRelay = await require('../services/campaignPlan.service').relayCampaignWorktable(campaignId, { by: _by(req) });
     res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId)) });

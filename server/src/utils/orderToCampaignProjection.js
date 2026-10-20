@@ -63,7 +63,9 @@ function projectOrderToCampaign(order) {
     review_type_mix: _mix(p.review_type_mix),
     work_kind: CANON.workKind(p.work_kind),
     thumbnail_url: _s(p.thumbnail_url),
-    skip_weekends: p.skip_weekends ? '1' : '0',
+    // ★ 7단계 🔴6: 오더 주말 여부가 비어 있으면 "아직 안 정함" — 작업표는 이를 주말 제외로, 공고(프리필)는 포함으로 읽는다.
+    //   어느 쪽과도 같다고 보지 않아 연결 판정에서 직원이 고르게 한다(설계 완화 금지 11 · 운영 0건 2026-10-20).
+    skip_weekends: (order && (order.skip_weekends === null || order.skip_weekends === undefined || order.skip_weekends === '')) ? 'unset' : (p.skip_weekends ? '1' : '0'),
     channel: _s(p.channel),
     landing_url: _s(p.landing_url),
     options: (p.options || []).map(_optionShape),
