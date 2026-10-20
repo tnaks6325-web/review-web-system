@@ -883,6 +883,7 @@ async function _intakeSourceBidir(res, { b, source, current, optionsJson, delive
     opId: bid && bid.op_id ? String(bid.op_id).slice(0, 120) : '',
     actor: requester || '인트라넷',
     forceMine: bid && Array.isArray(bid.force_mine) ? bid.force_mine.map(String).slice(0, 200) : [],
+    conflictPolicy: 'last_writer',   // 겹친 칸 = 나중에 저장한 값 + 덮인 값 알림(사용자 확정 2026-10-20)
     preHook: _sourceRevisionPreHook(source),
     extraSets: {
       source_revision: source.sourceRevision,

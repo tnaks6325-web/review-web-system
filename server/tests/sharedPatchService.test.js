@@ -3,7 +3,7 @@
  *   A. 정적 — 잠금 순서(L1 → 오더 행 → 공고 행) · 부분 반영 금지(409 다섯 갈래 모두 쓰기 전) · 비상 스위치 · 스위치 off 면 종전 경로
  *   B. PGTEST_URL 있으면 진짜 PG + 실제 라우트(인트라넷이 보내는 그대로):
  *      연결(같으면 on · 마감 공고 거부) · 글 칸 수정 → 오더·공고 함께 · 버전·스냅숏 · 원본 번호 규칙 · 같은 시도 멱등 ·
- *      그 사이 리뷰웹이 같은 칸을 고침 → 충돌(쓰기 0) → 사람이 고르면 반영 · 아직 못 고치는 칸 → 막힘(쓰기 0) ·
+ *      그 사이 리뷰웹이 같은 칸을 고침 → 나중 저장 값 + 덮인 값 알림(기본 정책은 여전히 쓰기 0) · 아직 못 고치는 칸 → 막힘(쓰기 0) ·
  *      공고가 거부(읽지 못한 구매시간·가이드 없는 가이드유입) → 오더까지 되돌림 · 관리자 수정(고유 칸 막힘·글 칸 반영) ·
  *      스위치 off = 종전 경로 · 같은 오더 동시 저장 반복 → 교착 0 · 공고 행을 쥐는 시간
  */
@@ -37,6 +37,11 @@ const read = (rel) => fs.readFileSync(path.join(__dirname, '..', 'src', rel), 'u
   assert.ok(branchAt > 0 && branchAt < ord.indexOf('const sourceEditLocked = isSourceEditLocked(current);'), '잠금 판정보다 먼저 갈라진다');
   assert.ok(/if \(!baseVersion\) \{\s*return res\.status\(409\)\.json\(\{ ok: false, code: 'edit_base_required'/.test(ord), '기준 버전 없이 저장하지 않는다');
   assert.ok(/o\.bidir_state === 'on' && \(await readBidirSwitch\(pool\)\)\.in2rw === 'apply'/.test(ord), '관리자 수정도 같은 조건');
+  // 겹친 칸 = 나중 저장 값은 인트라넷발 원본 수정에만(사용자 확정 2026-10-20) — 관리자 수정은 기본(block)
+  const bidirFn = ord.slice(ord.indexOf('async function _intakeSourceBidir('), ord.indexOf('async function _observeSourceBidir('));
+  assert.ok(/conflictPolicy: 'last_writer'/.test(bidirFn), '인트라넷발 = 나중 저장 값');
+  assert.equal((ord.match(/conflictPolicy:/g) || []).length, 1, '다른 호출(관리자 수정)은 정책을 주지 않는다');
+  assert.ok(/const lastWriter = p\.conflictPolicy === 'last_writer';/.test(fn) && /plan\.readOnly\.length\) \{\s*return await _abort\(client, 409, \{ ok: false, code: 'field_conflict'/.test(fn), '보기전용은 정책과 무관하게 막는다');
   console.log('sharedPatchService: static passed');
 }
 
@@ -130,34 +135,47 @@ async function pg() {
     assert.equal(again.body.idempotent, true, JSON.stringify(again.body));
     assert.equal(Number((await wo()).sync_version), v1);
 
-    // ── 그 사이 리뷰웹(관리자)이 특이사항을 고침 → 인트라넷이 옛 기준으로 같은 칸을 다르게 → 충돌, 쓰기 0 ──
+    // ── 그 사이 리뷰웹(관리자)이 특이사항을 고침 → 인트라넷이 옛 기준으로 같은 칸을 다르게 저장 ──
+    //    = 나중에 저장한 값이 남고, 덮인 리뷰웹 값을 응답으로 돌려준다(사용자 확정 2026-10-20 · 인트라넷발만)
     const adm = await applySharedPatch({ workOrderId: w.id, mine: { ...readSharedState(await wo()), special_notes: '리뷰웹에서 고친 특이사항' }, baseVersion: v1, origin: 'rw_admin', actor: '관리자' });
     assert.equal(adm.status, 200, JSON.stringify(adm.body));
     const v2 = Number(adm.body.sync_version);
     assert.ok(v2 > v1);
+    assert.deepEqual(adm.body.overwritten, [], '겹친 칸이 없으면 빈 목록');
     assert.equal((await pool.query('SELECT count(*)::int n FROM shared_sync_outbox WHERE work_order_id=$1 AND sync_version=$2', [w.id, v2])).rows[0].n, 1, '리뷰웹발 = 인트라넷으로 보낼 대기열');
+    // 정책을 안 준 저장(기본 block — 관리자·연결)은 여전히 충돌이면 쓰기 0
+    const blk = await applySharedPatch({ workOrderId: w.id, mine: { ...readSharedState(await wo()), special_notes: '기본 정책 시험' }, baseVersion: v1, origin: 'intranet', actor: '시험' });
+    assert.equal(blk.status, 409); assert.equal(blk.body.code, 'field_conflict', JSON.stringify(blk.body));
+    assert.deepEqual(blk.body.conflicts.map(x => x.path), ['f:special_notes']);
+    assert.equal((await wo()).special_notes, '리뷰웹에서 고친 특이사항', '기본 정책 충돌 = 쓰기 0');
     const keep = { review_guide: '[리뷰등록 가이드]\n사진 5장으로 바뀜', purchase_time: '14:00 ~ 17:00', purchase_channel: '네이버', product_url: 'https://smartstore.naver.com/x/products/2' };
     const cf = await put(4, `${sid}:4:e`, { ...keep, special_notes: '인트라넷에서 고친 특이사항' }, { base_sync_version: v1 });
-    assert.equal(cf.status, 409); assert.equal(cf.body.code, 'field_conflict', JSON.stringify(cf.body));
-    assert.deepEqual(cf.body.conflicts.map(x => x.path), ['f:special_notes']);
+    assert.equal(cf.status, 200, JSON.stringify(cf.body));
+    assert.equal(cf.body.overwritten.length, 1, JSON.stringify(cf.body.overwritten));
+    const ow = cf.body.overwritten[0];
+    assert.equal(ow.path, 'f:special_notes');
+    assert.equal(ow.before, '리뷰웹에서 고친 특이사항', '덮인 리뷰웹 값');
+    assert.equal(ow.after, '인트라넷에서 고친 특이사항', '남은 값');
+    assert.ok(ow.label && !/^f:/.test(ow.label), '사람이 읽는 칸 이름: ' + ow.label);
     w = await wo();
-    assert.equal(w.special_notes, '리뷰웹에서 고친 특이사항', '충돌이면 아무것도 쓰지 않는다');
-    assert.equal(Number(w.source_revision), 3, '번호도 그대로(같은 번호로 다시 보낼 수 있다)');
-    // 다른 칸만 고친 것은 충돌이 아니다(3방향) — 특이사항은 base 그대로 보내고 리뷰가이드만 바꿈
-    const nc = await put(4, `${sid}:4:f`, { ...keep, special_notes: '주의 사항 없음', review_guide: '[리뷰등록 가이드]\n사진 7장' }, { base_sync_version: v1 });
-    assert.equal(nc.status, 200, JSON.stringify(nc.body));
-    w = await wo();
-    assert.equal(w.special_notes, '리뷰웹에서 고친 특이사항', '안 고친 칸은 리뷰웹 값이 남는다');
-    assert.equal(w.review_guide, '[리뷰등록 가이드]\n사진 7장');
+    assert.equal(w.special_notes, '인트라넷에서 고친 특이사항', '나중에 저장한 값이 남는다');
+    assert.equal((await cRow()).work_detail.specialNotes, '인트라넷에서 고친 특이사항', '공고(리뷰어 화면)까지');
+    assert.equal(Number(w.source_revision), 4);
     const v3 = Number(w.sync_version);
-    // 사람이 고르면(force_mine) 반영
-    const fm = await put(5, `${sid}:5:g`, { ...keep, review_guide: '[리뷰등록 가이드]\n사진 7장', special_notes: '인트라넷에서 고친 특이사항' },
-      { base_sync_version: v1, force_mine: ['f:special_notes'] });
-    assert.equal(fm.status, 200, JSON.stringify(fm.body));
-    assert.equal((await wo()).special_notes, '인트라넷에서 고친 특이사항');
-    assert.equal((await cRow()).work_detail.specialNotes, '인트라넷에서 고친 특이사항');
-    const v4 = Number((await wo()).sync_version);
-    const k2 = { ...keep, review_guide: '[리뷰등록 가이드]\n사진 7장', special_notes: '인트라넷에서 고친 특이사항' };
+    assert.ok(v3 > v2);
+    assert.equal((await pool.query(`SELECT state->>'special_notes' s FROM work_order_shared_snapshots WHERE work_order_id=$1 AND sync_version=$2`, [w.id, v2])).rows[0].s,
+      '리뷰웹에서 고친 특이사항', '덮인 값은 이력(스냅숏)에 남는다');
+    // 다른 칸만 고친 것은 겹침이 아니다(3방향) — 리뷰웹이 특이사항을 또 고친 뒤, 인트라넷은 리뷰가이드만 바꿈
+    const adm2 = await applySharedPatch({ workOrderId: w.id, mine: { ...readSharedState(w), special_notes: '리뷰웹 두 번째 수정' }, baseVersion: v3, origin: 'rw_admin', actor: '관리자' });
+    assert.equal(adm2.status, 200, JSON.stringify(adm2.body));
+    const nc = await put(5, `${sid}:5:f`, { ...keep, special_notes: '인트라넷에서 고친 특이사항', review_guide: '[리뷰등록 가이드]\n사진 7장' }, { base_sync_version: v3 });
+    assert.equal(nc.status, 200, JSON.stringify(nc.body));
+    assert.deepEqual(nc.body.overwritten, [], '손대지 않은 칸은 덮지 않고 알림도 없다');
+    w = await wo();
+    assert.equal(w.special_notes, '리뷰웹 두 번째 수정', '안 고친 칸은 리뷰웹 값이 남는다');
+    assert.equal(w.review_guide, '[리뷰등록 가이드]\n사진 7장');
+    const v4 = Number(w.sync_version);
+    const k2 = { ...keep, review_guide: '[리뷰등록 가이드]\n사진 7장', special_notes: '리뷰웹 두 번째 수정' };
 
     // ── 아직 못 고치는 칸(모집인원) → 막힘, 쓰기 0 ──
     const ne = await put(6, `${sid}:6:h`, { ...k2, recruit_count: 20 }, { base_sync_version: v4 });

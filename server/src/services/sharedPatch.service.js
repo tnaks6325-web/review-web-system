@@ -3,7 +3,8 @@
 //
 // ★★ 쓰기 단일 출처 — 연결(`bidir_state='on'`)된 오더의 공유 칸은 이 함수로만 바뀐다.
 //    판정은 `utils/sharedPatchPlan`(3방향), 공고 반영은 기존 전파 본체(`*InTx`)를 같은 트랜잭션에서 부른다.
-// ★★ 부분 반영 금지 — 충돌·보기전용·아직 못 고치는 칸이 하나라도 있으면 아무것도 쓰지 않고 409.
+// ★★ 부분 반영 금지 — 보기전용·아직 못 고치는 칸(그리고 정책이 block 일 때 충돌)이 하나라도 있으면 아무것도 쓰지 않고 409.
+//    인트라넷발(`conflictPolicy:'last_writer'`)은 겹친 칸을 나중 저장 값으로 쓰고 덮인 값을 `overwritten` 으로 돌려준다(사용자 확정 2026-10-20).
 //    공고 반영이 거부되면(가이드 없는 가이드유입·읽지 못한 구매시간) 오더 쓰기까지 통째로 되돌린다.
 // ★★ 잠금 순서(완화 금지 · 결정 262) — L1(`recruit_campaign_wo:<오더>`) → 오더 행 → 공고 행.
 //    3단계 칸은 작업표와 무관해 탭 잠금(L2)을 잡지 않는다. 작업표에 닿는 칸(7단계)이 들어오면
@@ -16,7 +17,7 @@
 const getPool = () => require('../db/pool');
 const { logger } = require('../utils/logger');
 const { SHARED_FIELDS, FIELD_BY_KEY } = require('../utils/sharedFields');
-const { planSharedPatch } = require('../utils/sharedPatchPlan');
+const { planSharedPatch, ABSENT } = require('../utils/sharedPatchPlan');
 const { projectOrderToCampaign } = require('../utils/orderToCampaignProjection');
 
 const NEXT_VERSION_SQL = `GREATEST(sync_version + 1, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000000)::bigint)`;
@@ -73,6 +74,15 @@ function _label(rowOrPath) {
   }
   if (path.startsWith('products:')) return '상품·옵션';
   return path;
+}
+
+/** 알림에 보일 값 — 정규화 값을 사람이 읽는 글로. 사진 목록은 장수, 없음·빈칸은 말로, 길면 자른다. */
+function _display(path, v) {
+  if (v === ABSENT || v === undefined) return '(없음)';
+  if (v === null || v === '') return '(빈칸)';
+  if (path === 'f:guide_images') { const l = _parseList(v); if (l) return l.length ? `사진 ${l.length}장` : '(사진 없음)'; }
+  const s = String(v);
+  return s.length > 300 ? s.slice(0, 300) + '…' : s;
 }
 
 function _parseList(v) {
@@ -205,6 +215,7 @@ async function _abort(client, status, body) {
  * @param {string} [p.opId] 같은 저장 재전송 판별
  * @param {string} [p.actor]
  * @param {string[]} [p.forceMine] 사람이 "내 값" 을 고른 경로
+ * @param {'block'|'last_writer'} [p.conflictPolicy] 겹친 칸 처리 — block(기본, 409 쓰기 0) · last_writer(이번 저장 값으로 쓰고 overwritten 으로 알림)
  * @param {(client, wo) => Promise<null|{status,body}>} [p.preHook] 같은 트랜잭션에서 먼저 검사(원본 번호 등)
  * @param {object} [p.extraSets] 공유 칸이 아닌 같이 쓸 칸(원본 번호·키 등 — EXTRA_COLUMNS 만)
  * @param {object} [p.db] 시험용 pool
@@ -253,13 +264,18 @@ async function applySharedPatch(p) {
         fields: blocked.map(w => ({ path: w.path, label: _label(w) })),
         error: `이 칸은 아직 여기서 바꿀 수 없습니다: ${[...new Set(blocked.map(w => _label(w)))].join(', ')}` });
     }
-    if (plan.conflicts.length || plan.readOnly.length) {
+    // ★ 겹친 칸 = 나중에 저장한 값(사용자 확정 2026-10-20 · 인트라넷발만) — 덮인 리뷰웹 값은 응답 `overwritten` 으로
+    //   돌려줘 저장한 사람이 확인하게 하고, 스냅숏 이력에 남는다. 보기전용(readOnly)은 정책과 무관하게 막는다.
+    const lastWriter = p.conflictPolicy === 'last_writer';
+    if ((plan.conflicts.length && !lastWriter) || plan.readOnly.length) {
       return await _abort(client, 409, { ok: false, code: 'field_conflict', sync_version: curVersion,
         conflicts: plan.conflicts.map(c => ({ ...c, label: _label(c) })),
         readOnly: plan.readOnly.map(c => ({ ...c, label: _label(c) })),
         error: '다른 곳에서 같은 칸이 먼저 바뀌었습니다. 어느 값을 남길지 골라 주세요.' });
     }
 
+    const overwritten = lastWriter ? plan.conflicts.map(c => ({ path: c.path, label: _label(c), before: _display(c.path, c.theirs), after: _display(c.path, c.mine) })) : [];
+    if (lastWriter && plan.conflicts.length) plan.writes = [...plan.writes, ...plan.conflicts];
     const extra = Object.entries(p.extraSets || {}).filter(([k]) => EXTRA_COLUMNS.has(k));
     if (!plan.writes.length && !extra.length) {
       await client.query('COMMIT');
@@ -313,7 +329,8 @@ async function applySharedPatch(p) {
       }
     }
     await client.query('COMMIT');
-    return { status: 200, body: { ok: true, data: saved, sync_version: newVersion, applied: plan.writes.map(w => w.path), campaign_applied: campaign.applied } };
+    if (overwritten.length) logger.info(`[bidir/apply] ${wo.id} 겹친 칸을 나중 저장 값으로(${p.origin}·${p.actor || ''}): ${overwritten.map(o => o.label).join(', ')}`);
+    return { status: 200, body: { ok: true, data: saved, sync_version: newVersion, applied: plan.writes.map(w => w.path), campaign_applied: campaign.applied, overwritten } };
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     if (['40P01', '55P03', '57014'].includes(e && e.code)) {
