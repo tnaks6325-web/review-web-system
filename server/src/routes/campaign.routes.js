@@ -296,64 +296,20 @@ function _validateActiveUnitInflowGuides(inflowType, options) {
  * 종전엔 선택지를 이름(opt_key)으로만 구분해 이름을 바꾸면 "옛 선택지 빠짐 + 새 선택지 생김"이 되어
  *  ① 참여자 있는 옛 이름이 리뷰어 화면에 '마감'으로 남고 ② 새 이름은 0명부터 다시 세어 정원 초과 모집이 됐다.
  * → 화면이 보낸 prevOptKey(그 줄이 원래 어떤 선택지였는지)로 **선택지 행과 참여 기록의 이름을 함께 바꾼다**.
- * ★ 바꾸는 곳 = campaign_options.opt_key + campaign_applications.option_key 두 곳뿐.
- *   이미 접수된 주문(order_submissions.selected_opt_key)·작업표 옵션 칸은 **옛 이름 그대로 둔다**(사용자 확정 (나) — 산 시점의 사실).
+ * ★ 바꾸는 곳 = campaign_options.opt_key + campaign_applications.option_key + 품절 신고·알림 + **아직 아무도 채우지 않은 작업표 빈 줄**
+ *   (사용자 확정 2026-10-21 「2.가」 — 안 바꾸면 빈 줄이 옛 이름에 묶여 새 이름 주문이 들어갈 자리가 없다).
+ *   이미 접수된 주문(order_submissions.selected_opt_key)·**채운 줄**은 **옛 이름 그대로 둔다**(사용자 확정 (나) — 산 시점의 사실 · 완화 금지).
  * ★ fail-safe: 옛 이름이 이번 목록에도 그대로 있거나 / 원장에 없거나 / 같은 옛 이름을 두 줄이 주장하거나 /
  *   새 이름이 이미 다른 선택지로 살아 있으면 **바꾸지 않는다**(종전 동작 = 새로 만들고 옛 것은 마감·삭제).
  * ★ 서로 이름을 맞바꾸는 경우를 위해 임시 이름을 거쳐 두 단계로 바꾼다(유니크 충돌 방지).
  * 호출자가 같은 트랜잭션·캠페인 행 잠금 안에서 부른다.
  */
-function _planOptionRenames(currentKeys, options, keep) {
-  const cur = new Set(currentKeys);
-  const prevCount = new Map(), targetCount = new Map();
-  for (const o of options) {
-    const p = o && o.prevOptKey;
-    if (!p || p === o.optKey) continue;
-    prevCount.set(p, (prevCount.get(p) || 0) + 1);
-    targetCount.set(o.optKey, (targetCount.get(o.optKey) || 0) + 1);
-  }
-  // 이름을 안 바꾼(또는 새로 추가한) 줄의 이름 — 옛 이름이 여기 있으면 그 선택지는 그대로 남는다(이름 바꾸기 아님)
-  const stay = new Set(options.filter(o => o && (!o.prevOptKey || o.prevOptKey === o.optKey)).map(o => o.optKey));
-  let plan = options
-    .filter(o => o && o.prevOptKey && o.prevOptKey !== o.optKey)
-    .filter(o => cur.has(o.prevOptKey) && !stay.has(o.prevOptKey))
-    .filter(o => prevCount.get(o.prevOptKey) === 1 && targetCount.get(o.optKey) === 1)
-    .map(o => ({ from: o.prevOptKey, to: o.optKey }));
-  // 새 이름이 이미 원장에 있으면 그 이름도 이번에 다른 이름으로 비켜나야만 허용(맞바꾸기). 사슬은 안정될 때까지.
-  for (let changed = true; changed;) {
-    changed = false;
-    const leaving = new Set(plan.map(r => r.from));
-    const next = plan.filter(r => !cur.has(r.to) || leaving.has(r.to));
-    if (next.length !== plan.length) { plan = next; changed = true; }
-  }
-  return plan;
+function _planOptionRenames(currentKeys, options, keep) {   // 단일 출처 = services/campaignOptionRename(공유 저장과 같은 규칙)
+  return require('../services/campaignOptionRename.service').planOptionRenames(currentKeys, options);
 }
 
 async function _applyOptionRenames(client, campaignId, options, keep) {
-  if (!options.some(o => o && o.prevOptKey && o.prevOptKey !== o.optKey)) return [];
-  const { rows } = await client.query('SELECT opt_key FROM campaign_options WHERE campaign_id=$1', [campaignId]);
-  const plan = _planOptionRenames(rows.map(r => r.opt_key), options, keep);
-  // ★ 임시 이름은 한 번만 만들어 두 표·두 단계에서 같은 값을 쓴다(호출마다 만들면 시각이 달라져
-  //   선택지와 참여 기록이 서로 다른 임시 이름으로 흩어진다 — 코드리뷰 P1).
-  const stamp = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-  const tmpKeys = plan.map((_, i) => '__rename_tmp_' + i + '_' + stamp);
-  const tmp = (i) => tmpKeys[i];
-  for (let i = 0; i < plan.length; i++) {
-    await client.query('UPDATE campaign_options SET opt_key=$3, updated_at=NOW() WHERE campaign_id=$1 AND opt_key=$2', [campaignId, plan[i].from, tmp(i)]);
-    await client.query('UPDATE campaign_applications SET option_key=$3 WHERE campaign_id=$1 AND option_key=$2', [campaignId, plan[i].from, tmp(i)]);
-    // ★ 결정 229: 품절 신고·알림도 상품 이름을 따라간다(안 바꾸면 이름을 바꾼 뒤 신고가 처음부터 다시 세진다)
-    await client.query('UPDATE campaign_option_soldout_reports SET opt_key=$3 WHERE campaign_id=$1 AND opt_key=$2', [campaignId, plan[i].from, tmp(i)]);
-    await client.query('UPDATE campaign_option_alerts SET opt_key=$3 WHERE campaign_id=$1 AND opt_key=$2', [campaignId, plan[i].from, tmp(i)]);
-  }
-  for (let i = 0; i < plan.length; i++) {
-    await client.query('UPDATE campaign_options SET opt_key=$3, updated_at=NOW() WHERE campaign_id=$1 AND opt_key=$2', [campaignId, tmp(i), plan[i].to]);
-    await client.query('UPDATE campaign_applications SET option_key=$3 WHERE campaign_id=$1 AND option_key=$2', [campaignId, tmp(i), plan[i].to]);
-    // ★ 결정 229: 품절 신고·알림도 상품 이름을 따라간다(안 바꾸면 이름을 바꾼 뒤 신고가 처음부터 다시 세진다)
-    await client.query('UPDATE campaign_option_soldout_reports SET opt_key=$3 WHERE campaign_id=$1 AND opt_key=$2', [campaignId, tmp(i), plan[i].to]);
-    await client.query('UPDATE campaign_option_alerts SET opt_key=$3 WHERE campaign_id=$1 AND opt_key=$2', [campaignId, tmp(i), plan[i].to]);
-  }
-  if (plan.length) logger.info('[campaign/options] 선택지 이름 변경 ' + campaignId + ' ' + plan.map(r => r.from + ' → ' + r.to).join(', '));
-  return plan;
+  return require('../services/campaignOptionRename.service').applyOptionRenames(client, campaignId, options);
 }
 
 /**

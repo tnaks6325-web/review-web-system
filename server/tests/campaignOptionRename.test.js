@@ -19,14 +19,12 @@ const front = read('../frontend/js/index-recruit.js');
 let passed = 0;
 function ok(name, cond) { assert(cond, name); passed++; console.log('  ✓ ' + name); }
 
-// ── 서버 함수 추출 실행 ──
-const start = routes.indexOf('function _planOptionRenames');
-const end = routes.indexOf('async function _saveCampaignOptions');
-assert(start > 0 && end > start, 'rename 함수 위치');
+// ── 서버 함수 실행 — 단일 출처 services/campaignOptionRename(결정 263 7단계-④ ③ 에서 공유 저장과 같이 쓰려고 라우트에서 옮김 · 검사 의미 불변) ──
+const svc = require('../src/services/campaignOptionRename.service');
 let _now = 1000;
-const sandbox = { logger: { info() {} }, Date: { now: () => (_now += 7) }, Math };
-vm.createContext(sandbox);
-vm.runInContext(routes.slice(start, end) + '\nthis._plan=_planOptionRenames;this._apply=_applyOptionRenames;', sandbox);
+const _realNow = Date.now;
+Date.now = () => (_now += 7);   // 시각이 흘러도 임시 이름이 한 번만 만들어지는지 본다
+const sandbox = { _plan: (cur, opts) => svc.planOptionRenames(cur, opts), _apply: (client, id, opts) => svc.applyOptionRenames(client, id, opts) };
 const plan = (cur, opts) => sandbox._plan(cur, opts, new Set(opts.map(o => o.optKey)));
 
 ok('단순 이름 변경 → 계획 1건', JSON.stringify(plan(['A', 'B'], [{ optKey: 'A2', prevOptKey: 'A' }, { optKey: 'B', prevOptKey: 'B' }])) === JSON.stringify([{ from: 'A', to: 'A2' }]));
@@ -56,6 +54,7 @@ ok('맞바꾸기(A↔B)는 허용', plan(['A', 'B'], [{ optKey: 'B', prevOptKey:
   ok('바꿀 것 없으면 조회조차 안 함', none.length === 0);
 
   // ── 배선 ──
+  ok('공고 창 저장의 이름 바꾸기 = 단일 출처 서비스', /require\('\.\.\/services\/campaignOptionRename\.service'\)\.applyOptionRenames\(client, campaignId, options\)/.test(routes));
   ok('정규화가 prevOptKey 를 받는다', /prevOptKey: _normOptKey\(obj\.prevOptKey \?\? obj\.prev_opt_key\)/.test(routes));
   const save = routes.slice(routes.indexOf('async function _saveCampaignOptions'));
   ok('저장이 잠금 뒤·upsert 앞에서 이름 바꾸기를 먼저 한다',

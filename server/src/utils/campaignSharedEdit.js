@@ -447,7 +447,7 @@ function _planQuantityEdit({ base, products, baseRows, liveCampOpts, body, edite
  * ★ 이름 바꾸기·상품 이름·마감시키기(지우기로 한다)·옵션 없는 공고는 담지 않는다(unmappable).
  */
 function _planStructureEdit({ products, baseRows, liveCampOpts, body, guideInflow }) {
-  const out = { any: false, removes: [], adds: [], reopens: [], unmappable: [], changed: [] };
+  const out = { any: false, removes: [], adds: [], reopens: [], renames: [], unmappable: [], changed: [] };
   if (!Array.isArray(body.options)) return out;
   if (!products || !(liveCampOpts.length > 0 && baseRows.length > 0)) {
     // 오더 상품 구성과 공고 줄을 짝지을 수 없는 오더(상품 정보 없음 · 옛 형식 · 옵션 줄 없는 공고) — 화면이 공고 줄을 더하거나 지우거나
@@ -470,10 +470,25 @@ function _planStructureEdit({ products, baseRows, liveCampOpts, body, guideInflo
   for (const [key, o] of sentKeys) {
     if (baseByKey.has(key)) continue;
     const prev = prevOf(o);
-    const wasRow = prev && baseRows.find(r => r.key.split('|')[1] === prev || (r.unit_kind === 'product' && r.key.split('|')[0] === prev));
-    if (wasRow && !sentKeys.has(wasRow.key) && prev !== String(o.optKey ?? o.opt_key ?? '').trim()) {
+    const wasRow = prev && baseRows.find(r => (r.unit_kind === 'product' ? r.key.split('|')[0] === prev : r.key.split('|')[1] === prev));
+    if (wasRow && !sentKeys.has(wasRow.key)) {
+      // 7단계-④ ③ 이름 바꾸기 — 옵션 이름 · 상품 이름(옵션 없는 상품은 줄 이름이 곧 상품 이름)
       renamedFrom.add(wasRow.key);
-      out.unmappable.push({ key, label: `이름 바꾸기(${prev} → ${String(o.optKey ?? o.opt_key ?? '').trim()}) — 다음 단계에서 엽니다`, want: key, got: wasRow.key });
+      const k = baseByKey.get(wasRow.key);
+      const [oldP, oldOpt] = wasRow.key.split('|');
+      const newP = String(o.productName ?? o.product_name ?? '').replace(/\|/g, '').trim() || (wasRow.unit_kind === 'product' ? String(o.optKey ?? o.opt_key ?? '').trim() : oldP);
+      const newOpt = wasRow.unit_kind === 'product' ? '' : String(o.optKey ?? o.opt_key ?? '').replace(/\|/g, '').trim();
+      const src = srcs[k];
+      const node = src && (src.j >= 0 ? products[src.i].options[src.j] : products[src.i]);
+      const { optionKey: rawKey } = require('./sharedPatchPlan');
+      const label = `이름 바꾸기(${prev} → ${String(o.optKey ?? o.opt_key ?? '').trim()})`;
+      if (!src || srcs.length !== baseRows.length) { out.unmappable.push({ key, label: `${label} — 리뷰오더 상품 구성과 짝을 지을 수 없습니다`, want: key, got: wasRow.key }); continue; }
+      if (wasRow.status === 'closed') { out.unmappable.push({ key, label: `${label} — 마감된 옵션은 이름을 바꿀 수 없습니다`, want: key, got: wasRow.key }); continue; }
+      if (newOpt && src.j >= 0 && (rawKey(node) !== oldOpt || (node && node.option_2))) {
+        out.unmappable.push({ key, label: `${label} — 2단 옵션이거나 다른 상품과 이름이 겹친 옵션은 리뷰오더에서 바꿔 주세요`, want: key, got: wasRow.key }); continue;
+      }
+      if (!newP || (wasRow.unit_kind !== 'product' && !newOpt)) { out.unmappable.push({ key, label: `${label} — 이름을 비울 수 없습니다`, want: key, got: '' }); continue; }
+      out.renames.push({ src, oldP, newP, oldOpt: wasRow.unit_kind === 'product' ? '' : oldOpt, newOpt, name: label });
       continue;
     }
     if (!hasOptRows) { out.unmappable.push({ key, label: '옵션 없는 공고에 상품·옵션 더하기 — 옵션 있음·없음 바꾸기와 함께 엽니다', want: key, got: '' }); continue; }
@@ -505,9 +520,21 @@ function _planStructureEdit({ products, baseRows, liveCampOpts, body, guideInflo
   if (srcs.length !== baseRows.length && (out.removes.length || out.reopens.length)) {
     out.unmappable.push({ key: 'options', label: '상품·옵션 — 리뷰오더 상품 구성과 공고 줄을 짝지을 수 없습니다', want: '', got: '' });
   }
+  // 상품 이름은 그 상품의 모든 줄에서 같이 바뀌어야 한다(일부 줄만 바꾸면 상품이 둘로 갈린다)
+  const pRen = new Map();
+  for (const r of out.renames) if (r.newP !== r.oldP) {
+    if (pRen.has(r.oldP) && pRen.get(r.oldP) !== r.newP) out.unmappable.push({ key: r.oldP, label: `상품 이름(${r.oldP}) — 옵션마다 다른 이름으로 바꿀 수 없습니다`, want: r.newP, got: pRen.get(r.oldP) });
+    pRen.set(r.oldP, r.newP);
+  }
+  for (const [oldP] of pRen) {
+    const rowsOfP = baseRows.filter(r => r.key.split('|')[0] === oldP && r.status !== 'closed');
+    if (rowsOfP.some(r => !renamedFrom.has(r.key))) out.unmappable.push({ key: oldP, label: `상품 이름(${oldP}) — 그 상품의 모든 옵션에서 같이 바꿔 주세요`, want: pRen.get(oldP), got: oldP });
+  }
+  for (const r of out.renames) if (_hasTiers(products[r.src.i])) out.unmappable.push({ key: r.name, label: `${r.name} — 구매수량 단계 상품은 이름을 바꿀 수 없습니다`, want: '', got: '' });
   for (const r of out.removes) if (_hasTiers(products[r.src.i])) out.unmappable.push({ key: r.name, label: `${r.name} — 구매수량 단계 상품은 접수 뒤 더하거나 지울 수 없습니다`, want: '', got: '' });
   out.guideInflow = guideInflow;
-  out.any = out.adds.length + out.removes.length + out.reopens.length > 0;
+  out.any = out.adds.length + out.removes.length + out.reopens.length + out.renames.length > 0;
+  out.renames.forEach(r => out.changed.push(r.name));
   out.removes.forEach(r => out.changed.push(`삭제(${r.name})`));
   out.adds.forEach(o => out.changed.push(`추가(${String(o.optKey ?? o.opt_key ?? o.productName ?? '').trim()})`));
   out.reopens.forEach(r => out.changed.push(`다시 열기(${r.name})`));
@@ -519,6 +546,22 @@ function applyStructurePlan(ed, st) {
   const int = v => Math.max(0, Math.floor(Number(v) || 0));
   const { canonGuide } = require('./guideCanon');
   const dropNodes = new Set();
+  // 7단계-④ ③ 이름 바꾸기 먼저(자리 번호는 원래 상품 구성 기준) — 원래 이름을 실어 보낸다(공유 저장이 같은 줄로 잇는다)
+  for (const r of st.renames || []) {
+    const prod = r.src && ed[r.src.i];
+    if (!prod) continue;
+    if (r.newOpt && r.src.j >= 0) {
+      const node = prod.options[r.src.j];
+      const { optionKey: rawKey } = require('./sharedPatchPlan');
+      if (!node.prev_label) node.prev_label = rawKey(node);
+      node.label = r.newOpt;
+      node.option_1 = { ...(node.option_1 && typeof node.option_1 === 'object' ? node.option_1 : { name: '옵션' }), value: r.newOpt };
+    }
+    if (r.newP !== r.oldP) {
+      if (!prod.prev_name) prod.prev_name = String(prod.name || '').trim();
+      prod.name = r.newP;
+    }
+  }
   for (const r of st.removes) {
     const prod = r.src && ed[r.src.i];
     if (!prod) continue;

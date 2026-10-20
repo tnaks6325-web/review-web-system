@@ -41,6 +41,8 @@ const PHASE7W_SHARED_FIELDS = Object.freeze(['skip_weekends']);
 /** 7단계-④ 상품·옵션 더하기·지우기(마감) — 칸이 아니라 상품 구성 경로의 표시. 수정 창 잠금 해제 목록에도 이 이름으로 나간다.
  *  이름 바꾸기·옵션 있음↔없음·구매수량 단계는 여기 들지 않는다(그 경로는 따로 막힌다). */
 const STRUCTURE_FIELD = 'product_structure';
+/** 7단계-④ ③ 상품·옵션 이름 바꾸기 — 보내는 쪽이 원래 이름(prev_name/prev_label)을 실은 줄만. 수정 창 잠금 해제 목록에도 이 이름. */
+const RENAME_FIELD = 'product_rename';
 /** 리뷰웹 → 인트라넷으로 보내는 칸(수정 창이 리뷰웹 값으로 덮는 칸과 같다). 상품 구성·합계·요약은 금액이 함께 움직이는 짝. */
 const PUSH_VIEW_KEYS = Object.freeze([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, 'pay_amount', 'product_options_json', 'product_option']);
 /** 인트라넷 고유 칸 중 접수 뒤에도 고칠 수 있는 것 — 종전 원본 수정 허용 목록·계약 후속 매칭과 같은 범위. */
@@ -49,10 +51,10 @@ const INTRANET_EDITABLE_AFTER_ACCEPT = Object.freeze([
 ]);
 /** 리뷰웹발 수정(관리자 오더 수정)이 쓸 수 있는 칸 — 인트라넷 고유는 제외. */
 const WRITABLE_BY_ORIGIN = {
-  intranet: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
-  reconcile: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
+  intranet: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
+  reconcile: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
   rw_admin: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS]),
-  campaign: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD]),   // 4단계-2 공고 편집 창(campaignSharedSave) — 리뷰웹발이라 인트라넷 고유 칸은 제외
+  campaign: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD]),   // 4단계-2 공고 편집 창(campaignSharedSave) — 리뷰웹발이라 인트라넷 고유 칸은 제외
 };
 const KNOWN_CHANNELS = new Set(['쿠팡', '네이버', '올리브영', '카카오메이커스']);
 const SNAPSHOT_KEYS = Object.freeze([...SHARED_FIELDS.map(f => f.key), 'product_options_json', 'product_option']);
@@ -135,6 +137,8 @@ function writablePath(row, origin) {
     return !row.noStructure && set.has(STRUCTURE_FIELD) && ((row.base === ABSENT) !== (row.mine === ABSENT));
   }
   if (row.covered) return !row.noStructure && set.has(STRUCTURE_FIELD);
+  // 7단계-④ ③ 이름 바꾸기 — 원래 이름을 실은 줄의 이름 칸(상품 name · 옵션 label/option_1/option_2). 마감 줄은 못 바꾼다.
+  if (row.rename) return !row.noRename && !row.parentClosed && !row.closedMeanwhile && set.has(RENAME_FIELD);
   // 마감된 선택지(양쪽 다 마감)의 칸은 못 고친다 — 인원은 이미 참여한 수로 굳었다. 다시 열기(closed 칸이 풀림)는 아래에서.
   if (row.parentClosed) return false;
   if (m.kind === 'leaf' && m.key === 'closed') return !row.noStructure && set.has(STRUCTURE_FIELD) && _truthy(row.base) && !_truthy(row.mine);
@@ -169,9 +173,10 @@ const _truthy = v => v === 'true' || v === '1' || v === true;
  *   parentClosed = 기준에서도 보낸 값에서도 마감인 선택지의 칸.
  *   noStructure  = 구조를 모르는 옛 인트라넷 창.
  */
-function markStructureRows(plan, base, mine, { structureCapable = true, theirs = null } = {}) {
+function markStructureRows(plan, base, mine, { structureCapable = true, renameCapable = true, theirs = null } = {}) {
   const { flattenState } = require('../utils/sharedPatchPlan');
   const T = theirs ? flattenState(theirs) : null;
+  const renamed = renamedParents(mine);
   const rows = [...plan.writes, ...plan.conflicts];
   const moved = new Set(rows.filter(w => w.meta && (w.meta.kind === 'product' || w.meta.kind === 'option')
     && (w.base === ABSENT) !== (w.mine === ABSENT)).map(w => w.path));
@@ -188,11 +193,55 @@ function markStructureRows(plan, base, mine, { structureCapable = true, theirs =
     if (m.kind === 'option' && moved.has(productOf(w.path))) { w.covered = true; continue; }
     if (m.kind !== 'leaf' || !m.parent) continue;
     if (moved.has(m.parent) || (productOf(m.parent) && moved.has(productOf(m.parent)))) { w.covered = true; continue; }
+    if (renamed.has(m.parent) && (m.parent.includes('|o:') ? ['label', 'option_1', 'option_2'] : ['name']).includes(m.key)) {
+      w.rename = true;
+      if (!renameCapable) w.noRename = true;
+    }
     if (m.key !== 'closed' && closedIn(B, m.parent) && closedIn(M, m.parent)) w.parentClosed = true;
     // 창을 연 뒤 다른 쪽에서 마감된 줄의 칸 — 나중 저장 값으로 쓰면 "마감 = 참여 수" 가 깨진다(검토 2026-10-21) → 새로고침
     if (T && m.key !== 'closed' && closedIn(T, m.parent) && !closedIn(B, m.parent)) w.closedMeanwhile = true;
   }
   return moved.size > 0;
+}
+
+/** 보낸 값(mine)에서 원래 이름을 실어 이름을 바꾼 상품·옵션 경로(`p:<원래 상품>` · `p:<원래 상품>|o:<원래 옵션>`). */
+function renamedParents(mine) {
+  const out = new Set();
+  for (const p of _parseList(mine && mine.product_options_json) || []) {
+    if (!p || typeof p !== 'object') continue;
+    const name = String(p.name || '').trim(), prev = String(p.prev_name || '').trim();
+    const pk = prev || name;
+    if (prev && prev !== name) out.add('p:' + pk);
+    for (const o of Array.isArray(p.options) ? p.options : []) {
+      const lab = optionKey(o), pl = String(o && o.prev_label || '').trim();
+      if (pl && pl !== lab) out.add(`p:${pk}|o:${pl}`);
+    }
+  }
+  return out;
+}
+
+/**
+ * 보낸 값의 원래 이름(prev_name/prev_label) 중 기준에 없는 것은 지운다 — 이름 바꾸기가 아니다(예: 인트라넷이 예전에 실어 둔 원래 이름을 다시 보낸 재전송).
+ * 안 지우면 그 줄이 기준에 없는 경로로 펼쳐져 "옛 이름 더함 + 지금 이름 지움" 으로 읽힌다. @returns 새 mine(지운 게 없으면 그대로)
+ */
+function sanitizeRenames(base, mine) {
+  const list = _parseList(mine && mine.product_options_json);
+  if (!list) return mine;
+  const bl = _parseList(base && base.product_options_json) || [];
+  const bNames = new Map(bl.filter(p => p && typeof p === 'object').map(p => [String(p.name || '').trim(), p]));
+  let changed = false;
+  for (const p of list) {
+    if (!p || typeof p !== 'object') continue;
+    const prev = String(p.prev_name || '').trim();
+    if (prev && (!bNames.has(prev) || prev === String(p.name || '').trim())) { delete p.prev_name; changed = true; }
+    const bp = bNames.get(String(p.prev_name || p.name || '').trim());
+    const bLabels = new Set((bp && Array.isArray(bp.options) ? bp.options : []).map(optionKey));
+    for (const o of Array.isArray(p.options) ? p.options : []) {
+      const pl = String(o && o.prev_label || '').trim();
+      if (pl && (!bLabels.has(pl) || pl === optionKey(o))) { delete o.prev_label; changed = true; }
+    }
+  }
+  return changed ? { ...mine, product_options_json: JSON.stringify(list) } : mine;
 }
 
 /** 쓰기 행의 상품·옵션 이름 — 판정이 붙인 경로 종류(meta.parent)에서 읽는다(이름 속 '.' 을 글자로 추측하지 않게). */
@@ -274,11 +323,16 @@ function applyWrites(theirs, mine, writes) {
   // 7단계-④ 더한·지운·다시 연 상품·옵션(이름) — 공고 반영·마감 처리가 읽는다
   const structure = { addedProducts: [], removedProducts: [], addedOptions: [], removedOptions: [], reopened: [] };
   const pNameOf = p => String(p && p.name || '').trim();
+  // 보낸 값 쪽은 원래 이름으로 찾는다(경로는 원래 이름 — 이름을 바꾼 줄도 같은 경로)
+  const mineKeyP = p => String(p && p.prev_name || '').trim() || pNameOf(p);
+  const mineKeyO = o => String(o && o.prev_label || '').trim() || optionKey(o);
+  const renames = [];   // 이름 칸 쓰기 — 다른 칸을 다 쓴 뒤 옮긴다(앞 칸들이 원래 이름으로 줄을 찾는다)
   const clean = o => { const c = JSON.parse(JSON.stringify(o)); delete c.prev_name; delete c.prev_label;
     if (Array.isArray(c.options)) c.options.forEach(x => { if (x) delete x.prev_label; }); return c; };
   for (const w of writes) {
     if (w.path.startsWith('f:')) { next[w.path.slice(2)] = mine[w.path.slice(2)]; continue; }
     if (w.covered) continue;   // 더하거나 지우는 상품·옵션 줄이 통째로 옮긴다
+    if (w.rename) { renames.push(w); continue; }
     const wm = w.meta || {};
     if (wm.kind === 'product' || wm.kind === 'option') {
       if (!nextProducts) { missed.push(w.path); continue; }
@@ -288,7 +342,7 @@ function applyWrites(theirs, mine, writes) {
       if (!oLabel) {
         const ti = nextProducts.findIndex(x => pNameOf(x) === pName);
         if (adding) {
-          const mi = mineProducts.findIndex(x => pNameOf(x) === pName);
+          const mi = mineProducts.findIndex(x => mineKeyP(x) === pName);
           if (mi < 0 || ti >= 0) { missed.push(w.path); continue; }
           // 자리 = 보낸 목록에서 앞에 있는 상품 중 지금 목록에 있는 것의 수
           const before = mineProducts.slice(0, mi).filter(x => nextProducts.some(y => pNameOf(y) === pNameOf(x))).length;
@@ -305,9 +359,9 @@ function applyWrites(theirs, mine, writes) {
         if (!Array.isArray(tp.options)) tp.options = [];
         const oi = tp.options.findIndex(o => optionKey(o) === oLabel);
         if (adding) {
-          const mp = mineProducts.find(x => pNameOf(x) === pName);
+          const mp = mineProducts.find(x => mineKeyP(x) === pName);
           const mopts = Array.isArray(mp && mp.options) ? mp.options : [];
-          const mi = mopts.findIndex(o => optionKey(o) === oLabel);
+          const mi = mopts.findIndex(o => mineKeyO(o) === oLabel);
           if (mi < 0 || oi >= 0) { missed.push(w.path); continue; }
           const before = mopts.slice(0, mi).filter(x => tp.options.some(y => optionKey(y) === optionKey(x))).length;
           tp.options.splice(before, 0, clean(mopts[mi]));
@@ -336,10 +390,10 @@ function applyWrites(theirs, mine, writes) {
     const { pName, oLabel, leaf } = t;
     const findP = list => list.find(p => p && String(p.name || '').trim() === pName);
     const findO = p => (Array.isArray(p && p.options) ? p.options : []).find(o => optionKey(o) === oLabel);
-    const tp = findP(nextProducts); const mp = findP(mineProducts);
+    const tp = findP(nextProducts); const mp = mineProducts.find(x => mineKeyP(x) === pName);
     if (!tp || !mp) { missed.push(w.path); continue; }
     if (oLabel) {
-      const to = findO(tp); const mo = findO(mp);
+      const to = findO(tp); const mo = (Array.isArray(mp.options) ? mp.options : []).find(o => mineKeyO(o) === oLabel);
       if (!to || !mo) { missed.push(w.path); continue; }
       if (leaf === 'url') { to.url = mo.url; urlTouched = true; }
       else if (leaf === 'pay') { to.pay = mo.pay; payProducts.add(pName); }
@@ -369,8 +423,35 @@ function applyWrites(theirs, mine, writes) {
     if (mine && mine.product_option !== undefined) next.product_option = mine.product_option;
   }
   // 인원이 바뀐 상품도 결제합계(상품구입비 = 금액 × 인원)가 바뀐다
+  // 7단계-④ ③ 이름 바꾸기 — 옵션 먼저(상품 원래 이름으로 찾는다), 상품 나중
+  structure.renamedOptions = []; structure.renamedProducts = [];
+  const renameParents = [...new Set(renames.map(w => w.meta.parent))].sort((a, b) => (b.includes('|o:') ? 1 : 0) - (a.includes('|o:') ? 1 : 0));
+  for (const parent of renameParents) {
+    const key = parent.slice(2); const at = key.indexOf('|o:');
+    const pName = at < 0 ? key : key.slice(0, at), oLabel = at < 0 ? '' : key.slice(at + 3);
+    const tp = nextProducts && nextProducts.find(x => pNameOf(x) === pName);
+    const mp = mineProducts.find(x => mineKeyP(x) === pName);
+    if (!tp || !mp) { renames.filter(w => w.meta.parent === parent).forEach(w => missed.push(w.path)); continue; }
+    if (oLabel) {
+      const to = (tp.options || []).find(o => optionKey(o) === oLabel);
+      const mo = (mp.options || []).find(o => mineKeyO(o) === oLabel);
+      if (!to || !mo) { renames.filter(w => w.meta.parent === parent).forEach(w => missed.push(w.path)); continue; }
+      for (const k of ['label', 'option_1', 'option_2']) { if (mo[k] === undefined) delete to[k]; else to[k] = JSON.parse(JSON.stringify(mo[k])); }
+      structure.renamedOptions.push({ pName, from: oLabel, to: optionKey(to) });
+    } else {
+      tp.name = pNameOf(mp);
+      structure.renamedProducts.push({ from: pName, to: tp.name });
+    }
+    productsTouched = true;
+  }
+  if (structure.renamedOptions.length || structure.renamedProducts.length) {
+    next.product_options_json = JSON.stringify(nextProducts);   // 이름 바꾸기는 다른 칸 뒤에 했다 — 다시 적는다
+    if (mine && mine.product_option !== undefined) next.product_option = mine.product_option;
+  }
+  const productRenameMap = new Map(structure.renamedProducts.map(r => [r.from, r.to]));
+  structure.productRenameMap = productRenameMap;
   const structureTouched = structure.addedProducts.length + structure.removedProducts.length + structure.addedOptions.length
-    + structure.removedOptions.length + structure.reopened.length > 0;
+    + structure.removedOptions.length + structure.reopened.length + structure.renamedOptions.length + structure.renamedProducts.length > 0;
   return { next, productsTouched, urlTouched, guideTouched, quantityTouched, payTouched: payProducts.size > 0, payProducts, qtyProducts, missed, structure, structureTouched };
 }
 
@@ -394,7 +475,7 @@ function _productCost(p) {
  *   ★ 합계를 1건당 자리에 쓰지 않는다 · 결정 161). 단계 상품이 끼어 차이를 모르면 인트라넷이 보낸 합계, 그것도 없으면 지금 합계 유지(기록).
  *   요약 문장은 옛 구성으로 다시 만든 문장이 지금 문장과 같을 때만(`orderProductSummary`) — 다르면 옛 문장을 두고 기록.
  */
-function derivePayFields({ base, theirs, mine, next, payProducts, origin, recompute = false }) {
+function derivePayFields({ base, theirs, mine, next, payProducts, origin, recompute = false, renameMap = null }) {
   const out = {};
   if (!payProducts || !payProducts.size) return out;
   // recompute = 리뷰웹이 보낸 상품 구성을 바꿔 저장했다(7단계-④ 마감으로 되살림) — 보낸 합계·요약 문장은 맞지 않는다
@@ -407,7 +488,7 @@ function derivePayFields({ base, theirs, mine, next, payProducts, origin, recomp
     const byName = (list, n) => list.find(p => p && String(p.name || '').trim() === n);
     let delta = 0, unknown = false;
     for (const n of payProducts) {
-      const a = _productCost(byName(after, n)), b = _productCost(byName(before, n));
+      const a = _productCost(byName(after, (renameMap && renameMap.get(n)) || n)), b = _productCost(byName(before, n));   // 이름을 바꾼 상품은 바뀐 이름으로(7단계-④ ③)
       if (a == null || b == null) { unknown = true; break; }
       delta += a - b;
     }
@@ -800,6 +881,24 @@ async function _closeRemovedInTx(client, camp, theirs, next, structure) {
 /** 더한 선택지 검사(쓰기 전) — 인원 1명 이상 · 이름 있음. */
 function validateStructure(next, structure) {
   if (!structure) return null;
+  if ((structure.renamedOptions || []).length || (structure.renamedProducts || []).length) {
+    // 이름을 바꾼 뒤 같은 상품 안에 같은 옵션 이름(마감 줄 포함), 같은 이름의 상품이 둘이면 안 된다(줄 짝이 갈린다)
+    const list = _parseList(next.product_options_json) || [];
+    const names = list.map(x => String(x && x.name || '').trim());
+    const dupP = names.find((n, i) => n && names.indexOf(n) !== i);
+    if (dupP) return { code: 'structure_rename_conflict', error: `같은 이름의 상품(「${dupP}」)이 둘이 됩니다. 다른 이름으로 바꿔 주세요.` };
+    for (const x of list) {
+      const labs = (Array.isArray(x && x.options) ? x.options : []).map(optionKey);
+      const dupO = labs.find((l, i) => l && labs.indexOf(l) !== i);
+      if (dupO) return { code: 'structure_rename_conflict', error: `「${String(x.name || '').trim()}」에 같은 이름의 옵션(「${dupO}」 — 마감된 옵션 포함)이 둘이 됩니다. 다른 이름으로 바꿔 주세요.` };
+    }
+    for (const r of structure.renamedOptions || []) if (!String(r.to || '').trim()) return { code: 'structure_add_invalid', error: '옵션 이름을 비울 수 없습니다.' };
+    for (const r of structure.renamedOptions || []) {
+      const x = list.find(y => String(y && y.name || '').trim() === ((structure.productRenameMap && structure.productRenameMap.get(r.pName)) || r.pName));
+      if (_tiersOn(x)) return { code: 'quantity_tiers_locked', error: '구매수량 단계를 쓰는 상품의 옵션 이름은 바꿀 수 없습니다(단계 표가 옵션 이름으로 짝지어져 있다). 새 리뷰오더로 만들어 주세요.' };
+    }
+    for (const r of structure.renamedProducts || []) if (!String(r.to || '').trim()) return { code: 'structure_add_invalid', error: '상품 이름을 비울 수 없습니다.' };
+  }
   for (const r of structure.removedProducts) {
     if (_tiersOn(r.entry)) return { code: 'quantity_tiers_locked', error: `구매수량 단계를 쓰는 상품(「${r.pName}」)은 접수 뒤 더하거나 지울 수 없습니다. 새 리뷰오더로 만들어 주세요.` };
   }
@@ -886,8 +985,16 @@ async function _releaseRemovedSlotsInTx(client, camp, keys) {
  * ★ 거부: 짝을 못 지음 · 옵션 있음↔없음이 바뀜(5번째 단계) · 옵션 줄 없는 공고 · 남는 줄의 공고 열쇠가 바뀜(다른 상품에 같은 옵션 이름) ·
  *   같은 이름의 살아 있는 줄 · 지우려는 줄에 그 사이 참여자가 생김.
  */
-async function _projectStructureInTx(client, camp, prev, next) {
-  const pu = _unitsOf(prev), nu = _unitsOf(next);
+async function _projectStructureInTx(client, camp, prev, next, structure = {}) {
+  const pu0 = _unitsOf(prev), nu = _unitsOf(next);
+  // 7단계-④ ③ — 이름을 바꾼 상품·옵션은 원래 단위를 새 이름으로 옮겨 짝짓는다(안 그러면 "지우고 더함" 으로 읽힌다)
+  const prMap = structure.productRenameMap || new Map();
+  const orMap = new Map((structure.renamedOptions || []).map(r => [`${r.pName}\u0000${r.from}`, r.to]));
+  const pu = pu0 === null ? null : pu0.map(u => {
+    const np = prMap.get(u.pName) || u.pName;
+    const nl = u.oLabel ? (orMap.get(`${u.pName}\u0000${u.oLabel}`) || u.oLabel) : '';
+    return { ...u, id: `${np}\u0000${nl}`, renamed: np !== u.pName || nl !== u.oLabel, productRenamed: np !== u.pName ? { from: u.pName, to: np } : null };
+  });
   if (pu === null || nu === null) return _STRUCT_REJECT('structure_unmatched', '리뷰오더의 상품·옵션과 모집공고의 줄을 짝지을 수 없어 저장하지 않았습니다. 모집공고에서 상품 줄 이름을 먼저 맞춰 주세요.');
   const { rows: optRows } = await client.query(
     `SELECT id, opt_key, status, sort_order FROM campaign_options WHERE campaign_id = $1 AND COALESCE(status,'active') <> 'deleted' ORDER BY id FOR UPDATE`, [camp.id]);
@@ -895,9 +1002,36 @@ async function _projectStructureInTx(client, camp, prev, next) {
     return _STRUCT_REJECT('structure_mode_pending', '옵션 없이 상품 하나로 도는 공고는 아직 상품·옵션을 더하거나 지울 수 없습니다(옵션 있음·없음 바꾸기와 함께 엽니다). 모집공고 담당자에게 알려 주세요.');
   }
   const pMap = new Map(pu.map(u => [u.id, u])), nMap = new Map(nu.map(u => [u.id, u]));
+  // 이름 바꾸기 — 공고 줄 이름(opt_key)·상품 이름·참여 기록·품절 신고·빈 작업표 줄(단일 출처 campaignOptionRename)
+  const renamePlan = [], productNameFix = [];
   for (const [k, u] of nMap) {
     const b = pMap.get(k);
-    if (b && b.optKey !== u.optKey) {
+    if (!b || !b.renamed) continue;
+    if (b.optKey !== u.optKey) renamePlan.push({ from: b.optKey, to: u.optKey });
+    if (b.productRenamed) productNameFix.push({ optKey: u.optKey, from: b.productRenamed.from, to: b.productRenamed.to });
+  }
+  if (renamePlan.length || productNameFix.length) {
+    const { rows: cur0 } = await client.query(`SELECT opt_key FROM campaign_options WHERE campaign_id = $1`, [camp.id]);
+    const curKeys = new Set(cur0.map(r => r.opt_key));
+    const leaving = new Set(renamePlan.map(r => r.from));
+    for (const r of renamePlan) {
+      if (!curKeys.has(r.from)) return _STRUCT_REJECT('option_key_mismatch', `모집공고에서 「${r.from}」 줄을 찾지 못했습니다. 모집공고의 상품 줄 이름을 맞춘 뒤 다시 저장해 주세요.`);
+      if (curKeys.has(r.to) && !leaving.has(r.to)) return _STRUCT_REJECT('structure_rename_conflict', `모집공고에 「${r.to}」 줄이 이미 있어(마감된 줄 포함) 이 이름으로 바꿀 수 없습니다. 다른 이름으로 바꿔 주세요.`);
+    }
+    await require('./campaignOptionRename.service').applyRenamePlanInTx(client, camp.id, renamePlan);
+    for (const f of productNameFix) {
+      await client.query(`UPDATE campaign_options SET product_name = $3, updated_at = NOW() WHERE campaign_id = $1 AND opt_key = $2`, [camp.id, f.optKey, f.to]);
+    }
+    const pPairs = [...new Map(productNameFix.map(f => [f.from, f.to])).entries()].map(([from, to]) => ({ from, to }));
+    if (pPairs.length) await require('./campaignOptionRename.service').relabelEmptySlotsInTx(client, camp.id, [], pPairs);
+    // 바뀐 이름으로 다시 읽는다(아래 더하기·지우기 판정이 지금 줄을 본다)
+    const { rows: fresh } = await client.query(
+      `SELECT id, opt_key, status, sort_order FROM campaign_options WHERE campaign_id = $1 AND COALESCE(status,'active') <> 'deleted' ORDER BY id FOR UPDATE`, [camp.id]);
+    optRows.length = 0; optRows.push(...fresh);
+  }
+  for (const [k, u] of nMap) {
+    const b = pMap.get(k);
+    if (b && !b.renamed && b.optKey !== u.optKey) {
       return _STRUCT_REJECT('option_key_shift', `여러 상품에 같은 옵션 이름(「${u.oLabel}」)이 있거나 생기거나 없어져 모집공고의 줄 이름이 바뀌어야 합니다 — 상품마다 옵션 이름이 겹치지 않게 해 주세요.`);
     }
   }
@@ -960,7 +1094,7 @@ async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTo
   // 7단계-④ 상품·옵션 더하기·지우기·마감 — 줄을 먼저 맞춘다(뒤이은 인원·가이드·금액 투영이 그 줄을 찾는다)
   let structureOut = null;
   if (extra.structureTouched) {
-    structureOut = await _projectStructureInTx(client, camp, extra.prev || {}, next);
+    structureOut = await _projectStructureInTx(client, camp, extra.prev || {}, next, extra.structure || {});
     if (structureOut.reject) return { reject: structureOut.reject };
     applied.push('structure');
     // 가이드유입 작업에 가이드 없는 선택지가 생기면 거부(선택지 가이드 투영과 같은 검사 — 구조 경로는 가이드 변경 표시를 안 세운다 · 검토 2026-10-21)
@@ -1134,6 +1268,8 @@ async function applySharedPatch(p) {
         error: '수정 화면을 연 뒤 기준 정보가 사라졌습니다. 창을 닫고 다시 열어 주세요.' });
     }
     const base = baseRows[0].state;
+    // 7단계-④ ③ — 기준에 없는 원래 이름(prev_name/prev_label)은 이름 바꾸기가 아니다(재전송 등) — 지우고 판정한다
+    p = { ...p, mine: sanitizeRenames(base, p.mine) };
     const plan = planSharedPatch({ base, mine: p.mine, theirs, origin: p.origin, forceMine: p.forceMine || [] });
 
     /* ★ 배포 순서 안전장치(5단계 · 검토 2026-10-20) — 금액을 모르는 옛 인트라넷(저장 본문에 `bidir.money` 표시 없음)은 리뷰비·상품 금액을
@@ -1187,7 +1323,7 @@ async function applySharedPatch(p) {
 
     // 7단계-④ — 상품·옵션 더하기·지우기 표시(구조를 모르는 옛 인트라넷 창은 그 경로를 막는다)
     const structureCapable = p.origin !== 'intranet' || p.structureCapable === true;
-    markStructureRows(plan, base, p.mine, { structureCapable, theirs });
+    markStructureRows(plan, base, p.mine, { structureCapable, renameCapable: p.origin !== 'intranet' || p.renameCapable === true, theirs });
     // ★ 구조를 모르는 옛 인트라넷 창 — 마감 표시(그 창은 마감을 모른다)와 마감 줄 안의 칸은 "안 보낸 칸" 으로 버린다(금액·인원과 같은 장치 · 검토 2026-10-21).
     //   안 버리면 마감 줄이 생긴 오더는 옛 창에서 저장할 때마다 막힌다(인트라넷을 되돌리면 그 오더들이 전부 저장 불가).
     if (!structureCapable) {
@@ -1243,7 +1379,7 @@ async function applySharedPatch(p) {
     const qtyFieldWritten = plan.writes.some(w => w.meta && w.meta.kind === 'field' && PHASE7Q_SHARED_FIELDS.includes(w.meta.key));
     const quantityChanged = quantityTouched || qtyFieldWritten;
     if (quantityChanged) {
-      const qErr = validateQuantities(next, qtyProducts);
+      const qErr = validateQuantities(next, new Set([...qtyProducts].map(n => (structure.productRenameMap && structure.productRenameMap.get(n)) || n)));
       if (qErr) return await _abort(client, 409, { ok: false, code: qErr.code, sync_version: curVersion, error: qErr.error });
     }
     // 옛 인트라넷이 금액을 버린 저장인데 상품 주소가 바뀌었으면, 그 저장이 보낸 요약 문장(옛 금액이 적힌)을 쓰지 않는다
@@ -1256,10 +1392,19 @@ async function applySharedPatch(p) {
     if (closure.addTotal) writtenKeys.add('recruit_count');   // 마감으로 되살린 인원만큼 총모집이 늘었다
     // 인원이 바뀐 상품도 상품구입비(금액 × 인원)가 바뀐다 — 결제합계·요약 문장을 같이 다시 만든다
     const costProducts = new Set([...payProducts, ...qtyProducts]);
-    const derived = derivePayFields({ base, theirs, mine: p.mine, next, payProducts: costProducts, origin: p.origin, recompute: closure.restored.length > 0 });
+    const derived = derivePayFields({ base, theirs, mine: p.mine, next, payProducts: costProducts, origin: p.origin, recompute: closure.restored.length > 0,
+      renameMap: structure.productRenameMap });
     if (derived.payAmountNote) logger.info(`[bidir/apply] ${wo.id} 결제합계: 구매수량 단계 상품이라 차이를 계산하지 않음(${derived.payAmountNote})`);
     if (derived.pay_amount !== undefined) next.pay_amount = derived.pay_amount;
     if (derived.product_option !== undefined) next.product_option = derived.product_option;
+    // 7단계-④ ③ 이름만 바꾼 저장(금액·인원 그대로)도 상품 요약 문장은 이름이 바뀐다 — 인트라넷이 보낸 문장이 없으면 리뷰웹이 다시 만든다
+    if (derived.product_option === undefined && ((structure.renamedOptions || []).length || (structure.renamedProducts || []).length)
+        && !(p.origin === 'intranet' && p.mine && p.mine.product_option !== undefined)) {
+      const { regenerateSummary } = require('../utils/orderProductSummary');
+      const rs = regenerateSummary({ prevJson: theirs.product_options_json, prevText: theirs.product_option, nextJson: next.product_options_json });
+      next.product_option = rs.text != null ? rs.text : theirs.product_option;
+      if (rs.text == null) logger.info(`[bidir/apply] ${wo.id} 상품 요약 문장은 옛 문장 유지(${rs.reason}) — 이름만 바뀜`);
+    }
     if (derived.summaryKept) logger.info(`[bidir/apply] ${wo.id} 상품 요약 문장은 옛 문장 유지(${derived.summaryKept}) — 결제금액만 바뀜`);
 
     // ── 오더 쓰기(쓴 칸 + 함께 쓰는 칸) ──
@@ -1299,7 +1444,7 @@ async function applySharedPatch(p) {
     let campaign = { applied: [] };
     if (camp && plan.writes.length) {
       campaign = await projectToCampaignInTx(client, camp, next, writtenKeys, productsTouched,
-        { prev: theirs, payTouched, urlTouched, guideTouched, quantityChanged, structureTouched, actor: p.actor || p.origin });
+        { prev: theirs, payTouched, urlTouched, guideTouched, quantityChanged, structureTouched, structure, actor: p.actor || p.origin });
       if (campaign.reject) {
         const { campaignSyncNotice } = require('./campaignPayAmountSync.service');
         return await _abort(client, 409, { ok: false, code: 'campaign_rejected', sync_version: curVersion,
@@ -1402,6 +1547,6 @@ async function linkSharedOrder({ workOrderId, actor = '', dryRun = false, db } =
 }
 
 module.exports = {
-  applySharedPatch, linkSharedOrder, readSharedState, applyWrites, writablePath, projectToCampaignInTx, derivePayFields, validateQuantities, markStructureRows, STRUCTURE_FIELD, structureOpenFor, structurePermanentlyLocked,
+  applySharedPatch, linkSharedOrder, readSharedState, sanitizeRenames, renamedParents, RENAME_FIELD, applyWrites, writablePath, projectToCampaignInTx, derivePayFields, validateQuantities, markStructureRows, STRUCTURE_FIELD, structureOpenFor, structurePermanentlyLocked,
   PHASE3_SHARED_FIELDS, PHASE5_SHARED_FIELDS, PHASE7Q_SHARED_FIELDS, PHASE7W_SHARED_FIELDS, PUSH_VIEW_KEYS, WRITABLE_BY_ORIGIN, INTRANET_EDITABLE_AFTER_ACCEPT, NEXT_VERSION_SQL, _pushBackKeys,
 };

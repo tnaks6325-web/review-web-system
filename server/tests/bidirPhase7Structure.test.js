@@ -264,7 +264,7 @@ async function pg() {
       assert.equal(await A.snap(), before, label + ' — 쓰기 0');
     };
     // ── ① 아직 막힌 구조 변경(이름·배송 한 종류끼리·리뷰타입 = 다음 순서) · 영구 금지 ──
-    await blocked('옵션 이름', b => { b.options[0].optKey += '2'; }, 'structure_linked_pending', '옵션·상품 이름');
+    // 옵션 이름 바꾸기는 ③ 에서 열렸다 — bidirPhase7Rename 이 본다
     await blocked('배송 한 종류끼리', b => { b.delivery_type = '빈박스'; }, 'structure_linked_pending', '배송 방식');
     await blocked('리뷰타입', b => { b.review_type = '텍스트'; }, 'structure_linked_pending', '리뷰타입');
     await blocked('배송 혼합', b => { b.delivery_type = '혼합'; b.delivery_type_mix = [{ type: 'real', quantity: 10 }, { type: 'empty', quantity: 10 }];

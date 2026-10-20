@@ -908,6 +908,8 @@ async function _intakeSourceBidir(res, { b, source, current, optionsJson, delive
     weekendsCapable: !!(bid && (bid.weekends === 1 || bid.weekends === true || bid.weekends === '1')),
     // ★ 7단계-④: 상품·옵션 더하기·지우기는 그것을 아는 인트라넷 창만(옛 창은 그 버튼이 잠겨 있다 — 보내면 종전처럼 409)
     structureCapable: !!(bid && (bid.structure === 1 || bid.structure === true || bid.structure === '1')),
+    // ★ 7단계-④ ③: 이름 바꾸기도 그것을 아는 창만(원래 이름 prev_name/prev_label 을 싣는 창)
+    renameCapable: !!(bid && (bid.rename === 1 || bid.rename === true || bid.rename === '1')),
     preHook: _sourceRevisionPreHook(source),
     extraSets: {
       source_revision: source.sourceRevision,
@@ -1307,7 +1309,7 @@ router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) 
       `SELECT * FROM work_orders WHERE source_review_order_id = $1 LIMIT 1`, [sid]);
     if (!rows.length || rows[0].deleted_at) return res.status(404).json({ ok: false, error: '작업오더를 찾을 수 없습니다.' });
     const sw = await readBidirSwitch(pool);
-    const { WRITABLE_BY_ORIGIN, readSharedState, STRUCTURE_FIELD, structureOpenFor } = require('../services/sharedPatch.service');
+    const { WRITABLE_BY_ORIGIN, readSharedState, STRUCTURE_FIELD, RENAME_FIELD, structureOpenFor } = require('../services/sharedPatch.service');
     const active = rows[0].bidir_state === 'on' && sw.in2rw === 'apply';
     const structureOpen = active ? await structureOpenFor(pool, rows[0]) : false;
     res.json({
@@ -1318,7 +1320,7 @@ router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) 
       sync_version: Number(rows[0].sync_version || 0),
       // 인트라넷 수정 창은 이 목록으로 잠금을 푼다(접수 뒤 잠금 목록에 더한다 · 5단계 리뷰비 포함). 상품 구성 안의 결제금액·주소는 키 단위로 이미 열려 있다.
       // ★ 7단계-④: 상품·옵션 더하기·지우기는 공고에 옵션 줄이 있는 작업만 연다(옵션 없이 상품 하나로 도는 공고는 옵션 있음·없음 바꾸기 단계 — 열면 저장 때 막힌다)
-      writable: active ? [...WRITABLE_BY_ORIGIN.intranet].filter(f => f !== STRUCTURE_FIELD || structureOpen) : null,
+      writable: active ? [...WRITABLE_BY_ORIGIN.intranet].filter(f => (f !== STRUCTURE_FIELD && f !== RENAME_FIELD) || structureOpen) : null,
       /* ★★ 이 버전의 공유 값(저장 형태 그대로) — 인트라넷 수정 창은 이 값으로 연다.
          안 그러면 창이 인트라넷 사본(리뷰웹에서 고친 글 칸이 아직 안 온 값)으로 열리고, 손대지 않은 칸이
          "인트라넷이 되돌렸다" 로 읽혀 리뷰웹 수정을 조용히 덮는다(로컬 E2E 실측 2026-10-20). */
