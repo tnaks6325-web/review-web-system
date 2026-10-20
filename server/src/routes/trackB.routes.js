@@ -19,6 +19,7 @@ const sheetlessStatus = require('../services/sheetlessStatus.service');
 const shareLinks = require('../services/shareLink.service');   // 작업보드·업체 공유 링크(131)
 const { isTrackingField } = require('../utils/trackingColumn');   // 택배송장 열 판정 단일 출처(사본 금지)
 const { addClient: addSseClient } = require('../utils/sse');
+const shortLinkSvc = require('../services/shortLink.service');
 // ★ 이 파일은 예전부터 `logger` 를 최상위 import 없이 써 왔다(review-inspect 목록 실패 경로) —
 //   그 자리는 평소 안 타서 드러나지 않았을 뿐 ReferenceError 였다. 여기서 함께 바로잡는다.
 const { logger } = require('../utils/logger');
@@ -559,7 +560,8 @@ function internalMiddleware(req, res, next) {
 // 광고주·리뷰어는 구매자 이름/수취인 정보가 섞인 전역 이벤트를 구독할 수 없다.
 router.get('/events', authMiddleware, internalMiddleware, (req, res) => {
   const exp = Number(req.admin && req.admin.exp);
-  addSseClient(req, res, { role: 'workdesk', expiresAt: Number.isFinite(exp) ? exp * 1000 : Date.now() });
+  // userRole = 로그인 등급(master/admin/staff) — 관리자 전용 이벤트(새 작업오더 도착, 결정 268)를 고르는 데만 쓴다.
+  addSseClient(req, res, { role: 'workdesk', userRole: _role(req), expiresAt: Number.isFinite(exp) ? exp * 1000 : Date.now() });
 });
 
 router.get('/advertisers', authMiddleware, internalMiddleware, async (req, res, next) => {
@@ -622,6 +624,21 @@ router.post('/share-link', authMiddleware, internalMiddleware, async (req, res, 
     if (err && err.status === 400) return res.status(400).json({ ok: false, error: err.message });
     next(err);
   }
+});
+
+// ── 구매양식 링크(리뷰어용 단축링크) — 옛 관리자 대시보드 [🔗] 를 작업보드로 옮긴 것 (결정 268 · 사용자 확정 2026-10-21) ──
+//   위 share-link(직원끼리 주고받는 작업보드 주소)와 **다르다**: 이 링크는 리뷰어가 로그인 뒤 구매양식을 내는 search.html 로 간다.
+//   ★ 재료(gid·표시이름)는 서버가 tab_configs 에서 읽는다 — 화면이 보낸 값을 믿지 않는다. 코드 규칙은 shortLink.service 한 곳.
+//   ★ 게이트는 작업보드 본문과 같은 _ensureEditScope(내부 직원=허용 · 광고주=차단) — 여기만 좁히면 막다른 길이 된다.
+router.post('/form-link', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.body || {};
+    const g = await _ensureEditScope(req, sheetId, tabName);
+    if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const out = await shortLinkSvc.ensureTabFormLink({ sheetId, tabName });
+    if (!out.ok) return res.status(out.code || 400).json({ ok: false, error: out.error });
+    res.json({ ok: true, code: out.code, reused: out.reused });
+  } catch (err) { next(err); }
 });
 
 // 코드 → 대상 되찾기. ★ 작업 링크는 여기서 canAccessTab 을 통과해야 한다(담당 밖에는 탭 이름조차 안 준다).

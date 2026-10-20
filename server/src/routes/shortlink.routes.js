@@ -3,17 +3,8 @@ const router = express.Router();
 const pool = require('../db/pool');
 const { authMiddleware } = require('../middleware/auth.middleware');
 
-// 혼동문자 제외 영숫자 (GAS 원본 동일)
-const SHORT_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789';
-const SHORT_CODE_LEN = 6;
-
-function generateShortCode() {
-  let code = '';
-  for (let i = 0; i < SHORT_CODE_LEN; i++) {
-    code += SHORT_CHARS.charAt(Math.floor(Math.random() * SHORT_CHARS.length));
-  }
-  return code;
-}
+// 코드 생성·재사용 규칙은 services/shortLink.service.js 한 곳(작업보드 [🔗 구매양식 링크] 와 공용 — 결정 268).
+const { ensureShortLink } = require('../services/shortLink.service');
 
 // ═══════════════════════════════════════════════════════════
 // POST /api/short/create — 단축URL 생성 (GAS: createShort)
@@ -23,70 +14,9 @@ router.post('/create', authMiddleware, async (req, res, next) => {
   try {
     const { s, g, t, d, options, optionList, rd } = req.body;
     const round = rd || req.body.round || '';  // 차수 (rd 또는 round)
-    if (!s || !t) return res.json({ error: 's(sheetId)와 t(tabName)은 필수입니다.' });
-
-    // 옵션 리스트 처리
-    let finalOptions = options || optionList || [];
-    if (typeof finalOptions === 'string') {
-      try { finalOptions = JSON.parse(finalOptions); } catch (_) { finalOptions = []; }
-    }
-
-    // composite key: 동일 파라미터 조합 재사용 (round 포함)
-    const compositeKey = `${s}|${g || ''}|${t}|${d || ''}|${round}`;
-
-    // 기존 코드 확인
-    const { rows: existing } = await pool.query(
-      'SELECT code, option_list FROM short_links WHERE composite_key = $1 LIMIT 1',
-      [compositeKey]
-    );
-
-    if (existing.length > 0) {
-      const existCode = existing[0].code;
-      // optionList가 변경됐으면 업데이트
-      if (finalOptions.length > 0) {
-        const currentOptions = existing[0].option_list || [];
-        if (JSON.stringify(currentOptions) !== JSON.stringify(finalOptions)) {
-          await pool.query(
-            'UPDATE short_links SET option_list = $1 WHERE code = $2',
-            [JSON.stringify(finalOptions), existCode]
-          );
-        }
-      }
-      // round가 변경됐으면 업데이트
-      if (round) {
-        await pool.query(
-          'UPDATE short_links SET round = $1 WHERE code = $2',
-          [round, existCode]
-        );
-      }
-      return res.json({ success: true, code: existCode, shortUrl: existCode, reused: true });
-    }
-
-    // 새 코드 생성 (중복 방지 루프)
-    let code, attempts = 0;
-    while (attempts < 10) {
-      code = generateShortCode();
-      try {
-        await pool.query(
-          `INSERT INTO short_links (code, sheet_id, gid, tab_name, display_name, option_list, composite_key, round)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [code, s, g || '', t, d || '', finalOptions.length > 0 ? JSON.stringify(finalOptions) : null, compositeKey, round]
-        );
-        break;
-      } catch (err) {
-        if (err.code === '23505') { // unique violation
-          attempts++;
-          continue;
-        }
-        throw err;
-      }
-    }
-
-    if (attempts >= 10) {
-      return res.json({ error: '단축 코드 생성 실패' });
-    }
-
-    res.json({ success: true, code, shortUrl: code, reused: false });
+    const out = await ensureShortLink({ s, g, t, d, round, options: options || optionList || [] });
+    if (!out.ok) return res.json({ error: out.error });
+    res.json({ success: true, code: out.code, shortUrl: out.code, reused: out.reused });
   } catch (err) {
     next(err);
   }

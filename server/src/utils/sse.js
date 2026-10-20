@@ -211,11 +211,19 @@ function emitOrderUpdate(data) {
 }
 
 // 작업오더 신규 제출(AE submit / 인트라넷 intake) + 보완 재제출(revision→submitted)
+// ★ 받는 쪽: 관리자 연결(role='admin') + 리뷰웹시스템[3버전] 연결 중 로그인 등급이 master/admin 인 것(결정 268).
+//   옛 관리자 대시보드가 폐기되며(결정 267) 이 알림을 듣던 화면이 사라졌다 — AE(staff)는 보내는 쪽이라 받지 않는다.
+function workOrderNewTarget(client) {
+  const m = client && client.meta;
+  if (!m) return true;
+  if (m.role === 'admin') return true;
+  return m.role === 'workdesk' && (m.userRole === 'master' || m.userRole === 'admin');
+}
 function emitWorkOrderNew(data) {
   broadcast('work_order_new', {
     message: `새 작업오더: ${data.title || ''} — ${data.created_by || ''}${data.resubmitted ? ' (재제출)' : ''}`,
     ...data,
-  });
+  }, workOrderNewTarget);
 }
 
 // ── 주문 원장(order ledger) — 편집/취소/수동추가/큐 상태변경 단일 이벤트(PR-B) ──
@@ -290,6 +298,7 @@ module.exports = {
   emitOrderSubmit,
   emitOrderUpdate,
   emitWorkOrderNew,
+  workOrderNewTarget,
   emitOrderLedger,
   emitImageExtract,
   emitImageUpload,
