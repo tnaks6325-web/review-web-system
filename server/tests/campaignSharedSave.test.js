@@ -57,7 +57,7 @@ const read = (rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
   // ★ 7단계-②: 인원 칸(총모집·일건수·혼합 수량)이 더해졌다 — 인트라넷 고유 칸 제외는 그대로(아래)
   // 7단계-③(2026-10-21): 주말 제외(PHASE7W)가 더해졌다 — 공고 창 쓰기 칸 = 공유 칸 묶음(인트라넷 고유 칸 없음)이라는 뜻은 그대로
   // 7단계-④ ⑤(2026-10-21): 배송 한 종류(PHASE7D)가 더해졌다 — 검사 의미 불변(공고 창발 = 공유 칸만)
-  assert.match(sp, /campaign: new Set\(\[\.\.\.PHASE3_SHARED_FIELDS, \.\.\.PHASE5_SHARED_FIELDS, \.\.\.PHASE7Q_SHARED_FIELDS, \.\.\.PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, \.\.\.PHASE7R_SHARED_FIELDS, \.\.\.PHASE7D_SHARED_FIELDS\]\)/);
+  assert.match(sp, /campaign: new Set\(\[\.\.\.PHASE3_SHARED_FIELDS, \.\.\.PHASE5_SHARED_FIELDS, \.\.\.PHASE7Q_SHARED_FIELDS, \.\.\.PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, MODE_FIELD, \.\.\.PHASE7R_SHARED_FIELDS, \.\.\.PHASE7D_SHARED_FIELDS\]\)/);   // 7단계-④ ⑤-3 MODE_FIELD 더함(검사 의미 불변 — 공고 창 쓰기 칸 목록 고정)
   assert.doesNotMatch(sp.match(/\n  campaign: new Set\([^\n]*/)[0], /INTRANET_EDITABLE_AFTER_ACCEPT/, '공고 창발에 인트라넷 고유 칸 없음');
   assert.match(sp, /const PHASE5_SHARED_FIELDS = Object\.freeze\(\['review_fee'\]\);/);
   console.log('campaignSharedSave: static passed');

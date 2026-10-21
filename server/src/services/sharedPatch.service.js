@@ -51,6 +51,8 @@ const PHASE7W_SHARED_FIELDS = Object.freeze(['skip_weekends']);
 const STRUCTURE_FIELD = 'product_structure';
 /** 7단계-④ ③ 상품·옵션 이름 바꾸기 — 보내는 쪽이 원래 이름(prev_name/prev_label)을 실은 줄만. 수정 창 잠금 해제 목록에도 이 이름. */
 const RENAME_FIELD = 'product_rename';
+/** 7단계-④ ⑤-3 옵션 있음↔없음 바꾸기 — 그 상품에 참여·구매가 하나도 없을 때만(사용자 확정 2026-10-21 「2.가」). 수정 창 잠금 해제 목록에도 이 이름. */
+const MODE_FIELD = 'product_mode';
 /** 리뷰웹 → 인트라넷으로 보내는 칸(수정 창이 리뷰웹 값으로 덮는 칸과 같다). 상품 구성·합계·요약은 금액이 함께 움직이는 짝. */
 const PUSH_VIEW_KEYS = Object.freeze([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, ...PHASE7R_SHARED_FIELDS, ...PHASE7D_SHARED_FIELDS, 'pay_amount', 'product_options_json', 'product_option']);
 /** 인트라넷 고유 칸 중 접수 뒤에도 고칠 수 있는 것 — 종전 원본 수정 허용 목록·계약 후속 매칭과 같은 범위. */
@@ -59,10 +61,10 @@ const INTRANET_EDITABLE_AFTER_ACCEPT = Object.freeze([
 ]);
 /** 리뷰웹발 수정(관리자 오더 수정)이 쓸 수 있는 칸 — 인트라넷 고유는 제외. */
 const WRITABLE_BY_ORIGIN = {
-  intranet: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, ...PHASE7R_SHARED_FIELDS, ...PHASE7D_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
-  reconcile: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, ...PHASE7R_SHARED_FIELDS, ...PHASE7D_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
+  intranet: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, MODE_FIELD, ...PHASE7R_SHARED_FIELDS, ...PHASE7D_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
+  reconcile: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, MODE_FIELD, ...PHASE7R_SHARED_FIELDS, ...PHASE7D_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
   rw_admin: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS]),
-  campaign: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, ...PHASE7R_SHARED_FIELDS, ...PHASE7D_SHARED_FIELDS]),   // 4단계-2 공고 편집 창(campaignSharedSave) — 리뷰웹발이라 인트라넷 고유 칸은 제외
+  campaign: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, MODE_FIELD, ...PHASE7R_SHARED_FIELDS, ...PHASE7D_SHARED_FIELDS]),   // 4단계-2 공고 편집 창(campaignSharedSave) — 리뷰웹발이라 인트라넷 고유 칸은 제외
 };
 const KNOWN_CHANNELS = new Set(['쿠팡', '네이버', '올리브영', '카카오메이커스']);
 const SNAPSHOT_KEYS = Object.freeze([...SHARED_FIELDS.map(f => f.key), 'product_options_json', 'product_option']);
@@ -163,6 +165,10 @@ function writablePath(row, origin) {
   // 마감된 선택지(양쪽 다 마감)의 칸은 못 고친다 — 인원은 이미 참여한 수로 굳었다. 다시 열기(closed 칸이 풀림)는 아래에서.
   if (row.parentClosed) return false;
   if (m.kind === 'leaf' && m.key === 'closed') return !row.noStructure && set.has(STRUCTURE_FIELD) && _truthy(row.base) && !_truthy(row.mine);
+  // 7단계-④ ⑤-3 옵션 있음↔없음 — 상품 방식·기준값 칸은 한 묶음(참여자 검사는 저장 때 · 방식을 모르는 옛 인트라넷 창은 막음)
+  if (row.modeSwitch) return !row.noStructure && !row.noMode && set.has(MODE_FIELD);
+  // 방식 칸 표기만 다른 것(옛 자료에 방식 칸이 없고 옵션 유무가 같다) = 바뀐 것 없음
+  if (m.kind === 'leaf' && m.key === 'product_mode') return !!row.modeSame;
   // 7단계-④ ④ 리뷰타입·섞는 종류 — 리뷰타입을 아는 저장만(noReviewType = 옛 인트라넷 창)
   const typesOk = set.has('review_type') && !row.noReviewType;
   if (m.kind === 'field') {
@@ -199,8 +205,21 @@ const _truthy = v => v === 'true' || v === '1' || v === true;
  *   parentClosed = 기준에서도 보낸 값에서도 마감인 선택지의 칸.
  *   noStructure  = 구조를 모르는 옛 인트라넷 창.
  */
-function markStructureRows(plan, base, mine, { structureCapable = true, renameCapable = true, reviewTypeCapable = true, theirs = null } = {}) {
+function markStructureRows(plan, base, mine, { structureCapable = true, renameCapable = true, reviewTypeCapable = true, modeCapable = true, theirs = null } = {}) {
   const { flattenState } = require('../utils/sharedPatchPlan');
+  // ⑤-3 상품별 방식(옵션 있음·없음) — 방식 칸이 없으면 옵션 유무로(옛 자료). 보낸 값은 원래 이름(prev_name)으로 짝짓는다.
+  const modes = st => {
+    const out = new Map();
+    for (const p of _parseList(st && st.product_options_json) || []) {
+      if (!p || typeof p !== 'object') continue;
+      const k = String(p.prev_name || '').trim() || String(p.name || '').trim();
+      const md = String(p.product_mode || '').trim();
+      out.set('p:' + k, md === 'opt' || md === 'none' ? md : ((Array.isArray(p.options) && p.options.length) ? 'opt' : 'none'));
+    }
+    return out;
+  };
+  const bm = modes(base), mm = modes(mine);
+  const switched = new Set([...bm].filter(([k, v]) => mm.has(k) && mm.get(k) !== v).map(([k]) => k));
   const T = theirs ? flattenState(theirs) : null;
   const renamed = renamedParents(mine);
   const rows = [...plan.writes, ...plan.conflicts];
@@ -220,6 +239,10 @@ function markStructureRows(plan, base, mine, { structureCapable = true, renameCa
     if (m.kind === 'option' && moved.has(productOf(w.path))) { w.covered = true; continue; }
     if (m.kind !== 'leaf' || !m.parent) continue;
     if (moved.has(m.parent) || (productOf(m.parent) && moved.has(productOf(m.parent)))) { w.covered = true; continue; }
+    if (['product_mode', 'base'].includes(m.key) && !m.parent.includes('|o:')) {
+      if (switched.has(m.parent)) { w.modeSwitch = true; if (!modeCapable) w.noMode = true; }
+      else if (m.key === 'product_mode') w.modeSame = true;
+    }
     if (renamed.has(m.parent) && (m.parent.includes('|o:') ? ['label', 'option_1', 'option_2'] : ['name']).includes(m.key)) {
       w.rename = true;
       if (closedIn(B, m.parent)) w.renameClosed = true;   // 기준에서 마감인 줄은 다시 열면서 이름을 바꿀 수도 없다(재검토 2026-10-21)
@@ -387,7 +410,7 @@ function applyWrites(theirs, mine, writes) {
   const nextProducts = _parseList(next.product_options_json);
   const mineProducts = _parseList(mine && mine.product_options_json) || [];
   // 7단계-④ 더한·지운·다시 연 상품·옵션(이름) — 공고 반영·마감 처리가 읽는다
-  const structure = { addedProducts: [], removedProducts: [], addedOptions: [], removedOptions: [], reopened: [] };
+  const structure = { addedProducts: [], removedProducts: [], addedOptions: [], removedOptions: [], reopened: [], modeSwitched: [] };
   const pNameOf = p => String(p && p.name || '').trim();
   // 보낸 값 쪽은 원래 이름으로 찾는다(경로는 원래 이름 — 이름을 바꾼 줄도 같은 경로)
   const mineKeyP = p => String(p && p.prev_name || '').trim() || pNameOf(p);
@@ -471,6 +494,18 @@ function applyWrites(theirs, mine, writes) {
       else { missed.push(w.path); continue; }
     } else if (leaf === 'url') { tp.url = mp.url; urlTouched = true; }
     else if (leaf === 'guide') { if (mp.guide === undefined) delete tp.guide; else tp.guide = mp.guide; guideTouched = true; }
+    else if (leaf === 'product_mode') {   // ⑤-3 옵션 있음↔없음(판정이 허락한 줄만) · 표기만 다른 것도 보낸 값으로
+      if (mp.product_mode === undefined) delete tp.product_mode; else tp.product_mode = mp.product_mode;
+      if (w.modeSwitch) {
+        if (!structure.modeSwitched.includes(pName)) structure.modeSwitched.push(pName);
+        payProducts.add(pName); qtyProducts.add(pName); quantityTouched = true;
+      }
+    }
+    else if (leaf === 'base' && w.modeSwitch) {   // ⑤-3 방식이 바뀌면 기준값(상품 금액·인원)은 통째로 보낸 값
+      tp.base = JSON.parse(JSON.stringify(mp.base && typeof mp.base === 'object' ? mp.base : {}));
+      if (!structure.modeSwitched.includes(pName)) structure.modeSwitched.push(pName);
+      payProducts.add(pName); qtyProducts.add(pName); quantityTouched = true;
+    }
     else if (leaf === 'base') {
       const tb = tp.base && typeof tp.base === 'object' ? tp.base : {};
       const mb = mp.base && typeof mp.base === 'object' ? mp.base : {};
@@ -521,7 +556,7 @@ function applyWrites(theirs, mine, writes) {
   const productRenameMap = new Map(structure.renamedProducts.map(r => [r.from, r.to]));
   structure.productRenameMap = productRenameMap;
   const structureTouched = structure.addedProducts.length + structure.removedProducts.length + structure.addedOptions.length
-    + structure.removedOptions.length + structure.reopened.length + structure.renamedOptions.length + structure.renamedProducts.length > 0;
+    + structure.removedOptions.length + structure.reopened.length + structure.renamedOptions.length + structure.renamedProducts.length + structure.modeSwitched.length > 0;
   return { next, productsTouched, urlTouched, guideTouched, quantityTouched, payTouched: payProducts.size > 0, payProducts, qtyProducts, missed, structure, structureTouched };
 }
 
@@ -958,6 +993,40 @@ async function _adoptSoleProductInTx(client, camp, theirs) {
   await client.query(`UPDATE campaign_option_soldout_reports SET opt_key = $2 WHERE campaign_id = $1 AND opt_key = ''`, [camp.id, key]);
   logger.info(`[bidir/structure] ${camp.id} 옵션 없는 공고 → 상품 줄 「${key}」 만듦(참여 기록 ${moved}건 옮김${paused ? ' · 품절 멈춤 옮김' : ''})`);
   return { adopted: true, optKey: key, moved, paused };
+}
+
+/**
+ * 7단계-④ ⑤-3 옵션 있음↔없음 바꾸기 검사(같은 트랜잭션 · 사용자 확정 2026-10-21 「2.가」).
+ *   그 상품의 지금 선택지(옵션들 또는 상품 자체)에 참여·구매(바로 구매 포함 — usedByOption 단일 출처)가 하나라도 있으면 거부 —
+ *   지우면 마감으로 남겨야 하는데 한 상품 안에 방식이 다른 줄이 섞인다. 구매수량 단계 상품 · 마감 줄이 있는 상품도 거부.
+ *   바꾼 뒤 모양: 옵션 없음 = 상품 인원 1명 이상 · 옵션 있음 = 옵션 1개 이상(옵션 인원은 더하기 검사가 본다).
+ * @returns {{code:string, error:string}|null}
+ */
+async function _modeSwitchCheckInTx(client, camp, theirs, next, structure) {
+  const before = _parseList(theirs && theirs.product_options_json) || [];
+  const after = _parseList(next.product_options_json) || [];
+  const nm = p => String(p && p.name || '').trim();
+  const units = _unitsOf(theirs);
+  if (units === null) return { code: 'structure_unmatched', error: '리뷰오더의 상품·옵션과 모집공고의 줄을 짝지을 수 없어 저장하지 않았습니다. 모집공고에서 상품 줄 이름을 먼저 맞춰 주세요.' };
+  const used = camp ? await require('./linkedRecruitQuota.service').usedByOption(client, camp.id) : new Map();
+  for (const pName of structure.modeSwitched) {
+    const bp = before.find(p => nm(p) === pName), np = after.find(p => nm(p) === pName);
+    if (!bp || !np) return { code: 'write_unmatched', error: `「${pName}」 상품을 찾지 못해 저장하지 않았습니다. 창을 닫고 다시 열어 주세요.` };
+    if (_tiersOn(bp) || _tiersOn(np)) return { code: 'quantity_tiers_locked', error: `구매수량 단계를 쓰는 상품(「${pName}」)은 옵션 있음·없음을 바꿀 수 없습니다. 새 리뷰오더로 만들어 주세요.` };
+    if (_truthy(bp.closed) || (Array.isArray(bp.options) && bp.options.some(o => o && _truthy(o.closed)))) {
+      return { code: 'mode_closed', error: `「${pName}」에 마감된 줄이 있어 옵션 있음·없음을 바꿀 수 없습니다. 새 상품 줄로 더해 주세요.` };
+    }
+    const n = units.filter(u => u.pName === pName).reduce((a, u) => a + (used.get(u.optKey) || 0), 0);
+    if (n > 0) {
+      return { code: 'mode_in_use', error: `「${pName}」에 이미 참여한 분이 ${n}명 있어 옵션 있음·없음을 바꿀 수 없습니다. 그 상품을 마감하고 새 상품 줄로 더하거나 새 리뷰오더로 접수해 주세요.` };
+    }
+    const opts = Array.isArray(np.options) ? np.options : [];
+    const toOpt = String(np.product_mode || '').trim() === 'opt' || (!String(np.product_mode || '').trim() && opts.length > 0);
+    if (toOpt && !opts.length) return { code: 'structure_add_invalid', error: `「${pName}」을 옵션 있음으로 바꾸려면 옵션을 하나 이상 적어 주세요.` };
+    if (!toOpt && opts.length) return { code: 'structure_add_invalid', error: `「${pName}」을 옵션 없음으로 바꾸려면 옵션을 모두 지워 주세요.` };
+    if (!toOpt && !(Math.floor(_num(np.base && np.base.count)) >= 1)) return { code: 'structure_add_zero', error: `옵션 없음으로 바꾼 「${pName}」의 인원을 1명 이상으로 적어 주세요.` };
+  }
+  return null;
 }
 
 /**
@@ -1564,7 +1633,7 @@ async function applySharedPatch(p) {
     // 7단계-④ — 상품·옵션 더하기·지우기 표시(구조를 모르는 옛 인트라넷 창은 그 경로를 막는다)
     const structureCapable = p.origin !== 'intranet' || p.structureCapable === true;
     markStructureRows(plan, base, p.mine, { structureCapable, renameCapable: p.origin !== 'intranet' || p.renameCapable === true,
-      reviewTypeCapable: p.origin !== 'intranet' || p.reviewTypeCapable === true, theirs });
+      reviewTypeCapable: p.origin !== 'intranet' || p.reviewTypeCapable === true, modeCapable: p.origin !== 'intranet' || p.modeCapable === true, theirs });
     // ★ 구조를 모르는 옛 인트라넷 창 — 마감 표시(그 창은 마감을 모른다)와 마감 줄 안의 칸은 "안 보낸 칸" 으로 버린다(금액·인원과 같은 장치 · 검토 2026-10-21).
     //   안 버리면 마감 줄이 생긴 오더는 옛 창에서 저장할 때마다 막힌다(인트라넷을 되돌리면 그 오더들이 전부 저장 불가).
     if (!structureCapable) {
@@ -1649,6 +1718,11 @@ async function applySharedPatch(p) {
       if (sErr) return await _abort(client, 409, { ok: false, code: sErr.code, sync_version: curVersion, error: sErr.error });
       // ⑤-2 옵션 없이 상품 하나로 도는 공고 — 원래 상품 줄을 먼저 만든다(아래 마감·더하기 판정이 그 줄의 참여 수를 읽는다)
       adopted = await _adoptSoleProductInTx(client, camp, theirs);
+      // ⑤-3 옵션 있음↔없음 — 그 상품에 참여·구매가 있으면 막는다(마감으로 남길 수 없다 — 방식이 다른 줄이 섞인다). 마감 판정보다 먼저.
+      if (structure.modeSwitched.length) {
+        const mErr = await _modeSwitchCheckInTx(client, camp, theirs, next, structure);
+        if (mErr) return await _abort(client, 409, { ok: false, code: mErr.code, sync_version: curVersion, error: mErr.error });
+      }
       closure = await _closeRemovedInTx(client, camp, theirs, next, structure);
       if (closure.reject) return await _abort(client, 409, { ok: false, code: closure.reject.out.reason, sync_version: curVersion, error: closure.reject.error });
     }
@@ -1877,6 +1951,6 @@ async function linkSharedOrder({ workOrderId, actor = '', dryRun = false, db } =
 }
 
 module.exports = {
-  applySharedPatch, linkSharedOrder, readSharedState, sanitizeRenames, renamedParents, renameShapeError, RENAME_FIELD, applyWrites, writablePath, projectToCampaignInTx, derivePayFields, validateQuantities, markStructureRows, STRUCTURE_FIELD, structureOpenFor, structurePermanentlyLocked,
+  applySharedPatch, linkSharedOrder, readSharedState, sanitizeRenames, renamedParents, renameShapeError, RENAME_FIELD, MODE_FIELD, applyWrites, writablePath, projectToCampaignInTx, derivePayFields, validateQuantities, markStructureRows, STRUCTURE_FIELD, structureOpenFor, structurePermanentlyLocked,
   PHASE3_SHARED_FIELDS, PHASE5_SHARED_FIELDS, PHASE7Q_SHARED_FIELDS, PHASE7W_SHARED_FIELDS, PHASE7R_SHARED_FIELDS, PHASE7D_SHARED_FIELDS, deliverySwapOpen, PUSH_VIEW_KEYS, WRITABLE_BY_ORIGIN, INTRANET_EDITABLE_AFTER_ACCEPT, NEXT_VERSION_SQL, _pushBackKeys, _prefillOf,
 };

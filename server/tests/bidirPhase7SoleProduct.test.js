@@ -12,6 +12,9 @@ const { productSummaryText } = require('../src/utils/orderProductSummary');
 
 const SINGLE = [{ name: '단일상품', url: 'https://smartstore.naver.com/x/products/1', option_schema_version: 2, product_mode: 'none',
   base: { pay: 13000, count: 20, daily: 4, review_type_mix: [] }, options: [] }];
+const OPT_P = { name: '탈취제', url: '', option_schema_version: 2, product_mode: 'opt', base: { pay: 0, count: 0, daily: 0, review_type_mix: [] }, options: [
+  { option_1: { name: '', value: '블랙' }, label: '블랙', url: '', pay: 15900, count: 5, daily: 1, review_type_mix: [] },
+  { option_1: { name: '', value: '화이트' }, label: '화이트', url: '', pay: 21500, count: 12, daily: 2, review_type_mix: [] }] };
 const PROD_B = { name: '새상품', url: 'https://smartstore.naver.com/x/products/2', option_schema_version: 2, product_mode: 'none',
   base: { pay: 9000, count: 5, daily: 1, review_type_mix: [] }, options: [] };
 
@@ -74,7 +77,15 @@ async function pg() {
         proj.channel, proj.landing_url, proj.thumbnail_url, Number(proj.daily_limit) || 1,
         JSON.stringify({ inflowType: 'link', reviewGuide: pre.wd_review, specialNotes: pre.wd_notes, reviewGuideImages: [], specialNotesImages: [], productLines: pre.wd_product }),
         SHEET, tab]);
-    // 옵션 줄 없음 — 운영의 옵션 없는 공고(16개 중 7개)와 같은 모양
+    // 옵션 있는 상품이 있으면 발행 그대로 옵션 줄 · 없으면 옵션 줄 없음(운영의 옵션 없는 공고 16개 중 7개와 같은 모양)
+    if (products.some(x => x.product_mode === 'opt')) {
+      for (const o of proj.options) {
+        const [pName, oKey] = o.key.split('|');
+        await pool.query(`INSERT INTO campaign_options (campaign_id, opt_key, product_name, unit_kind, option_url, pay_amount, recruit_total, daily_limit, status, sort_order)
+                           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', 0)`,
+          [camp, oKey || pName, pName, o.unit_kind, o.option_url, Number(o.pay_amount) || 0, Number(o.recruit_total) || 0, Number(o.daily_limit) || 0]);
+      }
+    }
     await pool.query(`INSERT INTO tab_configs (sheet_id, tab_name, tab_gid, sheetless, delivery_type, taekhap, updated_at) VALUES ($1, $2, $3, TRUE, '실배송', FALSE, NOW())`, [SHEET, tab, 'g' + tag + stamp]);
     for (let i = 1; i <= total; i++) {
       await pool.query(`INSERT INTO campaign_participants (sheet_id, tab_name, seq, row_json, option_text, source, updated_by, updated_at)
@@ -93,13 +104,17 @@ async function pg() {
     const applyNone = (n) => { const from = phoneSeq; phoneSeq += n;
       return pool.query(`INSERT INTO campaign_applications (campaign_id, applicant_name, phone8, status, option_key, expires_at)
         SELECT $1, '가짜참여' || g, lpad((7300000 + $3 + g)::text, 8, '0'), 'applied', NULL, NOW() + INTERVAL '1 hour' FROM generate_series(1, $2) g`, [camp, n, from]); };
-    const intranet = async (patch) => {
+    const applyKey = (key, n) => { const from = phoneSeq; phoneSeq += n;
+      return pool.query(`INSERT INTO campaign_applications (campaign_id, applicant_name, phone8, status, option_key, expires_at)
+        SELECT $1, '가짜참여' || g, lpad((7400000 + $4 + g)::text, 8, '0'), 'applied', $2, NOW() + INTERVAL '1 hour' FROM generate_series(1, $3) g`, [camp, key, n, from]); };
+    const intranet = async (patch, { mode = true } = {}) => {
       const cur = await wo();
       return applySharedPatch({ workOrderId: w.id, mine: { ...readSharedState(cur), ...patch }, baseVersion: Number(cur.sync_version), origin: 'intranet', actor: '인트라넷',
         conflictPolicy: 'last_writer', moneyCapable: true, guideCapable: true, countsCapable: true, weekendsCapable: true, structureCapable: true, renameCapable: true,
-        reviewTypeCapable: true, deliveryCapable: true });
+        reviewTypeCapable: true, deliveryCapable: true, modeCapable: mode });
     };
-    return { sid, camp, tab, w, wo, cRow, opts, apps, rows, applyNone, intranet };
+    const snap = async () => JSON.stringify([(await wo()).sync_version, (await wo()).product_options_json, await opts(), await apps(), (await cRow()).recruit_total]);
+    return { sid, camp, tab, w, wo, cRow, opts, apps, rows, applyNone, applyKey, intranet, snap };
   };
   /** 인트라넷 화면이 하듯 상품 구성을 고치고 총모집·일건수·결제합계·요약 문장을 다시 계산한다. */
   const edited = (cur, fn) => {
@@ -231,6 +246,87 @@ async function pg() {
     r = await put(G.camp, b => { b.title = '가짜 공고 제목만'; });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal((await G.opts()).length, 0); assert.equal(Number((await G.wo()).sync_version), vG);
+    // ═══ ⑤-3 옵션 있음↔없음 ═══
+    const toOpt = p => { p[0].product_mode = 'opt'; p[0].base = { ...p[0].base, pay: 0, count: 0, daily: 0 };
+      p[0].options = [{ option_1: { name: '', value: '블랙' }, label: '블랙', url: '', pay: 13000, count: 12, daily: 2, review_type_mix: [] },
+        { option_1: { name: '', value: '화이트' }, label: '화이트', url: '', pay: 14000, count: 8, daily: 2, review_type_mix: [] }]; };
+    // M1 옵션 없는 상품 하나짜리 공고(참여 0) → 옵션 있음: 원래 상품 줄은 지우고 옵션 줄 둘 · 오더 방식 opt
+    const M = await setup('m1');
+    assert.ok((await call('GET', `/api/order/intake/source/${M.sid}/shared?caps=delivery`)).body.writable.includes('product_mode'));
+    out = await M.intranet(edited(await M.wo(), toOpt));
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    assert.deepEqual((await M.opts()).map(x => [x.opt_key, x.unit_kind, x.status, Number(x.recruit_total), Number(x.pay_amount)]),
+      [['블랙', 'option', 'active', 12, 13000], ['화이트', 'option', 'active', 8, 14000]]);
+    w = await M.wo();
+    assert.equal(JSON.parse(w.product_options_json)[0].product_mode, 'opt'); assert.equal(Number(w.recruit_count), 20);
+    assert.equal(Number(w.pay_amount), 13000 * 12 + 14000 * 8);
+    assert.equal(Number((await M.cRow()).recruit_total), 20);
+
+    // M2 참여자가 있으면 거부 — 원래 상품 줄을 만든 것까지 통째로 되돌아간다(옵션 줄 0개 · 참여 기록 그대로)
+    const M2 = await setup('m2');
+    await M2.applyNone(2);
+    const s2 = await M2.snap();
+    out = await M2.intranet(edited(await M2.wo(), toOpt));
+    assert.equal(out.status, 409, JSON.stringify(out.body)); assert.equal(out.body.code, 'mode_in_use'); assert.match(out.body.error, /이미 참여한 분이 2명/);
+    assert.equal(await M2.snap(), s2); assert.deepEqual(await M2.apps(), [{ option_key: null, n: 2 }]);
+
+    // M3 옵션 있음 → 없음(참여 0): 옵션 줄 지우고 상품 줄 하나
+    const M3 = await setup('m3', [JSON.parse(JSON.stringify(OPT_P)), JSON.parse(JSON.stringify(PROD_B))]);
+    out = await M3.intranet(edited(await M3.wo(), p => { p[0].product_mode = 'none'; p[0].options = []; p[0].base = { pay: 17000, count: 17, daily: 3, review_type_mix: [] }; }));
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    assert.deepEqual((await M3.opts()).map(x => [x.opt_key, x.unit_kind, x.status, Number(x.recruit_total), Number(x.pay_amount)]),
+      [['새상품', 'product', 'active', 5, 9000], ['탈취제', 'product', 'active', 17, 17000]]);
+    assert.equal(Number((await M3.wo()).recruit_count), 22);
+
+    // M4 옵션에 참여자가 있으면 옵션 있음 → 없음도 거부(아무것도 안 바뀜)
+    const M4 = await setup('m4', [JSON.parse(JSON.stringify(OPT_P)), JSON.parse(JSON.stringify(PROD_B))]);
+    await M4.applyKey('블랙', 1);
+    const s4 = await M4.snap();
+    out = await M4.intranet(edited(await M4.wo(), p => { p[0].product_mode = 'none'; p[0].options = []; p[0].base = { pay: 17000, count: 17, daily: 3, review_type_mix: [] }; }));
+    assert.equal(out.status, 409, JSON.stringify(out.body)); assert.equal(out.body.code, 'mode_in_use'); assert.equal(await M4.snap(), s4);
+    // 다른 상품(참여 0)의 방식은 바꿀 수 있다
+    out = await M4.intranet(edited(await M4.wo(), p => { p[1].product_mode = 'opt'; p[1].base = { ...p[1].base, pay: 0, count: 0, daily: 0 };
+      p[1].options = [{ option_1: { name: '', value: '대' }, label: '대', url: '', pay: 9000, count: 5, daily: 1, review_type_mix: [] }]; }));
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    assert.ok((await M4.opts()).some(x => x.opt_key === '대' && x.unit_kind === 'option'));
+
+    // M5 방식을 모르는 옛 인트라넷 창 — 종전처럼 막힘(아무것도 안 바뀜)
+    const M5 = await setup('m5');
+    const s5 = await M5.snap();
+    out = await M5.intranet(edited(await M5.wo(), toOpt), { mode: false });
+    assert.equal(out.status, 409, JSON.stringify(out.body)); assert.equal(out.body.code, 'field_not_editable'); assert.equal(await M5.snap(), s5);
+
+    // M6 바꾼 뒤 모양 검사 — 옵션 있음인데 옵션 0개 · 옵션 없음인데 인원 0 은 거부
+    out = await M5.intranet(edited(await M5.wo(), p => { p[0].product_mode = 'opt'; p[0].base = { ...p[0].base, count: 0, daily: 0 }; p[0].options = []; }));
+    assert.equal(out.status, 409, JSON.stringify(out.body));
+    assert.equal(await M5.snap(), s5);
+    // ═══ ⑤-3 공고 창에서 옵션 있음↔없음 ═══
+    const optRow = (pName, key, pay, rt, dl) => ({ optKey: key, prevOptKey: '', productName: pName, unitKind: 'option', optionUrl: '', payAmount: pay,
+      recruitTotal: rt, dailyLimit: dl, status: 'active', inflowGuideHtml: '', inflowGuideImages: [] });
+    // E1 옵션 없는 공고(줄 0개) → 원래 상품 이름의 옵션 줄 둘: 같은 상품의 방식 바꾸기(상품 주소·자리 유지)
+    const E1 = await setup('e1');
+    r = await put(E1.camp, b => { b.options = [optRow('단일상품', '블랙', 13000, 12, 2), optRow('단일상품', '화이트', 14000, 8, 2)]; b.recruit_total = 20; b.daily_limit = 4; });
+    assert.equal(r.status, 200, JSON.stringify(r.body)); assert.notEqual(r.body.ok, false, JSON.stringify(r.body));
+    assert.deepEqual((await E1.opts()).map(x => [x.opt_key, x.unit_kind, Number(x.recruit_total), Number(x.pay_amount)]), [['블랙', 'option', 12, 13000], ['화이트', 'option', 8, 14000]]);
+    let pe = JSON.parse((await E1.wo()).product_options_json);
+    assert.equal(pe.length, 1); assert.equal(pe[0].name, '단일상품'); assert.equal(pe[0].product_mode, 'opt'); assert.equal(pe[0].url, SINGLE[0].url, '상품 주소 유지');
+    assert.deepEqual(pe[0].options.map(o => [o.label, o.count, o.pay]), [['블랙', 12, 13000], ['화이트', 8, 14000]]);
+
+    // E2 옵션 있음 → 없음(공고 창) — 옵션 줄을 모두 빼고 같은 이름의 상품 줄
+    const E2 = await setup('e2', [JSON.parse(JSON.stringify(OPT_P)), JSON.parse(JSON.stringify(PROD_B))]);
+    r = await put(E2.camp, b => { b.options = b.options.filter(o => o.productName !== '탈취제');
+      b.options.unshift(prodRow('탈취제', '', 17000, 17, 3)); b.recruit_total = 22; b.daily_limit = 4; });
+    assert.equal(r.status, 200, JSON.stringify(r.body)); assert.notEqual(r.body.ok, false, JSON.stringify(r.body));
+    pe = JSON.parse((await E2.wo()).product_options_json);
+    assert.deepEqual(pe.map(x => [x.name, x.product_mode, x.options.length, x.base.count, x.base.pay]), [['탈취제', 'none', 0, 17, 17000], ['새상품', 'none', 0, 5, 9000]]);
+    assert.deepEqual((await E2.opts()).map(x => [x.opt_key, x.unit_kind]).sort(), [['새상품', 'product'], ['탈취제', 'product']]);
+
+    // E3 참여자가 있으면 공고 창에서도 거부(아무것도 안 바뀜)
+    const E3 = await setup('e3');
+    await E3.applyNone(1);
+    const s3 = await E3.snap();
+    r = await put(E3.camp, b => { b.options = [optRow('단일상품', '블랙', 13000, 12, 2), optRow('단일상품', '화이트', 14000, 8, 2)]; b.recruit_total = 20; b.daily_limit = 4; });
+    assert.equal(r.status, 409, JSON.stringify(r.body)); assert.equal(r.body.code, 'mode_in_use'); assert.equal(await E3.snap(), s3);
     console.log('bidirPhase7SoleProduct: PG passed');
   } finally {
     srv.close();

@@ -914,6 +914,8 @@ async function _intakeSourceBidir(res, { b, source, current, optionsJson, delive
     reviewTypeCapable: !!(bid && (bid.reviewtype === 1 || bid.reviewtype === true || bid.reviewtype === '1')),
     // ★ 7단계-④ ⑤: 배송 한 종류 바꾸기도 그것을 아는 창만(옛 창은 잠긴 배송 칸의 옛 사본 값을 다시 보낸다 — 받지 않는다)
     deliveryCapable: !!(bid && (bid.delivery === 1 || bid.delivery === true || bid.delivery === '1')),
+    // ★ 7단계-④ ⑤-3: 옵션 있음↔없음도 그것을 아는 창만(옛 창은 방식 칸이 잠겨 있다 — 보내면 종전처럼 409)
+    modeCapable: !!(bid && (bid.mode === 1 || bid.mode === true || bid.mode === '1')),
     preHook: _sourceRevisionPreHook(source),
     extraSets: {
       source_revision: source.sourceRevision,
@@ -1313,7 +1315,7 @@ router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) 
       `SELECT * FROM work_orders WHERE source_review_order_id = $1 LIMIT 1`, [sid]);
     if (!rows.length || rows[0].deleted_at) return res.status(404).json({ ok: false, error: '작업오더를 찾을 수 없습니다.' });
     const sw = await readBidirSwitch(pool);
-    const { WRITABLE_BY_ORIGIN, readSharedState, STRUCTURE_FIELD, RENAME_FIELD, structureOpenFor, structurePermanentlyLocked, deliverySwapOpen } = require('../services/sharedPatch.service');
+    const { WRITABLE_BY_ORIGIN, readSharedState, STRUCTURE_FIELD, RENAME_FIELD, MODE_FIELD, structureOpenFor, structurePermanentlyLocked, deliverySwapOpen } = require('../services/sharedPatch.service');
     const active = rows[0].bidir_state === 'on' && sw.in2rw === 'apply';
     const structureOpen = active ? await structureOpenFor(pool, rows[0]) : false;
     const caps = new Set(String(req.query.caps || '').split(',').map(x => x.trim()).filter(Boolean));
@@ -1326,7 +1328,8 @@ router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) 
       // 인트라넷 수정 창은 이 목록으로 잠금을 푼다(접수 뒤 잠금 목록에 더한다 · 5단계 리뷰비 포함). 상품 구성 안의 결제금액·주소는 키 단위로 이미 열려 있다.
       // ★ 7단계-④: 상품·옵션 더하기·지우기는 공고에 옵션 줄이 있는 작업만 연다(옵션 없이 상품 하나로 도는 공고는 옵션 있음·없음 바꾸기 단계 — 열면 저장 때 막힌다)
       // ★ 7단계-④ ④: 리뷰타입은 영구 금지 작업(배송 혼합·회수·블로그·구매수량 단계)에서는 열지 않는다
-      writable: active ? [...WRITABLE_BY_ORIGIN.intranet].filter(f => ((f !== STRUCTURE_FIELD && f !== RENAME_FIELD) || structureOpen)
+      // ★ 7단계-④ ⑤-3: 옵션 있음↔없음도 구조와 같은 조건(영구 금지 작업·짝을 못 짓는 작업은 닫음)
+      writable: active ? [...WRITABLE_BY_ORIGIN.intranet].filter(f => ((f !== STRUCTURE_FIELD && f !== RENAME_FIELD && f !== MODE_FIELD) || structureOpen)
         && (f !== 'review_type' || !structurePermanentlyLocked(readSharedState(rows[0])))
         // ★ 7단계-④ ⑤: 배송은 한 종류 배송 작업만(배송 혼합·회수·블로그는 열지 않는다 — 창은 혼합·회수 선택지·부속 칸을 계속 잠근다)
         // ★ 배송을 아는 창(caps=delivery)에만 연다 — 옛 인트라넷 창은 배송 칸 하나로 혼합·회수 선택지까지 함께 잠가, 열면 전부 풀린다(검토 2026-10-21 · 배포 순서 안전장치)

@@ -447,12 +447,14 @@ function _planQuantityEdit({ base, products, baseRows, liveCampOpts, body, edite
  * ★ 이름 바꾸기·상품 이름·마감시키기(지우기로 한다)·옵션 없는 공고는 담지 않는다(unmappable).
  */
 function _planStructureEdit({ products, baseRows, liveCampOpts, body, guideInflow, soleVirtual = false }) {
-  const out = { any: false, removes: [], adds: [], reopens: [], renames: [], unmappable: [], changed: [] };
+  const out = { any: false, removes: [], adds: [], reopens: [], renames: [], unmappable: [], changed: [], modeSwitch: new Set() };
   if (!Array.isArray(body.options)) return out;
   // ⑤-2 옵션 줄 없는 상품 하나짜리 공고를 여러 상품으로 — 원래 상품 줄은 같은 이름으로 남겨야 한다(그 줄이 옵션 없이 참여한 사람·품절 멈춤을 이어받는다).
   //   이름이 다르면 "지우고 더함" 으로 읽혀 참여 기록이 이어지지 않는다 → 막고 안내(줄이 생긴 뒤에는 이름 바꾸기·지우기가 종전대로 된다)
-  if (soleVirtual && !body.options.some(o => o && typeof o === 'object' && _bodyOptKey(o) === baseRows[0].key)) {
-    const p0 = baseRows[0].key.split('|')[0];
+  const p0 = baseRows.length ? baseRows[0].key.split('|')[0] : '';
+  // (⑤-3 옵션 있음으로 바꾸기 — 원래 상품 이름의 옵션 줄을 보낸 것도 원래 상품을 남긴 것이다)
+  if (soleVirtual && !body.options.some(o => o && typeof o === 'object' && (_bodyOptKey(o) === baseRows[0].key
+      || (String(o.unitKind ?? o.unit_kind ?? '') !== 'product' && String(o.productName ?? o.product_name ?? '').replace(/\|/g, '').trim() === p0)))) {
     out.unmappable.push({ key: baseRows[0].key, label: `상품 더하기 — 원래 상품(「${p0}」) 줄을 같은 이름의 옵션 없는 상품으로 남겨 주세요(옵션 없는 공고를 여러 상품으로 바꿀 때)`, want: p0, got: '' });
     return out;
   }
@@ -511,6 +513,16 @@ function _planStructureEdit({ products, baseRows, liveCampOpts, body, guideInflo
     const pName = String(o.productName ?? o.product_name ?? '').replace(/\|/g, '').trim();
     const unit = String(o.unitKind ?? o.unit_kind ?? '') === 'product' ? 'product' : 'option';
     const same = products.find(p => p && String(p.name || '').replace(/\|/g, '').trim() === (unit === 'product' ? (pName || String(o.optKey ?? o.opt_key ?? '').trim()) : pName));
+    // ⑤-3 옵션 있음↔없음 — 같은 상품의 원래 줄을 모두 빼고 다른 방식의 줄을 보냈으면 그 상품의 방식 바꾸기다(참여자 검사는 공유 저장이 한다)
+    const sameName = same ? String(same.name || '').replace(/\|/g, '').trim() : '';
+    const sameRows = same ? baseRows.filter(r => r.key.split('|')[0] === sameName) : [];
+    const sameHasOpts = !!(same && Array.isArray(same.options) && same.options.length);
+    if (same && sameRows.length && sameRows.every(r => !sentKeys.has(r.key) && !renamedFrom.has(r.key))
+        && (unit === 'product' ? sameHasOpts : !sameHasOpts)) {
+      out.modeSwitch.add(sameName);
+      out.adds.push(o);
+      continue;
+    }
     if (same && (unit === 'product' || !(Array.isArray(same.options) && same.options.length))) {
       out.unmappable.push({ key, label: unit === 'product'
         ? `상품 추가(${pName}) — 같은 이름의 상품이 이미 있습니다`
@@ -549,9 +561,13 @@ function _planStructureEdit({ products, baseRows, liveCampOpts, body, guideInflo
   for (const r of out.renames) if (_hasTiers(products[r.src.i])) out.unmappable.push({ key: r.name, label: `${r.name} — 구매수량 단계 상품은 이름을 바꿀 수 없습니다`, want: '', got: '' });
   for (const r of out.removes) if (_hasTiers(products[r.src.i])) out.unmappable.push({ key: r.name, label: `${r.name} — 구매수량 단계 상품은 접수 뒤 더하거나 지울 수 없습니다`, want: '', got: '' });
   out.guideInflow = guideInflow;
+  for (const n of out.modeSwitch) if (_hasTiers(products.find(p => p && String(p.name || '').replace(/\|/g, '').trim() === n))) {
+    out.unmappable.push({ key: n, label: `${n} — 구매수량 단계 상품은 옵션 있음·없음을 바꿀 수 없습니다`, want: '', got: '' });
+  }
   out.any = out.adds.length + out.removes.length + out.reopens.length + out.renames.length > 0;
+  out.modeSwitch.forEach(n => out.changed.push(`옵션 있음·없음(${n})`));
   out.renames.forEach(r => out.changed.push(r.name));
-  out.removes.forEach(r => out.changed.push(`삭제(${r.name})`));
+  out.removes.filter(r => !out.modeSwitch.has(String(r.name || '').split(' / ')[0].trim())).forEach(r => out.changed.push(`삭제(${r.name})`));
   out.adds.forEach(o => out.changed.push(`추가(${String(o.optKey ?? o.opt_key ?? o.productName ?? '').trim()})`));
   out.reopens.forEach(r => out.changed.push(`다시 열기(${r.name})`));
   return out;
@@ -580,10 +596,23 @@ function applyStructurePlan(ed, st) {
       prodRenamed.add(prod);
     }
   }
+  // ⑤-3 방식을 바꾸는 상품은 지우지 않고 그 자리에서 모양만 바꾼다(이름·주소·자리 유지 — 공유 저장이 같은 상품의 방식 바꾸기로 읽는다)
+  const switchSet = st.modeSwitch instanceof Set ? st.modeSwitch : new Set();
+  const nameOf0 = p => String(p && p.name || '').replace(/\|/g, '').trim();
+  const switching = new Set();
   for (const r of st.removes) {
     const prod = r.src && ed[r.src.i];
     if (!prod) continue;
+    if (switchSet.has(nameOf0(prod))) { switching.add(prod); continue; }
     dropNodes.add(r.src.j >= 0 ? prod.options[r.src.j] : prod);
+  }
+  for (const prod of switching) {
+    const toOpt = !(Array.isArray(prod.options) && prod.options.length);
+    prod.product_mode = toOpt ? 'opt' : 'none';
+    prod.options = [];
+    prod.base = { ...(prod.base && typeof prod.base === 'object' ? prod.base : {}), pay: 0, count: 0, daily: 0, review_type_mix: [] };
+    if (prod.base.daily_limit !== undefined) prod.base.daily_limit = 0;
+    if (prod.base.dailyLimit !== undefined) prod.base.dailyLimit = 0;
   }
   for (const r of st.reopens) {
     const prod = r.src && ed[r.src.i];
@@ -596,7 +625,7 @@ function applyStructurePlan(ed, st) {
     if (dl !== undefined) _setDaily(tgt, int(dl));
   }
   let list = ed.filter(p => !dropNodes.has(p)).map(p => {
-    if (!Array.isArray(p.options) || !p.options.length) return p;
+    if (switching.has(p) || !Array.isArray(p.options) || !p.options.length) return p;
     const kept = p.options.filter(o => !dropNodes.has(o));
     return kept.length ? { ...p, options: kept } : null;   // 옵션을 다 지운 상품 = 상품째 지움
   }).filter(Boolean);
@@ -611,12 +640,14 @@ function applyStructurePlan(ed, st) {
     const g = canonGuide(o.inflowGuideHtml ?? o.inflow_guide_html ?? '', o.inflowGuideImages ?? o.inflow_guide_images ?? []);
     const guide = st.guideInflow && (g.text || g.images.length) ? { guide: { text: g.text, images: g.images } } : {};
     if (unit === 'product') {
+      const sw = list.find(p => switching.has(p) && nameOf(p) === (pName || optKey) && p.product_mode === 'none');
+      if (sw) { sw.base = { ...sw.base, pay, count, daily, review_type_mix: mix }; _setDaily(sw.base, daily); if (guide.guide) sw.guide = guide.guide; continue; }
       list.push({ name: pName || optKey, url, option_schema_version: 2, product_mode: 'none', ...guide,
         base: { pay, count, daily, review_type_mix: mix }, options: [] });
       continue;
     }
     const opt = { option_1: { name: '옵션', value: optKey }, label: optKey, url, pay, count, daily, review_type_mix: mix, ...guide };
-    const at = list.findIndex(p => nameOf(p) === pName && Array.isArray(p.options) && p.options.length);
+    const at = list.findIndex(p => nameOf(p) === pName && ((Array.isArray(p.options) && p.options.length) || (switching.has(p) && p.product_mode === 'opt')));
     if (at >= 0) list[at] = { ...list[at], options: [...list[at].options, opt] };
     else list.push({ name: pName, url, option_schema_version: 2, product_mode: 'opt', base: { pay: 0, count: 0, daily: 0, review_type_mix: [] }, options: [opt] });
   }
