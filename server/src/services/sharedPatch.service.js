@@ -1506,6 +1506,15 @@ async function applySharedPatch(p) {
         error: `창을 연 뒤 다른 곳에서 마감된 옵션이 있어 저장하지 않았습니다: ${[...new Set(meanwhile.map(w => _label(w)))].join(', ')}. 창을 닫고 다시 열어 주세요.` });
     }
     const blocked = [...plan.writes, ...plan.conflicts].filter(w => !writablePath(w, p.origin));
+    // 7단계-④ ⑤ 접수 뒤 영구 금지 칸(배송 혼합·회수로 가거나 오는 배송 · 혼합 수량 · 회수 정보 · 체험단 종류)은 "아직" 이 아니다 — 새 리뷰오더 안내(결정 263 「4.가」).
+    //   배송 한 종류끼리인데 막힌 경우(그 출처가 아직 못 씀 — 관리자 오더 수정)는 종전 안내 그대로.
+    const permBlocked = blocked.filter(w => w.meta && w.meta.kind === 'field' && (['delivery_type_mix', 'recall_courier', 'recall_product', 'work_kind'].includes(w.meta.key)
+      || (w.meta.key === 'delivery_type' && !(_deliverySingle(w.base) && _deliverySingle(w.mine)))));
+    if (permBlocked.length) {
+      const names = [...new Set(permBlocked.map(w => _label(w)))];
+      return await _abort(client, 409, { ok: false, code: 'structure_new_order', sync_version: curVersion, fields: permBlocked.map(w => ({ path: w.path, label: _label(w) })),
+        error: `접수된 리뷰오더라 ${names.join(', ')}${((c) => (c >= 0 && c <= 11171 && c % 28 !== 0 ? '을' : '를'))(String(names[names.length - 1]).slice(-1).charCodeAt(0) - 0xAC00)} 바꿀 수 없습니다 — 배송 혼합·회수와 체험단 종류는 작업표 모양 자체가 달라집니다. 바꿔야 하면 새 리뷰오더로 접수해 주세요.` });
+    }
     if (blocked.length) {
       return await _abort(client, 409, { ok: false, code: 'field_not_editable', sync_version: curVersion,
         fields: blocked.map(w => ({ path: w.path, label: _label(w) })),

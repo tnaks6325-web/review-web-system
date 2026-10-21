@@ -231,9 +231,9 @@ async function pg() {
     // D5 혼합·회수로 가는 변경은 막힌다(접수 뒤 영구 금지) — 아무것도 안 바뀜
     const s5 = await A.snap();
     out = await A.intranet({ delivery_type: '혼합(실배송 10건, 빈박스 12건)', delivery_type_mix: [{ type: 'real', quantity: 10 }, { type: 'empty', quantity: 12 }] });
-    assert.equal(out.status, 409, JSON.stringify(out.body)); assert.equal(await A.snap(), s5);
+    assert.equal(out.status, 409, JSON.stringify(out.body)); assert.equal(out.body.code, 'structure_new_order'); assert.match(out.body.error, /새 리뷰오더/); assert.equal(await A.snap(), s5);
     out = await A.intranet({ delivery_type: '회수(회수택배사: CJ, 회수상품명칭: 가짜)', recall_courier: 'CJ', recall_product: '가짜' });
-    assert.equal(out.status, 409, JSON.stringify(out.body)); assert.equal(await A.snap(), s5);
+    assert.equal(out.status, 409, JSON.stringify(out.body)); assert.equal(out.body.code, 'structure_new_order'); assert.equal(await A.snap(), s5);
 
     // D6 배송을 모르는 옛 인트라넷 창 — 잠긴 배송 칸의 옛 사본 값(빈박스)을 다시 보내도 받지 않는다(다른 칸은 저장)
     out = await A.intranet({ delivery_type: '빈박스', special_notes: '옛 창 저장' }, { delivery: false });
