@@ -66,7 +66,7 @@ ok('모바일 펼침 버튼은 행 열기를 막고 aria 상태를 함께 갱신
     && /setAttribute\('aria-expanded',String\(open\)\)/.test(src));
 
 ok('★ _loadOrders 는 _woSyncNavBadge() 를 부른다(인라인 표기 사본 제거)',
-  /_renderWoHead\(\); _renderWoBody\(\);\s*\n\s*_woSyncNavBadge\(\);/.test(src));
+  /_renderWoHead\(\); (?:if\(STATE\.woRecon\) _rcRender\(\); else )?_renderWoBody\(\);\s*\n\s*_woSyncNavBadge\(\);/.test(src));   // 오더·공고 맞추기 화면이면 목록 대신 그 화면(결정 263)
 ok('★ #woNavBadge 표기는 _woSyncNavBadge 안 한 곳뿐(값 단일 출처)',
   (src.match(/#woNavBadge/g) || []).length === 1);
 

@@ -1518,6 +1518,63 @@ async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTo
   return { applied, after };
 }
 
+/**
+ * 오더·공고 맞추기 ① — 화면이 본 차이가 지금과 같은지(지문) 보고, 오더를 지금 공고와 같게(P) 적은 뒤 그 상태를 기준 스냅숏으로 남긴다.
+ * 공고는 이미 P 의 모습이라 건드리지 않는다. 결제합계·상품 요약 문장·택배대행 표시는 P 에서 다시 만든다.
+ * @returns {Promise<{abort?:{status,body}, wo?:object, plan?:object}>}
+ */
+async function _reconcilePrepareInTx(client, wo, camp, rec, actor) {
+  if (!camp) return { abort: { status: 409, body: { ok: false, code: 'no_campaign', error: '연결된 모집공고가 없거나 마감(보관)된 공고입니다.' } } };
+  if (wo.bidir_state === 'on') return { abort: { status: 409, body: { ok: false, code: 'already_linked', error: '이미 연결된 작업입니다. 새로고침해 주세요.' } } };
+  if (!String(wo.source_review_order_id || '').trim()) return { abort: { status: 409, body: { ok: false, code: 'not_intranet_order', error: '인트라넷 리뷰오더로 들어온 오더가 아닙니다.' } } };
+  const { rows: opts } = await client.query('SELECT * FROM campaign_options WHERE campaign_id = $1 ORDER BY sort_order, id', [camp.id]);
+  const plan = require('./sharedReconcile.service').planReconcile(wo, camp, opts, rec.picks || {});
+  if (plan.fingerprint !== String(rec.fingerprint || '')) {
+    return { abort: { status: 409, body: { ok: false, code: 'reconcile_stale', error: '화면을 연 뒤 이 작업의 값이 바뀌었습니다. 새로고침한 뒤 다시 골라 주세요.' } } };
+  }
+  if (plan.blocked) return { abort: { status: 409, body: { ok: false, code: 'reconcile_blocked', error: plan.blocked } } };
+  if (plan.error) {
+    const e = plan.error;
+    const msg = e.code === 'reconcile_unpicked' ? '아직 고르지 않은 칸이 있습니다.'
+      : e.code === 'reconcile_campaign_side_locked' ? `공고 쪽으로 맞출 수 없는 칸을 공고 쪽으로 골랐습니다: ${(e.labels || []).join(', ')}`
+      : `이 조합으로는 맞출 수 없습니다: ${(e.labels || []).join(' / ')}`;
+    return { abort: { status: 409, body: { ok: false, code: e.code, fields: e.fields || [], error: msg } } };
+  }
+  const O = plan.O, P = plan.P;
+  const sets = []; const params = [wo.id];
+  const add = v => { params.push(v); return `$${params.length}`; };
+  for (const k of SNAPSHOT_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(P, k) || !/^[a-z_]+$/.test(k)) continue;
+    if (JSON.stringify(P[k]) === JSON.stringify(O[k])) continue;
+    let v = P[k];
+    if (k === 'review_type_mix' && v != null && typeof v !== 'string') v = JSON.stringify(v);
+    if (k === 'skip_weekends') v = CANON.bool(v) === '1';
+    if (k === 'product_option') continue;   // 아래에서 다시 만든다
+    sets.push(`${k} = ${add(v)}`);
+  }
+  if (JSON.stringify(P.product_options_json) !== JSON.stringify(O.product_options_json)) {
+    const list = _parseList(P.product_options_json) || [];
+    const costs = list.map(_productCost);
+    if (costs.every(c => c != null)) sets.push(`pay_amount = ${add(costs.reduce((a, c) => a + c, 0))}`);
+    const { regenerateSummary } = require('../utils/orderProductSummary');
+    const r = regenerateSummary({ prevJson: O.product_options_json, prevText: O.product_option, nextJson: P.product_options_json });
+    if (r.text != null) sets.push(`product_option = ${add(r.text)}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(P, 'delivery_type') && P.delivery_type !== O.delivery_type) {
+    const { deliveryBaseType } = require('../utils/deliveryType');
+    sets.push(`courier_proxy = ${add(deliveryBaseType(P.delivery_type) === '택배발송대행')}`);
+  }
+  const { rows: v } = await client.query(
+    `UPDATE work_orders SET ${sets.length ? sets.join(', ') + ', ' : ''}sync_version = ${NEXT_VERSION_SQL}, updated_at = NOW()
+      WHERE id = $1 RETURNING *`, params);
+  const saved = v[0];
+  await client.query(
+    `INSERT INTO work_order_shared_snapshots (work_order_id, sync_version, origin, op_id, state, actor)
+     VALUES ($1, $2, 'reconcile_base', '', $3::jsonb, $4)`,
+    [saved.id, Number(saved.sync_version), JSON.stringify(readSharedState(saved)), String(actor || '')]);
+  return { wo: saved, plan };
+}
+
 async function _abort(client, status, body) {
   try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
   return { status, body };
@@ -1550,7 +1607,7 @@ async function applySharedPatch(p) {
     await client.query(`SET LOCAL statement_timeout = '10s'`);
     await lrq.lockWorkOrderCampaigns(client, [p.workOrderId]);                                  // L1
     const { rows: woRows } = await client.query('SELECT * FROM work_orders WHERE id = $1 FOR UPDATE', [p.workOrderId]);
-    const wo = woRows[0];
+    let wo = woRows[0];
     if (!wo || wo.deleted_at) return await _abort(client, 404, { ok: false, code: 'order_not_found', error: '작업오더를 찾을 수 없습니다.' });
     const peek = await lrq.liveCampaignForWorkOrders(client, [wo.id]);                          // 보관(마감) 공고 제외
     let camp = null;
@@ -1562,6 +1619,19 @@ async function applySharedPatch(p) {
     if (p.preHook) { const r = await p.preHook(client, wo); if (r) return await _abort(client, r.status, r.body); }
     if (wo.bidir_state !== 'on' && p.origin !== 'reconcile') {
       return await _abort(client, 409, { ok: false, code: 'bidir_not_on', state: wo.bidir_state, error: '이 오더는 양방향 동기화가 연결돼 있지 않습니다.' });
+    }
+    // 오더·공고 맞추기(사용자 확정 2026-10-21) — ① 오더를 지금 공고와 같게(P) 적고 그 상태를 기준으로, ② 오더 쪽을 고른 칸(T)을 보통 길로 쓴다.
+    const rec = p.origin === 'reconcile' && p.reconcile ? p.reconcile : null;
+    if (p.origin === 'reconcile' && !rec) return await _abort(client, 400, { ok: false, code: 'reconcile_required', error: '맞추기 정보가 없습니다.' });
+    let recPlan = null;
+    if (rec) {
+      const r = await _reconcilePrepareInTx(client, wo, camp, rec, p.actor);
+      if (r.abort) return await _abort(client, r.abort.status, r.abort.body);
+      wo = r.wo; recPlan = r.plan;
+      // ② 보낼 값 = 방금 적은 P(저장 모양 그대로) 위에 "오더 쪽" 계산 결과만 — 계산 모양(글자/배열)의 차이가 쓰기로 읽히지 않게. 요약 문장은 보내지 않는다(리뷰웹이 다시 만든다).
+      const mine = { ...readSharedState(wo), ...r.plan.Tmine };
+      delete mine.product_option;
+      p = { ...p, baseVersion: Number(wo.sync_version), mine };
     }
     const curVersion = Number(wo.sync_version || 0);
     if (p.opId) {
@@ -1702,7 +1772,7 @@ async function applySharedPatch(p) {
     const overwritten = lastWriter ? plan.conflicts.map(c => ({ path: c.path, label: _label(c), before: _display(c.path, c.theirs), after: _display(c.path, c.mine) })) : [];
     if (lastWriter && plan.conflicts.length) plan.writes = [...plan.writes, ...plan.conflicts];
     const extra = Object.entries(p.extraSets || {}).filter(([k]) => EXTRA_COLUMNS.has(k));
-    if (!plan.writes.length && !extra.length) {
+    if (!plan.writes.length && !extra.length && !rec) {
       await client.query('COMMIT');
       return { status: 200, body: { ok: true, noop: true, sync_version: curVersion } };
     }
@@ -1777,6 +1847,7 @@ async function applySharedPatch(p) {
       next.product_option = r.text != null ? r.text : theirs.product_option;
     }
     const writtenKeys = new Set(plan.writes.filter(w => w.path.startsWith('f:')).map(w => w.path.slice(2)));
+    if (rec) for (const k of recPlan.force.keys) writtenKeys.add(k);   // 공고 쪽으로 못 옮긴 칸 — 오더 값으로 공고 반영을 강제로(값은 그대로라 오더 칸은 같은 값)
     if (reviewTypeWritten && CANON.reviewType(next.review_type) !== 'mixed') writtenKeys.add('review_type_mix');
     if (closure.addTotal) writtenKeys.add('recruit_count');   // 마감으로 되살린 인원만큼 총모집이 늘었다
     // 인원이 바뀐 상품도 상품구입비(금액 × 인원)가 바뀐다 — 결제합계·요약 문장을 같이 다시 만든다
@@ -1817,7 +1888,8 @@ async function applySharedPatch(p) {
       const { deliveryBaseType } = require('../utils/deliveryType');
       sets.push(`courier_proxy = ${add(deliveryBaseType(next.delivery_type) === '택배발송대행')}`);
     }
-    if (plan.writes.length) {
+    if (rec) sets.push(`bidir_state = 'on'`);
+    if (plan.writes.length || rec) {
       // 새 버전은 한 번만 계산해 두 칸에 같은 값을 쓴다(시각이 들어가 두 번 계산하면 값이 갈린다).
       const { rows: nv } = await client.query(
         `SELECT GREATEST($1::bigint + 1, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000000)::bigint) AS v`, [curVersion]);
@@ -1836,9 +1908,9 @@ async function applySharedPatch(p) {
 
     // ── 공고 반영(같은 트랜잭션) ──
     let campaign = { applied: [] };
-    if (camp && plan.writes.length) {
+    if (camp && (plan.writes.length || rec)) {
       campaign = await projectToCampaignInTx(client, camp, next, writtenKeys, productsTouched,
-        { prev: theirs, payTouched, urlTouched, guideTouched, quantityChanged, structureTouched, structure, reviewTypeChanged: reviewTypeWritten || writtenKeys.has('review_type_mix'), actor: p.actor || p.origin });
+        { prev: theirs, payTouched, urlTouched: urlTouched || !!(rec && recPlan.force.urlTouched), guideTouched, quantityChanged, structureTouched, structure, reviewTypeChanged: reviewTypeWritten || writtenKeys.has('review_type_mix'), actor: p.actor || p.origin });
       if (campaign.reject) {
         const { campaignSyncNotice } = require('./campaignPayAmountSync.service');
         return await _abort(client, 409, { ok: false, code: 'campaign_rejected', sync_version: curVersion,
@@ -1846,7 +1918,22 @@ async function applySharedPatch(p) {
           error: campaign.reject.error || campaignSyncNotice(campaign.reject.kind, campaign.reject.out) || '모집공고에 반영할 수 없어 저장하지 않았습니다.' });
       }
     }
-    if (plan.writes.length) {
+    // 맞추기 — 끝에 다시 비교한다. 한 칸이라도 다르면 통째로 되돌린다(fail-closed · 오더·공고가 다른 채 "연결" 되지 않게)
+    if (rec) {
+      const { rows: c2 } = await client.query('SELECT * FROM recruit_campaigns WHERE id = $1', [camp.id]);
+      const { rows: o2 } = await client.query('SELECT * FROM campaign_options WHERE campaign_id = $1 ORDER BY sort_order, id', [camp.id]);
+      const left = require('./sharedReconcile.service').diffFields(saved, c2[0], o2);
+      if (left.length) {
+        logger.warn(`[bidir/reconcile] ${wo.id} 맞춘 뒤에도 다른 칸: ${left.map(f => `${f.id}(${f.order}≠${f.campaign})`).join(', ')}`);
+        return await _abort(client, 409, { ok: false, code: 'reconcile_incomplete', fields: left.map(f => ({ id: f.id, label: f.label })),
+          error: `다 맞추지 못한 칸이 있어 아무것도 바꾸지 않았습니다: ${left.map(f => f.label).join(', ')}. 개발 담당에게 알려 주세요.` });
+      }
+      if (rec.dryRun) {
+        const out = { ok: true, dryRun: true, campaign_applied: campaign.applied, applied: plan.writes.map(w => w.path), ...(closure.restored.length ? { closed_options: closure.restored } : {}) };
+        return await _abort(client, 200, out);
+      }
+    }
+    if (plan.writes.length || rec) {
       await client.query(
         `INSERT INTO work_order_shared_snapshots (work_order_id, sync_version, origin, op_id, state, actor)
          VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
@@ -1854,7 +1941,7 @@ async function applySharedPatch(p) {
     }
     // ── 인트라넷으로 보낼 거리(4단계) — 리뷰웹발은 항상, 인트라넷발은 저장 결과가 보낸 값과 다를 때만
     //    (그 사이 리뷰웹이 고친 다른 칸과 합쳐진 경우). 같으면 쌓지 않는다 — 자기가 보낸 것을 되받는 메아리 방지.
-    if (p.origin !== 'intranet' ? plan.writes.length > 0 : (plan.writes.length > 0 && _pushBackKeys(p.mine, next).length > 0)) {
+    if (p.origin !== 'intranet' ? (plan.writes.length > 0 || !!rec) : (plan.writes.length > 0 && _pushBackKeys(p.mine, next).length > 0)) {
       await client.query(
         `INSERT INTO shared_sync_outbox (work_order_id, sync_version) VALUES ($1, $2)
          ON CONFLICT (work_order_id, sync_version) DO UPDATE SET status = 'pending', attempts = 0, next_at = NOW(), last_error = '', updated_at = NOW()

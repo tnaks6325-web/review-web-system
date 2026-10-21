@@ -53,7 +53,9 @@ const push = require('../src/services/sharedSyncPush.service');
   assert.match(svc, /FOR UPDATE SKIP LOCKED/);
   const sp = read('services/sharedPatch.service.js');
   assert.match(sp, /if \(p\.origin === 'intranet' && !_pushBackKeys\(p\.mine, next\)\.length\) sets\.push\(`intranet_acked_version/, '합쳐졌으면 "안다" 를 적지 않는다');
-  assert.match(sp, /p\.origin !== 'intranet' \? plan\.writes\.length > 0 : \(plan\.writes\.length > 0 && _pushBackKeys\(p\.mine, next\)\.length > 0\)/, '인트라넷발은 합쳐졌을 때만 쌓는다(메아리 방지)');
+  // 리뷰웹발은 쓴 칸이 있을 때(오더·공고 맞추기는 쓴 칸이 없어도 — 오더를 공고 값으로 바꿨으니 인트라넷이 받아 가야 한다) · 인트라넷발은 합쳐졌을 때만
+  assert.match(sp, /p\.origin !== 'intranet' \? \(plan\.writes\.length > 0 \|\| !!rec\) : \(plan\.writes\.length > 0 && _pushBackKeys\(p\.mine, next\)\.length > 0\)/, '인트라넷발은 합쳐졌을 때만 쌓는다(메아리 방지)');
+  assert.match(sp, /const rec = p\.origin === 'reconcile' && p\.reconcile \? p\.reconcile : null;/, '맞추기 표시는 origin reconcile 에서만(인트라넷발에는 없다)');
   console.log('sharedSyncPush: static passed');
 }
 
