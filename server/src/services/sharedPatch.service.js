@@ -876,7 +876,14 @@ function structurePermanentlyLocked(st) {
   return (_parseList(st.product_options_json) || []).some(_tiersOn);
 }
 
-/** 이 오더에서 상품·옵션 더하기·지우기를 열 수 있나 — 살아 있는 공고에 옵션 줄이 있고 발행 프리필이 선택지 줄을 만드는 작업(투영 거부 조건과 같다). 판정 실패 = 닫음. */
+/** 옵션 없이 상품 하나로 도는 작업인가(발행 프리필 선택지 줄이 상품 줄 하나) — 공고에 옵션 줄이 없어도 저장 때 그 줄을 먼저 만들어 연다(⑤-2). */
+function _soleProductUnit(st) {
+  const units = _unitsOf(st);
+  return units && units.length === 1 && units[0].row && units[0].row.unitKind === 'product' && units[0].optKey ? units[0] : null;
+}
+
+/** 이 오더에서 상품·옵션 더하기·지우기를 열 수 있나 — 살아 있는 공고에 옵션 줄이 있거나(⑤-2) 옵션 없이 상품 하나로 도는 작업이고,
+ *  발행 프리필이 선택지 줄을 만드는 작업(투영 거부 조건과 같다). 판정 실패 = 닫음. */
 async function structureOpenFor(db, wo) {
   try {
     const st = readSharedState(wo);
@@ -887,7 +894,8 @@ async function structureOpenFor(db, wo) {
     const camp = await require('./linkedRecruitQuota.service').liveCampaignForWorkOrders(db, [wo.id]);
     if (!camp) return false;
     const { rows } = await db.query(`SELECT 1 FROM campaign_options WHERE campaign_id = $1 AND COALESCE(status,'active') <> 'deleted' LIMIT 1`, [camp.id]);
-    return rows.length > 0;
+    // ⑤-2 옵션 줄이 없는 공고 — 상품 하나짜리면 연다(저장 때 _adoptSoleProductInTx 가 원래 상품 줄을 먼저 만든다)
+    return rows.length > 0 || !!_soleProductUnit(st);
   } catch (e) {
     logger.warn(`[bidir/structure] ${wo && wo.id} 구조 열림 판정 실패(닫음): ${e.message}`);
     return false;
@@ -895,6 +903,62 @@ async function structureOpenFor(db, wo) {
 }
 
 const _STRUCT_REJECT = (reason, error) => ({ reject: { kind: 'structure', out: { applied: false, reason }, error } });
+
+/**
+ * 7단계-④ ⑤-2 옵션 없이 상품 하나로 도는 공고(살아 있는 옵션 줄 0개)를 그 상품 줄 하나짜리 공고로 바꾼다(사용자 확정 2026-10-21 「2.가」).
+ *   ① 원래 상품 줄을 만든다(발행 프리필 값 그대로 — 더하기 투영의 새 줄과 같은 값) ② 옵션 없이 참여한 기록(option_key 없음)을 그 줄 몫으로 옮겨 적는다
+ *   ③ 공고 전체 품절 멈춤(결정 259 — 공고 행)을 그 줄의 멈춤으로 옮긴다 ④ 공고 전체 품절 신고·알림(opt_key '')을 그 줄 이름으로 옮긴다.
+ *   그 뒤는 이미 있는 더하기·지우기(마감)·투영이 그대로 처리한다 — 원래 상품에 참여자가 있으면 지워도 마감으로 남는다.
+ * ★ 같은 트랜잭션 — 뒤에서 거부되면 통째로 되돌아간다. 잠금 순서 = 공고 행(호출부가 이미 잠금) → 상품 줄(결정 229와 같다).
+ * ★ 바로 구매(공고 밖 주문)는 옮겨 적지 않는다 — 상품이 하나뿐인 동안은 이름이 달라도 그 상품으로 센다(결정 252). 상품이 둘 이상이 되면 이름으로만 센다(사각지대 — 결정 263 ⑤).
+ * @returns {{adopted:boolean, optKey?:string, moved?:number, paused?:boolean} | {reject}}
+ */
+async function _adoptSoleProductInTx(client, camp, theirs) {
+  if (!camp) return { adopted: false };
+  const { rows: live } = await client.query(
+    `SELECT 1 FROM campaign_options WHERE campaign_id = $1 AND COALESCE(status,'active') <> 'deleted' LIMIT 1`, [camp.id]);
+  if (live.length) return { adopted: false };
+  const u = _soleProductUnit(theirs);
+  if (!u) return { adopted: false };
+  const r = u.row, key = u.optKey;
+  const vals = [String(r.productName || '').trim(), 'product', String(r.optionUrl || ''),
+    Math.max(0, Math.floor(_num(r.payAmount))), Math.max(0, Math.floor(_num(r.recruitTotal))), Math.max(0, Math.floor(_num(r.dailyLimit))),
+    JSON.stringify(r.reviewTypeMix || []), String(r.inflowGuideHtml || ''), JSON.stringify(Array.isArray(r.inflowGuideImages) ? r.inflowGuideImages : [])];
+  // 지운 줄(deleted)이 같은 이름으로 남아 있으면 그 줄을 다시 쓴다(이름 중복 금지 색인)
+  const { rows: old } = await client.query(`SELECT id FROM campaign_options WHERE campaign_id = $1 AND opt_key = $2 FOR UPDATE`, [camp.id, key]);
+  let optionId;
+  if (old.length) {
+    optionId = old[0].id;
+    await client.query(
+      `UPDATE campaign_options SET status = 'active', product_name = $2, unit_kind = $3, option_url = $4, pay_amount = $5, recruit_total = $6, daily_limit = $7,
+         review_type_mix = $8::jsonb, inflow_guide_html = $9, inflow_guide_images = $10::jsonb, updated_at = NOW() WHERE id = $1`, [optionId, ...vals]);
+  } else {
+    const { rows: ins } = await client.query(
+      `INSERT INTO campaign_options (campaign_id, opt_key, product_name, unit_kind, option_url, pay_amount, recruit_total, daily_limit,
+         review_type_mix, inflow_guide_html, inflow_guide_images, status, sort_order, thumbnail_url, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11::jsonb, 'active', 1, '', NOW()) RETURNING id`, [camp.id, key, ...vals]);
+    optionId = ins[0].id;
+  }
+  const { rowCount: moved } = await client.query(
+    `UPDATE campaign_applications SET option_key = $2 WHERE campaign_id = $1 AND option_key IS NULL`, [camp.id, key]);
+  // 공고 전체 품절 멈춤 → 그 줄 멈춤(멈춘 채로 다른 상품을 더하면 새 상품만 열린다 · 다시 열기는 상품 줄에서)
+  const { rows: pz } = await client.query(
+    `SELECT soldout_paused_at, soldout_paused_reason, soldout_paused_by FROM recruit_campaigns WHERE id = $1`, [camp.id]);
+  const paused = !!(pz[0] && pz[0].soldout_paused_at);
+  if (paused) {
+    await client.query(`UPDATE campaign_options SET paused_at = $2, paused_reason = $3, paused_by = $4, updated_at = NOW() WHERE id = $1`,
+      [optionId, pz[0].soldout_paused_at, pz[0].soldout_paused_reason || '', pz[0].soldout_paused_by || '']);
+    await client.query(`UPDATE recruit_campaigns SET soldout_paused_at = NULL, soldout_paused_reason = '', soldout_paused_by = '', updated_at = NOW() WHERE id = $1`, [camp.id]);
+  }
+  // 공고 전체 품절 신고·알림('') → 그 줄 이름. 그 이름으로 열린 옛 알림이 있으면 먼저 닫는다(열린 알림은 상품마다 하나 — 색인)
+  await client.query(
+    `UPDATE campaign_option_alerts SET resolved_at = NOW(), resolved_by = 'system', resolution = 'gone', updated_at = NOW()
+      WHERE campaign_id = $1 AND opt_key = $2 AND resolved_at IS NULL`, [camp.id, key]);
+  await client.query(`UPDATE campaign_option_alerts SET opt_key = $2, updated_at = NOW() WHERE campaign_id = $1 AND opt_key = ''`, [camp.id, key]);
+  await client.query(`UPDATE campaign_option_soldout_reports SET opt_key = $2 WHERE campaign_id = $1 AND opt_key = ''`, [camp.id, key]);
+  logger.info(`[bidir/structure] ${camp.id} 옵션 없는 공고 → 상품 줄 「${key}」 만듦(참여 기록 ${moved}건 옮김${paused ? ' · 품절 멈춤 옮김' : ''})`);
+  return { adopted: true, optKey: key, moved, paused };
+}
 
 /**
  * 지운 선택지 중 이미 참여·구매한 사람이 있는 것은 지우지 않고 **마감**으로 되살린다(사용자 확정 2026-10-21 「1.가」).
@@ -1213,6 +1277,29 @@ async function _projectDeliveryInTx(client, camp, prev, next) {
   return { applied: true, tracking };
 }
 
+/**
+ * 상품 안내 글(work_detail.productLines) ← 발행 프리필 글(wd_product · 공고를 처음 만들 때 쓰는 글과 같은 단일 출처).
+ * ★ 지금 글이 "바뀌기 전 오더로 만든 글" 과 같을 때만 바꾼다 — 공고 창에서 사람이 고친 글은 덮지 않는다(그대로 두고 기록 · 사각지대).
+ * ★ 옵션 줄이 없는 공고는 건너뛴다(금액 투영 _projectPayInTx 가 글 속 금액만 바꾼다 — 두 경로가 같은 글을 고치지 않게).
+ */
+async function _projectProductLinesInTx(client, camp, prev, next) {
+  const was = String(_prefillOf(prev).wd_product || '').trim(), want = String(_prefillOf(next).wd_product || '').trim();
+  if (!want || was === want) return { applied: false };
+  const { rows: live } = await client.query(`SELECT 1 FROM campaign_options WHERE campaign_id = $1 AND COALESCE(status,'active') <> 'deleted' LIMIT 1`, [camp.id]);
+  if (!live.length) return { applied: false };
+  const { rows } = await client.query('SELECT work_detail FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [camp.id]);
+  let wd = rows[0] && rows[0].work_detail;
+  if (typeof wd === 'string') { try { wd = JSON.parse(wd); } catch (_) { wd = null; } }
+  if (!wd || typeof wd !== 'object' || Array.isArray(wd)) return { applied: false };
+  const norm = v => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+  if (norm(wd.productLines) !== norm(was)) {
+    logger.info(`[bidir/apply] ${camp.id} 상품 안내 글은 공고 창에서 고친 글이라 그대로 둠(상품 구성·금액이 바뀜)`);
+    return { applied: false, kept: true };
+  }
+  await client.query('UPDATE recruit_campaigns SET work_detail = $2::jsonb, updated_at = NOW() WHERE id = $1', [camp.id, JSON.stringify({ ...wd, productLines: want })]);
+  return { applied: true };
+}
+
 /** 공고 반영 — 쓴 칸만. 거부 사유가 있으면 {reject} 를 돌려 호출부가 통째로 되돌린다.
  *  @param {object} [extra] { prev: 저장 전 상태(금액 비교) · payTouched · actor } */
 async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTouched, extra = {}) {
@@ -1277,6 +1364,11 @@ async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTo
     const r = await _projectPayInTx(client, camp, extra.prev || {}, next, extra.actor || '');
     if (r.reject) return { reject: { ...r.reject, error: PAY_REJECT_TEXT[r.reject.out.reason] } };
     if (r.applied) applied.push('pay');
+  }
+  // 7단계-④ ⑤-2 상품 안내 글(리뷰어 작업 안내의 「상품」 — 상품 이름·결제금액) — 상품 구성·금액이 바뀌면 다시 쓴다(옵션 줄 있는 공고만 · 옵션 없는 공고는 위 금액 투영이 금액만 바꾼다)
+  if (productsTouched) {
+    const r = await _projectProductLinesInTx(client, camp, extra.prev || {}, next);
+    if (r.applied) applied.push('product_lines');
   }
   const proj = projectOrderToCampaign(next);
   const prefill = _prefillOf(next);
@@ -1551,9 +1643,12 @@ async function applySharedPatch(p) {
     }
     // 7단계-④ — 지운 선택지 중 참여자가 있는 것은 마감으로 되살린다(총모집도 그만큼) · 더한 선택지 검사
     let closure = { restored: [], addTotal: 0 };
+    let adopted = { adopted: false };
     if (structureTouched) {
       const sErr = validateStructure(next, structure);
       if (sErr) return await _abort(client, 409, { ok: false, code: sErr.code, sync_version: curVersion, error: sErr.error });
+      // ⑤-2 옵션 없이 상품 하나로 도는 공고 — 원래 상품 줄을 먼저 만든다(아래 마감·더하기 판정이 그 줄의 참여 수를 읽는다)
+      adopted = await _adoptSoleProductInTx(client, camp, theirs);
       closure = await _closeRemovedInTx(client, camp, theirs, next, structure);
       if (closure.reject) return await _abort(client, 409, { ok: false, code: closure.reject.out.reason, sync_version: curVersion, error: closure.reject.error });
     }
