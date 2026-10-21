@@ -635,7 +635,12 @@ router.post('/form-link', authMiddleware, internalMiddleware, async (req, res, n
     const { sheetId, tabName } = req.body || {};
     const g = await _ensureEditScope(req, sheetId, tabName);
     if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
-    const out = await shortLinkSvc.ensureTabFormLink({ sheetId, tabName });
+    // 🏁 마감 판정 = 홈 작업 목록·보관함과 같은 단일 출처(이름 → gid 폴백). 조회 실패면 막지 않는다(화면 버튼이 이미 숨김).
+    const isFinished = async (r) => {
+      const fin = await svc.finishedTabsMap();
+      return !!(fin.ok && svc.isTabFinishedIn(fin.map, r.sheet_id, r.tab_name, r.tab_gid));
+    };
+    const out = await shortLinkSvc.ensureTabFormLink({ sheetId, tabName, isFinished });
     if (!out.ok) return res.status(out.code || 400).json({ ok: false, error: out.error });
     res.json({ ok: true, code: out.code, reused: out.reused });
   } catch (err) { next(err); }

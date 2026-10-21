@@ -37,6 +37,7 @@
   .top .sp{flex:1}
   .rolebadge{font-size:11px;font-weight:750;padding:4px 12px;border-radius:999px;background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--accent-deep)}
   .btn{font:inherit;font-size:12px;font-weight:700;padding:0 13px;height:32px;display:inline-flex;align-items:center;gap:6px;border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer;white-space:nowrap;transition:background .15s,border-color .15s,color .15s,transform .1s,box-shadow .15s}
+  #formLinkBtn[hidden]{display:none}   /* .btn 의 inline-flex 가 hidden 속성을 이기지 않게(결정 269) */
   .btn:hover{border-color:var(--accent-line);background:var(--card2)} .btn:active{transform:scale(.97)}
   .btn.pri{background:var(--accent);color:#fff;border-color:var(--accent);box-shadow:0 1px 2px rgba(37,99,235,.32)} .btn.pri:hover{background:var(--accent-deep);border-color:var(--accent-deep)}
   .btn:disabled{background:var(--card2);color:var(--faint);border-color:var(--card2);cursor:not-allowed;box-shadow:none;transform:none}
@@ -4517,6 +4518,7 @@ async function _finRefresh(){
   if(document.getElementById('tb2')) _renderTabList();
   _renderWorktabs();
   const bar=document.getElementById('finBar'); if(bar) bar.outerHTML=_finBarHtml();
+  const flb=document.getElementById('formLinkBtn'); if(flb) flb.hidden=isFinished(STATE.cur);   // 🏁 마감/복귀 즉시 반영(결정 269)
 }
 
 /* ★ 마감/복귀 안내에서 "무엇이 그대로인가"를 그 작업에 맞게 말한다 — 무시트 작업(탈 구글시트)에
@@ -6898,7 +6900,8 @@ function renderWorkdesk(wd){
   // [🏢 광고주링크] — 이 작업의 업체(광고주)가 로그인 없이 보는 주소를 바로 복사(내부 역할만 — 서버 게이트 internalMiddleware 와 1:1).
   const advLinkBtn=_isInternalRole()?`<button class="btn" type="button" onclick="copyAdvertiserLink()" title="이 작업의 업체(광고주)가 로그인 없이 보는 광고주 링크를 복사합니다. 이 업체의 모든 작업(리뷰어 연락처·주소 포함)이 보이니 광고주에게만 전달하세요.">🏢 광고주링크</button>`:'';
   // [🛒 구매양식 링크] — 리뷰어에게 보내는 구매양식 단축링크(옛 관리자 대시보드 [🔗] 이관 · 결정 268). 위 [🔗 링크 복사](직원용 작업보드 주소)와 다른 링크다.
-  const formLinkBtn=_isInternalRole()?`<button class="btn" type="button" onclick="copyFormLink()" title="리뷰어에게 보내는 구매양식 링크를 복사합니다. 리뷰어가 열면 로그인 뒤 이 작업의 구매양식을 냅니다(모집공고 참여 없이 바로 구매).">🛒 구매양식 링크</button>`:'';
+  //   ★ 🏁 마감 작업에서도 숨긴다(결정 269) — 마감한 작업에 새 구매를 받지 않는다. [🔗 링크 복사]·[🏢 광고주링크]는 지난 작업 열람용이라 남긴다.
+  const formLinkBtn=_isInternalRole()?`<button class="btn" type="button" id="formLinkBtn"${isFinished(STATE.cur)?' hidden':''} onclick="copyFormLink()" title="리뷰어에게 보내는 구매양식 링크를 복사합니다. 리뷰어가 열면 로그인 뒤 이 작업의 구매양식을 냅니다(모집공고 참여 없이 바로 구매).">🛒 구매양식 링크</button>`:'';
   const planBtn=STATE.role==='advertiser'?'':`<button class="btn" type="button" onclick="openCurrentCampaignDailyPlan()" title="연결된 모집공고의 날짜별 모집인원을 조절합니다. 저장하면 무시트 작업표의 미배정 행도 같은 날짜 계획으로 재배치됩니다.">📅 모집인원 조절</button>`;
   /* [🗒 로그] — 이 작업에 무슨 일이 있었나(주문·취소·리뷰·편집·정원·정산·시스템 한 타임라인).
      ★ 내부 역할만 — 리뷰어 실명·연락처가 실린다(서버 게이트와 1:1).
@@ -17647,12 +17650,13 @@ async function _deleteOrderRowCore(t,rowId){
     await reloadWorkdesk();
   }catch(_){ toast('삭제 정보를 불러오지 못했습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.'); }
 }
-/** 외부모집 수동제출 노출 게이트 — 서버(`/api/trackb/manual-order/*` = AE 또는 편집 허용 admin)와 1:1.
- *  ★ AE(staff)는 실행할 수 있다. 서버 권한 판정이 아직 안 왔으면
+/** 외부모집 수동제출 노출 게이트 — 서버(`/api/trackb/manual-order/*` = master · AE · 편집 허용 admin)와 1:1.
+ *  ★ AE(staff)와 명단에 있는 admin 이 실행할 수 있다. 서버 권한 판정이 아직 안 왔으면
  *    버튼을 그리지 않는다 — "눌러도 403 나는 버튼"을 만들지 않는다(도착하면 `_emoSyncBtn` 이 채운다). */
 function canOpenExternalManualOrder(){
-  if(STATE.role==='master'||STATE.role==='admin') return true;
-  return STATE.role==='staff' && STATE.campEdit===true;
+  if(STATE.role==='master') return true;   // 서버 canEdit 도 master 는 명단 없이 통과
+  // ★ admin 도 명단 판정을 따른다(결정 269) — 서버는 명단 밖 admin 을 403 으로 막는데 화면이 보여 주던 막다른 길.
+  return (STATE.role==='staff'||STATE.role==='admin') && STATE.campEdit===true;
 }
 function _emoBtnHtml(){ return canOpenExternalManualOrder()
   ? `<button class="btn" style="margin-top:10px" onclick="openExternalManualOrder()">외부모집 수동제출</button>` : ''; }

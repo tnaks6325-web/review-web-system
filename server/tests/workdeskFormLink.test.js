@@ -138,7 +138,22 @@ function loadSvc(pool) {
     const body = r.slice(i, i + 700);
     assert.match(body, /authMiddleware, internalMiddleware/);
     assert.match(body, /_ensureEditScope\(req, sheetId, tabName\)/);
-    assert.match(body, /shortLinkSvc\.ensureTabFormLink\(\{ sheetId, tabName \}\)/);
+    assert.match(body, /shortLinkSvc\.ensureTabFormLink\(\{ sheetId, tabName, isFinished \}\)/);
+    // 🏁 마감 판정 = 마감 단일 출처(finishedTabsMap → isTabFinishedIn, gid 폴백) · 조회 실패(ok:false)는 막지 않음
+    assert.match(body, /const fin = await svc\.finishedTabsMap\(\);/);
+    assert.match(body, /fin\.ok && svc\.isTabFinishedIn\(fin\.map, r\.sheet_id, r\.tab_name, r\.tab_gid\)/);
+  });
+  await ta('🏁 마감 작업은 409 로 거절하고 링크를 만들지 않는다 · 진행 중은 그대로(결정 269)', async () => {
+    const pool = makePool(); const svc = loadSvc(pool);
+    let seen = null;
+    const fin = await svc.ensureTabFormLink({ sheetId: 'wt_a', tabName: '작업A', isFinished: async (r) => { seen = r; return true; } });
+    assert.deepStrictEqual([fin.ok, fin.code], [false, 409]);
+    assert.match(fin.error, /마감된 작업/);
+    assert.strictEqual(pool.links.length, 0, '마감 작업에 새 링크를 만들지 않는다');
+    assert.strictEqual(seen.tab_gid, '123', '판정에 gid 를 넘겨 이름이 바뀐 작업도 잡는다');
+    const run = await svc.ensureTabFormLink({ sheetId: 'wt_a', tabName: '작업A', isFinished: async () => false });
+    assert.strictEqual(run.ok, true);
+    assert.strictEqual(pool.links.length, 1);
   });
 
   console.log('§3 새 작업오더 알림 대상');
@@ -163,8 +178,14 @@ function loadSvc(pool) {
   console.log('§4 화면 배선');
   const wd = fs.readFileSync(path.join(ROOT, '..', 'frontend', 'workdesk.html'), 'utf8');
   await ta('[🛒 구매양식 링크] 버튼 — 내부 역할만 · 보관(마감) 작업에서는 숨김', () => {
-    assert.match(wd, /const formLinkBtn=_isInternalRole\(\)\?`<button class="btn" type="button" onclick="copyFormLink\(\)"/);
+    assert.match(wd, /const formLinkBtn=_isInternalRole\(\)\?`<button class="btn" type="button" id="formLinkBtn"\$\{isFinished\(STATE\.cur\)\?' hidden':''\} onclick="copyFormLink\(\)"/);
     assert.match(wd, /\$\{wd\.archived\?'':formLinkBtn\}/);
+  });
+  await ta('🏁 마감 작업에서도 숨김 — 마감/복귀 즉시 반영 · hidden 이 .btn 의 inline-flex 에 지지 않음(결정 269)', () => {
+    assert.match(wd, /#formLinkBtn\[hidden\]\{display:none\}/);
+    const i = wd.indexOf('async function _finRefresh(){');
+    assert.ok(i > 0);
+    assert.match(wd.slice(i, i + 900), /const flb=document\.getElementById\('formLinkBtn'\); if\(flb\) flb\.hidden=isFinished\(STATE\.cur\);/);
   });
   await ta('copyFormLink — 서버 경로 하나 · 주소는 API/r/<코드> · 복사 실패 시 주소 창', () => {
     const i = wd.indexOf('async function copyFormLink(){');

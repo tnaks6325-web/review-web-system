@@ -104,9 +104,10 @@ async function ensureShortLink({ s, g, t, d, round, options } = {}) {
  * 작업보드의 작업 하나 → 구매양식 단축링크. 재료는 **서버가 tab_configs 에서** 읽는다(화면이 보낸 gid·이름을 믿지 않는다).
  * 옛 대시보드 copyShortLink 와 같은 값(s=sheet_id · g=tab_gid · t=tab_name · d=display_name · 차수 없음)을 넣어
  * 같은 composite key 가 나오게 한다.
+ * @param {(row)=>Promise<boolean>} [isFinished] 마감 판정(참이면 409) — 판정 실패는 호출부가 false 로 접는다(버튼이 이미 숨겨져 있다).
  * @returns {Promise<{ok:true, code, reused} | {ok:false, code:number, error}>}
  */
-async function ensureTabFormLink({ sheetId, tabName } = {}) {
+async function ensureTabFormLink({ sheetId, tabName, isFinished } = {}) {
   const s = String(sheetId || '').trim();
   const t = String(tabName || '').trim();
   if (!s || !t) return { ok: false, code: 400, error: '작업 정보가 없습니다.' };
@@ -116,6 +117,11 @@ async function ensureTabFormLink({ sheetId, tabName } = {}) {
   );
   if (!rows.length) return { ok: false, code: 404, error: '작업을 찾을 수 없습니다. 새로고침한 뒤 다시 시도해 주세요.' };
   const r = rows[0];
+  // ★ 🏁 마감 작업은 새 구매양식 링크를 내주지 않는다(결정 269). 판정은 호출부가 마감 단일 출처(trackB.finishedTabsMap)로 넘긴다 —
+  //   이 서비스가 trackB 를 직접 끌어오지 않게(옛 경로 /api/short/create 는 판정 없이 그대로).
+  if (typeof isFinished === 'function' && await isFinished(r)) {
+    return { ok: false, code: 409, error: '마감된 작업입니다. 구매양식 링크가 필요하면 먼저 [진행중으로 복귀]해 주세요.' };
+  }
   const out = await ensureShortLink({ s: r.sheet_id, g: r.tab_gid || '', t: r.tab_name, d: r.display_name || '' });
   if (!out.ok) return { ok: false, code: 500, error: out.error };
   return out;
