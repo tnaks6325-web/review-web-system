@@ -36,6 +36,14 @@ const ORDER_ONLY_LEAVES = new Set(['option_url']);
 
 const _s = v => (v == null ? '' : String(v)).trim();
 
+/** 비교 모양의 리뷰타입 수량(CANON 글자 "photo:3,text:2") → 편집 본문 배열. 읽을 수 없는 값(`invalid:…`)은 던진다 — 부르는 쪽이 그 칸을 잠근다(검토 2026-10-21). */
+function _mixArr(v) {
+  const s = _s(v);
+  if (!s) return [];
+  if (s.startsWith('invalid:')) { const e = new Error('mix_invalid'); e.code = 'mix_invalid'; throw e; }
+  return s.split(',').filter(Boolean).map(p => { const [type, q] = p.split(':'); return { type, quantity: Number(q) || 0 }; });
+}
+
 const _rtName = k => require('../utils/reviewType').reviewTypeLabel(k) || k;   // 이름표 단일 출처
 const _won = v => `${Number(v || 0).toLocaleString('ko-KR')}원`;
 /** 사람이 읽는 값 — 칸 종류별(화면은 이 글자를 그대로 보여 준다). 빈 값 = "(비어 있음)". */
@@ -52,7 +60,7 @@ function _text(key, raw) {
   if (key === 'status') return v === 'closed' ? '마감' : '모집 중';
   if (key === 'unit_kind') return v === 'product' ? '옵션 없음' : '옵션 있음';
   if (key === 'review_type_mix') {
-    try { const a = JSON.parse(v); return Array.isArray(a) && a.length ? a.map(e => `${_rtName(e.type)} ${e.quantity}`).join(' · ') : '없음'; } catch (_) { return v; }
+    try { const a = _mixArr(v); return a.length ? a.map(e => `${_rtName(e.type)} ${e.quantity}`).join(' · ') : '없음'; } catch (_) { return '(읽을 수 없는 값)'; }
   }
   return v;
 }
@@ -120,7 +128,7 @@ function _bodyRow(r, extra = {}) {
   return {
     productName: pName, optKey: r.unit_kind === 'product' ? '' : optKey, unitKind: r.unit_kind,
     payAmount: Number(r.pay_amount) || 0, recruitTotal: Number(r.recruit_total) || 0, dailyLimit: Number(r.daily_limit) || 0,
-    reviewTypeMix: r.review_type_mix ? JSON.parse(r.review_type_mix) : [],
+    reviewTypeMix: _mixArr(r.review_type_mix),
     inflowGuideHtml: r.inflow_guide_html, inflowGuideImages: r._images || [],
     status: r.status, ...extra,
   };
@@ -149,7 +157,7 @@ function _mixedBody({ from, to, pairs, S, fromIsOrder, hasRows }) {
   { const ch = pick('channel') ? to.channel : from.channel; b.channel = ch; b.channel_custom = ''; }
   sc('skip_weekends', v => v === '1');
   sc('review_type'); sc('delivery_type');
-  if (!hasRows) { sc('recruit_total', v => Number(v) || 0); sc('daily_limit', v => Number(v) || 0); sc('review_type_mix', v => (v ? JSON.parse(v) : [])); }
+  if (!hasRows) { sc('recruit_total', v => Number(v) || 0); sc('daily_limit', v => Number(v) || 0); sc('review_type_mix', _mixArr); }
   if (!hasRows) return b;
   // 줄 — 짝마다 from 줄에서 시작해 고른 잎만 to 값으로. 이름을 to 로 고르면 이름을 바꾸고 원래 이름(prevOptKey)을 싣는다.
   const opts = [];
@@ -162,7 +170,7 @@ function _mixedBody({ from, to, pairs, S, fromIsOrder, hasRows }) {
     if (L('pay_amount')) row.payAmount = Number(t.pay_amount) || 0;
     if (L('recruit_total')) row.recruitTotal = Number(t.recruit_total) || 0;
     if (L('daily_limit')) row.dailyLimit = Number(t.daily_limit) || 0;
-    if (L('review_type_mix')) row.reviewTypeMix = t.review_type_mix ? JSON.parse(t.review_type_mix) : [];
+    if (L('review_type_mix')) row.reviewTypeMix = _mixArr(t.review_type_mix);
     if (L('guide')) { row.inflowGuideHtml = t.inflow_guide_html; row.inflowGuideImages = t._images || []; }
     if (L('status')) row.status = t.status;
     if (L('name') && f.key !== t.key) {
@@ -219,7 +227,27 @@ function _planToward({ baseState, camp, from, to, pairs, S, fromIsOrder, hasRows
   const a = planCampaignSharedEdit({ baseState, camp: fake, body });
   const m = planCampaignMoneyEdit({ baseState, camp: fake, body, campOptions: fakeOpts });
   const mine = { ...a.mine, ...m.mine };
+  // 오더 주말 제외가 "아직 안 정함" 이면 되돌리기 계산은 거짓과 같게 읽어 안 바뀐 것으로 본다 → 고른 값을 직접 싣는다(검토 2026-10-21)
+  if (S.has('skip_weekends') && (to.skip_weekends === '1' || to.skip_weekends === '0') && !('skip_weekends' in mine)
+      && CANON.bool(baseState.skip_weekends) === 'unset') mine.skip_weekends = to.skip_weekends === '1';
   return { state: { ...baseState, ...mine }, mine, unmappable: [...a.unmappable, ...m.unmappable] };
+}
+
+/** 상품·옵션 이름 바꾸기 표시(prev_name/prev_label)를 걷어낸 상태 — 기준으로 적을 P 에 남기지 않는다(검토 2026-10-21). */
+function _stripRenameMarks(state) {
+  const raw = state.product_options_json;
+  if (raw == null || raw === '') return state;
+  let list;
+  try { list = typeof raw === 'string' ? JSON.parse(raw) : JSON.parse(JSON.stringify(raw)); } catch (_) { return state; }
+  if (!Array.isArray(list)) return state;
+  let changed = false;
+  for (const p of list) {
+    if (!p || typeof p !== 'object') continue;
+    if ('prev_name' in p) { delete p.prev_name; changed = true; }
+    for (const o of Array.isArray(p.options) ? p.options : []) if (o && typeof o === 'object' && 'prev_label' in o) { delete o.prev_label; changed = true; }
+  }
+  if (!changed) return state;
+  return { ...state, product_options_json: typeof raw === 'string' ? JSON.stringify(list) : list };
 }
 
 /**
@@ -245,14 +273,21 @@ function planReconcile(wo, camp, opts, picks = null) {
   // 칸마다 "공고 쪽" 을 고를 수 있나 — 그 칸 하나만 옮겨 보고 왕복 검사가 통과하는지
   const tryOne = id => _planToward({ baseState: O, camp, from: ov, to: cv, pairs: pairList, S: new Set([id]), fromIsOrder: true, hasRows });
   for (const f of fields) {
+    // 오더 쪽 — 공고는 참·거짓만 담는다. 오더가 "아직 안 정함" 이면 오더 쪽으로 맞출 수 없다
+    if (f.group === 'scalar' && f.key === 'skip_weekends' && ov.skip_weekends === 'unset') f.orderSide = { ok: false, reason: '오더에 아직 정하지 않은 값이라 공고 쪽으로만 맞춥니다' };
     if (f.group === 'scalar' && ['recruit_total', 'daily_limit', 'review_type_mix'].includes(f.key) && hasRows) {
       f.derived = true;   // 옵션 줄 있는 공고 — 줄 인원·일건수·수량을 고르면 따라온다(따로 고르지 않는다)
       f.campaignSide = { ok: false, reason: '옵션별 인원·일건수를 고르면 따라 맞춰집니다' };
       continue;
     }
     if (f.group === 'option' && ORDER_ONLY_LEAVES.has(f.leaf)) { f.campaignSide = { ok: false, reason: '공고 쪽 값은 오더로 옮길 수 없는 칸입니다 — 오더 쪽으로만 맞춥니다' }; continue; }
-    const r = tryOne(f.id);
-    f.campaignSide = r.unmappable.length ? { ok: false, reason: r.unmappable.map(u => u.label).join(' · ') } : { ok: true };
+    let r;
+    try { r = tryOne(f.id); } catch (e) { f.campaignSide = { ok: false, reason: '공고 쪽 값을 읽을 수 없습니다' }; continue; }
+    if (r.unmappable.length) { f.campaignSide = { ok: false, reason: r.unmappable.map(u => u.label).join(' · ') }; continue; }
+    // 옮겨 본 뒤 그 칸이 정말 같아지나 — 계산이 조용히 아무것도 안 바꾸면 공고 쪽을 잠근다(검토 2026-10-21)
+    let still = true;
+    try { still = diffFields({ ...wo, ...r.state }, camp, opts).some(x => x.id === f.id); } catch (_) { still = true; }
+    f.campaignSide = still ? { ok: false, reason: '공고 쪽 값으로 옮겨지지 않는 칸입니다 — 오더 쪽으로만 맞춥니다' } : { ok: true };
   }
   if (!picks) return { ...base, hasRows };
 
@@ -262,14 +297,18 @@ function planReconcile(wo, camp, opts, picks = null) {
   if (missing.length) return { ...base, hasRows, error: { code: 'reconcile_unpicked', fields: missing } };
   const badCamp = fields.filter(f => picks[f.id] === 'campaign' && !(f.campaignSide && f.campaignSide.ok));
   if (badCamp.length) return { ...base, hasRows, error: { code: 'reconcile_campaign_side_locked', fields: badCamp.map(f => f.id), labels: badCamp.map(f => f.label) } };
+  const badOrder = fields.filter(f => picks[f.id] === 'order' && f.orderSide && f.orderSide.ok === false);
+  if (badOrder.length) return { ...base, hasRows, error: { code: 'reconcile_order_side_locked', fields: badOrder.map(f => f.id), labels: badOrder.map(f => f.label) } };
   // 옵션 줄 있는 공고의 총모집·일건수·수량(파생)은 줄 고르기를 따라간다 — 줄 인원을 하나라도 공고 쪽으로 고르면 공고 쪽(합계 = 줄 합)
   const derivedIds = fields.filter(f => f.derived).map(f => f.id);
 
   // ① P = 오더를 공고 쪽으로(공고 쪽으로 옮길 수 있는 모든 칸)
   const allCamp = new Set(fields.filter(f => f.campaignSide && f.campaignSide.ok).map(f => f.id));
-  const P1 = _planToward({ baseState: O, camp, from: ov, to: cv, pairs: pairList, S: allCamp, fromIsOrder: true, hasRows });
+  let P1;
+  try { P1 = _planToward({ baseState: O, camp, from: ov, to: cv, pairs: pairList, S: allCamp, fromIsOrder: true, hasRows }); }
+  catch (e) { return { ...base, hasRows, error: { code: 'reconcile_unmappable', labels: ['읽을 수 없는 값'] } }; }
   if (P1.unmappable.length) return { ...base, hasRows, error: { code: 'reconcile_unmappable', labels: P1.unmappable.map(u => u.label) } };
-  const P = P1.state;
+  const P = _stripRenameMarks(P1.state);
   // ② T = P 에서 오더 쪽으로 고른 칸(공고 쪽으로 옮길 수 있었던 칸만 — 못 옮긴 칸은 P 에 이미 오더 값)
   const toOrder = new Set(fields.filter(f => picks[f.id] === 'order' && allCamp.has(f.id)).map(f => f.id));
   const pv = _orderView(P);
@@ -279,13 +318,16 @@ function planReconcile(wo, camp, opts, picks = null) {
   const pairs2 = pairList.map(p => ({ name: p.name, o: p.o, c: (p.c && pByKey.get(p.c.key)) || (p.o && pByKey.get(p.o.key)) || null }));
   let T = P, Tmine = {};
   if (toOrder.size) {
-    const T1 = _planToward({ baseState: P, camp, from: pv, to: ov, pairs: pairs2, S: toOrder, fromIsOrder: false, hasRows });
+    let T1;
+    try { T1 = _planToward({ baseState: P, camp, from: pv, to: ov, pairs: pairs2, S: toOrder, fromIsOrder: false, hasRows }); }
+    catch (e) { return { ...base, hasRows, error: { code: 'reconcile_unmappable', labels: ['읽을 수 없는 값'] } }; }
     if (T1.unmappable.length) return { ...base, hasRows, error: { code: 'reconcile_unmappable', labels: T1.unmappable.map(u => u.label) } };
     T = T1.state; Tmine = T1.mine;
   }
   // 공고 쪽으로 못 옮긴 칸(오더 쪽 고정)은 P 에 오더 값이 남아 ② 에 차이가 없다 → 공고 반영을 강제로 건다
   const forced = fields.filter(f => picks[f.id] === 'order' && !allCamp.has(f.id) && !f.derived);
-  const force = { urlTouched: forced.some(f => f.leaf === 'option_url') || forced.some(f => f.key === 'landing_url'), keys: [] };
+  const force = { urlTouched: forced.some(f => f.leaf === 'option_url') || forced.some(f => f.key === 'landing_url'), keys: [],
+    quantity: derivedIds.length > 0 };   // 줄 있는 공고의 총모집·일건수가 줄 합과 어긋남 — 오더(줄 합)로 공고를 다시 맞춘다(검토 2026-10-21)
   const KEYMAP = { review_fee: 'review_fee', time_range: 'purchase_time', thumbnail_url: 'thumbnail_url', channel: 'purchase_channel', skip_weekends: 'skip_weekends', delivery_type: 'delivery_type', landing_url: 'product_url' };
   for (const f of forced) if (f.group === 'scalar' && KEYMAP[f.key]) force.keys.push(KEYMAP[f.key]);
   const forcedUnknown = forced.filter(f => !(f.group === 'option' && f.leaf === 'option_url') && !(f.group === 'scalar' && KEYMAP[f.key]));
@@ -308,11 +350,14 @@ async function reconcileSharedOrder({ workOrderId, picks, fingerprint: fp, dryRu
  * ★ 읽기만 한다.
  */
 async function listReconcile(db) {
+  const { LINKED_WO_ON } = require('./linkedRecruitQuota.service');
+  // 공고 찾기 = liveCampaignForWorkOrders 와 같은 규칙(정방향·역방향 짝 · 보관 제외 · 가장 먼저 만든 것 하나)
   const { rows } = await db.query(`
     SELECT w.*, row_to_json(c.*) AS _campaign,
            (SELECT COALESCE(json_agg(o.* ORDER BY o.sort_order, o.id), '[]'::json) FROM campaign_options o WHERE o.campaign_id = c.id) AS _options
       FROM work_orders w
-      JOIN recruit_campaigns c ON c.id = w.linked_campaign_id AND c.archived_at IS NULL
+      JOIN LATERAL (SELECT c.* FROM recruit_campaigns c WHERE c.archived_at IS NULL AND ${LINKED_WO_ON}
+                     ORDER BY c.created_at ASC NULLS LAST, c.id ASC LIMIT 1) c ON TRUE
      WHERE w.deleted_at IS NULL AND COALESCE(w.source_review_order_id, '') <> '' AND COALESCE(w.bidir_state, 'off') <> 'on'
      ORDER BY w.created_at DESC`);
   const items = [];
@@ -320,7 +365,13 @@ async function listReconcile(db) {
   try { usedFor = require('./linkedRecruitQuota.service').usedByOption; } catch (_) { usedFor = null; }
   for (const r of rows) {
     const camp = r._campaign, opts = r._options || [];
-    const plan = planReconcile(r, camp, opts);
+    let plan;
+    try { plan = planReconcile(r, camp, opts); }
+    catch (e) {   // 한 작업의 값이 깨져도 목록 전체가 안 열리면 안 된다 — 그 작업만 막힘으로
+      items.push({ workOrderId: r.id, sourceReviewOrderId: r.source_review_order_id, title: r.title, workManager: r.work_manager || '',
+        campaignId: camp.id, campaignTitle: camp.title, fields: [], fingerprint: '', blocked: '이 작업의 값을 읽지 못해 여기서 맞출 수 없습니다 — 개발 담당에게 알려 주세요.' });
+      continue;
+    }
     if (!plan.fields.length) continue;
     // 이름·줄 있음·없음 칸 — 이미 참여·구매한 수(안내용 · 못 읽으면 빈 값)
     let used = null;
@@ -342,4 +393,4 @@ async function listReconcile(db) {
   return { items, counts: { diverged: items.length } };
 }
 
-module.exports = { reconcileSharedOrder, listReconcile,  diffFields, fingerprint, planReconcile, _pairRows, _mixedBody, PERMANENT, SCALAR_LABEL, LEAF_LABEL };
+module.exports = { reconcileSharedOrder, listReconcile, diffFields, _mixArr, _stripRenameMarks, fingerprint, planReconcile, _pairRows, _mixedBody, PERMANENT, SCALAR_LABEL, LEAF_LABEL };

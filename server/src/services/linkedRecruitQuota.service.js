@@ -753,6 +753,7 @@ module.exports = {
   workOrderCampaignLockKey,
   lockWorkOrderCampaigns,
   liveCampaignForWorkOrders,
+  LINKED_WO_ON,   // 짝짓기 조건 단일 출처(오더·공고 맞추기 목록이 같은 규칙으로 공고를 찾는다)
   workOrderIdsForCampaign,
   guardWorkOrderLinkChange,
   worktableSlotDelta,

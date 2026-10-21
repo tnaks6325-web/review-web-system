@@ -11803,7 +11803,9 @@ async function _rcLoad(){
 function _rcMgr(it){ return _pmManagerName(it.workManager||''); }
 function _rcPickable(it){ return (it.fields||[]).filter(f=>!f.derived); }
 function _rcPicked(it){ const p=_rcState().picks[it.workOrderId]||{}; return _rcPickable(it).filter(f=>p[f.id]==='order'||p[f.id]==='campaign').length; }
-function _rcDone(it){ return !it.blocked && _rcPickable(it).length>0 && _rcPicked(it)===_rcPickable(it).length; }
+// 고를 칸이 없고 합계(총모집·일건수)만 다른 작업 = 고를 것 없이 맞출 수 있다(옵션별 합계로 공고를 다시 맞춘다)
+function _rcDone(it){ return !it.blocked && (it.fields||[]).length>0 && _rcPicked(it)===_rcPickable(it).length; }
+function _rcSideOk(f,side){ return side==='campaign' ? !!(f.campaignSide&&f.campaignSide.ok) : !(f.orderSide&&f.orderSide.ok===false); }
 function _rcVisible(){
   const st=_rcState(); const q=String(st.q||'').trim().toLowerCase();
   return (st.items||[]).filter(it=>(!st.mgr||_rcMgr(it)===st.mgr) && (!q||String(it.title||'').toLowerCase().includes(q)));
@@ -11811,7 +11813,7 @@ function _rcVisible(){
 const _RC_CHECK='<span class="pmworkcheck" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><path d="m5 12 4 4L19 6"/></svg></span>';
 /** 칸 아래 작은 안내 — 그 쪽을 고르면 무엇이 바뀌는가(이름·줄 있음·없음) / 공고 쪽을 못 고르는 이유 */
 function _rcSub(f, side){
-  if(side==='campaign' && !(f.campaignSide&&f.campaignSide.ok)) return f.campaignSide&&f.campaignSide.reason||'공고 쪽으로 맞출 수 없는 칸입니다';
+  if(!_rcSideOk(f,side)) return (side==='campaign'?f.campaignSide:f.orderSide)&&(side==='campaign'?f.campaignSide:f.orderSide).reason||(side==='campaign'?'공고 쪽으로 맞출 수 없는 칸입니다':'오더 쪽으로 맞출 수 없는 칸입니다');
   const u=Number(f.used)||0;
   if(f.leaf==='name') return side==='order' ? ('고르면 공고 이름이 바뀝니다'+(u?` · 이미 참여 ${u}명(구매한 주문은 옛 이름 그대로)`:'')) : '고르면 오더·인트라넷 이름이 바뀝니다';
   if(f.leaf==='presence'){
@@ -11823,7 +11825,7 @@ function _rcSub(f, side){
 }
 function _rcCell(it,f,side){
   const p=(_rcState().picks[it.workOrderId]||{})[f.id];
-  const dis=side==='campaign' && !(f.campaignSide&&f.campaignSide.ok);
+  const dis=!_rcSideOk(f,side);
   const v=side==='order'?f.orderText:f.campaignText;
   const sub=_rcSub(f,side);
   return `<button type="button" class="rcpick${p===side?' on':''}" ${dis?'disabled':''} aria-pressed="${p===side}" title="${esc(v)}"
@@ -11833,7 +11835,7 @@ function _rcDetail(it){
   if(it.blocked) return `<div class="rcbox"><div class="rchead"><strong>${esc(it.title)}</strong></div><div class="pmworkempty" style="text-align:left">${esc(it.blocked)}</div></div>`;
   const rows=_rcPickable(it).map(f=>`<div class="rcname">${esc(f.label)}</div>${_rcCell(it,f,'order')}${_rcCell(it,f,'campaign')}`).join('');
   const der=(it.fields||[]).filter(f=>f.derived);
-  const derNote=der.length?`<p class="rcnote">${der.map(f=>`${esc(f.label)}(오더 ${esc(f.orderText)} · 공고 ${esc(f.campaignText)})`).join(' · ')} — 옵션별 인원·일건수를 고르면 따라 맞춰집니다.</p>`:'';
+  const derNote=der.length?`<p class="rcnote">${der.map(f=>`${esc(f.label)}(오더 ${esc(f.orderText)} · 공고 ${esc(f.campaignText)})`).join(' · ')} — ${_rcPickable(it).length?'옵션별 인원·일건수를 고르면 따라 맞춰집니다.':'옵션별 값은 같고 합계만 다릅니다. 고를 칸 없이 옵션별 합계로 공고를 맞춥니다.'}</p>`:'';
   const id=esc(JSON.stringify(it.workOrderId));
   return `<div class="rcbox"><div class="rchead"><strong>${esc(it.title)} — 다른 칸 ${_rcPickable(it).length}개</strong><span class="sp"></span>
       <button type="button" class="pmmgr" onclick="_rcAll(${id},'order')">전부 오더 쪽으로</button><button type="button" class="pmmgr" onclick="_rcAll(${id},'campaign')">전부 공고 쪽으로</button></div>
@@ -11844,7 +11846,7 @@ function _rcListHtml(){
   if(!list.length) return `<div class="pmworkempty">${String(st.q||'').trim()?`‘${esc(String(st.q).trim())}’ 와 일치하는 작업이 없습니다.`:'값이 서로 다른 작업이 없습니다.'}</div>`;
   return list.map(it=>{
     const mgr=_rcMgr(it), n=_rcPickable(it).length, k=_rcPicked(it);
-    const meta=it.blocked?'여기서 맞출 수 없음':`다른 칸 ${n}개 · 고름 ${k}/${n}`;
+    const meta=it.blocked?'여기서 맞출 수 없음':(n?`다른 칸 ${n}개 · 고름 ${k}/${n}`:'합계만 다름 · 고를 칸 없음');
     return `<button type="button" class="pmworkpick${st.open===it.workOrderId?' on':''}${_rcDone(it)?' done':''}${it.blocked?' needmemo':''}" aria-expanded="${st.open===it.workOrderId}"
       onclick="_rcToggle(${esc(JSON.stringify(it.workOrderId))})"><span class="pmworkname">${mgr?`[${esc(mgr)}] `:''}${esc(it.title||it.workOrderId)}</span><span class="pmworkmeta">${esc(meta)}</span>${_RC_CHECK}</button>`
       +(st.open===it.workOrderId?_rcDetail(it):'');
@@ -11889,7 +11891,8 @@ function _rcAll(id,side){
   const st=_rcState(); const it=(st.items||[]).find(x=>x.workOrderId===id); if(!it) return;
   const p=st.picks[id]=st.picks[id]||{};
   // 「전부 공고 쪽」 이어도 공고 쪽을 못 고르는 칸은 오더 쪽(그 칸은 오더 쪽만 된다)
-  for(const f of _rcPickable(it)) p[f.id]=side==='campaign'&&f.campaignSide&&f.campaignSide.ok?'campaign':'order';
+  // 「전부 오더 쪽」 이어도 오더 쪽을 못 고르는 칸(주말 제외 미정 등)은 공고 쪽
+  for(const f of _rcPickable(it)) p[f.id]=_rcSideOk(f,side)?side:(side==='campaign'?'order':'campaign');
   _rcRender();
 }
 /** 고른 대로 — 서버에서 끝까지 해 보고(dryRun) 바뀌는 것을 확인창으로 → 확인하면 차례로 맞춘다. */
@@ -11908,7 +11911,7 @@ async function _rcApply(){
   const line=(it,f)=>{ const side=(st.picks[it.workOrderId]||{})[f.id];
     return side==='campaign' ? `<li><b>오더·인트라넷</b> ${esc(f.label)}: ${esc(f.orderText)} → ${esc(f.campaignText)}</li>` : `<li><b>모집공고</b> ${esc(f.label)}: ${esc(f.campaignText)} → ${esc(f.orderText)}</li>`; };
   const html=tried.map(x=>`<div style="margin:0 0 12px"><div style="font-weight:800;margin-bottom:4px">${x.ok?'':'⚠ '}${esc(x.it.title)}</div>`
-    +(x.ok?`<ul style="margin:0;padding-left:18px;line-height:1.7">${_rcPickable(x.it).map(f=>line(x.it,f)).join('')}</ul>`
+    +(x.ok?`<ul style="margin:0;padding-left:18px;line-height:1.7">${_rcPickable(x.it).map(f=>line(x.it,f)).join('')}${(x.it.fields||[]).filter(f=>f.derived).map(f=>`<li><b>모집공고</b> ${esc(f.label)}: 옵션별 값의 합계로 다시 맞춥니다</li>`).join('')}</ul>`
       +((x.r.closed_options||[]).length?`<div style="margin-top:4px;color:#8A5A00">이미 참여한 분이 있어 지우지 않고 마감으로 남깁니다: ${x.r.closed_options.map(c=>esc([c.pName,c.oLabel].filter(Boolean).join(' / '))+` (${c.used}명)`).join(', ')}</div>`:'')
       :`<div style="color:#B3382E">맞출 수 없습니다 — ${esc((x.r&&x.r.error)||'알 수 없는 오류')}</div>`)+`</div>`).join('');
   _modal('고른 대로 맞추기 — 확인', `${html}<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">

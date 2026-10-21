@@ -1537,6 +1537,7 @@ async function _reconcilePrepareInTx(client, wo, camp, rec, actor) {
     const e = plan.error;
     const msg = e.code === 'reconcile_unpicked' ? '아직 고르지 않은 칸이 있습니다.'
       : e.code === 'reconcile_campaign_side_locked' ? `공고 쪽으로 맞출 수 없는 칸을 공고 쪽으로 골랐습니다: ${(e.labels || []).join(', ')}`
+      : e.code === 'reconcile_order_side_locked' ? `오더 쪽으로 맞출 수 없는 칸을 오더 쪽으로 골랐습니다: ${(e.labels || []).join(', ')}`
       : `이 조합으로는 맞출 수 없습니다: ${(e.labels || []).join(' / ')}`;
     return { abort: { status: 409, body: { ok: false, code: e.code, fields: e.fields || [], error: msg } } };
   }
@@ -1620,6 +1621,11 @@ async function applySharedPatch(p) {
     if (wo.bidir_state !== 'on' && p.origin !== 'reconcile') {
       return await _abort(client, 409, { ok: false, code: 'bidir_not_on', state: wo.bidir_state, error: '이 오더는 양방향 동기화가 연결돼 있지 않습니다.' });
     }
+    // 같은 저장 재전송 — 맞추기 준비보다 먼저 본다(커밋은 됐는데 응답만 잃은 재전송이 「이미 연결」 로 실패처럼 보이지 않게 · 검토 2026-10-21)
+    if (p.opId) {
+      const { rows } = await client.query('SELECT sync_version FROM work_order_shared_snapshots WHERE op_id = $1 LIMIT 1', [String(p.opId)]);
+      if (rows.length) return await _abort(client, 200, { ok: true, idempotent: true, sync_version: Number(rows[0].sync_version) });
+    }
     // 오더·공고 맞추기(사용자 확정 2026-10-21) — ① 오더를 지금 공고와 같게(P) 적고 그 상태를 기준으로, ② 오더 쪽을 고른 칸(T)을 보통 길로 쓴다.
     const rec = p.origin === 'reconcile' && p.reconcile ? p.reconcile : null;
     if (p.origin === 'reconcile' && !rec) return await _abort(client, 400, { ok: false, code: 'reconcile_required', error: '맞추기 정보가 없습니다.' });
@@ -1634,10 +1640,6 @@ async function applySharedPatch(p) {
       p = { ...p, baseVersion: Number(wo.sync_version), mine };
     }
     const curVersion = Number(wo.sync_version || 0);
-    if (p.opId) {
-      const { rows } = await client.query('SELECT sync_version FROM work_order_shared_snapshots WHERE op_id = $1 LIMIT 1', [String(p.opId)]);
-      if (rows.length) return await _abort(client, 200, { ok: true, idempotent: true, sync_version: Number(rows[0].sync_version) });
-    }
     const theirs = readSharedState(wo);
     const { rows: baseRows } = await client.query(
       'SELECT state FROM work_order_shared_snapshots WHERE work_order_id = $1 AND sync_version = $2', [wo.id, Number(p.baseVersion)]);
@@ -1910,7 +1912,7 @@ async function applySharedPatch(p) {
     let campaign = { applied: [] };
     if (camp && (plan.writes.length || rec)) {
       campaign = await projectToCampaignInTx(client, camp, next, writtenKeys, productsTouched,
-        { prev: theirs, payTouched, urlTouched: urlTouched || !!(rec && recPlan.force.urlTouched), guideTouched, quantityChanged, structureTouched, structure, reviewTypeChanged: reviewTypeWritten || writtenKeys.has('review_type_mix'), actor: p.actor || p.origin });
+        { prev: theirs, payTouched, urlTouched: urlTouched || !!(rec && recPlan.force.urlTouched), guideTouched, quantityChanged: quantityChanged || !!(rec && recPlan.force.quantity), structureTouched, structure, reviewTypeChanged: reviewTypeWritten || writtenKeys.has('review_type_mix'), actor: p.actor || p.origin });
       if (campaign.reject) {
         const { campaignSyncNotice } = require('./campaignPayAmountSync.service');
         return await _abort(client, 409, { ok: false, code: 'campaign_rejected', sync_version: curVersion,

@@ -24,6 +24,18 @@ const OPT_P = [{ name: '탈취제', url: 'https://smartstore.naver.com/x/product
   assert.ok(sp.indexOf("code: 'reconcile_incomplete'") > 0 && sp.indexOf("code: 'reconcile_incomplete'") < sp.indexOf("VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,\n        [wo.id, newVersion"),
     '끝 비교는 스냅숏·송신·커밋 전(fail-closed)');
   assert.match(sp, /if \(plan\.fingerprint !== String\(rec\.fingerprint \|\| ''\)\)/, '화면이 본 차이가 지금과 다르면 막는다');
+  // 검토 2026-10-21 ⑤ — 같은 저장 재전송 확인은 맞추기 준비(이미 연결 판정)보다 먼저
+  assert.ok(sp.indexOf("SELECT sync_version FROM work_order_shared_snapshots WHERE op_id = $1") < sp.indexOf('const r = await _reconcilePrepareInTx('), 'opId 재전송 확인이 맞추기 준비보다 앞');
+  // ⑥ — 목록의 공고 찾기 = 짝짓기 단일 출처(정방향·역방향)
+  assert.match(src, /require\('\.\/linkedRecruitQuota\.service'\);\n[^]*?JOIN LATERAL \(SELECT c\.\* FROM recruit_campaigns c WHERE c\.archived_at IS NULL AND \$\{LINKED_WO_ON\}/);
+  // ① — 비교 모양 혼합 수량은 CANON 글자(JSON 아님)
+  const R0 = require('../src/services/sharedReconcile.service');
+  assert.deepEqual(R0._mixArr('photo:3,text:2'), [{ type: 'photo', quantity: 3 }, { type: 'text', quantity: 2 }]);
+  assert.deepEqual(R0._mixArr(''), []);
+  assert.throws(() => R0._mixArr('invalid:"x"'));
+  // ④ — 이름 바꾸기 표시는 기준(P)에 남기지 않는다
+  const st = R0._stripRenameMarks({ product_options_json: JSON.stringify([{ name: 'A', prev_name: 'B', options: [{ label: 'x', prev_label: 'y' }] }]) });
+  assert.ok(!/prev_name|prev_label/.test(st.product_options_json), st.product_options_json);
 }
 console.log('bidirReconcile: static passed');
 
@@ -142,6 +154,9 @@ async function pg() {
     assert.equal(Number((await A.cRow()).review_fee), 1500);
     assert.ok(await outbox(A.w.id) >= 1, '인트라넷으로 보낼 거리가 쌓인다');
     assert.ok(!(await R.listReconcile(pool)).items.some(x => x.workOrderId === A.w.id), '맞춘 뒤 목록에서 빠진다');
+    // 검토 ⑤ — 커밋은 됐는데 응답만 잃은 재전송(같은 opId) = 성공으로(「이미 연결」 실패 아님)
+    out = await R.reconcileSharedOrder({ workOrderId: A.w.id, picks, fingerprint: it.fingerprint, actor: '시험', opId: 'rcn-a-1' });
+    assert.equal(out.status, 200, JSON.stringify(out.body)); assert.equal(out.body.idempotent, true);
 
     // ── R2 전부 공고 쪽(옵션 주소는 오더 쪽만) — 오더가 공고 이름을 받는다(인트라넷도 그 이름으로) ──
     const B = await setup('b', async (camp) => { await pool.query(`UPDATE recruit_campaigns SET review_fee = 1500 WHERE id = $1`, [camp]); await renameCamp(camp); });
@@ -152,6 +167,10 @@ async function pg() {
     assert.equal(w.bidir_state, 'on');
     assert.deepEqual(JSON.parse(w.product_options_json)[0].options.map(o => o.label), ['1번 블랙', '1번 화이트']);
     assert.deepEqual((await B.opts()).map(o => o.opt_key), ['1번 블랙', '1번 화이트'], '공고는 그대로');
+    // 검토 ④ — 이름 바꾸기 표시(원래 이름)가 오더·기준 스냅숏에 남지 않는다
+    assert.ok(!/prev_name|prev_label/.test(w.product_options_json), w.product_options_json);
+    { const { rows: sn } = await pool.query(`SELECT state::text AS s FROM work_order_shared_snapshots WHERE work_order_id = $1 AND origin = 'reconcile_base'`, [B.w.id]);
+      assert.ok(sn.length && !/prev_name|prev_label/.test(sn[0].s), JSON.stringify(sn)); }
     assert.equal(Number(w.review_fee), 1500);
     assert.ok(await outbox(B.w.id) >= 1);
 
@@ -226,6 +245,64 @@ async function pg() {
         assert.match(c.time_range, /^13:00\s*~\s*18:00$/); assert.equal(c.skip_weekends, false); assert.equal(c.review_type, 'photo');
       }
     }
+
+    // ── R8 옵션별 리뷰타입 수량이 다른 공고 — 목록이 깨지지 않는다(검토 ①: 비교 모양은 CANON 글자) ──
+    const M = await setup('m', async (camp) => {
+      // 양쪽 다 값이 있어야 「차이」(한쪽이 비면 「채울 값」) — 오더 블랙 = 포토 5 · 공고 블랙 = 포토 3·텍스트 2
+      const { rows: [mw] } = await pool.query(`SELECT w.id, w.product_options_json FROM work_orders w JOIN recruit_campaigns c ON c.source_work_order_id = w.id WHERE c.id = $1`, [camp]);
+      const pj = JSON.parse(mw.product_options_json); pj[0].options[0].review_type_mix = [{ type: 'photo', quantity: 5 }];
+      await pool.query(`UPDATE work_orders SET product_options_json = $2 WHERE id = $1`, [mw.id, JSON.stringify(pj)]);
+      await pool.query(`UPDATE campaign_options SET review_type_mix = '[{"type":"photo","quantity":3},{"type":"text","quantity":2}]'::jsonb WHERE campaign_id = $1 AND opt_key = '블랙'`, [camp]);
+    });
+    const lm = await R.listReconcile(pool);   // 예전: JSON.parse("photo:3,text:2") 예외 → 목록 전체 500
+    it = lm.items.find(x => x.workOrderId === M.w.id);
+    assert.ok(it, JSON.stringify(lm.items.map(x => x.workOrderId)));
+    const mf = it.fields.find(x => x.id === 'option:탈취제 / 블랙.review_type_mix');
+    assert.ok(mf, JSON.stringify(it.fields.map(x => x.id)));
+    assert.match(mf.campaignText, /3/, mf.campaignText);
+    assert.ok(!/photo:|\{/.test(mf.campaignText), '사람이 읽는 글자: ' + mf.campaignText);
+    out = await R.reconcileSharedOrder({ workOrderId: M.w.id, picks: picksOf(it, () => 'order'), fingerprint: it.fingerprint, actor: '시험' });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    assert.equal((await M.wo()).bidir_state, 'on');
+
+    // ── R9 주말 제외 — 오더는 아직 안 정함 · 공고는 주말 포함(검토 ②) ──
+    const K = await setup('k', async (camp) => {
+      await pool.query(`UPDATE work_orders SET skip_weekends = NULL WHERE id = (SELECT source_work_order_id FROM recruit_campaigns WHERE id = $1)`, [camp]);
+    });
+    it = await K.item();
+    assert.ok(it, '목록에 나온다');
+    const kf = it.fields.find(x => x.id === 'skip_weekends');
+    assert.ok(kf, JSON.stringify(it.fields.map(x => x.id)));
+    assert.equal(kf.orderSide && kf.orderSide.ok, false, '오더 쪽(정하지 않음)은 공고로 못 옮긴다');
+    assert.equal(kf.campaignSide.ok, true, JSON.stringify(kf.campaignSide));
+    out = await R.reconcileSharedOrder({ workOrderId: K.w.id, picks: picksOf(it, () => 'order'), fingerprint: it.fingerprint, actor: '시험' });
+    assert.equal(out.status, 409); assert.equal(out.body.code, 'reconcile_order_side_locked');
+    out = await R.reconcileSharedOrder({ workOrderId: K.w.id, picks: picksOf(it, () => 'campaign'), fingerprint: it.fingerprint, actor: '시험' });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    w = await K.wo();
+    assert.equal(w.bidir_state, 'on'); assert.equal(w.skip_weekends, false, '공고 값(주말 포함)이 오더에 들어간다');
+
+    // ── R10 줄 값은 같고 총모집만 다름 — 고를 칸 없이 맞춘다(검토 ③) ──
+    const T = await setup('t', async (camp) => { await pool.query(`UPDATE recruit_campaigns SET recruit_total = 20 WHERE id = $1`, [camp]); });
+    it = await T.item();
+    assert.ok(it, '목록에 나온다');
+    assert.ok(it.fields.length && it.fields.every(x => x.derived), JSON.stringify(it.fields.map(x => [x.id, x.derived])));
+    out = await R.reconcileSharedOrder({ workOrderId: T.w.id, picks: {}, fingerprint: it.fingerprint, actor: '시험' });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    assert.equal((await T.wo()).bidir_state, 'on');
+    assert.equal(Number((await T.cRow()).recruit_total), 17, '공고 총모집 = 줄 합(오더)');
+
+    // ── R13 역방향으로만 이어진 공고(오더 쪽 연결 칸 비어 있음) — 목록에 나오고 맞춰진다(검토 ⑥) ──
+    const V = await setup('v', async (camp) => {
+      await pool.query(`UPDATE recruit_campaigns SET review_fee = 1500 WHERE id = $1`, [camp]);
+      await pool.query(`UPDATE work_orders SET linked_campaign_id = NULL WHERE linked_campaign_id = $1`, [camp]);
+    });
+    it = await V.item();
+    assert.ok(it, '역방향 짝도 목록에 나온다');
+    assert.equal(it.campaignId, V.camp);
+    out = await R.reconcileSharedOrder({ workOrderId: V.w.id, picks: picksOf(it, () => 'campaign'), fingerprint: it.fingerprint, actor: '시험' });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    assert.equal(Number((await V.wo()).review_fee), 1500);
 
     // ── R6 HTTP — 관리자만 · 목록·해 보기·맞추기 ──
     const jwt = require('jsonwebtoken');
