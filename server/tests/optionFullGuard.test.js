@@ -84,7 +84,7 @@ const TWO = [{ opt_key: '3. 퀸더블', product_name: '3. 퀸더블' }, { opt_ke
     async query(sql, params) {
       this.calls.push(sql);
       if (/SELECT opt_key, recruit_total FROM campaign_options/.test(sql)) return { rows: TWO.map(o => ({ opt_key: o.opt_key, recruit_total: o.opt_key === KEY ? cap : 50 })) };
-      if (/SELECT campaign_id, opt_key, product_name FROM campaign_options/.test(sql)) return { rows: TWO.map(o => ({ campaign_id: 'c1', ...o })) };
+      if (/SELECT campaign_id, opt_key, product_name(, sole_until)? FROM campaign_options/.test(sql)) return { rows: TWO.map(o => ({ campaign_id: 'c1', ...o })) };   // 195 sole_until 더함(검사 의미 불변)
       if (/DISTINCT ON/.test(sql)) {
         if (extFail) throw new Error('boom');
         return { rows: ext.map(e => ({ campaign_id: 'c1', order_id: e.id, submitted_at: new Date(e.at), selected_product: e.p, is_today: false })) };

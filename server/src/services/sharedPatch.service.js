@@ -966,12 +966,13 @@ async function _adoptSoleProductInTx(client, camp, theirs) {
     optionId = old[0].id;
     await client.query(
       `UPDATE campaign_options SET status = 'active', product_name = $2, unit_kind = $3, option_url = $4, pay_amount = $5, recruit_total = $6, daily_limit = $7,
-         review_type_mix = $8::jsonb, inflow_guide_html = $9, inflow_guide_images = $10::jsonb, updated_at = NOW() WHERE id = $1`, [optionId, ...vals]);
+         review_type_mix = $8::jsonb, inflow_guide_html = $9, inflow_guide_images = $10::jsonb, sole_until = NOW(), updated_at = NOW() WHERE id = $1`, [optionId, ...vals]);
   } else {
+    // sole_until = 지금(이 저장 트랜잭션 시각) — 그 전에 들어온 바로 구매는 표기와 무관하게 이 상품이다(결정 252 규칙을 이 시각까지 · matchOrderOption)
     const { rows: ins } = await client.query(
       `INSERT INTO campaign_options (campaign_id, opt_key, product_name, unit_kind, option_url, pay_amount, recruit_total, daily_limit,
-         review_type_mix, inflow_guide_html, inflow_guide_images, status, sort_order, thumbnail_url, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11::jsonb, 'active', 1, '', NOW()) RETURNING id`, [camp.id, key, ...vals]);
+         review_type_mix, inflow_guide_html, inflow_guide_images, status, sort_order, thumbnail_url, sole_until, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11::jsonb, 'active', 1, '', NOW(), NOW()) RETURNING id`, [camp.id, key, ...vals]);
     optionId = ins[0].id;
   }
   const { rowCount: moved } = await client.query(

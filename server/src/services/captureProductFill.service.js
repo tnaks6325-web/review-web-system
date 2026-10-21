@@ -52,7 +52,7 @@ async function _loadCampaign(db, campaignId) {
   if (!c) throw new CaptureFillError('not_found', '공고를 찾을 수 없습니다.');
   if (!c.linked_sheet_id || !c.linked_tab_name) throw new CaptureFillError('no_worktable', '연결된 작업표가 없는 공고입니다.');
   const { rows: opts } = await db.query(
-    `SELECT opt_key, product_name, status FROM campaign_options WHERE campaign_id = $1 ORDER BY sort_order, id`, [campaignId]);
+    `SELECT opt_key, product_name, status, sole_until FROM campaign_options WHERE campaign_id = $1 ORDER BY sort_order, id`, [campaignId]);
   if (opts.length < 2) throw new CaptureFillError('not_multi_product', '상품이 둘 이상인 공고에서만 쓸 수 있습니다(하나면 고를 것이 없습니다).');
   return { camp: c, options: opts };
 }
@@ -66,7 +66,7 @@ async function _loadCampaign(db, campaignId) {
  */
 async function _loadTargets(db, camp, options, onlyOrderId = null) {
   const { rows } = await db.query(`
-    SELECT os.id, os.capture_file_id, os.selected_opt_key, os.selected_product,
+    SELECT os.id, os.capture_file_id, os.selected_opt_key, os.selected_product, os.submitted_at,
            (os.submitted_at AT TIME ZONE 'Asia/Seoul')::date::text AS day,
            cp.id AS row_id, cp.seq, cp.tab_name AS row_tab, cp.option_text, cp.row_json->>'상품' AS row_product,
            pe.value_text AS edited_product,
@@ -111,7 +111,7 @@ async function _loadTargets(db, camp, options, onlyOrderId = null) {
     seen.add(String(r.id));
     if (matchOrderOption(options, {
       editedProduct: r.edited_product, selectedOptKey: r.selected_opt_key, selectedProduct: r.selected_product,
-      optionText: r.option_text, rowProduct: r.row_product,
+      optionText: r.option_text, rowProduct: r.row_product, submittedAt: r.submitted_at,   // 결정 263 ⑤-2 원래 상품 줄 시각(정원 셈과 같은 규칙)
     })) continue;
     r.dupRows = Number(r.row_count) > 1;
     r.filledUnmatched = !!(String(r.row_product || '').trim() || String(r.edited_product || '').trim());

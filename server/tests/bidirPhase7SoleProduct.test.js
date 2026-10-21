@@ -24,6 +24,17 @@ const PROD_B = { name: '새상품', url: 'https://smartstore.naver.com/x/product
   assert.match(src, /return rows\.length > 0 \|\| !!_soleProductUnit\(st\);/);
   assert.ok(src.indexOf('adopted = await _adoptSoleProductInTx(client, camp, theirs);') < src.indexOf('closure = await _closeRemovedInTx(client, camp, theirs, next, structure);'),
     '원래 상품 줄을 먼저 만든다(마감 판정이 그 줄의 참여 수를 읽는다)');
+  // ⑤-2 보완(사용자 확정 「1.보완」) — 원래 상품 줄 시각(sole_until) 전에 들어온 바로 구매는 표기와 무관하게 그 상품
+  const { matchOrderOption } = require('../src/services/campaignState.service');
+  const T0 = '2026-10-21T05:00:00.000Z';
+  const rows = [{ opt_key: '단일상품', product_name: '단일상품', sole_until: T0 }, { opt_key: '새상품', product_name: '새상품', sole_until: null }];
+  assert.equal(matchOrderOption(rows, { selectedProduct: '전혀 다른 표기 1개', submittedAt: '2026-10-21T04:00:00Z' }), '단일상품', '그 전 = 원래 상품');
+  assert.equal(matchOrderOption(rows, { selectedProduct: '새상품', submittedAt: new Date('2026-10-21T04:00:00Z') }), '단일상품', '그 전엔 새 상품이 없었다');
+  assert.equal(matchOrderOption(rows, { selectedProduct: '전혀 다른 표기 1개', submittedAt: '2026-10-21T06:00:00Z' }), null, '그 뒤 = 종전(이름으로만)');
+  assert.equal(matchOrderOption(rows, { selectedProduct: '새상품', submittedAt: '2026-10-21T06:00:00Z' }), '새상품');
+  assert.equal(matchOrderOption(rows, { selectedProduct: '전혀 다른 표기 1개' }), null, '시각 모름 = 종전');
+  assert.equal(matchOrderOption(rows, { editedProduct: '새상품', submittedAt: '2026-10-21T04:00:00Z' }), '새상품', '사람이 고친 상품 칸이 먼저(결정 232)');
+  assert.equal(matchOrderOption(rows, { editedProduct: '엉뚱', submittedAt: '2026-10-21T04:00:00Z' }), '단일상품', '고친 값이 안 맞으면 그때 하나뿐이던 상품');
 }
 console.log('bidirPhase7SoleProduct: static passed');
 
@@ -327,6 +338,29 @@ async function pg() {
     const s3 = await E3.snap();
     r = await put(E3.camp, b => { b.options = [optRow('단일상품', '블랙', 13000, 12, 2), optRow('단일상품', '화이트', 14000, 8, 2)]; b.recruit_total = 20; b.daily_limit = 4; });
     assert.equal(r.status, 409, JSON.stringify(r.body)); assert.equal(r.body.code, 'mode_in_use'); assert.equal(await E3.snap(), s3);
+    // S11 바로 구매(표기가 다른 이름) — 상품을 더한 뒤에도 그 전 구매는 원래 상품 사용 수에 남는다 · 그 뒤 구매는 종전(이름으로만)
+    const K = await setup('k');
+    const direct = (n, label, ago) => pool.query(`INSERT INTO order_submissions (sheet_id, tab_name, selected_product, submitted_at)
+      SELECT $1, $1, $2, NOW() - ($3 || ' minutes')::interval FROM generate_series(1, $4)`, ['campaign:' + K.camp, label, String(ago), n]);
+    await direct(3, '단일 1개 200ml 표기 다름', 60);
+    out = await K.intranet(edited(await K.wo(), p => p.push(JSON.parse(JSON.stringify(PROD_B)))));
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    const { usedByOption } = require('../src/services/linkedRecruitQuota.service');
+    let used = await usedByOption(pool, K.camp);
+    assert.equal(used.get('단일상품') || 0, 3, '더하기 전 바로 구매 3건 = 원래 상품 몫: ' + JSON.stringify([...used]));
+    assert.ok((await K.opts())[0].sole_until, '원래 상품 줄에 시각');
+    await pool.query(`INSERT INTO order_submissions (sheet_id, tab_name, selected_product, submitted_at) VALUES ($1, $1, '또 다른 표기', NOW() + INTERVAL '1 minute')`, ['campaign:' + K.camp]);
+    used = await usedByOption(pool, K.camp);
+    assert.equal(used.get('단일상품') || 0, 3, '더한 뒤 표기 다른 구매는 종전대로 안 센다');
+    // 원래 상품을 지우면 — 바로 구매가 있어 지우지 않고 마감(종전엔 세지 못해 지워질 수 있었다)
+    out = await K.intranet(edited(await K.wo(), p => p.splice(0, 1)));
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    assert.deepEqual(out.body.closed_options, [{ pName: '단일상품', oLabel: '', used: 3 }]);
+    // 옵션 있음으로 바꾸기도 바로 구매 3건 때문에 막힌다
+    const K2 = await setup('k2');
+    await pool.query(`INSERT INTO order_submissions (sheet_id, tab_name, selected_product, submitted_at) VALUES ($1, $1, '표기 다름', NOW() - INTERVAL '5 minutes')`, ['campaign:' + K2.camp]);
+    out = await K2.intranet(edited(await K2.wo(), toOpt));
+    assert.equal(out.status, 409, JSON.stringify(out.body)); assert.equal(out.body.code, 'mode_in_use');
     console.log('bidirPhase7SoleProduct: PG passed');
   } finally {
     srv.close();
@@ -337,6 +371,7 @@ async function pg() {
     await pool.query('DELETE FROM work_order_shared_snapshots WHERE work_order_id = ANY($1)', [ids]).catch(() => {});
     await pool.query('DELETE FROM shared_sync_outbox WHERE work_order_id = ANY($1)', [ids]).catch(() => {});
     await pool.query('DELETE FROM campaign_applications WHERE campaign_id = ANY($1)', [camps]).catch(() => {});
+    await pool.query(`DELETE FROM order_submissions WHERE sheet_id = ANY($1)`, [camps.map(c => 'campaign:' + c)]).catch(() => {});
     await pool.query('DELETE FROM campaign_option_soldout_reports WHERE campaign_id = ANY($1)', [camps]).catch(() => {});
     await pool.query('DELETE FROM campaign_option_alerts WHERE campaign_id = ANY($1)', [camps]).catch(() => {});
     await pool.query('DELETE FROM campaign_participants WHERE sheet_id = $1 AND tab_name = ANY($2)', [SHEET, tabs]).catch(() => {});
