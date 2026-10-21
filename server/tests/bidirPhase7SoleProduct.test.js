@@ -36,6 +36,8 @@ async function pg() {
   const srv = app.listen(0);
   const port = srv.address().port;
   const stamp = Date.now();
+  const jwt = require('jsonwebtoken');
+  const admin = { authorization: 'Bearer ' + jwt.sign({ id: 'admin_t', role: 'admin', name: '시험관리자' }, process.env.JWT_SECRET) };
   const call = async (method, p, body, headers = {}) => {
     const r = await fetch(`http://127.0.0.1:${port}${p}`, { method, headers: { 'content-type': 'application/json', 'x-intake-key': 'test-intake', ...headers }, body: body ? JSON.stringify(body) : undefined });
     return { status: r.status, body: await r.json() };
@@ -110,6 +112,23 @@ async function pg() {
     const json = JSON.stringify(p);
     return { product_options_json: json, recruit_count: total, daily_count: daily, pay_amount: pay, product_option: productSummaryText(json) };
   };
+  /** 공고 창을 연 모양 그대로의 저장 본문(Delivery 시험과 같은 규칙). */
+  const openBody = async (camp) => {
+    const dd = await call('GET', `/api/campaign/admin/${camp}`, null, admin);
+    const c0 = dd.body.data;
+    return { title: c0.title, review_fee: c0.review_fee, max_slots: c0.max_slots, sort_order: c0.sort_order, deadline: c0.deadline,
+      work_detail: { ...c0.work_detail }, thumbnail_url: c0.thumbnail_url, time_range: c0.time_range, landing_url: c0.landing_url,
+      channel: c0.channel, channel_custom: c0.channel_custom || '', window_start: String(c0.window_start || '').slice(0, 5), window_end: String(c0.window_end || '').slice(0, 5),
+      recruit_total: c0.recruit_total, daily_limit: c0.daily_limit,
+      delivery_type: c0.delivery_type, review_type: c0.review_type, work_kind: c0.work_kind || 'review',
+      options: (dd.body.options || []).map(x => ({ optKey: x.optKey, prevOptKey: x.optKey, productName: x.productName, unitKind: x.unitKind, optionUrl: x.optionUrl, payAmount: x.payAmount,
+        recruitTotal: x.recruitTotal, dailyLimit: x.dailyLimit, status: x.status, inflowGuideHtml: x.inflowGuideHtml || '', inflowGuideImages: x.inflowGuideImages || [] })),
+      fee_schedules: (dd.body.feeSchedules || []).map(x => ({ effectiveFrom: x.effectiveFrom, reviewFee: x.reviewFee, memo: x.memo })),
+      bidir_base_sync_version: dd.body.bidir ? dd.body.bidir.sync_version : undefined };
+  };
+  const put = async (camp, fn) => { const b = await openBody(camp); fn(b); return call('PUT', `/api/campaign/admin/${camp}`, b, admin); };
+  const prodRow = (name, url, pay, rt, dl) => ({ optKey: name, prevOptKey: '', productName: name, unitKind: 'product', optionUrl: url, payAmount: pay,
+    recruitTotal: rt, dailyLimit: dl, status: 'active', inflowGuideHtml: '', inflowGuideImages: [] });
   const prevSetting = (await pool.query(`SELECT value FROM app_settings WHERE key = 'bidir_sync'`)).rows[0];
   try {
     await setSwitch('{"in2rw":"apply","push":"off","campaign_edit":"on"}');
@@ -186,6 +205,32 @@ async function pg() {
     out = await E.intranet(edited(await E.wo(), p => p.push(JSON.parse(JSON.stringify(PROD_B)))));
     assert.equal(out.status, 200, JSON.stringify(out.body));
     assert.equal((await E.cRow()).work_detail.productLines, '담당자가 직접 쓴 상품 안내');
+    // S8 공고 창 — 옵션 없는 공고를 "옵션 있음" 으로 바꿔 원래 상품 + 새 상품 → 공유 저장이 원래 줄을 만들고 새 줄을 더한다(오더까지)
+    const F = await setup('f');
+    await F.applyNone(2);
+    let r = await put(F.camp, b => { assert.deepEqual(b.options, [], '옵션 없는 공고 = 옵션표 빈 목록');
+      b.options = [prodRow('단일상품', SINGLE[0].url, 13000, 20, 4), prodRow('새상품', PROD_B.url, 9000, 5, 1)]; b.recruit_total = 25; b.daily_limit = 5; });
+    assert.equal(r.status, 200, JSON.stringify(r.body)); assert.notEqual(r.body.ok, false, JSON.stringify(r.body));
+    assert.deepEqual((await F.opts()).map(x => [x.opt_key, x.unit_kind, x.status, Number(x.recruit_total), Number(x.pay_amount)]),
+      [['단일상품', 'product', 'active', 20, 13000], ['새상품', 'product', 'active', 5, 9000]]);
+    assert.deepEqual(await F.apps(), [{ option_key: '단일상품', n: 2 }]);
+    w = await F.wo();
+    assert.deepEqual(JSON.parse(w.product_options_json).map(x => [x.name, x.base.count, x.base.pay]), [['단일상품', 20, 13000], ['새상품', 5, 9000]]);
+    assert.equal(Number(w.recruit_count), 25);
+    const lf = String((await F.cRow()).work_detail.productLines || '');
+    assert.ok(lf.includes('새상품'), '공고 창 저장이 다시 쓴 상품 안내 글을 옛 글로 되덮지 않는다: ' + lf);
+
+    // S9 원래 상품 줄을 빠뜨리거나 이름을 바꿔 보내면 막는다(참여 기록이 이어지지 않는다) — 아무것도 안 바뀜
+    const G = await setup('g');
+    const vG = Number((await G.wo()).sync_version);
+    r = await put(G.camp, b => { b.options = [prodRow('새상품', PROD_B.url, 9000, 5, 1)]; b.recruit_total = 5; b.daily_limit = 1; });
+    assert.equal(r.status, 409, JSON.stringify(r.body)); assert.equal(r.body.code, 'campaign_field_unmappable'); assert.match(r.body.error, /원래 상품\(「단일상품」\)/);
+    assert.equal((await G.opts()).length, 0); assert.equal(Number((await G.wo()).sync_version), vG);
+
+    // S10 옵션 없는 모드 그대로 저장(옵션표 빈 목록) = 구조 손대지 않음 — 줄을 만들지 않는다
+    r = await put(G.camp, b => { b.title = '가짜 공고 제목만'; });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal((await G.opts()).length, 0); assert.equal(Number((await G.wo()).sync_version), vG);
     console.log('bidirPhase7SoleProduct: PG passed');
   } finally {
     srv.close();

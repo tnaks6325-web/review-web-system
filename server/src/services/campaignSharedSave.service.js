@@ -129,6 +129,13 @@ async function applyCampaignSharedSave({ campaignId, body, actor, db } = {}) {
     actor: actor || '리뷰웹 공고', opId: b.bidir_op_id ? String(b.bidir_op_id).slice(0, 120) : '',
   });
   if (out.status !== 200) return { response: { status: out.status, body: out.body } };
+  // ⑤-2 공유 저장이 상품 안내 글을 새 상품 구성으로 다시 썼으면, 화면이 손대지 않은 옛 글로 되덮지 않는다(사람이 이 저장에서 고친 글이면 그 글이 이긴다)
+  const nl = v => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+  const wd0 = camp.work_detail && typeof camp.work_detail === 'object' ? camp.work_detail : {};
+  if ((out.body.campaign_applied || []).includes('product_lines')
+      && !(b.work_detail && typeof b.work_detail === 'object' && Object.prototype.hasOwnProperty.call(b.work_detail, 'productLines') && nl(b.work_detail.productLines) !== nl(wd0.productLines))) {
+    keepProductLines = true;
+  }
   return strip({
     sync_version: out.body.sync_version, changed: plan.changed,
     overwritten: out.body.overwritten || [], applied: out.body.applied || [], idempotent: out.body.idempotent === true,

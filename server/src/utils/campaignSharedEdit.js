@@ -446,9 +446,16 @@ function _planQuantityEdit({ base, products, baseRows, liveCampOpts, body, edite
  *   마감 줄을 다시 열기 = 마감 표시를 뗀다(인원은 그 줄 칸).
  * ★ 이름 바꾸기·상품 이름·마감시키기(지우기로 한다)·옵션 없는 공고는 담지 않는다(unmappable).
  */
-function _planStructureEdit({ products, baseRows, liveCampOpts, body, guideInflow }) {
+function _planStructureEdit({ products, baseRows, liveCampOpts, body, guideInflow, soleVirtual = false }) {
   const out = { any: false, removes: [], adds: [], reopens: [], renames: [], unmappable: [], changed: [] };
   if (!Array.isArray(body.options)) return out;
+  // ⑤-2 옵션 줄 없는 상품 하나짜리 공고를 여러 상품으로 — 원래 상품 줄은 같은 이름으로 남겨야 한다(그 줄이 옵션 없이 참여한 사람·품절 멈춤을 이어받는다).
+  //   이름이 다르면 "지우고 더함" 으로 읽혀 참여 기록이 이어지지 않는다 → 막고 안내(줄이 생긴 뒤에는 이름 바꾸기·지우기가 종전대로 된다)
+  if (soleVirtual && !body.options.some(o => o && typeof o === 'object' && _bodyOptKey(o) === baseRows[0].key)) {
+    const p0 = baseRows[0].key.split('|')[0];
+    out.unmappable.push({ key: baseRows[0].key, label: `상품 더하기 — 원래 상품(「${p0}」) 줄을 같은 이름의 옵션 없는 상품으로 남겨 주세요(옵션 없는 공고를 여러 상품으로 바꿀 때)`, want: p0, got: '' });
+    return out;
+  }
   if (!products || !(liveCampOpts.length > 0 && baseRows.length > 0)) {
     // 오더 상품 구성과 공고 줄을 짝지을 수 없는 오더(상품 정보 없음 · 옛 형식 · 옵션 줄 없는 공고) — 화면이 공고 줄을 더하거나 지우거나
     //   마감·다시 열기를 하면 오더에 담을 수 없다(종전엔 공고 줄만 바뀌었다 · 검토 2026-10-21). 손대지 않은 저장은 통과.
@@ -786,13 +793,19 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
     }
   }
   // ⑥ 7단계-④ 상품·옵션 더하기·지우기·다시 열기(판정 — 반영은 금액·인원 계획 뒤)
-  const st = _planStructureEdit({ products, baseRows, liveCampOpts, body: b, guideInflow });
+  // ⑤-2 옵션 줄 없는 공고 — 상품 하나짜리면 그 상품 줄이 있는 것처럼 짝짓는다(저장 때 공유 저장이 실제 줄을 먼저 만든다 · _adoptSoleProductInTx).
+  //   화면이 옵션표를 보낸 저장만 — 옵션 없는 모드 저장(빈 목록)은 손대지 않은 저장이다. 인원 계획도 같은 줄로 본다(안 그러면 총모집이 원래 상품 인원으로 읽힌다).
+  const soleVirtual = !liveCampOpts.length && !!products && baseRows.length === 1 && baseRows[0].unit_kind === 'product'
+    && Array.isArray(b.options) && b.options.some(o => o && typeof o === 'object');
+  const liveForPlan = soleVirtual
+    ? [{ opt_key: baseRows[0].key.split('|')[0], status: 'active', recruit_total: baseRows[0].recruit_total, daily_limit: baseRows[0].daily_limit }] : liveCampOpts;
+  const st = _planStructureEdit({ products, baseRows, body: b, guideInflow, soleVirtual, liveCampOpts: liveForPlan });
   unmappable.push(...st.unmappable);
   // ④ 7단계-② 인원·일건수·리뷰타입 혼합 수량 — 공고 창 총모집(열린 줄만)에 마감 줄 인원을 더해 오더 총모집과 같은 기준으로
   const baseClosed = closedCountSum(products);
   const sentRt = b.recruit_total !== undefined && b.recruit_total !== null && b.recruit_total !== '';
   const bq = baseClosed && sentRt ? { ...b, recruit_total: Math.max(0, Math.floor(Number(b.recruit_total) || 0)) + baseClosed } : b;
-  const q = _planQuantityEdit({ base, products, baseRows, liveCampOpts, body: bq, edited, suppressTotals: st.any });
+  const q = _planQuantityEdit({ base, products, baseRows, liveCampOpts: liveForPlan, body: bq, edited, suppressTotals: st.any });
   unmappable.push(...q.unmappable);
   changed.push(...q.changed);
   Object.assign(mine, q.mine);

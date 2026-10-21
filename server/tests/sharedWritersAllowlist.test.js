@@ -31,6 +31,8 @@ const ALLOW = {
   'services/sharedPatch.service.js|_projectPayInTx|campaign_options': '공유 저장 투영(옵션 금액 · 금액 이력과 함께 · 5단계)',
   'services/sharedPatch.service.js|_projectGuideInTx|campaign_options': '공유 저장 투영(선택지 유입가이드 · 바뀐 줄만 · 6단계)',
   'services/sharedPatch.service.js|_projectStructureInTx|campaign_options': '공유 저장 투영(상품·옵션 더하기·지우기·마감·다시 열기 · 오더 상품 구성과 같은 트랜잭션 · 7단계-④)',
+  'services/sharedPatch.service.js|_adoptSoleProductInTx|campaign_options': '공유 저장 투영 앞단(옵션 없는 상품 하나짜리 공고의 원래 상품 줄 만들기 · 같은 트랜잭션 · 7단계-④ ⑤-2)',
+  'services/sharedPatch.service.js|_projectProductLinesInTx|recruit_campaigns': '공유 저장 투영(상품 안내 글 ← 발행 프리필 · 사람이 고친 글은 그대로 · 같은 트랜잭션 · 7단계-④ ⑤-2)',
   'services/campaignPayAmountSync.service.js|syncCampaignPayAmount|campaign_options': '옛 원본 수정 경로의 전파(금액) — 연결+apply 오더는 _intakeSourceBidir 로 갈라져 여기 오지 않는다',
   'routes/order.routes.js|_intakeSourceRevisionHandler|work_orders': '연결+apply 면 그 앞에서 _intakeSourceBidir 로 갈라진다(종전 경로 = 연결 안 됨·스위치 off)',
   'services/campaignPayAmountSync.service.js|syncCampaignPayAmount|recruit_campaigns': '옛 원본 수정 경로의 전파(금액 — 5단계)',
