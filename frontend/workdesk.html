@@ -11837,6 +11837,8 @@ function _rcDetail(it){
   const der=(it.fields||[]).filter(f=>f.derived);
   const derNote=der.length?`<p class="rcnote">${der.map(f=>`${esc(f.label)}(오더 ${esc(f.orderText)} · 공고 ${esc(f.campaignText)})`).join(' · ')} — ${_rcPickable(it).length?'옵션별 인원·일건수를 고르면 따라 맞춰집니다.':'옵션별 값은 같고 합계만 다릅니다. 고를 칸 없이 옵션별 합계로 공고를 맞춥니다.'}</p>`:'';
   const id=esc(JSON.stringify(it.workOrderId));
+  // 고를 칸이 없는(합계만 다른) 작업 — 빈 표·「전부 ~쪽으로」 없이 안내만
+  if(!_rcPickable(it).length) return `<div class="rcbox"><div class="rchead"><strong>${esc(it.title)} — 합계만 다름</strong></div>${derNote}</div>`;
   return `<div class="rcbox"><div class="rchead"><strong>${esc(it.title)} — 다른 칸 ${_rcPickable(it).length}개</strong><span class="sp"></span>
       <button type="button" class="pmmgr" onclick="_rcAll(${id},'order')">전부 오더 쪽으로</button><button type="button" class="pmmgr" onclick="_rcAll(${id},'campaign')">전부 공고 쪽으로</button></div>
     <div class="rcgrid"><div class="rccol"></div><div class="rccol">인트라넷 리뷰오더 · 작업오더</div><div class="rccol">모집공고 (리뷰어 화면)</div>${rows}</div>${derNote}</div>`;
