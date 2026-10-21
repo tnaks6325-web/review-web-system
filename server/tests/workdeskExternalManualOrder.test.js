@@ -83,7 +83,15 @@ assert.strictEqual(actions.canOpenExternalManualOrder(), false, '서버 편집 �
 
 state = { role: 'admin', cur: { sheetId: 'sheet-1', tabName: '8/12 외부모집', tabGid: 42, displayName: '탭 이름' }, wd: { meta: { displayName: '작업명' } } };
 actions = externalManualOrder(state, text => { message = text; }, { ManualOrder: { open: ctx => { opened = ctx; } } }, async () => { reloaded++; });
-assert.strictEqual(actions.canOpenExternalManualOrder(), true, '관리자는 외부모집 수동제출 버튼을 사용할 수 있어야 합니다.');
+// ★ 결정 269 — admin 도 서버 canEdit(편집 허용 명단)과 1:1. 명단 판정 전·명단 밖이면 버튼 없음(눌러도 403 나는 막다른 길 금지).
+assert.strictEqual(actions.canOpenExternalManualOrder(), false, '명단 판정 전의 관리자에게는 버튼을 그리지 않아야 합니다.');
+state.campEdit = false;
+assert.strictEqual(actions.canOpenExternalManualOrder(), false, '편집 허용 명단 밖 관리자에게는 버튼을 그리지 않아야 합니다(서버가 403).');
+state.campEdit = true;
+assert.strictEqual(actions.canOpenExternalManualOrder(), true, '명단에 있는 관리자는 외부모집 수동제출 버튼을 사용할 수 있어야 합니다.');
+{ const ms = { role: 'master', campEdit: null };
+  const m = externalManualOrder(ms, () => {}, {}, async () => {});
+  assert.strictEqual(m.canOpenExternalManualOrder(), true, 'master 는 서버도 명단 없이 통과하므로 바로 보여야 합니다.'); }
 actions.openExternalManualOrder();
 assert.deepStrictEqual(
   { sheetId: opened.sheetId, tabName: opened.tabName, gid: opened.gid, campaignId: opened.campaignId, title: opened.title },
