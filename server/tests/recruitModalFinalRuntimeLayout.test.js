@@ -21,10 +21,12 @@ assert(/class="editor"/.test(compact) && /id="editorScroller" class="compact-edi
   '중앙 편집기와 독립 스크롤 영역을 유지해야 합니다.');
 assert(/class="startup-setting-bar"/.test(compact) && /id="rf_startcheck"/.test(compact),
   '작업 시작 점검은 편집기 상단의 고정 요약으로 보여야 합니다.');
-assert(/class="section rf-public-settings"/.test(compact)
-  && /class="section" data-sec="link"/.test(compact)
-  && /class="section" data-sec="prod"/.test(compact),
-  '공개 설정·기본 설정·진행상품의 현재 섹션 구조를 유지해야 합니다.');
+// 시안 3차(결정 263 · 사용자 확정 2026-10-22) — 진행상품은 「리뷰오더와 맞춰지는 항목」 안의 묶음이고, 참여형 전용 토글(data-part-only)을 그대로 단다
+assert(/class="section rf-order-own" data-sec="order"/.test(compact)
+  && /class="section rf-sync-box" data-sec="link"/.test(compact)
+  && /class="rf-sync-sub" data-sec="prod" data-part-only/.test(compact)
+  && /class="section rf-public-settings" data-sec="pub"/.test(compact),
+  '고유 항목·맞춰지는 항목(진행상품)·리뷰웹 전용 값의 현재 섹션 구조를 유지해야 합니다.');
 assert(/id="rf_status" hidden/.test(compact), '저장 계약용 상태 필드는 숨은 필드로 유지해야 합니다.');
 assert(/<footer class="footer modal-footer">/.test(compact)
   && /id="recruitSaveBtnInline"/.test(compact),

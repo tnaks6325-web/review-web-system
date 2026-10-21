@@ -3125,6 +3125,40 @@ function onFeeScheduleToggle(on) {
   renderFeeSchedule();
 }
 
+/** 공고 창 시안 3차(결정 263 · 사용자 확정 2026-10-22): 「리뷰오더 고유 항목」·연결 표시줄·양방향 표시.
+ *  info = 상세 응답의 orderInfo(연결 리뷰오더 · 없음 = null) · linked = 양방향으로 맞춰지는 공고(창을 연 시점 버전이 있음).
+ *  ★ 모집 시작일은 리뷰오더 고유 값이라 연결 공고에서 보기 전용(사용자 확정 D5) — 연결 아닌 공고는 종전처럼 여기서 고친다. */
+function _rfApplyOrderLink(info, linked) {
+  const box = document.querySelector("#recruitModal .rf-sync-box");
+  if (box) box.dataset.linked = linked ? "1" : "0";
+  const badge = document.getElementById("rf_sync_badge"); if (badge) badge.hidden = !linked;
+  const bar = document.getElementById("rf_order_linkbar");
+  if (bar) {
+    if (info) {
+      const at = info.syncedAt ? new Date(info.syncedAt) : null;
+      const atText = at && !isNaN(at) ? `${at.getMonth() + 1}/${at.getDate()} ${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}` : "";
+      bar.innerHTML = linked
+        ? `<span class="rf-linkstate">연결됨</span><span>연결된 리뷰오더 <b>${escHtml(info.title || "")}</b></span>${atText ? `<small>마지막 맞춤 ${escHtml(atText)}</small>` : ""}`
+        : `<span class="rf-linkstate off">연결 전</span><span>리뷰오더 <b>${escHtml(info.title || "")}</b> — 값이 서로 달라 아직 따로 돕니다. 작업오더 화면의 「오더·공고 다름」에서 맞춥니다.</span>`;
+    } else bar.innerHTML = "";
+    bar.hidden = !info;
+  }
+  const mRow = document.getElementById("rf_order_manager_row"), mVal = document.getElementById("rf_order_manager");
+  if (mRow && mVal) { const m = String((info && info.manager) || "").trim(); mVal.textContent = m === "박은비" ? "박은비 (망고)" : m === "박세희" ? "박세희 (만두)" : m; mRow.hidden = !m; }
+  const dRow = document.getElementById("rf_order_distribution_row"), dVal = document.getElementById("rf_order_distribution");
+  if (dRow && dVal) { const d = String((info && info.distribution) || "").trim(); dVal.textContent = d === "sequential" ? "순차진행" : d ? "균등분산" : ""; dRow.hidden = !(linked && d); }
+  const hint = document.getElementById("rf_order_own_hint");
+  if (hint) hint.textContent = info ? (linked ? "리뷰오더에서 정한 값 · 여기서는 보기만" : "리뷰오더에서 정한 값 · 연결 전이라 여기서도 고칠 수 있음") : "연결된 리뷰오더가 없는 공고 — 여기서 정합니다";
+  const sRow = document.getElementById("rf_start_date_row"), sBtn = document.getElementById("rf_start_date_trigger");
+  if (sBtn) sBtn.disabled = !!linked;
+  if (sRow) {
+    sRow.classList.toggle("rf-readonly", !!linked);
+    let note = document.getElementById("rf_start_date_lock_note");
+    if (linked && !note) { note = document.createElement("span"); note.id = "rf_start_date_lock_note"; note.className = "rf-readonly-note"; note.textContent = "리뷰오더에서 고칩니다"; sRow.querySelector(".form-control")?.appendChild(note); }
+    if (note) note.hidden = !linked;
+  }
+}
+
 /** ★ 양방향 5단계(결정 263 · 사용자 확정 2026-10-20): 리뷰오더와 맞춰지는 공고는 기간별 리뷰비를 직접 고치지 않는다.
  *  리뷰비 칸만 바꾸면 서버가 "오늘부터 새 금액" 구간을 넣고 지난 참여 금액을 고정한다 — 표는 보기 전용으로 둔다.
  *  (저장도 기간표를 보내지 않는다 — 창을 연 뒤 생긴 구간을 옛 표로 지우지 않게.) 연결 아닌 공고는 종전 그대로. */
@@ -3288,6 +3322,8 @@ function renderFeeSchedule() {
      정하는 값이라, 발행 단계에서 뒤집으면 준비 행 기준·작업표 열 구성과 어긋난다. */
 function _rfApplyWorkKindUi() {
   const isBlog = (document.getElementById("rf_work_kind")?.value || "") === "blog";
+  // 시안 3차: 맨 위 체험단 종류 탭(보기 전용 — 체험단 종류는 리뷰오더에서 정하고 접수 뒤 바꾸지 않는다)
+  document.querySelectorAll("#rf_kind_tabs [data-kind]").forEach(t => t.classList.toggle("on", (t.dataset.kind === "blog") === isBlog));
   // 리뷰타입 UI(두 레이아웃 변형 모두) — 카드형은 .rf-hrow, 행형은 .rf-review-type-row
   document.querySelectorAll("#rf_review_type_btns").forEach(btns => {
     const row = btns.closest(".rf-hrow") || btns.closest(".rf-review-type-row") || btns.closest(".form-row");
@@ -3353,6 +3389,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   window._recruitEditLoadedFees = null;
   window._rfBidirBase = null;   // ★ 양방향 4단계-2: 창을 연 시점의 리뷰오더 공유 버전(연결 공고만)
   _rfApplyFeeLinkLock();        // ★ 5단계: 지난 공고의 보기 전용 잠금을 푼다
+  _rfApplyOrderLink(null, false);   // 시안 3차: 지난 공고의 연결 표시·시작일 잠금을 지운다
   _rfLastScheduledPurchaseWindow = { start: "", end: "" };
   if (typeof recruitSaveBlockClear === "function") recruitSaveBlockClear();  // 지난번 차단 사유 잔류 방지
   _rfLinkedMiss = null; _rfSugCache = [];   // 지난 공고의 "탭 못 찾음" 사유가 새 모달에 남지 않게(로드보다 먼저)
@@ -3511,6 +3548,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
       // 📅 082: 리뷰비 구간 프리필 — 구간이 있으면 스위치가 자동으로 켜진다(없으면 종전 화면 그대로)
       if (typeof renderFeeRows === "function") renderFeeRows(json.feeSchedules || []);
       _rfApplyFeeLinkLock();   // ★ 5단계: 리뷰오더와 맞춰지는 공고면 기간표 보기 전용
+      _rfApplyOrderLink(json && json.orderInfo || null, !!window._rfBidirBase);   // 시안 3차: 고유 항목·연결 표시줄
       // The compact editor intentionally does not render the legacy public-note
       // textarea.  Treat it as an optional compatibility field so an older
       // campaign cannot abort loading before its product and guide values are

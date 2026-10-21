@@ -1580,6 +1580,7 @@ async function getCampaignDetail(req, res, next) {
          (2026-08-21 신고). → 수정 모달이 **열 때부터** 그 사실을 말하고 칸을 잠그도록 재료를 준다.
          ★ 조회 실패·095 미적용 = **null(모름)** — 화면이 "잠금 없음"으로 꾸미지 않는다. */
       let roundsLock = null;
+      let orderInfo = null;   // 연결 리뷰오더 안내(보기 전용) — 없음·조회 실패 = null(화면은 「연결된 리뷰오더 없음」)
       try {
         const { rows: _rr } = await pool.query(
           `SELECT COUNT(*)::int AS n, COALESCE(SUM(slot_count), 0)::int AS total
@@ -1601,7 +1602,16 @@ async function getCampaignDetail(req, res, next) {
         const wo = await linkedWorkOrderForCampaign(rows[0], [
           'review_type_mix', 'inflow_type', 'start_date',
           'product_url', 'review_guide', 'special_notes', 'inflow_guide', 'guide_images',
+          // 공고 창 시안 3차(결정 263): 「리뷰오더 고유 항목」 보기 전용 · 연결 표시줄 재료(읽기만)
+          'id', 'title', 'manager_name', 'work_manager', 'product_distribution_mode', 'source_review_order_id', 'bidir_state',
         ]);
+        if (wo && wo.id) {
+          orderInfo = {
+            workOrderId: String(wo.id), title: String(wo.title || ''), sourceReviewOrderId: String(wo.source_review_order_id || ''),
+            manager: String(wo.manager_name || wo.work_manager || ''), distribution: String(wo.product_distribution_mode || ''),
+            linked: String(wo.bidir_state || '') === 'on', syncedAt: null,
+          };
+        }
         if (needMix) {
           const woMix = normalizeReviewTypeMix(wo && wo.review_type_mix);
           if ((woMix.mix || []).length) orderReviewTypeMix = woMix.mix;
@@ -1636,11 +1646,19 @@ async function getCampaignDetail(req, res, next) {
         const link = await require('../services/campaignSharedSave.service').findBidirLink(pool, id);
         if (link) bidir = { linked: true, sync_version: Number(link.wo.sync_version) || 0, work_order_id: link.wo.id };
       } catch (e) { logger.warn(`[campaign/detail] 양방향 연결 확인 실패(없음으로): ${e.message}`); }
+      // 「마지막 맞춤」 시각 — 공유 저장 기록의 마지막(연결 공고만 · 조회 실패 = 표시 안 함)
+      if (orderInfo && bidir && orderInfo.workOrderId === String(bidir.work_order_id)) {
+        try {
+          const { rows: _sn } = await pool.query('SELECT MAX(created_at) AS at FROM work_order_shared_snapshots WHERE work_order_id = $1', [orderInfo.workOrderId]);
+          orderInfo.syncedAt = _sn[0] && _sn[0].at ? new Date(_sn[0].at).toISOString() : null;
+        } catch (_) { /* 표시만 생략 */ }
+      }
       return res.json({
         ok: true,
         data: { ...rows[0], repurchase_days: repurchaseDays(rows[0].repurchase_days), workboard_display_name: workboardDisplayName },
         options, feeSchedules, orderReviewTypeMix, orderInflowType, orderStartDate, orderCampaignContent, roundsLock,
         ...(bidir ? { bidir } : {}),
+        ...(orderInfo ? { orderInfo } : {}),
       });
     }
     const now = new Date();

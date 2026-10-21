@@ -40,12 +40,16 @@ ok('작업 시작 점검은 편집기 상단에 있다',
   /class="startup-setting-bar"/.test(compact) && /id="rf_startcheck"/.test(compact));
 ok('상태 저장 계약은 숨은 select로 유지한다',
   /id="rf_status" hidden/.test(compact) && /function syncStatusButtons/.test(modal));
-ok('시안 순서로 공개 설정·기본 설정·진행상품을 직접 렌더링한다',
-  compact.indexOf('class="section rf-public-settings"') < compact.indexOf('data-sec="link"')
+// 시안 3차(결정 263 · 사용자 확정 2026-10-22): 체험단 종류 → 리뷰오더 고유 항목 → 리뷰오더와 맞춰지는 항목(안에 진행상품) → 리뷰웹에서만 정하는 값
+ok('시안 3차 순서로 체험단 종류·고유 항목·맞춰지는 항목(진행상품 포함)·리뷰웹 전용 값을 직접 렌더링한다',
+  compact.indexOf('id="rf_kind_tabs"') > 0
+  && compact.indexOf('id="rf_kind_tabs"') < compact.indexOf('data-sec="order"')
+  && compact.indexOf('data-sec="order"') < compact.indexOf('data-sec="link"')
   && compact.indexOf('data-sec="link"') < compact.indexOf('data-sec="prod"')
+  && compact.indexOf('data-sec="prod"') < compact.indexOf('class="section rf-public-settings" data-sec="pub"')
   && !/data-sec="info"/.test(compact));
 ok('중앙 편집부는 section/row-form/form-row 문법을 쓴다',
-  /class="section" data-sec="link"/.test(compact)
+  /class="section rf-sync-box" data-sec="link"/.test(compact)
   && /class="row-form"/.test(compact)
   && /class="form-row"/.test(compact)
   && /class="form-label"/.test(compact)
