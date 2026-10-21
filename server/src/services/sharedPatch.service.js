@@ -1200,9 +1200,15 @@ async function _projectDeliveryInTx(client, camp, prev, next) {
   await client.query('UPDATE recruit_campaigns SET delivery_type = $2, updated_at = NOW() WHERE id = $1 AND delivery_type IS DISTINCT FROM $2', [camp.id, base]);
   let tracking = null;
   if (camp.linked_sheet_id && camp.linked_tab_name) {
+    // 탭 설정·송장 칸은 탭 하나에 하나 — 다른 공고(마감 포함)와 같이 쓰는 탭이면 그 공고 화면 배송 표시까지 바뀐다 → 막는다(검토 2026-10-21 · 판정 단일 출처)
+    if (await require('./worktableTrackingColumn.service').tabSharedByOthers(client, camp.linked_sheet_id, camp.linked_tab_name, camp.id)) {
+      return { reject: { kind: 'delivery', out: { applied: false, reason: 'delivery_shared_tab' },
+        error: '이 작업표를 다른 모집공고(마감 포함)와 같이 써서 배송 방식을 바꿀 수 없습니다. 바꿔야 하면 새 리뷰오더로 접수해 주세요.' } };
+    }
     await client.query(`UPDATE tab_configs SET delivery_type = $3, taekhap = $4, updated_at = NOW() WHERE sheet_id = $1 AND tab_name = $2`,
       [camp.linked_sheet_id, camp.linked_tab_name, String(next.delivery_type == null ? '' : next.delivery_type), courier]);
-    if ((deliveryBaseType(prev.delivery_type) === '택배발송대행') !== courier) tracking = { sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name, enable: courier };
+    // 택배발송대행이 끼면 매번 맞춘다(같은 일을 다시 해도 결과가 같다 — 지난번 맞추기가 실패했어도 다음 배송 저장이 바로잡는다)
+    if (deliveryBaseType(prev.delivery_type) === '택배발송대행' || courier) tracking = { sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name, enable: courier, campaignId: camp.id };
   }
   return { applied: true, tracking };
 }
@@ -1258,6 +1264,7 @@ async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTo
   // 7단계-④ ⑤ 배송 한 종류 → 공고 배송 · 탭 설정(배송·택배대행) · 작업표 송장 칸은 커밋 뒤(장부 잠금을 따로 잡는다)
   if (has('delivery_type')) {
     const r = await _projectDeliveryInTx(client, camp, extra.prev || {}, next);
+    if (r.reject) return { reject: r.reject };
     if (r.applied) applied.push('delivery');
     if (r.tracking) after = { ...(after || {}), tracking: r.tracking };
   }

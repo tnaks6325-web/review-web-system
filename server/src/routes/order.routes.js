@@ -1316,6 +1316,7 @@ router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) 
     const { WRITABLE_BY_ORIGIN, readSharedState, STRUCTURE_FIELD, RENAME_FIELD, structureOpenFor, structurePermanentlyLocked, deliverySwapOpen } = require('../services/sharedPatch.service');
     const active = rows[0].bidir_state === 'on' && sw.in2rw === 'apply';
     const structureOpen = active ? await structureOpenFor(pool, rows[0]) : false;
+    const caps = new Set(String(req.query.caps || '').split(',').map(x => x.trim()).filter(Boolean));
     res.json({
       ok: true,
       work_order_id: rows[0].id,
@@ -1328,7 +1329,8 @@ router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) 
       writable: active ? [...WRITABLE_BY_ORIGIN.intranet].filter(f => ((f !== STRUCTURE_FIELD && f !== RENAME_FIELD) || structureOpen)
         && (f !== 'review_type' || !structurePermanentlyLocked(readSharedState(rows[0])))
         // ★ 7단계-④ ⑤: 배송은 한 종류 배송 작업만(배송 혼합·회수·블로그는 열지 않는다 — 창은 혼합·회수 선택지·부속 칸을 계속 잠근다)
-        && (f !== 'delivery_type' || deliverySwapOpen(readSharedState(rows[0])))) : null,
+        // ★ 배송을 아는 창(caps=delivery)에만 연다 — 옛 인트라넷 창은 배송 칸 하나로 혼합·회수 선택지까지 함께 잠가, 열면 전부 풀린다(검토 2026-10-21 · 배포 순서 안전장치)
+        && (f !== 'delivery_type' || (caps.has('delivery') && deliverySwapOpen(readSharedState(rows[0]))))) : null,
       /* ★★ 이 버전의 공유 값(저장 형태 그대로) — 인트라넷 수정 창은 이 값으로 연다.
          안 그러면 창이 인트라넷 사본(리뷰웹에서 고친 글 칸이 아직 안 온 값)으로 열리고, 손대지 않은 칸이
          "인트라넷이 되돌렸다" 로 읽혀 리뷰웹 수정을 조용히 덮는다(로컬 E2E 실측 2026-10-20). */

@@ -36,7 +36,9 @@ const OPT_PRODUCTS = [
   const T = require('../src/services/worktableTrackingColumn.service');
   assert.deepEqual(T.withTrackingColumn(['번호', '구매일자', '주문번호', '비고', '리뷰'], true).headers, ['번호', '구매일자', '주문번호', '비고', '송장번호', '리뷰'], '새 판 = 비고 뒤');
   assert.deepEqual(T.withTrackingColumn(['번호', '구매일자', '리뷰'], false).headers, ['번호', '구매일자', '리뷰', '택배송장번호'], '옛 판 = 맨 뒤');
-  assert.deepEqual(T.trackingHeaders(['번호', '택배송장번호', '송장번호', '비고']), ['택배송장번호', '송장번호']);
+  // 옛 판은 정규식(택배+송장)만 · 새 판은 분류(송장번호)만 — 섞으면 옛 판 틀의 「송장번호」를 송장 칸으로 읽는다(검토 2026-10-21)
+  assert.deepEqual(T.trackingHeaders(['번호', '택배송장번호', '송장번호', '비고']), ['택배송장번호']);
+  assert.deepEqual(T.trackingHeaders(['번호', '구매일자', '주문번호', '비고', '송장번호'], true), ['송장번호']);
   const E = require('../src/utils/campaignSharedEdit');
   const ch = E.structureChangesFromCampaign({ camp: { delivery_type: '실배송' }, store: { delivery_type: '빈박스' } });
   assert.deepEqual(ch, [{ label: '배송 방식', permanent: false }]);
@@ -249,9 +251,12 @@ async function pg() {
     assert.equal(out.status, 409, JSON.stringify(out.body)); assert.equal(out.body.code, 'delivery_locked'); assert.equal(await B.snap(), sB);
 
     // D8 수정 창 잠금 해제 목록 — 한 종류 배송이면 열고, 블로그면 닫는다
-    const sh = async X => (await call('GET', `/api/order/intake/source/${X.sid}/shared`)).body;
+    const sh = async (X, q = '?caps=delivery') => (await call('GET', `/api/order/intake/source/${X.sid}/shared${q}`)).body;
     assert.ok((await sh(A)).writable.includes('delivery_type'));
     assert.ok(!(await sh(B)).writable.includes('delivery_type'));
+    // 배송을 모르는 옛 인트라넷(caps 없음)에는 열지 않는다 — 옛 창은 배송 칸 하나로 혼합·회수까지 함께 잠근다(배포 순서 안전장치)
+    assert.ok(!(await sh(A, '')).writable.includes('delivery_type'));
+    assert.ok((await sh(A, '')).writable.includes('review_fee'), '다른 칸은 그대로');
 
     // D9 공고 창 — 배송 한 종류 바꾸기는 공유 저장으로(오더·탭 설정·송장 칸까지) · 혼합으로는 새 리뷰오더 안내
     const C = await setup('c');
@@ -273,6 +278,19 @@ async function pg() {
     r = await put(b => { b.delivery_type = '실배송'; }, F.camp);
     ok(r, '공고 창 배송 되돌리기');
     assert.equal((await F.cRow()).delivery_type, '실배송'); assert.equal(Number((await F.wo()).sync_version), vF, '오더는 그대로');
+
+    // D12 다른 공고(마감 포함 · 보관 안 함)와 같이 쓰는 작업표 — 탭 설정·송장 칸이 하나라 배송을 못 바꾼다(아무것도 안 바뀜)
+    const G = await setup('g');
+    const other = `camp_p7d_g2_${stamp}`; camps.push(other);
+    await pool.query(`INSERT INTO recruit_campaigns (id, title, recruit_total, review_fee, participation_mode, status, linked_sheet_id, linked_tab_name)
+                       VALUES ($1, '같은 탭 1차', 5, 1000, TRUE, 'closed', $2, $3)`, [other, SHEET, G.tab]);
+    const sG = await G.snap(); const tG = await tabOf(G);
+    out = await G.intranet({ delivery_type: '택배발송대행' });
+    assert.equal(out.status, 409, JSON.stringify(out.body)); assert.equal(out.body.reason, 'delivery_shared_tab'); assert.match(out.body.error, /같이 써서/);
+    assert.equal(await G.snap(), sG); assert.deepEqual(await tabOf(G), tG);
+    await pool.query(`UPDATE recruit_campaigns SET archived_at = NOW() WHERE id = $1`, [other]);   // 보관한 공고는 같이 쓰는 것으로 안 본다
+    out = await G.intranet({ delivery_type: '빈박스' });
+    assert.equal(out.status, 200, JSON.stringify(out.body)); assert.equal((await G.wo()).delivery_type, '빈박스');
 
     // D11 리뷰어 앱(범위 편집)의 배송 바꾸기는 종전대로 막힌다
     const sc = await call('PUT', `/api/campaign/admin/${A.camp}`, { delivery_type: '빈박스' }, scoped);
