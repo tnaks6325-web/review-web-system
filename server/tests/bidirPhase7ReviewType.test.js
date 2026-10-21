@@ -208,20 +208,29 @@ async function pg() {
     out = await A.intranet({ review_type: '텍스트', review_type_mix: [] }, { reviewtype: false });
     assert.equal(out.status, 200, JSON.stringify(out.body)); assert.equal((await A.wo()).review_type, rt6); assert.equal((await A.cRow()).review_type, 'mixed'); assert.equal(await A.snap(), s6);
 
-    // T4 혼합 → 텍스트 — 혼합 수량 비움 · 빈 줄(손으로 고친 줄 제외) 비움(옛 판 = 한 종류면 빈 칸) · 손으로 고친 구매확정 줄이 있으면? 한 종류는 수량 검사 없음
-    out = await A.intranet({ review_type: '텍스트', review_type_mix: [] });
+    // T4 한 종류로 바꾸기도 이미 정해진 줄이 쓰는 유형이 사라지면 거부(사용자 확정 2026-10-21 「가」) — 아무것도 안 바뀐다
+    const s4 = await A.snap();
+    out = await A.intranet({ review_type: '텍스트', review_type_mix: [] });   // 산 포토 2줄
+    assert.equal(out.status, 409, JSON.stringify(out.body)); assert.equal(out.body.reason, 'review_type_below_used', JSON.stringify(out.body)); assert.equal(await A.snap(), s4);
+    assert.ok(/포토/.test(out.body.error) && /새 리뷰오더/.test(out.body.error), out.body.error);
+    out = await A.intranet({ review_type: '포토', review_type_mix: [] });     // 손으로 고친 구매확정 1줄
+    assert.equal(out.status, 409, JSON.stringify(out.body)); assert.equal(out.body.reason, 'review_type_below_used', JSON.stringify(out.body)); assert.equal(await A.snap(), s4);
+    // 손 글씨를 되돌리면 혼합 → 포토 가능 — 혼합 수량 비움 · 빈 줄 비움(옛 판 = 한 종류면 빈 칸) · 채운 줄 그대로
+    await pool.query(`UPDATE participant_edits SET reverted_at = NOW() WHERE sheet_id = 'sheet_p7t' AND tab_name = $1 AND anchor_value = $2`, [A.tab, String(manualRow.id)]);
+    out = await A.intranet({ review_type: '포토', review_type_mix: [] });
     assert.equal(out.status, 200, JSON.stringify(out.body));
     c = await A.cRow();
-    assert.equal(c.review_type, 'text'); assert.deepEqual(c.review_type_mix, []); assert.ok(!c.badges.includes('구매확정'));
+    assert.equal(c.review_type, 'photo'); assert.deepEqual(c.review_type_mix, []); assert.ok(!c.badges.includes('구매확정'));
     const r4 = await ro();
-    assert.ok(r4.filter(x => !x.filled && x.id !== manualRow.id).every(x => x.v === ''), '빈 줄은 빈 칸(옛 판 한 종류)');
+    assert.ok(r4.filter(x => !x.filled).every(x => x.v === ''), '빈 줄은 빈 칸(옛 판 한 종류)');
     assert.ok(r4.filter(x => filledIds.includes(x.id)).every(x => x.v === '포토리뷰'), '채운 줄 그대로');
     assert.deepEqual((await A.wo()).review_type_mix, []);
 
-    // T7 공고 창에서 리뷰타입 바꾸기 → 오더(인트라넷 표기)
-    let r = await put(b => { b.review_type = 'photo'; });
-    ok(r, '공고 창 리뷰타입');
-    assert.equal((await A.wo()).review_type, '포토'); assert.equal((await A.cRow()).review_type, 'photo');
+    // T7 공고 창에서도 같은 규칙 — 산 포토 줄이 있는데 텍스트 하나로 = 저장 안 됨(오더·공고 그대로)
+    const s7 = await A.snap();
+    let r = await put(b => { b.review_type = 'text'; });
+    assert.ok(r.status !== 200 || r.body.ok === false, '공고 창 텍스트 거부: ' + JSON.stringify(r.body));
+    assert.equal((await A.wo()).review_type, '포토'); assert.equal((await A.cRow()).review_type, 'photo'); assert.equal(await A.snap(), s7);
     // T8 마감 줄이 있는 작업은 섞어 쓰기로 못 바꾼다
     const B = await setup('b');
     await B.apply({ key: '블랙', count: 1 });
@@ -276,6 +285,14 @@ async function pg() {
     r = await put(b => { b.review_type = 'text'; }, F.camp);
     ok(r, '공고 창 텍스트');
     assert.equal((await F.wo()).review_type, '텍스트'); assert.equal((await F.cRow()).review_type, 'text');
+    // T13 옛 판 한 종류(포토) · 리뷰옵션 칸 자체가 없는 작업표 · 산 줄 2 → 텍스트 하나로 = 거부(빈 칸 산 줄 = 저장 전 유형) / 인원만 바꾸기는 그대로 된다
+    const G = await setup('g');
+    for (const x of (await G.rows()).slice(0, 2)) await pool.query(`UPDATE campaign_participants SET reviewer_name = '가짜구매' WHERE id = $1`, [x.id]);
+    const sG = await G.snap();
+    out = await G.intranet({ review_type: '텍스트', review_type_mix: [] });
+    assert.equal(out.status, 409, JSON.stringify(out.body)); assert.equal(out.body.reason, 'review_type_below_used', JSON.stringify(out.body)); assert.equal(await G.snap(), sG);
+    out = await G.intranet(edited(await G.wo(), x => { x[0].options[1].count += 1; }));
+    assert.equal(out.status, 200, JSON.stringify(out.body)); assert.equal((await G.wo()).review_type, '포토');
     console.log('bidirPhase7ReviewType: PG passed');
   } finally {
     srv.close();

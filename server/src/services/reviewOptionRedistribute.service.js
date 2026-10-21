@@ -76,7 +76,9 @@ async function redistributeReviewOptionsInTx(client, camp, order, { by = 'bidir-
   for (const r of rows) { const k = Object.keys(r.row_json || {}).find(h => isReviewOptionHeader(h)); if (k) { header = k; break; } }
   const type = normalizeReviewType(order.review_type) || '';
   const mixed = type === 'mixed';
-  if (!header) { if (!mixed) return { applied: false, reason: 'no_column' }; header = '리뷰옵션'; }
+  // 칸이 없는 작업표(옛 판 한 종류 = 칸 자체가 없을 수 있다) — 한 종류면 아래 「사라지는 유형」 검사만 하고 쓰지 않는다
+  const noColumn = !header;
+  if (noColumn) header = '리뷰옵션';
 
   // 사람이 손으로 고친 빈 줄(1.가) — 최신 손 글씨가 살아 있는 줄
   const manual = new Map();
@@ -114,6 +116,20 @@ async function redistributeReviewOptionsInTx(client, camp, order, { by = 'bidir-
 
   const want = new Map();   // row id → 적을 값
   if (!mixed) {
+    // 2.가 — 한 종류로 바꿀 때도 이미 정해진 줄(채운 줄 + 손으로 고친 줄)이 쓰는 유형이 사라지면 거부(사용자 확정 2026-10-21 「가」:
+    //   산 분에게 다른 유형 기준이 적용되는 일을 막는다). 유형이 그대로인 저장(인원만 바뀜)·자율(빈 유형)은 검사하지 않는다.
+    const prevType = normalizeReviewType(prevReviewType) || '';
+    if (type && type !== prevType) {
+      const gone = new Map();
+      for (const r of rows.filter(fixed)) { const t = fixedType(r); if (t && t !== 'mixed' && t !== type) gone.set(t, (gone.get(t) || 0) + 1); }
+      if (gone.size) {
+        const [t, used] = [...gone.entries()][0];
+        const name = reviewTypeLabel(t) || t;
+        return { applied: false, reject: { code: 'review_type_below_used',
+          error: `「${name}」은 이미 ${used}줄이 정해져 있어(참여했거나 작업표에서 직접 정한 줄) 리뷰타입을 「${reviewTypeLabel(type) || type}」 하나로 바꿀 수 없습니다. 혼합으로 바꿔 ${name}을 ${used}줄 이상 남기거나, 새 리뷰오더로 접수해 주세요.` } };
+      }
+    }
+    if (noColumn) return { applied: false, reason: 'no_column' };
     const label = v1 ? '' : (type ? labelOf(type) : '');
     for (const r of open) want.set(String(r.id), label);
   } else {
