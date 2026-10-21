@@ -775,6 +775,16 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
       changed.push('리뷰타입');
     }
   }
+  // ⑧ 7단계-④ ⑤ 배송 한 종류 — 리뷰타입과 같은 규칙(기준(오더)과도 지금 공고 값과도 다를 때만). 오더는 기본형 그대로(실배송·빈박스·택배발송대행·직접배송(가구 등)).
+  //   혼합·회수가 끼는 변경은 여기 오기 전에 structureBlocked 가 "새 리뷰오더로" 로 막는다.
+  if (b.delivery_type !== undefined && b.delivery_type !== null) {
+    const { deliveryBaseType } = require('./deliveryType');
+    const want = deliveryBaseType(b.delivery_type);
+    if (want && want !== deliveryBaseType(base.delivery_type) && want !== deliveryBaseType((camp || {}).delivery_type)) {
+      mine.delivery_type = want;
+      changed.push('배송 방식');
+    }
+  }
   // ⑥ 7단계-④ 상품·옵션 더하기·지우기·다시 열기(판정 — 반영은 금액·인원 계획 뒤)
   const st = _planStructureEdit({ products, baseRows, liveCampOpts, body: b, guideInflow });
   unmappable.push(...st.unmappable);

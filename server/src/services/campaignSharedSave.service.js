@@ -312,7 +312,10 @@ async function structureBlocked({ campaignId, store, normOpts, body, db } = {}) 
   }
   const shared = ch.map(x => x.label);
   // 영구 금지 작업(배송 혼합·회수 · 블로그 · 구매수량 단계)은 더하기·지우기도 새 리뷰오더로(재검토 2026-10-21 — 종전엔 "구조 단계에서 엽니다" 로 거부됐다)
-  if (require('./sharedPatch.service').structurePermanentlyLocked(require('./sharedPatch.service').readSharedState(link.wo))) {
+  //   배송 한 종류 바꾸기는 판정이 따로다(배송 혼합·회수·블로그만 막힘 — 구매수량 단계와는 무관 · 공유 저장 deliverySwapOpen 과 같은 판정)
+  const sp = require('./sharedPatch.service');
+  const st0 = sp.readSharedState(link.wo);
+  if ((shared.some(l => l !== '배송 방식') && sp.structurePermanentlyLocked(st0)) || (shared.includes('배송 방식') && !sp.deliverySwapOpen(st0))) {
     return { status: 409, body: { ok: false, code: 'structure_new_order', fields: shared,
       error: `접수된 리뷰오더와 연결된 공고라 이 작업(배송 혼합·회수, 블로그, 구매수량 단계 중 하나)은 ${shared.join('·')}${_topic(shared[shared.length - 1])} 할 수 없습니다. 새 리뷰오더로 만들어 주세요.` } };
   }
@@ -325,7 +328,7 @@ async function structureBlocked({ campaignId, store, normOpts, body, db } = {}) 
 }
 
 /** 7단계-④ ② 공유 저장으로 보내는 구조 변경(나머지는 아직 막힘). */
-const STRUCTURE_SHARED_LABELS = new Set(['옵션·상품 추가', '옵션·상품 삭제', '옵션 마감·다시 열기', '옵션·상품 이름', '상품 이름', '리뷰타입']);   // ③ 이름 바꾸기 · ④ 리뷰타입 포함
+const STRUCTURE_SHARED_LABELS = new Set(['옵션·상품 추가', '옵션·상품 삭제', '옵션 마감·다시 열기', '옵션·상품 이름', '상품 이름', '리뷰타입', '배송 방식']);   // ③ 이름 바꾸기 · ④ 리뷰타입 · ⑤ 배송 한 종류 포함
 
 /** 공고 마감 줄(참여한 수로 굳은 옵션)의 인원 합 — 공고 창·리뷰어 앱 총모집(열린 줄만)을 공고 총모집과 같은 기준으로 맞출 때 더한다(7단계-④). */
 async function closedRecruitSum(db, campaignId) {

@@ -39,6 +39,11 @@ const PHASE7Q_SHARED_FIELDS = Object.freeze(['recruit_count', 'daily_count', 're
 /** 7단계-④ ④ 리뷰타입(한 종류 ↔ 섞어 쓰기 · 섞는 종류) — 바뀌면 작업표 빈 줄 리뷰옵션을 새 비율로 다시 나눈다(채운 줄·손으로 고친 줄 그대로).
  *  리뷰타입 혼합 수량의 **종류 구성** 변경도 이 칸을 아는 저장에서만 연다(수량만 바뀌는 것은 7단계-②). */
 const PHASE7R_SHARED_FIELDS = Object.freeze(['review_type']);
+/** 7단계-④ ⑤ 배송 한 종류 바꾸기(실배송·빈박스·택배발송대행·직접배송끼리 · 사용자 확정 2026-10-21 「1.나」) — 공고 배송·탭 설정·택배대행 표시·작업표 송장 칸이 따라간다.
+ *  배송 혼합·회수로 가거나 그것에서 오는 변경은 계속 막는다(접수 뒤 영구 금지 「4.가」). */
+const PHASE7D_SHARED_FIELDS = Object.freeze(['delivery_type']);
+/** 배송 한 종류 바꾸기를 여는 기본형(혼합·회수 제외). */
+const DELIVERY_SWAP_TYPES = new Set(['실배송', '빈박스', '택배발송대행', '직접배송(가구 등)']);
 /** 7단계-③ 주말 제외(주말·공휴일 모집 닫힘 + 작업표 빈 줄 날짜) — 참·거짓만(빈 값 = "아직 안 정함" 은 쓰지 않는다). */
 const PHASE7W_SHARED_FIELDS = Object.freeze(['skip_weekends']);
 /** 7단계-④ 상품·옵션 더하기·지우기(마감) — 칸이 아니라 상품 구성 경로의 표시. 수정 창 잠금 해제 목록에도 이 이름으로 나간다.
@@ -47,17 +52,17 @@ const STRUCTURE_FIELD = 'product_structure';
 /** 7단계-④ ③ 상품·옵션 이름 바꾸기 — 보내는 쪽이 원래 이름(prev_name/prev_label)을 실은 줄만. 수정 창 잠금 해제 목록에도 이 이름. */
 const RENAME_FIELD = 'product_rename';
 /** 리뷰웹 → 인트라넷으로 보내는 칸(수정 창이 리뷰웹 값으로 덮는 칸과 같다). 상품 구성·합계·요약은 금액이 함께 움직이는 짝. */
-const PUSH_VIEW_KEYS = Object.freeze([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, ...PHASE7R_SHARED_FIELDS, 'pay_amount', 'product_options_json', 'product_option']);
+const PUSH_VIEW_KEYS = Object.freeze([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, ...PHASE7R_SHARED_FIELDS, ...PHASE7D_SHARED_FIELDS, 'pay_amount', 'product_options_json', 'product_option']);
 /** 인트라넷 고유 칸 중 접수 뒤에도 고칠 수 있는 것 — 종전 원본 수정 허용 목록·계약 후속 매칭과 같은 범위. */
 const INTRANET_EDITABLE_AFTER_ACCEPT = Object.freeze([
   'title', 'manager_name', 'inflow_keyword', 'sales_id', 'quote_id', 'contract_number', 'intranet_advertiser_id',
 ]);
 /** 리뷰웹발 수정(관리자 오더 수정)이 쓸 수 있는 칸 — 인트라넷 고유는 제외. */
 const WRITABLE_BY_ORIGIN = {
-  intranet: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, ...PHASE7R_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
-  reconcile: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, ...PHASE7R_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
+  intranet: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, ...PHASE7R_SHARED_FIELDS, ...PHASE7D_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
+  reconcile: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, ...PHASE7R_SHARED_FIELDS, ...PHASE7D_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
   rw_admin: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS]),
-  campaign: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, ...PHASE7R_SHARED_FIELDS]),   // 4단계-2 공고 편집 창(campaignSharedSave) — 리뷰웹발이라 인트라넷 고유 칸은 제외
+  campaign: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, ...PHASE7R_SHARED_FIELDS, ...PHASE7D_SHARED_FIELDS]),   // 4단계-2 공고 편집 창(campaignSharedSave) — 리뷰웹발이라 인트라넷 고유 칸은 제외
 };
 const KNOWN_CHANNELS = new Set(['쿠팡', '네이버', '올리브영', '카카오메이커스']);
 const SNAPSHOT_KEYS = Object.freeze([...SHARED_FIELDS.map(f => f.key), 'product_options_json', 'product_option']);
@@ -119,6 +124,19 @@ function _isBoolValue(v) {
   return CANON.bool(v) === '1' || CANON.bool(v) === '0';
 }
 
+/** 7단계-④ ⑤ 배송 값이 "한 종류" 기본형인가(부속정보 없는 맨 값 · 혼합·회수 아님). */
+function _deliverySingle(v) {
+  if (v === ABSENT || v == null) return '';
+  const { deliveryBaseType, canonicalDeliveryValue } = require('../utils/deliveryType');
+  const b = deliveryBaseType(v);
+  return DELIVERY_SWAP_TYPES.has(b) && canonicalDeliveryValue(v) === b ? b : '';
+}
+
+/** 7단계-④ ⑤ 이 오더 상태에서 배송 한 종류 바꾸기를 열 수 있나 — 한 종류 배송 · 배송 혼합 없음 · 블로그 아님(블로그는 실배송 고정). */
+function deliverySwapOpen(st) {
+  return !!_deliverySingle(st && st.delivery_type) && !CANON.deliveryMix(st && st.delivery_type_mix) && CANON.workKind(st && st.work_kind) !== 'blog';
+}
+
 /** 7단계-② 인원 경로인가(총모집·일건수·혼합 수량 칸 · 옵션 count/daily/review_type_mix · base 의 인원 쪽 차이). */
 function _isQuantityPath(w) {
   const m = w.meta || {};
@@ -152,6 +170,8 @@ function writablePath(row, origin) {
     if (m.key === 'review_type_mix') return set.has(m.key) && (_mixQuantityOnly(row.base, row.mine) || typesOk);
     // 7단계-③ 주말 제외 — 참·거짓으로만 바꾼다(비우기 = "아직 안 정함" 은 연결된 오더에서 둘 수 없다)
     if (m.key === 'skip_weekends') return set.has(m.key) && _isBoolValue(row.mine);
+    // 7단계-④ ⑤ 배송 — 한 종류끼리만(혼합·회수로 가거나 오는 것은 접수 뒤 영구 금지)
+    if (m.key === 'delivery_type') return set.has(m.key) && !!_deliverySingle(row.base) && !!_deliverySingle(row.mine);
     return set.has(m.key);
   }
   if (m.kind !== 'leaf') return false;
@@ -336,7 +356,7 @@ function _display(path, v) {
 function _pushBackKeys(mine, saved) {
   const { canon } = require('../utils/sharedFields');
   // 7단계 칸(인원·주말)도 — 옛 창이 보낸 값을 버린 저장이면 인트라넷 사본이 낡았으니 받아 가게 한다(검토 2026-10-21)
-  const keys = [...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, ...PHASE7R_SHARED_FIELDS].filter(k => mine && Object.prototype.hasOwnProperty.call(mine, k)
+  const keys = [...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, ...PHASE7R_SHARED_FIELDS, ...PHASE7D_SHARED_FIELDS].filter(k => mine && Object.prototype.hasOwnProperty.call(mine, k)
     && canon(k, mine[k]) !== canon(k, saved[k]));
   if (mine && mine.pay_amount !== undefined && mine.pay_amount !== null && mine.pay_amount !== ''
       && canon('pay_amount', mine.pay_amount) !== canon('pay_amount', saved.pay_amount)) keys.push('pay_amount');
@@ -1169,6 +1189,24 @@ async function _projectReviewTypeInTx(client, camp, next) {
   return { applied: true };
 }
 
+/**
+ * 7단계-④ ⑤ 배송 한 종류 → 공고 배송(기본형) · 작업 탭 설정(배송 원문 · 택배대행 표시 taekhap — 접수 때는 빈 칸만 채우던 값을 덮는다).
+ * 택배발송대행으로 들어가거나 나오면 작업표 송장 칸을 커밋 뒤 맞추라고 돌려준다(`worktableTrackingColumn`).
+ */
+async function _projectDeliveryInTx(client, camp, prev, next) {
+  const { deliveryBaseType } = require('../utils/deliveryType');
+  const base = deliveryBaseType(next.delivery_type);
+  const courier = base === '택배발송대행';
+  await client.query('UPDATE recruit_campaigns SET delivery_type = $2, updated_at = NOW() WHERE id = $1 AND delivery_type IS DISTINCT FROM $2', [camp.id, base]);
+  let tracking = null;
+  if (camp.linked_sheet_id && camp.linked_tab_name) {
+    await client.query(`UPDATE tab_configs SET delivery_type = $3, taekhap = $4, updated_at = NOW() WHERE sheet_id = $1 AND tab_name = $2`,
+      [camp.linked_sheet_id, camp.linked_tab_name, String(next.delivery_type == null ? '' : next.delivery_type), courier]);
+    if ((deliveryBaseType(prev.delivery_type) === '택배발송대행') !== courier) tracking = { sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name, enable: courier };
+  }
+  return { applied: true, tracking };
+}
+
 /** 공고 반영 — 쓴 칸만. 거부 사유가 있으면 {reject} 를 돌려 호출부가 통째로 되돌린다.
  *  @param {object} [extra] { prev: 저장 전 상태(금액 비교) · payTouched · actor } */
 async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTouched, extra = {}) {
@@ -1216,6 +1254,12 @@ async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTo
     const r = await require('./reviewOptionRedistribute.service').redistributeReviewOptionsInTx(client, camp, next, { by: 'bidir-review-type', prevReviewType: (extra.prev || {}).review_type });
     if (r.reject) return { reject: { kind: 'quantity', out: { applied: false, reason: r.reject.code }, error: r.reject.error } };
     if (r.applied) { applied.push('review_options'); after = { ...(after || {}), reviewOptions: r.worktable }; }
+  }
+  // 7단계-④ ⑤ 배송 한 종류 → 공고 배송 · 탭 설정(배송·택배대행) · 작업표 송장 칸은 커밋 뒤(장부 잠금을 따로 잡는다)
+  if (has('delivery_type')) {
+    const r = await _projectDeliveryInTx(client, camp, extra.prev || {}, next);
+    if (r.applied) applied.push('delivery');
+    if (r.tracking) after = { ...(after || {}), tracking: r.tracking };
   }
   if (extra.guideTouched) {
     const r = await _projectGuideInTx(client, camp, extra.prev || {}, next);
@@ -1445,6 +1489,17 @@ async function applySharedPatch(p) {
         logger.info(`[bidir/apply] ${wo.id} 리뷰타입을 모르는 옛 인트라넷 저장 — 리뷰타입 칸은 받지 않음: ${dt.join(', ')}`);
       }
     }
+    // ★ 7단계-④ ⑤ 같은 장치 — 배송을 모르는 옛 인트라넷 창(`bidir.delivery` 없음)은 잠긴 배송 칸의 옛 사본 값을 다시 보낸다 → 한 종류 바꾸기로 읽히는 배송 칸은 받지 않는다(기록).
+    //   혼합·회수가 끼는 차이는 그대로 아래 막힘 판정으로 간다(종전과 같은 409).
+    if (p.origin === 'intranet' && p.deliveryCapable !== true) {
+      const isOldDel = w => w.meta && w.meta.kind === 'field' && w.meta.key === 'delivery_type' && writablePath(w, p.origin);
+      const dd = [...plan.writes, ...plan.conflicts].filter(isOldDel);
+      if (dd.length) {
+        plan.writes = plan.writes.filter(w => !isOldDel(w));
+        plan.conflicts = plan.conflicts.filter(w => !isOldDel(w));
+        logger.info(`[bidir/apply] ${wo.id} 배송을 모르는 옛 인트라넷 저장 — 배송 칸은 받지 않음`);
+      }
+    }
     const meanwhile = [...plan.writes, ...plan.conflicts].filter(w => w.closedMeanwhile);
     if (meanwhile.length) {
       return await _abort(client, 409, { ok: false, code: 'closed_meanwhile', sync_version: curVersion, fields: meanwhile.map(w => ({ path: w.path, label: _label(w) })),
@@ -1487,6 +1542,12 @@ async function applySharedPatch(p) {
       if (closure.reject) return await _abort(client, 409, { ok: false, code: closure.reject.out.reason, sync_version: curVersion, error: closure.reject.error });
     }
     const reviewTypeWritten = plan.writes.some(w => w.meta && w.meta.kind === 'field' && w.meta.key === 'review_type');
+    // 7단계-④ ⑤ 배송 한 종류 바꾸기 — 칸 판정(writablePath)은 보낸 값·기준만 본다. 지금 오더가 배송 혼합·블로그면 막는다(판정 단일 출처 deliverySwapOpen).
+    const deliveryWritten = plan.writes.some(w => w.meta && w.meta.kind === 'field' && w.meta.key === 'delivery_type');
+    if (deliveryWritten && !deliverySwapOpen(theirs)) {
+      return await _abort(client, 409, { ok: false, code: 'delivery_locked', sync_version: curVersion,
+        error: '배송 혼합·회수나 블로그 작업은 접수 뒤 배송 방식을 바꿀 수 없습니다. 바꿔야 하면 새 리뷰오더로 접수해 주세요.' });
+    }
     // ★ 접수 뒤 영구 금지 작업(배송 혼합·회수 · 블로그 · 구매수량 단계)은 리뷰타입·섞는 종류를 못 바꾼다 — 창 목록(/shared writable)만 숨기면
     //   그 목록을 안 보는 저장(옛 창·직접 호출)이 그대로 쓴다. 서버가 다시 막는다(검토 2026-10-21 · 판정 단일 출처 structurePermanentlyLocked).
     const typeSetWritten = reviewTypeWritten || plan.writes.some(w => w.meta && ((w.meta.key === 'review_type_mix' && !_mixQuantityOnly(w.base, w.mine))
@@ -1565,6 +1626,11 @@ async function applySharedPatch(p) {
       if (payTouched || quantityTouched) sets.push(`pay_amount = ${add(Math.max(0, Math.floor(Number(next.pay_amount) || 0)))}`);
     }
     for (const [k, v] of extra) sets.push(`${k} = ${add(v)}`);
+    // 7단계-④ ⑤ 택배대행 표시는 배송에서 나오는 값 — 같이 쓴다(어긋나면 새 판 작업표가 delivery_source_inconsistent 로 막힌다)
+    if (writtenKeys.has('delivery_type')) {
+      const { deliveryBaseType } = require('../utils/deliveryType');
+      sets.push(`courier_proxy = ${add(deliveryBaseType(next.delivery_type) === '택배발송대행')}`);
+    }
     if (plan.writes.length) {
       // 새 버전은 한 번만 계산해 두 칸에 같은 값을 쓴다(시각이 들어가 두 번 계산하면 값이 갈린다).
       const { rows: nv } = await client.query(
@@ -1620,6 +1686,11 @@ async function applySharedPatch(p) {
           campaign.after.rebuilt = await lrq.rebuildWorktableProjection(campaign.after.reviewOptions, 'bidir-review-type', true);
         }
       } catch (e) { logger.warn(`[bidir/apply] ${wo.id} 리뷰옵션 장부 다시 만들기 실패(저장은 끝남): ${e.message}`); }
+      // 7단계-④ ⑤ 택배발송대행으로 들어가거나 나온 작업 — 작업표 송장 칸(들어가면 더함 · 나오면 송장이 하나도 없을 때만 뺌). 실패해도 저장은 끝났다(기록).
+      if (campaign.after.tracking) {
+        try { campaign.after.trackingResult = await require('./worktableTrackingColumn.service').syncTrackingColumn({ ...campaign.after.tracking, by: 'bidir-delivery' }); }
+        catch (e) { logger.warn(`[bidir/apply] ${wo.id} 작업표 송장 칸 맞추기 실패(저장은 끝남): ${e.message}`); }
+      }
       if (campaign.after.relay) {
         try { campaign.after.relayResult = await require('./campaignPlan.service').relayCampaignWorktable(camp.id, { by: 'bidir-quota' }); }
         catch (e) { logger.warn(`[bidir/apply] ${wo.id} 작업표 날짜 다시 배치 실패(저장은 끝남): ${e.message}`); }
@@ -1696,5 +1767,5 @@ async function linkSharedOrder({ workOrderId, actor = '', dryRun = false, db } =
 
 module.exports = {
   applySharedPatch, linkSharedOrder, readSharedState, sanitizeRenames, renamedParents, renameShapeError, RENAME_FIELD, applyWrites, writablePath, projectToCampaignInTx, derivePayFields, validateQuantities, markStructureRows, STRUCTURE_FIELD, structureOpenFor, structurePermanentlyLocked,
-  PHASE3_SHARED_FIELDS, PHASE5_SHARED_FIELDS, PHASE7Q_SHARED_FIELDS, PHASE7W_SHARED_FIELDS, PHASE7R_SHARED_FIELDS, PUSH_VIEW_KEYS, WRITABLE_BY_ORIGIN, INTRANET_EDITABLE_AFTER_ACCEPT, NEXT_VERSION_SQL, _pushBackKeys, _prefillOf,
+  PHASE3_SHARED_FIELDS, PHASE5_SHARED_FIELDS, PHASE7Q_SHARED_FIELDS, PHASE7W_SHARED_FIELDS, PHASE7R_SHARED_FIELDS, PHASE7D_SHARED_FIELDS, deliverySwapOpen, PUSH_VIEW_KEYS, WRITABLE_BY_ORIGIN, INTRANET_EDITABLE_AFTER_ACCEPT, NEXT_VERSION_SQL, _pushBackKeys, _prefillOf,
 };

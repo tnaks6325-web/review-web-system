@@ -912,6 +912,8 @@ async function _intakeSourceBidir(res, { b, source, current, optionsJson, delive
     renameCapable: !!(bid && (bid.rename === 1 || bid.rename === true || bid.rename === '1')),
     // ★ 7단계-④ ④: 리뷰타입(한 종류 ↔ 섞어 쓰기 · 섞는 종류)도 그것을 아는 창만
     reviewTypeCapable: !!(bid && (bid.reviewtype === 1 || bid.reviewtype === true || bid.reviewtype === '1')),
+    // ★ 7단계-④ ⑤: 배송 한 종류 바꾸기도 그것을 아는 창만(옛 창은 잠긴 배송 칸의 옛 사본 값을 다시 보낸다 — 받지 않는다)
+    deliveryCapable: !!(bid && (bid.delivery === 1 || bid.delivery === true || bid.delivery === '1')),
     preHook: _sourceRevisionPreHook(source),
     extraSets: {
       source_revision: source.sourceRevision,
@@ -1311,7 +1313,7 @@ router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) 
       `SELECT * FROM work_orders WHERE source_review_order_id = $1 LIMIT 1`, [sid]);
     if (!rows.length || rows[0].deleted_at) return res.status(404).json({ ok: false, error: '작업오더를 찾을 수 없습니다.' });
     const sw = await readBidirSwitch(pool);
-    const { WRITABLE_BY_ORIGIN, readSharedState, STRUCTURE_FIELD, RENAME_FIELD, structureOpenFor, structurePermanentlyLocked } = require('../services/sharedPatch.service');
+    const { WRITABLE_BY_ORIGIN, readSharedState, STRUCTURE_FIELD, RENAME_FIELD, structureOpenFor, structurePermanentlyLocked, deliverySwapOpen } = require('../services/sharedPatch.service');
     const active = rows[0].bidir_state === 'on' && sw.in2rw === 'apply';
     const structureOpen = active ? await structureOpenFor(pool, rows[0]) : false;
     res.json({
@@ -1324,7 +1326,9 @@ router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) 
       // ★ 7단계-④: 상품·옵션 더하기·지우기는 공고에 옵션 줄이 있는 작업만 연다(옵션 없이 상품 하나로 도는 공고는 옵션 있음·없음 바꾸기 단계 — 열면 저장 때 막힌다)
       // ★ 7단계-④ ④: 리뷰타입은 영구 금지 작업(배송 혼합·회수·블로그·구매수량 단계)에서는 열지 않는다
       writable: active ? [...WRITABLE_BY_ORIGIN.intranet].filter(f => ((f !== STRUCTURE_FIELD && f !== RENAME_FIELD) || structureOpen)
-        && (f !== 'review_type' || !structurePermanentlyLocked(readSharedState(rows[0])))) : null,
+        && (f !== 'review_type' || !structurePermanentlyLocked(readSharedState(rows[0])))
+        // ★ 7단계-④ ⑤: 배송은 한 종류 배송 작업만(배송 혼합·회수·블로그는 열지 않는다 — 창은 혼합·회수 선택지·부속 칸을 계속 잠근다)
+        && (f !== 'delivery_type' || deliverySwapOpen(readSharedState(rows[0])))) : null,
       /* ★★ 이 버전의 공유 값(저장 형태 그대로) — 인트라넷 수정 창은 이 값으로 연다.
          안 그러면 창이 인트라넷 사본(리뷰웹에서 고친 글 칸이 아직 안 온 값)으로 열리고, 손대지 않은 칸이
          "인트라넷이 되돌렸다" 로 읽혀 리뷰웹 수정을 조용히 덮는다(로컬 E2E 실측 2026-10-20). */

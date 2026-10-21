@@ -3766,6 +3766,14 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         }
       }
     }
+    /* ★ 7단계-④ ⑤: 배송도 같은 장치 — 연결 공고의 배송은 공유 저장이 쓴다. 오더·공고가 갈라진 공고에서 공고 값을 오더 값으로 되돌릴 때만 공고 칸을 맞춘다. */
+    let _bxDeliveryAlign = null;
+    if (_bx && delivery_type !== undefined && delivery_type !== null) {
+      const { rows: dv } = await pool.query('SELECT delivery_type FROM work_orders WHERE id = $1', [bidirEdit.link.wo.id]);
+      const { deliveryBaseType } = require('../utils/deliveryType');
+      const ob = dv.length ? deliveryBaseType(dv[0].delivery_type) : '';
+      if (ob && deliveryBaseType(delivery_type) === ob) _bxDeliveryAlign = ob;
+    }
     if (_bx && normOpts) {
       await require('../services/campaignSharedSave.service')
         .protectOptionLeaves({ normOpts, link: bidirEdit.link, baseVersion: req.body && req.body.bidir_base_sync_version });
@@ -3864,7 +3872,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       [
         id,
         title, _bx ? null : channel, _bx ? null : channel_custom, manager, _bx ? null : time_range,   // ★ 4단계-2: 연결 공고면 공유 칸은 위 공유 저장이 쓴다
-        delivery_type, _bx ? null : (review_fee || 0),   // ★ 5단계: 연결 공고의 리뷰비는 위 공유 저장이 쓴다(지난 참여 금액 고정과 함께)
+        _bx ? _bxDeliveryAlign : delivery_type, _bx ? null : (review_fee || 0),   // 7단계-④ ⑤: 연결 공고의 배송은 공유 저장이(오더 값으로 되돌릴 때만 맞추기)   // ★ 5단계: 연결 공고의 리뷰비는 위 공유 저장이 쓴다(지난 참여 금액 고정과 함께)
         badgesForStore === null ? null : JSON.stringify(badgesForStore),
         notes, chat_url, status, sort_order || 0,
         max_slots || 0, deadline || null, description,
