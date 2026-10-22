@@ -1,6 +1,7 @@
 const pool = require('../db/pool');
 const { withJobLock } = require('../utils/jobLock');
 const { logger } = require('../utils/logger');
+const { isSheetlessOrderCoord } = require('../utils/sheetlessScope');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -15,7 +16,7 @@ async function cancelOrderSubmission({ orderSubmissionId, canceledBy = 'admin', 
       const { rows } = await client.query(
         `UPDATE order_submissions SET deleted_at=NOW(), canceled_by=$2, updated_at=NOW()
           WHERE id=$1 AND deleted_at IS NULL
-          RETURNING sheet_row, mirror_status`, [orderSubmissionId, by]);
+          RETURNING sheet_row, mirror_status, sheet_id, tab_name, tab_gid, gid`, [orderSubmissionId, by]);
       if (!rows.length) { await client.query('ROLLBACK'); return { alreadyCanceled: true }; }
       const order = rows[0];
 
@@ -38,8 +39,19 @@ async function cancelOrderSubmission({ orderSubmissionId, canceledBy = 'admin', 
         `UPDATE campaign_applications SET late_order_id=NULL
           WHERE late_order_id=$1::uuid AND status <> 'submitted'`, [orderSubmissionId]);
 
-      const cleared = !!(order.sheet_row && order.mirror_status === 'written');
-      if (cleared) {
+      const written = !!(order.sheet_row && order.mirror_status === 'written');
+      /* ★★ 결정 271 — 무시트 좌표(참여형 `campaign:*` · 무시트 탭)에는 비울 구글시트 행이 없다.
+         종전엔 여기서도 order_cancel 을 넣어 큐가 매번 "RAW 메타 없음"으로 실패했다(운영 201건 전부 무시트).
+         → 큐를 거치지 않고 **시트 비우기가 성공했을 때 남는 상태 그대로**(mirror_status='canceled', 점유 기록 보존)를 바로 남긴다.
+         판정은 별도 연결(pool)로 한다 — 이 트랜잭션 안에서 조회가 실패하면 취소 전체가 롤백되기 때문.
+         판정 실패 = false = 종전 시트 경로(fail-open). */
+      const sheetless = written && await isSheetlessOrderCoord(pool, {
+        sheetId: order.sheet_id, tabName: order.tab_name, tabGid: order.tab_gid || order.gid,
+      });
+      const cleared = written && !sheetless;
+      if (sheetless) {
+        await client.query(`UPDATE order_submissions SET mirror_status='canceled' WHERE id=$1`, [orderSubmissionId]);
+      } else if (cleared) {
         // 취소 원장·선택 행 삭제·시트 클리어 큐를 같은 트랜잭션으로 확정한다.
         // 커밋 뒤 enqueue가 실패해 삭제만 되고 시트 값이 남는 단절을 만들지 않는다.
         await client.query(

@@ -602,6 +602,9 @@ function startCronJobs() {
 
   // ── Phase 2: Sync Queue 워커 — 30초마다 pending 작업 처리 ──
   // ★ A2: stuck processing 자동 감지 포함
+  // ★★ 결정 271: 무시트 구매의 작업보드 반영(workboard_apply)이 이 워커의 라이브 일이다. 시트 타입
+  //   (order_append·order_update·order_cancel·review_submit …)은 ORDER_BATCH_AUTO=1 일 때만 집는다
+  //   (syncQueue `sheetQueueTypesEnabled` — 끄면 시트 시절 잔여 행은 손대지 않고 남긴다).
   cron.schedule('*/30 * * * * *', async () => {
     try {
       const result = await processQueue(10);
@@ -636,6 +639,7 @@ function startCronJobs() {
   });
 
   // ── ★ A2+C2: 매시간 stuck/failed 자동 복구 ──
+  //   ★ 결정 271: 작업보드 반영 타입(DB_ONLY_QUEUE_TYPES)만 되살린다 — 시트 타입 실패분은 기록으로 남긴다.
   cron.schedule('0 * * * *', async () => {
     try {
       const result = await retryAllFailed();
