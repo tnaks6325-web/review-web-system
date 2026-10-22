@@ -1205,9 +1205,10 @@ router.get('/workdesk/manual-review-precheck', authMiddleware, internalMiddlewar
     res.json({ ...out, existing });
   } catch (err) { next(err); }
 });
+const _diagRoutes = require('./diag.routes');
 // 작업보드 수동 캡처 전용 프록시. 인트라넷 토큰은 Track A 주소에 직접 접근할 수 없고,
 // 이 Track B 권한 게이트를 통과한 요청에만 서버 내부 표식을 붙여 기존 업로드 핸들러를 재사용한다.
-const _workdeskReviewUpload = _delegate(require('./diag.routes'), 'post', '/review-upload');
+const _workdeskReviewUpload = _handler(_diagRoutes, 'reviewUpload');
 router.post('/workdesk/review-upload', authMiddleware, internalMiddleware, imageApiLimiter, (req, res, next) => {
   req.trackBUploadAuthorized = true;
   return _workdeskReviewUpload(req, res, next);
@@ -1559,12 +1560,16 @@ router.get('/work-orders/list', authMiddleware, internalMiddleware, async (req, 
   } catch (err) { next(err); }
 });
 
-/** 편집 계열은 기존 order 라우트 핸들러를 그대로 태운다(로직 복제 금지) */
-function _delegate(routerRef, method, path) {
-  const layer = routerRef.stack.find(l => l.route && l.route.path === path && l.route.methods[method]);
-  if (!layer) throw new Error(`[trackB] 위임 대상 라우트를 찾지 못함: ${method.toUpperCase()} ${path}`);
-  // 마지막 스택 = 실제 핸들러(앞은 authMiddleware 등 — 여기선 우리 게이트를 이미 통과했다)
-  return layer.route.stack[layer.route.stack.length - 1].handle;
+/** 편집 계열은 기존 라우터 모듈의 핸들러를 그대로 태운다(로직 복제 금지).
+ *  ★ 결정 270: 예전 `_delegate` 는 옛 라우터 스택을 **경로 문자열로** 뒤져 마지막 핸들러를 꺼냈다 —
+ *    그래서 옛 공개 경로 한 줄만 지워도 서버가 기동 시 throw 했다. 지금은 각 라우터 모듈이 내보내는
+ *    `router.handlers.<이름>` 을 직접 가리킨다(옛 공개 경로 유무와 무관). 핸들러 앞의 원래 미들웨어
+ *    (authMiddleware 등)는 예전과 똑같이 타지 않는다 — 여기선 Track B 게이트를 이미 통과했다.
+ *  ★ 없는 이름이면 모듈 로드 시 바로 throw 한다(fail-closed — 조용히 undefined 핸들러로 뜨지 않게). */
+function _handler(routerRef, name) {
+  const fn = routerRef && routerRef.handlers && routerRef.handlers[name];
+  if (typeof fn !== 'function') throw new Error(`[trackB] 위임 대상 핸들러를 찾지 못함: ${name}`);
+  return fn;
 }
 /* ── 탭 설정(진행방식) 프록시 — 작업 조건 카드의 [현금영수증] 설정 창구 ────────────────
    ★★ 새 저장 경로를 만들지 않는다 — `tab_configs.income_type` 의 writer 는 `POST /api/tab/config`
@@ -1573,16 +1578,16 @@ function _delegate(routerRef, method, path) {
    ★ Track B 경로에 두는 이유 = 인트라넷 SSO 토큰(via:'intranet')은 `/api/tab/*` 에 도달할 수 없다.
    ★ 게이트는 **내부인**(원본은 authMiddleware 만 — 광고주만 좁힌다. 탭 설정은 담당자 업무다). */
 const _tabConfigRoutes = require('./tabconfig.routes');
-const _tabConfigHandler = _delegate(_tabConfigRoutes, 'post', '/config');
+const _tabConfigHandler = _handler(_tabConfigRoutes, 'tabConfigSave');
 const { tabConfigWriteScopeMiddleware } = require('../middleware/tabConfigScope.middleware');
 router.post('/tab/config', authMiddleware, internalMiddleware, tabConfigWriteScopeMiddleware, (req, res, next) =>
   _tabConfigHandler(req, res, next));
 
 const _orderRoutes = require('./order.routes');
-const _acceptHandler = _delegate(_orderRoutes, 'post', '/admin/accept');
-const _statusHandler = _delegate(_orderRoutes, 'put', '/admin/status');
-const _updateHandler = _delegate(_orderRoutes, 'put', '/admin/update');
-const _adminEditHandler = _delegate(_orderRoutes, 'put', '/admin/edit');
+const _acceptHandler = _handler(_orderRoutes, 'orderAdminAccept');
+const _statusHandler = _handler(_orderRoutes, 'orderAdminStatus');
+const _updateHandler = _handler(_orderRoutes, 'orderAdminUpdate');
+const _adminEditHandler = _handler(_orderRoutes, 'orderAdminEdit');
 // (🧪 테스트 작업오더 프록시 POST /work-orders/submit 은 2026-09-28 제거 — 결정 186 17번. 연습은 테스트 서버에서.)
 
 router.post('/work-orders/accept', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
@@ -1608,8 +1613,8 @@ router.put('/work-orders/edit', authMiddleware, internalMiddleware, editorOnlyMi
 //     주문 원장 기록·정원 차감·시트 쓰기를 일으키므로 보는 사람 전부에게 열지 않는다.
 //   ★ 로직 복제 0 — 기존 핸들러를 그대로 태운다(원본 라우트·게이트는 무변경).
 const _moRoutes = require('./manualOrder.routes');
-const _moPreview = _delegate(_moRoutes, 'post', '/preview');
-const _moSubmit = _delegate(_moRoutes, 'post', '/submit');
+const _moPreview = _handler(_moRoutes, 'manualOrderPreview');
+const _moSubmit = _handler(_moRoutes, 'manualOrderSubmit');
 
 router.post('/manual-order/preview', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _moPreview(req, res, next));
@@ -1622,22 +1627,22 @@ router.post('/manual-order/submit', authMiddleware, internalMiddleware, editorOn
 //     같은 함수라 두 화면이 어긋날 수 없다(사본 금지 규율).
 const _campRoutes = require('./campaign.routes');
 const _campHandlers = {
-  list: _delegate(_campRoutes, 'get', '/admin/list'),
-  create: _delegate(_campRoutes, 'post', '/admin/create'),
-  update: _delegate(_campRoutes, 'put', '/admin/:id'),
-  flags: _delegate(_campRoutes, 'post', '/admin/:id/flags'),
-  del: _delegate(_campRoutes, 'delete', '/admin/:id'),
-  apps: _delegate(_campRoutes, 'get', '/admin/:id/applications'),
-  activityLog: _delegate(_campRoutes, 'get', '/admin/:id/activity-log'),
-  confirm: _delegate(_campRoutes, 'post', '/admin/:id/confirm'),
-  status: _delegate(_campRoutes, 'put', '/admin/:id/status'),     // 게시/마감 토글
-  preview: _delegate(_campRoutes, 'get', '/admin/:id/preview'),   // 리뷰어 화면 미리보기
-  detail: _delegate(_campRoutes, 'get', '/:id'),                  // 수정 모달 프리필(관리자 = 전체 행)
-  dismiss: _delegate(_campRoutes, 'post', '/admin/:id/dismiss'),
-  blogApprove: _delegate(_campRoutes, 'post', '/admin/:id/blog-approve'),   // 127 블로그 승인
-  blogReject: _delegate(_campRoutes, 'post', '/admin/:id/blog-reject'),     // 127 블로그 반려
-  archive: _delegate(_campRoutes, 'post', '/admin/:id/archive'),           // 130 보관/보관 해제
-  optionMerge: _delegate(_campRoutes, 'post', '/admin/:id/options/merge'), // 갈라진 선택지 합치기(이름 바꾸기 이전분)
+  list: _handler(_campRoutes, 'adminList'),
+  create: _handler(_campRoutes, 'adminCreate'),
+  update: _handler(_campRoutes, 'adminUpdate'),
+  flags: _handler(_campRoutes, 'adminFlags'),
+  del: _handler(_campRoutes, 'adminDelete'),
+  apps: _handler(_campRoutes, 'adminApplications'),
+  activityLog: _handler(_campRoutes, 'adminActivityLog'),
+  confirm: _handler(_campRoutes, 'adminConfirm'),
+  status: _handler(_campRoutes, 'adminStatus'),     // 게시/마감 토글
+  preview: _handler(_campRoutes, 'adminPreview'),   // 리뷰어 화면 미리보기
+  detail: _handler(_campRoutes, 'detail'),                  // 수정 모달 프리필(관리자 = 전체 행)
+  dismiss: _handler(_campRoutes, 'adminDismiss'),
+  blogApprove: _handler(_campRoutes, 'adminBlogApprove'),   // 127 블로그 승인
+  blogReject: _handler(_campRoutes, 'adminBlogReject'),     // 127 블로그 반려
+  archive: _handler(_campRoutes, 'adminArchive'),           // 130 보관/보관 해제
+  optionMerge: _handler(_campRoutes, 'adminOptionMerge'), // 갈라진 선택지 합치기(이름 바꾸기 이전분)
 };
 router.get('/campaigns/list', authMiddleware, internalMiddleware, async (req, res, next) => {
   // 편집 가능 여부를 함께 실어 준다 — 프론트가 버튼 노출을 정한다(서버 게이트가 최종 방어)
@@ -1939,9 +1944,9 @@ router.delete('/campaigns/:id/rounds', authMiddleware, internalMiddleware, async
    ══════════════════════════════════════════════════════════════ */
 const _reRoutes = require('./reviewEdit.routes');
 const _reHandlers = {
-  list: _delegate(_reRoutes, 'get', '/list'),
-  approve: _delegate(_reRoutes, 'post', '/approve'),
-  reject: _delegate(_reRoutes, 'post', '/reject'),
+  list: _handler(_reRoutes, 'reviewEditList'),
+  approve: _handler(_reRoutes, 'reviewEditApprove'),
+  reject: _handler(_reRoutes, 'reviewEditReject'),
 };
 
 /** 내부인(master/admin/staff)만 — 광고주·리뷰어 차단 */
@@ -2532,14 +2537,14 @@ router.post('/review-inspect/reinspect', authMiddleware, adminOrMasterMiddleware
    ══════════════════════════════════════════════════════════════ */
 const _csRoutes = require('./cs.routes');
 const _csHandlers = {
-  threads:      _delegate(_csRoutes, 'get',  '/threads'),
-  unread:       _delegate(_csRoutes, 'get',  '/unread-count'),
-  messages:     _delegate(_csRoutes, 'get',  '/messages'),
-  orderContext: _delegate(_csRoutes, 'get',  '/order-context'),
-  reply:        _delegate(_csRoutes, 'post', '/reply'),
-  upload:       _delegate(_csRoutes, 'post', '/upload'),
-  status:       _delegate(_csRoutes, 'post', '/status'),
-  memo:         _delegate(_csRoutes, 'post', '/memo'),
+  threads:      _handler(_csRoutes, 'csThreads'),
+  unread:       _handler(_csRoutes, 'csUnreadCount'),
+  messages:     _handler(_csRoutes, 'csMessages'),
+  orderContext: _handler(_csRoutes, 'csOrderContext'),
+  reply:        _handler(_csRoutes, 'csReply'),
+  upload:       _handler(_csRoutes, 'csUpload'),
+  status:       _handler(_csRoutes, 'csStatus'),
+  memo:         _handler(_csRoutes, 'csMemo'),
 };
 // 경로 모양은 `/api/cs/*` 와 1:1 — 프론트가 베이스 문자열만 갈아끼워 같은 모듈을 쓴다.
 router.get('/cs/threads', authMiddleware, internalMiddleware, (req, res, next) =>
@@ -2737,25 +2742,25 @@ const _adminRoutes = require('./admin.routes');
 const _tabRoutes = require('./tabconfig.routes');
 const _reviewerRoutes = require('./reviewer.routes');
 const _setHandlers = {
-  nicknameGet:  _delegate(_adminRoutes, 'get', '/my-nickname'),
-  nicknameSet:  _delegate(_adminRoutes, 'post', '/my-nickname'),
-  providerInfo: _delegate(_tabRoutes, 'get', '/provider-info'),
-  businessNo:   _delegate(_tabRoutes, 'post', '/company-business-no'),
-  cashGuide:    _delegate(_tabRoutes, 'post', '/cash-receipt-guide'),
-  guideImage:   _delegate(_orderRoutes, 'post', '/guide-image'),
-  notices:      _delegate(_reviewerRoutes, 'get', '/notices/all'),
-  noticeSave:   _delegate(_reviewerRoutes, 'post', '/notices/save'),
-  noticeDelete: _delegate(_reviewerRoutes, 'post', '/notices/delete'),
-  homeBanner:   _delegate(_reviewerRoutes, 'get', '/home-banner/all'),
-  homeBannerSave: _delegate(_reviewerRoutes, 'post', '/home-banner/save'),
+  nicknameGet:  _handler(_adminRoutes, 'myNicknameGet'),
+  nicknameSet:  _handler(_adminRoutes, 'myNicknameSet'),
+  providerInfo: _handler(_tabRoutes, 'providerInfo'),
+  businessNo:   _handler(_tabRoutes, 'companyBusinessNo'),
+  cashGuide:    _handler(_tabRoutes, 'cashReceiptGuide'),
+  guideImage:   _handler(_orderRoutes, 'guideImageUpload'),
+  notices:      _handler(_reviewerRoutes, 'noticesAll'),
+  noticeSave:   _handler(_reviewerRoutes, 'noticeSave'),
+  noticeDelete: _handler(_reviewerRoutes, 'noticeDelete'),
+  homeBanner:   _handler(_reviewerRoutes, 'homeBannerAll'),
+  homeBannerSave: _handler(_reviewerRoutes, 'homeBannerSave'),
   // ★ 087: 리뷰타입 옛 값 정리 — 원본은 `/api/diag/review-type-cleanup`.
   //   인트라넷 SSO 토큰(via:'intranet')은 `/api/diag/*` 에 **도달 자체가 불가**라
   //   리뷰웹시스템[3버전]에서 이 정리를 부르려면 Track B 경로가 필요하다(로직 복제 0).
-  reviewTypeCleanup: _delegate(require('./diag.routes'), 'post', '/review-type-cleanup'),
+  reviewTypeCleanup: _handler(_diagRoutes, 'reviewTypeCleanup'),
   // ★ 065 후속: 담당자 실명(박세희·박은비) → 닉네임(만두·망고) 정리 — 원본은 `/api/diag/manager-cleanup`.
   //   같은 이유(인트라넷 SSO 토큰은 `/api/diag/*` 미도달)로 Track B 경로를 함께 연다.
-  managerCleanup: _delegate(require('./diag.routes'), 'post', '/manager-cleanup'),
-  deliveryTypeCleanup: _delegate(require('./diag.routes'), 'post', '/delivery-type-cleanup'),   // 135 — 옛 배송유형 표기 정리
+  managerCleanup: _handler(_diagRoutes, 'managerCleanup'),
+  deliveryTypeCleanup: _handler(_diagRoutes, 'deliveryTypeCleanup'),   // 135 — 옛 배송유형 표기 정리
 };
 router.get('/settings/my-nickname', authMiddleware, internalMiddleware, (req, res, next) =>
   _setHandlers.nicknameGet(req, res, next));
@@ -2797,12 +2802,12 @@ router.post('/settings/delivery-type-cleanup', authMiddleware, adminOrMasterMidd
          관리자 판정은 결정 257 과 같은 인트라넷 지정 관리자(verifyIntranetIdentity)를 따른다.
    ★ 화면 모듈(admin-settings.js)은 POST 두 개로 부른다 — 저장(id 있으면 수정)·삭제를 원본 PUT/DELETE 핸들러로 넘긴다. */
 const _staffNotice = {
-  unread: _delegate(_adminRoutes, 'get', '/notices/unread'),
-  read:   _delegate(_adminRoutes, 'post', '/notices/read'),
-  all:    _delegate(_adminRoutes, 'get', '/notices/all'),
-  create: _delegate(_adminRoutes, 'post', '/notices'),
-  update: _delegate(_adminRoutes, 'put', '/notices/:id'),
-  remove: _delegate(_adminRoutes, 'delete', '/notices/:id'),
+  unread: _handler(_adminRoutes, 'noticesUnread'),
+  read:   _handler(_adminRoutes, 'noticesRead'),
+  all:    _handler(_adminRoutes, 'noticesAll'),
+  create: _handler(_adminRoutes, 'noticeCreate'),
+  update: _handler(_adminRoutes, 'noticeUpdate'),
+  remove: _handler(_adminRoutes, 'noticeDelete'),
 };
 function _staffNoticeId(req) {
   const id = req.body && req.body.id;
@@ -2844,11 +2849,11 @@ router.post('/settings/staff-notices/delete', authMiddleware, adminOrMasterMiddl
      프론트가 `includeAdminUi=1` 을 주면 그때만 포함 — 제외 건수는 응답이 함께 준다.
    ══════════════════════════════════════════════════════════════ */
 const _errHandlers = {
-  list:    _delegate(_adminRoutes, 'get',  '/error-logs'),
-  detail:  _delegate(_adminRoutes, 'get',  '/error-logs/detail'),
-  analyze: _delegate(_adminRoutes, 'post', '/error-logs/analyze'),
-  status:  _delegate(_adminRoutes, 'post', '/error-logs/status'),
-  resolve: _delegate(_adminRoutes, 'post', '/error-logs/resolve'),
+  list:    _handler(_adminRoutes, 'errorLogsList'),
+  detail:  _handler(_adminRoutes, 'errorLogDetail'),
+  analyze: _handler(_adminRoutes, 'errorLogAnalyze'),
+  status:  _handler(_adminRoutes, 'errorLogStatus'),
+  resolve: _handler(_adminRoutes, 'errorLogResolve'),
 };
 router.get('/error-logs', authMiddleware, adminOrMasterMiddleware, (req, res, next) => {
   // ★ 기본 제외 = 이 화면의 정책. 원본 라우트는 opt-in(기본 미적용)이라 다른 소비처는 무영향.

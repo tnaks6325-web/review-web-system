@@ -191,8 +191,9 @@ t('★ TEXT 타입 — 082 의 42804(타입 불일치로 파일 전체 롤백) �
 t('★ 기존 행 백필 없음 = 기존 공고 동작 불변', !/\bUPDATE\b/i.test(MIG));
 t('★ 판정을 DB CHECK 로 이중화하지 않는다(어휘 확장 시 저장 실패 방지)', !/CHECK\s*\(/i.test(MIG));
 
+// 결정 270: 옛 공개 경로 /api/diag/review-type-cleanup 은 지웠다 — 핸들러는 이름으로 남고 창구는 Track B 프록시(admin/master) 하나.
 t('옛 값 정리는 자동이 아니라 dryRun 기본 엔드포인트',
-  /router\.post\('\/review-type-cleanup', authMiddleware, adminOrMasterMiddleware/.test(DIAG)
+  /_handlers\.reviewTypeCleanup = async/.test(DIAG) && !/router\.post\('\/review-type-cleanup'/.test(DIAG)
   && /dryRun = req\.body\?\.dryRun !== false/.test(DIAG));
 t("★★ 배송유형 이관은 blank-only — 접수가 채운 값을 덮지 않는다",
   /COALESCE\(delivery_type, ''\) = '' THEN review_type/.test(DIAG));
@@ -241,13 +242,13 @@ t('검색 화면에 옛 대시보드 탭 설정 팝오버 사본이 남아 있�
    옛 관리자 대시보드 폐기(결정 267)로 탭 설정 팝오버·빠른편집·인라인 셀렉트 창구(admin.html·index-app.js)는 없어졌다. */
 t('★ 옛 대시보드 탭 설정 팝오버가 어느 화면에도 남아 있지 않다',
   ['workdesk.html', 'search.html', 'index.html'].every(f => !/id="tcOptReview"/.test(F(f))));   // 옛 관리자 대시보드 폐기(결정 267) — admin.html 진입 경로까지 삭제
-t('★ search-app 의 빠른편집은 그 화면 팝오버(#tcOptReview)에서 읽는다(사본 0)',
-  /querySelectorAll\('#tcOptReview \.tc-opt'\)/.test(F('js/search-app.js'))
+// 결정 270: search-app 안에 남아 있던 옛 대시보드 빠른편집(quickEditCell → setTabConfig)·탭 행 렌더러(_buildTabRowHtml)는
+//   그릴 자리가 없는 죽은 코드라 지웠다 — 리뷰타입 입력 창구는 작업보드뿐이다. 사본 어휘 목록도 남지 않는다.
+t('★ search-app 에 옛 대시보드 빠른편집·탭 행 렌더러가 남아 있지 않다(리뷰타입 입력 창구 사본 0)',
+  !/function quickEditCell\(/.test(F('js/search-app.js')) && !/function _buildTabRowHtml\(/.test(F('js/search-app.js'))
   && !/\['실배송','빈박스','구매확정','믹스'\]/.test(F('js/search-app.js')));
 /* (AE 작업오더 제출 폼 안내 검사 — staff.html 제거로 삭제 (staff.html 은 결정 186 49번에서 제거)) */
-t('★ 옛 값 배지는 화면에서 사라지지 않는다(색 맵·CSS 유지)',
-  /'실배송': 'tc-review-실배송'/.test(F('js/search-app.js'))
-  && ['css/search.css'].every(f => /\.tc-review-실배송\{/.test(F(f))));
+// (옛 값 배지 색 맵은 위 탭 행 렌더러 안에 있었다 — 결정 270 으로 렌더러와 함께 제거. CSS 클래스는 무해해 그대로 둔다.)
 t('★ 라벨 어휘 통일 — 화면에 "리뷰유형" 표기가 남아 있지 않다',
   ['workdesk.html', 'js/work-order-detail.js'].every(f => !F(f).includes('리뷰유형')));   // 옛 관리자 대시보드 폐기(결정 267) — admin.html 진입 경로까지 삭제
 
@@ -265,7 +266,8 @@ const SET = F('js/admin-settings.js');
 }
 const TBS = S('src/routes/trackB.routes.js');
 t('★ 로직 복제 0 — 기존 diag 핸들러를 위임한다',
-  /_delegate\(require\('\.\/diag\.routes'\), 'post', '\/review-type-cleanup'\)/.test(TBS));
+  /reviewTypeCleanup: _handler\(_diagRoutes, 'reviewTypeCleanup'\)/.test(TBS)
+  && typeof require('../src/routes/diag.routes').handlers.reviewTypeCleanup === 'function');
 t('설정 패널·목차·로더가 같은 키로 등록된다',
   /reviewtype: _reviewTypeHtml/.test(SET) && /reviewtype: loadReviewTypeCleanup/.test(SET)
   && /reviewtype: \{ ic: '✅'/.test(SET));

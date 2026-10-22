@@ -58,11 +58,14 @@ t('리뷰어 로그 해결 처리는 여전히 adminOrMaster',
 /* ── 2) 로직 복제 0 — 기존 admin 핸들러 위임 ───────────────── */
 console.log('\n2) 로직 복제 0 (기존 핸들러 위임)');
 const TB = fs.readFileSync(path.join(__dirname, '..', 'src/routes/trackB.routes.js'), 'utf8');
-t('_delegate 로 admin.routes 핸들러를 태운다', /_delegate\(_adminRoutes, 'get',\s*'\/error-logs'\)/.test(TB));
+// 결정 270: 경로 문자열 위임(_delegate) → 이름 위임(_handler). 옛 공개 경로 /api/admin/error-logs* 는 지웠다.
+t('이름 위임으로 admin.routes 핸들러를 태운다', /_handler\(_adminRoutes, 'errorLogsList'\)/.test(TB)
+  && ['errorLogsList', 'errorLogDetail', 'errorLogAnalyze', 'errorLogStatus', 'errorLogResolve']
+    .every(n => typeof require('../src/routes/admin.routes').handlers[n] === 'function'));
 t('trackB 가 error_logs 를 직접 쿼리하지 않는다(사본 금지)', !/FROM\s+error_logs/i.test(TB));
 const AD = fs.readFileSync(path.join(__dirname, '..', 'src/routes/admin.routes.js'), 'utf8');
-t('원본 /api/admin/error-logs* 라우트는 그대로 살아 있다(위임 대상)',
-  /router\.get\('\/error-logs',/.test(AD) && /router\.post\('\/error-logs\/analyze',/.test(AD));
+t('옛 공개 /api/admin/error-logs* 는 제거 — 핸들러만 이름으로 남는다(결정 270)',
+  !/router\.(get|post)\('\/error-logs/.test(AD) && /_handlers\.errorLogsList = async/.test(AD) && /_handlers\.errorLogAnalyze = async/.test(AD));
 
 /* ── 3) 제외 규칙 — 순수함수 실행 ──────────────────────────── */
 console.log('\n3) 관리자 대시보드 오류 제외 규칙');

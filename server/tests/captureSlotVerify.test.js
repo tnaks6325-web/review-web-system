@@ -98,8 +98,10 @@ ok('리뷰 교체요청도 같은 라벨 규칙(파일이 다른 폴더로 흩�
   && /slotLabelOf\(tc\[0\]\?\.capture_slots, tc\[0\]\?\.income_type, k, _rt, _cr === true\)/.test(revEdit));
 ok('캡처 슬롯 저장은 기존 설정을 잠그고 stable key 부여를 적용',
   /SELECT capture_slots FROM tab_configs[\s\S]*FOR UPDATE[\s\S]*assignStableCaptureSlotKeys\(raw, existing\[0\]\?\.capture_slots\)/.test(tabConfig));
+// 결정 270: 옛 공개 경로 POST /api/tab/config 는 지웠다 — 저장 창구는 Track B 프록시 하나(같은 3단 게이트).
 ok('탭 설정 변경은 내부 역할 + 담당 탭 범위를 통과해야 한다',
-  /router\.post\('\/config', authMiddleware, internalOnlyMiddleware, tabConfigWriteScopeMiddleware/.test(tabConfig));
+  /router\.post\('\/tab\/config', authMiddleware, internalMiddleware, tabConfigWriteScopeMiddleware/.test(readS('routes/trackB.routes.js'))
+  && /_handlers\.tabConfigSave = async/.test(tabConfig) && !/router\.post\('\/config'/.test(tabConfig));
 
 /* ═══ 3단계: 검수 정책(실제 핸들러 · Gemini 스텁) ═══ */
 const orig = Module.prototype.require;

@@ -51,9 +51,15 @@ t('원본 /api/cs/* 정책이 바뀌지 않았다(프록시만 추가)', () => {
 t('★ 로직 복제 0 — 기존 cs 핸들러에 위임한다', () => {
   const src = R('src/routes/trackB.routes.js');
   assert.ok(/const _csRoutes = require\('\.\/cs\.routes'\)/.test(src));
-  ['/threads', '/unread-count', '/messages', '/order-context', '/reply', '/status', '/memo']
-    .forEach(p => assert.ok(new RegExp("_delegate\\(_csRoutes, '(get|post)',\\s*'" + p + "'\\)").test(src),
-      '위임이 아닌 경로: ' + p));
+  // 결정 270: 경로 문자열 위임(_delegate) → 이름 위임(_handler). 이름이 가리키는 함수가 원본 /api/cs/* 의 그 핸들러인지 실제로 대조한다.
+  const csR = require('../src/routes/cs.routes');
+  [['/threads', 'csThreads'], ['/unread-count', 'csUnreadCount'], ['/messages', 'csMessages'], ['/order-context', 'csOrderContext'],
+    ['/reply', 'csReply'], ['/status', 'csStatus'], ['/memo', 'csMemo']]
+    .forEach(([p, name]) => {
+      assert.ok(new RegExp("_handler\\(_csRoutes, '" + name + "'\\)").test(src), '위임이 아닌 경로: ' + p);
+      const l = csR.stack.find(x => x.route && x.route.path === p);
+      assert.ok(l && l.route.stack.at(-1).handle === csR.handlers[name], '이름이 원본 핸들러를 가리키지 않는다: ' + p);
+    });
   // 위임 대신 SQL 을 베끼면 원본과 갈라진다.
   // ★ 금지 대상은 **문의 목록·대화를 재현하는 조회**다. 다른 기능이 "이 리뷰어에게 문의가 몇 건인가"를
   //   세는 COUNT 는 CS 로직의 사본이 아니라 교차 참조라 허용한다(등록리뷰어DB 삭제 경고 = reviewers/delete).

@@ -58,8 +58,10 @@ const DS = require('../src/services/drive.service');
 
   // ── B ──
   const RE = read('src/routes/reviewEdit.routes.js');
+  // 결정 270: 옛 공개 경로 /api/review-edit/approve·reject 는 지웠다 — 핸들러는 _handlers.reviewEditApprove/Reject 로 남고
+  //   창구는 Track B(/api/trackb/review-edit/*) 하나다. 본문 위치 기준만 그 정의로 옮긴다(검사 의미 불변).
   {
-    const ap = RE.slice(RE.indexOf("router.post('/approve'"), RE.indexOf("router.post('/reject'"));
+    const ap = RE.slice(RE.indexOf('_handlers.reviewEditApprove = async'), RE.indexOf('_handlers.reviewEditReject = async'));
     assert.ok(ap.length > 500, '승인 라우트를 찾지 못했다');
     assert.match(ap, /_resolveFolders\(\s*r0\.sheet_id, r0\.tab_name, r0\.slot_key \|\| 'review', \{ withStaging: false \}\s*\)/,
       '승인은 스테이징 폴더가 필요 없다(Drive 검색 1회 절약)');
@@ -77,7 +79,7 @@ const DS = require('../src/services/drive.service');
     assert.ok(resAt > 0 && archAt > resAt, '옛 파일 보관 이동은 응답을 보낸 **뒤**에 시작해야 한다');
     assert.ok(!/_resolveArchiveFolder\(\)/.test(ap), '승인 요청 안에서 보관 폴더를 다루지 않는다(응답 뒤 함수로 옮겼다)');
     assert.ok(ap.indexOf("postReviewEditDecision(committed, 'approved'") < resAt, '리뷰어 통지는 여전히 응답 전(저장 확정 뒤)');
-    const h = RE.slice(RE.indexOf('function _archiveOldFileAfterReply('), RE.indexOf("router.post('/approve'"));
+    const h = RE.slice(RE.indexOf('function _archiveOldFileAfterReply('), RE.indexOf('_handlers.reviewEditApprove = async'));
     assert.match(h, /setImmediate\(async \(\) => \{\s*try \{[\s\S]*\} catch \(e\) \{\s*logger\.warn\(`\[review-edit\] 구 파일 보관 이동 실패\(무시\)/,
       '응답 뒤 작업은 전부 try/catch — 잡아 줄 곳이 없어 throw 하면 안 된다');
     assert.match(h, /getFileParents\(committed\.old_file_id\)[\s\S]*moveAndRenameFile\(committed\.old_file_id, archiveId/,

@@ -1,5 +1,8 @@
 const express = require('express');
 const router = express.Router();
+// Track B(trackB.routes.js)가 경로 문자열 대신 이름으로 부르는 핸들러 모음 — 맨 아래 router.handlers 로 내보낸다(결정 270).
+const { lastRouteHandler } = require('../utils/routeHandlers');
+const _handlers = {};
 const jwt = require('jsonwebtoken');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const { registerLimiter, imageApiLimiter, intranetLoginLimiter } = require('../middleware/rateLimit.middleware');
@@ -8,8 +11,6 @@ const {
   registerReviewer,
   verifyReviewer,
   lookupPhone,
-  getReviewerList,
-  deleteReviewer,
   handleReviewerProfile,
 } = require('../services/reviewer.service');
 const pool = require('../db/pool');
@@ -285,27 +286,6 @@ router.get('/lookup', async (req, res, next) => {
   try {
     const { phone8 } = req.query;
     const result = await lookupPhone(phone8);
-    res.json(result);
-  } catch (err) {
-    next(err);
-  }
-});
-
-// GET /api/reviewer/list — 리뷰어 목록 (GAS: getReviewerList)
-router.get('/list', authMiddleware, async (req, res, next) => {
-  try {
-    const result = await getReviewerList();
-    res.json(result);
-  } catch (err) {
-    next(err);
-  }
-});
-
-// POST /api/reviewer/delete — 리뷰어 삭제 (GAS: deleteReviewer)
-router.post('/delete', authMiddleware, async (req, res, next) => {
-  try {
-    const { name, phone } = req.body;
-    const result = await deleteReviewer(name, phone);
     res.json(result);
   } catch (err) {
     next(err);
@@ -1946,6 +1926,7 @@ router.get('/notices/all', authMiddleware, adminOrMasterMiddleware, async (req, 
     res.json({ ok: true, notices: rows });
   } catch (err) { next(err); }
 });
+_handlers.noticesAll = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // POST /api/reviewer/notices/save — 관리자 작성/수정 { id?, title, body, pinned?, active? }
 router.post('/notices/save', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
@@ -1976,6 +1957,7 @@ router.post('/notices/save', authMiddleware, adminOrMasterMiddleware, async (req
     res.json({ ok: true, id: rows[0].id });
   } catch (err) { next(err); }
 });
+_handlers.noticeSave = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // POST /api/reviewer/notices/delete — 관리자 삭제 { id }
 router.post('/notices/delete', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
@@ -1986,6 +1968,7 @@ router.post('/notices/delete', authMiddleware, adminOrMasterMiddleware, async (r
     res.json({ ok: true });
   } catch (err) { next(err); }
 });
+_handlers.noticeDelete = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // 리뷰어 홈 가로 배너. 공개 응답은 완성되어 활성화된 배너만 노출한다.
 const REVIEWER_HOME_BANNER_KEY = 'reviewer_home_banner';
@@ -2003,6 +1986,7 @@ router.get('/home-banner/all', authMiddleware, adminOrMasterMiddleware, async (r
   try { res.json({ ok: true, banner: await _loadReviewerHomeBanner() }); }
   catch (err) { next(err); }
 });
+_handlers.homeBannerAll = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 router.post('/home-banner/save', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
@@ -2016,6 +2000,7 @@ router.post('/home-banner/save', authMiddleware, adminOrMasterMiddleware, async 
     res.json({ ok: true, banner: checked.banner });
   } catch (err) { next(err); }
 });
+_handlers.homeBannerSave = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/reviewer/my-missing-captures?phone8=XX — 구매캡쳐가 빠진 내 주문 (무인증·phone8 스코프)
@@ -2111,5 +2096,8 @@ router.get('/my-missing-captures', async (req, res, next) => {
     res.json({ ok: true, count: items.length, items });
   } catch (err) { next(err); }
 });
+
+// ★ 이름을 빼거나 바꾸면 trackB 가 기동 시 바로 실패한다(fail-closed) — 옛 공개 경로를 지워도 Track B 는 그대로다.
+router.handlers = Object.freeze(_handlers);
 
 module.exports = router;

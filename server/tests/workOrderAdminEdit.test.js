@@ -72,25 +72,23 @@ function findRoute(router, method, p) {
   return (router.stack || []).find(l => l.route && l.route.path === p && l.route.methods[method]);
 }
 
-t('③ PUT /admin/edit 등록 + 미들웨어 3단(auth+adminOrMaster+handler)', () => {
-  const layer = findRoute(orderRouter, 'put', '/admin/edit');
-  assert.ok(layer, '라우트 없음');
-  assert.ok(layer.route.stack.length >= 3, '미들웨어 체인 부족: ' + layer.route.stack.length);
+// 결정 270: 옛 대시보드 전용 공개 경로 PUT /api/order/admin/edit 는 지웠다 — 편집 창구는 Track B(/work-orders/edit) 하나이고
+//   핸들러는 order 라우터가 이름(router.handlers.orderAdminEdit)으로 내보낸다.
+t('③ 옛 공개 경로 PUT /admin/edit 제거 · 핸들러는 이름으로 남는다', () => {
+  assert.ok(!findRoute(orderRouter, 'put', '/admin/edit'), '옛 공개 경로가 남아 있다');
+  assert.strictEqual(typeof orderRouter.handlers.orderAdminEdit, 'function');
 });
 
 t('③ PUT /work-orders/edit 위임 등록(trackB) + 미들웨어 4단', () => {
   const layer = findRoute(trackBRouter, 'put', '/work-orders/edit');
   assert.ok(layer, 'trackB 위임 라우트 없음');
   assert.ok(layer.route.stack.length >= 4, 'auth+internal+editorOnly+handler 체인 부족: ' + layer.route.stack.length);
-  assert.ok(/_delegate\(_orderRoutes, 'put', '\/admin\/edit'\)/.test(trackBSrc), '_delegate 위임 아님(사본 금지)');
+  assert.ok(/_handler\(_orderRoutes, 'orderAdminEdit'\)/.test(trackBSrc), '이름 위임 아님(사본 금지)');
 });
 
 console.log('\n[3] 서버 런타임 — 스텁 pool 로 핸들러 실제 실행');
 
-const editHandler = (() => {
-  const layer = findRoute(orderRouter, 'put', '/admin/edit');
-  return layer.route.stack[layer.route.stack.length - 1].handle;
-})();
+const editHandler = orderRouter.handlers.orderAdminEdit;
 
 function makeRes() {
   const res = { statusCode: 200, body: null };

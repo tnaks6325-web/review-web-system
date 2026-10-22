@@ -131,10 +131,7 @@ function completeDb({ existing = '' } = {}) {
     assert.match(segment, /inspectForUpload/);
     assert.match(segment, /completeCapture/);
   });
-  await t('캡처 폴더 저장 필드는 captureFolderUrl과 folderUrl을 모두 수용한다', async () => {
-    const drive = read('server/src/routes/drive.routes.js');
-    assert.match(drive, /req\.body\.folderUrl \|\| req\.body\.captureFolderUrl/);
-  });
+  // (캡처 폴더 저장 POST /api/drive/save-capture — 옛 대시보드 전용 — 는 2026-10-22 제거 · 결정 270. 부재는 retiredBulkTools.test.js 가 본다.)
   await t('세션 테이블 마이그레이션 누락 시 운영 부팅을 차단한다', async () => {
     const boot = read('server/index.js');
     const requiredTables = (boot.match(/const REQUIRED_TABLES = \[([\s\S]*?)\];/) || [])[1] || '';

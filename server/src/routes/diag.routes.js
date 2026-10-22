@@ -2,6 +2,9 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const { randomUUID } = require('crypto');
 const router = express.Router();
+// Track B(trackB.routes.js)가 경로 문자열 대신 이름으로 부르는 핸들러 모음 — 맨 아래 router.handlers 로 내보낸다(결정 270).
+const { lastRouteHandler } = require('../utils/routeHandlers');
+const _handlers = {};
 const { authMiddleware, adminOrMasterMiddleware, isTrustedLoginToken } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
 const { readSheet, getSpreadsheetMeta } = require('../services/sheets.service');
@@ -10,15 +13,12 @@ const { imageApiLimiter, imageUploadLimiter } = require('../middleware/rateLimit
 const captureLinkBackfill = require('../services/captureLinkBackfill.service');
 const { extractOrderFromImage, verifyAddressMatch } = require('../services/gemini.service');
 const driveService = require('../services/drive.service');
-const { getMetricsSummary, resetMetrics } = require('../middleware/metrics.middleware');
-const { isSentryEnabled } = require('../utils/sentry');
-const { addClient, emitImageExtract, emitImageUpload } = require('../utils/sse');
+const { resetMetrics } = require('../middleware/metrics.middleware');
+const { emitImageExtract, emitImageUpload } = require('../utils/sse');
 const { logger } = require('../utils/logger');
 const { slotLabel: slotLabelOf, effectiveCaptureSlots, isCashReceiptSlot } = require('../utils/captureSlots');
 const { verifyCapture, logCaptureMismatch, resolveCaptureMismatch } = require('../services/captureVerify.service');
 const { logAbnormal } = require('../services/errorLog.service');
-const { buildOneSheet } = require('../services/indexBuilder.service');
-const { allowManualRegister, REGISTER_GUIDE_MSG } = require('../utils/tabRegistration');
 const { reviewTypeForTab } = require('../services/reviewTypeContext.service');
 const purchaseSessions = require('../services/purchaseSubmissionSession.service');
 const reviewerOrderIdentity = require('../services/reviewerOrderIdentity.service');
@@ -74,7 +74,6 @@ function verifiedInternalUploadIdentity(req) {
 })();
 
 // GET /api/diag/debug-tab · /debug-base 은 2026-10-05 제거 — 결정 186 103번(옛 리뷰제출 화면의 열 수 없는 진단 창 전용 · 9/2 이후 호출 0).
-
 
 
 // (GET /api/viewer/viewer-data — 광고주 뷰어 viewer.html 전용, 2026-09-28 제거 · 결정 186 47번)
@@ -134,458 +133,6 @@ router.post('/', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// GET /api/diag/preview-tab — 탭 URL(gid 포함) 미리보기 (등록 전 확인용)
-// query: { url }
-// ★ v10.5: 모든 비시스템 탭을 조회하여 등록/미등록 상태를 각각 반환
-// ═══════════════════════════════════════════════════════════
-router.get('/preview-tab', authMiddleware, async (req, res, next) => {
-  try {
-    const { url } = req.query;
-    if (!url) return res.json({ error: 'url이 필요합니다.' });
-
-    const sheetIdMatch = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]{20,})/);
-    if (!sheetIdMatch) return res.json({ error: '유효한 구글 스프레드시트 URL이 아닙니다.' });
-    const sheetId = sheetIdMatch[1];
-
-    const gidMatch = url.match(/[#&]gid=(\d+)/);
-    const targetGid = gidMatch ? gidMatch[1] : null;
-
-    let meta;
-    try {
-      meta = await getSpreadsheetMeta(sheetId);
-    } catch (metaErr) {
-      const sa = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '';
-      return res.json({
-        error: '시트 접근 권한이 없습니다. 서비스 계정을 편집자로 추가해주세요.',
-        serviceAccount: sa,
-      });
-    }
-
-    const spreadsheetTitle = meta._spreadsheetTitle || sheetId;
-
-    // 시스템 탭 필터
-    const systemTabs = ['세부목록', '검색인덱스', '인덱스마스터', '인덱스데이터', '마감', '상세목록', '탭설정', '설정',
-                        '시트DB', '탭목록', 'tab_configs', '캠페인목록', '시트목록', '매크로', '서식', '요약', '대시보드', '템플릿', '양식'];
-
-    // 모든 비시스템, 비숨김 탭 추출
-    const allTabs = meta
-      .filter(s => !systemTabs.includes(s.properties.title) && !s.properties.hidden)
-      .map(s => ({
-        name: s.properties.title,
-        gid: String(s.properties.sheetId),
-        url: `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=${s.properties.sheetId}`,
-      }));
-
-    if (allTabs.length === 0) {
-      return res.json({ error: '등록 가능한 탭이 없습니다 (시스템 탭 제외).' });
-    }
-
-    // targetGid가 있는 탭이 존재하는지 확인
-    if (targetGid) {
-      const found = allTabs.find(t => t.gid === targetGid);
-      if (!found) {
-        return res.json({ error: `gid=${targetGid}에 해당하는 탭을 찾을 수 없습니다.` });
-      }
-    }
-
-    // DB에서 해당 시트의 모든 등록된 탭 조회 (차수 마감 정보 포함)
-    // ★ tab_gid 포함 — 탭 이름이 변경돼도 gid로 동일 탭을 인식
-    const { rows: registeredTabs } = await pool.query(
-      'SELECT tab_name, tab_gid, is_closed, closed_rounds, archived_rounds FROM tab_configs WHERE sheet_id = $1',
-      [sheetId]
-    );
-    const registeredSet = new Set(registeredTabs.map(r => r.tab_name));
-    const closedInConfigSet = new Set(registeredTabs.filter(r => r.is_closed).map(r => r.tab_name));
-    // ★ gid 기반 매핑 (탭 이름 변경 대응)
-    const tcByName = new Map(registeredTabs.map(r => [r.tab_name, r]));
-    const tcByGid = new Map(registeredTabs.filter(r => r.tab_gid).map(r => [String(r.tab_gid), r]));
-
-    // 차수 마감/아카이브 정보 맵
-    const roundInfoMap = {};
-    for (const r of registeredTabs) {
-      const closed = (r.closed_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
-      const archived = (r.archived_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
-      if (closed.length > 0 || archived.length > 0) {
-        roundInfoMap[r.tab_name] = { closedRounds: closed, archivedRounds: archived };
-      }
-    }
-
-    // ★ 마감/아카이브된 탭 조회 (index_master_archive) — 이름 + gid 양쪽 매칭
-    const { rows: archivedTabs } = await pool.query(
-      'SELECT tab_name, tab_gid FROM index_master_archive WHERE sheet_id = $1',
-      [sheetId]
-    );
-    const archivedSet = new Set(archivedTabs.map(r => r.tab_name));
-    const archivedGidSet = new Set(archivedTabs.filter(r => r.tab_gid).map(r => String(r.tab_gid)));
-
-    // 해당 시트의 인덱스 데이터 조회
-    const { rows: indexRows } = await pool.query(
-      'SELECT tab_name, row_count, submitted_count FROM index_master WHERE sheet_id = $1',
-      [sheetId]
-    );
-    const indexMap = {};
-    for (const ir of indexRows) {
-      indexMap[ir.tab_name] = { rowCount: ir.row_count, submittedCount: ir.submitted_count };
-    }
-
-    // ★ 각 탭의 차수별 현황 조회 (review_index에서 고유 round 값 + 건수)
-    const { rows: roundRows } = await pool.query(
-      `SELECT tab_name, round,
-              COUNT(*) AS total,
-              COUNT(*) FILTER (WHERE is_submitted = TRUE) AS submitted
-       FROM review_index
-       WHERE sheet_id = $1 AND round IS NOT NULL AND round != ''
-       GROUP BY tab_name, round
-       ORDER BY tab_name, round`,
-      [sheetId]
-    );
-    const roundDataMap = {}; // tabName → [{round, total, submitted, status}]
-    for (const rr of roundRows) {
-      if (!roundDataMap[rr.tab_name]) roundDataMap[rr.tab_name] = [];
-      const ri = roundInfoMap[rr.tab_name] || { closedRounds: [], archivedRounds: [] };
-      let roundStatus = 'active';
-      if (ri.archivedRounds.includes(rr.round)) roundStatus = 'archived';
-      else if (ri.closedRounds.includes(rr.round)) roundStatus = 'closed';
-      roundDataMap[rr.tab_name].push({
-        round: rr.round,
-        total: +rr.total,
-        submitted: +rr.submitted,
-        status: roundStatus,
-      });
-    }
-
-    // ★ 아카이브된 차수도 review_index_archive에서 조회 (이미 review_index에 없는 차수)
-    const { rows: archivedRoundRows } = await pool.query(
-      `SELECT tab_name, round,
-              COUNT(*) AS total,
-              COUNT(*) FILTER (WHERE is_submitted = TRUE) AS submitted
-       FROM review_index_archive
-       WHERE sheet_id = $1 AND round IS NOT NULL AND round != ''
-       GROUP BY tab_name, round
-       ORDER BY tab_name, round`,
-      [sheetId]
-    );
-    for (const ar of archivedRoundRows) {
-      if (!roundDataMap[ar.tab_name]) roundDataMap[ar.tab_name] = [];
-      // 이미 있는 차수는 스킵 (review_index에 남아있는 경우)
-      const existing = roundDataMap[ar.tab_name].find(x => x.round === ar.round);
-      if (!existing) {
-        roundDataMap[ar.tab_name].push({
-          round: ar.round,
-          total: +ar.total,
-          submitted: +ar.submitted,
-          status: 'archived',
-        });
-      }
-    }
-
-    // 차수 정렬 (숫자 기준)
-    for (const tabName of Object.keys(roundDataMap)) {
-      roundDataMap[tabName].sort((a, b) => {
-        const numA = parseInt(a.round) || 0;
-        const numB = parseInt(b.round) || 0;
-        return numA - numB;
-      });
-    }
-
-    // 각 탭에 등록 상태 추가 (등록됨 / 마감됨 / 신규)
-    // ★ 이름 우선, 없으면 gid로 매칭 (구글시트에서 탭 이름이 변경된 경우 대응)
-    const tabsWithStatus = allTabs.map(tab => {
-      const tc = tcByName.get(tab.name) || tcByGid.get(String(tab.gid)) || null;
-      const isRegistered = !!tc;
-      const isClosed = !!(tc && tc.is_closed);
-      const isArchived = archivedSet.has(tab.name) || archivedGidSet.has(String(tab.gid));
-      // DB에 저장된 탭명 (이름이 바뀐 경우 인덱스/차수 조회는 DB 이름 기준)
-      const dbName = tc ? tc.tab_name : tab.name;
-      let status = 'new'; // 기본: 신규
-      if (isRegistered && !isClosed) status = 'registered'; // 활성 등록
-      else if (isRegistered && isClosed) status = 'closed';  // 마감 (tab_configs에 남아있음)
-      else if (isArchived) status = 'archived'; // 아카이브됨 (tab_configs에서 삭제됨)
-      return {
-        ...tab,
-        registered: isRegistered || isArchived,
-        status,
-        indexData: indexMap[dbName] || indexMap[tab.name] || null,
-        rounds: roundDataMap[dbName] || roundDataMap[tab.name] || [],
-      };
-    });
-
-    const newTabs = tabsWithStatus.filter(t => t.status === 'new');
-    const existingTabs = tabsWithStatus.filter(t => t.status === 'registered');
-    const closedTabs = tabsWithStatus.filter(t => t.status === 'closed' || t.status === 'archived');
-
-    res.json({
-      ok: true,
-      sheetId,
-      campaignName: spreadsheetTitle,
-      // 기존 단일 탭 호환 필드 (targetGid에 해당하는 탭)
-      tabName: targetGid ? (allTabs.find(t => t.gid === targetGid)?.name || allTabs[0].name) : allTabs[0].name,
-      tabGid: targetGid || allTabs[0].gid,
-      tabUrl: targetGid
-        ? `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=${targetGid}`
-        : allTabs[0].url,
-      // ★ 신규: 전체 탭 목록 + 등록 상태
-      allTabs: tabsWithStatus,
-      newTabs,
-      existingTabs,
-      closedTabs,
-      totalTabCount: allTabs.length,
-      newTabCount: newTabs.length,
-      existingTabCount: existingTabs.length,
-      closedTabCount: closedTabs.length,
-      // 기존 호환
-      alreadyRegistered: newTabs.length === 0,
-      indexData: indexMap[targetGid ? (allTabs.find(t => t.gid === targetGid)?.name) : allTabs[0].name] || null,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/diag/add-tab — 탭 URL(gid 포함)로 즉시 등록 + 인덱스 빌드
-// body: { url } (예: https://docs.google.com/spreadsheets/d/xxx/edit#gid=123)
-// ★ v10.5: 신규 탭만 tab_configs에 추가, 이미 등록된 탭은 스킵
-// ═══════════════════════════════════════════════════════════
-router.post('/add-tab', authMiddleware, async (req, res, next) => {
-  try {
-    // ★ 등록 단일경로 게이트: 신규 등록은 작업오더 접수로만 (TAB_REGISTRATION_MODE=manual로 일시 재개 가능)
-    if (!allowManualRegister()) {
-      return res.json({ ok: false, error: REGISTER_GUIDE_MSG, registrationLocked: true });
-    }
-    const { url } = req.body;
-    if (!url) return res.json({ error: 'url이 필요합니다.' });
-
-    // sheetId 추출
-    const sheetIdMatch = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]{20,})/);
-    if (!sheetIdMatch) return res.json({ error: '유효한 구글 스프레드시트 URL이 아닙니다.' });
-    const sheetId = sheetIdMatch[1];
-
-    // 1. 시트 메타 조회 → 캠페인명 + 전체 탭 확인
-    let meta;
-    try {
-      meta = await getSpreadsheetMeta(sheetId);
-    } catch (metaErr) {
-      const sa = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '';
-      return res.json({
-        error: '시트 접근 권한이 없습니다. 서비스 계정을 편집자로 추가해주세요.',
-        serviceAccount: sa,
-      });
-    }
-
-    const spreadsheetTitle = meta._spreadsheetTitle || sheetId;
-
-    // 시스템 탭 필터
-    const systemTabs = ['세부목록', '검색인덱스', '인덱스마스터', '인덱스데이터', '마감', '상세목록', '탭설정', '설정',
-                        '시트DB', '탭목록', 'tab_configs', '캠페인목록', '시트목록', '매크로', '서식', '요약', '대시보드', '템플릿', '양식'];
-
-    // 모든 비시스템, 비숨김 탭 추출
-    const allTabs = meta
-      .filter(s => !systemTabs.includes(s.properties.title) && !s.properties.hidden)
-      .map(s => ({
-        name: s.properties.title,
-        gid: String(s.properties.sheetId),
-      }));
-
-    if (allTabs.length === 0) {
-      return res.json({ error: '등록 가능한 탭이 없습니다.' });
-    }
-
-    // DB에서 이미 등록된 탭 목록 조회 (★ tab_gid 포함 — 탭 이름 변경 대응)
-    const { rows: registeredTabs } = await pool.query(
-      'SELECT tab_name, tab_gid FROM tab_configs WHERE sheet_id = $1',
-      [sheetId]
-    );
-    const registeredSet = new Set(registeredTabs.map(r => r.tab_name));
-    const registeredGidSet = new Set(registeredTabs.filter(r => r.tab_gid).map(r => String(r.tab_gid)));
-
-    // ★ 마감/아카이브된 탭도 조회 (재등록 방지)
-    const { rows: archivedTabs } = await pool.query(
-      'SELECT tab_name, tab_gid FROM index_master_archive WHERE sheet_id = $1',
-      [sheetId]
-    );
-    const archivedSet = new Set(archivedTabs.map(r => r.tab_name));
-    const archivedGidSet = new Set(archivedTabs.filter(r => r.tab_gid).map(r => String(r.tab_gid)));
-
-    // 신규 탭만 필터링 (등록됨 + 마감됨 모두 제외)
-    // ★ 탭 이름(tab_name) + GID(tab_gid) 양쪽으로 매칭 — 구글시트에서 탭 이름이 변경돼도
-    //   gid는 유지되므로, 마감/아카이브된 탭이 "신규"로 오인되어 재등록되는 것을 방지
-    const newTabs = allTabs.filter(t =>
-      !registeredSet.has(t.name) && !registeredGidSet.has(String(t.gid)) &&
-      !archivedSet.has(t.name)   && !archivedGidSet.has(String(t.gid))
-    );
-
-    if (newTabs.length === 0) {
-      return res.json({
-        ok: true,
-        sheetId,
-        campaignName: spreadsheetTitle,
-        message: '모든 탭이 이미 등록 또는 마감되어 있습니다. 신규 탭이 없습니다.',
-        newTabCount: 0,
-        totalTabCount: allTabs.length,
-        registeredTabCount: registeredSet.size,
-        archivedTabCount: archivedSet.size,
-      });
-    }
-
-    // 2. campaigns 테이블에 시트 등록 (없으면 추가)
-    await pool.query(
-      `INSERT INTO campaigns (sheet_id, campaign_name, sheet_url)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (sheet_id, campaign_name) DO UPDATE SET
-         sheet_url = EXCLUDED.sheet_url, updated_at = NOW()`,
-      [sheetId, spreadsheetTitle, `https://docs.google.com/spreadsheets/d/${sheetId}/edit`]
-    );
-
-    // 3. 신규 탭만 tab_configs에 UPSERT
-    const addedTabs = [];
-    for (const tab of newTabs) {
-      const tabSheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=${tab.gid}`;
-      await pool.query(
-        `INSERT INTO tab_configs (sheet_id, tab_name, campaign_name, sheet_url, tab_gid)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
-           campaign_name = COALESCE(NULLIF(tab_configs.campaign_name,''), EXCLUDED.campaign_name),
-           sheet_url = EXCLUDED.sheet_url,
-           tab_gid = COALESCE(NULLIF(tab_configs.tab_gid,''), EXCLUDED.tab_gid),
-           updated_at = NOW()`,
-        [sheetId, tab.name, spreadsheetTitle, tabSheetUrl, tab.gid]
-      );
-      addedTabs.push(tab.name);
-    }
-
-    // 4. 즉시 인덱스 빌드 (해당 시트 전체)
-    let buildResult = null;
-    try {
-      buildResult = await buildOneSheet(sheetId);
-    } catch (buildErr) {
-      logger.warn(`[add-tab] 인덱스 빌드 실패 (등록은 완료): ${buildErr.message}`);
-      buildResult = { ok: false, error: buildErr.message };
-    }
-
-    // 5. 빌드 후 신규 탭들의 인덱스 데이터 확인
-    const { rows: indexCheck } = await pool.query(
-      'SELECT tab_name, row_count, submitted_count FROM index_master WHERE sheet_id = $1 AND tab_name = ANY($2)',
-      [sheetId, addedTabs]
-    );
-    const indexDataMap = {};
-    for (const row of indexCheck) {
-      indexDataMap[row.tab_name] = { rowCount: row.row_count, submittedCount: row.submitted_count };
-    }
-
-    logger.info(`[add-tab] 신규 탭 등록 완료: ${spreadsheetTitle} / [${addedTabs.join(', ')}] (${addedTabs.length}개 신규, ${registeredSet.size}개 기존)`);
-
-    res.json({
-      ok: true,
-      sheetId,
-      campaignName: spreadsheetTitle,
-      // 기존 호환 (첫 번째 신규 탭 정보)
-      tabName: addedTabs[0],
-      tabGid: newTabs[0].gid,
-      tabUrl: `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=${newTabs[0].gid}`,
-      // ★ 신규: 추가된 탭 목록 정보
-      addedTabs,
-      addedTabCount: addedTabs.length,
-      totalTabCount: allTabs.length,
-      existingTabCount: registeredSet.size,
-      indexDataMap,
-      buildResult: buildResult ? { ok: buildResult.ok, rebuilt: buildResult.rebuilt, elapsed: buildResult.elapsed } : null,
-      // 기존 호환
-      indexData: indexDataMap[addedTabs[0]] || null,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// DELETE /api/diag/delete-campaign — 캠페인 삭제 (잘못 등록된 캠페인 제거)
-// body: { sheetId, campaignName?, confirm?: boolean }
-// confirm=false(기본)이면 삭제 영향 범위만 조회하여 반환 (dry-run)
-// confirm=true이면 실제 삭제 수행
-// ═══════════════════════════════════════════════════════════
-router.delete('/delete-campaign', authMiddleware, async (req, res, next) => {
-  const client = await pool.connect();
-  try {
-    const { sheetId, campaignName, confirm } = req.body;
-    if (!sheetId) {
-      return res.status(400).json({ error: 'sheetId가 필요합니다.' });
-    }
-
-    // 삭제 영향 범위 조회 (dry-run)
-    const { rows: campRows } = await client.query(
-      'SELECT campaign_name FROM campaigns WHERE sheet_id = $1', [sheetId]
-    );
-    const { rows: tabRows } = await client.query(
-      'SELECT tab_name FROM tab_configs WHERE sheet_id = $1', [sheetId]
-    );
-    const { rows: masterRows } = await client.query(
-      'SELECT tab_name, row_count, submitted_count FROM index_master WHERE sheet_id = $1', [sheetId]
-    );
-    const { rows: reviewCountRows } = await client.query(
-      'SELECT count(*) as cnt FROM review_index WHERE sheet_id = $1', [sheetId]
-    );
-
-    const impact = {
-      campaignName: campRows[0]?.campaign_name || '(알 수 없음)',
-      tabCount: tabRows.length,
-      tabs: tabRows.map(r => r.tab_name).slice(0, 20),
-      indexMasterCount: masterRows.length,
-      totalRows: masterRows.reduce((s, r) => s + (r.row_count || 0), 0),
-      totalSubmitted: masterRows.reduce((s, r) => s + (r.submitted_count || 0), 0),
-      reviewIndexCount: parseInt(reviewCountRows[0]?.cnt || '0', 10),
-    };
-
-    // confirm이 아니면 dry-run 결과만 반환
-    if (!confirm) {
-      return res.json({
-        ok: true,
-        dryRun: true,
-        impact,
-        message: `이 작업은 "${impact.campaignName}" 캠페인의 모든 데이터를 삭제합니다. (탭 ${impact.tabCount}개, 리뷰 인덱스 ${impact.reviewIndexCount}건) confirm:true로 재요청하면 실제 삭제됩니다.`,
-      });
-    }
-
-    // 실제 삭제 수행
-    await client.query('BEGIN');
-
-    // 1. review_index 삭제
-    const { rowCount: reviewDeleted } = await client.query(
-      'DELETE FROM review_index WHERE sheet_id = $1', [sheetId]
-    );
-
-    // 2. index_master 삭제
-    const { rowCount: masterDeleted } = await client.query(
-      'DELETE FROM index_master WHERE sheet_id = $1', [sheetId]
-    );
-
-    // 3. tab_configs 삭제
-    const { rowCount: tabDeleted } = await client.query(
-      'DELETE FROM tab_configs WHERE sheet_id = $1', [sheetId]
-    );
-
-    // 4. campaigns 삭제
-    const { rowCount: campDeleted } = await client.query(
-      'DELETE FROM campaigns WHERE sheet_id = $1', [sheetId]
-    );
-
-    await client.query('COMMIT');
-
-    logger.info(`[delete-campaign] 캠페인 삭제 완료: sheetId=${sheetId.substring(0,15)}... campaign=${campDeleted}, tabs=${tabDeleted}, master=${masterDeleted}, reviews=${reviewDeleted}`);
-    res.json({
-      ok: true,
-      deleted: { campaigns: campDeleted, tabConfigs: tabDeleted, indexMaster: masterDeleted, reviewIndex: reviewDeleted },
-    });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    logger.error(`[delete-campaign] 오류: ${err.message}`);
-    next(err);
-  } finally {
-    client.release();
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
 // GET /api/diag/campaign-list — 캠페인 목록 조회 (GAS: campaignList)
 // ═══════════════════════════════════════════════════════════
 router.get('/campaign-list', authMiddleware, async (req, res, next) => {
@@ -602,8 +149,6 @@ router.get('/campaign-list', authMiddleware, async (req, res, next) => {
 });
 
 // 시트 시절 임시 진단 10종(tab-gid-check·dashboard-check·dashboard-roundlist·round-check·drive-diag·payment-check·sse-status·debug-parse·archive-detect-debug·slot-locks)은 2026-10-04 제거 — 결정 186 100번(화면 호출 0 · 9/2 이후 0).
-
-
 
 
 // (GET /api/diag/inaed-list(·viewer·image·blacklist) — 리뷰어 이름·전화 명단) 은 2026-10-04 제거 — 화면 호출 0 · 9/2 이후 호출 0 · 개인정보가 새는 입구(결정 186 92번).
@@ -1513,6 +1058,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     res.json({ ok: false, error: err.message || '리뷰 캡처 업로드 중 오류가 발생했습니다.' });
   }
 });
+_handlers.reviewUpload = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // ═══════════════════════════════════════════════════════════
 // POST /api/image/verify-address — AI 주소 동일인 비교 (Gemini)
@@ -1931,73 +1477,11 @@ router.post('/order-relink', authMiddleware, adminOrMasterMiddleware, async (req
 });
 
 // ═══════════════════════════════════════════════════════════
-// 주문 원장(order ledger) PR-B — 인라인 편집/취소/수동추가/조회 (admin/master 전용)
-//   쓰기 3종은 ORDER_LEDGER_WRITE_ENABLED='true'에서만 동작(롤링배포·점진 활성 게이트).
-//   편집/취소는 per-order 락(order_ledger:<id>)로 DB UPDATE 직렬화 → 큐(order_update/order_cancel)로 in-place 시트반영.
+// 주문 원장(order ledger) 편집 허용 필드 — 아래 역동기화 적용(reverse-sync-apply)의 화이트리스트.
+//   (옛 대시보드 주문 원장 창의 조회·편집·취소·수동추가 GET order-ledger · POST order-edit·order-cancel·order-manual-add 는
+//    2026-10-22 제거 — 결정 270. 작업보드 주문 수정은 Track B 경로가 맡는다.)
 // ═══════════════════════════════════════════════════════════
 const _ORDER_LEDGER_EDIT_FIELDS = ['orderer','recipient','user_id','phone','address','bank','account','depositor','price','order_num','memo','date_str','selected_opt_key'];
-
-// POST /api/diag/order-edit — 주문 필드 편집 → DB 즉시 + 큐(order_update) in-place 시트반영
-router.post('/order-edit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    if (process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return res.status(503).json({ ok: false, error: 'order ledger 쓰기 비활성(ORDER_LEDGER_WRITE_ENABLED)' });
-    const { orderSubmissionId } = req.body || {};
-    const edits = Array.isArray(req.body?.edits) ? req.body.edits : [];
-    if (!orderSubmissionId || !edits.length) return res.status(400).json({ ok: false, error: 'orderSubmissionId, edits 필수' });
-    const clean = [];
-    for (const e of edits) {
-      if (!e || !_ORDER_LEDGER_EDIT_FIELDS.includes(e.field)) return res.status(400).json({ ok: false, error: `허용되지 않은 편집 필드: ${e && e.field}` });
-      clean.push({ field: e.field, oldValue: e.oldValue == null ? '' : String(e.oldValue), newValue: e.newValue == null ? '' : String(e.newValue) });
-    }
-    const editSeq = Date.now(); // per-order 락 직렬화 하 단조(시트 stale 편집 무시 기준)
-    const { withJobLock } = require('../utils/jobLock');
-    const { enqueue } = require('../services/syncQueue.service');
-    const out = await withJobLock('order_ledger:' + orderSubmissionId, async () => {
-      const sets = clean.map((e, idx) => `${e.field} = $${idx + 2}`); // field는 화이트리스트라 인젝션 불가
-      const vals = [orderSubmissionId, ...clean.map(e => e.newValue)];
-      // 심판[치명1]: 편집 확정 즉시 last_edit_seq 단조증가(큐워커 지연 무관) → 무인 역동기가 이 편집을 stale로 인식·보존.
-      const { rows } = await pool.query(
-        `UPDATE order_submissions SET ${sets.join(', ')}, updated_at = NOW(),
-                last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $${clean.length + 2})
-          WHERE id = $1 AND deleted_at IS NULL
-        RETURNING id, mirror_status, sheet_id, tab_name, tab_gid, gid, sheet_row`,
-        [...vals, editSeq]
-      );
-      if (!rows.length) return { notFound: true };
-      /* ★★ 무시트 탭은 큐 대신 작업표에 바로 재기록한다 (2026-08-21 실측 결함 수정).
-         종전엔 order_update 를 그대로 큐에 넣었는데 큐 실행부의 무시트 백스톱이 그 항목을
-         "작업표 기록 경로가 담당"이라며 done 으로 삼켰고, **update 는 그 경로가 없어** 관리자
-         주문 편집이 원장(DB)에만 남고 작업표 row_json·장부(검색·리뷰어 화면)에는 영영 반영되지
-         않았다(조용한 소실). 실행부는 manualOrder ④ 와 같은 `writeOrderToWorktable` 한 벌 —
-         기존 연결 행(order_submission_id)을 잠가 최신 DB 값으로 병합하고 장부까지 재생성한다.
-         ★ 판정 실패·기록 실패는 종전 경로(enqueue) 폴백 — 백스톱이 삼키는 건 같지만 동작이
-           조용히 나빠지지는 않고, 응답 `sheetlessApplied` 로 사실을 말한다(조용한 누락 금지). */
-      const os = rows[0];
-      let sheetlessApplied = null;
-      let isSl = false;
-      try { isSl = await require('../utils/sheetlessScope').isSheetless(pool, os.sheet_id, os.tab_name); } catch (_) { isSl = false; }
-      if (isSl && os.sheet_row) {
-        try {
-          const { rows: full } = await pool.query(`SELECT * FROM order_submissions WHERE id = $1`, [orderSubmissionId]);
-          const { _osRowToOrderData } = require('../services/orderLedger.service');
-          sheetlessApplied = await require('../services/sheetlessOrder.service').writeOrderToWorktable({
-            sheetId: os.sheet_id, tabName: os.tab_name, tabGid: os.tab_gid || os.gid || '',
-            sheetRow: os.sheet_row, orderData: _osRowToOrderData(full[0]), orderSubmissionId,
-          });
-        } catch (e) { sheetlessApplied = { ok: false, reason: 'exception', message: e.message }; }
-      }
-      if (!sheetlessApplied || !sheetlessApplied.ok) {
-        await enqueue('order_update', { orderSubmissionId, editSeq, edits: clean });
-      }
-      return { mirrorStatus: os.mirror_status, sheetlessApplied };
-    });
-    if (out && out.skipped) return res.status(409).json({ ok: false, error: '다른 편집/취소 진행 중 — 재시도하세요' });
-    if (out && out.notFound) return res.status(404).json({ ok: false, error: '주문 없음 또는 이미 취소됨' });
-    require('../jobs/queuePump').kickQueuePump();
-    require('../utils/sse').emitOrderLedger({ action: 'edit', orderSubmissionId, mirror_status: out.mirrorStatus });
-    res.json({ ok: true, queued: !(out.sheetlessApplied && out.sheetlessApplied.ok), editSeq, sheetlessApplied: out.sheetlessApplied || null });
-  } catch (err) { next(err); }
-});
 
 // ═══════════════════════════════════════════════════════════
 // 시트→DB 역동기화(옵션·수동·기본 OFF) — 감지/조회/적용. (admin/master 전용)
@@ -2061,7 +1545,7 @@ router.post('/reverse-sync-apply', authMiddleware, adminOrMasterMiddleware, asyn
     const { rows } = await pool.query(`SELECT * FROM reverse_sync_proposals WHERE id = $1 AND status = 'open'`, [proposalId]);
     if (!rows.length) return res.status(404).json({ ok: false, error: 'not_found_or_resolved' });
     const p = rows[0];
-    if (p.proposal_type === 'cancel_suspect') return res.status(409).json({ ok: false, error: 'cancel은 order-cancel 엔드포인트로 명시 처리하세요' }); // R4
+    if (p.proposal_type === 'cancel_suspect') return res.status(409).json({ ok: false, error: '취소 의심 제안은 자동 적용하지 않습니다 — 작업보드에서 해당 주문을 확인해 처리하세요' }); // R4 (옛 order-cancel 입구는 결정 270 으로 제거)
     // G1: field 화이트리스트 재검증(인젝션/오염 방어).
     if (!_ORDER_LEDGER_EDIT_FIELDS.includes(p.field)) return res.status(400).json({ ok: false, error: `허용되지 않은 필드: ${p.field}` });
 
@@ -2196,84 +1680,6 @@ router.get('/reverse-sync-auto-status', authMiddleware, adminOrMasterMiddleware,
   } catch (err) { next(err); }
 });
 
-
-router.post('/order-cancel', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    if (process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return res.status(503).json({ ok: false, error: 'order ledger 쓰기 비활성' });
-    const { orderSubmissionId } = req.body || {};
-    if (!orderSubmissionId) return res.status(400).json({ ok: false, error: 'orderSubmissionId 필수' });
-    const { cancelOrderSubmission } = require('../services/orderCancellation.service');
-    const out = await cancelOrderSubmission({
-      orderSubmissionId,
-      canceledBy: String((req.admin && (req.admin.name || req.admin.role)) || 'admin').slice(0, 100),
-    });
-    res.status(out.ok ? 200 : (out.code === 'concurrent_cancel' ? 409 : 400)).json(out);
-  } catch (err) { next(err); }
-});
-
-// POST /api/diag/order-manual-add — 수동 주문추가(원자 INSERT, source=manual, osid dedup, 하단 노란행 append)
-router.post('/order-manual-add', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    if (process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return res.status(503).json({ ok: false, error: 'order ledger 쓰기 비활성' });
-    const { sheetId, tabName, gid, phone } = req.body || {};
-    const od = (req.body && req.body.orderData) || {};
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    if (!gid) return res.status(400).json({ ok: false, error: 'gid 필수(동명탭 오배정 방지)' });
-    const { loadRawTabContext, buildCandidateRows, claimRow, markOrderQueued } = require('../services/orderLedger.service');
-    const { enqueue } = require('../services/syncQueue.service');
-    const { emitOrderLedger } = require('../utils/sse');
-    const odPhone = phone || od.phone || '';
-    const { rows: ins } = await pool.query(
-      `INSERT INTO order_submissions
-         (sheet_id, tab_name, gid, tab_gid, orderer, recipient, user_id, phone, address, bank, account,
-          depositor, price, order_num, date_str, selected_opt_key, memo, source, mirror_status, submitted_at)
-       VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'manual','pending',NOW())
-       RETURNING id`,
-      [sheetId, tabName, String(gid), od.orderer||'', od.recipient||'', od.userId||'', odPhone, od.address||'',
-       od.bank||'', od.account||'', od.depositor||'', od.price||'', od.orderNum||'', od.dateStr||'', od.selectedOptKey||'', od.memo||'']
-    );
-    const orderId = ins[0].id;
-    const dedupKey = 'osid:' + orderId;
-    await pool.query(`UPDATE order_submissions SET dedup_key = $2 WHERE id = $1`, [orderId, dedupKey]);
-    const odForMap = { orderer: od.orderer||'', recipient: od.recipient||'', userId: od.userId||'', phone: odPhone,
-      address: od.address||'', bank: od.bank||'', account: od.account||'', depositor: od.depositor||'',
-      price: od.price||'', orderNum: od.orderNum||'', dateStr: od.dateStr||'', selectedOptKey: od.selectedOptKey||'', memo: od.memo||'' };
-
-    const tabContext = await loadRawTabContext(sheetId, String(gid), tabName);
-    if (!tabContext || !tabContext.headers || !tabContext.headers.length) {
-      await pool.query(`UPDATE order_submissions SET mirror_status='pending_no_row' WHERE id=$1`, [orderId]);
-      emitOrderLedger({ action: 'created', orderSubmissionId: orderId, mirror_status: 'pending_no_row' });
-      return res.json({ ok: true, orderSubmissionId: orderId, mirrorStatus: 'pending_no_row', note: 'RAW 메타 없음 — reconcile가 흡수' });
-    }
-    if (tabContext.tabName && tabContext.tabName !== tabName) { // R9: stale gid 오탭 방지
-      await pool.query(`UPDATE order_submissions SET mirror_status='pending_no_row', sheet_error='gid/tabName 불일치' WHERE id=$1`, [orderId]);
-      return res.status(400).json({ ok: false, error: `gid가 다른 탭(${tabContext.tabName})을 가리킵니다`, orderSubmissionId: orderId });
-    }
-    const candidateRows = buildCandidateRows({ headers: tabContext.headers, dataRows: tabContext.dataRows, headerRowIndex: tabContext.headerRowIndex, orderData: odForMap, appendOnly: true });
-    const client = await pool.connect();
-    let claim = { row: null };
-    try {
-      await client.query('BEGIN');
-      claim = await claimRow({ client, sheetId, tabGid: tabContext.tabGid || String(gid), tabName, dedupKey, candidateRows, orderId, meta: { name: od.orderer || od.recipient || '', phone: odPhone, source: 'manual' } });
-      await client.query(
-        `UPDATE order_submissions SET sheet_row = $2::int, tab_gid = COALESCE(NULLIF($3,''), tab_gid),
-            mirror_status = CASE WHEN $2::int IS NULL THEN 'pending_no_row' ELSE 'pending' END WHERE id = $1`,
-        [orderId, claim.row || null, tabContext.tabGid || String(gid)]
-      );
-      await client.query('COMMIT');
-    } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} client.release(); throw e; }
-    client.release();
-    if (claim.row) {
-      await enqueue('order_append', { sheetId, tabName, gid: tabContext.tabGid || String(gid), orderData: odForMap, orderSubmissionId: orderId, sheetRow: claim.row, dedupKey, loginPhone8: '', loginName: '', recovered: true });
-      await markOrderQueued(orderId);
-      require('../jobs/queuePump').kickQueuePump();
-      emitOrderLedger({ action: 'created', orderSubmissionId: orderId, mirror_status: 'queued' });
-      return res.json({ ok: true, orderSubmissionId: orderId, sheetRow: claim.row, mirrorStatus: 'queued' });
-    }
-    emitOrderLedger({ action: 'created', orderSubmissionId: orderId, mirror_status: 'pending_no_row' });
-    res.json({ ok: true, orderSubmissionId: orderId, mirrorStatus: 'pending_no_row', note: '행 배정 실패 — reconcile가 흡수' });
-  } catch (err) { next(err); }
-});
 
 // POST /api/diag/order-flush-one — 특정 주문의 pending 큐항목(append/update/cancel)을 즉시 반영(FIFO 우회).
 //   글로벌 큐 백로그 시 편집/취소가 밀리므로 "이 주문만 지금 반영". 동기 실행(항목 소수, throttle 가드).
@@ -2432,42 +1838,6 @@ router.post('/order-batch-drain', authMiddleware, adminOrMasterMiddleware, async
   } catch (err) { next(err); }
 });
 
-// GET /api/diag/order-ledger — 원장 그리드(keyset 커서, PII는 admin/master만). 읽기 전용(flag 무관).
-router.get('/order-ledger', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const lim = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
-    const where = []; const params = [];
-    if (!(req.query.includeCanceled === 'true' || req.query.includeCanceled === '1')) where.push('deleted_at IS NULL');
-    if (req.query.sheetId) { params.push(req.query.sheetId); where.push(`sheet_id = $${params.length}`); }
-    if (req.query.tabName) { params.push(req.query.tabName); where.push(`tab_name = $${params.length}`); }
-    if (req.query.mirrorStatus) { params.push(req.query.mirrorStatus); where.push(`mirror_status = $${params.length}`); }
-    if (req.query.q) { params.push('%' + String(req.query.q) + '%'); const i = params.length; where.push(`(orderer ILIKE $${i} OR recipient ILIKE $${i} OR phone ILIKE $${i} OR order_num ILIKE $${i})`); }
-    if (req.query.cursor) { // keyset: "<submitted_at_iso>|<id>"
-      const [cAt, cId] = String(req.query.cursor).split('|');
-      params.push(cAt); const a = params.length; params.push(cId); const b = params.length;
-      where.push(`(submitted_at, id) < ($${a}::timestamptz, $${b}::uuid)`);
-    }
-    const sql = `SELECT id, sheet_id AS "sheetId", tab_name AS "tabName", orderer, recipient, user_id AS "userId",
-            phone, address, bank, account, depositor, price, order_num AS "orderNum", date_str AS "dateStr",
-            selected_opt_key AS "selectedOptKey", memo, mirror_status AS "mirrorStatus", sheet_row AS "sheetRow",
-            sheet_error AS "sheetError", source, deleted_at AS "deletedAt", last_edit_seq AS "lastEditSeq",
-            submitted_at AS "submittedAt",
-            (SELECT jsonb_build_object('id',sq.id,'status',sq.status,'attempts',sq.attempts,'maxRetry',sq.max_retry)
-               FROM sync_queue sq
-              WHERE sq.payload->>'orderSubmissionId'=order_submissions.id::text
-                AND sq.type IN ('workboard_apply','workboard_legacy_apply')
-              ORDER BY sq.created_at DESC LIMIT 1) AS queue
-       FROM order_submissions ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-       ORDER BY submitted_at DESC, id DESC LIMIT ${lim + 1}`;
-    const { rows } = await pool.query(sql, params);
-    const hasMore = rows.length > lim;
-    const page = hasMore ? rows.slice(0, lim) : rows;
-    const last = page[page.length - 1];
-    const nextCursor = hasMore && last ? `${new Date(last.submittedAt).toISOString()}|${last.id}` : null;
-    res.json({ ok: true, rows: page, nextCursor, count: page.length });
-  } catch (err) { next(err); }
-});
-
 // ═══════════════════════════════════════════════════════════
 // GET /api/diag/row-claims — 행 점유 원장(sheet_row_claims) 조회 (읽기전용 진단)
 //   비연속 행배정(행 건너뜀) 원인 추적용: 어떤 행이 어떤 주문/출처(source)로 언제 점유됐는지 +
@@ -2515,7 +1885,8 @@ router.get('/row-claims', authMiddleware, adminOrMasterMiddleware, async (req, r
 //
 //   body: { dryRun? = true } — admin/master 전용.
 // ═══════════════════════════════════════════════════════════
-router.post('/review-type-cleanup', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+// (POST /api/diag/review-type-cleanup 공개 경로는 삭제 — Track B 프록시가 이 핸들러를 이름으로 부른다 · 결정 270)
+_handlers.reviewTypeCleanup = async (req, res, next) => {
   try {
     const dryRun = req.body?.dryRun !== false;   // 기본 미리보기
 
@@ -2552,7 +1923,7 @@ router.post('/review-type-cleanup', authMiddleware, adminOrMasterMiddleware, asy
     logger.info(`[review-type-cleanup] 배송유형 이관 ${moved}건 · 믹스→혼합 ${renamed}건`);
     res.json({ ok: true, dryRun: false, total, preview, moved, renamed });
   } catch (err) { next(err); }
-});
+};
 
 // ═══════════════════════════════════════════════════════════
 // POST /api/diag/manager-cleanup — 담당자 칸에 남은 **실명**을 닉네임으로 정리 (★ 065 후속)
@@ -2581,7 +1952,8 @@ const MANAGER_TABLES = [
   { table: 'tab_configs',       label: '작업 탭 담당자' },   // 홈 작업목록 담당자 칩·필터의 재료
   { table: 'recruit_campaigns', label: '모집공고 담당자' },  // 공고 카드 🥟🥭·카카오 ID 매핑의 재료
 ];
-router.post('/manager-cleanup', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+// (POST /api/diag/manager-cleanup 공개 경로는 삭제 — Track B 프록시가 이 핸들러를 이름으로 부른다 · 결정 270)
+_handlers.managerCleanup = async (req, res, next) => {
   try {
     const { mapWorkManager } = require('../utils/workManager');
     const dryRun = req.body?.dryRun !== false;   // 기본 미리보기
@@ -2620,7 +1992,7 @@ router.post('/manager-cleanup', authMiddleware, adminOrMasterMiddleware, async (
     logger.info(`[manager-cleanup] 담당자 표기 정리 ${updated}건 (${preview.map(p => `${p.table}:${p.from}→${p.to}`).join(' · ')})`);
     res.json({ ok: true, dryRun: false, total, preview, updated });
   } catch (err) { next(err); }
-});
+};
 
 // ═══════════════════════════════════════════════════════════
 // POST /api/diag/delivery-type-cleanup — 배송유형 칸의 **옛 어휘**를 표준 6종으로 정리
@@ -2651,7 +2023,8 @@ const DELIVERY_TYPE_TABLES = [
   { table: 'recruit_campaigns', label: '모집공고 배송유형' },
   { table: 'work_orders',       label: '작업오더 배송유형' },
 ];
-router.post('/delivery-type-cleanup', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+// (POST /api/diag/delivery-type-cleanup 공개 경로는 삭제 — Track B 프록시가 이 핸들러를 이름으로 부른다 · 결정 270)
+_handlers.deliveryTypeCleanup = async (req, res, next) => {
   try {
     const { canonicalDeliveryValue } = require('../utils/deliveryType');
     const dryRun = req.body?.dryRun !== false;   // 기본 미리보기
@@ -2688,7 +2061,7 @@ router.post('/delivery-type-cleanup', authMiddleware, adminOrMasterMiddleware, a
     logger.info(`[delivery-type-cleanup] 배송유형 표기 정리 ${updated}건 (${preview.map(x => `${x.table}:${x.from}→${x.to}`).join(' · ')})`);
     res.json({ ok: true, dryRun: false, total, preview, updated });
   } catch (err) { next(err); }
-});
+};
 
 // ═══════════════════════════════════════════════════════════
 // POST /api/diag/queue-drain — 백로그 가속 드레인(선택적·온디맨드, 백그라운드)
@@ -3166,53 +2539,6 @@ router.get('/build-history', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// GET /api/diag/app-url — 앱 URL 조회 (GAS: getAppUrl)
-// ═══════════════════════════════════════════════════════════
-router.get('/app-url', authMiddleware, async (req, res, next) => {
-  try {
-    const { rows } = await pool.query(
-      "SELECT value FROM app_settings WHERE key = 'APP_URL'"
-    );
-    const url = rows[0]?.value || '';
-    res.json({ ok: true, url });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/diag/app-url — 앱 URL 저장 (GAS: saveAppUrl)
-// ═══════════════════════════════════════════════════════════
-router.post('/app-url', authMiddleware, async (req, res, next) => {
-  try {
-    const { url } = req.body;
-    if (!url) return res.json({ ok: false, error: 'URL이 필요합니다.' });
-
-    await pool.query(
-      `INSERT INTO app_settings (key, value, updated_at)
-       VALUES ('APP_URL', $1, NOW())
-       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
-      [url]
-    );
-    res.json({ ok: true, url });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// GET /api/diag/metrics — API 메트릭 조회 (관리자 전용)
-// ═══════════════════════════════════════════════════════════
-router.get('/metrics', authMiddleware, async (req, res) => {
-  const summary = getMetricsSummary();
-  res.json({
-    ok: true,
-    sentry: isSentryEnabled() ? 'active' : 'inactive',
-    ...summary,
-  });
-});
-
-// ═══════════════════════════════════════════════════════════
 // POST /api/diag/metrics/reset — 메트릭 초기화 (관리자 전용)
 // ═══════════════════════════════════════════════════════════
 router.post('/metrics/reset', authMiddleware, async (req, res) => {
@@ -3287,351 +2613,9 @@ router.post('/client-error', (req, res, next) => {
 
 
 // ═══════════════════════════════════════════════════════════
-// GET /api/diag/events — SSE 실시간 알림 스트림 (관리자 전용)
-// Phase 8: 새 제출/분석완료 알림을 대시보드에 실시간 전달
-// ═══════════════════════════════════════════════════════════
-router.get('/events', authMiddleware, (req, res) => {
-  addClient(req, res);
-});
-
-
-// ═══════════════════════════════════════════════════════════
 // Phase 9: 통계/리포트 대시보드 API
 // ═══════════════════════════════════════════════════════════
 
-// GET /api/diag/stats/campaigns — 캠페인별 제출률 통계
-router.get('/stats/campaigns', authMiddleware, async (req, res, next) => {
-  try {
-    // 캠페인(탭)별 전체·제출·미제출 집계
-    const { rows } = await pool.query(`
-      SELECT
-        ri.campaign_name AS "campaignName",
-        ri.sheet_id      AS "sheetId",
-        ri.tab_name       AS "tabName",
-        tc.display_name   AS "displayName",
-        tc.manager,
-        tc.review_type    AS "reviewType",
-        tc.is_closed      AS "isClosed",
-        COUNT(*)                              AS "totalCount",
-        COUNT(*) FILTER (WHERE ri.is_submitted)  AS "submittedCount",
-        COUNT(*) FILTER (WHERE NOT ri.is_submitted) AS "pendingCount",
-        CASE WHEN COUNT(*) > 0
-          THEN ROUND(100.0 * COUNT(*) FILTER (WHERE ri.is_submitted) / COUNT(*), 1)
-          ELSE 0 END                          AS "submitRate"
-      FROM review_index ri
-      LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
-      GROUP BY ri.campaign_name, ri.sheet_id, ri.tab_name,
-               tc.display_name, tc.manager, tc.review_type, tc.is_closed
-      ORDER BY "submitRate" DESC, "totalCount" DESC
-    `);
-
-    // 전체 요약
-    const totals = rows.reduce((acc, r) => {
-      acc.total += parseInt(r.totalCount);
-      acc.submitted += parseInt(r.submittedCount);
-      acc.pending += parseInt(r.pendingCount);
-      return acc;
-    }, { total: 0, submitted: 0, pending: 0 });
-    totals.submitRate = totals.total > 0
-      ? Math.round(1000 * totals.submitted / totals.total) / 10
-      : 0;
-
-    res.json({ ok: true, campaigns: rows, totals, count: rows.length });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// GET /api/diag/stats/reviewers — 리뷰어 활동량 통계
-router.get('/stats/reviewers', authMiddleware, async (req, res, next) => {
-  try {
-    const limit = parseInt(req.query.limit) || 30;
-
-    // 리뷰어별 총 건수, 제출 건수, 미제출 건수
-    const { rows } = await pool.query(`
-      SELECT
-        ri.reviewer_name          AS "name",
-        COUNT(*)                  AS "totalCount",
-        COUNT(*) FILTER (WHERE ri.is_submitted)    AS "submittedCount",
-        COUNT(*) FILTER (WHERE NOT ri.is_submitted) AS "pendingCount",
-        COUNT(DISTINCT ri.campaign_name)            AS "campaignCount",
-        MAX(ri.built_at)                            AS "lastActivity"
-      FROM review_index ri
-      GROUP BY ri.reviewer_name
-      ORDER BY "totalCount" DESC
-      LIMIT $1
-    `, [limit]);
-
-    // 구매양식 제출 건수 병합
-    const { rows: orderRows } = await pool.query(`
-      SELECT orderer AS "name", COUNT(*) AS "orderCount"
-      FROM order_submissions
-      GROUP BY orderer
-    `);
-    const orderMap = {};
-    orderRows.forEach(r => { orderMap[r.name] = parseInt(r.orderCount); });
-
-    const reviewers = rows.map(r => ({
-      ...r,
-      totalCount: parseInt(r.totalCount),
-      submittedCount: parseInt(r.submittedCount),
-      pendingCount: parseInt(r.pendingCount),
-      campaignCount: parseInt(r.campaignCount),
-      orderCount: orderMap[r.name] || 0,
-    }));
-
-    res.json({ ok: true, reviewers, count: reviewers.length });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// GET /api/diag/stats/payments — 입금 현황 통계
-router.get('/stats/payments', authMiddleware, async (req, res, next) => {
-  try {
-    // 탭별 입금 집계
-    const { rows: byTab } = await pool.query(`
-      SELECT
-        pr.tab_name       AS "tabName",
-        pr.sheet_id       AS "sheetId",
-        tc.campaign_name  AS "campaignName",
-        tc.display_name   AS "displayName",
-        pr.status,
-        COUNT(*)          AS "count",
-        COALESCE(SUM(
-          CASE WHEN pr.amount ~ '^[0-9,.]+$'
-               THEN REPLACE(pr.amount, ',', '')::NUMERIC
-               ELSE 0 END
-        ), 0)             AS "totalAmount"
-      FROM payment_records pr
-      LEFT JOIN tab_configs tc ON pr.sheet_id = tc.sheet_id AND pr.tab_name = tc.tab_name
-      GROUP BY pr.tab_name, pr.sheet_id, tc.campaign_name, tc.display_name, pr.status
-      ORDER BY "totalAmount" DESC
-    `);
-
-    // 일별 입금 추이 (최근 30일)
-    const { rows: daily } = await pool.query(`
-      SELECT
-        TO_CHAR(paid_at, 'YYYY-MM-DD') AS "date",
-        COUNT(*)                        AS "count",
-        COALESCE(SUM(
-          CASE WHEN amount ~ '^[0-9,.]+$'
-               THEN REPLACE(amount, ',', '')::NUMERIC
-               ELSE 0 END
-        ), 0)                           AS "totalAmount"
-      FROM payment_records
-      WHERE paid_at >= NOW() - INTERVAL '30 days'
-      GROUP BY TO_CHAR(paid_at, 'YYYY-MM-DD')
-      ORDER BY "date" ASC
-    `);
-
-    // 전체 요약
-    const { rows: summaryRows } = await pool.query(`
-      SELECT
-        COUNT(*) AS "totalPayments",
-        COUNT(DISTINCT reviewer_name) AS "uniqueReviewers",
-        COALESCE(SUM(
-          CASE WHEN amount ~ '^[0-9,.]+$'
-               THEN REPLACE(amount, ',', '')::NUMERIC
-               ELSE 0 END
-        ), 0) AS "grandTotal"
-      FROM payment_records
-    `);
-    const summary = summaryRows[0] || { totalPayments: 0, uniqueReviewers: 0, grandTotal: 0 };
-
-    res.json({
-      ok: true,
-      byTab,
-      daily,
-      summary: {
-        totalPayments: parseInt(summary.totalPayments),
-        uniqueReviewers: parseInt(summary.uniqueReviewers),
-        grandTotal: parseFloat(summary.grandTotal),
-      },
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// GET /api/diag/stats/overview — 전체 대시보드 요약 (한 번에 로드)
-router.get('/stats/overview', authMiddleware, async (req, res, next) => {
-  try {
-    const [
-      { rows: campaignSummary },
-      { rows: recentSubmits },
-      { rows: recentOrders },
-      { rows: paymentSummary },
-      { rows: dailyActivity },
-    ] = await Promise.all([
-      // 1. 캠페인 요약
-      pool.query(`
-        SELECT
-          COUNT(DISTINCT campaign_name) AS "campaignCount",
-          COUNT(*)                      AS "totalReviews",
-          COUNT(*) FILTER (WHERE is_submitted) AS "submitted",
-          COUNT(*) FILTER (WHERE NOT is_submitted) AS "pending"
-        FROM review_index
-      `),
-      // 2. 최근 리뷰 제출 (7일)
-      pool.query(`
-        SELECT TO_CHAR(built_at, 'YYYY-MM-DD') AS "date", COUNT(*) AS "count"
-        FROM review_index
-        WHERE is_submitted = TRUE AND built_at >= NOW() - INTERVAL '7 days'
-        GROUP BY TO_CHAR(built_at, 'YYYY-MM-DD')
-        ORDER BY "date" ASC
-      `),
-      // 3. 최근 구매양식 제출 (7일)
-      pool.query(`
-        SELECT TO_CHAR(submitted_at, 'YYYY-MM-DD') AS "date", COUNT(*) AS "count"
-        FROM order_submissions
-        WHERE submitted_at >= NOW() - INTERVAL '7 days'
-        GROUP BY TO_CHAR(submitted_at, 'YYYY-MM-DD')
-        ORDER BY "date" ASC
-      `),
-      // 4. 입금 요약
-      pool.query(`
-        SELECT
-          COUNT(*) AS "totalPayments",
-          COALESCE(SUM(
-            CASE WHEN amount ~ '^[0-9,.]+$'
-                 THEN REPLACE(amount, ',', '')::NUMERIC ELSE 0 END
-          ), 0) AS "grandTotal"
-        FROM payment_records
-      `),
-      // 5. 일별 활동량 (7일)
-      pool.query(`
-        SELECT d::DATE AS "date",
-          COALESCE(r.cnt, 0) AS "reviews",
-          COALESCE(o.cnt, 0) AS "orders"
-        FROM generate_series(NOW() - INTERVAL '6 days', NOW(), '1 day') d
-        LEFT JOIN (
-          SELECT DATE(built_at) AS dt, COUNT(*) AS cnt
-          FROM review_index WHERE is_submitted AND built_at >= NOW() - INTERVAL '7 days'
-          GROUP BY DATE(built_at)
-        ) r ON r.dt = d::DATE
-        LEFT JOIN (
-          SELECT DATE(submitted_at) AS dt, COUNT(*) AS cnt
-          FROM order_submissions WHERE submitted_at >= NOW() - INTERVAL '7 days'
-          GROUP BY DATE(submitted_at)
-        ) o ON o.dt = d::DATE
-        ORDER BY d ASC
-      `),
-    ]);
-
-    const cs = campaignSummary[0] || {};
-    const ps = paymentSummary[0] || {};
-
-    res.json({
-      ok: true,
-      overview: {
-        campaigns: parseInt(cs.campaignCount) || 0,
-        totalReviews: parseInt(cs.totalReviews) || 0,
-        submitted: parseInt(cs.submitted) || 0,
-        pending: parseInt(cs.pending) || 0,
-        submitRate: cs.totalReviews > 0
-          ? Math.round(1000 * cs.submitted / cs.totalReviews) / 10
-          : 0,
-        totalPayments: parseInt(ps.totalPayments) || 0,
-        paymentTotal: parseFloat(ps.grandTotal) || 0,
-      },
-      dailyActivity: dailyActivity.map(r => ({
-        date: r.date instanceof Date ? r.date.toISOString().split('T')[0] : String(r.date).split('T')[0],
-        reviews: parseInt(r.reviews),
-        orders: parseInt(r.orders),
-      })),
-      recentSubmits,
-      recentOrders,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-
-
-
-// ═══════════════════════════════════════════════════════════
-// GET /api/diag/pending-rows — 특정 탭의 미제출 행 조회
-// ═══════════════════════════════════════════════════════════
-router.get('/pending-rows', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, round } = req.query;
-    if (!sheetId || !tabName) return res.json({ error: 'sheetId, tabName 필요' });
-
-    // 먼저 테이블 컬럼 확인
-    const colCheck = await pool.query(
-      `SELECT column_name FROM information_schema.columns WHERE table_name = 'review_index' ORDER BY ordinal_position`
-    );
-    const columns = colCheck.rows.map(r => r.column_name);
-
-    // 존재하는 컬럼만 SELECT
-    const selectCols = ['row_index', 'reviewer_name', 'phone', 'submit_value', 'submit_col', 'round', 'built_at']
-      .filter(c => columns.includes(c));
-
-    // ★ round 필터링 적용
-    const roundCond = round ? ` AND round = $3` : '';
-    const params = round ? [sheetId, tabName, round] : [sheetId, tabName];
-
-    const { rows } = await pool.query(
-      `SELECT ${selectCols.join(', ')}
-       FROM review_index
-       WHERE sheet_id = $1 AND tab_name = $2 AND is_submitted = false${roundCond}
-       ORDER BY row_index`,
-      params
-    );
-
-    const countRes = await pool.query(
-      `SELECT COUNT(*) as total,
-              COUNT(*) FILTER (WHERE is_submitted = true) as submitted,
-              COUNT(*) FILTER (WHERE is_submitted = false) as pending
-       FROM review_index WHERE sheet_id = $1 AND tab_name = $2${roundCond}`,
-      params
-    );
-
-    res.json({ ok: true, counts: countRes.rows[0], pendingRows: rows, availableColumns: columns, round: round || '' });
-  } catch (err) {
-    res.status(500).json({ error: err.message, stack: err.stack?.split('\n').slice(0,5) });
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// GET /api/diag/unpaid-rows — 특정 탭의 미입금 행 조회
-// (제출 완료 + 미입금 상태인 행)
-// ═══════════════════════════════════════════════════════════
-router.get('/unpaid-rows', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, round } = req.query;
-    if (!sheetId || !tabName) return res.json({ error: 'sheetId, tabName 필요' });
-
-    // round 조건 추가
-    const roundCond = round ? ` AND round = $3` : '';
-    const params = round ? [sheetId, tabName, round] : [sheetId, tabName];
-
-    const { rows } = await pool.query(
-      `SELECT row_index, reviewer_name, round
-       FROM review_index
-       WHERE sheet_id = $1 AND tab_name = $2
-         AND is_submitted = true
-         AND (is_submitted2 IS NULL OR is_submitted2 = 'NONE')${roundCond}
-       ORDER BY row_index`,
-      params
-    );
-
-    const countRes = await pool.query(
-      `SELECT
-         COUNT(*) FILTER (WHERE is_submitted = true) AS submitted,
-         COUNT(*) FILTER (WHERE is_submitted2 = 'PAID') AS paid,
-         COUNT(*) FILTER (WHERE is_submitted = true AND (is_submitted2 IS NULL OR is_submitted2 = 'NONE')) AS unpaid
-       FROM review_index WHERE sheet_id = $1 AND tab_name = $2${roundCond}`,
-      params
-    );
-
-    res.json({ ok: true, counts: countRes.rows[0], unpaidRows: rows });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/diag/no-capture-audit?days=3&limit=200 — "구매캡쳐 미첨부" 판정 실측 검증 (admin/master)
@@ -3683,5 +2667,8 @@ router.get('/no-capture-audit', authMiddleware, adminOrMasterMiddleware, async (
     });
   } catch (err) { next(err); }
 });
+
+// ★ 이름을 빼거나 바꾸면 trackB 가 기동 시 바로 실패한다(fail-closed) — 옛 공개 경로를 지워도 Track B 는 그대로다.
+router.handlers = Object.freeze(_handlers);
 
 module.exports = router;

@@ -16,7 +16,9 @@ for (const p of ['tab-gid-check', 'dashboard-check', 'dashboard-roundlist', 'rou
   ok(`diag /${p} 제거 상태`, !re(p).test(diag));
 }
 ok('변이: 되살린 라우트는 잡힌다', re('slot-locks').test("router.get('/slot-locks', authMiddleware, h)"));
-ok('실시간 알림 연결 자체(events)는 남아 있다', /router\.get\('\/events'/.test(diag));
+// 결정 270: 옛 대시보드 전용 실시간 연결 GET /api/diag/events 는 지웠다 — 작업보드는 /api/trackb/events 를 쓴다.
+ok('옛 대시보드 실시간 연결(diag /events)은 제거, 작업보드 실시간 연결(trackb /events)은 남아 있다',
+  !re('events').test(diag) && /router\.get\('\/events', authMiddleware, internalMiddleware/.test(read('server/src/routes/trackB.routes.js')));
 ok('101번 잔류: worktable/dup-watch', /router\.post\('\/worktable\/dup-watch', authMiddleware, adminOrMasterMiddleware/.test(read('server/src/routes/trackB.routes.js')));
 ok('102번: 모집공고 편집기 미리보기 페이지 없음',
   !fs.existsSync(path.join(root, 'frontend/recruit-editor-runtime-preview.html'))

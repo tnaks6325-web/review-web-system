@@ -3,24 +3,8 @@ const router = express.Router();
 const pool = require('../db/pool');
 const { authMiddleware } = require('../middleware/auth.middleware');
 
-// 코드 생성·재사용 규칙은 services/shortLink.service.js 한 곳(작업보드 [🔗 구매양식 링크] 와 공용 — 결정 268).
-const { ensureShortLink } = require('../services/shortLink.service');
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/short/create — 단축URL 생성 (GAS: createShort)
-// GAS 호환: 동일 파라미터 조합이면 기존 코드 재사용
-// ═══════════════════════════════════════════════════════════
-router.post('/create', authMiddleware, async (req, res, next) => {
-  try {
-    const { s, g, t, d, options, optionList, rd } = req.body;
-    const round = rd || req.body.round || '';  // 차수 (rd 또는 round)
-    const out = await ensureShortLink({ s, g, t, d, round, options: options || optionList || [] });
-    if (!out.ok) return res.json({ error: out.error });
-    res.json({ success: true, code: out.code, shortUrl: out.code, reused: out.reused });
-  } catch (err) {
-    next(err);
-  }
-});
+// (POST /api/short/create — 옛 관리자 대시보드의 구매양식 단축링크 생성 — 는 2026-10-22 제거 · 결정 270.
+//  코드 생성·재사용 규칙은 services/shortLink.service.js 한 곳이고, 작업보드 [🔗 구매양식 링크](POST /api/trackb/form-link)가 쓴다 — 결정 268.)
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/short/resolve — 단축URL 해석 (GAS: resolveShort)

@@ -85,11 +85,12 @@ function routeBody(src, decl) {
   ok('미전송(undefined)은 종전대로 기존값 보존', /b\.manager\s+!== undefined \?/.test(TAB_SRC));
 
   // ── C. 일회성 정리 창구(실제 실행) ───────────────────────────
-  console.log('\n[C] /api/diag/manager-cleanup');
+  console.log('\n[C] 담당자 실명 정리 핸들러(diag managerCleanup — 창구는 Track B 프록시)');
   const diagRouter = require('../src/routes/diag.routes');
-  const layer = diagRouter.stack.find(l => l.route && l.route.path === '/manager-cleanup');
-  ok('라우트가 등록돼 있다', !!layer);
-  const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+  // 결정 270: 옛 공개 경로 /api/diag/manager-cleanup 은 지웠다 — 핸들러는 이름(router.handlers.managerCleanup)으로 남는다.
+  ok('핸들러가 이름으로 내보내져 있다', typeof diagRouter.handlers.managerCleanup === 'function');
+  ok('옛 공개 경로는 제거 상태', !diagRouter.stack.some(l => l.route && l.route.path === '/manager-cleanup'));
+  const handler = diagRouter.handlers.managerCleanup;
   const run = async (body) => {
     _calls = []; let out = null;
     await handler({ body }, { json: (x) => { out = x; } }, (e) => { throw e; });
@@ -134,17 +135,16 @@ function routeBody(src, decl) {
       writes().length === 0 && r.total === 0 && /없습니다/.test(r.note || ''));
   }
   ok('★ 판정은 workManager 단일 출처 — SQL 에 실명을 박지 않았다',
-    !/'박세희'|'박은비'/.test(routeBody(DIAG, "router.post('/manager-cleanup'")
+    !/'박세희'|'박은비'/.test(routeBody(DIAG, "_handlers.managerCleanup = async")
       .replace(/^\s*\/\/.*$/gm, '')));   // 주석(배경 설명)은 제외하고 본다
 
   // ── D. 라우터·권한 ───────────────────────────────────────────
   console.log('\n[D] 권한·프록시');
-  ok('원본은 admin/master 전용',
-    /router\.post\('\/manager-cleanup', authMiddleware, adminOrMasterMiddleware/.test(DIAG));
-  ok('Track B 프록시도 같은 게이트(넓어지지 않는다)',
+  // 결정 270: 원본 공개 경로가 없어져 창구는 Track B 프록시 하나 — 그 게이트가 admin/master 전용이다.
+  ok('Track B 프록시는 admin/master 전용(넓어지지 않는다)',
     /router\.post\('\/settings\/manager-cleanup', authMiddleware, adminOrMasterMiddleware/.test(TB));
   ok('★ 프록시는 원본 핸들러를 그대로 태운다(로직 복제 0)',
-    /managerCleanup: _delegate\(require\('\.\/diag\.routes'\), 'post', '\/manager-cleanup'\)/.test(TB));
+    /managerCleanup: _handler\(_diagRoutes, 'managerCleanup'\)/.test(TB));
   {
     const tbRouter = require('../src/routes/trackB.routes');
     const l = tbRouter.stack.find(x => x.route && x.route.path === '/settings/manager-cleanup' && x.route.methods.post);

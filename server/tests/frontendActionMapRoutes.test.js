@@ -94,8 +94,9 @@ for (const [method, p] of [['GET', '/api/diag/debug-tab'], ['GET', '/api/diag/de
 
 /* 변이: 없는 입구는 잡는다 */
 ok('변이: 지운 입구는 없음으로 판정', !exists('GET', '/api/diag/campaign-stats') && !exists('GET', '/api/tab/stats'));
-ok('변이: 있는 입구는 있음으로 판정', exists('GET', '/api/admin/keywords') && exists('PUT', '/api/admin/keywords', '/:id'));
-ok('변이: 동적 표시 없는 매핑은 접두 일치로 통과시키지 않는다', !exists('PUT', '/api/admin/keywords'));
+// 결정 270: 표본이던 /api/admin/keywords 는 옛 대시보드 전용이라 지웠다 — 살아 있는 입구로 표본을 옮긴다(검사 의미 불변).
+ok('변이: 있는 입구는 있음으로 판정', exists('GET', '/api/diag/sync-queue') && exists('PUT', '/api/campaign/admin', '/:id'));
+ok('변이: 동적 표시 없는 매핑은 접두 일치로 통과시키지 않는다', !exists('PUT', '/api/campaign/admin'));
 ok('변이: 동적 꼬리는 완전한 템플릿만 인정', exists('PUT', '/api/campaign/admin', '/:id/status') && !exists('PUT', '/api/campaign/admin', '/:id/nope'));
 
 /* ═══ 93~95번 · [진행률] 버튼 제거 고정 ═══ */
@@ -104,6 +105,32 @@ for (const [method, p] of [['POST', '/api/submit/debug-tabs'], ['GET', '/api/sub
   ok(`${method} ${p} 제거 상태`, !exists(method, p));
 }
 ok('광고주 계정 관리는 3버전 입구가 남아 있다', exists('POST', '/api/trackb/advertiser-account'));
+
+/* ═══ 결정 270: 옛 관리자 대시보드 전용 서버 입구 제거 고정 ═══
+ * 지운 입구가 되살아나면(또는 매핑이 다시 생기면) 잡는다. 옛 대시보드(admin.html)는 결정 267 로 이미 없다. */
+for (const [method, p] of [
+  ['GET', '/api/admin/notices'], ['GET', '/api/admin/notices/all'], ['POST', '/api/admin/notices'], ['GET', '/api/admin/notices/unread'],
+  ['POST', '/api/admin/notices/read'], ['GET', '/api/admin/error-logs'], ['POST', '/api/admin/error-logs/analyze'],
+  ['POST', '/api/admin/users'], ['POST', '/api/admin/staff-users'], ['POST', '/api/admin/change-pw'], ['POST', '/api/admin/change-master-pw'],
+  ['GET', '/api/admin/dashboard'], ['GET', '/api/admin/keywords'], ['GET', '/api/admin/unrecognized'], ['GET', '/api/admin/my-workboard-preferences'],
+  ['GET', '/api/archive/list'], ['POST', '/api/archive/tabs'], ['GET', '/api/index/status'], ['GET', '/api/index/dirty'],
+  ['GET', '/api/tab/config'], ['POST', '/api/tab/config'], ['POST', '/api/tab/closed'], ['GET', '/api/tab/dashboard'], ['GET', '/api/tab/col-prefs'],
+  ['GET', '/api/diag/events'], ['GET', '/api/diag/stats/overview'], ['GET', '/api/diag/metrics'], ['POST', '/api/diag/order-edit'],
+  ['POST', '/api/diag/manager-cleanup'], ['POST', '/api/image/manager-cleanup'],
+  ['GET', '/api/order/admin/list'], ['POST', '/api/order/admin/accept'], ['PUT', '/api/order/admin/edit'], ['DELETE', '/api/order/admin/delete'],
+  ['GET', '/api/reviewer/list'], ['POST', '/api/reviewer/delete'], ['POST', '/api/drive/save-capture'], ['POST', '/api/short/create'],
+  ['GET', '/api/review-edit/list'], ['POST', '/api/review-edit/approve']]) {
+  ok(`270: ${method} ${p} 제거 상태`, !exists(method, p));
+}
+/* 남겨야 하는 것 — 리뷰어·작업보드·인트라넷이 실제로 부르거나(공유 핸들러) 사용자 결정 대기(결정 186 킵) */
+for (const [method, p] of [
+  ['POST', '/api/admin/login'], ['POST', '/api/admin/intranet-login'], ['GET', '/api/search'], ['GET', '/api/index'],
+  ['POST', '/api/image/review-upload'], ['POST', '/api/diag/client-error'], ['GET', '/api/diag/reverse-sync-list'], ['POST', '/api/diag/metrics/reset'],
+  ['GET', '/api/tab/provider-info'], ['GET', '/api/tab/reviewer-options'], ['GET', '/api/short/resolve'], ['GET', '/api/drive/report/:code'],
+  ['PUT', '/api/order/admin/update'], ['POST', '/api/order/guide-image'], ['GET', '/api/cs/threads'], ['GET', '/api/reviewer/notices/all'],
+  ['POST', '/api/admin/smart-build/run'], ['POST', '/api/index/build-sheet'], ['GET', '/api/diag/sync-queue']]) {
+  ok(`270: ${method} ${p} 남아 있음`, exists(method, p.replace(/:\w+/g, 'x')));
+}
 ok('97·98번 잔류 입구는 남아 있다', exists('GET', '/api/campaign/admin/popular-credit-audit') && exists('POST', '/api/trackb/workdesk/auto-finish'));
 // 옛 관리자 대시보드 폐기(결정 267) — admin.html 은 이동 정류장이 되고 index-app.js·index-stats.js 는 파일째 지웠다.
 //   [진행률] 패널·블랙리스트/공지 배너 창(index-stats.js) 검사는 화면과 함께 빠진다(작업보드는 자체 블랙리스트·홈 배너 설정을 쓴다).

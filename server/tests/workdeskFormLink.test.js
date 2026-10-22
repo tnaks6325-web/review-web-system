@@ -6,7 +6,7 @@
  *   ② "새 작업오더 도착" 실시간 카드(결정 006)
  *
  * 고정하는 것:
- *   §1 코드 규칙 단일 출처 — /api/short/create 와 /api/trackb/form-link 가 같은 서비스(shortLink.service)를 쓴다
+ *   §1 코드 규칙 단일 출처 — /api/trackb/form-link 가 shortLink.service 를 쓴다(옛 /api/short/create 는 결정 270 으로 제거 — 사본이 되살아나지 않는지 본다)
  *      · 같은 (s|g|t|d|round) 면 기존 코드를 재사용(옛 대시보드에서 만든 링크와 갈리지 않는다)
  *      · 작업보드 경로의 재료는 서버가 tab_configs 에서 읽는다(화면 값 불신) · 없는 작업은 404
  *   §2 게이트 — form-link 는 internalMiddleware + _ensureEditScope(작업보드 본문과 같은 판정)
@@ -80,11 +80,12 @@ function loadSvc(pool) {
 
 (async () => {
   console.log('§1 코드 규칙 단일 출처');
-  await ta('옛 경로(/api/short/create)도 같은 서비스를 쓴다 — 라우트 안에 INSERT 사본 없음', () => {
+  // 결정 270: 옛 대시보드 전용 POST /api/short/create 는 지웠다 — 링크 만들기 창구는 작업보드(/api/trackb/form-link) 하나다.
+  await ta('옛 경로(/api/short/create) 제거 · 단축링크 라우터에 INSERT 사본 없음(되찾기·OG 만 남음)', () => {
     const r = read('src/routes/shortlink.routes.js');
-    assert.match(r, /require\('\.\.\/services\/shortLink\.service'\)/);
-    assert.match(r, /ensureShortLink\(\{ s, g, t, d, round, options: options \|\| optionList \|\| \[\] \}\)/);
+    assert.doesNotMatch(r, /router\.post\('\/create'/);
     assert.doesNotMatch(r, /INSERT INTO short_links/);
+    assert.match(r, /router\.get\('\/resolve'/);
   });
   await ta('작업보드 경로: 재료는 tab_configs 값(s·tab_gid·tab_name·display_name · 차수 없음)', async () => {
     const pool = makePool(); const svc = loadSvc(pool);

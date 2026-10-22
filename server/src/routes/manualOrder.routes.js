@@ -7,6 +7,9 @@
  */
 const express = require('express');
 const router = express.Router();
+// Track B(trackB.routes.js)가 경로 문자열 대신 이름으로 부르는 핸들러 모음 — 맨 아래 router.handlers 로 내보낸다(결정 270).
+const { lastRouteHandler } = require('../utils/routeHandlers');
+const _handlers = {};
 
 const pool = require('../db/pool');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
@@ -77,6 +80,7 @@ router.post('/preview', authMiddleware, adminOrMasterMiddleware, async (req, res
     repairedCount: items.filter(i => (i.repairs || []).length || i.aiRepaired).length,
   });
 });
+_handlers.manualOrderPreview = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // ── 제출 ─────────────────────────────────────────────────────
 // body: { sheetId, tabName, gid, campaignId?, productCheck?, allowProductMismatch?,
@@ -270,5 +274,9 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
     res.json({ ok: true, okCount, failCount: results.length - okCount, results });
   } catch (err) { next(err); }
 });
+_handlers.manualOrderSubmit = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
+
+// ★ 이름을 빼거나 바꾸면 trackB 가 기동 시 바로 실패한다(fail-closed) — 옛 공개 경로를 지워도 Track B 는 그대로다.
+router.handlers = Object.freeze(_handlers);
 
 module.exports = router;

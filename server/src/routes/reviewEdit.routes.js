@@ -17,6 +17,9 @@
 const express = require('express');
 const crypto = require('crypto');
 const router = express.Router();
+// Track B(trackB.routes.js)가 경로 문자열 대신 이름으로 부르는 핸들러 모음 — 맨 아래 router.handlers 로 내보낸다(결정 270).
+const { lastRouteHandler } = require('../utils/routeHandlers');
+const _handlers = {};
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const { slotLabel: slotLabelOf, isCashReceiptSlot } = require('../utils/captureSlots');
@@ -24,7 +27,7 @@ const driveService = require('../services/drive.service');
 const fileRouteService = require('../services/fileRoute.service');
 const { _getReviewerPhoneList } = require('../services/search.service');
 const { reviewerSessionMiddleware } = require('../services/reviewerSession.service');
-const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware } = require('../middleware/auth.middleware');
 const { imageApiLimiter } = require('../middleware/rateLimit.middleware');
 const sse = require('../utils/sse');
 const csBridge = require('../services/csBridge.service');
@@ -697,7 +700,8 @@ router.post('/cancel', async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 
 // GET /api/review-edit/list?status=pending
-router.get('/list', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
+// (GET /api/review-edit/list 공개 경로는 삭제 — Track B 프록시가 이 핸들러를 이름으로 부른다 · 결정 270)
+_handlers.reviewEditList = async (req, res) => {
   try {
     const status = ['pending', 'approved', 'rejected', 'cancelled'].includes(req.query.status)
       ? req.query.status : 'pending';
@@ -719,7 +723,7 @@ router.get('/list', authMiddleware, adminOrMasterMiddleware, async (req, res) =>
     logger.error(`[review-edit] list 실패: ${err.message}`);
     res.status(500).json({ ok: false, error: err.message });
   }
-});
+};
 
 /**
  * 승인된 요청의 구 파일: 휴지통이 아니라 [리뷰교체보관] 폴더로 이동 + 규칙 파일명(보관 목적).
@@ -756,7 +760,8 @@ function _archiveOldFileAfterReply(committed) {
 //   ★ Drive 연산(비트랜잭셔널)은 트랜잭션 "밖"에서 먼저(멱등) 수행하고, 짧은 트랜잭션에서만
 //     FOR UPDATE 재검증 + DB 포인터 스왑 + 상태확정 → 커밋 → 구 파일 [리뷰교체보관] 이동(커밋 후·비치명적).
 //   → Drive 왕복 동안 커넥션/행 락을 잡지 않는다(스타베이션 방지). 이동/이름변경은 재시도 안전.
-router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
+// (POST /api/review-edit/approve 공개 경로는 삭제 — Track B 프록시가 이 핸들러를 이름으로 부른다 · 결정 270)
+_handlers.reviewEditApprove = async (req, res) => {
   const { id, note } = req.body;
   if (!id) return res.json({ ok: false, error: 'id가 필요합니다.' });
 
@@ -919,12 +924,13 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
     logger.error(`[review-edit] approve 실패: ${err.message}`);
     res.json({ ok: false, error: err.message || '승인 처리 중 오류가 발생했습니다.' });
   }
-});
+};
 
 // POST /api/review-edit/reject  body: { id, note? }
 //   ★ note(반려 사유) **필수**(사용자 확정) — 이 사유가 그대로 리뷰어 채팅에 자동 전송되므로,
 //     비워 두면 리뷰어는 "반려됐다"만 알고 무엇을 고쳐야 하는지 모른 채 다시 요청하게 된다.
-router.post('/reject', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
+// (POST /api/review-edit/reject 공개 경로는 삭제 — Track B 프록시가 이 핸들러를 이름으로 부른다 · 결정 270)
+_handlers.reviewEditReject = async (req, res) => {
   const { id, note } = req.body;
   if (!id) return res.json({ ok: false, error: 'id가 필요합니다.' });
   const rejectNote = _sanitizeReason(note || '');
@@ -971,7 +977,10 @@ router.post('/reject', authMiddleware, adminOrMasterMiddleware, async (req, res)
     logger.warn(`[review-edit] reject 후처리 실패(무시): ${e.message}`);
   }
   res.json({ ok: true });
-});
+};
+
+// ★ 이름을 빼거나 바꾸면 trackB 가 기동 시 바로 실패한다(fail-closed) — 옛 공개 경로를 지워도 Track B 는 그대로다.
+router.handlers = Object.freeze(_handlers);
 
 module.exports = router;
 /* 작업보드 [🖼 리뷰캡처 교체](reviewCaptureReplace.service)가 **같은 폴더 판정**을 쓰도록 내보낸다
