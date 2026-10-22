@@ -14,7 +14,7 @@ const svc = require('../services/trackB.service');
 const participants = require('../services/participants.service');
 const authSvc = require('../services/auth.service');
 const { advertiserLinkLimiter } = require('../middleware/rateLimit.middleware');
-const { imageApiLimiter } = require('../middleware/rateLimit.middleware');
+const { imageApiLimiter, productPageLimiter } = require('../middleware/rateLimit.middleware');
 const sheetlessStatus = require('../services/sheetlessStatus.service');
 const shareLinks = require('../services/shareLink.service');   // 작업보드·업체 공유 링크(131)
 const { isTrackingField } = require('../utils/trackingColumn');   // 택배송장 열 판정 단일 출처(사본 금지)
@@ -1642,7 +1642,7 @@ router.get('/campaigns/:id/activity-log', authMiddleware, internalMiddleware, (r
    ★ 판정 실패는 공개 뷰(fail-closed) — 모르면 더 주지 않는다. 편집은 서버 게이트가 막는다. */
 // 공고 편집 상품 카드 「쇼핑몰에서 가져오기」(결정 271) — 확장 프로그램이 읽은 상품페이지 글 → AI 판독 결과(저장 없음).
 //   공고를 고칠 수 있는 사람만(편집 게이트와 같다). 받은 글은 저장·로그하지 않는다. 원본 = 인트라넷 product-page-reader.
-router.post('/campaigns/product-page/extract', authMiddleware, internalMiddleware, editorOnlyMiddleware, async (req, res) => {
+router.post('/campaigns/product-page/extract', authMiddleware, internalMiddleware, editorOnlyMiddleware, productPageLimiter, async (req, res) => {
   res.set('Cache-Control', 'no-store');
   try {
     const out = await require('../services/productPageReader.service').extractProductPage(req.body);

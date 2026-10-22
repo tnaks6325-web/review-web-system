@@ -90,6 +90,22 @@ const plan = (options, campOptions = campRows()) => E.planCampaignMoneyEdit({ ba
   const q = plan([opt('블랙', { productUrl: null }), opt('화이트', { productUrl: null }), unit({ productUrl: null })]);
   assert.deepEqual(q.mine, {});
 }
+{
+  // ★ 코드 리뷰 실측(2026-10-22) — 옵션 없는 상품 줄의 상품 주소가 NULL(196 이전)이고 공고 줄 주소가 오더와 다르면,
+  //   그 줄 주소를 그대로 보낸 손대지 않은 저장이 오더 상품 주소를 덮었다. 옵션 없는 상품은 두 칸이 같은 값 → 줄 주소가 지금 값.
+  const p = plan([opt('블랙'), opt('화이트'), unit({ optionUrl: U(70), productUrl: U(70) })], campRows({ 방향제: { option_url: U(70) } }));
+  assert.deepEqual(p.mine, {}, '공고에만 다르게 적혀 있던 옛 상품 주소 = 손대지 않음 ' + JSON.stringify(p.changed));
+  // 표기만 다른 주소(공고는 저장 때 URL.href 정규화 — 한글 → %XX)도 손대지 않음
+  const KO = 'https://smartstore.naver.com/x/products/2?q=한글';
+  const PK = JSON.parse(JSON.stringify(PRODUCTS)); PK[1].url = KO;
+  const enc = new URL(KO).href;
+  const q = E.planCampaignMoneyEdit({ baseState: { ...base, product_options_json: JSON.stringify(PK) }, camp,
+    body: { options: [opt('블랙'), opt('화이트'), unit({ optionUrl: enc, productUrl: enc })] }, campOptions: campRows({ 방향제: { option_url: enc } }) });
+  assert.deepEqual(q.mine, {}, '인코딩만 다른 주소 = 손대지 않음 ' + JSON.stringify(q.changed));
+  // 사람이 정말 고치면 그대로 간다
+  const r = plan([opt('블랙'), opt('화이트'), unit({ optionUrl: U(71), productUrl: U(71) })], campRows({ 방향제: { option_url: U(70) } }));
+  assert.equal(JSON.parse(r.mine.product_options_json)[1].url, U(71));
+}
 // ── ④ 못 담음 ──
 {
   let p = plan([opt('블랙', { optionUrl: '' }), opt('화이트'), unit()]);

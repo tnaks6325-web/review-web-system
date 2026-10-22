@@ -195,4 +195,16 @@ const campaignTokenLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-module.exports = { rateLimiter, rateIdentity, clientIp, identityLimiter, ipCeilingLimiter, registerLimiter, imageApiLimiter, imageUploadLimiter, intranetLoginLimiter, advertiserLinkLimiter, campaignTokenLimiter };
+// ── 공고 상품 카드 「쇼핑몰에서 가져오기」 AI 판독(결정 271) — 로그인 직원 전용이라 imageApiLimiter(로그인 면제)는 소용없다.
+//    한 번에 최대 4만 자를 Gemini 로 보내므로 **사람별** 분당 12회(직원이 한 상품씩 누르는 속도로는 닿지 않는다). ──
+const _staffKey = (req) => String((req.admin && (req.admin.id ?? req.admin.username ?? req.admin.name)) ?? '').trim();
+const productPageLimiter = rateLimit({
+  keyGenerator: (req) => (_staffKey(req) ? 'u:' + _staffKey(req) : 'ip:' + clientIp(req)),   // 사람별(로그인 직원) · 없으면 실제 주소
+  windowMs: 60 * 1000,
+  max: 12,
+  message: { ok: false, error: '가져오기를 너무 자주 눌렀습니다. 1분 뒤 다시 시도해 주세요.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+module.exports = { rateLimiter, rateIdentity, clientIp, identityLimiter, ipCeilingLimiter, registerLimiter, imageApiLimiter, imageUploadLimiter, intranetLoginLimiter, advertiserLinkLimiter, campaignTokenLimiter, productPageLimiter };

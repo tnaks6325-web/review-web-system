@@ -343,7 +343,9 @@
         have[o.name] = 1; reused++;
         fill(row.querySelector(".rf-opt-name"), o.name);
         if (o.pay) fill(row.querySelector(".rf-opt-pay"), o.pay);
-        if (pu) fill(row.querySelector(".rf-opt-url"), pu);
+        // 그 줄에 따로 적힌 옵션 주소는 덮지 않는다(상품 주소를 따라가던 줄은 위 [상품 메인 URL] 채우기 때 이미 함께 바뀌었다)
+        var ou = row.querySelector(".rf-opt-url");
+        if (pu && ou && !String(ou.value || "").trim()) fill(ou, pu);
         return false;
       });
       // 그래도 남은 빈 줄 중 아무것도 안 적힌 새 줄만 지운다 — 저장돼 있던 줄·사람이 적어 둔 줄은 그대로(주소는 카드가 채운 값이라 셈에서 뺀다)

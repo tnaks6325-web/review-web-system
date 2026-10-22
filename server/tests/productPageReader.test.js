@@ -86,8 +86,10 @@ const shopSrc = rd('frontend/js/recruit-shop-import.js');
 
   console.log('\n[3] 라우트 — 편집자만 · 경로 순서');
   {
-    const i = routes.indexOf("router.post('/campaigns/product-page/extract', authMiddleware, internalMiddleware, editorOnlyMiddleware,");
-    ok('공고 편집 게이트 뒤에 있다(auth·내부인·편집자)', i > 0);
+    const i = routes.indexOf("router.post('/campaigns/product-page/extract', authMiddleware, internalMiddleware, editorOnlyMiddleware, productPageLimiter,");
+    ok('공고 편집 게이트 뒤 + 사람별 호출 제한(auth·내부인·편집자·제한)', i > 0);
+    const rl = rd('server/src/middleware/rateLimit.middleware.js');
+    ok('호출 제한은 사람별(로그인 면제 없음)', /const productPageLimiter = rateLimit\(\{[\s\S]*?'u:' \+ _staffKey\(req\)[\s\S]*?max: 12,/.test(rl) && !/productPageLimiter = rateLimit\(\{[\s\S]{0,600}skip:/.test(rl));
     ok('/campaigns/:id 보다 앞', i < routes.indexOf("router.get('/campaigns/:id'"));
     ok('응답은 캐시 금지', /product-page\/extract[\s\S]{0,200}Cache-Control', 'no-store'/.test(routes));
     ok('라우트 오류 로그는 오류 이름만(받은 글 금지)', /\[product-page\] 판독 실패: \$\{String\(e && e\.name \|\| 'Error'\)\}/.test(routes));

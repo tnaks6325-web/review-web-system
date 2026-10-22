@@ -300,13 +300,22 @@ function _planGuideEdit({ products, src, srcCount, rowCount, o, name, baseRow, d
  */
 function _planUrlEdit({ products, src, srcCount, rowCount, o, row, dbRow, name }) {
   const t = v => String(v == null ? '' : v).trim();
+  // 비교는 주소 모양을 맞춘 뒤 — 공고 쪽은 저장 때 URL.href 로 정규화된다(한글 경로 → %XX). 글자 인코딩만 다른 주소를 "고쳤다"로 보면
+  // 손대지 않은 저장이 공고 쪽 표기로 오더를 다시 쓴다(코드 리뷰 실측 2026-10-22).
+  const n = v => { const x = t(v); if (!x) return ''; try { return new URL(x).href; } catch (_) { return x; } };
   const sentOf = (camel, snake) => (o[camel] !== undefined && o[camel] !== null) ? t(o[camel]) : ((o[snake] !== undefined && o[snake] !== null) ? t(o[snake]) : null);
   const sentOpt = sentOf('optionUrl', 'option_url');
   const sentProd = sentOf('productUrl', 'product_url');
-  const touched = (sent, baseV, dbV) => sent !== null && sent !== t(baseV) && (dbV === undefined || sent !== t(dbV));
+  const touched = (sent, baseV, dbV) => sent !== null && n(sent) !== n(baseV) && (dbV === undefined || n(sent) !== n(dbV));
   const optT = touched(sentOpt, row.option_url, dbRow ? dbRow.option_url : undefined);
-  // 상품 메인 주소 — 196 이전 줄(지금 공고 값 NULL)은 "모름" 이라 지금 값과의 비교를 건너뛴다(기준 투영과만 비교)
-  const prodT = touched(sentProd, row.product_url, dbRow && dbRow.product_url != null ? dbRow.product_url : undefined);
+  /* 상품 메인 주소의 "지금 공고 값":
+     · 저장돼 있으면 그 값
+     · 196 이전 줄(NULL)인데 옵션 없는 상품 줄이면 그 줄 주소(option_url) — 옵션 없는 상품은 두 칸이 같은 값이다.
+       (안 그러면 공고에만 다르게 적혀 있던 옛 주소가 손대지 않은 저장 한 번에 오더 상품 주소를 덮는다 — 코드 리뷰 실측 2026-10-22)
+     · 옵션 줄이면 "모름" — 기준 투영과만 비교한다 */
+  const dbProd = !dbRow ? undefined
+    : (dbRow.product_url != null ? dbRow.product_url : ((src && src.j < 0) ? dbRow.option_url : undefined));
+  const prodT = touched(sentProd, row.product_url, dbProd);
   if (!optT && !prodT) return {};
   const label = `주소(${name})`;
   if (!products || !src || srcCount !== rowCount) return { unmappable: { label, want: sentOpt || sentProd || '', got: row.option_url } };

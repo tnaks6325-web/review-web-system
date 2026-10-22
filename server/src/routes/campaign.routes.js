@@ -241,7 +241,13 @@ function _normalizeOptionsInput(arr) {
       optionUrl: _normalizeOptionUrl(obj.optionUrl ?? obj.option_url ?? obj.url),
       // ★ 결정 271(사용자 확정 2026-10-22 「2.가」): 그 선택지가 속한 **상품의 메인 주소**(인트라넷 상품 카드의 상품 메인 URL).
       //   같은 상품의 줄은 같은 값. 미전달(undefined) = null = 저장된 값 유지(옛 화면이 저장해도 지워지지 않게) · '' = 지움.
-      productUrl: (obj.productUrl === undefined && obj.product_url === undefined) ? null : _normalizeOptionUrl(obj.productUrl ?? obj.product_url),
+      // 결정 271: 안 보냄(undefined·null) = 저장값 유지(null). 값이 있는데 형식이 틀리면 지우지 않고 유지(null) — 빈 값('')은 사람이 비운 것
+      productUrl: (() => {
+        const raw = obj.productUrl ?? obj.product_url;
+        if (raw === undefined || raw === null) return null;
+        const v = _normalizeOptionUrl(raw);
+        return (!v && String(raw).trim()) ? null : v;
+      })(),
       // ★ 결정 214: 선택지별 사진(3상태 — null 유지 · '' 지움 · https 주소). 형식 불량은 thumbError 로 거절.
       thumbnailUrl: _normalizeOptionThumb(obj.thumbnailUrl !== undefined ? obj.thumbnailUrl : obj.thumbnail_url),
       thumbError: _normalizeOptionThumb(obj.thumbnailUrl !== undefined ? obj.thumbnailUrl : obj.thumbnail_url) === undefined

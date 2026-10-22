@@ -2149,15 +2149,20 @@ function _prodMode() {
     return (el && el.value === "opt") ? "opt" : "none";
   }
   const live = boxes.filter(b => Array.from(b.querySelectorAll(".rf-opt-row")).some(r => r.dataset.status !== "closed"));
-  if (live.length > 1) return "opt";
   if (!live.length) return "none";
-  const b = live[0];
-  if (b.dataset.unit !== "product") return "opt";
+  const allProduct = live.every(b => b.dataset.unit === "product");
+  /* ★★ 원장 없이 상품 여러 줄로 저장된 옛 공고·구조화 옵션 없는 작업오더(부르는 쪽이 'none' 을 명시 = _rfForcedNone)는
+     카드가 여럿이어도 'none' 이다 — 손대지 않은 저장이 상품 단위 원장을 새로 만들면 리뷰어 화면이 「옵션 고르기」로 바뀐다
+     (코드 리뷰 실측: 종전 'none' 은 늘 [] 를 보냈다). 사람이 [+ 상품 추가]를 누르면 새 규칙으로 돌아간다(addOptRow). */
+  if (live.length > 1 && !(window._rfForcedNone && allProduct)) return "opt";
+  if (!allProduct) return "opt";
   if (window._rfLiveLedger) return "opt";
-  const r = b.querySelector(".rf-opt-row");
-  if (r && r.dataset.ig && typeof _ugCompose === "function") {
-    const g = _ugCompose(r, r.dataset.ig);
-    if (String(g.html || "").trim() || (Array.isArray(g.images) && g.images.length)) return "opt";
+  for (const b of live) {
+    const r = b.querySelector(".rf-opt-row");
+    if (r && r.dataset.ig && typeof _ugCompose === "function") {
+      const g = _ugCompose(r, r.dataset.ig);
+      if (String(g.html || "").trim() || (Array.isArray(g.images) && g.images.length)) return "opt";
+    }
   }
   return "none";
 }
@@ -2236,7 +2241,10 @@ function _buildProdGroup(g) {
   const orderPu = (window._rfOrderProductUrls || {})[String(g && g.name || "").replace(/\|/g, "").trim()] || "";
   const firstUrl = String(rows0[0].optionUrl ?? rows0[0].option_url ?? rows0[0].url ?? "");
   const pu0 = unit0 === "product" ? String(savedPu || firstUrl || "") : String(savedPu || "");
-  box.dataset.puKnown = (unit0 === "product" || savedPu) ? "1" : "0";
+  /* ★ 저장돼 있던 줄(savedOptKey)인데 상품 주소가 없으면(196 이전) 옵션 없는 상품이라도 "모름" — 사람이 고치기 전엔 null 로 보낸다
+     (코드 리뷰 2026-10-22: 그 줄 주소를 상품 주소로 보내면 공고에만 다르게 적혀 있던 옛 주소가 리뷰오더 상품 주소를 덮을 수 있다). */
+  const savedRow = rows0.some(r => String(r.savedOptKey || "").trim());
+  box.dataset.puKnown = (savedPu || (unit0 === "product" && !savedRow)) ? "1" : "0";
   const head = document.createElement("div");
   head.className = "rf-gp-head";
   head.innerHTML =
@@ -2349,6 +2357,7 @@ function _syncGroupTotals() {
 function addOptRow(data) {
   const wrap = document.getElementById("rf_opt_rows");
   if (!wrap) return;
+  window._rfForcedNone = false;   // 사람이 상품을 더했다 — 이제 카드 구성 규칙(_prodMode)대로
   // ★ 결정 271 — [+ 상품 추가] = 상품 카드 하나(새 상품은 인트라넷처럼 「옵션 없음」으로 시작 · 카드에서 바꾼다)
   wrap.appendChild(_buildProdGroup({
     name: (data && (data.productName ?? data.product_name)) || "",
@@ -2671,6 +2680,7 @@ function renderOptRows(options, opts) {
   const m = forced || (live.length ? "opt" : "none");
   // ★ 결정 271 — 저장된 공고를 열 때 살아 있는 선택지 원장이 있으면 그 공고는 원장을 유지한다(_prodMode)
   if (opts && opts.saved) window._rfLiveLedger = live.length > 0;
+  window._rfForcedNone = forced === "none";   // ★ 부르는 쪽이 'none' 을 명시한 표 — _prodMode 가 카드 수로 원장을 만들지 않게
   _applyProdModeUi(m);
   // 사유는 값이 있을 때만 — 빈 표(신규 공고)에 "자동 선택됨"이라 하면 정하지 않은 것을 정했다고 말하는 셈이다
   _setProdModeNote((forced || !list.length) ? "" : (live.length
@@ -2865,8 +2875,9 @@ function _rfRowProductUrl(row, unitKind) {
   const box = row && row.closest ? row.closest(".rf-gp") : null;
   if (!box) return null;
   const u = String(box.querySelector(".rf-gp-url")?.value || "").trim();
+  if (box.dataset.puKnown !== "1") return null;
   if (unitKind === "product") return u || String(row.querySelector(".rf-opt-url")?.value || "").trim();
-  return box.dataset.puKnown === "1" ? u : null;
+  return u;
 }
 
 /** 가이드유입 신규 공고는 실제 참여 가능한 모든 선택지에 안내가 있어야 한다.
@@ -3478,6 +3489,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   _rfApplyOrderLink(null, false);   // 시안 3차: 지난 공고의 연결 표시·시작일 잠금을 지운다
   window._rfOrderProductUrls = {};   // 결정 271: 연결 리뷰오더의 상품 메인 주소(보기용) — 새 공고·다른 공고에 남지 않게
   window._rfLiveLedger = false;
+  window._rfForcedNone = false;
   _rfLastScheduledPurchaseWindow = { start: "", end: "" };
   if (typeof recruitSaveBlockClear === "function") recruitSaveBlockClear();  // 지난번 차단 사유 잔류 방지
   _rfLinkedMiss = null; _rfSugCache = [];   // 지난 공고의 "탭 못 찾음" 사유가 새 모달에 남지 않게(로드보다 먼저)
@@ -5909,6 +5921,10 @@ async function saveRecruitPostImpl() {
         const invalidOptionUrl = payload.options.find(option =>
           String(option.optionUrl || "").trim() && !_rfHttpUrl(option.optionUrl));
         if (invalidOptionUrl) { renderPartCheck(); _rfSaveBlocked("옵션 URL은 http:// 또는 https:// 주소로 입력해주세요.", { go: _rfGoToCheck }); return; }
+        // ★ 결정 271 — 상품 메인 URL 도 같은 규칙(값이 있는데 형식이 틀리면 막는다). 서버는 틀린 주소를 빈 값으로 바꿔 저장된 주소를 지운다.
+        const invalidProductUrl = Array.from(document.querySelectorAll("#rf_opt_rows .rf-gp-url"))
+          .find(i => String(i.value || "").trim() && !_rfHttpUrl(i.value));
+        if (invalidProductUrl) { renderPartCheck(); _rfSaveBlocked("상품 메인 URL은 http:// 또는 https:// 주소로 입력해주세요.", { go: _rfGoToCheck }); return; }
         const inflowGuideError = validateActiveUnitInflowGuides(
           document.getElementById("rf_inflow_type_value")?.value === "guide" ? "guide" : "link"
         );

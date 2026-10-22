@@ -271,6 +271,19 @@ console.log('\n[B-2] 카드 구성 → 저장 모양(발행 프리필 _woProduct
   const t4 = makeTable();
   t4.run(`renderOptRows([{ productName:'힙스', optKey:'콰이어트', productUrl:'https://s.example/saved', payAmount:1, recruitTotal:1, dailyLimit:1 }])`);
   ok('저장된 상품 주소는 그대로 보낸다', JSON.parse(t4.run('JSON.stringify(readOptRows())'))[0].productUrl === 'https://s.example/saved');
+  // ★ 코드 리뷰(2026-10-22) — 저장돼 있던 옵션 없는 상품 줄(savedOptKey)인데 상품 주소가 없으면(196 이전) 그 줄 주소를 상품 주소로 보내지 않는다
+  const t5 = makeTable();
+  t5.run(`renderOptRows([{ productName:'방향제', unitKind:'product', optKey:'방향제', savedOptKey:'방향제', optionUrl:'https://s.example/old', payAmount:1, recruitTotal:1, dailyLimit:1 },
+    { productName:'탈취제', unitKind:'product', optKey:'탈취제', savedOptKey:'탈취제', optionUrl:'https://s.example/t', productUrl:'https://s.example/t', payAmount:1, recruitTotal:1, dailyLimit:1 }], { saved: true })`);
+  const o5 = JSON.parse(t5.run('JSON.stringify(readOptRows())'));
+  ok('저장된 옵션 없는 상품 줄 · 상품 주소 모름 = null(줄 주소는 그대로 보냄)', o5[0].productUrl === null && o5[0].optionUrl === 'https://s.example/old' && o5[1].productUrl === 'https://s.example/t');
+  const ue5 = t5.dom.byId.rf_opt_rows.querySelector('.rf-gp-url'); ue5.value = 'https://s.example/new'; ue5.fire('input');
+  ok('사람이 고치면 보낸다', JSON.parse(t5.run('JSON.stringify(readOptRows())'))[0].productUrl === 'https://s.example/new');
+  const t6 = makeTable();
+  t6.run('addOptRow()'); t6.run('addOptRow()');
+  const ue6 = t6.dom.byId.rf_opt_rows.querySelectorAll('.rf-gp-name'); ue6[0].value = 'A'; ue6[0].fire('input'); ue6[1].value = 'B'; ue6[1].fire('input');
+  const ru6 = t6.dom.byId.rf_opt_rows.querySelectorAll('.rf-opt-url'); ru6[0].value = 'https://s.example/a';
+  ok('새 카드(저장 전)의 옵션 없는 상품 = 줄 주소가 곧 상품 주소', JSON.parse(t6.run('JSON.stringify(readOptRows())'))[0].productUrl === 'https://s.example/a');
 }
 
 /* ══════════════ C. 자동 판정 + 사람 전환 ══════════════ */
@@ -308,6 +321,21 @@ console.log('\n[D] 옵션 신호 없는 오더·공고 — 추측 승격 금지'
   const t2 = makeTable();
   t2.run(`renderOptRowsWithProduct([], '우레온 모이스처 바디-리셋 미스트 - 결제금액 22,000원')`);
   ok('옵션 원장 빈 공고 편집 → none 모드 · 옵션 0건', t2.run('_prodMode()') === 'none' && t2.run('JSON.stringify(readOptRows())') === '[]');
+
+  // ★ 결정 271 코드 리뷰 실측 — 원장 없이 상품 여러 줄로 저장된 공고: 카드가 둘이어도 손대지 않은 저장은 원장을 만들지 않는다
+  const tm = makeTable();
+  tm.run(`renderOptRowsWithProduct([], '상품A - 결제금액 10,000원\\n상품B - 결제금액 12,000원', { recruit_total: 30 })`);
+  ok('원장 없는 여러 줄 공고 → 카드 2개 · none · 옵션 0건',
+    tm.dom.byId.rf_opt_rows.querySelectorAll('.rf-gp').length === 2 && tm.run('_prodMode()') === 'none' && tm.run('JSON.stringify(readOptRows())') === '[]');
+  const tw = makeTable();
+  tw.run(`applyProductRowsFromOrder({ wd_product: '상품A - 결제금액 10,000원\\n상품B - 결제금액 12,000원' })`);
+  ok('구조화 옵션 없는 여러 줄 오더 → none · 옵션 0건', tw.run('_prodMode()') === 'none' && tw.run('JSON.stringify(readOptRows())') === '[]');
+  tm.run('addOptRow()');
+  ok('사람이 [+ 상품 추가]를 누르면 새 규칙(카드 여럿 = opt)', tm.run('_prodMode()') === 'opt');
+  const tn = makeTable();
+  tn.run(`renderOptRowsWithProduct([], '상품A - 결제금액 10,000원\\n상품B - 결제금액 12,000원', {})`);
+  tn.run(`document.querySelectorAll('#rf_opt_rows .rf-gp')[1].querySelectorAll('.rf-gp-unit button').filter(x => x.dataset.unit === 'option')[0].onclick()`);
+  ok('사람이 카드를 「옵션 있음」으로 바꾸면 opt', tn.run('_prodMode()') === 'opt');
 
   // 옵션 배열이 오면 그대로 옵션 모드(무회귀)
   const t3 = makeTable();
@@ -347,7 +375,7 @@ ok('모달: 공고 전체 스위치 없음(결정 271) · 모드 hidden 생존 �
   && !/setProdMode\(/.test(modalSrc) && /id="rf_prod_mode"[^>]*value="none"/.test(modalSrc) && /id="rf_opt_wrap" class="rf-cards"/.test(modalSrc));
 ok('모달 CSS: 카드 — 옵션 없는 카드는 URL·옵션 칸 숨김', /\.rf-gp-noopt \.rf-opt-row \.rf-f-url,#recruitModal #rf_opt_wrap\.rf-cards \.rf-gp-noopt \.rf-opt-row \.rf-f-name\{display:none\}/.test(modalSrc));
 ok('index-recruit: 모드 = 카드 구성(상품 둘 이상·옵션 있는 상품 = opt · 원장 살아 있던 공고 = opt · 마감만 = 세지 않음)',
-  /function _prodMode\(\)\s*\{[\s\S]*?if \(live\.length > 1\) return "opt";[\s\S]*?if \(b\.dataset\.unit !== "product"\) return "opt";[\s\S]*?if \(window\._rfLiveLedger\) return "opt";/.test(recruitSrc));
+  /function _prodMode\(\)\s*\{[\s\S]*?if \(live\.length > 1 && !\(window\._rfForcedNone && allProduct\)\) return "opt";[\s\S]*?if \(!allProduct\) return "opt";[\s\S]*?if \(window\._rfLiveLedger\) return "opt";/.test(recruitSrc));
 ok('index-recruit: 사람이 누르는 공고 전체 모드 전환 함수가 없다(사본 판정 0)', !/function setProdMode\(/.test(recruitSrc) && !/function _convertProdRows\(/.test(recruitSrc));
 ok('모달: 옵션표 저장 계약 필드 생존(rf_opt_rows·rf_wd_product·정원 hidden)', /id="rf_opt_rows"/.test(modalSrc)
   && /id="rf_wd_product"/.test(modalSrc) && /id="rf_recruit_total"/.test(modalSrc) && /id="rf_daily_limit"/.test(modalSrc));
