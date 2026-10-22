@@ -166,7 +166,30 @@ async function isSheetless(db, sheetId, tabName) {
   }
 }
 
+/**
+ * ★ 참여형(무시트) 주문의 원장 좌표 접두어 — `campaign:<공고ID>`(submit.routes `_resolveCampaignOrderScope`).
+ *   구글시트 탭이 아니라서 `tab_configs` 행이 없다 → `isSheetless` 로는 false 가 나온다.
+ *   SQL 쪽은 종전대로 `sheet_id LIKE 'campaign:%'` 를 쓴다(orderLedger reconcile 스캔 제외 등).
+ */
+const CAMPAIGN_ORDER_COORD_PREFIX = 'campaign:';
+
+/**
+ * ★★ 주문 원장 좌표에 "구글시트에 쓸 곳이 있는가" (결정 271) — 시트 큐(order_cancel 등)에 넣기 전에 묻는다.
+ *   무시트 = ① 참여형 좌표(`campaign:*`) 또는 ② 무시트 탭(이름 → gid 폴백, `isSheetlessTab` 그대로).
+ *   새 판정을 만들지 않고 위 두 기존 규칙을 한 문장으로 묶은 것뿐이다.
+ * ★ 조회 실패 = false(fail-open) — 호출부는 **종전 시트 경로**를 탄다(최악이 "예전처럼 큐에 들어가 실패").
+ * @returns {Promise<boolean>}
+ */
+async function isSheetlessOrderCoord(db, { sheetId, tabName, tabGid } = {}) {
+  if (String(sheetId || '').startsWith(CAMPAIGN_ORDER_COORD_PREFIX)) return true;
+  if (!sheetId || !tabName) return false;
+  const keys = await sheetlessTabKeys(db);          // 실패 = 빈 Set = false
+  return isSheetlessTab(keys, sheetId, tabName, tabGid ? String(tabGid) : '');
+}
+
 module.exports = {
+  CAMPAIGN_ORDER_COORD_PREFIX,
+  isSheetlessOrderCoord,
   REGISTERED_SHEET_IDS_SQL,
   FULLY_SHEETLESS_SHEET_IDS_SQL,
   SWEEP_SKIP_SHEET_IDS_SQL,

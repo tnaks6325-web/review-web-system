@@ -39,6 +39,26 @@ const { logAbnormal } = require('./errorLog.service');
 const { pickMemoColumnIndex, pickPostDateColumnIndex } = require('../utils/memoColumn');
 const { mergeDepositStamps } = require('../utils/depositStamp');
 
+// ═══════════════════════════════════════════════════════════
+// ★★ 큐 타입 분류 — 단일 출처 (결정 271 · 시트 시절 정리 1단계)
+//   DB_ONLY  = 구글을 부르지 않고 DB 안에서 끝나는 타입. 무시트 구매(작업보드 반영)의 **라이브 경로**다.
+//              30초 워커·즉시 펌프는 언제나 이것을 처리하고, 매시 retryAllFailed 도 이것만 되살린다.
+//   SHEET    = 구글시트에 쓰는 시트 시절 타입. 30초 워커·즉시 펌프는 `ORDER_BATCH_AUTO=1` 일 때만 집는다
+//              (=오늘의 동작 그대로). 2단계에서 `ORDER_BATCH_AUTO` 를 끄면 이 타입의 남은 행
+//              (pending order_append·processing order_update 등)은 **손대지 않고 기록으로 남는다**.
+//   ★ `_executeItem` 의 모든 case 는 둘 중 하나에 있어야 한다(tests/syncQueueSheetTypesGate.test.js).
+//     새 타입을 만들면 여기 분류부터 한다 — 빠지면 시트가 꺼진 뒤 그 타입이 영원히 대기한다.
+// ═══════════════════════════════════════════════════════════
+const DB_ONLY_QUEUE_TYPES = Object.freeze(['workboard_apply', 'workboard_legacy_apply', 'deposit_mark']);
+const SHEET_QUEUE_TYPES = Object.freeze([
+  'order_append', 'order_update', 'order_cancel', 'review_submit',
+  'sheet_write', 'sheet_append', 'participant_mirror',
+]);
+/** 30초 워커·즉시 펌프가 시트 타입을 집는가 — 기존 `ORDER_BATCH_AUTO=1` 의미에 얹는다(새 스위치 없음). */
+function sheetQueueTypesEnabled() {
+  return process.env.ORDER_BATCH_AUTO === '1';
+}
+
 // ── 큐에 작업 추가 ──
 async function enqueue(type, payload, maxRetry = 3) {
   try {
@@ -86,22 +106,34 @@ async function processQueue(batchSize = 10, { interItemDelayMs = 2000, onlyType 
     // ★ 제안A: ORDER_BATCH_AUTO=1이면 order_append는 상시 배치 스케줄러 전담(단건 2콜/건 금지).
     //   30초 cron의 단건 order_append가 throttle 45/분을 최대 40콜/분 잠식하던 것을 제거 →
     //   배치(라운드당 2콜)로 단일화해 쿼터 효율 극대화. review/deposit 등 다른 타입은 계속 처리(손실0).
-    //   AUTO 끄면 즉시 단건 cron이 order_append 흡수(되돌리기). 큐 백스톱은 15초 배치 cron이 담당.
+    //   ⚠ 결정 271(2026-10-22)부터 AUTO 를 끄면 단건 cron 이 order_append 를 흡수하지 **않는다** — 시트 타입 전체를
+    //   집지 않는다(시트 시절 종료 스위치). 큐 백스톱은 15초 배치 cron이 담당.
     //   ★ F3 백스톱(심판 D4b): onlyType='order_append' 면 skipOrderAppend를 무시하고 그 타입만 처리.
     //     배치 heartbeat가 끊긴 비상시에만 cron이 소량(5건) 단건으로 호출 → 영구 미반영 방지.
     const skipOrderAppend = process.env.ORDER_BATCH_AUTO === '1' && !onlyType;
+    // ★★ 결정 271: 시트 타입은 ORDER_BATCH_AUTO=1 일 때만 집는다. 꺼지면 DB_ONLY(작업보드 반영)만 —
+    //   시트 시절 잔여 행(pending order_append 등)은 손대지 않는다(구글 호출 0 · 행은 기록으로 보존).
+    const sheetTypesOn = sheetQueueTypesEnabled();
+    if (!sheetTypesOn && onlyType && !DB_ONLY_QUEUE_TYPES.includes(onlyType)) {
+      return { processed: 0, succeeded: 0, failed: 0, elapsed: 0 };
+    }
+    const typeFilter = onlyType
+      ? 'AND type = $2'
+      : (!sheetTypesOn ? 'AND type = ANY($2::text[])' : (skipOrderAppend ? "AND type <> 'order_append'" : ''));
+    const params = onlyType ? [batchSize, onlyType]
+      : (!sheetTypesOn ? [batchSize, [...DB_ONLY_QUEUE_TYPES]] : [batchSize]);
     const { rows: items } = await pool.query(
       `UPDATE sync_queue SET status = 'processing', processed_at = NOW()
         WHERE id IN (
           SELECT id FROM sync_queue
            WHERE status = 'pending' AND attempts < max_retry
-             ${onlyType ? 'AND type = $2' : (skipOrderAppend ? "AND type <> 'order_append'" : '')}
+             ${typeFilter}
            ORDER BY created_at ASC
            LIMIT $1
            FOR UPDATE SKIP LOCKED
         )
         RETURNING *`,
-      onlyType ? [batchSize, onlyType] : [batchSize]
+      params
     );
 
     if (items.length === 0) return { processed: 0, succeeded: 0, failed: 0, elapsed: 0 };
@@ -884,6 +916,14 @@ async function _executeItem(item) {
       if (!rows.length || !rows[0].deleted_at) return;                           // 취소 아님 → noop
       const os = rows[0];
       if (!os.sheet_row) return;                                                 // 시트 미반영 → 클리어 불필요
+      // ★ 결정 271 백스톱: 무시트 좌표에는 비울 시트 행이 없다(취소 서비스는 이제 큐에 넣지 않는다 —
+      //   배포 중 구버전이 넣은 것·사람이 retryItem 한 옛 실패분만 여기 온다). 성공했을 때와 같은 상태로 끝낸다.
+      if (await require('../utils/sheetlessScope').isSheetlessOrderCoord(pool, {
+        sheetId: os.sheet_id, tabName: os.tab_name, tabGid: os.tab_gid || os.gid,
+      })) {
+        await pool.query(`UPDATE order_submissions SET mirror_status='canceled' WHERE id=$1`, [orderSubmissionId]);
+        return;
+      }
       const tabContext = await loadRawTabContext(os.sheet_id, os.tab_gid || os.gid, os.tab_name);
       if (!tabContext || !tabContext.headers || !tabContext.headers.length) throw new Error('RAW 메타 없음'); // 재시도
       // R1/J-2: identity-match(연락처+수취인+주소 AND). 그리드밖(빈읽기)=사람 손 불가 → 클리어 진행.
@@ -1056,16 +1096,20 @@ async function retryItem(id) {
 
 // ── 모든 실패 항목 재시도 ──
 async function retryAllFailed() {
-  // ★ PR-B(R6): order_update/order_cancel은 backstop 재시도 대상에서 제외.
-  //   이미 conflict/canceled_sheet_dirty로 "판정·안전정지"한 건을 시간차 재실행해
-  //   사람 재사용행 클리어(R1)·클로버(R3) 파괴를 재발시키지 않게 한다. (3개 쿼리 모두 적용)
+  // ★★ 결정 271: **DB_ONLY 타입(작업보드 반영)만** 되살린다 — 시트 타입은 매시 되살리지 않는다.
+  //   종전엔 order_append·review_submit·sheet_* 실패분을 매시간 pending 으로 되돌려, 무시트 가상 시트ID
+  //   (`wt_…`)로 구글을 다시 부르고 또 실패하는 일을 반복했다. 시트 타입 실패·정체 행은 그대로 기록으로 남긴다.
+  //   (종전 PR-B(R6)의 order_update/order_cancel 제외는 이 허용목록에 자연히 포함된다 — 둘 다 시트 타입.)
+  //   시트 타입 한 건을 꼭 다시 돌려야 하면 사람이 retryItem(id) 으로 한 줄씩 한다.
+  const live = [...DB_ONLY_QUEUE_TYPES];
   // stuck된 processing 항목도 함께 리셋 (5분 이상 경과)
   const { rowCount: unstuck } = await pool.query(
     `UPDATE sync_queue
      SET status = 'pending', attempts = 0, error_msg = 'reset: stuck processing'
      WHERE status = 'processing'
        AND (processed_at IS NULL OR processed_at < NOW() - INTERVAL '5 minutes')
-       AND type NOT IN ('order_update','order_cancel')`
+       AND type = ANY($1::text[])`,
+    [live]
   );
   if (unstuck > 0) {
     logger.info(`[syncQueue] ${unstuck}건 stuck processing 항목 리셋`);
@@ -1076,7 +1120,8 @@ async function retryAllFailed() {
     `UPDATE sync_queue
      SET status = 'pending', attempts = 0, error_msg = NULL
      WHERE status = 'failed'
-       AND type NOT IN ('order_update','order_cancel')`
+       AND type = ANY($1::text[])`,
+    [live]
   );
 
   // pending이지만 attempts >= max_retry로 처리 불가능한 항목도 리셋
@@ -1084,7 +1129,8 @@ async function retryAllFailed() {
     `UPDATE sync_queue
      SET attempts = 0, error_msg = NULL
      WHERE status = 'pending' AND attempts >= max_retry
-       AND type NOT IN ('order_update','order_cancel')`
+       AND type = ANY($1::text[])`,
+    [live]
   );
   if (resetExhausted > 0) {
     logger.info(`[syncQueue] ${resetExhausted}건 exhausted pending 항목 attempts 리셋`);
@@ -1311,6 +1357,9 @@ async function drainOrderQueue(orderSubmissionId, { maxItems = 5 } = {}) {
 }
 
 module.exports = {
+  DB_ONLY_QUEUE_TYPES,
+  SHEET_QUEUE_TYPES,
+  sheetQueueTypesEnabled,
   enqueue,
   processQueue,
   drainTabQueue,
