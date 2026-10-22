@@ -815,7 +815,7 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
     }
     if (edited) {
       const after = new Map(projectOrderToCampaign({ ...base, product_options_json: JSON.stringify(edited) }).options.map(r => [r.key, r]));
-      for (const r of baseRows) {
+      baseRows.forEach((r, idx) => {
         const got = after.get(r.key);
         const expect = want.has(r.key) ? want.get(r.key) : r.pay_amount;
         if (!got || got.pay_amount !== expect) unmappable.push({ key: r.key, label: `결제금액(${r.name})`, want: expect, got: got ? got.pay_amount : '' });
@@ -827,11 +827,15 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
         //   (옵션 주소가 빈 옵션 줄은 상품 주소로 접힌다 — 화면은 그 줄의 옛 주소를 보냈으므로 여기서 걸러 새로고침을 받는다).
         if (got && urlWant.size) {
           const uw = urlWant.get(r.key) || {};
-          const expOpt = uw.option_url !== undefined ? uw.option_url : r.option_url;
+          // 오더에서 옵션 주소가 빈 옵션 줄 = 상품 주소를 따라가는 줄 — 상품 주소를 바꾸면 그 줄 주소도 새 상품 주소가 되는 것이 맞다(막지 않는다)
+          const sr = srcs[idx];
+          const follows = uw.option_url === undefined && sr && sr.j >= 0 && products[sr.i] && products[sr.i].options[sr.j]
+            && !String(products[sr.i].options[sr.j].url || '').trim() && prodUrlSet.has(sr.i);
+          const expOpt = uw.option_url !== undefined ? uw.option_url : (follows ? prodUrlSet.get(sr.i) : r.option_url);
           if (got.option_url !== expOpt) unmappable.push({ key: r.key, label: `옵션 주소(${r.name}) — 리뷰오더에서 이 옵션 주소가 비어 상품 주소를 따라갑니다. 옵션 주소를 직접 넣어 주세요`, want: expOpt, got: got.option_url });
           if (uw.product_url !== undefined && got.product_url !== uw.product_url) unmappable.push({ key: r.key, label: `상품 주소(${r.name})`, want: uw.product_url, got: got.product_url });
         }
-      }
+      });
       // 첫 상품 주소가 바뀌면 오더 상품 페이지 칸(product_url — 작업표 구매채널·링크유입 랜딩의 재료)도 같이 — 그 칸이 첫 상품 주소와 같았을 때만
       if (edited && prodUrlSet.has(0) && products && products[0] && String(base.product_url || '').trim() === String(products[0].url || '').trim()) {
         mine.product_url = prodUrlSet.get(0);

@@ -71,6 +71,16 @@ const plan = (options, campOptions = campRows()) => E.planCampaignMoneyEdit({ ba
   assert.deepEqual(p.unmappable, []);
   assert.equal(JSON.parse(p.mine.product_options_json)[1].url, U(52), '옵션 없는 상품 = 상품 url 하나');
 }
+{
+  // 오더 옵션 주소가 빈 옵션(상품 주소를 따라가는 줄) — 상품 주소만 바꾸고 옵션 칸은 옛 주소 그대로 보내도 막지 않는다(그 줄은 새 상품 주소를 따라간다)
+  const P2 = JSON.parse(JSON.stringify(PRODUCTS)); P2[0].options.forEach(o => { o.url = ''; });
+  const base2 = { ...base, product_options_json: JSON.stringify(P2) };
+  const rows2 = campRows({ 블랙: { option_url: U(1) }, 화이트: { option_url: U(1) } });
+  const p = E.planCampaignMoneyEdit({ baseState: base2, camp, body: { options: [opt('블랙', { optionUrl: U(1), productUrl: U(44) }), opt('화이트', { optionUrl: U(1), productUrl: U(44) }), unit()] }, campOptions: rows2 });
+  assert.deepEqual(p.unmappable, [], JSON.stringify(p.unmappable));
+  const j = JSON.parse(p.mine.product_options_json);
+  assert.equal(j[0].url, U(44)); assert.deepEqual(j[0].options.map(o => o.url), ['', ''], '옵션은 계속 상품 주소를 따라간다');
+}
 // ── ③ 손대지 않음 ──
 {
   // 공고에서만 고쳐 둔 옛 옵션 주소(지금 공고 값)를 그대로 보내면 = 손대지 않음

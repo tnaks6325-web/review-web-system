@@ -163,9 +163,11 @@ function stand(rows, opts) {
     _mixQuantity: null,
   };
   sandbox.window = sandbox;
+  // 결정 271 — 저장 모양(원장 유무)은 카드 구성에서 정해진다. 'opt' 로 세운 표 = 원장이 살아 있던 공고(상품 하나여도 원장 유지)
+  sandbox._rfLiveLedger = (o.mode || 'opt') === 'opt';
   vm.createContext(sandbox);
   ['RF_REVIEW_MIX_TYPES', 'RF_MIX_LABEL'].forEach(c => vm.runInContext(grabConst(recruitSrc, c), sandbox));
-  ['_prodMode', '_rfGroupUnit', '_rfRowProductName', '_optUnitEntries', 'readOptRows',
+  ['_prodMode', '_rfGroupUnit', '_rfRowProductName', '_optUnitEntries', 'readOptRows', '_rfRowProductUrl',
    '_readOptionReviewMix', '_writeOptionReviewMix', '_mixQuantity', '_mixVerdict',
    '_reviewMixRows', '_reviewMixKey', 'getRecruitOptionReviewTypeMix', '_isOptionReviewMix',
    '_mxBuild', '_mxAuto', '_mxMark', '_mxMarkAll', 'validateRecruitReviewTypeMix',

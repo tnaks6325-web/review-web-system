@@ -54,20 +54,28 @@ function grabConst(src, name) {
 /* ══════════════ 가짜 DOM (후손 선택자 + id 파싱 + getElementById 트리 탐색) ══════════════ */
 function makeDom() {
   function parseHtml(html) {
-    const out = [];
-    const re = /<(input|button|span|div|textarea)\b([^>]*)>/g;
+    // ★ 결정 271 — 상품 카드는 칸이 이름표 상자 안에 들어간다(겹친 마크업). 여는·닫는 태그 짝으로 실제 DOM 처럼 겹쳐 세운다
+    //   (평평하게 세우면 「.rf-gp-unit button」 같은 후손 선택자가 아무것도 못 찾아 버튼 배선을 시험할 수 없다).
+    const top = [], stack = [];
+    const VOID = new Set(['input', 'img', 'br']);
+    const re = /<(\/?)(input|button|span|div|textarea|strong|label|b|img)\b([^>]*)>/g;
     let m;
     while ((m = re.exec(html))) {
-      const node = mk(m[1]);
-      const cls = /class="([^"]*)"/.exec(m[2]);
+      if (m[1]) { for (let i = stack.length - 1; i >= 0; i--) if (stack[i].tag === m[2]) { stack.length = i; break; } continue; }
+      const node = mk(m[2]);
+      const cls = /class="([^"]*)"/.exec(m[3]);
       if (cls) cls[1].trim().split(/\s+/).forEach(c => c && node.classList.add(c));
-      const id = /id="([^"]*)"/.exec(m[2]);
+      const id = /id="([^"]*)"/.exec(m[3]);
       if (id) node.id = id[1];
-      const ph = /placeholder="([^"]*)"/.exec(m[2]);
+      const ph = /placeholder="([^"]*)"/.exec(m[3]);
       if (ph) node.placeholder = ph[1];
-      out.push(node);
+      let d; const dre = /data-([\w-]+)="([^"]*)"/g;
+      while ((d = dre.exec(m[3]))) node.dataset[d[1].replace(/-(\w)/g, (_, c) => c.toUpperCase())] = d[2];
+      const parent = stack[stack.length - 1];
+      if (parent) { node.parent = parent; parent.children.push(node); } else top.push(node);
+      if (!VOID.has(m[2])) stack.push(node);
     }
-    return out;
+    return top;
   }
   function matches(node, simple) {
     if (simple[0] === '#') return node.id === simple.slice(1);
@@ -102,6 +110,7 @@ function makeDom() {
       set innerHTML(v) { node._html = String(v); node.children = parseHtml(String(v)); node.children.forEach(c => { c.parent = node; }); },
       get innerHTML() { return node._html; },
       appendChild(c) { c.parent = node; node.children.push(c); return c; },
+      removeAttribute(k) { delete node['_attr_' + k]; }, setAttribute(k, v) { node['_attr_' + k] = String(v); },
       remove() { if (node.parent) node.parent.children = node.parent.children.filter(x => x !== node); },
       closest(sel) {
         let n = node;
@@ -147,10 +156,11 @@ function makeTable(opts) {
   dom.add('rf_prod_mode_note', 'span');
   ['inflow', 'review', 'notes'].forEach(f => dom.add('rf_wd_' + f, 'textarea'));
   const wrap = dom.add('rf_opt_wrap');
-  wrap.classList.add('rf-pm-none');
+  wrap.classList.add('rf-cards');
   const mode = dom.add('rf_prod_mode', 'input'); mode.value = 'none';
-  const sw = dom.add('rf_prod_mode_sw');
-  ['none', 'opt'].forEach(m => { const b = dom.mk('button'); b.classList.add('rf-pm-btn'); b.dataset.mode = m; sw.appendChild(b); });
+  // 결정 271 — 공고 전체 스위치는 없다. 모드는 카드에서 거꾸로 정해지고(_prodMode), 첫 카드 주소가 상품메인 칸으로 간다
+  dom.add('rf_inflow_type_value', 'input').value = 'link';
+  dom.add('rf_product_url', 'input');
   dom.add('rf_opt_addbtn', 'button');
 
   const sandbox = {
@@ -179,7 +189,7 @@ function makeTable(opts) {
   [
     '_htmlToPlainPreview', '_igSetList', '_igSplitInflow',
     '_ugNewKey', '_ugRegister', '_ugDrop', '_ugDropAll', '_ugDropBox', '_ugBuild', '_ugLoad', '_ugCompose', '_ugMark', '_ugAttachAll',
-    '_prodMode', '_applyProdModeUi', '_setProdModeNote', '_renderProdModeHelp', 'setProdMode', '_convertProdRows',
+    '_prodMode', '_applyProdModeUi', '_setProdModeNote', '_renderProdModeHelp', '_rfRefreshCards', '_rfSyncFirstCardUrl', '_rfRowProductUrl',
     '_renderProdTable', '_buildProdGroup', '_syncGroupTotals', 'addOptRow', '_buildOptThumbLine', '_buildOptRowEl',
     '_lastOptProductName', '_markDupProductNames', 'renderOptRows',
     '_rfHttpUrl', '_rfGroupUnit', '_rfRowProductName', '_optUnitEntries',
@@ -255,11 +265,15 @@ console.log('\n[C] 상품 단위 = 그룹당 선택지 하나');
   t2.sandbox._seed = [
     { productName: '상품C', unitKind: 'option', optKey: '옵1' },
     { productName: '상품C', unitKind: 'option', optKey: '옵2' },
+    // 결정 271: 공고 모드는 카드에서 정해진다 — 옵션 없는 카드 하나뿐이면 「옵션 없는 작업」이라 옵션 원장 자체를 안 쓴다.
+    //   원장을 쓰는 상황(카드 2개 이상)을 세워야 "그룹당 선택지 하나"를 시험할 수 있다.
+    { productName: '상품D', unitKind: 'option', optKey: '옵D' },
   ];
   t2.run("renderOptRows(_seed, { mode:'opt' })");
   t2.run("document.querySelectorAll('#rf_opt_rows .rf-gp')[0].dataset.unit = 'product'");
   const out2 = JSON.parse(t2.run('JSON.stringify(readOptRows())'));
-  ok('한 그룹에 행이 둘이어도 상품 단위면 선택지 1개', out2.length === 1 && out2[0].optKey === '상품C');
+  const outC = out2.filter(o => o.productName === '상품C');
+  ok('한 그룹에 행이 둘이어도 상품 단위면 선택지 1개', outC.length === 1 && outC[0].optKey === '상품C' && out2.length === 2);
 }
 
 /* ══════════════ D·E. 선택지 전용 유입가이드 왕복 ══════════════ */
@@ -423,11 +437,12 @@ console.log('\n[J] 안내줄 — 행마다 형제로 붙고, 채워지면 상태
   ok('종전 아이콘 버튼(.rf-ug-btn) 은 어디에도 없다(사본 부활 금지)',
     t.dom.byId.rf_opt_rows.querySelectorAll('.rf-ug-btn').length === 0);
 
-  ok('안내줄을 누르면 패널이 펼쳐진다(ug-on)', !unit1.classList.contains('ug-on'));
+  // 결정 271 — 인트라넷 상품 카드의 「가이드유입」 상자처럼 처음부터 펼쳐 둔다. 안내줄은 여전히 접고 펴는 스위치다
+  ok('처음부터 펼쳐져 있다(ug-on · 결정 271)', unit1.classList.contains('ug-on'));
   cta1.onclick();
-  ok('열림', unit1.classList.contains('ug-on'));
+  ok('안내줄을 누르면 접힌다', !unit1.classList.contains('ug-on'));
   cta1.onclick();
-  ok('다시 누르면 닫힌다', !unit1.classList.contains('ug-on'));
+  ok('다시 누르면 펼쳐진다', unit1.classList.contains('ug-on'));
 
   // 글을 채운 뒤 다시 살리면(_ugAttachAll) 안내줄도 "설정됨"으로 바뀐다
   const keyEmpty = unit1.querySelectorAll('.rf-opt-row')[0].dataset.ig;

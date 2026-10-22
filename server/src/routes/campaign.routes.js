@@ -1609,12 +1609,25 @@ async function getCampaignDetail(req, res, next) {
           'product_url', 'review_guide', 'special_notes', 'inflow_guide', 'guide_images',
           // 공고 창 시안 3차(결정 263): 「리뷰오더 고유 항목」 보기 전용 · 연결 표시줄 재료(읽기만)
           'id', 'title', 'manager_name', 'work_manager', 'product_distribution_mode', 'source_review_order_id', 'bidir_state',
+          'product_options_json',   // 결정 271: 상품 메인 주소를 아직 모르는 줄(196 이전)의 카드에 오더 쪽 주소를 보여 준다(보기만)
         ]);
         if (wo && wo.id) {
           orderInfo = {
             workOrderId: String(wo.id), title: String(wo.title || ''), sourceReviewOrderId: String(wo.source_review_order_id || ''),
             manager: String(wo.manager_name || wo.work_manager || ''), distribution: String(wo.product_distribution_mode || ''),
             linked: String(wo.bidir_state || '') === 'on', syncedAt: null,
+            productUrls: (() => {   // 상품 이름 → 오더의 상품 메인 주소(못 읽으면 빈 목록)
+              const out = {};
+              try {
+                const arr = JSON.parse(wo.product_options_json || '[]');
+                if (Array.isArray(arr)) for (const p of arr) {
+                  const n = String((p && p.name) || '').replace(/\|/g, '').trim();
+                  const u = String((p && (p.url || p.product_url)) || '').trim();
+                  if (n && u && !out[n]) out[n] = u;
+                }
+              } catch (_) { /* 모름 = 빈 목록 */ }
+              return out;
+            })(),
           };
         }
         if (needMix) {
