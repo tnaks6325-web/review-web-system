@@ -5,6 +5,8 @@
  *   60번  POST /api/drive/migrate-names        — 모든 탭 폴더를 [리뷰]·[구매캡처]로 일괄 개명
  *   60번  POST /api/drive/reset-folder-urls    — 재탐색 없이 폴더 URL 비움
  *   74번  POST /api/admin/db-rebuild           — 운영 4표 전체 DELETE 후 구글시트에서 재등록(무시트 작업 복구 불가)
+ *   272번 POST /api/drive/orphan-capture-cleanup · capture-rename-recipient · report-link (2026-10-22 · 결정 272)
+ *         — 고아 캡처 휴지통 이동 · 리뷰 사진 파일명 일괄 변경(실행하면 1,291장이 남의 이름이 된다) · 공개 링크 발급.
  *   270번 옛 관리자 대시보드 전용 입구(2026-10-22 · 결정 270) — 계정 관리·⬛ 마감/보관·주문 원장 편집·탭 일괄 설정 등.
  *         admin.html 은 결정 267 로 이미 없다. 되살리면 같은 화면 없는 쓰기 입구가 다시 열린다.
  * 실행: node tests/retiredBulkTools.test.js
@@ -63,5 +65,17 @@ for (const [r, names] of [[admin, ['noticesUnread', 'noticesAll', 'errorLogsList
   [reviewEdit, ['reviewEditList', 'reviewEditApprove', 'reviewEditReject']]]) {
   for (const n of names) assert.strictEqual(typeof r.handlers[n], 'function', `270번: Track B 위임 핸들러 ${n} 이 없다`);
 }
-console.log('✅ retiredBulkTools: 제거된 일괄 도구·옛 대시보드 입구 부재 확인');
+// ── 결정 272: Drive 남은 도구 3종(호출자 0) — 입구·서비스 파일·크론 배선 부재, 이미 보낸 보고 링크 열람은 남긴다 ──
+for (const p of ['/orphan-capture-cleanup', '/capture-rename-recipient', '/report-link']) {
+  assert.ok(!has(drive, p), `272번: /api/drive${p} 입구가 되살아났다`);
+}
+for (const f of ['orphanCaptureCleanup.service.js', 'captureFileRename.service.js']) {
+  assert.ok(!fs.existsSync(path.join(__dirname, '..', 'src/services', f)), `272번: ${f} 가 되살아났다`);
+}
+assert.ok(!/orphanCaptureCleanup|trashOrphanCaptures|captureFileRename/.test(
+  fs.readFileSync(path.join(__dirname, '..', 'src/jobs/cron.js'), 'utf8')), '272번: 크론이 고아 정리·파일명 정정을 다시 부른다');
+assert.ok(has(drive, '/report/:code'), '업체에 이미 보낸 보고 링크 열람(GET /api/drive/report/:code)이 사라졌다');
+assert.ok(has(drive, '/image/:id'), '보고 페이지·작업보드 이미지 프록시(GET /api/drive/image/:id)가 사라졌다');
+assert.ok(fs.existsSync(path.join(__dirname, '..', '..', 'frontend/report.html')), '보고 페이지(report.html)가 사라졌다');
+console.log('✅ retiredBulkTools: 제거된 일괄 도구·옛 대시보드 입구·Drive 남은 도구 부재 확인');
 process.exit(0);

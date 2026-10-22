@@ -122,6 +122,10 @@ for (const [method, p] of [
   ['GET', '/api/review-edit/list'], ['POST', '/api/review-edit/approve']]) {
   ok(`270: ${method} ${p} 제거 상태`, !exists(method, p));
 }
+/* 결정 272: Drive 남은 도구 3종 — 지운 입구가 되살아나거나 매핑이 다시 생기면 잡는다(열람 GET /api/drive/report/:code 는 아래 '남아 있음'). */
+for (const [method, p] of [['POST', '/api/drive/orphan-capture-cleanup'], ['POST', '/api/drive/capture-rename-recipient'], ['POST', '/api/drive/report-link']]) {
+  ok(`272: ${method} ${p} 제거 상태`, !exists(method, p));
+}
 /* 남겨야 하는 것 — 리뷰어·작업보드·인트라넷이 실제로 부르거나(공유 핸들러) 사용자 결정 대기(결정 186 킵) */
 for (const [method, p] of [
   ['POST', '/api/admin/login'], ['POST', '/api/admin/intranet-login'], ['GET', '/api/search'], ['GET', '/api/index'],

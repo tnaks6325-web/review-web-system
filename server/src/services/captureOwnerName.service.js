@@ -25,9 +25,10 @@
 
 const { logger } = require('../utils/logger');
 
-/* ★★ 해석 규칙은 **여기 한 곳**이다 — 단건(아래 `recipientNameForRow`)과 배치(파일명 소급 정정
-   `captureFileRename.service`)가 같은 조각을 쓴다. SQL 을 복사해 두면 "제출은 수취인인데
-   소급 정정은 주문자"처럼 두 경로가 조용히 갈린다(레포의 `rowNumbering.filledSql` 관용구).
+/* ★★ 해석 규칙은 **여기 한 곳**이다 — 단건(아래 `recipientNameForRow`)이 이 조각을 쓴다.
+   (배치 소비처였던 파일명 소급 정정 `captureFileRename.service` 는 2026-10-22 제거 · 결정 272.)
+   이름 해석이 또 필요해지면 SQL 을 복사하지 말고 이 조각을 가져다 쓴다 — 복사본은
+   "제출은 수취인인데 다른 경로는 주문자"처럼 조용히 갈린다(레포의 `rowNumbering.filledSql` 관용구).
    ★ 별칭 고정: `ri`(검색 명단) · `cp`(작업표) · `os`(주문 원장). */
 const RECIPIENT_PICK_SQL = `COALESCE(
                 NULLIF(BTRIM(ri.recipient_name), ''),
