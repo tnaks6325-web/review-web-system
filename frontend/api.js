@@ -55,8 +55,6 @@ const API_BASE_URL = (function() {
 const _ACTION_MAP = {
   // 검색/인덱스 (Section 5)
   'searchAll':              { method: 'GET',  path: '/api/search' },
-  'buildIndexSmart':        { method: 'POST', path: '/api/index/build' },
-  'buildIndexByCampaign':   { method: 'POST', path: '/api/index/build-sheet' },
 
   // 옵션(Option) 기능
   'getReviewerOptions':{ method: 'GET', path: '/api/tab/reviewer-options' },
@@ -86,7 +84,6 @@ const _ACTION_MAP = {
   'adminLoginV2':       { method: 'POST', path: '/api/admin/login' },
   'adminMyNickname':    { method: 'GET',  path: '/api/admin/my-nickname' },
   'adminSaveNickname':  { method: 'POST', path: '/api/admin/my-nickname' },
-  'releaseBuildLock':   { method: 'POST', path: '/api/admin/release-lock' },
   
   // 영업담당자 (Staff)
   'staffLogin':         { method: 'POST', path: '/api/admin/staff-login' },
@@ -98,9 +95,6 @@ const _ACTION_MAP = {
   'submitReview':       { method: 'POST', path: '/api/submit/review' },
   'submitOrderForm':    { method: 'POST', path: '/api/submit/order' },
   'findSlot':           { method: 'POST', path: '/api/submit/find-slot' },
-
-  // 진단/기타
-  'campaignList':       { method: 'GET',  path: '/api/diag/campaign-list' },
 
   // 블랙리스트
   'blacklist':      { method: 'POST', path: '/api/blacklist' },
@@ -122,21 +116,8 @@ const _ACTION_MAP = {
   'reviewEditMyRequests': { method: 'GET',  path: '/api/review-edit/my-requests' },
   'reviewEditCancel':     { method: 'POST', path: '/api/review-edit/cancel' },
 
-  // Phase 2-5: Sync Queue + Build History
-  'syncQueueStats':     { method: 'GET',  path: '/api/diag/sync-queue' },
-  'syncQueueRetry':     { method: 'POST', path: '/api/diag/sync-queue/retry' },
-  'syncQueuePurge':     { method: 'POST', path: '/api/diag/sync-queue/purge' },
-  'syncQueueDelete':    { method: 'POST', path: '/api/diag/sync-queue/delete' },
-  'orderMirrorStatus':  { method: 'GET',  path: '/api/diag/order-mirror-status' },
-  'orderReconcile':     { method: 'POST', path: '/api/diag/order-reconcile' },
-  'queueDrain':         { method: 'POST', path: '/api/diag/queue-drain' },
-  'buildHistory':       { method: 'GET',  path: '/api/diag/build-history' },
-
-  // ★ 스마트 빌드 (Drive API + Sheets batchGet 기반)
-  'smartBuildStatus':      { method: 'GET',  path: '/api/admin/smart-build/status' },
-  'smartBuildRun':         { method: 'POST', path: '/api/admin/smart-build/run' },
-  'smartBuildStart':       { method: 'POST', path: '/api/admin/smart-build/start' },
-  'smartBuildStop':        { method: 'POST', path: '/api/admin/smart-build/stop' },
+  // (시트 시절 큐·빌드 도구 매핑 syncQueue*·orderMirrorStatus·orderReconcile·queueDrain·buildHistory·smartBuild*·
+  //  buildIndexSmart·buildIndexByCampaign·releaseBuildLock·진단 campaignList 는 2026-10-22 제거 — 결정 273. 호출하는 화면 0.)
 
   // ★ 모집공고(캠페인) 시스템
   'campaignList':          { method: 'GET',  path: '/api/campaign/list' },

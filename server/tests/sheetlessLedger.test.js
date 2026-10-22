@@ -7,7 +7,7 @@
  *  A. 순수함수 — 헤더 결정 우선순위 / 작업표 → 2차원 배열(seq 자리 보존·헤더 행 위치)
  *  B. fail-closed — 시트 기반 탭에서는 장부를 만들지 않는다(시트 값 덮어쓰기 사고 차단)
  *  C. 판정 사본 0 — 검색 명단은 **기존 파서**(indexBuilder.parseTabRows)를 통과해 나온다
- *  D. 크론 단속 — smartBuild·RAW 미러·변경감지가 무시트 시트/탭을 건너뛴다(구조 1)
+ *  D. 크론 단속 — 시트를 읽는 주기 스윕은 결정 273 으로 전부 삭제 · 남은 단일 시트 빌드(buildOneSheet)는 무시트 탭을 건너뛴다(구조 1)
  *  E. 두 장부의 행 수 차이가 **의도**임을 고정(raw=빈 슬롯 포함 / index=이름 있는 행만)
  *  F. (PGTEST_URL) 진짜 PG — 장부 생성 결과가 `listActiveTabs` 에 실제로 뜨는지(구조 2)
  */
@@ -232,25 +232,20 @@ const PARTS = [
   {
     const im = srv('src/services/indexBuilder.service.js');
     const rm = srv('src/services/rawMirror.service.js');
-    const sb = srv('src/services/smartBuild.service.js');
-    ok('RAW 미러 스윕: 전부 무시트인 시트 제외', /sweepSkipSheetIds\(pool\)/.test(rm) && /sheetIds\.filter\(id => !_slSheets\.has\(id\)\)/.test(rm));
-    ok('RAW 미러 요약에 제외 건수 고지(조용한 누락 금지)', /sheetlessSkipped/.test(rm));
-    // ★★ 시트를 실제로 읽는 크론은 셋 — smartBuild(5분) · buildIndexSmart(전체빌드) · checkDirtySheets(변경감지).
-    //   ★ smartBuild 를 빠뜨리면 이관한 탭을 5분마다 다시 읽어 **작업표로 만든 장부를 옛 시트 값으로 덮는다**
-    //     (구현 중 실제로 빠져 있었고 회귀가드가 잡았다 — 이 셋을 함께 고정할 것).
-    const gates = (im.match(/filter\(id => !_slSheets\.has\(id\)\)/g) || []).length
-                + (sb.match(/filter\(id => !_slSheets\.has\(id\)\)/g) || []).length;
-    ok('세 스윕 모두 시트 단위 게이트 통과(한 곳만 막으면 새 나간다)', gates === 3);
-    // ★★ 탭 단위 게이트 — 이관은 한 시트 안에서 탭별로 진행된다(같은 시트에 시트 기반 탭이 남는다)
-    ok('전체빌드 탭 게이트: 무시트 탭은 시트에서 빌드하지 않는다',
+    // ★★ 시트를 주기적으로 읽던 크론 셋 — smartBuild(5분) · buildIndexSmart(전체빌드) · checkDirtySheets(변경감지) — 과
+    //   RAW 미러 전체 스윕(mirrorAllSheets)은 결정 273(2026-10-22)으로 삭제됐다. 되살아나면 그 스윕은
+    //   "무시트 시트를 건너뛰는 게이트"를 다시 갖춰야 한다(smartBuild 를 빠뜨리면 작업표로 만든 장부를 옛 시트 값으로 덮는다)
+    //   — 그래서 여기서는 **스윕이 없다는 사실**을 고정하고, 게이트 배선은 sweepSkipScope 가 파일 전체에서 본다.
+    ok('주기 스윕 4종이 되살아나지 않았다(결정 273)',
+      !fs.existsSync(path.join(__dirname, '..', 'src/services/smartBuild.service.js'))
+      && !/async function (buildIndexSmart|checkDirtySheets)\b/.test(im) && !/async function mirrorAllSheets\b/.test(rm));
+    // ★★ 탭 단위 게이트 — 이관은 한 시트 안에서 탭별로 진행된다(같은 시트에 시트 기반 탭이 남는다).
+    //   남은 시트 읽기 = 단일 시트 빌드(buildOneSheet → _processOneSheet). 무시트 탭은 시트에서 빌드하지 않는다.
+    ok('단일 시트 빌드 탭 게이트: 무시트 탭은 시트에서 빌드하지 않는다',
       /isSheetlessTab\(sheetlessKeys, sheetId, t\.properties\.title/.test(im) && /skippedSheetless/.test(im));
-    ok('스마트빌드(5분 크론) 탭 게이트 — 장부 덮어쓰기 차단',
-      /isSheetlessTab\(sheetlessKeys, sheetId, t\.properties\.title/.test(sb) && /tabsSkippedSheetless/.test(sb));
-    ok('탭 게이트 재료를 실제로 읽는다(sheetlessTabKeys 조회 — 두 빌더 호출부 모두)',
-      (im.match(/sheetlessTabKeys\(pool\)/g) || []).length === 2 && /sheetlessTabKeys\(pool\)/.test(sb));
-    ok('스마트빌드 요약에 무시트 제외 건수 고지(조용한 누락 금지)',
-      /무시트 \$\{result\.tabsSkippedSheetless\}탭 제외/.test(sb)
-      && /result\.tabsSkippedSheetless\+\+;/.test(sb));   // ★ 증가까지 — 문구만 보면 카운터 제거를 통과시킨다
+    ok('탭 게이트 재료를 실제로 읽는다(buildOneSheet 호출부의 sheetlessTabKeys 조회)',
+      (im.match(/sheetlessTabKeys\(pool\)/g) || []).length === 1
+      && /async function buildOneSheet[\s\S]*sheetlessKeys: await sheetlessTabKeys\(pool\)/.test(im));
   }
   {
     // 판정 유틸 실행 — fail-open(조회 실패는 빈 집합 = 종전 동작)

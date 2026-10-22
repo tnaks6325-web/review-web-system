@@ -275,13 +275,16 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
     ok('② 수동제출도 sheetlessDone 이면 enqueue 하지 않는다', /if \(ledger\.sheetRow && !sheetlessDone && !queuedWorkboardApply\)/.test(man));
     // ★★ 백스톱이 핵심 — 이관 전에 쌓여 있던 큐·새 호출부·판정 실패분이 여기서 막힌다
     ok('③ 큐 실행부 백스톱: 쓰기 직전 다시 판정', /isSheetless\(pool, sheetId, tabName\)/.test(sq));
-    // ★ 위치가 곧 방어다 — 시트를 **읽기 전에** 막아야 한다. 함수 본문 안에서 순서를 본다
-    //   (파일 전체 indexOf 는 `_readGuardWindow` 의 *정의*를 먼저 집어 항상 통과한다).
-    const exec = sq.slice(sq.indexOf('async function _executeBatch'));
-    ok('③ 백스톱은 배치 시작 직후 = 가드 읽기·시트 쓰기 **앞**',
+    // ★ 위치가 곧 방어다 — 시트를 **읽기 전에** 막아야 한다. 함수 본문 안에서 순서를 본다.
+    //   결정 273: 배치 경로(_executeBatch)를 지우며 백스톱을 단건 order_append 실행부로 옮겼다 — 같은 순서 계약을 그 본문에서 본다(검사 의미 불변).
+    const exec = sq.slice(sq.indexOf("case 'order_append': {"), sq.indexOf("case 'order_update': {"));
+    ok('③ 백스톱은 order_append 실행 맨 앞 = RAW 메타 조회·가드 읽기·시트 쓰기 **앞**',
       exec.indexOf('무시트 탭 시트쓰기 차단') >= 0 &&
-      exec.indexOf('무시트 탭 시트쓰기 차단') < exec.indexOf('await _readGuardWindow(') &&
+      exec.indexOf('무시트 탭 시트쓰기 차단') < exec.indexOf('loadRawTabContext(') &&
+      exec.indexOf('무시트 탭 시트쓰기 차단') < exec.indexOf('throttledCall(') &&
       exec.indexOf('무시트 탭 시트쓰기 차단') < exec.indexOf('batchUpdateSheet('));
+    ok('③ 백스톱 사유는 done 갱신까지 이어진다(error_msg 를 NULL 로 덮지 않는다)',
+      /error_msg = \$2 WHERE id = \$1`,\s*\[item\.id, \(execOut && execOut\.doneNote\) \|\| null\]/.test(sq));
     ok('③ 큐 항목은 버리지 않고 done + 사유(무신호 금지)', /sheetless tab — 시트 쓰기 생략/.test(sq));
     ok('④ 복구(reconcile)도 큐 대신 작업표 재기록', /isSheetlessTab\(_slKeys/.test(ol) && /writeOrderToWorktable\(/.test(ol));
     // ★ 목록에서 통째로 빼면 그 주문은 영영 복구되지 않는다 → 대체 경로가 있어야 한다
@@ -306,11 +309,12 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
   console.log('\n[E] 시트를 읽어 대조하는 경로에서 제외');
   {
     const wv = noLineComments(srv('src/services/writtenVerify.service.js'));
-    const bs = noLineComments(srv('src/jobs/orderBatchScheduler.js'));
     const slSql = /COALESCE\(tc\.sheetless, FALSE\) = TRUE/;
     ok('사후검증 대상에서 무시트 탭 제외(정상 주문 오판 → 구글 쓰기 전이 차단)',
       slSql.test(wv) && /NOT EXISTS \(\s*SELECT 1 FROM tab_configs tc/.test(wv));
-    ok('시트 반영 배치 스케줄러도 무시트 탭 제외', slSql.test(bs));
+    // 결정 273: 시트 반영 배치 스케줄러(orderBatchScheduler)는 삭제 — 남은 단건 실행부의 무시트 백스톱은 [D]③ 이 본다.
+    ok('시트 반영 배치 스케줄러가 되살아나지 않았다(되살리면 무시트 탭 제외부터)',
+      !fs.existsSync(path.join(__dirname, '..', 'src/jobs/orderBatchScheduler.js')));
     // ★★ 새 종결 상태를 만들지 않았다 — 'written' 이 이미 종결이고 소비처가 여럿이다
     const so = noLineComments(srv('src/services/sheetlessOrder.service.js'));
     ok("종결 상태는 기존 'written' 그대로(새 상태 미도입 — 소비처 스윕 불필요)",

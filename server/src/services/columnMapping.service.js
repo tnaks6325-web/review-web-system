@@ -208,8 +208,7 @@ async function saveMapping(sheetId, tabGid, tabName, columns, updatedBy) {
          WHERE sheet_id = $1 AND (tab_gid = $2 OR tab_name = $3)`,
       [sheetId, gid, tabName || null]
     );
-    // 스마트빌드 장수 프로세스의 인메모리 캐시도 무효화(isFirstRun 이후 DB 재로드 안 함)
-    try { require('./smartBuild.service').invalidateChecksumCache(sheetId, tabName); } catch (_) {}
+    // (스마트빌드 인메모리 체크섬 캐시 무효화는 스케줄러와 함께 2026-10-22 제거 — 결정 273)
     logger.info(`[mapping] 체크섬 무효화 — sheet=${String(sheetId).slice(0,12)} gid=${gid} tab=${tabName} → 다음 빌드 재파싱`);
   } catch (err) {
     logger.warn(`[mapping] 체크섬 무효화 실패(무시, 매핑은 저장됨): ${err.message}`);

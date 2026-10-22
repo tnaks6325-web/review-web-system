@@ -32,16 +32,23 @@ const src = f => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
       /SHEET_SWEEP_SKIP_WIDE === '0'[\s\S]{0,80}FULLY_SHEETLESS_SHEET_IDS_SQL/.test(s));
     ok('조회 실패는 빈 집합(fail-open — 게이트가 죽어도 스윕은 계속)',
       /catch \(_\) \{\s*return new Set\(\);/.test(s));
-    // ★ 소비처 3곳이 같은 함수를 부른다(읽는 범위 진단 sheetReadScope 는 2026-09-28 제거 — 결정 186 2번) — 한 곳만 옛 이름으로 남으면 그 스윕만 계속 읽는다
-    for (const f of ['src/services/rawMirror.service.js', 'src/services/smartBuild.service.js',
-                     'src/services/indexBuilder.service.js']) {
-      ok(`${path.basename(f)} 가 게이트 함수를 부른다`, /sweepSkipSheetIds\(/.test(src(f)));
+    // ★ 결정 273(2026-10-22): 이 게이트를 부르던 주기 스윕 셋(RAW 미러 전체·스마트빌드·전체 인덱스 빌드/변경감지)은
+    //   전부 삭제됐다. 대신 **"등록 시트 전체를 훑는 코드는 반드시 이 게이트를 부른다"** 를 파일 전체에서 본다(강화) —
+    //   새 스윕이 생기면(또는 옛 스윕이 되살아나면) 게이트 없이 무시트 시트를 구글에 묻는 순간 잡힌다.
+    const walk = (d) => fs.readdirSync(d, { withFileTypes: true })
+      .flatMap(e => e.isDirectory() ? walk(path.join(d, e.name)) : (e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
+    const srcRoot = path.join(__dirname, '..', 'src');
+    const sweepers = walk(srcRoot).filter(f => !f.endsWith('sheetlessScope.js'))
+      .filter(f => /REGISTERED_SHEET_IDS_SQL|FROM campaigns UNION SELECT DISTINCT sheet_id FROM tab_configs/.test(fs.readFileSync(f, 'utf8')));
+    for (const f of sweepers) {
+      ok(`${path.relative(srcRoot, f)} — 등록 시트 전체를 훑으면 게이트 함수를 부른다`, /sweepSkipSheetIds\(/.test(fs.readFileSync(f, 'utf8')));
     }
+    ok('결정 273: 주기 스윕(스마트빌드·전체 미러·전체 인덱스 빌드·변경감지)이 되살아나지 않았다',
+      !fs.existsSync(path.join(srcRoot, 'services', 'smartBuild.service.js'))
+      && !/async function (mirrorAllSheets|buildIndexSmart|checkDirtySheets)\b/.test(
+        ['src/services/rawMirror.service.js', 'src/services/indexBuilder.service.js'].map(src).join('\n')));
     ok('옛 이름(fullySheetlessSheetIds) 호출부 0 — 이름이 남으면 의미가 갈린다',
-      !/fullySheetlessSheetIds\s*\(/.test(
-        ['src/services/rawMirror.service.js', 'src/services/smartBuild.service.js',
-         'src/services/indexBuilder.service.js']
-          .map(src).join('\n')));
+      !walk(srcRoot).some(f => /fullySheetlessSheetIds\s*\(/.test(fs.readFileSync(f, 'utf8'))));
   }
 
   /* ══════════ B. 읽기 전용 ══════════ */

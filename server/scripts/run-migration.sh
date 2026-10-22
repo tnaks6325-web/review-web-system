@@ -11,7 +11,7 @@
 #   1. PostgreSQL DDL (테이블 생성)
 #   2. 세부목록 → tab_configs 마이그레이션
 #   3. 인애드명단 → reviewers 마이그레이션
-#   4. 인덱스 전체 재빌드 (POST /api/index/build)
+#   4. (인덱스 전체 재빌드 POST /api/index/build — 2026-10-22 제거 · 결정 273. 무시트 작업 색인은 작업표에서 만든다)
 #   5. 관리자 계정 시드 (선택)
 # ═══════════════════════════════════════════════════════════
 
@@ -57,11 +57,7 @@ echo ""
 
 # Step 4: 인덱스 재빌드 (서버가 실행 중이어야 함)
 echo "═══ Step 4: 인덱스 전체 재빌드 ═══"
-echo "⚠️  서버가 실행 중일 때 아래 명령으로 재빌드:"
-echo "   curl -X POST http://localhost:3000/api/index/build \\"
-echo "     -H 'Content-Type: application/json' \\"
-echo "     -H 'Authorization: Bearer <your-jwt-token>' \\"
-echo "     -d '{\"forceFullRebuild\": true}'"
+echo "   (구글시트 전체 재빌드 입구는 2026-10-22 제거 — 결정 273. 무시트 작업 색인은 작업표에서 바로 만들어진다)"
 echo ""
 
 # Step 5: 초기 관리자 계정 시드 (선택)

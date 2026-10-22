@@ -79,7 +79,7 @@ async function main() {
   });
 
   await test('인증 없이 보호된 API 호출', async () => {
-    const r = await req('GET', '/api/admin/smart-build/status');
+    const r = await req('GET', '/api/admin/my-nickname');   // (옛 표본 smart-build/status 는 2026-10-22 제거 — 결정 273)
     if (r.status !== 401) throw new Error(`status: ${r.status}`);
     return `401 반환 확인`;
   });
@@ -156,13 +156,7 @@ async function main() {
   });
   console.log('');
 
-  // ═══ 13. 관리자 대시보드 ═══
-  console.log('▶ [13] 빌드잠금');
-  await test('POST /api/admin/release-lock', async () => {
-    const r = await req('POST', '/api/admin/release-lock', {}, authH());
-    return `잠금 해제: ${JSON.stringify(r.data).substring(0, 80)}`;
-  });
-  console.log('');
+  // (13. 빌드잠금 해제 /api/admin/release-lock — 시트 시절 색인 수동 조작이라 2026-10-22 제거 · 결정 273)
 
   // (14. 진단 엔드포인트 debug-tab 은 2026-10-05 제거 — 결정 186 103번)
 

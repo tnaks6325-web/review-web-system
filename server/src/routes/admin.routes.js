@@ -3,7 +3,7 @@ const router = express.Router();
 // Track B(trackB.routes.js)가 경로 문자열 대신 이름으로 부르는 핸들러 모음 — 맨 아래 router.handlers 로 내보낸다(결정 270).
 const { lastRouteHandler } = require('../utils/routeHandlers');
 const _handlers = {};
-const { authMiddleware, masterOnlyMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const {
   loginAdmin, loginStaff, loginAdvertiser, loginIntranet,
 } = require('../services/auth.service');
@@ -131,153 +131,8 @@ _handlers.myNicknameSet = lastRouteHandler(router); // Track B 프록시가 이 
 // (리뷰어 앱 "공고수정 허용 명단" GET/POST /api/admin/campaign-editors 는 2026-10-19 폐지 — 결정 257.
 //  리뷰어 앱 공고수정은 인트라넷 관리자 로그인으로 연다: POST /api/reviewer/campaign-token-intranet.)
 
-// ═══════════════════════════════════════════════════════════
-// POST /api/admin/release-lock — 빌드 잠금 해제 (GAS: releaseBuildLock)
-// ═══════════════════════════════════════════════════════════
-router.post('/release-lock', authMiddleware, async (req, res, next) => {
-  try {
-    await pool.query(
-      `UPDATE build_locks SET is_locked = FALSE, locked_at = NULL, locked_by = NULL WHERE lock_key = 'INDEX_BUILD'`
-    );
-    res.json({ ok: true, message: '빌드 잠금이 해제되었습니다.' });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// ★ 스마트 빌드 (Drive API + Sheets batchGet 기반 — 기존 인덱스빌드와 별개)
-// ═══════════════════════════════════════════════════════════
-const {
-  runSmartBuild,
-  startSmartBuild,
-  stopSmartBuild,
-  pauseSmartBuild,
-  resumeSmartBuild,
-  getSmartBuildStatus,
-  resetSmartBuildCache,
-} = require('../services/smartBuild.service');
-
-// GET /api/admin/smart-build/status — 스마트 빌드 상태 조회
-router.get('/smart-build/status', authMiddleware, async (req, res, next) => {
-  try {
-    const status = getSmartBuildStatus();
-    res.json({ ok: true, ...status });
-  } catch (err) { next(err); }
-});
-
-// POST /api/admin/smart-build/run — 스마트 빌드 1회 수동 실행
-router.post('/smart-build/run', authMiddleware, async (req, res, next) => {
-  try {
-    // 비동기 실행: 즉시 "시작됨" 응답 → 백그라운드 처리
-    const statusBefore = getSmartBuildStatus();
-    if (statusBefore.running) {
-      return res.json({ ok: false, error: '이미 스마트 빌드가 실행 중입니다.' });
-    }
-
-    // force=true 파라미터가 있으면 체크섬 캐시 초기화 후 실행 (강제 전체 갱신)
-    const force = req.body?.force === true || req.query?.force === 'true';
-    if (force) {
-      const cacheResult = resetSmartBuildCache();
-      const { logger: log } = require('../utils/logger');
-      log.info(`[smartBuild] 강제 실행 — 캐시 리셋: ${JSON.stringify(cacheResult)}`);
-    }
-
-    // 백그라운드 실행 — 강제(force) 실행은 시트 lane 양보 없이 완주(부분완료 보고 방지)
-    runSmartBuild({ noYield: force }).then(result => {
-      const { broadcast } = require('../utils/sse');
-      const deferredNote = (result.sheetsDeferred || 0) > 0 ? `, ${result.sheetsDeferred}시트 연기(다음 주기 처리)` : '';
-      broadcast('smart_build_done', {
-        message: `스마트빌드 완료: ${result.tabsUpdated}탭 갱신, ${result.tabsSkipped}탭 스킵, ${result.errors}건 오류${deferredNote}`,
-        ...result,
-      });
-    }).catch(err => {
-      const { logger } = require('../utils/logger');
-      logger.error(`[smartBuild] 수동 실행 오류: ${err.message}`);
-    });
-
-    res.json({ ok: true, message: '스마트 빌드를 시작했습니다. 완료 시 SSE로 알림됩니다.' });
-  } catch (err) { next(err); }
-});
-
-// POST /api/admin/smart-build/start — 스케줄러 시작 (5분 주기). async라 await(심판 수정2).
-router.post('/smart-build/start', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
-  try {
-    const started = await startSmartBuild();
-    res.json({ ok: true, started, status: getSmartBuildStatus() });
-  } catch (err) { next(err); }
-});
-
-// POST /api/admin/smart-build/pause { minutes? } — 관리자 일시정지(영속·자동재개). 라이브 이벤트 중 쿼터 회복용.
-//   stop과 달리 interval은 유지하고 pausedUntil까지 tick만 스킵 → 만료 시 자동 재개(끈 채 방치 방지).
-router.post('/smart-build/pause', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
-  try {
-    const minutes = parseInt((req.body && req.body.minutes), 10);
-    const out = await pauseSmartBuild(Number.isFinite(minutes) ? minutes : undefined);
-    res.json({ ok: true, ...out, status: getSmartBuildStatus() });
-  } catch (err) { next(err); }
-});
-
-// POST /api/admin/smart-build/resume — 관리자 수동 재개(pause 해제)
-router.post('/smart-build/resume', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
-  try {
-    const out = await resumeSmartBuild();
-    res.json({ ok: true, ...out, status: getSmartBuildStatus() });
-  } catch (err) { next(err); }
-});
-
-// POST /api/admin/smart-build/stop — 스케줄러 정지(프로세스성 clearInterval; 재부팅 시 복원됨).
-//   ⚠️ 오래 끄려면 pause를 쓸 것(stop은 재배포/재부팅에 리셋됨).
-router.post('/smart-build/stop', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
-  try {
-    const stopped = stopSmartBuild();
-    res.json({ ok: true, stopped, note: '재부팅 시 재기동됨. 오래 정지하려면 /smart-build/pause 사용', status: getSmartBuildStatus() });
-  } catch (err) { next(err); }
-});
-
-// (POST /db-rebuild — 운영 4표 전체 DELETE 후 구글시트 탭목록에서 재등록: 무시트 작업은 복구 불가 → 2026-09-29 제거 · 결정 186 74번)
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/admin/campaign-delete/:sheetId — 오류 시트(캠페인) DB 일괄 삭제
-//   시스템 모니터링에서 접근 불가 시트를 관리자가 직접 정리할 때 사용
-//   campaigns, tab_configs, index_master, review_index 4개 테이블에서 삭제
-// ═══════════════════════════════════════════════════════════
-router.post('/campaign-delete/:sheetId', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
-  const { logger } = require('../utils/logger');
-  try {
-    const { sheetId } = req.params;
-    logger.info(`[campaign-delete] 요청: ${sheetId}`);
-    if (!sheetId || sheetId.length < 10) {
-      return res.status(400).json({ ok: false, error: 'sheetId가 유효하지 않습니다.' });
-    }
-
-    const r1 = await pool.query('DELETE FROM review_index WHERE sheet_id = $1', [sheetId]);
-    const r2 = await pool.query('DELETE FROM index_master WHERE sheet_id = $1', [sheetId]);
-    const r3 = await pool.query('DELETE FROM tab_configs WHERE sheet_id = $1', [sheetId]);
-    const r4 = await pool.query('DELETE FROM campaigns WHERE sheet_id = $1', [sheetId]);
-
-    const deleted = {
-      review_index: r1.rowCount,
-      index_master: r2.rowCount,
-      tab_configs: r3.rowCount,
-      campaigns: r4.rowCount,
-    };
-    const total = Object.values(deleted).reduce((a, b) => a + b, 0);
-
-    logger.info(`[campaign-delete] 시트 ${sheetId.substring(0, 15)}... 삭제 완료: ${JSON.stringify(deleted)}`);
-
-    res.json({
-      ok: true,
-      sheetId,
-      deleted,
-      totalDeleted: total,
-      message: `시트 데이터 ${total}건 삭제 완료`,
-    });
-  } catch (err) {
-    logger.error(`[campaign-delete] 오류: ${err.message}`);
-    next(err);
-  }
-});
+// (시트 시절 색인 수동 조작 — POST /release-lock · /smart-build/status·run·start·pause·resume·stop ·
+//  POST /campaign-delete/:sheetId 는 2026-10-22 제거 — 결정 273 · 결정 186 88번. 스마트빌드 스케줄러(smartBuild.service)도 함께 삭제.)
 
 // ═══════════════════════════════════════════════════════════
 // 관리자 공지사항 CRUD

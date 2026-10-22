@@ -519,7 +519,9 @@ console.log('\nE. 데이터 보전 가드');
     src.indexOf('if (!allowRepurchase)') < src.indexOf('createOrderLedgerEntry('));
   ok('E16 ★ 등록된 리뷰어 번호를 남의 타계정으로 붙이지 않는다(063과 같은 정책 스위치)',
     src.includes('CAMPAIGN_SUB_REGISTERED_POLICY') && src.includes('sub_accounts'));
-  ok('E17 큐 등록 후 kick — cron까지 시트에 안 뜨던 문제', /kickOrderBatch\(sheetId, tabName\)/.test(src));
+  // 결정 273: 배치 스케줄러(kickOrderBatch)를 지워 큐 등록 뒤 깨우는 것은 queuePump 하나다(검사 의미 불변 — 등록 뒤 깨운다).
+  ok('E17 큐 등록 후 kick — cron까지 시트에 안 뜨던 문제',
+    /enqueue\('order_append'[\s\S]{0,600}kickQueuePump\(\)/.test(src));
 }
 {
   const em = R('src/middleware/error.middleware.js');

@@ -103,14 +103,8 @@ async function processQueue(batchSize = 10, { interItemDelayMs = 2000, onlyType 
     //   pending 항목을 동시에 집어 이중 시트쓰기(중복행)·정체(processing stall)가 나던 경합을 차단.
     //   - 다른 워커가 이미 잠근 행은 SKIP LOCKED 로 건너뛴다(대기 없음).
     //   - attempts는 여기서 올리지 않는다(원본 시맨틱 유지: 항목별 실행 직전에 +1).
-    // ★ 제안A: ORDER_BATCH_AUTO=1이면 order_append는 상시 배치 스케줄러 전담(단건 2콜/건 금지).
-    //   30초 cron의 단건 order_append가 throttle 45/분을 최대 40콜/분 잠식하던 것을 제거 →
-    //   배치(라운드당 2콜)로 단일화해 쿼터 효율 극대화. review/deposit 등 다른 타입은 계속 처리(손실0).
-    //   ⚠ 결정 271(2026-10-22)부터 AUTO 를 끄면 단건 cron 이 order_append 를 흡수하지 **않는다** — 시트 타입 전체를
-    //   집지 않는다(시트 시절 종료 스위치). 큐 백스톱은 15초 배치 cron이 담당.
-    //   ★ F3 백스톱(심판 D4b): onlyType='order_append' 면 skipOrderAppend를 무시하고 그 타입만 처리.
-    //     배치 heartbeat가 끊긴 비상시에만 cron이 소량(5건) 단건으로 호출 → 영구 미반영 방지.
-    const skipOrderAppend = process.env.ORDER_BATCH_AUTO === '1' && !onlyType;
+    // ★ 결정 273(2026-10-22): 상시 배치 스케줄러(order_append 전담)를 지웠다. AUTO=1 이면 이 단건 워커가
+    //   order_append 까지 모든 타입을 집는다(배치 이전의 동작). AUTO 꺼짐(=운영)은 결정 271 그대로 작업보드 반영만.
     // ★★ 결정 271: 시트 타입은 ORDER_BATCH_AUTO=1 일 때만 집는다. 꺼지면 DB_ONLY(작업보드 반영)만 —
     //   시트 시절 잔여 행(pending order_append 등)은 손대지 않는다(구글 호출 0 · 행은 기록으로 보존).
     const sheetTypesOn = sheetQueueTypesEnabled();
@@ -119,7 +113,7 @@ async function processQueue(batchSize = 10, { interItemDelayMs = 2000, onlyType 
     }
     const typeFilter = onlyType
       ? 'AND type = $2'
-      : (!sheetTypesOn ? 'AND type = ANY($2::text[])' : (skipOrderAppend ? "AND type <> 'order_append'" : ''));
+      : (!sheetTypesOn ? 'AND type = ANY($2::text[])' : '');
     const params = onlyType ? [batchSize, onlyType]
       : (!sheetTypesOn ? [batchSize, [...DB_ONLY_QUEUE_TYPES]] : [batchSize]);
     const { rows: items } = await pool.query(
@@ -164,12 +158,12 @@ async function processQueue(batchSize = 10, { interItemDelayMs = 2000, onlyType 
       );
 
       try {
-        await _executeItem(item);
+        const execOut = await _executeItem(item);
 
-        // 성공 → done
+        // 성공 → done (무시트 백스톱으로 건너뛴 항목은 사유를 남긴다)
         await pool.query(
-          `UPDATE sync_queue SET status = 'done', processed_at = NOW(), error_msg = NULL WHERE id = $1`,
-          [item.id]
+          `UPDATE sync_queue SET status = 'done', processed_at = NOW(), error_msg = $2 WHERE id = $1`,
+          [item.id, (execOut && execOut.doneNote) || null]
         );
         succeeded++;
         logger.info(`[syncQueue] ✅ id=${item.id} type=${item.type} 완료`);
@@ -235,373 +229,12 @@ async function processQueue(batchSize = 10, { interItemDelayMs = 2000, onlyType 
   return { processed, succeeded, failed, elapsed, quotaExceeded };
 }
 
-// ── 특정 탭만 우선 드레인(FIFO 우회) ──
-//   글로벌 큐는 created_at FIFO라 최근 탭이 뒤로 밀린다. 이 함수는 payload의 sheetId+tabName이
-//   일치하는 order_append만 골라 즉시 처리(대기 0, sheetsThrottle이 쿼터 가드). 관리자 "탭 우선 반영"용.
-async function drainTabQueue({ sheetId, tabName, maxMillis = 30000, batchSize = 20 } = {}) {
-  if (!sheetId || !tabName) throw new Error('drainTabQueue: sheetId, tabName 필수');
-  const start = Date.now();
-  let processed = 0, succeeded = 0, failed = 0;
-  while (Date.now() - start < maxMillis) {
-    // ★ #2: 글로벌 큐워커와 동시에 돌아도 같은 항목을 이중처리하지 않도록 원자 클레임(SKIP LOCKED).
-    //   (탭 우선 flush가 글로벌 워커와 경합해 stall 나던 직접 원인 제거.)
-    const { rows: items } = await pool.query(
-      `UPDATE sync_queue SET status = 'processing', processed_at = NOW()
-        WHERE id IN (
-          SELECT id FROM sync_queue
-           WHERE status = 'pending' AND attempts < max_retry AND type = 'order_append'
-             AND payload->>'sheetId' = $1 AND payload->>'tabName' = $2
-           ORDER BY created_at ASC
-           LIMIT $3
-           FOR UPDATE SKIP LOCKED
-        )
-        RETURNING *`,
-      [sheetId, tabName, batchSize]
-    );
-    if (!items.length) break;
-    for (const item of items) {
-      processed++;
-      await pool.query(`UPDATE sync_queue SET attempts = attempts + 1 WHERE id = $1`, [item.id]);
-      try {
-        await _executeItem(item);
-        await pool.query(`UPDATE sync_queue SET status = 'done', processed_at = NOW(), error_msg = NULL WHERE id = $1`, [item.id]);
-        succeeded++;
-      } catch (err) {
-        if (err && err.__defer) {
-          await pool.query(`UPDATE sync_queue SET status='pending', attempts=GREATEST(attempts-1,0), processed_at=NOW() WHERE id=$1`, [item.id]);
-          continue;
-        }
-        const newAttempts = (item.attempts || 0) + 1;
-        const newStatus = newAttempts >= item.max_retry ? 'failed' : 'pending';
-        await pool.query(`UPDATE sync_queue SET status = $1, error_msg = $2, processed_at = NOW() WHERE id = $3`,
-          [newStatus, String(err.message || '').substring(0, 500), item.id]);
-        failed++;
-      }
-    }
-  }
-  return { processed, succeeded, failed, elapsedMs: Date.now() - start };
-}
+// (탭 우선 드레인 drainTabQueue · 배치 드레인 drainTabQueueBatched/_drainLoop/_executeBatch/_readGuardWindow —
+//  관리자 order-flush-tab·order-batch-drain 과 상시 배치 스케줄러(orderBatchScheduler) 전용 — 는 2026-10-22 제거 · 결정 273.
+//  시트 타입 큐는 ORDER_BATCH_AUTO=1 일 때 아래 단건 워커(processQueue)가 order_append 까지 함께 처리한다.)
 
-// ═══════════════════════════════════════════════════════════
-// ★ 배치 드레인 (버스트 전용) — 한 탭 order_append를 가드 1콜 + write 1콜(청크당)로 반영.
-//   라이브 핫패스. 레드-블루-심판 적대검증 통과(R-B1~B10 방어). ORDER_BATCH_DRAIN=1 일 때만 활성.
-// ═══════════════════════════════════════════════════════════
-const BATCH_ROW_CAP = parseInt(process.env.ORDER_BATCH_ROW_CAP || '50', 10); // R-B9: 1콜당 행 상한
-// R-1b: 락분리(AUTO=1) 시 단건 백스톱과 배치가 같은 항목을 동시에 잡지 않도록 재점유 임계를 충분히 키운다(단건 throttle 대기 상한 초과).
-const STALE_PROCESSING_SEC = parseInt(process.env.ORDER_BATCH_STALE_PROCESSING_SEC || '60', 10); // 정체 processing 재점유 임계
-
-function _isQuota(err) {
-  if (!err) return false;
-  const m = String(err.message || '');
-  const status = err.code || err.status || (err.response && err.response.status);
-  return status === 429 || /quota|rate limit|RESOURCE_EXHAUSTED|429/i.test(m);
-}
-
-async function _restorePending(items) {
-  const ids = (items || []).map(it => it.id);
-  if (ids.length) {
-    await pool.query(
-      `UPDATE sync_queue SET status='pending', processed_at=NOW() WHERE id = ANY($1::int[]) AND status='processing'`,
-      [ids]
-    );
-  }
-}
-
-// ★ R-B3: values.batchGet 금지. readSheet(GID모드 _readSheetByGridData) 단일 사각형 1콜.
-//   여러 targetRow를 minRow:maxRow × minCol:maxCol 한 사각형으로 읽고 행→cells 맵 반환.
-//   그리드밖 행 = 사각형이 []거나 짧은 배열 → 없는 행은 [] = 빈칸 통과(단건경로 시맨틱 동일).
-//   minCol/maxCol/cols 는 0-based(buildMirrorGuardRanges의 g.col, _getColLetter 와 동일).
-async function _readGuardWindow(sheetId, tabName, gid, rows, minCol, maxCol, _reader) {
-  const nums = [...new Set(rows.map(r => parseInt(r, 10)).filter(n => Number.isInteger(n) && n > 0))];
-  if (!nums.length) return new Map();
-  const minRow = Math.min(...nums), maxRow = Math.max(...nums);
-  const range = `'${tabName}'!${_getColLetter(minCol)}${minRow}:${_getColLetter(maxCol)}${maxRow}`;
-  // _reader: 테스트 주입용(없으면 실제 throttled readSheet). 반환은 행배열의 배열(grid).
-  const read = _reader || ((rng, opts) => throttledCall(() => readSheet(sheetId, rng, opts)));
-  const grid = await read(range, gid ? { gid } : {});
-  const map = new Map();
-  for (const r of nums) {
-    const off = r - minRow;
-    map.set(r, (grid && grid[off]) || []); // 없으면 [] = guardBlocksWrite false(통과)
-  }
-  return map;
-}
-
-// 한 탭의 pending order_append를 묶어 가드 1콜 + write 1콜(청크당)으로 반영.
-// ★ R-B1: queue_pump_drain + order_reconcile 두 락 중첩 → 펌프·가속드레인·reconcile 모두와 직렬화.
-async function drainTabQueueBatched({ sheetId, tabName, maxMillis = 60000, batchSize = BATCH_ROW_CAP, runReconcileFirst = true, oneChunk = false } = {}) {
-  if (!sheetId || !tabName) throw new Error('drainTabQueueBatched: sheetId, tabName 필수');
-  if (process.env.ORDER_BATCH_DRAIN !== '1') {                  // R-B10: 플래그 게이트(되돌리기)
-    return drainTabQueue({ sheetId, tabName, maxMillis });      // 미설정 시 검증된 단건 경로
-  }
-  const { withJobLock } = require('../utils/jobLock');
-
-  // ── F1(심판 D1): AUTO=1일 때만 락 분리(정체 직접원인 제거). AUTO=0이면 기존 2중락 유지(R-J1: 펌프 공존 안전). ──
-  const lockSplit = process.env.ORDER_BATCH_AUTO === '1';
-  if (!lockSplit) {
-    // 락 중첩: 바깥 queue_pump_drain(펌프/가속드레인 배제) → 안 order_reconcile(reconcile 배제).
-    return withJobLock('queue_pump_drain', async () => {
-      return withJobLock('order_reconcile', async () => {
-        // ★ R-B5 완화: 배치는 큐만 드레인 → 행 미배정 주문(pending_no_row)은 큐에 없다.
-        //   같은 락 안에서 reconcile 먼저 돌려 행배정+enqueue → 그 큐를 곧바로 빼낸다.
-        if (runReconcileFirst) {
-          try {
-            const { reconcileStuckOrders } = require('./orderLedger.service');
-            await reconcileStuckOrders({ sheetId, tabName, limit: 1000, perTabCap: 1000 });
-          } catch (e) { logger.warn(`[batchDrain] reconcile 선행 실패(무시): ${e.message}`); }
-        }
-        return _drainLoop({ sheetId, tabName, maxMillis, batchSize });
-      }, { onBusy: () => ({ skipped: true, reason: 'order_reconcile_lock_busy' }) });
-    }, { onBusy: () => ({ skipped: true, reason: 'queue_pump_drain_lock_busy' }) });
-  }
-
-  // ── AUTO=1: (1) reconcile만 짧은 단독락(DB-only + maxRow 라이브 탭당1콜). 락 busy면 양보(이미 다른 경로가 reconcile 중). ──
-  if (runReconcileFirst) {
-    await withJobLock('order_reconcile', async () => {
-      try {
-        const { reconcileStuckOrders } = require('./orderLedger.service');
-        return await reconcileStuckOrders({ sheetId, tabName, limit: 300, perTabCap: 60, useLiveMaxRow: true });
-      } catch (e) { logger.warn(`[batchDrain] reconcile 선행 실패(무시): ${e.message}`); return null; }
-    }, { onBusy: () => ({ skipped: true, reason: 'order_reconcile_lock_busy' }) });
-    // 락 busy여도 큐 드레인은 계속(이미 행배정된 항목 빼냄).
-  }
-  // ── (2) 큐 드레인: 락 밖. SKIP LOCKED + STALE(60s) 재점유가 이중처리 차단(R-1b 조건부 written이 안전 흡수). ──
-  return _drainLoop({ sheetId, tabName, maxMillis, batchSize, oneChunk });
-}
-
-// 드레인 루프(락 안/밖 공용). 한 탭 order_append를 청크 배치(가드1콜+쓰기1콜)로 반영.
-// oneChunk=true(인터리브): 1 batch만 처리하고 반환(점유시간 최소·공평 양보). emptied=클레임 0행(이번 라운드 비움 — 완료 단정 아님).
-async function _drainLoop({ sheetId, tabName, maxMillis, batchSize, oneChunk = false }) {
-  const start = Date.now();
-  let processed = 0, succeeded = 0, failed = 0, deferred = 0, quotaExceeded = false, emptied = false;
-  // ★ 버그1(R3): 이번 드레인콜에서 defer된 항목은 재클레임 제외(옛 stale sheetRow 재읽기·throttle 낭비·busy-spin 차단).
-  const skipIds = [];
-  while (Date.now() - start < maxMillis) {
-    // R-B8: 단건과 동일 클레임 조건(type='order_append') → 같은 항목은 한쪽만 점유(SKIP LOCKED).
-    const { rows: items } = await pool.query(
-      // ★ 버스트/백로그 대응: pending뿐 아니라 "정체된 processing"도 재점유.
-      //   STALE_PROCESSING_SEC(기본 60s) 넘은 processing은 재점유한다(R-1b: 단건 백스톱과 겹쳐도
-      //   조건부 written이 이중쓰기를 멱등 흡수).
-      //   ★ ($5 IS NULL OR id <> ALL($5)) 선행 필수: id<>ALL(NULL)은 NULL이라 전건 제외되므로 skipIds 없을 땐 NULL 전달.
-      `UPDATE sync_queue SET status='processing', processed_at=NOW()
-        WHERE id IN (SELECT id FROM sync_queue
-           WHERE attempts<max_retry AND type='order_append'
-             AND payload->>'sheetId'=$1 AND payload->>'tabName'=$2
-             AND ($5::int[] IS NULL OR id <> ALL($5::int[]))
-             AND (status='pending'
-                  OR (status='processing' AND processed_at < NOW() - ($4 || ' seconds')::interval))
-           ORDER BY created_at ASC LIMIT $3 FOR UPDATE SKIP LOCKED)
-        RETURNING *`,
-      [sheetId, tabName, batchSize, String(STALE_PROCESSING_SEC), skipIds.length ? skipIds : null]
-    );
-    if (!items.length) { emptied = true; break; }           // 빈 큐 = 이번 라운드 비움(완료 신호 아님)
-    const r = await _executeBatch(items, sheetId, tabName);
-    processed += r.processed; succeeded += r.succeeded; failed += r.failed; deferred += r.deferred;
-    if (Array.isArray(r.deferredIds)) for (const id of r.deferredIds) if (!skipIds.includes(id)) skipIds.push(id);
-    if (r.quotaExceeded) { quotaExceeded = true; break; }   // R-B9: quota → 양보(락 해제)
-    if (oneChunk) break;                                     // R2/R5: 1청크만 → 점유시간 최소·공평 양보
-  }
-  return { processed, succeeded, failed, deferred, quotaExceeded, emptied, elapsedMs: Date.now() - start };
-}
-
-async function _executeBatch(items, sheetId, tabName) {
-  let succeeded = 0, failed = 0, deferred = 0, quotaExceeded = false;
-  const deferredIds = [];   // 버그1(R3): 같은 드레인콜서 재클레임 제외할 defer 항목(스핀/throttle 낭비 차단)
-
-  /* ★★ 무시트 백스톱(탈 구글시트 W2 · fail-closed) — **쓰기 직전 마지막 방어**.
-     제출·수동제출·복구 경로가 이미 큐를 안 태우지만, ① 이관 **전에** 쌓여 있던 큐 항목
-     ② 앞으로 생길 새 호출부 ③ 판정 실패(fail-open)로 새어 들어온 건이 남아 있다.
-     여기서 막지 않으면 **이관해 놓은 작업의 옛 시트에 주문이 다시 쓰인다**(장부와 갈라짐).
-     ★ 큐 항목은 버리지 않고 `done` + 사유 — 주문 자체는 무시트 기록 경로가 완결시킨다. */
-  try {
-    const { isSheetless } = require('../utils/sheetlessScope');
-    if (await isSheetless(pool, sheetId, tabName)) {
-      await pool.query(
-        `UPDATE sync_queue SET status='done', error_msg='sheetless tab — 시트 쓰기 생략(작업표 기록 경로가 담당)',
-                processed_at=NOW() WHERE id = ANY($1::int[])`, [items.map(it => it.id)]);
-      logger.warn(`[syncQueue] 무시트 탭 시트쓰기 차단 tab=${tabName} items=${items.length}`);
-      return { processed: items.length, succeeded: 0, failed: 0, deferred: items.length, quotaExceeded: false, deferredIds: [] };
-    }
-  } catch (_) { /* 판정 실패는 종전 경로(fail-open) — 제출 시점 게이트가 1차 방어 */ }
-
-  // 실행 직전 attempts +1 (원본 시맨틱 — 클레임이 아니라 실행 단위)
-  await pool.query(`UPDATE sync_queue SET attempts=attempts+1 WHERE id = ANY($1::int[])`, [items.map(it => it.id)]);
-
-  const parsed = items.map(it => ({ item: it, p: typeof it.payload === 'string' ? JSON.parse(it.payload) : it.payload }));
-
-  // ── J-1 (R-B6): id=ANY 단일 SELECT로 전 항목 최신값 재조회. ──
-  const osIds = parsed.map(x => x.p.orderSubmissionId).filter(Boolean);
-  const aliveMap = new Map();
-  if (osIds.length) {
-    const { rows } = await pool.query(
-      `SELECT id, deleted_at, mirror_status, orderer, recipient, user_id, phone, address, bank, account,
-              depositor, price, order_num, memo, date_str, selected_opt_key,
-              submitted_at, reassign_count
-         FROM order_submissions WHERE id = ANY($1::uuid[])`, [osIds]);
-    for (const row of rows) aliveMap.set(row.id, row);
-  }
-
-  // ── 탭 컨텍스트 1회. 메타 없으면 전체 pending 복원(자가치유). ──
-  let tabContext = null;
-  try { tabContext = await loadRawTabContext(sheetId, parsed[0].p.gid, tabName); } catch (_) { tabContext = null; }
-  if (!tabContext || !tabContext.headers || !tabContext.headers.length) {
-    await _restorePending(items);
-    return { processed: items.length, succeeded: 0, failed: 0, deferred: items.length, quotaExceeded,
-             deferredIds: items.map(it => it.id) };
-  }
-  const ctxTab = tabContext.tabName || tabName;
-  const ctxGid = tabContext.tabGid || parsed[0].p.gid || '';
-
-  // ── 후보 구성: deleted=큐 done, 행 미배정=pending, 그 외 J-1 최신값으로 orderData 교체. ──
-  const live = [];
-  for (const x of parsed) {
-    const os = x.p.orderSubmissionId ? aliveMap.get(x.p.orderSubmissionId) : null;
-    // ★ 공정화 #4(R1/R10 보조): deleted/written(고아)면 시트 재기록 금지 → 시트콜 0으로 큐만 done.
-    //   written 재기록은 멱등이라 무해하나 throttle 낭비 → 흡수해서 신규에 예산 집중.
-    if (x.p.orderSubmissionId && (!os || os.deleted_at || os.mirror_status === 'written' || os.mirror_status === 'stuck_manual')) {
-      await pool.query(`UPDATE sync_queue SET status='done', processed_at=NOW(), error_msg=NULL WHERE id=$1`, [x.item.id]);
-      continue;
-    }
-    if (!x.p.sheetRow) {
-      await pool.query(`UPDATE sync_queue SET status='pending', attempts=GREATEST(attempts-1,0), processed_at=NOW() WHERE id=$1 AND status='processing'`, [x.item.id]);
-      deferredIds.push(x.item.id); deferred++; continue;
-    }
-    const orderData = os ? _osRowToOrderData(os) : x.p.orderData;
-    live.push({ item: x.item, p: x.p, orderData, sheetRow: parseInt(x.p.sheetRow, 10) });
-  }
-  if (!live.length) return { processed: items.length, succeeded, failed, deferred, quotaExceeded, deferredIds };
-
-  // ── 가드 1콜 (R-B3): 모든 가드 col union을 minCol..maxCol 한 사각형으로. ──
-  const allCols = new Set();
-  const _optCols = optionWriteColumns(tabContext.headers);      // ★ C′: 같은 사각형에 합류(콜 순증 0)
-  for (const x of live) {
-    x.guards = buildMirrorGuardRanges({ tabName: ctxTab, headers: tabContext.headers, targetRow: x.sheetRow, orderData: x.orderData });
-    for (const g of x.guards) allCols.add(g.col);
-  }
-  for (const c of _optCols) allCols.add(c);
-  invalidateSheetMeta(sheetId);                                 // D3b: stale 그리드 무효화
-  if (allCols.size) {
-    const cols = [...allCols];
-    const minCol = Math.min(...cols), maxCol = Math.max(...cols);
-    let guardMap;
-    try {
-      guardMap = await _readGuardWindow(sheetId, ctxTab, ctxGid, live.map(x => x.sheetRow), minCol, maxCol);
-    } catch (err) {
-      await _restorePending(items);                             // 가드 실패=전체 보류(쓰기 금지)
-      if (_isQuota(err)) return { processed: items.length, succeeded, failed, deferred, quotaExceeded: true };
-      throw err;
-    }
-    for (const x of live) {
-      const cells = guardMap.get(x.sheetRow) || [];
-      x.optProbe = (col) => ({ known: true, value: String(cells[col - minCol] || '') });
-      x.blocked = x.guards.some(g => guardBlocksWrite(String(cells[g.col - minCol] || '').trim(), g));
-    }
-  }
-
-  // ── 차단행 처리(버그1): defer(유예)/release(재배정)/giveup(수동전환·상한). ── (R1/R2/R3/R6)
-  //   release: 큐항목 'done'을 '먼저' → 그 뒤 claim 해제/강등(크래시 시에도 stale 재드레인 churn 불가·J1).
-  //   defer:   attempts 되돌림 + deferredIds로 동일 드레인콜 재클레임 제외(옛 점유행 재읽기·busy-spin 차단·R3).
-  //   giveup:  reassign 상한 초과 → stuck_manual(reconcile/스케줄러 제외 = 무한 append 종결·R2) + claim 보존.
-  const passed = [];
-  let anyBlocked = false;
-  for (const x of live) {
-    if (!x.blocked) { passed.push(x); continue; }               // R-B7: 단일 진실원본
-    anyBlocked = true;
-    const os = x.p.orderSubmissionId ? aliveMap.get(x.p.orderSubmissionId) : null;
-    const decision = _guardBlockDecision({
-      recovered: x.p.recovered, submittedAt: os && os.submitted_at, reassignCount: os && os.reassign_count });
-    if (decision === 'giveup') {
-      await pool.query(
-        `UPDATE order_submissions SET mirror_status='stuck_manual',
-                sheet_error='guard blocked; exceeded max reassign — needs manual entry'
-          WHERE id=$1 AND mirror_status<>'written'`, [x.p.orderSubmissionId]);
-      await pool.query(`UPDATE sync_queue SET status='done', error_msg='guard blocked; giveup(stuck_manual)', processed_at=NOW() WHERE id=$1 AND status='processing'`, [x.item.id]);
-      deferred++;
-    } else if (decision === 'release') {
-      // J1: 큐 'done'을 release '앞에' → 크래시-윈도에도 stale 항목 재드레인 없음(order는 done된 큐 없이 reconcile 재진입).
-      await pool.query(`UPDATE sync_queue SET status='done', error_msg='guard blocked; released for reassignment', processed_at=NOW() WHERE id=$1 AND status='processing'`, [x.item.id]);
-      // J2: dedupKey 유무와 무관하게 무조건 호출(내부에서 dedupKey/orderId 가드) → sheet_row NULL·failed로 reconcile 재배정.
-      try { await _releaseOrderRowClaim({ sheetId, tabName: ctxTab, dedupKey: x.p.dedupKey, orderId: x.p.orderSubmissionId, orderSubmissionId: x.p.orderSubmissionId }); } catch (_) {}
-      await pool.query(`UPDATE order_submissions SET reassign_count=COALESCE(reassign_count,0)+1 WHERE id=$1`, [x.p.orderSubmissionId]);
-      deferred++;
-    } else { // defer(유예): grace 미경과 실시간 주문 — 일시 write 경합을 영구소실로 오판하지 않음(R6)
-      await pool.query(`UPDATE sync_queue SET status='pending', attempts=GREATEST(attempts-1,0), error_msg='guard blocked (grace/defer)', processed_at=NOW() WHERE id=$1 AND status='processing'`, [x.item.id]);
-      deferredIds.push(x.item.id); deferred++;
-    }
-  }
-  // ★ 시트 변경 감지(이벤트 기반): 가드 차단 = "시트가 예상과 다름"(수동 편집/재배치 신호) →
-  //   그 시트만 자동 재미러+리컨실(triggerSheetMirrorOnce, 60초/시트 debounce·order_reconcile 락).
-  //   released 주문이 사람 클릭 없이 현재 실제 하단 빈 행으로 재배정된다. best-effort(백그라운드).
-  if (anyBlocked) {
-    try { require('./orderLedger.service').triggerSheetMirrorOnce(sheetId); } catch (_) {}
-  }
-  if (!passed.length) return { processed: items.length, succeeded, failed, deferred, quotaExceeded, deferredIds };
-
-  // ── 쓰기 (R-B9 청크 캡). 청크당 batchUpdate 1콜, 순차폴백 비활성. ──
-  for (let i = 0; i < passed.length; i += BATCH_ROW_CAP) {
-    const chunk = passed.slice(i, i + BATCH_ROW_CAP);
-    const batchData = [];
-    for (const x of chunk) {
-      // 복구분(재배정 append)은 배경색 대신 비고란에 'system' 표기.
-      const od = x.p.recovered ? { ...x.orderData, memo: _markSystemMemo(x.orderData && x.orderData.memo, x.p.recoverReason) } : x.orderData;
-      const _bd = buildBatchUpdateData({ tabName: ctxTab, headers: tabContext.headers, targetRow: x.sheetRow, orderData: od });
-      // ★ C′: optProbe 없으면(가드 읽기 미수행) 옵션 칸은 쓰지 않는다(fail-closed)
-      const _optFilt = filterOptionWritesBlankOnly({ batchData: _bd, headers: tabContext.headers,
-        tabName: ctxTab, targetRow: x.sheetRow, probe: x.optProbe });
-      batchData.push(..._optFilt.data);
-      _reportOptionSuppressed(_optFilt.suppressed, { sheetId, tabName: ctxTab, gid: ctxGid,
-        sheetRow: x.sheetRow, orderSubmissionId: x.p.orderSubmissionId });
-    }
-    try {
-      if (batchData.length) {
-        await throttledCall(() => batchUpdateSheet(sheetId, batchData, 'RAW',
-          { ...(ctxGid ? { gid: ctxGid } : {}), noSequentialFallback: true }));  // R-B9
-      }
-    } catch (err) {
-      await _restorePending(chunk.map(x => x.item));             // R-B2: 청크 전체 멱등 재시도
-      if (_isQuota(err)) { quotaExceeded = true; break; }
-      failed += chunk.length; continue;
-    }
-    // ── 쓰기 성공 청크에만: 조건부 written + 신원기록 (같은 루프, 단일 진실원본). ──
-    for (const x of chunk) {
-      // ★ R-1b: 조건부 written(mirror_status<>'written'). 락분리(AUTO=1)로 단건 백스톱이
-      //   같은 주문을 먼저 썼다면 0행 갱신 → 신원기록 생략(이중 흡수). markOrderWritten 전역함수는
-      //   reconcile 등 타 호출자 보존 위해 손대지 않고 여기서 로컬 조건부 UPDATE.
-      // 역동기 provenance(R1): 방금 쓴 매핑칸 서명 기록 → detect가 내 흔적을 변경으로 오인 안 함.
-      let _sig = null;
-      try { _sig = computeRowWriteSig(tabContext.headers, x.orderData); } catch (_) {}
-      const w = await pool.query(
-        `UPDATE order_submissions SET mirror_status='written',
-                sheet_row=COALESCE($2::int, sheet_row), sheet_written_at=NOW(), sheet_error=NULL,
-                last_sheet_write_sig=COALESCE($3, last_sheet_write_sig)
-          WHERE id=$1 AND mirror_status<>'written' RETURNING id`,
-        [x.p.orderSubmissionId, x.sheetRow, _sig]
-      );
-      if (w.rowCount === 0) {
-        await pool.query(`UPDATE sync_queue SET status='done', processed_at=NOW(), error_msg=NULL WHERE id=$1`, [x.item.id]);
-        continue;  // 이미 written(다른 경로가 먼저 씀) → 신원기록 생략(이중 흡수)
-      }
-      try {
-        const { rows: codeRows } = await pool.query(
-          `SELECT owner_reviewer_id AS "ownerReviewerId", participant_identity_id AS "participantIdentityId"
-             FROM order_submissions WHERE id = $1`, [x.p.orderSubmissionId]
-        );
-        const codeIdentity = codeRows[0] || {};
-        await recordParticipationLink({ sheetId, tabName: ctxTab, rowIndex: x.sheetRow,
-          phone8: x.p.loginPhone8, phone: x.orderData && x.orderData.phone,
-          name: x.p.loginName || (x.orderData && x.orderData.orderer), source: 'order_batch_drain',
-          ownerReviewerId: codeIdentity.ownerReviewerId, participantIdentityId: codeIdentity.participantIdentityId });
-        await recordReviewIdentity({ sheetId, tabName: ctxTab, tabGid: ctxGid, rowIndex: x.sheetRow,
-          phone8: x.p.loginPhone8, phone: x.orderData && x.orderData.phone,
-          name: x.p.loginName || (x.orderData && x.orderData.orderer), recipient: x.orderData && x.orderData.recipient });
-      } catch (idErr) { logger.warn(`[batchDrain] 신원기록 실패(무시): ${idErr.message}`); }
-      await pool.query(`UPDATE sync_queue SET status='done', processed_at=NOW(), error_msg=NULL WHERE id=$1`, [x.item.id]);
-      succeeded++;
-    }
-    // (복구행 표식은 배경색 대신 비고란 'system'으로 대체 — 위 batchData 생성 시 반영.)
-  }
-  return { processed: items.length, succeeded, failed, deferred, quotaExceeded, deferredIds };
-}
+// 무시트 백스톱으로 시트 쓰기를 생략한 큐 항목에 남기는 사유(done + 사유 — 무신호 금지)
+const SHEETLESS_SKIP_NOTE = 'sheetless tab — 시트 쓰기 생략(작업표 기록 경로가 담당)';
 
 // ── 개별 항목 실행 ──
 async function _executeItem(item) {
@@ -706,6 +339,21 @@ async function _executeItem(item) {
     case 'order_append': {
       let { sheetId, tabName, orderData, loginPhone8, loginName, gid, sheetRow, orderSubmissionId, recovered, recoverReason, dedupKey } = payload;
       if (!sheetId || !tabName) throw new Error('payload 누락');
+      /* ★★ 무시트 백스톱(탈 구글시트 W2 · fail-closed) — **시트를 읽거나 쓰기 전 마지막 방어**.
+         제출·수동제출·복구 경로가 이미 큐를 안 태우지만, ① 이관 **전에** 쌓여 있던 큐 항목
+         ② 앞으로 생길 새 호출부 ③ 판정 실패(fail-open)로 새어 들어온 건이 남아 있다.
+         여기서 막지 않으면 **이관해 놓은 작업의 옛 시트에 주문이 다시 쓰인다**(장부와 갈라짐)
+         — 가상 시트ID(wt_…)면 RAW 메타 조회가 자동 미러로 구글을 부르기도 한다.
+         ★ 큐 항목은 버리지 않고 `done` + 사유 — 주문 자체는 무시트 기록 경로가 완결시킨다.
+         ★ 결정 273: 이 방어는 배치 경로(_executeBatch)에 있었다. 배치 스케줄러를 지우며 order_append 를
+           이 단건 경로가 맡게 됐으므로 같은 판정·같은 사유 문구로 옮겼다(완화 아님). */
+      try {
+        const { isSheetless } = require('../utils/sheetlessScope');
+        if (await isSheetless(pool, sheetId, tabName)) {
+          logger.warn(`[syncQueue] 무시트 탭 시트쓰기 차단 tab=${tabName} id=${item.id}`);
+          return { doneNote: SHEETLESS_SKIP_NOTE };
+        }
+      } catch (_) { /* 판정 실패는 종전 경로(fail-open) — 제출 시점 게이트가 1차 방어 */ }
       if (!sheetRow) throw new Error('payload 누락: sheetRow');
 
       try {
@@ -1033,52 +681,7 @@ async function _setPStatus(pool, id, st) {
   await pool.query(`UPDATE campaign_participants SET mirror_status=$2, updated_at=NOW() WHERE id=$1`, [id, st]);
 }
 
-// ── 큐 통계 조회 ──
-async function getQueueStats() {
-  const { rows } = await pool.query(`
-    SELECT
-      status,
-      COUNT(*) as count,
-      MAX(created_at) as latest_created,
-      MAX(processed_at) as latest_processed
-    FROM sync_queue
-    GROUP BY status
-    ORDER BY status
-  `);
-
-  const stats = { pending: 0, processing: 0, done: 0, failed: 0, total: 0 };
-  rows.forEach(r => {
-    stats[r.status] = parseInt(r.count);
-    stats.total += parseInt(r.count);
-  });
-
-  // 최근 실패 항목 (payload 포함 — 어떤 탭/시트에서 실패했는지 확인용)
-  const { rows: recentFailed } = await pool.query(`
-    SELECT id, type, error_msg, attempts, max_retry, created_at, processed_at, payload
-    FROM sync_queue
-    WHERE status = 'failed'
-    ORDER BY processed_at DESC NULLS LAST
-    LIMIT 5
-  `);
-
-  // ★ 타입×상태 분해(적체 원인 진단: review_submit vs order_append 고아 구분)
-  const { rows: byType } = await pool.query(`
-    SELECT type, status, COUNT(*)::int AS count
-    FROM sync_queue
-    GROUP BY type, status
-    ORDER BY type, status
-  `);
-  // pending order_append 중 "이미 written/canceled/삭제된 주문"(고아) 수 — 실제 미반영과 구분
-  const { rows: orphanRows } = await pool.query(`
-    SELECT COUNT(*)::int AS orphans
-    FROM sync_queue sq
-    JOIN order_submissions os ON os.id = (sq.payload->>'orderSubmissionId')::uuid
-    WHERE sq.type='order_append' AND sq.status='pending'
-      AND (os.deleted_at IS NOT NULL OR os.mirror_status IN ('written','canceled'))
-  `).catch(() => [{ orphans: null }]);
-
-  return { stats, recentFailed, byType, orphanOrderAppendPending: orphanRows[0] && orphanRows[0].orphans };
-}
+// (큐 현황 getQueueStats · 실패 항목 삭제 deleteItem/deleteAllFailed — /api/diag/sync-queue* 전용 — 는 2026-10-22 제거 · 결정 273)
 
 // ── 특정 항목 수동 재시도 ──
 async function retryItem(id) {
@@ -1287,28 +890,6 @@ function _mapOrderToRow(headers, orderData) {
   });
 }
 
-// ── 특정 항목 삭제 (failed 상태만) ──
-async function deleteItem(id) {
-  const { rows } = await pool.query(
-    `DELETE FROM sync_queue
-     WHERE id = $1 AND status = 'failed'
-     RETURNING id, type`,
-    [id]
-  );
-  if (rows.length === 0) throw new Error(`id=${id}인 실패 항목을 찾을 수 없거나 이미 삭제됨`);
-  logger.info(`[syncQueue] 🗑️ id=${id} type=${rows[0].type} 삭제 완료`);
-  return rows[0];
-}
-
-// ── 모든 실패 항목 삭제 ──
-async function deleteAllFailed() {
-  const { rowCount } = await pool.query(
-    `DELETE FROM sync_queue WHERE status = 'failed'`
-  );
-  logger.info(`[syncQueue] 🗑️ 실패 항목 ${rowCount}건 일괄 삭제`);
-  return { deleted: rowCount };
-}
-
 // ── 특정 주문(orderSubmissionId)의 pending 큐항목을 즉시 처리(FIFO 우회) ──
 //   order_append/order_update/order_cancel은 payload에 orderSubmissionId가 있다(tabName은 update/cancel엔 없음).
 //   글로벌 큐가 백로그면 편집/취소가 FIFO 뒤로 밀리는데, 이 함수로 그 주문의 항목만 골라 즉시 반영한다.
@@ -1335,8 +916,9 @@ async function drainOrderQueue(orderSubmissionId, { maxItems = 5 } = {}) {
     processed++;
     await pool.query(`UPDATE sync_queue SET attempts = attempts + 1 WHERE id = $1`, [item.id]);
     try {
-      await _executeItem(item);
-      await pool.query(`UPDATE sync_queue SET status = 'done', processed_at = NOW(), error_msg = NULL WHERE id = $1`, [item.id]);
+      const execOut = await _executeItem(item);
+      await pool.query(`UPDATE sync_queue SET status = 'done', processed_at = NOW(), error_msg = $2 WHERE id = $1`,
+        [item.id, (execOut && execOut.doneNote) || null]);
       succeeded++;
     } catch (err) {
       if (err && err.__defer) {
@@ -1362,17 +944,10 @@ module.exports = {
   sheetQueueTypesEnabled,
   enqueue,
   processQueue,
-  drainTabQueue,
-  drainTabQueueBatched,
   drainOrderQueue,
-  _isQuota,            // 테스트용
-  _readGuardWindow,    // 테스트용(reader 주입)
   _guardBlockDecision, // 테스트용(defer/release/giveup 진리표)
   _markSystemMemo,     // 테스트용(복구행 비고 'system' 표기)
-  getQueueStats,
   retryItem,
   retryAllFailed,
   purgeCompleted,
-  deleteItem,
-  deleteAllFailed,
 };

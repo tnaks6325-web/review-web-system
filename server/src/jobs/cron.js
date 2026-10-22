@@ -1,173 +1,26 @@
 const cron = require('node-cron');
-const { buildIndexSmart, checkDirtySheets, buildOneSheet } = require('../services/indexBuilder.service');
 const { processQueue, purgeCompleted, retryAllFailed } = require('../services/syncQueue.service');
-const { mirrorAllSheets } = require('../services/rawMirror.service');
-const { getThrottleStatus } = require('../utils/sheetsThrottle');
 // [DEPRECATED — v11.8.0] syncSettingsOnly 제거: DB가 설정 원본이므로 시트→DB 동기화 불필요
 const { logger } = require('../utils/logger');
-const { emitIndexBuild, broadcast } = require('../utils/sse');
 const { logAbnormal } = require('../services/errorLog.service');
 const pool = require('../db/pool');
-let rawMirrorRunning = false;
-let reconcileRunning = false;
 // [REMOVED] readSheet — 세부목록→DB 자동동기화 CRON 제거됨 (DB가 원본)
 
 /**
- * ★ CRON 최적화 (v11.8.0 — 2탭 통합):
- *   1. [REMOVED] 설정 동기화(Group B) — DB가 설정 원본이므로 시트→DB 동기화 불필요
- *   2. Dirty Check + 자동 빌드: 15분마다 → 변경 시트 자동 개별 빌드
- *   3. 인덱스 전체 빌드: 하루 2회 (09시, 15시)
- *   4. 전체 재빌드: 하루 1회 새벽 4시
+ * ★ 2026-10-22 시트 시절 정리 3단계(결정 273): 구글시트를 읽고 쓰던 정기 작업 —
+ *   변경감지(15분)·RAW 미러(5분)·막힌 주문 리컨실(2분)·역동기화 자동(3분)·인덱스 빌드(09/15시)·
+ *   전체 재빌드(04시)·상시 배치 드레인(15초)·배치 heartbeat 백스톱 — 은 삭제했다.
+ *   운영은 2단계(Railway 설정)에서 이미 전부 꺼 둔 상태였다. 남은 크론은 전부 DB 안에서 끝난다.
  */
 function startCronJobs() {
   // [DEPRECATED — v11.8.0] Group B 설정 동기화 CRON 제거
   // DB가 설정 원본이므로 시트→DB 설정 동기화가 불필요합니다.
   // 설정은 웹 UI(POST /api/tab/config)에서 직접 DB에 저장됩니다.
 
-  // ── ★ Dirty Check + 자동 빌드: 15분마다 ──
-  //   #2 일원화: smartBuild(5분, 더 완전·더 근실시간)가 같은 review_index를 이미 변경감지·갱신하므로
-  //   이 dirty-check(15분)는 중복 폴러다. 기본 OFF로 두어 smartBuild를 단일 폴러화(getSheetModifiedTime 폴링 감축).
-  //   INDEX_DIRTY_CRON_ENABLED=true 로 즉시 원복 가능(롤백가능). 전체빌드(09/15/04)는 drift 백스톱으로 유지.
-  if (process.env.INDEX_DIRTY_CRON_ENABLED === 'true') {
-  cron.schedule('*/15 9-19 * * 1-6', async () => {
-    try {
-      const dirtySheets = await checkDirtySheets();
-      if (dirtySheets.length === 0) return;
-
-      logger.info(`[CRON-Dirty] 변경 감지: ${dirtySheets.length}개 시트 — ${dirtySheets.map(s => s.campaignName).join(', ')}`);
-      broadcast('dirty_detected', {
-        message: `${dirtySheets.length}개 시트에 변경사항 감지 → 자동 갱신 시작`,
-        dirtyCount: dirtySheets.length,
-        dirtySheets,
-      });
-
-      // ★ 변경된 시트만 순차적으로 개별 빌드
-      let builtCount = 0, failCount = 0;
-      for (const dirty of dirtySheets) {
-        try {
-          const result = await buildOneSheet(dirty.sheetId);
-          if (result.ok) {
-            builtCount++;
-            logger.info(`[CRON-Dirty] 자동 빌드 완료: ${dirty.campaignName} (rebuilt=${result.rebuilt}, ${result.elapsed})`);
-          } else {
-            logger.warn(`[CRON-Dirty] 자동 빌드 스킵: ${dirty.campaignName} — ${result.error || 'locked'}`);
-            break;
-          }
-        } catch (err) {
-          failCount++;
-          logger.error(`[CRON-Dirty] 자동 빌드 실패: ${dirty.campaignName} — ${err.message}`);
-        }
-      }
-
-      if (builtCount > 0) {
-        emitIndexBuild({
-          rebuilt: builtCount,
-          skipped: 0,
-          errors: failCount,
-          trigger: 'dirty_auto',
-          message: `Dirty 자동 빌드: ${builtCount}개 시트 갱신`,
-        });
-        broadcast('dirty_auto_built', {
-          message: `${builtCount}개 변경 시트 자동 갱신 완료`,
-          builtCount,
-          failCount,
-        });
-      }
-    } catch (err) {
-      logger.warn(`[CRON-Dirty] 변경 감지 오류: ${err.message}`);
-    }
-  }, { timezone: 'Asia/Seoul' });
-  } else {
-    logger.info('[CRON] dirty-check(15분) 비활성 — smartBuild 단일 폴러(#2 일원화). INDEX_DIRTY_CRON_ENABLED=true로 원복.');
-  }
-
-  // ── 인덱스 전체 빌드: 하루 2회 (09시, 15시) ──
-  // RAW mirror dirty check: keep DB source data close to manually edited Sheets.
-  if (process.env.RAW_MIRROR_CRON_ENABLED !== 'false') {
-    const rawMirrorSchedule = process.env.RAW_MIRROR_CRON_SCHEDULE || '*/5 * * * *';
-    const bootGraceSec = (n => (Number.isFinite(n) && n >= 0 ? n : 120))(
-      parseInt(process.env.RAW_MIRROR_BOOT_GRACE_SEC || '120', 10)
-    );
-    cron.schedule(rawMirrorSchedule, async () => {
-      if (rawMirrorRunning) {
-        logger.debug('[CRON-RawMirror] previous run still active, skip');
-        return;
-      }
-      // (R1) 배포 직후 해빙 폭주 완충: 부팅 유예 — rolling 공존창(30~60s)엔 old 인스턴스가 담당,
-      //   new는 유예 후 합류. 유예 중 신규 주문 시트는 _triggerSheetMirrorOnce가 자가치유(현행 백스톱).
-      if (process.uptime() < bootGraceSec) {
-        logger.debug(`[CRON-RawMirror] boot grace ${Math.round(process.uptime())}s/${bootGraceSec}s, skip`);
-        return;
-      }
-      const throttle = getThrottleStatus();
-      const busyThreshold = parseInt(process.env.RAW_MIRROR_BUSY_THRESHOLD || '10', 10);
-      if (throttle.requestsInLastMinute > busyThreshold) {
-        logger.debug(`[CRON-RawMirror] throttle busy (${throttle.requestsInLastMinute}/${throttle.limit}), skip`);
-        return;
-      }
-      rawMirrorRunning = true;
-      try {
-        // (R1) 인스턴스 경계 직렬화 — rolling 배포 중 old+new 동시 미러(합산 실쿼터 초과) 차단.
-        //   기존 reconcile/queuePump와 동일한 jobLock 패턴. busy면 즉시 양보(다음 5분 cron 백스톱).
-        const { withJobLock } = require('../utils/jobLock');
-        const result = await withJobLock('raw_mirror_all', () => mirrorAllSheets({ force: false, includeHidden: true }));
-        if (result && result.skipped) {
-          logger.debug('[CRON-RawMirror] raw_mirror_all lock busy — 다른 인스턴스 미러 중, 양보');
-        } else if ((result.tabsMirrored || 0) > 0 || (result.errors || 0) > 0 || (result.sheetsDeferred || 0) > 0) {
-          logger.info(`[CRON-RawMirror] tabs=${result.tabsMirrored}, rows=${result.rowsWritten}, skipped=${result.sheetsSkipped}, deferred=${result.sheetsDeferred || 0}, errors=${result.errors}, elapsed=${result.elapsed}`);
-        }
-      } catch (err) {
-        logger.error(`[CRON-RawMirror] error: ${err.message}`);
-        logAbnormal({ flow: 'cron', step: 'raw_mirror', error: err, context: { job: 'raw_mirror' } });
-      } finally {
-        rawMirrorRunning = false;
-      }
-    }, { timezone: 'Asia/Seoul' });
-  }
-
-  // ── 막힌 주문 자동복구(리컨실): 2분마다 — RAW 미러 뒤에 둠(메타 채워진 뒤 복구) ──
-  //   pending_no_row/failed/정체 queued 주문을 시트에 다시 밀어넣는다(복구분은 하단 노란행).
-  //   읽기 쿼터 부담 0(메타 없는 탭은 skip). 아침 폭주 시 throttle busy면 양보.
-  if (process.env.ORDER_RECONCILE_CRON_ENABLED !== 'false') {
-    const reconcileSchedule = process.env.ORDER_RECONCILE_CRON_SCHEDULE || '*/2 * * * *';
-    cron.schedule(reconcileSchedule, async () => {
-      if (reconcileRunning) return;
-      // ★ AUTO 배치 시 cron reconcile 양보: 배치 스케줄러가 탭별 reconcile-first(DB-only, 시트콜0)를
-      //   직접 수행하므로 이 cron은 order_reconcile 락만 점유해 배치 드레인을 skip시키는 역효과.
-      //   AUTO=1이면 cron reconcile 비활성(배치가 전탭 FIFO 순회로 reconcile 커버). AUTO 끄면 복귀.
-      if (process.env.ORDER_BATCH_AUTO === '1') return;
-      const throttle = getThrottleStatus();
-      const busyThreshold = parseInt(process.env.ORDER_RECONCILE_BUSY_THRESHOLD || '20', 10);
-      if (throttle.requestsInLastMinute > busyThreshold) {
-        logger.debug(`[CRON-Reconcile] throttle busy (${throttle.requestsInLastMinute}/${throttle.limit}), skip`);
-        return;
-      }
-      reconcileRunning = true;
-      try {
-        const { reconcileStuckOrders } = require('../services/orderLedger.service');
-        const { withJobLock } = require('../utils/jobLock');
-        // ★ #1: 멀티인스턴스/rolling 배포(old+new 공존) 경합 차단 — order_reconcile advisory lock으로
-        //   cron·flush·인라인 reconcile을 하나로 직렬화. 다른 인스턴스가 보유 중이면 이번 틱은 양보.
-        const r = await withJobLock('order_reconcile', () => reconcileStuckOrders({ limit: 100, perTabCap: 60 }));
-        if (r && (r.requeued > 0 || r.stillStuck > 0 || r.noCandidates > 0)) {
-          logger.info(`[CRON-Reconcile] requeued=${r.requeued}, skippedNoMeta=${r.skippedNoMeta}, noCandidates=${r.noCandidates}, stillStuck=${r.stillStuck}`);
-        } else if (r && r.skipped) {
-          logger.debug('[CRON-Reconcile] order_reconcile lock busy — 다른 인스턴스 처리 중, 양보');
-        }
-      } catch (err) {
-        logger.error(`[CRON-Reconcile] error: ${err.message}`);
-        logAbnormal({ flow: 'cron', step: 'order_reconcile', error: err, context: { job: 'order_reconcile' } });
-      } finally {
-        reconcileRunning = false;
-      }
-    }, { timezone: 'Asia/Seoul' });
-  }
-
   // ── 작업보드 큐 누락 복구: 홀수 분마다(DB-only) ───────────────────────
-  // ORDER_BATCH_AUTO=1은 위 시트 리컨실을 끄고, 시트 배치 대상에서도 무시트 탭을 제외한다.
-  // 그래서 원장 저장 뒤 workboard_apply INSERT만 실패한 주문은 실행 주체가 없었다.
+  // 원장 저장 뒤 workboard_apply INSERT만 실패한 주문을 다시 큐에 넣는다(시트 리컨실 크론은 2026-10-22 삭제 — 결정 273).
   // 최근 48시간 중 기존 큐 이력이 전혀 없는 2분 이상 지난 주문만 재등록하며,
-  // 같은 order_reconcile 락으로 기존 리컨실과 겹치지 않는다. 큐 소비는 기존 30초 워커 하나가 계속 담당한다.
+  // order_reconcile 락으로 수동 리컨실 경로와 겹치지 않는다. 큐 소비는 기존 30초 워커 하나가 계속 담당한다.
   if (process.env.WORKBOARD_RECONCILE_CRON !== '0') {
     const wbReconcileSchedule = process.env.WORKBOARD_RECONCILE_CRON_SCHEDULE || '1-59/2 * * * *';
     cron.schedule(wbReconcileSchedule, async () => {
@@ -306,37 +159,6 @@ function startCronJobs() {
     };
     setTimeout(() => { void runCapRepair('boot'); }, capRepairBootDelay);
     cron.schedule(capRepairSchedule, () => { void runCapRepair('cron'); }, { timezone: 'Asia/Seoul' });
-  }
-
-  // ── 시트→DB 역동기화 무인 사이클(detect+constrained auto-apply): 기본 OFF ──
-  //   REVERSE_SYNC_AUTO=1 에서만 동작(SHEET_REVERSE_SYNC=1·ORDER_LEDGER_WRITE_ENABLED=true 추가게이트는 서비스 내부).
-  //   활성탭 라운드로빈 detect → 안전필드만 apply시점 라이브 재검증 후 자동적용(전용 락 reverse_sync_auto).
-  //   RAW미러(*/5)·reconcile(*/2)와 겹치지 않게 3분 오프셋. throttle busy면 서비스가 양보.
-  if (process.env.REVERSE_SYNC_AUTO === '1') {
-    const reverseAutoSchedule = process.env.REVERSE_SYNC_AUTO_SCHEDULE || '1-59/3 * * * *';
-    let reverseAutoRunning = false;
-    cron.schedule(reverseAutoSchedule, async () => {
-      if (reverseAutoRunning) return;
-      const throttle = getThrottleStatus();
-      const busyThreshold = parseInt(process.env.REVERSE_SYNC_BUSY || '15', 10);
-      if (throttle.requestsInLastMinute > busyThreshold) {
-        logger.debug(`[CRON-ReverseSync] throttle busy (${throttle.requestsInLastMinute}/${throttle.limit}), skip`);
-        return;
-      }
-      reverseAutoRunning = true;
-      try {
-        const { runReverseSyncAutoCycle } = require('../services/orderLedger.service');
-        const r = await runReverseSyncAutoCycle({});
-        if (r && !r.skipped && ((r.detected || 0) > 0 || (r.apply && (r.apply.applied || 0) > 0))) {
-          logger.info(`[CRON-ReverseSync] tabs=${r.activeTabs} detectRuns=${r.detectRuns} detected=${r.detected} applied=${r.apply && r.apply.applied} orders=${r.apply && r.apply.orders} reverifyFail=${r.apply && r.apply.reverifyFail}`);
-        }
-      } catch (err) {
-        logger.error(`[CRON-ReverseSync] error: ${err.message}`);
-        logAbnormal({ flow: 'cron', step: 'reverse_sync_auto', error: err, context: { job: 'reverse_sync_auto' } });
-      } finally {
-        reverseAutoRunning = false;
-      }
-    }, { timezone: 'Asia/Seoul' });
   }
 
   // ── 무시트 주문 작업보드 인계(자동 복구): 기본 ON · 최근 창만 ─────────────────────
@@ -572,34 +394,6 @@ function startCronJobs() {
 
   // (Track B P2 상태 토글 write-back 크론은 2026-09-28 제거 — 결정 186 5번. TRACK_B_WRITEBACK 은 본섭 미설정이었고 전환(source_of_truth='db') 탭 0.)
 
-  const schedule = process.env.INDEX_CRON_SCHEDULE || '0 9,15 * * 1-6';
-  cron.schedule(schedule, async () => {
-    logger.info(`[CRON] 인덱스 빌드 시작: ${new Date().toISOString()}`);
-    try {
-      const result = await buildIndexSmart(false);
-      logger.info(`[CRON] 인덱스 빌드 완료: rebuilt=${result.rebuilt}, skipped=${result.skipped}, ${result.elapsed}`);
-      emitIndexBuild({ rebuilt: result.rebuilt || 0, skipped: result.skipped || 0, errors: result.errors || 0, elapsed: result.elapsed || '', trigger: 'cron' });
-    } catch (err) {
-      logger.error(`[CRON] 인덱스 빌드 오류: ${err.message}`);
-      logAbnormal({ flow: 'cron', step: 'index_build', error: err, context: { job: '인덱스 빌드' } });
-    }
-  }, {
-    timezone: 'Asia/Seoul',
-  });
-
-  // ── 전체 재빌드: 하루 1회 새벽 4시 ──
-  cron.schedule('0 4 * * *', async () => {
-    logger.info('[CRON] 전체 재빌드 시작 (일일 1회)');
-    try {
-      await buildIndexSmart(true);
-      logger.info('[CRON] 전체 재빌드 완료');
-      emitIndexBuild({ trigger: 'cron_full' });
-    } catch (err) {
-      logger.error(`[CRON] 전체 재빌드 오류: ${err.message}`);
-      logAbnormal({ flow: 'cron', step: 'index_build', error: err, context: { job: '전체 재빌드' } });
-    }
-  }, { timezone: 'Asia/Seoul' });
-
   // ── Phase 2: Sync Queue 워커 — 30초마다 pending 작업 처리 ──
   // ★ A2: stuck processing 자동 감지 포함
   // ★★ 결정 271: 무시트 구매의 작업보드 반영(workboard_apply)이 이 워커의 라이브 일이다. 시트 타입
@@ -611,31 +405,10 @@ function startCronJobs() {
       if (result.processed > 0) {
         logger.info(`[CRON-Queue] 처리: ${result.succeeded}/${result.processed} 성공, ${result.failed} 실패, ${result.elapsed}ms`);
       }
-      // ★ R-F3-a 백스톱: AUTO=1이면 평소 order_append를 배치가 전담하지만, 배치 heartbeat가
-      //   STALE 이상 끊기면(워치독도 못 살린 영구정지) cron이 소량 단건으로 order_append를 흡수 → 미반영 방지.
-      if (process.env.ORDER_BATCH_AUTO === '1') {
-        const STALE = parseInt(process.env.ORDER_BATCH_HEARTBEAT_STALE_SEC || '120', 10);
-        try {
-          const { getHeartbeat } = require('../jobs/orderBatchScheduler');
-          const hb = getHeartbeat();
-          if (Date.now() - (hb.lastTickAt || 0) > STALE * 1000) {
-            logger.warn(`[CRON-Queue] 배치 heartbeat ${Math.round((Date.now() - (hb.lastTickAt || 0)) / 1000)}s 끊김 → order_append 단건 백스톱(5건)`);
-            await processQueue(5, { onlyType: 'order_append' });
-          }
-        } catch (hbErr) { logger.warn(`[CRON-Queue] heartbeat 백스톱 체크 실패(무시): ${hbErr.message}`); }
-      }
     } catch (err) {
       logger.error(`[CRON-Queue] 큐 처리 오류: ${err.message}`);
       logAbnormal({ flow: 'sync_queue', step: 'process_queue', error: err, context: { job: '큐 워커' } });
     }
-  });
-
-  // ── ★ 상시 배치 드레인 백스톱 — 15초마다 백로그 탭을 배치로 시트반영(근실시간) ──
-  //   ORDER_BATCH_AUTO=1 일 때만 동작(kickOrderBatch 내부 게이트). 코얼레싱이라 중복 사이클 없음.
-  //   제출 시 즉시 kick + 이 15초 cron이 백스톱(kick 누락·재시작 잔여분 흡수).
-  cron.schedule('*/15 * * * * *', () => {
-    try { require('../jobs/orderBatchScheduler').kickOrderBatch(); }
-    catch (err) { logger.warn(`[CRON-OrderBatch] kick 실패(무시): ${err.message}`); }
   });
 
   // ── ★ A2+C2: 매시간 stuck/failed 자동 복구 ──
@@ -775,7 +548,7 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
-  logger.info(`[CRON] 스케줄러 등록 완료: dirty=${process.env.INDEX_DIRTY_CRON_ENABLED === 'true' ? '15분' : 'OFF(smartBuild단일)'}, 인덱스=${schedule}, 전체재빌드=매일04시, 큐워커=30초, 자동복구=매시간, 정리=매일03시, 이상로그정리=매일03시30분, 홀드스윕=매분, 리뷰알림=${process.env.REVIEW_REMINDER_ENABLED === '1' ? 'ON' : 'OFF'}`);
+  logger.info(`[CRON] 스케줄러 등록 완료: 큐워커=30초(작업보드 반영), 자동복구=매시간, 정리=매일03시, 이상로그정리=매일03시30분, 홀드스윕=매분, 리뷰알림=${process.env.REVIEW_REMINDER_ENABLED === '1' ? 'ON' : 'OFF'}`);
 }
 
 module.exports = { startCronJobs };
