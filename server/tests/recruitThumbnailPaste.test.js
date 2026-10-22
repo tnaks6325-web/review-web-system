@@ -22,8 +22,8 @@ assert.match(recruitJs, /5 \* 1024 \* 1024/,
 assert.match(modalJs, /복사한 이미지를 입력창에 Ctrl\+V 하세요/,
   '모집공고 설정에 이미지 붙여넣기 안내를 표시해야 합니다.');
 for (const [name, html] of [['workdesk', workdeskHtml]]) {   // (admin-siand.html 은 결정 186 44번에서 제거)
-  // 결정 228·229: 이후 버전(20261012-seqdays · 20261012-optpause)도 썸네일 붙여넣기 동작을 그대로 담는다 — 검사 의미 불변(그 동작이 든 버전을 부르는가)
-  assert.match(html, /index-recruit\.js\?v=(?:20260914-recruit-thumb-paste|20261012-seqdays|20261012-optpause)/,
+  // 결정 228·229: 이후 버전(20261012-seqdays · 20261012-optpause · 20261022-namefix)도 썸네일 붙여넣기 동작을 그대로 담는다 — 검사 의미 불변(그 동작이 든 버전을 부르는가)
+  assert.match(html, /index-recruit\.js\?v=(?:20260914-recruit-thumb-paste|20261012-seqdays|20261012-optpause|20261022-namefix)/,
     `${name} 화면은 새 썸네일 동작이 든 index-recruit.js 버전을 불러야 합니다.`);
 }
 for (const [name, html] of [['workdesk', workdeskHtml]]) {
