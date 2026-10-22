@@ -336,6 +336,19 @@ console.log('\n[D] 옵션 신호 없는 오더·공고 — 추측 승격 금지'
   tn.run(`renderOptRowsWithProduct([], '상품A - 결제금액 10,000원\\n상품B - 결제금액 12,000원', {})`);
   tn.run(`document.querySelectorAll('#rf_opt_rows .rf-gp')[1].querySelectorAll('.rf-gp-unit button').filter(x => x.dataset.unit === 'option')[0].onclick()`);
   ok('사람이 카드를 「옵션 있음」으로 바꾸면 opt', tn.run('_prodMode()') === 'opt');
+  // ★ 2026-10-22 실측 — 옵션 없는 공고의 원문은 한 줄에 상품 하나다. 한 덩어리 줄이 앞 줄 상품명을 이어받아
+  //   "린스" 가 "샴푸 린스" 가 되던 것(손대지 않은 저장 한 번에 둘째 상품부터 이름이 바뀜)
+  const tl = makeTable();
+  tl.run(`renderOptRowsWithProduct([], '샴푸 - 결제금액 10,000원\\n린스 - 결제금액 12,000원')`);
+  const rl = JSON.parse(tl.run('JSON.stringify(_readProdRowsRaw())'));
+  ok('옵션 없는 공고 여러 줄 — 상품명이 앞 줄 이름을 이어받지 않는다(샴푸 · 린스)', rl.map(r => r.productName).join(',') === '샴푸,린스' && rl[1].payAmount === 12000);
+  // 같은 줄 조각은 종전대로 되붙는다(결정 042) · 작업오더 원문은 종전대로 오더 상품명을 이어받는다(옵션 글자 줄)
+  const tl2 = makeTable();
+  tl2.run(`renderOptRowsWithProduct([], '우레온 미스트 - 리필 - 결제금액 9,000원\\n샴푸 - 결제금액 10,000원')`);
+  ok('같은 줄 조각은 되붙는다', JSON.parse(tl2.run('JSON.stringify(_readProdRowsRaw())')).map(r => r.productName).join(',') === '우레온 미스트 리필,샴푸');
+  const to = makeTable();
+  to.run(`applyProductRowsFromOrder({ product_name: '샴푸', wd_product: '블랙 - 결제금액 10,000원\\n화이트 - 결제금액 12,000원' })`);
+  ok('작업오더 글자 옵션은 오더 상품명을 이어받는다(무회귀)', JSON.parse(to.run('JSON.stringify(_readProdRowsRaw())')).map(r => r.productName).join(',') === '샴푸 블랙,샴푸 화이트');
 
   // 옵션 배열이 오면 그대로 옵션 모드(무회귀)
   const t3 = makeTable();
