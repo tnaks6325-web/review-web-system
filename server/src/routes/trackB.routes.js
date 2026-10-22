@@ -1640,6 +1640,18 @@ router.get('/campaigns/:id/activity-log', authMiddleware, internalMiddleware, (r
    work_detail·연결탭·정원·옵션을 빈 기본값으로 채우고, 저장하면 기존 설정이 조용히
    지워진다(0·빈값·options:[]). 그래서 canEdit 이면 신뢰 플래그를 세워 위임한다.
    ★ 판정 실패는 공개 뷰(fail-closed) — 모르면 더 주지 않는다. 편집은 서버 게이트가 막는다. */
+// 공고 편집 상품 카드 「쇼핑몰에서 가져오기」(결정 271) — 확장 프로그램이 읽은 상품페이지 글 → AI 판독 결과(저장 없음).
+//   공고를 고칠 수 있는 사람만(편집 게이트와 같다). 받은 글은 저장·로그하지 않는다. 원본 = 인트라넷 product-page-reader.
+router.post('/campaigns/product-page/extract', authMiddleware, internalMiddleware, editorOnlyMiddleware, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const out = await require('../services/productPageReader.service').extractProductPage(req.body);
+    return res.status(out.status).json(out.body);
+  } catch (e) {
+    logger.warn(`[product-page] 판독 실패: ${String(e && e.name || 'Error')}`);
+    return res.status(500).json({ ok: false, error: '상품페이지를 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.' });
+  }
+});
 router.get('/campaigns/:id', authMiddleware, internalMiddleware, async (req, res, next) => {
   try { if (await canEdit(req.admin)) req._trustedAdminView = true; } catch (_) { /* 공개 뷰로 수렴 */ }
   return _campHandlers.detail(req, res, next);

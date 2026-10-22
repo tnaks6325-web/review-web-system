@@ -54,18 +54,22 @@ function _withTimeout(promise, ms, label) {
 
 // 라운드로빈 + 일시오류 시 키회전 재시도 + 호출 타임아웃
 // genConfigOverride: 호출별 generationConfig 덮어쓰기(예: maxOutputTokens 확대)
-async function _runModel(parts, label, genConfigOverride) {
+// callOpts(선택): { timeoutMs, maxAttempts, systemInstruction } — 긴 글을 읽는 호출(상품페이지)만 쓴다. 없으면 종전 그대로.
+async function _runModel(parts, label, genConfigOverride, callOpts) {
   if (!_initGemini()) throw new Error('Gemini API가 설정되지 않았습니다. GEMINI_API_KEY(S)를 확인하세요.');
-  const attempts = Math.max(2, Math.min(_modelPool.length, 3));
+  const co = callOpts || {};
+  const attempts = co.maxAttempts > 0 ? co.maxAttempts : Math.max(2, Math.min(_modelPool.length, 3));
+  const timeoutMs = co.timeoutMs > 0 ? co.timeoutMs : GEMINI_TIMEOUT_MS;
   let lastErr;
   for (let i = 0; i < attempts; i++) {
     const { model, keyLabel } = _getModel();
     try {
       const req = genConfigOverride
         ? { contents: [{ role: 'user', parts: Array.isArray(parts) ? parts : [parts] }],
-            generationConfig: { ...GEN_CONFIG, ...genConfigOverride } }
+            generationConfig: { ...GEN_CONFIG, ...genConfigOverride },
+            ...(co.systemInstruction ? { systemInstruction: { role: 'system', parts: [{ text: co.systemInstruction }] } } : {}) }
         : parts;
-      const res = await _withTimeout(model.generateContent(req), GEMINI_TIMEOUT_MS, `[Gemini ${label}]`);
+      const res = await _withTimeout(model.generateContent(req), timeoutMs, `[Gemini ${label}]`);
       return { text: res.response.text(), key: keyLabel };
     } catch (e) {
       lastErr = e;
@@ -754,7 +758,20 @@ async function analyzeErrorAgents(p = {}) {
   }
 }
 
+/**
+ * 구조화 JSON 한 번 생성 — 응답 모양(responseSchema)을 고정해 받는다. 실패는 throw(호출부가 사람 말로 바꾼다).
+ * ★ 받은 글(prompt)은 로그에 남기지 않는다 — _runModel 은 오류 요약(이름·상태)만 남긴다.
+ */
+async function generateStructuredJson(prompt, opts = {}) {
+  const gen = { maxOutputTokens: opts.maxOutputTokens || 8192 };
+  if (opts.responseSchema) gen.responseSchema = opts.responseSchema;
+  const { text } = await _runModel([{ text: String(prompt || '') }], opts.label || '[StructuredJson]', gen,
+    { timeoutMs: opts.timeoutMs, maxAttempts: opts.maxAttempts, systemInstruction: opts.systemInstruction });
+  return text;
+}
+
 module.exports = {
+  generateStructuredJson,
   extractOrderFromImage,
   verifyAddressMatch,
   classifySubmissionImage,
