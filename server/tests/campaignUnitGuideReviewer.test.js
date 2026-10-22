@@ -162,6 +162,28 @@ const IMG = 'https://api.example.com/api/order/guide-image/bbbbbbbbbbbbbbbbbbbbb
   ok('★ 글 없이 사진만 있어도 선택지 전용으로 인정(사진이 통째로 사라지지 않는다)',
     imgOnly.includes(IMG) && !imgOnly.includes('공통 가이드') && !imgOnly.includes('선택지 전용 안내'));
 
+  // 결정 272(D4 「나」) — 사진 자리: 글 사이 사진은 그 자리에, 같은 사진은 한 번만(HTML 과 목록 양쪽에 있어도)
+  {
+    const P1 = 'https://api.example.com/api/order/guide-image/d4ppppppppppppppppppp1';
+    const P2 = 'https://api.example.com/api/order/guide-image/d4ppppppppppppppppppp2';
+    const count = (h, u) => h.split(u).length - 1;
+    // 공고 창이 저장한 모양(서버 정화 뒤 — <br /> · <img />)
+    const fromEditor = M.cardsHtml({ workDetail: common, inflowType: 'guide',
+      selectedOption: { optKey: '500ml', unitKind: 'option', inflowGuideHtml: '1) 검색<br /><img src="' + P1 + '" /><br />2) 세 번째 상품<img src="' + P2 + '" />', inflowGuideImages: [P1, P2] } },
+      { apiBase: 'https://api.example.com' });
+    ok('D4: 글 → 사진1 → 글 → 사진2 차례 그대로',
+      fromEditor.indexOf('1) 검색') < fromEditor.indexOf(P1) && fromEditor.indexOf(P1) < fromEditor.indexOf('2) 세 번째 상품') && fromEditor.indexOf('2) 세 번째 상품') < fromEditor.indexOf(P2));
+    ok('D4: 같은 사진은 한 번만(HTML·목록 겹침)', count(fromEditor, P1) === 1 && count(fromEditor, P2) === 1);
+    // 인트라넷 오더 글(주소 줄)을 서버가 바꾼 모양 + 목록에만 있는 맨 끝 사진
+    const compose = require('../src/utils/inflowGuideCompose');
+    const c = compose.composeUnitGuide({ guide: { text: '1) 검색\n' + P1 + '\n2) 세 번째 상품', images: [P1, P2] } });
+    const fromOrder = M.cardsHtml({ workDetail: common, inflowType: 'guide',
+      selectedOption: { optKey: '500ml', unitKind: 'option', inflowGuideHtml: c.html, inflowGuideImages: c.images } }, { apiBase: 'https://api.example.com' });
+    ok('D4: 인트라넷 주소 줄 = 그 자리 사진 · 맨 끝 사진은 글 뒤',
+      fromOrder.indexOf(P1) < fromOrder.indexOf('2) 세 번째 상품') && fromOrder.indexOf('2) 세 번째 상품') < fromOrder.indexOf('d4ppppppppppppppppppp2'));
+    ok('D4: 주소가 글자로 드러나지 않는다(사진으로만)', !/>\s*https:\/\/api\.example\.com\/api\/order\/guide-image/.test(fromOrder) && count(fromOrder, P1) === 1);
+  }
+
   const noOpt = M.cardsHtml({ workDetail: common }, { apiBase: 'https://api.example.com' });
   ok('선택지 자체가 없는 공고는 종전 그대로', noOpt.includes('공통 가이드') && !noOpt.includes('선택지 전용 안내'));
 

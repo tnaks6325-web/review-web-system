@@ -243,6 +243,42 @@ async function pg() {
     const rowsD = (await pool.query('SELECT opt_key, inflow_guide_html FROM campaign_options WHERE campaign_id = $1 ORDER BY opt_key', [camp2])).rows;
     assert.match(rowsD.find(x => x.opt_key === '상품B 블랙').inflow_guide_html, /상품B 블랙만 고침/, JSON.stringify(rowsD));
     assert.doesNotMatch(rowsD.find(x => x.opt_key === '상품A 블랙').inflow_guide_html, /상품B 블랙만 고침/);
+    // ── 결정 272(D4 「나」) — 사진 자리(글 속 사진 주소 한 줄)가 두 시스템 사이를 그대로 오간다 ──
+    {
+      // 인트라넷: 블랙 가이드 첫 줄 뒤에 사진 → 공고 HTML 그 자리에 <img>
+      r = await putSource(p => { p[0].options[0].guide = { text: '1) 검색\n' + IMG(6) + '\n2) 세 번째 상품', images: [IMG(6), IMG(7)] }; });
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      black = await optRow('블랙');
+      const G = require('../src/utils/guideCanon');
+      const gb = G.canonGuide(black.inflow_guide_html, black.inflow_guide_images);
+      assert.equal(gb.text, '1) 검색\n' + IMG(6) + '\n2) 세 번째 상품', 'D4: 공고에도 같은 자리 ' + black.inflow_guide_html);
+      assert.deepEqual(gb.images, [IMG(6), IMG(7)]);
+      assert.ok(black.inflow_guide_html.indexOf(IMG(6)) < black.inflow_guide_html.indexOf('2) 세 번째 상품'), '사진이 둘째 줄 앞');
+      // 같은 가이드를 다시 보내도 공고 줄을 다시 쓰지 않는다
+      const blackHtml = black.inflow_guide_html;
+      r = await putSource(() => {}, { money: 1, guide: 1 }, { special_notes: 'D4 다시 저장' });
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      assert.equal((await optRow('블랙')).inflow_guide_html, blackHtml, 'D4: 같은 가이드 = 다시 쓰지 않음');
+      // 공고 창: 화이트 사진을 두 줄 사이로 옮김 → 오더 글에 주소 줄
+      ed = await openEditor();
+      r = await call('PUT', `/api/campaign/admin/${camp}`, { ...ed, options: ed.options.map(o => (o.optKey === '화이트'
+        ? { ...o, inflowGuideHtml: '공고 창에서 고친 화이트<br><img src="' + IMG(5) + '"><br>둘째 줄', inflowGuideImages: [IMG(5)] } : o)) }, admin);
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      assert.deepEqual(r.body.shared.changed, ['유입가이드(가이드 상품 / 화이트)'], 'D4: 사진 자리만 바뀌어도 바뀐 것');
+      assert.deepEqual(JSON.parse((await wo()).product_options_json)[0].options[1].guide, { text: '공고 창에서 고친 화이트\n' + IMG(5) + '\n둘째 줄', images: [IMG(5)] });
+      // 그 상태로 창을 다시 열어 손대지 않고 저장 → 오더 그대로
+      const svBefore = Number((await wo()).sync_version);
+      ed = await openEditor();
+      r = await call('PUT', `/api/campaign/admin/${camp}`, { ...ed, title: 'D4 손대지 않음' }, admin);
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      assert.equal(Number((await wo()).sync_version), svBefore, 'D4: 손대지 않은 저장 = 오더 버전 그대로');
+      // 오더·공고 비교 = 같음(어긋남 0)
+      const { compareOrderCampaign } = require('../src/utils/orderToCampaignProjection');
+      const cRow = (await pool.query('SELECT * FROM recruit_campaigns WHERE id = $1', [camp])).rows[0];
+      const cOpts = (await pool.query('SELECT * FROM campaign_options WHERE campaign_id = $1 ORDER BY sort_order, id', [camp])).rows;
+      const diffs = compareOrderCampaign(await wo(), cRow, cOpts).filter(d => d.kind === 'diff' && /guide/.test(JSON.stringify(d)));
+      assert.deepEqual(diffs, [], 'D4: 오더·공고 가이드 어긋남 0');
+    }
     console.log('bidirPhase6Guide: PG passed');
   } finally {
     srv.close();
