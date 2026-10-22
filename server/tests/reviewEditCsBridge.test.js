@@ -70,7 +70,7 @@ t('★ 통지는 Drive·DB 작업이 **끝난 뒤**에 부른다', () => {
   assert.ok(i > 0 && j > i, '승인 통지가 커밋/보관 처리보다 앞에 있다');
 });
 t('★ 반려는 **커넥션을 반납한 뒤** 통지한다(풀 자기교착 방지)', () => {
-  const i = RE.indexOf("router.post('/reject'");
+  const i = RE.indexOf('_handlers.reviewEditReject = async');   // 결정 270: 옛 공개 경로 대신 핸들러 정의
   const seg = RE.slice(i, i + 3000);
   const rel = seg.indexOf('client.release()');
   const call = seg.indexOf("postReviewEditDecision(committed, 'rejected'");
@@ -166,14 +166,18 @@ t('스코프 조회가 행마다 돌지 않는다((시트,탭)당 1회) + 키를
 });
 t('로직 복제 0 — 기존 reviewEdit 핸들러에 위임', () => {
   assert.ok(/const _reRoutes = require\('\.\/reviewEdit\.routes'\)/.test(TB));
-  ['/list', '/approve', '/reject'].forEach(p =>
-    assert.ok(new RegExp("_delegate\\(_reRoutes, '(get|post)', '" + p + "'\\)").test(TB), '위임 아님: ' + p));
+  // 결정 270: 경로 문자열 위임(_delegate) → 이름 위임(_handler)
+  ['reviewEditList', 'reviewEditApprove', 'reviewEditReject'].forEach(n =>
+    assert.ok(new RegExp("_handler\\(_reRoutes, '" + n + "'\\)").test(TB), '위임 아님: ' + n));
   assert.ok(!/FROM review_edit_requests\s+WHERE status/.test(TB), 'trackB 에 목록 쿼리 사본이 있다');
 });
-t('원본 /api/review-edit/* 정책 불변(admin/master)', () => {
+// 결정 270: 옛 대시보드 전용 공개 경로 /api/review-edit/list·approve·reject(admin/master)는 지웠다 —
+//   창구는 Track B 하나(auth + 내부인 게이트 · AE 는 담당 범위)다. 옛 경로가 되살아나지 않는지만 고정한다.
+t('옛 공개 /api/review-edit/list·approve·reject 제거 · 핸들러는 이름으로 남음', () => {
   ['/list', '/approve', '/reject'].forEach(p =>
-    assert.ok(new RegExp("router\\.(get|post)\\('" + p + "', authMiddleware, adminOrMasterMiddleware").test(RE),
-      '원본 게이트가 바뀌었다: ' + p));
+    assert.ok(!new RegExp("router\\.(get|post)\\('" + p + "'").test(RE), '옛 공개 경로가 남아 있다: ' + p));
+  const r = require('../src/routes/reviewEdit.routes');
+  ['reviewEditList', 'reviewEditApprove', 'reviewEditReject'].forEach(n => assert.strictEqual(typeof r.handlers[n], 'function', n));
 });
 
 /* ── 6) 리뷰어 노출 ────────────────────────────────────────── */

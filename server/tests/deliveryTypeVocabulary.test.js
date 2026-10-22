@@ -334,15 +334,24 @@ t('★ 리뷰어 배지는 아는 어휘일 때만 접는다(모르는 값 삭�
 console.log('G) 옛 어휘 일괄 정리 도구');
 
 const DIAG = read('src/routes/diag.routes.js');
+// 결정 270: 옛 공개 경로 /api/diag/delivery-type-cleanup 은 지웠다 — 핸들러는 _handlers.deliveryTypeCleanup 로 남고
+//   창구는 Track B 프록시(/api/trackb/settings/delivery-type-cleanup) 하나다. 본문은 그 핸들러 정의부터 다음 정의 직전까지.
+function _dtcBlock() {
+  const i = DIAG.indexOf('_handlers.deliveryTypeCleanup = async');
+  assert.ok(i > -1, '핸들러 정의를 찾지 못함');
+  const rest = DIAG.slice(i + 10);
+  const m = rest.search(/\n(router\.|_handlers\.|\/\/ \()/);
+  return DIAG.slice(i, m > -1 ? i + 10 + m : DIAG.length);
+}
 
 t('★ 판정은 utils/deliveryType 단일 출처 — SQL 에 어휘를 박지 않는다', () => {
-  const blk = DIAG.slice(DIAG.indexOf("router.post('/delivery-type-cleanup'"), DIAG.indexOf("\nrouter.", DIAG.indexOf("router.post('/delivery-type-cleanup'") + 10));
+  const blk = _dtcBlock();
   assert.match(blk, /const \{ canonicalDeliveryValue \} = require\('\.\.\/utils\/deliveryType'\)/);
   assert.ok(!/빈택배|회수건/.test(blk), '어휘 리터럴을 라우트에 박지 않는다');
 });
 
 t('★★ 미리보기가 기본 — 명시하지 않으면 쓰기 0', () => {
-  const blk = DIAG.slice(DIAG.indexOf("router.post('/delivery-type-cleanup'"), DIAG.indexOf("\nrouter.", DIAG.indexOf("router.post('/delivery-type-cleanup'") + 10));
+  const blk = _dtcBlock();
   assert.match(blk, /const dryRun = req\.body\?\.dryRun !== false;/);
   const upd = blk.indexOf('UPDATE ');
   const gate = blk.indexOf('if (dryRun || total === 0)');
@@ -350,7 +359,7 @@ t('★★ 미리보기가 기본 — 명시하지 않으면 쓰기 0', () => {
 });
 
 t('★ 쓰기 표면 = delivery_type 한 칸 (updated_at 도 안 건드린다)', () => {
-  const blk = DIAG.slice(DIAG.indexOf("router.post('/delivery-type-cleanup'"), DIAG.indexOf("\nrouter.", DIAG.indexOf("router.post('/delivery-type-cleanup'") + 10));
+  const blk = _dtcBlock();
   const sets = blk.match(/UPDATE \$\{[a-z.]+\} SET ([^`]*) WHERE/);
   assert.ok(sets, 'UPDATE SET 절 추출');
   assert.strictEqual(sets[1].trim(), 'delivery_type = $2');
@@ -359,7 +368,7 @@ t('★ 쓰기 표면 = delivery_type 한 칸 (updated_at 도 안 건드린다)',
 });
 
 t('★ 접히는 값만 바꾼다 — 이미 표준형·판정 밖 값은 대상 아님', () => {
-  const blk = DIAG.slice(DIAG.indexOf("router.post('/delivery-type-cleanup'"), DIAG.indexOf("\nrouter.", DIAG.indexOf("router.post('/delivery-type-cleanup'") + 10));
+  const blk = _dtcBlock();
   assert.match(blk, /if \(!std \|\| std === r\.raw\) continue;/);
 });
 

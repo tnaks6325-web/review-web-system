@@ -1,10 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const { searchByName } = require('../services/search.service');
-const { buildIndexSmart, checkDirtySheets, buildOneSheet } = require('../services/indexBuilder.service');
+const { buildIndexSmart, buildOneSheet } = require('../services/indexBuilder.service');
 const { authMiddleware } = require('../middleware/auth.middleware');
 const { emitIndexBuild } = require('../utils/sse');
-const { calcNextCronTimes } = require('../utils/cronCalc');
 const pool = require('../db/pool');
 const { verifyReviewerSession } = require('../services/reviewerSession.service');
 const reviewerIdentity = require('../services/reviewerIdentity.service');
@@ -135,102 +134,6 @@ router.post('/build', authMiddleware, async (req, res, next) => {
       } catch (err) {
         console.error('[index/build] 백그라운드 빌드 실패:', err.message);
       }
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// GET /api/index/status — 인덱스 현황 (GAS: indexStatus)
-// ═══════════════════════════════════════════════════════════
-router.get('/status', authMiddleware, async (req, res, next) => {
-  try {
-    const metaResult = await pool.query(
-      'SELECT COUNT(*) AS count, MAX(built_at) AS built_at FROM review_index'
-    );
-    const meta = metaResult.rows[0] || {};
-
-    const { rows: masterData } = await pool.query(
-      `SELECT campaign_name AS "campaignName", tab_name AS "tabName",
-              row_count AS "rowCount", submitted_count AS "submittedCount",
-              status, checksum, built_at AS "builtAt",
-              error_msg AS "errorMsg", skip_reason AS "skipReason"
-       FROM index_master
-       ORDER BY built_at DESC NULLS LAST`
-    );
-
-    // 빌드 잠금 상태
-    let lockStatus = { isLocked: false };
-    try {
-      const { rows: lockRows } = await pool.query(
-        "SELECT * FROM build_locks WHERE lock_key = 'INDEX_BUILD'"
-      );
-      if (lockRows.length > 0) {
-        const lock = lockRows[0];
-        lockStatus = {
-          isLocked: lock.is_locked,
-          lockedAt: lock.locked_at,
-          lockedBy: lock.locked_by,
-          elapsedSec: lock.locked_at ? Math.round((Date.now() - new Date(lock.locked_at).getTime()) / 1000) : 0,
-        };
-      }
-    } catch (_) {}
-
-    // 인덱스 만료 체크 (2시간)
-    const builtAt = meta.built_at ? new Date(meta.built_at).getTime() : 0;
-    const isExpired = (Date.now() - builtAt) > 2 * 60 * 60 * 1000;
-    const indexCount = parseInt(meta.count) || 0;
-
-    // builtAt을 KST 문자열로 변환 (프론트엔드 builtAtStr 필드)
-    let builtAtStr = '-';
-    if (meta.built_at) {
-      const d = new Date(meta.built_at);
-      builtAtStr = d.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
-    }
-
-    // ── 다음 자동 빌드 / 전체 재빌드 시각 계산 ──
-    const cronSchedule = calcNextCronTimes();
-
-    res.json({
-      ok: true,
-      // ★ 프론트엔드 호환 필드 (GAS 응답 형식 유지)
-      exists: indexCount > 0,
-      expired: isExpired,
-      count: indexCount,
-      builtAt: meta.built_at || null,
-      builtAtStr,
-      // 추가 메타 (구조화된 형식)
-      meta: {
-        count: indexCount,
-        builtAt: meta.built_at || null,
-        isExpired,
-      },
-      master: masterData,
-      lock: lockStatus,
-      buildLock: {
-        locked: lockStatus.isLocked,
-        elapsedSec: lockStatus.elapsedSec || 0,
-      },
-      codeVersion: new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }),
-      // ★ CRON 스케줄 정보
-      cron: cronSchedule,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// Phase 4: GET /api/index/dirty — 변경된 시트 감지 (경량, Drive API만)
-// ═══════════════════════════════════════════════════════════
-router.get('/dirty', authMiddleware, async (req, res, next) => {
-  try {
-    const dirtySheets = await checkDirtySheets();
-    res.json({
-      ok: true,
-      dirtyCount: dirtySheets.length,
-      dirtySheets,
     });
   } catch (err) {
     next(err);

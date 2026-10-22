@@ -1,7 +1,7 @@
 /**
  * API 메트릭 수집 미들웨어
  * 요청 수, 응답 시간, 에러율, 상태코드 분포를 인메모리 수집
- * /api/diag/metrics 또는 /health에서 조회 가능
+ * /health 에서 요약을 조회한다(옛 GET /api/diag/metrics 는 2026-10-22 제거 — 결정 270. 초기화 POST /api/diag/metrics/reset 은 남음)
  */
 const { logger } = require('../utils/logger');
 const { captureException } = require('../utils/sentry');
@@ -128,7 +128,7 @@ function errorMetricsMiddleware(err, req, res, next) {
 }
 
 /**
- * 메트릭 요약 반환 (GET /api/diag/metrics 등에서 사용)
+ * 메트릭 요약 반환 (/health 에서 사용)
  */
 function getMetricsSummary() {
   const uptimeSec = Math.floor((Date.now() - metrics.startTime) / 1000);

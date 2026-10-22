@@ -158,7 +158,9 @@ async function run() {
   }
   {
     ok('★ 작업보드 [📎 리뷰 대신 제출]도 같은 핸들러를 탄다(위임 — 창구별 사본 0)',
-      /_workdeskReviewUpload = _delegate\(require\('\.\/diag\.routes'\), 'post', '\/review-upload'\)/.test(TB));
+      /_workdeskReviewUpload = _handler\(_diagRoutes, 'reviewUpload'\)/.test(TB)
+      // 결정 270: 이름 위임 — diag 가 내보내는 reviewUpload 가 리뷰어 업로드 경로(/review-upload)의 바로 그 핸들러다.
+      && /router\.post\('\/review-upload'[\s\S]*?\n\}\);\n_handlers\.reviewUpload = lastRouteHandler\(router\);/.test(DIAG));
   }
 
   console.log('\n[F] 파일명 모양 불변 — 정리 도구의 이름↔행 매칭 생존');

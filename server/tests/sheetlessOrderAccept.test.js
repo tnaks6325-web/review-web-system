@@ -372,12 +372,17 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
     ok('★ 접수 경로에 랜덤 시트ID 발급이 없다', !/newVirtualSheetId|newVirtualGid/.test(orN));
 
     // 라우터 스택 실검사 — 게이트가 실제로 걸려 있는지
+    // 결정 270: 옛 대시보드 전용 공개 경로 POST /api/order/admin/accept(auth+adminOrMaster)는 지웠다 —
+    //   접수 창구는 Track B /work-orders/accept 하나이고, 그 게이트(auth → 내부인 → 편집 허용자)를 실제 스택으로 본다.
     const router = require('../src/routes/order.routes');
-    const layer = router.stack.find(l => l.route && l.route.path === '/admin/accept');
-    ok('POST /admin/accept 존재', !!layer && !!layer.route.methods.post);
+    ok('옛 공개 경로 POST /admin/accept 제거 · 핸들러는 이름으로 남음',
+      !router.stack.some(l => l.route && l.route.path === '/admin/accept') && typeof router.handlers.orderAdminAccept === 'function');
+    const tb = require('../src/routes/trackB.routes');
+    const layer = tb.stack.find(l => l.route && l.route.path === '/work-orders/accept' && l.route.methods.post);
+    ok('POST /work-orders/accept 존재(Track B)', !!layer);
     const names = layer.route.stack.map(s => s.handle.name);
-    ok('접수는 여전히 adminOrMaster 게이트 뒤', names.some(n => /adminOrMaster/i.test(n)));
-    ok('authMiddleware 가 역할 미들웨어 앞', names.findIndex(n => /^auth/i.test(n)) < names.findIndex(n => /adminOrMaster/i.test(n)));
+    ok('접수는 여전히 권한 게이트 뒤(내부인 + 편집 허용자)', names.includes('internalMiddleware') && names.includes('editorOnlyMiddleware'));
+    ok('authMiddleware 가 역할 미들웨어 앞', names.indexOf('authMiddleware') === 0 && names.indexOf('authMiddleware') < names.indexOf('editorOnlyMiddleware'));
   }
 
   /* ══════════════ H. 소스 위생 ══════════════ */

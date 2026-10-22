@@ -198,8 +198,10 @@ t('★ 미리보기 렌더러가 로드된다 — 없으면 미리보기 카드�
 console.log('\n5) 경로 재기준(SSO 토큰 격리)');
 
 t('연결 탭 목록은 호스트가 재기준(RECRUIT_TABS_API)', () => {
-  assert.ok(/window\.RECRUIT_TABS_API\) \|\| "\/api\/tab\/dashboard"/.test(REC),
-    '전역 미설정 시 기존 경로 폴백이 없다(관리자 대시보드 동작 불변이어야 한다)');
+  // 결정 270: 옛 관리자 대시보드의 /api/tab/dashboard 가 지워져 폴백도 살아 있는 Track B 목록을 가리킨다.
+  assert.ok(/window\.RECRUIT_TABS_API\) \|\| "\/api\/trackb\/tabs"/.test(REC),
+    '전역 미설정 시 폴백이 살아 있는 /api/trackb/tabs 가 아니다(지운 /api/tab/dashboard 로 가면 404)');
+  assert.ok(!/\/api\/tab\/dashboard/.test(REC.replace(/\/\*[\s\S]*?\*\//g, '')), '지운 /api/tab/dashboard 를 코드가 아직 부른다');
   assert.ok(/API_BASE_URL \+ _recruitTabsApi\(\)/.test(REC));
   assert.ok(/window\.RECRUIT_TABS_API = '\/api\/trackb\/tabs'/.test(HTML));
   assert.ok(/r\.spreadsheetTitle/.test(REC), 'trackb 응답의 시트 제목 필드를 읽지 않는다');

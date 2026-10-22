@@ -120,7 +120,7 @@ ok('저장 시 작업오더 ↔ 공고 양방향 링크',
 ok('리뷰웹 SSO에서는 Track B 작업오더 갱신 경로를 쓴다',
   /\/api\/trackb\/work-orders\/update/.test(rec)
   && /router\.put\('\/work-orders\/update'/.test(trackB)
-  && /_delegate\(_orderRoutes, 'put', '\/admin\/update'\)/.test(trackB));
+  && /_handler\(_orderRoutes, 'orderAdminUpdate'\)/.test(trackB));   // 결정 270: 이름 위임
 
 /* ── 운영 중 시트 우선 ── */
 // 문서가 "시트가 우선"이라 약속한 근거 = 상태 계산이 시트 일정을 진실원천으로 삼는 분기.

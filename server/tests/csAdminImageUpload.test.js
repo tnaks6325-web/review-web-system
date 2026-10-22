@@ -87,8 +87,11 @@ ok('최대 5장 제한(리뷰어측과 동일)', /_csPending\.length >= 5/.test(
 ok('8MB 초과 파일 차단(프론트 사전 검증)', /f\.size > 8 \* 1024 \* 1024/.test(appJs));
 
 console.log('\n⑤ 리뷰웹시스템[3버전](Track B) 프록시 대칭');
+// 결정 270: 경로 문자열 위임(_delegate) → 이름 위임(_handler). cs 라우터가 /upload 바로 뒤에서 그 핸들러를 csUpload 로 내보낸다.
 ok('trackB가 /cs/upload도 위임(다른 6개 경로와 동일 패턴)',
-  /upload:\s*_delegate\(_csRoutes, 'post', '\/upload'\)/.test(trackBRoutes));
+  /upload:\s*_handler\(_csRoutes, 'csUpload'\)/.test(trackBRoutes)
+  && require('../src/routes/cs.routes').handlers.csUpload === require('../src/routes/cs.routes').stack
+    .find(l => l.route && l.route.path === '/upload' && l.route.methods.post).route.stack.at(-1).handle);
 ok('trackB 마운트 경로도 authMiddleware+internalMiddleware로 보호',
   /router\.post\('\/cs\/upload', authMiddleware, internalMiddleware/.test(trackBRoutes));
 

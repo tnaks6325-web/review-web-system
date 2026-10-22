@@ -241,32 +241,8 @@ async function lookupPhone(phone8) {
   return { ok: true, name: rows[0].name, phone: rows[0].phone };
 }
 
-/**
- * 리뷰어 목록 조회 (GAS: getReviewerList)
- */
-async function getReviewerList() {
-  const { rows } = await pool.query(`
-    SELECT name, phone, phone8, registered_at AS "registeredAt", consent, status,
-           income_type AS "incomeType", sub_accounts AS "subAccounts",
-           admin_memo AS "memo"
-    FROM reviewers
-    ORDER BY registered_at DESC
-  `);
-  return { ok: true, reviewers: rows, total: rows.length };
-}
-
-/**
- * 리뷰어 삭제 (GAS: deleteReviewer)
- */
-async function deleteReviewer(name, phone) {
-  const cleanPhone = (phone || '').replace(/[^0-9]/g, '');
-  const result = await pool.query(
-    'DELETE FROM reviewers WHERE name = $1 AND phone = $2',
-    [name, cleanPhone]
-  );
-  if (result.rowCount === 0) return { ok: false, error: '해당 리뷰어를 찾을 수 없습니다.' };
-  return { ok: true };
-}
+// (리뷰어 목록 getReviewerList·삭제 deleteReviewer — 옛 대시보드 전용 GET /api/reviewer/list·POST /api/reviewer/delete — 는 2026-10-22 제거 · 결정 270.
+//  작업보드 등록리뷰어DB 는 /api/trackb/reviewers/* 를 쓴다.)
 
 /**
  * 리뷰어 프로필 조회/저장 (GAS: getReviewerProfile / saveSubAccounts / saveIncomeInfo)
@@ -527,7 +503,5 @@ module.exports = {
   registerReviewer,
   verifyReviewer,
   lookupPhone,
-  getReviewerList,
-  deleteReviewer,
   handleReviewerProfile,
 };

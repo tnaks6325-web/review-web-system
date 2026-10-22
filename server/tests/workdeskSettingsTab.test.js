@@ -63,14 +63,19 @@ t('★ /settings/guide-image 는 원본(무인증)보다 좁다 — 업로드 �
 /* ── 2) 로직 복제 0 — 기존 핸들러 위임만 ───────────────────── */
 console.log('\n2) 사본 금지(서버)');
 const tb = R('src/routes/trackB.routes.js');
-t('설정 라우트는 _delegate 로 기존 핸들러를 태운다',
-  /_setHandlers\s*=\s*\{[\s\S]*?_delegate\(_adminRoutes, 'get', '\/my-nickname'\)/.test(tb)
-  && /_delegate\(_tabRoutes, 'post', '\/company-business-no'\)/.test(tb)
-  && /_delegate\(_reviewerRoutes, 'post', '\/notices\/save'\)/.test(tb));
+// 결정 270: 경로 문자열 위임(_delegate) → 이름 위임(_handler). 이름이 원본 라우트의 바로 그 핸들러인지 실제로 대조한다.
+const _same = (mod, p, m, name) => { const r = require('../src/routes/' + mod); const l = r.stack.find(x => x.route && x.route.path === p && x.route.methods[m]); return !!l && l.route.stack.at(-1).handle === r.handlers[name]; };
+t('설정 라우트는 이름 위임으로 기존 핸들러를 태운다',
+  /_setHandlers\s*=\s*\{[\s\S]*?_handler\(_adminRoutes, 'myNicknameGet'\)/.test(tb)
+  && /_handler\(_tabRoutes, 'companyBusinessNo'\)/.test(tb)
+  && /_handler\(_reviewerRoutes, 'noticeSave'\)/.test(tb)
+  && _same('admin.routes', '/my-nickname', 'get', 'myNicknameGet')
+  && _same('tabconfig.routes', '/company-business-no', 'post', 'companyBusinessNo')
+  && _same('reviewer.routes', '/notices/save', 'post', 'noticeSave'));
 t('★ SQL·저장 로직을 베끼지 않았다(원장 테이블 이름이 trackB 라우트에 없음)',
   !/admin_nicknames/.test(tb) && !/reviewer_notices/.test(tb) && !/company_business_no/.test(tb));
 t('★ 위임 대상이 사라지면 부팅 시 throw — 조용한 404 금지',
-  /위임 대상 라우트를 찾지 못함/.test(tb));
+  /위임 대상 핸들러를 찾지 못함/.test(tb));
 t('원본 라우트는 무변경 — /api/admin·/api/tab·/api/reviewer 게이트 그대로',
   /router\.get\('\/my-nickname', authMiddleware,/.test(R('src/routes/admin.routes.js'))
   && /router\.post\('\/company-business-no', authMiddleware, adminOrMasterMiddleware,/.test(R('src/routes/tabconfig.routes.js'))

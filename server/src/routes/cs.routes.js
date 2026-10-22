@@ -7,6 +7,9 @@
  */
 const express = require('express');
 const router = express.Router();
+// Track B(trackB.routes.js)가 경로 문자열 대신 이름으로 부르는 핸들러 모음 — 맨 아래 router.handlers 로 내보낸다(결정 270).
+const { lastRouteHandler } = require('../utils/routeHandlers');
+const _handlers = {};
 const pool = require('../db/pool');
 const adminNickname = require('../services/adminNickname.service');
 const { logger } = require('../utils/logger');
@@ -97,6 +100,7 @@ router.get('/threads', async (req, res, next) => {
     next(err);
   }
 });
+_handlers.csThreads = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // GET /api/cs/unread-count — 관리자 탭 뱃지용(미확인 메시지 보유 방 수 + 합계)
 router.get('/unread-count', async (req, res, next) => {
@@ -111,6 +115,7 @@ router.get('/unread-count', async (req, res, next) => {
     next(err);
   }
 });
+_handlers.csUnreadCount = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // GET /api/cs/messages?threadId=XX — 대화 메시지 + 리뷰어 정보(관리자 메모 포함). 열람 시 미확인 리셋.
 router.get('/messages', async (req, res, next) => {
@@ -176,6 +181,7 @@ router.get('/messages', async (req, res, next) => {
     next(err);
   }
 });
+_handlers.csMessages = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // POST /api/cs/reply { threadId, content } — 관리자 답장
 router.post('/reply', async (req, res, next) => {
@@ -235,6 +241,7 @@ router.post('/reply', async (req, res, next) => {
     next(err);
   }
 });
+_handlers.csReply = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // POST /api/cs/upload { imageBase64, mimeType?, fileName? } — 관리자 답장 첨부 이미지 업로드
 //   리뷰어측 POST /api/reviewer/cs/upload와 동일 인프라(guide-image Drive+무인증 프록시) 재사용,
@@ -275,6 +282,7 @@ router.post('/upload', async (req, res, next) => {
     next(err);
   }
 });
+_handlers.csUpload = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // POST /api/cs/status { threadId, status } — 방 상태(open/closed)
 router.post('/status', async (req, res, next) => {
@@ -296,6 +304,7 @@ router.post('/status', async (req, res, next) => {
     next(err);
   }
 });
+_handlers.csStatus = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // ── row_json에서 금액류 값 찾아내기(시트마다 헤더명이 달라 키워드 매칭, 표시 전용) ──
 function _pickAmount(rowJson) {
@@ -403,6 +412,7 @@ router.get('/order-context', async (req, res, next) => {
     next(err);
   }
 });
+_handlers.csOrderContext = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // POST /api/cs/memo { phone8, memo } — 리뷰어 관리자 전용 메모 저장(리뷰어정보로 영구 보존)
 router.post('/memo', async (req, res, next) => {
@@ -423,5 +433,9 @@ router.post('/memo', async (req, res, next) => {
     next(err);
   }
 });
+_handlers.csMemo = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
+
+// ★ 이름을 빼거나 바꾸면 trackB 가 기동 시 바로 실패한다(fail-closed) — 옛 공개 경로를 지워도 Track B 는 그대로다.
+router.handlers = Object.freeze(_handlers);
 
 module.exports = router;

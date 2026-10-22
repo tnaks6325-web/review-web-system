@@ -234,15 +234,19 @@ t('Track B 네임스페이스가 admin 과 같은 모양(베이스 치환만으�
 });
 t('편집 계열은 기존 핸들러에 위임(로직 복제 0)', () => {
   const SRC = R('src/routes/trackB.routes.js');
-  assert.ok(/function _delegate\(/.test(SRC), '위임 헬퍼가 없다');
-  assert.ok(/throw new Error\(`\[trackB\] 위임 대상 라우트를 찾지 못함/.test(SRC),
+  // 결정 270: 경로 문자열 위임(_delegate) → 이름 위임(_handler). 대상이 사라지면 여전히 부팅 때 터진다.
+  assert.ok(/function _handler\(/.test(SRC), '위임 헬퍼가 없다');
+  assert.ok(/throw new Error\(`\[trackB\] 위임 대상 핸들러를 찾지 못함/.test(SRC),
     '대상이 사라지면 부팅 때 터져야 한다(조용한 404 금지)');
   assert.ok(!/INSERT INTO recruit_campaigns/.test(SRC), 'Track B 가 공고를 직접 INSERT 하면 사본이다');
   assert.ok(!/INSERT INTO work_orders/.test(SRC), 'Track B 가 오더를 직접 INSERT 하면 사본이다');
 });
 t('★ 모집공고 작업 로그도 원본의 공유 집계 핸들러에 위임', () => {
   const SRC = R('src/routes/trackB.routes.js');
-  assert.ok(/activityLog:\s*_delegate\(_campRoutes, 'get', '\/admin\/:id\/activity-log'\)/.test(SRC));
+  assert.ok(/activityLog:\s*_handler\(_campRoutes, 'adminActivityLog'\)/.test(SRC));
+  const camp = require('../src/routes/campaign.routes');
+  const l = camp.stack.find(x => x.route && x.route.path === '/admin/:id/activity-log');
+  assert.ok(l && l.route.stack.at(-1).handle === camp.handlers.adminActivityLog, '이름이 원본 집계 핸들러를 가리키지 않는다');
   assert.ok(/_campHandlers\.activityLog\(req, res, next\)/.test(SRC));
 });
 
