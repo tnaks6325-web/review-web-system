@@ -1,10 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const driveService = require('../services/drive.service');
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
-const captureRename = require('../services/captureFileRename.service');
 
 // 공개 리포트에서 제외할 영수증 검수 증거. 리뷰 슬롯 파일을 AI가 영수증으로 오판했어도
 // 담당자가 정상(ok)으로 확정했다면 format 흔적만으로 숨기지 않는다. 영수증 전용
@@ -30,109 +28,19 @@ const PUBLIC_REPORT_RECEIPT_EVIDENCE_SQL = `(
 
 // (POST /relocate-orphan-reviews — 옛 대시보드 「리뷰 캡처 정리」 창 전용, 2026-09-29 제거 · 결정 186 72번)
 
-// ═══════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════
-// POST /api/drive/capture-rename-recipient — 과거 리뷰 캡처 파일명 소급 정정(주문자 → 수취인)
-//
-// 배경: 타계정 참여 캡처가 Drive 에 전부 주문자(로그인 본계정) 이름으로 쌓여 어떤 타계정의
-//   리뷰인지 구분할 수 없다(2026-09-22 신고 · 결정 009 후속). 앞으로의 저장은 서버 판정으로
-//   고쳤고, 이미 올라간 파일은 이 창구가 **이름만** 바꾼다(꼬리 = 순번·제출시각·확장자 보존).
-//
-// ★★ 되돌리기 어려운 외부 저장 쓰기라 **미리보기 기본** — `dryRun:false` **와** `confirm:true`
-//    가 둘 다 있어야 실행한다. 바꾸기 전 이름은 `review_submissions.renamed_from`(164)에 남고
-//    `revert:true` 로 되돌린다.
-// ★ adminOrMaster — 리뷰 캡처 정리(relocate)와 같은 급의 Drive 쓰기 도구다.
-// ═══════════════════════════════════════════════════════════
-router.post('/capture-rename-recipient', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, limit, dryRun, confirm, revert } = req.body || {};
-    const by = (req.admin && req.admin.name) || 'admin';
-    const args = { db: pool, sheetId: sheetId || null, tabName: tabName || null,
-                   limit, dryRun: dryRun !== false, confirm: confirm === true, by };
-    const out = revert === true
-      ? await captureRename.revertRecipientRenames(args)
-      : await captureRename.applyRecipientRenames(args);
-    res.json({ ok: true, revert: revert === true, ...out });
-  } catch (err) {
-    // 마이그레이션 164 미적용은 원인을 말해 준다(조용한 500 금지).
-    if (err && err.code === '42703') {
-      return res.status(400).json({ ok: false, code: 'not_ready',
-        error: '이 기능은 migration 164(review_submissions.renamed_from) 적용 후 사용할 수 있습니다.' });
-    }
-    next(err);
-  }
-});
+// (POST /capture-rename-recipient — 과거 리뷰 캡처 파일명 소급 정정, 2026-10-22 제거 · 결정 272 ·
+//  결정 186 90번. 실행 금지 상태로 한 번도 안 돌았다. migration 164 renamed_from 칸은 그대로 둔다.)
 // (POST /review-folder-backfill — 같은 창 전용, 결정 186 72번 제거)
 
 // (POST /share-review-folder — 같은 창 전용, 결정 186 72번 제거)
 
 // ═══════════════════════════════════════════════════════════
-// 업체 보고용 공개 링크 (탭 단위)
-//   - POST /report-link (관리자): 탭당 추측불가 코드 발급(재생성 시 동일 코드 재사용)
+// 업체 보고용 공개 링크 (탭 단위) — **이미 보낸 링크 열람만** 남긴다
 //   - GET  /report/:code (공개): 코드 → 탭의 리뷰 캡처 목록 반환(이미지 자체는
 //     기존 /api/drive/image/:id 프록시로 표시 → 폴더 공개공유 불필요, 원본 복제 0)
+//   - (POST /report-link — 새 링크 발급, 2026-10-22 제거 · 결정 272 · 결정 186 48번.
+//      발급하던 화면 버튼은 이미 없다. 이미 발급된 review_report_links 행과 report.html 은 그대로.)
 // ═══════════════════════════════════════════════════════════
-const _REPORT_CODE_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789'; // 혼동문자 제외
-function _genReportCode(len = 10) {
-  let c = '';
-  for (let i = 0; i < len; i++) c += _REPORT_CODE_CHARS.charAt(Math.floor(Math.random() * _REPORT_CODE_CHARS.length));
-  return c;
-}
-function _frontendBase() {
-  return (process.env.FRONTEND_URL || 'https://review-web-system.pages.dev').replace(/\/+$/, '');
-}
-
-// 탭당 보고 코드 확보 (없으면 생성, 있으면 재사용 — 동일 링크 유지)
-async function _ensureReportCode(sheetId, tabName, displayName, createdBy) {
-  const found = await pool.query(
-    'SELECT code FROM review_report_links WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
-    [sheetId, tabName]
-  );
-  if (found.rows[0]) {
-    if (displayName) {
-      await pool.query('UPDATE review_report_links SET display_name = $1 WHERE code = $2', [displayName, found.rows[0].code]);
-    }
-    return found.rows[0].code;
-  }
-  for (let i = 0; i < 12; i++) {
-    const c = _genReportCode();
-    try {
-      await pool.query(
-        'INSERT INTO review_report_links (code, sheet_id, tab_name, display_name, created_by) VALUES ($1, $2, $3, $4, $5)',
-        [c, sheetId, tabName, displayName || null, createdBy || null]
-      );
-      return c;
-    } catch (e) {
-      if (e.code === '23505') {
-        // 탭 유니크 충돌(동시 생성) → 기존 코드 재선택 / 코드 충돌이면 재시도
-        const r = await pool.query('SELECT code FROM review_report_links WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1', [sheetId, tabName]);
-        if (r.rows[0]) return r.rows[0].code;
-        continue;
-      }
-      throw e;
-    }
-  }
-  throw new Error('보고 코드 생성 실패');
-}
-
-// POST /api/drive/report-link — 탭의 업체 보고용 공개 링크 발급(관리자)
-//   body: { sheetId, tabName, displayName? }
-router.post('/report-link', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, displayName } = req.body || {};
-    if (!sheetId || !tabName) return res.json({ ok: false, error: 'sheetId, tabName이 필요합니다.' });
-    const createdBy = (req.admin && (req.admin.name || req.admin.username || req.admin.id)) || null;
-    const code = await _ensureReportCode(sheetId, tabName, (displayName || '').trim() || null, createdBy);
-    res.json({
-      ok: true,
-      code,
-      reportUrl: `${_frontendBase()}/report.html?r=${code}`,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
 // GET /api/drive/report/:code — 공개: 코드 → 탭 리뷰 캡처 목록 (무인증)
 //   명시적 review 원장 우선 → 비어 있으면 review_index 대표 리뷰만 사용.
 //   폴더 재귀 스캔은 역할을 판별할 수 없어 현금영수증을 노출하므로 공개 경로에서 사용하지 않는다.
@@ -236,52 +144,7 @@ router.get('/image/:id', async (req, res) => {
   }
 });
 
-// ═══════════════════════════════════════════════════════════
-// POST /api/drive/orphan-capture-cleanup — 고아 캡처 미리보기·정리 (세 종류 한 창구)
-//
-// A 'linked'(기본) 링크 끊김 — 원장은 살아 있는데 그 칸이 파일을 더는 안 가리킨다
-//     (04:40 자동 정리는 2026-10-02 제거.) ⚠ A 판정은 **번호가 다시 매겨진 정상 리뷰 사진**도 잡는다
-//     (실측 72 중 62) — dryRun:false 로 실행하기 전에 후보를 명단과 대조할 것(결정 064 후속).
-// C 'tombstoned'  작업 소멸 — 작업이 통째로 지워져 원장 자체가 없다(묘비 134 가 좌표를 남긴다)
-// B 'folder'      원장 없음 — Drive 폴더에는 있는데 원장 어디에서도 안 가리킨다
-//     ★★★ B 는 **사람이 고른 파일만**(`fileIds` 필수) 처리한다. "원장에 없다"에는
-//        업로드는 됐는데 기록만 실패한 **정상 캡처**가 섞이므로 일괄 삭제 표면을 두지 않는다.
-//     ★ 그래서 B·C 는 크론이 절대 부르지 않는다 — 사람이 눌러야만 움직인다.
-//
-// body: { kind? ('linked'|'tombstoned'|'folder', 기본 'linked'), dryRun? (기본 true),
-//         fileIds?: string[], sheetId?/tabName? (folder 필수) }
-//   ★ fileIds 를 줘도 서버가 후보를 다시 골라 **교집합**만 처리한다(화면 목록 불신).
-//   ★ 삭제는 휴지통만(30일 복구창) — 영구삭제 API 를 쓰지 않는다.
-//   ★ 모르는 kind 는 400 으로 거부한다 — 오타가 조용히 A 를 실행하면 안 된다.
-// ═══════════════════════════════════════════════════════════
-router.post('/orphan-capture-cleanup', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const b = req.body || {};
-    const by = (req.admin && req.admin.name) || 'admin';
-    const dryRun = b.dryRun !== false;   // ★ 기본 미리보기 — 실행은 dryRun:false 를 명시해야만
-    const fileIds = Array.isArray(b.fileIds) && b.fileIds.length ? b.fileIds : null;
-    const svc = require('../services/orphanCaptureCleanup.service');
-
-    /* kind — 어떤 종류의 고아를 다루는가. 미지정은 종전 동작(A) 그대로.
-         'linked'(기본) A 링크 끊김   — 크론이 자동으로 도는 것과 같은 함수
-         'tombstoned'   C 작업 소멸   — 묘비(134) 기준, 사람이 실행
-         'folder'       B 원장 없음   — Drive 스캔, **고른 파일만** 실행 */
-    const kind = String(b.kind || 'linked');
-    if (kind === 'tombstoned') {
-      return res.json(await svc.trashTombstonedCaptures({ dryRun, fileIds, by }));
-    }
-    if (kind === 'folder') {
-      if (!b.sheetId || !b.tabName) {
-        return res.status(400).json({ ok: false, error: 'folder 종류는 sheetId, tabName 이 필요합니다.' });
-      }
-      return res.json(await svc.trashFolderOrphans({
-        sheetId: b.sheetId, tabName: b.tabName, fileIds, dryRun, by }));
-    }
-    if (kind !== 'linked') {
-      return res.status(400).json({ ok: false, error: `알 수 없는 kind: ${kind}` });
-    }
-    return res.json(await svc.trashOrphanCaptures({ dryRun, fileIds, by }));
-  } catch (err) { return next(err); }
-});
+// (POST /orphan-capture-cleanup — 고아 캡처 수동 미리보기·정리, 2026-10-22 제거 · 결정 272 · 결정 186 73번.
+//  04:40 자동 정리는 2026-10-02 에 이미 제거(결정 064 후속 2). 작업 삭제 때 남기는 묘비(134)는 그대로 기록된다.)
 
 module.exports = router;
