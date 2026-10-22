@@ -26,8 +26,8 @@ function _mix(v) { return CANON.reviewTypeMix(v); }
 
 function _optionShape(r) {
   const unitKind = _s(r.unitKind) || 'option';
-  // ★ 6단계: 선택지 가이드는 글자 모양이 아니라 {글, 사진(파일 id)} 로 비교한다 — 서버 투영(글만 + 사진 목록)과
-  //   공고 창 저장(글 + 끝에 <img> + 사진 목록)은 리뷰어에게 똑같이 보인다(`utils/guideCanon`).
+  // ★ 6단계·D4: 선택지 가이드는 글자 모양이 아니라 {글·사진 자리, 사진(파일 id)} 로 비교한다 — 서버 투영(주소 줄 자리 <img> + 사진 목록)과
+  //   공고 창 저장(자리 <img> + 끝에 <img> + 사진 목록)은 리뷰어에게 똑같이 보인다(`utils/guideCanon`). 글은 자리 표시가 든 비교용 글(view).
   const g = canonGuide(r.inflowGuideHtml, Array.isArray(r.inflowGuideImages) ? r.inflowGuideImages : _jsonArr(r.inflowGuideImages));
   // ★ 상품 단위 줄(옵션 없는 상품)은 공고가 opt_key 에 상품명을 넣어 저장한다(발행 폼 규칙) —
   //   비교 열쇠는 상품명 하나로 맞춘다. 안 맞추면 같은 줄이 "있음/없음" 두 줄로 갈린다(운영 대조 실측).
@@ -43,7 +43,7 @@ function _optionShape(r) {
     recruit_total: CANON.int(r.recruitTotal),
     daily_limit: CANON.int(r.dailyLimit),
     review_type_mix: _mix(r.reviewTypeMix),
-    inflow_guide_html: g.text,
+    inflow_guide_html: g.view,
     inflow_guide_images: g.images.map(imageKey).join(','),
     // 7단계-④ — 마감(참여자가 있어 지우지 않고 닫은 선택지). 오더는 그 줄에 closed:true, 공고는 status='closed'.
     status: r.closed === true || String(r.status || '') === 'closed' ? 'closed' : 'active',

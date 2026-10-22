@@ -1648,6 +1648,8 @@ function _ugRegister(key, label) {
 function _ugDrop(key) {
   if (!key || !_UG_KEY_RE.test(key)) return;     // 고정 3칸(inflow/review/notes)은 절대 안 지운다
   delete _IG_FIELDS[key]; delete _IG_TA[key]; delete window._igState[key];
+  const st = window._ugSt0;
+  if (st) { delete st.doc[key]; delete st.ins[key]; delete st.caret[key]; }
 }
 /** 표를 통째로 다시 그리기 전에 — 사라진 행의 키가 `_igBusy`·`_igRenderAll` 에 남지 않게 */
 function _ugDropAll() { Object.keys(_IG_FIELDS).forEach(k => { if (_UG_KEY_RE.test(k)) _ugDrop(k); }); }
@@ -1656,56 +1658,305 @@ function _ugDropBox(box) {
   box.querySelectorAll(".rf-opt-row").forEach(r => _ugDrop(r.dataset.ig));
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   📍 결정 272(D4 「나」 · 사용자 확정 2026-10-22) — 선택지 가이드 = **글 칸 하나 + 그 사이 사진 줄**
+   ─────────────────────────────────────────────────────────────────────
+   글을 쓰다가 넣고 싶은 자리를 누르고 「여기에 사진 넣기」 → 그 줄에 사진이 끼어든다.
+   사진 줄마다 위로·아래로·빼기. 저장은 새 칸 없이 **글 속 사진 자리**로(서버 `utils/guideCanon`):
+     HTML = 글<br><img>(자리)<br>글 … + 맨 끝 사진들 <img>  ·  사진 목록 = 글 속 차례 그대로
+   ★ 화면 모델 `_ugDoc[key]` = 글·사진이 번갈아 놓인 목록(T P T P … T — 글은 비어 있을 수 있다).
+     사진 항목은 `_igState[key]` 의 그 객체 자체를 가리킨다 → 올리기·장수 제한·확대 보기는 위젯 한 벌 그대로(사본 0).
+   ★ 글 칸에 타이핑할 때는 다시 그리지 않는다(한글 조합이 깨진다) — 사진을 넣고·옮기고·뺄 때만 다시 그린다.
+   ★ 숨은 글칸(rf_wd_<key>)은 "글이 있나" 판정용 거울이다(배지·미리보기가 읽는다).
+   ═══════════════════════════════════════════════════════════════════════ */
+/** 칸별 편집 상태(처음 쓸 때 만든다) — doc: 글·사진 차례 · ins: 다음 사진이 들어갈 자리 {seg, at}(null = 맨 끝) · caret: 마지막으로 쓰던 글 칸 */
+function _ugSt() { return window._ugSt0 || (window._ugSt0 = { doc: {}, ins: {}, caret: {} }); }
+
+/** 글·사진 목록을 T P T … T 모양으로 — 붙은 글은 잇고, 붙은 사진 사이·양 끝에는 빈 글 칸 */
+function _ugDocNorm(blocks) {
+  const out = [];
+  (blocks || []).forEach(b => {
+    const last = out[out.length - 1];
+    if (b.t === "text") {
+      if (last && last.t === "text") last.v = [last.v, b.v].filter(x => x !== "").join("\n");
+      else out.push({ t: "text", v: String(b.v || "") });
+    } else {
+      if (!last || last.t !== "text") out.push({ t: "text", v: "" });
+      out.push(b);
+    }
+  });
+  if (!out.length || out[out.length - 1].t !== "text") out.push({ t: "text", v: "" });
+  return out;
+}
+
+/** 위젯 목록과 맞춘다 — 빠진 사진은 줄을 빼고 앞뒤 글을 잇고, 새 사진은 넣을 자리(없으면 끝)에. 목록 차례 = 글 속 차례. */
+function _ugDocSync(key) {
+  const list = window._igState[key] || (window._igState[key] = []);
+  let doc = _ugDocNorm((_ugSt().doc[key] || []).filter(b => b.t !== "pic" || list.includes(b.item)));
+  const inDoc = new Set(doc.filter(b => b.t === "pic").map(b => b.item));
+  list.forEach(item => {
+    if (inDoc.has(item)) return;
+    inDoc.add(item);
+    const at = _ugSt().ins[key];
+    if (at && doc[at.seg] && doc[at.seg].t === "text") {
+      const v = doc[at.seg].v, c = Math.max(0, Math.min(at.at, v.length));
+      doc.splice(at.seg, 1, { t: "text", v: v.slice(0, c).replace(/\n$/, "") }, { t: "pic", item }, { t: "text", v: v.slice(c).replace(/^\n/, "") });
+      _ugSt().ins[key] = { seg: at.seg + 2, at: 0 };          // 여러 장을 한 번에 넣으면 고른 차례대로 이어진다
+    } else {
+      doc.push({ t: "pic", item });
+      doc = _ugDocNorm(doc);
+    }
+  });
+  doc = _ugDocNorm(doc);
+  _ugSt().doc[key] = doc;
+  const order = doc.filter(b => b.t === "pic").map(b => b.item);
+  list.splice(0, list.length, ...order);
+  return doc;
+}
+
+/** 손댔는지 판정용 서명 — 글(앞뒤 공백 무시)과 사진(토큰)의 차례 */
+function _ugSig(key) {
+  return JSON.stringify((_ugSt().doc[key] || []).map(b => b.t === "text" ? b.v.trim() : "#" + (b.item.tok || b.item.src || ""))
+    .filter(x => x !== ""));
+}
+
+/** 숨은 거울 글칸 = 글만 이어 붙인 것(배지·미리보기의 "글 있음" 판정용) */
+function _ugMirror(key) {
+  const ta = document.getElementById(_IG_TA[key]);
+  if (ta) ta.value = (_ugSt().doc[key] || []).filter(b => b.t === "text" && b.v.trim()).map(b => b.v.trim()).join("\n");
+}
+
+function _ugAutoH(ta) {
+  ta.style.height = "auto";
+  ta.style.height = Math.max(ta.scrollHeight, 30) + "px";
+}
+
+/** 글·사진 줄을 그린다. 글은 value 로 넣는다(HTML 보간 0). */
+function _ugDocRender(key) {
+  const box = document.getElementById("rf_ugdoc_" + key);
+  if (!box) return;
+  const doc = _ugDocSync(key);
+  let n = 0;
+  box.innerHTML = doc.map((b, i) => {
+    if (b.t === "text") {
+      const ph = i === 0 ? "유입 경로, 검색어, 진입 순서를 적어주세요&#10;넣고 싶은 자리를 누른 뒤 「여기에 사진 넣기」 · 이미지를 붙여넣어도 됩니다." : "";
+      return `<textarea class="ug-seg" data-seg="${i}" rows="1" placeholder="${ph}"></textarea>`;
+    }
+    n++;
+    const im = b.item;
+    const canUp = doc[i - 1].v.trim() !== "" || i >= 2;
+    const canDown = doc[i + 1].v.trim() !== "" || i + 2 < doc.length;
+    const st = im.state === "up" ? " up" : im.state === "bad" ? " bad" : "";
+    const say = im.state === "up" ? "올리는 중…" : im.state === "bad" ? "올리지 못했어요 — 빼고 다시 넣어주세요" : "이 줄 자리에 사진이 보입니다";
+    return `<div class="ug-pic${st}" data-pic="${i}">
+        <button type="button" class="ug-pic-th" data-ugzoom="${i}" title="크게 보기"><img src="${escHtml(im.src || im.url)}" alt=""></button>
+        <span class="ug-pic-tx"><b>사진 ${n}</b> <span>${say}</span></span>
+        <button type="button" class="ug-btn" data-ugmv="-1" data-i="${i}"${canUp ? "" : " disabled"}>위로</button>
+        <button type="button" class="ug-btn" data-ugmv="1" data-i="${i}"${canDown ? "" : " disabled"}>아래로</button>
+        <button type="button" class="ug-btn del" data-ugdel="${i}">빼기</button>
+      </div>`;
+  }).join("");
+  box.querySelectorAll("textarea.ug-seg").forEach(ta => { ta.value = doc[Number(ta.dataset.seg)].v; _ugAutoH(ta); });
+  const wrap = box.closest(".rf-ug");
+  if (wrap) wrap.querySelectorAll(".ug-ins,.ug-add").forEach(btn => {
+    btn.disabled = n >= _IG_MAX;
+    btn.title = n >= _IG_MAX ? `사진은 최대 ${_IG_MAX}장까지 넣을 수 있어요` : "";
+  });
+  _ugMirror(key);
+  // 배지·안내줄도 같이 — 사진 올리기가 끝난 순간(_igUpload → _igRender → 여기)에도 "글 · 사진 N" 이 바로 맞는다
+  const row = document.querySelector(`#rf_opt_rows .rf-opt-row[data-ig="${key}"]`);
+  if (row) _ugMark(row);
+}
+
+/** 사진 줄 한 칸 옮기기 — 옆 글이 있으면 글 한 줄과 자리를 바꾸고, 바로 옆이 사진이면 둘을 바꾼다 */
+function _ugMove(key, i, dir) {
+  const doc = _ugSt().doc[key];
+  if (!doc || !doc[i] || doc[i].t !== "pic") return false;
+  const near = doc[i + dir], far = doc[i - dir];
+  const nearV = near.v.replace(/\n+$/, "").replace(/^\n+/, "");
+  if (nearV.trim() !== "") {
+    const L = nearV.split("\n");
+    const line = dir < 0 ? L.pop() : L.shift();
+    near.v = L.join("\n");
+    far.v = far.v.trim() === "" ? line : (dir < 0 ? line + "\n" + far.v : far.v + "\n" + line);
+    return true;
+  }
+  const other = doc[i + 2 * dir];
+  if (!other || other.t !== "pic") return false;
+  const t = other.item; other.item = doc[i].item; doc[i].item = t;
+  return true;
+}
+
+function _ugDocChanged(key) {
+  _ugDocRender(key);
+  if (typeof _onPreviewInput === "function") _onPreviewInput();
+}
+
+/** 넣을 자리 = 마지막으로 쓰던 글 칸의 커서(없으면 맨 끝) */
+function _ugInsHere(key) {
+  const box = document.getElementById("rf_ugdoc_" + key);
+  const seg = _ugSt().caret[key];
+  const ta = box && seg != null ? box.querySelector(`textarea.ug-seg[data-seg="${seg}"]`) : null;
+  _ugSt().ins[key] = ta ? { seg: Number(seg), at: ta.selectionStart || 0 } : null;
+}
+
+/** 글·사진 칸 배선(멱등) — 클릭은 위임, 파일 입력은 addEventListener */
+function _ugDocBind(key) {
+  const box = document.getElementById("rf_ugdoc_" + key);
+  const wrap = box && box.closest(".rf-ug");
+  if (!box || !wrap || wrap.dataset.ugdocBound === "1") return;
+  wrap.dataset.ugdocBound = "1";
+  const file = wrap.querySelector("#rf_igf_" + key);
+  const caret = (e) => { const ta = e.target.closest && e.target.closest("textarea.ug-seg"); if (ta) _ugSt().caret[key] = Number(ta.dataset.seg); };
+  box.addEventListener("focusin", caret);
+  box.addEventListener("input", (e) => {
+    const ta = e.target.closest("textarea.ug-seg");
+    if (!ta) return;
+    const doc = _ugSt().doc[key];
+    const b = doc && doc[Number(ta.dataset.seg)];
+    if (b && b.t === "text") b.v = ta.value;
+    _ugAutoH(ta);
+    _ugMirror(key);
+    const row = document.querySelector(`#rf_opt_rows .rf-opt-row[data-ig="${key}"]`);
+    if (row) _ugMark(row);
+    if (typeof _onPreviewInput === "function") _onPreviewInput();
+    // 위로·아래로 가능 여부는 옆 글에 달렸다 — 버튼 상태만 고친다(글칸은 다시 그리지 않는다)
+    box.querySelectorAll(".ug-pic").forEach(el => {
+      const i = Number(el.dataset.pic);
+      const up = el.querySelector('[data-ugmv="-1"]'), dn = el.querySelector('[data-ugmv="1"]');
+      if (up) up.disabled = !(doc[i - 1].v.trim() !== "" || i >= 2);
+      if (dn) dn.disabled = !(doc[i + 1].v.trim() !== "" || i + 2 < doc.length);
+    });
+  });
+  wrap.addEventListener("click", (e) => {
+    const mv = e.target.closest("[data-ugmv]");
+    if (mv) { if (_ugMove(key, Number(mv.dataset.i), Number(mv.dataset.ugmv))) _ugDocChanged(key); return; }
+    const del = e.target.closest("[data-ugdel]");
+    if (del) {
+      const b = (_ugSt().doc[key] || [])[Number(del.dataset.ugdel)];
+      if (!b || b.t !== "pic") return;
+      if (!confirm("이 사진을 가이드에서 뺄까요?")) return;
+      const list = window._igState[key] || [];
+      const at = list.indexOf(b.item);
+      if (at >= 0) list.splice(at, 1);
+      _ugDocChanged(key); _igSay(key, "사진을 뺐습니다.", "ok");
+      return;
+    }
+    const zoom = e.target.closest("[data-ugzoom]");
+    if (zoom) {
+      const b = (_ugSt().doc[key] || [])[Number(zoom.dataset.ugzoom)];
+      if (!b || b.t !== "pic") return;
+      if (b.item.state === "up") { _igSay(key, "아직 올리는 중이에요.", "warn"); return; }
+      if (b.item.state === "bad") { _igSay(key, "이 사진은 올리지 못했어요 — 빼고 다시 넣어주세요.", "bad"); return; }
+      _igLbOpen(key, _igOk(key).indexOf(b.item));
+      return;
+    }
+    if (e.target.closest("[data-ugins]")) { _ugInsHere(key); file?.click(); return; }
+    if (e.target.closest("[data-ugadd]")) { _ugSt().ins[key] = null; file?.click(); return; }
+  });
+  // Ctrl+V — 이미지일 때만 가로챈다(글 붙여넣기는 기본 동작) · 그 커서 자리에 넣는다
+  box.addEventListener("paste", (e) => {
+    const ta = e.target.closest("textarea.ug-seg");
+    const items = [...((e.clipboardData && e.clipboardData.items) || [])].filter(it => it.kind === "file" && /^image\//.test(it.type));
+    if (!items.length) return;
+    e.preventDefault();
+    _ugSt().ins[key] = ta ? { seg: Number(ta.dataset.seg), at: ta.selectionStart || 0 } : null;
+    (async () => { for (const it of items) { const f = it.getAsFile(); if (f) await _igUpload(key, f); } })();
+  });
+  // 파일 끌어다 놓기 — 글 칸 위에 놓으면 그 칸 끝, 그 밖이면 맨 끝
+  const isFileDrag = e => [...((e.dataTransfer && e.dataTransfer.types) || [])].includes("Files");
+  wrap.addEventListener("dragover", (e) => { if (!isFileDrag(e)) return; e.preventDefault(); wrap.classList.add("drag"); });
+  wrap.addEventListener("dragleave", (e) => { if (!wrap.contains(e.relatedTarget)) wrap.classList.remove("drag"); });
+  wrap.addEventListener("drop", (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault(); wrap.classList.remove("drag");
+    const ta = e.target.closest && e.target.closest("textarea.ug-seg");
+    _ugSt().ins[key] = ta ? { seg: Number(ta.dataset.seg), at: ta.value.length } : null;
+    const files = [...((e.dataTransfer && e.dataTransfer.files) || [])];
+    (async () => { for (const f of files) await _igUpload(key, f); })();
+  });
+}
+
 /** 선택지 가이드 편집 블록(행 아래 접힘) — 파일 입력은 onclick 문자열 보간 없이 배선 */
 function _ugBuild(key) {
   const box = document.createElement("div");
   box.className = "rf-ug";
   box.dataset.ug = key;
-  // ★ 사진(스트립)이 왼쪽, 글이 오른쪽 — 인트라넷 리뷰오더와 같은 규격
-  //   (작업지시서: inadd-webapp docs/specs/unit-guide-attach-spec.md §1·§4)
-  //   "비우면 공통 가이드가 나갑니다"류 설명문은 안내줄 배지가 대신하므로 넣지 않는다.
+  // ★ 결정 272 — 글 칸 하나 안에 사진 줄이 끼어드는 모양(인트라넷 리뷰오더와 같은 규격)
   box.innerHTML =
-    '<div class="rf-ug-h">가이드유입<span class="rf-ug-badge">없음</span></div>' +
-    '<div class="work-compose ig-wrap">' +
-      '<div class="work-image-strip ig-strip" id="rf_ig_' + key + '" tabindex="0" data-igf="' + key + '"></div>' +
-      '<textarea id="rf_wd_' + key + '" class="rform-input" rows="3" ' +
-        'placeholder="유입 경로, 검색어, 진입 순서를 적어주세요&#10;이곳을 선택 후 이미지를 붙여넣어도 됩니다."></textarea>' +
-      '<input type="file" id="rf_igf_' + key + '" accept="image/*" multiple class="ig-file">' +
+    '<div class="rf-ug-h">가이드유입<span class="rf-ug-badge">없음</span><span class="rf-ug-max">사진 최대 ' + _IG_MAX + '장</span></div>' +
+    '<div class="ug-doc" id="rf_ugdoc_' + key + '"></div>' +
+    '<div class="ug-tools">' +
+      '<button type="button" class="ug-ins" data-ugins="1">여기에 사진 넣기 <small>(글자 깜빡이는 자리)</small></button>' +
+      '<button type="button" class="ug-add" data-ugadd="1">사진 끌어다 놓기 · 클릭해 고르기</button>' +
     '</div>' +
+    '<textarea id="rf_wd_' + key + '" class="ug-mirror" hidden tabindex="-1" aria-hidden="true"></textarea>' +
+    '<input type="file" id="rf_igf_' + key + '" accept="image/*" multiple class="ig-file">' +
     '<div class="ig-msg" id="rf_igm_' + key + '"></div>';
   const f = box.querySelector("#rf_igf_" + key);
   if (f) f.addEventListener("change", () => igPickFiles(key, f));
   return box;
 }
 
-/** 저장값(HTML+배열) → 편집 상태. 원본 HTML 은 그대로 보관했다가 미수정이면 되돌려준다. */
-function _ugLoad(row, key, rawHtml, images) {
-  const raw = String(rawHtml || "");
-  const { textHtml, urls } = _igSplitInflow(raw);
-  // 배열(inflow_guide_images)과 본문 <img> 를 합친다 — 중복 토큰은 `_igSetList` 가 접는다
-  _igSetList(key, urls.concat(Array.isArray(images) ? images : []));
-  const plain = _htmlToPlainPreview(textHtml);
-  const ta = document.getElementById(_IG_TA[key]);
-  if (ta) ta.value = plain;
-  row.dataset.ugRaw = raw;
-  row.dataset.ugPlain = plain;
-  row.dataset.ugTok = _igOk(key).map(x => x.tok).join(",");
+/** HTML 조각 → 글(줄바꿈 유지 · 따옴표까지 풀어 준다 — 다시 저장할 때 &amp;quot; 로 두 번 감싸지 않게) */
+function _ugHtmlText(h) {
+  return String(h)
+    .replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&#0?39;|&apos;/g, "'").replace(/&amp;/g, "&")
+    .replace(/\n{3,}/g, "\n\n").trim();
 }
 
-/** 편집 상태 → 저장값. 글도 사진도 그대로면 **원본 HTML 바이트 그대로**(단락·링크 보존). */
+/** 저장값(HTML+배열) → 편집 상태. 사진은 HTML 속 자리 그대로, 목록에만 있는 사진은 맨 끝. 원본 HTML 은 보관했다가 미수정이면 되돌려준다. */
+function _ugLoad(row, key, rawHtml, images) {
+  const raw = String(rawHtml || "");
+  const blocks = [], urls = [];
+  const re = new RegExp("<" + "img" + "\\b[^>]*>", "gi");
+  let last = 0, m;
+  const addText = (h) => { const t = _ugHtmlText(h); if (t) blocks.push({ t: "text", v: t }); };
+  while ((m = re.exec(raw))) {
+    addText(raw.slice(last, m.index));
+    last = re.lastIndex;
+    const src = m[0].match(/src\s*=\s*["']([^"']+)["']/i);
+    const u = src ? src[1].trim() : "";
+    if (_IG_URL_RE.test(u)) { blocks.push({ t: "pic", url: u }); urls.push(u); }
+  }
+  addText(raw.slice(last));
+  // 배열(inflow_guide_images)과 본문 <img> 를 합친다 — 중복 토큰은 `_igSetList` 가 접는다
+  _igSetList(key, urls.concat(Array.isArray(images) ? images : []));
+  const byTok = new Map(_igOk(key).map(x => [x.tok, x]));
+  const used = new Set(), doc = [];
+  blocks.forEach(b => {
+    if (b.t === "text") { doc.push(b); return; }
+    const it = byTok.get(_igTok(b.url));
+    if (it && !used.has(it)) { used.add(it); doc.push({ t: "pic", item: it }); }
+  });
+  _igOk(key).forEach(it => { if (!used.has(it)) doc.push({ t: "pic", item: it }); });
+  _ugSt().doc[key] = _ugDocNorm(doc);
+  _ugSt().ins[key] = null;
+  _ugMirror(key);
+  row.dataset.ugRaw = raw;
+  row.dataset.ugSig = _ugSig(key);
+}
+
+/** 편집 상태 → 저장값. 글도 사진 자리도 그대로면 **원본 HTML 바이트 그대로**(단락·링크 보존). */
 function _ugCompose(row, key) {
   if (!key || !window._igState[key]) return { html: "", images: [] };
-  const ta = document.getElementById(_IG_TA[key]);
-  const plain = String(ta ? ta.value : "").trim();
-  const toks = _igOk(key).map(x => x.tok).join(",");
+  _ugDocSync(key);
   const images = _igUrls(key);
   const raw = String(row.dataset.ugRaw || "");
-  if (raw && plain === String(row.dataset.ugPlain || "").trim() && toks === String(row.dataset.ugTok || "")) {
-    return { html: raw, images };
-  }
-  if (!plain && !toks) return { html: "", images: [] };
+  if (raw && _ugSig(key) === String(row.dataset.ugSig || "")) return { html: raw, images };
   const escT = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return { html: escT(plain).replace(/\n/g, "<br>") + _igImgTags(key), images };
+  const segs = (_ugSt().doc[key] || []).filter(b => b.t === "pic" ? b.item.state === "ok" : b.v.trim() !== "");
+  let lastText = -1;
+  segs.forEach((b, i) => { if (b.t === "text") lastText = i; });
+  const tagOf = b => `<img src="${escHtml(b.item.url)}">`;
+  // 글 사이 사진 = 그 자리에(앞뒤 <br> — 인트라넷 주소 줄을 서버가 HTML 로 바꾼 모양과 같다) · 맨 끝 사진 = 끝에 이어 붙임(종전 모양)
+  const inline = segs.slice(0, lastText + 1).map(b => b.t === "text" ? escT(b.v.trim()).replace(/\n/g, "<br>") : tagOf(b)).join("<br>");
+  const tail = segs.slice(lastText + 1).map(tagOf).join("");
+  if (!inline && !tail) return { html: "", images: [] };
+  return { html: inline + tail, images };
 }
 
 /** 행 아래 안내줄(.rf-ug-cta)에 "가이드 있음/없음" 표시 — 접혀 있어도 설정 상태가 보이게 */
@@ -1740,13 +1991,8 @@ function _ugAttachAll() {
     const key = r.dataset.ig;
     if (!key) return;
     if (r._ugPending) { _ugLoad(r, key, r._ugPending.html, r._ugPending.images); r._ugPending = null; }
-    _igBind(key);
-    _igRender(key);
-    const ta = document.getElementById(_IG_TA[key]);
-    if (ta && ta.dataset.ugBound !== "1") {
-      ta.dataset.ugBound = "1";
-      ta.addEventListener("input", () => { _ugMark(r); if (typeof _onPreviewInput === "function") _onPreviewInput(); });
-    }
+    _ugDocBind(key);
+    _igRender(key);      // 선택지 칸은 글·사진 줄을 그린다(_igRender → _ugDocRender)
     _ugMark(r);
   });
 }
@@ -1776,20 +2022,14 @@ function _igSay(field, msg, kind) {
 }
 
 function _igRender(field) {
+  // 결정 272 — 선택지 칸은 스트립이 아니라 글·사진 줄(_ugDocRender)이 사진을 보여 준다(올리는 중·실패 표시 포함)
+  if (_UG_KEY_RE.test(field) && document.getElementById("rf_ugdoc_" + field)) { _ugDocRender(field); return; }
   const strip = document.getElementById("rf_ig_" + field);
   if (!strip) return;
   const list = window._igState[field] || [];
-  // 선택지 전용 칸은 **드롭 타일이 맨 왼쪽**, 사진이 그 오른쪽으로 이어붙는다(리뷰오더와 같은 배치).
-  // canonical 3칸(유입·리뷰·특이)은 종전대로 사진 뒤에 [추가] 타일이 붙는다.
-  const lead = _UG_KEY_RE.test(field);
+  // canonical 3칸(유입·리뷰·특이) — 사진 뒤에 [추가] 타일. 선택지 칸은 위에서 글·사진 줄로 갈라졌다(결정 272).
   let h = "";
-  if (lead) {
-    const full = list.length >= _IG_MAX;
-    h = `<button type="button" class="ig-lead${full ? " off" : ""}"${full ? "" : ' data-igadd="1"'}
-           title="${full ? `사진은 최대 ${_IG_MAX}장까지 넣을 수 있어요` : "끌어다 놓거나 클릭해 고르기"}">
-           <span class="t1">사진 끌어다 놓기</span><span class="t2">클릭해 고르기 · 최대 ${_IG_MAX}장</span></button>`;
-  }
-  if (!list.length && !lead) {
+  if (!list.length) {
     h = `<button type="button" class="ig-empty" data-igadd="1">
            <span class="t1">＋ 사진 넣기</span><span class="t2">끌어다 놓기 · Ctrl+V<br>클릭</span></button>`;
   } else {
@@ -1803,7 +2043,7 @@ function _igRender(field) {
               <span class="ig-x" data-igdel="${i}" title="이 사진 빼기">✕</span>
             </button>`;
     });
-    if (!lead && list.length < _IG_MAX) {
+    if (list.length < _IG_MAX) {
       h += `<button type="button" class="ig-add" data-igadd="1" title="사진 추가">
               <span class="plus">＋</span><span>추가</span></button>`;
     }

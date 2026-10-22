@@ -189,6 +189,8 @@ function makeTable(opts) {
   [
     '_htmlToPlainPreview', '_igSetList', '_igSplitInflow',
     '_ugNewKey', '_ugRegister', '_ugDrop', '_ugDropAll', '_ugDropBox', '_ugBuild', '_ugLoad', '_ugCompose', '_ugMark', '_ugAttachAll',
+    // 결정 272 — 글·사진 줄 편집 모델
+    '_ugSt', '_ugDocNorm', '_ugDocSync', '_ugSig', '_ugMirror', '_ugAutoH', '_ugDocRender', '_ugMove', '_ugDocChanged', '_ugInsHere', '_ugDocBind', '_ugHtmlText',
     '_prodMode', '_applyProdModeUi', '_setProdModeNote', '_renderProdModeHelp', '_rfRefreshCards', '_rfSyncFirstCardUrl', '_rfRowProductUrl',
     '_renderProdTable', '_buildProdGroup', '_syncGroupTotals', 'addOptRow', '_buildOptThumbLine', '_buildOptRowEl',
     '_lastOptProductName', '_markDupProductNames', 'renderOptRows',
@@ -202,6 +204,13 @@ function makeTable(opts) {
 }
 
 const IMG = (t) => 'https://api.example.com/api/order/guide-image/' + t;
+
+/** 결정 272 — 선택지 가이드 글 칸에 타이핑한 것과 같게(첫 글 칸에 쓰고 나머지 글 칸은 비움 · 거울 글칸 갱신). 사진 줄은 그대로. */
+function typeGuide(t, key, v) {
+  t.run("(() => { const st = _ugSt(); const d = st.doc['" + key + "'] || (st.doc['" + key + "'] = [{ t: 'text', v: '' }]);"
+    + " d.filter(b => b.t === 'text').forEach((b, i) => { b.v = i === 0 ? " + JSON.stringify(v) + " : ''; }); _ugMirror('" + key + "'); })()");
+}
+
 const TOK_A = 'aaaaaaaaaaaaaaaaaaaa1';
 const TOK_B = 'bbbbbbbbbbbbbbbbbbbb2';
 
@@ -288,13 +297,13 @@ console.log('\n[D·E] 선택지 가이드 — 원본 보존 · 글 수정 시 �
 
   // 글을 고치면 재조립 — 사진은 살아남는다(글 한 글자에 사진이 통째로 사라지던 사고 차단)
   const key = t.run("document.querySelector('#rf_opt_rows .rf-opt-row').dataset.ig");
-  t.run("document.getElementById(_IG_TA['" + key + "']).value = '고친 글'");
+  typeGuide(t, key, '고친 글');
   const out2 = JSON.parse(t.run('JSON.stringify(readOptRows())'));
   ok('글 수정 → 재조립되지만 사진 태그가 살아남는다',
     /^고친 글/.test(out2[0].inflowGuideHtml) && out2[0].inflowGuideHtml.indexOf(IMG(TOK_A)) > 0);
 
   // 글도 사진도 비우면 빈 값
-  t.run("document.getElementById(_IG_TA['" + key + "']).value = ''");
+  typeGuide(t, key, '');
   t.run("window._igState['" + key + "'] = []");
   const out3 = JSON.parse(t.run('JSON.stringify(readOptRows())'));
   ok('글·사진을 모두 비우면 빈 값', out3[0].inflowGuideHtml === '' && out3[0].inflowGuideImages.length === 0);
@@ -446,7 +455,7 @@ console.log('\n[J] 안내줄 — 행마다 형제로 붙고, 채워지면 상태
 
   // 글을 채운 뒤 다시 살리면(_ugAttachAll) 안내줄도 "설정됨"으로 바뀐다
   const keyEmpty = unit1.querySelectorAll('.rf-opt-row')[0].dataset.ig;
-  t.run("document.getElementById(_IG_TA['" + keyEmpty + "']).value = '새로 채움'");
+  typeGuide(t, keyEmpty, '새로 채움');
   t.run('_ugAttachAll()');
   ok('글을 채우면 안내줄이 즉시 "설정됨"으로 바뀐다',
     unit1.querySelectorAll('.rf-ug-cta')[0].classList.contains('has'));
@@ -472,77 +481,108 @@ console.log('\n[K] 배선 — 값 주입은 DOM 에 붙은 뒤 · onclick 문자
     fs.readFileSync(__filename, 'utf8').indexOf(NUL) < 0);
 }
 
-/* ══════════════ L. 2차 확대(2026-08-24 "버튼이 너무 좁아" 신고) ══════════════
-   안내줄·패널이 좁아 클릭 대상·입력 영역이 답답했다는 신고로, canonical 3칸(유입/리뷰/특이,
-   58px로 나란히 좁게 배치)보다 크게 키운다: 안내줄 글자·여백 확대, 패널은 글을 위·사진을
-   아래로 쌓고(옆으로 눕힌 58px 판형 폐기), 썸네일도 키운다. 옵션 행 아래는 폭 제약이 없어
-   canonical 3칸을 건드리지 않고도 이렇게 할 수 있다(사본 0 — 셀렉터로만 갈라진다). */
-console.log('\n[L] 2차 확대 — 안내줄·패널이 canonical 3칸보다 크다 · 58px 캐스케이드를 이긴다');
+/* ══════════════ L·M. 결정 272(D4 「나」 · 사용자 확정 2026-10-22) — 글 칸 하나 + 그 사이 사진 줄 ══════════════
+   종전 L(2차 확대 — 사진 스트립·글칸 높이 --ug-h)·M(3차 통일 — 사진 왼쪽·글 오른쪽) 규격을 대체한다.
+   인트라넷 리뷰오더도 같은 모양으로 바꾼다(사진 자리를 고를 수 있어야 하므로 스트립·글칸 2열로는 표현이 안 된다).
+   ★ 안내줄(.rf-ug-cta) 크기와 canonical 3칸(유입/리뷰/특이) 58px 판형은 이번에 건드리지 않는다 — 그대로 고정. */
+console.log('\n[L·M] 결정 272 — 선택지 가이드 편집 칸 = 글·사진 줄 · canonical 3칸 무회귀');
 {
-  ok('안내줄 글자·여백이 커졌다(.62rem·4px 8px → .74rem·9px 11px)',
-    /\.rf-unit>\.rf-ug-cta\{[^}]*padding:9px 11px[^}]*font-size:\.74rem/.test(modalSrc) &&
-    !/\.rf-unit>\.rf-ug-cta\{[^}]*font-size:\.62rem/.test(modalSrc));
-  ok('안내줄 아이콘·라벨도 커졌다', /\.rf-ug-cta-ic\{flex:none;font-size:\.92rem\}/.test(modalSrc) &&
-    /\.rf-ug-cta-tx\{[^}]*font-size:\.76rem\}/.test(modalSrc));
-  // ★ 패널이 열려도 canonical 3칸(유입/리뷰/특이)의 좁은 58px 판형은 절대 안 건드린다
-  //   (사본을 두지 않고 .rf-unit>.rf-ug 로만 갈랐다는 것을 회귀로 고정)
+  ok('안내줄 글자·여백은 그대로(.74rem · 9px 11px)',
+    /\.rf-unit>\.rf-ug-cta\{[^}]*padding:9px 11px[^}]*font-size:\.74rem/.test(modalSrc));
   ok('canonical 3칸의 58px !important 규칙은 그대로 남아 있다(무회귀)',
     /\.rf-compact-main \.work-compose textarea,[^{]*\{[^}]*height:58px!important/.test(modalSrc) &&
     /\.rf-compact-main \.ig-strip\{height:58px!important/.test(modalSrc));
-  ok('패널은 사진 왼쪽 · 글 오른쪽 2열이다(3차 통일 규격)',
-    /\.rf-compact-main \.rf-unit>\.rf-ug \.ig-wrap\{display:grid!important;\s*grid-template-columns:auto minmax\(180px,1fr\)/.test(modalSrc));
-  ok('종전의 좁은 58px 옆배치 규칙(.rf-ug 단독 스코프)은 사라졌다(사본 부활 금지)',
-    !/#recruitModal \.rf-ug \.ig-wrap>textarea\.rform-input,#recruitModal \.rf-ug \.ig-strip\{height:58px/.test(modalSrc));
-  // ★★ compact-main 의 두 58px !important 규칙(텍스트영역·스트립)을 이겨야 한다 — 특이성이
-  //    같으면 파일 순서에 좌우된다(위 CTA 특이성 사고와 같은 함정). !important + 더 높은
-  //    특이성(.rf-compact-main .rf-unit>.rf-ug …)으로 순서 무관하게 이기는지 고정한다.
-  ok('텍스트영역 높이를 --ug-h 로 되찾는다(더 높은 특이성)',
-    /\.rf-compact-main \.rf-unit>\.rf-ug \.ig-wrap>textarea\.rform-input\{[^}]*height:var\(--ug-h\)!important/.test(modalSrc));
-  ok('스트립도 !important 로 폭·높이를 되찾는다(사진 수만큼 오른쪽으로 자란다)',
-    /\.rf-compact-main \.rf-unit>\.rf-ug \.ig-strip\{[^}]*width:auto!important[^}]*height:var\(--ug-h\)!important/.test(modalSrc));
-  {
-    // 두 규칙 모두 compact-main 의 규칙보다 특이성이 높다 — `.rf-compact-main .rf-unit>.rf-ug`
-    // 접두가 없는 순간 `.rf-compact-main .ig-strip`/`.work-compose textarea` 와 동률로 떨어져
-    // 파일 순서에 기댄다(실측으로 이미 한 번 밟은 함정과 같은 계열).
-    const stripRule = /\.rf-compact-main \.rf-unit>\.rf-ug \.ig-strip\{[^}]*\}/.exec(modalSrc);
-    const taRule = /\.rf-compact-main \.rf-unit>\.rf-ug \.ig-wrap>textarea\.rform-input\{[^}]*\}/.exec(modalSrc);
-    ok('그 두 규칙은 순서에 기대지 않을 만큼 특이성이 높다(.rf-compact-main .rf-unit> 접두)',
-      !!stripRule && !!taRule);
-  }
-  ok('맨 왼쪽 드롭 타일(.ig-lead)이 132px 로 자리를 지킨다',
-    /\.rf-unit>\.rf-ug \.ig-lead\{flex:none;width:132px;height:var\(--ug-h\)/.test(modalSrc));
-  ok('썸네일·추가 버튼은 스트립과 같은 높이다(아래로 쌓지 않는다)',
-    /\.rf-unit>\.rf-ug \.ig-thumb\{width:88px;height:var\(--ug-h\)/.test(modalSrc) &&
-    /\.rf-unit>\.rf-ug \.ig-add\{width:88px;height:var\(--ug-h\)\}/.test(modalSrc));
-  ok('높이는 --ug-h 한 값으로 묶는다(글칸·타일·썸네일이 같이 움직인다)',
-    /#recruitModal \.rf-unit>\.rf-ug\{--ug-h:96px\}/.test(modalSrc));
-  ok('CSS 선택자는 여전히 #recruitModal 스코프(호스트 화면 오염 금지)',
-    !/\n\.rf-ug-cta\b/.test(modalSrc) && !/\n\.rf-ug\b/.test(modalSrc));
+  const build = grab(recruitSrc, '_ugBuild');
+  ok('편집 칸 = 글·사진 줄 상자 하나(스트립·2열 없음)',
+    /class="ug-doc" id="rf_ugdoc_'/.test(build) && !/ig-strip/.test(build) && !/ig-wrap/.test(build));
+  ok('「여기에 사진 넣기」와 「끌어다 놓기 · 클릭해 고르기」 두 버튼(시안 그대로)',
+    /data-ugins="1">여기에 사진 넣기/.test(build) && /data-ugadd="1">사진 끌어다 놓기 · 클릭해 고르기/.test(build));
+  ok('거울 글칸은 숨김(배지·미리보기 판정용) — 사람이 보는 글칸은 글·사진 줄 안에만',
+    /id="rf_wd_' \+ key \+ '" class="ug-mirror" hidden/.test(build) && /\.rf-ug \.ug-mirror\{display:none!important\}/.test(modalSrc));
+  ok('「사진 최대 N장」 안내가 머리줄에 있다', /rf-ug-max">사진 최대 ' \+ _IG_MAX \+ '장/.test(build));
+  const render = grab(recruitSrc, '_igRender');
+  ok('선택지 칸은 _igRender 가 글·사진 줄로 넘긴다(스트립 경로 미진입)',
+    /if \(_UG_KEY_RE\.test\(field\) && document\.getElementById\("rf_ugdoc_" \+ field\)\) \{ _ugDocRender\(field\); return; \}/.test(render) &&
+    !/ig-lead/.test(render));
+  ok('글 칸 타이핑은 다시 그리지 않는다(한글 조합 보호) — input 처리에 _ugDocRender 없음',
+    !/_ugDocRender/.test(grab(recruitSrc, '_ugDocBind').split('box.addEventListener("input"')[1].split('wrap.addEventListener("click"')[0]));
+  ok('글은 value 로만 넣는다(HTML 보간 0)',
+    /ta\.value = doc\[Number\(ta\.dataset\.seg\)\]\.v/.test(grab(recruitSrc, '_ugDocRender')) &&
+    !/\$\{b\.v\}|\$\{escHtml\(b\.v\)\}/.test(grab(recruitSrc, '_ugDocRender')));
+  ok('사진 줄마다 위로·아래로·빼기', /data-ugmv="-1"[^]*위로[^]*data-ugmv="1"[^]*아래로[^]*data-ugdel=[^]*빼기/.test(grab(recruitSrc, '_ugDocRender')));
+  ok('4장이 차면 넣기 버튼을 끈다', /btn\.disabled = n >= _IG_MAX/.test(grab(recruitSrc, '_ugDocRender')));
+  ok('CSS 는 #recruitModal 스코프 · 글 칸 자동 높이(resize 없음)',
+    /#recruitModal \.rf-ug \.ug-seg\{[^}]*resize:none;overflow:hidden/.test(modalSrc) &&
+    !/\n\.rf-ug\b/.test(modalSrc) && !/\n\.ug-/.test(modalSrc));
+  ok('옛 2열 규칙(사진 스트립 왼쪽 · --ug-h)은 사라졌다(죽은 규칙 부활 금지)',
+    !/\.rf-unit>\.rf-ug \.ig-wrap\{display:grid/.test(modalSrc) && !/--ug-h/.test(modalSrc) && !/\.rf-ug \.ig-lead/.test(modalSrc));
 }
 
-/* ══════════════ M. 3차 통일(2026-08-25) — 리뷰오더와 같은 규격 ══════════════
-   인트라넷 리뷰오더 등록 폼과 모집공고 수정 모달이 같은 일을 하면서 다르게 생겨 있었다.
-   작업지시서(inadd-webapp docs/specs/unit-guide-attach-spec.md)대로 배치·문구를 맞춘다:
-   사진 왼쪽 · 글 오른쪽 · 드롭 타일이 맨 왼쪽 · 안내문 삭제 · placeholder 두 줄. */
-console.log('\n[M] 3차 통일 — 배치·문구가 리뷰오더와 같다');
+/* ══════════════ P. 결정 272 — 사진 자리 편집 모델(실행) ══════════════ */
+console.log('\n[P] 결정 272 — 사진 자리 · 위로/아래로 · 커서 자리에 넣기 · 빼기 · 저장 모양');
 {
-  const build = grab(recruitSrc, '_ugBuild');
-  const iStrip = build.indexOf('ig-strip');
-  const iTa = build.indexOf('<textarea');
-  ok('마크업에서 스트립이 글칸보다 먼저 온다(= 사진이 왼쪽)', iStrip >= 0 && iTa > iStrip);
-  ok('글칸 안내는 두 줄 — 둘째 줄이 붙여넣기를 알린다',
-    /유입 경로, 검색어, 진입 순서를 적어주세요&#10;이곳을 선택 후 이미지를 붙여넣어도 됩니다\./.test(build));
-  ok('칸마다 반복되던 설명문은 사라졌다(안내줄 배지가 대신한다)',
-    !/비우면 공고 공통 유입가이드가 그대로 보입니다/.test(recruitSrc) &&
-    !/이 선택지를 고른 리뷰어에게만 보일 유입 경로 안내/.test(recruitSrc));
-
-  const render = grab(recruitSrc, '_igRender');
-  ok('선택지 칸만 드롭 타일을 맨 앞에 둔다(canonical 3칸은 종전대로)',
-    /const lead = _UG_KEY_RE\.test\(field\)/.test(render) &&
-    /if \(lead\)/.test(render) && /if \(!list\.length && !lead\)/.test(render) &&
-    /if \(!lead && list\.length < _IG_MAX\)/.test(render));
-  ok('드롭 타일 문구도 리뷰오더와 같다',
-    /사진 끌어다 놓기/.test(render) && /클릭해 고르기 · 최대 \$\{_IG_MAX\}장/.test(render));
+  const t = mixedTable();
+  const key = t.run("document.querySelector('#rf_opt_rows .rf-opt-row').dataset.ig");
+  const row = "document.querySelector('#rf_opt_rows .rf-opt-row')";
+  const shape = () => JSON.parse(t.run("JSON.stringify(_ugSt().doc['" + key + "'].map(b => b.t === 'text' ? b.v : '#' + b.item.tok))"));
+  const comp = () => JSON.parse(t.run("JSON.stringify(_ugCompose(" + row + ", '" + key + "'))"));
+  // 다시 싣기: 글 사이에 사진이 있는 저장값
+  const mid = '1) 검색 &quot;블랙&quot;<br><img src="' + IMG(TOK_A) + '"><br>2) 세 번째 상품<br>3) 구매' + '<img src="' + IMG(TOK_B) + '">';
+  t.run(`_ugLoad(${row}, '${key}', ${JSON.stringify(mid)}, [${JSON.stringify(IMG(TOK_A))}, ${JSON.stringify(IMG(TOK_B))}])`);
+  ok('저장값의 사진 자리를 그대로 싣는다(글 · 사진 · 글 · 사진 · 빈 글)',
+    JSON.stringify(shape()) === JSON.stringify(['1) 검색 "블랙"', '#' + TOK_A, '2) 세 번째 상품\n3) 구매', '#' + TOK_B, '']));
+  ok('손대지 않으면 원본 HTML 바이트 그대로', comp().html === mid);
+  // 아래로: 사진1 이 다음 글의 첫 줄 뒤로
+  ok('아래로 = 다음 글 한 줄과 자리 바꿈', t.run(`_ugMove('${key}', 1, 1)`) === true &&
+    JSON.stringify(shape()) === JSON.stringify(['1) 검색 "블랙"\n2) 세 번째 상품', '#' + TOK_A, '3) 구매', '#' + TOK_B, '']));
+  let c = comp();
+  ok('옮긴 뒤 저장 = 그 자리에 <img> · 맨 끝 사진은 끝에 · 따옴표는 한 번만 풀린 글',
+    c.html === '1) 검색 "블랙"<br>2) 세 번째 상품<br><img src="' + IMG(TOK_A) + '"><br>3) 구매<img src="' + IMG(TOK_B) + '">' &&
+    c.images.join() === [IMG(TOK_A), IMG(TOK_B)].join());
+  // 위로 두 번: 맨 위까지
+  t.run(`_ugMove('${key}', 1, -1)`); t.run(`_ugMove('${key}', 1, -1)`);
+  ok('위로 = 앞 글 한 줄과 자리 바꿈 · 맨 위까지',
+    JSON.stringify(shape()) === JSON.stringify(['', '#' + TOK_A, '1) 검색 "블랙"\n2) 세 번째 상품\n3) 구매', '#' + TOK_B, '']));
+  ok('맨 위에서는 더 못 올라간다', t.run(`_ugMove('${key}', 1, -1)`) === false);
+  // 사진2 를 위로 — 앞 글을 한 줄씩 지나 사진1 바로 뒤까지, 그다음은 사진1 과 자리 바꿈
+  t.run(`_ugMove('${key}', 3, -1)`); t.run(`_ugMove('${key}', 3, -1)`); t.run(`_ugMove('${key}', 3, -1)`);
+  t.run(`_ugSt().doc['${key}'] = _ugDocNorm(_ugSt().doc['${key}'])`);
+  ok('사진끼리 붙으면 둘 사이엔 빈 글 칸', JSON.stringify(shape()) === JSON.stringify(['', '#' + TOK_A, '', '#' + TOK_B, '1) 검색 "블랙"\n2) 세 번째 상품\n3) 구매']));
+  ok('바로 위가 사진이면 서로 자리를 바꾼다', t.run(`_ugMove('${key}', 3, -1)`) === true &&
+    JSON.stringify(shape()) === JSON.stringify(['', '#' + TOK_B, '', '#' + TOK_A, '1) 검색 "블랙"\n2) 세 번째 상품\n3) 구매']));
+  c = comp();
+  ok('맨 위 사진 둘 = 저장 HTML 맨 앞에 차례대로 · 목록도 같은 차례',
+    c.html.indexOf('<img src="' + IMG(TOK_B) + '"><br><img src="' + IMG(TOK_A) + '"><br>1) 검색') === 0 &&
+    c.images.join() === [IMG(TOK_B), IMG(TOK_A)].join());
+  // 빼기 = 사진이 목록에서 빠지고 앞뒤 글이 이어진다
+  t.run(`window._igState['${key}'].splice(1, 1)`);
+  t.run(`_ugDocSync('${key}')`);
+  ok('빼기 = 그 사진 줄이 사라지고 글은 그대로', JSON.stringify(shape()) === JSON.stringify(['', '#' + TOK_B, '1) 검색 "블랙"\n2) 세 번째 상품\n3) 구매']));
+  // 커서 자리에 넣기: 둘째 줄 앞
+  const tok3 = 'cccccccccccccccccccc3';
+  t.run(`_ugSt().ins['${key}'] = { seg: 2, at: '1) 검색 "블랙"\\n'.length }`);
+  t.run(`window._igState['${key}'].push({ url: ${JSON.stringify(IMG(tok3))}, tok: '${tok3}', src: '', state: 'ok' })`);
+  t.run(`_ugDocSync('${key}')`);
+  ok('커서 자리에 넣기 = 그 줄에서 글이 갈라지고 사진이 끼어든다',
+    JSON.stringify(shape()) === JSON.stringify(['', '#' + TOK_B, '1) 검색 "블랙"', '#' + tok3, '2) 세 번째 상품\n3) 구매']));
+  ok('목록 차례 = 글 속 차례', JSON.parse(t.run(`JSON.stringify(window._igState['${key}'].map(x => x.tok))`)).join() === [TOK_B, tok3].join());
+  // 넣을 자리를 안 고르면 맨 끝
+  const tok4 = 'dddddddddddddddddddd4';
+  t.run(`_ugSt().ins['${key}'] = null`);
+  t.run(`window._igState['${key}'].push({ url: ${JSON.stringify(IMG(tok4))}, tok: '${tok4}', src: '', state: 'ok' })`);
+  t.run(`_ugDocSync('${key}')`);
+  ok('자리를 안 고르면 맨 끝', shape().slice(-2).join() === ['#' + tok4, ''].join());
+  // 올리는 중·실패 사진은 저장 HTML 에 넣지 않는다
+  t.run(`window._igState['${key}'][2].state = 'up'`);
+  ok('올리는 중 사진은 저장에서 빠진다', comp().html.indexOf(tok4) < 0);
+  // 서버 비교 규칙과 같은 판단: 저장 HTML 을 서버가 읽으면 사진 자리가 그대로
+  t.run(`window._igState['${key}'][2].state = 'ok'`);
+  const G = require('../src/utils/guideCanon');
+  c = comp();
+  const g = G.canonGuide(c.html, c.images);
+  ok('서버가 읽은 오더 글 = 맨 위 사진 · 첫 줄 · 사진 · 나머지 (맨 끝 사진은 목록에만)',
+    g.text === [IMG(TOK_B), '1) 검색 "블랙"', IMG(tok3), '2) 세 번째 상품\n3) 구매'].join('\n') &&
+    g.images.join() === [IMG(TOK_B), IMG(tok3), IMG(tok4)].join());
 }
 
 /* ★ 사진이 실제로 나열되고 클릭하면 확대되는지는 이 파일의 가짜 DOM(getAttribute·임의

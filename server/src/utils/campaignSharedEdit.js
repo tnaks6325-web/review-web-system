@@ -276,7 +276,8 @@ function _planGuideEdit({ products, src, srcCount, rowCount, o, name, baseRow, d
   const { canonGuide, imageKey } = require('./guideCanon');
   const imgs = Array.isArray(o.inflowGuideImages) ? o.inflowGuideImages : [];
   const sent = canonGuide(o.inflowGuideHtml, imgs);
-  const shapeKey = g => JSON.stringify([g.text, g.images.map(imageKey).join(',')]);
+  // 비교는 자리 표시가 든 비교용 글(view) — 오더 투영(`_optionShape`)과 같은 모양. 오더에 싣는 것은 주소 줄이 든 글(text).
+  const shapeKey = g => JSON.stringify([g.view, g.images.map(imageKey).join(',')]);
   // 손대지 않음 = 창을 연 시점 오더 투영과 같거나, 창이 불러온 지금 공고 값과 같다(공고에서만 고쳐 둔 옛 가이드를 저장 한 번에 오더로 끌어오지 않는다 · 검토 2026-10-20)
   if (baseRow && shapeKey(sent) === JSON.stringify([baseRow.inflow_guide_html, baseRow.inflow_guide_images])) return {};
   if (dbRow && dbRow.inflow_guide_html !== undefined && shapeKey(sent) === shapeKey(canonGuide(dbRow.inflow_guide_html, Array.isArray(dbRow.inflow_guide_images) ? dbRow.inflow_guide_images : []))) return {};
