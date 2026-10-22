@@ -239,6 +239,9 @@ function _normalizeOptionsInput(arr) {
       // ★★ 이름 바꾸기(rename): 이 줄이 원래 어떤 선택지였는지(저장된 opt_key). 없으면 '' = 종전 동작.
       prevOptKey: _normOptKey(obj.prevOptKey ?? obj.prev_opt_key) || '',
       optionUrl: _normalizeOptionUrl(obj.optionUrl ?? obj.option_url ?? obj.url),
+      // ★ 결정 271(사용자 확정 2026-10-22 「2.가」): 그 선택지가 속한 **상품의 메인 주소**(인트라넷 상품 카드의 상품 메인 URL).
+      //   같은 상품의 줄은 같은 값. 미전달(undefined) = null = 저장된 값 유지(옛 화면이 저장해도 지워지지 않게) · '' = 지움.
+      productUrl: (obj.productUrl === undefined && obj.product_url === undefined) ? null : _normalizeOptionUrl(obj.productUrl ?? obj.product_url),
       // ★ 결정 214: 선택지별 사진(3상태 — null 유지 · '' 지움 · https 주소). 형식 불량은 thumbError 로 거절.
       thumbnailUrl: _normalizeOptionThumb(obj.thumbnailUrl !== undefined ? obj.thumbnailUrl : obj.thumbnail_url),
       thumbError: _normalizeOptionThumb(obj.thumbnailUrl !== undefined ? obj.thumbnailUrl : obj.thumbnail_url) === undefined
@@ -345,8 +348,8 @@ async function _saveCampaignOptions(campaignId, options, { linked = false } = {}
       }
       await client.query(
         `INSERT INTO campaign_options (campaign_id, opt_key, option_url, pay_amount, recruit_total, daily_limit, review_type_mix, sort_order, status,
-                                      product_name, unit_kind, inflow_guide_html, inflow_guide_images, thumbnail_url, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,COALESCE($9,'active'),$10,$11,$12,$13::jsonb,COALESCE($14,''),NOW())
+                                      product_name, unit_kind, inflow_guide_html, inflow_guide_images, thumbnail_url, product_url, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,COALESCE($9,'active'),$10,$11,$12,$13::jsonb,COALESCE($14,''),$15,NOW())
          ON CONFLICT (campaign_id, opt_key) DO UPDATE SET
            option_url=EXCLUDED.option_url, pay_amount=EXCLUDED.pay_amount, recruit_total=EXCLUDED.recruit_total,
            daily_limit=EXCLUDED.daily_limit, review_type_mix=EXCLUDED.review_type_mix, sort_order=EXCLUDED.sort_order,
@@ -354,10 +357,12 @@ async function _saveCampaignOptions(campaignId, options, { linked = false } = {}
            product_name=EXCLUDED.product_name, unit_kind=EXCLUDED.unit_kind,
            inflow_guide_html=EXCLUDED.inflow_guide_html, inflow_guide_images=EXCLUDED.inflow_guide_images,
            thumbnail_url=COALESCE($14, campaign_options.thumbnail_url),
+           product_url=COALESCE($15, campaign_options.product_url),
            updated_at=NOW()`,
         [campaignId, o.optKey, o.optionUrl, o.payAmount, o.recruitTotal, o.dailyLimit, JSON.stringify(o.reviewTypeMix || []), o.sortOrder, o.status,
          o.productName || '', o.unitKind || 'option', o.inflowGuideHtml || '', JSON.stringify(o.inflowGuideImages || []),
-         (typeof o.thumbnailUrl === 'string') ? o.thumbnailUrl : null]);
+         (typeof o.thumbnailUrl === 'string') ? o.thumbnailUrl : null,
+         (typeof o.productUrl === 'string') ? o.productUrl : null]);
     }
     const { rows: existing } = await client.query('SELECT opt_key FROM campaign_options WHERE campaign_id=$1', [campaignId]);
     // ★ 결정 239 — 바로 구매(정원 엔진이 그 상품에 귀속한 공고 밖 주문)만 있는 상품도 지우지 않고 닫는다.
@@ -747,7 +752,7 @@ async function _loadOptionsRaw(db, campaignId) {
             daily_limit AS "dailyLimit", sort_order AS "sortOrder", status,
             product_name AS "productName", unit_kind AS "unitKind",
             inflow_guide_html AS "inflowGuideHtml", inflow_guide_images AS "inflowGuideImages",
-            thumbnail_url AS "thumbnailUrl", paused_at AS "pausedAt", paused_reason AS "pausedReason"
+            thumbnail_url AS "thumbnailUrl", product_url AS "productUrl", paused_at AS "pausedAt", paused_reason AS "pausedReason"
        FROM campaign_options WHERE campaign_id=$1 ORDER BY (status='closed'), sort_order, id`,
     [campaignId]);
   // ★ 응답 직전 재정화(§03-E 이중 적용) — 저장 시 정화본이라도 옛 행·직접 DB 수정분을 신뢰하지 않는다.

@@ -30,6 +30,7 @@ const REQUIRED_SCHEMA = [
   ['reviewer_history_control', 'coverage_epoch'],
   ['workdesk_review_resolutions', 'resolution'],
   ['review_closed_targets', 'resolution_id'],
+  ['campaign_options', 'product_url'],             // 196 — 상품 메인 주소(공고 창 저장 INSERT·편집 프리필 SELECT · 결정 271)
   ['campaign_options', 'sole_until'],              // 195 — 상품별 바로 구매 셈이 SELECT(없으면 셈 조회가 통째 실패 = 상품 정원 "모름")
   ['order_submissions', 'delivery_memo'],          // 188 — 캡처 배송메세지(주문 저장 INSERT·구매캡처 교체·작업보드 명단이 읽고 쓴다)
   ['order_submissions', 'rule_flags'],              // 187 — 바로 구매 규칙 위반 표시(작업보드·공고 카드·참여 관리 읽기)

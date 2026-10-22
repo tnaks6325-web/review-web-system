@@ -37,6 +37,8 @@ function _optionShape(r) {
     name: `${_s(r.productName)}${optKey ? ' / ' + optKey : ''}`,
     unit_kind: unitKind,
     option_url: _s(r.optionUrl),
+    // 결정 271 — 그 줄이 속한 상품의 메인 주소. 공고 쪽이 비어 있으면(196 이전 줄 · 옛 화면) "모름" 이라 비교하지 않는다(compareOrderCampaign).
+    product_url: _s(r.productUrl),
     pay_amount: CANON.int(r.payAmount),
     recruit_total: CANON.int(r.recruitTotal),
     daily_limit: CANON.int(r.dailyLimit),
@@ -117,7 +119,7 @@ function readCampaignShared(c, optionRows) {
     options: (optionRows || [])
       .filter(o => _s(o.status) !== 'deleted')
       .map(o => _optionShape({
-        productName: o.product_name, optKey: o.opt_key, unitKind: o.unit_kind, optionUrl: o.option_url,
+        productName: o.product_name, optKey: o.opt_key, unitKind: o.unit_kind, optionUrl: o.option_url, productUrl: o.product_url,
         payAmount: o.pay_amount, recruitTotal: o.recruit_total, dailyLimit: o.daily_limit,
         reviewTypeMix: o.review_type_mix, inflowGuideHtml: o.inflow_guide_html, inflowGuideImages: o.inflow_guide_images, status: o.status,
       })),
@@ -129,6 +131,8 @@ const SCALAR_KEYS = ['time_range', 'review_fee', 'recruit_total', 'daily_limit',
   'channel', 'landing_url'];
 const OPTION_KEYS = ['unit_kind', 'option_url', 'pay_amount', 'recruit_total', 'daily_limit', 'review_type_mix',
   'inflow_guide_html', 'inflow_guide_images', 'status'];
+/** 결정 271 — 상품 메인 주소는 공고 쪽에 값이 있을 때만 비교한다(196 이전 줄은 NULL = 모름 · 차이로 세면 연결된 공고가 전부 "다름" 이 된다). */
+const OPTION_KEYS_IF_CAMPAIGN = ['product_url'];
 
 /**
  * @returns {Array<{field:string, kind:'diff'|'fill', order:string, campaign:string}>}
@@ -151,6 +155,7 @@ function compareOrderCampaign(order, campaign, optionRows) {
       if (!ob) { unmatchedA.push(oa); continue; }
       byKey.delete(oa.key);
       for (const k of OPTION_KEYS) push(`option:${oa.name}.${k}`, oa[k], ob[k]);
+      for (const k of OPTION_KEYS_IF_CAMPAIGN) if (ob[k]) push(`option:${oa.name}.${k}`, oa[k], ob[k]);
     }
     const unmatchedB = [...byKey.values()];
     // ★ 이름이 바뀐 줄 — 남은 줄 수가 같으면 순서대로 짝짓고 "이름이 다름" 한 칸으로 센다
@@ -160,6 +165,7 @@ function compareOrderCampaign(order, campaign, optionRows) {
         const ob = unmatchedB[i];
         push(`option:${oa.name}.name`, oa.name, ob.name);
         for (const k of OPTION_KEYS) push(`option:${oa.name}.${k}`, oa[k], ob[k]);
+        for (const k of OPTION_KEYS_IF_CAMPAIGN) if (ob[k]) push(`option:${oa.name}.${k}`, oa[k], ob[k]);
       });
     } else {
       for (const oa of unmatchedA) out.push({ field: `option:${oa.name}`, kind: 'diff', order: 'present', campaign: 'missing' });
@@ -169,4 +175,4 @@ function compareOrderCampaign(order, campaign, optionRows) {
   return out;
 }
 
-module.exports = { projectOrderToCampaign, readCampaignShared, compareOrderCampaign, optionShape: _optionShape, unitClosedFlags, SCALAR_KEYS, OPTION_KEYS };
+module.exports = { projectOrderToCampaign, readCampaignShared, compareOrderCampaign, optionShape: _optionShape, unitClosedFlags, SCALAR_KEYS, OPTION_KEYS, OPTION_KEYS_IF_CAMPAIGN };

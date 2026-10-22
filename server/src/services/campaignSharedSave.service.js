@@ -16,7 +16,8 @@
 //   리뷰비 기간표는 연결 공고에서 직접 고치지 않는다(사용자 확정 2026-10-20) — 리뷰비 칸을 바꾸면 "오늘부터 새 금액" 구간이 저절로 생긴다.
 //   화면이 보낸 기간표가 지금과 다르면 409(쓰기 0), 같으면 기존 저장이 기간표를 다시 쓰지 않는다(그 사이 생긴 구간을 지우지 않게).
 // ★ 6단계 — 가이드유입 공고의 선택지 유입가이드도 공유 저장으로 보낸다({글, 사진} · `planCampaignMoneyEdit`).
-//   옵션 URL 은 아직 공고 전용(7단계). 창을 연 뒤 리뷰오더 쪽에서 바뀐 옵션 칸은 `protectOptionLeaves` 가 지금 DB 값을 남긴다(금액·가이드 포함).
+//   옵션 URL·상품 메인 주소는 결정 271(2026-10-22)부터 공유(`planCampaignMoneyEdit` 의 주소 계획). 창을 연 뒤 리뷰오더 쪽에서 바뀐 옵션 칸은
+//   `protectOptionLeaves` 가 지금 DB 값을 남긴다(금액·가이드·주소 포함).
 // ═══════════════════════════════════════════════════════════════════════════
 'use strict';
 
@@ -175,13 +176,17 @@ async function protectOptionLeaves({ normOpts, link, baseVersion, db } = {}) {
   const gKey = x => JSON.stringify([x.inflow_guide_html, x.inflow_guide_images]);
   const kept = [];
   for (const o of normOpts) {
-    const mine = shape({ productName: o.productName, optKey: o.optKey, unitKind: o.unitKind, optionUrl: o.optionUrl,
+    const mine = shape({ productName: o.productName, optKey: o.optKey, unitKind: o.unitKind, optionUrl: o.optionUrl, productUrl: o.productUrl,
       inflowGuideHtml: o.inflowGuideHtml, inflowGuideImages: o.inflowGuideImages, payAmount: o.payAmount,
       recruitTotal: o.recruitTotal, dailyLimit: o.dailyLimit, reviewTypeMix: o.reviewTypeMix });
     const b = baseOpts.get(mine.key), c = curByKey.get(mine.key), raw = rawByKey.get(mine.key);
     if (!b || !c || !raw) continue;
     for (const [leaf, field, rawOf] of LEAVES) {
       if (mine[leaf] === b[leaf] && c[leaf] !== b[leaf]) { o[field] = rawOf(raw); kept.push(`${mine.name}·${leaf}`); }
+    }
+    // 결정 271 — 상품 메인 주소(보낸 줄만 · 안 보낸 줄(null)은 저장이 지금 값을 그대로 둔다)
+    if (typeof o.productUrl === 'string' && mine.product_url === b.product_url && c.product_url && c.product_url !== b.product_url) {
+      o.productUrl = raw.product_url || ''; kept.push(`${mine.name}·product_url`);
     }
     if (gKey(mine) === gKey(b) && gKey(c) !== gKey(b)) {
       o.inflowGuideHtml = raw.inflow_guide_html || '';

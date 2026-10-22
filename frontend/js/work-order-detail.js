@@ -732,6 +732,8 @@ function _woOptionRows(o) {
           optKey: isNone ? "" : lab,
           // 옵션 링크가 비면 그 상품의 메인 URL 로 접는다(공고 공통 랜딩으로 떨어지면 남의 상품이 열린다)
           optionUrl: clean(op.url || op.option_url || "") || prodUrl,
+          // ★ 결정 271 — 그 줄이 속한 상품의 메인 주소(공고 창 상품 카드의 "상품 메인 URL" · 옵션 주소와 따로 저장)
+          productUrl: prodUrl,
           payAmount: Number(op.pay) || basePay,
           // 옵션별 정원·일건수까지 오더 입력값을 그대로 모집공고 표에 적용한다.
           recruitTotal: Math.max(0, Number(op.count) || 0),
@@ -747,7 +749,7 @@ function _woOptionRows(o) {
       const ug = _woUnitGuide(_woProductUnitSrc(prod));
       rows.push({
         productName: name, optKey: "", unitKind: "product",
-        payAmount: basePay, optionUrl: prodUrl,
+        payAmount: basePay, optionUrl: prodUrl, productUrl: prodUrl,
         // ★ 옵션 줄이 `op.count` 를 그대로 쓰듯, 옵션 없는 상품도 오더가 정한 인원(base.count)을 따른다.
         //   0 으로 두면 그 선택지만 "무제한"이 되어 복합 작업의 정원 합계가 통째로 무너진다(테섭 실측).
         recruitTotal: Math.max(0, Number(prod.base && prod.base.count) || 0), dailyLimit: baseDaily,

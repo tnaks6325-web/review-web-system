@@ -28,11 +28,14 @@ const SCALAR_LABEL = {
   channel: '구매채널', landing_url: '상품 페이지 주소',
 };
 const LEAF_LABEL = {
-  name: '이름', unit_kind: '옵션 있음·없음', option_url: '주소', pay_amount: '결제금액', recruit_total: '인원', daily_limit: '일건수',
+  name: '이름', unit_kind: '옵션 있음·없음', option_url: '주소', product_url: '상품 주소', pay_amount: '결제금액', recruit_total: '인원', daily_limit: '일건수',
   review_type_mix: '리뷰타입 수량', guide: '유입가이드', status: '마감 여부',
 };
-/** 공고 쪽 값을 오더로 옮기는 계산이 없는 칸 — 오더 쪽만(공고 반영을 강제로 건다). */
-const ORDER_ONLY_LEAVES = new Set(['option_url']);
+/** 공고 쪽 값을 오더로 옮기는 계산이 없는 칸 — 오더 쪽만(공고 반영을 강제로 건다).
+ *  결정 271(2026-10-22): 옵션 주소·상품 주소도 공고 → 오더 계산이 생겼다(`planCampaignMoneyEdit` 주소 계획) — 비었다. */
+const ORDER_ONLY_LEAVES = new Set([]);
+/** 오더 쪽으로 고르면 공고 주소 반영을 강제로 거는 줄 칸. */
+const URL_LEAVES = new Set(['option_url', 'product_url']);
 
 const _s = v => (v == null ? '' : String(v)).trim();
 
@@ -127,6 +130,7 @@ function _bodyRow(r, extra = {}) {
   const [pName, optKey] = r.key.split('|');
   return {
     productName: pName, optKey: r.unit_kind === 'product' ? '' : optKey, unitKind: r.unit_kind,
+    optionUrl: r.option_url, productUrl: r.product_url || null,
     payAmount: Number(r.pay_amount) || 0, recruitTotal: Number(r.recruit_total) || 0, dailyLimit: Number(r.daily_limit) || 0,
     reviewTypeMix: _mixArr(r.review_type_mix),
     inflowGuideHtml: r.inflow_guide_html, inflowGuideImages: r._images || [],
@@ -139,6 +143,7 @@ function _dbRow(r) {
   const [pName, optKey] = r.key.split('|');
   return {
     opt_key: r.unit_kind === 'product' ? pName : optKey, product_name: pName, unit_kind: r.unit_kind, status: r.status,
+    option_url: r.option_url, product_url: r.product_url || null,
     recruit_total: Number(r.recruit_total) || 0, daily_limit: Number(r.daily_limit) || 0, pay_amount: Number(r.pay_amount) || 0,
     inflow_guide_html: r.inflow_guide_html, inflow_guide_images: r._images || [], review_type_mix: r.review_type_mix,
   };
@@ -173,6 +178,8 @@ function _mixedBody({ from, to, pairs, S, fromIsOrder, hasRows }) {
     if (L('review_type_mix')) row.reviewTypeMix = _mixArr(t.review_type_mix);
     if (L('guide')) { row.inflowGuideHtml = t.inflow_guide_html; row.inflowGuideImages = t._images || []; }
     if (L('status')) row.status = t.status;
+    if (L('option_url')) row.optionUrl = t.option_url;
+    if (L('product_url')) row.productUrl = t.product_url;
     if (L('name') && f.key !== t.key) {
       const [tp, to2] = t.key.split('|');
       const [fp, fo] = f.key.split('|');
@@ -326,11 +333,11 @@ function planReconcile(wo, camp, opts, picks = null) {
   }
   // 공고 쪽으로 못 옮긴 칸(오더 쪽 고정)은 P 에 오더 값이 남아 ② 에 차이가 없다 → 공고 반영을 강제로 건다
   const forced = fields.filter(f => picks[f.id] === 'order' && !allCamp.has(f.id) && !f.derived);
-  const force = { urlTouched: forced.some(f => f.leaf === 'option_url') || forced.some(f => f.key === 'landing_url'), keys: [],
+  const force = { urlTouched: forced.some(f => URL_LEAVES.has(f.leaf)) || forced.some(f => f.key === 'landing_url'), keys: [],
     quantity: derivedIds.length > 0 };   // 줄 있는 공고의 총모집·일건수가 줄 합과 어긋남 — 오더(줄 합)로 공고를 다시 맞춘다(검토 2026-10-21)
   const KEYMAP = { review_fee: 'review_fee', time_range: 'purchase_time', thumbnail_url: 'thumbnail_url', channel: 'purchase_channel', skip_weekends: 'skip_weekends', delivery_type: 'delivery_type', landing_url: 'product_url' };
   for (const f of forced) if (f.group === 'scalar' && KEYMAP[f.key]) force.keys.push(KEYMAP[f.key]);
-  const forcedUnknown = forced.filter(f => !(f.group === 'option' && f.leaf === 'option_url') && !(f.group === 'scalar' && KEYMAP[f.key]));
+  const forcedUnknown = forced.filter(f => !(f.group === 'option' && URL_LEAVES.has(f.leaf)) && !(f.group === 'scalar' && KEYMAP[f.key]));
   if (forcedUnknown.length) return { ...base, hasRows, error: { code: 'reconcile_unmappable', labels: forcedUnknown.map(f => `${f.label} — ${f.campaignSide.reason}`) } };
   return { ...base, hasRows, derivedIds, P, T, Tmine, force, O };
 }

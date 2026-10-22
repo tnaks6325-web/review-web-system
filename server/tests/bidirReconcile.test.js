@@ -113,21 +113,24 @@ async function pg() {
   const renameCamp = (camp) => pool.query(`UPDATE campaign_options SET opt_key = '1번 ' || opt_key WHERE campaign_id = $1`, [camp]);
 
   try {
-    // ── R1 공고에서 리뷰비·옵션 이름·옵션 주소를 고친 공고 — 리뷰비는 공고 쪽, 이름·주소는 오더 쪽 ──
+    // ── R1 공고에서 리뷰비·옵션 이름·옵션 주소를 고친 공고 — 리뷰비·블랙 주소는 공고 쪽, 이름·화이트 주소는 오더 쪽 ──
+    //   결정 271(2026-10-22 「4.가」): 옵션 주소도 공고 → 오더로 옮길 수 있다. 비운 옵션 주소는 오더에서 상품 주소로 접혀 담을 수 없다(공고 쪽 잠김).
     const A = await setup('a', async (camp) => {
       await pool.query(`UPDATE recruit_campaigns SET review_fee = 1500 WHERE id = $1`, [camp]);
       await renameCamp(camp);
       await pool.query(`UPDATE campaign_options SET option_url = 'https://naver.me/short1' WHERE campaign_id = $1 AND opt_key = '1번 블랙'`, [camp]);
+      await pool.query(`UPDATE campaign_options SET option_url = '' WHERE campaign_id = $1 AND opt_key = '1번 화이트'`, [camp]);
     });
     assert.equal(A.ln.body.state, 'diverged', JSON.stringify(A.ln.body));
     let it = await A.item();
     assert.ok(it, '목록에 나온다');
     const ids = it.fields.map(f => f.id).sort();
-    assert.deepEqual(ids, ['option:탈취제 / 블랙.name', 'option:탈취제 / 블랙.option_url', 'option:탈취제 / 화이트.name', 'review_fee'].sort(), JSON.stringify(ids));
+    assert.deepEqual(ids, ['option:탈취제 / 블랙.name', 'option:탈취제 / 블랙.option_url', 'option:탈취제 / 화이트.name', 'option:탈취제 / 화이트.option_url', 'review_fee'].sort(), JSON.stringify(ids));
     const f = id => it.fields.find(x => x.id === id);
     assert.equal(f('review_fee').campaignSide.ok, true);
     assert.equal(f('option:탈취제 / 블랙.name').campaignSide.ok, true);
-    assert.equal(f('option:탈취제 / 블랙.option_url').campaignSide.ok, false, '옵션 주소는 공고 쪽으로 못 옮긴다(오더 쪽만)');
+    assert.equal(f('option:탈취제 / 블랙.option_url').campaignSide.ok, true, '옵션 주소도 공고 쪽으로 옮긴다(결정 271)');
+    assert.equal(f('option:탈취제 / 화이트.option_url').campaignSide.ok, false, '비운 옵션 주소는 오더에서 상품 주소로 접혀 공고 쪽으로 못 옮긴다');
     assert.equal(it.workManager, '박은비');
     // 고르지 않은 칸이 있으면 막힌다
     let out = await R.reconcileSharedOrder({ workOrderId: A.w.id, picks: { review_fee: 'campaign' }, fingerprint: it.fingerprint, actor: '시험' });
@@ -138,7 +141,7 @@ async function pg() {
     // 공고 쪽으로 못 옮기는 칸을 공고 쪽으로 고르면 막힌다
     out = await R.reconcileSharedOrder({ workOrderId: A.w.id, picks: picksOf(it, () => 'campaign'), fingerprint: it.fingerprint, actor: '시험' });
     assert.equal(out.status, 409); assert.equal(out.body.code, 'reconcile_campaign_side_locked');
-    const picks = picksOf(it, x => (x.id === 'review_fee' ? 'campaign' : 'order'));
+    const picks = picksOf(it, x => (x.id === 'review_fee' || x.id === 'option:탈취제 / 블랙.option_url' ? 'campaign' : 'order'));
     // 해 보기(dryRun) — 아무것도 안 바뀐다
     const before = JSON.stringify([await A.wo(), await A.cRow(), await A.opts()]);
     out = await R.reconcileSharedOrder({ workOrderId: A.w.id, picks, fingerprint: it.fingerprint, dryRun: true, actor: '시험' });
@@ -149,8 +152,9 @@ async function pg() {
     let w = await A.wo();
     assert.equal(w.bidir_state, 'on');
     assert.equal(Number(w.review_fee), 1500, '리뷰비 = 공고 쪽');
-    assert.deepEqual((await A.opts()).map(o => [o.opt_key, o.option_url]), [['블랙', OPT_P[0].url], ['화이트', OPT_P[0].url]], '이름·주소 = 오더 쪽(공고가 따라감)');
+    assert.deepEqual((await A.opts()).map(o => [o.opt_key, o.option_url]), [['블랙', 'https://naver.me/short1'], ['화이트', OPT_P[0].url]], '이름 = 오더 쪽 · 블랙 주소 = 공고 쪽 · 화이트 주소 = 오더 쪽(공고가 따라감)');
     assert.deepEqual(JSON.parse(w.product_options_json)[0].options.map(o => o.label), ['블랙', '화이트']);
+    assert.equal(JSON.parse(w.product_options_json)[0].options[0].url, 'https://naver.me/short1', '공고 쪽 옵션 주소가 오더로(결정 271)');
     assert.equal(Number((await A.cRow()).review_fee), 1500);
     assert.ok(await outbox(A.w.id) >= 1, '인트라넷으로 보낼 거리가 쌓인다');
     assert.ok(!(await R.listReconcile(pool)).items.some(x => x.workOrderId === A.w.id), '맞춘 뒤 목록에서 빠진다');

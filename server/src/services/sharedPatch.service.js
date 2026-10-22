@@ -1504,6 +1504,21 @@ async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTo
       }
     }
   }
+  // 결정 271 — 상품 메인 주소(같은 상품의 줄 전부 · 마감 줄 포함: 그 상품의 주소다). 주소가 움직였거나 줄을 더한 저장(새 줄은 프리필 값으로 들어와 주소가 비어 있다).
+  if (urlTouched || has('product_url') || extra.structureTouched) {
+    const prodUrls = new Map();
+    for (const o of proj.options) { const pName = o.key.split('|')[0]; if (!prodUrls.has(pName)) prodUrls.set(pName, o.product_url); }
+    for (const [pName, url] of prodUrls) {
+      if (!url) continue;
+      const { rowCount } = await client.query(
+        `UPDATE campaign_options SET product_url = $3, updated_at = NOW()
+          WHERE campaign_id = $1 AND COALESCE(status,'active') <> 'deleted'
+            AND (product_name = $2 OR (unit_kind = 'product' AND opt_key = $2))
+            AND COALESCE(product_url,'') <> $3`,
+        [camp.id, pName, url]);
+      if (rowCount) applied.push('product_url');
+    }
+  }
   if (has('purchase_channel') || has('purchase_channel_custom') || has('product_url')) {
     const ch = String(proj.channel || '').trim();
     if (ch) {

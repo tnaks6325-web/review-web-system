@@ -291,6 +291,35 @@ function _planGuideEdit({ products, src, srcCount, rowCount, o, name, baseRow, d
   return { guide, target: t, wantKey: shapeKey(sent) };
 }
 
+/**
+ * 결정 271(사용자 확정 2026-10-22 「2.가」「4.가」) — 공고 창 한 줄의 옵션 주소·상품 메인 주소 → 오더 주소(바뀌었을 때만).
+ *   옵션 줄 = 그 옵션 `url`(옵션 주소) + 그 상품 `url`(상품 메인 주소) · 상품 줄(옵션 없는 상품) = 그 상품 `url` 하나(두 칸이 같은 값).
+ * ★ "바뀜" = 창을 연 시점 오더 투영과도, 지금 공고 값과도 다를 때(가이드와 같은 규칙) — 공고에서만 따로 고쳐 둔 옛 주소를
+ *   손대지 않은 저장 한 번에 오더로 끌어오지 않는다. 안 보낸 칸(undefined·null)은 손대지 않은 것으로 본다(옛 화면 · 상품 주소를 모르는 줄).
+ * @returns {{ opt?: string, prod?: string, unmappable?: object }}
+ */
+function _planUrlEdit({ products, src, srcCount, rowCount, o, row, dbRow, name }) {
+  const t = v => String(v == null ? '' : v).trim();
+  const sentOf = (camel, snake) => (o[camel] !== undefined && o[camel] !== null) ? t(o[camel]) : ((o[snake] !== undefined && o[snake] !== null) ? t(o[snake]) : null);
+  const sentOpt = sentOf('optionUrl', 'option_url');
+  const sentProd = sentOf('productUrl', 'product_url');
+  const touched = (sent, baseV, dbV) => sent !== null && sent !== t(baseV) && (dbV === undefined || sent !== t(dbV));
+  const optT = touched(sentOpt, row.option_url, dbRow ? dbRow.option_url : undefined);
+  // 상품 메인 주소 — 196 이전 줄(지금 공고 값 NULL)은 "모름" 이라 지금 값과의 비교를 건너뛴다(기준 투영과만 비교)
+  const prodT = touched(sentProd, row.product_url, dbRow && dbRow.product_url != null ? dbRow.product_url : undefined);
+  if (!optT && !prodT) return {};
+  const label = `주소(${name})`;
+  if (!products || !src || srcCount !== rowCount) return { unmappable: { label, want: sentOpt || sentProd || '', got: row.option_url } };
+  if (src.j < 0) {
+    // 옵션 없는 상품 — 옵션 주소와 상품 주소가 같은 칸(오더 상품 url)이다. 둘을 다르게 고치면 담을 수 없다.
+    const opt = optT ? sentOpt : null, prod = prodT ? sentProd : null;
+    if (opt !== null && prod !== null && opt !== prod) return { unmappable: { label: `${label} — 옵션 없는 상품은 상품 주소 하나만 둡니다`, want: opt, got: prod } };
+    const v = opt !== null ? opt : prod;
+    return { prod: v, unitProduct: true };
+  }
+  return { opt: optT ? sentOpt : undefined, prod: prodT ? sentProd : undefined };
+}
+
 /** 리뷰 혼합 수량 → 저장 모양 배열([{type, quantity}] · 0 은 뺀다). */
 function _mixArray(v) {
   const { normalizeReviewTypeMix } = require('./reviewTypeMix');
@@ -704,6 +733,8 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
   let edited = null;
   const want = new Map();   // 줄 열쇠 → 화면이 보낸 금액
   const guideWant = new Map();   // 줄 열쇠 → 화면이 보낸 가이드(투영 비교 모양)
+  const urlWant = new Map();     // 줄 열쇠 → {option_url?, product_url?} 화면이 보낸 주소(결정 271)
+  const prodUrlSet = new Map();  // 상품 자리 i → 새 상품 주소(같은 상품의 줄끼리 다르면 담을 수 없다)
   const wdIn = b.work_detail && typeof b.work_detail === 'object' && b.work_detail.inflowType !== undefined ? b.work_detail.inflowType : base.inflow_type;
   const guideInflow = String(wdIn || '').trim() === 'guide';
 
@@ -711,6 +742,31 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
     // ② 옵션 있는 공고 — 옵션표 금액
     const byKey = new Map(baseRows.map((r, k) => [r.key, k]));
     const srcs = products ? _rowSources(products) : [];
+    // ── 결정 271: 옵션 주소 · 상품 메인 주소 → 오더 url(줄 k = 기준 투영의 그 줄 · 이름을 바꾼 줄은 원래 이름의 줄) ──
+    const planUrlRow = (k, o, key) => {
+      const src = srcs[k];
+      const dbRowU = liveCampOpts.find(r => String(r.opt_key || '') === String(o.optKey ?? o.opt_key ?? '').trim()
+        || (String(o.unitKind ?? o.unit_kind ?? '') === 'product' && String(r.opt_key || '') === String(o.productName ?? o.product_name ?? '').trim()));
+      const u = _planUrlEdit({ products, src, srcCount: srcs.length, rowCount: baseRows.length, o, row: baseRows[k], dbRow: dbRowU, name: baseRows[k].name });
+      if (u.unmappable) unmappable.push({ key, ...u.unmappable });
+      else if (u.opt !== undefined || u.prod !== undefined) {
+        if (!edited) edited = JSON.parse(JSON.stringify(products));
+        const w = {};
+        if (u.unitProduct) {
+          edited[src.i].url = u.prod; w.option_url = u.prod; w.product_url = u.prod;
+          prodUrlSet.set(src.i, u.prod);
+        } else {
+          if (u.opt !== undefined) { edited[src.i].options[src.j].url = u.opt; w.option_url = u.opt; }
+          if (u.prod !== undefined) {
+            if (prodUrlSet.has(src.i) && prodUrlSet.get(src.i) !== u.prod) unmappable.push({ key, label: `상품 주소(${String(products[src.i].name || '')}) — 같은 상품의 줄마다 다른 주소`, want: u.prod, got: prodUrlSet.get(src.i) });
+            prodUrlSet.set(src.i, u.prod);
+            edited[src.i].url = u.prod; w.product_url = u.prod;
+          }
+        }
+        urlWant.set(key, w);
+        changed.push(`주소(${baseRows[k].name})`);
+      }
+    };
     for (const o of b.options) {
       if (!o || typeof o !== 'object') continue;
       const key = _bodyOptKey(o);
@@ -723,6 +779,13 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
         const pay = Math.max(0, Math.floor(Number(o.payAmount ?? o.pay_amount) || 0));
         if (was && CANON.int(pay) !== CANON.int(was.pay_amount)) {
           unmappable.push({ key, label: `결제금액(${prev} → ${String(o.optKey || '').trim()}) — 이름과 금액을 함께 바꿈`, want: String(pay), got: CANON.int(was.pay_amount) });
+        }
+        // 이름을 바꾼 줄의 주소 — 원래 이름의 줄 자리로(이름 바꾸기는 뒤의 구조 계획이 같은 사본에 얹는다 · 맞추기 화면에서 이름·주소를 함께 고르는 경우)
+        if (prev) {
+          const unitP = String(o.unitKind ?? o.unit_kind ?? '') === 'product';
+          const pn = String(o.productName ?? o.product_name ?? '').replace(/\|/g, '').trim();
+          const kPrev = byKey.get(unitP ? `${prev}|` : `${pn}|${prev}`);
+          if (kPrev !== undefined) planUrlRow(kPrev, { ...o, optKey: prev, productName: unitP ? prev : pn }, baseRows[kPrev].key);
         }
         continue;
       }
@@ -739,6 +802,7 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
           changed.push(`유입가이드(${baseRows[k].name})`);
         }
       }
+      planUrlRow(k, o, key);
       const pay = Math.max(0, Math.floor(Number(o.payAmount ?? o.pay_amount) || 0));
       if (CANON.int(pay) === baseRows[k].pay_amount) continue;  // 손대지 않음
       const label = `결제금액(${baseRows[k].name})`;
@@ -759,6 +823,18 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
         const gotGuide = got ? JSON.stringify([got.inflow_guide_html, got.inflow_guide_images]) : '';
         const expectGuide = guideWant.has(r.key) ? guideWant.get(r.key) : JSON.stringify([r.inflow_guide_html, r.inflow_guide_images]);
         if (gotGuide !== expectGuide) unmappable.push({ key: r.key, label: `유입가이드(${r.name})`, want: expectGuide, got: gotGuide });
+        // 주소 왕복(결정 271) — 화면이 보낸 주소가 그대로 나와야 한다. 상품 주소를 바꾼 상품의 다른 줄은 그 주소를 따라가는 것이 맞다
+        //   (옵션 주소가 빈 옵션 줄은 상품 주소로 접힌다 — 화면은 그 줄의 옛 주소를 보냈으므로 여기서 걸러 새로고침을 받는다).
+        if (got && urlWant.size) {
+          const uw = urlWant.get(r.key) || {};
+          const expOpt = uw.option_url !== undefined ? uw.option_url : r.option_url;
+          if (got.option_url !== expOpt) unmappable.push({ key: r.key, label: `옵션 주소(${r.name}) — 리뷰오더에서 이 옵션 주소가 비어 상품 주소를 따라갑니다. 옵션 주소를 직접 넣어 주세요`, want: expOpt, got: got.option_url });
+          if (uw.product_url !== undefined && got.product_url !== uw.product_url) unmappable.push({ key: r.key, label: `상품 주소(${r.name})`, want: uw.product_url, got: got.product_url });
+        }
+      }
+      // 첫 상품 주소가 바뀌면 오더 상품 페이지 칸(product_url — 작업표 구매채널·링크유입 랜딩의 재료)도 같이 — 그 칸이 첫 상품 주소와 같았을 때만
+      if (edited && prodUrlSet.has(0) && products && products[0] && String(base.product_url || '').trim() === String(products[0].url || '').trim()) {
+        mine.product_url = prodUrlSet.get(0);
       }
     }
   } else if (!liveCampOpts.length && b.work_detail && typeof b.work_detail === 'object'
@@ -889,6 +965,15 @@ function moneyDriftFromCampaign(camp, body, campOptions = []) {
       const rt = o.recruitTotal ?? o.recruit_total, dl = o.dailyLimit ?? o.daily_limit;
       return (rt !== undefined && CANON.int(rt) !== CANON.int(r.recruit_total)) || (dl !== undefined && CANON.int(dl) !== CANON.int(r.daily_limit));
     })) out.push('옵션 인원');
+    // 결정 271 — 옵션 주소·상품 메인 주소도 공유 칸이다(옛 화면은 기준 버전을 몰라 받지 않는다 · 안 보낸 칸 · 지금 값 모름(NULL)은 비교하지 않는다)
+    const nu = v => { const t = String(v == null ? '' : v).trim(); if (!t) return ''; try { return new URL(t).href; } catch (_) { return t; } };
+    if (b.options.some(o => {
+      const r = o && rowOf.get(String(o.optKey ?? o.opt_key ?? '').trim());
+      if (!r) return false;
+      const u = o.optionUrl ?? o.option_url, pu = o.productUrl ?? o.product_url;
+      return (u !== undefined && u !== null && nu(u) !== nu(r.option_url))
+        || (pu !== undefined && pu !== null && r.product_url != null && nu(pu) !== nu(r.product_url));
+    })) out.push('주소');
   } else if (!live.length && b.work_detail && typeof b.work_detail === 'object' && Object.prototype.hasOwnProperty.call(b.work_detail, 'productLines')) {
     const wd = c.work_detail && typeof c.work_detail === 'object' ? c.work_detail : {};
     if (distinctAmountsInText(b.work_detail.productLines).join(',') !== distinctAmountsInText(wd.productLines).join(',')) out.push('결제금액');
