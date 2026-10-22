@@ -2656,7 +2656,10 @@ function renderOptRowsWithProduct(options, productLines, campaign) {
     /* ★ 총인원·일건수는 캠페인 원장 값이다(상품 줄 수와 무관) — 종전엔 원문이 두 줄 이상이면
        0 으로 떨어져 화면이 '무제한'을 보여주고, 저장하면 그대로 리셋됐다. 첫 행에만 싣는다. */
     renderOptRows(parsed.map((r, i) => ({
-      productName: [r.productName, r.optKey].filter(Boolean).join(" "),
+      /* ★ 옵션 없는 공고의 원문은 발행 폼이 **한 줄에 상품 하나**로 쓴다("상품명 - 결제금액 N원").
+         그래서 한 덩어리 줄이 앞 줄 상품명을 이어받으면(inherited) 틀린다 — "린스" 가 "샴푸 린스" 가 되어
+         손대지 않은 저장 한 번에 둘째 상품부터 이름이 바뀌었다(2026-10-22 실측). 같은 줄 조각만 되붙인다(결정 042). */
+      productName: (r.inherited && r.optKey) ? r.optKey : [r.productName, r.optKey].filter(Boolean).join(" "),
       optKey: "", payAmount: r.payAmount,
       recruitTotal: i === 0 ? (fallback.recruit_total ?? 0) : 0,
       dailyLimit: i === 0 ? (fallback.daily_limit ?? 0) : 0,
@@ -2915,11 +2918,12 @@ function parseProductLinesToRows(text, fallbackProductName) {
       .replace(/[\s\-·/|]+$/, "")
       .trim();
     const parts = rest.split(/\s*[-–/|·]\s*/).map(p => p.trim()).filter(Boolean);
-    let productName = "", optKey = "";
+    let productName = "", optKey = "", inherited = false;
     if (parts.length >= 2) { productName = parts[0]; optKey = parts.slice(1).join(" "); }
     else if (parts.length === 1) {
       // 한 덩어리 — 앞 줄에 상품명이 있으면 이건 옵션명일 가능성이 높다
-      if (lastProd) { productName = lastProd; optKey = parts[0]; }
+      //   (inherited = 상품명을 앞 줄·오더 상품명에서 이어받았다는 표시 — 옵션 없는 공고 편집은 이 추측을 쓰지 않는다)
+      if (lastProd) { productName = lastProd; optKey = parts[0]; inherited = true; }
       else { productName = parts[0]; }
     }
     // "옵션 없음" 류는 옵션명이 아니라 '옵션이 없다'는 서술 — 실제 옵션으로 저장되면
@@ -2936,7 +2940,7 @@ function parseProductLinesToRows(text, fallbackProductName) {
     }
     if (!productName && !optKey && !pay) continue;
     if (productName) lastProd = productName;
-    rows.push({ productName: productName || lastProd, optKey, payAmount: pay });
+    rows.push({ productName: productName || lastProd, optKey, payAmount: pay, inherited });
   }
   return rows;
 }
