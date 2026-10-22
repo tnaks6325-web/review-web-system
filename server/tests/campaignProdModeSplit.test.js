@@ -281,6 +281,16 @@ console.log('\n[B-2] 카드 구성 → 저장 모양(발행 프리필 _woProduct
   ok('저장된 옵션 없는 상품 줄 · 상품 주소 모름 = null(줄 주소는 그대로 보냄)', o5[0].productUrl === null && o5[0].optionUrl === 'https://s.example/old' && o5[1].productUrl === 'https://s.example/t');
   const ue5 = t5.dom.byId.rf_opt_rows.querySelector('.rf-gp-url'); ue5.value = 'https://s.example/new'; ue5.fire('input');
   ok('사람이 고치면 보낸다', JSON.parse(t5.run('JSON.stringify(readOptRows())'))[0].productUrl === 'https://s.example/new');
+  // ★ 5단계 전수 시험 실측(2026-10-22) — 상품 주소 모르는 옵션 없는 상품 줄을 사람이 「옵션 있음」으로 바꾸면 카드에 보이던 주소를 보낸다
+  //   (안 그러면 null = 저장 값 유지인데 저장 값이 비어 있어, 다시 열면 상품 주소 칸이 빈다)
+  const t7 = makeTable();
+  t7.run(`renderOptRows([{ productName:'방향제', unitKind:'product', optKey:'방향제', savedOptKey:'방향제', optionUrl:'https://s.example/old', payAmount:1, recruitTotal:1, dailyLimit:1 }], { saved: true })`);
+  const b7 = t7.dom.byId.rf_opt_rows.querySelector('.rf-gp');
+  ok('바꾸기 전 = 상품 주소 모름(null)', JSON.parse(t7.run('JSON.stringify(readOptRows())'))[0].productUrl === null);
+  b7.querySelectorAll('.rf-gp-unit button').find(b => b.dataset.unit === 'option').onclick();
+  const n7 = b7.querySelector('.rf-opt-name'); n7.value = '라벤더'; n7.fire('input');
+  const o7 = JSON.parse(t7.run('JSON.stringify(readOptRows())'));
+  ok('옵션 없음 → 있음 전환 = 카드 상품 주소를 보낸다', o7.length === 1 && o7[0].unitKind === 'option' && o7[0].productUrl === 'https://s.example/old');
   const t6 = makeTable();
   t6.run('addOptRow()'); t6.run('addOptRow()');
   const ue6 = t6.dom.byId.rf_opt_rows.querySelectorAll('.rf-gp-name'); ue6[0].value = 'A'; ue6[0].fire('input'); ue6[1].value = 'B'; ue6[1].fire('input');

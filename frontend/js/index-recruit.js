@@ -2575,6 +2575,9 @@ function _buildProdGroup(g) {
           box.dataset.puKnown = "1";
         }
       }
+      // 옵션 없음 → 있음도 같다 — 사람이 이 카드를 직접 바꾸는 순간, 카드에 보이는 상품 주소를 아는 값으로 친다
+      // (안 그러면 196 이전 줄에서 넘어온 주소가 저장 때 빠져 다시 열면 주소 칸이 빈다 — 5단계 전수 시험 실측 2026-10-22)
+      if (u === "option" && String(urlEl.value || "").trim()) box.dataset.puKnown = "1";
       box.dataset.unit = u;
       paintUnit();
       _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); _syncGroupTotals();

@@ -279,6 +279,17 @@ async function pg() {
       const diffs = compareOrderCampaign(await wo(), cRow, cOpts).filter(d => d.kind === 'diff' && /guide/.test(JSON.stringify(d)));
       assert.deepEqual(diffs, [], 'D4: 오더·공고 가이드 어긋남 0');
     }
+    // 인트라넷 직접입력 채널(목록에 없는 채널) → 공고는 「직접입력 + 채널명」 — 날것으로 넣으면 공고 창이 채널 버튼을 못 찾아 저장이 막힌다
+    {
+      r = await putSource(() => {}, { money: 1, guide: 1 }, { purchase_channel: '무신사', purchase_channel_custom: true });
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      const cch = (await pool.query('SELECT channel, channel_custom FROM recruit_campaigns WHERE id = $1', [camp])).rows[0];
+      assert.deepEqual([cch.channel, cch.channel_custom], ['직접입력', '무신사'], '직접입력 채널 = 직접입력 + 채널명: ' + JSON.stringify(cch));
+      r = await putSource(() => {}, { money: 1, guide: 1 }, { purchase_channel: '쿠팡', purchase_channel_custom: false });
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      const cch2 = (await pool.query('SELECT channel, channel_custom FROM recruit_campaigns WHERE id = $1', [camp])).rows[0];
+      assert.deepEqual([cch2.channel, cch2.channel_custom], ['쿠팡', ''], '목록 채널 = 그대로 · 채널명 칸 비움');
+    }
     console.log('bidirPhase6Guide: PG passed');
   } finally {
     srv.close();
