@@ -1,5 +1,8 @@
 const express = require('express');
 const router = express.Router();
+// Track B(trackB.routes.js)가 경로 문자열 대신 이름으로 부르는 핸들러 모음 — 맨 아래 router.handlers 로 내보낸다(결정 270).
+const { lastRouteHandler } = require('../utils/routeHandlers');
+const _handlers = {};
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
@@ -3060,6 +3063,7 @@ router.post('/admin/:id/archive', authMiddleware, adminOrMasterMiddleware, async
     next(err);
   }
 });
+_handlers.adminArchive = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // POST /api/campaign/admin/:id/flags {popular} — 인기상품 ON/OFF.
 //   과거 별표 우선노출 데이터(pinned_at)는 보존하되 더 이상 정렬·UI·API에서 사용하지 않는다.
@@ -3097,6 +3101,7 @@ router.post('/admin/:id/flags', authMiddleware, adminOrMasterMiddleware, async (
     next(err);
   }
 });
+_handlers.adminFlags = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // POST /api/campaign/admin/create — 캠페인 생성
 router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
@@ -3419,6 +3424,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
     next(err);
   }
 });
+_handlers.adminCreate = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // PUT /api/campaign/admin/:id — 캠페인 수정
 router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
@@ -4079,6 +4085,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     next(err);
   }
 });
+_handlers.adminUpdate = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // DELETE /api/campaign/admin/:id — 캠페인 삭제
 router.delete('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
@@ -4136,6 +4143,7 @@ router.delete('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req,
     next(err);
   }
 });
+_handlers.adminDelete = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // PUT /api/campaign/admin/:id/status — 상태 변경 (active/closed/draft)
 router.put('/admin/:id/status', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
@@ -4169,6 +4177,7 @@ router.put('/admin/:id/status', authMiddleware, adminOrMasterMiddleware, async (
     next(err);
   }
 });
+_handlers.adminStatus = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // GET /api/campaign/admin/:id/applications — 관리자: 참여자 전체 목록
 router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
@@ -4383,6 +4392,7 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
     next(err);
   }
 });
+_handlers.adminApplications = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 /* GET /api/campaign/admin/:id/activity-log — 모집공고에서 연결 작업보드의 로그를 그대로 읽는다.
    ★ 신규 로그 저장소·별도 집계 0: 작업보드가 쓰는 tabActivityLog 서비스가 단일 출처다.
@@ -4423,6 +4433,7 @@ router.get('/admin/:id/activity-log', authMiddleware, adminOrMasterMiddleware, a
     res.json({ ...out, kinds: (out.kinds || []).filter(k => k.key !== 'inspect') });
   } catch (err) { next(err); }
 });
+_handlers.adminActivityLog = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // GET /api/campaign/admin/:id/preview — 관리자: 리뷰어 참여 화면 미리보기 (읽기 전용)
 //   ★ 격리 원칙: 무인증 리뷰어 경로 `GET /:id/work-detail` 은 **일절 미변경**. 관리자 전용 별도 라우트로
@@ -4507,6 +4518,7 @@ router.get('/admin/:id/preview', authMiddleware, adminOrMasterMiddleware, async 
     next(err);
   }
 });
+_handlers.adminPreview = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // POST /api/campaign/admin/:id/confirm {applicationId} — 만료+기구매(late) 구제의 유일 경로 (admin/master)
 //   유예 정책 제거에 따라, 만료 후 도착한 제출(late_order_id)은 이 수동확정으로만 자리 확정된다.
@@ -4576,6 +4588,7 @@ router.post('/admin/:id/options/merge', authMiddleware, adminOrMasterMiddleware,
     client.release();
   }
 });
+_handlers.adminOptionMerge = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 router.post('/admin/:id/confirm', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   const { id } = req.params;
@@ -4650,6 +4663,7 @@ router.post('/admin/:id/confirm', authMiddleware, adminOrMasterMiddleware, async
     client.release();
   }
 });
+_handlers.adminConfirm = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 /* ═══ 127 블로그 승인제 — 승인/반려 (사용자 확정 2026-08-19) ═══
    승인 = blog_pending → 'applied' + expires_at=NOW()+구매기한(기본 24h = BLOG_PURCHASE_TTL_MIN)
@@ -4759,6 +4773,7 @@ router.post('/admin/:id/blog-approve', authMiddleware, adminOrMasterMiddleware, 
     client.release();
   }
 });
+_handlers.adminBlogApprove = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // POST /api/campaign/admin/:id/blog-reject {applicationId, reason}
 router.post('/admin/:id/blog-reject', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
@@ -4802,6 +4817,7 @@ router.post('/admin/:id/blog-reject', authMiddleware, adminOrMasterMiddleware, a
     client.release();
   }
 });
+_handlers.adminBlogReject = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // POST /api/campaign/admin/:id/dismiss {applicationId} — 취소확정(미참여) (admin/master)
 //   만료·취소된 참여를 관리자가 "미참여로 취소 확정" → dismissed_at 기록.
@@ -4846,6 +4862,7 @@ router.post('/admin/:id/dismiss', authMiddleware, adminOrMasterMiddleware, async
     client.release();
   }
 });
+_handlers.adminDismiss = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // ═══════════════════════════════════════════════════════════
 // 내부: 시트 행 자동 추가
@@ -4926,5 +4943,10 @@ async function _addApplicationToSheet(campaign, applicant) {
 
 // 공고 목록 5초 캐시 비우기 — 다른 기능이 정원을 바꾼 직후 화면이 옛 숫자를 다시 그리지 않게(어제 부족 인원 팝업 — 코덱스 리뷰)
 router.invalidateListCache = function () { _listCache = { at: 0, rows: null, countsMap: null, feeMap: null }; };
+
+_handlers.adminList = _adminCampaignList;
+_handlers.detail = getCampaignDetail;
+// ★ 이름을 빼거나 바꾸면 trackB 가 기동 시 바로 실패한다(fail-closed) — 옛 공개 경로를 지워도 Track B 는 그대로다.
+router.handlers = Object.freeze(_handlers);
 
 module.exports = router;

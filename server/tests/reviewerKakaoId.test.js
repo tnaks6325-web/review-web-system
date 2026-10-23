@@ -106,15 +106,13 @@ const reviewer = require('../src/services/reviewer.service');
   ok('검색 페이지 로그인창 가입에 카톡 칸', /id="regKakaoInline"/.test(search));
   // 검색 페이지의 별도 등록창(registerModal)은 여는 길이 없어 2026-10-05 제거(결정 186 103번) — 가입은 위 로그인창 안 가입(regKakaoInline)이 맡는다.
   ok('검색 페이지에 열 수 없던 별도 등록창이 남아 있지 않다', !/id="registerModal"/.test(search));
-  ok('관리자 등록창에도 카톡 칸(서버 필수라 빠지면 막다른 길)', /id="regKakao"/.test(read('frontend/admin.html')));
+  // 옛 관리자 대시보드 폐기(결정 267) — 관리자 등록창(admin.html·index-register.js)이 없어졌다. 가입 경로는 검색 페이지 로그인창 하나다.
+  ok('옛 관리자 등록창(index-register.js)은 남아 있지 않다', !fs.existsSync(path.join(__dirname, '..', '..', 'frontend/js/index-register.js')));
   ok('개인정보 수집 항목에 카톡 아이디 고지', /이름, 휴대전화번호, 카카오톡 아이디<\/td>/.test(search));
   const app = read('frontend/js/search-app.js');
   ok('로그인창 가입이 kakaoId 를 보낸다', /registerReviewer", name, phone, consent: "true", kakaoId \}/.test(app));
-  // search-register.js 는 열 수 없던 별도 등록창 전용이라 2026-10-05 제거(결정 186 103번) — 관리자 등록창(index-register.js)만 본다.
+  // search-register.js 는 열 수 없던 별도 등록창 전용이라 2026-10-05 제거(결정 186 103번).
   ok('search-register.js 는 남아 있지 않다', !fs.existsSync(path.join(__dirname, '..', '..', 'frontend/js/search-register.js')));
-  for (const f of ['frontend/js/index-register.js']) {
-    ok(`${path.basename(f)} 가입이 kakaoId 를 보낸다`, /kakaoId:window\._regKakao\|\|''/.test(read(f)));
-  }
   const idx = read('frontend/index.html');
   ok('내정보에 카톡 칸(소득 줄 다음)', idx.indexOf('id="pfSelfKakaoId"') > idx.indexOf('id="inlineSelfIncomeName"') && idx.indexOf('id="pfSelfKakaoId"') > 0);
   const fn = idx.slice(idx.indexOf('function renderSelfKakaoId'), idx.indexOf('function focusKakaoIdInput'));

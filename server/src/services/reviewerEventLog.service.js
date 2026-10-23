@@ -114,7 +114,7 @@ function describeEvent(row = {}) {
     case 'order_lost_manual':
       return {
         problem: `구매양식이 시트에서 반복 소실되어 자동 재기록을 중단함${at(c.row) ? `(마지막 기록 ${at(c.row)}행)` : ''}.`,
-        action: "수동 확인·입력이 필요(관리자 대시보드 '구매주문 시트반영 현황' 참조).",
+        action: "수동 확인·입력이 필요(리뷰웹시스템 작업표에서 해당 주문 확인).",
       };
     case 'identity_blocked_expired':
       return {
@@ -136,7 +136,7 @@ function describeEvent(row = {}) {
       return manual
         ? {
           problem: '구매양식을 제출했으나, 시트에 입력되지 못함.',
-          action: "자동 재기록이 중단되어 수동 입력이 필요(관리자 대시보드 '구매주문 시트반영 현황' 참조).",
+          action: "자동 재기록이 중단되어 수동 입력이 필요(리뷰웹시스템 작업표에서 해당 주문 확인).",
         }
         : {
           problem: `구매양식을 제출했으나, 아직 시트에 입력되지 못함${at(c.mirrorStatus) ? `(상태: ${at(c.mirrorStatus)})` : ''}.`,
@@ -252,7 +252,7 @@ const CANCELABLE_EVENTS = new Set(['order_lost', 'order_lost_manual', 'order_unm
 /**
  * 알림에 걸린 주문을 취소로 확정 — 재기록(reconcile)·사후검증 대상에서 함께 빠진다
  * (둘 다 `deleted_at IS NULL` 필터라 소프트삭제만으로 되살아남이 멈춘다).
- * 시트에 행이 남아 있으면 기존 `order_cancel` 큐로 그 행을 비운다 — 큐의 신원검증이
+ * 시트에 행이 남아 있으면(무시트 좌표 제외 — 결정 271) 기존 `order_cancel` 큐로 그 행을 비운다 — 큐의 신원검증이
  * "그 사이 다른 사람이 쓴 행"은 건드리지 않도록 막아준다(남의 데이터 파괴 불가).
  */
 async function cancelOrderFromEvent({ id, by = 'admin' } = {}) {
@@ -274,18 +274,25 @@ async function cancelOrderFromEvent({ id, by = 'admin' } = {}) {
     const { rows } = await db.query(
       `UPDATE order_submissions SET deleted_at = NOW(), canceled_by = $2, updated_at = NOW()
         WHERE id = $1 AND deleted_at IS NULL
-      RETURNING sheet_row, mirror_status`,
+      RETURNING sheet_row, mirror_status, sheet_id, tab_name, tab_gid, gid`,
       [osId, canceledBy]
     );
     if (!rows.length) return { already: true };
-    return { sheetRow: rows[0].sheet_row };
+    return { sheetRow: rows[0].sheet_row, coord: rows[0] };
   });
   if (out && out.skipped) return { ok: false, error: '다른 편집/취소가 진행 중입니다. 잠시 후 다시 시도해주세요.' };
 
   if (out && !out.already) {
     // 시트 행이 남아 있고 시트쓰기가 켜져 있으면 그 행 비우기를 큐에 위임(신원검증은 큐가 수행).
     // 그 외(행 없음·쓰기 비활성)는 DB 상태만 확정 — 취소 자체는 항상 성립해야 한다(되살아남 중단이 목적).
-    if (out.sheetRow && process.env.ORDER_LEDGER_WRITE_ENABLED === 'true') {
+    // ★★ 결정 271 — 무시트 좌표(참여형 `campaign:*` · 무시트 탭)에는 비울 구글시트 행이 없다.
+    //   큐에 넣으면 매번 "RAW 메타 없음"으로 실패만 쌓인다 → 아래 else(DB 상태만 확정)로 보낸다.
+    //   판정 실패 = false = 종전 경로(fail-open).
+    const sheetless = !!out.sheetRow && await require('../utils/sheetlessScope').isSheetlessOrderCoord(db, {
+      sheetId: out.coord && out.coord.sheet_id, tabName: out.coord && out.coord.tab_name,
+      tabGid: out.coord && (out.coord.tab_gid || out.coord.gid),
+    });
+    if (out.sheetRow && !sheetless && process.env.ORDER_LEDGER_WRITE_ENABLED === 'true') {
       try {
         await require('./syncQueue.service').enqueue('order_cancel', { orderSubmissionId: osId });
         require('../jobs/queuePump').kickQueuePump();

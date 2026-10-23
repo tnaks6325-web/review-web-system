@@ -9,7 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const read = (p) => fs.readFileSync(path.join(__dirname, '..', '..', p), 'utf8');
 
-const adminHtml = read('frontend/js/recruit-modal.js') + '\n' + read('frontend/admin.html');
+const adminHtml = read('frontend/js/recruit-modal.js');   // 옛 관리자 대시보드 폐기(결정 267) — admin.html 진입 경로까지 삭제
 const recruit = read('frontend/js/index-recruit.js');
 const compactEditor = adminHtml.slice(adminHtml.indexOf('class="rf-main rf-compact-main"'));
 
@@ -17,12 +17,12 @@ let passed = 0;
 function ok(name, cond) { assert(cond, name); passed++; console.log('  ✓ ' + name); }
 
 // ── 공고 모달 UI ──
-ok('admin.html: 타계정 참여 체크박스(rf_multi_account) + 토글 핸들러', /id="rf_multi_account"[^>]*onchange="onMultiAccountToggle/.test(adminHtml));
-ok('admin.html: 하루한도(rf_multi_daily)·타계정 제한시간(rf_sub_ttl) 입력', /id="rf_multi_daily"/.test(adminHtml) && /id="rf_sub_ttl"/.test(adminHtml));
+ok('공고 모달: 타계정 참여 체크박스(rf_multi_account) + 토글 핸들러', /id="rf_multi_account"[^>]*onchange="onMultiAccountToggle/.test(adminHtml));
+ok('공고 모달: 하루한도(rf_multi_daily)·타계정 제한시간(rf_sub_ttl) 입력', /id="rf_multi_daily"/.test(adminHtml) && /id="rf_sub_ttl"/.test(adminHtml));
 ok('실사용 편집기: 타계정 허용 오른쪽에 하루 한도 [숫자] 계정 입력',
   /id="rf_multi_account_toggle"[\s\S]{0,500}id="rf_multi_section" class="rf-multi-limit" hidden[\s\S]{0,200}>하루 한도<[\s\S]{0,300}id="rf_multi_daily"[\s\S]{0,200}<span>계정<\/span>/.test(compactEditor)
   && /\.rf-multi-limit\{[^}]*margin-left:auto/.test(compactEditor));
-ok('admin.html: 참여형(rf_part_section) 안에 위치 — 레거시 공고엔 미노출', adminHtml.indexOf('id="rf_part_section"') < adminHtml.indexOf('id="rf_multi_account"'));
+ok('공고 모달: 참여형(rf_part_section) 안에 위치 — 레거시 공고엔 미노출', adminHtml.indexOf('id="rf_part_section"') < adminHtml.indexOf('id="rf_multi_account"'));
 
 // ── 토글·자동점검 ──
 ok('index-recruit: 허용/미허용에 따라 실제 입력 영역 hidden 해제 + 점검 갱신',

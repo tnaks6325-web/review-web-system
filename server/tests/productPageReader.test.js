@@ -104,7 +104,7 @@ const shopSrc = rd('frontend/js/recruit-shop-import.js');
     ok('마감 줄은 손대지 않고, 저장돼 있던 줄은 지우지 않는다(빈 이름이면 채워 쓴다)',
       /return row\.dataset\.status !== "closed" && !String/.test(shopSrc) && /blanks\.forEach\(function \(row\) \{\s*if \(row\.dataset\.origKey\) return;/.test(shopSrc));
     ok('안내는 창·카드 안에서(토스트는 공고 창 아래에 깔린다)', !/showToast\(/.test(shopSrc));
-    for (const page of ['frontend/admin.html', 'frontend/workdesk.html']) {
+    for (const page of ['frontend/workdesk.html']) {   // 옛 관리자 대시보드(admin.html)는 main 결정 267 로 폐기 — 공고 창은 작업보드에만 있다
       const html = rd(page);
       ok(page + ': index-recruit 다음에 싣는다', html.indexOf('js/recruit-shop-import.js') > html.indexOf('js/index-recruit.js?v='));
     }

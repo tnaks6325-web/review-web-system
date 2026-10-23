@@ -1000,6 +1000,7 @@ function _batchMountDropzone() {
   });
   document.addEventListener("paste", e => {
     if (!_BATCH) return;
+    if (!box.isConnected || !box.offsetParent) return;   // 이 칸이 안 보이는 화면(리뷰 제출 등)의 붙여넣기는 받지 않는다 — 숨은 카드로 새지 않게
     const imgs = [...((e.clipboardData && e.clipboardData.items) || [])]
       .filter(i => i.type && i.type.startsWith("image/")).map(i => i.getAsFile()).filter(Boolean);
     if (imgs.length) { e.preventDefault(); _batchTakeFiles(imgs); }   // 이미지일 때만 가로챔(텍스트 붙여넣기 보존)
@@ -1937,6 +1938,7 @@ document.addEventListener("DOMContentLoaded", () => {
   hideLoading();
   bindEnter();
   bindDragDrop();
+  bindPasteUpload();
   // ★ mode=form / s= 파라미터 감지 → 구매양식 전용 화면 진입
   if (initOrderFormMode()) return; // 구매양식 모드이면 이후 일반 초기화 스킵
 
@@ -2768,7 +2770,7 @@ function _renderMultiImageSlots(items) {
         <div class="mr-slot-title">${escHtml(productLabel)}${escHtml(optTxt)}</div>
         <span class="mr-slot-status wait" id="mrSlotStatus_${idx}">대기</span>
       </div>
-      <div class="mr-slot-dropzone" id="mrDz_${idx}"
+      <div class="mr-slot-dropzone" id="mrDz_${idx}" onclick="_zoneTap(event,this)"
            ondragover="event.preventDefault();this.classList.add('drag-over')"
            ondragleave="this.classList.remove('drag-over')"
            ondrop="_mrOnDrop(event,${idx})">
@@ -2779,6 +2781,7 @@ function _renderMultiImageSlots(items) {
           <span>클릭 또는 드래그 · JPG/PNG/WebP</span>
         </div>
         <div class="mr-slot-preview hidden" id="mrPreview_${idx}"></div>
+        ${_dzSplitHtml()}
       </div>
       <textarea class="mr-slot-memo" id="mrMemo_${idx}" rows="1"
                 placeholder="비고 - 블로그체험단인 경우 포스팅URL (선택)" style="margin-top:8px"></textarea>`;
@@ -2823,13 +2826,14 @@ function _renderCaptureSlots(item, slots, paneCard) {
     const slotEl = document.createElement("div");
     slotEl.className = "mr-slot";
     slotEl.id = `csSlot_${slot.key}`;
+    if (isDone) slotEl.dataset.submitted = "1";   // 붙여넣기 기본 대상(비어 있는 첫 칸)에서 이미 제출한 칸은 건너뛴다(결정 263)
     slotEl.innerHTML = `
       <div class="mr-slot-header">
         <div class="mr-slot-num">${isReceipt ? ++receiptIndex : ++reviewIndex}</div>
         <div class="mr-slot-title">${escHtml(slot.label || slot.key)}${optional ? ' <span style="font-size:.72rem;color:#B45309;font-weight:700">(선택 · 발행 확정 후 제출)</span>' : ''}${isDone ? ' <span style="font-size:.72rem;color:#16a34a;font-weight:600">(이미 제출 — 다시 올리면 교체)</span>' : ''}</div>
         ${statusHtml}
       </div>
-      <div class="mr-slot-dropzone" id="csDz_${slot.key}"
+      <div class="mr-slot-dropzone" id="csDz_${slot.key}" onclick="_zoneTap(event,this)"
            ondragover="event.preventDefault();this.classList.add('drag-over')"
            ondragleave="this.classList.remove('drag-over')"
            ondrop="_csOnDrop(event,'${slot.key}')">
@@ -2840,6 +2844,7 @@ function _renderCaptureSlots(item, slots, paneCard) {
           <span>클릭 또는 드래그 · JPG/PNG/WebP</span>
         </div>
         <div class="mr-slot-preview hidden" id="csPreview_${slot.key}"></div>
+        ${_dzSplitHtml()}
       </div>
       ${optionalHint}
       <div id="csGuide_${slot.key}"></div>`;
@@ -3472,6 +3477,7 @@ function goStep(n) {
       : '<i class="fas fa-paper-plane"></i> 제출하기';
   }
   if (n === 3) _updateReceiptStepActions();
+  _pastePaint();   // 단계가 바뀌면 붙여넣기 대상 칸 표시도 그 단계 기준으로
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -3676,6 +3682,131 @@ function bindDragDrop() {
 }
 function onFilesSelected(e) { addFiles(Array.from(e.target.files)); e.target.value = ""; }
 
+/* ── 사진 칸 3분할(PC): 왼쪽 Ctrl+V 붙여넣기 · 가운데 끌어다 놓기 · 오른쪽 파일 추가 (2026-10-20) ──
+ *  사용자 요청: "저장 없이 Ctrl+V 로 바로 붙여넣기 · 어딜 누르고 붙여넣어야 하는지 불분명 · 선택했다는 시각적 표시 ·
+ *  클릭 시 바로 파일탐색기를 열지 말 것 · 영역을 3분할(좌 Ctrl+V / 중앙 끌어다놓기 / 우 파일추가)".
+ *  ★ PC(마우스)만 3분할을 보인다 — 휴대폰은 Ctrl+V·끌어다 놓기가 없어 종전대로 누르면 바로 사진 고르기(화면 불변).
+ *  ★ 넣는 길은 클릭·드래그와 같은 addFiles / _mrAddFiles / _csAddFiles — 형식·10MB·AI 사전확인 사본 0.
+ *  ★ 선택된 칸 = 마지막으로 누른 칸 · 아직 안 눌렀으면 비어 있는 첫 칸. 실선 파란 테두리 + 왼쪽 칸 "✓ 선택됨"(css .paste-target).
+ *  ★ 파일 탐색기는 오른쪽 [파일 추가]만 연다. 칸의 다른 곳을 누르면 그 칸을 선택만 한다.
+ *  ★ Ctrl+V 는 화면 어디서나 → 선택된 칸. 클립보드에 사진이 없으면 가로채지 않는다(비고란 글자 붙여넣기 그대로).
+ *  ★ 지금 보이는 단계 화면의 보이는 칸에서만 받는다 — 구매양식 일괄 캡처(_batchMountDropzone)와 겹쳐 받지 않는다. */
+const _PASTE_ZONE_SEL = "#dropZone, .mr-slot-dropzone";
+let _pasteZoneId = "";
+function _isPcPointer() {
+  try { return window.matchMedia("(hover:hover) and (pointer:fine)").matches; } catch (_) { return false; }
+}
+function _pasteZones() {
+  const pane = document.querySelector(".step-pane.active");
+  if (!pane || !pane.offsetParent) return [];
+  return [...pane.querySelectorAll(_PASTE_ZONE_SEL)].filter(z => z.id && z.offsetParent);
+}
+function _pasteZoneFiles(z) {
+  if (z.id === "dropZone") return S.files || [];
+  let m = z.id.match(/^mrDz_(\d+)$/); if (m) return (S.filesByIdx && S.filesByIdx[m[1]]) || [];
+  m = z.id.match(/^csDz_(.+)$/);     if (m) return (S.filesBySlot && S.filesBySlot[m[1]]) || [];
+  return [];
+}
+/** 사용자가 누른 칸이 먼저 · 아니면 "비어 있는 첫 칸"(이미 제출한 칸은 비어 보여도 건너뛴다 — 덮어쓰기 방지).
+ *  ★ 자동으로 고른 칸은 _pasteZoneId 에 적지 않는다 — 적으면 한 칸이 찬 뒤에도 같은 칸에 계속 쌓인다(누른 칸만 기억). */
+function _pasteTargetZone() {
+  const zones = _pasteZones(); if (!zones.length) return null;
+  const done = z => { const sl = z.closest && z.closest(".mr-slot"); return !!(sl && sl.dataset.submitted === "1"); };
+  return zones.find(z => z.id === _pasteZoneId) || zones.find(z => !_pasteZoneFiles(z).length && !done(z))
+    || zones.find(z => !done(z)) || zones[0];
+}
+function _pastePaint() {
+  const t = _pasteTargetZone();
+  document.querySelectorAll(".paste-target").forEach(z => { if (z !== t) z.classList.remove("paste-target"); });
+  if (t && !t.classList.contains("paste-target")) t.classList.add("paste-target");
+}
+function _pasteZoneLabel(z) {
+  if (z.id === "dropZone") return "리뷰 캡처";
+  const slot = z.closest(".mr-slot");
+  const num = slot && slot.querySelector(".mr-slot-num"), tt = slot && slot.querySelector(".mr-slot-title");
+  const title = tt ? String((tt.firstChild && tt.firstChild.textContent) || tt.textContent || "").trim() : "";
+  return (num ? num.textContent.trim() + "번 " : "") + (title || "사진");
+}
+function _zonePickerInput(z) {
+  if (z.id === "dropZone") return document.getElementById("imgInput");
+  let m = z.id.match(/^mrDz_(\d+)$/); if (m) return document.getElementById("mrFile_" + m[1]);
+  m = z.id.match(/^csDz_(.+)$/);     if (m) return document.getElementById("csFile_" + m[1]);
+  return null;
+}
+/** 3분할 막대(PC 전용 — css 가 휴대폰에서 숨긴다). 칸마다 하나씩, 미리보기 뒤에 둔다(사진이 있으면 한 줄로 줄어든다). */
+function _dzSplitHtml() {
+  return '<div class="dz-split">'
+    + '<button type="button" class="ds-cell ds-paste" data-act="paste"><i class="fas fa-paste"></i><b>Ctrl+V</b><span class="ds-sub">캡처 후 붙여넣기</span></button>'
+    + '<div class="ds-cell ds-drop"><i class="fas fa-hand-pointer"></i><b>끌어다 놓기</b><span class="ds-sub">사진을 여기로</span></div>'
+    + '<button type="button" class="ds-cell ds-file" data-act="file"><i class="fas fa-folder-open"></i><b>파일 추가</b><span class="ds-sub">내 PC에서 고르기</span></button>'
+    + '</div>';
+}
+/** 사진 칸을 눌렀을 때. PC = 3분할(왼쪽 붙여넣기 · 오른쪽 파일 추가 · 그 밖은 선택만) / 휴대폰 = 종전대로 바로 사진 고르기. */
+function _zoneTap(e, z) {
+  if (!z) return;
+  const cell = e && e.target && e.target.closest && e.target.closest(".ds-cell");
+  if (!cell && e && e.target && e.target.closest && e.target.closest("button")) return;   // 사진 삭제(×) 등은 각자 처리
+  if (!_isPcPointer()) {
+    if (e && e.target && e.target.tagName === "INPUT") return;   // 칸을 덮은 파일 입력을 직접 누른 경우 = 브라우저가 이미 연다
+    const inp = _zonePickerInput(z); if (inp) inp.click();
+    return;
+  }
+  _pasteZoneId = z.id; _pastePaint();
+  const act = cell && cell.dataset.act;
+  if (act === "file") { const inp = _zonePickerInput(z); if (inp) inp.click(); }
+  else if (act === "paste") _zonePasteFromClipboard(z);
+}
+/** 왼쪽 [Ctrl+V] 칸을 눌렀을 때 — 그 칸을 선택하고 클립보드 사진을 바로 읽어 넣는다.
+ *  못 읽으면(권한 거절·미지원·사진 없음) 이유와 "키보드 Ctrl+V" 를 안내 — 칸은 이미 선택돼 있어 Ctrl+V 가 그리로 간다. */
+async function _zonePasteFromClipboard(z) {
+  const KEY_HINT = "키보드에서 Ctrl+V 를 눌러주세요 — 선택한 칸에 들어갑니다.";
+  if (!(navigator.clipboard && navigator.clipboard.read)) { showToast("이 브라우저는 눌러서 붙여넣기를 못 해요. " + KEY_HINT, "info", 5000); return; }
+  let items;
+  try { items = await navigator.clipboard.read(); }
+  catch (_) { showToast("브라우저가 클립보드 읽기를 막았어요. " + KEY_HINT, "warning", 5000); return; }
+  const blobs = [];
+  for (const it of items || []) {
+    const ty = (it.types || []).find(t => t.startsWith("image/"));
+    if (ty) { try { blobs.push(await it.getType(ty)); } catch (_) {} }
+  }
+  if (!blobs.length) { showToast("클립보드에 사진이 없어요. 먼저 화면을 캡처(Win+Shift+S)한 뒤 Ctrl+V 를 누르거나 다시 눌러주세요.", "warning", 5000); return; }
+  _pasteInto(z, blobs);
+}
+/** 붙여넣은 사진(클립보드 Blob/File)을 그 칸에 넣는다 — 클릭·드래그와 같은 함수로.
+ *  ★ 성공 안내는 실제로 받아들여진 장수만(10MB 초과·형식 불가·읽기 실패는 넣는 함수가 각자 오류 안내). */
+async function _pasteInto(z, imgs) {
+  // 클립보드 사진은 이름이 없거나 모두 image.png 라 구분되게 다시 붙인다(내용은 그대로)
+  const stamp = new Date().toTimeString().slice(0, 8).replace(/:/g, "");
+  const files = imgs.map((f, k) => {
+    const ext = String((f.type || "image/png").split("/")[1] || "png").replace("jpeg", "jpg");
+    try { return new File([f], `붙여넣기_${stamp}${imgs.length > 1 ? "_" + (k + 1) : ""}.${ext}`, { type: f.type || "image/png" }); } catch (_) { return f; }
+  });
+  const before = _pasteZoneFiles(z).length;
+  let m;
+  if (z.id === "dropZone") await addFiles(files);
+  else if ((m = z.id.match(/^mrDz_(\d+)$/))) await _mrAddFiles(Number(m[1]), files);
+  else if ((m = z.id.match(/^csDz_(.+)$/))) await _csAddFiles(m[1], files);
+  else return;
+  const took = _pasteZoneFiles(z).length - before;
+  if (took > 0) showToast(`붙여넣은 사진 ${took}장을 「${_pasteZoneLabel(z)}」 칸에 넣었어요`, "success");
+  _pastePaint();
+}
+function bindPasteUpload() {
+  // 칸이 새로 그려지거나(다건·슬롯 전환) 사진이 들어가 "비어 있는 첫 칸"이 바뀌면 표시를 다시 맞춘다
+  let raf = 0;
+  new MutationObserver(() => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; _pastePaint(); }); })
+    .observe(document.body, { childList: true, subtree: true });
+  document.addEventListener("paste", e => {
+    if (!_pasteZones().length) return;
+    const imgs = [...((e.clipboardData && e.clipboardData.items) || [])]
+      .filter(i => i.kind === "file" && i.type && i.type.startsWith("image/")).map(i => i.getAsFile()).filter(Boolean);
+    if (!imgs.length) return;                 // 사진이 아니면 그대로(글자 붙여넣기 보존)
+    e.preventDefault();
+    const z = _pasteTargetZone(); if (!z) return;
+    _pasteInto(z, imgs);
+  });
+}
+
 /**
  * ★ 개선: 파일 선택 즉시 Base64 변환 후 { file, b64, size, type, name } 객체로 저장
  *   → submitReview() 시점에 File 참조가 만료되는 Android WebView 문제 방지
@@ -3719,7 +3850,7 @@ function renderPreviews() {
   });
   const add = document.createElement("div"); add.className = "prev-add";
   add.innerHTML = '<i class="fas fa-plus"></i><span>추가</span>';
-  add.onclick = e => { e.stopPropagation(); document.getElementById("imgInput").click(); };
+  add.onclick = e => { e.stopPropagation(); document.getElementById("imgInput").click(); };   // 휴대폰 전용(PC 는 3분할 [파일 추가] — css 로 숨김)
   prev.appendChild(add);
 }
 
@@ -4261,8 +4392,6 @@ function resetApp() {
   showScreen("screenSearch");
 }
 
-/* ── 관리자 세션 (search.html에서는 미사용 — stub 유지) ── */
-function isAdminLoggedIn() { return false; }
 function clearAdminSession() {}
 
 /* ── GAS URL 설정 모달 (비밀번호 인증) ── */
@@ -4344,445 +4473,6 @@ async function _saveAppUrlToGas(url) {
   }
 }
 
-function exitAdmin() {}
-
-
-/* ── 제출 현황 대시보드 ── */
-async function loadAdminDashboard() {
-  if (!isAdminLoggedIn()) { showToast("세션이 만료되었습니다. 다시 로그인하세요.", "warning"); exitAdmin(); return; }
-  // ── section-header sticky 위치를 데이터 로드 전 즉시 보정 ──
-  _fixStickyPositions();
-  const wrap = document.getElementById("dashboardWrap");
-  wrap.innerHTML = '<div class="admin-loading"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
-  hide("dashboardSummary");
-
-  try {
-    const data  = await gasGet({ action: "dashboard" });
-    if (data.error) {
-      wrap.innerHTML = `<div class="admin-error"><i class="fas fa-exclamation-circle"></i> ${escHtml(data.error)}</div>`;
-      return;
-    }
-
-    const stats = data.stats || [];
-    const grand = data.grand || { total: 0, submitted: 0, pending: 0 };
-
-    _closedSet    = new Set();
-    stats.forEach(c => {
-      (c.tabs || []).forEach(t => {
-        if (t.isClosed) {
-          const key = (t.sheetId || "") + "||" + (t.tab || "");
-          _closedSet.add(key);
-        }
-      });
-    });
-    // ★ 마감탭 Set (인덱스에서 제외된 항목도 포함)
-    (data.closedTabs || []).forEach(t => {
-      const key = (t.sheetId || "") + "||" + (t.tab || "");
-      _closedSet.add(key);
-    });
-
-    if (data.indexBuiltAt) {
-      document.getElementById("dashboardIndexInfo").textContent = "인덱스 기준: " + data.indexBuiltAt;
-    }
-
-    // ★ 자동 빌드 카운트다운 + 빌드 진행 중 배너
-    if (typeof _startCronCountdown === 'function') _startCronCountdown(data.cron, data.buildLock);
-
-    const rate = grand.total > 0 ? Math.round(grand.submitted / grand.total * 100) : 0;
-    document.getElementById("sumTotal").textContent   = grand.total.toLocaleString();
-    document.getElementById("sumDone").textContent    = grand.submitted.toLocaleString();
-    document.getElementById("sumPending").textContent = grand.pending.toLocaleString();
-    document.getElementById("sumRate").textContent    = rate + "%";
-    show("dashboardSummary");
-
-    if (!stats.length) {
-      wrap.innerHTML = '<div class="admin-empty"><i class="fas fa-inbox"></i><p>데이터가 없습니다</p></div>';
-      return;
-    }
-
-    wrap.innerHTML = "";
-
-    // ── 컬럼 헤더: wrap 직속 (scrollOuter 밖) → sticky 정상 동작 ──
-    const colHeader = document.createElement("div");
-    colHeader.id = "dashColHeader";
-    colHeader.className = "dash-col-header";
-    _buildColHeader(colHeader);
-    wrap.appendChild(colHeader);
-
-    // ── 가로 스크롤 래퍼 (캠페인 블록만 포함) ──
-    const scrollOuter1 = document.createElement("div");
-    scrollOuter1.id = "dashboardScrollOuter";
-    const scrollInner1 = document.createElement("div");
-    scrollInner1.id = "dashboardScrollInner";
-    scrollOuter1.appendChild(scrollInner1);
-    wrap.appendChild(scrollOuter1);
-
-    stats.forEach((c, ci) => {
-      const cRate    = c.total > 0 ? Math.round(c.submitted / c.total * 100) : 0;
-      const tableId  = `dct-${ci}`;
-      const block    = document.createElement("div");
-      // 마감업체 조건: 모든 탭이 완료(pending===0) 또는 마감(isClosed)인 경우
-      const isCampDone = c.closedOnly === true || (c.tabs.length > 0 && c.tabs.every(t => {
-        const key = (t.sheetId||"")+"||"+(t.tab||"");
-        return _closedSet.has(key) || (t.total > 0 && t.pending === 0);
-      }));
-      // 마감 탭 포함 여부
-      const hasClosed = c.closedOnly === true || c.tabs.some(t => _closedSet.has((t.sheetId||"")+"||"+(t.tab||"")));
-      block.className  = "dash-campaign-block" + (isCampDone ? " camp-all-done" : "") + (hasClosed ? " camp-has-closed" : "");
-
-      const campSheetId = (c.tabs[0] && c.tabs[0].sheetId) ? c.tabs[0].sheetId : "";
-      const header = document.createElement("div");
-      header.className = "dash-campaign-header";
-      header.innerHTML = `
-        <div class="dash-campaign-left">
-          <i class="fas fa-chevron-down dash-toggle-icon"></i>
-          ${campSheetId ? `<button class="btn-camp-refresh" data-sheetid="${escHtml(campSheetId)}" data-campname="${escHtml(c.campaign)}" onclick="event.stopPropagation();refreshCampaignIndex(this)" title="이 캠페인만 동기화"><i class="fas fa-sync-alt"></i> 갱신</button>` : ""}
-          <span class="dash-campaign-name">${escHtml(c.campaign)}</span>
-        </div>
-        <span class="dash-campaign-total">${c.submitted}/${c.total} (${cRate}%)</span>`;
-      header.addEventListener("click", () => toggleDashTab(tableId, header));
-
-      const table = document.createElement("div");
-      table.id        = tableId;
-      table.className = "dash-tab-table collapsed";
-
-      c.tabs.forEach(t => {
-        const tRate     = t.total > 0 ? Math.round(t.submitted / t.total * 100) : 0;
-        const tabKey    = (t.sheetId || "") + "||" + (t.tab || "");
-        const isClosedTab = _closedSet.has(tabKey);
-        const isTabDone = (t.total > 0 && t.pending === 0);
-        const row       = document.createElement("div");
-        row.className   = "dash-tab-row"
-          + (isTabDone   ? " tab-done" : "")
-          + (isClosedTab ? " is-closed-row" : "");
-        row.dataset.tabkey = tabKey;
-
-        const _tabSheetUrl = _buildTabUrl(t.sheetUrl, t.sheetId, t.tabGid);
-        const tabNameHtml = _tabSheetUrl
-          ? `<a class="dash-tab-link" href="${escHtml(_tabSheetUrl)}" target="_blank" title="${escHtml(_tabSheetUrl)}">${escHtml(t.tab)} <i class="fas fa-link dash-tab-ext"></i></a>`
-          : `<span>${escHtml(t.tab)}</span>`;
-
-        // 시작일 배지
-        const startDateHtml = t.startDate
-          ? `<span class="tab-start-date"><i class="fas fa-calendar-day"></i> ${escHtml(t.startDate)}</span>`
-          : "";
-        const tuip    = t.tuip    || 0;
-        const chuihap = t.chuihap || 0;
-
-        // 상태 오버레이 HTML 생성 헬퍼
-        const total = t.total || 0;
-        // 상태 셀: 마감 > 완료 > 투입중/취합중(동시가능) > 없음
-        let stateHtml = "";
-        if (isClosedTab) {
-          stateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
-        } else if (isTabDone) {
-          stateHtml = `<span class="bar-lbl-center">✓ 완료</span>`;
-        } else if (tuip > 0 || chuihap > 0) {
-          const leftHtml  = tuip    > 0 ? `<span class="bar-lbl-left"><i class="fas fa-user-plus"></i> 투입중 ${tuip}/${total}</span>`       : `<span class="bar-lbl-left"></span>`;
-          const rightHtml = chuihap > 0 ? `<span class="bar-lbl-right"><i class="fas fa-layer-group"></i> 취합중 ${chuihap}/${total}</span>` : `<span class="bar-lbl-right"></span>`;
-          stateHtml = leftHtml + rightHtml;
-        }
-
-        // 탭설정 데이터 (data-tc 속성으로 전달 → onclick 이스케이프 문제 방지)
-        const tcData = { sheetId: t.sheetId, sheetUrl: t.sheetUrl || "", tabName: t.tab,
-          manager: t.manager||"", timeRange: t.timeRange||"",
-          taekhap: t.taekhap||false, reviewType: t.reviewType||"",
-          paymentType: t.paymentType||"", displayName: t.displayName||"",
-          isBulk: t.isBulk||false };
-        const tcAttr = escHtml(JSON.stringify(tcData));
-
-        // ★ 차수 렌더링:
-        //   - roundList 1개 이상 → 각 차수마다 독립 행 (탭명 동일, 차수 배지만 다름)
-        //   - roundList 없음     → 단독 행 1개 ("단독" 배지)
-        if (t.roundList && t.roundList.length >= 1) {
-          t.roundList.forEach(rd => {
-            const rdRow = document.createElement("div");
-            const rdDone = (rd.total > 0 && rd.pending === 0);
-            rdRow.className = "dash-tab-row" + (rdDone ? " tab-done" : "") + (isClosedTab ? " is-closed-row" : "");
-            rdRow.dataset.tabkey = tabKey;
-            const rdRate = rd.total > 0 ? Math.round(rd.submitted / rd.total * 100) : 0;
-            // 차수별 시작일: rd.startDate 우선, 없으면 탭 전체 startDate
-            const rdStartDate = rd.startDate || t.startDate || "";
-            const rdStartDateHtml = rdStartDate
-              ? `<span class="tab-start-date"><i class="fas fa-calendar-day"></i> ${escHtml(rdStartDate)}</span>`
-              : "";
-            let rdStateHtml = "";
-            if (isClosedTab) {
-              rdStateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
-            } else if (rdDone) {
-              rdStateHtml = `<span class="bar-lbl-center">✓ 완료</span>`;
-            } else if ((rd.tuip||0) > 0 || (rd.chuihap||0) > 0) {
-              const rdTotal = rd.total || 0;
-              const rdLeftHtml  = (rd.tuip||0)    > 0 ? `<span class="bar-lbl-left"><i class="fas fa-user-plus"></i> 투입중 ${rd.tuip}/${rdTotal}</span>`          : `<span class="bar-lbl-left"></span>`;
-              const rdRightHtml = (rd.chuihap||0) > 0 ? `<span class="bar-lbl-right"><i class="fas fa-layer-group"></i> 취합중 ${rd.chuihap}/${rdTotal}</span>` : `<span class="bar-lbl-right"></span>`;
-              rdStateHtml = rdLeftHtml + rdRightHtml;
-            }
-            const tRd = Object.assign({}, t, { submitted: rd.submitted, total: rd.total, pending: rd.pending, noRecipient: t.noRecipient, tuip: rd.tuip||0, chuihap: rd.chuihap||0 });
-            rdRow.dataset.state = _rowState(isClosedTab, rdDone, rd.tuip||0, rd.chuihap||0);
-            rdRow.innerHTML = _buildTabRowHtml(tRd, tabKey, isClosedTab, tabNameHtml, rdStartDateHtml, rdRate, rdStateHtml, tcAttr, rd.round);
-            table.appendChild(rdRow);
-          });
-        } else {
-          row.dataset.state = _rowState(isClosedTab, isTabDone, tuip, chuihap);
-          row.innerHTML = _buildTabRowHtml(t, tabKey, isClosedTab, tabNameHtml, startDateHtml, tRate, stateHtml, tcAttr, null);
-          table.appendChild(row);
-        }
-
-        if (t.hasMonthly) {
-          const tRate2     = t.total2 > 0 ? Math.round(t.submitted2 / t.total2 * 100) : 0;
-          const isTab2Done = t.total2 > 0 && t.pending2 === 0;
-          const row2       = document.createElement("div");
-          row2.className   = "dash-tab-row dash-tab-row-monthly" + (isTab2Done ? " tab-done" : "");
-          row2.innerHTML   = `
-            <div class="closed-cb-wrap"></div>
-            <div class="dash-tab-name dash-tab-name-monthly"><i class="fas fa-calendar-alt"></i> 한달리뷰</div>
-            <div></div>
-            <div></div>
-            <div></div>
-            <div class="dash-tab-date-col"></div>
-            <div></div>
-            <div></div>
-            <div></div>
-            <div></div>
-            <div></div>
-            <div class="dash-tab-bar-col">
-              ${(t.noRecipient || t.total2 === 0)
-                ? `<span class="bar-no-recipient" title="시트에 수취인 컬럼이 없거나 데이터가 없어 진행률을 계산할 수 없습니다"><i class="fas fa-exclamation-triangle"></i>수취인헤더없음</span>`
-                : (() => {
-                    const barClass2 = tRate2 === 100 ? 'bar-full' : tRate2 >= 50 ? 'bar-half' : 'bar-low';
-                    const stateHtml2 = isTab2Done ? `<span class="bar-lbl-center">✓ 완료</span>` : '';
-                    const lblClass2  = isTab2Done ? 'bar-label-done' : 'bar-label-dark';
-                    return `${stateHtml2 ? `<span class="bar-label ${lblClass2} bar-label-center">${stateHtml2}</span>` : ''}
-                            <div class="dash-tab-bar-wrap"><div class="dash-tab-bar ${barClass2}" style="width:${tRate2}%"></div></div>`;
-                  })()
-              }
-            </div>
-            <div class="dash-tab-nums">
-              ${(t.noRecipient || t.total2 === 0)
-                ? `<span style="color:#D1D5DB;font-size:.65rem">—</span>`
-                : `<span class="dash-done">${t.submitted2}</span><span class="dash-sep">/</span><span class="dash-total">${t.total2}</span>`
-              }
-            </div>
-            <div></div>
-            <div></div>
-            <div></div>
-            <div></div>
-            <div></div>`;
-          table.appendChild(row2);
-        }
-      });
-
-      block.appendChild(header);
-      block.appendChild(table);
-      scrollInner1.appendChild(block);
-    });
-
-    if (hideDoneMode) wrap.classList.add("hide-done-mode");
-    else              wrap.classList.remove("hide-done-mode");
-    if (hideClosedCampMode) wrap.classList.add("hide-closed-camp-mode");
-    else                    wrap.classList.remove("hide-closed-camp-mode");
-    if (hideClosedTabMode)  wrap.classList.add("hide-closed-tab-mode");
-    else                    wrap.classList.remove("hide-closed-tab-mode");
-
-    // 마감 모드가 켜져 있었다면 유지
-    if (_closedMode)    wrap.classList.add("closed-mode");
-
-    // 필터가 활성화된 경우 재적용
-    if (activeFilters.size > 0) applyDashFilter();
-
-    _fixStickyPositions();
-    _bindScrollSync();
-    _closeColResizePopup();
-    _syncTabnameWidth(); // 렌더 완료 후 컨테이너 너비 확정 → tabname 재계산
-    loadColWidths();    // ★ 렌더 후 저장된 컬럼 너비 재적용 (DOM 재빌드 시 인라인 스타일 유지)
-    _lastDashData = data;
-
-  } catch (err) {
-    wrap.innerHTML = `<div class="admin-error"><i class="fas fa-exclamation-circle"></i> ${escHtml(err.message)}</div>`;
-  }
-}
-
-/**
- * ★ v11.2: 탭 URL 구성 헬퍼
- * sheetUrl(또는 sheetId)에 tabGid를 항상 반영하여 정확한 탭 URL을 반환한다.
- */
-function _buildTabUrl(sheetUrl, sheetId, tabGid) {
-  let baseUrl = sheetUrl
-    ? sheetUrl.split('#')[0].split('?')[0]
-    : (sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}/edit` : '');
-  if (!baseUrl) return '';
-  if (tabGid) {
-    baseUrl += `#gid=${tabGid}`;
-  }
-  return baseUrl;
-}
-
-
-// ═══════════════════════════════════════════════════════
-// 탭 행 HTML 빌더 (loadAdminDashboard + renderDashboard 공용)
-// 열 순서: 체크박스 | 탭명 | 시작일 | 상품명 | 주문시간대 | 리뷰타입 | 담당자 | 진행률 | 리뷰 | 상태 | 입금방식 | 택대 | +정보
-// ═══════════════════════════════════════════════════════
-// ★ roundLabel: 차수 배지 HTML (호출 시 전달 — "단독" 또는 "1차" 등)
-function _buildTabRowHtml(t, tabKey, isClosedTab, tabNameHtml, startDateHtml, tRate, stateHtml, tcAttr, roundLabel) {
-  // 각 열 셀 값 (없으면 회색 dash)
-  const empty = `<span style="color:#D1D5DB;font-size:.65rem">—</span>`;
-
-  // ── qe(빠른입력) 셀 래퍼 생성 헬퍼 ──
-  function qeWrap(field, hasValue, inner, extraStyle) {
-    const base = `overflow:hidden;min-width:0;padding:0 3px;display:flex;align-items:center;${extraStyle||''}`;
-    if (hasValue) {
-      return `<div class="qe-cell-filled" style="${base}" title="${field} 수정은 [+정보] 버튼을 이용해주세요">${inner}</div>`;
-    }
-    return `<div class="qe-cell" style="${base}" data-field="${field}" data-tabkey="${escHtml(tabKey)}" data-tc="${tcAttr}" onclick="quickEditCell(event,this)" title="클릭하여 ${field} 입력">${inner}</div>`;
-  }
-
-  // 상품명 열
-  const nameCell = t.displayName
-    ? `<span class="dash-cell-name" title="${escHtml(t.displayName)}">${escHtml(t.displayName)}</span>`
-    : empty;
-
-  // 주문시간대 열
-  const timeCell = t.timeRange
-    ? `<span class="dash-cell-time">${escHtml(t.timeRange)}</span>`
-    : empty;
-
-  // 리뷰타입 열
-  /* 리뷰타입 배지 — 값 목록의 단일 출처는 server/src/utils/reviewType.js(087 어휘 통일).
-     ★ 목록에 없는 옛 값(실배송·빈박스·믹스)도 **그대로 표시**한다 — 선택지에서 빠졌다고
-       화면에서까지 지우면 그 탭에 무엇이 설정돼 있었는지 알 수 없다. */
-  const reviewClass = {
-    '포토': 'tc-review-포토',
-    '텍스트': 'tc-review-텍스트',
-    '구매확정': 'tc-review-구매확정',
-    '별점': 'tc-review-별점',
-    '혼합': 'tc-review-혼합',
-    // 옛 값(선택지에는 없음)
-    '실배송': 'tc-review-실배송',
-    '빈박스': 'tc-review-빈박스',
-    '믹스': 'tc-review-믹스'
-  }[t.reviewType] || '';
-  const reviewCell = t.reviewType
-    ? `<span class="tc-badge ${reviewClass}" style="font-size:.65rem">${escHtml(t.reviewType)}</span>`
-    : empty;
-
-  // 담당자 열
-  const managerClass = t.manager === '만두' ? 'tc-mandu' : t.manager === '망고' ? 'tc-mango' : '';
-  const managerCell = t.manager
-    ? `<span class="tc-badge ${managerClass}" style="font-size:.65rem">${escHtml(t.manager)}</span>`
-    : empty;
-
-  // 입금방식 열
-  const paymentClass = t.paymentType === '인애드' ? 'tc-payment-인애드' : t.paymentType === '업체' ? 'tc-payment-업체' : '';
-  const paymentCell = t.paymentType
-    ? `<span class="tc-badge ${paymentClass}" style="font-size:.64rem">${escHtml(t.paymentType)}</span>`
-    : empty;
-
-  // 택대 열
-  const taekhapCell = t.taekhap
-    ? `<span class="tc-badge tc-taekhap-on" style="font-size:.63rem">✔ 택대</span>`
-    : empty;
-
-  // 캡처폴더 열
-  const captureFolderCell = t.captureFolderUrl
-    ? `<a class="dash-folder-link" style="color:#3182f6;background:#f2f7ff;border-color:#cce0fb" href="${escHtml(t.captureFolderUrl)}" target="_blank" onclick="event.stopPropagation()"><i class="fas fa-camera"></i> 캡처폴더</a>`
-    : `<span style="color:#D1D5DB;font-size:.6rem">—</span>`;
-
-  // 리뷰폴더 열 (대량건 뱃지 포함)
-  const bulkBadge = t.isBulk
-    ? `<span class="tc-badge tc-bulk-badge" style="font-size:.6rem;margin-right:3px">대량건</span>`
-    : "";
-  const folderCell = t.folderUrl
-    ? `${bulkBadge}<a class="dash-folder-link" href="${escHtml(t.folderUrl)}" target="_blank" onclick="event.stopPropagation()"><i class="fas fa-folder-open"></i> 리뷰폴더</a>`
-    : bulkBadge || `<span style="color:#D1D5DB;font-size:.6rem">—</span>`;
-
-  // 차수 열: 호출 시 전달된 roundLabel 사용 (없으면 "단독")
-  const roundBadgeHtml = roundLabel
-    ? `<span class="dash-round-col-badge badge-nth">${escHtml(roundLabel)}</span>`
-    : `<span class="dash-round-col-badge badge-solo">단독</span>`;
-  const roundColHtml = `<div style="display:flex;align-items:center;justify-content:center;overflow:hidden;padding:0 2px">${roundBadgeHtml}</div>`;
-
-  // 비고 열 (localStorage 기반)
-  const memoVal = _getTabMemo(tabKey);
-  const memoInner = memoVal
-    ? `<span class="dash-cell-memo" title="${escHtml(memoVal)}">${escHtml(memoVal)}</span>`
-    : empty;
-
-  return `
-    <div class="closed-cb-wrap">
-      <input type="checkbox" class="closed-cb" data-tabkey="${escHtml(tabKey)}" ${isClosedTab ? "checked" : ""} onclick="event.stopPropagation()">
-    </div>
-    <div class="dash-tab-name">${tabNameHtml}</div>
-    <div style="display:flex;align-items:center;justify-content:center;overflow:hidden;min-width:0;padding:0 2px">${captureFolderCell}</div>
-    <div style="display:flex;align-items:center;justify-content:center;overflow:hidden;min-width:0;padding:0 2px">${folderCell}</div>
-    ${roundColHtml}
-    <div class="dash-tab-date-col">${startDateHtml}</div>
-    ${qeWrap('상품명', !!t.displayName, nameCell)}
-    ${t.timeRange
-      ? `<div class="qe-cell" style="overflow:hidden;min-width:0;padding:0 3px;display:flex;align-items:center" data-field="주문시간대" data-tabkey="${escHtml(tabKey)}" data-tc="${tcAttr}" onclick="quickEditCell(event,this)" title="클릭하여 주문시간대 수정">${timeCell}</div>`
-      : qeWrap('주문시간대', false, timeCell)}
-    ${qeWrap('리뷰타입', !!t.reviewType, reviewCell)}
-    <div style="display:flex;align-items:center;justify-content:center;overflow:hidden;padding:0 2px">
-      <button class="form-link-btn" data-tc="${tcAttr}" onclick="event.stopPropagation();openFormLink(this)" title="구매양식 링크 열기"><i class="fas fa-link"></i></button>
-    </div>
-    ${qeWrap('담당자', !!t.manager, managerCell, 'justify-content:center')}
-    <div class="dash-tab-bar-col">
-      ${(t.noRecipient || t.total === 0)
-        ? `<span class="bar-no-recipient" title="시트에 수취인 컬럼이 없거나 데이터가 없어 진행률을 계산할 수 없습니다"><i class="fas fa-exclamation-triangle"></i>수취인헤더없음</span>`
-        : (() => {
-            const isCenterState = stateHtml.includes('bar-lbl-center');
-            const centerCls = isCenterState ? ' bar-label-center' : '';
-            const total = t.total || 0;
-            const tuip    = t.tuip    || 0;
-            const chuihap = t.chuihap || 0;
-            const tuipRate    = (tuip    > 0 && total > 0) ? Math.min(100, Math.round(tuip    / total * 100)) : 0;
-            const chuihapRate = (chuihap > 0 && total > 0) ? Math.min(100, Math.round(chuihap / total * 100)) : 0;
-            const hasDual = tuipRate > 0 && chuihapRate > 0;
-            const hasTuipOnly    = tuipRate > 0 && chuihapRate === 0;
-            const hasChuihapOnly = chuihapRate > 0 && tuipRate === 0;
-            // 텍스트 색상: 투입중=노랑계, 취합중=보라계, 완료=초록계
-            let lblClass;
-            if (isCenterState) {
-              lblClass = tRate === 100 ? 'bar-label-done' : 'bar-label-dark';
-            } else if (hasDual || hasChuihapOnly) {
-              lblClass = 'bar-label-light'; // 보라색 계열
-            } else if (hasTuipOnly) {
-              lblClass = 'bar-label-dark';  // 노란색 계열
-            } else {
-              lblClass = tRate >= 50 ? 'bar-label-light' : 'bar-label-dark';
-            }
-            // 레이어 구성
-            let layers = '';
-            if (hasDual) {
-              layers = `<div class="bar-layer-tuip" style="width:${tuipRate}%"></div>
-                        <div class="bar-layer-chuihap" style="width:${chuihapRate}%"></div>`;
-            } else if (hasTuipOnly) {
-              layers = `<div class="bar-layer-tuip" style="width:${tuipRate}%"></div>`;
-            } else if (hasChuihapOnly) {
-              layers = `<div class="bar-layer-chuihap" style="width:${chuihapRate}%"></div>`;
-            } else {
-              const barClass = tRate === 100 ? 'bar-full' : tRate >= 50 ? 'bar-half' : 'bar-low';
-              layers = `<div class="dash-tab-bar ${barClass}" style="width:${tRate}%"></div>`;
-            }
-            // 게이지 바 (좁게) + 텍스트 레이블 (바 밖, 위쪽에 배치)
-            return `${stateHtml ? `<span class="bar-label ${lblClass}${centerCls}">${stateHtml}</span>` : ''}
-                    <div class="dash-tab-bar-wrap">${layers}</div>`;
-          })()
-      }
-    </div>
-    <div class="dash-tab-nums">
-      ${(t.noRecipient || t.total === 0)
-        ? `<span style="color:#D1D5DB;font-size:.65rem">—</span>`
-        : `<span class="dash-done">${t.submitted}</span><span class="dash-sep">/</span><span class="dash-total">${t.total}</span>`
-      }
-    </div>
-
-    ${qeWrap('입금방식', !!t.paymentType, paymentCell, 'justify-content:center')}
-    ${qeWrap('택대', t.taekhap === true, taekhapCell, 'justify-content:center')}
-    <div class="qe-cell" style="overflow:hidden;min-width:0;padding:0 3px;display:flex;align-items:center" data-field="비고" data-tabkey="${escHtml(tabKey)}" data-tc="${tcAttr}" onclick="quickEditCell(event,this)" title="${memoVal ? '비고 수정' : '비고 입력'}">${memoInner}</div>
-    <div style="display:flex;align-items:center;justify-content:center">
-      <button class="tc-info-btn tc-clickable" data-tc="${tcAttr}" title="일괄 정보 입력·수정">+정보</button>
-    </div>`;
-}
 
 // ═══════════════════════════════════════════════════════
 // 컬럼 리사이즈 시스템
@@ -4831,207 +4521,11 @@ function loadColWidths() {
   return applied; // 디버그용
 }
 
-/** 현재 실제 적용 너비를 localStorage에 저장 (CB 컬럼 제외) */
-function saveColWidths() {
-  const data = {};
-  DASH_COL_DEFS.forEach(col => {
-    if (col.isCb) return; // CB 컬럼은 저장 안 함
-    // _getColWidth: inline style 우선, 없으면 computed style 폴백
-    const w = _getColWidth(col);
-    if (w && Number.isFinite(w) && w > 0) data[col.key] = w;
-  });
-  try { localStorage.setItem(COL_WIDTH_LS_KEY, JSON.stringify(data)); } catch(_) {}
-}
-
-/** (호환성 stub - tabname 자동조정 방식 폐기) */
-function _syncTabnameWidth() {}
-
-
-/**
- * 컬럼 헤더 요소 빌드
- * DASH_COL_DEFS 인덱스: 0=closedcb, 1=tabname, 2=capture, ... 18=info
- * 데이터 행 child 인덱스도 동일 (0=closed-cb-wrap, 1=탭명, ...)
- */
-function _buildColHeader(container) {
-  // colIdx = DASH_COL_DEFS 인덱스와 1:1 대응
-  const CELLS = [
-    // isCb 컬럼: 평소 0px(숨김) → 모드 진입 시 28px
-    { colIdx: 0,  inner: '<i class="fas fa-archive"      style="font-size:.6rem;color:#3182f6"></i>',  style: 'justify-content:center', title: '마감 선택',    cbClass: 'closed-cb-wrap' },
-    { colIdx: 1,  inner: '<i class="fas fa-tag" style="font-size:.55rem"></i> 탭명',              style: '' },
-    { colIdx: 2,  inner: '<i class="fas fa-camera" style="font-size:.55rem;color:#3182f6"></i> 캡처폴더', style: 'justify-content:center', title: '주문캡처 저장 폴더' },
-    { colIdx: 3,  inner: '<i class="fas fa-folder" style="font-size:.55rem;color:#F59E0B"></i> 리뷰폴더',  style: 'justify-content:center', title: '리뷰 저장 폴더'    },
-    { colIdx: 4,  inner: '<i class="fas fa-layer-group" style="font-size:.55rem;color:#1b64da"></i> 차수',  style: 'justify-content:center', title: '진행 차수'         },
-    { colIdx: 5,  inner: '<i class="fas fa-calendar-day" style="font-size:.55rem"></i> 시작일',   style: '' },
-    { colIdx: 6,  inner: '<i class="fas fa-box" style="font-size:.55rem"></i> 상품명',            style: '' },
-    { colIdx: 7,  inner: '<i class="fas fa-clock" style="font-size:.55rem"></i> 주문시간대',      style: '' },
-    { colIdx: 8,  inner: '<i class="fas fa-star" style="font-size:.55rem"></i> 리뷰타입',         style: '' },
-    { colIdx: 9, inner: '<i class="fas fa-link" style="font-size:.55rem;color:#3182f6"></i>',    style: 'justify-content:center', title: '구매양식 제출링크 생성' },
-    { colIdx: 10, inner: '<i class="fas fa-user" style="font-size:.55rem"></i> 담당',             style: 'justify-content:center' },
-    { colIdx: 11, inner: '<i class="fas fa-chart-bar" style="font-size:.55rem"></i> 진행률',      style: '' },
-    { colIdx: 12, inner: '<i class="fas fa-check-double" style="font-size:.55rem"></i> 리뷰',     style: 'justify-content:flex-end' },
-    { colIdx: 13, inner: '<i class="fas fa-won-sign" style="font-size:.55rem"></i> 입금',         style: 'justify-content:center' },
-    { colIdx: 14, inner: '<i class="fas fa-truck" style="font-size:.55rem"></i> 택대',            style: 'justify-content:center' },
-    { colIdx: 15, inner: '<i class="fas fa-sticky-note" style="font-size:.55rem;color:#F59E0B"></i> 비고', style: '' },
-    { colIdx: 16, inner: '<i class="fas fa-cog" style="font-size:.55rem"></i>', style: 'justify-content:center', noResize: true },  // ⚙ 마지막
-  ];
-
-  container.innerHTML = '';
-
-  CELLS.forEach(c => {
-    const colDef = DASH_COL_DEFS[c.colIdx];
-    const div = document.createElement('div');
-
-    // CB 컬럼: 평소엔 숨겨진 래퍼 역할 + 드래그 조절 지원
-    if (colDef && colDef.isCb) {
-      div.className = 'dash-col-header-cell ' + (c.cbClass || '');
-    } else {
-      div.className = 'dash-col-header-cell';
-    }
-
-    if (c.style) div.setAttribute('style', c.style);
-    if (c.title) div.title = c.title;
-    div.innerHTML = c.inner;
-
-    // ⚙(마지막) 제외 → 드래그 핸들 추가
-    if (!c.noResize && colDef) {
-      div.dataset.colKey = colDef.key;
-      div.dataset.colIdx = c.colIdx;
-
-      // 드래그 핸들 div (헤더 셀 우측 경계)
-      const handle = document.createElement('div');
-      handle.className = 'col-drag-handle';
-      handle.title =
-                     colDef.key === 'closedcb' ? '마감 체크박스 너비 조절' : '';
-      handle.addEventListener('mousedown', _onColDragStart);
-      handle.dataset.colKey = colDef.key;
-      handle.dataset.colIdx = c.colIdx;
-      div.appendChild(handle);
-    }
-
-    container.appendChild(div);
-  });
-}
 
 /* ══════════════════════════════════════════════
    엑셀 스타일 컬럼 드래그 리사이즈 시스템
    ══════════════════════════════════════════════ */
 
-/** 현재 컬럼 너비(px) 반환 - JS style 직접 설정값 우선, 없으면 CSS :root 기본값 */
-function _getColWidth(colDef) {
-  const inlineVal = document.documentElement.style.getPropertyValue(colDef.varName).trim();
-  if (inlineVal && inlineVal.endsWith('px')) return parseInt(inlineVal);
-  const cssVal = getComputedStyle(document.documentElement).getPropertyValue(colDef.varName).trim();
-  if (cssVal && cssVal.endsWith('px')) return parseInt(cssVal);
-  return colDef.default || 70;
-}
-
-// 드래그 상태 변수
-let _dragColDef   = null;  // 현재 드래그 중인 컬럼 정의
-let _dragStartX   = 0;     // 드래그 시작 X (pageX)
-let _dragStartW   = 0;     // 드래그 시작 시점의 컬럼 너비
-let _dragHandle   = null;  // 드래그 핸들 요소
-
-const _tooltip = document.getElementById('colDragTooltip');
-const _dragLine = document.getElementById('colDragLine');
-
-/** 드래그 시작 */
-function _onColDragStart(e) {
-  if (e.button !== 0) return; // 좌클릭만
-  e.preventDefault();
-  e.stopPropagation();
-
-  const key = e.currentTarget.dataset.colKey;
-  const colDef = DASH_COL_DEFS.find(d => d.key === key);
-  if (!colDef) return;
-
-  // CB 컬럼이 0px(비활성)이면 드래그 불가
-  if (colDef.isCb && _getColWidth(colDef) === 0) {
-    showToast('마감 모드 진입 후 너비를 조절할 수 있습니다.');
-    return;
-  }
-
-  _dragColDef  = colDef;
-  _dragStartX  = e.pageX;
-  _dragStartW  = _getColWidth(colDef);
-  _dragHandle  = e.currentTarget;
-
-  // 핸들 강조
-  _dragHandle.classList.add('dragging');
-  // 헤더 셀 강조
-  const headerCell = _dragHandle.closest('.dash-col-header-cell');
-  if (headerCell) headerCell.classList.add('col-drag-active');
-
-  // 드래그 중 커서 고정
-  document.body.classList.add('col-resizing');
-
-  // 수직 가이드라인 표시
-  if (_dragLine) {
-    _dragLine.style.left  = e.clientX + 'px';
-    _dragLine.style.display = 'block';
-  }
-
-  // 툴팁 표시
-  if (_tooltip) {
-    _tooltip.textContent = _dragStartW + 'px';
-    _tooltip.style.left  = e.clientX + 'px';
-    _tooltip.style.top   = e.clientY + 'px';
-    _tooltip.style.display = 'block';
-  }
-
-  document.addEventListener('mousemove', _onColDragMove);
-  document.addEventListener('mouseup',   _onColDragEnd);
-}
-
-/** 드래그 이동 */
-function _onColDragMove(e) {
-  if (!_dragColDef) return;
-
-  const delta  = e.pageX - _dragStartX;
-  let newW     = Math.max(_dragColDef.minPx, _dragStartW + delta);
-
-  // 수직 가이드라인 이동
-  if (_dragLine) _dragLine.style.left = e.clientX + 'px';
-
-  // 툴팁 업데이트
-  if (_tooltip) {
-    _tooltip.textContent = newW + 'px';
-    _tooltip.style.left  = e.clientX + 'px';
-    _tooltip.style.top   = e.clientY + 'px';
-  }
-
-  // 실시간 CSS 변수 업데이트
-  document.documentElement.style.setProperty(_dragColDef.varName, newW + 'px');
-}
-
-/** 드래그 종료 */
-function _onColDragEnd(e) {
-  if (!_dragColDef) return;
-
-  const delta  = e.pageX - _dragStartX;
-  let newW     = Math.max(_dragColDef.minPx, _dragStartW + delta);
-
-  // 최종 너비 적용 & 저장
-  document.documentElement.style.setProperty(_dragColDef.varName, newW + 'px');
-  saveColWidths();
-
-  // 정리
-  if (_dragHandle) _dragHandle.classList.remove('dragging');
-  document.querySelectorAll('.dash-col-header-cell.col-drag-active')
-    .forEach(c => c.classList.remove('col-drag-active'));
-
-  document.body.classList.remove('col-resizing');
-  if (_dragLine)   _dragLine.style.display   = 'none';
-  if (_tooltip)    _tooltip.style.display    = 'none';
-
-  _dragColDef = null;
-  _dragHandle = null;
-
-  document.removeEventListener('mousemove', _onColDragMove);
-  document.removeEventListener('mouseup',   _onColDragEnd);
-}
-
-/** (호환성 stub - 이전 팝업 방식 제거 후 빈 함수 유지) */
-function _closeColResizePopup() {}
 
 // 페이지 로드 시 저장된 너비 즉시 적용 (레이아웃 완료 후 tabname 너비 계산)
 if (document.readyState === 'loading') {
@@ -5043,61 +4537,11 @@ if (document.readyState === 'loading') {
 // (창 크기 변경 시 특별한 재계산 불필요 - 각 컬럼이 독립 고정px로 관리됨)
 
 
-/** (overflow:visible 전환으로 불필요 - 호환성 stub) */
-function _bindScrollSync() {}
-
-// ═══════════════════════════════════════════════════════
-function toggleDashTab(tableId, header) {
-  const table = document.getElementById(tableId);
-  const icon  = header ? header.querySelector(".dash-toggle-icon") : null;
-  if (!table) return;
-  const isCollapsed = table.classList.contains("collapsed");
-  table.classList.toggle("collapsed", !isCollapsed);
-  if (icon) icon.classList.toggle("rotated", isCollapsed);
-}
-
-let hideDoneMode = false;
-
-// ── 마감업체 숨김: 모든 탭이 완료인 캠페인 전체 숨김 ──
-let hideClosedCampMode = false;
-
-let hideClosedTabMode = false;
-
-
 // ═══════════════════════════════════════════════════════════
 // ★ 마감 처리 — 베이스시트 is_closed 컬럼 기반
 //   마감된 탭은 동기화 시 완전히 제외 (검색 불가)
 //   마감된 탭은 인덱스에서 행 자체를 제외함
 // ═══════════════════════════════════════════════════════════
-
-// 마감된 tabKey Set — dashboard API 응답의 isClosed 값으로 채워짐
-let _closedSet = new Set();
-
-// 마감 모드 ON/OFF
-let _closedMode = false;
-
-
-// ── 비고(메모) 관리 ──
-const _TAB_MEMO_KEY = "rapp_tab_memo";     // { tabKey: memoString, ... }
-
-function _loadMemoStore() {
-  try {
-    const raw = localStorage.getItem(_TAB_MEMO_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch (_) { return {}; }
-}
-function _getTabMemo(tabKey) {
-  return _loadMemoStore()[tabKey] || "";
-}
-function _setTabMemo(tabKey, memo) {
-  const store = _loadMemoStore();
-  if (memo) store[tabKey] = memo;
-  else delete store[tabKey];
-  try { localStorage.setItem(_TAB_MEMO_KEY, JSON.stringify(store)); } catch (_) {}
-}
-
-// 대시보드 재렌더링 (마지막 로드 데이터 재사용 — API 재호출 없이 즉시)
-let _lastDashData = null;
 
 
 // ── 관리자 화면 sticky 위치 전체 보정 ──
@@ -5140,93 +4584,6 @@ document.addEventListener("click", function(e) {
 // 구매양식 폼링크 생성 & 제출 (mode=form)
 // ═══════════════════════════════════════════════════════
 
-/**
- * 대시보드 행의 [🔗] 버튼 클릭 시 호출
- * tcAttr(JSON 문자열)에서 sheetId, gid, tabName, displayName 추출 → URL 생성 → 클립보드 복사
- */
-/**
- * 대시보드 행의 [구매양식 링크 열기] 버튼 클릭 시 호출
- * data-tc 속성에서 인덱스 정보 읽기 → 구매양식 URL 생성 → 새 탭으로 열기 + 링크 복사
- */
-function openFormLink(btnEl) {
-  // data-tc 속성에서 tcData 파싱
-  let tc = {};
-  try {
-    const raw = btnEl.getAttribute("data-tc") || "";
-    const decoded = raw
-      .replace(/&quot;/g, '"')
-      .replace(/&amp;/g,  '&')
-      .replace(/&#39;/g,  "'")
-      .replace(/&lt;/g,   '<')
-      .replace(/&gt;/g,   '>');
-    tc = JSON.parse(decoded);
-  } catch (e) {
-    showToast("링크 생성 실패: tcData 파싱 오류", "error");
-    return;
-  }
-
-  const sheetId     = tc.sheetId     || "";
-  const sheetUrl    = tc.sheetUrl    || "";
-  const tabName     = tc.tabName     || "";
-  const displayName = tc.displayName || "";
-
-  if (!sheetId || !tabName) {
-    showToast("링크 생성 실패: sheetId 또는 tabName이 없습니다.", "error");
-    return;
-  }
-
-  // gid: sheetUrl에서 추출
-  const gidMatch = sheetUrl.match(/[?&]gid=(\d+)/);
-  const gid = gidMatch ? gidMatch[1] : "";
-
-  // gasUrl은 URL에 포함하지 않음 → 링크를 짧고 깔끔하게 유지
-  // 리뷰어 접속 시 BOOTSTRAP_GAS_URL(하드코딩) 또는 localStorage에서 자동 확보
-  const base   = location.origin + location.pathname;
-  const params = new URLSearchParams({
-    mode: "form",
-    sheetId,
-    gid,
-    tabName,
-    displayName
-  });
-  const link = base + "?" + params.toString();
-
-  // ① 새 탭으로 바로 열기
-  window.open(link, "_blank");
-
-  // ② 클립보드에도 복사 (성공 시 버튼 피드백)
-  const markCopied = () => {
-    btnEl.classList.add("copied");
-    btnEl.innerHTML = '<i class="fas fa-check"></i>';
-    setTimeout(() => {
-      btnEl.classList.remove("copied");
-      btnEl.innerHTML = '<i class="fas fa-link"></i>';
-    }, 2500);
-  };
-
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(link).then(() => {
-      markCopied();
-      showToast("🔗 새 탭으로 열었습니다. 링크도 클립보드에 복사됐습니다!", "success");
-    }).catch(() => {
-      showToast("🔗 새 탭으로 열었습니다.", "success");
-    });
-  } else {
-    try {
-      const ta = document.createElement("textarea");
-      ta.value = link;
-      ta.style.cssText = "position:fixed;top:-9999px;left:-9999px";
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
-      markCopied();
-      showToast("🔗 새 탭으로 열었습니다. 링크도 클립보드에 복사됐습니다!", "success");
-    } catch (_) {
-      showToast("🔗 새 탭으로 열었습니다.", "success");
-    }
-  }
-}
 
 /**
  * ★ 결정 243 — 인기 공고 구매양식을 "참여하기" 없이 열었을 때 참여권 안내(사용자 확정 2026-10-14 "1.나").
@@ -10188,408 +9545,6 @@ function goToReviewerMain(tab) {
   window.location.href = tab === "review" ? "index.html#review" : "index.html";
 }
 
-async function quickEditCell(e, cell) {
-  e.stopPropagation();
-  _closeQePopup();
-
-  const field   = cell.dataset.field;   // '상품명' | '주문시간대' | '리뷰타입' | '담당자' | '입금방식' | '택대'
-  const tcData  = JSON.parse(cell.dataset.tc.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'"));
-
-  // ── 팝업 DOM 생성 ──
-  const popup = document.createElement("div");
-  popup.className = "qe-popup";
-  _qePopup = popup;
-
-  // 아이콘 맵
-  const iconMap = { '상품명':'fa-box', '주문시간대':'fa-clock', '리뷰타입':'fa-star', '담당자':'fa-user', '입금방식':'fa-won-sign', '택대':'fa-truck' };
-  popup.innerHTML = `<div class="qe-popup-title"><i class="fas ${iconMap[field]||'fa-pen'}" style="font-size:.65rem;color:var(--p)"></i>${field} 입력</div>`;
-
-  let getValue; // 팝업 확인 시 선택값을 반환하는 함수
-
-  if (field === '상품명') {
-    popup.innerHTML += `<input type="text" id="qeInput" placeholder="예: OO브랜드 후기작업 3월" maxlength="60">`;
-    getValue = () => document.getElementById("qeInput").value.trim();
-
-  } else if (field === '주문시간대') {
-    // ── [+정보]와 동일한 모드버튼 + 48슬롯 그리드 UI ──
-    // 기존 값 파싱
-    const _existingTime = (tcData.timeRange || '').trim();
-    let _qeTimeMode, _qeTimeStart, _qeTimeEnd;
-    if (!_existingTime || _existingTime === '') {
-      _qeTimeMode = ''; _qeTimeStart = null; _qeTimeEnd = null;
-    } else if (_existingTime === '자유') {
-      _qeTimeMode = '자유'; _qeTimeStart = null; _qeTimeEnd = null;
-    } else {
-      _qeTimeMode = 'timed';
-      const parts = _existingTime.split('~').map(s => s.trim());
-      _qeTimeStart = parts[0] || null;
-      _qeTimeEnd   = (parts[1] && parts[1] !== '') ? parts[1] : null;
-    }
-
-    popup.innerHTML += `
-      <div class="tc-option-row" id="qeTimeModeRow" style="margin-bottom:4px">
-        <button class="tc-opt qe-tm" data-val="">미지정</button>
-        <button class="tc-opt qe-tm" data-val="자유">자유</button>
-        <button class="tc-opt qe-tm" data-val="timed">타임지정</button>
-      </div>
-      <div id="qeTimePicker" class="tc-time-picker tc-time-picker-disabled" style="margin-bottom:6px">
-        <div class="tc-time-picker-hint" id="qeTimeHint">타임지정을 선택하면 활성화됩니다</div>
-        <div class="tc-time-grid" id="qeTimeGrid"></div>
-        <button class="tc-time-clear" type="button" id="qeTimeClear">시간 초기화</button>
-      </div>`;
-
-    // 그리드 셀 생성
-    const qeGrid = popup.querySelector("#qeTimeGrid");
-    TC_TIME_SLOTS.forEach(slot => {
-      const btn = document.createElement("button");
-      btn.className   = "tc-time-cell";
-      btn.textContent = slot;
-      btn.type        = "button";
-      btn.addEventListener("click", ev => {
-        ev.stopPropagation();
-        if (!_qeTimeStart) {
-          _qeTimeStart = slot; _qeTimeEnd = null;
-        } else if (!_qeTimeEnd) {
-          if (slot === _qeTimeStart)      { _qeTimeStart = null; }
-          else if (slot < _qeTimeStart)   { _qeTimeEnd = _qeTimeStart; _qeTimeStart = slot; }
-          else                             { _qeTimeEnd = slot; }
-        } else {
-          _qeTimeStart = slot; _qeTimeEnd = null;
-        }
-        _syncQeTimePicker();
-      });
-      qeGrid.appendChild(btn);
-    });
-
-    // 초기화 버튼
-    popup.querySelector("#qeTimeClear").addEventListener("click", ev => {
-      ev.stopPropagation();
-      _qeTimeStart = null; _qeTimeEnd = null;
-      _syncQeTimePicker();
-    });
-
-    // 모드 버튼 클릭
-    popup.querySelectorAll(".qe-tm").forEach(btn => {
-      btn.addEventListener("click", ev => {
-        ev.stopPropagation();
-        _qeTimeMode = btn.dataset.val;
-        if (_qeTimeMode !== "timed") { _qeTimeStart = null; _qeTimeEnd = null; }
-        _syncQeTimePicker();
-      });
-    });
-
-    // 동기화 함수 (클로저)
-    function _syncQeTimePicker() {
-      const picker = popup.querySelector("#qeTimePicker");
-      const hint   = popup.querySelector("#qeTimeHint");
-      popup.querySelectorAll(".qe-tm").forEach(b => b.classList.toggle("sel", b.dataset.val === _qeTimeMode));
-      const isTimed = (_qeTimeMode === "timed");
-      picker.classList.toggle("tc-time-picker-disabled", !isTimed);
-      picker.querySelectorAll(".tc-time-cell").forEach(c => {
-        const v = c.textContent;
-        c.classList.remove("tc-sel-start","tc-sel-end","tc-in-range");
-        if (!isTimed) return;
-        if (v === _qeTimeStart) c.classList.add("tc-sel-start");
-        if (v === _qeTimeEnd)   c.classList.add("tc-sel-end");
-        if (_qeTimeStart && _qeTimeEnd && v > _qeTimeStart && v < _qeTimeEnd)
-          c.classList.add("tc-in-range");
-      });
-      if (!isTimed) {
-        hint.textContent = _qeTimeMode === "자유" ? "시간 제한 없음" : "타임지정을 선택하면 활성화됩니다";
-      } else if (!_qeTimeStart) {
-        hint.textContent = "① 시작 시간을 클릭하세요";
-      } else if (!_qeTimeEnd) {
-        hint.textContent = "✔ " + _qeTimeStart + "~  ← 종료시간(선택사항)";
-      } else {
-        hint.textContent = "✔ " + _qeTimeStart + " ~ " + _qeTimeEnd;
-      }
-    }
-    _syncQeTimePicker();
-    // 팝업 제목에 '수정' 표시 (기존 값 있을 때)
-    if (_existingTime) {
-      popup.querySelector('.qe-popup-title').innerHTML =
-        `<i class="fas fa-clock" style="font-size:.65rem;color:var(--p)"></i>주문시간대 수정`;
-    }
-
-    // 팝업 너비를 넉넉하게 확보 (그리드 6열 표시용)
-    popup.style.minWidth = "280px";
-
-    getValue = () => {
-      if (_qeTimeMode === "")      return "";
-      if (_qeTimeMode === "자유")   return "자유";
-      if (_qeTimeStart && _qeTimeEnd) return _qeTimeStart + " ~ " + _qeTimeEnd;
-      if (_qeTimeStart)               return _qeTimeStart + " ~";
-      return "";
-    };
-
-  } else if (field === '리뷰타입') {
-    /* ★★ 선택지는 **이 화면의 탭 설정 팝오버(#tcOptReview)** 에서 읽는다 — 목록을 여기에 다시
-       적으면 087 어휘 통일에서 빠져 옛 값(실배송·빈박스·믹스)을 저장하게 되고, 그 값은
-       `resolveReviewType` 에서 null 로 떨어져 "설정했는데 검수는 미지정"이 된다(2026-08-06 사고). */
-    const opts = [...document.querySelectorAll('#tcOptReview .tc-opt')]
-      .map(b => (b.dataset.val || '').trim()).filter(Boolean);
-    popup.innerHTML += `<div class="qe-opt-row">${opts.map(o=>`<button class="qe-opt" data-val="${o}">${o}</button>`).join('')}</div>`;
-    getValue = () => { const s = popup.querySelector(".qe-opt.sel"); return s ? s.dataset.val : ''; };
-    popup.querySelectorAll(".qe-opt").forEach(btn => {
-      btn.addEventListener("click", ev => {
-        ev.stopPropagation();
-        popup.querySelectorAll(".qe-opt").forEach(b => b.classList.remove("sel"));
-        btn.classList.toggle("sel", !btn.classList.contains("sel") || true);
-        btn.classList.add("sel");
-      });
-    });
-
-  } else if (field === '담당자') {
-    const opts = ['만두','망고'];
-    popup.innerHTML += `<div class="qe-opt-row">${opts.map(o=>`<button class="qe-opt" data-val="${o}">${o}</button>`).join('')}</div>`;
-    getValue = () => { const s = popup.querySelector(".qe-opt.sel"); return s ? s.dataset.val : ''; };
-    popup.querySelectorAll(".qe-opt").forEach(btn => {
-      btn.addEventListener("click", ev => {
-        ev.stopPropagation();
-        popup.querySelectorAll(".qe-opt").forEach(b => b.classList.remove("sel"));
-        btn.classList.add("sel");
-      });
-    });
-
-  } else if (field === '입금방식') {
-    const opts = ['인애드','업체'];
-    popup.innerHTML += `<div class="qe-opt-row">${opts.map(o=>`<button class="qe-opt" data-val="${o}">${o}</button>`).join('')}</div>`;
-    getValue = () => { const s = popup.querySelector(".qe-opt.sel"); return s ? s.dataset.val : ''; };
-    popup.querySelectorAll(".qe-opt").forEach(btn => {
-      btn.addEventListener("click", ev => {
-        ev.stopPropagation();
-        popup.querySelectorAll(".qe-opt").forEach(b => b.classList.remove("sel"));
-        btn.classList.add("sel");
-      });
-    });
-
-  } else if (field === '택대') {
-    popup.innerHTML += `<div class="qe-opt-row"><button class="qe-opt" data-val="true">✔ 택대 ON</button><button class="qe-opt sel" data-val="false" style="display:none"></button></div>`;
-    // 택대는 단일 ON 버튼 (OFF는 +정보에서)
-    getValue = () => "true";
-    popup.querySelectorAll(".qe-opt").forEach(btn => {
-      btn.addEventListener("click", ev => { ev.stopPropagation(); btn.classList.add("sel"); });
-    });
-
-  } else if (field === '비고') {
-    // 비고 – localStorage 전용 (GAS 저장 없음), 기존 값 미리 채워짐
-    const existingMemo = _getTabMemo(cell.dataset.tabkey || '');
-    popup.innerHTML += `<textarea id="qeMemoInput" rows="3" placeholder="자유롭게 메모하세요..." maxlength="200" style="width:100%;border:1.5px solid var(--bd);border-radius:7px;padding:7px 9px;font-size:.8rem;outline:none;box-sizing:border-box;resize:vertical;font-family:inherit;line-height:1.4">${escHtml(existingMemo)}</textarea><p style="font-size:.62rem;color:var(--t3);margin:2px 0 5px">이 기기에만 저장됩니다 (최대 200자)</p>`;
-    getValue = () => document.getElementById("qeMemoInput").value.trim();
-    popup.style.minWidth = "240px";
-    // 기존 값 있으면 제목에 '수정' 표시
-    if (existingMemo) {
-      popup.querySelector('.qe-popup-title').innerHTML =
-        `<i class="fas fa-sticky-note" style="font-size:.65rem;color:var(--p)"></i>비고 수정`;
-    }
-  }
-
-  // 적용 버튼
-  const applyBtn = document.createElement("button");
-  applyBtn.className = "qe-apply";
-  applyBtn.textContent = "✔ 적용";
-  popup.appendChild(applyBtn);
-
-  // ── 팝업 위치 계산 (셀 아래, 화면 밖으로 나가지 않도록) ──
-  document.body.appendChild(popup);
-  const cr   = cell.getBoundingClientRect();
-  const pw   = popup.offsetWidth;
-  const ph   = popup.offsetHeight;
-  let left   = cr.left;
-  let top    = cr.bottom + 4;
-  if (left + pw > window.innerWidth - 8)  left = window.innerWidth - pw - 8;
-  if (top  + ph > window.innerHeight - 8) top  = cr.top - ph - 4;
-  popup.style.left = Math.max(4, left) + "px";
-  popup.style.top  = Math.max(4, top)  + "px";
-
-  // input 포커스
-  const inp = popup.querySelector("input[type=text]");
-  if (inp) setTimeout(() => inp.focus(), 30);
-
-  // ── 적용 클릭 → GAS 저장 (비고는 localStorage 전용) ──
-  applyBtn.addEventListener("click", async (ev) => {
-    ev.stopPropagation();
-    const val = getValue ? getValue() : '';
-    if (!val && field !== '택대' && field !== '주문시간대' && field !== '비고') { showToast("값을 입력하거나 선택해주세요.", true); return; }
-
-    _closeQePopup();
-
-    // ── 비고: localStorage만 저장 후 행 DOM 즉시 갱신 ──
-    if (field === '비고') {
-      const tabKey = cell.dataset.tabkey || '';
-      _setTabMemo(tabKey, val);
-      // 해당 셀 내용 직접 교체
-      const memoInner = val
-        ? `<span class="dash-cell-memo" title="${escHtml(val)}">${escHtml(val)}</span>`
-        : `<span style="color:#D1D5DB;font-size:.65rem">—</span>`;
-      cell.innerHTML = memoInner;
-      cell.title = val ? '비고 수정' : '비고 입력';
-      showToast(val ? "비고가 저장되었습니다." : "비고가 삭제되었습니다.");
-      return; // GAS 전송 없이 종료
-    }
-
-    // 기존 tcData에서 해당 필드만 교체
-    const fieldKey = { '상품명':'displayName', '주문시간대':'timeRange', '리뷰타입':'reviewType', '담당자':'manager', '입금방식':'paymentType', '택대':'taekhap' }[field];
-    const newTcData = { ...tcData };
-    if (field === '택대') newTcData.taekhap = true;
-    else newTcData[fieldKey] = val;
-
-    const resolvedSheetId  = newTcData.sheetId || "";
-    const rawSheetUrl      = newTcData.sheetUrl || (resolvedSheetId ? "https://docs.google.com/spreadsheets/d/"+resolvedSheetId+"/edit" : "");
-    const resolvedSheetUrl = rawSheetUrl.split("#")[0];
-
-    const payload = {
-      action:      "setTabConfig",
-      sheetId:     resolvedSheetId,
-      sheetUrl:    resolvedSheetUrl,
-      tabName:     newTcData.tabName     || "",
-      manager:     newTcData.manager     || "",
-      timeRange:   newTcData.timeRange   || "",
-      taekhap:     newTcData.taekhap     ? "true" : "false",
-      reviewType:  newTcData.reviewType  || "",
-      paymentType: newTcData.paymentType || "",
-      displayName: newTcData.displayName || ""
-    };
-
-    console.log("[QE] 저장 payload:", JSON.stringify(payload));
-    try {
-      let json;
-      try { json = await gasPost(payload); }
-      catch { json = await gasGet(payload); }
-      if (json.ok) {
-        showToast(`✅ ${field} 저장 완료`);
-        loadAdminDashboard();
-      } else {
-        showToast("❌ 저장 실패: " + (json.error || ""), true);
-      }
-    } catch (err) {
-      showToast("❌ 오류: " + err.message, true);
-    }
-  });
-}
-
-
-/* ── 대시보드 필터 드롭다운 ─────────────────────────────────
-   activeFilters: Set (비어있으면 전체 표시)
-   필터 종류: tuip / chuihap / monthly
-   복수 선택 OR 조건
-─────────────────────────────────────────────────────────── */
-const activeFilters = new Set();
-
-
-// 드롭다운 외부 클릭 시 닫기
-document.addEventListener("click", function(e) {
-  const wrap = document.getElementById("dashFilterWrap");
-  if (wrap && !wrap.contains(e.target)) {
-    const dd = document.getElementById("dashFilterDropdown");
-    if (dd) dd.classList.remove("open");
-  }
-});
-
-
-/* ══════════════════════════════════════════════════════════
-   캠페인별 인덱스 부분 갱신
-══════════════════════════════════════════════════════════ */
-async function refreshCampaignIndex(btn) {
-  const sheetId  = btn.dataset.sheetid  || "";
-  const campName = btn.dataset.campname || "선택한 캠페인";
-  if (!sheetId) { showToast("sheetId가 없습니다.", "error"); return; }
-
-  // 확인 메시지
-  const ok = confirm(`"${campName}" 캠페인만 인덱스를 갱신합니다.\n\n선택한 캠페인만 동기화됩니다.\n계속하시겠습니까?`);
-  if (!ok) return;
-
-  // 버튼 로딩 상태
-  btn.classList.add("loading");
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 갱신 중...';
-
-  try {
-    const res = await gasGet({ action: "buildIndexByCampaign", sheetId });
-
-    if (res.error) {
-      showToast("갱신 실패: " + res.error, "error");
-    } else {
-      showToast(`✅ ${res.message || campName + " 갱신 완료"}`, "success");
-      // 대시보드 새로고침 (갱신된 데이터 반영)
-      await loadAdminDashboard();
-    }
-  } catch(err) {
-    showToast("갱신 오류: " + err.message, "error");
-  } finally {
-    // 버튼 복원 (loadAdminDashboard가 DOM 재빌드하므로 사실상 새 버튼으로 교체됨)
-    if (btn && btn.isConnected) {
-      btn.classList.remove("loading");
-      btn.innerHTML = '<i class="fas fa-sync-alt"></i> 갱신';
-    }
-  }
-}
-
-// 행 상태값 결정 헬퍼 (data-state 속성에 저장 → 필터가 읽음)
-// 반환값: "closed" | "forcedone" | "done" | "tuip" | "chuihap" | "tuip chuihap" | ""
-function _rowState(isClosedTab, isDone, tuip, chuihap) {
-  if (isClosedTab)  return "closed";
-  if (isDone)       return "done";
-  const parts = [];
-  if (tuip    > 0) parts.push("tuip");
-  if (chuihap > 0) parts.push("chuihap");
-  return parts.join(" ");
-}
-
-function applyDashFilter() {
-  const wrap = document.getElementById("dashboardWrap");
-  if (!wrap) return;
-
-  const blocks = wrap.querySelectorAll(".dash-campaign-block");
-  const noFilter = activeFilters.size === 0;
-
-  blocks.forEach(block => {
-    const rows = block.querySelectorAll(".dash-tab-row");
-    let visibleCount = 0;
-
-    rows.forEach(row => {
-      if (noFilter) {
-        row.style.display = "";
-        visibleCount++;
-        return;
-      }
-
-      let show = false;
-      const rowState = (row.dataset.state || "").split(" ");
-      if (!show && activeFilters.has("tuip"))       { if (rowState.includes("tuip"))                                              show = true; }
-      if (!show && activeFilters.has("chuihap"))    { if (rowState.includes("chuihap"))                                           show = true; }
-      if (!show && activeFilters.has("monthly"))    { if (row.classList.contains("dash-tab-row-monthly"))                         show = true; }
-      if (!show && activeFilters.has("taekhap"))    { if (row.querySelector(".tc-taekhap-on"))                                    show = true; }
-      if (!show && activeFilters.has("done"))       { if (row.classList.contains("tab-done")) show = true; }
-      if (!show && activeFilters.has("closed"))     { if (row.classList.contains("is-closed-row"))                                show = true; }
-      // 리뷰타입 필터
-      for (const f of activeFilters) {
-        if (f.startsWith("review:")) {
-          const rv = f.slice(7);
-          if (row.querySelector(`.tc-review-${rv}`)) { show = true; break; }
-        }
-      }
-      // 담당자 필터
-      for (const f of activeFilters) {
-        if (f.startsWith("manager:")) {
-          const mg = f.slice(8); // "만두" or "망고"
-          const cls = mg === "만두" ? ".tc-mandu" : ".tc-mango";
-          if (row.querySelector(cls)) { show = true; break; }
-        }
-      }
-
-      row.style.display = show ? "" : "none";
-      if (show) visibleCount++;
-    });
-
-    block.style.display = visibleCount === 0 ? "none" : "";
-    if (!noFilter && visibleCount > 0) {
-      const table = block.querySelector(".dash-tab-table");
-      const icon  = block.querySelector(".dash-toggle-icon");
-      if (table) table.classList.remove("collapsed");
-      if (icon)  icon.classList.add("rotated");
-    }
-  });
-}
 
 /* ══════════════════════════════════════════════════════════
    탭설정 팝오버 & 저장 로직

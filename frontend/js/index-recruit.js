@@ -352,11 +352,11 @@ async function toggleRecruitPublish(id, checked, inputEl) {
    2단계: 해당 캠페인의 탭 목록 표시
 ═══════════════════════════════════════ */
 /* ★ 탭 목록 경로는 호스트가 재기준한다(`CAMPAIGN_ADMIN_API` 와 같은 장치).
-   관리자 대시보드는 `/api/tab/dashboard`(admin_token) 그대로, 리뷰웹시스템[3버전]은
-   `/api/trackb/tabs` — 인트라넷 SSO 토큰(via:'intranet')은 `/api/trackb/*` 밖으로
-   나갈 수 없어 그 경로가 **양쪽에서 닿는 유일한 목록**이다. 전역 미설정이면 동작 불변. */
+   리뷰웹시스템[3버전]은 `/api/trackb/tabs` — 인트라넷 SSO 토큰(via:'intranet')은 `/api/trackb/*` 밖으로
+   나갈 수 없어 그 경로가 **양쪽에서 닿는 유일한 목록**이다.
+   폴백도 같은 경로다 — 옛 관리자 대시보드의 `/api/tab/dashboard` 는 2026-10-22 제거(결정 270). */
 function _recruitTabsApi() {
-  return (typeof window !== "undefined" && window.RECRUIT_TABS_API) || "/api/tab/dashboard";
+  return (typeof window !== "undefined" && window.RECRUIT_TABS_API) || "/api/trackb/tabs";
 }
 let _rfTabsErr = null;   // 탭 목록 로드 실패 사유(성공 = null) — "0건"과 "못 불러옴"을 구분해 말하려고 남긴다
 async function loadRecruitTabOptions() {

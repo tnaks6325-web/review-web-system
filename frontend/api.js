@@ -10,8 +10,8 @@
  *      <script src="api.js"></script>
  *   2. 기존 gasGet({ action: "searchAll", query: "..." }) 호출은
  *      자동으로 GET /api/search?query=... 로 변환됩니다.
- *   3. 기존 gasPost({ action: "setTabConfig", ... }) 호출은
- *      자동으로 POST /api/tab/config 로 변환됩니다.
+ *   3. 기존 gasPost({ action: "uploadReviewImage", ... }) 호출은
+ *      자동으로 POST /api/image/review-upload 로 변환됩니다.
  * 
  * 핵심 원칙:
  *   - 함수 이름 변경 금지 (gasGet, gasPost 유지)
@@ -55,37 +55,9 @@ const API_BASE_URL = (function() {
 const _ACTION_MAP = {
   // 검색/인덱스 (Section 5)
   'searchAll':              { method: 'GET',  path: '/api/search' },
-  'buildIndexSmart':        { method: 'POST', path: '/api/index/build' },
-  'indexStatus':            { method: 'GET',  path: '/api/index/status' },
-  'getIndexMasterStatus':   { method: 'GET',  path: '/api/index/status' },
-  'buildIndexByCampaign':   { method: 'POST', path: '/api/index/build-sheet' },
 
-  // 탭 설정 (Section 6)
-  'setTabConfig':     { method: 'POST', path: '/api/tab/config' },
-  'getTabConfig':     { method: 'GET',  path: '/api/tab/config' },
-  'reopenSlots':      { method: 'POST', path: '/api/tab/reopen-slots' },
-  'listDetailSheet':  { method: 'GET',  path: '/api/tab/config' },
-  'setClosed':        { method: 'POST', path: '/api/tab/closed' },
-  'getTabOptions':    { method: 'GET',  path: '/api/tab/options' },
-  'getTabEndDate':    { method: 'GET',  path: '/api/tab/end-date' },
-
-  // 주문 원장(order ledger) PR-B — DB 주체 인라인 뷰어/편집/취소/수동추가
-  'orderLedgerList':  { method: 'GET',  path: '/api/diag/order-ledger' },
-  'orderEdit':        { method: 'POST', path: '/api/diag/order-edit' },
-  'orderCancel':      { method: 'POST', path: '/api/diag/order-cancel' },
-  'orderManualAdd':   { method: 'POST', path: '/api/diag/order-manual-add' },
-  // [DEPRECATED v11.8.0] 2탭 통합으로 폐기된 액션 — 서버에서 deprecated 응답 반환
-  // 인덱스 스캔 + DB 동기화 (정상 경로)
-
-  'getTabDashboard':  { method: 'GET',  path: '/api/tab/dashboard' },
-  'getColPrefs':      { method: 'GET',  path: '/api/tab/col-prefs' },
-  'saveColPrefs':     { method: 'POST', path: '/api/tab/col-prefs' },
   // 옵션(Option) 기능
-  'getOptionHeaders': { method: 'GET',  path: '/api/tab/option-headers' },
-  'saveOptionColumns':{ method: 'POST', path: '/api/tab/option-columns' },
-  'getOptionData':    { method: 'GET',  path: '/api/tab/option-data' },
   'getReviewerOptions':{ method: 'GET', path: '/api/tab/reviewer-options' },
-  'refreshOptionCache':{ method: 'POST', path: '/api/tab/refresh-option-cache' },
   'getProviderInfo':   { method: 'GET',  path: '/api/tab/provider-info' },
   'setCompanyBusinessNo':{ method: 'POST', path: '/api/tab/company-business-no' },
 
@@ -93,8 +65,6 @@ const _ACTION_MAP = {
   'registerReviewer':   { method: 'POST', path: '/api/reviewer/register' },
   'verifyReviewer':     { method: 'GET',  path: '/api/reviewer/verify' },
   'lookupPhone':        { method: 'GET',  path: '/api/reviewer/lookup' },
-  'getReviewerList':    { method: 'GET',  path: '/api/reviewer/list' },
-  'deleteReviewer':     { method: 'POST', path: '/api/reviewer/delete' },
   'getReviewerProfile': { method: 'POST', path: '/api/reviewer/profile', remap: 'get' },
   'saveSubAccounts':    { method: 'POST', path: '/api/reviewer/profile', remap: 'saveSubAccounts' },
   'saveIncomeInfo':     { method: 'POST', path: '/api/reviewer/profile', remap: 'saveIncomeInfo' },
@@ -112,51 +82,19 @@ const _ACTION_MAP = {
   // 관리자 인증 (Section 8)
   'adminLogin':         { method: 'POST', path: '/api/admin/login' },
   'adminLoginV2':       { method: 'POST', path: '/api/admin/login' },
-  'adminChangePw':      { method: 'POST', path: '/api/admin/change-pw' },
   'adminMyNickname':    { method: 'GET',  path: '/api/admin/my-nickname' },
   'adminSaveNickname':  { method: 'POST', path: '/api/admin/my-nickname' },
-  'changeMasterPw':     { method: 'POST', path: '/api/admin/change-master-pw' },
-  'addAdminUser':       { method: 'POST', path: '/api/admin/users', remap: 'add' },
-  'editAdminUser':      { method: 'POST', path: '/api/admin/users', remap: 'edit' },
-  'deleteAdminUser':    { method: 'POST', path: '/api/admin/users', remap: 'delete' },
-  'listAdminUsers':     { method: 'POST', path: '/api/admin/users', remap: 'list' },
-  'dashboard':          { method: 'GET',  path: '/api/admin/dashboard' },
-  'releaseBuildLock':   { method: 'POST', path: '/api/admin/release-lock' },
   
   // 영업담당자 (Staff)
   'staffLogin':         { method: 'POST', path: '/api/admin/staff-login' },
-  'addStaffUser':       { method: 'POST', path: '/api/admin/staff-users', remap: 'add' },
-  'editStaffUser':      { method: 'POST', path: '/api/admin/staff-users', remap: 'edit' },
-  'deleteStaffUser':    { method: 'POST', path: '/api/admin/staff-users', remap: 'delete' },
-  'listStaffUsers':     { method: 'POST', path: '/api/admin/staff-users', remap: 'list' },
-
-  // 관리자 공지사항
-  'getNotices':         { method: 'GET',  path: '/api/admin/notices' },
-  'getAllNotices':      { method: 'GET',  path: '/api/admin/notices/all' },
-  'createNotice':       { method: 'POST', path: '/api/admin/notices' },
-  'getUnreadNotices':   { method: 'GET',  path: '/api/admin/notices/unread' },
-  'markNoticeRead':     { method: 'POST', path: '/api/admin/notices/read' },
-
-  // Drive 폴더 (Section 9)
-  'saveCaptureFolder':      { method: 'POST', path: '/api/drive/save-capture' },
-  'updateFolderUrls':       { method: 'POST', path: '/api/drive/update-urls' },
 
   // 단축URL / 메모 (Section 10)
-  'createShort':  { method: 'POST', path: '/api/short/create' },
   'resolveShort': { method: 'GET',  path: '/api/short/resolve' },
-
-  // 입금처리 (Section 11)
 
   // 제출 (Section 12)
   'submitReview':       { method: 'POST', path: '/api/submit/review' },
   'submitOrderForm':    { method: 'POST', path: '/api/submit/order' },
   'findSlot':           { method: 'POST', path: '/api/submit/find-slot' },
-
-  // 진단/기타
-  'campaignList':       { method: 'GET',  path: '/api/diag/campaign-list' },
-  'deleteCampaign':     { method: 'DELETE', path: '/api/diag/delete-campaign' },
-
-  // 뷰어
 
   // 블랙리스트
   'blacklist':      { method: 'POST', path: '/api/blacklist' },
@@ -165,8 +103,6 @@ const _ACTION_MAP = {
   'reviewerLogsList':   { method: 'GET',  path: '/api/trackb/reviewer-logs' },
   'reviewerLogResolve': { method: 'POST', path: '/api/trackb/reviewer-logs/resolve' },
   'reviewerLogCancelOrder': { method: 'POST', path: '/api/trackb/reviewer-logs/cancel-order' },
-
-  // 시트 상단 강제 공지문 (C1:R1) — 신규 탭 자동 삽입 + 기존 탭 일괄 적용
 
   // 이미지 (Gemini AI + Drive)
   'extractOrderImage':   { method: 'POST', path: '/api/image/image-extract' },
@@ -179,69 +115,9 @@ const _ACTION_MAP = {
   'reviewEditRequest':    { method: 'POST', path: '/api/review-edit/request' },
   'reviewEditMyRequests': { method: 'GET',  path: '/api/review-edit/my-requests' },
   'reviewEditCancel':     { method: 'POST', path: '/api/review-edit/cancel' },
-  'reviewEditList':       { method: 'GET',  path: '/api/review-edit/list' },
-  'reviewEditApprove':    { method: 'POST', path: '/api/review-edit/approve' },
-  'reviewEditReject':     { method: 'POST', path: '/api/review-edit/reject' },
 
-  // Drive 폴더 관리
-  'removeDuplicates':    { method: 'POST', path: '/api/drive/remove-duplicates' },
-  'checkSubmissionStatus': { method: 'POST', path: '/api/drive/check-submission-status' },
-  'getPendingRows':      { method: 'GET',  path: '/api/diag/pending-rows' },
-  'getUnpaidRows':       { method: 'GET',  path: '/api/diag/unpaid-rows' },
-  'addTab':              { method: 'POST', path: '/api/diag/add-tab' },
-  'previewTab':          { method: 'GET',  path: '/api/diag/preview-tab' },
-
-  // 기타 GAS 전용 (호환성)
-  'getAppUrl':      { method: 'GET',  path: '/api/diag/app-url' },
-  'saveAppUrl':     { method: 'POST', path: '/api/diag/app-url' },
-
-  // Phase 2-5: Sync Queue + Build History
-  'syncQueueStats':     { method: 'GET',  path: '/api/diag/sync-queue' },
-  'syncQueueRetry':     { method: 'POST', path: '/api/diag/sync-queue/retry' },
-  'syncQueuePurge':     { method: 'POST', path: '/api/diag/sync-queue/purge' },
-  'syncQueueDelete':    { method: 'POST', path: '/api/diag/sync-queue/delete' },
-  'orderMirrorStatus':  { method: 'GET',  path: '/api/diag/order-mirror-status' },
-  'orderReconcile':     { method: 'POST', path: '/api/diag/order-reconcile' },
-  'queueDrain':         { method: 'POST', path: '/api/diag/queue-drain' },
-  'buildHistory':       { method: 'GET',  path: '/api/diag/build-history' },
-
-  // Phase 12: 시트 권한 관리
-
-  // Phase 10: Archive (탭 단위 마감)
-  'archiveDetect':      { method: 'GET',  path: '/api/archive/detect' },
-  'archiveTabs':        { method: 'POST', path: '/api/archive/tabs' },
-  'archiveList':        { method: 'GET',  path: '/api/archive/list' },
-  'archiveHistory':     { method: 'GET',  path: '/api/archive/history' },
-  'unhideTab':          { method: 'POST', path: '/api/archive/unhide-tab' },
-  'hideTab':            { method: 'POST', path: '/api/archive/hide-tab' },
-  'archiveRestore':     { method: 'POST', path: '/api/archive/restore' },
-  'archiveRestoreRound': { method: 'POST', path: '/api/archive/restore-round' },
-
-  // Phase 11: Campaign Name Fix
-
-  // Phase 13: Empty Index Cleanup
-
-  // Phase 14: 키워드 관리 + 인식 실패 탭 진단
-  'getKeywords':           { method: 'GET',    path: '/api/admin/keywords' },
-  'addKeyword':            { method: 'POST',   path: '/api/admin/keywords' },
-  'getUnrecognized':       { method: 'GET',    path: '/api/admin/unrecognized' },
-  'ignoreUnrecognized':    { method: 'POST',   path: '/api/admin/unrecognized/ignore' },
-  'resolveUnrecognized':   { method: 'POST',   path: '/api/admin/unrecognized/resolve' },
-
-  // 오류디버깅(Error Debugging) — error_logs
-  'getErrorLogs':          { method: 'GET',    path: '/api/admin/error-logs' },
-  'errorLogDetail':        { method: 'GET',    path: '/api/admin/error-logs/detail' },
-  'errorLogAnalyze':       { method: 'POST',   path: '/api/admin/error-logs/analyze' },
-  'errorLogStatus':        { method: 'POST',   path: '/api/admin/error-logs/status' },
-  'resolveErrorLog':       { method: 'POST',   path: '/api/admin/error-logs/resolve' }, // 구버전 호환
-
-  // ★ 스마트 빌드 (Drive API + Sheets batchGet 기반)
-  'smartBuildStatus':      { method: 'GET',  path: '/api/admin/smart-build/status' },
-  'smartBuildRun':         { method: 'POST', path: '/api/admin/smart-build/run' },
-  'smartBuildStart':       { method: 'POST', path: '/api/admin/smart-build/start' },
-  'smartBuildStop':        { method: 'POST', path: '/api/admin/smart-build/stop' },
-
-  // ★ DB 전체 재구축 (초기화 → 탭목록 재등록 → 스마트빌드)
+  // (시트 시절 큐·빌드 도구 매핑 syncQueue*·orderMirrorStatus·orderReconcile·queueDrain·buildHistory·smartBuild*·
+  //  buildIndexSmart·buildIndexByCampaign·releaseBuildLock·진단 campaignList 는 2026-10-22 제거 — 결정 273. 호출하는 화면 0.)
 
   // ★ 모집공고(캠페인) 시스템
   'campaignList':          { method: 'GET',  path: '/api/campaign/list' },
@@ -250,14 +126,7 @@ const _ACTION_MAP = {
 
   // ★ 작업 오더(work_orders) 시스템 — 동적 /:id 미지원이라 전부 평면경로 + body/query id
   'orderGuideImage':       { method: 'POST', path: '/api/order/guide-image' },
-  'orderAdminList':        { method: 'GET',  path: '/api/order/admin/list' },
-  'orderNewCount':         { method: 'GET',  path: '/api/order/admin/new-count' },
-  'orderAdminStatus':      { method: 'PUT',  path: '/api/order/admin/status' },
-  'orderAdminAccept':      { method: 'POST', path: '/api/order/admin/accept' },
   'orderAdminUpdate':      { method: 'PUT',  path: '/api/order/admin/update' },
-  'orderAdminEdit':        { method: 'PUT',  path: '/api/order/admin/edit' },
-  'orderSendMemo':         { method: 'PUT',  path: '/api/order/admin/send-memo' },
-  'orderAdminDelete':      { method: 'DELETE', path: '/api/order/admin/delete' },
   'productPreview':        { method: 'POST', path: '/api/product/preview' },
 
   // ★ C/S 문의창구 — 리뷰어 (토큰 없음, phone8 기반)
@@ -278,9 +147,6 @@ const _ACTION_MAP = {
   'csAdminStatus':         { method: 'POST', path: '/api/cs/status' },
   'csAdminSaveMemo':       { method: 'POST', path: '/api/cs/memo' },
 
-  // ★ 구글시트 전체 RAW 미러링 (Section 14)
-
-  // ★ 명시적 컬럼 매핑 (Section 15)
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -425,8 +291,8 @@ async function gasGet(params, timeout) {
 
 // ═══════════════════════════════════════════════════════════
 // gasPost — GAS doPost 대체 (POST 요청)
-// 기존 호출: gasPost({ action: "setTabConfig", sheetId: "...", tabName: "..." })
-// 변환 후:   POST /api/tab/config { sheetId, tabName, ... }
+// 기존 호출: gasPost({ action: "uploadReviewImage", sheetId: "...", tabName: "..." })
+// 변환 후:   POST /api/image/review-upload { sheetId, tabName, ... }
 // ═══════════════════════════════════════════════════════════
 async function gasPost(body, timeout) {
   const action = body.action || '';

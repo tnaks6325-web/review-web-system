@@ -20,7 +20,6 @@ const driveRoutes    = require('./routes/drive.routes');
 const shortRoutes    = require('./routes/shortlink.routes');
 const submitRoutes   = require('./routes/submit.routes');
 const diagRoutes     = require('./routes/diag.routes');
-const archiveRoutes  = require('./routes/archive.routes');
 const campaignRoutes = require('./routes/campaign.routes');
 const orderRoutes    = require('./routes/order.routes');
 const productRoutes  = require('./routes/product.routes');
@@ -95,7 +94,7 @@ app.use('/api/submit',    submitRoutes);
 
 // 진단/디버그/뷰어/블랙리스트/캠페인/이미지 (Section 12)
 app.use('/api/diag',      diagRoutes);
-app.use('/api/archive',   archiveRoutes);
+// (/api/archive/* — 옛 대시보드 ⬛ 마감·보관 화면 8개 경로는 2026-10-22 제거 · 결정 270. 예전 마감 작업은 작업보드 마감 보관함에서 읽기 전용 — 결정 258)
 // (/api/dedupe — 옛 대시보드 리뷰폴더 중복정리(Drive 휴지통 + 시트 '중복' 마킹)는 2026-09-28 제거, 결정 186 56번)
 app.use('/api/campaign',  campaignRoutes);
 app.use('/api/order',     orderRoutes);
@@ -228,8 +227,8 @@ app.get('/health', async (req, res) => {
     },
     routes: {
       search: '/api/search?query=',
-      index: '/api/index/status',
-      tab: '/api/tab/config',
+      index: '/api/index',
+      tab: '/api/tab/reviewer-options',
       reviewer: '/api/reviewer/*',
       admin: '/api/admin/login',
       drive: '/api/drive/*',

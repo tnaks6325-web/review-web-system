@@ -1469,16 +1469,8 @@ router.post('/order', async (req, res, next) => {
     //   order_append만 kick(메타전제 자동충족, R8). 실패해도 30초 cron이 백스톱이라 throw 안 함.
     if (queued) {
       try {
-        // ★ 상시 배치(ORDER_BATCH_AUTO=1): 주문은 배치 스케줄러가 탭별로 묶어 근실시간 반영
-        //   (단건 펌프보다 throttle 효율 수십배). 미설정 시 기존 단건 펌프(되돌리기).
-        if (queuedWorkboardApply) {
-          require('../jobs/queuePump').kickQueuePump();
-        } else if (process.env.ORDER_BATCH_AUTO === '1') {
-          // ★ 공정화 #1: 제출한 탭을 타깃으로 전달 → 그 탭이 글로벌 우선순위 밖이어도 이 사이클에 직접 드레인(즉시성).
-          require('../jobs/orderBatchScheduler').kickOrderBatch(sheetId, tabName);
-        } else {
-          require('../jobs/queuePump').kickQueuePump();
-        }
+        // (상시 배치 스케줄러 kickOrderBatch 는 2026-10-22 제거 — 결정 273. 작업보드 반영·시트 큐 모두 단건 펌프가 맡는다.)
+        require('../jobs/queuePump').kickQueuePump();
       } catch (e) { logger.warn(`[submit/order] kick 실패(무시, cron 백스톱): ${e.message}`); }
     }
 

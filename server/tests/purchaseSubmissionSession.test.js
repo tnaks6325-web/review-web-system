@@ -112,10 +112,10 @@ function completeDb({ existing = '' } = {}) {
 
   console.log('\n[D] 구형·신규·외부·보완 경로 계약');
   const modern = read('frontend/js/search-app.js');
-  const legacy = read('frontend/js/index-app.js');
+  // 옛 관리자 대시보드 폐기(결정 267) — 구형 구매양식(index-app.js)은 파일째 삭제, admin.html 의 옛 양식 링크는 search.html(신규)로 넘어간다.
   const manual = read('frontend/js/manual-order.js');
   const home = read('frontend/index.html');
-  for (const [label, src] of [['신규', modern], ['구형', legacy], ['외부수동', manual], ['홈보완', home]]) {
+  for (const [label, src] of [['신규', modern], ['외부수동', manual], ['홈보완', home]]) {
     await t(`${label} 경로가 주문ID+세션ID+세션토큰을 함께 보낸다`, async () => {
       assert.match(src, /orderSubmissionId/);
       assert.match(src, /captureSessionId/);
@@ -131,10 +131,7 @@ function completeDb({ existing = '' } = {}) {
     assert.match(segment, /inspectForUpload/);
     assert.match(segment, /completeCapture/);
   });
-  await t('캡처 폴더 저장 필드는 captureFolderUrl과 folderUrl을 모두 수용한다', async () => {
-    const drive = read('server/src/routes/drive.routes.js');
-    assert.match(drive, /req\.body\.folderUrl \|\| req\.body\.captureFolderUrl/);
-  });
+  // (캡처 폴더 저장 POST /api/drive/save-capture — 옛 대시보드 전용 — 는 2026-10-22 제거 · 결정 270. 부재는 retiredBulkTools.test.js 가 본다.)
   await t('세션 테이블 마이그레이션 누락 시 운영 부팅을 차단한다', async () => {
     const boot = read('server/index.js');
     const requiredTables = (boot.match(/const REQUIRED_TABLES = \[([\s\S]*?)\];/) || [])[1] || '';

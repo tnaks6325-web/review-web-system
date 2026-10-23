@@ -17,7 +17,7 @@ const orderRoute = fs.readFileSync(path.join(root, 'src', 'routes', 'order.route
 const feRoot = path.join(root, '..', 'frontend');
 const woDetail = fs.readFileSync(path.join(feRoot, 'js', 'work-order-detail.js'), 'utf8');
 const workdesk = fs.readFileSync(path.join(feRoot, 'workdesk.html'), 'utf8');
-const indexApp = fs.readFileSync(path.join(feRoot, 'js', 'index-app.js'), 'utf8');
+// 옛 관리자 대시보드 폐기(결정 267) — index-app.js 삭제. 접수는 리뷰웹시스템[3버전]만 본다.
 
 let failed = 0;
 function ok(message, condition) {
@@ -160,8 +160,7 @@ console.log('advertiser name conflict - confirm-then-link');
   ok('확인 팝업은 공유 모듈 한 벌이다(사본 금지)',
     /function woAdvertiserLinkPicker/.test(woDetail)
     && /woAdvertiserLinkPicker: woAdvertiserLinkPicker/.test(woDetail)
-    && !/function woAdvertiserLinkPicker/.test(workdesk)
-    && !/function woAdvertiserLinkPicker/.test(indexApp));
+    && !/function woAdvertiserLinkPicker/.test(workdesk));
   ok('팝업은 업체명을 onclick 문자열로 보간하지 않는다(외부 문자열 XSS 규율)',
     !/onclick=/.test(woDetail.slice(woDetail.indexOf('function woAdvertiserLinkPicker'),
                                     woDetail.indexOf('function woAdvertiserLinkPicker') + 6000)));
@@ -171,10 +170,6 @@ console.log('advertiser name conflict - confirm-then-link');
     /r&&r\.advertiserNameConflict&&typeof woAdvertiserLinkPicker/.test(workdesk)
     && /linkAdvertiserId:advId/.test(workdesk)
     && /body\.linkAdvertiserId=opts\.linkAdvertiserId/.test(workdesk));
-  ok('관리자 대시보드 접수도 같은 팝업·같은 파라미터를 쓴다',
-    /r\.advertiserNameConflict && typeof woAdvertiserLinkPicker === "function"/.test(indexApp)
-    && /woAdvertiserLinkPicker\(r, advId => woAccept\(id, pickGid, advId\)\)/.test(indexApp)
-    && /payload\.linkAdvertiserId = linkAdvertiserId/.test(indexApp));
   ok('확인 팝업을 거친 재접수는 확인창을 다시 띄우지 않는다',
     /const _confirmed = !!pickGid \|\| !!\(opts&&opts\.linkAdvertiserId\)/.test(workdesk));
   // 사업자번호 줄 — "미등록"과 "원본과 다름"은 다른 신호다(사용자 지적 2026-08-19).

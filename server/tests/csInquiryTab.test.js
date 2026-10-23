@@ -51,9 +51,15 @@ t('원본 /api/cs/* 정책이 바뀌지 않았다(프록시만 추가)', () => {
 t('★ 로직 복제 0 — 기존 cs 핸들러에 위임한다', () => {
   const src = R('src/routes/trackB.routes.js');
   assert.ok(/const _csRoutes = require\('\.\/cs\.routes'\)/.test(src));
-  ['/threads', '/unread-count', '/messages', '/order-context', '/reply', '/status', '/memo']
-    .forEach(p => assert.ok(new RegExp("_delegate\\(_csRoutes, '(get|post)',\\s*'" + p + "'\\)").test(src),
-      '위임이 아닌 경로: ' + p));
+  // 결정 270: 경로 문자열 위임(_delegate) → 이름 위임(_handler). 이름이 가리키는 함수가 원본 /api/cs/* 의 그 핸들러인지 실제로 대조한다.
+  const csR = require('../src/routes/cs.routes');
+  [['/threads', 'csThreads'], ['/unread-count', 'csUnreadCount'], ['/messages', 'csMessages'], ['/order-context', 'csOrderContext'],
+    ['/reply', 'csReply'], ['/status', 'csStatus'], ['/memo', 'csMemo']]
+    .forEach(([p, name]) => {
+      assert.ok(new RegExp("_handler\\(_csRoutes, '" + name + "'\\)").test(src), '위임이 아닌 경로: ' + p);
+      const l = csR.stack.find(x => x.route && x.route.path === p);
+      assert.ok(l && l.route.stack.at(-1).handle === csR.handlers[name], '이름이 원본 핸들러를 가리키지 않는다: ' + p);
+    });
   // 위임 대신 SQL 을 베끼면 원본과 갈라진다.
   // ★ 금지 대상은 **문의 목록·대화를 재현하는 조회**다. 다른 기능이 "이 리뷰어에게 문의가 몇 건인가"를
   //   세는 COUNT 는 CS 로직의 사본이 아니라 교차 참조라 허용한다(등록리뷰어DB 삭제 경고 = reviewers/delete).
@@ -68,34 +74,26 @@ t('★ 로직 복제 0 — 기존 cs 핸들러에 위임한다', () => {
 /* ── 2) 프론트 — 화면 코드 한 벌 ───────────────────────────── */
 console.log('\n2) 사본 금지(공유 모듈)');
 const MOD = F('js/cs-inquiry.js');
-const APP = F('js/index-app.js');
-const ADM = F('admin.html');
+// 옛 관리자 대시보드 폐기(결정 267) — admin.html·index-app.js 가 빠져 화면은 workdesk.html 하나다.
 const WD = F('workdesk.html');
 const API = F('api.js');
 
-t('★ 화면 코드는 모듈에만 있다(index-app.js·workdesk.html 에 사본 없음)', () => {
+t('★ 화면 코드는 모듈에만 있다(workdesk.html 에 사본 없음)', () => {
   ['loadCsRooms', '_renderCsRooms', 'csOpenConversation', '_csRenderMessages', 'csSendReply']
     .forEach(fn => {
       assert.ok(new RegExp('function ' + fn + '\\b').test(MOD), '모듈에 없다: ' + fn);
-      assert.ok(!new RegExp('function ' + fn + '\\b').test(APP), 'index-app.js 에 사본: ' + fn);
       assert.ok(!new RegExp('function ' + fn + '\\b').test(WD), 'workdesk.html 에 사본: ' + fn);
     });
 });
 t('★ 마크업도 모듈이 들고 있다(두 화면이 같은 판을 마운트)', () => {
   assert.ok(/id=\\"tab-cs-inquiry\\"/.test(MOD) || /id=\\?"tab-cs-inquiry/.test(MOD),
     '모듈 안에 탭 판 마크업이 없다');
-  assert.ok(/id="csInquiryMount"/.test(ADM), 'admin.html 마운트 지점 없음');
-  assert.ok(!/id="csRoomListWrap"/.test(ADM), 'admin.html 에 마크업 사본이 남아 있다');
   assert.ok(!/id="csRoomListWrap"/.test(WD), 'workdesk.html 에 마크업 사본이 있다');
   assert.ok(/CsInquiry\.mount\('csInquiryMount'\)/.test(WD), '리뷰웹시스템[3버전]이 모듈 마운트를 안 쓴다');
 });
-t('두 화면이 같은 모듈을 로드한다', () => {
-  [['admin.html', ADM], ['workdesk.html', WD]].forEach(([n, s]) => {   // (admin-siand.html 은 결정 186 44번에서 제거)
+t('리뷰웹시스템[3버전]이 모듈을 로드한다', () => {
+  [['workdesk.html', WD]].forEach(([n, s]) => {   // (admin-siand.html 은 결정 186 44번 · admin.html 은 결정 267 에서 제거)
     assert.ok(/<script src="js\/cs-inquiry\.js"><\/script>/.test(s), n + ' 미로드');
-  });
-  // admin 계열은 index-app.js 앞 — onclick 문자열이 전역 이름으로 참조한다
-  [['admin.html', ADM]].forEach(([n, s]) => {
-    assert.ok(s.indexOf('js/cs-inquiry.js') < s.indexOf('js/index-app.js'), n + ': 로드 순서');
   });
 });
 t('★ 전역 공개 — onclick 문자열·SSE 훅이 이름 그대로 쓴다', () => {
@@ -131,8 +129,6 @@ t('★ api.js 가 /api/cs 만 재기준한다 — 전역 미설정이면 동작 
 });
 t('리뷰웹시스템[3버전]만 Track B 네임스페이스를 가리킨다', () => {
   assert.ok(/window\.CS_API_BASE = '\/api\/trackb\/cs'/.test(WD));
-  assert.ok(!/CS_API_BASE\s*=/.test(ADM),
-    'admin 이 베이스를 바꾸면 기존 경로가 죽는다');
   // ★ 문자열이 주석에도 나오므로 **실제 태그 위치**로 비교한다(주석 순서에 속지 않게)
   assert.ok(WD.indexOf("<script>window.CS_API_BASE") < WD.indexOf('<script src="js/cs-inquiry.js">'),
     '베이스는 모듈 로드보다 먼저 정해져야 한다');
@@ -193,9 +189,10 @@ t('★ 부팅 1회로 끝내지 않는다 — 주기 갱신 + 화면 가려지�
   assert.ok(/addEventListener\('visibilitychange'/.test(WD), '복귀 시 즉시 갱신이 없다');
   assert.ok(/if\(isAdmin \|\| isStaff\) _csStartBadgePoll\(\)/.test(WD), '내부 담당자 화면에서 돌아야 한다');
 });
-t('모듈 아이콘이 보이도록 폰트어썸을 admin 과 같은 CDN 으로 로드', () => {
+t('모듈 아이콘이 보이도록 폰트어썸 6.4.0 CDN 을 로드', () => {
+  // 옛 관리자 대시보드 폐기(결정 267) — admin.html 과의 버전 비교는 빠지고 작업보드 로드만 고정한다.
   const fa = /fontawesome-free@6\.4\.0\/css\/all\.min\.css/;
-  assert.ok(fa.test(WD) && fa.test(ADM), '두 화면의 아이콘 버전이 어긋난다');
+  assert.ok(fa.test(WD), '작업보드가 모듈 아이콘 버전(6.4.0)을 안 불러온다');
 });
 
 /* ══ 주문정보·참여이력 접기/펼치기(사용자 확정 2026-08-21) ══════════════════════

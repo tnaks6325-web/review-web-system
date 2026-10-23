@@ -230,10 +230,10 @@ async function pg() {
 
     // ═══ 검토 2026-10-21 ① 관리자 오더 수정(상품 구성 + 총모집) → 공고 옵션 인원이 오더와 같다(다시 나누지 않는다) ═══
     {
-      const tok = jwt.sign({ id: 'admin_t', role: 'admin', name: '시험관리자' }, process.env.JWT_SECRET);
+      const tok = jwt.sign({ id: 'admin_t', role: 'master', name: '시험관리자' }   /* main 결정 270: 관리자 수정은 Track B 경로만(편집 허용명단 · master 는 안전판) */, process.env.JWT_SECRET);
       const cur = await A.wo();
       const e = edited(cur, p => { p[0].options[0].count = 7; });
-      r = await call('PUT', '/api/order/admin/edit', { id: A.w.id, product_options_json: e.product_options_json, recruit_count: e.recruit_count }, { authorization: 'Bearer ' + tok });
+      r = await call('PUT', '/api/trackb/work-orders/edit', { id: A.w.id, product_options_json: e.product_options_json, recruit_count: e.recruit_count }, { authorization: 'Bearer ' + tok });
       if (r.status === 401 || r.status === 403) console.log('  - 관리자 수정: 시험 토큰 거부로 건너뜀');
       else {
         assert.equal(r.status, 200, JSON.stringify(r.body)); assert.notEqual(r.body.ok, false, JSON.stringify(r.body));

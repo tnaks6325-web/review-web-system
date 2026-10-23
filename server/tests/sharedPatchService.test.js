@@ -197,8 +197,8 @@ async function pg() {
 
     // ── 관리자 수정 라우트: 고유 칸 막힘 · 글 칸 반영 ──
     const jwt = require('jsonwebtoken');
-    const tok = jwt.sign({ id: 'admin_t', role: 'admin', name: '시험관리자' }, process.env.JWT_SECRET);
-    const ae = async (body) => call('PUT', '/api/order/admin/edit', body, { authorization: 'Bearer ' + tok });
+    const tok = jwt.sign({ id: 'admin_t', role: 'master', name: '시험관리자' }   /* main 결정 270: 관리자 수정은 Track B 경로만(편집 허용명단 · master 는 안전판) */, process.env.JWT_SECRET);
+    const ae = async (body) => call('PUT', '/api/trackb/work-orders/edit', body, { authorization: 'Bearer ' + tok });
     const own = await ae({ id: w.id, title: '리뷰웹에서 바꾼 작업명' });
     if (own.status !== 401 && own.status !== 403) {
       assert.equal(own.body.code, 'intranet_owned', JSON.stringify(own.body));

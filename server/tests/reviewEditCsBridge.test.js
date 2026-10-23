@@ -32,9 +32,8 @@ const RVR = R('src/routes/reviewer.routes.js');
 const CARD = F('js/cs-review-edit-card.js');
 const CSJ = F('js/cs-inquiry.js');
 const RCS = F('js/reviewer-cs.js');
-const PAY = F('js/index-payment.js');
 const WD = F('workdesk.html');
-const ADM = F('admin.html');
+// 옛 관리자 대시보드 폐기(결정 267) — admin.html·index-payment.js 는 더 이상 화면이 아니다(빈 사유 검사는 작업보드 팝업으로 대신 본다).
 
 /* ── 1) 스키마 ─────────────────────────────────────────────── */
 console.log('1) 스키마(080)');
@@ -71,7 +70,7 @@ t('★ 통지는 Drive·DB 작업이 **끝난 뒤**에 부른다', () => {
   assert.ok(i > 0 && j > i, '승인 통지가 커밋/보관 처리보다 앞에 있다');
 });
 t('★ 반려는 **커넥션을 반납한 뒤** 통지한다(풀 자기교착 방지)', () => {
-  const i = RE.indexOf("router.post('/reject'");
+  const i = RE.indexOf('_handlers.reviewEditReject = async');   // 결정 270: 옛 공개 경로 대신 핸들러 정의
   const seg = RE.slice(i, i + 3000);
   const rel = seg.indexOf('client.release()');
   const call = seg.indexOf("postReviewEditDecision(committed, 'rejected'");
@@ -118,15 +117,16 @@ t('★ 서버가 빈 사유를 거부한다', () => {
   assert.ok(/const rejectNote = _sanitizeReason\(note \|\| ''\)/.test(RE));
   assert.ok(/if \(!rejectNote\.trim\(\)\) return res\.json\(\{ ok: false/.test(RE));
 });
-t('★ 프론트 **세 화면 모두** 빈 사유를 막는다', () => {
+t('★ 프론트 **두 화면 모두**(C/S·작업보드 팝업) 빈 사유를 막는다', () => {
   assert.ok(/if \(!String\(note\)\.trim\(\)\) \{ showToast\('반려 사유를 입력해 주세요/.test(CSJ),
     'C/S·전용탭 공용 핸들러');
-  assert.ok(/if \(!String\(note\)\.trim\(\)\) \{ showToast\('반려 사유를 입력해 주세요/.test(PAY),
-    '기존 관리자페이지가 빈 사유를 그대로 보낸다');
-  const i = PAY.indexOf('async function rejectReviewEdit');
-  const body = PAY.slice(i, PAY.indexOf('\n}', i));
-  assert.ok(body.indexOf('String(note).trim()') < body.indexOf('_reviewEditRemoveCard'),
-    '빈 사유 검사가 낙관적 카드 제거보다 뒤에 있으면 "반려한 줄 알았는데 그대로"가 된다');
+  // 옛 관리자 대시보드 폐기(결정 267) — index-payment.js 의 rejectReviewEdit 검사 대신 작업보드 처리 팝업을 본다.
+  const i = WD.indexOf('async function _rePopupResolve(action)');
+  assert.ok(i > 0, '작업보드 리뷰수정 처리 팝업 핸들러가 없다');
+  const body = WD.slice(i, WD.indexOf('\n}', i));
+  assert.ok(/if\(!String\(note\)\.trim\(\)\)\{/.test(body), '작업보드 팝업이 빈 사유를 그대로 보낸다');
+  assert.ok(body.indexOf('String(note).trim()') < body.indexOf('csRejectReviewEdit('),
+    '빈 사유 검사가 반려 호출보다 뒤에 있으면 빈 사유가 서버로 간다');
 });
 
 /* ── 5) 권한 ───────────────────────────────────────────────── */
@@ -166,14 +166,18 @@ t('스코프 조회가 행마다 돌지 않는다((시트,탭)당 1회) + 키를
 });
 t('로직 복제 0 — 기존 reviewEdit 핸들러에 위임', () => {
   assert.ok(/const _reRoutes = require\('\.\/reviewEdit\.routes'\)/.test(TB));
-  ['/list', '/approve', '/reject'].forEach(p =>
-    assert.ok(new RegExp("_delegate\\(_reRoutes, '(get|post)', '" + p + "'\\)").test(TB), '위임 아님: ' + p));
+  // 결정 270: 경로 문자열 위임(_delegate) → 이름 위임(_handler)
+  ['reviewEditList', 'reviewEditApprove', 'reviewEditReject'].forEach(n =>
+    assert.ok(new RegExp("_handler\\(_reRoutes, '" + n + "'\\)").test(TB), '위임 아님: ' + n));
   assert.ok(!/FROM review_edit_requests\s+WHERE status/.test(TB), 'trackB 에 목록 쿼리 사본이 있다');
 });
-t('원본 /api/review-edit/* 정책 불변(admin/master)', () => {
+// 결정 270: 옛 대시보드 전용 공개 경로 /api/review-edit/list·approve·reject(admin/master)는 지웠다 —
+//   창구는 Track B 하나(auth + 내부인 게이트 · AE 는 담당 범위)다. 옛 경로가 되살아나지 않는지만 고정한다.
+t('옛 공개 /api/review-edit/list·approve·reject 제거 · 핸들러는 이름으로 남음', () => {
   ['/list', '/approve', '/reject'].forEach(p =>
-    assert.ok(new RegExp("router\\.(get|post)\\('" + p + "', authMiddleware, adminOrMasterMiddleware").test(RE),
-      '원본 게이트가 바뀌었다: ' + p));
+    assert.ok(!new RegExp("router\\.(get|post)\\('" + p + "'").test(RE), '옛 공개 경로가 남아 있다: ' + p));
+  const r = require('../src/routes/reviewEdit.routes');
+  ['reviewEditList', 'reviewEditApprove', 'reviewEditReject'].forEach(n => assert.strictEqual(typeof r.handlers[n], 'function', n));
 });
 
 /* ── 6) 리뷰어 노출 ────────────────────────────────────────── */
@@ -217,9 +221,8 @@ t('★ 카드 렌더러는 공유 모듈 하나뿐', () => {
     assert.ok(!/리뷰캡처 교체요청<\/span>/.test(s), n + ' 에 카드 마크업 사본이 있다');
   });
 });
-t('세 화면이 같은 모듈을 로드한다', () => {   // (admin-siand.html 은 결정 186 44번에서 제거)
-  [['admin.html', ADM],
-   ['workdesk.html', WD], ['index.html', F('index.html')]].forEach(([n, s]) =>
+t('두 화면(작업보드·리뷰어 홈)이 같은 모듈을 로드한다', () => {   // (admin-siand.html 은 결정 186 44번에서 제거)
+  [['workdesk.html', WD], ['index.html', F('index.html')]].forEach(([n, s]) =>
     assert.ok(/<script src="js\/cs-review-edit-card\.js"><\/script>/.test(s), n + ' 미로드'));
 });
 t('★ 리뷰어 화면은 읽기 전용', () => {
@@ -275,7 +278,6 @@ t('★ 처리 후 갱신은 뷰 이름이 아니라 **띠의 존재**로 판정'
 });
 t('경로 재기준 — 리뷰웹시스템[3버전]만 Track B', () => {
   assert.ok(/window\.REVIEW_EDIT_API_BASE = '\/api\/trackb\/review-edit'/.test(WD));
-  assert.ok(!/REVIEW_EDIT_API_BASE\s*=/.test(ADM), 'admin 이 베이스를 바꾸면 기존 경로가 죽는다');
   assert.ok(/'\/api\/review-edit'/.test(CSJ), '기본값이 기존 경로가 아니다');
 });
 t('★ 목록 새로고침은 C/S 화면이 있을 때만(AE 403·unhandled rejection 방지)', () => {

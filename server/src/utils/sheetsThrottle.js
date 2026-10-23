@@ -5,7 +5,7 @@
  *
  * lane:
  *   - sheets lane(45/분): spreadsheets.* 전용. ORDER_RESERVE(8)·저우선 서브캡·getThrottleStatus()
- *     시맨틱 완전 불변 — busy-gate 소비처(cron.js, queuePump.js, orderBatchScheduler.js,
+ *     시맨틱 완전 불변 — busy-gate 소비처(cron.js, queuePump.js, (옛 orderBatchScheduler.js — 결정 273 삭제),
  *     syncQueue.service.js, orderLedger.service.js, diag.routes.js)가 "시트 lane 여유"로 해석한다.
  *   - drive lane(120/분): drive.files.get(modifiedTime)/drive.permissions.* 전용. 평평한 cap
  *     (priority 서브캡/_LOW_PRIORITY_LABELS 미적용). 시트 lane을 오점유하지 않는다.
@@ -80,7 +80,6 @@ const _FILE_LABEL = {
   'rawMirror.service.js': 'RAW미러',
   'syncQueue.service.js': '주문쓰기/큐',
   'orderLedger.service.js': '주문행배정/역동기',
-  'smartBuild.service.js': '리뷰인덱스빌드',
   'indexBuilder.service.js': '리뷰인덱스빌드',
   'submit.routes.js': '제출(리뷰/구매)',
   'tabconfig.routes.js': '탭설정',
@@ -248,7 +247,7 @@ async function concurrentMap(items, fn, concurrency = DEFAULT_CONCURRENCY) {
 
 /**
  * 현재 throttle 상태 조회 (busy-gate/디버깅용)
- * ⚠️ 계약: 시트 lane 전용 — busy-gate(cron.js, queuePump.js, orderBatchScheduler.js,
+ * ⚠️ 계약: 시트 lane 전용 — busy-gate(cron.js, queuePump.js, (옛 orderBatchScheduler.js — 결정 273 삭제),
  *   syncQueue.service.js, orderLedger.service.js, diag.routes.js)와 테스트 mock이
  *   "시트 lane 여유"로 해석한다. drive 필드를 여기 추가하지 말 것(모니터는 getThrottleMonitor).
  */

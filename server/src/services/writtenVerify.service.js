@@ -308,7 +308,7 @@ async function verifyWrittenOrders({ limit = 400, maxTabs = 20 } = {}) {
         await logReviewerEvent({
           sheetId, tabName, tabGid: ctx.tabGid, reviewerName: _who(os), phone8: os.phone8,
           eventType: 'order_lost_manual', severity: 'critical',
-          message: `『${_label(os)}』 ${_who(os)} 리뷰어의 구매양식이 시트에서 반복 소실되어 자동 재기록을 중단했습니다. 수동 확인·입력이 필요합니다(관리자 대시보드 '구매주문 시트반영 현황' 참조).`,
+          message: `『${_label(os)}』 ${_who(os)} 리뷰어의 구매양식이 시트에서 반복 소실되어 자동 재기록을 중단했습니다. 수동 확인·입력이 필요합니다(리뷰웹시스템 작업표에서 해당 주문 확인).`,
           context: { row: os.sheetRow, priorLost, reassignOn }, orderSubmissionId: os.id,
         });
         await db.query(
@@ -396,7 +396,7 @@ async function detectStuckOrders({ limit = 50 } = {}) {
       reviewerName: _who(os), phone8: os.phone8,
       eventType: 'order_unmirrored', severity: manual ? 'critical' : 'warn',
       message: manual
-        ? `『${_label(os)}』에 ${_who(os)} 리뷰어가 구매양식을 제출했으나, 시트에 입력되지 못했습니다. 자동 재기록이 중단되어 수동 입력이 필요합니다(관리자 대시보드 '구매주문 시트반영 현황' 참조).`
+        ? `『${_label(os)}』에 ${_who(os)} 리뷰어가 구매양식을 제출했으나, 시트에 입력되지 못했습니다. 자동 재기록이 중단되어 수동 입력이 필요합니다(리뷰웹시스템 작업표에서 해당 주문 확인).`
         : `『${_label(os)}』에 ${_who(os)} 리뷰어가 구매양식을 제출했으나, 아직 시트에 입력되지 못했습니다(상태: ${os.mirrorStatus} — 자동복구 대기 중).`,
       context: { mirrorStatus: os.mirrorStatus }, orderSubmissionId: os.id,
     });

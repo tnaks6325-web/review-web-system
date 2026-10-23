@@ -1,7 +1,6 @@
 require('dotenv').config();
 const app = require('./src/app');
 const { startCronJobs } = require('./src/jobs/cron');
-const { startSmartBuild } = require('./src/services/smartBuild.service');
 const { logger } = require('./src/utils/logger');
 const fs = require('fs');
 const path = require('path');
@@ -169,6 +168,8 @@ const REQUIRED_SCHEMA = [
 const REQUIRED_TABLES = [
   'campaign_option_soldout_reports',              // 184 — 리뷰어 품절 신고(상품 이름 바꾸기 tx 가 함께 고친다 — 없으면 공고 저장이 죽는다)
   'campaign_option_alerts',                       // 184 — 관리자 전원 품절 알림
+  'campaign_price_reports',                       // 194 — 리뷰어 가격 신고(상품 이름 바꾸기 tx 가 함께 고친다 — 없으면 공고 저장이 죽는다)
+  'campaign_price_alerts',                        // 194 — 관리자 전원 가격 신고 알림·처리 이력
   'review_reminder_states',
   'review_reminder_deliveries',
   'reviewer_identity_match_audits',                // 147 — 캡처/수동 명의확인 비식별 감사기록
@@ -339,57 +340,13 @@ async function runMigrations() {
     // 스케줄러 시작 (GAS 트리거 대체)
     if (process.env.NODE_ENV === 'production' && !readOnlyPreview) {
       startCronJobs();
-      logger.info('✅ 인덱스 빌드 스케줄러 시작됨');
+      logger.info('✅ 스케줄러 시작됨');
     } else {
       logger.info('⏭ 개발 환경 — 기존 CRON 스케줄러 비활성화 (수동 빌드 사용)');
     }
 
-    // ★ 스마트 빌드 스케줄러 시작 (기본 ON — 근실시간 변경감지 유일 폴러).
-    //   SMART_BUILD_DISABLED=1 이면 코드레벨 미기동(env 킬스위치). 미설정=기존 동작(가산적·롤백가능).
-    //   startSmartBuild는 app_settings.smart_build_paused_until을 읽어 관리자 pause를 부팅 복원(async)한다.
-    //   listen 콜백은 async가 아니므로 fire-and-forget(.then/.catch) — 부팅복원 실패는 비치명.
-    if (readOnlyPreview) {
-      logger.info('[read-only-preview] smart build scheduler skipped');
-    } else if (process.env.SMART_BUILD_DISABLED === '1') {
-      logger.warn('⏸ SMART_BUILD_DISABLED=1 — 스마트 빌드 스케줄러 미기동(env 킬스위치). 근실시간 인덱스 갱신 없음(전체빌드만).');
-    } else {
-      startSmartBuild()
-        .then(() => logger.info('✅ 스마트 빌드 스케줄러 시작됨 (5분 주기, Drive+Sheets API)'))
-        .catch(err => logger.error(`[smartBuild] 시작 실패: ${err.message}`));
-    }
-
-    // ★ 제출열 오탐지 핫픽스(#427, #435) 배포 직후 1회성 강제 전체 재빌드.
-    //   원인 ①(8/3, #427): SUBMIT_KEYWORDS의 넓은 catch-all '리뷰'가 우선탐지를 무력화해
-    //   '리뷰가이드' 같은 작업지시 열이 실제 '리뷰제출'열보다 먼저 잡혀 그 탭 참여자 전원이
-    //   제출완료로 오판정됐다. 원인 ②(8/4, #435): ①의 수정이 만든 회귀 — 완료열이 접미사 없이
-    //   '리뷰' 단독(또는 '리뷰캡쳐본' 등 완료신호 단어 없는 파생명)뿐인 시트에서 최후수단 단계가
-    //   이름열 제외패턴 없이 '주문자제출'(이름열, '제출' 포함)을 먼저 집어 같은 증상이 재발했다.
-    //   코드 수정은 "다음에 새로 파싱할 때"만 적용되는데, review_index는 시트 checksum이 그대로면
-    //   정기 빌드(스마트/09·15시/04시)가 그 탭을 계속 건너뛰므로(변경 없음=재파싱 불필요 최적화)
-    //   코드만 배포해서는 이미 저장된 잘못된 is_submitted 값이 저절로 정정되지 않는다.
-    //   → forceFullRebuild=true(체크섬 무시)로 전 탭 1회 강제 재파싱해 즉시 정정한다.
-    //   ★ 1회성 가드(app_settings, 057과 동일 패턴): 재배포마다 반복 실행되면 Sheets API 쿼터를
-    //     불필요하게 소모하므로 최초 1회만 수행한다. 키를 8/4 라운드로 갱신해 ①만 반영됐던
-    //     배포에서도 ②까지 포함해 다시 한번 강제 재빌드되게 한다(8/3 플래그는 재사용하지 않음).
-    if (process.env.NODE_ENV === 'production' && !readOnlyPreview) {
-      (async () => {
-        const pool = require('./src/db/pool');
-        try {
-          const { rows } = await pool.query(
-            "SELECT 1 FROM app_settings WHERE key = 'submitcol_fix_20260804_rebuilt'");
-          if (rows.length) return;
-          logger.info('[boot] 제출열 오탐지 핫픽스 — 강제 전체 재빌드 시작(1회성, #427+#435)');
-          const { buildIndexSmart } = require('./src/services/indexBuilder.service');
-          const result = await buildIndexSmart(true);
-          logger.info(`[boot] 강제 전체 재빌드 완료: ${JSON.stringify(result)}`);
-          await pool.query(
-            `INSERT INTO app_settings (key, value, updated_at) VALUES ('submitcol_fix_20260804_rebuilt', NOW()::text, NOW())
-             ON CONFLICT (key) DO NOTHING`);
-        } catch (err) {
-          logger.error(`[boot] 제출열 오탐지 핫픽스 강제 재빌드 실패(무시, 다음 재배포에 재시도): ${err.message}`);
-        }
-      })();
-    }
+    // (스마트 빌드 스케줄러(5분 시트 변경감지)와 제출열 핫픽스 1회성 강제 전체 재빌드(submitcol_fix_20260804_rebuilt)는
+    //  2026-10-22 제거 — 결정 273. 무시트 작업의 색인은 작업표에서 바로 만든다(sheetlessLedger). 운영은 이미 SMART_BUILD_DISABLED=1.)
 
     // (블로그체험단 M3 바를참스킨 0804 1회 동기화 부팅 잡 — 완료 가드 확인만 반복하던 것, 2026-09-30 제거 · 결정 186 78번)
   });
@@ -397,10 +354,6 @@ async function runMigrations() {
   // ── Graceful Shutdown (Railway / Docker 대응) ──
   function gracefulShutdown(signal) {
     logger.info(`${signal} 수신 — 서버 종료 시작...`);
-    // 스마트 빌드 스케줄러 정지
-    const { stopSmartBuild } = require('./src/services/smartBuild.service');
-    stopSmartBuild();
-
     // ★ 빌드 잠금 해제 (재배포 시 좀비 잠금 방지)
     const { releaseBuildLock } = require('./src/services/indexBuilder.service');
     releaseBuildLock()

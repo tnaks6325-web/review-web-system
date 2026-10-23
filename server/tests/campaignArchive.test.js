@@ -30,7 +30,6 @@ const indexJs = read('index.js');
 const migration = read('migrations/130_campaign_archive.sql');
 const cards = read('../frontend/js/campaign-cards.js');
 const recruitJs = read('../frontend/js/index-recruit.js');
-const adminHtml = read('../frontend/admin.html');
 const workdesk = read('../frontend/workdesk.html');
 
 /* 스텁 pool — 라우트를 **실제로 실행**하기 위해 require 캐시에 미리 심는다.
@@ -327,7 +326,7 @@ function finishRest() {
     /typeof json\.archivedCount === 'number'\) \? json\.archivedCount : null/.test(recruitJs));
   ok('보관함 토글 함수 노출', /window\.toggleRecruitArchivedView = toggleRecruitArchivedView/.test(recruitJs));
   ok('보관함이 비면 다른 안내(빈 목록과 구분)', /보관한 공고가 없습니다/.test(recruitJs));
-  ok('★ 관리자 대시보드에 보관함 버튼', /id="recruitArchiveBtn"[\s\S]{0,200}toggleRecruitArchivedView\(\)/.test(adminHtml));
+  // 옛 관리자 대시보드 폐기(결정 267) — admin.html 보관함 버튼 단언은 뺐다(화면은 리뷰웹시스템[3버전]만).
   ok('★ 리뷰웹시스템[3버전]에도 보관함 버튼', /id="recruitArchiveBtn"[\s\S]{0,200}toggleRecruitArchivedView\(\)/.test(workdesk));
   ok('★ 머리말 재렌더 후 버튼 상태 복원(보관함 보는 중인데 버튼은 "보관함" 방지)',
     /_rcRenderHead\(\(list \|\| \[\]\)\.length\)[\s\S]{0,400}_syncArchiveBtn\(\)/.test(workdesk));

@@ -30,7 +30,9 @@ for (const m of app.matchAll(/app\.use\(\s*'([^']+)'\s*,\s*(?:[\w.]+\s*,\s*)*(\w
     routes.push([r[1].toUpperCase(), m[1] + (r[2] === '/' ? '' : r[2])]);
   }
 }
-ok(`서버 라우트 표 구성(${routes.length}개)`, routes.length > 500);
+// 하한은 "라우트 표를 제대로 읽었다"는 확인용이다. 결정 273 으로 diag 공용 라우터(4개 접두어)의 시트 시절 도구 약 100줄이
+//   빠져 577 → 474 가 됐다 — 하한을 400 으로 내린다(검사 의미 불변: 표가 비거나 반토막이면 여전히 잡는다).
+ok(`서버 라우트 표 구성(${routes.length}개)`, routes.length > 400);
 
 const toRe = (p) => new RegExp('^' + p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/:\w+/g, '[^/]+') + '$');
 const norm = (t) => t.replace(/:\w+/g, ':x');
@@ -94,8 +96,10 @@ for (const [method, p] of [['GET', '/api/diag/debug-tab'], ['GET', '/api/diag/de
 
 /* 변이: 없는 입구는 잡는다 */
 ok('변이: 지운 입구는 없음으로 판정', !exists('GET', '/api/diag/campaign-stats') && !exists('GET', '/api/tab/stats'));
-ok('변이: 있는 입구는 있음으로 판정', exists('GET', '/api/admin/keywords') && exists('PUT', '/api/admin/keywords', '/:id'));
-ok('변이: 동적 표시 없는 매핑은 접두 일치로 통과시키지 않는다', !exists('PUT', '/api/admin/keywords'));
+// 결정 270: 표본이던 /api/admin/keywords 는 옛 대시보드 전용이라 지웠다 — 살아 있는 입구로 표본을 옮긴다(검사 의미 불변).
+// 결정 273: 표본이던 /api/diag/sync-queue 는 시트 시절 큐 도구라 지웠다 — 살아 있는 입구로 표본을 옮긴다(검사 의미 불변).
+ok('변이: 있는 입구는 있음으로 판정', exists('GET', '/api/diag/reverse-sync-list') && exists('PUT', '/api/campaign/admin', '/:id'));
+ok('변이: 동적 표시 없는 매핑은 접두 일치로 통과시키지 않는다', !exists('PUT', '/api/campaign/admin'));
 ok('변이: 동적 꼬리는 완전한 템플릿만 인정', exists('PUT', '/api/campaign/admin', '/:id/status') && !exists('PUT', '/api/campaign/admin', '/:id/nope'));
 
 /* ═══ 93~95번 · [진행률] 버튼 제거 고정 ═══ */
@@ -104,21 +108,62 @@ for (const [method, p] of [['POST', '/api/submit/debug-tabs'], ['GET', '/api/sub
   ok(`${method} ${p} 제거 상태`, !exists(method, p));
 }
 ok('광고주 계정 관리는 3버전 입구가 남아 있다', exists('POST', '/api/trackb/advertiser-account'));
+
+/* ═══ 결정 270: 옛 관리자 대시보드 전용 서버 입구 제거 고정 ═══
+ * 지운 입구가 되살아나면(또는 매핑이 다시 생기면) 잡는다. 옛 대시보드(admin.html)는 결정 267 로 이미 없다. */
+for (const [method, p] of [
+  ['GET', '/api/admin/notices'], ['GET', '/api/admin/notices/all'], ['POST', '/api/admin/notices'], ['GET', '/api/admin/notices/unread'],
+  ['POST', '/api/admin/notices/read'], ['GET', '/api/admin/error-logs'], ['POST', '/api/admin/error-logs/analyze'],
+  ['POST', '/api/admin/users'], ['POST', '/api/admin/staff-users'], ['POST', '/api/admin/change-pw'], ['POST', '/api/admin/change-master-pw'],
+  ['GET', '/api/admin/dashboard'], ['GET', '/api/admin/keywords'], ['GET', '/api/admin/unrecognized'], ['GET', '/api/admin/my-workboard-preferences'],
+  ['GET', '/api/archive/list'], ['POST', '/api/archive/tabs'], ['GET', '/api/index/status'], ['GET', '/api/index/dirty'],
+  ['GET', '/api/tab/config'], ['POST', '/api/tab/config'], ['POST', '/api/tab/closed'], ['GET', '/api/tab/dashboard'], ['GET', '/api/tab/col-prefs'],
+  ['GET', '/api/diag/events'], ['GET', '/api/diag/stats/overview'], ['GET', '/api/diag/metrics'], ['POST', '/api/diag/order-edit'],
+  ['POST', '/api/diag/manager-cleanup'], ['POST', '/api/image/manager-cleanup'],
+  ['GET', '/api/order/admin/list'], ['POST', '/api/order/admin/accept'], ['PUT', '/api/order/admin/edit'], ['DELETE', '/api/order/admin/delete'],
+  ['GET', '/api/reviewer/list'], ['POST', '/api/reviewer/delete'], ['POST', '/api/drive/save-capture'], ['POST', '/api/short/create'],
+  ['GET', '/api/review-edit/list'], ['POST', '/api/review-edit/approve']]) {
+  ok(`270: ${method} ${p} 제거 상태`, !exists(method, p));
+}
+/* 결정 272: Drive 남은 도구 3종 — 지운 입구가 되살아나거나 매핑이 다시 생기면 잡는다(열람 GET /api/drive/report/:code 는 아래 '남아 있음'). */
+for (const [method, p] of [['POST', '/api/drive/orphan-capture-cleanup'], ['POST', '/api/drive/capture-rename-recipient'], ['POST', '/api/drive/report-link']]) {
+  ok(`272: ${method} ${p} 제거 상태`, !exists(method, p));
+}
+/* 결정 273: 시트 시절 큐 복구·스마트빌드 수동 도구(결정 186 82·88번) — 지운 입구가 되살아나거나 매핑이 다시 생기면 잡는다.
+ * ★ diag 라우터는 /api/diag·/api/viewer·/api/image·/api/blacklist 공용이라 같은 줄이 네 주소로 열린다(결정 270) — 대표로 /api/image 도 본다. */
+for (const [method, p] of [
+  ['GET', '/api/diag/sync-queue'], ['POST', '/api/diag/sync-queue/retry'], ['POST', '/api/diag/sync-queue/purge'], ['POST', '/api/diag/sync-queue/delete'],
+  ['GET', '/api/diag/order-mirror-status'], ['POST', '/api/diag/order-reconcile'], ['POST', '/api/diag/queue-drain'], ['GET', '/api/diag/queue-drain'],
+  ['GET', '/api/diag/yellow-rows-export'], ['POST', '/api/diag/yellow-rows-delete'], ['GET', '/api/diag/build-history'],
+  ['POST', '/api/diag/order-flush-tab'], ['GET', '/api/diag/order-flush-tab'], ['POST', '/api/diag/order-flush-one'], ['POST', '/api/diag/order-batch-drain'],
+  ['GET', '/api/diag/order-batch-state'], ['POST', '/api/diag/order-relink'], ['POST', '/api/diag/order-orphan-cleanup'], ['GET', '/api/diag/order-written-sample'],
+  ['POST', '/api/diag/metrics/reset'], ['GET', '/api/diag/campaign-list'], ['GET', '/api/image/sync-queue'],
+  ['GET', '/api/admin/smart-build/status'], ['POST', '/api/admin/smart-build/run'], ['POST', '/api/admin/smart-build/start'], ['POST', '/api/admin/smart-build/pause'],
+  ['POST', '/api/admin/smart-build/resume'], ['POST', '/api/admin/smart-build/stop'], ['POST', '/api/admin/release-lock'], ['POST', '/api/admin/campaign-delete/x'],
+  ['POST', '/api/index/build'], ['POST', '/api/index/build-sheet'], ['POST', '/api/search/build'], ['POST', '/api/search/build-sheet']]) {
+  ok(`273: ${method} ${p} 제거 상태`, !exists(method, p));
+}
+ok('273: 시트 시절 도구 액션 매핑 없음', !['syncQueueStats', 'syncQueueRetry', 'syncQueuePurge', 'syncQueueDelete', 'orderMirrorStatus', 'orderReconcile',
+  'queueDrain', 'buildHistory', 'smartBuildStatus', 'smartBuildRun', 'smartBuildStart', 'smartBuildStop', 'buildIndexSmart', 'buildIndexByCampaign',
+  'releaseBuildLock'].some(n => mapNames.has(n)));
+/* 남겨야 하는 것 — 리뷰어·작업보드·인트라넷이 실제로 부르거나(공유 핸들러) 사용자 결정 대기(결정 186 킵) */
+for (const [method, p] of [
+  ['POST', '/api/admin/login'], ['POST', '/api/admin/intranet-login'], ['GET', '/api/search'], ['GET', '/api/index'],
+  ['POST', '/api/image/review-upload'], ['POST', '/api/diag/client-error'], ['GET', '/api/diag/reverse-sync-list'], ['POST', '/api/blacklist'],
+  ['GET', '/api/tab/provider-info'], ['GET', '/api/tab/reviewer-options'], ['GET', '/api/short/resolve'], ['GET', '/api/drive/report/:code'],
+  ['PUT', '/api/order/admin/update'], ['POST', '/api/order/guide-image'], ['GET', '/api/cs/threads'], ['GET', '/api/reviewer/notices/all'],
+  // 결정 273 이후에도 남기는 수동 도구(무시트 복구·역동기화 #85·행 점유 조회)
+  ['POST', '/api/diag/sheetless-worktable-recover'], ['POST', '/api/diag/order-mirror-repair'], ['POST', '/api/diag/reverse-sync-apply'],
+  ['GET', '/api/diag/row-claims'], ['POST', '/api/diag/review-reflect'], ['GET', '/api/diag/no-capture-audit'], ['GET', '/api/diag/order-stuck-export']]) {
+  ok(`270: ${method} ${p} 남아 있음`, exists(method, p.replace(/:\w+/g, 'x')));
+}
 ok('97·98번 잔류 입구는 남아 있다', exists('GET', '/api/campaign/admin/popular-credit-audit') && exists('POST', '/api/trackb/workdesk/auto-finish'));
-const admin = read('frontend/admin.html');
-ok('옛 대시보드: 진행률 패널 화면 없음', !/statsPanelOverlay/.test(admin));
-ok('옛 대시보드: [진행률] 버튼 없음', !/openStatsPanel|btn-tab-stats/.test(read('frontend/js/index-app.js')));
-// ★ 84-정정의 정정(Codex P1): index-stats.js 에는 블랙리스트·공지 배너 창도 있었다 — 파일째 지우면 그 버튼이 죽는다.
-const stats = read('frontend/js/index-stats.js');
-ok('진행률 패널 함수는 없다', !/function openStatsPanel|function _renderStatsPanel/.test(stats));
-ok('블랙리스트·공지 배너 창 함수는 남아 있고 옛 대시보드가 불러온다',
-  ['openBlPanel', 'closeBlPanel', 'loadBlacklist', 'addBlacklist', 'removeBlacklist', 'openNoticePanel', 'closeNoticePanel', 'saveNotice', 'clearNotice']
-    .every(fn => new RegExp('function ' + fn + '\\b').test(stats))
-  && /<script src="js\/index-stats\.js"><\/script>/.test(admin));
+// 옛 관리자 대시보드 폐기(결정 267) — admin.html 은 이동 정류장이 되고 index-app.js·index-stats.js 는 파일째 지웠다.
+//   [진행률] 패널·블랙리스트/공지 배너 창(index-stats.js) 검사는 화면과 함께 빠진다(작업보드는 자체 블랙리스트·홈 배너 설정을 쓴다).
+//   지운 파일이 정말 없는지·옛 주소가 어디로 가는지는 oldDashboardRetired.test.js 가 본다.
 
 /* ═══ 옛 대시보드 인라인 핸들러가 부르는 함수는 어딘가에 정의돼 있다 ═══
  * 공유 스크립트를 지울 때 같이 사라지는 버튼을 잡는다(이번에 실제로 놓쳤다). */
-const scripts = [...admin.matchAll(/<script src="([^"?]+)/g)].map(m => m[1]).filter(s => !/^https?:/.test(s));
 // 전역에서 부를 수 있는 함수만 센다(Codex P2): 옛 대시보드 스크립트를 **실제로 한 번 실행**(가짜 브라우저 객체)하고
 //   인라인 핸들러가 부르는 이름이 전역에서 함수인지 vm 안에서 typeof 로 확인한다.
 //   IIFE·DOMContentLoaded 안으로 숨은 함수는 여기서 undefined 로 잡힌다. 실행 중 오류는 스크립트 단위로 삼킨다
@@ -154,8 +199,9 @@ function checkPageHandlers(page) {
   const undef = [...called].filter(fn => !BUILTIN.has(fn) && !isGlobalFn(fn));
   return { called, undef };
 }
-// 옛 대시보드 + 리뷰어 제출 화면(103번 정리) + 참여형 공고 화면(같은 search-app.js 를 싣는다)
-for (const page of ['admin.html', 'search.html', 'campaign.html']) {
+// 리뷰어 제출 화면(103번 정리) + 참여형 공고 화면(같은 search-app.js 를 싣는다)
+//   + 리뷰웹시스템[3버전] — 옛 대시보드(admin.html)가 결정 267 로 빠지면서 그 자리를 작업보드가 이어받는다
+for (const page of ['search.html', 'campaign.html', 'workdesk.html']) {
   const r = checkPageHandlers(page);
   ok(`${page} 인라인 버튼이 부르는 함수 ${r.called.size}개가 모두 정의돼 있다` + (r.undef.length ? ' → 없음: ' + r.undef.join(', ') : ''), r.undef.length === 0);
 }
@@ -169,6 +215,5 @@ ok('106번: 리뷰제출 화면의 옛 조회식 로그인·단건 제출·호�
 ok('107번: 무인증 인애드명단 입구 제거 · 매핑 없음 · 리뷰어 양식은 후보 0건(자동 기록) 경로',
   !exists('GET', '/api/submit/get-inaed-list') && !mapNames.has('getInaedList')
   && /function _loadInaedList\(\) \{\s*_setOrdererDisabled\(false\);\s*_applyOrdererPicker\(\);/.test(read('frontend/js/search-app.js')));
-ok('104번: 옛 대시보드 고아 행 경고 띠·정리 버튼 없음', !/_handleOrphanRowsWarning|cleanOrphanRows|orphanRowsBanner/.test(read('frontend/js/index-app.js')));
 
 console.log(`\n✅ frontendActionMapRoutes: ${n}개 통과`);

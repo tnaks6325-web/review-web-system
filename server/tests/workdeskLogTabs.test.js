@@ -12,7 +12,7 @@
  *     → 판정 순수함수를 **실행**해 그 예외가 살아 있는지 고정한다.
  *  ③ **창구 단일화** — 관리자 대시보드의 「오류디버깅」 화면이 남아 있으면 창구가 둘이 되고,
  *     index-app.js 에서 코드만 지우고 HTML 버튼을 남기면 **누르면 ReferenceError 로 죽는 탭**이 된다.
- *     → 두 화면(admin/index-app) 모두에서 흔적 0 을 고정한다(admin-siand 는 결정 186 44번 제거).
+ *     → 두 화면(admin/index-app) 모두에서 흔적 0 을 고정했다(admin-siand 는 결정 186 44번 제거 · 옛 대시보드는 결정 267 로 폐기).
  *  ④ **프리변수·사본** — 렌더 함수가 자기 스코프에 없는 변수를 참조하면 화면이 조용히 매달린다
  *     (리뷰검수 `isAdmin` 실측 사고). → 로그 뷰 렌더 블록을 **vm 으로 꺼내 실제 실행**한다.
  */
@@ -58,11 +58,14 @@ t('리뷰어 로그 해결 처리는 여전히 adminOrMaster',
 /* ── 2) 로직 복제 0 — 기존 admin 핸들러 위임 ───────────────── */
 console.log('\n2) 로직 복제 0 (기존 핸들러 위임)');
 const TB = fs.readFileSync(path.join(__dirname, '..', 'src/routes/trackB.routes.js'), 'utf8');
-t('_delegate 로 admin.routes 핸들러를 태운다', /_delegate\(_adminRoutes, 'get',\s*'\/error-logs'\)/.test(TB));
+// 결정 270: 경로 문자열 위임(_delegate) → 이름 위임(_handler). 옛 공개 경로 /api/admin/error-logs* 는 지웠다.
+t('이름 위임으로 admin.routes 핸들러를 태운다', /_handler\(_adminRoutes, 'errorLogsList'\)/.test(TB)
+  && ['errorLogsList', 'errorLogDetail', 'errorLogAnalyze', 'errorLogStatus', 'errorLogResolve']
+    .every(n => typeof require('../src/routes/admin.routes').handlers[n] === 'function'));
 t('trackB 가 error_logs 를 직접 쿼리하지 않는다(사본 금지)', !/FROM\s+error_logs/i.test(TB));
 const AD = fs.readFileSync(path.join(__dirname, '..', 'src/routes/admin.routes.js'), 'utf8');
-t('원본 /api/admin/error-logs* 라우트는 그대로 살아 있다(위임 대상)',
-  /router\.get\('\/error-logs',/.test(AD) && /router\.post\('\/error-logs\/analyze',/.test(AD));
+t('옛 공개 /api/admin/error-logs* 는 제거 — 핸들러만 이름으로 남는다(결정 270)',
+  !/router\.(get|post)\('\/error-logs/.test(AD) && /_handlers\.errorLogsList = async/.test(AD) && /_handlers\.errorLogAnalyze = async/.test(AD));
 
 /* ── 3) 제외 규칙 — 순수함수 실행 ──────────────────────────── */
 console.log('\n3) 관리자 대시보드 오류 제외 규칙');
@@ -106,18 +109,11 @@ t('작업보드 프록시는 기본 제외 · includeAdminUi 로만 포함',
 
 /* ── 4) 창구 단일화 — 관리자 대시보드 흔적 0 ───────────────── */
 console.log('\n4) 관리자 대시보드 「오류디버깅」 제거');
-const IA = F('js/index-app.js');
-const ADMIN_HTML = F('admin.html');
-[['admin.html', ADMIN_HTML]].forEach(([nm, src]) => {   // (admin-siand.html 은 결정 186 44번에서 제거)
-  t(`${nm} — 탭 버튼 제거`, !/data-tab="errorlogs"/.test(src));
-  t(`${nm} — 패널 마크업 제거`, !/id="tab-errorlogs"/.test(src) && !/id="errorLogListWrap"/.test(src));
-});
-t('index-app.js — 오류디버깅 함수·상수 제거',
-  !/function loadErrorLogs/.test(IA) && !/ERRLOG_CAT_LABELS/.test(IA) && !/ERR_AGENTS/.test(IA));
-t('★ 죽은 호출 잔재 0 — 탭 분기·뱃지 호출도 함께 지웠다',
-  !/loadErrorLogs\(\)/.test(IA) && !/_updateErrorLogBadge/.test(IA) && !/errorLogBadge/.test(IA));
-t('제거 사유가 코드에 남아 있다(다음 사람이 되살리지 않게)',
-  /리뷰웹시스템\[3버전\] 「로그」/.test(IA) && /시스템 오류로그/.test(IA));
+// 옛 관리자 대시보드 폐기(결정 267) — admin.html·index-app.js 가 화면째 없어져 「오류디버깅」 흔적 0 은 자명하다.
+//   대신 옛 대시보드 화면 코드가 되살아나지 않았는지만 본다(admin.html·index-app.js 둘 다 없음 — 옛 관리자 대시보드 폐기(결정 267) — admin.html 진입 경로까지 삭제).
+t('옛 대시보드 화면 코드가 남아 있지 않다(오류디버깅 탭 포함)',
+  !require('fs').existsSync(require('path').join(__dirname, '../../frontend/js/index-app.js'))
+  && !require('fs').existsSync(require('path').join(__dirname, '../../frontend/admin.html')));
 
 /* ── 5) 프론트 배선 ───────────────────────────────────────── */
 console.log('\n5) 리뷰웹시스템[3버전] 배선');

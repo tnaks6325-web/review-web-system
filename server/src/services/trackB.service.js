@@ -3395,6 +3395,9 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       /* ★ 결정 229: 상품별 판매 상태(품절 일시 멈춤·쌓인 신고) — 작업조건 카드 [품절로 멈추기]/[다시 열기] 줄.
            null = 못 읽음/공고 없음 → 카드는 그 줄을 그리지 않는다(구버전 서버와 같은 화면). */
       optionSales: c ? await require('./campaignOptionPause.service').optionSalesForCampaign(db, c.id) : null,
+      /* ★ 결정 266: 가격 신고 — 상품별 쌓인 신고 수 + 최근 처리 이력(고침 전→후 · 그대로 · 보류 · 누가 · 언제).
+           null = 못 읽음/공고 없음 → 카드는 그 줄을 그리지 않는다. 업체 렌즈(_condAdvertiserLens)는 화이트리스트라 나가지 않는다. */
+      priceReports: c ? await require('./campaignPriceReport.service').priceReportsForCampaign(db, c.id) : null,
       campaignCount: camps.length,
       workOrderId: (wo && wo.id) || null,   // [미설정] → 작업오더 수정 창구를 열 때만 쓴다
     };

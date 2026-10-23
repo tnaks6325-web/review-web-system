@@ -705,8 +705,7 @@ async function submitExternalOrder({
       queued = true;
       // 리뷰어 제출과 같은 kick — 없으면 cron까지 시트에 안 뜨고 현황 위젯도 반응하지 않는다
       try {
-        if (process.env.ORDER_BATCH_AUTO === '1') require('../jobs/orderBatchScheduler').kickOrderBatch(sheetId, tabName);
-        else require('../jobs/queuePump').kickQueuePump();
+        require('../jobs/queuePump').kickQueuePump();   // (배치 스케줄러 kickOrderBatch 는 2026-10-22 제거 — 결정 273)
       } catch (e2) { logger.warn(`[manual-order] kick 실패(무시, cron 백스톱): ${e2.message}`); }
     } catch (e) {
       await markOrderMirrorFailed(ledger.orderSubmissionId, e);

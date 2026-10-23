@@ -63,14 +63,19 @@ t('★ /settings/guide-image 는 원본(무인증)보다 좁다 — 업로드 �
 /* ── 2) 로직 복제 0 — 기존 핸들러 위임만 ───────────────────── */
 console.log('\n2) 사본 금지(서버)');
 const tb = R('src/routes/trackB.routes.js');
-t('설정 라우트는 _delegate 로 기존 핸들러를 태운다',
-  /_setHandlers\s*=\s*\{[\s\S]*?_delegate\(_adminRoutes, 'get', '\/my-nickname'\)/.test(tb)
-  && /_delegate\(_tabRoutes, 'post', '\/company-business-no'\)/.test(tb)
-  && /_delegate\(_reviewerRoutes, 'post', '\/notices\/save'\)/.test(tb));
+// 결정 270: 경로 문자열 위임(_delegate) → 이름 위임(_handler). 이름이 원본 라우트의 바로 그 핸들러인지 실제로 대조한다.
+const _same = (mod, p, m, name) => { const r = require('../src/routes/' + mod); const l = r.stack.find(x => x.route && x.route.path === p && x.route.methods[m]); return !!l && l.route.stack.at(-1).handle === r.handlers[name]; };
+t('설정 라우트는 이름 위임으로 기존 핸들러를 태운다',
+  /_setHandlers\s*=\s*\{[\s\S]*?_handler\(_adminRoutes, 'myNicknameGet'\)/.test(tb)
+  && /_handler\(_tabRoutes, 'companyBusinessNo'\)/.test(tb)
+  && /_handler\(_reviewerRoutes, 'noticeSave'\)/.test(tb)
+  && _same('admin.routes', '/my-nickname', 'get', 'myNicknameGet')
+  && _same('tabconfig.routes', '/company-business-no', 'post', 'companyBusinessNo')
+  && _same('reviewer.routes', '/notices/save', 'post', 'noticeSave'));
 t('★ SQL·저장 로직을 베끼지 않았다(원장 테이블 이름이 trackB 라우트에 없음)',
   !/admin_nicknames/.test(tb) && !/reviewer_notices/.test(tb) && !/company_business_no/.test(tb));
 t('★ 위임 대상이 사라지면 부팅 시 throw — 조용한 404 금지',
-  /위임 대상 라우트를 찾지 못함/.test(tb));
+  /위임 대상 핸들러를 찾지 못함/.test(tb));
 t('원본 라우트는 무변경 — /api/admin·/api/tab·/api/reviewer 게이트 그대로',
   /router\.get\('\/my-nickname', authMiddleware,/.test(R('src/routes/admin.routes.js'))
   && /router\.post\('\/company-business-no', authMiddleware, adminOrMasterMiddleware,/.test(R('src/routes/tabconfig.routes.js'))
@@ -79,27 +84,15 @@ t('원본 라우트는 무변경 — /api/admin·/api/tab·/api/reviewer 게이�
 /* ── 3) 사본 금지(프론트) ──────────────────────────────────── */
 console.log('\n3) 사본 금지(프론트)');
 const mod = F('js/admin-settings.js');
-const adm = F('admin.html');
 const wdk = F('workdesk.html');
-const app = F('js/index-app.js');
+// 옛 관리자 대시보드 폐기(결정 267) — admin.html·index-app.js 쪽 검사(로드 순서·탭 전환 훅·전역 덮어쓰기)는 화면째 사라져 뺐다.
 
 t('마크업·로직은 공유 모듈 한 벌', /window\.AdminSettings\s*=/.test(mod)
   && /function _nicknameHtml/.test(mod) && /function _businessHtml/.test(mod) && /function _noticeHtml/.test(mod));
-t('★ 두 화면이 같은 모듈을 로드한다 (admin-siand.html 은 결정 186 44번에서 제거)', [adm, wdk].every(h => /js\/admin-settings\.js/.test(h)));
+t('★ 리뷰웹시스템[3버전]이 공유 모듈을 로드한다 (admin-siand.html 은 결정 186 44번 · 옛 대시보드는 결정 267 로 제거)', /js\/admin-settings\.js/.test(wdk));
 t('★ 화면에는 사본이 없다 — 마운트 지점만',
-  !/id="myNicknameInput"/.test(adm) && !/id="companyBusinessNoInput"/.test(adm) && !/id="rvNoticeList"/.test(adm)
-  && /id="adminSettingsMount"/.test(adm) && /id="rvNoticeMount"/.test(adm)
+  !/id="myNicknameInput"/.test(wdk) && !/id="companyBusinessNoInput"/.test(wdk) && !/id="rvNoticeList"/.test(wdk)
   && /id="adminSettingsMount"/.test(wdk));
-t('★ index-app.js 에 같은 이름의 선언이 남아 있지 않다(뒤에 로드되어 모듈 전역을 덮는다)',
-  !/function saveMyNickname/.test(app) && !/function saveCompanyBusinessNo/.test(app)
-  && !/function uploadCashReceiptGuide/.test(app) && !/function saveReviewerNotice/.test(app)
-  && !/const CR_GUIDE_CHANNELS/.test(app));
-t('★ 모듈은 index-app.js **앞**에 로드된다(순서가 바뀌면 전역이 덮인다)',
-  [adm].every(h => h.indexOf('js/admin-settings.js') < h.indexOf('js/index-app.js')));
-t('탭 전환 훅(호출부)은 그대로 — 로드 타이밍 불변',
-  /tabName === "settings"[\s\S]{0,400}loadMyNickname/.test(app)
-  && /tabName === "dashboard"[\s\S]{0,400}loadReviewerNoticesAdmin/.test(app)
-  && /autoload: false/.test(adm));
 
 /* ── 4) 리뷰웹시스템[3버전] 배선 ───────────────────────────────────── */
 console.log('\n4) 리뷰웹시스템[3버전] 배선');
@@ -113,7 +106,7 @@ t('★ 패널 노출 = 서버 게이트와 1:1(전사 설정은 AE 에게 안 �
   (() => {
     const m = /isAdmin \? \[([^\]]*)\] : \[([^\]]*)\]/.exec(wdk);
     if (!m) return false;
-    const adminOnly = ['business', 'aisamples', 'inspectmsg', 'worktable', 'homebanner', 'notice'];
+    const adminOnly = ['business', 'aisamples', 'inspectmsg', 'worktable', 'homebanner', 'notice', 'staffnotice'];   // staffnotice = 결정 265
     return adminOnly.every(p => m[1].includes(`'${p}'`) && !m[2].includes(`'${p}'`))
       && m[2].includes("'nickname'");
   })());
@@ -133,7 +126,7 @@ t('경로 매핑이 기본값·접미사 양쪽에 같은 키를 갖는다(한�
     const g = re => [...mod.matchAll(re)].map(m => m[1]);
     const a = g(/^\s{4}(\w+):\s+"\/api\//gm);
     const b = g(/^\s{4}(\w+):\s+"\/(?!api)/gm);
-    return a.length === 10 && a.join(',') === b.join(',');
+    return a.length === 13 && a.join(',') === b.join(',');   // 13 = 결정 265 직원 공지 3키 추가(검사 의미 불변)
   })());
 
 // 실제 실행 — 전역이 하나도 없는 가짜 DOM 에서 mount() 가 도는지

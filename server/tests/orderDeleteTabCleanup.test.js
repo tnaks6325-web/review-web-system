@@ -159,9 +159,10 @@ const svc = require('../src/services/workTabDelete.service');
     assert.ok(!/deleteDrive/.test(f));
   });
 
-  await ok('리뷰웹 관리자 오더 삭제도 같은 자동 정리(새로 지운 경우만)', () => {
+  // 결정 270: 옛 대시보드 전용 DELETE /api/order/admin/delete 는 지웠다 — 오더 삭제 입구는 인트라넷 원본 삭제 하나(위 검사)다.
+  await ok('리뷰웹 관리자 오더 삭제 입구는 제거 상태(삭제는 인트라넷 원본 경로로만)', () => {
     const r = read('server/src/routes/order.routes.js');
-    assert.ok(/if \(!o\.deleted_at\) \{\s*const _by = `리뷰웹 오더 삭제\(\$\{deletedBy \|\| '\?'\}\)`;\s*setImmediate\(\(\) => \{\s*require\('\.\.\/services\/workTabDelete\.service'\)\.autoCleanupDeletedOrderTab\(id, \{ by: _by \}\)/.test(r));
+    assert.ok(!/router\.delete\('\/admin\/delete'/.test(r));
   });
 
   console.log('[4] 홈 목록 "원본 오더 삭제됨"');

@@ -15,7 +15,8 @@ const readS = (p) => fs.readFileSync(path.join(__dirname, '..', 'src', p), 'utf8
 
 const cc = readF('js/campaign-cards.js');
 const rec = readF('js/index-recruit.js');
-const adm = readF('admin.html');
+// 옛 관리자 대시보드 폐기(결정 267) — 관리자 공고 카드는 리뷰웹시스템[3버전](workdesk.html)이 같은 모듈로 그린다.
+const adm = readF('workdesk.html');
 const routes = readS('routes/campaign.routes.js');
 
 let n = 0;
@@ -103,7 +104,8 @@ ok('관리자 카드 액션 = 시트 열기 제거 + 👁 리뷰어 화면 보�
   !/연결된 시트 열기/.test(cc)
   && !/docs\.google\.com\/spreadsheets\/d\//.test(cc)
   && /openReviewerPreview\('\$\{id\}'\)/.test(cc));
-ok('삭제는 헤더 삭제 모드로 분리', /toggleRecruitDelMode/.test(rec) && /recruitDelModeBtn/.test(adm));
+// 옛 관리자 대시보드 폐기(결정 267) — 헤더 [삭제 모드] 버튼(recruitDelModeBtn)은 옛 대시보드에만 있었다. 함수 존재만 본다.
+ok('삭제는 헤더 삭제 모드로 분리', /toggleRecruitDelMode/.test(rec));
 ok('삭제 모드일 때만 선택 오버레이', /delMode\s*\n?\s*\? `<div class="pdelpick"/.test(cc));
 ok('일괄 삭제는 확인 후 실행', /function deleteRecruitPicked/.test(rec) && /confirm\(/.test(rec));
 ok('삭제 모드 중엔 카운트다운 자동 새로고침 보류(선택 유실 방지)',

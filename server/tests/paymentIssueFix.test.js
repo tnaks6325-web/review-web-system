@@ -113,8 +113,7 @@ function withStubPool(handler, run) {
   t('2c 탭 설정에 되쓰는 표기는 **한글 라벨**(관리자 대시보드가 문자열 비교로 배지를 그린다)', () => {
     assert.strictEqual(svc0.tabBankLabel('kbank'), '케이뱅크');
     assert.strictEqual(svc0.tabBankLabel('hana'), '하나은행');
-    const admin = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'js', 'index-app.js'), 'utf8');
-    assert.ok(admin.includes("transferBank === '케이뱅크'"), '탭설정 화면이 한글 라벨을 비교한다 — 표기를 바꾸면 그 배지가 죽는다');
+    // 옛 관리자 대시보드 폐기(결정 267) — 한글 라벨을 비교하던 옛 탭설정 화면(index-app.js)은 지웠다. 저장된 값과의 호환을 위해 라벨 표기 고정은 유지한다.
   });
 
   /* ══════════════════════════════════════════════════════════

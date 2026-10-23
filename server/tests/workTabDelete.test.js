@@ -63,6 +63,31 @@ console.log('\n[A] (sheet_id, tab_name) 표 전수 분류');
   }
   ok('★ 묘비는 남기는 쪽이다(작업이 사라진 뒤에야 쓸모가 생긴다)',
     keep.includes('orphan_capture_tombstones'));
+  /* ── 묘비 기록 계약(결정 064) — 2026-10-22 orphanCaptureCleanup.test.js 에서 옮김(결정 272) ──
+     고아 캡처 정리 창구·서비스는 지웠지만 작업 삭제가 묘비를 남기는 코드는 살아 있다.
+     그 코드가 작업 삭제를 망가뜨리지 않게 지키던 단언은 의미 그대로 여기서 계속 본다. */
+  {
+    const src2 = readSrv('src/services/workTabDelete.service.js');
+    const del = src2.slice(src2.indexOf('async function deleteTask'),
+      src2.indexOf('async function findOrphanCampaigns'));
+    /* ⚠ `/SAVEPOINT orphan_tomb/` 만 보면 ROLLBACK·RELEASE 줄에도 걸려 생성문을 지워도 초록이다.
+         생성문 자체와 **순서**를 고정한다. */
+    const iSp  = del.indexOf("query('SAVEPOINT orphan_tomb')");
+    const iIns = del.indexOf('INSERT INTO orphan_capture_tombstones');
+    ok('★★★ 묘비: 세이브포인트를 실제로 만든다', iSp > 0);
+    ok('★★★ 묘비: 세이브포인트가 INSERT 보다 앞(뒤면 감싼 게 아니다)', iSp > 0 && iIns > 0 && iSp < iIns);
+    ok('★★ 묘비: 실패하면 catch 안에서 되돌린다(아니면 뒤 DELETE 가 25P02 로 죽어 작업 삭제 전체가 롤백)',
+      /catch \(tombErr\) \{[\s\S]{0,300}ROLLBACK TO SAVEPOINT orphan_tomb/.test(del));
+    ok('★ 묘비: 성공하면 해제한다', /RELEASE SAVEPOINT orphan_tomb/.test(del));
+    ok('★★ 묘비 기록이 DELETE_TABLES 루프보다 앞(뒤면 읽을 원장이 없다)',
+      iIns > 0 && iIns < del.indexOf('for (const t of DELETE_TABLES)'));
+    ok('★ 묘비 실패가 삭제를 막지 않는다(fail-soft)', /캡처 묘비 기록 실패\(삭제는 계속\)/.test(src2));
+    ok('★ 묘비 재실행 안전(같은 파일 두 번 안 남긴다)', /ON CONFLICT \(file_id\) DO NOTHING/.test(src2));
+    ok('★ 이미 휴지통 처리된 파일은 묘비에 안 남긴다', /slot_key,''\) <> 'trashed'/.test(src2));
+    const mig = readSrv('migrations/134_orphan_capture_tombstones.sql');
+    ok('묘비 표 마이그레이션 존속(file_id 유니크)',
+      /CREATE TABLE IF NOT EXISTS orphan_capture_tombstones/.test(mig) && /uq_orphan_tombstone_file/.test(mig));
+  }
   ok('삭제 목록에 중복이 없다', new Set(DELETE_TABLES).size === DELETE_TABLES.length);
   ok('★ 등록행(tab_configs)이 마지막(자식 → 부모 순서 계약)',
     DELETE_TABLES[DELETE_TABLES.length - 1] === 'tab_configs');

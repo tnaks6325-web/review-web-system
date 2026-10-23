@@ -36,6 +36,10 @@ const ALLOW = {
   'services/campaignPayAmountSync.service.js|syncCampaignPayAmount|campaign_options': '옛 원본 수정 경로의 전파(금액) — 연결+apply 오더는 _intakeSourceBidir 로 갈라져 여기 오지 않는다',
   'routes/order.routes.js|_intakeSourceRevisionHandler|work_orders': '연결+apply 면 그 앞에서 _intakeSourceBidir 로 갈라진다(종전 경로 = 연결 안 됨·스위치 off)',
   'services/campaignPayAmountSync.service.js|syncCampaignPayAmount|recruit_campaigns': '옛 원본 수정 경로의 전파(금액 — 5단계)',
+  // 결정 279: 가격 신고 [금액 고치기] — 연결 공고는 _editLinkedPrice 가 알림 트랜잭션 밖에서 먼저 공유 저장(applySharedPatch)을 탄다.
+  //   여기 쓰기는 ① 연결 아닌 공고 ② 공유 저장 뒤 투영이 공고를 못 따라왔을 때 공고만 오더와 같은 금액으로 맞춤 — 오더와 갈라지지 않는다.
+  'services/campaignPriceReport.service.js|_writePriceInTx|recruit_campaigns': '가격 신고 금액 고치기 — 연결 공고는 _editLinkedPrice(공유 저장) 먼저(결정 279)',
+  'services/campaignPriceReport.service.js|_writePriceInTx|campaign_options': '가격 신고 금액 고치기 — 연결 공고는 _editLinkedPrice(공유 저장) 먼저(결정 279)',
   'services/campaignPayAmountSync.service.js|syncCampaignThumbnailInTx|recruit_campaigns': '공유 저장 투영 본체(트랜잭션 안) + 옛 래퍼',
   'services/campaignPayAmountSync.service.js|syncCampaignInflowInTx|recruit_campaigns': '공유 저장 투영 본체 + 옛 래퍼',
   'services/campaignPayAmountSync.service.js|syncCampaignInflowInTx|campaign_options': '공유 저장 투영 본체 + 옛 래퍼',
@@ -80,10 +84,11 @@ function scan() {
 {
   const ord = fs.readFileSync(path.join(SRC, 'routes/order.routes.js'), 'utf8');
   const dyn = [...ord.matchAll(/UPDATE work_orders SET \$\{sets\.join/g)].map(m => {
-    const fm = [...ord.slice(0, m.index).matchAll(/(?:async\s+)?function\s+(\w+)|router\.(?:get|put|post|patch|delete)\('([^']+)'/g)].pop();
-    return fm ? (fm[1] || fm[2]) : '?';
+    // main 결정 270: 관리자 수정은 공개 경로(router.put('/admin/edit')) 대신 이름 붙은 핸들러(_handlers.orderAdminEdit — Track B 가 이름으로 부른다)
+    const fm = [...ord.slice(0, m.index).matchAll(/^(?:async\s+)?function\s+(\w+)|^router\.(?:get|put|post|patch|delete)\('([^']+)'|^_handlers\.(\w+) = /gm)].pop();
+    return fm ? (fm[1] || fm[2] || fm[3]) : '?';
   });
-  assert.deepEqual(dyn, ['_intakeUpdateHandler', '/admin/edit'], '동적 SET 으로 작업오더를 쓰는 곳: ' + dyn.join(','));
+  assert.deepEqual(dyn, ['_intakeUpdateHandler', 'orderAdminEdit'], '동적 SET 으로 작업오더를 쓰는 곳: ' + dyn.join(','));
   // 다른 파일에 동적 SET 작업오더 쓰기가 생기면 실패(공유 저장 본체 제외)
   const files = [];
   (function walk(d) { for (const f of fs.readdirSync(d)) { const p = path.join(d, f); if (fs.statSync(p).isDirectory()) walk(p); else if (p.endsWith('.js')) files.push(p); } })(SRC);

@@ -150,7 +150,7 @@ test('열린 직원 작업보드는 같은 작업의 구매제출만 자동 갱�
   const trackb = read('src/routes/trackB.routes.js');
   const sse = read('src/utils/sse.js');
   assert.match(trackb, /router\.get\('\/events', authMiddleware, internalMiddleware/);
-  assert.match(trackb, /addSseClient\(req, res, \{ role: 'workdesk', expiresAt:/);
+  assert.match(trackb, /addSseClient\(req, res, \{ role: 'workdesk', userRole: _role\(req\), expiresAt:/);
   assert.match(sse, /function emitOrderSubmit[\s\S]*?role === 'admin' \|\| role === 'workdesk'/);
   assert.match(workdesk, /\/api\/trackb\/events\?token=/);
   assert.doesNotMatch(workdesk, /\/api\/diag\/events\?token=/);
@@ -210,7 +210,7 @@ test('직원 작업보드 실시간 연결은 로그인 만료 시 종료된다'
   req.emit('close');
 
   const trackb = read('src/routes/trackB.routes.js');
-  assert.match(trackb, /addSseClient\(req, res, \{ role: 'workdesk', expiresAt: Number\.isFinite\(exp\) \? exp \* 1000 : Date\.now\(\) \}\)/);
+  assert.match(trackb, /addSseClient\(req, res, \{ role: 'workdesk', userRole: _role\(req\), expiresAt: Number\.isFinite\(exp\) \? exp \* 1000 : Date\.now\(\) \}\)/);
 });
 
 test('참여형 구매 알림은 요청의 빈 좌표가 아니라 서버가 확정한 작업표를 사용한다', () => {

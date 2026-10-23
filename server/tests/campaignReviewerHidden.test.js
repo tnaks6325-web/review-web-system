@@ -27,7 +27,7 @@ const migration = read('migrations/085_campaign_reviewer_hidden.sql');
 const modal     = read('../frontend/js/recruit-modal.js');
 const recruitJs = read('../frontend/js/index-recruit.js');
 const cards     = read('../frontend/js/campaign-cards.js');
-const adminHtml = read('../frontend/admin.html');
+// 옛 관리자 대시보드 폐기(결정 267) — admin.html 진입 경로까지 삭제(파일 없음 — 아래 사본 부재 단언은 남은 화면들로 본다)
 const workdesk  = read('../frontend/workdesk.html');
 
 let passed = 0;
@@ -96,7 +96,7 @@ ok('★ 카드 배지는 관리자 화면에서만(admin 분기) — 이미 숨�
 /* 🧪 테스트 공고 프리셋·버튼은 2026-09-28 제거(결정 186 18번) — 숨김 토글이 없어진 뒤로 그 프리셋
    공고가 실제 리뷰어 목록에 떴다. 되살아나지 않는지만 본다(창구 0). */
 ok('★ 테스트 공고 프리셋·버튼이 없다(운영에서 리뷰어에게 보이는 테스트 공고를 만들지 않는다)',
-  !/function openTestCampaignModal/.test(recruitJs) && !/openTestCampaignModal/.test(workdesk) && !/openTestCampaignModal/.test(adminHtml));
+  !/function openTestCampaignModal/.test(recruitJs) && !/openTestCampaignModal/.test(workdesk));
 
 // ── E. 진짜 PG 로 필터 실행 확인(있을 때만) ──
 (async () => {

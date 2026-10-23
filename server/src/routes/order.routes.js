@@ -1,5 +1,8 @@
 const express = require('express');
 const router = express.Router();
+// Track B(trackB.routes.js)가 경로 문자열 대신 이름으로 부르는 핸들러 모음 — 맨 아래 router.handlers 로 내보낸다(결정 270).
+const { lastRouteHandler } = require('../utils/routeHandlers');
+const _handlers = {};
 const crypto = require('crypto');
 const {
   SourceContractError,
@@ -1750,6 +1753,7 @@ router.post('/guide-image', async (req, res, next) => {
     next(err);
   }
 });
+_handlers.guideImageUpload = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // GET /api/order/guide-image/:id — Drive 파일을 서버가 받아 스트리밍 (이미지 표시용)
 // <img src>가 헤더 인증을 못 보내므로 토큰 없이 동작. id는 추측 불가한 Drive fileId.
@@ -1787,38 +1791,10 @@ router.get('/guide-image/:id', async (req, res) => {
 // staff 차단: adminOrMasterMiddleware
 // ═══════════════════════════════════════════════════════════
 
-// GET /api/order/admin/new-count — 신규(제출됨) 오더 수 (배지/알림 폴링용)
-router.get('/admin/new-count', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    await _ensureTables();
-    const { rows } = await pool.query(
-      `SELECT COUNT(*)::int AS count FROM work_orders WHERE status = 'submitted' AND deleted_at IS NULL`
-    );
-    res.json({ ok: true, count: rows[0] ? rows[0].count : 0 });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// GET /api/order/admin/list — 인박스 (status 필터 선택)
-router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    await _ensureTables();
-    const { status } = req.query;
-    let q = `SELECT * FROM work_orders WHERE deleted_at IS NULL`;
-    const vals = [];
-    if (status) { q += ` AND status = $1`; vals.push(status); }
-    q += ` ORDER BY created_at DESC`;
-    const { rows } = await pool.query(q, vals);
-    res.json({ ok: true, data: rows });
-  } catch (err) {
-    next(err);
-  }
-});
-
 // PUT /api/order/admin/status — 상태 전이 (전이 규칙 서버 검증)
 // body: { id, status, admin_memo?, linked_campaign_id? }
-router.put('/admin/status', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+// (PUT /api/order/admin/status 공개 경로는 삭제 — Track B 프록시가 이 핸들러를 이름으로 부른다 · 결정 270)
+_handlers.orderAdminStatus = async (req, res, next) => {
   try {
     await _ensureTables();
     const b = req.body || {};
@@ -1888,7 +1864,7 @@ router.put('/admin/status', authMiddleware, adminOrMasterMiddleware, async (req,
   } catch (err) {
     next(err);
   }
-});
+};
 
 // POST /api/order/admin/accept — 접수: work_sheet_url(gid)의 그 탭을 캠페인 탭 관리에 등록 +
 //   작업오더 기본정보를 탭 메타에 자동 입력 + 상태 reviewing 전이 (단일 원자 처리)
@@ -1898,7 +1874,8 @@ router.put('/admin/status', authMiddleware, adminOrMasterMiddleware, async (req,
 // ★ 중복 방지: tab_name 을 gid가 가리키는 "실제 탭 현재 제목"으로 등록 →
 //   인덱스 자동갱신(smartBuild)의 (sheet_id, tab_name) 충돌과 정렬되어 중복 줄이 생기지 않는다.
 //   (smartBuild 는 manager/time_range 등 메타 컬럼을 건드리지 않으므로 작업오더 메타는 보존됨)
-router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+// (POST /api/order/admin/accept 공개 경로는 삭제 — Track B 프록시가 이 핸들러를 이름으로 부른다 · 결정 270)
+_handlers.orderAdminAccept = async (req, res, next) => {
   try {
     await _ensureTables();
     const id = String((req.body || {}).id || '').trim();
@@ -2327,7 +2304,7 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
   } catch (err) {
     next(err);
   }
-});
+};
 
 // PUT /api/order/admin/update — 관리자 필드 보정 (선택)
 // body: { id, chat_room_url?, admin_memo?, linked_campaign_id? }
@@ -2375,6 +2352,7 @@ router.put('/admin/update', authMiddleware, adminOrMasterMiddleware, async (req,
     next(err);
   }
 });
+_handlers.orderAdminUpdate = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
 // ═══════════════════════════════════════════════════════════
 // PUT /api/order/admin/edit — 작업오더 관리자 수동 수정
@@ -2418,7 +2396,8 @@ function _d10(v) {
   return String(v).slice(0, 10);
 }
 
-router.put('/admin/edit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+// (PUT /api/order/admin/edit 공개 경로는 삭제 — Track B 프록시가 이 핸들러를 이름으로 부른다 · 결정 270)
+_handlers.orderAdminEdit = async (req, res, next) => {
   try {
     await _ensureTables();
     const b = req.body || {};
@@ -2577,7 +2556,7 @@ router.put('/admin/edit', authMiddleware, adminOrMasterMiddleware, async (req, r
   } catch (err) {
     next(err);
   }
-});
+};
 
 // ── 인트라넷 처리메모 webhook push (공용 헬퍼) ─────────────────
 //   send-memo(처리메모 전송)와 admin/edit(관리자 수정 알림)이 같은 채널을 쓴다 —
@@ -2589,112 +2568,7 @@ router.put('/admin/edit', authMiddleware, adminOrMasterMiddleware, async (req, r
 const _pushIntranetMemo = (o, memo, sentBy, sentAt) =>
   require('../services/intranetMemo.service').pushIntranetMemo(o, memo, sentBy, sentAt);
 
-// PUT /api/order/admin/send-memo — 처리메모 저장 + 인트라넷으로 즉시 push(webhook)
-// body: { id, memo }
-router.put('/admin/send-memo', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    await _ensureTables();
-    const b = req.body || {};
-    if (!b.id) return res.status(400).json({ ok: false, error: 'id가 필요합니다.' });
-    const memo = (b.memo || b.admin_memo || '').toString();
-    if (!memo.trim()) return res.status(400).json({ ok: false, error: '메모 내용이 비어 있습니다.' });
-
-    // 현재 오더 + 기존 로그 조회
-    const { rows: cur } = await pool.query(
-      `SELECT id, title, status, created_by, memo_log FROM work_orders WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [b.id]
-    );
-    if (cur.length === 0) return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
-    const o = cur[0];
-    let log = [];
-    try { const p = JSON.parse(o.memo_log || '[]'); if (Array.isArray(p)) log = p; } catch (_) {}
-
-    const sentBy = req.admin?.name || '';
-    const sentAt = new Date().toISOString();
-
-    // 인트라넷 webhook push (공용 헬퍼)
-    const { delivered, deliverError } = await _pushIntranetMemo(o, memo, sentBy, sentAt);
-
-    // 로그 누적 (최근 100건 유지)
-    log.push({ memo, by: sentBy, at: sentAt, delivered, error: deliverError });
-    if (log.length > 100) log = log.slice(-100);
-
-    const { rows } = await pool.query(
-      `UPDATE work_orders SET admin_memo = $2, memo_log = $3, updated_at = NOW() WHERE id = $1 RETURNING *`,
-      [b.id, memo, JSON.stringify(log)]
-    );
-    res.json({ ok: true, data: rows[0], delivered, deliverError });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// DELETE /api/order/admin/delete — 관리자 작업오더 삭제 (soft) + 인트라넷 동기 삭제 push
-// body: { id }
-// 리뷰웹 인박스에서 삭제 → soft delete(이력 보존) → 인트라넷으로 삭제 이벤트 전파(best-effort)
-// 필요 env: INTRANET_ORDER_DELETE_WEBHOOK_URL (인트라넷 수신 URL), INTRANET_WEBHOOK_KEY (공유 시크릿)
-router.delete('/admin/delete', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    await _ensureTables();
-    const b = req.body || {};
-    const id = String(b.id || '').trim();
-    if (!id) return res.status(400).json({ ok: false, error: 'id가 필요합니다.' });
-
-    const { rows: cur } = await pool.query(
-      `SELECT id, title, created_by, deleted_at FROM work_orders WHERE id = $1 LIMIT 1`, [id]
-    );
-    if (cur.length === 0) return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
-    const o = cur[0];
-    const deletedBy = req.admin?.name || '';
-
-    // soft delete (이미 삭제된 경우 멱등)
-    if (!o.deleted_at) {
-      await pool.query(
-        `UPDATE work_orders SET deleted_at = NOW(), deleted_by = $2, deleted_by_name = $2, updated_at = NOW() WHERE id = $1`,
-        [id, deletedBy]
-      );
-    }
-
-    // 인트라넷으로 삭제 전파 (비차단: 실패해도 리뷰웹 삭제는 유지)
-    let delivered = false, deliverError = null;
-    const hook = process.env.INTRANET_ORDER_DELETE_WEBHOOK_URL;
-    if (hook) {
-      try {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 8000);
-        const resp = await fetch(hook, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Review-Key': process.env.INTRANET_WEBHOOK_KEY || '' },
-          body: JSON.stringify({
-            event: 'order_deleted',
-            order_id: o.id, title: o.title, requester_name: o.created_by,
-            deleted_by: deletedBy, deleted_at: new Date().toISOString(),
-          }),
-          signal: ctrl.signal,
-        });
-        clearTimeout(timer);
-        delivered = resp.ok;
-        if (!resp.ok) deliverError = 'HTTP ' + resp.status;
-      } catch (e) {
-        deliverError = e.message;
-        logger.warn(`[order] 인트라넷 삭제 webhook 실패: ${e.message}`);
-      }
-    } else {
-      deliverError = 'webhook 미설정';
-    }
-
-    logger.info(`[order] 관리자 작업오더 삭제: ${id} (by ${deletedBy}), 인트라넷 전파=${delivered}`);
-    res.json({ ok: true, id, intranetDeleted: delivered, deliverError });
-    // ★ 결정 254: 리뷰웹 관리자 삭제도 인트라넷 삭제와 같이 손대지 않은 빈 작업을 정리한다(응답 뒤 · throw 없음)
-    if (!o.deleted_at) {
-      const _by = `리뷰웹 오더 삭제(${deletedBy || '?'})`;
-      setImmediate(() => {
-        require('../services/workTabDelete.service').autoCleanupDeletedOrderTab(id, { by: _by })
-          .catch(e => logger.warn(`[order] 오더 삭제 후 작업 정리 실패(무시): ${e.message}`));
-      });
-    }
-  } catch (err) {
-    next(err);
-  }
-});
+// ★ 이름을 빼거나 바꾸면 trackB 가 기동 시 바로 실패한다(fail-closed) — 옛 공개 경로를 지워도 Track B 는 그대로다.
+router.handlers = Object.freeze(_handlers);
 
 module.exports = router;

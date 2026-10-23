@@ -8,21 +8,20 @@ const fs = require('fs');
 const path = require('path');
 const read = f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8');
 
-const smart = read('services/smartBuild.service.js');
-assert.ok(!/throttledCall\(\(\)\s*=>\s*getSheetModifiedTime/.test(smart), 'smartBuild: modifiedTime이 시트 lane에 잔존');
-assert.ok(/driveThrottledCall\(\(\)\s*=>\s*getSheetModifiedTime/.test(smart), 'smartBuild: driveThrottledCall 이관 확인');
-assert.ok(/driveThrottledCall\(\(\)\s*=>\s*shareSheetWithServiceAccount/.test(smart), 'smartBuild: share도 drive lane');
+// (smartBuild.service 는 2026-10-22 삭제 — 결정 273. 되살아나면 아래 부재 단언이 잡는다.)
+assert.ok(!fs.existsSync(path.join(__dirname, '..', 'src', 'services', 'smartBuild.service.js')), 'smartBuild.service 가 되살아났다(결정 273)');
 
 const raw = read('services/rawMirror.service.js');
 assert.ok(!/await\s+throttledMap\(/.test(raw), 'rawMirror: 팬텀 throttledMap 잔존');
-assert.ok(/concurrentMap\(/.test(raw), 'rawMirror: concurrentMap 교체 확인');
+assert.ok(!/await\s+getSheetModifiedTime\(/.test(raw), 'rawMirror: modifiedTime 맨 호출 잔존(R4 — 무제한 버스트)');
 assert.ok(/driveThrottledCall\(\(\)\s*=>\s*getSheetModifiedTime/.test(raw), 'rawMirror: modifiedTime drive lane');
+// (전체 미러 mirrorAllSheets 의 concurrentMap 단언은 함수째 삭제로 대상이 사라졌다 — 결정 273)
 
 const ib = read('services/indexBuilder.service.js');
 assert.ok(!/await\s+throttledMap\(/.test(ib), 'indexBuilder: 팬텀 throttledMap 잔존');
-assert.ok(/concurrentMap\(/.test(ib), 'indexBuilder: concurrentMap 교체 확인');
-assert.ok(!/await\s+getSheetModifiedTime\(/.test(ib), 'checkDirtySheets: 맨 호출 잔존(R4 — 무제한 버스트)');
+assert.ok(!/await\s+getSheetModifiedTime\(/.test(ib), 'indexBuilder: modifiedTime 맨 호출 잔존(R4 — 무제한 버스트)');
 assert.ok(/driveThrottledCall\(\(\)\s*=>\s*getSheetModifiedTime/.test(ib), 'indexBuilder: drive lane 래핑 확인');
+// (buildIndexSmart 의 concurrentMap · checkDirtySheets 단언은 함수째 삭제로 대상이 사라졌다 — 결정 273)
 
 // (indexScan.service 는 결정 186 80번에서 제거)
 

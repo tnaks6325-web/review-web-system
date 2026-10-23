@@ -79,53 +79,15 @@ async function main() {
   });
 
   await test('인증 없이 보호된 API 호출', async () => {
-    const r = await req('GET', '/api/index/status');
+    const r = await req('GET', '/api/admin/my-nickname');   // (옛 표본 smart-build/status 는 2026-10-22 제거 — 결정 273)
     if (r.status !== 401) throw new Error(`status: ${r.status}`);
     return `401 반환 확인`;
   });
   console.log('');
 
-  // ═══ 3. 관리자 사용자 CRUD ═══
-  console.log('▶ [3] 관리자 사용자 CRUD');
-  await test('POST /api/admin/users (추가)', async () => {
-    const r = await req('POST', '/api/admin/users', { action: 'add', name: 'testadmin', pw: 'testpass123' }, authH());
-    if (!r.data.success && !r.data.ok) throw new Error(JSON.stringify(r.data));
-    return '관리자 추가 성공';
-  });
+  // (3. 관리자 사용자 CRUD /api/admin/users — 옛 관리자 대시보드 전용 경로라 2026-10-22 제거 · 결정 270)
 
-  await test('POST /api/admin/users (목록)', async () => {
-    const r = await req('POST', '/api/admin/users', { action: 'list' }, authH());
-    if (!r.data.success && !r.data.users) throw new Error(JSON.stringify(r.data));
-    return `관리자 ${r.data.users?.length || 0}명`;
-  });
-
-  await test('POST /api/admin/users (삭제)', async () => {
-    const r = await req('POST', '/api/admin/users', { action: 'delete', name: 'testadmin' }, authH());
-    if (!r.data.success && !r.data.ok) throw new Error(JSON.stringify(r.data));
-    return '관리자 삭제 성공';
-  });
-  console.log('');
-
-  // ═══ 4. Staff CRUD ═══
-  console.log('▶ [4] 영업담당자 CRUD');
-  await test('POST /api/admin/staff-users (추가)', async () => {
-    const r = await req('POST', '/api/admin/staff-users', { action: 'add', name: 'teststaff', pw: 'staffpass123' }, authH());
-    if (!r.data.success && !r.data.ok) throw new Error(JSON.stringify(r.data));
-    return '스태프 추가 성공';
-  });
-
-  await test('POST /api/admin/staff-login', async () => {
-    const r = await req('POST', '/api/admin/staff-login', { name: 'teststaff', pw: 'staffpass123' });
-    if (!r.data.success || !r.data.token) throw new Error(JSON.stringify(r.data));
-    return `스태프 로그인 성공`;
-  });
-
-  await test('POST /api/admin/staff-users (삭제)', async () => {
-    const r = await req('POST', '/api/admin/staff-users', { action: 'delete', name: 'teststaff' }, authH());
-    if (!r.data.success && !r.data.ok) throw new Error(JSON.stringify(r.data));
-    return '스태프 삭제 성공';
-  });
-  console.log('');
+  // (4. 영업담당자 CRUD /api/admin/staff-users — 옛 관리자 대시보드 전용 경로라 2026-10-22 제거 · 결정 270)
 
   // ═══ 5. 리뷰어 관리 ═══
   console.log('▶ [5] 리뷰어 관리');
@@ -147,47 +109,15 @@ async function main() {
     return `조회: ${r.data.name}`;
   });
 
-  await test('GET /api/reviewer/list', async () => {
-    const r = await req('GET', '/api/reviewer/list', null, authH());
-    if (!r.data.ok && !r.data.reviewers) throw new Error(JSON.stringify(r.data));
-    return `리뷰어 ${r.data.reviewers?.length || r.data.list?.length || 0}명`;
-  });
-
   await test('POST /api/reviewer/profile (get)', async () => {
     const r = await req('POST', '/api/reviewer/profile', { action: 'get', phone8: '12345678' });
     if (!r.data.ok) throw new Error(JSON.stringify(r.data));
     return `프로필 조회 성공`;
   });
 
-  await test('POST /api/reviewer/delete', async () => {
-    const r = await req('POST', '/api/reviewer/delete', { name: '테스트리뷰어', phone: '01012345678' }, authH());
-    if (!r.data.ok) throw new Error(JSON.stringify(r.data));
-    return '리뷰어 삭제 성공';
-  });
   console.log('');
 
-  // ═══ 6. 탭 설정 ═══
-  console.log('▶ [6] 탭 설정');
-  await test('POST /api/tab/config (설정 저장)', async () => {
-    const r = await req('POST', '/api/tab/config', {
-      sheetId: 'test-sheet-id', tabName: 'test-tab', manager: '김테스트',
-      reviewType: '블로그', paymentType: '건별', displayName: '테스트탭'
-    }, authH());
-    if (r.data.error) throw new Error(r.data.error);
-    return '탭 설정 저장 성공';
-  });
-
-  await test('GET /api/tab/config', async () => {
-    const r = await req('GET', '/api/tab/config', null, authH());
-    if (r.data.error) throw new Error(r.data.error);
-    return `탭 설정 ${r.data.configs?.length || r.data.detailMap ? '조회' : '0건'} 성공`;
-  });
-
-  await test('GET /api/tab/options', async () => {
-    const r = await req('GET', '/api/tab/options');
-    return `탭 옵션 조회 성공`;
-  });
-  console.log('');
+  // (6. 탭 설정 /api/tab/config·options — 옛 관리자 대시보드 전용 경로라 2026-10-22 제거 · 결정 270)
 
   // ═══ 7. 검색 ═══
   console.log('▶ [7] 검색');
@@ -198,34 +128,11 @@ async function main() {
   });
   console.log('');
 
-  // ═══ 8. 인덱스 ═══
-  console.log('▶ [8] 인덱스');
-  await test('GET /api/index/status', async () => {
-    const r = await req('GET', '/api/index/status', null, authH());
-    if (!r.data.ok) throw new Error(JSON.stringify(r.data));
-    return `인덱스: count=${r.data.meta?.count}, builtAt=${r.data.meta?.builtAt}`;
-  });
-  console.log('');
+  // (8. 인덱스 상태 /api/index/status — 옛 관리자 대시보드 전용 경로라 2026-10-22 제거 · 결정 270)
 
   // (9. 메모 /api/memo — 2026-09-28 제거, 결정 186 55번)
 
-  // ═══ 10. 단축 URL ═══
-  console.log('▶ [10] 단축 URL');
-  let shortCode = '';
-  await test('POST /api/short/create', async () => {
-    const r = await req('POST', '/api/short/create', { s: 'test-sheet', g: '123', t: 'test-tab', d: '테스트탭' });
-    if (!r.data.code) throw new Error(JSON.stringify(r.data));
-    shortCode = r.data.code;
-    return `code: ${r.data.code}, url: ${r.data.shortUrl}`;
-  });
-
-  await test('GET /api/short/resolve', async () => {
-    if (!shortCode) throw new Error('shortCode 없음');
-    const r = await req('GET', `/api/short/resolve?code=${shortCode}`);
-    if (!r.data.s) throw new Error(JSON.stringify(r.data));
-    return `해석: sheet=${r.data.s}, tab=${r.data.t}`;
-  });
-  console.log('');
+  // (10. 단축 URL 생성 /api/short/create — 옛 관리자 대시보드 전용 경로라 2026-10-22 제거 · 결정 270)
 
   // (11. 입금처리 /api/payment — 2026-09-28 제거, 결정 186 57번. 입금은 /api/trackb/payment/*)
 
@@ -249,18 +156,7 @@ async function main() {
   });
   console.log('');
 
-  // ═══ 13. 관리자 대시보드 ═══
-  console.log('▶ [13] 대시보드 / 빌드잠금');
-  await test('GET /api/admin/dashboard', async () => {
-    const r = await req('GET', '/api/admin/dashboard', null, authH());
-    return `대시보드: ${JSON.stringify(r.data).substring(0, 100)}`;
-  });
-
-  await test('POST /api/admin/release-lock', async () => {
-    const r = await req('POST', '/api/admin/release-lock', {}, authH());
-    return `잠금 해제: ${JSON.stringify(r.data).substring(0, 80)}`;
-  });
-  console.log('');
+  // (13. 빌드잠금 해제 /api/admin/release-lock — 시트 시절 색인 수동 조작이라 2026-10-22 제거 · 결정 273)
 
   // (14. 진단 엔드포인트 debug-tab 은 2026-10-05 제거 — 결정 186 103번)
 

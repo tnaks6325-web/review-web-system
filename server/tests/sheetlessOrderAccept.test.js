@@ -275,13 +275,16 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
     ok('② 수동제출도 sheetlessDone 이면 enqueue 하지 않는다', /if \(ledger\.sheetRow && !sheetlessDone && !queuedWorkboardApply\)/.test(man));
     // ★★ 백스톱이 핵심 — 이관 전에 쌓여 있던 큐·새 호출부·판정 실패분이 여기서 막힌다
     ok('③ 큐 실행부 백스톱: 쓰기 직전 다시 판정', /isSheetless\(pool, sheetId, tabName\)/.test(sq));
-    // ★ 위치가 곧 방어다 — 시트를 **읽기 전에** 막아야 한다. 함수 본문 안에서 순서를 본다
-    //   (파일 전체 indexOf 는 `_readGuardWindow` 의 *정의*를 먼저 집어 항상 통과한다).
-    const exec = sq.slice(sq.indexOf('async function _executeBatch'));
-    ok('③ 백스톱은 배치 시작 직후 = 가드 읽기·시트 쓰기 **앞**',
+    // ★ 위치가 곧 방어다 — 시트를 **읽기 전에** 막아야 한다. 함수 본문 안에서 순서를 본다.
+    //   결정 273: 배치 경로(_executeBatch)를 지우며 백스톱을 단건 order_append 실행부로 옮겼다 — 같은 순서 계약을 그 본문에서 본다(검사 의미 불변).
+    const exec = sq.slice(sq.indexOf("case 'order_append': {"), sq.indexOf("case 'order_update': {"));
+    ok('③ 백스톱은 order_append 실행 맨 앞 = RAW 메타 조회·가드 읽기·시트 쓰기 **앞**',
       exec.indexOf('무시트 탭 시트쓰기 차단') >= 0 &&
-      exec.indexOf('무시트 탭 시트쓰기 차단') < exec.indexOf('await _readGuardWindow(') &&
+      exec.indexOf('무시트 탭 시트쓰기 차단') < exec.indexOf('loadRawTabContext(') &&
+      exec.indexOf('무시트 탭 시트쓰기 차단') < exec.indexOf('throttledCall(') &&
       exec.indexOf('무시트 탭 시트쓰기 차단') < exec.indexOf('batchUpdateSheet('));
+    ok('③ 백스톱 사유는 done 갱신까지 이어진다(error_msg 를 NULL 로 덮지 않는다)',
+      /error_msg = \$2 WHERE id = \$1`,\s*\[item\.id, \(execOut && execOut\.doneNote\) \|\| null\]/.test(sq));
     ok('③ 큐 항목은 버리지 않고 done + 사유(무신호 금지)', /sheetless tab — 시트 쓰기 생략/.test(sq));
     ok('④ 복구(reconcile)도 큐 대신 작업표 재기록', /isSheetlessTab\(_slKeys/.test(ol) && /writeOrderToWorktable\(/.test(ol));
     // ★ 목록에서 통째로 빼면 그 주문은 영영 복구되지 않는다 → 대체 경로가 있어야 한다
@@ -306,11 +309,12 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
   console.log('\n[E] 시트를 읽어 대조하는 경로에서 제외');
   {
     const wv = noLineComments(srv('src/services/writtenVerify.service.js'));
-    const bs = noLineComments(srv('src/jobs/orderBatchScheduler.js'));
     const slSql = /COALESCE\(tc\.sheetless, FALSE\) = TRUE/;
     ok('사후검증 대상에서 무시트 탭 제외(정상 주문 오판 → 구글 쓰기 전이 차단)',
       slSql.test(wv) && /NOT EXISTS \(\s*SELECT 1 FROM tab_configs tc/.test(wv));
-    ok('시트 반영 배치 스케줄러도 무시트 탭 제외', slSql.test(bs));
+    // 결정 273: 시트 반영 배치 스케줄러(orderBatchScheduler)는 삭제 — 남은 단건 실행부의 무시트 백스톱은 [D]③ 이 본다.
+    ok('시트 반영 배치 스케줄러가 되살아나지 않았다(되살리면 무시트 탭 제외부터)',
+      !fs.existsSync(path.join(__dirname, '..', 'src/jobs/orderBatchScheduler.js')));
     // ★★ 새 종결 상태를 만들지 않았다 — 'written' 이 이미 종결이고 소비처가 여럿이다
     const so = noLineComments(srv('src/services/sheetlessOrder.service.js'));
     ok("종결 상태는 기존 'written' 그대로(새 상태 미도입 — 소비처 스윕 불필요)",
@@ -372,12 +376,17 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
     ok('★ 접수 경로에 랜덤 시트ID 발급이 없다', !/newVirtualSheetId|newVirtualGid/.test(orN));
 
     // 라우터 스택 실검사 — 게이트가 실제로 걸려 있는지
+    // 결정 270: 옛 대시보드 전용 공개 경로 POST /api/order/admin/accept(auth+adminOrMaster)는 지웠다 —
+    //   접수 창구는 Track B /work-orders/accept 하나이고, 그 게이트(auth → 내부인 → 편집 허용자)를 실제 스택으로 본다.
     const router = require('../src/routes/order.routes');
-    const layer = router.stack.find(l => l.route && l.route.path === '/admin/accept');
-    ok('POST /admin/accept 존재', !!layer && !!layer.route.methods.post);
+    ok('옛 공개 경로 POST /admin/accept 제거 · 핸들러는 이름으로 남음',
+      !router.stack.some(l => l.route && l.route.path === '/admin/accept') && typeof router.handlers.orderAdminAccept === 'function');
+    const tb = require('../src/routes/trackB.routes');
+    const layer = tb.stack.find(l => l.route && l.route.path === '/work-orders/accept' && l.route.methods.post);
+    ok('POST /work-orders/accept 존재(Track B)', !!layer);
     const names = layer.route.stack.map(s => s.handle.name);
-    ok('접수는 여전히 adminOrMaster 게이트 뒤', names.some(n => /adminOrMaster/i.test(n)));
-    ok('authMiddleware 가 역할 미들웨어 앞', names.findIndex(n => /^auth/i.test(n)) < names.findIndex(n => /adminOrMaster/i.test(n)));
+    ok('접수는 여전히 권한 게이트 뒤(내부인 + 편집 허용자)', names.includes('internalMiddleware') && names.includes('editorOnlyMiddleware'));
+    ok('authMiddleware 가 역할 미들웨어 앞', names.indexOf('authMiddleware') === 0 && names.indexOf('authMiddleware') < names.indexOf('editorOnlyMiddleware'));
   }
 
   /* ══════════════ H. 소스 위생 ══════════════ */
@@ -429,12 +438,7 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
       /작업오더 값 그대로 시스템 작업표를 만들고 곧바로 모집공고 설정으로 넘어갑니다/.test(wdN)
       && !/_woEditActions\(o\)\{[\s\S]{0,1600}_woAcceptSheetless/.test(wdN));
 
-    const ia = noLineComments(fs.readFileSync(path.join(__dirname, '..', '..', 'frontend/js/index-app.js'), 'utf8'));
-    const wa = /async function woAccept\(id, pickGid, linkAdvertiserId\) \{([\s\S]*?)\n\}/.exec(ia);
-    ok('관리자 대시보드 woAccept 선언 존재', !!wa);
-    // ★ gid 선검증으로 접수를 막던 막다른 길이 없어야 한다(서버는 무시트로 등록한다)
-    ok('gid 없다고 접수를 막지 않는다', !/작업시트탭URL에 gid가 없습니다/.test(wa[1]));
-    ok('관리자 대시보드도 공유 판정을 쓴다', /_woAcceptSheetless\(o\)/.test(wa[1]));
+    // 옛 관리자 대시보드 폐기(결정 267) — index-app.js 의 woAccept(관리자 대시보드 접수 창구) 검사는 화면째 사라져 뺐다. 접수 창구는 위 작업보드 하나다.
   }
 
   console.log(`\n총 ${passed}개 통과\n`);

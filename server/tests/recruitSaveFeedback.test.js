@@ -15,7 +15,7 @@
  * 그래서 고정하는 것(시안 C 확정 · frontend/docs/design-recruit-save-feedback.html):
  *   A. 성공  = 버튼 ✓ → 모달 닫힘 → **화면 가운데 카드**(공고 이름 + 바뀐 항목) → 페이드아웃
  *   B. 차단·실패 = 토스트가 아니라 **모달 안쪽** 인라인 줄(rf-blockbar) + 자동 소멸 없음
- *   C. 렌더러는 recruit-modal.js **한 벌**(admin.html·workdesk.html 공용, 사본 금지)
+ *   C. 렌더러는 recruit-modal.js **한 벌**(workdesk.html 이 로드, 사본 금지 — 옛 admin.html 은 결정 267 로 폐기)
  *   D. 오버레이는 **body 직속** + 모달(5000)보다 위 z-index
  *   E. 저장 버튼 인터랙션(hover/active/busy/done)이 **인라인 style 이 아니라 클래스**
  *      — 인라인은 :hover 의 background 를 이길 수 없어 "눌렸는지 모르겠다"가 안 고쳐진다
@@ -277,12 +277,13 @@ ok('E5. 스피너는 폰트어썸에 기대지 않는다(리뷰웹시스템[3버
 console.log('\n── F. 단일 출처 · 사본 금지 ──');
 ok('F1. ★ 안내 렌더러 정의는 recruit-modal.js 한 곳 — 화면별 사본 금지',
   (() => {
-    const others = ['js/index-recruit.js', 'js/index-app.js', 'js/campaign-cards.js', 'workdesk.html', 'admin.html']
+    const others = ['js/index-recruit.js', 'js/campaign-cards.js', 'workdesk.html']   // index-app.js·옛 admin.html 은 결정 267 로 폐기
       .map(p => { try { return readF(p); } catch (_) { return ''; } });
     return others.every(s => !/function campSaveFeedback/.test(s) && !/csfb-box/.test(s));
   })());
-ok('F2. admin.html · workdesk.html 둘 다 recruit-modal.js 를 로드한다(공용)',
-  /recruit-modal\.js/.test(readF('admin.html')) && /recruit-modal\.js/.test(readF('workdesk.html')));
+// 옛 관리자 대시보드 폐기(결정 267) — 로드하는 화면은 리뷰웹시스템[3버전] 하나다.
+ok('F2. workdesk.html 이 recruit-modal.js 를 로드한다',
+  /recruit-modal\.js/.test(readF('workdesk.html')));
 ok('F3. FB_CSS 중괄호 균형 — 하나만 어긋나도 브라우저가 조용히 파싱을 포기한다',
   (() => {
     const m = modal.match(/var FB_CSS = `([\s\S]*?)`;/);
@@ -318,11 +319,9 @@ ok('H3. 사유 2종 — 작업오더의 탭 / 이 공고에 저장된 탭',
   /접수하지 않았거나/.test(noteFn) && /이름이 바뀌었거나/.test(noteFn));
 ok('H4. ★ [작업오더 열기]는 호스트 훅이 있을 때만 그린다(눌러도 아무 일 없는 버튼 금지)',
   /miss\.orderId && typeof window\.RECRUIT_OPEN_WORK_ORDER === "function"/.test(noteFn));
-ok('H5. 훅은 admin·workdesk 양쪽이 등록한다',
-  /window\.RECRUIT_OPEN_WORK_ORDER = function/.test(readF('js/index-app.js')) &&
+ok('H5. 훅은 workdesk 가 등록한다(옛 admin 쪽 등록은 결정 267 로 폐기)',
   /RECRUIT_OPEN_WORK_ORDER = async function/.test(readF('workdesk.html')));
 ok('H6. ★ 훅은 공고 모달을 먼저 닫는다 — 덮개(5000) 뒤에 열리면 안 뜬 것처럼 보인다',
-  /closeRecruitModal[\s\S]{0,120}openWoDetailModal/.test(readF('js/index-app.js')) &&
   /closeRecruitModal\(\);[\s\S]{0,200}switchView\('orders'\)/
     .test(readF('workdesk.html').replace(/\/\*[\s\S]*?\*\//g, '')));   // 주석 제외 후 판정(설명이 길어져 창을 넘겼다)
 ok('H7. ★ 추천 클릭은 인덱스만 넘긴다(탭명은 시트발 외부 문자열 — onclick 보간 금지)',

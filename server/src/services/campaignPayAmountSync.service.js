@@ -61,6 +61,34 @@ function replaceAmountInProductLines(text, nextAmount) {
 }
 
 /**
+ * 상품을 나눈 공고의 안내 글에서 **그 상품이 만든 줄의 금액만** 바꾼다(결정 266 실측 2026-10-21).
+ * ★ 발행 폼(`_syncPreviewFromOptRows`)이 상품마다 `머리 - 결제금액 N원` 한 줄을 쓴다 —
+ *   머리 = 옵션 상품(unit_kind 'option') `[상품명 - ]옵션명` · 옵션 없는 상품(unit_kind 'product') `상품명`(= 키).
+ *   리뷰어 공고 화면은 선택 상품 금액(숫자 칸)과 **이 글을 함께** 보여 준다 — 숫자 칸만 고치면 옛 금액·새 금액이 같이 뜬다.
+ * ★★ 줄의 머리가 **그 상품의 머리와 정확히 같을 때만**, 그리고 **줄 끝의 「 - 결제금액 N원」만** 바꾼다(코드리뷰 P1 2건):
+ *   접미 비교는 「세트 - 블랙」 상품 줄을 「블랙」 옵션으로 오인하고, 첫 일치 치환은 이름 속 「결제금액 5,000원」을 바꾼다.
+ *   못 찾으면 글을 그대로 둔다(사람이 자유롭게 쓴 글 — 짐작해서 고치지 않는다).
+ * @param {{optKey:string, productName?:string, unitKind?:string}} unit
+ */
+const PRODUCT_LINE_TAIL_RE = /^(.*) - 결제금액 [\d,]+원(\s*)$/;
+function optionLineHead(unit) {
+  const key = String((unit && unit.optKey) || '').trim();
+  const prod = String((unit && unit.productName) || '').trim();
+  if (unit && unit.unitKind === 'product') return prod || key;
+  return [prod, key].filter(Boolean).join(' - ');
+}
+function replaceOptionAmountInProductLines(text, unit, nextAmount) {
+  const s = String(text == null ? '' : text);
+  const head = optionLineHead(unit);
+  if (!head) return s;
+  return s.split('\n').map(line => {
+    const m = line.match(PRODUCT_LINE_TAIL_RE);
+    if (!m || m[1].trim() !== head) return line;
+    return m[1] + ' - 결제금액 ' + Number(nextAmount).toLocaleString('en-US') + '원' + m[2];
+  }).join('\n');
+}
+
+/**
  * 작업오더 금액을 연결 공고에 반영한다.
  * @returns {Promise<{applied:boolean, reason?:string, campaignId?:string, options?:number, workDetail?:boolean, detail?:object}>}
  *   ★ `applied:false` 는 실패가 아니라 "해당 없음/근거 없음" 도 포함한다 — `reason` 이 그 사유다.
@@ -91,9 +119,14 @@ async function syncCampaignPayAmount({ workOrderId, productOptionsJson, by = 'so
     const camp = await linkedCampaign(client, woRows[0]);
     if (!camp) { await client.query('ROLLBACK'); return { applied: false, reason: 'no_campaign' }; }
 
-    // ── ㉮ 살아있는 공고 옵션이 있으면 옵션명으로 짝지어 숫자 칸만 갱신 ──────────────
+    // ★ 공고 행을 상품 행보다 먼저 잠근다(잠금 순서 공고 → 상품 · 가격 신고 팝업 수정과 같은 순서 — 뒤집으면 교착).
+    //   ㉮ 에서도 안내 글의 상품 줄 금액을 함께 고치므로 여기서 읽어 둔다.
+    const { rows: wdLock } = await client.query(
+      'SELECT work_detail FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [camp.id]);
+
+    // ── ㉮ 살아있는 공고 옵션이 있으면 옵션명으로 짝지어 숫자 칸 + 안내 글 그 상품 줄 갱신 ──────────────
     const { rows: liveOpts } = await client.query(
-      `SELECT id, opt_key, pay_amount FROM campaign_options
+      `SELECT id, opt_key, pay_amount, product_name, unit_kind FROM campaign_options
         WHERE campaign_id = $1 AND COALESCE(status,'active') <> 'closed' FOR UPDATE`, [camp.id]);
 
     if (liveOpts.length) {
@@ -103,10 +136,15 @@ async function syncCampaignPayAmount({ workOrderId, productOptionsJson, by = 'so
       }
       let changed = 0, matched = 0;
       const unmatched = [];
+      let wdOpt = wdLock[0] && wdLock[0].work_detail;
+      if (typeof wdOpt === 'string') { try { wdOpt = JSON.parse(wdOpt); } catch (_) { wdOpt = null; } }
+      const linesBefore = (wdOpt && typeof wdOpt === 'object' && !Array.isArray(wdOpt)) ? String(wdOpt.productLines == null ? '' : wdOpt.productLines) : null;
+      let lines = linesBefore;
       for (const o of liveOpts) {
         const next = wanted.get(o.opt_key);
         if (next == null) { unmatched.push(o.opt_key); continue; }
         matched += 1;
+        if (lines != null) lines = replaceOptionAmountInProductLines(lines, { optKey: o.opt_key, productName: o.product_name, unitKind: o.unit_kind }, next);
         if (Number(o.pay_amount) === Number(next)) continue;
         await client.query(
           'UPDATE campaign_options SET pay_amount = $3, updated_at = NOW() WHERE campaign_id = $1 AND opt_key = $2',
@@ -116,13 +154,19 @@ async function syncCampaignPayAmount({ workOrderId, productOptionsJson, by = 'so
           { campaignId: camp.id, optionId: o.id, oldPay: o.pay_amount, newPay: next, actor: `리뷰오더(${by})` });
         changed += 1;
       }
+      // ★ 안내 글의 상품 줄도 맞춘다(결정 266 실측) — 숫자 칸만 바뀌면 리뷰어 화면에 옛 금액이 함께 남는다.
+      const linesChanged = lines != null && lines !== linesBefore;
+      if (linesChanged) {
+        await client.query('UPDATE recruit_campaigns SET work_detail = $2::jsonb, updated_at = NOW() WHERE id = $1',
+          [camp.id, JSON.stringify(Object.assign({}, wdOpt, { productLines: lines }))]);
+      }
       await client.query('COMMIT');
       if (!matched) {
         return { applied: false, reason: 'option_key_mismatch', campaignId: camp.id, detail: { unmatched } };
       }
       logger.info(`[campaign/pay-sync] ${camp.id} 옵션 금액 갱신 ${changed}/${matched} by ${by}`);
-      return { applied: changed > 0, reason: changed ? undefined : 'already_same',
-        campaignId: camp.id, options: changed, detail: { matched, unmatched } };
+      return { applied: changed > 0 || linesChanged, reason: (changed || linesChanged) ? undefined : 'already_same',
+        campaignId: camp.id, options: changed, detail: { matched, unmatched, linesReplaced: linesChanged } };
     }
 
     // ── ㉯ 옵션 없는 공고 — 상품 안내 글 + payAmount ────────────────────────────────
@@ -132,9 +176,7 @@ async function syncCampaignPayAmount({ workOrderId, productOptionsJson, by = 'so
       return { applied: false, reason: 'multiple_amounts', campaignId: camp.id, detail: { amounts: parsed.distinct } };
     }
 
-    const { rows: wdRows } = await client.query(
-      'SELECT work_detail FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [camp.id]);
-    let wd = wdRows[0] && wdRows[0].work_detail;
+    let wd = wdLock[0] && wdLock[0].work_detail;
     if (typeof wd === 'string') { try { wd = JSON.parse(wd); } catch (_) { wd = null; } }
     if (!wd || typeof wd !== 'object' || Array.isArray(wd)) {
       await client.query('ROLLBACK');
@@ -567,5 +609,7 @@ module.exports = {
   SYNC_QUIET_REASONS,
   distinctAmountsInText,
   replaceAmountInProductLines,
+  replaceOptionAmountInProductLines,
+  optionLineHead,
   __setPoolForTest,
 };
