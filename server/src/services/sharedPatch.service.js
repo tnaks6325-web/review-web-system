@@ -296,6 +296,39 @@ function sanitizeRenames(base, mine) {
 }
 
 /**
+ * 상품 이름은 시스템마다 따로(결정 285 · 사용자 확정 2026-10-24 「가」) — 인트라넷 수정 창이 리뷰웹 이름과 다른 자기 이름으로 연 상품은
+ * `bidir.rw_names`({인트라넷 이름: 리뷰웹 이름})에 짝을 실어 보낸다. 그 짝으로 보낸 상품 이름을 기준(리뷰웹) 이름으로 되돌린다.
+ *   · 열쇠 = 원래 이름(prev_name) 우선 — 인트라넷에서 갈라진 상품의 이름을 바꿔도 리뷰웹 이름은 그대로(따로)
+ *   · 이미 기준에 있는 이름 · 기준에 없는 짝 · 보낸 목록에 이미 있는 이름(겹침)은 건드리지 않는다(종전 판정 그대로)
+ *   · 되돌렸으면 인트라넷이 보낸 요약 문장(인트라넷 이름)은 버린다 — 리뷰웹이 자기 이름으로 다시 만든다
+ * @returns {{ mine, aligned: number }}
+ */
+function alignIntranetNames(base, mine, nameMap) {
+  if (!nameMap || typeof nameMap !== 'object' || Array.isArray(nameMap)) return { mine, aligned: 0 };
+  const list = _parseList(mine && mine.product_options_json);
+  if (!list) return { mine, aligned: 0 };
+  const nm = p => String(p && p.name || '').trim();
+  const baseNames = new Set((_parseList(base && base.product_options_json) || []).filter(p => p && typeof p === 'object').map(nm));
+  const live = list.filter(p => p && typeof p === 'object');
+  const used = new Set(live.map(nm));
+  let aligned = 0;
+  for (const p of live) {
+    const own = nm(p);
+    const key = String(p.prev_name || '').trim() || own;
+    const target = typeof nameMap[key] === 'string' ? nameMap[key].trim() : '';
+    if (!target || target === own || baseNames.has(own) || !baseNames.has(target) || used.has(target)) continue;
+    used.delete(own); used.add(target);
+    p.name = target;
+    delete p.prev_name;
+    aligned += 1;
+  }
+  if (!aligned) return { mine, aligned: 0 };
+  const out = { ...mine, product_options_json: JSON.stringify(list) };
+  delete out.product_option;
+  return { mine: out, aligned };
+}
+
+/**
  * 이름 바꾸기 모양 검사(재검토 2026-10-21) — 한 번에 담을 수 없는 이름 바꾸기는 거부한다(못 담으면 오더와 공고가 어긋난다):
  *   · 맞바꾸기·이어 바꾸기·지우는 줄의 이름 쓰기 = 새 이름이 기준의 다른 상품·옵션 이름(지우는 것 포함)과 같음
  *   · 원래 이름(또는 이름)이 보낸 목록 안에서 겹침 = 이름 바꾸기 + 같은 이름 새로 더하기
@@ -1663,6 +1696,11 @@ async function applySharedPatch(p) {
         error: '수정 화면을 연 뒤 기준 정보가 사라졌습니다. 창을 닫고 다시 열어 주세요.' });
     }
     const base = baseRows[0].state;
+    // 결정 285 — 인트라넷 이름으로 보낸 상품을 리뷰웹 이름으로 되돌린다(이름은 시스템마다 따로). 이름 바꾸기 판정보다 먼저.
+    if (p.origin === 'intranet' && p.nameMap) {
+      const al = alignIntranetNames(base, p.mine, p.nameMap);
+      if (al.aligned) { p = { ...p, mine: al.mine }; logger.info(`[bidir/apply] ${wo.id} 인트라넷 이름 ${al.aligned}개를 리뷰웹 이름으로 읽음`); }
+    }
     // 7단계-④ ③ — 기준에 없는 원래 이름(prev_name/prev_label)은 이름 바꾸기가 아니다(재전송 등) — 지우고 판정한다
     p = { ...p, mine: sanitizeRenames(base, p.mine) };
     const rnErr = renameShapeError(base, p.mine);
@@ -2056,6 +2094,6 @@ async function linkSharedOrder({ workOrderId, actor = '', dryRun = false, db } =
 }
 
 module.exports = {
-  applySharedPatch, linkSharedOrder, readSharedState, sanitizeRenames, renamedParents, renameShapeError, RENAME_FIELD, MODE_FIELD, applyWrites, writablePath, projectToCampaignInTx, derivePayFields, validateQuantities, markStructureRows, STRUCTURE_FIELD, structureOpenFor, structurePermanentlyLocked,
+  applySharedPatch, linkSharedOrder, readSharedState, sanitizeRenames, alignIntranetNames, renamedParents, renameShapeError, RENAME_FIELD, MODE_FIELD, applyWrites, writablePath, projectToCampaignInTx, derivePayFields, validateQuantities, markStructureRows, STRUCTURE_FIELD, structureOpenFor, structurePermanentlyLocked,
   PHASE3_SHARED_FIELDS, PHASE5_SHARED_FIELDS, PHASE7Q_SHARED_FIELDS, PHASE7W_SHARED_FIELDS, PHASE7R_SHARED_FIELDS, PHASE7D_SHARED_FIELDS, deliverySwapOpen, PUSH_VIEW_KEYS, WRITABLE_BY_ORIGIN, INTRANET_EDITABLE_AFTER_ACCEPT, NEXT_VERSION_SQL, _pushBackKeys, _prefillOf,
 };
