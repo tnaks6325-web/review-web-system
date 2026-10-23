@@ -174,8 +174,18 @@ function _woGuideHtml(raw) {
    ★ 저장값(`inflow_type`)은 종전 그대로 `guide`/`link` — 보이는 말만 바뀐다. */
 const _INFLOW_LABEL = { guide: "가이드유입", link: "링크유입" };
 
+// 인트라넷 옛 [라벨] 묶음 형식(~2026-08-11)에서 **인트라넷이 붙인** 머리말 — 이 칸들은 개별 필드로 이미 따로
+// 보이므로 섹션째 버린다(운영 work_orders 의 review_guide·special_notes 머리말 전수 실측 2026-10-23).
+// ★★ 여기 없는 머리말(「[키워드 가이드]」「[포토 가이드라인]」처럼 **사람이 직접 쓴 제목**)과 첫 머리말 **앞** 글은
+//    사람이 쓴 내용이라 남긴다 — 종전엔 둘 다 버려 리뷰가이드가 통째로 빈 공고가 나왔다(결정 282 · 완화 금지).
+// ★ 리뷰어 화면 campaign-workdetail.js 의 같은 목록과 한 글자도 다르면 안 된다(가드: guideSectionLabels.test.js).
+const _WO_MACHINE_SECTION_LABELS = ["유입방식", "유입가이드", "유입가이드 첨부 이미지", "링크유입", "리뷰등록 가이드", "리뷰가이드", "리뷰 가이드",
+  "특이사항", "배송유형", "물건비", "리뷰유형", "구매 시간대", "일일 진행건수", "합계", "담당AE", "상품/옵션/금액", "상품/옵션/건수",
+  "옵션별 건수", "시트참조", "빈박스 택배대행"];
+
 // 인트라넷이 review_guide/special_notes에 [헤더] 섹션으로 모든 항목을 중복 포함시켜 보내므로,
-// 개별 필드로 이미 표시되는 섹션은 버리고 지정한 라벨의 섹션 내용만 추출한다.
+// 지정한 라벨(keepLabels)의 섹션은 머리말을 떼고 내용만, 인트라넷 자동 머리말 섹션은 버리고,
+// 그 밖(첫 머리말 앞 글 · 모르는 머리말 섹션)은 머리말 줄째 그대로 남긴다.
 // 섹션 헤더가 전혀 없으면(우리 키트/스태프의 평문) 원문 그대로 반환.
 function _woPickSections(raw, keepLabels) {
   const text = String(raw == null ? "" : raw);
@@ -183,16 +193,19 @@ function _woPickSections(raw, keepLabels) {
   if (!/\[[^\]]+\]/.test(text)) return text.trim();
   const norm = s => s.replace(/\s/g, "");
   const keep = keepLabels.map(norm);
+  const machine = _WO_MACHINE_SECTION_LABELS.map(norm);
   const lines = text.split(/\r?\n/);
   const out = [];
-  let take = false, buf = [];
+  let take = true, buf = [];   // 첫 머리말 앞 글 = 사람이 쓴 내용(남긴다)
   const flush = () => { const c = buf.join("\n").trim(); if (take && c) out.push(c); buf = []; };
   for (const ln of lines) {
     const m = ln.match(/^\s*\[([^\]]+)\]\s*(.*)$/);
     if (m) {
       flush();
-      take = keep.some(k => norm(m[1]).includes(k));
-      buf = m[2] ? [m[2]] : [];
+      const label = norm(m[1]);
+      if (keep.some(k => label.includes(k))) { take = true; buf = m[2] ? [m[2]] : []; }
+      else if (machine.includes(label)) { take = false; buf = []; }
+      else { take = true; buf = [ln.trim()]; }   // 사람이 쓴 제목 — 머리말 줄째 남긴다
     } else {
       buf.push(ln);
     }

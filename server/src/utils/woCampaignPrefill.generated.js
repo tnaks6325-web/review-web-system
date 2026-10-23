@@ -10,22 +10,29 @@ function _driveId(url) {
   return m ? m[1] : null;
 }
 
+const _WO_MACHINE_SECTION_LABELS = ["유입방식", "유입가이드", "유입가이드 첨부 이미지", "링크유입", "리뷰등록 가이드", "리뷰가이드", "리뷰 가이드",
+  "특이사항", "배송유형", "물건비", "리뷰유형", "구매 시간대", "일일 진행건수", "합계", "담당AE", "상품/옵션/금액", "상품/옵션/건수",
+  "옵션별 건수", "시트참조", "빈박스 택배대행"];
+
 function _woPickSections(raw, keepLabels) {
   const text = String(raw == null ? "" : raw);
   if (!text.trim()) return "";
   if (!/\[[^\]]+\]/.test(text)) return text.trim();
   const norm = s => s.replace(/\s/g, "");
   const keep = keepLabels.map(norm);
+  const machine = _WO_MACHINE_SECTION_LABELS.map(norm);
   const lines = text.split(/\r?\n/);
   const out = [];
-  let take = false, buf = [];
+  let take = true, buf = [];   // 첫 머리말 앞 글 = 사람이 쓴 내용(남긴다)
   const flush = () => { const c = buf.join("\n").trim(); if (take && c) out.push(c); buf = []; };
   for (const ln of lines) {
     const m = ln.match(/^\s*\[([^\]]+)\]\s*(.*)$/);
     if (m) {
       flush();
-      take = keep.some(k => norm(m[1]).includes(k));
-      buf = m[2] ? [m[2]] : [];
+      const label = norm(m[1]);
+      if (keep.some(k => label.includes(k))) { take = true; buf = m[2] ? [m[2]] : []; }
+      else if (machine.includes(label)) { take = false; buf = []; }
+      else { take = true; buf = [ln.trim()]; }   // 사람이 쓴 제목 — 머리말 줄째 남긴다
     } else {
       buf.push(ln);
     }

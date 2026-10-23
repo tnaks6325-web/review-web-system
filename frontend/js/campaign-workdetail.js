@@ -71,21 +71,31 @@
     return base || '(등록된 상품 정보가 없어요)';
   }
 
-  /** 리뷰가이드: [리뷰등록 가이드] 계열 섹션만. [라벨] 마커가 없으면 평문 전체 그대로(무변화). */
+  /* 인트라넷 옛 [라벨] 묶음의 자동 머리말 — work-order-detail.js _WO_MACHINE_SECTION_LABELS 와 **한 글자도 같아야 한다**
+     (리뷰어 화면은 그 파일을 싣지 않아 사본을 둔다 · 가드: guideSectionLabels.test.js · 결정 282). */
+  var MACHINE_SECTION_LABELS = ["유입방식", "유입가이드", "유입가이드 첨부 이미지", "링크유입", "리뷰등록 가이드", "리뷰가이드", "리뷰 가이드",
+    "특이사항", "배송유형", "물건비", "리뷰유형", "구매 시간대", "일일 진행건수", "합계", "담당AE", "상품/옵션/금액", "상품/옵션/건수",
+    "옵션별 건수", "시트참조", "빈박스 택배대행"];
+
+  /** 리뷰가이드: [리뷰등록 가이드] 계열 섹션은 내용만, 자동 머리말 섹션은 버리고, 첫 머리말 앞 글·사람이 쓴 제목(「[키워드 가이드]」 등)은
+   *  머리말 줄째 남긴다(결정 282). [라벨] 마커가 없으면 평문 전체 그대로(무변화). */
   function pickReviewOnly(raw) {
     var text = String(raw == null ? '' : raw);
     if (!text.trim()) return '';
     if (!/\[[^\]]+\]/.test(text)) return text.trim();
     var norm = function (s) { return s.replace(/\s/g, ''); };
-    var keep = ['리뷰등록가이드', '리뷰가이드'];   // index-app.js _woPickSections 와 동일 규율
-    var out = [], take = false, buf = [];
+    var keep = ['리뷰등록가이드', '리뷰가이드'];   // work-order-detail.js _woPickSections 와 동일 규율
+    var machine = MACHINE_SECTION_LABELS.map(norm);
+    var out = [], take = true, buf = [];   // 첫 머리말 앞 글 = 사람이 쓴 내용(남긴다)
     var flush = function () { var c = buf.join('\n').trim(); if (take && c) out.push(c); buf = []; };
     text.split(/\r?\n/).forEach(function (ln) {
       var mm = ln.match(/^\s*\[([^\]]+)\]\s*(.*)$/);
       if (mm) {
         flush();
-        take = keep.some(function (k) { return norm(mm[1]).indexOf(k) >= 0; });
-        buf = mm[2] ? [mm[2]] : [];
+        var label = norm(mm[1]);
+        if (keep.some(function (k) { return label.indexOf(k) >= 0; })) { take = true; buf = mm[2] ? [mm[2]] : []; }
+        else if (machine.indexOf(label) >= 0) { take = false; buf = []; }
+        else { take = true; buf = [ln.trim()]; }   // 사람이 쓴 제목 — 머리말 줄째 남긴다
       } else buf.push(ln);
     });
     flush();
