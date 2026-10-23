@@ -159,7 +159,7 @@
           <button type="button" class="rchan-btn" id="rf_opt_addbtn" onclick="addOptRow()" style="font-size:.72rem;white-space:nowrap"><i class="fas fa-plus"></i> 상품 추가</button></div>
         <div class="rf-cb">
         <div id="rf_opt_wrap" class="rf-pm-none">
-          <!-- 결정 271: 공고 전체 「옵션 없는/있는 작업」 스위치는 없앴다 — 상품 카드마다 정한다(실화면 rf_opt_wrap.rf-cards). -->
+          <!-- 결정 276: 공고 전체 「옵션 없는/있는 작업」 스위치는 없앴다 — 상품 카드마다 정한다(실화면 rf_opt_wrap.rf-cards). -->
           <div id="rf_prod_mode_help" class="rf-prod-mode-help" data-mode="none">옵션 없이 진행하는 작업 1건 — 리뷰어는 옵션 선택 없이 바로 참여합니다.</div>
           <div class="rf-prod-head" data-pm="none">
             <span>상품명</span><span style="text-align:right">결제금액</span>
@@ -445,7 +445,7 @@
         <section class="editor">
           <div class="startup-setting-bar"><div><strong>작업 시작 설정</strong></div><div id="rf_startcheck" class="rf-startcheck" hidden></div><select id="rf_status" hidden onchange="RecruitModal.syncStatusButtons()"><option value="draft">임시저장</option><option value="active">모집중</option><option value="closed">마감</option></select></div>
           <div id="editorScroller" class="compact-editor-scroller" tabindex="0" aria-label="모집공고 수정 항목">
-            <!-- 공고 창 시안 3차(결정 263 · 사용자 확정 2026-10-22) — 체험단 종류 → 리뷰오더 고유 항목 → 리뷰오더와 맞춰지는 항목(양방향) → 리뷰웹에서만 정하는 값.
+            <!-- 공고 창 시안 3차(결정 274 · 사용자 확정 2026-10-22) — 체험단 종류 → 리뷰오더 고유 항목 → 리뷰오더와 맞춰지는 항목(양방향) → 리뷰웹에서만 정하는 값.
                  ★ 칸의 화면 뒤 이름(id)·동작은 그대로다(프리필·저장·잠금이 그 이름으로 묶여 있다). 옮긴 것은 줄의 자리뿐. -->
             <div id="rf_kind_tabs" class="rf-kind-tabs" role="group" aria-label="체험단 종류(리뷰오더에서 정함)"><span data-kind="review" class="on">리뷰체험단</span><span data-kind="blog">블로그체험단</span></div>
             <section class="section rf-order-own" data-sec="order">
@@ -1030,7 +1030,7 @@
 #recruitModal .rf-compact-main .section-heading{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px}
 #recruitModal .rf-compact-main .section-heading h3{margin:0;color:#172033;font-size:14px;letter-spacing:-.025em}
 #recruitModal .section-hint{color:#7F8A9B;font-size:10px}.section-count{color:#2563C8;font-size:10px;font-weight:850}
-/* 공고 창 시안 3차(결정 263) — 체험단 종류 탭 · 리뷰오더 고유 항목 · 리뷰오더와 맞춰지는 항목(파란 상자 · 양방향) · 리뷰웹에서만 정하는 값 */
+/* 공고 창 시안 3차(결정 274) — 체험단 종류 탭 · 리뷰오더 고유 항목 · 리뷰오더와 맞춰지는 항목(파란 상자 · 양방향) · 리뷰웹에서만 정하는 값 */
 #recruitModal .rf-compact-main .rf-kind-tabs{display:grid;grid-template-columns:1fr 1fr;margin-top:14px;border:1px solid #DCE3EC;border-radius:8px;overflow:hidden}
 #recruitModal .rf-compact-main .rf-kind-tabs span{padding:8px;text-align:center;font-size:12px;font-weight:850;color:#617087;background:#fff}
 #recruitModal .rf-compact-main .rf-kind-tabs span.on{background:#2769DF;color:#fff}
@@ -1225,7 +1225,7 @@
 #recruitModal .rf-unit.ug-on:last-child>.rf-ug{border-radius:0 0 8px 8px}
 #recruitModal .rf-ug-h{display:flex;align-items:center;gap:6px;margin-bottom:7px;color:#3E4D64;font-size:.76rem;font-weight:850}
 #recruitModal .rf-ug-note{color:#94A3B8;font-size:.62rem;font-weight:600}
-/* ★★ 결정 272(D4 「나」 · 사용자 확정 2026-10-22) — 선택지 가이드 = 글 칸 하나 + 그 사이 사진 줄.
+/* ★★ 결정 277(D4 「나」 · 사용자 확정 2026-10-22) — 선택지 가이드 = 글 칸 하나 + 그 사이 사진 줄.
    종전(사진 스트립 왼쪽 · 글 오른쪽, 2026-08-25 3차 통일)을 대체한다 — 인트라넷 리뷰오더도 같은 모양으로 바꾼다.
    글 칸은 자동 높이(쓰는 만큼 자란다) · 사진 줄마다 위로·아래로·빼기 · 아래에 「여기에 사진 넣기」. */
 #recruitModal .rf-ug .ug-doc{display:flex;flex-direction:column;gap:6px;padding:8px 10px;border:1px solid #C9D6E8;border-radius:8px;background:#fff}
@@ -1258,7 +1258,7 @@
 @media (max-width:1060px){#recruitModal .rf-side{display:none}#recruitModal .rf-rail{width:160px}}
 @media (min-width:781px) and (max-width:900px){#recruitModal .rf-rail{display:flex}}
 @media (max-width:780px){#recruitModal .rf-rail{display:none}#recruitModal .modal-body{padding:0 12px 16px!important}#recruitModal .rf-hrow{grid-template-columns:1fr;border-radius:0!important}#recruitModal .rf-hrow .rf-hl{border-bottom:1px solid #E7ECF3;padding:6px 7px}#recruitModal .rf-title-control{flex-wrap:wrap}#recruitModal .rf-status-buttons{width:100%}#recruitModal .rf-status-buttons button{flex:1}#recruitModal .ig-strip{width:100%}}
-/* ── 결정 271 상품 카드(사용자 확정 2026-10-22 「1.나」) — 인트라넷 리뷰오더 상품 카드와 같은 모양 ──
+/* ── 결정 276 상품 카드(사용자 확정 2026-10-22 「1.나」) — 인트라넷 리뷰오더 상품 카드와 같은 모양 ──
    머리(상품 N · 옵션 없음/있음 · 쇼핑몰에서 가져오기 · 삭제) → 상품명·상품 메인 URL → (옵션 없음) 결제금액·모집인원·일건수 /
    (옵션 있음) 옵션 줄(옵션 URL·1차 옵션·결제금액·모집인원·일건수·+·×) → 줄마다 「가이드유입」 상자(접지 않음) → 리뷰 조합 → 상품 사진(리뷰웹 전용).
    ★ id 셀렉터 둘로 앞선 규칙(진행상품 표 시절 격자)보다 우선한다 — 그 규칙들은 옛 화면 호환으로 남아 있다. */

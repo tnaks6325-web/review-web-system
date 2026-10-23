@@ -1,5 +1,5 @@
 /**
- * campaignSharedEdit — 모집공고 편집 창에서 고친 **공유 글 칸**을 작업오더 값으로 되돌린다(결정 263 · 4단계-2).
+ * campaignSharedEdit — 모집공고 편집 창에서 고친 **공유 글 칸**을 작업오더 값으로 되돌린다(결정 274 · 4단계-2).
  *
  * 정본은 작업오더 한 벌이고 공고는 그 투영(`projectToCampaignInTx`)이다. 공고 창에서 공유 칸을 고치면
  * "그 공고 값이 나오는 작업오더 값" 을 찾아 공유 저장(`applySharedPatch`)으로 보낸다.
@@ -200,7 +200,7 @@ function planCampaignSharedEdit({ baseState, camp, body }) {
   return { mine, changed: changed.map(k => LABELS[k] || k), unmappable, windowsWritable };
 }
 
-/* ── 5단계 — 리뷰비 · 결제금액(결정 263 · 사용자 확정 D2·D3) ─────────────────────────────────────────────
+/* ── 5단계 — 리뷰비 · 결제금액(결정 274 · 사용자 확정 D2·D3) ─────────────────────────────────────────────
    공고 창의 리뷰비 칸 = 작업오더 review_fee. 옵션표 금액 = 작업오더 상품 구성의 그 줄 금액(옵션 `pay` · 옵션 없는 상품 `base.pay`).
    옵션 없는 공고는 상품 안내 글(productLines)의 `결제금액 N원` 이 리뷰어가 보는 금액이다.
    ★ 손댄 칸 판정은 창을 연 시점(기준 스냅숏)의 투영 값과 비교한다(위 글 칸과 같은 규칙) — 그 사이 리뷰오더에서 바뀐 금액을
@@ -293,7 +293,7 @@ function _planGuideEdit({ products, src, srcCount, rowCount, o, name, baseRow, d
 }
 
 /**
- * 결정 271(사용자 확정 2026-10-22 「2.가」「4.가」) — 공고 창 한 줄의 옵션 주소·상품 메인 주소 → 오더 주소(바뀌었을 때만).
+ * 결정 276(사용자 확정 2026-10-22 「2.가」「4.가」) — 공고 창 한 줄의 옵션 주소·상품 메인 주소 → 오더 주소(바뀌었을 때만).
  *   옵션 줄 = 그 옵션 `url`(옵션 주소) + 그 상품 `url`(상품 메인 주소) · 상품 줄(옵션 없는 상품) = 그 상품 `url` 하나(두 칸이 같은 값).
  * ★ "바뀜" = 창을 연 시점 오더 투영과도, 지금 공고 값과도 다를 때(가이드와 같은 규칙) — 공고에서만 따로 고쳐 둔 옛 주소를
  *   손대지 않은 저장 한 번에 오더로 끌어오지 않는다. 안 보낸 칸(undefined·null)은 손대지 않은 것으로 본다(옛 화면 · 상품 주소를 모르는 줄).
@@ -311,7 +311,7 @@ function _planUrlEdit({ products, src, srcCount, rowCount, o, row, dbRow, name }
   const optT = touched(sentOpt, row.option_url, dbRow ? dbRow.option_url : undefined);
   /* 상품 메인 주소의 "지금 공고 값":
      · 저장돼 있으면 그 값
-     · 196 이전 줄(NULL)인데 옵션 없는 상품 줄이면 그 줄 주소(option_url) — 옵션 없는 상품은 두 칸이 같은 값이다.
+     · 197 이전 줄(NULL)인데 옵션 없는 상품 줄이면 그 줄 주소(option_url) — 옵션 없는 상품은 두 칸이 같은 값이다.
        (안 그러면 공고에만 다르게 적혀 있던 옛 주소가 손대지 않은 저장 한 번에 오더 상품 주소를 덮는다 — 코드 리뷰 실측 2026-10-22)
      · 옵션 줄이면 "모름" — 기준 투영과만 비교한다 */
   const dbProd = !dbRow ? undefined
@@ -743,7 +743,7 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
   let edited = null;
   const want = new Map();   // 줄 열쇠 → 화면이 보낸 금액
   const guideWant = new Map();   // 줄 열쇠 → 화면이 보낸 가이드(투영 비교 모양)
-  const urlWant = new Map();     // 줄 열쇠 → {option_url?, product_url?} 화면이 보낸 주소(결정 271)
+  const urlWant = new Map();     // 줄 열쇠 → {option_url?, product_url?} 화면이 보낸 주소(결정 276)
   const prodUrlSet = new Map();  // 상품 자리 i → 새 상품 주소(같은 상품의 줄끼리 다르면 담을 수 없다)
   const wdIn = b.work_detail && typeof b.work_detail === 'object' && b.work_detail.inflowType !== undefined ? b.work_detail.inflowType : base.inflow_type;
   const guideInflow = String(wdIn || '').trim() === 'guide';
@@ -752,7 +752,7 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
     // ② 옵션 있는 공고 — 옵션표 금액
     const byKey = new Map(baseRows.map((r, k) => [r.key, k]));
     const srcs = products ? _rowSources(products) : [];
-    // ── 결정 271: 옵션 주소 · 상품 메인 주소 → 오더 url(줄 k = 기준 투영의 그 줄 · 이름을 바꾼 줄은 원래 이름의 줄) ──
+    // ── 결정 276: 옵션 주소 · 상품 메인 주소 → 오더 url(줄 k = 기준 투영의 그 줄 · 이름을 바꾼 줄은 원래 이름의 줄) ──
     const planUrlRow = (k, o, key) => {
       const src = srcs[k];
       const dbRowU = liveCampOpts.find(r => String(r.opt_key || '') === String(o.optKey ?? o.opt_key ?? '').trim()
@@ -833,7 +833,7 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
         const gotGuide = got ? JSON.stringify([got.inflow_guide_html, got.inflow_guide_images]) : '';
         const expectGuide = guideWant.has(r.key) ? guideWant.get(r.key) : JSON.stringify([r.inflow_guide_html, r.inflow_guide_images]);
         if (gotGuide !== expectGuide) unmappable.push({ key: r.key, label: `유입가이드(${r.name})`, want: expectGuide, got: gotGuide });
-        // 주소 왕복(결정 271) — 화면이 보낸 주소가 그대로 나와야 한다. 상품 주소를 바꾼 상품의 다른 줄은 그 주소를 따라가는 것이 맞다
+        // 주소 왕복(결정 276) — 화면이 보낸 주소가 그대로 나와야 한다. 상품 주소를 바꾼 상품의 다른 줄은 그 주소를 따라가는 것이 맞다
         //   (옵션 주소가 빈 옵션 줄은 상품 주소로 접힌다 — 화면은 그 줄의 옛 주소를 보냈으므로 여기서 걸러 새로고침을 받는다).
         if (got && urlWant.size) {
           const uw = urlWant.get(r.key) || {};
@@ -979,7 +979,7 @@ function moneyDriftFromCampaign(camp, body, campOptions = []) {
       const rt = o.recruitTotal ?? o.recruit_total, dl = o.dailyLimit ?? o.daily_limit;
       return (rt !== undefined && CANON.int(rt) !== CANON.int(r.recruit_total)) || (dl !== undefined && CANON.int(dl) !== CANON.int(r.daily_limit));
     })) out.push('옵션 인원');
-    // 결정 271 — 옵션 주소·상품 메인 주소도 공유 칸이다(옛 화면은 기준 버전을 몰라 받지 않는다 · 안 보낸 칸 · 지금 값 모름(NULL)은 비교하지 않는다)
+    // 결정 276 — 옵션 주소·상품 메인 주소도 공유 칸이다(옛 화면은 기준 버전을 몰라 받지 않는다 · 안 보낸 칸 · 지금 값 모름(NULL)은 비교하지 않는다)
     const nu = v => { const t = String(v == null ? '' : v).trim(); if (!t) return ''; try { return new URL(t).href; } catch (_) { return t; } };
     if (b.options.some(o => {
       const r = o && rowOf.get(String(o.optKey ?? o.opt_key ?? '').trim());

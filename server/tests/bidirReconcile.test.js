@@ -1,5 +1,5 @@
 /**
- * 오더·공고 맞추기(결정 263 · 사용자 확정 2026-10-21 「C스타일 · 칸마다 고르기 + 전부 한쪽 · 관리자 이상」).
+ * 오더·공고 맞추기(결정 274 · 사용자 확정 2026-10-21 「C스타일 · 칸마다 고르기 + 전부 한쪽 · 관리자 이상」).
  *   값이 다른(연결 전) 오더 ↔ 공고를 칸마다 쪽을 골라 맞추고 연결한다 — ① 오더를 공고와 같게(P) ② 오더 쪽 고른 칸만 보통 공유 저장으로.
  *   끝에 다시 비교해 한 칸이라도 다르면 통째로 되돌린다.
  */
@@ -114,7 +114,7 @@ async function pg() {
 
   try {
     // ── R1 공고에서 리뷰비·옵션 이름·옵션 주소를 고친 공고 — 리뷰비·블랙 주소는 공고 쪽, 이름·화이트 주소는 오더 쪽 ──
-    //   결정 271(2026-10-22 「4.가」): 옵션 주소도 공고 → 오더로 옮길 수 있다. 비운 옵션 주소는 오더에서 상품 주소로 접혀 담을 수 없다(공고 쪽 잠김).
+    //   결정 276(2026-10-22 「4.가」): 옵션 주소도 공고 → 오더로 옮길 수 있다. 비운 옵션 주소는 오더에서 상품 주소로 접혀 담을 수 없다(공고 쪽 잠김).
     const A = await setup('a', async (camp) => {
       await pool.query(`UPDATE recruit_campaigns SET review_fee = 1500 WHERE id = $1`, [camp]);
       await renameCamp(camp);
@@ -129,7 +129,7 @@ async function pg() {
     const f = id => it.fields.find(x => x.id === id);
     assert.equal(f('review_fee').campaignSide.ok, true);
     assert.equal(f('option:탈취제 / 블랙.name').campaignSide.ok, true);
-    assert.equal(f('option:탈취제 / 블랙.option_url').campaignSide.ok, true, '옵션 주소도 공고 쪽으로 옮긴다(결정 271)');
+    assert.equal(f('option:탈취제 / 블랙.option_url').campaignSide.ok, true, '옵션 주소도 공고 쪽으로 옮긴다(결정 276)');
     assert.equal(f('option:탈취제 / 화이트.option_url').campaignSide.ok, false, '비운 옵션 주소는 오더에서 상품 주소로 접혀 공고 쪽으로 못 옮긴다');
     assert.equal(it.workManager, '박은비');
     // 고르지 않은 칸이 있으면 막힌다
@@ -154,7 +154,7 @@ async function pg() {
     assert.equal(Number(w.review_fee), 1500, '리뷰비 = 공고 쪽');
     assert.deepEqual((await A.opts()).map(o => [o.opt_key, o.option_url]), [['블랙', 'https://naver.me/short1'], ['화이트', OPT_P[0].url]], '이름 = 오더 쪽 · 블랙 주소 = 공고 쪽 · 화이트 주소 = 오더 쪽(공고가 따라감)');
     assert.deepEqual(JSON.parse(w.product_options_json)[0].options.map(o => o.label), ['블랙', '화이트']);
-    assert.equal(JSON.parse(w.product_options_json)[0].options[0].url, 'https://naver.me/short1', '공고 쪽 옵션 주소가 오더로(결정 271)');
+    assert.equal(JSON.parse(w.product_options_json)[0].options[0].url, 'https://naver.me/short1', '공고 쪽 옵션 주소가 오더로(결정 276)');
     assert.equal(Number((await A.cRow()).review_fee), 1500);
     assert.ok(await outbox(A.w.id) >= 1, '인트라넷으로 보낼 거리가 쌓인다');
     assert.ok(!(await R.listReconcile(pool)).items.some(x => x.workOrderId === A.w.id), '맞춘 뒤 목록에서 빠진다');

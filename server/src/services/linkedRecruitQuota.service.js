@@ -758,7 +758,7 @@ module.exports = {
   guardWorkOrderLinkChange,
   worktableSlotDelta,
   syncWorktableSlotsInTx,
-  // 양방향 7단계(결정 263): 공유 저장이 같은 트랜잭션에서 인원 하한·작업표 줄을 맞출 때 쓴다(규칙 사본 0)
+  // 양방향 7단계(결정 274): 공유 저장이 같은 트랜잭션에서 인원 하한·작업표 줄을 맞출 때 쓴다(규칙 사본 0)
   assertTotalFloorInTx: _assertTotalFloor,
   usedByOption,
   rebuildWorktableProjection,

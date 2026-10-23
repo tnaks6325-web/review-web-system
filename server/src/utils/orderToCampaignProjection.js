@@ -1,5 +1,5 @@
 /**
- * orderToCampaignProjection — 작업오더의 공유 칸이 **모집공고에서는 어떤 값이어야 하는가**(결정 263).
+ * orderToCampaignProjection — 작업오더의 공유 칸이 **모집공고에서는 어떤 값이어야 하는가**(결정 274).
  *
  * ★★ 변환 규칙은 새로 만들지 않는다 — 발행 프리필 `_woCampaignPrefill`(화면 원본을 글자 그대로 옮긴
  *    `woCampaignPrefill.generated.js`)을 그대로 돌린다. 발행할 때 공고가 받는 값 = 동기화가 기대하는 값.
@@ -37,7 +37,7 @@ function _optionShape(r) {
     name: `${_s(r.productName)}${optKey ? ' / ' + optKey : ''}`,
     unit_kind: unitKind,
     option_url: _s(r.optionUrl),
-    // 결정 271 — 그 줄이 속한 상품의 메인 주소. 공고 쪽이 비어 있으면(196 이전 줄 · 옛 화면) "모름" 이라 비교하지 않는다(compareOrderCampaign).
+    // 결정 276 — 그 줄이 속한 상품의 메인 주소. 공고 쪽이 비어 있으면(197 이전 줄 · 옛 화면) "모름" 이라 비교하지 않는다(compareOrderCampaign).
     product_url: _s(r.productUrl),
     pay_amount: CANON.int(r.payAmount),
     recruit_total: CANON.int(r.recruitTotal),
@@ -131,7 +131,7 @@ const SCALAR_KEYS = ['time_range', 'review_fee', 'recruit_total', 'daily_limit',
   'channel', 'landing_url'];
 const OPTION_KEYS = ['unit_kind', 'option_url', 'pay_amount', 'recruit_total', 'daily_limit', 'review_type_mix',
   'inflow_guide_html', 'inflow_guide_images', 'status'];
-/** 결정 271 — 상품 메인 주소는 공고 쪽에 값이 있을 때만 비교한다(196 이전 줄은 NULL = 모름 · 차이로 세면 연결된 공고가 전부 "다름" 이 된다). */
+/** 결정 276 — 상품 메인 주소는 공고 쪽에 값이 있을 때만 비교한다(197 이전 줄은 NULL = 모름 · 차이로 세면 연결된 공고가 전부 "다름" 이 된다). */
 const OPTION_KEYS_IF_CAMPAIGN = ['product_url'];
 
 /**

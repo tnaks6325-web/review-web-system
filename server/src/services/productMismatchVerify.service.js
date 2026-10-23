@@ -45,7 +45,7 @@ function __setPoolForTest(p) { _pool = p; }
 function isEnabled() { return String(process.env.CAMPAIGN_PRODUCT_VERIFY || '').trim() !== '0'; }
 
 /**
- * @param {Date|string|null} [at] 신청 시각 — 주면 결제금액을 **그 시각의 금액**으로 바꿔 돌려준다(결정 263 5단계 · D3).
+ * @param {Date|string|null} [at] 신청 시각 — 주면 결제금액을 **그 시각의 금액**으로 바꿔 돌려준다(결정 274 5단계 · D3).
  *   금액을 중간에 바꾼 공고에서, 바꾸기 전에 신청해 옛 금액으로 정상 구매한 리뷰어가 "다른 상품 가격" 으로 걸리지 않게.
  *   이력이 없는 옵션·조회 실패 = 지금 금액(종전 동작).
  */

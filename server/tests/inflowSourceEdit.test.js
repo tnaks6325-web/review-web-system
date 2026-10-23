@@ -243,7 +243,7 @@ async function run() {
         /^campaign_options: inflow_guide_html = \$3, inflow_guide_images = \$4::jsonb, updated_at = NOW\(\)$/.test(x)
         || /^recruit_campaigns: work_detail = \$2::jsonb, updated_at = NOW\(\)$/.test(x)
         || /^recruit_campaigns: window_start = \$2::time, window_end = \$3::time, time_range = \$4, updated_at = NOW\(\)$/.test(x)
-        // 양방향 공유 저장(결정 263) 전용 — 레거시 공고에서 같은 글자 칸(time_range)만. 위 표면의 부분집합이다.
+        // 양방향 공유 저장(결정 274) 전용 — 레거시 공고에서 같은 글자 칸(time_range)만. 위 표면의 부분집합이다.
         || /^recruit_campaigns: time_range = \$2, updated_at = NOW\(\)$/.test(x),
         '허용되지 않은 쓰기가 늘었다: ' + x);
     });

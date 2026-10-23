@@ -163,7 +163,7 @@ function stand(rows, opts) {
     _mixQuantity: null,
   };
   sandbox.window = sandbox;
-  // 결정 271 — 저장 모양(원장 유무)은 카드 구성에서 정해진다. 'opt' 로 세운 표 = 원장이 살아 있던 공고(상품 하나여도 원장 유지)
+  // 결정 276 — 저장 모양(원장 유무)은 카드 구성에서 정해진다. 'opt' 로 세운 표 = 원장이 살아 있던 공고(상품 하나여도 원장 유지)
   sandbox._rfLiveLedger = (o.mode || 'opt') === 'opt';
   vm.createContext(sandbox);
   ['RF_REVIEW_MIX_TYPES', 'RF_MIX_LABEL'].forEach(c => vm.runInContext(grabConst(recruitSrc, c), sandbox));

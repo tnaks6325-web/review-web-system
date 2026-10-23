@@ -159,7 +159,7 @@ const { buildSequentialSchedule } = require('../src/utils/sequentialSchedule');
     const routes = R('src/routes/campaign.routes.js');
     ok('참여·상품변경 둘 다 option_paused 로 거절', (routes.match(/reason: 'option_paused'/g) || []).length === 2);
     ok('참여 게이트·공개 상세·목록·상품변경 조회에 paused_at', (routes.match(/thumbnail_url, paused_at\n|status, paused_at\n|sort_order, paused_at\n/g) || []).length >= 4);
-    // 이름 바꾸기 단일 출처 = services/campaignOptionRename(결정 263 7단계-④ ③ 에서 라우트에서 옮김 · 검사 의미 불변) — 한 단계 함수가 신고·알림을 옮기고 두 단계 모두 그 함수를 탄다
+    // 이름 바꾸기 단일 출처 = services/campaignOptionRename(결정 274 7단계-④ ③ 에서 라우트에서 옮김 · 검사 의미 불변) — 한 단계 함수가 신고·알림을 옮기고 두 단계 모두 그 함수를 탄다
     const ren = R('src/services/campaignOptionRename.service.js');
     ok('이름 바꾸기가 신고·알림도 옮긴다(두 단계 모두)', /UPDATE campaign_option_soldout_reports SET opt_key=\$3/.test(ren) && /UPDATE campaign_option_alerts SET opt_key=\$3/.test(ren)
       && /await step\(plan\[i\]\.from, tmp\[i\]\)/.test(ren) && /await step\(tmp\[i\], plan\[i\]\.to\)/.test(ren)

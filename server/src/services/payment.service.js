@@ -1952,7 +1952,7 @@ async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo, r
   }
 
   if (campId && touchFee) {
-    /* ★ 결정 263 5단계 — 리뷰오더와 맞춰지는(양방향 연결) 공고의 리뷰비는 공유 저장으로만 바뀐다(지난 참여 금액 고정과 함께).
+    /* ★ 결정 274 5단계 — 리뷰오더와 맞춰지는(양방향 연결) 공고의 리뷰비는 공유 저장으로만 바뀐다(지난 참여 금액 고정과 함께).
        이 경로로 바꾸면 이미 참여한 분 금액까지 바뀌고 리뷰오더와 값이 갈라진다 — 바뀌는 값이면 거부한다(같은 값은 통과). */
     const { rows: feeRows } = await pool.query('SELECT review_fee FROM recruit_campaigns WHERE id = $1', [campId]);
     const curFee = feeRows[0] ? Number(feeRows[0].review_fee) || 0 : 0;

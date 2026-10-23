@@ -164,7 +164,7 @@ async function _cashReceiptFlags(rows) {
     const seen = new Set();
     for (const r of rows || []) {
       if (!r.linked_sheet_id || !r.linked_tab_name) continue;
-      const k = r.linked_sheet_id + ' ' + r.linked_tab_name;
+      const k = r.linked_sheet_id + '' + r.linked_tab_name;
       if (!seen.has(k)) { seen.add(k); pairs.push([r.linked_sheet_id, r.linked_tab_name]); }
     }
     const tabMap = new Map();
@@ -174,7 +174,7 @@ async function _cashReceiptFlags(rows) {
           WHERE (sheet_id, tab_name) IN (SELECT unnest($1::text[]), unnest($2::text[]))`,
         [pairs.map(p => p[0]), pairs.map(p => p[1])]
       );
-      for (const t of tcs) tabMap.set(t.sheet_id + ' ' + t.tab_name, isCashReceiptIncome(t.income_type));
+      for (const t of tcs) tabMap.set(t.sheet_id + '' + t.tab_name, isCashReceiptIncome(t.income_type));
     }
     const out = new Map();
     for (const r of rows || []) {
@@ -182,7 +182,7 @@ async function _cashReceiptFlags(rows) {
     }
     for (const r of rows || []) {
       if (out.has(r.id)) continue;
-      out.set(r.id, tabMap.get((r.linked_sheet_id || '') + ' ' + (r.linked_tab_name || '')) === true);
+      out.set(r.id, tabMap.get((r.linked_sheet_id || '') + '' + (r.linked_tab_name || '')) === true);
     }
     return out;
   } catch (_) {
@@ -239,9 +239,9 @@ function _normalizeOptionsInput(arr) {
       // ★★ 이름 바꾸기(rename): 이 줄이 원래 어떤 선택지였는지(저장된 opt_key). 없으면 '' = 종전 동작.
       prevOptKey: _normOptKey(obj.prevOptKey ?? obj.prev_opt_key) || '',
       optionUrl: _normalizeOptionUrl(obj.optionUrl ?? obj.option_url ?? obj.url),
-      // ★ 결정 271(사용자 확정 2026-10-22 「2.가」): 그 선택지가 속한 **상품의 메인 주소**(인트라넷 상품 카드의 상품 메인 URL).
+      // ★ 결정 276(사용자 확정 2026-10-22 「2.가」): 그 선택지가 속한 **상품의 메인 주소**(인트라넷 상품 카드의 상품 메인 URL).
       //   같은 상품의 줄은 같은 값. 미전달(undefined) = null = 저장된 값 유지(옛 화면이 저장해도 지워지지 않게) · '' = 지움.
-      // 결정 271: 안 보냄(undefined·null) = 저장값 유지(null). 값이 있는데 형식이 틀리면 지우지 않고 유지(null) — 빈 값('')은 사람이 비운 것
+      // 결정 276: 안 보냄(undefined·null) = 저장값 유지(null). 값이 있는데 형식이 틀리면 지우지 않고 유지(null) — 빈 값('')은 사람이 비운 것
       productUrl: (() => {
         const raw = obj.productUrl ?? obj.product_url;
         if (raw === undefined || raw === null) return null;
@@ -343,7 +343,7 @@ async function _saveCampaignOptions(campaignId, options, { linked = false } = {}
     } else {
       await _applyOptionRenames(client, campaignId, options, keep);
     }
-    // ★ 결정 263 5단계(사용자 확정 2026-10-20 「모든 공고」) — 금액이 바뀐 옵션은 이력을 남긴다(잘못구매 판정이 신청 시각 금액을 쓴다).
+    // ★ 결정 274 5단계(사용자 확정 2026-10-20 「모든 공고」) — 금액이 바뀐 옵션은 이력을 남긴다(잘못구매 판정이 신청 시각 금액을 쓴다).
     const { rows: prevPays } = await client.query('SELECT id, opt_key, pay_amount FROM campaign_options WHERE campaign_id=$1', [campaignId]);
     const prevPayByKey = new Map(prevPays.map(r => [r.opt_key, r]));
     for (const o of options) {
@@ -1613,9 +1613,9 @@ async function getCampaignDetail(req, res, next) {
         const wo = await linkedWorkOrderForCampaign(rows[0], [
           'review_type_mix', 'inflow_type', 'start_date',
           'product_url', 'review_guide', 'special_notes', 'inflow_guide', 'guide_images',
-          // 공고 창 시안 3차(결정 263): 「리뷰오더 고유 항목」 보기 전용 · 연결 표시줄 재료(읽기만)
+          // 공고 창 시안 3차(결정 274): 「리뷰오더 고유 항목」 보기 전용 · 연결 표시줄 재료(읽기만)
           'id', 'title', 'manager_name', 'work_manager', 'product_distribution_mode', 'source_review_order_id', 'bidir_state',
-          'product_options_json',   // 결정 271: 상품 메인 주소를 아직 모르는 줄(196 이전)의 카드에 오더 쪽 주소를 보여 준다(보기만)
+          'product_options_json',   // 결정 276: 상품 메인 주소를 아직 모르는 줄(197 이전)의 카드에 오더 쪽 주소를 보여 준다(보기만)
         ]);
         if (wo && wo.id) {
           orderInfo = {
@@ -3264,7 +3264,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
           });
         }
       }
-    /* ★ 결정 273: 시작일을 비웠거나 오더 희망 시작일을 그대로 받았으면 'pending'(첫 참여일로 맞출 대상) · 사람이 고른 날이면 'manual'.
+    /* ★ 결정 278: 시작일을 비웠거나 오더 희망 시작일을 그대로 받았으면 'pending'(첫 참여일로 맞출 대상) · 사람이 고른 날이면 'manual'.
        오더 날짜는 글자로 읽는다(DATE → Date 변환은 서버 시간대에 따라 하루가 밀린다). 못 읽으면 'manual'(자동으로 바꾸지 않는 쪽). */
     let _startDateBasis = start_date ? 'manual' : 'pending';
     if (start_date && _srcWoId) {
@@ -3341,7 +3341,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         storeRecallCourier,                                     // ★ 135: 회수가 아니면 '' — NOT NULL 컬럼이라 null 금지
         storeRecallProduct,
         repurchaseDaysState.value,
-        _startDateBasis,                                        // ★ 결정 273: pending(안 정함 → 첫 참여일로 맞춤) · manual(사람이 고름)
+        _startDateBasis,                                        // ★ 결정 278: pending(안 정함 → 첫 참여일로 맞춤) · manual(사람이 고름)
       ]
     ));
       if (_insClient) await _insClient.query('COMMIT');
@@ -3379,7 +3379,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
        그날은 일건수·이월·주말 변경이 반영되지 않는다 — 완화 금지). 대신
        ① 인트라넷 오더의 휴무일만 그날 0명으로 저장하고 ② 작업표 빈 줄 날짜를 규칙에 맞춘다.
        ★ fail-soft — 실패해도 공고 발행은 성공(사유는 planPrefill 로 응답에 싣는다). */
-    /* ★ 양방향 4단계-3(결정 263 · 사용자 확정 D1): 인트라넷 오더로 만든 새 공고는 옵션까지 저장된 뒤 바로 연결을 판정한다 —
+    /* ★ 양방향 4단계-3(결정 274 · 사용자 확정 D1): 인트라넷 오더로 만든 새 공고는 옵션까지 저장된 뒤 바로 연결을 판정한다 —
        값이 같으면 'on'(이후 양쪽 수정이 서로 맞춰짐), 다르면 'diverged'(직원이 쪽을 고를 때까지 종전 동작).
        스위치(in2rw)가 off 면 하지 않는다(전부 꺼짐 = 오늘 동작). fail-soft — 실패해도 공고 발행은 성공. */
     let bidirLink = null;
@@ -3461,7 +3461,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(String(start_date))) {
       return res.status(400).json({ ok: false, error: '시작일 형식이 올바르지 않습니다. (YYYY-MM-DD)' });
     }
-    /* ★ 결정 273: 화면이 창을 열 때 본 시작일(start_date_seen)과 같은 값을 보내면 = 사람이 고치지 않았다 → 보내지 않은 것으로 친다.
+    /* ★ 결정 278: 화면이 창을 열 때 본 시작일(start_date_seen)과 같은 값을 보내면 = 사람이 고치지 않았다 → 보내지 않은 것으로 친다.
        창을 열어 둔 사이 새벽 맞춤(첫 참여일)이 시작일을 바꿨어도 옛 화면 값으로 되돌리지 않고, 「사람이 정함」으로 바꾸지도 않는다.
        start_date_seen 을 모르는 옛 화면은 종전 그대로(보낸 값 = 설정). */
     const _startDateEff = (req.body.start_date_seen !== undefined && start_date !== undefined && start_date !== null
@@ -3774,7 +3774,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       await assertCampaignRecruitTotal({ campaignId: id, recruitTotal: Number(_rtEff) || 0 });
     }
 
-    /* ★★ 양방향 4단계-2(결정 263) — 연결 공고의 공유 글 칸은 작업오더 공유 저장으로 먼저 보낸다(`campaignSharedSave`).
+    /* ★★ 양방향 4단계-2(결정 274) — 연결 공고의 공유 글 칸은 작업오더 공유 저장으로 먼저 보낸다(`campaignSharedSave`).
        그 뒤 아래 UPDATE 는 그 칸을 쓰지 않는다(`_bx`) — 창을 연 뒤 인트라넷이 고친 칸을 옛 화면 값으로 되돌리지 않게.
        스위치(campaign_edit)가 꺼져 있거나 연결 공고가 아니면 `_bx=false` = 종전 저장 그대로.
        ★ 모든 검증이 끝난 뒤 여기서 부른다 — 공유 저장은 따로 커밋되므로, 앞선 검증 실패로 반쪽 저장이 남지 않게. */
@@ -3893,7 +3893,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         start_date = CASE WHEN $32::text IS NULL THEN start_date
                           WHEN $32::text = '' THEN NULL
                           ELSE $32::date END,
-        -- ★ 결정 273: 사람이 시작일을 바꾸면 'manual'(자동 맞춤 대상에서 빠짐) · 지우면 첫 참여일로 다시 맞출 대상('pending')
+        -- ★ 결정 278: 사람이 시작일을 바꾸면 'manual'(자동 맞춤 대상에서 빠짐) · 지우면 첫 참여일로 다시 맞출 대상('pending')
         --   이 칸 이전 공고(NULL)를 지우기만 한 경우는 그대로 둔다(사용자 확정 1.가 — 기존 공고는 자동으로 바꾸지 않는다).
         start_date_basis = CASE WHEN $32::text IS NULL THEN start_date_basis
                                 WHEN $32::text = '' THEN (CASE WHEN start_date IS NULL OR start_date_basis IS NULL THEN start_date_basis ELSE 'pending' END)
@@ -3956,7 +3956,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         wdPrepared === undefined ? null : wdPrepared, // $30: 새 값(null=비움)
         null,   // $31 ★ 결정 246: 수정은 작업오더 연결(source_work_order_id)을 바꾸지 않는다(null=유지) — 바꿔 끼우면
                 //    잠금·중복 확인 없이 같은 오더에 살아 있는 공고가 둘이 된다(Codex PR #1632). 화면도 수정 때 보내지 않는다.
-        (_startDateEff === undefined || _startDateEff === null) ? null : String(_startDateEff), // $32: null=유지, ''=제거, 날짜=설정 · 결정 273 본 값과 같으면 유지
+        (_startDateEff === undefined || _startDateEff === null) ? null : String(_startDateEff), // $32: null=유지, ''=제거, 날짜=설정 · 결정 278 본 값과 같으면 유지
         (multi_account_mode === undefined || multi_account_mode === null) ? null : multi_account_mode === true, // $33 ★ 063: null=유지
         (multi_daily_limit === undefined || multi_daily_limit === null || multi_daily_limit === '') ? null : Math.max(0, Number(multi_daily_limit) || 0), // $34
         (sub_hold_ttl_min === undefined || sub_hold_ttl_min === null || sub_hold_ttl_min === '') ? null : Math.max(1, Number(sub_hold_ttl_min) || 15), // $35

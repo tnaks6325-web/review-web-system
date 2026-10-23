@@ -635,7 +635,7 @@ function startCronJobs() {
     catch (err) { logger.warn(`[CRON-OrderBatch] kick 실패(무시): ${err.message}`); }
   });
 
-  // ── 양방향 4단계(결정 263): 리뷰웹 → 인트라넷 공유 글 칸 송신 — 15초마다 ──
+  // ── 양방향 4단계(결정 274): 리뷰웹 → 인트라넷 공유 글 칸 송신 — 15초마다 ──
   //   스위치(bidir_sync.push='on')·주소·전용 비밀값이 모두 있을 때만 보낸다(없으면 대기열에 쌓이기만).
   //   여러 서버가 동시에 돌아도 줄 단위 SKIP LOCKED 로 나눠 가진다.
   cron.schedule('*/15 * * * * *', async () => {
@@ -662,7 +662,7 @@ function startCronJobs() {
   //   진짜 고아는 10장 남짓이라 자동으로 돌릴 이유가 없다 → 크론 제거. 수동 미리보기는
   //   POST /api/drive/orphan-capture-cleanup(dryRun 기본) 그대로.
 
-  // ── 공고 시작일 = 첫 참여일(결정 273 · 2026-10-23): 매일 새벽 4시 10분 ──
+  // ── 공고 시작일 = 첫 참여일(결정 278 · 2026-10-23): 매일 새벽 4시 10분 ──
   //   사람이 시작일을 정하지 않은 새 공고(start_date_basis='pending')만, 첫 참여가 생긴 날로 한 번 맞춘다(앞으로만).
   //   ★ 4시 20분 작업표 날짜 맞추기보다 먼저 — 그쪽이 새 시작일로 빈 줄 날짜를 맞춘다.
   //   되돌리기 = Railway `CAMPAIGN_START_FIRST_JOIN_CRON=0`(맞춘 날은 그대로 남는다 — 사람이 공고 창에서 고칠 수 있다).

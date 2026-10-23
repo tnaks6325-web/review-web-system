@@ -1291,7 +1291,7 @@ function _normOptLabel(s) { return String(s || '').replace(/\s+/g, '').toLowerCa
  * ★★ **하나로 딱 맞을 때만** 귀속한다(정확 일치 → 없으면 4글자 이상 포함 관계). 둘 이상이 맞거나 아무것도
  *   안 맞으면 그 단서는 버린다 — 잘못 귀속하면 멀쩡한 선택지가 마감된다(모르면 세지 않는다 = 종전).
  * ★ 마감(closed) 선택지도 후보에 넣는다 — 빼면 마감된 선택지의 주문이 이름이 비슷한 다른 선택지로 붙는다.
- * ★ 결정 263 ⑤-2 — 옵션 없이 상품 하나로 돌던 공고에 상품을 더하면, 원래 상품 줄에 그 시각(sole_until)이 적힌다.
+ * ★ 결정 274 ⑤-2 — 옵션 없이 상품 하나로 돌던 공고에 상품을 더하면, 원래 상품 줄에 그 시각(sole_until)이 적힌다.
  *   그 전에 들어온 주문(submittedAt)은 상품이 하나뿐이던 때 산 것이라 표기와 무관하게 그 상품이다(결정 252 규칙을 그 시각까지 잇는다).
  *   사람이 작업보드에서 고친 상품 칸(editedProduct)이 있으면 그것이 먼저다(결정 232).
  * @param options campaign_options 행 [{opt_key, product_name, sole_until?}]
@@ -2061,7 +2061,7 @@ function liveOptions(rows) {
 
 module.exports = {
   computeCampaignState,
-  ORDER_COUNTED_SQL,   // 결정 273 — 첫 참여일 맞춤이 같은 "센 주문" 규칙을 쓴다(사본 금지)
+  ORDER_COUNTED_SQL,   // 결정 278 — 첫 참여일 맞춤이 같은 "센 주문" 규칙을 쓴다(사본 금지)
   fetchCampaignCounts,
   fetchOptionCounts,
   fetchOptionCountsBatch,

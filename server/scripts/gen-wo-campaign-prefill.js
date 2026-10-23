@@ -3,7 +3,7 @@
  * 발행 프리필 규칙(`frontend/js/work-order-detail.js` 의 `_woCampaignPrefill` 과 그 의존 함수)을
  * **글자 그대로** 잘라 서버 모듈 `src/utils/woCampaignPrefill.generated.js` 로 만든다.
  *
- * ★★ 왜 손으로 옮기지 않나 — 양방향 동기화(결정 263)는 "오더 → 공고" 변환을 서버가 해야 한다.
+ * ★★ 왜 손으로 옮기지 않나 — 양방향 동기화(결정 274)는 "오더 → 공고" 변환을 서버가 해야 한다.
  *    Railway 는 `server/` 만 배포하므로 화면 파일을 실행 시점에 읽을 수 없다. 손 사본은 28개 함수·
  *    545줄이라 한쪽만 고치는 순간 "발행할 때와 동기화할 때 공고가 다르게 나온다" 로 갈린다.
  *    그래서 사본을 **기계가 만든다** — 회귀가드(`tests/woCampaignPrefillGenerated.test.js`)가

@@ -1,5 +1,5 @@
 /**
- * 양방향 6단계(결정 263 · 사용자 확정 2026-10-20 「1번」 — 지금 화면 모양 {글, 사진은 글 아래}로 맞춤) — 선택지별 유입가이드.
+ * 양방향 6단계(결정 274 · 사용자 확정 2026-10-20 「1번」 — 지금 화면 모양 {글, 사진은 글 아래}로 맞춤) — 선택지별 유입가이드.
  *   ① 비교 규칙: 서버 투영(글만 + 사진 목록)과 공고 창 저장(글 + 끝에 <img> + 사진 목록)은 같은 가이드
  *   ② 연결 저장이 옵션·상품 guide 칸을 연다 · 적용(지움 포함)
  *   ③ 공고 창 가이드 → 오더 guide(옵션 · "옵션 없음" 라벨은 상품 · 링크유입은 공고 전용) · 왕복 검사
@@ -243,7 +243,7 @@ async function pg() {
     const rowsD = (await pool.query('SELECT opt_key, inflow_guide_html FROM campaign_options WHERE campaign_id = $1 ORDER BY opt_key', [camp2])).rows;
     assert.match(rowsD.find(x => x.opt_key === '상품B 블랙').inflow_guide_html, /상품B 블랙만 고침/, JSON.stringify(rowsD));
     assert.doesNotMatch(rowsD.find(x => x.opt_key === '상품A 블랙').inflow_guide_html, /상품B 블랙만 고침/);
-    // ── 결정 272(D4 「나」) — 사진 자리(글 속 사진 주소 한 줄)가 두 시스템 사이를 그대로 오간다 ──
+    // ── 결정 277(D4 「나」) — 사진 자리(글 속 사진 주소 한 줄)가 두 시스템 사이를 그대로 오간다 ──
     {
       // 인트라넷: 블랙 가이드 첫 줄 뒤에 사진 → 공고 HTML 그 자리에 <img>
       r = await putSource(p => { p[0].options[0].guide = { text: '1) 검색\n' + IMG(6) + '\n2) 세 번째 상품', images: [IMG(6), IMG(7)] }; });

@@ -1640,7 +1640,7 @@ router.get('/campaigns/:id/activity-log', authMiddleware, internalMiddleware, (r
    work_detail·연결탭·정원·옵션을 빈 기본값으로 채우고, 저장하면 기존 설정이 조용히
    지워진다(0·빈값·options:[]). 그래서 canEdit 이면 신뢰 플래그를 세워 위임한다.
    ★ 판정 실패는 공개 뷰(fail-closed) — 모르면 더 주지 않는다. 편집은 서버 게이트가 막는다. */
-// 공고 편집 상품 카드 「쇼핑몰에서 가져오기」(결정 271) — 확장 프로그램이 읽은 상품페이지 글 → AI 판독 결과(저장 없음).
+// 공고 편집 상품 카드 「쇼핑몰에서 가져오기」(결정 276) — 확장 프로그램이 읽은 상품페이지 글 → AI 판독 결과(저장 없음).
 //   공고를 고칠 수 있는 사람만(편집 게이트와 같다). 받은 글은 저장·로그하지 않는다. 원본 = 인트라넷 product-page-reader.
 router.post('/campaigns/product-page/extract', authMiddleware, internalMiddleware, editorOnlyMiddleware, productPageLimiter, async (req, res) => {
   res.set('Cache-Control', 'no-store');
@@ -4121,7 +4121,7 @@ router.post('/payment/batch/:id/confirm-failures', authMiddleware, adminOrMaster
 });
 
 // ═══════════════════════════════════════════════════════════
-// 오더·공고 맞추기(결정 263 · 사용자 확정 2026-10-21 「C스타일 · 관리자 이상」)
+// 오더·공고 맞추기(결정 274 · 사용자 확정 2026-10-21 「C스타일 · 관리자 이상」)
 //   GET  /api/trackb/bidir/reconcile          값이 다른(연결 전) 작업과 칸마다의 차이 — 읽기만
 //   POST /api/trackb/bidir/reconcile/:woId    { picks:{칸 id:'order'|'campaign'}, fingerprint, dryRun?, opId? } → 맞추고 연결(dryRun = 해 보고 되돌림)
 // ★ 쓰기는 공유 저장 한 곳(applySharedPatch, origin 'reconcile') — 이 라우트는 전달만 한다.

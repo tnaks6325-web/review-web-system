@@ -30,9 +30,9 @@ const REQUIRED_SCHEMA = [
   ['reviewer_history_control', 'coverage_epoch'],
   ['workdesk_review_resolutions', 'resolution'],
   ['review_closed_targets', 'resolution_id'],
-  ['recruit_campaigns', 'start_date_basis'],      // 197 — 공고 생성 INSERT·수정 UPDATE·새벽 첫 참여일 맞춤(없으면 공고 발행·수정 전면 42703 · 결정 273)
-  ['campaign_options', 'product_url'],             // 196 — 상품 메인 주소(공고 창 저장 INSERT·편집 프리필 SELECT · 결정 271)
-  ['campaign_options', 'sole_until'],              // 195 — 상품별 바로 구매 셈이 SELECT(없으면 셈 조회가 통째 실패 = 상품 정원 "모름")
+  ['recruit_campaigns', 'start_date_basis'],      // 198 — 공고 생성 INSERT·수정 UPDATE·새벽 첫 참여일 맞춤(없으면 공고 발행·수정 전면 42703 · 결정 278)
+  ['campaign_options', 'product_url'],             // 197 — 상품 메인 주소(공고 창 저장 INSERT·편집 프리필 SELECT · 결정 276)
+  ['campaign_options', 'sole_until'],              // 196 — 상품별 바로 구매 셈이 SELECT(없으면 셈 조회가 통째 실패 = 상품 정원 "모름")
   ['order_submissions', 'delivery_memo'],          // 188 — 캡처 배송메세지(주문 저장 INSERT·구매캡처 교체·작업보드 명단이 읽고 쓴다)
   ['order_submissions', 'rule_flags'],              // 187 — 바로 구매 규칙 위반 표시(작업보드·공고 카드·참여 관리 읽기)
   ['reviewers', 'kakao_id'],                       // 170 — 리뷰어 가입 INSERT·내정보 저장(없으면 가입 전면 42703)
@@ -155,7 +155,7 @@ const REQUIRED_SCHEMA = [
   ['recruit_campaigns', 'soldout_paused_at'],
   ['recruit_campaigns', 'soldout_paused_by'],
   ['recruit_campaigns', 'soldout_paused_reason'],
-  // 194 — 양방향 동기화(결정 263 · 3단계): 원본 수정 분기·관리자 수정 분기·/intake/source/:id/shared 가 읽는다
+  // 195 — 양방향 동기화(결정 274 · 3단계): 원본 수정 분기·관리자 수정 분기·/intake/source/:id/shared 가 읽는다
   ['work_orders', 'bidir_state'],
   ['work_orders', 'sync_version'],
   ['work_orders', 'intranet_acked_version'],
@@ -181,9 +181,9 @@ const REQUIRED_TABLES = [
   'workboard_consolidation_backup_records',
   'workboard_consolidation_link_events',
   'workboard_consolidation_targets',
-  'work_order_shared_snapshots',                  // 194 — 양방향 공유 저장의 3방향 기준(없으면 연결된 오더 저장이 409/500)
-  'shared_sync_outbox',                           // 194 — 리뷰웹발 공유 저장의 인트라넷 전송 대기열
-  'campaign_option_price_history',                // 194 — 옵션 결제금액 이력(5단계 · 잘못구매 판정은 신청 시각 금액 — 쓰기·읽기 모두 실패해도 지금 금액으로 접힌다)
+  'work_order_shared_snapshots',                  // 195 — 양방향 공유 저장의 3방향 기준(없으면 연결된 오더 저장이 409/500)
+  'shared_sync_outbox',                           // 195 — 리뷰웹발 공유 저장의 인트라넷 전송 대기열
+  'campaign_option_price_history',                // 195 — 옵션 결제금액 이력(5단계 · 잘못구매 판정은 신청 시각 금액 — 쓰기·읽기 모두 실패해도 지금 금액으로 접힌다)
 ];
 
 async function _runOneMigration(pool, sql) {
