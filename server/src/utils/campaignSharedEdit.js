@@ -26,7 +26,10 @@ const TOP_KEYS = ['thumbnail_url', 'time_range', 'landing_url', 'channel'];
 const LABELS = {
   reviewGuide: '리뷰가이드', specialNotes: '특이사항', reviewGuideImages: '리뷰가이드 사진', specialNotesImages: '특이사항 사진',
   inflowType: '유입방식', thumbnail_url: '썸네일', time_range: '구매시간', landing_url: '상품 페이지 주소', channel: '구매채널',
+  required_delivery_memo: '필수 배송메세지',
 };
+/** 필수 배송메세지(결정 260·287) — 저장 규칙 단일 출처. */
+const _memo = v => require('../services/requiredDeliveryMemo.service').normalizeRequired(v);
 
 const _t = v => String(v == null ? '' : v).replace(/\r\n?/g, '\n').trim();
 const _isFree = text => /자유|자율/.test(String(text || ''));
@@ -44,6 +47,7 @@ function norm(key, v) {
   if (key === 'inflowType') return _t(v) === 'guide' ? 'guide' : 'link';
   if (key === 'time_range') return CANON.time(v);
   if (key === 'channel') return _t(v);
+  if (key === 'required_delivery_memo') return _memo(v);
   return _t(v);
 }
 
@@ -69,6 +73,8 @@ function campaignViewOf(state, camp) {
     time_range: timeOk ? time : _t(c.time_range),
     landing_url: _t(p.landing_url) || _t(c.landing_url),
     channel: channel === '직접입력' ? channelCustom : channel,
+    // 결정 287: 오더 값이 그대로 공고 칸이 된다(빈 값도 — projectToCampaignInTx 가 늘 쓴다)
+    required_delivery_memo: _memo(o.required_delivery_memo),
   };
 }
 
@@ -83,6 +89,7 @@ function bodyView(body, { landingShared = true } = {}) {
   // 상품 페이지(랜딩)는 링크유입일 때만 작업오더에서 나온다 — 가이드유입 공고의 랜딩은 공고 전용 값이라 공유 대상이 아니다.
   if (landingShared && b.landing_url !== undefined && b.landing_url !== null) out.landing_url = b.landing_url;
   if (b.channel !== undefined && b.channel !== null) out.channel = _t(b.channel) === '직접입력' ? _t(b.channel_custom) : _t(b.channel);
+  if (b.required_delivery_memo !== undefined && b.required_delivery_memo !== null) out.required_delivery_memo = b.required_delivery_memo;   // 결정 287 — 칸이 있는 화면만 보낸다
   return out;
 }
 
@@ -95,6 +102,7 @@ function campaignRowView(camp) {
     reviewGuideImages: wd.reviewGuideImages || [], specialNotesImages: wd.specialNotesImages || [],
     inflowType: wd.inflowType || 'link', thumbnail_url: c.thumbnail_url || '', time_range: c.time_range || '',
     landing_url: c.landing_url || '', channel: _t(c.channel) === '직접입력' ? _t(c.channel_custom) : _t(c.channel),
+    required_delivery_memo: _memo(c.required_delivery_memo),
   };
 }
 
@@ -171,6 +179,7 @@ function planCampaignSharedEdit({ baseState, camp, body }) {
     else if (k === 'thumbnail_url') mine.thumbnail_url = _t(v);
     else if (k === 'time_range') mine.purchase_time = _t(v);
     else if (k === 'channel') { mine.purchase_channel = _t(v); mine.purchase_channel_custom = !KNOWN_CHANNELS.has(_t(v)); }
+    else if (k === 'required_delivery_memo') mine.required_delivery_memo = _memo(v);   // 결정 287
     else if (k === 'landing_url') {
       // 랜딩 = (링크유입) 유입가이드 첫 주소 || 상품 주소. 가이드에 주소가 있으면 상품 주소를 바꿔도 랜딩이 안 바뀐다 → 왕복 검사에서 걸린다.
       mine.product_url = _t(v);

@@ -3103,6 +3103,22 @@ router.post('/admin/:id/flags', authMiddleware, adminOrMasterMiddleware, async (
 });
 _handlers.adminFlags = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
+/* ★★ 결정 260 — 공고별 필수 배송메세지. 거대한 INSERT/UPDATE 자리표에 끼우지 않고 저장 직후 이 칸만 따로 쓴다
+   (다른 작업이 같은 자리표를 바꿔도 번호가 어긋나지 않게). undefined = 유지(이 칸이 없는 화면·리뷰어앱 편집).
+   ★ 실패는 숨기지 않는다 — 이 칸이 안 저장되면 "00 확인"이 조용히 꺼진다. 응답 경고로 화면에 알린다. */
+async function _saveRequiredDeliveryMemo(id, value, row) {
+  if (value === undefined || value === null) return null;
+  const v = require('../services/requiredDeliveryMemo.service').normalizeRequired(value);
+  try {
+    await pool.query('UPDATE recruit_campaigns SET required_delivery_memo = $2 WHERE id = $1', [id, v]);
+    if (row) row.required_delivery_memo = v;
+    return null;
+  } catch (e) {
+    logger.warn(`[campaign] 필수 배송메세지 저장 실패(${id}): ${e.message}`);
+    return '필수 배송메세지 저장 실패: ' + e.message;
+  }
+}
+
 // POST /api/campaign/admin/create — 캠페인 생성
 router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
@@ -3126,6 +3142,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       carry_strategy, // ★ 139: next|spread|extend — 공고 설정의 실제 이월 배치 규칙
       work_kind, // ★ 099: 체험단 종류(review|blog) — 빈 값=리뷰체험단(기존 동작). 블로그면 리뷰타입 미사용
       cash_receipt_required, // 모집공고 직접 설정 — 무시트 공고도 구매 안내·배지에 반영
+      required_delivery_memo, // ★ 결정 260: 필수 배송메세지(''=확인 안 함) — 아래 _saveRequiredDeliveryMemo 가 따로 저장
       workboard_display_name, // 탭 단위 표시 별칭(실제 상품명·주문/참여 이력은 무접촉)
       // ★ 135: 회수·혼합 부속정보. 배송유형이 그 기본형일 때만 저장하고, 아니면 비운다
       //   (작업오더 접수의 _deliveryMixJson·_recallFields 와 같은 규율 — 유형을 바꾸면
@@ -3360,6 +3377,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       .invalidateCashReceiptContext(rows[0].linked_sheet_id, rows[0].linked_tab_name);
     // ★ 061: 상품옵션 저장(제공 시). 원자 저장(캠페인 락) — 실패 시 응답에 경고 표면화(조용한 정원 오염 방지, 레드 #7).
     let optionsWarning = null;
+    const requiredMemoWarning = await _saveRequiredDeliveryMemo(rows[0].id, required_delivery_memo, rows[0]);   // ★ 결정 260
     // 172: 처음부터 게시(모집중)로 만든 공고는 지금을 게시 시각으로 남긴다 — 실패해도 공고 생성은 유지(fail-soft)
     if (rows[0].status === 'active') { try { await pool.query(`UPDATE recruit_campaigns SET published_at = NOW() WHERE id = $1 AND published_at IS NULL`, [rows[0].id]); } catch (e) { logger.warn('[campaign/create] 게시 시각 기록 실패: ' + e.message); } }
     if (normOpts) { try { await _saveCampaignOptions(rows[0].id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/create] ' + optionsWarning); } }
@@ -3417,6 +3435,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       data: rows[0], options: await _loadOptionsRaw(pool, rows[0].id),
       feeSchedules: await _loadFeeSchedules(pool, rows[0].id),
       ...(optionsWarning ? { optionsWarning } : {}), ...(feeWarning ? { feeWarning } : {}),
+      ...(requiredMemoWarning ? { requiredMemoWarning } : {}),   // ★ 결정 260
       ...(quotaSync ? { quotaSync } : {}),
       ...(bidirLink ? { bidirLink } : {}),
       ...(planPrefill ? { planPrefill } : {}) });
@@ -3458,6 +3477,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       carry_mode, // ★ 098: 이월 반영 방식 'auto'|'hold' — undefined=유지
       carry_strategy, // ★ 139: 이월 배치 전략 next|spread|extend — undefined=유지
       cash_receipt_required, // undefined=유지 / true·false=모집공고 직접 설정
+      required_delivery_memo, // ★ 결정 260: undefined=유지 / ''=확인 안 함 — 아래 _saveRequiredDeliveryMemo 가 따로 저장
       workboard_display_name, // undefined=유지 / ''=표시명 해제(실제 상품명으로 폴백)
       skip_weekends, // undefined=유지 / true·false=주말 게시 직접 설정
       // ★ 135: 회수·혼합 부속정보 — undefined=유지(부속 칸 없는 화면이 저장해도 안 지워진다).
@@ -4006,6 +4026,15 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       .invalidateCashReceiptContext(rows[0].linked_sheet_id, rows[0].linked_tab_name);
     // ★ 061: 상품옵션 교체(배열 전달 시에만). 원자 저장(캠페인 락), 참여자 있는 옵션은 삭제 대신 closed(기록 보호).
     let optionsWarning = null;
+    /* ★ 결정 287: 연결 공고(_bx)의 필수 배송메세지는 양방향 공유 칸 — 위 공유 저장이 오더에 쓰고 공고 칸에도 반영했다.
+       여기서는 화면 값이 아니라 **오더의 지금 값**으로 공고 칸을 맞춘다(주말·리뷰타입 맞추기와 같은 규칙 — 오더와 다른 값은 쓰지 않는다).
+       칸이 없는 화면(미전송 = undefined)은 종전처럼 손대지 않는다. */
+    let _rdmStore = required_delivery_memo;
+    if (_bx && required_delivery_memo !== undefined && required_delivery_memo !== null) {
+      const { rows: rdm } = await pool.query('SELECT required_delivery_memo FROM work_orders WHERE id = $1', [bidirEdit.link.wo.id]);
+      _rdmStore = rdm.length ? (rdm[0].required_delivery_memo || '') : undefined;
+    }
+    const requiredMemoWarning = await _saveRequiredDeliveryMemo(id, _rdmStore, rows[0]);   // ★ 결정 260
     if (normOpts) { try { await _saveCampaignOptions(id, normOpts, { linked: _bx }); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/update] ' + optionsWarning); } }
     if (hasWorkboardDisplayName) {
       rows[0].workboard_display_name = await _saveWorkboardDisplayName({
@@ -4069,6 +4098,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       ...(worktableRelay ? { worktableRelay } : {}),
       feeSchedules: await _loadFeeSchedules(pool, id),
       ...(optionsWarning ? { optionsWarning } : {}), ...(feeWarning ? { feeWarning } : {}),
+      ...(requiredMemoWarning ? { requiredMemoWarning } : {}),   // ★ 결정 260
       ...(quotaSync ? { quotaSync } : {}),
       // ★ 095: 차수 공고라 총모집 전송값을 무시했음을 화면에 알린다(진행상품 표 hidden 재전송 케이스)
       ...(_rtLocked ? { recruitTotalLocked: true } : {}),

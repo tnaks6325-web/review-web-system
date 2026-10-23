@@ -51,7 +51,8 @@ const roi = require('../src/services/reviewerOrderIdentity.service');
   const vals = m[2].split(',').map(s => s.trim());
   assert.equal(cols.length, vals.length, 'insert columns == values');
   assert.equal(vals[cols.indexOf('delivery_memo')], '$21', 'delivery_memo bound to $21');
-  assert.ok(/source \|\| 'order_submit',\n[^\n]*\n\s*orderData\.deliveryMemo \|\| '',\n  \];/.test(ol), '$21 param is deliveryMemo (after source)');
+  // 결정 260: 뒤에 $22(deliveryMemoCheck)가 붙을 수 있다 — deliveryMemo 가 source 바로 다음($21)이라는 검사 의미는 그대로.
+  assert.ok(/source \|\| 'order_submit',\n[^\n]*\n\s*orderData\.deliveryMemo \|\| '',\n(?:[^\n]*\n\s*orderData\.deliveryMemoCheck \|\| '',\n)?  \];/.test(ol), '$21 param is deliveryMemo (after source)');
   assert.ok(/delivery_memo=''/.test(read('server/src/services/purchaseCaptureReplace.service.js')), 'capture replace clears memo');
   assert.ok(/ADD COLUMN IF NOT EXISTS delivery_memo TEXT NOT NULL DEFAULT ''/.test(read('server/migrations/188_order_delivery_memo.sql')));
   assert.ok(/\['order_submissions', 'delivery_memo'\]/.test(read('server/index.js')), 'schema preflight');

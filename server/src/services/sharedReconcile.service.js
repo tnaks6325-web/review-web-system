@@ -25,7 +25,7 @@ const SCALAR_LABEL = {
   time_range: '구매시간', review_fee: '리뷰비', recruit_total: '총모집', daily_limit: '일 진행 건수', delivery_type: '배송 방식',
   delivery_type_mix: '배송 혼합', recall_courier: '회수 택배사', recall_product: '회수 상품', review_type: '리뷰타입',
   review_type_mix: '리뷰타입 혼합 수량', work_kind: '체험단 종류', thumbnail_url: '썸네일', skip_weekends: '주말 제외',
-  channel: '구매채널', landing_url: '상품 페이지 주소',
+  channel: '구매채널', landing_url: '상품 페이지 주소', required_delivery_memo: '필수 배송메세지',
 };
 const LEAF_LABEL = {
   name: '이름', unit_kind: '옵션 있음·없음', option_url: '주소', product_url: '상품 주소', pay_amount: '결제금액', recruit_total: '인원', daily_limit: '일건수',
@@ -162,6 +162,7 @@ function _mixedBody({ from, to, pairs, S, fromIsOrder, hasRows }) {
   { const ch = pick('channel') ? to.channel : from.channel; b.channel = ch; b.channel_custom = ''; }
   sc('skip_weekends', v => v === '1');
   sc('review_type'); sc('delivery_type');
+  sc('required_delivery_memo');   // 결정 287
   if (!hasRows) { sc('recruit_total', v => Number(v) || 0); sc('daily_limit', v => Number(v) || 0); sc('review_type_mix', _mixArr); }
   if (!hasRows) return b;
   // 줄 — 짝마다 from 줄에서 시작해 고른 잎만 to 값으로. 이름을 to 로 고르면 이름을 바꾸고 원래 이름(prevOptKey)을 싣는다.
@@ -219,6 +220,7 @@ function _fakeCamp(camp, view) {
   const known = new Set(['쿠팡', '네이버', '올리브영', '카카오메이커스']);
   return { ...camp, review_type: view.review_type, delivery_type: view.delivery_type, skip_weekends: view.skip_weekends === '1',
     time_range: view.time_range, thumbnail_url: view.thumbnail_url, landing_url: view.landing_url,
+    required_delivery_memo: view.required_delivery_memo,
     channel: ch ? (known.has(ch) ? ch : '직접입력') : camp.channel, channel_custom: ch && !known.has(ch) ? ch : '' };
 }
 
@@ -335,7 +337,7 @@ function planReconcile(wo, camp, opts, picks = null) {
   const forced = fields.filter(f => picks[f.id] === 'order' && !allCamp.has(f.id) && !f.derived);
   const force = { urlTouched: forced.some(f => URL_LEAVES.has(f.leaf)) || forced.some(f => f.key === 'landing_url'), keys: [],
     quantity: derivedIds.length > 0 };   // 줄 있는 공고의 총모집·일건수가 줄 합과 어긋남 — 오더(줄 합)로 공고를 다시 맞춘다(검토 2026-10-21)
-  const KEYMAP = { review_fee: 'review_fee', time_range: 'purchase_time', thumbnail_url: 'thumbnail_url', channel: 'purchase_channel', skip_weekends: 'skip_weekends', delivery_type: 'delivery_type', landing_url: 'product_url' };
+  const KEYMAP = { review_fee: 'review_fee', time_range: 'purchase_time', thumbnail_url: 'thumbnail_url', channel: 'purchase_channel', skip_weekends: 'skip_weekends', delivery_type: 'delivery_type', landing_url: 'product_url', required_delivery_memo: 'required_delivery_memo' };
   for (const f of forced) if (f.group === 'scalar' && KEYMAP[f.key]) force.keys.push(KEYMAP[f.key]);
   const forcedUnknown = forced.filter(f => !(f.group === 'option' && URL_LEAVES.has(f.leaf)) && !(f.group === 'scalar' && KEYMAP[f.key]));
   if (forcedUnknown.length) return { ...base, hasRows, error: { code: 'reconcile_unmappable', labels: forcedUnknown.map(f => `${f.label} — ${f.campaignSide.reason}`) } };

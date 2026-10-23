@@ -225,6 +225,8 @@ async function scopedEditSharedBlock({ campaignId, body, db } = {}) {
   const t = v => String(v == null ? '' : v).trim();
   if (b.thumbnail_url !== undefined && t(b.thumbnail_url) !== t(now.thumbnail_url)) changed.push('썸네일');
   if (b.time_range !== undefined && t(b.time_range) !== t(now.time_range)) changed.push('구매시간');
+  if (b.required_delivery_memo !== undefined && b.required_delivery_memo !== null
+      && require('./requiredDeliveryMemo.service').normalizeRequired(b.required_delivery_memo) !== now.required_delivery_memo) changed.push('필수 배송메세지');   // 결정 287
   if (b.review_fee !== undefined && b.review_fee !== null && b.review_fee !== ''
       && (Number(b.review_fee) || 0) !== (Number(link.camp.review_fee) || 0)) changed.push('리뷰비');
   // 7단계 — 총모집·일건수는 작업표 칸(연결 오더와 같이 맞춘다). 이 화면은 기준 버전을 몰라 연결 공고에서는 바꾸지 못한다.

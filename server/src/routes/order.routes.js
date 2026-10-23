@@ -332,8 +332,8 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
        source_review_order_id, source_revision, workboard_schema_version, intake_idempotency_key, intranet_advertiser_id,
        intranet_advertiser_name, intranet_advertiser_contact, intranet_advertiser_business_number,
        status, created_by, work_kind, delivery_type_mix, recall_courier, recall_product,
-       work_series_id, work_round, thumbnail_url)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,'submitted',$42,$43,$44,$45,$46,$47,$48,$49)
+       work_series_id, work_round, thumbnail_url, required_delivery_memo)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,'submitted',$42,$43,$44,$45,$46,$47,$48,$49,$50)
      RETURNING *`,
     [
       _genOrderId(),
@@ -396,6 +396,8 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
       source.workRound,
       // ★ 163: 모집공고 썸네일. 우리 프록시 절대 URL만 통과 — 형식 밖·미전송은 빈 값(종전 동작).
       _thumbnailUrl(b.thumbnail_url),
+      // ★ 결정 287: 필수 배송메세지(결정 260 · 196 칸) — 발행 프리필이 공고 칸으로 옮긴다. 미전송 = 빈 값(확인 안 함).
+      _requiredMemo(b.required_delivery_memo),
     ]
   );
   return rows[0];
@@ -588,6 +590,8 @@ function _sourceContentNextValues(b, derived) {
        이 칸을 모르는 구버전 인트라넷 payload 가 "빈 값으로 바뀌었다" 로 읽히면
        계약 후속 매칭이 새로 막힌다. */
     ...(b.thumbnail_url === undefined ? {} : { thumbnail_url: _thumbnailUrl(b.thumbnail_url) }),
+    /* ★ 결정 287 필수 배송메세지 — 썸네일과 같은 규율(보냈을 때만 비교 · 이 칸을 모르는 인트라넷 창이 지우지 않게). */
+    ...(b.required_delivery_memo === undefined ? {} : { required_delivery_memo: _requiredMemo(b.required_delivery_memo) }),
     delivery_type: derived.deliveryType,
     courier_proxy: derived.courierProxy,
     review_type: b.review_type || '',
@@ -635,7 +639,9 @@ const SOURCE_EDIT_AFTER_ACCEPT = ['title', 'manager_name', 'product_url', 'inflo
   /* ★★ 유입방식·구매시간대(사용자 확정 2026-09-22) — 둘 다 **작업표와 무관**하다(작업표를 만드는
      `utils/worktablePlan` 에 유입·구매시간 참조가 한 건도 없다). 열·줄·날짜 배치를 바꾸지 않으므로
      접수 뒤에도 고칠 수 있다. 대신 **공고까지 전파**해야 리뷰어 화면이 따라온다(아래 전파 호출). */
-  'inflow_type', 'purchase_time'];
+  'inflow_type', 'purchase_time',
+  /* ★ 결정 287 필수 배송메세지 — 구매양식 제출 검사(결정 260)의 기준 글자일 뿐 작업표 열·줄·정원·금액과 무관하다. */
+  'required_delivery_memo'];
 
 // ★★ 상품 구성(product_options_json) 안에서 접수 뒤에도 고칠 수 있는 키 (2026-09-21 실측).
 //   ★ 왜 칸 전체가 아니라 키 단위인가: 인트라넷은 **상품 주소와 선택지별 유입가이드**를 이 한
@@ -651,6 +657,9 @@ const SOURCE_EDIT_AFTER_ACCEPT = ['title', 'manager_name', 'product_url', 'inflo
  *   Drive 원본 주소는 교차 오리진에서 깨진다(관리자 썸네일이 "절대 프록시 URL" 을 쓰는 것과 같은 규율).
  *   ★ 형식 밖이면 **빈 값**(틀린 값보다 빈 값) — 빈 값이면 공고 전파도 하지 않는다.
  */
+/** 결정 287 — 필수 배송메세지 저장 규칙(공백 하나로·30자) 단일 출처. */
+function _requiredMemo(v) { return require('../services/requiredDeliveryMemo.service').normalizeRequired(v); }
+
 function _thumbnailUrl(v) {
   const s = String(v == null ? '' : v).trim();
   if (!s) return '';
@@ -700,7 +709,7 @@ const SOURCE_FIELD_LABELS = {
   product_url: '상품 주소', work_sheet_url: '작업시트', goods_cost_type: '물건비',
   manager_name: '담당AE', work_manager: '작업담당', skip_weekends: '주말 제외',
   delivery_type_mix: '실배송·빈박스 건수', recall_courier: '회수 택배사', recall_product: '회수 상품명칭',
-  holidays: '휴무일', work_kind: '체험단 종류', thumbnail_url: '공고 썸네일',
+  holidays: '휴무일', work_kind: '체험단 종류', thumbnail_url: '공고 썸네일', required_delivery_memo: '필수 배송메세지',
 };
 const _sourceFieldLabel = column => SOURCE_FIELD_LABELS[column] || column;
 
@@ -1255,6 +1264,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
          intranet_advertiser_contact = $37, intranet_advertiser_business_number = $38, review_fee = $39,
          delivery_type_mix = $41, recall_courier = $42, recall_product = $43, product_distribution_mode = $44,
          thumbnail_url = $45,
+         required_delivery_memo = COALESCE($47, required_delivery_memo),   -- 결정 287: 미전송 = 유지
          updated_at = NOW()
        WHERE id = $1 AND source_review_order_id = $40 AND COALESCE(source_revision, 0) = $46
        RETURNING *`,
@@ -1275,6 +1285,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
         _productDistributionMode(b.product_distribution_mode),
         _thumbnailUrl(b.thumbnail_url),
         currentRevision,                                   // $46 ★ 1단계: 읽은 번호 그대로일 때만 쓴다
+        b.required_delivery_memo === undefined ? null : _requiredMemo(b.required_delivery_memo),   // $47 결정 287
       ]
     );
     const updated = rows[0];
