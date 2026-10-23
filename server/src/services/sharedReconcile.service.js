@@ -395,9 +395,49 @@ async function listReconcile(db) {
       if (n) f.used = n;
     }
     items.push({ workOrderId: r.id, sourceReviewOrderId: r.source_review_order_id, title: r.title, workManager: r.work_manager || '',
-      campaignId: camp.id, campaignTitle: camp.title, fields: plan.fields, fingerprint: plan.fingerprint, blocked: plan.blocked });
+      campaignId: camp.id, campaignTitle: camp.title, fields: plan.fields, fingerprint: plan.fingerprint, blocked: plan.blocked,
+      ..._skipInfo(r), joined: await _joinedCount(db, camp) });
   }
   return { items, counts: { diverged: items.length } };
 }
 
-module.exports = { reconcileSharedOrder, listReconcile, diffFields, _mixArr, _stripRenameMarks, fingerprint, planReconcile, _pairRows, _mixedBody, PERMANENT, SCALAR_LABEL, LEAF_LABEL };
+/** 「따로 두기」 표시(결정 284) — 담당자 팝업이 다시 묻지 않는 작업. 칸이 없는 옛 DB = 정하지 않음. */
+function _skipInfo(r) {
+  return r && r.bidir_reconcile_skip_at
+    ? { skipped: true, skippedAt: r.bidir_reconcile_skip_at, skippedBy: r.bidir_reconcile_skip_by || '' }
+    : { skipped: false };
+}
+
+/** 지금까지 참여한 사람 수(안내용 · 작업표 채워진 줄 = 진행 현황 참여자와 같은 판정). 작업표가 없거나 못 읽으면 null(0 위장 금지). */
+async function _joinedCount(db, camp) {
+  if (!camp || !camp.linked_sheet_id || !camp.linked_tab_name) return null;
+  try {
+    const { filledSql } = require('../utils/rowNumbering');
+    const { rows } = await db.query(
+      `SELECT COUNT(*)::int AS n FROM campaign_participants p
+        WHERE p.sheet_id = $1 AND p.tab_name = $2 AND p.active = TRUE AND p.deleted_at IS NULL AND ${filledSql('p')}`,
+      [camp.linked_sheet_id, camp.linked_tab_name]);
+    return rows[0] ? Number(rows[0].n) : null;
+  } catch (_) { return null; }
+}
+
+/**
+ * 「따로 두기」 켜고 끄기(결정 284) — 값이 다른 작업을 담당자 팝업이 더 묻지 않게(켜기) · 다시 묻게(끄기).
+ * ★ 연결·값은 건드리지 않는다 — 이 표시는 "묻지 않음" 하나뿐이다. 이미 연결된(on) 작업·지운 작업은 거절한다.
+ * @returns {Promise<{status:number, body:object}>}
+ */
+async function setReconcileSkip({ workOrderId, skip, actor = '', db } = {}) {
+  const pool = db || require('../db/pool');
+  const id = String(workOrderId || '').trim();
+  if (!id) return { status: 400, body: { ok: false, code: 'work_order_required', error: '작업오더가 없습니다.' } };
+  const { rows } = await pool.query(
+    `UPDATE work_orders
+        SET bidir_reconcile_skip_at = CASE WHEN $2::boolean THEN COALESCE(bidir_reconcile_skip_at, NOW()) ELSE NULL END,
+            bidir_reconcile_skip_by = CASE WHEN $2::boolean THEN $3 ELSE '' END
+      WHERE id = $1 AND deleted_at IS NULL AND COALESCE(bidir_state, 'off') <> 'on'
+      RETURNING id, bidir_reconcile_skip_at, bidir_reconcile_skip_by`, [id, !!skip, String(actor || '').slice(0, 80)]);
+  if (!rows.length) return { status: 409, body: { ok: false, code: 'reconcile_skip_not_applicable', error: '이미 맞춰졌거나 지워진 작업입니다. 새로고침해 주세요.' } };
+  return { status: 200, body: { ok: true, workOrderId: id, ..._skipInfo(rows[0]) } };
+}
+
+module.exports = { reconcileSharedOrder, listReconcile, setReconcileSkip, _skipInfo, diffFields, _mixArr, _stripRenameMarks, fingerprint, planReconcile, _pairRows, _mixedBody, PERMANENT, SCALAR_LABEL, LEAF_LABEL };
