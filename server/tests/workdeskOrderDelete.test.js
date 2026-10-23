@@ -29,7 +29,9 @@ const workdesk = fs.readFileSync(path.join(root, '..', 'frontend/workdesk.html')
 
 assert.match(deleteService, /WHERE id=\$1 AND sheet_id=\$2 AND tab_name=\$3 AND order_submission_id=\$5::uuid/,
   '삭제 대상은 선택한 행 ID와 주문 ID를 함께 대조한다');
-assert.match(cancelService, /INSERT INTO sync_queue/, '시트 주문값 비우기 큐는 취소 트랜잭션 안에서 확정한다');
+// 결정 274: 시트 주문값 비우기 큐(order_cancel)는 없다 — 취소 상태(canceled)를 같은 트랜잭션 안에서 확정한다(검사 의미 불변: 단절 없음).
+assert.doesNotMatch(cancelService, /INSERT INTO sync_queue/, '취소가 시트 비우기 큐를 다시 넣는다(결정 274)');
+assert.match(cancelService, /mirror_status='canceled'[\s\S]*?COMMIT/, '취소 상태는 취소 트랜잭션 커밋 전에 확정한다');
 // ★ 2026-08 사용자 확정: 주문 삭제·번호 배정은 AE(staff)도 한다 — 게이트는 internal(광고주 차단).
 assert.match(trackRoute, /\/workdesk\/order-delete-preview[\s\S]{0,180}authMiddleware, internalMiddleware/,
   '영향 미리보기도 내부 담당자 권한이 필요하다(광고주 차단)');

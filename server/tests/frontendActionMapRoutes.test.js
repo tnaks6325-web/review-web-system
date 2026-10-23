@@ -98,7 +98,8 @@ for (const [method, p] of [['GET', '/api/diag/debug-tab'], ['GET', '/api/diag/de
 ok('변이: 지운 입구는 없음으로 판정', !exists('GET', '/api/diag/campaign-stats') && !exists('GET', '/api/tab/stats'));
 // 결정 270: 표본이던 /api/admin/keywords 는 옛 대시보드 전용이라 지웠다 — 살아 있는 입구로 표본을 옮긴다(검사 의미 불변).
 // 결정 273: 표본이던 /api/diag/sync-queue 는 시트 시절 큐 도구라 지웠다 — 살아 있는 입구로 표본을 옮긴다(검사 의미 불변).
-ok('변이: 있는 입구는 있음으로 판정', exists('GET', '/api/diag/reverse-sync-list') && exists('PUT', '/api/campaign/admin', '/:id'));
+// 결정 274: 표본이던 /api/diag/reverse-sync-list 는 역동기화 입구라 지웠다 — 살아 있는 입구로 표본을 옮긴다(검사 의미 불변).
+ok('변이: 있는 입구는 있음으로 판정', exists('GET', '/api/diag/row-claims') && exists('PUT', '/api/campaign/admin', '/:id'));
 ok('변이: 동적 표시 없는 매핑은 접두 일치로 통과시키지 않는다', !exists('PUT', '/api/campaign/admin'));
 ok('변이: 동적 꼬리는 완전한 템플릿만 인정', exists('PUT', '/api/campaign/admin', '/:id/status') && !exists('PUT', '/api/campaign/admin', '/:id/nope'));
 
@@ -146,14 +147,22 @@ for (const [method, p] of [
 ok('273: 시트 시절 도구 액션 매핑 없음', !['syncQueueStats', 'syncQueueRetry', 'syncQueuePurge', 'syncQueueDelete', 'orderMirrorStatus', 'orderReconcile',
   'queueDrain', 'buildHistory', 'smartBuildStatus', 'smartBuildRun', 'smartBuildStart', 'smartBuildStop', 'buildIndexSmart', 'buildIndexByCampaign',
   'releaseBuildLock'].some(n => mapNames.has(n)));
+/* 결정 274: 시트→DB 역동기화 입구 7개(결정 186 85번) — 지운 입구가 되살아나면 잡는다. 대표로 /api/image·/api/viewer 도 본다(공용 라우터). */
+for (const [method, p] of [
+  ['POST', '/api/diag/reverse-sync-detect'], ['GET', '/api/diag/reverse-sync-list'], ['POST', '/api/diag/reverse-sync-apply'],
+  ['POST', '/api/diag/reverse-sync-dismiss'], ['POST', '/api/diag/reverse-sync-auto-run'], ['POST', '/api/diag/reverse-sync-rollback'],
+  ['GET', '/api/diag/reverse-sync-auto-status'], ['GET', '/api/image/reverse-sync-list'], ['POST', '/api/viewer/reverse-sync-apply']]) {
+  ok(`274: ${method} ${p} 제거 상태`, !exists(method, p));
+}
+ok('274: 역동기화 액션 매핑 없음', ![...mapNames].some(n => /reverse/i.test(n)));
 /* 남겨야 하는 것 — 리뷰어·작업보드·인트라넷이 실제로 부르거나(공유 핸들러) 사용자 결정 대기(결정 186 킵) */
 for (const [method, p] of [
   ['POST', '/api/admin/login'], ['POST', '/api/admin/intranet-login'], ['GET', '/api/search'], ['GET', '/api/index'],
-  ['POST', '/api/image/review-upload'], ['POST', '/api/diag/client-error'], ['GET', '/api/diag/reverse-sync-list'], ['POST', '/api/blacklist'],
+  ['POST', '/api/image/review-upload'], ['POST', '/api/diag/client-error'], ['POST', '/api/blacklist'],
   ['GET', '/api/tab/provider-info'], ['GET', '/api/tab/reviewer-options'], ['GET', '/api/short/resolve'], ['GET', '/api/drive/report/:code'],
   ['PUT', '/api/order/admin/update'], ['POST', '/api/order/guide-image'], ['GET', '/api/cs/threads'], ['GET', '/api/reviewer/notices/all'],
-  // 결정 273 이후에도 남기는 수동 도구(무시트 복구·역동기화 #85·행 점유 조회)
-  ['POST', '/api/diag/sheetless-worktable-recover'], ['POST', '/api/diag/order-mirror-repair'], ['POST', '/api/diag/reverse-sync-apply'],
+  // 결정 273·274 이후에도 남기는 수동 도구(무시트 복구·행 점유 조회 — 역동기화 #85 는 274 로 제거)
+  ['POST', '/api/diag/sheetless-worktable-recover'], ['POST', '/api/diag/order-mirror-repair'],
   ['GET', '/api/diag/row-claims'], ['POST', '/api/diag/review-reflect'], ['GET', '/api/diag/no-capture-audit'], ['GET', '/api/diag/order-stuck-export']]) {
   ok(`270: ${method} ${p} 남아 있음`, exists(method, p.replace(/:\w+/g, 'x')));
 }

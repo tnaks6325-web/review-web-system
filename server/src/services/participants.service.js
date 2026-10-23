@@ -143,9 +143,7 @@ async function compareWithIndex({ sheetId, tabName } = {}) {
 
 // ── Phase 4: DB를 "살아있는 원본"으로 — 이미 가져온 탭들을 review_index에서 주기 최신화(시트 재읽기 0). ──
 //   라이브 소비처 아직 없음(shadow) → 리뷰어·관리자·시트 무영향. 수동편집 행은 importTabFromIndex가 보존.
-//   ⚠️ 주의: PARTICIPANTS_SHEET_MIRROR=1(Phase 2b)과 "동시에" 켜면, 여기서 최신화한 is_submitted/is_paid가
-//     이후 mirror-tab 트리거 시 시트 빈칸으로 흐를 수 있다(빈칸-only·비파괴이나 review_index→시트 round-trip).
-//     단독(sync만)으로는 시트 무영향. 둘을 함께 쓸 땐 그 흐름을 이해하고 운영할 것.
+//   시트 무영향(Phase 2b 시트 되쓰기 participant_mirror 는 2026-10-23 제거 · 결정 274).
 async function syncImportedTabs({ limit = 200, by = 'auto-sync' } = {}) {
   const db = getPool();
   const { rows: tabs } = await db.query(

@@ -1,14 +1,11 @@
 /**
- * PR-B 백엔드 검증 — 취소 안전가드(R1) + 편집 필드매핑 헬퍼
- *   rowIdentityMatches: 시트 행이 "여전히 이 주문의 것"인지 다중칸 AND 일치로 판정.
- *     - 일치 → {match:true} (클리어 허용)
- *     - 수취인만 다른 재기입자 → {match:false,gridOutOfRange:false} (클리어 거부 = R1 데이터파괴 방지)
- *     - 그리드밖 빈읽기 → {match:false,gridOutOfRange:true} (사람 손 불가 → 호출부가 클리어 진행)
+ * PR-B 백엔드 검증 — 편집 필드매핑 헬퍼 (취소 안전가드 R1 rowIdentityMatches 는 결정 274 로 제거 — 부재만 본다)
+ *   (rowIdentityMatches — 시트 행 신원 재확인 — 는 시트 쓰기 실행부와 함께 결정 274 로 제거. 부재만 본다.)
  * 실행: node tests/orderLedgerPRB.test.js
  */
 const assert = require('assert');
 
-// sheets.service / sheetsThrottle를 require.cache로 모킹(rowIdentityMatches가 호출시점 inline require).
+// sheets.service / sheetsThrottle를 require.cache로 모킹(혹시 남은 시트 호출이 실제 구글로 나가지 않게).
 let _readReturn = [['홍길동', '01011112222', '서울시']];
 function mockModule(relId, exportsObj) {
   const resolved = require.resolve(relId);
@@ -42,32 +39,9 @@ async function run() {
   assert.equal(ledger._fieldToCol(headers, 'nope'), -1);
   console.log('  _fieldToCol ok');
 
-  const tabContext = { headers, tabName: 'Orders', tabGid: '123' };
-  const osBase = { sheet_id: 's1', sheet_row: 10, recipient: '홍길동', phone: '010-1111-2222', address: '서울시' };
-
-  // (a) 3칸 일치 → match
-  _readReturn = [['홍길동', '01011112222', '서울시']]; // B10:D10 = [수취인,연락처,주소]
-  let r = await ledger.rowIdentityMatches(osBase, tabContext);
-  assert.deepEqual(r, { match: true, gridOutOfRange: false });
-  console.log('  rowIdentityMatches (a) 일치 → match:true');
-
-  // (b) 수취인만 다른 재기입자 → match:false (클리어 거부)
-  _readReturn = [['김철수', '01011112222', '서울시']];
-  r = await ledger.rowIdentityMatches(osBase, tabContext);
-  assert.deepEqual(r, { match: false, gridOutOfRange: false }, 'R1: 사람 재사용행은 클리어 거부');
-  console.log('  rowIdentityMatches (b) 수취인 불일치 → match:false (R1 파괴방지)');
-
-  // (c) 연락처 일치+주소 불일치 → AND라 match:false
-  _readReturn = [['홍길동', '01011112222', '부산시']];
-  r = await ledger.rowIdentityMatches(osBase, tabContext);
-  assert.equal(r.match, false, '한 칸이라도 다르면 불일치(AND)');
-  console.log('  rowIdentityMatches (c) 주소 불일치 → match:false');
-
-  // (d) 그리드밖 빈읽기 → gridOutOfRange:true (호출부가 클리어 진행)
-  _readReturn = [];
-  r = await ledger.rowIdentityMatches(osBase, tabContext);
-  assert.deepEqual(r, { match: false, gridOutOfRange: true }, 'J-2: 그리드밖=사람 손 불가');
-  console.log('  rowIdentityMatches (d) 빈읽기 → gridOutOfRange:true');
+  // (rowIdentityMatches — 시트 행 신원 재확인 — 단언 4건은 그 유일한 소비처인 큐 실행부 order_update·order_cancel 과 함께
+  //  결정 274 로 제거됐다. 시트 셀을 비우거나 고치는 경로 자체가 없으니 재확인할 대상도 없다.)
+  assert.equal(typeof ledger.rowIdentityMatches, 'undefined', '시트 행 신원 재확인이 되살아났다 — 시트 쓰기 실행부가 다시 생겼는지 확인');
 }
 
 run()

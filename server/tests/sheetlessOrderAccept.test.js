@@ -273,36 +273,28 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
     ok('① 제출은 sheetlessDone 이면 enqueue 하지 않는다', /if \(ledger\.sheetRow && !sheetlessDone && !queuedWorkboardApply\)/.test(sub));
     ok('② 외부모집 수동제출도 같은 분기', /isSheetless\(/.test(man) && /writeOrderToWorktable\(/.test(man));
     ok('② 수동제출도 sheetlessDone 이면 enqueue 하지 않는다', /if \(ledger\.sheetRow && !sheetlessDone && !queuedWorkboardApply\)/.test(man));
-    // ★★ 백스톱이 핵심 — 이관 전에 쌓여 있던 큐·새 호출부·판정 실패분이 여기서 막힌다
-    ok('③ 큐 실행부 백스톱: 쓰기 직전 다시 판정', /isSheetless\(pool, sheetId, tabName\)/.test(sq));
-    // ★ 위치가 곧 방어다 — 시트를 **읽기 전에** 막아야 한다. 함수 본문 안에서 순서를 본다.
-    //   결정 273: 배치 경로(_executeBatch)를 지우며 백스톱을 단건 order_append 실행부로 옮겼다 — 같은 순서 계약을 그 본문에서 본다(검사 의미 불변).
-    const exec = sq.slice(sq.indexOf("case 'order_append': {"), sq.indexOf("case 'order_update': {"));
-    ok('③ 백스톱은 order_append 실행 맨 앞 = RAW 메타 조회·가드 읽기·시트 쓰기 **앞**',
-      exec.indexOf('무시트 탭 시트쓰기 차단') >= 0 &&
-      exec.indexOf('무시트 탭 시트쓰기 차단') < exec.indexOf('loadRawTabContext(') &&
-      exec.indexOf('무시트 탭 시트쓰기 차단') < exec.indexOf('throttledCall(') &&
-      exec.indexOf('무시트 탭 시트쓰기 차단') < exec.indexOf('batchUpdateSheet('));
-    ok('③ 백스톱 사유는 done 갱신까지 이어진다(error_msg 를 NULL 로 덮지 않는다)',
+    // ★★ 결정 274: 백스톱이 더 강해졌다 — 큐에 시트 쓰기 실행부 자체가 없다(order_append case 0 · 클레임 SQL 은 DB_ONLY 만).
+    //   종전 ③(order_append 맨 앞 무시트 재판정)의 목적 = "이관 전 잔여·새 호출부·판정 실패분이 옛 시트에 쓰지 않게"는
+    //   실행부 부재로 무조건 성립한다(검사 의미 강화). 되살리면 이 단언이 잡는다.
+    ok('③ 큐에 시트 쓰기 실행부가 없다(order_append·batchUpdateSheet·loadRawTabContext 0)',
+      !/case 'order_append'/.test(sq) && !/batchUpdateSheet\(/.test(sq) && !/loadRawTabContext\(/.test(sq));
+    ok('③ 워커 클레임은 DB_ONLY 타입만(시트 시절 잔여 행은 집지 않는다)',
+      /AND type = ANY\(\$2::text\[\]\)/.test(sq) && /const claimTypes = onlyType \? \[onlyType\] : \[\.\.\.DB_ONLY_QUEUE_TYPES\]/.test(sq));
+    ok('③ done 갱신은 실행부 사유를 이어 받는다(error_msg 를 NULL 로 덮지 않는다)',
       /error_msg = \$2 WHERE id = \$1`,\s*\[item\.id, \(execOut && execOut\.doneNote\) \|\| null\]/.test(sq));
-    ok('③ 큐 항목은 버리지 않고 done + 사유(무신호 금지)', /sheetless tab — 시트 쓰기 생략/.test(sq));
     ok('④ 복구(reconcile)도 큐 대신 작업표 재기록', /isSheetlessTab\(_slKeys/.test(ol) && /writeOrderToWorktable\(/.test(ol));
     // ★ 목록에서 통째로 빼면 그 주문은 영영 복구되지 않는다 → 대체 경로가 있어야 한다
     ok('④ 복구 결과를 요약에 싣는다(sheetlessWritten)', /sheetlessWritten/.test(ol));
 
     /* ★★ ⑤ 리뷰제출 표시(POST /api/submit/review)의 백그라운드 시트 쓰기.
-       프로덕션 E2E 로 실측한 구멍 — 큐 백스톱(③)이 시트 쓰기 자체는 막지만, 그 **앞의**
-       `getCachedHeaders` 가 가상 시트로 구글을 불러 404 + warn 오류로그 + 무의미한 큐 항목이
-       제출 1건마다 쌓였다. 게이트는 `setImmediate` 본문 **맨 앞**이라야 한다(읽기 전에 막는다).
-       ★ 부분 제출(complete=false)은 markStatusCell 을 안 타므로 `st.handled` 재활용은 불가 —
-         별도 판정이어야 그 갈래도 막힌다. */
-    const bg = sub.slice(sub.indexOf("[submit/review:bg]") - 3000);
-    const gateAt = bg.indexOf('무시트 탭 — 시트 쓰기 생략');
-    ok('⑤ 리뷰제출 표시 백그라운드도 무시트면 시트 쓰기 생략', gateAt >= 0);
-    ok('⑤ 그 게이트는 헤더 읽기·writeSheet **앞**(구글 호출 0)',
-      gateAt >= 0 && gateAt < bg.indexOf('getCachedHeaders(') && gateAt < bg.indexOf('writeSheet('));
-    ok('⑤ 판정 실패는 fail-open(시트 기반 탭이 절대 다수)',
-      /isSheetless\(pool, sheetId, tabName\)[\s\S]*?catch \(_\) \{ \/\* fail-open \*\/ \}/.test(bg.slice(0,bg.indexOf('getCachedHeaders('))));
+       종전엔 무시트 게이트가 setImmediate 맨 앞에서 헤더 읽기·writeSheet 를 막았다(프로덕션 E2E 실측 구멍).
+       결정 274: 시트 기반 탭도 시트에 쓰지 않으므로 헤더 읽기·writeSheet·review_submit 큐가 **통째로 없다**(검사 의미 강화). */
+    const bgAt = sub.indexOf('submitted: submitValue');   // 응답 직후 = 배경 작업 시작점(주석은 noLineComments 로 지워져 앵커로 못 쓴다)
+    const bg = bgAt >= 0 ? sub.slice(bgAt, sub.indexOf("router.post('/order'", bgAt) > 0 ? sub.indexOf("router.post('/order'", bgAt) : bgAt + 3000) : '';
+    ok('⑤ 리뷰제출 배경 작업에 시트 읽기·쓰기·큐가 없다(구글 호출 0)',
+      bgAt >= 0 && !/getCachedHeaders\(|writeSheet\(|enqueue\('review_submit'/.test(bg));
+    ok('⑤ 무시트 완료 제출의 장부 재생성은 남아 있다',
+      /if \(complete && sheetlessSubmission\)[\s\S]{0,200}rebuildLedgers\(/.test(bg));
   }
 
   /* ══════════════ E. 시트 대조 경로 제외 ══════════════ */
