@@ -121,7 +121,7 @@ async function run() {
     && !/current_paid_edit/.test(svcSrc)
     && !/COUNT\(\*\) FILTER \(WHERE cp\.active AND cp\.deleted_at IS NULL AND cp\.is_paid\)::int AS paid/.test(svcSrc));
   ok('내부 업체관리 참여 수는 빈 슬롯이 아닌 현재 작업보드의 구매양식 기록 줄만 센다',
-    /COUNT\(\*\) FILTER \(WHERE cp\.active AND cp\.deleted_at IS NULL\s+AND \$\{_filledSql\('cp'\)\}\)\:\:int AS total/.test(svcSrc));
+    /COUNT\(\*\) FILTER \(WHERE cp\.active AND cp\.deleted_at IS NULL\s+AND \$\{_filledOvSql\('cp'\)\}\)\:\:int AS total/.test(svcSrc));   // 결정 283: 사람 칸 편집까지 보는 판(rowNumbering.filledOverlaySql) — 의미 강화
   ok('★ 내부 필드(비고 memo·담당 manager·salesId) 는 항목에 아예 없다 — 화면에서만 감추는 건 보안연극',
     !('memo' in it) && !('manager' in it) && !('salesId' in it));
   ok('정산: 총비용=견적서 금액 우선(11,250,000) · 입금액=입금매칭 누계(8,000,000)',

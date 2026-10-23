@@ -146,7 +146,7 @@ console.log('\n[B2] 계산 위치 — 마스킹 전');
   // ⚠ 제출물 미리보기(2026-08-21)가 같은 import 에서 `numberColumnKey` 도 가져오며 형태가 바뀌었다.
   //   검사 의미는 불변 — 판정을 베끼지 않고 utils 에서 가져다 쓴다.
   ok('판정 사본 없음 — utils 를 import 해 쓴다',
-    /isFilledRow: _isFilledRow[\s\S]{0,80}\} = require\('\.\.\/utils\/rowNumbering'\)/.test(src));
+    /isFilledRow: _isFilledRow[\s\S]{0,140}\} = require\('\.\.\/utils\/rowNumbering'\)/.test(src));   // 결정 283: 같은 import 에 filledOverlaySql 이 더해져 길어졌다(의미 불변)
   /* ★ 결정 182(2026-09-26): 날짜별 인원은 규칙이 정한다 — 부족분은 **날짜별 예상 인원(projectDailyQuotas)
      이 남은 인원을 다 담지 못한 수**다. 종전(저장된 계획 합계 비교)은 "사람이 정한 날만 저장"하는 새 방식에서
      거짓 경고가 된다. 검사 의미(무시트 내부 보드에서만 · 0이면 필드 생략)는 그대로다. */

@@ -199,6 +199,29 @@ function filledSql(alias = 'p') {
 }
 
 /**
+ * "채워진 줄" SQL — 작업보드 사람 칸 편집(participant_edits)까지 반영한 판(결정 283 · Codex 리뷰).
+ * 작업보드(`trackB.workdeskTab`)는 편집 오버레이를 합성한 **뒤** `isFilledRow` 로 세므로, 빈 준비 줄에 담당자가
+ * 이름·수취인·연락처를 적어 넣은 줄도 사람이다. 집계 SQL 이 원본 칸만 보면 그 줄이 홈·업체관리에서 빠진다.
+ * `alias` 는 `anchor_type`·`anchor_value`·`anchor_count` 칸을 가진 행(집계 쿼리의 anchored_rows)이어야 한다.
+ * 오버레이 규칙 = workdeskTab 과 같음: 현재 앵커(중복 앵커면 무시) · 물리행(manual) 앵커(빈 자리·승격 전 값).
+ * ★ 원본 칸이 채워진 줄은 편집 조회를 하지 않는다(OR 단락) — 원본을 지우는 편집은 드물어 반영하지 않는다.
+ */
+function filledOverlaySql(alias = 'cp') {
+  const a = String(alias);
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(a)) throw new Error('filledOverlaySql: alias 형식 오류');
+  const fields = FILLED_FIELDS.filter(f => f.text).map(f => `'${f.col}'`).join(', ');
+  return `(${filledSql(a)}
+   OR EXISTS (SELECT 1 FROM participant_edits pe
+      WHERE pe.sheet_id = ${a}.sheet_id AND pe.tab_name = ${a}.tab_name AND pe.reverted_at IS NULL
+        AND pe.field IN (${fields})
+        AND NULLIF(btrim(COALESCE(pe.value_text, '')), '') IS NOT NULL
+        AND ((${a}.anchor_type IS NOT NULL AND (${a}.anchor_type = 'manual' OR ${a}.anchor_count = 1)
+              AND pe.anchor_type = ${a}.anchor_type AND pe.anchor_value = ${a}.anchor_value)
+          OR ((${a}.anchor_type IS NULL OR ${a}.anchor_type = 'manual' OR ${a}.anchor_count = 1)
+              AND pe.anchor_type = 'manual' AND pe.anchor_value = ${a}.id::text))))`;
+}
+
+/**
  * "채워진 줄" JS 판정 — DB 행(`reviewer_name`…)과 합성 행(`name`·`hasOrder`…) 양쪽을 받는다.
  * ★ **마스킹 전 원본으로 부를 것** — 광고주 렌즈를 거친 뒤 세면 빈 칸도 마스킹 문자열이 되어
  *   전 줄이 "채워짐" 으로 뒤집힌다(참여횟수 배지가 마스킹 전에 세는 것과 같은 이유).
@@ -216,6 +239,6 @@ function isFilledRow(row) {
 module.exports = {
   NUMBER_KEYS, NUMBER_KEY_RE, FILLED_FIELDS, MAX_RENUMBER_ROWS,
   hasNumberGap,
-  numberColumnKey, filledSql, isFilledRow,
+  numberColumnKey, filledSql, filledOverlaySql, isFilledRow,
   orderRowsForNumbering, computeRenumberPlan, displaySortKey,
 };

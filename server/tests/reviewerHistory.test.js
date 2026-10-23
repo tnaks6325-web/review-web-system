@@ -217,7 +217,7 @@ function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve
       const src=read('src/services/trackB.service.js');
       const start=src.indexOf('SELECT MIN(cp.first_seen_at) AS first_seen,');
       let fragment=src.slice(start,src.indexOf(') cnt ON TRUE',start));
-      fragment=Function('_filledSql','return `'+fragment+'`')(()=> 'TRUE');
+      fragment=Function('_filledSql','_filledOvSql','return `'+fragment+'`')(()=> 'TRUE',()=> 'TRUE');   // 결정 283: 업체관리 집계가 사람 칸 편집까지 보는 판을 쓴다(의미 불변)
       fragment=fragment.replace('FROM anchored_rows cp',`FROM (SELECT p.*,'manual'::text AS anchor_type,p.id::text AS anchor_value,1 AS anchor_count FROM campaign_participants p) cp`);
       const result=await query(`SELECT cnt.* FROM (VALUES('s','t')) t(sheet_id,tab_name)
         CROSS JOIN (SELECT '리뷰제출'::text submit_header) submit_header

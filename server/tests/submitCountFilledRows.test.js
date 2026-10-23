@@ -12,7 +12,8 @@
  *   1) 빈 슬롯의 「미진행」은 제출이 아니다 — 작업보드 ≡ 홈 ≡ 업체관리 = 6
  *   2) 옛 이름 빈 줄(같은 gid)은 업체관리 제출에 안 들어간다
  *   3) 사람 있는 줄의 제출 판정(classifyCell)은 그대로다 — 리뷰어 화면에 영향이 있어 건드리지 않는다
- *   4) 세 곳이 같은 판정(filled)을 탄다 — 배선 검사
+ *   4) 빈 준비 줄에 담당자가 작업보드에서 이름을 적어 넣은 줄(편집 오버레이)도 세 곳 모두 사람으로 센다(Codex 리뷰 P2)
+ *   5) 세 곳이 같은 판정(filled)을 탄다 — 배선 검사
  */
 const assert = require('assert');
 const fs = require('fs');
@@ -23,6 +24,7 @@ const S = 'SHEET_F';
 const T4 = '0528)빈슬롯 미진행 10건';     // 남이섬 모양 — 무시트 · 빈 슬롯 4줄에 「미진행」
 const T5 = '6/11(네이버)새이름 5건';      // 퓨비아 모양 — 같은 gid 의 옛 이름 빈 줄 3
 const T5_OLD = '6/10(네이버)옛이름 5건';
+const T6 = '7/1(쿠팡)대신입력 3건';        // 빈 준비 줄 1개에 담당자가 이름을 적어 넣고(오버레이만) 제출 완료
 
 let passed = 0;
 async function t(name, fn) { await fn(); passed++; console.log('PASS ' + name); }
@@ -40,9 +42,10 @@ async function t(name, fn) { await fn(); passed++; console.log('PASS ' + name); 
     INSERT INTO advertiser_campaigns (advertiser_id, sheet_id, tab_gid) VALUES ('adv2', '${S}', NULL);
     INSERT INTO raw_sheet_tabs (sheet_id, spreadsheet_title, tab_gid, tab_name, row_count, is_system_tab, detected_headers, mirrored_at) VALUES
      ('${S}','가짜 시트','104','${T4}',10,FALSE,'["번호","수취인","담당자","완료여부","입금"]'::jsonb, NOW()),
-     ('${S}','가짜 시트','105','${T5}',5,FALSE,'["번호","수취인","리뷰제출","입금"]'::jsonb, NOW());
+     ('${S}','가짜 시트','105','${T5}',5,FALSE,'["번호","수취인","리뷰제출","입금"]'::jsonb, NOW()),
+     ('${S}','가짜 시트','106','${T6}',3,FALSE,'["번호","이름","완료여부","입금"]'::jsonb, NOW());
     INSERT INTO tab_configs (sheet_id, tab_name, tab_gid, sheetless, is_closed, manager) VALUES
-     ('${S}','${T4}','104',TRUE,FALSE,'망고'), ('${S}','${T5}','105',TRUE,FALSE,'망고');
+     ('${S}','${T4}','104',TRUE,FALSE,'망고'), ('${S}','${T5}','105',TRUE,FALSE,'망고'), ('${S}','${T6}','106',TRUE,FALSE,'망고');
   `);
   await db.exec(`
     -- T4: 채워진 6줄(완료 6 · 입금 5) + 빈 슬롯 4줄(이름·연락처·주문 없음 · 완료여부 「미진행」 · 행 포인터 없음 — 운영 모양 그대로)
@@ -62,6 +65,17 @@ async function t(name, fn) { await fn(); passed++; console.log('PASS ' + name); 
            jsonb_build_object('번호', g::text, '리뷰제출', '미진행'), TRUE FROM generate_series(1,3) g;
   `);
 
+  await db.exec(`
+    -- T6: 채워진 2줄 + 빈 준비 줄 1(원본 칸 비어 있음 · 작업보드에서 이름만 적어 넣음 = participant_edits manual 앵커) · 셋 다 완료
+    INSERT INTO campaign_participants (sheet_id, tab_gid, tab_name, seq, reviewer_name, recipient_name, phone8, is_submitted, source, submit_col, row_json, active)
+    SELECT '${S}','106','${T6}', g+1, '사람'||g, '수취'||g, lpad((60000000+g)::text,8,'0'), TRUE, 'worktable', '완료여부',
+           jsonb_build_object('번호', g::text, '완료여부', '완료'), TRUE FROM generate_series(1,2) g;
+    INSERT INTO campaign_participants (sheet_id, tab_gid, tab_name, seq, is_submitted, source, submit_col, row_json, active)
+    VALUES ('${S}','106','${T6}', 4, TRUE, 'worktable', '완료여부', '{"번호":"3","완료여부":"완료"}'::jsonb, TRUE);   -- 홈은 제출 원장 플래그(is_submitted)로 센다(종전과 같음)
+    INSERT INTO participant_edits (sheet_id, tab_name, anchor_type, anchor_value, field, kind, value_text, created_by)
+    SELECT '${S}','${T6}','manual', id::text, 'reviewer_name', 'text', '대신입력', 'admin'
+      FROM campaign_participants WHERE tab_name='${T6}' AND seq=4;
+  `);
   const board = (await svc.workdeskTab({ sheetId: S, tabName: T4, role: 'master' }));
   await t('★★ 작업보드 [진행 현황] — 빈 슬롯의 「미진행」은 제출이 아니다(참여 6 · 제출 6 · 입금 5)', async () => {
     const c = board.counts;
@@ -94,15 +108,24 @@ async function t(name, fn) { await fn(); passed++; console.log('PASS ' + name); 
     assert.deepStrictEqual([o.bTotal, o.bSub, o.bPaid], [5, 5, 5]);
   });
 
+  await t('★★ 작업보드에서 이름을 적어 넣은 빈 준비 줄도 세 곳 모두 사람으로 센다(참여 3 · 제출 3)', async () => {
+    const c = (await svc.workdeskTab({ sheetId: S, tabName: T6, role: 'master' })).counts;
+    assert.deepStrictEqual([c.filled, c.submitted], [3, 3], '작업보드 기준값');
+    const h = st.map[S + '\t' + T6];
+    assert.deepStrictEqual([h.filled, h.submitted], [3, 3], '홈');
+    const o = own.rows.find(r => r.tabName === T6);
+    assert.deepStrictEqual([o.bTotal, o.bSub], [3, 3], '업체관리');
+  });
   await t('배선 — 세 곳 모두 제출 수에 채워진 줄 판정을 건다', async () => {
     const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8');
     assert.match(src, /const reviewSubmitted = syn\.filled && !syn\.reviewResolution && syn\.reviewObligationStatus==='fulfilled';/);
     // 업체관리: submitted FILTER 안에 filledSql
     const own = src.slice(src.indexOf('async function ownedTabsForAdvertiser'), src.indexOf('AS submitted,', src.indexOf('async function ownedTabsForAdvertiser')));
-    assert.ok(/AND \$\{_filledSql\('cp'\)\}\s+AND NOT EXISTS \(SELECT 1 FROM review_closed_targets closed/.test(own), '업체관리 제출에 채워진 줄 판정이 없다');
+    assert.ok(/AND \$\{_filledOvSql\('cp'\)\}\s+AND NOT EXISTS \(SELECT 1 FROM review_closed_targets closed/.test(own), '업체관리 제출에 채워진 줄 판정이 없다');
+    assert.ok(!/\$\{_filledSql\('cp'\)\}/.test(own), '업체관리에 편집을 안 보는 판정이 남았다');
     // 홈: submitted_count FILTER 안에 filledSql
     const home = src.slice(src.indexOf('async function tabStatsMap'), src.indexOf('AS submitted_count', src.indexOf('async function tabStatsMap')));
-    assert.ok(/submittedSql\('cp\.is_submitted','cp','seq'\)\}\s+AND \$\{_filledSql\('cp'\)\}/.test(home), '홈 제출에 채워진 줄 판정이 없다');
+    assert.ok(/submittedSql\('cp\.is_submitted','cp','seq'\)\}\s+AND \$\{_filledOvSql\('cp'\)\}/.test(home), '홈 제출에 채워진 줄 판정이 없다');
   });
 
   console.log(`\n✅ submitCountFilledRows: ${passed} 통과`);

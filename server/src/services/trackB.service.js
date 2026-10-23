@@ -19,7 +19,7 @@ const cm = require('../utils/contractMatch');   // 작업명↔계약 유사도 
 const { hasCashReceiptSlot, cashReceiptNote } = require('../utils/captureSlots');   // 현영 판정 단일 규칙(재구현 금지)
 const workdeskOrderDelete = require('./workdeskOrderDelete.service');
 const { TRACKING_HEADER_RE, isTrackingHeader } = require('../utils/trackingColumn');   // 택배송장 열 판정 단일 출처(사본 금지)
-const { isFilledRow: _isFilledRow, numberColumnKey: _numberColumnKey, filledSql: _filledSql } = require('../utils/rowNumbering');   // "채워진 줄" 판정 · 표의 「번호」 칸 이름 — 단일 출처(SQL `filledSql` 과 한 벌)
+const { isFilledRow: _isFilledRow, numberColumnKey: _numberColumnKey, filledSql: _filledSql, filledOverlaySql: _filledOvSql } = require('../utils/rowNumbering');   // "채워진 줄" 판정 · 표의 「번호」 칸 이름 — 단일 출처(SQL `filledSql` 과 한 벌)
 const { formatDepositStamp } = require('../utils/depositStamp');   // 입금 칸 표기 단일 출처(자동 반영과 같은 'M/D')
 const { resolveWorkManager } = require('../utils/workManager');   // 담당자 판정 단일 출처(065 + 회차 #18 — payment.service 와 한 벌)
 const { _idColIndices } = require('./orderLedger.service');   // 구매채널 ID 열 판정 단일 출처(상품아이디·비고 오탐 제외)
@@ -1018,10 +1018,10 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
                 /* 참여 = 현재 작업보드에서 구매양식이 실제로 기록된 줄만.
                    미리 생성한 빈 슬롯까지 세면 작업표의 참여 수와 업체관리 숫자가 갈린다. */
                 COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL
-                  AND ${_filledSql('cp')})::int AS total,
+                  AND ${_filledOvSql('cp')})::int AS total,
                 /* 제출도 채워진 줄만(결정 283) — 옛 이름 빈 줄·미리 깐 빈 슬롯이 제출로 세지 않게. 참여·입금과 같은 판정. */
                 COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL
-                  AND ${_filledSql('cp')}
+                  AND ${_filledOvSql('cp')}
                   AND NOT EXISTS (SELECT 1 FROM review_closed_targets closed
                     WHERE closed.sheet_id=cp.sheet_id AND closed.tab_name=cp.tab_name AND closed.row_index=cp.seq)
                   AND COALESCE(obligation.review_obligation_status='fulfilled', LOWER(BTRIM(COALESCE(
@@ -1037,7 +1037,7 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
                 /* 화면용 입금완료 = 원장 플래그나 과거 편집 이력이 아니라 작업보드
                    row_json의 실제 입금 셀. 원장·정산·이체 상태(cp.is_paid)는 분리한다. */
                 COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL AND cp.held_at IS NULL
-                  AND ${_filledSql('cp')}
+                  AND ${_filledOvSql('cp')}
                   AND NULLIF(BTRIM(
                     cp.row_json ->> COALESCE(paid_header.paid_header, NULLIF(BTRIM(cp.submit_col2), ''))
                   ), '') IS NOT NULL)::int AS paid
@@ -5826,11 +5826,11 @@ async function tabStatsMap({ force = false } = {}) {
            SELECT COUNT(*)::int AS total_count,
                   /* 제출도 채워진 줄만(결정 283) — 작업보드 [진행 현황]·업체관리와 같은 판정. */
                   COUNT(*) FILTER (WHERE ${require('./reviewObligation.service').submittedSql('cp.is_submitted','cp','seq')}
-                    AND ${_filledSql('cp')}
+                    AND ${_filledOvSql('cp')}
                     AND NOT EXISTS(SELECT 1 FROM review_closed_targets closed WHERE closed.sheet_id=cp.sheet_id
                       AND closed.tab_name=cp.tab_name AND closed.row_index=cp.seq))::int AS submitted_count,
-                  COUNT(*) FILTER (WHERE ${_filledSql('cp')})::int AS filled_count,
-                   COUNT(*) FILTER (WHERE ${_filledSql('cp')}
+                  COUNT(*) FILTER (WHERE ${_filledOvSql('cp')})::int AS filled_count,
+                   COUNT(*) FILTER (WHERE ${_filledOvSql('cp')}
                      AND NULLIF(BTRIM(
                        cp.row_json ->> COALESCE(paid_header.paid_header, NULLIF(BTRIM(cp.submit_col2), ''))
                      ), '') IS NOT NULL)::int AS paid_count
