@@ -1019,7 +1019,9 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
                    미리 생성한 빈 슬롯까지 세면 작업표의 참여 수와 업체관리 숫자가 갈린다. */
                 COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL
                   AND ${_filledSql('cp')})::int AS total,
+                /* 제출도 채워진 줄만(결정 283) — 옛 이름 빈 줄·미리 깐 빈 슬롯이 제출로 세지 않게. 참여·입금과 같은 판정. */
                 COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL
+                  AND ${_filledSql('cp')}
                   AND NOT EXISTS (SELECT 1 FROM review_closed_targets closed
                     WHERE closed.sheet_id=cp.sheet_id AND closed.tab_name=cp.tab_name AND closed.row_index=cp.seq)
                   AND COALESCE(obligation.review_obligation_status='fulfilled', LOWER(BTRIM(COALESCE(
@@ -3836,7 +3838,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     const projectedObligation=obligationMap.get(String(r.id));
     syn.reviewObligationStatus=projectedObligation ? projectedObligation.review_obligation_status
       : require('./reviewObligation.service').classifyCell(submitCellValue,!!submitHeader);
-    const reviewSubmitted = !syn.reviewResolution && syn.reviewObligationStatus==='fulfilled';
+    /* ★★ 제출완료도 **채워진 줄만** 센다(입금완료·참여자 게이지와 같은 `syn.filled`) — 작업표 생성 때 미리 깔아 둔 빈 슬롯의
+       「미진행」 같은 글자가 제출로 세지면 0528 남이섬처럼 "제출 60 · 참여 35"가 된다(결정 283). 줄별 상태(`reviewObligationStatus`)는 그대로다. */
+    const reviewSubmitted = syn.filled && !syn.reviewResolution && syn.reviewObligationStatus==='fulfilled';
     if (syn.reviewResolution) syn.submitted = false;
     const paidHeader = String(tabPaidHeader || r.submit_col2 || '').trim();
     // 상태 셀의 화면 정본은 rowJson이다. participant_edits의 col:입금 값은 편집기록
@@ -5820,7 +5824,9 @@ async function tabStatsMap({ force = false } = {}) {
                FROM active_rows ar
            )
            SELECT COUNT(*)::int AS total_count,
+                  /* 제출도 채워진 줄만(결정 283) — 작업보드 [진행 현황]·업체관리와 같은 판정. */
                   COUNT(*) FILTER (WHERE ${require('./reviewObligation.service').submittedSql('cp.is_submitted','cp','seq')}
+                    AND ${_filledSql('cp')}
                     AND NOT EXISTS(SELECT 1 FROM review_closed_targets closed WHERE closed.sheet_id=cp.sheet_id
                       AND closed.tab_name=cp.tab_name AND closed.row_index=cp.seq))::int AS submitted_count,
                   COUNT(*) FILTER (WHERE ${_filledSql('cp')})::int AS filled_count,
