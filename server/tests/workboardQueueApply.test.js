@@ -18,7 +18,9 @@ ok('큐 소비자는 기존 작업보드 기록 함수 하나만 사용한다', 
 ok('큐 타입이 워커에 등록된다', /case 'workboard_apply'/.test(queue));
 ok('큐 대기 중에는 원장을 written으로 조기 전이하지 않는다', /deferSheetlessApply/.test(ledger) && /workboard_apply_pending/.test(ledger));
 ok('제출은 pilot 대상만 workboard_apply를 enqueue한다', /enqueue\('workboard_apply'/.test(submit) && /queuedWorkboardApply/.test(submit));
-ok('새 경로 큐는 일반 order_append 배치가 아니라 queuePump로 즉시 소비한다', /if \(queuedWorkboardApply\)[\s\S]{0,140}kickQueuePump/.test(submit));
+// 결정 273: 상시 배치 스케줄러(kickOrderBatch)를 지워 큐 등록 뒤 깨우는 곳은 queuePump 하나다(분기 자체가 없어졌다 — 검사 의미 불변).
+ok('새 경로 큐는 queuePump로 즉시 소비한다(배치 스케줄러 경유 없음)',
+  /if \(queued\) \{[\s\S]{0,400}kickQueuePump\(\)/.test(submit) && !/kickOrderBatch|orderBatchScheduler/.test(submit.replace(/\/\/[^\n]*/g, '')));
 ok('직접 반영은 새 큐 대상에서 실행하지 않는다', /if \(ledger\.sheetRow && !queuedWorkboardApply\)/.test(submit));
 ok('큐 누락 복구는 기존 큐 이력이 한 건도 없는 주문만 고른다',
   /NOT EXISTS \([\s\S]*?FROM sync_queue sq[\s\S]*?sq\.type = 'workboard_apply'[\s\S]*?orderSubmissionId/.test(queueApply));

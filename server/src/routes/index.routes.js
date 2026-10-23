@@ -1,10 +1,6 @@
 const express = require('express');
 const router = express.Router();
 const { searchByName } = require('../services/search.service');
-const { buildIndexSmart, buildOneSheet } = require('../services/indexBuilder.service');
-const { authMiddleware } = require('../middleware/auth.middleware');
-const { emitIndexBuild } = require('../utils/sse');
-const pool = require('../db/pool');
 const { verifyReviewerSession } = require('../services/reviewerSession.service');
 const reviewerIdentity = require('../services/reviewerIdentity.service');
 
@@ -80,97 +76,7 @@ router.get('/', async (req, res, next) => {
 
 // GET /api/search/debug(= /api/index/debug) 은 2026-10-05 제거 — 결정 186 103번(옛 리뷰제출 화면의 열 수 없는 진단 창 전용 · 9/2 이후 호출 0).
 
-// ═══════════════════════════════════════════════════════════
-// POST /api/index/build — 인덱스 빌드 (비동기: 즉시 응답 + 백그라운드 처리)
-// 
-// 55개+ 캠페인 × N개 탭을 Google Sheets API로 읽어오므로
-// 동기 방식은 5분 이상 소요 → 프론트엔드 타임아웃 발생.
-// 해결: 즉시 accepted 응답 반환 → 백그라운드에서 빌드 → 
-//       프론트엔드는 /api/index/status 폴링으로 완료 감지.
-// ═══════════════════════════════════════════════════════════
-router.post('/build', authMiddleware, async (req, res, next) => {
-  try {
-    const { forceFullRebuild } = req.body;
-
-    // 이미 빌드 중인지 확인 (잠금 상태)
-    const { rows: lockRows } = await pool.query(
-      "SELECT * FROM build_locks WHERE lock_key = 'INDEX_BUILD'"
-    );
-    if (lockRows.length > 0 && lockRows[0].is_locked) {
-      const lock = lockRows[0];
-      const elapsed = lock.locked_at ? Date.now() - new Date(lock.locked_at).getTime() : 0;
-      // TTL(7분) 미만이면 이미 진행 중
-      if (elapsed < 7 * 60 * 1000) {
-        return res.json({
-          ok: false,
-          error: '타 사용자가 갱신중입니다. 잠시 후 다시 시도해주세요.',
-          locked: true,
-          elapsedSec: Math.round(elapsed / 1000),
-        });
-      }
-    }
-
-    // ★ 즉시 응답 반환 (accepted) — 빌드는 백그라운드에서 실행
-    res.json({
-      ok: true,
-      success: true,
-      mode: 'async',
-      message: '인덱스 빌드가 시작되었습니다. 완료 시 자동으로 업데이트됩니다.',
-    });
-
-    // ★ 백그라운드에서 빌드 실행 (응답 이후 비동기 처리)
-    setImmediate(async () => {
-      try {
-        const result = await buildIndexSmart(forceFullRebuild === true);
-        console.log('[index/build] 백그라운드 빌드 완료:', JSON.stringify(result));
-        // ── SSE 알림: 인덱스 빌드 완료 ──
-        emitIndexBuild({
-          rebuilt: result.rebuilt || 0,
-          skipped: result.skipped || 0,
-          errors: result.errors || 0,
-          elapsed: result.elapsed || '',
-          trigger: 'manual',
-        });
-      } catch (err) {
-        console.error('[index/build] 백그라운드 빌드 실패:', err.message);
-      }
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// Phase 4: POST /api/index/build-sheet — 특정 시트 1개만 빌드
-// ═══════════════════════════════════════════════════════════
-router.post('/build-sheet', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId } = req.body;
-    if (!sheetId) return res.json({ error: 'sheetId 필요' });
-
-    // 즉시 응답
-    res.json({ ok: true, mode: 'async', message: `시트 ${sheetId.substring(0, 15)}... 빌드 시작` });
-
-    // 백그라운드 빌드
-    setImmediate(async () => {
-      try {
-        const result = await buildOneSheet(sheetId);
-        console.log('[index/build-sheet] 완료:', JSON.stringify(result));
-        emitIndexBuild({
-          rebuilt: result.rebuilt || 0,
-          skipped: result.skipped || 0,
-          errors: result.errors || 0,
-          elapsed: result.elapsed || '',
-          trigger: 'partial',
-          sheetId,
-        });
-      } catch (err) {
-        console.error('[index/build-sheet] 실패:', err.message);
-      }
-    });
-  } catch (err) {
-    next(err);
-  }
-});
+// POST /api/index/build · /build-sheet(= /api/search/build·build-sheet — 구글시트를 읽어 색인을 다시 만드는 수동 버튼)은
+// 2026-10-22 제거 — 결정 273 · 결정 186 88번. 무시트 작업의 색인은 작업표에서 바로 만든다(sheetlessLedger).
 
 module.exports = router;

@@ -19,10 +19,9 @@
 const pool = require('../db/pool');
 const { getSpreadsheetMeta, batchReadSheet, readSheet, getSheetModifiedTime } = require('./sheets.service');
 const { computeChecksum } = require('../utils/checksum');
-const { throttledCall, driveThrottledCall, concurrentMap, getThrottleStatus } = require('../utils/sheetsThrottle');
+const { throttledCall, driveThrottledCall, getThrottleStatus } = require('../utils/sheetsThrottle');
 const { logger } = require('../utils/logger');
 const { detectSheetHeader } = require('../utils/sheetHeader');
-const { sweepSkipSheetIds, REGISTERED_SHEET_IDS_SQL } = require('../utils/sheetlessScope');
 
 // 시스템 탭 키워드 — 제외하지 않고 is_system_tab 플래그만 부여
 const SYSTEM_TAB_KEYWORDS = [
@@ -39,17 +38,6 @@ const MIRROR_TIME_GUARD_MS = 15 * 60 * 1000;
 // row 일괄 INSERT 배치 크기
 const ROW_INSERT_BATCH = 500;
 
-// ── (A) 비활성 시트 미러 주기 완화 — env 게이트(기본 OFF=기존 매 사이클 전체 미러). ──
-//   RAW미러의 유일 소비처는 "주문 행배정"(claimRow/loadRawTabContext/reconcile)이고
-//   review_index 빌드(smartBuild)는 시트를 직접 읽어 RAW미러에 의존하지 않는다(검증됨).
-//   따라서 "최근 주문이 없는 시트"는 미러를 매 사이클 돌릴 필요가 없다. INACTIVE_EVERY 사이클마다 1회만 미러.
-//   안전: 비활성 시트에 주문이 오면 loadRawTabContext가 _triggerSheetMirrorOnce로 즉시 자동미러(자가치유).
-//   force(수동 전체미러)·mirrorOneSheet(단일)·_triggerSheetMirrorOnce는 완화 무관(항상 미러).
-const INACTIVE_RELAX  = () => process.env.RAW_MIRROR_INACTIVE_RELAX === '1';
-const INACTIVE_DAYS   = parseInt(process.env.RAW_MIRROR_INACTIVE_DAYS  || '30', 10);
-const INACTIVE_EVERY  = Math.max(2, parseInt(process.env.RAW_MIRROR_INACTIVE_EVERY || '6', 10));
-let _mirrorCycleCount = 0;
-
 // (R2) bulk 미러 중간 양보 임계(시트 lane 기준) — 초과 시 그 시트를 다음 사이클로 연기. 999로 사실상 비활성.
 const YIELD_THRESHOLD = (n => (Number.isFinite(n) && n > 0 ? n : 30))(
   parseInt(process.env.RAW_MIRROR_YIELD_THRESHOLD || '30', 10)
@@ -65,123 +53,8 @@ function _isSystemTab(tabName) {
   return SYSTEM_TAB_KEYWORDS.some(kw => lower.includes(kw.toLowerCase()));
 }
 
-/**
- * 인덱스(시트DB)로 관리되는 모든 시트를 RAW 미러링
- *
- * @param {object} opts
- * @param {boolean} opts.force        - true면 체크섬/수정시각 무시하고 전체 재미러링
- * @param {boolean} opts.includeHidden- false면 숨김 탭 제외 (기본 true: 모두 포함)
- * @returns {object} 요약
- */
-async function mirrorAllSheets({ force = false, includeHidden = true } = {}) {
-  const startTime = Date.now();
-
-  // ── 1) 인덱스 기반 sheet_id 목록 ──
-  // ★ 열거식은 `sheetlessScope` 단일 출처 — 읽는 범위 진단이 같은 문장을 봐야 관측이 거짓말을 안 한다.
-  const { rows: idRows } = await pool.query(REGISTERED_SHEET_IDS_SQL);
-  let sheetIds = [...new Set(idRows.map(r => r.sheet_id))].filter(Boolean);
-  const totalRegistered = sheetIds.length;
-
-  // ★★ 무시트 작업 제외(탈 구글시트 W1) — 등록 탭이 전부 무시트인 시트는 구글에 존재하지 않거나
-  //   더는 읽을 이유가 없다. 안 걸러내면 **매 사이클 404 반복**(오류 로그·재시도 낭비).
-  //   판정은 `sheetlessScope` 단일 출처이고 조회 실패는 빈 집합(fail-open = 종전 동작).
-  const _slSheets = await sweepSkipSheetIds(pool);
-  let sheetlessSkipped = 0;
-  if (_slSheets.size) {
-    const before = sheetIds.length;
-    sheetIds = sheetIds.filter(id => !_slSheets.has(id));
-    sheetlessSkipped = before - sheetIds.length;
-  }
-
-  // ── (A) 비활성 시트 완화: relax 사이클에는 "최근 주문 있는 활성 시트"만 미러. ──
-  const cycle = ++_mirrorCycleCount;
-  let deferredInactive = 0;
-  const relaxThisCycle = INACTIVE_RELAX() && !force && (cycle % INACTIVE_EVERY !== 0);
-  if (relaxThisCycle) {
-    try {
-      const { rows: act } = await pool.query(
-        `SELECT DISTINCT sheet_id FROM order_submissions
-           WHERE deleted_at IS NULL AND submitted_at > NOW() - ($1 || ' days')::interval
-             AND sheet_id IS NOT NULL`,
-        [String(INACTIVE_DAYS)]
-      );
-      const activeSet = new Set(act.map(r => r.sheet_id));
-      const kept = sheetIds.filter(id => activeSet.has(id));
-      deferredInactive = sheetIds.length - kept.length;
-      sheetIds = kept;
-    } catch (e) {
-      logger.warn(`[rawMirror] 활성시트 조회 실패 → 완화 미적용(전체 미러): ${e.message}`);
-    }
-  }
-
-  logger.info(`[rawMirror] 시작: ${sheetIds.length}/${totalRegistered}개 시트 (force=${force}, cycle=${cycle}, relax=${relaxThisCycle}, 비활성연기=${deferredInactive})`);
-
-  // ── 2) 기존 미러 메타 로드 (증분 비교용) ──
-  const { rows: existingTabs } = await pool.query(
-    'SELECT sheet_id, tab_gid, checksum, sheet_modified_at FROM raw_sheet_tabs'
-  );
-  const checksumMap = {};       // "sheetId||gid" → checksum
-  const sheetModifiedMap = {};  // sheetId → 마지막 기록 수정시각(ms)
-  for (const t of existingTabs) {
-    checksumMap[`${t.sheet_id}||${t.tab_gid}`] = t.checksum;
-    if (t.sheet_modified_at) {
-      const ms = new Date(t.sheet_modified_at).getTime();
-      if (!sheetModifiedMap[t.sheet_id] || ms > sheetModifiedMap[t.sheet_id]) {
-        sheetModifiedMap[t.sheet_id] = ms;
-      }
-    }
-  }
-
-  // ── 3) 시트별 처리 (동시성 3 — 실 API콜은 내부 throttledCall/driveThrottledCall이 정확 계량, 팬텀 슬롯 0) ──
-  const results = await concurrentMap(
-    sheetIds,
-    (sheetId) => _mirrorOneSheet(sheetId, { force, includeHidden, checksumMap, sheetModifiedMap, startTime, deferOnBusy: true, deferOnDriveFail: true }),
-    3
-  );
-
-  // ── 4) 집계 ──
-  let tabsMirrored = 0, tabsSkipped = 0, rowsWritten = 0, sheetsSkipped = 0, sheetsDeferred = 0, errors = 0;
-  const errorDetails = [];
-  for (let i = 0; i < results.length; i++) {
-    const r = results[i];
-    if (r.status === 'fulfilled') {
-      const v = r.value;
-      tabsMirrored += v.tabsMirrored;
-      tabsSkipped  += v.tabsSkipped;
-      rowsWritten  += v.rowsWritten;
-      if (v.sheetSkipped) sheetsSkipped++;
-      if (v.sheetDeferred) sheetsDeferred++;
-      errors += v.errors;
-    } else {
-      errors++;
-      const msg = r.reason?.message || String(r.reason);
-      errorDetails.push({ sheetId: (sheetIds[i] || '').substring(0, 15) + '...', error: msg });
-      logger.error(`[rawMirror] 시트 처리 실패 (${(sheetIds[i] || '').substring(0, 15)}): ${msg}`);
-    }
-  }
-
-  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
-  const summary = {
-    ok: true,
-    sheetsScanned: sheetIds.length,
-    totalRegistered,
-    deferredInactive,           // (A) 이번 사이클에 비활성으로 건너뛴 시트 수(다음 INACTIVE_EVERY 사이클에 미러)
-    relaxCycle: relaxThisCycle,
-    sheetlessSkipped,           // 무시트 작업으로 제외한 시트 수(W1) — 0 이면 종전과 동일
-    sheetsSkipped,
-    sheetsDeferred,
-    tabsMirrored,
-    tabsSkipped,
-    rowsWritten,
-    errors,
-    errorDetails: errorDetails.slice(0, 20),
-    elapsed,
-    throttle: getThrottleStatus(),
-    mirroredAt: new Date().toISOString(),
-  };
-  logger.info(`[rawMirror] 완료: 탭 미러 ${tabsMirrored}개(스킵 ${tabsSkipped}), 행 ${rowsWritten}개, 시트스킵 ${sheetsSkipped}, 양보연기 ${sheetsDeferred}, 비활성연기 ${deferredInactive}, 오류 ${errors} — ${elapsed}`);
-  return summary;
-}
+// (전체 시트 정기 미러 mirrorAllSheets — 5분 RAW 미러 크론 전용 — 는 2026-10-22 제거 · 결정 273.
+//  남은 입구는 주문이 들어온 시트 1개만 미러하는 mirrorOneSheet(_triggerSheetMirrorOnce·작업 새로고침)뿐이다.)
 
 /**
  * 시트 1개의 모든 탭을 미러링
@@ -433,7 +306,6 @@ async function mirrorOneSheet(sheetId, { force = false, includeHidden = true } =
 }
 
 module.exports = {
-  mirrorAllSheets,
   mirrorOneSheet,
   SYSTEM_TAB_KEYWORDS,
 };

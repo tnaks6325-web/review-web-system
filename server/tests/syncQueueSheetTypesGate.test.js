@@ -7,10 +7,13 @@
  *     시트 기반 탭은 종전 그대로 order_cancel 을 넣는다.
  *  B. 비정상로그 [취소 처리] — 같은 판정(ORDER_LEDGER_WRITE_ENABLED=true 여도 무시트면 큐 없음).
  *  C. 30초 워커·즉시 펌프(processQueue) — ORDER_BATCH_AUTO 가 꺼져 있으면 작업보드 반영 타입만 집고,
- *     시트 타입 행은 pending 그대로(attempts·processed_at 무변경). 켜져 있으면 종전 SQL(order_append 만 제외).
+ *     시트 타입 행은 pending 그대로(attempts·processed_at 무변경). 켜져 있으면 시트 타입 전부를 집는다
+ *     (결정 273: order_append 를 전담하던 배치 스케줄러를 지워 단건 워커가 order_append 까지 맡는다).
  *  D. 매시 retryAllFailed — 작업보드 반영 타입만 되살린다. 시트 타입 failed·정체 processing·소진 pending 은 그대로.
  *  E. 분류 단일 출처 — _executeItem 의 모든 case 와 enqueue 되는 모든 타입이 DB_ONLY/SHEET 둘 중 하나에 있다.
  *  F. order_cancel 실행부 백스톱 — 무시트 좌표면 시트를 읽지 않고 canceled 로 끝난다(배포 중 구버전이 넣은 것 대비).
+ *  G. order_append 실행부 백스톱(결정 273 — 배치 경로에서 단건 경로로 옮김) — 무시트 탭이면 RAW 메타·시트를 읽지 않고
+ *     done + 사유로 끝난다(AUTO=1 로 되돌려도 무시트 작업의 옛 시트에 다시 쓰지 않는다).
  */
 const assert = require('assert');
 const fs = require('fs');
@@ -167,7 +170,7 @@ const stub = (rel, exportsObj) => {
     assert.equal(r.processed, 0);
     assert.equal(await untouchedSheetRows(), SHEET_TYPES.length);
   });
-  await t('C3 ORDER_BATCH_AUTO=1 → 종전 클레임 SQL(order_append 만 제외 · 타입 허용목록 없음)', async () => {
+  await t('C3 ORDER_BATCH_AUTO=1 → 시트 타입 전부(order_append 포함 · 타입 허용목록 없음 — 결정 273)', async () => {
     process.env.ORDER_BATCH_AUTO = '1';
     let claimSql = null;
     intercept = (sql) => {
@@ -176,8 +179,8 @@ const stub = (rel, exportsObj) => {
     };
     try { await sq.processQueue(10, { interItemDelayMs: 0 }); } finally { intercept = null; delete process.env.ORDER_BATCH_AUTO; }
     assert.ok(claimSql, '클레임 SQL 이 나가야 한다');
-    assert.ok(/type <> 'order_append'/.test(claimSql), 'AUTO=1 은 종전처럼 order_append 만 뺀다');
-    assert.ok(!/ANY\(\$2::text\[\]\)/.test(claimSql), 'AUTO=1 에서는 시트 타입도 집는다(오늘 동작 불변)');
+    assert.ok(!/order_append/.test(claimSql), 'AUTO=1 에서 order_append 를 빼면 이제 아무도 처리하지 않는다(배치 스케줄러 삭제)');
+    assert.ok(!/ANY\(\$2::text\[\]\)/.test(claimSql), 'AUTO=1 에서는 시트 타입도 집는다');
   });
 
   // ═══ D. 매시 retryAllFailed ═══
@@ -241,6 +244,30 @@ const stub = (rel, exportsObj) => {
     const r = await sq.drainOrderQueue(id);
     assert.equal(r.succeeded, 1, 'raw_sheet_* 표가 없는데도 성공 = 시트 메타를 읽지 않았다');
     assert.equal((await status(id)).mirror_status, 'canceled');
+  });
+
+  // ═══ G. order_append 실행부 백스톱(결정 273) ═══
+  await t('G1 AUTO=1 · 무시트 탭 order_append → RAW 메타·시트를 읽지 않고 done + 사유(주문은 그대로)', async () => {
+    const id = await newOrder({ sheetId: 'wt_aaaaaaaaaaaaaaaaaaaa', tabName: '무시트작업', tabGid: '11', status: 'queued' });
+    await db.query(`INSERT INTO sync_queue(type, payload, status) VALUES ('order_append', $1, 'pending')`,
+      [JSON.stringify({ sheetId: 'wt_aaaaaaaaaaaaaaaaaaaa', tabName: '무시트작업', gid: '11', sheetRow: 5, orderSubmissionId: id })]);
+    process.env.ORDER_BATCH_AUTO = '1';
+    let r;
+    try { r = await sq.drainOrderQueue(id); } finally { delete process.env.ORDER_BATCH_AUTO; }
+    assert.equal(r.succeeded, 1, 'raw_sheet_* 표가 없는데도 성공 = RAW 메타(→ 자동 미러 → 구글)를 부르지 않았다');
+    const row = (await db.query(`SELECT status, error_msg FROM sync_queue WHERE type='order_append' AND payload->>'orderSubmissionId'=$1`, [id])).rows[0];
+    assert.equal(row.status, 'done');
+    assert.ok(/sheetless tab — 시트 쓰기 생략/.test(row.error_msg || ''), '사유를 남긴다(무신호 금지)');
+    assert.equal((await status(id)).mirror_status, 'queued', '주문 상태는 무시트 기록 경로가 정한다 — 큐가 건드리지 않는다');
+  });
+  await t('G2 시트 기반 탭 order_append 는 백스톱을 지나 종전 실행부로 간다(여기선 RAW 메타가 없어 재시도 대기)', async () => {
+    const id = await newOrder({ sheetId: '1RealGoogleSheetIdXXXXXXXXXXXXXXXXXXXXXXXXX', tabName: '시트작업', tabGid: '33', status: 'queued' });
+    await db.query(`INSERT INTO sync_queue(type, payload, status) VALUES ('order_append', $1, 'pending')`,
+      [JSON.stringify({ sheetId: '1RealGoogleSheetIdXXXXXXXXXXXXXXXXXXXXXXXXX', tabName: '시트작업', gid: '33', sheetRow: 5, orderSubmissionId: id })]);
+    const r = await sq.drainOrderQueue(id);
+    assert.equal(r.succeeded, 0);
+    const row = (await db.query(`SELECT status, error_msg FROM sync_queue WHERE type='order_append' AND payload->>'orderSubmissionId'=$1`, [id])).rows[0];
+    assert.ok(!/sheetless tab/.test(row.error_msg || ''), '시트 기반 탭은 무시트 사유로 접히지 않는다');
   });
 
   console.log(`\n✅ syncQueueSheetTypesGate: ${passed}/${passed}`);

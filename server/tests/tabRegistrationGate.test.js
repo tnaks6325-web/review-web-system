@@ -1,8 +1,7 @@
 /**
  * tabRegistrationGate — 작업탭 등록 단일경로(작업오더 접수) 회귀 가드
  *   ① TAB_REGISTRATION_MODE 헬퍼: 기본 'order'(자동·수동 차단), 'manual'(수동만), 'auto'(전부 허용)
- *   ② smartBuild: 미등록 탭(이름·gid 불일치)은 읽기/빌드/등록 제외 + tabsSkippedUnregistered 계수,
- *      등록 탭 이름 일치·gid 일치(리네임)는 빌드 유지
+ *   ② (smartBuild 게이트 — 스마트빌드 스케줄러는 2026-10-22 삭제 · 결정 273. 지금은 "되살아나지 않았다"만 본다)
  *   ③ indexBuilder(buildOneSheet): 동일 게이트 — 미등록 탭은 batchGet 범위에서 제외
  *   ④ syncTabListToDB: 게이트 모드에서 신규 campaigns/tabs/index INSERT 미실행 + registrationGate 보고,
  *      기존 탭 gid 보정·리네임 UPDATE는 유지, allowNewTabs:true(DB 재구축)면 INSERT 실행,
@@ -109,7 +108,6 @@ mockModule('../src/services/reviewFolders.service', {
 });
 
 const reg = require('../src/utils/tabRegistration');
-const sb = require('../src/services/smartBuild.service');
 const ib = require('../src/services/indexBuilder.service');
 
 function _tab(title, gid) { return { properties: { title, sheetId: gid } }; }
@@ -131,42 +129,10 @@ async function run() {
   delete process.env.TAB_REGISTRATION_MODE;
   console.log('  ① 모드 헬퍼 통과');
 
-  // ══ ② smartBuild 게이트 ══
-  _sheetIdRows = [{ sheet_id: 'S1' }];
-  _tcRowsAll = [{ sheet_id: 'S1', tab_name: 'RegTab', tab_gid: '100', is_closed: false }];
-  _metaBySheet.S1 = Object.assign([_tab('RegTab', 100), _tab('NewTab', 999)], { _spreadsheetTitle: '캠페인A' });
-  _persistedCacheJson = '';
-  _mockMT.S1 = 'T1';
-  _batchCalls.length = 0; _writes.length = 0;
-
-  const b1 = await sb.runSmartBuild();
-  assert.equal(b1.ok, true);
-  assert.equal(b1.tabsSkippedUnregistered, 1, '미등록 NewTab 1개 제외 계수');
-  assert.equal(_batchCalls.length, 1, 'S1 batchGet 1회');
-  assert.deepEqual(_batchCalls[0].ranges, ["'RegTab'!A:Z"], '등록 탭만 읽음(미등록 NewTab 제외)');
-  assert.ok(!_writes.some(w => /INSERT INTO tab_configs/.test(w.sql) && String(w.params[1]) === 'NewTab'),
-    '미등록 NewTab의 tab_configs INSERT 없음');
-  console.log('  ② smartBuild: 미등록 탭 제외 통과');
-
-  // gid 일치(리네임) 탭은 게이트 통과
-  _metaBySheet.S1 = Object.assign([_tab('RenamedTab', 100), _tab('NewTab', 999)], { _spreadsheetTitle: '캠페인A' });
-  _mockMT.S1 = 'T2';
-  _batchCalls.length = 0;
-  const b2 = await sb.runSmartBuild();
-  assert.equal(b2.tabsSkippedUnregistered, 1, '미등록 NewTab만 제외');
-  assert.deepEqual(_batchCalls[0].ranges, ["'RenamedTab'!A:Z"], 'gid 일치(리네임 탭)는 빌드 유지');
-  console.log('  ② smartBuild: gid 리네임 통과');
-
-  // auto 모드 → 레거시 전체 허용(미등록 탭도 빌드 대상)
-  process.env.TAB_REGISTRATION_MODE = 'auto';
-  _metaBySheet.S1 = Object.assign([_tab('RegTab', 100), _tab('NewTab', 999)], { _spreadsheetTitle: '캠페인A' });
-  _mockMT.S1 = 'T3';
-  _batchCalls.length = 0;
-  const b3 = await sb.runSmartBuild();
-  assert.equal(b3.tabsSkippedUnregistered, 0, 'auto: 게이트 비활성');
-  assert.deepEqual(_batchCalls[0].ranges, ["'RegTab'!A:Z", "'NewTab'!A:Z"], 'auto: 미등록 탭도 읽음(현행 유지)');
-  delete process.env.TAB_REGISTRATION_MODE;
-  console.log('  ② smartBuild: auto 롤백 모드 통과');
+  // ══ ② smartBuild — 2026-10-22 삭제(결정 273). 5분마다 시트를 다시 읽어 색인을 덮던 스케줄러가 되살아나면
+  //   무시트 작업표로 만든 색인을 옛 시트 값으로 덮을 수 있다(결정 131) — 파일째 없어야 한다. ══
+  assert.ok(!fs.existsSync(path.join(__dirname, '..', 'src', 'services', 'smartBuild.service.js')), '② 스마트빌드 스케줄러(smartBuild.service)가 되살아났다');
+  console.log('  ② smartBuild 부재 통과');
 
   // ══ ③ indexBuilder(buildOneSheet) 게이트 ══
   _tcRowsAll = [{ sheet_id: 'S2', tab_name: 'RegTab2', tab_gid: '300', is_closed: false }];

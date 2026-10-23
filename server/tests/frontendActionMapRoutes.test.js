@@ -30,7 +30,9 @@ for (const m of app.matchAll(/app\.use\(\s*'([^']+)'\s*,\s*(?:[\w.]+\s*,\s*)*(\w
     routes.push([r[1].toUpperCase(), m[1] + (r[2] === '/' ? '' : r[2])]);
   }
 }
-ok(`서버 라우트 표 구성(${routes.length}개)`, routes.length > 500);
+// 하한은 "라우트 표를 제대로 읽었다"는 확인용이다. 결정 273 으로 diag 공용 라우터(4개 접두어)의 시트 시절 도구 약 100줄이
+//   빠져 577 → 474 가 됐다 — 하한을 400 으로 내린다(검사 의미 불변: 표가 비거나 반토막이면 여전히 잡는다).
+ok(`서버 라우트 표 구성(${routes.length}개)`, routes.length > 400);
 
 const toRe = (p) => new RegExp('^' + p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/:\w+/g, '[^/]+') + '$');
 const norm = (t) => t.replace(/:\w+/g, ':x');
@@ -95,7 +97,8 @@ for (const [method, p] of [['GET', '/api/diag/debug-tab'], ['GET', '/api/diag/de
 /* 변이: 없는 입구는 잡는다 */
 ok('변이: 지운 입구는 없음으로 판정', !exists('GET', '/api/diag/campaign-stats') && !exists('GET', '/api/tab/stats'));
 // 결정 270: 표본이던 /api/admin/keywords 는 옛 대시보드 전용이라 지웠다 — 살아 있는 입구로 표본을 옮긴다(검사 의미 불변).
-ok('변이: 있는 입구는 있음으로 판정', exists('GET', '/api/diag/sync-queue') && exists('PUT', '/api/campaign/admin', '/:id'));
+// 결정 273: 표본이던 /api/diag/sync-queue 는 시트 시절 큐 도구라 지웠다 — 살아 있는 입구로 표본을 옮긴다(검사 의미 불변).
+ok('변이: 있는 입구는 있음으로 판정', exists('GET', '/api/diag/reverse-sync-list') && exists('PUT', '/api/campaign/admin', '/:id'));
 ok('변이: 동적 표시 없는 매핑은 접두 일치로 통과시키지 않는다', !exists('PUT', '/api/campaign/admin'));
 ok('변이: 동적 꼬리는 완전한 템플릿만 인정', exists('PUT', '/api/campaign/admin', '/:id/status') && !exists('PUT', '/api/campaign/admin', '/:id/nope'));
 
@@ -126,13 +129,32 @@ for (const [method, p] of [
 for (const [method, p] of [['POST', '/api/drive/orphan-capture-cleanup'], ['POST', '/api/drive/capture-rename-recipient'], ['POST', '/api/drive/report-link']]) {
   ok(`272: ${method} ${p} 제거 상태`, !exists(method, p));
 }
+/* 결정 273: 시트 시절 큐 복구·스마트빌드 수동 도구(결정 186 82·88번) — 지운 입구가 되살아나거나 매핑이 다시 생기면 잡는다.
+ * ★ diag 라우터는 /api/diag·/api/viewer·/api/image·/api/blacklist 공용이라 같은 줄이 네 주소로 열린다(결정 270) — 대표로 /api/image 도 본다. */
+for (const [method, p] of [
+  ['GET', '/api/diag/sync-queue'], ['POST', '/api/diag/sync-queue/retry'], ['POST', '/api/diag/sync-queue/purge'], ['POST', '/api/diag/sync-queue/delete'],
+  ['GET', '/api/diag/order-mirror-status'], ['POST', '/api/diag/order-reconcile'], ['POST', '/api/diag/queue-drain'], ['GET', '/api/diag/queue-drain'],
+  ['GET', '/api/diag/yellow-rows-export'], ['POST', '/api/diag/yellow-rows-delete'], ['GET', '/api/diag/build-history'],
+  ['POST', '/api/diag/order-flush-tab'], ['GET', '/api/diag/order-flush-tab'], ['POST', '/api/diag/order-flush-one'], ['POST', '/api/diag/order-batch-drain'],
+  ['GET', '/api/diag/order-batch-state'], ['POST', '/api/diag/order-relink'], ['POST', '/api/diag/order-orphan-cleanup'], ['GET', '/api/diag/order-written-sample'],
+  ['POST', '/api/diag/metrics/reset'], ['GET', '/api/diag/campaign-list'], ['GET', '/api/image/sync-queue'],
+  ['GET', '/api/admin/smart-build/status'], ['POST', '/api/admin/smart-build/run'], ['POST', '/api/admin/smart-build/start'], ['POST', '/api/admin/smart-build/pause'],
+  ['POST', '/api/admin/smart-build/resume'], ['POST', '/api/admin/smart-build/stop'], ['POST', '/api/admin/release-lock'], ['POST', '/api/admin/campaign-delete/x'],
+  ['POST', '/api/index/build'], ['POST', '/api/index/build-sheet'], ['POST', '/api/search/build'], ['POST', '/api/search/build-sheet']]) {
+  ok(`273: ${method} ${p} 제거 상태`, !exists(method, p));
+}
+ok('273: 시트 시절 도구 액션 매핑 없음', !['syncQueueStats', 'syncQueueRetry', 'syncQueuePurge', 'syncQueueDelete', 'orderMirrorStatus', 'orderReconcile',
+  'queueDrain', 'buildHistory', 'smartBuildStatus', 'smartBuildRun', 'smartBuildStart', 'smartBuildStop', 'buildIndexSmart', 'buildIndexByCampaign',
+  'releaseBuildLock'].some(n => mapNames.has(n)));
 /* 남겨야 하는 것 — 리뷰어·작업보드·인트라넷이 실제로 부르거나(공유 핸들러) 사용자 결정 대기(결정 186 킵) */
 for (const [method, p] of [
   ['POST', '/api/admin/login'], ['POST', '/api/admin/intranet-login'], ['GET', '/api/search'], ['GET', '/api/index'],
-  ['POST', '/api/image/review-upload'], ['POST', '/api/diag/client-error'], ['GET', '/api/diag/reverse-sync-list'], ['POST', '/api/diag/metrics/reset'],
+  ['POST', '/api/image/review-upload'], ['POST', '/api/diag/client-error'], ['GET', '/api/diag/reverse-sync-list'], ['POST', '/api/blacklist'],
   ['GET', '/api/tab/provider-info'], ['GET', '/api/tab/reviewer-options'], ['GET', '/api/short/resolve'], ['GET', '/api/drive/report/:code'],
   ['PUT', '/api/order/admin/update'], ['POST', '/api/order/guide-image'], ['GET', '/api/cs/threads'], ['GET', '/api/reviewer/notices/all'],
-  ['POST', '/api/admin/smart-build/run'], ['POST', '/api/index/build-sheet'], ['GET', '/api/diag/sync-queue']]) {
+  // 결정 273 이후에도 남기는 수동 도구(무시트 복구·역동기화 #85·행 점유 조회)
+  ['POST', '/api/diag/sheetless-worktable-recover'], ['POST', '/api/diag/order-mirror-repair'], ['POST', '/api/diag/reverse-sync-apply'],
+  ['GET', '/api/diag/row-claims'], ['POST', '/api/diag/review-reflect'], ['GET', '/api/diag/no-capture-audit'], ['GET', '/api/diag/order-stuck-export']]) {
   ok(`270: ${method} ${p} 남아 있음`, exists(method, p.replace(/:\w+/g, 'x')));
 }
 ok('97·98번 잔류 입구는 남아 있다', exists('GET', '/api/campaign/admin/popular-credit-audit') && exists('POST', '/api/trackb/workdesk/auto-finish'));
