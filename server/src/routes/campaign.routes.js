@@ -4026,14 +4026,11 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       .invalidateCashReceiptContext(rows[0].linked_sheet_id, rows[0].linked_tab_name);
     // ★ 061: 상품옵션 교체(배열 전달 시에만). 원자 저장(캠페인 락), 참여자 있는 옵션은 삭제 대신 closed(기록 보호).
     let optionsWarning = null;
-    /* ★ 결정 287: 연결 공고(_bx)의 필수 배송메세지는 양방향 공유 칸 — 위 공유 저장이 오더에 쓰고 공고 칸에도 반영했다.
-       여기서는 화면 값이 아니라 **오더의 지금 값**으로 공고 칸을 맞춘다(주말·리뷰타입 맞추기와 같은 규칙 — 오더와 다른 값은 쓰지 않는다).
-       칸이 없는 화면(미전송 = undefined)은 종전처럼 손대지 않는다. */
-    let _rdmStore = required_delivery_memo;
-    if (_bx && required_delivery_memo !== undefined && required_delivery_memo !== null) {
-      const { rows: rdm } = await pool.query('SELECT required_delivery_memo FROM work_orders WHERE id = $1', [bidirEdit.link.wo.id]);
-      _rdmStore = rdm.length ? (rdm[0].required_delivery_memo || '') : undefined;
-    }
+    /* ★ 결정 287: 연결 공고(_bx)의 필수 배송메세지는 양방향 공유 칸 — 위 공유 저장이 한 트랜잭션 안에서 오더에 쓰고
+       공고 칸에도 반영했다(projectToCampaignInTx). 여기서 다시 쓰지 않는다 — 트랜잭션 밖에서 오더 값을 읽어 다시 쓰면,
+       그 사이 인트라넷 수정이 끼었을 때 옛 값으로 공고만 되돌려 오더와 어긋난다(Codex P2, PR #1687).
+       연결 안 된 공고·칸이 없는 화면(미전송 = undefined)은 종전대로. */
+    const _rdmStore = _bx ? undefined : required_delivery_memo;
     const requiredMemoWarning = await _saveRequiredDeliveryMemo(id, _rdmStore, rows[0]);   // ★ 결정 260
     if (normOpts) { try { await _saveCampaignOptions(id, normOpts, { linked: _bx }); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/update] ' + optionsWarning); } }
     if (hasWorkboardDisplayName) {

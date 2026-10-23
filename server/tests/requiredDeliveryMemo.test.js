@@ -101,8 +101,9 @@ async function stubs() {
   const cr = read('server/src/routes/campaign.routes.js');
   assert.equal((cr.match(/await _saveRequiredDeliveryMemo\(/g) || []).length, 2, 'create + update both save');
   assert.ok(/await _saveRequiredDeliveryMemo\(rows\[0\]\.id, required_delivery_memo, rows\[0\]\)/.test(cr) && /await _saveRequiredDeliveryMemo\(id, _rdmStore, rows\[0\]\)/.test(cr))
-  // 결정 287: 연결 공고(_bx)는 화면 값이 아니라 오더의 지금 값으로 공고 칸을 맞춘다(미전송 = 유지)
-  assert.ok(/let _rdmStore = required_delivery_memo;\s*if \(_bx && required_delivery_memo !== undefined && required_delivery_memo !== null\) \{[\s\S]{0,200}SELECT required_delivery_memo FROM work_orders WHERE id = \$1', \[bidirEdit\.link\.wo\.id\]/.test(cr), 'linked campaign aligns to order value');
+  // 결정 287: 연결 공고(_bx)는 공유 저장 트랜잭션(projectToCampaignInTx)만 이 칸을 쓴다 — 트랜잭션 밖 재기록 금지(Codex P2, PR #1687)
+  assert.ok(/const _rdmStore = _bx \? undefined : required_delivery_memo;/.test(cr), 'linked campaign: no post-transaction memo write');
+  assert.ok(!/SELECT required_delivery_memo FROM work_orders/.test(cr), 'no out-of-transaction order memo read-back');
   assert.equal((cr.match(/required_delivery_memo, \/\/ ★ 결정 260/g) || []).length, 2, 'destructured in create + update');
   assert.equal((cr.match(/\.\.\.\(requiredMemoWarning \? \{ requiredMemoWarning \} : \{\}\)/g) || []).length, 2, 'save failure surfaced in both responses');
   assert.ok(/if \(value === undefined \|\| value === null\) return null;/.test(cr), 'undefined = keep (screens without the field)');
