@@ -877,6 +877,20 @@ function _sourceRevisionPreHook(source) {
   };
 }
 
+/** 결정 285 — 인트라넷 수정 창이 보낸 상품 이름 짝 `bidir.rw_names`({인트라넷 이름: 리뷰웹 이름}). 모양이 틀리면 없음(종전 판정). */
+function _bidirNameMap(bid) {
+  const m = bid && bid.rw_names;
+  if (!m || typeof m !== 'object' || Array.isArray(m)) return null;
+  const out = {};
+  let n = 0;
+  for (const [k, v] of Object.entries(m)) {
+    if (n >= 200) break;
+    const key = String(k || '').trim(), val = typeof v === 'string' ? v.trim() : '';
+    if (key && val && key.length <= 300 && val.length <= 300) { out[key] = val; n += 1; }
+  }
+  return n ? out : null;
+}
+
 async function _intakeSourceBidir(res, { b, source, current, optionsJson, deliveryType, courierProxy, requester }) {
   const bid = (b.bidir && typeof b.bidir === 'object' && !Array.isArray(b.bidir)) ? b.bidir : null;
   // ★ 기준 버전이 없으면 저장하지 않는다 — 기준 없이 쓰면 그 사이 리뷰웹에서 고친 값을 조용히 덮는다.
@@ -900,6 +914,7 @@ async function _intakeSourceBidir(res, { b, source, current, optionsJson, delive
     opId: bid && bid.op_id ? String(bid.op_id).slice(0, 120) : '',
     actor: requester || '인트라넷',
     forceMine: bid && Array.isArray(bid.force_mine) ? bid.force_mine.map(String).slice(0, 200) : [],
+    nameMap: _bidirNameMap(bid),   // 결정 285 — 상품 이름은 시스템마다 따로
     conflictPolicy: 'last_writer',   // 겹친 칸 = 나중에 저장한 값 + 덮인 값 알림(사용자 확정 2026-10-20)
     // ★ 5단계: 금액(리뷰비·상품 금액)은 금액을 아는 인트라넷(수신·수정 창이 금액을 받는 판)만 쓴다 — 옛 인트라넷은 옛 사본 금액을 늘 다시 보낸다.
     moneyCapable: !!(bid && (bid.money === 1 || bid.money === true || bid.money === '1')),
@@ -943,8 +958,10 @@ async function _observeSourceBidir({ b, current, optionsJson, deliveryType, cour
     const { rows } = await pool.query('SELECT state FROM work_order_shared_snapshots WHERE work_order_id = $1 AND sync_version = $2', [current.id, baseVersion]);
     if (!rows.length) { logger.info(`[bidir/observe] ${current.id} 기준 스냅숏 없음(버전 ${baseVersion})`); return; }
     const { planSharedPatch } = require('../utils/sharedPatchPlan');
-    const plan = planSharedPatch({ base: rows[0].state, mine: _sourceSharedMine(b, { optionsJson, deliveryType, courierProxy }, normalizeReviewOrderSourceContract(b)),
-      theirs: require('../services/sharedPatch.service').readSharedState(current), origin: 'intranet' });
+    const svc = require('../services/sharedPatch.service');
+    // 결정 285 — 실제 저장(applySharedPatch)과 같이 인트라넷 이름을 리뷰웹 이름으로 되돌린 뒤 판정한다
+    const mine = svc.alignIntranetNames(rows[0].state, _sourceSharedMine(b, { optionsJson, deliveryType, courierProxy }, normalizeReviewOrderSourceContract(b)), _bidirNameMap(bid)).mine;
+    const plan = planSharedPatch({ base: rows[0].state, mine, theirs: svc.readSharedState(current), origin: 'intranet' });
     logger.info(`[bidir/observe] ${current.id} 쓰기 ${plan.writes.length} · 충돌 ${plan.conflicts.length} · ${[...plan.writes, ...plan.conflicts].map(x => x.path).join(', ').slice(0, 300)}`);
   } catch (e) {
     logger.warn(`[bidir/observe] ${current.id} 판정 실패(종전 경로 계속): ${e.message}`);
@@ -1275,7 +1292,7 @@ router.put('/intake/source/:sourceReviewOrderId', _intakeSourceRevisionHandler);
 // ═══════════════════════════════════════════════════════════
 // 양방향 수정 기준(결정 275 · 3단계) — 인트라넷 수정 창이 열 때 부른다(X-Intake-Key).
 // GET /api/order/intake/source/:sourceReviewOrderId/shared
-//   → { bidir_state, sync_version, writable: [칸], intake_view: {칸: 현재 값}, field_owner: {칸: 주인}, capabilities: { bidir_v1 } }
+//   → { bidir_state, sync_version, writable: [칸], intake_view: {칸: 현재 값}, field_owner: {칸: 주인}, capabilities: { bidir_v1, keep_names } }
 // ★ 읽기만 한다. 연결 안 된 오더도 200(bidir_state 로 판단) — 인트라넷이 종전 경로로 저장한다.
 // ═══════════════════════════════════════════════════════════
 /** 오더의 선택지(상품 이름 · 옵션 표기)별 이미 참여·구매한 수(0 은 뺀다). 조회 실패 = [](확인창 안내만 빠진다 — 판정은 저장 때 서버가 한다). */
@@ -1344,7 +1361,8 @@ router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) 
       // ★ 7단계-④: 선택지별 이미 참여·구매한 수 — 수정 창 확인창이 "지우면 마감으로 남는다" 를 미리 말한다(지울 때 서버가 같은 수로 다시 판정한다).
       option_used: active ? await _optionUsedForOrder(rows[0]) : null,
       field_owner: Object.fromEntries(SHARED_FIELDS.map(f => [f.key, f.owner])),
-      capabilities: { bidir_v1: true },
+      // ★ 결정 285 — keep_names: 인트라넷 이름으로 저장해도 `bidir.rw_names` 짝으로 받는다(이 표시가 없는 옛 리뷰웹에 인트라넷 이름을 보내면 지우고 더하기로 읽힌다)
+      capabilities: { bidir_v1: true, keep_names: true },
     });
   } catch (err) {
     next(err);
