@@ -87,7 +87,7 @@ const st = async (id) => (await pool.query('SELECT mirror_status, sheet_row FROM
     ok('멱등 — 다시 돌리면 0건', (await slOrder.repairWrittenMarkForBoardRows({ dryRun: false })).repaired === 0);
   }
 
-  console.log('\n[3] 시트 기반 좌표는 대상이 아니다');
+  console.log('\n[3] 시트 기반 좌표 — 작업보드 연결 여부로 가른다');
   {
     const SB = '1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789';
     const { rows } = await pool.query(
@@ -97,9 +97,24 @@ const st = async (id) => (await pool.query('SELECT mirror_status, sheet_row FROM
       `INSERT INTO campaign_participants (sheet_id, tab_name, seq, order_submission_id, source)
        VALUES ($1,'시트탭',3,$2,'import')`, [SB, rows[0].id]);
     const out = await slOrder.repairWrittenMarkForBoardRows({ dryRun: true });
-    ok('★ campaign:* 아닌 좌표는 스캔되지 않는다(그쪽은 큐 리컨실이 담당)', out.scanned === 0);
-    await pool.query('DELETE FROM campaign_participants WHERE order_submission_id=$1', [rows[0].id]);
-    await pool.query('DELETE FROM order_submissions WHERE id=$1', [rows[0].id]);
+    ok('★ 작업보드에 연결 안 된 campaign:* 아닌 좌표는 스캔되지 않는다(그쪽은 큐 리컨실이 담당)', out.scanned === 0);
+
+    /* 옛 시트 좌표로 남았지만 작업보드에 연결된 주문은 대상이다(2026-10-24 운영 실측 20건 · #1297 재작성).
+       근거는 그대로 "같은 작업보드의 살아 있는 줄" — 다른 작업보드 줄은 근거가 아니다. */
+    const { rows: wb } = await pool.query(`INSERT INTO workboards(state) VALUES ('active'), ('active') RETURNING id`);
+    const { rows: wbo } = await pool.query(
+      `INSERT INTO order_submissions (sheet_id, tab_name, mirror_status, submitted_at, recipient, workboard_id)
+       VALUES ($1,'시트탭','failed',NOW(),'작업보드수취인',$2), ($1,'시트탭','failed',NOW(),'남의보드수취인',$2) RETURNING id`, [SB, wb[0].id]);
+    await pool.query(
+      `INSERT INTO campaign_participants (sheet_id, tab_name, seq, order_submission_id, source, workboard_id)
+       VALUES ($1,'시트탭',4,$2,'import',$3), ($1,'시트탭',5,$4,'import',$5)`, [SB, wbo[0].id, wb[0].id, wbo[1].id, wb[1].id]);
+    const out2 = await slOrder.repairWrittenMarkForBoardRows({ dryRun: true });
+    const got = out2.items.map(i => i.orderSubmissionId);
+    ok('작업보드에 연결된 옛 좌표 주문은 스캔된다', got.includes(wbo[0].id) && out2.scanned === 1);
+    ok('★ 다른 작업보드 줄은 근거가 아니다', !got.includes(wbo[1].id));
+    await pool.query('DELETE FROM campaign_participants WHERE order_submission_id = ANY($1::uuid[])', [[rows[0].id, wbo[0].id, wbo[1].id]]);
+    await pool.query('DELETE FROM order_submissions WHERE id = ANY($1::uuid[])', [[rows[0].id, wbo[0].id, wbo[1].id]]);
+    await pool.query('DELETE FROM workboards WHERE id = ANY($1::uuid[])', [wb.map(w => w.id)]);
   }
 
   console.log('\n[4] 자동 인계 창(sinceHours) — SQL 실행 + 창이 옛 건을 뺀다');
