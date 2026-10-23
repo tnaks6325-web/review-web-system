@@ -149,7 +149,7 @@ async function pg() {
 
     // ── 리뷰가이드·특이사항 수정 → 오더(가이드 구간만)·공고·인트라넷 보낼 줄 ──
     ed = await openEditor();
-    r = await save({ ...ed.body, work_detail: { ...ed.body.work_detail, reviewGuide: '사진 5장 + 50자', specialNotes: '박스 사진 필수' } });
+    r = await save({ ...ed.body, work_detail: { ...ed.body.work_detail, reviewGuide: '사진 5장 + 50자\n\n[기타 안내]\n문의는 채팅방', specialNotes: '박스 사진 필수' } });   // 결정 282·286 — 창에 보이는 [기타 안내]는 그대로 두고 앞만 고침
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.deepEqual(r.body.shared.changed.sort(), ['리뷰가이드', '특이사항']);
     assert.deepEqual(r.body.shared.overwritten, []);
@@ -157,7 +157,7 @@ async function pg() {
     assert.equal(w.review_guide, '[리뷰등록 가이드]\n사진 5장 + 50자\n\n[기타 안내]\n문의는 채팅방', '가이드 구간만 바뀐다');
     assert.equal(w.special_notes, '박스 사진 필수');
     let c = await cRow();
-    assert.equal(c.work_detail.reviewGuide, '사진 5장 + 50자'); assert.equal(c.work_detail.specialNotes, '박스 사진 필수');
+    assert.equal(c.work_detail.reviewGuide, '사진 5장 + 50자\n\n[기타 안내]\n문의는 채팅방'); assert.equal(c.work_detail.specialNotes, '박스 사진 필수');
     assert.equal(c.work_detail.productLines, '상품 줄', '공고 전용 work_detail 칸은 그대로');
     assert.equal(await pendingPush(), 1, '인트라넷으로 보낼 줄');
     const snapOrigin = (await pool.query('SELECT origin FROM work_order_shared_snapshots WHERE work_order_id=$1 ORDER BY sync_version DESC LIMIT 1', [w.id])).rows[0].origin;

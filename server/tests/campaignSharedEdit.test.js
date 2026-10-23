@@ -82,10 +82,22 @@ const bodyOf = (over = {}, wd = {}) => ({
 {
   assert.equal(E.replaceReviewSection('그냥 글', '새 글'), '새 글', '구간 라벨이 없으면 통째');
   assert.equal(E.replaceReviewSection('[특이사항]\n주의', '새 가이드'), '[리뷰등록 가이드]\n새 가이드\n\n[특이사항]\n주의', '가이드 구간이 없으면 앞에 만든다');
-  assert.equal(E.replaceReviewSection('[리뷰가이드] 한 줄 글\n둘째 줄\n[기타]\n남김', '바뀐 글'), '[리뷰가이드]\n바뀐 글\n\n[기타]\n남김');
-  for (const raw of ['그냥 글', '[특이사항]\n주의', base.review_guide, '[리뷰가이드] 한 줄\n[리뷰 가이드]\n둘째 구간']) {
-    const out = E.replaceReviewSection(raw, '왕복 확인 글');
-    assert.equal(E.campaignViewOf({ ...base, review_guide: out }, {}).reviewGuide, '왕복 확인 글', raw);
+  // 결정 282 이후 사람이 쓴 제목 구간([기타])은 공고에 보인다 → 공고 글이 대신한다(지우면 지워지고, 남기면 한 번만 · 결정 286)
+  assert.equal(E.replaceReviewSection('[리뷰가이드] 한 줄 글\n둘째 줄\n[기타]\n남김', '바뀐 글'), '[리뷰가이드]\n바뀐 글');
+  assert.equal(E.replaceReviewSection('[리뷰가이드] 한 줄 글\n[기타]\n남김', '바뀐 글\n\n[기타]\n남김'), '[리뷰가이드]\n바뀐 글\n\n[기타]\n남김', '남긴 제목 구간은 한 번만');
+  // 투영이 버리는 자동 머리말 구간·메타 줄은 오더에 그대로
+  assert.equal(E.replaceReviewSection('[유입방식]\n링크\n[리뷰등록 가이드]\n사진 3장\n1. a.png (29KB, Drive 저장됨)\n[특이사항]\n주의', '사진 5장'),
+    '[유입방식]\n링크\n\n[리뷰등록 가이드]\n사진 5장\n1. a.png (29KB, Drive 저장됨)\n\n[특이사항]\n주의');
+  // 왕복(완화 금지): 되돌린 오더를 다시 투영하면 보낸 글 그대로 — 첫 머리말 앞 글 · 사람이 쓴 제목 · 자동 머리말 · 메타 줄이 섞인 모양 전부
+  const shapes = ['그냥 글', '[특이사항]\n주의', base.review_guide, '[리뷰가이드] 한 줄\n[리뷰 가이드]\n둘째 구간',
+    '전체 포토리뷰 / 30자\n[키워드 가이드]\n강아지 간식', '[리뷰등록 가이드]\n사진 3장\n\n[기타 안내]\n문의는 채팅방',
+    '[유입방식] 유입가이드\n\n[유입가이드]\n이미지 참고\n\n[리뷰등록 가이드]\n포토 50\n\n[포토 가이드라인]\n광 연출\n\n[특이사항]\n없음'];
+  for (const raw of shapes) {
+    const shown = E.campaignViewOf({ ...base, review_guide: raw }, {}).reviewGuide;
+    for (const t of ['왕복 확인 글', shown, `${shown}\n\n[추가 안내]\n새 줄`.trim(), shown.replace(/\n\n\[[^\]]+\][\s\S]*$/, '')].filter(Boolean)) {
+      const out = E.replaceReviewSection(raw, t);
+      assert.equal(E.campaignViewOf({ ...base, review_guide: out }, {}).reviewGuide, t, `${raw} ← ${t}`);
+    }
   }
 }
 // ⑤ 옛 화면 · 랜딩 공유 여부
