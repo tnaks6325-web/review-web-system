@@ -33,12 +33,17 @@ const wd = rf('workdesk.html');
 
 console.log('\n1. tabStatsMap — 채워진 줄은 filledSql 단일 출처');
 ok('filledSql 을 SQL 에 태운다(사본 금지)', /filledSql\('cp'\)/.test(trackB));
-ok('filled_count 를 무시트 분기에서 쓴다', /THEN COALESCE\(cp\.filled_count, 0\)[\s\S]{0,40}AS "filledCount"/.test(trackB));
+// 결정 281: 시트 기반 탭도 작업표 원장으로 센다(운영에 index_master 행이 0건이라 그 분기는 늘 0이었다) — 분기 없이 원장 값.
+ok('filled_count 를 모든 탭에서 쓴다(index_master 분기 부재)', /COALESCE\(cp\.filled_count, 0\) AS "filledCount"/.test(trackB)
+  && !/ELSE im\.(row_count|submitted_count) END/.test(trackB) && !/LEFT JOIN index_master im ON im\.sheet_id = tc\.sheet_id/.test(trackB));
 ok('맵에 filled 를 싣는다', /filled: Number\.isFinite\(\+r\.filledCount\)/.test(trackB));
 ok('total(준비된 줄)은 그대로 남긴다(정보 손실 0)', /total: Number\.isFinite\(\+r\.rowCount\)/.test(trackB));
 ok('입금완료도 review_index 상태값이 아니라 작업보드 submit_col2 실제 셀을 센다',
   /cp\.row_json ->> COALESCE\(paid_header\.paid_header, NULLIF\(BTRIM\(cp\.submit_col2\), ''\)\)/.test(trackB)
-  && /GROUP BY NULLIF\(BTRIM\(ri\.submit_col2\), ''\)[\s\S]{0,100}ORDER BY COUNT\(\*\) DESC/.test(trackB)
+  // ★ 결정 281: 칸 이름 = 작업보드와 같은 판정(workboardStatusHeaders) — review_index 최빈값 사본 부재
+  && /const statusHeaders = await _wsh\.loadTabStatusHeaders\(db, \{ submit: false \}\);/.test(trackB)
+  && /jsonb_to_recordset\(\$1::jsonb\) AS paid_header\(/.test(trackB)
+  && !/GROUP BY NULLIF\(BTRIM\(ri\.submit_col2\), ''\)/.test(trackB)
   && /COALESCE\(cp\.paid_count, 0\)::int AS "paidCount"/.test(trackB)
   && !/FROM review_index WHERE is_submitted2 = 'PAID' GROUP BY sheet_id, tab_name/.test(trackB));
 

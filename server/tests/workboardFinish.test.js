@@ -242,8 +242,11 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   t('★ 쓰기 표면은 trackb_tab_finished 하나뿐(운영 테이블 무접촉)',
     !/(INSERT INTO|UPDATE|DELETE FROM)\s+(?!trackb_tab_finished)/i.test(finBlock.replace(/--[^\n]*/g, '')),
     (finBlock.match(/(INSERT INTO|UPDATE|DELETE FROM)\s+\w+/gi) || []).join(','));
-  t('★ tab_configs.is_closed 를 재사용하지 않는다(그 플래그는 기존 소비처 동작을 바꾼다)',
-    !/is_closed/.test(finBlock));
+  // 결정 281: 자동 마감은 옛 ⬛ 마감 탭을 **읽어서 건너뛴다**(258 완화 금지 — ⬛ 를 🏁 로 옮기지 않는다). 읽기 한 줄만 허용 —
+  //   마감 저장·판정에 그 플래그를 쓰거나 고치는 것은 여전히 금지다.
+  t('★ tab_configs.is_closed 를 재사용하지 않는다(그 플래그는 기존 소비처 동작을 바꾼다) — 자동 마감 제외용 읽기 1곳만',
+    !/is_closed/.test(finBlock.replace('COALESCE(tc.is_closed, FALSE) AS "isClosed",', ''))
+    && (finBlock.match(/is_closed/g) || []).length === 1 && !/SET[^;]*is_closed/i.test(finBlock));
   t('★ 시트 API 무접촉(마감은 화면 분류일 뿐)', !/sheets|spreadsheets|throttledCall/i.test(finBlock));
   t('통계는 읽기 전용(SELECT 만)', /FROM tab_configs tc/.test(finBlock) && !/UPDATE tab_configs/.test(finBlock));
   t('마감자료 표시는 기존 정산 원장 재사용(신규 저장소 0)', /trackb_tab_closeouts/.test(finBlock));
@@ -296,7 +299,9 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   t('마감/복귀 버튼은 내부인만(_finCanEdit — 서버 게이트와 1:1)',
     /_finCanEdit\(\)\{ return STATE\.role==='master'\|\|STATE\.role==='admin'\|\|STATE\.role==='staff'; \}/.test(WD));
   t('작업바 로드는 stats 를 붙이지 않는다(무거운 집계를 탭 전환마다 돌리지 않는다)',
-    /loadTabs\(\)\{[\s\S]{0,200}api\('\/api\/trackb\/tabs\?limit=300'\)/.test(WD));
+    // 결정 281: participantTabs=1(보는 목록 전용 줄 포함)이 붙었다 — stats 는 여전히 붙지 않는다(검사 의미 불변).
+    /loadTabs\(\)\{[\s\S]{0,400}api\('\/api\/trackb\/tabs\?limit=300&participantTabs=1'\)/.test(WD)
+    && !/loadTabs\(\)\{[\s\S]{0,400}api\('\/api\/trackb\/tabs\?[^']*stats=1/.test(WD));
   t('★ 통계는 배열 교체가 아니라 병합(인덱스=selTab 계약·STATE.cur 동일성 보존)',
     /function _finAbsorb\(r\)\{[\s\S]{0,700}STATE\.tabs\.forEach\(t=>\{ const n=by\[/.test(WD));
   // ★★ 코드리뷰가 잡은 무신호 사고 계열 — 조회 실패를 빈 값으로 덮으면 마감이 통째로 풀린 것처럼 보인다

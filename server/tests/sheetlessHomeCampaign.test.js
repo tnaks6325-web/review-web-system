@@ -13,8 +13,10 @@ const trackB = read('src/services/trackB.service.js');
 const workdesk = read('../frontend/workdesk.html');
 
 assert.match(trackB,
-  /CASE WHEN COALESCE\(tc\.sheetless, FALSE\) THEN COALESCE\(cp\.total_count, 0\) ELSE im\.row_count END AS "rowCount"/,
-  '무시트 홈 총원은 검색 인덱스가 아닌 활성 작업표 슬롯을 써야 한다');
+  /COALESCE\(cp\.total_count, 0\) AS "rowCount"/,
+  '홈 총원은 검색 인덱스가 아닌 활성 작업표 슬롯을 써야 한다(결정 281: 시트 기반 탭 포함)');
+assert.doesNotMatch(trackB, /ELSE im\.row_count END AS "rowCount"/,
+  '시트 기반 탭만 index_master 로 세는 분기가 되살아났다(운영 0건 — 남은 시트 탭이 0/0/0 으로 보인다)');
 assert.match(trackB,
   /p\.active = TRUE AND p\.deleted_at IS NULL AND p\.held_at IS NULL[\s\S]{0,260}COUNT\(\*\)::int AS total_count/,
   '삭제·비활성·보관 슬롯은 홈 총원에서 제외해야 한다');

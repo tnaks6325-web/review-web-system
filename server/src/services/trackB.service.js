@@ -24,6 +24,7 @@ const { formatDepositStamp } = require('../utils/depositStamp');   // 입금 칸
 const { resolveWorkManager } = require('../utils/workManager');   // 담당자 판정 단일 출처(065 + 회차 #18 — payment.service 와 한 벌)
 const { _idColIndices } = require('./orderLedger.service');   // 구매채널 ID 열 판정 단일 출처(상품아이디·비고 오탐 제외)
 const { findPaymentColumnIndex } = require('./columnResolver');   // 작업보드에 실제 표시되는 입금 열 판정 단일 출처
+const _wsh = require('./workboardStatusHeaders.service');   // 상태 칸(리뷰제출·입금) 머리글 판정 단일 출처 — 작업보드·홈·업체관리 공용(결정 281)
 const { loadPopularCreditMatches } = require('./popularCredit.service');   // 인기 참여권·운영 목적 라벨 단일 출처
 const { cashReceiptSubmissionStates, cashReceiptSubmissionRowKey } = require('./paymentReceiptGate.service');
 
@@ -665,7 +666,10 @@ async function advertiserOverview() {
        --   그 탭이 두 own 행에 모두 매칭돼 작업 수가 이중 계수된다(이관을 탭→시트 순으로 두 번 하면 즉시 도달).
        --   연결탭 표(ownedTabsForAdvertiser)는 tabs CTE 의 DISTINCT ON 이 접어 주므로, 여기만 두면 두 화면이 갈린다.
        SELECT DISTINCT o.advertiser_id AS "advertiserId", t.sheet_id AS "sheetId",
-              t.tab_gid AS "tabGid", t.tab_name AS "tabName", wo.created_at AS "latestRequestAt"
+              t.tab_gid AS "tabGid", t.tab_name AS "tabName", wo.created_at AS "latestRequestAt",
+              -- 옛 ⬛ 마감 — 마감자료 검수 대기 수(finishCand)에서 뺀다(연결탭 표와 같은 배제 · 258 · 결정 281).
+              EXISTS (SELECT 1 FROM tab_configs tcc WHERE tcc.sheet_id = t.sheet_id AND tcc.tab_name = t.tab_name
+                        AND tcc.is_closed = TRUE) AS "isClosed"
          FROM tabs t JOIN own o ON o.sheet_id = t.sheet_id AND (
               o.tab_gid = t.tab_gid
               -- ★ 탭지정>시트전체 배제(ownedTabsForAdvertiser 와 같은 규칙) — 없으면 이관된 탭이
@@ -728,7 +732,7 @@ async function advertiserOverview() {
     if (!out.contractsUnavailable && !linked.has(k)) a.noMatch += 1;
     // 마감 여부는 이름 우선 → gid 폴백(탭 리네임으로 마감이 조용히 풀리지 않게 — 088 과 같은 규칙)
     const finished = !!(fin.map[k] || (g && fin.map[_FIN_GKEY(r.sheetId, g)]));
-    if (!finished && finishCandidate(st.map[k])) a.finishCand += 1;
+    if (!finished && r.isClosed !== true && finishCandidate(st.map[k])) a.finishCand += 1;   // ⬛ 마감 제외(258 · 결정 281)
   }
   return out;
 }
@@ -923,8 +927,8 @@ function _sameAdvertiserError(same) {
 async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
   if (!advertiserId) throw new Error('ownedTabsForAdvertiser: advertiserId 필수');
   const db = getPool();
-  const { rows } = await db.query(
-    `WITH own AS (
+  /* 소유 탭 전개(CTE) — 상태 칸 배치 조회와 본 조회가 **같은 문자열**을 쓴다(사본 금지: 두 벌이면 칸을 고른 탭과 센 탭이 갈린다). */
+  const ownTabsCte = `WITH own AS (
        SELECT sheet_id, tab_gid FROM advertiser_campaigns
         WHERE advertiser_id = $1 AND deleted_at IS NULL
      ), tabs AS (
@@ -942,7 +946,20 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
                        AND x.tab_gid = rst.tab_gid AND x.advertiser_id <> $1)))
         WHERE rst.is_system_tab = FALSE
         ORDER BY rst.sheet_id, rst.tab_gid, rst.mirrored_at DESC
-     )
+     )`;
+  /* ★★ 상태 칸(리뷰제출·입금) = 작업보드와 **같은 판정**(workboardStatusHeaders 단일 출처 · 결정 281).
+     종전에는 review_index(시트 시절 장부)에서 칸 이름을 골라, 장부가 빈 탭에서 업체관리·업체 요약이 작업보드보다 적게 셌다
+     (실측: 작업보드 제출 783·입금 775 ↔ 업체관리 659·653). ★ 조회 실패 = 경고 후 행별 포인터로만 센다(업체 화면·업체관리 표는 뜬다). */
+  let statusHeadersParam = '[]';
+  try {
+    const { rows: keyRows } = await db.query(
+      `${ownTabsCte} SELECT t.sheet_id AS "sheetId", t.tab_name AS "tabName", t.tab_gid AS "tabGid" FROM tabs t`, [advertiserId]);
+    statusHeadersParam = _wsh.headersParam(await _wsh.loadTabStatusHeaders(db, { tabs: keyRows }));
+  } catch (e) {
+    logger.warn(`[trackB] 업체 작업목록 상태 칸 판정 실패(행별 포인터로만 셉니다): ${e.message}`);
+  }
+  const { rows } = await db.query(
+    `${ownTabsCte}
      SELECT t.sheet_id AS "sheetId", t.spreadsheet_title AS "spreadsheetTitle", t.tab_gid AS "tabGid",
             t.tab_name AS "tabName", t.row_count AS "rowCount", cnt.first_seen AS "firstSeenAt",
             cnt.total AS "bTotal", cnt.submitted AS "bSub", cnt.paid AS "bPaid",
@@ -953,6 +970,8 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
             tc.capture_slots AS "captureSlots", tc.income_type AS "incomeType",
             COALESCE(tc.sheetless, FALSE) AS "sheetless",
             (tc.sheet_id IS NOT NULL) AS "hasTabConfig",
+            -- 옛 ⬛ 마감(tab_configs.is_closed) — 마감자료 검수 대기(finishCand)에서 뺀다(258 완화 금지 · 결정 281).
+            COALESCE(tc.is_closed, FALSE) AS "isClosed",
             wo.recruit_count AS "woRecruit", wo.start_date::text AS "woStartDate",
             wo.work_order_created_at AS "workOrderCreatedAt",
             rc.recruit_total AS "recruitTotal", rc.cash_receipt_required AS "cashReceiptRequired",
@@ -968,20 +987,10 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
         * 있으면 해당 탭 review_index의 실제 리뷰제출 헤더를 쓴다.
         */
        FROM tabs t
-       LEFT JOIN LATERAL (
-         SELECT NULLIF(MAX(NULLIF(BTRIM(ri.submit_col), '')), '') AS submit_header
-           FROM review_index ri
-          WHERE ri.sheet_id = t.sheet_id AND ri.tab_name = t.tab_name
-       ) submit_header ON TRUE
-       LEFT JOIN LATERAL (
-         SELECT NULLIF(BTRIM(ri.submit_col2), '') AS paid_header
-           FROM review_index ri
-          WHERE ri.sheet_id = t.sheet_id AND ri.tab_name = t.tab_name
-            AND NULLIF(BTRIM(ri.submit_col2), '') IS NOT NULL
-          GROUP BY NULLIF(BTRIM(ri.submit_col2), '')
-          ORDER BY COUNT(*) DESC, NULLIF(BTRIM(ri.submit_col2), '')
-          LIMIT 1
-       ) paid_header ON TRUE
+       LEFT JOIN jsonb_to_recordset($2::jsonb) AS status_headers(sheet_id text, tab_name text, paid_header text, submit_header text)
+         ON status_headers.sheet_id = t.sheet_id AND status_headers.tab_name = t.tab_name
+       LEFT JOIN LATERAL (SELECT status_headers.submit_header) submit_header ON TRUE
+       LEFT JOIN LATERAL (SELECT status_headers.paid_header) paid_header ON TRUE
        LEFT JOIN LATERAL (
          /* workdeskTab과 같은 앵커 규율(리뷰제출 집계):
             - 현재 앵커의 셀 편집이 원본 셀보다 우선
@@ -1093,7 +1102,7 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
           WHERE c.sheet_id = t.sheet_id AND c.tab_name = t.tab_name AND c.deleted_at IS NULL
           ORDER BY c.created_at DESC, c.id DESC LIMIT 1
        ) co ON TRUE
-      ORDER BY COALESCE(wo.latest_work_order_created_at, cnt.first_seen, t.mirrored_at) DESC NULLS LAST, t.tab_name DESC`, [advertiserId]);
+      ORDER BY COALESCE(wo.latest_work_order_created_at, cnt.first_seen, t.mirrored_at) DESC NULLS LAST, t.tab_name DESC`, [advertiserId, statusHeadersParam]);
   // ── 자료 폴더 바로가기(시안 A) 재료 — ★ 쿼리 순증 0(tab_configs 를 이미 조인하고 있다).
   //   현영 대상 여부는 captureSlots.hasCashReceiptSlot 단일 규칙(홈 버튼·/tab-folders 와 같은 함수).
   //   ★ 판정 원재료(capture_slots JSONB·income_type)는 응답에서 **버린다** — 316행 × JSONB 는 그냥
@@ -1131,7 +1140,8 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
     const k = _FIN_KEY(r.sheetId, r.tabName);
     const g = String(r.tabGid == null ? '' : r.tabGid).trim();
     r.finished = !!(fin.map[k] || (g && fin.map[_FIN_GKEY(r.sheetId, g)]));
-    r.finishCand = !r.finished && finishCandidate(st.map[k]);
+    /* ★★ 옛 ⬛ 마감 탭은 후보로 세지 않는다(258 완화 금지 — ⬛ 를 🏁 로 옮기지 않는다 · 결정 281). 판정은 그대로 finishCandidate 하나. */
+    r.finishCand = !r.finished && r.isClosed !== true && finishCandidate(st.map[k]);
     const b = brandByTab.get(r.sheetId + '\t' + r.tabName);
     if (b) { r.brandId = b.id; r.brandName = b.name; r.brandColor = b.color; }
   }
@@ -2740,8 +2750,13 @@ async function openRequestCounts({ sheetId, tabName, role = 'master' } = {}) {
 // 역할 스코프 적용된 활성 탭 목록. `allWorkdesk`는 작업보드의 표 열람 전용 확장이다.
 // 광고주도 전체 탭을 열 수 있으나, workdeskTab의 PII 마스킹·읽기 전용 렌즈는 그대로 적용된다.
 // 스레드·정산·폴더 등의 별도 API는 이 플래그를 받지 않아 기존 소유/담당 스코프를 유지한다.
-async function scopedActiveTabs({ role, staffName, advertiserId, limit, forMapping = false, allStaff = false, allWorkdesk = false } = {}) {
-  const all = await participants.listActiveTabs({ limit });
+async function scopedActiveTabs({ role, staffName, advertiserId, limit, forMapping = false, allStaff = false, allWorkdesk = false, includeParticipantTabs = false } = {}) {
+  /* ★ 작업표 원장으로만 살아 있는 시트 기반 작업(결정 281)은 **보는 목록**(홈 작업목록 `stats=1` · 작업바 `participantTabs=1`)
+     에만 싣는다 — 기본값 false. 같은 `/api/trackb/tabs` 를 모집공고 발행 대상 선택(index-recruit `loadRecruitTabOptions`)·
+     업체 매핑(`forMapping=1`)·스코프 판정(unseenCounts·로그·staff 스코프)도 쓰므로, 켜 두면 시트와 끊긴 탭이 공고 대상으로
+     골라져 주문이 sheet_tab_retired 로 실패한다(PR #1677 리뷰).
+     ★★★ 투영 크론·커버리지(projectActive·projectionCoverage)에는 켜지 말 것 — listActiveTabs 주석 참조. */
+  const all = await participants.listActiveTabs({ limit, includeParticipantTabs: includeParticipantTabs === true });
   // allWorkdesk: 리뷰어를 제외하고 작업보드 표를 열 수 있는 역할에만 라우트가 명시한다.
   // forMapping/allStaff는 기존 staff 전용 초기매핑/작업보드 호출 계약을 유지한다.
   const scope = (allWorkdesk || ((forMapping || allStaff) && role === 'staff'))
@@ -3670,32 +3685,15 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   let filledCount = 0;
   // 무시트 작업표에서 수동으로 만든 참여 줄은 submit_col을 들고 있지 않는다. 그 경우에도
   // 실제 표가 쓰는 탭 단위 상태 헤더를 읽어야 "셀에는 O가 있는데 카드 0건"이 되지 않는다.
-  let tabSubmitHeader = String((roster.find(r => String(r.submit_col || '').trim()) || {}).submit_col || '').trim();
-  if (!tabSubmitHeader) {
-    try {
-      tabSubmitHeader = String(await require('./sheetlessStatus.service')
-        .statusHeaderForTab(db, { sheetId, tabName, kind: 'submit' }) || '').trim();
-    } catch (_) { /* 헤더를 모르면 값 없는 것으로 처리한다 — 플래그로 추측하지 않는다. */ }
-  }
-  // 입금완료 표시는 현재 작업보드에 실제 보이는 입금 열을 단일 출처로 삼는다.
-  // 과거 일부 행의 submit_col2가 예전 헤더를 계속 들고 있어도, 화면은 현재 헤더의 값을 보여준다.
-  // 집계만 행별 포인터를 우선하면 화면에 값이 보이는 행이 (빈값)으로 세어지므로 현재 헤더를 우선한다.
-  const paidHeaderIndex = findPaymentColumnIndex(headers || []);
-  let tabPaidHeader = paidHeaderIndex >= 0 ? String(headers[paidHeaderIndex] || '').trim() : '';
-  if (!tabPaidHeader) {
-    const frequencies = new Map();
-    for (const row of roster) {
-      const header = String(row.submit_col2 || '').trim();
-      if (header) frequencies.set(header, (frequencies.get(header) || 0) + 1);
-    }
-    tabPaidHeader = [...frequencies].sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]))[0]?.[0] || '';
-  }
-  if (!tabPaidHeader) {
-    try {
-      tabPaidHeader = String(await require('./sheetlessStatus.service')
-        .statusHeaderForTab(db, { sheetId, tabName, kind: 'paid' }) || '').trim();
-    } catch (_) { /* 헤더를 모르면 원장 플래그로 추측하지 않고 0건으로 처리한다. */ }
-  }
+  /* ★★ 상태 칸(리뷰제출·입금) 판정 = `workboardStatusHeaders` 단일 출처(결정 281) — 홈 작업목록(tabStatsMap)·
+     업체관리(ownedTabsForAdvertiser)도 **같은 함수**로 칸을 고른다. 여기서 다시 짜면 "작업보드 입금 775 · 업체관리 653"이 재현된다.
+     ① 제출 = 첫 줄의 submit_col → 기록 칸 ② 입금 = 현재 작업보드에 실제 보이는 머리글(findPaymentColumnIndex)
+        → 줄 포인터 최빈값 → 기록 칸. 과거 일부 행의 submit_col2 가 예전 헤더를 들고 있어도 화면은 현재 헤더의 값을 보여준다.
+     ★ 헤더를 모르면 값 없는 것으로 처리한다 — 플래그로 추측하지 않는다(0건). */
+  let tabSubmitHeader = _wsh.pickSubmitHeader((roster.find(r => String(r.submit_col || '').trim()) || {}).submit_col);
+  if (!tabSubmitHeader) tabSubmitHeader = await _wsh.statusHeaderFallback(db, { sheetId, tabName, kind: 'submit' });
+  let tabPaidHeader = _wsh.pickPaidHeader(headers || [], _wsh.countHeaders(roster.map(r => r.submit_col2)));
+  if (!tabPaidHeader) tabPaidHeader = await _wsh.statusHeaderFallback(db, { sheetId, tabName, kind: 'paid' });
   /*
    * 진행 현황의 "제출완료"는 제출 상태 플래그가 아니라, 사용자가 작업표에서 실제로
    * 확인하는 리뷰제출 칸의 값으로 센다. 플래그/인덱스는 재투영 전에는 뒤처질 수 있어
@@ -5686,7 +5684,7 @@ const AUTO_FINISH_CAP = Math.max(1, Number(process.env.TAB_AUTO_FINISH_CAP) || 2
  *             finished:number, failed:Array, skippedReopened:number, capped:boolean}} */
 async function autoFinishEligibleTabs({ dryRun = false, cap = AUTO_FINISH_CAP, by = AUTO_FINISH_BY } = {}) {
   const limit = Math.max(1, Number(cap) || AUTO_FINISH_CAP);
-  const out = { ok: true, dryRun: !!dryRun, scanned: 0, candidates: [], finished: 0, failed: [], skippedReopened: 0, capped: false };
+  const out = { ok: true, dryRun: !!dryRun, scanned: 0, candidates: [], finished: 0, failed: [], skippedReopened: 0, skippedClosed: 0, capped: false };
 
   // ① 통계 — ★ force: 낡은 캐시로 마감하지 않는다.
   const st = await tabStatsMap({ force: true });
@@ -5701,6 +5699,7 @@ async function autoFinishEligibleTabs({ dryRun = false, cap = AUTO_FINISH_CAP, b
   try {
     const { rows } = await getPool().query(
       `SELECT tc.sheet_id AS "sheetId", tc.tab_name AS "tabName", tc.tab_gid AS "tabGid",
+              COALESCE(tc.is_closed, FALSE) AS "isClosed",
               EXISTS (SELECT 1 FROM trackb_tab_finished f
                        WHERE f.sheet_id = tc.sheet_id AND f.tab_name = tc.tab_name
                          AND f.deleted_at IS NOT NULL) AS "everReopened"
@@ -5719,6 +5718,9 @@ async function autoFinishEligibleTabs({ dryRun = false, cap = AUTO_FINISH_CAP, b
     if (!finishCandidate(st.map[key])) continue;                                 // ★ 판정 단일 출처
     out.scanned += 1;
     if (r.everReopened) { out.skippedReopened += 1; continue; }                   // ★ 사람이 되돌린 작업
+    /* ★★ 옛 ⬛ 마감 작업은 🏁 로 옮기지 않는다(258 완화 금지 · 결정 281) — 시트 기반 탭도 작업표 원장으로 세면서
+       보관된 ⬛ 탭이 숫자를 갖게 됐다(실측: 1건 차이로 후보 직전인 ⬛ 탭 2개). 판정은 그대로 finishCandidate 하나. */
+    if (r.isClosed === true) { out.skippedClosed += 1; continue; }
     const s = st.map[key] || {};
     out.candidates.push({ sheetId: r.sheetId, tabName: r.tabName, tabGid: gid,
       displayName: s.displayName || s.campaignName || r.tabName,
@@ -5759,7 +5761,13 @@ const _TAB_STATS_TTL_MS = 30 * 1000;
 async function tabStatsMap({ force = false } = {}) {
   if (!force && _tabStatsCache.map && (Date.now() - _tabStatsCache.at) < _TAB_STATS_TTL_MS) return { ok: true, map: _tabStatsCache.map };
   try {
-    const { rows } = await getPool().query(
+    const db = getPool();
+    /* ★★ 입금 칸 = 작업보드 [진행 현황]과 **같은 판정**(workboardStatusHeaders 단일 출처 · 결정 281).
+       종전에는 `review_index.submit_col2` 최빈값(시트 시절 장부)을 따로 골라, 장부가 빈 탭에서 행별 포인터가 빈 줄을
+       못 셌다(실측: 작업보드 입금 775 · 여기 653). ★ 조회 실패는 throw → 아래 catch 가 ok:false(모르면 숫자를 내지 않는다 —
+       자동 마감도 `stats_unavailable` 로 건너뛴다, 158 fail-closed). */
+    const statusHeaders = await _wsh.loadTabStatusHeaders(db, { submit: false });
+    const { rows } = await db.query(
       `SELECT tc.sheet_id AS "sheetId", tc.tab_name AS "tabName",
               tc.manager, tc.campaign_name AS "campaignName", tc.display_name AS "displayName",
               tc.folder_url AS "folderUrl", tc.capture_folder_url AS "captureFolderUrl", tc.income_type AS "incomeType",
@@ -5772,15 +5780,15 @@ async function tabStatsMap({ force = false } = {}) {
               --   tc.manager 는 접수 시점에 한 번만 채워지는 blank-only 칸이라 오더에서 담당자가
               --   바뀌어도 안 따라온다(payment.service 와 같은 함정 — resolveWorkManager 로 통일).
               wo.work_manager AS "orderWorkManager",
-              /* 무시트 작업표의 빈 슬롯은 review_index 에 들어가지 않는다(이름 없는 행은 검색 대상이 아님).
-                 홈의 작업 인원은 검색 명단이 아니라 실제 작업표 원장으로 보여야 하므로, 무시트 탭만
-                 campaign_participants 활성 행을 쓴다. 시트 탭은 기존 index_master 집계를 그대로 유지한다. */
-              CASE WHEN COALESCE(tc.sheetless, FALSE) THEN COALESCE(cp.total_count, 0) ELSE im.row_count END AS "rowCount",
+              /* ★★ 모든 탭을 **작업표 원장(campaign_participants 활성 행)** 으로 센다 — 작업보드 [진행 현황]과 같은 원천(결정 281).
+                 종전 시트 기반 탭 분기(index_master.row_count/submitted_count)는 운영에서 그 행이 0건이라(2026-10-23 실측
+                 시트 기반 335탭 전부 index_master 없음) 남은 시트 탭이 늘 0/0/0 으로 보였다.
+                 무시트 작업표의 빈 슬롯은 review_index 에 들어가지 않으므로 검색 명단이 아니라 원장을 본다(057). */
+              COALESCE(cp.total_count, 0) AS "rowCount",
               /* ★★ 채워진 줄 = 작업보드 상단 참여자 게이지의 분자와 **같은 판정**(rowNumbering.filledSql).
-                 홈이 여기서 따로 세면 "게이지는 208명인데 홈은 다른 숫자"로 갈린다(단일 출처 규율).
-                 시트 기반 탭의 index_master.row_count 는 이미 **이름 있는 행만** 세므로 그대로 채움 수다. */
-              CASE WHEN COALESCE(tc.sheetless, FALSE) THEN COALESCE(cp.filled_count, 0) ELSE im.row_count END AS "filledCount",
-              CASE WHEN COALESCE(tc.sheetless, FALSE) THEN COALESCE(cp.submitted_count, 0) ELSE im.submitted_count END AS "submittedCount",
+                 홈이 여기서 따로 세면 "게이지는 208명인데 홈은 다른 숫자"로 갈린다(단일 출처 규율). */
+              COALESCE(cp.filled_count, 0) AS "filledCount",
+              COALESCE(cp.submitted_count, 0) AS "submittedCount",
               COALESCE(cp.paid_count, 0)::int AS "paidCount",
               co.closed_date AS "closeoutDate", co.row_count AS "closeoutRows"
          FROM tab_configs tc
@@ -5789,16 +5797,10 @@ async function tabStatsMap({ force = false } = {}) {
                                 AND w.linked_tab_sheet_id = tc.sheet_id
                                 AND w.linked_tab_name = tc.tab_name
                               ORDER BY w.created_at DESC LIMIT 1) wo ON TRUE
-         LEFT JOIN index_master im ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
-         LEFT JOIN LATERAL (
-            SELECT NULLIF(BTRIM(ri.submit_col2), '') AS paid_header
-              FROM review_index ri
-             WHERE ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
-               AND NULLIF(BTRIM(ri.submit_col2), '') IS NOT NULL
-             GROUP BY NULLIF(BTRIM(ri.submit_col2), '')
-             ORDER BY COUNT(*) DESC, NULLIF(BTRIM(ri.submit_col2), '')
-             LIMIT 1
-         ) paid_header ON TRUE
+         -- 입금 칸 = workboardStatusHeaders 가 고른 값(작업보드와 같은 칸). 모르면 NULL → 아래 COALESCE 가 행별 포인터로 접는다
+         --   (작업보드의 tabPaidHeader || r.submit_col2 와 같은 모양).
+         LEFT JOIN jsonb_to_recordset($1::jsonb) AS paid_header(sheet_id text, tab_name text, paid_header text, submit_header text)
+           ON paid_header.sheet_id = tc.sheet_id AND paid_header.tab_name = tc.tab_name
          LEFT JOIN LATERAL (
            WITH active_rows AS (
              SELECT p.*,
@@ -5832,7 +5834,7 @@ async function tabStatsMap({ force = false } = {}) {
          --   ★ LATERAL LIMIT 1 = 행 곱증식 없음(레포 관용구). 미생성이면 NULL → 화면이 경고만 띄운다(하드블록 아님).
          LEFT JOIN LATERAL (SELECT c.closed_date, c.row_count FROM trackb_tab_closeouts c
                              WHERE c.sheet_id = tc.sheet_id AND c.tab_name = tc.tab_name AND c.deleted_at IS NULL
-                             ORDER BY c.created_at DESC LIMIT 1) co ON TRUE`);
+                             ORDER BY c.created_at DESC LIMIT 1) co ON TRUE`, [_wsh.headersParam(statusHeaders)]);
     const map = {};
     for (const r of rows) {
       map[_FIN_KEY(r.sheetId, r.tabName)] = {

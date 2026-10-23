@@ -377,6 +377,9 @@ async function loadRecruitTabOptions() {
       const tab = r.tabName || r.tab_name || "";
       const key = sid + "||" + tab;
       if (!sid || !tab || seen.has(key)) return;
+      // ★ 결정 281: 보는 목록 전용 줄(시트와 끊긴 시트 기반 작업)은 공고 대상이 아니다 — 서버도 이 호출엔 안 싣지만 두 겹으로 막는다
+      //   (골라 발행하면 주문이 sheet_tab_retired 로 실패한다).
+      if (r.participantOnly === true) return;
       seen.add(key);
       // spreadsheetTitle = /api/trackb/tabs(리뷰웹시스템[3버전]) 의 시트 제목 필드 — 없으면 종전 폴백 그대로
       const sheetName = r.campaignName || r.campaign_name || r.tcCampaignName || r.spreadsheetTitle || sid.slice(-6);

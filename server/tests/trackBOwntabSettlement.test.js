@@ -87,7 +87,8 @@ async function run() {
   console.log('  4. 비고 저장 경로 부재 ✓');
 
   // ═══ 5. Track A 무접촉(요약은 읽기만) ═══
-  const writes = p.q.filter(x => /INSERT|UPDATE|DELETE/i.test(x.s) && !/trackb_/.test(x.s));
+  // ★ 단어 경계 — `deleted_at` 같은 칸 이름을 쓰기로 오판하지 않는다(결정 281: 상태 칸 배치 조회가 trackb_ 없는 읽기 쿼리를 더했다).
+  const writes = p.q.filter(x => /\b(INSERT|UPDATE|DELETE)\b/i.test(x.s) && !/trackb_/.test(x.s));
   assert.equal(writes.length, 0, '5a: 비 trackb 테이블 write 0');
   console.log('  5. Track A 무접촉 ✓');
 

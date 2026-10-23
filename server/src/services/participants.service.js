@@ -333,9 +333,43 @@ async function retireRows({ sheetId, tabName, rounds = [], seqs = [], dryRun = t
 }
 
 // 프리뷰 탭 셀렉터용 활성 캠페인 탭 목록(master 전용 라우트에서 사용 — /api/raw/tabs 의존 제거).
-async function listActiveTabs({ limit = 500 } = {}) {
+async function listActiveTabs({ limit = 500, includeParticipantTabs = false } = {}) {
   const db = getPool();
   const lim = Math.min(Math.max(parseInt(limit, 10) || 500, 1), 2000);
+  /* ★★ 작업표 원장으로만 살아 있는 시트 기반 작업(결정 281 · 사용자 확정 2026-10-23) — 홈 작업목록·작업바에만 보탠다.
+     「8/3(쿠팡)위프_블랙 탈취제 800건」은 2026-09-04 보관돼 index_master 가 없고 sheetless 도 아니라(결정 267: TRUE 로 바꾸면
+     5분 스윕이 보관 명단을 되살린다) 위 두 경로 어디에도 안 걸렸다 — 참여 800줄이 살아 있는데 홈에서 사라진 작업.
+     조건 = 무시트 아님 · ⬛ 마감 아님 · 활성 작업표 줄 있음 · 위 두 경로에 없음.
+     ★★★ **기본값 false 를 바꾸지 말 것(완화 금지)** — 이 목록은 그림자 투영 크론(projectActive)의 대상이기도 하다.
+     이 탭이 투영 대상이 되면 review_index(0줄)를 임포트한 뒤 seen-set 정리가 그 탭의 import 줄(149줄)을 **전부 비활성화**한다.
+     켜는 곳은 화면 목록(trackB.scopedActiveTabs) 하나뿐이다. */
+  const participantTabsSql = includeParticipantTabs ? `
+     UNION ALL
+     SELECT pt.* FROM (
+       SELECT tc.sheet_id AS "sheetId",
+              COALESCE(rst.spreadsheet_title, NULLIF(tc.campaign_name, ''), NULLIF(tc.display_name, ''), tc.tab_name) AS "spreadsheetTitle",
+              COALESCE(NULLIF(BTRIM(COALESCE(tc.tab_gid, '')), ''), rst.tab_gid) AS "tabGid", tc.tab_name AS "tabName",
+              COALESCE(rst.row_count, 0) AS "rowCount",
+              FALSE AS "sheetless", COALESCE(tc.work_kind, '') AS "workKind",
+              COALESCE(tc.display_name, '') AS "displayName",
+              COALESCE((SELECT MIN(cp.first_seen_at)
+                        FROM campaign_participants cp
+                       WHERE cp.sheet_id = tc.sheet_id AND cp.tab_name = tc.tab_name
+                         AND cp.deleted_at IS NULL), rst.mirrored_at, tc.updated_at) AS "firstSeenAt",
+              /* ★ 표시 전용 표식 — 작업 선택 목록(모집공고 발행 대상 등)이 이 줄을 고르지 못하게(PR #1677 리뷰).
+                 이 작업은 시트와 끊긴 시트 기반 탭이라 새 주문이 sheet_tab_retired 로 실패한다. */
+              TRUE AS "participantOnly"
+         FROM tab_configs tc
+         LEFT JOIN LATERAL (SELECT r.spreadsheet_title, r.tab_gid, r.row_count, r.mirrored_at FROM raw_sheet_tabs r
+                             WHERE r.sheet_id = tc.sheet_id AND r.tab_name = tc.tab_name AND r.is_system_tab = FALSE
+                             ORDER BY r.mirrored_at DESC NULLS LAST LIMIT 1) rst ON TRUE
+        WHERE COALESCE(tc.sheetless, FALSE) = FALSE
+          AND COALESCE(tc.is_closed, FALSE) = FALSE
+          AND EXISTS (SELECT 1 FROM campaign_participants p
+                       WHERE p.sheet_id = tc.sheet_id AND p.tab_name = tc.tab_name
+                         AND p.active = TRUE AND p.deleted_at IS NULL AND p.held_at IS NULL)
+     ) pt
+      WHERE NOT EXISTS (SELECT 1 FROM raw_tabs r WHERE r."sheetId" = pt."sheetId" AND r."tabName" = pt."tabName")` : '';
   const { rows } = await db.query(
     /* ★ sheetless — 화면이 "이 작업은 구글시트를 안 쓴다"고 말하기 위한 재료(탈 구글시트 W3-b).
        없으면 담당자가 어느 작업이 이관됐는지 화면만 봐서는 알 수 없고, 시트를 찾으러 간다.
@@ -369,7 +403,8 @@ async function listActiveTabs({ limit = 500 } = {}) {
             COALESCE((SELECT MIN(cp.first_seen_at)
                         FROM campaign_participants cp
                        WHERE cp.sheet_id = rst.sheet_id AND cp.tab_name = rst.tab_name
-                         AND cp.deleted_at IS NULL), rst.mirrored_at) AS "firstSeenAt"
+                         AND cp.deleted_at IS NULL), rst.mirrored_at) AS "firstSeenAt",
+            FALSE AS "participantOnly"   -- 세 갈래 UNION ALL 칸 순서 계약(맨 끝)
        FROM raw_sheet_tabs rst
        LEFT JOIN tab_configs tc ON tc.sheet_id = rst.sheet_id AND tc.tab_name = rst.tab_name
       WHERE rst.is_system_tab = FALSE
@@ -385,7 +420,8 @@ async function listActiveTabs({ limit = 500 } = {}) {
               COALESCE((SELECT MIN(cp.first_seen_at)
                         FROM campaign_participants cp
                        WHERE cp.sheet_id = tc.sheet_id AND cp.tab_name = tc.tab_name
-                         AND cp.deleted_at IS NULL), tc.sheetless_at, tc.updated_at) AS "firstSeenAt"
+                         AND cp.deleted_at IS NULL), tc.sheetless_at, tc.updated_at) AS "firstSeenAt",
+              FALSE AS "participantOnly"
          FROM tab_configs tc
          LEFT JOIN index_master im ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
         WHERE COALESCE(tc.sheetless, FALSE) = TRUE
@@ -397,7 +433,7 @@ async function listActiveTabs({ limit = 500 } = {}) {
       WHERE NOT EXISTS (
         SELECT 1 FROM raw_tabs r
          WHERE r."sheetId" = sl."sheetId" AND r."tabName" = sl."tabName"
-      )
+      )${participantTabsSql}
      ORDER BY "spreadsheetTitle", "tabName" LIMIT $1`,
     [lim]
   );
