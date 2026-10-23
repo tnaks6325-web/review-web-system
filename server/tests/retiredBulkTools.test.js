@@ -11,6 +11,8 @@
  *         admin.html 은 결정 267 로 이미 없다. 되살리면 같은 화면 없는 쓰기 입구가 다시 열린다.
  *   273번 시트 시절 큐 복구·스마트빌드 수동 도구(2026-10-22 · 결정 273 · 결정 186 82·88번) — 구글시트 반영 큐를 사람이
  *         다시 돌리거나(yellow-rows-delete 는 시트 행을 실제로 지운다) 색인을 시트에서 다시 읽던 입구. 시트 작업이 끝나 호출자 0.
+ *   274번 시트→DB 역동기화 입구 7개(결정 186 85번) + 시트 타입 큐 실행부·넣는 곳(2026-10-23 · 결정 274) — "원장을 시트값으로"
+ *         바꾸던 입구(인트라넷 로그인 직원은 권한 없음으로 막혀 있던 막다른 길)와 구글시트에 쓰던 큐. 남은 시트 탭도 작업보드가 원본.
  * 실행: node tests/retiredBulkTools.test.js
  */
 const assert = require('assert');
@@ -58,7 +60,7 @@ assert.ok(!fs.existsSync(path.join(__dirname, '..', 'src/routes/archive.routes.j
 assert.ok(!/archive\.routes/.test(fs.readFileSync(path.join(__dirname, '..', 'src/app.js'), 'utf8')), '270번: /api/archive 마운트가 되살아났다');
 // 같은 묶음에서 **남겨야 하는** 것 — 리뷰어·작업보드가 지금 부른다(지우면 실사용 경로가 끊긴다).
 assert.ok(has(diag, '/review-upload'), '리뷰어 리뷰 캡처 업로드(/api/image/review-upload)가 사라졌다');
-assert.ok(has(diag, '/client-error') && has(diag, '/reverse-sync-list'), 'diag 잔류 입구가 사라졌다');
+assert.ok(has(diag, '/client-error') && has(diag, '/no-capture-audit'), 'diag 잔류 입구가 사라졌다');   // (표본 reverse-sync-list 는 결정 274 로 제거 — 살아 있는 입구로 옮김)
 assert.ok(has(index, '/'), '/api/search·/api/index 검색 입구가 사라졌다');
 assert.ok(has(shortlink, '/resolve'), '단축링크 되찾기(/api/short/resolve)가 사라졌다');
 // Track B 가 이름으로 부르는 핸들러는 경로를 지워도 남아 있어야 한다(지우면 trackB 가 기동 시 throw).
@@ -100,9 +102,28 @@ for (const f of ['services/smartBuild.service.js', 'jobs/orderBatchScheduler.js'
     '273번: 크론이 시트 색인 빌드·RAW 미러·시트 리컨실·역동기화 자동·배치 드레인을 다시 부른다');
   assert.ok(!/require\([^)]*smartBuild\.service|buildIndexSmart\(|'submitcol_fix_20260804_rebuilt'/.test(bootSrc), '273번: 부팅이 스마트빌드·1회성 전체 재빌드를 다시 돌린다');
 }
-// 273 에서 남긴 것 — 무시트 작업에도 쓰이는 DB 전용 수동 도구(지우면 복구 수단이 사라진다)
-for (const p of ['/sheetless-worktable-recover', '/order-mirror-repair', '/order-stuck-export', '/row-claims', '/reverse-sync-apply']) {
-  assert.ok(has(diag, p), `273번에서 남긴 /api/diag${p} 가 사라졌다`);
+// 273·274 에서 남긴 것 — 무시트 작업에도 쓰이는 DB 전용 수동 도구(지우면 복구 수단이 사라진다)
+for (const p of ['/sheetless-worktable-recover', '/order-mirror-repair', '/order-stuck-export', '/row-claims', '/review-reflect']) {
+  assert.ok(has(diag, p), `273·274번에서 남긴 /api/diag${p} 가 사라졌다`);
 }
-console.log('✅ retiredBulkTools: 제거된 일괄 도구·옛 대시보드 입구·Drive 남은 도구·시트 시절 큐/빌드 도구 부재 확인');
+// ── 결정 274: 시트→DB 역동기화 입구 7개 · 서비스 함수 · 작업보드 서브탭 · 시트 타입 큐 실행부 부재 ──
+for (const p of ['/reverse-sync-detect', '/reverse-sync-list', '/reverse-sync-apply', '/reverse-sync-dismiss', '/reverse-sync-auto-run',
+  '/reverse-sync-rollback', '/reverse-sync-auto-status']) {
+  assert.ok(!has(diag, p), `274번: /api/diag${p}(=/api/viewer·image·blacklist${p}) 입구가 되살아났다`);
+}
+{
+  const ledger = require('../src/services/orderLedger.service');
+  for (const n of ['detectReverseSyncProposals', 'autoApplyReverseSync', 'rollbackAutoApplied', 'runReverseSyncAutoCycle', 'computeRowWriteSig', 'rowIdentityMatches']) {
+    assert.strictEqual(ledger[n], undefined, `274번: orderLedger.${n} 가 되살아났다`);
+  }
+  const srcAll = ['src/routes/diag.routes.js', 'src/services/orderLedger.service.js', 'src/jobs/cron.js', 'index.js']
+    .map(f => fs.readFileSync(path.join(__dirname, '..', f), 'utf8')).join('\n');
+  assert.ok(!/process\.env\.SHEET_REVERSE_SYNC|process\.env\.REVERSE_SYNC_AUTO/.test(srcAll), '274번: 역동기화 스위치를 다시 읽는다');
+  const wd = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend/workdesk.html'), 'utf8');
+  assert.ok(!/reverse-sync/.test(wd) && !/_rsOpen|_rsBootBadge|pmNavBadge/.test(wd), '274번: 작업보드 「⚠ 원장 불일치」 서브탭·입금관리 뱃지가 되살아났다');
+  assert.ok(!fs.existsSync(path.join(__dirname, '..', 'src/services/participantMirror.service.js')), '274번: participant_mirror 시트 되쓰기 서비스가 되살아났다');
+  const q = fs.readFileSync(path.join(__dirname, '..', 'src/services/syncQueue.service.js'), 'utf8');
+  assert.ok(!/ORDER_BATCH_AUTO\s*===|process\.env\.ORDER_BATCH_AUTO/.test(q), '274번: 큐 워커가 ORDER_BATCH_AUTO 를 다시 읽는다');
+}
+console.log('✅ retiredBulkTools: 제거된 일괄 도구·옛 대시보드 입구·Drive 남은 도구·시트 시절 큐/빌드 도구·역동기화 부재 확인');
 process.exit(0);

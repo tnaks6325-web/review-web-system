@@ -283,28 +283,14 @@ async function cancelOrderFromEvent({ id, by = 'admin' } = {}) {
   if (out && out.skipped) return { ok: false, error: '다른 편집/취소가 진행 중입니다. 잠시 후 다시 시도해주세요.' };
 
   if (out && !out.already) {
-    // 시트 행이 남아 있고 시트쓰기가 켜져 있으면 그 행 비우기를 큐에 위임(신원검증은 큐가 수행).
-    // 그 외(행 없음·쓰기 비활성)는 DB 상태만 확정 — 취소 자체는 항상 성립해야 한다(되살아남 중단이 목적).
-    // ★★ 결정 271 — 무시트 좌표(참여형 `campaign:*` · 무시트 탭)에는 비울 구글시트 행이 없다.
-    //   큐에 넣으면 매번 "RAW 메타 없음"으로 실패만 쌓인다 → 아래 else(DB 상태만 확정)로 보낸다.
-    //   판정 실패 = false = 종전 경로(fail-open).
-    const sheetless = !!out.sheetRow && await require('../utils/sheetlessScope').isSheetlessOrderCoord(db, {
-      sheetId: out.coord && out.coord.sheet_id, tabName: out.coord && out.coord.tab_name,
-      tabGid: out.coord && (out.coord.tab_gid || out.coord.gid),
-    });
-    if (out.sheetRow && !sheetless && process.env.ORDER_LEDGER_WRITE_ENABLED === 'true') {
-      try {
-        await require('./syncQueue.service').enqueue('order_cancel', { orderSubmissionId: osId });
-        require('../jobs/queuePump').kickQueuePump();
-      } catch (e) {
-        logger.warn(`[reviewer-log] 취소 시트반영 큐 등록 실패(무시, DB취소는 확정): ${e.message}`);
-      }
-    } else {
-      await db.query(
-        `UPDATE order_submissions SET mirror_status = 'canceled' WHERE id = $1 AND mirror_status <> 'canceled'`,
-        [osId]
-      );
-    }
+    // ★★ 결정 271 → 274 — 취소는 **DB 상태만 확정**한다(어느 탭이든 시트 비우기 큐를 넣지 않는다).
+    //   271 은 무시트 좌표만 여기로 보냈고 시트 기반 탭은 `ORDER_LEDGER_WRITE_ENABLED=true` 면 order_cancel 을 넣었다.
+    //   274 로 시트 쓰기 실행부를 지웠고 남은 시트 탭은 작업보드가 원본이다(사용자 결정 2026-10-23).
+    //   취소 자체는 항상 성립해야 한다(되살아남 중단이 목적).
+    await db.query(
+      `UPDATE order_submissions SET mirror_status = 'canceled' WHERE id = $1 AND mirror_status <> 'canceled'`,
+      [osId]
+    );
   }
 
   // 이 알림 + 같은 주문의 다른 미해결 알림을 함께 정리(원인이 소멸했으므로).

@@ -350,7 +350,10 @@ console.log('\nB3. 서비스 구조(원장 단일 진입점)');
   const src = nc(R('src/services/manualOrder.service.js'));
   ok('B26 원장은 createOrderLedgerEntry 재사용(행배정 인라인 복제 금지)',
     src.includes('createOrderLedgerEntry(') && !src.includes('claimRow('));
-  ok('B27 시트 반영은 기존 큐(order_append) 경유', src.includes("enqueue('order_append'"));
+  // 결정 274: 시트 반영 큐(order_append) 실행부를 지웠다 — 시트 기반 탭은 큐 대신 실패 상태 + 경고(조용한 대기 금지).
+  ok('B27 ★ 시트 반영 큐(order_append)를 넣지 않는다 · 시트 기반 탭은 실패 상태 + 경고(결정 274)',
+    !src.includes("enqueue('order_append'") && /markOrderMirrorFailed\(ledger\.orderSubmissionId, 'sheet_tab_retired/.test(src)
+    && /시트 기반 작업이라 작업보드에 자동으로 적히지 않습니다/.test(src));
   ok('B28 큐 등록 성공은 markOrderQueued 로 상태 반영', src.includes('markOrderQueued('));
   ok('B29 ★ 계좌 덮어쓰기 경로(saveBankInfo/saveAddress)를 쓰지 않는다',
     !src.includes('saveBankInfo') && !src.includes('saveAddress'));
@@ -520,8 +523,9 @@ console.log('\nE. 데이터 보전 가드');
   ok('E16 ★ 등록된 리뷰어 번호를 남의 타계정으로 붙이지 않는다(063과 같은 정책 스위치)',
     src.includes('CAMPAIGN_SUB_REGISTERED_POLICY') && src.includes('sub_accounts'));
   // 결정 273: 배치 스케줄러(kickOrderBatch)를 지워 큐 등록 뒤 깨우는 것은 queuePump 하나다(검사 의미 불변 — 등록 뒤 깨운다).
-  ok('E17 큐 등록 후 kick — cron까지 시트에 안 뜨던 문제',
-    /enqueue\('order_append'[\s\S]{0,600}kickQueuePump\(\)/.test(src));
+  // 결정 274: 남은 큐 등록은 작업보드 반영(workboard_apply) 하나 — 등록 뒤 깨우는지를 그 자리에서 본다(검사 의미 불변).
+  ok('E17 큐 등록 후 kick — cron까지 반영이 안 뜨던 문제',
+    /enqueue\('workboard_apply'[\s\S]{0,600}kickQueuePump\(\)/.test(src));
 }
 {
   const em = R('src/middleware/error.middleware.js');

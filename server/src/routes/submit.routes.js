@@ -1,8 +1,6 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const router = express.Router();
-const { writeSheet, readSheet, appendSheet } = require('../services/sheets.service');
-const { throttledCall } = require('../utils/sheetsThrottle');
 const { enqueue } = require('../services/syncQueue.service');
 const { logAbnormal } = require('../services/errorLog.service');
 const { mutateSubAccounts, findSubIndex } = require('../services/reviewerIdentityCards.service');
@@ -26,12 +24,7 @@ const purchaseSessions = require('../services/purchaseSubmissionSession.service'
 const reviewerOrderIdentity = require('../services/reviewerOrderIdentity.service');
 const { verifyReviewerSession } = require('../services/reviewerSession.service');
 
-// ═══════════════════════════════════════════════════════════
-// 블로그체험단(099) — memo 가 들어갈 열은 종류에 따라 우선순위가 다르다.
-// 열 고르기는 `utils/memoColumn` 단일 출처(이 경로·큐 재시도·무시트 작업표 기록 공용).
-// ★ 판정 실패·리뷰체험단은 종전 순서 그대로 = 무회귀.
-// ═══════════════════════════════════════════════════════════
-const { pickMemoColumnIndex, pickPostDateColumnIndex } = require('../utils/memoColumn');
+// (블로그체험단 memo 열 고르기 utils/memoColumn 은 무시트 작업표 기록 쪽이 쓴다 — 이 파일의 시트 직접 쓰기는 결정 274 로 제거.)
 const { workKindForTab } = require('../services/workKindContext.service');
 const { isBlogKind } = require('../utils/workKind');
 const { isPostUrl, POST_URL_HINT } = require('../utils/blogPostUrl');
@@ -65,16 +58,6 @@ function _isKoreanRealName(str) {
   return false;
 }
 
-// ═══════════════════════════════════════════════════════════
-// 헤더 캐시 — 같은 탭의 헤더를 5분간 캐시 (Phase 3 최적화)
-// ═══════════════════════════════════════════════════════════
-const headerCache = new Map();
-const HEADER_CACHE_TTL = 5 * 60 * 1000; // 5분
-
-
-// 헤더 행 자동 감지용 키워드 (smartBuild _isDataTabRow와 동일 로직)
-const HEADER_DETECT_KEYWORDS = ['번호', '주문자', '수취인', '수취인명', '성함', '이름', '성명', '신청자', '연락처', '전화번호', '아이디', '주소'];
-
 // 인애드명 컬럼 감지 키워드
 const INAD_COL_KEYWORDS = ['인애드', '인애드명', '인애드제출', '카톡', '카카오', '닉네임'];
 
@@ -89,58 +72,7 @@ function _countFilledCells(row) {
   }).length;
 }
 
-function _isHeaderRow(cells) {
-  let matchCount = 0;
-  for (const kw of HEADER_DETECT_KEYWORDS) {
-    const found = kw === '번호'
-      ? cells.includes(kw)
-      : cells.some(c => c.includes(kw));
-    if (found) {
-      matchCount++;
-      if (matchCount >= 2) return true;
-    }
-  }
-  return false;
-}
-
-async function getCachedHeaders(sheetId, tabName, opts = {}) {
-  const key = `${sheetId}||${opts.gid || tabName}`;
-  const cached = headerCache.get(key);
-  if (cached && Date.now() - cached.ts < HEADER_CACHE_TTL) {
-    return cached.headers;
-  }
-
-  // 상위 50행을 읽어서 실제 헤더 행을 동적으로 탐색
-  // ★ opts.gid가 있으면 GID 기반 조회로 탭 이름 변경에도 안전
-  // ★ 글로벌 throttle로 감싸 읽기 쿼터 초과를 구조적으로 차단 (한도 근접 시 대기)
-  const allRows = await throttledCall(() => readSheet(sheetId, `'${tabName}'!A1:ZZ50`, opts));
-  if (!allRows || allRows.length === 0) return null;
-
-  let headerRow = null;
-  for (let i = 0; i < allRows.length; i++) {
-    const cells = (allRows[i] || []).map(c => String(c || '').trim());
-    if (_isHeaderRow(cells)) {
-      headerRow = cells;
-      logger.info(`[getCachedHeaders] 헤더 발견: ${tabName} → ${i + 1}행 (키워드 매칭)`);
-      break;
-    }
-  }
-
-  if (!headerRow) {
-    // fallback: 1행을 헤더로 사용 (기존 동작)
-    const firstRow = (allRows[0] || []).map(c => String(c || '').trim());
-    if (firstRow.length > 0 && firstRow.some(c => c)) {
-      headerRow = firstRow;
-      logger.warn(`[getCachedHeaders] 헤더 감지 실패 → fallback 1행 사용: ${tabName}`);
-    }
-  }
-
-  if (headerRow) {
-    headerCache.set(key, { headers: headerRow, ts: Date.now() });
-    return headerRow;
-  }
-  return null;
-}
+// (시트 헤더 읽기 getCachedHeaders·헤더 캐시 — 리뷰제출 시트 직접 쓰기 전용 — 는 2026-10-23 제거 · 결정 274)
 
 // POST /api/submit/debug-tabs · GET /diag-tabs · GET /slot-status(시트 시절 진단 3종) 은 2026-10-04 제거 — 결정 186 93번(화면 호출 0 · 9/2 이후 호출 0).
 
@@ -167,10 +99,8 @@ router.post('/find-slot', async (req, res, next) => {
 // POST /api/submit/review — 리뷰 제출
 //
 // Phase 3 개선:
-//   1. DB 즉시 업데이트 (is_submitted = TRUE)
-//   2. Sheets 동시 쓰기 시도
-//   3. Sheets 실패 시 → sync_queue에 등록 (자동 재시도)
-//   4. 헤더 캐시 적용 (5분)
+//   1. DB 즉시 업데이트 (is_submitted = TRUE · 무시트는 작업표 칸)
+//   (2~4. 시트 동시 쓰기·실패 시 review_submit 큐·헤더 캐시 — 2026-10-23 제거 · 결정 274)
 // ═══════════════════════════════════════════════════════════
 router.post('/review', async (req, res, next) => {
   try {
@@ -221,7 +151,6 @@ router.post('/review', async (req, res, next) => {
     }
 
     const submitValue = value || '제출';
-    const sheetOpts = gid ? { gid } : {};
 
     // ★ 체험단 종류 — memo 열 우선순위와 무시트 기록 대상이 갈린다.
     //   조회 실패·미등록 탭은 null → `isBlogKind(null)=false` = 리뷰체험단 경로(종전 동작).
@@ -570,104 +499,22 @@ router.post('/review', async (req, res, next) => {
       complete,                  // 모든 필요 슬롯 충족 여부 (다중 슬롯 탭)
       missingSlots,              // 아직 미제출인 슬롯 key 목록
       dbUpdated,
-      sheetsWritten: false,  // Sheets는 백그라운드에서 처리
-      queued: true,          // 항상 큐 처리 방식
+      sheetsWritten: false,  // 시트에는 쓰지 않는다(결정 274)
+      queued: true,          // 응답 모양 호환용(화면이 읽을 수 있어 그대로 둔다 — 시트 큐는 결정 274 로 없음)
     });
 
-    // ── ★ Step 3: 백그라운드 Sheets 쓰기 (응답 후 비동기 처리) ──
-    const SHEETS_TIMEOUT_MS = 15000;
-
+    // ── ★ Step 3: 응답 뒤 배경 작업 — 무시트 탭 장부 재생성만 ──
+    /* ★★ 결정 274 — **어느 탭이든 구글시트에 쓰지 않는다.** 종전엔 시트 기반 탭이면 여기서 리뷰제출 칸·비고·포스팅제출일을
+       시트에 직접 쓰고(writeSheet), 실패하면 review_submit 큐에 넣었다. 시트 쓰기 실행부를 지웠고 남은 시트 탭은
+       작업보드가 원본이라(사용자 결정 2026-10-23) 제출 표시는 위 Step 1 의 DB 기록(review_index · 무시트는 작업표 칸)으로 끝난다.
+       무시트 탭 완료 제출의 장부 재생성은 종전 그대로 둔다. */
     setImmediate(async () => {
-      /* ★★ 무시트 탭은 쓸 시트가 없다 — 표시는 위 Step 1 의 `markStatusCell` 이 **작업표 칸**에 이미 기록했다.
-         이 게이트가 없으면 리뷰제출 표시 1건마다 ① 구글 호출 1회 → 404 ② `logAbnormal(warn)` 오류로그
-         ③ 무의미한 `review_submit` 큐 항목이 쌓인다(프로덕션 E2E 로 실측 — 큐 백스톱이 시트 쓰기 자체는
-         막지만 그 앞의 낭비·소음은 남았다). paymentApply.service 의 `if (st.handled) continue` 와 같은 규율.
-         ★ 부분 제출(complete=false)은 markStatusCell 을 타지 않으므로 **여기서 따로 판정**한다.
-         ★ 판정 실패는 종전 경로(fail-open) — 시트 기반 탭이 절대 다수다. */
       try {
-        const { isSheetless } = require('../utils/sheetlessScope');
-        if (sheetlessSubmission || await isSheetless(pool, sheetId, tabName)) {
-          if (complete && sheetlessSubmission) {
-            try { await require('../services/sheetlessLedger.service').rebuildLedgers({sheetId,tabName,by:'review-submit'}); }
-            catch(e) { logger.warn(`[submit/review:bg] 작업보드 저장 완료, 장부 재생성 지연: ${e.message}`); }
-          }
-          logger.info(`[submit/review:bg] 무시트 탭 — 시트 쓰기 생략 (tab=${tabName}, row=${rowIndex})`);
-          return;
+        if (complete && sheetlessSubmission) {
+          try { await require('../services/sheetlessLedger.service').rebuildLedgers({sheetId,tabName,by:'review-submit'}); }
+          catch(e) { logger.warn(`[submit/review:bg] 작업보드 저장 완료, 장부 재생성 지연: ${e.message}`); }
         }
-      } catch (_) { /* fail-open */ }
-
-      try {
-        const sheetsPromise = (async () => {
-          const headers = await getCachedHeaders(sheetId, tabName, sheetOpts);
-          if (!headers) throw new Error('헤더를 가져올 수 없음');
-
-          const colIdx = headers.findIndex(h => h === submitCol);
-          if (colIdx < 0) throw new Error(`submitCol '${submitCol}' 을 헤더에서 찾을 수 없음`);
-
-          const colLetter = getColLetter(colIdx);
-          const range = `'${tabName}'!${colLetter}${rowIndex}`;
-          // ★ 글로벌 throttle (멱등 쓰기 — 같은 셀에 고정값 기록이라 재시도/중복 안전)
-          await throttledCall(() => writeSheet(sheetId, range, [[submitValue]], sheetOpts));
-          logger.info(`[submit/review:bg] Sheets 쓰기 성공 (sheet=${sheetId}, tab=${tabName}, row=${rowIndex})`);
-
-          // ── 비고/포스팅 컬럼 쓰기 ──
-          //   ★ 열 고르기는 `utils/memoColumn` 단일 출처 — 이 경로와 큐 재시도, 무시트 작업표 기록이
-          //     같은 규칙을 써야 "처음 제출은 포스팅 칸, 재시도는 비고 칸"으로 값이 흩어지지 않는다.
-          //   ★ 블로그체험단은 결과물이 포스팅URL 이라 우선순위가 뒤집힌다(리뷰체험단은 종전 그대로).
-          if (memo && memo.trim()) {
-            const memoColIdx = pickMemoColumnIndex(headers, { blog: _isBlog });
-            if (memoColIdx >= 0) {
-              const memoColLetter = getColLetter(memoColIdx);
-              const memoRange = `'${tabName}'!${memoColLetter}${rowIndex}`;
-              await throttledCall(() => writeSheet(sheetId, memoRange, [[memo.trim()]], sheetOpts));
-              logger.info(`[submit/review:bg] 비고 컬럼 쓰기 성공 (col=${headers[memoColIdx]}, colIdx=${memoColIdx}, row=${rowIndex})`);
-            } else {
-              logger.warn(`[submit/review:bg] 비고/포스팅 컬럼을 찾을 수 없음 (headers: ${headers.slice(0, 30).join(',')})`);
-            }
-          }
-
-          // ★ 127: 포스팅제출일(blog 완료) — 열 고르기는 memoColumn 단일 출처(큐 재시도와 동일).
-          if (_isBlog && complete && _postDate) {
-            const dateColIdx = pickPostDateColumnIndex(headers);
-            if (dateColIdx >= 0) {
-              const dateRange = `'${tabName}'!${getColLetter(dateColIdx)}${rowIndex}`;
-              await throttledCall(() => writeSheet(sheetId, dateRange, [[_postDate]], sheetOpts));
-            } else {
-              logger.warn(`[submit/review:bg] 포스팅제출일 컬럼을 찾을 수 없음 (tab=${tabName})`);
-            }
-          }
-        })();
-
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Sheets 쓰기 타임아웃 (15초)')), SHEETS_TIMEOUT_MS)
-        );
-
-        await Promise.race([sheetsPromise, timeoutPromise]);
-      } catch (bgErr) {
-        logger.warn(`[submit/review:bg] Sheets 쓰기 실패 → 큐 등록: ${bgErr.message}`);
-        logAbnormal({
-          flow: 'review_submit', step: 'sheet_write', severity: 'warn', error: bgErr,
-          context: { sheetId, tabName, rowIndex, queued: true },
-        });
-        try {
-          await enqueue('review_submit', {
-            sheetId,
-            tabName,
-            rowIndex,
-            submitCol,
-            value: submitValue,
-            memo: memo || '',
-            blog: _isBlog,          // ★ 재시도도 같은 열 우선순위를 써야 값이 흩어지지 않는다
-            postDate: (_isBlog && complete) ? _postDate : '',   // 127: 제출 시점 날짜(재시도 시각 아님)
-          });
-        } catch (queueErr) {
-          logger.error(`[submit/review:bg] 큐 등록도 실패: ${queueErr.message}`);
-          logAbnormal({
-            flow: 'sync_queue', step: 'enqueue', severity: 'critical', error: queueErr,
-            context: { sheetId, tabName, type: 'review_submit' },
-          });
-        }
-      }
+      } catch (_) { /* 배경 작업 실패가 제출을 바꾸지 않는다 */ }
     });
 
   } catch (err) {
@@ -1371,28 +1218,19 @@ router.post('/order', async (req, res, next) => {
     }
 
     if (ledger.sheetRow && !sheetlessDone && !queuedWorkboardApply) {
-      try {
-        await enqueue('order_append', {
-          sheetId,
-          tabName,
-          gid: ledger.tabGid || gid || '',
-          orderData,
-          orderSubmissionId: ledger.orderSubmissionId,
-          sheetRow: ledger.sheetRow,
-          dedupKey: ledger.dedupKey,
-          loginPhone8: loginPhone8 || '',
-          loginName: loginName || '',
-        });
-        await markOrderQueued(ledger.orderSubmissionId);
-        queued = true;
-      } catch (queueErr) {
-        logger.error(`[submit/order] 큐 등록 실패: ${queueErr.message}`);
-        await markOrderMirrorFailed(ledger.orderSubmissionId, queueErr);
-        logAbnormal({
-          flow: 'sync_queue', step: 'enqueue', severity: 'critical', error: queueErr,
-          context: { sheetId, tabName, type: 'order_append', orderSubmissionId: ledger.orderSubmissionId },
-        });
-      }
+      /* ★★ 결정 274 — 시트 기반 탭(무시트 아님 · 작업보드 큐 대상 아님)의 주문은 **시트에 쓰지 않는다**.
+         종전엔 여기서 order_append 를 넣어 큐가 구글시트에 적었다. 시트 쓰기 실행부를 지웠으므로 넣어도 영영 대기한다
+         (운영은 이미 ORDER_BATCH_AUTO=0 이라 그렇게 쌓이고 있었다). 주문 원장은 저장됐다 — 조용히 대기시키지 않고
+         실패 상태 + 위급 로그로 남겨 담당자가 작업보드에서 처리하게 한다(리뷰어 응답은 종전과 같다). */
+      const reason = 'sheet_tab_retired: 시트 기반 작업이라 작업보드에 자동 기록되지 않음(결정 274) — 담당자 확인 필요';
+      try { await markOrderMirrorFailed(ledger.orderSubmissionId, reason); }
+      catch (statusErr) { logger.error(`[submit/order] 시트 탭 실패상태 저장 실패(원장 저장은 완료): ${statusErr.message}`); }
+      logger.error(`[submit/order] 시트 기반 탭 주문 — 시트 기록 종료로 자동 반영 안 됨 sheet=${sheetId} tab=${tabName} os=${ledger.orderSubmissionId}`);
+      logAbnormal({
+        flow: 'order_submit', step: 'sheet_tab_retired', severity: 'critical',
+        error: new Error('시트 기반 작업 주문 — 시트 기록 종료(결정 274)'),
+        context: { sheetId, tabName, orderSubmissionId: ledger.orderSubmissionId, sheetRow: ledger.sheetRow },
+      });
     } else if (!ledger.sheetRow && !skipSheetMirrorForWrite) {
       logger.warn(`[submit/order] RAW 행 배정 실패: sheet=${sheetId}, tab=${tabName}, orderSubmissionId=${ledger.orderSubmissionId}`);
       logAbnormal({
@@ -1484,17 +1322,6 @@ router.post('/order', async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 // 헬퍼 함수들
 // ═══════════════════════════════════════════════════════════
-
-/** 열 인덱스를 알파벳 문자로 변환 (0=A, 1=B, ..., 25=Z, 26=AA) */
-function getColLetter(colIdx) {
-  let letter = '';
-  let idx = colIdx;
-  while (idx >= 0) {
-    letter = String.fromCharCode((idx % 26) + 65) + letter;
-    idx = Math.floor(idx / 26) - 1;
-  }
-  return letter;
-}
 
 /** 주문 데이터를 헤더에 맞게 매핑
  *  ★ 옵션 처리: selectedOptKey가 "블랙|유선|체리축" 형태이면

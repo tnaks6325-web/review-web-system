@@ -22,7 +22,7 @@ const { logger } = require('./logger');
 //   안정적·결정적 해시여야 인스턴스 간 같은 이름이 같은 키로 매핑된다.
 //   ⚠️ 향후 락 이름을 추가할 때 주의: 서로 다른 이름이 같은 키로 해시 충돌하면
 //   무관한 두 작업이 조용히 직렬화된다(한쪽이 다른쪽 보유 중 항상 양보).
-//   현재 사용 이름: 'order_reconcile', 'queue_pump_drain', 'reverse_sync_auto', 'raw_mirror_all',
+//   현재 사용 이름: 'order_reconcile', 'queue_pump_drain', 'raw_mirror_all',  (옛 이름 'reverse_sync_auto' 는 결정 274 로 소비처 0 — 충돌 검사 목록에는 남겨도 무해)
 //   'order_ledger:<id>', 'campaign_hold_sweep', 'review_reminder_alimtalk'.
 //   신규 추가 시 tests/… 또는 `node -e "require('./jobLock')._lockKeys('name')"`로 기존 키와 비충돌 확인할 것.
 function _lockKeys(name) {

@@ -150,25 +150,17 @@ ok('옵션 컬럼 인덱스 판정은 매퍼와 같은 규칙',
   ok('mapOrderToSheetRow(headers,{})의 non-null 집합 불변 — _wbOrderMappedMask 무영향',
     JSON.stringify(OL.mapOrderToSheetRow(HEADERS, {}).map(v => v !== null)) === JSON.stringify([false, true, true, true, true, true, true]));
 
-  /* ═══ 배선: 두 쓰기 경로 + 취소 경로 ═══ */
+  /* ═══ 배선 ═══
+   * 결정 274(2026-10-23): 시트 쓰기 실행부(order_append·order_cancel)를 지웠다 — 시트 셀을 덮을 경로 자체가 없다.
+   *   옵션 칸 보호는 무시트 작업표 기록(sheetlessOrder)이 같은 판정 열·같은 킬스위치로 건다. 시트 쓰기 경로가 되살아나면 이 가드가 잡는다
+   *   (되살릴 때는 같은 필터를 통과시킨다 — 경로 드리프트 차단). */
   {
     const q = readS('services/syncQueue.service.js');
-    ok('★ 단건 order_append: buildBatchUpdateData → filterOptionWritesBlankOnly → batchUpdateSheet',
-      /const _bd = buildBatchUpdateData\(\{[\s\S]{0,300}?const _optFilt = filterOptionWritesBlankOnly\(\{[\s\S]{0,300}?const batchData = _optFilt\.data;/.test(q));
-    // 결정 273: 배치 드레인(_executeBatch)을 지워 order_append 쓰기 경로는 위 단건 하나뿐이다 — 두 번째 경로가 되살아나면
-    //   그 경로도 같은 필터를 통과해야 한다(경로 드리프트 차단). 지금은 "두 번째 경로 없음"을 고정한다.
-    ok('★ 필터를 건너뛰는 두 번째 order_append 쓰기 경로(배치 드레인)가 없다',
-      !/async function _executeBatch\b/.test(q) && (q.match(/filterOptionWritesBlankOnly\(\{/g) || []).length >= 1);
-    ok('★ 가드 사각형에 옵션 열이 합류한다(콜 순증 0 · 라이브 판정)',
-      /const _probeCols = \[\.\.\.new Set\(\[\.\.\.guards\.map\(g => g\.col\), \.\.\._optCols\]\)\]/.test(q));
-      // (배치 경로의 `allCols.add` 단언은 배치 드레인 삭제로 대상이 사라졌다 — 결정 273)
-    ok('★ probe 오프셋이 가드와 같은 minCol 기준이다(어긋나면 가드 오판)',
-      /_optProbe = \(col\) => \(\{ known: true, value: String\(cells\[col - minC\] \|\| ''\) \}\)/.test(q));
-      // (배치 경로 x.optProbe 단언은 배치 드레인 삭제로 대상이 사라졌다 — 결정 273)
-    ok('★ 취소(order_cancel)도 옵션 칸은 비우지 않는다(작업지시 보호)',
-      /_cancelOptCols/.test(q) && /_blankAll\.filter\(u => !_cancelOptCols\.has\(u\.range\)\)/.test(q));
-    ok('★ 경고는 reviewer_event_logs 가 아니라 logAbnormal(warn) — 알림 도배 금지',
-      /step: 'option_cell_occupied', severity: 'warn'/.test(q));
+    ok('★ 큐에 시트 쓰기 경로(order_append·order_cancel·배치 드레인)가 없다(결정 274)',
+      !/case 'order_append'/.test(q) && !/case 'order_cancel'/.test(q) && !/async function _executeBatch\b/.test(q) && !/batchUpdateSheet/.test(q));
+    const so = readS('services/sheetlessOrder.service.js');
+    ok('★ 무시트 작업표 기록은 같은 옵션 칸 판정(optionWriteColumns)·같은 킬스위치로 blank-only 를 건다',
+      /optionWriteColumns\(headers/.test(so) && /process\.env\.ORDER_OPTION_BLANK_ONLY !== '0'/.test(so));
   }
 
   console.log(`\n✅ optionColumnPreserve: ${n}개 통과`);

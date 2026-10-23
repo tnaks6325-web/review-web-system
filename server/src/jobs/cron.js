@@ -306,9 +306,7 @@ function startCronJobs() {
   //   PARTICIPANTS_AUTO_SYNC=1 에서만. 시트 재읽기 0(DB→DB 복사)·라이브 소비처 없음(shadow) → 무영향.
   //   수동편집(source='manual') 행은 보존. 이미 가져온 탭만 대상(규모 작음).
   if (process.env.PARTICIPANTS_AUTO_SYNC === '1') {
-    if (process.env.PARTICIPANTS_SHEET_MIRROR === '1') {
-      logger.warn('[CRON-ParticipantsSync] ⚠️ AUTO_SYNC + SHEET_MIRROR 동시 활성 — sync가 최신화한 상태값이 mirror-tab 시 시트로 흐를 수 있음(빈칸-only·비파괴). 의도 확인 후 운영.');
-    }
+    // (PARTICIPANTS_SHEET_MIRROR 동시 활성 경고 — participant_mirror 시트 되쓰기는 2026-10-23 제거 · 결정 274)
     const partSyncSchedule = process.env.PARTICIPANTS_AUTO_SYNC_SCHEDULE || '*/10 * * * *';
     let partSyncRunning = false;
     cron.schedule(partSyncSchedule, async () => {
@@ -396,9 +394,9 @@ function startCronJobs() {
 
   // ── Phase 2: Sync Queue 워커 — 30초마다 pending 작업 처리 ──
   // ★ A2: stuck processing 자동 감지 포함
-  // ★★ 결정 271: 무시트 구매의 작업보드 반영(workboard_apply)이 이 워커의 라이브 일이다. 시트 타입
-  //   (order_append·order_update·order_cancel·review_submit …)은 ORDER_BATCH_AUTO=1 일 때만 집는다
-  //   (syncQueue `sheetQueueTypesEnabled` — 끄면 시트 시절 잔여 행은 손대지 않고 남긴다).
+  // ★★ 결정 271 → 274: 이 워커의 일은 작업보드 반영(DB_ONLY_QUEUE_TYPES)뿐이다. 시트 타입
+  //   (order_append·order_update·order_cancel·review_submit …)은 실행부를 지웠고 클레임 SQL 이 고르지 않는다 —
+  //   시트 시절 잔여 행은 기록으로 남는다(`ORDER_BATCH_AUTO` 는 더 이상 읽지 않는다).
   cron.schedule('*/30 * * * * *', async () => {
     try {
       const result = await processQueue(10);
