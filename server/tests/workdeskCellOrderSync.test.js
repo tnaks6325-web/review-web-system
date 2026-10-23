@@ -381,9 +381,9 @@ await ta('4f 장부 재생성(rebuildLedgers) 실패는 ledger_rebuild_failed �
 });
 
 /* ══════════════ §5 시트기반 경로 ══════════════ */
-console.log('\n§5 시트기반 탭 — 큐(order_update) 페이로드');
+console.log('\n§5 시트기반 탭 — 원장(DB)만 고친다(결정 274 · order_update 큐 없음)');
 
-await ta('5a ★ 무시트가 아니면 즉시 쓰지 않고 order_update 큐로 위임한다(page 안전 회차)', async () => {
+await ta('5a ★ 무시트가 아니면 원장만 고치고 큐에 넣지 않는다(작업표 직접 쓰기도 없음)', async () => {
   const sless = require(SRC('utils/sheetlessScope'));
   const origIsSless = sless.isSheetless;
   sless.isSheetless = async () => false;
@@ -407,44 +407,16 @@ await ta('5a ★ 무시트가 아니면 즉시 쓰지 않고 order_update 큐로
           sheetId: 'S1', tabName: 'T1', header: '연락처', value: '01077280891', oldValue: '01070891728', orderSubmissionId: 'o1',
         });
         assert.strictEqual(out.ok, true, JSON.stringify(out));
-        assert.strictEqual(out.mode, 'queued');
-        assert.ok(!calls.some(c => /UPDATE campaign_participants/.test(c.sql)), '시트기반 탭에서 campaign_participants 를 직접 쓰면 안 된다');
+        assert.strictEqual(out.mode, 'db_only');
+        const up = calls.find(c => /UPDATE order_submissions/.test(c.sql));
+        assert.ok(up && up.params[1] === '01077280891', '원장 연락처를 새 값으로 고친다');
+        assert.ok(!calls.some(c => /UPDATE campaign_participants/.test(c.sql)), '시트기반 탭에서 campaign_participants 를 직접 쓰면 안 된다(화면 값은 editWorkdeskRow 가 이미 저장)');
       });
-    assert.ok(captured, 'enqueue 가 호출되지 않았다');
-    assert.strictEqual(captured.type, 'order_update');
-    assert.strictEqual(captured.payload.orderSubmissionId, 'o1');
-    assert.ok(Array.isArray(captured.payload.edits) && captured.payload.edits.length === 1);
-    assert.strictEqual(captured.payload.edits[0].field, 'phone');
-    assert.strictEqual(captured.payload.edits[0].oldValue, '01070891728');
-    assert.strictEqual(captured.payload.edits[0].newValue, '01077280891');
-    assert.ok(kicked >= 1, '★ 큐에 넣은 뒤 즉시 펌프해야 시트 반영이 지연되지 않는다');
+    assert.strictEqual(captured, null, '시트 기반 탭도 order_update 큐를 넣지 않는다(결정 274)');
+    assert.strictEqual(kicked, 0, '넣은 큐가 없으니 펌프도 깨우지 않는다');
   } finally {
     sless.isSheetless = origIsSless; queue.enqueue = origEnqueue; pump.kickQueuePump = origKick;
   }
-});
-
-await ta('5b oldValue 미지정이면 빈 문자열로 채운다(큐 대조 안전값)', async () => {
-  const sless = require(SRC('utils/sheetlessScope'));
-  const origIsSless = sless.isSheetless;
-  sless.isSheetless = async () => false;
-  const queue = require(SRC('services/syncQueue.service'));
-  const origEnqueue = queue.enqueue;
-  let captured = null;
-  queue.enqueue = async (type, payload) => { captured = payload; };
-  const pump = require(SRC('jobs/queuePump'));
-  const origKick = pump.kickQueuePump; pump.kickQueuePump = () => {};
-  try {
-    await withStubPool(
-      (sql) => {
-        if (/FROM raw_sheet_tabs/.test(sql)) return { rows: [rawTabsRow()] };
-        if (/UPDATE order_submissions/.test(sql)) return { rows: [{ id: 'o1', sheet_id: 'S1', tab_name: 'T1' }] };
-        return { rows: [], rowCount: 0 };
-      },
-      async (svc) => {
-        await svc.syncCellToOrderIdentity({ sheetId: 'S1', tabName: 'T1', header: '주소', value: '새 주소', orderSubmissionId: 'o1' });
-      });
-    assert.strictEqual(captured.edits[0].oldValue, '');
-  } finally { sless.isSheetless = origIsSless; queue.enqueue = origEnqueue; pump.kickQueuePump = origKick; }
 });
 
 /* ══════════════ §6 DB 컬럼매핑 오버라이드 대조 ══════════════ */

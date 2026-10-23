@@ -62,7 +62,7 @@ for (const role of ['master', 'admin', 'staff']) {
   ok('advertiser 로그인 토큰은 업체 화면(trackb) 통과', run(adv, { baseUrl: '/api/trackb', p: '/workdesk/tabs' }).passed);
   ok('advertiser 토큰은 직원용 라우트에서 403(리뷰어 명단·삭제 등)',
     run(adv).status === 403 && run(adv, { baseUrl: '/api/reviewer', p: '/delete', method: 'POST' }).status === 403
-    && run(adv, { baseUrl: '/api/diag', p: '/reverse-sync-list' }).status === 403
+    && run(adv, { baseUrl: '/api/diag', p: '/row-claims' }).status === 403
     && run(adv, { baseUrl: '/api/trackbx', p: '/y' }).status === 403);
 }
 ok('광고주 링크 토큰(via link) 통과', run(jwt.sign({ name: 'u', role: 'advertiser', advertiser_id: 1, via: 'link' }, SECRET), { baseUrl: '/api/trackb', p: '/x' }).passed);

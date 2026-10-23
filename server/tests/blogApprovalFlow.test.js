@@ -131,8 +131,9 @@ console.log('\n§8b 제출 — 캡처+URL + 포스팅제출일 자동 기록 배
 ok('submit: capture_required(캡처 없는 blog 제출 거부 — 서버 최종 방어)', /code: 'capture_required'/.test(SUBMIT));
 ok('submit: 포스팅제출일 = kstTodayStr(사본 금지)', /_postDate = _isBlog \? require\('\.\.\/services\/campaignState\.service'\)\.kstTodayStr/.test(SUBMIT));
 ok('submit: 무시트 포스팅제출일 기록(markSheetlessPostDate)', /markSheetlessPostDate\(\{ sheetId, tabName, rowIndex, date: _postDate/.test(SUBMIT));
-ok('submit: 큐 payload 에 postDate(재시도 시각 아님)', /postDate: \(_isBlog && complete\) \? _postDate : ''/.test(SUBMIT));
-ok('queue: 재시도도 같은 열 고르기(pickPostDateColumnIndex)', /pickPostDateColumnIndex\(headers\)/.test(QUEUE) && /pickPostDateColumnIndex/.test(QUEUE.split('\n').find(l => l.includes("require('../utils/memoColumn')")) || ''));
+// ★ 결정 274: 시트 기반 탭의 리뷰제출 시트 직접 쓰기·review_submit 큐 재시도를 지웠다 — 포스팅제출일은 무시트 작업표 기록(위)만 남는다.
+ok('submit: 시트 직접 쓰기·review_submit 큐 없음(결정 274)', !/enqueue\('review_submit'/.test(SUBMIT) && !/writeSheet\(/.test(SUBMIT));
+ok('queue: review_submit 실행부 없음(결정 274)', !/case 'review_submit'/.test(QUEUE));
 {
   const SS = read('src/services/sheetlessStatus.service.js');
   ok('sheetlessStatus: markSheetlessPostDate — 시트 기반 탭은 handled:false(무회귀)',

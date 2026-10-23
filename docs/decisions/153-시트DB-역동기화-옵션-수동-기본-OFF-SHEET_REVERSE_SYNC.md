@@ -3,3 +3,6 @@
 - `migration 039`: `order_submissions.last_sheet_write_sig`(정방향 written 시 기록한 매핑칸 서명=R1 루프차단 provenance) + `reverse_sync_proposals`(제안 감사원장).
 - `POST /api/diag/reverse-sync-detect`(읽기전용, gid 필수·throttle busy면 양보·`order_reconcile` 락·라이브 단일사각형읽기): 시트≠DB인 written·미취소·**기본 sig-not-null** 주문만 비교 → identity(연락처+수취인+주소) 통과 시 필드별 `edit` 제안, 전공란/그리드밖은 `cancel_suspect` 플래그만(자동취소 금지). `selected_opt_key`·옵션칸 제외(G4). open 제안 교체(DELETE→INSERT)로 멱등.
 - `GET /api/diag/reverse-sync-list` 검토 → `POST /api/diag/reverse-sync-apply {proposalId}`(`ORDER_LEDGER_WRITE_ENABLED=true` 추가게이트): per-order 락 + `deleted_at`·`detected_edit_seq` 불변 재검증(G6) 후 화이트리스트 필드 직접 UPDATE + `enqueue('order_update')` 위임 → `order_update`가 `cur===wantNew` no-op(시트 안 건드림)으로 **핑퐁 0**. `reverse-sync-dismiss`로 기각. **권고: detect만 먼저 켜 제안량 관측 후 apply 활성**(효용 낮으면 기존 `order-edit`/`order-cancel` 관리자 정정으로 일원화가 더 안전).
+
+
+> ⛔ **2026-10-23 퇴역** — 입구 7개·감지/적용/자동/되돌리기 코드·작업보드 「⚠ 원장 불일치」 서브탭을 지웠다. 열린 제안 3건은 migration 195 가 기각(dismissed)으로 닫았다(표 `reverse_sync_proposals` 는 기록으로 남김). `SHEET_REVERSE_SYNC`·`REVERSE_SYNC_AUTO` 는 더 이상 읽지 않는다 → [274](274-시트-시절-정리-마지막-단계-역동기화-퇴역-시트-타입-큐-삭제-2026-10-23.md).

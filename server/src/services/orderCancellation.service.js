@@ -1,7 +1,6 @@
 const pool = require('../db/pool');
 const { withJobLock } = require('../utils/jobLock');
 const { logger } = require('../utils/logger');
-const { isSheetlessOrderCoord } = require('../utils/sheetlessScope');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -26,10 +25,8 @@ async function cancelOrderSubmission({ orderSubmissionId, canceledBy = 'admin', 
       await client.query(`UPDATE review_reminder_states SET review_status='cancelled', updated_at=NOW()
         WHERE order_submission_id=$1`, [orderSubmissionId]);
 
-      await client.query(
-        `DELETE FROM sync_queue WHERE status='pending'
-           AND type IN ('order_append','order_update','order_cancel')
-           AND (payload->>'orderSubmissionId')=$1`, [String(orderSubmissionId)]);
+      // (종전: 이 주문의 pending order_append·order_update·order_cancel 큐 행 삭제 — 결정 274 로 그 타입은 실행부가 없어
+      //  어떤 워커도 집지 않는다. 남은 행은 기록으로 둔다 — 지우지 않는다.)
       const { rows: held } = await client.query(
         `UPDATE campaign_applications
             SET status='cancelled', submitted_at=NULL, order_submission_id=NULL
@@ -40,30 +37,18 @@ async function cancelOrderSubmission({ orderSubmissionId, canceledBy = 'admin', 
           WHERE late_order_id=$1::uuid AND status <> 'submitted'`, [orderSubmissionId]);
 
       const written = !!(order.sheet_row && order.mirror_status === 'written');
-      /* ★★ 결정 271 — 무시트 좌표(참여형 `campaign:*` · 무시트 탭)에는 비울 구글시트 행이 없다.
-         종전엔 여기서도 order_cancel 을 넣어 큐가 매번 "RAW 메타 없음"으로 실패했다(운영 201건 전부 무시트).
-         → 큐를 거치지 않고 **시트 비우기가 성공했을 때 남는 상태 그대로**(mirror_status='canceled', 점유 기록 보존)를 바로 남긴다.
-         판정은 별도 연결(pool)로 한다 — 이 트랜잭션 안에서 조회가 실패하면 취소 전체가 롤백되기 때문.
-         판정 실패 = false = 종전 시트 경로(fail-open). */
-      const sheetless = written && await isSheetlessOrderCoord(pool, {
-        sheetId: order.sheet_id, tabName: order.tab_name, tabGid: order.tab_gid || order.gid,
-      });
-      const cleared = written && !sheetless;
-      if (sheetless) {
+      /* ★★ 결정 271 → 274 — 반영된(written) 주문의 취소는 **어느 탭이든** 큐를 거치지 않고
+         시트 비우기가 성공했을 때 남던 상태 그대로(mirror_status='canceled', 점유 기록 sheet_row_claims 보존 — R13)를 바로 남긴다.
+         271 은 무시트 좌표만 이렇게 했고 시트 기반 탭은 order_cancel 을 넣었다. 274 로 시트 쓰기 실행부를 지웠고
+         남은 시트 탭은 작업보드가 원본이라(사용자 결정 2026-10-23) 같은 길로 합쳤다 — 판정(isSheetlessOrderCoord)도 필요 없다. */
+      if (written) {
         await client.query(`UPDATE order_submissions SET mirror_status='canceled' WHERE id=$1`, [orderSubmissionId]);
-      } else if (cleared) {
-        // 취소 원장·선택 행 삭제·시트 클리어 큐를 같은 트랜잭션으로 확정한다.
-        // 커밋 뒤 enqueue가 실패해 삭제만 되고 시트 값이 남는 단절을 만들지 않는다.
-        await client.query(
-          `INSERT INTO sync_queue (type, payload, status, max_retry)
-           VALUES ('order_cancel', $1, 'pending', 3)`,
-          [JSON.stringify({ orderSubmissionId })]);
       } else {
         await client.query(`DELETE FROM sheet_row_claims WHERE order_id=$1::uuid`, [orderSubmissionId]);
         await client.query(`UPDATE order_submissions SET mirror_status='canceled' WHERE id=$1`, [orderSubmissionId]);
       }
       await client.query('COMMIT');
-      return { cleared, campaignSeatReleased: held[0] && held[0].campaign_id || null };
+      return { cleared: false, campaignSeatReleased: held[0] && held[0].campaign_id || null };
     } catch (err) {
       try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
       throw err;
@@ -71,12 +56,10 @@ async function cancelOrderSubmission({ orderSubmissionId, canceledBy = 'admin', 
   });
   if (out && out.skipped) return { ok: false, code: 'concurrent_cancel', error: '다른 편집 또는 취소가 진행 중입니다. 다시 시도해 주세요.' };
   if (out && out.alreadyCanceled) return { ok: true, alreadyCanceled: true, cleared: false };
-  if (out && out.cleared) {
-    require('../jobs/queuePump').kickQueuePump();
-  }
   require('../utils/sse').emitOrderLedger({ action: 'canceled', orderSubmissionId });
   if (out && out.campaignSeatReleased) logger.info(`[order-cancel] 캠페인 확정 반환: camp=${out.campaignSeatReleased}`);
-  return { ok: true, cleared: !!(out && out.cleared), campaignSeatReleased: out && out.campaignSeatReleased || null };
+  // cleared = "시트 주문값을 비우는 중"(큐) — 결정 274 이후 언제나 false(작업보드 문구가 "구매기록을 취소하고 제거"가 된다).
+  return { ok: true, cleared: false, campaignSeatReleased: out && out.campaignSeatReleased || null };
 }
 
 module.exports = { cancelOrderSubmission };

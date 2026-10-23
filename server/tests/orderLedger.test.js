@@ -4,9 +4,6 @@ const {
   computeDedupKey,
   buildCandidateRows,
   mapOrderToSheetRow,
-  buildMirrorGuardRange,
-  buildMirrorGuardRanges,
-  guardBlocksWrite,
   createOrderLedgerEntry,
   reconcileStuckOrders,
   __setPoolForTest,
@@ -133,32 +130,7 @@ async function run() {
   assert.equal(mapped[7], '010-2542-5118');
   assert.equal(mapped[15], '26100199557831');
 
-  const guard = buildMirrorGuardRange({
-    tabName: 'Orders',
-    headers: ['no', 'orderer', 'phone', 'address'],
-    targetRow: 12,
-    orderData: { orderer: 'Kim', phone: '01012345678', address: 'Seoul' },
-  });
-  assert.deepEqual(guard, { range: "'Orders'!C12", col: 2, header: 'phone', expected: '01012345678' });
-
-  // 가드 차단 판정 — 덮어쓰기 방지 + 자기 재기입 허용(멱등)
-  // 빈 칸 → 통과
-  assert.equal(guardBlocksWrite('', guard), false);
-  // 내가 쓴 값(서식 차이 무시: 하이픈 있어도 숫자만 비교) → 통과(재시도 멱등)
-  assert.equal(guardBlocksWrite('010-1234-5678', guard), false);
-  assert.equal(guardBlocksWrite('01012345678', guard), false);
-  // 외부/타 주문이 쓴 다른 값 → 차단
-  assert.equal(guardBlocksWrite('010-9999-0000', guard), true);
-  // 비연락처(주소) 가드는 trim 문자열 비교
-  const addrGuard = buildMirrorGuardRange({
-    tabName: 'Orders',
-    headers: ['no', 'orderer', 'address'],
-    targetRow: 7,
-    orderData: { orderer: 'Kim', address: 'Seoul 123' },
-  });
-  assert.equal(addrGuard.header, 'address');
-  assert.equal(guardBlocksWrite('Seoul 123', addrGuard), false);
-  assert.equal(guardBlocksWrite('Busan 456', addrGuard), true);
+  // (시트 미러 쓰기 가드 buildMirrorGuardRange·guardBlocksWrite 단언 — 큐 실행부 order_append 와 함께 결정 274 로 제거)
 
   // ── D4(#5): dedupKey osid 폴백 — 약한 주문번호의 별개 주문이 같은 행 공유하는 소실 차단 ──
   assert.equal(computeDedupKey({ orderNum: '12', orderSubmissionId: 'uuid-A' }), 'osid:uuid-A');
@@ -171,18 +143,7 @@ async function run() {
     computeDedupKey({ orderNum: '', recipient: 'Kim', phone: '01011112222', dateStr: '6/12', selectedOptKey: 'A', orderSubmissionId: 'osidY' })
   );
 
-  // ── D3a(#3): 다중컬럼 가드 — 연락처+주소+수취인, 어느 칸이든 외부값이면 차단(한 칸만 보던 덮어쓰기 방지) ──
-  const mguards = buildMirrorGuardRanges({
-    tabName: 'Orders',
-    headers: ['no', K.recipient, K.phone, K.address],
-    targetRow: 7,
-    orderData: { recipient: 'Kim', phone: '01012345678', address: 'Seoul' },
-  });
-  assert.equal(mguards.length, 3); // 수취인+연락처+주소
-  assert.equal(mguards.some(g => guardBlocksWrite('', g)), false); // 모두 빈칸 → 통과
-  const addrCellGuard = mguards.find(g => g.header === K.address);
-  assert.equal(guardBlocksWrite('Seoul', addrCellGuard), false);     // 내 값 → 통과
-  assert.equal(guardBlocksWrite('Busan 999', addrCellGuard), true);  // 주소칸만 외부값이어도 차단
+  // (D3a 다중컬럼 가드 buildMirrorGuardRanges 단언 — 결정 274 로 제거)
 
   const calls = [];
   const fakeClient = {
@@ -237,6 +198,7 @@ async function run() {
   }
 
   // ── reconcileStuckOrders (dryRun: enqueue/claim 없이 선택·분류만 검증) ──
+  //   ★ 결정 274: 시트 기반 탭 주문은 복구하지 않는다(시트 행 배정·order_append 재등록 0) — 건수만 sheetTabSkipped 로 센다.
   const stuckRows = [
     // A: pending_no_row, 행 없음, RAW 메타 있음(s1) → requeued
     { id: 'o-A', sheet_id: 's1', tab_name: 'Orders', gid: '', tab_gid: '123', dedup_key: 'num:111111',
@@ -254,9 +216,11 @@ async function run() {
       order_num: '333333', date_str: '6/12', selected_opt_key: '', bank: '', account: '', depositor: '', price: '', memo: '',
       mirror_status: 'failed', sheet_row: 50 },
   ];
+  const rawReads = [];
   const rPool = {
     query: async (sql, params) => {
       if (sql.includes('FROM order_submissions os')) return { rows: stuckRows };
+      if (/raw_sheet_/.test(sql)) rawReads.push(sql);
       if (sql.includes('FROM raw_sheet_tabs')) {
         if (params && params.includes('s2')) return { rows: [] }; // s2 = 메타 없음 → 라이브폴백(미설정)→null→skip
         return { rows: [{ tab_gid: '123', tab_name: 'Orders', headers: ['orderer', 'phone', 'address'],
@@ -271,8 +235,9 @@ async function run() {
   try {
     const r = await reconcileStuckOrders({ dryRun: true, limit: 100 });
     assert.equal(r.scanned, 3);
-    assert.equal(r.requeued, 2);      // A(메타O) + C(행 있음)
-    assert.equal(r.skippedNoMeta, 1); // B(메타X)
+    assert.equal(r.requeued, 0);         // 종전: A(메타O) + C(행 있음) → order_append 재등록. 274 이후 0
+    assert.equal(r.sheetTabSkipped, 3);  // 시트 기반 탭 3건 모두 건너뜀(상태 그대로)
+    assert.equal(rawReads.length, 0, '시트 탭 복구를 위해 RAW 미러를 읽지 않는다(행 배정 없음)');
   } finally {
     __setPoolForTest(null);
   }

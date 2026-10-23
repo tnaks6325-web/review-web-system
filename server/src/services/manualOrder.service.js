@@ -655,7 +655,7 @@ async function submitExternalOrder({
     } finally { client.release(); }
   }
 
-  // ④ 반영 — 무시트 탭은 작업표에 바로 기록(큐 미경유), 그 외는 종전대로 시트 반영 큐
+  // ④ 반영 — 무시트 탭은 작업표에 바로 기록(큐 미경유) · 작업보드 큐 대상은 workboard_apply · 시트 기반 탭은 기록 안 함(결정 274)
   //   ★ 판정은 `sheetlessScope` 단일 출처. 실패 시 종전 경로(fail-open) — 큐 실행부가 최종 방어.
   let queued = false;
   let sheetlessDone = null;
@@ -694,25 +694,13 @@ async function submitExternalOrder({
     }
   }
   if (ledger.sheetRow && !sheetlessDone && !queuedWorkboardApply) {
-    try {
-      await enqueue('order_append', {
-        sheetId, tabName, gid: ledger.tabGid || gid || '',
-        orderData, orderSubmissionId: ledger.orderSubmissionId,
-        sheetRow: ledger.sheetRow, dedupKey: ledger.dedupKey,
-        loginPhone8: p8, loginName: f.recipient || '',
-      });
-      await markOrderQueued(ledger.orderSubmissionId);
-      queued = true;
-      // 리뷰어 제출과 같은 kick — 없으면 cron까지 시트에 안 뜨고 현황 위젯도 반응하지 않는다
-      try {
-        require('../jobs/queuePump').kickQueuePump();   // (배치 스케줄러 kickOrderBatch 는 2026-10-22 제거 — 결정 273)
-      } catch (e2) { logger.warn(`[manual-order] kick 실패(무시, cron 백스톱): ${e2.message}`); }
-    } catch (e) {
-      await markOrderMirrorFailed(ledger.orderSubmissionId, e);
-      warnings.push('시트 반영 예약 실패(자동복구 대상): ' + e.message);
-    }
+    /* ★★ 결정 274 — 시트 기반 탭에는 시트 반영 큐(order_append)를 넣지 않는다(실행부 삭제 · 넣어도 영영 대기).
+       주문 원장은 저장됐다 — 실패 상태로 남기고 경고로 알린다(리뷰어 제출 경로와 같은 처리). */
+    try { await markOrderMirrorFailed(ledger.orderSubmissionId, 'sheet_tab_retired: 시트 기반 작업이라 작업보드에 자동 기록되지 않음(결정 274)'); }
+    catch (statusErr) { logger.error(`[manual-order] 시트 탭 실패상태 저장 실패(원장 저장은 완료): ${statusErr.message}`); }
+    warnings.push('시트 기반 작업이라 작업보드에 자동으로 적히지 않습니다 — 주문은 저장됐고 담당자 확인이 필요합니다');
   } else if (!ledger.sheetRow && !sheetlessDone && !queuedWorkboardApply) {
-    warnings.push('빈 행을 찾지 못해 보류 — 자동복구가 하단에 기록합니다');
+    warnings.push('빈 행을 찾지 못해 보류 — 시트 기반 작업이라 자동으로 적히지 않습니다(담당자 확인)');
   }
 
   logger.info(`[manual-order] 외부제출 tab=${tabName} name=${f.recipient} osid=${ledger.orderSubmissionId}`

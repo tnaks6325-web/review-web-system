@@ -2,11 +2,10 @@
 // 블로그체험단 M4-1 회귀가드 — memo(비고 / 포스팅URL) 기록 경로
 //
 // 고정 대상:
-//   ① **열 고르기 단일 출처** — 제출 배경 쓰기 · 큐 재시도 · 무시트 작업표 기록이 같은 규칙.
-//      갈라지면 "처음 제출은 포스팅 칸, 재시도는 비고 칸"으로 값이 흩어진다.
+//   ① **열 고르기 단일 출처** — 무시트 작업표 기록이 utils/memoColumn 을 쓴다.
+//      (제출 배경 시트 쓰기 · 큐 재시도는 결정 274 로 제거 — 되살아나지 않는지 본다.)
 //   ② **리뷰체험단·판정 불가는 종전 순서(`비고` → `포스팅`)** = 무회귀.
-//   ③ **큐 memo 유실 버그 수리** — 종전엔 payload 의 memo 를 읽지도 쓰지도 않아
-//      시트 쓰기가 한 번 실패해 큐로 내려가면 비고/포스팅URL 이 영구 유실됐다.
+//   ③ (큐 memo 유실 수리 — review_submit 큐 자체가 결정 274 로 없어졌다. 부재만 본다.)
 //   ④ **무시트 탭 memo 기록** — 시트 쓰기가 막힌 탭에서 값이 사라지지 않게 작업표 칸에 남긴다.
 //
 // 실행: node tests/blogMemoColumn.test.js
@@ -74,12 +73,10 @@ t('pickMemoColumnName = 같은 판정의 이름 표기', () => {
 });
 
 // ── 2. 단일 출처 (사본 금지) ──────────────────────────────────────────────
-console.log('\n2) 단일 출처 — 소비처 3곳이 같은 함수를 쓴다');
-t('★★ 제출 배경 쓰기가 pickMemoColumnIndex 사용', () => {
-  assert.ok(/pickMemoColumnIndex\(headers, \{ blog: _isBlog \}\)/.test(submitSrc), '제출 경로 미사용');
-});
-t('★★ 큐 재시도가 pickMemoColumnIndex 사용', () => {
-  assert.ok(/pickMemoColumnIndex\(headers, \{ blog: blog === true \}\)/.test(queueSrc), '큐 미사용');
+console.log('\n2) 단일 출처 — 소비처는 무시트 작업표 기록 하나(결정 274 로 시트 쓰기 두 곳 제거)');
+t('★★ 결정 274 — 제출 배경 시트 쓰기·큐 재시도가 없다(열 고르기 사본이 생길 자리가 없다)', () => {
+  assert.ok(!/pickMemoColumnIndex/.test(submitSrc), '제출 경로에 시트 memo 쓰기가 되살아났다');
+  assert.ok(!/case 'review_submit'/.test(queueSrc) && !/pickMemoColumnIndex/.test(queueSrc), '큐 review_submit 실행부가 되살아났다');
 });
 t('★★ 무시트 기록이 pickMemoColumnName 사용', () => {
   assert.ok(/pickMemoColumnName\(headers, \{ blog \}\)/.test(statusSrc), '무시트 미사용');
@@ -94,44 +91,17 @@ const submitReviewBody = (() => {
   return submitSrc.slice(i, j > 0 ? j : submitSrc.length);
 })();
 t('★★ 판정 사본 0 — 쓰기 경로 세 곳에 인라인 /비고/ → /포스팅/ 폴백이 없다', () => {
-  for (const [name, s] of [['submit:/review', submitReviewBody], ['queue', qBlockEarly()], ['status', statusSrc]]) {
+  for (const [name, s] of [['submit:/review', submitReviewBody], ['status', statusSrc]]) {
     assert.ok(!/findIndex\([^)]*\/비고\//.test(s), `${name}: 인라인 비고 탐색 사본`);
     assert.ok(!/findIndex\([^)]*\/포스팅\//.test(s), `${name}: 인라인 포스팅 탐색 사본`);
   }
 });
-function qBlockEarly() {
-  const i = queueSrc.indexOf("case 'review_submit'");
-  const j = queueSrc.indexOf("case 'deposit_mark'", i);
-  return queueSrc.slice(i, j > 0 ? j : i + 4000);
-}
 
-// ── 3. 큐 memo 유실 수리 ──────────────────────────────────────────────────
-console.log('\n3) 큐 재시도 memo 유실 수리 (현행 버그)');
-const qBlock = (() => {
-  const i = queueSrc.indexOf("case 'review_submit'");
-  assert.ok(i > 0, 'review_submit 핸들러를 못 찾음');
-  const j = queueSrc.indexOf("case 'deposit_mark'", i);
-  return queueSrc.slice(i, j > 0 ? j : i + 4000);
-})();
-t('★★ payload 에서 memo 를 꺼낸다', () => {
-  assert.ok(/const \{[^}]*\bmemo\b[^}]*\} = payload;/.test(qBlock), 'memo 구조분해 없음(유실 재발)');
-});
-t('★★ memo 를 실제로 시트에 쓴다', () => {
-  assert.ok(/writeSheet\(sheetId, memoRange/.test(qBlock), 'memo 쓰기 없음 — 재시도 시 유실');
-});
-t('★ 같은 열 우선순위(blog 플래그도 payload 로 온다)', () => {
-  assert.ok(/\bblog\b/.test(qBlock), 'blog 플래그 미소비');
-  assert.ok(/pickMemoColumnIndex\(headers, \{ blog: blog === true \}\)/.test(qBlock));
-});
-t('★ 제출 경로가 큐 payload 에 memo·blog 를 함께 싣는다', () => {
-  const i = submitSrc.indexOf("enqueue('review_submit'");
-  assert.ok(i > 0);
-  const block = submitSrc.slice(i, i + 400);
-  assert.ok(/memo: memo \|\| ''/.test(block), 'memo 미전달');
-  assert.ok(/blog: _isBlog/.test(block), 'blog 미전달 — 재시도가 다른 칸에 쓴다');
-});
-t('★ 열이 없으면 조용히 넘기지 않고 경고(담당자 조치 신호)', () => {
-  assert.ok(/비고\/포스팅 열 없음/.test(qBlock));
+// ── 3. (큐 재시도 memo 유실 수리 — review_submit 실행부와 함께 결정 274 로 제거) ─────────
+console.log('\n3) 큐 재시도 경로 없음 (결정 274)');
+t('★★ review_submit 을 넣는 곳도 실행하는 곳도 없다(시트 기반 탭도 시트에 쓰지 않는다)', () => {
+  assert.ok(!/enqueue\('review_submit'/.test(submitSrc), '제출 경로가 review_submit 큐를 다시 넣는다');
+  assert.ok(!/case 'review_submit'/.test(queueSrc), '큐 실행부가 되살아났다');
 });
 
 // ── 4. 무시트 memo 기록 ───────────────────────────────────────────────────
@@ -287,9 +257,8 @@ console.log('\n7) 소스 위생');
 t('★ memoColumn 에 리터럴 NUL 없음', () => {
   assert.strictEqual(fs.readFileSync(path.join(SRC, 'utils/memoColumn.js')).indexOf(0), -1);
 });
-t('★ 시트 쓰기 경로는 그대로 살아 있다(무회귀)', () => {
-  assert.ok(/writeSheet\(sheetId, memoRange, \[\[memo\.trim\(\)\]\], sheetOpts\)/.test(submitSrc),
-    '시트 기반 탭의 memo 쓰기가 사라졌다');
+t('★ 결정 274 — 시트 기반 탭에도 리뷰제출 시트 쓰기가 없다(작업보드가 원본)', () => {
+  assert.ok(!/writeSheet\(/.test(submitSrc), '제출 경로에 시트 직접 쓰기가 되살아났다');
 });
 
 console.log(`\n${fail ? '❌' : '✅'} 블로그체험단 M4-1 회귀가드 — 통과 ${pass} · 실패 ${fail}\n`);
