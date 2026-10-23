@@ -4218,12 +4218,22 @@ router.post('/payment/batch/:id/confirm-failures', authMiddleware, adminOrMaster
 // 오더·공고 맞추기(결정 275 · 사용자 확정 2026-10-21 「C스타일 · 관리자 이상」)
 //   GET  /api/trackb/bidir/reconcile          값이 다른(연결 전) 작업과 칸마다의 차이 — 읽기만
 //   POST /api/trackb/bidir/reconcile/:woId    { picks:{칸 id:'order'|'campaign'}, fingerprint, dryRun?, opId? } → 맞추고 연결(dryRun = 해 보고 되돌림)
+//   POST /api/trackb/bidir/reconcile/:woId/skip { skip:boolean } → 「따로 두기」(담당자 팝업이 더 묻지 않음 · 결정 284) — 값·연결은 그대로
 // ★ 쓰기는 공유 저장 한 곳(applySharedPatch, origin 'reconcile') — 이 라우트는 전달만 한다.
 // ═══════════════════════════════════════════════════════════
 router.get('/bidir/reconcile', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const out = await require('../services/sharedReconcile.service').listReconcile(pool);
     res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
+
+router.post('/bidir/reconcile/:woId/skip', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const r = await require('../services/sharedReconcile.service').setReconcileSkip({
+      workOrderId: String(req.params.woId || ''), skip: !!(req.body && req.body.skip === true),
+      actor: (req.admin && req.admin.name) || '' });
+    res.status(r.status).json(r.body);
   } catch (err) { next(err); }
 });
 

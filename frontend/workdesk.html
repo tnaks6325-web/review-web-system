@@ -3074,6 +3074,7 @@ function _dropSession(msg){ sessionStorage.removeItem('admin_token'); try{ local
   window.__SEQEND_PENDING=null; if(window.SequentialEndPrompt) window.SequentialEndPrompt.stop();
   window.__OPTALERT_PENDING=null; if(window.OptionAlertPrompt) window.OptionAlertPrompt.stop();
   window.__PRICEALERT_PENDING=null; if(window.PriceAlertPrompt) window.PriceAlertPrompt.stop();
+  window.__RCASK_PENDING=null; if(window.ReconcilePrompt) window.ReconcilePrompt.stop();
   window.__STAFFNOTICE_PENDING=null; if(window.StaffNoticePrompt) window.StaffNoticePrompt.stop();
   // ★ 401 → 재로그인도 계정이 바뀔 수 있는 경로다. logout 과 같은 계정 귀속 상태를 비운다
   //   (안 비우면 다음 계정이 이전 계정의 열린 줄을 보고, 그것이 그 계정 서버 행에 저장된다).
@@ -3189,6 +3190,9 @@ async function boot(){
     if(window.OptionAlertPrompt) window.OptionAlertPrompt.start(_sp); else window.__OPTALERT_PENDING=_sp;
     // ★ 결정 266: 가격 신고 알림(다른 리뷰어 2명) — 받는 사람 = 품절 알림과 같은 내부 직원 전원
     if(window.PriceAlertPrompt) window.PriceAlertPrompt.start(_sp); else window.__PRICEALERT_PENDING=_sp;
+    // ★ 결정 284: 오더·공고 값이 다른(연결 전) 작업 — 받는 사람 = 그 작업 담당자(관리자 이상 · 맞추기 API 와 같은 문)
+    { const _rp={ api, name: STATE.name, role: STATE.role };
+      if(window.ReconcilePrompt) window.ReconcilePrompt.start(_rp); else window.__RCASK_PENDING=_rp; }
     // ★ 결정 265: 직원 공지(옛 관리자 대시보드 로그인 팝업 이관) — 받는 사람(대상 이름) 판정은 서버
     if(window.StaffNoticePrompt) window.StaffNoticePrompt.start(_sp); else window.__STAFFNOTICE_PENDING=_sp; }
   // 공유 링크 실패는 조용히 홈으로 떨어지지 않는다 — 왜 못 열었는지(폐기·담당 밖) 말한다.
@@ -3344,6 +3348,7 @@ function logout(){
   _pmLoadInFlight=null;
   window.__STAFFNOTICE_PENDING=null; if(window.StaffNoticePrompt) window.StaffNoticePrompt.stop();
   window.__PRICEALERT_PENDING=null; if(window.PriceAlertPrompt) window.PriceAlertPrompt.stop();
+  window.__RCASK_PENDING=null; if(window.ReconcilePrompt) window.ReconcilePrompt.stop();
   sessionStorage.removeItem('admin_token');
   // ★★ 접속 링크 세션은 **주소에 남은 해시가 곧 열쇠**다(A안). 여기서 지우지 않으면 바로 이어지는
   //   boot() 이 그 토큰을 다시 교환해 **로그아웃이 되지 않는다**(공용 PC에서 다음 사람이 그대로 입장).
@@ -11950,17 +11955,29 @@ function _rcDetail(it){
   const derNote=der.length?`<p class="rcnote">${der.map(f=>`${esc(f.label)}(오더 ${esc(f.orderText)} · 공고 ${esc(f.campaignText)})`).join(' · ')} — ${_rcPickable(it).length?'옵션별 인원·일건수를 고르면 따라 맞춰집니다.':'옵션별 값은 같고 합계만 다릅니다. 고를 칸 없이 옵션별 합계로 공고를 맞춥니다.'}</p>`:'';
   const id=esc(JSON.stringify(it.workOrderId));
   // 고를 칸이 없는(합계만 다른) 작업 — 빈 표·「전부 ~쪽으로」 없이 안내만
-  if(!_rcPickable(it).length) return `<div class="rcbox"><div class="rchead"><strong>${esc(it.title)} — 합계만 다름</strong></div>${derNote}</div>`;
-  return `<div class="rcbox"><div class="rchead"><strong>${esc(it.title)} — 다른 칸 ${_rcPickable(it).length}개</strong><span class="sp"></span>
+  if(!_rcPickable(it).length) return `<div class="rcbox"><div class="rchead"><strong>${esc(it.title)} — 합계만 다름</strong><span class="sp"></span>${_rcSkipBtn(it)}</div>${derNote}</div>`;
+  return `<div class="rcbox"><div class="rchead"><strong>${esc(it.title)} — 다른 칸 ${_rcPickable(it).length}개</strong><span class="sp"></span>${_rcSkipBtn(it)}
       <button type="button" class="pmmgr" onclick="_rcAll(${id},'order')">전부 오더 쪽으로</button><button type="button" class="pmmgr" onclick="_rcAll(${id},'campaign')">전부 공고 쪽으로</button></div>
     <div class="rcgrid"><div class="rccol"></div><div class="rccol">인트라넷 리뷰오더 · 작업오더</div><div class="rccol">모집공고 (리뷰어 화면)</div>${rows}</div>${derNote}</div>`;
+}
+/** 「따로 두기」(결정 284) — 담당자 팝업이 묻지 않게 / 다시 묻게. 값·연결은 그대로(맞추기는 이 화면에서 언제든). */
+function _rcSkipBtn(it){
+  if(it.skipped===undefined) return '';   // 구버전 서버 — 표시 자체가 없다(버튼을 보여 주면 눌러도 안 된다)
+  return `<button type="button" class="pmmgr" title="${it.skipped?'담당자 팝업이 이 작업을 다시 묻습니다':'맞추지 않고 지금처럼 따로 둡니다 — 담당자 팝업이 더 묻지 않습니다'}" onclick="_rcSkip(${esc(JSON.stringify(it.workOrderId))},${it.skipped?'false':'true'})">${it.skipped?'다시 묻기':'따로 두기'}</button>`;
+}
+async function _rcSkip(id,on){
+  const r=await api('/api/trackb/bidir/reconcile/'+encodeURIComponent(id)+'/skip',{ method:'POST', body:JSON.stringify({ skip:!!on }) });
+  if(!r||!r.ok){ toast((r&&r.error)||'바꾸지 못했습니다'); return; }
+  toast(on?'따로 두었습니다 — 담당자 팝업이 더 묻지 않습니다':'담당자 팝업이 다시 묻습니다');
+  await _rcLoad();
+  if(window.ReconcilePrompt) window.ReconcilePrompt.refresh();
 }
 function _rcListHtml(){
   const st=_rcState(); const list=_rcVisible();
   if(!list.length) return `<div class="pmworkempty">${String(st.q||'').trim()?`‘${esc(String(st.q).trim())}’ 와 일치하는 작업이 없습니다.`:'값이 서로 다른 작업이 없습니다.'}</div>`;
   return list.map(it=>{
     const mgr=_rcMgr(it), n=_rcPickable(it).length, k=_rcPicked(it);
-    const meta=it.blocked?'여기서 맞출 수 없음':(n?`다른 칸 ${n}개 · 고름 ${k}/${n}`:'합계만 다름 · 고를 칸 없음');
+    const meta=(it.blocked?'여기서 맞출 수 없음':(n?`다른 칸 ${n}개 · 고름 ${k}/${n}`:'합계만 다름 · 고를 칸 없음'))+(it.skipped?' · 따로 둠(담당자 팝업이 묻지 않음)':'');
     return `<button type="button" class="pmworkpick${st.open===it.workOrderId?' on':''}${_rcDone(it)?' done':''}${it.blocked?' needmemo':''}" aria-expanded="${st.open===it.workOrderId}"
       onclick="_rcToggle(${esc(JSON.stringify(it.workOrderId))})"><span class="pmworkname">${mgr?`[${esc(mgr)}] `:''}${esc(it.title||it.workOrderId)}</span><span class="pmworkmeta">${esc(meta)}</span>${_RC_CHECK}</button>`
       +(st.open===it.workOrderId?_rcDetail(it):'');
@@ -19561,6 +19578,7 @@ window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';
 <script src="js/sequential-end-prompt.js?v=20261012-optpause"></script>
 <script src="js/option-alert-prompt.js?v=20261019-camppause"></script>
 <script src="js/price-alert-prompt.js?v=20261023-linked"></script>
+<script src="js/reconcile-prompt.js?v=20261023-ask"></script>
 <script src="js/staff-notice-prompt.js?v=20261020"></script>
 <!-- 참여 후 작업내용 4카드 공용 렌더러 — 발행 모달 오른쪽 "리뷰어가 보는 실제 화면" 미리보기가
      이것으로 그려진다. 없으면 `_renderPreview` 가 조용히 그 카드를 건너뛰어(window.CampWorkDetail 체크)
