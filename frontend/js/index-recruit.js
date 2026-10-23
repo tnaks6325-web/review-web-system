@@ -920,6 +920,7 @@ function onRecruitDatesChange() {
   if (sDay && sd) sDay.textContent = _rfDow(sd.value);
   window.RecruitModal?.syncStartDateControl?.();
   _renderStartDateOriginNote();   // 날짜를 맞추면 대조 안내가 스스로 사라진다
+  _renderStartDateBasisNote();    // 결정 273 — 고치면 「직접 정한 날로 저장합니다」
   if (dDay && dl) dDay.textContent = _rfDow(dl.value);
   const warn = document.getElementById("rf_deadline_warn");
   if (!warn || !dl) return;
@@ -1251,9 +1252,9 @@ function _renderStartDateOriginNote() {
       + "line-height:1.5;background:#EFF6FF;color:#1E40AF;border:1px solid #BFDBFE";
     row.parentNode.insertBefore(box, row.nextSibling);
   }
-  box.textContent = "연결된 작업오더의 시작일은 " + wo + " 입니다 — 이 공고에는 발행 당시 값 "
-    + cur + " 이 그대로 남아 있습니다(발행은 스냅샷이라 오더를 고쳐도 따라가지 않습니다). "
-    + "바꾸려면 위 날짜를 고쳐 저장하세요.";
+  // ★ 결정 273: 리뷰오더 시작일 = 희망 시작일 · 공고 시작일 = 실제 시작일(여기서 정함 · 안 정하면 첫 참여일)
+  box.textContent = "리뷰오더의 희망 시작일은 " + wo + " 입니다 — 이 공고의 실제 시작일은 " + cur + " 입니다. "
+    + "실제 시작일은 위 날짜에서 정합니다.";
 }
 
 function _renderInflowOriginNote() {
@@ -3492,15 +3493,34 @@ function _rfApplyOrderLink(info, linked) {
   const dRow = document.getElementById("rf_order_distribution_row"), dVal = document.getElementById("rf_order_distribution");
   if (dRow && dVal) { const d = String((info && info.distribution) || "").trim(); dVal.textContent = d === "sequential" ? "순차진행" : d ? "균등분산" : ""; dRow.hidden = !(linked && d); }
   const hint = document.getElementById("rf_order_own_hint");
-  if (hint) hint.textContent = info ? (linked ? "리뷰오더에서 정한 값 · 여기서는 보기만" : "리뷰오더에서 정한 값 · 연결 전이라 여기서도 고칠 수 있음") : "연결된 리뷰오더가 없는 공고 — 여기서 정합니다";
-  const sRow = document.getElementById("rf_start_date_row"), sBtn = document.getElementById("rf_start_date_trigger");
-  if (sBtn) sBtn.disabled = !!linked;
-  if (sRow) {
-    sRow.classList.toggle("rf-readonly", !!linked);
-    let note = document.getElementById("rf_start_date_lock_note");
-    if (linked && !note) { note = document.createElement("span"); note.id = "rf_start_date_lock_note"; note.className = "rf-readonly-note"; note.textContent = "리뷰오더에서 고칩니다"; sRow.querySelector(".form-control")?.appendChild(note); }
-    if (note) note.hidden = !linked;
+  if (hint) hint.textContent = info ? (linked ? "리뷰오더에서 정한 값 · 모집 시작일만 여기서 정합니다" : "리뷰오더에서 정한 값 · 연결 전이라 여기서도 고칠 수 있음") : "연결된 리뷰오더가 없는 공고 — 여기서 정합니다";
+  /* ★ 결정 273(사용자 확정 2026-10-23 「나」): 리뷰오더의 시작일은 희망 시작일 — 실제 시작일은 연결된 공고에서도 여기서 정한다.
+     (종전 D5 는 잠갔지만 리뷰오더 쪽 시작일은 접수 뒤 고칠 수 없어, 연결 공고의 시작일을 아무도 못 고치는 막다른 길이었다.) */
+  _renderStartDateBasisNote();
+}
+
+/** 결정 273 — 시작일 옆 한 줄: 누가 정한 날인가(사람 · 아직 안 정함 → 첫 참여일로 맞춤 · 첫 참여일로 맞춤). 값은 바꾸지 않는다. */
+function _renderStartDateBasisNote() {
+  const sRow = document.getElementById("rf_start_date_row");
+  if (!sRow) return;
+  let note = document.getElementById("rf_start_date_basis_note");
+  const cur = String(document.getElementById("rf_start_date")?.value || "").slice(0, 10);
+  let text = "";
+  if (_recruitEditId) {
+    const seen = window._rfStartSeen, basis = String(window._rfStartBasis || "");
+    if (seen != null && cur !== seen) text = "직접 정한 날로 저장합니다";
+    else if (basis === "pending") text = "아직 정하지 않음 — 첫 참여가 생긴 날로 자동으로 맞춥니다";
+    else if (basis === "first_join") text = "첫 참여가 생긴 날로 자동으로 맞춘 날입니다";
+  } else if (window._rfPrefillStart != null) {
+    // 새 공고 — 비워 두거나 오더 희망 시작일 그대로면 서버가 'pending' 으로 저장한다(같은 규칙: campaign.routes INSERT)
+    text = (!cur || cur === window._rfPrefillStart) ? "그대로 두면 첫 참여가 생긴 날로 자동으로 맞춥니다" : "직접 정한 날로 저장합니다";
   }
+  if (!text) { if (note) note.remove(); return; }
+  if (!note) {
+    note = document.createElement("span"); note.id = "rf_start_date_basis_note"; note.className = "rf-readonly-note";
+    sRow.querySelector(".form-control")?.appendChild(note);
+  }
+  note.textContent = text;
 }
 
 /** ★ 양방향 5단계(결정 263 · 사용자 확정 2026-10-20): 리뷰오더와 맞춰지는 공고는 기간별 리뷰비를 직접 고치지 않는다.
@@ -3812,6 +3832,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   window._rfInflowOrigin = '';   // 유입방식 출처(저장값/작업오더) — 지난 공고 안내 누수 방지
   window._rfMixOrigin = '';   // 혼합 조합 출처(저장값/작업오더/없음) — 지난 공고 안내 누수 방지
   window._rfOrderStartDate = '';  // 연결 작업오더 시작일(대조용) — 지난 공고 안내 누수 방지
+  window._rfStartSeen = null; window._rfStartBasis = ''; window._rfPrefillStart = null;   // 결정 273 — 지난 공고 값 누수 방지
   window._rfRoundsLock = null;    // 차수 원장 잠금(모름=null) — 지난 공고 상태 누수 방지
   // ★ 카드는 렌더 캐시(signature)를 들고 재사용되는 DOM 이다 — 캐시를 비우지 않으면
   //   다음 공고를 열어도 이전 공고의 수량·기준값이 그대로 남아(early-return) 저장값이 안 보인다.
@@ -3962,6 +3983,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
         }
         const setV = (i, v) => { const el = document.getElementById(i); if (el && v != null && v !== "") el.value = v; };
         setV("rf_start_date", (c.start_date || "").slice(0, 10));
+        window._rfStartSeen = (c.start_date || "").slice(0, 10);          // 결정 273 — 창을 열 때 본 값(같으면 서버가 「안 고침」으로 친다)
+        window._rfStartBasis = String(c.start_date_basis || "");
         /* ★ 발행은 **스냅샷**이라 발행 뒤 작업오더 시작일이 바뀌어도 공고는 따라가지 않는다.
            그 사실을 확인할 창구가 없어 "오더는 8/19인데 공고는 8/12"가 원인 불명으로 보였다
            (2026-08-21 신고). → 값은 **덮지 않고** 다르면 사실만 한 줄로 말한다.
@@ -4172,6 +4195,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
         pe.checked = true; onParticipationToggle(true);
         const setV = (i, v) => { const el = document.getElementById(i); if (el && v != null && v !== "") el.value = v; };
         setV("rf_start_date", prefill.start_date);
+        window._rfPrefillStart = String(prefill.start_date || "").slice(0, 10);   // 결정 273 — 오더 희망 시작일
         const _skipWeekendsEl = document.getElementById("rf_skip_weekends");
         if (_skipWeekendsEl) _skipWeekendsEl.checked = prefill.skip_weekends === true;
         setV("rf_daily_limit", prefill.daily_limit);
@@ -6063,6 +6087,7 @@ async function saveRecruitPostImpl() {
       }
       /* ★ 062: ""=서버에서 비움(자율주문 전환·시작일 제거), 값=설정 — null(유지)은 미전송 화면(admin-siand)만 */
       payload.start_date     = document.getElementById("rf_start_date")?.value || "";
+      if (_recruitEditId && window._rfStartSeen != null) payload.start_date_seen = window._rfStartSeen;   // 결정 273
       payload.skip_weekends  = !!document.getElementById("rf_skip_weekends")?.checked;
       payload.window_start   = document.getElementById("rf_window_start").value || "";
       payload.window_end     = document.getElementById("rf_window_end").value || "";

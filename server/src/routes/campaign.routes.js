@@ -3264,6 +3264,16 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
           });
         }
       }
+    /* ★ 결정 273: 시작일을 비웠거나 오더 희망 시작일을 그대로 받았으면 'pending'(첫 참여일로 맞출 대상) · 사람이 고른 날이면 'manual'.
+       오더 날짜는 글자로 읽는다(DATE → Date 변환은 서버 시간대에 따라 하루가 밀린다). 못 읽으면 'manual'(자동으로 바꾸지 않는 쪽). */
+    let _startDateBasis = start_date ? 'manual' : 'pending';
+    if (start_date && _srcWoId) {
+      try {
+        // 잠금 tx 밖(pool)에서 읽는다 — 이 조회가 실패해도 공고 저장 tx 를 죽이지 않게
+        const { rows: _wsd } = await pool.query(`SELECT to_char(start_date, 'YYYY-MM-DD') AS d FROM work_orders WHERE id = $1`, [_srcWoId]);
+        if (_wsd[0] && _wsd[0].d === String(start_date).slice(0, 10)) _startDateBasis = 'pending';
+      } catch (_) { /* 모름 = manual */ }
+    }
     ({ rows } = await (_insClient || pool).query(
       `INSERT INTO recruit_campaigns
        (id, title, channel, channel_custom, manager, time_range, delivery_type,
@@ -3274,10 +3284,10 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         window_start, window_end, close_buffer_min, hold_ttl_min, work_detail, source_work_order_id,
         start_date, multi_account_mode, multi_daily_limit, sub_hold_ttl_min, reviewer_hidden,
         transfer_bank, transfer_memo, review_type, review_type_mix, carry_mode, carry_strategy, work_kind, skip_weekends, cash_receipt_required,
-        delivery_type_mix, delivery_review_fee_mix, recall_courier, recall_product, repurchase_days)
+        delivery_type_mix, delivery_review_fee_mix, recall_courier, recall_product, repurchase_days, start_date_basis)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
                $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,
-               $45,$46,$47,$48,$49,$50)
+               $45,$46,$47,$48,$49,$50,$51)
        RETURNING *`,
       [
         _genCampaignId(),
@@ -3331,6 +3341,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         storeRecallCourier,                                     // ★ 135: 회수가 아니면 '' — NOT NULL 컬럼이라 null 금지
         storeRecallProduct,
         repurchaseDaysState.value,
+        _startDateBasis,                                        // ★ 결정 273: pending(안 정함 → 첫 참여일로 맞춤) · manual(사람이 고름)
       ]
     ));
       if (_insClient) await _insClient.query('COMMIT');
@@ -3450,6 +3461,11 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(String(start_date))) {
       return res.status(400).json({ ok: false, error: '시작일 형식이 올바르지 않습니다. (YYYY-MM-DD)' });
     }
+    /* ★ 결정 273: 화면이 창을 열 때 본 시작일(start_date_seen)과 같은 값을 보내면 = 사람이 고치지 않았다 → 보내지 않은 것으로 친다.
+       창을 열어 둔 사이 새벽 맞춤(첫 참여일)이 시작일을 바꿨어도 옛 화면 값으로 되돌리지 않고, 「사람이 정함」으로 바꾸지도 않는다.
+       start_date_seen 을 모르는 옛 화면은 종전 그대로(보낸 값 = 설정). */
+    const _startDateEff = (req.body.start_date_seen !== undefined && start_date !== undefined && start_date !== null
+      && String(start_date || '') === String(req.body.start_date_seen || '')) ? undefined : start_date;
     const repurchaseDaysState = _normalizeRepurchaseDays(repurchase_days, null);
     if (repurchaseDaysState.error) return res.status(400).json({ ok: false, error: repurchaseDaysState.error });
 
@@ -3877,6 +3893,12 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         start_date = CASE WHEN $32::text IS NULL THEN start_date
                           WHEN $32::text = '' THEN NULL
                           ELSE $32::date END,
+        -- ★ 결정 273: 사람이 시작일을 바꾸면 'manual'(자동 맞춤 대상에서 빠짐) · 지우면 첫 참여일로 다시 맞출 대상('pending')
+        --   이 칸 이전 공고(NULL)를 지우기만 한 경우는 그대로 둔다(사용자 확정 1.가 — 기존 공고는 자동으로 바꾸지 않는다).
+        start_date_basis = CASE WHEN $32::text IS NULL THEN start_date_basis
+                                WHEN $32::text = '' THEN (CASE WHEN start_date IS NULL OR start_date_basis IS NULL THEN start_date_basis ELSE 'pending' END)
+                                WHEN start_date IS DISTINCT FROM $32::date THEN 'manual'
+                                ELSE start_date_basis END,
         multi_account_mode = COALESCE($33, multi_account_mode),
         multi_daily_limit = COALESCE($34, multi_daily_limit),
         sub_hold_ttl_min = COALESCE($35, sub_hold_ttl_min),
@@ -3934,7 +3956,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         wdPrepared === undefined ? null : wdPrepared, // $30: 새 값(null=비움)
         null,   // $31 ★ 결정 246: 수정은 작업오더 연결(source_work_order_id)을 바꾸지 않는다(null=유지) — 바꿔 끼우면
                 //    잠금·중복 확인 없이 같은 오더에 살아 있는 공고가 둘이 된다(Codex PR #1632). 화면도 수정 때 보내지 않는다.
-        (start_date === undefined || start_date === null) ? null : String(start_date), // $32: null=유지, ''=제거, 날짜=설정
+        (_startDateEff === undefined || _startDateEff === null) ? null : String(_startDateEff), // $32: null=유지, ''=제거, 날짜=설정 · 결정 273 본 값과 같으면 유지
         (multi_account_mode === undefined || multi_account_mode === null) ? null : multi_account_mode === true, // $33 ★ 063: null=유지
         (multi_daily_limit === undefined || multi_daily_limit === null || multi_daily_limit === '') ? null : Math.max(0, Number(multi_daily_limit) || 0), // $34
         (sub_hold_ttl_min === undefined || sub_hold_ttl_min === null || sub_hold_ttl_min === '') ? null : Math.max(1, Number(sub_hold_ttl_min) || 15), // $35

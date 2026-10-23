@@ -662,6 +662,26 @@ function startCronJobs() {
   //   진짜 고아는 10장 남짓이라 자동으로 돌릴 이유가 없다 → 크론 제거. 수동 미리보기는
   //   POST /api/drive/orphan-capture-cleanup(dryRun 기본) 그대로.
 
+  // ── 공고 시작일 = 첫 참여일(결정 273 · 2026-10-23): 매일 새벽 4시 10분 ──
+  //   사람이 시작일을 정하지 않은 새 공고(start_date_basis='pending')만, 첫 참여가 생긴 날로 한 번 맞춘다(앞으로만).
+  //   ★ 4시 20분 작업표 날짜 맞추기보다 먼저 — 그쪽이 새 시작일로 빈 줄 날짜를 맞춘다.
+  //   되돌리기 = Railway `CAMPAIGN_START_FIRST_JOIN_CRON=0`(맞춘 날은 그대로 남는다 — 사람이 공고 창에서 고칠 수 있다).
+  if (process.env.CAMPAIGN_START_FIRST_JOIN_CRON !== '0') {
+    let sfjRunning = false;
+    cron.schedule(process.env.CAMPAIGN_START_FIRST_JOIN_SCHEDULE || '10 4 * * *', async () => {
+      if (sfjRunning) return;
+      sfjRunning = true;
+      try {
+        const { correctStartDatesToFirstJoin } = require('../services/campaignStartDate.service');
+        const { withJobLock } = require('../utils/jobLock');
+        const r = await withJobLock('campaign_start_first_join', () => correctStartDatesToFirstJoin());
+        if (r && Array.isArray(r.corrected)) logger.info(`[CRON-StartFirstJoin] 대상 ${r.checked} · 맞춤 ${r.corrected.length} · 앞당김 건너뜀 ${r.skippedEarlier.length}`);
+      } catch (err) {
+        logger.error(`[CRON-StartFirstJoin] error: ${err.message}`);
+      } finally { sfjRunning = false; }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
   // ── 작업표 날짜 맞추기(결정 182 · 2026-09-26): 매일 새벽 4시 20분 ──
   //   날짜별 인원은 규칙(일건수·주말·이월·총량)이 정하고 작업표가 따라간다. 전날 못 채운 몫(이월)과
   //   종료일 연장은 날이 바뀌며 달라지므로, 조용한 시간에 작업표 빈 줄 날짜를 한 번 맞춘다.

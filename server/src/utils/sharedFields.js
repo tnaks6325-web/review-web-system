@@ -112,7 +112,7 @@ const CANON = {
 const SHARED_FIELDS = Object.freeze([
   // ── 인트라넷 고유(리뷰웹 보기 전용) ──
   { key: 'title',            owner: 'intranet', canon: 'text',     label: '작업명' },
-  { key: 'start_date',       owner: 'intranet', canon: 'date',     label: '모집 시작일' },
+  { key: 'start_date',       owner: 'intranet', canon: 'date',     label: '희망 시작일' },   // 결정 273 — 리뷰오더 값은 희망 시작일(공고 실제 시작일과 따로 돈다)
   { key: 'manager_name',     owner: 'intranet', canon: 'text',     label: '담당AE' },
   { key: 'work_manager',     owner: 'intranet', canon: 'text',     label: '작업담당' },
   { key: 'sales_id',         owner: 'intranet', canon: 'text',     label: '계약건' },

@@ -2061,6 +2061,7 @@ function liveOptions(rows) {
 
 module.exports = {
   computeCampaignState,
+  ORDER_COUNTED_SQL,   // 결정 273 — 첫 참여일 맞춤이 같은 "센 주문" 규칙을 쓴다(사본 금지)
   fetchCampaignCounts,
   fetchOptionCounts,
   fetchOptionCountsBatch,

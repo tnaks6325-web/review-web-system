@@ -49,12 +49,13 @@ const sec = (startMarker, endMarker) => compact.slice(compact.indexOf(startMarke
 // ③ 양방향 표시 — 연결 공고에서만 · 리뷰웹 전용 줄(유형별 리뷰비·작업보드 표시명)에는 달지 않는다
 assert.match(modal, /\.rf-sync-box\[data-linked="1"\] \.form-row:not\(\.rf-local\):not\(\.thumb-guide-row\):not\(#rf_workboard_display_name_row\)::after\{content:'양방향'/);
 assert.match(compact, /class="form-row rf-local" id="rf_delivery_fee_row"/);
-// ④ 열 때 채우고 새 공고에서 지운다 · 연결 공고는 모집 시작일 보기 전용
+// ④ 열 때 채우고 새 공고에서 지운다 · 결정 273(사용자 확정 2026-10-23 「나」): 연결 공고도 모집 시작일은 여기서 정한다(종전 D5 잠금 해제)
 {
   assert.match(editor, /_rfApplyOrderLink\(null, false\);/, '새 공고·다른 공고를 열 때 지난 연결 표시를 지운다');
   assert.match(editor, /_rfApplyOrderLink\(json && json\.orderInfo \|\| null, !!window\._rfBidirBase\);/);
   const fn = editor.slice(editor.indexOf('function _rfApplyOrderLink('), editor.indexOf('\n}\n', editor.indexOf('function _rfApplyOrderLink(')));
-  assert.match(fn, /if \(sBtn\) sBtn\.disabled = !!linked;/);
+  assert.doesNotMatch(fn, /sBtn\.disabled = !!linked/, '연결 공고의 시작일을 잠그면 아무도 못 고친다(리뷰오더 시작일은 접수 뒤 고칠 수 없다)');
+  assert.match(fn, /_renderStartDateBasisNote\(\);/, '누가 정한 날인지 한 줄');
   assert.match(fn, /escHtml\(info\.title/, '오더 제목은 이스케이프해서 그린다');
 }
 // ⑤ 서버 — 상세 응답에 연결 리뷰오더 안내를 더한다(가산 · 읽기만 · 조회 실패 = 없음)
