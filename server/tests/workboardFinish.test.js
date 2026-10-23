@@ -299,7 +299,9 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   t('마감/복귀 버튼은 내부인만(_finCanEdit — 서버 게이트와 1:1)',
     /_finCanEdit\(\)\{ return STATE\.role==='master'\|\|STATE\.role==='admin'\|\|STATE\.role==='staff'; \}/.test(WD));
   t('작업바 로드는 stats 를 붙이지 않는다(무거운 집계를 탭 전환마다 돌리지 않는다)',
-    /loadTabs\(\)\{[\s\S]{0,200}api\('\/api\/trackb\/tabs\?limit=300'\)/.test(WD));
+    // 결정 281: participantTabs=1(보는 목록 전용 줄 포함)이 붙었다 — stats 는 여전히 붙지 않는다(검사 의미 불변).
+    /loadTabs\(\)\{[\s\S]{0,400}api\('\/api\/trackb\/tabs\?limit=300&participantTabs=1'\)/.test(WD)
+    && !/loadTabs\(\)\{[\s\S]{0,400}api\('\/api\/trackb\/tabs\?[^']*stats=1/.test(WD));
   t('★ 통계는 배열 교체가 아니라 병합(인덱스=selTab 계약·STATE.cur 동일성 보존)',
     /function _finAbsorb\(r\)\{[\s\S]{0,700}STATE\.tabs\.forEach\(t=>\{ const n=by\[/.test(WD));
   // ★★ 코드리뷰가 잡은 무신호 사고 계열 — 조회 실패를 빈 값으로 덮으면 마감이 통째로 풀린 것처럼 보인다

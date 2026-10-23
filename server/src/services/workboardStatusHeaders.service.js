@@ -52,11 +52,17 @@ function pickPaidHeader(headers, submitCol2Counts) {
 /** 제출 칸 ①(동기) — 작업표 첫 줄(번호 순)의 submit_col. */
 function pickSubmitHeader(firstSubmitCol) { return _txt(firstSubmitCol); }
 
-/** ③ 폴백 — 서버가 기록하는 칸. 조회 실패 = ''(플래그로 추측하지 않는다). */
-async function statusHeaderFallback(db, { sheetId, tabName, kind }) {
+/** ③ 폴백 — 서버가 기록하는 칸.
+ *  기본(작업보드 한 탭 화면) = 조회 실패면 ''(플래그로 추측하지 않는다 · 화면은 그대로 뜬다 — 종전 동작).
+ *  strict = 조회 실패를 그대로 던진다 — **배치(홈 집계·업체관리)** 용. 삼키면 홈이 틀린 숫자를 ok:true 로 캐시하고
+ *  자동 마감이 `stats_unavailable` 신호를 놓친다(PR #1677 리뷰). */
+async function statusHeaderFallback(db, { sheetId, tabName, kind, strict = false }) {
   try {
     return _txt(await require('./sheetlessStatus.service').statusHeaderForTab(db, { sheetId, tabName, kind }));
-  } catch (_) { return ''; }
+  } catch (e) {
+    if (strict) throw e;
+    return '';
+  }
 }
 
 /**
@@ -135,7 +141,8 @@ async function loadTabStatusHeaders(db, { tabs = null, submit: wantSubmit = true
       if (wantSubmit && !v.submit) fallbacks.push([v, sheetId, tabName, 'submit']);
     }
   }
-  for (const [v, sheetId, tabName, kind] of fallbacks) v[kind] = await statusHeaderFallback(db, { sheetId, tabName, kind });
+  // ★ strict — 배치에서는 폴백 조회 실패를 삼키지 않는다(호출부가 fail 방향을 정한다: 홈 = ok:false · 업체관리 = 경고 후 행별 포인터).
+  for (const [v, sheetId, tabName, kind] of fallbacks) v[kind] = await statusHeaderFallback(db, { sheetId, tabName, kind, strict: true });
   return out;
 }
 

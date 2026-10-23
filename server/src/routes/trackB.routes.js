@@ -91,7 +91,10 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
     // 작업보드의 표 열람·셀 범위 선택/합계는 리뷰어를 제외한 로그인 역할 모두에게 연다.
     // 광고주는 타 업체 작업도 목록에서 열 수 있지만, service의 advertiser 렌즈가 PII를 마스킹하고
     // 편집·정산·스레드 같은 별도 권한 기능은 기존 스코프를 그대로 유지한다.
-    const tabs = await svc.scopedActiveTabs({ role, staffName: req.admin && req.admin.name, advertiserId: (req.admin && req.admin.advertiser_id) || null, limit: req.query.limit, forMapping: req.query.forMapping === '1', allStaff: role === 'staff', allWorkdesk: true });
+    // 결정 281: 작업표 원장으로만 살아 있는 시트 기반 작업은 **보는 목록**에만 — 홈 작업목록(stats=1)·작업바(participantTabs=1).
+    //   매개변수 없는 호출(모집공고 발행 대상 선택)·forMapping 에는 싣지 않는다(시트와 끊긴 탭이 공고 대상이 되면 주문이 실패).
+    const includeParticipantTabs = req.query.forMapping !== '1' && (req.query.stats === '1' || req.query.participantTabs === '1');
+    const tabs = await svc.scopedActiveTabs({ role, staffName: req.admin && req.admin.name, advertiserId: (req.admin && req.admin.advertiser_id) || null, limit: req.query.limit, forMapping: req.query.forMapping === '1', allStaff: role === 'staff', allWorkdesk: true, includeParticipantTabs });
     // ── 마감(전사 공통) 주석 + 작업목록 통계(?stats=1) ── migration 088 · PRD prd-workboard-worktabs.html
     //   ★ 스코프 단일 출처는 위 scopedActiveTabs 하나 — 여기서는 그 결과에 **주석만** 얹는다.
     //     서버가 마감 탭을 거르지 않는 이유 = 홈 "마감 보관함"이 같은 응답에서 마감분을 골라 그린다.

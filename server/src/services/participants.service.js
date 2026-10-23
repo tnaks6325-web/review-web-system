@@ -355,7 +355,10 @@ async function listActiveTabs({ limit = 500, includeParticipantTabs = false } = 
               COALESCE((SELECT MIN(cp.first_seen_at)
                         FROM campaign_participants cp
                        WHERE cp.sheet_id = tc.sheet_id AND cp.tab_name = tc.tab_name
-                         AND cp.deleted_at IS NULL), rst.mirrored_at, tc.updated_at) AS "firstSeenAt"
+                         AND cp.deleted_at IS NULL), rst.mirrored_at, tc.updated_at) AS "firstSeenAt",
+              /* ★ 표시 전용 표식 — 작업 선택 목록(모집공고 발행 대상 등)이 이 줄을 고르지 못하게(PR #1677 리뷰).
+                 이 작업은 시트와 끊긴 시트 기반 탭이라 새 주문이 sheet_tab_retired 로 실패한다. */
+              TRUE AS "participantOnly"
          FROM tab_configs tc
          LEFT JOIN LATERAL (SELECT r.spreadsheet_title, r.tab_gid, r.row_count, r.mirrored_at FROM raw_sheet_tabs r
                              WHERE r.sheet_id = tc.sheet_id AND r.tab_name = tc.tab_name AND r.is_system_tab = FALSE
@@ -400,7 +403,8 @@ async function listActiveTabs({ limit = 500, includeParticipantTabs = false } = 
             COALESCE((SELECT MIN(cp.first_seen_at)
                         FROM campaign_participants cp
                        WHERE cp.sheet_id = rst.sheet_id AND cp.tab_name = rst.tab_name
-                         AND cp.deleted_at IS NULL), rst.mirrored_at) AS "firstSeenAt"
+                         AND cp.deleted_at IS NULL), rst.mirrored_at) AS "firstSeenAt",
+            FALSE AS "participantOnly"   -- 세 갈래 UNION ALL 칸 순서 계약(맨 끝)
        FROM raw_sheet_tabs rst
        LEFT JOIN tab_configs tc ON tc.sheet_id = rst.sheet_id AND tc.tab_name = rst.tab_name
       WHERE rst.is_system_tab = FALSE
@@ -416,7 +420,8 @@ async function listActiveTabs({ limit = 500, includeParticipantTabs = false } = 
               COALESCE((SELECT MIN(cp.first_seen_at)
                         FROM campaign_participants cp
                        WHERE cp.sheet_id = tc.sheet_id AND cp.tab_name = tc.tab_name
-                         AND cp.deleted_at IS NULL), tc.sheetless_at, tc.updated_at) AS "firstSeenAt"
+                         AND cp.deleted_at IS NULL), tc.sheetless_at, tc.updated_at) AS "firstSeenAt",
+              FALSE AS "participantOnly"
          FROM tab_configs tc
          LEFT JOIN index_master im ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
         WHERE COALESCE(tc.sheetless, FALSE) = TRUE

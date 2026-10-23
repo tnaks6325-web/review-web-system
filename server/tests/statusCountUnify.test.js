@@ -128,8 +128,8 @@ async function t(name, fn) { await fn(); passed++; console.log('PASS ' + name); 
   });
 
   /* ── 4) 홈 목록 / 투영 대상 목록 ─────────────────────────────── */
-  await t('★ 홈·작업바 목록(scopedActiveTabs)에 남은 시트 탭이 뜬다 — ⬛ 탭은 안 뜨고, 무시트 탭은 한 번만', async () => {
-    const list = await svc.scopedActiveTabs({ role: 'master', allWorkdesk: true });
+  await t('★ 홈·작업바 목록(includeParticipantTabs)에 남은 시트 탭이 뜬다 — ⬛ 탭은 안 뜨고, 무시트 탭은 한 번만', async () => {
+    const list = await svc.scopedActiveTabs({ role: 'master', allWorkdesk: true, includeParticipantTabs: true });
     const names = list.map(x => x.tabName);
     assert.ok(names.includes(T1), '남은 시트 탭이 홈에 없다');
     assert.ok(!names.includes(T2), '⬛ 마감 탭이 진행 목록에 떴다');
@@ -137,6 +137,34 @@ async function t(name, fn) { await fn(); passed++; console.log('PASS ' + name); 
     const row = list.find(x => x.tabName === T1);
     assert.strictEqual(row.tabGid, '101', '탭 설정의 gid 가 비면 시트 미러의 gid 로 채운다(마감·공고 gid 폴백 재료)');
     assert.strictEqual(row.sheetless, false);
+    assert.strictEqual(row.participantOnly, true, '보는 목록 전용 표식');
+    assert.strictEqual(list.find(x => x.tabName === T3).participantOnly, false);
+  });
+  await t('★★ 모집공고 발행 대상·매핑·스코프 판정(기본값)에는 남은 시트 탭이 없다 — 골라 발행하면 주문이 sheet_tab_retired 로 실패', async () => {
+    const plain = await svc.scopedActiveTabs({ role: 'master', allWorkdesk: true });
+    assert.ok(!plain.some(x => x.tabName === T1));
+    assert.ok(plain.some(x => x.tabName === T3));
+    // 라우트: 보는 목록(stats=1 · participantTabs=1)만 켠다 · forMapping 은 언제나 끈다
+    const routes = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'trackB.routes.js'), 'utf8');
+    assert.match(routes, /const includeParticipantTabs = req\.query\.forMapping !== '1' && \(req\.query\.stats === '1' \|\| req\.query\.participantTabs === '1'\);/);
+    assert.match(routes, /allWorkdesk: true, includeParticipantTabs \}\);/);
+    // 화면: 작업바만 participantTabs=1 · 모집공고 탭 목록은 매개변수 없이 + participantOnly 줄을 두 겹으로 거른다
+    const wd = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
+    assert.match(wd, /async function loadTabs\(\)\{[\s\S]{0,300}api\('\/api\/trackb\/tabs\?limit=300&participantTabs=1'\)/);
+    assert.strictEqual((wd.match(/\/api\/trackb\/tabs\?[^'"`]*participantTabs=1/g) || []).length, 1, '작업바 외에 켜는 곳이 생겼다');
+    const rec = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'js', 'index-recruit.js'), 'utf8');
+    assert.match(rec, /return \(typeof window !== "undefined" && window\.RECRUIT_TABS_API\) \|\| "\/api\/trackb\/tabs";/);
+    assert.ok(!/participantTabs|stats=1/.test(rec), '모집공고 탭 목록이 보는 목록 매개변수를 쓴다');
+    // 화면 실행 — 서버가 실수로 실어도 공고 대상 목록에는 안 들어간다
+    const vm = require('vm');
+    const src = rec.slice(rec.indexOf('async function loadRecruitTabOptions'), rec.indexOf('/* fallback: DOM에서 보완'));
+    const ctx = { _recruitTabList: [] };
+    vm.createContext(ctx);
+    // 행 처리 루프(실제 코드)를 그대로 돌린다 — 서버가 실수로 표식 줄을 실은 경우
+    const loop = src.slice(src.indexOf('const seen'));
+    vm.runInContext(`(async () => { const json = { tabs: [{ sheetId: '${S}', tabName: '${T1}', participantOnly: true }, { sheetId: '${S}', tabName: '${T3}', participantOnly: false }] };
+      const rows = json.tabs; ${loop} })()`, ctx);
+    assert.strictEqual(JSON.stringify(ctx._recruitTabList.map(x => x.tabName)), JSON.stringify([T3]));
   });
   await t('★★★ 그림자 투영 대상(listActiveTabs 기본값)에는 남은 시트 탭을 넣지 않는다 — 넣으면 import 줄 전부 비활성화', async () => {
     const proj = await parts.listActiveTabs({ limit: 2000 });
@@ -146,7 +174,9 @@ async function t(name, fn) { await fn(); passed++; console.log('PASS ' + name); 
     assert.match(fn('projectActive'), /participants\.listActiveTabs\(\{ limit \}\)/);
     assert.match(fn('projectionCoverage'), /participants\.listActiveTabs\(\{ limit: _COVERAGE_TAB_CAP \}\)/);
     assert.ok(!/includeParticipantTabs/.test(fn('projectActive') + fn('projectionCoverage')));
-    assert.strictEqual((src.match(/includeParticipantTabs: true/g) || []).length, 1, '켜는 곳은 scopedActiveTabs 하나');
+    assert.strictEqual((src.match(/listActiveTabs\(\{[^}]*includeParticipantTabs/g) || []).length, 1, '켜는 곳은 scopedActiveTabs 하나');
+    assert.match(src, /async function scopedActiveTabs\([^)]*includeParticipantTabs = false/, 'scopedActiveTabs 기본값은 끈 상태');
+    assert.ok(!/includeParticipantTabs: true/.test(src), '서비스 안에서 무조건 켜는 곳이 생겼다');
   });
 
   /* ── 5) fail 방향 ───────────────────────────────────────────── */
@@ -164,6 +194,28 @@ async function t(name, fn) { await fn(); passed++; console.log('PASS ' + name); 
     failOn = null;
     const o = r.rows.find(x => x.tabName === T1);
     assert.deepStrictEqual([o.bSub, o.bPaid], [12, 12], '포인터가 있는 12줄만 — 종전 동작으로 접힌다');
+  });
+
+  await t('★ 칸을 못 찾은 탭의 기록 칸 폴백이 실패해도 홈 집계는 ok:false(빈 칸으로 삼켜 ok:true 로 캐시하지 않는다)', async () => {
+    // 머리글·포인터가 전혀 없는 줄 있는 탭 → ③ 폴백(review_index 조회)까지 간다
+    await db.exec(`INSERT INTO tab_configs (sheet_id, tab_name, sheetless) VALUES ('${S}','폴백탭',TRUE);
+      INSERT INTO campaign_participants (sheet_id, tab_name, seq, reviewer_name, active, row_json) VALUES ('${S}','폴백탭',2,'가',TRUE,'{}'::jsonb);`);
+    try {
+      failOn = /FROM review_index/; svc.__resetTabStatsCacheForTest();
+      const r = await svc.tabStatsMap({ force: true });
+      assert.strictEqual(r.ok, false, '폴백 실패가 삼켜졌다');
+      const cached = await svc.tabStatsMap();
+      assert.strictEqual(cached.ok, false, '실패 결과 대신 캐시가 ok:true 를 돌려준다');
+      const own = await svc.ownedTabsForAdvertiser({ advertiserId: 'adv1' });
+      assert.ok(own.rows.length > 0, '업체관리는 경고 후 계속');
+      // 작업보드 한 탭 화면은 종전대로 fail-soft(빈 칸 = 0건) — 화면이 죽지 않는다
+      const w = await svc.workdeskTab({ sheetId: S, tabName: '폴백탭', role: 'master' });
+      assert.strictEqual(w.counts.paid, 0);
+    } finally {
+      failOn = null;
+      await db.exec(`DELETE FROM campaign_participants WHERE tab_name='폴백탭'; DELETE FROM tab_configs WHERE tab_name='폴백탭';`);
+      svc.__resetTabStatsCacheForTest();
+    }
   });
 
   /* ── 6) 정적 배선 + 변이시험 ──────────────────────────────────── */

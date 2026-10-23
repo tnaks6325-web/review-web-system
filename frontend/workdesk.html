@@ -3707,7 +3707,9 @@ function renderWorkdeskView(){
   loadTabs();
 }
 async function loadTabs(){
-  const r = await api('/api/trackb/tabs?limit=300');
+  // participantTabs=1 — 작업표 원장으로만 살아 있는 시트 기반 작업도 작업바에 싣는다(결정 281 · 보는 목록 전용).
+  //   ★ 모집공고 발행 대상 선택(index-recruit)은 이 매개변수 없이 불러 그 작업을 받지 않는다.
+  const r = await api('/api/trackb/tabs?limit=300&participantTabs=1');
   // ── 업체(광고주): 소유 탭 + 작업 요약(카운트·정산)을 함께 받아 사이드바 + "내 작업 목록"(화면 A)을 그린다 ──
   if(STATE.role==='advertiser'){
     STATE.tabs=(r&&r.ok&&r.tabs)||[];

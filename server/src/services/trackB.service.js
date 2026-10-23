@@ -2750,10 +2750,13 @@ async function openRequestCounts({ sheetId, tabName, role = 'master' } = {}) {
 // 역할 스코프 적용된 활성 탭 목록. `allWorkdesk`는 작업보드의 표 열람 전용 확장이다.
 // 광고주도 전체 탭을 열 수 있으나, workdeskTab의 PII 마스킹·읽기 전용 렌즈는 그대로 적용된다.
 // 스레드·정산·폴더 등의 별도 API는 이 플래그를 받지 않아 기존 소유/담당 스코프를 유지한다.
-async function scopedActiveTabs({ role, staffName, advertiserId, limit, forMapping = false, allStaff = false, allWorkdesk = false } = {}) {
-  // ★ 화면 목록(홈·작업바·스코프)만 작업표 원장으로 살아 있는 시트 기반 작업까지 본다(결정 281).
-  //   ★★★ 투영 크론·커버리지(projectActive·projectionCoverage)에는 켜지 말 것 — listActiveTabs 주석 참조.
-  const all = await participants.listActiveTabs({ limit, includeParticipantTabs: true });
+async function scopedActiveTabs({ role, staffName, advertiserId, limit, forMapping = false, allStaff = false, allWorkdesk = false, includeParticipantTabs = false } = {}) {
+  /* ★ 작업표 원장으로만 살아 있는 시트 기반 작업(결정 281)은 **보는 목록**(홈 작업목록 `stats=1` · 작업바 `participantTabs=1`)
+     에만 싣는다 — 기본값 false. 같은 `/api/trackb/tabs` 를 모집공고 발행 대상 선택(index-recruit `loadRecruitTabOptions`)·
+     업체 매핑(`forMapping=1`)·스코프 판정(unseenCounts·로그·staff 스코프)도 쓰므로, 켜 두면 시트와 끊긴 탭이 공고 대상으로
+     골라져 주문이 sheet_tab_retired 로 실패한다(PR #1677 리뷰).
+     ★★★ 투영 크론·커버리지(projectActive·projectionCoverage)에는 켜지 말 것 — listActiveTabs 주석 참조. */
+  const all = await participants.listActiveTabs({ limit, includeParticipantTabs: includeParticipantTabs === true });
   // allWorkdesk: 리뷰어를 제외하고 작업보드 표를 열 수 있는 역할에만 라우트가 명시한다.
   // forMapping/allStaff는 기존 staff 전용 초기매핑/작업보드 호출 계약을 유지한다.
   const scope = (allWorkdesk || ((forMapping || allStaff) && role === 'staff'))
