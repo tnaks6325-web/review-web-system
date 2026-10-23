@@ -7279,7 +7279,8 @@ function summaryStrip(wd,d,m,c){
      작업표 생성 때 미리 깔아 둔 빈 슬롯까지 세면 6명만 들어온 200줄 작업이
      `참여자 200/200 · 100%` 로 보인다(신고 건). 판정은 서버 단일 출처(`counts.filled`).
      ★ 구버전 백엔드(필드 부재)는 `total` 로 접어 **종전 동작 그대로**(0 위장 금지).
-     ★ 제출·입금의 분모도 같은 값이어야 한다 — 분자만 바꾸면 "134/200 인데 참여자는 134" 로 갈린다.
+     ★★ 세 게이지의 분모는 모두 **총건수**(사용자 확정 2026-10-23 — 결정 283) — 10건 중 참여 6 · 제출 3 · 입금 1 이면 6/10 · 3/10 · 1/10.
+        종전(054)에는 제출·입금 분모가 채워진 줄이라 "3/6"으로 보여 전체 중 얼마나 끝났는지 읽히지 않았다.
      ★ 줄 수(준비된 슬롯)는 사라지지 않는다 — 참여자 게이지 툴팁이 말한다(조용한 누락 금지). */
   const filled=_rvFilledOf(c);
   /* ★★ 분모(총건수) = 서버가 준 `counts.cap` — 작업 조건 카드·표 초과 판정과 **같은 값**이다.
@@ -7292,7 +7293,7 @@ function summaryStrip(wd,d,m,c){
   /* 모집일 계획 부족은 서버가 총건수와 저장된 계획 합계로 한 번만 판정한다.
      광고주 응답에는 필드 자체가 없고, 화면도 방어적으로 내부에서만 렌더한다. */
   const scheduleUnassigned=!isNaN(Number(c.scheduleUnassigned))?Math.max(0,Number(c.scheduleUnassigned)):0;
-  const pT=target?Math.round(filled/target*100):0, pS=filled?Math.round((c.submitted||0)/filled*100):0, pP=filled?Math.round((c.paid||0)/filled*100):0;
+  const pT=target?Math.round(filled/target*100):0, pS=target?Math.round((c.submitted||0)/target*100):0, pP=target?Math.round((c.paid||0)/target*100):0;
   const slots=+c.total||0, empty=Math.max(0,slots-filled);
   const filledTip=(c.filled==null)?'':`채워진 줄 ${filled}명 · 준비된 줄 ${slots}줄${empty?` (빈 슬롯 ${empty}줄)`:''}`;
   const isAdv=STATE.role==='advertiser';
@@ -7317,8 +7318,8 @@ function summaryStrip(wd,d,m,c){
     ? `<div class="tp3schedulewarn">! 모집일 미설정 ${scheduleUnassigned.toLocaleString()}건</div>` : '';
   const prog=`<div class="tp3col"><div class="tp3t tp3h topcardhd" onclick="_topToggle()" title="클릭하면 상단 네 블록이 함께 접히거나 펼쳐집니다">진행 현황<span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>`+
     gg('참여자',filled,target||filled,pT,'',filledTip+(overN?`${filledTip?' · ':''}⚠ 총건수(${target})를 ${overN}명 넘겨 들어왔습니다 — 표에서 붉은 줄로 표시합니다`:''),overN)+
-    gg('제출완료',c.submitted||0,filled,pS,'s')+
-    gg('입금완료',c.paid||0,filled,pP)+
+    gg('제출완료',c.submitted||0,target,pS,'s')+
+    gg('입금완료',c.paid||0,target,pP)+
     /* 누적집행은 활성 주문 전체가 아니라, 작업표에서 실제로 리뷰제출 완료된 주문만 합산한다.
        잔여집행은 작업오더의 총 결제금액에서 뺀다. 총액이 없는 작업은 0원으로 꾸미지 않는다. */
     scheduleWarning+`<div class="tp3money" title="작업표의 리뷰제출 칸이 채워진 주문의 결제금액 누계"><span>누적집행</span><b>${_wonFmt(c.executionAmount||0)}</b></div>`+

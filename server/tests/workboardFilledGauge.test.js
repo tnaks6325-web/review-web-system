@@ -146,7 +146,7 @@ console.log('\n[B2] 계산 위치 — 마스킹 전');
   // ⚠ 제출물 미리보기(2026-08-21)가 같은 import 에서 `numberColumnKey` 도 가져오며 형태가 바뀌었다.
   //   검사 의미는 불변 — 판정을 베끼지 않고 utils 에서 가져다 쓴다.
   ok('판정 사본 없음 — utils 를 import 해 쓴다',
-    /isFilledRow: _isFilledRow[\s\S]{0,80}\} = require\('\.\.\/utils\/rowNumbering'\)/.test(src));
+    /isFilledRow: _isFilledRow[\s\S]{0,140}\} = require\('\.\.\/utils\/rowNumbering'\)/.test(src));   // 결정 283: 같은 import 에 filledOverlaySql 이 더해져 길어졌다(의미 불변)
   /* ★ 결정 182(2026-09-26): 날짜별 인원은 규칙이 정한다 — 부족분은 **날짜별 예상 인원(projectDailyQuotas)
      이 남은 인원을 다 담지 못한 수**다. 종전(저장된 계획 합계 비교)은 "사람이 정한 날만 저장"하는 새 방식에서
      거짓 경고가 된다. 검사 의미(무시트 내부 보드에서만 · 0이면 필드 생략)는 그대로다. */
@@ -185,8 +185,9 @@ console.log('\n[C][D] 화면 게이지 — summaryStrip 을 vm 으로 실제 실
   const now = run({ total: 200, filled: 134, submitted: 134, paid: 119, executionAmount: 900000, remainingExecutionAmount: 100000 });
   ok('★ 참여자 분자 = 채워진 줄(134)', /참여자<\/span><span class="nm">134<small>\/200<\/small>/.test(now), now.slice(0, 400));
   ok('★ 참여자 % = 채워진 줄 / 총건수(67%)', />67%<\/span>/.test(now));
-  ok('★ 제출완료 분모도 채워진 줄(134/134)', /제출완료<\/span><span class="nm">134<small>\/134<\/small>/.test(now));
-  ok('★ 입금완료 분모도 채워진 줄(119/134)', /입금완료<\/span><span class="nm">119<small>\/134<\/small>/.test(now));
+  // ★★ 세 게이지 분모 = 총건수(사용자 확정 2026-10-23 · 결정 283 — 054 의 "제출·입금 분모 = 채워진 줄"을 바꿈)
+  ok('★ 제출완료 분모 = 총건수(134/200 · 67%)', /제출완료<\/span><span class="nm">134<small>\/200<\/small><\/span><span class="track"><i class="s" style="width:67%"><\/i><\/span><span class="pc">67%/.test(now), now.slice(0, 900));
+  ok('★ 입금완료 분모 = 총건수(119/200 · 60%)', /입금완료<\/span><span class="nm">119<small>\/200<\/small><\/span><span class="track"><i class="" style="width:60%"><\/i><\/span><span class="pc">60%/.test(now));
   ok('★ 준비된 줄은 사라지지 않는다 — 툴팁이 말한다',
     /title="채워진 줄 134명 · 준비된 줄 200줄 \(빈 슬롯 66줄\)"/.test(now), now.slice(0, 600));
   ok('★ 진행 현황 금액은 누적집행·잔여집행으로 표시한다',
