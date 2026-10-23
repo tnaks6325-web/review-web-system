@@ -207,7 +207,7 @@ process.env.JWT_SECRET = 'test-price-report';
   await t('★ 끄는 스위치가 꺼져 있으면 금액 고치기를 거절한다(남은 팝업·직접 호출) · 상품 이름 바꾸기가 신고·알림을 옮긴다 · 필수 스키마', async () => {
     const src = R('src/services/campaignPriceReport.service.js');
     assert.ok(/if \(action === 'edit'\) \{[\s\S]{0,260}if \(!ENABLED\) return \{ ok: false/.test(src));
-    // 이름 바꾸기는 단일 출처(services/campaignOptionRename — 공고 창 저장·양방향 공유 저장이 함께 쓴다 · 결정 274 7단계-④ ③)로 옮겨졌다.
+    // 이름 바꾸기는 단일 출처(services/campaignOptionRename — 공고 창 저장·양방향 공유 저장이 함께 쓴다 · 결정 275 7단계-④ ③)로 옮겨졌다.
     //   한 단계 함수(step)에 한 번씩 · 임시 이름 경유 두 단계가 같은 step 을 부른다 = 종전 "두 번" 과 같은 검사 의미.
     const routes = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'campaign.routes.js'), 'latin1');
     assert.ok(/require\('\.\.\/services\/campaignOptionRename\.service'\)\.applyOptionRenames\(client, campaignId, options\)/.test(routes));
@@ -278,7 +278,7 @@ process.env.JWT_SECRET = 'test-price-report';
     assert.ok(/모집공고 수정에서 고쳐 주세요/.test(h));
     assert.strictEqual((h.match(/data-a="keep"/g) || []).length, 2);
     assert.strictEqual((h.match(/data-a="defer"/g) || []).length, 2);
-    // 결정 279: 연결 공고는 리뷰오더 금액도 같이 바뀐다 — 머리말이 두 경우를 모두 말한다(검사 의미 갱신: 어디까지 바뀌는지 밝힌다)
+    // 결정 280: 연결 공고는 리뷰오더 금액도 같이 바뀐다 — 머리말이 두 경우를 모두 말한다(검사 의미 갱신: 어디까지 바뀌는지 밝힌다)
     assert.ok(/리뷰오더와 연결된 공고는 인트라넷 리뷰오더 금액도 같이 바뀌고, 연결 안 된 공고는 리뷰오더는 그대로예요/.test(h));
   });
   await t('팝업: 금액을 안 적고 [금액 고치기] = 보내지 않는다 · 쉼표·"원"을 지워 숫자로 보낸다', async () => {

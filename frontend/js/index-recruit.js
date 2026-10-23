@@ -920,7 +920,7 @@ function onRecruitDatesChange() {
   if (sDay && sd) sDay.textContent = _rfDow(sd.value);
   window.RecruitModal?.syncStartDateControl?.();
   _renderStartDateOriginNote();   // 날짜를 맞추면 대조 안내가 스스로 사라진다
-  _renderStartDateBasisNote();    // 결정 278 — 고치면 「직접 정한 날로 저장합니다」
+  _renderStartDateBasisNote();    // 결정 279 — 고치면 「직접 정한 날로 저장합니다」
   if (dDay && dl) dDay.textContent = _rfDow(dl.value);
   const warn = document.getElementById("rf_deadline_warn");
   if (!warn || !dl) return;
@@ -1252,7 +1252,7 @@ function _renderStartDateOriginNote() {
       + "line-height:1.5;background:#EFF6FF;color:#1E40AF;border:1px solid #BFDBFE";
     row.parentNode.insertBefore(box, row.nextSibling);
   }
-  // ★ 결정 278: 리뷰오더 시작일 = 희망 시작일 · 공고 시작일 = 실제 시작일(여기서 정함 · 안 정하면 첫 참여일)
+  // ★ 결정 279: 리뷰오더 시작일 = 희망 시작일 · 공고 시작일 = 실제 시작일(여기서 정함 · 안 정하면 첫 참여일)
   box.textContent = "리뷰오더의 희망 시작일은 " + wo + " 입니다 — 이 공고의 실제 시작일은 " + cur + " 입니다. "
     + "실제 시작일은 위 날짜에서 정합니다.";
 }
@@ -1660,7 +1660,7 @@ function _ugDropBox(box) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   📍 결정 277(D4 「나」 · 사용자 확정 2026-10-22) — 선택지 가이드 = **글 칸 하나 + 그 사이 사진 줄**
+   📍 결정 278(D4 「나」 · 사용자 확정 2026-10-22) — 선택지 가이드 = **글 칸 하나 + 그 사이 사진 줄**
    ─────────────────────────────────────────────────────────────────────
    글을 쓰다가 넣고 싶은 자리를 누르고 「여기에 사진 넣기」 → 그 줄에 사진이 끼어든다.
    사진 줄마다 위로·아래로·빼기. 저장은 새 칸 없이 **글 속 사진 자리**로(서버 `utils/guideCanon`):
@@ -1883,7 +1883,7 @@ function _ugBuild(key) {
   const box = document.createElement("div");
   box.className = "rf-ug";
   box.dataset.ug = key;
-  // ★ 결정 277 — 글 칸 하나 안에 사진 줄이 끼어드는 모양(인트라넷 리뷰오더와 같은 규격)
+  // ★ 결정 278 — 글 칸 하나 안에 사진 줄이 끼어드는 모양(인트라넷 리뷰오더와 같은 규격)
   box.innerHTML =
     '<div class="rf-ug-h">가이드유입<span class="rf-ug-badge">없음</span><span class="rf-ug-max">사진 최대 ' + _IG_MAX + '장</span></div>' +
     '<div class="ug-doc" id="rf_ugdoc_' + key + '"></div>' +
@@ -2023,12 +2023,12 @@ function _igSay(field, msg, kind) {
 }
 
 function _igRender(field) {
-  // 결정 277 — 선택지 칸은 스트립이 아니라 글·사진 줄(_ugDocRender)이 사진을 보여 준다(올리는 중·실패 표시 포함)
+  // 결정 278 — 선택지 칸은 스트립이 아니라 글·사진 줄(_ugDocRender)이 사진을 보여 준다(올리는 중·실패 표시 포함)
   if (_UG_KEY_RE.test(field) && document.getElementById("rf_ugdoc_" + field)) { _ugDocRender(field); return; }
   const strip = document.getElementById("rf_ig_" + field);
   if (!strip) return;
   const list = window._igState[field] || [];
-  // canonical 3칸(유입·리뷰·특이) — 사진 뒤에 [추가] 타일. 선택지 칸은 위에서 글·사진 줄로 갈라졌다(결정 277).
+  // canonical 3칸(유입·리뷰·특이) — 사진 뒤에 [추가] 타일. 선택지 칸은 위에서 글·사진 줄로 갈라졌다(결정 278).
   let h = "";
   if (!list.length) {
     h = `<button type="button" class="ig-empty" data-igadd="1">
@@ -2377,7 +2377,7 @@ function renderPartCheck() {
    ═══════════════════════════════════════ */
 /** 현재 진행상품 입력 모드 — 'none'(옵션 없는 작업) | 'opt'(옵션 있는 작업) */
 function _prodMode() {
-  /* ★★ 결정 276(사용자 확정 2026-10-22 「3.가」) — 공고 전체의 "옵션 없는/있는 작업" 스위치는 없다.
+  /* ★★ 결정 277(사용자 확정 2026-10-22 「3.가」) — 공고 전체의 "옵션 없는/있는 작업" 스위치는 없다.
      상품 카드마다 옵션 있음·없음을 고르고(인트라넷 리뷰오더 상품 카드와 같다), 저장 모양(선택지 원장 유무)은
      **카드 구성에서 정해진다** — 작업오더 → 공고 자동 생성 규칙(`_woProductMode`)과 같은 규칙:
        · 살아 있는 상품 카드가 둘 이상이거나, 옵션 있는 상품이 있거나 → 'opt'(선택지 원장)
@@ -2442,7 +2442,7 @@ function _renderProdTable(rows) {
   _ugDropAll();                 // 표를 통째로 갈아치우므로 옛 선택지 가이드 키를 먼저 버린다
   wrap.innerHTML = "";
   const list = rows || [];
-  // ★ 결정 276 — 언제나 상품 카드로 그린다(인트라넷 리뷰오더 상품 카드와 같은 모양).
+  // ★ 결정 277 — 언제나 상품 카드로 그린다(인트라넷 리뷰오더 상품 카드와 같은 모양).
   //   옵션 단위 줄은 같은 상품끼리 한 카드로 묶고, 상품 단위(옵션 없는 상품)는 그 자체가 카드 하나다.
   const groups = [];
   list.forEach(r => {
@@ -2476,13 +2476,13 @@ function _buildProdGroup(g) {
   box.dataset.unit = unit0;
   box.classList.toggle("rf-gp-noopt", unit0 === "product");
   const rows0 = (g && g.rows && g.rows.length) ? g.rows : [{}];
-  /* 상품 메인 주소(결정 276) — 옵션 없는 상품은 그 줄 주소가 곧 상품 주소. 옵션 있는 상품은 저장된 상품 주소(197 이후 줄)가 있을 때만
+  /* 상품 메인 주소(결정 277) — 옵션 없는 상품은 그 줄 주소가 곧 상품 주소. 옵션 있는 상품은 저장된 상품 주소(198 이후 줄)가 있을 때만
      "아는 값"(puKnown) — 모르는 채로 보내면 빈 값으로 지우게 되므로, 사람이 고치기 전에는 보내지 않는다(readOptRows). */
   const savedPu = rows0.map(r => r.productUrl ?? r.product_url).find(v => v !== undefined && v !== null && String(v).trim() !== "");
   const orderPu = (window._rfOrderProductUrls || {})[String(g && g.name || "").replace(/\|/g, "").trim()] || "";
   const firstUrl = String(rows0[0].optionUrl ?? rows0[0].option_url ?? rows0[0].url ?? "");
   const pu0 = unit0 === "product" ? String(savedPu || firstUrl || "") : String(savedPu || "");
-  /* ★ 저장돼 있던 줄(savedOptKey)인데 상품 주소가 없으면(197 이전) 옵션 없는 상품이라도 "모름" — 사람이 고치기 전엔 null 로 보낸다
+  /* ★ 저장돼 있던 줄(savedOptKey)인데 상품 주소가 없으면(198 이전) 옵션 없는 상품이라도 "모름" — 사람이 고치기 전엔 null 로 보낸다
      (코드 리뷰 2026-10-22: 그 줄 주소를 상품 주소로 보내면 공고에만 다르게 적혀 있던 옛 주소가 리뷰오더 상품 주소를 덮을 수 있다). */
   const savedRow = rows0.some(r => String(r.savedOptKey || "").trim());
   box.dataset.puKnown = (savedPu || (unit0 === "product" && !savedRow)) ? "1" : "0";
@@ -2577,7 +2577,7 @@ function _buildProdGroup(g) {
         }
       }
       // 옵션 없음 → 있음도 같다 — 사람이 이 카드를 직접 바꾸는 순간, 카드에 보이는 상품 주소를 아는 값으로 친다
-      // (안 그러면 197 이전 줄에서 넘어온 주소가 저장 때 빠져 다시 열면 주소 칸이 빈다 — 5단계 전수 시험 실측 2026-10-22)
+      // (안 그러면 198 이전 줄에서 넘어온 주소가 저장 때 빠져 다시 열면 주소 칸이 빈다 — 5단계 전수 시험 실측 2026-10-22)
       if (u === "option" && String(urlEl.value || "").trim()) box.dataset.puKnown = "1";
       box.dataset.unit = u;
       paintUnit();
@@ -2602,7 +2602,7 @@ function addOptRow(data) {
   const wrap = document.getElementById("rf_opt_rows");
   if (!wrap) return;
   window._rfForcedNone = false;   // 사람이 상품을 더했다 — 이제 카드 구성 규칙(_prodMode)대로
-  // ★ 결정 276 — [+ 상품 추가] = 상품 카드 하나(새 상품은 인트라넷처럼 「옵션 없음」으로 시작 · 카드에서 바꾼다)
+  // ★ 결정 277 — [+ 상품 추가] = 상품 카드 하나(새 상품은 인트라넷처럼 「옵션 없음」으로 시작 · 카드에서 바꾼다)
   wrap.appendChild(_buildProdGroup({
     name: (data && (data.productName ?? data.product_name)) || "",
     unit: (data && (data.unitKind ?? data.unit_kind)) === "option" ? "option" : "product",
@@ -2771,7 +2771,7 @@ function _buildOptRowEl(data) {
   const lastBtn = status === "closed"
     ? '<button type="button" class="btn-icon-sm rf-opt-reopen" title="옵션 재개(다시 모집)" style="color:#12b886"><i class="fas fa-rotate-left"></i></button>'
     : '<button type="button" class="btn-icon-sm rf-opt-del" title="이 옵션 삭제" style="color:#EF4444"><i class="fas fa-times"></i></button>';
-  // ★ 결정 276 — 칸마다 이름표(인트라넷 옵션 줄과 같은 이름 · 같은 순서). 옵션 없는 상품 카드는 URL·옵션 칸을 숨기고
+  // ★ 결정 277 — 칸마다 이름표(인트라넷 옵션 줄과 같은 이름 · 같은 순서). 옵션 없는 상품 카드는 URL·옵션 칸을 숨기고
   //   결제금액·모집인원·일건수만 보인다(그 줄의 주소는 카드의 상품 메인 URL 이 채운다). 칸의 class 는 그대로 — 저장·판정 함수 무변경.
   row.innerHTML =
     '<div class="rf-f rf-f-url"><span class="rf-f-l">옵션 URL<b>*</b></span><input class="rform-input rf-opt-url" type="url" inputmode="url" maxlength="2048" placeholder="https://..."></div>' +
@@ -2842,7 +2842,7 @@ function _buildOptRowEl(data) {
      "옵션별 유입가이드에 대한 공간을 확보해줘"). 패널·저장 로직(`_ugBuild`/`_ugLoad`/`_ugCompose`)은
      한 글자도 안 바꾼다 — 바뀐 건 **입구를 찾기 쉽게** 만드는 것뿐이다(사본 0). */
   unitEl.appendChild(row);
-  const thumbLine = _buildOptThumbLine(row, d.thumbnailUrl ?? d.thumbnail_url ?? "");   // ★ 결정 214: 상품 사진 — 줄 맨 아래(결정 276 카드: 가이드·조합 다음)
+  const thumbLine = _buildOptThumbLine(row, d.thumbnailUrl ?? d.thumbnail_url ?? "");   // ★ 결정 214: 상품 사진 — 줄 맨 아래(결정 277 카드: 가이드·조합 다음)
   const ugKey = _ugNewKey();
   row.dataset.ig = ugKey;
   _ugRegister(ugKey, "선택지 유입가이드");
@@ -2856,7 +2856,7 @@ function _buildOptRowEl(data) {
     '<span class="rf-ug-cta-ar">▾</span>';
   unitEl.appendChild(cta);
   unitEl.appendChild(_ugBuild(ugKey));
-  unitEl.classList.add("ug-on");   // ★ 결정 276 — 접지 않고 늘 펼쳐 둔다(인트라넷 상품 카드의 「가이드유입」 상자). 링크유입이면 빈 상자만 접힌다(CSS)
+  unitEl.classList.add("ug-on");   // ★ 결정 277 — 접지 않고 늘 펼쳐 둔다(인트라넷 상품 카드의 「가이드유입」 상자). 링크유입이면 빈 상자만 접힌다(CSS)
   // 값 주입은 DOM 에 붙은 뒤(`_ugAttachAll`) — 여기서 getElementById 를 부르면 조용히 no-op 이 된다
   row._ugPending = {
     html: d.inflowGuideHtml ?? d.inflow_guide_html ?? "",
@@ -2922,7 +2922,7 @@ function renderOptRows(options, opts) {
   const live = list.filter(o => (o.optKey || o.opt_key) && (o.status || "active") !== "closed");
   const forced = opts && opts.mode;
   const m = forced || (live.length ? "opt" : "none");
-  // ★ 결정 276 — 저장된 공고를 열 때 살아 있는 선택지 원장이 있으면 그 공고는 원장을 유지한다(_prodMode)
+  // ★ 결정 277 — 저장된 공고를 열 때 살아 있는 선택지 원장이 있으면 그 공고는 원장을 유지한다(_prodMode)
   if (opts && opts.saved) window._rfLiveLedger = live.length > 0;
   window._rfForcedNone = forced === "none";   // ★ 부르는 쪽이 'none' 을 명시한 표 — _prodMode 가 카드 수로 원장을 만들지 않게
   _applyProdModeUi(m);
@@ -2935,7 +2935,7 @@ function renderOptRows(options, opts) {
     // 상품 단위는 키가 곧 상품명 — 원장에 product_name 이 비어 있어도(구버전 행) 키로 되살린다
     const productName = String(o.productName ?? o.product_name ?? "")
       || (unitKind === "product" ? String(o.optKey ?? o.opt_key ?? "") : "");
-    // ★ 결정 276 — 부르는 쪽이 'none' 을 **명시**한 줄(원장 없는 공고·옵션 없는 작업오더)은 옵션 없는 상품 카드다.
+    // ★ 결정 277 — 부르는 쪽이 'none' 을 **명시**한 줄(원장 없는 공고·옵션 없는 작업오더)은 옵션 없는 상품 카드다.
     //   숨은 옵션명은 버린다(결정 042 — 옵션 없는 작업에서 옵션명 조각이 옵션이 되던 사고). 자동 판정 'none'(마감 줄만 남은 공고)은
     //   줄 종류를 그대로 둔다 — 마감 줄의 이름(opt_key)이 바뀌면 [↩ 재개]·참여 기록과 짝이 끊긴다.
     const unitDrawn = (forced === "none") ? "product" : unitKind;
@@ -2982,7 +2982,7 @@ function renderOptRowsWithProduct(options, productLines, campaign) {
          손대지 않은 저장 한 번에 둘째 상품부터 이름이 바뀌었다(2026-10-22 실측). 같은 줄 조각만 되붙인다(결정 042). */
       productName: (r.inherited && r.optKey) ? r.optKey : [r.productName, r.optKey].filter(Boolean).join(" "),
       optKey: "", payAmount: r.payAmount,
-      // ★ 결정 276 — 원장 없는 공고의 상품 주소 = 공고 상품 페이지(랜딩) — 첫 카드에만(나머지는 모른다)
+      // ★ 결정 277 — 원장 없는 공고의 상품 주소 = 공고 상품 페이지(랜딩) — 첫 카드에만(나머지는 모른다)
       optionUrl: i === 0 ? String(fallback.landing_url || "") : "",
       recruitTotal: i === 0 ? (fallback.recruit_total ?? 0) : 0,
       dailyLimit: i === 0 ? (fallback.daily_limit ?? 0) : 0,
@@ -3000,7 +3000,7 @@ function renderOptRowsWithProduct(options, productLines, campaign) {
      ★ **모르는 값은 건드리지 않는다** — 원장 값이 양수일 때만 싣는다(공개 화이트리스트 뷰·구버전 백엔드). */
   const hasLiveOpt = opts.some(o => (o.optKey || o.opt_key) && (o.status || "active") !== "closed");
   const campQuota = campaign || {};
-  window._rfLiveLedger = hasLiveOpt;   // ★ 결정 276 — 원장이 살아 있던 공고는 원장을 유지한다(_prodMode)
+  window._rfLiveLedger = hasLiveOpt;   // ★ 결정 277 — 원장이 살아 있던 공고는 원장을 유지한다(_prodMode)
   renderOptRows(opts.map((o, i) => {
     const key = o.optKey || o.opt_key || "";
     const hit = byOpt.get(key);
@@ -3101,7 +3101,7 @@ function readOptRows() {
       productName,
       unitKind,
       optionUrl,
-      // ★ 결정 276: 상품 메인 주소(카드) — 모르는 값(197 이전 줄을 사람이 안 고침)은 null = 저장된 값 유지
+      // ★ 결정 277: 상품 메인 주소(카드) — 모르는 값(198 이전 줄을 사람이 안 고침)은 null = 저장된 값 유지
       productUrl:    _rfRowProductUrl(r, unitKind),
       payAmount:     Math.max(0, parseInt(r.querySelector(".rf-opt-pay").value, 10) || 0),
       recruitTotal:  Math.max(0, parseInt(r.querySelector(".rf-opt-rt").value, 10) || 0),
@@ -3117,7 +3117,7 @@ function readOptRows() {
   return out;
 }
 
-/** 그 줄의 상품 메인 주소(결정 276) — 옵션 없는 상품 = 카드 주소(= 그 줄 주소) · 옵션 있는 상품 = 아는 값일 때만 카드 주소, 모르면 null */
+/** 그 줄의 상품 메인 주소(결정 277) — 옵션 없는 상품 = 카드 주소(= 그 줄 주소) · 옵션 있는 상품 = 아는 값일 때만 카드 주소, 모르면 null */
 function _rfRowProductUrl(row, unitKind) {
   const box = row && row.closest ? row.closest(".rf-gp") : null;
   if (!box) return null;
@@ -3301,7 +3301,7 @@ function applyProductRowsFromOrder(prefill) {
       inflowGuideHtml: o.inflowGuideHtml ?? o.inflow_guide_html ?? "",
       inflowGuideImages: o.inflowGuideImages ?? o.inflow_guide_images ?? [],
       optionUrl: o.optionUrl || o.option_url || o.url || "",
-      productUrl: o.productUrl || o.product_url || null,   // ★ 결정 276 — 그 줄이 속한 상품의 메인 주소
+      productUrl: o.productUrl || o.product_url || null,   // ★ 결정 277 — 그 줄이 속한 상품의 메인 주소
       optKey: o.optKey || o.opt_key || "",
       payAmount: o.payAmount || o.pay_amount || 0,
       recruitTotal: o.recruitTotal || 0, dailyLimit: o.dailyLimit || 0,
@@ -3346,7 +3346,7 @@ function applyProductRowsFromOrder(prefill) {
 /** 옵션표 요약·자동점검(정원합/하루합/중복). 반환: { dup, count } — 저장 시 중복 하드블록용 */
 /** 옵션표 요약·자동점검(정원합/하루합/중복). 반환: { dup, count } — 저장 시 중복 하드블록용 */
 function _optSummary() {
-  _applyProdModeUi(_prodMode());   // ★ 결정 276 — 모드는 카드 구성에서 정해진다(스위치 없음)
+  _applyProdModeUi(_prodMode());   // ★ 결정 277 — 모드는 카드 구성에서 정해진다(스위치 없음)
   _renderProdModeHelp();
   const el = document.getElementById("rf_opt_summary");
   const opts = readOptRows();
@@ -3362,7 +3362,7 @@ function _optSummary() {
     ? "⚠ 옵션 없는 상품 " + namelessProduct + "개에 상품명이 없어 선택지로 저장되지 않습니다"
     : "";
   if (!opts.length) {
-    // ★ 결정 276 — 옵션 없는 상품 하나(선택지 원장 없음)는 정상 구성이다 — "추가하세요" 가 아니라 그 사실을 말한다
+    // ★ 결정 277 — 옵션 없는 상품 하나(선택지 원장 없음)는 정상 구성이다 — "추가하세요" 가 아니라 그 사실을 말한다
     const oneProduct = _prodMode() !== "opt" && _readProdRows().some(r => r.productName || r.payAmount);
     el.innerHTML = namelessMsg || (oneProduct ? "옵션 없는 상품 1개 — 리뷰어는 옵션 선택 없이 바로 참여합니다." : (_prodMode() === "opt" ? "옵션을 추가하세요." : "상품을 추가하세요."));
     el.style.color = namelessMsg ? "#B45309" : "var(--t3)";
@@ -3470,7 +3470,7 @@ function onFeeScheduleToggle(on) {
   renderFeeSchedule();
 }
 
-/** 공고 창 시안 3차(결정 274 · 사용자 확정 2026-10-22): 「리뷰오더 고유 항목」·연결 표시줄·양방향 표시.
+/** 공고 창 시안 3차(결정 275 · 사용자 확정 2026-10-22): 「리뷰오더 고유 항목」·연결 표시줄·양방향 표시.
  *  info = 상세 응답의 orderInfo(연결 리뷰오더 · 없음 = null) · linked = 양방향으로 맞춰지는 공고(창을 연 시점 버전이 있음).
  *  ★ 모집 시작일은 리뷰오더 고유 값이라 연결 공고에서 보기 전용(사용자 확정 D5) — 연결 아닌 공고는 종전처럼 여기서 고친다. */
 function _rfApplyOrderLink(info, linked) {
@@ -3494,12 +3494,12 @@ function _rfApplyOrderLink(info, linked) {
   if (dRow && dVal) { const d = String((info && info.distribution) || "").trim(); dVal.textContent = d === "sequential" ? "순차진행" : d ? "균등분산" : ""; dRow.hidden = !(linked && d); }
   const hint = document.getElementById("rf_order_own_hint");
   if (hint) hint.textContent = info ? (linked ? "리뷰오더에서 정한 값 · 모집 시작일만 여기서 정합니다" : "리뷰오더에서 정한 값 · 연결 전이라 여기서도 고칠 수 있음") : "연결된 리뷰오더가 없는 공고 — 여기서 정합니다";
-  /* ★ 결정 278(사용자 확정 2026-10-23 「나」): 리뷰오더의 시작일은 희망 시작일 — 실제 시작일은 연결된 공고에서도 여기서 정한다.
+  /* ★ 결정 279(사용자 확정 2026-10-23 「나」): 리뷰오더의 시작일은 희망 시작일 — 실제 시작일은 연결된 공고에서도 여기서 정한다.
      (종전 D5 는 잠갔지만 리뷰오더 쪽 시작일은 접수 뒤 고칠 수 없어, 연결 공고의 시작일을 아무도 못 고치는 막다른 길이었다.) */
   _renderStartDateBasisNote();
 }
 
-/** 결정 278 — 시작일 옆 한 줄: 누가 정한 날인가(사람 · 아직 안 정함 → 첫 참여일로 맞춤 · 첫 참여일로 맞춤). 값은 바꾸지 않는다. */
+/** 결정 279 — 시작일 옆 한 줄: 누가 정한 날인가(사람 · 아직 안 정함 → 첫 참여일로 맞춤 · 첫 참여일로 맞춤). 값은 바꾸지 않는다. */
 function _renderStartDateBasisNote() {
   const sRow = document.getElementById("rf_start_date_row");
   if (!sRow) return;
@@ -3523,7 +3523,7 @@ function _renderStartDateBasisNote() {
   note.textContent = text;
 }
 
-/** ★ 양방향 5단계(결정 274 · 사용자 확정 2026-10-20): 리뷰오더와 맞춰지는 공고는 기간별 리뷰비를 직접 고치지 않는다.
+/** ★ 양방향 5단계(결정 275 · 사용자 확정 2026-10-20): 리뷰오더와 맞춰지는 공고는 기간별 리뷰비를 직접 고치지 않는다.
  *  리뷰비 칸만 바꾸면 서버가 "오늘부터 새 금액" 구간을 넣고 지난 참여 금액을 고정한다 — 표는 보기 전용으로 둔다.
  *  (저장도 기간표를 보내지 않는다 — 창을 연 뒤 생긴 구간을 옛 표로 지우지 않게.) 연결 아닌 공고는 종전 그대로. */
 function _rfApplyFeeLinkLock() {
@@ -3754,7 +3754,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   window._rfBidirBase = null;   // ★ 양방향 4단계-2: 창을 연 시점의 리뷰오더 공유 버전(연결 공고만)
   _rfApplyFeeLinkLock();        // ★ 5단계: 지난 공고의 보기 전용 잠금을 푼다
   _rfApplyOrderLink(null, false);   // 시안 3차: 지난 공고의 연결 표시·시작일 잠금을 지운다
-  window._rfOrderProductUrls = {};   // 결정 276: 연결 리뷰오더의 상품 메인 주소(보기용) — 새 공고·다른 공고에 남지 않게
+  window._rfOrderProductUrls = {};   // 결정 277: 연결 리뷰오더의 상품 메인 주소(보기용) — 새 공고·다른 공고에 남지 않게
   window._rfLiveLedger = false;
   window._rfForcedNone = false;
   _rfLastScheduledPurchaseWindow = { start: "", end: "" };
@@ -3832,7 +3832,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   window._rfInflowOrigin = '';   // 유입방식 출처(저장값/작업오더) — 지난 공고 안내 누수 방지
   window._rfMixOrigin = '';   // 혼합 조합 출처(저장값/작업오더/없음) — 지난 공고 안내 누수 방지
   window._rfOrderStartDate = '';  // 연결 작업오더 시작일(대조용) — 지난 공고 안내 누수 방지
-  window._rfStartSeen = null; window._rfStartBasis = ''; window._rfPrefillStart = null;   // 결정 278 — 지난 공고 값 누수 방지
+  window._rfStartSeen = null; window._rfStartBasis = ''; window._rfPrefillStart = null;   // 결정 279 — 지난 공고 값 누수 방지
   window._rfRoundsLock = null;    // 차수 원장 잠금(모름=null) — 지난 공고 상태 누수 방지
   // ★ 카드는 렌더 캐시(signature)를 들고 재사용되는 DOM 이다 — 캐시를 비우지 않으면
   //   다음 공고를 열어도 이전 공고의 수량·기준값이 그대로 남아(early-return) 저장값이 안 보인다.
@@ -3903,7 +3903,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
         throw new Error("편집용 전체 공고 정보를 받지 못했습니다. 저장할 수 없습니다.");
       }
       window._recruitEditLoaded = c;   // ★ 064: sort_order 등 "UI 없는 서버 ||0 강제 필드"의 로드값 보존용
-      /* ★ 양방향 4단계-2(결정 274): 리뷰오더와 맞춰지는 공고면 창을 연 시점의 버전을 기억했다가 저장 때 그대로 보낸다.
+      /* ★ 양방향 4단계-2(결정 275): 리뷰오더와 맞춰지는 공고면 창을 연 시점의 버전을 기억했다가 저장 때 그대로 보낸다.
          안 보내면 서버는 "옛 화면" 으로 보고, 공통 칸이 지금 값과 다르면 저장을 막는다(창을 연 뒤 인트라넷이 고친 값을 덮지 않게). */
       window._rfBidirBase = (json && json.bidir && Number(json.bidir.sync_version) > 0) ? Number(json.bidir.sync_version) : null;
       /* ★ 차수 원장 잠금 — 서버가 총모집 전송값을 무시하는지 **열 때부터** 안다(null=모름). */
@@ -3983,7 +3983,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
         }
         const setV = (i, v) => { const el = document.getElementById(i); if (el && v != null && v !== "") el.value = v; };
         setV("rf_start_date", (c.start_date || "").slice(0, 10));
-        window._rfStartSeen = (c.start_date || "").slice(0, 10);          // 결정 278 — 창을 열 때 본 값(같으면 서버가 「안 고침」으로 친다)
+        window._rfStartSeen = (c.start_date || "").slice(0, 10);          // 결정 279 — 창을 열 때 본 값(같으면 서버가 「안 고침」으로 친다)
         window._rfStartBasis = String(c.start_date_basis || "");
         /* ★ 발행은 **스냅샷**이라 발행 뒤 작업오더 시작일이 바뀌어도 공고는 따라가지 않는다.
            그 사실을 확인할 창구가 없어 "오더는 8/19인데 공고는 8/12"가 원인 불명으로 보였다
@@ -4195,7 +4195,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
         pe.checked = true; onParticipationToggle(true);
         const setV = (i, v) => { const el = document.getElementById(i); if (el && v != null && v !== "") el.value = v; };
         setV("rf_start_date", prefill.start_date);
-        window._rfPrefillStart = String(prefill.start_date || "").slice(0, 10);   // 결정 278 — 오더 희망 시작일
+        window._rfPrefillStart = String(prefill.start_date || "").slice(0, 10);   // 결정 279 — 오더 희망 시작일
         const _skipWeekendsEl = document.getElementById("rf_skip_weekends");
         if (_skipWeekendsEl) _skipWeekendsEl.checked = prefill.skip_weekends === true;
         setV("rf_daily_limit", prefill.daily_limit);
@@ -6087,7 +6087,7 @@ async function saveRecruitPostImpl() {
       }
       /* ★ 062: ""=서버에서 비움(자율주문 전환·시작일 제거), 값=설정 — null(유지)은 미전송 화면(admin-siand)만 */
       payload.start_date     = document.getElementById("rf_start_date")?.value || "";
-      if (_recruitEditId && window._rfStartSeen != null) payload.start_date_seen = window._rfStartSeen;   // 결정 278
+      if (_recruitEditId && window._rfStartSeen != null) payload.start_date_seen = window._rfStartSeen;   // 결정 279
       payload.skip_weekends  = !!document.getElementById("rf_skip_weekends")?.checked;
       payload.window_start   = document.getElementById("rf_window_start").value || "";
       payload.window_end     = document.getElementById("rf_window_end").value || "";
@@ -6193,7 +6193,7 @@ async function saveRecruitPostImpl() {
         const invalidOptionUrl = payload.options.find(option =>
           String(option.optionUrl || "").trim() && !_rfHttpUrl(option.optionUrl));
         if (invalidOptionUrl) { renderPartCheck(); _rfSaveBlocked("옵션 URL은 http:// 또는 https:// 주소로 입력해주세요.", { go: _rfGoToCheck }); return; }
-        // ★ 결정 276 — 상품 메인 URL 도 같은 규칙(값이 있는데 형식이 틀리면 막는다). 서버는 틀린 주소를 빈 값으로 바꿔 저장된 주소를 지운다.
+        // ★ 결정 277 — 상품 메인 URL 도 같은 규칙(값이 있는데 형식이 틀리면 막는다). 서버는 틀린 주소를 빈 값으로 바꿔 저장된 주소를 지운다.
         const invalidProductUrl = Array.from(document.querySelectorAll("#rf_opt_rows .rf-gp-url"))
           .find(i => String(i.value || "").trim() && !_rfHttpUrl(i.value));
         if (invalidProductUrl) { renderPartCheck(); _rfSaveBlocked("상품 메인 URL은 http:// 또는 https:// 주소로 입력해주세요.", { go: _rfGoToCheck }); return; }

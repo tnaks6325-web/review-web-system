@@ -315,7 +315,7 @@ function _woOptionRows(o) {
           optKey: isNone ? "" : lab,
           // 옵션 링크가 비면 그 상품의 메인 URL 로 접는다(공고 공통 랜딩으로 떨어지면 남의 상품이 열린다)
           optionUrl: clean(op.url || op.option_url || "") || prodUrl,
-          // ★ 결정 276 — 그 줄이 속한 상품의 메인 주소(공고 창 상품 카드의 "상품 메인 URL" · 옵션 주소와 따로 저장)
+          // ★ 결정 277 — 그 줄이 속한 상품의 메인 주소(공고 창 상품 카드의 "상품 메인 URL" · 옵션 주소와 따로 저장)
           productUrl: prodUrl,
           payAmount: Number(op.pay) || basePay,
           // 옵션별 정원·일건수까지 오더 입력값을 그대로 모집공고 표에 적용한다.

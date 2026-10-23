@@ -1,5 +1,5 @@
 /**
- * 양방향 4단계-3(결정 274) — 공유 칸 쓰기 경로 허용목록(정적 가드).
+ * 양방향 4단계-3(결정 275) — 공유 칸 쓰기 경로 허용목록(정적 가드).
  *
  * 연결 오더의 공유 칸은 `applySharedPatch` 한 곳으로만 바뀌어야 한다(완화 금지 ①). 그런데 같은 칸을 쓰는 옛 경로가 남아 있다
  * (스위치가 꺼졌거나 연결 안 된 오더용 · 공유 저장의 투영 본체). 그래서 **어디서 그 칸을 쓰는지 전부 목록으로 고정**하고,
@@ -36,10 +36,10 @@ const ALLOW = {
   'services/campaignPayAmountSync.service.js|syncCampaignPayAmount|campaign_options': '옛 원본 수정 경로의 전파(금액) — 연결+apply 오더는 _intakeSourceBidir 로 갈라져 여기 오지 않는다',
   'routes/order.routes.js|_intakeSourceRevisionHandler|work_orders': '연결+apply 면 그 앞에서 _intakeSourceBidir 로 갈라진다(종전 경로 = 연결 안 됨·스위치 off)',
   'services/campaignPayAmountSync.service.js|syncCampaignPayAmount|recruit_campaigns': '옛 원본 수정 경로의 전파(금액 — 5단계)',
-  // 결정 279: 가격 신고 [금액 고치기] — 연결 공고는 _editLinkedPrice 가 알림 트랜잭션 밖에서 먼저 공유 저장(applySharedPatch)을 탄다.
+  // 결정 280: 가격 신고 [금액 고치기] — 연결 공고는 _editLinkedPrice 가 알림 트랜잭션 밖에서 먼저 공유 저장(applySharedPatch)을 탄다.
   //   여기 쓰기는 ① 연결 아닌 공고 ② 공유 저장 뒤 투영이 공고를 못 따라왔을 때 공고만 오더와 같은 금액으로 맞춤 — 오더와 갈라지지 않는다.
-  'services/campaignPriceReport.service.js|_writePriceInTx|recruit_campaigns': '가격 신고 금액 고치기 — 연결 공고는 _editLinkedPrice(공유 저장) 먼저(결정 279)',
-  'services/campaignPriceReport.service.js|_writePriceInTx|campaign_options': '가격 신고 금액 고치기 — 연결 공고는 _editLinkedPrice(공유 저장) 먼저(결정 279)',
+  'services/campaignPriceReport.service.js|_writePriceInTx|recruit_campaigns': '가격 신고 금액 고치기 — 연결 공고는 _editLinkedPrice(공유 저장) 먼저(결정 280)',
+  'services/campaignPriceReport.service.js|_writePriceInTx|campaign_options': '가격 신고 금액 고치기 — 연결 공고는 _editLinkedPrice(공유 저장) 먼저(결정 280)',
   'services/campaignPayAmountSync.service.js|syncCampaignThumbnailInTx|recruit_campaigns': '공유 저장 투영 본체(트랜잭션 안) + 옛 래퍼',
   'services/campaignPayAmountSync.service.js|syncCampaignInflowInTx|recruit_campaigns': '공유 저장 투영 본체 + 옛 래퍼',
   'services/campaignPayAmountSync.service.js|syncCampaignInflowInTx|campaign_options': '공유 저장 투영 본체 + 옛 래퍼',

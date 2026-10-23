@@ -149,7 +149,7 @@ async function syncCampaignPayAmount({ workOrderId, productOptionsJson, by = 'so
         await client.query(
           'UPDATE campaign_options SET pay_amount = $3, updated_at = NOW() WHERE campaign_id = $1 AND opt_key = $2',
           [camp.id, o.opt_key, next]);
-        // 결정 274 5단계 — 잘못구매 판정이 "신청한 시각의 금액" 을 찾게 이력을 남긴다(실패해도 전파는 계속).
+        // 결정 275 5단계 — 잘못구매 판정이 "신청한 시각의 금액" 을 찾게 이력을 남긴다(실패해도 전파는 계속).
         await require('./campaignPriceHistory.service').recordOptionPriceChangeInTx(client,
           { campaignId: camp.id, optionId: o.id, oldPay: o.pay_amount, newPay: next, actor: `리뷰오더(${by})` });
         changed += 1;
@@ -226,7 +226,7 @@ async function syncCampaignPayAmount({ workOrderId, productOptionsJson, by = 'so
  * ★ **절대 throw 하지 않는다** · 쓰기 표면 = `recruit_campaigns.thumbnail_url` 한 칸.
  */
 /**
- * 썸네일 쓰기 본체 — **호출부의 트랜잭션 안에서**(잠금·커밋은 호출부 몫). 종전 래퍼와 양방향 공유 저장(결정 274)이 같이 쓴다.
+ * 썸네일 쓰기 본체 — **호출부의 트랜잭션 안에서**(잠금·커밋은 호출부 몫). 종전 래퍼와 양방향 공유 저장(결정 275)이 같이 쓴다.
  * @param {object} camp 이미 잠근 공고({id})
  */
 async function syncCampaignThumbnailInTx(client, camp, url) {
@@ -450,7 +450,7 @@ function _isFreeTimeText(text) { return /자유|자율/.test(String(text || ''))
 /**
  * 구매시간대 쓰기 본체 — **호출부의 트랜잭션 안에서**(잠금·커밋·되돌리기는 호출부 몫). 규칙은 아래 래퍼 설명 그대로.
  * @param {{textOnlyWhenLegacy?: boolean}} [opts] 레거시(참여형 아님) 공고에서 글자(`time_range`)만이라도 맞출지 —
- *   양방향 공유 저장(결정 274)만 켠다. 시간창 개념이 없는 공고라 시각 칸은 건드리지 않는다.
+ *   양방향 공유 저장(결정 275)만 켠다. 시간창 개념이 없는 공고라 시각 칸은 건드리지 않는다.
  */
 async function syncCampaignPurchaseWindowInTx(client, camp, purchaseTime, { textOnlyWhenLegacy = false } = {}) {
   const { parsePurchaseTime } = require('../utils/purchaseTimeWindow');
@@ -599,7 +599,7 @@ module.exports = {
   syncCampaignPayAmount,
   syncCampaignThumbnail,
   syncCampaignInflow,
-  // ★ 양방향 공유 저장(결정 274) — 같은 쓰기 본체를 호출부 트랜잭션 안에서
+  // ★ 양방향 공유 저장(결정 275) — 같은 쓰기 본체를 호출부 트랜잭션 안에서
   syncCampaignThumbnailInTx,
   syncCampaignInflowInTx,
   syncCampaignPurchaseWindowInTx,

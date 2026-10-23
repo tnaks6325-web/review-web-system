@@ -222,7 +222,7 @@ function loadSvc(pool) {
     assert.match(wd, /if\(copyFormLink\._busy\) return;/);
   });
   await ta('작업오더 목록 응답이 늦게 와도(다른 화면·로그아웃) 표를 그리지 않는다', () => {
-    assert.match(wd, /if\(!\$\('#wohead'\)\|\|!\$\('#wobody'\)\)\{ _woSyncNavBadge\(\); return; \}\s*_renderWoHead\(\); (?:if\(STATE\.woRecon\) _rcRender\(\); else )?_renderWoBody\(\);/);   // 결정 274: 오더·공고 맞추기 화면이면 목록 대신 그 화면(검사 의미 불변)
+    assert.match(wd, /if\(!\$\('#wohead'\)\|\|!\$\('#wobody'\)\)\{ _woSyncNavBadge\(\); return; \}\s*_renderWoHead\(\); (?:if\(STATE\.woRecon\) _rcRender\(\); else )?_renderWoBody\(\);/);   // 결정 275: 오더·공고 맞추기 화면이면 목록 대신 그 화면(검사 의미 불변)
   });
 
   console.log(`\n결과: ${pass} 통과 / ${fail} 실패`);

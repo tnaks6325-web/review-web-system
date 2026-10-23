@@ -1,4 +1,4 @@
--- 195: 리뷰오더↔모집공고 양방향 동기화 기반 (결정 274 · 양방향 2단계)
+-- 196: 리뷰오더↔모집공고 양방향 동기화 기반 (결정 275 · 양방향 2단계)
 -- ★ 가산 전용 — 칸·표를 더하기만 한다. 기존 행 값 변경(백필) 0 · 트리거·함수 0 · DROP 0.
 -- ★ 이 칸·표를 읽는 코드는 아직 없다(2단계 = 관찰 전용). 그래서 REQUIRED_SCHEMA 에도 등록하지 않는다 —
 --   이 파일이 실패해도 기동은 계속된다(읽는 코드가 들어가는 단계에서 등록한다).
@@ -15,7 +15,7 @@ ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS intranet_acked_version BIGINT N
 ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS required_delivery_memo TEXT NOT NULL DEFAULT '';
 ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS purchase_channel_custom BOOLEAN NOT NULL DEFAULT FALSE;
 
--- 옵션별 유입가이드 문서(글-사진 순서 블록, 결정 274 D4). HTML 칸(inflow_guide_html)은 그대로 계속 쓴다.
+-- 옵션별 유입가이드 문서(글-사진 순서 블록, 결정 275 D4). HTML 칸(inflow_guide_html)은 그대로 계속 쓴다.
 ALTER TABLE campaign_options ADD COLUMN IF NOT EXISTS inflow_guide_doc JSONB;
 
 -- 버전마다 공유 상태 스냅숏 — 3방향 병합의 base. op_id = 같은 저장 재전송 판별(멱등).
@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS work_order_option_links (
   UNIQUE (campaign_id, opt_key)
 );
 
--- 옵션 결제금액 이력 — 잘못구매 판정은 "구매 시점 금액"으로(결정 274 D3). campaign_options.id 는 INTEGER.
+-- 옵션 결제금액 이력 — 잘못구매 판정은 "구매 시점 금액"으로(결정 275 D3). campaign_options.id 는 INTEGER.
 CREATE TABLE IF NOT EXISTS campaign_option_price_history (
   id           BIGSERIAL PRIMARY KEY,
   campaign_id  TEXT NOT NULL,

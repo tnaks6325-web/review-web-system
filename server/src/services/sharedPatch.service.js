@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// 양방향 공유 저장 — 연결된 작업오더의 공유 칸을 한 트랜잭션에서 고치고 공고까지 맞춘다 (결정 274 · 3단계)
+// 양방향 공유 저장 — 연결된 작업오더의 공유 칸을 한 트랜잭션에서 고치고 공고까지 맞춘다 (결정 275 · 3단계)
 //
 // ★★ 쓰기 단일 출처 — 연결(`bidir_state='on'`)된 오더의 공유 칸은 이 함수로만 바뀐다.
 //    판정은 `utils/sharedPatchPlan`(3방향), 공고 반영은 기존 전파 본체(`*InTx`)를 같은 트랜잭션에서 부른다.
@@ -945,7 +945,7 @@ const _STRUCT_REJECT = (reason, error) => ({ reject: { kind: 'structure', out: {
  *   ③ 공고 전체 품절 멈춤(결정 259 — 공고 행)을 그 줄의 멈춤으로 옮긴다 ④ 공고 전체 품절 신고·알림(opt_key '')을 그 줄 이름으로 옮긴다.
  *   그 뒤는 이미 있는 더하기·지우기(마감)·투영이 그대로 처리한다 — 원래 상품에 참여자가 있으면 지워도 마감으로 남는다.
  * ★ 같은 트랜잭션 — 뒤에서 거부되면 통째로 되돌아간다. 잠금 순서 = 공고 행(호출부가 이미 잠금) → 상품 줄(결정 229와 같다).
- * ★ 바로 구매(공고 밖 주문)는 옮겨 적지 않는다 — 상품이 하나뿐인 동안은 이름이 달라도 그 상품으로 센다(결정 252). 상품이 둘 이상이 되면 이름으로만 센다(사각지대 — 결정 274 ⑤).
+ * ★ 바로 구매(공고 밖 주문)는 옮겨 적지 않는다 — 상품이 하나뿐인 동안은 이름이 달라도 그 상품으로 센다(결정 252). 상품이 둘 이상이 되면 이름으로만 센다(사각지대 — 결정 275 ⑤).
  * @returns {{adopted:boolean, optKey?:string, moved?:number, paused?:boolean} | {reject}}
  */
 async function _adoptSoleProductInTx(client, camp, theirs) {
@@ -1504,7 +1504,7 @@ async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTo
       }
     }
   }
-  // 결정 276 — 상품 메인 주소(같은 상품의 줄 전부 · 마감 줄 포함: 그 상품의 주소다). 주소가 움직였거나 줄을 더한 저장(새 줄은 프리필 값으로 들어와 주소가 비어 있다).
+  // 결정 277 — 상품 메인 주소(같은 상품의 줄 전부 · 마감 줄 포함: 그 상품의 주소다). 주소가 움직였거나 줄을 더한 저장(새 줄은 프리필 값으로 들어와 주소가 비어 있다).
   if (urlTouched || has('product_url') || extra.structureTouched) {
     const prodUrls = new Map();
     for (const o of proj.options) { const pName = o.key.split('|')[0]; if (!prodUrls.has(pName)) prodUrls.set(pName, o.product_url); }
@@ -1678,7 +1678,7 @@ async function applySharedPatch(p) {
       const isGuide = w => w.meta && w.meta.kind === 'leaf' && w.meta.key === 'guide';
       const linkInflow = String((p.mine && p.mine.inflow_type) || '').trim() !== 'guide';
       // ★ 옛 인트라넷의 가이드 차이는 "낡은 사본" 과 "진짜 수정" 을 가를 근거가 없다(옛 화면은 리뷰웹 가이드를 받지 못해 창 자체가 낡은 값으로 열린다).
-      //   막으면 리뷰웹이 가이드를 한 번 바꾼 뒤로 그 오더의 옛 화면 저장이 전부 막힌다 → 버린다(기록). 그래서 배포는 인트라넷 먼저(결정 274 5·6단계).
+      //   막으면 리뷰웹이 가이드를 한 번 바꾼 뒤로 그 오더의 옛 화면 저장이 전부 막힌다 → 버린다(기록). 그래서 배포는 인트라넷 먼저(결정 275 5·6단계).
       const dropGuide = w => isGuide(w) && (p.guideCapable === false || (linkInflow && w.mine === ABSENT));
       const dropped = [...plan.writes, ...plan.conflicts].filter(dropGuide).map(w => w.path);
       if (dropped.length) {
@@ -1762,7 +1762,7 @@ async function applySharedPatch(p) {
         error: `창을 연 뒤 다른 곳에서 마감된 옵션이 있어 저장하지 않았습니다: ${[...new Set(meanwhile.map(w => _label(w)))].join(', ')}. 창을 닫고 다시 열어 주세요.` });
     }
     const blocked = [...plan.writes, ...plan.conflicts].filter(w => !writablePath(w, p.origin));
-    // 7단계-④ ⑤ 접수 뒤 영구 금지 칸(배송 혼합·회수로 가거나 오는 배송 · 혼합 수량 · 회수 정보 · 체험단 종류)은 "아직" 이 아니다 — 새 리뷰오더 안내(결정 274 「4.가」).
+    // 7단계-④ ⑤ 접수 뒤 영구 금지 칸(배송 혼합·회수로 가거나 오는 배송 · 혼합 수량 · 회수 정보 · 체험단 종류)은 "아직" 이 아니다 — 새 리뷰오더 안내(결정 275 「4.가」).
     //   배송 한 종류끼리인데 막힌 경우(그 출처가 아직 못 씀 — 관리자 오더 수정)는 종전 안내 그대로.
     const permBlocked = blocked.filter(w => w.meta && w.meta.kind === 'field' && (['delivery_type_mix', 'recall_courier', 'recall_product', 'work_kind'].includes(w.meta.key)
       || (w.meta.key === 'delivery_type' && !(_deliverySingle(w.base) && _deliverySingle(w.mine)))));

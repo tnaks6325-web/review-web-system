@@ -7,7 +7,7 @@
  *     (실측 오염 문장 `상품명 결제금액 22,000원 - 결제금액 22,000원` 재발 차단)
  *  B. 모드가 옵션 유무의 **단일 출처** — 'none' 이면 숨은 칸에 값이 남아 있어도
  *     `readOptRows()` 는 빈 배열, `rf_wd_product` 원문에도 옵션명이 안 샌다
- *     ★ 결정 276(2026-10-22 「3.가」): 공고 전체 스위치는 없다 — 모드는 **상품 카드 구성**에서 정해진다
+ *     ★ 결정 277(2026-10-22 「3.가」): 공고 전체 스위치는 없다 — 모드는 **상품 카드 구성**에서 정해진다
  *       (상품 둘 이상·옵션 있는 상품 = opt · 옵션 없는 상품 하나 = none · 원장이 살아 있던 공고 = opt 유지).
  *       판정은 여전히 `_prodMode()` 한 곳이고 저장·원문이 그것을 본다(단일 출처 불변).
  *  C. 자동 판정 = 살아있는 옵션 유무(서버 `liveOptions` 와 같은 기준) — 마감만 남은 카드는 세지 않는다
@@ -59,7 +59,7 @@ function grabConst(src, name) {
 function makeDom() {
   const byId = {};
   function parseHtml(html) {
-    // ★ 결정 276 — 상품 카드는 칸이 이름표 상자 안에 들어간다(겹친 마크업). 여는·닫는 태그 짝으로 실제 DOM 처럼 겹쳐 세운다
+    // ★ 결정 277 — 상품 카드는 칸이 이름표 상자 안에 들어간다(겹친 마크업). 여는·닫는 태그 짝으로 실제 DOM 처럼 겹쳐 세운다
     //   (평평하게 세우면 「.rf-gp-unit button」 같은 후손 선택자가 아무것도 못 찾아 버튼 배선을 시험할 수 없다).
     const top = [], stack = [];
     const VOID = new Set(['input', 'img', 'br']);
@@ -182,7 +182,7 @@ function makeTable(opts) {
   [
     '_htmlToPlainPreview', '_igSetList', '_igSplitInflow', '_rfHttpUrl', '_rfGroupUnit', '_rfRowProductName', '_optUnitEntries',
     '_ugNewKey', '_ugRegister', '_ugDrop', '_ugDropAll', '_ugDropBox', '_ugBuild', '_ugLoad', '_ugCompose', '_ugMark', '_ugAttachAll',
-    // 결정 277 — 글·사진 줄 편집 모델
+    // 결정 278 — 글·사진 줄 편집 모델
     '_ugSt', '_ugDocNorm', '_ugDocSync', '_ugSig', '_ugMirror', '_ugAutoH', '_ugDocRender', '_ugMove', '_ugDocChanged', '_ugInsHere', '_ugDocBind', '_ugHtmlText',
     '_prodMode', '_applyProdModeUi', '_setProdModeNote', '_renderProdModeHelp', '_rfRefreshCards', '_rfSyncFirstCardUrl', '_rfRowProductUrl',
     '_renderProdTable', '_buildProdGroup', '_syncGroupTotals', 'addOptRow', '_buildOptThumbLine', '_buildOptRowEl',
@@ -218,7 +218,7 @@ console.log('\n[A] 작업오더 상품 원문 — 옵션 없는 줄 오독');
 }
 
 /* ══════════════ B. 모드 = 옵션 유무의 단일 출처 ══════════════ */
-console.log('\n[B] 모드가 옵션 유무의 단일 출처(결정 276 — 카드 구성에서 정해짐)');
+console.log('\n[B] 모드가 옵션 유무의 단일 출처(결정 277 — 카드 구성에서 정해짐)');
 {
   const t = makeTable();
   // 옵션명 값이 들어간 행을 'none' 으로 그리면 = 옵션 없는 상품 카드 — 저장에도 원문에도 옵션이 안 나가야 한다
@@ -238,7 +238,7 @@ console.log('\n[B] 모드가 옵션 유무의 단일 출처(결정 276 — 카�
   ok('opt 모드: 작업내용 원문에 옵션명 포함', /상품A - 블랙 - 결제금액/.test(t.dom.byId.rf_wd_product.value));
 }
 
-/* ══════════════ B-2. 결정 276 — 카드 구성이 정하는 저장 모양 ══════════════ */
+/* ══════════════ B-2. 결정 277 — 카드 구성이 정하는 저장 모양 ══════════════ */
 console.log('\n[B-2] 카드 구성 → 저장 모양(발행 프리필 _woProductMode 와 같은 규칙)');
 {
   const t = makeTable();
@@ -264,7 +264,7 @@ console.log('\n[B-2] 카드 구성 → 저장 모양(발행 프리필 _woProduct
   t2.run(`renderOptRowsWithProduct([{ optKey:'상품A', unitKind:'product', productName:'상품A', payAmount:1000, recruitTotal:3, dailyLimit:1, status:'active' }], '상품A - 결제금액 1,000원')`);
   ok('원장 줄이 살아 있던 상품 하나 = opt 유지', t2.run('_prodMode()') === 'opt' && JSON.parse(t2.run('JSON.stringify(readOptRows())')).length === 1);
 
-  // 옵션 있는 상품의 상품 주소 — 모르는 값(197 이전 줄)은 보내지 않는다(null = 저장된 값 유지) · 사람이 고치면 보낸다
+  // 옵션 있는 상품의 상품 주소 — 모르는 값(198 이전 줄)은 보내지 않는다(null = 저장된 값 유지) · 사람이 고치면 보낸다
   const t3 = makeTable();
   t3.run(`renderOptRows([{ productName:'힙스', optKey:'콰이어트', payAmount:1, recruitTotal:1, dailyLimit:1 }, { productName:'힙스', optKey:'어나더', payAmount:1, recruitTotal:1, dailyLimit:1 }])`);
   ok('모르는 상품 주소 = null', JSON.parse(t3.run('JSON.stringify(readOptRows())')).every(x => x.productUrl === null));
@@ -273,7 +273,7 @@ console.log('\n[B-2] 카드 구성 → 저장 모양(발행 프리필 _woProduct
   const t4 = makeTable();
   t4.run(`renderOptRows([{ productName:'힙스', optKey:'콰이어트', productUrl:'https://s.example/saved', payAmount:1, recruitTotal:1, dailyLimit:1 }])`);
   ok('저장된 상품 주소는 그대로 보낸다', JSON.parse(t4.run('JSON.stringify(readOptRows())'))[0].productUrl === 'https://s.example/saved');
-  // ★ 코드 리뷰(2026-10-22) — 저장돼 있던 옵션 없는 상품 줄(savedOptKey)인데 상품 주소가 없으면(197 이전) 그 줄 주소를 상품 주소로 보내지 않는다
+  // ★ 코드 리뷰(2026-10-22) — 저장돼 있던 옵션 없는 상품 줄(savedOptKey)인데 상품 주소가 없으면(198 이전) 그 줄 주소를 상품 주소로 보내지 않는다
   const t5 = makeTable();
   t5.run(`renderOptRows([{ productName:'방향제', unitKind:'product', optKey:'방향제', savedOptKey:'방향제', optionUrl:'https://s.example/old', payAmount:1, recruitTotal:1, dailyLimit:1 },
     { productName:'탈취제', unitKind:'product', optKey:'탈취제', savedOptKey:'탈취제', optionUrl:'https://s.example/t', productUrl:'https://s.example/t', payAmount:1, recruitTotal:1, dailyLimit:1 }], { saved: true })`);
@@ -334,7 +334,7 @@ console.log('\n[D] 옵션 신호 없는 오더·공고 — 추측 승격 금지'
   t2.run(`renderOptRowsWithProduct([], '우레온 모이스처 바디-리셋 미스트 - 결제금액 22,000원')`);
   ok('옵션 원장 빈 공고 편집 → none 모드 · 옵션 0건', t2.run('_prodMode()') === 'none' && t2.run('JSON.stringify(readOptRows())') === '[]');
 
-  // ★ 결정 276 코드 리뷰 실측 — 원장 없이 상품 여러 줄로 저장된 공고: 카드가 둘이어도 손대지 않은 저장은 원장을 만들지 않는다
+  // ★ 결정 277 코드 리뷰 실측 — 원장 없이 상품 여러 줄로 저장된 공고: 카드가 둘이어도 손대지 않은 저장은 원장을 만들지 않는다
   const tm = makeTable();
   tm.run(`renderOptRowsWithProduct([], '상품A - 결제금액 10,000원\\n상품B - 결제금액 12,000원', { recruit_total: 30 })`);
   ok('원장 없는 여러 줄 공고 → 카드 2개 · none · 옵션 0건',
@@ -396,7 +396,7 @@ console.log('\n[E] 카드 옵션 유무 전환 — 조용한 소실 금지');
 
 /* ══════════════ 화면 배선 ══════════════ */
 console.log('\n[UI] 모달 배선');
-ok('모달: 공고 전체 스위치 없음(결정 276) · 모드 hidden 생존 · 카드 표 표시', !/id="rf_prod_mode_sw"/.test(modalSrc)
+ok('모달: 공고 전체 스위치 없음(결정 277) · 모드 hidden 생존 · 카드 표 표시', !/id="rf_prod_mode_sw"/.test(modalSrc)
   && !/setProdMode\(/.test(modalSrc) && /id="rf_prod_mode"[^>]*value="none"/.test(modalSrc) && /id="rf_opt_wrap" class="rf-cards"/.test(modalSrc));
 ok('모달 CSS: 카드 — 옵션 없는 카드는 URL·옵션 칸 숨김', /\.rf-gp-noopt \.rf-opt-row \.rf-f-url,#recruitModal #rf_opt_wrap\.rf-cards \.rf-gp-noopt \.rf-opt-row \.rf-f-name\{display:none\}/.test(modalSrc));
 ok('index-recruit: 모드 = 카드 구성(상품 둘 이상·옵션 있는 상품 = opt · 원장 살아 있던 공고 = opt · 마감만 = 세지 않음)',

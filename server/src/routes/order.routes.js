@@ -35,7 +35,7 @@ const { normalizeReviewTypeMix } = require('../utils/reviewTypeMix');
 const { deliveryBaseType, parseDeliveryType, canonicalDeliveryValue, isCourierProxyDelivery } = require('../utils/deliveryType');
 const { normalizeDeliveryTypeMix } = require('../utils/deliveryTypeMix');
 const { workKindForStore } = require('../utils/workKind');   // 099 — 체험단 종류(리뷰/블로그)
-// 양방향 동기화(결정 274) — 칸 목록·스위치·공유 저장 단일 출처
+// 양방향 동기화(결정 275) — 칸 목록·스위치·공유 저장 단일 출처
 const { SHARED_FIELDS } = require('../utils/sharedFields');
 const { readBidirSwitch } = require('../utils/bidirSwitch');
 const { applySharedPatch } = require('../services/sharedPatch.service');
@@ -832,7 +832,7 @@ async function _sourceRevisionRaceResponse(res, sourceReviewOrderId, source) {
   });
 }
 
-/* ── 양방향 원본 수정(결정 274 · 3단계) ───────────────────────────────────────────────── */
+/* ── 양방향 원본 수정(결정 275 · 3단계) ───────────────────────────────────────────────── */
 /** 인트라넷 본문 → 공유 상태(저장 형태). 값 계산은 종전 원본 수정과 같은 `_sourceContentNextValues`(사본 0). */
 function _sourceSharedMine(b, derived, source) {
   const v = _sourceContentNextValues(b, derived);
@@ -1019,7 +1019,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
       return res.status(409).json({ ok: false, code: 'work_round_immutable', error: '기존 작업오더의 작업 계열과 차수는 수정할 수 없습니다. 차수 추가를 사용하세요.', work_order_id: current.id });
     }
 
-    /* ★★ 양방향(결정 274 · 3단계) — 연결된 오더(`bidir_state='on'`)는 공유 저장 단일 출처로 간다.
+    /* ★★ 양방향(결정 275 · 3단계) — 연결된 오더(`bidir_state='on'`)는 공유 저장 단일 출처로 간다.
        스위치(`app_settings.bidir_sync.in2rw`)가 apply 일 때만. off·비상 스위치면 종전 경로 그대로(오늘 동작),
        observe 면 판정만 기록하고 종전 경로로 계속 간다. 연결 안 된 오더는 언제나 종전 경로. */
     if (current.bidir_state === 'on') {
@@ -1273,7 +1273,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
 router.put('/intake/source/:sourceReviewOrderId', _intakeSourceRevisionHandler);
 
 // ═══════════════════════════════════════════════════════════
-// 양방향 수정 기준(결정 274 · 3단계) — 인트라넷 수정 창이 열 때 부른다(X-Intake-Key).
+// 양방향 수정 기준(결정 275 · 3단계) — 인트라넷 수정 창이 열 때 부른다(X-Intake-Key).
 // GET /api/order/intake/source/:sourceReviewOrderId/shared
 //   → { bidir_state, sync_version, writable: [칸], intake_view: {칸: 현재 값}, field_owner: {칸: 주인}, capabilities: { bidir_v1 } }
 // ★ 읽기만 한다. 연결 안 된 오더도 200(bidir_state 로 판단) — 인트라넷이 종전 경로로 저장한다.
@@ -1545,7 +1545,7 @@ async function _intakeUpdateHandler(req, res, next) {
       return res.status(409).json({ ok: false, error: '완료된 작업오더는 수정할 수 없습니다.' });
     }
 
-    /* ★ 양방향 4단계-3(결정 274): 양방향 연결 오더의 공유 칸은 이 옛 경로(작업오더 ID 직접 수정)로 바꾸지 않는다 —
+    /* ★ 양방향 4단계-3(결정 275): 양방향 연결 오더의 공유 칸은 이 옛 경로(작업오더 ID 직접 수정)로 바꾸지 않는다 —
        공유 저장(applySharedPatch)을 건너뛰면 버전·스냅숏·공고 투영·인트라넷 송신이 모두 빠진다. 지금 인트라넷은 이 경로를
        쓰지 않는다(원본 수정 /intake/source/:id 만). 공유 칸이 아닌 칸만이면 종전대로. 조건은 원본 수정 분기와 같다. */
     if (cur[0].bidir_state === 'on' && (await readBidirSwitch(pool)).in2rw === 'apply') {
@@ -2471,7 +2471,7 @@ _handlers.orderAdminEdit = async (req, res, next) => {
     }
     if (sets.length === 0) return res.json({ ok: true, data: o, unchanged: true, changed: [] });
 
-    /* ★★ 양방향(결정 274 · 3단계) — 연결된 오더(`bidir_state='on'` · 스위치 apply)의 관리자 수정.
+    /* ★★ 양방향(결정 275 · 3단계) — 연결된 오더(`bidir_state='on'` · 스위치 apply)의 관리자 수정.
        ① 인트라넷 고유 칸(작업명·시작일·담당 등)은 리뷰웹에서 보기 전용 → 400(사용자 확정 D5)
        ② 양방향 글 칸은 공유 저장 단일 출처로 — 버전 조건부 쓰기 + 공고 반영 + 스냅숏이 한 트랜잭션
        ③ 둘을 한 번에 섞어 보내면 나눠 저장하게 한다(두 트랜잭션으로 갈라 반쪽만 남는 일 방지)

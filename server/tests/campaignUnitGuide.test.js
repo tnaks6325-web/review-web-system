@@ -237,7 +237,7 @@ async function pgChecks(url) {
       daily_limit INTEGER NOT NULL DEFAULT 0, review_type_mix JSONB NOT NULL DEFAULT '[]'::jsonb,
       sort_order INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active',
       updated_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE (campaign_id, opt_key))`);
-    // 뒤 마이그레이션이 더한 칸(상품 사진 · 결정 276 상품 주소) — 아래에서 코드의 INSERT 를 그대로 실행하므로 표도 지금 모양이어야 한다
+    // 뒤 마이그레이션이 더한 칸(상품 사진 · 결정 277 상품 주소) — 아래에서 코드의 INSERT 를 그대로 실행하므로 표도 지금 모양이어야 한다
     await c.query(`ALTER TABLE campaign_options ADD COLUMN thumbnail_url TEXT NOT NULL DEFAULT '', ADD COLUMN product_url TEXT NULL`);
     await c.query(`INSERT INTO recruit_campaigns VALUES ('c1','복합')`);
     await c.query(`INSERT INTO campaign_options (campaign_id, opt_key) VALUES ('c1','옛옵션')`);

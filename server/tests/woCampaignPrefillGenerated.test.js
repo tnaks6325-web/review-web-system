@@ -1,6 +1,6 @@
 'use strict';
 /**
- * 회귀가드 — 발행 프리필 서버 사본(`src/utils/woCampaignPrefill.generated.js`)이 화면 원본과 같다 (결정 274)
+ * 회귀가드 — 발행 프리필 서버 사본(`src/utils/woCampaignPrefill.generated.js`)이 화면 원본과 같다 (결정 275)
  *
  * 실행: node tests/woCampaignPrefillGenerated.test.js
  *

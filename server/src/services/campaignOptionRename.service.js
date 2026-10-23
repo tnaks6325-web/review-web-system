@@ -1,5 +1,5 @@
 /**
- * campaignOptionRename — 선택지 이름 바꾸기 단일 출처(결정 197 · 결정 274 7단계-④ ③).
+ * campaignOptionRename — 선택지 이름 바꾸기 단일 출처(결정 197 · 결정 275 7단계-④ ③).
  *
  * 공고 창 저장(`_saveCampaignOptions`)과 양방향 공유 저장(`sharedPatch._projectStructureInTx`)이 같은 규칙을 쓴다.
  *   바뀌는 곳: 공고 선택지(campaign_options.opt_key) · 참여 기록(campaign_applications.option_key) · 품절 신고·알림(결정 229) ·

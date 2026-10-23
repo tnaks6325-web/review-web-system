@@ -1,5 +1,5 @@
 /**
- * 결정 278 — 모집공고 실제 시작일 = 사람이 정한 날, 안 정했으면 첫 참여일 (사용자 확정 2026-10-23 「나 · 1.가 · 2.가」)
+ * 결정 279 — 모집공고 실제 시작일 = 사람이 정한 날, 안 정했으면 첫 참여일 (사용자 확정 2026-10-23 「나 · 1.가 · 2.가」)
  *   A. 정적: 가산 마이그레이션 · 부팅 스키마 검사 · 생성/수정 판정 · 새벽 작업(끄는 스위치) · 화면 잠금 해제 · 본 값 전송
  *   B. 화면 한 줄(실행): 누가 정한 날인지
  *   C. PGTEST_URL 있으면 진짜 PG + 실제 라우트: 생성 판정 · 수정 판정(본 값·옛 화면) · 새벽 맞춤(앞으로만·사람 우선·옛 공고 무접촉)
@@ -19,14 +19,14 @@ const read = p => fs.readFileSync(path.join(__dirname, p), 'utf8');
 /* ══════════════ A. 정적 ══════════════ */
 console.log('\n[A] 정적 — 저장 칸 · 판정 · 새벽 작업 · 화면');
 {
-  const mig = read('../migrations/198_campaign_start_date_basis.sql');
+  const mig = read('../migrations/199_campaign_start_date_basis.sql');
   const body = mig.replace(/--[^\n]*/g, '');
-  ok('198 = 칸 더하기만(값 변경·백필·삭제 없음)', /ADD COLUMN IF NOT EXISTS start_date_basis TEXT NULL/.test(body) && !/\bUPDATE\b|\bDROP\b|\bDELETE\b|DEFAULT/i.test(body));
+  ok('199 = 칸 더하기만(값 변경·백필·삭제 없음)', /ADD COLUMN IF NOT EXISTS start_date_basis TEXT NULL/.test(body) && !/\bUPDATE\b|\bDROP\b|\bDELETE\b|DEFAULT/i.test(body));
   ok('부팅 스키마 검사에 들어 있다(없으면 공고 발행·수정이 통째 실패)', /\['recruit_campaigns', 'start_date_basis'\]/.test(read('../index.js')));
   const camp = read('../src/routes/campaign.routes.js');
   ok('생성: 비웠거나 오더 희망 시작일 그대로 = pending · 고른 날 = manual',
     /let _startDateBasis = start_date \? 'manual' : 'pending';[\s\S]{0,500}to_char\(start_date, 'YYYY-MM-DD'\) AS d FROM work_orders WHERE id = \$1`, \[_srcWoId\]\);\s+if \(_wsd\[0\] && _wsd\[0\]\.d === String\(start_date\)\.slice\(0, 10\)\) _startDateBasis = 'pending';/.test(camp)
-    && /repurchase_days, start_date_basis\)/.test(camp) && /\$49,\$50,\$51\)/.test(camp) && /_startDateBasis,\s+\/\/ ★ 결정 278/.test(camp));
+    && /repurchase_days, start_date_basis\)/.test(camp) && /\$49,\$50,\$51\)/.test(camp) && /_startDateBasis,\s+\/\/ ★ 결정 279/.test(camp));
   ok('오더 날짜 조회는 잠금 tx 밖(실패해도 공고 저장을 죽이지 않는다)', /const \{ rows: _wsd \} = await pool\.query\(/.test(camp));
   ok('수정: 본 값과 같으면 = 안 고침(시작일 유지)', /String\(start_date \|\| ''\) === String\(req\.body\.start_date_seen \|\| ''\)\) \? undefined : start_date/.test(camp)
     && /\(_startDateEff === undefined \|\| _startDateEff === null\) \? null : String\(_startDateEff\)/.test(camp));
@@ -43,7 +43,7 @@ console.log('\n[A] 정적 — 저장 칸 · 판정 · 새벽 작업 · 화면');
   ok('연결 공고도 시작일 버튼을 잠그지 않는다(막다른 길 해소)', !/sBtn\.disabled = !!linked/.test(fe) && !/리뷰오더에서 고칩니다/.test(fe));
   ok('수정 저장은 창을 열 때 본 시작일을 함께 보낸다', /payload\.start_date_seen = window\._rfStartSeen/.test(fe) && /window\._rfStartSeen = \(c\.start_date \|\| ""\)\.slice\(0, 10\)/.test(fe));
   ok('새 창을 열면 지난 공고 값을 비운다', /window\._rfStartSeen = null; window\._rfStartBasis = ''; window\._rfPrefillStart = null;/.test(fe));
-  ok('날짜를 고치면 한 줄을 다시 그린다', /_renderStartDateBasisNote\(\);\s+\/\/ 결정 278/.test(fe.slice(fe.indexOf('function onRecruitDatesChange'), fe.indexOf('function onRecruitDatesChange') + 900)));
+  ok('날짜를 고치면 한 줄을 다시 그린다', /_renderStartDateBasisNote\(\);\s+\/\/ 결정 279/.test(fe.slice(fe.indexOf('function onRecruitDatesChange'), fe.indexOf('function onRecruitDatesChange') + 900)));
   ok('비교 이름 = 희망 시작일', /key: 'start_date',[^\n]*label: '희망 시작일'/.test(read('../src/utils/sharedFields.js')));
 }
 

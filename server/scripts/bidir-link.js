@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 양방향 연결(결정 274) — 값이 같은 오더만 연결한다(사용자 확정 D1). 다르면 `diverged` 로 표시만 한다.
+ * 양방향 연결(결정 275) — 값이 같은 오더만 연결한다(사용자 확정 D1). 다르면 `diverged` 로 표시만 한다.
  *   DATABASE_URL=... node scripts/bidir-link.js <작업오더ID> [--dry]
  *   DATABASE_URL=... node scripts/bidir-link.js --all-same [--dry]   (진행 중 공고·인트라넷 오더 전부를 같은 규칙으로)
  * ★ 마감(보관) 공고 오더는 대상이 아니다(사용자 확정 2026-10-20). --dry = 쓰기 0(판정만).

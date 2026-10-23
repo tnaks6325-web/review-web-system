@@ -1,6 +1,6 @@
 /**
- * 결정 276(사용자 확정 2026-10-22 「2.가」「4.가」) — 상품 메인 주소 칸 · 옵션 주소·상품 주소 양방향.
- *   ① 발행 프리필·비교: 줄마다 그 상품의 주소(product_url) · 공고 쪽이 비어 있으면(197 이전 줄) 비교하지 않는다
+ * 결정 277(사용자 확정 2026-10-22 「2.가」「4.가」) — 상품 메인 주소 칸 · 옵션 주소·상품 주소 양방향.
+ *   ① 발행 프리필·비교: 줄마다 그 상품의 주소(product_url) · 공고 쪽이 비어 있으면(198 이전 줄) 비교하지 않는다
  *   ② 공고 창 → 오더: 옵션 주소 = 그 옵션 url · 상품 주소 = 그 상품 url(+ 첫 상품이면 오더 상품 페이지 칸) · 옵션 없는 상품 = 상품 url 하나
  *   ③ 손대지 않음: 기준과 같음 · 지금 공고 값과 같음(공고에서만 고쳐 둔 옛 주소) · 안 보냄(null)
  *   ④ 못 담음: 옵션 주소를 비움(오더에서 상품 주소로 접힘) · 옵션 없는 상품의 두 칸을 다르게 · 같은 상품 줄마다 다른 상품 주소
@@ -32,7 +32,7 @@ const campRows = (over = {}) => [
   { opt_key: '방향제', product_name: '방향제', unit_kind: 'product', option_url: U(2), product_url: null, pay_amount: 9000, recruit_total: 4, daily_limit: 1, status: 'active', ...(over['방향제'] || {}) }];
 const camp = { review_fee: 0, recruit_total: 14, daily_limit: 3, landing_url: U(1) };
 const diffs = (opts) => P.compareOrderCampaign(base, camp, opts).filter(d => /product_url/.test(d.field)).map(d => d.field);
-assert.deepEqual(diffs(campRows()), [], '공고 상품 주소가 비어 있으면(197 이전) 비교하지 않는다 — 연결된 공고가 전부 "다름" 이 되지 않게');
+assert.deepEqual(diffs(campRows()), [], '공고 상품 주소가 비어 있으면(198 이전) 비교하지 않는다 — 연결된 공고가 전부 "다름" 이 되지 않게');
 assert.deepEqual(diffs(campRows({ 블랙: { product_url: U(1) }, 화이트: { product_url: U(1) } })), [], '같으면 차이 없음');
 assert.deepEqual(diffs(campRows({ 블랙: { product_url: U(9) } })), ['option:탈취제 / 블랙.product_url'], '다르면 차이');
 
@@ -86,12 +86,12 @@ const plan = (options, campOptions = campRows()) => E.planCampaignMoneyEdit({ ba
   // 공고에서만 고쳐 둔 옛 옵션 주소(지금 공고 값)를 그대로 보내면 = 손대지 않음
   const p = plan([opt('블랙', { optionUrl: U(66) }), opt('화이트'), unit()], campRows({ 블랙: { option_url: U(66) } }));
   assert.deepEqual(p.mine, {});
-  // 상품 주소를 안 보냄(null) = 손대지 않음 — 197 이전 줄을 처음 연 창(상품 주소 칸을 안 건드림)
+  // 상품 주소를 안 보냄(null) = 손대지 않음 — 198 이전 줄을 처음 연 창(상품 주소 칸을 안 건드림)
   const q = plan([opt('블랙', { productUrl: null }), opt('화이트', { productUrl: null }), unit({ productUrl: null })]);
   assert.deepEqual(q.mine, {});
 }
 {
-  // ★ 코드 리뷰 실측(2026-10-22) — 옵션 없는 상품 줄의 상품 주소가 NULL(197 이전)이고 공고 줄 주소가 오더와 다르면,
+  // ★ 코드 리뷰 실측(2026-10-22) — 옵션 없는 상품 줄의 상품 주소가 NULL(198 이전)이고 공고 줄 주소가 오더와 다르면,
   //   그 줄 주소를 그대로 보낸 손대지 않은 저장이 오더 상품 주소를 덮었다. 옵션 없는 상품은 두 칸이 같은 값 → 줄 주소가 지금 값.
   const p = plan([opt('블랙'), opt('화이트'), unit({ optionUrl: U(70), productUrl: U(70) })], campRows({ 방향제: { option_url: U(70) } }));
   assert.deepEqual(p.mine, {}, '공고에만 다르게 적혀 있던 옛 상품 주소 = 손대지 않음 ' + JSON.stringify(p.changed));

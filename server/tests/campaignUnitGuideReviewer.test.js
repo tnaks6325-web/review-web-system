@@ -162,7 +162,7 @@ const IMG = 'https://api.example.com/api/order/guide-image/bbbbbbbbbbbbbbbbbbbbb
   ok('★ 글 없이 사진만 있어도 선택지 전용으로 인정(사진이 통째로 사라지지 않는다)',
     imgOnly.includes(IMG) && !imgOnly.includes('공통 가이드') && !imgOnly.includes('선택지 전용 안내'));
 
-  // 결정 277(D4 「나」) — 사진 자리: 글 사이 사진은 그 자리에, 같은 사진은 한 번만(HTML 과 목록 양쪽에 있어도)
+  // 결정 278(D4 「나」) — 사진 자리: 글 사이 사진은 그 자리에, 같은 사진은 한 번만(HTML 과 목록 양쪽에 있어도)
   {
     const P1 = 'https://api.example.com/api/order/guide-image/d4ppppppppppppppppppp1';
     const P2 = 'https://api.example.com/api/order/guide-image/d4ppppppppppppppppppp2';

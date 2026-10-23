@@ -1,5 +1,5 @@
 /**
- * sharedFields — 리뷰오더(인트라넷) ↔ 작업오더·모집공고(리뷰웹) 양방향 동기화의 **칸 목록 단일 출처**(결정 274).
+ * sharedFields — 리뷰오더(인트라넷) ↔ 작업오더·모집공고(리뷰웹) 양방향 동기화의 **칸 목록 단일 출처**(결정 275).
  *
  * ★★ 이 표 하나가 정한다:
  *    ① 어떤 칸이 동기화 대상인가(목록에 없으면 동기화하지 않는다)
@@ -105,14 +105,14 @@ const CANON = {
 
 /**
  * 동기화 칸 표. key = 작업오더 칸 이름 = 인트라넷 payload 키(접수 계약상 같은 이름).
- * ★ 인트라넷 고유 칸은 "리뷰웹에서 보기 전용" — 결정 274 · 사용자 확정 2026-10-19(D5) · 블루 설계 「칸 주인」.
+ * ★ 인트라넷 고유 칸은 "리뷰웹에서 보기 전용" — 결정 275 · 사용자 확정 2026-10-19(D5) · 블루 설계 「칸 주인」.
  * ★ `product_options_json` 은 통째 비교하지 않는다 — 상품·옵션 단위로 펼쳐 비교한다(`sharedPatchPlan.flattenState`).
  * ★ `pay_amount` 는 옵션 금액·인원에서 파생되는 합계라 `derived` — 직접 고치는 칸이 아니라 비교만 한다.
  */
 const SHARED_FIELDS = Object.freeze([
   // ── 인트라넷 고유(리뷰웹 보기 전용) ──
   { key: 'title',            owner: 'intranet', canon: 'text',     label: '작업명' },
-  { key: 'start_date',       owner: 'intranet', canon: 'date',     label: '희망 시작일' },   // 결정 278 — 리뷰오더 값은 희망 시작일(공고 실제 시작일과 따로 돈다)
+  { key: 'start_date',       owner: 'intranet', canon: 'date',     label: '희망 시작일' },   // 결정 279 — 리뷰오더 값은 희망 시작일(공고 실제 시작일과 따로 돈다)
   { key: 'manager_name',     owner: 'intranet', canon: 'text',     label: '담당AE' },
   { key: 'work_manager',     owner: 'intranet', canon: 'text',     label: '작업담당' },
   { key: 'sales_id',         owner: 'intranet', canon: 'text',     label: '계약건' },

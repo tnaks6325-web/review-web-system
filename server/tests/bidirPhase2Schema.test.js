@@ -1,6 +1,6 @@
 'use strict';
 /**
- * 회귀가드 — 양방향 2단계 기반: migration 195 · 스위치 (결정 274)
+ * 회귀가드 — 양방향 2단계 기반: migration 196 · 스위치 (결정 275)
  *
  * 실행: node tests/bidirPhase2Schema.test.js   (PGTEST_URL 있으면 진짜 PG 에서도 확인)
  *
@@ -15,7 +15,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const MIG = fs.readFileSync(path.join(__dirname, '../migrations/195_bidir_shared_sync.sql'), 'utf8');
+const MIG = fs.readFileSync(path.join(__dirname, '../migrations/196_bidir_shared_sync.sql'), 'utf8');
 const INDEX = fs.readFileSync(path.join(__dirname, '../index.js'), 'utf8');
 const sw = require('../src/utils/bidirSwitch');
 
@@ -42,7 +42,7 @@ const NEW_COLS = [['work_orders', 'sync_version'], ['work_orders', 'bidir_state'
   });
 
   await t('② 새 칸·표를 읽는 코드가 있으면 그 칸·표는 전부 필수 스키마에 등록돼 있다(3단계부터)', () => {
-    // ★ 2단계에서는 "읽는 코드 0 → 미등록" 이었다. 3단계(결정 274)에서 원본 수정·관리자 수정·/shared 가 읽기 시작해 등록했다.
+    // ★ 2단계에서는 "읽는 코드 0 → 미등록" 이었다. 3단계(결정 275)에서 원본 수정·관리자 수정·/shared 가 읽기 시작해 등록했다.
     //   이 가드는 반대 방향 드리프트(읽는 코드는 있는데 미등록 → 마이그레이션 실패 시 기동은 되고 그 기능만 500)를 막는다.
     const req = INDEX.slice(INDEX.indexOf('const REQUIRED_SCHEMA'), INDEX.indexOf('];', INDEX.indexOf('const REQUIRED_SCHEMA')));
     const reqT = INDEX.slice(INDEX.indexOf('const REQUIRED_TABLES'), INDEX.indexOf('];', INDEX.indexOf('const REQUIRED_TABLES')));
@@ -97,11 +97,11 @@ const NEW_COLS = [['work_orders', 'sync_version'], ['work_orders', 'bidir_state'
       await c.connect();
       try {
         await c.query('BEGIN');
-        await c.query(`INSERT INTO work_orders (id, title) VALUES ('wo_mig195_probe', '마이그레이션 시험') ON CONFLICT (id) DO NOTHING`);
-        const before = (await c.query(`SELECT to_jsonb(w.*) AS j FROM work_orders w WHERE id = 'wo_mig195_probe'`)).rows[0].j;
+        await c.query(`INSERT INTO work_orders (id, title) VALUES ('wo_mig196_probe', '마이그레이션 시험') ON CONFLICT (id) DO NOTHING`);
+        const before = (await c.query(`SELECT to_jsonb(w.*) AS j FROM work_orders w WHERE id = 'wo_mig196_probe'`)).rows[0].j;
         await c.query(MIG);
         await c.query(MIG);
-        const after = (await c.query(`SELECT to_jsonb(w.*) AS j FROM work_orders w WHERE id = 'wo_mig195_probe'`)).rows[0].j;
+        const after = (await c.query(`SELECT to_jsonb(w.*) AS j FROM work_orders w WHERE id = 'wo_mig196_probe'`)).rows[0].j;
         for (const k of Object.keys(before)) assert.deepStrictEqual(after[k], before[k], `기존 칸 ${k} 가 바뀌었다`);
         assert.strictEqual(after.bidir_state, 'off');
         assert.strictEqual(Number(after.sync_version), 0);

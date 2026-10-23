@@ -75,9 +75,9 @@ assert.deepEqual(normalizedOptions, [{
   status: null,
   thumbnailUrl: null,   // ★ 결정 214: 미전달 = null = 저장된 상품 사진 유지
   thumbError: false,
-  productUrl: null,     // ★ 결정 276: 미전달 = null = 저장된 상품 메인 주소 유지(옛 화면이 저장해도 지워지지 않게)
+  productUrl: null,     // ★ 결정 277: 미전달 = null = 저장된 상품 메인 주소 유지(옛 화면이 저장해도 지워지지 않게)
 }]);
-// ★ 결정 276 — 상품 메인 주소: 보낸 값은 옵션 주소와 같은 규칙(http/https 만 · 2048자) · '' = 지움 · 저장은 미전달이면 기존 값 유지(COALESCE)
+// ★ 결정 277 — 상품 메인 주소: 보낸 값은 옵션 주소와 같은 규칙(http/https 만 · 2048자) · '' = 지움 · 저장은 미전달이면 기존 값 유지(COALESCE)
 {
   const pu = v => JSON.parse(JSON.stringify(sandbox._normalizeOptionsInput([{ optKey: 'a', productUrl: v }])))[0].productUrl;
   assert.equal(pu('https://store.example/p/1'), 'https://store.example/p/1');
@@ -90,7 +90,7 @@ assert.deepEqual(normalizedOptions, [{
   assert.match(routes, /product_url=COALESCE\(\$15, campaign_options\.product_url\)/);
   assert.match(routes, /\(typeof o\.productUrl === 'string'\) \? o\.productUrl : null\]\);/);
   assert.match(routes, /product_url AS "productUrl"/);
-  const mig = fs.readFileSync(path.join(root, 'server', 'migrations', '197_campaign_option_product_url.sql'), 'utf8');
+  const mig = fs.readFileSync(path.join(root, 'server', 'migrations', '198_campaign_option_product_url.sql'), 'utf8');
   assert.match(mig, /ADD COLUMN IF NOT EXISTS product_url TEXT NULL/);
   assert.match(fs.readFileSync(path.join(root, 'server', 'index.js'), 'utf8'), /\['campaign_options', 'product_url'\]/);
 }

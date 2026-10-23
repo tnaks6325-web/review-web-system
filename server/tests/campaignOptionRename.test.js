@@ -19,7 +19,7 @@ const front = read('../frontend/js/index-recruit.js');
 let passed = 0;
 function ok(name, cond) { assert(cond, name); passed++; console.log('  ✓ ' + name); }
 
-// ── 서버 함수 실행 — 단일 출처 services/campaignOptionRename(결정 274 7단계-④ ③ 에서 공유 저장과 같이 쓰려고 라우트에서 옮김 · 검사 의미 불변) ──
+// ── 서버 함수 실행 — 단일 출처 services/campaignOptionRename(결정 275 7단계-④ ③ 에서 공유 저장과 같이 쓰려고 라우트에서 옮김 · 검사 의미 불변) ──
 const svc = require('../src/services/campaignOptionRename.service');
 let _now = 1000;
 const _realNow = Date.now;

@@ -5,7 +5,7 @@
  *   ① 신고 통로 = 취소 사유 "화면과 가격이 달라요"(리뷰어 화면 무접촉 — 새 버튼 없음).
  *   ② **다른 리뷰어 2명**이 신고하면 관리자 전원(마스터·관리자·AE)에게 팝업 — 1명은 작업조건 카드에 "신고 1명"만.
  *   ③ 금액은 **리뷰웹 모집공고에서만** 고친다(인트라넷 리뷰오더 무접촉) · 처리 결과(고침/그대로/보류)를 이력으로 남긴다.
- *      ★ 결정 279(2026-10-23 「가」): 단 리뷰오더와 양방향으로 맞춰지는 공고는 리뷰오더 금액까지 같은 길(공유 저장)로 바꾼다 — `_editLinkedPrice`.
+ *      ★ 결정 280(2026-10-23 「가」): 단 리뷰오더와 양방향으로 맞춰지는 공고는 리뷰오더 금액까지 같은 길(공유 저장)로 바꾼다 — `_editLinkedPrice`.
  *
  * ★ 자동으로 아무것도 바꾸지 않는다 — 품절과 달리 "얼마가 맞는지"는 사람만 안다. 신고 2명 = 알림만.
  * ★ 품절(campaignOptionPause)과 표·통로를 나눈다 — 품절 멈춤/다시 열기는 상품의 열린 품절 알림을 전부 닫는다.
@@ -235,7 +235,7 @@ async function _writePriceInTx(client, cid, optKey, amount) {
 }
 
 /**
- * ★ 결정 279(사용자 확정 2026-10-23 「가」): 리뷰오더와 양방향으로 맞춰지는 공고면 [금액 고치기]를 공고 창 금액 수정과 **같은 길**로 보낸다 —
+ * ★ 결정 280(사용자 확정 2026-10-23 「가」): 리뷰오더와 양방향으로 맞춰지는 공고면 [금액 고치기]를 공고 창 금액 수정과 **같은 길**로 보낸다 —
  *   리뷰오더(작업오더) 상품 금액을 공유 저장으로 바꾸고, 공고 금액은 그 투영이 따라 바꾼다(공고만 바꾸면 두 곳이 갈라지고,
  *   다음 리뷰오더 수정 때 금액 전파가 옛 금액으로 되돌린다).
  *   연결 공고가 아니거나 · 스위치(campaign_edit)가 꺼졌거나 · 알림이 이미 처리됐거나 · 그대로 고칠 수 없는 경우(마감·같은 금액·금액 여럿)는
@@ -330,7 +330,7 @@ async function resolveAlert({ id, action, amount, by = '', pool: dbPool } = {}) 
   const who = String(by || '').slice(0, 100);
   const { rows: pre } = await db.query(`SELECT campaign_id FROM campaign_price_alerts WHERE id = $1`, [aid]);
   if (!pre.length) return { ok: false, code: 404, error: '알림을 찾을 수 없어요.' };
-  // ★ 결정 279: 연결 공고면 리뷰오더까지 같은 길로(알림 트랜잭션 밖에서 먼저 — 잠금 순서)
+  // ★ 결정 280: 연결 공고면 리뷰오더까지 같은 길로(알림 트랜잭션 밖에서 먼저 — 잠금 순서)
   const linked = action === 'edit' ? await _editLinkedPrice({ db, aid, amount: next, who }) : null;
   if (linked && linked.response) return linked.response;
   const client = await db.connect();

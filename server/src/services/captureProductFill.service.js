@@ -111,7 +111,7 @@ async function _loadTargets(db, camp, options, onlyOrderId = null) {
     seen.add(String(r.id));
     if (matchOrderOption(options, {
       editedProduct: r.edited_product, selectedOptKey: r.selected_opt_key, selectedProduct: r.selected_product,
-      optionText: r.option_text, rowProduct: r.row_product, submittedAt: r.submitted_at,   // 결정 274 ⑤-2 원래 상품 줄 시각(정원 셈과 같은 규칙)
+      optionText: r.option_text, rowProduct: r.row_product, submittedAt: r.submitted_at,   // 결정 275 ⑤-2 원래 상품 줄 시각(정원 셈과 같은 규칙)
     })) continue;
     r.dupRows = Number(r.row_count) > 1;
     r.filledUnmatched = !!(String(r.row_product || '').trim() || String(r.edited_product || '').trim());

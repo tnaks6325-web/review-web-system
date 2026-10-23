@@ -1,5 +1,5 @@
 /**
- * 공고 창 시안 3차(결정 274 · 사용자 확정 2026-10-22 「1.나 2.가 3.가」) — 리뷰웹 모집공고 설정 창.
+ * 공고 창 시안 3차(결정 275 · 사용자 확정 2026-10-22 「1.나 2.가 3.가」) — 리뷰웹 모집공고 설정 창.
  *   체험단 종류 → 리뷰오더 고유 항목 → 리뷰오더와 맞춰지는 항목(양방향 · 진행상품/구매배송/리뷰작업내용) → 리뷰웹에서만 정하는 값.
  *   ★ 칸의 화면 뒤 이름(id)은 그대로다 — 옮긴 것은 줄의 자리뿐(프리필·저장·잠금이 그 이름으로 묶여 있다).
  */
@@ -49,7 +49,7 @@ const sec = (startMarker, endMarker) => compact.slice(compact.indexOf(startMarke
 // ③ 양방향 표시 — 연결 공고에서만 · 리뷰웹 전용 줄(유형별 리뷰비·작업보드 표시명)에는 달지 않는다
 assert.match(modal, /\.rf-sync-box\[data-linked="1"\] \.form-row:not\(\.rf-local\):not\(\.thumb-guide-row\):not\(#rf_workboard_display_name_row\)::after\{content:'양방향'/);
 assert.match(compact, /class="form-row rf-local" id="rf_delivery_fee_row"/);
-// ④ 열 때 채우고 새 공고에서 지운다 · 결정 278(사용자 확정 2026-10-23 「나」): 연결 공고도 모집 시작일은 여기서 정한다(종전 D5 잠금 해제)
+// ④ 열 때 채우고 새 공고에서 지운다 · 결정 279(사용자 확정 2026-10-23 「나」): 연결 공고도 모집 시작일은 여기서 정한다(종전 D5 잠금 해제)
 {
   assert.match(editor, /_rfApplyOrderLink\(null, false\);/, '새 공고·다른 공고를 열 때 지난 연결 표시를 지운다');
   assert.match(editor, /_rfApplyOrderLink\(json && json\.orderInfo \|\| null, !!window\._rfBidirBase\);/);

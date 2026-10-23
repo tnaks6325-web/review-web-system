@@ -195,7 +195,7 @@ const campaignTokenLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// ── 공고 상품 카드 「쇼핑몰에서 가져오기」 AI 판독(결정 276) — 로그인 직원 전용이라 imageApiLimiter(로그인 면제)는 소용없다.
+// ── 공고 상품 카드 「쇼핑몰에서 가져오기」 AI 판독(결정 277) — 로그인 직원 전용이라 imageApiLimiter(로그인 면제)는 소용없다.
 //    한 번에 최대 4만 자를 Gemini 로 보내므로 **사람별** 분당 12회(직원이 한 상품씩 누르는 속도로는 닿지 않는다). ──
 const _staffKey = (req) => String((req.admin && (req.admin.id ?? req.admin.username ?? req.admin.name)) ?? '').trim();
 const productPageLimiter = rateLimit({

@@ -54,7 +54,7 @@ function render(options, productLines, campaign) {
   const box = { rows: null, opts: null };
   const sandbox = {
     console,
-    window: {},   // 결정 276 — 원장이 살아 있던 공고 표시(window._rfLiveLedger)를 여기에 남긴다
+    window: {},   // 결정 277 — 원장이 살아 있던 공고 표시(window._rfLiveLedger)를 여기에 남긴다
     renderOptRows(list, o) { box.rows = list; box.opts = o; },
   };
   vm.createContext(sandbox);
@@ -114,7 +114,7 @@ console.log('\n§C 모르는 값은 지어내지 않는다');
   ok('D. campaign 인자 자체가 없어도 죽지 않는다', rn.rows.length === 1 && rn.rows[0].recruitTotal === 7);
 }
 
-console.log('\n§C-2 결정 276 — 원장이 살아 있던 공고만 원장을 유지한다(상품 카드 구성 판정 _prodMode)');
+console.log('\n§C-2 결정 277 — 원장이 살아 있던 공고만 원장을 유지한다(상품 카드 구성 판정 _prodMode)');
 {
   ok('마감만 있는 공고 = 원장 유지 아님(옵션 없는 공고로 — 정원은 공고 원장)', render(CLOSED, LINES, CAMP).liveLedger === false);
   ok('살아있는 옵션이 있는 공고 = 원장 유지', render(LIVE, LINES, CAMP).liveLedger === true);
