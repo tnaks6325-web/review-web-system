@@ -249,8 +249,10 @@ t('★ search-app 에 옛 대시보드 빠른편집·탭 행 렌더러가 남아
   && !/\['실배송','빈박스','구매확정','믹스'\]/.test(F('js/search-app.js')));
 /* (AE 작업오더 제출 폼 안내 검사 — staff.html 제거로 삭제 (staff.html 은 결정 186 49번에서 제거)) */
 // (옛 값 배지 색 맵은 위 탭 행 렌더러 안에 있었다 — 결정 270 으로 렌더러와 함께 제거. CSS 클래스는 무해해 그대로 둔다.)
+// ★ 결정 282: 인트라넷 옛 묶음의 자동 머리말 목록(_WO_MACHINE_SECTION_LABELS)은 화면에 안 보이는 **읽기용 데이터**라
+//   (옛 오더 28건이 실제로 「[리뷰유형]」 머리말을 쓴다) 그 한 덩어리만 빼고 본다 — 화면 표기 검사 의미는 그대로.
 t('★ 라벨 어휘 통일 — 화면에 "리뷰유형" 표기가 남아 있지 않다',
-  ['workdesk.html', 'js/work-order-detail.js'].every(f => !F(f).includes('리뷰유형')));   // 옛 관리자 대시보드 폐기(결정 267) — admin.html 진입 경로까지 삭제
+  ['workdesk.html', 'js/work-order-detail.js'].every(f => !F(f).replace(/const _WO_MACHINE_SECTION_LABELS = \[[\s\S]*?\];/, '').includes('리뷰유형')));   // 옛 관리자 대시보드 폐기(결정 267) — admin.html 진입 경로까지 삭제
 
 /* ── 9) 정리 화면 — 리뷰웹시스템[3버전]에서 부를 수 있어야 한다 ── */
 console.log('\n9) 리뷰타입 정리 화면');
