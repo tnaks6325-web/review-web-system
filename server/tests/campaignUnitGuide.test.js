@@ -237,6 +237,8 @@ async function pgChecks(url) {
       daily_limit INTEGER NOT NULL DEFAULT 0, review_type_mix JSONB NOT NULL DEFAULT '[]'::jsonb,
       sort_order INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active',
       updated_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE (campaign_id, opt_key))`);
+    // 뒤 마이그레이션이 더한 칸(상품 사진 · 결정 277 상품 주소) — 아래에서 코드의 INSERT 를 그대로 실행하므로 표도 지금 모양이어야 한다
+    await c.query(`ALTER TABLE campaign_options ADD COLUMN thumbnail_url TEXT NOT NULL DEFAULT '', ADD COLUMN product_url TEXT NULL`);
     await c.query(`INSERT INTO recruit_campaigns VALUES ('c1','복합')`);
     await c.query(`INSERT INTO campaign_options (campaign_id, opt_key) VALUES ('c1','옛옵션')`);
 
@@ -254,7 +256,7 @@ async function pgChecks(url) {
     const i = routes.indexOf('`INSERT INTO campaign_options (campaign_id, opt_key');
     const sql = routes.slice(i + 1, routes.indexOf('`', i + 1));
     const run = o => c.query(sql, ['c1', o.k, '', 0, 0, 0, '[]', o.s, o.status || 'active',
-      o.p || '', o.u || 'option', o.g || '', '[]']);
+      o.p || '', o.u || 'option', o.g || '', '[]', '', null]);
     await run({ k: '옵션A', s: 0, p: '상품A', u: 'option', g: '<p>A</p>' });
     await run({ k: '옵션B', s: 1, p: '상품A', u: 'option', g: '<p>B</p>' });
     await run({ k: '상품B', s: 2, p: '상품B', u: 'product', g: '<p>P</p>' });
@@ -266,7 +268,7 @@ async function pgChecks(url) {
 
     // 업서트가 새 컬럼을 갱신하고 status 는 미지정 시 보존(COALESCE $9)
     await c.query(`UPDATE campaign_options SET status='closed' WHERE opt_key='상품B'`);
-    await c.query(sql, ['c1', '상품B', '', 0, 0, 0, '[]', 2, null, '상품B', 'product', '<p>수정</p>', '[]']);
+    await c.query(sql, ['c1', '상품B', '', 0, 0, 0, '[]', 2, null, '상품B', 'product', '<p>수정</p>', '[]', '', null]);
     const up = await c.query(`SELECT status, inflow_guide_html FROM campaign_options WHERE opt_key='상품B'`);
     assert.equal(up.rows[0].status, 'closed', 'status 미지정은 기존 상태 보존(조용한 재오픈 금지)');
     assert.equal(up.rows[0].inflow_guide_html, '<p>수정</p>', '가이드는 갱신');

@@ -14,7 +14,7 @@ const svc = require('../services/trackB.service');
 const participants = require('../services/participants.service');
 const authSvc = require('../services/auth.service');
 const { advertiserLinkLimiter } = require('../middleware/rateLimit.middleware');
-const { imageApiLimiter } = require('../middleware/rateLimit.middleware');
+const { imageApiLimiter, productPageLimiter } = require('../middleware/rateLimit.middleware');
 const sheetlessStatus = require('../services/sheetlessStatus.service');
 const shareLinks = require('../services/shareLink.service');   // 작업보드·업체 공유 링크(131)
 const { isTrackingField } = require('../utils/trackingColumn');   // 택배송장 열 판정 단일 출처(사본 금지)
@@ -1667,6 +1667,18 @@ router.get('/campaigns/:id/activity-log', authMiddleware, internalMiddleware, (r
    work_detail·연결탭·정원·옵션을 빈 기본값으로 채우고, 저장하면 기존 설정이 조용히
    지워진다(0·빈값·options:[]). 그래서 canEdit 이면 신뢰 플래그를 세워 위임한다.
    ★ 판정 실패는 공개 뷰(fail-closed) — 모르면 더 주지 않는다. 편집은 서버 게이트가 막는다. */
+// 공고 편집 상품 카드 「쇼핑몰에서 가져오기」(결정 277) — 확장 프로그램이 읽은 상품페이지 글 → AI 판독 결과(저장 없음).
+//   공고를 고칠 수 있는 사람만(편집 게이트와 같다). 받은 글은 저장·로그하지 않는다. 원본 = 인트라넷 product-page-reader.
+router.post('/campaigns/product-page/extract', authMiddleware, internalMiddleware, editorOnlyMiddleware, productPageLimiter, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const out = await require('../services/productPageReader.service').extractProductPage(req.body);
+    return res.status(out.status).json(out.body);
+  } catch (e) {
+    logger.warn(`[product-page] 판독 실패: ${String(e && e.name || 'Error')}`);
+    return res.status(500).json({ ok: false, error: '상품페이지를 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.' });
+  }
+});
 router.get('/campaigns/:id', authMiddleware, internalMiddleware, async (req, res, next) => {
   try { if (await canEdit(req.admin)) req._trustedAdminView = true; } catch (_) { /* 공개 뷰로 수렴 */ }
   return _campHandlers.detail(req, res, next);
@@ -1914,7 +1926,20 @@ router.post('/campaigns/:id/rounds', authMiddleware, internalMiddleware, async (
   try {
     const { addRound, getPlanOverview } = require('../services/campaignPlan.service');
     const campaignId = String(req.params.id);
+    // ★ 7단계-②(사용자 확정 2026-10-20 ②): 리뷰오더와 맞춰지는 공고는 차수를 쓰지 않는다 — 옵션이 여럿이면 늘린 인원을 어느 옵션에 줄지
+    //   정할 근거가 없다. 인원은 공고 창·리뷰오더의 인원 칸에서(오더·작업표 줄과 함께 맞춘다). 연결 판정 실패 = 막음(fail-closed).
+    if (await require('../services/campaignSharedSave.service').bidirOrderLinked(campaignId)) {   // 스위치와 상관없이(인원은 공유 칸 · 검토 2026-10-21)
+      return res.status(409).json({ ok: false, code: 'rounds_bidir_linked', error: '리뷰오더와 맞춰지는 공고라 차수를 쓰지 않습니다. 모집공고 편집 창이나 리뷰오더에서 인원을 바꿔 주세요.' });
+    }
     const out = await addRound(campaignId, req.body, _by(req));
+    /* ★ 7단계 🔴2(2026-10-20): 차수로 총 인원이 바뀌면 관리자 공고 창과 같은 한 곳(syncCampaignRecruitTotal)으로 연결 작업오더의 총모집과
+       작업표 줄 수도 맞춘다 — 종전에는 공고 총량만 바뀌고 작업오더·작업표 줄은 옛 인원으로 남았다. 차수는 이미 저장됐으므로 실패는 알리기만 한다. */
+    try {
+      out.quotaSync = await require('../services/linkedRecruitQuota.service').syncCampaignRecruitTotal({ campaignId, recruitTotal: out.newTotal });
+    } catch (e) {
+      logger.error(`[trackb/rounds] ${campaignId} 차수 뒤 작업오더 정원 동기화 실패: ${e.message}`);
+      out.quotaSyncError = '차수는 저장됐지만 연결 작업오더·작업표 줄 수를 맞추지 못했습니다: ' + e.message;
+    }
     // 결정 182 — 총 인원이 바뀌면 날짜별 인원·종료일이 바뀐다 → 작업표 빈 줄 날짜도 따라간다.
     out.worktableRelay = await require('../services/campaignPlan.service').relayCampaignWorktable(campaignId, { by: _by(req) });
     res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId)) });
@@ -1924,7 +1949,20 @@ router.delete('/campaigns/:id/rounds', authMiddleware, internalMiddleware, async
   try {
     const { removeLastRound, getPlanOverview } = require('../services/campaignPlan.service');
     const campaignId = String(req.params.id);
+    // ★ 7단계-②(사용자 확정 2026-10-20 ②): 리뷰오더와 맞춰지는 공고는 차수를 쓰지 않는다 — 옵션이 여럿이면 늘린 인원을 어느 옵션에 줄지
+    //   정할 근거가 없다. 인원은 공고 창·리뷰오더의 인원 칸에서(오더·작업표 줄과 함께 맞춘다). 연결 판정 실패 = 막음(fail-closed).
+    if (await require('../services/campaignSharedSave.service').bidirOrderLinked(campaignId)) {   // 스위치와 상관없이(인원은 공유 칸 · 검토 2026-10-21)
+      return res.status(409).json({ ok: false, code: 'rounds_bidir_linked', error: '리뷰오더와 맞춰지는 공고라 차수를 쓰지 않습니다. 모집공고 편집 창이나 리뷰오더에서 인원을 바꿔 주세요.' });
+    }
     const out = await removeLastRound(campaignId, _by(req));
+    /* ★ 7단계 🔴2(2026-10-20): 차수로 총 인원이 바뀌면 관리자 공고 창과 같은 한 곳(syncCampaignRecruitTotal)으로 연결 작업오더의 총모집과
+       작업표 줄 수도 맞춘다 — 종전에는 공고 총량만 바뀌고 작업오더·작업표 줄은 옛 인원으로 남았다. 차수는 이미 저장됐으므로 실패는 알리기만 한다. */
+    try {
+      out.quotaSync = await require('../services/linkedRecruitQuota.service').syncCampaignRecruitTotal({ campaignId, recruitTotal: out.newTotal });
+    } catch (e) {
+      logger.error(`[trackb/rounds] ${campaignId} 차수 뒤 작업오더 정원 동기화 실패: ${e.message}`);
+      out.quotaSyncError = '차수는 저장됐지만 연결 작업오더·작업표 줄 수를 맞추지 못했습니다: ' + e.message;
+    }
     // 결정 182 — 총 인원이 바뀌면 날짜별 인원·종료일이 바뀐다 → 작업표 빈 줄 날짜도 따라간다.
     out.worktableRelay = await require('../services/campaignPlan.service').relayCampaignWorktable(campaignId, { by: _by(req) });
     res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId)) });
@@ -4171,6 +4209,30 @@ router.post('/payment/batch/:id/confirm-failures', authMiddleware, adminOrMaster
     }
     res.json(await paymentResultSvc.confirmOutstandingFailures({ batchId: req.params.id, by: _by(req) }));
   } catch (err) { _resultErr(err, res, next); }
+});
+
+// ═══════════════════════════════════════════════════════════
+// 오더·공고 맞추기(결정 275 · 사용자 확정 2026-10-21 「C스타일 · 관리자 이상」)
+//   GET  /api/trackb/bidir/reconcile          값이 다른(연결 전) 작업과 칸마다의 차이 — 읽기만
+//   POST /api/trackb/bidir/reconcile/:woId    { picks:{칸 id:'order'|'campaign'}, fingerprint, dryRun?, opId? } → 맞추고 연결(dryRun = 해 보고 되돌림)
+// ★ 쓰기는 공유 저장 한 곳(applySharedPatch, origin 'reconcile') — 이 라우트는 전달만 한다.
+// ═══════════════════════════════════════════════════════════
+router.get('/bidir/reconcile', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const out = await require('../services/sharedReconcile.service').listReconcile(pool);
+    res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
+
+router.post('/bidir/reconcile/:woId', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const picks = b.picks && typeof b.picks === 'object' && !Array.isArray(b.picks) ? b.picks : {};
+    const r = await require('../services/sharedReconcile.service').reconcileSharedOrder({
+      workOrderId: String(req.params.woId || ''), picks, fingerprint: String(b.fingerprint || ''), dryRun: b.dryRun === true,
+      actor: (req.admin && req.admin.name) || '오더·공고 맞추기', opId: String(b.opId || '').slice(0, 80) });
+    res.status(r.status).json(r.body);
+  } catch (err) { next(err); }
 });
 
 module.exports = router;

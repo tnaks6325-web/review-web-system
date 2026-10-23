@@ -47,7 +47,8 @@ t('★ 판정은 성공 처리보다 **앞**에 온다', () => {
 });
 
 t('★ HTTP 상태 검사는 그대로 둔다 — 두 갈래를 모두 막는다', () => {
-  if (!/if \(!res\.ok\) \{[\s\S]{0,200}?throw new Error\(errData\.error/.test(recruit))
+  // 2026-10-20 양방향 4단계-2: 실패 문구 뒤에 "공통 칸은 이미 저장됨" 안내를 붙이느라 괄호·줄이 늘었다(검사 의미 불변).
+  if (!/if \(!res\.ok\) \{[\s\S]{0,400}?throw new Error\(\(?errData\.error/.test(recruit))
     throw new Error('상태코드 검사를 없애면 진짜 4xx/5xx 가 통과한다(본문 판정으로 대체 금지)');
 });
 

@@ -920,6 +920,7 @@ function onRecruitDatesChange() {
   if (sDay && sd) sDay.textContent = _rfDow(sd.value);
   window.RecruitModal?.syncStartDateControl?.();
   _renderStartDateOriginNote();   // 날짜를 맞추면 대조 안내가 스스로 사라진다
+  _renderStartDateBasisNote();    // 결정 279 — 고치면 「직접 정한 날로 저장합니다」
   if (dDay && dl) dDay.textContent = _rfDow(dl.value);
   const warn = document.getElementById("rf_deadline_warn");
   if (!warn || !dl) return;
@@ -1221,6 +1222,7 @@ function rfSetInflowType(type, button, opts) {
   root?.querySelectorAll("button").forEach((el) => el.classList.toggle("active", el === button || el.dataset.inflow === value));
   _renderInflowOriginNote();
   syncRecruitProductMainUrl();
+  if (typeof _rfRefreshCards === "function") _rfRefreshCards();
 }
 
 /**
@@ -1250,9 +1252,9 @@ function _renderStartDateOriginNote() {
       + "line-height:1.5;background:#EFF6FF;color:#1E40AF;border:1px solid #BFDBFE";
     row.parentNode.insertBefore(box, row.nextSibling);
   }
-  box.textContent = "연결된 작업오더의 시작일은 " + wo + " 입니다 — 이 공고에는 발행 당시 값 "
-    + cur + " 이 그대로 남아 있습니다(발행은 스냅샷이라 오더를 고쳐도 따라가지 않습니다). "
-    + "바꾸려면 위 날짜를 고쳐 저장하세요.";
+  // ★ 결정 279: 리뷰오더 시작일 = 희망 시작일 · 공고 시작일 = 실제 시작일(여기서 정함 · 안 정하면 첫 참여일)
+  box.textContent = "리뷰오더의 희망 시작일은 " + wo + " 입니다 — 이 공고의 실제 시작일은 " + cur + " 입니다. "
+    + "실제 시작일은 위 날짜에서 정합니다.";
 }
 
 function _renderInflowOriginNote() {
@@ -1647,6 +1649,8 @@ function _ugRegister(key, label) {
 function _ugDrop(key) {
   if (!key || !_UG_KEY_RE.test(key)) return;     // 고정 3칸(inflow/review/notes)은 절대 안 지운다
   delete _IG_FIELDS[key]; delete _IG_TA[key]; delete window._igState[key];
+  const st = window._ugSt0;
+  if (st) { delete st.doc[key]; delete st.ins[key]; delete st.caret[key]; }
 }
 /** 표를 통째로 다시 그리기 전에 — 사라진 행의 키가 `_igBusy`·`_igRenderAll` 에 남지 않게 */
 function _ugDropAll() { Object.keys(_IG_FIELDS).forEach(k => { if (_UG_KEY_RE.test(k)) _ugDrop(k); }); }
@@ -1655,56 +1659,305 @@ function _ugDropBox(box) {
   box.querySelectorAll(".rf-opt-row").forEach(r => _ugDrop(r.dataset.ig));
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   📍 결정 278(D4 「나」 · 사용자 확정 2026-10-22) — 선택지 가이드 = **글 칸 하나 + 그 사이 사진 줄**
+   ─────────────────────────────────────────────────────────────────────
+   글을 쓰다가 넣고 싶은 자리를 누르고 「여기에 사진 넣기」 → 그 줄에 사진이 끼어든다.
+   사진 줄마다 위로·아래로·빼기. 저장은 새 칸 없이 **글 속 사진 자리**로(서버 `utils/guideCanon`):
+     HTML = 글<br><img>(자리)<br>글 … + 맨 끝 사진들 <img>  ·  사진 목록 = 글 속 차례 그대로
+   ★ 화면 모델 `_ugDoc[key]` = 글·사진이 번갈아 놓인 목록(T P T P … T — 글은 비어 있을 수 있다).
+     사진 항목은 `_igState[key]` 의 그 객체 자체를 가리킨다 → 올리기·장수 제한·확대 보기는 위젯 한 벌 그대로(사본 0).
+   ★ 글 칸에 타이핑할 때는 다시 그리지 않는다(한글 조합이 깨진다) — 사진을 넣고·옮기고·뺄 때만 다시 그린다.
+   ★ 숨은 글칸(rf_wd_<key>)은 "글이 있나" 판정용 거울이다(배지·미리보기가 읽는다).
+   ═══════════════════════════════════════════════════════════════════════ */
+/** 칸별 편집 상태(처음 쓸 때 만든다) — doc: 글·사진 차례 · ins: 다음 사진이 들어갈 자리 {seg, at}(null = 맨 끝) · caret: 마지막으로 쓰던 글 칸 */
+function _ugSt() { return window._ugSt0 || (window._ugSt0 = { doc: {}, ins: {}, caret: {} }); }
+
+/** 글·사진 목록을 T P T … T 모양으로 — 붙은 글은 잇고, 붙은 사진 사이·양 끝에는 빈 글 칸 */
+function _ugDocNorm(blocks) {
+  const out = [];
+  (blocks || []).forEach(b => {
+    const last = out[out.length - 1];
+    if (b.t === "text") {
+      if (last && last.t === "text") last.v = [last.v, b.v].filter(x => x !== "").join("\n");
+      else out.push({ t: "text", v: String(b.v || "") });
+    } else {
+      if (!last || last.t !== "text") out.push({ t: "text", v: "" });
+      out.push(b);
+    }
+  });
+  if (!out.length || out[out.length - 1].t !== "text") out.push({ t: "text", v: "" });
+  return out;
+}
+
+/** 위젯 목록과 맞춘다 — 빠진 사진은 줄을 빼고 앞뒤 글을 잇고, 새 사진은 넣을 자리(없으면 끝)에. 목록 차례 = 글 속 차례. */
+function _ugDocSync(key) {
+  const list = window._igState[key] || (window._igState[key] = []);
+  let doc = _ugDocNorm((_ugSt().doc[key] || []).filter(b => b.t !== "pic" || list.includes(b.item)));
+  const inDoc = new Set(doc.filter(b => b.t === "pic").map(b => b.item));
+  list.forEach(item => {
+    if (inDoc.has(item)) return;
+    inDoc.add(item);
+    const at = _ugSt().ins[key];
+    if (at && doc[at.seg] && doc[at.seg].t === "text") {
+      const v = doc[at.seg].v, c = Math.max(0, Math.min(at.at, v.length));
+      doc.splice(at.seg, 1, { t: "text", v: v.slice(0, c).replace(/\n$/, "") }, { t: "pic", item }, { t: "text", v: v.slice(c).replace(/^\n/, "") });
+      _ugSt().ins[key] = { seg: at.seg + 2, at: 0 };          // 여러 장을 한 번에 넣으면 고른 차례대로 이어진다
+    } else {
+      doc.push({ t: "pic", item });
+      doc = _ugDocNorm(doc);
+    }
+  });
+  doc = _ugDocNorm(doc);
+  _ugSt().doc[key] = doc;
+  const order = doc.filter(b => b.t === "pic").map(b => b.item);
+  list.splice(0, list.length, ...order);
+  return doc;
+}
+
+/** 손댔는지 판정용 서명 — 글(앞뒤 공백 무시)과 사진(토큰)의 차례 */
+function _ugSig(key) {
+  return JSON.stringify((_ugSt().doc[key] || []).map(b => b.t === "text" ? b.v.trim() : "#" + (b.item.tok || b.item.src || ""))
+    .filter(x => x !== ""));
+}
+
+/** 숨은 거울 글칸 = 글만 이어 붙인 것(배지·미리보기의 "글 있음" 판정용) */
+function _ugMirror(key) {
+  const ta = document.getElementById(_IG_TA[key]);
+  if (ta) ta.value = (_ugSt().doc[key] || []).filter(b => b.t === "text" && b.v.trim()).map(b => b.v.trim()).join("\n");
+}
+
+function _ugAutoH(ta) {
+  ta.style.height = "auto";
+  ta.style.height = Math.max(ta.scrollHeight, 30) + "px";
+}
+
+/** 글·사진 줄을 그린다. 글은 value 로 넣는다(HTML 보간 0). */
+function _ugDocRender(key) {
+  const box = document.getElementById("rf_ugdoc_" + key);
+  if (!box) return;
+  const doc = _ugDocSync(key);
+  let n = 0;
+  box.innerHTML = doc.map((b, i) => {
+    if (b.t === "text") {
+      const ph = i === 0 ? "유입 경로, 검색어, 진입 순서를 적어주세요&#10;넣고 싶은 자리를 누른 뒤 「여기에 사진 넣기」 · 이미지를 붙여넣어도 됩니다." : "";
+      return `<textarea class="ug-seg" data-seg="${i}" rows="1" placeholder="${ph}"></textarea>`;
+    }
+    n++;
+    const im = b.item;
+    const canUp = doc[i - 1].v.trim() !== "" || i >= 2;
+    const canDown = doc[i + 1].v.trim() !== "" || i + 2 < doc.length;
+    const st = im.state === "up" ? " up" : im.state === "bad" ? " bad" : "";
+    const say = im.state === "up" ? "올리는 중…" : im.state === "bad" ? "올리지 못했어요 — 빼고 다시 넣어주세요" : "이 줄 자리에 사진이 보입니다";
+    return `<div class="ug-pic${st}" data-pic="${i}">
+        <button type="button" class="ug-pic-th" data-ugzoom="${i}" title="크게 보기"><img src="${escHtml(im.src || im.url)}" alt=""></button>
+        <span class="ug-pic-tx"><b>사진 ${n}</b> <span>${say}</span></span>
+        <button type="button" class="ug-btn" data-ugmv="-1" data-i="${i}"${canUp ? "" : " disabled"}>위로</button>
+        <button type="button" class="ug-btn" data-ugmv="1" data-i="${i}"${canDown ? "" : " disabled"}>아래로</button>
+        <button type="button" class="ug-btn del" data-ugdel="${i}">빼기</button>
+      </div>`;
+  }).join("");
+  box.querySelectorAll("textarea.ug-seg").forEach(ta => { ta.value = doc[Number(ta.dataset.seg)].v; _ugAutoH(ta); });
+  const wrap = box.closest(".rf-ug");
+  if (wrap) wrap.querySelectorAll(".ug-ins,.ug-add").forEach(btn => {
+    btn.disabled = n >= _IG_MAX;
+    btn.title = n >= _IG_MAX ? `사진은 최대 ${_IG_MAX}장까지 넣을 수 있어요` : "";
+  });
+  _ugMirror(key);
+  // 배지·안내줄도 같이 — 사진 올리기가 끝난 순간(_igUpload → _igRender → 여기)에도 "글 · 사진 N" 이 바로 맞는다
+  const row = document.querySelector(`#rf_opt_rows .rf-opt-row[data-ig="${key}"]`);
+  if (row) _ugMark(row);
+}
+
+/** 사진 줄 한 칸 옮기기 — 옆 글이 있으면 글 한 줄과 자리를 바꾸고, 바로 옆이 사진이면 둘을 바꾼다 */
+function _ugMove(key, i, dir) {
+  const doc = _ugSt().doc[key];
+  if (!doc || !doc[i] || doc[i].t !== "pic") return false;
+  const near = doc[i + dir], far = doc[i - dir];
+  const nearV = near.v.replace(/\n+$/, "").replace(/^\n+/, "");
+  if (nearV.trim() !== "") {
+    const L = nearV.split("\n");
+    const line = dir < 0 ? L.pop() : L.shift();
+    near.v = L.join("\n");
+    far.v = far.v.trim() === "" ? line : (dir < 0 ? line + "\n" + far.v : far.v + "\n" + line);
+    return true;
+  }
+  const other = doc[i + 2 * dir];
+  if (!other || other.t !== "pic") return false;
+  const t = other.item; other.item = doc[i].item; doc[i].item = t;
+  return true;
+}
+
+function _ugDocChanged(key) {
+  _ugDocRender(key);
+  if (typeof _onPreviewInput === "function") _onPreviewInput();
+}
+
+/** 넣을 자리 = 마지막으로 쓰던 글 칸의 커서(없으면 맨 끝) */
+function _ugInsHere(key) {
+  const box = document.getElementById("rf_ugdoc_" + key);
+  const seg = _ugSt().caret[key];
+  const ta = box && seg != null ? box.querySelector(`textarea.ug-seg[data-seg="${seg}"]`) : null;
+  _ugSt().ins[key] = ta ? { seg: Number(seg), at: ta.selectionStart || 0 } : null;
+}
+
+/** 글·사진 칸 배선(멱등) — 클릭은 위임, 파일 입력은 addEventListener */
+function _ugDocBind(key) {
+  const box = document.getElementById("rf_ugdoc_" + key);
+  const wrap = box && box.closest(".rf-ug");
+  if (!box || !wrap || wrap.dataset.ugdocBound === "1") return;
+  wrap.dataset.ugdocBound = "1";
+  const file = wrap.querySelector("#rf_igf_" + key);
+  const caret = (e) => { const ta = e.target.closest && e.target.closest("textarea.ug-seg"); if (ta) _ugSt().caret[key] = Number(ta.dataset.seg); };
+  box.addEventListener("focusin", caret);
+  box.addEventListener("input", (e) => {
+    const ta = e.target.closest("textarea.ug-seg");
+    if (!ta) return;
+    const doc = _ugSt().doc[key];
+    const b = doc && doc[Number(ta.dataset.seg)];
+    if (b && b.t === "text") b.v = ta.value;
+    _ugAutoH(ta);
+    _ugMirror(key);
+    const row = document.querySelector(`#rf_opt_rows .rf-opt-row[data-ig="${key}"]`);
+    if (row) _ugMark(row);
+    if (typeof _onPreviewInput === "function") _onPreviewInput();
+    // 위로·아래로 가능 여부는 옆 글에 달렸다 — 버튼 상태만 고친다(글칸은 다시 그리지 않는다)
+    box.querySelectorAll(".ug-pic").forEach(el => {
+      const i = Number(el.dataset.pic);
+      const up = el.querySelector('[data-ugmv="-1"]'), dn = el.querySelector('[data-ugmv="1"]');
+      if (up) up.disabled = !(doc[i - 1].v.trim() !== "" || i >= 2);
+      if (dn) dn.disabled = !(doc[i + 1].v.trim() !== "" || i + 2 < doc.length);
+    });
+  });
+  wrap.addEventListener("click", (e) => {
+    const mv = e.target.closest("[data-ugmv]");
+    if (mv) { if (_ugMove(key, Number(mv.dataset.i), Number(mv.dataset.ugmv))) _ugDocChanged(key); return; }
+    const del = e.target.closest("[data-ugdel]");
+    if (del) {
+      const b = (_ugSt().doc[key] || [])[Number(del.dataset.ugdel)];
+      if (!b || b.t !== "pic") return;
+      if (!confirm("이 사진을 가이드에서 뺄까요?")) return;
+      const list = window._igState[key] || [];
+      const at = list.indexOf(b.item);
+      if (at >= 0) list.splice(at, 1);
+      _ugDocChanged(key); _igSay(key, "사진을 뺐습니다.", "ok");
+      return;
+    }
+    const zoom = e.target.closest("[data-ugzoom]");
+    if (zoom) {
+      const b = (_ugSt().doc[key] || [])[Number(zoom.dataset.ugzoom)];
+      if (!b || b.t !== "pic") return;
+      if (b.item.state === "up") { _igSay(key, "아직 올리는 중이에요.", "warn"); return; }
+      if (b.item.state === "bad") { _igSay(key, "이 사진은 올리지 못했어요 — 빼고 다시 넣어주세요.", "bad"); return; }
+      _igLbOpen(key, _igOk(key).indexOf(b.item));
+      return;
+    }
+    if (e.target.closest("[data-ugins]")) { _ugInsHere(key); file?.click(); return; }
+    if (e.target.closest("[data-ugadd]")) { _ugSt().ins[key] = null; file?.click(); return; }
+  });
+  // Ctrl+V — 이미지일 때만 가로챈다(글 붙여넣기는 기본 동작) · 그 커서 자리에 넣는다
+  box.addEventListener("paste", (e) => {
+    const ta = e.target.closest("textarea.ug-seg");
+    const items = [...((e.clipboardData && e.clipboardData.items) || [])].filter(it => it.kind === "file" && /^image\//.test(it.type));
+    if (!items.length) return;
+    e.preventDefault();
+    _ugSt().ins[key] = ta ? { seg: Number(ta.dataset.seg), at: ta.selectionStart || 0 } : null;
+    (async () => { for (const it of items) { const f = it.getAsFile(); if (f) await _igUpload(key, f); } })();
+  });
+  // 파일 끌어다 놓기 — 글 칸 위에 놓으면 그 칸 끝, 그 밖이면 맨 끝
+  const isFileDrag = e => [...((e.dataTransfer && e.dataTransfer.types) || [])].includes("Files");
+  wrap.addEventListener("dragover", (e) => { if (!isFileDrag(e)) return; e.preventDefault(); wrap.classList.add("drag"); });
+  wrap.addEventListener("dragleave", (e) => { if (!wrap.contains(e.relatedTarget)) wrap.classList.remove("drag"); });
+  wrap.addEventListener("drop", (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault(); wrap.classList.remove("drag");
+    const ta = e.target.closest && e.target.closest("textarea.ug-seg");
+    _ugSt().ins[key] = ta ? { seg: Number(ta.dataset.seg), at: ta.value.length } : null;
+    const files = [...((e.dataTransfer && e.dataTransfer.files) || [])];
+    (async () => { for (const f of files) await _igUpload(key, f); })();
+  });
+}
+
 /** 선택지 가이드 편집 블록(행 아래 접힘) — 파일 입력은 onclick 문자열 보간 없이 배선 */
 function _ugBuild(key) {
   const box = document.createElement("div");
   box.className = "rf-ug";
   box.dataset.ug = key;
-  // ★ 사진(스트립)이 왼쪽, 글이 오른쪽 — 인트라넷 리뷰오더와 같은 규격
-  //   (작업지시서: inadd-webapp docs/specs/unit-guide-attach-spec.md §1·§4)
-  //   "비우면 공통 가이드가 나갑니다"류 설명문은 안내줄 배지가 대신하므로 넣지 않는다.
+  // ★ 결정 278 — 글 칸 하나 안에 사진 줄이 끼어드는 모양(인트라넷 리뷰오더와 같은 규격)
   box.innerHTML =
-    '<div class="rf-ug-h">유입가이드</div>' +
-    '<div class="work-compose ig-wrap">' +
-      '<div class="work-image-strip ig-strip" id="rf_ig_' + key + '" tabindex="0" data-igf="' + key + '"></div>' +
-      '<textarea id="rf_wd_' + key + '" class="rform-input" rows="3" ' +
-        'placeholder="유입 경로, 검색어, 진입 순서를 적어주세요&#10;이곳을 선택 후 이미지를 붙여넣어도 됩니다."></textarea>' +
-      '<input type="file" id="rf_igf_' + key + '" accept="image/*" multiple class="ig-file">' +
+    '<div class="rf-ug-h">가이드유입<span class="rf-ug-badge">없음</span><span class="rf-ug-max">사진 최대 ' + _IG_MAX + '장</span></div>' +
+    '<div class="ug-doc" id="rf_ugdoc_' + key + '"></div>' +
+    '<div class="ug-tools">' +
+      '<button type="button" class="ug-ins" data-ugins="1">여기에 사진 넣기 <small>(글자 깜빡이는 자리)</small></button>' +
+      '<button type="button" class="ug-add" data-ugadd="1">사진 끌어다 놓기 · 클릭해 고르기</button>' +
     '</div>' +
+    '<textarea id="rf_wd_' + key + '" class="ug-mirror" hidden tabindex="-1" aria-hidden="true"></textarea>' +
+    '<input type="file" id="rf_igf_' + key + '" accept="image/*" multiple class="ig-file">' +
     '<div class="ig-msg" id="rf_igm_' + key + '"></div>';
   const f = box.querySelector("#rf_igf_" + key);
   if (f) f.addEventListener("change", () => igPickFiles(key, f));
   return box;
 }
 
-/** 저장값(HTML+배열) → 편집 상태. 원본 HTML 은 그대로 보관했다가 미수정이면 되돌려준다. */
-function _ugLoad(row, key, rawHtml, images) {
-  const raw = String(rawHtml || "");
-  const { textHtml, urls } = _igSplitInflow(raw);
-  // 배열(inflow_guide_images)과 본문 <img> 를 합친다 — 중복 토큰은 `_igSetList` 가 접는다
-  _igSetList(key, urls.concat(Array.isArray(images) ? images : []));
-  const plain = _htmlToPlainPreview(textHtml);
-  const ta = document.getElementById(_IG_TA[key]);
-  if (ta) ta.value = plain;
-  row.dataset.ugRaw = raw;
-  row.dataset.ugPlain = plain;
-  row.dataset.ugTok = _igOk(key).map(x => x.tok).join(",");
+/** HTML 조각 → 글(줄바꿈 유지 · 따옴표까지 풀어 준다 — 다시 저장할 때 &amp;quot; 로 두 번 감싸지 않게) */
+function _ugHtmlText(h) {
+  return String(h)
+    .replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&#0?39;|&apos;/g, "'").replace(/&amp;/g, "&")
+    .replace(/\n{3,}/g, "\n\n").trim();
 }
 
-/** 편집 상태 → 저장값. 글도 사진도 그대로면 **원본 HTML 바이트 그대로**(단락·링크 보존). */
+/** 저장값(HTML+배열) → 편집 상태. 사진은 HTML 속 자리 그대로, 목록에만 있는 사진은 맨 끝. 원본 HTML 은 보관했다가 미수정이면 되돌려준다. */
+function _ugLoad(row, key, rawHtml, images) {
+  const raw = String(rawHtml || "");
+  const blocks = [], urls = [];
+  const re = new RegExp("<" + "img" + "\\b[^>]*>", "gi");
+  let last = 0, m;
+  const addText = (h) => { const t = _ugHtmlText(h); if (t) blocks.push({ t: "text", v: t }); };
+  while ((m = re.exec(raw))) {
+    addText(raw.slice(last, m.index));
+    last = re.lastIndex;
+    const src = m[0].match(/src\s*=\s*["']([^"']+)["']/i);
+    const u = src ? src[1].trim() : "";
+    if (_IG_URL_RE.test(u)) { blocks.push({ t: "pic", url: u }); urls.push(u); }
+  }
+  addText(raw.slice(last));
+  // 배열(inflow_guide_images)과 본문 <img> 를 합친다 — 중복 토큰은 `_igSetList` 가 접는다
+  _igSetList(key, urls.concat(Array.isArray(images) ? images : []));
+  const byTok = new Map(_igOk(key).map(x => [x.tok, x]));
+  const used = new Set(), doc = [];
+  blocks.forEach(b => {
+    if (b.t === "text") { doc.push(b); return; }
+    const it = byTok.get(_igTok(b.url));
+    if (it && !used.has(it)) { used.add(it); doc.push({ t: "pic", item: it }); }
+  });
+  _igOk(key).forEach(it => { if (!used.has(it)) doc.push({ t: "pic", item: it }); });
+  _ugSt().doc[key] = _ugDocNorm(doc);
+  _ugSt().ins[key] = null;
+  _ugMirror(key);
+  row.dataset.ugRaw = raw;
+  row.dataset.ugSig = _ugSig(key);
+}
+
+/** 편집 상태 → 저장값. 글도 사진 자리도 그대로면 **원본 HTML 바이트 그대로**(단락·링크 보존). */
 function _ugCompose(row, key) {
   if (!key || !window._igState[key]) return { html: "", images: [] };
-  const ta = document.getElementById(_IG_TA[key]);
-  const plain = String(ta ? ta.value : "").trim();
-  const toks = _igOk(key).map(x => x.tok).join(",");
+  _ugDocSync(key);
   const images = _igUrls(key);
   const raw = String(row.dataset.ugRaw || "");
-  if (raw && plain === String(row.dataset.ugPlain || "").trim() && toks === String(row.dataset.ugTok || "")) {
-    return { html: raw, images };
-  }
-  if (!plain && !toks) return { html: "", images: [] };
+  if (raw && _ugSig(key) === String(row.dataset.ugSig || "")) return { html: raw, images };
   const escT = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return { html: escT(plain).replace(/\n/g, "<br>") + _igImgTags(key), images };
+  const segs = (_ugSt().doc[key] || []).filter(b => b.t === "pic" ? b.item.state === "ok" : b.v.trim() !== "");
+  let lastText = -1;
+  segs.forEach((b, i) => { if (b.t === "text") lastText = i; });
+  const tagOf = b => `<img src="${escHtml(b.item.url)}">`;
+  // 글 사이 사진 = 그 자리에(앞뒤 <br> — 인트라넷 주소 줄을 서버가 HTML 로 바꾼 모양과 같다) · 맨 끝 사진 = 끝에 이어 붙임(종전 모양)
+  const inline = segs.slice(0, lastText + 1).map(b => b.t === "text" ? escT(b.v.trim()).replace(/\n/g, "<br>") : tagOf(b)).join("<br>");
+  const tail = segs.slice(lastText + 1).map(tagOf).join("");
+  if (!inline && !tail) return { html: "", images: [] };
+  return { html: inline + tail, images };
 }
 
 /** 행 아래 안내줄(.rf-ug-cta)에 "가이드 있음/없음" 표시 — 접혀 있어도 설정 상태가 보이게 */
@@ -1716,6 +1969,11 @@ function _ugMark(row) {
   const has = !!(String(ta ? ta.value : "").trim() || n);
   row.classList.toggle("ug-has", has);
   const unitEl = row.closest(".rf-unit");
+  if (unitEl) {
+    unitEl.classList.toggle("ug-has", has);
+    const badge = unitEl.querySelector(".rf-ug-badge");
+    if (badge) badge.textContent = has ? (n ? (String(ta ? ta.value : "").trim() ? "글 · 사진 " + n : "사진 " + n) : "글") : "없음";
+  }
   const cta = unitEl && unitEl.querySelector(".rf-ug-cta");
   if (!cta) return;
   cta.classList.toggle("has", has);
@@ -1734,13 +1992,8 @@ function _ugAttachAll() {
     const key = r.dataset.ig;
     if (!key) return;
     if (r._ugPending) { _ugLoad(r, key, r._ugPending.html, r._ugPending.images); r._ugPending = null; }
-    _igBind(key);
-    _igRender(key);
-    const ta = document.getElementById(_IG_TA[key]);
-    if (ta && ta.dataset.ugBound !== "1") {
-      ta.dataset.ugBound = "1";
-      ta.addEventListener("input", () => { _ugMark(r); if (typeof _onPreviewInput === "function") _onPreviewInput(); });
-    }
+    _ugDocBind(key);
+    _igRender(key);      // 선택지 칸은 글·사진 줄을 그린다(_igRender → _ugDocRender)
     _ugMark(r);
   });
 }
@@ -1770,20 +2023,14 @@ function _igSay(field, msg, kind) {
 }
 
 function _igRender(field) {
+  // 결정 278 — 선택지 칸은 스트립이 아니라 글·사진 줄(_ugDocRender)이 사진을 보여 준다(올리는 중·실패 표시 포함)
+  if (_UG_KEY_RE.test(field) && document.getElementById("rf_ugdoc_" + field)) { _ugDocRender(field); return; }
   const strip = document.getElementById("rf_ig_" + field);
   if (!strip) return;
   const list = window._igState[field] || [];
-  // 선택지 전용 칸은 **드롭 타일이 맨 왼쪽**, 사진이 그 오른쪽으로 이어붙는다(리뷰오더와 같은 배치).
-  // canonical 3칸(유입·리뷰·특이)은 종전대로 사진 뒤에 [추가] 타일이 붙는다.
-  const lead = _UG_KEY_RE.test(field);
+  // canonical 3칸(유입·리뷰·특이) — 사진 뒤에 [추가] 타일. 선택지 칸은 위에서 글·사진 줄로 갈라졌다(결정 278).
   let h = "";
-  if (lead) {
-    const full = list.length >= _IG_MAX;
-    h = `<button type="button" class="ig-lead${full ? " off" : ""}"${full ? "" : ' data-igadd="1"'}
-           title="${full ? `사진은 최대 ${_IG_MAX}장까지 넣을 수 있어요` : "끌어다 놓거나 클릭해 고르기"}">
-           <span class="t1">사진 끌어다 놓기</span><span class="t2">클릭해 고르기 · 최대 ${_IG_MAX}장</span></button>`;
-  }
-  if (!list.length && !lead) {
+  if (!list.length) {
     h = `<button type="button" class="ig-empty" data-igadd="1">
            <span class="t1">＋ 사진 넣기</span><span class="t2">끌어다 놓기 · Ctrl+V<br>클릭</span></button>`;
   } else {
@@ -1797,7 +2044,7 @@ function _igRender(field) {
               <span class="ig-x" data-igdel="${i}" title="이 사진 빼기">✕</span>
             </button>`;
     });
-    if (!lead && list.length < _IG_MAX) {
+    if (list.length < _IG_MAX) {
       h += `<button type="button" class="ig-add" data-igadd="1" title="사진 추가">
               <span class="plus">＋</span><span>추가</span></button>`;
     }
@@ -2130,20 +2377,44 @@ function renderPartCheck() {
    ═══════════════════════════════════════ */
 /** 현재 진행상품 입력 모드 — 'none'(옵션 없는 작업) | 'opt'(옵션 있는 작업) */
 function _prodMode() {
-  const el = document.getElementById("rf_prod_mode");
-  return (el && el.value === "opt") ? "opt" : "none";
+  /* ★★ 결정 277(사용자 확정 2026-10-22 「3.가」) — 공고 전체의 "옵션 없는/있는 작업" 스위치는 없다.
+     상품 카드마다 옵션 있음·없음을 고르고(인트라넷 리뷰오더 상품 카드와 같다), 저장 모양(선택지 원장 유무)은
+     **카드 구성에서 정해진다** — 작업오더 → 공고 자동 생성 규칙(`_woProductMode`)과 같은 규칙:
+       · 살아 있는 상품 카드가 둘 이상이거나, 옵션 있는 상품이 있거나 → 'opt'(선택지 원장)
+       · 옵션 없는 상품 하나 → 그 상품에 전용 유입가이드가 있으면 'opt', 없으면 'none'(원장 없이 공고 하나로)
+       · ★ 선택지 원장이 살아 있던 공고는 'opt' 를 유지한다(손대지 않은 저장이 원장을 지우지 않게 — 종전 자동 판정과 같은 기준)
+     ★ 마감 줄만 있는 카드는 세지 않는다(마감만 남은 공고 = 옵션 없는 공고 · 결정 029·042 — 정원은 공고 원장이 말한다). */
+  const boxes = Array.from(document.querySelectorAll("#rf_opt_rows .rf-gp"));
+  if (!boxes.length) {
+    const el = document.getElementById("rf_prod_mode");
+    return (el && el.value === "opt") ? "opt" : "none";
+  }
+  const live = boxes.filter(b => Array.from(b.querySelectorAll(".rf-opt-row")).some(r => r.dataset.status !== "closed"));
+  if (!live.length) return "none";
+  const allProduct = live.every(b => b.dataset.unit === "product");
+  /* ★★ 원장 없이 상품 여러 줄로 저장된 옛 공고·구조화 옵션 없는 작업오더(부르는 쪽이 'none' 을 명시 = _rfForcedNone)는
+     카드가 여럿이어도 'none' 이다 — 손대지 않은 저장이 상품 단위 원장을 새로 만들면 리뷰어 화면이 「옵션 고르기」로 바뀐다
+     (코드 리뷰 실측: 종전 'none' 은 늘 [] 를 보냈다). 사람이 [+ 상품 추가]를 누르면 새 규칙으로 돌아간다(addOptRow). */
+  if (live.length > 1 && !(window._rfForcedNone && allProduct)) return "opt";
+  if (!allProduct) return "opt";
+  if (window._rfLiveLedger) return "opt";
+  for (const b of live) {
+    const r = b.querySelector(".rf-opt-row");
+    if (r && r.dataset.ig && typeof _ugCompose === "function") {
+      const g = _ugCompose(r, r.dataset.ig);
+      if (String(g.html || "").trim() || (Array.isArray(g.images) && g.images.length)) return "opt";
+    }
+  }
+  return "none";
 }
 /** 모드 표시만 갱신(값 변환·재렌더 없음) */
 function _applyProdModeUi(m) {
   const el = document.getElementById("rf_prod_mode"); if (el) el.value = m;
   const wrap = document.getElementById("rf_opt_wrap");
-  if (wrap) { wrap.classList.toggle("rf-pm-opt", m === "opt"); wrap.classList.toggle("rf-pm-none", m !== "opt"); }
-  document.querySelectorAll("#rf_prod_mode_sw .rf-pm-btn").forEach(b => b.classList.toggle("on", b.dataset.mode === m));
-  // 버튼은 두 모드 모두 "상품 추가" — none 이면 상품 한 줄, opt 이면 상품 그룹(옵션은 그룹 안에서 추가)
-  const add = document.getElementById("rf_opt_addbtn");
-  if (add) add.innerHTML = '<i class="fas fa-plus"></i> 상품 추가';
-  // ★ 결정 214(Codex P2): 옵션 없는 작업 모드는 선택지 원장을 저장하지 않는다 → 상품 사진 줄을 숨긴다(올려도 버려지는 막다른 길 방지)
+  if (wrap) { wrap.classList.toggle("rf-pm-opt", m === "opt"); wrap.classList.toggle("rf-pm-none", m !== "opt"); wrap.classList.add("rf-cards"); }
+  // ★ 결정 214(Codex P2): 선택지 원장을 만들지 않는 구성(옵션 없는 상품 하나)에서는 상품 사진 줄을 숨긴다(올려도 버려지는 막다른 길 방지)
   document.querySelectorAll("#rf_opt_rows .rf-opt-thumb-line").forEach(l => { l.style.display = m === "opt" ? "flex" : "none"; });
+  _rfRefreshCards();
 }
 /** 옵션 유무 선택 바로 아래 한 줄 안내. 진행상품 수가 아직 없으면 기본 1건으로 안내한다. */
 function _renderProdModeHelp() {
@@ -2162,42 +2433,6 @@ function _setProdModeNote(txt) {
   if (n) n.textContent = txt || "";
 }
 /**
- * 모드 전환(사람이 누름) — 값은 이월하고, 옵션을 없애는 방향일 때만 확인창.
- * ★ 조용히 값이 사라지지 않게: 살아있는 옵션이 있으면 몇 종이 정리되는지 먼저 말한다.
- */
-function setProdMode(mode, opts) {
-  const m = (mode === "opt") ? "opt" : "none";
-  if (_prodMode() === m) return;
-  const rows = _readProdRowsRaw();
-  if (m === "none" && !(opts && opts.silent)) {
-    const live = rows.filter(r => r.optKey && !r.closed);
-    if (live.length && !confirm(
-      "옵션 " + live.length + "종을 정리하고 '옵션 없는 작업'으로 바꿉니다.\n" +
-      "이미 참여한 리뷰어가 있는 옵션은 기록 보호를 위해 마감 상태로 남습니다.\n\n계속할까요?")) return;
-  }
-  _applyProdModeUi(m);
-  _setProdModeNote("");
-  _renderProdModeHelp();
-  _renderProdTable(_convertProdRows(rows, m));
-}
-/** 모드 전환 시 값 이월 — none↔opt 어느 쪽으로도 입력한 값이 사라지지 않게 */
-function _convertProdRows(rows, m) {
-  const list = rows || [];
-  if (!list.length) return [];
-  if (m === "opt") return list;                     // 옵션명 칸이 드러나며 그대로 이어 쓴다
-  // opt → none: 상품 단위로 접는다(금액=첫 옵션, 인원·건수=합계, 하나라도 0이면 0=무제한)
-  const out = [];
-  list.forEach(r => {
-    const key = r.productName || "";
-    const g = out.length && out[out.length - 1].productName === key ? out[out.length - 1] : null;
-    if (!g) { out.push({ productName: key, optKey: "", payAmount: r.payAmount, recruitTotal: r.recruitTotal, dailyLimit: r.dailyLimit, status: "active" }); return; }
-    g.recruitTotal = (g.recruitTotal > 0 && r.recruitTotal > 0) ? g.recruitTotal + r.recruitTotal : 0;
-    g.dailyLimit   = (g.dailyLimit   > 0 && r.dailyLimit   > 0) ? g.dailyLimit   + r.dailyLimit   : 0;
-    if (!g.payAmount) g.payAmount = r.payAmount;
-  });
-  return out;
-}
-/**
  * 표 전체 렌더 — 모드에 맞는 모양으로 다시 그린다.
  * ★ 행 DOM(.rf-opt-row + 다섯 입력칸)은 두 모드 공통 — 'opt' 모드는 상품 그룹으로 감싸기만 한다.
  */
@@ -2207,21 +2442,18 @@ function _renderProdTable(rows) {
   _ugDropAll();                 // 표를 통째로 갈아치우므로 옛 선택지 가이드 키를 먼저 버린다
   wrap.innerHTML = "";
   const list = rows || [];
-  if (_prodMode() === "opt") {
-    const groups = [];
-    list.forEach(r => {
-      // ★ 상품 단위(옵션 없는 상품)는 **묶지 않는다** — 그 자체가 하나의 선택지다
-      const unit = (r.unitKind === "product" || r.unit_kind === "product") ? "product" : "option";
-      const key = r.productName || "";
-      const last = groups.length ? groups[groups.length - 1] : null;
-      const g = (last && unit === "option" && last.unit === "option" && last.name === key) ? last : null;
-      if (g) g.rows.push(r); else groups.push({ name: key, unit, rows: [r] });
-    });
-    if (!groups.length) groups.push({ name: "", unit: "option", rows: [{}] });
-    groups.forEach(g => wrap.appendChild(_buildProdGroup(g)));
-  } else {
-    (list.length ? list : []).forEach(r => wrap.appendChild(_buildOptRowEl(r)));
-  }
+  // ★ 결정 277 — 언제나 상품 카드로 그린다(인트라넷 리뷰오더 상품 카드와 같은 모양).
+  //   옵션 단위 줄은 같은 상품끼리 한 카드로 묶고, 상품 단위(옵션 없는 상품)는 그 자체가 카드 하나다.
+  const groups = [];
+  list.forEach(r => {
+    const unit = (r.unitKind === "product" || r.unit_kind === "product") ? "product" : "option";
+    const key = r.productName || "";
+    const last = groups.length ? groups[groups.length - 1] : null;
+    const g = (last && unit === "option" && last.unit === "option" && last.name === key) ? last : null;
+    if (g) g.rows.push(r); else groups.push({ name: key, unit, rows: [r] });
+  });
+  if (!groups.length) groups.push({ name: "", unit: "product", rows: [{}] });   // 빈 공고 = 상품 카드 하나(인트라넷과 같다)
+  groups.forEach(g => wrap.appendChild(_buildProdGroup(g)));
   _ugAttachAll();
   _markDupProductNames();
   _optSummary();
@@ -2239,38 +2471,77 @@ function _renderProdTable(rows) {
  */
 function _buildProdGroup(g) {
   const box = document.createElement("div");
-  box.className = "rf-gp";
+  box.className = "rf-gp rf-card";
   const unit0 = (g && g.unit === "product") ? "product" : "option";
   box.dataset.unit = unit0;
   box.classList.toggle("rf-gp-noopt", unit0 === "product");
+  const rows0 = (g && g.rows && g.rows.length) ? g.rows : [{}];
+  /* 상품 메인 주소(결정 277) — 옵션 없는 상품은 그 줄 주소가 곧 상품 주소. 옵션 있는 상품은 저장된 상품 주소(198 이후 줄)가 있을 때만
+     "아는 값"(puKnown) — 모르는 채로 보내면 빈 값으로 지우게 되므로, 사람이 고치기 전에는 보내지 않는다(readOptRows). */
+  const savedPu = rows0.map(r => r.productUrl ?? r.product_url).find(v => v !== undefined && v !== null && String(v).trim() !== "");
+  const orderPu = (window._rfOrderProductUrls || {})[String(g && g.name || "").replace(/\|/g, "").trim()] || "";
+  const firstUrl = String(rows0[0].optionUrl ?? rows0[0].option_url ?? rows0[0].url ?? "");
+  const pu0 = unit0 === "product" ? String(savedPu || firstUrl || "") : String(savedPu || "");
+  /* ★ 저장돼 있던 줄(savedOptKey)인데 상품 주소가 없으면(198 이전) 옵션 없는 상품이라도 "모름" — 사람이 고치기 전엔 null 로 보낸다
+     (코드 리뷰 2026-10-22: 그 줄 주소를 상품 주소로 보내면 공고에만 다르게 적혀 있던 옛 주소가 리뷰오더 상품 주소를 덮을 수 있다). */
+  const savedRow = rows0.some(r => String(r.savedOptKey || "").trim());
+  box.dataset.puKnown = (savedPu || (unit0 === "product" && !savedRow)) ? "1" : "0";
   const head = document.createElement("div");
   head.className = "rf-gp-head";
   head.innerHTML =
-    '<input class="rform-input rf-gp-name" placeholder="상품명">' +
+    '<strong class="rf-card-no">상품</strong>' +
     '<span class="rf-gp-unit" role="group" aria-label="이 상품의 옵션 유무">' +
-      '<button type="button" data-unit="option">옵션 있음</button>' +
       '<button type="button" data-unit="product">옵션 없음</button>' +
+      '<button type="button" data-unit="option">옵션 있음</button>' +
     '</span>' +
-    '<span class="rf-gp-total" title="옵션인원 합계(자동)">–</span>' +
-    '<button type="button" class="btn-icon-sm rf-gp-del" title="이 상품(옵션 전체) 삭제" style="color:#EF4444"><i class="fas fa-times"></i></button>';
-  const nameEl = head.querySelector(".rf-gp-name");
-  nameEl.value = g.name || "";
+    '<span class="rf-gp-total" title="옵션 모집인원 합계(자동)">–</span>' +
+    '<span class="rf-card-sp"></span>' +
+    '<button type="button" class="rf-gp-shop" title="열어 둔 쇼핑몰 상품 페이지에서 상품명·주소·금액·옵션을 읽어 옵니다">쇼핑몰에서 가져오기</button>' +
+    '<button type="button" class="rf-gp-del" title="이 상품(옵션 전체) 삭제">삭제</button>';
+  box.appendChild(head);
+  const main = document.createElement("div");
+  main.className = "rf-card-main";
+  main.innerHTML =
+    '<div class="rf-f"><span class="rf-f-l">상품명<b>*</b></span><input class="rform-input rf-gp-name" placeholder="상품명"></div>' +
+    '<div class="rf-f"><span class="rf-f-l">상품 메인 URL<b>*</b></span><input class="rform-input rf-gp-url" type="url" inputmode="url" maxlength="2048" placeholder="https://..."></div>';
+  box.appendChild(main);
+  const nameEl = main.querySelector(".rf-gp-name");
+  const urlEl = main.querySelector(".rf-gp-url");
+  nameEl.value = (g && g.name) || "";
+  urlEl.value = pu0;
+  if (!pu0 && orderPu) { urlEl.value = orderPu; urlEl.title = "리뷰오더에 적힌 상품 주소입니다 — 고치면 저장됩니다"; }
   // 그룹 상품명 → 그 그룹의 모든 옵션 행 상품명(숨은 칸)에 반영 — 저장 원문·정원 파생이 따라온다
   nameEl.addEventListener("input", () => {
     box.querySelectorAll(".rf-opt-row .rf-opt-prod").forEach(i => { i.value = nameEl.value; });
+    _optSummary(); renderPartCheck(); _syncPreviewFromOptRows();
+  });
+  // 상품 메인 주소 → 옵션 없는 상품이면 그 줄 주소(= 선택지 주소)도 같은 값 · 첫 상품이면 공고 상품 페이지(랜딩)도 같은 값
+  let prevPu = urlEl.value;
+  urlEl.addEventListener("input", () => {
+    box.dataset.puKnown = "1";
+    urlEl.title = "";
+    if (box.dataset.unit === "product") box.querySelectorAll(".rf-opt-row .rf-opt-url").forEach(i => { i.value = urlEl.value; });
+    // 옵션 주소가 상품 주소와 같던 줄(= 상품 주소를 따라가던 줄)은 함께 바뀐다 — 따로 적어 둔 옵션 주소는 그대로
+    else box.querySelectorAll(".rf-opt-row .rf-opt-url").forEach(i => { if (String(i.value || "").trim() === String(prevPu || "").trim()) i.value = urlEl.value; });
+    prevPu = urlEl.value;
+    _rfSyncFirstCardUrl(box);
     _optSummary(); renderPartCheck(); _syncPreviewFromOptRows();
   });
   head.querySelector(".rf-gp-del").onclick = () => {
     _ugDropBox(box);
     box.remove(); _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); _syncGroupTotals();
   };
-  box.appendChild(head);
+  head.querySelector(".rf-gp-shop").onclick = () => {
+    if (typeof rfImportFromShop === "function") rfImportFromShop(box);
+    else if (typeof showToast === "function") showToast("쇼핑몰에서 가져오기를 불러오지 못했습니다 — 새로고침해 주세요.", true);
+  };
   const body = document.createElement("div");
   body.className = "rf-gp-body";
-  (g.rows.length ? g.rows : [{}]).forEach(r => body.appendChild(_buildOptRowEl(Object.assign({}, r, { productName: g.name || "" }))));
+  rows0.forEach(r => body.appendChild(_buildOptRowEl(Object.assign({}, r, { productName: (g && g.name) || "" }))));
   box.appendChild(body);
+  if (unit0 === "product") body.querySelectorAll(".rf-opt-row .rf-opt-url").forEach(i => { i.value = urlEl.value; });
   const add = document.createElement("button");
-  add.type = "button"; add.className = "rf-gp-add"; add.textContent = "＋ 옵션 추가";
+  add.type = "button"; add.className = "rf-gp-add"; add.textContent = "+ 옵션 추가";
   add.onclick = () => {
     body.appendChild(_buildOptRowEl({ productName: nameEl.value }));
     _ugAttachAll();
@@ -2297,8 +2568,17 @@ function _buildProdGroup(g) {
         // 첫 줄만 남긴다 — 남길 줄이 어느 것인지 사람이 보고 있는 순서 그대로
         rows.slice(1).forEach(r => { _ugDrop(r.dataset.ig); (r.closest(".rf-unit") || r).remove(); });
         const first = box.querySelector(".rf-opt-row");
-        if (first) first.querySelector(".rf-opt-name").value = "";   // 숨은 칸 잔여값이 옵션으로 새지 않게
+        if (first) {
+          first.querySelector(".rf-opt-name").value = "";   // 숨은 칸 잔여값이 옵션으로 새지 않게
+          // 옵션 없는 상품의 선택지 주소 = 상품 메인 주소(비어 있으면 그 줄 주소를 상품 주소로 올린다)
+          const fu = first.querySelector(".rf-opt-url");
+          if (String(urlEl.value || "").trim()) fu.value = urlEl.value; else { urlEl.value = fu.value; _rfSyncFirstCardUrl(box); }
+          box.dataset.puKnown = "1";
+        }
       }
+      // 옵션 없음 → 있음도 같다 — 사람이 이 카드를 직접 바꾸는 순간, 카드에 보이는 상품 주소를 아는 값으로 친다
+      // (안 그러면 198 이전 줄에서 넘어온 주소가 저장 때 빠져 다시 열면 주소 칸이 빈다 — 5단계 전수 시험 실측 2026-10-22)
+      if (u === "option" && String(urlEl.value || "").trim()) box.dataset.puKnown = "1";
       box.dataset.unit = u;
       paintUnit();
       _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); _syncGroupTotals();
@@ -2321,20 +2601,39 @@ function _syncGroupTotals() {
 function addOptRow(data) {
   const wrap = document.getElementById("rf_opt_rows");
   if (!wrap) return;
-  if (_prodMode() === "opt") {
-    wrap.appendChild(_buildProdGroup({
-      name: (data && (data.productName ?? data.product_name)) || "",
-      unit: (data && (data.unitKind ?? data.unit_kind)) === "product" ? "product" : "option",
-      rows: [data || {}],
-    }));
-  } else {
-    wrap.appendChild(_buildOptRowEl(data));
-  }
+  window._rfForcedNone = false;   // 사람이 상품을 더했다 — 이제 카드 구성 규칙(_prodMode)대로
+  // ★ 결정 277 — [+ 상품 추가] = 상품 카드 하나(새 상품은 인트라넷처럼 「옵션 없음」으로 시작 · 카드에서 바꾼다)
+  wrap.appendChild(_buildProdGroup({
+    name: (data && (data.productName ?? data.product_name)) || "",
+    unit: (data && (data.unitKind ?? data.unit_kind)) === "option" ? "option" : "product",
+    rows: [data || {}],
+  }));
   _ugAttachAll();
   _markDupProductNames();
   _optSummary();
   _syncPreviewFromOptRows();
   _syncGroupTotals();
+}
+
+/** 상품 카드 번호·삭제 버튼(카드가 하나면 숨김 — 인트라넷과 같다) · 유입방식 표시(링크유입이면 빈 가이드 칸을 접는다) */
+function _rfRefreshCards() {
+  const boxes = Array.from(document.querySelectorAll("#rf_opt_rows .rf-gp"));
+  boxes.forEach((b, i) => {
+    const no = b.querySelector(".rf-card-no"); if (no) no.textContent = "상품 " + (i + 1);
+    const del = b.querySelector(".rf-gp-del"); if (del) del.hidden = boxes.length <= 1;
+  });
+  const wrap = document.getElementById("rf_opt_wrap");
+  const inflow = document.getElementById("rf_inflow_type_value");
+  if (wrap) wrap.dataset.inflow = (inflow && inflow.value === "guide") ? "guide" : "link";
+}
+
+/** 첫 상품 카드의 메인 주소 = 공고 상품 페이지(랜딩) — 사람이 그 칸을 고쳤을 때만 옮긴다(불러온 값은 건드리지 않는다). */
+function _rfSyncFirstCardUrl(box) {
+  const first = document.querySelector("#rf_opt_rows .rf-gp");
+  if (!first || first !== box) return;
+  const v = String(box.querySelector(".rf-gp-url")?.value || "").trim();
+  const main = document.getElementById("rf_product_url");
+  if (main) { main.value = v; if (typeof syncRecruitProductMainUrl === "function") syncRecruitProductMainUrl(); }
 }
 
 /** ★★ 정원(총인원·일건수)은 **수정 화면에서도 고칠 수 있다** (사용자 확정 2026-08-19 오후).
@@ -2472,14 +2771,17 @@ function _buildOptRowEl(data) {
   const lastBtn = status === "closed"
     ? '<button type="button" class="btn-icon-sm rf-opt-reopen" title="옵션 재개(다시 모집)" style="color:#12b886"><i class="fas fa-rotate-left"></i></button>'
     : '<button type="button" class="btn-icon-sm rf-opt-del" title="이 옵션 삭제" style="color:#EF4444"><i class="fas fa-times"></i></button>';
+  // ★ 결정 277 — 칸마다 이름표(인트라넷 옵션 줄과 같은 이름 · 같은 순서). 옵션 없는 상품 카드는 URL·옵션 칸을 숨기고
+  //   결제금액·모집인원·일건수만 보인다(그 줄의 주소는 카드의 상품 메인 URL 이 채운다). 칸의 class 는 그대로 — 저장·판정 함수 무변경.
   row.innerHTML =
-    '<input class="rform-input rf-opt-url" type="url" inputmode="url" maxlength="2048" placeholder="옵션 URL">' +
+    '<div class="rf-f rf-f-url"><span class="rf-f-l">옵션 URL<b>*</b></span><input class="rform-input rf-opt-url" type="url" inputmode="url" maxlength="2048" placeholder="https://..."></div>' +
     '<input class="rform-input rf-opt-prod" placeholder="상품명">' +
-    '<input class="rform-input rf-opt-name" placeholder="옵션명(없으면 비움)">' +
-    '<input class="rform-input rf-opt-pay" type="number" min="0" placeholder="금액">' +
-    '<input class="rform-input rf-opt-rt" type="number" min="0" placeholder="총">' +
-    '<input class="rform-input rf-opt-dl" type="number" min="0" placeholder="일">' +
-    '<span class="rf-opt-acts">' + lastBtn + '</span>';
+    '<div class="rf-f rf-f-name"><span class="rf-f-l">1차 옵션<b>*</b></span><input class="rform-input rf-opt-name" placeholder="예: 컬러 화이트 사이즈 105"></div>' +
+    '<div class="rf-f"><span class="rf-f-l">결제금액</span><input class="rform-input rf-opt-pay" type="number" min="0" placeholder="10000"></div>' +
+    '<div class="rf-f"><span class="rf-f-l">모집인원</span><input class="rform-input rf-opt-rt" type="number" min="0" placeholder="20"></div>' +
+    '<div class="rf-f"><span class="rf-f-l">일건수</span><input class="rform-input rf-opt-dl" type="number" min="0" placeholder="5"></div>' +
+    '<span class="rf-opt-hint">옵션이 없으면 이 결제금액·모집인원·일건수로 계산됩니다.</span>' +
+    '<span class="rf-opt-acts"><button type="button" class="btn-icon-sm rf-opt-plus" title="옵션 추가">+</button>' + lastBtn + '</span>';
   /* ★ 결정 229: 품절로 잠시 멈춘 상품 — 여기서 저장해도 멈춤은 그대로다(멈춤은 상태와 따로 저장된다).
        다시 여는 곳을 말해 준다(작업보드 작업 조건 카드 · 품절 알림). 표시만 — 저장 값 무접촉. */
   if (status !== "closed" && (d.pausedAt || d.paused_at)) {
@@ -2515,6 +2817,14 @@ function _buildOptRowEl(data) {
   };
   const del = row.querySelector(".rf-opt-del");
   if (del) del.onclick = dropUnit;
+  const plus = row.querySelector(".rf-opt-plus");
+  if (plus) plus.onclick = () => {
+    const box = unitEl.closest(".rf-gp");
+    const next = _buildOptRowEl({ productName: box ? String(box.querySelector(".rf-gp-name")?.value || "") : "" });
+    if (unitEl.nextSibling) unitEl.parentNode.insertBefore(next, unitEl.nextSibling); else unitEl.parentNode.appendChild(next);
+    _ugAttachAll();
+    _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); _syncGroupTotals();
+  };
   const reopen = row.querySelector(".rf-opt-reopen");
   if (reopen) reopen.onclick = () => {   // 마감 옵션 재개 → active + 삭제 버튼으로 교체(재개는 명시적 의도로만)
     row.dataset.status = "active"; row.style.opacity = "";
@@ -2532,7 +2842,7 @@ function _buildOptRowEl(data) {
      "옵션별 유입가이드에 대한 공간을 확보해줘"). 패널·저장 로직(`_ugBuild`/`_ugLoad`/`_ugCompose`)은
      한 글자도 안 바꾼다 — 바뀐 건 **입구를 찾기 쉽게** 만드는 것뿐이다(사본 0). */
   unitEl.appendChild(row);
-  unitEl.appendChild(_buildOptThumbLine(row, d.thumbnailUrl ?? d.thumbnail_url ?? ""));   // ★ 결정 214: 상품 사진
+  const thumbLine = _buildOptThumbLine(row, d.thumbnailUrl ?? d.thumbnail_url ?? "");   // ★ 결정 214: 상품 사진 — 줄 맨 아래(결정 277 카드: 가이드·조합 다음)
   const ugKey = _ugNewKey();
   row.dataset.ig = ugKey;
   _ugRegister(ugKey, "선택지 유입가이드");
@@ -2546,6 +2856,7 @@ function _buildOptRowEl(data) {
     '<span class="rf-ug-cta-ar">▾</span>';
   unitEl.appendChild(cta);
   unitEl.appendChild(_ugBuild(ugKey));
+  unitEl.classList.add("ug-on");   // ★ 결정 277 — 접지 않고 늘 펼쳐 둔다(인트라넷 상품 카드의 「가이드유입」 상자). 링크유입이면 빈 상자만 접힌다(CSS)
   // 값 주입은 DOM 에 붙은 뒤(`_ugAttachAll`) — 여기서 getElementById 를 부르면 조용히 no-op 이 된다
   row._ugPending = {
     html: d.inflowGuideHtml ?? d.inflow_guide_html ?? "",
@@ -2580,6 +2891,7 @@ function _buildOptRowEl(data) {
     });
     _mxMark(row);
   }
+  unitEl.appendChild(thumbLine);
   return unitEl;
 }
 
@@ -2610,6 +2922,9 @@ function renderOptRows(options, opts) {
   const live = list.filter(o => (o.optKey || o.opt_key) && (o.status || "active") !== "closed");
   const forced = opts && opts.mode;
   const m = forced || (live.length ? "opt" : "none");
+  // ★ 결정 277 — 저장된 공고를 열 때 살아 있는 선택지 원장이 있으면 그 공고는 원장을 유지한다(_prodMode)
+  if (opts && opts.saved) window._rfLiveLedger = live.length > 0;
+  window._rfForcedNone = forced === "none";   // ★ 부르는 쪽이 'none' 을 명시한 표 — _prodMode 가 카드 수로 원장을 만들지 않게
   _applyProdModeUi(m);
   // 사유는 값이 있을 때만 — 빈 표(신규 공고)에 "자동 선택됨"이라 하면 정하지 않은 것을 정했다고 말하는 셈이다
   _setProdModeNote((forced || !list.length) ? "" : (live.length
@@ -2620,11 +2935,16 @@ function renderOptRows(options, opts) {
     // 상품 단위는 키가 곧 상품명 — 원장에 product_name 이 비어 있어도(구버전 행) 키로 되살린다
     const productName = String(o.productName ?? o.product_name ?? "")
       || (unitKind === "product" ? String(o.optKey ?? o.opt_key ?? "") : "");
+    // ★ 결정 277 — 부르는 쪽이 'none' 을 **명시**한 줄(원장 없는 공고·옵션 없는 작업오더)은 옵션 없는 상품 카드다.
+    //   숨은 옵션명은 버린다(결정 042 — 옵션 없는 작업에서 옵션명 조각이 옵션이 되던 사고). 자동 판정 'none'(마감 줄만 남은 공고)은
+    //   줄 종류를 그대로 둔다 — 마감 줄의 이름(opt_key)이 바뀌면 [↩ 재개]·참여 기록과 짝이 끊긴다.
+    const unitDrawn = (forced === "none") ? "product" : unitKind;
     return {
       productName,
-      unitKind,
+      unitKind: unitDrawn,
+      productUrl:  o.productUrl ?? o.product_url ?? null,
       optionUrl:   o.optionUrl ?? o.option_url ?? o.url ?? "",
-      optKey:      o.optKey ?? o.opt_key ?? "",
+      optKey:      unitDrawn === "product" && forced === "none" ? "" : (o.optKey ?? o.opt_key ?? ""),
       savedOptKey: o.savedOptKey ?? "",
       payAmount:   o.payAmount ?? o.pay_amount ?? 0,
       recruitTotal: o.recruitTotal ?? o.recruit_total ?? 0,
@@ -2655,12 +2975,15 @@ function renderOptRowsWithProduct(options, productLines, campaign) {
     const fallback = campaign || {};
     /* ★ 총인원·일건수는 캠페인 원장 값이다(상품 줄 수와 무관) — 종전엔 원문이 두 줄 이상이면
        0 으로 떨어져 화면이 '무제한'을 보여주고, 저장하면 그대로 리셋됐다. 첫 행에만 싣는다. */
+    window._rfLiveLedger = false;
     renderOptRows(parsed.map((r, i) => ({
       /* ★ 옵션 없는 공고의 원문은 발행 폼이 **한 줄에 상품 하나**로 쓴다("상품명 - 결제금액 N원").
          그래서 한 덩어리 줄이 앞 줄 상품명을 이어받으면(inherited) 틀린다 — "린스" 가 "샴푸 린스" 가 되어
          손대지 않은 저장 한 번에 둘째 상품부터 이름이 바뀌었다(2026-10-22 실측). 같은 줄 조각만 되붙인다(결정 042). */
       productName: (r.inherited && r.optKey) ? r.optKey : [r.productName, r.optKey].filter(Boolean).join(" "),
       optKey: "", payAmount: r.payAmount,
+      // ★ 결정 277 — 원장 없는 공고의 상품 주소 = 공고 상품 페이지(랜딩) — 첫 카드에만(나머지는 모른다)
+      optionUrl: i === 0 ? String(fallback.landing_url || "") : "",
       recruitTotal: i === 0 ? (fallback.recruit_total ?? 0) : 0,
       dailyLimit: i === 0 ? (fallback.daily_limit ?? 0) : 0,
     })), { mode: "none" });
@@ -2677,6 +3000,7 @@ function renderOptRowsWithProduct(options, productLines, campaign) {
      ★ **모르는 값은 건드리지 않는다** — 원장 값이 양수일 때만 싣는다(공개 화이트리스트 뷰·구버전 백엔드). */
   const hasLiveOpt = opts.some(o => (o.optKey || o.opt_key) && (o.status || "active") !== "closed");
   const campQuota = campaign || {};
+  window._rfLiveLedger = hasLiveOpt;   // ★ 결정 277 — 원장이 살아 있던 공고는 원장을 유지한다(_prodMode)
   renderOptRows(opts.map((o, i) => {
     const key = o.optKey || o.opt_key || "";
     const hit = byOpt.get(key);
@@ -2777,6 +3101,8 @@ function readOptRows() {
       productName,
       unitKind,
       optionUrl,
+      // ★ 결정 277: 상품 메인 주소(카드) — 모르는 값(198 이전 줄을 사람이 안 고침)은 null = 저장된 값 유지
+      productUrl:    _rfRowProductUrl(r, unitKind),
       payAmount:     Math.max(0, parseInt(r.querySelector(".rf-opt-pay").value, 10) || 0),
       recruitTotal:  Math.max(0, parseInt(r.querySelector(".rf-opt-rt").value, 10) || 0),
       dailyLimit:    Math.max(0, parseInt(r.querySelector(".rf-opt-dl").value, 10) || 0),
@@ -2789,6 +3115,16 @@ function readOptRows() {
     });
   });
   return out;
+}
+
+/** 그 줄의 상품 메인 주소(결정 277) — 옵션 없는 상품 = 카드 주소(= 그 줄 주소) · 옵션 있는 상품 = 아는 값일 때만 카드 주소, 모르면 null */
+function _rfRowProductUrl(row, unitKind) {
+  const box = row && row.closest ? row.closest(".rf-gp") : null;
+  if (!box) return null;
+  const u = String(box.querySelector(".rf-gp-url")?.value || "").trim();
+  if (box.dataset.puKnown !== "1") return null;
+  if (unitKind === "product") return u || String(row.querySelector(".rf-opt-url")?.value || "").trim();
+  return u;
 }
 
 /** 가이드유입 신규 공고는 실제 참여 가능한 모든 선택지에 안내가 있어야 한다.
@@ -2955,6 +3291,7 @@ function applyProductRowsFromOrder(prefill) {
   const p = prefill || {};
   // ★★ 134 — 작업오더가 "옵션 없음"을 **명시**한 경우도 신호다(빈 값 = 명시 없음 = 종전 추론).
   const sourceMode = p.productMode === "opt" ? "opt" : (p.productMode === "none" ? "none" : "");
+  window._rfLiveLedger = false;   // 새 공고 — 저장된 원장이 없다(구성은 카드에서 정해진다 · _prodMode)
   const sourceOptions = (Array.isArray(p.options) ? p.options : []).map(o => ({
       productName: o.productName || p.product_name || "",
       // ★★ 134 — 선택 단위(옵션/옵션 없는 상품)와 그 선택지 전용 유입가이드를 **그대로 통과**시킨다.
@@ -2964,6 +3301,7 @@ function applyProductRowsFromOrder(prefill) {
       inflowGuideHtml: o.inflowGuideHtml ?? o.inflow_guide_html ?? "",
       inflowGuideImages: o.inflowGuideImages ?? o.inflow_guide_images ?? [],
       optionUrl: o.optionUrl || o.option_url || o.url || "",
+      productUrl: o.productUrl || o.product_url || null,   // ★ 결정 277 — 그 줄이 속한 상품의 메인 주소
       optKey: o.optKey || o.opt_key || "",
       payAmount: o.payAmount || o.pay_amount || 0,
       recruitTotal: o.recruitTotal || 0, dailyLimit: o.dailyLimit || 0,
@@ -3008,6 +3346,7 @@ function applyProductRowsFromOrder(prefill) {
 /** 옵션표 요약·자동점검(정원합/하루합/중복). 반환: { dup, count } — 저장 시 중복 하드블록용 */
 /** 옵션표 요약·자동점검(정원합/하루합/중복). 반환: { dup, count } — 저장 시 중복 하드블록용 */
 function _optSummary() {
+  _applyProdModeUi(_prodMode());   // ★ 결정 277 — 모드는 카드 구성에서 정해진다(스위치 없음)
   _renderProdModeHelp();
   const el = document.getElementById("rf_opt_summary");
   const opts = readOptRows();
@@ -3023,7 +3362,9 @@ function _optSummary() {
     ? "⚠ 옵션 없는 상품 " + namelessProduct + "개에 상품명이 없어 선택지로 저장되지 않습니다"
     : "";
   if (!opts.length) {
-    el.innerHTML = namelessMsg || (_prodMode() === "opt" ? "옵션을 추가하세요." : "상품을 추가하세요.");
+    // ★ 결정 277 — 옵션 없는 상품 하나(선택지 원장 없음)는 정상 구성이다 — "추가하세요" 가 아니라 그 사실을 말한다
+    const oneProduct = _prodMode() !== "opt" && _readProdRows().some(r => r.productName || r.payAmount);
+    el.innerHTML = namelessMsg || (oneProduct ? "옵션 없는 상품 1개 — 리뷰어는 옵션 선택 없이 바로 참여합니다." : (_prodMode() === "opt" ? "옵션을 추가하세요." : "상품을 추가하세요."));
     el.style.color = namelessMsg ? "#B45309" : "var(--t3)";
     return { dup, count: 0 };
   }
@@ -3129,6 +3470,146 @@ function onFeeScheduleToggle(on) {
   renderFeeSchedule();
 }
 
+/** 공고 창 시안 3차(결정 275 · 사용자 확정 2026-10-22): 「리뷰오더 고유 항목」·연결 표시줄·양방향 표시.
+ *  info = 상세 응답의 orderInfo(연결 리뷰오더 · 없음 = null) · linked = 양방향으로 맞춰지는 공고(창을 연 시점 버전이 있음).
+ *  ★ 모집 시작일은 리뷰오더 고유 값이라 연결 공고에서 보기 전용(사용자 확정 D5) — 연결 아닌 공고는 종전처럼 여기서 고친다. */
+function _rfApplyOrderLink(info, linked) {
+  const box = document.querySelector("#recruitModal .rf-sync-box");
+  if (box) box.dataset.linked = linked ? "1" : "0";
+  const badge = document.getElementById("rf_sync_badge"); if (badge) badge.hidden = !linked;
+  const bar = document.getElementById("rf_order_linkbar");
+  if (bar) {
+    if (info) {
+      const at = info.syncedAt ? new Date(info.syncedAt) : null;
+      const atText = at && !isNaN(at) ? `${at.getMonth() + 1}/${at.getDate()} ${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}` : "";
+      bar.innerHTML = linked
+        ? `<span class="rf-linkstate">연결됨</span><span>연결된 리뷰오더 <b>${escHtml(info.title || "")}</b></span>${atText ? `<small>마지막 맞춤 ${escHtml(atText)}</small>` : ""}`
+        : `<span class="rf-linkstate off">연결 전</span><span>리뷰오더 <b>${escHtml(info.title || "")}</b> — 값이 서로 달라 아직 따로 돕니다. 작업오더 화면의 「오더·공고 다름」에서 맞춥니다.</span>`;
+    } else bar.innerHTML = "";
+    bar.hidden = !info;
+  }
+  const mRow = document.getElementById("rf_order_manager_row"), mVal = document.getElementById("rf_order_manager");
+  if (mRow && mVal) { const m = String((info && info.manager) || "").trim(); mVal.textContent = m === "박은비" ? "박은비 (망고)" : m === "박세희" ? "박세희 (만두)" : m; mRow.hidden = !m; }
+  const dRow = document.getElementById("rf_order_distribution_row"), dVal = document.getElementById("rf_order_distribution");
+  if (dRow && dVal) { const d = String((info && info.distribution) || "").trim(); dVal.textContent = d === "sequential" ? "순차진행" : d ? "균등분산" : ""; dRow.hidden = !(linked && d); }
+  const hint = document.getElementById("rf_order_own_hint");
+  if (hint) hint.textContent = info ? (linked ? "리뷰오더에서 정한 값 · 모집 시작일만 여기서 정합니다" : "리뷰오더에서 정한 값 · 연결 전이라 여기서도 고칠 수 있음") : "연결된 리뷰오더가 없는 공고 — 여기서 정합니다";
+  /* ★ 결정 279(사용자 확정 2026-10-23 「나」): 리뷰오더의 시작일은 희망 시작일 — 실제 시작일은 연결된 공고에서도 여기서 정한다.
+     (종전 D5 는 잠갔지만 리뷰오더 쪽 시작일은 접수 뒤 고칠 수 없어, 연결 공고의 시작일을 아무도 못 고치는 막다른 길이었다.) */
+  _renderStartDateBasisNote();
+}
+
+/** 결정 279 — 시작일 옆 한 줄: 누가 정한 날인가(사람 · 아직 안 정함 → 첫 참여일로 맞춤 · 첫 참여일로 맞춤). 값은 바꾸지 않는다. */
+function _renderStartDateBasisNote() {
+  const sRow = document.getElementById("rf_start_date_row");
+  if (!sRow) return;
+  let note = document.getElementById("rf_start_date_basis_note");
+  const cur = String(document.getElementById("rf_start_date")?.value || "").slice(0, 10);
+  let text = "";
+  if (_recruitEditId) {
+    const seen = window._rfStartSeen, basis = String(window._rfStartBasis || "");
+    if (seen != null && cur !== seen) text = "직접 정한 날로 저장합니다";
+    else if (basis === "pending") text = "아직 정하지 않음 — 첫 참여가 생긴 날로 자동으로 맞춥니다";
+    else if (basis === "first_join") text = "첫 참여가 생긴 날로 자동으로 맞춘 날입니다";
+  } else if (window._rfPrefillStart != null) {
+    // 새 공고 — 비워 두거나 오더 희망 시작일 그대로면 서버가 'pending' 으로 저장한다(같은 규칙: campaign.routes INSERT)
+    text = (!cur || cur === window._rfPrefillStart) ? "그대로 두면 첫 참여가 생긴 날로 자동으로 맞춥니다" : "직접 정한 날로 저장합니다";
+  }
+  if (!text) { if (note) note.remove(); return; }
+  if (!note) {
+    note = document.createElement("span"); note.id = "rf_start_date_basis_note"; note.className = "rf-readonly-note";
+    sRow.querySelector(".form-control")?.appendChild(note);
+  }
+  note.textContent = text;
+}
+
+/** ★ 양방향 5단계(결정 275 · 사용자 확정 2026-10-20): 리뷰오더와 맞춰지는 공고는 기간별 리뷰비를 직접 고치지 않는다.
+ *  리뷰비 칸만 바꾸면 서버가 "오늘부터 새 금액" 구간을 넣고 지난 참여 금액을 고정한다 — 표는 보기 전용으로 둔다.
+ *  (저장도 기간표를 보내지 않는다 — 창을 연 뒤 생긴 구간을 옛 표로 지우지 않게.) 연결 아닌 공고는 종전 그대로. */
+function _rfApplyFeeLinkLock() {
+  const linked = !!(_recruitEditId && window._rfBidirBase);
+  const sec = document.getElementById("rf_fee_sched_section");
+  [document.getElementById("rf_fee_sched_on"), document.getElementById("rf_fee_sched_toggle")].forEach(el => { if (el) el.disabled = linked; });
+  if (sec) sec.querySelectorAll("input,button").forEach(el => { el.disabled = linked; });
+  let note = document.getElementById("rf_fee_link_note");
+  if (linked && !note && sec && sec.parentNode) {
+    note = document.createElement("div");
+    note.id = "rf_fee_link_note";
+    note.className = "rf-help";
+    note.textContent = "리뷰오더와 맞춰지는 공고라 기간별 리뷰비는 직접 고칠 수 없습니다 — 리뷰비 칸만 바꾸면 오늘부터 새 금액이 저절로 들어가고, 이미 참여한 분은 참여할 때 금액 그대로입니다.";
+    sec.parentNode.insertBefore(note, sec);
+  }
+  if (note) note.hidden = !linked;
+}
+
+/** ★ 양방향 5단계: 연결 공고에서 바뀌는 금액(리뷰비·옵션 금액·옵션 없는 공고의 상품 안내 금액) — 저장 전 확인창 목록. */
+function _rfMoneyChanges(payload) {
+  const loaded = window._recruitEditLoaded;
+  if (!loaded || !payload) return [];
+  const won = v => Number(v || 0).toLocaleString() + "원";
+  const out = [];
+  if (payload.review_fee !== undefined && Number(payload.review_fee || 0) !== Number(loaded.review_fee || 0)) out.push("리뷰비 " + won(loaded.review_fee) + " → " + won(payload.review_fee));
+  if (Array.isArray(payload.options) && Array.isArray(window._recruitEditLoadedOpts)) {
+    payload.options.forEach(o => {
+      const was = window._recruitEditLoadedOpts.find(x => String(x.optKey ?? x.opt_key ?? "") === String(o.optKey || ""));
+      if (was && Number(was.payAmount ?? was.pay_amount ?? 0) !== Number(o.payAmount || 0)) {
+        out.push("결제금액(" + (o.optKey || o.productName) + ") " + won(was.payAmount ?? was.pay_amount) + " → " + won(o.payAmount));
+      }
+    });
+  }
+  if ((!Array.isArray(payload.options) || !payload.options.length) && payload.work_detail && typeof payload.work_detail === "object") {
+    const amts = t => (String(t || "").match(/결제금액\s*([\d,]+)\s*원/g) || []).map(m => m.replace(/[^\d]/g, "")).sort().join(",");
+    const before = amts((loaded.work_detail || {}).productLines), after = amts(payload.work_detail.productLines);
+    if (before !== after) out.push("결제금액(상품 안내) " + (before || "없음") + " → " + (after || "없음"));
+  }
+  return out;
+}
+
+/** 양방향 7단계-② — 리뷰오더와 맞춰지는 공고의 인원 변경(총모집·일 진행 건수·옵션 인원). 작업표 줄·구매일 배치가 바뀐다. */
+function _rfCountChanges(payload) {
+  const loaded = window._recruitEditLoaded;
+  const out = { lines: [], delta: 0, daily: false };
+  if (!loaded || !payload) return out;
+  const num = v => (v === undefined || v === null || String(v).trim() === "" || !Number.isFinite(Number(v))) ? null : Number(v);
+  // 7단계-④ 리뷰오더와 맞춰지는 공고는 총모집에 마감 줄 인원(참여한 수)까지 든다 — 확인창 숫자도 저장 결과와 같게
+  const closedRt = window._rfBidirBase && Array.isArray(payload.options)
+    ? payload.options.filter(o => o && o.status === "closed").reduce((a, o) => a + (Number(o.recruitTotal ?? o.recruit_total) || 0), 0) : 0;
+  const rtA = num(payload.recruit_total) === null ? null : num(payload.recruit_total) + closedRt, rtB = num(loaded.recruit_total);
+  if (rtA !== null && rtB !== null && rtA !== rtB) { out.lines.push("총모집 " + rtB + "명 → " + rtA + "명"); out.delta = rtA - rtB; }
+  const dlA = num(payload.daily_limit), dlB = num(loaded.daily_limit);
+  if (dlA !== null && dlB !== null && dlA !== dlB) { out.lines.push("일 진행 건수 " + dlB + "건 → " + dlA + "건"); out.daily = true; }
+  if (Array.isArray(payload.options) && Array.isArray(window._recruitEditLoadedOpts)) {
+    payload.options.forEach(o => {
+      const was = window._recruitEditLoadedOpts.find(x => String(x.optKey ?? x.opt_key ?? "") === String(o.optKey || ""));
+      const a = num(o.recruitTotal ?? o.recruit_total), b = was ? num(was.recruitTotal ?? was.recruit_total) : null;
+      if (a !== null && b !== null && a !== b) out.lines.push("인원(" + (o.optKey || o.productName) + ") " + b + "명 → " + a + "명");
+    });
+  }
+  // 7단계-④ — 상품·옵션 더하기·지우기·다시 열기(이름을 바꾼 줄은 원래 이름(prevOptKey)으로 짝짓는다)
+  if (Array.isArray(payload.options) && Array.isArray(window._recruitEditLoadedOpts)) {
+    const keyOf = o => String((o && (o.optKey ?? o.opt_key)) || "");
+    const was = window._recruitEditLoadedOpts;
+    const kept = new Set(payload.options.flatMap(o => [keyOf(o), String(o.prevOptKey || "")]).filter(Boolean));
+    was.forEach(w => {
+      if (kept.has(keyOf(w)) || String(w.status || "active") === "closed") return;
+      out.lines.push("삭제: " + keyOf(w) + " — 참여한 분이 있으면 지우지 않고 마감으로 남습니다");
+      out.structure = true; out.structureLines = (out.structureLines || 0) + 1;
+    });
+    payload.options.forEach(o => {
+      const w = was.find(x => keyOf(x) === keyOf(o) || (o.prevOptKey && keyOf(x) === String(o.prevOptKey)));
+      const n = num(o.recruitTotal ?? o.recruit_total);
+      if (!w) { out.lines.push("추가: " + keyOf(o) + (n !== null ? " (" + n + "명)" : "")); out.structure = true; out.structureLines = (out.structureLines || 0) + 1; }
+      else if (String(w.status || "active") === "closed" && o.status === "active") { out.lines.push("다시 열기: " + keyOf(o) + (n !== null ? " (" + n + "명)" : "")); out.structure = true; out.structureLines = (out.structureLines || 0) + 1; }
+    });
+  }
+  // 7단계-③ — 주말 제외(빈 줄 구매일이 다시 배치된다)
+  if (typeof payload.skip_weekends === "boolean" && payload.skip_weekends !== (loaded.skip_weekends === true)) {
+    out.lines.push(payload.skip_weekends ? "주말 포함 → 주말 제외" : "주말 제외 → 주말 포함");
+    out.weekends = payload.skip_weekends ? "off" : "on";
+  }
+  return out;
+}
+
 /** 표 → 저장 payload 배열. 날짜·금액이 비면 그 줄은 제외(부분 입력 중 저장 방해 금지). */
 function readFeeRows() {
   const out = [];
@@ -3205,6 +3686,8 @@ function renderFeeSchedule() {
      정하는 값이라, 발행 단계에서 뒤집으면 준비 행 기준·작업표 열 구성과 어긋난다. */
 function _rfApplyWorkKindUi() {
   const isBlog = (document.getElementById("rf_work_kind")?.value || "") === "blog";
+  // 시안 3차: 맨 위 체험단 종류 탭(보기 전용 — 체험단 종류는 리뷰오더에서 정하고 접수 뒤 바꾸지 않는다)
+  document.querySelectorAll("#rf_kind_tabs [data-kind]").forEach(t => t.classList.toggle("on", (t.dataset.kind === "blog") === isBlog));
   // 리뷰타입 UI(두 레이아웃 변형 모두) — 카드형은 .rf-hrow, 행형은 .rf-review-type-row
   document.querySelectorAll("#rf_review_type_btns").forEach(btns => {
     const row = btns.closest(".rf-hrow") || btns.closest(".rf-review-type-row") || btns.closest(".form-row");
@@ -3249,6 +3732,17 @@ function _syncWorkboardDisplayNameInput() {
   input.placeholder = linked ? '예) 체크오 아르테미스 비타민 300정' : '연결된 작업보드에서만 설정할 수 있습니다.';
 }
 
+/** 양방향 4단계-2 — 공유 저장 결과 → 저장 안내 줄(덮인 값 먼저). */
+function _rfSharedNoticeLines(shared) {
+  const out = [];
+  const ow = Array.isArray(shared && shared.overwritten) ? shared.overwritten : [];
+  // 덮인 칸이 여럿이어도 한 줄 — 안내 상자는 3줄만 보여서 여러 줄이면 일부가 "외 N건" 에 숨는다.
+  if (ow.length) out.push(`⚠ 리뷰오더에서 먼저 바뀐 칸을 지금 저장한 값으로 바꿨습니다 — ${ow.map(o => `${o.label}(먼저 바뀐 값: ${String(o.before || "").slice(0, 40)})`).join(" · ")}`);
+  const sc = Array.isArray(shared && shared.changed) ? shared.changed : [];
+  if (sc.length) out.push(`🔗 리뷰오더(인트라넷)에도 반영: ${sc.join(", ")}`);
+  return out;
+}
+
 async function openRecruitModal(id, prefill, woOrderId) {
   _recruitEditId = id || null;
   _woPrefillOrderId = (!id && woOrderId) ? woOrderId : null;
@@ -3257,6 +3751,12 @@ async function openRecruitModal(id, prefill, woOrderId) {
   window._recruitEditLoaded = null;   // ★ 064: 이전 편집의 로드값(sort_order 등)이 새 공고에 새는 것 방지
   window._recruitEditLoadedOpts = null;  // 저장 후 "바뀐 항목" 대조용 옵션표 원본(로드 실패 시 null=대조 안 함)
   window._recruitEditLoadedFees = null;
+  window._rfBidirBase = null;   // ★ 양방향 4단계-2: 창을 연 시점의 리뷰오더 공유 버전(연결 공고만)
+  _rfApplyFeeLinkLock();        // ★ 5단계: 지난 공고의 보기 전용 잠금을 푼다
+  _rfApplyOrderLink(null, false);   // 시안 3차: 지난 공고의 연결 표시·시작일 잠금을 지운다
+  window._rfOrderProductUrls = {};   // 결정 277: 연결 리뷰오더의 상품 메인 주소(보기용) — 새 공고·다른 공고에 남지 않게
+  window._rfLiveLedger = false;
+  window._rfForcedNone = false;
   _rfLastScheduledPurchaseWindow = { start: "", end: "" };
   if (typeof recruitSaveBlockClear === "function") recruitSaveBlockClear();  // 지난번 차단 사유 잔류 방지
   _rfLinkedMiss = null; _rfSugCache = [];   // 지난 공고의 "탭 못 찾음" 사유가 새 모달에 남지 않게(로드보다 먼저)
@@ -3332,6 +3832,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   window._rfInflowOrigin = '';   // 유입방식 출처(저장값/작업오더) — 지난 공고 안내 누수 방지
   window._rfMixOrigin = '';   // 혼합 조합 출처(저장값/작업오더/없음) — 지난 공고 안내 누수 방지
   window._rfOrderStartDate = '';  // 연결 작업오더 시작일(대조용) — 지난 공고 안내 누수 방지
+  window._rfStartSeen = null; window._rfStartBasis = ''; window._rfPrefillStart = null;   // 결정 279 — 지난 공고 값 누수 방지
   window._rfRoundsLock = null;    // 차수 원장 잠금(모름=null) — 지난 공고 상태 누수 방지
   // ★ 카드는 렌더 캐시(signature)를 들고 재사용되는 DOM 이다 — 캐시를 비우지 않으면
   //   다음 공고를 열어도 이전 공고의 수량·기준값이 그대로 남아(early-return) 저장값이 안 보인다.
@@ -3402,6 +3903,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
         throw new Error("편집용 전체 공고 정보를 받지 못했습니다. 저장할 수 없습니다.");
       }
       window._recruitEditLoaded = c;   // ★ 064: sort_order 등 "UI 없는 서버 ||0 강제 필드"의 로드값 보존용
+      /* ★ 양방향 4단계-2(결정 275): 리뷰오더와 맞춰지는 공고면 창을 연 시점의 버전을 기억했다가 저장 때 그대로 보낸다.
+         안 보내면 서버는 "옛 화면" 으로 보고, 공통 칸이 지금 값과 다르면 저장을 막는다(창을 연 뒤 인트라넷이 고친 값을 덮지 않게). */
+      window._rfBidirBase = (json && json.bidir && Number(json.bidir.sync_version) > 0) ? Number(json.bidir.sync_version) : null;
       /* ★ 차수 원장 잠금 — 서버가 총모집 전송값을 무시하는지 **열 때부터** 안다(null=모름). */
       window._rfRoundsLock = (json && json.roundsLock && typeof json.roundsLock === "object") ? json.roundsLock : null;
       window._recruitEditLoadedOpts = json.options || [];   // 저장 후 "바뀐 항목" 대조용(옵션표 원본)
@@ -3411,6 +3915,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
       document.getElementById("rf_review_fee").value   = c.review_fee || "";
       // 📅 082: 리뷰비 구간 프리필 — 구간이 있으면 스위치가 자동으로 켜진다(없으면 종전 화면 그대로)
       if (typeof renderFeeRows === "function") renderFeeRows(json.feeSchedules || []);
+      _rfApplyFeeLinkLock();   // ★ 5단계: 리뷰오더와 맞춰지는 공고면 기간표 보기 전용
+      _rfApplyOrderLink(json && json.orderInfo || null, !!window._rfBidirBase);   // 시안 3차: 고유 항목·연결 표시줄
+      window._rfOrderProductUrls = (json && json.orderInfo && json.orderInfo.productUrls && typeof json.orderInfo.productUrls === "object") ? json.orderInfo.productUrls : {};
       // The compact editor intentionally does not render the legacy public-note
       // textarea.  Treat it as an optional compatibility field so an older
       // campaign cannot abort loading before its product and guide values are
@@ -3476,6 +3983,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
         }
         const setV = (i, v) => { const el = document.getElementById(i); if (el && v != null && v !== "") el.value = v; };
         setV("rf_start_date", (c.start_date || "").slice(0, 10));
+        window._rfStartSeen = (c.start_date || "").slice(0, 10);          // 결정 279 — 창을 열 때 본 값(같으면 서버가 「안 고침」으로 친다)
+        window._rfStartBasis = String(c.start_date_basis || "");
         /* ★ 발행은 **스냅샷**이라 발행 뒤 작업오더 시작일이 바뀌어도 공고는 따라가지 않는다.
            그 사실을 확인할 창구가 없어 "오더는 8/19인데 공고는 8/12"가 원인 불명으로 보였다
            (2026-08-21 신고). → 값은 **덮지 않고** 다르면 사실만 한 줄로 말한다.
@@ -3686,6 +4195,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
         pe.checked = true; onParticipationToggle(true);
         const setV = (i, v) => { const el = document.getElementById(i); if (el && v != null && v !== "") el.value = v; };
         setV("rf_start_date", prefill.start_date);
+        window._rfPrefillStart = String(prefill.start_date || "").slice(0, 10);   // 결정 279 — 오더 희망 시작일
         const _skipWeekendsEl = document.getElementById("rf_skip_weekends");
         if (_skipWeekendsEl) _skipWeekendsEl.checked = prefill.skip_weekends === true;
         setV("rf_daily_limit", prefill.daily_limit);
@@ -5577,6 +6087,7 @@ async function saveRecruitPostImpl() {
       }
       /* ★ 062: ""=서버에서 비움(자율주문 전환·시작일 제거), 값=설정 — null(유지)은 미전송 화면(admin-siand)만 */
       payload.start_date     = document.getElementById("rf_start_date")?.value || "";
+      if (_recruitEditId && window._rfStartSeen != null) payload.start_date_seen = window._rfStartSeen;   // 결정 279
       payload.skip_weekends  = !!document.getElementById("rf_skip_weekends")?.checked;
       payload.window_start   = document.getElementById("rf_window_start").value || "";
       payload.window_end     = document.getElementById("rf_window_end").value || "";
@@ -5682,6 +6193,10 @@ async function saveRecruitPostImpl() {
         const invalidOptionUrl = payload.options.find(option =>
           String(option.optionUrl || "").trim() && !_rfHttpUrl(option.optionUrl));
         if (invalidOptionUrl) { renderPartCheck(); _rfSaveBlocked("옵션 URL은 http:// 또는 https:// 주소로 입력해주세요.", { go: _rfGoToCheck }); return; }
+        // ★ 결정 277 — 상품 메인 URL 도 같은 규칙(값이 있는데 형식이 틀리면 막는다). 서버는 틀린 주소를 빈 값으로 바꿔 저장된 주소를 지운다.
+        const invalidProductUrl = Array.from(document.querySelectorAll("#rf_opt_rows .rf-gp-url"))
+          .find(i => String(i.value || "").trim() && !_rfHttpUrl(i.value));
+        if (invalidProductUrl) { renderPartCheck(); _rfSaveBlocked("상품 메인 URL은 http:// 또는 https:// 주소로 입력해주세요.", { go: _rfGoToCheck }); return; }
         const inflowGuideError = validateActiveUnitInflowGuides(
           document.getElementById("rf_inflow_type_value")?.value === "guide" ? "guide" : "link"
         );
@@ -5693,10 +6208,36 @@ async function saveRecruitPostImpl() {
   /* 📅 기간별 리뷰비(082) — ★ 구간표 UI가 있는 페이지에서만 전송(없으면 미전송=서버가 기존 구간 유지).
      옵션표·work_detail과 같은 원칙: 축약 화면의 저장이 설정을 조용히 지우지 않게 한다.
      스위치를 끄면 빈 배열을 보내 구간을 제거한다(= 기본 리뷰비 한 값으로 복귀). */
-  if (document.getElementById("rf_fee_rows")) {
+  //   ★ 양방향 5단계: 리뷰오더와 맞춰지는 공고는 보내지 않는다(보기 전용 · 리뷰비 칸이 구간을 만든다).
+  if (document.getElementById("rf_fee_rows") && !(_recruitEditId && window._rfBidirBase)) {
     const _feeChk = renderFeeSchedule();
     if (_feeChk.dup) { _rfSaveBlocked("리뷰비 구간의 시작일이 중복됐어요 — 날짜를 다르게 하거나 삭제해주세요."); return; }
     payload.fee_schedules = document.getElementById("rf_fee_sched_on")?.checked ? readFeeRows() : [];
+  }
+
+  /* ★ 양방향 5단계(사용자 확정 D3): 리뷰오더와 맞춰지는 공고의 결제금액·리뷰비는 리뷰어 화면과 리뷰오더까지 바로 바뀐다 — 저장 전에 확인받는다. */
+  if (_recruitEditId && window._rfBidirBase) {
+    const _money = _rfMoneyChanges(payload);
+    // 7단계-② — 인원(총모집·일 진행 건수·옵션 인원)은 작업표 줄과 구매일 배치까지 바뀐다
+    const _cnt = _rfCountChanges(payload);
+    if (_money.length || _cnt.lines.length) {
+      const _hasCnt = _cnt.lines.length - (_cnt.weekends ? 1 : 0) - (_cnt.structureLines || 0) > 0, _hasWk = !!_cnt.weekends;
+      const _what = [_cnt.structure ? "상품·옵션" : "", _money.length ? "금액" : "", _hasCnt ? "인원" : "", _hasWk ? "주말 설정" : ""].filter(Boolean).join("·") + "을";
+      const _notes = [];
+      if (_money.length) _notes.push("결제금액을 바꾸면 리뷰어 화면 금액이 바로 바뀝니다. 이미 참여한 분은 참여할 때 금액으로 잘못구매를 판정합니다."
+        + "\n리뷰비는 오늘부터 참여하는 분에게 새 금액이 적용되고, 이미 참여한 분은 참여할 때 금액 그대로입니다.");
+      if (_cnt.structure) _notes.push("더한 상품·옵션은 리뷰어 화면에 바로 생깁니다. 이미 참여한 분이 있는 상품·옵션을 지우면 지우지 않고 마감으로 남고(인원 = 참여한 수), 그만큼 총모집에 남습니다.");
+      if (_cnt.delta > 0) _notes.push("작업표에 빈 줄이 " + _cnt.delta + "줄 늘어납니다.");
+      else if (_cnt.delta < 0) _notes.push("작업표의 빈 줄이 " + (-_cnt.delta) + "줄 정리됩니다. 이미 참여한 분의 줄은 지우지 않습니다(참여 인원보다 적게는 줄일 수 없습니다).");
+      if (_cnt.daily) _notes.push("일 진행 건수를 바꾸면 작업표에서 아직 참여자가 없는 빈 줄의 구매일을 다시 배치합니다.");
+      if (_cnt.weekends === "off") _notes.push("주말 제외로 바꾸면 오늘부터 주말·공휴일에는 모집이 닫히고, 작업표 빈 줄의 구매일이 다시 배치됩니다. 참여자가 채운 줄은 그대로이고, 날짜별로 직접 정해 둔 인원도 그대로입니다.");
+      else if (_cnt.weekends === "on") _notes.push("주말 포함으로 바꾸면 주말·공휴일에도 모집이 열리고, 작업표 빈 줄의 구매일이 다시 배치됩니다. 참여자가 채운 줄은 그대로이고, 날짜별로 직접 정해 둔 인원도 그대로입니다.");
+      if (!confirm(_what + " 바꿉니다 — 리뷰오더(인트라넷)에도 같이 바뀝니다.\n\n· " + [..._money, ..._cnt.lines].join("\n· ")
+        + "\n\n" + _notes.join("\n") + "\n\n저장할까요?")) {
+        _rfSaveBlocked((_cnt.lines.length ? "변경" : "금액 변경") + "을 취소했습니다 — 저장하지 않았습니다.");
+        return;
+      }
+    }
   }
 
   /* 저장 직전에 "무엇이 바뀌었나"를 계산해 둔다 — 모달을 닫은 뒤엔 폼 값을 읽을 수 없다 */
@@ -5708,6 +6249,7 @@ async function saveRecruitPostImpl() {
   btn.innerHTML = '<span class="rf-spin"></span> 저장 중…';
   let _ok = false;   // 성공하면 버튼을 원복하지 않는다(✓ 저장됨 → 모달 닫힘으로 이어진다)
 
+  if (_recruitEditId && window._rfBidirBase) payload.bidir_base_sync_version = window._rfBidirBase;
   try {
     let res;
     if (_recruitEditId) {
@@ -5725,7 +6267,9 @@ async function saveRecruitPostImpl() {
     }
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.error || "저장 실패 (HTTP " + res.status + ")");
+      // 공통 칸은 리뷰오더에 먼저 저장된 뒤 나머지가 실패한 경우 — 덮인 값 안내가 사라지지 않게 오류 문구에 붙인다.
+      const _sl = errData && errData.shared ? _rfSharedNoticeLines(errData.shared) : [];
+      throw new Error((errData.error || "저장 실패 (HTTP " + res.status + ")") + (_sl.length ? "\n" + _sl.join("\n") : ""));
     }
     const saved = await res.json().catch(() => ({}));
     /* ★★ **상태코드만으로 성공을 판정하지 않는다** (2026-08-23 실사고) —
@@ -5778,6 +6322,14 @@ async function saveRecruitPostImpl() {
       _changed.unshift("⚠ 상품 사진은 저장되지 않았습니다 — 서버 업데이트가 끝난 뒤(1~2분) 다시 저장해주세요");
     }
 
+    /* ★ 양방향 4단계-2: 리뷰오더와 맞춰지는 칸을 고쳤으면 리뷰오더에도 갔다고 말하고, 창을 연 뒤 리뷰오더 쪽에서 먼저 바뀐 칸을
+       지금 값으로 덮었으면 무엇을 덮었는지 보여준다(사용자 확정 2026-10-20 — 나중에 저장한 값 · 확인만).
+       ★ 다른 안내를 다 넣은 **뒤에** 맨 위로 — 안내 상자는 3줄만 보여서 뒤에 끼면 "외 N건" 에 숨는다(검토 2026-10-20). */
+    if (saved && saved.shared) _changed.unshift(..._rfSharedNoticeLines(saved.shared));
+    /* ★ 7단계 🔴7(2026-10-20): 공고는 저장됐는데 옵션 표·기간별 리뷰비만 저장에 실패한 경우 — 서버가 경고를 실어 보내는데 화면이 버려
+       "저장됨" 으로만 보였다. 맨 위에 올려 다시 저장하게 한다(반쪽 저장을 조용히 넘기지 않는다). */
+    if (saved && saved.feeWarning) _changed.unshift("⚠ " + saved.feeWarning + " — 다시 저장해 주세요");
+    if (saved && saved.optionsWarning) _changed.unshift("⚠ " + saved.optionsWarning + " — 공고는 저장됐지만 옵션 표는 옛 값입니다. 다시 저장해 주세요");
     /* ★ 버튼 ✓ → 모달 닫힘 → 화면 가운데 안내(시안 C 확정) 로 시선이 이어진다.
        안내 렌더러는 recruit-modal.js 한 벌 — 없으면(구버전 모듈) 종전 토스트로 폴백. */
     _ok = true;

@@ -55,7 +55,7 @@ function _worktableSlotEmpty(row) {
  * 호출자는 동일 트랜잭션에서 작업오더/공고 정원을 갱신하므로, 슬롯 축소 실패 시
  * 두 저장값도 함께 롤백된다. 투영 장부 재생성은 커밋 후 별도 수행한다.
  */
-async function syncWorktableSlotsInTx(client, campaign, target, by = 'quota-sync') {
+async function syncWorktableSlotsInTx(client, campaign, target, by = 'quota-sync', { preferRetireIds = null } = {}) {
   if (!campaign || !campaign.linked_sheet_id || !campaign.linked_tab_name) return { synced: false, reason: 'no_worktable_link' };
   const { isSheetless } = require('../utils/sheetlessScope');
   if (!await isSheetless(client, campaign.linked_sheet_id, campaign.linked_tab_name)) return { synced: false, reason: 'not_sheetless' };
@@ -83,7 +83,9 @@ async function syncWorktableSlotsInTx(client, campaign, target, by = 'quota-sync
   const fixed = rows.filter(r => !_worktableSlotEmpty(r));
   const delta = worktableSlotDelta({ current: rows.length, protectedCount: fixed.length, target });
   if (delta.retire) {
-    const ids = rows.filter(_worktableSlotEmpty).sort((a, b) => Number(b.seq) - Number(a.seq)).slice(0, delta.retire).map(r => r.id);
+    // 7단계-④: 지우거나 마감한 선택지의 빈 줄을 먼저 정리한다(preferRetireIds) — 나머지는 종전대로 뒤에서부터
+    const prefer = id => (preferRetireIds && preferRetireIds.has(String(id)) ? 0 : 1);
+    const ids = rows.filter(_worktableSlotEmpty).sort((a, b) => (prefer(a.id) - prefer(b.id)) || (Number(b.seq) - Number(a.seq))).slice(0, delta.retire).map(r => r.id);
     if (ids.length !== delta.retire) throw quotaError('줄일 수 있는 빈 작업보드 슬롯이 부족합니다.', 'recruit_quota_worktable_below_used');
     await client.query(
       `UPDATE campaign_participants
@@ -751,10 +753,15 @@ module.exports = {
   workOrderCampaignLockKey,
   lockWorkOrderCampaigns,
   liveCampaignForWorkOrders,
+  LINKED_WO_ON,   // 짝짓기 조건 단일 출처(오더·공고 맞추기 목록이 같은 규칙으로 공고를 찾는다)
   workOrderIdsForCampaign,
   guardWorkOrderLinkChange,
   worktableSlotDelta,
   syncWorktableSlotsInTx,
+  // 양방향 7단계(결정 275): 공유 저장이 같은 트랜잭션에서 인원 하한·작업표 줄을 맞출 때 쓴다(규칙 사본 0)
+  assertTotalFloorInTx: _assertTotalFloor,
+  usedByOption,
+  rebuildWorktableProjection,
   firstRoundQuota,
   allocateOptionQuotas,
   assertWorkOrderQuota,

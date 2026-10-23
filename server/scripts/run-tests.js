@@ -69,6 +69,9 @@ function runOne(name) {
       env: childEnv,
       encoding: 'utf8',
       timeout: 120_000,
+      // ★ SIGKILL — 앱 코드가 SIGTERM 리스너를 달면(utils/sse.js) 기본 종료가 꺼져 시간초과 신호가 무시되고,
+      //   멈춘 시험 하나가 실패로 보고되지 않은 채 점검 전체를 영원히 붙잡는다(결정 기록 참조 · 2026-10-21 실측 3시간+).
+      killSignal: 'SIGKILL',
       maxBuffer: 16 * 1024 * 1024,
       windowsHide: true,
     }, (error, stdout, stderr) => {

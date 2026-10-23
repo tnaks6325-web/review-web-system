@@ -2,7 +2,8 @@
  * price-alert-prompt.js — 가격 신고 알림 팝업 (결정 266 · 사용자 확정 2026-10-20)
  *
  * 리뷰어가 "화면과 가격이 달라요"로 취소한 리뷰어가 **2명**이 되면 관리자 전원(마스터·관리자·AE)에게 띄운다.
- *   [금액 고치기] — 칸에 적은 1건당 금액으로 리뷰웹 모집공고 금액을 바로 바꾼다(인트라넷 리뷰오더는 그대로).
+ *   [금액 고치기] — 칸에 적은 1건당 금액으로 리뷰웹 모집공고 금액을 바로 바꾼다(인트라넷 리뷰오더는 그대로 ·
+ *     결정 280: 리뷰오더와 양방향으로 맞춰지는 공고는 리뷰오더 금액도 같은 길로 함께 바뀐다).
  *   [금액 맞음 — 그대로 두기] — 쌓인 신고를 정리한다.
  *   [결정 보류] — 알림만 닫는다(신고는 남는다 — 한 명이 더 신고하면 다시 뜬다).
  * 처리 결과는 작업조건 카드 「가격 신고」 줄에 이력으로 남는다(고침 전→후 · 누가 · 언제).
@@ -125,7 +126,7 @@
     if (!ov) { ov = document.createElement('div'); ov.id = 'paOv'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-labelledby', 'paTitle'); document.body.appendChild(ov); bind(ov); }
     ov.innerHTML = '<div class="pa-box"><div class="pa-hd"><h2 id="paTitle">가격 신고 알림</h2>' +
       '<button type="button" class="pa-x" data-x="1" aria-label="닫기">✕</button></div>' +
-      '<p class="pa-lead">관리자 모두에게 보이는 알림이에요. 한 분이 처리하면 모두의 화면에서 사라져요. 고친 금액은 리뷰웹 모집공고에만 반영돼요(인트라넷 리뷰오더는 그대로).</p>' +
+      '<p class="pa-lead">관리자 모두에게 보이는 알림이에요. 한 분이 처리하면 모두의 화면에서 사라져요. 고친 금액은 리뷰웹 모집공고에 반영돼요. 리뷰오더와 연결된 공고는 인트라넷 리뷰오더 금액도 같이 바뀌고, 연결 안 된 공고는 리뷰오더는 그대로예요.</p>' +
       '<div class="pa-list">' + list.map(itemHtml).join('') + '</div>' +
       '<div class="pa-ft"><span>' + list.length + '건</span><span>처리한 결과는 작업 조건 카드 「가격 신고」 줄에 남아요</span></div></div>';
     S.view = list;

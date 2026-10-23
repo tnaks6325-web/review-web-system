@@ -50,7 +50,10 @@ for (const f of ['participation_mode', 'thumbnail_url', 'landing_url', 'daily_li
 ok('admin create: 참여형 active 생성도 활성화 게이트 통과 필요', /participation_mode && \(status === 'active'\)/.test(routes));
 ok('admin update 게이트: 시간창·일일건수도 본문값 병합 판정(J7 확장, 062: auto_order 반영 유효값)', /window_start: pick\(_wsEff/.test(routes) && /daily_limit: pick\(daily_limit/.test(routes));
 ok('work_detail 저장 시 sanitize(1차) — _prepWorkDetail', /_prepWorkDetail[\s\S]*?sanitizeGuideHtml\(wd\.inflowGuideHtml\)/.test(routes));
-ok('work_detail: undefined=유지 시맨틱(CASE WHEN $29)', /work_detail = CASE WHEN \$29::boolean THEN \$30::jsonb ELSE work_detail END/.test(routes));
+// ★ 2026-10-20 양방향 4단계-2: 연결 공고($52)면 공유 하위 칸만 DB 값을 되살리는 분기가 안에 들어갔다 —
+//   검사 의미 불변(미전송=유지 · 아니면 $30 으로 교체), 연결 공고가 아니면 종전과 같은 $30 그대로.
+// ★ 2026-10-20 양방향 5단계: 그 분기의 유지 칸 목록에 payAmount·조건부 productLines($54)가 더해져 글자가 길어졌다 — 창 600→900(검사 의미 불변).
+ok('work_detail: undefined=유지 시맨틱(CASE WHEN $29)', /work_detail = CASE WHEN \$29::boolean THEN\s*\(CASE WHEN \$52::boolean AND \$30::jsonb IS NULL THEN work_detail[\s\S]{0,900}?ELSE \$30::jsonb END\)\s*ELSE work_detail END/.test(routes));
 
 // ── my-status 홀드 병합 ──
 // ★ 127: stage 는 blog_pending 분기가 붙어 삼항이 됐다(검사 의미 불변 — applied 병합 존재)

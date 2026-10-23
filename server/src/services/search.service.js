@@ -827,7 +827,7 @@ async function searchByName(query, phone8, opts = {}) {
     const multiSlotItems = results.filter(r => r.captureSlots);
     if (multiSlotItems.length > 0) {
       try {
-        const keyOf = (sheetId, tabName, rowIndex) => `${sheetId} ${tabName} ${rowIndex}`;
+        const keyOf = (sheetId, tabName, rowIndex) => `${sheetId}${tabName}${rowIndex}`;
         const sheetIds = [...new Set(multiSlotItems.map(r => r.sheetId))];
         const tabNames = [...new Set(multiSlotItems.map(r => r.tabName))];
         const rowIdxs  = [...new Set(multiSlotItems.map(r => r.rowIndex))];

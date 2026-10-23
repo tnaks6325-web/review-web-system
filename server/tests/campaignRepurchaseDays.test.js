@@ -33,7 +33,7 @@ assert.ok(migration.includes('CHECK (repurchase_days IS NULL OR repurchase_days 
 assert.ok(entry.includes("['recruit_campaigns', 'repurchase_days']"), '컬럼 누락 시 서버 기동을 차단');
 
 assert.ok(campaigns.includes('repurchase_days, // ★ 148'), 'create/update 요청에서 공고별 값을 받음');
-assert.ok(campaigns.includes('recall_product, repurchase_days)'), 'create INSERT에 값을 저장');
+assert.ok(/recall_product, repurchase_days[,)]/.test(campaigns), 'create INSERT에 값을 저장');   // 결정 279: 뒤에 start_date_basis 칸이 붙었다 — 검사 의미 불변(INSERT 칸 목록에 있다)
 assert.ok(campaigns.includes('repurchase_days = COALESCE($50::integer, repurchase_days)'),
   'update 미전송은 보존하고 명시값은 갱신');
 assert.ok(campaigns.includes('repurchase_days: effectiveRepurchaseDays'),

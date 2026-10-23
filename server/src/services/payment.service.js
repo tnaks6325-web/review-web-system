@@ -1951,6 +1951,17 @@ async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo, r
     if (g.action === 'keep') { touchBankEff = false; bankKept = g; }
   }
 
+  if (campId && touchFee) {
+    /* ★ 결정 275 5단계 — 리뷰오더와 맞춰지는(양방향 연결) 공고의 리뷰비는 공유 저장으로만 바뀐다(지난 참여 금액 고정과 함께).
+       이 경로로 바꾸면 이미 참여한 분 금액까지 바뀌고 리뷰오더와 값이 갈라진다 — 바뀌는 값이면 거부한다(같은 값은 통과). */
+    const { rows: feeRows } = await pool.query('SELECT review_fee FROM recruit_campaigns WHERE id = $1', [campId]);
+    const curFee = feeRows[0] ? Number(feeRows[0].review_fee) || 0 : 0;
+    if ((feeVal == null ? 0 : feeVal) !== curFee
+        && await require('./campaignSharedSave.service').bidirLinkActive(campId)) {
+      throw new PaymentFixError('bidir_linked_fee', '리뷰오더와 맞춰지는 공고라 여기서는 리뷰비를 바꿀 수 없습니다. 모집공고 편집 창이나 리뷰오더에서 바꿔 주세요.');
+    }
+  }
+
   if (campId) {
     // ★ 이 두 칸만 UPDATE — 공고의 다른 설정은 절대 건드리지 않는다(축약 폼 클로버 금지).
     // ★ 공고의 `review_fee` 는 **구간표(082)가 없을 때의 그 공고 금액**이다 — 구간이 있으면

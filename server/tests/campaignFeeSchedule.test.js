@@ -187,7 +187,9 @@ ok('전파 쿼리의 소유권 검증(campaign_id·phone8·hold_token)은 그대
 /* ══ ④ 구간 저장 ══ */
 ok('구간 저장은 배열 전달 시에만(미전달=기존 구간 유지)',
   /if \(!Array\.isArray\(schedules\)\) return;/.test(camp)
-  && /const normFees = normalizeFeeSchedules\(fee_schedules\);/.test(camp));
+  // ★ 2026-10-20 양방향 5단계: 수정(PUT)은 리뷰오더와 맞춰지는 공고(_bx)면 구간을 다시 쓰지 않는다 — 미전달=유지 의미는 그대로(강화).
+  && /const normFees = normalizeFeeSchedules\(fee_schedules\);/.test(camp)
+  && /const normFees = _bx \? null : normalizeFeeSchedules\(fee_schedules\);/.test(camp));
 ok('저장은 캠페인 행 FOR UPDATE 안에서 — apply 와 같은 잠금 계층(중간 상태 관측 차단)',
   /_saveFeeSchedules[\s\S]{0,600}SELECT id FROM recruit_campaigns WHERE id=\$1 FOR UPDATE/.test(camp));
 ok('구간 저장 실패가 공고 저장을 통째로 막지 않는다(경고 표면화)',
@@ -290,7 +292,8 @@ ok('신규 공고는 구간이 항상 비어 시작한다(이전 편집값 누�
 ok('수정 모달은 서버 구간으로 프리필한다',
   /renderFeeRows\(json\.feeSchedules \|\| \[\]\)/.test(rec));
 ok('★ 구간표 UI 가 있는 화면에서만 전송 — 축약 화면 저장이 구간을 지우지 않는다',
-  /if \(document\.getElementById\("rf_fee_rows"\)\) \{[\s\S]{0,400}payload\.fee_schedules/.test(rec));
+  // ★ 2026-10-20 양방향 5단계: 리뷰오더와 맞춰지는 공고(_rfBidirBase)도 보내지 않는다(보기 전용) — 검사 의미 불변·강화.
+  /if \(document\.getElementById\("rf_fee_rows"\) && !\(_recruitEditId && window\._rfBidirBase\)\) \{[\s\S]{0,400}payload\.fee_schedules/.test(rec));
 ok('스위치를 끄면 빈 배열 전송 = 구간 제거(기본 리뷰비로 복귀)',
   /payload\.fee_schedules = document\.getElementById\("rf_fee_sched_on"\)\?\.checked \? readFeeRows\(\) : \[\]/.test(rec));
 ok('시작일 중복은 저장 전에 막는다(서버 UNIQUE 위반 전에 사람 말로 안내)',

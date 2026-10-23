@@ -558,7 +558,7 @@ async function _authoritativeHold(ctx) {
   try {
     const { rows } = await pool.query(
       `SELECT ca.phone8, ca.option_key, ca.owner_phone8, ca.blog_url, ca.status,
-              ca.order_submission_id, ca.late_order_id,
+              ca.order_submission_id, ca.late_order_id, ca.applied_at,
               co.unit_kind AS unit_kind,
               co.product_name AS product_name,
               (so.id IS NOT NULL) AS sub_alive,
@@ -586,6 +586,8 @@ async function _authoritativeHold(ctx) {
       ctx.phone8 = srv;
     }
     ctx.optionKey = rows[0].option_key || null;
+    // ★ 결정 275 5단계 — 잘못구매 판정은 신청한 시각의 결제금액으로 본다(같은 왕복 · 순증 0).
+    ctx.appliedAt = rows[0].applied_at || null;
     // ★ 134 복합 작업: 이 선택 단위가 "옵션 없는 상품"이면 그 키는 **상품명**이지 옵션명이 아니다.
     //   같은 왕복에서 읽어 온다(순증 0). 모르면 'option'(종전 동작 — 추측 승격 금지).
     ctx.unitKind = String(rows[0].unit_kind || '') === 'product' ? 'product' : 'option';

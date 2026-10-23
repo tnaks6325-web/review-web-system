@@ -1291,12 +1291,17 @@ function _normOptLabel(s) { return String(s || '').replace(/\s+/g, '').toLowerCa
  * ★★ **하나로 딱 맞을 때만** 귀속한다(정확 일치 → 없으면 4글자 이상 포함 관계). 둘 이상이 맞거나 아무것도
  *   안 맞으면 그 단서는 버린다 — 잘못 귀속하면 멀쩡한 선택지가 마감된다(모르면 세지 않는다 = 종전).
  * ★ 마감(closed) 선택지도 후보에 넣는다 — 빼면 마감된 선택지의 주문이 이름이 비슷한 다른 선택지로 붙는다.
- * @param options campaign_options 행 [{opt_key, product_name}]
- * @param order { selectedOptKey, optionText, selectedProduct, rowProduct }
+ * ★ 결정 275 ⑤-2 — 옵션 없이 상품 하나로 돌던 공고에 상품을 더하면, 원래 상품 줄에 그 시각(sole_until)이 적힌다.
+ *   그 전에 들어온 주문(submittedAt)은 상품이 하나뿐이던 때 산 것이라 표기와 무관하게 그 상품이다(결정 252 규칙을 그 시각까지 잇는다).
+ *   사람이 작업보드에서 고친 상품 칸(editedProduct)이 있으면 그것이 먼저다(결정 232).
+ * @param options campaign_options 행 [{opt_key, product_name, sole_until?}]
+ * @param order { selectedOptKey, optionText, selectedProduct, rowProduct, editedProduct?, submittedAt? }
  */
 function matchOrderOption(options, order) {
   const all = (options || []).filter(o => o && typeof o.opt_key === 'string' && o.opt_key);
   if (!all.length || !order) return null;
+  const sole = OPTION_SINGLE_FALLBACK_ENABLED ? _soleProductBefore(all, order.submittedAt) : null;
+  if (sole && !_normOptLabel(order.editedProduct)) return sole;
   // ★ 결정 232: 사람이 작업보드에서 고친 「상품」 칸(편집 기록 — row_json 에는 안 남는다)이 맨 앞이다.
   //   빼면 담당자가 상품을 적어 줘도 상품별 숫자가 그대로다(간장 38건 실측). 캡처 판독 채우기도 같은 기록을 남긴다.
   for (const raw of [order.editedProduct, order.selectedOptKey, order.selectedProduct, order.optionText, order.rowProduct]) {
@@ -1316,7 +1321,21 @@ function matchOrderOption(options, order) {
   //   「쿠팡 … 쿠팡상품번호…」) 세지 못하면 상품이 실제보다 비어 보여 정원을 넘겨 받는다(블랑카우 크림 운영 실측: 200 중 15명 누락).
   //   ★ 결정 210 「대충 비슷하면 귀속 금지」의 예외가 아니다 — 잘못 마감시킬 다른 상품이 없다. 2개 이상이면 종전 그대로.
   if (OPTION_SINGLE_FALLBACK_ENABLED && all.length === 1) return all[0].opt_key;
+  if (sole) return sole;   // 사람이 고친 상품 칸이 어느 상품과도 안 맞으면 — 그때 상품은 하나뿐이었다
   return null;
+}
+
+/** 주문 시각이 원래 상품 줄의 sole_until 보다 앞이면 그 줄(딱 하나일 때만) · 시각을 모르면 null(종전). */
+function _soleProductBefore(all, submittedAt) {
+  if (submittedAt == null || submittedAt === '') return null;
+  const t = submittedAt instanceof Date ? submittedAt.getTime() : Date.parse(String(submittedAt));
+  if (!Number.isFinite(t)) return null;
+  const hit = all.filter(o => {
+    if (o.sole_until == null || o.sole_until === '') return false;
+    const u = o.sole_until instanceof Date ? o.sole_until.getTime() : Date.parse(String(o.sole_until));
+    return Number.isFinite(u) && t < u;
+  });
+  return hit.length === 1 ? hit[0].opt_key : null;
 }
 
 /**
@@ -1471,7 +1490,7 @@ async function _loadExternalOptionOrders(db, ids, now = new Date(), opts = null)
   try {
     const dayStart = kstDayStartUtc(now).toISOString();
     const { rows: optRows } = await db.query(
-      `SELECT campaign_id, opt_key, product_name FROM campaign_options WHERE campaign_id = ANY($1)`, [ids]);
+      `SELECT campaign_id, opt_key, product_name, sole_until FROM campaign_options WHERE campaign_id = ANY($1)`, [ids]);
     const optsBy = new Map();
     for (const r of optRows || []) {
       if (!r || typeof r.opt_key !== 'string' || !r.opt_key || r.campaign_id == null) continue;
@@ -1538,7 +1557,7 @@ async function _loadExternalOptionOrders(db, ids, now = new Date(), opts = null)
         if (!r || !optsBy.has(r.campaign_id)) continue;
         const key = matchOrderOption(optsBy.get(r.campaign_id), {
           selectedOptKey: r.selected_opt_key, optionText: r.option_text,
-          selectedProduct: r.selected_product, rowProduct: r.row_product, editedProduct: r.edited_product,
+          selectedProduct: r.selected_product, rowProduct: r.row_product, editedProduct: r.edited_product, submittedAt: r.submitted_at,
         });
         if (!key) continue;
         if (collect) collect.push({ campaignId: r.campaign_id, orderId: String(r.order_id), key, submittedAt: r.submitted_at });
@@ -2042,6 +2061,7 @@ function liveOptions(rows) {
 
 module.exports = {
   computeCampaignState,
+  ORDER_COUNTED_SQL,   // 결정 279 — 첫 참여일 맞춤이 같은 "센 주문" 규칙을 쓴다(사본 금지)
   fetchCampaignCounts,
   fetchOptionCounts,
   fetchOptionCountsBatch,
