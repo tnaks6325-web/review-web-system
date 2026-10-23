@@ -1020,6 +1020,8 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
                 COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL
                   AND ${_filledSql('cp')})::int AS total,
                 COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL
+                  -- ★ 제출도 채워진 줄만(결정 283 — 참여·입금과 같은 분모 · 작업보드 진행 현황과 같은 규칙)
+                  AND ${_filledSql('cp')}
                   AND NOT EXISTS (SELECT 1 FROM review_closed_targets closed
                     WHERE closed.sheet_id=cp.sheet_id AND closed.tab_name=cp.tab_name AND closed.row_index=cp.seq)
                   AND COALESCE(obligation.review_obligation_status='fulfilled', LOWER(BTRIM(COALESCE(
@@ -3847,7 +3849,10 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     // 삭제·보관 행은 roster 쿼리에서 빠지고, 준비만 된 빈 슬롯은 filled 판정으로 제외한다.
     if (syn.filled && _hasWorkboardStatusValue(paidCellValue)) paymentCellCount++;
     if (reviewSubmitted) {
-      reviewSubmitCellCount++;
+      /* ★★ 제출완료 수는 **채워진 줄만** 센다(결정 283) — 입금완료(바로 위 paymentCellCount)·참여(filledCount)와 같은 분모.
+         작업표 생성 때 깔아 둔 빈 슬롯에 「미진행」 같은 표시 글자가 있으면 칸 분류(classifyCell)가 제출로 읽어
+         「참여 35 · 제출 60」이 됐다(0528 남이섬 실측). 줄 단위 판정(syn.reviewObligationStatus)과 누적집행은 그대로 둔다. */
+      if (syn.filled) reviewSubmitCellCount++;
       /* 주문이 제출된 행만 집행으로 본다. 원장 금액이 비어 있는 레거시 행은 실제 작업표의
          결제금액 칸(오버레이 포함)을 같은 공용 판정으로 읽는다. 같은 주문이 중복 행에 연결된
          과거 작업표는 한 번만 더한다 — 실제 구매가 복제돼 누적집행이 부풀면 안 된다. */
