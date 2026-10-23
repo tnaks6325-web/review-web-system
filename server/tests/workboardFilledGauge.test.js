@@ -185,8 +185,9 @@ console.log('\n[C][D] 화면 게이지 — summaryStrip 을 vm 으로 실제 실
   const now = run({ total: 200, filled: 134, submitted: 134, paid: 119, executionAmount: 900000, remainingExecutionAmount: 100000 });
   ok('★ 참여자 분자 = 채워진 줄(134)', /참여자<\/span><span class="nm">134<small>\/200<\/small>/.test(now), now.slice(0, 400));
   ok('★ 참여자 % = 채워진 줄 / 총건수(67%)', />67%<\/span>/.test(now));
-  ok('★ 제출완료 분모도 채워진 줄(134/134)', /제출완료<\/span><span class="nm">134<small>\/134<\/small>/.test(now));
-  ok('★ 입금완료 분모도 채워진 줄(119/134)', /입금완료<\/span><span class="nm">119<small>\/134<\/small>/.test(now));
+  // ★★ 세 게이지 분모 = 총건수(사용자 확정 2026-10-23 · 결정 283 — 054 의 "제출·입금 분모 = 채워진 줄"을 바꿈)
+  ok('★ 제출완료 분모 = 총건수(134/200 · 67%)', /제출완료<\/span><span class="nm">134<small>\/200<\/small><\/span><span class="track"><i class="s" style="width:67%"><\/i><\/span><span class="pc">67%/.test(now), now.slice(0, 900));
+  ok('★ 입금완료 분모 = 총건수(119/200 · 60%)', /입금완료<\/span><span class="nm">119<small>\/200<\/small><\/span><span class="track"><i class="" style="width:60%"><\/i><\/span><span class="pc">60%/.test(now));
   ok('★ 준비된 줄은 사라지지 않는다 — 툴팁이 말한다',
     /title="채워진 줄 134명 · 준비된 줄 200줄 \(빈 슬롯 66줄\)"/.test(now), now.slice(0, 600));
   ok('★ 진행 현황 금액은 누적집행·잔여집행으로 표시한다',
