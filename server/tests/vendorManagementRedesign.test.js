@@ -126,7 +126,7 @@ async function run() {
   /* ═══ 3. ownedTabsForAdvertiser 계약 ═══ */
   console.log('\n3) 연결탭 응답 계약');
   db = pool([
-    [/FROM tabs t LEFT JOIN LATERAL/, () => ({ rows: [
+    [/FROM tabs t LEFT JOIN jsonb_to_recordset/, () => ({ rows: [
       { sheetId: 'S1', tabName: 'T1', tabGid: 11, bTotal: 10, bSub: 10, bPaid: 10 },
       { sheetId: 'S1', tabName: 'T2', tabGid: 12, bTotal: 10, bSub: 1, bPaid: 0 },
     ] })],
@@ -223,7 +223,7 @@ async function run() {
 
   const otL = layer('get', '/ownership/tabs');
   db = pool([
-    [/FROM tabs t LEFT JOIN LATERAL/, () => ({ rows: [{ sheetId: 'S1', tabName: 'T1', tabGid: 11 }] })],
+    [/FROM tabs t LEFT JOIN jsonb_to_recordset/, () => ({ rows: [{ sheetId: 'S1', tabName: 'T1', tabGid: 11 }] })],
     [/FROM tab_configs tc/, () => { throw new Error('boom'); }],
     [/FROM trackb_tab_finished WHERE deleted_at IS NULL/, () => ({ rows: [] })],
   ]);

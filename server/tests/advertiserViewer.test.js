@@ -113,7 +113,11 @@ async function run() {
   ok('업체 작업목록 입금 수도 원장 플래그가 아닌 실제 작업표 입금 셀을 집계한다',
     /paid_header\.paid_header/.test(svcSrc)
     && /cp\.row_json\s*->>\s*COALESCE\(paid_header\.paid_header, NULLIF\(BTRIM\(cp\.submit_col2\), ''\)\)/.test(svcSrc)
-    && /GROUP BY NULLIF\(BTRIM\(ri\.submit_col2\), ''\)[\s\S]{0,100}ORDER BY COUNT\(\*\) DESC/.test(svcSrc)
+    // ★ 결정 281: 칸 이름은 작업보드와 같은 판정(workboardStatusHeaders)에서 — review_index(시트 시절 장부) 최빈값 사본 금지
+    && /_wsh\.loadTabStatusHeaders\(db, \{ tabs: keyRows \}\)/.test(svcSrc)
+    && /LEFT JOIN LATERAL \(SELECT status_headers\.paid_header\) paid_header ON TRUE/.test(svcSrc)
+    && !/GROUP BY NULLIF\(BTRIM\(ri\.submit_col2\), ''\)/.test(svcSrc)
+    && !/NULLIF\(MAX\(NULLIF\(BTRIM\(ri\.submit_col\), ''\)\), ''\) AS submit_header/.test(svcSrc)
     && !/current_paid_edit/.test(svcSrc)
     && !/COUNT\(\*\) FILTER \(WHERE cp\.active AND cp\.deleted_at IS NULL AND cp\.is_paid\)::int AS paid/.test(svcSrc));
   ok('내부 업체관리 참여 수는 빈 슬롯이 아닌 현재 작업보드의 구매양식 기록 줄만 센다',

@@ -44,11 +44,12 @@ const LAT_S = PART.indexOf('async function listActiveTabs(');
 assert.ok(LAT_S > 0, 'listActiveTabs 를 찾지 못했습니다');
 const LAT = PART.slice(LAT_S, PART.indexOf('\n}', LAT_S));
 const dnCols = (LAT.match(/COALESCE\(tc\.display_name, ''\) AS "displayName"/g) || []).length;
-t('★★ 두 CTE 모두 displayName 을 뽑는다(UNION ALL — 한쪽만 넣으면 칸이 밀려 값이 섞인다)', dnCols === 2,
+// 결정 281: 세 번째 갈래(작업표 원장으로만 살아 있는 시트 기반 작업)가 더해졌다 — 세 갈래 모두 같은 칸을 뽑아야 한다.
+t('★★ 세 갈래 모두 displayName 을 뽑는다(UNION ALL — 한쪽만 넣으면 칸이 밀려 값이 섞인다)', dnCols === 3,
   'count=' + dnCols);
 // 칸 순서 계약: 두 CTE 에서 displayName 이 workKind **바로 뒤**여야 SELECT * 정렬이 맞는다.
 const orderOk = (LAT.match(/AS "workKind",\s*(?:\/\*[\s\S]*?\*\/\s*)?COALESCE\(tc\.display_name, ''\) AS "displayName"/g) || []).length;
-t('★ 칸 위치가 두 CTE 에서 같다(workKind 바로 뒤)', orderOk === 2, 'count=' + orderOk);
+t('★ 칸 위치가 세 갈래에서 같다(workKind 바로 뒤)', orderOk === 3, 'count=' + orderOk);
 t('★ 원본은 tab_configs.display_name 하나(다른 칸을 작업명으로 지어내지 않는다)',
   LAT.split('\n').filter(l => /AS "displayName"/.test(l)).every(l => /tc\.display_name/.test(l)));
 

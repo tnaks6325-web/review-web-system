@@ -60,8 +60,8 @@ t('업체별 작업목록은 즐겨찾기 우선 후 최초 관측시각 최신�
   assert.match(html, /const dx=_wTabNewestAt\(tx\), dy=_wTabNewestAt\(ty\); if\(dx!==dy\) return dy-dx;/,
     '최신 작업 내림차순 정렬이 없음');
   const activeTabs = participants.slice(participants.indexOf('async function listActiveTabs('), participants.indexOf('\n}', participants.indexOf('async function listActiveTabs(')));
-  assert.strictEqual((activeTabs.match(/AS "firstSeenAt"/g) || []).length, 2,
-    '시트/무시트 작업 모두 최초 관측 시각을 내려야 한다');
+  assert.strictEqual((activeTabs.match(/AS "firstSeenAt"/g) || []).length, 3,
+    '시트/무시트/작업표 원장 작업(결정 281) 모두 최초 관측 시각을 내려야 한다');
   assert.match(activeTabs, /MIN\(cp\.first_seen_at\)/,
     '최신 작업 정렬이 재동기화 시각에 흔들리지 않게 최초 관측 시각을 읽어야 한다');
 });
