@@ -121,7 +121,9 @@ const ALLOWED = ['title', 'manager_name', 'product_url', 'inflow_keyword',
   'thumbnail_url',   // ★ 163 — 공고 카드 그림 하나라 표·정원·금액 어디에도 안 쓰인다
   // ★ 사용자 확정 2026-09-22 — 둘 다 작업표를 만드는 계산이 한 번도 보지 않는 값이다
   //   (회귀가드 `inflowSourceEdit` 가 작업표 코드에 참조 0건을 고정한다).
-  'inflow_type', 'purchase_time'];
+  'inflow_type', 'purchase_time',
+  // ★ 결정 287(사용자 확정 2026-10-24 계획 「진행해」) — 구매양식 제출 검사의 기준 글자. 작업표 계산은 이 칸을 보지 않는다(아래 ③-2 가 고정).
+  'required_delivery_memo'];
 const BLOCKED_SAMPLES = {
   recruit_count: 500, daily_count: 99, start_date: '2026-12-25',
   review_fee: 1, purchase_channel: '쿠팡', review_type: '텍스트', delivery_type: '빈박스',
@@ -147,6 +149,7 @@ async function run() {
       pay_amount: 31000,   // ★ 결제합계 — 상품 구성의 1건당 금액과 함께 바뀌는 짝(2026-09-21 확정)
       thumbnail_url: 'https://api.example.com/api/order/guide-image/1AbCdEfGhIjKlMnOp',   // ★ 163
       inflow_type: 'guide', purchase_time: '오후 2시 ~ 5시',   // ★ 사용자 확정 2026-09-22 — 작업표 무관
+      required_delivery_memo: '00',   // ★ 결정 287
     });
     const { res } = await call(baseOrder(), body);
     assert.strictEqual(res.statusCode, 200, 'body=' + JSON.stringify(res.body));
@@ -209,6 +212,12 @@ async function run() {
     const listed = line[1].match(/'([a-z_]+)'/g).map(v => v.replace(/'/g, ''));
     assert.deepStrictEqual(listed.slice().sort(), ALLOWED.slice().sort(),
       '허용 칸이 달라졌다 — 정원·일정·열 구성·금액·시트는 잠긴 채로 둔다');
+  });
+
+  await t('③-2 필수 배송메세지는 작업표 계산이 보지 않는다(결정 287 — 허용 칸 자격)', async () => {
+    for (const f of ['src/utils/worktablePlan.js', 'src/services/sheetlessOrder.service.js', 'src/services/campaignPlan.service.js']) {
+      assert.ok(!/required_delivery_memo/.test(fs.readFileSync(path.join(ROOT, f), 'utf8')), f + ' 가 필수 배송메세지를 읽는다 — 허용 칸 자격이 없어진다');
+    }
   });
 
   await t('⑤ 부분 수정도 정원 검증·작업표 동기화를 호출하지 않는다', async () => {

@@ -983,6 +983,8 @@ function _woCampaignPrefill(o) {
     start_date:     (o.start_date || "").slice(0, 10),
     // 주말 제외는 작업오더가 원본이다. 모집공고에는 동일한 값을 보여 주되, 실제 주말 신청 차단은 서버가 강제한다.
     skip_weekends:  o.skip_weekends === true,
+    // 결정 260·287: 필수 배송메세지(예: 00)는 오더·공고 양방향 공유 칸 — 발행 때 오더 값을 그대로 가져온다(빈 값 = 확인 안 함).
+    required_delivery_memo: String(o.required_delivery_memo || "").replace(/\s+/g, " ").trim().slice(0, 30),
     daily_limit:    o.daily_count || (String(o.daily_count_text || "").match(/\d+/) || [])[0] || "",  // 인트라넷 text형("일 10건") 폴백
     recruit_total:  o.recruit_count || 0,
     purchase_time:  o.purchase_time || "",

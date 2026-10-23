@@ -1434,6 +1434,13 @@ async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTo
       'UPDATE recruit_campaigns SET skip_weekends = $2, updated_at = NOW() WHERE id = $1 AND skip_weekends IS DISTINCT FROM $2', [camp.id, want]);
     if (rowCount) { applied.push('weekends'); after = { ...(after || {}), relay: true }; }
   }
+  // 결정 287 — 필수 배송메세지(양방향 공유 칸) → 공고 칸(구매양식 제출 검사가 읽는 곳 · 결정 260). 정규화는 저장 규칙 단일 출처.
+  if (has('required_delivery_memo')) {
+    const want = require('./requiredDeliveryMemo.service').normalizeRequired(next.required_delivery_memo);
+    const { rowCount } = await client.query(
+      'UPDATE recruit_campaigns SET required_delivery_memo = $2, updated_at = NOW() WHERE id = $1 AND required_delivery_memo IS DISTINCT FROM $2', [camp.id, want]);
+    if (rowCount) applied.push('required_memo');
+  }
   if (extra.quantityChanged) {
     const r = await _projectQuantityInTx(client, camp, extra.prev || {}, next, { preferRetireIds: structureOut && structureOut.preferRetireIds });
     if (r.reject) return { reject: r.reject };

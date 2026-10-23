@@ -20,6 +20,8 @@ function _jsonArr(v) {
 }
 
 const _s = (v) => (v == null ? '' : String(v)).trim();
+/** 필수 배송메세지(결정 260·287) — 저장 규칙과 같은 정규화(공백 하나로·30자). 단일 출처 = requiredDeliveryMemo.normalizeRequired. */
+const _memo = (v) => require('../services/requiredDeliveryMemo.service').normalizeRequired(v);
 
 function _mix(v) { return CANON.reviewTypeMix(v); }
 
@@ -87,6 +89,7 @@ function projectOrderToCampaign(order) {
     // ★ 7단계 🔴6: 오더 주말 여부가 비어 있으면 "아직 안 정함" — 작업표는 이를 주말 제외로, 공고(프리필)는 포함으로 읽는다.
     //   어느 쪽과도 같다고 보지 않아 연결 판정에서 직원이 고르게 한다(설계 완화 금지 11 · 운영 0건 2026-10-20).
     skip_weekends: (order && (order.skip_weekends === null || order.skip_weekends === undefined || order.skip_weekends === '')) ? 'unset' : (p.skip_weekends ? '1' : '0'),
+    required_delivery_memo: _memo(p.required_delivery_memo),
     channel: _s(p.channel),
     landing_url: _s(p.landing_url),
     options: (() => {
@@ -114,6 +117,7 @@ function readCampaignShared(c, optionRows) {
     work_kind: CANON.workKind(camp.work_kind),
     thumbnail_url: _s(camp.thumbnail_url),
     skip_weekends: camp.skip_weekends ? '1' : '0',
+    required_delivery_memo: _memo(camp.required_delivery_memo),
     channel,
     landing_url: _s(camp.landing_url),
     options: (optionRows || [])
@@ -128,9 +132,12 @@ function readCampaignShared(c, optionRows) {
 
 const SCALAR_KEYS = ['time_range', 'review_fee', 'recruit_total', 'daily_limit', 'delivery_type', 'delivery_type_mix',
   'recall_courier', 'recall_product', 'review_type', 'review_type_mix', 'work_kind', 'thumbnail_url', 'skip_weekends',
-  'channel', 'landing_url'];
+  'channel', 'landing_url', 'required_delivery_memo'];
 const OPTION_KEYS = ['unit_kind', 'option_url', 'pay_amount', 'recruit_total', 'daily_limit', 'review_type_mix',
   'inflow_guide_html', 'inflow_guide_images', 'status'];
+/** 빈 값도 뜻이 있는 칸 — 오더가 비고 공고에 값이 있어도 "채우기(fill)" 가 아니라 다름이다.
+ *  결정 287: 필수 배송메세지 빈 값 = "확인 안 함". fill 로 접으면 연결 판정이 그냥 이어 붙여 리뷰어는 막히는데 인트라넷에는 빈 칸으로 보인다. */
+const EMPTY_IS_VALUE = new Set(['required_delivery_memo']);
 /** 결정 277 — 상품 메인 주소는 공고 쪽에 값이 있을 때만 비교한다(198 이전 줄은 NULL = 모름 · 차이로 세면 연결된 공고가 전부 "다름" 이 된다). */
 const OPTION_KEYS_IF_CAMPAIGN = ['product_url'];
 
@@ -144,7 +151,7 @@ function compareOrderCampaign(order, campaign, optionRows) {
   const out = [];
   const push = (field, x, y) => {
     if (x === y) return;
-    out.push({ field, kind: (!x && y) ? 'fill' : 'diff', order: x, campaign: y });
+    out.push({ field, kind: (!x && y && !EMPTY_IS_VALUE.has(field)) ? 'fill' : 'diff', order: x, campaign: y });
   };
   for (const k of SCALAR_KEYS) push(k, a[k], b[k]);
   if (b.options.length && a.options.length) {

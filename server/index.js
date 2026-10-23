@@ -34,6 +34,8 @@ const REQUIRED_SCHEMA = [
   ['campaign_options', 'product_url'],             // 198 — 상품 메인 주소(공고 창 저장 INSERT·편집 프리필 SELECT · 결정 277)
   ['campaign_options', 'sole_until'],              // 197 — 상품별 바로 구매 셈이 SELECT(없으면 셈 조회가 통째 실패 = 상품 정원 "모름")
   ['order_submissions', 'delivery_memo'],          // 188 — 캡처 배송메세지(주문 저장 INSERT·구매캡처 교체·작업보드 명단이 읽고 쓴다)
+  ['order_submissions', 'delivery_memo_check'],    // 192 — 필수 배송메세지 확인 결과(주문 저장 INSERT·작업보드 명단 🚩)
+  ['recruit_campaigns', 'required_delivery_memo'],  // 192 — 공고별 필수 배송메세지(구매양식 제출 게이트·공고 설정 창)
   ['order_submissions', 'rule_flags'],              // 187 — 바로 구매 규칙 위반 표시(작업보드·공고 카드·참여 관리 읽기)
   ['reviewers', 'kakao_id'],                       // 170 — 리뷰어 가입 INSERT·내정보 저장(없으면 가입 전면 42703)
   ['reviewers', 'shopping_id'],                    // 147 — 명의별 공통 쇼핑 아이디(본인)

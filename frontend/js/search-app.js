@@ -7381,6 +7381,19 @@ function _ofpOnCaptureCleared(cid) {
   _ofpRender(cid);
 }
 
+/* ★ 결정 260 — 필수 배송메세지로 막힌 횟수(같은 작업·같은 주문번호). 두 번째부터 「직원 확인 요청」을 고를 수 있다.
+   새로고침해도 이어지도록 sessionStorage 에 둔다(못 쓰면 메모리만 — 그래도 횟수는 센다). */
+const _RDM_MEM = {};
+function _rdmBump(tabName, orderNum) {
+  const key = "rdm:" + String(tabName || "") + "|" + String(orderNum || "").replace(/[^0-9A-Za-z]/g, "");
+  let n = (_RDM_MEM[key] || 0);
+  try { n = Math.max(n, parseInt(sessionStorage.getItem(key) || "0", 10) || 0); } catch (_) {}
+  n += 1;
+  _RDM_MEM[key] = n;
+  try { sessionStorage.setItem(key, String(n)); } catch (_) {}
+  return n;
+}
+
 /* ★ 결정 230 — 「잘못 구매한 것 같아요」 확인 창(사용자 확정 2026-10-12: 고른 상품과 다른 상품을 샀으면 제출 불가).
    서버가 PRODUCT_MISMATCH(캡처 속 상품 ≠ 참여할 때 고른 상품)를 돌려주면 띄운다. 리뷰어가 고른 키를 돌려주고, 닫으면 null.
    · 「고른 상품을 샀어요」 → 그 키로 다시 제출(서버가 접수하고 담당자 확인용 기록을 남긴다)
@@ -9230,6 +9243,28 @@ async function submitOrderForm() {
         break; // 이후 주문도 동일하게 막히므로 중단
       }
 
+      // ★ 결정 260: 공고의 필수 배송메세지(예: 00)가 캡처에서 확인되지 않았다 — 다시 캡처하게 한다.
+      //   같은 주문번호로 두 번째부터 막히면 「직원 확인 요청」으로 받을 수 있다(작업보드 🚩 · 직원이 보고 반려).
+      if (!res.ok && res.code === "DELIVERY_MEMO_REQUIRED") {
+        const pre = orders.length > 1 ? `${i+1}번째 주문: ` : "";
+        const n = _rdmBump(ctx.tabName, o.orderNum);
+        let staff = false;
+        if (n >= 2) {
+          staff = confirm(`${pre}배송메세지 「${res.required || ""}」이(가) 이번에도 캡처에서 확인되지 않았어요.\n\n`
+            + `주문할 때 배송메세지를 분명히 넣었다면 「직원 확인 요청」으로 제출할 수 있어요.\n`
+            + `직원이 캡처를 직접 확인하고, 배송메세지가 없으면 반려(주문 취소)될 수 있어요.\n\n직원 확인 요청으로 제출할까요?`);
+        }
+        if (!staff) {
+          const rmsg = (res.error || "필수 배송메세지가 캡처에서 확인되지 않았어요.")
+            + (n >= 2 ? "" : " 한 번 더 확인되지 않으면 직원 확인 요청으로 제출할 수 있어요.");
+          showToast(pre + rmsg, "error");
+          results.push({ phone8: bh ? bh.phone8 : "", name: bh ? bh.name : "", ok: false, error: "배송메세지 확인 필요 — " + rmsg });
+          continue;
+        }
+        payload.deliveryMemoStaffReview = "true";
+        try { res = await gasPost(payload, 30000); } catch(_) { throw new Error("서버 연결 실패 (직원 확인 요청 제출)"); }
+        if (!res) throw new Error("서버 응답이 없습니다.");
+      }
       if (!res.ok && (res.code === "IDENTITY_APPROVAL_STALE" || res.code === "IDENTITY_CONTEXT_CHANGED")) {
         // ★ 조각 5: 명의 저장 정보가 바뀌어 승인이 낡았다 — 같은 토큰으로 재제출하면 영영 실패한다.
         //   명의 확인을 자동으로 다시 돌리고, 끝나면 다시 제출하게 한다.
