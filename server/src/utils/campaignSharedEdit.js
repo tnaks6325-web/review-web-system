@@ -14,7 +14,7 @@
  */
 'use strict';
 
-const { _woCampaignPrefill, _woStripReviewMeta } = require('./woCampaignPrefill.generated');
+const { _woCampaignPrefill, _woStripReviewMeta, _woPickSections } = require('./woCampaignPrefill.generated');
 const { sanitizeGuideImages } = require('./sanitizeGuideHtml');
 const { parsePurchaseTime } = require('./purchaseTimeWindow');
 const { CANON } = require('./sharedFields');
@@ -98,38 +98,46 @@ function campaignRowView(camp) {
   };
 }
 
-/** 리뷰가이드 글 → 작업오더 review_guide. [리뷰등록 가이드] 구간만 바꾸고 다른 구간·메타 줄은 그대로 둔다. */
+/**
+ * 리뷰가이드 글 → 작업오더 review_guide — 투영(`_woPickSections`)의 역방향.
+ * 투영이 공고에 싣는 부분(첫 머리말 앞 글 · [리뷰등록 가이드] 구간 내용 · 사람이 쓴 제목 구간 — 결정 282)은 공고 글이 통째로 대신하고,
+ * 투영이 버리는 부분(인트라넷 자동 머리말 구간 · 투영이 걷어내는 메타 줄)은 그대로 둔다.
+ * ★ 사람이 쓴 제목 구간을 남긴 채 공고 글(그 구간 포함)을 넣으면 두 번 들어가 왕복 검사가 늘 실패한다(결정 286 — 282 의 역방향 누락).
+ * 구간 분류는 투영 함수로 직접 물어 본다(자동 머리말 목록을 여기 다시 적지 않는다 — 단일 출처).
+ */
 function replaceReviewSection(raw, text) {
   const src = String(raw == null ? '' : raw);
   const body = _t(text);
   if (!/\[[^\]]+\]/.test(src)) return body;
-  const normL = s => s.replace(/\s/g, '');
-  const keep = GUIDE_LABELS.map(normL);
-  const lines = src.split(/\r?\n/);
-  const out = [];
-  let inGuide = false, placed = false, kept = [];
-  const flushMeta = () => { if (kept.length) { out.push(...kept); kept = []; } };
-  for (const ln of lines) {
+  // 'machine' = 투영이 버림 · 'guide' = 머리말 떼고 내용만 · 'human' = 머리말째 남김
+  const kindOf = label => {
+    const r = _woPickSections(`[${label}]\nx`, GUIDE_LABELS);
+    return r === '' ? 'machine' : (r === 'x' ? 'guide' : 'human');
+  };
+  const blocks = [{ kind: 'pre', header: null, label: '', same: '', lines: [] }];
+  for (const ln of src.split(/\r?\n/)) {
     const m = ln.match(/^\s*\[([^\]]+)\]\s*(.*)$/);
-    if (m) {
-      const wasGuide = inGuide;
-      if (inGuide) flushMeta();
-      inGuide = keep.some(k => normL(m[1]).includes(k));
-      if (wasGuide && !inGuide) out.push('');   // 구간 사이 빈 줄(원래 모양)
-      if (inGuide) {
-        if (!placed) { out.push(`[${m[1]}]`); if (body) out.push(body); placed = true; }
-        // 같은 줄에 붙은 글·이후 본문은 버리고, 투영이 걷어내는 메타 줄만 남긴다.
-        if (m[2] && !_woStripReviewMeta(m[2])) kept.push(m[2]);
-        continue;
-      }
-      out.push(ln);
-      continue;
-    }
-    if (inGuide) { if (ln.trim() && !_woStripReviewMeta(ln)) kept.push(ln); continue; }
-    out.push(ln);
+    if (m) blocks.push({ kind: kindOf(m[1]), header: ln, label: m[1], same: m[2] || '', lines: [] });
+    else blocks[blocks.length - 1].lines.push(ln);
   }
-  if (inGuide) flushMeta();
-  if (!placed) return [`[리뷰등록 가이드]`, body, '', src].join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  const shown = b => b.kind !== 'machine' && (b.kind !== 'pre' || b.lines.some(l => l.trim()));
+  // 투영이 걷어내는 메타 줄(첨부 파일 줄·상품번호 등)은 공고에 안 보이니 공고 글로 대신하지 않고 가이드 구간에 남긴다
+  const meta = [];
+  for (const b of blocks.filter(shown)) {
+    if (b.kind === 'guide' && b.same && !_woStripReviewMeta(b.same)) meta.push(b.same);
+    for (const l of b.lines) if (l.trim() && !_woStripReviewMeta(l)) meta.push(l);
+  }
+  const firstGuide = blocks.find(b => b.kind === 'guide');
+  const head = `[${firstGuide ? firstGuide.label : '리뷰등록 가이드'}]`;
+  const guideBlock = [head, ...(body ? [body] : []), ...meta];
+  const out = [];
+  let placed = false;
+  for (const b of blocks) {
+    if (b.kind === 'machine') { out.push(b.header, ...b.lines); continue; }
+    if (!shown(b)) { out.push(...b.lines); continue; }
+    if (!placed) { if (out.length) out.push(''); out.push(...guideBlock, ''); placed = true; }
+  }
+  if (!placed) return [head, body, '', src].join('\n').replace(/\n{3,}/g, '\n\n').trim();
   return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
