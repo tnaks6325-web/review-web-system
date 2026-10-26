@@ -10,10 +10,14 @@
 const pool = require('../db/pool');
 
 const MESSAGES = {
-  no_tab: '업체입금은 작업보드가 연결된 공고에서만 고를 수 있습니다.',
-  tab_not_found: '이 작업의 설정을 찾지 못해 업체입금을 고를 수 없습니다 — 새로고침 후 다시 시도해 주세요.',
-  not_sheetless: '구글시트를 쓰는 작업이라 업체입금을 고를 수 없습니다 — 업체 입금일 기록은 시트 없이 운영하는 작업에서만 됩니다.',
-  no_advertiser: '이 작업에 연결된 업체가 없어 업체입금을 고를 수 없습니다 — 업체관리에서 작업을 업체에 먼저 연결해 주세요.',
+  no_tab: '업체입금(제품비 업체 포함)은 작업보드가 연결된 공고에서만 고를 수 있습니다.',
+  tab_not_found: '이 작업의 설정을 찾지 못해 업체입금(제품비 업체 포함)을 고를 수 없습니다 — 새로고침 후 다시 시도해 주세요.',
+  not_sheetless: '구글시트를 쓰는 작업이라 업체입금(제품비 업체 포함)을 고를 수 없습니다 — 업체 입금일 기록은 시트 없이 운영하는 작업에서만 됩니다.',
+  no_advertiser: '이 작업에 연결된 업체가 없어 업체입금(제품비 업체 포함)을 고를 수 없습니다 — 업체관리에서 작업을 업체에 먼저 연결해 주세요.',
+  // 결정 291 — 업체입금 ↔ 제품비 업체 직접 전환 막기(리뷰비 이중 지급)
+  advertiser_recorded: '업체가 이미 입금일을 기록한 줄이 있어 「제품비 업체」로 바꿀 수 없습니다 — 업체입금에서는 업체가 리뷰비까지 보냈으므로, 바꾸면 그 줄에 우리가 리뷰비를 또 보냅니다.',
+  fee_paid: '우리가 이미 리뷰비를 보낸(또는 보내는 중인) 줄이 있어 「업체입금」으로 바꿀 수 없습니다 — 바꾸면 업체가 그 줄에 리뷰비를 또 보냅니다.',
+  lookup_failed: '이 작업의 입금 기록을 확인하지 못해 바꾸지 않았습니다 — 잠시 뒤 다시 시도해 주세요.',
 };
 
 /**
@@ -38,7 +42,13 @@ function _isAdv(v) {
   const s = String(v == null ? '' : v).replace(/\s/g, '').toLowerCase();
   return s === 'advertiser' || s === '업체입금';
 }
-const KEPT_NOTICE = '이 작업은 이체은행이 「업체입금」이라 그대로 두었습니다 — 바꾸려면 모집공고 설정이나 작업보드 › 작업 조건 › 이체은행에서 확인 후 바꿔 주세요.';
+/* 결정 291 — 제품비 업체 · 리뷰비 우리(split). 표기 판정은 payment.service 단일 출처(호출 시점 지연 require — 순환 방지). */
+function _splitBank(v) { return require('./payment.service').splitBankOf(v); }
+/* 제품비를 업체가 보내는 값인가(업체입금 · split) — 켜기 검사·끄기 확인의 기준 */
+function _isGoodsAdv(v) { return _isAdv(v) || !!_splitBank(v); }
+/* 같은 선택인가(표기 차이 무시) — 업체입금 ↔ split 전환도 "바꾸는" 쓰기로 본다 */
+function _choiceKey(v) { return _isAdv(v) ? 'advertiser' : (_splitBank(v) ? 'split_' + _splitBank(v) : String(v == null ? '' : v).trim()); }
+const KEPT_NOTICE = '이 작업은 이체은행이 「업체입금」(또는 「제품비 업체」)이라 그대로 두었습니다 — 바꾸려면 모집공고 설정이나 작업보드 › 작업 조건 › 이체은행에서 확인 후 바꿔 주세요.';
 
 /**
  * 이체은행 쓰기 공통 규칙(결정 247 · Codex 리뷰) — **모든** 이체은행 저장 경로(모집공고 생성·수정 · 탭 설정 /api/tab/config ·
@@ -50,10 +60,34 @@ const KEPT_NOTICE = '이 작업은 이체은행이 「업체입금」이라 그�
  */
 async function guardTransferBankWrite({ current, incoming, ack = false, sheetId, tabName, recheck = false } = {}) {
   if (incoming === undefined || incoming === null) return { action: 'write' };
-  const curAdv = _isAdv(current), inAdv = _isAdv(incoming);
-  if (inAdv && (!curAdv || recheck)) {
+  /* 결정 291 — 「제품비 업체 · 리뷰비 우리」도 업체입금과 같은 규칙: 업체가 계좌를 보고 입금일을 적어야 하므로 켤 때 같은 검사,
+     우리가 제품비를 다시 보내게 되는 쪽(우리 입금)으로 끌 때 같은 확인. 업체입금 ↔ 제품비 업체 사이 전환은 제품비 주체가 그대로라 확인 없이 쓴다. */
+  const curAdv = _isGoodsAdv(current), inAdv = _isGoodsAdv(incoming);
+  if (inAdv && (_choiceKey(current) !== _choiceKey(incoming) || recheck)) {
     const g = await checkAdvertiserPayoutAllowed({ sheetId, tabName });
     if (!g.ok) return { action: 'reject', error: g.error, message: g.message };
+  }
+  /* ★ 결정 291(레드팀) — 업체입금 ↔ 제품비 업체 사이는 **리뷰비를 누가 보내는지**가 바뀐다. 이미 그 방식으로 돈이 나간 줄이 있으면 막는다.
+       업체입금 → 제품비 업체: 업체가 기록한 줄(= 리뷰비까지 받은 줄)에 우리가 리뷰비를 또 보낸다.
+       제품비 업체 → 업체입금: 우리가 리뷰비를 보낸 줄에 업체가 리뷰비를 또 보낸다. 조회 실패 = 바꾸지 않는다(fail-closed). */
+  const curKey = _choiceKey(current), inKey = _choiceKey(incoming);
+  if (curAdv && inAdv && curKey !== inKey && sheetId && tabName) {
+    const fromAdv = _isAdv(current), toAdv = _isAdv(incoming);
+    if (fromAdv !== toAdv) {
+      try {
+        const n = fromAdv
+          ? (await pool.query(
+              `SELECT COUNT(*)::int AS n FROM participant_edits
+                WHERE sheet_id=$1 AND tab_name=$2 AND reverted_at IS NULL AND left(created_by, 3) = '업체#'
+                  AND (field LIKE 'col:%입금%' OR field LIKE 'col:%페이백%') AND btrim(COALESCE(value_text, '')) <> ''`,
+              [sheetId, tabName])).rows[0].n
+          : (await pool.query(
+              `SELECT COUNT(*)::int AS n FROM payment_batch_items
+                WHERE sheet_id=$1 AND tab_name=$2 AND status IN ('pending','paid')
+                  AND ${require('./payment.service').feeOnlyItemSql()}`, [sheetId, tabName])).rows[0].n;
+        if (n > 0) { const e = fromAdv ? 'advertiser_recorded' : 'fee_paid'; return { action: 'reject', error: e, message: MESSAGES[e] }; }
+      } catch (_) { return { action: 'reject', error: 'lookup_failed', message: MESSAGES.lookup_failed }; }
+    }
   }
   if (curAdv && !inAdv && !(ack === true || ack === 'true' || ack === 1 || ack === '1')) {
     return { action: 'keep', kept: String(current), notice: KEPT_NOTICE };

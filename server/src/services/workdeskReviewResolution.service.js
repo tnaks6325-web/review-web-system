@@ -60,7 +60,9 @@ async function closeWithoutReview({ db, sheetId, tabName, rowId, expectedRevisio
     const ri=(await c.query(`SELECT id,is_submitted2 FROM review_index WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3 FOR UPDATE`,[sheetId,tabName,row.seq])).rows[0];
     if (!ri) throw fail('review_history_missing','리뷰 원장 연결을 확인해 주세요.');
     if (row.is_paid || ri.is_submitted2==='PAID') throw fail('already_paid','입금 완료 건은 종결할 수 없습니다. 정산 내역을 먼저 확인해 주세요.');
-    const batches=await c.query(`SELECT 1 FROM payment_batch_items WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3 AND status IN ('pending','paid') LIMIT 1`,[sheetId,tabName,row.seq]);
+    // 결정 291 — 리뷰비만 보낸 항목(제품비 업체 작업 · 리뷰 전 지급)은 종결을 막지 않는다: 막으면 리뷰를 안 쓴 줄을 정리할 길이 없다(막다른 길).
+    const batches=await c.query(`SELECT 1 FROM payment_batch_items WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3 AND status IN ('pending','paid')
+      AND NOT ${require('./payment.service').feeOnlyItemSql()} LIMIT 1`,[sheetId,tabName,row.seq]);
     if (batches.rows.length) throw fail('payment_in_progress','이체 처리 중이거나 입금된 건입니다. 정산 내역을 먼저 확인해 주세요.');
     const files=await c.query(`SELECT 1 FROM review_submissions WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3 AND slot_key='review' AND completed_at IS NOT NULL LIMIT 1`,[sheetId,tabName,row.seq]);
     if (files.rows.length) throw fail('review_record_exists','완료된 리뷰 첨부가 있습니다. 제출 내역을 먼저 확인해 주세요.');

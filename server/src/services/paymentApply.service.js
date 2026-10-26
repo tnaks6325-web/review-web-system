@@ -71,6 +71,21 @@ async function recordDeposits(client, items, opts = {}) {
   let updated = 0;
   for (const item of (items || [])) {
     const rowIndex = item.rowIndex != null ? item.rowIndex : item.rowNum;
+    /* ★★ 결정 291 — 리뷰비만 보낸 건(제품비 업체 · 리뷰비 우리): 제품비 페이백은 업체가 보내고 입금 칸에 적는다.
+         ① 리뷰 제출 전에도 보낸다(사용자 확정 2026-10-26) → v2 '리뷰 제출 전 입금 금지' 검사를 하지 않는다
+         ② review_index PAID(= 리뷰어 화면 "페이백 완료")를 찍지 않는다 — 1천원만 받았는데 페이백이 끝난 것으로 보이면 안 된다
+         ③ 우리 원장(payment_records)은 남긴다 — 다음 입금 대상 계산에서 이 줄을 잠그는 근거다(이중 지급 방지).
+         중복 기록은 호출부가 막는다(회차 항목 pending→paid 전이 · 미확인 이체 검토 유일키). */
+    if (item.feeOnly === true) {
+      const paidAt = item.paidAt || opts.paidAt || null;
+      await client.query(
+        `INSERT INTO payment_records (sheet_id, tab_name, reviewer_name, row_index, amount, paid_by, paid_at)
+         VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::timestamptz, NOW()))`,
+        [item.sheetId, item.tabName, item.reviewerName || '', rowIndex, item.amount || '', by, paidAt]);
+      updated += 1;
+      if (appliedItems) appliedItems.push(item);
+      continue;
+    }
     // v2의 입금일은 결제 처리 메모가 아니라 "리뷰가 제출된 뒤"에만 쓸 수 있는
     // 확정 상태다. 이 검사는 같은 transaction 안에서 먼저 수행하여 선입금을
     // payment_records/review_index 어느 쪽에도 남기지 않는다.
@@ -122,6 +137,8 @@ async function markDepositCells(items, opts = {}) {
   for (const item of (items || [])) {
     const rowIndex = item.rowIndex != null ? item.rowIndex : item.rowNum;
     const stamp = item.stamp || opts.stamp;
+    // 결정 291 — 리뷰비만 보낸 건은 입금 칸(= 업체가 보낸 제품비 기록)에 쓰지 않는다. 쓸 것이 없으니 "처리됨"으로 센다.
+    if (item.feeOnly === true) { outcome.recorded += 1; continue; }
     if (!item.sheetId || !item.tabName || !rowIndex || !stamp) { outcome.skipped += 1; continue; }
 
     // 입금 원장은 DB(review_index + payment_records)만 사용한다. 무시트 작업표의
@@ -159,6 +176,7 @@ async function verifyDepositCells(items) {
   for (const item of (items || [])) {
     const rowIndex = item.rowIndex != null ? item.rowIndex : item.rowNum;
     const stamp = item.stamp;
+    if (item.feeOnly === true) { outcome.verified += 1; continue; }   // 결정 291 — 입금 칸에 쓰지 않는 건(위 markDepositCells)
     if (!item.sheetId || !item.tabName || !rowIndex || !stamp) { outcome.missing += 1; continue; }
     try {
       const st = await require('./sheetlessStatus.service').verifyStatusCell({

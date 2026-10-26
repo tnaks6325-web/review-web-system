@@ -655,21 +655,25 @@ function _rfTransferHint(goodsCostType) {
 /* 결정 247 — 이체은행 「업체입금」 안내(작업보드 탭 설정 창의 _ADV_PAYOUT_NOTE_HTML 과 같은 말). */
 const RF_ADV_PAYOUT_NOTE = "업체가 페이백을 직접 보냅니다 — 업체 작업보드에 참여한 모든 줄의 은행·계좌번호·예금주가 늘 보이고 업체가 입금일을 기록합니다. 우리 입금관리·이체 파일에서는 빠집니다. ⚠ 업체 링크는 로그인 없이 열려 링크를 가진 사람은 계좌를 봅니다.";
 const RF_ADV_PAYOUT_OFF_CONFIRM = "이체은행을 업체입금에서 다른 값으로 바꿉니다.\n\n· 입금일이 기록되지 않은 줄이 바로 우리 입금관리 목록으로 돌아옵니다\n· 업체가 이미 보냈는데 날짜만 안 적은 줄이 있는지 먼저 업체에 확인해 주세요(그대로 보내면 이중 입금)\n· 업체 화면의 계좌 칸·입금일 기록은 바로 닫힙니다\n\n진행할까요?";
+/* 결정 291 — 제품비 업체 · 리뷰비 우리(split_kbank|split_hana). 작업보드 탭 설정 창의 _SPLIT_PAYOUT_NOTE_HTML 과 같은 말. */
+const RF_SPLIT_PAYOUT_NOTE = "제품비(구매대금 페이백)는 업체가 보내고 입금일을 기록합니다(업체입금과 같은 계좌 공개). 우리 입금관리에는 리뷰비만 잡힙니다 — 리뷰 제출 전에도 구매가 끝난 줄부터, 고른 은행 서식으로. 이미 우리가 제품비까지 보낸 줄은 그대로 끝입니다.";
+const _rfIsGoodsAdv = v => v === "advertiser" || v === "split_kbank" || v === "split_hana";
 function _rfAdvPayoutHint(val) {
   // 안내 줄이 없는 모양(설정 표 레이아웃)은 업체입금일 때만 보이는 전용 줄을 쓴다.
+  const note = val === "advertiser" ? RF_ADV_PAYOUT_NOTE : RF_SPLIT_PAYOUT_NOTE;
   const adv = document.getElementById("rf_transfer_bank_adv");
-  if (adv) { adv.textContent = RF_ADV_PAYOUT_NOTE; adv.hidden = val !== "advertiser"; }
-  if (val !== "advertiser") { _rfTransferHint(window._rfLastGoodsCost); return; }
+  if (adv) { adv.textContent = note; adv.hidden = !_rfIsGoodsAdv(val); }
+  if (!_rfIsGoodsAdv(val)) { _rfTransferHint(window._rfLastGoodsCost); return; }
   const el = document.getElementById("rf_transfer_bank_hint");
   if (!el) return;
-  el.textContent = RF_ADV_PAYOUT_NOTE;
+  el.textContent = note;
   el.style.color = "#B3382E";
 }
 
 function _rfPickTransferBank(val) {
   const box = document.getElementById("rf_transfer_bank_btns");
   if (!box) return false;
-  const v = (val === "kbank" || val === "hana" || val === "advertiser") ? val : "";
+  const v = (val === "kbank" || val === "hana" || _rfIsGoodsAdv(val)) ? val : "";
   window._rfOrigTransferBank = v;   // 불러온 값 — 업체입금에서 바꿀 때 저장 직전 확인을 받는다
   const btn = box.querySelector(`.rchan-btn[data-val="${v}"]`);
   if (!btn) return false;
@@ -6152,7 +6156,8 @@ async function saveRecruitPostImpl() {
       if (document.getElementById("rf_transfer_bank_btns")) {
         payload.transfer_bank = document.getElementById("rf_transfer_bank")?.value || "";
         // 결정 247 — 업체입금을 끄면 미기록 줄이 바로 우리 입금 목록으로 돌아온다 → 이중 입금 확인
-        if (window._rfOrigTransferBank === "advertiser" && payload.transfer_bank !== "advertiser") {
+        // 결정 291 — 제품비 업체(split)도 같다: 제품비를 업체가 보내던 작업을 우리 입금으로 돌릴 때만 확인
+        if (_rfIsGoodsAdv(window._rfOrigTransferBank) && !_rfIsGoodsAdv(payload.transfer_bank)) {
           if (!confirm(RF_ADV_PAYOUT_OFF_CONFIRM)) { _rfSaveBlocked("이체은행 변경을 취소했습니다 — 저장하지 않았습니다."); return; }
           payload.transfer_bank_disable_ack = true;   // 서버는 이 표시가 있을 때만 업체입금을 끈다
         }
@@ -6298,6 +6303,10 @@ async function saveRecruitPostImpl() {
        ② 서버가 업체입금을 유지했다(확인 없이 끄는 저장 · 업체입금 작업에 새 공고) → 그 사실을 말한다. */
     if (saved && payload.transfer_bank === "advertiser" && !(saved.advertiserPayoutBank && saved.data && saved.data.transfer_bank === "advertiser")) {
       setTimeout(() => showToast("이체은행 「업체입금」이 저장되지 않았습니다 — 서버 업데이트 중일 수 있습니다. 잠시 뒤 다시 저장해 주세요.", "error"), 900);
+    } else if (saved && /^split_/.test(String(payload.transfer_bank || "")) && !saved.transferBankKept
+        && !(saved.splitPayoutBank && saved.data && saved.data.transfer_bank === payload.transfer_bank)) {
+      // 결정 291 — 제품비 업체를 모르는 서버(배포 시차)는 그 값을 '자동'으로 저장한다 → 사실대로 말한다
+      setTimeout(() => showToast("이체은행 「제품비 업체」가 저장되지 않았습니다 — 서버 업데이트 중일 수 있습니다. 잠시 뒤 다시 저장해 주세요.", "error"), 900);
     } else if (saved && saved.transferBankKept) {
       setTimeout(() => showToast(saved.transferBankNotice || "이체은행 업체입금은 그대로 두었습니다.", "error"), 900);
     }

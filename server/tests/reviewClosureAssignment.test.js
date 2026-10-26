@@ -40,7 +40,7 @@ async function seedOrder(who=owner,opts={}){await q(`INSERT INTO order_submissio
  await pg.exec(`ALTER TABLE order_submissions ADD phone text;
  ALTER TABLE participant_edits ADD reverted_by text;
  CREATE TABLE reviewer_identities(id uuid,owner_reviewer_id uuid,current_phone8 text,status text);
- CREATE TABLE payment_batch_items(sheet_id text,tab_name text,row_index int,status text);
+ CREATE TABLE payment_batch_items(sheet_id text,tab_name text,row_index int,status text,product_price int,review_fee int,amount int);
  CREATE TABLE review_submissions(sheet_id text,tab_name text,row_index int,slot_key text,completed_at timestamptz);
  CREATE TABLE index_master(sheet_id text,tab_name text,submitted_count int);`);
  for(const file of ['160_review_reminder_alimtalk.sql','161_workdesk_review_resolutions.sql','162_reviewer_participations.sql'])await pg.exec(read('migrations/'+file));

@@ -54,6 +54,9 @@ const client = {
     if (/SELECT COALESCE\(tc\.workboard_schema_version, 1\) AS schema_version/.test(sql)) return { rows: [{ schema_version: 1, is_submitted: false }] };
     if (/UPDATE review_index SET is_submitted2 = 'PAID'/.test(sql)) return { rowCount: 1, rows: [] };
     if (/INSERT INTO payment_records/.test(sql)) return { rowCount: 1, rows: [] };
+    // 결정 291 — 승인 시 그 작업의 입금 방식(제품비 업체 여부)을 잠금 읽기로 본다(여기서는 보통 작업)
+    if (/SELECT transfer_bank FROM tab_configs/.test(sql) && /FOR SHARE/.test(sql)) return { rows: [] };
+    if (/SELECT transfer_bank FROM recruit_campaigns/.test(sql) && /FOR SHARE/.test(sql)) return { rows: [] };
     throw new Error(`unexpected query: ${sql.slice(0, 80)}`);
   },
   release() {},
