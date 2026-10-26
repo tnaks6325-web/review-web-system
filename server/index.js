@@ -33,6 +33,10 @@ const REQUIRED_SCHEMA = [
   ['recruit_campaigns', 'start_date_basis'],      // 199 — 공고 생성 INSERT·수정 UPDATE·새벽 첫 참여일 맞춤(없으면 공고 발행·수정 전면 42703 · 결정 279)
   ['campaign_options', 'product_url'],             // 198 — 상품 메인 주소(공고 창 저장 INSERT·편집 프리필 SELECT · 결정 277)
   ['campaign_options', 'sole_until'],              // 197 — 상품별 바로 구매 셈이 SELECT(없으면 셈 조회가 통째 실패 = 상품 정원 "모름")
+  ['campaign_applications', 'purchase_qty'],      // 202 — 참여 게이트 UPDATE·단계 셈·주문 전파(결정 289 · 없으면 단계 공고 참여가 죽는다)
+  ['campaign_applications', 'qty_tier_amount'],   // 202
+  ['order_submissions', 'purchase_qty'],          // 202 — 홀드 확정 UPDATE 가 쓴다(없으면 주문 확정 문장이 통째로 실패)
+  ['order_submissions', 'qty_tier_amount'],       // 202
   ['order_submissions', 'delivery_memo'],          // 188 — 캡처 배송메세지(주문 저장 INSERT·구매캡처 교체·작업보드 명단이 읽고 쓴다)
   ['order_submissions', 'delivery_memo_check'],    // 192 — 필수 배송메세지 확인 결과(주문 저장 INSERT·작업보드 명단 🚩)
   ['recruit_campaigns', 'required_delivery_memo'],  // 192 — 공고별 필수 배송메세지(구매양식 제출 게이트·공고 설정 창)
@@ -171,6 +175,7 @@ const REQUIRED_SCHEMA = [
 // 이 표 자체가 없으면 새 V2 탭에서 리뷰·입금 상태를 안전하게 처리할 수 없으므로
 // 컬럼 프리플라이트와 함께 부팅을 막는다.
 const REQUIRED_TABLES = [
+  'campaign_qty_tiers',                           // 202 — 참여 게이트·이름 바꾸기 tx·합치기가 읽는다(결정 289 · 없으면 참여·공고 저장이 죽는다)
   'campaign_option_soldout_reports',              // 184 — 리뷰어 품절 신고(상품 이름 바꾸기 tx 가 함께 고친다 — 없으면 공고 저장이 죽는다)
   'campaign_option_alerts',                       // 184 — 관리자 전원 품절 알림
   'campaign_price_reports',                       // 194 — 리뷰어 가격 신고(상품 이름 바꾸기 tx 가 함께 고친다 — 없으면 공고 저장이 죽는다)
