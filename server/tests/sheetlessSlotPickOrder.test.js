@@ -171,6 +171,120 @@ const pick = (client, key = '') => S.__pickOpenSlotForTest(client, {
     }
   }
 
+  /* [6] v2 작업표(상품 1개 + 옵션 여러 개) — 빈 줄 표식 「상품 · 옵션」 ↔ 주문 옵션 키 「옵션」
+     (2026-10-26 로컬 전과정 실테스트: 빈 줄 10개를 두고 주문 5건이 전부 정원 밖 새 줄로 붙었다) */
+  console.log('[6] v2 「상품 · 옵션」 빈 줄');
+  function stagedClient({ staged = [], product = [], stagedFail = false } = {}) {
+    const seen = []; const locked = new Set();
+    return {
+      seen,
+      async query(sql, params = []) {
+        const q = String(sql).replace(/\s+/g, ' ');
+        seen.push({ q, params });
+        if (/SAVEPOINT/.test(q)) return { rows: [] };
+        if (/SELECT co\.product_name/.test(q)) return { rows: product };
+        if (/JOIN campaign_options co/.test(q)) return { rows: [] };   // 옵션 이름 바꿔 쓰기 후보 없음
+        if (/LIKE '% · %'/.test(q)) { if (stagedFail) throw new Error('boom'); return { rows: staged }; }
+        if (/WHERE cp\.id = \$1/.test(q) && /FOR UPDATE SKIP LOCKED/.test(q)) {
+          const r = staged.find(x => x.id === params[0]);
+          if (!r || locked.has(r.id)) return { rows: [] };
+          locked.add(r.id); return { rows: [r] };
+        }
+        return { rows: [] };   // 첫 후보(옵션 키 일치·빈 표식) 없음
+      },
+    };
+  }
+  const P = '에코 미니 가습기 300ml';
+  const V2 = [row('w1', 2, '', `${P} · 화이트`), row('k1', 3, '', `${P} · 블랙`), row('w2', 4, T, `${P} · 화이트`), row('k2', 5, '', `${P} · 블랙`)];
+  {
+    const c = stagedClient({ staged: V2, product: [{ product_name: P }] });
+    const r = await pick(c, '화이트');
+    ok('같은 상품·같은 옵션의 빈 줄을 고른다(오늘 날짜 줄 먼저)', r.rows[0] && r.rows[0].id === 'w2' && r.stagedFrom === `${P} · 화이트`);
+    ok('옵션 이름 바꿔 쓰기로 처리하지 않는다', r.relabelFrom === '');
+  }
+  {
+    const c = stagedClient({ staged: V2, product: [{ product_name: '에코 미니 가습기' }] });
+    const r = await pick(c, '블랙');
+    ok('공고에서 상품 표기만 고쳤어도(작업표 상품이 하나뿐) 옵션으로 짝짓는다', r.rows[0] && r.rows[0].id === 'k1');
+  }
+  {
+    const two = [row('a', 2, '', '가습기 · 화이트'), row('b', 3, '', '필터 · 화이트')];
+    const r1 = await pick(stagedClient({ staged: two, product: [{ product_name: '필터' }] }), '화이트');
+    ok('상품이 여럿이면 그 주문의 상품 줄만', r1.rows[0] && r1.rows[0].id === 'b');
+    const r2 = await pick(stagedClient({ staged: two, product: [{ product_name: '모르는 상품' }] }), '화이트');
+    ok('상품이 여럿인데 상품을 못 짝지으면 쓰지 않는다(엉뚱한 상품 줄 금지)', r2.rows.length === 0);
+  }
+  {
+    const r = await pick(stagedClient({ staged: [row('x', 2, '', `${P} · 화이트 · 대형`), row('y', 3, '', `${P} · 화이트 · 소형`)], product: [{ product_name: P }] }), '화이트 + 소형');
+    ok('2단 옵션(「1차 + 2차」)도 같은 선택만', r.rows[0] && r.rows[0].id === 'y');
+  }
+  {
+    const r = await pick(stagedClient({ staged: V2, product: [{ product_name: P }] }), '레드');
+    ok('없는 옵션은 고르지 않는다', r.rows.length === 0);
+  }
+  {
+    process.env.WORKTABLE_STAGED_OPTION_MATCH = '0';
+    const c = stagedClient({ staged: V2, product: [{ product_name: P }] });
+    const r = await pick(c, '화이트');
+    delete process.env.WORKTABLE_STAGED_OPTION_MATCH;
+    ok('킬스위치 WORKTABLE_STAGED_OPTION_MATCH=0 = 종전 동작(조회도 안 함)', r.rows.length === 0 && !c.seen.some(x => /LIKE '% · %'/.test(x.q)));
+  }
+  {
+    const c = stagedClient({ staged: V2, stagedFail: true });
+    const r = await pick(c, '화이트');
+    ok('조회 실패 = 종전 동작(SAVEPOINT 로 되돌리고 계속)', r.rows.length === 0 && c.seen.some(x => /ROLLBACK TO SAVEPOINT slot_pick_staged/.test(x.q)));
+  }
+  {
+    const r = await pick(stagedClient({ staged: V2, product: [{ product_name: P }] }), '');
+    ok('옵션을 고르지 않은 구매는 이 갈래를 타지 않는다', r.rows.length === 0);
+  }
+
+  console.log('[7] 실제 기록 — 「상품 · 옵션」 빈 줄을 채우고 정원 밖 줄을 만들지 않는다');
+  {
+    const ledgerSvc = require('../src/services/orderLedger.service');
+    const rowNumbering = require('../src/services/rowNumbering.service');
+    const sheetlessLedger = require('../src/services/sheetlessLedger.service');
+    const participation = require('../src/services/participation.service');
+    const saved = { l: ledgerSvc.loadRawTabContext, w: ledgerSvc.markOrderWritten, i: ledgerSvc.recordReviewIdentity,
+      r: rowNumbering.renumberTabInTx, b: sheetlessLedger.rebuildLedgers, p: participation.recordParticipationLink };
+    const H2 = ['번호', '구매일자', '상품', '1차옵션', '리뷰옵션', '수취인', '연락처'];
+    const slot = { id: 'w9', seq: 9, option_text: `${P} · 화이트`, row_json: { 구매일자: label(T), 상품: P, '1차옵션': '화이트', 리뷰옵션: '포토' } };
+    let update = null; let appended = false;
+    const client = {
+      async query(sql, params = []) {
+        const q = String(sql).replace(/\s+/g, ' ').trim();
+        if (/^BEGIN|^COMMIT|^ROLLBACK|^SAVEPOINT|^RELEASE|pg_advisory_xact_lock/.test(q)) return { rows: [] };
+        if (/SELECT co\.product_name/.test(q)) return { rows: [{ product_name: P }] };
+        if (/JOIN campaign_options co/.test(q)) return { rows: [] };
+        if (/LIKE '% · %'/.test(q)) return { rows: [slot] };
+        if (/WHERE cp\.id = \$1/.test(q) && /SKIP LOCKED/.test(q)) return { rows: [slot] };
+        if (/^INSERT INTO campaign_participants/.test(q)) { appended = true; return { rows: [{ seq: 99 }], rowCount: 1 }; }
+        if (/^UPDATE campaign_participants SET row_json/.test(q)) { update = params; return { rows: [], rowCount: 1 }; }
+        if (/SELECT id FROM campaign_participants/.test(q)) return { rows: [{ id: 'w9' }] };
+        return { rows: [], rowCount: 0 };
+      },
+      release() {},
+    };
+    S.__setPoolForTest({ connect: async () => client, query: async () => ({ rows: [{}] }) });
+    ledgerSvc.loadRawTabContext = async () => ({ headers: H2, tabGid: '1' });
+    ledgerSvc.markOrderWritten = async () => {}; ledgerSvc.recordReviewIdentity = async () => {};
+    rowNumbering.renumberTabInTx = async () => {}; sheetlessLedger.rebuildLedgers = async () => ({ ok: true });
+    participation.recordParticipationLink = async () => {};
+    try {
+      const out = await S.writeOrderToWorktable({ sheetId: 'S', tabName: 'T', orderSubmissionId: '00000000-0000-0000-0000-000000000001',
+        orderData: { selectedOptKey: '화이트', selectedProduct: P, orderer: '구매자', recipient: '수취인', phone: '010-1234-5678', orderNum: '', dateStr: label(T) } });
+      ok('기록 성공 — 그 빈 줄(9번)을 채운다', out.ok === true && out.written === true && Number(out.seq) === 9);
+      ok('정원 밖 줄을 새로 붙이지 않는다', !appended);
+      const rj = update ? JSON.parse(update[3]) : {};
+      ok('작업지시 칸(리뷰옵션=포토)은 그대로', rj.리뷰옵션 === '포토');
+      ok('채운 줄의 표식은 주문 옵션 키(지금의 정원 밖 줄과 같은 값 — 표식을 읽는 곳의 의미 불변)', update && update[7] === '화이트');
+    } finally {
+      S.__setPoolForTest(null);
+      Object.assign(ledgerSvc, { loadRawTabContext: saved.l, markOrderWritten: saved.w, recordReviewIdentity: saved.i });
+      rowNumbering.renumberTabInTx = saved.r; sheetlessLedger.rebuildLedgers = saved.b; participation.recordParticipationLink = saved.p;
+    }
+  }
+
   console.log(failed ? `sheetlessSlotPickOrder: FAILED (${failed}/${n})` : `sheetlessSlotPickOrder: passed (${n})`);
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.log('  ✗ 실행 실패: ' + (e && e.stack)); process.exit(1); });
