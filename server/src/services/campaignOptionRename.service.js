@@ -2,7 +2,7 @@
  * campaignOptionRename — 선택지 이름 바꾸기 단일 출처(결정 197 · 결정 275 7단계-④ ③).
  *
  * 공고 창 저장(`_saveCampaignOptions`)과 양방향 공유 저장(`sharedPatch._projectStructureInTx`)이 같은 규칙을 쓴다.
- *   바뀌는 곳: 공고 선택지(campaign_options.opt_key) · 참여 기록(campaign_applications.option_key) · 품절 신고·알림(결정 229) ·
+ *   바뀌는 곳: 공고 선택지(campaign_options.opt_key) · 참여 기록(campaign_applications.option_key) · 품절 신고·알림(결정 229) · 구매수량 단계(결정 289) ·
  *             **아직 아무도 채우지 않은 작업표 빈 줄**의 배정 표식(option_text)과 그 이름이 적힌 옵션·상품 칸(사용자 확정 2026-10-21 「2.가」 —
  *             안 바꾸면 빈 줄이 옛 이름에 묶여 새 이름 주문이 "빈자리 없음" 이 된다).
  *   🚫 안 바뀌는 곳(완화 금지 · 결정 197): 주문 기록(order_submissions.selected_opt_key)과 **채운 줄**(산 사람이 있는 줄)은 산 당시 이름 그대로.
@@ -60,6 +60,8 @@ async function applyRenamePlanInTx(client, campaignId, plan) {
     // ★ 결정 266: 가격 신고·알림(이력 포함)도 상품 이름을 따라간다(안 바꾸면 신고 2명이 이름 앞뒤로 갈려 알림이 안 뜬다)
     await client.query('UPDATE campaign_price_reports SET opt_key=$3 WHERE campaign_id=$1 AND opt_key=$2', [campaignId, from, to]);
     await client.query('UPDATE campaign_price_alerts SET opt_key=$3 WHERE campaign_id=$1 AND opt_key=$2', [campaignId, from, to]);
+    // ★ 결정 289: 옵션 전용 구매수량 단계도 이름을 따라간다(안 바꾸면 단계가 어느 옵션 것인지 잃어 그 옵션이 1개 구매로 돌아간다)
+    await client.query('UPDATE campaign_qty_tiers SET opt_key=$3, updated_at=NOW() WHERE campaign_id=$1 AND opt_key=$2', [campaignId, from, to]);
   };
   for (let i = 0; i < plan.length; i++) await step(plan[i].from, tmp[i]);
   for (let i = 0; i < plan.length; i++) await step(tmp[i], plan[i].to);

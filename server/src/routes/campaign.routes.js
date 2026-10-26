@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 const pool = require('../db/pool');
+const campaignQtyTiers = require('../services/campaignQtyTiers.service');   // ★ 결정 289 — 인당 구매수량 단계
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const { appendSheet, readSheet } = require('../services/sheets.service');
 const { logger } = require('../utils/logger');
@@ -345,6 +346,17 @@ async function _saveCampaignOptions(campaignId, options, { linked = false } = {}
       options = options.filter(o => haveKeys.has(o.optKey)).map(o => ({ ...o, status: null }));
     } else {
       await _applyOptionRenames(client, campaignId, options, keep);
+    }
+    // ★ 결정 289(사용자 확정 2026-10-26 「가」): 구매수량 단계가 있는 공고는 상품 이름을 바꾸지 않는다 —
+    //   상품 공통 단계는 상품 이름으로 짝지어져 있어, 바꾸면 단계가 조용히 빠져 모두 1개씩 산다. 통째로 되돌린다(호출부가 경고로 알린다).
+    {
+      const { rows: tq } = await client.query('SELECT 1 FROM campaign_qty_tiers WHERE campaign_id=$1 LIMIT 1', [campaignId]);
+      if (tq.length) {
+        const { rows: cur } = await client.query('SELECT opt_key, product_name FROM campaign_options WHERE campaign_id=$1', [campaignId]);
+        const curName = new Map(cur.map(r => [r.opt_key, String(r.product_name || '')]));
+        const bad = options.find(o => curName.has(o.optKey) && String(o.productName || '') !== curName.get(o.optKey));
+        if (bad) throw Object.assign(new Error(`구매수량 단계가 있는 공고라 상품 이름(「${curName.get(bad.optKey)}」)을 바꿀 수 없습니다 — 새 리뷰오더로 만들어 주세요.`), { code: 'qty_tiers_present' });
+      }
     }
     // ★ 결정 275 5단계(사용자 확정 2026-10-20 「모든 공고」) — 금액이 바뀐 옵션은 이력을 남긴다(잘못구매 판정이 신청 시각 금액을 쓴다).
     const { rows: prevPays } = await client.query('SELECT id, opt_key, pay_amount FROM campaign_options WHERE campaign_id=$1', [campaignId]);
@@ -1919,9 +1931,12 @@ router.post('/:id/change-option', applyLimiter, async (req, res, next) => {
   const { id } = req.params;
   const p8 = String(req.body.phone8 || '').replace(/\D/g, '').slice(-8);
   const token = String(req.body.holdToken || '').trim();
-  const newKey = _normOptKey(req.body.optionKey);
+  let newKey = _normOptKey(req.body.optionKey);
+  // ★ 결정 289 — 구매수량만 바꿀 수도 있다(옵션 없는 공고 포함). 숫자가 오면 개수 변경 요청.
+  const wantQty = req.body.purchaseQty === undefined || req.body.purchaseQty === null || req.body.purchaseQty === ''
+    ? null : Math.max(0, Math.floor(Number(req.body.purchaseQty) || 0));
   if (p8.length !== 8 || !token) return res.status(400).json({ ok: false, error: 'phone8(8자리)과 holdToken이 필요합니다.' });
-  if (!newKey) return res.status(400).json({ ok: false, error: '변경할 옵션을 선택해주세요.' });
+  if (!newKey && wantQty === null) return res.status(400).json({ ok: false, error: '변경할 옵션을 선택해주세요.' });
 
   const client = await pool.connect();
   try {
@@ -1942,7 +1957,15 @@ router.post('/:id/change-option', applyLimiter, async (req, res, next) => {
       await client.query('ROLLBACK');
       return res.status(409).json({ ok: false, reason: 'not_changeable', error: '지금은 옵션을 변경할 수 없어요(제출 완료 또는 만료).' });
     }
-    if (app.option_key === newKey) { await client.query('COMMIT'); return res.json({ ok: true, optionKey: newKey, unchanged: true }); }
+    // ★ 결정 289 — 지금 고른 개수(위 SELECT 칸 목록은 회귀가드가 고정 — 같은 tx·이미 잠근 행이라 따로 읽는다)
+    { const { rows: q } = await client.query('SELECT purchase_qty FROM campaign_applications WHERE id=$1', [app.id]); app.purchase_qty = q[0] ? q[0].purchase_qty : null; }
+    if (!newKey) newKey = app.option_key || null;   // 개수만 바꾸는 요청 — 옵션은 그대로
+    const optionChanging = newKey !== (app.option_key || null);
+    if (!optionChanging && (wantQty === null || wantQty === (app.purchase_qty == null ? null : Number(app.purchase_qty)))) {
+      await client.query('COMMIT'); return res.json({ ok: true, optionKey: newKey, purchaseQty: app.purchase_qty == null ? null : Number(app.purchase_qty), unchanged: true });
+    }
+    let ov = null;
+    if (optionChanging) {
 
     // 새 옵션: 활성 + 잔여/오늘 확인 (전환 대상은 자기 홀드를 포함하지 않음 = 기존 옵션에 계수돼 있음 → 순증 판정 정확)
     // ★ 결정 212: 순차진행 판정은 선택지 **전체 순서**가 있어야 하고, 내 홀드는 원래 선택지에서 뺀 상태로 본다
@@ -1953,7 +1976,7 @@ router.post('/:id/change-option', applyLimiter, async (req, res, next) => {
       await client.query('ROLLBACK');
       return res.status(400).json({ ok: false, reason: 'option_invalid', error: '선택한 옵션을 찾을 수 없어요.' });
     }
-    const ov = changeViews.find(v => v.optKey === newKey);   // 변경은 캠페인 open 무관(이미 참여중)
+    ov = changeViews.find(v => v.optKey === newKey);   // 변경은 캠페인 open 무관(이미 참여중)
     if (ov.status !== 'open') {
       await client.query('ROLLBACK');
       if (ov.status === 'waiting') {
@@ -1966,6 +1989,17 @@ router.post('/:id/change-option', applyLimiter, async (req, res, next) => {
       return res.status(409).json({ ok: false, reason, option: _publicOptionView(ov), error: '선택한 옵션은 마감되었어요. 다른 옵션을 선택해주세요.' });
     }
 
+    }   // optionChanging
+
+    /* ★★ 결정 289 — 바뀐 선택지(또는 같은 선택지의 다른 개수)의 구매수량 단계 자리. 내 기록은 빼고 본다.
+       개수를 안 보냈으면 지금 개수를 유지해 본다(새 옵션에 그 단계가 없으면 tier_required — 화면이 다시 고르게 한다). */
+    const tierVerdict = await campaignQtyTiers.judge(client, id, newKey, wantQty !== null ? wantQty : app.purchase_qty, { excludeAppId: app.id });
+    if (tierVerdict && !tierVerdict.ok) {
+      await client.query('ROLLBACK');
+      return res.status(tierVerdict.status).json({ ok: false, reason: tierVerdict.reason, error: tierVerdict.error, qtyTiers: tierVerdict.views.map(_publicTierView) });
+    }
+
+    if (optionChanging) {
     // 원자 전환: 여전히 내 유효 홀드일 때만(경합 시 0행 → 기존 유지)
     const upd = await client.query(
       `UPDATE campaign_applications SET option_key=$4
@@ -1973,9 +2007,21 @@ router.post('/:id/change-option', applyLimiter, async (req, res, next) => {
         RETURNING id`,
       [app.id, id, token, newKey]);
     if (!upd.rows.length) { await client.query('ROLLBACK'); return res.status(409).json({ ok: false, reason: 'not_changeable', error: '옵션 변경에 실패했어요. 다시 시도해주세요.' }); }
+    }
+    // ★ 결정 289 — 개수·금액은 별도 조건부 UPDATE(위 옵션 전환 문장은 회귀가드가 글자 그대로 고정 — 만료 미연장)
+    const nextQty = tierVerdict ? tierVerdict.qty : null, nextAmt = tierVerdict ? tierVerdict.amount : null;
+    if (optionChanging || nextQty !== (app.purchase_qty == null ? null : Number(app.purchase_qty))) {
+      const tu = await client.query(
+        `UPDATE campaign_applications SET purchase_qty=$4, qty_tier_amount=$5
+          WHERE id=$1 AND campaign_id=$2 AND hold_token=$3 AND status='applied' AND expires_at > NOW()
+          RETURNING id`,
+        [app.id, id, token, nextQty, nextAmt]);
+      if (!tu.rows.length) { await client.query('ROLLBACK'); return res.status(409).json({ ok: false, reason: 'not_changeable', error: '구매수량 변경에 실패했어요. 다시 시도해주세요.' }); }
+    }
     await client.query('COMMIT');
-    logger.info(`[campaign/change-option] camp=${id} app=${app.id} ${app.option_key || '∅'}→${newKey} phone8=***${p8.slice(-4)}`);
-    return res.json({ ok: true, optionKey: newKey, previousOptionKey: app.option_key || null, option: ov });
+    logger.info(`[campaign/change-option] camp=${id} app=${app.id} ${app.option_key || '∅'}→${newKey || '∅'} qty=${app.purchase_qty || '∅'}→${nextQty || '∅'} phone8=***${p8.slice(-4)}`);
+    return res.json({ ok: true, optionKey: newKey, previousOptionKey: app.option_key || null, option: ov,
+      purchaseQty: nextQty, qtyTierAmount: nextAmt, qtyTiers: tierVerdict ? tierVerdict.views.map(_publicTierView) : [] });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     return next(err);
@@ -1990,6 +2036,11 @@ router.post('/:id/change-option', applyLimiter, async (req, res, next) => {
 //   클래스 순서(캠페인 행 < owner < 명의)가 전역 고정 + tx당 클래스별 1락 = 순환 대기 불가.
 // ★ 타계정 추가참여(063, PRD §09): subName/subPhone 존재 = 타계정 명의 참여. 홀드는 계속 "명의 phone8"로
 //   키잉(uq_campaign_apps_active_hold 무변경 = §02 명의당 1건), 소유자 귀속은 owner_phone8 신설 컬럼.
+/** ★ 결정 289 — 리뷰어에게 보내는 단계 보기. 금액은 참여 후 공개(결정 041 원칙) → 참여 전 응답에는 싣지 않는다. */
+function _publicTierView(v) {
+  return { qty: v.qty, status: v.status, remaining: v.remaining, buyMethod: v.buyMethod };
+}
+
 async function _applyParticipation(req, res, next, campPre) {
   const id = campPre.id;
   const name = String(req.body.name || '').trim().slice(0, 100);
@@ -2157,6 +2208,19 @@ async function _applyParticipation(req, res, next, campPre) {
           return res.status(409).json({ ok: false, reason, option: _publicOptionView(ov), error: '선택한 옵션은 마감되었어요. 다른 옵션을 선택해주세요.' });
         }
       }
+    }
+
+    /* ★★ 결정 289 — 인당 구매수량 단계 게이트. 고른 선택지에 단계 표가 있으면 개수(purchaseQty)를 받아 그 단계 자리를 본다.
+       같은 캠페인 행 잠금 안이라 마지막 한 자리를 두 사람이 동시에 잡지 못한다. 단계 없는 공고는 조회 1번 뒤 그대로 통과.
+       ★ SAVEPOINT 로 감싸지 않는다 — 옵션 게이트와 같이 실패하면 막힌다(표 존재는 필수 스키마 검사가 보장). */
+    let qtyTierPick = null;
+    if (!blogApply) {
+      const verdict = await campaignQtyTiers.judge(client, id, chosenOpt ? chosenOpt.opt_key : null, req.body.purchaseQty);
+      if (verdict && !verdict.ok) {
+        await client.query('ROLLBACK');
+        return res.status(verdict.status).json({ ok: false, reason: verdict.reason, error: verdict.error, qtyTiers: verdict.views.map(_publicTierView) });
+      }
+      if (verdict) qtyTierPick = verdict;
     }
 
     // 등록 리뷰어만(레드 #12) — 조회 대상은 항상 "소유자"(로그인 p8). ★ 063: sub_accounts 동봉(명의 검증용)
@@ -2565,6 +2629,11 @@ async function _applyParticipation(req, res, next, campPre) {
        VALUES ($1,$2,$3,$4,$5,$12,$6,$7,$8,$9,$10,$11)
        RETURNING id, status, expires_at, option_key`,
       [id, insName, insPhone, holdP8, p8, insExpires, holdToken, chosenOpt ? chosenOpt.opt_key : null, feeSnapshot, blogUrlIns, camp.is_popular === true, insStatus]);
+    if (qtyTierPick) {   // ★ 결정 289 — INSERT 칸 목록은 고정(회귀가드) · 뒤이은 UPDATE 관용구로 고른 개수·금액을 새긴다
+      await client.query(
+        `UPDATE campaign_applications SET purchase_qty = $2, qty_tier_amount = $3 WHERE id = $1`,
+        [ins.rows[0].id, qtyTierPick.qty, qtyTierPick.amount]);
+    }
     if (deliveryFeeMixSnapshot) {
       await client.query(
         `UPDATE campaign_applications
@@ -3271,6 +3340,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
     const _srcWoId = String(source_work_order_id || '').trim();
     const _insClient = _srcWoId ? await pool.connect() : null;
     let rows;
+    let _qtyTierRows = [];   // ★ 결정 289 — 같은 트랜잭션에서 공고와 함께 저장
     try {
       if (_insClient) {
         await _insClient.query('BEGIN');
@@ -3284,6 +3354,20 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
             ok: false, code: 'WORK_ORDER_CAMPAIGN_EXISTS', campaignId: dupRows[0].id,
             error: `이 작업오더로 만든 모집공고가 이미 있습니다 — 「${dupRows[0].title || dupRows[0].id}」. 새로 만들지 말고 그 공고를 열어 수정해 주세요.`,
           });
+        }
+        /* ★★ 결정 289 — 오더의 인당 구매수량 단계를 공고로 복사할 줄을 **INSERT 전에** 만든다.
+           짝지을 수 없으면 공고를 만들지 않는다(400) — 단계 없이 게시되면 리뷰어가 모두 1개씩 사고 아무도 모른다.
+           ★ 원본은 서버가 오더에서 직접 읽는다(화면이 넘긴 값을 믿지 않는다 — 오더 단계는 접수 뒤 잠겨 있다, 결정 250).
+           ★ 블로그 체험단·스위치 꺼짐은 복사하지 않는다(종전 동작). */
+        if (campaignQtyTiers.enabled() && workKindForStore(work_kind) !== 'blog') {
+          const { rows: woRows } = await _insClient.query('SELECT product_options_json FROM work_orders WHERE id = $1', [_srcWoId]);
+          try {
+            _qtyTierRows = campaignQtyTiers.planTierCopy(woRows[0] && woRows[0].product_options_json, normOpts);
+          } catch (tierErr) {
+            if (!(tierErr instanceof campaignQtyTiers.QtyTierError)) throw tierErr;
+            await _insClient.query('ROLLBACK');
+            return res.status(400).json({ ok: false, code: tierErr.code, error: tierErr.message });
+          }
         }
       }
     /* ★ 결정 279: 시작일을 비웠거나 오더 희망 시작일을 그대로 받았으면 'pending'(첫 참여일로 맞출 대상) · 사람이 고른 날이면 'manual'.
@@ -3366,6 +3450,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         _startDateBasis,                                        // ★ 결정 279: pending(안 정함 → 첫 참여일로 맞춤) · manual(사람이 고름)
       ]
     ));
+      if (_insClient && _qtyTierRows.length) await campaignQtyTiers.insertTiers(_insClient, rows[0].id, _qtyTierRows);   // ★ 결정 289
       if (_insClient) await _insClient.query('COMMIT');
     } catch (insErr) {
       if (_insClient) await _insClient.query('ROLLBACK').catch(() => {});
@@ -4576,6 +4661,9 @@ router.post('/admin/:id/options/merge', authMiddleware, adminOrMasterMiddleware,
     await client.query('BEGIN');
     const { rows: lock } = await client.query('SELECT id FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [id]);
     if (!lock.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '공고를 찾을 수 없습니다.' }); }
+    // ★ 결정 289 — 구매수량 단계가 있는 공고는 합치지 않는다(옮겨 간 옵션에 그 개수 단계가 없으면 참여 기록이 단계를 잃는다)
+    const { rows: tierRows } = await client.query('SELECT 1 FROM campaign_qty_tiers WHERE campaign_id=$1 LIMIT 1', [id]);
+    if (tierRows.length) { await client.query('ROLLBACK'); return res.status(409).json({ ok: false, code: 'qty_tiers_present', error: '구매수량 단계가 있는 공고는 선택지를 합칠 수 없습니다.' }); }
     const { rows: opts } = await client.query('SELECT opt_key, status FROM campaign_options WHERE campaign_id=$1', [id]);
     const byKey = new Map(opts.map(o => [o.opt_key, o]));
     const froms = new Set();

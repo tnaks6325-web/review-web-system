@@ -1148,6 +1148,12 @@ function validateStructure(next, structure) {
       if (_tiersOn(x)) return { code: 'quantity_tiers_locked', error: '구매수량 단계를 쓰는 상품의 옵션 이름은 바꿀 수 없습니다(단계 표가 옵션 이름으로 짝지어져 있다). 새 리뷰오더로 만들어 주세요.' };
     }
     for (const r of structure.renamedProducts || []) if (!String(r.to || '').trim()) return { code: 'structure_add_invalid', error: '상품 이름을 비울 수 없습니다.' };
+    // ★ 결정 289(사용자 확정 2026-10-26 「가」): 상품 공통 단계는 상품 이름으로 짝지어져 있다 — 바꾸면 공고 단계가 조용히 빠져 모두 1개씩 산다
+    for (const r of structure.renamedProducts || []) {
+      if (_tiersOn(list.find(y => String(y && y.name || '').trim() === String(r.to || '').trim()))) {
+        return { code: 'quantity_tiers_locked', error: `구매수량 단계를 쓰는 상품(「${r.from}」)의 이름은 바꿀 수 없습니다(단계 표가 상품 이름으로 짝지어져 있다). 새 리뷰오더로 만들어 주세요.` };
+      }
+    }
   }
   for (const r of structure.removedProducts) {
     if (_tiersOn(r.entry)) return { code: 'quantity_tiers_locked', error: `구매수량 단계를 쓰는 상품(「${r.pName}」)은 접수 뒤 더하거나 지울 수 없습니다. 새 리뷰오더로 만들어 주세요.` };
@@ -1815,6 +1821,13 @@ async function applySharedPatch(p) {
       const names = [...new Set(permBlocked.map(w => _label(w)))];
       return await _abort(client, 409, { ok: false, code: 'structure_new_order', sync_version: curVersion, fields: permBlocked.map(w => ({ path: w.path, label: _label(w) })),
         error: `접수된 리뷰오더라 ${names.join(', ')}${((c) => (c >= 0 && c <= 11171 && c % 28 !== 0 ? '을' : '를'))(String(names[names.length - 1]).slice(-1).charCodeAt(0) - 0xAC00)} 바꿀 수 없습니다 — 배송 혼합·회수와 체험단 종류는 작업표 모양 자체가 달라집니다. 바꿔야 하면 새 리뷰오더로 접수해 주세요.` });
+    }
+    // ★ 결정 289(사용자 확정 2026-10-26 「가」): 구매수량 단계(개수·인원·금액)는 접수 뒤 영구 금지 — "아직" 이 아니다.
+    //   공고 단계 표는 발행 때 복사한 것이라 오더만 바뀌면 이미 그 단계로 참여한 사람의 금액·자리와 어긋난다.
+    const tierBlocked = blocked.filter(w => w.meta && w.meta.kind === 'leaf' && w.meta.key === 'qty_tiers');
+    if (tierBlocked.length) {
+      return await _abort(client, 409, { ok: false, code: 'quantity_tiers_locked', sync_version: curVersion, fields: tierBlocked.map(w => ({ path: w.path, label: _label(w) })),
+        error: '접수된 리뷰오더라 구매수량 단계(개수·인원·금액)를 바꿀 수 없습니다 — 공고의 단계와 이미 그 단계로 참여한 분의 금액·자리가 어긋납니다. 바꿔야 하면 새 리뷰오더로 접수해 주세요.' });
     }
     if (blocked.length) {
       return await _abort(client, 409, { ok: false, code: 'field_not_editable', sync_version: curVersion,
