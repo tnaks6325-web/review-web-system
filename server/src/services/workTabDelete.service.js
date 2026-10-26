@@ -485,6 +485,11 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, del
                 'capture', 'work_deleted', $3
            FROM order_submissions os
           WHERE os.sheet_id=$1 AND os.tab_name=$2 AND os.capture_file_id IS NOT NULL
+         UNION
+         SELECT os.capture_file_id_2, NULL, os.sheet_id, os.tab_name, os.orderer,
+                'capture', 'work_deleted', $3
+           FROM order_submissions os
+          WHERE os.sheet_id=$1 AND os.tab_name=$2 AND os.capture_file_id_2 IS NOT NULL   -- 결정 288: 구매캡처 2장째
          ON CONFLICT (file_id) DO NOTHING`,
         [sheetId, tabName, String(by || 'admin').slice(0, 100)]);
       if (tomb.rowCount) {

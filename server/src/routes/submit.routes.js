@@ -1042,7 +1042,9 @@ router.post('/order', async (req, res, next) => {
                            옵션 칸을 비우는 위 규율은 그대로 두고, 사라지던 값을 여기로 흘려보낸다. */
                         selectedProduct: (holdCtx && holdCtx.productName) || formPickedProduct || '',
                         /* 결정 245 — 캡처에서 AI 가 읽은 배송메세지. 서버 서명에서만 꺼내고, 서명의 주문번호가 이 제출의 주문번호와 같을 때만(없거나 틀리면 '' · 제출은 막지 않는다). */
-                        deliveryMemo: reviewerOrderIdentity.readDeliveryMemoProof(b.deliveryMemoToken, orderNum) };
+                        /* 결정 288 — 첫 장에 배송메세지가 없으면(잘림) 두 번째 장에서 읽은 서명을 쓴다. 규칙은 같다(주문번호 일치 · 실패해도 제출은 막지 않음). */
+                        deliveryMemo: reviewerOrderIdentity.readDeliveryMemoProof(b.deliveryMemoToken, orderNum)
+                          || reviewerOrderIdentity.readDeliveryMemoProof(b.deliveryMemoToken2, orderNum) };
     /* ★★ 결정 260 — 공고의 「필수 배송메세지」(예: 00)가 캡처 배송메세지에 없으면 접수하지 않는다(사용자 확정 2026-10-19).
        판정 대상은 **위에서 정한 orderData.deliveryMemo 하나**(서명에서만 꺼낸 값 = 원장에 남는 값) — 화면 값을 따로 믿지 않는다.
        ★ 리뷰어가 두 번 막힌 뒤 「직원 확인 요청」으로 다시 보내면(deliveryMemoStaffReview) 받되 'staff_review' 로 남긴다(작업보드 🚩).
@@ -1050,6 +1052,12 @@ router.post('/order', async (req, res, next) => {
     {
       const rdm = require('../services/requiredDeliveryMemo.service');
       const rdmRequired = await rdm.requiredForSubmission({ holdCtx, sheetId: orderScope.sheetId, tabName: orderScope.tabName });
+      /* 결정 288 — 두 장 모두 배송메세지가 읽혔는데 첫 장(잘린 화면)에는 필수 글자가 없고 둘째 장에만 있으면 둘째 장 값을 판정·원장에 쓴다.
+         두 값 모두 서명(주문번호 일치)에서만 꺼낸 값이라 화면 값을 믿는 것은 아니다. */
+      if (rdmRequired && !rdm.memoSatisfies(orderData.deliveryMemo, rdmRequired)) {
+        const memo2 = reviewerOrderIdentity.readDeliveryMemoProof(b.deliveryMemoToken2, orderNum);
+        if (memo2 && rdm.memoSatisfies(memo2, rdmRequired)) orderData.deliveryMemo = memo2;
+      }
       const rdmDecision = rdm.decide({
         required: rdmRequired, memo: orderData.deliveryMemo,
         staffReviewRequested: b.deliveryMemoStaffReview === true || b.deliveryMemoStaffReview === 'true',

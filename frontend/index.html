@@ -2837,7 +2837,7 @@ async function _partInfoLoadBrief(list, done, requestSeq){
     _partInfoCaptureItems = results.map((result, index) => {
       const pc = result && result.brief && result.brief.purchaseCapture;
       if (!pc || !pc.fileId) return null;
-      return { fileId:String(pc.fileId), uploadedAt:pc.uploadedAt ? String(pc.uploadedAt) : '', label:_partInfoGroupRowLabel(items[index]) };
+      return { fileId:String(pc.fileId), fileId2:pc.fileId2 ? String(pc.fileId2) : '', uploadedAt:pc.uploadedAt ? String(pc.uploadedAt) : '', label:_partInfoGroupRowLabel(items[index]) };   // fileId2 = 결정 288 두 번째 장
     }).filter(Boolean);
     const firstCapture = _partInfoCaptureItems[0] || null;
     _partInfoCaptureFileId = firstCapture ? firstCapture.fileId : '';
@@ -3203,6 +3203,8 @@ function _partInfoOpenCapture(index){
     + '<div class="part-info-capture-meta">' + escHtml(capture.label || _partInfoCoordLabel || '참여상품')
     + (at ? '<br>' + escHtml(at) + ' 제출' : '') + '</div>'
     + '<img class="part-info-capture-img" src="' + _escAttrX(_reEditImgUrl(capture.fileId)) + '" alt="내가 제출한 구매 캡처">'
+    /* 결정 288 — 두 번째 장이 있으면 아래에 이어서 보여 준다. */
+    + (capture.fileId2 ? '<div class="part-info-capture-meta" style="margin-top:10px">2장째</div><img class="part-info-capture-img" src="' + _escAttrX(_reEditImgUrl(capture.fileId2)) + '" alt="내가 제출한 구매 캡처 2장째">' : '')
     + '<div style="font-size:.68rem;color:#9CA3AF;line-height:1.5;margin-top:9px">주문번호와 주소 등 개인정보가 포함될 수 있어 본인 참여 내역에서만 확인할 수 있습니다.</div>'
     + '</div></div>';
   ovl.classList.add('on');

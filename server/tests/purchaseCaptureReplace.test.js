@@ -33,7 +33,7 @@ function makeDb(opts = {}) {
     if (/FROM tab_configs WHERE sheet_id=\$1 AND tab_name=\$2 LIMIT 1/.test(sql) && /tab_gid/.test(sql)) return { rows: [{ gid: '123' }] };
     if (/FROM order_submissions os/.test(sql)) return { rows: cands };
     if (/SELECT capture_folder_url/.test(sql)) return { rows: [{ capture_folder_url: 'https://drive.google.com/drive/folders/FOLDER' }] };
-    if (/SELECT capture_file_id FROM order_submissions WHERE id=\$1/.test(sql)) {
+    if (/SELECT capture_file_id(, capture_file_id_2)? FROM order_submissions WHERE id=\$1/.test(sql)) {
       return { rows: [{ capture_file_id: opts.raceTo !== undefined ? opts.raceTo : cands[0].capture_file_id }] };
     }
     if (/UNION ALL/.test(sql) && /review_submissions/.test(sql)) {
@@ -183,7 +183,9 @@ const base = { sheetId: 'S1', tabName: 'T1', rowId: 'r1', imageBase64: IMG, mime
     assert.ok(a > 0 && b > a);
     assert.ok(!/type="file"|type=\\"file\\"/.test(seg), '파일 선택 창구가 생겼다');
     assert.ok((seg.match(/_capTake\(/g) || []).length >= 3);
-    assert.ok(/expectFileId[:=]String\(st\.pre\.currentFileId/.test(seg), '지금 사진 대조값을 보내지 않는다');
+    // 결정 288: 1장째/2장째 중 고른 칸의 지금 사진을 대조값으로 보낸다(검사 의미 불변 — 지금 사진 대조).
+    assert.ok(/body\.expectFileId=_capCurrent\(st\); body\.captureIndex=\(st\.pick===1\?2:1\);/.test(seg)
+      && /st\.pick===1\?st\.pre\.currentFileId2:st\.pre\.currentFileId/.test(WD), '지금 사진 대조값을 보내지 않는다');
     assert.ok(!/_capTake\([^)]*\)[^;]*_capSubmit\(/.test(seg));
   });
   await t('★ 화면: 두 창구 모두 내부 직원에게만', () => {

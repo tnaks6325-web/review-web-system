@@ -138,7 +138,7 @@ const T = (id, extra = {}) => ({ id, capture_file_id: 'f' + id, selected_opt_key
   await ok('Codex 리뷰: AI 판독 — 상품만 찍힌 캡처는 이 기능에서만 허용(리뷰어 제출 경로는 종전대로 실패) · 그 결과는 캐시하지 않음', async () => {
     const src = require('fs').readFileSync(require('path').resolve(__dirname, '../src/services/gemini.service.js'), 'utf8');
     assert(/const productOnly = allBlank && opts\.allowProductOnly === true/.test(src));
-    assert(/if \(allBlank && !productOnly\)/.test(src) && /if \(!productOnly\) _putToCache/.test(src));
+    assert(/if \(allBlank && !productOnly( && !secondOnly)?\)/.test(src) && /if \(!productOnly( && !secondOnly)?\) _putToCache/.test(src));
   });
   console.log(`\n✅ captureProductFill: ${passed} passed`);
 })().catch(e => { console.error(e); process.exit(1); });
