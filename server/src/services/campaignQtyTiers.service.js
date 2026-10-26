@@ -184,6 +184,25 @@ async function judge(db, campaignId, optKey, wantQty, { excludeAppId = null } = 
   return { ok: true, qty: v.qty, amount: v.payAmount, buyMethod: v.buyMethod, views };
 }
 
+/**
+ * ③-나 화면용 — 옵션별(byOpt) · 옵션 없는 공고(campaign)의 단계 보기. 단계 없는 공고 = null(종전 화면).
+ * excludeAppId = 참여 후 「개수 바꾸기」에서 내 참여는 빼고 본다(바꾸기 판정과 같은 셈).
+ * ★ 보기 전용 — 참여·바꾸기의 판정은 언제나 judge(같은 잠금 안)가 다시 한다.
+ */
+async function viewsForCampaign(db, campaignId, optKeys, { excludeAppId = null } = {}) {
+  if (!enabled()) return null;
+  const ctx = await loadContext(db, campaignId);
+  if (!ctx.tiers.length) return null;
+  const usage = await fetchUsage(db, campaignId, ctx, { excludeAppId });
+  const byOpt = {};
+  for (const k of optKeys || []) {
+    const s = k ? scopeFor(ctx, k) : null;
+    if (s) byOpt[k] = tierViews(s, usage);
+  }
+  const none = scopeFor(ctx, null);
+  return { byOpt, campaign: none ? tierViews(none, usage) : null };
+}
+
 module.exports = {
-  enabled, planTierCopy, insertTiers, loadContext, scopeFor, unresolved, fetchUsage, tierViews, judge, QtyTierError,
+  enabled, planTierCopy, insertTiers, loadContext, scopeFor, unresolved, fetchUsage, tierViews, judge, viewsForCampaign, QtyTierError,
 };

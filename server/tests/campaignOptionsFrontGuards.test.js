@@ -32,7 +32,7 @@ ok('campaign.html: 옵션 등록 캠페인은 선택 필수(1개면 자동)',
   /pickable\.length === 1\) return _joinWithOption\(pickable\[0\]\.optKey\)/.test(camp) && /return openOptSheet\(\)/.test(camp));
 ok('campaign.html: 옵션 확정 → _joinWithOption → (명의 고르기 불필요 시) _doApply 즉시',
   /function _joinWithOption\(optionKey\)\{[\s\S]{0,200}if\(!acctChoiceEnabled\(\)\) return _doApply\(optionKey\);/.test(camp));
-ok('campaign.html: _doApply가 optionKey를 apply body에 실음', /function _doApply\(optionKey, sub\)[\s\S]*?if\(optionKey\) body\.optionKey = optionKey/.test(camp));
+ok('campaign.html: _doApply가 optionKey를 apply body에 실음', /function _doApply\(optionKey, sub(?:, purchaseQty)?\)[\s\S]*?if\(optionKey\) body\.optionKey = optionKey/.test(camp));
 ok('campaign.html: 옵션 소진 사유 처리(재선택 유도)', /option_required','option_invalid','option_soldout','option_today_done','option_unavailable/.test(camp));
 ok('campaign.html: 참여 후 옵션카드+변경(renderJoinedOption)', /function renderJoinedOption\(j\)/.test(camp) && /openChangeOptSheet\(\)/.test(camp));
 ok('campaign.html: 단일상품 선택지(product 1개)는 중복 참여옵션 카드를 숨김',

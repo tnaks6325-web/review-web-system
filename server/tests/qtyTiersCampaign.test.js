@@ -175,3 +175,41 @@ test('P2 — 단계는 있는데 범위를 못 정하면 통과로 접지 않는
   const e = await svc.judge(fakeDb({ tiers: optTiers, options: [{ opt_key: '블랙', product_name: '가습기' }, { opt_key: '컵', product_name: '컵' }], usage: [] }), 'c1', '컵', undefined);
   assert.equal(e, null, '단계 없는 상품은 종전 그대로');
 });
+
+// ★ 결정 289 ③-나 — 리뷰어 개수 고르기(화면) · 보기 전용 서버 응답
+test('③-나 viewsForCampaign — 옵션별·옵션 없는 공고 · 단계 없으면 null · 내 참여 빼고', async () => {
+  assert.equal(await svc.viewsForCampaign(fakeDb(), 'c1', ['블랙']), null, '단계 없는 공고 = null(종전 화면)');
+  const tiers = [T(null, 1, 2, 10000), T(null, 2, 1, 20000)];
+  const options = [{ opt_key: '블랙', product_name: '가습기' }, { opt_key: '컵', product_name: '컵' }];
+  const usage = [{ id: 9, option_key: '블랙', purchase_qty: 2, n: 1 }];
+  const v = await svc.viewsForCampaign(fakeDb({ tiers, options, usage }), 'c1', ['블랙', '컵']);
+  assert.deepEqual(v.byOpt['블랙'].map(x => [x.qty, x.status, x.remaining]), [[2, 'soldout', 0], [1, 'open', 2]]);
+  assert.equal(v.byOpt['컵'], undefined, '단계 없는 상품의 옵션은 싣지 않는다');
+  const mine = await svc.viewsForCampaign(fakeDb({ tiers, options, usage }), 'c1', ['블랙'], { excludeAppId: 9 });
+  assert.ok(mine && mine.byOpt && mine.byOpt['블랙'], '내 참여 빼고 보기도 돌아간다');
+});
+
+test('③-나 배선 — 참여 전 상세(금액 없음) · 참여 후 내 개수·금액 · 화면 개수 창', () => {
+  // 서버: 참여 전 상세는 _publicTierView(금액 없음)로만 · 실패해도 공고는 연다
+  assert.match(routes, /o\.qtyTiers = v\.map\(_publicTierView\)/);
+  assert.match(routes, /view\.qtyTiers = tv\.campaign\.map\(_publicTierView\)/);
+  assert.match(routes, /logger\.warn\(`\[campaign\/detail\] 구매수량 단계 보기 실패/, '보기 실패가 상세를 죽이지 않는다');
+  // 참여 후: 내 참여는 빼고 본 자리 · 금액은 참여 후에만 · 응답 qty
+  assert.match(routes, /viewsForCampaign\(pool, id, app\.option_key \? \[app\.option_key\] : \[\], \{ excludeAppId: app\.id \}\)/);
+  assert.match(routes, /\{ \.\.\._publicTierView\(v\), payAmount: v\.payAmount \}/);
+  assert.match(routes, /\n\s+qty,\s+\/\/ ★ 결정 289 ③-나/);
+  // 화면: 모든 참여 경로가 모이는 _doApply 에서 자리 잡기 전에 개수 창 · 본문에 purchaseQty · 서버 단계 사유면 개수 창 다시
+  const camp = fs.readFileSync(path.join(ROOT, '../frontend/campaign.html'), 'utf8');
+  const ap = camp.slice(camp.indexOf('async function _doApply(optionKey, sub, purchaseQty){'));
+  const sheet = ap.indexOf("return openQtySheet({ mode:'join', optionKey, sub, views: tv })");
+  assert.ok(sheet > 0 && sheet < ap.indexOf("+ '/apply', {"), '개수 창은 apply 요청 전');
+  assert.ok(ap.indexOf('if(isBlogCampaign() && !_isBlogUrl(_blogUrl))') < sheet, '블로그 주소 확인 뒤(블로그는 단계 없음)');
+  assert.match(ap, /if\(purchaseQty\) body\.purchaseQty = purchaseQty;/);
+  assert.match(ap, /if\(_qtyRetryFromServer\(j, \{ mode:'join', optionKey, sub, views: _qtyViewsFor\(optionKey\) \}\)\) return;/);
+  assert.match(camp, /function _qtyRetryFromServer\(j, p\)\{\n\s*if\(!\['tier_required','tier_invalid','tier_soldout'\]\.includes\(j && j\.reason\)\) return false;/);
+  assert.match(camp, /if\(_qtyRetryFromServer\(j, \{ mode:'change_opt', optionKey: newKey, views: \[\] \}\)\) return;/, '옵션 바꾸기도 새 옵션의 개수');
+  assert.match(camp, /renderJoinedOption\(j\);\n\s*renderJoinedQty\(j\);/);
+  assert.match(camp, /<div class="sheet-ovl" id="qtySheet">/);
+  // 개수 바꾸기도 미리보기에서는 서버를 부르지 않는다
+  assert.match(camp, /async function _doChangeQty\(qty\)\{\n\s*if\(PREVIEW\) return toast/);
+});
