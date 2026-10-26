@@ -46,9 +46,21 @@
     return m ? m[1] : null;
   }
 
-  /** 상품 라인 정규화 — 같은 결제금액이 여러 줄에 반복되면 한 줄로 모은다(표시 직전 정규화, 원문 불변) */
-  function fmtProduct(wd) {
+  /** 상품 라인 정규화 — 같은 결제금액이 여러 줄에 반복되면 한 줄로 모은다(표시 직전 정규화, 원문 불변)
+   *  ★ 결정 289: qty = 리뷰어가 고른 구매수량 단계({purchaseQty, amount} — 서버 신청 기록). 있으면 1개 기준 금액을
+   *    지우고 그 단계 금액 한 줄로 말한다 — 위 「구매수량」 칸과 금액이 둘로 갈리면 무엇을 결제할지 모른다(Codex P2 #1692). */
+  function fmtProduct(wd, qty) {
     var base = String((wd && wd.productLines) || '').trim();
+    if (qty && qty.purchaseQty != null) {
+      var lines = base.split(/\n/)
+        .map(function (ln) {
+          return ln.replace(/\s*[-·/]?\s*결제금액\s*[\d,]+\s*원/g, '').replace(/[\s\-·/]+$/, '').trim();
+        })
+        .filter(Boolean).join('\n');
+      var tail = (qty.amount != null ? '결제금액 ' + Number(qty.amount).toLocaleString() + '원 · ' : '')
+        + Number(qty.purchaseQty) + '개 구매';
+      return (lines ? lines + '\n' : '') + tail;
+    }
     var payAmt = (wd && wd.payAmount) ? Number(wd.payAmount) : 0;
     if (!base && !payAmt) return '(등록된 상품 정보가 없어요)';
     var amtRe = /결제금액\s*([\d,]+)\s*원/g;
@@ -192,7 +204,7 @@
 
     // 상품 · 옵션 · 결제금액
     html += '<div class="cwd-box"><div class="cwd-tt">📦 상품 · 옵션 · 결제금액</div>'
-      + '<div class="cwd-body">' + escAttr(fmtProduct(wd)) + '</div></div>';
+      + '<div class="cwd-body">' + escAttr(fmtProduct(wd, d.qty)) + '</div></div>';
 
     // 🧾 현금영수증 발행 안내 — 연결 탭 진행방식이 '현영'인 공고만(d.cashReceipt는 서버가 판정).
     //   결제 단계를 지나면 발행을 되돌리기 어려우므로 상품 카드 바로 아래(구매 전 시점)에 둔다.
