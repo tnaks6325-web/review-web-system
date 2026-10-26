@@ -197,7 +197,8 @@ const FRONT = p => fs.readFileSync(path.join(ROOT, '..', 'frontend', p), 'utf8')
     assert.match(sa, /_processCardImgFile\(imgs\[0\], cid\)\.then\(/);
   });
   await ta('5b 2장째 판독은 명의 증명을 건드리지 않는다(첫 장 증명만 제출) · 상품명은 첫 장에 없을 때만', () => {
-    const f = sa.slice(sa.indexOf('async function _callCardExtractAi2('), sa.indexOf('/** ★ Promise 반환'));
+    const f = sa.slice(sa.indexOf('async function _callCardExtractAi2Run('), sa.indexOf('/** ★ Promise 반환'));
+    assert.ok(f.length > 200, '2장째 판독 본문을 찾지 못했다');
     assert.ok(!/approvalToken|extractToken|imageHash|identity/.test(f), '2장째 판독이 명의 확인 상태를 바꾸면 안 된다');
     assert.match(f, /captureIndex: 2, orderNumberHint: orderHint/);
     assert.match(f, /const orderHint = String\(st\.extracted\?\.orderNumber \|\| document\.getElementById/, 'AI 가 읽은 주문번호를 먼저');
@@ -221,6 +222,28 @@ const FRONT = p => fs.readFileSync(path.join(ROOT, '..', 'frontend', p), 'utf8')
     const ix = FRONT('index.html');
     assert.match(ix, /fileId2:pc\.fileId2 \? String\(pc\.fileId2\) : ''/);
     assert.match(ix, /capture\.fileId2 \? '<div class="part-info-capture-meta" style="margin-top:10px">2장째<\/div>/);
+  });
+  // 2026-10-26 코드리뷰 3건(PR #1688)
+  await ta('5f 제출은 2장째 판독이 끝날 때까지 기다린 뒤 값을 모은다(배송메세지 서명이 빠지지 않게)', () => {
+    const body = sa.slice(sa.indexOf('async function submitOrderForm()'));
+    const wait = body.indexOf('await Promise.race([Promise.allSettled(waits)');
+    assert.ok(wait > 0, '제출이 2장째 판독을 기다리지 않는다');
+    assert.ok(wait < body.indexOf('_syncAllSharedBeforeSubmit();'), '기다림이 값 모으기보다 뒤에 있다');
+    assert.match(body.slice(0, wait), /s\.img2Chain\) waits\.push\(s\.img2Chain\); if \(s\.img2\.pending\) waits\.push\(s\.img2\.pending\)/);
+    assert.match(sa, /if \(img\) \{ img\.pending = p;/);
+    assert.match(sa, /_cardAiState\[cid\]\.img2Chain = chain;/);
+  });
+  await ta('5g 2장째를 빼거나 바꾸면 그 사진이 채운 상품·자동 선택을 거둔다(직접 고른 상품은 남긴다)', () => {
+    assert.match(sa, /if \(st\) \{ _clearImg2Product\(cid, st\.img2\); st\.img2 = null; \}/);
+    assert.match(sa, /_clearImg2Product\(cid, st\.img2\);   \/\/ 바꾸기 전/);
+    assert.match(sa, /img\.gaveName = json\.productName;/);
+    assert.match(sa, /if \(!img \|\| !img\.gaveName \|\| _OFP\.capName\[cid\] !== img\.gaveName\) return;\n  if \(_OFP\.pick\[cid\] && _OFP\.pick\[cid\] === _OFP\.ai\[cid\]\) delete _OFP\.pick\[cid\];/);
+  });
+  await ta('5h 완료 화면 목록이 2장째 실패·업로드 중을 센다', () => {
+    const fn = sa.slice(sa.indexOf('function _renderCaptureChecklist()'), sa.indexOf('function resetOrderFormForReentry()'));
+    assert.match(fn, /const failed2   = list\.filter\(x => x\.status === "ok" && x\.status2 === "fail"\)\.length;/);
+    assert.match(fn, /const okCount   = list\.filter\(x => x\.status === "ok" && x\.status2 !== "uploading" && x\.status2 !== "fail"\)\.length;/);
+    assert.match(fn, /구매 캡처 2장째 업로드 실패/);
   });
 
   console.log(`\n결과: ${pass} 통과 / ${fail} 실패`);

@@ -7718,10 +7718,13 @@ function _takeCardImgFiles(files, cid) {
   if (imgs[0].size > 10 * 1024 * 1024) { showToast("이미지 크기는 10MB 이하여야 합니다.", true); return; }   // 첫 장이 거부되면 둘째 장도 받지 않는다
   // 둘째 장 판독은 첫 장 판독이 끝난 뒤에 — 그래야 첫 장에서 읽은 주문번호에 배송메세지 서명을 묶을 수 있다.
   if (imgs[1]) _setCardImg2(imgs[1], cid, { deferAi: true });
-  _processCardImgFile(imgs[0], cid).then(() => {
+  const chain = _processCardImgFile(imgs[0], cid).then(() => {
     const st = _cardAiState[cid];
-    if (st && st.img2 && !st.img2.memoToken && !st.img2.busy && !st.img2.tried) _callCardExtractAi2(cid);
+    if (st && st.img2 && !st.img2.memoToken && !st.img2.busy && !st.img2.tried) return _callCardExtractAi2(cid);
+    if (st && st.img2 && st.img2.pending) return st.img2.pending;
   });
+  // 제출이 기다릴 수 있게 남긴다 — 첫 장 판독 → 2장째 판독이 끝나기 전에 제출하면 2장째 배송메세지 서명이 빠진다(코드리뷰).
+  if (imgs[1] && _cardAiState[cid]) _cardAiState[cid].img2Chain = chain;
 }
 
 function onCardImgDrop(e, cid) {
@@ -7784,6 +7787,7 @@ function _setCardImg2(file, cid, opts = {}) {
   const reader = new FileReader();
   reader.onload = (ev) => {
     const dataUrl = ev.target.result;
+    _clearImg2Product(cid, st.img2);   // 바꾸기 전 2장째가 채운 상품 값은 같이 뺀다
     st.img2 = { dataUrl, mime: file.type || "image/jpeg", memoToken: "", req: ((st.img2 && st.img2.req) || 0) + 1, busy: false };
     const th = document.getElementById(cid + "_img2Thumb"); if (th) th.src = dataUrl;
     const pv = document.getElementById(cid + "_img2Preview"); if (pv) pv.style.display = "flex";
@@ -7796,14 +7800,31 @@ function _setCardImg2(file, cid, opts = {}) {
 
 function removeCardImg2(cid) {
   const st = _cardAiState[cid];
-  if (st) st.img2 = null;
+  if (st) { _clearImg2Product(cid, st.img2); st.img2 = null; }
   const th = document.getElementById(cid + "_img2Thumb"); if (th) th.src = "";
   const pv = document.getElementById(cid + "_img2Preview"); if (pv) pv.style.display = "none";
   const bx = document.getElementById(cid + "_img2Box"); if (bx) bx.style.display = "none";
   const lb = document.getElementById(cid + "_img2Label"); if (lb) lb.textContent = "2장째 첨부됨";
 }
 
-async function _callCardExtractAi2(cid) {
+/* 2장째가 채운 상품명·옵션·자동 선택을 거둔다(코드리뷰) — 뺀 사진이 저장될 상품을 정하거나 상품 불일치 확인을 띄우면 안 된다.
+   ★ 그 뒤 첫 장이 다시 읽혀 제 값을 넣었으면(값이 달라졌으면) 건드리지 않는다 · 리뷰어가 직접 고른 상품은 남긴다. */
+function _clearImg2Product(cid, img) {
+  if (!img || !img.gaveName || _OFP.capName[cid] !== img.gaveName) return;
+  if (_OFP.pick[cid] && _OFP.pick[cid] === _OFP.ai[cid]) delete _OFP.pick[cid];
+  _OFP.capName[cid] = ""; _OFP.capOpt[cid] = ""; _OFP.ai[cid] = "";
+  _ofpRender(cid);
+}
+
+/* 판독이 도는 동안의 약속을 2장째에 붙여 둔다 — 제출이 끝날 때까지 기다린다(submitOrderForm). */
+function _callCardExtractAi2(cid) {
+  const img = _cardAiState[cid] && _cardAiState[cid].img2;
+  const p = _callCardExtractAi2Run(cid);
+  if (img) { img.pending = p; p.catch(() => {}).then(() => { if (img.pending === p) img.pending = null; }); }
+  return p;
+}
+
+async function _callCardExtractAi2Run(cid) {
   const st = _cardAiState[cid]; const img = st && st.img2; if (!img || !img.dataUrl) return;
   const req = img.req;
   const lb = document.getElementById(cid + "_img2Label");
@@ -7824,6 +7845,7 @@ async function _callCardExtractAi2(cid) {
   // 상품명 — 첫 장에서 못 읽었을 때만 2장째 판독값을 쓴다(첫 장 값·리뷰어가 고른 상품은 덮지 않는다).
   if (typeof _ofpOnExtracted === "function" && !_OFP.capName[cid] && json.productName) {
     _ofpOnExtracted(cid, json.productLabel || "", json.productName || "", typeof json.productOption === "string" ? json.productOption : "");
+    img.gaveName = json.productName;   // 이 사진을 빼면 거둔다(_clearImg2Product)
   }
   say(img.memoToken ? "2장째 첨부됨 · 배송메세지 확인 ✓" : "2장째 첨부됨 ✓");   // 서명이 있을 때만 "확인" — 제출 때 실제로 쓰이는 것만 말한다
 }
@@ -8864,6 +8886,18 @@ async function submitOrderForm() {
   const days = ["일","월","화","수","목","금","토"];
   const dateStr = `${now.getMonth()+1} / ${now.getDate()} (${days[now.getDay()]})`;
 
+  // 결정 288: 2장째 판독(그 앞의 첫 장 판독 포함)이 아직 돌고 있으면 끝날 때까지 기다린다(코드리뷰) —
+  // 기다리지 않으면 2장째에만 보이는 배송메세지 서명이 빠진 채 제출된다. 판독 자체에 35초 제한이 있지만 한 번 더 상한을 둔다.
+  {
+    const waits = [];
+    _orderCardIds.forEach(c => { const s = _cardAiState[c]; if (s && s.img2) { if (s.img2Chain) waits.push(s.img2Chain); if (s.img2.pending) waits.push(s.img2.pending); } });
+    if (waits.length) {
+      if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 2장째 사진 확인 중...';
+      await Promise.race([Promise.allSettled(waits), new Promise(r => setTimeout(r, 45000))]);
+      if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 처리 중...';
+    }
+  }
+
   // ── 제출 전 공유값 최종 동기화 ──
   _syncAllSharedBeforeSubmit();
 
@@ -9463,7 +9497,10 @@ async function submitOrderForm() {
               const ok2 = await _runCapUpload({ dataUrl: o.img2Src, base64: o.img2Src.split(",")[1], mime: o.img2Mime || "image/jpeg", recipient: o.recipient, orderer: o.orderer }, 2);
               _capSlot.status2 = ok2 ? "ok" : "fail";
               if (!ok2) { try { showToast(`${_idx}번째 주문의 구매캡처 2장째 업로드에 실패했습니다 — 담당자에게 사진을 보내주세요.`, "error"); } catch(_) {} }
-            } catch (e2) { _capSlot.status2 = "fail"; console.warn(`[이미지 업로드 ${_idx}-2] 백그라운드 오류:`, e2.message); }
+            } catch (e2) {
+              _capSlot.status2 = "fail"; console.warn(`[이미지 업로드 ${_idx}-2] 백그라운드 오류:`, e2.message);
+              try { showToast(`${_idx}번째 주문의 구매캡처 2장째 업로드에 실패했습니다 — 담당자에게 사진을 보내주세요.`, "error"); } catch(_) {}
+            }
           }
           try { _renderCaptureChecklist(); } catch(_) {}   // 완료화면이 떠 있으면 즉시 반영
         }).catch(() => {});   // 한 건의 예외가 큐를 끊지 않게
@@ -9622,16 +9659,19 @@ function _renderCaptureChecklist() {
     + `<span style="flex:1;min-width:0"><span style="font-size:.82rem;font-weight:700;display:block">${_safeText(title)}</span>`
     + `<span style="font-size:.72rem;color:#6B7280">${sub}</span></span></div>`;
 
-  const uploading = list.filter(x => x.status === "uploading").length;
+  // 결정 288: 2장째도 센다(코드리뷰) — 첫 장만 보면 2장째가 실패·업로드 중이어도 "정상 보관"으로 보인다.
+  const uploading = list.filter(x => x.status === "uploading" || (x.status === "ok" && x.status2 === "uploading")).length;
   const failed    = list.filter(x => x.status === "fail").length;
+  const failed2   = list.filter(x => x.status === "ok" && x.status2 === "fail").length;
   const missing   = list.filter(x => !x.has).length;
-  const okCount   = list.filter(x => x.status === "ok").length;
+  const okCount   = list.filter(x => x.status === "ok" && x.status2 !== "uploading" && x.status2 !== "fail").length;
   const many      = list.length > 1;
 
   let html = "";
   if (okCount)   html += row("✓", "#22C55E", "#F0FDF4", "#BBF7D0", `구매 캡처 첨부 완료${many ? ` (${okCount}건)` : ""}`, "증빙이 정상 보관되었습니다");
   if (uploading) html += row("↑", "#3182f6", "#EBF3FE", "#cce0fb", `구매 캡처 업로드 중${many ? ` (${uploading}건)` : ""}`, "<b>업로드가 끝날 때까지 창을 닫지 말아주세요</b>");
   if (failed)    html += row("!", "#E5484D", "#FEF2F2", "#FEE2E2", `구매 캡처 업로드 실패${many ? ` (${failed}건)` : ""}`, "네트워크 확인 후 아래에서 다시 첨부해주세요");
+  if (failed2)   html += row("!", "#E5484D", "#FEF2F2", "#FEE2E2", `구매 캡처 2장째 업로드 실패${many ? ` (${failed2}건)` : ""}`, "첫 장은 보관됐어요 · <b>2장째 사진은 담당자에게 보내주세요</b>");
   if (missing)   html += row("!", "#E5484D", "#FEF2F2", "#FEE2E2", `구매 캡처 미첨부${many ? ` (${missing}건)` : ""}`, "증빙이 없으면 <b>정산이 지연될 수 있어요</b>");
 
   if (missing || failed) {
