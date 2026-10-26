@@ -332,8 +332,11 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
          이 조건이 빠지면 이미 paid 인 건이 다시 paid 로 덮여 이중입금 경로가 열린다(변이시험이 잡은 구멍). */
     ok('★★ 모든 대기건 상태 변경 UPDATE가 `AND status = \'pending\'` 조건을 건다', (() => {
       const ups = resSrc.match(/UPDATE payment_batch_items[\s\S]*?`/g) || [];
+      // 결정 293: 결과 파일·통장 확정이 함께 쓰는 _commitBatchOutcome 으로 실패·파일누락 UPDATE 가 하나로 합쳐졌다(4→3).
+      // 의미는 그대로·강화 — 상태를 바꾸는 UPDATE 는 **전부** pending 조건을 걸어야 한다(개수 대신 전수).
       const gated = ups.filter(u => /WHERE id = \$1 AND status = 'pending'/.test(u));
-      return gated.length === 4;
+      const statusUps = ups.filter(u => /SET status = /.test(u));
+      return gated.length === 3 && statusUps.every(u => /status = 'pending'/.test(u));
     })());
     ok('★ recordDeposits / markDepositCells 를 재사용한다',
       /require\('\.\/paymentApply\.service'\)/.test(resSrc)
