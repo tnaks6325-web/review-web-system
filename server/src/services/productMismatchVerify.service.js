@@ -68,14 +68,108 @@ const _wonText = (n) => Number(n || 0).toLocaleString('ko-KR');
  * 상품 가격이 2종 이상이고, 결제금액이 고른 상품 가격과 다르며, **다른 상품 하나의 가격과 정확히 같을 때만** 그 상품을 돌려준다.
  * 가격이 같은 상품끼리·어느 가격과도 안 맞는 금액(쿠폰 등)·고른 상품 가격 모름 = null(근거 없음 — 묻지 않는다).
  */
-function priceOtherOption(opts, heldKey, paidRaw) {
+function priceOtherOption(opts, heldKey, paidRaw, tierCtx = null, heldAmount = 0) {
   const paid = _won(paidRaw);
   if (!paid || !Array.isArray(opts)) return null;
+  if (tierCtx) return _priceOtherOptionTiered(opts, heldKey, paid, tierCtx, _won(heldAmount));
   if (new Set(opts.map(o => _won(o.pay_amount)).filter(Boolean)).size < 2) return null;
   const heldPay = _won((opts.find(o => o.opt_key === heldKey) || {}).pay_amount);
   if (!heldPay || paid === heldPay) return null;
   const same = opts.filter(o => o.opt_key !== heldKey && _won(o.pay_amount) === paid);
   return same.length === 1 ? { key: same[0].opt_key, paid, heldPay } : null;
+}
+
+/**
+ * ★ 결정 289 ③-다 — 인당 구매수량 단계가 있는 공고의 금액 문맥. 단계가 없거나 스위치(CAMPAIGN_QTY_TIERS=0)가 꺼져 있으면 null(= 종전 판정 그대로).
+ */
+async function _loadTierCtx(db, campaignId) {
+  const qt = require('./campaignQtyTiers.service');
+  if (!qt.enabled()) return null;
+  const ctx = await qt.loadContext(db, String(campaignId));
+  return ctx && ctx.tiers && ctx.tiers.length ? ctx : null;
+}
+
+/** 그 선택지가 낼 수 있는 금액 전부 — 1개 가격 + 그 범위의 단계 금액. */
+function _amountsOf(opt, scope) {
+  const out = new Set();
+  const pay = _won(opt && opt.pay_amount);
+  if (pay) out.add(pay);
+  if (scope) scope.tiers.forEach(t => { const a = _won(t.pay_amount); if (a) out.add(a); });
+  return out;
+}
+
+/**
+ * 단계가 있는 공고의 결제금액 근거 — priceOtherOption 의 한 갈래(단일 출처는 그대로 priceOtherOption).
+ *   · 고른 상품의 금액 = 리뷰어가 고른 개수의 단계 금액(heldAmount — 신청 행 스냅샷). 모르면(담당자 수동 입력) 고른 상품이 낼 수 있는 금액 전부.
+ *   · 다른 상품 후보 금액 = 그 상품의 1개 가격 + 그 상품 단계 금액. 단 **고른 상품이 낼 수 있는 금액과 같은 값은 근거가 아니다**
+ *     (같은 상품 공통 단계를 쓰는 옵션끼리는 금액이 같다 — 개수 차이는 qtyOtherTier 가 따로 본다).
+ *   · 그런 다른 상품이 **정확히 하나**일 때만 돌려준다(결정 230·236 규율 그대로).
+ */
+function _priceOtherOptionTiered(opts, heldKey, paid, tierCtx, heldAmount) {
+  const qt = require('./campaignQtyTiers.service');
+  const heldOpt = opts.find(o => o.opt_key === heldKey);
+  if (!heldOpt) return null;
+  const heldScope = qt.scopeFor(tierCtx, heldKey);
+  const heldAll = _amountsOf(heldOpt, heldScope);
+  const heldPay = heldAmount || _won(heldOpt.pay_amount);
+  if (paid === heldAmount || heldAll.has(paid)) return null;
+  const same = opts.filter(o => o.opt_key !== heldKey && _amountsOf(o, qt.scopeFor(tierCtx, o.opt_key)).has(paid));
+  return same.length === 1 ? { key: same[0].opt_key, paid, heldPay } : null;
+}
+
+/**
+ * ★ 결정 289 ③-다(사용자 확정 2026-10-26 「가」) — 고른 개수와 다른 개수를 샀는가(결제금액으로 본다 · 쓰기 0).
+ *   결제금액이 고른 개수의 단계 금액과 다르고, 같은 상품의 **다른 개수 하나**의 단계 금액과 정확히 같을 때만 그 개수를 돌려준다.
+ *   고른 상품이 낼 수 있는 금액이면 상품 쪽 판정은 근거로 쓰지 않으므로 두 판정이 겹치지 않는다. 개수가 둘 이상 걸리거나 모르면 아무 일도 하지 않는다.
+ * @returns {null|{qty:number, paid:number, heldQty:number, heldAmount:number}}
+ */
+function qtyOtherTier(tierCtx, heldKey, heldQty, heldAmount, paidRaw, opts = []) {
+  const paid = _won(paidRaw), hq = Math.floor(Number(heldQty) || 0), ha = _won(heldAmount);
+  if (!tierCtx || !paid || !hq || !ha || paid === ha) return null;
+  const qt = require('./campaignQtyTiers.service');
+  const scope = qt.scopeFor(tierCtx, heldKey || null);
+  if (!scope) return null;
+  // 고른 상품이 낼 수 있는 금액만 본다 — 그 밖의 금액은 상품 쪽 판정(_priceOtherOptionTiered)의 몫이다(두 판정이 같은 금액을 나눠 갖지 않는다).
+  const heldOpt = (Array.isArray(opts) ? opts : []).find(o => o.opt_key === heldKey);
+  const qtys = new Set(scope.tiers.filter(t => _won(t.pay_amount) === paid && Math.floor(Number(t.qty) || 0) !== hq)
+    .map(t => Math.floor(Number(t.qty) || 0)).filter(Boolean));
+  // 1개 단계 줄이 따로 없으면 그 상품의 1개 가격 = 1개 구매로 본다.
+  if (!scope.tiers.some(t => Math.floor(Number(t.qty) || 0) === 1) && hq !== 1 && heldOpt && _won(heldOpt.pay_amount) === paid) qtys.add(1);
+  return qtys.size === 1 ? { qty: [...qtys][0], paid, heldQty: hq, heldAmount: ha } : null;
+}
+
+/**
+ * ★ 결정 289 ③-다 — 제출 때 개수 판정(상품 판정 뒤 · 쓰기 0).
+ * @returns {Promise<{action:'none'}|{action:'prompt',paid,chosen,captured}|{action:'keep',paid,chosen,captured}|{action:'wrong',chosen,bought,error}>}
+ *   chosen/captured/bought = { qty, label:'N개', amount }
+ *   ★ 리뷰어 답(confirmedQty)은 **그 범위의 단계 개수일 때만** 받는다 — 아니면 답이 없는 것으로 보고 다시 묻는다.
+ */
+async function decideQtyAtSubmit({ holdCtx, capturePrice = '', confirmedQty, db = getPool() }) {
+  if (!isEnabled()) return { action: 'none' };
+  if (!holdCtx || !holdCtx.verified || holdCtx.doneKind || holdCtx.purchaseQty == null || !holdCtx.qtyTierAmount) return { action: 'none' };
+  try {
+    const tierCtx = await _loadTierCtx(db, holdCtx.campaignId);
+    if (!tierCtx) return { action: 'none' };
+    const opts = await _loadOptions(db, holdCtx.campaignId, holdCtx.appliedAt || null);
+    const held = holdCtx.optionKey ? String(holdCtx.optionKey) : null;
+    const qo = qtyOtherTier(tierCtx, held, holdCtx.purchaseQty, holdCtx.qtyTierAmount, capturePrice, opts);
+    if (!qo) return { action: 'none' };
+    const scope = require('./campaignQtyTiers.service').scopeFor(tierCtx, held);
+    const amountOf = (q) => { const t = scope.tiers.find(x => Math.floor(Number(x.qty) || 0) === q); return t ? _won(t.pay_amount) : (q === qo.qty ? qo.paid : 0); };
+    const view = (q) => ({ qty: q, label: `${q}개`, amount: q === qo.heldQty ? qo.heldAmount : amountOf(q) });
+    const chosen = view(qo.heldQty), captured = view(qo.qty);
+    const cq = Math.floor(Number(confirmedQty) || 0);
+    const valid = cq > 0 && (cq === qo.qty || scope.tiers.some(t => Math.floor(Number(t.qty) || 0) === cq));
+    if (!valid) return { action: 'prompt', paid: qo.paid, chosen, captured };
+    if (cq === qo.heldQty) return { action: 'keep', paid: qo.paid, chosen, captured };
+    return {
+      action: 'wrong', chosen, bought: view(cq),
+      error: `참여할 때 고른 ${chosen.label}와 다른 ${cq}개를 구매했어요. 고른 개수와 다르게 구매한 주문은 제출할 수 없어요. 담당자에게 문의해 주세요.`,
+    };
+  } catch (e) {
+    logger.warn(`[product-verify] 개수 판정 실패 — 종전대로 접수: ${(e && e.message) || e}`);
+    return { action: 'none' };
+  }
 }
 
 /**
@@ -93,6 +187,9 @@ async function decideAtSubmit({ holdCtx, captureText, captureOption = '', captur
     const opts = await _loadOptions(db, holdCtx.campaignId, holdCtx.appliedAt || null);
     if (opts.length < 2) return { action: 'none' };
     const held = String(holdCtx.optionKey);
+    // ★ 결정 289 ③-다: 단계가 있는 공고는 고른 개수의 단계 금액으로 본다(없으면 null = 종전).
+    const tierCtx = await _loadTierCtx(db, holdCtx.campaignId);
+    const heldAmount = tierCtx ? (holdCtx.qtyTierAmount || 0) : 0;
     // 화면이 보낸 값은 **그 공고의 상품일 때만** 답으로 받는다 — 아니면 답이 없는 것으로 보고 아래 판정을 그대로 한다
     // (결정 236 코드리뷰: 지어낸 값으로 경고·다시 묻기를 기록 없이 건너뛰지 못하게).
     const _c = String(confirmedKey == null ? '' : confirmedKey).trim();
@@ -101,7 +198,7 @@ async function decideAtSubmit({ holdCtx, captureText, captureOption = '', captur
       if (confirmed === held) {
         const capturedKey = capturedOtherOption(captureText, opts, held, { shortText: captureOption }) || '';
         // ④ "고른 상품이 맞다"는 답을 결제금액으로 한 번 더 확인한다 — 다시 확인하고도 맞다면(priceAck) 접수 + 이상로그.
-        const po = priceOtherOption(opts, held, capturePrice);
+        const po = priceOtherOption(opts, held, capturePrice, tierCtx, heldAmount);
         if (po && !priceAck) {
           return {
             action: 'recheck', paid: po.paid, chosen: { key: held, label: _label(held) }, captured: { key: po.key, label: _label(po.key) },
@@ -122,7 +219,7 @@ async function decideAtSubmit({ holdCtx, captureText, captureOption = '', captur
     //   (운영 캡처 117건 실측: 글자만 = 실제 잘못 구매 4건 중 2건 · 글자+금액 = 4건 모두 · 정상 113건 경고 0.
     //    금액만 쓰면 쿠폰 3,000원이 다른 상품 가격과 우연히 같아진 정상 5건이 걸렸다 — 글자가 고른 상품을 말하면 금액은 보지 않는다.)
     const read = matchOption(captureText, opts, { shortText: captureOption });
-    const po = read ? null : priceOtherOption(opts, held, capturePrice);
+    const po = read ? null : priceOtherOption(opts, held, capturePrice, tierCtx, heldAmount);
     if (po) {
       return { action: 'prompt', basis: 'price', paid: po.paid, chosen: { key: held, label: _label(held) }, captured: { key: po.key, label: _label(po.key) } };
     }
@@ -228,10 +325,13 @@ async function syncApplicationFromWorkboard({ sheetId, tabName, rowId, field, by
 async function checkManualEntries({ campaignId, items, db = getPool() }) {
   if (!isEnabled() || !campaignId || !Array.isArray(items) || !items.length) return [];
   let opts = [];
+  let tierCtx = null;
   try { opts = await _loadOptions(db, campaignId); } catch (e) {
     logger.warn(`[product-verify] 수동 입력 상품 목록 조회 실패 — 종전대로 접수: ${(e && e.message) || e}`);
     return [];
   }
+  // ★ 결정 289 ③-다: 수동 입력은 개수를 모른다 — 고른 상품이 낼 수 있는 금액(어느 개수든)이면 근거 없음. 조회 실패 = 종전 판정.
+  try { tierCtx = await _loadTierCtx(db, campaignId); } catch (e) { tierCtx = null; }
   const out = [];
   for (const it of items) {
     try {
@@ -245,7 +345,7 @@ async function checkManualEntries({ campaignId, items, db = getPool() }) {
       let suggestKey = '';
       // 고른 상품이 이 공고 목록에 없으면(삭제·오타) 금액·캡처 근거는 보지 않는다 — 그 줄은 접수 단계가 따로 거른다.
       if (chosen && opts.length >= 2 && opts.some(o => o.opt_key === chosen)) {
-        const po = priceOtherOption(opts, chosen, it.price);
+        const po = priceOtherOption(opts, chosen, it.price, tierCtx);
         if (po) {
           notes.push(`결제금액 ${_wonText(po.paid)}원은 「${_label(po.key)}」 가격입니다(고른 상품 가격 ${_wonText(po.heldPay)}원)`); kinds.push('price');
           suggestKey = po.key;
@@ -287,5 +387,5 @@ async function checkManualEntries({ campaignId, items, db = getPool() }) {
 }
 
 module.exports = {
-  isEnabled, decideAtSubmit, syncApplicationFromWorkboard, isProductColumn, priceOtherOption, checkManualEntries, __setPoolForTest,
+  isEnabled, decideAtSubmit, decideQtyAtSubmit, qtyOtherTier, syncApplicationFromWorkboard, isProductColumn, priceOtherOption, checkManualEntries, __setPoolForTest,
 };

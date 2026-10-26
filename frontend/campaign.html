@@ -1707,6 +1707,12 @@ function _renderJoinedView(j, h){
       if(!_pvOptBlocked){
         if(j.application && j.application.optionKey) qp.set('optionKey', j.application.optionKey);
       }
+      // ★ 결정 289 ③-다: 고른 구매수량·금액을 구매양식에 표시용으로 넘긴다(판정은 서버가 신청 기록으로 — 화면 값은 쓰지 않는다).
+      //   개수를 바꾸면 enterJoined() 가 이 URL 을 다시 만들어 iframe 을 다시 연다.
+      if(!PREVIEW && j.qty && j.qty.purchaseQty != null){
+        qp.set('qty', String(j.qty.purchaseQty));
+        if(j.qty.amount != null) qp.set('qtyAmt', String(j.qty.amount));
+      }
       const _src = '/search.html?' + qp.toString();
       // ★ 같은 URL 재대입도 iframe 재탐색(=재부팅)이라 시트 읽기가 반복된다.
       //   미리보기 단계 전환마다 시트 lane을 소모하지 않도록 **미리보기에서만** URL이 바뀔 때만 로드.
