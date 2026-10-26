@@ -1680,6 +1680,7 @@ function _renderJoinedView(j, h){
       inflowType: j.inflowType,
       selectedOption: j.selectedOption,
       cashReceipt: j.cashReceipt,   // 현영 탭 공고만 서버가 내려줌(발행 안내 카드)
+      qty: j.qty,                   // ★ 결정 289: 고른 개수 단계 — 상품 카드 결제금액을 그 단계 금액으로(1개 금액과 둘로 갈리지 않게)
     }, { showOption: false, apiBase: API_BASE_URL });
     // 인라인 구매양식 iframe (동일 오리진 — search.html 재사용)
     const frame = $('orderFrame');

@@ -23,6 +23,27 @@ ok('상품 라인 — 같은 결제금액 반복은 한 줄로 합침(실제 화
 ok('상품 라인 — 비었으면 안내 문구', () => {
   assert.strictEqual(M.fmtProduct({}), '(등록된 상품 정보가 없어요)');
 });
+// ★ 결정 289 · Codex P2 #1692 — 고른 개수 단계가 있으면 상품 카드도 그 단계 금액만 말한다(1개 금액과 둘로 갈리지 않게)
+ok('개수 단계 — 1개 금액을 지우고 고른 단계 금액·개수 한 줄', () => {
+  const q = { purchaseQty: 3, amount: 30000 };
+  assert.strictEqual(M.fmtProduct({ productLines: '에코 가습기 - 결제금액 10,000원' }, q), '에코 가습기\n결제금액 30,000원 · 3개 구매');
+  assert.strictEqual(M.fmtProduct({ productLines: '에코 가습기', payAmount: 10000 }, q), '에코 가습기\n결제금액 30,000원 · 3개 구매');
+  assert.strictEqual(M.fmtProduct({ productLines: 'A 결제금액 10,000원\nB 결제금액 20,000원' }, q), 'A\nB\n결제금액 30,000원 · 3개 구매');
+  assert.strictEqual(M.fmtProduct({ productLines: '에코 가습기 - 결제금액 10,000원' }, { purchaseQty: 2, amount: null }), '에코 가습기\n2개 구매');
+});
+ok('개수 단계 — 카드 HTML 에 1개 금액이 남지 않는다 · 단계 없으면 종전 그대로', () => {
+  const wd = { productLines: '에코 가습기 - 결제금액 10,000원' };
+  const withQ = M.cardsHtml({ workDetail: wd, qty: { purchaseQty: 3, amount: 30000 } }, { showOption: false });
+  assert.ok(withQ.includes('결제금액 30,000원 · 3개 구매') && !withQ.includes('10,000원'), withQ);
+  const noQ = M.cardsHtml({ workDetail: wd }, { showOption: false });
+  assert.ok(noQ.includes('결제금액 10,000원'));
+  assert.strictEqual(M.fmtProduct(wd, { purchaseQty: null }), M.fmtProduct(wd));
+});
+ok('참여 화면이 고른 개수를 공용 렌더러에 넘긴다', () => {
+  const html = require('fs').readFileSync(require('path').join(__dirname, '../../frontend/campaign.html'), 'utf8');
+  const i = html.indexOf('function _renderJoinedView(');
+  assert.ok(/CampWorkDetail\.renderInto\(\$\('wdCards'\), \{[\s\S]{0,400}?qty: j\.qty,/.test(html.slice(i, i + 3000)));
+});
 ok('리뷰가이드 — [리뷰등록 가이드] 섹션만 추출(유입 섹션 제거)', () => {
   const raw = '[유입방식] 유입가이드\n검색어: 장수돌침대\n[리뷰등록 가이드]\n전체 별점 5건\n- 배송이 빠르다';
   assert.strictEqual(M.pickReviewOnly(raw), '전체 별점 5건\n- 배송이 빠르다');
