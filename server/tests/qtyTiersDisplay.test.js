@@ -74,6 +74,12 @@ function stubDb(routes) {
     assert.strictEqual(none.totalAmount, 170000);
   });
 
+  await t('코드리뷰 — 마감 옵션은 요약에서 뺀다(카드 옵션 목록과 같은 기준 · 쿼리 조건)', async () => {
+    let seen = '';
+    const db = stubDb([[/FROM campaign_qty_tiers/, TIERS], [/FROM campaign_options/, (sql) => { seen = sql; return OPTS; }]]);
+    await qt.summaryForCampaign(db, 'c1');
+    assert.ok(/COALESCE\(status, 'active'\) <> 'closed'/.test(seen), seen);
+  });
   // ── 4. 입금관리 단독 금액 경고 ──
   const { flagPriceOutliers } = require('../src/services/payment.service');
   await t('★ 입금관리 — 1개 10,000원 사이의 3개 30,000원: 고른 개수 금액이면 경고 없음 · 아니면 종전대로 경고', async () => {
@@ -155,6 +161,9 @@ function stubDb(routes) {
     const qtBlock = card.slice(card.indexOf('const qt=cd.qtyTiers'), card.indexOf('/* 메인URL') > 0 ? card.indexOf('/* 메인URL') : card.length);
     assert.ok(qtBlock.length > 50 && !/\*\s*Number|\w\*\w/.test(qtBlock.replace(/\/\*[\s\S]*?\*\//g, '')), '단계 블록은 서버 값을 그리기만(곱셈 없음)');
     assert.ok(/c\.soldUnits!=null\?/.test(f) && /판매 개수/.test(f));
+    assert.ok(/if\(pi>=0&&pi<fzIdx\) fset\.add\(_PURCHASE_QTY_COL\)/.test(f), '고정 범위가 결제금액 뒤까지면 구매수량 칸도 고정(코드리뷰)');
+    assert.ok(/const sv=\(r\)=>col===_PURCHASE_QTY_COL\?/.test(f), '구매수량 정렬은 숫자로(코드리뷰)');
+    assert.ok(/const qtot=payTotal!=null/.test(f), '총결제금액은 작업오더 결제합계 우선(잔여집행 기준과 같은 값 · 코드리뷰)');
   });
 
   console.log(`\n✅ qtyTiersDisplay: ${passed} 통과`);

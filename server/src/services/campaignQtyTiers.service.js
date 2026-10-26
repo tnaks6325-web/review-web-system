@@ -214,7 +214,8 @@ async function summaryForCampaign(db, campaignId) {
   const ctx = await loadContext(db, campaignId);
   if (!ctx.tiers.length) return null;
   const { rows: opts } = await db.query(
-    `SELECT opt_key, pay_amount, recruit_total FROM campaign_options WHERE campaign_id = $1 ORDER BY sort_order, id`, [campaignId]);
+    // 마감 옵션은 뺀다 — 작업 조건 카드의 옵션 목록(trackB tabConditionSummary)과 같은 기준(코드리뷰)
+    `SELECT opt_key, pay_amount, recruit_total FROM campaign_options WHERE campaign_id = $1 AND COALESCE(status, 'active') <> 'closed' ORDER BY sort_order, id`, [campaignId]);
   const groups = new Map();
   const addGroup = (scope, label) => {
     if (groups.has(scope.key)) return;
