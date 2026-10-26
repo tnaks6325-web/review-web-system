@@ -60,9 +60,28 @@ const B2 = '22222222-2222-4222-8222-222222222222';
     const out = await feed.batchItems([B1], db);
     assert.strictEqual(out.ok, true);
     assert.deepStrictEqual(out.items[0], { id: 'it1', batch_id: B1, sheet_id: 's1', tab_name: '탭', row_index: 4, campaign_id: null,
-      product_price: 15000, review_fee: 3000, amount: 18000, paid_at: '2026-10-02T03:00:00.000Z' });
+      product_price: 15000, review_fee: 3000, amount: 18000, paid_at: '2026-10-02T03:00:00.000Z', adjusted: false, snapshot_amount: 0 });
     assert(/i\.status = 'paid'/.test(db.calls[0].sql));
     assert.deepStrictEqual(db.calls[0].params, [[B1]]);
+  });
+
+  await ta('§1 금액 조정 승인 건은 승인 기록의 실제 이체금액 — 합계·지문·건 목록이 같은 정의를 읽는다', async () => {
+    const db = stubDb(() => []);
+    await feed.batchSummaries(db);
+    await feed.batchItems([B1], db);
+    for (const c of db.calls) {
+      assert(/LEFT JOIN payment_amount_mismatch_reconciliations r ON r\.batch_item_id = i\.id/.test(c.sql), '조정 승인 기록을 읽어야 한다');
+      assert(/ROUND\(r\.actual_amount\)/.test(c.sql));
+      assert(!/FROM payment_batch_items i\s+WHERE/.test(c.sql), '박제값만 읽는 옛 쿼리로 돌아가지 않는다');
+    }
+  });
+
+  await ta('§3 작업오더 = 명시 링크(trackb_work_order_links) 우선', async () => {
+    const db = stubDb(() => []);
+    await feed.tabLinks(db);
+    const sql = db.calls[0].sql;
+    assert(/trackb_work_order_links l[\s\S]*l\.deleted_at IS NULL/.test(sql));
+    assert(/ORDER BY \(l\.id IS NOT NULL\) DESC/.test(sql), '명시 링크가 먼저');
   });
 
   await ta('§2 개인정보 칸을 SELECT 하지 않는다(세 쿼리 모두)', async () => {
