@@ -79,7 +79,7 @@ const svc = require('../src/services/trackB.service');
       /rc\.linked_tab_name = \$2 OR \(\$3 <> '' AND rc\.linked_tab_gid = \$3\)/.test(oq.sql));
     t("★ 좌표는 'campaign:'||id 로 결합한다(submit.routes 규칙과 같은 모양)",
       /os\.sheet_id = 'campaign:' \|\| rc\.id AND os\.tab_name = 'campaign:' \|\| rc\.id/.test(oq.sql));
-    t('★ 삭제된 주문·캡처 없는 주문은 제외', /os\.deleted_at IS NULL AND os\.capture_file_id IS NOT NULL/.test(oq.sql));
+    t('★ 삭제된 주문·캡처 없는 주문은 제외', /os\.deleted_at IS NULL AND \(os\.capture_file_id IS NOT NULL OR os\.capture_file_id_2 IS NOT NULL\)/.test(oq.sql));
   }
 
   console.log('\n── B. fail-soft ──');

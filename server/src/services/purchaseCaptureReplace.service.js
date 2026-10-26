@@ -53,7 +53,7 @@ async function resolveRowOrder(db, { sheetId, tabName, rowId }) {
   const gid = (tc[0] && tc[0].gid) || '';
   const tnum = _digits(p.table_order_num);
   const { rows: cands } = await db.query(
-    `SELECT os.id, os.capture_file_id, os.recipient, os.orderer, os.phone, os.order_num
+    `SELECT os.id, os.capture_file_id, os.capture_file_id_2, os.recipient, os.orderer, os.phone, os.order_num
        FROM order_submissions os
       WHERE os.deleted_at IS NULL
         AND ((os.sheet_id = $1 AND os.tab_name = $2)
@@ -82,6 +82,7 @@ async function previewReplace({ sheetId, tabName, rowId }) {
     ok: true,
     orderSubmissionId: r.order.id,
     currentFileId: r.order.capture_file_id || '',
+    currentFileId2: r.order.capture_file_id_2 || '',   // 결정 288 — 두 번째 장(없으면 '')
     name: r.order.recipient || r.order.orderer || r.participant.reviewer_name || '',
   };
 }
@@ -97,7 +98,7 @@ function _decode(imageBase64) {
 async function _oldFileStillUsed(db, fileId, orderId) {
   try {
     const { rows } = await db.query(
-      `SELECT 1 FROM order_submissions WHERE capture_file_id=$1 AND id<>$2 AND deleted_at IS NULL
+      `SELECT 1 FROM order_submissions WHERE (capture_file_id=$1 OR capture_file_id_2=$1) AND id<>$2 AND deleted_at IS NULL
        UNION ALL
        SELECT 1 FROM review_submissions WHERE file_id=$1
        LIMIT 1`, [fileId, orderId]);
@@ -105,7 +106,13 @@ async function _oldFileStillUsed(db, fileId, orderId) {
   } catch (_) { return true; }
 }
 
-async function replaceCapture({ sheetId, tabName, rowId, imageBase64, mimeType, expectFileId, by = 'admin' } = {}) {
+/**
+ * @param {number} [captureIndex=1] 1 = 첫 장(종전) · 2 = 두 번째 장(결정 288). 2 는 그 칸만 바꾸고 배송메세지는 건드리지 않는다
+ *   (배송메세지는 첫 장에서 먼저 읽고, 첫 장에 없을 때만 두 번째 장 값을 쓴다 — 첫 장을 바꿀 때만 비운다).
+ */
+async function replaceCapture({ sheetId, tabName, rowId, imageBase64, mimeType, expectFileId, captureIndex = 1, by = 'admin' } = {}) {
+  const second = Number(captureIndex) === 2;
+  const col = second ? 'capture_file_id_2' : 'capture_file_id';
   if (!sheetId || !tabName || !rowId) return { ok: false, error: 'bad_request' };
   const mime = String(mimeType || 'image/jpeg').toLowerCase();
   if (!/^image\/(jpeg|jpg|png|webp|gif|heic|heif)$/.test(mime)) return { ok: false, error: 'not_image' };
@@ -117,7 +124,7 @@ async function replaceCapture({ sheetId, tabName, rowId, imageBase64, mimeType, 
   const r = await resolveRowOrder(db, { sheetId, tabName, rowId });
   if (!r.ok) return { ok: false, error: r.error };
   const orderId = r.order.id;
-  const before = String(r.order.capture_file_id || '');
+  const before = String(r.order[col] || '');
   if (String(expectFileId || '') !== before) return { ok: false, error: 'capture_changed' };
 
   const rootFolderId = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
@@ -127,7 +134,7 @@ async function replaceCapture({ sheetId, tabName, rowId, imageBase64, mimeType, 
   const who = String(r.order.recipient || r.order.orderer || r.participant.reviewer_name || '주문캡처')
     .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '').slice(0, 40) || '주문캡처';
   const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : mime.includes('gif') ? 'gif' : 'jpg';
-  const fileName = `${who}_교체__${String(orderId).slice(0, 8)}_${Date.now().toString(36)}.${ext}`;
+  const fileName = `${who}_교체${second ? '_2' : ''}__${String(orderId).slice(0, 8)}_${Date.now().toString(36)}.${ext}`;
   const uploaded = await driveService.uploadFileBase64(img.b64, fileName, mime, folder.folderId);
 
   const client = typeof db.connect === 'function' ? await db.connect() : db;
@@ -136,9 +143,16 @@ async function replaceCapture({ sheetId, tabName, rowId, imageBase64, mimeType, 
     await client.query('BEGIN');
     await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [LOCK_PREFIX + orderId]);
     const { rows } = await client.query(
-      `SELECT capture_file_id FROM order_submissions WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, [orderId]);
-    if (!rows.length || String(rows[0].capture_file_id || '') !== before) {
+      `SELECT capture_file_id, capture_file_id_2 FROM order_submissions WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, [orderId]);
+    if (!rows.length || String(rows[0][col] || '') !== before) {
       await client.query('ROLLBACK');
+    } else if (second) {
+      await client.query(
+        `UPDATE order_submissions
+            SET capture_file_id_2=$2, capture2_uploaded_at=NOW(), updated_at=NOW()
+          WHERE id=$1 AND deleted_at IS NULL`, [orderId, uploaded.id]);
+      await client.query('COMMIT');
+      committed = true;
     } else {
       await client.query(
         `UPDATE order_submissions
@@ -179,13 +193,13 @@ async function replaceCapture({ sheetId, tabName, rowId, imageBase64, mimeType, 
       reviewerName: r.participant.reviewer_name || r.order.recipient || '',
       eventType: 'capture_replaced', severity: 'info', resolved: true,
       orderSubmissionId: orderId,
-      message: before ? `구매캡처를 새 사진으로 교체했습니다 (${String(by).slice(0, 40)})`
-                      : `구매캡처를 직원이 올렸습니다 (${String(by).slice(0, 40)})`,
-      context: { rowIndex: r.participant.seq, oldFileId: before || null, newFileId: uploaded.id, by: String(by).slice(0, 100), oldTrashed },
+      message: before ? `구매캡처${second ? ' 2장째' : ''}를 새 사진으로 교체했습니다 (${String(by).slice(0, 40)})`
+                      : `구매캡처${second ? ' 2장째' : ''}를 직원이 올렸습니다 (${String(by).slice(0, 40)})`,
+      context: { rowIndex: r.participant.seq, captureIndex: second ? 2 : 1, oldFileId: before || null, newFileId: uploaded.id, by: String(by).slice(0, 100), oldTrashed },
     });
   } catch (e) { logger.warn(`[capture-replace] 작업 로그 기록 실패(무시): ${e.message}`); }
 
-  return { ok: true, fileId: uploaded.id, oldFileId: before || null, replaced: !!before, oldTrashed, oldKept };
+  return { ok: true, captureIndex: second ? 2 : 1, fileId: uploaded.id, oldFileId: before || null, replaced: !!before, oldTrashed, oldKept };
 }
 
 module.exports = { resolveRowOrder, orderMatchesRow, previewReplace, replaceCapture, MAX_IMAGE_BYTES, __setPoolForTest };
