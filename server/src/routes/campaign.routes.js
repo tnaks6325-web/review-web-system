@@ -78,10 +78,10 @@ function _prepWorkDetail(wd) {
 function _normTransferBank(v) {
   const s = String(v == null ? '' : v).trim().toLowerCase();
   // 결정 247(2026-10-15) — 'advertiser' = 업체입금(업체가 페이백을 직접 보낸다 · 우리 이체에서 빠진다).
-  // 결정 291(2026-10-26) — 'split_kbank'|'split_hana' = 제품비는 업체 · 리뷰비만 우리(그 은행으로).
+  // 결정 292(2026-10-26) — 'split_kbank'|'split_hana' = 제품비는 업체 · 리뷰비만 우리(그 은행으로).
   return (s === 'kbank' || s === 'hana' || s === 'advertiser' || s === 'split_kbank' || s === 'split_hana') ? s : null;
 }
-/* 결정 291 — 제품비를 업체가 보내는 이체은행 값인가(업체입금 · 제품비 업체) */
+/* 결정 292 — 제품비를 업체가 보내는 이체은행 값인가(업체입금 · 제품비 업체) */
 function _isGoodsAdvBank(v) { const s = _normTransferBank(v); return s === 'advertiser' || s === 'split_kbank' || s === 'split_hana'; }
 /* 그 작업의 실제 입금 방식(공고 → 탭)을 이체은행 코드로 — 제품비를 업체가 보내면 그 코드, 아니면 '' */
 function _effGoodsAdvCode(pay, campRaw, tabRaw) {
@@ -3326,9 +3326,10 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         'SELECT transfer_bank FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1', [lSheet, lTab]);
       const curEff = _effGoodsAdvCode(pay, curCamp && curCamp.transferBank, curTab[0] && curTab[0].transfer_bank);
       const g = await require('../services/advertiserPayout.service').guardTransferBankWrite({
-        current: curEff, incoming: _normTransferBank(transfer_bank) || '', ack: req.body.transfer_bank_disable_ack, sheetId: lSheet, tabName: lTab });
+        current: curEff, incoming: _normTransferBank(transfer_bank) || '', ack: req.body.transfer_bank_disable_ack, sheetId: lSheet, tabName: lTab,
+        slot: 'campaign_new' });   // 새 공고 = 그 작업의 가장 최근 공고 → 실제 입금 방식으로 판정(Codex PR #1699)
       if (g.action === 'reject') return res.status(400).json({ ok: false, code: 'ADVERTISER_PAYOUT_NOT_ALLOWED', error: g.message });
-      if (g.action === 'keep') { _createTransferBank = curEff; _createBankKept = g; }   // 결정 291 — 제품비 업체도 그대로 이어받는다
+      if (g.action === 'keep') { _createTransferBank = curEff; _createBankKept = g; }   // 결정 292 — 제품비 업체도 그대로 이어받는다
     } else if (_isGoodsAdvBank(transfer_bank)) {
       const g = await _advertiserPayoutGate(lSheet, lTab);   // 연결 작업이 없으면 no_tab
       if (!g.ok) return res.status(400).json({ ok: false, code: 'ADVERTISER_PAYOUT_NOT_ALLOWED', error: g.message });
@@ -3550,7 +3551,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
     }
     res.json({ ok: true, optionThumbnails: true /* ★ 결정 214: 상품 사진 저장을 아는 서버(배포 시차 판별) */,
       advertiserPayoutBank: true /* ★ 결정 247: 이체은행 업체입금을 아는 서버(배포 시차 판별) */,
-      splitPayoutBank: true /* ★ 결정 291: 이체은행 제품비 업체(split)를 아는 서버(배포 시차 판별) */,
+      splitPayoutBank: true /* ★ 결정 292: 이체은행 제품비 업체(split)를 아는 서버(배포 시차 판별) */,
       ...(_createBankKept ? { transferBankKept: _createBankKept.kept || 'advertiser', transferBankNotice: _createBankKept.notice } : {}),
       data: rows[0], options: await _loadOptionsRaw(pool, rows[0].id),
       feeSchedules: await _loadFeeSchedules(pool, rows[0].id),
@@ -3837,7 +3838,8 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         ? (curAdv && tabChanged ? _normTransferBank(curEff) : undefined)
         : (_normTransferBank(transfer_bank) || '');
       const g = await require('../services/advertiserPayout.service').guardTransferBankWrite({
-        current: curEff, incoming, ack: req.body.transfer_bank_disable_ack, sheetId: effSheet, tabName: effTab, recheck: tabChanged });
+        current: curEff, incoming, ack: req.body.transfer_bank_disable_ack, sheetId: effSheet, tabName: effTab, recheck: tabChanged,
+        slot: tabChanged ? 'campaign_new' : 'campaign', campaignId: id });   // 실제 입금 방식(공고 → 탭)으로 판정(Codex PR #1699)
       if (g.action === 'reject') return res.status(400).json({ ok: false, code: 'ADVERTISER_PAYOUT_NOT_ALLOWED', error: g.message });
       if (g.action === 'keep') { _updTransferBank = undefined; _updBankKept = g; }
     }
@@ -4211,7 +4213,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       : null;
     res.json({ ok: true, optionThumbnails: true /* ★ 결정 214: 상품 사진 저장을 아는 서버(배포 시차 판별) */,
       advertiserPayoutBank: true /* ★ 결정 247: 이체은행 업체입금을 아는 서버(배포 시차 판별) */,
-      splitPayoutBank: true /* ★ 결정 291: 이체은행 제품비 업체(split)를 아는 서버(배포 시차 판별) */,
+      splitPayoutBank: true /* ★ 결정 292: 이체은행 제품비 업체(split)를 아는 서버(배포 시차 판별) */,
       ...(_updBankKept ? { transferBankKept: _updBankKept.kept || 'advertiser', transferBankNotice: _updBankKept.notice } : {}),
       data: rows[0], options: await _loadOptionsRaw(pool, id),
       ...(worktableRelay ? { worktableRelay } : {}),

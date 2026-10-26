@@ -260,11 +260,11 @@ _handlers.tabConfigSave = async (req, res, next) => {
         'SELECT transfer_bank FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1', [sheetId, tabName]);
       const g = await require('../services/advertiserPayout.service').guardTransferBankWrite({
         current: curRows[0] ? curRows[0].transfer_bank : null, incoming: fields.transfer_bank,
-        ack: b.transferBankDisableAck, sheetId, tabName });
+        ack: b.transferBankDisableAck, sheetId, tabName, slot: 'tab' });
       if (g.action === 'reject') return res.json({ error: g.message, code: g.error });
       if (g.action === 'keep') { fields.transfer_bank = undefined; bankKept = g; }
       else if (require('../services/payment.service').isAdvertiserPayoutChoice(fields.transfer_bank)) fields.transfer_bank = '업체입금';   // 표기 하나로
-      else if (require('../services/payment.service').splitBankOf(fields.transfer_bank)) {   // 결정 291 — 제품비 업체도 탭 라벨 하나로
+      else if (require('../services/payment.service').splitBankOf(fields.transfer_bank)) {   // 결정 292 — 제품비 업체도 탭 라벨 하나로
         const pay = require('../services/payment.service');
         fields.transfer_bank = pay.SPLIT_PAYOUT_LABEL[pay.splitBankOf(fields.transfer_bank)];
       }

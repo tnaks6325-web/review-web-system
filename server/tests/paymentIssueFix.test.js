@@ -34,9 +34,11 @@ const noLineComments = s => s.split('\n').map(l => l.replace(/^\s*\/\/.*$/, ''))
 
 /* ══════════════ 스텁 pool 주입 ══════════════
    payment.service 는 `require('../db/pool')` 로 pool 을 **직접** 받는다(구조분해 아님). */
-function withStubPool(handler, run) {
+async function withStubPool(handler, run) {
   const poolPath = require.resolve(SRC('db/pool'));
   const svcPath = require.resolve(SRC('services/payment.service'));
+  // 결정 292 — 이체은행 쓰기 규칙(advertiserPayout.guardTransferBankWrite)도 같은 스텁 pool 로 실제 입금 방식을 읽는다
+  const advPath = require.resolve(SRC('services/advertiserPayout.service'));
   const calls = [];
   const stub = {
     query: async (sql, params) => { calls.push({ sql, params }); return handler(sql, params, calls) || { rows: [], rowCount: 0 }; },
@@ -44,10 +46,11 @@ function withStubPool(handler, run) {
   };
   const orig = require.cache[poolPath];
   require.cache[poolPath] = { id: poolPath, filename: poolPath, loaded: true, exports: stub };
-  delete require.cache[svcPath];
-  try { return run(require(svcPath), calls); }
+  delete require.cache[svcPath]; delete require.cache[advPath];
+  // ★ await — 비동기 run 안의 지연 require(advertiserPayout 등)가 스텁이 걷히기 전에 끝나야 한다(종전엔 finally 가 먼저 돌았다)
+  try { return await run(require(svcPath), calls); }
   finally {
-    delete require.cache[svcPath];
+    delete require.cache[svcPath]; delete require.cache[advPath];
     if (orig) require.cache[poolPath] = orig; else delete require.cache[poolPath];
   }
 }

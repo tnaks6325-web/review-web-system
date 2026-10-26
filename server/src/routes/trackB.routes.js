@@ -3830,7 +3830,7 @@ router.get('/payment/targets', authMiddleware, adminOrMasterMiddleware, async (r
     res.json({ ok: true, items: out.items, summary: out.summary,
       finishedExcluded: out.finishedExcluded || null, finishedUnavailable: !!out.finishedUnavailable,
       advertiserPaidExcluded: out.advertiserPaidExcluded || null,
-      splitWorks: out.splitWorks || [] /* 결정 291 — 제품비 업체 · 리뷰비 우리 작업별 진행 */ });
+      splitWorks: out.splitWorks || [] /* 결정 292 — 제품비 업체 · 리뷰비 우리 작업별 진행 */ });
   } catch (err) {
     if (err && err.code === 'payment_target_timeout') {
       return res.status(504).json({ ok: false, code: err.code, error: err.message });

@@ -1,5 +1,5 @@
 /**
- * splitPayoutPg.test.js — 결정 291 「제품비 업체 · 리뷰비 우리」 · **진짜 PG16** 끝까지 검증
+ * splitPayoutPg.test.js — 결정 292 「제품비 업체 · 리뷰비 우리」 · **진짜 PG16** 끝까지 검증
  * 실행: PGTEST_URL=postgres://... node tests/splitPayoutPg.test.js   (★ 마이그레이션된 **복사본** DB 에서만 — 표를 지우지는 않지만 행을 넣는다)
  *
  * 스텁으로 못 잡는 것만 본다:
@@ -211,6 +211,12 @@ async function targets(opts = {}) {
     console.log('\n[5d] 업체입금 ↔ 제품비 업체 직접 전환 막기');
     const toAdv = await pay.saveTransferSetting({ sheetId: SHEET, tabName: TAB, campaignId: CAMP, bank: 'advertiser' }).catch(e => e);
     ok('★ 리뷰비를 이미 보낸 줄이 있으면 업체입금으로 못 바꾼다', toAdv && toAdv.code === 'fee_paid', toAdv && (toAdv.code || toAdv));
+    // Codex PR #1699 — 탭은 업체입금, 공고는 제품비 업체: 공고를 「자동」으로 비우면 실제로는 업체입금으로 돌아간다 → 같은 검사
+    await pool.query(`UPDATE tab_configs SET transfer_bank='업체입금' WHERE sheet_id=$1`, [SHEET]);
+    const toAuto = await pay.saveTransferSetting({ sheetId: SHEET, tabName: TAB, campaignId: CAMP, bank: '', disableAck: true }).catch(e => e);
+    let { rows: [cA] } = await pool.query(`SELECT transfer_bank FROM recruit_campaigns WHERE id=$1`, [CAMP]);
+    ok('★ 공고를 비워 탭의 업체입금이 살아나는 저장도 거부(실제 입금 방식으로 판정)', toAuto && toAuto.code === 'fee_paid' && cA.transfer_bank === 'split_kbank', { code: toAuto && toAuto.code, cA });
+    await pool.query(`UPDATE tab_configs SET transfer_bank=NULL WHERE sheet_id=$1`, [SHEET]);
 
     console.log('\n[6] 우리 입금으로 되돌리기');
     const kept = await pay.saveTransferSetting({ sheetId: SHEET, tabName: TAB, campaignId: CAMP, bank: 'kbank' });
@@ -222,6 +228,11 @@ async function targets(opts = {}) {
     ({ out, by } = await targets());
     ok('되돌린 뒤에는 리뷰비만 받은 줄도 잠겨 있다(리뷰비 원장)', !by.has(key(3)) && !by.has(key(4)));
     ok('되돌린 뒤 split 진행 안내는 없다', out.splitWorks.length === 0);
+    // Codex PR #1699 — 탭 값은 split 이어도 최근 공고가 은행을 명시하면 후보가 아니다(조건을 풀지 않는다 → 상한을 엉뚱한 줄이 채우지 않음)
+    await pool.query(`UPDATE tab_configs SET transfer_bank='제품비업체·리뷰비케이뱅크' WHERE sheet_id=$1`, [SHEET]);
+    const keys2 = await pay.__splitCandidateKeysForTest();
+    ok('★ 공고가 케이뱅크를 명시하면 탭의 split 값은 후보에서 빠진다', !keys2.includes(`${SHEET}||${TAB}`), keys2);
+    await pool.query(`UPDATE tab_configs SET transfer_bank=NULL WHERE sheet_id=$1`, [SHEET]);
 
     console.log('\n[7] 판정 단위');
     ok('payoutModeFrom: 공고 은행 명시 > 탭 split', pay.payoutModeFrom('kbank', '제품비업체·리뷰비하나은행').mode === 'ours');

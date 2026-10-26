@@ -3223,7 +3223,7 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
     const tabBank  = normalizeBankChoice(meta.tabTransferBank);
     const autoBank = bankFromGoodsCostType((wo && wo.goodsCostType) || '');
     /* 결정 247 — 이체은행 = 업체입금이면 그 값이 이체은행 칸에 그대로 보인다(판정 = payoutModeFrom 단일 출처, 입금 대상과 같은 공고).
-       결정 291 — 제품비 업체 · 리뷰비 우리(split)도 같은 판정으로 그 값을 보인다. */
+       결정 292 — 제품비 업체 · 리뷰비 우리(split)도 같은 판정으로 그 값을 보인다. */
     const payoutMode = payoutModeFrom(txCamp && txCamp.transferBank, meta.tabTransferBank);
     const advertiserPayout = payoutMode.mode === 'advertiser';
     const splitPayout = payoutMode.mode === 'split';
@@ -3405,7 +3405,7 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       depositName: ((memoCamp && memoCamp.transferMemo) || meta.depositName || '') || null,
       /* 결정 247 — 업체 직접 입금 작업인가(이체은행 = 업체입금). 업체 렌즈(_condAdvertiserLens)는 화이트리스트라 나가지 않는다. */
       advertiserPayout,
-      /* 결정 291 — 제품비는 업체 · 리뷰비만 우리(split). advertiserPayout 과 따로 싣는다(옛 화면은 이 값을 몰라 종전대로 그린다). */
+      /* 결정 292 — 제품비는 업체 · 리뷰비만 우리(split). advertiserPayout 과 따로 싣는다(옛 화면은 이 값을 몰라 종전대로 그린다). */
       goodsByAdvertiser: splitPayout,
       /* 이체은행 — 값·라벨·출처를 함께 싣는다(화면이 판정을 다시 하지 않게).
          null = 정할 근거가 없음 = [미설정](작업오더 물건비도 비어 자동판정이 안 된 경우). */
@@ -3759,7 +3759,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       // 업체 직접 입금 = 이체은행 업체입금(입금 대상 계산과 같은 공고 → 탭 순서 · 판정 실패 = 아님 = 계좌를 보이지 않는다)
       && await (async () => { const p = require('./payment.service');
         const c = await p.campaignForTab(sheetId, tabName).catch(() => undefined);
-        // 결정 291 — 제품비 업체(split)도 업체가 제품비를 보내므로 같은 계좌를 보인다(advertiserGoodsFrom = 업체입금 · split)
+        // 결정 292 — 제품비 업체(split)도 업체가 제품비를 보내므로 같은 계좌를 보인다(advertiserGoodsFrom = 업체입금 · split)
         return c !== undefined && p.advertiserGoodsFrom(c && c.transferBank, meta[0].tabTransferBank); })()
       && String(((await advertiserForTab({ sheetId, tabName }).catch(() => null)) || {}).id || '') === String(advertiserId)) {
     advPayout = { accounts: new Map(), unavailable: false, lockAll: '', batchSeqs: new Set(), advEntries: new Map() };
@@ -3770,7 +3770,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       logger.warn(`[trackB] 업체 직접 입금 계좌 조회 실패 tab=${tabName}: ${e.message}`);
     }
     try {
-      // 결정 291 — 리뷰비만 보낸 회차 항목(제품비 업체 작업)은 업체의 제품비 기록을 막지 않는다(우리가 보낸 건 리뷰비뿐).
+      // 결정 292 — 리뷰비만 보낸 회차 항목(제품비 업체 작업)은 업체의 제품비 기록을 막지 않는다(우리가 보낸 건 리뷰비뿐).
       const { rows: bi } = await db.query(
         `SELECT DISTINCT row_index FROM payment_batch_items
           WHERE sheet_id=$1 AND tab_name=$2 AND status IN ('pending','paid')
@@ -3940,7 +3940,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       for (const h of advHeaders) {
         // 결정 247 — 송금 계좌 세 칸은 원본 행이 아니라 입금 판정 결과에서만 채운다(원본 열 값이 섞이지 않게).
         if (advPayout && Object.prototype.hasOwnProperty.call(ADV_PAYOUT_FIELD, h)) {
-          /* ★ 결정 291(레드팀) — 우리가 제품비를 보냈거나 보내는 중인 줄(제품비가 든 우리 회차 pending/paid)은 계좌를 싣지 않는다.
+          /* ★ 결정 292(레드팀) — 우리가 제품비를 보냈거나 보내는 중인 줄(제품비가 든 우리 회차 pending/paid)은 계좌를 싣지 않는다.
                우리 입금 → 업체입금·제품비 업체로 바꾼 작업에서 업체가 그 줄에 제품비를 또 보내는 것을 막는다(기록은 our_payout 으로 이미 잠김). */
           if (advPayout.batchSeqs.has(Number(r.seq))) { cur[h] = h === '은행' ? '인애드가 제품비 지급 — 보내지 마세요' : ''; continue; }
           // 우리 회차 조회가 실패했으면(lockAll=unknown) 어느 줄을 우리가 보냈는지 모른다 → 계좌를 싣지 않는다(fail-closed)
@@ -5185,10 +5185,10 @@ async function setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by = 'adm
       const advPrefix = '업체#' + String(advertiserId || '') + ':';
       if (!advertiserId) { await client.query('ROLLBACK'); return { ok: false, error: 'not_own_entry' }; }
       // FOR SHARE — 공고 수정·탭 이체설정 저장과 직렬화한다. 업체입금을 끄는 중이면 끝난 뒤 꺼진 값을 보고 거부한다(Codex 리뷰).
-      // 결정 291 — 제품비 업체 · 리뷰비 우리(split)도 업체가 제품비 입금일을 적는다(입금 방식 ≠ 우리 입금이면 연다).
+      // 결정 292 — 제품비 업체 · 리뷰비 우리(split)도 업체가 제품비 입금일을 적는다(입금 방식 ≠ 우리 입금이면 연다).
       const advMode = await require('./payment.service').payoutModeLocked(client, sheetId, tabName);
       if (advMode === 'ours') { await client.query('ROLLBACK'); return { ok: false, error: 'advertiser_payout_off' }; }
-      // ② 우리 회차 — 리뷰비만 보낸 항목은 제외(우리가 제품비를 보낸 줄만 막는다 · 결정 291)
+      // ② 우리 회차 — 리뷰비만 보낸 항목은 제외(우리가 제품비를 보낸 줄만 막는다 · 결정 292)
       const { rows: bi } = await client.query(
         `SELECT 1 FROM payment_batch_items
           WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3 AND status IN ('pending','paid')
@@ -5254,7 +5254,7 @@ async function setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by = 'adm
        자체 상태는 무접촉(그 사람들의 이체는 그대로 유효하게 남는다). */
     let releasedBatchItems = 0;
     if (clearing) {
-      /* ★ 결정 291 — 리뷰비만 보낸 항목은 풀지 않는다: 입금 칸은 업체가 보낸 **제품비** 기록이라, 칸을 비워도 우리 리뷰비는
+      /* ★ 결정 292 — 리뷰비만 보낸 항목은 풀지 않는다: 입금 칸은 업체가 보낸 **제품비** 기록이라, 칸을 비워도 우리 리뷰비는
            실제로 나간 돈이다. 풀면 다음 회차에 리뷰비가 한 번 더 나간다(이중 지급). */
       const rel = await client.query(
         `UPDATE payment_batch_items

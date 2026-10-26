@@ -381,7 +381,7 @@ function payHandler(o = {}) {
   const html = fs.readFileSync(path.join(ROOT, '..', 'frontend', 'workdesk.html'), 'utf8');
   await ta('4a ★★ 계좌 칸은 소유 업체 대표 링크만 — 브랜드 세션·남의 업체(작업보드는 모든 업체가 열람) 제외', () => {
     assert.match(tb, /role === 'advertiser' && !archived && advHeaders && !brandId && advertiserId && meta\[0\] && meta\[0\]\.sheetless === true/);
-    // 결정 291 — 업체입금 + 제품비 업체(split) 모두 계좌를 보인다(advertiserGoodsFrom). 소유 판정 체인은 그대로.
+    // 결정 292 — 업체입금 + 제품비 업체(split) 모두 계좌를 보인다(advertiserGoodsFrom). 소유 판정 체인은 그대로.
     assert.match(tb, /return c !== undefined && p\.advertiserGoodsFrom\(c && c\.transferBank, meta\[0\]\.tabTransferBank\); \}\)\(\)\s*\n\s*&& String\(\(\(await advertiserForTab\(\{ sheetId, tabName \}\)/);
     // 명의(phone8)까지 맞아야 싣는다 — 줄 재배정 시 남의 계좌 노출 방지
     assert.match(tb, /String\(a0\.phone8\) === String\(r\.phone8 == null \? '' : r\.phone8\)/);
@@ -415,7 +415,7 @@ function payHandler(o = {}) {
   });
   await ta('4f 모집공고 저장 — advertiser 를 받고, 업체입금으로 바꿀 때 고를 수 있는 작업인지 본다 · 화면 세 곳에 선택지', () => {
     const camp = read('src/routes/campaign.routes.js');
-    // 결정 291 — 제품비 업체(split_kbank|split_hana)도 받는다(업체입금은 그대로)
+    // 결정 292 — 제품비 업체(split_kbank|split_hana)도 받는다(업체입금은 그대로)
     assert.match(camp, /return \(s === 'kbank' \|\| s === 'hana' \|\| s === 'advertiser' \|\| s === 'split_kbank' \|\| s === 'split_hana'\) \? s : null;/);
     assert.strictEqual((camp.match(/guardTransferBankWrite\(\{/g) || []).length, 2, '생성·수정 두 곳이 공통 규칙을 탄다');
     assert.match(camp, /ack: req\.body\.transfer_bank_disable_ack/);
@@ -425,7 +425,7 @@ function payHandler(o = {}) {
     const rm = fs.readFileSync(path.join(ROOT, '..', 'frontend', 'js', 'recruit-modal.js'), 'utf8');
     assert.strictEqual((rm.match(/data-group="transfer_bank" data-val="advertiser"/g) || []).length, 3, '모집공고 창 세 가지 모양 모두');
     const ir = fs.readFileSync(path.join(ROOT, '..', 'frontend', 'js', 'index-recruit.js'), 'utf8');
-    // 결정 291 — 업체입금·제품비 업체 어느 쪽이든 "제품비를 업체가 보내던 작업"을 우리 입금으로 돌릴 때 확인(의미 동일 + split 확장)
+    // 결정 292 — 업체입금·제품비 업체 어느 쪽이든 "제품비를 업체가 보내던 작업"을 우리 입금으로 돌릴 때 확인(의미 동일 + split 확장)
     assert.match(ir, /_rfIsGoodsAdv\(window\._rfOrigTransferBank\) && !_rfIsGoodsAdv\(payload\.transfer_bank\)/, '끌 때 확인');
     assert.match(ir, /const _rfIsGoodsAdv = v => v === "advertiser" \|\| v === "split_kbank" \|\| v === "split_hana";/);
     assert.match(ir, /payload\.transfer_bank_disable_ack = true;/, '확인하면 서버에 표시를 보낸다');

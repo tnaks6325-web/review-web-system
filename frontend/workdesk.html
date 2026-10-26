@@ -7871,7 +7871,7 @@ const _ADV_PAYOUT_NOTE_HTML=`<div class="cndnote"><b>🏢 업체입금</b>을 �
   `· 업체가 입금 칸을 우클릭해 <b>입금일을 기록</b>합니다 · <b>우리 입금관리·이체 파일에서는 빠집니다</b><br>`+
   `<span style="color:#B91C1C">⚠ 업체 링크는 로그인 없이 열립니다 — 링크를 가진 사람은 참여자 계좌를 봅니다.</span></div>`;
 const _ADV_PAYOUT_OFF_CONFIRM='업체입금을 다른 이체은행으로 바꿉니다.\n\n· 입금일이 기록되지 않은 줄이 바로 우리 입금관리 목록으로 돌아옵니다\n· 업체가 이미 보냈는데 날짜만 안 적은 줄이 있는지 먼저 업체에 확인해 주세요(그대로 보내면 이중 입금)\n· 업체 화면의 계좌 칸·입금일 기록은 바로 닫힙니다\n\n진행할까요?';
-/* 결정 291 — 제품비 업체 · 리뷰비 우리(split). 서버 값 split_kbank|split_hana(리뷰비를 보낼 우리 은행이 함께 들어 있다). */
+/* 결정 292 — 제품비 업체 · 리뷰비 우리(split). 서버 값 split_kbank|split_hana(리뷰비를 보낼 우리 은행이 함께 들어 있다). */
 const _SPLIT_PAYOUT_NOTE_HTML=`<div class="cndnote"><b>🏢 제품비 업체 · 리뷰비 우리</b>를 고르면 —<br>`+
   `· 제품비(구매대금 페이백)는 <b>업체가</b> 보내고 입금 칸에 입금일을 기록합니다(업체입금과 같은 계좌 공개)<br>`+
   `· 우리 입금관리에는 <b>리뷰비만</b> 잡힙니다 — 리뷰 제출을 기다리지 않고 구매가 끝난 줄부터(고른 은행 서식)<br>`+
@@ -12636,7 +12636,7 @@ const PAY_ISSUE_LABEL = {
   no_account:'계좌 미등록', no_holder:'예금주 미등록', no_price:'결제금액 조회안됨', zero_amount:'금액 0원',
   advertiser_pays:'업체 직접 입금 작업', advertiser_payout_unknown:'업체입금 여부 확인 실패(새로고침)',
   advertiser_pays_orphan:'이체은행이 업체입금인데 연결된 업체 없음 — 이체은행 확인',
-  // 결정 291 — 제품비 업체 · 리뷰비 우리
+  // 결정 292 — 제품비 업체 · 리뷰비 우리
   not_purchased:'구매 전(결제금액 없음) — 리뷰비는 구매 뒤에', split_no_fee:'리뷰비 미설정 — 작업 조건에서 리뷰비를 정해 주세요',
 };
 const PAY_BANKS = [['kbank','케이뱅크'],['hana','하나은행']];
@@ -12720,7 +12720,7 @@ function _pmFinishedNoteHtml(){
   return `<div class="pmnote">🏁 마감된 작업 <b>${Number(f.works)||0}개</b>의 <b>${Number(f.rows)||0}건</b>은 목록에서 뺐습니다${f.payable?` — 이 중 <b>지금 입금 가능한 ${Number(f.payable)}건</b>이 있습니다`:''}. <button class="btn sm" onclick="_pmToggleFinished()">보기</button></div>`;
 }
 
-/* 결정 291 — 제품비 업체 · 리뷰비 우리 작업: 금액이 리뷰비만이라는 사실과 진행(대상·구매 전)을 작업마다 한 줄로 말한다.
+/* 결정 292 — 제품비 업체 · 리뷰비 우리 작업: 금액이 리뷰비만이라는 사실과 진행(대상·구매 전)을 작업마다 한 줄로 말한다.
      "투입이 다 끝나면 한 번에 전원 입금"(사용자 2026-10-26)을 고를 수 있게 구매 전 줄 수를 함께 보인다. */
 function _pmSplitNoteHtml(){
   const ws=STATE.pmSplitWorks||[];
@@ -13236,7 +13236,7 @@ function _pmTargetTable(items){
       <td class="mono">${esc(it.bankOfficial||it.bankName||'-')} ${esc(it.bankAccount||'')}</td>
       <td>${esc(it.accountHolder||'-')}</td>
       <td class="num">${_pmNum(it.amount)}</td>
-      <td class="num dim">${it.goodsByAdvertiser?`<span title="제품비 ${_pmNum(it.productPrice)}원은 업체가 보냅니다 — 우리는 리뷰비만(결정 291)">제품비 업체</span> · 리뷰비 ${_pmNum(it.reviewFee||0)}</td>`:`${_pmNum(it.productPrice)}${it.priceSource==='workboard_edit'?`<span class="pmauto" title="관리자가 수정한 현재 작업보드 표시값을 우선 적용했습니다${it.priceMismatch?` · 주문 원장 ${_pmNum(it.orderPrice)}원`:''}">수정값</span>`:it.priceSource==='order'?'<span class="pmauto" title="작업보드에 결제금액이 없어 주문 원장 금액을 사용했습니다">원장</span>':''}${it.priceOutlier?`<span class="pmpriceout" title="이 작업 ${it.priceOutlier.workCount}건 중 ${it.priceOutlier.dominantCount}건은 ${_pmNum(it.priceOutlier.dominantAmount)}원입니다">금액 확인</span>`:''}+${_pmNum(it.reviewFee||0)}</td>`}
+      <td class="num dim">${it.goodsByAdvertiser?`<span title="제품비 ${_pmNum(it.productPrice)}원은 업체가 보냅니다 — 우리는 리뷰비만(결정 292)">제품비 업체</span> · 리뷰비 ${_pmNum(it.reviewFee||0)}</td>`:`${_pmNum(it.productPrice)}${it.priceSource==='workboard_edit'?`<span class="pmauto" title="관리자가 수정한 현재 작업보드 표시값을 우선 적용했습니다${it.priceMismatch?` · 주문 원장 ${_pmNum(it.orderPrice)}원`:''}">수정값</span>`:it.priceSource==='order'?'<span class="pmauto" title="작업보드에 결제금액이 없어 주문 원장 금액을 사용했습니다">원장</span>':''}${it.priceOutlier?`<span class="pmpriceout" title="이 작업 ${it.priceOutlier.workCount}건 중 ${it.priceOutlier.dominantCount}건은 ${_pmNum(it.priceOutlier.dominantAmount)}원입니다">금액 확인</span>`:''}+${_pmNum(it.reviewFee||0)}</td>`}
       <td>${memoSig!==null?'':memoCell(it, idx)}</td>
       <td class="pmwarn">${whySig!==null?'':`${esc(why)} ${fixBtn}`}</td></tr>${mmRow}`;
     }).join('');
@@ -13682,7 +13682,7 @@ function _pmDownloadConfirmText(label, picked){
 async function _pmDownload(bank){
   const picked = _pmVisibleItems().filter(it=>it.bank===bank && _pmOn(it));
   // payoutFp = 지금 화면에 보이는 송금 계좌의 지문 — 그 사이 계좌가 바뀌면 서버가 회차를 만들지 않는다(결정 233)
-  // payoutMode = 지금 화면이 본 입금 방식(제품비를 누가 보내는지) — 그 사이 바뀌면 금액 구성이 달라져 서버가 회차를 만들지 않는다(결정 291)
+  // payoutMode = 지금 화면이 본 입금 방식(제품비를 누가 보내는지) — 그 사이 바뀌면 금액 구성이 달라져 서버가 회차를 만들지 않는다(결정 292)
   const rows = picked.map(it=>({sheetId:it.sheetId, tabName:it.tabName, rowIndex:it.rowIndex, payoutFp:it.payoutFp,
     ...(it.payoutMode?{payoutMode:it.payoutMode}:{})}));
   if(!rows.length){ toast('담을 건이 없습니다.'); return; }

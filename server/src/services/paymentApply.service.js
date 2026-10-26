@@ -71,7 +71,7 @@ async function recordDeposits(client, items, opts = {}) {
   let updated = 0;
   for (const item of (items || [])) {
     const rowIndex = item.rowIndex != null ? item.rowIndex : item.rowNum;
-    /* ★★ 결정 291 — 리뷰비만 보낸 건(제품비 업체 · 리뷰비 우리): 제품비 페이백은 업체가 보내고 입금 칸에 적는다.
+    /* ★★ 결정 292 — 리뷰비만 보낸 건(제품비 업체 · 리뷰비 우리): 제품비 페이백은 업체가 보내고 입금 칸에 적는다.
          ① 리뷰 제출 전에도 보낸다(사용자 확정 2026-10-26) → v2 '리뷰 제출 전 입금 금지' 검사를 하지 않는다
          ② review_index PAID(= 리뷰어 화면 "페이백 완료")를 찍지 않는다 — 1천원만 받았는데 페이백이 끝난 것으로 보이면 안 된다
          ③ 우리 원장(payment_records)은 남긴다 — 다음 입금 대상 계산에서 이 줄을 잠그는 근거다(이중 지급 방지).
@@ -137,7 +137,7 @@ async function markDepositCells(items, opts = {}) {
   for (const item of (items || [])) {
     const rowIndex = item.rowIndex != null ? item.rowIndex : item.rowNum;
     const stamp = item.stamp || opts.stamp;
-    // 결정 291 — 리뷰비만 보낸 건은 입금 칸(= 업체가 보낸 제품비 기록)에 쓰지 않는다. 쓸 것이 없으니 "처리됨"으로 센다.
+    // 결정 292 — 리뷰비만 보낸 건은 입금 칸(= 업체가 보낸 제품비 기록)에 쓰지 않는다. 쓸 것이 없으니 "처리됨"으로 센다.
     if (item.feeOnly === true) { outcome.recorded += 1; continue; }
     if (!item.sheetId || !item.tabName || !rowIndex || !stamp) { outcome.skipped += 1; continue; }
 
@@ -176,7 +176,7 @@ async function verifyDepositCells(items) {
   for (const item of (items || [])) {
     const rowIndex = item.rowIndex != null ? item.rowIndex : item.rowNum;
     const stamp = item.stamp;
-    if (item.feeOnly === true) { outcome.verified += 1; continue; }   // 결정 291 — 입금 칸에 쓰지 않는 건(위 markDepositCells)
+    if (item.feeOnly === true) { outcome.verified += 1; continue; }   // 결정 292 — 입금 칸에 쓰지 않는 건(위 markDepositCells)
     if (!item.sheetId || !item.tabName || !rowIndex || !stamp) { outcome.missing += 1; continue; }
     try {
       const st = await require('./sheetlessStatus.service').verifyStatusCell({

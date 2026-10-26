@@ -1,5 +1,5 @@
 /**
- * splitPayout.test.js — 결정 291 「제품비 업체 · 리뷰비 우리」 회귀가드(스텁 · DB 없이)
+ * splitPayout.test.js — 결정 292 「제품비 업체 · 리뷰비 우리」 회귀가드(스텁 · DB 없이)
  * 끝까지 실제 PG 로 도는 검증은 splitPayoutPg.test.js(PGTEST_URL 필요).
  */
 'use strict';
@@ -59,7 +59,9 @@ async function t(name, fn) {
   await t('2d 회차 — 화면이 본 입금 방식 대조(split 이면 필수) · 잠금 안 재확인 · 제품비 0 박제', () => {
     assert.match(ps, /\(w\.payoutMode != null \|\| it\.payoutMode === 'split'\)/);
     assert.match(ps, /lateMode !== \(it\.payoutMode \|\| 'ours'\) \? 'payout_mode_changed'/);
-    assert.match(ps, /lateMode === 'split' \? ''/);
+    // Codex PR #1699 — split 이라도 잠근 뒤 입금 칸 값이 업체가 넣은 것인지 다시 본다(직원이 그 사이 적은 날짜 = already_paid)
+    assert.match(ps, /\(lockedPaid && !\(lateMode === 'split' && advEntered\)\) \? 'already_paid'/);
+    assert.match(ps, /WHERE cp\.id = \$1 AND pe\.field = 'col:' \|\| \$2 AND pe\.reverted_at IS NULL\s*AND left\(pe\.created_by, 3\) = '업체#'/);
     assert.match(ps, /it\.goodsByAdvertiser \? 0 : it\.productPrice, it\.reviewFee, it\.amount, it\.transferMemo/);
   });
   const ap = read('src/services/paymentApply.service.js');
@@ -124,6 +126,20 @@ async function t(name, fn) {
     assert.strictEqual(kept.action, 'keep');
     const ok = await withCounts(0, () => guard({ current: 'split_kbank', incoming: 'kbank', ack: true, sheetId: 's', tabName: 't' }));
     assert.strictEqual(ok.action, 'write');
+  });
+  await t('4f ★ 실제 입금 방식으로 판정 — 탭 업체입금 + 공고 split 에서 공고를 「자동」으로 비우면 split→업체입금 전환으로 본다', async () => {
+    pool.query = async (sql) => {
+      if (/FROM recruit_campaigns/.test(sql)) return { rows: [{ id: 'c1', transfer_bank: 'split_kbank' }] };
+      if (/SELECT transfer_bank FROM tab_configs/.test(sql)) return { rows: [{ transfer_bank: '업체입금' }] };
+      if (/FROM payment_batch_items/.test(sql)) return { rows: [{ n: 2 }] };
+      if (/FROM tab_configs/.test(sql)) return { rows: [{ sheetless: true }] };
+      if (/advertiser_campaigns/.test(sql)) return { rows: [{ advertiserId: 'a1', advertiserName: '업체', tabGid: null }] };
+      return { rows: [] };
+    };
+    try {
+      const g = await guard({ current: 'split_kbank', incoming: '', ack: true, sheetId: 's', tabName: 't', slot: 'campaign', campaignId: 'c1' });
+      assert.strictEqual(g.action, 'reject'); assert.strictEqual(g.error, 'fee_paid');
+    } finally { pool.query = realQuery; }
   });
   await t('4e 조회 실패 = 바꾸지 않는다(fail-closed)', async () => {
     pool.query = async sql => { if (/participant_edits/.test(sql)) throw new Error('boom'); return { rows: [{ sheetless: true }] }; };
