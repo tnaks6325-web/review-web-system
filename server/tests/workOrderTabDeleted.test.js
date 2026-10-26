@@ -126,6 +126,34 @@ console.log('\n[F] 접수하기 → 모집공고 두 단계 (사용자 확정 20
     && /총건수·일건수·시작일·주말은 모집공고에서/.test(wd)
     && /구매채널·작업유형\(작업표 열 구성\)은 접수 전/.test(wd));
 
+  // ★ 접수 직후 여는 공고는 **접수 뒤 오더**(서버 응답 행)를 본다 — vm 으로 _woAccept 를 실제로 돌린다.
+  //   종전엔 _loadOrders() 를 기다리지 않아 _woCampaign 이 접수 전 사본(linked_tab_* 빈 값)을 읽었다.
+  {
+    const a = wd.indexOf('async function _woAccept(id, pickGid, opts){');
+    const afn = wd.slice(a, wd.indexOf('\n/* ════', a));
+    const run = async (resp) => {
+      const seen = [];
+      const sb = {
+        STATE: { wo: [{ id: 'wo_1', status: 'submitted', linked_tab_sheet_id: '', linked_tab_name: '' }] },
+        confirm: () => true, _toast: () => {}, _woAcceptSheetless: () => true,
+        api: async () => resp,
+        _loadOrders: () => {},
+        _woCampaign: async (id) => { seen.push(Object.assign({}, sb.STATE.wo.find(x => x.id === id))); },
+      };
+      vm.createContext(sb); vm.runInContext(afn + '\n;this.__a=_woAccept;', sb);
+      await sb.__a('wo_1');
+      return seen;
+    };
+    const fresh = { id: 'wo_1', status: 'reviewing', linked_tab_sheet_id: 'wt_9', linked_tab_name: '10/26 가습기', linked_tab_gid: 'g9' };
+    const s1 = await run({ ok: true, sheetless: true, tabName: '10/26 가습기', data: fresh });
+    ok('★★ 접수 직후 공고는 연결된 작업표가 채워진 오더로 열린다',
+      s1.length === 1 && s1[0].linked_tab_sheet_id === 'wt_9' && s1[0].linked_tab_name === '10/26 가습기');
+    const s2 = await run({ ok: true, sheetless: true, tabName: 't' });
+    ok('구버전 서버(data 없음)면 종전과 같다(던지지 않고 그대로 연다)', s2.length === 1 && s2[0].linked_tab_name === '');
+    const s3 = await run({ ok: true, data: { id: 'wo_OTHER', linked_tab_name: 'x' } });
+    ok('다른 오더의 행으로는 바꾸지 않는다', s3.length === 1 && s3[0].linked_tab_name === '');
+  }
+
   // 미완료 배지 — 값이 있을 때만, 버튼과 같은 판정
   const j = wd.indexOf('function _woStartBadge(o){');
   const bfn = wd.slice(j, wd.indexOf('\nfunction ', j + 10));
