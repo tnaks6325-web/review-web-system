@@ -203,6 +203,39 @@ async function viewsForCampaign(db, campaignId, optKeys, { excludeAppId = null }
   return { byOpt, campaign: none ? tierViews(none, usage) : null };
 }
 
+/**
+ * ★ 결정 289 ④ — 작업 조건 카드용 단계 요약(관리자·업체 표시 · 읽기 전용).
+ *   단계가 있는 범위는 Σ(단계 1인 금액 × 단계 인원) · Σ(개수 × 인원), 단계가 없는 옵션은 1개 × 모집인원으로 더한다.
+ *   단계가 하나도 없으면 null(= 화면은 종전 계산). 단계 없는 옵션의 금액·인원을 모르면 totalAmount 는 null(지어내지 않는다).
+ * @returns {null|{groups:[{label, rows:[{qty, people, amount}]}], plain:[{label, pay, count}], totalAmount:number|null, totalUnits:number, totalPeople:number}}
+ */
+async function summaryForCampaign(db, campaignId) {
+  if (!enabled() || !campaignId) return null;
+  const ctx = await loadContext(db, campaignId);
+  if (!ctx.tiers.length) return null;
+  const { rows: opts } = await db.query(
+    `SELECT opt_key, pay_amount, recruit_total FROM campaign_options WHERE campaign_id = $1 ORDER BY sort_order, id`, [campaignId]);
+  const groups = new Map();
+  const addGroup = (scope, label) => {
+    if (groups.has(scope.key)) return;
+    groups.set(scope.key, { label, rows: scope.tiers.map(t => ({ qty: int(t.qty), people: int(t.people), amount: int(t.pay_amount) })).sort((a, b) => b.qty - a.qty) });
+  };
+  let amount = 0, units = 0, people = 0, complete = true;
+  const plain = [];   // 단계 없는 옵션 — 카드가 종전처럼 「이름 금액(건수)」로 함께 적는다
+  for (const o of opts) {
+    const scope = scopeFor(ctx, o.opt_key);
+    if (scope) { addGroup(scope, scope.key.startsWith('opt:') ? clean(o.opt_key) : clean(scope.tiers[0].product_name)); continue; }
+    const n = int(o.recruit_total), p = int(o.pay_amount);
+    if (!n || !p) complete = false;
+    amount += p * n; units += n; people += n;
+    plain.push({ label: clean(o.opt_key), pay: p || null, count: n });
+  }
+  if (!opts.length) { const scope = scopeFor(ctx, null); if (scope) addGroup(scope, clean(scope.tiers[0].product_name)); }
+  if (!groups.size) return null;
+  for (const g of groups.values()) for (const r of g.rows) { amount += r.amount * r.people; units += r.qty * r.people; people += r.people; }
+  return { groups: [...groups.values()], plain, totalAmount: complete ? amount : null, totalUnits: units, totalPeople: people };
+}
+
 module.exports = {
-  enabled, planTierCopy, insertTiers, loadContext, scopeFor, unresolved, fetchUsage, tierViews, judge, viewsForCampaign, QtyTierError,
+  enabled, planTierCopy, insertTiers, loadContext, scopeFor, unresolved, fetchUsage, tierViews, judge, viewsForCampaign, summaryForCampaign, QtyTierError,
 };

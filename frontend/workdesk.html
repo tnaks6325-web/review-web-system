@@ -7330,7 +7330,10 @@ function summaryStrip(wd,d,m,c){
     /* 누적집행은 활성 주문 전체가 아니라, 작업표에서 실제로 리뷰제출 완료된 주문만 합산한다.
        잔여집행은 작업오더의 총 결제금액에서 뺀다. 총액이 없는 작업은 0원으로 꾸미지 않는다. */
     scheduleWarning+`<div class="tp3money" title="작업표의 리뷰제출 칸이 채워진 주문의 결제금액 누계"><span>누적집행</span><b>${_wonFmt(c.executionAmount||0)}</b></div>`+
-    `<div class="tp3money" title="작업오더 총 결제금액에서 누적집행을 뺀 금액"><span>잔여집행</span><b>${c.remainingExecutionAmount==null?'—':_wonFmt(c.remainingExecutionAmount)}</b></div>${setlIn}</div>`;
+    `<div class="tp3money" title="작업오더 총 결제금액에서 누적집행을 뺀 금액"><span>잔여집행</span><b>${c.remainingExecutionAmount==null?'—':_wonFmt(c.remainingExecutionAmount)}</b></div>`+
+    /* 결정 289 ④ — 판매 개수(채워진 줄의 구매수량 합 · 개수를 고르지 않은 줄 = 1개). 서버가 단계 작업일 때만 싣는다. 목표는 작업 조건의 단계 요약. */
+    (c.soldUnits!=null?`<div class="tp3money" title="참여한 줄의 구매수량 합계입니다(개수를 고르지 않은 줄은 1개)"><span>판매 개수</span><b>${Number(c.soldUnits).toLocaleString()}개${(wd&&wd.condition&&wd.condition.qtyTiers&&wd.condition.qtyTiers.totalUnits)?` / 목표 ${Number(wd.condition.qtyTiers.totalUnits).toLocaleString()}개`:''}</b></div>`:'')+
+    `${setlIn}</div>`;
   /* ★★ 상단 3분할(작업 조건 · 진행 현황 · 제출물 미리보기)은 **내부·업체 뷰어 한 벌**이다
      (사용자 확정 2026-08-23) — 종전에는 업체만 세로 스택 + 표 옆 세로 레일이라 같은 화면이
      두 모양으로 갈렸다. 다른 것은 **작업 조건 카드의 내용뿐**(업체는 종전 4줄 유지 — 10항목
@@ -7527,6 +7530,25 @@ function _condCardHtml(wd,d,m){
         ?`${per?' / ':''}총 ${per?`<b title="작업오더의 결제합계입니다">${won(payTotal)}</b>`:clk(won(payTotal))}`
         :'');
     payRows=`<dt>결제금액</dt><dd>${per}${tot}</dd>`;
+  }
+  /* ★ 결정 289 ④ — 인당 구매수량 단계가 있는 공고는 「1건당 × 총건수」가 맞지 않는다(2개·3개를 사는 사람이 있다).
+     단계별 1인 금액·인원과 총결제금액·판매 목표를 **서버가 계산해 보낸 값**(campaignQtyTiers.summaryForCampaign)으로 그린다 — 화면에서 곱하지 않는다.
+     총결제금액을 모르면(단계 없는 옵션의 금액·인원 미정) 지어내지 않고 「—」. 단계가 없으면 cd.qtyTiers 가 없어 위 종전 표기 그대로. */
+  const qt=cd.qtyTiers&&Array.isArray(cd.qtyTiers.groups)&&cd.qtyTiers.groups.length?cd.qtyTiers:null;
+  if(qt){
+    /* 카드 칸은 한 줄(넘치면 …)이라 범위만 적고, 단계별 금액·인원 전부는 마우스를 올리면 보인다. 판매 목표 개수는 진행 현황 「판매 개수」 줄에 있다. */
+    const all=[];qt.groups.forEach(g=>(g.rows||[]).forEach(t=>all.push(t)));
+    all.sort((a,b)=>a.qty-b.qty||a.amount-b.amount);
+    const lo=all[0],hi=all[all.length-1];
+    const tip='구매수량 단계(1인 결제금액 · 인원)\n'+qt.groups.map(g=>`${g.label}: `+(g.rows||[]).map(t=>`${Number(t.qty)}개 ${Number(t.amount).toLocaleString()}원(${Number(t.people).toLocaleString()}명)`).join(' · ')).join('\n')
+      +(qt.plain||[]).map(o=>`\n${o.label}: 1개 ${o.pay!=null?Number(o.pay).toLocaleString()+'원':'금액 미정'}(${Number(o.count||0).toLocaleString()}건)`).join('');
+    const one=qt.groups.length===1&&!(qt.plain||[]).length;
+    const rng=(lo&&hi?(one?'':`${esc(qt.groups.map(g=>g.label).join('·'))} `)+(lo===hi?`${Number(lo.qty)}개 ${won(lo.amount)}`:`${Number(lo.qty)}개 ${won(lo.amount)} ~ ${Number(hi.qty)}개 ${won(hi.amount)}`):'—')
+      +(qt.plain||[]).map(o=>`, ${esc(o.label)} ${o.pay!=null?won(o.pay):'<span class="cnna">금액 미정</span>'}${o.count>0?`<span class="u">(${Number(o.count).toLocaleString()}건)</span>`:''}`).join('');
+    const qtot=n(qt.totalAmount)!=null
+      ?`<b title="구매수량 단계별 1인 결제금액 × 단계 인원의 합(단계 없는 상품은 1건당 × 인원)입니다">${won(qt.totalAmount)}</b>`
+      :`<span class="cnna" title="단계 없는 상품의 금액·인원이 비어 있어 계산하지 않았습니다">—</span>`;
+    payRows=`<dt>결제금액</dt><dd title="${esc(tip)}">${rng}</dd><dt>총결제금액</dt><dd>${qtot}</dd>`;
   }
   /* 메인URL(사용자 확정 2026-08-23) — 작업오더의 상품 URL. 이 카드의 구매채널 판정이 이미 쓰는 값이다.
      ★ 링크 렌더는 공유 모듈 `_woLinkHtml` **단일 출처**(http(s) 만 링크화 · escape · noopener) —
@@ -8625,7 +8647,12 @@ const _CASH_RECEIPT_COL='__cashReceiptStatus';
 function _cashReceiptColumn(wd){return STATE.role!=='advertiser'&&wd&&wd.cashReceiptColumn?[{key:_CASH_RECEIPT_COL,kind:'cashReceipt'}]:[];}
 function _cashReceiptDisplay(status){return ({submitted:'제출완료',missing:'미제출',not_applicable:'해당없음',configuration_error:'설정확인',unavailable:'확인불가'})[status]||'확인불가';}
 function _cashReceiptTitle(status){return ({submitted:'현금영수증 제출 완료',missing:'현금영수증 제출 전',not_applicable:'현금영수증 제출 대상이 아닌 작업',configuration_error:'현금영수증 대상이지만 제출 슬롯 설정을 확인해야 합니다',unavailable:'현금영수증 제출 상태를 불러오지 못했습니다'})[status]||'현금영수증 제출 상태를 확인할 수 없습니다';}
-function _gridAllColumns(wd){const idCols=STATE.role==='advertiser'?[]:[{key:'참여자',kind:'name'},{key:'연락처',kind:'phone'}];const custom=(wd&&wd.customColumns||[]).map(c=>({key:'ccol:'+c.id,kind:'custom',colId:c.id}));return [...idCols,..._cashReceiptColumn(wd),...(wd&&wd.headers||[]).map(h=>({key:h,kind:'col'})),...custom];}
+/* ★ 결정 289 ④ — 「구매수량」 가상 칸(시트에 쓰지 않는다 · 현영 칸과 같은 방식). 서버가 purchaseQtyColumn 을 선언할 때만 생긴다
+   (개수가 실린 줄이 있을 때 · 내부·업체 모두 — 사용자 확정 「가」). 자리는 결제금액 칸 바로 뒤(없으면 시트 칸 맨 뒤). 값 = 고른 개수(없으면 1개). */
+const _PURCHASE_QTY_COL='__purchaseQty';
+function _gridSheetCols(wd,H){const cols=(H||[]).map(h=>({key:h,kind:'col'}));if(!(wd&&wd.purchaseQtyColumn))return cols;const at=(H||[]).findIndex(h=>/결제\s*금액|^금액$/.test(String(h||'').trim()));cols.splice(at>=0?at+1:cols.length,0,{key:_PURCHASE_QTY_COL,kind:'purchaseQty'});return cols;}
+function _purchaseQtyDisplay(r){const q=Number(r&&r.purchaseQty)||0;return q>0?q+'개':(r&&r.filled?'1개':'');}
+function _gridAllColumns(wd){const idCols=STATE.role==='advertiser'?[]:[{key:'참여자',kind:'name'},{key:'연락처',kind:'phone'}];const custom=(wd&&wd.customColumns||[]).map(c=>({key:'ccol:'+c.id,kind:'custom',colId:c.id}));return [...idCols,..._cashReceiptColumn(wd),..._gridSheetCols(wd,wd&&wd.headers||[]),...custom];}
 function _gridApplyOneWidthToDom(col,width){const cols=STATE.gVCols||[],i=cols.findIndex(c=>c.key===col),tbl=document.querySelector('.gridscroll table.sheetgrid');if(i<0||!tbl)return;const w=_gridWidthClamp(width);if(w==null)return;STATE.gColWidths.set(col,w);tbl.querySelectorAll(`tr:not(.grouphd)>:nth-child(${i+1})`).forEach(cell=>{cell.style.minWidth=w+'px';cell.style.width=w+'px';});const head=tbl.tHead&&tbl.tHead.rows[0];if(head){if(head.cells[i])head.cells[i].classList.toggle('gwmanual',_gridHasManualWidth(col));let left=0;cols.forEach((c,ci)=>{const frozen=!!(head.cells[ci]&&head.cells[ci].classList.contains('gfz'));if(frozen){tbl.querySelectorAll(`tr:not(.grouphd)>:nth-child(${ci+1})`).forEach(cell=>{cell.style.left=left+'px';});left+=_colW(c.key);}});STATE.gFrozenW=left;}_fitGrid();}
 function _gridSetStoredWidth(col,width){const prefs=_gridLoadWidthPrefs(),w=_gridWidthClamp(width);if(w==null)return false;prefs[col]=w;if(!_gridSaveWidthPrefs(prefs)){toast('열 너비를 브라우저에 저장하지 못했습니다');return false;}return true;}
 function _gridWidthEditorRows(query){const ed=STATE.gWidthEditor;if(!ed)return '';const q=String(query||'').trim().toLowerCase();let visible=0;const html=ed.cols.map(c=>{const label=_colLabel(c.key),show=!q||String(label).toLowerCase().includes(q);if(show)visible++;const auto=ed.auto.get(c.key)||_GRID_WIDTH_MIN,manual=Object.prototype.hasOwnProperty.call(ed.draft,c.key),width=manual?ed.draft[c.key]:_gridWidthClamp(auto),enc=_gridWidthKeyToken(c.key);return `<div class="gw-row" data-gw-row data-search="${esc(String(label).toLowerCase())}" data-col="${esc(enc)}"${show?'':' hidden'}><div class="gw-name" title="${esc(label)}">${esc(label)}</div><div class="gw-auto">자동 <b>${auto}px</b></div><input class="gw-range" type="range" min="${_GRID_WIDTH_MIN}" max="${_GRID_WIDTH_MAX}" step="1" value="${width}" aria-label="${esc(label)} 너비" oninput="_gridWidthChange('${enc}',this)"><input class="gw-number" type="number" min="${_GRID_WIDTH_MIN}" max="${_GRID_WIDTH_MAX}" value="${width}" aria-label="${esc(label)} 너비 픽셀" onchange="_gridWidthChange('${enc}',this)"><button class="gw-reset" type="button" onclick="_gridWidthReset('${enc}')"${manual?'':' disabled'}>자동</button></div>`;}).join('');return html+(visible?'':'<div class="gw-empty">검색 결과가 없습니다.</div>');}
@@ -8644,6 +8671,7 @@ function _colW(h){ const widths=STATE.gColWidths; return widths instanceof Map&&
 // 커스텀 열 표시명(원본 시트 헤더는 그대로 key=label, 커스텀 열은 id 대신 사용자가 지은 이름을 보여준다).
 function _colLabel(key){
   if(key===_CASH_RECEIPT_COL) return '현영';
+  if(key===_PURCHASE_QTY_COL) return '구매수량';
   if(typeof key==='string' && key.indexOf('ccol:')===0){
     const id=key.slice(5); const c=((STATE.wd&&STATE.wd.customColumns)||[]).find(x=>String(x.id)===id);
     return c?c.colName:'(삭제된 열)';
@@ -8651,7 +8679,7 @@ function _colLabel(key){
   return key;
 }
 // 가운데 정렬 대상 = 날짜형(구매일자 등)·연락처(전화) → 값 길이가 달라도 앞여백=뒷여백(좌우 대칭). (_isPhoneHeader는 아래 정의, 함수선언 호이스팅)
-function _isCtrCol(h){ return h===_CASH_RECEIPT_COL || /일자|날짜|date/i.test(String(h==null?'':h)) || _isDepositCol(h) || _isPhoneHeader(h); }
+function _isCtrCol(h){ return h===_CASH_RECEIPT_COL || h===_PURCHASE_QTY_COL || /일자|날짜|date/i.test(String(h==null?'':h)) || _isDepositCol(h) || _isPhoneHeader(h); }
 // 시트 일련번호(1899-12-30 기준) → YYYY-MM-DD. 날짜형 헤더 + 순수 숫자일 때만 변환(금액 등 오변환 방지).
 function _serialToDate(n){ const ms=Math.round((n-25569)*86400000); const d=new Date(ms); if(isNaN(d.getTime()))return null; const y=d.getUTCFullYear(); if(y<2000||y>2100)return null; const p=x=>String(x).padStart(2,'0'); return `${y}-${p(d.getUTCMonth()+1)}-${p(d.getUTCDate())}`; }
 // 편집 시작값(정본): 일련번호는 ISO 로, 그 외는 원본 그대로 — 셀 클릭 편집이 표시용 축약값으로 오염되지 않게 분리.
@@ -8737,6 +8765,7 @@ function _workboardDisplayName(){
 function gCellDisp(r,h){
   if(h==='#') return String(r.seq==null?'':r.seq);
   if(h===_CASH_RECEIPT_COL) return _cashReceiptDisplay(r&&r.cashReceiptStatus);
+  if(h===_PURCHASE_QTY_COL) return _purchaseQtyDisplay(r);
   if(typeof h==='string' && h.indexOf('ccol:')===0) return (r.customValues&&r.customValues[h.slice(5)])||'';
   if(STATE.role!=='advertiser'){   // 광고주 그리드는 신원열(참여자·phone8)이 없음 → 동명 시트열은 rowJson에서 읽음(col 분기로 폴백)
     if(h==='참여자') return r.name||'';
@@ -8946,7 +8975,7 @@ function buildGrid(wd){
   const idCols = STATE.role==='advertiser' ? [] : [{key:'참여자',kind:'name'},{key:'연락처',kind:'phone'}];
   // 커스텀 열(행별 자유메모, migration 080) — 시트 헤더 뒤에 이어붙임. 광고주 그리드는 서버가 애초에 내려주지 않음.
   const customCols=(wd.customColumns||[]).map(c=>({key:'ccol:'+c.id, kind:'custom', colId:c.id}));
-  const cols0=[...idCols, ..._cashReceiptColumn(wd), ...H.map(h=>({key:h,kind:'col'})), ...customCols];
+  const cols0=[...idCols, ..._cashReceiptColumn(wd), ..._gridSheetCols(wd,H), ...customCols];
   const allCols=cols0.map(c=>c.key);                                          // 필터/정렬/그룹 가드용 key 목록
   const vcols=cols0.filter(c=>!STATE.gHidden.has(c.key));                     // 숨긴 열 제외(key 기준) = 표시 컬럼
   STATE.gColWidths=_gridAutoColumnWidths(wd,vcols);                            // 내부·업체용 공통: 최장 표시값 폭
@@ -9040,6 +9069,9 @@ function buildGrid(wd){
       else if(c.kind==='cashReceipt'){
         const status=String(r.cashReceiptStatus||'unavailable'),disp=_cashReceiptDisplay(status);
         tds+=`<td ${cls(i,'gcell gstatuslock gcashreceipt '+status+' gctr')} style="${cstyle(i)}" title="${esc(_cashReceiptTitle(status))}" data-rid="${esc(r.id)}" data-cfield="${_CASH_RECEIPT_COL}">${esc(disp)}</td>`; }
+      else if(c.kind==='purchaseQty'){   // 결정 289 ④ — 읽기 전용(리뷰어가 공고 참여 때 고른 개수)
+        const disp=_purchaseQtyDisplay(r);
+        tds+=`<td ${cls(i,'gcell gstatuslock gctr'+(disp?'':' gempty'))} style="${cstyle(i)}" title="${esc(disp?'리뷰어가 공고 참여 때 고른 구매수량 — 수정 불가':'')}" data-rid="${esc(r.id)}" data-cfield="${_PURCHASE_QTY_COL}">${esc(disp)}</td>`; }
       else if(c.kind==='custom'){
         // 커스텀 열(행별 자유메모) — 시트 오버레이(col:)와 같은 eCell 경로 재사용, 편집기록 없음(원본·오버레이 개념이 없다).
         const cv=(r.customValues&&r.customValues[c.colId])||'';

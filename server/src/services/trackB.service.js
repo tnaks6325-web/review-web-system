@@ -3421,6 +3421,10 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       /* ★ 결정 266: 가격 신고 — 상품별 쌓인 신고 수 + 최근 처리 이력(고침 전→후 · 그대로 · 보류 · 누가 · 언제).
            null = 못 읽음/공고 없음 → 카드는 그 줄을 그리지 않는다. 업체 렌즈(_condAdvertiserLens)는 화이트리스트라 나가지 않는다. */
       priceReports: c ? await require('./campaignPriceReport.service').priceReportsForCampaign(db, c.id) : null,
+      /* ★ 결정 289 ④: 인당 구매수량 단계 요약(단계별 1인 금액·인원 · 총결제금액 · 판매 목표 개수).
+           null = 단계 없음·못 읽음 → 카드는 종전 계산(1건당 × 총건수). 단일 출처 = campaignQtyTiers.summaryForCampaign. */
+      qtyTiers: c ? await require('./campaignQtyTiers.service').summaryForCampaign(db, c.id).catch(e => {
+        logger.warn(`[trackB] 구매수량 단계 요약 실패(카드는 종전 계산): ${e.message}`); return null; }) : null,
       campaignCount: camps.length,
       workOrderId: (wo && wo.id) || null,   // [미설정] → 작업오더 수정 창구를 열 때만 쓴다
     };
@@ -3487,7 +3491,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             ria.is_submitted AS submitted, FALSE AS paid, 'archive'::text AS source,
             NULL::uuid AS order_submission_id, NULL::text AS identity_key, ria.row_json, ria.submit_col, ria.submit_col2,
             NULL::uuid AS "popularPurposeApplicationId", NULL::text AS "popularPurposePhone8", NULL::jsonb AS "ruleFlags",
-            NULL::text AS "deliveryMemo", NULL::text AS "deliveryMemoCheck"
+            NULL::text AS "deliveryMemo", NULL::text AS "deliveryMemoCheck", NULL::int AS "purchaseQty"
        FROM review_index_archive ria
       WHERE ria.sheet_id=$1 AND ria.tab_name=$2
       ORDER BY ria.row_index`
@@ -3506,7 +3510,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             -- 결정 245: 캡처에서 읽은 배송메세지(제출물 미리보기 한 줄) — 업체에는 아래에서 주문 줄이 맞을 때만 싣는다.
             purpose_order.delivery_memo AS "deliveryMemo",
             -- 결정 260: 필수 배송메세지 확인 결과('staff_review' = 확인 안 된 채 직원 확인 요청으로 받음 · 내부 작업보드만 🚩)
-            purpose_order.delivery_memo_check AS "deliveryMemoCheck"
+            purpose_order.delivery_memo_check AS "deliveryMemoCheck",
+            -- 결정 289 ④: 리뷰어가 고른 구매수량(공고 참여 주문만 · 없으면 NULL = 1개 기본) — 「구매수량」 가상 칸·판매 개수
+            purpose_order.purchase_qty AS "purchaseQty"
        FROM campaign_participants cp
        LEFT JOIN order_submissions purpose_order
          ON purpose_order.id = cp.order_submission_id AND purpose_order.deleted_at IS NULL
@@ -3837,6 +3843,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
         && String(r.deliveryMemo || '').trim()) syn.deliveryMemo = String(r.deliveryMemo).trim();
     /* 결정 260 — 필수 배송메세지가 확인 안 된 채 「직원 확인 요청」으로 받은 주문(🚩). 반려(주문 취소)는 직원 몫이라 내부에만 싣는다. */
     if (showEdits && r.deliveryMemoCheck === 'staff_review') syn.deliveryMemoCheck = 'staff_review';
+    /* 결정 289 ④ — 고른 구매수량(내부·업체 모두 · 사용자 확정 「가」). 개인정보가 아니고 결제금액 칸이 이미 보인다. */
+    if (r.purchaseQty != null && Number(r.purchaseQty) > 0) syn.purchaseQty = Number(r.purchaseQty);
     /* ★ 행마다 같은 판정을 실어 보낸다 — 제출물 미리보기 목록이 "채워진 줄"을 화면에서 다시
        세지 않게(사본 0). 게이지 분자(`filledCount`)와 **같은 호출**이라 갈릴 수가 없다. */
     syn.filled = _isFilledRow(syn);
@@ -4038,6 +4046,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     if (consumed.has(k)) continue;
     orphanCount++; const t = k.split('\t')[0]; orphanByType[t] = (orphanByType[t] || 0) + 1;
   }
+  const _hasQty = out.some(r => r.purchaseQty != null);
   const counts = {
     total: out.length,
     /* 채워진 줄(사람이 들어온 줄) — 참여자 게이지의 분자. `total`(줄 수)과의 차이 = 빈 슬롯. */
@@ -4067,12 +4076,18 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     scheduleUnassigned: scheduleUnassigned > 0 ? scheduleUnassigned : undefined,
     /* 정원을 넘겨 채워진 줄 수. cap 을 모르면 undefined(0 과 구분). */
     over: _cap ? overCount : undefined,
+    /* 결정 289 ④ — 판매 개수 = 채워진 줄의 구매수량 합(개수를 고르지 않은 줄 = 1개).
+       구매수량 단계가 있는 작업(조건 카드 요약 있음)이거나 개수가 실린 줄이 있을 때만 싣는다 — 아니면 사람 수와 같아 의미가 없다. */
+    soldUnits: (_hasQty || (_cond && _cond.qtyTiers)) ? out.reduce((sm, r) => sm + (r.filled ? (Number(r.purchaseQty) || 1) : 0), 0) : undefined,
   };
   /* 업체 응답의 meta 에서 내부 정산 값(입금명·리뷰비·이체은행·입금 주체)을 뺀다 — 화면은 업체에게 이 값을 쓰지 않는다(리뷰 반영 · 종전부터 새던 값). */
   const _resMeta = { ...(meta[0] || {}) };
   if (role === 'advertiser') { delete _resMeta.depositName; delete _resMeta.tabReviewFee; delete _resMeta.tabTransferBank; }
   const res = { role, maskPII, archived: !!archived, meta: _resMeta, detail: wo[0] || null, counts, roster: out,
     sourceOfTruth: (meta[0] && meta[0].sourceOfTruth) || 'sheet' };   // 진실원천(cutover 상태) 표시용
+  /* 결정 289 ④ — 「구매수량」 가상 칸(시트에 쓰지 않는다 · 현영 칸과 같은 방식). 내부·업체 모두(사용자 확정 「가」).
+     개수가 실린 줄이 하나도 없으면 선언하지 않는다 = 종전 표 그대로. 보관본은 roster 쿼리가 NULL 이라 생기지 않는다. */
+  if (_hasQty) res.purchaseQtyColumn = { key: '__purchaseQty', label: '구매수량' };
   if (showEdits) {
     res.orphanEdits = { count: orphanCount, byType: orphanByType };
     res.headers = headers || []; res.customColumns = customCols;
@@ -6038,6 +6053,9 @@ function _condAdvertiserLens(cd, { brandSession = false } = {}) {
        정보가 없고**, 안 실으면 "내부는 공고 금액인데 업체는 옛 작업오더 금액"으로 갈린다.
        ★ 공고 **상품 원문**은 싣지 않는다(관리자가 손으로 적을 수 있는 자유 텍스트) — 숫자만. */
     campaignPayAmount: cd.campaignPayAmount,
+    /* ★ 결정 289 ④(사용자 확정 2026-10-26 「가」): 구매수량 단계 요약도 업체에 나간다 — 결제금액·인원은 이미 보고 있고,
+       판매 개수는 업체가 가장 궁금해할 값이다. 숫자와 상품·옵션 이름만(내부 식별자 없음). */
+    qtyTiers: cd.qtyTiers || null,
     channel: cd.channel || null,
     inflowType: cd.inflowType || null,
     /* 담당 2인 — ★ **실명(`adminRaw`)은 폐기**하고 여기서 fail-closed 를 완결한다:
