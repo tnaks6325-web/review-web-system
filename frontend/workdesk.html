@@ -12299,6 +12299,14 @@ async function _woAccept(id, pickGid, opts){
     _toast(r.skipped?'이미 등록된 오더입니다.'
       :((r.gidCorrected?'🔧 URL 교정 후 ':'')+'접수 완료'+(r.tabName?' — '+r.tabName:'')+(r.sheetless?' (무시트)'+wt:'')));
     if(r.worktable&&r.worktable.error) _toast('⚠ 작업표 장부 생성 실패: '+r.worktable.error);
+    /* ★ 서버가 돌려준 접수 직후 행(`data` = UPDATE … RETURNING *)으로 STATE.wo 의 그 오더를 먼저 갈아 끼운다.
+       _loadOrders() 는 기다리지 않으므로, 아래에서 곧바로 여는 공고(_woCampaign)가 **접수 전 사본**
+       (linked_tab_* 빈 값)을 읽어 연결 작업표 칸이 빈 채로 열렸다. 목록 새로고침은 그대로 뒤에서 덮는다.
+       `data` 가 없는 응답(구버전 서버)이면 종전과 같다. */
+    if(r.data && r.data.id===id && Array.isArray(STATE.wo)){
+      const i=STATE.wo.findIndex(x=>x.id===id);
+      if(i>=0) STATE.wo[i]=r.data;
+    }
     _loadOrders();
     /* ★★ 접수 → 모집공고는 **한 흐름**이다(사용자 확정 2026-08-21) — 접수가 끝나면 곧바로
        그 오더 값으로 채운 모집공고를 연다(상태는 '게시 전'이 기본이라 리뷰어에게 안 보인다).
