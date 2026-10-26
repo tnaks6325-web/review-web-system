@@ -572,6 +572,7 @@ async function listPaymentTargets(opts = {}) {
       accountMismatch: acctMismatch,
       productPrice, reviewFee: fee, amount, priceSource, feeSource, deliveryKind,
       workboardPrice, orderPrice, priceMismatch,
+      qtyTierAmount: ord && ord.qtyTierAmount ? ord.qtyTierAmount : null,
       tabReviewFee: tabFee, campaignReviewFee: campFee,
       transferMemo: memo, memoSource,
       issues, warnings,
@@ -625,7 +626,10 @@ async function listPaymentTargets(opts = {}) {
 /**
  * 같은 작업에서 압도적으로 많이 쓰이는 금액과 크게 다른 단독값만 경고한다.
  * 옵션별 정상 금액을 자동으로 막지 않도록 경고 전용이며, 4건 이상/주금액 70% 이상/
- * 단독 1건/차이 5천원 이상/1.5배 이상을 모두 만족할 때만 표시한다.
+ * 단독 1건/차이 5천원 이상/1.5배 이상을 모두 만족할 때만 표시한다. *
+ * ★ 결정 289 ④(사용자 확정 2026-10-26 「가」): 리뷰어가 고른 구매수량 단계의 금액(`qtyTierAmount`)과 같은 금액은
+ *   경고하지 않는다 — 1개 10,000원 사이에서 3개 30,000원을 정상 구매한 사람이 "금액 확인"으로 걸리지 않게.
+ *   경고를 **줄이는 쪽만** 바꾼다(단계 금액과 다르다고 새로 경고하지 않는다).
  */
 function flagPriceOutliers(items, referenceItems = items) {
   const groups = new Map();
@@ -650,6 +654,7 @@ function flagPriceOutliers(items, referenceItems = items) {
     const stat = stats.get(key); if (!stat) continue;
     const candidate = Number(item.productPrice);
     if (candidate === stat.dominantAmount || stat.counts.get(candidate) !== 1) continue;
+    if (item.qtyTierAmount && candidate === Number(item.qtyTierAmount)) continue;   // 고른 개수의 금액 = 정상(결정 289 ④)
     const difference = Math.abs(candidate - stat.dominantAmount);
     const ratio = Math.max(candidate, stat.dominantAmount) / Math.min(candidate, stat.dominantAmount);
     if (difference < 5000 || ratio < 1.5) continue;
@@ -751,7 +756,9 @@ async function _loadOrderPrices(sheetIds, tabNames) {
 
             -- ★ 그 건의 구매양식으로 **리뷰어가 직접 적어 낸 계좌**(035). 등록 계좌를 못 찾을 때의
             --   마지막 근거다 — 이걸 안 보면 시트에 계좌가 멀쩡히 있는 건도 영구 보류된다.
-            bank AS "bank", account AS "account", depositor AS "depositor"
+            bank AS "bank", account AS "account", depositor AS "depositor",
+            -- ★ 결정 289 ④: 리뷰어가 고른 구매수량 단계의 1인 결제금액(공고 참여 때 스냅샷) — 단독 금액 경고에서 뺀다
+            qty_tier_amount AS "qtyTierAmount"
        FROM order_submissions
       WHERE deleted_at IS NULL AND sheet_row IS NOT NULL
         AND sheet_id = ANY($1) AND tab_name = ANY($2)`,
@@ -762,6 +769,7 @@ async function _loadOrderPrices(sheetIds, tabNames) {
       price: o.price, feeSnapshot: o.feeSnapshot, deliveryReviewFeeMixSnapshot: o.deliveryReviewFeeMixSnapshot,
       orderDate: toKstDate(o.orderedAt), orderedAt: o.orderedAt || null,
       bank: o.bank || '', account: o.account || '', depositor: o.depositor || '',
+      qtyTierAmount: o.qtyTierAmount == null ? null : Number(o.qtyTierAmount),
     };
   }
   return map;
