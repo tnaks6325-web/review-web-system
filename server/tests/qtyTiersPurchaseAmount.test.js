@@ -138,9 +138,23 @@ t('3b decideAtSubmit: "고른 상품이 맞다" + 고른 개수 금액 → 다�
   assert.strictEqual(d.action, 'keep');
   assert.strictEqual(d.priceOther, '');
 });
-t('3c 단계 조회 실패는 상품 판정 전체를 종전 fail-open 으로(접수)', async () => {
-  const db = stubDb([[/FROM campaign_qty_tiers/, () => { throw new Error('boom'); }], [/FROM campaign_options/, OPTS]]);
-  assert.strictEqual((await pv.decideAtSubmit({ holdCtx: HOLD(), captureText: '', capturePrice: '20000', db })).action, 'none');
+t('3c ★ 단계 조회 실패 = 종전 금액 판정(단계 없는 공고와 같은 결과) · 「다른 상품을 샀다」 막음·글자 판정은 영향 없음', async () => {
+  const bad = () => stubDb([[/FROM campaign_qty_tiers/, () => { throw new Error('boom'); }], [/FROM campaign_options/, OPTS]]);
+  const d = await pv.decideAtSubmit({ holdCtx: HOLD(), captureText: '', capturePrice: '20000', db: bad() });
+  assert.strictEqual(d.action, 'prompt', '조회 실패 → 단계 없는 공고와 같은 종전 판정');
+  assert.strictEqual((await pv.decideAtSubmit({ holdCtx: HOLD(), captureText: '', capturePrice: '20000', confirmedKey: B, db: bad() })).action, 'wrong');
+  const txt = await pv.decideAtSubmit({ holdCtx: HOLD(), captureText: 'B 탄소매트 킹', capturePrice: '', db: bad() });
+  assert.strictEqual(txt.action, 'prompt'); assert.strictEqual(txt.basis, 'text');
+});
+t('3d 고른 상품 금액을 모르면(단계 없음·1개 가격 0) 단계 공고에서도 근거 없음 — 종전 규칙과 같다', () => {
+  const o3 = [OPTS[0], { opt_key: 'Z', product_name: 'Z상품', status: 'active', pay_amount: 0 }, { opt_key: 'C', product_name: 'C상품', status: 'active', pay_amount: 15000 }];
+  assert.strictEqual(pv.priceOtherOption(o3, 'Z', '15000'), null, '종전');
+  assert.strictEqual(pv.priceOtherOption(o3, 'Z', '15000', ctxOf(TIERS_A, o3), 0), null, '단계 갈래');
+});
+t('3e 단계 없는 공고·글자 판정만으로 끝나는 제출은 단계 표를 읽지 않는다', async () => {
+  const seen = []; const db = { query: async (sql) => { seen.push(sql); if (/FROM campaign_options/.test(sql)) return { rows: OPTS }; return { rows: [] }; } };
+  await pv.decideAtSubmit({ holdCtx: HOLD(), captureText: 'B 탄소매트 킹', capturePrice: '', db });
+  assert.ok(!seen.some(q => /campaign_qty_tiers/.test(q)), seen.join(' | '));
 });
 
 // ── 4. 담당자 수동 입력 ──

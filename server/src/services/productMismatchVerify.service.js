@@ -111,6 +111,7 @@ function _priceOtherOptionTiered(opts, heldKey, paid, tierCtx, heldAmount) {
   if (!heldOpt) return null;
   const heldScope = qt.scopeFor(tierCtx, heldKey);
   const heldAll = _amountsOf(heldOpt, heldScope);
+  if (!heldAmount && !heldAll.size) return null;   // 고른 상품 금액 모름 = 근거 없음(종전 갈래와 같은 규칙 · 코드리뷰)
   const heldPay = heldAmount || _won(heldOpt.pay_amount);
   if (paid === heldAmount || heldAll.has(paid)) return null;
   const same = opts.filter(o => o.opt_key !== heldKey && _amountsOf(o, qt.scopeFor(tierCtx, o.opt_key)).has(paid));
@@ -188,8 +189,15 @@ async function decideAtSubmit({ holdCtx, captureText, captureOption = '', captur
     if (opts.length < 2) return { action: 'none' };
     const held = String(holdCtx.optionKey);
     // ★ 결정 289 ③-다: 단계가 있는 공고는 고른 개수의 단계 금액으로 본다(없으면 null = 종전).
-    const tierCtx = await _loadTierCtx(db, holdCtx.campaignId);
-    const heldAmount = tierCtx ? (holdCtx.qtyTierAmount || 0) : 0;
+    //   ★ 금액 판정 직전에만 읽고, 읽기 실패는 종전 판정으로 접는다 — 글자 판정·「다른 상품을 샀다」 막음은 이 조회와 무관해야 한다(코드리뷰).
+    let _tier;
+    const priceOther = async () => {
+      if (_tier === undefined) {
+        try { _tier = await _loadTierCtx(db, holdCtx.campaignId); }
+        catch (e) { _tier = null; logger.warn(`[product-verify] 단계 금액 조회 실패 — 종전 금액 판정: ${(e && e.message) || e}`); }
+      }
+      return priceOtherOption(opts, held, capturePrice, _tier, _tier ? (holdCtx.qtyTierAmount || 0) : 0);
+    };
     // 화면이 보낸 값은 **그 공고의 상품일 때만** 답으로 받는다 — 아니면 답이 없는 것으로 보고 아래 판정을 그대로 한다
     // (결정 236 코드리뷰: 지어낸 값으로 경고·다시 묻기를 기록 없이 건너뛰지 못하게).
     const _c = String(confirmedKey == null ? '' : confirmedKey).trim();
@@ -198,7 +206,7 @@ async function decideAtSubmit({ holdCtx, captureText, captureOption = '', captur
       if (confirmed === held) {
         const capturedKey = capturedOtherOption(captureText, opts, held, { shortText: captureOption }) || '';
         // ④ "고른 상품이 맞다"는 답을 결제금액으로 한 번 더 확인한다 — 다시 확인하고도 맞다면(priceAck) 접수 + 이상로그.
-        const po = priceOtherOption(opts, held, capturePrice, tierCtx, heldAmount);
+        const po = await priceOther();
         if (po && !priceAck) {
           return {
             action: 'recheck', paid: po.paid, chosen: { key: held, label: _label(held) }, captured: { key: po.key, label: _label(po.key) },
@@ -219,7 +227,7 @@ async function decideAtSubmit({ holdCtx, captureText, captureOption = '', captur
     //   (운영 캡처 117건 실측: 글자만 = 실제 잘못 구매 4건 중 2건 · 글자+금액 = 4건 모두 · 정상 113건 경고 0.
     //    금액만 쓰면 쿠폰 3,000원이 다른 상품 가격과 우연히 같아진 정상 5건이 걸렸다 — 글자가 고른 상품을 말하면 금액은 보지 않는다.)
     const read = matchOption(captureText, opts, { shortText: captureOption });
-    const po = read ? null : priceOtherOption(opts, held, capturePrice, tierCtx, heldAmount);
+    const po = read ? null : await priceOther();
     if (po) {
       return { action: 'prompt', basis: 'price', paid: po.paid, chosen: { key: held, label: _label(held) }, captured: { key: po.key, label: _label(po.key) } };
     }
@@ -330,7 +338,8 @@ async function checkManualEntries({ campaignId, items, db = getPool() }) {
     logger.warn(`[product-verify] 수동 입력 상품 목록 조회 실패 — 종전대로 접수: ${(e && e.message) || e}`);
     return [];
   }
-  // ★ 결정 289 ③-다: 수동 입력은 개수를 모른다 — 고른 상품이 낼 수 있는 금액(어느 개수든)이면 근거 없음. 조회 실패 = 종전 판정.
+  // ★ 결정 289 ③-다: 수동 입력은 개수를 모른다고 본다(신청을 골라 확정해도 담당자가 실제 구매를 보고 넣는 길이라 더 관대하게) —
+  //   고른 상품이 낼 수 있는 금액(어느 개수든)이면 근거 없음. 조회 실패 = 종전 판정.
   try { tierCtx = await _loadTierCtx(db, campaignId); } catch (e) { tierCtx = null; }
   const out = [];
   for (const it of items) {
