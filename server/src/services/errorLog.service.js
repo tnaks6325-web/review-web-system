@@ -59,6 +59,8 @@ const STEP_LABELS = {
   wrong_product_purchase:             '잘못 구매(고른 상품과 다른 상품) — 제출 막음',
   capture_product_differs_confirmed:  '캡처는 다른 상품 — 리뷰어가 고른 상품이 맞다고 확인',
   capture_price_mismatch_confirmed:   '결제금액이 다른 상품 가격 — 리뷰어가 다시 확인하고도 맞다고 함',
+  wrong_qty_purchase:                 '잘못 구매(고른 개수와 다른 개수) — 제출 막음',
+  capture_qty_mismatch_confirmed:     '결제금액이 다른 개수 금액 — 리뷰어가 고른 개수가 맞다고 함',
   manual_product_mismatch_confirmed:  '수동 입력 상품 확인 경고 — 담당자가 확인하고 접수',
 };
 

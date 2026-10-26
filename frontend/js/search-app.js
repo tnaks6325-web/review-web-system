@@ -36,6 +36,9 @@ const _EMBED_CTX = (() => {
       holdToken: q.get("holdToken") || "",
       holdPhone8: q.get("holdPhone8") || "",
       optionKey: q.get("optionKey") || "", // ★ 061: 참여 시 고른 옵션(잠금표시). 서버가 최종 권위.
+      // ★ 결정 289 ③-다: 참여할 때 고른 구매수량·그 단계 1인 결제금액(표시용 — 판정은 서버가 신청 기록으로 한다)
+      qty: Math.max(0, Math.floor(Number(q.get("qty")) || 0)),
+      qtyAmt: Math.max(0, Math.floor(Number(q.get("qtyAmt")) || 0)),
       // ★ 관리자 미리보기(읽기전용): campaign.html?preview=1 이 iframe에만 실어 보낸다.
       //   리뷰어 진입 URL에는 이 파라미터가 없으므로 항상 false = 제출 동작 불변.
       preview: q.get("preview") === "1",
@@ -6270,6 +6273,16 @@ function _buildOrderCardHtml(cid, idx, type) {
       <div style="font-size:.73rem;color:#6B7280;margin:-2px 0 6px 0">*선택이 되지 않는다면 배정된 옵션이므로 주문한 옵션과 일치하는지 확인후 제출하세요.</div>
       <div id="of_option_tabs" class="of-option-tabs"></div>
     </div>` : ""}
+    ${isFirst && _EMBED_CTX && _EMBED_CTX.qty ? `
+    <!-- ★ 결정 289 ③-다: 참여할 때 고른 구매수량 — 이 개수·금액대로 사야 한다(다르게 사면 제출 때 묻고, 다른 개수를 샀으면 제출할 수 없다) -->
+    <div class="of-option-picker" id="of_qty_note">
+      <div class="of-option-picker-title"><i class="fas fa-lock"></i> 참여한 구매수량</div>
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border:1.5px solid #3182f6;border-radius:10px;background:#e8f1fe">
+        <b style="flex:1;font-size:.9rem">${_EMBED_CTX.qty}개 구매</b>
+        ${_EMBED_CTX.qtyAmt ? `<span style="font-size:.8rem;font-weight:700;color:#1d4ed8">결제금액 ${_EMBED_CTX.qtyAmt.toLocaleString("ko-KR")}원</span>` : ""}
+      </div>
+      <div style="font-size:.62rem;color:#9CA3AF;margin-top:6px">이 개수대로 구매해 주세요. 개수를 바꾸려면 위 참여 화면의 [개수 바꾸기]를 이용하세요.</div>
+    </div>` : ""}
 
     <!-- 주문번호 -->
     <div class="of-field">
@@ -7464,28 +7477,36 @@ function _pmvAsk(res, orderNo, mode) {
     const esc = (v) => (typeof escHtml === "function" ? escHtml(String(v || "")) : String(v || "").replace(/[&<>"']/g, ""));
     const choL = cho.label || cho.key, capL = cap.label || cap.key;
     const recheck = mode === "recheck";
+    const qtyMode = mode === "qty";   // ★ 결정 289 ③-다: 고른 개수 ≠ 결제금액의 개수
     const paidTxt = esc(Number(res.paid || 0).toLocaleString("ko-KR"));
     const ov = document.createElement("div");
     ov.className = "modal-overlay pmv-overlay";
     ov.setAttribute("role", "dialog"); ov.setAttribute("aria-modal", "true"); ov.setAttribute("aria-labelledby", "pmvTitle");
-    const opts = [{ key: cho.key, label: choL, tag: "참여할 때 고른 상품", wrong: false },
-                  { key: cap.key, label: capL, tag: (recheck || res.basis === "price") ? "결제금액이 같은 상품" : "캡처에 보이는 상품", wrong: true }];
+    const opts = qtyMode
+      ? [{ key: cho.key, label: choL + " 샀어요", tag: "참여할 때 고른 개수", wrong: false },
+         { key: cap.key, label: capL + " 샀어요", tag: "결제금액이 같은 개수", wrong: true }]
+      : [{ key: cho.key, label: choL, tag: "참여할 때 고른 상품", wrong: false },
+         { key: cap.key, label: capL, tag: (recheck || res.basis === "price") ? "결제금액이 같은 상품" : "캡처에 보이는 상품", wrong: true }];
     ov.innerHTML =
       '<div class="modal-box pmv-box"><div class="modal-header pmv-head"><h3 id="pmvTitle">' + (orderNo ? orderNo + "번째 주문 · " : "")
-      + (recheck ? '결제금액을 다시 확인해 주세요' : '잘못 구매한 것 같아요') + '</h3></div>'
+      + (recheck ? '결제금액을 다시 확인해 주세요' : qtyMode ? '구매 개수를 확인해 주세요' : '잘못 구매한 것 같아요') + '</h3></div>'
       + '<div class="modal-body">'
-      + (recheck
+      + (qtyMode
+          ? '<p class="pmv-lead">참여할 때 <b>' + esc(choL) + '</b>를 고르셨는데, 결제금액 <b class="pmv-cap">' + paidTxt + '원</b>은 <b class="pmv-cap">' + esc(capL) + '</b> 결제금액이에요.</p>'
+          : recheck
           ? '<p class="pmv-lead"><b>' + esc(choL) + '</b>를 주문했다고 하셨지만, 결제금액 <b class="pmv-cap">' + paidTxt + '원</b>은 <b class="pmv-cap">' + esc(capL) + '</b> 결제금액이에요. 잘못 구매한 것으로 보여요.</p>'
           : res.basis === "price"
           ? '<p class="pmv-lead">캡처의 결제금액 <b class="pmv-cap">' + paidTxt + '원</b>이 참여할 때 고른 <b>' + esc(choL) + '</b>가 아니라 <b class="pmv-cap">' + esc(capL) + '</b> 가격과 같아요.</p>'
           : '<p class="pmv-lead">참여할 때 고른 상품은 <b>' + esc(choL) + '</b>인데, 올린 주문 캡처에는 <b class="pmv-cap">' + esc(capL) + '</b>(으)로 보여요.</p>')
-      + '<p class="pmv-q">' + (recheck ? '주문 내역을 다시 확인하고, 실제로 산 상품을 골라 주세요.' : '실제로 산 상품을 골라 주세요.') + '</p>'
+      + '<p class="pmv-q">' + (qtyMode ? '주문 내역을 확인하고, 실제로 산 개수를 골라 주세요.' : recheck ? '주문 내역을 다시 확인하고, 실제로 산 상품을 골라 주세요.' : '실제로 산 상품을 골라 주세요.') + '</p>'
       + '<div class="ofp-list pmv-list" role="radiogroup" aria-labelledby="pmvTitle">'
       + opts.map((o, k) => '<button type="button" class="ofp-opt' + (o.wrong ? ' pmv-wrong-opt' : '') + '" role="radio" aria-checked="false" data-pmv="' + k + '">'
           + '<span class="ofp-radio"></span><span class="ofp-nm">' + esc(o.label) + '</span><span class="ofp-match">' + o.tag + '</span></button>').join("")
       + '</div>'
-      + '<div class="pmv-warn" role="alert" hidden><b>잘못 구매한 주문이에요.</b> 참여할 때 고른 상품과 다른 상품을 사서 이 주문은 제출할 수 없어요. 담당자에게 문의해 주세요.</div>'
-      + '<p class="pmv-note">' + (recheck
+      + '<div class="pmv-warn" role="alert" hidden><b>잘못 구매한 주문이에요.</b> ' + (qtyMode ? '참여할 때 고른 개수와 다르게 사서' : '참여할 때 고른 상품과 다른 상품을 사서') + ' 이 주문은 제출할 수 없어요. 담당자에게 문의해 주세요.</div>'
+      + '<p class="pmv-note">' + (qtyMode
+          ? '할인·쿠폰 때문에 금액만 같은 것이고 고른 개수를 샀다면 그대로 제출돼요. 담당자가 결제금액을 확인합니다.'
+          : recheck
           ? '할인·쿠폰 때문에 금액만 같은 것이고 고른 상품이 맞다면 그대로 제출돼요. 담당자가 결제금액을 확인합니다.'
           : '캡처를 잘못 읽은 것이라면 참여할 때 고른 상품을 골라 주세요.') + '</p>'
       + '<div class="modal-actions"><button type="button" class="btn-ghost" data-pmv-cancel>' + (recheck ? '다시 확인할게요' : '취소') + '</button>'
@@ -7503,7 +7524,7 @@ function _pmvAsk(res, orderNo, mode) {
         const wrong = opts[sel].wrong;
         warn.hidden = !wrong; note.hidden = wrong;
         okBtn.disabled = false;
-        okBtn.textContent = wrong ? "확인 (제출 안 됨)" : (recheck ? "이 상품이 맞아요 · 제출" : "제출");
+        okBtn.textContent = wrong ? "확인 (제출 안 됨)" : (recheck ? "이 상품이 맞아요 · 제출" : qtyMode ? "이 개수가 맞아요 · 제출" : "제출");
         okBtn.classList.toggle("pmv-btn-stop", wrong);
         // 페이지 공통 버튼 규칙(!important)이 이기지 않게 색은 그 자리에서 직접 준다
         if (wrong) okBtn.style.setProperty("background", "#d92d20", "important"); else okBtn.style.removeProperty("background");
@@ -9322,6 +9343,20 @@ async function submitOrderForm() {
         if (res.chosen && again === res.chosen.key) payload.priceRecheckAck = "true";
         else payload.confirmedProductKey = again;
         try { res = await gasPost(payload, 30000); } catch(_) { throw new Error("서버 연결 실패 (결제금액 확인 후 제출)"); }
+        if (!res) throw new Error("서버 응답이 없습니다.");
+      }
+      // ★ 결정 289 ③-다: 결제금액이 고른 개수가 아니라 다른 개수의 금액 — 실제로 산 개수를 묻는다.
+      //   고른 개수 = 그 개수로 다시 보내 접수(담당자 확인 기록) · 다른 개수 = 그 개수로 보내 서버가 막는다 · 닫기 = 제출 안 함.
+      if (!res.ok && res.code === "PRODUCT_QTY_MISMATCH") {
+        const _q = (v) => ({ key: String((v && v.qty) || ""), label: (v && v.label) || ((v && v.qty) + "개") });
+        const pickedQty = await _pmvAsk({ paid: res.paid, chosen: _q(res.chosen), captured: _q(res.captured) }, orders.length > 1 ? (i + 1) : 0, "qty");
+        if (!pickedQty) {
+          showToast((orders.length > 1 ? `${i+1}번째 주문은 ` : "") + "제출하지 않았어요. 산 개수를 확인한 뒤 다시 제출해 주세요.", "warning");
+          results.push({ phone8: bh ? bh.phone8 : "", name: bh ? bh.name : "", ok: false, error: "산 개수 확인이 필요해 제출하지 않았어요" });
+          continue;
+        }
+        payload.confirmedPurchaseQty = pickedQty;
+        try { res = await gasPost(payload, 30000); } catch(_) { throw new Error("서버 연결 실패 (개수 확인 후 제출)"); }
         if (!res) throw new Error("서버 응답이 없습니다.");
       }
       // ★ 결정 230: 잘못 구매(고른 상품과 다른 상품) — 서버가 막았다. 경고로 알리고 이 주문은 제출하지 않는다.

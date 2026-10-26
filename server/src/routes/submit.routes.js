@@ -559,6 +559,7 @@ async function _authoritativeHold(ctx) {
     const { rows } = await pool.query(
       `SELECT ca.phone8, ca.option_key, ca.owner_phone8, ca.blog_url, ca.status,
               ca.order_submission_id, ca.late_order_id, ca.applied_at,
+              ca.purchase_qty, ca.qty_tier_amount,
               co.unit_kind AS unit_kind,
               co.product_name AS product_name,
               (so.id IS NOT NULL) AS sub_alive,
@@ -588,6 +589,9 @@ async function _authoritativeHold(ctx) {
     ctx.optionKey = rows[0].option_key || null;
     // ★ 결정 275 5단계 — 잘못구매 판정은 신청한 시각의 결제금액으로 본다(같은 왕복 · 순증 0).
     ctx.appliedAt = rows[0].applied_at || null;
+    // ★ 결정 289 ③-다 — 고른 구매수량·그 단계 1인 결제금액(같은 왕복 · 순증 0). 잘못 구매 판정의 "고른 상품 금액"이 된다.
+    ctx.purchaseQty = rows[0].purchase_qty == null ? null : Number(rows[0].purchase_qty);
+    ctx.qtyTierAmount = rows[0].qty_tier_amount == null ? 0 : Number(rows[0].qty_tier_amount);
     // ★ 134 복합 작업: 이 선택 단위가 "옵션 없는 상품"이면 그 키는 **상품명**이지 옵션명이 아니다.
     //   같은 왕복에서 읽어 온다(순증 0). 모르면 'option'(종전 동작 — 추측 승격 금지).
     ctx.unitKind = String(rows[0].unit_kind || '') === 'product' ? 'product' : 'option';
@@ -780,6 +784,39 @@ router.post('/order', async (req, res, next) => {
         });
         if (decision.action === 'wrong') {
           return res.json({ ok: false, code: 'PRODUCT_WRONG_PURCHASE', chosen: decision.chosen, bought: decision.bought, error: decision.error });
+        }
+      }
+    }
+
+    /* ★★ 결정 289 ③-다(사용자 확정 2026-10-26 「가」) — 고른 개수와 다른 개수를 샀는가. 상품 판정을 통과한 뒤에만 본다(쓰기 0).
+       결제금액이 고른 개수의 단계 금액이 아니라 **같은 상품의 다른 개수 하나**의 금액과 정확히 같으면 묻는다(PRODUCT_QTY_MISMATCH).
+       · "고른 개수를 샀어요"(confirmedPurchaseQty = 고른 개수) → 접수 + 이상로그(capture_qty_mismatch_confirmed — 담당자 확인용).
+       · "다른 개수를 샀어요" → 상품 잘못 구매와 같게 제출 불가(PRODUCT_WRONG_PURCHASE) + 이상로그(wrong_qty_purchase).
+       ★ 단계 없음·금액 모름·판정 실패 = 종전대로 접수(fail-open). 스위치 CAMPAIGN_PRODUCT_VERIFY=0 · CAMPAIGN_QTY_TIERS=0 이면 보지 않는다. */
+    if (holdCtx && holdCtx.verified && holdCtx.purchaseQty != null && holdCtx.qtyTierAmount) {
+      const pv = require('../services/productMismatchVerify.service');
+      const qd = await pv.decideQtyAtSubmit({ holdCtx, capturePrice: b.productCapturePrice, confirmedQty: b.confirmedPurchaseQty });
+      if (qd.action === 'prompt') {
+        // 옛 화면(이 코드를 모름)은 이 문구를 실패 알림으로 보여 주고 제출을 멈춘다 — 새로고침하면 묻는 창이 뜬다.
+        return res.json({
+          ok: false, code: 'PRODUCT_QTY_MISMATCH', paid: qd.paid, chosen: qd.chosen, captured: qd.captured,
+          error: `참여할 때 ${qd.chosen.label}를 고르셨는데, 결제금액 ${Number(qd.paid).toLocaleString('ko-KR')}원은 ${qd.captured.label} 결제금액이에요. 실제로 산 개수를 골라 주세요. (화면을 새로고침한 뒤 다시 제출해 주세요)`,
+        });
+      }
+      if (qd.action === 'wrong' || qd.action === 'keep') {
+        logAbnormal({
+          flow: 'order_submit',
+          step: qd.action === 'wrong' ? 'wrong_qty_purchase' : 'capture_qty_mismatch_confirmed',
+          category: 'validation', source: 'server', severity: 'warn',
+          fingerprintKey: qd.action === 'wrong' ? '' : 'app-' + holdCtx.applicationId,
+          error: new Error(qd.action === 'wrong'
+            ? `고른 개수와 다르게 구매해 제출 막음 — 고른 ${qd.chosen.label} · 산 ${qd.bought.label}${holdCtx.optionKey ? ` · 상품 「${holdCtx.optionKey}」` : ''}`
+            : `결제금액 ${Number(qd.paid || 0).toLocaleString('ko-KR')}원이 ${qd.captured.label} 금액인데 리뷰어가 고른 ${qd.chosen.label}가 맞다고 함${holdCtx.optionKey ? ` — 상품 「${holdCtx.optionKey}」` : ''} · 신청 #${holdCtx.applicationId}`),
+          context: { campaignId: holdCtx.campaignId, applicationId: holdCtx.applicationId, sheetId, tabName,
+                     loginPhone8: _idPhone8 ? '***' + _idPhone8.slice(-4) : '' },
+        });
+        if (qd.action === 'wrong') {
+          return res.json({ ok: false, code: 'PRODUCT_WRONG_PURCHASE', chosen: qd.chosen, bought: qd.bought, error: qd.error });
         }
       }
     }
