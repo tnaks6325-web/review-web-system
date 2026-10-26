@@ -1720,6 +1720,15 @@ async function getCampaignDetail(req, res, next) {
         view.options = opts.map(_publicOptionView);
         _applySequentialDisplay(view, opts);   // ★ 결정 214
       }
+      // ★ 결정 289 ③-나: 개수별 남은 자리(금액 없이 — 결정 041). 보기 전용 — 실패해도 공고는 연다
+      //   (참여 때 서버가 같은 잠금 안에서 다시 판정하고, 개수가 필요하면 그 응답으로 개수 창을 띄운다).
+      try {
+        const tv = await campaignQtyTiers.viewsForCampaign(pool, id, (view.options || []).map(o => o.optKey));
+        if (tv) {
+          for (const o of view.options || []) { const v = tv.byOpt[o.optKey]; if (v && v.length) o.qtyTiers = v.map(_publicTierView); }
+          if (!view.options && tv.campaign && tv.campaign.length) view.qtyTiers = tv.campaign.map(_publicTierView);
+        }
+      } catch (e) { logger.warn(`[campaign/detail] 구매수량 단계 보기 실패(참여 때 다시 판정) camp=${id}: ${e.message}`); }
     }
     res.json({ ok: true, data: view, serverNow: now.toISOString() });
   } catch (err) {
@@ -1860,6 +1869,22 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
         logger.warn(`[campaign/work-detail] 옵션 변경 가능 판정 실패(종전 규칙): ${e.message}`);
       }
     }
+    // ★ 결정 289 ③-나: 내 구매수량·금액(참여 후 공개 — 결정 041) + 같은 범위의 개수별 자리(내 참여는 빼고 = 바꾸기 판정과 같은 셈).
+    //   위 참여 SELECT 는 손대지 않고 따로 읽는다. 실패 = 개수 정보 없이 종전 화면(바꾸기 판정은 서버가 다시 한다).
+    let qty = null;
+    try {
+      const { rows: q } = await pool.query('SELECT purchase_qty, qty_tier_amount FROM campaign_applications WHERE id = $1', [app.id]);
+      const tv = await campaignQtyTiers.viewsForCampaign(pool, id, app.option_key ? [app.option_key] : [], { excludeAppId: app.id });
+      const mine = tv ? (app.option_key ? tv.byOpt[app.option_key] : tv.campaign) : null;
+      const cur = q[0] && q[0].purchase_qty != null ? Number(q[0].purchase_qty) : null;
+      if (cur != null || (mine && mine.length)) {
+        const tiers = (mine || []).map(v => ({ ..._publicTierView(v), payAmount: v.payAmount }));
+        qty = { purchaseQty: cur, amount: q[0] && q[0].qty_tier_amount != null ? Number(q[0].qty_tier_amount) : null, tiers,
+          canChange: !!validHold && tiers.some(v => v.qty !== cur && v.status === 'open') };
+      }
+    } catch (e) {
+      logger.warn(`[campaign/work-detail] 구매수량 조회 실패(개수 표시 생략) camp=${id}: ${e.message}`);
+    }
 
     res.json({
       ok: true,
@@ -1875,6 +1900,7 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
       options,               // [{ optKey, payAmount, remaining, todayRemaining, status, selectable, ... }]
       selectedOption,        // 내가 참여한 옵션(잠금표시·구매양식 고정용)
       canChangeOption,
+      qty,                   // ★ 결정 289 ③-나: { purchaseQty, amount, tiers:[{qty,status,remaining,buyMethod,payAmount}], canChange } | null(단계 없음)
       joinedDisplay: joinedView,   // ★ 결정 214: { title, thumbnailUrl } | null
       workDetail,                                                // HTML은 응답 직전 방어적 재정화
       inflowType,                                                 // 'guide' | 'link' | '' — 랜딩 버튼 게이트

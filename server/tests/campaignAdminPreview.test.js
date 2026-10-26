@@ -87,7 +87,7 @@ ok('③-5b Track B 경로 폴백은 401/403 에서만',
 for (const [label, re] of [
   // ★ 옵션변경은 "막기" 대신 **가상 시뮬레이션**으로 바뀌었다(관리자가 흐름을 끝까지 볼 수 있게).
   //   규칙은 그대로다 — 서버 상태를 바꾸지 않는다. 아래에서 그 시뮬레이션에 **서버 호출이 0** 임을 못박는다.
-  ['옵션변경(_doChangeOption)', /async function _doChangeOption\(newKey\)\{\s*\n\s*if\(PREVIEW\) return _pvSimulateChangeOption/],
+  ['옵션변경(_doChangeOption)', /async function _doChangeOption\(newKey(?:, purchaseQty)?\)\{\s*\n\s*if\(PREVIEW\) return _pvSimulateChangeOption/],
   // ★ 063 2단계 신규 진입점도 동일 차단(명의 선택·타계정 추가참여)
   ['명의선택(openAcctSheet)', /async function openAcctSheet\(optionKey, next\)\{\s*\n\s*if\(PREVIEW\) return _pvBlock/],
   ['타계정 추가참여(onAddSubJoin)', /async function onAddSubJoin\(\)\{\s*\n\s*if\(PREVIEW\) return _pvBlock/],

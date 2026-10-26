@@ -167,6 +167,10 @@
         <div class="wd-tt" style="color:var(--p-dark)">✅ 내가 참여한 옵션</div>
         <div class="myopt" id="joinedOption"></div>
       </div>
+      <div class="cardbx" id="joinedQtyBox" style="display:none;border-color:var(--p)">
+        <div class="wd-tt" style="color:var(--p-dark)">✅ 내가 고른 구매수량</div>
+        <div class="myopt" id="joinedQty"></div>
+      </div>
       <!-- 작업내용 4카드 = js/campaign-workdetail.js 공용 렌더러. 관리자 미리보기가 같은 코드를 써서
            "미리보기와 실제 화면이 다른" 문제가 구조적으로 생기지 않는다. -->
       <div id="wdCards"></div>
@@ -246,6 +250,18 @@
     <div class="optnote" id="optSheetNote">선택한 옵션으로 자리가 잡혀요. 구매 전까지는 다른 옵션으로 바꿀 수 있어요.</div>
     <button class="btn" id="optSheetGo" style="margin-top:12px" onclick="onOptSheetConfirm()">이 옵션으로 참여</button>
     <button class="btn ghost" style="margin-top:8px" onclick="hideOptSheet()">취소</button>
+  </div>
+</div>
+
+<!-- ★ 결정 289 ③-나 — 인당 구매수량 고르기(옵션 선택 시트와 같은 모양) -->
+<div class="sheet-ovl" id="qtySheet">
+  <div class="sheet">
+    <h3 id="qtySheetTitle">몇 개 구매하시겠어요?</h3>
+    <p id="qtySheetDesc">이 상품은 구매 개수마다 자리가 따로 정해져 있어요.</p>
+    <div id="qtySheetList"></div>
+    <div class="optnote" id="qtySheetNote"></div>
+    <button class="btn" id="qtySheetGo" style="margin-top:12px" onclick="onQtySheetConfirm()">이 개수로 참여</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="hideQtySheet()">취소</button>
   </div>
 </div>
 
@@ -833,7 +849,8 @@ function _seqMD(iso){
 }
 function _optSubText(o){
   let t = _optRemainText(o);
-  if(o.payAmount) t += ' · 결제금액 ' + Number(o.payAmount).toLocaleString() + '원';
+  // ★ 결정 289: 구매수량 단계로 참여했으면 옵션 1개 금액은 내 결제금액이 아니다(「구매수량」 칸이 단계 금액) — 겹쳐 적지 않는다
+  if(o.payAmount && !(_detail && _detail.qty && _detail.qty.purchaseQty != null)) t += ' · 결제금액 ' + Number(o.payAmount).toLocaleString() + '원';
   return t;
 }
 function _optBadgeHtml(o, isCur){
@@ -911,8 +928,9 @@ function _renderOptSheetList(opts, curKey){
     const pickable = (PREVIEW ? _pvOptionSelectable(o) : o.selectable) && !isCur;
     const div = document.createElement('div');
     div.className = 'optrow' + (pickable ? '' : ' dis');
+    const qtyHint = (o.qtyTiers && o.qtyTiers.length) ? ' · ' + o.qtyTiers.map(v => v.qty).sort((a, b) => a - b).join('·') + '개 중 골라 구매' : '';   // ★ 결정 289
     div.innerHTML = '<span class="radio"></span><div class="oi"><div class="nm">' + _escAttr(o.optKey) +
-      '</div><div class="sub">' + _escAttr(_optSubText(o)) + '</div></div>' + _optBadgeHtml(o, isCur);
+      '</div><div class="sub">' + _escAttr(_optSubText(o) + qtyHint) + '</div></div>' + _optBadgeHtml(o, isCur);
     if(pickable){
       div.onclick = () => {
         _optSheetSel = o.optKey;
@@ -952,6 +970,95 @@ function onOptSheetConfirm(){
   else if(_optSheetMode === 'join') _joinWithOption(_optSheetSel);
   else if(_optSheetMode === 'join_sub'){ hideOptSheet(); openAcctSheet(_optSheetSel); }  // 추가참여: 옵션 → 명의
   else _doChangeOption(_optSheetSel);
+}
+
+/* ═══ ★ 결정 289 ③-나 — 인당 구매수량 고르기 ═══
+   단계가 있는 상품이면 자리를 잡기 전에 개수를 받는다(블로그 주소처럼 — 모든 참여 경로가 _doApply 한곳으로 모인다).
+   ★ 보기는 서버가 준 것만 그린다(참여 전 = 금액 없음 · 결정 041). 남은 자리는 표시용 — 판정은 서버가 잠금 안에서 다시 한다.
+   mode: join(참여) · change(개수만 바꾸기) · change_opt(옵션 바꾸기에서 새 옵션의 개수). */
+let _qtyPending = null, _qtySel = null;
+function _qtyViewsFor(optionKey){
+  if(!_camp) return null;
+  if(optionKey){ const o = (_camp.options || []).find(x => String(x.optKey) === String(optionKey)); return (o && o.qtyTiers) || null; }
+  return _camp.qtyTiers || null;
+}
+function _qtyNoteText(views){
+  const opt = (views || []).some(v => v.buyMethod === 'option');
+  return opt ? '주문할 때 고른 개수에 맞는 구성 상품(옵션)으로 주문해 주세요. 구매 전까지는 다른 개수로 바꿀 수 있어요.'
+             : '주문할 때 구매 수량을 고른 개수로 맞춰 주세요. 구매 전까지는 다른 개수로 바꿀 수 있어요.';
+}
+function openQtySheet(p){
+  _qtyPending = p; _qtySel = null;
+  const views = (p.views || []).slice().sort((a, b) => a.qty - b.qty);
+  $('qtySheetTitle').textContent = p.mode === 'join' ? '몇 개 구매하시겠어요?' : '구매수량 바꾸기';
+  $('qtySheetDesc').textContent = p.mode === 'join' ? '이 상품은 구매 개수마다 자리가 따로 정해져 있어요.' : '자리가 남은 다른 개수로 바꿀 수 있어요.';
+  $('qtySheetNote').textContent = _qtyNoteText(views);
+  $('qtySheetGo').textContent = p.mode === 'join' ? '이 개수로 참여' : '이 개수로 바꾸기';
+  const list = $('qtySheetList'); list.innerHTML = '';
+  views.forEach(v => {
+    const isCur = p.cur != null && v.qty === p.cur;
+    const pickable = v.status === 'open' && !isCur;
+    const sub = [v.payAmount ? '결제금액 ' + Number(v.payAmount).toLocaleString() + '원' : '',
+                 v.status === 'open' ? '남은 자리 ' + v.remaining + '명' : '마감'].filter(Boolean).join(' · ');
+    const badge = isCur ? '<span class="obadge cur">현재</span>'
+      : v.status !== 'open' ? '<span class="obadge soldout">마감</span>'
+      : (v.remaining <= 3 ? '<span class="obadge hot">임박</span>' : '');
+    const div = document.createElement('div');
+    div.className = 'optrow' + (pickable ? '' : ' dis');
+    div.innerHTML = '<span class="radio"></span><div class="oi"><div class="nm">' + Number(v.qty) + '개 구매</div><div class="sub">' + _escAttr(sub) + '</div></div>' + badge;
+    if(pickable){
+      div.onclick = () => { _qtySel = v.qty; [...list.children].forEach(c => c.classList.remove('sel')); div.classList.add('sel'); $('qtySheetGo').disabled = false; };
+    }
+    list.appendChild(div);
+  });
+  $('qtySheetGo').disabled = true;
+  $('qtySheet').style.display = 'flex';
+}
+function hideQtySheet(){ $('qtySheet').style.display = 'none'; }
+function onQtySheetConfirm(){
+  const p = _qtyPending;
+  if(!p || !_qtySel) return toast('구매수량을 선택해주세요');
+  hideQtySheet();
+  if(p.mode === 'join') return _doApply(p.optionKey, p.sub, _qtySel);
+  if(p.mode === 'change_opt') return _doChangeOption(p.optionKey, _qtySel);
+  return _doChangeQty(_qtySel);
+}
+function openChangeQtySheet(){
+  const q = _detail && _detail.qty; if(!q) return;
+  openQtySheet({ mode:'change', views: q.tiers || [], cur: q.purchaseQty });
+}
+/** 서버가 단계 사유로 돌려보낸 응답 → 최신 자리로 개수 창을 다시 띄운다(참여·옵션 바꾸기 공용). */
+function _qtyRetryFromServer(j, p){
+  if(!['tier_required','tier_invalid','tier_soldout'].includes(j && j.reason)) return false;
+  toast(j.reason === 'tier_required' ? '몇 개 구매할지 선택해주세요' : (j.error || '선택한 구매수량은 마감됐어요. 다른 개수를 선택해주세요'));
+  openQtySheet({ ...p, views: (j.qtyTiers && j.qtyTiers.length) ? j.qtyTiers : (p.views || []) });
+  return true;
+}
+async function _doChangeQty(qty){
+  if(PREVIEW) return toast('미리보기에서는 바꿀 수 없어요');
+  const h = getHold(); if(!h) return;
+  toast('구매수량 변경 중…');
+  try{
+    const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/change-option', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ phone8: h.phone8, holdToken: h.holdToken, purchaseQty: qty })
+    });
+    const j = await r.json().catch(()=>({}));
+    if(r.ok && j.ok){ toast(j.unchanged ? '같은 개수예요' : '구매수량이 바뀌었어요'); await enterJoined(); return; }
+    const q = _detail && _detail.qty;
+    if(_qtyRetryFromServer(j, { mode:'change', cur: q && q.purchaseQty, views: q && q.tiers })) return;
+    if(j.reason === 'not_changeable'){ toast('지금은 바꿀 수 없어요'); await enterJoined(); return; }
+    toast(j.error || '구매수량을 바꿀 수 없어요');
+  }catch(e){ toast('오류: ' + e.message); }
+}
+function renderJoinedQty(j){
+  const box = $('joinedQtyBox'); const q = j && j.qty;
+  if(!q || q.purchaseQty == null){ box.style.display = 'none'; return; }
+  box.style.display = '';
+  const sub = q.amount != null ? '결제금액 ' + Number(q.amount).toLocaleString() + '원' : '';
+  $('joinedQty').innerHTML = '<div class="oi"><div class="nm">' + Number(q.purchaseQty) + '개 구매</div>' +
+    (sub ? '<div class="sub">' + _escAttr(sub) + '</div>' : '') + '</div>' +
+    (q.canChange ? '<button class="chg" onclick="openChangeQtySheet()">개수 바꾸기</button>' : '');
 }
 
 /* ═══ 👥 타계정 추가참여 (063 2단계) ═══
@@ -1332,19 +1439,22 @@ function _pvSimulateChangeOption(newKey){
 }
 
 /** @param sub {name,phone}|null — 있으면 타계정 명의로 참여(서버가 sub_accounts로 재검증) */
-async function _doApply(optionKey, sub){
+async function _doApply(optionKey, sub, purchaseQty){
   if(PREVIEW) return _pvSimulateApply(optionKey); // 어떤 경로로도 /apply 요청을 보내지 않는다.
   const s = getSession();
   if(!s) return needLogin(onJoin);
   hideOptSheet();
   // ★ 블로그체험단은 블로그 주소가 필수 — **홀드 생성 요청 전에** 받는다(자리 미점유 = 그날 참여권 미소각)
   if(isBlogCampaign() && !_isBlogUrl(_blogUrl)){ hideAcctSheet(); return openBlogSheet(optionKey, sub); }
+  // ★ 결정 289 ③-나: 단계가 있는 상품은 개수를 먼저 받는다(자리 미점유 상태에서)
+  if(purchaseQty == null){ const tv = _qtyViewsFor(optionKey); if(tv && tv.length){ hideAcctSheet(); return openQtySheet({ mode:'join', optionKey, sub, views: tv }); } }
   const jb = $('joinBtn'); if(jb){ jb.disabled = true; jb.textContent = '확인 중…'; }
   try{
     const body = { name: s.name, phone: s.phone8, phone8: s.phone8 };
     if(optionKey) body.optionKey = optionKey;
     if(isBlogCampaign() && _blogUrl) body.blogUrl = _blogUrl;
     if(sub && sub.name && sub.phone){ body.subName = sub.name; body.subPhone = sub.phone; }
+    if(purchaseQty) body.purchaseQty = purchaseQty;   // ★ 결정 289
     const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/apply', {
       method:'POST', headers:{'Content-Type':'application/json', ..._getAuthHeaders()}, body: JSON.stringify(body)
     });
@@ -1382,6 +1492,9 @@ async function _doApply(optionKey, sub){
       _popCreditPromise = _popCreditPromise || Promise.resolve(); renderPopNotice(); _applyPopLock();
       toast('최근 1일 안에 일반 모집 구매양식을 먼저 제출해주세요'); openPopGate(j); return;
     }
+    // ★ 결정 289 ③-나: 개수 미선택·없는 개수·그 개수 마감 → 서버가 준 최신 자리로 개수 창 다시(자리는 점유되지 않았다)
+    if(_qtyRetryFromServer(j, { mode:'join', optionKey, sub, views: _qtyViewsFor(optionKey) })) return;
+    if(j.reason === 'tier_unavailable'){ toast(j.error || '지금은 참여할 수 없어요'); await loadCampaign(); return; }
     if(j.reason === 'not_registered'){ toast('리뷰어 등록 후 참여할 수 있어요'); setTimeout(()=>location.href='/search.html#register', 900); return; }
     // 옵션 관련 사유 → 옵션 상태 갱신 후 선택 시트 재오픈
     if(['option_required','option_invalid','option_soldout','option_today_done','option_unavailable','option_waiting','option_paused'].includes(j.reason)){
@@ -1436,7 +1549,7 @@ async function _doApply(optionKey, sub){
     if(c && c.state==='open' && c.soldoutPaused === true){ $('joinBtn').disabled = true; $('joinBtn').textContent = '품절로 잠시 멈춤'; } } }   // 결정 259: 거절 뒤에도 멈춤 표시 유지
 }
 
-async function _doChangeOption(newKey){
+async function _doChangeOption(newKey, purchaseQty){
   if(PREVIEW) return _pvSimulateChangeOption(newKey);
   const h = getHold(); if(!h) return;
   hideOptSheet();
@@ -1444,7 +1557,7 @@ async function _doChangeOption(newKey){
   try{
     const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/change-option', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ phone8: h.phone8, holdToken: h.holdToken, optionKey: newKey })
+      body: JSON.stringify(Object.assign({ phone8: h.phone8, holdToken: h.holdToken, optionKey: newKey }, purchaseQty ? { purchaseQty } : {}))
     });
     const j = await r.json().catch(()=>({}));
     if(r.ok && j.ok){
@@ -1452,6 +1565,8 @@ async function _doChangeOption(newKey){
       await enterJoined(); // work-detail 재조회 + 구매양식 iframe 재로드(인플라이트 제출 파기 — 서버권위 TOCTOU 봉합)
       return;
     }
+    // ★ 결정 289 ③-나: 새 옵션에 지금 개수가 없거나 그 개수가 마감 → 새 옵션의 개수를 고르게 한다
+    if(_qtyRetryFromServer(j, { mode:'change_opt', optionKey: newKey, views: [] })) return;
     if(j.reason === 'option_waiting'){ toast('앞 상품이 마감된 뒤에 열리는 상품이에요'); await enterJoined(); return; }
     if(j.reason === 'option_paused'){ toast('품절로 잠시 멈춘 상품이에요. 다른 상품을 선택해주세요'); await enterJoined(); return; }   // ★ 결정 229
     if(['option_soldout','option_today_done','option_closed','option_invalid'].includes(j.reason)){
@@ -1555,6 +1670,7 @@ function _renderJoinedView(j, h){
     renderAcctPanel(h);
     // 내가 참여한 옵션 카드(옵션 등록 캠페인만) + 변경 버튼
     renderJoinedOption(j);
+    renderJoinedQty(j);   // ★ 결정 289 ③-나
     // 작업내용 렌더 — 공용 렌더러(js/campaign-workdetail.js). 관리자 미리보기와 동일 코드.
     //   표시 직전 정규화(상품 금액 합치기·리뷰가이드 섹션 추출·첨부 이미지 병합)는 모듈이 담당.
     //   옵션 카드는 아래 renderJoinedOption이 [변경] 버튼과 함께 그리므로 여기선 제외.
@@ -1625,7 +1741,8 @@ function renderJoinedOption(j){
   //   옵션 없는 상품(unitKind='product')은 줄 이름이 곧 상품명이라 상품 표기를 겹쳐 적지 않는다.
   const sub = [
     (so.unitKind !== 'product' && so.productName) ? ('상품 ' + so.productName) : '',
-    so.payAmount ? ('결제금액 ' + Number(so.payAmount).toLocaleString() + '원') : '',
+    // ★ 결정 289: 개수 단계로 참여했으면 결제금액은 그 단계 금액(아래 「구매수량」 칸)이다 — 1개 금액을 겹쳐 적지 않는다
+    (so.payAmount && !(j.qty && j.qty.purchaseQty != null)) ? ('결제금액 ' + Number(so.payAmount).toLocaleString() + '원') : '',
   ].filter(Boolean).join(' · ');
   $('joinedOption').innerHTML =
     '<div class="oi"><div class="nm">' + _escAttr(so.optKey) + '</div>' +
