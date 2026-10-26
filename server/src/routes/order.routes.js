@@ -41,6 +41,7 @@ const { readBidirSwitch } = require('../utils/bidirSwitch');
 const { applySharedPatch } = require('../services/sharedPatch.service');
 const { assertWorkOrderQuota, syncWorkOrderRecruitTotal } = require('../services/linkedRecruitQuota.service');
 const { projectIntranetAdvertiser, ensureTabOwnership, ADVERTISER_NAME_CONFLICT } = require('../services/advertiserProjection.service');
+const paybackLedgerFeed = require('../services/paybackLedgerFeed.service');
 
 // ═══════════════════════════════════════════════════════════
 // 작업 오더(work_orders) — AE 제출 → 관리자 인박스 → 상태머신
@@ -1375,6 +1376,47 @@ router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) 
       // ★ 결정 285 — keep_names: 인트라넷 이름으로 저장해도 `bidir.rw_names` 짝으로 받는다(이 표시가 없는 옛 리뷰웹에 인트라넷 이름을 보내면 지우고 더하기로 읽힌다)
       capabilities: { bidir_v1: true, keep_names: true },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// 외부(인트라넷) 페이백 장부 — 지급이 끝난 건을 인트라넷 재무가 끌어간다 (결정 290 · 읽기 전용)
+// GET /api/order/payback-ledger/summary               → 회차 합계·지문 + 작업별 계약 연결
+// GET /api/order/payback-ledger/items?batch_ids=a,b   → 그 회차들의 지급 건(금액·시각·작업 키만)
+// 키: X-Intake-Key 헤더만(주소에 키를 싣지 않는다 — 접속 기록에 남는다)
+// ═══════════════════════════════════════════════════════════
+function _paybackLedgerAuth(req, res) {
+  const expected = process.env.ORDER_INTAKE_KEY;
+  if (!expected) {
+    res.status(503).json({ ok: false, error: 'intake 키가 서버에 설정되지 않았습니다. (ORDER_INTAKE_KEY)' });
+    return false;
+  }
+  if (!_intakeKeyMatches(req.headers['x-intake-key'], expected)) {
+    res.status(401).json({ ok: false, error: '인증에 실패했습니다.' });
+    return false;
+  }
+  return true;
+}
+
+router.get('/payback-ledger/summary', async (req, res, next) => {
+  try {
+    if (!_paybackLedgerAuth(req, res)) return;
+    const [batches, tabs] = await Promise.all([paybackLedgerFeed.batchSummaries(), paybackLedgerFeed.tabLinks()]);
+    res.json({ ok: true, generated_at: new Date().toISOString(), batches, tabs });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/payback-ledger/items', async (req, res, next) => {
+  try {
+    if (!_paybackLedgerAuth(req, res)) return;
+    const ids = String(req.query.batch_ids || '').split(',');
+    const out = await paybackLedgerFeed.batchItems(ids);
+    if (!out.ok) return res.status(400).json(out);
+    res.json(out);
   } catch (err) {
     next(err);
   }
