@@ -93,6 +93,12 @@ async function loadContext(db, campaignId) {
   return { tiers, optProduct: new Map(opts.map(o => [o.opt_key, clean(o.product_name)])) };
 }
 
+/** 단계는 있는데 범위를 못 정한 상태인가(scopeFor 가 null 일 때만 의미) — 고른 옵션 줄이 공고에 없거나, 옵션 없이 왔는데 단계가 한 상품 공통이 아니다. */
+function unresolved(ctx, optKey) {
+  if (!ctx || !ctx.tiers || !ctx.tiers.length) return false;
+  return optKey ? !ctx.optProduct.has(optKey) : true;
+}
+
 /** 고른 옵션(없으면 null)에 걸리는 단계 범위 → { key, tiers } | null */
 function scopeFor(ctx, optKey) {
   if (!ctx || !ctx.tiers || !ctx.tiers.length) return null;
@@ -100,7 +106,9 @@ function scopeFor(ctx, optKey) {
     const own = ctx.tiers.filter(t => t.opt_key === optKey);
     if (own.length) return { key: `opt:${optKey}`, tiers: own };
     const product = ctx.optProduct.get(optKey) || '';
-    const common = ctx.tiers.filter(t => t.opt_key == null && (t.product_name === product || t.product_name === optKey));
+    // ★ 코드리뷰 P1: 상품을 알면 그 상품의 공통 단계만 — 옵션 이름이 다른 상품 이름과 같아도 섞지 않는다(섞이면 남의 금액·자리로 잡힌다).
+    //   옵션 이름 = 상품 이름 짝은 상품을 모를 때만(옵션 없는 상품 줄 · 옛 자료).
+    const common = ctx.tiers.filter(t => t.opt_key == null && (product ? t.product_name === product : t.product_name === optKey));
     if (common.length) return { key: `prod:${common[0].product_name}`, tiers: common };
     return null;
   }
@@ -149,7 +157,16 @@ async function judge(db, campaignId, optKey, wantQty, { excludeAppId = null } = 
   if (!enabled()) return null;
   const ctx = await loadContext(db, campaignId);
   const scope = scopeFor(ctx, optKey);
-  if (!scope) return null;
+  if (!scope) {
+    /* ★ 코드리뷰 P2: 단계가 있는 공고인데 어느 단계인지 정할 수 없으면 통과(null)로 접지 않는다(fail-closed) —
+       공고 발행 직후 옵션이 아직 저장되지 않은 찰나·옵션 저장 실패·고른 옵션 줄이 없는 상태에서 개수 선택 없이 참여되던 빈틈.
+       옵션 줄이 있고 그 옵션에 단계가 없는 것(단계 없는 상품)만 종전대로 통과. */
+    if (unresolved(ctx, optKey)) {
+      return { ok: false, status: 409, reason: 'tier_unavailable', views: [],
+        error: '이 공고는 지금 참여를 받을 수 없어요(구매수량 준비 중). 잠시 후 다시 시도해주세요.' };
+    }
+    return null;
+  }
   const views = tierViews(scope, await fetchUsage(db, campaignId, ctx, { excludeAppId }));
   const want = int(wantQty);
   if (!want) {
@@ -168,5 +185,5 @@ async function judge(db, campaignId, optKey, wantQty, { excludeAppId = null } = 
 }
 
 module.exports = {
-  enabled, planTierCopy, insertTiers, loadContext, scopeFor, fetchUsage, tierViews, judge, QtyTierError,
+  enabled, planTierCopy, insertTiers, loadContext, scopeFor, unresolved, fetchUsage, tierViews, judge, QtyTierError,
 };

@@ -145,3 +145,33 @@ test('「가」 — 접수 뒤 단계 수정·단계 상품 이름 바꾸기·�
   const fn = routes.slice(routes.indexOf('async function _saveCampaignOptions('), routes.indexOf('INSERT INTO campaign_options (campaign_id, opt_key, option_url'));
   assert.match(fn, /await _applyOptionRenames\(client, campaignId, options, keep\);[\s\S]*SELECT 1 FROM campaign_qty_tiers WHERE campaign_id=\$1 LIMIT 1[\s\S]*throw Object\.assign\(new Error\(`구매수량 단계가 있는 공고라 상품 이름/);
 });
+
+// ★ 코드리뷰(PR #1690) P1·P2
+test('P1 — 옵션 이름이 다른 상품 이름과 같아도 그 옵션 상품의 단계만 본다', async () => {
+  // 상품 「블랙」(옵션 라지 · 2개 200원) · 상품 「램프」(옵션 「블랙」 · 2개 900원)
+  const tiers = [T(null, 2, 1, 200, '블랙'), T(null, 2, 1, 900, '램프')];
+  const options = [{ opt_key: '라지', product_name: '블랙' }, { opt_key: '블랙', product_name: '램프' }];
+  const v = await svc.judge(fakeDb({ tiers, options, usage: [] }), 'c1', '블랙', 2);
+  assert.ok(v.ok && v.amount === 900, '램프의 블랙 = 램프 단계(900원) ' + JSON.stringify(v));
+  const ctx = { tiers, optProduct: new Map(options.map(o => [o.opt_key, o.product_name])) };
+  assert.equal(svc.scopeFor(ctx, '블랙').key, 'prod:램프');
+  assert.equal(svc.scopeFor(ctx, '블랙').tiers.length, 1, '두 상품 단계를 섞지 않는다');
+});
+
+test('P2 — 단계는 있는데 범위를 못 정하면 통과로 접지 않는다(발행 직후 옵션 미저장 · 옵션 저장 실패)', async () => {
+  const optTiers = [T('블랙', 2, 1, 20000)];
+  // 옵션 줄이 아직 없다(발행 tx 커밋 뒤 · 옵션 저장 전) — 옵션 없이 온 참여
+  const a = await svc.judge(fakeDb({ tiers: optTiers, options: [], usage: [] }), 'c1', null, undefined);
+  assert.equal(a && a.reason, 'tier_unavailable');
+  // 고른 옵션 줄이 공고에 없다
+  const b = await svc.judge(fakeDb({ tiers: optTiers, options: [], usage: [] }), 'c1', '블랙', 2);
+  assert.ok(b.ok === true || b.reason === 'tier_unavailable', '옵션 전용 단계는 opt_key 로 바로 잡힌다(줄 없어도 단계 자체는 맞다)');
+  const c = await svc.judge(fakeDb({ tiers: [T(null, 2, 1, 1, '가습기')], options: [], usage: [] }), 'c1', '화이트', 2);
+  assert.equal(c && c.reason, 'tier_unavailable', '옵션 줄이 없으면 어느 상품 단계인지 모른다');
+  // 옵션 없이 왔는데 공통 단계가 상품 둘 → 모른다 → 막음
+  const d = await svc.judge(fakeDb({ tiers: [T(null, 1, 1, 1, 'A'), T(null, 1, 1, 1, 'B')], options: [], usage: [] }), 'c1', null, 1);
+  assert.equal(d && d.reason, 'tier_unavailable');
+  // 단계 없는 상품의 옵션(줄은 있다) = 종전대로 통과
+  const e = await svc.judge(fakeDb({ tiers: optTiers, options: [{ opt_key: '블랙', product_name: '가습기' }, { opt_key: '컵', product_name: '컵' }], usage: [] }), 'c1', '컵', undefined);
+  assert.equal(e, null, '단계 없는 상품은 종전 그대로');
+});
