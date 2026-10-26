@@ -266,6 +266,10 @@ async function listPaymentTargets(opts = {}) {
   // 좌표로 못 찾은 행만 — 모집공고 경유 주문은 원장 좌표가 `campaign:<공고ID>` 라 위 조회에 안 걸린다.
   const linkedFormMap = await _loadLinkedFormAccounts(
     rows.filter(r => !orderMap[r.sheetId + '||' + r.tabName + '||' + r.rowIndex]));
+  // ★ 결정 289 ④ 보완 — 고른 구매수량 단계 금액도 같은 이유로 좌표 조회에 안 걸린다(단계 주문은 **전부** 공고 경유).
+  //   경고를 줄이는 재료로만 쓴다 — 계좌·금액 판정에는 넣지 않는다(위 연결 계좌 조회와 분리).
+  const linkedTierMap = await _loadLinkedQtyTierAmounts(
+    rows.filter(r => !orderMap[r.sheetId + '||' + r.tabName + '||' + r.rowIndex]));
   // ★ 결정 231 재료 — 이 줄에서 이미 이체 실패한 계좌 · 등록 계좌가 마지막으로 바뀐 시각(둘 다 실패해도 종전 동작)
   const failedAcctMap = await _loadFailedAccounts(rows);
   // ★ 결정 233 재료 — 직원이 작업보드에서 고친 은행·계좌번호·예금주(조회 실패 = 빈 결과 = 종전 동작)
@@ -572,7 +576,7 @@ async function listPaymentTargets(opts = {}) {
       accountMismatch: acctMismatch,
       productPrice, reviewFee: fee, amount, priceSource, feeSource, deliveryKind,
       workboardPrice, orderPrice, priceMismatch,
-      qtyTierAmount: ord && ord.qtyTierAmount ? ord.qtyTierAmount : null,
+      qtyTierAmount: (ord && ord.qtyTierAmount) || linkedTierMap[key + '||' + r.rowIndex] || null,
       tabReviewFee: tabFee, campaignReviewFee: campFee,
       transferMemo: memo, memoSource,
       issues, warnings,
@@ -811,6 +815,45 @@ async function _loadLinkedFormAccounts(rows) {
     }
   } catch (e) {
     try { require('../utils/logger').logger.warn(`[payment] 연결 주문 계좌 조회 실패(무시): ${e.message}`); } catch (_) {}
+  }
+  return out;
+}
+
+/**
+ * 좌표로 못 찾은 행의 **고른 구매수량 단계 1인 금액**(결정 289 ④ 보완 · 2026-10-26 로컬 전과정 실테스트에서 발견).
+ * ★ 왜: 단계 주문은 공고 참여로만 생기고 공고 경유 주문의 원장 좌표는 `campaign:<공고ID>` 라
+ *   `_loadOrderPrices` 에 안 걸린다(운영 최근 7일 공고 경유 956건 전부) → 「고른 개수 금액이면 단독 금액 경고 제외」가
+ *   한 건도 동작하지 않고 2개 19,000원 정상 구매에 '금액 확인'이 붙었다.
+ * ★ 짝짓기는 `_loadLinkedFormAccounts` 와 같은 하드 링크(주문 id + 주문 줄 번호 = 작업표 줄 번호 · 둘 이상 = 모호 → 안 씀).
+ * ★ 경고를 **줄이는** 재료로만 쓴다 — 이 값으로 이체금액·계좌가 바뀌지 않는다.
+ * ★ 조회 실패 = 빈 결과(종전 동작 = 경고가 그대로 남는 쪽).
+ */
+async function _loadLinkedQtyTierAmounts(rows) {
+  const out = {};
+  if (!rows || !rows.length) return out;
+  try {
+    const { rows: found } = await pool.query(
+      `SELECT t.sheet_id AS "sheetId", t.tab_name AS "tabName", t.row_index AS "rowIndex",
+              os.qty_tier_amount AS "qtyTierAmount"
+         FROM unnest($1::text[], $2::text[], $3::int[]) AS t(sheet_id, tab_name, row_index)
+         JOIN campaign_participants cp
+           ON cp.sheet_id = t.sheet_id AND cp.tab_name = t.tab_name AND cp.seq = t.row_index
+          AND cp.deleted_at IS NULL AND cp.active = TRUE
+         JOIN order_submissions os
+           ON os.id = cp.order_submission_id AND os.deleted_at IS NULL
+          AND os.sheet_row = cp.seq
+        WHERE os.qty_tier_amount IS NOT NULL`,
+      [rows.map(r => r.sheetId), rows.map(r => r.tabName), rows.map(r => r.rowIndex)]);
+    const seen = new Set();
+    for (const o of found) {
+      const k = o.sheetId + '||' + o.tabName + '||' + o.rowIndex;
+      if (seen.has(k)) { out[k] = null; continue; }   // 한 줄에 둘 이상 = 모호 → 쓰지 않는다
+      seen.add(k);
+      const v = Number(o.qtyTierAmount);
+      out[k] = Number.isFinite(v) && v > 0 ? v : null;
+    }
+  } catch (e) {
+    try { require('../utils/logger').logger.warn(`[payment] 연결 주문 구매수량 금액 조회 실패(무시): ${e.message}`); } catch (_) {}
   }
   return out;
 }
@@ -2095,4 +2138,5 @@ module.exports = {
   _acctChangedAt, _holderKey,
   advertiserPayoutAccounts, advertiserPayoutLocked, advertiserPaysFrom, isAdvertiserPayoutChoice,
   ADVERTISER_PAYOUT, ADVERTISER_PAYOUT_LABEL, _classifyAdvertiserPayout,
+  _loadLinkedQtyTierAmounts,
 };

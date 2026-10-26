@@ -166,5 +166,30 @@ function stubDb(routes) {
     assert.ok(/const qtot=payTotal!=null/.test(f), '총결제금액은 작업오더 결제합계 우선(잔여집행 기준과 같은 값 · 코드리뷰)');
   });
 
+  // ── 6. 입금관리 — 공고 경유 주문(원장 좌표 campaign:<공고ID>)의 고른 단계 금액 (2026-10-26 로컬 전과정 실테스트에서 발견) ──
+  await t('★ 입금관리 — 공고 경유 주문도 작업표 줄의 주문 연결로 고른 단계 금액을 찾는다(PGlite) · 오염 링크·취소 주문은 안 씀', async () => {
+    const TC = '10/27(쿠팡)공고경유 3건';
+    await db.exec(`
+      INSERT INTO order_submissions (id, sheet_id, tab_name, orderer, recipient, phone, price, purchase_qty, qty_tier_amount, sheet_row, deleted_at)
+      VALUES ('00000000-0000-0000-0000-0000000000c1','campaign:c9','campaign:c9','하','하','01070000011','19000',2,19000,2,NULL),
+             ('00000000-0000-0000-0000-0000000000c2','campaign:c9','campaign:c9','거','거','01070000012','19000',2,19000,9,NULL),
+             ('00000000-0000-0000-0000-0000000000c3','campaign:c9','campaign:c9','너','너','01070000013','19000',2,19000,4,NOW());
+      INSERT INTO campaign_participants (sheet_id, tab_gid, tab_name, seq, reviewer_name, phone8, source, row_json, active, order_submission_id)
+      VALUES ('${S}','203','${TC}',2,'하','70000011','sheetless_order','{}'::jsonb,TRUE,'00000000-0000-0000-0000-0000000000c1'),
+             ('${S}','203','${TC}',3,'거','70000012','sheetless_order','{}'::jsonb,TRUE,'00000000-0000-0000-0000-0000000000c2'),
+             ('${S}','203','${TC}',4,'너','70000013','sheetless_order','{}'::jsonb,TRUE,'00000000-0000-0000-0000-0000000000c3');
+    `);
+    const pay = require('../src/services/payment.service');
+    const m = await pay._loadLinkedQtyTierAmounts([2, 3, 4].map(n => ({ sheetId: S, tabName: TC, rowIndex: n })));
+    assert.strictEqual(m[`${S}||${TC}||2`], 19000, '줄 번호가 맞는 연결 = 고른 단계 금액');
+    assert.ok(!m[`${S}||${TC}||3`], '주문 줄 번호 ≠ 작업표 줄 번호(오염 링크)는 안 쓴다');
+    assert.ok(!m[`${S}||${TC}||4`], '취소된 주문은 안 쓴다');
+    const src = read('src/services/payment.service.js');
+    assert.ok(/qtyTierAmount: \(ord && ord\.qtyTierAmount\) \|\| linkedTierMap\[key \+ '\|\|' \+ r\.rowIndex\] \|\| null,/.test(src),
+      '좌표 조회가 비면 연결 조회 값을 쓴다(경고를 줄이는 재료로만)');
+    const linkedAcct = src.slice(src.indexOf('async function _loadLinkedFormAccounts'), src.indexOf('async function _loadLinkedQtyTierAmounts'));
+    assert.ok(!/qty_tier_amount/.test(linkedAcct), '계좌 연결 조회에는 금액 재료를 섞지 않는다(157 · 6e 가드 의미 그대로)');
+  });
+
   console.log(`\n✅ qtyTiersDisplay: ${passed} 통과`);
 })().catch(e => { console.error(e); process.exitCode = 1; });
