@@ -2040,7 +2040,7 @@
   .cndval:hover{text-decoration-color:var(--accent)}
   /* 현금영수증 설정 팝업 */
   .cndlb{display:block;font-size:11px;font-weight:700;color:var(--muted);margin:2px 0 5px}
-  .cndchips{display:flex;gap:6px;margin-top:7px}
+  .cndchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
   .cndchips .wbl-b{font-size:11px;padding:3px 10px}
   .cndpv{margin-top:10px;font-size:12px;font-weight:700;border-radius:8px;padding:8px 10px}
   .cndpv.on{background:var(--accent-soft);color:var(--accent-deep)}
@@ -7871,20 +7871,28 @@ const _ADV_PAYOUT_NOTE_HTML=`<div class="cndnote"><b>🏢 업체입금</b>을 �
   `· 업체가 입금 칸을 우클릭해 <b>입금일을 기록</b>합니다 · <b>우리 입금관리·이체 파일에서는 빠집니다</b><br>`+
   `<span style="color:#B91C1C">⚠ 업체 링크는 로그인 없이 열립니다 — 링크를 가진 사람은 참여자 계좌를 봅니다.</span></div>`;
 const _ADV_PAYOUT_OFF_CONFIRM='업체입금을 다른 이체은행으로 바꿉니다.\n\n· 입금일이 기록되지 않은 줄이 바로 우리 입금관리 목록으로 돌아옵니다\n· 업체가 이미 보냈는데 날짜만 안 적은 줄이 있는지 먼저 업체에 확인해 주세요(그대로 보내면 이중 입금)\n· 업체 화면의 계좌 칸·입금일 기록은 바로 닫힙니다\n\n진행할까요?';
+/* 결정 292 — 제품비 업체 · 리뷰비 우리(split). 서버 값 split_kbank|split_hana(리뷰비를 보낼 우리 은행이 함께 들어 있다). */
+const _SPLIT_PAYOUT_NOTE_HTML=`<div class="cndnote"><b>🏢 제품비 업체 · 리뷰비 우리</b>를 고르면 —<br>`+
+  `· 제품비(구매대금 페이백)는 <b>업체가</b> 보내고 입금 칸에 입금일을 기록합니다(업체입금과 같은 계좌 공개)<br>`+
+  `· 우리 입금관리에는 <b>리뷰비만</b> 잡힙니다 — 리뷰 제출을 기다리지 않고 구매가 끝난 줄부터(고른 은행 서식)<br>`+
+  `· 이미 우리가 제품비까지 보낸 줄은 그대로 끝입니다(리뷰비 추가 지급 없음)</div>`;
+const _isGoodsAdvBank=v=>v==='advertiser'||v==='split_kbank'||v==='split_hana';
 function _cndBankModal(cd){
   const cur = cd.bankSource==='campaign'||cd.bankSource==='tab' ? (cd.transferBank||'') : '';
-  const opts=[['','🔄 자동(작업오더 물건비)'],['hana','🟩 하나은행'],['kbank','🟦 케이뱅크'],['advertiser','🏢 업체입금']];
+  const opts=[['','🔄 자동(작업오더 물건비)'],['hana','🟩 하나은행'],['kbank','🟦 케이뱅크'],['advertiser','🏢 업체입금'],
+    ['split_kbank','🏢 제품비 업체 · 리뷰비 케이뱅크'],['split_hana','🏢 제품비 업체 · 리뷰비 하나은행']];
   _cndMini({
     title:'🏦 이체은행 — 탭 설정',
     body: `<div class="cndchips" id="cndBkChips">${opts.map(([v,l])=>`<button type="button" class="wbl-b${v===cur?' on':''}" data-v="${esc(v)}" onclick="_cndBkPick(this)">${esc(l)}</button>`).join('')}</div>`+
       `<div class="cndnote">이체 파일을 어느 은행 서식으로 뽑을지 정합니다 — <b>입금관리</b>가 이 값을 씁니다.<br>`+
       `자동으로 두면 작업오더의 물건비를 따릅니다(현금 → 하나은행 · 계산서/수수료 → 케이뱅크).<br>`+
       `아직 모집공고가 없어 <b>탭 설정</b>에 저장합니다 — 공고를 발행하면 <b>공고 값이 우선</b>합니다(자동).</div>`+
-      _ADV_PAYOUT_NOTE_HTML,
+      _ADV_PAYOUT_NOTE_HTML+_SPLIT_PAYOUT_NOTE_HTML,
     onSave: async ()=>{
       const sel=document.querySelector('#cndBkChips .wbl-b.on');
       if(!sel){ _toast('이체은행을 선택해 주세요.'); return false; }
-      const disabling = cur==='advertiser' && sel.dataset.v!=='advertiser';
+      // 제품비를 업체가 보내던 작업(업체입금 · 제품비 업체)을 우리 입금으로 돌릴 때만 확인(서버도 같은 규칙 — guardTransferBankWrite)
+      const disabling = _isGoodsAdvBank(cur) && !_isGoodsAdvBank(sel.dataset.v);
       if(disabling && !confirm(_ADV_PAYOUT_OFF_CONFIRM)) return false;
       const t=STATE.cur;
       const r=await api('/api/trackb/payment/transfer-setting',{method:'POST',
@@ -12628,6 +12636,8 @@ const PAY_ISSUE_LABEL = {
   no_account:'계좌 미등록', no_holder:'예금주 미등록', no_price:'결제금액 조회안됨', zero_amount:'금액 0원',
   advertiser_pays:'업체 직접 입금 작업', advertiser_payout_unknown:'업체입금 여부 확인 실패(새로고침)',
   advertiser_pays_orphan:'이체은행이 업체입금인데 연결된 업체 없음 — 이체은행 확인',
+  // 결정 292 — 제품비 업체 · 리뷰비 우리
+  not_purchased:'구매 전(결제금액 없음) — 리뷰비는 구매 뒤에', split_no_fee:'리뷰비 미설정 — 작업 조건에서 리뷰비를 정해 주세요',
 };
 const PAY_BANKS = [['kbank','케이뱅크'],['hana','하나은행']];
 /* 보완 창구 분류 — ★ 사유마다 "고치는 곳"이 다르다.
@@ -12710,6 +12720,16 @@ function _pmFinishedNoteHtml(){
   return `<div class="pmnote">🏁 마감된 작업 <b>${Number(f.works)||0}개</b>의 <b>${Number(f.rows)||0}건</b>은 목록에서 뺐습니다${f.payable?` — 이 중 <b>지금 입금 가능한 ${Number(f.payable)}건</b>이 있습니다`:''}. <button class="btn sm" onclick="_pmToggleFinished()">보기</button></div>`;
 }
 
+/* 결정 292 — 제품비 업체 · 리뷰비 우리 작업: 금액이 리뷰비만이라는 사실과 진행(대상·구매 전)을 작업마다 한 줄로 말한다.
+     "투입이 다 끝나면 한 번에 전원 입금"(사용자 2026-10-26)을 고를 수 있게 구매 전 줄 수를 함께 보인다. */
+function _pmSplitNoteHtml(){
+  const ws=STATE.pmSplitWorks||[];
+  if(!ws.length) return '';
+  const lines=ws.map(w=>`<b>${esc(w.tabLabel||w.tabName)}</b> — 리뷰비 ${_pmNum(Number(w.reviewFee)||0)}원 · 지금 보낼 수 있음 <b>${Number(w.payable)||0}명</b>`+
+    (Number(w.notPurchased)?` · 구매 전 ${Number(w.notPurchased)}명`:' · 구매 전 0명(모두 투입 완료)')+
+    (w.noAdvertiser?' · <span style="color:#B91C1C">⚠ 연결된 업체가 없어 제품비를 보내고 적을 사람이 없습니다(업체관리에서 연결)</span>':'')).join('<br>');
+  return `<div class="pmnote">🏢 제품비는 업체가 보내는 작업 — 아래 금액은 <b>리뷰비만</b>입니다(리뷰 제출 전에도 보낼 수 있음).<br>${lines}</div>`;
+}
 /* 결정 247 — 업체가 직접 입금하는 작업은 서버가 목록에서 뺀다(이체 회차에도 안 담긴다). 뺀 사실만 한 줄로 말한다. */
 function _pmAdvPaidNoteHtml(){
   const a=STATE.pmAdvPaidEx;
@@ -12756,6 +12776,7 @@ async function _pmLoad(force){
   }
   STATE.pmFinEx = t.finishedExcluded||null; STATE.pmFinUnknown = !!t.finishedUnavailable;
   STATE.pmAdvPaidEx = t.advertiserPaidExcluded||null;
+  STATE.pmSplitWorks = t.splitWorks||[];
   // 과거 버전에서 저장된 입금 열 정보가 비어 실패한 회차는 화면을 열 때 한 번만 자동 보완한다.
   // 새 결과 파일은 result-auto-apply(안에서 같은 반영 계산) 경로에서 즉시 기록하므로, 이 경로는 기록 실패 이력에만 해당한다.
   const legacyFailed = STATE.pmBatches.filter(batch => batch.status === 'applied'
@@ -13117,7 +13138,7 @@ function _pmRender(){
         <h2 class="pmh2">이체 회차</h2>
         ${_pmBatchTable(STATE.pmBatches||[])}
       </section>
-      ${_pmFinishedNoteHtml()}${_pmAdvPaidNoteHtml()}
+      ${_pmFinishedNoteHtml()}${_pmAdvPaidNoteHtml()}${_pmSplitNoteHtml()}
       ${blocked.length?`<div class="pmnote">⚠ <b>보류 ${blocked.length}건</b>은 파일에서 빠집니다 — 아래에서 사유를 바로 보완할 수 있습니다.</div>`:''}
       ${noMemo.length?`<div class="pmnote">⚠ <b>통장표시가 없는 건 ${noMemo.length}건</b>은 선택할 수 없습니다(리뷰어 통장에 이름이 안 찍히므로) — 작업 선택의 <b>[입금명 필요]</b> 줄을 누르면 작업 화면에서 입금명 설정 창이 바로 열립니다.</div>`:''}
       ${failedAgain.length?`<div class="pmnote">⚠ <b>이미 이체가 실패한 계좌 그대로인 ${failedAgain.length}건</b>은 체크를 풀어 두었습니다 — 고객이 내정보에서 계좌를 고치면 고친 계좌로 다시 담기고, 은행 쪽 일시 오류였다면 아래 표에서 체크해 다시 담으세요.</div>`:''}
@@ -13215,7 +13236,7 @@ function _pmTargetTable(items){
       <td class="mono">${esc(it.bankOfficial||it.bankName||'-')} ${esc(it.bankAccount||'')}</td>
       <td>${esc(it.accountHolder||'-')}</td>
       <td class="num">${_pmNum(it.amount)}</td>
-      <td class="num dim">${_pmNum(it.productPrice)}${it.priceSource==='workboard_edit'?`<span class="pmauto" title="관리자가 수정한 현재 작업보드 표시값을 우선 적용했습니다${it.priceMismatch?` · 주문 원장 ${_pmNum(it.orderPrice)}원`:''}">수정값</span>`:it.priceSource==='order'?'<span class="pmauto" title="작업보드에 결제금액이 없어 주문 원장 금액을 사용했습니다">원장</span>':''}${it.priceOutlier?`<span class="pmpriceout" title="이 작업 ${it.priceOutlier.workCount}건 중 ${it.priceOutlier.dominantCount}건은 ${_pmNum(it.priceOutlier.dominantAmount)}원입니다">금액 확인</span>`:''}+${_pmNum(it.reviewFee||0)}</td>
+      <td class="num dim">${it.goodsByAdvertiser?`<span title="제품비 ${_pmNum(it.productPrice)}원은 업체가 보냅니다 — 우리는 리뷰비만(결정 292)">제품비 업체</span> · 리뷰비 ${_pmNum(it.reviewFee||0)}</td>`:`${_pmNum(it.productPrice)}${it.priceSource==='workboard_edit'?`<span class="pmauto" title="관리자가 수정한 현재 작업보드 표시값을 우선 적용했습니다${it.priceMismatch?` · 주문 원장 ${_pmNum(it.orderPrice)}원`:''}">수정값</span>`:it.priceSource==='order'?'<span class="pmauto" title="작업보드에 결제금액이 없어 주문 원장 금액을 사용했습니다">원장</span>':''}${it.priceOutlier?`<span class="pmpriceout" title="이 작업 ${it.priceOutlier.workCount}건 중 ${it.priceOutlier.dominantCount}건은 ${_pmNum(it.priceOutlier.dominantAmount)}원입니다">금액 확인</span>`:''}+${_pmNum(it.reviewFee||0)}</td>`}
       <td>${memoSig!==null?'':memoCell(it, idx)}</td>
       <td class="pmwarn">${whySig!==null?'':`${esc(why)} ${fixBtn}`}</td></tr>${mmRow}`;
     }).join('');
@@ -13661,7 +13682,9 @@ function _pmDownloadConfirmText(label, picked){
 async function _pmDownload(bank){
   const picked = _pmVisibleItems().filter(it=>it.bank===bank && _pmOn(it));
   // payoutFp = 지금 화면에 보이는 송금 계좌의 지문 — 그 사이 계좌가 바뀌면 서버가 회차를 만들지 않는다(결정 233)
-  const rows = picked.map(it=>({sheetId:it.sheetId, tabName:it.tabName, rowIndex:it.rowIndex, payoutFp:it.payoutFp}));
+  // payoutMode = 지금 화면이 본 입금 방식(제품비를 누가 보내는지) — 그 사이 바뀌면 금액 구성이 달라져 서버가 회차를 만들지 않는다(결정 292)
+  const rows = picked.map(it=>({sheetId:it.sheetId, tabName:it.tabName, rowIndex:it.rowIndex, payoutFp:it.payoutFp,
+    ...(it.payoutMode?{payoutMode:it.payoutMode}:{})}));
   if(!rows.length){ toast('담을 건이 없습니다.'); return; }
   const label = (PAY_BANKS.find(b=>b[0]===bank)||[])[1]||bank;
   if(!confirm(_pmDownloadConfirmText(label, picked))) return;
@@ -14693,7 +14716,7 @@ async function _bnSave(){
   // ★ 여기서 화면을 갈아타지 않는다(사용자는 은행 이름 탭에 그대로 머문다).
   try{
     const t = await api(_pmTargetsUrl());
-    if(t && t.ok){ STATE.pmItems=t.items||[]; STATE.pmSum=t.summary||{}; STATE.pmFinEx=t.finishedExcluded||null; STATE.pmFinUnknown=!!t.finishedUnavailable; STATE.pmAdvPaidEx=t.advertiserPaidExcluded||null; }
+    if(t && t.ok){ STATE.pmItems=t.items||[]; STATE.pmSum=t.summary||{}; STATE.pmFinEx=t.finishedExcluded||null; STATE.pmFinUnknown=!!t.finishedUnavailable; STATE.pmAdvPaidEx=t.advertiserPaidExcluded||null; STATE.pmSplitWorks=t.splitWorks||[]; }
   }catch(_){}
   STATE.bn = {
     rows:(r.banks||[]).map(b=>({ ...b, aliases:(b.aliases||[]).map(a=>({...a})) })),

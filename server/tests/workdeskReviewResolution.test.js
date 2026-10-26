@@ -86,7 +86,7 @@ function menuContext({ field='col:리뷰제출', role='staff', count=1, archived
       CREATE TABLE index_master_archive(sheet_id text,tab_name text);
       CREATE TABLE review_index(id uuid DEFAULT gen_random_uuid(),sheet_id text,tab_name text,row_index integer,is_submitted boolean DEFAULT false,is_submitted2 text,row_json jsonb,built_at timestamptz);
       CREATE TABLE participant_edits(sheet_id text,tab_name text,anchor_type text,anchor_value text,field text,kind text,value_text text,value_bool boolean,reverted_at timestamptz,reverted_by text);
-      CREATE TABLE payment_batch_items(sheet_id text,tab_name text,row_index integer,status text);
+      CREATE TABLE payment_batch_items(sheet_id text,tab_name text,row_index integer,status text,product_price integer,review_fee integer,amount integer);
       CREATE TABLE review_submissions(sheet_id text,tab_name text,row_index integer,slot_key text,completed_at timestamptz);
       CREATE TABLE reviewer_participations(campaign_participant_id uuid,lifecycle_status text,review_obligation_status text);
       CREATE TABLE index_master(sheet_id text,tab_name text,submitted_count integer);

@@ -355,6 +355,9 @@ router.get('/participation-brief', reviewerSessionMiddleware, async (req, res) =
            FROM payment_batch_items
           WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
             AND status IN ('paid','failed')
+            -- 결정 292 — 리뷰비만 보낸 항목(제품비 업체 작업)은 페이백이 아니다: 1천원만 받았는데 "페이백 완료"로 보이면 안 되고,
+            -- 업체가 적은 제품비 입금일(아래 작업보드 입금 칸)을 가리지도 않게 뺀다.
+            AND NOT ${require('../services/payment.service').feeOnlyItemSql()}
           ORDER BY (status = 'paid') DESC, created_at DESC
           LIMIT 1`,
         [sheetId, tabName, rowIndex]

@@ -132,8 +132,24 @@ async function listPaymentTargets(opts = {}) {
   // ★ 선택 필터(sheetId·tabName)는 뒤에 push 되어 $3·$4 가 된다 — 자리표시자는 params.length 로 뽑으므로
   //   여기 순서만 지키면 어긋나지 않는다.
   const params = [payPatterns, AMOUNT_EXACT_KEYS];
+  /* ★ 결정 292 — 제품비 업체 · 리뷰비 우리(split) 작업은 **리뷰 제출을 기다리지 않고**(사용자 확정 2026-10-26 "바로 보내도 된다"),
+       입금 칸·입금 표시는 **업체가 보낸 제품비 기록**이라 우리 리뷰비의 "이미 입금됨" 근거가 아니다.
+       그래서 후보 작업(넓게)에서만 그 조건들을 풀고, 행을 읽은 뒤 split 이 아니면 아래 strictOk 로 원래 조건을 다시 건다.
+       우리 이중 지급 잠금(회차 pending/paid · 입금 원장 payment_records)·미작성 종결 제외는 **그대로** 둔다. */
+  const accountsOnlyMode = opts.accountsForAllRows === true;
+  const splitKeys = accountsOnlyMode ? [] : await _splitCandidateKeys();
+  let inSplit = 'FALSE';
+  if (splitKeys.length) { params.push(splitKeys); inSplit = `((ri.sheet_id || '||' || ri.tab_name) = ANY($${params.length}::text[]))`; }
+  const relaxForSplit = c => (inSplit === 'FALSE' ? c : `(${c} OR ${inSplit})`);
+  const strictConds = [];   // split 후보에서 풀어 준 조건 — 행 단위로 다시 계산해 split 이 아니면 걸러낸다
+  // alt 가 있으면 split 후보에서도 **alt 를 만족할 때만** 푼다(통째로 풀지 않는다).
+  const strict = (c, alt) => {
+    strictConds.push(c);
+    if (inSplit === 'FALSE' || !alt) return relaxForSplit(c);
+    return `(${c} OR (${inSplit} AND ${alt}))`;
+  };
   const where = [
-    'ri.is_submitted = TRUE',
+    strict('ri.is_submitted = TRUE'),
     'ri.row_index IS NOT NULL',
     "COALESCE(ri.phone8,'') <> ''",
     // 알림톡 3회 성공 뒤 최종기한까지 미작성으로 종결된 작업은, 나중에 리뷰칸이 바뀌어도
@@ -142,15 +158,33 @@ async function listPaymentTargets(opts = {}) {
         SELECT 1 FROM review_closed_targets rrs
          WHERE rrs.sheet_id = ri.sheet_id AND rrs.tab_name = ri.tab_name
            AND rrs.row_index = ri.row_index AND rrs.review_status = 'closed_no_review')`,
-    `NOT EXISTS (SELECT 1 FROM reviewer_participations p WHERE p.sheet_id=ri.sheet_id AND p.tab_name=ri.tab_name
-      AND p.row_index=ri.row_index AND p.lifecycle_status='active' AND p.review_obligation_status IN ('pending','unknown'))`,
+    strict(`NOT EXISTS (SELECT 1 FROM reviewer_participations p WHERE p.sheet_id=ri.sheet_id AND p.tab_name=ri.tab_name
+      AND p.row_index=ri.row_index AND p.lifecycle_status='active' AND p.review_obligation_status IN ('pending','unknown'))`),
     // 미입금 — search.service._isPaid 와 동일 규칙(SQL 판)
-    `NOT (ri.is_submitted2 = 'PAID' OR EXISTS (
+    /* ★ 결정 292 — split 작업에서도 입금 칸을 **통째로** 풀지 않는다(레드팀): 채워진 입금 칸이 **모두 업체가 넣은 값**
+         (활성 편집기록이 `업체#…` 이고 지금 칸 값과 같다 = 업체가 보낸 제품비 기록)일 때만 "아직 우리 리뷰비 미지급"으로 본다.
+         우리 직원이 [💰 입금수정]으로 적은 날짜(원장 없이 우리가 보낸 돈)는 그대로 "이미 입금" — 리뷰비를 또 보내지 않는다. */
+    strict(`NOT (ri.is_submitted2 = 'PAID' OR EXISTS (
         SELECT 1 FROM jsonb_each_text(COALESCE(ri.row_json, '{}'::jsonb)) kv
          WHERE kv.key ILIKE ANY($1) AND btrim(kv.value) <> ''))`,
+      `NOT EXISTS (
+        SELECT 1 FROM jsonb_each_text(COALESCE(ri.row_json, '{}'::jsonb)) kv
+         WHERE kv.key ILIKE ANY($1) AND btrim(kv.value) <> ''
+           AND NOT EXISTS (
+             SELECT 1 FROM campaign_participants cp
+               JOIN participant_edits pe
+                 ON pe.sheet_id = cp.sheet_id AND pe.tab_name = cp.tab_name
+                AND ((pe.anchor_type = 'order' AND cp.order_submission_id::text = pe.anchor_value)
+                  OR (pe.anchor_type = 'manual' AND cp.id::text = pe.anchor_value)
+                  OR (pe.anchor_type = 'identity' AND cp.identity_key = pe.anchor_value))
+              WHERE cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name AND cp.seq = ri.row_index
+                AND cp.deleted_at IS NULL AND cp.active = TRUE
+                AND pe.field = 'col:' || kv.key AND pe.reverted_at IS NULL
+                AND left(pe.created_by, 3) = '업체#' AND btrim(COALESCE(pe.value_text, '')) = btrim(kv.value)))`),
     // 작업보드에서 수동으로 `8/11`을 입력한 행은 실제 입금완료로 간주한다.
     // 대상 좌표는 아래 manual_paid CTE에서 한 번만 계산한다. 행별 상관 서브쿼리로
     // participant_edits 전체를 반복 조회하면 운영 데이터에서 같은 인덱스를 35만 회 이상 탄다.
+    // ★ 결정 292 — split 에서도 풀지 않는다(수동 입금 표시 = 우리가 보낸 돈).
     `NOT EXISTS (
         SELECT 1 FROM manual_paid mp
          WHERE mp.sheet_id = ri.sheet_id AND mp.tab_name = ri.tab_name
@@ -163,12 +197,14 @@ async function listPaymentTargets(opts = {}) {
     // 실제 입금 원장은 성공했는데 작업보드 표시·장부 재생성만 누락된 경우도 재지급 대상으로 살려내지 않는다.
     // 단, 관리자가 나중에 해당 행을 '미입금'으로 명시 정정(is_paid=false)한 경우에는 그 이전 원장만 풀어준다.
     // 정정 후 새 입금 원장이 생기면 시각 비교로 다시 잠겨 중복 이체를 막는다.
+    // ★ 결정 292 — ① 업체가 자기 입금 기록을 비운 것(created_by 업체#…)은 우리 원장을 푸는 정정이 아니다
+    //   ② split 후보 작업에서는 이 예외를 쓰지 않는다 — 그 작업의 입금 칸은 업체 제품비 기록이라, 칸을 비워도 우리 리뷰비는 나간 돈이다.
     `NOT EXISTS (
         SELECT 1
           FROM payment_records pr
          WHERE pr.sheet_id = ri.sheet_id AND pr.tab_name = ri.tab_name
            AND pr.row_index = ri.row_index
-           AND NOT EXISTS (
+           AND (${inSplit} OR NOT EXISTS (
              SELECT 1
                FROM campaign_participants cp
                JOIN participant_edits pe
@@ -179,13 +215,14 @@ async function listPaymentTargets(opts = {}) {
               WHERE cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
                 AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
                 AND pe.field = 'is_paid' AND pe.kind = 'bool' AND pe.value_bool = FALSE
-                AND pe.reverted_at IS NULL AND pe.created_at > pr.paid_at))`,
+                AND left(COALESCE(pe.created_by, ''), 3) <> '업체#'
+                AND pe.reverted_at IS NULL AND pe.created_at > pr.paid_at)))`,
   ];
   /* ★ 결정 247(2026-10-15 사용자 요청 "업체입금이면 리뷰 등록 여부와 상관없이 계좌 상시 공개") — **업체 화면 계좌 전용 모드**.
        리뷰 제출·입금·회차·종결·현금영수증 같은 "지금 보낼 건인가" 조건을 모두 빼고, 그 작업의 **모든 참여 줄**의 송금 계좌만 계산한다.
        계좌 판정(양식 → 고친 계좌 → 직원이 고친 칸, 마지막 값 우선)은 아래 같은 코드를 그대로 탄다(사본 0).
        ★ 한 작업 지정이 필수다(sheetId+tabName) — 이 모드의 결과는 **이체 대상이 아니다**. 회차 만들기·입금관리는 이 모드를 쓰지 않는다. */
-  const accountsOnly = opts.accountsForAllRows === true;
+  const accountsOnly = accountsOnlyMode;
   if (accountsOnly) {
     if (!opts.sheetId || !opts.tabName) throw new Error('accountsForAllRows: sheetId·tabName 필수');
     where.length = 0;
@@ -223,7 +260,9 @@ async function listPaymentTargets(opts = {}) {
                  OR replace(kv.key, ' ', '') = ANY($2)) AS "amountCells",
             -- 혼합배송 리뷰비 판정은 배송구분 한 칸만 필요하다. 행 JSON 전체를 넘기지 않아
             -- 기존 입금 후보/작업보드 금액 조회의 작은-행 계약을 보존한다.
-            COALESCE(ri.row_json->>'배송구분', '') AS "deliveryKind"
+            COALESCE(ri.row_json->>'배송구분', '') AS "deliveryKind",
+            -- 결정 292: split 후보 작업에서 풀어 준 조건을 그 행이 원래 통과하는가(아니면 split 일 때만 남긴다)
+            ${inSplit === 'FALSE' || accountsOnly ? 'TRUE' : `(NOT ${inSplit} OR (${strictConds.join(' AND ')}))`} AS "strictOk"
       FROM review_index ri
       WHERE ${where.join(' AND ')}
       ORDER BY ri.sheet_id, ri.tab_name, ri.row_index
@@ -241,7 +280,7 @@ async function listPaymentTargets(opts = {}) {
     if (pageRows.length < pageSize) break;
     offset += pageRows.length;
   }
-  if (!rows.length) return { items: [], summary: _summarize([]) };
+  if (!rows.length) return { items: [], summary: _summarize([]), splitWorks: [] };
 
   const sheetIds = [...new Set(rows.map(r => r.sheetId))];
   const tabNames = [...new Set(rows.map(r => r.tabName))];
@@ -276,6 +315,16 @@ async function listPaymentTargets(opts = {}) {
   const wbAcctMap = await _loadWorkboardAccountEdits(rows);
   const acctChangeMap = await _loadAccountChangeTimes([
     ...Object.values(acctMap), ...Object.values(ownerAcctMap)].map(a => a && a.reviewerId).filter(Boolean));
+  /* ★ 결정 292 — split 후보로 조건을 풀어 읽은 행 중 **실제 입금 방식이 split 이 아닌** 작업의 행은 원래 조건(리뷰 제출·미입금)을
+       다시 건다(공고가 은행을 명시해 탭의 split 값이 무시되는 경우 등). 판정 = payoutModeFrom — 아래 금액·은행 계산과 같은 재료. */
+  const _modeOf = key => payoutModeFrom(campMap[key] && campMap[key].transferBank, tabMap[key] && tabMap[key].transferBank);
+  if (rows.some(r => r.strictOk === false)) {
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const r = rows[i];
+      if (r.strictOk === false && _modeOf(r.sheetId + '||' + r.tabName).mode !== 'split') rows.splice(i, 1);
+    }
+    if (!rows.length) return { items: [], summary: _summarize([]), splitWorks: [] };
+  }
   // ★ 결정 247 재료 — 업체가 직접 입금하는 작업(이체은행 = 업체입금 · 판정 실패 = null = 전 건 보류 · fail-closed)
   const advPayoutTabs = await _classifyAdvertiserPayout(
     [...new Set(rows.map(r => r.sheetId + '||' + r.tabName))], campMap, tabMap);
@@ -476,8 +525,11 @@ async function listPaymentTargets(opts = {}) {
     const campBank = normalizeBankChoice(camp && camp.transferBank);
     const tabBank = normalizeBankChoice(tab && tab.transferBank);
     const autoBank = bankFromGoodsCostType((camp && camp.goodsCostType) || (tab && tab.goodsCostType));
-    const bank = campBank || tabBank || autoBank || null;
-    const bankSource = campBank ? 'campaign' : tabBank ? 'tab' : bank ? 'auto' : null;
+    /* ★ 결정 292 — 제품비 업체 · 리뷰비 우리: 리뷰비를 보낼 은행이 이체은행 값에 들어 있다(공고 → 탭 순서 · 같은 판정). */
+    const payout = _modeOf(key);
+    const goodsByAdvertiser = payout.mode === 'split';
+    const bank = goodsByAdvertiser ? payout.bank : (campBank || tabBank || autoBank || null);
+    const bankSource = goodsByAdvertiser ? payout.source : campBank ? 'campaign' : tabBank ? 'tab' : bank ? 'auto' : null;
     const bankAuto = bankSource === 'auto';
 
     const resolved = acct ? resolveBank(acct.bankName) : null;
@@ -487,7 +539,8 @@ async function listPaymentTargets(opts = {}) {
     const tabMemo = normalizeMemo((tab && tab.depositName) || '');
     const memo = campMemo || tabMemo;
     const memoSource = campMemo ? 'campaign' : tabMemo ? 'tab' : null;
-    const amount = productPrice + fee;
+    // ★ 결정 292 — 제품비는 업체가 보낸다 → 우리 이체 금액 = **리뷰비만**(회차에는 제품비 0 으로 박제 — createBatch).
+    const amount = goodsByAdvertiser ? fee : productPrice + fee;
 
     const issues = [];      // 있으면 다운로드에서 제외(막는 사유)
     const warnings = [];    // 진행은 되지만 사람이 알아야 하는 것
@@ -498,8 +551,9 @@ async function listPaymentTargets(opts = {}) {
       if (!account) issues.push('no_account');
       if (!String(acct.accountHolder || '').trim()) issues.push('no_holder');
     }
-    if (!productPrice) issues.push('no_price');
-    if (amount <= 0) issues.push('zero_amount');
+    // split: 제품비 값이 없다 = 아직 구매(투입) 전 — 리뷰비도 구매가 끝난 줄에만 보낸다(사용자 확정 2026-10-26).
+    if (!productPrice) issues.push(goodsByAdvertiser ? 'not_purchased' : 'no_price');
+    if (amount <= 0) issues.push(goodsByAdvertiser ? 'split_no_fee' : 'zero_amount');
     /* ★★ 업체 직접 입금 작업(결정 247 · 사용자 확정 2026-10-14) — 업체가 페이백을 보내므로 **우리는 보내지 않는다**.
          맨 앞 사유로 둔다(createBatch 가 issues[0] 을 건너뛴 사유로 말한다). 모르면(조회 실패) 보내지 않는다(fail-closed —
          업체도 보내고 우리도 보내면 되돌릴 수 없다). */
@@ -511,6 +565,8 @@ async function listPaymentTargets(opts = {}) {
     /* ★ 양식 계좌 ≠ 등록DB 계좌 — **경고만**(사용자 확정 2026-09-21: 보류시키지 않는다).
        화면이 두 계좌를 나란히 보여주고, 담당자가 체크를 풀면 그 건만 회차에서 빠진다. */
     if (acctMismatch) warnings.push('account_form_override');
+    // 결정 292 — 제품비 업체인데 연결된 업체가 없다: 리뷰비는 나가도 제품비를 보내고 적을 사람이 없다(경고 · 막지는 않는다)
+    if (goodsByAdvertiser && advPayoutTabs && advPayoutTabs.splitOrphan.has(key)) warnings.push('split_no_advertiser');
     /* ★★ 이 줄에서 **이미 이체 실패한 계좌 그대로** 다시 보내려는 경우(사용자 확정 2026-10-13 · 결정 231) —
          같은 줄이 같은 계좌로 최대 10번까지 실패를 반복했다(계좌를 아무도 안 고쳤는데 매 회차 다시 담겼다).
        ★ 막지(issues) 않고 경고로 둔다 — 은행 쪽 일시 오류였을 수 있어 담당자가 체크하면 다시 담을 수 있어야 한다.
@@ -575,6 +631,8 @@ async function listPaymentTargets(opts = {}) {
          화면은 이 값을 **그리기만** 한다 — 판정 사본을 만들지 않는다. */
       accountMismatch: acctMismatch,
       productPrice, reviewFee: fee, amount, priceSource, feeSource, deliveryKind,
+      // 결정 292 — 입금 방식(ours|advertiser|split). split = 제품비는 업체, 금액은 리뷰비만. 화면이 받은 값을 회차 만들 때 되돌려 대조한다.
+      payoutMode: payout.mode, goodsByAdvertiser,
       workboardPrice, orderPrice, priceMismatch,
       qtyTierAmount: (ord && ord.qtyTierAmount) || linkedTierMap[key + '||' + r.rowIndex] || null,
       tabReviewFee: tabFee, campaignReviewFee: campFee,
@@ -624,7 +682,25 @@ async function listPaymentTargets(opts = {}) {
       finishedUnavailable = true;
     }
   }
-  return { items: shown, summary: _summarize(shown), finishedExcluded, finishedUnavailable, advertiserPaidExcluded };
+  return { items: shown, summary: _summarize(shown), finishedExcluded, finishedUnavailable, advertiserPaidExcluded,
+    splitWorks: _splitWorks(shown) };
+}
+
+/** 결정 292 — 제품비 업체 · 리뷰비 우리 작업별 진행(화면 한 줄 안내 재료). 목록에 있는 줄 기준(이미 우리 회차에 담긴 줄은 없다). */
+function _splitWorks(items) {
+  const by = new Map();
+  for (const it of items || []) {
+    if (!it.goodsByAdvertiser) continue;
+    const k = it.sheetId + '||' + it.tabName;
+    if (!by.has(k)) by.set(k, { sheetId: it.sheetId, tabName: it.tabName, tabLabel: it.tabLabel || it.tabName,
+      bank: it.bank, reviewFee: it.reviewFee, rows: 0, payable: 0, notPurchased: 0, noAdvertiser: false });
+    const w = by.get(k);
+    w.rows++;
+    if ((it.warnings || []).includes('split_no_advertiser')) w.noAdvertiser = true;
+    if (it.payable) w.payable++;
+    if ((it.issues || []).includes('not_purchased')) w.notPurchased++;
+  }
+  return [...by.values()];
 }
 
 /**
@@ -1370,21 +1446,111 @@ function advertiserPaysFrom(campRaw, tabRaw) {
   return isAdvertiserPayoutChoice(tabRaw);
 }
 
+/* ══ 제품비 업체 · 리뷰비 우리 (split · 사용자 요청 2026-10-26 · 결정 292) ══════════════════════════════
+ * 구매대금(제품비) 페이백은 업체가 보내고 입금 칸에 입금일을 적는다(업체입금과 같은 창구) — 우리는 **리뷰비만** 보낸다.
+ * ★ 저장소는 여전히 이체은행 하나(결정 247 완화 금지: 두 번째 스위치 금지) — 값에 리뷰비를 보낼 우리 은행이 함께 들어 있다.
+ *   공고 `recruit_campaigns.transfer_bank` = 'split_kbank' | 'split_hana' / 탭 `tab_configs.transfer_bank` = 한글 라벨.
+ * ★ normalizeBankChoice 는 그대로 kbank|hana 만 — split 값이 은행으로 읽히지 않는다(splitBankOf 로만 푼다). */
+const SPLIT_PAYOUT = { kbank: 'split_kbank', hana: 'split_hana' };
+const SPLIT_PAYOUT_LABEL = { kbank: '제품비업체·리뷰비케이뱅크', hana: '제품비업체·리뷰비하나은행' };
+/** split 값(코드·라벨 어느 표기든) → 리뷰비를 보낼 은행 'kbank'|'hana' · 아니면 null */
+function splitBankOf(v) {
+  const s = String(v == null ? '' : v).replace(/\s/g, '').toLowerCase();
+  if (!s) return null;
+  for (const b of ['kbank', 'hana']) {
+    if (s === SPLIT_PAYOUT[b] || s === SPLIT_PAYOUT_LABEL[b].toLowerCase()) return b;
+  }
+  return null;
+}
+/** SQL 후보 조회용 — 공백 제거·소문자로 맞춘 split 표기 전부 */
+const SPLIT_PAYOUT_NORMS = [...Object.values(SPLIT_PAYOUT), ...Object.values(SPLIT_PAYOUT_LABEL)].map(v => v.toLowerCase());
+/**
+ * 입금 방식 판정 — **이체은행과 같은 순서**(공고에 사람이 정한 값 → 탭 설정). advertiserPaysFrom 과 같은 규칙의 확장판.
+ * @returns {{mode:'ours'|'advertiser'|'split', bank:'kbank'|'hana'|null, source:'campaign'|'tab'|null}}
+ *   bank = split 일 때 리뷰비를 보낼 은행(ours 의 은행은 기존 판정 — 여기서 정하지 않는다).
+ */
+function payoutModeFrom(campRaw, tabRaw) {
+  if (isAdvertiserPayoutChoice(campRaw)) return { mode: 'advertiser', bank: null, source: 'campaign' };
+  const cs = splitBankOf(campRaw);
+  if (cs) return { mode: 'split', bank: cs, source: 'campaign' };
+  if (normalizeBankChoice(campRaw)) return { mode: 'ours', bank: null, source: null };
+  if (isAdvertiserPayoutChoice(tabRaw)) return { mode: 'advertiser', bank: null, source: 'tab' };
+  const ts = splitBankOf(tabRaw);
+  if (ts) return { mode: 'split', bank: ts, source: 'tab' };
+  return { mode: 'ours', bank: null, source: null };
+}
+/** 이체은행 저장값(코드·라벨) → 화면 코드값('kbank'|'hana'|'advertiser'|'split_kbank'|'split_hana'|null) */
+function transferBankCodeOf(v) {
+  if (isAdvertiserPayoutChoice(v)) return ADVERTISER_PAYOUT;
+  const sb = splitBankOf(v);
+  if (sb) return SPLIT_PAYOUT[sb];
+  return normalizeBankChoice(v);
+}
+/** 제품비를 업체가 보내는 작업인가(업체입금 · split) — 업체 계좌 공개·업체 입금일 기록·끄기 확인이 쓰는 판정 */
+function advertiserGoodsFrom(campRaw, tabRaw) { return payoutModeFrom(campRaw, tabRaw).mode !== 'ours'; }
+/** 회차 항목이 리뷰비만 보낸 건인가 — 회차에 제품비 0 · 금액 = 리뷰비로 박제된다(결정 292).
+ *  보통 건은 제품비가 없으면 no_price 로 막혀 회차에 들어올 수 없으므로 이 모양은 split 에서만 나온다. */
+function isFeeOnlyItem(it) {
+  if (!it) return false;
+  const pp = Number(it.productPrice != null ? it.productPrice : it.product_price);
+  const fee = Number(it.reviewFee != null ? it.reviewFee : it.review_fee);
+  const amt = Number(it.amount);
+  return pp === 0 && fee > 0 && amt === fee;
+}
+/** isFeeOnlyItem 의 SQL 판(payment_batch_items 별칭 없이 · 앞에 별칭을 붙여 쓰려면 feeOnlyItemSql('i')). */
+function feeOnlyItemSql(alias = '') {
+  const a = alias ? alias + '.' : '';
+  return `(COALESCE(${a}product_price, 0) = 0 AND COALESCE(${a}review_fee, 0) > 0 AND ${a}amount = ${a}review_fee)`;
+}
+/** split 일 수 있는 작업 키(시트||탭) 후보 — 대상 SQL 에서 "리뷰 제출·입금 칸" 조건을 풀어 줄 범위.
+ *  ★ 넓게 잡는다(공고 여럿·탭 값) — 최종 판정은 행을 읽은 뒤 payoutModeFrom 이 하고, split 이 아니면 원래 조건을 다시 건다.
+ *  ★ 조회 실패 = 빈 목록 = 조건을 풀지 않는다(리뷰비가 늦게 나갈 뿐 잘못 나가지 않는 쪽). */
+async function _splitCandidateKeys() {
+  /* ★ Codex PR #1699 — 넓은 후보를 그대로 쓰면 공고가 은행을 명시해 split 이 아닌 작업의 리뷰 전 줄이 2,000건 상한을 먼저 채워
+       (뒤에서 걸러지므로) 진짜 지급 대상이 목록에서 사라질 수 있다. 그래서 후보마다 **입금 대상 계산과 같은 공고**(그 탭의 가장 최근 공고 —
+       _loadCampaigns 와 같은 순서)와 탭 값으로 payoutModeFrom 을 돌려 실제 split 작업만 돌려준다. */
+  try {
+    const { rows } = await pool.query(
+      `WITH cand AS (
+         SELECT linked_sheet_id AS sheet_id, linked_tab_name AS tab_name FROM recruit_campaigns
+          WHERE linked_sheet_id IS NOT NULL AND linked_tab_name IS NOT NULL
+            AND lower(regexp_replace(COALESCE(transfer_bank, ''), '[[:space:]]', '', 'g')) = ANY($1::text[])
+         UNION
+         SELECT sheet_id, tab_name FROM tab_configs
+          WHERE lower(regexp_replace(COALESCE(transfer_bank, ''), '[[:space:]]', '', 'g')) = ANY($1::text[]))
+       SELECT c.sheet_id || '||' || c.tab_name AS k,
+              (SELECT rc.transfer_bank FROM recruit_campaigns rc
+                WHERE rc.linked_sheet_id = c.sheet_id AND rc.linked_tab_name = c.tab_name
+                ORDER BY rc.created_at DESC LIMIT 1) AS "campBank",
+              (SELECT tbk.transfer_bank FROM tab_configs tbk
+                WHERE tbk.sheet_id = c.sheet_id AND tbk.tab_name = c.tab_name LIMIT 1) AS "tabBank"
+         FROM cand c`,
+      [SPLIT_PAYOUT_NORMS]);
+    return rows.filter(r => r.k && payoutModeFrom(r.campBank, r.tabBank).mode === 'split').map(r => r.k);
+  } catch (e) {
+    logger.warn('[payment] 제품비 업체 작업 후보 조회 실패(리뷰비 선지급 조건을 풀지 않음): ' + e.message);
+    return [];
+  }
+}
+
 /** 업체 직접 입금 작업 분류 — { paid: 지금 주인 업체가 있는 작업, orphan: 업체입금인데 주인 업체가 없는 작업 }.
  *  재료 = 대상 계산이 이미 읽은 그 공고(campMap)·탭 설정(tabMap) — 판정 사본 0.
  *  ★ 주인 = trackB.advertiserForTab(탭 지정 > 시트 전체 — 화면 노출·입금 기록과 같은 판정). 업체 연결을 지우면
  *    아무도 보내지 못하는데 우리 목록에서도 조용히 빠지는 막다른 길이 된다 → orphan 은 **보류로 목록에 남겨** 말한다.
  *  ★ 탭 설정 조회가 실패했으면(탭의 업체입금을 모른다) null = 전 건 보류(fail-closed — 업체도 보내고 우리도 보내면 되돌릴 수 없다). */
 async function _classifyAdvertiserPayout(keys, campMap, tabMap) {
-  const out = { paid: new Set(), orphan: new Set() };
+  // splitOrphan(결정 292) = 제품비 업체인데 주인 업체가 없는 작업 — 리뷰비는 보내도 되지만 제품비를 보낼 사람이 없다(경고로 말한다)
+  const out = { paid: new Set(), orphan: new Set(), splitOrphan: new Set() };
   if (tabMap && tabMap.failed) return null;
   try {
     const tb = require('./trackB.service');   // 지연 require(순환 방지)
     for (const key of keys) {
       const camp = campMap[key] || null, tab = tabMap[key] || null;
-      if (!advertiserPaysFrom(camp && camp.transferBank, tab && tab.transferBank)) continue;
+      const mode = payoutModeFrom(camp && camp.transferBank, tab && tab.transferBank).mode;
+      if (mode === 'ours') continue;
       const [sheetId, tabName] = key.split('||');
       const owner = await tb.advertiserForTab({ sheetId, tabName });
+      if (mode === 'split') { if (!(owner && owner.id)) out.splitOrphan.add(key); continue; }
       (owner && owner.id ? out.paid : out.orphan).add(key);
     }
     return out;
@@ -1397,12 +1563,16 @@ async function _classifyAdvertiserPayout(keys, campMap, tabMap) {
 /** 잠금 안에서 다시 보는 업체 직접 입금 여부 — 대상 계산(_loadCampaigns)과 **같은 공고**(연결 탭의 가장 최근 공고)·탭 설정을
  *  FOR SHARE 로 읽는다(공고 수정·탭 이체설정 저장과 직렬화 — 바꾸는 중이면 끝난 뒤 값을 본다). */
 async function advertiserPayoutLocked(client, sheetId, tabName) {
+  return (await payoutModeLocked(client, sheetId, tabName)) === 'advertiser';
+}
+/** 잠금 안에서 다시 보는 입금 방식('ours'|'advertiser'|'split') — advertiserPayoutLocked 와 같은 공고·탭·FOR SHARE(결정 292). */
+async function payoutModeLocked(client, sheetId, tabName) {
   const { rows: t } = await client.query(
     `SELECT transfer_bank FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1 FOR SHARE`, [sheetId, tabName]);
   const { rows: c } = await client.query(
     `SELECT transfer_bank FROM recruit_campaigns WHERE linked_sheet_id=$1 AND linked_tab_name=$2
       ORDER BY created_at DESC LIMIT 1 FOR SHARE`, [sheetId, tabName]);
-  return advertiserPaysFrom(c[0] && c[0].transfer_bank, t[0] && t[0].transfer_bank);
+  return payoutModeFrom(c[0] && c[0].transfer_bank, t[0] && t[0].transfer_bank).mode;
 }
 
 /**
@@ -1541,10 +1711,19 @@ async function createBatch({ bank, rows, by }) {
     if (w.payoutFp != null && String(w.payoutFp) !== String(it.payoutFp || '')) {
       skipped.push({ key: k, reason: 'account_changed' }); continue;
     }
+    /* ★★ 결정 292 — 관리자가 본 입금 방식(=금액 구성)으로 묶는다. 화면을 띄운 뒤 누가 「제품비 업체」를 끄면 다시 계산한 금액은
+         제품비+리뷰비가 되어, 업체도 제품비를 보내는데 우리도 보내게 된다(되돌릴 수 없다). 다르면 회차를 통째로 만들지 않는다. */
+    // 지금 split 인 건은 화면 값이 **반드시** 있어야 한다 — 이 값을 모르는 옛 화면(캐시)은 리뷰비만 보는지 확인하지 못했다(레드팀).
+    if ((w.payoutMode != null || it.payoutMode === 'split') && String(w.payoutMode == null ? '' : w.payoutMode) !== String(it.payoutMode || '')) {
+      skipped.push({ key: k, reason: 'payout_mode_changed' }); continue;
+    }
     picked.push(it);
   }
   if (skipped.some(s => s.reason === 'account_changed')) {
     return { ok: false, error: '화면을 연 뒤 송금 계좌가 바뀐 건이 있습니다 — 새로고침해서 바뀐 계좌를 확인한 뒤 다시 받아 주세요.', skipped };
+  }
+  if (skipped.some(s => s.reason === 'payout_mode_changed')) {
+    return { ok: false, error: '화면을 연 뒤 입금 방식(제품비를 누가 보내는지)이 바뀐 작업이 있습니다 — 새로고침해서 금액을 확인한 뒤 다시 받아 주세요.', skipped };
   }
   if (!picked.length) return { ok: false, error: '담을 수 있는 건이 없습니다.', skipped };
 
@@ -1560,7 +1739,7 @@ async function createBatch({ bank, rows, by }) {
       await client.query('SAVEPOINT sp_item');
       try {
         // Serialize with manual closure; a stale payment list cannot enqueue a closed row.
-        const { rows: lockRows } = await client.query(`SELECT id, row_json ->> COALESCE(submit_col2, '') AS "paidCell"
+        const { rows: lockRows } = await client.query(`SELECT id, row_json ->> COALESCE(submit_col2, '') AS "paidCell", submit_col2 AS "paidCol"
             FROM campaign_participants
           WHERE sheet_id=$1 AND tab_name=$2 AND seq=$3 AND active=TRUE AND deleted_at IS NULL FOR UPDATE`,
         [it.sheetId, it.tabName, it.rowIndex]);
@@ -1568,9 +1747,29 @@ async function createBatch({ bank, rows, by }) {
              ① 그 사이 업체 직접 입금으로 바뀐 작업 ② 작업표 입금 칸에 이미 날짜가 있는 줄(업체가 기록했는데 장부 재생성이
              밀려 review_index 가 아직 미입금인 경우 — 그대로 담으면 업체와 우리가 둘 다 보낸다). 걸리면 그 건만 건너뛴다. */
         // FOR SHARE — 공고 수정·탭 이체설정 저장과 직렬화한다(업체입금으로 바꾸는 중이면 끝난 뒤 값을 본다).
-        const lateAdv = await advertiserPayoutLocked(client, it.sheetId, it.tabName);
-        const lateReason = lateAdv ? 'advertiser_pays'
-          : (lockRows[0] && String(lockRows[0].paidCell == null ? '' : lockRows[0].paidCell).trim()) ? 'already_paid' : '';
+        const lateMode = await payoutModeLocked(client, it.sheetId, it.tabName);
+        /* ★ 결정 292 — ③ 대상 계산 뒤 입금 방식이 바뀌었으면(제품비 업체 ↔ 우리) 금액 구성이 달라졌다 → 그 건만 건너뛴다.
+             ④ split 의 입금 칸은 **업체가 보낸 제품비** 기록이라 우리 리뷰비의 "이미 입금" 근거가 아니다(그 검사를 건너뛴다). */
+        const lockedPaid = lockRows[0] ? String(lockRows[0].paidCell == null ? '' : lockRows[0].paidCell).trim() : '';
+        /* ★ Codex PR #1699 — split 이라도 잠근 뒤 입금 칸에 값이 있으면 **업체가 넣은 제품비 기록인지** 다시 본다(대상 SQL 과 같은 판정).
+             목록 계산과 잠금 사이에 직원이 [💰 입금수정]으로 "이미 보낸 돈"을 적었으면 그 줄은 already_paid 로 건너뛴다. */
+        let advEntered = false;
+        if (lateMode === 'split' && lockedPaid) {
+          const { rows: ae } = await client.query(
+            `SELECT 1 FROM campaign_participants cp
+               JOIN participant_edits pe
+                 ON pe.sheet_id = cp.sheet_id AND pe.tab_name = cp.tab_name
+                AND ((pe.anchor_type = 'order' AND cp.order_submission_id::text = pe.anchor_value)
+                  OR (pe.anchor_type = 'manual' AND cp.id::text = pe.anchor_value)
+                  OR (pe.anchor_type = 'identity' AND cp.identity_key = pe.anchor_value))
+              WHERE cp.id = $1 AND pe.field = 'col:' || $2 AND pe.reverted_at IS NULL
+                AND left(pe.created_by, 3) = '업체#' AND btrim(COALESCE(pe.value_text, '')) = $3 LIMIT 1`,
+            [lockRows[0].id, String(lockRows[0].paidCol || ''), lockedPaid]);
+          advEntered = ae.length > 0;
+        }
+        const lateReason = lateMode === 'advertiser' ? 'advertiser_pays'
+          : lateMode !== (it.payoutMode || 'ours') ? 'payout_mode_changed'
+          : (lockedPaid && !(lateMode === 'split' && advEntered)) ? 'already_paid' : '';
         if (lateReason) {
           await client.query('RELEASE SAVEPOINT sp_item');
           skipped.push({ key: it.sheetId + '||' + it.tabName + '||' + it.rowIndex, reason: lateReason });
@@ -1599,9 +1798,10 @@ async function createBatch({ bank, rows, by }) {
            //   'self' 로 박제해야 다음 대조(reconcileAccountSnapshots)가 같은 곳을 본다.
            it.accountRef ? (it.accountRef.subPhone8 ? 'sub' : 'self') : null,
            it.accountRef && it.accountRef.subPhone8 || null, accountFingerprint(it.bankAccount), snapshotFingerprint(it.bankName, it.bankAccount, it.accountHolder),
-           it.productPrice, it.reviewFee, it.amount, it.transferMemo]);
+           // 결정 292 — 리뷰비만 보내는 건은 제품비 0 으로 박제(인트라넷 페이백 장부가 "돌려준 상품값"으로 읽지 않게 · isFeeOnlyItem 판별 근거)
+           it.goodsByAdvertiser ? 0 : it.productPrice, it.reviewFee, it.amount, it.transferMemo]);
         await client.query('RELEASE SAVEPOINT sp_item');
-        saved.push({ ...it, id: row.id });
+        saved.push({ ...it, id: row.id, ...(it.goodsByAdvertiser ? { productPrice: 0 } : {}) });
       } catch (e) {
         await client.query('ROLLBACK TO SAVEPOINT sp_item');
         if (e && e.code === '23505') skipped.push({ key: it.sheetId + '||' + it.tabName + '||' + it.rowIndex, reason: 'already_locked' });
@@ -1961,9 +2161,11 @@ async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo, r
   if (touchBank && String(bank || '').trim() !== '') {
     if (isAdvertiserPayoutChoice(bank)) {
       bankCode = ADVERTISER_PAYOUT;   // 고를 수 있는 작업인지는 아래 공통 규칙(guardTransferBankWrite)이 본다
+    } else if (splitBankOf(bank)) {
+      bankCode = SPLIT_PAYOUT[splitBankOf(bank)];   // 결정 292 — 제품비 업체 · 리뷰비 우리(같은 공통 규칙이 본다)
     } else {
       bankCode = normalizeBankChoice(bank);
-      if (!bankCode) throw new PaymentFixError('bad_bank', '이체은행은 케이뱅크·하나은행·업체입금 중에서만 지정할 수 있습니다.');
+      if (!bankCode) throw new PaymentFixError('bad_bank', '이체은행은 케이뱅크·하나은행·업체입금·제품비 업체(리뷰비 케이/하나) 중에서만 지정할 수 있습니다.');
     }
   }
   const memoText = touchMemo ? normalizeMemo(String(memo || '')) : null;
@@ -1997,7 +2199,8 @@ async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo, r
       ? await pool.query('SELECT transfer_bank FROM recruit_campaigns WHERE id = $1', [campId])
       : await pool.query('SELECT transfer_bank FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1', [sid, tab]);
     const g = await require('./advertiserPayout.service').guardTransferBankWrite({
-      current: curRows[0] ? curRows[0].transfer_bank : null, incoming: bankCode || '', ack: disableAck, sheetId: sid, tabName: tab });
+      current: curRows[0] ? curRows[0].transfer_bank : null, incoming: bankCode || '', ack: disableAck, sheetId: sid, tabName: tab,
+      slot: campId ? 'campaign' : 'tab', campaignId: campId });   // 실제 입금 방식(공고 → 탭)으로 판정(Codex PR #1699)
     if (g.action === 'reject') throw new PaymentFixError(g.error, g.message);
     if (g.action === 'keep') { touchBankEff = false; bankKept = g; }
   }
@@ -2024,7 +2227,7 @@ async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo, r
               review_fee    = CASE WHEN $6::bool THEN COALESCE($7::int, 0) ELSE review_fee END
         WHERE id = $1`,
       [campId, touchBankEff, bankCode, touchMemo, memoText, touchFee, feeVal]);
-    return { ok: true, target: 'campaign', bank: bankKept ? ADVERTISER_PAYOUT : bankCode, memo: memoText || '', reviewFee: touchFee ? (feeVal == null ? 0 : feeVal) : undefined,
+    return { ok: true, target: 'campaign', bank: bankKept ? transferBankCodeOf(bankKept.kept) : bankCode, memo: memoText || '', reviewFee: touchFee ? (feeVal == null ? 0 : feeVal) : undefined,
       ...(bankKept ? { transferBankKept: bankKept.kept, transferBankNotice: bankKept.notice } : {}) };
   }
 
@@ -2037,9 +2240,11 @@ async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo, r
             review_fee    = CASE WHEN $7::bool THEN $8::int ELSE review_fee END,
             updated_at    = NOW()
       WHERE sheet_id = $1 AND tab_name = $2`,
-    [sid, tab, touchBankEff, bankCode === ADVERTISER_PAYOUT ? ADVERTISER_PAYOUT_LABEL : (bankCode ? tabBankLabel(bankCode) : ''), touchMemo, memoText, touchFee, feeVal]);
+    [sid, tab, touchBankEff, bankCode === ADVERTISER_PAYOUT ? ADVERTISER_PAYOUT_LABEL
+      : splitBankOf(bankCode) ? SPLIT_PAYOUT_LABEL[splitBankOf(bankCode)]
+      : (bankCode ? tabBankLabel(bankCode) : ''), touchMemo, memoText, touchFee, feeVal]);
   if (!rowCount) throw new PaymentFixError('tab_not_found', '탭 설정이 없어 저장하지 못했습니다(작업오더 접수 전 탭일 수 있습니다).');
-  return { ok: true, target: 'tab', bank: bankKept ? ADVERTISER_PAYOUT : bankCode, memo: memoText || '', reviewFee: touchFee ? feeVal : undefined,
+  return { ok: true, target: 'tab', bank: bankKept ? transferBankCodeOf(bankKept.kept) : bankCode, memo: memoText || '', reviewFee: touchFee ? feeVal : undefined,
     ...(bankKept ? { transferBankKept: bankKept.kept, transferBankNotice: bankKept.notice } : {}) };
 }
 
@@ -2137,6 +2342,8 @@ module.exports = {
   compareAccountSnapshot, accountFingerprint, resolveWorkManager, flagPriceOutliers, PaymentFixError,
   _acctChangedAt, _holderKey,
   advertiserPayoutAccounts, advertiserPayoutLocked, advertiserPaysFrom, isAdvertiserPayoutChoice,
+  __splitCandidateKeysForTest: _splitCandidateKeys,
+  payoutModeFrom, payoutModeLocked, advertiserGoodsFrom, splitBankOf, transferBankCodeOf, isFeeOnlyItem, feeOnlyItemSql, SPLIT_PAYOUT, SPLIT_PAYOUT_LABEL,
   ADVERTISER_PAYOUT, ADVERTISER_PAYOUT_LABEL, _classifyAdvertiserPayout,
   _loadLinkedQtyTierAmounts,
 };

@@ -3217,16 +3217,19 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
        순서 = 공고(사람이 정한 값) → 탭 설정 → 작업오더 물건비 자동판정(현금→하나 · 계산서/수수료→케이뱅크).
        ★ `auto` 는 **사람이 정하지 않았다**는 뜻이라 화면이 그 사실을 말한다(조용한 추정 금지). */
     const { normalizeBankChoice, bankFromGoodsCostType, BANK_LABEL, campaignForTab,
-            advertiserPaysFrom, isAdvertiserPayoutChoice, ADVERTISER_PAYOUT, ADVERTISER_PAYOUT_LABEL } = require('./payment.service');
+            payoutModeFrom, ADVERTISER_PAYOUT, ADVERTISER_PAYOUT_LABEL, SPLIT_PAYOUT } = require('./payment.service');
     const txCamp = await campaignForTab(sheetId, tabName).catch(() => null);
     const campBank = normalizeBankChoice(txCamp && txCamp.transferBank);
     const tabBank  = normalizeBankChoice(meta.tabTransferBank);
     const autoBank = bankFromGoodsCostType((wo && wo.goodsCostType) || '');
-    /* 결정 247 — 이체은행 = 업체입금이면 그 값이 이체은행 칸에 그대로 보인다(판정 = advertiserPaysFrom 단일 출처, 입금 대상과 같은 공고). */
-    const advertiserPayout = advertiserPaysFrom(txCamp && txCamp.transferBank, meta.tabTransferBank);
-    const advFromCamp = advertiserPayout && isAdvertiserPayoutChoice(txCamp && txCamp.transferBank);
-    const transferBank = advertiserPayout ? ADVERTISER_PAYOUT : (campBank || tabBank || autoBank || null);
-    const bankSource = advertiserPayout ? (advFromCamp ? 'campaign' : 'tab')
+    /* 결정 247 — 이체은행 = 업체입금이면 그 값이 이체은행 칸에 그대로 보인다(판정 = payoutModeFrom 단일 출처, 입금 대상과 같은 공고).
+       결정 292 — 제품비 업체 · 리뷰비 우리(split)도 같은 판정으로 그 값을 보인다. */
+    const payoutMode = payoutModeFrom(txCamp && txCamp.transferBank, meta.tabTransferBank);
+    const advertiserPayout = payoutMode.mode === 'advertiser';
+    const splitPayout = payoutMode.mode === 'split';
+    const transferBank = advertiserPayout ? ADVERTISER_PAYOUT : splitPayout ? SPLIT_PAYOUT[payoutMode.bank]
+      : (campBank || tabBank || autoBank || null);
+    const bankSource = (advertiserPayout || splitPayout) ? payoutMode.source
       : campBank ? 'campaign' : tabBank ? 'tab' : transferBank ? 'auto' : null;
 
     const { resolveReviewType, reviewTypeLabel, normalizeReviewType, parseWorkOrderReviewType,
@@ -3402,10 +3405,14 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       depositName: ((memoCamp && memoCamp.transferMemo) || meta.depositName || '') || null,
       /* 결정 247 — 업체 직접 입금 작업인가(이체은행 = 업체입금). 업체 렌즈(_condAdvertiserLens)는 화이트리스트라 나가지 않는다. */
       advertiserPayout,
+      /* 결정 292 — 제품비는 업체 · 리뷰비만 우리(split). advertiserPayout 과 따로 싣는다(옛 화면은 이 값을 몰라 종전대로 그린다). */
+      goodsByAdvertiser: splitPayout,
       /* 이체은행 — 값·라벨·출처를 함께 싣는다(화면이 판정을 다시 하지 않게).
          null = 정할 근거가 없음 = [미설정](작업오더 물건비도 비어 자동판정이 안 된 경우). */
       transferBank, bankSource,
-      transferBankLabel: advertiserPayout ? ADVERTISER_PAYOUT_LABEL : (transferBank ? (BANK_LABEL[transferBank] || transferBank) : null),
+      transferBankLabel: advertiserPayout ? ADVERTISER_PAYOUT_LABEL
+        : splitPayout ? `제품비 업체 · 리뷰비 ${BANK_LABEL[payoutMode.bank] || ''}`
+        : (transferBank ? (BANK_LABEL[transferBank] || transferBank) : null),
       /* 판정값 — 혼합은 행 단위로 정할 수 없어 null(검수·슬롯이 보는 값, 규율 불변). */
       reviewType: rtKey,
       /* 표기값 — 혼합이면 '혼합' + 조합(아래 reviewTypeMix). 둘 다 없으면 null = [미설정]. */
@@ -3752,7 +3759,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       // 업체 직접 입금 = 이체은행 업체입금(입금 대상 계산과 같은 공고 → 탭 순서 · 판정 실패 = 아님 = 계좌를 보이지 않는다)
       && await (async () => { const p = require('./payment.service');
         const c = await p.campaignForTab(sheetId, tabName).catch(() => undefined);
-        return c !== undefined && p.advertiserPaysFrom(c && c.transferBank, meta[0].tabTransferBank); })()
+        // 결정 292 — 제품비 업체(split)도 업체가 제품비를 보내므로 같은 계좌를 보인다(advertiserGoodsFrom = 업체입금 · split)
+        return c !== undefined && p.advertiserGoodsFrom(c && c.transferBank, meta[0].tabTransferBank); })()
       && String(((await advertiserForTab({ sheetId, tabName }).catch(() => null)) || {}).id || '') === String(advertiserId)) {
     advPayout = { accounts: new Map(), unavailable: false, lockAll: '', batchSeqs: new Set(), advEntries: new Map() };
     try {
@@ -3762,9 +3770,11 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       logger.warn(`[trackB] 업체 직접 입금 계좌 조회 실패 tab=${tabName}: ${e.message}`);
     }
     try {
+      // 결정 292 — 리뷰비만 보낸 회차 항목(제품비 업체 작업)은 업체의 제품비 기록을 막지 않는다(우리가 보낸 건 리뷰비뿐).
       const { rows: bi } = await db.query(
         `SELECT DISTINCT row_index FROM payment_batch_items
-          WHERE sheet_id=$1 AND tab_name=$2 AND status IN ('pending','paid')`, [sheetId, tabName]);
+          WHERE sheet_id=$1 AND tab_name=$2 AND status IN ('pending','paid')
+            AND NOT ${require('./payment.service').feeOnlyItemSql()}`, [sheetId, tabName]);
       advPayout.batchSeqs = new Set(bi.map(x => Number(x.row_index)));
       /* ★ 화면에 보이는 입금 칸(tabPaidHeader)과 서버가 기록하는 칸(statusHeaderForTab)이 다르면 잠근다 —
            다르면 업체가 넣은 값이 엉뚱한 칸에 들어가거나, 자기 기록이 "저희가 기록한 값"으로 보인다(리뷰 반영). */
@@ -3930,6 +3940,11 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       for (const h of advHeaders) {
         // 결정 247 — 송금 계좌 세 칸은 원본 행이 아니라 입금 판정 결과에서만 채운다(원본 열 값이 섞이지 않게).
         if (advPayout && Object.prototype.hasOwnProperty.call(ADV_PAYOUT_FIELD, h)) {
+          /* ★ 결정 292(레드팀) — 우리가 제품비를 보냈거나 보내는 중인 줄(제품비가 든 우리 회차 pending/paid)은 계좌를 싣지 않는다.
+               우리 입금 → 업체입금·제품비 업체로 바꾼 작업에서 업체가 그 줄에 제품비를 또 보내는 것을 막는다(기록은 our_payout 으로 이미 잠김). */
+          if (advPayout.batchSeqs.has(Number(r.seq))) { cur[h] = h === '은행' ? '인애드가 제품비 지급 — 보내지 마세요' : ''; continue; }
+          // 우리 회차 조회가 실패했으면(lockAll=unknown) 어느 줄을 우리가 보냈는지 모른다 → 계좌를 싣지 않는다(fail-closed)
+          if (advPayout.lockAll === 'unknown') { cur[h] = h === '은행' ? '계좌를 불러오지 못했습니다(새로고침)' : ''; continue; }
           const a = _advPayoutAcct(advPayout, r);
           let v = a ? (a[ADV_PAYOUT_FIELD[h]] || '') : '';
           // 결정 231 — 우리가 이 계좌로 이체해 이미 실패한 적이 있으면 업체에게도 알린다(은행 칸 옆 표시).
@@ -5170,11 +5185,14 @@ async function setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by = 'adm
       const advPrefix = '업체#' + String(advertiserId || '') + ':';
       if (!advertiserId) { await client.query('ROLLBACK'); return { ok: false, error: 'not_own_entry' }; }
       // FOR SHARE — 공고 수정·탭 이체설정 저장과 직렬화한다. 업체입금을 끄는 중이면 끝난 뒤 꺼진 값을 보고 거부한다(Codex 리뷰).
-      const advOn = await require('./payment.service').advertiserPayoutLocked(client, sheetId, tabName);
-      if (!advOn) { await client.query('ROLLBACK'); return { ok: false, error: 'advertiser_payout_off' }; }
+      // 결정 292 — 제품비 업체 · 리뷰비 우리(split)도 업체가 제품비 입금일을 적는다(입금 방식 ≠ 우리 입금이면 연다).
+      const advMode = await require('./payment.service').payoutModeLocked(client, sheetId, tabName);
+      if (advMode === 'ours') { await client.query('ROLLBACK'); return { ok: false, error: 'advertiser_payout_off' }; }
+      // ② 우리 회차 — 리뷰비만 보낸 항목은 제외(우리가 제품비를 보낸 줄만 막는다 · 결정 292)
       const { rows: bi } = await client.query(
         `SELECT 1 FROM payment_batch_items
-          WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3 AND status IN ('pending','paid') LIMIT 1`,
+          WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3 AND status IN ('pending','paid')
+            AND NOT ${require('./payment.service').feeOnlyItemSql()} LIMIT 1`,
         [sheetId, tabName, row.seq]);
       if (bi.length) { await client.query('ROLLBACK'); return { ok: false, error: 'our_payout' }; }
       /* ④ 새 날짜는 **리뷰 제출이 끝난 줄에만**(계좌를 보여주는 대상과 같은 규칙 · 리뷰 반영) — 진행 중인 줄에 입금일이
@@ -5236,10 +5254,13 @@ async function setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by = 'adm
        자체 상태는 무접촉(그 사람들의 이체는 그대로 유효하게 남는다). */
     let releasedBatchItems = 0;
     if (clearing) {
+      /* ★ 결정 292 — 리뷰비만 보낸 항목은 풀지 않는다: 입금 칸은 업체가 보낸 **제품비** 기록이라, 칸을 비워도 우리 리뷰비는
+           실제로 나간 돈이다. 풀면 다음 회차에 리뷰비가 한 번 더 나간다(이중 지급). */
       const rel = await client.query(
         `UPDATE payment_batch_items
             SET status='failed', fail_reason=$4, paid_at=NULL
-          WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3 AND status IN ('pending','paid')`,
+          WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3 AND status IN ('pending','paid')
+            AND NOT ${require('./payment.service').feeOnlyItemSql()}`,
         [sheetId, tabName, row.seq, `관리자(${String(by).slice(0, 100)})가 작업표 입금 기록을 비워 미입금으로 정정함`]);
       releasedBatchItems = rel.rowCount;
     }

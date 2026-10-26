@@ -303,7 +303,9 @@ const run = (opts, fn) => withStubPool(handler(opts), async svc => fn((await svc
     assert.ok(/이전 실패 계좌 \$\{Number\(it\.failedAccountCount\)\}회/.test(WD));
   });
   t('4F 다운로드 요청이 화면에 보이는 송금 계좌 지문(payoutFp)을 보낸다', () => {
-    assert.ok(/rowIndex:it\.rowIndex, payoutFp:it\.payoutFp\}/.test(WD));
+    assert.ok(/rowIndex:it\.rowIndex, payoutFp:it\.payoutFp[,}]/.test(WD));
+    // 결정 292 — 입금 방식(payoutMode)도 함께 보내 그 사이 바뀌면 서버가 회차를 만들지 않는다
+    assert.ok(/\.\.\.\(it\.payoutMode\?\{payoutMode:it\.payoutMode\}:\{\}\)/.test(WD));
   });
   t('4W 안내줄이 "직원이 작업보드에서 고친 계좌로 보냅니다"를 말한다(서버 using 값으로만)', () => {
     assert.ok(/mm\.using==='workboard' && st/.test(WD) && /직원이 작업보드에서 고친 계좌로 보냅니다/.test(WD));

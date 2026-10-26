@@ -44,7 +44,7 @@ async function seedOrder(who=owner,extra={}){return q(`INSERT INTO order_submiss
  await pg.exec(Function('owner','other','return '+schema)(owner,other));
  await pg.exec(`CREATE TABLE reviewer_identities(id uuid PRIMARY KEY,owner_reviewer_id uuid,current_phone8 text,status text DEFAULT 'active',member_no int);
  CREATE TABLE workdesk_participant_deletions(order_submission_id uuid,sheet_id text,tab_name text,seq int);
- CREATE TABLE payment_batch_items(sheet_id text,tab_name text,row_index int,status text);
+ CREATE TABLE payment_batch_items(sheet_id text,tab_name text,row_index int,status text,product_price int,review_fee int,amount int);
  CREATE TABLE review_submissions(sheet_id text,tab_name text,row_index int,slot_key text,completed_at timestamptz);
  CREATE TABLE index_master(sheet_id text,tab_name text,submitted_count int);
  CREATE TABLE raw_sheet_tabs(sheet_id text,tab_name text,detected_headers jsonb,headers jsonb,mirrored_at timestamptz);

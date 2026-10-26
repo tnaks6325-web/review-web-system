@@ -144,6 +144,10 @@ async function _writeBoardDeposits(items, { by } = {}) {
 }
 
 /** DB 행 → 짝맞추기 입력 모양(파서는 DB 컬럼명을 모른다) */
+/* 결정 292 — 리뷰비만 보낸 회차 항목인가(판정 = payment.service.isFeeOnlyItem 단일 출처 · 지연 require — 순환 방지).
+   이런 건은 입금 칸(업체가 보낸 제품비 기록)·리뷰어 "페이백 완료"(review_index PAID)를 건드리지 않는다(paymentApply). */
+function _feeOnly(it) { return require('./payment.service').isFeeOnlyItem(it); }
+
 function _itemView(r) {
   return {
     id: r.id,
@@ -455,7 +459,8 @@ function findAmountMismatchCandidates({ transfers, items }) {
     const matches = (items || []).filter(item => {
       const currentProduct = Number(item && item.workboardAmount || 0);
       const currentAmount = currentProduct > 0 ? currentProduct + Number(item.reviewFee || 0) : 0;
-      return item && (item.status === 'pending'
+      // 결정 292 — 리뷰비만 보내는 건은 금액 조정 후보로 잡지 않는다(제품비+리뷰비로 나갔다면 그건 조정이 아니라 과지급 — 미확인으로 남겨 사람이 본다)
+      return item && !_feeOnly(item) && (item.status === 'pending'
           || (item.status === 'failed' && String(item.failReason || '').includes('결과 파일에 해당 이체내역 없음')))
         && Number(item.amount) !== Number(transfer.amount)
         && currentAmount === Number(transfer.amount)
@@ -684,6 +689,15 @@ async function reviewUnconfirmedTransfer({ batchId, uploadId, memo, sheetId, tab
       if (!paidAt || !paidAt.stamp) {
         throw new ResultError('missing_transfer_time', '은행 이체시각이 없어 입금일을 기록할 수 없습니다. 결과 파일을 확인해 주세요.');
       }
+      /* 결정 292 — 회차 밖 이체를 승인하는 경로라 항목 박제가 없다 → 지금 그 작업의 입금 방식으로 정한다(잠금 읽기).
+           제품비 업체 작업이면 우리가 보낸 돈은 리뷰비뿐이므로 입금 칸·페이백 완료 표시를 건드리지 않는다. */
+      /* ★ 레드팀 — 회차 밖 이체는 "그 돈이 제품비였는지 리뷰비였는지"를 시스템이 알 수 없다(지금 방식으로 추정하면
+           우리 입금 시절 이체를 리뷰비로 적어 업체가 제품비를 또 보내거나, 그 반대가 된다). 제품비 업체 작업에서는 승인하지 않고
+           중복·수동 검토로 보낸다(fail-closed). */
+      const approvedMode = await require('./payment.service').payoutModeLocked(client, sheetId, tabName);
+      if (approvedMode === 'split') {
+        throw new ResultError('split_payout_unconfirmed', '제품비 업체 · 리뷰비 우리 작업이라 회차 밖 이체를 입금으로 승인할 수 없습니다 — 그 돈이 제품비인지 리뷰비인지 확인한 뒤 [중복·후속관리]로 처리해 주세요.');
+      }
       approvedDepositItem = {
         sheetId, tabName, rowIndex: result.rowIndex,
         reviewerName: result.holder || '', amount: String(result.amount || ''),
@@ -813,7 +827,8 @@ async function reconcileAccountMismatch({ batchId, uploadId, itemId, resultSeq, 
         WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $3
         FOR UPDATE`,
       [item.sheetId, item.tabName, item.rowIndex]);
-    if (!paidState || paidState.isSubmitted2 === 'PAID' || paidState.hasPaymentRecord || paidState.hasPaidBatchItem) {
+    // 결정 292 — 리뷰비만 보내는 건은 입금 표시(PAID)가 업체의 제품비 기록이라 "이미 입금"의 근거가 아니다(우리 원장·회차만 본다).
+    if (!paidState || (!_feeOnly(item) && paidState.isSubmitted2 === 'PAID') || paidState.hasPaymentRecord || paidState.hasPaidBatchItem) {
       throw new ResultError('already_paid', '이미 입금 처리된 참여자는 수동 대조할 수 없습니다.');
     }
     const candidates = findAccountMismatchCandidates({ transfers: [transfer], items: batchItems.map(_itemView) });
@@ -856,7 +871,7 @@ async function reconcileAccountMismatch({ batchId, uploadId, itemId, resultSeq, 
       [uploadId, JSON.stringify({ preview: nextPreview })]);
     paidItem = {
       sheetId: item.sheetId, tabName: item.tabName, rowIndex: item.rowIndex, reviewerName: item.reviewerName,
-      amount: String(item.amount || ''), depositColKey: null, gid: '', paidAt,
+      amount: String(item.amount || ''), feeOnly: _feeOnly(item), depositColKey: null, gid: '', paidAt,
       stamp: _depositDateFromResultStamp(transfer.transferredAt || ''),
     };
     await recordDeposits(client, [paidItem], { by: by || '' });
@@ -937,7 +952,8 @@ async function reconcileAmountMismatch({ batchId, uploadId, itemId, resultSeq, n
         WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $3
         FOR UPDATE`,
       [item.sheetId, item.tabName, item.rowIndex]);
-    if (!paidState || paidState.isSubmitted2 === 'PAID' || paidState.hasPaymentRecord || paidState.hasPaidBatchItem) {
+    // 결정 292 — 리뷰비만 보내는 건은 입금 표시(PAID)가 업체의 제품비 기록이라 "이미 입금"의 근거가 아니다(우리 원장·회차만 본다).
+    if (!paidState || (!_feeOnly(item) && paidState.isSubmitted2 === 'PAID') || paidState.hasPaymentRecord || paidState.hasPaidBatchItem) {
       throw new ResultError('already_paid', '이미 입금 처리된 참여자는 금액 조정 승인할 수 없습니다.');
     }
 
@@ -990,7 +1006,7 @@ async function reconcileAmountMismatch({ batchId, uploadId, itemId, resultSeq, n
 
     paidItem = {
       sheetId: item.sheetId, tabName: item.tabName, rowIndex: item.rowIndex, reviewerName: item.reviewerName,
-      amount: String(candidate.actualAmount), depositColKey: null, gid: '', paidAt,
+      amount: String(candidate.actualAmount), feeOnly: _feeOnly(item), depositColKey: null, gid: '', paidAt,
       stamp: _depositDateFromResultStamp(transfer.transferredAt || ''),
     };
     await recordDeposits(client, [paidItem], { by: by || '' });
@@ -1125,7 +1141,7 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
       if (!r.rowCount) continue;
       paidItems.push({
         sheetId: it.sheetId, tabName: it.tabName, rowIndex: it.rowIndex,
-        reviewerName: it.reviewerName, amount: String(it.amount || ''),
+        reviewerName: it.reviewerName, amount: String(it.amount || ''), feeOnly: _feeOnly(it),
         depositColKey: null, gid: '',
         stamp: _depositDateFromResultStamp(p.result.transferredStamp),
         paidAt: paidAtIso,
@@ -1301,7 +1317,7 @@ async function backfillPaidDepositStamp({ batchId, by }) {
     if (!batch) throw new ResultError('not_found', '회차를 찾을 수 없습니다.');
     if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 회차에는 입금일을 기록할 수 없습니다.');
     const { rows } = await client.query(
-      `SELECT i.sheet_id, i.tab_name, i.row_index, i.paid_at,
+      `SELECT i.sheet_id, i.tab_name, i.row_index, i.paid_at, i.product_price, i.review_fee, i.amount,
               COALESCE(p.sheet_id, i.sheet_id) AS target_sheet_id,
               COALESCE(p.tab_name, i.tab_name) AS target_tab_name,
               COALESCE(p.submit_col2, target_r.submit_col2, r.submit_col2) AS submit_col2,
@@ -1364,6 +1380,7 @@ async function backfillPaidDepositStamp({ batchId, by }) {
       sheetId: r.target_sheet_id, tabName: r.target_tab_name, rowIndex: r.target_row_index,
       depositColKey: r.submit_col2 || null, gid: r.tab_gid || '', sheetless: r.sheetless === true,
       stamp: _depositDateFromPaidAt(r.paid_at),
+      feeOnly: _feeOnly(r),   // 결정 292 — 리뷰비만 보낸 건은 입금 칸에 다시 쓰지 않는다
     })).filter(x => x.sheetId && x.tabName && x.rowIndex);
     if (!items.length) throw new ResultError('no_paid_items', '입금일을 기록할 완료 항목이 없습니다.');
     await client.query('COMMIT');
