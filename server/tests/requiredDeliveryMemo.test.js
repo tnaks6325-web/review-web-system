@@ -32,10 +32,17 @@ const rdm = require('../src/services/requiredDeliveryMemo.service');
 
   assert.deepEqual(rdm.decide({ required: '', memo: '' }), { action: 'none' });
   assert.equal(rdm.decide({ required: '00', memo: '00' }).action, 'ok');
-  assert.equal(rdm.decide({ required: '00', memo: '문 앞', staffReviewRequested: true }).action, 'staff_review');
+  // 결정 300 — 직원 확인 요청은 두 번째 사진을 서버가 받은 경우(secondCaptureProven)만. 플래그만으로는 막힌다.
+  const sNo = rdm.decide({ required: '00', memo: '문 앞', staffReviewRequested: true });
+  assert.equal(sNo.action, 'block', 'staff flag alone (no 2nd photo) → still blocked');
+  assert.equal(sNo.needSecondCapture, true);
+  assert.equal(rdm.decide({ required: '00', memo: '문 앞', staffReviewRequested: true, secondCaptureProven: 'true' }).action, 'block', 'only boolean true counts');
+  assert.equal(rdm.decide({ required: '00', memo: '문 앞', staffReviewRequested: true, secondCaptureProven: true }).action, 'staff_review');
+  const s2 = rdm.decide({ required: '00', memo: '', secondCaptureProven: true });
+  assert.equal(s2.action, 'block'); assert.equal(s2.needSecondCapture, false); assert.ok(/두 번째 사진에서도/.test(s2.error), '2nd photo present → different guidance');
   const b1 = rdm.decide({ required: '00', memo: '' });
   assert.equal(b1.action, 'block');
-  assert.ok(/「00」/.test(b1.error) && /보이지 않아요/.test(b1.error) && /다시 캡처/.test(b1.error), 'no memo message');
+  assert.ok(/「00」/.test(b1.error) && /보이지 않아요/.test(b1.error) && /두 번째 사진으로 추가/.test(b1.error) && b1.needSecondCapture === true, 'no memo message asks for a 2nd photo');
   const b2 = rdm.decide({ required: '00', memo: '문 앞' });
   assert.ok(/「문 앞」/.test(b2.error) && b2.readMemo === '문 앞', 'read memo echoed to reviewer');
   assert.equal(rdm.decide({ required: '00', memo: '00', staffReviewRequested: true }).action, 'ok', 'satisfied wins over staff flag');
@@ -125,7 +132,8 @@ async function stubs() {
   assert.ok(hAt > 0 && hAt < sa.indexOf('res.code === "IDENTITY_APPROVAL_STALE"', hAt) && hAt > sa.indexOf('res.code === "NEED_SUB_REGISTER"'),
     'reviewer form: handled after identity retries (their resubmit may come back blocked) and before generic failure');
   const h = sa.slice(hAt, sa.indexOf('res.code === "IDENTITY_APPROVAL_STALE"', hAt));
-  assert.ok(/if \(n >= 2\) \{\s*staff = confirm\(/.test(h) && /payload\.deliveryMemoStaffReview = "true";/.test(h), 'staff review only from the 2nd block, after confirm');
+  assert.ok(/if \(n >= 2 && has2\) \{\s*staff = confirm\(/.test(h) && /payload\.deliveryMemoStaffReview = "true";/.test(h), 'staff review only from the 2nd block, with a 2nd photo, after confirm');
+  assert.ok(/const has2 = !!o\.capture2Token && res\.needSecondCapture !== true;/.test(h) && /if \(!has2\) _rdmNeedImg2\(o\.cid\);/.test(h), '결정 300 — no 2nd photo → show the add-photo button');
   assert.ok(/results\.push\(\{[^}]*ok: false/.test(h) && /continue;/.test(h), 'declined → this order marked failed, not silently dropped');
 
   const tb = read('server/src/services/trackB.service.js');
@@ -196,8 +204,14 @@ async function pg() {
     assert.equal((await pool.query(`SELECT COUNT(*)::int n FROM order_submissions WHERE tab_name=$1`, [scope])).rows[0].n, 0, 'blocked = nothing written');
     const r4 = await post({ ...base, orderNum: 'T3', deliveryMemoToken: roi.issueDeliveryMemoProof('OO 부재시 문앞', 'T3') });
     assert.equal(r4.ok, true, '00 present → accepted');
-    const r5 = await post({ ...base, orderNum: 'T4', deliveryMemoToken: roi.issueDeliveryMemoProof('문 앞', 'T4'), deliveryMemoStaffReview: 'true' });
-    assert.equal(r5.ok, true, 'staff review request → accepted');
+    // 결정 300 — 두 번째 사진 서명 없이 직원 확인 요청 → 막힘(쓰기 0) · 다른 주문의 서명도 막힘 · 이 주문의 서명 → 접수
+    const r5a = await post({ ...base, orderNum: 'T4', deliveryMemoToken: roi.issueDeliveryMemoProof('문 앞', 'T4'), deliveryMemoStaffReview: 'true' });
+    assert.equal(r5a.code, 'DELIVERY_MEMO_REQUIRED', 'staff flag without 2nd photo → blocked'); assert.equal(r5a.needSecondCapture, true);
+    const r5b = await post({ ...base, orderNum: 'T4', deliveryMemoStaffReview: 'true', capture2Token: roi.issueSecondCaptureProof('T1', 'h') });
+    assert.equal(r5b.code, 'DELIVERY_MEMO_REQUIRED', "another order's 2nd-photo proof does not count");
+    assert.equal((await pool.query(`SELECT COUNT(*)::int n FROM order_submissions WHERE tab_name=$1 AND order_num='T4'`, [scope])).rows[0].n, 0, 'blocked staff request = nothing written');
+    const r5 = await post({ ...base, orderNum: 'T4', deliveryMemoToken: roi.issueDeliveryMemoProof('문 앞', 'T4'), deliveryMemoStaffReview: 'true', capture2Token: roi.issueSecondCaptureProof('T4', 'h') });
+    assert.equal(r5.ok, true, 'staff review request with 2nd photo → accepted');
     await pool.query(`UPDATE recruit_campaigns SET required_delivery_memo='' WHERE id=$1`, [cid]);
     const r6 = await post({ ...base, orderNum: 'T5' });
     assert.equal(r6.ok, true, 'no required → unchanged behaviour');
