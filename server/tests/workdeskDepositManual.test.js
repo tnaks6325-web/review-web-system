@@ -195,7 +195,7 @@ async function run() {
     assert.ok(/const isPayCell = one && statusKind==='payment';/.test(html), '입금 칸 판정(한 칸 선택일 때)');
     assert.ok(/api\('\/api\/trackb\/workdesk\/deposit-date'/.test(html), '저장 경로는 전용 API 하나');
     assert.ok(/onclick="_wdDpClearDeposit\(\)"/.test(html), '달력에 [입금일 비우기]');
-    assert.ok(/if\(r\.releasedBatchItems\) setTimeout\(\(\)=>toast\('이체 회차 잠금도 이 사람 몫만 함께 풀렸습니다/.test(html),
+    assert.ok(/if\(r\.releasedBatchItems\) setTimeout\(\(\)=>toast\('대량이체 잠금도 이 사람 몫만 함께 풀렸습니다/.test(html),
       '비우면 이체 회차도 그 사람 몫만 풀렸다고 말한다(회차 전체 취소와 다름을 명시)');
     assert.ok(/if\(S\.mode==='deposit'\)\{ _wdDpSaveDeposit\(iso\); return; \}/.test(html), '입금 모드는 구매일자 경로를 타지 않는다');
     assert.ok(/_depositMenuBlockReason/.test(html), '못 누르는 사유를 숨기지 않는다(흐린 항목 + 툴팁)');

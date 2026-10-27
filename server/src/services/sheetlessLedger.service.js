@@ -616,7 +616,7 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
         reason: blockedPayment.length ? 'in_payment_batch' : 'used_row_is_not_first',
         keepSeq: keep.seq, removeSeqs: losers.map(r => r.seq),
         detail: blockedPayment.length
-          ? '지울 줄이 입금 회차(대기·완료)에 담겨 있습니다 — 이체 내역을 먼저 확인하세요.'
+          ? '지울 줄이 대량이체(대기·완료)에 담겨 있습니다 — 이체 내역을 먼저 확인하세요.'
           : '지울 줄에 리뷰제출·입금 표시가 있고 남길 줄에는 없습니다 — 어느 줄을 남길지 사람이 정하세요.',
       });
       continue;
@@ -795,7 +795,7 @@ async function dedupeManual({ sheetId, tabName, keepSeq, removeSeqs = [],
   } catch (e) {
     logger.warn(`[sheetlessLedger] 수동 정리 이체 담김 조회 실패 tab=${tabName} — ${e.message}`);
     throw new LedgerError('payment_unknown',
-      '이체 회차에 담긴 줄인지 확인하지 못했습니다 — 모르는 채로 내리지 않습니다. 잠시 후 다시 시도하세요.');
+      '대량이체에 담긴 줄인지 확인하지 못했습니다 — 모르는 채로 내리지 않습니다. 잠시 후 다시 시도하세요.');
   }
   const paidSeqs = rem.filter(s => (payBySeq.get(s) || []).some(x => x.status === 'paid'));
   if (paidSeqs.length) {
@@ -806,8 +806,8 @@ async function dedupeManual({ sheetId, tabName, keepSeq, removeSeqs = [],
   const pendingSeqs = rem.filter(s => (payBySeq.get(s) || []).some(x => x.status === 'pending'));
   if (pendingSeqs.length && ackPending !== true) {
     throw new LedgerError('in_pending_batch',
-      `이체 대기 회차에 담긴 줄이 있습니다(줄 ${pendingSeqs.join(', ')}) — 줄을 내려도 그 회차 항목은 ` +
-      '자동으로 빠지지 않습니다. 입금관리에서 회차를 확인한 뒤 진행하세요.');
+      `이체 대기 중인 대량이체에 담긴 줄이 있습니다(줄 ${pendingSeqs.join(', ')}) — 줄을 내려도 그 대량이체 항목은 ` +
+      '자동으로 빠지지 않습니다. 입금관리에서 대량이체를 확인한 뒤 진행하세요.');
   }
 
   /* 주문 취소 대상 — 이 그룹 밖의 활성 줄까지 확인해 **아무도 안 쓰는 주문만** 취소한다. */

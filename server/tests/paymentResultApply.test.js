@@ -414,7 +414,7 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
       !/_pmResultApply|_pmApplySavedResult|\/result-apply'/.test(wd));
     ok('★ 순서 배정을 화면이 고지한다', /결과를 순서대로 배정/.test(wd));
     ok('★ 결과없음은 이체실패·다음 회차 재포함으로 안내한다',
-      /이체실패로 처리/.test(wd) && /다음 회차에 다시 포함/.test(wd));
+      /이체실패로 처리/.test(wd) && /다음 대량이체에 다시 포함/.test(wd));
     ok('자동 반영은 실패 안내를 기본으로 켠다', /result-auto-apply/.test(wd)
       && /notifyFailed: b\.notifyFailed !== false/.test(tb));
     ok('★ 확인 팝업은 body 직속', /document\.body\.appendChild\(el\);\s*\/\/ ★ body 직속/.test(wd));

@@ -148,7 +148,7 @@ function planConfirm(rec, items, failedItemIds = []) {
   const picked = new Set((failedItemIds || []).map(String));
   for (const id of picked) {
     const it = byId.get(id);
-    if (!it) throw new BankError('bad_pick', '이 회차에 없는 사람을 골랐습니다. 화면을 새로고침해 주세요.');
+    if (!it) throw new BankError('bad_pick', '이 대량이체에 없는 사람을 골랐습니다. 화면을 새로고침해 주세요.');
     const row = rec.amounts.find(x => x.amount === Number(it.amount));
     if (!row || row.failures === 0) throw new BankError('bad_pick', `${Number(it.amount).toLocaleString('ko-KR')}원은 통장과 맞아 실패를 고를 수 없습니다.`);
     if (row.failures == null) throw new BankError('bad_pick', `${Number(it.amount).toLocaleString('ko-KR')}원은 통장에 더 많이 찍혀 고를 수 없습니다. 결과 파일을 올려 주세요.`);
@@ -207,7 +207,7 @@ async function _claimedTimes(batchId, fromMs, toMs) {
 
 async function inspectBatch(batchId, { now = Date.now() } = {}) {
   const { rows: [b] } = await _db().query(`SELECT id, seq, bank, status, created_at FROM payment_batches WHERE id = $1`, [batchId]);
-  if (!b) throw new BankError('not_found', '회차를 찾을 수 없습니다.');
+  if (!b) throw new BankError('not_found', '대량이체를 찾을 수 없습니다.');
   if (b.bank !== BANK) return { batchId, seq: b.seq, state: 'other_bank' };
   if (b.status === 'cancelled') return { batchId, seq: b.seq, state: 'cancelled' };
   const created = new Date(b.created_at).getTime();
@@ -227,12 +227,12 @@ async function confirmBatchFromBank({ batchId, by, failedItemIds = [], notifyFai
   const rec = await inspectBatch(batchId);
   if (!['clean', 'review'].includes(rec.state)) {
     const msg = {
-      not_found: '통장에서 이 회차 이체를 아직 찾지 못했습니다. 이체 뒤 통장 확인을 다시 눌러 주세요.',
+      not_found: '통장에서 이 대량이체를 아직 찾지 못했습니다. 이체 뒤 통장 확인을 다시 눌러 주세요.',
       settling: '이체 직후라 실패 반환을 기다리는 중입니다. 10분 뒤 다시 확인해 주세요.',
-      file: '결과 파일로 이미 처리된 회차입니다. 남은 건은 결과 파일로 처리해 주세요.',
-      done: '이미 모두 처리된 회차입니다.', empty: '이 회차에 대상이 없습니다.',
-      other_bank: '케이뱅크 회차만 통장으로 확인할 수 있습니다.', cancelled: '취소된 회차입니다.',
-    }[rec.state] || '통장으로 확인할 수 없는 회차입니다.';
+      file: '결과 파일로 이미 처리된 대량이체입니다. 남은 건은 결과 파일로 처리해 주세요.',
+      done: '이미 모두 처리된 대량이체입니다.', empty: '이 대량이체에 대상이 없습니다.',
+      other_bank: '케이뱅크 대량이체만 통장으로 확인할 수 있습니다.', cancelled: '취소된 대량이체입니다.',
+    }[rec.state] || '통장으로 확인할 수 없는 대량이체입니다.';
     throw new BankError(rec.state, msg);
   }
   const plan = planConfirm(rec, rec.items, failedItemIds);

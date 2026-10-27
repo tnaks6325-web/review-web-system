@@ -315,7 +315,11 @@ test('transfer batch history is grouped in a bordered panel', () => {
 
 test('transfer batch history appears directly below the payment summary cards', () => {
   const paymentRender = workdesk.slice(workdesk.indexOf("$('#pmbody').innerHTML = `"), workdesk.indexOf('function _pmTargetTable'));
-  assert.ok(paymentRender.indexOf('<h2 class="pmh2">이체 회차</h2>') < paymentRender.indexOf('${_pmTargetTable(items)}'));
+  // ★ 제목이 바뀌면 indexOf 가 -1 이 되어 순서 검사가 조용히 통과한다(결정 301 Codex P1) — 둘 다 있는지부터 본다.
+  const head = paymentRender.indexOf('<h2 class="pmh2">대량이체</h2>');
+  const target = paymentRender.indexOf('${_pmTargetTable(items)}');
+  assert.ok(head >= 0 && target >= 0, '대량이체 제목·대상 표 자리를 찾지 못했다');
+  assert.ok(head < target);
 });
 
 test('transfer batch history shows ten rows before scrolling within its own area', () => {

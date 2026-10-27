@@ -134,7 +134,7 @@ function parseResultAoa(aoa, opt = {}) {
   if (opt.expectBank && opt.expectBank !== bank) {
     return {
       ok: false, bank,
-      error: `이 회차는 ${BANK_SPECS[opt.expectBank] ? BANK_SPECS[opt.expectBank].label : opt.expectBank} 회차인데 올린 파일은 ${BANK_SPECS[bank].label} 결과 파일입니다.`,
+      error: `이 대량이체는 ${BANK_SPECS[opt.expectBank] ? BANK_SPECS[opt.expectBank].label : opt.expectBank} 대량이체인데 올린 파일은 ${BANK_SPECS[bank].label} 결과 파일입니다.`,
     };
   }
 

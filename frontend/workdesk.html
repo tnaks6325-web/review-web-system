@@ -4647,7 +4647,7 @@ function _mhMenuHtml(){
   const ddShow = _ddCan() && (dd === null || dd > 0);
   const ddBadge = (dd && dd > 0) ? ` ${dd}` : '';
   /* (master 전용 [Track B로 전환]·[write-back 시뮬]·[그림자 투영] 은 2026-09-28 제거 — 결정 186 5번.) */
-  const html = (ddShow ? `<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 입금 회차에 담긴 줄은 보류)">♻ 중복 정리${ddBadge}</button>` : '')
+  const html = (ddShow ? `<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 대량이체에 담긴 줄은 보류)">♻ 중복 정리${ddBadge}</button>` : '')
     + (_brCanAdd() ? `<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>` : '');
   /* 빈 메뉴 금지 — 중복 0건으로 정리 버튼이 숨으면 [⋯] 를 연 사람에게 빈 상자 대신 사유를 말한다. */
   return html || '<div class="mh-empty" style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap">지금 이 작업에 쓸 도구가 없습니다</div>';
@@ -4762,21 +4762,21 @@ function _ddAxis(list){
   const v = (Array.isArray(list) ? list : []).map(k => _DD_AXIS[k] || k);
   return v.length ? esc(v.join(' + ')) : '<span style="color:#6b7280">—</span>';
 }
-const _DD_PAY_LABEL = { pending: '이체 대기', paid: '입금완료', failed: '이체 실패', cancelled: '회차 취소' };
+const _DD_PAY_LABEL = { pending: '이체 대기', paid: '입금완료', failed: '이체 실패', cancelled: '대량이체 취소' };
 const _DD_PAY_COLOR = { pending: '#92400e', paid: '#166534', failed: '#b91c1c', cancelled: '#6b7280' };
 const _DD_BANK_LABEL = { hana: '하나', kbank: '케이뱅크' };
 function _ddWon(n){ const v = Number(n); return Number.isFinite(v) ? v.toLocaleString('ko-KR') + '원' : ''; }
 function _ddPayLine(x){
   const st = String(x.status || '');
   const parts = [
-    `회차 #${esc(String(x.batchSeq || '?'))}${x.bank ? ' ' + esc(_DD_BANK_LABEL[x.bank] || x.bank) : ''}`,
+    `대량이체 #${esc(String(x.batchSeq || '?'))}${x.bank ? ' ' + esc(_DD_BANK_LABEL[x.bank] || x.bank) : ''}`,
     `<b style="color:${_DD_PAY_COLOR[st] || '#374151'}">${esc(_DD_PAY_LABEL[st] || st || '상태 불명')}</b>`,
     esc(_ddWon(x.amount)),
   ];
   if (x.paidAt) parts.push(esc(_ddDay(x.paidAt)));
   /* 실패 사유는 내부 표기라 리뷰어에겐 안 나가지만, 관리자 화면에서는 판단 근거다. */
   if (st === 'failed' && x.failReason) parts.push(esc(String(x.failReason).slice(0, 60)));
-  if (String(x.batchStatus || '') === 'cancelled') parts.push('(회차 취소됨)');
+  if (String(x.batchStatus || '') === 'cancelled') parts.push('(대량이체 취소됨)');
   return parts.filter(Boolean).join(' · ');
 }
 function _ddSkipRows(g){
@@ -4784,7 +4784,7 @@ function _ddSkipRows(g){
   if (!g.rows) return '';
   return `<div style="margin:4px 0 0 12px">${g.rows.map(r =>
     `<div>줄 <b>${esc(String(r.seq))}</b>${r.isKeep ? ' <span style="color:#166534">(남길 줄)</span>' : ''} —
-      ${r.pay.length ? r.pay.map(_ddPayLine).join(' / ') : '<span style="color:#6b7280">회차에 담긴 적 없음</span>'}</div>`).join('')}</div>`;
+      ${r.pay.length ? r.pay.map(_ddPayLine).join(' / ') : '<span style="color:#6b7280">대량이체에 담긴 적 없음</span>'}</div>`).join('')}</div>`;
 }
 function _ddRender(){
   const b = document.getElementById('ddBody'); if (!b || !_DD) return;
@@ -4909,7 +4909,7 @@ async function ddRun(){
   if (!confirm(`「${tg.label || tg.tabName}」 표에서 중복 ${p.removeRows}줄을 내립니다.\n\n` +
     `대상은 ㉮ 표·기록 주문번호와 연락처가 셋 다 같은 줄, 또는 ㉯ 같은 주문 기록을 여러 줄이 쓰는 경우입니다.\n` +
     `가장 이른 줄은 남고, 내려간 줄의 중복 주문은 취소로 표시됩니다.\n` +
-    (p.skippedGroups ? `보류 ${p.skippedGroups}건(입금 회차에 담김 등)은 손대지 않습니다.\n` : '') +
+    (p.skippedGroups ? `보류 ${p.skippedGroups}건(대량이체에 담김 등)은 손대지 않습니다.\n` : '') +
     `구글시트는 건드리지 않으며 되돌릴 수 있습니다.\n\n계속할까요?`)) return;
   _DD.busy = true; _ddRender();
   try {
@@ -5051,7 +5051,7 @@ async function abResolve(i, ackPending){
     const warn = [
       pv.losesPaid ? '· 내릴 줄에만 입금 표시가 있습니다' : '',
       pv.losesSubmitted ? '· 내릴 줄에만 리뷰제출 표시가 있습니다' : '',
-      (pv.pendingSeqs || []).length ? `· 이체 대기 회차에 담긴 줄 ${pv.pendingSeqs.join(', ')} (회차 항목은 자동으로 빠지지 않습니다)` : '',
+      (pv.pendingSeqs || []).length ? `· 이체 대기 중인 대량이체에 담긴 줄 ${pv.pendingSeqs.join(', ')} (대량이체 항목은 자동으로 빠지지 않습니다)` : '',
     ].filter(Boolean).join('\n');
     const okGo = confirm(
       `「${_AB.label}」\n\n남길 줄 ${pv.keep.seq}번 (${pv.keep.name || '이름 없음'})\n` +
@@ -5081,7 +5081,7 @@ function _abGroupHtml(g, i){
       r.orderDeleted ? '<span style="color:#b91c1c">주문 취소됨</span>' : '',
       r.submitted ? '리뷰제출' : '',
       r.paid ? '입금' : '',
-      r.inPayment === true ? '<span style="color:#b91c1c"><b>이체 회차</b></span>'
+      r.inPayment === true ? '<span style="color:#b91c1c"><b>대량이체</b></span>'
         : (r.inPayment === null ? '<span style="color:#6b7280">이체 담김 모름</span>' : ''),
     ].filter(Boolean).join(' · ');
     const pick = can ? `<td class="pick"><input type="radio" name="abk${i}" ${isKeep ? 'checked' : ''}
@@ -5139,7 +5139,7 @@ function _abRender(){
       ${_abCan() ? '그룹마다 <b>남길 줄</b>을 고르고 나머지를 <b>내림</b>으로 체크한 뒤 [이 그룹 정리]를 누르세요 — 미리보기 확인창을 거쳐 실행되고, 내린 줄은 되돌릴 수 있습니다.' : '이 창은 <b>읽기 전용</b>입니다.'}</div>
     <div style="margin:8px 0 2px">${legend || ''}</div>
     ${r.dedupeError ? `<div class="wbl-facts" style="color:#92400e">정리 도구와 대조하지 못했습니다(${esc(r.dedupeError)}) — "정리 대상/보류" 표시는 이번 결과에 없습니다.</div>` : ''}
-    ${r.payUnavailable ? `<div class="wbl-facts" style="color:#b91c1c">이체 회차에 담긴 줄인지 확인하지 못했습니다 — 지우기 전에 입금관리에서 직접 확인하세요.</div>` : ''}
+    ${r.payUnavailable ? `<div class="wbl-facts" style="color:#b91c1c">대량이체에 담긴 줄인지 확인하지 못했습니다 — 지우기 전에 입금관리에서 직접 확인하세요.</div>` : ''}
     ${r.truncated ? `<div class="wbl-facts">그룹이 많아 상위 ${esc(String(all.length))}개만 받았습니다.</div>` : ''}
     ${all.length ? all.slice(0, shown).map(_abGroupHtml).join('') : `<div class="wbl-facts">겹친 줄이 없습니다.</div>`}
     ${shown < all.length ? `<div style="margin:10px 0 2px;text-align:center">
@@ -5839,9 +5839,9 @@ async function openTaskDelete(i){
         <div class="wbl-sub">${esc(t.tabName)} · ${esc(t.advertiserName||'업체 미지정')}</div>
         ${facts}
         <div class="tdbad"><b>이 작업에는 입금 기록이 있습니다 — ${j.money.map(m=>esc(m.label)+' '+m.count+'건').join(' · ')}</b><br>
-          지우면 그 리뷰어 줄이 <b>미입금으로 보여 다음 회차에 다시 담기고 이중 송금</b>이 날 수 있습니다.
+          지우면 그 리뷰어 줄이 <b>미입금으로 보여 다음 대량이체에 다시 담기고 이중 송금</b>이 날 수 있습니다.
           지우지 않고 목록에서만 내리려면 [🏁 마감]을 쓰세요.<br>
-          <span class="wbl-sub">입금 회차(배치) 자체는 남고, 이 작업의 항목만 지워집니다.</span></div>
+          <span class="wbl-sub">대량이체 자체는 남고, 이 작업의 항목만 지워집니다.</span></div>
         ${side}${driveBlock}
         <label class="wbl-chk"><input type="checkbox" id="tdOk" onchange="_tdSync()">
           입금 기록까지 <b>영구히 삭제</b>되는 것을 확인했습니다.
@@ -10122,8 +10122,8 @@ function _wdDpSaveDeposit(iso){
         toast(msg + (r.ledger==='deferred' ? ' (장부 반영은 잠시 뒤 자동 완료)' : ''));
         /* ★ 이체 회차(다운로드 이력)에 잡혀 있던 줄은 [비우기] 한 번으로 **그 사람 몫만** 풀린다
            (회차 전체 취소 아님 — 같은 회차의 다른 사람 이체는 그대로 유효). 몇 건 풀렸는지 말한다. */
-        if(r.releasedBatchItems) setTimeout(()=>toast('이체 회차 잠금도 이 사람 몫만 함께 풀렸습니다(다른 사람 이체는 그대로입니다)'),1200);
-        else if(r.batchLocked) setTimeout(()=>toast('단, 이 줄은 이체 회차에 잡혀 있어 입금관리 목록에는 아직 나오지 않습니다'),1200);
+        if(r.releasedBatchItems) setTimeout(()=>toast('대량이체 잠금도 이 사람 몫만 함께 풀렸습니다(다른 사람 이체는 그대로입니다)'),1200);
+        else if(r.batchLocked) setTimeout(()=>toast('단, 이 줄은 대량이체에 잡혀 있어 입금관리 목록에는 아직 나오지 않습니다'),1200);
         reloadWorkdesk();
         return;
       }
@@ -12634,7 +12634,7 @@ async function openOrphanCampaigns(){
       ${j.truncated?'<div class="wbl-sub">일부만 표시했습니다 — 정리 후 다시 열면 나머지가 보입니다.</div>':''}
       <ul class="wbl-ul">
         <li>그 공고의 <b>참여 신청·옵션·리뷰비 구간·차수·날짜별 인원</b>도 함께 사라집니다.</li>
-        <li>입금 회차 자체는 그대로 남습니다(회차 항목의 공고 연결만 비워집니다).</li>
+        <li>대량이체 자체는 그대로 남습니다(대량이체 항목의 공고 연결만 비워집니다).</li>
       </ul>
       <label class="wbl-chk"><input type="checkbox" id="ocOk" onchange="_ocSync()">
         위 ${items.length}건이 <b>영구히 삭제</b>되는 것에 동의합니다.
@@ -12857,7 +12857,7 @@ function _pmTabsHtml(){
   /* (⚠ 원장 불일치 서브탭 — 시트↔원장 역동기화 제안 목록 — 은 2026-10-23 제거 · 결정 274.
      남은 시트 탭도 작업보드가 원본이라 "원장을 시트값으로" 바꿀 일이 없고, 그 입구는 인트라넷 로그인 직원에게
      권한 없음으로 막혀 있었다.) */
-  return `<div class="pmtabs">${t('targets','입금 대상 · 회차')}${t('banks','🏦 은행 이름')}</div>`;
+  return `<div class="pmtabs">${t('targets','입금 대상 · 대량이체')}${t('banks','🏦 은행 이름')}</div>`;
 }
 function _pmSwitch(k){ if(STATE.pmSub===k) return; STATE.pmSub=k; _pmPaint(); }
 function _pmPaint(){ if(STATE.pmSub==='banks') _bnOpen(); else _pmRender(); }
@@ -13297,7 +13297,7 @@ function _pmRender(){
         ${priceOutliers.length?stat('⚠ 단독 이상금액', priceOutliers.length+'건','warn'):''}
       </div>
       <section class="pmbatchpanel">
-        <h2 class="pmh2">이체 회차</h2>
+        <h2 class="pmh2">대량이체</h2>
         <div id="pmBankBar">${_pmBankBarHtml()}</div>
         <div id="pmBatchTableWrap">${_pmBatchTable(STATE.pmBatches||[])}</div>
       </section>
@@ -13461,7 +13461,7 @@ function _pmBatchWorkboard(b,i){
    서버는 `paid` 항목의 실제 이체시각(paid_at)으로만 값을 만든다(화면이 날짜를 정하지 않는다). */
 async function _pmDepositBackfill(i){
   const b=(STATE.pmBatches||[])[i]; if(!b) return;
-  if(!confirm(`#${b.seq} 회차의 작업보드 입금일을 기록할까요?\n\n· 이미 이체 완료된 ${b.resultAppliedCount||b.paidCount||0}건의 입금일을 작업보드에 적습니다\n· 입금 기록(원장)과 회차 상태는 바뀌지 않습니다\n· 이미 적혀 있는 값은 그대로 유지됩니다`)) return;
+  if(!confirm(`#${b.seq} 대량이체의 작업보드 입금일을 기록할까요?\n\n· 이미 이체 완료된 ${b.resultAppliedCount||b.paidCount||0}건의 입금일을 작업보드에 적습니다\n· 입금 기록(원장)과 대량이체 상태는 바뀌지 않습니다\n· 이미 적혀 있는 값은 그대로 유지됩니다`)) return;
   toast('입금일을 기록하는 중…');
   const r=await api('/api/trackb/payment/batch/'+b.id+'/deposit-date-backfill',{method:'POST',body:JSON.stringify({})});
   if(!r||!r.ok){ toast('입금일 기록 실패'+(r&&r.error?' — '+r.error:'')); return; }
@@ -13478,7 +13478,7 @@ function _pmBatchActions(b,i){
   const resultUpload = (b.status==='downloaded' || b.status==='applied')
     ? `<button class="pmdrop" type="button" title="클릭하거나 결과 파일을 끌어 놓으세요" onclick="_pmPickResult(${i})" ondragover="_pmResultDragOver(event)" ondragleave="_pmResultDragLeave(event)" ondrop="_pmResultDrop(event,${i})"><span class="pmdropicon" aria-hidden="true">⇧</span><span>결과 파일 업로드</span></button>` : '';
   const manage = b.status==='downloaded' ? `<button class="btn sm" onclick="_pmRefileByIndex(${i})">⬇ 다시 받기</button>
-    ${reconcile}<button class="btn sm danger" onclick="_pmCancelByIndex(${i})">회차 취소</button>`
+    ${reconcile}<button class="btn sm danger" onclick="_pmCancelByIndex(${i})">대량이체 취소</button>`
     : '';
   const result = b.resultUploadId && b.resultSource!=='bank' ? `<button class="btn sm" onclick="_pmOpenResult(${i})">이체결과 확인</button>
     ` : '';
@@ -13490,12 +13490,12 @@ function _pmBatchActions(b,i){
   return manage + result + bankAction + unconfirmedAction + resultUpload;
 }
 function _pmBatchTable(list){
-  if(!list.length) return `<div class="empty">아직 만든 회차가 없습니다.</div>`;
+  if(!list.length) return `<div class="empty">아직 만든 대량이체가 없습니다.</div>`;
   const st = b => b.status==='cancelled' ? '<span class="pmb no">취소됨</span>'
     : b.status==='applied' ? '<span class="pmb ok">반영완료</span>'
     : '<span class="pmb wait">결과 대기</span>';
   return `<div class="lgwrap pm-batch-scroll"><table class="lgtable pmtable">
-    <thead><tr><th>회차</th><th>만든 시각</th><th>은행</th><th class="num">건수</th><th class="num">금액</th>
+    <thead><tr><th>대량이체</th><th>만든 시각</th><th>은행</th><th class="num">건수</th><th class="num">금액</th>
       <th>담당</th><th>다운로드</th><th>이체결과</th><th>작업보드</th><th>상태</th><th></th></tr></thead><tbody>
     ${list.map((b,i)=>`<tr><td class="mono">#${b.seq}</td><td class="mono">${esc(_pmDate(b.createdAt))}</td>
       <td>${esc(b.bankLabel)}</td><td class="num">${b.itemCount}</td><td class="num">${_pmNum(b.totalAmount)}</td>
@@ -13526,7 +13526,7 @@ async function _pmBankRefresh(force){
     else if(force && sr && sr.ok) toast(sr.skipped?'통장 확인 완료':'통장 확인 완료 — 거래 '+(sr.fetched||0)+'건');
     const auto=(sr&&sr.autoConfirmed)||[];
     if(auto.length){
-      toast(`통장으로 ${auto.map(a=>'#'+a.seq).join(', ')} 회차 ${auto.reduce((n,a)=>n+(a.applied||0),0)}건을 이체 완료로 기록했습니다`);
+      toast(`통장으로 ${auto.map(a=>'#'+a.seq).join(', ')} 대량이체 ${auto.reduce((n,a)=>n+(a.applied||0),0)}건을 이체 완료로 기록했습니다`);
       reload=true;
     }
   }catch(_){ STATE.pmBank={ error:'통장 상태를 불러오지 못했습니다' }; }
@@ -13597,10 +13597,10 @@ function _pmBankBarHtml(){
   const err=(s.ok===false&&s.error)?`<b style="color:#B24A3A">마지막 확인 실패 — ${esc(s.error)}</b>`:'';
   const o=k.outside||{count:0,sum:0,days:[]};
   const out=o.count
-    ? `<span class="pmbank-out">⚠ 최근 7일 <b>회차 밖으로 나간 돈 ${o.count}건 · ${_pmNum(o.sum)}원</b></span>`
-    : '<span class="muted">최근 7일 회차 밖으로 나간 돈 없음</span>';
+    ? `<span class="pmbank-out">⚠ 최근 7일 <b>기록 없이 나간 돈 ${o.count}건 · ${_pmNum(o.sum)}원</b></span>`
+    : '<span class="muted">최근 7일 기록 없이 나간 돈 없음</span>';
   const days=o.count&&(o.days||[]).length
-    ? `<div class="pmbank-days">${(o.days||[]).map(d=>`${esc(String(d.date).slice(5).replace('-','/'))} ${d.count}건 ${_pmNum(d.sum)}원`).join(' · ')} — 은행 이체 파일에 회차 밖 줄을 넣어 보낸 돈입니다. 같은 사람이 다음 회차에 또 담기지 않았는지 확인해 주세요.</div>` : '';
+    ? `<div class="pmbank-days">${(o.days||[]).map(d=>`${esc(String(d.date).slice(5).replace('-','/'))} ${d.count}건 ${_pmNum(d.sum)}원`).join(' · ')} — 은행 이체 파일에 리뷰웹 기록에 없는 줄을 넣어 보낸 돈입니다. 같은 사람이 다음 대량이체에 또 담기지 않았는지 확인해 주세요.</div>` : '';
   return `<div class="pmbank"><b>케이뱅크 통장</b><span class="muted">마지막 확인 ${esc(last)}</span>${err}<span class="sp" style="flex:1"></span>${out}<button class="btn xs" onclick="_pmBankRefresh(true)">통장 확인</button>${days}</div>`;
 }
 function _pmBankStateHtml(b){
@@ -13645,9 +13645,9 @@ function _pmBankPickRender(){
   const groups=need.map(a=>{
     const rows=items.filter(it=>it.amount===a.amount);
     const already=rows.filter(it=>it.status==='failed').length;
-    const head=`<b>${_pmNum(a.amount)}원</b><span>회차 ${a.count}명 · 통장 출금 ${a.bank}건${a.refunds?` · 취소로 돌아옴 ${a.refunds}건`:''}</span>`;
+    const head=`<b>${_pmNum(a.amount)}원</b><span>대량이체 ${a.count}명 · 통장 출금 ${a.bank}건${a.refunds?` · 취소로 돌아옴 ${a.refunds}건`:''}</span>`;
     if(a.failures==null){
-      return `<div class="pmbp-grp"><div class="pmbp-hd">${head}<span style="color:#80500F">같은 금액이 통장에 더 많이 찍혀(회차 밖 줄이 섞임) 누가 받았는지 알 수 없습니다 — 결과 파일을 올려 주세요.</span></div></div>`;
+      return `<div class="pmbp-grp"><div class="pmbp-hd">${head}<span style="color:#80500F">같은 금액이 통장에 더 많이 찍혀(기록에 없는 줄이 섞임) 누가 받았는지 알 수 없습니다 — 결과 파일을 올려 주세요.</span></div></div>`;
     }
     const cnt=already+pickedOf(a);
     return `<div class="pmbp-grp"><div class="pmbp-hd">${head}<span style="color:#80500F">통장 기준 <b>${a.failures}명</b>이 못 받았습니다 — 못 받은 사람을 눌러 고르세요 <b>(${cnt}/${a.failures})</b></span></div>
@@ -13660,7 +13660,7 @@ function _pmBankPickRender(){
   const btnLabel=[okPending?`맞는 ${okPending}명 이체 완료`:'', picks.length?`고른 ${picks.length}명 실패`:''].filter(Boolean).join(' · ')||'확정할 것 없음';
   let el=document.getElementById('pmBankPickOv');
   if(!el){ el=document.createElement('div'); el.className='pmrov'; el.id='pmBankPickOv'; document.body.appendChild(el); }
-  el.innerHTML=`<div class="pmrbox" style="width:min(760px,100%)"><div class="pmrhd"><h3>#${b.seq} 회차 통장 대조</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmBankPickClose()">닫기</button></div>
+  el.innerHTML=`<div class="pmrbox" style="width:min(760px,100%)"><div class="pmrhd"><h3>#${b.seq} 대량이체 통장 대조</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmBankPickClose()">닫기</button></div>
     <div class="pmrbd">
       <div class="pmnote">케이뱅크 통장 ${cl?`${esc(_pmDate(cl.start))} 대량이체 ${cl.rowCount}건 · ${_pmNum(cl.total)}원`:''}과 맞대 봤습니다. 통장에는 받는 사람이 찍히지 않아, 금액이 맞지 않는 사람만 아래에서 확인합니다.</div>
       <div style="font-size:12.5px;margin:8px 0">통장과 맞는 금액: <b>${ok.length}종 · ${okPending}명</b>${okPending?' → 확정하면 이체 완료로 기록됩니다(결과 파일 반영과 같은 기록).':''}</div>
@@ -13672,7 +13672,7 @@ function _pmBankPickRender(){
 async function _pmBankPickSubmit(){
   const st=STATE.pmBankPick; if(!st) return;
   const picks=[...st.picked];
-  if(picks.length && !confirm(`고른 ${picks.length}명을 이체 실패로 기록합니다.\n실패 안내(1:1문의)가 그 리뷰어에게 나가고, 다음 회차 대상으로 돌아갑니다.\n\n계속할까요?`)) return;
+  if(picks.length && !confirm(`고른 ${picks.length}명을 이체 실패로 기록합니다.\n실패 안내(1:1문의)가 그 리뷰어에게 나가고, 다음 대량이체 대상으로 돌아갑니다.\n\n계속할까요?`)) return;
   toast('통장으로 확정하는 중…');
   const r=await api('/api/trackb/payment/batch/'+st.batch.id+'/bank-confirm',{method:'POST',body:JSON.stringify({failedItemIds:picks})});
   if(!r||!r.ok){ toast('확정 실패 — '+((r&&r.error)||'다시 시도해 주세요')); return; }
@@ -13887,7 +13887,7 @@ function _pmFixBlock(){
   return `<div class="pmfix">
     <h3>보완하면 풀리는 보류 — 작업 ${f.works.length}개</h3>
     <div class="sub">작업별로 모았습니다. <b>이체은행·통장표시</b>는 <b>[📋 작업보드] → 작업 조건</b>에서 정합니다 —
-      한 번 정하면 <b>그 작업의 보류가 한 번에</b> 풀리고 다음 회차부터 파일에 포함됩니다.
+      한 번 정하면 <b>그 작업의 보류가 한 번에</b> 풀리고 다음 대량이체부터 파일에 포함됩니다.
       리뷰어 <b>계좌</b>는 사람마다 달라 여기서 바로 고칩니다.
       ${totals.length?`<br>화면에서 못 고치는 사유: ${totals.join(' · ')}`:''}</div>
     <div class="pmfixgrid">${cards}</div>
@@ -14024,7 +14024,7 @@ function _pmDownloadConfirmText(label, picked){
     + `담당자: ${_pmManagerLabel(filter.manager)}\n`
     + `작업 ${works.length}개: ${shown}\n\n`
     + `다운로드하면 이 건들은 잠겨서 다음 목록에 다시 나오지 않습니다.\n`
-    + `(잘못 뽑았다면 [회차 취소]로 되돌릴 수 있어요)`;
+    + `(잘못 뽑았다면 [대량이체 취소]로 되돌릴 수 있어요)`;
 }
 
 async function _pmDownload(bank){
@@ -14037,7 +14037,7 @@ async function _pmDownload(bank){
   const label = (PAY_BANKS.find(b=>b[0]===bank)||[])[1]||bank;
   if(!confirm(_pmDownloadConfirmText(label, picked))) return;
   const r = await api('/api/trackb/payment/batch', { method:'POST', body: JSON.stringify({ bank, rows }) });
-  if(!r || !r.ok){ toast((r&&r.error)||'회차 생성 실패'); return; }
+  if(!r || !r.ok){ toast((r&&r.error)||'대량이체 생성 실패'); return; }
   if((r.skipped||[]).length) toast(`${r.batch.itemCount}건 생성 · ${r.skipped.length}건은 제외됐습니다`);
   await _pmRefile(r.batch.id);
   STATE.pmExcluded = {};
@@ -14135,7 +14135,7 @@ async function _pmOpenBatchUnconfirmed(i){
   const r=await api('/api/trackb/payment/batch/'+b.id+'/result-preview');
   if(!r||!r.ok){ toast((r&&r.error)||'이체결과를 불러오지 못했습니다'); return; }
   const outside=Array.isArray(r.unmatchedResults)?r.unmatchedResults:[];
-  if(!outside.length){ toast('이 회차에 미확인 이체가 없습니다.'); return; }
+  if(!outside.length){ toast('이 대량이체에 미확인 이체가 없습니다.'); return; }
   STATE.pmResult={ batch:b, file:{name:r.fileName||'결과 파일'}, preview:r, persisted:true };
   const groups=Object.values(outside.reduce((acc,x)=>{
     const memo=String(x&&x.memo||'통장표시 없음').trim()||'통장표시 없음';
@@ -14223,7 +14223,7 @@ function _pmOpenAmountMismatchForm(rowIndex){
   const c=_pmUnconfirmedContext(rowIndex), box=document.getElementById('pmUnconfirmedDecision'), x=c.amountCandidate;
   if(!x||!box) return;
   box.style.display='block';
-  box.innerHTML=`<p><b>금액 조정 승인</b> · 회차 예정금액과 실제 이체금액이 다릅니다. 현재 작업보드 금액과 실제 이체금액이 같은지 확인하고 사유를 남겨 주세요.</p><div class="pmstats" style="margin:8px 0"><div class="pmstat"><div class="k">회차 예정금액</div><div class="v">${_pmNum(x.expectedAmount)}원</div></div><div class="pmstat warn"><div class="k">현재 작업보드 기준</div><div class="v">${_pmNum(x.workboardAmount)}원</div></div><div class="pmstat"><div class="k">실제 이체금액</div><div class="v">${_pmNum(x.actualAmount)}원</div></div></div><div class="row"><input id="pmAmountMismatchNote" class="memo" maxlength="500" placeholder="필수: 금액이 조정된 사유 또는 확인 근거"><button class="btn pri xs" onclick="_pmReconcileAmountMismatch(${c.rowIndex})">확인 후 승인</button><button class="btn xs" onclick="_pmCloseUnconfirmedDecision()">취소</button></div>`;
+  box.innerHTML=`<p><b>금액 조정 승인</b> · 대량이체 예정금액과 실제 이체금액이 다릅니다. 현재 작업보드 금액과 실제 이체금액이 같은지 확인하고 사유를 남겨 주세요.</p><div class="pmstats" style="margin:8px 0"><div class="pmstat"><div class="k">대량이체 예정금액</div><div class="v">${_pmNum(x.expectedAmount)}원</div></div><div class="pmstat warn"><div class="k">현재 작업보드 기준</div><div class="v">${_pmNum(x.workboardAmount)}원</div></div><div class="pmstat"><div class="k">실제 이체금액</div><div class="v">${_pmNum(x.actualAmount)}원</div></div></div><div class="row"><input id="pmAmountMismatchNote" class="memo" maxlength="500" placeholder="필수: 금액이 조정된 사유 또는 확인 근거"><button class="btn pri xs" onclick="_pmReconcileAmountMismatch(${c.rowIndex})">확인 후 승인</button><button class="btn xs" onclick="_pmCloseUnconfirmedDecision()">취소</button></div>`;
   document.getElementById('pmAmountMismatchNote')?.focus();
 }
 async function _pmReconcileAmountMismatch(rowIndex){
@@ -14231,7 +14231,7 @@ async function _pmReconcileAmountMismatch(rowIndex){
   if(!R||!x||!R.preview?.uploadId) return;
   const note=String(document.getElementById('pmAmountMismatchNote')?.value||'').trim();
   if(!note){ toast('금액 조정 승인 사유를 입력해 주세요.'); document.getElementById('pmAmountMismatchNote')?.focus(); return; }
-  if(!confirm(`${x.reviewerName||'참여자'}\n\n회차 예정 ${_pmNum(x.expectedAmount)}원 → 현재 작업보드 ${_pmNum(x.workboardAmount)}원\n실제 이체 ${_pmNum(x.actualAmount)}원\n\n이 금액으로 입금완료 처리할까요? 감사 이력에 승인자와 사유가 남습니다.`)) return;
+  if(!confirm(`${x.reviewerName||'참여자'}\n\n대량이체 예정 ${_pmNum(x.expectedAmount)}원 → 현재 작업보드 ${_pmNum(x.workboardAmount)}원\n실제 이체 ${_pmNum(x.actualAmount)}원\n\n이 금액으로 입금완료 처리할까요? 감사 이력에 승인자와 사유가 남습니다.`)) return;
   const r=await api('/api/trackb/payment/batch/'+R.batch.id+'/amount-mismatch-reconcile',{method:'POST',body:JSON.stringify({uploadId:R.preview.uploadId,itemId:x.itemId,resultSeq:x.resultSeq,note,confirm:true})});
   if(!r||!r.ok){ toast((r&&r.error)||'금액 조정 승인을 처리하지 못했습니다.'); return; }
   _pmUnconfirmedClose();
@@ -14280,7 +14280,7 @@ async function _pmOpenDuplicateCaseManagement(){
   const r=await api('/api/trackb/payment/batch/'+R.batch.id+'/duplicate-payment-cases');
   if(!r||!r.ok){box.innerHTML=`<p>${esc((r&&r.error)||'중복입금 후속관리 건을 불러오지 못했습니다.')}</p>`;return;}
   const cases=Array.isArray(r.cases)?r.cases:[];
-  if(!cases.length){box.innerHTML='<p>현재 회차에 열린 중복입금 후속관리 건이 없습니다.</p>';return;}
+  if(!cases.length){box.innerHTML='<p>현재 대량이체에 열린 중복입금 후속관리 건이 없습니다.</p>';return;}
   box.innerHTML=`<p><b>중복입금 후속관리</b> · 실제 회수·환불 이체는 외부에서 처리하며, 아래에서 업무 상태와 담당·기한만 기록합니다.</p>${cases.map(x=>{const id=String(x.id);return `<div class="row" style="padding-top:8px;border-top:1px solid var(--line,#E1E5EB)"><span style="min-width:92px"><b>#${esc(x.resultSeq)}</b> · ${esc(x.transferMemo||'이체 결과')}</span><select id="pmCaseStatus-${id}">${_pmDuplicateStatusOptions(x.case_status)}</select><input id="pmCaseOwner-${id}" value="${esc(x.owner_name||'')}" placeholder="담당자"><input id="pmCaseDue-${id}" type="date" value="${esc(x.due_at||'')}"><input id="pmCaseMemo-${id}" class="memo" value="${esc(x.memo||'')}" placeholder="메모"><button class="btn xs" onclick="_pmUpdateDuplicatePaymentCase('${id}')">저장</button></div>`;}).join('')}<div class="row" style="justify-content:flex-end;margin-top:9px"><button class="btn xs" onclick="_pmCloseUnconfirmedDecision()">닫기</button></div>`;
 }
 async function _pmUpdateDuplicatePaymentCase(caseId){
@@ -14391,7 +14391,7 @@ function _pmResultModal(){
   const R = STATE.pmResult; if(!R) return;
   const p = R.preview, s = p.summary || {};
   const auto = p.autoApply || { blockers: [] };
-  const autoLabels = { match_below_90:'회차 항목 일치율이 90% 미만입니다', result_outside_batch:'회차 밖 이체 결과가 포함되어 있습니다', duplicate_file:'이미 반영된 동일 결과 파일입니다', no_pending_items:'반영할 미처리 항목이 없습니다', no_matched_results:'이 회차와 매칭된 이체결과가 없습니다' };
+  const autoLabels = { match_below_90:'대량이체 항목 일치율이 90% 미만입니다', result_outside_batch:'기록 없는 이체 결과가 포함되어 있습니다', duplicate_file:'이미 반영된 동일 결과 파일입니다', no_pending_items:'반영할 미처리 항목이 없습니다', no_matched_results:'이 대량이체와 매칭된 이체결과가 없습니다' };
   const autoNote = p.autoApply ? (R.autoApplied
     ? `<div class="pmnote" style="background:#E5F3EE;border-left-color:#27A17A;color:#126449"><b>자동 반영 완료</b> · 정확 매칭 ${Math.round((auto.matchRate||0)*100)}%</div>`
     : `<div class="pmnote" style="background:#FBF2E1;border-left-color:#D29A39;color:#80550D"><b>자동 반영 보류</b> · ${(auto.blockers||[]).map(x=>autoLabels[x]||x).join(' · ')||'일치 기준을 확인하지 못했습니다'}</div>`) : '';
@@ -14418,11 +14418,11 @@ function _pmResultModal(){
         같은 사람·같은 금액이라 입금 결과는 같지만, <b>어느 줄에 붙었는지는 임의</b>입니다.</div>`
     : '';
   const nf = s.notInFile
-    ? `<div class="pmnote">⚠ <b>결과 파일에 없는 건 ${s.notInFile}건</b>은 <b>이체실패로 처리</b>되어 다음 회차에 다시 포함됩니다.</div>`
+    ? `<div class="pmnote">⚠ <b>결과 파일에 없는 건 ${s.notInFile}건</b>은 <b>이체실패로 처리</b>되어 다음 대량이체에 다시 포함됩니다.</div>`
     : '';
   const outside = Array.isArray(p.unmatchedResults) ? p.unmatchedResults : [];
   const ur = outside.length
-    ? `<div class="pmnote">⚠ <b>미확인 이체 ${outside.length}건</b>도 아래에 모두 표시합니다. 이 회차에는 반영하지 않으며, 매칭된 성공 건은 정상 반영됩니다.</div>`
+    ? `<div class="pmnote">⚠ <b>미확인 이체 ${outside.length}건</b>도 아래에 모두 표시합니다. 이 대량이체에는 반영하지 않으며, 매칭된 성공 건은 정상 반영됩니다.</div>`
     : '';
   const outsideGroups = outside.reduce((m,it)=>{ const k=String(it.memo||'미표기'); (m[k]||(m[k]=[])).push(it); return m; },{});
   const outsideRows = Object.entries(outsideGroups).map(([memo,items])=>{ const memoArg=esc(JSON.stringify(memo)); return `<tr><td colspan="8" style="background:#FFF9EF;padding:8px 10px"><b>미확인 이체 · ${esc(memo)}</b> <span class="muted">${items.length}건</span><button class="btn xs" style="float:right" onclick="_pmOpenUnconfirmedMatch(${memoArg})">작업 검색·대조</button></td></tr>${items.map(it=>`<tr>
@@ -14447,7 +14447,7 @@ function _pmResultModal(){
       ${archivedNote}${autoNote}${warn}${oa}${nf}${ur}
       <div class="pmnote" style="background:#EEF4FB;border-left-color:#7FA7D4;color:#1B4F9C">
         ${R.autoApplied ? '자동 반영으로' : '자동 반영 조건을 충족하면'} <b>입금완료 건만</b> 기록됩니다 — 시스템 입금 표시 + 작업표(또는 시트) 입금칸에
-        <b>결과 파일의 실제 이체시각</b>이 찍힙니다. 이체실패·결과없음 건은 잠금이 풀려 <b>다음 회차에 다시 담깁니다</b>.
+        <b>결과 파일의 실제 이체시각</b>이 찍힙니다. 이체실패·결과없음 건은 잠금이 풀려 <b>다음 대량이체에 다시 담깁니다</b>.
       </div>
       <div class="lgwrap"><table class="lgtable pmtable">
         <thead><tr><th>결과</th><th>작업</th><th>리뷰어</th><th class="num">금액</th><th>계좌</th><th>예금주</th><th>이체시각</th><th>은행 응답</th></tr></thead>
@@ -14472,7 +14472,7 @@ function _pmResultClose(){
 async function _pmMarkApplied(i){
   const b = (STATE.pmBatches||[])[i];
   if(!b) return;
-  if(!confirm(`#${b.seq} 회차를 적용완료로 처리할까요?\n\n이미 반영된 이체 결과가 있는 회차의 상태만 정리합니다.\n입금 기록·입금일·실패 상태는 새로 변경하지 않습니다.`)) return;
+  if(!confirm(`#${b.seq} 대량이체를 적용완료로 처리할까요?\n\n이미 반영된 이체 결과가 있는 대량이체의 상태만 정리합니다.\n입금 기록·입금일·실패 상태는 새로 변경하지 않습니다.`)) return;
   const r = await api('/api/trackb/payment/batch/'+b.id+'/mark-applied',
     { method:'POST', body: JSON.stringify({ confirm:true }) });
   if(!r || !r.ok){ toast((r&&r.error)||'적용완료 처리 실패'); return; }
@@ -14605,7 +14605,7 @@ function _pmOvBankHtml(g){
   ].join('');
   return `<div style="margin:2px 0 8px">
     <div class="muted" style="margin-bottom:4px">은행 이체결과 — <b>${m.length+u.length}</b>건${u.length?` (미확인 ${u.length}건)`:''}</div>
-    <div class="lgwrap"><table class="lgtable pmtable"><thead><tr><th>회차</th><th>예금주</th><th>금액</th><th>계좌끝</th><th>이체시각</th><th>결과</th><th>기록 위치</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="lgwrap"><table class="lgtable pmtable"><thead><tr><th>대량이체</th><th>예금주</th><th>금액</th><th>계좌끝</th><th>이체시각</th><th>결과</th><th>기록 위치</th></tr></thead><tbody>${rows}</tbody></table></div>
   </div>`;
 }
 function _pmOvDecisions(){
@@ -14682,7 +14682,7 @@ async function _pmOpenFanoutCleanup(stamp){
 async function _pmApplyFanoutCleanup(){
   const F=STATE.pmFanout; if(!F||!F.plan) return;
   const s2=F.plan.summary||{}, t=STATE.cur;
-  if(!confirm(`${Number(s2.actionableGroups||0)}묶음에서 ${Number(s2.dropRows||0)}줄의 ${F.stamp} 입금일을 회수합니다.\n\n· 남길 줄은 건드리지 않습니다\n· 같은 칸의 다른 입금일은 보존됩니다\n· 수동 이력 회차(#0)의 해당 항목도 함께 회수됩니다\n· 보류 ${Number(s2.holdGroups||0)}묶음은 그대로 둡니다\n\n이 작업은 되돌릴 수 없습니다.`)) return;
+  if(!confirm(`${Number(s2.actionableGroups||0)}묶음에서 ${Number(s2.dropRows||0)}줄의 ${F.stamp} 입금일을 회수합니다.\n\n· 남길 줄은 건드리지 않습니다\n· 같은 칸의 다른 입금일은 보존됩니다\n· 수동 이력 대량이체(#0)의 해당 항목도 함께 회수됩니다\n· 보류 ${Number(s2.holdGroups||0)}묶음은 그대로 둡니다\n\n이 작업은 되돌릴 수 없습니다.`)) return;
   const body={confirm:true,stamp:F.stamp};
   if(t&&t.sheetId) body.sheetId=t.sheetId;
   if(t&&t.tabName) body.tabName=t.tabName;
@@ -14690,7 +14690,7 @@ async function _pmApplyFanoutCleanup(){
   try{ r=await api('/api/trackb/payment/repair/deposit-fanout-cleanup',{method:'POST',body:JSON.stringify(body)}); }catch(e){ r=null; }
   if(!r||!r.ok){ toast((r&&r.error)||'정리에 실패했습니다.'); return; }
   document.getElementById('pmfanoutov')?.remove();
-  toast(`정리 완료 · 입금일 회수 ${r.removedCells||0}줄 · 회차 항목 회수 ${r.cancelledItems||0}건 · 마커 재고정 ${r.reanchored||0}건`);
+  toast(`정리 완료 · 입금일 회수 ${r.removedCells||0}줄 · 대량이체 항목 회수 ${r.cancelledItems||0}건 · 마커 재고정 ${r.reanchored||0}건`);
   await _pmLoad(true);
   _pmOpenDepositAnomalies();
 }
@@ -14728,7 +14728,7 @@ async function _pmConfirmFailures(i){
   const b = (STATE.pmBatches||[])[i];
   if(!b) return;
   const n = b.pendingCount||0;
-  if(!confirm(`#${b.seq} 회차의 결과 미확인 ${n}건을 이체실패로 처리할까요?\n\n실패 처리된 건은 다음 이체 회차에 다시 포함됩니다. 입금완료 건은 변경하지 않습니다.`)) return;
+  if(!confirm(`#${b.seq} 대량이체의 결과 미확인 ${n}건을 이체실패로 처리할까요?\n\n실패 처리된 건은 다음 대량이체에 다시 포함됩니다. 입금완료 건은 변경하지 않습니다.`)) return;
   const r = await api('/api/trackb/payment/batch/'+b.id+'/confirm-failures',
     { method:'POST', body: JSON.stringify({ confirm:true }) });
   if(!r || !r.ok){ toast((r&&r.error)||'이체실패 처리 실패'); return; }
@@ -14737,10 +14737,10 @@ async function _pmConfirmFailures(i){
 }
 
 async function _pmCancel(id, seq){
-  if(!confirm(`#${seq} 회차를 취소할까요?\n\n담겨 있던 건들의 잠금이 풀려 다시 입금대상 목록에 나타납니다.\n(이미 은행에 올렸다면 취소하지 마세요 — 이중입금이 될 수 있습니다)`)) return;
+  if(!confirm(`#${seq} 대량이체를 취소할까요?\n\n담겨 있던 건들의 잠금이 풀려 다시 입금대상 목록에 나타납니다.\n(이미 은행에 올렸다면 취소하지 마세요 — 이중입금이 될 수 있습니다)`)) return;
   const r = await api('/api/trackb/payment/batch/'+id+'/cancel', { method:'POST', body: JSON.stringify({}) });
   if(!r || !r.ok){ toast((r&&r.error)||'취소 실패'); return; }
-  toast('회차를 취소했습니다');
+  toast('대량이체를 취소했습니다');
   await _pmLoad(true);
 }
 
@@ -15084,7 +15084,7 @@ async function _bnSave(){
    ══════════════════════════════════════════════════════════════ */
 const WORK_GUIDES = [
   { cat:'업무 절차', icon:'💸', title:'입금관리 사용 안내',
-    desc:'입금대상을 뽑아 케이뱅크·하나은행 다건이체 서식으로 내려받고 회차를 남기는 방법',
+    desc:'입금대상을 뽑아 케이뱅크·하나은행 다건이체 서식으로 내려받고 대량이체를 남기는 방법',
     file:'입금관리_사용안내.html', tag:'입금' },
   { cat:'업무 절차', icon:'🧾', title:'외부모집 구매양식 수동제출',
     desc:'카톡으로 모집한 외부 리뷰어의 슬래시 양식을 붙여넣어 접수하는 절차',
@@ -15179,7 +15179,7 @@ function _hmMenus(){
     {v:'workdesk',  ic:'🗂', nm:'작업보드',     ds:'작업별 시트 그리드'},
     {v:'overview',  ic:'📡', nm:'관측',         ds:'Track B 전환 현황'},
     ...(isAdmin?[
-      {v:'payment',   ic:'💸', nm:'입금관리',     ds:'리뷰비 이체 회차'},
+      {v:'payment',   ic:'💸', nm:'입금관리',     ds:'리뷰비 대량이체'},
     ]:[]),
     {v:'cs',        ic:'🎧', nm:'C/S',          ds:'문의 · 교체요청',    bd:'hmCsBadge'},
     {v:'ownership', ic:'🏢', nm:'업체관리',     ds:'소유 · 정산 연결'},
