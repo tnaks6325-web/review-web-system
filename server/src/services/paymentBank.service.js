@@ -92,8 +92,11 @@ function toBankRow(tx, bank = 'kbank') {
 function _markHanaRefunds(rows) {
   const outs = rows.filter(r => r.kind === 'bulk_out').sort((a, b) => a.at - b.at);
   const used = new Set();
+  const take = r => outs.find(x => !used.has(x) && x.amount === r.amount && r.at >= x.at && r.at <= x.at + REFUND_WINDOW_MS);
+  // 이름으로 이미 반환인 입금이 그 출금을 먼저 차지한다 — 같은 출금에 반환이 두 번 붙지 않게(인트라넷 Codex P2 와 같은 갈래)
+  for (const r of rows.filter(x => x.kind === 'refund_in').sort((a, b) => a.at - b.at)) { const o = take(r); if (o) used.add(o); }
   for (const r of rows.filter(x => x.kind === 'other_in').sort((a, b) => a.at - b.at)) {
-    const o = outs.find(x => !used.has(x) && x.amount === r.amount && r.at >= x.at && r.at <= x.at + REFUND_WINDOW_MS);
+    const o = take(r);
     if (o) { used.add(o); r.kind = 'refund_in'; }
   }
   return rows;

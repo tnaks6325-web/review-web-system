@@ -1309,6 +1309,10 @@ async function intranetPaybackGauge({ force = false } = {}) {
         contract_total: num(g.contract_total) || 0, contract_count: num(g.contract_count) || 0, paid_product: num(g.paid_product) || 0,
         outside: num(g.outside), rest: num(g.rest) || 0, unlinked_paid_product: num(g.unlinked_paid_product) || 0,
         through: typeof g.through === 'string' ? g.through.slice(0, 10) : null,
+        // 은행별(인트라넷 2026-10-28 — 하나은행 입출금 장부). 옛 인트라넷이면 null → 화면은 한 칸으로 그린다.
+        outside_kbank: num(g.outside_kbank), outside_hana: num(g.outside_hana),
+        hana_from: typeof g.hana_from === 'string' ? g.hana_from.slice(0, 10) : null,
+        hana_through: typeof g.hana_through === 'string' ? g.hana_through.slice(0, 10) : null,
       },
       fetchedAt: now,
     };

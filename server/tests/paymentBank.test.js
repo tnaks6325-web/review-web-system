@@ -203,6 +203,10 @@ const item = (id, amount, status = 'pending', resultStatus = '') => ({ id, amoun
     ];
     bank._markHanaRefunds(rows);
     assert.deepStrictEqual(rows.map(r => r.kind), ['bulk_out', 'bulk_out', 'refund_in', 'refund_in', 'other_in', 'other_in']);
+    // 이름으로 반환인 입금이 먼저 그 출금을 차지한다 — 출금 하나에 반환 둘 금지
+    const r2 = [{ at: T, amount: 2000, kind: 'bulk_out' }, { at: T + 5 * MIN, amount: 2000, kind: 'refund_in' }, { at: T + 10 * MIN, amount: 2000, kind: 'other_in' }];
+    bank._markHanaRefunds(r2);
+    assert.deepStrictEqual(r2.map(r => r.kind), ['bulk_out', 'refund_in', 'other_in']);
     const items = [{ id: 1, amount: 2000, status: 'pending' }, { id: 2, amount: 2000, status: 'pending' }];
     const rec = reconcileBatch({ batch: { createdAt: T - MIN }, items, rows, now: T + 120 * MIN, settleMs: bank.BANKS.hana.settleMs });
     assert.strictEqual(rec.state, 'review');
