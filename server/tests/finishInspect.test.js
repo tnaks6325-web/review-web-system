@@ -68,42 +68,62 @@ t('★★ 줄별 사진은 reviewImagesForTab(제출물 미리보기와 같은 �
 t('★ 파일 이름으로 사람을 가르지 않는다(extractReviewerNameFromFile 미사용)', !/extractReviewerNameFromFile|file_name/.test(body));
 t('★ Drive 무접촉', !/drive\.|driveService/.test(body));
 t('★ unrowed 조회 실패 = null(모름)', /unrowed = null/.test(body));
-t('라우트 = 내부인 전용 + 스코프 게이트(/workdesk/pending 과 같다)',
-  /router\.get\('\/workdesk\/finish-inspect', authMiddleware, internalMiddleware[\s\S]{0,400}_ensureThreadScope/.test(ROUTES));
+t('라우트 = 스코프 게이트(_ensureThreadScope — 내부인 · 업체 소유 탭 · 브랜드 배정 탭, 결정 298)',
+  /router\.get\('\/workdesk\/finish-inspect', authMiddleware, async[\s\S]{0,400}_ensureThreadScope/.test(ROUTES));
+t('★★ 이름은 직원·업체 동일 — 라우트가 역할별로 이름을 바꾸지 않는다(사용자 확정)', /finishInspectForTab\(\{ sheetId, tabName \}\)/.test(ROUTES) && !/maskNames/.test(ROUTES));
+const masked = svc._finishInspectCompute({ people: [P(1, '홍길동'), P(2, '김철수')], revByRow: svc._fiReviewRows({ 1: [{ fileId: 'a', slot: 'review' }, { fileId: 'b', slot: 'review' }] }),
+  metaRows: [{ file_id: 'a', file_hash: 'H' }, { file_id: 'b', file_hash: 'H' }] });
+t('이름은 그대로(같은 사진·사진 없음 목록 모두)', masked.samePhoto.items[0].people[0].name === '홍길동' && masked.missing.items[0].name === '김철수', JSON.stringify(masked));
+t('★ 응답에 파일ID 를 싣지 않는다', !JSON.stringify(masked).includes('"a"') && !/fileIds/.test(JSON.stringify(r)));
 
-console.log('\n3) 화면(마감 확인창)');
+console.log('\n3) 화면(마감 확인창 · [🔍 리뷰 점검])');
 const grab = (name) => { const i = HTML.indexOf(`function ${name}(`); assert.ok(i > 0, name); for (let k = HTML.indexOf('{', i), d = 0; ; k++) { if (HTML[k] === '{') d++; else if (HTML[k] === '}') { d--; if (!d) return HTML.slice(i, k + 1); } } };
 const fin = grab('_finOpen');
-t('확인창이 열리면 검사를 부른다', /_finInspectLoad\(sheetId,tabName\)/.test(fin) && /id="finInspect"/.test(fin));
+t('확인창이 열리면 검사를 부른다(마감 모드)', /_fiLoad\('finInspect',sheetId,tabName,'finish'\)/.test(fin) && /id="finInspect"/.test(fin));
 t('★ [마감] 게이트는 그대로 — 사람 체크(finChk) 유지 · 검수 결과로 버튼을 켜거나 막지 않는다',
-  /id="finChk"/.test(fin) && !/finGo/.test(grab('_fiRender')) && !/finGo/.test(grab('_finInspectLoad')));
-// vm 렌더 실행
-const box = { innerHTML: '' };
-const ctx = { document: { getElementById: id => (id === 'finInspect' ? box : null) }, esc: s => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`),
-  _FIN: { sheetId: 'S', tabName: 'T' }, STATE: {}, console };
+  /id="finChk"/.test(fin) && !/finGo/.test(grab('_fiRender')) && !/finGo/.test(grab('_fiLoad')));
+t('★★ [🔍 리뷰 점검] 버튼은 역할 조건 없이(업체 포함) · 마감 작업에서도 그린다(결정 298)',
+  /const checkBtn=`<button class="btn" type="button" onclick="openReviewCheck\(\)"/.test(HTML) && /\$\{checkBtn\}/.test(HTML) && !/wd\.archived\?'':checkBtn/.test(HTML));
+t('[🔍 리뷰 점검] 은 같은 렌더러를 도구 모드로 부른다', /_fiLoad\('rcInspect',t\.sheetId,t\.tabName,'tool'\)/.test(grab('openReviewCheck')));
+const boxes = {};
+const mkEl = id => (boxes[id] = boxes[id] || { innerHTML: '' });
+const ctx = { document: { getElementById: id => (['finInspect', 'rcInspect'].includes(id) ? mkEl(id) : null) }, esc: s => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`),
+  _FIN: { sheetId: 'S', tabName: 'T' }, STATE: { role: 'admin' }, console };
 vm.createContext(ctx);
-vm.runInContext(`let _FI=null;${grab('_fiHead')}${grab('_fiRender')}${grab('_fiToggle')}async ${grab('_finInspectLoad')}`, ctx);
-ctx._FI = { r, open: {} }; vm.runInContext('_FI=this._FI;_fiRender()', ctx);
-t('문제 있음 = 네 줄 + 리뷰검수로 가는 링크', /똑같은 사진/.test(box.innerHTML) && /두 번 제출/.test(box.innerHTML) && /사진이 없음/.test(box.innerHTML) && /명단에 없는/.test(box.innerHTML) && /_finInspectGo/.test(box.innerHTML));
-t('명단 밖 건수 = 줄 + 줄 번호 없는 사진', /명단에 없는 사람의 사진<\/span><span class="n">3건/.test(box.innerHTML), box.innerHTML.slice(0, 0));
-vm.runInContext("_fiToggle('missing')", ctx);
-t('건수를 누르면 이름이 펼쳐지고 제출 표시만 있는 사람을 구분', /박다 <span class="m">\(제출 표시는 있음\)/.test(box.innerHTML));
-t('해시 없는 사진 수를 말한다', /1장은 비교 정보가 없어/.test(box.innerHTML));
-ctx._FI = { r: { ...r, canOpenInspect: false }, open: {} }; vm.runInContext('_FI=this._FI;_fiRender()', ctx);
-t('★ 리뷰검수로 못 가는 사람에게는 링크 대신 안내(403 막다른 길 금지)', !/_finInspectGo/.test(box.innerHTML) && /담당 AE·관리자/.test(box.innerHTML));
-ctx._FI = { r: clean, open: {} }; vm.runInContext('_FI=this._FI;_fiRender()', ctx);
-t('깨끗하면 한 줄', /모두 없음/.test(box.innerHTML) && !/fi-r/.test(box.innerHTML));
-ctx._FI = { r: { ...clean, outside: { ...clean.outside, unrowed: null } }, open: {} }; vm.runInContext('_FI=this._FI;_fiRender()', ctx);
-t('★ 줄 번호 없는 사진을 못 셌으면 그 사실을 말한다', /확인하지 못했습니다/.test(box.innerHTML));
+vm.runInContext(`const _FIS={};${grab('_fiHead')}${grab('_fiTitle')}${grab('_fiRender')}${grab('_fiToggle')}async ${grab('_fiLoad')}${grab('_fiRetry')}`, ctx);
+const show = (id, res, mode, role) => { ctx.STATE.role = role || 'admin'; vm.runInContext(`_FIS['${id}']={sheetId:'S',tabName:'T',mode:'${mode}',seq:1,r:this.__r,open:{}};_fiRender('${id}')`, Object.assign(ctx, { __r: res })); return boxes[id].innerHTML; };
+let h = show('finInspect', r, 'finish');
+t('문제 있음 = 네 줄 + 리뷰검수로 가는 링크', /똑같은 사진/.test(h) && /두 번 제출/.test(h) && /사진이 없음/.test(h) && /명단에 없는/.test(h) && /_fiGo\('finInspect'\)/.test(h));
+t('명단 밖 건수 = 줄 + 줄 번호 없는 사진', /명단에 없는 사람의 사진<\/span><span class="n">3건/.test(h));
+t('마감 모드의 "사진 없음"은 빨강', /fi-r bad"><span class="nm">명단에 있는데 리뷰 사진이 없음/.test(h));
+vm.runInContext("_fiToggle('finInspect','missing')", ctx);
+t('건수를 누르면 이름이 펼쳐지고 제출 표시만 있는 사람을 구분', /박다 <span class="m">\(제출 표시는 있음\)/.test(boxes.finInspect.innerHTML));
+t('해시 없는 사진 수를 말한다', /1장은 비교 정보가 없어/.test(boxes.finInspect.innerHTML));
+h = show('rcInspect', r, 'tool');
+t('★ 도구 모드: "아직 리뷰 사진이 없는 사람" 회색 + 참여·사진 요약', /fi-r info"><span class="nm">아직 리뷰 사진이 없는 사람/.test(h) && /참여 <b>5명<\/b>/.test(h));
+h = show('rcInspect', r, 'tool', 'advertiser');
+t('★★ 업체 화면에는 리뷰검수 링크 대신 "담당자가 합니다"', !/_fiGo/.test(h) && /담당자가 합니다/.test(h));
+t('★ 업체가 링크 함수를 불러도 이동하지 않는다', /STATE\.role==='advertiser'\) return/.test(grab('_fiGo')));
+h = show('finInspect', { ...r, canOpenInspect: false }, 'finish');
+t('★ 리뷰검수로 못 가는 직원에게는 링크 대신 안내(403 막다른 길 금지)', !/_fiGo/.test(h) && /담당 AE·관리자/.test(h));
+h = show('finInspect', clean, 'finish');
+t('깨끗하면 한 줄', /모두 없음/.test(h) && !/fi-r/.test(h));
+h = show('finInspect', { ...clean, outside: { ...clean.outside, unrowed: null } }, 'finish');
+t('★ 줄 번호 없는 사진을 못 셌으면 그 사실을 말한다', /확인하지 못했습니다/.test(h));
 (async () => {
   ctx.api = async () => { throw new Error('net'); };
-  await vm.runInContext("_finInspectLoad('S','T')", ctx);
-  t('★ 조회 실패 = "검사하지 못했습니다"(0건으로 꾸미지 않음) + 다시 검사', /검사하지 못했습니다/.test(box.innerHTML) && /다시 검사/.test(box.innerHTML) && !/모두 없음/.test(box.innerHTML));
-  ctx.api = async () => ({ ok: true, ...clean });
-  ctx._FIN = { sheetId: 'OTHER', tabName: 'X' }; box.innerHTML = 'keep';
-  vm.runInContext('_FIN=this._FIN', ctx);
-  await vm.runInContext("_finInspectLoad('S','T')", ctx);
-  t('★ 늦게 온 응답이 다른 작업의 창이면 그리지 않는다', !/모두 없음/.test(box.innerHTML));
+  await vm.runInContext("_fiLoad('rcInspect','S','T','tool')", ctx);
+  t('★ 조회 실패 = "검사하지 못했습니다"(0건으로 꾸미지 않음) + 다시 검사', /검사하지 못했습니다/.test(boxes.rcInspect.innerHTML) && /다시 검사/.test(boxes.rcInspect.innerHTML) && !/모두 없음/.test(boxes.rcInspect.innerHTML));
+  let release; ctx.api = () => new Promise(res => { release = () => res({ ok: true, ...clean }); });
+  const p1 = vm.runInContext("_fiLoad('rcInspect','S','T','tool')", ctx);
+  ctx.api = async () => ({ ok: false, error: '두번째' });
+  await vm.runInContext("_fiLoad('rcInspect','S2','T2','tool')", ctx);
+  release(); await p1;
+  t('★ 늦게 온 앞 요청의 응답은 그리지 않는다(상자가 다른 작업으로 넘어감)', !/모두 없음/.test(boxes.rcInspect.innerHTML) && /두번째/.test(boxes.rcInspect.innerHTML));
+  ctx._FIN = { sheetId: 'OTHER', tabName: 'X' }; vm.runInContext('_FIN=this._FIN', ctx);
+  ctx.api = async () => ({ ok: true, ...clean }); boxes.finInspect.innerHTML = 'keep';
+  await vm.runInContext("_fiLoad('finInspect','S','T','finish')", ctx);
+  t('★ 마감 확인창이 다른 작업으로 바뀌었으면 그리지 않는다', !/모두 없음/.test(boxes.finInspect.innerHTML));
   // Codex P1/P2 — reviewImagesForTab strict·상한 실제 실행(스텁 pool)
   const mkPool = (failSubs) => ({ async query(sql) {
     const q = String(sql);
