@@ -12,7 +12,7 @@ t('★ 판정 실패(undefined)면 칸을 선언하지 않는다', /c !== undefi
 t('★★ 값 = 우리 이체 회차(payment_batch_items) paid/pending 만 — 시트·입금 칸이 아니다', /FROM payment_batch_items[\s\S]{0,120}status IN \('paid','pending'\)/.test(blk) && !/UPDATE|INSERT/.test(blk));
 t('★★ 리뷰비가 든 항목만(제품비만 보낸 항목 제외 — Codex P2)', /AND COALESCE\(review_fee, 0\) > 0/.test(blk));
 t('★ 회차 조회 실패 = "확인불가"(빈칸 = 안 보냄으로 꾸미지 않는다)', /feeDep\.unavailable = true/.test(blk) && /return '확인불가'/.test(blk));
-t('★★ 줄 번호 + 명의(phone8)로 짝짓는다', /bySeq\.get\(Number\(r\.seq\)\)[\s\S]{0,160}String\(x\.phone8\)\.trim\(\) === p8/.test(blk));
+t('★★ 줄 번호 + 명의(phone8)로 짝짓는다', /if \(!p8\) return '';[\s\S]{0,120}bySeq\.get\(Number\(r\.seq\)\)[\s\S]{0,120}\.trim\(\) === p8/.test(blk));
 t('★ 마스킹 전에 짝짓는다(업체 응답의 phone8 은 가려진다)', SVC.indexOf('if (feeDep) syn.feeDeposit = _feeDepOf(syn);') < SVC.indexOf('if (maskPII) { syn.phone8 = _mask(syn.phone8)'));
 t('응답 선언 = 내부·업체 공통(res 생성 직후 · 역할 분기 밖)', /if \(feeDep\) res\.feeDepositColumn = \{ key: '__feeDeposit', label: '리뷰비 입금일\(인애드\)', paidLabel: '업체입금일\(제품비\)'/.test(SVC));
 
