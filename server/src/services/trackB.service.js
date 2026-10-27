@@ -2379,7 +2379,7 @@ async function pendingParticipants({ sheetId, tabName, kind = 'submit', limit = 
    ★ 알려주기만 한다(마감 게이트 아님 — 사용자 확정 2026-10-27). */
 const _FI_GAP_MS = 30 * 60 * 1000;   // 업로드 묶음 표식이 없는 옛 사진: 30분 넘게 떨어지면 다른 제출로 본다
 const _FI_CAP = 50;                  // 항목별 이름 목록 상한(건수는 전부 센다 · 잘리면 truncated)
-async function finishInspectForTab({ sheetId, tabName } = {}) {
+async function finishInspectForTab({ sheetId, tabName, maskNames = false } = {}) {
   if (!sheetId || !tabName) throw new Error('finishInspectForTab: sheetId, tabName 필수');
   const db = getPool();
   const roster = await _closeoutRoster(sheetId, tabName);
@@ -2403,7 +2403,7 @@ async function finishInspectForTab({ sheetId, tabName } = {}) {
         WHERE sheet_id=$1 AND tab_name=$2 AND row_index IS NULL AND COALESCE(slot_key,'review')='review'`, [sheetId, tabName]);
     unrowed = (rows[0] && rows[0].n) || 0;
   } catch (_) { unrowed = null; }   // 모름 = null(0 으로 꾸미지 않는다)
-  return _finishInspectCompute({ people, revByRow, metaRows, unrowed });
+  return _finishInspectCompute({ people, revByRow, metaRows, unrowed, maskNames });
 }
 // 줄별 사진 → 리뷰 갈래만. 휴지통으로 보낸 사진(slot 'trashed' — 고아 정리·중복 자동정리)은 이미 처리된 것이라 세지 않는다.
 function _fiReviewRows(imgs) {
@@ -2413,11 +2413,13 @@ function _fiReviewRows(imgs) {
   return out;
 }
 /** 순수 판정(쿼리 0) — 테스트가 직접 실행한다. */
-function _finishInspectCompute({ people = [], revByRow = new Map(), metaRows = [], unrowed = 0 } = {}) {
+function _finishInspectCompute({ people = [], revByRow = new Map(), metaRows = [], unrowed = 0, maskNames = false } = {}) {
+  // 업체 렌즈 — 이름은 업체 작업표와 같은 규칙으로 가린다(결정 298). 파일ID·연락처는 애초에 싣지 않는다.
+  const nmOut = (v) => { const n = String(v || '').slice(0, 40); return maskNames ? _maskName(n) : n; };
   const bySeq = new Map(people.map(r => [String(r.seq), r]));
   const meta = new Map(metaRows.map(r => [String(r.file_id), r]));
   const ids = [...revByRow.values()].flat();
-  const who = (seq) => { const p = bySeq.get(String(seq)); return { seq: Number(seq), name: String((p && (p.name || p.recipient)) || '').slice(0, 40) }; };
+  const who = (seq) => { const p = bySeq.get(String(seq)); return { seq: Number(seq), name: nmOut(p && (p.name || p.recipient)) }; };
   const cap = (arr) => ({ count: arr.length, truncated: arr.length > _FI_CAP, items: arr.slice(0, _FI_CAP) });
 
   // ① 같은 사진 — 내용 해시가 같은 파일 묶음(같은 사람 안 · 다른 사람끼리 모두)
@@ -2429,7 +2431,7 @@ function _finishInspectCompute({ people = [], revByRow = new Map(), metaRows = [
     byHash.get(h).push({ seq, fileId: String(f.fileId) });
   }
   const samePhoto = [...byHash.values()].filter(g => g.length > 1)
-    .map(g => ({ people: [...new Set(g.map(x => x.seq))].map(who), files: g.length, fileIds: g.map(x => x.fileId) }));
+    .map(g => ({ people: [...new Set(g.map(x => x.seq))].map(who), files: g.length }));
 
   // ② 한 사람이 두 번 제출 — 업로드 묶음(upload_batch_id)이 둘 이상. 표식이 없는 옛 사진은 30분 넘는 간격을 다른 제출로 본다
   const twice = [];
@@ -2457,7 +2459,7 @@ function _finishInspectCompute({ people = [], revByRow = new Map(), metaRows = [
 
   // ③ 명단에 있는데 리뷰 사진 없음 — 제출 표시가 있는데 사진이 없는 사람은 따로 표시
   const missing = people.filter(r => !revByRow.has(String(r.seq)))
-    .map(r => ({ seq: Number(r.seq), name: String(r.name || r.recipient || '').slice(0, 40), submitted: !!r.submitted }));
+    .map(r => ({ seq: Number(r.seq), name: nmOut(r.name || r.recipient), submitted: !!r.submitted }));
 
   // ④ 명단 밖 사진 — 채워진 줄이 아닌 줄 번호에 붙은 사진(+ 줄 번호 없이 이 작업에 들어온 리뷰 사진 수)
   const outside = [...revByRow.entries()].filter(([seq]) => !bySeq.has(seq)).map(([seq, files]) => ({ seq: Number(seq), files: files.length }));
