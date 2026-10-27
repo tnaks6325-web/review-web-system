@@ -872,7 +872,7 @@ router.post('/order', async (req, res, next) => {
 
     const _newIdentityGate = reviewerOrderIdentity.isEnabled() && !!(holdCtx && holdCtx.verified);
     let verifiedIdentityBinding = null;
-    let firstCaptureImageHash = '';   // 결정 299 — 첫 장 지문(명의 승인 서명) · 두 번째 장이 같은 사진이면 직원 확인 요청을 열지 않는다
+    let firstCaptureImageHash = '';   // 결정 300 — 첫 장 지문(명의 승인 서명) · 두 번째 장이 같은 사진이면 직원 확인 요청을 열지 않는다
     if (_newIdentityGate) {
       try {
         const reviewerToken = req.headers['x-reviewer-token'];
@@ -1087,7 +1087,7 @@ router.post('/order', async (req, res, next) => {
     /* ★★ 결정 260 — 공고의 「필수 배송메세지」(예: 00)가 캡처 배송메세지에 없으면 접수하지 않는다(사용자 확정 2026-10-19).
        판정 대상은 **위에서 정한 orderData.deliveryMemo 하나**(서명에서만 꺼낸 값 = 원장에 남는 값) — 화면 값을 따로 믿지 않는다.
        ★ 리뷰어가 두 번 막힌 뒤 「직원 확인 요청」으로 다시 보내면(deliveryMemoStaffReview) 받되 'staff_review' 로 남긴다(작업보드 🚩).
-       ★ 결정 299 — 단, 두 번째 사진을 서버가 받은 서명(capture2Token · 이 주문번호)이 있을 때만. 없으면 막고 두 번째 사진을 요구한다.
+       ★ 결정 300 — 단, 두 번째 사진을 서버가 받은 서명(capture2Token · 이 주문번호)이 있을 때만. 없으면 막고 두 번째 사진을 요구한다.
        ★ 아무것도 쓰기 전에 둔다. 공고 조회 실패(null) = 막지 않는다(fail-open + warn) · 필수 글자 없는 공고 = 종전 그대로. */
     {
       const rdm = require('../services/requiredDeliveryMemo.service');
@@ -1101,7 +1101,7 @@ router.post('/order', async (req, res, next) => {
       const rdmDecision = rdm.decide({
         required: rdmRequired, memo: orderData.deliveryMemo,
         staffReviewRequested: b.deliveryMemoStaffReview === true || b.deliveryMemoStaffReview === 'true',
-        // 결정 299 — 직원 확인 요청은 두 번째 사진을 서버가 받은 서명(이 주문번호)이 있을 때만.
+        // 결정 300 — 직원 확인 요청은 두 번째 사진을 서버가 받은 서명(이 주문번호)이 있을 때만.
         secondCaptureProven: reviewerOrderIdentity.readSecondCaptureProof(b.capture2Token, orderNum, { firstImageHash: firstCaptureImageHash }),
       });
       if (rdmDecision.action === 'block') {

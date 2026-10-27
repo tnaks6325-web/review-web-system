@@ -39,7 +39,7 @@ const roi = require('../src/services/reviewerOrderIdentity.service');
 {
   const g = read('server/src/services/gemini.service.js');
   assert.ok(/"deliveryMemo": "배송요청사항\/배송메모/.test(g), 'prompt asks for deliveryMemo');
-  assert.ok(/const EXTRACT_CACHE_VERSION = 'extract([5-9]|[1-9]\d+)';/.test(g), 'cache prefix bumped (old cache lacks the field) — 5 이상(결정 299 가 6 으로 올림)');
+  assert.ok(/const EXTRACT_CACHE_VERSION = 'extract([5-9]|[1-9]\d+)';/.test(g), 'cache prefix bumped (old cache lacks the field) — 5 이상(결정 300 가 6 으로 올림)');
   const d = read('server/src/routes/diag.routes.js');
   assert.ok(/issueDeliveryMemoProof\(result\.deliveryMemo, memoOrder\)/.test(d) && /const memoOrder = result\.orderNumber \|\| \(secondCapture \?/.test(d) && /productLabel, deliveryMemoToken \}\)/.test(d), 'extract response carries signed memo');
   const sr = read('server/src/routes/submit.routes.js');

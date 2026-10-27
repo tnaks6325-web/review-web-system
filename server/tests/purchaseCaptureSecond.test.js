@@ -107,7 +107,7 @@ const FRONT = p => fs.readFileSync(path.join(ROOT, '..', 'frontend', p), 'utf8')
     assert.match(diag, /allowSecondCapture: secondCapture/);
   });
   await ta('3a2 ★ 두 번째 장 판독 응답에는 명의 확인 증명을 싣지 않는다', () => {
-    // 결정 299 — 두 번째 장 응답에 「받았다는 서명」(capture2Token)이 더해졌다. 명의 확인 증명(...proof)은 여전히 없다(의미 불변).
+    // 결정 300 — 두 번째 장 응답에 「받았다는 서명」(capture2Token)이 더해졌다. 명의 확인 증명(...proof)은 여전히 없다(의미 불변).
     assert.match(diag, /res\.json\(secondCapture \? \{ \.\.\.result, productLabel, deliveryMemoToken(, capture2Token)? \} : \{ \.\.\.result, \.\.\.proof, productLabel, deliveryMemoToken \}\);/);
   });
   await ta('3b 두 번째 장 배송메세지 서명은 주문번호가 없을 때만 화면이 보낸 주문번호에 묶는다(제출 때 주문번호 일치 검사 그대로)', () => {
@@ -187,7 +187,7 @@ const FRONT = p => fs.readFileSync(path.join(ROOT, '..', 'frontend', p), 'utf8')
   await ta('5a 사진 칸 하나에서 한 번에 두 장(별도 추가 버튼 없음 · 사용자 요청) · 2장째 칸은 둘째 장이 있을 때만 · 첫 장을 빼면 2장째도 빠진다', () => {
     assert.strictEqual((sa.match(/<input type="file" accept="image\/\*" multiple id="\$\{cid\}_imgInput"/g) || []).length, 2, '두 카드 모양 모두 여러 장 선택');
     assert.strictEqual((sa.match(/id="\$\{cid\}_img2Box"/g) || []).length, 2);
-    // 결정 299(사용자 확정 2026-10-27 1가) — 평소엔 별도 추가 버튼이 없다. 필수 배송메세지로 막힌 칸에만 「배송메세지 사진 추가」가 보인다.
+    // 결정 300(사용자 확정 2026-10-27 1가) — 평소엔 별도 추가 버튼이 없다. 필수 배송메세지로 막힌 칸에만 「배송메세지 사진 추가」가 보인다.
     assert.ok(!/_img2Input/.test(sa), '별도 2장째 입력칸 id 는 없다');
     assert.strictEqual((sa.match(/id="\$\{cid\}_img2Add" style="display:none;/g) || []).length, 2, '추가 버튼 줄은 기본 숨김');
     const shows = sa.match(/_img2Add"\); if \(ad\) ad\.style\.display = "flex"/g) || [];

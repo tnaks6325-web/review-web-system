@@ -5895,7 +5895,7 @@ function _buildCoupangCardHtml(cid) {
       </div>
       <!-- ★ 결정 288: 구매캡처 2장째(선택) — 아이폰 등은 구매내역이 한 화면에 다 안 담긴다(배송메세지 잘림).
            사진 칸에서 두 장을 한 번에 고르면 둘째 장이 여기 보인다(별도 추가 버튼 없음 · 사용자 요청 2026-10-16). -->
-      <!-- ★ 결정 299: 필수 배송메세지가 확인되지 않아 막힌 주문 칸에만 보인다(평소엔 숨김 · 결정 288 의 "두 장 한 번에" 그대로). -->
+      <!-- ★ 결정 300: 필수 배송메세지가 확인되지 않아 막힌 주문 칸에만 보인다(평소엔 숨김 · 결정 288 의 "두 장 한 번에" 그대로). -->
       <div id="${cid}_img2Add" style="display:none;flex-direction:column;gap:8px;margin:0 0 8px;padding:10px 12px;border:1.5px solid #FCA5A5;border-radius:10px;background:#FEF2F2">
         <div style="font-size:.78rem;line-height:1.5;color:#991B1B">배송메세지가 확인되지 않았어요. 배송지와 배송메세지가 보이는 화면을 찍어 두 번째 사진으로 추가해 주세요.</div>
         <label style="display:inline-flex;align-items:center;justify-content:center;gap:6px;align-self:flex-start;padding:8px 14px;border-radius:8px;background:#DC2626;color:#fff;font-size:.8rem;font-weight:600;cursor:pointer">
@@ -6219,7 +6219,7 @@ function _buildOrderCardHtml(cid, idx, type) {
       </div>
       <!-- ★ 결정 288: 구매캡처 2장째(선택) — 아이폰 등은 구매내역이 한 화면에 다 안 담긴다(배송메세지 잘림).
            사진 칸에서 두 장을 한 번에 고르면 둘째 장이 여기 보인다(별도 추가 버튼 없음 · 사용자 요청 2026-10-16). -->
-      <!-- ★ 결정 299: 필수 배송메세지가 확인되지 않아 막힌 주문 칸에만 보인다(평소엔 숨김 · 결정 288 의 "두 장 한 번에" 그대로). -->
+      <!-- ★ 결정 300: 필수 배송메세지가 확인되지 않아 막힌 주문 칸에만 보인다(평소엔 숨김 · 결정 288 의 "두 장 한 번에" 그대로). -->
       <div id="${cid}_img2Add" style="display:none;flex-direction:column;gap:8px;margin:0 0 8px;padding:10px 12px;border:1.5px solid #FCA5A5;border-radius:10px;background:#FEF2F2">
         <div style="font-size:.78rem;line-height:1.5;color:#991B1B">배송메세지가 확인되지 않았어요. 배송지와 배송메세지가 보이는 화면을 찍어 두 번째 사진으로 추가해 주세요.</div>
         <label style="display:inline-flex;align-items:center;justify-content:center;gap:6px;align-self:flex-start;padding:8px 14px;border-radius:8px;background:#DC2626;color:#fff;font-size:.8rem;font-weight:600;cursor:pointer">
@@ -7781,7 +7781,7 @@ function removeCardImg(cid) {
   _syncSubmissionIdentityAction();
   _ofpOnCaptureCleared(cid);
   removeCardImg2(cid); { const b2 = document.getElementById(cid + "_img2Box"); if (b2) b2.style.display = "none"; }   // 결정 288: 첫 장을 빼면 2장째도 함께 뺀다(2장째만 남는 주문을 만들지 않는다)
-  { const a2 = document.getElementById(cid + "_img2Add"); if (a2) a2.style.display = "none"; }   // 결정 299: 첫 장이 없으면 「배송메세지 사진 추가」도 숨긴다
+  { const a2 = document.getElementById(cid + "_img2Add"); if (a2) a2.style.display = "none"; }   // 결정 300: 첫 장이 없으면 「배송메세지 사진 추가」도 숨긴다
   const inp  = document.getElementById(cid + "_imgInput");  if (inp) inp.value = "";
   const prev = document.getElementById(cid + "_imgPreview"); if (prev) { prev.style.display="none"; document.getElementById(cid+"_imgThumb").src=""; }
   const zone = document.getElementById(cid + "_imgZone");   if (zone) zone.style.display = "";
@@ -7825,7 +7825,7 @@ function _setCardImg2(file, cid, opts = {}) {
   const reader = new FileReader();
   reader.onload = (ev) => {
     const dataUrl = ev.target.result;
-    // 결정 299 — 첫 장과 똑같은 사진은 두 번째 사진으로 받지 않는다(배송메세지 화면을 따로 찍어야 한다).
+    // 결정 300 — 첫 장과 똑같은 사진은 두 번째 사진으로 받지 않는다(배송메세지 화면을 따로 찍어야 한다).
     if (opts.rejectSameAsFirst && st.lastBase64 && String(dataUrl).split(",")[1] === st.lastBase64) {
       showToast("첫 번째 사진과 같은 사진이에요. 배송지·배송메세지가 보이는 화면을 따로 찍어 올려 주세요.", true); return;
     }
@@ -7851,7 +7851,7 @@ function removeCardImg2(cid) {
   if (st && st.rdmNeedImg2) _rdmNeedImg2(cid);
 }
 
-/* ★ 결정 299 — 필수 배송메세지가 확인되지 않아 막힌 주문 칸에만 「배송메세지 사진 추가」 버튼을 보인다
+/* ★ 결정 300 — 필수 배송메세지가 확인되지 않아 막힌 주문 칸에만 「배송메세지 사진 추가」 버튼을 보인다
    (평소에는 두 장을 한 번에 고르는 종전 방식 그대로 — 결정 288). 첫 장이 있고 두 번째 장이 없을 때만. */
 function _rdmNeedImg2(cid) {
   const st = _cardAiState[cid]; if (!st) return;
@@ -7890,7 +7890,7 @@ async function _callCardExtractAi2Run(cid) {
   const req = img.req;
   const lb = document.getElementById(cid + "_img2Label");
   const say = (t) => { if (lb && st.img2 === img && img.req === req) lb.textContent = t; };
-  // 결정 299(Codex P2) — 두 장 한 번에 고를 때도 첫 장과 같은 사진은 두 번째 사진으로 받지 않는다(같은 캡처 두 장으로 직원 확인 요청을 여는 것을 막음).
+  // 결정 300(Codex P2) — 두 장 한 번에 고를 때도 첫 장과 같은 사진은 두 번째 사진으로 받지 않는다(같은 캡처 두 장으로 직원 확인 요청을 여는 것을 막음).
   if (st.lastBase64 && String(img.dataUrl).split(",")[1] === st.lastBase64) {
     removeCardImg2(cid);
     showToast("두 번째 사진이 첫 번째와 같은 사진이라 뺐어요. 배송지·배송메세지가 보이는 화면을 따로 찍어 올려 주세요.", true);
@@ -7907,7 +7907,7 @@ async function _callCardExtractAi2Run(cid) {
   } catch (_) { json = null; }
   if (st.img2 !== img || img.req !== req) return;   // 그 사이 바꾸거나 뺐다
   img.busy = false;
-  img.capture2Token = (json && json.capture2Token) || "";   // 결정 299 — 판독을 못 해도 서버가 받았으면 있다
+  img.capture2Token = (json && json.capture2Token) || "";   // 결정 300 — 판독을 못 해도 서버가 받았으면 있다
   if (!json || !json.ok) { say("2장째 첨부됨 · 내용은 읽지 못했지만 사진은 함께 제출됩니다"); return; }
   img.memoToken = json.deliveryMemoToken || "";
   // 상품명 — 첫 장에서 못 읽었을 때만 2장째 판독값을 쓴다(첫 장 값·리뷰어가 고른 상품은 덮지 않는다).
@@ -9208,7 +9208,7 @@ async function submitOrderForm() {
       img2Src:            (document.getElementById(cid+"_imgThumb")?.src || "").startsWith("data:") ? (_cardAiState[cid]?.img2?.dataUrl || "") : "",
       img2Mime:           _cardAiState[cid]?.img2?.mime || "",
       deliveryMemoToken2: _cardAiState[cid]?.img2?.memoToken || "",
-      // ★ 결정 299: 두 번째 사진을 서버가 받았다는 서명 — 필수 배송메세지 「직원 확인 요청」의 전제
+      // ★ 결정 300: 두 번째 사진을 서버가 받았다는 서명 — 필수 배송메세지 「직원 확인 요청」의 전제
       capture2Token:      _cardAiState[cid]?.img2?.capture2Token || "",
       identityConfirmed:  false
       ,saveShoppingId: !!document.getElementById(cid+"_saveIdChk")?.checked
@@ -9339,7 +9339,7 @@ async function submitOrderForm() {
       deliveryMemoToken:  o.deliveryMemoToken || "",
       // ★ 결정 288: 첫 장에 배송메세지가 없으면(잘림) 서버가 두 번째 장의 서명을 쓴다.
       deliveryMemoToken2: o.deliveryMemoToken2 || "",
-      // ★ 결정 299: 두 번째 사진을 서버가 받았다는 서명(필수 배송메세지 직원 확인 요청은 이것이 있어야 받는다)
+      // ★ 결정 300: 두 번째 사진을 서버가 받았다는 서명(필수 배송메세지 직원 확인 요청은 이것이 있어야 받는다)
       capture2Token:      o.capture2Token || "",
       identityConfirmed:  o.identityConfirmed ? "true" : "false",
       identityApprovalToken: o.identityApprovalToken || "",
@@ -9475,7 +9475,7 @@ async function submitOrderForm() {
         const pre = orders.length > 1 ? `${i+1}번째 주문: ` : "";
         const n = _rdmBump(ctx.tabName, o.orderNum);
         let staff = false;
-        // ★ 결정 299 — 직원 확인 요청은 두 번째 사진을 서버가 받은 뒤에만(서버도 같은 조건으로 막는다).
+        // ★ 결정 300 — 직원 확인 요청은 두 번째 사진을 서버가 받은 뒤에만(서버도 같은 조건으로 막는다).
         //   없으면 그 주문 칸에 「배송메세지 사진 추가」 버튼을 보이고 다시 제출하게 한다.
         const has2 = !!o.capture2Token && res.needSecondCapture !== true;
         if (!has2) _rdmNeedImg2(o.cid);

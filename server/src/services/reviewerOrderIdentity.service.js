@@ -138,7 +138,7 @@ function readDeliveryMemoProof(token, orderNumber) {
     return cleanDeliveryMemo(p.memo);
   } catch (_) { return ''; }
 }
-/* 결정 299 — 구매캡처 두 번째 장을 서버가 실제로 받아 판독했다는 서명(배송메세지를 읽었든 못 읽었든).
+/* 결정 300 — 구매캡처 두 번째 장을 서버가 실제로 받아 판독했다는 서명(배송메세지를 읽었든 못 읽었든).
    필수 배송메세지가 확인되지 않은 주문의 「직원 확인 요청」은 이 서명이 있을 때만 받는다 — 화면 값(플래그)만으로는 못 건너뛴다.
    배송메세지 서명과 같은 규율: 그 장을 판독할 때 묶은 주문번호와 제출한 주문번호가 같아야 한다. */
 function issueSecondCaptureProof(orderNumber, imageHash) {

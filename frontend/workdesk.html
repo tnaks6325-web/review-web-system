@@ -8803,7 +8803,13 @@ function _cashReceiptTitle(status){return ({submitted:'현금영수증 제출 �
 /* ★ 결정 289 ④ — 「구매수량」 가상 칸(시트에 쓰지 않는다 · 현영 칸과 같은 방식). 서버가 purchaseQtyColumn 을 선언할 때만 생긴다
    (개수가 실린 줄이 있을 때 · 내부·업체 모두 — 사용자 확정 「가」). 자리는 결제금액 칸 바로 뒤(없으면 시트 칸 맨 뒤). 값 = 고른 개수(없으면 1개). */
 const _PURCHASE_QTY_COL='__purchaseQty';
-function _gridSheetCols(wd,H){const cols=(H||[]).map(h=>({key:h,kind:'col'}));if(!(wd&&wd.purchaseQtyColumn))return cols;const at=(H||[]).findIndex(h=>/결제\s*금액|^금액$/.test(String(h||'').trim()));cols.splice(at>=0?at+1:cols.length,0,{key:_PURCHASE_QTY_COL,kind:'purchaseQty'});return cols;}
+/* ★ 결정 299 — 입금일 두 칸(제품비 업체 작업): 서버가 feeDepositColumn 을 선언할 때만. 기존 입금 칸은 이름표만 「업체입금일(제품비)」,
+   바로 뒤에 읽기 전용 「리뷰비 입금일(인애드)」(우리 이체 결과에서만 채워진다 — 시트에 쓰지 않는다). 내부·업체 같은 모양. */
+const _FEE_DEPOSIT_COL='__feeDeposit';
+function _feeDepositPaidHeader(){const f=STATE.wd&&STATE.wd.feeDepositColumn;return f&&f.paidHeader?String(f.paidHeader).trim():'';}
+function _gridSheetCols(wd,H){const cols=(H||[]).map(h=>({key:h,kind:'col'}));
+  if(wd&&wd.feeDepositColumn){const ph=String(wd.feeDepositColumn.paidHeader||'').trim();const at=ph?(H||[]).findIndex(h=>String(h||'').trim()===ph):-1;cols.splice(at>=0?at+1:cols.length,0,{key:_FEE_DEPOSIT_COL,kind:'feeDeposit'});}
+  if(!(wd&&wd.purchaseQtyColumn))return cols;const at=(H||[]).findIndex(h=>/결제\s*금액|^금액$/.test(String(h||'').trim()));cols.splice(at>=0?at+1:cols.length,0,{key:_PURCHASE_QTY_COL,kind:'purchaseQty'});return cols;}
 function _purchaseQtyDisplay(r){const q=Number(r&&r.purchaseQty)||0;return q>0?q+'개':(r&&r.filled?'1개':'');}
 function _gridAllColumns(wd){const idCols=STATE.role==='advertiser'?[]:[{key:'참여자',kind:'name'},{key:'연락처',kind:'phone'}];const custom=(wd&&wd.customColumns||[]).map(c=>({key:'ccol:'+c.id,kind:'custom',colId:c.id}));return [...idCols,..._cashReceiptColumn(wd),..._gridSheetCols(wd,wd&&wd.headers||[]),...custom];}
 function _gridApplyOneWidthToDom(col,width){const cols=STATE.gVCols||[],i=cols.findIndex(c=>c.key===col),tbl=document.querySelector('.gridscroll table.sheetgrid');if(i<0||!tbl)return;const w=_gridWidthClamp(width);if(w==null)return;STATE.gColWidths.set(col,w);tbl.querySelectorAll(`tr:not(.grouphd)>:nth-child(${i+1})`).forEach(cell=>{cell.style.minWidth=w+'px';cell.style.width=w+'px';});const head=tbl.tHead&&tbl.tHead.rows[0];if(head){if(head.cells[i])head.cells[i].classList.toggle('gwmanual',_gridHasManualWidth(col));let left=0;cols.forEach((c,ci)=>{const frozen=!!(head.cells[ci]&&head.cells[ci].classList.contains('gfz'));if(frozen){tbl.querySelectorAll(`tr:not(.grouphd)>:nth-child(${ci+1})`).forEach(cell=>{cell.style.left=left+'px';});left+=_colW(c.key);}});STATE.gFrozenW=left;}_fitGrid();}
@@ -8825,6 +8831,8 @@ function _colW(h){ const widths=STATE.gColWidths; return widths instanceof Map&&
 function _colLabel(key){
   if(key===_CASH_RECEIPT_COL) return '현영';
   if(key===_PURCHASE_QTY_COL) return '구매수량';
+  if(key===_FEE_DEPOSIT_COL) return (STATE.wd&&STATE.wd.feeDepositColumn&&STATE.wd.feeDepositColumn.label)||'리뷰비 입금일(인애드)';
+  if(typeof key==='string'&&key&&key.trim()===_feeDepositPaidHeader()) return (STATE.wd.feeDepositColumn.paidLabel)||'업체입금일(제품비)';
   if(typeof key==='string' && key.indexOf('ccol:')===0){
     const id=key.slice(5); const c=((STATE.wd&&STATE.wd.customColumns)||[]).find(x=>String(x.id)===id);
     return c?c.colName:'(삭제된 열)';
@@ -8832,7 +8840,7 @@ function _colLabel(key){
   return key;
 }
 // 가운데 정렬 대상 = 날짜형(구매일자 등)·연락처(전화) → 값 길이가 달라도 앞여백=뒷여백(좌우 대칭). (_isPhoneHeader는 아래 정의, 함수선언 호이스팅)
-function _isCtrCol(h){ return h===_CASH_RECEIPT_COL || h===_PURCHASE_QTY_COL || /일자|날짜|date/i.test(String(h==null?'':h)) || _isDepositCol(h) || _isPhoneHeader(h); }
+function _isCtrCol(h){ return h===_CASH_RECEIPT_COL || h===_PURCHASE_QTY_COL || h===_FEE_DEPOSIT_COL || /일자|날짜|date/i.test(String(h==null?'':h)) || _isDepositCol(h) || _isPhoneHeader(h); }
 // 시트 일련번호(1899-12-30 기준) → YYYY-MM-DD. 날짜형 헤더 + 순수 숫자일 때만 변환(금액 등 오변환 방지).
 function _serialToDate(n){ const ms=Math.round((n-25569)*86400000); const d=new Date(ms); if(isNaN(d.getTime()))return null; const y=d.getUTCFullYear(); if(y<2000||y>2100)return null; const p=x=>String(x).padStart(2,'0'); return `${y}-${p(d.getUTCMonth()+1)}-${p(d.getUTCDate())}`; }
 // 편집 시작값(정본): 일련번호는 ISO 로, 그 외는 원본 그대로 — 셀 클릭 편집이 표시용 축약값으로 오염되지 않게 분리.
@@ -8919,6 +8927,7 @@ function gCellDisp(r,h){
   if(h==='#') return String(r.seq==null?'':r.seq);
   if(h===_CASH_RECEIPT_COL) return _cashReceiptDisplay(r&&r.cashReceiptStatus);
   if(h===_PURCHASE_QTY_COL) return _purchaseQtyDisplay(r);
+  if(h===_FEE_DEPOSIT_COL) return String((r&&r.feeDeposit)||'');
   if(typeof h==='string' && h.indexOf('ccol:')===0) return (r.customValues&&r.customValues[h.slice(5)])||'';
   if(STATE.role!=='advertiser'){   // 광고주 그리드는 신원열(참여자·phone8)이 없음 → 동명 시트열은 rowJson에서 읽음(col 분기로 폴백)
     if(h==='참여자') return r.name||'';
@@ -9228,6 +9237,9 @@ function buildGrid(wd){
       else if(c.kind==='purchaseQty'){   // 결정 289 ④ — 읽기 전용(리뷰어가 공고 참여 때 고른 개수)
         const disp=_purchaseQtyDisplay(r);
         tds+=`<td ${cls(i,'gcell gstatuslock gctr'+(disp?'':' gempty'))} style="${cstyle(i)}" title="${esc(disp?'리뷰어가 공고 참여 때 고른 구매수량 — 수정 불가':'')}" data-rid="${esc(r.id)}" data-cfield="${_PURCHASE_QTY_COL}">${esc(disp)}</td>`; }
+      else if(c.kind==='feeDeposit'){   // 결정 299 — 읽기 전용(우리 이체 결과 · 업체도 고칠 수 없다)
+        const disp=String(r.feeDeposit||''),t=disp==='확인불가'?'리뷰비 입금 기록을 불러오지 못했습니다(새로고침)':disp==='이체 진행 중'?'인애드가 리뷰비 이체 파일을 받아 보내는 중입니다':disp?'인애드가 리뷰비를 보낸 날(은행 결과 반영) — 수정 불가':'아직 인애드가 리뷰비를 보내지 않았습니다';
+        tds+=`<td ${cls(i,'gcell gstatuslock gctr'+(disp?'':' gempty'))} style="${cstyle(i)}" title="${esc(t)}" data-rid="${esc(r.id)}" data-cfield="${_FEE_DEPOSIT_COL}">${esc(disp)}</td>`; }
       else if(c.kind==='custom'){
         // 커스텀 열(행별 자유메모) — 시트 오버레이(col:)와 같은 eCell 경로 재사용, 편집기록 없음(원본·오버레이 개념이 없다).
         const cv=(r.customValues&&r.customValues[c.colId])||'';

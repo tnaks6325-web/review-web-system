@@ -224,7 +224,7 @@ const EXTRACT_PROMPT = `당신은 한국 온라인 쇼핑몰 주문 캡쳐 이�
 // 프롬프트·화면 규칙이 달라지면 접두를 올려 옛 오인식 캐시가 새 판독을 가로막지 않게 한다.
 // extract4 (결정 230): productOption 칸 추가 — 옛 캐시는 이 칸이 없어 고른 상품 확인(①)이 그 이미지에서 꺼진다.
 // extract5 (결정 245): deliveryMemo(배송메세지) 칸 추가 — 옛 캐시는 이 칸이 없어 그 이미지의 배송메세지가 비어 남는다.
-// extract6 (결정 299): 네이버의 라벨 없는 배송메모(주소 아래 메모 아이콘 줄) — 옛 캐시는 그 줄을 빈칸으로 들고 있다.
+// extract6 (결정 300): 네이버의 라벨 없는 배송메모(주소 아래 메모 아이콘 줄) — 옛 캐시는 그 줄을 빈칸으로 들고 있다.
 const EXTRACT_CACHE_VERSION = 'extract6';
 // Gemini inline 요청 한도(20MB)에 JSON/프롬프트 여유를 남긴 실제 base64 문자 예산.
 const EXTRACT_INLINE_CHAR_BUDGET = 18 * 1024 * 1024;

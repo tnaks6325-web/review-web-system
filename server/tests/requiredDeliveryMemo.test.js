@@ -32,7 +32,7 @@ const rdm = require('../src/services/requiredDeliveryMemo.service');
 
   assert.deepEqual(rdm.decide({ required: '', memo: '' }), { action: 'none' });
   assert.equal(rdm.decide({ required: '00', memo: '00' }).action, 'ok');
-  // 결정 299 — 직원 확인 요청은 두 번째 사진을 서버가 받은 경우(secondCaptureProven)만. 플래그만으로는 막힌다.
+  // 결정 300 — 직원 확인 요청은 두 번째 사진을 서버가 받은 경우(secondCaptureProven)만. 플래그만으로는 막힌다.
   const sNo = rdm.decide({ required: '00', memo: '문 앞', staffReviewRequested: true });
   assert.equal(sNo.action, 'block', 'staff flag alone (no 2nd photo) → still blocked');
   assert.equal(sNo.needSecondCapture, true);
@@ -133,7 +133,7 @@ async function stubs() {
     'reviewer form: handled after identity retries (their resubmit may come back blocked) and before generic failure');
   const h = sa.slice(hAt, sa.indexOf('res.code === "IDENTITY_APPROVAL_STALE"', hAt));
   assert.ok(/if \(n >= 2 && has2\) \{\s*staff = confirm\(/.test(h) && /payload\.deliveryMemoStaffReview = "true";/.test(h), 'staff review only from the 2nd block, with a 2nd photo, after confirm');
-  assert.ok(/const has2 = !!o\.capture2Token && res\.needSecondCapture !== true;/.test(h) && /if \(!has2\) _rdmNeedImg2\(o\.cid\);/.test(h), '결정 299 — no 2nd photo → show the add-photo button');
+  assert.ok(/const has2 = !!o\.capture2Token && res\.needSecondCapture !== true;/.test(h) && /if \(!has2\) _rdmNeedImg2\(o\.cid\);/.test(h), '결정 300 — no 2nd photo → show the add-photo button');
   assert.ok(/results\.push\(\{[^}]*ok: false/.test(h) && /continue;/.test(h), 'declined → this order marked failed, not silently dropped');
 
   const tb = read('server/src/services/trackB.service.js');
@@ -204,7 +204,7 @@ async function pg() {
     assert.equal((await pool.query(`SELECT COUNT(*)::int n FROM order_submissions WHERE tab_name=$1`, [scope])).rows[0].n, 0, 'blocked = nothing written');
     const r4 = await post({ ...base, orderNum: 'T3', deliveryMemoToken: roi.issueDeliveryMemoProof('OO 부재시 문앞', 'T3') });
     assert.equal(r4.ok, true, '00 present → accepted');
-    // 결정 299 — 두 번째 사진 서명 없이 직원 확인 요청 → 막힘(쓰기 0) · 다른 주문의 서명도 막힘 · 이 주문의 서명 → 접수
+    // 결정 300 — 두 번째 사진 서명 없이 직원 확인 요청 → 막힘(쓰기 0) · 다른 주문의 서명도 막힘 · 이 주문의 서명 → 접수
     const r5a = await post({ ...base, orderNum: 'T4', deliveryMemoToken: roi.issueDeliveryMemoProof('문 앞', 'T4'), deliveryMemoStaffReview: 'true' });
     assert.equal(r5a.code, 'DELIVERY_MEMO_REQUIRED', 'staff flag without 2nd photo → blocked'); assert.equal(r5a.needSecondCapture, true);
     const r5b = await post({ ...base, orderNum: 'T4', deliveryMemoStaffReview: 'true', capture2Token: roi.issueSecondCaptureProof('T1', 'h') });
