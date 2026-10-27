@@ -45,6 +45,11 @@ t('홈 자리는 admin/master 만 · 홈 블록은 _tckLoad 만 부른다(새 AP
   assert.match(workdesk, /\$\{isAdmin\?'<div id="tckHomeMount"><\/div>':''\}/);
   assert.match(sourceOf('_homeLoad'), /document\.getElementById\('tckHomeMount'\) && typeof _tckLoad==='function'\) \? _tckLoad\(\)/);
 });
+t('홈 위쪽 = 왼쪽 인사 · 오른쪽 확인할 것(admin/master 만 두 칸) · 좁으면 위아래', () => {
+  assert.match(workdesk, /<div class="hm-top\$\{isAdmin\?' two':''\}">\s*<div class="hm-hero">[\s\S]{0,1200}\$\{isAdmin\?'<div id="tckHomeMount"><\/div>':''\}\s*<\/div>\s*<div id="wblMount">/);
+  assert.match(workdesk, /\.hm-top\.two\{display:grid;grid-template-columns:minmax\(300px,\.8fr\) minmax\(0,1\.2fr\)/);
+  assert.match(workdesk, /@media\(max-width:1000px\)\{\.hm-top\.two\{grid-template-columns:1fr\}/);
+});
 t('[바로 가기] = 새 탭 · 로그인을 이어받도록 noopener 없음 · 입금관리 + 그 대량이체', () => {
   const go = sourceOf('_tckGo');
   assert.match(go, /window\.open\(url,'_blank'\)/);

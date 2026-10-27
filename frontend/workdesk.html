@@ -2565,6 +2565,15 @@ table.lgtable.pm-unconfirmed-two-row-table{width:100%;min-width:0;table-layout:f
 .hm-st .n{font-size:21px;font-weight:800;font-variant-numeric:tabular-nums}
 .hm-st .n.hot{color:#fecaca}
 .hm-st .l{font-size:10.5px;opacity:.8}
+/* 결정 302 — admin/master 홈 위쪽: 왼쪽 인사 블록 · 오른쪽 「오늘 확인할 것」(사용자 확정 2026-10-28 「홈화면 2번」).
+   AE 는 확인할 것이 없으므로 종전 한 줄 그대로(.two 없음). 1000px 이하는 위아래로 쌓는다. */
+.hm-top.two{display:grid;grid-template-columns:minmax(300px,.8fr) minmax(0,1.2fr);gap:14px;align-items:stretch}
+.hm-top.two .hm-hero{display:flex;flex-direction:column}
+.hm-top.two .hm-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 0;margin-top:auto;padding-top:18px}
+.hm-top.two .hm-st{padding:0 14px;border-left:1px solid rgba(255,255,255,.2)}
+.hm-top.two .hm-st:nth-child(odd){padding-left:0;border-left:0}
+#hmwrap .hm-top.two #tckHomeMount .tck-wrap{margin-top:0;height:100%;box-sizing:border-box;max-height:420px;overflow:auto}
+@media(max-width:1000px){.hm-top.two{grid-template-columns:1fr} #hmwrap .hm-top.two #tckHomeMount .tck-wrap{max-height:none}}
 .hm-wrap{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px;align-items:start;margin-top:16px}
 @media(max-width:1000px){.hm-wrap{grid-template-columns:1fr}}
 .hm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(178px,1fr));gap:12px}
@@ -15246,6 +15255,7 @@ function renderHomeView(){
   // 브리핑 줄 — 문의(cs)는 admin 만 조회하므로 AE 에겐 줄 자체를 안 그린다(영원한 '–' 방지, 서버 게이트와 1:1)
   const brow=(v,ic,label,id)=>`<button class="hm-row" onclick="switchView('${v}')"><span>${ic}</span><span class="nm">${label}</span><b class="cnt" id="${id}">–</b></button>`;
   $('#viewroot').innerHTML=`<div class="ovwrap"><div id="hmwrap">
+    <div class="hm-top${isAdmin?' two':''}">
     <div class="hm-hero">
       <div class="hm-hi">${esc(STATE.name||STATE.role||'')}님, 오늘도 좋은 하루 되세요 ☀️</div>
       <div class="hm-sub">${dstr} · 리뷰웹시스템[3버전]이 오늘의 현황을 요약했어요</div>
@@ -15257,6 +15267,7 @@ function renderHomeView(){
       </div>
     </div>
     ${isAdmin?'<div id="tckHomeMount"></div>':''}
+    </div>
     <div id="wblMount"></div>
     <div class="hm-wrap">
       <div class="hm-grid"><div class="hm-section-title">빠른 메뉴</div>${tiles}</div>
