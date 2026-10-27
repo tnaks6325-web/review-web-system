@@ -128,7 +128,7 @@ t('④ 구매 캡처 짝짓기는 이 줄 사람의 주문으로 확인된 것�
 t('④ 삭제된 주문은 근거가 아니다', /deleted_at IS NULL/.test(rv));
 t('★ 묶음 key 는 order_capture', /'order_capture'/.test(rv));
 t('⑤ 상한은 묶음별로 센다(전체 개수로 자르면 나중 묶음이 통째로 잘린다)',
-  /arr\.filter\(f => f\.slot === sl\)\.length >= _RV_MAX_PER_ROW/.test(svc));
+  /arr\.filter\(f => f\.slot === sl\)\.length >= maxPerRow/.test(svc) && /maxPerRow = _RV_MAX_PER_ROW/.test(svc));   // 결정 297: 상한을 인자로(기본값 = 종전 12 · 검사 의미 불변)
 t('★ fail-soft — 캡처 조회가 실패해도 리뷰 캡처는 나간다', /\.catch\(\(\) => \(\{ rows: \[\] \}\)\)/.test(rv));
 
 console.log('\n── C. 화면: 상단 3분할 · 작업세부 폐지 · 정산 통합 ──');

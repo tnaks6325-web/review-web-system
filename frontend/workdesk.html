@@ -2825,6 +2825,24 @@ table.wbl-t td.nc .rest.on{position:static;transform:none;opacity:1;margin:0 0 0
 .wbl-chk input{margin-top:2px}
 .wbl-chk .sub{display:block;font-weight:400;color:var(--warn);margin-top:2px}
 .wbl-df{display:flex;gap:8px;justify-content:flex-end;padding:12px 16px;background:var(--card2);border-top:1px solid var(--line)}
+/* 결정 297 — 🏁 마감 확인창 「마감자료 검수」(시안 docs/design-finish-inspect.html) */
+#finOv .fi{margin-top:12px;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+#finOv .fi-h{display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--card2);font-size:11.5px;font-weight:800}
+#finOv .fi-h .sp{flex:1}#finOv .fi-h .when{font-weight:500;color:var(--faint);font-size:10.5px}
+#finOv .fi-empty{padding:10px 12px;font-size:11.5px;color:var(--muted);border-top:1px solid var(--line)}
+#finOv .fi-h+.fi-empty{border-top:none}
+#finOv .fi-empty.warn{color:var(--warn);background:var(--warn-soft)}
+#finOv .fi-r{display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid var(--line);font-size:11.5px}
+#finOv .fi-h+.fi-r{border-top:none}
+#finOv .fi-r .nm{flex:1}#finOv .fi-r .n{font-weight:800;min-width:34px;text-align:right}
+#finOv .fi-r.ok .n{color:var(--safe)}#finOv .fi-r.bad .n{color:var(--bad)}#finOv .fi-r.warn .n{color:var(--warn)}
+#finOv .fi-tog{font:inherit;font-size:10.5px;color:var(--accent-deep);background:none;border:none;cursor:pointer;padding:0;text-decoration:underline;text-underline-offset:2px}
+#finOv .fi-sp{width:24px}
+#finOv .fi-list{margin:0;padding:4px 12px 9px 26px;border-top:1px dashed var(--line);background:#fcfcfd;font-size:11px;max-height:180px;overflow:auto}
+#finOv .fi-list li{margin:2px 0}#finOv .fi-list .m{color:var(--faint)}
+#finOv .fi-go{padding:8px 12px;border-top:1px solid var(--line);font-size:11px;color:var(--muted)}
+#finOv .fi-go a{color:var(--accent-deep);font-weight:750}
+#finOv .fi-all{padding:10px 12px;font-size:11.5px;color:var(--safe);font-weight:750;background:var(--safe-soft)}
 /* 결정 237 — 캡처로 상품 찾기 창 */
 #cfOv .cf-dlg{width:min(780px,100%);max-height:min(720px,90vh);display:flex;flex-direction:column}
 #cfOv .cf-dlg .wbl-db{flex:1;min-height:0;overflow:auto}
@@ -5321,9 +5339,74 @@ async function _finOpen(tab){
       <li>${_finUntouched(t)}에는 <b>아무 영향이 없습니다.</b></li>
       <li>언제든 [↩ 진행중으로 복귀]로 되돌릴 수 있습니다.</li>
     </ul>
+    <div class="fi" id="finInspect">${_fiHead('검사 중…')}<div class="fi-empty">리뷰 사진을 확인하고 있습니다.</div></div>
     <label class="wbl-chk"><input type="checkbox" id="finChk" onchange="_finChk(this)">
       <span>리뷰폴더의 리뷰 캡처 검수를 확인했습니다
         <span class="sub">체크해야 [마감] 버튼이 활성화됩니다</span></span></label>`;
+  _finInspectLoad(sheetId,tabName);
+}
+/* ── 🏁 마감자료 검수(결정 297 · 시안 docs/design-finish-inspect.html) ─────────────────────────
+   ★ 알려주기만 한다 — [마감] 활성은 종전대로 사람의 체크(서버도 inspected 를 요구한다).
+   ★ 판정은 전부 서버(`/workdesk/finish-inspect` → finishInspectForTab). 화면은 받은 값을 그리기만 한다.
+   ★ 실패는 "검사하지 못했습니다"로 말한다 — 0건으로 꾸미지 않는다.
+   ★ 응답이 늦게 와도 그 사이 다른 작업의 창으로 바뀌었으면 그리지 않는다(_FIN 대조). */
+let _FI=null;
+function _fiHead(when){ return `<div class="fi-h">🔍 마감자료 검수<span class="sp"></span><span class="when">${when}</span></div>`; }
+async function _finInspectLoad(sheetId,tabName){
+  const box=document.getElementById('finInspect'); if(!box) return;
+  box.innerHTML=_fiHead('검사 중…')+`<div class="fi-empty">리뷰 사진을 확인하고 있습니다.</div>`;
+  let r=null;
+  try{ r=await api('/api/trackb/workdesk/finish-inspect?sheetId='+encodeURIComponent(sheetId)+'&tabName='+encodeURIComponent(tabName)); }catch(_){ r=null; }
+  if(_FIN.sheetId!==sheetId||_FIN.tabName!==tabName) return;
+  const el=document.getElementById('finInspect'); if(!el) return;
+  if(!(r&&r.ok)){
+    _FI=null;
+    el.innerHTML=_fiHead(`<button class="fi-tog" onclick="_finInspectRetry()">다시 검사</button>`)+
+      `<div class="fi-empty warn">검사하지 못했습니다${r&&r.error?' — '+esc(r.error):''}. 문제가 없다는 뜻이 아닙니다.</div>`;
+    return;
+  }
+  _FI={r,open:{}};
+  _fiRender();
+}
+function _finInspectRetry(){ if(_FIN.sheetId) _finInspectLoad(_FIN.sheetId,_FIN.tabName); }
+function _fiToggle(k){ if(!_FI) return; _FI.open[k]=!_FI.open[k]; _fiRender(); }
+function _fiRender(){
+  const el=document.getElementById('finInspect'); if(!el||!_FI) return;
+  const r=_FI.r;
+  const nm=p=>esc((p&&p.name)||'(이름 없음)');
+  const more=g=>g.truncated?`<li class="m">… 외 ${g.count-g.items.length}건</li>`:'';
+  const rows=[
+    {k:'same',cls:'bad',label:'똑같은 사진이 두 번 올라감',g:r.samePhoto,unit:'건',
+     li:x=>`<li>${x.people.map(nm).join(' ↔ ')} — 같은 사진 ${x.files|0}장</li>`},
+    {k:'twice',cls:'warn',label:'한 사람이 두 번 제출',g:r.twice,unit:'명',
+     li:x=>`<li>${nm(x)} — ${x.sets|0}번 제출</li>`},
+    {k:'missing',cls:'bad',label:'명단에 있는데 리뷰 사진이 없음',g:r.missing,unit:'명',
+     li:x=>`<li>${nm(x)}${x.submitted?' <span class="m">(제출 표시는 있음)</span>':''}</li>`},
+    {k:'outside',cls:'bad',label:'명단에 없는 사람의 사진',g:{...r.outside,count:(r.outside.count|0)+(r.outside.unrowed|0)},unit:'건',
+     li:x=>`<li>줄 ${x.seq|0} — 사진 ${x.files|0}장 <span class="m">(명단에서 빠진 줄)</span></li>`,
+     extra:(r.outside.unrowed|0)?`<li>줄 번호 없이 들어온 사진 ${r.outside.unrowed|0}장</li>`:''},
+  ];
+  const bad=rows.filter(x=>(x.g.count|0)>0);
+  const when=`방금 · <button class="fi-tog" onclick="_finInspectRetry()">다시 검사</button>`;
+  const hashNote=((r.noHash|0)?`<div class="fi-empty">사진 ${r.noHash|0}장은 비교 정보가 없어 같은 사진 검사에서 빠졌습니다.</div>`:'')+
+    (r.outside&&r.outside.unrowed==null?`<div class="fi-empty warn">줄 번호 없이 들어온 사진은 확인하지 못했습니다.</div>`:'');
+  if(!bad.length){
+    el.innerHTML=_fiHead(when)+`<div class="fi-all">✓ 중복 사진 · 두 번 제출 · 사진 없는 사람 · 명단 밖 사진 — 모두 없음</div>`+hashNote;
+    return;
+  }
+  el.innerHTML=_fiHead(when)+rows.map(x=>{
+    const n=x.g.count|0, open=!!_FI.open[x.k]&&n>0;
+    return `<div class="fi-r ${n?x.cls:'ok'}"><span class="nm">${x.label}</span><span class="n">${n?n+x.unit:'0'}</span>`+
+      (n?`<button class="fi-tog" onclick="_fiToggle('${x.k}')">${open?'닫기':'보기'}</button>`:'<span class="fi-sp"></span>')+`</div>`+
+      (open?`<ul class="fi-list">${(x.g.items||[]).map(x.li).join('')}${x.extra||''}${more(x.g)}</ul>`:'');
+  }).join('')+hashNote+
+  (r.canOpenInspect===false
+    ? `<div class="fi-go">처리는 이 작업 담당 AE·관리자가 「리뷰검수」에서 합니다.</div>`
+    : `<div class="fi-go">처리는 <a href="javascript:void(0)" onclick="_finInspectGo()">리뷰검수에서 이 작업만 보기</a> 에서 합니다.</div>`);
+}
+function _finInspectGo(){
+  const s=_FIN.sheetId, t=_FIN.tabName; if(!s) return;
+  closeFinishModal(); STATE.riContext=null; STATE.riTab={sheetId:s,tabName:t}; STATE.riType='all'; switchView('inspect');
 }
 function _finChk(el){ const b=document.getElementById('finGo'); if(b) b.disabled=!el.checked; }
 function closeFinishModal(){ const o=document.getElementById('finOv'); if(o) o.remove(); }
