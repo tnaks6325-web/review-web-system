@@ -13341,6 +13341,7 @@ function _pmRender(){
       ${_pmFixBlock()}
       ${_pmTargetTable(items)}
     </div>`;
+  if(typeof _tckPaint==='function') _tckPaint();   // 결정 302 — 다시 그린 자리에 받아 둔 확인할 것을 그대로 채운다(Codex P2)
   const workList=$('#pmbody .pmworklist');
   if(workList && Number.isFinite(STATE.pmWorkScrollTop)) workList.scrollTop=STATE.pmWorkScrollTop;
   STATE.pmWorkScrollTop=null;
@@ -13508,8 +13509,11 @@ function _pmBatchActions(b,i){
   if(b.status==='cancelled') return b.resultUploadId ? `<button class="btn sm" onclick="_pmOpenResult(${i})">이체결과 확인</button>` : '';
   const reconcile = b.status==='downloaded' && ((b.paidCount||0)+(b.failedCount||0)>0)
     ? `<button class="btn sm primary" onclick="_pmMarkApplied(${i})">적용완료 처리</button>` : '';
-  // 결정 302 — 통장 자동 대조로 바뀌어 결과 파일 업로드 버튼은 숨긴다(사용자 확정 2026-10-27 · 기능은 남김 · 다시 켜려면 true)
-  const resultUpload = _PM_RESULT_UPLOAD_ON && (b.status==='downloaded' || b.status==='applied')
+  // 결정 302 — 통장 자동 대조로 바뀌어 결과 파일 업로드 버튼은 숨긴다(사용자 확정 2026-10-27 · 기능은 남김 · 다시 켜려면 true).
+  //   ★ 단 통장으로 정할 수 없는 대량이체는 남긴다(Codex P1): 하나은행(통장 대조 없음) · 같은 금액이 통장에 더 찍혀 누가 받았는지 모르는 케이뱅크.
+  const bkU=_pmBankOf(b);
+  const uploadNeeded = b.bank!=='kbank' || !!(bkU && (bkU.amounts||[]).some(a=>a.failures==null));
+  const resultUpload = (_PM_RESULT_UPLOAD_ON || uploadNeeded) && (b.status==='downloaded' || b.status==='applied')
     ? `<button class="pmdrop" type="button" title="클릭하거나 결과 파일을 끌어 놓으세요" onclick="_pmPickResult(${i})" ondragover="_pmResultDragOver(event)" ondragleave="_pmResultDragLeave(event)" ondrop="_pmResultDrop(event,${i})"><span class="pmdropicon" aria-hidden="true">⇧</span><span>결과 파일 업로드</span></button>` : '';
   const manage = b.status==='downloaded' ? `<button class="btn sm" onclick="_pmRefileByIndex(${i})">⬇ 다시 받기</button>
     ${reconcile}<button class="btn sm danger" onclick="_pmCancelByIndex(${i})">대량이체 취소</button>`
@@ -13653,9 +13657,14 @@ function _pmBankStateHtml(b){
 }
 async function _pmOpenBankPick(i){
   const b=(STATE.pmBatches||[])[i]; if(!b) return;
-  const r=await api('/api/trackb/payment/batch/'+b.id+'/bank');
+  return _pmOpenBankPickById(b.id);
+}
+/** 결정 302 — 최근 30개 목록에 없는 대량이체도 id 로 바로 연다(오늘 확인할 것 · #view=payment&pick=). */
+async function _pmOpenBankPickById(id){
+  if(!id) return;
+  const r=await api('/api/trackb/payment/batch/'+encodeURIComponent(id)+'/bank');
   if(!r||!r.ok){ toast((r&&r.error)||'통장 대조를 불러오지 못했습니다'); return; }
-  STATE.pmBankPick={ index:i, batch:b, data:r, picked:new Set() };
+  STATE.pmBankPick={ batch:{ id:r.batchId||id, seq:r.seq }, data:r, picked:new Set() };
   _pmBankPickRender();
 }
 function _pmBankPickClose(){ const el=document.getElementById('pmBankPickOv'); if(el) el.remove(); STATE.pmBankPick=null; }
@@ -15339,10 +15348,7 @@ function _tckPaint(){
   const pay=document.getElementById('pmTodayChecks'); if(pay) pay.innerHTML=_tckHtml('payment');
   // #view=payment&pick= 로 들어왔으면 대량이체를 받은 뒤 한 번만 고르기 창을 연다
   const pick=STATE.pmPickBatch;
-  if(pay && pick){
-    const i=(STATE.pmBatches||[]).findIndex(b=>String(b.id)===String(pick));
-    if(i>=0){ STATE.pmPickBatch=''; _pmOpenBankPick(i); }
-  }
+  if(pay && pick){ STATE.pmPickBatch=''; _pmOpenBankPickById(pick); }
 }
 function _tckTitle(f){
   const c=(f&&f.cluster)||{};
@@ -15415,9 +15421,7 @@ function _tckGo(i){
 /** 입금관리 안에서는 같은 화면의 고르기 창을 바로 연다 */
 function _tckPick(i){
   const c=(STATE.tckView||[])[i]; if(!c||!c.facts||!c.facts.batch) return;
-  const k=(STATE.pmBatches||[]).findIndex(b=>String(b.id)===String(c.facts.batch.id));
-  if(k<0){ toast('대량이체 목록에서 찾지 못했습니다. 새로고침해 주세요.'); return; }
-  _pmOpenBankPick(k);
+  _pmOpenBankPickById(c.facts.batch.id);   // 최근 30개 목록에 없어도 연다(Codex P2)
 }
 async function _tckSave(i,j,choice){
   const c=(STATE.tckView||[])[i]; const o=c&&((c.facts||{}).outside||[])[j]; if(!o) return;

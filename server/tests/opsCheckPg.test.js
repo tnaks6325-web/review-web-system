@@ -123,6 +123,20 @@ async function bankRow(n, at, amount, kind = 'bulk_out') {
   const list = await oc.listChecks({});
   ok('④ 목록에 방금 끝난 것도 보인다(최근 2일)', list.some(x => x.id === Number(c.id) && x.status === 'done'));
 
+  // ⑥ Codex P2 — AI 를 기다리는 사이 저장한 답이 갱신에 지워지지 않는다
+  await pool.query(`DELETE FROM ops_checks`);
+  await bankRow(++n, T + 30000, 1000);   // 사실이 바뀌게(1,000원 하나 더)
+  oc.__setGenerateForTest(null);
+  await oc.refreshBankChecks({ now: NOW + 3000, by: 'tester' });
+  ({ rows } = await pool.query(`SELECT * FROM ops_checks WHERE ref_key LIKE 'bank_cluster:%'`));
+  const c2 = rows[0];
+  await bankRow(++n, T + 31000, 1000);
+  oc.__setGenerateForTest(async () => { await oc.answerCheck({ id: c2.id, key: 'out:1000', choice: 'direct', memo: '중간 저장', by: '만두' }); throw new Error('slow'); });
+  await oc.refreshBankChecks({ now: NOW + 4000, by: 'tester' });
+  ({ rows } = await pool.query(`SELECT * FROM ops_checks WHERE id = $1`, [c2.id]));
+  ok('⑥ 갱신 중 저장한 답이 남는다', rows[0].answers['out:1000'] && rows[0].answers['out:1000'].memo === '중간 저장'
+    && rows[0].facts.outside.find(o => o.amount === 1000).count === 5, rows[0].answers);
+
   oc.__setGenerateForTest(null);
   await cleanup();
   await pool.end();

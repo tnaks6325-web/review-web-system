@@ -200,10 +200,11 @@ async function writeLines(f) {
   return { lines: fb, source: 'fallback' };
 }
 
-/** 처리 완료 판정 — 안 나간 사람이 없고(고르기로 확정됨), 기록 없는 돈 묶음마다 '모르겠음' 아닌 답이 있을 때. */
+/** 처리 완료 판정 — 안 나간 사람이 없고(고르기로 확정됨) · 통장만으로 모르는 금액도 없고(Codex P2 — 그 사람들은 아직 '결과 대기')
+ *  · 기록 없는 돈 묶음마다 '모르겠음' 아닌 답이 있을 때. */
 function isDone(f, answers) {
   if (!f) return true;
-  if (f.short.length) return false;
+  if (f.short.length || (f.shortUnknown || []).length) return false;
   for (const o of f.outside) {
     const a = answers && answers[o.key];
     if (!a || !DONE_CHOICES.has(a.choice)) return false;
@@ -299,34 +300,43 @@ async function refreshBankChecks({ now = Date.now(), by = '' } = {}) {
     if (cur && cur.facts_hash === hash) {
       const done = isDone(f, cur.answers);
       if (done !== (cur.status === 'done')) {
-        await _db().query(`UPDATE ops_checks SET status = $2, done_at = $3, done_by = $4, updated_at = NOW() WHERE id = $1`,
-          [cur.id, done ? 'done' : 'open', done ? new Date(now).toISOString() : null, done ? (by || '자동') : '']);
-        if (done) out.done++;
+        // 읽은 뒤 직원이 답을 바꿨으면 건드리지 않는다(답 저장이 상태를 이미 정했다)
+        const { rowCount } = await _db().query(
+          `UPDATE ops_checks SET status = $2, done_at = $3, done_by = $4, updated_at = NOW() WHERE id = $1 AND answers = $5::jsonb`,
+          [cur.id, done ? 'done' : 'open', done ? new Date(now).toISOString() : null, done ? (by || '자동') : '', JSON.stringify(cur.answers || {})]);
+        if (done && rowCount) out.done++;
       }
       continue;
     }
     const { lines, source } = hasWork(f) ? await writeLines(f) : { lines: [], source: 'fallback' };
-    // 남아 있는 금액 묶음의 답은 그대로 둔다(사실이 조금 바뀌어도 직원 답을 지우지 않는다).
-    const keep = {};
-    const prev = (cur && cur.answers) || {};
-    for (const o of f.outside) if (prev[o.key]) keep[o.key] = prev[o.key];
-    const done = isDone(f, keep);
-    if (!cur) {
-      await _db().query(
-        `INSERT INTO ops_checks (kind, ref_key, manager, facts, facts_hash, lines, text_source, answers, status, done_at, done_by)
-         VALUES ($1,$2,$3,$4::jsonb,$5,$6::jsonb,$7,$8::jsonb,$9,$10,$11) ON CONFLICT (ref_key) DO NOTHING`,
-        [KIND_BANK, ref, manager, JSON.stringify(f), hash, JSON.stringify(lines), source, JSON.stringify(keep),
-          done ? 'done' : 'open', done ? new Date(now).toISOString() : null, done ? (by || '자동') : '']);
-      out.created++;
-    } else {
-      await _db().query(
-        `UPDATE ops_checks SET manager = $2, facts = $3::jsonb, facts_hash = $4, lines = $5::jsonb, text_source = $6,
-                answers = $7::jsonb, status = $8, done_at = $9, done_by = $10, updated_at = NOW() WHERE id = $1`,
-        [cur.id, manager, JSON.stringify(f), hash, JSON.stringify(lines), source, JSON.stringify(keep),
-          done ? 'done' : 'open', done ? (cur.done_at || new Date(now).toISOString()) : null, done ? (cur.done_by || by || '자동') : '']);
-      out.updated++;
-      if (done && cur.status !== 'done') out.done++;
-    }
+    // ★ AI 를 기다리는 사이 직원이 답을 저장했을 수 있다(Codex P2) — 쓰기 직전에 잠그고 **지금 답**을 다시 읽어 합친다.
+    const client = await _db().connect();
+    try {
+      await client.query('BEGIN');
+      const { rows: [now2] } = await client.query(`SELECT * FROM ops_checks WHERE ref_key = $1 FOR UPDATE`, [ref]);
+      // 남아 있는 금액 묶음의 답은 그대로 둔다(사실이 조금 바뀌어도 직원 답을 지우지 않는다).
+      const keep = {};
+      const prev = (now2 && now2.answers) || {};
+      for (const o of f.outside) if (prev[o.key]) keep[o.key] = prev[o.key];
+      const done = isDone(f, keep);
+      if (!now2) {
+        await client.query(
+          `INSERT INTO ops_checks (kind, ref_key, manager, facts, facts_hash, lines, text_source, answers, status, done_at, done_by)
+           VALUES ($1,$2,$3,$4::jsonb,$5,$6::jsonb,$7,$8::jsonb,$9,$10,$11) ON CONFLICT (ref_key) DO NOTHING`,
+          [KIND_BANK, ref, manager, JSON.stringify(f), hash, JSON.stringify(lines), source, JSON.stringify(keep),
+            done ? 'done' : 'open', done ? new Date(now).toISOString() : null, done ? (by || '자동') : '']);
+        out.created++;
+      } else {
+        await client.query(
+          `UPDATE ops_checks SET manager = $2, facts = $3::jsonb, facts_hash = $4, lines = $5::jsonb, text_source = $6,
+                  answers = $7::jsonb, status = $8, done_at = $9, done_by = $10, updated_at = NOW() WHERE id = $1`,
+          [now2.id, manager, JSON.stringify(f), hash, JSON.stringify(lines), source, JSON.stringify(keep),
+            done ? 'done' : 'open', done ? (now2.done_at || new Date(now).toISOString()) : null, done ? (now2.done_by || by || '자동') : '']);
+        out.updated++;
+        if (done && now2.status !== 'done') out.done++;
+      }
+      await client.query('COMMIT');
+    } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} throw e; } finally { client.release(); }
   }
   return out;
 }

@@ -86,6 +86,8 @@ const facts = oc.buildClusterFacts({
     assert.strictEqual(oc.isDone(noShort, { 'out:1000': { choice: 'direct' } }), false);
     assert.strictEqual(oc.isDone(noShort, { 'out:1000': { choice: 'direct' }, 'out:332200': { choice: 'unknown' } }), false);
     assert.strictEqual(oc.isDone(noShort, { 'out:1000': { choice: 'direct' }, 'out:332200': { choice: 'not_reviewer' } }), true);
+    // Codex P2 — 통장만으로 모르는 금액이 남아 있으면 답을 다 해도 열린 채로
+    assert.strictEqual(oc.isDone({ ...noShort, shortUnknown: [{ amount: 7000, count: 2, bank: 3 }] }, { 'out:1000': { choice: 'direct' }, 'out:332200': { choice: 'not_reviewer' } }), false);
   });
   await t('⑤ AI 가 숫자를 지어내거나 실패하면 기본 문장', async () => {
     oc.__setGenerateForTest(async () => JSON.stringify({ lines: oc.fallbackLines(facts).map(x => ({ ...x, text: x.text + ' 9999' })) }));

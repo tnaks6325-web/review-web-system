@@ -56,10 +56,18 @@ t('#view=payment 딥링크는 admin/master 만 · pick 은 대량이체 id 모�
   assert.match(workdesk, /if\(_VIEW==='payment' && \(STATE\.role==='master'\|\|STATE\.role==='admin'\)\)\{ STATE\.view='payment'; STATE\.pmPickBatch=_PICK\|\|'';/);
   assert.match(workdesk, /\[#&\]pick=\(\[0-9a-fA-F-\]\{36\}\)/);
 });
-t('결과 파일 업로드 버튼은 숨김(스위치 false) · 기능은 남김', () => {
+t('결과 파일 업로드 버튼은 숨김(스위치 false) · 기능은 남김 · 통장으로 못 정하는 대량이체(하나은행·모르는 금액)는 남김', () => {
   assert.match(workdesk, /const _PM_RESULT_UPLOAD_ON=false;/);
-  assert.match(sourceOf('_pmBatchActions'), /const resultUpload = _PM_RESULT_UPLOAD_ON && /);
+  const act = sourceOf('_pmBatchActions');
+  assert.match(act, /const uploadNeeded = b\.bank!=='kbank' \|\| !!\(bkU && \(bkU\.amounts\|\|\[\]\)\.some\(a=>a\.failures==null\)\);/);
+  assert.match(act, /const resultUpload = \(_PM_RESULT_UPLOAD_ON \|\| uploadNeeded\) && /);
   assert.match(sourceOf('_pmUploadResultFile'), /result-auto-apply/);
+});
+t('입금관리를 다시 그려도 확인할 것이 남는다 · 고르기는 id 로 연다(최근 30개 밖도)', () => {
+  assert.match(sourceOf('_pmRender'), /if\(typeof _tckPaint==='function'\) _tckPaint\(\);/);
+  assert.match(sourceOf('_tckPick'), /_pmOpenBankPickById\(c\.facts\.batch\.id\)/);
+  assert.match(sourceOf('_tckPaint'), /_pmOpenBankPickById\(pick\)/);
+  assert.match(sourceOf('_pmOpenBankPickById'), /\/api\/trackb\/payment\/batch\/'\+encodeURIComponent\(id\)\+'\/bank'/);
 });
 t('고르기 창에 힌트를 보여 준다(서버가 준 문구 그대로)', () => {
   assert.match(sourceOf('_pmBankPickRender'), /\(it\.hints\|\|\[\]\)\.map\(h=>`<span class="pmbp-hint">\$\{esc\(h\)\}<\/span>`\)/);
