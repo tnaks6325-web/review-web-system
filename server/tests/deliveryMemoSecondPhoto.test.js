@@ -26,6 +26,10 @@ const roi = require('../src/services/reviewerOrderIdentity.service');
   const memoTok = roi.issueDeliveryMemoProof('문 앞', '20261027001');
   assert.equal(roi.readSecondCaptureProof(memoTok, '20261027001'), false, 'a delivery-memo proof is not a 2nd-photo proof');
   assert.equal(roi.readDeliveryMemoProof(t, '20261027001'), '', 'and vice versa');
+  // Codex P2 — 첫 장과 같은 사진(지문 같음)은 두 번째 사진으로 치지 않는다
+  assert.equal(roi.readSecondCaptureProof(t, '20261027001', { firstImageHash: 'hash1' }), false, 'same image as the first → false');
+  assert.equal(roi.readSecondCaptureProof(t, '20261027001', { firstImageHash: 'other' }), true, 'different image → true');
+  assert.equal(roi.readSecondCaptureProof(t, '20261027001', { firstImageHash: '' }), true, 'first hash unknown (no identity approval) → order check only');
 }
 
 // ── B. 배선 ──
@@ -36,8 +40,11 @@ const roi = require('../src/services/reviewerOrderIdentity.service');
   assert.ok(/Number\(req\.body && req\.body\.captureIndex\) === 2\) \{\s*try \{ capture2Token = reviewerOrderIdentity\.issueSecondCaptureProof\(String\(\(req\.body && req\.body\.orderNumberHint\) \|\| ''\)\.trim\(\), imageHash\)/.test(diag),
     'AI failure path: the 2nd photo still counts as received');
   const sub = read('server/src/routes/submit.routes.js');
-  assert.ok(/secondCaptureProven: reviewerOrderIdentity\.readSecondCaptureProof\(b\.capture2Token, orderNum\)/.test(sub), 'gate reads the proof bound to this order number');
+  assert.ok(/secondCaptureProven: reviewerOrderIdentity\.readSecondCaptureProof\(b\.capture2Token, orderNum[,)]/.test(sub), 'gate reads the proof bound to this order number');
   assert.ok(/needSecondCapture: rdmDecision\.needSecondCapture === true/.test(sub), 'block response tells the screen to ask for a 2nd photo');
+  assert.ok(/firstCaptureImageHash = String\(\(verifiedIdentity\.approval && verifiedIdentity\.approval\.imageHash\) \|\| ''\);/.test(sub)
+    && /readSecondCaptureProof\(b\.capture2Token, orderNum, \{ firstImageHash: firstCaptureImageHash \}\)/.test(sub), 'gate rejects a 2nd photo identical to the approved first one');
+  assert.ok(sub.indexOf('let firstCaptureImageHash') > 0 && sub.indexOf('let firstCaptureImageHash') < sub.indexOf('firstCaptureImageHash = String(') && sub.indexOf('firstCaptureImageHash = String(') < sub.indexOf('firstImageHash: firstCaptureImageHash'), 'declared → set by identity gate → used by memo gate');
   const sa = read('frontend/js/search-app.js');
   assert.ok(/capture2Token:\s+_cardAiState\[cid\]\?\.img2\?\.capture2Token \|\| ""/.test(sa) && /capture2Token:\s+o\.capture2Token \|\| ""/.test(sa), 'screen carries the proof to submit');
   assert.ok(/img\.capture2Token = \(json && json\.capture2Token\) \|\| "";\s*\/\/[^\n]*\n\s*if \(!json \|\| !json\.ok\)/.test(sa), 'proof kept even when the 2nd photo could not be read');
@@ -95,4 +102,27 @@ const roi = require('../src/services/reviewerOrderIdentity.service');
   assert.ok(readerInput, 'reader used');
 }
 
-console.log('deliveryMemoSecondPhoto: passed');
+// ── D2. 두 장 한 번에 고르기에서도 같은 사진 거부(Codex P2) — 판독 요청 전에 빼고 서버에 보내지 않는다 ──
+(async () => {
+  const sa = read('frontend/js/search-app.js');
+  const s = sa.indexOf('async function _callCardExtractAi2Run(cid) {');
+  const e = sa.indexOf('\n}\n', s) + 3;
+  const calls = { removed: 0, upload: 0, toast: [] };
+  const mk = () => ({ style: {}, textContent: '', value: '' });
+  const ctx = {
+    _cardAiState: { c1: { lastBase64: 'SAME', img2: { dataUrl: 'data:image/png;base64,SAME', mime: 'image/png', req: 1 } },
+                    c2: { lastBase64: 'FIRST', img2: { dataUrl: 'data:image/png;base64,OTHER', mime: 'image/png', req: 1 }, extracted: { orderNumber: '1' } } },
+    document: { getElementById: () => mk() }, window: {},
+    removeCardImg2: () => { calls.removed++; }, showToast: (m) => calls.toast.push(m),
+    gasPostUpload: async () => { calls.upload++; return { ok: true, capture2Token: 'tok' }; },
+    _ofpOnExtracted: () => {}, _OFP: { capName: {} },
+  };
+  vm.createContext(ctx);
+  vm.runInContext(sa.slice(s, e) + '; this.run = _callCardExtractAi2Run;', ctx);
+  await ctx.run('c1');
+  assert.equal(calls.removed, 1, 'identical 2nd photo removed'); assert.equal(calls.upload, 0, 'never sent to the server (no proof issued)');
+  assert.ok(/같은 사진/.test(calls.toast[0] || ''));
+  await ctx.run('c2');
+  assert.equal(calls.upload, 1, 'a different photo is read'); assert.equal(ctx._cardAiState.c2.img2.capture2Token, 'tok');
+  console.log('deliveryMemoSecondPhoto: passed');
+})().catch((err) => { console.error(err); process.exit(1); });

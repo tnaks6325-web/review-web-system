@@ -7890,6 +7890,12 @@ async function _callCardExtractAi2Run(cid) {
   const req = img.req;
   const lb = document.getElementById(cid + "_img2Label");
   const say = (t) => { if (lb && st.img2 === img && img.req === req) lb.textContent = t; };
+  // 결정 299(Codex P2) — 두 장 한 번에 고를 때도 첫 장과 같은 사진은 두 번째 사진으로 받지 않는다(같은 캡처 두 장으로 직원 확인 요청을 여는 것을 막음).
+  if (st.lastBase64 && String(img.dataUrl).split(",")[1] === st.lastBase64) {
+    removeCardImg2(cid);
+    showToast("두 번째 사진이 첫 번째와 같은 사진이라 뺐어요. 배송지·배송메세지가 보이는 화면을 따로 찍어 올려 주세요.", true);
+    return;
+  }
   img.busy = true; img.tried = true; say("2장째 · AI 확인 중…");
   const ctx = window._orderFormCtx || {};
   // 첫 장에서 AI 가 읽은 주문번호를 먼저(입력칸은 그다음) — 입력칸의 옛 값에 묶이면 제출 때 번호가 달라 배송메세지가 버려진다.

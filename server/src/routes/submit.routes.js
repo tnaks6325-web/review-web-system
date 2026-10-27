@@ -872,6 +872,7 @@ router.post('/order', async (req, res, next) => {
 
     const _newIdentityGate = reviewerOrderIdentity.isEnabled() && !!(holdCtx && holdCtx.verified);
     let verifiedIdentityBinding = null;
+    let firstCaptureImageHash = '';   // 결정 299 — 첫 장 지문(명의 승인 서명) · 두 번째 장이 같은 사진이면 직원 확인 요청을 열지 않는다
     if (_newIdentityGate) {
       try {
         const reviewerToken = req.headers['x-reviewer-token'];
@@ -894,6 +895,7 @@ router.post('/order', async (req, res, next) => {
           holdToken: holdCtx.holdToken,
           recipient, phone, address,
         }, reviewerSession);
+        firstCaptureImageHash = String((verifiedIdentity.approval && verifiedIdentity.approval.imageHash) || '');
         verifiedIdentityBinding = {
           ownerReviewerId: verifiedIdentity.context.owner.id,
           participantIdentityId: verifiedIdentity.context.selected.participantIdentityId || null,
@@ -1100,7 +1102,7 @@ router.post('/order', async (req, res, next) => {
         required: rdmRequired, memo: orderData.deliveryMemo,
         staffReviewRequested: b.deliveryMemoStaffReview === true || b.deliveryMemoStaffReview === 'true',
         // 결정 299 — 직원 확인 요청은 두 번째 사진을 서버가 받은 서명(이 주문번호)이 있을 때만.
-        secondCaptureProven: reviewerOrderIdentity.readSecondCaptureProof(b.capture2Token, orderNum),
+        secondCaptureProven: reviewerOrderIdentity.readSecondCaptureProof(b.capture2Token, orderNum, { firstImageHash: firstCaptureImageHash }),
       });
       if (rdmDecision.action === 'block') {
         logger.info(`[submit/order] 필수 배송메세지 「${rdmDecision.required}」 미확인으로 접수 안 함 — ${orderScope.tabName} (읽힌 메세지 ${rdmDecision.readMemo ? '있음' : '없음'})`);

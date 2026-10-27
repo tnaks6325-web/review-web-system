@@ -146,13 +146,16 @@ function issueSecondCaptureProof(orderNumber, imageHash) {
   if (!order) return '';
   return signScoped({ purpose: PURPOSE_SECOND_CAPTURE, order, imageHash: String(imageHash || '') }, '12h');
 }
-/** 서명이 맞고 주문번호가 같으면 true. 없거나 틀리거나 만료면 false. */
-function readSecondCaptureProof(token, orderNumber) {
+/** 서명이 맞고 주문번호가 같으면 true. 없거나 틀리거나 만료면 false.
+ *  firstImageHash(첫 장 지문 — 명의 승인 서명에서 꺼낸 값)를 주면 두 번째 장이 **같은 사진**일 때도 false (Codex P2 — 같은 캡처 두 장으로 건너뛰기). */
+function readSecondCaptureProof(token, orderNumber, { firstImageHash = '' } = {}) {
   if (!token) return false;
   try {
     const p = verifyScoped(token, PURPOSE_SECOND_CAPTURE);
     const order = orderNoKey(orderNumber);
-    return !!(p.order && order && p.order === order);
+    if (!(p.order && order && p.order === order)) return false;
+    if (firstImageHash && p.imageHash && String(p.imageHash) === String(firstImageHash)) return false;
+    return true;
   } catch (_) { return false; }
 }
 function verifyExtractionProof(token, extracted) {
