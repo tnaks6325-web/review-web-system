@@ -5400,7 +5400,9 @@ function _fiRender(){
       (n?`<button class="fi-tog" onclick="_fiToggle('${x.k}')">${open?'닫기':'보기'}</button>`:'<span class="fi-sp"></span>')+`</div>`+
       (open?`<ul class="fi-list">${(x.g.items||[]).map(x.li).join('')}${x.extra||''}${more(x.g)}</ul>`:'');
   }).join('')+hashNote+
-  `<div class="fi-go">처리는 <a href="javascript:void(0)" onclick="_finInspectGo()">리뷰검수에서 이 작업만 보기</a> 에서 합니다.</div>`;
+  (r.canOpenInspect===false
+    ? `<div class="fi-go">처리는 이 작업 담당 AE·관리자가 「리뷰검수」에서 합니다.</div>`
+    : `<div class="fi-go">처리는 <a href="javascript:void(0)" onclick="_finInspectGo()">리뷰검수에서 이 작업만 보기</a> 에서 합니다.</div>`);
 }
 function _finInspectGo(){
   const s=_FIN.sheetId, t=_FIN.tabName; if(!s) return;

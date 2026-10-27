@@ -2384,7 +2384,9 @@ async function finishInspectForTab({ sheetId, tabName } = {}) {
   const db = getPool();
   const roster = await _closeoutRoster(sheetId, tabName);
   const people = roster.filter(r => _isFilledRow(r));
-  const imgs = await reviewImagesForTab({ sheetId, tabName, includeReceipt: true });
+  // ★ strict · 상한 없음 — 미리보기용 12장 상한이 검사 근거를 자르면 13번째 중복을 못 본다(Codex P2),
+  //   원장 조회 실패를 삼키면 일부만 보고 "모두 없음"이라 말한다(Codex P1).
+  const imgs = await reviewImagesForTab({ sheetId, tabName, includeReceipt: true, strict: true, maxPerRow: Infinity, withCaptures: false });
   const revByRow = _fiReviewRows(imgs);
   const ids = [...revByRow.values()].flat().map(f => String(f.fileId));
   let metaRows = [];
@@ -2433,15 +2435,23 @@ function _finishInspectCompute({ people = [], revByRow = new Map(), metaRows = [
   const twice = [];
   for (const [seq, files] of revByRow) {
     if (!bySeq.has(seq)) continue;   // 명단 밖은 ④에서 센다
-    const list = files.map(f => { const m = meta.get(String(f.fileId)) || {}; return { b: m.upload_batch_id || null, t: new Date(m.at || f.at || 0).getTime() }; })
-      .sort((a, b) => a.t - b.t);
-    const keys = new Set(); let last = null, n = 0;
-    for (const x of list) {
-      if (x.b) { keys.add(String(x.b)); continue; }
-      if (last == null || !Number.isFinite(x.t) || x.t - last > _FI_GAP_MS) n++;
-      last = x.t;
+    /* ★ 첨부 칸(slot)마다 따로 센다 — 칸이 여럿인 작업은 한 번 제출에 칸마다 업로드 요청이 따로 나가
+       묶음 ID 가 칸 수만큼 생긴다(search-app 칸별 업로드 · diag 요청마다 새 묶음). 칸을 섞으면 정상 1회 제출이
+       "두 번 제출"이 된다(Codex P2). 한 칸 안에서 묶음이 둘 이상일 때만 두 번 제출이다. */
+    const bySlot = new Map();
+    for (const f of files) { const k = String(f.slot || 'review'); if (!bySlot.has(k)) bySlot.set(k, []); bySlot.get(k).push(f); }
+    let sets = 0;
+    for (const sf of bySlot.values()) {
+      const list = sf.map(f => { const m = meta.get(String(f.fileId)) || {}; return { b: m.upload_batch_id || null, t: new Date(m.at || f.at || 0).getTime() }; })
+        .sort((a, b) => a.t - b.t);
+      const keys = new Set(); let last = null, n = 0;
+      for (const x of list) {
+        if (x.b) { keys.add(String(x.b)); continue; }
+        if (last == null || !Number.isFinite(x.t) || x.t - last > _FI_GAP_MS) n++;
+        last = x.t;
+      }
+      sets = Math.max(sets, keys.size + n);
     }
-    const sets = keys.size + n;
     if (sets > 1) twice.push({ ...who(seq), sets });
   }
 
@@ -3009,7 +3019,10 @@ function _sameSheetRow(a, b) {
 //   ★ 현금영수증은 includeReceipt=true 인 내부 작업보드에만 합류한다. 기본 false = 업체용 payload 제외.
 //   ★ 파일 자체는 기존 무인증 프록시 /api/drive/image/<id> 가 스트리밍(추측 불가 fileId) — 신규 저장소 0.
 const _RV_MAX_PER_ROW = 12;
-async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false } = {}) {
+/* 옵션(결정 297 마감자료 검수 · Codex 리뷰 P1/P2): strict=true 면 원장·대표이미지·탭 설정 조회 실패를 **삼키지 않고 던진다**
+   (검사가 "모두 없음"이라 말하려면 근거를 다 읽었어야 한다) · maxPerRow 로 미리보기 상한을 끈다 · withCaptures=false 면 구매캡처 조회 생략.
+   기본값은 종전 동작 그대로(미리보기·업체 화면 무변경). */
+async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false, strict = false, maxPerRow = _RV_MAX_PER_ROW, withCaptures = true } = {}) {
   if (!sheetId || !tabName) throw new Error('reviewImagesForTab: sheetId, tabName 필수');
   const db = getPool();
   const out = new Map();
@@ -3023,13 +3036,13 @@ async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false } =
       [sheetId, tabName]);
     tabCfg = rows[0] || {};
     tabContextResolved = !!rows[0];
-  } catch (_) { tabCfg = {}; }
+  } catch (e) { if (strict) throw e; tabCfg = {}; }
   let campaignCashReceipt = false;
   if (includeReceipt) {
     try {
       campaignCashReceipt = (await require('./cashReceiptContext.service')
         .cashReceiptRequiredForTab({ sheetId, tabName, client: db })) === true;
-    } catch (_) {}
+    } catch (e) { if (strict) throw e; }
   }
   let receiptSlotKey = 'receipt';
   const knownSlotKeys = new Set(['review']);
@@ -3077,7 +3090,7 @@ async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false } =
     const sl = isReceipt ? 'receipt' : rawSlot;
     /* ★ 상한은 **묶음별**로 센다 — 전체 개수로 자르면 리뷰가 12장인 줄에서
        나중에 붙는 구매 캡처가 통째로 잘려 "구매 캡처 없음"으로 거짓 표시된다. */
-    if (arr.filter(f => f.slot === sl).length >= _RV_MAX_PER_ROW || arr.some(f => f.fileId === fileId)) return;
+    if (arr.filter(f => f.slot === sl).length >= maxPerRow || arr.some(f => f.fileId === fileId)) return;
     arr.push({ fileId, slot: sl, at: at || null });
   };
   let subs = [];
@@ -3097,7 +3110,8 @@ async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false } =
       [sheetId, tabName]);
     subs = result.rows || [];
     submissionEvidenceResolved = true;
-  } catch (_) {
+  } catch (e) {
+    if (strict) throw e;
     // 내부 작업보드는 아래의 과거 대표이미지를 계속 볼 수 있다. 업체용은 영수증 역할
     // 근거를 못 읽은 상태에서 review_index를 review라고 추측해 내보내지 않는다.
   }
@@ -3115,7 +3129,7 @@ async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false } =
       `SELECT row_index, review_file_id, review_file_at
          FROM review_index
         WHERE sheet_id=$1 AND tab_name=$2 AND row_index IS NOT NULL AND review_file_id IS NOT NULL`,
-      [sheetId, tabName]).catch(() => ({ rows: [] }));
+      [sheetId, tabName]).catch(e => { if (strict) throw e; return { rows: [] }; });
     idx = result.rows || [];
   }
   for (const r of idx) {
@@ -3134,6 +3148,7 @@ async function reviewImagesForTab({ sheetId, tabName, includeReceipt = false } =
        공고 매칭은 이름 → gid 폴백이고 **빈 gid 는 절을 켜지 않는다**. gid 는 서버가 tab_configs 에서 다시 구한다.
      ★ 확인 못 한 줄에는 **싣지 않는다**(남의 사진을 보여주는 것보다 없다고 하는 편이 낫다).
      ★ fail-soft: 실패해도 리뷰 이미지는 그대로 나간다. */
+  if (!withCaptures) return Object.fromEntries(out);
   const _gid = tabCfg.gid || '';
   const { rows: capOrders } = await db.query(
     `SELECT os.id, os.sheet_row, os.capture_file_id, os.capture_uploaded_at,

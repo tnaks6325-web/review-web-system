@@ -50,13 +50,21 @@ t('④ 명단 밖 줄의 사진 + 줄 번호 없는 사진 수', r.outside.count
 t('④ 명단 밖 사람은 ② 두 번 제출에서 세지 않는다', !r.twice.items.some(x => x.seq === 9));
 const many = svc._finishInspectCompute({ people: Array.from({ length: 60 }, (_, i) => P(i + 1, 'p' + i)), revByRow: new Map(), metaRows: [] });
 t('목록 상한을 넘으면 자른 사실을 말한다(truncated · 건수는 전부)', many.missing.count === 60 && many.missing.items.length === 50 && many.missing.truncated === true);
+// Codex P2 — 칸이 여럿인 작업: 한 번 제출에 칸마다 묶음 ID 가 따로 생긴다 → 두 번 제출 아님
+const multi = svc._finishInspectCompute({ people: [P(7, '칸둘')], revByRow: svc._fiReviewRows({ 7: [{ fileId: 'm1', slot: 'review' }, { fileId: 'm2', slot: 'slot2' }] }),
+  metaRows: [{ file_id: 'm1', file_hash: 'X1', upload_batch_id: 'K1' }, { file_id: 'm2', file_hash: 'X2', upload_batch_id: 'K2' }] });
+t('★ 칸(slot)이 다르면 묶음이 둘이어도 한 번 제출(Codex P2)', multi.twice.count === 0, JSON.stringify(multi.twice));
 const clean = svc._finishInspectCompute({ people: [P(1, 'x')], revByRow: svc._fiReviewRows({ 1: [{ fileId: 'q', slot: 'review' }] }), metaRows: [{ file_id: 'q', file_hash: 'H', upload_batch_id: 'B' }] });
 t('깨끗한 작업 = 네 가지 모두 0', !clean.samePhoto.count && !clean.twice.count && !clean.missing.count && !clean.outside.count);
 
 console.log('\n2) 사본 0 · 배선');
+t('★★ 검사는 strict · 상한 없음 · 구매캡처 생략으로 사진을 읽는다(Codex P1·P2)',
+  /reviewImagesForTab\(\{ sheetId, tabName, includeReceipt: true, strict: true, maxPerRow: Infinity, withCaptures: false \}\)/.test(SVC));
+t('라우트가 리뷰검수로 보낼 수 있는지(canOpenInspect)를 리뷰검수 게이트와 같은 canAccessTab 으로 싣는다(Codex P1)',
+  /out\.canOpenInspect = role === 'master' \|\| role === 'admin'[\s\S]{0,160}canAccessTab\(\{ role: 'staff'/.test(ROUTES));
 const body = SVC.slice(SVC.indexOf('async function finishInspectForTab('), SVC.indexOf('function _fiReviewRows('));
 t('★★ 명단은 _closeoutRoster + isFilledRow(홈·마감자료와 같은 판정)', /_closeoutRoster\(sheetId, tabName\)/.test(body) && /_isFilledRow/.test(body));
-t('★★ 줄별 사진은 reviewImagesForTab(제출물 미리보기와 같은 함수)', /reviewImagesForTab\(\{ sheetId, tabName, includeReceipt: true \}\)/.test(body));
+t('★★ 줄별 사진은 reviewImagesForTab(제출물 미리보기와 같은 함수)', /reviewImagesForTab\(\{ sheetId, tabName, includeReceipt: true/.test(body));
 t('★ 파일 이름으로 사람을 가르지 않는다(extractReviewerNameFromFile 미사용)', !/extractReviewerNameFromFile|file_name/.test(body));
 t('★ Drive 무접촉', !/drive\.|driveService/.test(body));
 t('★ unrowed 조회 실패 = null(모름)', /unrowed = null/.test(body));
@@ -81,6 +89,8 @@ t('명단 밖 건수 = 줄 + 줄 번호 없는 사진', /명단에 없는 사람
 vm.runInContext("_fiToggle('missing')", ctx);
 t('건수를 누르면 이름이 펼쳐지고 제출 표시만 있는 사람을 구분', /박다 <span class="m">\(제출 표시는 있음\)/.test(box.innerHTML));
 t('해시 없는 사진 수를 말한다', /1장은 비교 정보가 없어/.test(box.innerHTML));
+ctx._FI = { r: { ...r, canOpenInspect: false }, open: {} }; vm.runInContext('_FI=this._FI;_fiRender()', ctx);
+t('★ 리뷰검수로 못 가는 사람에게는 링크 대신 안내(403 막다른 길 금지)', !/_finInspectGo/.test(box.innerHTML) && /담당 AE·관리자/.test(box.innerHTML));
 ctx._FI = { r: clean, open: {} }; vm.runInContext('_FI=this._FI;_fiRender()', ctx);
 t('깨끗하면 한 줄', /모두 없음/.test(box.innerHTML) && !/fi-r/.test(box.innerHTML));
 ctx._FI = { r: { ...clean, outside: { ...clean.outside, unrowed: null } }, open: {} }; vm.runInContext('_FI=this._FI;_fiRender()', ctx);
@@ -94,6 +104,25 @@ t('★ 줄 번호 없는 사진을 못 셌으면 그 사실을 말한다', /확�
   vm.runInContext('_FIN=this._FIN', ctx);
   await vm.runInContext("_finInspectLoad('S','T')", ctx);
   t('★ 늦게 온 응답이 다른 작업의 창이면 그리지 않는다', !/모두 없음/.test(box.innerHTML));
+  // Codex P1/P2 — reviewImagesForTab strict·상한 실제 실행(스텁 pool)
+  const mkPool = (failSubs) => ({ async query(sql) {
+    const q = String(sql);
+    if (/FROM tab_configs/.test(q)) return { rows: [{ gid: '', capture_slots: null, income_type: '' }] };
+    if (/FROM review_submissions rs/.test(q)) { if (failSubs) throw new Error('db down');
+      return { rows: Array.from({ length: 13 }, (_, i) => ({ row_index: 1, file_id: 'f' + i, slot_key: 'review', at: null })) }; }
+    if (/FROM review_index/.test(q)) return { rows: [{ row_index: 1, review_file_id: 'legacy', review_file_at: null }] };
+    return { rows: [] };
+  } });
+  svc.__setPoolForTest(mkPool(true));
+  let threw = false; try { await svc.reviewImagesForTab({ sheetId: 'S', tabName: 'T', includeReceipt: true, strict: true, withCaptures: false }); } catch (_) { threw = true; }
+  t('★★ strict 에서는 원장 조회 실패를 던진다(일부만 보고 "모두 없음" 금지 — Codex P1)', threw);
+  const soft = await svc.reviewImagesForTab({ sheetId: 'S', tabName: 'T', includeReceipt: true });
+  t('기본(미리보기) 동작은 종전대로 fail-soft', soft && soft['1'] && soft['1'].length === 1);
+  svc.__setPoolForTest(mkPool(false));
+  const all = await svc.reviewImagesForTab({ sheetId: 'S', tabName: 'T', includeReceipt: true, strict: true, maxPerRow: Infinity, withCaptures: false });
+  const cap12 = await svc.reviewImagesForTab({ sheetId: 'S', tabName: 'T', includeReceipt: true });
+  t('★ 검사는 13장 전부 · 미리보기는 종전 12장 상한(Codex P2)', all['1'].length === 14 && cap12['1'].length === 12, all['1'].length + '/' + cap12['1'].length);
+  svc.__setPoolForTest(null);
   console.log(`\n✅ ${pass} 케이스 통과`);
   process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });

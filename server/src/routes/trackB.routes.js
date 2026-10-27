@@ -973,7 +973,13 @@ router.get('/workdesk/finish-inspect', authMiddleware, internalMiddleware, async
     const scope = await _ensureThreadScope(req, sheetId, tabName);
     if (!scope.ok) return res.status(scope.code || 403).json({ ok: false, error: scope.error });
     res.set('Cache-Control', 'private, no-store');
-    res.json(await svc.finishInspectForTab({ sheetId, tabName }));
+    const out = await svc.finishInspectForTab({ sheetId, tabName });
+    /* 처리 창구(리뷰검수)로 보낼 수 있나 — 리뷰검수 목록의 게이트(`_riScopeQuery`)와 같은 판정.
+       담당 밖 AE 에게 링크를 주면 눌렀을 때 403 막다른 길이다(Codex P1). */
+    const role = _role(req);
+    out.canOpenInspect = role === 'master' || role === 'admin'
+      || (role === 'staff' && await svc.canAccessTab({ role: 'staff', staffName: req.admin && req.admin.name, sheetId, tabName }).catch(() => false));
+    res.json(out);
   } catch (e) { next(e); }
 });
 
