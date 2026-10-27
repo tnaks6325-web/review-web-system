@@ -13,6 +13,7 @@ const PURPOSE_EXTRACT = 'reviewer_capture_extract';
 const PURPOSE_MATCH_REVIEW = 'reviewer_identity_review';
 const PURPOSE_APPROVAL = 'reviewer_identity_approval';
 const PURPOSE_DELIVERY_MEMO = 'reviewer_capture_delivery_memo';
+const PURPOSE_SECOND_CAPTURE = 'reviewer_capture_second';
 const DELIVERY_MEMO_MAX = 200;
 
 class ReviewerOrderIdentityError extends Error {
@@ -136,6 +137,23 @@ function readDeliveryMemoProof(token, orderNumber) {
     if (!p.order || !order || p.order !== order) return '';
     return cleanDeliveryMemo(p.memo);
   } catch (_) { return ''; }
+}
+/* 결정 299 — 구매캡처 두 번째 장을 서버가 실제로 받아 판독했다는 서명(배송메세지를 읽었든 못 읽었든).
+   필수 배송메세지가 확인되지 않은 주문의 「직원 확인 요청」은 이 서명이 있을 때만 받는다 — 화면 값(플래그)만으로는 못 건너뛴다.
+   배송메세지 서명과 같은 규율: 그 장을 판독할 때 묶은 주문번호와 제출한 주문번호가 같아야 한다. */
+function issueSecondCaptureProof(orderNumber, imageHash) {
+  const order = orderNoKey(orderNumber);
+  if (!order) return '';
+  return signScoped({ purpose: PURPOSE_SECOND_CAPTURE, order, imageHash: String(imageHash || '') }, '12h');
+}
+/** 서명이 맞고 주문번호가 같으면 true. 없거나 틀리거나 만료면 false. */
+function readSecondCaptureProof(token, orderNumber) {
+  if (!token) return false;
+  try {
+    const p = verifyScoped(token, PURPOSE_SECOND_CAPTURE);
+    const order = orderNoKey(orderNumber);
+    return !!(p.order && order && p.order === order);
+  } catch (_) { return false; }
 }
 function verifyExtractionProof(token, extracted) {
   const p = verifyScoped(token, PURPOSE_EXTRACT);
@@ -1223,6 +1241,8 @@ module.exports = {
   verifyExtractionProof,
   issueDeliveryMemoProof,
   readDeliveryMemoProof,
+  issueSecondCaptureProof,
+  readSecondCaptureProof,
   loadOwnerProfile,
   getSecureProfile,
   saveShoppingId,

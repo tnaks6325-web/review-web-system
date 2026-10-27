@@ -193,7 +193,10 @@ router.post('/image-extract', imageApiLimiter, async (req, res, next) => {
     const memoOrder = result.orderNumber || (secondCapture ? String((req.body && req.body.orderNumberHint) || '').trim() : '');
     try { deliveryMemoToken = result.ok ? reviewerOrderIdentity.issueDeliveryMemoProof(result.deliveryMemo, memoOrder) : ''; } catch (_) { deliveryMemoToken = ''; }
     // ★ 두 번째 장 판독에는 명의 확인 증명을 싣지 않는다(결정 288 — 명의 확인은 첫 장만 · 빈 칸 증명이 매칭 경로에 쓰이지 않게).
-    res.json(secondCapture ? { ...result, productLabel, deliveryMemoToken } : { ...result, ...proof, productLabel, deliveryMemoToken });
+    // 결정 299 — 두 번째 장을 받았다는 서명(읽었든 못 읽었든). 필수 배송메세지 「직원 확인 요청」의 전제다. 서명 실패도 판독 응답을 막지 않는다.
+    let capture2Token = '';
+    if (secondCapture) { try { capture2Token = reviewerOrderIdentity.issueSecondCaptureProof(memoOrder, imageHash); } catch (_) { capture2Token = ''; } }
+    res.json(secondCapture ? { ...result, productLabel, deliveryMemoToken, capture2Token } : { ...result, ...proof, productLabel, deliveryMemoToken });
   } catch (err) {
     logger.error(`[image-extract] ${err.message}`);
     logAbnormal({
@@ -208,7 +211,12 @@ router.post('/image-extract', imageApiLimiter, async (req, res, next) => {
     const proof = imageHash
       ? reviewerOrderIdentity.issueExtractionProof({ imageHash, extracted: failed, ok: false, errorCode: err.code || err.name || 'extract_failed' })
       : {};
-    res.json({ ...failed, ...proof });
+    // 결정 299 — 판독이 실패해도(AI 장애) 두 번째 장은 받았다 — 화면이 보낸 주문번호에 묶어 서명한다(위와 같은 규율).
+    let capture2Token = '';
+    if (imageHash && Number(req.body && req.body.captureIndex) === 2) {
+      try { capture2Token = reviewerOrderIdentity.issueSecondCaptureProof(String((req.body && req.body.orderNumberHint) || '').trim(), imageHash); } catch (_) { capture2Token = ''; }
+    }
+    res.json(capture2Token ? { ...failed, ...proof, capture2Token } : { ...failed, ...proof });
   }
 });
 
