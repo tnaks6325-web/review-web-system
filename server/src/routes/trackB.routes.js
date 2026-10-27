@@ -231,7 +231,26 @@ router.get('/tab-folders', authMiddleware, internalMiddleware, async (req, res) 
         `SELECT folder_url, capture_folder_url, capture_slots, income_type
            FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`, [sheetId, tabName]);
       const t = r.rows[0];
-      if (!t) return res.json({ ok: false, kind: 'info', error: '등록되지 않은 탭입니다.' });
+      if (!t) {
+        /* ★★ 예전 ⬛ 보관 작업(옛 대시보드 /api/archive/* 가 tab_configs 를 지웠다 · migration 204) —
+           보관 기록에 남긴 폴더 주소로 접는다. tab_configs 를 되살리지 않는다(결정 267: 주기 재생성이
+           보관 명단을 되살린다). 현영 대상 여부는 등록행이 없어 **모른다** — cashReceipt 를 싣지 않는다
+           (false 로 꾸미면 "대상 아님"이라 말하게 된다). 칸이 아직 없는 DB(배포 직후)는 종전 응답. */
+        let a = null;
+        try {
+          const ar = await pool.query(
+            `SELECT folder_url, capture_folder_url FROM index_master_archive
+              WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`, [sheetId, tabName]);
+          a = ar.rows[0] || null;
+        } catch (_) { a = null; }
+        if (a && (a.folder_url || a.capture_folder_url)) {
+          const val = { folderUrl: a.folder_url || null, captureFolderUrl: a.capture_folder_url || null, archived: true };
+          _tabFolderInfoCache.set(key, { at: Date.now(), val });
+          return res.json({ ok: true, kind: 'info', ...val });
+        }
+        return res.json({ ok: false, kind: 'info',
+          error: a ? '보관된 작업인데 폴더 주소 기록이 없습니다' : '등록되지 않은 탭입니다.' });
+      }
       const cri = cashReceiptSlotInfo(t.capture_slots, t.income_type, campaignCashReceipt);
       const val = {
         folderUrl: t.folder_url || null,
