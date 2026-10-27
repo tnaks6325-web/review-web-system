@@ -964,6 +964,18 @@ router.get('/workdesk/pending', authMiddleware, internalMiddleware, async (req, 
     res.json(out);
   } catch (e) { next(e); }
 });
+/* 🏁 마감자료 검수(결정 297) — 마감 확인창이 부른다. 게이트·스코프는 위 `/workdesk/pending` 과 같다(읽기 전용).
+   ★ 판정은 서비스(`finishInspectForTab`) 단독 — 라우트는 배선만. */
+router.get('/workdesk/finish-inspect', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const sheetId = String(req.query.sheetId || ''), tabName = String(req.query.tabName || '');
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const scope = await _ensureThreadScope(req, sheetId, tabName);
+    if (!scope.ok) return res.status(scope.code || 403).json({ ok: false, error: scope.error });
+    res.set('Cache-Control', 'private, no-store');
+    res.json(await svc.finishInspectForTab({ sheetId, tabName }));
+  } catch (e) { next(e); }
+});
 
 router.get('/workdesk', authMiddleware, async (req, res, next) => {
   try {

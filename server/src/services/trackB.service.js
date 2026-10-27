@@ -2368,6 +2368,97 @@ async function pendingParticipants({ sheetId, tabName, kind = 'submit', limit = 
     })),
   };
 }
+
+/* ── 🏁 마감자료 검수(결정 297) — 마감 확인창이 마감 전에 보여주는 네 가지 ─────────────────
+   ① 같은 사진(파일 내용 해시 같음) ② 한 사람이 두 번 제출 ③ 명단에 있는데 리뷰 사진 없음 ④ 명단 밖 사진.
+   ★★ 사본 0 — 명단 = `_closeoutRoster` + `isFilledRow`(홈 "아직 안 낸 사람"·마감자료와 같은 판정),
+     줄별 사진 = `reviewImagesForTab`(제출물 미리보기와 같은 함수 · 리뷰 갈래 = 구매캡처·영수증 아닌 것).
+     옛 관리자 「마감자료 검수」처럼 **파일 이름으로 사람을 가르지 않는다**(동명이인이 섞인다).
+   ★ 읽기 전용 · Drive 무접촉 — 해시·업로드 묶음은 제출 원장(review_submissions)에 이미 있다.
+   ★ "모른다"를 0 으로 꾸미지 않는다 — 해시가 없는 사진 수(`noHash`)를 따로 돌려준다.
+   ★ 알려주기만 한다(마감 게이트 아님 — 사용자 확정 2026-10-27). */
+const _FI_GAP_MS = 30 * 60 * 1000;   // 업로드 묶음 표식이 없는 옛 사진: 30분 넘게 떨어지면 다른 제출로 본다
+const _FI_CAP = 50;                  // 항목별 이름 목록 상한(건수는 전부 센다 · 잘리면 truncated)
+async function finishInspectForTab({ sheetId, tabName } = {}) {
+  if (!sheetId || !tabName) throw new Error('finishInspectForTab: sheetId, tabName 필수');
+  const db = getPool();
+  const roster = await _closeoutRoster(sheetId, tabName);
+  const people = roster.filter(r => _isFilledRow(r));
+  const imgs = await reviewImagesForTab({ sheetId, tabName, includeReceipt: true });
+  const revByRow = _fiReviewRows(imgs);
+  const ids = [...revByRow.values()].flat().map(f => String(f.fileId));
+  let metaRows = [];
+  if (ids.length) {
+    const { rows } = await db.query(
+      `SELECT file_id, file_hash, upload_batch_id, COALESCE(uploaded_at, created_at) AS at
+         FROM review_submissions WHERE file_id = ANY($1::text[])`, [ids]);
+    metaRows = rows || [];
+  }
+  let unrowed = 0;
+  try {
+    const { rows } = await db.query(
+      `SELECT COUNT(*)::int AS n FROM review_submissions
+        WHERE sheet_id=$1 AND tab_name=$2 AND row_index IS NULL AND COALESCE(slot_key,'review')='review'`, [sheetId, tabName]);
+    unrowed = (rows[0] && rows[0].n) || 0;
+  } catch (_) { unrowed = null; }   // 모름 = null(0 으로 꾸미지 않는다)
+  return _finishInspectCompute({ people, revByRow, metaRows, unrowed });
+}
+// 줄별 사진 → 리뷰 갈래만. 휴지통으로 보낸 사진(slot 'trashed' — 고아 정리·중복 자동정리)은 이미 처리된 것이라 세지 않는다.
+function _fiReviewRows(imgs) {
+  const isRev = f => f && f.slot !== 'order_capture' && f.slot !== 'receipt' && f.slot !== 'trashed';
+  const out = new Map();
+  for (const [k, files] of Object.entries(imgs || {})) { const rv = (files || []).filter(isRev); if (rv.length) out.set(String(k), rv); }
+  return out;
+}
+/** 순수 판정(쿼리 0) — 테스트가 직접 실행한다. */
+function _finishInspectCompute({ people = [], revByRow = new Map(), metaRows = [], unrowed = 0 } = {}) {
+  const bySeq = new Map(people.map(r => [String(r.seq), r]));
+  const meta = new Map(metaRows.map(r => [String(r.file_id), r]));
+  const ids = [...revByRow.values()].flat();
+  const who = (seq) => { const p = bySeq.get(String(seq)); return { seq: Number(seq), name: String((p && (p.name || p.recipient)) || '').slice(0, 40) }; };
+  const cap = (arr) => ({ count: arr.length, truncated: arr.length > _FI_CAP, items: arr.slice(0, _FI_CAP) });
+
+  // ① 같은 사진 — 내용 해시가 같은 파일 묶음(같은 사람 안 · 다른 사람끼리 모두)
+  const byHash = new Map(); let noHash = 0;
+  for (const [seq, files] of revByRow) for (const f of files) {
+    const m = meta.get(String(f.fileId)); const h = m && m.file_hash;
+    if (!h) { noHash++; continue; }
+    if (!byHash.has(h)) byHash.set(h, []);
+    byHash.get(h).push({ seq, fileId: String(f.fileId) });
+  }
+  const samePhoto = [...byHash.values()].filter(g => g.length > 1)
+    .map(g => ({ people: [...new Set(g.map(x => x.seq))].map(who), files: g.length, fileIds: g.map(x => x.fileId) }));
+
+  // ② 한 사람이 두 번 제출 — 업로드 묶음(upload_batch_id)이 둘 이상. 표식이 없는 옛 사진은 30분 넘는 간격을 다른 제출로 본다
+  const twice = [];
+  for (const [seq, files] of revByRow) {
+    if (!bySeq.has(seq)) continue;   // 명단 밖은 ④에서 센다
+    const list = files.map(f => { const m = meta.get(String(f.fileId)) || {}; return { b: m.upload_batch_id || null, t: new Date(m.at || f.at || 0).getTime() }; })
+      .sort((a, b) => a.t - b.t);
+    const keys = new Set(); let last = null, n = 0;
+    for (const x of list) {
+      if (x.b) { keys.add(String(x.b)); continue; }
+      if (last == null || !Number.isFinite(x.t) || x.t - last > _FI_GAP_MS) n++;
+      last = x.t;
+    }
+    const sets = keys.size + n;
+    if (sets > 1) twice.push({ ...who(seq), sets });
+  }
+
+  // ③ 명단에 있는데 리뷰 사진 없음 — 제출 표시가 있는데 사진이 없는 사람은 따로 표시
+  const missing = people.filter(r => !revByRow.has(String(r.seq)))
+    .map(r => ({ seq: Number(r.seq), name: String(r.name || r.recipient || '').slice(0, 40), submitted: !!r.submitted }));
+
+  // ④ 명단 밖 사진 — 채워진 줄이 아닌 줄 번호에 붙은 사진(+ 줄 번호 없이 이 작업에 들어온 리뷰 사진 수)
+  const outside = [...revByRow.entries()].filter(([seq]) => !bySeq.has(seq)).map(([seq, files]) => ({ seq: Number(seq), files: files.length }));
+
+  return {
+    ok: true, checkedAt: new Date().toISOString(),
+    people: people.length, photos: ids.length, noHash,
+    samePhoto: cap(samePhoto), twice: cap(twice), missing: cap(missing),
+    outside: { ...cap(outside), unrowed },
+  };
+}
 // (마감자료 생성 generateCloseout · CSV closeoutCsv 는 2026-09-28 제거 — 결정 186 9번. 화면 버튼은 9/7 #1345 에서 이미 제거.
 //  기존 trackb_tab_closeouts 행은 latestCloseout 이 계속 읽는다.)
 // 최신 마감(스텝퍼 ① 소스). settlementForTab 이 병합. N-1: 동시각 tie 는 id DESC 로 결정적.
@@ -6591,6 +6682,9 @@ module.exports = {
   settlementVisibleFor,
   latestCloseout,
   pendingParticipants,
+  finishInspectForTab,
+  _finishInspectCompute,
+  _fiReviewRows,
   listThread,
   addThread,
   setRequestStatus,

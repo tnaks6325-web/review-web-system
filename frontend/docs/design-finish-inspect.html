@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>시안 — 🏁 마감 확인창 [마감자료 검수]</title>
+<style>
+:root{--paper:#f4f6f9;--card:#fff;--card2:#f1f4f8;--ink:#101828;--muted:#667085;--faint:#98a2b3;--line:#e6eaf0;--line2:#d0d9e4;
+  --accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;--safe:#16a34a;--safe-soft:#e9f7ee;--warn:#b45309;--warn-soft:#fdf6ec;--bad:#e5484d;--bad-soft:#fdf0f0;
+  --sans:'Pretendard',-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR','Apple SD Gothic Neo',sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:#e8ebf0;color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;padding:26px 22px 60px}
+h1{font-size:18px;margin:0 0 4px}
+.lead{font-size:12.5px;color:var(--muted);margin:0 0 20px}
+.row{display:flex;gap:22px;align-items:flex-start;flex-wrap:wrap}
+.cap{font-size:12px;font-weight:800;margin:0 0 8px;color:var(--ink)}
+.cap small{display:block;font-weight:500;color:var(--muted);font-size:11px}
+/* ── 이하 = 작업보드 마감 확인창 실제 스타일(.wbl-*) 그대로 ── */
+.wbl-dlg{width:460px;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 20px 50px rgba(16,24,40,.18);overflow:hidden}
+.wbl-dh{padding:13px 18px;font-size:13.5px;font-weight:800;border-bottom:1px solid var(--line)}
+.wbl-db{padding:14px 18px;font-size:12px;line-height:1.65}
+.wbl-facts{margin:9px 0 3px;padding:9px 12px;background:var(--card2);border:1px solid var(--line);border-radius:9px;font-size:11.5px}
+.wbl-ul{margin:8px 0 0 17px;padding:0}.wbl-ul li{margin:3px 0;font-size:11.5px;color:var(--muted)}
+.wbl-chk{display:flex;gap:8px;align-items:flex-start;margin-top:12px;padding:10px 12px;background:var(--warn-soft);border:1px solid #f0dcb8;border-radius:9px;font-size:11.5px;font-weight:750}
+.wbl-chk input{margin-top:2px}.wbl-chk .sub{display:block;font-weight:400;color:var(--warn);margin-top:2px}
+.wbl-df{display:flex;gap:8px;justify-content:flex-end;padding:12px 16px;background:var(--card2);border-top:1px solid var(--line)}
+.wbl-b{font:inherit;font-size:10.5px;font-weight:750;padding:3px 10px;border-radius:7px;border:1px solid var(--line2);background:var(--card);color:var(--ink);cursor:pointer;white-space:nowrap}
+.wbl-b.dark{background:var(--ink);color:#fff;border-color:var(--ink)}
+.wbl-b:disabled{color:#c3cad6;border-color:#edf0f5;background:var(--card2);cursor:not-allowed}
+.wbl-s.cand{display:inline-block;border-radius:6px;padding:2px 8px;font-size:11px;background:var(--accent);color:#fff}
+/* ── 새로 더하는 것: 마감자료 검수 블록 ── */
+.fi{margin-top:12px;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.fi-h{display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--card2);font-size:11.5px;font-weight:800}
+.fi-h .sp{flex:1}
+.fi-h .when{font-weight:500;color:var(--faint);font-size:10.5px}
+.fi-empty{padding:12px;font-size:11.5px;color:var(--muted)}
+.fi-r{display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid var(--line);font-size:11.5px}
+.fi-r .nm{flex:1}
+.fi-r .n{font-weight:800;min-width:34px;text-align:right}
+.fi-r.ok .n{color:var(--safe)} .fi-r.bad .n{color:var(--bad)} .fi-r.warn .n{color:var(--warn)}
+.fi-r .tog{font:inherit;font-size:10.5px;color:var(--accent-deep);background:none;border:none;cursor:pointer;padding:0;text-decoration:underline;text-underline-offset:2px}
+.fi-list{padding:4px 12px 9px 26px;border-top:1px dashed var(--line);background:#fcfcfd;font-size:11px;color:var(--ink)}
+.fi-list li{margin:2px 0}.fi-list .m{color:var(--faint)}
+.fi-go{padding:8px 12px;border-top:1px solid var(--line);font-size:11px;color:var(--muted);display:flex;align-items:center;gap:8px}
+.fi-go a{color:var(--accent-deep);font-weight:750}
+.fi-all{padding:10px 12px;border-top:1px solid var(--line);font-size:11.5px;color:var(--safe);font-weight:750;background:var(--safe-soft)}
+.note{max-width:1450px;margin-top:22px;font-size:12px;color:#3f4a5a;background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 16px}
+.note b{color:var(--ink)} .note li{margin:3px 0}
+</style></head><body>
+<h1>🏁 마감 확인창 — [마감자료 검수] 시안</h1>
+<p class="lead">작업보드 › 작업 › 🏁 마감 을 누르면 뜨는 기존 창 안에 검수 칸 하나를 더합니다. 다른 화면은 바뀌지 않습니다. (예시 데이터)</p>
+
+<div class="row">
+<!-- ① 열었을 때 -->
+<div>
+  <div class="cap">① 창을 열면 — 자동으로 검사합니다<small>몇 초 걸립니다. 그동안에도 창은 쓸 수 있습니다.</small></div>
+  <div class="wbl-dlg"><div class="wbl-dh">🏁 이 작업을 마감할까요?</div>
+  <div class="wbl-db"><b>8/14(쿠팡)웰스앤헬스 약도라지 진액 500건</b> (웰스앤헬스 · 담당 망고)
+    <div class="wbl-facts">인원/제출 <b>499/499</b> · 입금 <b>499</b> <span class="wbl-s cand">✓ 마감 후보</span></div>
+    <div class="fi"><div class="fi-h">🔍 마감자료 검수<span class="sp"></span><span class="when">검사 중…</span></div>
+      <div class="fi-empty">리뷰 사진 499명분을 확인하고 있습니다.</div></div>
+    <label class="wbl-chk"><input type="checkbox"><span>리뷰폴더의 리뷰 캡처 검수를 확인했습니다<span class="sub">체크해야 [마감] 버튼이 활성화됩니다</span></span></label>
+  </div>
+  <div class="wbl-df"><button class="wbl-b">취소</button><button class="wbl-b dark" disabled>🏁 마감</button></div></div>
+</div>
+
+<!-- ② 문제 있음 -->
+<div>
+  <div class="cap">② 손볼 것이 있을 때<small>건수를 누르면 누구인지 펼쳐집니다.</small></div>
+  <div class="wbl-dlg"><div class="wbl-dh">🏁 이 작업을 마감할까요?</div>
+  <div class="wbl-db"><b>8/14(쿠팡)웰스앤헬스 약도라지 진액 500건</b> (웰스앤헬스 · 담당 망고)
+    <div class="wbl-facts">인원/제출 <b>499/499</b> · 입금 <b>499</b> <span class="wbl-s cand">✓ 마감 후보</span></div>
+    <div class="fi"><div class="fi-h">🔍 마감자료 검수<span class="sp"></span><span class="when">방금 · <button class="tog" style="font-size:10.5px">다시 검사</button></span></div>
+      <div class="fi-r bad"><span class="nm">똑같은 사진이 두 번 올라감</span><span class="n">2건</span><button class="tog">닫기</button></div>
+      <ul class="fi-list"><li>김은경 — 리뷰 사진 2장이 같은 파일 <span class="m">(8/22 · 8/23)</span></li><li>박종미 ↔ 이소라 — 서로 같은 사진 <span class="m">(8/24)</span></li></ul>
+      <div class="fi-r warn"><span class="nm">한 사람이 두 번 제출</span><span class="n">1명</span><button class="tog">보기</button></div>
+      <div class="fi-r bad"><span class="nm">명단에 있는데 리뷰 사진이 없음</span><span class="n">3명</span><button class="tog">보기</button></div>
+      <div class="fi-r ok"><span class="nm">명단에 없는 사람의 사진</span><span class="n">0</span><span style="width:24px"></span></div>
+      <div class="fi-go">처리는 <a href="#">리뷰검수에서 이 작업만 보기</a> 에서 합니다.</div>
+    </div>
+    <label class="wbl-chk"><input type="checkbox"><span>리뷰폴더의 리뷰 캡처 검수를 확인했습니다<span class="sub">체크해야 [마감] 버튼이 활성화됩니다</span></span></label>
+  </div>
+  <div class="wbl-df"><button class="wbl-b">취소</button><button class="wbl-b dark" disabled>🏁 마감</button></div></div>
+</div>
+
+<!-- ③ 문제 없음 -->
+<div>
+  <div class="cap">③ 깨끗할 때<small>네 가지 모두 0이면 한 줄로 끝납니다.</small></div>
+  <div class="wbl-dlg"><div class="wbl-dh">🏁 이 작업을 마감할까요?</div>
+  <div class="wbl-db"><b>10/19(쿠팡)작심홈_일체형목베개 100건</b> (작심홈 · 담당 만두)
+    <div class="wbl-facts">인원/제출 <b>100/100</b> · 입금 <b>100</b> <span class="wbl-s cand">✓ 마감 후보</span></div>
+    <div class="fi"><div class="fi-h">🔍 마감자료 검수<span class="sp"></span><span class="when">방금 · <button class="tog" style="font-size:10.5px">다시 검사</button></span></div>
+      <div class="fi-all">✓ 중복 사진 · 두 번 제출 · 사진 없는 사람 · 명단 밖 사진 — 모두 없음</div></div>
+    <label class="wbl-chk"><input type="checkbox" checked><span>리뷰폴더의 리뷰 캡처 검수를 확인했습니다<span class="sub">체크해야 [마감] 버튼이 활성화됩니다</span></span></label>
+  </div>
+  <div class="wbl-df"><button class="wbl-b">취소</button><button class="wbl-b dark">🏁 마감</button></div></div>
+</div>
+</div>
+
+<div class="note"><b>정할 점(기본안)</b>
+<ul>
+<li>검사 결과는 <b>알려주기만</b> 하고 마감을 막지 않습니다 — 마감 버튼은 지금처럼 사람이 체크해야 켜집니다.</li>
+<li>사람 판정은 파일 이름이 아니라 <b>시스템 제출 기록</b>으로 합니다(동명이인 섞임 없음). 같은 사진 판정은 파일 내용이 같은지로 봅니다.</li>
+<li>지우기·옮기기는 이 창에서 하지 않습니다 — 처리는 기존 「리뷰검수」 화면에서.</li>
+<li>검사를 못 하면(드라이브 응답 없음 등) "검사하지 못했습니다 · 다시 검사"로 알리고, 0건으로 꾸미지 않습니다.</li>
+</ul></div>
+</body></html>
