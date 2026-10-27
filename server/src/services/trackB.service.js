@@ -3959,6 +3959,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             `SELECT row_index, phone8, status, to_char(paid_at AT TIME ZONE 'Asia/Seoul', 'FMMM/FMDD') AS d
                FROM payment_batch_items
               WHERE sheet_id=$1 AND tab_name=$2 AND status IN ('paid','pending')
+                -- ★ 리뷰비가 실제로 든 항목만(리뷰비 전용 · 제품비+리뷰비). 제품비만 보낸 항목을 "리뷰비 입금일"로 보이지 않는다(Codex P2).
+                AND COALESCE(review_fee, 0) > 0
               ORDER BY (status='paid') DESC, paid_at DESC NULLS LAST, created_at DESC`, [sheetId, tabName]);
           for (const x of fi) {
             const k = Number(x.row_index); if (!feeDep.bySeq.has(k)) feeDep.bySeq.set(k, []);
@@ -3975,7 +3977,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     if (!feeDep) return undefined;
     if (feeDep.unavailable) return '확인불가';
     const p8 = String(r.phone8 == null ? '' : r.phone8).trim();
-    const hit = (feeDep.bySeq.get(Number(r.seq)) || []).find(x => !p8 || !String(x.phone8 || '').trim() || String(x.phone8).trim() === p8);
+    // ★ 명의를 모르면 짝짓지 않는다(빈 명의 = 와일드카드 금지 · Codex P2) — 빈 줄·재배정 줄이 앞사람 입금일을 물려받지 않게.
+    if (!p8) return '';
+    const hit = (feeDep.bySeq.get(Number(r.seq)) || []).find(x => String(x.phone8 == null ? '' : x.phone8).trim() === p8);
     if (!hit) return '';
     return hit.status === 'paid' ? (hit.d || '입금완료') : '이체 진행 중';
   };
