@@ -2289,6 +2289,47 @@
 .pmbp-row.on .pmbp-mark::before{content:'✓ 못 받음';color:#B0362A;font-weight:700}
 .pmbp-row[disabled]{cursor:default;color:#8A94A6;background:#FAFBFC}
 .pmbp-mark{margin-left:auto;font-size:11.5px}
+.pmbp-hint{font-size:10.5px;padding:1px 6px;border-radius:4px;background:#FFF4E0;color:#8A5300;white-space:nowrap}
+/* 결정 302 — 「오늘 확인할 것」(홈·입금관리 같은 목록) */
+.tck-wrap{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 13px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+#hmwrap .tck-wrap{margin-top:14px}
+#pmbody .tck-wrap{margin-top:12px;border-radius:9px;box-shadow:none}
+.tck-hd{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tck-hd .tck-t{font-size:13px;font-weight:800}
+.tck-hd .tck-n{font-size:11px;font-weight:800;color:#fff;background:var(--bad);border-radius:999px;padding:1px 8px;font-variant-numeric:tabular-nums}
+.tck-hd .sp{flex:1}
+.tck-mgr{font:inherit;font-size:11.5px;padding:3px 11px;border:1px solid var(--line);border-radius:999px;background:var(--card);color:var(--ink);cursor:pointer}
+.tck-mgr.on{border-color:#2563EB;background:#EEF4FF;color:#1D4ED8;font-weight:700}
+.tck-empty{font-size:12px;color:var(--faint);padding:8px 2px 2px}
+.tck-card{border:1px solid var(--line);border-radius:10px;margin-top:10px;overflow:hidden}
+.tck-ch{display:flex;gap:6px 10px;align-items:center;flex-wrap:wrap;padding:8px 11px;background:var(--card2);font-size:12.5px}
+.tck-ch .sp{flex:1}
+.tck-ch .tck-sub{color:var(--faint);font-size:11.5px}
+.tck-line{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;padding:8px 11px;border-top:1px solid var(--line);font-size:12.5px;color:var(--ink)}
+.tck-line .tck-tx{flex:1 1 320px;min-width:0}
+.tck-line.sub{padding-left:26px}
+.tck-choice{font:inherit;font-size:11.5px;padding:3px 9px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);cursor:pointer}
+.tck-choice.on{border-color:#2563EB;background:#EEF4FF;color:#1D4ED8;font-weight:700}
+.tck-memo{font:inherit;font-size:11.5px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);flex:1 1 160px;min-width:120px}
+.tck-by{font-size:10.5px;color:var(--faint);flex-basis:100%}
+.tck-ai{font-size:10px;color:var(--faint);border:1px solid var(--line);border-radius:4px;padding:0 5px}
+.tck-ok{font-size:11px;font-weight:800;color:#15803D}
+.tck-row{font:inherit;width:100%;display:flex;align-items:center;gap:8px;margin-top:8px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);text-align:left;cursor:pointer;font-size:12.5px}
+.tck-row b{flex:none}
+.tck-row .tck-rs{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted)}
+.tck-row .tck-go{flex:none;color:var(--faint);font-size:15px}
+#tckSheet{position:fixed;inset:0;z-index:4000;visibility:hidden}
+#tckSheet.on{visibility:visible}
+#tckSheet .tck-bg{position:absolute;inset:0;background:rgba(15,23,42,.45);opacity:0;transition:opacity .2s;pointer-events:none}
+#tckSheet.on .tck-bg{opacity:1;pointer-events:auto}
+#tckSheet .tck-panel{position:absolute;left:0;right:0;bottom:0;max-height:86vh;overflow:auto;background:var(--card);border-radius:16px 16px 0 0;padding:8px 12px calc(16px + env(safe-area-inset-bottom));transform:translateY(100%);transition:transform .25s ease-out}
+#tckSheet.on .tck-panel{transform:translateY(0)}
+#tckSheet .tck-grab{width:40px;height:4px;border-radius:2px;background:var(--line);margin:2px auto 8px}
+#tckSheet .tck-sh{display:flex;align-items:center;gap:8px;margin-bottom:2px}
+#tckSheet .tck-sh b{flex:1;font-size:14px}
+#tckSheet .tck-card{margin-top:6px}
+@media (prefers-reduced-motion:reduce){#tckSheet .tck-panel,#tckSheet .tck-bg{transition:none}}
+.tck-donerow{display:flex;gap:8px;align-items:center;padding:7px 11px;margin-top:8px;border:1px dashed var(--line);border-radius:9px;font-size:12px;color:var(--faint)}
 #pmbody .pmbatchpanel .lgwrap{margin:0}
 #pmbody .pmbatchpanel .pm-batch-scroll{max-height:calc(10 * 48px + 38px);overflow-y:auto;overscroll-behavior:contain}
 .pmtable td.num,.pmtable th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -2539,6 +2580,17 @@ table.lgtable.pm-unconfirmed-two-row-table{width:100%;min-width:0;table-layout:f
 .hm-st .n{font-size:21px;font-weight:800;font-variant-numeric:tabular-nums}
 .hm-st .n.hot{color:#fecaca}
 .hm-st .l{font-size:10.5px;opacity:.8}
+/* 결정 302 — admin/master 홈 위쪽: 왼쪽 인사 블록 · 오른쪽 「오늘 확인할 것」(사용자 확정 2026-10-28 「홈화면 2번」).
+   AE 는 확인할 것이 없으므로 종전 한 줄 그대로(.two 없음). 1000px 이하는 위아래로 쌓는다. */
+.hm-top.two{display:grid;grid-template-columns:minmax(300px,.8fr) minmax(0,1.2fr);gap:14px;align-items:stretch}
+.hm-top.two .hm-hero{display:flex;flex-direction:column}
+@media(min-width:721px){
+  .hm-top.two .hm-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 0;margin-top:auto;padding-top:18px}
+  .hm-top.two .hm-st{padding:0 14px;border-left:1px solid rgba(255,255,255,.2)}
+  .hm-top.two .hm-st:nth-child(odd){padding-left:0;border-left:0}
+}
+#hmwrap .hm-top.two #tckHomeMount .tck-wrap{margin-top:0;height:100%;box-sizing:border-box;max-height:420px;overflow:auto}
+@media(max-width:1000px){.hm-top.two{grid-template-columns:1fr} #hmwrap .hm-top.two #tckHomeMount .tck-wrap{max-height:none}}
 .hm-wrap{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px;align-items:start;margin-top:16px}
 @media(max-width:1000px){.hm-wrap{grid-template-columns:1fr}}
 .hm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(178px,1fr));gap:12px}
@@ -2561,16 +2613,16 @@ table.lgtable.pm-unconfirmed-two-row-table{width:100%;min-width:0;table-layout:f
    데스크톱 표는 그대로 두고 720px 이하에서만 같은 행을 카드로 재배치한다. */
 @media(max-width:720px){
   #hmwrap{margin:-18px -22px;padding:12px 12px 28px;max-width:none}
-  .hm-hero{border-radius:16px;padding:20px 18px 18px;box-shadow:0 10px 26px rgba(37,99,235,.18)}
+  .hm-hero{border-radius:14px;padding:14px 16px 13px;box-shadow:0 8px 20px rgba(37,99,235,.16)}
   .hm-hero::after{right:-96px;top:-110px;width:250px;height:250px}
   .hm-hero::before{right:32px;bottom:-150px;width:230px;height:230px}
-  .hm-hi{font-size:20px;line-height:1.35;padding-right:18px}
-  .hm-sub{font-size:11px;line-height:1.55;margin-top:7px;max-width:280px}
-  .hm-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 0;margin-top:18px}
-  .hm-st{padding:2px 12px;border-left:1px solid rgba(255,255,255,.2)}
-  .hm-st:nth-child(odd){padding-left:0;border-left:0}
-  .hm-st .n{font-size:24px;line-height:1.15}
-  .hm-st .l{font-size:10.5px;margin-top:2px}
+  .hm-hi{font-size:16px;line-height:1.35;padding-right:18px}
+  .hm-sub{font-size:10.5px;line-height:1.45;margin-top:2px}
+  .hm-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;margin-top:11px}
+  .hm-st{padding:0 7px;border-left:1px solid rgba(255,255,255,.2);min-width:0}
+  .hm-st:first-child{padding-left:0;border-left:0}
+  .hm-st .n{font-size:19px;line-height:1.15}
+  .hm-st .l{font-size:10px;margin-top:1px;letter-spacing:-.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .hm-wrap{display:flex;flex-direction:column;gap:12px;margin-top:12px}
   .hm-brief{order:1;border-radius:13px;padding:12px 13px 8px}
   .hm-grid{order:2;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
@@ -3066,7 +3118,7 @@ const API_BASE = (function(){
 //   ★ initToken 보다 반드시 먼저 읽는다: #sso= 가 함께 오면 initToken이 해시 전체를 지우기 때문.
 //   여기서는 읽기만 하고 지우지 않는다(뒤따르는 #sso=/#adv= 핸들러가 같은 해시를 봐야 함) —
 //   실제 제거는 소비 시점(_consumeGo)에서 한다.
-let _GO=null, _VIEW='';
+let _GO=null, _VIEW='', _PICK='';
 (function initGoLink(){
   try{
     const m=(location.hash||'').match(/[#&]go=([^&]+)/);
@@ -3075,6 +3127,8 @@ let _GO=null, _VIEW='';
   }catch(_){ _GO=null; }
   // #view=logs — 대시보드 중요알림 요약 카드에서 '리뷰어 로그' 뷰로 바로 진입(초기 뷰 지정만)
   try{ const vm=(location.hash||'').match(/[#&]view=(\w+)/); if(vm) _VIEW=vm[1]; }catch(_){ }
+  // #view=payment&pick=<대량이체 id> — 「오늘 확인할 것」[바로 가기](새 탭)가 입금관리 + 그 대량이체 고르기 창으로 연다(결정 302)
+  try{ const pm=(location.hash||'').match(/[#&]pick=([0-9a-fA-F-]{36})(?:&|$)/); if(pm) _PICK=pm[1]; }catch(_){ }
 })();
 // ── 공유 링크(#w=<code>) 수신 — 메신저로 받은 "그 작업보드 주소" ──
 //   ★ 여기서는 코드만 집어 둔다. 로그인 전이면 boot 이 로그인 화면에서 되돌아오는데, _SHARE 는
@@ -3224,11 +3278,14 @@ async function boot(){
   // 직원(관리자·AE)만 확장 프로그램 필수 설치 — 광고주(업체) 화면은 제외(js/product-reader-gate.js, 2026-10-13)
   try { window.productReaderGate && window.productReaderGate({ isStaff: STATE.role !== 'advertiser' }); } catch (_) { }
   // 새로고침은 현재 브라우저 항목을 다시 읽되, 다른 계정이 남긴 이력은 복원하지 않는다.
-  if(!_GO && _VIEW!=='logs' && _navCanRestore(history.state)) _navRestoreState(history.state);
+  if(!_GO && _VIEW!=='logs' && _VIEW!=='payment' && _navCanRestore(history.state)) _navRestoreState(history.state);
   _consumeGo();   // 리뷰어 로그 딥링크 → 작업보드 탭 + 해당 리뷰어 행 지정(셸 렌더 전에 세팅해야 loadTabs가 집어감)
   await _consumeShare();   // 공유 링크(#w=) → 그 작업보드/업체로 직행(서버가 대상과 스코프를 판정)
   // #view=logs(대시보드 요약 카드에서 진입) — admin/staff만 로그 뷰 노출. 그 외/미지정은 기존 기본 뷰.
   if(_VIEW==='logs' && (STATE.role==='master'||STATE.role==='admin'||STATE.role==='staff')){ STATE.view='logs';
+    try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ } }
+  // 결정 302 — #view=payment(입금관리는 admin/master 만). pick 은 입금관리가 대량이체를 받은 뒤 고르기 창을 연다.
+  if(_VIEW==='payment' && (STATE.role==='master'||STATE.role==='admin')){ STATE.view='payment'; STATE.pmPickBatch=_PICK||'';
     try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ } }
   renderShell();
   _wbOrderLiveStart();
@@ -13300,6 +13357,7 @@ function _pmRender(){
         <h2 class="pmh2">대량이체</h2>
         <div id="pmBankBar">${_pmBankBarHtml()}</div>
         <div id="pmBatchTableWrap">${_pmBatchTable(STATE.pmBatches||[])}</div>
+        <div id="pmTodayChecks"></div>
       </section>
       ${_pmFinishedNoteHtml()}${_pmAdvPaidNoteHtml()}${_pmSplitNoteHtml()}
       ${blocked.length?`<div class="pmnote">⚠ <b>보류 ${blocked.length}건</b>은 파일에서 빠집니다 — 아래에서 사유를 바로 보완할 수 있습니다.</div>`:''}
@@ -13309,6 +13367,7 @@ function _pmRender(){
       ${_pmFixBlock()}
       ${_pmTargetTable(items)}
     </div>`;
+  if(typeof _tckPaint==='function') _tckPaint();   // 결정 302 — 다시 그린 자리에 받아 둔 확인할 것을 그대로 채운다(Codex P2)
   const workList=$('#pmbody .pmworklist');
   if(workList && Number.isFinite(STATE.pmWorkScrollTop)) workList.scrollTop=STATE.pmWorkScrollTop;
   STATE.pmWorkScrollTop=null;
@@ -13471,11 +13530,16 @@ async function _pmDepositBackfill(i){
   toast(msg.join(' · '));
   await _pmLoad(true);
 }
+const _PM_RESULT_UPLOAD_ON=false;
 function _pmBatchActions(b,i){
   if(b.status==='cancelled') return b.resultUploadId ? `<button class="btn sm" onclick="_pmOpenResult(${i})">이체결과 확인</button>` : '';
   const reconcile = b.status==='downloaded' && ((b.paidCount||0)+(b.failedCount||0)>0)
     ? `<button class="btn sm primary" onclick="_pmMarkApplied(${i})">적용완료 처리</button>` : '';
-  const resultUpload = (b.status==='downloaded' || b.status==='applied')
+  // 결정 302 — 통장 자동 대조로 바뀌어 결과 파일 업로드 버튼은 숨긴다(사용자 확정 2026-10-27 · 기능은 남김 · 다시 켜려면 true).
+  //   ★ 단 통장으로 정할 수 없는 대량이체는 남긴다(Codex P1): 하나은행(통장 대조 없음) · 같은 금액이 통장에 더 찍혀 누가 받았는지 모르는 케이뱅크.
+  const bkU=_pmBankOf(b);
+  const uploadNeeded = b.bank!=='kbank' || !!(bkU && (bkU.amounts||[]).some(a=>a.failures==null));
+  const resultUpload = (_PM_RESULT_UPLOAD_ON || uploadNeeded) && (b.status==='downloaded' || b.status==='applied')
     ? `<button class="pmdrop" type="button" title="클릭하거나 결과 파일을 끌어 놓으세요" onclick="_pmPickResult(${i})" ondragover="_pmResultDragOver(event)" ondragleave="_pmResultDragLeave(event)" ondrop="_pmResultDrop(event,${i})"><span class="pmdropicon" aria-hidden="true">⇧</span><span>결과 파일 업로드</span></button>` : '';
   const manage = b.status==='downloaded' ? `<button class="btn sm" onclick="_pmRefileByIndex(${i})">⬇ 다시 받기</button>
     ${reconcile}<button class="btn sm danger" onclick="_pmCancelByIndex(${i})">대량이체 취소</button>`
@@ -13533,6 +13597,7 @@ async function _pmBankRefresh(force){
   finally{ _pmBankBusy=false; }
   if(reload) return _pmLoad(true);
   _pmBankPaint();
+  if(typeof _tckLoad==='function') _tckLoad();   // 결정 302 — 통장을 받은 뒤 확인할 것(서버가 sync 직후 맞춘 목록)
 }
 // 결정 296 — 입금관리 맨 위 상품구입비 게이지. 숫자는 인트라넷 리뷰 페이백 장부가 계산한 그대로(여기서 다시 계산하지 않는다).
 //   상품구입비 총액(계약) − 리뷰웹으로 돌려준 상품값 − 기록 없이 나간 돈 = 남은 상품구입비
@@ -13591,7 +13656,7 @@ function _pmBankBarHtml(){
   const k=STATE.pmBank;
   if(!k) return '<div class="pmbank"><span class="muted">케이뱅크 통장 확인 중…</span></div>';
   if(k.error) return `<div class="pmbank warn">통장 상태를 불러오지 못했습니다 — ${esc(k.error)}<span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmBankRefresh(true)">다시 확인</button></div>`;
-  if(!k.configured) return '<div class="pmbank"><span class="muted">케이뱅크 통장 연결 전입니다 — 지금처럼 결과 파일로 반영해 주세요.</span></div>';
+  if(!k.configured) return '<div class="pmbank"><span class="muted">케이뱅크 통장이 연결되어 있지 않습니다 — 관리자에게 알려 주세요(통장 대조·확인할 것이 멈춥니다).</span></div>';
   const s=k.sync||{};
   const last=s.lastSyncedAt?_pmDate(s.lastSyncedAt):'아직 없음';
   const err=(s.ok===false&&s.error)?`<b style="color:#B24A3A">마지막 확인 실패 — ${esc(s.error)}</b>`:'';
@@ -13618,9 +13683,14 @@ function _pmBankStateHtml(b){
 }
 async function _pmOpenBankPick(i){
   const b=(STATE.pmBatches||[])[i]; if(!b) return;
-  const r=await api('/api/trackb/payment/batch/'+b.id+'/bank');
+  return _pmOpenBankPickById(b.id);
+}
+/** 결정 302 — 최근 30개 목록에 없는 대량이체도 id 로 바로 연다(오늘 확인할 것 · #view=payment&pick=). */
+async function _pmOpenBankPickById(id){
+  if(!id) return;
+  const r=await api('/api/trackb/payment/batch/'+encodeURIComponent(id)+'/bank');
   if(!r||!r.ok){ toast((r&&r.error)||'통장 대조를 불러오지 못했습니다'); return; }
-  STATE.pmBankPick={ index:i, batch:b, data:r, picked:new Set() };
+  STATE.pmBankPick={ batch:{ id:r.batchId||id, seq:r.seq }, data:r, picked:new Set() };
   _pmBankPickRender();
 }
 function _pmBankPickClose(){ const el=document.getElementById('pmBankPickOv'); if(el) el.remove(); STATE.pmBankPick=null; }
@@ -13647,12 +13717,12 @@ function _pmBankPickRender(){
     const already=rows.filter(it=>it.status==='failed').length;
     const head=`<b>${_pmNum(a.amount)}원</b><span>대량이체 ${a.count}명 · 통장 출금 ${a.bank}건${a.refunds?` · 취소로 돌아옴 ${a.refunds}건`:''}</span>`;
     if(a.failures==null){
-      return `<div class="pmbp-grp"><div class="pmbp-hd">${head}<span style="color:#80500F">같은 금액이 통장에 더 많이 찍혀(기록에 없는 줄이 섞임) 누가 받았는지 알 수 없습니다 — 결과 파일을 올려 주세요.</span></div></div>`;
+      return `<div class="pmbp-grp"><div class="pmbp-hd">${head}<span style="color:#80500F">같은 금액이 통장에 더 많이 찍혀(기록에 없는 줄이 섞임) 누가 받았는지 통장만으로는 알 수 없습니다 — 이체한 담당자에게 확인해 주세요.</span></div></div>`;
     }
     const cnt=already+pickedOf(a);
     return `<div class="pmbp-grp"><div class="pmbp-hd">${head}<span style="color:#80500F">통장 기준 <b>${a.failures}명</b>이 못 받았습니다 — 못 받은 사람을 눌러 고르세요 <b>(${cnt}/${a.failures})</b></span></div>
       ${rows.map(it=>it.status==='pending'
-        ? `<button type="button" class="pmbp-row ${st.picked.has(it.id)?'on':''}" onclick="_pmBankPickToggle(${items.indexOf(it)})"><span>${esc(it.reviewerName||'-')}</span><span class="muted">${esc(it.tabName||'')}</span><span class="pmbp-mark"></span></button>`
+        ? `<button type="button" class="pmbp-row ${st.picked.has(it.id)?'on':''}" onclick="_pmBankPickToggle(${items.indexOf(it)})"><span>${esc(it.reviewerName||'-')}</span><span class="muted">${esc(it.tabName||'')}</span>${(it.hints||[]).map(h=>`<span class="pmbp-hint">${esc(h)}</span>`).join('')}<span class="pmbp-mark"></span></button>`
         : `<button type="button" class="pmbp-row" disabled><span>${esc(it.reviewerName||'-')}</span><span class="muted">${esc(it.tabName||'')}</span><span class="pmbp-mark">${it.status==='failed'?'이미 실패로 정함':'이체 완료'}</span></button>`).join('')}
     </div>`;
   }).join('');
@@ -13665,7 +13735,7 @@ function _pmBankPickRender(){
       <div class="pmnote">케이뱅크 통장 ${cl?`${esc(_pmDate(cl.start))} 대량이체 ${cl.rowCount}건 · ${_pmNum(cl.total)}원`:''}과 맞대 봤습니다. 통장에는 받는 사람이 찍히지 않아, 금액이 맞지 않는 사람만 아래에서 확인합니다.</div>
       <div style="font-size:12.5px;margin:8px 0">통장과 맞는 금액: <b>${ok.length}종 · ${okPending}명</b>${okPending?' → 확정하면 이체 완료로 기록됩니다(결과 파일 반영과 같은 기록).':''}</div>
       ${groups||'<div class="muted" style="font-size:12.5px">확인이 필요한 금액이 없습니다.</div>'}
-      <div class="pmnote" style="margin-top:10px">못 받은 사람을 모르겠으면 고르지 말고 확정하세요 — 맞는 사람만 기록되고 나머지는 '확인 필요'로 남습니다. 은행 결과 파일을 올려도 됩니다.</div>
+      <div class="pmnote" style="margin-top:10px">이름 옆 노란 표시는 고르기 힌트입니다(처음 받는 계좌 · 예금주가 리뷰어와 다름 · 예전에 이체 실패 · 같은 날 다른 작업에도 있음). 모르겠으면 고르지 말고 확정하세요 — 맞는 사람만 기록되고 나머지는 '확인 필요'로 남습니다.</div>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px"><button class="btn" onclick="_pmBankPickClose()">취소</button><button class="btn primary" ${okPending||picks.length?'':'disabled'} onclick="_pmBankPickSubmit()">${esc(btnLabel)}</button></div>
     </div></div>`;
 }
@@ -15202,6 +15272,7 @@ function renderHomeView(){
   // 브리핑 줄 — 문의(cs)는 admin 만 조회하므로 AE 에겐 줄 자체를 안 그린다(영원한 '–' 방지, 서버 게이트와 1:1)
   const brow=(v,ic,label,id)=>`<button class="hm-row" onclick="switchView('${v}')"><span>${ic}</span><span class="nm">${label}</span><b class="cnt" id="${id}">–</b></button>`;
   $('#viewroot').innerHTML=`<div class="ovwrap"><div id="hmwrap">
+    <div class="hm-top${isAdmin?' two':''}">
     <div class="hm-hero">
       <div class="hm-hi">${esc(STATE.name||STATE.role||'')}님, 오늘도 좋은 하루 되세요 ☀️</div>
       <div class="hm-sub">${dstr} · 리뷰웹시스템[3버전]이 오늘의 현황을 요약했어요</div>
@@ -15211,6 +15282,8 @@ function renderHomeView(){
         <div class="hm-st"><div class="n" id="hmStToday">?</div><div class="l">오늘 참여 확정</div></div>
         <div class="hm-st"><div class="n hot" id="hmStNeed">?</div><div class="l">확인 필요</div></div>
       </div>
+    </div>
+    ${isAdmin?'<div id="tckHomeMount"></div>':''}
     </div>
     <div id="wblMount"></div>
     <div class="hm-wrap">
@@ -15258,6 +15331,8 @@ async function _homeLoad(){
       // nav 뱃지와 같은 재료(STATE.woCounts)에 실어 같은 함수로 그린다 — 홈 전용 계산 금지
       if(r && r.ok){ STATE.woCounts=r.counts||{}; _woSyncNavBadge(); }
     }),
+    // 결정 302 — 오늘 확인할 것(admin/master · 자리가 있을 때만). typeof 가드 = 블록 단위 vm 추출 가드 관용구.
+    (document.getElementById('tckHomeMount') && typeof _tckLoad==='function') ? _tckLoad() : Promise.resolve(),
   ]);
 }
 /** nav 뱃지 재료 → 홈 타일 뱃지·브리핑 줄·히어로 '확인 필요' 반영. 홈이 안 떠 있으면 no-op. */
@@ -15277,6 +15352,192 @@ function _homeSyncBadges(){
   const el=document.getElementById('hmStNeed'); if(el) el.textContent=known.length?String(known.reduce((a,b)=>a+b,0)):'?';
 }
 /* ══ 홈 끝 ══ */
+/* ══════════════════════════════════════════════════════════════
+   「오늘 확인할 것」 (결정 302 · 사용자 확정 2026-10-27)
+   홈(#tckHomeMount)과 입금관리(#pmTodayChecks)가 **같은 목록·같은 그리기**를 쓴다.
+   첫 종류 = 케이뱅크 대량이체 통장 대조 — ① 통장에서 안 나간 사람 ② 리뷰웹 기록 없이 나간 돈.
+   ★ 숫자는 서버가 계산한 facts · 문장은 서버가 만든 lines(AI 또는 기본 문장) — 화면은 그리기만 한다.
+   ★ onclick 에는 인덱스만(작업명 등 외부 문자열 보간 금지). [바로 가기]는 새 탭(사용자 확정).
+   ══════════════════════════════════════════════════════════════ */
+const TCK_CHOICES=[['direct','리뷰비·페이백 직접 보냄'],['not_reviewer','리뷰어 돈 아님'],['unknown','모르겠음']];
+let _tckBusy=false;
+async function _tckLoad(){
+  if(_tckBusy) return; _tckBusy=true;
+  try{
+    const r=await api('/api/trackb/ops-checks');
+    STATE.tckItems = r && r.ok && Array.isArray(r.items) ? r.items : null;
+    STATE.tckError = r && r.ok ? '' : ((r&&r.error)||'불러오지 못했습니다');
+  }catch(_){ STATE.tckItems=null; STATE.tckError='불러오지 못했습니다'; }
+  finally{ _tckBusy=false; }
+  _tckPaint();
+}
+function _tckPaint(){
+  const home=document.getElementById('tckHomeMount'); if(home) home.innerHTML=_tckHtml('home');
+  _tckSheetRender();
+  const pay=document.getElementById('pmTodayChecks'); if(pay) pay.innerHTML=_tckHtml('payment');
+  // #view=payment&pick= 로 들어왔으면 대량이체를 받은 뒤 한 번만 고르기 창을 연다
+  const pick=STATE.pmPickBatch;
+  if(pay && pick){ STATE.pmPickBatch=''; _pmOpenBankPickById(pick); }
+}
+/* 휴대폰 홈(720px 이하) — 한 건에 한 줄만 보이고, 누르면 아래에서 위로 올라오는 창에 전체 내용(사용자 확정 2026-10-28).
+   같은 칸이 화면에 두 번 그려지지 않게(메모 칸 id 중복 방지) 폭으로 그리기 자체를 고른다 · 폭이 바뀌면 다시 그린다. */
+const _TCK_MQ = (typeof matchMedia==='function') ? matchMedia('(max-width:720px)') : null;
+function _tckCompact(){ return !!(_TCK_MQ && _TCK_MQ.matches); }
+if(_TCK_MQ && _TCK_MQ.addEventListener) _TCK_MQ.addEventListener('change',()=>{ if(!_tckCompact()) _tckSheetClose(); if(STATE.tckItems) _tckPaint(); });
+window.addEventListener('popstate',()=>{ if(STATE.tckSheetId!=null) _tckSheetClose(); });   // 뒤로 가기로 화면을 옮기면 창도 닫는다
+function _tckRowHtml(c,i){
+  const f=c.facts||{}; const bits=[];
+  const miss=(f.short||[]).reduce((n,x)=>n+(Number(x.failures)||0),0);
+  if(miss) bits.push(`통장에 없음 ${_tckNum(miss)}명`);
+  if((f.shortUnknown||[]).length) bits.push('통장만으로 모름');
+  const outs=f.outside||[];
+  if(outs.length){
+    const left=outs.filter(o=>{ const a=(c.answers||{})[o.key]; return !a || a.choice==='unknown'; }).length;
+    bits.push(left ? `답할 것 ${_tckNum(left)}개` : '모두 답함');
+  }
+  return `<button type="button" class="tck-row" onclick="_tckSheetOpen(${i})"><b>${_tckTitle(f)}</b><span class="tck-rs">${esc(bits.join(' · '))}</span><span class="tck-go" aria-hidden="true">›</span></button>`;
+}
+function _tckSheetOpen(i){
+  const c=(STATE.tckView||[])[i]; if(!c) return;
+  STATE.tckSheetId=c.id;
+  _tckSheetRender();
+}
+function _tckSheetClose(){
+  STATE.tckSheetId=null;
+  const el=document.getElementById('tckSheet'); if(el) el.classList.remove('on');
+  document.body.style.overflow='';
+}
+/** 창이 열려 있으면 최신 목록으로 다시 그린다 — 답을 저장하면 목록이 바뀌므로 그때마다 여기로 온다(스크롤 위치는 지킨다) */
+function _tckSheetRender(){
+  if(STATE.tckSheetId==null) return;
+  const list=STATE.tckView||[];
+  const i=list.findIndex(x=>x.id===STATE.tckSheetId);
+  const c=list[i];
+  if(!c || c.status!=='open' || !document.getElementById('tckHomeMount')){ _tckSheetClose(); return; }
+  let el=document.getElementById('tckSheet');
+  if(!el){
+    el=document.createElement('div'); el.id='tckSheet'; el.setAttribute('role','dialog'); el.setAttribute('aria-modal','true');
+    document.body.appendChild(el);
+  }
+  const wasOn=el.classList.contains('on');
+  const prev=el.querySelector('.tck-panel'); const top=prev?prev.scrollTop:0;
+  el.innerHTML=`<div class="tck-bg" onclick="_tckSheetClose()"></div><div class="tck-panel"><div class="tck-grab"></div>
+    <div class="tck-sh"><b>오늘 확인할 것</b><button type="button" class="btn sm" onclick="_tckSheetClose()">닫기</button></div>${_tckCardHtml(c,i,'home')}</div>`;
+  document.body.style.overflow='hidden';
+  if(!wasOn){ void el.offsetHeight; el.classList.add('on'); }   // 처음 열 때만 아래에서 올라온다
+  else el.querySelector('.tck-panel').scrollTop=top;
+}
+function _tckTitle(f){
+  const c=(f&&f.cluster)||{};
+  return f&&f.batch ? `#${esc(String(f.batch.seq))} 대량이체` : `${esc(c.date||'')} ${esc(c.time||'')} 대량이체 (리뷰웹 대량이체와 이어지지 않음)`;
+}
+function _tckSub(f){
+  const c=(f&&f.cluster)||{};
+  return `${esc(c.date||'')} ${esc(c.time||'')} 통장 ${_tckNum(c.rowCount)}건 · ${_tckNum(c.total)}원`;
+}
+function _tckWhen(at){ const d=new Date(at); if(isNaN(d)) return ''; const p=n=>String(n).padStart(2,'0'); return `${d.getMonth()+1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+function _tckNum(n){ return (Number(n)||0).toLocaleString('ko-KR'); }
+function _tckVisible(){
+  const mgr=STATE.tckMgr||'';
+  return (STATE.tckItems||[]).filter(c=>!mgr || c.manager===mgr);
+}
+function _tckHtml(where){
+  if(STATE.tckItems===undefined) return '';
+  if(STATE.tckItems===null) return `<div class="tck-wrap"><div class="tck-hd"><span class="tck-t">오늘 확인할 것</span></div><div class="tck-empty">확인할 것을 불러오지 못했습니다(${esc(STATE.tckError||'')}) — 새로고침해 주세요.</div></div>`;
+  const all=STATE.tckItems;
+  const managers=[...new Set(all.map(c=>c.manager).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ko'));
+  const mgr=STATE.tckMgr||'';
+  const list=_tckVisible();
+  STATE.tckView=list;   // onclick 인덱스의 기준(그릴 때마다 새로)
+  const open=list.filter(c=>c.status==='open');
+  const chip=(v,l)=>`<button type="button" class="tck-mgr ${mgr===v?'on':''}" onclick="_tckSetMgr(${v?managers.indexOf(v):-1})">${esc(l)}</button>`;
+  const head=`<div class="tck-hd"><span class="tck-t">오늘 확인할 것</span>${open.length?`<span class="tck-n">${open.length}</span>`:''}<span class="sp"></span>${managers.length?chip('','전체')+managers.map(m=>chip(m,m)).join(''):''}</div>`;
+  if(!list.length) return `<div class="tck-wrap">${head}<div class="tck-empty">지금 확인할 것이 없습니다.</div></div>`;
+  const compact=where==='home' && _tckCompact();
+  const cards=list.map((c,i)=>c.status==='done'
+    ? `<div class="tck-donerow"><span class="tck-ok">✓ 처리 완료</span><span>${_tckTitle(c.facts)}</span><span class="tck-sub">${esc(c.doneBy||'')}</span></div>`
+    : compact ? _tckRowHtml(c,i) : _tckCardHtml(c,i,where)).join('');
+  return `<div class="tck-wrap">${head}${cards}</div>`;
+}
+function _tckCardHtml(c,i,where){
+  const f=c.facts||{};
+  const outs=f.outside||[];
+  const lineOf=k=>(c.lines||[]).find(l=>l.key===k);
+  const rows=[];
+  const sh=lineOf('short');
+  if(sh) rows.push(`<div class="tck-line"><span class="tck-tx">① ${esc(sh.text)}</span>${where==='payment'
+      ? `<button class="btn sm" onclick="_tckPick(${i})">뺀 사람 고르기</button>`
+      : `<button class="btn sm" onclick="_tckGo(${i})">바로 가기</button>`}</div>`);
+  const su=lineOf('short_unknown');
+  if(su) rows.push(`<div class="tck-line"><span class="tck-tx">${esc(su.text)}</span></div>`);
+  const ot=lineOf('out');
+  if(ot) rows.push(`<div class="tck-line"><span class="tck-tx">${sh?'②':'①'} ${esc(ot.text)}</span></div>`);
+  outs.forEach((o,j)=>{
+    const l=lineOf(o.key); const a=(c.answers||{})[o.key]||null;
+    const btns=TCK_CHOICES.map(([v,lb],k)=>`<button type="button" class="tck-choice ${a&&a.choice===v?'on':''}" onclick="_tckAnswer(${i},${j},${k})">${esc(lb)}</button>`).join('');
+    rows.push(`<div class="tck-line sub"><span class="tck-tx">· ${esc(l?l.text:'')}</span>${btns}
+      <input class="tck-memo" id="tckMemo_${i}_${j}" maxlength="200" placeholder="메모(선택)" value="${esc(a&&a.memo||'')}" onchange="_tckMemo(${i},${j})">
+      ${a?`<span class="tck-by">${esc(a.by||'')} · ${esc(_tckWhen(a.at))} 답함</span>`:''}</div>`);
+  });
+  return `<div class="tck-card"><div class="tck-ch"><b>${_tckTitle(f)}</b><span class="tck-sub">${_tckSub(f)}</span>${c.manager?`<span class="tck-sub">담당 ${esc(c.manager)}</span>`:''}
+      ${c.textSource==='ai'?'<span class="tck-ai" title="문장은 AI가 정리했고, 숫자는 시스템이 계산한 값입니다">AI 정리</span>':''}<span class="sp"></span>
+      <button class="btn sm" onclick="_tckCopy(${i})">메시지 복사</button>${where==='home'&&!sh?`<button class="btn sm" onclick="_tckGo(${i})">바로 가기</button>`:''}</div>${rows.join('')}</div>`;
+}
+function _tckSetMgr(k){
+  const managers=[...new Set((STATE.tckItems||[]).map(c=>c.manager).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ko'));
+  STATE.tckMgr = k>=0 ? (managers[k]||'') : '';
+  _tckPaint();
+}
+/** [바로 가기] — 새 탭으로 입금관리를 연다(사용자 확정). noopener 를 주지 않는다: 새 탭이 이 탭의 로그인(세션)을 이어받아야 한다. */
+function _tckGo(i){
+  const c=(STATE.tckView||[])[i]; if(!c) return;
+  const f=c.facts||{};
+  const url=location.pathname+'#view=payment'+(f.batch&&f.batch.id?'&pick='+encodeURIComponent(f.batch.id):'');
+  const w=window.open(url,'_blank');
+  if(!w) toast('팝업이 차단되었습니다. 브라우저에서 새 탭 열기를 허용해 주세요.');
+}
+/** 입금관리 안에서는 같은 화면의 고르기 창을 바로 연다 */
+function _tckPick(i){
+  const c=(STATE.tckView||[])[i]; if(!c||!c.facts||!c.facts.batch) return;
+  _pmOpenBankPickById(c.facts.batch.id);   // 최근 30개 목록에 없어도 연다(Codex P2)
+}
+async function _tckSave(i,j,choice){
+  const c=(STATE.tckView||[])[i]; const o=c&&((c.facts||{}).outside||[])[j]; if(!o) return;
+  const memoEl=document.getElementById(`tckMemo_${i}_${j}`);
+  const r=await api('/api/trackb/ops-checks/'+c.id+'/answer',{method:'POST',body:JSON.stringify({key:o.key,choice,memo:memoEl?memoEl.value:''})});
+  if(!r||!r.ok){ toast('저장 실패 — '+((r&&r.error)||'다시 시도해 주세요')); return; }
+  const k=(STATE.tckItems||[]).findIndex(x=>x.id===c.id);
+  if(k>=0) STATE.tckItems[k]=r.item;
+  toast(r.item.status==='done'?'답을 저장했습니다 — 이 대량이체는 처리 완료입니다':'답을 저장했습니다');
+  _tckPaint();
+}
+function _tckAnswer(i,j,k){ const ch=TCK_CHOICES[k]; if(ch) _tckSave(i,j,ch[0]); }
+/** 메모만 바꾼 경우 — 이미 고른 답이 있을 때만 저장한다(답 없이 메모만 남기면 처리 상태가 헷갈린다) */
+function _tckMemo(i,j){
+  const c=(STATE.tckView||[])[i]; const o=c&&((c.facts||{}).outside||[])[j]; if(!o) return;
+  const a=(c.answers||{})[o.key];
+  if(a&&a.choice) _tckSave(i,j,a.choice); else toast('먼저 무슨 돈인지 골라 주세요 — 고를 때 메모도 함께 저장됩니다');
+}
+function _tckMessage(c){
+  const f=c.facts||{};
+  const label=v=>(TCK_CHOICES.find(x=>x[0]===v)||[])[1]||'';
+  const out=[`[${f.batch?`#${f.batch.seq} 대량이체`:`${(f.cluster||{}).date||''} ${(f.cluster||{}).time||''} 대량이체`}] 확인 부탁드립니다`];
+  for(const l of (c.lines||[])){
+    const a=(c.answers||{})[l.key];
+    out.push(`- ${l.text}${a?` → ${label(a.choice)}${a.memo?` (${a.memo})`:''}`:''}`);
+  }
+  return out.join('\n');
+}
+async function _tckCopy(i){
+  const c=(STATE.tckView||[])[i]; if(!c) return;
+  const text=_tckMessage(c);
+  try{ await navigator.clipboard.writeText(text); toast('메시지를 복사했습니다'); }
+  catch(_){
+    const ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select();
+    try{ document.execCommand('copy'); toast('메시지를 복사했습니다'); }catch(__){ toast('복사하지 못했습니다'); }
+    ta.remove();
+  }
+}
 /** nav 뱃지 — 모듈이 계산한 미확인 수를 그대로 표시한다(집계 로직 복제 0).
     ★ #csInquiryBadge 를 읽지 않는다: 그 엘리먼트는 관리자 대시보드 탭 버튼에만 있고
       리뷰웹시스템[3버전]엔 없다 → DOM 에서 읽으면 늘 0이 되어 뱃지가 지워진다(실측). */
