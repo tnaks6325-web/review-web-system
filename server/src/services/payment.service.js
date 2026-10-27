@@ -1810,7 +1810,7 @@ async function createBatch({ bank, rows, by }) {
     }
     if (!saved.length) {
       await client.query('ROLLBACK');
-      return { ok: false, error: '담을 수 있는 건이 없습니다(이미 다른 회차에 포함).', skipped };
+      return { ok: false, error: '담을 수 있는 건이 없습니다(이미 다른 대량이체에 포함).', skipped };
     }
     const total = saved.reduce((a, b) => a + b.amount, 0);
     const { rows: [updated] } = await client.query(
@@ -1833,9 +1833,9 @@ async function cancelBatch(batchId, by) {
     await client.query('BEGIN');
     const { rows: [b] } = await client.query(
       `SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE`, [batchId]);
-    if (!b) { await client.query('ROLLBACK'); return { ok: false, error: '회차를 찾을 수 없습니다.' }; }
-    if (b.status === 'cancelled') { await client.query('ROLLBACK'); return { ok: false, error: '이미 취소된 회차입니다.' }; }
-    if (b.status === 'applied') { await client.query('ROLLBACK'); return { ok: false, error: '이미 이체결과가 반영된 회차는 취소할 수 없습니다.' }; }
+    if (!b) { await client.query('ROLLBACK'); return { ok: false, error: '대량이체를 찾을 수 없습니다.' }; }
+    if (b.status === 'cancelled') { await client.query('ROLLBACK'); return { ok: false, error: '이미 취소된 대량이체입니다.' }; }
+    if (b.status === 'applied') { await client.query('ROLLBACK'); return { ok: false, error: '이미 이체결과가 반영된 대량이체는 취소할 수 없습니다.' }; }
     // 입금 기록된 항목이 하나라도 있으면 취소 금지(M2 대비 안전장치)
     const { rows: [{ n }] } = await client.query(
       `SELECT COUNT(*)::int AS n FROM payment_batch_items WHERE batch_id = $1 AND status = 'paid'`, [batchId]);

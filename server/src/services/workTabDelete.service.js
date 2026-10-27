@@ -158,7 +158,7 @@ async function _untouchedReasons(q, sheetId, tabName) {
      지우지 않으면 회차 항목 삭제가 FK 로 튕긴다.
    ★ 회차(`payment_batches`) 자체는 지우지 않는다 — 한 회차가 여러 작업에 걸쳐 있다. */
 const MONEY_TABLES = [
-  { table: 'payment_batch_items', label: '입금 회차 항목' },
+  { table: 'payment_batch_items', label: '대량이체 항목' },
   { table: 'payment_records', label: '입금 원장' },
   { table: 'manual_payment_marks', label: '수기 입금 표기' },
   { table: 'unconfirmed_transfer_reviews', label: '미확인 이체 검토' },
@@ -412,7 +412,7 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, del
       await client.query('ROLLBACK');
       return {
         ok: false, code: 'payment_locked', money,
-        error: '이 작업에는 입금 기록이 걸려 있습니다. 그대로 지우면 그 리뷰어가 미입금으로 보여 다음 회차에 다시 담길 수 있습니다 — 확인 후 [입금 기록까지 삭제]로 진행하세요.',
+        error: '이 작업에는 입금 기록이 걸려 있습니다. 그대로 지우면 그 리뷰어가 미입금으로 보여 다음 대량이체에 다시 담길 수 있습니다 — 확인 후 [입금 기록까지 삭제]로 진행하세요.',
       };
     }
 

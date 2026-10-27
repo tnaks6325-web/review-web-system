@@ -3908,11 +3908,11 @@ router.get('/payment/batch/:id/file', authMiddleware, adminOrMasterMiddleware, a
     const out = await paymentSvc.getBatch(req.params.id, { db: client, lock: true });
     if (!out) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ ok: false, error: '회차를 찾을 수 없습니다.' });
+      return res.status(404).json({ ok: false, error: '대량이체를 찾을 수 없습니다.' });
     }
     if (out.batch.status === 'cancelled') {
       await client.query('ROLLBACK');
-      return res.status(400).json({ ok: false, error: '취소된 회차는 내려받을 수 없습니다.' });
+      return res.status(400).json({ ok: false, error: '취소된 대량이체는 내려받을 수 없습니다.' });
     }
     if (Number(out.batch.downloadCount || 0) === 0) {
       // 검증 대상 제출·검수 행을 잠근 채 파일 생성과 다운로드 기록까지 끝낸다.
@@ -3921,14 +3921,14 @@ router.get('/payment/batch/:id/file', authMiddleware, adminOrMasterMiddleware, a
       if (!receiptCheck.ok) {
         await client.query('ROLLBACK');
         return res.status(409).json({ ok: false, code: 'cash_receipt_not_verified',
-          error: '회차 생성 후 현금영수증 상태가 변경되었습니다. 이 회차를 취소하고 검수 완료 후 새 회차를 만들어 주세요.',
+          error: '대량이체 생성 후 현금영수증 상태가 변경되었습니다. 이 대량이체를 취소하고 검수 완료 후 새 대량이체를 만들어 주세요.',
           blocked: receiptCheck.blocked.map(x => ({ reviewerName: x.reviewerName })) });
       }
       const accountCheck = await paymentSvc.checkBatchAccountSnapshots(out, { db: client });
       if (!accountCheck.ok) {
         await client.query('ROLLBACK');
         return res.status(409).json({ ok: false, code: 'account_snapshot_changed',
-          error: '회차 생성 후 등록 계좌가 변경되었습니다. 이 회차를 취소하고 최신 계좌로 새 회차를 만들어 주세요.',
+          error: '대량이체 생성 후 등록 계좌가 변경되었습니다. 이 대량이체를 취소하고 최신 계좌로 새 대량이체를 만들어 주세요.',
           mismatches: accountCheck.mismatches.map(x => ({ reviewerName: x.reviewerName, accountTail: x.accountTail })) });
       }
     }

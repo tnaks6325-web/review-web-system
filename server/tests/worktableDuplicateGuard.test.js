@@ -601,11 +601,11 @@ function makeStub({ dupRow = null, dupTableRow = null, openSlot = { id: 'p9', se
 
     const wdJ = fs.readFileSync(path.join(__dirname, '../../frontend/workdesk.html'), 'utf8');
     ok('화면이 이체 상태를 한국어로 말한다',
-      /_DD_PAY_LABEL = \{ pending: '이체 대기', paid: '입금완료', failed: '이체 실패', cancelled: '회차 취소' \}/.test(wdJ));
+      /_DD_PAY_LABEL = \{ pending: '이체 대기', paid: '입금완료', failed: '이체 실패', cancelled: '대량이체 취소' \}/.test(wdJ));
     ok('★★ 이중 송금은 빨강으로 못박는다',
       /g\.doublePaid \?[\s\S]{0,200}이미 두 번 나갔을 수 있습니다/.test(wdJ));
     ok('★ 회차에 담긴 적 없는 줄도 그렇게 말한다(빈칸으로 두지 않는다)',
-      /회차에 담긴 적 없음/.test(wdJ));
+      /대량이체에 담긴 적 없음/.test(wdJ));
     ok('★ 조회 실패는 "이체 내역 없음"이 아니라 사유로 말한다',
       /g\.payUnavailable[\s\S]{0,160}불러오지 못했습니다/.test(wdJ));
     ok('실패 사유는 관리자 화면에만(리뷰어 경로 아님)', /st === 'failed' && x\.failReason/.test(wdJ));

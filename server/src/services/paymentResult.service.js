@@ -223,18 +223,18 @@ async function _assertFileBelongsToBatch(b, items, fileRows) {
   for (const v of byBatch.values()) { const n = overlap(v.items); if (!best || n > best.n) best = { seq: v.seq, n }; }
   if (best && best.n * 5 >= rows.length * 4) {
     throw new ResultError('wrong_batch',
-      `이 파일은 #${best.seq} 회차 결과로 보입니다(이 회차와 맞는 줄 ${mine}/${rows.length} · #${best.seq} 회차와 ${best.n}/${rows.length}). #${best.seq} 회차에 올려 주세요.`);
+      `이 파일은 #${best.seq} 대량이체 결과로 보입니다(이 대량이체와 맞는 줄 ${mine}/${rows.length} · #${best.seq} 대량이체와 ${best.n}/${rows.length}). #${best.seq} 대량이체에 올려 주세요.`);
   }
 }
 
 async function _analyze(batchId, fileName, base64) {
-  if (!batchId) throw new ResultError('bad_request', '회차를 지정해 주세요.');
+  if (!batchId) throw new ResultError('bad_request', '대량이체를 지정해 주세요.');
   if (!base64) throw new ResultError('bad_request', '파일이 비어 있습니다.');
   if (String(base64).length > MAX_BASE64) throw new ResultError('too_large', '파일이 너무 큽니다(12MB 초과).');
 
   const { rows: [b] } = await _db().query(`SELECT * FROM payment_batches WHERE id = $1`, [batchId]);
-  if (!b) throw new ResultError('not_found', '회차를 찾을 수 없습니다.');
-  if (b.status === 'cancelled') throw new ResultError('cancelled', '취소된 회차입니다.');
+  if (!b) throw new ResultError('not_found', '대량이체를 찾을 수 없습니다.');
+  if (b.status === 'cancelled') throw new ResultError('cancelled', '취소된 대량이체입니다.');
 
   let buf;
   try { buf = Buffer.from(String(base64), 'base64'); }
@@ -396,7 +396,7 @@ async function autoApplyResultFile({ batchId, fileName, base64, by, notifyFailed
 }
 
 async function getLatestResultPreview(batchId) {
-  if (!batchId) throw new ResultError('bad_request', '회차를 지정해 주세요.');
+  if (!batchId) throw new ResultError('bad_request', '대량이체를 지정해 주세요.');
   const { rows: [row] } = await _db().query(
     `SELECT id, file_name, uploaded_at, applied, file_blob, file_blob IS NOT NULL AS has_file, summary
        FROM payment_result_uploads
@@ -567,7 +567,7 @@ function _unconfirmedWorkboardAccount(rowJson) {
 async function inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, tabName, db = _db() }) {
   const normalizedMemo = _unconfirmedMemo(memo);
   if (!batchId || !uploadId || !normalizedMemo || !sheetId || !tabName) {
-    throw new ResultError('bad_request', '회차·결과파일·통장표시·작업을 모두 선택해 주세요.');
+    throw new ResultError('bad_request', '대량이체·결과파일·통장표시·작업을 모두 선택해 주세요.');
   }
   const { rows: [upload] } = await db.query(
     `SELECT summary, file_blob, file_name FROM payment_result_uploads WHERE id = $1 AND batch_id = $2`, [uploadId, batchId]);
@@ -701,8 +701,8 @@ async function reviewUnconfirmedTransfer({ batchId, uploadId, memo, sheetId, tab
   try {
     await client.query('BEGIN');
     const { rows: [batch] } = await client.query('SELECT id, status FROM payment_batches WHERE id = $1 FOR UPDATE', [batchId]);
-    if (!batch) throw new ResultError('not_found', '이체 회차를 찾을 수 없습니다.');
-    if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 이체 회차는 대조할 수 없습니다.');
+    if (!batch) throw new ResultError('not_found', '대량이체를 찾을 수 없습니다.');
+    if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 대량이체는 대조할 수 없습니다.');
     const match = await inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, tabName, db: client });
     const result = match.results.find(x => Number(x.seq) === Number(resultSeq));
     if (!result) throw new ResultError('not_found', '선택한 이체 결과를 찾을 수 없습니다.');
@@ -731,7 +731,7 @@ async function reviewUnconfirmedTransfer({ batchId, uploadId, memo, sheetId, tab
            중복·수동 검토로 보낸다(fail-closed). */
       const approvedMode = await require('./payment.service').payoutModeLocked(client, sheetId, tabName);
       if (approvedMode === 'split') {
-        throw new ResultError('split_payout_unconfirmed', '제품비 업체 · 리뷰비 우리 작업이라 회차 밖 이체를 입금으로 승인할 수 없습니다 — 그 돈이 제품비인지 리뷰비인지 확인한 뒤 [중복·후속관리]로 처리해 주세요.');
+        throw new ResultError('split_payout_unconfirmed', '제품비 업체 · 리뷰비 우리 작업이라 기록 없는 이체를 입금으로 승인할 수 없습니다 — 그 돈이 제품비인지 리뷰비인지 확인한 뒤 [중복·후속관리]로 처리해 주세요.');
       }
       approvedDepositItem = {
         sheetId, tabName, rowIndex: result.rowIndex,
@@ -819,7 +819,7 @@ async function updateDuplicatePaymentCase({ caseId, caseStatus, ownerName, dueAt
 }
 
 async function listDuplicatePaymentCases({ batchId }) {
-  if (!batchId) throw new ResultError('bad_request', '이체 회차를 선택해 주세요.');
+  if (!batchId) throw new ResultError('bad_request', '대량이체를 선택해 주세요.');
   const { rows } = await _db().query(
     `SELECT c.*, r.result_seq AS "resultSeq", r.memo AS "transferMemo", r.sheet_id AS "sheetId", r.tab_name AS "tabName",
             r.reviewed_at AS "reviewedAt", r.reviewed_by AS "reviewedBy"
@@ -832,7 +832,7 @@ async function listDuplicatePaymentCases({ batchId }) {
 
 async function reconcileAccountMismatch({ batchId, uploadId, itemId, resultSeq, by }) {
   if (!batchId || !uploadId || !itemId || !Number.isInteger(Number(resultSeq))) {
-    throw new ResultError('bad_request', '회차·결과파일·대상 항목·결과 행을 모두 지정해 주세요.');
+    throw new ResultError('bad_request', '대량이체·결과파일·대상 항목·결과 행을 모두 지정해 주세요.');
   }
   const client = await _db().connect();
   let paidItem;
@@ -840,8 +840,8 @@ async function reconcileAccountMismatch({ batchId, uploadId, itemId, resultSeq, 
   try {
     await client.query('BEGIN');
     const { rows: [batch] } = await client.query('SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE', [batchId]);
-    if (!batch) throw new ResultError('not_found', '회차를 찾을 수 없습니다.');
-    if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 회차는 대조할 수 없습니다.');
+    if (!batch) throw new ResultError('not_found', '대량이체를 찾을 수 없습니다.');
+    if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 대량이체는 대조할 수 없습니다.');
     const { rows: [upload] } = await client.query(
       'SELECT summary FROM payment_result_uploads WHERE id = $1 AND batch_id = $2 FOR UPDATE', [uploadId, batchId]);
     const outside = upload && upload.summary && upload.summary.preview && upload.summary.preview.unmatchedResults;
@@ -852,7 +852,7 @@ async function reconcileAccountMismatch({ batchId, uploadId, itemId, resultSeq, 
     const { rows: batchItems } = await client.query(
       'SELECT * FROM payment_batch_items WHERE batch_id = $1 FOR UPDATE', [batchId]);
     const row = batchItems.find(x => String(x.id) === String(itemId));
-    if (!row) throw new ResultError('not_found', '회차 대상 항목을 찾을 수 없습니다.');
+    if (!row) throw new ResultError('not_found', '대량이체 대상 항목을 찾을 수 없습니다.');
     const item = _itemView(row);
     const { rows: [paidState] } = await client.query(
       `SELECT ri.is_submitted2 AS "isSubmitted2",
@@ -945,7 +945,7 @@ async function reconcileAccountMismatch({ batchId, uploadId, itemId, resultSeq, 
 async function reconcileAmountMismatch({ batchId, uploadId, itemId, resultSeq, note, by }) {
   const reviewNote = _reviewText(note);
   if (!batchId || !uploadId || !itemId || !Number.isInteger(Number(resultSeq))) {
-    throw new ResultError('bad_request', '회차·결과파일·대상 항목·결과 행을 모두 지정해 주세요.');
+    throw new ResultError('bad_request', '대량이체·결과파일·대상 항목·결과 행을 모두 지정해 주세요.');
   }
   if (!reviewNote) throw new ResultError('bad_request', '금액 조정 승인 사유를 입력해 주세요.');
   const client = await _db().connect();
@@ -955,8 +955,8 @@ async function reconcileAmountMismatch({ batchId, uploadId, itemId, resultSeq, n
   try {
     await client.query('BEGIN');
     const { rows: [batch] } = await client.query('SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE', [batchId]);
-    if (!batch) throw new ResultError('not_found', '회차를 찾을 수 없습니다.');
-    if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 회차는 대조할 수 없습니다.');
+    if (!batch) throw new ResultError('not_found', '대량이체를 찾을 수 없습니다.');
+    if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 대량이체는 대조할 수 없습니다.');
     const { rows: [upload] } = await client.query(
       'SELECT summary, file_blob, file_name FROM payment_result_uploads WHERE id = $1 AND batch_id = $2 FOR UPDATE', [uploadId, batchId]);
     const outside = upload && upload.summary && upload.summary.preview && upload.summary.preview.unmatchedResults;
@@ -967,7 +967,7 @@ async function reconcileAmountMismatch({ batchId, uploadId, itemId, resultSeq, n
     const { rows: batchItems } = await client.query(
       'SELECT * FROM payment_batch_items WHERE batch_id = $1 FOR UPDATE', [batchId]);
     const row = batchItems.find(x => String(x.id) === String(itemId));
-    if (!row) throw new ResultError('not_found', '회차 대상 항목을 찾을 수 없습니다.');
+    if (!row) throw new ResultError('not_found', '대량이체 대상 항목을 찾을 수 없습니다.');
     const displayedAmounts = await loadWorkboardAmounts(client, batchItems.map(item => ({
       sheetId: item.sheet_id, tabName: item.tab_name, rowIndex: item.row_index,
     })));
@@ -1145,8 +1145,8 @@ async function _commitBatchOutcome({ batchId, by, notifyFailed, duplicateSha = n
     // 회차 행 잠금 — 동시에 두 사람이 같은 회차에 파일을 올리거나 통장 확정이 겹치는 경합 차단
     const { rows: [b] } = await client.query(
       `SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE`, [batchId]);
-    if (!b) throw new ResultError('not_found', '회차를 찾을 수 없습니다.');
-    if (b.status === 'cancelled') throw new ResultError('cancelled', '취소된 회차입니다.');
+    if (!b) throw new ResultError('not_found', '대량이체를 찾을 수 없습니다.');
+    if (b.status === 'cancelled') throw new ResultError('cancelled', '취소된 대량이체입니다.');
 
     for (const p of paid) {
       const it = p.item;
@@ -1262,7 +1262,7 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
   // 해당 항목은 failed 가 되어 다음 이체 회차 후보에 다시 포함된다.
   const notInFile = a.pairs.filter(p => !p.result);
   if (!success.length && !failed.length && !notInFile.length) {
-    throw new ResultError('empty', '이 회차에 반영할 결과가 없습니다(결과 파일과 짝지어진 건이 0건입니다).');
+    throw new ResultError('empty', '이 대량이체에 반영할 결과가 없습니다(결과 파일과 짝지어진 건이 0건입니다).');
   }
 
   const fileUpload = async (client, { paidCount, remaining }) => {
@@ -1336,8 +1336,8 @@ async function markBatchApplied({ batchId, by }) {
     await client.query('BEGIN');
     const { rows: [batch] } = await client.query(
       'SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE', [batchId]);
-    if (!batch) throw new ResultError('not_found', '회차를 찾을 수 없습니다.');
-    if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 회차는 적용완료로 처리할 수 없습니다.');
+    if (!batch) throw new ResultError('not_found', '대량이체를 찾을 수 없습니다.');
+    if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 대량이체는 적용완료로 처리할 수 없습니다.');
 
     const { rows: [{ n: appliedItems }] } = await client.query(
       `SELECT COUNT(*)::int AS n FROM payment_batch_items
@@ -1373,8 +1373,8 @@ async function backfillPaidDepositStamp({ batchId, by }) {
     await client.query('BEGIN');
     const { rows: [batch] } = await client.query(
       'SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE', [batchId]);
-    if (!batch) throw new ResultError('not_found', '회차를 찾을 수 없습니다.');
-    if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 회차에는 입금일을 기록할 수 없습니다.');
+    if (!batch) throw new ResultError('not_found', '대량이체를 찾을 수 없습니다.');
+    if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 대량이체에는 입금일을 기록할 수 없습니다.');
     const { rows } = await client.query(
       `SELECT i.sheet_id, i.tab_name, i.row_index, i.paid_at, i.product_price, i.review_fee, i.amount,
               COALESCE(p.sheet_id, i.sheet_id) AS target_sheet_id,
@@ -1465,8 +1465,8 @@ async function confirmOutstandingFailures({ batchId, by }) {
     await client.query('BEGIN');
     const { rows: [batch] } = await client.query(
       'SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE', [batchId]);
-    if (!batch) throw new ResultError('not_found', '회차를 찾을 수 없습니다.');
-    if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 회차는 실패 처리할 수 없습니다.');
+    if (!batch) throw new ResultError('not_found', '대량이체를 찾을 수 없습니다.');
+    if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 대량이체는 실패 처리할 수 없습니다.');
     const { rows: pending } = await client.query(
       `SELECT id FROM payment_batch_items
         WHERE batch_id = $1 AND status = 'pending' FOR UPDATE`, [batchId]);
