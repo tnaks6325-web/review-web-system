@@ -48,7 +48,8 @@ const roi = require('../src/services/reviewerOrderIdentity.service');
 {
   const g = read('server/src/services/gemini.service.js');
   assert.ok(/메모\(문서\) 모양 아이콘과 함께 배송메모를 보여 준다/.test(g) && /아이콘 \+ "00" 이면 deliveryMemo="00"/.test(g), 'Naver icon-only memo line is the delivery memo');
-  assert.ok(/배송지 카드 밖의 글이나 아이콘 없는 줄은 넣지 않는다/.test(g), 'kept narrow');
+  assert.ok(/라벨이 있으면 아이콘이 없어도 그 글을 그대로 옮긴다/.test(g), 'labelled memos (Coupang) still read — the icon rule only adds (실측: 아이콘 문구가 라벨 글을 지운 회귀)');
+  assert.ok(/라벨도 아이콘도 없는 배송지 카드 밖의 글은 넣지 않는다/.test(g), 'kept narrow');
   assert.ok(/const EXTRACT_CACHE_VERSION = 'extract([6-9]|[1-9]\d+)';/.test(g), 'cache prefix bumped (old cache holds blank memos)');
 }
 
