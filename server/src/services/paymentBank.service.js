@@ -420,9 +420,49 @@ function outsideTransfers(rows, paid, pendingClusters = [], now = Date.now()) {
   return { count, sum, held, days: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)) };
 }
 
+/**
+ * 결정 302 — 「뺀 사람 고르기」 힌트(무료 · 우리 기록만). 계좌 조회(유료)는 하지 않는다.
+ *   firstAccount = 이 계좌로 다른 대량이체에서 받은 적 없음 · failedBefore = 이 계좌로 이체 실패한 적 있음
+ *   holderDiff = 예금주가 리뷰어 이름과 다름 · multiJob = 같은 대량이체에 같은 계좌가 또 있음(다른 작업)
+ * ★ 계좌번호는 돌려주지 않는다(화면에 PII 를 늘리지 않는다) · 조회 실패 = 힌트 없음(고르기는 그대로 된다).
+ */
+async function itemHints(batchId, itemIds) {
+  const ids = (itemIds || []).map(String).filter(Boolean);
+  if (!batchId || !ids.length) return {};
+  const { rows } = await _db().query(
+    `WITH t AS (
+       SELECT id, batch_id, regexp_replace(COALESCE(bank_account, ''), '\\D', '', 'g') AS acc,
+              regexp_replace(COALESCE(reviewer_name, ''), '\\s', '', 'g') AS nm,
+              regexp_replace(COALESCE(account_holder, ''), '\\s', '', 'g') AS holder
+         FROM payment_batch_items WHERE batch_id = $1 AND id::text = ANY($2::text[])),
+     h AS (
+       SELECT p.id, p.batch_id, p.status, regexp_replace(COALESCE(p.bank_account, ''), '\\D', '', 'g') AS acc
+         FROM payment_batch_items p
+        WHERE regexp_replace(COALESCE(p.bank_account, ''), '\\D', '', 'g') IN (SELECT acc FROM t WHERE acc <> ''))
+     SELECT t.id::text AS id,
+            (t.acc <> '' AND NOT EXISTS (SELECT 1 FROM h WHERE h.acc = t.acc AND h.status = 'paid' AND h.batch_id <> t.batch_id)) AS first_account,
+            EXISTS (SELECT 1 FROM h WHERE h.acc = t.acc AND h.status = 'failed' AND h.id <> t.id) AS failed_before,
+            (t.holder <> '' AND t.nm <> '' AND t.holder <> t.nm) AS holder_diff,
+            EXISTS (SELECT 1 FROM h WHERE h.acc = t.acc AND h.batch_id = t.batch_id AND h.id <> t.id) AS multi_job
+       FROM t`, [batchId, ids]);
+  const out = {};
+  for (const r of rows) {
+    const tags = [];
+    if (r.first_account) tags.push('처음 받는 계좌');
+    if (r.holder_diff) tags.push('예금주가 리뷰어와 다름');
+    if (r.failed_before) tags.push('예전에 이체 실패');
+    if (r.multi_job) tags.push('같은 날 다른 작업에도 있음');
+    out[r.id] = tags;
+  }
+  return out;
+}
+
 module.exports = {
   BANK_STATUS, BankError,
   relayConfig, toBankRow, parseTradeDT, depositStampOf, clusterBulk, reconcileBatch, planConfirm, outsideTransfers,
-  inspectBatch, confirmBatchFromBank, syncBank, bankOverview,
+  inspectBatch, confirmBatchFromBank, syncBank, bankOverview, itemHints,
+  // 결정 302 — 「오늘 확인할 것」(opsCheck.service)이 같은 재료·같은 기준을 쓴다(사본 금지)
+  loadRows: (...a) => _loadRows(...a),
+  TIMING: { SYNC_DAYS, SETTLE_MS, REFUND_WINDOW_MS, CLAIM_SLACK_MS, FIND_WINDOW_MS },
   __setPoolForTest, __setFetchForTest,
 };

@@ -46,7 +46,8 @@ ok('renderOwnershipView 가 pendingAdv 를 소비해 보던 업체 패널을 복
   /if\(STATE\.pendingAdv\)\{[\s\S]{0,240}selAdv\(ix,\{nav:!!pa\.__nav\}\); return;/.test(src));
 ok('STATE 에 pendingAdv 초기값이 있다', /pendingTab:null, pendingAdv:null/.test(src));
 ok('부팅은 딥링크보다 낮은 우선순위로 같은 계정의 이력을 복원한다',
-  /if\(!_GO && _VIEW!=='logs' && _navCanRestore\(history\.state\)\) _navRestoreState\(history\.state\);/.test(src));
+  // 결정 302 — #view=payment(오늘 확인할 것 [바로 가기])도 딥링크라 이력 복원보다 먼저다(검사 의미 불변: 딥링크 > 이력)
+  /if\(!_GO && _VIEW!=='logs' && _VIEW!=='payment' && _navCanRestore\(history\.state\)\) _navRestoreState\(history\.state\);/.test(src));
 
 /* ── B. 히스토리 항목 ↔ 실제 화면 일치(어긋나면 뒤로/앞으로가 없던 화면을 되살린다) ── */
 ok('★ renderWorkdeskView: 열 작업 예약이 없으면 STATE.cur 를 비운다(본문이 "작업 선택" 안내로 뜨므로)',

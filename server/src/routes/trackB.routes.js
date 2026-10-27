@@ -4093,6 +4093,8 @@ router.get('/payment/bank', authMiddleware, adminOrMasterMiddleware, async (req,
 router.post('/payment/bank/sync', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const sync = await paymentBankSvc.syncBank({ by: _by(req), force: !!(req.body && req.body.force) });
+    // 결정 302 — 통장을 받은 뒤 「오늘 확인할 것」을 맞춘다. 실패해도 통장 받기 응답은 그대로(fail-soft).
+    if (sync && sync.ok) await _refreshOpsChecks(_by(req));
     res.json({ ...(await paymentBankSvc.bankOverview()), syncResult: sync });
   } catch (err) { _bankErr(err, res, next); }
 });
@@ -4100,7 +4102,12 @@ router.post('/payment/bank/sync', authMiddleware, adminOrMasterMiddleware, async
 router.get('/payment/batch/:id/bank', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const rec = await paymentBankSvc.inspectBatch(req.params.id);
-    const items = (rec.items || []).map(i => ({ id: i.id, reviewerName: i.reviewerName, tabName: i.tabName, amount: i.amount, status: i.status }));
+    // 결정 302 — '확인 필요' 금액의 처리 전 줄에만 무료 힌트(우리 기록만 · 계좌번호는 싣지 않는다 · 실패 = 힌트 없음)
+    const needAmounts = new Set((rec.amounts || []).filter(a => a.failures > 0).map(a => a.amount));
+    const hintIds = (rec.items || []).filter(i => needAmounts.has(i.amount) && i.status === 'pending').map(i => i.id);
+    const hints = await paymentBankSvc.itemHints(req.params.id, hintIds).catch(e => { logger.warn(`[payment] 고르기 힌트 실패: ${e.message}`); return {}; });
+    const items = (rec.items || []).map(i => ({ id: i.id, reviewerName: i.reviewerName, tabName: i.tabName, amount: i.amount, status: i.status,
+      hints: hints[String(i.id)] || [] }));
     res.json({ ok: true, batchId: rec.batchId, seq: rec.seq, state: rec.state, cluster: rec.cluster || null, outside: rec.outside || null,
       amounts: (rec.amounts || []).map(({ paidTimes, ...x }) => x), items });
   } catch (err) { _bankErr(err, res, next); }
@@ -4109,12 +4116,36 @@ router.get('/payment/batch/:id/bank', authMiddleware, adminOrMasterMiddleware, a
 router.post('/payment/batch/:id/bank-confirm', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const b = req.body || {};
-    res.json(await paymentBankSvc.confirmBatchFromBank({
+    const out = await paymentBankSvc.confirmBatchFromBank({
       batchId: req.params.id, by: _by(req),
       failedItemIds: Array.isArray(b.failedItemIds) ? b.failedItemIds.map(String).slice(0, 500) : [],
       notifyFailed: b.notifyFailed !== false,
-    }));
+    });
+    await _refreshOpsChecks(_by(req));   // 결정 302 — 뺀 사람을 고르면 그 「확인할 것」 줄이 바로 접힌다
+    res.json(out);
   } catch (err) { _bankErr(err, res, next); }
+});
+
+/* ── 「오늘 확인할 것」 (결정 302) — 홈·입금관리가 같은 목록을 쓴다. 입금관리와 같은 권한(admin/master). ── */
+const opsCheckSvc = require('../services/opsCheck.service');
+async function _refreshOpsChecks(by) {
+  try { await opsCheckSvc.refreshBankChecks({ by }); }
+  catch (e) { logger.warn(`[opsCheck] 확인할 것 갱신 실패(통장·확정은 그대로): ${e.message}`); }
+}
+router.get('/ops-checks', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json({ ok: true, items: await opsCheckSvc.listChecks({}) }); } catch (err) { next(err); }
+});
+router.post('/ops-checks/:id/answer', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: '잘못된 요청입니다.' });
+    const b = req.body || {};
+    const item = await opsCheckSvc.answerCheck({ id, key: String(b.key || ''), choice: String(b.choice || ''), memo: b.memo, by: _by(req) });
+    res.json({ ok: true, item });
+  } catch (err) {
+    if (err instanceof opsCheckSvc.OpsCheckError) return res.status(err.code === 'not_found' ? 404 : 400).json({ ok: false, code: err.code, error: err.message });
+    next(err);
+  }
 });
 
 router.get('/payment/batch/:id/result-preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {

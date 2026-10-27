@@ -177,6 +177,7 @@ const REQUIRED_SCHEMA = [
 const REQUIRED_TABLES = [
   'payment_bank_rows',                            // 203 — 입금 통장 자동 대조(결정 293 · 없으면 입금관리 통장 확인이 죽는다)
   'payment_bank_sync',                            // 203 — 통장 받아 온 기록(같은 결정)
+  'ops_checks',                                   // 205 — 오늘 확인할 것(결정 302)
   'campaign_qty_tiers',                           // 202 — 참여 게이트·이름 바꾸기 tx·합치기가 읽는다(결정 289 · 없으면 참여·공고 저장이 죽는다)
   'campaign_option_soldout_reports',              // 184 — 리뷰어 품절 신고(상품 이름 바꾸기 tx 가 함께 고친다 — 없으면 공고 저장이 죽는다)
   'campaign_option_alerts',                       // 184 — 관리자 전원 품절 알림
