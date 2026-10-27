@@ -553,6 +553,37 @@ function startCronJobs() {
     }
   }, { timezone: 'Asia/Seoul' });
 
+  // ── 입금 통장 자동 받기(사용자 확정 2026-10-28 · 결정 304): 5분마다 '받을 때인지'만 본다 ──
+  //   이체 파일 다운로드 뒤 1시간 안 = 5분마다 · 1~2시간 = 30분마다 · 그 뒤 = 안 받는다(팝빌은 조금만).
+  //   받은 뒤 회차 자동 확정(맞는 사람만) + 「오늘 확인할 것」 갱신. 은행마다 3분 칸 잡기가 있어 화면 받기와 겹쳐도 한 번만 받는다.
+  if (process.env.PAYMENT_BANK_AUTO_SYNC !== '0') {
+    let bankAutoRunning = false;
+    cron.schedule(process.env.PAYMENT_BANK_AUTO_SYNC_SCHEDULE || '2-59/5 * * * *', async () => {
+      if (bankAutoRunning) return;
+      bankAutoRunning = true;
+      try {
+        const { withJobLock } = require('../utils/jobLock');
+        const paymentBank = require('../services/paymentBank.service');
+        const r = await withJobLock('payment_bank_auto_sync', () => paymentBank.autoSync());
+        if (r && r.ran) {
+          const s = r.sync || {};
+          if (s.ok || s.anyOk) {
+            try { await require('../services/opsCheck.service').refreshBankChecks({ by: '자동' }); }
+            catch (e) { logger.warn(`[CRON-BankAutoSync] 확인할 것 갱신 실패(통장·확정은 그대로): ${e.message}`); }
+          }
+          const auto = s.autoConfirmed || [];
+          logger.info(`[CRON-BankAutoSync] banks=${r.banks.join(',')} ok=${!!s.ok}${s.error ? ` error=${s.error}` : ''} `
+            + `confirmed=${auto.map(a => `#${a.seq}:${a.applied}`).join(',') || '0'}`);
+        }
+      } catch (err) {
+        logger.error(`[CRON-BankAutoSync] ${err.message}`);
+        logAbnormal({ flow: 'cron', step: 'payment_bank_auto_sync', error: err, context: { job: 'payment_bank_auto_sync' } });
+      } finally {
+        bankAutoRunning = false;
+      }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
   // ── 리뷰 미작성 알림톡: 기본 OFF, KST 10~18시 매시 ──
   // 공급자 최종 성공(4000)만 회차로 세며, 3회 성공 뒤 final_due_at이 지나야 별도 상태로 종결한다.
   // 일일 상한은 서비스에서 다시 적용된다. 롤링배포 중복 실행은 advisory lock으로 막는다.
@@ -574,7 +605,7 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
-  logger.info(`[CRON] 스케줄러 등록 완료: 큐워커=30초(작업보드 반영), 자동복구=매시간, 정리=매일03시, 이상로그정리=매일03시30분, 홀드스윕=매분, 리뷰알림=${process.env.REVIEW_REMINDER_ENABLED === '1' ? 'ON' : 'OFF'}`);
+  logger.info(`[CRON] 스케줄러 등록 완료: 큐워커=30초(작업보드 반영), 자동복구=매시간, 정리=매일03시, 이상로그정리=매일03시30분, 홀드스윕=매분, 통장자동받기=${process.env.PAYMENT_BANK_AUTO_SYNC !== '0' ? 'ON' : 'OFF'}, 리뷰알림=${process.env.REVIEW_REMINDER_ENABLED === '1' ? 'ON' : 'OFF'}`);
 }
 
 module.exports = { startCronJobs };

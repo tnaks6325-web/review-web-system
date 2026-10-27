@@ -39,6 +39,9 @@ const ROWS = [
   [6, '라통장', '010-2000-0006', '7900'],
   [7, '마통장', '010-2000-0007', '3000'],
   [8, '바통장', '010-2000-0008', '3000'],   // [7] 하나은행 회차
+  [9, '사통장', '010-2000-0009', '4500'],   // [8] 자동 받기 — 빠진 사람이 있는 회차
+  [10, '아통장', '010-2000-0001', '4500'],
+  [11, '자통장', '010-2000-0002', '2500'],
 ];
 const NOW = Date.now();
 const MIN = 60 * 1000;
@@ -195,6 +198,42 @@ const items = async (batchId) => (await pool.query(
       && ov7.banks[1].settleMinutes === 30 && ov7.outside === ov7.banks[0].outside, ov7.banks.map(b => [b.bank, b.outside]));
     ok('케이뱅크 3,000원은 케이뱅크 기록 없이 나간 돈 · 하나 3,000원은 회차가 가져감', ov7.banks[0].outside.days.length >= 1
       && ov7.banks[1].outside.count === 0, ov7.banks.map(b => b.outside));
+
+    console.log('\n[8] 자동 받기 — 다운로드 뒤 서버가 스스로 받고, 빠진 사람이 섞인 금액만 남긴다(결정 304)');
+    const T8 = NOW - 30 * MIN;
+    const b8 = await makeBatch(T8 - 5 * MIN, [9, 10, 11]);
+    await pool.query(`UPDATE payment_batches SET last_downloaded_at = $2, download_count = 1 WHERE id = $1`, [b8.id, iso(T8 - 4 * MIN)]);
+    await pool.query(`INSERT INTO payment_bank_sync (bank) VALUES ('kbank') ON CONFLICT (bank) DO NOTHING`);
+    await pool.query(`UPDATE payment_bank_sync SET last_synced_at = NULL WHERE bank IN ('kbank','hana')`);
+    const kst = ms => new Date(ms + 9 * 3600 * 1000).toISOString().replace(/\D/g, '').slice(0, 14);
+    const calls = [];
+    bank.__setFetchForTest(async (url, init) => {
+      calls.push(url + ' ' + ((init && init.body) || ''));
+      if (url.endsWith('/api/bank/accounts')) return { status: 200, ok: true, json: async () => ({ accounts: [{ bankCode: '0089', accountNumber: '700' }, { bankCode: '0081', accountNumber: '402' }] }) };
+      return { status: 200, ok: true, json: async () => ({ success: true, allPages: true, truncated: false, list: [
+        { tradeDT: kst(T8), tradeAmt: 4500, tran_type: 'withdraw', remark1: '대량이체', remark3: '대량이체', tid: 'banktest-q1', balance: 1 },
+        { tradeDT: kst(T8 + 10 * 1000), tradeAmt: 2500, tran_type: 'withdraw', remark1: '대량이체', remark3: '대량이체', tid: 'banktest-q2', balance: 1 },
+      ] }) };
+    });
+    const env8 = { POPBILL_RELAY_URL: 'http://relay.test' };
+    const a8 = await bank.autoSync({ now: NOW, env: env8 });
+    ok('다운로드 30분 뒤 · 처음 = 케이뱅크만 받는다(하나은행 회차 없음)', a8.ran && a8.banks.join(',') === 'kbank'
+      && calls.filter(c => /bank\/collect/.test(c)).length === 1 && /0089/.test(calls.find(c => /bank\/collect/.test(c))), { a8, calls });
+    const auto8 = (a8.sync.autoConfirmed || []).find(x => x.batchId === b8.id);
+    ok('빠진 사람이 있어도 맞는 2,500원은 자동 완료 · 4,500원 둘은 남김', auto8 && auto8.applied === 1 && auto8.remaining === 2, a8.sync.autoConfirmed);
+    const it8 = await items(b8.id);
+    ok('사·아 = 확인 필요(pending) · 자 = 이체 완료', it8.find(i => i.row_index === 11).status === 'paid'
+      && it8.filter(i => i.status === 'pending').map(i => i.row_index).join(',') === '9,10', it8);
+    const { rows: up8 } = await pool.query(`SELECT uploaded_by, success_count FROM payment_result_uploads WHERE batch_id=$1`, [b8.id]);
+    ok('기록 줄 = 통장 자동확인(자동)', up8.length === 1 && /통장 자동확인\(자동\)/.test(up8[0].uploaded_by) && up8[0].success_count === 1, up8);
+    calls.length = 0;
+    await pool.query(`UPDATE payment_bank_sync SET last_synced_at = NULL WHERE bank = 'kbank'`);
+    const a8b = await bank.autoSync({ now: NOW, env: env8 });
+    ok('★ 한 번 확정한 회차는 더 받지 않는다(남은 건 사람이 고를 것뿐)', !a8b.ran && calls.length === 0, { a8b, calls });
+    const rec8 = await bank.inspectBatch(b8.id);
+    ok('남은 4,500원 = 통장 기준 1명 못 받음 → 뺀 사람 고르기', rec8.state === 'review'
+      && rec8.amounts.find(x => x.amount === 4500).failures === 1, rec8.amounts);
+    bank.__setFetchForTest(null);
   } catch (e) {
     console.error(e); fail++;
   } finally {
