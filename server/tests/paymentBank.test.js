@@ -274,6 +274,58 @@ const item = (id, amount, status = 'pending', resultStatus = '') => ({ id, amoun
     assert.match(read('migrations/203_payment_bank_rows.sql'), /PRIMARY KEY \(bank, tid\)/);
   });
 
+  console.log('§8 자동 받기·자동 확정(결정 304)');
+  await t('8a 다운로드 뒤 1시간 안 5분 · 1~2시간 30분 · 2시간 뒤 안 받음', () => {
+    const { autoSyncGap } = bank;
+    assert.strictEqual(autoSyncGap(0), 5 * MIN);
+    assert.strictEqual(autoSyncGap(59 * MIN), 5 * MIN);
+    assert.strictEqual(autoSyncGap(60 * MIN), 30 * MIN);
+    assert.strictEqual(autoSyncGap(119 * MIN), 30 * MIN);
+    assert.strictEqual(autoSyncGap(120 * MIN), null);
+    assert.strictEqual(autoSyncGap(-1), null, '미래 시각(시계 어긋남)은 받지 않는다');
+    assert.strictEqual(autoSyncGap(NaN), null);
+  });
+  await t('8b 받을 은행 — 마지막 받은 지 간격(1분 여유)이 지났거나 한 번도 안 받은 은행만', () => {
+    const { autoSyncDue } = bank;
+    const now = T;
+    const rows = [{ bank: 'kbank', downloadedAt: now - 10 * MIN }, { bank: 'hana', downloadedAt: now - 70 * MIN }];
+    assert.deepStrictEqual(autoSyncDue(rows, { kbank: now - 4 * MIN - 1000, hana: now - 29 * MIN - 1000 }, now), ['kbank', 'hana'], '5분 크론이 몇 초 늦어도 건너뛰지 않는다');
+    assert.deepStrictEqual(autoSyncDue(rows, { kbank: now - 2 * MIN, hana: now - 20 * MIN }, now), []);
+    assert.deepStrictEqual(autoSyncDue(rows, {}, now), ['kbank', 'hana']);
+    assert.deepStrictEqual(autoSyncDue([{ bank: 'kbank', downloadedAt: now - 3 * 3600 * 1000 }], {}, now), [], '2시간 지나면 안 받는다');
+  });
+  await t('8c ★ 자동 확정은 고르지 않는다 — 건수가 안 맞는 금액은 거부 대신 남기고 다른 금액은 완료', () => {
+    const r = reconcileBatch({ batch, items: [item('a', 9800), item('b', 9800), item('c', 3000)],
+      rows: [row(9800, T), row(3000, T + 1000)], now: T + 20 * MIN });
+    // b 는 이미 실패로 정했는데 통장 부족은 1 — 맞음 → a 완료 / 건수 어긋남(이미 실패 2명인데 부족 1)은 자동이면 남긴다
+    const its2 = [item('a', 9800), item('b', 9800, 'failed', '통장 확인: 실패'), item('c', 3000)];
+    assert.deepStrictEqual(planConfirm(r, its2, [], { auto: true }).paid.map(x => x.item.id).sort(), ['a', 'c']);
+    const r3 = reconcileBatch({ batch, items: [item('a', 9800), item('b', 9800), item('d', 9800), item('c', 3000)],
+      rows: [row(9800, T), row(3000, T + 1000)], now: T + 20 * MIN });
+    const its3 = [item('a', 9800), item('b', 9800, 'failed', '통장 확인: 실패'), item('d', 9800), item('c', 3000)];
+    assert.throws(() => planConfirm(r3, its3, []), e => e.code === 'pick_count', '사람이 누르면 종전대로 거부');
+    const p = planConfirm(r3, its3, [], { auto: true });
+    assert.deepStrictEqual(p.paid.map(x => x.item.id), ['c']);
+    assert.strictEqual(p.unresolved[0].amount, 9800);
+  });
+  await t('8d 자동 확정 대상 = clean + review(맞는 금액만) · 크론은 다운로드 기준 자동 받기를 건다', () => {
+    const src = read('src/services/paymentBank.service.js');
+    assert.ok(/rec\.state !== 'clean' && rec\.state !== 'review'/.test(src));
+    assert.ok(/by: `통장 자동확인[\s\S]{0,40}, auto: true \}\)/.test(src));
+    assert.ok(/MAX\(b\.last_downloaded_at\)/.test(src), '기준 = 다운로드 시각');
+    const cron = read('src/jobs/cron.js');
+    assert.ok(/withJobLock\('payment_bank_auto_sync', \(\) => paymentBank\.autoSync\(\)\)/.test(cron));
+    assert.ok(/refreshBankChecks\(\{ by: '자동' \}\)/.test(cron), '받은 뒤 오늘 확인할 것 갱신');
+  });
+  await t('8e 입금관리 1분 재확인은 읽기만(통장 받기 호출 없음)', () => {
+    const html = fs.readFileSync(path.join(ROOT, '..', 'frontend', 'workdesk.html'), 'utf8');
+    const m = html.match(/async function _pmBankPoll\(\)\{[\s\S]*?\n\}/);
+    assert.ok(m, '_pmBankPoll 있음');
+    assert.ok(!/bank\/sync/.test(m[0]), '팝빌을 부르는 받기 주소를 쓰지 않는다');
+    assert.ok(/STATE\.view!=='payment' \|\| document\.visibilityState!=='visible'/.test(m[0]), '다른 화면·숨은 탭이면 쉰다');
+    assert.ok(/_pmBankPollStart\(\);\n  await _pmLoad\(\);/.test(html));
+  });
+
   console.log('§7 다른 회차 결과 파일 막기');
   const result = require('../src/services/paymentResult.service');
   await t('7a ★ 이 회차와 절반도 안 맞고 다른 회차와 80% 이상 맞으면 거부 · 두 회차 섞인 파일은 통과', async () => {

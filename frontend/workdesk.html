@@ -12905,6 +12905,7 @@ async function renderPaymentView(){
   $('#viewroot').innerHTML=`<div class="ovwrap"><div id="pmhead"></div><div id="pmbody"><div class="empty">불러오는 중…</div></div></div>`;
   STATE.pmExcluded = STATE.pmExcluded || {};   // {key:true} = 이번 회차에서 뺀 건
   STATE.pmSub = STATE.pmSub || 'targets';      // 서브탭 — 입금 대상·회차 / 🏦 은행 이름
+  _pmBankPollStart();
   await _pmLoad();
 }
 
@@ -13607,6 +13608,31 @@ async function _pmBankRefresh(force){
   if(reload) return _pmLoad(true);
   _pmBankPaint();
   if(typeof _tckLoad==='function') _tckLoad();   // 결정 302 — 통장을 받은 뒤 확인할 것(서버가 sync 직후 맞춘 목록)
+}
+/* 결정 304 — 입금관리를 열어 둔 동안 1분마다 다시 본다. 통장은 서버가 스스로 받으므로(이체 파일 다운로드 뒤 2시간)
+   여기서는 서버가 이미 맞춘 결과만 읽는다(팝빌을 부르지 않는다). 대량이체 상태가 바뀌었으면 목록을 다시 불러
+   '이체 완료'로 바뀐 것을 보인다. 다른 화면·숨은 탭·통장 대조 창이 열린 동안은 쉰다. */
+const PM_BANK_POLL_MS=60000;
+let _pmBankPollTimer=null;
+function _pmBankSig(k){ return ((k&&k.batches)||[]).map(b=>`${b.batchId}:${b.state}:${b.pending}`).join('|'); }
+function _pmBankPollStart(){
+  if(_pmBankPollTimer) return;
+  _pmBankPollTimer=setInterval(_pmBankPoll, PM_BANK_POLL_MS);
+}
+async function _pmBankPoll(){
+  if(STATE.view!=='payment' || document.visibilityState!=='visible') return;
+  if(_pmBankBusy || _pmLoadInFlight || STATE.pmBankPick || !STATE.pmBank || STATE.pmBank.error) return;
+  _pmBankBusy=true;
+  let changed=false;
+  try{
+    const r=await api('/api/trackb/payment/bank');
+    if(!r || !r.ok || STATE.view!=='payment') return;
+    changed=_pmBankSig(r)!==_pmBankSig(STATE.pmBank);
+    STATE.pmBank=r;
+  }catch(_){ return; }
+  finally{ _pmBankBusy=false; }
+  if(changed){ STATE.pmBankSyncAt=Date.now(); return _pmLoad(true); }   // 서버가 방금 받았다 — 다시 불러도 통장은 또 받지 않는다
+  const bar=document.getElementById('pmBankBar'); if(bar) bar.innerHTML=_pmBankBarHtml();
 }
 // 결정 296 — 입금관리 맨 위 상품구입비 게이지. 숫자는 인트라넷 리뷰 페이백 장부가 계산한 그대로(여기서 다시 계산하지 않는다).
 //   상품구입비 총액(계약) − 리뷰웹으로 돌려준 상품값 − 기록 없이 나간 돈 = 남은 상품구입비

@@ -172,8 +172,9 @@ function reconcileBatch({ batch, items, rows, claimedTimes = [], now = Date.now(
 /**
  * 확정 계획 — reconcileBatch 결과 + 직접 고른 실패자 → paid / failed 목록.
  * failedItemIds 는 '확인 필요' 금액마다 정확히 failures 건이어야 한다(이미 실패로 정한 건 포함). 틀리면 거부.
+ * auto(자동 확정)는 아무도 고르지 않는다 — 건수가 안 맞는 금액은 거부 대신 그 금액만 남긴다(다른 금액의 완료를 막지 않게).
  */
-function planConfirm(rec, items, failedItemIds = []) {
+function planConfirm(rec, items, failedItemIds = [], { auto = false } = {}) {
   const byId = new Map(items.map(it => [String(it.id), it]));
   const picked = new Set((failedItemIds || []).map(String));
   for (const id of picked) {
@@ -197,6 +198,7 @@ function planConfirm(rec, items, failedItemIds = []) {
     const chosen = pending.filter(it => picked.has(String(it.id)));
     if (!chosen.length && !already) { unresolved.push({ amount: row.amount, reason: 'pick', failures: row.failures }); continue; }
     if (already + chosen.length !== row.failures) {
+      if (auto && !chosen.length) { unresolved.push({ amount: row.amount, reason: 'pick', failures: row.failures }); continue; }
       throw new BankError('pick_count', `${row.amount.toLocaleString('ko-KR')}원은 통장 기준 ${row.failures}명이 못 받았습니다. ${row.failures}명을 골라 주세요(지금 ${already + chosen.length}명).`);
     }
     chosen.forEach(it => failed.push({ item: it }));
@@ -254,7 +256,7 @@ async function inspectBatch(batchId, { now = Date.now() } = {}) {
  * 통장으로 확정 — 'clean' 이면 전부, 'review' 면 맞는 금액만(+ 직접 고른 실패자가 있으면 그 금액도).
  * 기록은 결과 파일 반영과 같은 경로(_commitBatchOutcome).
  */
-async function confirmBatchFromBank({ batchId, by, failedItemIds = [], notifyFailed }) {
+async function confirmBatchFromBank({ batchId, by, failedItemIds = [], notifyFailed, auto = false }) {
   const rec = await inspectBatch(batchId);
   if (!['clean', 'review'].includes(rec.state)) {
     const msg = {
@@ -266,7 +268,7 @@ async function confirmBatchFromBank({ batchId, by, failedItemIds = [], notifyFai
     }[rec.state] || '통장으로 확인할 수 없는 대량이체입니다.';
     throw new BankError(rec.state, msg);
   }
-  const plan = planConfirm(rec, rec.items, failedItemIds);
+  const plan = planConfirm(rec, rec.items, failedItemIds, { auto });
   if (!plan.paid.length && !plan.failed.length) {
     return { ok: true, state: rec.state, applied: 0, failed: 0, unresolved: plan.unresolved, remaining: rec.items.filter(i => i.status === 'pending').length };
   }
@@ -371,19 +373,22 @@ async function _syncOne(cfg, bank, { by, force, now }, getAccounts) {
 }
 
 /**
- * 통장 받기(은행마다 3분에 한 번) + 깨끗한 회차 자동 확정. force 면 3분 제한을 무시한다(버튼).
+ * 통장 받기(은행마다 3분에 한 번) + 회차 자동 확정. force 면 3분 제한을 무시한다(버튼). banks 를 주면 그 은행만 받는다(자동 받기).
+ * 자동 확정 = 'clean' 은 전부 · 'review' 는 통장과 맞는 금액의 사람만(사용자 확정 2026-10-28 「빠진 사람만 제외하면 적용」) —
+ *   빠진 사람이 섞인 금액 묶음은 그대로 '확인 필요'로 남아 담당자가 고른다(통장에 받는 사람이 안 찍혀 누군지 모른다).
  * ★ 은행은 서로 막지 않는다 — 한 은행이 실패해도 다른 은행은 받고 확정한다. 실패한 은행의 회차는 자동 확정하지 않는다.
  *   ok = 모든 은행이 받았거나 건너뜀 · 실패한 은행이 있으면 ok=false + code/error 는 첫 실패(케이뱅크 먼저).
  */
-async function syncBank({ by, force = false, now = Date.now(), env = process.env } = {}) {
+async function syncBank({ by, force = false, now = Date.now(), env = process.env, banks: only = null } = {}) {
   const cfg = relayConfig(env);
   if (!cfg) return { ok: false, code: 'not_configured', error: '통장 연결 설정이 없습니다(POPBILL_RELAY_URL).' };
+  const ids = only ? BANK_IDS.filter(bk => only.includes(bk)) : BANK_IDS;
   let accounts = null;
   const getAccounts = async () => (accounts = accounts || _relayAccounts(cfg));
   const banks = {};
-  for (const bank of BANK_IDS) banks[bank] = await _syncOne(cfg, bank, { by, force, now }, getAccounts);
-  const okBanks = BANK_IDS.filter(bk => banks[bk].ok);
-  // 깨끗한 회차 자동 확정 — 받기에 성공한(또는 3분 안에 이미 받은) 은행의 최근 7일 회차 중 처리 안 된 건이 있는 것
+  for (const bank of ids) banks[bank] = await _syncOne(cfg, bank, { by, force, now }, getAccounts);
+  const okBanks = ids.filter(bk => banks[bk].ok);
+  // 회차 자동 확정 — 받기에 성공한(또는 3분 안에 이미 받은) 은행의 최근 7일 회차 중 처리 안 된 건이 있는 것
   const { rows: open } = okBanks.length ? await _db().query(
     `SELECT b.id FROM payment_batches b
       WHERE b.bank = ANY($1::text[]) AND b.status <> 'cancelled' AND b.created_at >= $2
@@ -394,21 +399,68 @@ async function syncBank({ by, force = false, now = Date.now(), env = process.env
   for (const { id } of open) {
     try {
       const rec = await inspectBatch(id, { now });
-      if (rec.state !== 'clean') continue;
-      const r = await confirmBatchFromBank({ batchId: id, by: `통장 자동확인${by ? `(${by})` : ''}` });
-      if (r.applied) autoConfirmed.push({ batchId: id, seq: rec.seq, applied: r.applied });
+      if (rec.state !== 'clean' && rec.state !== 'review') continue;
+      const r = await confirmBatchFromBank({ batchId: id, by: `통장 자동확인${by ? `(${by})` : ''}`, auto: true });
+      if (r.applied) autoConfirmed.push({ batchId: id, seq: rec.seq, applied: r.applied, remaining: r.remaining || 0 });
     } catch (e) { logger.warn(`[paymentBank] 자동 확정 건너뜀(${id}): ${e.message}`); }
   }
-  const failed = BANK_IDS.filter(bk => !banks[bk].ok);
-  const fetchedList = BANK_IDS.map(bk => banks[bk].fetched).filter(n => n != null);
+  const failed = ids.filter(bk => !banks[bk].ok);
+  const fetchedList = ids.map(bk => banks[bk].fetched).filter(n => n != null);
   return {
     ok: !failed.length,
     ...(failed.length ? { code: banks[failed[0]].code, error: failed.map(bk => `${BANKS[bk].label}: ${banks[bk].error}`).join(' / ') } : {}),
     fetched: fetchedList.length ? fetchedList.reduce((x, y) => x + y, 0) : null,
-    skipped: BANK_IDS.every(bk => banks[bk].skipped),
+    skipped: ids.every(bk => banks[bk].skipped),
     anyOk: okBanks.length > 0,
     banks, autoConfirmed,
   };
+}
+
+/* ── 자동 받기(사용자 확정 2026-10-28) ─────────────────────
+ * 화면을 안 열어도 이체 파일을 받은 뒤 서버가 스스로 통장을 받는다 — 팝빌은 조금만 부른다.
+ *   다운로드 뒤 1시간 안 = 5분마다 · 1~2시간 = 30분마다 · 2시간 뒤 = 안 받는다(입금관리를 열면 그때 받는다).
+ * 기준 = 그 은행 대량이체 중 처리 안 된 건이 있는 것의 가장 최근 다운로드 시각. 다시 받으면 다시 2시간.
+ * 일찍 멈춤 = 다 처리됐거나, 한 번 확정(맞는 사람 완료)·결과 파일 반영이 된 회차는 기준에서 빠진다.
+ * (인트라넷 통장 기록을 신호로 쓰지 않는 이유: 인트라넷은 정기 작업이 없어 사람이 열 때만 받는다 — 시점이 사람에 달린다.) */
+const AUTO_SYNC_STEPS = [
+  { untilMs: 60 * 60 * 1000, gapMs: 5 * 60 * 1000 },
+  { untilMs: 120 * 60 * 1000, gapMs: 30 * 60 * 1000 },
+];
+const AUTO_SYNC_SLACK_MS = 60 * 1000;   // 5분 크론이 몇 초 늦게 돌아도 한 번을 건너뛰지 않게
+function autoSyncGap(sinceDownloadMs) {
+  if (!(sinceDownloadMs >= 0)) return null;
+  const step = AUTO_SYNC_STEPS.find(s => sinceDownloadMs < s.untilMs);
+  return step ? step.gapMs : null;
+}
+/** 지금 받아야 할 은행 — 순수 계산(다운로드 시각·마지막 받은 시각). */
+function autoSyncDue(rows, syncs, now = Date.now()) {
+  const due = [];
+  for (const r of rows) {
+    const gap = autoSyncGap(now - Number(r.downloadedAt));
+    if (gap == null) continue;
+    const last = syncs[r.bank] == null ? null : Number(syncs[r.bank]);
+    if (last == null || now - last >= gap - AUTO_SYNC_SLACK_MS) due.push(r.bank);
+  }
+  return due;
+}
+async function autoSync({ now = Date.now(), env = process.env } = {}) {
+  const since = new Date(now - AUTO_SYNC_STEPS[AUTO_SYNC_STEPS.length - 1].untilMs).toISOString();
+  const { rows } = await _db().query(
+    `SELECT b.bank, (EXTRACT(EPOCH FROM MAX(b.last_downloaded_at)) * 1000)::bigint AS dl
+       FROM payment_batches b
+      WHERE b.bank = ANY($1::text[]) AND b.status <> 'cancelled' AND b.last_downloaded_at >= $2
+        AND EXISTS (SELECT 1 FROM payment_batch_items i WHERE i.batch_id = b.id AND i.status = 'pending')
+        -- 한 번이라도 통장 확정·결과 파일 반영이 된 회차는 더 받지 않는다(남은 건 = 사람이 고를 '확인 필요'뿐 · 통장을 더 받아도 안 바뀐다)
+        AND NOT EXISTS (SELECT 1 FROM payment_result_uploads u WHERE u.batch_id = b.id AND u.applied)
+      GROUP BY b.bank`, [BANK_IDS, since]);
+  if (!rows.length) return { ran: false, banks: [] };
+  const { rows: s } = await _db().query(
+    `SELECT bank, (EXTRACT(EPOCH FROM last_synced_at) * 1000)::bigint AS at FROM payment_bank_sync WHERE bank = ANY($1::text[])`, [BANK_IDS]);
+  const syncs = Object.fromEntries(s.map(x => [x.bank, x.at == null ? null : Number(x.at)]));
+  const due = autoSyncDue(rows.map(r => ({ bank: r.bank, downloadedAt: Number(r.dl) })), syncs, now);
+  if (!due.length) return { ran: false, banks: [] };
+  const sync = await syncBank({ by: '자동', now, env, banks: due });
+  return { ran: true, banks: due, sync };
 }
 
 /** 한 은행의 통장 상태 + 회차 밖으로 나간 돈 + 처리 안 된 회차별 대조. */
@@ -531,6 +583,7 @@ async function itemHints(batchId, itemIds) {
 }
 
 module.exports = {
+  autoSyncGap, autoSyncDue, autoSync, AUTO_SYNC_STEPS,
   BANK_STATUS, BankError, BANKS, BANK_IDS,
   relayConfig, toBankRow, parseTradeDT, _markHanaRefunds, depositStampOf, clusterBulk, reconcileBatch, planConfirm, outsideTransfers,
   inspectBatch, confirmBatchFromBank, syncBank, bankOverview, itemHints,
