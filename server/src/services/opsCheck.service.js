@@ -3,7 +3,7 @@
  * 「오늘 확인할 것」 (결정 302 · 사용자 확정 2026-10-27)
  *
  * 사람이 답해야 하는 일을 한곳(ops_checks)에 모은다. 홈과 입금관리가 같은 목록을 보여 준다.
- * 첫 종류 = 케이뱅크 대량이체 통장 대조 — 묶음(같은 시각에 이어 찍힌 대량이체 출금)마다
+ * 첫 종류 = 케이뱅크·하나은행(결정 303) 대량이체 통장 대조 — 묶음(같은 시각에 이어 찍힌 대량이체 출금)마다
  *   ① 통장에서 안 나간 사람(대량이체에 있는데 통장에 그 금액이 모자람) — 직원이 [뺀 사람 고르기]로 답한다
  *   ② 리뷰웹 기록 없이 같이 나간 돈(금액 묶음별) — 직원이 「무슨 돈인가」를 골라 답한다
  *
@@ -53,7 +53,7 @@ function _kst(ms) {
  * @param {Map<number,string[]>} p.feeWorks   리뷰비만 보내는 작업(금액 → 작업명들) — 추정 재료
  * @param {number} p.refundWindowMs
  */
-function buildClusterFacts({ cluster, rows, openRec, batch, paidElsewhere = [], feeWorks = new Map(), refundWindowMs }) {
+function buildClusterFacts({ cluster, rows, openRec, batch, paidElsewhere = [], feeWorks = new Map(), refundWindowMs, bank = 'kbank' }) {
   const left = _countBy(cluster.rows, r => Number(r.amount));
   const take = (a, n) => { const v = left.get(a) || 0; left.set(a, Math.max(0, v - n)); };
   const short = []; const shortUnknown = [];
@@ -80,6 +80,8 @@ function buildClusterFacts({ cluster, rows, openRec, batch, paidElsewhere = [], 
     });
   const t = _kst(cluster.start);
   return {
+    // 케이뱅크는 bank 칸을 싣지 않는다 — 기존 확인거리의 사실(해시)이 바뀌어 문장을 다시 만들지 않게(결정 303)
+    ...(bank !== 'kbank' ? { bank } : {}),
     cluster: { start: cluster.start, end: cluster.end, rowCount: cluster.rows.length,
       total: cluster.rows.reduce((s, r) => s + Number(r.amount), 0), date: t.md, time: t.hm },
     batch: batch ? { id: String(batch.id), seq: Number(batch.seq), createdBy: String(batch.createdBy || '') } : null,
@@ -162,6 +164,7 @@ function validateAiLines(f, lines) {
 /** AI 에 보내는 사실 — 리뷰어 이름·계좌는 원래 facts 에 없다. id·시각 숫자는 뺀다. */
 function _factsForAi(f) {
   return {
+    ...(f.bank === 'hana' ? { 통장: '하나은행' } : {}),
     대량이체: f.batch ? `#${f.batch.seq}` : '리뷰웹 대량이체와 이어지지 않은 묶음',
     통장묶음: { 날짜: f.cluster.date, 시각: f.cluster.time, 건수: f.cluster.rowCount, 합계: f.cluster.total },
     통장에서_안나간사람: f.short.map(x => ({ 작업: x.jobs, 금액: x.amount, 안나간사람: x.failures, 대량이체건수: x.count, 통장건수: x.bank, 취소로돌아옴: x.refunds })),
@@ -237,20 +240,26 @@ async function _feeWorksByAmount(amounts) {
   return map;
 }
 
-/** 최근 7일 케이뱅크 대량이체 묶음마다 사실을 만든다(쓰기 없음). */
+/** 최근 7일 대량이체 묶음마다 사실을 만든다(쓰기 없음) — 은행마다 따로(묶음·회차는 같은 은행끼리만 맞댄다). */
 async function collectBankFacts({ now = Date.now() } = {}) {
   const bank = require('./paymentBank.service');
-  const { SYNC_DAYS, SETTLE_MS, REFUND_WINDOW_MS, CLAIM_SLACK_MS } = bank.TIMING;
+  const out = [];
+  for (const bk of bank.BANK_IDS) out.push(...await _collectBankFactsOne(bank, bk, now));
+  return out;
+}
+async function _collectBankFactsOne(bank, bk, now) {
+  const { SYNC_DAYS, REFUND_WINDOW_MS, CLAIM_SLACK_MS } = bank.TIMING;
+  const settleMs = bank.BANKS[bk].settleMs;
   const fromMs = Math.max(SINCE_MS, now - SYNC_DAYS * 24 * 3600 * 1000);
-  const rows = await bank.loadRows(fromMs - 3600 * 1000, now);
-  const clusters = bank.clusterBulk(rows).filter(c => c.start >= fromMs && now >= c.end + SETTLE_MS);
+  const rows = await bank.loadRows(bk, fromMs - 3600 * 1000, now);
+  const clusters = bank.clusterBulk(rows).filter(c => c.start >= fromMs && now >= c.end + settleMs);
   if (!clusters.length) return [];
   // 처리 전 대량이체 — 어느 묶음을 차지했는지(reconcileBatch 와 같은 기준)
   const { rows: open } = await _db().query(
     `SELECT b.id, b.seq, b.created_by FROM payment_batches b
-      WHERE b.bank = 'kbank' AND b.status <> 'cancelled' AND b.created_at >= $1
+      WHERE b.bank = $2 AND b.status <> 'cancelled' AND b.created_at >= $1
         AND EXISTS (SELECT 1 FROM payment_batch_items i WHERE i.batch_id = b.id AND i.status = 'pending')
-      ORDER BY b.created_at`, [new Date(fromMs - 3 * 24 * 3600 * 1000).toISOString()]);
+      ORDER BY b.created_at`, [new Date(fromMs - 3 * 24 * 3600 * 1000).toISOString(), bk]);
   const openRecs = [];
   for (const b of open) {
     try {
@@ -261,8 +270,8 @@ async function collectBankFacts({ now = Date.now() } = {}) {
   const { rows: paid } = await _db().query(
     `SELECT i.batch_id, b.seq, b.created_by, i.amount, (EXTRACT(EPOCH FROM i.paid_at) * 1000)::bigint AS at
        FROM payment_batch_items i JOIN payment_batches b ON b.id = i.batch_id
-      WHERE b.bank = 'kbank' AND i.status = 'paid' AND i.paid_at >= $1`,
-    [new Date(fromMs - 3600 * 1000).toISOString()]);
+      WHERE b.bank = $2 AND i.status = 'paid' AND i.paid_at >= $1`,
+    [new Date(fromMs - 3600 * 1000).toISOString(), bk]);
   const outsideAmounts = [];
   const pre = clusters.map(c => {
     const own = openRecs.find(o => o.rec.cluster.start === c.start) || null;
@@ -279,10 +288,13 @@ async function collectBankFacts({ now = Date.now() } = {}) {
   });
   const feeWorks = await _feeWorksByAmount(outsideAmounts);
   return pre.map(({ c, own, inWin, batch }) => buildClusterFacts({
-    cluster: c, rows, openRec: own ? { ...own.rec } : null, batch,
+    cluster: c, rows, openRec: own ? { ...own.rec } : null, batch, bank: bk,
     paidElsewhere: inWin.map(p => ({ amount: Number(p.amount) })), feeWorks, refundWindowMs: REFUND_WINDOW_MS,
   }));
 }
+
+/** 확인거리 열쇠 — 케이뱅크는 예전 그대로(이미 쌓인 줄과 이어지게), 다른 은행은 은행 이름을 붙인다(같은 시각 묶음이 겹치지 않게). */
+function refKeyOf(f) { return f.bank && f.bank !== 'kbank' ? `${KIND_BANK}:${f.bank}:${f.cluster.start}` : `${KIND_BANK}:${f.cluster.start}`; }
 
 /**
  * 통장 받은 뒤 부른다 — 묶음마다 확인거리를 만들거나 고친다. 사실이 같으면 문장을 다시 만들지 않는다(AI 호출 최소).
@@ -292,7 +304,7 @@ async function refreshBankChecks({ now = Date.now(), by = '' } = {}) {
   const all = await collectBankFacts({ now });
   const out = { created: 0, updated: 0, done: 0 };
   for (const f of all) {
-    const ref = `${KIND_BANK}:${f.cluster.start}`;
+    const ref = refKeyOf(f);
     const { rows: [cur] } = await _db().query(`SELECT * FROM ops_checks WHERE ref_key = $1`, [ref]);
     if (!cur && !hasWork(f)) continue;
     const hash = factsHash(f);
@@ -383,6 +395,6 @@ async function answerCheck({ id, key, choice, memo, by }) {
 module.exports = {
   KIND_BANK, CHOICES, SINCE_MS, OpsCheckError,
   buildClusterFacts, hasWork, expectedKeys, fallbackLines, validateAiLines, allowedNumbers, isDone, writeLines,
-  collectBankFacts, refreshBankChecks, listChecks, answerCheck,
+  collectBankFacts, refreshBankChecks, listChecks, answerCheck, refKeyOf,
   __setPoolForTest, __setGenerateForTest,
 };

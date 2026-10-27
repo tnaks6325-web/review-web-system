@@ -108,5 +108,12 @@ const facts = oc.buildClusterFacts({
     oc.__setGenerateForTest(null);
     assert.ok(sent && !/이름\d/.test(sent) && !/계좌번호/.test(sent));
   });
+  await t('⑥ 하나은행(결정 303) — 사실에 은행이 실리고 열쇠가 따로 · 케이뱅크는 예전 그대로(문장 다시 만들지 않음)', () => {
+    assert.ok(!('bank' in facts), '케이뱅크 사실에는 bank 칸이 없다');
+    assert.strictEqual(oc.refKeyOf(facts), `bank_cluster:${START}`);
+    const h = oc.buildClusterFacts({ cluster, rows: cluster.rows, openRec: null, batch: null, refundWindowMs: 0, bank: 'hana' });
+    assert.strictEqual(h.bank, 'hana');
+    assert.strictEqual(oc.refKeyOf(h), `bank_cluster:hana:${START}`);
+  });
   console.log(`opsCheck: ${pass} passed`);
 })().catch(e => { console.error(e); process.exit(1); });

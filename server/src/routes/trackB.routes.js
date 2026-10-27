@@ -4070,7 +4070,7 @@ router.post('/payment/batch/:id/result-auto-apply', authMiddleware, adminOrMaste
   } catch (err) { _resultErr(err, res, next); }
 });
 
-// ── 통장 자동 대조(결정 293) — 케이뱅크 거래내역으로 회차를 확정한다. 기록은 결과 파일 반영과 같은 경로. ──
+// ── 통장 자동 대조(결정 293 · 하나은행 결정 303) — 케이뱅크·하나은행 거래내역으로 회차를 확정한다. 기록은 결과 파일 반영과 같은 경로. ──
 const paymentBankSvc = require('../services/paymentBank.service');
 function _bankErr(err, res, next) {
   if (err && err.code === '42P01') {
@@ -4094,7 +4094,8 @@ router.post('/payment/bank/sync', authMiddleware, adminOrMasterMiddleware, async
   try {
     const sync = await paymentBankSvc.syncBank({ by: _by(req), force: !!(req.body && req.body.force) });
     // 결정 302 — 통장을 받은 뒤 「오늘 확인할 것」을 맞춘다. 실패해도 통장 받기 응답은 그대로(fail-soft).
-    if (sync && sync.ok) await _refreshOpsChecks(_by(req));
+    // 결정 303 — 한 은행만 받았어도(다른 은행 실패) 받은 은행 몫은 맞춘다.
+    if (sync && (sync.ok || sync.anyOk)) await _refreshOpsChecks(_by(req));
     res.json({ ...(await paymentBankSvc.bankOverview()), syncResult: sync });
   } catch (err) { _bankErr(err, res, next); }
 });
@@ -4108,7 +4109,7 @@ router.get('/payment/batch/:id/bank', authMiddleware, adminOrMasterMiddleware, a
     const hints = await paymentBankSvc.itemHints(req.params.id, hintIds).catch(e => { logger.warn(`[payment] 고르기 힌트 실패: ${e.message}`); return {}; });
     const items = (rec.items || []).map(i => ({ id: i.id, reviewerName: i.reviewerName, tabName: i.tabName, amount: i.amount, status: i.status,
       hints: hints[String(i.id)] || [] }));
-    res.json({ ok: true, batchId: rec.batchId, seq: rec.seq, state: rec.state, cluster: rec.cluster || null, outside: rec.outside || null,
+    res.json({ ok: true, batchId: rec.batchId, seq: rec.seq, bank: rec.bank || null, state: rec.state, cluster: rec.cluster || null, outside: rec.outside || null,
       amounts: (rec.amounts || []).map(({ paidTimes, ...x }) => x), items });
   } catch (err) { _bankErr(err, res, next); }
 });

@@ -150,13 +150,15 @@ const item = (id, amount, status = 'pending', resultStatus = '') => ({ id, amoun
       connect: async () => ({ query: async (sql) => { queries.push(sql); return { rows: [] }; }, release() {} }),
     };
     bank.__setPoolForTest(stubPool);
+    const hanaReply = { success: true, allPages: true, truncated: false, list: [] };
     let reply = { success: true, allPages: true, truncated: false, list: [
       { tradeDT: '20261026123901', tradeAmt: 5980, tran_type: 'withdraw', remark1: '대량이체', remark3: '대량이체', tid: 'k1', balance: 1 },
       { tradeDT: '20261026130000', tradeAmt: 30000, tran_type: 'withdraw', remark1: '홍길동', remark3: '즉시이체', tid: 'k2', balance: 2 },
     ] };
     bank.__setFetchForTest(async (url, init) => {
       calls.push({ url, key: init && init.headers && init.headers['X-Relay-Key'], body: init && init.body });
-      if (url.endsWith('/api/bank/accounts')) return { status: 200, ok: true, json: async () => ({ accounts: [{ bankCode: '0089', accountNumber: '700' }] }) };
+      if (url.endsWith('/api/bank/accounts')) return { status: 200, ok: true, json: async () => ({ accounts: [{ bankCode: '0089', accountNumber: '700' }, { bankCode: '0081', accountNumber: '402' }] }) };
+      if (JSON.parse(init.body).bankCode === '0081') return { status: 200, ok: true, json: async () => hanaReply };
       if (reply.__status) return { status: reply.__status, ok: false, json: async () => reply };
       return { status: 200, ok: true, json: async () => reply };
     });
@@ -168,6 +170,9 @@ const item = (id, amount, status = 'pending', resultStatus = '') => ({ id, amoun
     assert.strictEqual(JSON.parse(calls[1].body).allPages, true);
     const inserts = queries.filter(q => /INSERT INTO payment_bank_rows/.test(q));
     assert.strictEqual(inserts.length, 2);
+    assert.strictEqual(JSON.parse(calls[2].body).bankCode, '0081', '하나은행도 받는다');
+    assert.strictEqual(calls.filter(c => c.url.endsWith('/api/bank/accounts')).length, 1, '계좌 목록은 한 번만');
+    calls.length = 0;
     for (const [bad, code] of [[{ success: true, allPages: true, truncated: true, list: [] }, 'truncated'],
       [{ success: true, list: [] }, 'relay_old'], [{ __status: 202 }, 'collecting'], [{ __status: 401, error: 'no_key' }, 'relay_failed']]) {
       reply = bad; queries.length = 0;
@@ -175,6 +180,61 @@ const item = (id, amount, status = 'pending', resultStatus = '') => ({ id, amoun
       assert.strictEqual(x.code, code, JSON.stringify(x));
       assert.ok(!queries.some(q => /INSERT INTO payment_bank_rows/.test(q)), code + ' 이면 저장하지 않는다');
     }
+    bank.__setPoolForTest(null); bank.__setFetchForTest(null);
+  });
+
+  console.log('§5h 하나은행(결정 303)');
+  await t('5h-1 하나은행 줄 — 타행송금·당행송금 = 대량이체 출금 · 이름이 반환 같은 입금 = 반환 · 나머지 입금 = 기타', () => {
+    const o = toBankRow({ tradeDT: '20261019145300', tradeAmt: 2000, tradeType: 'O', remark1: '홍길동', remark2: '인터넷뱅킹', remark3: '타행송금', tid: 'H1' }, 'hana');
+    const o2 = toBankRow({ tradeDT: '20261019145300', tradeAmt: 2000, tradeType: 'O', remark3: '당행송금', tid: 'H2' }, 'hana');
+    const back = toBankRow({ tradeDT: '20261019150000', tradeAmt: 2000, tradeType: 'I', remark3: '이체불능반환', tid: 'H3' }, 'hana');
+    const dep = toBankRow({ tradeDT: '20261013155600', tradeAmt: 1768000, tradeType: 'I', remark3: '대체', tid: 'H4' }, 'hana');
+    assert.deepStrictEqual([o.kind, o2.kind, back.kind, dep.kind], ['bulk_out', 'bulk_out', 'refund_in', 'other_in']);
+    assert.ok(!('remark1' in o) && !JSON.stringify(o).includes('홍길동'), '이름은 버린다');
+    // 케이뱅크 규칙은 그대로(하나 기준이 섞이지 않는다)
+    assert.strictEqual(toBankRow({ tradeDT: '20261019145300', tradeAmt: 2000, tradeType: 'O', remark3: '타행송금', tid: 'K' }).kind, 'other_out');
+  });
+  await t('5h-2 ★ 하나은행 — 출금 뒤 30분 안에 같은 금액으로 들어온 돈은 반환으로 본다(한 줄에 한 번) → 그 금액은 확인 필요', () => {
+    const rows = [
+      { tid: 'a', at: T, amount: 2000, kind: 'bulk_out' }, { tid: 'b', at: T, amount: 2000, kind: 'bulk_out' },
+      { tid: 'c', at: T + 5 * MIN, amount: 2000, kind: 'other_in' },
+      { tid: 'd', at: T + 6 * MIN, amount: 2000, kind: 'other_in' }, { tid: 'e', at: T + 7 * MIN, amount: 2000, kind: 'other_in' },
+      { tid: 'f', at: T + 50 * MIN, amount: 7000, kind: 'other_in' },
+    ];
+    bank._markHanaRefunds(rows);
+    assert.deepStrictEqual(rows.map(r => r.kind), ['bulk_out', 'bulk_out', 'refund_in', 'refund_in', 'other_in', 'other_in']);
+    const items = [{ id: 1, amount: 2000, status: 'pending' }, { id: 2, amount: 2000, status: 'pending' }];
+    const rec = reconcileBatch({ batch: { createdAt: T - MIN }, items, rows, now: T + 120 * MIN, settleMs: bank.BANKS.hana.settleMs });
+    assert.strictEqual(rec.state, 'review');
+    assert.strictEqual(rec.amounts[0].failures, 2);
+  });
+  await t('5h-3 하나은행은 묶음 끝 30분 전에는 확정하지 않는다(실패 반환 모양 실측 없음)', () => {
+    const rows = [{ at: T, amount: 2000, kind: 'bulk_out' }];
+    const items = [{ id: 1, amount: 2000, status: 'pending' }];
+    assert.strictEqual(reconcileBatch({ batch: { createdAt: T - MIN }, items, rows, now: T + 20 * MIN, settleMs: bank.BANKS.hana.settleMs }).state, 'settling');
+    assert.strictEqual(reconcileBatch({ batch: { createdAt: T - MIN }, items, rows, now: T + 31 * MIN, settleMs: bank.BANKS.hana.settleMs }).state, 'clean');
+    assert.strictEqual(reconcileBatch({ batch: { createdAt: T - MIN }, items, rows, now: T + 20 * MIN }).state, 'clean', '케이뱅크는 10분');
+  });
+  await t('5h-4 ★ 한 은행이 실패해도 다른 은행은 받는다 · 실패한 은행 회차는 자동 확정하지 않는다', async () => {
+    const queries = [];
+    bank.__setPoolForTest({
+      query: async (sql, params) => { queries.push({ sql, params }); if (/UPDATE payment_bank_sync SET last_synced_at/.test(sql)) return { rows: [{ bank: params[0] }] }; return { rows: [] }; },
+      connect: async () => ({ query: async (sql, params) => { queries.push({ sql, params }); return { rows: [] }; }, release() {} }),
+    });
+    bank.__setFetchForTest(async (url, init) => {
+      if (url.endsWith('/api/bank/accounts')) return { status: 200, ok: true, json: async () => ({ accounts: [{ bankCode: '0089', accountNumber: '700' }, { bankCode: '0081', accountNumber: '402' }] }) };
+      if (JSON.parse(init.body).bankCode === '0081') return { status: 500, ok: false, json: async () => ({ error: '수집 실패' }) };
+      return { status: 200, ok: true, json: async () => ({ success: true, allPages: true, list: [{ tradeDT: '20261026123901', tradeAmt: 5980, tradeType: 'O', remark3: '대량이체', tid: 'k1' }] }) };
+    });
+    const r = await bank.syncBank({ by: 'u', force: true, env: { POPBILL_RELAY_URL: 'http://relay.test' }, now: T + 60 * MIN });
+    assert.strictEqual(r.ok, false); assert.strictEqual(r.anyOk, true);
+    assert.strictEqual(r.banks.kbank.ok, true); assert.strictEqual(r.banks.hana.ok, false);
+    assert.match(r.error, /^하나은행: /);
+    const ins = queries.filter(q => /INSERT INTO payment_bank_rows/.test(q.sql));
+    assert.deepStrictEqual(ins.map(q => q.params[0]), ['kbank']);
+    const auto = queries.find(q => /SELECT b\.id FROM payment_batches b/.test(q.sql));
+    assert.deepStrictEqual(auto.params[0], ['kbank'], '자동 확정은 받은 은행만');
+    assert.ok(queries.some(q => /last_ok = FALSE/.test(q.sql) && q.params[0] === 'hana'), '하나은행 실패를 기록');
     bank.__setPoolForTest(null); bank.__setFetchForTest(null);
   });
 
