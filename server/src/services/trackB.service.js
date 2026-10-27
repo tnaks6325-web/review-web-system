@@ -3940,6 +3940,49 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     const at = tabPaidHeader ? advHeaders.indexOf(tabPaidHeader) : -1;
     advHeaders.splice(at >= 0 ? at : advHeaders.length, 0, ...ADV_PAYOUT_HEADERS);
   }
+  /* ★★ 결정 299 — 제품비를 업체가 보내는 작업(업체입금 · 제품비 업체·리뷰비 우리)은 입금일이 둘이다(사용자 확정 2026-10-27).
+       ① 기존 입금 칸 = **업체입금일(제품비)** — 업체가 기록하는 칸(결정 247·292 그대로, 이름표만 바꿔 보인다)
+       ② 가상 칸 **리뷰비 입금일(인애드)** — 우리 이체 회차(payment_batch_items)의 결과에서만 채운다. 시트·입금 칸에 쓰지 않는다
+          (결정 292: 리뷰비 전용 결과는 입금 칸을 건드리지 않는다 — 그래서 지금까지 작업보드 어디에도 안 보였다).
+       ★ 입금 방식 판정 = payoutModeFrom(입금 대상 계산과 같은 공고 → 탭 순서 · 사본 0). 판정 실패 = 칸을 선언하지 않는다(종전 표).
+       ★ 회차 조회 실패 = 칸은 두고 줄마다 "확인불가"(빈칸 = 안 보냄으로 꾸미지 않는다).
+       ★ 줄 짝짓기 = 줄 번호 + 명의(phone8) — 빈 줄 재배정 시 남의 입금일이 보이지 않게(결정 247 계좌 칸과 같은 규율). */
+  let feeDep = null;
+  if (meta[0]) {
+    try {
+      const p = require('./payment.service');
+      const c = await p.campaignForTab(sheetId, tabName).catch(() => undefined);
+      if (c !== undefined && p.advertiserGoodsFrom(c && c.transferBank, meta[0].tabTransferBank)) {
+        feeDep = { bySeq: new Map(), unavailable: false };
+        try {
+          const { rows: fi } = await db.query(
+            `SELECT row_index, phone8, status, to_char(paid_at AT TIME ZONE 'Asia/Seoul', 'FMMM/FMDD') AS d
+               FROM payment_batch_items
+              WHERE sheet_id=$1 AND tab_name=$2 AND status IN ('paid','pending')
+                -- ★ 리뷰비가 실제로 든 항목만(리뷰비 전용 · 제품비+리뷰비). 제품비만 보낸 항목을 "리뷰비 입금일"로 보이지 않는다(Codex P2).
+                AND COALESCE(review_fee, 0) > 0
+              ORDER BY (status='paid') DESC, paid_at DESC NULLS LAST, created_at DESC`, [sheetId, tabName]);
+          for (const x of fi) {
+            const k = Number(x.row_index); if (!feeDep.bySeq.has(k)) feeDep.bySeq.set(k, []);
+            feeDep.bySeq.get(k).push(x);
+          }
+        } catch (e) {
+          feeDep.unavailable = true;
+          logger.warn(`[trackB] 리뷰비 입금일 조회 실패 tab=${tabName}: ${e.message}`);
+        }
+      }
+    } catch (_) { feeDep = null; }
+  }
+  const _feeDepOf = (r) => {
+    if (!feeDep) return undefined;
+    if (feeDep.unavailable) return '확인불가';
+    const p8 = String(r.phone8 == null ? '' : r.phone8).trim();
+    // ★ 명의를 모르면 짝짓지 않는다(빈 명의 = 와일드카드 금지 · Codex P2) — 빈 줄·재배정 줄이 앞사람 입금일을 물려받지 않게.
+    if (!p8) return '';
+    const hit = (feeDep.bySeq.get(Number(r.seq)) || []).find(x => String(x.phone8 == null ? '' : x.phone8).trim() === p8);
+    if (!hit) return '';
+    return hit.status === 'paid' ? (hit.d || '입금완료') : '이체 진행 중';
+  };
   let paymentCellCount = 0;
   // 진행 현황의 금액도 "제출완료"와 정확히 같은 작업표 리뷰제출 칸을 기준으로 한다.
   // is_submitted 플래그만 보면 재투영 전 카드 건수와 표의 제출 칸이 다시 갈릴 수 있다.
@@ -4044,6 +4087,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     syn.boardNo = _nk ? String(pick('col:' + _nk, (r.row_json || {})[_nk]) ?? '').trim() : '';
     const _vp8 = String(syn.phone8 == null ? '' : syn.phone8).trim();
     if (_vp8) { const n = (visitSeen.get(_vp8) || 0) + 1; visitSeen.set(_vp8, n); syn.visitNo = n; }
+    if (feeDep) syn.feeDeposit = _feeDepOf(syn);   // 결정 299 — 마스킹 전 명의로 짝짓는다
     // 광고주(외부)는 phone8 + 이름·수취인(PII)까지 마스킹. AE/관리자(내부)는 전체.
     if (maskPII) { syn.phone8 = _mask(syn.phone8); syn.name = _maskName(syn.name); syn.recipient = _maskName(syn.recipient); }
     if (showEdits) {
@@ -4246,6 +4290,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   /* 결정 289 ④ — 「구매수량」 가상 칸(시트에 쓰지 않는다 · 현영 칸과 같은 방식). 내부·업체 모두(사용자 확정 「가」).
      개수가 실린 줄이 하나도 없으면 선언하지 않는다 = 종전 표 그대로. 보관본은 roster 쿼리가 NULL 이라 생기지 않는다. */
   if (_hasQty) res.purchaseQtyColumn = { key: '__purchaseQty', label: '구매수량' };
+  /* 결정 299 — 입금일 두 칸(내부·업체 모두 같은 모양 · 사용자 확정 권장안). paidHeader = 화면이 「업체입금일(제품비)」로 이름표를 바꿀 칸. */
+  if (feeDep) res.feeDepositColumn = { key: '__feeDeposit', label: '리뷰비 입금일(인애드)', paidLabel: '업체입금일(제품비)',
+    paidHeader: tabPaidHeader || null, ...(feeDep.unavailable ? { unavailable: true } : {}) };
   if (showEdits) {
     res.orphanEdits = { count: orphanCount, byType: orphanByType };
     res.headers = headers || []; res.customColumns = customCols;
