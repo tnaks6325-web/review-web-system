@@ -38,6 +38,7 @@ const ROWS = [
   [5, '다통장', '010-2000-0005', '7900'],
   [6, '라통장', '010-2000-0006', '7900'],
   [7, '마통장', '010-2000-0007', '3000'],
+  [8, '바통장', '010-2000-0008', '3000'],   // [7] 하나은행 회차
 ];
 const NOW = Date.now();
 const MIN = 60 * 1000;
@@ -52,7 +53,7 @@ async function cleanup() {
   await pool.query(`DELETE FROM payment_batches WHERE created_by='bank-test'`);
   await pool.query(`DELETE FROM tab_configs WHERE sheet_id=$1`, [SHEET]);
   await pool.query(`DELETE FROM reviewers WHERE phone LIKE '010-2000-000%'`);
-  await pool.query(`DELETE FROM payment_bank_rows WHERE bank='kbank' AND tid LIKE 'banktest-%'`);
+  await pool.query(`DELETE FROM payment_bank_rows WHERE bank IN ('kbank','hana') AND tid LIKE 'banktest-%'`);
 }
 
 async function seed() {
@@ -73,9 +74,9 @@ async function seed() {
   await ledger.rebuildLedgers({ sheetId: SHEET, tabName: TAB, columns: HEADERS });
 }
 
-async function makeBatch(createdAt, rows) {
+async function makeBatch(createdAt, rows, bankId = 'kbank') {
   const { rows: [b] } = await pool.query(
-    `INSERT INTO payment_batches (bank, created_by, status, created_at) VALUES ('kbank','bank-test','downloaded',$1) RETURNING id, seq`, [iso(createdAt)]);
+    `INSERT INTO payment_batches (bank, created_by, status, created_at) VALUES ($2,'bank-test','downloaded',$1) RETURNING id, seq`, [iso(createdAt), bankId]);
   for (const seq of rows) {
     const r = ROWS.find(x => x[0] === seq);
     await pool.query(
@@ -89,9 +90,9 @@ async function makeBatch(createdAt, rows) {
     total_amount = (SELECT SUM(amount) FROM payment_batch_items WHERE batch_id=$1) WHERE id=$1`, [b.id]);
   return b;
 }
-async function bankRow(tid, at, amount, kind) {
-  await pool.query(`INSERT INTO payment_bank_rows (bank, tid, traded_at, amount, kind) VALUES ('kbank',$1,$2,$3,$4)`,
-    ['banktest-' + tid, iso(at), amount, kind]);
+async function bankRow(tid, at, amount, kind, bankId = 'kbank') {
+  await pool.query(`INSERT INTO payment_bank_rows (bank, tid, traded_at, amount, kind) VALUES ($5,$1,$2,$3,$4)`,
+    ['banktest-' + tid, iso(at), amount, kind, bankId]);
 }
 const items = async (batchId) => (await pool.query(
   `SELECT row_index, status, result_status, fail_reason, paid_at FROM payment_batch_items WHERE batch_id=$1 ORDER BY row_index`, [batchId])).rows;
@@ -175,6 +176,25 @@ const items = async (batchId) => (await pool.query(
     const v1 = list.find(x => x.id === b1.id), v2 = list.find(x => x.id === b2.id);
     ok('1회차 = 통장 확인 · 성공 2 · 실패 0', v1.resultSource === 'bank' && v1.resultSuccessCount === 2 && v1.resultFailedCount === 0, v1);
     ok('2회차 = 통장 확인 · 실패 1(부풀지 않음)', v2.resultSource === 'bank' && v2.failedCount === 1 && v2.resultFailedCount === 1, v2);
+
+    console.log('\n[7] 하나은행 회차 — 하나은행 통장과만 맞댄다(결정 303)');
+    const T7 = NOW - 90 * MIN;
+    const b7 = await makeBatch(T7 - 10 * MIN, [8], 'hana');
+    await bankRow('k7', T7, 3000, 'bulk_out');            // 같은 시각 케이뱅크 3,000원 — 하나 회차와 섞이면 안 된다
+    let rec7 = await bank.inspectBatch(b7.id);
+    ok('케이뱅크 줄만 있으면 하나 회차는 못 찾음', rec7.state === 'not_found' && rec7.bank === 'hana', rec7.state);
+    await bankRow('h7', T7, 3000, 'bulk_out', 'hana');
+    rec7 = await bank.inspectBatch(b7.id);
+    ok('하나 통장 줄이 생기면 clean', rec7.state === 'clean' && rec7.cluster.rowCount === 1, rec7.state);
+    const c7 = await bank.confirmBatchFromBank({ batchId: b7.id, by: 'bank-test', notifyFailed: false });
+    ok('하나 회차 확정 1건', c7.applied === 1 && c7.remaining === 0, c7);
+    const { rows: up7 } = await pool.query(`SELECT bank, file_name FROM payment_result_uploads WHERE batch_id=$1`, [b7.id]);
+    ok('기록 줄 = 하나은행 거래내역', up7.length === 1 && up7[0].bank === 'hana' && /하나은행 거래내역/.test(up7[0].file_name), up7);
+    const ov7 = await bank.bankOverview();
+    ok('개요 = 은행 두 줄(케이뱅크 먼저) · 맨 위 값은 케이뱅크(옛 화면)', ov7.banks.map(b => b.bank).join(',') === 'kbank,hana'
+      && ov7.banks[1].settleMinutes === 30 && ov7.outside === ov7.banks[0].outside, ov7.banks.map(b => [b.bank, b.outside]));
+    ok('케이뱅크 3,000원은 케이뱅크 기록 없이 나간 돈 · 하나 3,000원은 회차가 가져감', ov7.banks[0].outside.days.length >= 1
+      && ov7.banks[1].outside.count === 0, ov7.banks.map(b => b.outside));
   } catch (e) {
     console.error(e); fail++;
   } finally {

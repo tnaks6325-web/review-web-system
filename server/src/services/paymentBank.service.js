@@ -2,8 +2,8 @@
 /**
  * 입금 통장 자동 대조 (결정 293 · 사용자 확정 2026-10-27)
  *
- * 리뷰어 지급은 케이뱅크 통장에서 대량이체로 나간다. 팝빌 중계 서버(inadd-finance-server)로 그 통장
- * 거래내역을 받아 회차와 맞대 본다.
+ * 리뷰어 지급은 케이뱅크·하나은행 통장에서 대량이체로 나간다. 팝빌 중계 서버(inadd-finance-server)로 두 통장
+ * 거래내역을 받아 회차와 맞대 본다(하나은행 = 결정 303 · 사용자 확정 2026-10-28). 회차는 자기 은행 통장과만 맞댄다.
  *   - 회차의 모든 금액이 그 시각 통장에 같은 건수로 찍혀 있고 취소 반환이 없으면 → 결과 파일 없이 '이체 완료'.
  *   - 맞지 않는 금액은 그 금액의 사람만 '확인 필요'로 남긴다(통장에는 받는 사람이 안 찍혀 누가 실패했는지 모른다).
  *     → 결과 파일을 올리거나, 실패한 사람을 직접 고른다(고른 건수가 통장의 부족 건수와 같아야 저장).
@@ -20,12 +20,19 @@ function __setPoolForTest(p) { _pool = p || null; }
 let _fetch = (...a) => fetch(...a);
 function __setFetchForTest(f) { _fetch = f || ((...a) => fetch(...a)); }
 
-const BANK = 'kbank';
-const KBANK_CODE = '0089';
+/* 은행별 설정 — 회차(payment_batches.bank)와 통장(payment_bank_rows.bank)이 같은 키를 쓴다.
+ *  settleMs = 묶음 끝에서 이만큼 지나야 확정. 케이뱅크는 실패가 같은 분에 '취소'로 돌아온다(82회차 실측).
+ *  하나은행은 실패가 어떻게 찍히는지 실측이 아직 없다(2026-10-28) → 30분 기다리고, 반환으로 보이는 입금은
+ *  그 금액을 '확인 필요'로 접는다(_markHanaRefunds). 모르면 확정하지 않는다. */
+const BANKS = {
+  kbank: { code: '0089', label: '케이뱅크', settleMs: 10 * 60 * 1000 },
+  hana:  { code: '0081', label: '하나은행', settleMs: 30 * 60 * 1000 },
+};
+const BANK_IDS = Object.keys(BANKS);
 const SYNC_MIN_GAP_MS = 3 * 60 * 1000;     // 3분에 한 번까지 받는다(입금관리 열 때마다 팝빌을 부르지 않게)
 const SYNC_DAYS = 7;                         // 최근 7일
 const CLUSTER_GAP_MS = 3 * 60 * 1000;        // 대량이체 한 번 = 3분 안에 이어 찍힌 출금 묶음
-const SETTLE_MS = 10 * 60 * 1000;            // 실패는 같은 분에 '취소'로 돌아온다(82회차 실측) — 10분 지나야 확정
+const SETTLE_MS = BANKS.kbank.settleMs;      // 실패는 같은 분에 '취소'로 돌아온다(82회차 실측) — 10분 지나야 확정(은행별 값은 BANKS)
 const REFUND_WINDOW_MS = 30 * 60 * 1000;     // 묶음 끝 30분 안의 취소 반환을 그 묶음 것으로 본다
 const FIND_WINDOW_MS = 3 * 24 * 3600 * 1000; // 회차 만든 뒤 3일 안의 묶음만 그 회차 후보
 const CLAIM_SLACK_MS = 2 * 60 * 1000;        // 다른 회차가 이미 그 시각에 이체 완료면 그 묶음은 다른 회차 것
@@ -58,18 +65,38 @@ function depositStampOf(ms) {
 }
 
 /** 중계 서버 거래 한 줄 → 저장할 모양(이름·적요는 버린다). 읽을 수 없으면 null. */
-function toBankRow(tx) {
+function toBankRow(tx, bank = 'kbank') {
   const at = parseTradeDT(tx && (tx.tradeDT || ''));
   const amount = Math.round(Number(tx && tx.tradeAmt));
   if (at == null || !Number.isFinite(amount) || amount <= 0) return null;
   const incoming = tx.tran_type === 'deposit' || tx.tradeType === 'I';
   const r3 = String(tx.remark3 || '').trim();
-  const kind = !incoming && r3 === '대량이체' ? 'bulk_out'
-    : incoming && r3 === '취소' ? 'refund_in'
-    : incoming ? 'other_in' : 'other_out';
+  // 하나은행 다건이체는 한 사람 한 줄 '타행송금'/'당행송금'(remark2 '인터넷뱅킹')으로 찍힌다(2026-10-28 실측 22줄).
+  const kind = bank === 'hana'
+    ? (!incoming && (r3 === '타행송금' || r3 === '당행송금') ? 'bulk_out'
+      : incoming && /취소|반환|불능|오류|정정|환불/.test(r3) ? 'refund_in'
+      : incoming ? 'other_in' : 'other_out')
+    : (!incoming && r3 === '대량이체' ? 'bulk_out'
+      : incoming && r3 === '취소' ? 'refund_in'
+      : incoming ? 'other_in' : 'other_out');
   const balance = Number(tx.balance);
   const tid = String(tx.tid || '').trim() || `dt:${tx.tradeDT}:${amount}:${Number.isFinite(balance) ? balance : ''}:${kind}`;
   return { tid, at, amount, kind, balance: Number.isFinite(balance) ? balance : null };
+}
+
+/**
+ * 하나은행 — 실패 반환이 무슨 이름으로 찍히는지 모르므로, 대량이체 출금 뒤 30분 안에 **같은 금액**으로 들어온 돈은
+ * 반환으로 본다(그 금액은 받은 건수가 줄어 '확인 필요'로 접힌다 = 잘못 '이체 완료'로 적지 않는다).
+ * 출금 한 줄에 반환 한 줄까지만 짝짓는다.
+ */
+function _markHanaRefunds(rows) {
+  const outs = rows.filter(r => r.kind === 'bulk_out').sort((a, b) => a.at - b.at);
+  const used = new Set();
+  for (const r of rows.filter(x => x.kind === 'other_in').sort((a, b) => a.at - b.at)) {
+    const o = outs.find(x => !used.has(x) && x.amount === r.amount && r.at >= x.at && r.at <= x.at + REFUND_WINDOW_MS);
+    if (o) { used.add(o); r.kind = 'refund_in'; }
+  }
+  return rows;
 }
 
 /* ── 대조(순수 계산) ─────────────────────────────────────── */
@@ -91,7 +118,7 @@ function _countBy(list, f) { const m = new Map(); for (const x of list) { const 
  *   state: clean = 확정 가능 · review = 일부 '확인 필요' · not_found = 통장에서 이 회차 이체를 못 찾음 ·
  *          settling = 이체 직후(취소 반환 대기) · file = 결과 파일로 이미 처리된 건이 있음(파일이 기준) · done = 처리할 건 없음
  */
-function reconcileBatch({ batch, items, rows, claimedTimes = [], now = Date.now() }) {
+function reconcileBatch({ batch, items, rows, claimedTimes = [], now = Date.now(), settleMs = SETTLE_MS }) {
   const live = items.filter(it => it.status !== 'cancelled');
   if (!live.length) return { state: 'empty' };
   // 결과 파일로 처리된 건이 하나라도 있으면 그 회차는 결과 파일이 기준이다(통장으로 덮지 않는다).
@@ -115,7 +142,7 @@ function reconcileBatch({ batch, items, rows, claimedTimes = [], now = Date.now(
   if (!best || bestScore < Math.max(1, Math.ceil(live.length / 2))) return { state: 'not_found' };
 
   const cluster = { start: best.start, end: best.end, rowCount: best.rows.length, total: best.rows.reduce((s, r) => s + r.amount, 0) };
-  if (now < best.end + SETTLE_MS) return { state: 'settling', cluster };
+  if (now < best.end + settleMs) return { state: 'settling', cluster };
 
   const have = _countBy(best.rows, r => r.amount);
   const refunds = _countBy(rows.filter(r => r.kind === 'refund_in' && r.at >= best.start && r.at <= best.end + REFUND_WINDOW_MS), r => r.amount);
@@ -176,11 +203,11 @@ function planConfirm(rec, items, failedItemIds = []) {
 }
 
 /* ── 저장소 ───────────────────────────────────────────── */
-async function _loadRows(fromMs, toMs) {
+async function _loadRows(bank, fromMs, toMs) {
   const { rows } = await _db().query(
     `SELECT tid, (EXTRACT(EPOCH FROM traded_at) * 1000)::bigint AS at, amount, kind
        FROM payment_bank_rows WHERE bank = $1 AND traded_at >= $2 AND traded_at <= $3 ORDER BY traded_at`,
-    [BANK, new Date(fromMs).toISOString(), new Date(toMs).toISOString()]);
+    [bank, new Date(fromMs).toISOString(), new Date(toMs).toISOString()]);
   return rows.map(r => ({ tid: r.tid, at: Number(r.at), amount: Number(r.amount), kind: r.kind }));
 }
 
@@ -195,28 +222,29 @@ async function _loadBatchItems(batchId) {
 }
 
 /** 다른 회차가 이미 '이체 완료'한 시각들(그 묶음은 다른 회차 것). */
-async function _claimedTimes(batchId, fromMs, toMs) {
+async function _claimedTimes(bank, batchId, fromMs, toMs) {
   const { rows } = await _db().query(
     `SELECT DISTINCT (EXTRACT(EPOCH FROM date_trunc('minute', i.paid_at)) * 1000)::bigint AS at
        FROM payment_batch_items i JOIN payment_batches b ON b.id = i.batch_id
       WHERE b.bank = $1 AND i.batch_id <> $2 AND i.status = 'paid'
         AND i.paid_at >= $3 AND i.paid_at <= $4`,
-    [BANK, batchId, new Date(fromMs).toISOString(), new Date(toMs).toISOString()]);
+    [bank, batchId, new Date(fromMs).toISOString(), new Date(toMs).toISOString()]);
   return rows.map(r => Number(r.at));
 }
 
 async function inspectBatch(batchId, { now = Date.now() } = {}) {
   const { rows: [b] } = await _db().query(`SELECT id, seq, bank, status, created_at FROM payment_batches WHERE id = $1`, [batchId]);
   if (!b) throw new BankError('not_found', '대량이체를 찾을 수 없습니다.');
-  if (b.bank !== BANK) return { batchId, seq: b.seq, state: 'other_bank' };
-  if (b.status === 'cancelled') return { batchId, seq: b.seq, state: 'cancelled' };
+  const cfg = BANKS[b.bank];
+  if (!cfg) return { batchId, seq: b.seq, bank: b.bank, state: 'other_bank' };
+  if (b.status === 'cancelled') return { batchId, seq: b.seq, bank: b.bank, state: 'cancelled' };
   const created = new Date(b.created_at).getTime();
   const to = Math.min(now, created + FIND_WINDOW_MS + REFUND_WINDOW_MS);
   const [items, rows, claimedTimes] = await Promise.all([
-    _loadBatchItems(batchId), _loadRows(created - 60 * 1000, to), _claimedTimes(batchId, created - 60 * 1000, to),
+    _loadBatchItems(batchId), _loadRows(b.bank, created - 60 * 1000, to), _claimedTimes(b.bank, batchId, created - 60 * 1000, to),
   ]);
-  const rec = reconcileBatch({ batch: { createdAt: created }, items, rows, claimedTimes, now });
-  return { batchId, seq: b.seq, ...rec, items };
+  const rec = reconcileBatch({ batch: { createdAt: created }, items, rows, claimedTimes, now, settleMs: cfg.settleMs });
+  return { batchId, seq: b.seq, bank: b.bank, ...rec, items };
 }
 
 /**
@@ -228,10 +256,10 @@ async function confirmBatchFromBank({ batchId, by, failedItemIds = [], notifyFai
   if (!['clean', 'review'].includes(rec.state)) {
     const msg = {
       not_found: '통장에서 이 대량이체를 아직 찾지 못했습니다. 이체 뒤 통장 확인을 다시 눌러 주세요.',
-      settling: '이체 직후라 실패 반환을 기다리는 중입니다. 10분 뒤 다시 확인해 주세요.',
+      settling: `이체 직후라 실패 반환을 기다리는 중입니다. ${Math.round(((BANKS[rec.bank] || BANKS.kbank).settleMs) / 60000)}분 뒤 다시 확인해 주세요.`,
       file: '결과 파일로 이미 처리된 대량이체입니다. 남은 건은 결과 파일로 처리해 주세요.',
       done: '이미 모두 처리된 대량이체입니다.', empty: '이 대량이체에 대상이 없습니다.',
-      other_bank: '케이뱅크 대량이체만 통장으로 확인할 수 있습니다.', cancelled: '취소된 대량이체입니다.',
+      other_bank: '케이뱅크·하나은행 대량이체만 통장으로 확인할 수 있습니다.', cancelled: '취소된 대량이체입니다.',
     }[rec.state] || '통장으로 확인할 수 없는 대량이체입니다.';
     throw new BankError(rec.state, msg);
   }
@@ -257,7 +285,7 @@ async function confirmBatchFromBank({ batchId, by, failedItemIds = [], notifyFai
         `INSERT INTO payment_result_uploads
            (batch_id, bank, file_name, file_format, row_count, matched, success_count, failed_count, applied, applied_count, applied_at, summary, uploaded_by)
          VALUES ($1,$2,$3,'bank',$4,$5,$6,$7,TRUE,$6,NOW(),$8,$9)`,
-        [batchId, BANK, `통장 확인(케이뱅크 거래내역) ${depositStampOf(rec.cluster.start)}`, rec.cluster.rowCount,
+        [batchId, rec.bank, `통장 확인(${BANKS[rec.bank].label} 거래내역) ${depositStampOf(rec.cluster.start)}`, rec.cluster.rowCount,
          paidCount + failedCount, paidCount, failedCount, JSON.stringify(summary), by || 'bank']);
     },
   });
@@ -276,15 +304,18 @@ async function _fetchJson(url, init, timeoutMs) {
   } finally { clearTimeout(t); }
 }
 
-async function _collectFromRelay(cfg, fromMs, toMs) {
-  const headers = { 'Content-Type': 'application/json', ...(cfg.key ? { 'X-Relay-Key': cfg.key } : {}) };
-  const acc = await _fetchJson(`${cfg.url}/api/bank/accounts`, { headers }, 20000);
+function _relayHeaders(cfg) { return { 'Content-Type': 'application/json', ...(cfg.key ? { 'X-Relay-Key': cfg.key } : {}) }; }
+/** 팝빌에 등록된 통장 목록 — 한 번 받아 두 은행이 같이 쓴다 */
+async function _relayAccounts(cfg) {
+  const acc = await _fetchJson(`${cfg.url}/api/bank/accounts`, { headers: _relayHeaders(cfg) }, 20000);
   if (!acc.ok) throw new BankError('relay_failed', `팝빌 중계 서버가 계좌 목록을 주지 않았습니다(${acc.status}).`);
-  const account = ((acc.body && acc.body.accounts) || []).find(a => String(a && a.bankCode) === KBANK_CODE);
-  if (!account) throw new BankError('no_kbank', '케이뱅크 통장이 팝빌에 등록돼 있지 않습니다.');
+  return (acc.body && acc.body.accounts) || [];
+}
+async function _collectFromRelay(cfg, bank, account, fromMs, toMs) {
+  const headers = _relayHeaders(cfg);
   const res = await _fetchJson(`${cfg.url}/api/bank/collect`, {
     method: 'POST', headers,
-    body: JSON.stringify({ bankCode: KBANK_CODE, accountNumber: account.accountNumber,
+    body: JSON.stringify({ bankCode: BANKS[bank].code, accountNumber: account.accountNumber,
       sDate: kstYmd(fromMs).replace(/-/g, ''), eDate: kstYmd(toMs).replace(/-/g, ''), allPages: true }),
   }, 150000);
   if (res.status === 202) throw new BankError('collecting', '팝빌이 아직 통장 내역을 모으는 중입니다. 잠시 뒤 다시 확인해 주세요.');
@@ -293,56 +324,69 @@ async function _collectFromRelay(cfg, fromMs, toMs) {
   if (d.allPages !== true) throw new BankError('relay_old', '중계 서버가 모든 쪽 받기를 지원하지 않습니다.');
   if (d.truncated) throw new BankError('truncated', '통장 내역을 다 받지 못했습니다(쪽 수 상한). 담당자에게 알려 주세요.');
   if (d.adjustedNote) throw new BankError('range_adjusted', '조회 기간이 팝빌 제한으로 줄었습니다.');
-  return (d.list || []).map(toBankRow).filter(Boolean);
+  const rows = (d.list || []).map(tx => toBankRow(tx, bank)).filter(Boolean);
+  return bank === 'hana' ? _markHanaRefunds(rows) : rows;
 }
 
-/** 통장 받기(3분에 한 번) + 깨끗한 회차 자동 확정. force 면 3분 제한을 무시한다(버튼). */
-async function syncBank({ by, force = false, now = Date.now(), env = process.env } = {}) {
-  const cfg = relayConfig(env);
-  if (!cfg) return { ok: false, code: 'not_configured', error: '통장 연결 설정이 없습니다(POPBILL_RELAY_URL).' };
-  await _db().query(`INSERT INTO payment_bank_sync (bank) VALUES ($1) ON CONFLICT (bank) DO NOTHING`, [BANK]);
-  // 3분 안에 누가 이미 받았으면 건너뛴다 — 칸 하나를 조건부로 잡아 동시에 두 번 받지 않는다.
+/** 한 은행 통장 받기(3분에 한 번 — 칸 하나를 조건부로 잡아 동시에 두 번 받지 않는다). */
+async function _syncOne(cfg, bank, { by, force, now }, getAccounts) {
+  await _db().query(`INSERT INTO payment_bank_sync (bank) VALUES ($1) ON CONFLICT (bank) DO NOTHING`, [bank]);
   const { rows: claim } = await _db().query(
     `UPDATE payment_bank_sync SET last_synced_at = $2, synced_by = $3
       WHERE bank = $1 AND ($4::bool OR last_synced_at IS NULL OR last_synced_at < $2::timestamptz - make_interval(secs => $5))
       RETURNING bank`,
-    [BANK, new Date(now).toISOString(), String(by || ''), !!force, SYNC_MIN_GAP_MS / 1000]);
-  let fetched = null;
-  if (claim.length) {
-    const fromMs = now - (SYNC_DAYS - 1) * 24 * 3600 * 1000;
+    [bank, new Date(now).toISOString(), String(by || ''), !!force, SYNC_MIN_GAP_MS / 1000]);
+  if (!claim.length) return { ok: true, skipped: true, fetched: null };
+  const fromMs = now - (SYNC_DAYS - 1) * 24 * 3600 * 1000;
+  try {
+    const account = (await getAccounts()).find(a => String(a && a.bankCode) === BANKS[bank].code);
+    if (!account) throw new BankError('no_account', `${BANKS[bank].label} 통장이 팝빌에 등록돼 있지 않습니다.`);
+    const rows = await _collectFromRelay(cfg, bank, account, fromMs, now);
+    const client = await _db().connect();
     try {
-      const rows = await _collectFromRelay(cfg, fromMs, now);
-      const client = await _db().connect();
-      try {
-        await client.query('BEGIN');
-        for (const r of rows) {
-          await client.query(
-            `INSERT INTO payment_bank_rows (bank, tid, traded_at, amount, kind, balance, collected_at)
-             VALUES ($1,$2,$3,$4,$5,$6,NOW())
-             ON CONFLICT (bank, tid) DO UPDATE SET traded_at = EXCLUDED.traded_at, amount = EXCLUDED.amount,
-               kind = EXCLUDED.kind, balance = EXCLUDED.balance, collected_at = NOW()`,
-            [BANK, r.tid, new Date(r.at).toISOString(), r.amount, r.kind, r.balance]);
-        }
+      await client.query('BEGIN');
+      for (const r of rows) {
         await client.query(
-          `UPDATE payment_bank_sync SET last_ok = TRUE, last_error = '', range_from = $2, range_to = $3, row_count = $4 WHERE bank = $1`,
-          [BANK, kstYmd(fromMs), kstYmd(now), rows.length]);
-        await client.query('COMMIT');
-      } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} throw e; } finally { client.release(); }
-      fetched = rows.length;
-    } catch (e) {
-      const message = String(e && e.message || e).slice(0, 300);
-      await _db().query(`UPDATE payment_bank_sync SET last_ok = FALSE, last_error = $2 WHERE bank = $1`, [BANK, message]);
-      logger.warn(`[paymentBank] 통장 받기 실패: ${message}`);
-      return { ok: false, code: e && e.code || 'sync_failed', error: message };
-    }
+          `INSERT INTO payment_bank_rows (bank, tid, traded_at, amount, kind, balance, collected_at)
+           VALUES ($1,$2,$3,$4,$5,$6,NOW())
+           ON CONFLICT (bank, tid) DO UPDATE SET traded_at = EXCLUDED.traded_at, amount = EXCLUDED.amount,
+             kind = EXCLUDED.kind, balance = EXCLUDED.balance, collected_at = NOW()`,
+          [bank, r.tid, new Date(r.at).toISOString(), r.amount, r.kind, r.balance]);
+      }
+      await client.query(
+        `UPDATE payment_bank_sync SET last_ok = TRUE, last_error = '', range_from = $2, range_to = $3, row_count = $4 WHERE bank = $1`,
+        [bank, kstYmd(fromMs), kstYmd(now), rows.length]);
+      await client.query('COMMIT');
+    } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} throw e; } finally { client.release(); }
+    return { ok: true, skipped: false, fetched: rows.length };
+  } catch (e) {
+    const message = String(e && e.message || e).slice(0, 300);
+    await _db().query(`UPDATE payment_bank_sync SET last_ok = FALSE, last_error = $2 WHERE bank = $1`, [bank, message]);
+    logger.warn(`[paymentBank] ${BANKS[bank].label} 통장 받기 실패: ${message}`);
+    return { ok: false, code: e && e.code || 'sync_failed', error: message };
   }
-  // 깨끗한 회차 자동 확정 — 최근 7일 케이뱅크 회차 중 아직 처리 안 된 건이 있는 것
-  const { rows: open } = await _db().query(
+}
+
+/**
+ * 통장 받기(은행마다 3분에 한 번) + 깨끗한 회차 자동 확정. force 면 3분 제한을 무시한다(버튼).
+ * ★ 은행은 서로 막지 않는다 — 한 은행이 실패해도 다른 은행은 받고 확정한다. 실패한 은행의 회차는 자동 확정하지 않는다.
+ *   ok = 모든 은행이 받았거나 건너뜀 · 실패한 은행이 있으면 ok=false + code/error 는 첫 실패(케이뱅크 먼저).
+ */
+async function syncBank({ by, force = false, now = Date.now(), env = process.env } = {}) {
+  const cfg = relayConfig(env);
+  if (!cfg) return { ok: false, code: 'not_configured', error: '통장 연결 설정이 없습니다(POPBILL_RELAY_URL).' };
+  let accounts = null;
+  const getAccounts = async () => (accounts = accounts || _relayAccounts(cfg));
+  const banks = {};
+  for (const bank of BANK_IDS) banks[bank] = await _syncOne(cfg, bank, { by, force, now }, getAccounts);
+  const okBanks = BANK_IDS.filter(bk => banks[bk].ok);
+  // 깨끗한 회차 자동 확정 — 받기에 성공한(또는 3분 안에 이미 받은) 은행의 최근 7일 회차 중 처리 안 된 건이 있는 것
+  const { rows: open } = okBanks.length ? await _db().query(
     `SELECT b.id FROM payment_batches b
-      WHERE b.bank = $1 AND b.status <> 'cancelled' AND b.created_at >= $2
+      WHERE b.bank = ANY($1::text[]) AND b.status <> 'cancelled' AND b.created_at >= $2
         AND EXISTS (SELECT 1 FROM payment_batch_items i WHERE i.batch_id = b.id AND i.status = 'pending')
       ORDER BY b.created_at`,
-    [BANK, new Date(now - SYNC_DAYS * 24 * 3600 * 1000).toISOString()]);
+    [okBanks, new Date(now - SYNC_DAYS * 24 * 3600 * 1000).toISOString()]) : { rows: [] };
   const autoConfirmed = [];
   for (const { id } of open) {
     try {
@@ -352,40 +396,66 @@ async function syncBank({ by, force = false, now = Date.now(), env = process.env
       if (r.applied) autoConfirmed.push({ batchId: id, seq: rec.seq, applied: r.applied });
     } catch (e) { logger.warn(`[paymentBank] 자동 확정 건너뜀(${id}): ${e.message}`); }
   }
-  return { ok: true, fetched, skipped: !claim.length, autoConfirmed };
+  const failed = BANK_IDS.filter(bk => !banks[bk].ok);
+  const fetchedList = BANK_IDS.map(bk => banks[bk].fetched).filter(n => n != null);
+  return {
+    ok: !failed.length,
+    ...(failed.length ? { code: banks[failed[0]].code, error: failed.map(bk => `${BANKS[bk].label}: ${banks[bk].error}`).join(' / ') } : {}),
+    fetched: fetchedList.length ? fetchedList.reduce((x, y) => x + y, 0) : null,
+    skipped: BANK_IDS.every(bk => banks[bk].skipped),
+    anyOk: okBanks.length > 0,
+    banks, autoConfirmed,
+  };
 }
 
-/** 입금관리 맨 위 — 통장 받은 상태 + 회차 밖으로 나간 돈 + 처리 안 된 회차별 대조. */
-async function bankOverview({ now = Date.now(), env = process.env } = {}) {
-  const cfg = relayConfig(env);
-  const { rows: [sync] } = await _db().query(`SELECT * FROM payment_bank_sync WHERE bank = $1`, [BANK]);
+/** 한 은행의 통장 상태 + 회차 밖으로 나간 돈 + 처리 안 된 회차별 대조. */
+async function _bankOverviewOne(bank, now) {
+  const cfg = BANKS[bank];
+  const { rows: [sync] } = await _db().query(`SELECT * FROM payment_bank_sync WHERE bank = $1`, [bank]);
   const fromMs = now - SYNC_DAYS * 24 * 3600 * 1000;
-  const rows = await _loadRows(fromMs, now);
-  // 회차 이체 완료 건(어느 회차든)을 시각·금액으로 지운다 → 남은 대량이체 = 회차 밖
+  const rows = await _loadRows(bank, fromMs, now);
+  // 회차 이체 완료 건(그 은행 어느 회차든)을 시각·금액으로 지운다 → 남은 대량이체 = 회차 밖
   const { rows: paid } = await _db().query(
     `SELECT (EXTRACT(EPOCH FROM i.paid_at) * 1000)::bigint AS at, i.amount
        FROM payment_batch_items i JOIN payment_batches b ON b.id = i.batch_id
-      WHERE b.bank = $1 AND i.status = 'paid' AND i.paid_at >= $2`, [BANK, new Date(fromMs - 3600 * 1000).toISOString()]);
+      WHERE b.bank = $1 AND i.status = 'paid' AND i.paid_at >= $2`, [bank, new Date(fromMs - 3600 * 1000).toISOString()]);
   const { rows: open } = await _db().query(
     `SELECT b.id FROM payment_batches b
       WHERE b.bank = $1 AND b.status <> 'cancelled' AND b.created_at >= $2
         AND EXISTS (SELECT 1 FROM payment_batch_items i WHERE i.batch_id = b.id AND i.status = 'pending')
-      ORDER BY b.created_at`, [BANK, new Date(fromMs).toISOString()]);
+      ORDER BY b.created_at`, [bank, new Date(fromMs).toISOString()]);
   const batches = [];
   for (const { id } of open) {
     const rec = await inspectBatch(id, { now });
     batches.push({
-      batchId: id, seq: rec.seq, state: rec.state, cluster: rec.cluster || null, outside: rec.outside || null,
+      batchId: id, seq: rec.seq, bank, state: rec.state, cluster: rec.cluster || null, outside: rec.outside || null,
       amounts: (rec.amounts || []).filter(x => x.failures !== 0).map(x => ({ amount: x.amount, count: x.count, bank: x.bank, refunds: x.refunds, failures: x.failures })),
       pending: (rec.items || []).filter(i => i.status === 'pending').length,
     });
   }
   const outside = outsideTransfers(rows, paid.map(p => ({ at: Number(p.at), amount: Number(p.amount) })),
-    batches.filter(b => b.cluster).map(b => ({ start: b.cluster.start, end: b.cluster.end })), now);
+    batches.filter(b => b.cluster).map(b => ({ start: b.cluster.start, end: b.cluster.end })), now, cfg.settleMs);
   return {
-    ok: true, configured: !!cfg,
+    bank, label: cfg.label, settleMinutes: Math.round(cfg.settleMs / 60000),
     sync: sync ? { lastSyncedAt: sync.last_synced_at, ok: sync.last_ok, error: sync.last_error || '', rowCount: sync.row_count } : null,
     outside, batches,
+  };
+}
+
+/**
+ * 입금관리 맨 위 — 은행마다 통장 받은 상태 + 회차 밖으로 나간 돈, 처리 안 된 회차별 대조(두 은행 합침).
+ * ★ 배포 스큐: 옛 화면은 맨 위 sync/outside 만 읽는다 → 케이뱅크 값을 그대로 둔다(새 화면은 banks[]).
+ */
+async function bankOverview({ now = Date.now(), env = process.env } = {}) {
+  const cfg = relayConfig(env);
+  const banks = [];
+  for (const bank of BANK_IDS) banks.push(await _bankOverviewOne(bank, now));
+  const kb = banks.find(b => b.bank === 'kbank');
+  return {
+    ok: true, configured: !!cfg,
+    sync: kb.sync, outside: kb.outside,
+    banks: banks.map(({ batches, ...b }) => b),
+    batches: banks.flatMap(b => b.batches),
   };
 }
 
@@ -393,11 +463,11 @@ async function bankOverview({ now = Date.now(), env = process.env } = {}) {
  * 회차 밖으로 나간 돈 — 대량이체 묶음에서 회차 이체 완료(같은 금액·묶음 시각 ±2분)와 취소 반환을 지우고 남은 줄.
  * 아직 처리 전인 회차가 차지한 묶음(pendingClusters)은 그 회차가 정해질 때까지 세지 않는다(거짓 알림 방지).
  */
-function outsideTransfers(rows, paid, pendingClusters = [], now = Date.now()) {
+function outsideTransfers(rows, paid, pendingClusters = [], now = Date.now(), settleMs = SETTLE_MS) {
   const days = new Map();
   let count = 0; let sum = 0; let held = 0;
   for (const c of clusterBulk(rows)) {
-    if (now < c.end + SETTLE_MS) continue;
+    if (now < c.end + settleMs) continue;
     if (pendingClusters.some(p => p.start === c.start)) { held += c.rows.length; continue; }
     const left = _countBy(c.rows, r => r.amount);
     for (const p of paid) {
@@ -458,11 +528,11 @@ async function itemHints(batchId, itemIds) {
 }
 
 module.exports = {
-  BANK_STATUS, BankError,
-  relayConfig, toBankRow, parseTradeDT, depositStampOf, clusterBulk, reconcileBatch, planConfirm, outsideTransfers,
+  BANK_STATUS, BankError, BANKS, BANK_IDS,
+  relayConfig, toBankRow, parseTradeDT, _markHanaRefunds, depositStampOf, clusterBulk, reconcileBatch, planConfirm, outsideTransfers,
   inspectBatch, confirmBatchFromBank, syncBank, bankOverview, itemHints,
   // 결정 302 — 「오늘 확인할 것」(opsCheck.service)이 같은 재료·같은 기준을 쓴다(사본 금지)
-  loadRows: (...a) => _loadRows(...a),
+  loadRows: (...a) => _loadRows(...a),   // (bank, fromMs, toMs)
   TIMING: { SYNC_DAYS, SETTLE_MS, REFUND_WINDOW_MS, CLAIM_SLACK_MS, FIND_WINDOW_MS },
   __setPoolForTest, __setFetchForTest,
 };

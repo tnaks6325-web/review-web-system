@@ -68,10 +68,13 @@ t('#view=payment 딥링크는 admin/master 만 · pick 은 대량이체 id 모�
   assert.match(workdesk, /if\(_VIEW==='payment' && \(STATE\.role==='master'\|\|STATE\.role==='admin'\)\)\{ STATE\.view='payment'; STATE\.pmPickBatch=_PICK\|\|'';/);
   assert.match(workdesk, /\[#&\]pick=\(\[0-9a-fA-F-\]\{36\}\)/);
 });
-t('결과 파일 업로드 버튼은 숨김(스위치 false) · 기능은 남김 · 통장으로 못 정하는 대량이체(하나은행·모르는 금액)는 남김', () => {
+t('결과 파일 업로드 버튼은 숨김(스위치 false) · 기능은 남김 · 통장으로 못 정하는 대량이체(대조 없는 은행·모르는 금액)는 남김', () => {
   assert.match(workdesk, /const _PM_RESULT_UPLOAD_ON=false;/);
   const act = sourceOf('_pmBatchActions');
-  assert.match(act, /const uploadNeeded = b\.bank!=='kbank' \|\| !!\(bkU && \(bkU\.amounts\|\|\[\]\)\.some\(a=>a\.failures==null\)\);/);
+  assert.match(act, /const uploadNeeded = !_PM_BANK_RECONCILED\.includes\(b\.bank\) \|\| !!\(bkU && \(bkU\.amounts\|\|\[\]\)\.some\(a=>a\.failures==null\)\);/);
+  // 결정 303 — 통장 대조 은행 목록 = 서버 BANKS 와 같다(하나은행 포함)
+  assert.match(workdesk, /const _PM_BANK_RECONCILED=\['kbank','hana'\];/);
+  assert.deepStrictEqual(require('../src/services/paymentBank.service').BANK_IDS, ['kbank', 'hana']);
   assert.match(act, /const resultUpload = \(_PM_RESULT_UPLOAD_ON \|\| uploadNeeded\) && /);
   assert.match(sourceOf('_pmUploadResultFile'), /result-auto-apply/);
 });
@@ -114,7 +117,10 @@ t('실제로 그려 본다 — 열린 것은 줄·답 버튼·메모, 끝난 것
   ctx.STATE.tckMgr = '';
   vm.runInContext('_TCK_MQ={matches:true}', ctx);
   const mob = ctx._tckHtml('home');
-  assert.match(mob, /class="tck-row" onclick="_tckSheetOpen\(0\)"><b>#84 대량이체<\/b><span class="tck-rs">통장에 없음 2명 · 모두 답함<\/span>/);
+  assert.match(mob, /class="tck-row" onclick="_tckSheetOpen\(0\)"><b>#84 대량이체<\/b><span class="tck-rs">케이뱅크 · 통장에 없음 2명 · 모두 답함<\/span>/);
+  ctx.STATE.tckItems.push({ id: 3, status: 'open', manager: '', facts: { bank: 'hana', cluster: { date: '10/28', time: '14:53', rowCount: 13, total: 26000 }, batch: null, short: [], shortUnknown: [], outside: [{ key: 'out:2000', amount: 2000, count: 13 }] }, lines: [], answers: {} });
+  assert.match(ctx._tckHtml('home'), /<b>10\/28 14:53 출금<\/b><span class="tck-rs">하나은행 · 답할 것 1개<\/span>/);
+  ctx.STATE.tckItems.pop();
   assert.doesNotMatch(mob, /tck-choice|tck-memo/);
   assert.match(ctx._tckHtml('payment'), /tck-choice/, '입금관리는 휴대폰에서도 카드 그대로');
   vm.runInContext('_TCK_MQ=null', ctx);
