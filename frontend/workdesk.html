@@ -13533,7 +13533,12 @@ async function _pmDepositBackfill(i){
   await _pmLoad(true);
 }
 const _PM_RESULT_UPLOAD_ON=false;
-const _PM_BANK_RECONCILED=['kbank','hana'];   // 통장 자동 대조가 되는 은행(서버 paymentBank BANKS 와 같은 목록)
+/* 통장 자동 대조가 되는 은행 — 서버가 알려 준 목록(개요 banks[])을 따른다(Codex P1 · 배포 스큐).
+   옛 서버·아직 못 받음·실패 = 케이뱅크만(하나은행은 결과 파일 업로드가 남는다 — 기록할 길이 없어지면 안 된다). */
+function _pmReconciledBanks(){
+  const k=STATE.pmBank;
+  return (k && !k.error && Array.isArray(k.banks) && k.banks.length) ? k.banks.map(x=>x.bank) : ['kbank'];
+}
 function _pmBatchActions(b,i){
   if(b.status==='cancelled') return b.resultUploadId ? `<button class="btn sm" onclick="_pmOpenResult(${i})">이체결과 확인</button>` : '';
   const reconcile = b.status==='downloaded' && ((b.paidCount||0)+(b.failedCount||0)>0)
@@ -13542,7 +13547,7 @@ function _pmBatchActions(b,i){
   //   ★ 단 통장으로 정할 수 없는 대량이체는 남긴다(Codex P1): 통장 대조가 없는 은행 · 같은 금액이 통장에 더 찍혀 누가 받았는지 모르는 금액.
   //   결정 303 — 하나은행도 통장 대조를 한다(사용자 확정 2026-10-28).
   const bkU=_pmBankOf(b);
-  const uploadNeeded = !_PM_BANK_RECONCILED.includes(b.bank) || !!(bkU && (bkU.amounts||[]).some(a=>a.failures==null));
+  const uploadNeeded = !_pmReconciledBanks().includes(b.bank) || !!(bkU && (bkU.amounts||[]).some(a=>a.failures==null));
   const resultUpload = (_PM_RESULT_UPLOAD_ON || uploadNeeded) && (b.status==='downloaded' || b.status==='applied')
     ? `<button class="pmdrop" type="button" title="클릭하거나 결과 파일을 끌어 놓으세요" onclick="_pmPickResult(${i})" ondragover="_pmResultDragOver(event)" ondragleave="_pmResultDragLeave(event)" ondrop="_pmResultDrop(event,${i})"><span class="pmdropicon" aria-hidden="true">⇧</span><span>결과 파일 업로드</span></button>` : '';
   const manage = b.status==='downloaded' ? `<button class="btn sm" onclick="_pmRefileByIndex(${i})">⬇ 다시 받기</button>

@@ -71,9 +71,14 @@ t('#view=payment 딥링크는 admin/master 만 · pick 은 대량이체 id 모�
 t('결과 파일 업로드 버튼은 숨김(스위치 false) · 기능은 남김 · 통장으로 못 정하는 대량이체(대조 없는 은행·모르는 금액)는 남김', () => {
   assert.match(workdesk, /const _PM_RESULT_UPLOAD_ON=false;/);
   const act = sourceOf('_pmBatchActions');
-  assert.match(act, /const uploadNeeded = !_PM_BANK_RECONCILED\.includes\(b\.bank\) \|\| !!\(bkU && \(bkU\.amounts\|\|\[\]\)\.some\(a=>a\.failures==null\)\);/);
-  // 결정 303 — 통장 대조 은행 목록 = 서버 BANKS 와 같다(하나은행 포함)
-  assert.match(workdesk, /const _PM_BANK_RECONCILED=\['kbank','hana'\];/);
+  assert.match(act, /const uploadNeeded = !_pmReconciledBanks\(\)\.includes\(b\.bank\) \|\| !!\(bkU && \(bkU\.amounts\|\|\[\]\)\.some\(a=>a\.failures==null\)\);/);
+  // 결정 303 · Codex P1 — 대조 은행은 서버가 알려 준 목록(banks[]) · 옛 서버/못 받음/실패 = 케이뱅크만(하나는 업로드 유지)
+  const rb = new vm.Script(sourceOf('_pmReconciledBanks') + '; _pmReconciledBanks()');
+  const run = pmBank => rb.runInNewContext({ STATE: { pmBank } });
+  assert.deepStrictEqual([...run({ ok: true, banks: [{ bank: 'kbank' }, { bank: 'hana' }] })], ['kbank', 'hana']);
+  assert.deepStrictEqual([...run({ ok: true, sync: {}, outside: {} })], ['kbank'], '옛 서버(banks 없음)');
+  assert.deepStrictEqual([...run(undefined)], ['kbank'], '아직 못 받음');
+  assert.deepStrictEqual([...run({ error: 'x' })], ['kbank'], '실패');
   assert.deepStrictEqual(require('../src/services/paymentBank.service').BANK_IDS, ['kbank', 'hana']);
   assert.match(act, /const resultUpload = \(_PM_RESULT_UPLOAD_ON \|\| uploadNeeded\) && /);
   assert.match(sourceOf('_pmUploadResultFile'), /result-auto-apply/);
