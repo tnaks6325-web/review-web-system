@@ -249,6 +249,27 @@ async function run() {
     const none = await run1({ kind: 'info', sheetId: 'S9', tabName: 'T9' }, 'admin');
     t('★ 미등록 탭 = ok:false + 사유(프론트가 그 문구를 툴팁으로 보여준다)',
       none.b.ok === false && /등록되지 않은 탭/.test(none.b.error) && none.b.kind === 'info', JSON.stringify(none.b));
+    /* ★★ 예전 ⬛ 보관 작업(migration 204) — 옛 대시보드 보관이 tab_configs 를 지워 폴더 바로가기가 꺼졌다.
+       등록행이 없으면 보관 기록의 폴더 주소로 접는다. tab_configs 를 되살리는 쪽으로 고치지 말 것(결정 267). */
+    const archPool = (arch) => async (sql) => {
+      const s = String(sql).replace(/\s+/g, ' ');
+      if (/FROM index_master_archive/.test(s)) { if (arch === 'throw') throw new Error('column "capture_folder_url" does not exist'); return { rows: arch ? [arch] : [] }; }
+      return { rows: [] };
+    };
+    poolMod.query = archPool({ folder_url: 'https://drive.google.com/drive/folders/arev', capture_folder_url: 'https://drive.google.com/drive/folders/acap' });
+    const arch = await run1({ kind: 'info', sheetId: 'SA1', tabName: 'TA1' }, 'staff');
+    t('★★ 보관 작업 = 보관 기록의 폴더 주소로 연다(구매·리뷰 둘 다)',
+      arch.b.ok === true && arch.b.kind === 'info' && /acap$/.test(arch.b.captureFolderUrl) && /arev$/.test(arch.b.folderUrl), JSON.stringify(arch.b));
+    t('★ 보관 작업의 현영 대상 여부는 "모른다" — cashReceipt 를 false 로 꾸미지 않는다',
+      !('cashReceipt' in arch.b), JSON.stringify(arch.b));
+    poolMod.query = archPool({ folder_url: null, capture_folder_url: null });
+    const archNone = await run1({ kind: 'info', sheetId: 'SA2', tabName: 'TA2' }, 'admin');
+    t('★ 보관 기록에 주소가 없으면 그 사유를 말한다(등록 안 된 탭과 구분)',
+      archNone.b.ok === false && /보관된 작업/.test(archNone.b.error), JSON.stringify(archNone.b));
+    poolMod.query = archPool('throw');
+    const archSkew = await run1({ kind: 'info', sheetId: 'SA3', tabName: 'TA3' }, 'admin');
+    t('★ 칸이 아직 없는 DB(배포 직후) = 종전 응답 그대로(500 아님)',
+      archSkew.b.ok === false && /등록되지 않은 탭/.test(archSkew.b.error) && !archSkew.err, JSON.stringify(archSkew));
   }
 
   /* ═══ 4. 프론트 — 렌더러 한 벌 · 재료 정규화 실행 ═══ */
