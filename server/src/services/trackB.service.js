@@ -1285,6 +1285,41 @@ async function _intranetGet(path) {
   } finally { clearTimeout(timer); }
 }
 
+// 입금관리 맨 위 상품구입비 게이지(결정 296) — 인트라넷 리뷰 페이백 장부와 같은 숫자를 받아 그대로 그린다.
+//   인트라넷 GET /api/review-paybacks/gauge(서버간 키 X-Api-Key 로 이 GET 하나만 열림) · 합계 숫자만(리뷰어 이름 없음) · 쓰기 0.
+//   인트라넷이 계약·지급 장부 전체를 다시 계산해서 답하므로 5초가 아니라 15초까지 기다리고, 1분 동안은 받은 값을 다시 쓴다.
+const PAYBACK_GAUGE_CACHE_MS = 60 * 1000;
+let _paybackGaugeCache = { at: 0, data: null };
+async function intranetPaybackGauge({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && _paybackGaugeCache.data && now - _paybackGaugeCache.at < PAYBACK_GAUGE_CACHE_MS) return _paybackGaugeCache.data;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const resp = await fetch(`${_intranetBase()}/api/review-paybacks/gauge`, { signal: ctrl.signal, headers: _intranetHeaders() });
+    // 403 = 인트라넷이 아직 이 통로를 열지 않았거나 키가 다름 — 숫자를 0 으로 꾸미지 않고 "못 받음"으로 알린다
+    if (!resp.ok) return { ok: false, error: resp.status === 403 || resp.status === 401 ? 'intranet_denied' : 'intranet_error' };
+    const j = await resp.json();
+    const g = j && j.gauge;
+    if (!g || typeof g.contract_total !== 'number') return { ok: false, error: 'intranet_error' };
+    const num = v => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+    const data = {
+      ok: true,
+      gauge: {
+        contract_total: num(g.contract_total) || 0, contract_count: num(g.contract_count) || 0, paid_product: num(g.paid_product) || 0,
+        outside: num(g.outside), rest: num(g.rest) || 0, unlinked_paid_product: num(g.unlinked_paid_product) || 0,
+        through: typeof g.through === 'string' ? g.through.slice(0, 10) : null,
+      },
+      fetchedAt: now,
+    };
+    _paybackGaugeCache = { at: now, data };
+    return data;
+  } catch (e) {
+    logger.warn(`[trackB] 인트라넷 상품구입비 게이지 조회 실패: ${e.message}`);
+    return { ok: false, error: 'intranet_unreachable' };
+  } finally { clearTimeout(timer); }
+}
+
 // 계약 검색(링크 UI). C-번호/업체명/작업명 — 인트라넷 범용 테이블 검색 프록시. 이름·상태·금액만 추림.
 let _intraSalesCache = { at: 0, q: null, rows: null };
 async function intranetSalesSearch({ q = '', limit = 30 } = {}) {
@@ -6529,6 +6564,7 @@ module.exports = {
   isRegisteredIntranetAdvertiser, findSameAdvertiser, intranetAdvertiserIndex,
   intranetAdvertisers, intranetStaffUsers, setAdvertiserInadPm,
   intranetSalesSearch,
+  intranetPaybackGauge,
   advertiserForTab,
   intranetSalesForAdvertiser,
   contractCandidatesForTab,
