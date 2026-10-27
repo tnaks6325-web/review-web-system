@@ -4061,6 +4061,10 @@ function _bankErr(err, res, next) {
   }
   return _resultErr(err, res, next);
 }
+// 입금관리 맨 위 상품구입비 게이지(결정 296) — 인트라넷 리뷰 페이백 장부와 같은 숫자(합계만) · 쓰기 0
+router.get('/payment/payback-gauge', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await svc.intranetPaybackGauge({ force: req.query.force === '1' })); } catch (err) { next(err); }
+});
 // 입금관리 맨 위: 통장 받은 상태 · 회차 밖으로 나간 돈 · 처리 안 된 회차별 대조(쓰기 0)
 router.get('/payment/bank', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try { res.json(await paymentBankSvc.bankOverview()); } catch (err) { _bankErr(err, res, next); }

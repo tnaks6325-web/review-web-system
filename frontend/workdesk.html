@@ -2261,6 +2261,21 @@
 .pmh2{font-size:15px;font-weight:750;margin:22px 0 9px}
 #pmbody .pmbatchpanel{margin:18px 0 14px;padding:12px;border:1px solid #D9E1EC;border-radius:8px;background:#fff}
 #pmbody .pmbatchpanel .pmh2{margin:0 0 9px}
+/* 결정 296 — 입금관리 맨 위 상품구입비 게이지(인트라넷 리뷰 페이백 장부와 같은 숫자·같은 모양) */
+#pmbody .pmgauge{margin:0 0 14px;padding:12px 14px;border:1px solid #D9E1EC;border-radius:8px;background:#fff}
+#pmbody .pmgauge-tot{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 18px}
+#pmbody .pmgauge-tot .k{font-size:11.5px;font-weight:700;color:#5B6676}
+#pmbody .pmgauge-tot .v{font-size:18px;font-weight:800;font-variant-numeric:tabular-nums;color:#1F2733}
+#pmbody .pmgauge-tot .v.red{color:#C62F2F}
+#pmbody .pmgauge-tot .v.warn{color:#A66A10}
+#pmbody .pmgauge-tot .s{font-size:11px;color:#8A94A3}
+#pmbody .pmgauge-bar{display:flex;height:16px;margin:10px 0 8px;border-radius:6px;overflow:hidden;background:#EEF1F5}
+#pmbody .pmgauge-leg{display:flex;flex-wrap:wrap;gap:4px 22px;font-size:12px;color:#4A5463}
+#pmbody .pmgauge-leg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+#pmbody .pmgauge-leg b{font-variant-numeric:tabular-nums;color:#1F2733;margin:0 4px}
+#pmbody .pmgauge-leg .red,#pmbody .pmgauge-leg .red b{color:#C62F2F}
+#pmbody .pmgauge-note{margin-top:6px;font-size:11.5px;color:#8A94A3}
+#pmbody .pmgauge-note .warn{color:#A66A10;font-weight:700}
 /* 결정 293 — 케이뱅크 통장 자동 대조 */
 #pmbody .pmbank{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin:0 0 10px;padding:8px 10px;border:1px solid #D9E1EC;border-radius:7px;background:#F7F9FC;font-size:12px}
 #pmbody .pmbank.warn{border-color:#F0D4A8;background:#FFF8ED;color:#80500F}
@@ -12808,6 +12823,7 @@ async function _pmLoad(force){
   }
   _pmPaint();
   _pmBankRefresh(false);   // 결정 293 — 통장 확인(3분 제한은 서버가) · 기다리지 않는다
+  _pmGaugeRefresh();       // 결정 296 — 상품구입비 게이지(인트라넷 숫자, 1분 캐시는 서버가) · 기다리지 않는다
   })();
   _pmLoadInFlight=run;
   try{ return await run; }
@@ -13145,6 +13161,7 @@ function _pmRender(){
   $('#pmbody').innerHTML = `
     <div class="lgwrap" style="max-width:1400px">
       ${_pmTabsHtml()}
+      <div id="pmGauge">${_pmGaugeHtml()}</div>
       ${_pmFilterBar(allItems)}
       <div class="pmstats">
         ${stat('케이뱅크', kb.length+'건')}
@@ -13390,6 +13407,55 @@ async function _pmBankRefresh(force){
   finally{ _pmBankBusy=false; }
   if(reload) return _pmLoad(true);
   _pmBankPaint();
+}
+// 결정 296 — 입금관리 맨 위 상품구입비 게이지. 숫자는 인트라넷 리뷰 페이백 장부가 계산한 그대로(여기서 다시 계산하지 않는다).
+//   상품구입비 총액(계약) − 리뷰웹으로 돌려준 상품값 − 기록 없이 나간 돈 = 남은 상품구입비
+let _pmGaugeBusy=false;
+async function _pmGaugeRefresh(force){
+  if(_pmGaugeBusy) return; _pmGaugeBusy=true;
+  try{
+    const r=await api('/api/trackb/payment/payback-gauge'+(force?'?force=1':''));
+    STATE.pmGauge=(r&&r.ok&&r.gauge)?r:{ error:(r&&r.error)||'intranet_error' };
+  }catch(_){ STATE.pmGauge={ error:'intranet_unreachable' }; }
+  finally{ _pmGaugeBusy=false; }
+  const el=document.getElementById('pmGauge'); if(el) el.innerHTML=_pmGaugeHtml();
+}
+function _pmGaugeHtml(){
+  const st=STATE.pmGauge;
+  if(!st) return '<div class="pmgauge"><span class="muted">상품구입비 총액을 인트라넷에서 받는 중…</span></div>';
+  if(st.error) return `<div class="pmgauge"><span class="muted">상품구입비 총액을 인트라넷에서 받지 못했습니다${st.error==='intranet_denied'?' — 인트라넷 연결 설정을 확인해 주세요':''}.</span> <button class="btn xs" onclick="_pmGaugeRefresh(true)">다시 받기</button></div>`;
+  const G=st.gauge;
+  if(!(G.contract_total>0)) return '';
+  const won=n=>_pmNum(n)+'원';
+  const real=G.outside!==null&&G.outside!==undefined;
+  const outside=real?G.outside:0;
+  const rest=G.rest;
+  const base=Math.max(G.contract_total, G.paid_product+outside);
+  const segs=[
+    { label:'리뷰웹으로 돌려준 상품값', amount:G.paid_product, color:'#2563eb' },
+    ...(real?[{ label:'기록 없이 나간 돈', amount:outside, color:'#ef4444', red:true }]:[]),
+    { label:'남은 상품구입비', amount:Math.max(rest,0), color:'#10b981' },
+  ];
+  const pct=n=>n/base*100;
+  const pctText=n=>{ const p=pct(n); return p>0&&p<1?p.toFixed(1)+'%':Math.round(p)+'%'; };
+  const bar=segs.filter(x=>x.amount>0).map(x=>`<div style="background:${x.color};width:${Math.max(pct(x.amount),0.6).toFixed(2)}%" title="${esc(x.label)} ${won(x.amount)}"></div>`).join('');
+  const leg=segs.map(x=>`<span class="${x.red&&x.amount?'red':''}"><i style="background:${x.color}"></i>${esc(x.label)}<b>${won(x.amount)}</b><span class="muted">${pctText(x.amount)}</span></span>`).join('');
+  const tot=(k,n,sub,cls)=>`<div><div class="k">${k}</div><div class="v ${cls||''}">${n<0?'−':''}${won(Math.abs(n))}</div><div class="s">${sub}</div></div>`;
+  const notes=[];
+  if(rest<0) notes.push(`<span class="warn">계약에 넣은 상품구입비보다 ${won(-rest)} 더 나갔습니다.</span>`);
+  if(G.unlinked_paid_product) notes.push(`계약에 잇지 않은 작업에 돌려준 상품값 ${won(G.unlinked_paid_product)}은 넣지 않았습니다(인트라넷 리뷰 페이백에서 계약을 이으면 들어갑니다).`);
+  if(real) notes.push(`기록 없이 나간 돈은 ${esc(G.through||'')}까지 케이뱅크 실제 내역 기준입니다(인트라넷에서 받은 통장 내역).`);
+  return `<div class="pmgauge">
+    <div class="pmgauge-tot">
+      ${tot('상품구입비 총액',G.contract_total,`계약 ${_pmNum(G.contract_count)}건에 넣은 상품구입비 · 취소·업체입금 제외`)}
+      ${tot('리뷰웹으로 돌려준 상품값',G.paid_product,'리뷰웹 지급 기록(리뷰비 제외)')}
+      ${real?tot('기록 없이 나간 돈',outside,'리뷰웹 기록 없이 케이뱅크에서 나간 돈',outside?'red':''):''}
+      ${tot('남은 상품구입비',rest,'아직 리뷰어에게 돌려주지 않은 상품구입비',rest<0?'warn':'')}
+    </div>
+    <div class="pmgauge-bar">${bar}</div>
+    <div class="pmgauge-leg">${leg}</div>
+    <div class="pmgauge-note">${notes.join(' ')}</div>
+  </div>`;
 }
 function _pmBankPaint(){
   const bar=document.getElementById('pmBankBar'); if(bar) bar.innerHTML=_pmBankBarHtml();
