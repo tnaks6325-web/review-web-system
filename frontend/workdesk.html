@@ -2314,6 +2314,21 @@
 .tck-by{font-size:10.5px;color:var(--faint);flex-basis:100%}
 .tck-ai{font-size:10px;color:var(--faint);border:1px solid var(--line);border-radius:4px;padding:0 5px}
 .tck-ok{font-size:11px;font-weight:800;color:#15803D}
+.tck-row{font:inherit;width:100%;display:flex;align-items:center;gap:8px;margin-top:8px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);text-align:left;cursor:pointer;font-size:12.5px}
+.tck-row b{flex:none}
+.tck-row .tck-rs{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted)}
+.tck-row .tck-go{flex:none;color:var(--faint);font-size:15px}
+#tckSheet{position:fixed;inset:0;z-index:4000;visibility:hidden}
+#tckSheet.on{visibility:visible}
+#tckSheet .tck-bg{position:absolute;inset:0;background:rgba(15,23,42,.45);opacity:0;transition:opacity .2s;pointer-events:none}
+#tckSheet.on .tck-bg{opacity:1;pointer-events:auto}
+#tckSheet .tck-panel{position:absolute;left:0;right:0;bottom:0;max-height:86vh;overflow:auto;background:var(--card);border-radius:16px 16px 0 0;padding:8px 12px calc(16px + env(safe-area-inset-bottom));transform:translateY(100%);transition:transform .25s ease-out}
+#tckSheet.on .tck-panel{transform:translateY(0)}
+#tckSheet .tck-grab{width:40px;height:4px;border-radius:2px;background:var(--line);margin:2px auto 8px}
+#tckSheet .tck-sh{display:flex;align-items:center;gap:8px;margin-bottom:2px}
+#tckSheet .tck-sh b{flex:1;font-size:14px}
+#tckSheet .tck-card{margin-top:6px}
+@media (prefers-reduced-motion:reduce){#tckSheet .tck-panel,#tckSheet .tck-bg{transition:none}}
 .tck-donerow{display:flex;gap:8px;align-items:center;padding:7px 11px;margin-top:8px;border:1px dashed var(--line);border-radius:9px;font-size:12px;color:var(--faint)}
 #pmbody .pmbatchpanel .lgwrap{margin:0}
 #pmbody .pmbatchpanel .pm-batch-scroll{max-height:calc(10 * 48px + 38px);overflow-y:auto;overscroll-behavior:contain}
@@ -2569,9 +2584,11 @@ table.lgtable.pm-unconfirmed-two-row-table{width:100%;min-width:0;table-layout:f
    AE 는 확인할 것이 없으므로 종전 한 줄 그대로(.two 없음). 1000px 이하는 위아래로 쌓는다. */
 .hm-top.two{display:grid;grid-template-columns:minmax(300px,.8fr) minmax(0,1.2fr);gap:14px;align-items:stretch}
 .hm-top.two .hm-hero{display:flex;flex-direction:column}
-.hm-top.two .hm-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 0;margin-top:auto;padding-top:18px}
-.hm-top.two .hm-st{padding:0 14px;border-left:1px solid rgba(255,255,255,.2)}
-.hm-top.two .hm-st:nth-child(odd){padding-left:0;border-left:0}
+@media(min-width:721px){
+  .hm-top.two .hm-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 0;margin-top:auto;padding-top:18px}
+  .hm-top.two .hm-st{padding:0 14px;border-left:1px solid rgba(255,255,255,.2)}
+  .hm-top.two .hm-st:nth-child(odd){padding-left:0;border-left:0}
+}
 #hmwrap .hm-top.two #tckHomeMount .tck-wrap{margin-top:0;height:100%;box-sizing:border-box;max-height:420px;overflow:auto}
 @media(max-width:1000px){.hm-top.two{grid-template-columns:1fr} #hmwrap .hm-top.two #tckHomeMount .tck-wrap{max-height:none}}
 .hm-wrap{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px;align-items:start;margin-top:16px}
@@ -2596,16 +2613,16 @@ table.lgtable.pm-unconfirmed-two-row-table{width:100%;min-width:0;table-layout:f
    데스크톱 표는 그대로 두고 720px 이하에서만 같은 행을 카드로 재배치한다. */
 @media(max-width:720px){
   #hmwrap{margin:-18px -22px;padding:12px 12px 28px;max-width:none}
-  .hm-hero{border-radius:16px;padding:20px 18px 18px;box-shadow:0 10px 26px rgba(37,99,235,.18)}
+  .hm-hero{border-radius:14px;padding:14px 16px 13px;box-shadow:0 8px 20px rgba(37,99,235,.16)}
   .hm-hero::after{right:-96px;top:-110px;width:250px;height:250px}
   .hm-hero::before{right:32px;bottom:-150px;width:230px;height:230px}
-  .hm-hi{font-size:20px;line-height:1.35;padding-right:18px}
-  .hm-sub{font-size:11px;line-height:1.55;margin-top:7px;max-width:280px}
-  .hm-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 0;margin-top:18px}
-  .hm-st{padding:2px 12px;border-left:1px solid rgba(255,255,255,.2)}
-  .hm-st:nth-child(odd){padding-left:0;border-left:0}
-  .hm-st .n{font-size:24px;line-height:1.15}
-  .hm-st .l{font-size:10.5px;margin-top:2px}
+  .hm-hi{font-size:16px;line-height:1.35;padding-right:18px}
+  .hm-sub{font-size:10.5px;line-height:1.45;margin-top:2px}
+  .hm-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;margin-top:11px}
+  .hm-st{padding:0 7px;border-left:1px solid rgba(255,255,255,.2);min-width:0}
+  .hm-st:first-child{padding-left:0;border-left:0}
+  .hm-st .n{font-size:19px;line-height:1.15}
+  .hm-st .l{font-size:10px;margin-top:1px;letter-spacing:-.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .hm-wrap{display:flex;flex-direction:column;gap:12px;margin-top:12px}
   .hm-brief{order:1;border-radius:13px;padding:12px 13px 8px}
   .hm-grid{order:2;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
@@ -15356,10 +15373,59 @@ async function _tckLoad(){
 }
 function _tckPaint(){
   const home=document.getElementById('tckHomeMount'); if(home) home.innerHTML=_tckHtml('home');
+  _tckSheetRender();
   const pay=document.getElementById('pmTodayChecks'); if(pay) pay.innerHTML=_tckHtml('payment');
   // #view=payment&pick= 로 들어왔으면 대량이체를 받은 뒤 한 번만 고르기 창을 연다
   const pick=STATE.pmPickBatch;
   if(pay && pick){ STATE.pmPickBatch=''; _pmOpenBankPickById(pick); }
+}
+/* 휴대폰 홈(720px 이하) — 한 건에 한 줄만 보이고, 누르면 아래에서 위로 올라오는 창에 전체 내용(사용자 확정 2026-10-28).
+   같은 칸이 화면에 두 번 그려지지 않게(메모 칸 id 중복 방지) 폭으로 그리기 자체를 고른다 · 폭이 바뀌면 다시 그린다. */
+const _TCK_MQ = (typeof matchMedia==='function') ? matchMedia('(max-width:720px)') : null;
+function _tckCompact(){ return !!(_TCK_MQ && _TCK_MQ.matches); }
+if(_TCK_MQ && _TCK_MQ.addEventListener) _TCK_MQ.addEventListener('change',()=>{ if(!_tckCompact()) _tckSheetClose(); if(STATE.tckItems) _tckPaint(); });
+window.addEventListener('popstate',()=>{ if(STATE.tckSheetId!=null) _tckSheetClose(); });   // 뒤로 가기로 화면을 옮기면 창도 닫는다
+function _tckRowHtml(c,i){
+  const f=c.facts||{}; const bits=[];
+  const miss=(f.short||[]).reduce((n,x)=>n+(Number(x.failures)||0),0);
+  if(miss) bits.push(`통장에 없음 ${_tckNum(miss)}명`);
+  if((f.shortUnknown||[]).length) bits.push('통장만으로 모름');
+  const outs=f.outside||[];
+  if(outs.length){
+    const left=outs.filter(o=>{ const a=(c.answers||{})[o.key]; return !a || a.choice==='unknown'; }).length;
+    bits.push(left ? `답할 것 ${_tckNum(left)}개` : '모두 답함');
+  }
+  return `<button type="button" class="tck-row" onclick="_tckSheetOpen(${i})"><b>${_tckTitle(f)}</b><span class="tck-rs">${esc(bits.join(' · '))}</span><span class="tck-go" aria-hidden="true">›</span></button>`;
+}
+function _tckSheetOpen(i){
+  const c=(STATE.tckView||[])[i]; if(!c) return;
+  STATE.tckSheetId=c.id;
+  _tckSheetRender();
+}
+function _tckSheetClose(){
+  STATE.tckSheetId=null;
+  const el=document.getElementById('tckSheet'); if(el) el.classList.remove('on');
+  document.body.style.overflow='';
+}
+/** 창이 열려 있으면 최신 목록으로 다시 그린다 — 답을 저장하면 목록이 바뀌므로 그때마다 여기로 온다(스크롤 위치는 지킨다) */
+function _tckSheetRender(){
+  if(STATE.tckSheetId==null) return;
+  const list=STATE.tckView||[];
+  const i=list.findIndex(x=>x.id===STATE.tckSheetId);
+  const c=list[i];
+  if(!c || c.status!=='open' || !document.getElementById('tckHomeMount')){ _tckSheetClose(); return; }
+  let el=document.getElementById('tckSheet');
+  if(!el){
+    el=document.createElement('div'); el.id='tckSheet'; el.setAttribute('role','dialog'); el.setAttribute('aria-modal','true');
+    document.body.appendChild(el);
+  }
+  const wasOn=el.classList.contains('on');
+  const prev=el.querySelector('.tck-panel'); const top=prev?prev.scrollTop:0;
+  el.innerHTML=`<div class="tck-bg" onclick="_tckSheetClose()"></div><div class="tck-panel"><div class="tck-grab"></div>
+    <div class="tck-sh"><b>오늘 확인할 것</b><button type="button" class="btn sm" onclick="_tckSheetClose()">닫기</button></div>${_tckCardHtml(c,i,'home')}</div>`;
+  document.body.style.overflow='hidden';
+  if(!wasOn){ void el.offsetHeight; el.classList.add('on'); }   // 처음 열 때만 아래에서 올라온다
+  else el.querySelector('.tck-panel').scrollTop=top;
 }
 function _tckTitle(f){
   const c=(f&&f.cluster)||{};
@@ -15387,9 +15453,10 @@ function _tckHtml(where){
   const chip=(v,l)=>`<button type="button" class="tck-mgr ${mgr===v?'on':''}" onclick="_tckSetMgr(${v?managers.indexOf(v):-1})">${esc(l)}</button>`;
   const head=`<div class="tck-hd"><span class="tck-t">오늘 확인할 것</span>${open.length?`<span class="tck-n">${open.length}</span>`:''}<span class="sp"></span>${managers.length?chip('','전체')+managers.map(m=>chip(m,m)).join(''):''}</div>`;
   if(!list.length) return `<div class="tck-wrap">${head}<div class="tck-empty">지금 확인할 것이 없습니다.</div></div>`;
+  const compact=where==='home' && _tckCompact();
   const cards=list.map((c,i)=>c.status==='done'
     ? `<div class="tck-donerow"><span class="tck-ok">✓ 처리 완료</span><span>${_tckTitle(c.facts)}</span><span class="tck-sub">${esc(c.doneBy||'')}</span></div>`
-    : _tckCardHtml(c,i,where)).join('');
+    : compact ? _tckRowHtml(c,i) : _tckCardHtml(c,i,where)).join('');
   return `<div class="tck-wrap">${head}${cards}</div>`;
 }
 function _tckCardHtml(c,i,where){

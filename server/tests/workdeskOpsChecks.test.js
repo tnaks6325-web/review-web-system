@@ -26,7 +26,7 @@ function sourceOf(name) {
 let n = 0;
 function t(name, fn) { fn(); n++; console.log('  ✓ ' + name); }
 
-const TCK_FNS = ['_tckLoad', '_tckPaint', '_tckTitle', '_tckSub', '_tckNum', '_tckWhen', '_tckVisible', '_tckHtml', '_tckCardHtml', '_tckSetMgr', '_tckGo', '_tckPick', '_tckSave', '_tckAnswer', '_tckMemo', '_tckMessage', '_tckCopy'];
+const TCK_FNS = ['_tckLoad', '_tckPaint', '_tckTitle', '_tckSub', '_tckNum', '_tckWhen', '_tckVisible', '_tckHtml', '_tckCardHtml', '_tckSetMgr', '_tckGo', '_tckPick', '_tckSave', '_tckAnswer', '_tckMemo', '_tckMessage', '_tckCopy', '_tckCompact', '_tckRowHtml', '_tckSheetOpen', '_tckSheetClose', '_tckSheetRender'];
 const tckSrc = TCK_FNS.map(sourceOf).join('\n');
 
 t('onclick 에는 인덱스만 — 작업명·키·id 를 문자열로 끼우지 않는다', () => {
@@ -49,6 +49,13 @@ t('홈 위쪽 = 왼쪽 인사 · 오른쪽 확인할 것(admin/master 만 두 �
   assert.match(workdesk, /<div class="hm-top\$\{isAdmin\?' two':''\}">\s*<div class="hm-hero">[\s\S]{0,1200}\$\{isAdmin\?'<div id="tckHomeMount"><\/div>':''\}\s*<\/div>\s*<div id="wblMount">/);
   assert.match(workdesk, /\.hm-top\.two\{display:grid;grid-template-columns:minmax\(300px,\.8fr\) minmax\(0,1\.2fr\)/);
   assert.match(workdesk, /@media\(max-width:1000px\)\{\.hm-top\.two\{grid-template-columns:1fr\}/);
+});
+t('휴대폰 창 — 답을 저장하면 다시 그린다 · 처리 완료·목록 밖이면 닫는다 · 처음 열 때만 올라온다', () => {
+  assert.match(sourceOf('_tckPaint'), /_tckHtml\('home'\);\n  _tckSheetRender\(\);/);
+  const r = sourceOf('_tckSheetRender');
+  assert.match(r, /if\(!c \|\| c\.status!=='open' \|\| !document\.getElementById\('tckHomeMount'\)\)\{ _tckSheetClose\(\); return; \}/);
+  assert.match(r, /_tckCardHtml\(c,i,'home'\)/);
+  assert.match(workdesk, /#tckSheet\.on \.tck-panel\{transform:translateY\(0\)\}/);
 });
 t('[바로 가기] = 새 탭 · 로그인을 이어받도록 noopener 없음 · 입금관리 + 그 대량이체', () => {
   const go = sourceOf('_tckGo');
@@ -81,7 +88,7 @@ t('실제로 그려 본다 — 열린 것은 줄·답 버튼·메모, 끝난 것
   const ctx = { STATE: {}, esc: s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])),
     document: { getElementById: () => null }, toast() {}, location: { pathname: '/workdesk' } };
   vm.createContext(ctx);
-  vm.runInContext('const TCK_CHOICES=[["direct","리뷰비·페이백 직접 보냄"],["not_reviewer","리뷰어 돈 아님"],["unknown","모르겠음"]];\n' + tckSrc, ctx);
+  vm.runInContext('var _TCK_MQ=null;\nconst TCK_CHOICES=[["direct","리뷰비·페이백 직접 보냄"],["not_reviewer","리뷰어 돈 아님"],["unknown","모르겠음"]];\n' + tckSrc, ctx);
   const facts = { cluster: { date: '10/27', time: '12:41', rowCount: 118, total: 2687370 }, batch: { id: 'x', seq: 84 },
     short: [{ amount: 19800, failures: 2 }], shortUnknown: [], outside: [{ key: 'out:1000', amount: 1000, count: 22 }] };
   ctx.STATE.tckItems = [
@@ -103,6 +110,15 @@ t('실제로 그려 본다 — 열린 것은 줄·답 버튼·메모, 끝난 것
   ctx._tckSetMgr(1);   // 정렬된 담당자 [만두, 망고] 의 두 번째
   assert.strictEqual(ctx.STATE.tckMgr, '망고');
   assert.doesNotMatch(ctx._tckHtml('home'), /#84 대량이체/);
+  // 휴대폰 홈 — 한 건에 한 줄(카드·답 버튼은 안 그린다) · 누르면 아래에서 올라오는 창
+  ctx.STATE.tckMgr = '';
+  vm.runInContext('_TCK_MQ={matches:true}', ctx);
+  const mob = ctx._tckHtml('home');
+  assert.match(mob, /class="tck-row" onclick="_tckSheetOpen\(0\)"><b>#84 대량이체<\/b><span class="tck-rs">통장에 없음 2명 · 모두 답함<\/span>/);
+  assert.doesNotMatch(mob, /tck-choice|tck-memo/);
+  assert.match(ctx._tckHtml('payment'), /tck-choice/, '입금관리는 휴대폰에서도 카드 그대로');
+  vm.runInContext('_TCK_MQ=null', ctx);
+  ctx.STATE.tckMgr = '망고';
   const msg = ctx._tckMessage(ctx.STATE.tckItems[0]);
   assert.match(msg, /\[#84 대량이체\] 확인 부탁드립니다/);
   assert.match(msg, /1,000원 × 22건 <b> → 리뷰비·페이백 직접 보냄 \(누룽칩\)/);
