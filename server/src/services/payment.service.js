@@ -1955,7 +1955,9 @@ function _batchView(b) {
   // 미확인 이체는 이 회차 밖 결과다. 회차 성공/실패 수에 섞지 않고 별도로 보여 준다.
   const resultSuccessCount = Math.min(itemCount, Math.max(Number(b.result_success_count || 0), Number(paidCount || 0)));
   // 결과 파일이 있으면 성공으로 매칭되지 않은 회차 항목은 이체실패(결과없음)로 처리한다.
-  const resultFailedCount = b.result_upload_id
+  // 결정 293: 통장 확정은 '확인 필요' 건(pending)을 남길 수 있다 — 그건 실패가 아니다(실제 실패 수만).
+  const resultSource = (b.result_summary && b.result_summary.source === 'bank') ? 'bank' : 'file';
+  const resultFailedCount = b.result_upload_id && resultSource === 'file'
     ? Math.max(Number(b.result_failed_count || 0), Number(failedCount || 0), Math.max(0, itemCount - resultSuccessCount))
     : Math.max(Number(b.result_failed_count || 0), Number(failedCount || 0));
   return {
@@ -1969,6 +1971,7 @@ function _batchView(b) {
     failedCount,
     pendingCount: b.pending_count == null ? undefined : Number(b.pending_count),
     resultUploadId: b.result_upload_id || '',
+    resultSource,
     resultFileName: b.result_file_name || '',
     resultRowCount: b.result_row_count == null ? undefined : Number(b.result_row_count),
     resultSuccessCount,

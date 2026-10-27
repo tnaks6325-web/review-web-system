@@ -193,6 +193,40 @@ function _pairView(p) {
  * 파일을 해석하고 회차 건과 짝을 맞춘다(쓰기 0).
  * @returns {{batch, parse, pairs, view, unmatchedResults, orderAssigned, summary}}
  */
+/**
+ * 다른 회차 결과 파일을 이 회차에 올리는 것을 막는다(결정 293 — 2026-10 76회차에 78회차 파일이 올라가 가짜 '미확인' 251건).
+ * 파일 줄의 계좌+금액이 이 회차와는 절반도 안 맞고, 앞뒤 14일 안의 다른 한 회차와 80% 이상 맞으면 거부한다.
+ * ★ 두 회차를 한 번에 이체한 파일(각각 절반쯤 맞음)은 막지 않는다. 줄이 5개 미만이면 판단하지 않는다.
+ */
+async function _assertFileBelongsToBatch(b, items, fileRows) {
+  const rows = (fileRows || []).filter(r => r && r.accountDigits);
+  if (rows.length < 5) return;
+  const keyOf = (acct, amount) => `${digitsOnly(acct)}|${Number(amount) || 0}`;
+  const overlap = (list) => {
+    const have = new Map();
+    for (const it of list) { const k = keyOf(it.bankAccount != null ? it.bankAccount : it.bank_account, it.amount); have.set(k, (have.get(k) || 0) + 1); }
+    let n = 0;
+    for (const r of rows) { const k = keyOf(r.accountDigits, r.amount); if ((have.get(k) || 0) > 0) { have.set(k, have.get(k) - 1); n++; } }
+    return n;
+  };
+  const mine = overlap(items);
+  if (mine * 2 >= rows.length) return;
+  const { rows: others } = await _db().query(
+    `SELECT b.id, b.seq, i.bank_account, i.amount
+       FROM payment_batches b JOIN payment_batch_items i ON i.batch_id = b.id
+      WHERE b.id <> $1 AND b.bank = $2 AND b.status <> 'cancelled'
+        AND b.created_at BETWEEN $3::timestamptz - INTERVAL '14 days' AND $3::timestamptz + INTERVAL '14 days'`,
+    [b.id, b.bank, b.created_at]);
+  const byBatch = new Map();
+  for (const r of others) { if (!byBatch.has(r.id)) byBatch.set(r.id, { seq: r.seq, items: [] }); byBatch.get(r.id).items.push(r); }
+  let best = null;
+  for (const v of byBatch.values()) { const n = overlap(v.items); if (!best || n > best.n) best = { seq: v.seq, n }; }
+  if (best && best.n * 5 >= rows.length * 4) {
+    throw new ResultError('wrong_batch',
+      `이 파일은 #${best.seq} 회차 결과로 보입니다(이 회차와 맞는 줄 ${mine}/${rows.length} · #${best.seq} 회차와 ${best.n}/${rows.length}). #${best.seq} 회차에 올려 주세요.`);
+  }
+}
+
 async function _analyze(batchId, fileName, base64) {
   if (!batchId) throw new ResultError('bad_request', '회차를 지정해 주세요.');
   if (!base64) throw new ResultError('bad_request', '파일이 비어 있습니다.');
@@ -215,6 +249,7 @@ async function _analyze(batchId, fileName, base64) {
   const { rows: itemRows } = await _db().query(
     `SELECT * FROM payment_batch_items WHERE batch_id = $1 ORDER BY created_at, id`, [batchId]);
   const items = itemRows.map(_itemView);
+  await _assertFileBelongsToBatch(b, items, parse.rows);
 
   /* ★ 짝맞추기 대상은 **아직 처리되지 않은 건(pending)** 뿐 —
        이미 paid 인 건을 대상에 넣으면 같은 결과 줄을 두 번 소비해 뒤 건이 "결과 없음"이 된다. */
@@ -365,7 +400,7 @@ async function getLatestResultPreview(batchId) {
   const { rows: [row] } = await _db().query(
     `SELECT id, file_name, uploaded_at, applied, file_blob, file_blob IS NOT NULL AS has_file, summary
        FROM payment_result_uploads
-      WHERE batch_id = $1
+      WHERE batch_id = $1 AND COALESCE(file_format, '') <> 'bank'   -- 통장 확정 기록(결정 293)은 파일 미리보기가 없다
       ORDER BY uploaded_at DESC, id DESC LIMIT 1`, [batchId]);
   const preview = row && row.summary && row.summary.preview;
   if (!preview || !Array.isArray(preview.items)) return { ok: true, found: false };
@@ -1076,6 +1111,134 @@ async function _notifyFailures(items, by) {
  * 반영 — 성공 건만 입금 기록. **서버가 파일을 다시 해석한다.**
  * @param {boolean} [notifyFailed] false 면 실패 안내(1:1문의)를 보내지 않는다(기본 = 보냄).
  */
+/**
+ * 회차 확정 기록의 단일 경로 — 결과 파일 반영(applyResultFile)과 통장 확정(confirmBatchFromBank)이 함께 쓴다(결정 293).
+ * ★ 둘이 따로 기록하면 입금 원장·작업보드 입금칸·실패 안내가 갈린다 — 반드시 이 함수 하나로만 쓴다.
+ *   paid   : [{ item, paidAtIso, statusRaw, seq, stamp }]  → status='pending' 인 건만 paid(조건부 UPDATE · 이중입금 0)
+ *   failed : [{ item, statusRaw, seq, reason }]            → status='pending' 인 건만 failed(안내는 아직 안 보낸 건만)
+ *   markApplied : true 면 회차를 applied 로(남은 pending 이 있어도 — 결과 파일은 전건을 정한다)
+ *                 'when_done' 이면 남은 pending 이 0 일 때만(통장 확정은 '확인 필요' 건을 남길 수 있다)
+ *   recordUpload(client, { paidCount, failedCount, remaining }) : 같은 트랜잭션 안에서 결과 기록 한 줄을 남긴다
+ */
+async function _commitBatchOutcome({ batchId, by, notifyFailed, duplicateSha = null, paid = [], failed = [], markApplied = true, recordUpload }) {
+  const paidItems = [];     // 배경 입금칸 기록 대상(성공 건)
+  const failedItems = [];   // 실패 안내(1:1문의) 대상 — 아직 안내를 보내지 않은 건만
+  let failedCount = 0;
+  let remaining = 0;
+  const client = await _db().connect();
+  try {
+    await client.query('BEGIN');
+
+    if (duplicateSha) {
+      // Serialize same-file uploads before changing any payment item.  A hash
+      // collision can only wait; it can never create a second payment.
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [duplicateSha.sha]);
+      const { rows: priorApplied } = await client.query(
+        `SELECT id FROM payment_result_uploads
+          WHERE file_sha256 = $1 AND applied = TRUE AND id <> $2
+          LIMIT 1`, [duplicateSha.sha, duplicateSha.uploadId || '']);
+      if (priorApplied.length) {
+        throw new ResultError('duplicate_file', '이미 반영된 동일 이체결과 파일입니다. 중복 이체 여부를 확인해 주세요.');
+      }
+    }
+
+    // 회차 행 잠금 — 동시에 두 사람이 같은 회차에 파일을 올리거나 통장 확정이 겹치는 경합 차단
+    const { rows: [b] } = await client.query(
+      `SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE`, [batchId]);
+    if (!b) throw new ResultError('not_found', '회차를 찾을 수 없습니다.');
+    if (b.status === 'cancelled') throw new ResultError('cancelled', '취소된 회차입니다.');
+
+    for (const p of paid) {
+      const it = p.item;
+      /* ★ 조건부 UPDATE — `status='pending'` 인 건만 바꾼다.
+           잠금을 잡기 전에 다른 요청이 먼저 처리했다면 rowCount 0 으로 조용히 건너뛴다(이중입금 0). */
+      const r = await client.query(
+        `UPDATE payment_batch_items
+            SET status = 'paid', paid_at = COALESCE($2::timestamptz, NOW()),
+                result_status = $3, result_seq = $4, fail_reason = NULL
+          WHERE id = $1 AND status = 'pending'`,
+        [it.id, p.paidAtIso || null, p.statusRaw || '', p.seq == null ? null : p.seq]);
+      if (!r.rowCount) continue;
+      paidItems.push({
+        sheetId: it.sheetId, tabName: it.tabName, rowIndex: it.rowIndex,
+        reviewerName: it.reviewerName, amount: String(it.amount || ''), feeOnly: _feeOnly(it),
+        depositColKey: null, gid: '',
+        stamp: p.stamp || '',
+        paidAt: p.paidAtIso || null,
+      });
+    }
+
+    for (const p of failed) {
+      const it = p.item;
+      const r = await client.query(
+        `UPDATE payment_batch_items
+            SET status = 'failed', result_status = $2, result_seq = $3, fail_reason = $4
+          WHERE id = $1 AND status = 'pending'
+        RETURNING notified_at`,
+        [it.id, p.statusRaw || '', p.seq == null ? null : p.seq, p.reason || '이체 실패']);
+      if (r.rowCount) failedCount++;
+      // ★ 이미 안내를 보낸 건은 다시 보내지 않는다(재반영 시 도배 방지)
+      if (r.rowCount && !r.rows[0].notified_at) failedItems.push(it);
+    }
+
+    /* ★ 입금 기록(review_index PAID + payment_records)은 같은 트랜잭션 안에서 —
+         회차 항목만 paid 로 바뀌고 원장이 안 남는 어긋난 상태를 만들지 않는다. */
+    if (paidItems.length) await recordDeposits(client, paidItems, { by: by || '' });
+
+    // 입금칸 열쇠(submit_col2)·gid 를 그 행의 검색 인덱스에서 채운다(시트 경로에 필요)
+    if (paidItems.length) {
+      const { rows: metaRows } = await client.query(
+        `SELECT sheet_id, tab_name, row_index, submit_col2, tab_gid
+           FROM review_index
+          WHERE (sheet_id, tab_name, row_index) IN (${
+            paidItems.map((_, i) => `($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`).join(',')})`,
+        paidItems.flatMap(x => [x.sheetId, x.tabName, x.rowIndex]));
+      const metaMap = new Map(metaRows.map(r => [`${r.sheet_id}\u0000${r.tab_name}\u0000${r.row_index}`, r]));
+      for (const x of paidItems) {
+        const meta = metaMap.get(`${x.sheetId}\u0000${x.tabName}\u0000${x.rowIndex}`);
+        if (meta) { x.depositColKey = meta.submit_col2 || null; x.gid = meta.tab_gid || ''; }
+      }
+    }
+
+    ({ rows: [{ n: remaining }] } = await client.query(
+      `SELECT COUNT(*)::int AS n FROM payment_batch_items WHERE batch_id = $1 AND status = 'pending'`,
+      [batchId]));
+    if (markApplied === true || (markApplied === 'when_done' && remaining === 0)) {
+      await client.query(
+        `UPDATE payment_batches SET status = 'applied', applied_at = NOW(), applied_by = $2 WHERE id = $1`,
+        [batchId, by || '']);
+    }
+
+    if (recordUpload) await recordUpload(client, { paidCount: paidItems.length, failedCount, remaining });
+
+    await client.query('COMMIT');
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  /* ★ 결과 반영은 반환 전에 작업보드 입금칸 쓰기 결과까지 확인한다.
+       ★ 날짜는 건별 실제 이체일(item.stamp)만 사용한다. */
+  const boardItems = paidItems.filter(x => x.stamp);
+  const undatedPaid = paidItems.length - boardItems.length;
+  const board = await _writeBoardDeposits(boardItems, { by: by || 'payment' });
+  board.skipped += undatedPaid;
+  const boardStamp = [...new Set(boardItems.map(x => x.stamp))].join(', ');
+  await _saveBoardWriteOutcome({ batchId, outcome: board, stamp: boardStamp, by: by || 'payment' });
+
+  // 실패 안내(1:1문의) — 기본 켬(사용자 확정 ⑤). 커밋 뒤에 보낸다(전송 실패가 반영을 되돌리지 않게).
+  let notified = 0;
+  if (notifyFailed !== false && failedItems.length) {
+    notified = await _notifyFailures(failedItems, by).catch(e => {
+      logger.warn(`[paymentResult] 실패 안내 전송 예외: ${e.message}`);
+      return 0;
+    });
+  }
+  return { paidItems, failedCount, remaining, board, notified, notifyTargets: failedItems.length };
+}
+
 async function applyResultFile({ batchId, fileName, base64, uploadId, by, notifyFailed, preventDuplicate = false }) {
   if (uploadId) {
     const { rows: [stored] } = await _db().query(
@@ -1102,105 +1265,7 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
     throw new ResultError('empty', '이 회차에 반영할 결과가 없습니다(결과 파일과 짝지어진 건이 0건입니다).');
   }
 
-  const paidItems = [];     // 배경 입금칸 기록 대상(성공 건)
-  const failedItems = [];   // 실패 안내(1:1문의) 대상 — 아직 안내를 보내지 않은 건만
-  const client = await _db().connect();
-  try {
-    await client.query('BEGIN');
-
-    if (preventDuplicate) {
-      // Serialize same-file uploads before changing any payment item.  A hash
-      // collision can only wait; it can never create a second payment.
-      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [fileSha256]);
-      const { rows: priorApplied } = await client.query(
-        `SELECT id FROM payment_result_uploads
-          WHERE file_sha256 = $1 AND applied = TRUE AND id <> $2
-          LIMIT 1`, [fileSha256, uploadId || '']);
-      if (priorApplied.length) {
-        throw new ResultError('duplicate_file', '이미 반영된 동일 이체결과 파일입니다. 중복 이체 여부를 확인해 주세요.');
-      }
-    }
-
-    // 회차 행 잠금 — 동시에 두 사람이 같은 회차에 파일을 올리는 경합 차단
-    const { rows: [b] } = await client.query(
-      `SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE`, [batchId]);
-    if (!b) throw new ResultError('not_found', '회차를 찾을 수 없습니다.');
-    if (b.status === 'cancelled') throw new ResultError('cancelled', '취소된 회차입니다.');
-
-    for (const p of success) {
-      const it = p.item;
-      const paidAtIso = p.result.transferredAtIso || null;
-      /* ★ 조건부 UPDATE — `status='pending'` 인 건만 바꾼다.
-           잠금을 잡기 전에 다른 요청이 먼저 처리했다면 rowCount 0 으로 조용히 건너뛴다(이중입금 0). */
-      const r = await client.query(
-        `UPDATE payment_batch_items
-            SET status = 'paid', paid_at = COALESCE($2::timestamptz, NOW()),
-                result_status = $3, result_seq = $4, fail_reason = NULL
-          WHERE id = $1 AND status = 'pending'`,
-        [it.id, paidAtIso, p.result.statusRaw || '', p.result.seq]);
-      if (!r.rowCount) continue;
-      paidItems.push({
-        sheetId: it.sheetId, tabName: it.tabName, rowIndex: it.rowIndex,
-        reviewerName: it.reviewerName, amount: String(it.amount || ''), feeOnly: _feeOnly(it),
-        depositColKey: null, gid: '',
-        stamp: _depositDateFromResultStamp(p.result.transferredStamp),
-        paidAt: paidAtIso,
-      });
-    }
-
-    for (const p of failed) {
-      const it = p.item;
-      const r = await client.query(
-        `UPDATE payment_batch_items
-            SET status = 'failed', result_status = $2, result_seq = $3, fail_reason = $4
-          WHERE id = $1 AND status = 'pending'
-        RETURNING notified_at`,
-        [it.id, p.result.statusRaw || '', p.result.seq,
-         `이체 실패 — 은행 처리상태: ${p.result.statusRaw || '(빈 값)'}`]);
-      // ★ 이미 안내를 보낸 건은 다시 보내지 않는다(재반영 시 도배 방지)
-      if (r.rowCount && !r.rows[0].notified_at) failedItems.push(it);
-    }
-
-    for (const p of notInFile) {
-      const it = p.item;
-      const r = await client.query(
-        `UPDATE payment_batch_items
-            SET status = 'failed', result_status = $2, result_seq = NULL, fail_reason = $3
-          WHERE id = $1 AND status = 'pending'
-        RETURNING notified_at`,
-        [it.id, '결과 파일에 없음', '이체 실패 — 결과 파일에 해당 이체내역 없음']);
-      if (r.rowCount && !r.rows[0].notified_at) failedItems.push(it);
-    }
-
-    /* ★ 입금 기록(review_index PAID + payment_records)은 같은 트랜잭션 안에서 —
-         회차 항목만 paid 로 바뀌고 원장이 안 남는 어긋난 상태를 만들지 않는다. */
-    const updated = paidItems.length
-      ? await recordDeposits(client, paidItems, { by: by || '' })
-      : 0;
-
-    // 입금칸 열쇠(submit_col2)·gid 를 그 행의 검색 인덱스에서 채운다(시트 경로에 필요)
-    if (paidItems.length) {
-      const { rows: metaRows } = await client.query(
-        `SELECT sheet_id, tab_name, row_index, submit_col2, tab_gid
-           FROM review_index
-          WHERE (sheet_id, tab_name, row_index) IN (${
-            paidItems.map((_, i) => `($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`).join(',')})`,
-        paidItems.flatMap(x => [x.sheetId, x.tabName, x.rowIndex]));
-      const metaMap = new Map(metaRows.map(r => [`${r.sheet_id}\u0000${r.tab_name}\u0000${r.row_index}`, r]));
-      for (const x of paidItems) {
-        const meta = metaMap.get(`${x.sheetId}\u0000${x.tabName}\u0000${x.rowIndex}`);
-        if (meta) { x.depositColKey = meta.submit_col2 || null; x.gid = meta.tab_gid || ''; }
-      }
-    }
-
-    // 파일 누락 항목도 실패로 확정했으므로, 회차에는 새 pending 이 남지 않는다.
-    const { rows: [{ n: remaining }] } = await client.query(
-      `SELECT COUNT(*)::int AS n FROM payment_batch_items WHERE batch_id = $1 AND status = 'pending'`,
-      [batchId]);
-    await client.query(
-      `UPDATE payment_batches SET status = 'applied', applied_at = NOW(), applied_by = $2 WHERE id = $1`,
-      [batchId, by || '']);
-
+  const fileUpload = async (client, { paidCount, remaining }) => {
     const applySummary = JSON.stringify({ apply: {
       warnings: a.parse.warnings || [], orderAssigned: a.orderAssigned,
       unmatchedResults: a.unmatchedResults.length, notInFile: a.summary.notInFile,
@@ -1213,48 +1278,42 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
                 applied = TRUE, applied_count = $6, applied_at = NOW(),
                 summary = COALESCE(summary, '{}'::jsonb) || $7::jsonb
           WHERE id = $1 AND batch_id = $2`,
-        [uploadId, batchId, a.summary.matched, paidItems.length, failed.length + notInFile.length, paidItems.length, applySummary]);
+        [uploadId, batchId, a.summary.matched, paidCount, failed.length + notInFile.length, paidCount, applySummary]);
     } else {
       await client.query(
         `INSERT INTO payment_result_uploads
            (batch_id, bank, file_name, file_format, row_count, matched, success_count, failed_count, applied, applied_count, applied_at, summary, uploaded_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,TRUE,$9,NOW(),$10,$11)`,
         [batchId, a.batch.bank, String(fileName || '').slice(0, 200), a.format,
-         a.parse.rows.length, a.summary.matched, paidItems.length, failed.length + notInFile.length,
-         paidItems.length, applySummary, by || '']);
+         a.parse.rows.length, a.summary.matched, paidCount, failed.length + notInFile.length,
+         paidCount, applySummary, by || '']);
     }
+  };
 
-    await client.query('COMMIT');
-  } catch (err) {
-    try { await client.query('ROLLBACK'); } catch (_) {}
-    throw err;
-  } finally {
-    client.release();
-  }
-
-  /* ★ 결과 반영은 반환 전에 작업보드 입금칸 쓰기 결과까지 확인한다.
-       ★ 날짜는 결과파일의 건별 실제 이체일(item.stamp)만 사용한다. */
-  const boardItems = paidItems.filter(x => x.stamp);
-  const undatedPaid = paidItems.length - boardItems.length;
-  const board = await _writeBoardDeposits(boardItems, { by: by || 'payment' });
-  board.skipped += undatedPaid;
-  const boardStamp = [...new Set(boardItems.map(x => x.stamp))].join(', ');
-  await _saveBoardWriteOutcome({ batchId, outcome: board, stamp: boardStamp, by: by || 'payment' });
-
-  // 실패 안내(1:1문의) — 기본 켬(사용자 확정 ⑤). 커밋 뒤에 보낸다(전송 실패가 반영을 되돌리지 않게).
-  let notified = 0;
-  if (notifyFailed !== false && failedItems.length) {
-    notified = await _notifyFailures(failedItems, by).catch(e => {
-      logger.warn(`[paymentResult] 실패 안내 전송 예외: ${e.message}`);
-      return 0;
-    });
-  }
+  const { paidItems, board, notified, notifyTargets } = await _commitBatchOutcome({
+    batchId, by, notifyFailed,
+    duplicateSha: preventDuplicate ? { sha: fileSha256, uploadId } : null,
+    paid: success.map(p => ({
+      item: p.item, paidAtIso: p.result.transferredAtIso || null,
+      statusRaw: p.result.statusRaw || '', seq: p.result.seq,
+      stamp: _depositDateFromResultStamp(p.result.transferredStamp),
+    })),
+    failed: [
+      ...failed.map(p => ({ item: p.item, statusRaw: p.result.statusRaw || '', seq: p.result.seq,
+        reason: `이체 실패 — 은행 처리상태: ${p.result.statusRaw || '(빈 값)'}` })),
+      // 결과 파일에 없는 회차 대상도 이번 이체에서 실패한 것으로 확정한다(다음 회차 후보로 돌아간다).
+      ...notInFile.map(p => ({ item: p.item, statusRaw: '결과 파일에 없음', seq: null,
+        reason: '이체 실패 — 결과 파일에 해당 이체내역 없음' })),
+    ],
+    markApplied: true,
+    recordUpload: fileUpload,
+  });
 
   return {
     ok: true,
     uploadId: uploadId || null,
     notified,
-    notifyTargets: failedItems.length,
+    notifyTargets,
     applied: paidItems.length,
     board,
     failed: failed.length + notInFile.length,
@@ -1429,4 +1488,4 @@ async function confirmOutstandingFailures({ batchId, by }) {
   }
 }
 
-module.exports = { previewResultFile, autoApplyResultFile, getLatestResultPreview, searchUnconfirmedWorkCandidates, inspectUnconfirmedWorkMatch, reviewUnconfirmedTransfer, createDuplicatePaymentCase, updateDuplicatePaymentCase, listDuplicatePaymentCases, findAccountMismatchCandidates, reconcileAccountMismatch, findAmountMismatchCandidates, reconcileAmountMismatch, applyResultFile, markBatchApplied, backfillPaidDepositStamp, confirmOutstandingFailures, decideAutoApply, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest, __setPaymentApplyForTest };
+module.exports = { previewResultFile, autoApplyResultFile, getLatestResultPreview, searchUnconfirmedWorkCandidates, inspectUnconfirmedWorkMatch, reviewUnconfirmedTransfer, createDuplicatePaymentCase, updateDuplicatePaymentCase, listDuplicatePaymentCases, findAccountMismatchCandidates, reconcileAccountMismatch, findAmountMismatchCandidates, reconcileAmountMismatch, applyResultFile, _commitBatchOutcome, markBatchApplied, backfillPaidDepositStamp, confirmOutstandingFailures, decideAutoApply, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest, __setPaymentApplyForTest, __assertFileBelongsToBatchForTest: _assertFileBelongsToBatch };

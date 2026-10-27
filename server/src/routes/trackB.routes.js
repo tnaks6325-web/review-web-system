@@ -4031,6 +4031,49 @@ router.post('/payment/batch/:id/result-auto-apply', authMiddleware, adminOrMaste
   } catch (err) { _resultErr(err, res, next); }
 });
 
+// ── 통장 자동 대조(결정 293) — 케이뱅크 거래내역으로 회차를 확정한다. 기록은 결과 파일 반영과 같은 경로. ──
+const paymentBankSvc = require('../services/paymentBank.service');
+function _bankErr(err, res, next) {
+  if (err && err.code === '42P01') {
+    return res.status(503).json({ ok: false, code: 'not_ready', error: '통장 대조 저장소가 아직 준비되지 않았습니다(마이그레이션 203).' });
+  }
+  if (err instanceof paymentBankSvc.BankError) {
+    return res.status(err.code === 'not_found' ? 404 : 400).json({ ok: false, code: err.code, error: err.message });
+  }
+  return _resultErr(err, res, next);
+}
+// 입금관리 맨 위: 통장 받은 상태 · 회차 밖으로 나간 돈 · 처리 안 된 회차별 대조(쓰기 0)
+router.get('/payment/bank', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await paymentBankSvc.bankOverview()); } catch (err) { _bankErr(err, res, next); }
+});
+// 통장 받기(3분에 한 번 · force=버튼) + 깨끗한 회차 자동 확정 → 갱신된 개요
+router.post('/payment/bank/sync', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const sync = await paymentBankSvc.syncBank({ by: _by(req), force: !!(req.body && req.body.force) });
+    res.json({ ...(await paymentBankSvc.bankOverview()), syncResult: sync });
+  } catch (err) { _bankErr(err, res, next); }
+});
+// 한 회차의 대조 — '확인 필요' 금액의 사람 목록(실패자 고르기 화면)
+router.get('/payment/batch/:id/bank', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const rec = await paymentBankSvc.inspectBatch(req.params.id);
+    const items = (rec.items || []).map(i => ({ id: i.id, reviewerName: i.reviewerName, tabName: i.tabName, amount: i.amount, status: i.status }));
+    res.json({ ok: true, batchId: rec.batchId, seq: rec.seq, state: rec.state, cluster: rec.cluster || null, outside: rec.outside || null,
+      amounts: (rec.amounts || []).map(({ paidTimes, ...x }) => x), items });
+  } catch (err) { _bankErr(err, res, next); }
+});
+// 통장으로 확정 — 맞는 금액은 이체 완료, 고른 사람은 실패(고른 건수가 통장 부족 건수와 같아야 함)
+router.post('/payment/batch/:id/bank-confirm', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    res.json(await paymentBankSvc.confirmBatchFromBank({
+      batchId: req.params.id, by: _by(req),
+      failedItemIds: Array.isArray(b.failedItemIds) ? b.failedItemIds.map(String).slice(0, 500) : [],
+      notifyFailed: b.notifyFailed !== false,
+    }));
+  } catch (err) { _bankErr(err, res, next); }
+});
+
 router.get('/payment/batch/:id/result-preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try { res.json(await paymentResultSvc.getLatestResultPreview(req.params.id)); }
   catch (err) { _resultErr(err, res, next); }
