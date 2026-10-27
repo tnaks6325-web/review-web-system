@@ -151,29 +151,35 @@ test('the manager chip row stays 전체 + 담당자 toggles (C스타일)', () =>
   assert.ok(bar.includes("${managerButton('','전체')}${managers.map(name=>managerButton(name,name)).join('')}</div>"),
     '담당자 칩 줄이 C스타일(전체 + 담당자 토글)을 벗어났다');
   // ★ 센티널·칩 자체는 여전히 금지 — 단, "담당자 미지정" **문구**는 A안(사용자 확정)의
-  //   안내 배너(_pmUnassignedNoteHtml)에서 정상적으로 쓰인다. 금지 대상은 그 문구가 칩
+  //   목록 맨 아래 줄(_pmUnassignedWorkRowsHtml)에서 정상적으로 쓰인다. 금지 대상은 그 문구가 칩
   //   함수 안으로 다시 새어 들어오는 것뿐이다(칩 줄 자체를 검사 대상으로 좁힌다).
   assert.doesNotMatch(workdesk, /PM_NO_MANAGER/);
   assert.doesNotMatch(bar, /담당자 미지정/);
 });
 
-/* ★★ A안(사용자 확정 2026-08-24) — 담당자가 비어 있는 작업(랜덤·미매핑·오더 없음)은 특정
-   담당자 칩을 고르면 안 보인다. 문구로만 알리고 버튼 구성(C스타일)은 그대로 두되, 그 작업의
-   작업보드로 보내 [관리자 수정] › 작업담당을 정하도록 유도한다(행동유도 — 안내만 하고 끝나지
-   않는다). '전체'에서는 어차피 다 보이므로 특정 담당자를 고른 상태에서만 뜬다. */
-test('unassigned-manager works get a nudge banner only while a specific manager chip is active', () => {
-  const render = sourceOf('_pmRender');
-  assert.match(render, /_pmFilterState\(\)\.manager \? _pmUnassignedWorks\(allItems\) : \[\]/);
-  assert.match(render, /unassignedWorks\.length\?_pmUnassignedNoteHtml\(unassignedWorks\):''/);
-  const note = sourceOf('_pmUnassignedNoteHtml');
-  assert.match(note, /담당자 미지정 작업/);
-  assert.match(note, /관리자 수정.*작업담당/);
-  // 안내는 문구뿐 아니라 실제 행동(작업보드 열기)까지 준다 — 텍스트만 있고 누를 게 없는 안내 금지.
-  assert.match(note, /_pmOpenUnassignedWork\(\$\{idx\}\)/);
+/* ★★ A안(사용자 확정 2026-08-24 → 2026-10-27 강화) — 담당자가 비어 있는 작업(랜덤·미매핑·오더 없음)은 특정
+   담당자 칩을 고르면 그 담당자 목록에서 빠진다. 버튼 구성(C스타일)은 그대로 두고, **작업 목록 맨 아래에 전부** 싣는다
+   (종전 안내 한 줄은 목록과 떨어져 있어 직원이 놓쳤다 — "전체와 만두·망고 건수가 차이나요" 2026-10-27).
+   그 줄은 고르는 줄이 아니라 작업보드로 보내 [관리자 수정] › 작업담당을 정하게 한다(행동유도 — 안내만 하고 끝나지 않는다).
+   '전체'에서는 어차피 다 보이므로 특정 담당자를 고른 상태에서만 싣는다. */
+test('unassigned-manager works are listed at the bottom of the work list while a specific manager chip is active', () => {
+  const rowsFn = sourceOf('_pmUnassignedWorkRowsHtml');
+  assert.match(rowsFn, /if\(!manager\)\{ STATE\.pmUnassignedWorks=\[\]; return ''; \}/);
+  assert.match(rowsFn, /_pmUnassignedWorks\(allItems\)/);
+  assert.match(rowsFn, /담당자 미지정 \$\{works\.length\}개/);
+  // 전부 싣는다 — 앞 몇 개만 보여 주고 나머지를 [전체]로 미루던 상한(_PM_UNASSIGNED_SHOW)을 되살리지 않는다.
+  assert.doesNotMatch(workdesk, /_PM_UNASSIGNED_SHOW/);
+  // 작업 목록을 그리는 두 곳(전체 렌더 · 검색 중 목록만 다시 그리기)이 **같은 한 벌**을 붙인다.
+  assert.match(sourceOf('_pmFilterBar'), /_pmMemoWorkRowsHtml\(allItems,filter\.manager\)\+_pmUnassignedWorkRowsHtml\(allItems,filter\.manager\)/);
+  assert.match(sourceOf('_pmRenderWorkList'), /_pmMemoWorkRowsHtml\(allItems,filter\.manager\)\+_pmUnassignedWorkRowsHtml\(allItems,filter\.manager\)/);
+  // 고르는 줄이 아니다 — 드래그 선택 배선·작업 키를 달지 않는다(끌어서 고르는 범위에 끼면 안 된다).
+  assert.doesNotMatch(rowsFn, /data-work-key|onpointerdown|onpointerenter/);
+  // 행동유도: 누르면 작업보드가 열린다. onclick 에는 인덱스만(탭명은 시트/DB 발 문자열 — 보간하면 XSS 자리).
+  assert.match(rowsFn, /onclick="_pmOpenUnassignedWork\(\$\{i\}\)"/);
+  assert.doesNotMatch(rowsFn, /onclick="_pmOpenUnassignedWork\(\$\{esc\(/);
+  assert.match(rowsFn, /관리자 수정.*작업담당/);
   const open = sourceOf('_pmOpenUnassignedWork');
   assert.match(open, /switchView\('workdesk'\)/);
-  // onclick 에는 인덱스만 — 탭명은 시트/DB 발 문자열이라 보간하면 XSS 자리다(레포 관용구).
-  assert.doesNotMatch(note, /onclick="_pmOpenUnassignedWork\(\$\{esc\(/);
 });
 
 test('the unassigned-manager helper is work-level, computed the same way as the manager chips', () => {

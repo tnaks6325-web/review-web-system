@@ -12896,18 +12896,25 @@ function _pmUnassignedWorks(items){
   //   없는 작업이 담당자 칩을 고르는 순간 선택 목록·이 안내·입금명 집계 어디에도 안 보인다(Codex P2, 결정 216).
   return _pmWorkEntries(items,'',it=>it.payable && !STATE.pmExcluded[_pmKey(it)]).filter(([,it])=>!_pmManagerName(it.manager));
 }
-const _PM_UNASSIGNED_SHOW=5;
-/** ⚠ 담당자 미지정 안내 — **특정 담당자를 고른 상태에서만** 보인다(그 필터가 이 작업들을 가린다는
- *  사실이 지금 당장 문제가 되는 순간이다. '전체'에서는 어차피 다 보이므로 안 띄운다). */
-function _pmUnassignedNoteHtml(unassigned){
-  STATE.pmUnassignedWorks=unassigned.map(([,it])=>it);
-  const shown=unassigned.slice(0,_PM_UNASSIGNED_SHOW);
-  const rest=unassigned.length-shown.length;
-  const btns=shown.map(([,it],idx)=>
-    `<button type="button" class="btn xs" onclick="_pmOpenUnassignedWork(${idx})" title="이 작업의 작업보드를 엽니다 — [관리자 수정]에서 작업담당을 정할 수 있습니다">📋 ${esc(it.tabLabel||it.tabName)}</button>`).join(' ');
-  return `<div class="pmnote">⚠ <b>담당자 미지정 작업 ${unassigned.length}개</b>는 담당자를 고르면 여기 안 보입니다 — 작업보드에서 [관리자 수정] › 작업담당을 정해 주세요.<div class="pmnoteacts">${btns}${rest>0?`<span class="pmauto">+${rest}개는 [전체]에서 확인</span>`:''}</div></div>`;
+/** 담당자 미지정 작업 줄 — **특정 담당자를 고른 상태에서만** 작업 목록 맨 아래에 전부 싣는다
+ *  (사용자 확정 2026-10-27 A안: 종전 안내 한 줄은 목록과 떨어져 있어 놓쳤다 — "전체와 만두·망고 건수가 다르다").
+ *  ★ 고르는 줄이 아니다 — 드래그 선택 배선·data-work-key 를 달지 않는다(입금명 필요 줄과 같은 규율).
+ *    누르면 그 작업의 작업보드로 가서 [관리자 수정] › 작업담당을 정한다. 정하면 그 담당자 목록에 들어온다.
+ *  ★ onclick 에는 인덱스만(작업명은 시트/DB 발 문자열 — 보간 금지). '전체'에서는 어차피 다 보이므로 싣지 않는다. */
+function _pmUnassignedWorkRowsHtml(allItems, manager){
+  if(!manager){ STATE.pmUnassignedWorks=[]; return ''; }
+  const q=_pmNormQ(STATE.pmWorkQ);
+  const works=_pmUnassignedWorks(allItems).filter(e=>_pmMatchWork(e,q));
+  STATE.pmUnassignedWorks=works.map(([,it])=>it);
+  if(!works.length) return '';
+  const rows=works.map(([key,it],i)=>{
+    const rowItems=(allItems||[]).filter(row=>_pmWorkKey(row)===key && row.payable && !STATE.pmExcluded[_pmKey(row)]);
+    const label=it.tabLabel||it.tabName||key;
+    return `<button type="button" class="pmworkpick needmemo needmgr" onclick="_pmOpenUnassignedWork(${i})" title="담당자(작업담당)가 정해지지 않아 이 담당자 목록에서 고를 수 없습니다 — 누르면 작업보드가 열립니다([관리자 수정] › 작업담당)"><span class="pmworkname">${esc(label)}</span><span class="pmworkmeta">${rowItems.length}건 · ${_pmNum(rowItems.reduce((sum,row)=>sum+(Number(row.amount)||0),0))}원</span><span class="pmworkneed">담당자 정하기 ›</span></button>`;
+  }).join('');
+  return `<div class="pmmemohead">담당자 미지정 ${works.length}개 — 작업담당을 정하면 담당자 목록에 들어옵니다([전체]에서는 바로 고를 수 있습니다)</div>${rows}`;
 }
-/** 미지정 안내의 [작업보드] 버튼 — 인덱스만 받는다(탭명은 시트발 문자열, onclick 문자열 보간 금지). */
+/** 담당자 미지정 줄 — 인덱스만 받는다(탭명은 시트발 문자열, onclick 문자열 보간 금지). */
 function _pmOpenUnassignedWork(idx){
   const w=(STATE.pmUnassignedWorks||[])[idx]; if(!w) return;
   STATE.pendingTab={ sheetId:w.sheetId, tabName:w.tabName, tabGid:w.tabGid||'', spreadsheetTitle:'' };
@@ -13072,7 +13079,7 @@ function _pmRenderWorkList(){
   const selectedKeys=new Set(filter.workKeys===null ? allKeys : filter.workKeys);
   const works=_pmVisibleWorkEntries(allItems,filter.manager);
   const rows=_pmWorkRowsHtml(allItems,works,selectedKeys);
-  const memoRows=_pmMemoWorkRowsHtml(allItems,filter.manager);
+  const memoRows=_pmMemoWorkRowsHtml(allItems,filter.manager)+_pmUnassignedWorkRowsHtml(allItems,filter.manager);
   // ★ "검색 결과 없음"과 "애초에 작업이 없음"을 구분해 말한다(뭉뚱그리면 원인을 못 찾는다).
   wrap.innerHTML = (rows || (String(STATE.pmWorkQ||'').trim()
     ? `<div class="pmworkempty">‘${esc(String(STATE.pmWorkQ).trim())}’ 와 일치하는 작업이 없습니다.</div>`
@@ -13102,7 +13109,7 @@ function _pmFilterBar(allItems){
   const visibleWorks=_pmVisibleWorkEntries(allItems,filter.manager);
   const searchQ=String(STATE.pmWorkQ||'');
   const workRows=_pmWorkRowsHtml(allItems,visibleWorks,selectedKeys);
-  const memoRows=_pmMemoWorkRowsHtml(allItems,filter.manager);
+  const memoRows=_pmMemoWorkRowsHtml(allItems,filter.manager)+_pmUnassignedWorkRowsHtml(allItems,filter.manager);
   const downloadButton=(bank,label)=>{
     const bankItems=selectedItems.filter(it=>it.bank===bank);
     return bankItems.length
@@ -13125,8 +13132,6 @@ function _pmRender(){
   const priceOutliers = items.filter(it=>(it.warnings||[]).includes('price_outlier'));
   // 결정 231: 이전에 실패한 계좌 그대로인 줄(처음에 체크 해제) — 담당자 범위 전체에서 센다(체크 해제로 줄이 숨지 않게)
   const failedAgain = _pmFilterItems(allItems,{manager:_pmFilterState().manager}).filter(it=>it.payable && (it.warnings||[]).includes('failed_account'));
-  // 담당자를 고른 상태에서만 뜬다 — 그 필터가 이 작업들을 가리는 순간이 곧 알려야 할 순간이다.
-  const unassignedWorks = _pmFilterState().manager ? _pmUnassignedWorks(allItems) : [];
   STATE.pmFix = _pmBuildFix(items);   // 보완 창구(작업·리뷰어) — 표의 [보완] 버튼도 이 묶음을 쓴다
 
   $('#pmhead').innerHTML=`<div class="mh"><h1>입금관리</h1>
@@ -13158,7 +13163,6 @@ function _pmRender(){
       ${noMemo.length?`<div class="pmnote">⚠ <b>통장표시가 없는 건 ${noMemo.length}건</b>은 선택할 수 없습니다(리뷰어 통장에 이름이 안 찍히므로) — 작업 선택의 <b>[입금명 필요]</b> 줄을 누르면 작업 화면에서 입금명 설정 창이 바로 열립니다.</div>`:''}
       ${failedAgain.length?`<div class="pmnote">⚠ <b>이미 이체가 실패한 계좌 그대로인 ${failedAgain.length}건</b>은 체크를 풀어 두었습니다 — 고객이 내정보에서 계좌를 고치면 고친 계좌로 다시 담기고, 은행 쪽 일시 오류였다면 아래 표에서 체크해 다시 담으세요.</div>`:''}
       ${priceOutliers.length?`<div class="pmnote">⚠ <b>같은 작업의 대부분 금액과 크게 다른 단독 금액 ${priceOutliers.length}건</b>이 있습니다. 자동으로 막지는 않지만 다운로드 전에 아래의 ‘금액 확인’ 행을 검토해 주세요.</div>`:''}
-      ${unassignedWorks.length?_pmUnassignedNoteHtml(unassignedWorks):''}
       ${_pmFixBlock()}
       ${_pmTargetTable(items)}
     </div>`;
