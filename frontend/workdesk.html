@@ -13628,12 +13628,16 @@ function _pmGaugeHtml(){
   if(!(G.contract_total>0)) return '';
   const won=n=>_pmNum(n)+'원';
   const real=G.outside!==null&&G.outside!==undefined;
+  // 하나은행 실제 내역이 있으면 기록 없이 나간 돈을 은행별로 나눠 보인다(합치지 않음 — 사용자 요청 2026-10-28, 인트라넷 장부와 같은 모양)
+  const H=real&&G.outside_hana!==null&&G.outside_hana!==undefined;
   const outside=real?G.outside:0;
+  const outK=H?(G.outside_kbank||0):outside, outH=H?G.outside_hana:0;
   const rest=G.rest;
   const base=Math.max(G.contract_total, G.paid_product+outside);
   const segs=[
     { label:'리뷰웹으로 돌려준 상품값', amount:G.paid_product, color:'#2563eb' },
-    ...(real?[{ label:'기록 없이 나간 돈', amount:outside, color:'#ef4444', red:true }]:[]),
+    ...(real?[{ label:H?'기록 없이 나간 돈 · 케이뱅크':'기록 없이 나간 돈', amount:outK, color:'#ef4444', red:true }]:[]),
+    ...(H?[{ label:'기록 없이 나간 돈 · 하나은행', amount:outH, color:'#f97316', red:true }]:[]),
     { label:'남은 상품구입비', amount:Math.max(rest,0), color:'#10b981' },
   ];
   const pct=n=>n/base*100;
@@ -13644,12 +13648,14 @@ function _pmGaugeHtml(){
   const notes=[];
   if(rest<0) notes.push(`<span class="warn">계약에 넣은 상품구입비보다 ${won(-rest)} 더 나갔습니다.</span>`);
   if(G.unlinked_paid_product) notes.push(`계약에 잇지 않은 작업에 돌려준 상품값 ${won(G.unlinked_paid_product)}은 넣지 않았습니다(인트라넷 리뷰 페이백에서 계약을 이으면 들어갑니다).`);
-  if(real) notes.push(`기록 없이 나간 돈은 ${esc(G.through||'')}까지 케이뱅크 실제 내역 기준입니다(인트라넷에서 받은 통장 내역).`);
+  if(H) notes.push(`기록 없이 나간 돈은 케이뱅크 ${esc(G.through||'')}까지 · 하나은행 ${esc(G.hana_from||'')}~${esc(G.hana_through||'')} 실제 내역 기준입니다(인트라넷에서 받은 통장 내역).`);
+  else if(real) notes.push(`기록 없이 나간 돈은 ${esc(G.through||'')}까지 케이뱅크 실제 내역 기준입니다(인트라넷에서 받은 통장 내역).`);
   return `<div class="pmgauge">
     <div class="pmgauge-tot">
       ${tot('상품구입비 총액',G.contract_total,`계약 ${_pmNum(G.contract_count)}건에 넣은 상품구입비 · 취소·업체입금 제외`)}
       ${tot('리뷰웹으로 돌려준 상품값',G.paid_product,'리뷰웹 지급 기록(리뷰비 제외)')}
-      ${real?tot('기록 없이 나간 돈',outside,'리뷰웹 기록 없이 케이뱅크에서 나간 돈',outside?'red':''):''}
+      ${real?tot(H?'기록 없이 나간 돈 · 케이뱅크':'기록 없이 나간 돈',outK,'리뷰웹 기록 없이 케이뱅크에서 나간 돈',outK?'red':''):''}
+      ${H?tot('기록 없이 나간 돈 · 하나은행',outH,'리뷰웹 기록 없이 하나은행에서 나간 돈',outH?'red':''):''}
       ${tot('남은 상품구입비',rest,'아직 리뷰어에게 돌려주지 않은 상품구입비',rest<0?'warn':'')}
     </div>
     <div class="pmgauge-bar">${bar}</div>

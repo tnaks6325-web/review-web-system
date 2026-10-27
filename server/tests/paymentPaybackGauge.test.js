@@ -26,6 +26,9 @@ const read = p => fs.readFileSync(path.join(ROOT, p), 'utf8');
 
 const G = { contract_total: 301456420, contract_count: 91, paid_product: 208131750, outside: 32931516, rest: 60393154, unlinked_paid_product: 75406108, through: '2026-10-26' };
 
+// 2026-10-28 — 인트라넷이 하나은행 장부를 붙인 뒤의 은행별 칸
+const GH = { outside: 34547916, rest: 58776238, outside_kbank: 32931516, outside_hana: 1616400, hana_from: '2026-10-01', hana_through: '2026-10-23' };
+
 function freshSvc() {
   const p = require.resolve('../src/services/trackB.service');
   delete require.cache[p];
@@ -47,7 +50,9 @@ function freshSvc() {
     assert.equal(calls[0].opts.headers['X-Api-Key'], 'k-test', '키는 헤더로만');
     assert.ok(!/k-test/.test(calls[0].url), '주소에 키를 싣지 않는다');
     assert.equal(r.ok, true);
-    assert.deepEqual(r.gauge, G, '모르는 칸은 버리고 숫자는 그대로');
+    assert.deepEqual(r.gauge, { ...G, outside_kbank: null, outside_hana: null, hana_from: null, hana_through: null }, '모르는 칸은 버리고 숫자는 그대로(옛 인트라넷 = 은행별 칸 null)');
+    global.fetch = async () => ({ ok: true, status: 200, json: async () => ({ ok: true, gauge: { ...G, ...GH } }) });
+    assert.deepEqual((await freshSvc().intranetPaybackGauge({ force: true })).gauge, { ...G, ...GH }, '은행별 칸도 그대로 옮긴다');
   });
 
   await ta('§2 막힘·오류·모양 다름은 ok:false (0 으로 꾸미지 않음)', async () => {
@@ -99,6 +104,14 @@ function freshSvc() {
     assert.doesNotMatch(over, /기록 없이 나간 돈<\/div>/);
     assert.match(over, /남은 상품구입비<\/div><div class="v warn">−30원/);
     assert.match(over, /30원 더 나갔습니다/);
+    // 하나은행이 있으면 합치지 않고 은행별 두 칸 · 막대 네 칸 · 남은 상품구입비는 둘 다 뺀 값(사용자 요청 2026-10-28)
+    const split = run({ ok: true, gauge: { ...G, ...GH } });
+    assert.match(split, /기록 없이 나간 돈 · 케이뱅크<\/div><div class="v red">32,931,516원/);
+    assert.match(split, /기록 없이 나간 돈 · 하나은행<\/div><div class="v red">1,616,400원/);
+    assert.doesNotMatch(split, /34,547,916원/, '합친 금액은 보이지 않는다');
+    assert.match(split, /남은 상품구입비<\/div><div class="v ">58,776,238원/);
+    assert.equal((split.match(/<div style="background:/g) || []).length, 4, '막대 네 칸');
+    assert.match(split, /케이뱅크 2026-10-26까지 · 하나은행 2026-10-01~2026-10-23 실제 내역/);
     assert.match(run(null), /받는 중/);
     assert.match(run({ error: 'intranet_denied' }), /받지 못했습니다 — 인트라넷 연결 설정/);
     assert.equal(run({ ok: true, gauge: { ...G, contract_total: 0 } }), '');
