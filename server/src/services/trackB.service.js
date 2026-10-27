@@ -2379,7 +2379,7 @@ async function pendingParticipants({ sheetId, tabName, kind = 'submit', limit = 
    ★ 알려주기만 한다(마감 게이트 아님 — 사용자 확정 2026-10-27). */
 const _FI_GAP_MS = 30 * 60 * 1000;   // 업로드 묶음 표식이 없는 옛 사진: 30분 넘게 떨어지면 다른 제출로 본다
 const _FI_CAP = 50;                  // 항목별 이름 목록 상한(건수는 전부 센다 · 잘리면 truncated)
-async function finishInspectForTab({ sheetId, tabName, maskNames = false } = {}) {
+async function finishInspectForTab({ sheetId, tabName } = {}) {
   if (!sheetId || !tabName) throw new Error('finishInspectForTab: sheetId, tabName 필수');
   const db = getPool();
   const roster = await _closeoutRoster(sheetId, tabName);
@@ -2403,7 +2403,7 @@ async function finishInspectForTab({ sheetId, tabName, maskNames = false } = {})
         WHERE sheet_id=$1 AND tab_name=$2 AND row_index IS NULL AND COALESCE(slot_key,'review')='review'`, [sheetId, tabName]);
     unrowed = (rows[0] && rows[0].n) || 0;
   } catch (_) { unrowed = null; }   // 모름 = null(0 으로 꾸미지 않는다)
-  return _finishInspectCompute({ people, revByRow, metaRows, unrowed, maskNames });
+  return _finishInspectCompute({ people, revByRow, metaRows, unrowed });
 }
 // 줄별 사진 → 리뷰 갈래만. 휴지통으로 보낸 사진(slot 'trashed' — 고아 정리·중복 자동정리)은 이미 처리된 것이라 세지 않는다.
 function _fiReviewRows(imgs) {
@@ -2413,9 +2413,9 @@ function _fiReviewRows(imgs) {
   return out;
 }
 /** 순수 판정(쿼리 0) — 테스트가 직접 실행한다. */
-function _finishInspectCompute({ people = [], revByRow = new Map(), metaRows = [], unrowed = 0, maskNames = false } = {}) {
-  // 업체 렌즈 — 이름은 업체 작업표와 같은 규칙으로 가린다(결정 298). 파일ID·연락처는 애초에 싣지 않는다.
-  const nmOut = (v) => { const n = String(v || '').slice(0, 40); return maskNames ? _maskName(n) : n; };
+function _finishInspectCompute({ people = [], revByRow = new Map(), metaRows = [], unrowed = 0 } = {}) {
+  // 이름은 직원·업체 동일(결정 298 · 사용자 확정). 파일ID·연락처는 애초에 싣지 않는다.
+  const nmOut = (v) => String(v || '').slice(0, 40);
   const bySeq = new Map(people.map(r => [String(r.seq), r]));
   const meta = new Map(metaRows.map(r => [String(r.file_id), r]));
   const ids = [...revByRow.values()].flat();

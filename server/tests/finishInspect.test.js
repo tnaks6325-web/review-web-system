@@ -70,10 +70,10 @@ t('★ Drive 무접촉', !/drive\.|driveService/.test(body));
 t('★ unrowed 조회 실패 = null(모름)', /unrowed = null/.test(body));
 t('라우트 = 스코프 게이트(_ensureThreadScope — 내부인 · 업체 소유 탭 · 브랜드 배정 탭, 결정 298)',
   /router\.get\('\/workdesk\/finish-inspect', authMiddleware, async[\s\S]{0,400}_ensureThreadScope/.test(ROUTES));
-t('★★ 업체 응답은 이름을 가린다(maskNames = 업체 역할)', /finishInspectForTab\(\{ sheetId, tabName, maskNames: role === 'advertiser' \}\)/.test(ROUTES));
+t('★★ 이름은 직원·업체 동일 — 라우트가 역할별로 이름을 바꾸지 않는다(사용자 확정)', /finishInspectForTab\(\{ sheetId, tabName \}\)/.test(ROUTES) && !/maskNames/.test(ROUTES));
 const masked = svc._finishInspectCompute({ people: [P(1, '홍길동'), P(2, '김철수')], revByRow: svc._fiReviewRows({ 1: [{ fileId: 'a', slot: 'review' }, { fileId: 'b', slot: 'review' }] }),
-  metaRows: [{ file_id: 'a', file_hash: 'H' }, { file_id: 'b', file_hash: 'H' }], maskNames: true });
-t('★★ 가린 이름 = 업체 표와 같은 규칙(홍○○) · 같은 사진/사진 없음 목록 모두', masked.samePhoto.items[0].people[0].name === '홍○○' && masked.missing.items[0].name === '김○○', JSON.stringify(masked));
+  metaRows: [{ file_id: 'a', file_hash: 'H' }, { file_id: 'b', file_hash: 'H' }] });
+t('이름은 그대로(같은 사진·사진 없음 목록 모두)', masked.samePhoto.items[0].people[0].name === '홍길동' && masked.missing.items[0].name === '김철수', JSON.stringify(masked));
 t('★ 응답에 파일ID 를 싣지 않는다', !JSON.stringify(masked).includes('"a"') && !/fileIds/.test(JSON.stringify(r)));
 
 console.log('\n3) 화면(마감 확인창 · [🔍 리뷰 점검])');
