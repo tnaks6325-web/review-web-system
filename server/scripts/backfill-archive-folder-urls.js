@@ -19,25 +19,32 @@
  */
 require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
 const pool = require('../src/db/pool');
-const drive = require('../src/services/drive.service');
+let drive = require('../src/services/drive.service');
 
 const args = process.argv.slice(2);
 const APPLY = args.includes('--apply');
 const arg = (k) => { const a = args.find(x => x.startsWith(`--${k}=`)); return a ? a.slice(k.length + 3) : null; };
 const LIMIT = parseInt(arg('limit') || '0', 10) || null;
 const ONLY_TAB = arg('tab');
-const ROOT = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
+let ROOT = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
 const norm = (s) => String(s == null ? '' : s).replace(/[\s/]/g, '');
 const url = (id) => `https://drive.google.com/drive/folders/${id}`;
 
 /** 한 작업의 폴더를 찾는다. 반환 { status, review, capture, why } — 쓰기 0. */
 async function locate(row) {
-  const hits = (await drive.searchFolders(row.tab_name, { limit: 50 })).filter(f => f.name === row.tab_name);
+  const raw = await drive.searchFolders(row.tab_name, { limit: 100 });
+  // 목록이 잘렸으면(상한 도달) 유일성을 판정할 수 없다 — 건너뛴다(잘린 뒤쪽에 다른 후보가 있을 수 있다).
+  if (raw.length >= 100) return { status: 'error', why: '검색 결과가 너무 많아 유일성을 판정할 수 없음' };
+  const hits = raw.filter(f => f.name === row.tab_name);
   const cands = [];
   for (const f of hits) {
     const parent = f.parents && f.parents[0];
     if (!parent) continue;
-    const pm = await drive.getFileParents(parent).catch(() => null);
+    /* ★ 부모 확인이 실패하면 그 작업은 **건너뛴다** — 실패한 후보를 "루트 밖"으로 치면 남은 다른 캠페인의
+       같은 이름 폴더가 유일 후보로 보여 남의 폴더가 붙는다(Codex 리뷰 P2 · 스텁으로 재현). */
+    let pm;
+    try { pm = await drive.getFileParents(parent); }
+    catch (e) { return { status: 'error', why: `부모 폴더 확인 실패 — ${String(e.message).slice(0, 60)}` }; }
     if (pm && (pm.parents || []).includes(ROOT)) cands.push({ id: f.id, top: pm.name });
   }
   let pick = cands;
@@ -86,4 +93,8 @@ async function main() {
   console.log(JSON.stringify({ mode: APPLY ? 'apply' : 'dry-run', total: rows.length, ...tally, wrote }));
 }
 
-main().then(() => pool.end()).catch(async (e) => { console.error('실패:', e.message); try { await pool.end(); } catch (_) {} process.exit(1); });
+if (require.main === module) {
+  main().then(() => pool.end()).catch(async (e) => { console.error('실패:', e.message); try { await pool.end(); } catch (_) {} process.exit(1); });
+}
+/* 테스트 주입용 — 판정(locate)만 스텁 drive 로 실행한다 */
+module.exports = { locate, __setForTest(d, root) { drive = d; ROOT = root; } };
