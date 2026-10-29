@@ -252,7 +252,7 @@ t('★★ INSERT — 컬럼 수 ≡ VALUES 항목 수 ≡ **파라미터 배열 
 });
 
 t('★★ source revision UPDATE — 파라미터 개수 ≡ 자리표시자 수', () => {
-  const at = ORD.indexOf('WHERE id = $1 AND source_review_order_id = $40');
+  const at = ORD.indexOf('WHERE id = $1 AND source_review_order_id = $39');
   assert.ok(at > 0, 'source UPDATE 추출');
   // 2026-10-20: WHERE 끝에 번호 조건($46)이 붙어 창을 넓힘 — 검사 의미(파라미터 개수 ≡ 자리표시자 최댓값) 불변
   const maxPh = Math.max(...[...ORD.slice(at - 1400, at + 140).matchAll(/\$(\d+)/g)].map((x) => +x[1]));

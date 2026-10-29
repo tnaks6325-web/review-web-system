@@ -150,6 +150,7 @@ console.log('\n── E3. 작업 조건 재료(tabConditionSummary) 실행 ─�
   const src = tb.slice(st, en);
   const sandbox = {
     require: (m) => require(m.startsWith('.') ? path.join(root, 'server/src/services', m) : m),
+    resolveWorkManager: require('../src/utils/workManager').resolveWorkManager,
     _condWoOptions: () => [],
     logger: { warn() {}, info() {} },
     module: {}, exports: {},

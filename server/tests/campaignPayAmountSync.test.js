@@ -289,10 +289,11 @@ async function run() {
         intranet_advertiser_business_number: '000' };
       pool2.query = async (sql) => {
         const t2 = String(sql);
-        if (/SELECT \* FROM work_orders WHERE source_review_order_id/.test(t2)) return { rows: [Object.assign({}, ORDER)] };
+        if (/SELECT \* FROM work_orders WHERE (?:source_review_order_id|id = \$1 FOR UPDATE)/.test(t2)) return { rows: [Object.assign({}, ORDER)] };
         if (/UPDATE work_orders SET/.test(t2)) return { rows: [Object.assign({}, ORDER, { source_revision: 2 })] };
         return { rows: [] };
       };
+      pool2.connect = async () => ({ query: pool2.query, release() {} });
       const res = { statusCode: 200, body: null };
       res.status = c => { res.statusCode = c; return res; };
       res.json = b => { res.body = b; return res; };

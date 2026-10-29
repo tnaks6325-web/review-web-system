@@ -35,6 +35,7 @@ function loadCond() {
   const src = svcSrc.slice(st, en);
   const sandbox = {
     require: (m) => require(m.startsWith('.') ? path.join(root, 'server/src/services', m) : m),
+    resolveWorkManager: require('../src/utils/workManager').resolveWorkManager,
     _condWoOptions: () => [],
     logger: { warn() {}, info() {} },
     module: {}, exports: {},

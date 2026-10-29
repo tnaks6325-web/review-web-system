@@ -54,16 +54,16 @@ const RENAME_FIELD = 'product_rename';
 /** 7단계-④ ⑤-3 옵션 있음↔없음 바꾸기 — 그 상품에 참여·구매가 하나도 없을 때만(사용자 확정 2026-10-21 「2.가」). 수정 창 잠금 해제 목록에도 이 이름. */
 const MODE_FIELD = 'product_mode';
 /** 리뷰웹 → 인트라넷으로 보내는 칸(수정 창이 리뷰웹 값으로 덮는 칸과 같다). 상품 구성·합계·요약은 금액이 함께 움직이는 짝. */
-const PUSH_VIEW_KEYS = Object.freeze([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, ...PHASE7R_SHARED_FIELDS, ...PHASE7D_SHARED_FIELDS, 'pay_amount', 'product_options_json', 'product_option']);
+const PUSH_VIEW_KEYS = Object.freeze([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, ...PHASE7R_SHARED_FIELDS, ...PHASE7D_SHARED_FIELDS, 'work_manager', 'pay_amount', 'product_options_json', 'product_option']);
 /** 인트라넷 고유 칸 중 접수 뒤에도 고칠 수 있는 것 — 종전 원본 수정 허용 목록·계약 후속 매칭과 같은 범위. */
 const INTRANET_EDITABLE_AFTER_ACCEPT = Object.freeze([
   'title', 'manager_name', 'inflow_keyword', 'sales_id', 'quote_id', 'contract_number', 'intranet_advertiser_id',
 ]);
 /** 리뷰웹발 수정(관리자 오더 수정)이 쓸 수 있는 칸 — 인트라넷 고유는 제외. */
 const WRITABLE_BY_ORIGIN = {
-  intranet: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, MODE_FIELD, ...PHASE7R_SHARED_FIELDS, ...PHASE7D_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
+  intranet: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, MODE_FIELD, ...PHASE7R_SHARED_FIELDS, ...PHASE7D_SHARED_FIELDS, 'work_manager', ...INTRANET_EDITABLE_AFTER_ACCEPT]),
   reconcile: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, MODE_FIELD, ...PHASE7R_SHARED_FIELDS, ...PHASE7D_SHARED_FIELDS, ...INTRANET_EDITABLE_AFTER_ACCEPT]),
-  rw_admin: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS]),
+  rw_admin: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, 'work_manager']),
   campaign: new Set([...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, STRUCTURE_FIELD, RENAME_FIELD, MODE_FIELD, ...PHASE7R_SHARED_FIELDS, ...PHASE7D_SHARED_FIELDS]),   // 4단계-2 공고 편집 창(campaignSharedSave) — 리뷰웹발이라 인트라넷 고유 칸은 제외
 };
 const KNOWN_CHANNELS = new Set(['쿠팡', '네이버', '올리브영', '카카오메이커스']);
@@ -412,7 +412,7 @@ function _display(path, v) {
 function _pushBackKeys(mine, saved) {
   const { canon } = require('../utils/sharedFields');
   // 7단계 칸(인원·주말)도 — 옛 창이 보낸 값을 버린 저장이면 인트라넷 사본이 낡았으니 받아 가게 한다(검토 2026-10-21)
-  const keys = [...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, ...PHASE7R_SHARED_FIELDS, ...PHASE7D_SHARED_FIELDS].filter(k => mine && Object.prototype.hasOwnProperty.call(mine, k)
+  const keys = [...PHASE3_SHARED_FIELDS, ...PHASE5_SHARED_FIELDS, ...PHASE7Q_SHARED_FIELDS, ...PHASE7W_SHARED_FIELDS, ...PHASE7R_SHARED_FIELDS, ...PHASE7D_SHARED_FIELDS, 'work_manager'].filter(k => mine && Object.prototype.hasOwnProperty.call(mine, k)
     && canon(k, mine[k]) !== canon(k, saved[k]));
   if (mine && mine.pay_amount !== undefined && mine.pay_amount !== null && mine.pay_amount !== ''
       && canon('pay_amount', mine.pay_amount) !== canon('pay_amount', saved.pay_amount)) keys.push('pay_amount');
@@ -1637,6 +1637,18 @@ async function _reconcilePrepareInTx(client, wo, camp, rec, actor) {
   return { wo: saved, plan };
 }
 
+/** Called only while holding L1 + the current work-order row lock. Shared by both save scopes. */
+async function _managerEditProtection(client, wo) {
+  if (wo.status === 'done') return { status: 409, body: { ok: false, code: 'manager_order_done', error: '완료된 작업은 담당자를 바꿀 수 없습니다.' } };
+  const { rows: archived } = await client.query(
+    `SELECT id FROM recruit_campaigns
+      WHERE archived_at IS NOT NULL
+        AND (id = NULLIF($1, '') OR NULLIF(source_work_order_id, '') = $2)
+      LIMIT 1 FOR UPDATE`, [String(wo.linked_campaign_id || ''), String(wo.id)]);
+  if (archived.length) return { status: 409, body: { ok: false, code: 'manager_campaign_archived', error: '보관된 모집공고에 연결된 작업은 담당자를 바꿀 수 없습니다.' } };
+  return null;
+}
+
 async function _abort(client, status, body) {
   try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
   return { status, body };
@@ -1661,6 +1673,7 @@ async function _abort(client, status, body) {
  */
 async function applySharedPatch(p) {
   if (String(process.env.BIDIR_HARD_OFF || '').trim() === '1') return { status: 503, body: { ok: false, code: 'bidir_off', error: '양방향 동기화가 꺼져 있습니다.' } };
+  const managerOnly = p && p.managerOnly === true && ['rw_manager', 'intranet_manager'].includes(p.origin);
   const lrq = require('./linkedRecruitQuota.service');
   const client = await (p.db || getPool()).connect();
   try {
@@ -1671,6 +1684,77 @@ async function applySharedPatch(p) {
     const { rows: woRows } = await client.query('SELECT * FROM work_orders WHERE id = $1 FOR UPDATE', [p.workOrderId]);
     let wo = woRows[0];
     if (!wo || wo.deleted_at) return await _abort(client, 404, { ok: false, code: 'order_not_found', error: '작업오더를 찾을 수 없습니다.' });
+    if (managerOnly) {
+      const rawTarget = String(p.mine && p.mine.work_manager || '').trim();
+      const { mapWorkManager, isUndecidedWorkManager } = require('../utils/workManager');
+      const mappedTarget = mapWorkManager(rawTarget);
+      const target = mappedTarget === '만두' ? '박세희' : mappedTarget === '망고' ? '박은비'
+        : isUndecidedWorkManager(rawTarget) ? '랜덤' : rawTarget;
+      const keys = Object.keys(p.mine || {});
+      if (keys.length !== 1 || keys[0] !== 'work_manager'
+          || (!p.forcePush && !['박세희', '박은비', '랜덤'].includes(target))) {
+        return await _abort(client, 400, { ok: false, code: 'manager_payload_invalid', error: '작업담당만 지정해 다시 저장해 주세요.' });
+      }
+      if (!String(wo.source_review_order_id || '').trim()) {
+        return await _abort(client, 409, { ok: false, code: 'manager_order_unlinked', error: '인트라넷과 연결되지 않은 작업은 담당자를 바꿀 수 없습니다.' });
+      }
+      const protection = await _managerEditProtection(client, wo);
+      if (protection) return await _abort(client, protection.status, protection.body);
+      if (p.preHook) { const r = await p.preHook(client, wo); if (r) return await _abort(client, r.status, r.body); }
+      const extra = Object.entries(p.extraSets || {}).filter(([k]) => EXTRA_COLUMNS.has(k));
+      const currentVersion = Number(wo.sync_version || 0);
+      const baseVersion = Number(p.baseVersion);
+      const canonical = value => {
+        const raw = String(value == null ? '' : value).trim();
+        const mapped = mapWorkManager(raw);
+        if (mapped === '만두') return '박세희';
+        if (mapped === '망고') return '박은비';
+        if (isUndecidedWorkManager(raw)) return '랜덤';
+        return raw.replace(/\s+/g, '').replace(/[()（）\[\]]/g, '');
+      };
+      const existingCanonical = canonical(wo.work_manager);
+      const targetCanonical = canonical(target);
+      // 재전송·동시 중복 요청은 원하는 값이 이미 저장돼 있으면 같은 성공으로 돌려준다.
+      if (existingCanonical === targetCanonical && !extra.length && !p.forcePush) {
+        return await _abort(client, 200, { ok: true, noop: true, idempotent: true, data: wo, sync_version: currentVersion });
+      }
+      if (!Number.isSafeInteger(baseVersion) || baseVersion !== currentVersion) {
+        return await _abort(client, 409, { ok: false, code: 'manager_version_conflict', sync_version: currentVersion,
+          error: '작업담당이 다른 저장으로 바뀌었습니다. 화면을 새로고침한 뒤 다시 선택해 주세요.' });
+      }
+      const params = [wo.id, target];
+      const sets = ['work_manager = $2'];
+      for (const [key, value] of extra) {
+        params.push(value);
+        sets.push(`${key} = $${params.length}`);
+      }
+      params.push(currentVersion);
+      const { rows: updated } = await client.query(
+        `UPDATE work_orders SET ${sets.join(', ')},
+           sync_version = GREATEST(sync_version + 1, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000000)::bigint),
+           updated_at = NOW()
+         WHERE id = $1 AND sync_version = $${params.length} AND deleted_at IS NULL AND status <> 'done'
+         RETURNING *`, params);
+      if (!updated.length) return await _abort(client, 409, { ok: false, code: 'manager_version_conflict', sync_version: currentVersion,
+        error: '작업담당이 다른 저장으로 바뀌었습니다. 화면을 새로고침한 뒤 다시 선택해 주세요.' });
+      const saved = updated[0];
+      await client.query(
+        `INSERT INTO work_order_shared_snapshots (work_order_id, sync_version, origin, op_id, state, actor)
+         VALUES ($1, $2, 'rw_manager', '', $3::jsonb, $4)`,
+        [saved.id, Number(saved.sync_version), JSON.stringify(readSharedState(saved)), String(p.actor || '')]);
+      if (p.origin === 'rw_manager') {
+        await client.query(
+          `INSERT INTO shared_sync_outbox (work_order_id, sync_version, view_scope)
+           VALUES ($1, $2, 'manager')
+           ON CONFLICT (work_order_id, sync_version) DO UPDATE
+             SET status = 'pending', attempts = 0, next_at = NOW(), last_error = '', updated_at = NOW(),
+                 view_scope = CASE WHEN shared_sync_outbox.view_scope = 'full' THEN 'full' ELSE 'manager' END
+           WHERE shared_sync_outbox.status IN ('delivered', 'superseded')`,
+          [saved.id, Number(saved.sync_version)]);
+      }
+      await client.query('COMMIT');
+      return { status: 200, body: { ok: true, data: saved, sync_version: Number(saved.sync_version), applied: ['work_manager'], manager_only: true } };
+    }
     const peek = await lrq.liveCampaignForWorkOrders(client, [wo.id]);                          // 보관(마감) 공고 제외
     let camp = null;
     if (peek) {
@@ -1847,7 +1931,10 @@ async function applySharedPatch(p) {
     const overwritten = lastWriter ? plan.conflicts.map(c => ({ path: c.path, label: _label(c), before: _display(c.path, c.theirs), after: _display(c.path, c.mine) })) : [];
     if (lastWriter && plan.conflicts.length) plan.writes = [...plan.writes, ...plan.conflicts];
     const extra = Object.entries(p.extraSets || {}).filter(([k]) => EXTRA_COLUMNS.has(k));
-    if (!plan.writes.length && !extra.length && !rec) {
+    const managerRepair = p.origin === 'intranet' && (p.managerRepair === true
+      || (p.managerRepairValue !== undefined && require('../utils/sharedFields').canon('work_manager', p.managerRepairValue)
+        !== require('../utils/sharedFields').canon('work_manager', wo.work_manager)));
+    if (!plan.writes.length && !extra.length && !rec && !managerRepair) {
       await client.query('COMMIT');
       return { status: 200, body: { ok: true, noop: true, sync_version: curVersion } };
     }
@@ -1855,6 +1942,10 @@ async function applySharedPatch(p) {
     if (missed.length) {
       return await _abort(client, 409, { ok: false, code: 'write_unmatched', sync_version: curVersion, fields: missed.map(path => ({ path, label: _label(path) })),
         error: `상품·옵션 짝을 찾지 못해 저장하지 않았습니다: ${[...new Set(missed.map(path => _label(path)))].join(', ')}. 창을 닫고 다시 열어 주세요.` });
+    }
+    if (plan.writes.some(w => w.path === 'f:work_manager')) {
+      const protection = await _managerEditProtection(client, wo);
+      if (protection) return await _abort(client, protection.status, protection.body);
     }
     // 7단계-④ — 지운 선택지 중 참여자가 있는 것은 마감으로 되살린다(총모집도 그만큼) · 더한 선택지 검사
     let closure = { restored: [], addTotal: 0 };
@@ -1964,7 +2055,7 @@ async function applySharedPatch(p) {
       sets.push(`courier_proxy = ${add(deliveryBaseType(next.delivery_type) === '택배발송대행')}`);
     }
     if (rec) sets.push(`bidir_state = 'on'`);
-    if (plan.writes.length || rec) {
+    if (plan.writes.length || rec || managerRepair) {
       // 새 버전은 한 번만 계산해 두 칸에 같은 값을 쓴다(시각이 들어가 두 번 계산하면 값이 갈린다).
       const { rows: nv } = await client.query(
         `SELECT GREATEST($1::bigint + 1, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000000)::bigint) AS v`, [curVersion]);
@@ -1972,7 +2063,7 @@ async function applySharedPatch(p) {
       sets.push(`sync_version = ${v}::bigint`);
       // 인트라넷이 이 버전을 "안다" 고 적는 것은 저장 결과가 보낸 값과 같을 때만 — 합쳐져 달라졌으면
       // 인트라넷 사본은 아직 옛 값이다(받아 간 뒤 송신 처리기가 적는다). 기준 없는 옛 인트라넷 저장이 이 값을 기준으로 쓴다.
-      if (p.origin === 'intranet' && !_pushBackKeys(p.mine, next).length) sets.push(`intranet_acked_version = ${v}::bigint`);
+      if (p.origin === 'intranet' && !managerRepair && !_pushBackKeys(p.mine, next).length) sets.push(`intranet_acked_version = ${v}::bigint`);
     }
     const { rows: upd } = await client.query(
       `UPDATE work_orders SET ${sets.join(', ')}, updated_at = NOW()
@@ -2008,7 +2099,7 @@ async function applySharedPatch(p) {
         return await _abort(client, 200, out);
       }
     }
-    if (plan.writes.length || rec) {
+    if (plan.writes.length || rec || managerRepair) {
       await client.query(
         `INSERT INTO work_order_shared_snapshots (work_order_id, sync_version, origin, op_id, state, actor)
          VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
@@ -2016,11 +2107,13 @@ async function applySharedPatch(p) {
     }
     // ── 인트라넷으로 보낼 거리(4단계) — 리뷰웹발은 항상, 인트라넷발은 저장 결과가 보낸 값과 다를 때만
     //    (그 사이 리뷰웹이 고친 다른 칸과 합쳐진 경우). 같으면 쌓지 않는다 — 자기가 보낸 것을 되받는 메아리 방지.
-    if (p.origin !== 'intranet' ? (plan.writes.length > 0 || !!rec) : (plan.writes.length > 0 && _pushBackKeys(p.mine, next).length > 0)) {
+    if (p.origin !== 'intranet' ? (plan.writes.length > 0 || !!rec) : (managerRepair || (plan.writes.length > 0 && _pushBackKeys(p.mine, next).length > 0))) {
       await client.query(
-        `INSERT INTO shared_sync_outbox (work_order_id, sync_version) VALUES ($1, $2)
-         ON CONFLICT (work_order_id, sync_version) DO UPDATE SET status = 'pending', attempts = 0, next_at = NOW(), last_error = '', updated_at = NOW()
-          WHERE shared_sync_outbox.status IN ('delivered', 'superseded')`, [wo.id, newVersion]);
+        `INSERT INTO shared_sync_outbox (work_order_id, sync_version, view_scope) VALUES ($1, $2, $3)
+         ON CONFLICT (work_order_id, sync_version) DO UPDATE SET status = 'pending', attempts = 0, next_at = NOW(), last_error = '', updated_at = NOW(),
+           view_scope = CASE WHEN shared_sync_outbox.view_scope = 'full' THEN 'full' ELSE EXCLUDED.view_scope END
+          WHERE shared_sync_outbox.status IN ('delivered', 'superseded')`,
+        [wo.id, newVersion, managerRepair && !plan.writes.length && !rec ? 'manager' : 'full']);
     }
     await client.query('COMMIT');
     // 7단계-② 커밋 뒤 — 작업표 투영 장부 다시 만들기 · 빈 줄 날짜 다시 배치(정원 동기화와 같은 순서 · 탭 잠금은 자기 트랜잭션 · 실패해도 저장은 끝났다)
@@ -2047,7 +2140,7 @@ async function applySharedPatch(p) {
     if (overwritten.length) logger.info(`[bidir/apply] ${wo.id} 겹친 칸을 나중 저장 값으로(${p.origin}·${p.actor || ''}): ${overwritten.map(o => o.label).join(', ')}`);
     // push_back = 저장 결과가 보낸 값과 달라 인트라넷이 받아 가야 하는가(인트라넷발만 의미 있음). false 면 인트라넷은 이 버전을
     // 자기 사본과 같다고 적는다(remote_sync_version) — 안 적으면 늦게 도착한 옛 송신이 방금 저장한 수정을 되돌린다(검토 2026-10-20).
-    const pushBack = p.origin === 'intranet' && _pushBackKeys(p.mine, next).length > 0;   // 쓴 칸이 없어도(번호만) 사본이 다를 수 있다
+    const pushBack = p.origin === 'intranet' && (managerRepair || _pushBackKeys(p.mine, next).length > 0);   // 쓴 칸이 없어도(번호만) 사본이 다를 수 있다
     return { status: 200, body: { ok: true, data: saved, sync_version: newVersion, push_back: pushBack, applied: plan.writes.map(w => w.path), campaign_applied: campaign.applied, overwritten,
       ...(closure.restored.length ? { closed_options: closure.restored } : {}) } };
   } catch (e) {

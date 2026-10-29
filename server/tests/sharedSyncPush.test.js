@@ -33,10 +33,10 @@ const push = require('../src/services/sharedSyncPush.service');
   const sig = signBody('s3cret', '{"a":1}', 1792000000000);
   assert.equal(sig, 't=1792000000000,v1=' + crypto.createHmac('sha256', 's3cret').update('1792000000000.{"a":1}').digest('hex'));
   assert.equal(backoffMs(1), 15000); assert.equal(backoffMs(2), 30000); assert.equal(backoffMs(40), 600000, '최대 10분');
-  const body = buildPushBody({ id: 'wo_1', source_review_order_id: 'ro_1', sync_version: '1792000000000001', review_guide: 'g', special_notes: 'n', recruit_count: 9, title: 't', guide_images: '[]' });
+  const body = buildPushBody({ id: 'wo_1', source_review_order_id: 'ro_1', sync_version: '1792000000000001', review_guide: 'g', special_notes: 'n', recruit_count: 9, title: 't', guide_images: '[]', work_manager: '박세희' });
   assert.equal(body.sync_version, 1792000000000001, 'BIGINT 글자 → 숫자');
   // ★ 7단계-②(2026-10-20): 총모집도 보낸다(인원 양방향) — 인트라넷 고유 칸(작업명 등)은 여전히 보내지 않는다(검사 의미 유지)
-  assert.deepEqual(Object.keys(body.view).sort(), ['guide_images', 'recruit_count', 'review_guide', 'special_notes'], '공유 칸만(작업명 등 인트라넷 고유는 보내지 않는다)');
+  assert.deepEqual(Object.keys(body.view).sort(), ['guide_images', 'recruit_count', 'review_guide', 'special_notes', 'work_manager'], '공유 칸만(작업명 등 인트라넷 고유는 보내지 않는다)');
   assert.ok(!Object.prototype.hasOwnProperty.call(body.view, 'title'));
   console.log('sharedSyncPush: pure passed');
 }
@@ -50,11 +50,15 @@ const push = require('../src/services/sharedSyncPush.service');
   assert.match(svc, /if \(!url \|\| !secret\) return \{ skipped: 'config' \}/, '주소·전용 비밀값 없으면 보내지 않는다');
   assert.match(svc, /const secret = String\(env\.BIDIR_RW_TO_IN_SECRET/, '서명은 전용 비밀값(CS 중계 키 재사용 금지)');
   assert.ok(!/createHmac\([^)]*INTRANET_WEBHOOK_KEY/.test(svc));
-  assert.match(svc, /FOR UPDATE SKIP LOCKED/);
+  assert.match(svc, /FOR UPDATE OF o2 SKIP LOCKED/);
   const sp = read('services/sharedPatch.service.js');
-  assert.match(sp, /if \(p\.origin === 'intranet' && !_pushBackKeys\(p\.mine, next\)\.length\) sets\.push\(`intranet_acked_version/, '합쳐졌으면 "안다" 를 적지 않는다');
+  assert.match(sp, /if \(p\.origin === 'intranet' && !managerRepair && !_pushBackKeys\(p\.mine, next\)\.length\) sets\.push\(`intranet_acked_version/, '담당자 복구가 대기 중이면 전체 버전을 안다고 적지 않는다');
   // 리뷰웹발은 쓴 칸이 있을 때(오더·공고 맞추기는 쓴 칸이 없어도 — 오더를 공고 값으로 바꿨으니 인트라넷이 받아 가야 한다) · 인트라넷발은 합쳐졌을 때만
-  assert.match(sp, /p\.origin !== 'intranet' \? \(plan\.writes\.length > 0 \|\| !!rec\) : \(plan\.writes\.length > 0 && _pushBackKeys\(p\.mine, next\)\.length > 0\)/, '인트라넷발은 합쳐졌을 때만 쌓는다(메아리 방지)');
+  assert.match(sp, /managerRepair \|\| \(plan\.writes\.length > 0 && _pushBackKeys\(p\.mine, next\)\.length > 0\)/, '예전 화면의 담당자 복구도 저장 트랜잭션에 대기열을 남긴다');
+  assert.match(sp, /view_scope = CASE WHEN shared_sync_outbox\.view_scope = 'full' THEN 'full' ELSE EXCLUDED\.view_scope END/, '전송 범위가 전체에서 담당자 전용으로 좁아지지 않는다');
+  const pushService = read('services/sharedSyncPush.service.js');
+  assert.match(pushService, /\$3 = 'full' OR view_scope = 'manager'/, '담당자 전용 성공은 담당자 범위만 정리한다');
+  assert.match(pushService, /o2\.view_scope = 'manager' OR w\.bidir_state = 'on'/, '전체 대기 행은 연결 ON 에서만 가져온다');
   assert.match(sp, /const rec = p\.origin === 'reconcile' && p\.reconcile \? p\.reconcile : null;/, '맞추기 표시는 origin reconcile 에서만(인트라넷발에는 없다)');
   console.log('sharedSyncPush: static passed');
 }

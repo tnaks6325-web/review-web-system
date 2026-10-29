@@ -23,7 +23,7 @@ const read = (rel) => fs.readFileSync(path.join(__dirname, '..', 'src', rel), 'u
   const woLock = at(/SELECT \* FROM work_orders WHERE id = \$1 FOR UPDATE/);
   const campLock = at(/SELECT \* FROM recruit_campaigns WHERE id = \$1 AND archived_at IS NULL FOR UPDATE/);
   assert.ok(L1 < woLock && woLock < campLock, '잠금 순서 = L1 → 오더 행 → 공고 행(결정 262 완화 금지)');
-  const firstWrite = at(/UPDATE work_orders SET \$\{sets\.join/);
+  const firstWrite = at(/UPDATE work_orders SET \$\{sets\.join\(', '\)\}, updated_at = NOW\(\)/);
   for (const code of ['field_not_editable', 'field_conflict', 'edit_base_missing', 'bidir_not_on', 'link_changed_retry']) {
     const i = fn.indexOf(`code: '${code}'`);
     assert.ok(i > 0 && i < firstWrite, `${code} 는 쓰기 전에 끝난다(부분 반영 금지)`);

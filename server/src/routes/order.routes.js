@@ -29,7 +29,7 @@ const { mirrorOneSheet } = require('../services/rawMirror.service');
 const sse = require('../utils/sse');
 const { logger } = require('../utils/logger');
 const { fetchThumbFromUrl } = require('../utils/thumbFetch');
-const { mapWorkManager, pickWorkManager } = require('../utils/workManager');
+const { mapWorkManager, pickWorkManager, isUndecidedWorkManager } = require('../utils/workManager');
 const { LEGACY_DELIVERY_VALUES, normalizeReviewType } = require('../utils/reviewType');
 const { normalizeReviewTypeMix } = require('../utils/reviewTypeMix');
 const { deliveryBaseType, parseDeliveryType, canonicalDeliveryValue, isCourierProxyDelivery } = require('../utils/deliveryType');
@@ -887,6 +887,111 @@ function _sourceRevisionPreHook(source) {
   };
 }
 
+function _canonicalOriginalWorkManager(raw) {
+  const value = String(raw == null ? '' : raw).trim();
+  const mapped = mapWorkManager(value);
+  if (mapped === '만두') return '박세희';
+  if (mapped === '망고') return '박은비';
+  if (isUndecidedWorkManager(value)) return '랜덤';
+  return '';
+}
+
+function _hasExplicitWorkManager(body = {}) {
+  return ['work_manager', 'worker', 'work_staff', '작업담당'].some(k => Object.prototype.hasOwnProperty.call(body, k))
+    || /작업\s*담당\s*[:：]/.test([body.special_notes, body.review_guide, body.product_option].filter(Boolean).join('\n'));
+}
+
+function _sourceManagerCapability(body = {}) {
+  const bid = body.bidir && typeof body.bidir === 'object' && !Array.isArray(body.bidir) ? body.bidir : null;
+  return !!(bid && (bid.manager === 1 || bid.manager === true || bid.manager === '1'));
+}
+
+// Manager-only routing must account for the contract fields intentionally omitted by
+// _sourceContentChanges (that helper serves the accepted-order content lock).
+function _sourceManagerOtherChanges(current, b, derived, source) {
+  const changes = _sourceContentChanges(current, b, derived).filter(column => column !== 'work_manager');
+  const contract = {
+    sales_id: String(b.sales_id || '').trim(),
+    contract_number: String(b.contract_number || '').trim(),
+    quote_id: String(b.quote_id || '').trim(),
+    intranet_advertiser_id: source.intranetAdvertiserId,
+  };
+  return changes.concat(Object.keys(contract).filter(column =>
+    _sourceCompareValue(column, contract[column]) !== _sourceCompareValue(column, current[column])));
+}
+
+async function _intakeSourceManager(res, { b, source, current, optionsJson, deliveryType, courierProxy, requester }) {
+  const bid = b.bidir;
+  const manager = _canonicalOriginalWorkManager(pickWorkManager(b));
+  if (!manager) return res.status(400).json({ ok: false, code: 'manager_value_invalid', error: '작업담당은 박세희·박은비·랜덤 중에서 골라 주세요.' });
+  const contentChanges = _sourceManagerOtherChanges(current, b, { optionsJson, deliveryType, courierProxy }, source);
+  if (contentChanges.length) return res.status(400).json({ ok: false, code: 'split_save', fields: contentChanges,
+    error: '양방향 동기화가 꺼진 동안에는 작업담당과 다른 변경을 함께 저장할 수 없습니다. 다른 내용부터 따로 저장한 뒤 다시 시도해 주세요.' });
+  const rawBase = bid.base_sync_version !== undefined ? bid.base_sync_version : b.manager_base_version;
+  const baseVersion = Number(rawBase);
+  const out = await applySharedPatch({
+    workOrderId: current.id,
+    mine: { work_manager: manager },
+    baseVersion,
+    origin: 'intranet_manager',
+    managerOnly: true,
+    actor: requester || '인트라넷',
+    preHook: _sourceRevisionPreHook(source),
+    extraSets: {
+      source_revision: source.sourceRevision,
+      intake_idempotency_key: source.idempotencyKey,
+      intranet_advertiser_name: source.intranetAdvertiserName,
+      intranet_advertiser_contact: source.intranetAdvertiserContact,
+      intranet_advertiser_business_number: source.intranetAdvertiserBusinessNumber,
+    },
+  });
+  if (out.status === 200 && out.body && out.body.ok && !out.body.idempotent && out.body.data) {
+    _emitWorkOrderNew(out.body.data, { event: 'source_manager_edit', source_revision: source.sourceRevision });
+  }
+  if (out.status === 200 && out.body && !out.body.data) out.body.data = current;
+  // Acknowledge only the manager value proven by the locked save (including exact retries).
+  // Never acknowledge the full shared snapshot for this partial source edit.
+  if (out.status === 200 && out.body?.ok && out.body.data
+      && _canonicalOriginalWorkManager(out.body.data.work_manager) === manager) {
+    out.body.manager_ack_version = Number(out.body.data.sync_version || 0);
+  }
+  return res.status(out.status).json(out.body);
+}
+
+/** 구 인트라넷 전체 저장이 담당자까지 보냈지만 그 칸은 읽기 전용이었던 경우,
+ * 원본 버전 갱신과 현재 담당자 재전송을 한 DB 트랜잭션으로 묶는다. */
+async function _sourceUpdateWithManagerRepair(sql, params, { current, managerValue }) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SET LOCAL lock_timeout = '5s'`);
+    await client.query(`SET LOCAL statement_timeout = '10s'`);
+    await require('../services/linkedRecruitQuota.service').lockWorkOrderCampaigns(client, [current.id]);
+    const { rows: locked } = await client.query('SELECT * FROM work_orders WHERE id = $1 FOR UPDATE', [current.id]);
+    const repair = locked[0] && managerValue !== undefined
+      && _canonicalOriginalWorkManager(managerValue) !== _canonicalOriginalWorkManager(locked[0].work_manager);
+    // Both the write and recovery decision use the locked latest record, never the route pre-read.
+    const repairSql = repair ? sql.replace(/updated_at\s*=\s*NOW\(\)/i,
+      `sync_version = GREATEST(sync_version + 1, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000000)::bigint), updated_at = NOW()`) : sql;
+    const result = await client.query(repairSql, params);
+    const saved = result.rows && result.rows[0];
+    if (!saved) { await client.query('ROLLBACK'); return { rows: [] }; }
+    if (!repair) { await client.query('COMMIT'); return result; }
+    await client.query(
+      `INSERT INTO work_order_shared_snapshots (work_order_id, sync_version, origin, op_id, state, actor)
+       VALUES ($1, $2, 'rw_manager_repair', '', $3::jsonb, '인트라넷 이전 화면')`,
+      [saved.id, Number(saved.sync_version), JSON.stringify(require('../services/sharedPatch.service').readSharedState(saved))]);
+    await client.query(
+      `INSERT INTO shared_sync_outbox (work_order_id, sync_version, view_scope)
+       VALUES ($1, $2, 'manager')`, [saved.id, Number(saved.sync_version)]);
+    await client.query('COMMIT');
+    return { rows: [saved] };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* 원 오류 보존 */ }
+    throw err;
+  } finally { client.release(); }
+}
+
 /** 결정 285 — 인트라넷 수정 창이 보낸 상품 이름 짝 `bidir.rw_names`({인트라넷 이름: 리뷰웹 이름}). 모양이 틀리면 없음(종전 판정). */
 function _bidirNameMap(bid) {
   const m = bid && bid.rw_names;
@@ -905,7 +1010,7 @@ async function _intakeSourceBidir(res, { b, source, current, optionsJson, delive
   const bid = (b.bidir && typeof b.bidir === 'object' && !Array.isArray(b.bidir)) ? b.bidir : null;
   // ★ 기준 버전이 없으면 저장하지 않는다 — 기준 없이 쓰면 그 사이 리뷰웹에서 고친 값을 조용히 덮는다.
   //   구버전 인트라넷(bidir 블록 없음)은 마지막으로 받아 간 버전(intranet_acked_version)을 기준으로 쓴다.
-  const baseVersion = Number(bid && bid.base_sync_version) || Number(current.intranet_acked_version) || 0;
+  const baseVersion = Number(bid && bid.base_sync_version) || Number(b.manager_base_version) || Number(current.intranet_acked_version) || 0;
   if (!baseVersion) {
     return res.status(409).json({ ok: false, code: 'edit_base_required', work_order_id: current.id,
       error: '리뷰웹과 연결된 오더입니다. 수정 창을 닫고 다시 열어 주세요.' });
@@ -914,6 +1019,10 @@ async function _intakeSourceBidir(res, { b, source, current, optionsJson, delive
     workOrderId: current.id,
     mine: (() => {
       const m = _sourceSharedMine(b, { optionsJson, deliveryType, courierProxy }, source);
+      // 담당자 capability 가 있는 새 창만 공유 저장 본체에 담당자를 포함한다.
+      // 이전 창의 전체 저장은 담당자 원장을 보존하고 아래 repair flag 로 같은 트랜잭션에서 좁게 되돌려 보낸다.
+      if (_sourceManagerCapability(b) && _hasExplicitWorkManager(b) && _canonicalOriginalWorkManager(m.work_manager)) m.work_manager = _canonicalOriginalWorkManager(m.work_manager);
+      else delete m.work_manager; // 빈 값은 지정 해제가 아니라 변경 없음 — 해제는 명시적인 '랜덤'만.
       // 인트라넷 수정 창이 리뷰웹 상품 구성과 짝을 못 지어 금액 칸을 잠갔다(`bidir.skip_products`) — 그 저장의 상품 구성·합계·요약은 받지 않는다.
       //   인트라넷 사본은 옛 금액일 수 있어 그대로 받으면 리뷰웹 금액이 되돌아간다(검토 2026-10-20).
       if (bid && (bid.skip_products === 1 || bid.skip_products === true)) { delete m.product_options_json; delete m.product_option; delete m.pay_amount; }
@@ -944,6 +1053,7 @@ async function _intakeSourceBidir(res, { b, source, current, optionsJson, delive
     deliveryCapable: !!(bid && (bid.delivery === 1 || bid.delivery === true || bid.delivery === '1')),
     // ★ 7단계-④ ⑤-3: 옵션 있음↔없음도 그것을 아는 창만(옛 창은 방식 칸이 잠겨 있다 — 보내면 종전처럼 409)
     modeCapable: !!(bid && (bid.mode === 1 || bid.mode === true || bid.mode === '1')),
+    managerRepairValue: !_sourceManagerCapability(b) && _hasExplicitWorkManager(b) ? pickWorkManager(b) : undefined,
     preHook: _sourceRevisionPreHook(source),
     extraSets: {
       source_revision: source.sourceRevision,
@@ -1046,6 +1156,26 @@ async function _intakeSourceRevisionHandler(req, res, next) {
       return res.status(409).json({ ok: false, code: 'work_round_immutable', error: '기존 작업오더의 작업 계열과 차수는 수정할 수 없습니다. 차수 추가를 사용하세요.', work_order_id: current.id });
     }
 
+    if (_sourceManagerCapability(b)) {
+      if (_hasExplicitWorkManager(b) && String(pickWorkManager(b) || '').trim() && !_canonicalOriginalWorkManager(pickWorkManager(b))) {
+        return res.status(400).json({ ok: false, code: 'manager_value_invalid', error: '작업담당은 박세희·박은비·랜덤 중에서 골라 주세요.' });
+      }
+      const sw = await readBidirSwitch(pool);
+      const managerChanged = _hasExplicitWorkManager(b)
+        && !!_canonicalOriginalWorkManager(pickWorkManager(b))
+        && _canonicalOriginalWorkManager(pickWorkManager(b)) !== _canonicalOriginalWorkManager(current.work_manager);
+      if (current.bidir_state === 'on' && sw.in2rw === 'apply') {
+        return await _intakeSourceBidir(res, { b, source, current, optionsJson, deliveryType, courierProxy,
+          requester: String(b.requester_name || b.created_by || '').trim() });
+      }
+      const managerOnlyRetry = _hasExplicitWorkManager(b) && !!_canonicalOriginalWorkManager(pickWorkManager(b))
+        && _sourceManagerOtherChanges(current, b, { optionsJson, deliveryType, courierProxy }, source).length === 0;
+      if (managerChanged || managerOnlyRetry) {
+        return await _intakeSourceManager(res, { b, source, current, optionsJson, deliveryType, courierProxy,
+          requester: String(b.requester_name || b.created_by || '').trim() });
+      }
+    }
+
     /* ★★ 양방향(결정 275 · 3단계) — 연결된 오더(`bidir_state='on'`)는 공유 저장 단일 출처로 간다.
        스위치(`app_settings.bidir_sync.in2rw`)가 apply 일 때만. off·비상 스위치면 종전 경로 그대로(오늘 동작),
        observe 면 판정만 기록하고 종전 경로로 계속 간다. 연결 안 된 오더는 언제나 종전 경로. */
@@ -1063,9 +1193,9 @@ async function _intakeSourceRevisionHandler(req, res, next) {
     const sourceEditLocked = isSourceEditLocked(current);
     // 삭제된 작업오더에는 예외를 두지 않는다 — 없는 오더에 계약을 붙일 이유가 없다.
     const contractMatchAllowed = sourceEditLocked && !current.deleted_at;
-    const contentChanges = contractMatchAllowed
+    const contentChanges = (contractMatchAllowed
       ? _sourceContentChanges(current, b, { optionsJson, deliveryType, courierProxy })
-      : [];
+      : []).filter(column => column !== 'work_manager'); // 표시만 하던 구버전 전체 저장의 담당자 값은 보존한다.
     // 접수 뒤에도 고칠 수 있는 칸(안내 문구·사진·이름)만 바뀐 요청이면 그 칸만 갱신한다.
     // 계약 후속 매칭(바뀐 내용 0)도 같은 경로다 — 잠긴 칸에는 어느 쪽도 손대지 못한다.
     const blockedChanges = contentChanges.filter(column =>
@@ -1148,8 +1278,9 @@ async function _intakeSourceRevisionHandler(req, res, next) {
          WHERE id = $1 AND source_review_order_id = ${add(sourceReviewOrderId)}
            AND COALESCE(source_revision, 0) = ${add(currentRevision)}
          RETURNING *`;
-      const { rows: matched } = await pool.query(sql, params);
-      const linked = matched[0];
+      const managerValue = _hasExplicitWorkManager(b) ? pickWorkManager(b) : undefined;
+      const { rows: matched } = await _sourceUpdateWithManagerRepair(sql, params, { current, managerValue });
+      let linked = matched[0];
       // ★ 1단계: 읽은 뒤 그 사이 다른 요청이 번호를 올렸다 — 0행을 성공으로 접지 않는다(완화 금지).
       if (!linked) return await _sourceRevisionRaceResponse(res, sourceReviewOrderId, source);
       /* ★★ 결제금액이 바뀌었으면 연결 모집공고까지 반영한다(사용자 확정 2026-09-21).
@@ -1251,23 +1382,24 @@ async function _intakeSourceRevisionHandler(req, res, next) {
     // 원본 리뷰오더의 목표 인원이 바뀌면 연결된 공고도 같은 값으로 저장한다.
     // 실제 UPDATE 전에 하한을 검증해, 이미 참여한 인원보다 낮춘 값으로 반쪽만 남지 않게 한다.
     await assertWorkOrderQuota({ workOrderId: current.id, recruitTotal: _intOrZero(b.recruit_count) });
-    const { rows } = await pool.query(
+    const managerValue = _hasExplicitWorkManager(b) ? pickWorkManager(b) : undefined;
+    const { rows } = await _sourceUpdateWithManagerRepair(
       `UPDATE work_orders SET
          title = $2, start_date = $3, product_option = $4, product_options_json = $5,
          pay_amount = $6, daily_count = $7, daily_count_text = $8, purchase_channel = $9, purchase_time = $10,
          inflow_keyword = $11, inflow_type = $12, inflow_guide = $13, guide_images = $14,
          delivery_type = $15, courier_proxy = $16, review_type = $17, review_type_mix = $18, recruit_count = $19,
          review_guide = $20, special_notes = $21, product_url = $22, work_sheet_url = $23,
-         goods_cost_type = $24, manager_name = $25, work_manager = $26, sales_id = $27,
-         contract_number = $28, quote_id = $29, skip_weekends = $30, holidays = $31,
-         work_kind = $32, source_revision = $33, intake_idempotency_key = $34,
-         intranet_advertiser_id = $35, intranet_advertiser_name = $36,
-         intranet_advertiser_contact = $37, intranet_advertiser_business_number = $38, review_fee = $39,
-         delivery_type_mix = $41, recall_courier = $42, recall_product = $43, product_distribution_mode = $44,
-         thumbnail_url = $45,
-         required_delivery_memo = COALESCE($47, required_delivery_memo),   -- 결정 287: 미전송 = 유지
+         goods_cost_type = $24, manager_name = $25, sales_id = $26,
+         contract_number = $27, quote_id = $28, skip_weekends = $29, holidays = $30,
+         work_kind = $31, source_revision = $32, intake_idempotency_key = $33,
+         intranet_advertiser_id = $34, intranet_advertiser_name = $35,
+         intranet_advertiser_contact = $36, intranet_advertiser_business_number = $37, review_fee = $38,
+         delivery_type_mix = $40, recall_courier = $41, recall_product = $42, product_distribution_mode = $43,
+         thumbnail_url = $44,
+         required_delivery_memo = COALESCE($46, required_delivery_memo),   -- 결정 287: 미전송 = 유지
          updated_at = NOW()
-       WHERE id = $1 AND source_review_order_id = $40 AND COALESCE(source_revision, 0) = $46
+       WHERE id = $1 AND source_review_order_id = $39 AND COALESCE(source_revision, 0) = $45
        RETURNING *`,
       [
         current.id,
@@ -1277,7 +1409,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
         deliveryType, courierProxy, b.review_type || '', _reviewTypeMixJson(b.review_type_mix, b.review_type),
         _intOrZero(b.recruit_count), b.review_guide || '', b.special_notes || '', b.product_url || '',
         String(b.work_sheet_url || '').trim(), b.goods_cost_type || '', b.manager_name || '',
-        pickWorkManager(b), String(b.sales_id || '').trim(), String(b.contract_number || '').trim(),
+        String(b.sales_id || '').trim(), String(b.contract_number || '').trim(),
         String(b.quote_id || '').trim(), _boolOrNull(b.skip_weekends), _holidaysJson(b.holidays),
         workKindForStore(b.work_kind), source.sourceRevision, source.idempotencyKey,
         source.intranetAdvertiserId, source.intranetAdvertiserName, source.intranetAdvertiserContact,
@@ -1285,11 +1417,10 @@ async function _intakeSourceRevisionHandler(req, res, next) {
         _deliveryMixJson(b, deliveryType), _recallFields(b, deliveryType).courier, _recallFields(b, deliveryType).product,
         _productDistributionMode(b.product_distribution_mode),
         _thumbnailUrl(b.thumbnail_url),
-        currentRevision,                                   // $46 ★ 1단계: 읽은 번호 그대로일 때만 쓴다
-        b.required_delivery_memo === undefined ? null : _requiredMemo(b.required_delivery_memo),   // $47 결정 287
-      ]
-    );
-    const updated = rows[0];
+        currentRevision,                                   // $45 ★ 1단계: 읽은 번호 그대로일 때만 쓴다
+        b.required_delivery_memo === undefined ? null : _requiredMemo(b.required_delivery_memo),   // $46 결정 287
+      ], { current, managerValue });
+    let updated = rows[0];
     if (!updated) return await _sourceRevisionRaceResponse(res, sourceReviewOrderId, source);
     await syncWorkOrderRecruitTotal({ workOrderId: updated.id, recruitTotal: updated.recruit_count });
     _emitWorkOrderNew(updated, { event: 'source_revision', source_revision: source.sourceRevision });
@@ -1351,6 +1482,21 @@ router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) 
     const active = rows[0].bidir_state === 'on' && sw.in2rw === 'apply';
     const structureOpen = active ? await structureOpenFor(pool, rows[0]) : false;
     const caps = new Set(String(req.query.caps || '').split(',').map(x => x.trim()).filter(Boolean));
+    let managerArchived = false;
+    const { rows: archivedManagerCampaigns } = await pool.query(
+      `SELECT id FROM recruit_campaigns WHERE archived_at IS NOT NULL
+        AND (id = NULLIF($1, '') OR NULLIF(source_work_order_id, '') = $2) LIMIT 1`,
+      [String(rows[0].linked_campaign_id || ''), String(rows[0].id)]);
+    managerArchived = archivedManagerCampaigns.length > 0;
+    const managerCapable = caps.has('manager') && !sw.hardOff
+      && !!String(rows[0].source_review_order_id || '').trim() && rows[0].status !== 'done' && !managerArchived;
+    const normalWritable = active ? [...WRITABLE_BY_ORIGIN.intranet].filter(f => f !== 'work_manager'
+      && ((f !== STRUCTURE_FIELD && f !== RENAME_FIELD && f !== MODE_FIELD) || structureOpen)
+      && (f !== 'review_type' || !structurePermanentlyLocked(readSharedState(rows[0])))
+      && (f !== 'delivery_type' || (caps.has('delivery') && deliverySwapOpen(readSharedState(rows[0])))) ) : [];
+    const writable = active
+      ? [...normalWritable, ...(managerCapable ? ['work_manager'] : [])]
+      : (managerCapable ? ['work_manager'] : null);
     res.json({
       ok: true,
       work_order_id: rows[0].id,
@@ -1361,11 +1507,7 @@ router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) 
       // ★ 7단계-④: 상품·옵션 더하기·지우기는 공고에 옵션 줄이 있는 작업만 연다(옵션 없이 상품 하나로 도는 공고는 옵션 있음·없음 바꾸기 단계 — 열면 저장 때 막힌다)
       // ★ 7단계-④ ④: 리뷰타입은 영구 금지 작업(배송 혼합·회수·블로그·구매수량 단계)에서는 열지 않는다
       // ★ 7단계-④ ⑤-3: 옵션 있음↔없음도 구조와 같은 조건(영구 금지 작업·짝을 못 짓는 작업은 닫음)
-      writable: active ? [...WRITABLE_BY_ORIGIN.intranet].filter(f => ((f !== STRUCTURE_FIELD && f !== RENAME_FIELD && f !== MODE_FIELD) || structureOpen)
-        && (f !== 'review_type' || !structurePermanentlyLocked(readSharedState(rows[0])))
-        // ★ 7단계-④ ⑤: 배송은 한 종류 배송 작업만(배송 혼합·회수·블로그는 열지 않는다 — 창은 혼합·회수 선택지·부속 칸을 계속 잠근다)
-        // ★ 배송을 아는 창(caps=delivery)에만 연다 — 옛 인트라넷 창은 배송 칸 하나로 혼합·회수 선택지까지 함께 잠가, 열면 전부 풀린다(검토 2026-10-21 · 배포 순서 안전장치)
-        && (f !== 'delivery_type' || (caps.has('delivery') && deliverySwapOpen(readSharedState(rows[0]))))) : null,
+      writable,
       /* ★★ 이 버전의 공유 값(저장 형태 그대로) — 인트라넷 수정 창은 이 값으로 연다.
          안 그러면 창이 인트라넷 사본(리뷰웹에서 고친 글 칸이 아직 안 온 값)으로 열리고, 손대지 않은 칸이
          "인트라넷이 되돌렸다" 로 읽혀 리뷰웹 수정을 조용히 덮는다(로컬 E2E 실측 2026-10-20). */
@@ -1374,7 +1516,9 @@ router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) 
       option_used: active ? await _optionUsedForOrder(rows[0]) : null,
       field_owner: Object.fromEntries(SHARED_FIELDS.map(f => [f.key, f.owner])),
       // ★ 결정 285 — keep_names: 인트라넷 이름으로 저장해도 `bidir.rw_names` 짝으로 받는다(이 표시가 없는 옛 리뷰웹에 인트라넷 이름을 보내면 지우고 더하기로 읽힌다)
-      capabilities: { bidir_v1: true, keep_names: true },
+      manager_edit_capable: managerCapable,
+      manager_base_version: Number(rows[0].sync_version || 0),
+      capabilities: { bidir_v1: true, keep_names: true, manager: managerCapable },
     });
   } catch (err) {
     next(err);
@@ -2481,6 +2625,31 @@ _handlers.orderAdminEdit = async (req, res, next) => {
     if (o.deleted_at) return res.status(409).json({ ok: false, error: '삭제된 작업오더는 수정할 수 없습니다.' });
     if (o.status === 'done') return res.status(409).json({ ok: false, error: '완료된 작업오더는 수정할 수 없습니다.' });
 
+    const managerCapable = b.manager_capable === 1 || b.manager_capable === true || b.manager_capable === '1';
+    const hasManagerValue = Object.prototype.hasOwnProperty.call(b, 'work_manager');
+    const linkedIntranetOrder = !!String(o.source_review_order_id || '').trim();
+    let managerEdit = null;
+    if (linkedIntranetOrder && managerCapable && hasManagerValue) {
+      if (!req.admin || !['admin', 'master'].includes(req.admin.role)) {
+        return res.status(403).json({ ok: false, code: 'manager_admin_required', error: '담당자 변경은 관리자만 할 수 있습니다.' });
+      }
+      if (String(process.env.BIDIR_HARD_OFF || '').trim() === '1') {
+        return res.status(503).json({ ok: false, code: 'bidir_off', error: '양방향 동기화가 긴급 정지되어 담당자를 바꿀 수 없습니다.' });
+      }
+      const rawManager = String(b.work_manager == null ? '' : b.work_manager).trim();
+      const canonicalManager = _canonicalOriginalWorkManager(rawManager);
+      if (!canonicalManager) return res.status(400).json({ ok: false, code: 'manager_value_invalid', error: '작업담당은 박세희·박은비·랜덤 중에서 골라 주세요.' });
+      const baseVersion = Number(b.manager_base_version);
+      const currentVersion = Number(o.sync_version || 0);
+      const canonicalCurrent = _canonicalOriginalWorkManager(o.work_manager) || String(o.work_manager || '').trim();
+      if ((!Number.isSafeInteger(baseVersion) || baseVersion !== currentVersion) && canonicalCurrent !== canonicalManager) {
+        return res.status(409).json({ ok: false, code: 'manager_version_conflict', sync_version: currentVersion,
+          error: '작업담당이 다른 저장으로 바뀌었습니다. 화면을 새로고침한 뒤 다시 선택해 주세요.' });
+      }
+      managerEdit = { target: canonicalManager, baseVersion };
+      b.work_manager = canonicalManager;
+    }
+
     // 동적 SET — 화이트리스트 밖 필드(status/sales_id/work_sheet_url 등)는 조용히 무시가 아니라
     // 도달 자체가 불가(목록을 순회하므로). 값이 실제로 달라진 필드만 SET + diff 기록.
     if (b.delivery_type !== undefined || b.courier_proxy !== undefined) {
@@ -2510,9 +2679,15 @@ _handlers.orderAdminEdit = async (req, res, next) => {
     }
 
     const sets = [], vals = [], changes = [];
+    if (managerEdit && (_canonicalOriginalWorkManager(o.work_manager) || String(o.work_manager || '').trim()) !== managerEdit.target) {
+      changes.push({ field: 'work_manager', from: String(o.work_manager || ''), to: managerEdit.target });
+    }
     let i = 1;
     for (const f of ADMIN_EDIT_FIELDS) {
       if (b[f] === undefined) continue;
+      // 연결 오더의 옛 관리자 화면은 담당자 값을 표시만 했다. capability 없는 값은 보존하고,
+      // 새 capability 가 있는 값은 아래 공유 저장 본체에 포함해 나머지 칸과 원자적으로 쓴다.
+      if (f === 'work_manager' && linkedIntranetOrder) continue;
       let nv, curCmp, nvCmp;
       if (f === 'courier_proxy') {
         nv = (b[f] === true || b[f] === 'true');
@@ -2540,15 +2715,19 @@ _handlers.orderAdminEdit = async (req, res, next) => {
       vals.push(nv);
       changes.push({ field: f, from: curCmp, to: nvCmp });
     }
-    if (sets.length === 0) return res.json({ ok: true, data: o, unchanged: true, changed: [] });
-
     /* ★★ 양방향(결정 275 · 3단계) — 연결된 오더(`bidir_state='on'` · 스위치 apply)의 관리자 수정.
        ① 인트라넷 고유 칸(작업명·시작일·담당 등)은 리뷰웹에서 보기 전용 → 400(사용자 확정 D5)
        ② 양방향 글 칸은 공유 저장 단일 출처로 — 버전 조건부 쓰기 + 공고 반영 + 스냅숏이 한 트랜잭션
        ③ 둘을 한 번에 섞어 보내면 나눠 저장하게 한다(두 트랜잭션으로 갈라 반쪽만 남는 일 방지)
        스위치가 꺼져 있거나 연결 안 된 오더는 종전 그대로. */
     let bidirSaved = null;
-    if (o.bidir_state === 'on' && (await readBidirSwitch(pool)).in2rw === 'apply') {
+    const sharedSwitchActive = o.bidir_state === 'on' && (await readBidirSwitch(pool)).in2rw === 'apply';
+    const nonManagerChanges = changes.filter(c => c.field !== 'work_manager');
+    if (managerEdit && nonManagerChanges.length && !sharedSwitchActive) {
+      return res.status(400).json({ ok: false, code: 'split_save', fields: nonManagerChanges.map(c => c.field),
+        error: '양방향 동기화가 꺼진 동안에는 작업담당과 다른 변경을 함께 저장할 수 없습니다. 다른 내용을 먼저 따로 저장한 뒤 다시 시도해 주세요.' });
+    }
+    if (sharedSwitchActive) {
       const { readSharedState } = require('../services/sharedPatch.service');
       const { ownerOf } = require('../utils/sharedFields');
       const label = c => ADMIN_EDIT_LABELS[c.field] || c.field;
@@ -2573,16 +2752,25 @@ _handlers.orderAdminEdit = async (req, res, next) => {
         return res.status(400).json({ ok: false, code: 'split_save',
           error: `인트라넷과 함께 맞추는 칸(${shared.map(label).join(', ')})과 나머지 칸(${changes.filter(c => !shared.includes(c)).map(label).join(', ')})은 따로 저장해 주세요.` });
       }
-      if (shared.length) {
+      if (shared.length || managerEdit) {
         const mine = readSharedState(o);
         // 배열·객체 칸(리뷰타입 혼합 수량 등)은 JSON 글자로 — String() 은 "[object Object]" 로 깨진다(7단계-② 검토 2026-10-21)
         for (const c of shared) mine[c.field] = (b[c.field] !== null && typeof b[c.field] === 'object') ? JSON.stringify(b[c.field]) : String(b[c.field]);
+        if (managerEdit) mine.work_manager = managerEdit.target;
         const out = await applySharedPatch({
-          workOrderId: id, mine, baseVersion: Number(o.sync_version || 0), origin: 'rw_admin', actor: req.admin?.name || '',
+          workOrderId: id, mine, baseVersion: managerEdit ? managerEdit.baseVersion : Number(o.sync_version || 0), origin: 'rw_admin', actor: req.admin?.name || '',
         });
         if (out.status !== 200 || !out.body.ok) return res.status(out.status).json(out.body);
         bidirSaved = out.body.data || o;
       }
+    }
+    if (sets.length === 0 && !managerEdit) return res.json({ ok: true, data: o, unchanged: true, changed: [] });
+    if (sets.length === 0 && managerEdit && !sharedSwitchActive) {
+      const out = await applySharedPatch({
+        workOrderId: id, mine: { work_manager: managerEdit.target }, baseVersion: managerEdit.baseVersion,
+        origin: 'rw_manager', managerOnly: true, actor: req.admin?.name || '',
+      });
+      return res.status(out.status).json(out.body);
     }
 
     // ★ 7단계-②(검토 2026-10-21): 공유 저장이 이미 하한 검사·공고 옵션 인원·작업표 줄까지 맞췄다 — 여기서 다시 돌면
@@ -2599,6 +2787,21 @@ _handlers.orderAdminEdit = async (req, res, next) => {
     );
     if (recruitChange) {
       await syncWorkOrderRecruitTotal({ workOrderId: id, recruitTotal: upd[0].recruit_count });
+    }
+
+    let managerSaved = false;
+    if (managerEdit && !sharedSwitchActive) {
+      const out = await applySharedPatch({
+        workOrderId: id, mine: { work_manager: managerEdit.target },
+        // 이 요청의 처음 기준은 위에서 검사했다. 다른 칸을 먼저 저장했다면 그 새 버전을 이어 쓴다.
+        baseVersion: Number(upd[0].sync_version || o.sync_version || 0),
+        origin: 'rw_manager', managerOnly: true, actor: req.admin?.name || '',
+      });
+      if (out.status !== 200 || !out.body.ok) {
+        return res.status(out.status).json({ ...out.body, partial_saved: changes.map(c => c.field) });
+      }
+      if (out.body.data) upd[0] = out.body.data;
+      managerSaved = !out.body.noop;
     }
 
     // 수정 요약 → memo_log 누적 + 인트라넷 알림 push (admin_memo 는 덮지 않는다 — 처리메모 칸 보호)
@@ -2622,8 +2825,9 @@ _handlers.orderAdminEdit = async (req, res, next) => {
       logger.warn(`[order/edit] memo_log 기록 실패 (수정은 완료): ${logErr.message}`);
     }
 
-    logger.info(`[order/edit] ${id} 관리자 수정 by ${by}: ${changes.map(c => c.field).join(', ')}`);
-    res.json({ ok: true, data: upd[0], changed: changes.map(c => c.field), delivered, deliverError });
+    const changedFields = [...changes.map(c => c.field), ...(managerSaved ? ['work_manager'] : [])];
+    logger.info(`[order/edit] ${id} 관리자 수정 by ${by}: ${changedFields.join(', ')}`);
+    res.json({ ok: true, data: upd[0], changed: changedFields, delivered, deliverError });
   } catch (err) {
     next(err);
   }

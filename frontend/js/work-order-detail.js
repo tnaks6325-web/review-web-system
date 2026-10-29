@@ -1097,6 +1097,12 @@ function woAdminEditModal(order, opts) {
     opts2 = opts2 || {};
     var w = label(parent, text);
     var cur = o[f] == null ? "" : String(o[f]);
+    if (f === "work_manager") {
+      var managerNick = _woManagerNick(cur);
+      var canonical = values.find(function (v) { return managerNick && _woManagerNick(v.v) === managerNick; });
+      if (canonical) cur = canonical.v;
+      else if (_woManagerUndecided(cur)) cur = "랜덤";
+    }
     if (f === "courier_proxy") cur = (o[f] === true || o[f] === "true") ? "true" : "false";
     var list = values.slice();
     // 현재 값이 목록 밖(레거시 표기)이면 지우지 않고 알약으로 함께 보여준다
@@ -1174,9 +1180,14 @@ function woAdminEditModal(order, opts) {
   field(c1, "start_date", "시작일", { type: "date" });
   field(c1, "purchase_time", "구매시간대");
   field(c1, "manager_name", "담당AE");
-  pills(c1, "work_manager", "작업담당", [
-    { v: "박세희", l: "박세희(만두)" }, { v: "박은비", l: "박은비(망고)" }, { v: "랜덤", l: "랜덤" },
-  ]);
+  var canAssignManager = !!(opts && opts.canAssignManager);
+  if (!o.source_review_order_id || (o.manager_edit_capable === true && canAssignManager)) {
+    pills(c1, "work_manager", "작업담당", [
+      { v: "박세희", l: "만두" }, { v: "박은비", l: "망고" }, { v: "랜덤", l: "미지정" },
+    ]);
+  } else {
+    roField(c1, "작업담당", _woManagerNick(o.work_manager) || "미지정");
+  }
 
   var c2 = card(body, "📦 진행 조건");
   field(c2, "recruit_count", "총 모집건수", { type: "number", hint: ch("", "총인원") });
@@ -1231,8 +1242,12 @@ function woAdminEditModal(order, opts) {
     }
     if (!n) { alert("변경된 내용이 없습니다."); return; }
     if (typeof save !== "function") { alert("저장 경로가 연결되지 않았습니다."); return; }
+    if (fields.work_manager !== undefined && o.source_review_order_id) {
+      fields.manager_capable = 1;
+      fields.manager_base_version = Number(o.sync_version);
+    }
     saveBtn.disabled = true; saveBtn.textContent = "저장 중…";
-    Promise.resolve(save(fields)).then(function (r) {
+    Promise.resolve().then(function () { return save(fields); }).then(function (r) {
       if (r && r.ok) {
         ov.remove();
         if (typeof onSaved === "function") onSaved(r);
