@@ -127,7 +127,7 @@ async function _runOnce(opts) {
       const hasFullScope = rows.some(r => r.view_scope !== 'manager'); // migration 기본값은 full
       // Full 전송은 전체 공유 사본을 함께 최신화한다. OFF 상태에서 잡힌 것은 manager scope 뿐이다.
       const scope = wo && wo.bidir_state === 'on' && hasFullScope ? 'full' : hasManagerScope ? 'manager' : 'full';
-      if (!wo || wo.deleted_at || wo.status === 'done' || !String(wo.source_review_order_id || '').trim()) {
+      if (!wo || wo.deleted_at || (scope === 'manager' && wo.status === 'done') || !String(wo.source_review_order_id || '').trim()) {
         await _finish(db, ids, 'dead', '연결이 끊겼거나 지워진 오더');
         summary.dead++; continue;
       }

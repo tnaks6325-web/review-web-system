@@ -20,6 +20,7 @@ async function main() {
   let result = await run();
   assert.equal(result.wo.length,1,'manual-only link must keep its existing conditions');
   assert.equal(result.wo[0].id,'manual'); assert.equal(result.wo[0].payAmount,12345);
+  assert.equal(Object.hasOwn(result.wo[0],'workManager'),false,'public detail query must not carry canonical manager real names');
   assert.equal(result.wo[0].productUrl,'https://fake.invalid/product');
   assert.equal(result.wo[0].inflowGuide,'가짜 수동 가이드');
   // A different/newer direct-linked order controls manager only, never replaces manually linked money/URL.

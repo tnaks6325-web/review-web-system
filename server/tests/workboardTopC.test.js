@@ -870,7 +870,8 @@ console.log('\n── K. 담당 2인 행(사용자 확정 2026-08-24) ──');
    ③ "실명은 있는데 닉네임이 없음" 과 "담당자가 없음" 은 다르다 — 전자를 접으면 담당자가 없는
       작업처럼 보인다. */
 t('★ 서버가 created_by 를 함께 읽는다(AE 이름 재료)',
-  /manager_name AS "managerName", work_manager AS "workManager", created_by AS "createdBy", status/.test(svc));
+  /manager_name AS "managerName", created_by AS "createdBy", status/.test(svc)
+  && /SELECT id, work_manager AS "workManager", source_review_order_id/.test(svc));
 t('★ 작업담당은 담당AE가 아니라 홈·입금관리의 공통 판정',
   /resolveWorkManager\(\{ orderWorkManager: managerWo && managerWo\.workManager, tabManager: meta\.manager \}\)/.test(cond)
   && !/wo && wo\.managerName/.test(cond));

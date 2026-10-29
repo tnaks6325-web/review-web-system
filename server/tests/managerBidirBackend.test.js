@@ -129,11 +129,12 @@ async function main() {
   assert.equal((await db.query(`SELECT status FROM shared_sync_outbox WHERE work_order_id='wo-full-paused'`)).rows[0].status, 'pending', '담당자 전용 전송은 전체 대기 줄을 완료 처리하지 않는다');
 
   // A normal full correction queued before archive must still arrive; manager-only stays blocked.
-  for (const scope of ['full', 'manager']) {
-    const id = `wo-archived-push-${scope}`;
+  for (const protection of ['archive', 'done']) for (const scope of ['full', 'manager']) {
+    const id = `wo-${protection}-push-${scope}`;
     await insertOrder(id, 'on');
     await db.query(`UPDATE work_orders SET special_notes='가짜 보관 전 수정' WHERE id=$1`, [id]);
-    await db.query(`INSERT INTO recruit_campaigns(id,source_work_order_id,archived_at) VALUES($1,$2,NOW())`, [`camp-${id}`, id]);
+    if (protection === 'archive') await db.query(`INSERT INTO recruit_campaigns(id,source_work_order_id,archived_at) VALUES($1,$2,NOW())`, [`camp-${id}`, id]);
+    else await db.query(`UPDATE work_orders SET status='done' WHERE id=$1`, [id]);
     await db.query(`INSERT INTO shared_sync_outbox(work_order_id,sync_version,view_scope) VALUES($1,10,$2)`, [id, scope]);
     const sent = [];
     await push.runSharedSyncPush({ db,
@@ -142,7 +143,7 @@ async function main() {
     });
     const message = sent.find(body => body.work_order_id === id);
     const queued = (await db.query(`SELECT status FROM shared_sync_outbox WHERE work_order_id=$1`, [id])).rows[0];
-    assert.equal(queued.status, scope === 'full' ? 'delivered' : 'dead', `archive ${scope} queue must retain its original delivery contract`);
+    assert.equal(queued.status, scope === 'full' ? 'delivered' : 'dead', `${protection} ${scope} queue must retain its original delivery contract`);
     assert.equal(!!message, scope === 'full');
     if (message) assert.equal(message.view.special_notes, '가짜 보관 전 수정');
   }
@@ -278,6 +279,27 @@ async function main() {
   assert.equal(Number((await db.query(`SELECT sync_version FROM work_orders WHERE id=$1`, [row.id])).rows[0].sync_version), inboundVersion);
   out = await intakeCall({ ...sourceBody, idempotency_key: 'source_key_wo_diverged_1_different' });
   assert.equal(out.code, 409); assert.equal(out.body.code, 'revision_already_applied', '같은 번호·다른 내용 해시는 거부');
+
+  // An unchanged manager must not divert contract/advertiser matching into the manager-only path.
+  for (const state of ['off', 'diverged', 'separate']) for (const status of ['reviewing', 'published']) {
+    const id=`wo-contract-${state}-${status}`,sid=`ro_${id}`;
+    await insertOrder(id,state,{status});
+    const initial=(await db.query('SELECT * FROM work_orders WHERE id=$1',[id])).rows[0];
+    const body={...sourceBody,source_review_order_id:sid,title:initial.title,source_revision:1,
+      idempotency_key:`contract-${state}-${status}`,work_manager:initial.work_manager,
+      sales_id:'IA-FAKE-SALE',contract_number:'FAKE-CONTRACT',quote_id:'FAKE-QUOTE',intranet_advertiser_id:'FAKE-ADVERTISER',intranet_advertiser_name:'가짜 업체',
+      bidir:{manager:1,base_sync_version:Number(initial.sync_version)}};
+    const result=await intakeCall(body,sid);assert.equal(result.code,200,JSON.stringify(result.body));
+    const saved=(await db.query('SELECT * FROM work_orders WHERE id=$1',[id])).rows[0];
+    for(const key of ['sales_id','contract_number','quote_id','intranet_advertiser_id']) assert.equal(saved[key],body[key],`${state}/${status}: ${key} must not be silently discarded`);
+    assert.equal(Number(saved.source_revision),1);assert.equal(saved.work_manager,initial.work_manager);
+    const retry=await intakeCall(body,sid);assert.equal(retry.code,200);assert.equal(retry.body.idempotent,true);
+    const mixed=await intakeCall({...body,source_revision:2,idempotency_key:`contract-mixed-${state}-${status}`,work_manager:'박은비',contract_number:'FAKE-CONTRACT-2'},sid);
+    assert.equal(mixed.code,400);assert.equal(mixed.body.code,'split_save');
+    const unchanged=(await db.query('SELECT * FROM work_orders WHERE id=$1',[id])).rows[0];
+    assert.equal(unchanged.contract_number,'FAKE-CONTRACT');assert.equal(unchanged.work_manager,initial.work_manager);assert.equal(Number(unchanged.source_revision),1);
+  }
+  console.log('contract-only source revisions with manager capability: full/accepted OFF/diverged/separate + exact retry/mixed rejection PASS');
 
   // ON 상태의 신규 인트라넷 전체 저장은 담당자와 다른 공유 칸을 같은 source revision transaction에 저장한다.
   row = (await db.query(`SELECT * FROM work_orders WHERE source_review_order_id='ro_wo-on'`)).rows[0];

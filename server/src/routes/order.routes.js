@@ -906,12 +906,25 @@ function _sourceManagerCapability(body = {}) {
   return !!(bid && (bid.manager === 1 || bid.manager === true || bid.manager === '1'));
 }
 
+// Manager-only routing must account for the contract fields intentionally omitted by
+// _sourceContentChanges (that helper serves the accepted-order content lock).
+function _sourceManagerOtherChanges(current, b, derived, source) {
+  const changes = _sourceContentChanges(current, b, derived).filter(column => column !== 'work_manager');
+  const contract = {
+    sales_id: String(b.sales_id || '').trim(),
+    contract_number: String(b.contract_number || '').trim(),
+    quote_id: String(b.quote_id || '').trim(),
+    intranet_advertiser_id: source.intranetAdvertiserId,
+  };
+  return changes.concat(Object.keys(contract).filter(column =>
+    _sourceCompareValue(column, contract[column]) !== _sourceCompareValue(column, current[column])));
+}
+
 async function _intakeSourceManager(res, { b, source, current, optionsJson, deliveryType, courierProxy, requester }) {
   const bid = b.bidir;
   const manager = _canonicalOriginalWorkManager(pickWorkManager(b));
   if (!manager) return res.status(400).json({ ok: false, code: 'manager_value_invalid', error: '작업담당은 박세희·박은비·랜덤 중에서 골라 주세요.' });
-  const contentChanges = _sourceContentChanges(current, b, { optionsJson, deliveryType, courierProxy })
-    .filter(column => column !== 'work_manager');
+  const contentChanges = _sourceManagerOtherChanges(current, b, { optionsJson, deliveryType, courierProxy }, source);
   if (contentChanges.length) return res.status(400).json({ ok: false, code: 'split_save', fields: contentChanges,
     error: '양방향 동기화가 꺼진 동안에는 작업담당과 다른 변경을 함께 저장할 수 없습니다. 다른 내용부터 따로 저장한 뒤 다시 시도해 주세요.' });
   const rawBase = bid.base_sync_version !== undefined ? bid.base_sync_version : b.manager_base_version;
@@ -1156,7 +1169,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
           requester: String(b.requester_name || b.created_by || '').trim() });
       }
       const managerOnlyRetry = _hasExplicitWorkManager(b) && !!_canonicalOriginalWorkManager(pickWorkManager(b))
-        && !_sourceContentChanges(current, b, { optionsJson, deliveryType, courierProxy }).some(column => column !== 'work_manager');
+        && _sourceManagerOtherChanges(current, b, { optionsJson, deliveryType, courierProxy }, source).length === 0;
       if (managerChanged || managerOnlyRetry) {
         return await _intakeSourceManager(res, { b, source, current, optionsJson, deliveryType, courierProxy,
           requester: String(b.requester_name || b.created_by || '').trim() });

@@ -3632,7 +3632,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             inflow_guide AS "inflowGuide", delivery_type AS "deliveryType", courier_proxy AS "courierProxy",
             review_type AS "reviewType", recruit_count AS "recruitCount", review_guide AS "reviewGuide",
             special_notes AS "specialNotes", product_url AS "productUrl", start_date AS "startDate",
-            manager_name AS "managerName", work_manager AS "workManager", created_by AS "createdBy", status,
+            manager_name AS "managerName", created_by AS "createdBy", status,
             goods_cost_type AS "goodsCostType"
        FROM work_orders
       WHERE deleted_at IS NULL AND ($3::text IS NOT NULL AND id=$3 OR (linked_tab_sheet_id=$1 AND linked_tab_name=$2))
