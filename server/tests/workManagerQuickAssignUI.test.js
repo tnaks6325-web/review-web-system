@@ -29,6 +29,12 @@ async function click(node){for(const f of node.listeners.click||[])await f({});a
   x.STATE.role='admin';x.STATE.wd.archived=true;assert.equal(x._cndManagerButtons(cd),'');x.STATE.wd.archived=false;
   for(const change of [{managerEdit:undefined},{managerEdit:{capable:true,workOrderId:'other',syncVersion:19}},{managerEdit:{capable:true,workOrderId:'wo_FAKE',syncVersion:'bad'}}])assert.equal(x._cndManagerButtons({...cd,...change}),'');
  });
+ await test('manual conditions and canonical manager target remain distinct',async()=>{
+  const {x,cd,log}=setup();cd.workOrderId='manual-conditions';cd.managerWorkOrderId='wo_FAKE';
+  assert.equal(x._cndManagerGate(cd),true);await x._cndAssignManager('박세희');
+  assert.equal(log.writes[0].id,'wo_FAKE');assert.equal(cd.workOrderId,'manual-conditions');
+  assert.equal(x._cndManagerGate({...cd,managerWorkOrderId:'other'}),false);
+ });
  await test('quick save sends manager only with displayed base version, then re-reads',async()=>{
   const {x,log,buttons}=setup();await x._cndAssignManager('박세희');assert.deepEqual(log.writes,[{id:'wo_FAKE',work_manager:'박세희',manager_base_version:19,manager_capable:1}]);assert.equal(log.rendered.length,1);assert.equal(buttons[0].disabled,false);assert.equal(x.STATE.wo[0].work_manager,'박세희');
  });

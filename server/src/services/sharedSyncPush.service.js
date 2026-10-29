@@ -144,13 +144,16 @@ async function _runOnce(opts) {
         if (!ids.length) continue;
         attempts = Math.max(...rows.filter(r => r.view_scope === 'manager').map(r => Number(r.attempts || 1)));
       }
-      const { rows: archived } = await db.query(
-        `SELECT id FROM recruit_campaigns WHERE archived_at IS NOT NULL
-          AND (id = NULLIF($1, '') OR NULLIF(source_work_order_id, '') = $2) LIMIT 1`,
-        [String(wo.linked_campaign_id || ''), String(wo.id)]);
-      if (archived.length) {
-        await _finish(db, ids, 'dead', '보관된 모집공고에 연결된 작업');
-        summary.dead++; continue;
+      // Archive protection is for manager-only delivery, not already queued full corrections.
+      if (scope === 'manager') {
+        const { rows: archived } = await db.query(
+          `SELECT id FROM recruit_campaigns WHERE archived_at IS NOT NULL
+            AND (id = NULLIF($1, '') OR NULLIF(source_work_order_id, '') = $2) LIMIT 1`,
+          [String(wo.linked_campaign_id || ''), String(wo.id)]);
+        if (archived.length) {
+          await _finish(db, ids, 'dead', '보관된 모집공고에 연결된 작업');
+          summary.dead++; continue;
+        }
       }
       const body = buildPushBody(wo, scope);
       const raw = JSON.stringify(body);

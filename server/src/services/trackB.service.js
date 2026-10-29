@@ -3302,7 +3302,7 @@ function _condSchedule(rows, headers) {
   } catch (_) { return null; }
 }
 
-async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null } = {}) {
+async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null, managerWo = wo } = {}) {
   try {
     const gid = String(meta.tabGid || '').trim();
     const { rows: camps } = await db.query(
@@ -3498,7 +3498,7 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
          광고주 렌즈는 기존대로 별명 없는 실명을 폐기한다. */
       manager: await (async () => {
         const ae = String((wo && wo.createdBy) || '').trim() || null;
-        const resolved = resolveWorkManager({ orderWorkManager: wo && wo.workManager, tabManager: meta.manager });
+        const resolved = resolveWorkManager({ orderWorkManager: managerWo && managerWo.workManager, tabManager: meta.manager });
         const raw = String(resolved.manager || '').trim() || null;
         let nick = require('../utils/workManager').mapWorkManager(raw) || null;
         if (raw && !nick) {
@@ -3578,6 +3578,7 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       qtyTiers: c ? await require('./campaignQtyTiers.service').summaryForCampaign(db, c.id).catch(e => {
         logger.warn(`[trackB] 구매수량 단계 요약 실패(카드는 종전 계산): ${e.message}`); return null; }) : null,
       campaignCount: camps.length,
+      managerWorkOrderId: (managerWo && managerWo.id) || null, // 담당자 전용 대상(홈·입금관리와 동일)
       workOrderId: (wo && wo.id) || null,   // [미설정] → 작업오더 수정 창구를 열 때만 쓴다
     };
   } catch (e) {
@@ -3634,9 +3635,17 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             manager_name AS "managerName", work_manager AS "workManager", created_by AS "createdBy", status,
             goods_cost_type AS "goodsCostType"
        FROM work_orders
+      WHERE deleted_at IS NULL AND ($3::text IS NOT NULL AND id=$3 OR (linked_tab_sheet_id=$1 AND linked_tab_name=$2))
+      ORDER BY ($3::text IS NOT NULL AND id=$3) DESC, created_at DESC LIMIT 1`,
+    [sheetId, tabName, await _effectiveLinkedWorkOrderId(db, sheetId, tabName)]).catch(() => ({ rows: [] }));
+  if (wo[0]) wo[0].options = _parseWoOptions(wo[0].productOptionsJson);
+  // 조건의 수동 연결 우선순위는 보존한다. 담당자만 홈·입금관리의 최신 직접 연결을 읽는다.
+  const { rows: managerWo } = await db.query(
+    `SELECT id, work_manager AS "workManager", source_review_order_id AS "sourceReviewOrderId",
+            sync_version AS "syncVersion", linked_campaign_id AS "linkedCampaignId", status
+       FROM work_orders
       WHERE deleted_at IS NULL AND linked_tab_sheet_id=$1 AND linked_tab_name=$2
       ORDER BY created_at DESC LIMIT 1`, [sheetId, tabName]).catch(() => ({ rows: [] }));
-  if (wo[0]) wo[0].options = _parseWoOptions(wo[0].productOptionsJson);
   // 명단(활성) — 앵커 도출에 필요한 컬럼 포함
   const { rows: roster } = await db.query(archived
     ? `SELECT ria.id, ria.row_index AS seq, ria.reviewer_name AS name, NULL::text AS recipient, ria.phone8,
@@ -4213,19 +4222,19 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
      ★ **채워진 줄만** 센다(빈 슬롯은 사람이 아니다) · 화면과 **같은 정렬**(번호 순) 뒤에 센다.
      ★ cap 을 모르면(공고 미연결·조회 실패) 아무 표시도 하지 않는다(0 위장 금지).
      ★ 광고주에게도 보인다(사용자 확정) — 다만 `condition` 자체는 종전대로 내부 전용이다. */
-  const _cond = await tabConditionSummary(db, { sheetId, tabName, meta: meta[0] || {}, wo: wo[0] || null });
+  const _cond = await tabConditionSummary(db, { sheetId, tabName, meta: meta[0] || {}, wo: wo[0] || null, managerWo: managerWo[0] || null });
   // 담당자 빠른 배정은 작업 홈·입금관리와 같은 최신 직접 연결 작업오더를 기준으로만 연다.
   // 명시 Track B 링크의 오래된 오더를 조건 카드의 담당자로 잘못 편집하지 않는다.
-  if (_cond && wo[0] && showEdits && managerEditAllowed && ['master', 'admin'].includes(role)
+  if (_cond && managerWo[0] && showEdits && managerEditAllowed && ['master', 'admin'].includes(role)
       && String(process.env.BIDIR_HARD_OFF || '').trim() !== '1'
-      && String(wo[0].sourceReviewOrderId || '').trim() && wo[0].status !== 'done') {
+      && String(managerWo[0].sourceReviewOrderId || '').trim() && managerWo[0].status !== 'done') {
     try {
       const { rows: archivedManagerCampaigns } = await db.query(
         `SELECT id FROM recruit_campaigns WHERE archived_at IS NOT NULL
           AND (id = NULLIF($1, '') OR NULLIF(source_work_order_id, '') = $2) LIMIT 1`,
-        [String(wo[0].linkedCampaignId || ''), String(wo[0].id)]);
+        [String(managerWo[0].linkedCampaignId || ''), String(managerWo[0].id)]);
       if (!archivedManagerCampaigns.length) {
-        _cond.managerEdit = { capable: true, workOrderId: wo[0].id, syncVersion: Number(wo[0].syncVersion || 0) };
+        _cond.managerEdit = { capable: true, workOrderId: managerWo[0].id, syncVersion: Number(managerWo[0].syncVersion || 0) };
       }
     } catch (e) {
       logger.warn(`[trackB] 담당자 빠른 배정 권한 확인 실패(편집 숨김): ${e.message}`);

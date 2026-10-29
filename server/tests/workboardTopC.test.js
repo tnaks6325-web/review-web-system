@@ -872,7 +872,7 @@ console.log('\n── K. 담당 2인 행(사용자 확정 2026-08-24) ──');
 t('★ 서버가 created_by 를 함께 읽는다(AE 이름 재료)',
   /manager_name AS "managerName", work_manager AS "workManager", created_by AS "createdBy", status/.test(svc));
 t('★ 작업담당은 담당AE가 아니라 홈·입금관리의 공통 판정',
-  /resolveWorkManager\(\{ orderWorkManager: wo && wo\.workManager, tabManager: meta\.manager \}\)/.test(cond)
+  /resolveWorkManager\(\{ orderWorkManager: managerWo && managerWo\.workManager, tabManager: meta\.manager \}\)/.test(cond)
   && !/wo && wo\.managerName/.test(cond));
 t('① 닉네임 치환은 adminNickname.service 단일 출처(사본 금지)', (() => {
   const i = cond.indexOf('manager: await'), blk = cond.slice(i, i + 900);

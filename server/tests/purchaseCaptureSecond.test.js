@@ -82,17 +82,18 @@ const FRONT = p => fs.readFileSync(path.join(ROOT, '..', 'frontend', p), 'utf8')
   console.log('\n§2 업로드 라우트');
   const diag = read('src/routes/diag.routes.js');
   const up = diag.slice(diag.indexOf("router.post('/image-upload'"), diag.indexOf("// POST /api/image/review-precheck"));
-  await ta('2a captureIndex 2 = 이름에 _2(같은 이름이면 중복 정리가 첫 장을 휴지통으로 보낸다) · 자기 연결 함수', () => {
+  await ta('2a captureIndex 2 = 이름에 _2와 독립 꼬리 · 두 장 모두 이름으로 기존 증빙을 지우지 않는다', () => {
     assert.match(up, /const captureIndex = Number\(req\.body\.captureIndex\) === 2 \? 2 : 1;/);
-    assert.match(up, /`\$\{baseName\}_2__\$\{String\(orderSubmissionId\)\.slice\(0, 8\)\}_\$\{String\(captureSessionId\)\.slice\(0, 8\)\}_\$\{Date\.now\(\)\.toString\(36\)\}/, '두 번째 장 = _2 + 요청마다 다른 꼬리');
-    assert.match(up, /if \(!second\) \{\s*\n\s*try \{\s*\n\s*await driveService\.trashDuplicateFile/, '두 번째 장은 이름 기준 중복 정리를 하지 않는다(겹친 재시도가 먼저 연결된 파일을 지우지 않게)');
+    assert.match(up, /\$\{baseName\}\$\{second \? '_2' : ''\}__/);
+    assert.match(up, /__pcv2_\$\{randomBytes\(16\)\.toString\('hex'\)\}/, '두 장 모두 암호학적 요청별 꼬리');
+    assert.ok(!/trashDuplicateFile/.test(up), '첫 장도 포함해 이름 기준 삭제 0(결정 305)');
     assert.match(up, /purchaseSessions\[second \? 'completeCapture2' : 'completeCapture'\]/);
     assert.match(up, /captureIndex,\n\s*\}\);/, '세션 조회에 칸 번호를 넘긴다');
   });
   await ta('2b 세션 "업로드 중"·실패 표시는 첫 장 전용(두 번째 장이 첫 장 상태를 망치지 않게)', () => {
-    assert.match(up, /const claimed = second \? true : await purchaseSessions\.markUploading/);
-    assert.match(up, /if \(!second\) await purchaseSessions\.markFailed/);
-    assert.match(up, /if \(!\(req\.body && Number\(req\.body\.captureIndex\) === 2\)\) await purchaseSessions\.markFailed/);
+    assert.match(up, /if \(!second\) \{\s*uploadLease = await purchaseSessions\.markUploading/);
+    assert.match(up, /if \(!uploadLease\) return;/, '점유하지 않는 둘째 장은 실패 상태도 쓰지 않는다');
+    assert.strictEqual((up.match(/purchaseSessions\.markFailed\(/g) || []).length, 1, '실패 쓰기는 점유 소유권 검사 한 곳만 통과');
   });
   await ta('2c 부팅 필수 목록 · 마이그레이션', () => {
     assert.match(read('index.js'), /\['order_submissions', 'capture_file_id_2'\]/);

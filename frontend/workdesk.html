@@ -8028,12 +8028,13 @@ function _cndManagerGate(cd){
   const e=cd&&cd.managerEdit;
   return !!(STATE.canEdit && (STATE.role==='master'||STATE.role==='admin')
     && !(STATE.wd&&STATE.wd.archived) && e&&e.capable===true
-    && cd.workOrderId && String(e.workOrderId)===String(cd.workOrderId)
+    && (cd.managerWorkOrderId || cd.workOrderId)
+    && String(e.workOrderId)===String(cd.managerWorkOrderId || cd.workOrderId)
     && Number.isSafeInteger(Number(e.syncVersion))&&Number(e.syncVersion)>=0);
 }
 function _cndManagerButtons(cd){
   if(!_cndManagerGate(cd)) return '';
-  const busy=_cndManagerPending.has(String(cd.workOrderId));
+  const busy=_cndManagerPending.has(String(cd.managerEdit.workOrderId));
   const mg=cd.manager||{},name=String(mg.adminNick||mg.adminRaw||'');
   const nick=typeof _woManagerNick==='function'?_woManagerNick(name):name;
   return `<span class="cndmgrchoices" aria-label="작업담당 배정">${[['박세희','만두'],['박은비','망고']].map(([raw,label])=>
@@ -8042,7 +8043,7 @@ function _cndManagerButtons(cd){
 async function _cndAssignManager(value){
   const t=STATE.cur,cd=STATE.wd&&STATE.wd.condition;
   if(!t||!_cndManagerGate(cd)||!['박세희','박은비'].includes(value)) return;
-  const id=String(cd.workOrderId),e=cd.managerEdit;
+  const e=cd.managerEdit,id=String(e.workOrderId);
   if(_cndManagerPending.has(id)) return;
   _cndManagerPending.add(id);
   document.querySelectorAll('.cndmgrbtn').forEach(b=>{ b.disabled=true; });

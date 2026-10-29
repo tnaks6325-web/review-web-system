@@ -128,6 +128,25 @@ async function main() {
   assert.equal(Number(ack.intranet_acked_version), 0, '부분 담당자 수신을 전체 공유 버전 승인으로 오인하지 않는다');
   assert.equal((await db.query(`SELECT status FROM shared_sync_outbox WHERE work_order_id='wo-full-paused'`)).rows[0].status, 'pending', '담당자 전용 전송은 전체 대기 줄을 완료 처리하지 않는다');
 
+  // A normal full correction queued before archive must still arrive; manager-only stays blocked.
+  for (const scope of ['full', 'manager']) {
+    const id = `wo-archived-push-${scope}`;
+    await insertOrder(id, 'on');
+    await db.query(`UPDATE work_orders SET special_notes='가짜 보관 전 수정' WHERE id=$1`, [id]);
+    await db.query(`INSERT INTO recruit_campaigns(id,source_work_order_id,archived_at) VALUES($1,$2,NOW())`, [`camp-${id}`, id]);
+    await db.query(`INSERT INTO shared_sync_outbox(work_order_id,sync_version,view_scope) VALUES($1,10,$2)`, [id, scope]);
+    const sent = [];
+    await push.runSharedSyncPush({ db,
+      env: { INTRANET_ORDER_DELETE_WEBHOOK_URL: 'https://intranet.invalid/webhook', BIDIR_RW_TO_IN_SECRET: 'test-sign' },
+      fetchImpl: async (_url, options) => { sent.push(JSON.parse(options.body)); return new Response(JSON.stringify({ok:true,result:'applied'}), {status:200}); },
+    });
+    const message = sent.find(body => body.work_order_id === id);
+    const queued = (await db.query(`SELECT status FROM shared_sync_outbox WHERE work_order_id=$1`, [id])).rows[0];
+    assert.equal(queued.status, scope === 'full' ? 'delivered' : 'dead', `archive ${scope} queue must retain its original delivery contract`);
+    assert.equal(!!message, scope === 'full');
+    if (message) assert.equal(message.view.special_notes, '가짜 보관 전 수정');
+  }
+
   // hard-off, 삭제·완료·보관·미연결은 service에서 fail-closed.
   process.env.BIDIR_HARD_OFF = '1';
   out = await service.applySharedPatch({ workOrderId: 'wo-off', mine: { work_manager: '박세희' }, baseVersion: 0, origin: 'rw_manager', managerOnly: true });
@@ -401,7 +420,7 @@ async function main() {
   const trackService = fs.readFileSync(path.join(__dirname, '..', 'src/services/trackB.service.js'), 'utf8');
   assert.match(sharedRoute, /caps\.has\('manager'\)[\s\S]*managerCapable[\s\S]*\['work_manager'\]/);
   assert.match(listRoute, /manager_edit_capable[\s\S]*manager_base_version/);
-  assert.match(trackService, /managerEditAllowed[\s\S]*_cond\.managerEdit = \{ capable: true, workOrderId: wo\[0\]\.id, syncVersion: Number\(wo\[0\]\.syncVersion \|\| 0\) \}/);
+  assert.match(trackService, /managerEditAllowed[\s\S]*_cond\.managerEdit = \{ capable: true, workOrderId: managerWo\[0\]\.id, syncVersion: Number\(managerWo\[0\]\.syncVersion \|\| 0\) \}/);
   assert.match(trackService, /WHERE deleted_at IS NULL AND linked_tab_sheet_id=\$1 AND linked_tab_name=\$2\s+ORDER BY created_at DESC LIMIT 1/,
     '조건 카드 담당자는 최신 직접 연결 오더 기준이며 오래된 수동 링크를 쓰지 않는다');
   assert.match(listRoute, /router\.get\('\/work-orders',[\s\S]*manager_edit_capable/,
