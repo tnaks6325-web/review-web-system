@@ -77,15 +77,20 @@ async function inspectForUpload({ sessionId, sessionToken, orderSubmissionId, ca
 
 async function markUploading({ sessionId, orderSubmissionId }) {
   const out = await _db().query(
-    `UPDATE purchase_submission_sessions
-        SET status='uploading', attempt_count=attempt_count+1, failure_code=NULL,
-            expires_at=GREATEST(expires_at, NOW()+INTERVAL '15 minutes'), updated_at=NOW()
-      WHERE id=$1 AND order_submission_id=$2 AND expires_at > NOW()
-        AND (status <> 'uploading' OR updated_at < NOW()-INTERVAL '5 minutes')
-      RETURNING id`,
+    `UPDATE purchase_submission_sessions AS ps
+        SET status='uploading', attempt_count=ps.attempt_count+1, failure_code=NULL,
+            expires_at=GREATEST(ps.expires_at, NOW()+INTERVAL '15 minutes'), updated_at=NOW()
+      WHERE ps.id=$1 AND ps.order_submission_id=$2 AND ps.expires_at > NOW()
+        AND (ps.status IN ('prepared','failed')
+             OR (ps.status='uploading' AND ps.updated_at < NOW()-INTERVAL '5 minutes'))
+        AND ps.completed_at IS NULL AND COALESCE(ps.capture_file_id,'')=''
+        AND EXISTS (SELECT 1 FROM order_submissions os
+                     WHERE os.id=ps.order_submission_id AND os.deleted_at IS NULL
+                       AND COALESCE(os.capture_file_id,'')='')
+      RETURNING ps.attempt_count AS "attemptCount"`,
     [sessionId, orderSubmissionId]
   );
-  return !!(out && out.rows && out.rows.length);
+  return out.rows.length ? { attemptCount: out.rows[0].attemptCount } : null;
 }
 
 /** Drive 성공 뒤 DB 연결을 주문 단위로 직렬화한다. 먼저 완료된 캡처가 있으면 덮지 않는다. */
@@ -172,13 +177,16 @@ async function completeCapture2({ sessionId, sessionToken, orderSubmissionId, ca
   }
 }
 
-async function markFailed({ sessionId, orderSubmissionId, code }) {
+async function markFailed({ sessionId, orderSubmissionId, attemptCount, code }) {
+  // 결정 305: stale 점유 인수 뒤 옛 요청의 실패가 새 시도를 덮지 않게 한다.
+  if (!Number.isInteger(attemptCount) || attemptCount < 1) return;
   try {
     await _db().query(
       `UPDATE purchase_submission_sessions
           SET status='failed', failure_code=$3, updated_at=NOW()
-        WHERE id=$1 AND order_submission_id=$2 AND status <> 'completed'`,
-      [sessionId, orderSubmissionId, String(code || 'upload_failed').slice(0, 80)]
+        WHERE id=$1 AND order_submission_id=$2 AND attempt_count=$4
+          AND status='uploading' AND completed_at IS NULL AND COALESCE(capture_file_id,'')=''`,
+      [sessionId, orderSubmissionId, String(code || 'upload_failed').slice(0, 80), attemptCount]
     );
   } catch (_) { /* 원 실패를 덮지 않는다 */ }
 }

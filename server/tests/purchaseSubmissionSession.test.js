@@ -86,10 +86,13 @@ function completeDb({ existing = '' } = {}) {
   });
   await t('업로드 lease는 동시 실행을 막고 장시간 업로드 동안 만료를 연장한다', async () => {
     const calls = [];
-    sessionSvc.__setPoolForTest({ query: async (sql) => { calls.push(String(sql)); return { rows: [{ id: SESSION_ID }] }; } });
-    assert.equal(await sessionSvc.markUploading({ sessionId: SESSION_ID, orderSubmissionId: ORDER_ID }), true);
-    assert.match(calls[0], /status <> 'uploading'/);
-    assert.match(calls[0], /GREATEST\(expires_at, NOW\(\)\+INTERVAL '15 minutes'\)/);
+    sessionSvc.__setPoolForTest({ query: async (sql) => { calls.push(String(sql)); return { rows: [{ attemptCount: 1 }] }; } });
+    assert.deepEqual(await sessionSvc.markUploading({ sessionId: SESSION_ID, orderSubmissionId: ORDER_ID }), { attemptCount: 1 });
+    assert.match(calls[0], /ps\.status IN \('prepared','failed'\)/);
+    assert.match(calls[0], /ps\.completed_at IS NULL/);
+    assert.match(calls[0], /COALESCE\(ps\.capture_file_id,''\)=''/);
+    assert.match(calls[0], /COALESCE\(os\.capture_file_id,''\)=''/);
+    assert.match(calls[0], /GREATEST\(ps\.expires_at, NOW\(\)\+INTERVAL '15 minutes'\)/);
   });
 
   console.log('\n[C] DB 확정·동시성');

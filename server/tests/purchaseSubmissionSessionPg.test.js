@@ -23,6 +23,8 @@ async function t(name, fn) { await fn(); passed++; console.log('  ✓ ' + name);
     deleted_at TIMESTAMPTZ,
     capture_file_id TEXT,
     capture_uploaded_at TIMESTAMPTZ,
+    capture_file_id_2 TEXT,
+    capture2_uploaded_at TIMESTAMPTZ,
     updated_at TIMESTAMPTZ DEFAULT NOW()
   )`);
   const migration = fs.readFileSync(path.join(__dirname, '..', 'migrations', '146_purchase_submission_sessions.sql'), 'utf8');
@@ -54,6 +56,7 @@ async function t(name, fn) { await fn(); passed++; console.log('  ✓ ' + name);
       sessions.markUploading({ sessionId: lease.id, orderSubmissionId: orderId }),
     ]);
     assert.equal(got.filter(Boolean).length, 1);
+    assert.deepEqual(got.find(Boolean), { attemptCount: 1 });
   });
   await t('두 세션이 동시에 다른 파일을 연결해도 첫 파일 하나만 남는다', async () => {
     const a = await sessions.issueForOrder({ orderSubmissionId: orderId, captureSheetId: 's', captureTabName: 't' });
@@ -74,12 +77,40 @@ async function t(name, fn) { await fn(); passed++; console.log('  ✓ ' + name);
     assert.equal(out.alreadyCompleted, true); assert.notEqual(saved.rows[0].capture_file_id, 'FILE-LATE');
   });
 
+  await t('완료된 세션과 이미 연결된 주문은 늦은 점유를 거부한다', async () => {
+    const done = (await pool.query("SELECT id,order_submission_id FROM purchase_submission_sessions WHERE status='completed' LIMIT 1")).rows[0];
+    assert.ok(done);
+    assert.equal(await sessions.markUploading({ sessionId: done.id, orderSubmissionId: done.order_submission_id }), null);
+    assert.equal(await sessions.markUploading({ sessionId: issued.id, orderSubmissionId: orderId }), null, '다른 세션이 연결한 주문도 재점유 0');
+  });
+  await t('오래된 점유 인수 뒤 늦은 실패는 새 점유를 훼손하지 않는다', async () => {
+    const id = (await pool.query('INSERT INTO order_submissions DEFAULT VALUES RETURNING id')).rows[0].id;
+    const s = await sessions.issueForOrder({ orderSubmissionId: id });
+    const args = { sessionId: s.id, orderSubmissionId: id };
+    const first = await sessions.markUploading(args);
+    await pool.query("UPDATE purchase_submission_sessions SET updated_at=NOW()-INTERVAL '6 minutes' WHERE id=$1", [s.id]);
+    const second = await sessions.markUploading(args);
+    assert.deepEqual(first, { attemptCount: 1 }); assert.deepEqual(second, { attemptCount: 2 });
+    await sessions.markFailed({ ...args, attemptCount: 1, code: 'late-failure' });
+    assert.equal((await pool.query('SELECT status FROM purchase_submission_sessions WHERE id=$1', [s.id])).rows[0].status, 'uploading');
+    await sessions.markFailed({ ...args, attemptCount: 2, code: 'owned-failure' });
+    assert.equal((await pool.query('SELECT status FROM purchase_submission_sessions WHERE id=$1', [s.id])).rows[0].status, 'failed');
+    assert.deepEqual(await sessions.markUploading(args), { attemptCount: 3 });
+  });
+
   console.log('\n[C] 만료·삭제 경계');
   await t('만료된 세션은 거부한다', async () => {
     const exp = await sessions.issueForOrder({ orderSubmissionId: orderId });
     await pool.query(`UPDATE purchase_submission_sessions SET expires_at=NOW()-INTERVAL '1 second' WHERE id=$1`, [exp.id]);
     const out = await sessions.inspectForUpload({ sessionId: exp.id, sessionToken: exp.token, orderSubmissionId: orderId });
     assert.equal(out.code, 'capture_session_invalid');
+    assert.equal(await sessions.markUploading({ sessionId: exp.id, orderSubmissionId: orderId }), null);
+  });
+  await t('세션 발급 뒤 삭제된 주문도 업로드 점유를 거부한다', async () => {
+    const id = (await pool.query('INSERT INTO order_submissions DEFAULT VALUES RETURNING id')).rows[0].id;
+    const s = await sessions.issueForOrder({ orderSubmissionId: id });
+    await pool.query('UPDATE order_submissions SET deleted_at=NOW() WHERE id=$1', [id]);
+    assert.equal(await sessions.markUploading({ sessionId: s.id, orderSubmissionId: id }), null);
   });
   await t('삭제된 주문에는 새 세션을 발급하지 않는다', async () => {
     const gone = await pool.query(`INSERT INTO order_submissions(deleted_at) VALUES(NOW()) RETURNING id`);

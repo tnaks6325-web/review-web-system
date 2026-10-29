@@ -1,6 +1,6 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
-const { randomUUID } = require('crypto');
+const { randomUUID, randomBytes } = require('crypto');
 const router = express.Router();
 // Track B(trackB.routes.js)가 경로 문자열 대신 이름으로 부르는 핸들러 모음 — 맨 아래 router.handlers 로 내보낸다(결정 270).
 const { lastRouteHandler } = require('../utils/routeHandlers');
@@ -229,6 +229,14 @@ router.post('/image-extract', imageApiLimiter, async (req, res, next) => {
 // tab_configs.capture_folder_url이 없으면 ensureCaptureFolderPath로 만들고 서버가 직접 저장한다.
 // ═══════════════════════════════════════════════════════════
 router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
+  let uploadLease = null;
+  const failOwnedAttempt = async code => {
+    if (!uploadLease) return; // 점유 전 실패·둘째 장은 첫 장 세션 상태를 쓰지 않는다.
+    await purchaseSessions.markFailed({
+      sessionId: req.body.captureSessionId, orderSubmissionId: req.body.orderSubmissionId,
+      attemptCount: uploadLease.attemptCount, code,
+    });
+  };
   try {
     const { imageBase64, mimeType, fileName, displayName, round,
             orderSubmissionId, captureSessionId, captureSessionToken } = req.body;
@@ -253,9 +261,17 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
       return res.json({ ok: true, alreadyCompleted: true, fileId: uploadCtx.captureFileId, captureIndex });
     }
     // 두 번째 장은 세션의 "업로드 중" 표시를 쓰지 않는다(그 표시는 첫 장 전용) — 동시 업로드는 연결 단계의 주문 잠금이 가른다.
-    const claimed = second ? true : await purchaseSessions.markUploading({ sessionId: captureSessionId, orderSubmissionId });
-    if (!claimed) {
-      return res.status(409).json({ ok: false, code: 'capture_upload_in_progress', retryable: true, error: '같은 구매캡처가 이미 업로드 중입니다.' });
+    if (!second) {
+      uploadLease = await purchaseSessions.markUploading({ sessionId: captureSessionId, orderSubmissionId });
+      if (!uploadLease) {
+        // 사전 확인 뒤 다른 요청·직원이 완료했을 수 있다. 파일을 새로 만들지 않고 현재 값을 반환한다.
+        const latest = await purchaseSessions.inspectForUpload({
+          sessionId: captureSessionId, sessionToken: captureSessionToken, orderSubmissionId, captureIndex,
+        });
+        if (!latest.ok) return res.status(403).json({ ok: false, code: latest.code, error: '구매캡처 제출 세션이 유효하지 않습니다. 구매양식을 다시 열어주세요.' });
+        if (latest.alreadyCompleted) return res.json({ ok: true, alreadyCompleted: true, fileId: latest.captureFileId, captureIndex });
+        return res.status(409).json({ ok: false, code: 'capture_upload_in_progress', retryable: true, error: '같은 구매캡처가 이미 업로드 중입니다.' });
+      }
     }
     const sheetId = uploadCtx.captureSheetId;
     const tabName = uploadCtx.captureTabName;
@@ -263,7 +279,7 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
     const rootFolderId = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
     if (!rootFolderId) {
       logger.warn('[image-upload] AI_REVIEW_FOLDER_ID 미설정');
-      return res.json({ ok: false, error: 'Drive 루트 폴더가 설정되지 않았습니다. (AI_REVIEW_FOLDER_ID)' });
+      throw Object.assign(new Error('Drive 루트 폴더가 설정되지 않았습니다. (AI_REVIEW_FOLDER_ID)'), { code: 'drive_not_configured' });
     }
 
     // ── 1·2단계: 캡처 폴더 확보 — 작업보드 [구매캡처 교체]와 같은 함수(captureFolder.service 단일 출처) ──
@@ -279,25 +295,14 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
       throw folderErr;
     }
 
-    // ── 3단계: 중복 파일 처리 (동일 이름 → 휴지통 이동) ──
+    // ── 3단계: 요청별 독립 파일명 — 이름은 기존 증빙의 삭제 근거가 아니다(결정 305) ──
     const rawName = String(fileName || '주문캡처.jpg');
     const dot = rawName.lastIndexOf('.');
     const baseName = (dot > 0 ? rawName.slice(0, dot) : rawName).slice(0, 80) || '주문캡처';
     const ext = (dot > 0 ? rawName.slice(dot + 1) : 'jpg').replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'jpg';
-    // 같은 주문의 네트워크 재시도는 같은 파일명으로 수렴하고, 동명이인의 파일은 충돌하지 않는다.
-    // ★ 두 번째 장은 이름에 _2 를 붙인다 — 같은 이름이면 아래 중복 정리가 **첫 장을 휴지통으로** 보낸다(결정 288).
-    //   두 번째 장은 요청마다 다른 꼬리를 붙이고 이름 기준 중복 정리를 하지 않는다 — 재시도 요청이 겹치면 같은 이름 정리가
-    //   **먼저 연결된 파일을 휴지통으로** 보낼 수 있다(코드 리뷰). 연결 경쟁에서 진 파일은 아래 패배 정리·고아 정리가 치운다.
-    const finalFileName = second
-      ? `${baseName}_2__${String(orderSubmissionId).slice(0, 8)}_${String(captureSessionId).slice(0, 8)}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}.${ext}`
-      : `${baseName}__${String(orderSubmissionId).slice(0, 8)}_${String(captureSessionId).slice(0, 8)}.${ext}`;
-    if (!second) {
-      try {
-        await driveService.trashDuplicateFile(targetFolderId, finalFileName);
-      } catch (trashErr) {
-        logger.warn(`[image-upload] 중복 파일 처리 실패 (무시): ${trashErr.message}`);
-      }
-    }
+    // stale 점유 인수로 요청이 겹쳐도 서로의 파일을 건드리지 않는다. _2 는 둘째 장 계약을 보존한다.
+    // __pcv2_ 는 롤링 배포 중 구서버의 결정적 파일명·동명 삭제와도 격리한다.
+    const finalFileName = `${baseName}${second ? '_2' : ''}__${String(orderSubmissionId).slice(0, 8)}_${String(captureSessionId).slice(0, 8)}__pcv2_${randomBytes(16).toString('hex')}.${ext}`;
 
     // ── 4단계: 파일 업로드 ──
     const uploaded = await driveService.uploadFileBase64(
@@ -321,9 +326,11 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
       if (linked.alreadyCompleted && linked.captureFileId && linked.captureFileId !== uploaded.id) {
         try { await driveService.trashFiles([{ id: uploaded.id, name: uploaded.name }]); }
         catch (cleanupErr) { logger.warn(`[image-upload] 동시 업로드 패배 파일 정리 실패: ${cleanupErr.message}`); }
+        // 승자 ID에 이미 정리한 패자의 이름·URL·알림을 섞지 않는다(사전 완료 응답과 같은 계약).
+        return res.json({ ok: true, alreadyCompleted: true, fileId: linked.captureFileId, captureIndex });
       }
     } catch (linkErr) {
-      if (!second) await purchaseSessions.markFailed({ sessionId: captureSessionId, orderSubmissionId, code: linkErr.code || 'db_link_failed' });
+      await failOwnedAttempt(linkErr.code || 'db_link_failed');
       logger.error(`[image-upload] 캡처↔주문 연결 실패: ${linkErr.message}`);
       return res.status(503).json({
         ok: false,
@@ -334,12 +341,16 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
     }
 
     // ── SSE 알림 ──
-    emitImageUpload({
-      fileName: uploaded.name,
-      fileId: finalLinkedFileId,
-      tabName: tabName || '',
-      displayName: displayName || '',
-    });
+    try {
+      emitImageUpload({
+        fileName: uploaded.name,
+        fileId: finalLinkedFileId,
+        tabName: tabName || '',
+        displayName: displayName || '',
+      });
+    } catch (notifyErr) {
+      logger.warn(`[image-upload] 완료 알림 실패 (사진 연결 유지): ${notifyErr.message}`);
+    }
 
     res.json({
       ok: true,
@@ -352,11 +363,7 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
       captureFolderUrl: captureFolderUrl || '',
     });
   } catch (err) {
-    if (!(req.body && Number(req.body.captureIndex) === 2)) await purchaseSessions.markFailed({
-      sessionId: req.body && req.body.captureSessionId,
-      orderSubmissionId: req.body && req.body.orderSubmissionId,
-      code: err.code || 'upload_failed',
-    });
+    await failOwnedAttempt(err.code || 'upload_failed');
     logger.error(`[image-upload] ${err.message}`);
     logAbnormal({
       flow: 'order_submit', step: 'image_upload', source: 'external_api', error: err,

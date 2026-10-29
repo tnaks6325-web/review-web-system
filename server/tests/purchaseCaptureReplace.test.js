@@ -27,6 +27,10 @@ function makeDb(opts = {}) {
   const cands = opts.cands || [{ id: 'os-1', capture_file_id: OLD, recipient: '김선미', orderer: '김선미', order_num: 'Y2609293353567', phone: '010-4515-4844' }];
   const q = async (sql, params) => {
     sql = String(sql); calls.push({ sql, params });
+    if (opts.commitReplyLost && sql.trim() === 'COMMIT') {
+      opts.committedFile = NEW; // DB applied COMMIT; only its response was lost.
+      throw Object.assign(new Error('local simulated COMMIT response loss'), { code: 'ECONNRESET' });
+    }
     if (/FROM campaign_participants/.test(sql)) {
       return { rows: opts.noRow ? [] : [{ id: 'r1', seq: 49, order_submission_id: opts.link || null, reviewer_name: '김선미', recipient_name: '김선미', phone8: '45154844', table_order_num: opts.tnum !== undefined ? opts.tnum : '2609293353567' }] };
     }
@@ -100,6 +104,15 @@ const base = { sheetId: 'S1', tabName: 'T1', rowId: 'r1', imageBase64: IMG, mime
     assert.ok(!calls.some(c => /UPDATE order_submissions/.test(c.sql)), 'UPDATE 되면 안 된다');
     assert.deepStrictEqual(dlog.filter(x => x[0] === 'trash').map(x => x[1]), [[NEW]]);
   }));
+  await t('★ COMMIT 응답이 끊겨도 이미 확정된 새 사진을 삭제하지 않는다', async () => {
+    const state = { commitReplyLost: true };
+    await withDb(state, async ({ dlog, calls }) => {
+      await assert.rejects(() => svc.replaceCapture({ ...base, expectFileId: OLD }), /COMMIT response loss/);
+      assert.strictEqual(state.committedFile, NEW, 'DB에는 새 사진이 이미 확정됐다');
+      assert.ok(calls.some(c => /UPDATE order_submissions/.test(c.sql) && c.params[1] === NEW));
+      assert.ok(!dlog.some(x => x[0] === 'trash'), '확정 결과가 모호한 실패는 새 사진도 옛 사진도 지우지 않는다');
+    });
+  });
   await t('★ 옛 사진을 다른 곳이 쓰면 지우지 않는다', () => withDb({ oldInUse: true }, async ({ dlog }) => {
     const out = await svc.replaceCapture({ ...base, expectFileId: OLD });
     assert.strictEqual(out.ok, true); assert.strictEqual(out.oldTrashed, false); assert.strictEqual(out.oldKept, 'in_use');
