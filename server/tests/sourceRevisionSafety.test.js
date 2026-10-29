@@ -20,7 +20,7 @@ const read = (rel) => fs.readFileSync(path.join(__dirname, '..', 'src', rel), 'u
   assert.ok(/code: 'revision_gap'/.test(ord));
   assert.ok(/Number\(existing\.source_revision \|\| 0\) === sourceContract\.sourceRevision\s*\? 'revision_already_applied' : 'source_exists'/.test(ord), 'POST 재전송도 같은 code');
   assert.ok(/AND COALESCE\(source_revision, 0\) = \$\{add\(currentRevision\)\}/.test(ord), '부분 수정 UPDATE 번호 조건');
-  assert.ok(/WHERE id = \$1 AND source_review_order_id = \$40 AND COALESCE\(source_revision, 0\) = \$46/.test(ord), '전체 수정 UPDATE 번호 조건');
+  assert.ok(/WHERE id = \$1 AND source_review_order_id = \$39 AND COALESCE\(source_revision, 0\) = \$45/.test(ord), '전체 수정 UPDATE 번호 조건');
   assert.ok(/if \(!linked\) return await _sourceRevisionRaceResponse\(res, sourceReviewOrderId, source\);/.test(ord), '부분 수정 0행 = 성공으로 접지 않음(await — 실패가 next 로 간다, Codex P2)');
   assert.ok(/if \(!updated\) return await _sourceRevisionRaceResponse\(res, sourceReviewOrderId, source\);/.test(ord), '전체 수정 0행 = 성공으로 접지 않음(await)');
   const fullAt = ord.indexOf('if (!updated) return await _sourceRevisionRaceResponse');

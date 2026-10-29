@@ -936,24 +936,34 @@ async function _intakeSourceManager(res, { b, source, current, optionsJson, deli
     _emitWorkOrderNew(out.body.data, { event: 'source_manager_edit', source_revision: source.sourceRevision });
   }
   if (out.status === 200 && out.body && !out.body.data) out.body.data = current;
+  // Acknowledge only the manager value proven by the locked save (including exact retries).
+  // Never acknowledge the full shared snapshot for this partial source edit.
+  if (out.status === 200 && out.body?.ok && out.body.data
+      && _canonicalOriginalWorkManager(out.body.data.work_manager) === manager) {
+    out.body.manager_ack_version = Number(out.body.data.sync_version || 0);
+  }
   return res.status(out.status).json(out.body);
 }
 
 /** 구 인트라넷 전체 저장이 담당자까지 보냈지만 그 칸은 읽기 전용이었던 경우,
  * 원본 버전 갱신과 현재 담당자 재전송을 한 DB 트랜잭션으로 묶는다. */
-async function _sourceUpdateWithManagerRepair(sql, params, { current, repair }) {
-  if (!repair) return pool.query(sql, params);
+async function _sourceUpdateWithManagerRepair(sql, params, { current, managerValue }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     await client.query(`SET LOCAL lock_timeout = '5s'`);
     await client.query(`SET LOCAL statement_timeout = '10s'`);
     await require('../services/linkedRecruitQuota.service').lockWorkOrderCampaigns(client, [current.id]);
-    const repairSql = sql.replace(/updated_at\s*=\s*NOW\(\)/i,
-      `sync_version = GREATEST(sync_version + 1, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000000)::bigint), updated_at = NOW()`);
+    const { rows: locked } = await client.query('SELECT * FROM work_orders WHERE id = $1 FOR UPDATE', [current.id]);
+    const repair = locked[0] && managerValue !== undefined
+      && _canonicalOriginalWorkManager(managerValue) !== _canonicalOriginalWorkManager(locked[0].work_manager);
+    // Both the write and recovery decision use the locked latest record, never the route pre-read.
+    const repairSql = repair ? sql.replace(/updated_at\s*=\s*NOW\(\)/i,
+      `sync_version = GREATEST(sync_version + 1, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000000)::bigint), updated_at = NOW()`) : sql;
     const result = await client.query(repairSql, params);
     const saved = result.rows && result.rows[0];
     if (!saved) { await client.query('ROLLBACK'); return { rows: [] }; }
+    if (!repair) { await client.query('COMMIT'); return result; }
     await client.query(
       `INSERT INTO work_order_shared_snapshots (work_order_id, sync_version, origin, op_id, state, actor)
        VALUES ($1, $2, 'rw_manager_repair', '', $3::jsonb, '인트라넷 이전 화면')`,
@@ -1030,8 +1040,7 @@ async function _intakeSourceBidir(res, { b, source, current, optionsJson, delive
     deliveryCapable: !!(bid && (bid.delivery === 1 || bid.delivery === true || bid.delivery === '1')),
     // ★ 7단계-④ ⑤-3: 옵션 있음↔없음도 그것을 아는 창만(옛 창은 방식 칸이 잠겨 있다 — 보내면 종전처럼 409)
     modeCapable: !!(bid && (bid.mode === 1 || bid.mode === true || bid.mode === '1')),
-    managerRepair: !_sourceManagerCapability(b) && _hasExplicitWorkManager(b)
-      && _canonicalOriginalWorkManager(pickWorkManager(b)) !== _canonicalOriginalWorkManager(current.work_manager),
+    managerRepairValue: !_sourceManagerCapability(b) && _hasExplicitWorkManager(b) ? pickWorkManager(b) : undefined,
     preHook: _sourceRevisionPreHook(source),
     extraSets: {
       source_revision: source.sourceRevision,
@@ -1146,7 +1155,9 @@ async function _intakeSourceRevisionHandler(req, res, next) {
         return await _intakeSourceBidir(res, { b, source, current, optionsJson, deliveryType, courierProxy,
           requester: String(b.requester_name || b.created_by || '').trim() });
       }
-      if (managerChanged) {
+      const managerOnlyRetry = _hasExplicitWorkManager(b) && !!_canonicalOriginalWorkManager(pickWorkManager(b))
+        && !_sourceContentChanges(current, b, { optionsJson, deliveryType, courierProxy }).some(column => column !== 'work_manager');
+      if (managerChanged || managerOnlyRetry) {
         return await _intakeSourceManager(res, { b, source, current, optionsJson, deliveryType, courierProxy,
           requester: String(b.requester_name || b.created_by || '').trim() });
       }
@@ -1254,9 +1265,8 @@ async function _intakeSourceRevisionHandler(req, res, next) {
          WHERE id = $1 AND source_review_order_id = ${add(sourceReviewOrderId)}
            AND COALESCE(source_revision, 0) = ${add(currentRevision)}
          RETURNING *`;
-      const repairManager = !_sourceManagerCapability(b) && _hasExplicitWorkManager(b)
-        && _canonicalOriginalWorkManager(pickWorkManager(b)) !== _canonicalOriginalWorkManager(current.work_manager);
-      const { rows: matched } = await _sourceUpdateWithManagerRepair(sql, params, { current, repair: repairManager });
+      const managerValue = _hasExplicitWorkManager(b) ? pickWorkManager(b) : undefined;
+      const { rows: matched } = await _sourceUpdateWithManagerRepair(sql, params, { current, managerValue });
       let linked = matched[0];
       // ★ 1단계: 읽은 뒤 그 사이 다른 요청이 번호를 올렸다 — 0행을 성공으로 접지 않는다(완화 금지).
       if (!linked) return await _sourceRevisionRaceResponse(res, sourceReviewOrderId, source);
@@ -1359,8 +1369,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
     // 원본 리뷰오더의 목표 인원이 바뀌면 연결된 공고도 같은 값으로 저장한다.
     // 실제 UPDATE 전에 하한을 검증해, 이미 참여한 인원보다 낮춘 값으로 반쪽만 남지 않게 한다.
     await assertWorkOrderQuota({ workOrderId: current.id, recruitTotal: _intOrZero(b.recruit_count) });
-    const repairManager = !_sourceManagerCapability(b) && _hasExplicitWorkManager(b)
-      && _canonicalOriginalWorkManager(pickWorkManager(b)) !== _canonicalOriginalWorkManager(current.work_manager);
+    const managerValue = _hasExplicitWorkManager(b) ? pickWorkManager(b) : undefined;
     const { rows } = await _sourceUpdateWithManagerRepair(
       `UPDATE work_orders SET
          title = $2, start_date = $3, product_option = $4, product_options_json = $5,
@@ -1368,16 +1377,16 @@ async function _intakeSourceRevisionHandler(req, res, next) {
          inflow_keyword = $11, inflow_type = $12, inflow_guide = $13, guide_images = $14,
          delivery_type = $15, courier_proxy = $16, review_type = $17, review_type_mix = $18, recruit_count = $19,
          review_guide = $20, special_notes = $21, product_url = $22, work_sheet_url = $23,
-         goods_cost_type = $24, manager_name = $25, work_manager = $26, sales_id = $27,
-         contract_number = $28, quote_id = $29, skip_weekends = $30, holidays = $31,
-         work_kind = $32, source_revision = $33, intake_idempotency_key = $34,
-         intranet_advertiser_id = $35, intranet_advertiser_name = $36,
-         intranet_advertiser_contact = $37, intranet_advertiser_business_number = $38, review_fee = $39,
-         delivery_type_mix = $41, recall_courier = $42, recall_product = $43, product_distribution_mode = $44,
-         thumbnail_url = $45,
-         required_delivery_memo = COALESCE($47, required_delivery_memo),   -- 결정 287: 미전송 = 유지
+         goods_cost_type = $24, manager_name = $25, sales_id = $26,
+         contract_number = $27, quote_id = $28, skip_weekends = $29, holidays = $30,
+         work_kind = $31, source_revision = $32, intake_idempotency_key = $33,
+         intranet_advertiser_id = $34, intranet_advertiser_name = $35,
+         intranet_advertiser_contact = $36, intranet_advertiser_business_number = $37, review_fee = $38,
+         delivery_type_mix = $40, recall_courier = $41, recall_product = $42, product_distribution_mode = $43,
+         thumbnail_url = $44,
+         required_delivery_memo = COALESCE($46, required_delivery_memo),   -- 결정 287: 미전송 = 유지
          updated_at = NOW()
-       WHERE id = $1 AND source_review_order_id = $40 AND COALESCE(source_revision, 0) = $46
+       WHERE id = $1 AND source_review_order_id = $39 AND COALESCE(source_revision, 0) = $45
        RETURNING *`,
       [
         current.id,
@@ -1387,7 +1396,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
         deliveryType, courierProxy, b.review_type || '', _reviewTypeMixJson(b.review_type_mix, b.review_type),
         _intOrZero(b.recruit_count), b.review_guide || '', b.special_notes || '', b.product_url || '',
         String(b.work_sheet_url || '').trim(), b.goods_cost_type || '', b.manager_name || '',
-        current.work_manager || '', String(b.sales_id || '').trim(), String(b.contract_number || '').trim(),
+        String(b.sales_id || '').trim(), String(b.contract_number || '').trim(),
         String(b.quote_id || '').trim(), _boolOrNull(b.skip_weekends), _holidaysJson(b.holidays),
         workKindForStore(b.work_kind), source.sourceRevision, source.idempotencyKey,
         source.intranetAdvertiserId, source.intranetAdvertiserName, source.intranetAdvertiserContact,
@@ -1395,9 +1404,9 @@ async function _intakeSourceRevisionHandler(req, res, next) {
         _deliveryMixJson(b, deliveryType), _recallFields(b, deliveryType).courier, _recallFields(b, deliveryType).product,
         _productDistributionMode(b.product_distribution_mode),
         _thumbnailUrl(b.thumbnail_url),
-        currentRevision,                                   // $46 ★ 1단계: 읽은 번호 그대로일 때만 쓴다
-        b.required_delivery_memo === undefined ? null : _requiredMemo(b.required_delivery_memo),   // $47 결정 287
-      ], { current, repair: repairManager });
+        currentRevision,                                   // $45 ★ 1단계: 읽은 번호 그대로일 때만 쓴다
+        b.required_delivery_memo === undefined ? null : _requiredMemo(b.required_delivery_memo),   // $46 결정 287
+      ], { current, managerValue });
     let updated = rows[0];
     if (!updated) return await _sourceRevisionRaceResponse(res, sourceReviewOrderId, source);
     await syncWorkOrderRecruitTotal({ workOrderId: updated.id, recruitTotal: updated.recruit_count });

@@ -118,8 +118,8 @@ async function _runOnce(opts) {
   const summary = { sent: 0, delivered: 0, retry: 0, parked: 0, dead: 0 };
 
   for (const [woId, rows] of byWo) {
-    const ids = rows.map(r => Number(r.id));
-    const attempts = Math.max(...rows.map(r => Number(r.attempts || 1)));
+    let ids = rows.map(r => Number(r.id));
+    let attempts = Math.max(...rows.map(r => Number(r.attempts || 1)));
     try {
       const { rows: wos } = await db.query('SELECT * FROM work_orders WHERE id = $1', [woId]);
       const wo = wos[0];
@@ -131,13 +131,18 @@ async function _runOnce(opts) {
         await _finish(db, ids, 'dead', '연결이 끊겼거나 지워진 오더');
         summary.dead++; continue;
       }
-      if (scope === 'full' && wo.bidir_state !== 'on') {
-        // 상태가 읽기 뒤 바뀌었으면 전체 전송을 실패로 끝내지 않는다. 담당자 전용 행과도 섞지 않는다.
+      if (wo.bidir_state !== 'on' && hasFullScope) {
+        // The order can turn OFF between claim and read. Release every unsent full row,
+        // even when a manager row was claimed alongside it. Only transmitted scope may finish.
+        const unsentIds = rows.filter(r => r.view_scope !== 'manager').map(r => Number(r.id));
         await db.query(
           `UPDATE shared_sync_outbox SET status='pending', attempts=GREATEST(attempts - 1, 0),
              next_at=NOW() + INTERVAL '15 seconds', last_error='전체 동기화 상태가 꺼져 있어 대기 중', updated_at=NOW()
-           WHERE id = ANY($1::bigint[]) AND status='sending'`, [ids]);
-        summary.retry++; continue;
+           WHERE id = ANY($1::bigint[]) AND status='sending'`, [unsentIds]);
+        ids = rows.filter(r => r.view_scope === 'manager').map(r => Number(r.id));
+        summary.retry++;
+        if (!ids.length) continue;
+        attempts = Math.max(...rows.filter(r => r.view_scope === 'manager').map(r => Number(r.attempts || 1)));
       }
       const { rows: archived } = await db.query(
         `SELECT id FROM recruit_campaigns WHERE archived_at IS NOT NULL

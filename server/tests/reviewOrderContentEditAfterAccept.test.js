@@ -98,10 +98,11 @@ async function call(order, body) {
   pool.query = async (sql, params) => {
     const s = String(sql);
     queries.push({ sql: s, params });
-    if (/SELECT \* FROM work_orders WHERE source_review_order_id/.test(s)) return { rows: [Object.assign({}, order)] };
+    if (/SELECT \* FROM work_orders WHERE (?:source_review_order_id|id = \$1 FOR UPDATE)/.test(s)) return { rows: [Object.assign({}, order)] };
     if (/UPDATE work_orders SET/.test(s)) return { rows: [Object.assign({}, order, { source_revision: 2 })] };
     return { rows: [] };
   };
+  pool.connect = async () => ({ query: pool.query, release() {} });
   calls.quota = 0; calls.sync = 0;
   const res = makeRes();
   await handler({ body, params: { sourceReviewOrderId: body.source_review_order_id }, headers: {} }, res,

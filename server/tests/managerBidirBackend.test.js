@@ -29,7 +29,7 @@ async function main() {
       delivery_type_mix TEXT NOT NULL DEFAULT '', recall_courier TEXT NOT NULL DEFAULT '', recall_product TEXT NOT NULL DEFAULT '',
       review_type_mix JSONB NOT NULL DEFAULT '[]', recruit_count INTEGER NOT NULL DEFAULT 0, review_guide TEXT NOT NULL DEFAULT '',
       special_notes TEXT NOT NULL DEFAULT '', product_url TEXT NOT NULL DEFAULT '', work_sheet_url TEXT NOT NULL DEFAULT '', goods_cost_type TEXT NOT NULL DEFAULT '',
-      manager_name TEXT NOT NULL DEFAULT '', skip_weekends BOOLEAN, holidays TEXT, work_kind TEXT NOT NULL DEFAULT 'review',
+      manager_name TEXT NOT NULL DEFAULT '', skip_weekends BOOLEAN, holidays TEXT, work_kind TEXT NOT NULL DEFAULT 'review', memo_log JSONB NOT NULL DEFAULT '[]',
       intranet_advertiser_name TEXT NOT NULL DEFAULT '', intranet_advertiser_contact TEXT NOT NULL DEFAULT '',
       intranet_advertiser_business_number TEXT NOT NULL DEFAULT '', sales_id TEXT NOT NULL DEFAULT '', quote_id TEXT NOT NULL DEFAULT '',
       contract_number TEXT NOT NULL DEFAULT '', intranet_advertiser_id TEXT NOT NULL DEFAULT '', purchase_channel_custom BOOLEAN NOT NULL DEFAULT FALSE
@@ -150,14 +150,15 @@ async function main() {
   }
 
   // 실제 관리자 편집 핸들러: 권한 없는 요청·표시 없는 요청은 막고 정상 요청은 저장 서비스로 연결한다.
-  const orderRouter = require('../src/routes/order.routes');
   const pool = require('../src/db/pool');
   const dbQuery = db.query.bind(db);
   pool.query = async (sql, params) => {
-    if (/CREATE TABLE IF NOT EXISTS work_orders/.test(String(sql))) return { rows: [] };
+    // Route startup schema work is outside this isolated fixture; never use the host database.
+    if (/CREATE TABLE|ALTER TABLE|CREATE INDEX/.test(String(sql))) return { rows: [] };
     return dbQuery(sql, params);
   };
   pool.connect = async () => ({ query: dbQuery, release() {} });
+  const orderRouter = require('../src/routes/order.routes');
   const handler = orderRouter.handlers.orderAdminEdit;
   const response = () => ({ code: 200, body: null, status(n) { this.code = n; return this; }, json(v) { this.body = v; return this; } });
   const call = async (role, body) => { const res = response(); await handler({ body, admin: { role, name: '테스트' } }, res, e => { throw e; }); return res; };
@@ -279,6 +280,121 @@ async function main() {
   assert.ok(Number(row.sync_version) > onVersionBeforeLegacyRepair);
   assert.equal((await db.query(`SELECT view_scope FROM shared_sync_outbox WHERE work_order_id='wo-on' AND sync_version=$1`, [Number(row.sync_version)])).rows[0].view_scope,
     'manager', '공유 변경 없이 담당자 복구만 필요하면 한 칸 전용 전송을 같은 저장 트랜잭션에 기록');
+
+  // Review P1: inject a real quick assignment after the source handler's initial read.
+  // Cover legacy full UPDATE, accepted partial UPDATE, and ON shared/no-op repair.
+  for (const kind of ['full', 'partial', 'on']) {
+    const id = `wo-legacy-race-${kind}`, sid = `ro_${id}`;
+    await insertOrder(id, kind === 'on' ? 'on' : 'off');
+    if (kind === 'partial') await db.query(`UPDATE work_orders SET status='published' WHERE id=$1`, [id]);
+    const initial = (await db.query('SELECT * FROM work_orders WHERE id=$1', [id])).rows[0];
+    await db.query(`INSERT INTO work_order_shared_snapshots(work_order_id,sync_version,origin,state) VALUES($1,$2,'test',$3::jsonb)`, [id, Number(initial.sync_version), JSON.stringify(service.readSharedState(initial))]);
+    const originalQuery = pool.query;
+    let injected = false, assignedVersion = 0;
+    pool.query = async (sql, params) => {
+      const result = await originalQuery(sql, params);
+      if (!injected && /SELECT \* FROM work_orders WHERE source_review_order_id/.test(String(sql)) && params[0] === sid) {
+        injected = true;
+        const assignment = await call('admin', { id, work_manager: '박은비', manager_capable: 1, manager_base_version: 10 });
+        assert.equal(assignment.code, 200, JSON.stringify(assignment.body));
+        assignedVersion = Number(assignment.body.data.sync_version);
+      }
+      return result;
+    };
+    const legacyBody = { ...sourceBody, source_review_order_id: sid, title: initial.title, source_revision: 1,
+      idempotency_key: `legacy-race-${kind}`, work_manager: '박세희',
+      bidir: kind === 'on' ? { base_sync_version: 10 } : undefined };
+    let legacy;
+    try { legacy = await intakeCall(legacyBody, sid); } finally { pool.query = originalQuery; }
+    assert.equal(injected, true, 'real interleaving hook ran');
+    assert.equal(legacy.code, 200, `${kind}: ${JSON.stringify(legacy.body)}`);
+    const saved = (await db.query('SELECT * FROM work_orders WHERE id=$1', [id])).rows[0];
+    assert.equal(saved.work_manager, '박은비', `${kind}: stale legacy source UPDATE cannot restore the pre-read manager`);
+    assert.equal(Number(saved.source_revision), 1);
+    assert.ok(Number(saved.sync_version) > assignedVersion, `${kind}: repair has its own new version, not the already queued assignment`);
+    const repair = (await db.query(`SELECT * FROM shared_sync_outbox WHERE work_order_id=$1 AND sync_version=$2`, [id, Number(saved.sync_version)])).rows[0];
+    assert.ok(repair, `${kind}: recovery decision uses the locked current manager`);
+    assert.equal(repair.view_scope, 'manager');
+    assert.equal(legacy.body.data.work_manager, '박은비');
+  }
+  console.log('review P1 legacy full/partial/ON no-op assignment interleavings: PASS');
+
+  // Review P2: state changes after claiming both scopes, before loading the transmitted snapshot.
+  for (const mixed of [true, false]) {
+    const id = `wo-claim-scope-${mixed}`;
+    await insertOrder(id, 'on', { version: 20 });
+    await db.query(`INSERT INTO shared_sync_outbox(work_order_id,sync_version,view_scope) VALUES($1,19,'full')`, [id]);
+    if (mixed) await db.query(`INSERT INTO shared_sync_outbox(work_order_id,sync_version,view_scope) VALUES($1,20,'manager')`, [id]);
+    let flipped = false;
+    const claimDb = { query: async (sql, params) => {
+      const result = await dbQuery(sql, params);
+      if (!flipped && /RETURNING o\.\*/.test(String(sql))) {
+        assert.ok(result.rows.some(r => r.work_order_id === id), 'target rows actually claimed while ON');
+        flipped = true;
+        await db.query(`UPDATE work_orders SET bidir_state='off' WHERE id=$1`, [id]);
+      }
+      return result;
+    } };
+    const sent = [];
+    const opts = { db: claimDb, env: { INTRANET_ORDER_DELETE_WEBHOOK_URL: 'https://intranet.invalid/webhook', BIDIR_RW_TO_IN_SECRET: 'test-sign' },
+      fetchImpl: async (_url, options) => { sent.push(JSON.parse(options.body)); return new Response(JSON.stringify({ ok: true, result: 'applied' }), { status: 200 }); } };
+    await push.runSharedSyncPush(opts);
+    assert.equal(flipped, true);
+    const queued = (await db.query('SELECT * FROM shared_sync_outbox WHERE work_order_id=$1 ORDER BY sync_version', [id])).rows;
+    assert.equal(queued[0].status, 'pending', 'unsent full scope must remain pending after ON->OFF');
+    assert.equal(Number(queued[0].attempts), 0, 'unsent full scope must not consume retry attempts or retain sending lease');
+    assert.equal(Number((await db.query('SELECT intranet_acked_version FROM work_orders WHERE id=$1', [id])).rows[0].intranet_acked_version), 0);
+    if (mixed) {
+      assert.equal(queued[1].status, 'delivered');
+      assert.deepEqual(sent.find(body => body.work_order_id === id).view, { work_manager: '박세희' });
+    } else assert.ok(!sent.some(body => body.work_order_id === id), 'full-only OFF rows cannot be transmitted');
+    await db.query(`UPDATE work_orders SET bidir_state='on' WHERE id=$1`, [id]);
+    await db.query(`UPDATE shared_sync_outbox SET next_at=NOW() WHERE work_order_id=$1`, [id]);
+    await push.runSharedSyncPush({ ...opts, db });
+    const resumed = (await db.query('SELECT status FROM shared_sync_outbox WHERE work_order_id=$1 AND view_scope=\'full\'', [id])).rows[0];
+    assert.equal(resumed.status, 'delivered', 're-enabled full delivery resumes normally');
+    assert.ok(sent.some(body => body.work_order_id === id && !body.scope && Object.hasOwn(body.view, 'special_notes')));
+  }
+  console.log('review P2 mixed/full-only claim ON->OFF and re-enable: PASS');
+
+  // Review P2: full ON manager edits obey the same under-lock archive/completion gate.
+  for (const protection of ['archive-forward', 'archive-reverse', 'archive-between-read-and-lock', 'done']) {
+    const id = `wo-full-protected-${protection}`;
+    await insertOrder(id, 'on');
+    const before = (await db.query('SELECT * FROM work_orders WHERE id=$1', [id])).rows[0];
+    await db.query(`INSERT INTO work_order_shared_snapshots(work_order_id,sync_version,origin,state) VALUES($1,$2,'test',$3::jsonb)`, [id, Number(before.sync_version), JSON.stringify(service.readSharedState(before))]);
+    const archive = async () => {
+      await db.query(`INSERT INTO recruit_campaigns(id,source_work_order_id,archived_at) VALUES($1,$2,NOW())`, [`camp-${id}`, protection === 'archive-forward' ? '' : id]);
+      if (protection === 'archive-forward') await db.query('UPDATE work_orders SET linked_campaign_id=$2 WHERE id=$1', [id, `camp-${id}`]);
+    };
+    let protectedResult;
+    if (protection === 'done') {
+      await db.query(`UPDATE work_orders SET status='done' WHERE id=$1`, [id]);
+      protectedResult = await service.applySharedPatch({ db: { connect: pool.connect }, workOrderId: id,
+        mine: { work_manager: '박은비', special_notes: 'must rollback' }, baseVersion: 10, origin: 'rw_admin' });
+      protectedResult = { code: protectedResult.status, body: protectedResult.body };
+    } else {
+      const originalQuery = pool.query;
+      let injected = false;
+      if (protection !== 'archive-between-read-and-lock') await archive();
+      else pool.query = async (sql, params) => {
+        const result = await originalQuery(sql, params);
+        if (!injected && /SELECT \* FROM work_orders WHERE id/.test(String(sql)) && params[0] === id) { injected = true; await archive(); }
+        return result;
+      };
+      try { protectedResult = await call('admin', { id, work_manager: '박은비', special_notes: 'must rollback', manager_capable: 1, manager_base_version: 10 }); }
+      finally { pool.query = originalQuery; }
+      if (protection === 'archive-between-read-and-lock') assert.equal(injected, true);
+    }
+    assert.equal(protectedResult.code, 409, `${protection}: full shared manager edit must be blocked: ${JSON.stringify(protectedResult.body)}`);
+    assert.equal(protectedResult.body.code, protection === 'done' ? 'manager_order_done' : 'manager_campaign_archived');
+    const after = (await db.query('SELECT * FROM work_orders WHERE id=$1', [id])).rows[0];
+    assert.equal(after.work_manager, before.work_manager);
+    assert.equal(after.special_notes, before.special_notes, 'mixed edit rolls back unrelated fields too');
+    assert.equal(Number(after.sync_version), 10);
+    assert.equal(Number((await db.query('SELECT count(*)::int n FROM shared_sync_outbox WHERE work_order_id=$1', [id])).rows[0].n), 0);
+  }
+  console.log('review P2 ON archived/completed actual manager change + archive interleaving: PASS');
 
   const sharedRoute = fs.readFileSync(path.join(__dirname, '..', 'src/routes/order.routes.js'), 'utf8');
   const listRoute = fs.readFileSync(path.join(__dirname, '..', 'src/routes/trackB.routes.js'), 'utf8');

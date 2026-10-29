@@ -1637,6 +1637,18 @@ async function _reconcilePrepareInTx(client, wo, camp, rec, actor) {
   return { wo: saved, plan };
 }
 
+/** Called only while holding L1 + the current work-order row lock. Shared by both save scopes. */
+async function _managerEditProtection(client, wo) {
+  if (wo.status === 'done') return { status: 409, body: { ok: false, code: 'manager_order_done', error: '완료된 작업은 담당자를 바꿀 수 없습니다.' } };
+  const { rows: archived } = await client.query(
+    `SELECT id FROM recruit_campaigns
+      WHERE archived_at IS NOT NULL
+        AND (id = NULLIF($1, '') OR NULLIF(source_work_order_id, '') = $2)
+      LIMIT 1 FOR UPDATE`, [String(wo.linked_campaign_id || ''), String(wo.id)]);
+  if (archived.length) return { status: 409, body: { ok: false, code: 'manager_campaign_archived', error: '보관된 모집공고에 연결된 작업은 담당자를 바꿀 수 없습니다.' } };
+  return null;
+}
+
 async function _abort(client, status, body) {
   try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
   return { status, body };
@@ -1686,16 +1698,8 @@ async function applySharedPatch(p) {
       if (!String(wo.source_review_order_id || '').trim()) {
         return await _abort(client, 409, { ok: false, code: 'manager_order_unlinked', error: '인트라넷과 연결되지 않은 작업은 담당자를 바꿀 수 없습니다.' });
       }
-      if (wo.status === 'done') {
-        return await _abort(client, 409, { ok: false, code: 'manager_order_done', error: '완료된 작업은 담당자를 바꿀 수 없습니다.' });
-      }
-      // 보관된 공고의 연결을 관리자 수정으로 우회하지 않는다. 보관 해제 후 다시 시도해야 한다.
-      const { rows: archived } = await client.query(
-        `SELECT id FROM recruit_campaigns
-          WHERE archived_at IS NOT NULL
-            AND (id = NULLIF($1, '') OR NULLIF(source_work_order_id, '') = $2)
-          LIMIT 1 FOR UPDATE`, [String(wo.linked_campaign_id || ''), String(wo.id)]);
-      if (archived.length) return await _abort(client, 409, { ok: false, code: 'manager_campaign_archived', error: '보관된 모집공고에 연결된 작업은 담당자를 바꿀 수 없습니다.' });
+      const protection = await _managerEditProtection(client, wo);
+      if (protection) return await _abort(client, protection.status, protection.body);
       if (p.preHook) { const r = await p.preHook(client, wo); if (r) return await _abort(client, r.status, r.body); }
       const extra = Object.entries(p.extraSets || {}).filter(([k]) => EXTRA_COLUMNS.has(k));
       const currentVersion = Number(wo.sync_version || 0);
@@ -1927,7 +1931,9 @@ async function applySharedPatch(p) {
     const overwritten = lastWriter ? plan.conflicts.map(c => ({ path: c.path, label: _label(c), before: _display(c.path, c.theirs), after: _display(c.path, c.mine) })) : [];
     if (lastWriter && plan.conflicts.length) plan.writes = [...plan.writes, ...plan.conflicts];
     const extra = Object.entries(p.extraSets || {}).filter(([k]) => EXTRA_COLUMNS.has(k));
-    const managerRepair = p.origin === 'intranet' && p.managerRepair === true;
+    const managerRepair = p.origin === 'intranet' && (p.managerRepair === true
+      || (p.managerRepairValue !== undefined && require('../utils/sharedFields').canon('work_manager', p.managerRepairValue)
+        !== require('../utils/sharedFields').canon('work_manager', wo.work_manager)));
     if (!plan.writes.length && !extra.length && !rec && !managerRepair) {
       await client.query('COMMIT');
       return { status: 200, body: { ok: true, noop: true, sync_version: curVersion } };
@@ -1936,6 +1942,10 @@ async function applySharedPatch(p) {
     if (missed.length) {
       return await _abort(client, 409, { ok: false, code: 'write_unmatched', sync_version: curVersion, fields: missed.map(path => ({ path, label: _label(path) })),
         error: `상품·옵션 짝을 찾지 못해 저장하지 않았습니다: ${[...new Set(missed.map(path => _label(path)))].join(', ')}. 창을 닫고 다시 열어 주세요.` });
+    }
+    if (plan.writes.some(w => w.path === 'f:work_manager')) {
+      const protection = await _managerEditProtection(client, wo);
+      if (protection) return await _abort(client, protection.status, protection.body);
     }
     // 7단계-④ — 지운 선택지 중 참여자가 있는 것은 마감으로 되살린다(총모집도 그만큼) · 더한 선택지 검사
     let closure = { restored: [], addTotal: 0 };

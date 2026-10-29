@@ -247,6 +247,44 @@ async function main() {
     }
   }
 
+  // Review P1: a delayed old RWS push must not undo a successful manager-only source save.
+  // Exercise both the initial success and response-loss retry through the real source/outbox handlers.
+  for (const loseResponse of [false, true]) {
+    const id = `manager-ack-${loseResponse}`;
+    const payload = await seed(id, 'off');
+    const changed = await requestFor(handler, { id, manager_capable: 1, manager_base_version: 10, work_manager: '박은비' });
+    assert.equal(changed.statusCode, 200);
+    const delayed = pusher.buildPushBody(await dbRow(id), 'manager');
+    const version = Number((await dbRow(id)).sync_version);
+    let lost = false;
+    const normalFetch = global.fetch;
+    if (loseResponse) global.fetch = async (...args) => {
+      const response = await normalFetch(...args);
+      if (!lost && String(args[0]).includes(`/intake/source/${id}`)) { lost = true; throw new Error('intentional response loss after RWS commit'); }
+      return response;
+    };
+    const env = { DB: D1, REVIEW_MEMO_KEY: 'local-review-key', REVIEW_INTAKE_KEY: 'local-intake-key', REVIEW_API_BASE: 'http://rws.local', BIDIR_RW_TO_IN_SECRET: 'local-bidir-secret', BIDIR_RECEIVE_MODE: 'apply' };
+    const body = { ...payload, requester_username: 'fake-owner', work_manager: '랜덤', bidir: { manager: 1, base_sync_version: version } };
+    const response = await api.request(`/review-order/source/${id}`, new Request(`http://inadd.local/review-order/source/${id}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }), env);
+    assert.equal(response.status, loseResponse ? 202 : 200, JSON.stringify(await response.json()));
+    global.fetch = normalFetch;
+    if (loseResponse) {
+      const retry = await api.request(`/review-order/source/${id}/retry`, new Request(`http://inadd.local/review-order/source/${id}/retry`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requester_username: 'fake-owner' }) }), env);
+      assert.equal(retry.status, 200, JSON.stringify(await retry.json()));
+    }
+    const acceptedVersion = Number((await dbRow(id)).sync_version);
+    assert.equal((await d1row(id)).remote_manager_sync_version, acceptedVersion, 'manager-only source acknowledgement advances manager watermark');
+    assert.equal((await d1row(id)).remote_sync_version, 0, 'manager-only source acknowledgement must not advance full watermark');
+    const raw = JSON.stringify(delayed), t = Date.now();
+    const received = await api.request('/review-order/webhook', new Request('http://inadd.local/review-order/webhook', { method: 'POST', body: raw, headers: { 'content-type': 'application/json', 'X-Review-Key': 'local-review-key', 'X-Bidir-Signature': `t=${t},v1=${crypto.createHmac('sha256', 'local-bidir-secret').update(`${t}.${raw}`).digest('hex')}` } }), env);
+    assert.equal((await received.json()).result, 'stale', 'delayed pre-save manager message is stale');
+    assert.equal((await dbRow(id)).work_manager, '랜덤');
+    assert.equal(JSON.parse((await d1row(id)).payload_json).work_manager, '랜덤');
+    await pushOnce();
+    assert.equal(JSON.parse((await d1row(id)).payload_json).work_manager, '랜덤', 'durable older outbox also cannot roll back saved manager');
+  }
+  console.log('review P1 manager acknowledgement + lost-response retry: PASS');
+
   // An injected local network failure leaves the durable source revision failed; the real retry route resends the same revision and converges.
   const retryPayload = await seed('inadd-delivery-retry', 'off');
   const retryBody = { ...retryPayload, requester_username: 'fake-owner', work_manager: '랜덤', bidir: { manager: 1, base_sync_version: 10, op_id: 'op-retry' } };
@@ -263,7 +301,7 @@ async function main() {
   assert.ok(fetchLog.every(x => x.host === 'inadd.local' || x.host === 'rws.local'), 'network adapter saw local hosts only');
   assert.ok(fetchLog.some(x => x.path === '/review-order/webhook'), 'RWS -> Intranet crossed signed webhook route');
   assert.ok(fetchLog.some(x => /^\/api\/order\/intake\/source\//.test(x.path)), 'Intranet -> RWS crossed official source handler');
-  console.log(JSON.stringify({ result: 'PASS', cases: ['RWS->Intranet OFF/prepublish/diverged/separate manager scope','RWS->Intranet ON full shared edit + unrelated field','signed replay/reordered stale protection','held then convergence','Intranet PUT->RWS OFF/ON actual revision/outbox/official intake','same revision hash conflict','durable retry after injected network failure'], network: fetchLog, note: 'All DBs in memory; all fetches restricted to explicit loopback adapters.' }, null, 2));
+  console.log(JSON.stringify({ result: 'PASS', cases: ['RWS->Intranet OFF/prepublish/diverged/separate manager scope','RWS->Intranet ON full shared edit + unrelated field','signed replay/reordered stale protection','held then convergence','Intranet PUT->RWS OFF/ON actual revision/outbox/official intake','same revision hash conflict','manager source acknowledgement blocks delayed old push + response-loss retry','durable retry after injected network failure'], network: fetchLog, note: 'All DBs in memory; all fetches restricted to explicit loopback adapters.' }, null, 2));
   await db.close(); sqlite.close();
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
