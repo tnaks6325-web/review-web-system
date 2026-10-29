@@ -553,7 +553,12 @@ router.get('/parity-trend', authMiddleware, internalMiddleware, async (req, res,
 //   ★ Track A 무접촉: 링크는 Track B 전용 테이블 trackb_work_order_links(051)에만 저장(work_orders는 읽기만).
 //     work_orders.linked_tab_* 는 order.routes 승인 흐름이 읽어 분기하므로 절대 안 씀. 명단 골격은 manual 슬롯.
 router.get('/work-orders', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try { res.json({ ok: true, items: await svc.listWorkOrders({ sheetId: req.query.sheetId, tabName: req.query.tabName, limit: req.query.limit }) }); }
+  try {
+    const managerRole = ['admin', 'master'].includes(String(req.admin?.role || '')) && await canEdit(req.admin)
+      && String(process.env.BIDIR_HARD_OFF || '').trim() !== '1';
+    const items = await svc.listWorkOrders({ sheetId: req.query.sheetId, tabName: req.query.tabName, limit: req.query.limit });
+    res.json({ ok: true, items: items.map(row => ({ ...row, manager_edit_capable: managerRole && row.manager_edit_capable === true })) });
+  }
   catch (err) { next(err); }
 });
 router.post('/work-order/link', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
@@ -998,7 +1003,8 @@ router.get('/workdesk', authMiddleware, async (req, res, next) => {
     // `/tabs`와 동일하게, 작업보드 표는 모든 비리뷰어 역할이 열람할 수 있다. PII 마스킹과
     // 쓰기 권한은 역할별 service 렌즈/각 write route에서 계속 분리한다.
     // ★ brandId 는 **토큰에서만**(IDOR 차단) — 작업 조건 카드의 담당 행이 세션 종류로 갈린다(136).
-    const out = await svc.workdeskTab({ sheetId, tabName, tabGid: tabGid || null, role, advertiserId, brandId: (req.admin && req.admin.brand_id) || null, staffName: (req.admin && req.admin.name) || null, allowAllStaff: role === 'staff', allowAllWorkdesk: true, archived });
+    const managerEditAllowed = ['master', 'admin'].includes(role) && await canEdit(req.admin);
+    const out = await svc.workdeskTab({ sheetId, tabName, tabGid: tabGid || null, role, advertiserId, brandId: (req.admin && req.admin.brand_id) || null, staffName: (req.admin && req.admin.name) || null, allowAllStaff: role === 'staff', allowAllWorkdesk: true, archived, managerEditAllowed });
     if (out.denied) return res.status(403).json({ ok: false, error: '스코프 밖 작업(담당/소유 아님)' });
     // 인증된 작업표는 주문·셀 편집 직후에도 URL이 같으므로 어떤 캐시도 이전 합성 결과를 재사용하지 않는다.
     res.set('Cache-Control', 'private, no-store');
@@ -1593,13 +1599,25 @@ router.get('/work-orders/list', authMiddleware, internalMiddleware, async (req, 
         + ` OR COALESCE(manager_name,'') ILIKE $${params.length})`);
     }
     const { rows } = await pool.query(
-      `SELECT * FROM work_orders WHERE ${where.join(' AND ')} ORDER BY created_at DESC LIMIT 300`, params);
+      `SELECT wo.*,
+              (COALESCE(wo.source_review_order_id, '') <> '' AND wo.status <> 'done'
+                AND NOT EXISTS (
+                  SELECT 1 FROM recruit_campaigns rc
+                   WHERE rc.archived_at IS NOT NULL
+                     AND (rc.id = wo.linked_campaign_id OR NULLIF(rc.source_work_order_id, '') = wo.id)
+                )) AS manager_edit_capable
+         FROM work_orders wo WHERE ${where.join(' AND ')} ORDER BY wo.created_at DESC LIMIT 300`, params);
     // 상태별 건수(배지) — 필터와 무관하게 전체 기준
     const { rows: c } = await pool.query(
       `SELECT status, COUNT(*)::int AS n FROM work_orders WHERE deleted_at IS NULL GROUP BY status`);
     const counts = {};
     for (const r of c) counts[r.status] = r.n;
-    res.json({ ok: true, data: rows, counts, canEdit: await canEdit(req.admin) });
+    const managerRole = ['admin', 'master'].includes(String(req.admin?.role || '')) && await canEdit(req.admin)
+      && String(process.env.BIDIR_HARD_OFF || '').trim() !== '1';
+    res.json({ ok: true, data: rows.map(row => ({ ...row,
+      manager_edit_capable: managerRole && !!row.manager_edit_capable,
+      manager_base_version: Number(row.sync_version || 0),
+    })), counts, canEdit: await canEdit(req.admin) });
   } catch (err) { next(err); }
 });
 

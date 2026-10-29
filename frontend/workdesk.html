@@ -2021,6 +2021,12 @@
            white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .cndl dt:first-of-type,.cndl dd:first-of-type{border-top:0}
   .cndl dd .u{font-size:10px;font-weight:600;color:var(--faint);margin-left:2px}
+  .cndl dd.cndmgr{white-space:normal;overflow:visible;text-overflow:clip}
+  .cndmgrchoices{display:inline-flex;gap:4px;margin-left:7px;vertical-align:middle;flex-wrap:wrap}
+  .cndmgrbtn{font:inherit;font-size:11px;font-weight:700;border:1px solid var(--line);border-radius:5px;background:var(--panel,#fff);color:var(--ink);padding:2px 7px;min-height:25px;cursor:pointer}
+  .cndmgrbtn:hover,.cndmgrbtn[aria-pressed="true"]{background:var(--accent-soft,#eef4ff);border-color:var(--accent,#527cbe)}
+  .cndmgrbtn:disabled{opacity:.5;cursor:wait}
+  .cndmgrstatus{font-size:10px;color:var(--muted);font-weight:600}
   .cnna{color:var(--faint);font-weight:600}
   /* 담당 2인 — 역할 라벨(AE팀·관리자)은 작게, 구분자는 옅게(값이 이름이라는 게 읽혀야 한다) */
   .cndl .role{font-size:10px;font-weight:700;color:var(--faint);margin-right:3px}
@@ -7798,7 +7804,9 @@ function _condCardHtml(wd,d,m){
     const parts=[];
     if(ae)     parts.push(`<span class="role">AE팀</span>${esc(ae)}`);
     if(admHas) parts.push(admName?`<span class="role">관리자</span>${esc(admName)}`:'관리자');
-    const own=parts.length?`<dt>담당</dt><dd>${parts.join('<span class="sep">/</span>')}</dd>`
+    else if(!isAdv&&cd.workOrderId) parts.push('<span class="role">관리자</span><span class="cnna">미지정</span>');
+    const managerButtons=_cndManagerButtons(cd);
+    const own=parts.length?`<dt>담당</dt><dd class="cndmgr">${parts.join('<span class="sep">/</span>')}${managerButtons}</dd>`
                           :`<dt>담당</dt>${unset('order')}`;
     return own+(bm.length?`<dt>브랜드사<br>표시</dt><dd title="${esc(bm.join(' / '))} — 브랜드사 화면의 「담당」 행에 이대로 나갑니다(브랜드 관리에서 작업마다 정합니다).">${bmHtml}</dd>`:'');
   })();
@@ -8008,9 +8016,55 @@ async function _cndOrderModal(cd){
   const o=((r&&r.items)||[]).find(x=>String(x.id)===String(cd.workOrderId));
   if(!o){ _toast('작업오더를 불러오지 못했습니다. 작업오더 탭에서 수정해 주세요.'); return; }
   return woAdminEditModal(o,{
+    canAssignManager: STATE.canEdit&&(STATE.role==='master'||STATE.role==='admin'),
     save: fields=>api('/api/trackb/work-orders/edit',{method:'PUT',body:JSON.stringify({id:o.id,...fields})}),
     onSaved: ()=>{ _toast('✏ 수정 저장됨'); _cndReload(); }
   });
+}
+/* 담당자 빠른 배정 — 새 서버가 지정한 같은 오더만 쓴다. 구버전·읽기 전용은 버튼 없음.
+   저장 전에는 이름을 바꾸지 않고, 실패하면 그대로 두며 같은 작업의 중복 클릭을 막는다. */
+const _cndManagerPending=new Set();
+function _cndManagerGate(cd){
+  const e=cd&&cd.managerEdit;
+  return !!(STATE.canEdit && (STATE.role==='master'||STATE.role==='admin')
+    && !(STATE.wd&&STATE.wd.archived) && e&&e.capable===true
+    && cd.workOrderId && String(e.workOrderId)===String(cd.workOrderId)
+    && Number.isSafeInteger(Number(e.syncVersion))&&Number(e.syncVersion)>=0);
+}
+function _cndManagerButtons(cd){
+  if(!_cndManagerGate(cd)) return '';
+  const busy=_cndManagerPending.has(String(cd.workOrderId));
+  const mg=cd.manager||{},name=String(mg.adminNick||mg.adminRaw||'');
+  const nick=typeof _woManagerNick==='function'?_woManagerNick(name):name;
+  return `<span class="cndmgrchoices" aria-label="작업담당 배정">${[['박세희','만두'],['박은비','망고']].map(([raw,label])=>
+    `<button type="button" class="cndmgrbtn" aria-pressed="${nick===label}" ${busy?'disabled':''} onclick="_cndAssignManager('${raw}')" title="${label}(으)로 작업담당을 정합니다 — 인트라넷에도 전달됩니다">${label}</button>`).join('')}${busy?'<span class="cndmgrstatus" role="status">저장 중…</span>':''}</span>`;
+}
+async function _cndAssignManager(value){
+  const t=STATE.cur,cd=STATE.wd&&STATE.wd.condition;
+  if(!t||!_cndManagerGate(cd)||!['박세희','박은비'].includes(value)) return;
+  const id=String(cd.workOrderId),e=cd.managerEdit;
+  if(_cndManagerPending.has(id)) return;
+  _cndManagerPending.add(id);
+  document.querySelectorAll('.cndmgrbtn').forEach(b=>{ b.disabled=true; });
+  try{
+    const r=await api('/api/trackb/work-orders/edit',{method:'PUT',body:JSON.stringify({id,work_manager:value,manager_base_version:Number(e.syncVersion),manager_capable:1})});
+    if(!r||!r.ok){ alert((r&&r.error)||'담당자를 저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.'); return; }
+    if(Array.isArray(STATE.wo)) STATE.wo=STATE.wo.map(o=>String(o.id)===id?{...o,...r.data}:o);
+    // 작업을 옮긴 뒤 도착한 응답은 새 작업을 다시 그리지 않는다.
+    if(STATE.cur!==t) return;
+    _toast('담당자 저장됨 — 인트라넷에 전달됩니다.');
+    const q=`sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&tabGid=${encodeURIComponent(t.tabGid||'')}`;
+    const fresh=await api('/api/trackb/workdesk?'+q,{cache:'no-store'});
+    if(STATE.cur!==t) return;
+    if(!fresh||!fresh.ok){ alert('담당자는 저장됐지만 화면을 다시 불러오지 못했습니다. 새로고침해 주세요.'); return; }
+    _cndManagerPending.delete(id);
+    renderWorkdesk(fresh);
+  }catch(err){
+    alert('담당자 처리 결과를 확인하지 못했습니다. 새로고침해 담당자를 확인한 뒤 다시 시도해 주세요.');
+  }finally{
+    _cndManagerPending.delete(id);
+    if(STATE.cur===t) document.querySelectorAll('.cndmgrbtn').forEach(b=>{ b.disabled=false; });
+  }
 }
 /* ══ 공고 없는 작업의 설정 3종 ══════════════════════════════════════════════════
    ★★ "동기화"를 코드로 잇지 않는다 — 판정 순서가 전부 **공고 → 탭**이라(리뷰비 resolveReviewFee
@@ -12446,6 +12500,7 @@ function _woAdminEdit(id){
   if(!o){ _toast('오더를 찾을 수 없습니다.'); return; }
   if(typeof woAdminEditModal!=='function'){ _toast('수정 모달 모듈(js/work-order-detail.js)을 불러오지 못했습니다.'); return; }
   woAdminEditModal(o,{
+    canAssignManager: STATE.canEdit&&(STATE.role==='master'||STATE.role==='admin'),
     save: fields=>api('/api/trackb/work-orders/edit',{method:'PUT',body:JSON.stringify({id,...fields})}),
     onSaved: r=>{
       _toast('✏ 수정 저장됨'+(r&&r.delivered?' — 인트라넷 알림 전송':''));

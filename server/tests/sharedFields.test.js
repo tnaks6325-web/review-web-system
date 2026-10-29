@@ -67,12 +67,14 @@ t('③ 표 무결성', () => {
     assert.strictEqual(typeof CANON[f.canon], 'function', `${f.key} 정규화 ${f.canon} 없음`);
     assert.ok(f.label, `${f.key} 라벨`);
   }
-  for (const k of ['title', 'start_date', 'manager_name', 'work_manager', 'sales_id', 'intranet_advertiser_id']) {
+  for (const k of ['title', 'start_date', 'manager_name', 'sales_id', 'intranet_advertiser_id']) {
     assert.strictEqual(ownerOf(k), 'intranet', `${k} 는 인트라넷 고유(사용자 확정 D5·리뷰오더 고유항목)`);
   }
-  for (const k of ['review_fee', 'recruit_count', 'product_url', 'purchase_time', 'skip_weekends', 'required_delivery_memo']) {
+  for (const k of ['review_fee', 'recruit_count', 'product_url', 'purchase_time', 'skip_weekends', 'required_delivery_memo', 'work_manager']) {
     assert.strictEqual(ownerOf(k), 'shared', `${k} 는 양방향(사용자 확정)`);
   }
+  assert.strictEqual(canon('work_manager', '만두'), canon('work_manager', '박세희'), '담당자 별칭을 같은 원래 이름으로 비교');
+  assert.strictEqual(canon('work_manager', '망고'), canon('work_manager', '박은비'), '담당자 별칭을 같은 원래 이름으로 비교');
   assert.strictEqual(ownerOf('pay_amount'), 'derived', '결제금액 합계는 파생 — 직접 쓰지 않는다');
   assert.strictEqual(ownerOf('linked_campaign_id'), null);
   assert.throws(() => canon('linked_campaign_id', 'x'), /목록에 없는 칸/);

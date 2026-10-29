@@ -22,6 +22,7 @@ const MIG_LOCK_RETRIES = 3;
 // 실행 코드가 요구하는 컬럼(없으면 사용자 대면 500). 마이그레이션이 실패해도 listen 하면
 // /health 는 통과하고 해당 기능만 42703 으로 죽어 "무신호 전면장애"가 된다.
 const REQUIRED_SCHEMA = [
+  ['shared_sync_outbox', 'view_scope'],             // 206 — 담당자 단독 송신과 전체 공유 송신의 durable scope(없으면 공유 저장·송신 실패)
   ['campaign_participants', 'review_participation_id'],
   ['workdesk_review_resolutions', 'review_participation_id'],
   ['reviewer_participations', 'review_obligation_status'],

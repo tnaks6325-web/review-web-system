@@ -49,9 +49,20 @@ function classifyResponse(status, body) {
 }
 
 /** 보낼 본문 — 3단계 글 칸 + 5단계 금액(리뷰비 · 상품 구성 · 결제합계 · 상품 요약 문장). 인트라넷 수정 창이 덮는 칸과 같다. */
-function buildPushBody(wo) {
+function buildPushBody(wo, scope = 'full') {
   const state = readSharedState(wo);
+  if (Object.prototype.hasOwnProperty.call(state, 'work_manager')) {
+    const { mapWorkManager, isUndecidedWorkManager } = require('../utils/workManager');
+    const raw = String(state.work_manager || '').trim(), nick = mapWorkManager(raw);
+    // 빈 옛 원본도 미지정으로 전송한다. DB 과거값은 건드리지 않는다.
+    state.work_manager = nick === '만두' ? '박세희' : nick === '망고' ? '박은비'
+      : !raw || isUndecidedWorkManager(raw) ? '랜덤' : raw;
+  }
   const view = {};
+  if (scope === 'manager') {
+    if (Object.prototype.hasOwnProperty.call(state, 'work_manager')) view.work_manager = state.work_manager;
+    return { event: 'shared_state', scope: 'manager', source_review_order_id: String(wo.source_review_order_id || ''), work_order_id: wo.id, sync_version: Number(wo.sync_version), view };
+  }
   for (const k of PUSH_VIEW_KEYS) if (Object.prototype.hasOwnProperty.call(state, k)) view[k] = state[k];
   return { event: 'shared_state', source_review_order_id: String(wo.source_review_order_id || ''), work_order_id: wo.id, sync_version: Number(wo.sync_version), view };
 }
@@ -60,11 +71,13 @@ async function _claim(db) {
   const { rows } = await db.query(
     `UPDATE shared_sync_outbox o SET status = 'sending', attempts = o.attempts + CASE WHEN o.status = 'parked' THEN 0 ELSE 1 END, updated_at = NOW()
       WHERE o.id IN (
-        SELECT id FROM shared_sync_outbox
-         WHERE (status = 'pending' AND next_at <= NOW())
-            OR (status = 'sending' AND updated_at < NOW() - INTERVAL '5 minutes')
-            OR (status = 'parked' AND updated_at < NOW() - INTERVAL '30 minutes')
-         ORDER BY next_at, id LIMIT $1 FOR UPDATE SKIP LOCKED)
+        SELECT o2.id FROM shared_sync_outbox o2
+         JOIN work_orders w ON w.id = o2.work_order_id
+         WHERE ((o2.status = 'pending' AND o2.next_at <= NOW())
+            OR (o2.status = 'sending' AND o2.updated_at < NOW() - INTERVAL '5 minutes')
+            OR (o2.status = 'parked' AND o2.updated_at < NOW() - INTERVAL '30 minutes')
+           ) AND (o2.view_scope = 'manager' OR w.bidir_state = 'on')
+         ORDER BY o2.next_at, o2.id LIMIT $1 FOR UPDATE OF o2 SKIP LOCKED)
       RETURNING o.*`, [BATCH]);
   return rows;
 }
@@ -110,11 +123,31 @@ async function _runOnce(opts) {
     try {
       const { rows: wos } = await db.query('SELECT * FROM work_orders WHERE id = $1', [woId]);
       const wo = wos[0];
-      if (!wo || wo.deleted_at || wo.bidir_state !== 'on' || !String(wo.source_review_order_id || '').trim()) {
+      const hasManagerScope = rows.some(r => r.view_scope === 'manager');
+      const hasFullScope = rows.some(r => r.view_scope !== 'manager'); // migration 기본값은 full
+      // Full 전송은 전체 공유 사본을 함께 최신화한다. OFF 상태에서 잡힌 것은 manager scope 뿐이다.
+      const scope = wo && wo.bidir_state === 'on' && hasFullScope ? 'full' : hasManagerScope ? 'manager' : 'full';
+      if (!wo || wo.deleted_at || wo.status === 'done' || !String(wo.source_review_order_id || '').trim()) {
         await _finish(db, ids, 'dead', '연결이 끊겼거나 지워진 오더');
         summary.dead++; continue;
       }
-      const body = buildPushBody(wo);
+      if (scope === 'full' && wo.bidir_state !== 'on') {
+        // 상태가 읽기 뒤 바뀌었으면 전체 전송을 실패로 끝내지 않는다. 담당자 전용 행과도 섞지 않는다.
+        await db.query(
+          `UPDATE shared_sync_outbox SET status='pending', attempts=GREATEST(attempts - 1, 0),
+             next_at=NOW() + INTERVAL '15 seconds', last_error='전체 동기화 상태가 꺼져 있어 대기 중', updated_at=NOW()
+           WHERE id = ANY($1::bigint[]) AND status='sending'`, [ids]);
+        summary.retry++; continue;
+      }
+      const { rows: archived } = await db.query(
+        `SELECT id FROM recruit_campaigns WHERE archived_at IS NOT NULL
+          AND (id = NULLIF($1, '') OR NULLIF(source_work_order_id, '') = $2) LIMIT 1`,
+        [String(wo.linked_campaign_id || ''), String(wo.id)]);
+      if (archived.length) {
+        await _finish(db, ids, 'dead', '보관된 모집공고에 연결된 작업');
+        summary.dead++; continue;
+      }
+      const body = buildPushBody(wo, scope);
       const raw = JSON.stringify(body);
       // 보내기 직전 시각 갱신 — 앞 오더들이 오래 걸려도 다른 처리기가 이 줄을 "끊긴 줄" 로 다시 가져가지 않게.
       await db.query(`UPDATE shared_sync_outbox SET updated_at = NOW() WHERE id = ANY($1::bigint[]) AND status = 'sending'`, [ids]);
@@ -141,8 +174,9 @@ async function _runOnce(opts) {
         // 이 버전까지는 인트라넷 사본이 같다 — 그 오더의 더 옛 대기 줄은 보낼 필요가 없다.
         await db.query(
           `UPDATE shared_sync_outbox SET status = 'superseded', updated_at = NOW()
-            WHERE work_order_id = $1 AND sync_version <= $2 AND status IN ('pending', 'parked')`, [woId, body.sync_version]);
-        if (c.result === 'applied') {
+            WHERE work_order_id = $1 AND sync_version <= $2 AND status IN ('pending', 'parked')
+              AND ($3 = 'full' OR view_scope = 'manager')`, [woId, body.sync_version, scope]);
+        if (c.result === 'applied' && scope === 'full') {
           await db.query(
             `UPDATE work_orders SET intranet_acked_version = GREATEST(COALESCE(intranet_acked_version, 0), $2::bigint) WHERE id = $1`,
             [woId, String(body.sync_version)]);

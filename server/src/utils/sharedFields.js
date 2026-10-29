@@ -18,6 +18,7 @@ const { normalizeReviewTypeMix } = require('./reviewTypeMix');
 const { normalizeDeliveryTypeMix } = require('./deliveryTypeMix');
 const { parsePurchaseTime } = require('./purchaseTimeWindow');
 const { workKindForStore } = require('./workKind');
+const { mapWorkManager, isUndecidedWorkManager } = require('./workManager');
 
 const _str = (v) => (v == null ? '' : String(v));
 const _text = (v) => _str(v).replace(/\r\n?/g, '\n').trim();
@@ -101,6 +102,16 @@ const CANON = {
   distribution: (v) => (_text(v).toLowerCase() === 'sequential' ? 'sequential' : 'balanced'),
   /** 체험단 종류 — 빈 값 = 리뷰(기존 동작). 저장 규칙 `workKindForStore` 를 태운다. */
   workKind: (v) => workKindForStore(v) || 'review',
+  /** 원래 이름/닉네임 별칭을 같은 담당자로 비교한다. 저장값은 각 저장 경로에서 원래 이름으로 정규화한다. */
+  workManager: (v) => {
+    const s = _text(v);
+    if (!s) return '';
+    const nick = mapWorkManager(s);
+    if (nick === '만두') return '박세희';
+    if (nick === '망고') return '박은비';
+    if (isUndecidedWorkManager(s)) return '랜덤';
+    return s.replace(/\s+/g, '').replace(/[()（）\[\]]/g, '');
+  },
 };
 
 /**
@@ -114,7 +125,7 @@ const SHARED_FIELDS = Object.freeze([
   { key: 'title',            owner: 'intranet', canon: 'text',     label: '작업명' },
   { key: 'start_date',       owner: 'intranet', canon: 'date',     label: '희망 시작일' },   // 결정 279 — 리뷰오더 값은 희망 시작일(공고 실제 시작일과 따로 돈다)
   { key: 'manager_name',     owner: 'intranet', canon: 'text',     label: '담당AE' },
-  { key: 'work_manager',     owner: 'intranet', canon: 'text',     label: '작업담당' },
+  { key: 'work_manager',     owner: 'shared',   canon: 'workManager', label: '작업담당' },
   { key: 'sales_id',         owner: 'intranet', canon: 'text',     label: '계약건' },
   { key: 'quote_id',         owner: 'intranet', canon: 'text',     label: '견적' },
   { key: 'contract_number',  owner: 'intranet', canon: 'text',     label: '계약번호' },

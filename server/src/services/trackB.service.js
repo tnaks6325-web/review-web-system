@@ -2541,6 +2541,10 @@ async function listWorkOrders({ sheetId, tabName, limit = 100 } = {}) {
   const lim = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 300);
   const { rows } = await db.query(
     `SELECT w.id, w.title, w.recruit_count AS "recruitCount", w.status, w.created_at AS "createdAt",
+            w.sync_version AS "syncVersion",
+            (COALESCE(w.source_review_order_id, '') <> '' AND w.status <> 'done'
+              AND NOT EXISTS (SELECT 1 FROM recruit_campaigns rc WHERE rc.archived_at IS NOT NULL
+                AND (rc.id = w.linked_campaign_id OR NULLIF(rc.source_work_order_id, '') = w.id))) AS "managerEditCapable",
             l.sheet_id AS "linkSheetId", l.tab_name AS "linkTabName"
        FROM work_orders w
        LEFT JOIN LATERAL (SELECT sheet_id, tab_name FROM trackb_work_order_links
@@ -2550,6 +2554,7 @@ async function listWorkOrders({ sheetId, tabName, limit = 100 } = {}) {
   return rows.map(r => {
     const here = !!(sheetId && r.linkSheetId === sheetId && r.linkTabName === tabName);
     return { id: r.id, title: r.title, recruitCount: r.recruitCount, status: r.status, createdAt: r.createdAt,
+      manager_edit_capable: !!r.managerEditCapable, manager_base_version: Number(r.syncVersion || 0),
       linkedHere: here, linkedElsewhere: !!(r.linkSheetId && !here), linkedTabName: r.linkTabName || null };
   }).sort((a, b) => (b.linkedHere ? 1 : 0) - (a.linkedHere ? 1 : 0));
 }
@@ -3488,22 +3493,15 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       channel: (c && (String(c.channel || '').trim() === '직접입력' ? c.channelCustom : c.channel)) || null,
       productUrl: (wo && wo.productUrl) || null,
       inflowType: (wo && wo.inflowType) || null,
-      /* 담당 2인(사용자 확정 2026-08-24) — 「담당  AE팀 황운하 / 관리자 만두」.
-         ★ 앞 = 그 업체를 맡은 **AE**(`created_by` = 인트라넷에서 오더를 낸 사람).
-           뒤 = 이 작업의 모집·공고를 맡은 **리뷰웹 관리자**(`manager_name`).
-           ⚠ `manager_name` 은 코드 라벨이 "담당AE" 지만 **실제 값은 리뷰웹 관리자**다
-             (본섭 116건 실측: 박세희·박은비·랜덤). 라벨이 틀린 것이지 값이 틀린 게 아니다.
-         ★★ 관리자는 **닉네임**으로 적는다 — 치환은 `adminNickname.service` **단일 출처**
-           (1:1문의가 쓰는 그 맵. 사본을 만들면 두 화면의 이름이 갈린다).
-           `adminNick` = 닉네임(없으면 null) · `adminRaw` = 실명(**내부 전용** — 광고주 렌즈가 폐기).
-           화면은 `adminNick || adminRaw` 한 줄이면 되고, 그러면 **내부는 닉네임||실명 /
-           업체는 닉네임||'관리자'** 두 규율이 카드 한 벌에서 동시에 성립한다.
-         ★ 조회 실패는 빈 맵(fail-soft) — 업체 화면은 `관리자` 로 떨어지고 실명은 여전히 안 나간다. */
+      /* 작업담당은 홈·입금관리와 같은 단일 출처(work_manager 우선·탭 폴백).
+         담당AE(manager_name)를 작업담당으로 읽지 않는다. 알 수 없는 이름은 내부 원문만,
+         광고주 렌즈는 기존대로 별명 없는 실명을 폐기한다. */
       manager: await (async () => {
         const ae = String((wo && wo.createdBy) || '').trim() || null;
-        const raw = String((wo && wo.managerName) || '').trim() || null;
-        let nick = null;
-        if (raw) {
+        const resolved = resolveWorkManager({ orderWorkManager: wo && wo.workManager, tabManager: meta.manager });
+        const raw = String(resolved.manager || '').trim() || null;
+        let nick = require('../utils/workManager').mapWorkManager(raw) || null;
+        if (raw && !nick) {
           try {
             const { getNicknameMap } = require('./adminNickname.service');
             const map = await getNicknameMap();
@@ -3588,7 +3586,7 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
   }
 }
 
-async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertiserId = null, brandId = null, staffName = null, allowAllStaff = false, allowAllWorkdesk = false, archived = false } = {}) {
+async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertiserId = null, brandId = null, staffName = null, allowAllStaff = false, allowAllWorkdesk = false, archived = false, managerEditAllowed = false } = {}) {
   if (!sheetId || !tabName) throw new Error('workdeskTab: sheetId, tabName 필수');
   const db = getPool();
   // 스코프 강제: 일반 호출은 advertiser=소유업체, staff=담당업체다. 작업보드 표 열람만
@@ -3626,17 +3624,18 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
        FROM tab_configs tc WHERE tc.sheet_id=$1 AND tc.tab_name=$2 LIMIT 1`, [sheetId, tabName]);
   const { rows: wo } = await db.query(
     `SELECT id, title, product_option AS "productOption", product_options_json AS "productOptionsJson",
+            source_review_order_id AS "sourceReviewOrderId", bidir_state AS "bidirState", sync_version AS "syncVersion",
+            linked_campaign_id AS "linkedCampaignId",
             pay_amount AS "payAmount", review_fee AS "reviewFee", daily_count AS "dailyCount", daily_count_text AS "dailyCountText",
             purchase_time AS "purchaseTime", inflow_keyword AS "inflowKeyword", inflow_type AS "inflowType",
             inflow_guide AS "inflowGuide", delivery_type AS "deliveryType", courier_proxy AS "courierProxy",
             review_type AS "reviewType", recruit_count AS "recruitCount", review_guide AS "reviewGuide",
             special_notes AS "specialNotes", product_url AS "productUrl", start_date AS "startDate",
-            manager_name AS "managerName", created_by AS "createdBy", status,
+            manager_name AS "managerName", work_manager AS "workManager", created_by AS "createdBy", status,
             goods_cost_type AS "goodsCostType"
        FROM work_orders
-      WHERE deleted_at IS NULL AND ($3::text IS NOT NULL AND id=$3 OR (linked_tab_sheet_id=$1 AND linked_tab_name=$2))
-      ORDER BY ($3::text IS NOT NULL AND id=$3) DESC, created_at DESC LIMIT 1`,
-    [sheetId, tabName, await _effectiveLinkedWorkOrderId(db, sheetId, tabName)]).catch(() => ({ rows: [] }));
+      WHERE deleted_at IS NULL AND linked_tab_sheet_id=$1 AND linked_tab_name=$2
+      ORDER BY created_at DESC LIMIT 1`, [sheetId, tabName]).catch(() => ({ rows: [] }));
   if (wo[0]) wo[0].options = _parseWoOptions(wo[0].productOptionsJson);
   // 명단(활성) — 앵커 도출에 필요한 컬럼 포함
   const { rows: roster } = await db.query(archived
@@ -4215,6 +4214,23 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
      ★ cap 을 모르면(공고 미연결·조회 실패) 아무 표시도 하지 않는다(0 위장 금지).
      ★ 광고주에게도 보인다(사용자 확정) — 다만 `condition` 자체는 종전대로 내부 전용이다. */
   const _cond = await tabConditionSummary(db, { sheetId, tabName, meta: meta[0] || {}, wo: wo[0] || null });
+  // 담당자 빠른 배정은 작업 홈·입금관리와 같은 최신 직접 연결 작업오더를 기준으로만 연다.
+  // 명시 Track B 링크의 오래된 오더를 조건 카드의 담당자로 잘못 편집하지 않는다.
+  if (_cond && wo[0] && showEdits && managerEditAllowed && ['master', 'admin'].includes(role)
+      && String(process.env.BIDIR_HARD_OFF || '').trim() !== '1'
+      && String(wo[0].sourceReviewOrderId || '').trim() && wo[0].status !== 'done') {
+    try {
+      const { rows: archivedManagerCampaigns } = await db.query(
+        `SELECT id FROM recruit_campaigns WHERE archived_at IS NOT NULL
+          AND (id = NULLIF($1, '') OR NULLIF(source_work_order_id, '') = $2) LIMIT 1`,
+        [String(wo[0].linkedCampaignId || ''), String(wo[0].id)]);
+      if (!archivedManagerCampaigns.length) {
+        _cond.managerEdit = { capable: true, workOrderId: wo[0].id, syncVersion: Number(wo[0].syncVersion || 0) };
+      }
+    } catch (e) {
+      logger.warn(`[trackB] 담당자 빠른 배정 권한 확인 실패(편집 숨김): ${e.message}`);
+    }
+  }
   /* 총 모집완료 표기는 시트/무시트 모두 작업 조건의 총건수를 쓴다. 반면 초과행 칠하기는
      시트 기반 과거 표에 오탐을 내지 않도록 종전처럼 무시트에만 한정한다. */
   const _recruitCap = (_cond && Number(_cond.recruitTotal) > 0) ? Number(_cond.recruitTotal) : null;

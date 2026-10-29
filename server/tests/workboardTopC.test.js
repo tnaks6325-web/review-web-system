@@ -389,6 +389,7 @@ t('★ 계산값이라는 사실을 툴팁이 말한다(작업오더 결제합�
   const en = na >= 0 ? (nf >= 0 ? Math.min(na, nf) : na) : nf;
   const sb2 = {
     require: m => require(m.startsWith('.') ? path.join(__dirname, '..', 'src', 'services', m) : m),
+    resolveWorkManager: require('../src/utils/workManager').resolveWorkManager,
     _condWoOptions: () => [],
     logger: { warn() {}, info() {} },
     module: {}, exports: {},
@@ -861,14 +862,18 @@ t('★ 구매시간 행은 일정 바로 아래', (() => {
 
 console.log('\n── K. 담당 2인 행(사용자 확정 2026-08-24) ──');
 /* 「담당  AE팀 황운하 / 관리자 만두」 — 앞은 그 업체를 맡은 AE(`created_by`), 뒤는 이 작업의
-   모집·공고를 맡은 리뷰웹 관리자(`manager_name`). 아픈 자리 셋:
-   ① 닉네임 매핑 사본을 만들면 1:1문의와 이름이 갈린다 → `adminNickname.service` 단일 출처.
+   모집·공고를 맡은 리뷰웹 관리자(work_manager 우선·탭 폴백, 홈/입금관리와 같은 판정).
+   ① 기존 담당AE(manager_name)는 작업담당 재료가 아니다. 별명 규칙은 기존 공통 유틸과
+      adminNickname.service를 재사용한다(사본 금지).
    ② 카드는 한 벌인데 규율이 둘(내부 실명 허용 / 업체 실명 금지) → **서버가 역할별로 다른 값**을
       싣고 화면은 `adminNick || adminRaw` 한 줄만 본다.
    ③ "실명은 있는데 닉네임이 없음" 과 "담당자가 없음" 은 다르다 — 전자를 접으면 담당자가 없는
       작업처럼 보인다. */
 t('★ 서버가 created_by 를 함께 읽는다(AE 이름 재료)',
-  /manager_name AS "managerName", created_by AS "createdBy", status/.test(svc));
+  /manager_name AS "managerName", work_manager AS "workManager", created_by AS "createdBy", status/.test(svc));
+t('★ 작업담당은 담당AE가 아니라 홈·입금관리의 공통 판정',
+  /resolveWorkManager\(\{ orderWorkManager: wo && wo\.workManager, tabManager: meta\.manager \}\)/.test(cond)
+  && !/wo && wo\.managerName/.test(cond));
 t('① 닉네임 치환은 adminNickname.service 단일 출처(사본 금지)', (() => {
   const i = cond.indexOf('manager: await'), blk = cond.slice(i, i + 900);
   return /require\('\.\/adminNickname\.service'\)/.test(blk) && /getNicknameMap\(\)/.test(blk)
@@ -884,7 +889,7 @@ t('★ 닉네임 조회 실패는 fail-soft(업체는 그래도 실명이 안 �
   const i = m.indexOf('const mgrRow='), j = m.indexOf('/* 「일정」', i);
   /* ⚠ 2026-08-24: 브랜드 담당자(135)로 이 블록이 `STATE.brandId`(세션 종류)를 본다 —
      sandbox 에 STATE 를 두고 **브랜드 세션 / 대행사·내부** 두 경우를 각각 실행한다. */
-  const sb = { esc: s => String(s == null ? '' : s), unset: () => '<dd>UNSET</dd>', STATE: { brandId: null } };
+  const sb = { esc: s => String(s == null ? '' : s), unset: () => '<dd>UNSET</dd>', STATE: { brandId: null }, isAdv: false, _cndManagerButtons: () => '' };
   vm.createContext(sb);
   vm.runInContext('this.f=function(cd){' + m.slice(i, j) + 'return mgrRow;};', sb);
   const f = (mgr) => { sb.STATE.brandId = null; return sb.f({ manager: mgr }).replace(/<[^>]+>/g, '|').replace(/\|+/g, '|'); };
