@@ -164,7 +164,7 @@ async function replaceCapture({ sheetId, tabName, rowId, imageBase64, mimeType, 
     }
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
-    try { await driveService.trashFiles([{ id: uploaded.id, name: uploaded.name }]); } catch (_) { /* noop */ }
+    // 결정 305: COMMIT은 성공하고 응답만 끊겼을 수 있다. 확정 여부가 모호하면 새 증빙을 보존한다.
     throw e;
   } finally {
     if (client !== db && typeof client.release === 'function') client.release();

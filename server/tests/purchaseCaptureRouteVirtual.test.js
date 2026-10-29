@@ -4,12 +4,16 @@ const assert = require('assert');
 const pool = require('../src/db/pool');
 const drive = require('../src/services/drive.service');
 const sessions = require('../src/services/purchaseSubmissionSession.service');
+const sse = require('../src/utils/sse');
+const originalEmit = sse.emitImageUpload;
+let notifyThrows = false;
+sse.emitImageUpload = () => { if (notifyThrows) throw new Error('local notification failure'); };
 
 const originalPoolQuery = pool.query;
 const originalDrive = {};
 const originalSessions = {};
 for (const k of ['extractFolderIdFromUrl', 'trashDuplicateFile', 'uploadFileBase64', 'trashFiles']) originalDrive[k] = drive[k];
-for (const k of ['inspectForUpload', 'markUploading', 'completeCapture', 'markFailed']) originalSessions[k] = sessions[k];
+for (const k of ['inspectForUpload', 'markUploading', 'completeCapture', 'completeCapture2', 'markFailed']) originalSessions[k] = sessions[k];
 
 let poolCalls = [], driveCalls = [], failedMarks = [];
 pool.query = async (sql, params) => {
@@ -26,7 +30,7 @@ drive.uploadFileBase64 = async (base64, name, mime, folder) => {
   return { id: 'FILE-1', name, webViewLink: 'view' };
 };
 drive.trashFiles = async files => { driveCalls.push(['trashFiles', files.map(x => x.id)]); return { success: files.length, failed: 0 }; };
-sessions.markUploading = async x => { driveCalls.push(['markUploading', x.sessionId]); return true; };
+sessions.markUploading = async x => { driveCalls.push(['markUploading', x.sessionId]); return { attemptCount: 1 }; };
 sessions.markFailed = async x => { failedMarks.push(x); };
 
 process.env.AI_REVIEW_FOLDER_ID = 'ROOT';
@@ -87,7 +91,7 @@ async function t(name, fn) { poolCalls = []; driveCalls = []; failedMarks = []; 
     const folderQuery = poolCalls.find(x => /SELECT capture_folder_url/.test(x.sql));
     assert.deepEqual(folderQuery.params, ['server-sheet', 'server-tab']);
     assert.equal(completed.orderSubmissionId, request().body.orderSubmissionId);
-    assert.ok(driveCalls.find(x => x[0] === 'upload')[2].includes('__11111111_22222222.jpg'));
+    assert.match(driveCalls.find(x => x[0] === 'upload')[2], /__11111111_22222222__pcv2_[a-f0-9]{32}\.jpg$/);
   });
 
   await t('같은 세션의 동시 업로드는 lease를 못 잡은 요청을 Drive 전에 409로 돌린다', async () => {
@@ -96,7 +100,7 @@ async function t(name, fn) { poolCalls = []; driveCalls = []; failedMarks = []; 
     const r = await invoke(request());
     assert.equal(r.code, 409); assert.equal(r.body.code, 'capture_upload_in_progress');
     assert.equal(driveCalls.filter(x => x[0] === 'upload').length, 0);
-    sessions.markUploading = async x => { driveCalls.push(['markUploading', x.sessionId]); return true; };
+    sessions.markUploading = async x => { driveCalls.push(['markUploading', x.sessionId]); return { attemptCount: 1 }; };
   });
 
   console.log('\n[C] 실패·재시도');
@@ -105,6 +109,7 @@ async function t(name, fn) { poolCalls = []; driveCalls = []; failedMarks = []; 
     drive.uploadFileBase64 = async () => { throw Object.assign(new Error('drive down'), { code: 'drive_down' }); };
     const r = await invoke(request());
     assert.equal(r.body.ok, false); assert.ok(failedMarks.some(x => x.code === 'drive_down'));
+    assert.equal(failedMarks[0].attemptCount, 1, '실패 표시는 이 요청이 획득한 점유 번호를 함께 보낸다');
     drive.uploadFileBase64 = originalDrive.uploadFileBase64;
     drive.uploadFileBase64 = async (base64, name, mime, folder) => {
       driveCalls.push(['upload', folder, name, mime, base64]); return { id: 'FILE-1', name };
@@ -117,12 +122,13 @@ async function t(name, fn) { poolCalls = []; driveCalls = []; failedMarks = []; 
     assert.equal(r.code, 503); assert.equal(r.body.code, 'capture_link_failed'); assert.equal(r.body.retryable, true);
     assert.ok(failedMarks.some(x => x.code === 'db_down'));
   });
-  await t('네트워크 재시도 파일명은 주문ID 기반으로 동일해 중복 파일을 늘리지 않는다', async () => {
+  await t('네트워크 재시도도 독립 파일을 만들고 이름으로 기존 증빙을 지우지 않는다', async () => {
     sessions.inspectForUpload = async () => ({ ok: true, captureSheetId: 's', captureTabName: 't' });
     sessions.completeCapture = async x => ({ ok: true, captureFileId: x.captureFileId });
     await invoke(request()); await invoke(request());
     const names = driveCalls.filter(x => x[0] === 'upload').map(x => x[2]);
-    assert.equal(names.length, 2); assert.equal(names[0], names[1]);
+    assert.equal(names.length, 2); assert.notEqual(names[0], names[1]);
+    assert.equal(driveCalls.filter(x => x[0] === 'trash').length, 0);
   });
   await t('다른 세션이 먼저 완료했으면 이번에 업로드한 패배 파일만 휴지통 처리한다', async () => {
     sessions.inspectForUpload = async () => ({ ok: true, captureSheetId: 's', captureTabName: 't' });
@@ -133,9 +139,50 @@ async function t(name, fn) { poolCalls = []; driveCalls = []; failedMarks = []; 
     assert.equal(r.body.alreadyCompleted, true);
   });
 
+  await t('점유 전에 오류가 나면 다른 요청의 실패 상태를 쓰지 않는다', async () => {
+    sessions.inspectForUpload = async () => { throw new Error('local preflight failure'); };
+    const r = await invoke(request());
+    assert.equal(r.body.ok, false); assert.equal(failedMarks.length, 0); assert.equal(driveCalls.length, 0);
+  });
+  await t('점유를 못 잡았지만 그사이 완료됐으면 승자만 반환한다', async () => {
+    let n = 0;
+    sessions.inspectForUpload = async () => ++n === 1
+      ? { ok: true, captureSheetId: 's', captureTabName: 't' }
+      : { ok: true, alreadyCompleted: true, captureFileId: 'FILE-WINNER' };
+    sessions.markUploading = async () => null;
+    const r = await invoke(request());
+    assert.equal(r.body.ok, true); assert.equal(r.body.fileId, 'FILE-WINNER'); assert.equal(r.body.captureIndex, 1);
+    assert.equal(driveCalls.length, 0); assert.equal(failedMarks.length, 0);
+    sessions.markUploading = async () => ({ attemptCount: 1 });
+  });
+  await t('둘째 장 성공·실패는 첫 장의 점유·실패 상태를 쓰지 않는다', async () => {
+    sessions.inspectForUpload = async () => ({ ok: true, captureSheetId: 's', captureTabName: 't' });
+    sessions.markUploading = async () => { throw new Error('second must not claim'); };
+    sessions.completeCapture2 = async x => ({ ok: true, captureFileId: x.captureFileId });
+    const good = await invoke(request({ captureIndex: 2 }));
+    assert.equal(good.body.ok, true); assert.equal(good.body.captureIndex, 2);
+    assert.match(driveCalls.find(x => x[0] === 'upload')[2], /_2__.*__pcv2_[a-f0-9]{32}\.jpg$/);
+    assert.equal(failedMarks.length, 0);
+    sessions.completeCapture2 = async () => { throw new Error('local second DB failure'); };
+    const bad = await invoke(request({ captureIndex: 2 }));
+    assert.equal(bad.code, 503); assert.equal(failedMarks.length, 0);
+    assert.equal(driveCalls.filter(x => x[0] === 'trash' || x[0] === 'trashFiles').length, 0, 'DB 결과 불명은 파일 보존');
+    sessions.markUploading = async () => ({ attemptCount: 1 });
+  });
+  await t('사진이 연결된 뒤 알림만 실패해도 업로드 성공을 유지한다', async () => {
+    sessions.inspectForUpload = async () => ({ ok: true, captureSheetId: 's', captureTabName: 't' });
+    sessions.completeCapture = async x => ({ ok: true, captureFileId: x.captureFileId });
+    notifyThrows = true;
+    try {
+      const r = await invoke(request());
+      assert.equal(r.body.ok, true); assert.equal(failedMarks.length, 0);
+      assert.equal(driveCalls.filter(x => x[0] === 'trashFiles').length, 0);
+    } finally { notifyThrows = false; }
+  });
   console.log(`\n✅ purchaseCaptureRouteVirtual: ${passed}개 통과`);
 })().catch(err => { console.error('\n❌ ' + err.stack); process.exitCode = 1; }).finally(() => {
   pool.query = originalPoolQuery;
+  sse.emitImageUpload = originalEmit;
   for (const [k, v] of Object.entries(originalDrive)) drive[k] = v;
   for (const [k, v] of Object.entries(originalSessions)) sessions[k] = v;
   delete process.env.AI_REVIEW_FOLDER_ID;
