@@ -15707,7 +15707,7 @@ function _tckHtml(where){
   const cards=list.map((c,i)=>c.status==='done'
     ? `<div class="tck-donerow"><span class="tck-ok">${c.kind==='manager_assignment'?'✓ 리뷰웹 저장 완료':'✓ 처리 완료'}</span><span>${_tckTitle(c.facts)}</span>${c.kind==='manager_assignment'?`<span class="tck-sub">${c.remoteSync==='delivered'?'인트라넷 전달 완료':['pending','processing'].includes(c.remoteSync)?'인트라넷 전달 대기':'인트라넷 전달 상태 확인 필요'}</span>`:''}<span class="tck-sub">${esc(c.doneBy||'')}</span></div>`
     : compact ? _tckRowHtml(c,i) : _tckCardHtml(c,i,where)).join('');
-  return `<div class="tck-wrap">${head}${where==='home'&&STATE.tckManagerError?`<div class="tck-empty">담당자 질문을 불러오지 못했습니다 — 새로고침해 주세요.</div>`:''}${cards}${where==='home'&&STATE.tckManagerMore?'<button type="button" class="btn sm" onclick="_tckLoadManagers(true)">담당자 질문 더 보기</button>':''}</div>`;
+  return `<div class="tck-wrap">${head}${where==='home'&&STATE.tckItems===null?`<div class="tck-empty" role="alert">통장 확인 항목을 불러오지 못했습니다(${esc(STATE.tckError||'')}) — 새로고침해 주세요.</div>`:''}${where==='home'&&STATE.tckManagerError?`<div class="tck-empty">담당자 질문을 불러오지 못했습니다 — 새로고침해 주세요.</div>`:''}${cards}${where==='home'&&STATE.tckManagerMore?'<button type="button" class="btn sm" onclick="_tckLoadManagers(true)">담당자 질문 더 보기</button>':''}</div>`;
 }
 function _tckCardHtml(c,i,where){
   const f=c.facts||{};

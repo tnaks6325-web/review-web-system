@@ -27,6 +27,11 @@ const server=http.createServer((req,res)=>{const u=new URL(req.url,'http://local
   await page.waitForFunction(()=>Array.isArray(STATE.tckManagerItems)&&STATE.tckManagerItems.length===1);
   async function snap(name){await page.waitForTimeout(350);await page.evaluate(()=>{document.getElementById('localFixtureCaption')?.remove();const e=document.createElement('div');e.id='localFixtureCaption';e.textContent='로컬 가짜 데이터 · 운영 저장·전송 없음';e.style.cssText='position:fixed;left:8px;right:8px;'+(innerWidth<=720?'top:100px;':'bottom:8px;')+'z-index:999999;background:#fff3f3;color:#9f1239;border:2px solid #ef4444;padding:8px;font:600 12px sans-serif;pointer-events:none';document.body.append(e);});const f=path.join(out,`${device}-${name}.png`);await page.screenshot({path:f,fullPage:!(device==='mobile'&&['question-open','save-failed'].includes(name))});return f;}
   const captures=[await snap('home-unassigned')];
+  await page.evaluate(()=>{STATE.tckItems=null;STATE.tckError='가짜 통장 조회 실패';_tckPaint();});
+  assert.ok((await page.locator('#tckHomeMount').innerText()).includes('통장 확인 항목을 불러오지 못했습니다'));
+  assert.ok((await page.locator('#tckHomeMount').innerText()).includes('가짜상품 담당자 확인'));
+  captures.push(await snap('partial-bank-failure'));
+  await page.evaluate(bank=>{STATE.tckItems=[bank];STATE.tckError='';_tckPaint();},bank);
   if(device==='mobile'){assert.equal(await page.locator('#tckHomeMount .tck-row').count(),2);await page.locator('#tckHomeMount .tck-row').first().click();await page.locator('#tckSheet.on').waitFor();captures.push(await snap('question-open'));}
   const scope=device==='mobile'?page.locator('#tckSheet'):page.locator('#tckHomeMount');
   fail=true;await scope.getByRole('button',{name:'만두',exact:true}).click();await page.waitForFunction(()=>!Object.keys(STATE.tckManagerSaving||{}).length);assert.equal(question.status,'open');captures.push(await snap('save-failed'));fail=false;
