@@ -30,8 +30,10 @@ function normalizeRequired(v) {
    직원 확인으로 넘어갔다(운영 실측). 글자·숫자만 같으면 같은 지시로 본다. keepSymbols = 필수 글자가 기호뿐일 때의 대비. */
 function _cmpKey(s, digitsOnly, keepSymbols) {
   let t = String(s == null ? '' : s).normalize('NFKC').replace(/\s+/g, '').toLowerCase();
-  if (!keepSymbols) t = t.replace(/[\p{P}\p{S}]/gu, '');
+  // 숫자만인 필수 글자: AI 가 0 을 O·○·〇 로 읽은 것을 **기호를 빼기 전에** 0 으로 바꾼다(○ 는 기호라 먼저 빼면 사라진다 · Codex P2).
   if (digitsOnly) t = t.replace(/[o○〇]/g, '0');
+  // 글자·숫자만 남긴다 — 문장부호·기호뿐 아니라 이모지 꾸밈 문자(U+FE0F 등 표식)도 빠진다(Codex P2: ❤️ 의 꾸밈 문자만 남아 아무 이모지나 통과).
+  if (!keepSymbols) t = t.replace(/[^\p{L}\p{N}]/gu, '');
   return t;
 }
 
@@ -40,7 +42,7 @@ function memoSatisfies(memo, required) {
   const req = normalizeRequired(required);
   if (!req) return true;
   const digitsOnly = /^[0-9\s]+$/.test(req);
-  // 필수 글자가 기호뿐이면(예: ♥♥) 기호를 빼면 비어 버린다 — 그때만 기호까지 그대로 비교한다(아무거나 통과시키지 않게).
+  // 필수 글자에 글자·숫자가 하나도 없으면(예: ♥♥, ❤️) 빼면 비어 버린다 — 그때만 기호까지 그대로 비교한다(아무거나 통과시키지 않게).
   const keep = !_cmpKey(req, digitsOnly, false);
   const want = _cmpKey(req, digitsOnly, keep);
   if (!want) return true;

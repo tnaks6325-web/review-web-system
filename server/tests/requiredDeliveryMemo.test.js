@@ -34,6 +34,9 @@ const rdm = require('../src/services/requiredDeliveryMemo.service');
   assert.ok(!ok('문앞에 보관해주세요!', '문앞에 놓아주세요!'), 'different words still fail');
   assert.ok(ok('(00)', '00') && ok('0-0', '00') && ok('OO!', '00'), 'digits: symbols between/around ignored, O→0 kept');
   assert.ok(ok('부재시 ♥♥', '♥♥') && !ok('부재시', '♥♥'), 'symbol-only required: compared as-is, never pass-all');
+  // Codex P2 2건 — ○ 로 읽힌 0 · 꾸밈 문자가 붙은 이모지
+  assert.ok(ok('○○', '00') && ok('0○', '00') && ok('〇〇 부재시', '00'), 'circle zeros converted before symbols are stripped');
+  assert.ok(ok('부재시 ❤️', '❤️') && !ok('☀️', '❤️') && !ok('부재시', '❤️'), 'emoji-only required: variation selector does not make it pass-all');
 
   assert.deepEqual(rdm.decide({ required: '', memo: '' }), { action: 'none' });
   assert.equal(rdm.decide({ required: '00', memo: '00' }).action, 'ok');
