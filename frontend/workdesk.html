@@ -12280,6 +12280,10 @@ async function _rcLoad(){
   const r=await api('/api/trackb/bidir/reconcile'+(arch?'?archived=1':''));
   if(arch!==!!st.arch) return;   // 불러오는 사이 묶음을 바꿨다 — 옛 묶음 결과로 덮지 않는다
   if(!r||!r.ok){ st.loadError=(r&&r.error)||'불러오지 못했습니다.'; if(STATE.woRecon) _rcRender(); return; }
+  // 결정 312(Codex P1 · 배포 스큐) — 옛 서버는 ?archived=1 을 무시하고 진행 중 목록을 준다. 서버가 마감 묶음이라고 답하지 않으면 아무것도 보여 주지 않는다
+  //   (보여 주면 「공고는 바뀌지 않습니다」 라고 해 놓고 진행 중 공고를 고치게 된다). 항목도 마감 표시가 있는 것만.
+  if(arch && r.archived!==true){ st.items=null; st.loadError='서버가 아직 새 버전이 아닙니다. 잠시 뒤 새로고침해 주세요.'; if(STATE.woRecon) _rcRender(); return; }
+  if(arch) r.items=(r.items||[]).filter(x=>x&&x.archived===true);
   st.loadError='';
   // 지문이 바뀐 작업(그 사이 값이 바뀜)은 고른 것을 버린다 — 옛 차이로 고른 것을 새 차이에 쓰지 않는다
   const prevFp=Object.fromEntries((st.items||[]).map(x=>[x.workOrderId,x.fingerprint]));

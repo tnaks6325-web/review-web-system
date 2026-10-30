@@ -443,7 +443,8 @@ async function _listArchivedReconcile(db) {
     const blocked = plan.blocked || (stuck.length ? `공고 쪽으로 맞출 수 없는 칸이 있어 마감된 공고로는 맞출 수 없습니다: ${stuck.map(f => f.label).join(', ')}` : null);
     items.push({ ...base, fields, fingerprint: plan.fingerprint, blocked, joined: await _joinedCount(db, camp) });
   }
-  return { items, counts: { diverged: items.length } };
+  // archived:true = 화면이 「마감 묶음을 아는 서버」 임을 확인하는 표시(배포 스큐 — 옛 서버는 ?archived=1 을 무시하고 진행 중 목록을 준다 · Codex P1)
+  return { items, counts: { diverged: items.length }, archived: true };
 }
 
 /** 「따로 두기」 표시(결정 284) — 담당자 팝업이 다시 묻지 않는 작업. 칸이 없는 옛 DB = 정하지 않음. */

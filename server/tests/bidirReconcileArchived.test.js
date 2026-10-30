@@ -14,7 +14,7 @@ const OPT_P = [{ name: '탈취제', url: 'https://smartstore.naver.com/x/product
   { option_1: { name: '', value: '블랙' }, label: '블랙', url: '', pay: 15900, count: 5, daily: 1, review_type_mix: [] },
   { option_1: { name: '', value: '화이트' }, label: '화이트', url: '', pay: 21500, count: 12, daily: 2, review_type_mix: [] }] }];
 
-{
+const staticDone = (async () => {
   // 정적 — 보관 공고는 읽기만(완화 금지)
   const sp = fs.readFileSync(require.resolve('../src/services/sharedPatch.service'), 'utf8');
   const sr = fs.readFileSync(require.resolve('../src/services/sharedReconcile.service'), 'utf8');
@@ -29,10 +29,30 @@ const OPT_P = [{ name: '탈취제', url: 'https://smartstore.naver.com/x/product
   const wd = fs.readFileSync(require.resolve('../../frontend/workdesk.html'), 'utf8');
   assert.match(wd, /api\('\/api\/trackb\/bidir\/reconcile'\+\(arch\?'\?archived=1':''\)\)/, '화면은 묶음에 따라 부른다');
   assert.match(wd, /if\(arch!==!!st\.arch\) return;/, '늦게 온 옛 묶음 응답으로 덮지 않는다');
+  // Codex P1(배포 스큐) — 새 화면 + 옛 서버: 서버가 마감 묶음이라고 답하지 않으면 아무것도 안 보여 준다 · 항목도 마감 표시만
+  assert.match(wd, /if\(arch && r\.archived!==true\)\{ st\.items=null;/);
+  assert.match(wd, /if\(arch\) r\.items=\(r\.items\|\|\[\]\)\.filter\(x=>x&&x\.archived===true\);/);
+  assert.match(sr, /return \{ items, counts: \{ diverged: items\.length \}, archived: true \};/, '서버는 마감 묶음임을 답한다');
+  {
+    // vm — _rcLoad 를 옛 서버 응답(마감 표시 없음)과 새 서버 응답으로 실제 실행
+    const vm = require('vm');
+    const start = wd.indexOf('async function _rcLoad(){'); const end = wd.indexOf('\nfunction _rcMgr(', start);
+    const run = async (resp) => {
+      const ctx = { STATE: { woRecon: false, rc: { items: null, picks: {}, arch: true } }, api: async () => resp, $: () => null, _rcRender() {} };
+      ctx._rcState = () => ctx.STATE.rc;
+      vm.createContext(ctx); vm.runInContext(wd.slice(start, end) + '; this.f = _rcLoad;', ctx);
+      await ctx.f(); return ctx.STATE.rc;
+    };
+    const live = { workOrderId: 'w1', fingerprint: 'a', fields: [] };
+    const old = await run({ ok: true, items: [live], counts: { diverged: 1 } });
+    assert.equal(old.items, null, '옛 서버 응답 = 목록 없음'); assert.match(old.loadError, /새 버전이 아닙니다/);
+    const neu = await run({ ok: true, archived: true, items: [{ ...live, workOrderId: 'w2', archived: true }, live] });
+    assert.deepEqual(neu.items.map(x => x.workOrderId), ['w2'], '마감 표시 없는 항목은 버린다');
+  }
   assert.equal((wd.match(/\.\.\.\(it\.archived\?\{ archived:true \}:\{\}\)/g) || []).length, 2, '미리보기·맞추기 둘 다 깃발을 싣는다');
   assert.match(wd, /if\(it\.archived\) return '';   \/\/ 결정 312/, '마감 묶음엔 따로 두기 없음');
-}
-console.log('bidirReconcileArchived: static passed');
+  console.log('bidirReconcileArchived: static passed');
+})();
 
 async function pg() {
   process.env.ORDER_INTAKE_KEY = 'test-intake';
@@ -203,6 +223,7 @@ async function pg() {
 }
 
 (async () => {
+  await staticDone;
   if (process.env.PGTEST_URL) {
     await pg();
     await require('../src/db/pool').end().catch(() => {});
