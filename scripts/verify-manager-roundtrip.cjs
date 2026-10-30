@@ -67,6 +67,7 @@ async function main() {
       purchase_time TEXT NOT NULL DEFAULT '', inflow_keyword TEXT NOT NULL DEFAULT '', inflow_type TEXT NOT NULL DEFAULT '', inflow_guide TEXT NOT NULL DEFAULT '',
       guide_images TEXT NOT NULL DEFAULT '', thumbnail_url TEXT NOT NULL DEFAULT '', required_delivery_memo TEXT NOT NULL DEFAULT '',
       delivery_type TEXT NOT NULL DEFAULT '', courier_proxy BOOLEAN NOT NULL DEFAULT FALSE, review_type TEXT NOT NULL DEFAULT '',
+      delivery_type_mix TEXT NOT NULL DEFAULT '', recall_courier TEXT NOT NULL DEFAULT '', recall_product TEXT NOT NULL DEFAULT '',
       review_type_mix JSONB NOT NULL DEFAULT '[]', recruit_count INTEGER NOT NULL DEFAULT 0, review_guide TEXT NOT NULL DEFAULT '',
       special_notes TEXT NOT NULL DEFAULT '', product_url TEXT NOT NULL DEFAULT '', work_sheet_url TEXT NOT NULL DEFAULT '', goods_cost_type TEXT NOT NULL DEFAULT '',
       manager_name TEXT NOT NULL DEFAULT '', skip_weekends BOOLEAN, holidays TEXT, work_kind TEXT NOT NULL DEFAULT 'review', memo_log JSONB NOT NULL DEFAULT '[]',
@@ -74,7 +75,7 @@ async function main() {
       intranet_advertiser_business_number TEXT NOT NULL DEFAULT '', sales_id TEXT NOT NULL DEFAULT '', quote_id TEXT NOT NULL DEFAULT '',
       contract_number TEXT NOT NULL DEFAULT '', intranet_advertiser_id TEXT NOT NULL DEFAULT '', purchase_channel_custom BOOLEAN NOT NULL DEFAULT FALSE
     );
-    CREATE TABLE recruit_campaigns (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', source_work_order_id TEXT NOT NULL DEFAULT '', archived_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+    CREATE TABLE recruit_campaigns (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', source_work_order_id TEXT NOT NULL DEFAULT '', linked_sheet_id TEXT NOT NULL DEFAULT '', linked_tab_name TEXT NOT NULL DEFAULT '', archived_at TIMESTAMPTZ, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
     CREATE TABLE work_order_shared_snapshots (work_order_id TEXT NOT NULL, sync_version BIGINT NOT NULL, origin TEXT NOT NULL, op_id TEXT NOT NULL DEFAULT '', state JSONB NOT NULL, actor TEXT NOT NULL DEFAULT '', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(work_order_id,sync_version));
     CREATE TABLE shared_sync_outbox (id BIGSERIAL PRIMARY KEY, work_order_id TEXT NOT NULL, sync_version BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', attempts INT NOT NULL DEFAULT 0, next_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), last_error TEXT NOT NULL DEFAULT '', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE(work_order_id,sync_version));
     CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT);
@@ -166,6 +167,85 @@ async function main() {
   const dbRow = async id => (await db.query('SELECT * FROM work_orders WHERE id=$1', [id])).rows[0];
   const d1row = async id => sqlite.prepare('SELECT * FROM review_orders WHERE id=?').get(id);
 
+  // Legacy production shape: both DB series blank, original saved payload omits all lineage fields.
+  // The REAL Hono revision builder fills series with source.id; the REAL RWS handler must accept
+  // this equivalent first-round v1 identity without backfilling either DB lineage column.
+  {
+    const id = 'legacy-omitted-lineage';
+    const payload = await seed(id, 'off');
+    for (const key of ['work_series_id', 'work_round', 'workboard_schema_version']) delete payload[key];
+    payload.source_revision = 1;
+    await db.query(`UPDATE work_orders SET work_series_id='',source_revision=1 WHERE id=$1`, [id]);
+    sqlite.prepare(`UPDATE review_orders SET work_series_id='',source_revision=1,payload_json=? WHERE id=?`).run(JSON.stringify(payload), id);
+    const response = await api.request(`/review-order/source/${id}`, new Request(`http://inadd.local/review-order/source/${id}`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ requester_username: 'fake-owner', work_manager: '랜덤', bidir: { manager: 1, base_sync_version: 10 } }),
+    }), { DB: D1, REVIEW_MEMO_KEY: 'local-review-key', REVIEW_INTAKE_KEY: 'local-intake-key', REVIEW_API_BASE: 'http://rws.local' });
+    const result = await response.json();
+    assert.equal(response.status, 200, `legacy actual Hono builder -> outbox -> actual RWS save: ${JSON.stringify(result)}`);
+    const sent = officialIntakeBodies.at(-1);
+    assert.equal(sent.work_series_id, id, 'real builder synthesizes its own source ID');
+    assert.equal(sent.work_round, 1); assert.equal(sent.workboard_schema_version, 1);
+    assert.equal((await dbRow(id)).work_manager, '랜덤');
+    assert.equal((await dbRow(id)).source_revision, 2);
+    assert.equal((await dbRow(id)).work_series_id, '', 'comparison must not backfill RWS lineage');
+    assert.equal((await d1row(id)).work_series_id, '', 'comparison must not backfill intranet lineage');
+    assert.equal((await d1row(id)).source_revision, 2);
+    assert.equal((await d1row(id)).remote_sync_version, 0);
+    assert.equal(sqlite.prepare('SELECT status FROM review_order_outbox WHERE review_order_id=?').get(id).status, 'sent');
+    const stable = JSON.stringify(await dbRow(id));
+    for (const [change, expectedStatus, expectedCode] of [
+      [{}, 200, undefined],
+      [{ work_series_id: '' }, 200, undefined],
+      [{ work_series_id: undefined, work_round: undefined, workboard_schema_version: undefined }, 200, undefined],
+      [{ idempotency_key: 'different-key-same-revision' }, 409, 'revision_already_applied'],
+      [{ source_revision: 4, idempotency_key: 'skip-revision' }, 409, 'revision_gap'],
+      [{ source_revision: 1, idempotency_key: 'old-revision' }, 409, 'revision_stale'],
+      [{ work_series_id: 'foreign-series' }, 409, 'work_round_immutable'],
+      [{ work_round: 2 }, 409, 'work_round_immutable'],
+      [{ source_review_order_id: 'foreign-source' }, 400, undefined],
+    ]) {
+      const replay = await invokeRwsIntake({ ...sent, ...change }, id);
+      const body = await replay.json();
+      assert.equal(replay.status, expectedStatus, JSON.stringify(body));
+      assert.equal(body.code, expectedCode);
+      assert.equal(JSON.stringify(await dbRow(id)), stable, 'rejected/replayed legacy input writes nothing');
+    }
+    console.log('legacy omitted payload -> actual Hono revision/outbox -> actual RWS save + guarded replay: PASS');
+  }
+
+  // Retained pre-fix failed revision: use the exact stored body/key, not a new revision or edit.
+  {
+    const id = 'legacy-retained-failed-revision';
+    await seed(id, 'off');
+    const payload = { ...basePayload(id, '랜덤'), source_revision: 2, work_series_id: id,
+      idempotency_key: `${id}:2:retainedhash`, bidir: { manager: 1, base_sync_version: 10 } };
+    const serialized = JSON.stringify(payload);
+    await db.query(`UPDATE work_orders SET work_series_id='',source_revision=1,work_manager='랜덤' WHERE id=$1`, [id]);
+    sqlite.prepare(`UPDATE review_orders SET work_series_id='',source_revision=2,status='failed',payload_json=? WHERE id=?`).run(serialized, id);
+    sqlite.prepare(`INSERT INTO review_order_outbox(id,review_order_id,source_revision,idempotency_key,payload_json,status,created_at,updated_at) VALUES(?,?,2,?,?,'failed',?,?)`).run('fake-retained-outbox', id, payload.idempotency_key, serialized, Date.now(), Date.now());
+    await db.query(`INSERT INTO shared_sync_outbox(work_order_id,sync_version,view_scope) VALUES($1,10,'manager')`, [id]);
+    const held = await pushOnce();
+    assert.equal(held.retry, 1, 'failed origin holds earlier manager outbox');
+    const retry = await api.request(`/review-order/source/${id}/retry`, new Request(`http://inadd.local/review-order/source/${id}/retry`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requester_username: 'fake-owner' }),
+    }), { DB: D1, REVIEW_MEMO_KEY: 'local-review-key', REVIEW_INTAKE_KEY: 'local-intake-key', REVIEW_API_BASE: 'http://rws.local' });
+    assert.equal(retry.status, 200, JSON.stringify(await retry.json()));
+    const outbox = sqlite.prepare('SELECT * FROM review_order_outbox WHERE review_order_id=?').get(id);
+    assert.equal(outbox.status, 'sent'); assert.equal(outbox.source_revision, 2);
+    assert.equal(outbox.payload_json, serialized, 'formal retry preserves saved body and hash/key');
+    assert.equal((await dbRow(id)).source_revision, 2);
+    assert.equal((await dbRow(id)).work_series_id, '');
+    assert.equal((await dbRow(id)).work_manager, '랜덤');
+    assert.equal((await d1row(id)).status, 'sent');
+    assert.equal((await d1row(id)).remote_manager_sync_version, Number((await dbRow(id)).sync_version));
+    assert.equal((await d1row(id)).remote_sync_version, 0);
+    await db.query(`UPDATE shared_sync_outbox SET next_at=NOW() WHERE work_order_id=$1`, [id]);
+    assert.equal((await pushOnce()).delivered, 1, 'old held manager message completes after retry');
+    assert.equal(JSON.parse((await d1row(id)).payload_json).work_manager, '랜덤');
+    console.log('legacy retained failed revision -> official retry -> source2 + manager watermark + held queue recovery: PASS');
+  }
+
   // RWS -> Intranet: one manager-only OFF delivery and one ON full shared edit; official admin editor, real outbox/pusher, signed Hono receiver.
   for (const [id, state, target, withUnrelated] of [['rws-to-inadd-off','off','박은비',false], ['rws-to-inadd-prepublish','prepublish','박은비',false], ['rws-to-inadd-diverged','diverged','박은비',false], ['rws-to-inadd-separate','separate','박은비',false], ['rws-to-inadd-on','on','랜덤',true]]) {
     await seed(id, state);
@@ -252,6 +332,9 @@ async function main() {
   for (const loseResponse of [false, true]) {
     const id = `manager-ack-${loseResponse}`;
     const payload = await seed(id, 'off');
+    for (const key of ['work_series_id', 'work_round', 'workboard_schema_version']) delete payload[key];
+    await db.query(`UPDATE work_orders SET work_series_id='' WHERE id=$1`, [id]);
+    sqlite.prepare(`UPDATE review_orders SET work_series_id='',payload_json=? WHERE id=?`).run(JSON.stringify(payload), id);
     const changed = await requestFor(handler, { id, manager_capable: 1, manager_base_version: 10, work_manager: '박은비' });
     assert.equal(changed.statusCode, 200);
     const delayed = pusher.buildPushBody(await dbRow(id), 'manager');
@@ -301,7 +384,7 @@ async function main() {
   assert.ok(fetchLog.every(x => x.host === 'inadd.local' || x.host === 'rws.local'), 'network adapter saw local hosts only');
   assert.ok(fetchLog.some(x => x.path === '/review-order/webhook'), 'RWS -> Intranet crossed signed webhook route');
   assert.ok(fetchLog.some(x => /^\/api\/order\/intake\/source\//.test(x.path)), 'Intranet -> RWS crossed official source handler');
-  console.log(JSON.stringify({ result: 'PASS', cases: ['RWS->Intranet OFF/prepublish/diverged/separate manager scope','RWS->Intranet ON full shared edit + unrelated field','signed replay/reordered stale protection','held then convergence','Intranet PUT->RWS OFF/ON actual revision/outbox/official intake','same revision hash conflict','manager source acknowledgement blocks delayed old push + response-loss retry','durable retry after injected network failure'], network: fetchLog, note: 'All DBs in memory; all fetches restricted to explicit loopback adapters.' }, null, 2));
+  console.log(JSON.stringify({ result: 'PASS', cases: ['legacy omitted payload -> actual Hono revision/outbox -> RWS save; no lineage rewrite; replay/hash/gap/foreign identity guards','legacy retained failed revision -> official retry -> source2 and held manager queue recovery','RWS->Intranet OFF/prepublish/diverged/separate manager scope','RWS->Intranet ON full shared edit + unrelated field','signed replay/reordered stale protection','held then convergence','Intranet PUT->RWS OFF/ON actual revision/outbox/official intake','same revision hash conflict','manager source acknowledgement blocks delayed old push + response-loss retry','durable retry after injected network failure'], network: fetchLog, note: 'All DBs in memory; all fetches restricted to explicit loopback adapters.' }, null, 2));
   await db.close(); sqlite.close();
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
