@@ -109,7 +109,29 @@ function normalizeReviewOrderSourceContract(input) {
   };
 }
 
+/** Compare immutable lineage without rewriting either stored lineage or the incoming payload.
+ * Legacy v1 round-one senders now synthesize their own source ID for an empty series.
+ * Only that one-way representation change is equivalent; foreign series/rounds/v2 are not.
+ * Callers must still enforce schema, authenticated path identity, revision and content-key guards.
+ */
+function sourceWorkLineageMatches(current, source) {
+  const currentRound = Number(current.work_round || 1);
+  const incomingRound = Number(source.workRound || 1);
+  if (currentRound !== incomingRound) return false;
+  const currentSeries = String(current.work_series_id || '');
+  const incomingSeries = String(source.workSeriesId || '');
+  if (currentSeries === incomingSeries) return true;
+  return Number(current.workboard_schema_version || 1) === 1
+    && source.workboardSchemaVersion === 1
+    && currentRound === 1
+    && currentSeries === ''
+    && !!source.sourceReviewOrderId
+    && current.source_review_order_id === source.sourceReviewOrderId
+    && incomingSeries === source.sourceReviewOrderId;
+}
+
 module.exports = {
   SourceContractError,
   normalizeReviewOrderSourceContract,
+  sourceWorkLineageMatches,
 };
