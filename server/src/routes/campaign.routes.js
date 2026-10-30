@@ -3525,12 +3525,24 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
     /* ★ 양방향 4단계-3(결정 275 · 사용자 확정 D1): 인트라넷 오더로 만든 새 공고는 옵션까지 저장된 뒤 바로 연결을 판정한다 —
        값이 같으면 'on'(이후 양쪽 수정이 서로 맞춰짐), 다르면 'diverged'(직원이 쪽을 고를 때까지 종전 동작).
        스위치(in2rw)가 off 면 하지 않는다(전부 꺼짐 = 오늘 동작). fail-soft — 실패해도 공고 발행은 성공. */
+    /* ★★ 결정 313(사용자 확정 2026-10-30 「1.가」): 다르면(발행 창에서 상품 이름·구매시간 등을 고쳤다) 오더를 **공고 값으로** 맞추고 연결한다 —
+       담당자 팝업 [공고대로 맞추기] 와 같은 판정·같은 저장 길(reconcileOnPublish). 스위치 publish_reconcile 이 on 일 때만.
+       못 맞추면 아무것도 바꾸지 않고 diverged 그대로 + 이유(autoReason)를 실어 발행 창이 그 자리에서 알린다. */
     let bidirLink = null;
     if (_srcWoId) {
       try {
-        if ((await require('../utils/bidirSwitch').readBidirSwitch(pool)).in2rw !== 'off') {
+        const bsw = await require('../utils/bidirSwitch').readBidirSwitch(pool);
+        if (bsw.in2rw !== 'off') {
           const lk = await require('../services/sharedPatch.service').linkSharedOrder({ workOrderId: _srcWoId, actor: req.admin?.name || '공고 발행' });
           bidirLink = { state: lk.body.state || '', code: lk.body.code || '' };
+          if (bidirLink.state === 'diverged' && bsw.publish_reconcile === 'on') {
+            let ar;
+            try { ar = await require('../services/sharedReconcile.service').reconcileOnPublish({ workOrderId: _srcWoId, campaignId: rows[0].id, actor: req.admin?.name || '공고 발행' }); }
+            catch (e) { ar = { ok: false, code: 'reconcile_error', reason: '맞추는 중 오류가 났습니다', labels: [] }; logger.warn(`[campaign/create] 발행 자동 맞추기 실패(공고는 발행됨): ${e.message}`); }
+            bidirLink = ar.ok ? { state: 'on', code: '', autoReconciled: true, labels: ar.labels }
+              : { state: 'diverged', code: ar.code || '', autoReconciled: false, autoReason: ar.reason || '', labels: ar.labels || [] };
+            logger.info(`[campaign/create] ${rows[0].id} 발행 자동 맞추기 ${ar.ok ? '완료' : '못 함(' + (ar.code || '') + ')'}: ${(ar.labels || []).join(', ')}`);
+          }
         }
       } catch (e) { logger.warn(`[campaign/create] 양방향 연결 판정 실패(공고는 발행됨): ${e.message}`); }
     }
