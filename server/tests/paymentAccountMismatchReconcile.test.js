@@ -1,7 +1,10 @@
 'use strict';
 const assert = require('assert');
+const crypto = require('crypto');
 const svc = require('../src/services/paymentResult.service');
 const paymentApply = require('../src/services/paymentApply.service');
+const proofBlob = Buffer.from('synthetic account proof');
+const proofSha = crypto.createHash('sha256').update(proofBlob).digest('hex');
 
 const BATCH_ID = '00000000-0000-0000-0000-000000000008';
 const UPLOAD_ID = '00000000-0000-0000-0000-000000000010';
@@ -37,7 +40,15 @@ function makeHarness({ failRecord = false, alreadyPaid = false } = {}) {
       state.transactionSnapshot = null; state.rolledBack++;
       return { rows: [], rowCount: 0 };
     }
-    if (/SELECT \* FROM payment_batches WHERE id/.test(text)) return { rows: [{ id: BATCH_ID, status: 'applied' }], rowCount: 1 };
+    if (/SELECT id, batch_id, file_blob, file_sha256[\s\S]*FROM payment_result_uploads WHERE id/.test(text)) return { rows: [{ id: UPLOAD_ID, batch_id: BATCH_ID, file_blob: proofBlob, file_sha256: proofSha }], rowCount: 1 };
+    if (/pg_advisory_xact_lock/.test(text)) return { rows: [], rowCount: 0 };
+    if (/SELECT id, batch_id, file_format, file_blob, file_sha256, applied/.test(text)) return { rows: [{ id: UPLOAD_ID, batch_id: BATCH_ID, file_format: 'xlsx', file_blob: proofBlob, file_sha256: proofSha, applied: false }], rowCount: 1 };
+    if (/FROM unconfirmed_transfer_reviews WHERE upload_id::text/.test(text)) return { rows: [], rowCount: 0 };
+    if (/FROM payment_account_mismatch_reconciliations WHERE upload_id::text/.test(text)) return { rows: [], rowCount: 0 };
+    if (/FROM payment_amount_mismatch_reconciliations WHERE upload_id::text/.test(text)) return { rows: [], rowCount: 0 };
+    if (/JOIN payment_batch_items i ON i.batch_id = u.batch_id/.test(text)) return { rows: [], rowCount: 0 };
+    if (/FROM payment_records WHERE source_key/.test(text)) return { rows: [], rowCount: 0 };
+    if (/SELECT \* FROM payment_batches WHERE id/.test(text)) return { rows: [{ id: BATCH_ID, status: 'applied', historical_key: null }], rowCount: 1 };
     if (/SELECT summary FROM payment_result_uploads/.test(text)) return { rows: [upload], rowCount: 1 };
     if (/SELECT \* FROM payment_batch_items WHERE batch_id/.test(text)) return { rows: [state.item], rowCount: 1 };
     if (/SELECT COALESCE\(tc\.workboard_schema_version, 1\) AS schema_version/.test(text)) {

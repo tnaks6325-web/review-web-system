@@ -79,9 +79,9 @@ async function recordDeposits(client, items, opts = {}) {
     if (item.feeOnly === true) {
       const paidAt = item.paidAt || opts.paidAt || null;
       await client.query(
-        `INSERT INTO payment_records (sheet_id, tab_name, reviewer_name, row_index, amount, paid_by, paid_at)
-         VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::timestamptz, NOW()))`,
-        [item.sheetId, item.tabName, item.reviewerName || '', rowIndex, item.amount || '', by, paidAt]);
+        `INSERT INTO payment_records (sheet_id, tab_name, reviewer_name, row_index, amount, paid_by, paid_at, source_key)
+         VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::timestamptz, NOW()), $8)`,
+        [item.sheetId, item.tabName, item.reviewerName || '', rowIndex, item.amount || '', by, paidAt, item.sourceKey || null]);
       updated += 1;
       if (appliedItems) appliedItems.push(item);
       continue;

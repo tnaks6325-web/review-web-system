@@ -1,8 +1,11 @@
 'use strict';
 const assert = require('assert');
 const fs = require('fs');
+const crypto = require('crypto');
 const svc = require('../src/services/paymentResult.service');
 const paymentApply = require('../src/services/paymentApply.service');
+const proofBlob = Buffer.from('synthetic amount proof');
+const proofSha = crypto.createHash('sha256').update(proofBlob).digest('hex');
 
 const BATCH_ID = '00000000-0000-4000-8000-000000000201';
 const UPLOAD_ID = '00000000-0000-4000-8000-000000000202';
@@ -30,7 +33,15 @@ function harness({ failRecord = false } = {}) {
       if (state.snapshot) Object.assign(state, state.snapshot);
       state.snapshot = null; state.rolledBack++; return { rows: [], rowCount: 0 };
     }
-    if (/SELECT \* FROM payment_batches WHERE id/.test(text)) return { rows: [{ id: BATCH_ID, status: 'applied' }] };
+    if (/SELECT id, batch_id, file_blob, file_sha256[\s\S]*FROM payment_result_uploads WHERE id/.test(text)) return { rows: [{ id: UPLOAD_ID, batch_id: BATCH_ID, file_blob: proofBlob, file_sha256: proofSha }] };
+    if (/pg_advisory_xact_lock/.test(text)) return { rows: [], rowCount: 0 };
+    if (/SELECT id, batch_id, file_format, file_blob, file_sha256, applied/.test(text)) return { rows: [{ id: UPLOAD_ID, batch_id: BATCH_ID, file_format: 'xlsx', file_blob: proofBlob, file_sha256: proofSha, applied: false }] };
+    if (/FROM unconfirmed_transfer_reviews WHERE upload_id::text/.test(text)) return { rows: [] };
+    if (/FROM payment_account_mismatch_reconciliations WHERE upload_id::text/.test(text)) return { rows: [] };
+    if (/FROM payment_amount_mismatch_reconciliations WHERE upload_id::text/.test(text)) return { rows: [] };
+    if (/JOIN payment_batch_items i ON i.batch_id = u.batch_id/.test(text)) return { rows: [] };
+    if (/FROM payment_records WHERE source_key/.test(text)) return { rows: [] };
+    if (/SELECT \* FROM payment_batches WHERE id/.test(text)) return { rows: [{ id: BATCH_ID, status: 'applied', historical_key: null }] };
     if (/SELECT summary, file_blob, file_name FROM payment_result_uploads/.test(text)) return { rows: [upload] };
     if (/SELECT \* FROM payment_batch_items WHERE batch_id/.test(text)) return { rows: [{ ...item, status: state.status }] };
     if (/WITH targets AS/.test(text)) return { rows: [{

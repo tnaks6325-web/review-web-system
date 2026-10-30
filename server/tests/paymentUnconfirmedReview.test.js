@@ -2,7 +2,10 @@
 
 const assert = require('assert');
 const fs = require('fs');
+const crypto = require('crypto');
 const svc = require('../src/services/paymentResult.service');
+const proofBlob = Buffer.from('synthetic transfer proof for unit test');
+const proofSha = crypto.createHash('sha256').update(proofBlob).digest('hex');
 
 assert.equal(typeof svc.reviewUnconfirmedTransfer, 'function',
   '미확인 이체의 행별 검토를 기록하는 서비스가 필요하다');
@@ -42,7 +45,16 @@ const client = {
   async query(sql) {
     queries.push(sql);
     if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rows: [] };
-    if (/SELECT id, status FROM payment_batches/.test(sql)) return { rows: [{ id: 'batch-1', status: 'created' }] };
+    if (/SELECT historical_key FROM payment_batches/.test(sql)) return { rows: [{ historical_key: null }] };
+    if (/SELECT id, batch_id, file_blob, file_sha256/.test(sql)) return { rows: [{ id: 'upload-1', batch_id: 'batch-1', file_blob: proofBlob, file_sha256: proofSha }] };
+    if (/pg_advisory_xact_lock/.test(sql)) return { rows: [] };
+    if (/SELECT id, batch_id, file_format, file_blob, file_sha256, applied/.test(sql)) return { rows: [{ id: 'upload-1', batch_id: 'batch-1', file_format: 'xlsx', file_blob: proofBlob, file_sha256: proofSha, applied: false }] };
+    if (/FROM unconfirmed_transfer_reviews WHERE upload_id::text/.test(sql)) return { rows: [] };
+    if (/FROM payment_account_mismatch_reconciliations WHERE upload_id::text/.test(sql)) return { rows: [] };
+    if (/FROM payment_amount_mismatch_reconciliations WHERE upload_id::text/.test(sql)) return { rows: [] };
+    if (/JOIN payment_batch_items i ON i.batch_id = u.batch_id/.test(sql)) return { rows: [] };
+    if (/FROM payment_records WHERE source_key/.test(sql)) return { rows: [] };
+    if (/SELECT id, status, historical_key FROM payment_batches/.test(sql)) return { rows: [{ id: 'batch-1', status: 'created', historical_key: null }] };
     if (/SELECT summary.*FROM payment_result_uploads/.test(sql)) return { rows: [{ summary: { preview: { unmatchedResults: [
       { seq: 8, memo: '테스트입금명', holder: '황민정', amount: 20300, success: true, transferredAt: '2026.08.19 10:00' },
     ] } } }] };
@@ -88,7 +100,16 @@ const client = {
     async query(sql) {
       duplicateQueries.push(sql);
       if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rows: [] };
-      if (/SELECT id, status FROM payment_batches/.test(sql)) return { rows: [{ id: 'batch-1', status: 'created' }] };
+      if (/SELECT historical_key FROM payment_batches/.test(sql)) return { rows: [{ historical_key: null }] };
+      if (/SELECT id, batch_id, file_blob, file_sha256/.test(sql)) return { rows: [{ id: 'upload-1', batch_id: 'batch-1', file_blob: proofBlob, file_sha256: proofSha }] };
+      if (/pg_advisory_xact_lock/.test(sql)) return { rows: [] };
+      if (/SELECT id, batch_id, file_format, file_blob, file_sha256, applied/.test(sql)) return { rows: [{ id: 'upload-1', batch_id: 'batch-1', file_format: 'xlsx', file_blob: proofBlob, file_sha256: proofSha, applied: false }] };
+      if (/FROM unconfirmed_transfer_reviews WHERE upload_id::text/.test(sql)) return { rows: [] };
+      if (/FROM payment_account_mismatch_reconciliations WHERE upload_id::text/.test(sql)) return { rows: [] };
+      if (/FROM payment_amount_mismatch_reconciliations WHERE upload_id::text/.test(sql)) return { rows: [] };
+      if (/JOIN payment_batch_items i ON i.batch_id = u.batch_id/.test(sql)) return { rows: [] };
+      if (/FROM payment_records WHERE source_key/.test(sql)) return { rows: [] };
+      if (/SELECT id, status, historical_key FROM payment_batches/.test(sql)) return { rows: [{ id: 'batch-1', status: 'created', historical_key: null }] };
       if (/SELECT summary.*FROM payment_result_uploads/.test(sql)) return { rows: [{ summary: { preview: { unmatchedResults: [
         { seq: 9, memo: '테스트입금명', holder: '김윤경', amount: 20300, success: true },
       ] } } }] };

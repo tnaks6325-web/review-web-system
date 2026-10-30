@@ -37,6 +37,7 @@ let paymentApply = require('./paymentApply.service');
 const { recordDeposits } = paymentApply;
 function __setPaymentApplyForTest(v) { paymentApply = v || require('./paymentApply.service'); }
 const { rebuildLedgers } = require('./sheetlessLedger.service');
+const paymentProof = require('./paymentProof.service');
 
 const MAX_BASE64 = 16 * 1024 * 1024;   // base64 는 원본의 약 1.34배 — 12MB 파일까지 수용
 
@@ -324,6 +325,7 @@ function _adminUnconfirmedAccountPreview(preview, rows) {
 
 /** 미리보기는 입금·실패 상태를 전혀 바꾸지 않는다. 마스킹된 화면 보관본만 감사 이력에 남긴다. */
 async function previewResultFile({ batchId, fileName, base64, by }) {
+  await paymentProof.assertBatchNotHistoryOnly(_db(), batchId);
   const a = await _analyze(batchId, fileName, base64);
   const preview = _previewArchive(a);
   const fileBlob = Buffer.from(a.fileBuffer);
@@ -345,7 +347,6 @@ async function previewResultFile({ batchId, fileName, base64, by }) {
   };
 }
 
-/** 가장 최근의 저장된 결과 확인본. 원문 파일·전체 계좌번호는 절대 되돌려 주지 않는다. */
 async function _hasAppliedFileSha256(fileSha256) {
   const { rows } = await _db().query(
     `SELECT id FROM payment_result_uploads
@@ -392,6 +393,7 @@ async function findBatchForResultFile({ fileName, base64 }) {
     `SELECT b.id, b.seq, b.status, i.bank_account, i.amount, i.status AS item_status
        FROM payment_batches b JOIN payment_batch_items i ON i.batch_id = b.id
       WHERE b.bank = $1 AND b.status <> 'cancelled' AND i.status <> 'cancelled'
+        AND COALESCE(b.historical_key, '') NOT LIKE 'historical-fee:%'
         AND b.created_at >= NOW() - make_interval(days => $2)
         AND ($3::timestamptz IS NULL OR b.created_at <= $3::timestamptz)`,
     [parse.bank, RESULT_FIND_DAYS, createdBefore]);
@@ -424,8 +426,11 @@ async function findBatchForResultFile({ fileName, base64 }) {
 /** Store every upload for audit, but change payment state only when the
  * explicitly approved auto-apply policy says the file belongs to this batch. */
 async function autoApplyResultFile({ batchId, fileName, base64, by, notifyFailed }) {
+  await paymentProof.assertBatchNotHistoryOnly(_db(), batchId);
   const a = await _analyze(batchId, fileName, base64);
   const fileSha256 = crypto.createHash('sha256').update(a.fileBuffer).digest('hex');
+  // Preserve the existing automatic-upload whole-file duplicate policy.
+  // Explicit proof consumers additionally check exact rows under the SHA lock.
   const duplicateApplied = await _hasAppliedFileSha256(fileSha256);
   const autoApply = decideAutoApply({ summary: a.summary, duplicateApplied });
   const preview = await previewResultFile({ batchId, fileName, base64, by });
@@ -758,8 +763,13 @@ async function reviewUnconfirmedTransfer({ batchId, uploadId, memo, sheetId, tab
   let response;
   try {
     await client.query('BEGIN');
-    const { rows: [batch] } = await client.query('SELECT id, status FROM payment_batches WHERE id = $1 FOR UPDATE', [batchId]);
+    await paymentProof.assertBatchNotHistoryOnly(client, batchId);
+    const proof = await paymentProof.lockUploadProof(client, { uploadId, batchId });
+    await paymentProof.lockFileProof(client, proof.sha);
+    await paymentProof.assertProofUnused(client, { ...proof, resultSeq: Number(resultSeq) });
+    const { rows: [batch] } = await client.query('SELECT id, status, historical_key FROM payment_batches WHERE id = $1 FOR UPDATE', [batchId]);
     if (!batch) throw new ResultError('not_found', '대량이체를 찾을 수 없습니다.');
+    if (paymentProof.isHistoryOnlyKey(batch.historical_key)) throw new ResultError('history_only', '과거 입금 기록은 결과를 처리할 수 없습니다.');
     if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 대량이체는 대조할 수 없습니다.');
     const match = await inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, tabName, db: client });
     const result = match.results.find(x => Number(x.seq) === Number(resultSeq));
@@ -857,6 +867,13 @@ async function updateDuplicatePaymentCase({ caseId, caseStatus, ownerName, dueAt
   const client = await _db().connect();
   try {
     await client.query('BEGIN');
+    const { rows: [owner] } = await client.query(
+      `SELECT b.historical_key FROM duplicate_payment_cases c
+       JOIN unconfirmed_transfer_reviews r ON r.id = c.review_id
+       JOIN payment_batches b ON b.id = r.batch_id WHERE c.id = $1 FOR UPDATE OF b`, [caseId]);
+    if (owner && paymentProof.isHistoryOnlyKey(owner.historical_key)) {
+      throw new ResultError('history_only', '과거 입금 기록에 연결된 후속 관리는 수정할 수 없습니다.');
+    }
     const { rows: [current] } = await client.query('SELECT * FROM duplicate_payment_cases WHERE id = $1 FOR UPDATE', [caseId]);
     if (!current) throw new ResultError('not_found', '중복입금 후속관리 건을 찾을 수 없습니다.');
     const { rows: [updated] } = await client.query(
@@ -897,8 +914,12 @@ async function reconcileAccountMismatch({ batchId, uploadId, itemId, resultSeq, 
   let transfer;
   try {
     await client.query('BEGIN');
+    const proof = await paymentProof.lockUploadProof(client, { uploadId, batchId });
+    await paymentProof.lockFileProof(client, proof.sha);
+    await paymentProof.assertProofUnused(client, { ...proof, resultSeq: Number(resultSeq) });
     const { rows: [batch] } = await client.query('SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE', [batchId]);
     if (!batch) throw new ResultError('not_found', '대량이체를 찾을 수 없습니다.');
+    if (paymentProof.isHistoryOnlyKey(batch.historical_key)) throw new ResultError('history_only', '과거 입금 기록은 결과를 처리할 수 없습니다.');
     if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 대량이체는 대조할 수 없습니다.');
     const { rows: [upload] } = await client.query(
       'SELECT summary FROM payment_result_uploads WHERE id = $1 AND batch_id = $2 FOR UPDATE', [uploadId, batchId]);
@@ -1012,8 +1033,12 @@ async function reconcileAmountMismatch({ batchId, uploadId, itemId, resultSeq, n
   let candidate;
   try {
     await client.query('BEGIN');
+    const proof = await paymentProof.lockUploadProof(client, { uploadId, batchId });
+    await paymentProof.lockFileProof(client, proof.sha);
+    await paymentProof.assertProofUnused(client, { ...proof, resultSeq: Number(resultSeq) });
     const { rows: [batch] } = await client.query('SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE', [batchId]);
     if (!batch) throw new ResultError('not_found', '대량이체를 찾을 수 없습니다.');
+    if (paymentProof.isHistoryOnlyKey(batch.historical_key)) throw new ResultError('history_only', '과거 입금 기록은 결과를 처리할 수 없습니다.');
     if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 대량이체는 대조할 수 없습니다.');
     const { rows: [upload] } = await client.query(
       'SELECT summary, file_blob, file_name FROM payment_result_uploads WHERE id = $1 AND batch_id = $2 FOR UPDATE', [uploadId, batchId]);
@@ -1186,17 +1211,16 @@ async function _commitBatchOutcome({ batchId, by, notifyFailed, duplicateSha = n
   const client = await _db().connect();
   try {
     await client.query('BEGIN');
+    await paymentProof.assertBatchNotHistoryOnly(client, batchId);
 
     if (duplicateSha) {
-      // Serialize same-file uploads before changing any payment item.  A hash
-      // collision can only wait; it can never create a second payment.
-      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [duplicateSha.sha]);
-      const { rows: priorApplied } = await client.query(
-        `SELECT id FROM payment_result_uploads
-          WHERE file_sha256 = $1 AND applied = TRUE AND id <> $2
-          LIMIT 1`, [duplicateSha.sha, duplicateSha.uploadId || '']);
-      if (priorApplied.length) {
-        throw new ResultError('duplicate_file', '이미 반영된 동일 이체결과 파일입니다. 중복 이체 여부를 확인해 주세요.');
+      // Same advisory namespace as every proof consumer. Lock SHA and exact
+      // paid rows before the source batch lock to prevent cross-batch deadlocks.
+      await paymentProof.lockFileProof(client, duplicateSha.sha);
+      for (const p of paid) {
+        await paymentProof.assertProofUnused(client, {
+          sha: duplicateSha.sha, uploadId: duplicateSha.uploadId, resultSeq: p.seq,
+        });
       }
     }
 
@@ -1204,6 +1228,7 @@ async function _commitBatchOutcome({ batchId, by, notifyFailed, duplicateSha = n
     const { rows: [b] } = await client.query(
       `SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE`, [batchId]);
     if (!b) throw new ResultError('not_found', '대량이체를 찾을 수 없습니다.');
+    if (paymentProof.isHistoryOnlyKey(b.historical_key)) throw new ResultError('history_only', '과거 입금 기록은 결과를 처리할 수 없습니다.');
     if (b.status === 'cancelled') throw new ResultError('cancelled', '취소된 대량이체입니다.');
 
     for (const p of paid) {
@@ -1298,16 +1323,16 @@ async function _commitBatchOutcome({ batchId, by, notifyFailed, duplicateSha = n
 }
 
 async function applyResultFile({ batchId, fileName, base64, uploadId, by, notifyFailed, preventDuplicate = false }) {
+  await paymentProof.assertBatchNotHistoryOnly(_db(), batchId);
+  let storedProof = null;
   if (uploadId) {
+    storedProof = await paymentProof.lockUploadProof(_db(), { uploadId, batchId });
     const { rows: [stored] } = await _db().query(
       `SELECT id, file_name, file_blob, file_sha256, applied
          FROM payment_result_uploads
         WHERE id = $1 AND batch_id = $2`, [uploadId, batchId]);
     if (!stored || !stored.file_blob) throw new ResultError('not_stored', '저장된 결과 파일을 찾을 수 없습니다. 결과 파일을 다시 업로드해 주세요.');
     if (stored.applied) throw new ResultError('already_applied', '이미 이체결과가 반영된 파일입니다.');
-    if (stored.file_sha256 && crypto.createHash('sha256').update(stored.file_blob).digest('hex') !== stored.file_sha256) {
-      throw new ResultError('file_changed', '저장된 결과 파일의 무결성을 확인하지 못했습니다. 결과 파일을 다시 업로드해 주세요.');
-    }
     fileName = stored.file_name || fileName;
     base64 = Buffer.from(stored.file_blob).toString('base64');
   }
@@ -1340,17 +1365,17 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
     } else {
       await client.query(
         `INSERT INTO payment_result_uploads
-           (batch_id, bank, file_name, file_format, row_count, matched, success_count, failed_count, applied, applied_count, applied_at, summary, uploaded_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,TRUE,$9,NOW(),$10,$11)`,
+           (batch_id, bank, file_name, file_format, row_count, matched, success_count, failed_count, applied, applied_count, applied_at, summary, uploaded_by, file_blob, file_sha256)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,TRUE,$9,NOW(),$10,$11,$12,$13)`,
         [batchId, a.batch.bank, String(fileName || '').slice(0, 200), a.format,
          a.parse.rows.length, a.summary.matched, paidCount, failed.length + notInFile.length,
-         paidCount, applySummary, by || '']);
+         paidCount, applySummary, by || '', a.fileBuffer, fileSha256]);
     }
   };
 
   const { paidItems, board, notified, notifyTargets } = await _commitBatchOutcome({
     batchId, by, notifyFailed,
-    duplicateSha: preventDuplicate ? { sha: fileSha256, uploadId } : null,
+    duplicateSha: { sha: fileSha256, uploadId: storedProof && storedProof.uploadId || uploadId || null },
     paid: success.map(p => ({
       item: p.item, paidAtIso: p.result.transferredAtIso || null,
       statusRaw: p.result.statusRaw || '', seq: p.result.seq,
@@ -1395,6 +1420,7 @@ async function markBatchApplied({ batchId, by }) {
     const { rows: [batch] } = await client.query(
       'SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE', [batchId]);
     if (!batch) throw new ResultError('not_found', '대량이체를 찾을 수 없습니다.');
+    if (paymentProof.isHistoryOnlyKey(batch.historical_key)) throw new ResultError('history_only', '과거 입금 기록은 상태를 바꿀 수 없습니다.');
     if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 대량이체는 적용완료로 처리할 수 없습니다.');
 
     const { rows: [{ n: appliedItems }] } = await client.query(
@@ -1432,6 +1458,7 @@ async function backfillPaidDepositStamp({ batchId, by }) {
     const { rows: [batch] } = await client.query(
       'SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE', [batchId]);
     if (!batch) throw new ResultError('not_found', '대량이체를 찾을 수 없습니다.');
+    if (paymentProof.isHistoryOnlyKey(batch.historical_key)) throw new ResultError('history_only', '과거 입금 기록에는 입금일을 기록할 수 없습니다.');
     if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 대량이체에는 입금일을 기록할 수 없습니다.');
     const { rows } = await client.query(
       `SELECT i.sheet_id, i.tab_name, i.row_index, i.paid_at, i.product_price, i.review_fee, i.amount,
@@ -1524,6 +1551,7 @@ async function confirmOutstandingFailures({ batchId, by }) {
     const { rows: [batch] } = await client.query(
       'SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE', [batchId]);
     if (!batch) throw new ResultError('not_found', '대량이체를 찾을 수 없습니다.');
+    if (paymentProof.isHistoryOnlyKey(batch.historical_key)) throw new ResultError('history_only', '과거 입금 기록의 항목 상태는 바꿀 수 없습니다.');
     if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 대량이체는 실패 처리할 수 없습니다.');
     const { rows: pending } = await client.query(
       `SELECT id FROM payment_batch_items

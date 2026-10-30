@@ -57,7 +57,12 @@ async function renameTabState(db, { sheetId, oldTabName, newTabName, tabGid = ''
       `UPDATE payment_batch_items
           SET tab_name = $1
         WHERE sheet_id = $2 AND tab_name = $3
-          AND status = 'pending'`, common);
+          AND status = 'pending'
+          AND NOT EXISTS (
+            SELECT 1 FROM payment_batches b
+             WHERE b.id = payment_batch_items.batch_id
+               AND b.historical_key LIKE 'historical-fee:%'
+          )`, common);
 
     const im = await client.query(
       `UPDATE index_master

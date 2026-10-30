@@ -3928,6 +3928,11 @@ router.get('/payment/batch/:id/file', authMiddleware, adminOrMasterMiddleware, a
       await client.query('ROLLBACK');
       return res.status(404).json({ ok: false, error: '대량이체를 찾을 수 없습니다.' });
     }
+    if (out.batch.historyOnly === true || String(out.batch.historicalKey || '').startsWith('historical-fee:')) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ ok: false, code: 'history_only',
+        error: '과거 입금 기록은 이체 파일을 만들 수 없습니다.' });
+    }
     if (out.batch.status === 'cancelled') {
       await client.query('ROLLBACK');
       return res.status(400).json({ ok: false, error: '취소된 대량이체는 내려받을 수 없습니다.' });
@@ -4069,8 +4074,12 @@ function _resultErr(err, res, next) {
       error: '이체결과 반영 저장소가 아직 준비되지 않았습니다(마이그레이션 100 적용 후 다시 시도하세요).' });
   }
   if (err instanceof paymentResultSvc.ResultError) {
-    const code = err.code === 'not_found' ? 404 : err.code === 'too_large' ? 413 : 400;
+    const code = err.code === 'not_found' ? 404 : err.code === 'too_large' ? 413
+      : ['history_only', 'proof_already_used', 'invalid_evidence'].includes(err.code) ? 409 : 400;
     return res.status(code).json({ ok: false, code: err.code, error: err.message });
+  }
+  if (err && ['history_only', 'proof_already_used', 'invalid_evidence'].includes(err.code)) {
+    return res.status(409).json({ ok: false, code: err.code, error: err.message });
   }
   return next(err);
 }
