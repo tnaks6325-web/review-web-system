@@ -64,12 +64,13 @@ const NEW_COLS = [['work_orders', 'sync_version'], ['work_orders', 'bidir_state'
   });
 
   await t('④ 스위치 fail-closed · 최우선 비상 스위치 · 캐시', async () => {
-    const OFF = { in2rw: 'off', push: 'off', campaign_edit: 'off', hardOff: false };
+    const OFF = { in2rw: 'off', push: 'off', campaign_edit: 'off', publish_reconcile: 'off', hardOff: false };
     assert.deepStrictEqual(sw.parseBidirSetting(null), OFF);
     assert.deepStrictEqual(sw.parseBidirSetting('{깨짐'), OFF);
     assert.deepStrictEqual(sw.parseBidirSetting('[]'), OFF);
     assert.deepStrictEqual(sw.parseBidirSetting('{"in2rw":"ON","push":"yes"}'), OFF, '모르는 값은 꺼짐(대소문자 포함)');
-    assert.deepStrictEqual(sw.parseBidirSetting('{"in2rw":"apply","push":"on","campaign_edit":"on"}'), { in2rw: 'apply', push: 'on', campaign_edit: 'on', hardOff: false });
+    assert.deepStrictEqual(sw.parseBidirSetting('{"in2rw":"apply","push":"on","campaign_edit":"on"}'), { in2rw: 'apply', push: 'on', campaign_edit: 'on', publish_reconcile: 'off', hardOff: false }, '새 칸(발행 자동 맞추기)은 적지 않으면 꺼짐');
+    assert.deepStrictEqual(sw.parseBidirSetting('{"in2rw":"apply","push":"on","campaign_edit":"on","publish_reconcile":"on"}'), { in2rw: 'apply', push: 'on', campaign_edit: 'on', publish_reconcile: 'on', hardOff: false });
 
     let calls = 0;
     const db = (value, throws) => ({ query: async () => { calls++; if (throws) throw new Error('down'); return { rows: value == null ? [] : [{ value }] }; } });

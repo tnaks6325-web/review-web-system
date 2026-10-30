@@ -6354,6 +6354,20 @@ async function saveRecruitPostImpl() {
        "저장됨" 으로만 보였다. 맨 위에 올려 다시 저장하게 한다(반쪽 저장을 조용히 넘기지 않는다). */
     if (saved && saved.feeWarning) _changed.unshift("⚠ " + saved.feeWarning + " — 다시 저장해 주세요");
     if (saved && saved.optionsWarning) _changed.unshift("⚠ " + saved.optionsWarning + " — 공고는 저장됐지만 옵션 표는 옛 값입니다. 다시 저장해 주세요");
+    /* ★ 결정 313: 인트라넷 오더로 만든 새 공고 — 발행 때 오더를 공고 값으로 자동 맞췄으면 그렇다고, 못 맞췄으면(값이 다른 채 연결 안 됨) 그 자리에서 알린다.
+       판정·맞추기는 서버(bidirLink) — 화면은 말만 한다. 옛 서버(autoReconciled 없음)의 diverged 도 사실이므로 같은 ⚠ 를 띄운다. */
+    if (saved && saved.bidirLink && !_recruitEditId) {
+      const _bl = saved.bidirLink, _lb = Array.isArray(_bl.labels) ? _bl.labels.filter(Boolean) : [];
+      const _lbTxt = _lb.length ? " (" + _lb.slice(0, 3).join(", ") + (_lb.length > 3 ? " 외 " + (_lb.length - 3) + "개" : "") + ")" : "";
+      if (_bl.autoReconciled === true && _bl.state === "on") {
+        _changed.unshift("✅ 인트라넷 리뷰오더도 이 공고 값으로 맞췄습니다" + _lbTxt + " — 이제 양쪽 수정이 서로 맞춰집니다");
+      } else if (_bl.state === "diverged") {
+        // 접수 뒤 못 바꾸는 칸(reconcile_blocked)은 맞추기 화면에서도 못 맞춘다 — 할 일을 하나만 말한다
+        const _why = String(_bl.autoReason || "").replace(/[.。\s]+$/, "");
+        _changed.unshift("⚠ 인트라넷 리뷰오더와 값이 달라 아직 연결되지 않았습니다" + _lbTxt + (_why ? " — " + _why : "")
+          + (_bl.code === "reconcile_blocked" ? ". 개발 담당에게 알려 주세요" : ". 작업보드 「⚠ 오더·공고 다름」에서 맞춰 주세요"));
+      }
+    }
     /* ★ 버튼 ✓ → 모달 닫힘 → 화면 가운데 안내(시안 C 확정) 로 시선이 이어진다.
        안내 렌더러는 recruit-modal.js 한 벌 — 없으면(구버전 모듈) 종전 토스트로 폴백. */
     _ok = true;

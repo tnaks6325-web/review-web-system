@@ -486,4 +486,42 @@ async function setReconcileSkip({ workOrderId, skip, actor = '', db } = {}) {
   return { status: 200, body: { ok: true, workOrderId: id, ..._skipInfo(rows[0]) } };
 }
 
-module.exports = { reconcileSharedOrder, listReconcile, archivedCampaignSql, ARCHIVED_ORDER_SIDE, setReconcileSkip, _skipInfo, diffFields, _mixArr, _stripRenameMarks, fingerprint, planReconcile, _pairRows, _mixedBody, PERMANENT, SCALAR_LABEL, LEAF_LABEL };
+/**
+ * ★★ 결정 313 — 발행 때 자동 맞추기(사용자 확정 2026-10-30 「1.가」). 인트라넷 오더로 방금 만든 공고가 오더와 값이 다르면(발행 창에서
+ * 상품 이름·구매시간 등을 고쳤다) 오더를 **공고 값으로** 맞추고 연결한다 = 담당자 팝업의 [공고대로 맞추기] 와 같은 판정·같은 저장 길.
+ * 상품 이름은 시스템마다 따로(결정 285) — 맞추기 안에서 이미 지켜진다.
+ * 공고 쪽으로 못 맞추는 칸이 하나라도 있거나 · 방금 만든 공고가 그 오더의 기준 공고가 아니면 **아무것도 바꾸지 않고** 이유만 돌려준다(fail-closed).
+ * @returns {Promise<{ok:boolean, code?:string, reason?:string, labels:string[]}>}
+ */
+async function reconcileOnPublish({ workOrderId, campaignId, actor = '', db } = {}) {
+  const pool = db || require('../db/pool');
+  const lrq = require('./linkedRecruitQuota.service');
+  const peek = await lrq.liveCampaignForWorkOrders(pool, [workOrderId]);
+  if (!peek || String(peek.id) !== String(campaignId)) {
+    return { ok: false, code: 'publish_reconcile_other_campaign', reason: '이 오더에 먼저 연결된 다른 공고가 있어 자동으로 맞추지 않았습니다', labels: [] };
+  }
+  const { rows: woRows } = await pool.query('SELECT * FROM work_orders WHERE id = $1', [workOrderId]);
+  const { rows: cRows } = await pool.query('SELECT * FROM recruit_campaigns WHERE id = $1', [campaignId]);
+  const { rows: opts } = await pool.query('SELECT * FROM campaign_options WHERE campaign_id = $1 ORDER BY sort_order, id', [campaignId]);
+  if (!woRows[0] || !cRows[0]) return { ok: false, code: 'publish_reconcile_missing', reason: '오더나 공고를 다시 읽지 못했습니다', labels: [] };
+  const plan = planReconcile(woRows[0], cRows[0], opts);
+  // 안내용 칸 이름 — 상품 이름 칸은 뺀다(인트라넷은 자기 상품 이름을 지킨다 · 결정 285 — 「이름도 맞췄다」 로 읽히면 틀린 안내)
+  const labels = [...new Set(plan.fields.filter(f => f.leaf !== 'name').map(f => f.label))];
+  if (!plan.fields.length) return { ok: false, code: 'publish_reconcile_no_fields', reason: '다른 칸을 찾지 못했습니다', labels };
+  if (plan.blocked) {   // 접수 뒤 못 바꾸는 칸 — 맞추기 화면에서도 못 맞춘다(그 칸만 알린다)
+    const bl = [...new Set(plan.fields.filter(f => PERMANENT.has(f.key) && f.group === 'scalar').map(f => f.label))];
+    return { ok: false, code: 'reconcile_blocked', reason: '접수 뒤에는 바꿀 수 없는 칸이라 맞출 수 없습니다', labels: bl };
+  }
+  // 고를 칸 = 파생(옵션 줄을 따라오는 합계) 아닌 칸 — 팝업 [공고대로 맞추기] 와 같은 규칙(reconcile-prompt.js sideBlock·picksFor)
+  const pickable = plan.fields.filter(f => !f.derived);
+  if (!pickable.length) return { ok: false, code: 'publish_reconcile_derived_only', reason: '옵션별 값은 같고 합계만 달라 공고 쪽으로 고를 칸이 없습니다', labels };
+  const locked = pickable.find(f => !(f.campaignSide && f.campaignSide.ok));
+  if (locked) return { ok: false, code: 'reconcile_campaign_side_locked', reason: `${locked.label} — ${(locked.campaignSide && locked.campaignSide.reason) || '공고 쪽으로 맞출 수 없는 칸입니다'}`, labels };
+  const picks = {};
+  for (const f of pickable) picks[f.id] = 'campaign';
+  const r = await reconcileSharedOrder({ workOrderId, picks, fingerprint: plan.fingerprint, actor, opId: `publish-${campaignId}`, db });
+  if (r.status === 200 && r.body && r.body.ok) return { ok: true, labels };
+  return { ok: false, code: (r.body && r.body.code) || 'reconcile_failed', reason: (r.body && r.body.error) || '맞추지 못했습니다', labels };
+}
+
+module.exports = { reconcileSharedOrder, reconcileOnPublish, listReconcile, archivedCampaignSql, ARCHIVED_ORDER_SIDE, setReconcileSkip, _skipInfo, diffFields, _mixArr, _stripRenameMarks, fingerprint, planReconcile, _pairRows, _mixedBody, PERMANENT, SCALAR_LABEL, LEAF_LABEL };
