@@ -7978,6 +7978,7 @@ async function _callCardExtractAi(cid, base64, mimeType) {
   const gasUrl = APP_CONFIG.GAS_WEB_APP_URL;
   if (!gasUrl) { st.identityBusy = false; _showCardAiError(cid, "GAS 웹앱 URL이 설정되지 않았습니다.", false); return; }
   st.lastBase64 = base64; st.lastMime = mimeType;
+  st.captureTransportFail = false;
 
   // 로딩 UI 시작
   document.getElementById(cid+"_aiLoading").classList.add("show");
@@ -8032,6 +8033,7 @@ async function _callCardExtractAi(cid, base64, mimeType) {
       st.imageHash = json?.imageHash || "";
       _showCardAiError(cid, json?.error||"알 수 없는 오류", true);
       // ★ 2026-10-30 — 사진이 서버에 닿지 못한 경우(연결 끊김·시간 초과)를 AI 실패로 안내하지 않는다(운영: 서버 판독 실패 0건인데 이 문구가 뜸).
+      st.captureTransportFail = !!(json && json._transport);
       _renderIdentityMatchState(cid, "ERROR", [json && json._transport
         ? "사진을 서버로 보내지 못했어요. 인터넷 연결을 확인하고 「캡처 다시 분석하기」를 눌러 주세요."
         : "AI 분석을 완료하지 못했습니다."], !!st.extractToken);
@@ -8229,6 +8231,8 @@ function _renderIdentityMatchState(cid, status, reasons, canManual) {
     if (diff) box.innerHTML += '<div style="overflow-wrap:anywhere"><b>등록 주소</b><br>' + _safeText(diff.registered) + '<br><b>주문 배송지</b><br>' + _safeText(diff.entered) + '</div>';
   }
   if (!issues.length && status !== "MATCH") box.innerHTML = '<div>' + _safeText((reasons || []).filter(Boolean).join(' · ') || '선택 명의의 주문인지 확인해주세요.') + '</div>';
+  // 결정 308 — 사진이 서버에 못 닿으면 칸이 비어 빈칸 목록만 남고 이유가 가려진다(실측 2026-10-30). 그때만 이유를 목록 위에 붙인다.
+  else if (status === "ERROR" && st.captureTransportFail && (reasons || []).filter(Boolean).length) box.innerHTML = '<div style="margin-bottom:8px"><b>' + _safeText(reasons.filter(Boolean).join(' · ')) + '</b></div>' + box.innerHTML;
   const needsNewCapture = _identityNeedsNewCapture(st);
   if (needsNewCapture) box.innerHTML = _identityMismatchNotice(st) + box.innerHTML;
   else if (!st.approvalToken && (st.identityReasonCodes || []).includes("duplicate_name_identity")) {
