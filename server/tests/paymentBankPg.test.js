@@ -42,6 +42,12 @@ const ROWS = [
   [9, '사통장', '010-2000-0009', '4500'],   // [8] 자동 받기 — 빠진 사람이 있는 회차
   [10, '아통장', '010-2000-0001', '4500'],
   [11, '자통장', '010-2000-0002', '2500'],
+  [12, '차통장', '010-2000-0012', '6000'],   // [9] 결과 파일 한 곳에 놓기(결정 309)
+  [13, '카통장', '010-2000-0013', '6000'],
+  [14, '타통장', '010-2000-0014', '6000'],   //   계좌 오류로 은행이 뺀 사람(결과 파일에 없음)
+  [15, '파통장', '010-2000-0015', '2500'],
+  [16, '하통장', '010-2000-0016', '9100'],
+  [17, '거통장', '010-2000-0017', '9100'],
 ];
 const NOW = Date.now();
 const MIN = 60 * 1000;
@@ -234,6 +240,45 @@ const items = async (batchId) => (await pool.query(
     ok('남은 4,500원 = 통장 기준 1명 못 받음 → 뺀 사람 고르기', rec8.state === 'review'
       && rec8.amounts.find(x => x.amount === 4500).failures === 1, rec8.amounts);
     bank.__setFetchForTest(null);
+
+    console.log('\n[9] 결과 파일 한 곳에 놓기 — 통장으로 먼저 일부 완료된 대량이체에 결과 파일(결정 309)');
+    const result = require('../src/services/paymentResult.service');
+    const XLSX = require('@e965/xlsx');
+    const T9 = NOW - 50 * MIN;
+    const b9 = await makeBatch(T9 - 5 * MIN, [12, 13, 14, 15, 16, 17]);
+    await bankRow('r1', T9, 6000, 'bulk_out'); await bankRow('r2', T9 + 1000, 6000, 'bulk_out');
+    await bankRow('r3', T9 + 2000, 2500, 'bulk_out');
+    await bankRow('r4', T9 + 3000, 9100, 'bulk_out'); await bankRow('r5', T9 + 4000, 9100, 'bulk_out');
+    const a9 = await bank.confirmBatchFromBank({ batchId: b9.id, by: 'bank-test', auto: true, notifyFailed: false });
+    ok('통장 자동: 2,500원·9,100원 3명 완료 · 6,000원 셋은 확인 필요', a9.applied === 3 && a9.remaining === 3, a9);
+    const acct = seq => '9876543210' + seq;
+    const kstDot = ms => new Date(ms + 9 * 3600 * 1000).toISOString().slice(0, 19).replace('T', ' ').replace(/-/g, '.');
+    const fileRow = (seq, amt) => ['', kstDot(T9 + 10 * 1000), `국민 ${acct(seq)}`, ROWS.find(x => x[0] === seq)[1], Number(amt).toLocaleString('en-US'), '0', '인애드리뷰', '이체완료'];
+    const aoa = [[' ', '이체일시', '입금계좌', '예금주', '이체금액(원)', '수수료(원)', '받는분 통장표시', '처리결과'],
+      fileRow(12, 6000), fileRow(13, 6000), fileRow(15, 2500), fileRow(16, 9100), fileRow(17, 9100)];   // 14 = 은행이 뺀 사람
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'S');
+    const base64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+    const found = await result.findBatchForResultFile({ fileName: 'kbank-result.xlsx', base64 });
+    ok('대량이체를 고르지 않아도 이 대량이체를 찾는다', found.batchId === b9.id && found.bank === 'kbank' && found.matchedRows === 5 && found.pending === 3, found);
+    const r9 = await result.autoApplyResultFile({ batchId: found.batchId, fileName: 'kbank-result.xlsx', base64, by: 'bank-test', notifyFailed: false });
+    const it9 = await items(b9.id);
+    const st = n => it9.find(i => i.row_index === n).status;
+    ok('파일에 있는 6,000원 둘 = 이체 완료 · 파일에 없는 사람(계좌 오류) = 실패', r9.autoApplied === true && st(12) === 'paid' && st(13) === 'paid' && st(14) === 'failed', { r9: { autoApplied: r9.autoApplied, autoApply: r9.autoApply }, it9 });
+    ok('통장으로 먼저 완료된 셋은 그대로(통장 확인)', [15, 16, 17].every(n => st(n) === 'paid')
+      && it9.filter(i => [15, 16, 17].includes(i.row_index)).every(i => i.result_status === '통장 확인'), it9);
+    const { rows: [bb9] } = await pool.query(`SELECT status FROM payment_batches WHERE id=$1`, [b9.id]);
+    ok('다 정해지면 대량이체 반영완료', bb9.status === 'applied', bb9);
+    const again9 = await result.findBatchForResultFile({ fileName: 'kbank-result.xlsx', base64 });
+    ok('같은 파일을 또 놓으면 = 다 처리됨(pending 0)', again9.batchId === b9.id && again9.pending === 0, again9);
+    const r9b = await result.autoApplyResultFile({ batchId: again9.batchId, fileName: 'kbank-result.xlsx', base64, by: 'bank-test', notifyFailed: false });
+    const it9b = await items(b9.id);
+    ok('다 처리된 대량이체에 다시 반영해도 바뀌는 것 0(같은 입구 · 반영 보류)', r9b.autoApplied !== true && JSON.stringify(it9b) === JSON.stringify(it9), { auto: r9b.autoApply });
+    const oldAoa = aoa.map((r, k) => k ? [r[0], kstDot(T9 - 60 * MIN), ...r.slice(2)] : r);
+    const wb2 = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb2, XLSX.utils.aoa_to_sheet(oldAoa), 'S');
+    let old; try { old = await result.findBatchForResultFile({ fileName: 'old.xlsx', base64: XLSX.write(wb2, { type: 'base64', bookType: 'xlsx' }) }); } catch (e) { old = { code: e.code }; }
+    ok('★ 대량이체를 만들기 전 시각의 이체 파일은 그 대량이체로 가지 않는다(no_batch)', old.code === 'no_batch', old);
+    const { rows: pr9 } = await pool.query(`SELECT row_index FROM payment_records WHERE sheet_id=$1 AND row_index BETWEEN 12 AND 17 ORDER BY row_index`, [SHEET]);
+    ok('원장 = 12·13·15·16·17(실패한 14 없음 · 두 번 기록 없음)', pr9.map(r => r.row_index).join(',') === '12,13,15,16,17', pr9);
   } catch (e) {
     console.error(e); fail++;
   } finally {
