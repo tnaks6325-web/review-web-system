@@ -897,12 +897,15 @@ _handlers.reviewEditApprove = async (req, res) => {
         if (!f || !f.buffer) throw new Error('교체 영수증 파일을 받지 못했습니다');
         const b64 = f.buffer.toString('base64');
         const inspect = require('../services/reviewInspect.service');
-        await inspect.inspectSubmission({
+        const inspection = await inspect.inspectSubmission({
           base64: b64, mimeType: f.mimeType || 'image/jpeg', fileId: committed.new_file_id,
           fileHash: crypto.createHash('sha256').update(f.buffer).digest('hex'),
           sheetId: committed.sheet_id, tabName: committed.tab_name, rowIndex: committed.row_index,
           reviewerName: committed.reviewer_name, slotKey: committed.slot_key || 'review', slotRole: 'receipt',
         });
+        if (inspection?.persisted !== true) {
+          logger.warn('[review-edit] 교체 영수증 즉시 재검수 저장 실패(pending 유지)');
+        }
         await inspect.saveFileHash({
           fileId: committed.new_file_id,
           fileHash: crypto.createHash('sha256').update(f.buffer).digest('hex'),

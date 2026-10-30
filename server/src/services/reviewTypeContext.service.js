@@ -166,7 +166,7 @@ async function reviewTypeDetailsForTabs(pairs) {
  * ★ fail-soft: 조회 실패·행 없음·값 없음 = null(= 탭/공고 판정 그대로 = 오늘 동작).
  *   캐시는 두지 않는다 — 행 단위 PK 조회 1회이고, 값이 재배분으로 바뀔 수 있다.
  */
-async function reviewTypeForRow({ sheetId, tabName, rowIndex, client } = {}) {
+async function reviewTypeForRow({ sheetId, tabName, rowIndex, client, strict = false } = {}) {
   const idx = parseInt(rowIndex, 10);
   if (!sheetId || !tabName || !Number.isInteger(idx) || idx <= 0) return null;
   try {
@@ -187,6 +187,8 @@ async function reviewTypeForRow({ sheetId, tabName, rowIndex, client } = {}) {
     return rowOptionReviewType(rj, [...new Set(optionHeaders)]);
   } catch (e) {
     logger.warn(`[reviewType] 행 리뷰타입 조회 실패(미적용): ${e.message}`);
+    // 제출 입구는 종전처럼 허용하고, 후검수만 실패 사실을 별도로 기록한다.
+    if (strict) throw e;
     return null;
   }
 }

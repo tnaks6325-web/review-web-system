@@ -113,7 +113,7 @@ const RI = require('../src/services/reviewInspect.service');
       }
       if (/INSERT INTO review_inspections/i.test(q)) {
         got = JSON.parse(p.find(x => typeof x === 'string' && x.startsWith('{"format')) || '{}');
-        return { rows: [] };
+        return { rows: [{ status: p[6], checks: got }], rowCount: 1 };
       }
       return { rows: [] };
     } });

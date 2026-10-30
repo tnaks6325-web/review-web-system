@@ -147,10 +147,9 @@ const CACHE_TTL = 10 * 60 * 1000; // 10분
 const CACHE_MAX_SIZE = 200;
 
 function _getCacheKey(base64Data) {
-  // 이미지 데이터의 MD5 해시 (빠르고 충분)
+  // 같은 앞부분을 가진 서로 다른 사진도 분리한다. 용도·예시 접두까지 전체를 식별한다.
   const clean = base64Data.replace(/^data:image\/[a-z]+;base64,/, '');
-  return crypto.createHash('md5').update(clean.slice(0, 50000)).digest('hex');
-  // 첫 50KB만 해시 — 대부분의 이미지를 구분하기 충분하며 해싱 비용 절약
+  return crypto.createHash('sha256').update(clean).digest('hex');
 }
 
 function _getFromCache(hash) {

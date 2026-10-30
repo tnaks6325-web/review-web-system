@@ -94,7 +94,12 @@ ok('하나라도 fail 이면 fail',
   RI.computeStatus({ a: { verdict: 'pass' }, b: { verdict: 'fail' }, c: { verdict: 'warn' } }) === 'fail');
 ok('fail 없이 warn 이 있으면 suspect',
   RI.computeStatus({ a: { verdict: 'pass' }, b: { verdict: 'warn' } }) === 'suspect');
-ok('전부 통과면 pass', RI.computeStatus({ a: { verdict: 'pass' }, b: { verdict: 'skip' } }) === 'pass');
+ok('통과와 실제 적용제외만 있으면 pass', RI.computeStatus({ a: { verdict: 'pass' }, b: { verdict: 'skip' } }) === 'pass');
+ok('명시적 미확인은 보조 통과로 정상 처리하지 않는다',
+  RI.computeStatus({ a: { verdict: 'pass' }, b: { verdict: 'skip', evidence: 'unknown' } }) === 'unverifiable');
+ok('명시적 미확인이 있어도 알려진 불량·경고가 우선이다',
+  RI.computeStatus({ a: { verdict: 'fail' }, b: { evidence: 'unknown' } }) === 'fail'
+  && RI.computeStatus({ a: { verdict: 'warn' }, b: { evidence: 'unknown' } }) === 'suspect');
 ok('전부 판정 불가면 unverifiable',
   RI.computeStatus({ a: { verdict: 'skip' }, b: { verdict: 'skip' } }) === 'unverifiable');
 
@@ -147,9 +152,9 @@ RI.__setPoolForTest({ query: async (sql, params) => { _sql.push({ sql: String(sq
     (await RI.findDuplicate({ fileHash: 'h' })).verdict === 'skip'
     && (await RI.findSimilarText({ text: longText })).verdict === 'skip');
 
-  ok('★★ 검수 전체가 터져도 throw 하지 않는다 — 업로드 후처리라 예외가 오르면 제출이 실패로 보인다',
-    (await RI.inspectSubmission({ fileId: 'F', sheetId: 'S', tabName: 'T' })) === null
-    || true);
+  const failedWrite = await RI.inspectSubmission({ fileId: 'F', sheetId: 'S', tabName: 'T' });
+  ok('★★ 검수·저장 실패는 제출 후처리에서 예외를 올리지 않고 성공도 주장하지 않는다',
+    failedWrite === null || failedWrite.persisted === false);
   RI.__setPoolForTest(null);
 
   /* ═══ ⑦ 배선 — 서버 ═══════════════════════════════════════════ */

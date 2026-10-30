@@ -666,8 +666,8 @@ function matchProductName(ocr, expectedList) {
   // ★ 말줄임·번호·URL 을 벗긴 뒤 대조한다(_cleanProductForMatch) — 벗기지 않으면
   //   "이노크아든 …다회용…" vs "1. 이노크아든 …교체형 (https:" 처럼 같은 상품이 다름으로 나온다.
   const o = _normProduct(_cleanProductForMatch(ocr));
-  if (!comparable.length) return { verdict: 'skip', expected: list, ocr: String(ocr || '') };
-  if (!o) return { verdict: 'skip', expected: list, ocr: '' };
+  if (!comparable.length) return { verdict: 'skip', reason: 'no_expected', evidence: 'unknown', expected: list, ocr: String(ocr || '') };
+  if (!o) return { verdict: 'skip', reason: 'no_ocr', evidence: 'unknown', expected: list, ocr: '' };
   for (const e of comparable) {
     const n = _normProduct(_cleanProductForMatch(e));
     if (!n) continue;
@@ -737,11 +737,14 @@ function applyProductRule(check, rules, { sheetId, tabName } = {}) {
 }
 
 /** 항목별 판정 → 종합 status. 하나라도 fail → fail / warn 있으면 suspect / 나머지 pass. */
-function computeStatus(checks) {
-  const vs = Object.values(checks || {}).map(c => (c && c.verdict) || 'skip');
+function computeStatus(checks, { preserveReceiptPolicy = false } = {}) {
+  const entries = Object.values(checks || {});
+  const vs = entries.map(c => (c && c.verdict) || 'skip');
   if (!vs.length) return 'pending';
   if (vs.includes('fail')) return 'fail';
   if (vs.includes('warn')) return 'suspect';
+  // 제출 허용과 검증 성공은 다르다. 보조 검사 하나의 pass로 판독 실패를 덮지 않는다.
+  if (!preserveReceiptPolicy && entries.some(c => c && c.evidence === 'unknown')) return 'unverifiable';
   if (vs.every(v => v === 'skip')) return 'unverifiable';
   return 'pass';
 }
@@ -806,7 +809,7 @@ function productNamesFromWorkOrder(wo) {
  * 이 탭에 연결된 작업오더 1건. Track B 링크 우선 → work_orders.linked_tab_* 폴백.
  * ★ work_orders 는 **읽기만** 한다(Track A 승인 흐름이 linked_tab_* 를 보고 분기하므로).
  */
-async function _workOrderForTab({ sheetId, tabName } = {}) {
+async function _workOrderForTab({ sheetId, tabName, strict = false } = {}) {
   try {
     // ★★ 우선순위(ORDER BY link_rank)는 utils/workOrderLink 가 소유한다 — 준비 행 판정(블로그 총원)도
     //   같은 링크를 봐야 해서, 사본을 두면 한쪽만 폴백 오더에 속는다(실측으로 잡힌 버그).
@@ -817,6 +820,7 @@ async function _workOrderForTab({ sheetId, tabName } = {}) {
     return rows[0] || null;
   } catch (e) {
     logger.warn(`[reviewInspect] 작업오더 조회 실패(상품명 대조 생략): ${e.message}`);
+    if (strict) throw e;
     return null;
   }
 }
@@ -880,12 +884,13 @@ async function loadTabExpectations({ sheetId, tabName } = {}) {
     }
 
     // 직접 적어둔 값이 없으면 연결된 작업오더에서 파생한다
-    const wo = await _workOrderForTab({ sheetId, tabName });
+    const wo = await _workOrderForTab({ sheetId, tabName, strict: true });
     const derived = productNamesFromWorkOrder(wo);
     if (derived.length) { out.productNames = _mergeProductNames(derived, aliases); out.productSource = 'work_order'; }
     else if (aliases.length) { out.productNames = aliases; out.productSource = 'aliases'; }
   } catch (e) {
     logger.warn(`[reviewInspect] 탭 기대값 조회 실패(대조 생략): ${e.message}`);
+    out.lookupFailed = true;
   }
   return out;
 }
@@ -963,7 +968,7 @@ async function findDuplicate({ fileHash, fileId, sheetId, tabName, rowIndex, rev
     };
   } catch (e) {
     logger.warn(`[reviewInspect] 중복 대조 실패(통과 처리): ${e.message}`);
-    return { verdict: 'skip' };
+    return { verdict: 'skip', reason: 'lookup_failed', evidence: 'unknown' };
   }
 }
 
@@ -1093,8 +1098,11 @@ async function findOwnDuplicate({ fileHash, sheetId, tabName, rowIndex, reviewer
  * ★ 짧은 글은 애초에 비교하지 않는다: "맛있어요 재구매의사 있습니다" 같은 관용구는
  *   누구나 비슷해 오탐이 된다.
  */
-async function findSimilarText({ text, fileId, sheetId, tabName } = {}) {
+async function findSimilarText({ text, fileId, sheetId, tabName, requireText = true } = {}) {
   const t = String(text || '').trim();
+  if (!t) return requireText
+    ? { verdict: 'skip', reason: 'no_ocr', evidence: 'unknown' }
+    : { verdict: 'skip', reason: 'not_applicable' };
   if (t.length < MIN_TEXT) return { verdict: 'skip', reason: 'too_short' };
   try {
     const { rows } = await _db().query(
@@ -1125,7 +1133,7 @@ async function findSimilarText({ text, fileId, sheetId, tabName } = {}) {
     };
   } catch (e) {
     logger.warn(`[reviewInspect] 유사도 대조 실패(통과 처리): ${e.message}`);
-    return { verdict: 'skip' };
+    return { verdict: 'skip', reason: 'lookup_failed', evidence: 'unknown' };
   }
 }
 
@@ -1139,7 +1147,8 @@ async function findSimilarText({ text, fileId, sheetId, tabName } = {}) {
  */
 async function findAuthorReuse({ authorMask, fileId, sheetId, tabName, reviewerName } = {}) {
   const a = String(authorMask || '').trim();
-  if (a.length < 2 || !AUTHOR_REUSE) return { verdict: 'skip' };
+  if (!AUTHOR_REUSE) return { verdict: 'skip', reason: 'author_disabled' };
+  if (a.length < 2) return { verdict: 'skip', reason: 'mask_too_short' };
   try {
     const { rows } = await _db().query(
       `SELECT DISTINCT reviewer_name, tab_name
@@ -1158,7 +1167,7 @@ async function findAuthorReuse({ authorMask, fileId, sheetId, tabName, reviewerN
     };
   } catch (e) {
     logger.warn(`[reviewInspect] 작성자 재사용 대조 실패(통과): ${e.message}`);
-    return { verdict: 'skip' };
+    return { verdict: 'skip', reason: 'lookup_failed', evidence: 'unknown' };
   }
 }
 
@@ -1193,8 +1202,9 @@ async function inspectSubmission({
        (작업표 생성이 배분 · 시트 시절엔 직원 손기입). `resolveReviewType` ① 행 우선 그대로.
        ★ 조회 실패·행 미연결(rowIndex 없음)·값 없음 = exp.reviewType(탭/공고) 그대로 = 오늘 동작. */
     let _rowType = null;
+    let _rowTypeFailed = false;
     if (isReview && rowIndex) {
-      try { _rowType = await require('./reviewTypeContext.service').reviewTypeForRow({ sheetId, tabName, rowIndex }); } catch (_) {}
+      try { _rowType = await require('./reviewTypeContext.service').reviewTypeForRow({ sheetId, tabName, rowIndex, strict: true }); } catch (_) { _rowTypeFailed = true; }
     }
     const effReviewType = resolveReviewType({ rowOption: _rowType, campaignType: exp.reviewType });
 
@@ -1261,7 +1271,12 @@ async function inspectSubmission({
     if (_isBlogTab) {
       checks.format = { verdict: 'skip', reason: 'blog_tab', kind: (cls && cls.kind) || '' };
     } else if (!cls) {
-      checks.format = { verdict: 'skip', reason: 'no_ai' };
+      checks.format = { verdict: 'skip', reason: 'no_ai', ...(!isReceipt ? { evidence: 'unknown' } : {}) };
+    } else if (!isReceipt && (typeof cls.kind !== 'string' || !cls.kind.trim()
+      || !Number.isFinite(Number(cls.confidence)) || Number(cls.confidence) < BLOCK_CONFIDENCE
+      || Number(cls.confidence) > 1)) {
+      checks.format = { verdict: 'skip', reason: 'low_confidence', evidence: 'unknown',
+        kind: typeof cls.kind === 'string' ? cls.kind : '', confidence: Number(cls.confidence) || 0 };
     } else if (isReview && !_okKinds.includes(cls.kind) && cls.confidence >= BLOCK_CONFIDENCE) {
       checks.format = { verdict: 'fail', kind: cls.kind, confidence: cls.confidence };
     } else {
@@ -1270,6 +1285,10 @@ async function inspectSubmission({
         kind: cls.kind, channel: cls.channel || '', expectedChannel: exp.expectedChannel || '',
         confidence: cls.confidence,
       };
+    }
+
+    if (!isReceipt && !_isBlogTab && (exp.lookupFailed || _rowTypeFailed)) {
+      checks.format = { ...checks.format, reason: 'lookup_failed', evidence: 'unknown' };
     }
 
     // ② 상품명 (리뷰 슬롯만 · blog 탭 제외 — 위 주석 참조)
@@ -1289,7 +1308,8 @@ async function inspectSubmission({
 
     // ④ 본문 겹침 (리뷰 슬롯만 · blog 탭 제외 — 리뷰 본문 OCR 전제라 성립하지 않는다)
     checks.similarity = (isReview && !_isBlogTab)
-      ? await findSimilarText({ text: cls && cls.reviewText, fileId, sheetId, tabName })
+      ? await findSimilarText({ text: cls && cls.reviewText, fileId, sheetId, tabName,
+        requireText: effReviewType !== 'confirm' && effReviewType !== 'star' })
       : { verdict: 'skip' };
 
     // ⑤ 작성자 — 실명 대조는 하지 않는다(마스킹이라 불가). 대신 **같은 표기의 재사용**만 본다.
@@ -1297,8 +1317,8 @@ async function inspectSubmission({
       ? await findAuthorReuse({ authorMask: cls && cls.authorMask, fileId, sheetId, tabName, reviewerName })
       : { verdict: 'skip', ocr: (cls && cls.authorMask) || '' };
 
-    const status = computeStatus(checks);
-    await _upsertInspection({
+    const status = computeStatus(checks, { preserveReceiptPolicy: isReceipt });
+    const persistence = await _upsertInspection({
       fileId, sheetId, tabName, rowIndex, reviewerName, slotKey, status, checks,
       channel: (cls && cls.channel) || null, device: (cls && cls.device) || null,
       ocrProduct: (cls && cls.productName) || null,
@@ -1307,7 +1327,7 @@ async function inspectSubmission({
       fileHash: hash, confidence: (cls && cls.confidence) || null,
       productClusterKey: learnedProduct.clusterKey || null,
     });
-    return { status, checks };
+    return { status, checks, ...persistence };
   } catch (e) {
     logger.warn(`[reviewInspect] 검수 실패(무시): ${e.message}`);
     return null;
@@ -1315,8 +1335,12 @@ async function inspectSubmission({
 }
 
 async function _upsertInspection(p) {
+  // 상품명만 확인한 사람 판정으로 다른 축의 미확인까지 종결하지 않는다. 영수증의 독립 정책은 유지한다.
+  const otherUnknownSql = `NOT (EXCLUDED.checks ? 'receiptValidation') AND EXISTS (
+    SELECT 1 FROM jsonb_each(EXCLUDED.checks - 'product') AS evidence
+    WHERE evidence.value->>'evidence' = 'unknown')`;
   try {
-    await _db().query(
+    const { rows } = await _db().query(
       `INSERT INTO review_inspections
          (file_id, sheet_id, tab_name, row_index, reviewer_name, slot_key, status, checks,
           channel, device, ocr_product, ocr_text, ocr_author, file_hash, ai_confidence,
@@ -1331,6 +1355,7 @@ async function _upsertInspection(p) {
                                WHERE c.value->>'verdict' = 'fail') THEN 'fail'
                   WHEN EXISTS (SELECT 1 FROM jsonb_each(EXCLUDED.checks - 'product') AS c
                                WHERE c.value->>'verdict' = 'warn') THEN 'suspect'
+                  WHEN ${otherUnknownSql} THEN 'unverifiable'
                   ELSE 'resolved' END
                 ELSE EXCLUDED.status END,
               checks = CASE
@@ -1361,6 +1386,7 @@ async function _upsertInspection(p) {
                   AND review_inspections.product_cluster_key = EXCLUDED.product_cluster_key
                   AND NOT EXISTS (SELECT 1 FROM jsonb_each(EXCLUDED.checks - 'product') AS c
                                   WHERE c.value->>'verdict' IN ('warn','fail'))
+                  AND NOT (${otherUnknownSql})
                 THEN CASE review_inspections.product_resolution
                   WHEN 'pass' THEN 'ok' WHEN 'fail' THEN 'bad' ELSE review_inspections.resolution END
                 ELSE review_inspections.resolution END,
@@ -1369,23 +1395,29 @@ async function _upsertInspection(p) {
                   AND review_inspections.product_cluster_key = EXCLUDED.product_cluster_key
                   AND NOT EXISTS (SELECT 1 FROM jsonb_each(EXCLUDED.checks - 'product') AS c
                                   WHERE c.value->>'verdict' IN ('warn','fail'))
+                  AND NOT (${otherUnknownSql})
                 THEN NOW() ELSE review_inspections.resolved_at END,
               resolved_by = CASE
                 WHEN review_inspections.product_resolution IS NOT NULL
                   AND review_inspections.product_cluster_key = EXCLUDED.product_cluster_key
                   AND NOT EXISTS (SELECT 1 FROM jsonb_each(EXCLUDED.checks - 'product') AS c
                                   WHERE c.value->>'verdict' IN ('warn','fail'))
+                  AND NOT (${otherUnknownSql})
                 THEN COALESCE(review_inspections.product_resolved_by, review_inspections.resolved_by)
                 ELSE review_inspections.resolved_by END,
               row_index = EXCLUDED.row_index, reviewer_name = EXCLUDED.reviewer_name,
               inspected_at = NOW(), updated_at = NOW(),
-              attempts = review_inspections.attempts + 1`,
+              attempts = review_inspections.attempts + 1
+       RETURNING status, checks`,
       [p.fileId, p.sheetId, p.tabName, p.rowIndex ?? null, p.reviewerName || null, p.slotKey || 'review',
        p.status, JSON.stringify(p.checks || {}), p.channel, p.device, p.ocrProduct, p.ocrText,
        p.ocrAuthor, p.fileHash, p.confidence, p.productClusterKey || null]
     );
+    const stored = rows?.[0];
+    return { persisted: !!stored, storedStatus: stored?.status ?? null, storedChecks: stored?.checks ?? null };
   } catch (e) {
     logger.warn(`[reviewInspect] 판정 기록 실패(무시): ${e.message}`);
+    return { persisted: false, storedStatus: null, storedChecks: null };
   }
 }
 
@@ -1442,7 +1474,7 @@ async function reinspectReceiptFile({ fileId } = {}) {
       sheetId: sub.sheet_id, tabName: sub.tab_name, rowIndex: sub.row_index,
       reviewerName: sub.reviewer_name, slotKey: sub.slot_key || 'receipt', slotRole: 'receipt',
     });
-    if (!result) return { ok: false, pending: true, error: '영수증 재검수를 대기열에 남겼습니다.' };
+    if (result?.persisted !== true) return { ok: false, pending: true, error: '영수증 재검수를 대기열에 남겼습니다.' };
     if (!sub.file_hash) await saveFileHash({ fileId, fileHash: hashBase64(base64) });
     return { ok: true, ...result };
   } catch (e) {
@@ -1649,7 +1681,7 @@ async function runInspectSweep({ limit } = {}) {
         });
         // 과거분은 원장에 지문이 없다 — 이번에 계산한 값을 채워 이후 중복 대조의 재료로 만든다
         if (!t.file_hash) await saveFileHash({ fileId: t.file_id, fileHash: hashBase64(b64) });
-        if (r) out.done += 1; else out.failed += 1;
+        if (r?.persisted === true) out.done += 1; else out.failed += 1;
       } catch (e) {
         out.failed += 1;
         // 실패해도 행은 남겨 attempts 가 올라가게 한다(상한 초과 시 위에서 종결)
@@ -2029,7 +2061,8 @@ async function resolveProductCluster({ fileId, verdict, note, by } = {}) {
     for (const row of targets) {
       const checks = _humanResolveProductCheck(row.checks, decision);
       const remainingStatus = _statusAfterProductDecision(checks);
-      const closesWhole = remainingStatus === 'pass' || remainingStatus === 'unverifiable';
+      // 상품명 이외의 명시적 미확인은 종결 근거가 아니다. 적용제외 skip은 이미 pass로 계산된다.
+      const closesWhole = remainingStatus === 'pass';
       const nextStatus = closesWhole ? 'resolved' : remainingStatus;
       const wholeResolution = closesWhole
         ? (decision === 'pass' ? 'ok' : decision === 'fail' ? 'bad' : null)
