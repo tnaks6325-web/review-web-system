@@ -9,7 +9,7 @@
  *   · 들어 있음            → 접수 + delivery_memo_check='ok'
  *   · 없음 + 직원 확인 요청(두 번째 사진을 받은 경우만 · 결정 300) → 접수 + delivery_memo_check='staff_review'(작업보드 🚩 · 직원이 보고 반려)
  *   · 없음                 → 접수하지 않는다(DELIVERY_MEMO_REQUIRED — 다시 캡처하게 안내)
- * ★ 판정 = "들어 있으면 통과"(사용자 확정 가) — 띄어쓰기·대소문자 무시, 숫자만인 글자는 AI 가 영문 O 로 읽은 것도 0 으로 본다.
+ * ★ 판정 = "들어 있으면 통과"(사용자 확정 가) — 띄어쓰기·대소문자·문장부호(2026-10-30) 무시, 숫자만인 글자는 AI 가 영문 O 로 읽은 것도 0 으로 본다.
  * ★ 공고 설정 조회 실패 = 모름 → 막지 않는다(fail-open + warn). 필수 글자가 빈 공고는 종전 동작 그대로.
  */
 
@@ -26,8 +26,11 @@ function normalizeRequired(v) {
   return String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, REQUIRED_MAX);
 }
 
-function _cmpKey(s, digitsOnly) {
+/* ★ 2026-10-30 — 문장부호·기호(! . , ~ ♥ 등)도 비교에서 뺀다. 「문앞에 놓아주세요!」 공고에서 느낌표만 빠진 메세지 5건이
+   직원 확인으로 넘어갔다(운영 실측). 글자·숫자만 같으면 같은 지시로 본다. keepSymbols = 필수 글자가 기호뿐일 때의 대비. */
+function _cmpKey(s, digitsOnly, keepSymbols) {
   let t = String(s == null ? '' : s).normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+  if (!keepSymbols) t = t.replace(/[\p{P}\p{S}]/gu, '');
   if (digitsOnly) t = t.replace(/[o○〇]/g, '0');
   return t;
 }
@@ -37,9 +40,11 @@ function memoSatisfies(memo, required) {
   const req = normalizeRequired(required);
   if (!req) return true;
   const digitsOnly = /^[0-9\s]+$/.test(req);
-  const want = _cmpKey(req, digitsOnly);
+  // 필수 글자가 기호뿐이면(예: ♥♥) 기호를 빼면 비어 버린다 — 그때만 기호까지 그대로 비교한다(아무거나 통과시키지 않게).
+  const keep = !_cmpKey(req, digitsOnly, false);
+  const want = _cmpKey(req, digitsOnly, keep);
   if (!want) return true;
-  return _cmpKey(memo, digitsOnly).includes(want);
+  return _cmpKey(memo, digitsOnly, keep).includes(want);
 }
 
 /**
