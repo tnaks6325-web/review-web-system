@@ -82,5 +82,30 @@ const read = (rel) => fs.readFileSync(path.join(__dirname, '..', '..', rel), 'ut
     ctx.hold(true); timers[timers.length - 1].f();
     assert.ok(!leave.disabled && /늦어지고 있어요/.test(els.capSaveNote.innerHTML), 'timeout releases with guidance');
   }
+  // ── D ── 칸이 비어 빈칸 목록이 뜨면 이유가 가려졌다(실측 2026-10-30) — 사진 전송 실패일 때만 이유를 목록 위에 붙인다.
+  {
+    const sa = read('frontend/js/search-app.js');
+    assert.ok(/st\.lastBase64 = base64; st\.lastMime = mimeType;\s*\n\s*st\.captureTransportFail = false;/.test(sa), 'flag resets at every new analysis');
+    assert.ok(/st\.captureTransportFail = !!\(json && json\._transport\);\s*\n\s*_renderIdentityMatchState\(cid, "ERROR", \[json && json\._transport/.test(sa), 'flag set right before the failure render');
+    const s = sa.indexOf('function _renderIdentityMatchState(cid, status, reasons, canManual) {');
+    const e = sa.indexOf('\n}\n', s) + 3;
+    const run = (st, status, reasons, issues) => {
+      const box = { style: {}, innerHTML: '' };
+      const ctx = { _cardAiState: { c: st }, _identityIssues: () => issues, _safeText: (t) => String(t), _identityNeedsNewCapture: () => false,
+        _identityAddressDifference: () => null, _syncSubmissionIdentityAction() {}, _activeIdentityContext: null,
+        document: { getElementById: (id) => (id === 'c_identityStatus' ? box : null) } };
+      vm.createContext(ctx); vm.runInContext(sa.slice(s, e) + '; this.f = _renderIdentityMatchState;', ctx);
+      ctx.f('c', status, reasons, false); return box.innerHTML;
+    };
+    const blank = [{ field: 'recipient', label: '수취인', edit: true, reason: '입력해주세요.' }];
+    const sendFail = '사진을 서버로 보내지 못했어요. 인터넷 연결을 확인하고 「캡처 다시 분석하기」를 눌러 주세요.';
+    const h1 = run({ lastBase64: 'x', captureTransportFail: true }, 'ERROR', [sendFail], blank);
+    assert.ok(h1.indexOf('사진을 서버로 보내지 못했어요') >= 0 && h1.indexOf('사진을 서버로') < h1.indexOf('수취인'), 'send failure shown above the blank-field list');
+    assert.ok(/캡처 다시 분석하기<\/button>/.test(h1), 'retry button still there');
+    const h2 = run({ lastBase64: 'x', captureTransportFail: false }, 'ERROR', ['AI 분석을 완료하지 못했습니다.'], blank);
+    assert.ok(!/AI 분석을 완료하지/.test(h2) && /수취인/.test(h2), 'other errors keep the old screen (unchanged)');
+    const h3 = run({ lastBase64: 'x', captureTransportFail: true }, 'ERROR', [sendFail], []);
+    assert.equal((h3.match(/사진을 서버로 보내지 못했어요/g) || []).length, 1, 'no blank fields → shown once (old path)');
+  }
   console.log('captureSaveHold: passed');
 })().catch((err) => { console.error(err); process.exit(1); });
