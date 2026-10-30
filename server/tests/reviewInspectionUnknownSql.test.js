@@ -37,6 +37,25 @@ const { service } = require('./reviewInspectionFailureSafety.test');
     }
     const verified = await api.__upsertForTest(base);
     assert.strictEqual(verified.storedStatus, 'resolved', 'verified non-product axes still respect a preserved product decision');
-    console.log('Inspection unknown evidence: real SQL preservation checks passed');
+    // Additional review coverage: preserve historical whole-case confirmation metadata.
+    await db.exec("UPDATE review_inspections SET resolved_at = '2000-01-01T00:00:00Z', resolved_by = 'FAKE_WHOLE_CONFIRMATION';");
+    const beforeUnknown = (await db.query('SELECT * FROM review_inspections')).rows[0];
+    const reopened = await api.__upsertForTest({ ...base, status: 'unverifiable', checks: {
+      ...base.checks, format: { verdict: 'skip', reason: 'no_ai', evidence: 'unknown' },
+    } });
+    assert.strictEqual(reopened.storedStatus, 'unverifiable');
+    const afterUnknown = (await db.query('SELECT * FROM review_inspections')).rows[0];
+    assert.strictEqual(afterUnknown.resolution, beforeUnknown.resolution);
+    assert.strictEqual(String(afterUnknown.resolved_at), String(beforeUnknown.resolved_at));
+    assert.strictEqual(afterUnknown.resolved_by, beforeUnknown.resolved_by);
+    // Receipt evidence keeps its existing independent policy, including legacy skip behavior.
+    const receipt = await api.__upsertForTest({ ...base, slotKey: 'receipt', status: 'pass', checks: {
+      ...base.checks, receiptValidation: { verdict: 'pass', status: 'ok', businessNoMatched: true },
+      duplicate: { verdict: 'skip', reason: 'lookup_failed', evidence: 'unknown' },
+    } });
+    assert.strictEqual(receipt.persisted, true);
+    assert.strictEqual(receipt.storedStatus, 'resolved');
+    assert.strictEqual(receipt.storedChecks.receiptValidation.businessNoMatched, true);
+    console.log('Inspection unknown evidence: real SQL preservation and receipt compatibility checks passed');
   } finally { await db.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
