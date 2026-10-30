@@ -45,8 +45,9 @@ async function main(){const db=new PGlite();
  await db.exec(fs.readFileSync(path.join(__dirname,'../migrations/205_ops_checks.sql'),'utf8'));
  await db.exec(fs.readFileSync(path.join(__dirname,'../migrations/206_shared_sync_outbox_scope.sql'),'utf8'));
  await db.exec(`ALTER TABLE work_orders ADD COLUMN linked_tab_sheet_id TEXT NOT NULL DEFAULT '', ADD COLUMN linked_tab_name TEXT NOT NULL DEFAULT '', ADD COLUMN created_at TIMESTAMPTZ DEFAULT NOW();
- CREATE TABLE tab_configs(sheet_id TEXT,tab_name TEXT,manager TEXT DEFAULT '',display_name TEXT DEFAULT '');
- INSERT INTO tab_configs VALUES('fake','가짜 작업','','가짜 상품');
+ CREATE TABLE tab_configs(sheet_id TEXT,tab_name TEXT,tab_gid TEXT,manager TEXT DEFAULT '',display_name TEXT DEFAULT '');
+ CREATE TABLE trackb_tab_finished(sheet_id TEXT,tab_name TEXT,tab_gid TEXT,finished_at TIMESTAMPTZ DEFAULT NOW(),finished_by TEXT DEFAULT '',deleted_at TIMESTAMPTZ);
+ INSERT INTO tab_configs(sheet_id,tab_name,tab_gid,manager,display_name) VALUES('fake','가짜 작업','fake-gid','','가짜 상품');
  INSERT INTO work_orders(id,source_review_order_id,work_manager,linked_tab_sheet_id,linked_tab_name) VALUES('fake-order','fake-source','랜덤','fake','가짜 작업');`);
  let tail=Promise.resolve(),failAnswer=false,failQueue=false;
  const pool={query:db.query.bind(db),connect:async()=>{let release;const next=new Promise(r=>release=r);const prev=tail;tail=next;await prev;return {query:async(sql,args)=>{if(failAnswer&&/UPDATE ops_checks SET answers/.test(sql))throw Error('injected answer failure');if(failQueue&&/INSERT INTO shared_sync_outbox/.test(sql))throw Error('injected queue failure');return db.query(sql,args);},release};}};
@@ -66,11 +67,21 @@ async function main(){const db=new PGlite();
  await pool.query(`INSERT INTO recruit_campaigns(id,source_work_order_id,archived_at) VALUES('arch','fake-order',NOW())`);await assert.rejects(manager.answer({...args,baseVersion:q.facts.baseVersion}),/보관/);
  await manager.refresh(pool);assert.equal((await pool.query('SELECT status FROM ops_checks')).rows[0].status,'done');
  await pool.query('DELETE FROM recruit_campaigns');await manager.refresh(pool);q=(await pool.query('SELECT * FROM ops_checks')).rows[0];
+ await pool.query(`INSERT INTO recruit_campaigns(id,archived_at) VALUES('direct-arch',NOW())`);await pool.query(`UPDATE work_orders SET linked_campaign_id='direct-arch'`);
+ await assert.rejects(manager.answer({...args,baseVersion:q.facts.baseVersion}),/보관/);await manager.refresh(pool);assert.equal((await manager.list({db:pool,allowed:true})).items.length,0);
+ await pool.query('DELETE FROM recruit_campaigns');await pool.query(`UPDATE work_orders SET linked_campaign_id=''`);await manager.refresh(pool);q=(await pool.query('SELECT * FROM ops_checks')).rows[0];
  await pool.query(`UPDATE work_orders SET work_manager='박은비',sync_version=sync_version+1`);await assert.rejects(manager.answer({...args,baseVersion:q.facts.baseVersion}),/바뀐/);await manager.refresh(pool);assert.equal((await pool.query('SELECT status FROM ops_checks')).rows[0].status,'done');
  // Same current-order + tab fallback semantics, and every ineligible branch is a real SQL refresh.
  const reset=async()=>{await pool.query(`UPDATE work_orders SET status='reviewing',deleted_at=NULL,source_review_order_id='fake-source',work_manager='랜덤',linked_tab_sheet_id='fake',linked_tab_name='가짜 작업'`);await pool.query(`UPDATE tab_configs SET manager=''`);};
  for(const sql of ["status='done'","deleted_at=NOW()","source_review_order_id=''","linked_tab_sheet_id=''","work_manager='외부담당'"]){await reset();await pool.query('UPDATE work_orders SET '+sql);await manager.refresh(pool);assert.equal((await manager.list({db:pool,allowed:true})).items.length,0,sql);}
  for(const tabManager of ['망고','외부담당']){await reset();await pool.query('UPDATE tab_configs SET manager=$1',[tabManager]);await manager.refresh(pool);assert.equal((await manager.list({db:pool,allowed:true})).items.length,0,'tab fallback '+tabManager);}
+ for(const finishedName of ['가짜 작업','옛 이름']){
+  await reset();await manager.refresh(pool);const fq=(await manager.list({db:pool,allowed:true})).items[0];
+  await pool.query(`INSERT INTO trackb_tab_finished(sheet_id,tab_name,tab_gid) VALUES('fake',$1,'fake-gid')`,[finishedName]);
+  await assert.rejects(manager.answer({...args,id:fq.id,baseVersion:fq.facts.baseVersion}),/바뀐/,'finished tab cannot be answered even before refresh');
+  await manager.refresh(pool);assert.equal((await manager.list({db:pool,allowed:true})).items.length,0,'finished name/gid excluded');
+  await pool.query(`DELETE FROM trackb_tab_finished`);
+ }
  await reset();await manager.refresh(pool);
  const stable=(await manager.list({db:pool,allowed:true})).items[0].id;
  const fallbackQ=(await manager.list({db:pool,allowed:true})).items[0];await pool.query(`UPDATE tab_configs SET manager='망고'`);
@@ -79,6 +90,8 @@ async function main(){const db=new PGlite();
  await pool.query(`INSERT INTO work_orders(id,source_review_order_id,work_manager,linked_tab_sheet_id,linked_tab_name,created_at) VALUES('newer-fake','fake-new-source','랜덤','fake','가짜 작업',NOW()+INTERVAL '1 second')`);
  await manager.refresh(pool);let latest=(await manager.list({db:pool,allowed:true})).items;assert.equal(latest.length,1);assert.equal(latest[0].facts.workOrderId,'newer-fake');await pool.query(`DELETE FROM work_orders WHERE id='newer-fake'`);await manager.refresh(pool);
  await pool.query(`UPDATE work_orders SET work_manager='박은비'`);await manager.refresh(pool);
+ const brokenFinished={query:async(sql,args)=>{if(/FROM trackb_tab_finished/.test(sql))throw Error('injected finish lookup failure');return pool.query(sql,args);},connect:pool.connect};
+ await assert.rejects(manager.refresh(brokenFinished),/마감 여부/,'unknown finished state is not an empty success');
  // Bank questions cannot be crowded out by manager questions, and manager pagination is independent.
  await pool.query(`INSERT INTO ops_checks(kind,ref_key,facts,facts_hash,lines) VALUES('bank_cluster','bank-fixture','{}','bank','[]')`);
  const bank=await ops.listChecks();assert.equal(bank.length,1);assert.equal(bank[0].kind,'bank_cluster');

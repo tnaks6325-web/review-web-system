@@ -5815,9 +5815,9 @@ function isTabFinishedIn(map, sheetId, tabName, tabGid) {
   const g = String(tabGid == null ? '' : tabGid).trim();
   return !!(g && map[_FIN_GKEY(sheetId, g)]);
 }
-async function finishedTabsMap() {
+async function finishedTabsMap(db = getPool()) {
   try {
-    const { rows } = await getPool().query(
+    const { rows } = await db.query(
       `SELECT sheet_id AS "sheetId", tab_name AS "tabName", tab_gid AS "tabGid",
               finished_at AS "finishedAt", finished_by AS "finishedBy"
          FROM trackb_tab_finished WHERE deleted_at IS NULL`);

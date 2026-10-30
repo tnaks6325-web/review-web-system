@@ -10,7 +10,7 @@ function isUnassigned(r) {
   return undecided(raw) && undecided(resolved); // Unknown original or fallback names are never permission to overwrite.
 }
 const candidateSql = `SELECT w.*, tc.manager AS tab_manager, tc.display_name AS task_label,
-  tc.sheet_id AS question_sheet_id, tc.tab_name AS question_tab_name,
+  tc.sheet_id AS question_sheet_id, tc.tab_name AS question_tab_name, tc.tab_gid AS question_tab_gid,
   NOT EXISTS (SELECT 1 FROM recruit_campaigns c WHERE c.archived_at IS NOT NULL
     AND (c.id = NULLIF(w.linked_campaign_id, '') OR NULLIF(c.source_work_order_id, '') = w.id)) AS not_archived
  FROM tab_configs tc JOIN LATERAL (
@@ -18,11 +18,17 @@ const candidateSql = `SELECT w.*, tc.manager AS tab_manager, tc.display_name AS 
     AND x.linked_tab_sheet_id = tc.sheet_id AND x.linked_tab_name = tc.tab_name
   ORDER BY x.created_at DESC LIMIT 1
  ) w ON TRUE`;
+async function withFinished(db, rows) {
+  const tabs=require('./trackB.service');
+  const fin=await tabs.finishedTabsMap(db);
+  if(!fin.ok) throw new Error('마감 여부를 확인하지 못했습니다. 새로고침해 주세요.');
+  return rows.map(row=>({...row,not_finished:!tabs.isTabFinishedIn(fin.map,row.question_sheet_id,row.question_tab_name,row.question_tab_gid)}));
+}
 async function current(db, id) {
-  return (await db.query(candidateSql + ' WHERE w.id = $1', [id])).rows[0];
+  return (await withFinished(db,(await db.query(candidateSql + ' WHERE w.id = $1', [id])).rows))[0];
 }
 function eligible(r) {
-  return !!r && !r.deleted_at && r.status !== 'done' && r.not_archived
+  return !!r && !r.deleted_at && r.status !== 'done' && r.not_archived && r.not_finished
     && !!String(r.source_review_order_id || '').trim() && isUnassigned(r);
 }
 function factsOf(r) {
@@ -33,7 +39,7 @@ function factsOf(r) {
 async function refresh(db) {
   if (String(process.env.BIDIR_HARD_OFF || '').trim() === '1') return;
   // Include existing questions so assignments made in the workboard also close them.
-  const candidates=(await db.query(candidateSql)).rows.filter(eligible).map(r=>r.id);
+  const candidates=(await withFinished(db,(await db.query(candidateSql)).rows)).filter(eligible).map(r=>r.id);
   const open=(await db.query(`SELECT facts->>'workOrderId' AS id FROM ops_checks WHERE kind=$1 AND status='open'`,[KIND])).rows.map(r=>r.id);
   const ids=[...new Set([...candidates,...open])].filter(Boolean);
   for (const id of ids) {
