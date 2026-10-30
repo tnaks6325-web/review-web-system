@@ -1861,6 +1861,39 @@ function renderDone(pendingConfirm){
   show('vDone');
 }
 
+/* ★ 2026-10-30 — 제출 뒤 구매캡처(첫 장 → 2장째) 저장이 끝날 때까지 완료 화면의 떠나는 버튼을 잠근다.
+   카톡 채팅방 버튼(새 창)은 잠그지 않는다. 최대 150초 — 그 뒤에는 풀고 "사진을 담당자에게 보내 달라"고 안내한다(영영 막지 않는다). */
+let _capSaveTimer = null;
+function _capSaveBeforeUnload(e){ e.preventDefault(); e.returnValue = ''; return ''; }
+function _capSaveHold(on, failed){
+  const done = $('vDone'); if(!done) return;
+  const sec = done.querySelector('.sec'); if(!sec) return;
+  let note = $('capSaveNote');
+  if(!note){ note = document.createElement('div'); note.id = 'capSaveNote'; sec.parentNode.insertBefore(note, sec); }
+  const btns = [...sec.querySelectorAll('button')].filter(b => b.id !== 'doneChatBtn');
+  clearTimeout(_capSaveTimer);
+  const box = (bg, bd, fg) => `margin:0 0 12px;padding:12px 14px;border-radius:10px;background:${bg};border:1px solid ${bd};color:${fg};font-size:.86rem;line-height:1.55;text-align:left`;
+  if(on){
+    note.style.cssText = box('#EFF6FF', '#BFDBFE', '#1E3A8A');
+    note.innerHTML = '<b><i class="fas fa-circle-notch fa-spin"></i> 구매 캡처를 저장하고 있어요</b><br>저장이 끝날 때까지 이 화면을 닫거나 다른 화면으로 이동하지 마세요.';
+    btns.forEach(b => { b.disabled = true; b.style.opacity = '.45'; });
+    window.addEventListener('beforeunload', _capSaveBeforeUnload);
+    _capSaveTimer = setTimeout(() => _capSaveHold(false, -1), 150000);
+    return;
+  }
+  window.removeEventListener('beforeunload', _capSaveBeforeUnload);
+  btns.forEach(b => { b.disabled = false; b.style.opacity = ''; });
+  if(failed === 0){
+    note.style.cssText = box('#ECFDF5', '#A7F3D0', '#065F46');
+    note.innerHTML = '<b><i class="fas fa-check"></i> 구매 캡처 저장 완료</b>';
+  } else {
+    note.style.cssText = box('#FEF2F2', '#FCA5A5', '#991B1B');
+    note.innerHTML = failed > 0
+      ? '<b>구매 캡처 ' + failed + '건을 저장하지 못했어요.</b><br>주문은 접수됐어요. 담당자에게 캡처 사진을 보내 주세요.'
+      : '<b>구매 캡처 저장이 늦어지고 있어요.</b><br>주문은 접수됐어요. 잠시 뒤 참여현황에서 확인하고, 사진이 없으면 담당자에게 보내 주세요.';
+  }
+}
+
 /* iframe postMessage: 제출완료/높이/로그인 위임 (동일 오리진만 수신) */
 let _batchActive = false;
 window.addEventListener('message', (ev)=>{
@@ -1891,6 +1924,13 @@ window.addEventListener('message', (ev)=>{
     // ★ 홀드 확정 결과 분기(S1): confirmed 외(late/tab_mismatch/error 등)는 자동 확정이 아님 —
     //   주문은 안전히 접수됐고 운영자 수동확정 대상임을 안내(거짓 "참여 확정!" 금지)
     else renderDone(d.campaignHold && d.campaignHold !== 'confirmed');
+    // ★ 2026-10-30 — 구매캡처가 아직 저장 중이면 떠나는 버튼을 잠근다(떠나면 2장째는 보내지지도 않았다 · 운영 10/30 0건).
+    //   옛 구매양식(이 값을 안 보냄)이면 종전 그대로 — 기다릴 신호가 없으니 잠그지 않는다.
+    { const old = $('capSaveNote'); if(old) old.remove(); }   // 앞 제출의 저장 안내가 남지 않게
+    if(d.uploadsPending === true && ev.source === ($('orderFrame')||{}).contentWindow) _capSaveHold(true);
+  }
+  else if(d.type === 'capture-uploads-done'){
+    if(ev.source === ($('orderFrame')||{}).contentWindow) _capSaveHold(false, Number(d.failed) || 0);
   }
   else if(d.type === 'embed-height' && d.height){ $('orderFrame').style.height = Math.min(Math.max(d.height, 400), 4000) + 'px'; }
   else if(d.type === 'embed-need-login'){ needLogin(()=>{ const f=$('orderFrame'); f.src = f.src; }); }
