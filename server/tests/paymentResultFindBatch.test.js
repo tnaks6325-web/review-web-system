@@ -88,6 +88,15 @@ function stubPool(batches) {
     const f = await RES.findBatchForResultFile({ fileName: 'r.xlsx', base64: kFile });
     assert.deepStrictEqual([f.batchId, f.pending], ['A', 0]);
   });
+  await t('3a ★ 파일 이체 시각보다 뒤에 만든 대량이체는 후보가 아니다(옛 파일이 새 대량이체로 가지 않게)', async () => {
+    const pool = stubPool([{ id: 'A', seq: 87, bank: 'kbank', items: itemsOf(K.rows) }]);
+    RES.__setPoolForTest(pool);
+    await RES.findBatchForResultFile({ fileName: 'r.xlsx', base64: kFile });
+    const cut = Date.parse(pool.calls[0].params[2]);
+    const first = Math.min(...K.rows.map(r => Date.parse(r.transferredAtIso)));
+    assert.ok(/b\.created_at <= \$3::timestamptz/.test(pool.calls[0].sql));
+    assert.strictEqual(cut - first, 10 * 60 * 1000, '가장 이른 이체 + 10분');
+  });
   await t('3b 계좌는 숫자만 비교(은행 이름·하이픈 무시)', async () => {
     const dashed = K.rows.map(r => ({ bank_account: String(digitsOnly(r.accountDigits)).replace(/(\d{3})(\d+)/, '$1-$2'), amount: r.amount, item_status: 'pending' }));
     RES.__setPoolForTest(stubPool([{ id: 'A', seq: 87, bank: 'kbank', items: dashed }]));
@@ -100,7 +109,7 @@ function stubPool(batches) {
     const m = tb.match(/router\.post\('\/payment\/result-auto-apply', authMiddleware, adminOrMasterMiddleware[\s\S]*?\n\}\);/);
     assert.ok(m, '라우트');
     assert.ok(/findBatchForResultFile/.test(m[0]));
-    assert.ok(/if \(!found\.pending\) return res\.json\(\{ ok: true, found, alreadyDone: true \}\);/.test(m[0]), '다 처리됐으면 반환만');
+    assert.ok(/res\.json\(\{ \.\.\.out, found, alreadyDone: !found\.pending \}\);/.test(m[0]), '다 처리됐어도 같은 입구(쓰기는 no_pending_items 로 막힘 · 미확인은 보임)');
     assert.ok(/paymentResultSvc\.autoApplyResultFile\(\{\s*batchId: found\.batchId/.test(m[0]));
     assert.ok(!/applyResultFile\(|_commitBatchOutcome/.test(m[0].replace(/autoApplyResultFile/g, '')), '다른 반영 경로 없음');
   });

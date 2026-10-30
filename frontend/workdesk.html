@@ -14289,6 +14289,7 @@ function _pmResultDragLeave(event){ event.currentTarget.classList.remove('over')
 function _pmResultDrop(event, i){
   event.preventDefault();
   event.stopPropagation();   // 결정 308 — 화면 전체 놓기와 두 번 올라가지 않게
+  _pmDragDepth=0; _pmDropOvHide();   // 화면 전체 안내는 문서 drop 이 못 받으므로 여기서 걷는다(Codex P2)
   event.currentTarget.classList.remove('over');
   const f = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
   const b = (STATE.pmBatches||[])[i];
@@ -14355,11 +14356,12 @@ function _pmAnyDrop(event){
   const f=event.dataTransfer&&event.dataTransfer.files&&event.dataTransfer.files[0];
   if(f) _pmUploadResultAny(f);
 }
-let _pmAnyBusy=false;
+// 진행 중 표시는 시각으로 둔다 — 세션이 끊기면 api() 가 끝나지 않는 약속을 돌려 finally 가 안 돌 수 있다(Codex P2) → 2분 뒤 풀린다
+let _pmAnyBusyAt=0;
 async function _pmUploadResultAny(f){
-  if(_pmAnyBusy){ toast('결과 파일을 반영하는 중입니다. 잠시만 기다려 주세요'); return; }
+  if(_pmAnyBusyAt && Date.now()-_pmAnyBusyAt<120000){ toast('결과 파일을 반영하는 중입니다. 잠시만 기다려 주세요'); return; }
   if(f.size > 12*1024*1024){ toast('파일이 너무 큽니다(12MB 초과)'); return; }
-  _pmAnyBusy=true;
+  _pmAnyBusyAt=Date.now();
   try{
     toast('결과 파일에 맞는 대량이체를 찾는 중…');
     let base64;
@@ -14368,13 +14370,13 @@ async function _pmUploadResultAny(f){
     const r = await api('/api/trackb/payment/result-auto-apply', { method:'POST', body: JSON.stringify({ fileName:f.name, base64 }) });
     if(!r || !r.ok){ toast((r&&r.error)||'결과 파일을 해석하지 못했습니다.'); return; }
     const fd=r.found||{};
-    if(r.alreadyDone){ toast(`#${fd.seq} 대량이체 결과 파일입니다 — 이미 모두 처리돼 바꿀 것이 없습니다`); await _pmLoad(true); return; }
+    if(r.alreadyDone && !(r.unmatchedResults||[]).length){ toast(`#${fd.seq} 대량이체 결과 파일입니다 — 이미 모두 처리돼 바꿀 것이 없습니다`); await _pmLoad(true); return; }
     const known=(STATE.pmBatches||[]).find(x=>x.id===fd.batchId);
     const b=known||{ id:fd.batchId, seq:fd.seq, bank:fd.bank, bankLabel:fd.bankLabel||'' };
     STATE.pmResult = { batch:b, file:{ name:f.name }, preview:r, persisted:true, autoApplied:r.autoApplied===true };
     _pmResultModal();
     await _pmLoad(true);
-  } finally { _pmAnyBusy=false; }
+  } finally { _pmAnyBusyAt=0; }
 }
 /* 화면 어디에 놓아도 — 입금관리일 때만 · 파일을 끌 때만 · 다른 칸이 먼저 받았으면(preventDefault) 손대지 않는다 */
 function _pmDropOvShow(){

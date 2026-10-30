@@ -4089,17 +4089,17 @@ router.post('/payment/batch/:id/result-auto-apply', authMiddleware, adminOrMaste
 });
 
 // 결과 파일 한 곳에 놓기(결정 308) — 대량이체를 고르지 않는다. 서버가 계좌+금액으로 대량이체를 찾고, 반영은 위와 같은 autoApplyResultFile.
-//   이미 다 처리된 대량이체(통장으로 먼저 완료 등)면 쓰지 않고 그 사실만 알린다.
+//   이미 다 처리된 대량이체(통장으로 먼저 완료 등)도 같은 입구를 탄다 — 반영 대상이 없어 쓰지 않고(no_pending_items),
+//   파일에 섞인 기록 없는 이체(미확인)는 그대로 보여 준다(Codex P2).
 router.post('/payment/result-auto-apply', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const b = req.body || {};
     const base64 = b.base64 || b.file;
     const found = await paymentResultSvc.findBatchForResultFile({ fileName: b.fileName, base64 });
-    if (!found.pending) return res.json({ ok: true, found, alreadyDone: true });
     const out = await paymentResultSvc.autoApplyResultFile({
       batchId: found.batchId, fileName: b.fileName, base64, by: _by(req), notifyFailed: b.notifyFailed !== false,
     });
-    res.json({ ...out, found });
+    res.json({ ...out, found, alreadyDone: !found.pending });
   } catch (err) { _resultErr(err, res, next); }
 });
 

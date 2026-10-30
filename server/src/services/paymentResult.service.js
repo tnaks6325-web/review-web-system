@@ -369,7 +369,10 @@ async function _saveAutoApplyDecision(uploadId, autoApply) {
  * ★ 모르면 반영하지 않는다(fail-closed): 은행 파일이 아님 · 어느 대량이체와도 절반 넘게 안 맞음 ·
  *   두 대량이체가 비슷하게 맞음(둘째가 첫째의 80% 이상) → 거부. 줄 번호·순서는 근거로 쓰지 않는다(결정 186 계좌+금액).
  * 후보 = 그 은행 · 취소 안 된 · 최근 45일 대량이체의 **모든** 대상(이미 완료된 사람 포함 — 통장으로 먼저 완료돼도 같은 파일을 찾는다).
+ * ★ 파일의 가장 이른 이체 시각보다 뒤에 만든 대량이체는 후보가 아니다(Codex P1) — 옛 결과 파일의 같은 사람·같은 금액이
+ *   새 대량이체에 다시 담겨 있어도 그 새 대량이체를 고르지 않는다(만들기 전에 이체될 수 없다). 시각이 없으면 이 조건은 건너뛴다.
  */
+const RESULT_FIND_CLOCK_SLACK_MS = 10 * 60 * 1000;
 const RESULT_FIND_DAYS = 45;
 async function findBatchForResultFile({ fileName, base64 }) {
   if (!base64) throw new ResultError('bad_request', '파일이 비어 있습니다.');
@@ -383,12 +386,15 @@ async function findBatchForResultFile({ fileName, base64 }) {
   if (!parse.ok) throw new ResultError('parse_failed', parse.error);
   const rows = (parse.rows || []).filter(r => r && r.accountDigits && Number(r.amount));
   if (!rows.length) throw new ResultError('empty', '결과 파일에 계좌·금액이 있는 줄이 없습니다.');
+  const times = rows.map(r => Date.parse(r.transferredAtIso || '')).filter(Number.isFinite);
+  const createdBefore = times.length ? new Date(Math.min(...times) + RESULT_FIND_CLOCK_SLACK_MS).toISOString() : null;
   const { rows: cand } = await _db().query(
     `SELECT b.id, b.seq, b.status, i.bank_account, i.amount, i.status AS item_status
        FROM payment_batches b JOIN payment_batch_items i ON i.batch_id = b.id
       WHERE b.bank = $1 AND b.status <> 'cancelled' AND i.status <> 'cancelled'
-        AND b.created_at >= NOW() - make_interval(days => $2)`,
-    [parse.bank, RESULT_FIND_DAYS]);
+        AND b.created_at >= NOW() - make_interval(days => $2)
+        AND ($3::timestamptz IS NULL OR b.created_at <= $3::timestamptz)`,
+    [parse.bank, RESULT_FIND_DAYS, createdBefore]);
   const byBatch = new Map();
   for (const r of cand) {
     if (!byBatch.has(r.id)) byBatch.set(r.id, { id: r.id, seq: r.seq, status: r.status, have: new Map(), pending: 0 });
