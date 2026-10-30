@@ -2385,6 +2385,17 @@
 .pmdrop{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:28px;padding:0 8px;border:1px dashed #9AA8B8;border-radius:6px;background:#fff;color:var(--t2,#59626F);font:inherit;font-size:11px;cursor:pointer}
 .pmdrop:hover{border-color:#1B75D0;background:#F5FAFF;color:#155BA5}
 .pmdropicon{font-size:14px;font-weight:800;line-height:1}
+/* 결정 308 — 결과 파일 한 곳에 놓기 */
+.pmanydrop{display:flex;align-items:center;gap:12px;width:100%;margin:0 0 12px;padding:12px 14px;border:1.5px dashed #9AA8B8;border-radius:8px;background:#fff;font:inherit;text-align:left;cursor:pointer;color:inherit}
+.pmanydrop:hover,.pmanydrop.over{border-color:#1B75D0;background:#F5FAFF}
+.pmanydrop svg{flex:none;width:30px;height:30px}
+.pmanydrop b{display:block;font-size:13px}
+.pmanydrop .s{display:block;font-size:11.5px;color:var(--t2,#59626F);margin-top:2px}
+.pmanydrop .pick{margin-left:auto;flex:none;border:1px solid #1B75D0;color:#155BA5;background:#F5FAFF;border-radius:6px;padding:5px 11px;font-size:12px;font-weight:600}
+#pmDropOv{position:fixed;inset:0;z-index:9100;background:rgba(27,117,208,.10);border:3px dashed #1B75D0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+#pmDropOv div{background:#fff;border:1px solid #1B75D0;border-radius:10px;padding:16px 22px;font-size:15px;font-weight:700;color:#155BA5;text-align:center}
+#pmDropOv div span{display:block;font-size:12px;font-weight:400;color:#3A4250;margin-top:4px}
+@media(max-width:720px){.pmanydrop .s{display:none}}
 .pmdrop.over{border-color:#1B75D0;background:#EAF4FF;color:#155BA5;font-weight:700}
 .pmwarn{color:#B3382E;font-size:11.5px}
 /* ── 입금관리 B스타일: 네이비 헤더 + 고밀도 운영 원장 ── */
@@ -13440,6 +13451,7 @@ function _pmRender(){
       <section class="pmbatchpanel">
         <h2 class="pmh2">대량이체</h2>
         <div id="pmBankBar">${_pmBankBarHtml()}</div>
+        ${_pmResultDropHtml()}
         <div id="pmBatchTableWrap">${_pmBatchTable(STATE.pmBatches||[])}</div>
         <div id="pmTodayChecks"></div>
       </section>
@@ -14276,6 +14288,7 @@ function _pmResultDragOver(event){
 function _pmResultDragLeave(event){ event.currentTarget.classList.remove('over'); }
 function _pmResultDrop(event, i){
   event.preventDefault();
+  event.stopPropagation();   // 결정 308 — 화면 전체 놓기와 두 번 올라가지 않게
   event.currentTarget.classList.remove('over');
   const f = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
   const b = (STATE.pmBatches||[])[i];
@@ -14317,6 +14330,73 @@ function _pmPickResult(i){
   };
   inp.click();
 }
+
+/* ── 결정 308 · 결과 파일 한 곳에 놓기(사용자 확정 2026-10-30) ─────────────
+   대량이체를 고르지 않는다. 입금관리 어디에 놓든 서버가 파일 줄의 계좌+금액으로 어느 대량이체 결과인지 찾고
+   같은 반영(result-auto-apply)을 한다. 못 찾거나 두 대량이체가 비슷하면 서버가 거부한다(화면은 그 말을 그대로 보인다). */
+function _pmResultDropHtml(){
+  return `<button type="button" class="pmanydrop" id="pmAnyDrop" onclick="_pmPickResultAny()" ondragover="_pmResultDragOver(event)" ondragleave="_pmResultDragLeave(event)" ondrop="_pmAnyDrop(event)">
+    <svg viewBox="0 0 30 30" aria-hidden="true"><path d="M8 3h11l5 5v19H8z" fill="#fff" stroke="#1B75D0" stroke-width="1.8" stroke-linejoin="round"/><path d="M19 3v5h5" fill="none" stroke="#1B75D0" stroke-width="1.8"/><path d="M16 23V13M12 17l4-4 4 4" fill="none" stroke="#1B75D0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span><b>이체결과 파일을 여기에 끌어다 놓으세요</b><span class="s">케이뱅크·하나은행 모두 · 어느 대량이체 결과인지 자동으로 찾아 바로 반영합니다</span></span>
+    <span class="pick">파일 고르기</span></button>`;
+}
+function _pmPickResultAny(){
+  const inp=document.createElement('input');
+  inp.type='file';
+  inp.accept='.xls,.xlsx,.csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv';
+  inp.onchange=()=>{ const f=inp.files&&inp.files[0]; if(f) _pmUploadResultAny(f); };
+  inp.click();
+}
+function _pmAnyDrop(event){
+  event.preventDefault();
+  event.stopPropagation();
+  event.currentTarget.classList.remove('over');
+  _pmDropOvHide();
+  const f=event.dataTransfer&&event.dataTransfer.files&&event.dataTransfer.files[0];
+  if(f) _pmUploadResultAny(f);
+}
+let _pmAnyBusy=false;
+async function _pmUploadResultAny(f){
+  if(_pmAnyBusy){ toast('결과 파일을 반영하는 중입니다. 잠시만 기다려 주세요'); return; }
+  if(f.size > 12*1024*1024){ toast('파일이 너무 큽니다(12MB 초과)'); return; }
+  _pmAnyBusy=true;
+  try{
+    toast('결과 파일에 맞는 대량이체를 찾는 중…');
+    let base64;
+    try { base64 = await _pmFileB64(f); }
+    catch(e){ toast('파일을 읽지 못했습니다: '+e.message); return; }
+    const r = await api('/api/trackb/payment/result-auto-apply', { method:'POST', body: JSON.stringify({ fileName:f.name, base64 }) });
+    if(!r || !r.ok){ toast((r&&r.error)||'결과 파일을 해석하지 못했습니다.'); return; }
+    const fd=r.found||{};
+    if(r.alreadyDone){ toast(`#${fd.seq} 대량이체 결과 파일입니다 — 이미 모두 처리돼 바꿀 것이 없습니다`); await _pmLoad(true); return; }
+    const known=(STATE.pmBatches||[]).find(x=>x.id===fd.batchId);
+    const b=known||{ id:fd.batchId, seq:fd.seq, bank:fd.bank, bankLabel:fd.bankLabel||'' };
+    STATE.pmResult = { batch:b, file:{ name:f.name }, preview:r, persisted:true, autoApplied:r.autoApplied===true };
+    _pmResultModal();
+    await _pmLoad(true);
+  } finally { _pmAnyBusy=false; }
+}
+/* 화면 어디에 놓아도 — 입금관리일 때만 · 파일을 끌 때만 · 다른 칸이 먼저 받았으면(preventDefault) 손대지 않는다 */
+function _pmDropOvShow(){
+  if(document.getElementById('pmDropOv')) return;
+  const el=document.createElement('div'); el.id='pmDropOv';
+  el.innerHTML='<div>놓으면 이체 결과로 반영합니다<span>입금관리 화면 어디에 놓아도 됩니다</span></div>';
+  document.body.appendChild(el);
+}
+function _pmDropOvHide(){ const el=document.getElementById('pmDropOv'); if(el) el.remove(); }
+function _pmDragHasFiles(e){ return !!(e.dataTransfer && [...(e.dataTransfer.types||[])].includes('Files')); }
+function _pmPageDropOn(){ return STATE.view==='payment' && !document.querySelector('.pmrov') && !!document.getElementById('pmAnyDrop'); }
+let _pmDragDepth=0;
+document.addEventListener('dragenter', e=>{ if(!_pmDragHasFiles(e) || !_pmPageDropOn()) return; _pmDragDepth++; _pmDropOvShow(); });
+document.addEventListener('dragleave', e=>{ if(!_pmDragHasFiles(e)) return; _pmDragDepth=Math.max(0,_pmDragDepth-1); if(!_pmDragDepth) _pmDropOvHide(); });
+document.addEventListener('dragover', e=>{ if(_pmDragHasFiles(e) && _pmPageDropOn()) e.preventDefault(); });
+document.addEventListener('drop', e=>{
+  _pmDragDepth=0; _pmDropOvHide();
+  if(e.defaultPrevented || !_pmDragHasFiles(e) || !_pmPageDropOn()) return;
+  e.preventDefault();
+  const f=e.dataTransfer.files&&e.dataTransfer.files[0];
+  if(f) _pmUploadResultAny(f);
+});
 
 /* 확인은 파일 선택을 열지 않는다. 업로드 시 서버에 남긴 마스킹 미리보기를 읽는다. */
 async function _pmOpenResult(i){
