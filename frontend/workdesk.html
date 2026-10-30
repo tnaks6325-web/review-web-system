@@ -12248,7 +12248,7 @@ function _renderWoHead(){
   const c=STATE.woCounts||{};
   const rc=!!STATE.woRecon;
   const chip=(k,l)=>`<button class="btn${!rc&&STATE.woStatus===k?' pri':''}" onclick="STATE.woRecon=false;STATE.woStatus='${k}';_loadOrders()">${l}${c[k]?' '+c[k]:''}</button>`;
-  const rcN=STATE.rc&&STATE.rc.items?STATE.rc.items.length:null;
+  const rcN=STATE.rc&&STATE.rc.liveN!=null?STATE.rc.liveN:null;   // 결정 312: 진행 중 묶음 수만(마감 묶음을 보는 중에도)
   $('#wohead').innerHTML=`<div class="mh"><h1>작업오더</h1>
     <span class="sp" style="flex:1"></span>
     <button class="btn${!rc&&!STATE.woStatus?' pri':''}" onclick="STATE.woRecon=false;STATE.woStatus='';_loadOrders()">전체</button>
@@ -12270,11 +12270,15 @@ function _renderWoHead(){
    ★ 모양은 입금관리 C스타일 그대로(css/payment-c-style.css 를 #rcbody 에도 적용) — 담당자 하나 고르기 · 작업 줄 누르기 · 선택 칸은 배경·테두리·체크.
    ★ 맞추기 전에 서버에서 끝까지 해 보고(dryRun) 바뀌는 것을 확인창으로 보여 준다. 화면을 연 뒤 값이 바뀌었으면 서버가 막는다(지문). */
 function _rcAllowed(){ return STATE.role==='master' || STATE.role==='admin'; }
-function _rcState(){ if(!STATE.rc) STATE.rc={ items:null, mgr:'', q:'', open:null, picks:{}, busy:false, msg:'' }; return STATE.rc; }
+function _rcState(){ if(!STATE.rc) STATE.rc={ items:null, mgr:'', q:'', open:null, picks:{}, busy:false, msg:'', arch:false }; return STATE.rc; }
+/** 결정 312 — 진행 중 공고 / 마감된 공고 묶음 전환(마감 묶음은 공고 쪽으로만 맞춘다 · 담당자 팝업과 위 버튼 숫자는 진행 중 묶음만) */
+function _rcArch(on){ const st=_rcState(); if(st.arch===!!on) return; st.arch=!!on; st.items=null; st.picks={}; st.open=null; st.msg=''; _rcRender(); _rcLoad(); }
 function _rcOpen(){ STATE.woRecon=true; _renderWoHead(); _rcRender(); _rcLoad(); }
 async function _rcLoad(){
   const st=_rcState();
-  const r=await api('/api/trackb/bidir/reconcile');
+  const arch=!!st.arch;
+  const r=await api('/api/trackb/bidir/reconcile'+(arch?'?archived=1':''));
+  if(arch!==!!st.arch) return;   // 불러오는 사이 묶음을 바꿨다 — 옛 묶음 결과로 덮지 않는다
   if(!r||!r.ok){ st.loadError=(r&&r.error)||'불러오지 못했습니다.'; if(STATE.woRecon) _rcRender(); return; }
   st.loadError='';
   // 지문이 바뀐 작업(그 사이 값이 바뀜)은 고른 것을 버린다 — 옛 차이로 고른 것을 새 차이에 쓰지 않는다
@@ -12284,7 +12288,8 @@ async function _rcLoad(){
   const keep=new Set(st.items.map(x=>x.workOrderId));
   for(const k of Object.keys(st.picks)) if(!keep.has(k)) delete st.picks[k];
   if(st.open&&!keep.has(st.open)) st.open=null;
-  const n=$('#rcCount'); if(n) n.textContent=st.items.length?' '+st.items.length:'';
+  if(!arch) st.liveN=st.items.length;
+  const n=$('#rcCount'); if(n&&!arch) n.textContent=st.items.length?' '+st.items.length:'';
   if(STATE.woRecon) _rcRender();
 }
 function _rcMgr(it){ return _pmManagerName(it.workManager||''); }
@@ -12327,11 +12332,12 @@ function _rcDetail(it){
   // 고를 칸이 없는(합계만 다른) 작업 — 빈 표·「전부 ~쪽으로」 없이 안내만
   if(!_rcPickable(it).length) return `<div class="rcbox"><div class="rchead"><strong>${esc(it.title)} — 합계만 다름</strong><span class="sp"></span>${_rcSkipBtn(it)}</div>${derNote}</div>`;
   return `<div class="rcbox"><div class="rchead"><strong>${esc(it.title)} — 다른 칸 ${_rcPickable(it).length}개</strong><span class="sp"></span>${_rcSkipBtn(it)}
-      <button type="button" class="pmmgr" onclick="_rcAll(${id},'order')">전부 오더 쪽으로</button><button type="button" class="pmmgr" onclick="_rcAll(${id},'campaign')">전부 공고 쪽으로</button></div>
-    <div class="rcgrid"><div class="rccol"></div><div class="rccol">인트라넷 리뷰오더 · 작업오더</div><div class="rccol">모집공고 (리뷰어 화면)</div>${rows}</div>${derNote}</div>`;
+      ${it.archived?'':`<button type="button" class="pmmgr" onclick="_rcAll(${id},'order')">전부 오더 쪽으로</button>`}<button type="button" class="pmmgr" onclick="_rcAll(${id},'campaign')">전부 공고 쪽으로</button></div>
+    <div class="rcgrid"><div class="rccol"></div><div class="rccol">인트라넷 리뷰오더 · 작업오더</div><div class="rccol">${it.archived?'모집공고 (마감 · 바뀌지 않음)':'모집공고 (리뷰어 화면)'}</div>${rows}</div>${derNote}</div>`;
 }
 /** 「따로 두기」(결정 284) — 담당자 팝업이 묻지 않게 / 다시 묻게. 값·연결은 그대로(맞추기는 이 화면에서 언제든). */
 function _rcSkipBtn(it){
+  if(it.archived) return '';   // 결정 312: 마감 묶음은 담당자 팝업이 묻지 않는다
   if(it.skipped===undefined) return '';   // 구버전 서버 — 표시 자체가 없다(버튼을 보여 주면 눌러도 안 된다)
   return `<button type="button" class="pmmgr" title="${it.skipped?'담당자 팝업이 이 작업을 다시 묻습니다':'맞추지 않고 지금처럼 따로 둡니다 — 담당자 팝업이 더 묻지 않습니다'}" onclick="_rcSkip(${esc(JSON.stringify(it.workOrderId))},${it.skipped?'false':'true'})">${it.skipped?'다시 묻기':'따로 두기'}</button>`;
 }
@@ -12344,7 +12350,7 @@ async function _rcSkip(id,on){
 }
 function _rcListHtml(){
   const st=_rcState(); const list=_rcVisible();
-  if(!list.length) return `<div class="pmworkempty">${String(st.q||'').trim()?`‘${esc(String(st.q).trim())}’ 와 일치하는 작업이 없습니다.`:'값이 서로 다른 작업이 없습니다.'}</div>`;
+  if(!list.length) return `<div class="pmworkempty">${String(st.q||'').trim()?`‘${esc(String(st.q).trim())}’ 와 일치하는 작업이 없습니다.`:(st.arch?'마감된 공고와 값이 다른 작업이 없습니다.':'값이 서로 다른 작업이 없습니다.')}</div>`;
   return list.map(it=>{
     const mgr=_rcMgr(it), n=_rcPickable(it).length, k=_rcPicked(it);
     const meta=(it.blocked?'여기서 맞출 수 없음':(n?`다른 칸 ${n}개 · 고름 ${k}/${n}`:'합계만 다름 · 고를 칸 없음'))+(it.skipped?' · 따로 둠(담당자 팝업이 묻지 않음)':'');
@@ -12368,13 +12374,15 @@ function _rcRender(){
       <div class="pmmanagers" role="group" aria-label="담당자 선택" title="담당자 = 작업오더의 작업담당(입금관리와 같은 값)">
         <div class="pmsearch ${String(st.q||'').trim()?'has':''}"><span class="pmsearchic" aria-hidden="true">🔎</span><input id="rcQ" class="pmsearchin" type="search" autocomplete="off" placeholder="작업명 검색" aria-label="작업 검색" value="${esc(st.q||'')}" oninput="_rcSearch(this.value)"><button type="button" class="pmsearchx" title="검색어 지우기" aria-label="검색어 지우기" onclick="_rcSearch('',true)">✕</button></div>
         ${mb('','전체')}${mgrs.map(m=>mb(m,m)).join('')}</div>
+      <div class="pmmanagers" role="group" aria-label="공고 상태" title="마감된 공고 = 보관된 공고와 값이 다른 작업 — 공고는 그대로 두고 오더·인트라넷을 공고 값으로 맞춥니다">
+        <button type="button" class="pmmgr${st.arch?'':' on'}" aria-pressed="${!st.arch}" onclick="_rcArch(false)">진행 중 공고</button><button type="button" class="pmmgr${st.arch?' on':''}" aria-pressed="${!!st.arch}" onclick="_rcArch(true)">마감된 공고</button></div>
       <div class="pmworkhead"><strong>작업 선택</strong><span>누른 작업의 다른 칸이 아래에 펼쳐집니다</span></div>
       <div class="pmworklist rclist">${_rcListHtml()}</div>
     </div>
     <aside class="pmsummary"><div><div class="pmsummarytitle">고른 내용</div><p class="pmsummarycopy">칸마다 남길 쪽을 다 고른 작업만 맞춥니다. 맞추기 전에 무엇이 바뀌는지 한 번 더 보여 드립니다.</p></div>
       <div class="pmresultgrid"><div class="pmresult"><span>다 고른 작업</span><strong>${done}개</strong></div><div class="pmresult total"><span>남은 칸${open?'(펼친 작업)':''}</span><strong>${left}개</strong></div></div>
       <button type="button" class="btn pri pmdownload" ${done&&!st.busy?'':'disabled'} onclick="_rcApply()">${st.busy?'맞추는 중…':`고른 대로 맞추고 연결${done?` (${done}개)`:''}`}</button>
-      <p class="pmdownloadnote">맞춘 뒤에는 한쪽을 고치면 다른 쪽도 따라 바뀝니다. 고르지 않은 작업은 지금처럼 따로 돕니다.</p>
+      <p class="pmdownloadnote">${st.arch?'마감된 공고는 바뀌지 않습니다. 오더와 인트라넷 리뷰오더가 공고 값으로 바뀝니다.':'맞춘 뒤에는 한쪽을 고치면 다른 쪽도 따라 바뀝니다. 고르지 않은 작업은 지금처럼 따로 돕니다.'}</p>
       ${st.msg?`<p class="pmdownloadnote" style="color:#1B4F9C;font-weight:700">${esc(st.msg)}</p>`:''}</aside>
     </div></section></div>`;
 }
@@ -12404,7 +12412,7 @@ async function _rcApply(){
   st.busy=true; st.msg=''; _rcRender();
   const tried=[];
   for(const it of ready){
-    const r=await api('/api/trackb/bidir/reconcile/'+encodeURIComponent(it.workOrderId),{ method:'POST', body:JSON.stringify({ picks:st.picks[it.workOrderId], fingerprint:it.fingerprint, dryRun:true }) });
+    const r=await api('/api/trackb/bidir/reconcile/'+encodeURIComponent(it.workOrderId),{ method:'POST', body:JSON.stringify({ picks:st.picks[it.workOrderId], fingerprint:it.fingerprint, dryRun:true, ...(it.archived?{ archived:true }:{}) }) });
     tried.push({ it, ok:!!(r&&r.ok), r });
   }
   st.busy=false; _rcRender();
@@ -12412,7 +12420,7 @@ async function _rcApply(){
   const line=(it,f)=>{ const side=(st.picks[it.workOrderId]||{})[f.id];
     return side==='campaign' ? `<li><b>오더·인트라넷</b> ${esc(f.label)}: ${esc(f.orderText)} → ${esc(f.campaignText)}</li>` : `<li><b>모집공고</b> ${esc(f.label)}: ${esc(f.campaignText)} → ${esc(f.orderText)}</li>`; };
   const html=tried.map(x=>`<div style="margin:0 0 12px"><div style="font-weight:800;margin-bottom:4px">${x.ok?'':'⚠ '}${esc(x.it.title)}</div>`
-    +(x.ok?`<ul style="margin:0;padding-left:18px;line-height:1.7">${_rcPickable(x.it).map(f=>line(x.it,f)).join('')}${(x.it.fields||[]).filter(f=>f.derived).map(f=>`<li><b>모집공고</b> ${esc(f.label)}: 옵션별 값의 합계로 다시 맞춥니다</li>`).join('')}</ul>`
+    +(x.ok?`<ul style="margin:0;padding-left:18px;line-height:1.7">${_rcPickable(x.it).map(f=>line(x.it,f)).join('')}${(x.it.fields||[]).filter(f=>f.derived).map(f=>x.it.archived?`<li><b>오더·인트라넷</b> ${esc(f.label)}: ${esc(f.orderText)} → ${esc(f.campaignText)}</li>`:`<li><b>모집공고</b> ${esc(f.label)}: 옵션별 값의 합계로 다시 맞춥니다</li>`).join('')}</ul>`
       +((x.r.closed_options||[]).length?`<div style="margin-top:4px;color:#8A5A00">이미 참여한 분이 있어 지우지 않고 마감으로 남깁니다: ${x.r.closed_options.map(c=>esc([c.pName,c.oLabel].filter(Boolean).join(' / '))+` (${c.used}명)`).join(', ')}</div>`:'')
       :`<div style="color:#B3382E">맞출 수 없습니다 — ${esc((x.r&&x.r.error)||'알 수 없는 오류')}</div>`)+`</div>`).join('');
   _modal('고른 대로 맞추기 — 확인', `${html}<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
@@ -12426,7 +12434,7 @@ async function _rcCommit(){
   let ok=0; const fail=[];
   for(const id of ids){
     const it=(st.items||[]).find(x=>x.workOrderId===id); if(!it) continue;
-    const r=await api('/api/trackb/bidir/reconcile/'+encodeURIComponent(id),{ method:'POST', body:JSON.stringify({ picks:st.picks[id], fingerprint:it.fingerprint, opId:'rc-'+id+'-'+it.fingerprint }) });
+    const r=await api('/api/trackb/bidir/reconcile/'+encodeURIComponent(id),{ method:'POST', body:JSON.stringify({ picks:st.picks[id], fingerprint:it.fingerprint, opId:'rc-'+id+'-'+it.fingerprint, ...(it.archived?{ archived:true }:{}) }) });
     if(r&&r.ok){ ok++; delete st.picks[id]; if(st.open===id) st.open=null; }
     else fail.push(`${it.title}: ${(r&&r.error)||'알 수 없는 오류'}`);
   }

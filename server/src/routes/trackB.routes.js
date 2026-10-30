@@ -4398,7 +4398,8 @@ router.post('/payment/batch/:id/confirm-failures', authMiddleware, adminOrMaster
 // ═══════════════════════════════════════════════════════════
 router.get('/bidir/reconcile', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const out = await require('../services/sharedReconcile.service').listReconcile(pool);
+    // 결정 312 — ?archived=1 = 마감(보관)된 공고 묶음(관리자 화면 전용 · 담당자 팝업은 기본 목록만 본다)
+    const out = await require('../services/sharedReconcile.service').listReconcile(pool, { archived: req.query.archived === '1' });
     res.json({ ok: true, ...out });
   } catch (err) { next(err); }
 });
@@ -4417,7 +4418,7 @@ router.post('/bidir/reconcile/:woId', authMiddleware, adminOrMasterMiddleware, a
     const b = req.body || {};
     const picks = b.picks && typeof b.picks === 'object' && !Array.isArray(b.picks) ? b.picks : {};
     const r = await require('../services/sharedReconcile.service').reconcileSharedOrder({
-      workOrderId: String(req.params.woId || ''), picks, fingerprint: String(b.fingerprint || ''), dryRun: b.dryRun === true,
+      workOrderId: String(req.params.woId || ''), picks, fingerprint: String(b.fingerprint || ''), dryRun: b.dryRun === true, archived: b.archived === true,
       actor: (req.admin && req.admin.name) || '오더·공고 맞추기', opId: String(b.opId || '').slice(0, 80) });
     res.status(r.status).json(r.body);
   } catch (err) { next(err); }
