@@ -182,7 +182,9 @@ const db = {
       }] };
       if (/INSERT INTO review_inspections/.test(sql)) {
         if (/resolution = NULL/.test(sql)) pendingWrite = { sql, params };
-        return { rows: [], rowCount: 1 };
+        return /RETURNING\s+status,\s*checks/i.test(sql)
+          ? { rows: [{ status: params[6], checks: JSON.parse(params[7]) }], rowCount: 1 }
+          : { rows: [], rowCount: 1 };
       }
       throw new Error('unexpected inspection query: ' + sql);
     },

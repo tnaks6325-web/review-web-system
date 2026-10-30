@@ -75,6 +75,10 @@ console.log('\n② reviewTypeForRow(스텁 pool 실행)');
   ok('★ 조회 실패는 null — throw 하지 않는다(fail-open)',
     (await ctx.reviewTypeForRow({ sheetId: 's1', tabName: 't1', rowIndex: 7 })) === null);
 
+  // 검수 전용 strict 경로는 조회 실패와 실제 빈 값을 구별한다. 제출 입구 기본값은 위와 동일하다.
+  await assert.rejects(ctx.reviewTypeForRow({ sheetId: 's1', tabName: 't1', rowIndex: 7, strict: true }), /42P01/);
+  ok('2차 검수만 strict 조회 실패를 식별한다', true);
+
   // 입력 미비 → 쿼리 자체를 안 보낸다
   let called = 0;
   ctx.__setPoolForTest(mkPool(async () => { called++; return { rows: [] }; }));
@@ -88,7 +92,8 @@ console.log('\n② reviewTypeForRow(스텁 pool 실행)');
   const inspectSrc = readS('services/reviewInspect.service.js');
   const inspBody = inspectSrc.slice(inspectSrc.indexOf('async function inspectSubmission'));
   ok('2차 검수: 행 우선 유효 리뷰타입으로 형식 판정(_okKinds)',
-    /reviewTypeForRow\(\{ sheetId, tabName, rowIndex \}\)/.test(inspBody)
+    /reviewTypeForRow\(\{ sheetId, tabName, rowIndex, strict: true \}\)/.test(inspBody)
+    && /catch \(_\) \{ _rowTypeFailed = true; \}/.test(inspBody)
     && /resolveReviewType\(\{ rowOption: _rowType, campaignType: exp\.reviewType \}\)/.test(inspBody)
     && /effReviewType === 'confirm' \? \['review', 'purchase_confirm'\] : \['review'\]/.test(inspBody));
   const diagSrc = readS('routes/diag.routes.js');
