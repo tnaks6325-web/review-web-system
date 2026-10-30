@@ -2092,7 +2092,11 @@
   .tp3grid.c3.fold .wdcsmini-pane{height:auto;max-height:none;min-height:0}
   .tp3grid.c3.fold .wdcsmini-body{display:none}
   .cndchip{display:inline-block;background:var(--chip,#eef4ff);color:var(--p,#2456c9);border-radius:5px;padding:0 6px;font-size:10px;font-weight:700;vertical-align:1px}
-  .cndsales{display:grid;gap:4px}
+  .cndsales{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px}
+  .cndsales>.cndsalerow{flex:1 1 0;min-width:0}
+  .cndsalesmore{width:100%;display:grid;gap:4px}
+  .cndsalesmore[hidden]{display:none}
+  .cndsalestoggle{flex:none;white-space:nowrap;font:inherit;font-size:11px;color:var(--accent,#007aff);background:none;border:0;padding:0;cursor:pointer}
   .cndprice{display:grid;gap:3px}
   .cndl dd.cndprice{white-space:normal;overflow:visible;text-overflow:clip;min-width:0}
   .cndpricehist{font-size:11px;font-weight:600;color:var(--muted);line-height:1.45;white-space:normal;overflow-wrap:anywhere}
@@ -7895,20 +7899,41 @@ function _condCardHtml(wd,d,m){
      누르면 whole:true 로 보낸다(이름 없는 요청은 서버가 거절 — 공고를 통째로 멈추려면 명시해야 한다). */
 function _cndSalesRow(cd){
   const list=Array.isArray(cd&&cd.optionSales)?cd.optionSales:[];
+  const view=_cndSalesView(cd);
   if(!list.length||STATE.role==='advertiser'||!cd.campaignId) return '';
   /* ★ 사용자 확정 2026-10-19(B안): 줄 이름 「품절유무」 · 「판매 중」·「멈춤」 배지 없음 — 상태는 버튼 글자로만([멈추기] = 열려 있음 / [열기] = 멈춤).
      상품마다 **버튼까지 한 줄**(긴 이름은 「…」 · 마우스를 올리면 전체 이름). 공고 전체 줄은 이름 없이 버튼만.
      보여줄 것이 없는 줄(버튼 없음 — 보관·읽기 전용 · 신고도 없음)은 그리지 않는다. */
-  const items=list.map((o,i)=>{
+  // 표시 순서만 바꾼다. _cndSale(i)가 원본 배열을 읽으므로 원래 첨자를 보존한다.
+  const ordered=list.map((o,i)=>({o,i})).sort((a,b)=>Number(!!(b.o.paused||b.o.reports>0))-Number(!!(a.o.paused||a.o.reports>0))||a.i-b.i);
+  const items=ordered.map(({o,i})=>{
     const why=o.paused?`멈춤 — 새 신청을 받지 않습니다${o.pausedBy?` (${o.pausedReason==='auto_soldout'?'품절 신고 2명으로 자동':o.pausedBy})`:''}`:'';
     const rep=(!o.paused&&o.reports>0)?`<span class="cndchip" title="리뷰어가 품절이라 취소한 신고입니다 — 다른 리뷰어 2명이면 자동으로 멈춥니다.">신고 ${Number(o.reports)}</span>`:'';
     const btn=STATE.canEdit?`<button type="button" class="cndsalebtn${o.paused?'':' stop'}" onclick="_cndSale(${i})" title="${esc((o.whole?'공고 전체':o.optKey)+(o.paused?` · ${why} — 누르면 다시 엽니다`:' · 누르면 새 신청을 멈춥니다'))}">${o.paused?'열기':'멈추기'}</button>`:'';
     const nm=o.whole?'':`<span class="cndsalenm" title="${esc(o.optKey+(why?` · ${why}`:''))}">${esc(o.optKey)}</span>`;
     if(!btn&&!rep) return '';
     return `<div class="cndsalerow">${nm}${rep}${btn}</div>`;
-  }).join('');
-  if(!items) return '';
-  return `<dt>품절유무</dt><dd class="cndsales">${items}</dd>`;
+  }).filter(Boolean);
+  if(!items.length) return '';
+  const more=items.length-1;
+  const toggle=more?`<button type="button" class="cndsalestoggle" onclick="_cndSalesToggle(this)" aria-expanded="${view.expanded}" aria-controls="cndSalesMore">${view.expanded?'접기':`외 ${more}개 펼치기`}</button>`:'';
+  return `<dt>품절유무</dt><dd class="cndsales" data-sales-key="${esc(view.key)}">${items[0]}${toggle}${more?`<div id="cndSalesMore" class="cndsalesmore"${view.expanded?'':' hidden'}>${items.slice(1).join('')}</div>`:''}</dd>`;
+}
+// 같은 작업의 실시간 갱신은 유지하되 다른 탭·공고에는 펼침 상태를 넘기지 않는다.
+function _cndSalesView(cd){
+  const t=STATE.cur||{};
+  const key=JSON.stringify([t.sheetId||'',t.tabGid||t.tabName||'',cd&&cd.campaignId||'']);
+  if(!STATE._cndSalesView||STATE._cndSalesView.key!==key) STATE._cndSalesView={key,expanded:false};
+  return STATE._cndSalesView;
+}
+function _cndSalesToggle(button){
+  const cd=STATE.wd&&STATE.wd.condition, view=_cndSalesView(cd);
+  const dd=button.closest('.cndsales'), more=dd&&dd.querySelector('.cndsalesmore');
+  if(!more||dd.dataset.salesKey!==view.key) return;
+  view.expanded=!view.expanded;
+  more.hidden=!view.expanded;
+  button.setAttribute('aria-expanded',String(view.expanded));
+  button.textContent=view.expanded?'접기':`외 ${more.children.length}개 펼치기`;
 }
 /* ★ 결정 266: 가격 신고 — 상품별 쌓인 신고 수 + 최근 처리 이력(고침 전→후 · 그대로 · 보류 · 누가 · 언제).
    ★ 서버가 준 `priceReports` 를 그리기만 한다 · null/신고·이력 모두 없음 = 줄을 그리지 않는다(구버전 서버와 같은 화면).
