@@ -47,7 +47,8 @@ const roi = require('../src/services/reviewerOrderIdentity.service');
   assert.ok(sub.indexOf('let firstCaptureImageHash') > 0 && sub.indexOf('let firstCaptureImageHash') < sub.indexOf('firstCaptureImageHash = String(') && sub.indexOf('firstCaptureImageHash = String(') < sub.indexOf('firstImageHash: firstCaptureImageHash'), 'declared → set by identity gate → used by memo gate');
   const sa = read('frontend/js/search-app.js');
   assert.ok(/capture2Token:\s+_cardAiState\[cid\]\?\.img2\?\.capture2Token \|\| ""/.test(sa) && /capture2Token:\s+o\.capture2Token \|\| ""/.test(sa), 'screen carries the proof to submit');
-  assert.ok(/img\.capture2Token = \(json && json\.capture2Token\) \|\| "";\s*\/\/[^\n]*\n\s*if \(!json \|\| !json\.ok\)/.test(sa), 'proof kept even when the 2nd photo could not be read');
+  // 2026-10-30(결정 308): 사이에 「서버에 못 닿음」 갈래가 끼었다 — 서명은 그보다 먼저 담는다(의미 불변).
+  assert.ok(/img\.capture2Token = \(json && json\.capture2Token\) \|\| "";\s*\/\/[^\n]*\n(\s*if \(json && json\._transport\) \{[^\n]*\n)?\s*if \(!json \|\| !json\.ok\)/.test(sa), 'proof kept even when the 2nd photo could not be read');
   assert.equal((sa.match(/id="\$\{cid\}_img2Add" style="display:none;/g) || []).length, 2, 'both card layouts have the (hidden) add-photo row');
 }
 

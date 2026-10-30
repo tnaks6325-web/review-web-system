@@ -363,6 +363,64 @@ async function _saveAutoApplyDecision(uploadId, autoApply) {
     [uploadId, JSON.stringify({ autoApply })]);
 }
 
+/**
+ * 결과 파일 한 곳에 놓기(결정 309 · 사용자 확정 2026-10-30) — 대량이체를 고르지 않고 파일만 놓으면
+ * 파일 줄의 계좌+금액으로 어느 대량이체 결과인지 찾는다(쓰기 0). 반영은 찾은 대량이체로 autoApplyResultFile 그대로.
+ * ★ 모르면 반영하지 않는다(fail-closed): 은행 파일이 아님 · 어느 대량이체와도 절반 넘게 안 맞음 ·
+ *   두 대량이체가 비슷하게 맞음(둘째가 첫째의 80% 이상) → 거부. 줄 번호·순서는 근거로 쓰지 않는다(결정 186 계좌+금액).
+ * 후보 = 그 은행 · 취소 안 된 · 최근 45일 대량이체의 **모든** 대상(이미 완료된 사람 포함 — 통장으로 먼저 완료돼도 같은 파일을 찾는다).
+ * ★ 파일의 가장 이른 이체 시각보다 뒤에 만든 대량이체는 후보가 아니다(Codex P1) — 옛 결과 파일의 같은 사람·같은 금액이
+ *   새 대량이체에 다시 담겨 있어도 그 새 대량이체를 고르지 않는다(만들기 전에 이체될 수 없다). 시각이 없으면 이 조건은 건너뛴다.
+ */
+const RESULT_FIND_CLOCK_SLACK_MS = 10 * 60 * 1000;
+const RESULT_FIND_DAYS = 45;
+async function findBatchForResultFile({ fileName, base64 }) {
+  if (!base64) throw new ResultError('bad_request', '파일이 비어 있습니다.');
+  if (String(base64).length > MAX_BASE64) throw new ResultError('too_large', '파일이 너무 큽니다(12MB 초과).');
+  let buf;
+  try { buf = Buffer.from(String(base64), 'base64'); }
+  catch (_) { throw new ResultError('bad_file', '파일을 읽지 못했습니다.'); }
+  const loaded = loadSheetAoa(buf, fileName || '');
+  if (!loaded.ok) throw new ResultError('bad_file', loaded.error);
+  const parse = parseResultAoa(loaded.aoa, {});
+  if (!parse.ok) throw new ResultError('parse_failed', parse.error);
+  const rows = (parse.rows || []).filter(r => r && r.accountDigits && Number(r.amount));
+  if (!rows.length) throw new ResultError('empty', '결과 파일에 계좌·금액이 있는 줄이 없습니다.');
+  const times = rows.map(r => Date.parse(r.transferredAtIso || '')).filter(Number.isFinite);
+  const createdBefore = times.length ? new Date(Math.min(...times) + RESULT_FIND_CLOCK_SLACK_MS).toISOString() : null;
+  const { rows: cand } = await _db().query(
+    `SELECT b.id, b.seq, b.status, i.bank_account, i.amount, i.status AS item_status
+       FROM payment_batches b JOIN payment_batch_items i ON i.batch_id = b.id
+      WHERE b.bank = $1 AND b.status <> 'cancelled' AND i.status <> 'cancelled'
+        AND b.created_at >= NOW() - make_interval(days => $2)
+        AND ($3::timestamptz IS NULL OR b.created_at <= $3::timestamptz)`,
+    [parse.bank, RESULT_FIND_DAYS, createdBefore]);
+  const byBatch = new Map();
+  for (const r of cand) {
+    if (!byBatch.has(r.id)) byBatch.set(r.id, { id: r.id, seq: r.seq, status: r.status, have: new Map(), pending: 0 });
+    const v = byBatch.get(r.id);
+    const k = `${digitsOnly(r.bank_account)}|${Number(r.amount) || 0}`;
+    v.have.set(k, (v.have.get(k) || 0) + 1);
+    if (r.item_status === 'pending') v.pending++;
+  }
+  const scored = [];
+  for (const v of byBatch.values()) {
+    const have = new Map(v.have);
+    let n = 0;
+    for (const r of rows) { const k = `${digitsOnly(r.accountDigits)}|${Number(r.amount) || 0}`; if ((have.get(k) || 0) > 0) { have.set(k, have.get(k) - 1); n++; } }
+    if (n) scored.push({ id: v.id, seq: v.seq, status: v.status, pending: v.pending, n });
+  }
+  scored.sort((x, y) => y.n - x.n);
+  const [best, second] = scored;
+  if (!best || best.n * 2 <= rows.length) {
+    throw new ResultError('no_batch', `어느 대량이체 결과인지 찾지 못했습니다(파일 ${rows.length}줄 중 가장 많이 맞는 대량이체가 ${best ? `#${best.seq} ${best.n}줄` : '없음'}). 최근 ${RESULT_FIND_DAYS}일 안에 만든 ${parse.bankLabel || ''} 대량이체의 결과 파일인지 확인해 주세요.`);
+  }
+  if (second && second.n * 5 >= best.n * 4) {
+    throw new ResultError('ambiguous', `#${best.seq}·#${second.seq} 두 대량이체에 비슷하게 맞아 어느 쪽 결과인지 정할 수 없습니다(${best.n}줄 · ${second.n}줄). 관리자에게 알려 주세요.`);
+  }
+  return { batchId: best.id, seq: best.seq, bank: parse.bank, bankLabel: parse.bankLabel || '', matchedRows: best.n, fileRows: rows.length, pending: best.pending };
+}
+
 /** Store every upload for audit, but change payment state only when the
  * explicitly approved auto-apply policy says the file belongs to this batch. */
 async function autoApplyResultFile({ batchId, fileName, base64, by, notifyFailed }) {
@@ -1488,4 +1546,4 @@ async function confirmOutstandingFailures({ batchId, by }) {
   }
 }
 
-module.exports = { previewResultFile, autoApplyResultFile, getLatestResultPreview, searchUnconfirmedWorkCandidates, inspectUnconfirmedWorkMatch, reviewUnconfirmedTransfer, createDuplicatePaymentCase, updateDuplicatePaymentCase, listDuplicatePaymentCases, findAccountMismatchCandidates, reconcileAccountMismatch, findAmountMismatchCandidates, reconcileAmountMismatch, applyResultFile, _commitBatchOutcome, markBatchApplied, backfillPaidDepositStamp, confirmOutstandingFailures, decideAutoApply, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest, __setPaymentApplyForTest, __assertFileBelongsToBatchForTest: _assertFileBelongsToBatch };
+module.exports = { previewResultFile, autoApplyResultFile, findBatchForResultFile, getLatestResultPreview, searchUnconfirmedWorkCandidates, inspectUnconfirmedWorkMatch, reviewUnconfirmedTransfer, createDuplicatePaymentCase, updateDuplicatePaymentCase, listDuplicatePaymentCases, findAccountMismatchCandidates, reconcileAccountMismatch, findAmountMismatchCandidates, reconcileAmountMismatch, applyResultFile, _commitBatchOutcome, markBatchApplied, backfillPaidDepositStamp, confirmOutstandingFailures, decideAutoApply, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest, __setPaymentApplyForTest, __assertFileBelongsToBatchForTest: _assertFileBelongsToBatch };

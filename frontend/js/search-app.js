@@ -7908,6 +7908,7 @@ async function _callCardExtractAi2Run(cid) {
   if (st.img2 !== img || img.req !== req) return;   // 그 사이 바꾸거나 뺐다
   img.busy = false;
   img.capture2Token = (json && json.capture2Token) || "";   // 결정 300 — 판독을 못 해도 서버가 받았으면 있다
+  if (json && json._transport) { say("2장째 · 사진을 서버로 보내지 못했어요 — 연결을 확인하고 이 사진을 빼고 다시 올려 주세요"); return; }
   if (!json || !json.ok) { say("2장째 첨부됨 · 내용은 읽지 못했지만 사진은 함께 제출됩니다"); return; }
   img.memoToken = json.deliveryMemoToken || "";
   // 상품명 — 첫 장에서 못 읽었을 때만 2장째 판독값을 쓴다(첫 장 값·리뷰어가 고른 상품은 덮지 않는다).
@@ -8030,7 +8031,10 @@ async function _callCardExtractAi(cid, base64, mimeType) {
       st.extractToken = json?.extractToken || "";
       st.imageHash = json?.imageHash || "";
       _showCardAiError(cid, json?.error||"알 수 없는 오류", true);
-      _renderIdentityMatchState(cid, "ERROR", ["AI 분석을 완료하지 못했습니다."], !!st.extractToken);
+      // ★ 2026-10-30 — 사진이 서버에 닿지 못한 경우(연결 끊김·시간 초과)를 AI 실패로 안내하지 않는다(운영: 서버 판독 실패 0건인데 이 문구가 뜸).
+      _renderIdentityMatchState(cid, "ERROR", [json && json._transport
+        ? "사진을 서버로 보내지 못했어요. 인터넷 연결을 확인하고 「캡처 다시 분석하기」를 눌러 주세요."
+        : "AI 분석을 완료하지 못했습니다."], !!st.extractToken);
       return;
     }
 
@@ -9522,6 +9526,7 @@ async function submitOrderForm() {
       //   과거엔 실패해도 화면이 '성공'이라 리뷰어가 첨부됐다고 믿고 창을 닫았다.
       const _capSlot = { idx: i + 1, recipient: o.recipient || o.orderer || "",
                          has: !!(o.imgThumbSrc && o.imgThumbSrc.startsWith("data:")),
+                         has2: !!(o.img2Src && o.img2Src.startsWith("data:")),   // 2026-10-30 — 참여 화면이 2장째 저장을 기다리게(아래 uploadsPending)
                          status: "none", osId: (res && res.orderSubmissionId) || "" };
       (window._capUploads = window._capUploads || []).push(_capSlot);
       if (o.imgThumbSrc && o.imgThumbSrc.startsWith("data:")) {
@@ -9730,7 +9735,18 @@ async function submitOrderForm() {
     const _derived = !_okr.length ? null
       : (_okr.every(r => r.hold === "confirmed") ? "confirmed"
          : ((_okr.find(r => r.hold && r.hold !== "confirmed") || {}).hold || "late"));
-    _embedPost({ type: "order-submitted", successCount, campaignHold: _derived, results });
+    /* ★ 2026-10-30 — 사진 저장은 제출 뒤 뒤에서 첫 장 → 2장째 순서로 진행된다. 부모가 바로 「참여 확정」을 띄우고
+       리뷰어가 「내 참여현황 보기」로 떠나면 2장째는 보내지지도 않았다(운영: 10/30 2장째 저장 0건 · 로컬 재현).
+       아직 저장 중이면 부모에 알리고(uploadsPending), 끝나면 capture-uploads-done 을 보낸다 — 부모는 그동안 떠나는 버튼을 잠근다. */
+    const _capList = window._capUploads || [];
+    const _uploadsPending = _capList.some(x => x.status === "uploading" || x.status2 === "uploading" || (x.has2 && x.status === "ok" && !x.status2));
+    _embedPost({ type: "order-submitted", successCount, campaignHold: _derived, results, uploadsPending: _uploadsPending });
+    if (_uploadsPending && window._capUploadChain) {
+      window._capUploadChain.then(() => {
+        const failed = _capList.filter(x => x.status === "fail" || x.status2 === "fail").length;
+        _embedPost({ type: "capture-uploads-done", failed });
+      });
+    }
   }
 }
 
