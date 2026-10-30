@@ -29,6 +29,14 @@ const rdm = require('../src/services/requiredDeliveryMemo.service');
   assert.ok(!ok('문 앞', '00') && !ok('', '00') && !ok('0', '00'), 'missing → fail');
   assert.ok(ok('ABC 부탁', 'abc') && !ok('OO', 'O0X'), 'letters: case-insensitive, O→0 only for digits-only required');
   assert.ok(ok('', '') && ok('아무거나', '  '), 'no required → always pass');
+  // 2026-10-30 — 문장부호·기호 무시(운영: 「문앞에 놓아주세요!」 공고에서 느낌표만 빠진 5건이 직원 확인으로)
+  assert.ok(ok('문 앞에 놓아주세요', '문앞에 놓아주세요!') && ok('문앞에 놓아주세요.', '문앞에 놓아주세요!') && ok('문앞에~놓아주세요!!', '문앞에 놓아주세요!'), 'punctuation ignored');
+  assert.ok(!ok('문앞에 보관해주세요!', '문앞에 놓아주세요!'), 'different words still fail');
+  assert.ok(ok('(00)', '00') && ok('0-0', '00') && ok('OO!', '00'), 'digits: symbols between/around ignored, O→0 kept');
+  assert.ok(ok('부재시 ♥♥', '♥♥') && !ok('부재시', '♥♥'), 'symbol-only required: compared as-is, never pass-all');
+  // Codex P2 2건 — ○ 로 읽힌 0 · 꾸밈 문자가 붙은 이모지
+  assert.ok(ok('○○', '00') && ok('0○', '00') && ok('〇〇 부재시', '00'), 'circle zeros converted before symbols are stripped');
+  assert.ok(ok('부재시 ❤️', '❤️') && !ok('☀️', '❤️') && !ok('부재시', '❤️'), 'emoji-only required: variation selector does not make it pass-all');
 
   assert.deepEqual(rdm.decide({ required: '', memo: '' }), { action: 'none' });
   assert.equal(rdm.decide({ required: '00', memo: '00' }).action, 'ok');
