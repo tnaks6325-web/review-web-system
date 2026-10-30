@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const {
   SourceContractError,
   normalizeReviewOrderSourceContract,
+  sourceWorkLineageMatches,
 } = require('../services/reviewOrderSourceContract.service');
 const {
   LEGACY_WORKBOARD_SCHEMA_VERSION,
@@ -1151,8 +1152,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
     if (Number(current.workboard_schema_version || LEGACY_WORKBOARD_SCHEMA_VERSION) !== source.workboardSchemaVersion) {
       return res.status(409).json({ ok: false, code: 'workboard_schema_immutable', error: '작업표 규격은 원본 작업오더 생성 후 변경할 수 없습니다.', work_order_id: current.id });
     }
-    if (String(current.work_series_id || '') !== String(source.workSeriesId || '')
-      || Number(current.work_round || 1) !== Number(source.workRound || 1)) {
+    if (!sourceWorkLineageMatches(current, source)) {
       return res.status(409).json({ ok: false, code: 'work_round_immutable', error: '기존 작업오더의 작업 계열과 차수는 수정할 수 없습니다. 차수 추가를 사용하세요.', work_order_id: current.id });
     }
 
