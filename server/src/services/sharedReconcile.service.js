@@ -348,17 +348,30 @@ function planReconcile(wo, camp, opts, picks = null) {
  * 맞추고 연결한다(또는 dryRun = 끝까지 해 보고 되돌린다) — 쓰기는 공유 저장 한 곳(`applySharedPatch`, origin 'reconcile').
  * @returns {Promise<{status:number, body:object}>}
  */
-async function reconcileSharedOrder({ workOrderId, picks, fingerprint: fp, dryRun = false, actor = '', opId = '', db } = {}) {
+async function reconcileSharedOrder({ workOrderId, picks, fingerprint: fp, dryRun = false, archived = false, actor = '', opId = '', db } = {}) {
   const { applySharedPatch } = require('./sharedPatch.service');
   return applySharedPatch({ workOrderId, origin: 'reconcile', actor, opId: dryRun ? '' : opId, db,
-    mine: {}, baseVersion: 0, reconcile: { picks: picks || {}, fingerprint: fp, dryRun: !!dryRun } });
+    mine: {}, baseVersion: 0, reconcile: { picks: picks || {}, fingerprint: fp, dryRun: !!dryRun, archived: archived === true } });
 }
+
+/* ★★ 결정 312 — 마감(보관)된 공고로 맞추기. 살아 있는 공고가 없을 때만, 짝지어진(LINKED_WO_ON) 보관 공고 중 가장 최근에 보관된 것 하나.
+   목록(listReconcile archived)과 저장(applySharedPatch)이 **이 한 SQL** 을 같이 쓴다(짝 고르는 규칙이 갈리면 화면과 저장이 다른 공고를 본다). */
+function archivedCampaignSql(woExpr, lock) {
+  const { LINKED_WO_ON } = require('./linkedRecruitQuota.service');
+  return `SELECT c.* FROM recruit_campaigns c JOIN work_orders w ON w.id = ${woExpr}
+     WHERE c.archived_at IS NOT NULL AND ${LINKED_WO_ON}
+       AND NOT EXISTS (SELECT 1 FROM recruit_campaigns l WHERE l.archived_at IS NULL
+                        AND ((NULLIF(w.linked_campaign_id, '') = l.id) OR (NULLIF(l.source_work_order_id, '') = w.id)))
+     ORDER BY c.archived_at DESC, c.id DESC LIMIT 1${lock ? ' FOR UPDATE OF c' : ''}`;
+}
+const ARCHIVED_ORDER_SIDE = { ok: false, reason: '마감된 공고는 바꾸지 않습니다 — 공고 쪽으로만 맞출 수 있습니다' };
 
 /**
  * 값이 다른 작업 목록 — 인트라넷 리뷰오더로 들어와 살아 있는(보관 아님) 공고가 있고 아직 연결(on) 전인 오더 중 다른 칸이 있는 것.
  * ★ 읽기만 한다.
  */
-async function listReconcile(db) {
+async function listReconcile(db, { archived = false } = {}) {
+  if (archived) return _listArchivedReconcile(db);
   const { LINKED_WO_ON } = require('./linkedRecruitQuota.service');
   // 공고 찾기 = liveCampaignForWorkOrders 와 같은 규칙(정방향·역방향 짝 · 보관 제외 · 가장 먼저 만든 것 하나)
   const { rows } = await db.query(`
@@ -403,6 +416,37 @@ async function listReconcile(db) {
   return { items, counts: { diverged: items.length } };
 }
 
+/**
+ * 결정 312 — 마감(보관)된 공고와 값이 다른 연결 전 오더 목록(관리자 「마감된 공고」 묶음 전용 · 담당자 팝업은 부르지 않는다).
+ * 칸마다 오더 쪽은 막는다(공고는 바꾸지 않는다). 공고 쪽으로 못 맞추는 칸이 하나라도 있으면 그 작업은 막힘.
+ * ★ 읽기만 한다.
+ */
+async function _listArchivedReconcile(db) {
+  const { rows } = await db.query(`
+    SELECT w0.*, row_to_json(c.*) AS _campaign,
+           (SELECT COALESCE(json_agg(o.* ORDER BY o.sort_order, o.id), '[]'::json) FROM campaign_options o WHERE o.campaign_id = c.id) AS _options
+      FROM work_orders w0
+      JOIN LATERAL (${archivedCampaignSql('w0.id', false)}) c ON TRUE
+     WHERE w0.deleted_at IS NULL AND COALESCE(w0.source_review_order_id, '') <> '' AND COALESCE(w0.bidir_state, 'off') <> 'on'
+     ORDER BY c.archived_at DESC`);
+  const items = [];
+  for (const r of rows) {
+    const camp = r._campaign, opts = r._options || [];
+    const base = { workOrderId: r.id, sourceReviewOrderId: r.source_review_order_id, title: r.title, workManager: r.work_manager || '',
+      campaignId: camp.id, campaignTitle: camp.title, archived: true, archivedAt: camp.archived_at };
+    let plan;
+    try { plan = planReconcile(r, camp, opts); }
+    catch (e) { items.push({ ...base, fields: [], fingerprint: '', blocked: '이 작업의 값을 읽지 못해 여기서 맞출 수 없습니다 — 개발 담당에게 알려 주세요.' }); continue; }
+    if (!plan.fields.length) continue;
+    const fields = plan.fields.map(f => f.derived ? f : { ...f, orderSide: ARCHIVED_ORDER_SIDE });
+    const stuck = fields.filter(f => !f.derived && !(f.campaignSide && f.campaignSide.ok));
+    const blocked = plan.blocked || (stuck.length ? `공고 쪽으로 맞출 수 없는 칸이 있어 마감된 공고로는 맞출 수 없습니다: ${stuck.map(f => f.label).join(', ')}` : null);
+    items.push({ ...base, fields, fingerprint: plan.fingerprint, blocked, joined: await _joinedCount(db, camp) });
+  }
+  // archived:true = 화면이 「마감 묶음을 아는 서버」 임을 확인하는 표시(배포 스큐 — 옛 서버는 ?archived=1 을 무시하고 진행 중 목록을 준다 · Codex P1)
+  return { items, counts: { diverged: items.length }, archived: true };
+}
+
 /** 「따로 두기」 표시(결정 284) — 담당자 팝업이 다시 묻지 않는 작업. 칸이 없는 옛 DB = 정하지 않음. */
 function _skipInfo(r) {
   return r && r.bidir_reconcile_skip_at
@@ -442,4 +486,4 @@ async function setReconcileSkip({ workOrderId, skip, actor = '', db } = {}) {
   return { status: 200, body: { ok: true, workOrderId: id, ..._skipInfo(rows[0]) } };
 }
 
-module.exports = { reconcileSharedOrder, listReconcile, setReconcileSkip, _skipInfo, diffFields, _mixArr, _stripRenameMarks, fingerprint, planReconcile, _pairRows, _mixedBody, PERMANENT, SCALAR_LABEL, LEAF_LABEL };
+module.exports = { reconcileSharedOrder, listReconcile, archivedCampaignSql, ARCHIVED_ORDER_SIDE, setReconcileSkip, _skipInfo, diffFields, _mixArr, _stripRenameMarks, fingerprint, planReconcile, _pairRows, _mixedBody, PERMANENT, SCALAR_LABEL, LEAF_LABEL };

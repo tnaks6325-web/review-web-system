@@ -1584,7 +1584,7 @@ async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTo
  * 공고는 이미 P 의 모습이라 건드리지 않는다. 결제합계·상품 요약 문장·택배대행 표시는 P 에서 다시 만든다.
  * @returns {Promise<{abort?:{status,body}, wo?:object, plan?:object}>}
  */
-async function _reconcilePrepareInTx(client, wo, camp, rec, actor) {
+async function _reconcilePrepareInTx(client, wo, camp, rec, actor, archived = false) {
   if (!camp) return { abort: { status: 409, body: { ok: false, code: 'no_campaign', error: '연결된 모집공고가 없거나 마감(보관)된 공고입니다.' } } };
   if (wo.bidir_state === 'on') return { abort: { status: 409, body: { ok: false, code: 'already_linked', error: '이미 연결된 작업입니다. 새로고침해 주세요.' } } };
   if (!String(wo.source_review_order_id || '').trim()) return { abort: { status: 409, body: { ok: false, code: 'not_intranet_order', error: '인트라넷 리뷰오더로 들어온 오더가 아닙니다.' } } };
@@ -1594,6 +1594,13 @@ async function _reconcilePrepareInTx(client, wo, camp, rec, actor) {
     return { abort: { status: 409, body: { ok: false, code: 'reconcile_stale', error: '화면을 연 뒤 이 작업의 값이 바뀌었습니다. 새로고침한 뒤 다시 골라 주세요.' } } };
   }
   if (plan.blocked) return { abort: { status: 409, body: { ok: false, code: 'reconcile_blocked', error: plan.blocked } } };
+  // 결정 312 — 보관 공고는 바꾸지 않는다: 고른 칸이 전부 공고 쪽이어야 하고, 공고에 쓸 거리(오더 쪽 강제 칸·주소)가 없어야 한다.
+  if (archived) {
+    const notCampaign = Object.values(rec.picks || {}).some(v => v !== 'campaign');
+    if (notCampaign || (plan.force && (plan.force.keys.length || plan.force.urlTouched))) {
+      return { abort: { status: 409, body: { ok: false, code: 'archived_campaign_side_only', error: '마감된 공고는 바꾸지 않습니다 — 모든 칸을 공고 쪽으로 골라 주세요.' } } };
+    }
+  }
   if (plan.error) {
     const e = plan.error;
     const msg = e.code === 'reconcile_unpicked' ? '아직 고르지 않은 칸이 있습니다.'
@@ -1769,6 +1776,14 @@ async function applySharedPatch(p) {
       camp = rows[0] || null;
       if (!camp) return await _abort(client, 409, { ok: false, code: 'link_changed_retry', error: '연결 공고가 방금 바뀌었습니다. 다시 시도해 주세요.' });
     }
+    /* ★★ 결정 312 — 관리자가 「마감된 공고」 묶음에서 맞출 때만 보관 공고를 기준으로 쓴다(살아 있는 공고가 있으면 거절 — 그건 보통 맞추기).
+       보관 공고는 **읽기만** 한다: 공고 쪽만 고를 수 있고(_reconcilePrepareInTx) 공고 반영(projectToCampaignInTx)을 건너뛴다(완화 금지). */
+    const recArchived = p.origin === 'reconcile' && !!(p.reconcile && p.reconcile.archived === true);
+    if (recArchived) {
+      if (camp) return await _abort(client, 409, { ok: false, code: 'campaign_live', error: '진행 중인 모집공고가 있는 작업입니다. 「진행 중 공고」 목록에서 맞춰 주세요.' });
+      const { rows } = await client.query(require('./sharedReconcile.service').archivedCampaignSql('$1', true), [wo.id]);
+      camp = rows[0] || null;
+    }
     if (p.preHook) { const r = await p.preHook(client, wo); if (r) return await _abort(client, r.status, r.body); }
     if (wo.bidir_state !== 'on' && p.origin !== 'reconcile') {
       return await _abort(client, 409, { ok: false, code: 'bidir_not_on', state: wo.bidir_state, error: '이 오더는 양방향 동기화가 연결돼 있지 않습니다.' });
@@ -1783,7 +1798,7 @@ async function applySharedPatch(p) {
     if (p.origin === 'reconcile' && !rec) return await _abort(client, 400, { ok: false, code: 'reconcile_required', error: '맞추기 정보가 없습니다.' });
     let recPlan = null;
     if (rec) {
-      const r = await _reconcilePrepareInTx(client, wo, camp, rec, p.actor);
+      const r = await _reconcilePrepareInTx(client, wo, camp, rec, p.actor, recArchived);
       if (r.abort) return await _abort(client, r.abort.status, r.abort.body);
       wo = r.wo; recPlan = r.plan;
       // ② 보낼 값 = 방금 적은 P(저장 모양 그대로) 위에 "오더 쪽" 계산 결과만 — 계산 모양(글자/배열)의 차이가 쓰기로 읽히지 않게. 요약 문장은 보내지 않는다(리뷰웹이 다시 만든다).
@@ -2081,7 +2096,7 @@ async function applySharedPatch(p) {
 
     // ── 공고 반영(같은 트랜잭션) ──
     let campaign = { applied: [] };
-    if (camp && (plan.writes.length || rec)) {
+    if (camp && !recArchived && (plan.writes.length || rec)) {   // 결정 312: 보관 공고에는 쓰지 않는다
       campaign = await projectToCampaignInTx(client, camp, next, writtenKeys, productsTouched,
         { prev: theirs, payTouched, urlTouched: urlTouched || !!(rec && recPlan.force.urlTouched), guideTouched, quantityChanged: quantityChanged || !!(rec && recPlan.force.quantity), structureTouched, structure, reviewTypeChanged: reviewTypeWritten || writtenKeys.has('review_type_mix'), actor: p.actor || p.origin });
       if (campaign.reject) {
