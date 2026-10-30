@@ -4162,6 +4162,28 @@ router.post('/payment/batch/:id/bank-confirm', authMiddleware, adminOrMasterMidd
 
 /* ── 「오늘 확인할 것」 (결정 302) — 홈·입금관리가 같은 목록을 쓴다. 입금관리와 같은 권한(admin/master). ── */
 const opsCheckSvc = require('../services/opsCheck.service');
+const managerCheckSvc = require('../services/managerOpsCheck.service');
+// Home-only manager questions: independent cursor and editor capability, never the payment bank list.
+router.get('/ops-checks/managers', authMiddleware, adminOrMasterMiddleware, async (req,res,next)=>{
+  try {
+    const after=Number(req.query.after || 0);
+    if(!Number.isSafeInteger(after)||after<0) return res.status(400).json({ok:false,error:'목록을 새로고침해 주세요.'});
+    await managerCheckSvc.refresh(pool);
+    const allowed=await require('../utils/workdeskEditors').canEdit(req.admin);
+    res.json({ok:true,...await managerCheckSvc.list({db:pool,allowed,after})});
+  } catch(err){next(err);}
+});
+router.post('/ops-checks/:id/manager-answer', authMiddleware, adminOrMasterMiddleware, async(req,res,next)=>{
+  try {
+    const id=Number(req.params.id), b=req.body||{};
+    if(!Number.isSafeInteger(id)||id<=0) return res.status(400).json({ok:false,error:'잘못된 요청입니다.'});
+    const item=await managerCheckSvc.answer({db:pool,id,choice:b.choice,baseVersion:b.baseVersion,admin:req.admin,by:_by(req)});
+    res.json({ok:true,item});
+  } catch(err){
+    if(err instanceof opsCheckSvc.OpsCheckError) return res.status(err.status || (err.code==='forbidden'?403:err.code==='not_found'?404:err.code==='stale'?409:400)).json({ok:false,code:err.code,error:err.message});
+    next(err);
+  }
+});
 async function _refreshOpsChecks(by) {
   try { await opsCheckSvc.refreshBankChecks({ by }); }
   catch (e) { logger.warn(`[opsCheck] 확인할 것 갱신 실패(통장·확정은 그대로): ${e.message}`); }

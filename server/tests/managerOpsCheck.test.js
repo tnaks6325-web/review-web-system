@@ -1,0 +1,11 @@
+'use strict';
+const assert = require('assert');
+const ops = require('../src/services/managerOpsCheck.service');
+assert.equal(ops.isUnassigned({work_manager:'랜덤',tab_manager:''}),true);
+assert.equal(ops.isUnassigned({work_manager:'랜덤',tab_manager:'망고'}),false);
+assert.equal(ops.isUnassigned({work_manager:'',tab_manager:'외부담당'}),false);
+assert.equal(ops.isUnassigned({work_manager:'외부담당',tab_manager:''}),false,'미매핑 원문을 덮어쓰지 않는다');
+assert.equal(ops.isUnassigned({work_manager:'박세희',tab_manager:''}),false);
+assert.equal(ops.isUnassigned({work_manager:'이미정',tab_manager:''}),false,'미정이라는 글자가 든 모르는 사람 이름도 배정 대상이 아니다');
+assert.equal(ops.isUnassigned({work_manager:'랜덤',tab_manager:'랜덤'}),true,'탭의 명시적 미정값도 자동 배정된 사람이 아니다');
+console.log('manager questions resolver PASS');

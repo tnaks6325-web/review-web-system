@@ -15574,14 +15574,43 @@ function _homeSyncBadges(){
    ══════════════════════════════════════════════════════════════ */
 const TCK_CHOICES=[['direct','리뷰비·페이백 직접 보냄'],['not_reviewer','리뷰어 돈 아님'],['unknown','모르겠음']];
 let _tckBusy=false;
+async function _tckLoadManagers(more){
+  if(STATE.tckManagerLoading) return;
+  STATE.tckManagerLoading=true;
+  try{
+    const r=await api('/api/trackb/ops-checks/managers?after='+(more?(STATE.tckManagerAfter||0):0));
+    if(!r||!r.ok||!Array.isArray(r.items)) throw Error('목록 오류');
+    const combined=[...(more?(STATE.tckManagerItems||[]):[]),...r.items];
+    STATE.tckManagerItems=[...new Map(combined.map(c=>[c.id,c])).values()];
+    STATE.tckManagerMore=r.hasMore===true;STATE.tckManagerAfter=r.nextAfter;STATE.tckManagerError=false;
+  }catch(_){STATE.tckManagerError=true;if(!more) STATE.tckManagerItems=[];}
+  finally{STATE.tckManagerLoading=false;}
+  if(document.getElementById('tckHomeMount')) _tckPaint();
+}
+async function _tckManagerAnswer(i,k){
+  const c=(STATE.tckView||[])[i],choice=['mandu','mango'][k];
+  if(!c||c.kind!=='manager_assignment'||c.status!=='open'||c.canAnswer!==true||!choice) return;
+  const busy=STATE.tckManagerSaving||(STATE.tckManagerSaving={});if(busy[c.id]) return;
+  busy[c.id]=true;_tckPaint();
+  try{
+    const r=await api('/api/trackb/ops-checks/'+c.id+'/manager-answer',{method:'POST',body:JSON.stringify({choice,baseVersion:c.facts.baseVersion})});
+    if(!r||!r.ok) {toast('저장 실패 — '+((r&&r.error)||'새로고침한 뒤 다시 선택해 주세요'));return;}
+    const at=(STATE.tckManagerItems||[]).findIndex(x=>x===c);
+    if(at>=0) STATE.tckManagerItems[at]=r.item;
+    toast('리뷰웹에 담당자와 답을 저장했습니다 — 인트라넷 전달 상태는 별도로 확인합니다');
+  }catch(_){toast('저장 결과를 받지 못했습니다 — 같은 선택으로 다시 시도해 주세요');}
+  finally{delete busy[c.id];if(document.getElementById('tckHomeMount')) _tckPaint();}
+}
 async function _tckLoad(){
   if(_tckBusy) return; _tckBusy=true;
   try{
     const r=await api('/api/trackb/ops-checks');
     STATE.tckItems = r && r.ok && Array.isArray(r.items) ? r.items : null;
     STATE.tckError = r && r.ok ? '' : ((r&&r.error)||'불러오지 못했습니다');
+
   }catch(_){ STATE.tckItems=null; STATE.tckError='불러오지 못했습니다'; }
   finally{ _tckBusy=false; }
+  if(document.getElementById('tckHomeMount')) await _tckLoadManagers(false);
   _tckPaint();
 }
 function _tckPaint(){
@@ -15600,6 +15629,7 @@ if(_TCK_MQ && _TCK_MQ.addEventListener) _TCK_MQ.addEventListener('change',()=>{ 
 window.addEventListener('popstate',()=>{ if(STATE.tckSheetId!=null) _tckSheetClose(); });   // 뒤로 가기로 화면을 옮기면 창도 닫는다
 function _tckRowHtml(c,i){
   const f=c.facts||{}; const bits=[];
+  if(c.kind==='manager_assignment') return `<button type="button" class="tck-row" onclick="_tckSheetOpen(${i})"><b>${esc(f.title||f.tabName||'작업')}</b><span class="tck-rs">담당자 미지정 · 담당자 배정</span><span class="tck-go" aria-hidden="true">›</span></button>`;
   const miss=(f.short||[]).reduce((n,x)=>n+(Number(x.failures)||0),0);
   if(miss) bits.push(`통장에 없음 ${_tckNum(miss)}명`);
   if((f.shortUnknown||[]).length) bits.push('통장만으로 모름');
@@ -15645,6 +15675,7 @@ function _tckSheetRender(){
   else el.querySelector('.tck-panel').scrollTop=top;
 }
 function _tckTitle(f){
+  if(f&&f.workOrderId) return esc(f.title||f.tabName||'작업');
   const c=(f&&f.cluster)||{};
   return f&&f.batch ? `#${esc(String(f.batch.seq))} 대량이체` : `${esc(c.date||'')} ${esc(c.time||'')} 대량이체 (리뷰웹 대량이체와 이어지지 않음)`;
 }
@@ -15655,30 +15686,36 @@ function _tckSub(f){
 }
 function _tckWhen(at){ const d=new Date(at); if(isNaN(d)) return ''; const p=n=>String(n).padStart(2,'0'); return `${d.getMonth()+1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`; }
 function _tckNum(n){ return (Number(n)||0).toLocaleString('ko-KR'); }
-function _tckVisible(){
+function _tckVisible(where){
   const mgr=STATE.tckMgr||'';
-  return (STATE.tckItems||[]).filter(c=>!mgr || c.manager===mgr);
+  const bank=(STATE.tckItems||[]).filter(c=>c.kind!=='manager_assignment' && (!mgr || c.manager===mgr));
+  return where==='payment' ? bank : [...(STATE.tckManagerItems||[]),...bank];
 }
 function _tckHtml(where){
   if(STATE.tckItems===undefined) return '';
-  if(STATE.tckItems===null) return `<div class="tck-wrap"><div class="tck-hd"><span class="tck-t">오늘 확인할 것</span></div><div class="tck-empty">확인할 것을 불러오지 못했습니다(${esc(STATE.tckError||'')}) — 새로고침해 주세요.</div></div>`;
-  const all=STATE.tckItems;
+  if(STATE.tckItems===null && !(where==='home' && (STATE.tckManagerItems||[]).length)) return `<div class="tck-wrap"><div class="tck-hd"><span class="tck-t">오늘 확인할 것</span></div><div class="tck-empty">확인할 것을 불러오지 못했습니다(${esc(STATE.tckError||'')}) — 새로고침해 주세요.</div></div>`;
+  const all=STATE.tckItems||[];
   const managers=[...new Set(all.map(c=>c.manager).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ko'));
   const mgr=STATE.tckMgr||'';
-  const list=_tckVisible();
+  const list=_tckVisible(where);
   STATE.tckView=list;   // onclick 인덱스의 기준(그릴 때마다 새로)
   const open=list.filter(c=>c.status==='open');
   const chip=(v,l)=>`<button type="button" class="tck-mgr ${mgr===v?'on':''}" onclick="_tckSetMgr(${v?managers.indexOf(v):-1})">${esc(l)}</button>`;
   const head=`<div class="tck-hd"><span class="tck-t">오늘 확인할 것</span>${open.length?`<span class="tck-n">${open.length}</span>`:''}<span class="sp"></span>${managers.length?chip('','전체')+managers.map(m=>chip(m,m)).join(''):''}</div>`;
-  if(!list.length) return `<div class="tck-wrap">${head}<div class="tck-empty">지금 확인할 것이 없습니다.</div></div>`;
+  if(!list.length) return `<div class="tck-wrap">${head}<div class="tck-empty">${where==='home'&&STATE.tckManagerError?'담당자 질문을 불러오지 못했습니다 — 새로고침해 주세요.':'지금 확인할 것이 없습니다.'}</div></div>`;
   const compact=where==='home' && _tckCompact();
   const cards=list.map((c,i)=>c.status==='done'
-    ? `<div class="tck-donerow"><span class="tck-ok">✓ 처리 완료</span><span>${_tckTitle(c.facts)}</span><span class="tck-sub">${esc(c.doneBy||'')}</span></div>`
+    ? `<div class="tck-donerow"><span class="tck-ok">${c.kind==='manager_assignment'?'✓ 리뷰웹 저장 완료':'✓ 처리 완료'}</span><span>${_tckTitle(c.facts)}</span>${c.kind==='manager_assignment'?`<span class="tck-sub">${c.remoteSync==='delivered'?'인트라넷 전달 완료':['pending','processing'].includes(c.remoteSync)?'인트라넷 전달 대기':'인트라넷 전달 상태 확인 필요'}</span>`:''}<span class="tck-sub">${esc(c.doneBy||'')}</span></div>`
     : compact ? _tckRowHtml(c,i) : _tckCardHtml(c,i,where)).join('');
-  return `<div class="tck-wrap">${head}${cards}</div>`;
+  return `<div class="tck-wrap">${head}${where==='home'&&STATE.tckItems===null?`<div class="tck-empty" role="alert">통장 확인 항목을 불러오지 못했습니다(${esc(STATE.tckError||'')}) — 새로고침해 주세요.</div>`:''}${where==='home'&&STATE.tckManagerError?`<div class="tck-empty">담당자 질문을 불러오지 못했습니다 — 새로고침해 주세요.</div>`:''}${cards}${where==='home'&&STATE.tckManagerMore?'<button type="button" class="btn sm" onclick="_tckLoadManagers(true)">담당자 질문 더 보기</button>':''}</div>`;
 }
 function _tckCardHtml(c,i,where){
   const f=c.facts||{};
+  if(c.kind==='manager_assignment'){
+    const busy=!!(STATE.tckManagerSaving||{})[c.id];
+    const buttons=c.canAnswer===true ? ['만두','망고'].map((label,k)=>`<button type="button" class="tck-choice" ${busy?'disabled':''} onclick="_tckManagerAnswer(${i},${k})">${label}</button>`).join('') : '<span class="tck-sub">담당자를 수정할 수 있는 관리자에게 배정을 요청해 주세요.</span>';
+    return `<div class="tck-card"><div class="tck-ch"><b>${_tckTitle(f)}</b><span class="tck-sub">담당자 배정</span></div><div class="tck-line"><span class="tck-tx">${esc(((c.lines||[])[0]||{}).text||'작업담당이 미지정입니다. 만두·망고 중 누가 맡을까요?')}</span>${buttons}${busy?'<span class="tck-sub">저장 중…</span>':''}</div></div>`;
+  }
   const outs=f.outside||[];
   const lineOf=k=>(c.lines||[]).find(l=>l.key===k);
   const rows=[];
