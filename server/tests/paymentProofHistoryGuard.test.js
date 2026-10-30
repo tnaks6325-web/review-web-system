@@ -11,7 +11,7 @@ async function dbWithSchema() {
   await db.exec(`
     CREATE TABLE payment_batches(id text PRIMARY KEY, historical_key text, status text);
     CREATE TABLE payment_result_uploads(id text PRIMARY KEY, batch_id text, file_format text, file_sha256 text, file_blob bytea, applied boolean DEFAULT false);
-    CREATE TABLE payment_batch_items(id text PRIMARY KEY, batch_id text, status text, result_seq integer);
+    CREATE TABLE payment_batch_items(id text PRIMARY KEY, batch_id text, status text, result_seq integer, bank_account text, amount integer, paid_at timestamptz);
     CREATE TABLE unconfirmed_transfer_reviews(upload_id text, result_seq integer);
     CREATE TABLE payment_account_mismatch_reconciliations(upload_id text, result_seq integer);
     CREATE TABLE payment_amount_mismatch_reconciliations(upload_id text, result_seq integer);
@@ -23,7 +23,12 @@ async function dbWithSchema() {
 (async () => {
   const db = await dbWithSchema();
   try {
-    const bytes = Buffer.from('masked synthetic transfer evidence');
+    const XLSX=require('@e965/xlsx'), {KBANK_AOA}=require('./fixtures/paymentResultFixtures');
+    const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(KBANK_AOA),'결과');
+    const bytes=XLSX.write(wb,{type:'buffer',bookType:'xlsx'});
+    const loaded=require('../src/utils/spreadsheetLoad').loadSheetAoa(bytes,'result.xlsx');
+    const parsed=require('../src/utils/paymentResultParse').parseResultAoa(loaded.aoa);
+    const result3=parsed.rows.find(r=>r.seq===3);
     const digest = sha(bytes);
     await db.query('INSERT INTO payment_batches VALUES ($1,NULL,$2),($3,NULL,$2),($4,$5,$2)',
       ['normal-a','ready','normal-b','history','historical-fee:synthetic']);
@@ -48,7 +53,8 @@ async function dbWithSchema() {
     const otherDigest = sha('different synthetic result file');
     await db.query('UPDATE payment_result_uploads SET file_sha256=$1,file_blob=$2 WHERE id=$3',
       [otherDigest, Buffer.from('different synthetic result file'), 'upload-b']);
-    await db.query("INSERT INTO payment_batch_items VALUES ('item-a','normal-a','paid',3),('item-b','normal-b','paid',3)");
+    await db.query("INSERT INTO payment_batch_items VALUES ('item-a','normal-a','paid',3,$1,$2,$3),('item-b','normal-b','paid',3,$1,$2,$3)",
+      [result3.accountDigits,result3.amount,result3.transferredAtIso]);
     await assert.rejects(proof.assertProofUnused(db, { sha: digest, uploadId: 'legacy', resultSeq: 3 }), e => e.code === 'proof_already_used');
     await proof.assertProofUnused(db, { sha: digest, uploadId: 'legacy', resultSeq: 4 });
     await db.query("DELETE FROM payment_batch_items WHERE id='item-a'");

@@ -7,7 +7,7 @@ const client={query:async(sql,args=[])=>{
  if(/^BEGIN|^COMMIT|^ROLLBACK|^SELECT pg_advisory/.test(sql))return{rows:[]};
  if(/SELECT historical_key/.test(sql))return{rows:[{historical_key:null}]};
  if(/SELECT id, batch_id, file_format/.test(sql))return{rows:[{id:'upload',batch_id:'batch',file_format:'xlsx',file_blob:bytes,file_sha256:sha,applied:false}]};
- if(/FROM unconfirmed_transfer_reviews/.test(sql))return{rows:args[1]===1?[{used:1}]:[]};
+ if(/FROM unconfirmed_transfer_reviews/.test(sql))return{rows:Array.isArray(args[1]) && args[1].includes(1)?[{used:1}]:[]};
  if(/FROM payment_(account|amount)_mismatch|JOIN payment_batch_items i|FROM payment_records WHERE source_key/.test(sql))return{rows:[]};
  if(/SELECT \* FROM payment_batches/.test(sql))return{rows:[{id:'batch',status:'created',historical_key:null}]};
  if(/COUNT\(\*\)/.test(sql))return{rows:[{n:2}]};

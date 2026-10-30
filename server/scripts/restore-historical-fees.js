@@ -10,6 +10,10 @@ function privateFile(file) {
   const s=fs.statSync(file);if(!s.isFile() || (s.mode & 0o077)) refuse('private_file_permissions');
   return fs.readFileSync(file,'utf8');
 }
+function readPrivateBackup(file) {
+  return JSON.parse(privateFile(file), (key,value)=>
+    value && value.type==='Buffer' && Array.isArray(value.data) ? Buffer.from(value.data) : value);
+}
 function writePrivate(file,data) {
   const fd=fs.openSync(file,'wx',0o600);
   try {fs.writeFileSync(fd,JSON.stringify(data,null,2));fs.fsyncSync(fd);}finally{fs.closeSync(fd);}
@@ -36,7 +40,7 @@ async function main() {
       backup:async snapshot=>{
         backupPath=path.join(out,`before-${Date.now()}-${crypto.randomUUID()}.json`);
         writePrivate(backupPath,{...snapshot,releaseSha:opts['release-sha'],createdAt:new Date().toISOString()});
-        if(svc.digest(JSON.parse(privateFile(backupPath)).state)!==snapshot.beforeHash)refuse('backup_readback_failed');
+        if(svc.digest(readPrivateBackup(backupPath).state)!==snapshot.beforeHash)refuse('backup_readback_failed');
         return {path:backupPath,beforeHash:snapshot.beforeHash};
       }});
     if(opts.apply) {
@@ -49,4 +53,4 @@ async function main() {
   } finally {await pool.end();}
 }
 if(require.main===module)main().catch(e=>{console.error(JSON.stringify({ok:false,code:e.code || 'restore_failed'}));process.exitCode=1;});
-module.exports={privateFile,writePrivate,main};
+module.exports={privateFile,writePrivate,readPrivateBackup,main};

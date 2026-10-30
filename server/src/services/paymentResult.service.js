@@ -1217,11 +1217,9 @@ async function _commitBatchOutcome({ batchId, by, notifyFailed, duplicateSha = n
       // Same advisory namespace as every proof consumer. Lock SHA and exact
       // paid rows before the source batch lock to prevent cross-batch deadlocks.
       await paymentProof.lockFileProof(client, duplicateSha.sha);
-      for (const p of paid) {
-        await paymentProof.assertProofUnused(client, {
-          sha: duplicateSha.sha, uploadId: duplicateSha.uploadId, resultSeq: p.seq,
-        });
-      }
+      await paymentProof.assertProofRowsUnused(client, {
+        sha: duplicateSha.sha, uploadId: duplicateSha.uploadId, resultSeqs: paid.map(p=>p.seq),
+      });
     }
 
     // 회차 행 잠금 — 동시에 두 사람이 같은 회차에 파일을 올리거나 통장 확정이 겹치는 경합 차단

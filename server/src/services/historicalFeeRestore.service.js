@@ -143,8 +143,8 @@ async function restoreHistoricalFees({ db, manifest:m, apply=false, expectedBefo
       if(state.items.some(i=>i.sheet_id===m.sheetId && i.tab_name===m.tabName && i.row_index===x.p.seq) ||
           state.records.some(r=>r.sheet_id===m.sheetId && r.tab_name===m.tabName && r.row_index===x.p.seq) ||
           state.manualMarks.some(r=>r.sheet_id===m.sheetId && r.tab_name===m.tabName && r.row_index===x.p.seq)) fail('competing_payment');
-      await guard.assertProofUnused(c,{...evidence,resultSeq:x.result.seq});
     }
+    await guard.assertProofRowsUnused(c,{...evidence,resultSeqs:candidates.map(x=>x.result.seq)});
     const beforeHash=digest(state), invariantHash=digest(protectedState(m,state));
     const result={dryRun:!apply,inserted:apply ? m.expectedCount : 0,planned:m.expectedCount,skipped:0,total:m.fee*m.expectedCount,beforeHash,invariantHash};
     if(!apply) { await c.query('ROLLBACK');return result; }
