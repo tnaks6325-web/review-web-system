@@ -4088,7 +4088,7 @@ router.post('/payment/batch/:id/result-auto-apply', authMiddleware, adminOrMaste
   } catch (err) { _resultErr(err, res, next); }
 });
 
-// 결과 파일 한 곳에 놓기(결정 308) — 대량이체를 고르지 않는다. 서버가 계좌+금액으로 대량이체를 찾고, 반영은 위와 같은 autoApplyResultFile.
+// 결과 파일 한 곳에 놓기(결정 309) — 대량이체를 고르지 않는다. 서버가 계좌+금액으로 대량이체를 찾고, 반영은 위와 같은 autoApplyResultFile.
 //   이미 다 처리된 대량이체(통장으로 먼저 완료 등)도 같은 입구를 탄다 — 반영 대상이 없어 쓰지 않고(no_pending_items),
 //   파일에 섞인 기록 없는 이체(미확인)는 그대로 보여 준다(Codex P2).
 router.post('/payment/result-auto-apply', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {

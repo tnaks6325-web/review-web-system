@@ -1,5 +1,5 @@
 /**
- * paymentResultFindBatch.test.js — 결정 308 결과 파일 한 곳에 놓기 회귀가드(스텁 · DB 없이)
+ * paymentResultFindBatch.test.js — 결정 309 결과 파일 한 곳에 놓기 회귀가드(스텁 · DB 없이)
  * 실행: node tests/paymentResultFindBatch.test.js
  *
  * 고정하는 것:

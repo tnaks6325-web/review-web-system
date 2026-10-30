@@ -2385,7 +2385,7 @@
 .pmdrop{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:28px;padding:0 8px;border:1px dashed #9AA8B8;border-radius:6px;background:#fff;color:var(--t2,#59626F);font:inherit;font-size:11px;cursor:pointer}
 .pmdrop:hover{border-color:#1B75D0;background:#F5FAFF;color:#155BA5}
 .pmdropicon{font-size:14px;font-weight:800;line-height:1}
-/* 결정 308 — 결과 파일 한 곳에 놓기 */
+/* 결정 309 — 결과 파일 한 곳에 놓기 */
 .pmanydrop{display:flex;align-items:center;gap:12px;width:100%;margin:0 0 12px;padding:12px 14px;border:1.5px dashed #9AA8B8;border-radius:8px;background:#fff;font:inherit;text-align:left;cursor:pointer;color:inherit}
 .pmanydrop:hover,.pmanydrop.over{border-color:#1B75D0;background:#F5FAFF}
 .pmanydrop svg{flex:none;width:30px;height:30px}
@@ -14288,7 +14288,7 @@ function _pmResultDragOver(event){
 function _pmResultDragLeave(event){ event.currentTarget.classList.remove('over'); }
 function _pmResultDrop(event, i){
   event.preventDefault();
-  event.stopPropagation();   // 결정 308 — 화면 전체 놓기와 두 번 올라가지 않게
+  event.stopPropagation();   // 결정 309 — 화면 전체 놓기와 두 번 올라가지 않게
   _pmDragDepth=0; _pmDropOvHide();   // 화면 전체 안내는 문서 drop 이 못 받으므로 여기서 걷는다(Codex P2)
   event.currentTarget.classList.remove('over');
   const f = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
@@ -14332,7 +14332,7 @@ function _pmPickResult(i){
   inp.click();
 }
 
-/* ── 결정 308 · 결과 파일 한 곳에 놓기(사용자 확정 2026-10-30) ─────────────
+/* ── 결정 309 · 결과 파일 한 곳에 놓기(사용자 확정 2026-10-30) ─────────────
    대량이체를 고르지 않는다. 입금관리 어디에 놓든 서버가 파일 줄의 계좌+금액으로 어느 대량이체 결과인지 찾고
    같은 반영(result-auto-apply)을 한다. 못 찾거나 두 대량이체가 비슷하면 서버가 거부한다(화면은 그 말을 그대로 보인다). */
 function _pmResultDropHtml(){

@@ -487,14 +487,15 @@ async function gasPostUpload(body, timeout) {
 
     if (isTimeout) {
       _apiToast('⏱ 업로드 시간 초과 — 네트워크 상태를 확인하고 다시 시도해주세요.\n이미지 크기가 크면 자동 압축 후 재시도됩니다.', 'error', 6000);
-      return { error: '업로드 시간이 초과되었습니다. 이미지 크기를 줄이거나 네트워크를 확인하세요.' };
+      return { error: '업로드 시간이 초과되었습니다. 이미지 크기를 줄이거나 네트워크를 확인하세요.', _transport: true };
     }
     if (isAborted || isNetwork) {
       _apiToast('📡 업로드가 중단되었습니다 — 네트워크 연결을 확인하고 다시 시도해주세요.', 'error', 6000);
-      return { error: '업로드가 중단되었습니다. 네트워크 연결을 확인하세요.' };
+      return { error: '업로드가 중단되었습니다. 네트워크 연결을 확인하세요.', _transport: true };
     }
     _apiToast('❌ 업로드 실패: ' + err.message, 'error', 5000);
-    return { error: err.message };
+    // ★ _transport = 요청이 서버에 닿지 못했다(응답 없음) — 서버가 판독에 실패한 것과 화면이 구분한다(가산 필드 · 2026-10-30).
+    return { error: err.message, _transport: true };
   }
 }
 
