@@ -1,0 +1,45 @@
+'use strict';
+const assert=require('assert/strict');
+const {PGlite}=require('@electric-sql/pglite');
+const {renameTabState}=require('../src/services/tabRename.service');
+(async()=>{
+ const db=new PGlite();await db.waitReady;
+ await db.exec(`
+ CREATE TABLE review_index(sheet_id text,tab_name text,tab_gid text,row_index int);
+ CREATE TABLE order_submissions(sheet_id text,tab_name text,tab_gid text,gid text);
+ CREATE TABLE campaign_participants(sheet_id text,tab_name text,tab_gid text,updated_at timestamptz);
+ CREATE TABLE payment_batches(id text PRIMARY KEY,historical_key text);
+ CREATE TABLE payment_batch_items(id text PRIMARY KEY,batch_id text,sheet_id text,tab_name text,row_index int,status text,product_price int,review_fee int,amount int,paid_at timestamptz,bank_account text);
+ CREATE TABLE payment_records(id text PRIMARY KEY,sheet_id text,tab_name text,row_index int,source_key text,status text,product_price int,review_fee int,amount int,paid_at timestamptz);
+ INSERT INTO review_index VALUES('s','old','g',1),('s','old','g',2);
+ INSERT INTO order_submissions VALUES('s','old','g','g');
+ INSERT INTO campaign_participants VALUES('s','old','g',now());
+ INSERT INTO payment_batches VALUES('history','historical-fee:proof:s'),('ordinary',NULL);
+ INSERT INTO payment_batch_items VALUES('h','history','s','old',1,'paid',0,1000,1000,'2026-10-27T03:42:02Z','1234567'),('p','ordinary','s','old',2,'pending',100,10,110,NULL,'7654321'),('o','ordinary','s','old',3,'paid',100,10,110,'2026-10-20T01:00:00Z','7654321');
+ INSERT INTO payment_records VALUES('fee','s','old',1,'historical-fee:proof:1','PAID',0,1000,1000,'2026-10-27T03:42:02Z'),('other','s','old',3,'ordinary:1','PAID',100,10,110,'2026-10-20T01:00:00Z');
+ `);
+ const before=(await db.query('SELECT * FROM payment_batch_items ORDER BY id')).rows;
+ const calls=[];
+ const client={query:async(sql,args)=>{
+  calls.push(sql);
+  if(/^(BEGIN|COMMIT|ROLLBACK)$/.test(sql.trim())||/UPDATE (review_index|order_submissions|campaign_participants|payment_batch_items|payment_records)\b/.test(sql))return db.query(sql,args);
+  return {rows:[],rowCount:0};
+ },release(){}};
+ await renameTabState({connect:async()=>client},{sheetId:'s',oldTabName:'old',newTabName:'new',tabGid:'g'});
+ const hist=(await db.query("SELECT * FROM payment_batch_items WHERE id='h'")).rows[0];
+ assert.equal(hist.tab_name,'new','historical paid lock must follow current coordinates');
+ assert.equal((await db.query("SELECT tab_name FROM payment_records WHERE id='fee'")).rows[0].tab_name,'new','canonical fee ledger must follow the same rename');
+ assert.equal((await db.query("SELECT count(*)::int n FROM review_index ri WHERE NOT EXISTS(SELECT 1 FROM payment_batch_items i WHERE i.sheet_id=ri.sheet_id AND i.tab_name=ri.tab_name AND i.row_index=ri.row_index AND i.status IN('pending','paid'))")).rows[0].n,0,'renaming must not expose already-paid fee rows as new targets');
+ const after=(await db.query('SELECT * FROM payment_batch_items ORDER BY id')).rows;
+ const strip=r=>{const v={...r};delete v.tab_name;return v;};assert.deepEqual(after.map(strip),before.map(strip));
+ assert.equal(after.find(r=>r.id==='p').tab_name,'new','ordinary pending still follows rename');
+ assert.equal(after.find(r=>r.id==='o').tab_name,'old','ordinary paid snapshot remains unchanged');
+ assert.equal((await db.query("SELECT tab_name FROM payment_records WHERE id='other'")).rows[0].tab_name,'old','ordinary fee records remain unchanged');
+ assert(!calls.some(sql=>/UPDATE (payment_result_uploads|unconfirmed_transfer_reviews)\b/.test(sql)),'bank source and reservation evidence stay immutable');
+ const coords=async()=>({items:(await db.query('SELECT id,tab_name FROM payment_batch_items ORDER BY id')).rows,records:(await db.query('SELECT id,tab_name FROM payment_records ORDER BY id')).rows,index:(await db.query('SELECT * FROM review_index ORDER BY row_index')).rows});
+ const consistent=await coords();
+ const failing={connect:async()=>({...client,query:async(sql,args)=>{if(/UPDATE payment_records/.test(sql))throw new Error('injected ledger failure');return client.query(sql,args);}})};
+ await assert.rejects(renameTabState(failing,{sheetId:'s',oldTabName:'new',newTabName:'later'}),/injected ledger failure/);
+ assert.deepEqual(await coords(),consistent,'ledger failure rolls back index and historical coordinates together');
+ await db.close();console.log('paymentHistoryRename: paid fee locks and canonical records follow rename; atomic rollback, evidence and ordinary paid snapshots unchanged PASS');
+})().catch(e=>{console.error(e);process.exit(1);});

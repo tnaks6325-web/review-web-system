@@ -98,6 +98,18 @@ async function verifyAutomaticApplication() {
       const entry = uploads.find(x => x.id === params[0]);
       return { rows: entry ? [{ id: entry.id, file_name: entry.file_name, file_blob: entry.file_blob, file_sha256: entry.sha, applied: entry.applied }] : [], rowCount: entry ? 1 : 0 };
     }
+    if (/SELECT id, batch_id, file_blob, file_sha256[\s\S]*FROM payment_result_uploads WHERE id/.test(s)) {
+      const entry = uploads.find(x => x.id === params[0]);
+      return { rows: entry ? [{ id: entry.id, batch_id: 'B1', file_blob: entry.file_blob, file_sha256: entry.sha }] : [], rowCount: entry ? 1 : 0 };
+    }
+    if (/SELECT id, batch_id, file_format, file_blob, file_sha256, applied/.test(s)) {
+      return { rows: uploads.filter(x => x.sha === params[0]).map(x => ({ id: x.id, batch_id: 'B1', file_format: 'xlsx', file_blob: x.file_blob, file_sha256: x.sha, applied: x.applied })) };
+    }
+    if (/FROM unconfirmed_transfer_reviews WHERE upload_id::text/.test(s)) return { rows: [] };
+    if (/FROM payment_account_mismatch_reconciliations WHERE upload_id::text/.test(s)) return { rows: [] };
+    if (/FROM payment_amount_mismatch_reconciliations WHERE upload_id::text/.test(s)) return { rows: [] };
+    if (/JOIN payment_batch_items i ON i.batch_id = u.batch_id/.test(s)) return { rows: [] };
+    if (/FROM payment_records WHERE source_key/.test(s)) return { rows: [] };
     if (/SELECT pg_advisory_xact_lock/.test(s)) return { rows: [], rowCount: 1 };
     if (/UPDATE payment_batch_items[\s\S]*status = 'paid'/.test(s)) {
       const item = state.find(x => x.id === params[0] && x.status === 'pending');
@@ -125,8 +137,8 @@ async function verifyAutomaticApplication() {
     assert.strictEqual(out.board.recorded, 2, '자동 반영은 작업보드 입금일 기록 결과를 함께 반환한다');
     assert.ok(uploads[0].applied, '자동 반영한 파일은 이후 동일 파일 경고를 위해 반영 이력으로 남긴다');
     const duplicate = await autoApplyResultFile({ batchId: 'B1', fileName: 'result.xlsx', base64: fileBase64(onlyThisBatch), by: 'test', notifyFailed: false });
-    assert.strictEqual(duplicate.autoApplied, false, '이미 반영된 동일 파일은 다시 자동 반영하지 않는다');
-    assert.ok(duplicate.autoApply.blockers.includes('duplicate_file'), '동일 파일 경고 사유를 응답에 포함한다');
+    assert.strictEqual(duplicate.autoApplied, false, '완료된 행만 남은 회차는 다시 자동 반영하지 않는다');
+    assert.ok(duplicate.autoApply.blockers.includes('no_pending_items'), '남은 미처리 행이 없다는 사유를 응답에 포함한다');
   } finally {
     paymentApply.markDepositCells = originalMark;
     paymentApply.verifyDepositCells = originalVerify;

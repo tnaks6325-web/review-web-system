@@ -5479,6 +5479,11 @@ async function setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by = 'adm
         `UPDATE payment_batch_items
             SET status='failed', fail_reason=$4, paid_at=NULL
           WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3 AND status IN ('pending','paid')
+            AND NOT EXISTS (
+              SELECT 1 FROM payment_batches b
+               WHERE b.id = payment_batch_items.batch_id
+                 AND b.historical_key LIKE 'historical-fee:%'
+            )
             AND NOT ${require('./payment.service').feeOnlyItemSql()}`,
         [sheetId, tabName, row.seq, `관리자(${String(by).slice(0, 100)})가 작업표 입금 기록을 비워 미입금으로 정정함`]);
       releasedBatchItems = rel.rowCount;

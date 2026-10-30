@@ -31,6 +31,7 @@ const _bankOv = require('./bankNameOverride.service');   // 화면에서 고친 
 const { extractAmountNumber, EXACT_KEYS: AMOUNT_EXACT_KEYS } = require('../utils/paymentAmount');
 const { loadWorkboardAmounts, loadWorkboardAmountPopulation, workboardAmountKey } = require('./paymentWorkboardAmount.service');
 const { filterReceiptEligiblePaymentRows } = require('./paymentReceiptGate.service');
+const paymentProof = require('./paymentProof.service');
 // 시트 링크를 만들 수 있는지(= 진짜 구글시트가 있는지) 판정 — 접두 사본 금지
 const { isVirtualSheetId } = require('./sheetlessAccept.service');
 // 이름 정규화는 신원 판정(identity.service)과 **같은 함수**를 쓴다(사본 금지 — 판정이 갈리면 안 된다)
@@ -1834,6 +1835,10 @@ async function cancelBatch(batchId, by) {
     const { rows: [b] } = await client.query(
       `SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE`, [batchId]);
     if (!b) { await client.query('ROLLBACK'); return { ok: false, error: '대량이체를 찾을 수 없습니다.' }; }
+    if (paymentProof.isHistoryOnlyKey(b.historical_key)) {
+      await client.query('ROLLBACK');
+      return { ok: false, code: 'history_only', error: '과거 입금 기록은 취소하거나 잠금을 풀 수 없습니다.' };
+    }
     if (b.status === 'cancelled') { await client.query('ROLLBACK'); return { ok: false, error: '이미 취소된 대량이체입니다.' }; }
     if (b.status === 'applied') { await client.query('ROLLBACK'); return { ok: false, error: '이미 이체결과가 반영된 대량이체는 취소할 수 없습니다.' }; }
     // 입금 기록된 항목이 하나라도 있으면 취소 금지(M2 대비 안전장치)
@@ -1894,6 +1899,13 @@ async function getBatch(batchId, { db = pool, lock = false } = {}) {
 
 /** 재다운로드 이력 기록(사용자 확정: 재다운로드도 이력에 남는다) */
 async function markDownloaded(batchId, by, { db = pool } = {}) {
+  const { rows: [batch] } = await db.query(
+    `SELECT historical_key FROM payment_batches WHERE id = $1${db !== pool ? ' FOR UPDATE' : ''}`, [batchId]);
+  if (batch && paymentProof.isHistoryOnlyKey(batch.historical_key)) {
+    const error = new Error('과거 입금 기록은 이체 파일을 만들 수 없습니다.');
+    error.code = 'history_only';
+    throw error;
+  }
   await db.query(
     `UPDATE payment_batches
         SET download_count = download_count + 1, last_downloaded_at = NOW(), last_downloaded_by = $2
@@ -1962,6 +1974,7 @@ function _batchView(b) {
     : Math.max(Number(b.result_failed_count || 0), Number(failedCount || 0));
   return {
     id: b.id, seq: Number(b.seq), bank: b.bank, bankLabel: BANK_LABEL[b.bank] || b.bank,
+    historicalKey: b.historical_key || '', historyOnly: paymentProof.isHistoryOnlyKey(b.historical_key),
     status: b.status, itemCount: b.item_count, totalAmount: Number(b.total_amount || 0),
     createdBy: b.created_by || '', createdAt: b.created_at,
     downloadCount: b.download_count, lastDownloadedAt: b.last_downloaded_at,
@@ -2342,7 +2355,7 @@ module.exports = {
   checkBatchReceiptEligibility,
   buildWorkbook, batchFileName, batchFileFormat,
   saveTransferSetting, saveReviewerAccount, checkBatchAccountSnapshots, reconcileAccountSnapshots,
-  compareAccountSnapshot, accountFingerprint, resolveWorkManager, flagPriceOutliers, PaymentFixError,
+  compareAccountSnapshot, accountFingerprint, snapshotFingerprint, resolveWorkManager, flagPriceOutliers, PaymentFixError,
   _acctChangedAt, _holderKey,
   advertiserPayoutAccounts, advertiserPayoutLocked, advertiserPaysFrom, isAdvertiserPayoutChoice,
   __splitCandidateKeysForTest: _splitCandidateKeys,

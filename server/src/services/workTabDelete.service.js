@@ -396,6 +396,15 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, del
     }
     // 같은 작업을 두 사람이 동시에 지우는 것을 막는다(삭제끼리의 잠금).
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [String(sheetId), String(tabName)]);
+    // Historical evidence is immutable even through the explicit payment-wipe path.
+    const { rows: historical } = await client.query(
+      `SELECT b.id FROM payment_batches b JOIN payment_batch_items i ON i.batch_id=b.id
+        WHERE i.sheet_id=$1 AND i.tab_name=$2 AND b.historical_key LIKE 'historical-fee:%'
+        LIMIT 1 FOR SHARE OF b, i`, [sheetId, tabName]);
+    if (historical.length) {
+      await client.query('ROLLBACK');
+      return { ok: false, code: 'history_only', error: '이미 지급한 과거 리뷰비 증거가 있어 입금 기록까지 삭제할 수 없습니다. 목록에서 숨기려면 마감해 주세요.' };
+    }
 
     /* ★★ 결정 254: 자동 정리(사람의 미리보기 없음)는 **잠근 뒤 같은 트랜잭션 안에서** "손대지 않은 빈 작업"인지 다시 본다 —
          하나라도 걸리면 쓰기 0건으로 돌려준다(주문·편집·공고 참여가 그사이 들어와도 지우지 않는다). */
