@@ -1716,6 +1716,12 @@ async function applySharedPatch(p) {
       const targetCanonical = canonical(target);
       // 재전송·동시 중복 요청은 원하는 값이 이미 저장돼 있으면 같은 성공으로 돌려준다.
       if (existingCanonical === targetCanonical && !extra.length && !p.forcePush) {
+        // Home answers may only finish inside the same protected transaction, including exact retries.
+        if (p.managerCommitHook) {
+          await p.managerCommitHook(client, wo);
+          await client.query('COMMIT');
+          return { status: 200, body: { ok: true, noop: true, idempotent: true, data: wo, sync_version: currentVersion } };
+        }
         return await _abort(client, 200, { ok: true, noop: true, idempotent: true, data: wo, sync_version: currentVersion });
       }
       if (!Number.isSafeInteger(baseVersion) || baseVersion !== currentVersion) {
@@ -1752,6 +1758,7 @@ async function applySharedPatch(p) {
            WHERE shared_sync_outbox.status IN ('delivered', 'superseded')`,
           [saved.id, Number(saved.sync_version)]);
       }
+      if (p.managerCommitHook) await p.managerCommitHook(client, saved);
       await client.query('COMMIT');
       return { status: 200, body: { ok: true, data: saved, sync_version: Number(saved.sync_version), applied: ['work_manager'], manager_only: true } };
     }

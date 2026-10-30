@@ -365,7 +365,7 @@ function _view(r) {
 async function listChecks({ includeDone = true } = {}) {
   const { rows } = await _db().query(
     `SELECT * FROM ops_checks
-      WHERE status = 'open' OR ($1::bool AND done_at >= NOW() - INTERVAL '2 days')
+      WHERE kind = 'bank_cluster' AND (status = 'open' OR ($1::bool AND done_at >= NOW() - INTERVAL '2 days'))
       ORDER BY (status = 'open') DESC, created_at DESC LIMIT 50`, [!!includeDone]);
   return rows.map(_view);
 }
@@ -393,7 +393,7 @@ async function answerCheck({ id, key, choice, memo, by }) {
 }
 
 module.exports = {
-  KIND_BANK, CHOICES, SINCE_MS, OpsCheckError,
+  KIND_BANK, CHOICES, SINCE_MS, OpsCheckError, factsHash, viewCheck: _view,
   buildClusterFacts, hasWork, expectedKeys, fallbackLines, validateAiLines, allowedNumbers, isDone, writeLines,
   collectBankFacts, refreshBankChecks, listChecks, answerCheck, refKeyOf,
   __setPoolForTest, __setGenerateForTest,
