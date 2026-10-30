@@ -53,15 +53,30 @@ async function renameTabState(db, { sheetId, oldTabName, newTabName, tabGid = ''
     // 입금 전 pending 항목은 다운로드 여부와 무관하게 현재 행의 동일성 좌표를 따라간다.
     // 이미 만든 이체 파일의 표시명은 그 파일 자체가 스냅샷으로 보존한다. DB 좌표를 옛 이름에
     // 남기면 활성 회차 제외 조인이 끊겨 같은 행을 두 번째 회차에 넣을 수 있다.
+    // Ordinary paid snapshots stay immutable. Historical feeOnly paid rows additionally act as
+    // the live payout lock: move only their current coordinates, never bank/amount/date evidence.
     const payment = await client.query(
       `UPDATE payment_batch_items
           SET tab_name = $1
         WHERE sheet_id = $2 AND tab_name = $3
-          AND status = 'pending'
-          AND NOT EXISTS (
-            SELECT 1 FROM payment_batches b
-             WHERE b.id = payment_batch_items.batch_id
-               AND b.historical_key LIKE 'historical-fee:%'
+          AND ((status = 'pending' AND NOT EXISTS (
+                SELECT 1 FROM payment_batches b
+                 WHERE b.id = payment_batch_items.batch_id
+                   AND b.historical_key LIKE 'historical-fee:%'
+              )) OR (status = 'paid' AND EXISTS (
+                SELECT 1 FROM payment_batches b
+                 WHERE b.id = payment_batch_items.batch_id
+                   AND b.historical_key LIKE 'historical-fee:%'
+              )))`, common);
+    await client.query(
+      `UPDATE payment_records pr
+          SET tab_name = $1
+        WHERE pr.sheet_id = $2 AND pr.tab_name = $3
+          AND pr.status = 'PAID' AND pr.source_key LIKE 'historical-fee:%'
+          AND EXISTS (
+            SELECT 1 FROM payment_batch_items i JOIN payment_batches b ON b.id = i.batch_id
+             WHERE i.sheet_id = pr.sheet_id AND i.tab_name = $1 AND i.row_index = pr.row_index
+               AND i.status = 'paid' AND b.historical_key LIKE 'historical-fee:%'
           )`, common);
 
     const im = await client.query(
