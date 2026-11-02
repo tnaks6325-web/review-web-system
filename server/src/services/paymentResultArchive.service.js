@@ -41,13 +41,17 @@ function _root() {
   return base ? { rootId: base, prefix: [PRIVATE_PREFIX] } : null;
 }
 
-/** KST 기준 'YYYY-MM' · 'YYYYMMDD_HHmm' */
+/** KST 기준 'YYYY-MM'(묶음 열쇠) · 'YYYYMMDD_HHmm' · 'YYYYMMDD' · 보관 폴더 경로 ['2026년','10월'] */
 function _kst(d) {
   const t = new Date(new Date(d || Date.now()).getTime() + 9 * 3600 * 1000);
   const p = n => String(n).padStart(2, '0');
-  const ym = `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}`;
-  return { ym, stamp: `${t.getUTCFullYear()}${p(t.getUTCMonth() + 1)}${p(t.getUTCDate())}_${p(t.getUTCHours())}${p(t.getUTCMinutes())}` };
+  const y = t.getUTCFullYear(), m = t.getUTCMonth() + 1;
+  const ymd = `${y}${p(m)}${p(t.getUTCDate())}`;
+  return { ym: `${y}-${p(m)}`, ymd, stamp: `${ymd}_${p(t.getUTCHours())}${p(t.getUTCMinutes())}`, path: monthPath(y, m) };
 }
+/* 폴더 이름 규칙(사용자 확정 2026-11-02) — 연도 폴더 아래 월 폴더 하나: `2026년/10월`.
+   직원 드라이브의 「26년 10월」(망고)·「26년10월」(만두)·「26.4월」 같은 제각각 이름을 이 하나로 합친다. */
+function monthPath(y, m) { return [`${y}년`, `${Number(m)}월`]; }
 
 /** 드라이브 파일명 — `20261102_1430_#89_케이뱅크_<원래 이름>` (원래 이름이 없으면 '이체결과.xlsx') */
 function driveName({ uploadedAt, seq, bank, fileName }) {
@@ -121,12 +125,12 @@ async function archivePending({ limit = BATCH_PER_RUN } = {}) {
   const folderCache = new Map();
   for (const c of list) {
     const name = driveName(c);
-    const { ym } = _kst(c.uploadedAt);
+    const { ym, path: mPath } = _kst(c.uploadedAt);
     let folder = null;
     try {
       folder = folderCache.get(ym);
       if (!folder) {
-        folder = await _dv().ensureFolderPath(root.rootId, [...root.prefix, ym]);
+        folder = await _dv().ensureFolderPath(root.rootId, [...root.prefix, ...mPath]);
         folder.privacy = await _folderPrivacy(folder.id);
         folderCache.set(ym, folder);
       }
@@ -175,7 +179,8 @@ async function status() {
     `SELECT
        (SELECT COUNT(DISTINCT u.file_sha256)::int FROM payment_result_uploads u
          WHERE u.file_blob IS NOT NULL AND u.file_sha256 IS NOT NULL) AS files,
-       COUNT(*) FILTER (WHERE a.status = 'done')::int AS done,
+       COUNT(*) FILTER (WHERE a.status = 'done' AND a.upload_id IS NOT NULL)::int AS done,
+       COUNT(*) FILTER (WHERE a.status = 'done' AND a.upload_id IS NULL)::int AS legacy,
        COUNT(*) FILTER (WHERE a.status = 'blocked')::int AS blocked,
        COUNT(*) FILTER (WHERE a.status = 'failed' AND a.attempts >= $1)::int AS gave_up,
        (SELECT root_folder_id FROM payment_result_drive_archive
@@ -188,9 +193,86 @@ async function status() {
     enabled: !!_root(),
     files, done, waiting: Math.max(0, files - done),
     blocked: Number(s && s.blocked) || 0, gaveUp: Number(s && s.gave_up) || 0,
+    legacy: Number(s && s.legacy) || 0,   // 리뷰웹 밖에서 들여온 지난 결과 파일(importLegacyFile)
     folderUrl: s && s.root ? `https://drive.google.com/drive/folders/${s.root}` : null,
     lastError: (s && s.last_error) || '',
   };
+}
+
+/* ── 지난 결과 파일 들여오기(사용자 확정 2026-11-02) ──
+   리뷰웹 이전·밖에서 직원 드라이브에 쌓아 둔 케이뱅크·하나은행 결과 파일을 같은 보관 폴더·같은 이름 규칙으로 올린다.
+   ★ 보관 사본일 뿐 — 입금·회차·작업보드는 건드리지 않는다(파일을 해석하는 건 은행 결과 파일인지와 이체 날짜를 알기 위해서뿐).
+   ★ 같은 내용(sha256)은 한 번만: 이미 보관했거나 리뷰웹에 있는 파일(그건 cron 이 올린다)은 건너뛴다.
+   ★ 은행 결과 파일이 아니면 올리지 않는다(소득 대장 등 성격이 다른 자료가 섞이지 않게). 공개 폴더면 올리지 않는다. */
+class ArchiveError extends Error { constructor(code, message) { super(message); this.code = code; } }
+const LEGACY_MAX_BYTES = 12 * 1024 * 1024;
+
+/** 들여올 파일의 은행·이체 날짜 — 파일 안 첫 이체일시, 없으면 파일 이름의 YYYYMMDD. */
+function legacyFacts(buf, fileName) {
+  const { loadSheetAoa } = require('../utils/spreadsheetLoad');
+  const { parseResultAoa } = require('../utils/paymentResultParse');
+  const loaded = loadSheetAoa(buf, fileName || '');
+  const parsed = loaded.ok && parseResultAoa(loaded.aoa);
+  if (!parsed || !parsed.ok) return { ok: false, error: (parsed && parsed.error) || loaded.error || '은행 이체결과 파일이 아닙니다.' };
+  const first = (parsed.rows.find(r => r.transferredAtIso) || {}).transferredAtIso;
+  let at = first ? Date.parse(first) : NaN;
+  if (!Number.isFinite(at)) {
+    const m = String(fileName || '').split('/').pop().match(/(20\d{2})(\d{2})(\d{2})/);
+    if (m) at = Date.parse(`${m[1]}-${m[2]}-${m[3]}T12:00:00+09:00`);
+  }
+  if (!Number.isFinite(at)) return { ok: false, error: '이체 날짜를 알 수 없습니다(파일 안 이체일시·파일 이름 날짜 모두 없음).' };
+  return { ok: true, bank: parsed.bank, at, rows: parsed.rows.length };
+}
+
+async function importLegacyFile({ fileName, base64 } = {}) {
+  if (!enabled()) throw new ArchiveError('disabled', '드라이브 보관이 꺼져 있습니다.');
+  const root = _root();
+  if (!root) throw new ArchiveError('no_folder', '보관 폴더 설정이 없습니다.');
+  const orig = String(fileName || '').split('/').pop();
+  if (!orig || typeof base64 !== 'string' || !base64) throw new ArchiveError('bad_request', '파일 이름과 내용을 보내 주세요.');
+  const buf = Buffer.from(base64, 'base64');
+  if (!buf.length) throw new ArchiveError('bad_request', '빈 파일입니다.');
+  if (buf.length > LEGACY_MAX_BYTES) throw new ArchiveError('too_large', '파일이 너무 큽니다(12MB 초과).');
+  const sha = require('crypto').createHash('sha256').update(buf).digest('hex');
+  const facts = legacyFacts(buf, fileName);
+  if (!facts.ok) throw new ArchiveError('not_result', facts.error);
+  const client = await _db().connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['result-archive:' + sha]);
+    const { rows: [had] } = await client.query(
+      `SELECT status, drive_name FROM payment_result_drive_archive WHERE file_sha256 = $1`, [sha]);
+    if (had && had.status === 'done') { await client.query('ROLLBACK'); return { ok: true, result: 'duplicate', name: had.drive_name }; }
+    const { rows: [inRw] } = await client.query(
+      `SELECT 1 FROM payment_result_uploads
+        WHERE file_blob IS NOT NULL AND COALESCE(file_sha256, encode(sha256(file_blob), 'hex')) = $1 LIMIT 1`, [sha]);
+    if (inRw) { await client.query('ROLLBACK'); return { ok: true, result: 'in_reviewweb' }; }
+    const k = _kst(facts.at);
+    const folder = await _dv().ensureFolderPath(root.rootId, [...root.prefix, ...k.path]);
+    const privacy = await _folderPrivacy(folder.id);
+    if (privacy !== 'private') {
+      throw new ArchiveError(privacy === 'public' ? 'blocked' : 'privacy_unknown', privacy === 'public'
+        ? '보관 폴더가 링크 공개 상태라 올리지 않았습니다 — 드라이브에서 폴더 공유를 「제한됨」으로 바꿔 주세요'
+        : '보관 폴더 공유 상태를 확인하지 못해 올리지 않았습니다');
+    }
+    const safe = orig.replace(/[\\/:*?"<>|\r\n]+/g, '_').trim() || '이체결과.xls';
+    const name = `${k.ymd}_${BANK_LABEL[facts.bank] || facts.bank}_${safe}`.slice(0, 200);
+    const up = await _dv().uploadFileBase64(base64, name, _mime(orig), folder.id, { shareAnyone: false });
+    const top = root.prefix.length ? await _dv().findFolderPath(root.rootId, root.prefix).catch(() => null) : { id: root.rootId };
+    await client.query(
+      `INSERT INTO payment_result_drive_archive
+         (file_sha256, upload_id, status, attempts, drive_file_id, drive_folder_id, root_folder_id, drive_name, last_error, archived_at, updated_at)
+       VALUES ($1, NULL, 'done', 0, $2, $3, $4, $5, '', NOW(), NOW())
+       ON CONFLICT (file_sha256) DO UPDATE SET status = 'done', drive_file_id = EXCLUDED.drive_file_id,
+         drive_folder_id = EXCLUDED.drive_folder_id, root_folder_id = COALESCE(EXCLUDED.root_folder_id, payment_result_drive_archive.root_folder_id),
+         drive_name = EXCLUDED.drive_name, last_error = '', archived_at = NOW(), updated_at = NOW()`,
+      [sha, (up && up.id) || null, folder.id, (top && top.id) || null, name]);
+    await client.query('COMMIT');
+    return { ok: true, result: 'uploaded', name, folder: k.path.join('/'), bank: facts.bank };
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* 이미 끝남 */ }
+    throw e;
+  } finally { client.release(); }
 }
 
 /* 결과 파일을 놓은 직후 한 번 — 응답을 기다리게 하지 않는다(10초 뒤, 같은 잠금으로 cron 과 겹치지 않음). */
@@ -207,4 +289,5 @@ function kickSoon() {
   if (_kickTimer.unref) _kickTimer.unref();
 }
 
-module.exports = { archivePending, status, kickSoon, driveName, enabled, PRIVATE_PREFIX, __setPoolForTest, __setDriveForTest };
+module.exports = { archivePending, status, kickSoon, driveName, enabled, monthPath, legacyFacts, importLegacyFile, ArchiveError,
+  PRIVATE_PREFIX, __setPoolForTest, __setDriveForTest };

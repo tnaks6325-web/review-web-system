@@ -4126,6 +4126,22 @@ router.get('/payment/result-archive', authMiddleware, adminOrMasterMiddleware, a
   }
 });
 
+// 지난 결과 파일 들여오기(사용자 확정 2026-11-02) — 직원 드라이브에 쌓인 리뷰웹 이전 결과 파일을 같은 보관 폴더로. 보관 사본만(입금 기록 무관).
+router.post('/payment/result-archive/import', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    res.json(await paymentResultArchiveSvc.importLegacyFile({ fileName: b.fileName, base64: b.base64 }));
+  } catch (err) {
+    if (err instanceof paymentResultArchiveSvc.ArchiveError) {
+      const code = err.code === 'too_large' ? 413 : err.code === 'blocked' ? 409
+        : ['disabled', 'no_folder', 'privacy_unknown'].includes(err.code) ? 503 : 400;
+      return res.status(code).json({ ok: false, code: err.code, error: err.message });
+    }
+    if (err && err.code === '42P01') return res.status(503).json({ ok: false, code: 'not_ready', error: '보관 장부가 아직 준비되지 않았습니다.' });
+    next(err);
+  }
+});
+
 // ── 통장 자동 대조(결정 293 · 하나은행 결정 303) — 케이뱅크·하나은행 거래내역으로 회차를 확정한다. 기록은 결과 파일 반영과 같은 경로. ──
 const paymentBankSvc = require('../services/paymentBank.service');
 function _bankErr(err, res, next) {
