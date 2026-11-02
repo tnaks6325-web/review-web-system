@@ -72,7 +72,8 @@ async function recordDeposits(client, items, opts = {}) {
   for (const item of (items || [])) {
     const rowIndex = item.rowIndex != null ? item.rowIndex : item.rowNum;
     /* ★★ 결정 292 — 리뷰비만 보낸 건(제품비 업체 · 리뷰비 우리): 제품비 페이백은 업체가 보내고 입금 칸에 적는다.
-         ① 리뷰 제출 전에도 보낸다(사용자 확정 2026-10-26) → v2 '리뷰 제출 전 입금 금지' 검사를 하지 않는다
+         ① v2 '리뷰 제출 전 입금 금지' 검사를 하지 않는다 — 결정 318 이후 새 회차는 리뷰 제출 뒤 줄만 담지만,
+            그 전(리뷰 전 지급 규칙) 회차의 결과 반영·미확인 이체 승인이 막다른 길이 되지 않게 그대로 둔다
          ② review_index PAID(= 리뷰어 화면 "페이백 완료")를 찍지 않는다 — 1천원만 받았는데 페이백이 끝난 것으로 보이면 안 된다
          ③ 우리 원장(payment_records)은 남긴다 — 다음 입금 대상 계산에서 이 줄을 잠그는 근거다(이중 지급 방지).
          중복 기록은 호출부가 막는다(회차 항목 pending→paid 전이 · 미확인 이체 검토 유일키). */

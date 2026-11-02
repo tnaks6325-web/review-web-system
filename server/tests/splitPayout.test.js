@@ -52,6 +52,12 @@ async function t(name, fn) {
     assert.match(ps, /left\(pe\.created_by, 3\) = '업체#' AND btrim\(COALESCE\(pe\.value_text, ''\)\) = btrim\(kv\.value\)/);
     assert.ok(!/strict\(`NOT EXISTS \(\s*SELECT 1 FROM manual_paid/.test(ps), 'manual_paid 를 strict(완화)로 감싸지 말 것');
   });
+  await t('2b-2 ★ 결정 318 — split 에서도 리뷰 제출·의무 대기 조건은 풀지 않는다(리뷰 뒤에만 리뷰비)', () => {
+    assert.ok(!/strict\('ri\.is_submitted = TRUE'\)/.test(ps), '리뷰 제출 조건을 strict(완화)로 감싸지 말 것');
+    assert.match(ps, /\n    'ri\.is_submitted = TRUE',\n/);
+    assert.ok(!/strict\(`NOT EXISTS \(SELECT 1 FROM reviewer_participations/.test(ps), '의무 대기 조건을 strict(완화)로 감싸지 말 것');
+    assert.match(ps, /\n    `NOT EXISTS \(SELECT 1 FROM reviewer_participations p WHERE/);
+  });
   await t('2c ★ 우리 원장 잠금 예외 — 업체가 비운 기록은 정정이 아니고, split 후보에서는 예외 없음', () => {
     assert.match(ps, /AND \(\$\{inSplit\} OR NOT EXISTS \(/);
     assert.match(ps, /AND left\(COALESCE\(pe\.created_by, ''\), 3\) <> '업체#'/);
