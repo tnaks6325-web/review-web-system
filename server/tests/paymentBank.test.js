@@ -73,9 +73,25 @@ const item = (id, amount, status = 'pending', resultStatus = '') => ({ id, amoun
     assert.strictEqual(r.amounts[0].failures, null);
     assert.deepStrictEqual(r.outside, { count: 1, sum: 5980 });
   });
-  await t('2f 회차 밖 다른 금액 줄은 회차 확정을 막지 않고 회차 밖으로 센다', () => {
+  /* 결정 317(방식 B · 사용자 확정 2026-11-02) — 종전 2f(「회차 밖 다른 금액 줄은 확정을 막지 않는다」)를 바꿨다:
+       리뷰웹 밖 작업 줄이 섞인 묶음은 통장으로 정하지 않는다(회차 사람 실패 + 밖의 같은 금액 줄이면 못 받은 사람을 완료로 적게 됨). */
+  await t('2f ★ 회차 밖 줄이 섞인 묶음은 통장으로 정하지 않는다(mixed · 모든 금액 모름) · 회차 밖으로 센다', () => {
     const r = reconcileBatch({ batch, items: [item('a', 5980)], rows: [row(5980, T), row(39900, T + 1000)], now: T + 20 * MIN });
-    assert.deepStrictEqual([r.state, r.outside.count, r.outside.sum], ['clean', 1, 39900]);
+    assert.deepStrictEqual([r.state, r.mixed, r.outside.count, r.outside.sum], ['review', true, 1, 39900]);
+    assert.ok(r.amounts.every(x => x.failures === null));
+    const plan = planConfirm(r, [{ ...item('a', 5980), status: 'pending' }], [], { auto: true });
+    assert.deepStrictEqual([plan.paid.length, plan.failed.length], [0, 0], '아무도 확정하지 않는다 — 결과 파일로');
+  });
+  await t('2f2 ★ 위험 장면 — 회차 1명 실패 + 밖의 같은 금액 1줄 + 밖의 다른 금액 → 건수가 맞아 보여도 완료로 적지 않는다', () => {
+    const items = [item('a', 5980), item('b', 5980)];
+    const r = reconcileBatch({ batch, items, rows: [row(5980, T), row(5980, T + 500), row(30000, T + 900)], now: T + 20 * MIN });
+    assert.strictEqual(r.mixed, true);
+    const plan = planConfirm(r, items.map(x => ({ ...x, status: 'pending' })), [], { auto: true });
+    assert.strictEqual(plan.paid.length, 0);
+  });
+  await t('2f3 회차 밖 줄이 없으면 종전대로 clean(mixed 아님)', () => {
+    const r = reconcileBatch({ batch, items: [item('a', 5980)], rows: [row(5980, T)], now: T + 20 * MIN });
+    assert.deepStrictEqual([r.state, r.mixed], ['clean', false]);
   });
   await t('2g 통장에 이 회차 이체가 없으면 not_found · 절반도 안 맞아도 not_found', () => {
     assert.strictEqual(reconcileBatch({ batch, items: [item('a', 5980)], rows: [], now: T + 20 * MIN }).state, 'not_found');

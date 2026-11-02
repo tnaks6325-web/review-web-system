@@ -4152,6 +4152,7 @@ router.get('/payment/batch/:id/bank', authMiddleware, adminOrMasterMiddleware, a
     const items = (rec.items || []).map(i => ({ id: i.id, reviewerName: i.reviewerName, tabName: i.tabName, amount: i.amount, status: i.status,
       hints: hints[String(i.id)] || [] }));
     res.json({ ok: true, batchId: rec.batchId, seq: rec.seq, bank: rec.bank || null, state: rec.state, cluster: rec.cluster || null, outside: rec.outside || null,
+      mixed: !!rec.mixed,   // 결정 317 — 리뷰웹 밖 줄이 섞인 묶음(통장으로 정하지 않음 · 결과 파일로)
       amounts: (rec.amounts || []).map(({ paidTimes, ...x }) => x), items });
   } catch (err) { _bankErr(err, res, next); }
 });
@@ -4244,6 +4245,40 @@ router.post('/payment/batch/:id/unconfirmed-transfer-review', authMiddleware, ad
       resultSeq: b.resultSeq, action: b.action, note: b.note, caseInfo: b.caseInfo, by: _by(req),
     }));
   } catch (err) { _resultErr(err, res, next); }
+});
+
+/* 결정 317(방식 B) — 「리뷰웹 밖 작업」 표시. 블로그·예약자리뷰처럼 리뷰웹에 없는 작업을 같은 대량이체로 보낸 줄을
+   미확인에서 빼는 **분류 기록**이다(입금 기록·작업보드는 건드리지 않는다). 같은 줄 두 번 쓰기 금지는 paymentProof 검사 그대로. */
+const paymentExternalWorkSvc = require('../services/paymentExternalWork.service');
+function _extErr(err, res, next) {
+  if (err && err.code === '42P01') {
+    return res.status(503).json({ ok: false, code: 'not_ready', error: '리뷰웹 밖 작업 저장소가 아직 준비되지 않았습니다(마이그레이션 208).' });
+  }
+  if (err instanceof paymentExternalWorkSvc.ExternalWorkError) {
+    const code = err.code === 'not_found' ? 404 : ['not_unmatched', 'cancelled'].includes(err.code) ? 409 : 400;
+    return res.status(code).json({ ok: false, code: err.code, error: err.message });
+  }
+  return _resultErr(err, res, next);
+}
+router.post('/payment/batch/:id/external-work', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    res.json(await paymentExternalWorkSvc.markExternalWork({
+      batchId: req.params.id, uploadId: b.uploadId, seqs: b.seqs, workName: b.workName, by: _by(req),
+    }));
+  } catch (err) { _extErr(err, res, next); }
+});
+router.get('/payment/batch/:id/external-work', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json({ ok: true, items: await paymentExternalWorkSvc.listForUpload(String(req.query.uploadId || '')) }); }
+  catch (err) { _extErr(err, res, next); }
+});
+router.delete('/payment/external-work/:markId', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await paymentExternalWorkSvc.unmarkExternalWork({ id: req.params.markId, by: _by(req) })); }
+  catch (err) { _extErr(err, res, next); }
+});
+router.get('/payment/external-work/names', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json({ ok: true, names: await paymentExternalWorkSvc.recentWorkNames() }); }
+  catch (err) { _extErr(err, res, next); }
 });
 
 router.get('/payment/batch/:id/duplicate-payment-cases', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {

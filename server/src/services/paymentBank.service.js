@@ -165,8 +165,13 @@ function reconcileBatch({ batch, items, rows, claimedTimes = [], now = Date.now(
       paidTimes: best.rows.filter(x => x.amount === a).map(x => x.at),
     });
   }
+  /* 결정 317(방식 B) — 이 묶음에 회차 밖 줄(리뷰웹 밖 작업을 엑셀에 직접 넣어 같이 보낸 줄)이 섞였으면 **통장으로 정하지 않는다**.
+       회차 사람 한 명이 계좌 오류로 빠지고 밖의 줄 하나가 같은 금액이면 건수가 맞아 보여, 못 받은 사람을 '이체 완료'로 적게 된다.
+       → 모든 금액을 '통장으로 모름'(failures=null)으로 두고 결과 파일을 기다린다(planConfirm 이 아무도 확정하지 않는다). */
+  const mixed = outsideCount > 0;
+  if (mixed) for (const x of amounts) x.failures = null;
   const clean = amounts.every(x => x.failures === 0);
-  return { state: clean ? 'clean' : 'review', cluster, amounts, outside: { count: outsideCount, sum: outsideSum } };
+  return { state: clean ? 'clean' : 'review', cluster, amounts, mixed, outside: { count: outsideCount, sum: outsideSum } };
 }
 
 /**
@@ -483,12 +488,16 @@ async function _bankOverviewOne(bank, now) {
   for (const { id } of open) {
     const rec = await inspectBatch(id, { now });
     batches.push({
-      batchId: id, seq: rec.seq, bank, state: rec.state, cluster: rec.cluster || null, outside: rec.outside || null,
+      batchId: id, seq: rec.seq, bank, state: rec.state, cluster: rec.cluster || null, outside: rec.outside || null, mixed: !!rec.mixed,
       amounts: (rec.amounts || []).filter(x => x.failures !== 0).map(x => ({ amount: x.amount, count: x.count, bank: x.bank, refunds: x.refunds, failures: x.failures })),
       pending: (rec.items || []).filter(i => i.status === 'pending').length,
     });
   }
-  const outside = outsideTransfers(rows, paid.map(p => ({ at: Number(p.at), amount: Number(p.amount) })),
+  // 결정 317 — 「리뷰웹 밖 작업」으로 표시한 이체도 '기록 없이 나간 돈'이 아니다(시각·금액으로 지운다)
+  let external = [];
+  try { external = await require('./paymentExternalWork.service').paidTransfersForBank(bank, new Date(fromMs - 3600 * 1000).toISOString(), _db()); }
+  catch (e) { if (!(e && e.code === '42P01')) throw e; }
+  const outside = outsideTransfers(rows, [...paid.map(p => ({ at: Number(p.at), amount: Number(p.amount) })), ...external],
     batches.filter(b => b.cluster).map(b => ({ start: b.cluster.start, end: b.cluster.end })), now, cfg.settleMs);
   return {
     bank, label: cfg.label, settleMinutes: Math.round(cfg.settleMs / 60000),

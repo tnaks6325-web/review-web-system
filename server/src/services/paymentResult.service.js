@@ -38,6 +38,7 @@ const { recordDeposits } = paymentApply;
 function __setPaymentApplyForTest(v) { paymentApply = v || require('./paymentApply.service'); }
 const { rebuildLedgers } = require('./sheetlessLedger.service');
 const paymentProof = require('./paymentProof.service');
+const paymentExternalWork = require('./paymentExternalWork.service');   // 결정 317 — 리뷰웹 밖 작업 표시(미확인에서 뺀다)
 
 const MAX_BASE64 = 16 * 1024 * 1024;   // base64 는 원본의 약 1.34배 — 12MB 파일까지 수용
 
@@ -399,8 +400,9 @@ async function findBatchForResultFile({ fileName, base64 }) {
     [parse.bank, RESULT_FIND_DAYS, createdBefore]);
   const byBatch = new Map();
   for (const r of cand) {
-    if (!byBatch.has(r.id)) byBatch.set(r.id, { id: r.id, seq: r.seq, status: r.status, have: new Map(), pending: 0 });
+    if (!byBatch.has(r.id)) byBatch.set(r.id, { id: r.id, seq: r.seq, status: r.status, have: new Map(), pending: 0, total: 0 });
     const v = byBatch.get(r.id);
+    v.total++;
     const k = `${digitsOnly(r.bank_account)}|${Number(r.amount) || 0}`;
     v.have.set(k, (v.have.get(k) || 0) + 1);
     if (r.item_status === 'pending') v.pending++;
@@ -410,11 +412,16 @@ async function findBatchForResultFile({ fileName, base64 }) {
     const have = new Map(v.have);
     let n = 0;
     for (const r of rows) { const k = `${digitsOnly(r.accountDigits)}|${Number(r.amount) || 0}`; if ((have.get(k) || 0) > 0) { have.set(k, have.get(k) - 1); n++; } }
-    if (n) scored.push({ id: v.id, seq: v.seq, status: v.status, pending: v.pending, n });
+    if (n) scored.push({ id: v.id, seq: v.seq, status: v.status, pending: v.pending, total: v.total, n });
   }
   scored.sort((x, y) => y.n - x.n);
   const [best, second] = scored;
-  if (!best || best.n * 2 <= rows.length) {
+  /* 결정 317(방식 B) — 직원이 리뷰웹 밖 작업(블로그·예약자리뷰) 줄을 엑셀에 직접 넣어 같이 보내므로 파일 줄의 절반 넘게가
+       리뷰웹 밖일 수 있다. 그래서 「파일 줄의 절반」 또는 「그 대량이체 대상의 절반」(2줄 이상) 중 하나만 넘으면 그 대량이체로 본다.
+       두 대량이체가 비슷하면 거부(아래)와 이체 시각 뒤에 만든 대량이체 제외(위)는 그대로다. */
+  const coversFile = best && best.n * 2 > rows.length;
+  const coversBatch = best && best.n >= 2 && best.n * 2 > best.total;
+  if (!best || !(coversFile || coversBatch)) {
     throw new ResultError('no_batch', `어느 대량이체 결과인지 찾지 못했습니다(파일 ${rows.length}줄 중 가장 많이 맞는 대량이체가 ${best ? `#${best.seq} ${best.n}줄` : '없음'}). 최근 ${RESULT_FIND_DAYS}일 안에 만든 ${parse.bankLabel || ''} 대량이체의 결과 파일인지 확인해 주세요.`);
   }
   if (second && second.n * 5 >= best.n * 4) {
@@ -476,6 +483,8 @@ async function getLatestResultPreview(batchId) {
   const { rows: reviewedRows } = await _db().query(
     'SELECT result_seq FROM unconfirmed_transfer_reviews WHERE upload_id = $1', [row.id]);
   const reviewedSeqs = new Set(reviewedRows.map(x => Number(x.result_seq)));
+  // 결정 317 — 「리뷰웹 밖 작업」으로 표시한 줄도 미확인에서 뺀다(같은 파일 내용 기준)
+  for (const seq of await paymentExternalWork.markedSeqsForUpload(row.id, _db())) reviewedSeqs.add(seq);
   adminPreview = { ...adminPreview,
     unmatchedResults: (adminPreview.unmatchedResults || []).filter(x => !reviewedSeqs.has(Number(x && x.seq))),
   };
@@ -639,6 +648,7 @@ async function inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, t
   const { rows: reviewedRows } = await db.query(
     'SELECT result_seq FROM unconfirmed_transfer_reviews WHERE upload_id = $1', [uploadId]);
   const reviewedSeqs = new Set(reviewedRows.map(x => Number(x.result_seq)));
+  for (const seq of await paymentExternalWork.markedSeqsForUpload(uploadId, db)) reviewedSeqs.add(seq);   // 결정 317
   const transfers = _restoreStoredAccountDigits(upload, outside)
     .filter(x => _unconfirmedMemo(x && x.memo) === normalizedMemo && !reviewedSeqs.has(Number(x && x.seq)));
   if (!transfers.length) throw new ResultError('not_found', '선택한 통장표시의 미확인 이체가 이 결과파일에 없습니다.');

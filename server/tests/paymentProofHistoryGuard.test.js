@@ -15,6 +15,7 @@ async function dbWithSchema() {
     CREATE TABLE unconfirmed_transfer_reviews(upload_id text, result_seq integer);
     CREATE TABLE payment_account_mismatch_reconciliations(upload_id text, result_seq integer);
     CREATE TABLE payment_amount_mismatch_reconciliations(upload_id text, result_seq integer);
+    CREATE TABLE external_work_transfers(file_sha256 text, result_seq integer);
     CREATE TABLE payment_records(source_key text);
   `);
   return db;

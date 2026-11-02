@@ -76,7 +76,12 @@ async function assertProofRowsUnused(db, { sha, uploadId, resultSeqs } = {}) {
   const checks = [
     `SELECT 1 FROM unconfirmed_transfer_reviews WHERE upload_id::text = ANY($1::text[]) AND result_seq = ANY($2::int[]) LIMIT 1`,
     `SELECT 1 FROM payment_account_mismatch_reconciliations WHERE upload_id::text = ANY($1::text[]) AND result_seq = ANY($2::int[]) LIMIT 1`,
-    `SELECT 1 FROM payment_amount_mismatch_reconciliations WHERE upload_id::text = ANY($1::text[]) AND result_seq = ANY($2::int[]) LIMIT 1`,
+    // 결정 317 — 「리뷰웹 밖 작업」으로 표시한 줄도 다시 쓰지 않는다(키 = 파일 내용+줄 번호). 질의 수를 늘리지 않게 같은 줄에 붙인다.
+    `SELECT 1 FROM payment_amount_mismatch_reconciliations WHERE upload_id::text = ANY($1::text[]) AND result_seq = ANY($2::int[])
+     UNION ALL
+     SELECT 1 FROM external_work_transfers e JOIN payment_result_uploads eu ON eu.file_sha256 = e.file_sha256
+      WHERE eu.id::text = ANY($1::text[]) AND e.result_seq = ANY($2::int[])
+     LIMIT 1`,
   ];
   for (const sql of checks) {
     const { rows } = await db.query(sql, [ids, seqs]);

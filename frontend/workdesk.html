@@ -2549,6 +2549,14 @@
 .pmrbd{padding:14px 18px;overflow:auto;flex:1;min-height:0}
 .pm-unconfirmed-box{width:min(880px,100%);min-height:min(590px,80vh)}
 .pm-unconfirmed-search{margin:16px 0 0;display:grid;gap:8px}
+.pmext{margin-top:12px;border:1px solid #CFE3DF;border-radius:10px;padding:12px;background:#F6FBFA;display:grid;gap:8px}
+.pmext-hd{display:grid;gap:2px}.pmext-hd b{font-size:13px}.pmext-hd span{font-size:11.5px;color:var(--t3,#6B7280)}
+.pmext-rows{display:grid;gap:4px;max-height:180px;overflow:auto}
+.pmext-row{display:grid;grid-template-columns:auto minmax(0,1.2fr) minmax(0,1fr) auto minmax(0,1fr);gap:8px;align-items:center;font-size:12.5px;padding:4px 6px;border-radius:6px;background:#fff}
+.pmext-done .pmext-row{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) auto minmax(0,.8fr) auto}
+.pmext-row .num{text-align:right;font-variant-numeric:tabular-nums}
+.pmext-act{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.pmext-act .inp{flex:1;min-width:200px;height:34px}
+.pmext-done summary{cursor:pointer;font-size:12.5px;color:#0F766E}
 .pm-unconfirmed-box .pm-unconfirmed-search{display:none}.pm-unconfirmed-box .pm-unconfirmed-search.on{display:grid}
 .pm-unconfirmed-search .inp{height:44px;font-size:15px;padding:0 13px}
 .pm-unconfirmed-candidates{position:static;display:grid;gap:7px;max-height:360px;overflow:auto;padding:2px}
@@ -13867,7 +13875,8 @@ function _pmBankPickRender(){
   const need=amounts.filter(a=>a.failures!==0);
   const pickedOf=a=>items.filter(it=>it.amount===a.amount&&st.picked.has(it.id)).length;
   const cl=r.cluster;
-  const groups=need.map(a=>{
+  // 결정 317(방식 B) — 리뷰웹 밖 줄이 섞인 대량이체는 통장으로 정하지 않는다(금액별 안내 대신 한 줄로)
+  const groups=r.mixed?`<div class="pmnote">이 대량이체 통장 출금에 <b>리뷰웹에 없는 줄 ${Number(r.outside&&r.outside.count)||0}건</b>(블로그·예약자리뷰 등)이 섞여 있어 통장만으로는 누가 받았는지 정하지 않습니다 — <b>케이뱅크 이체결과 파일을 입금관리에 놓아 주세요.</b> 놓은 뒤 남는 미확인 줄은 「리뷰웹 밖 작업」으로 표시하면 됩니다.</div>`:need.map(a=>{
     const rows=items.filter(it=>it.amount===a.amount);
     const already=rows.filter(it=>it.status==='failed').length;
     const head=`<b>${_pmNum(a.amount)}원</b><span>대량이체 ${a.count}명 · 통장 출금 ${a.bank}건${a.refunds?` · 취소로 돌아옴 ${a.refunds}건`:''}</span>`;
@@ -14430,7 +14439,8 @@ async function _pmOpenBatchUnconfirmed(i){
   const r=await api('/api/trackb/payment/batch/'+b.id+'/result-preview');
   if(!r||!r.ok){ toast((r&&r.error)||'이체결과를 불러오지 못했습니다'); return; }
   const outside=Array.isArray(r.unmatchedResults)?r.unmatchedResults:[];
-  if(!outside.length){ toast('이 대량이체에 미확인 이체가 없습니다.'); return; }
+  await _pmExtLoad(b.id, r.uploadId);   // 결정 317 — 리뷰웹 밖 작업으로 표시한 줄·최근 작업명
+  if(!outside.length && !(STATE.pmExtMarks||[]).length){ toast('이 대량이체에 미확인 이체가 없습니다.'); return; }
   STATE.pmResult={ batch:b, file:{name:r.fileName||'결과 파일'}, preview:r, persisted:true };
   const groups=Object.values(outside.reduce((acc,x)=>{
     const memo=String(x&&x.memo||'통장표시 없음').trim()||'통장표시 없음';
@@ -14438,6 +14448,65 @@ async function _pmOpenBatchUnconfirmed(i){
   },{}));
   STATE.pmUnconfirmedGroups=groups.map(g=>({ memo:String(g[0]&&g[0].memo||'통장표시 없음').trim()||'통장표시 없음', items:g }));
   _pmOpenUnconfirmedMatchList(0);
+}
+/* ── 결정 317(방식 B) — 「리뷰웹 밖 작업」 표시 ──
+   블로그·예약자리뷰처럼 리뷰웹에 없는 작업을 엑셀에 직접 넣어 같은 대량이체로 보낸 줄은 결과 파일에서 '미확인'으로 남는다.
+   담당자가 작업명을 붙여 표시하면 미확인에서 빠진다(입금 기록·작업보드는 건드리지 않는 분류 기록 · 되돌리기 가능). */
+async function _pmExtLoad(batchId, uploadId){
+  try{
+    const [m,n]=await Promise.all([
+      api('/api/trackb/payment/batch/'+batchId+'/external-work?uploadId='+encodeURIComponent(uploadId||'')),
+      api('/api/trackb/payment/external-work/names')]);
+    STATE.pmExtMarks=(m&&m.ok&&m.items)||[]; STATE.pmExtNames=(n&&n.ok&&n.names)||[];
+  }catch(_){ STATE.pmExtMarks=[]; STATE.pmExtNames=[]; }
+}
+function _pmExtPaint(){
+  const box=document.getElementById('pmExtMark'), el=document.getElementById('pmUnconfirmedOv'); if(!box||!el) return;
+  const group=(STATE.pmUnconfirmedGroups||[])[Number(el.dataset.groupIndex)];
+  const items=(group&&group.items)||[], marks=STATE.pmExtMarks||[];
+  const names=STATE.pmExtNames||[];
+  const pick=items.length?`<div class="pmext-hd"><b>「${esc(group.memo)}」 ${items.length}건 — 리뷰웹 밖 작업이면 작업명을 붙여 표시하세요</b><span>입금 기록은 만들지 않고 미확인에서만 뺍니다. 리뷰웹 작업 사람이 섞였으면 그 줄은 체크를 풀고 위에서 작업 대조하세요.</span></div>
+    <div class="pmext-rows">${items.map(x=>`<label class="pmext-row"><input type="checkbox" class="pmext-ck" value="${Number(x.seq)}" checked><span>${esc(x.holder||'—')}</span><span class="muted">${esc(_pmAccountNumber(x))}</span><span class="num">${_pmNum(x.amount)}원</span><span class="muted">${esc(x.transferredAt||'')}</span></label>`).join('')}</div>
+    <div class="pmext-act"><label for="pmExtName" class="muted">작업명</label><input id="pmExtName" class="inp" list="pmExtNameList" placeholder="예: 블로그) 한옥카페 소담 방문 체험" value=""><datalist id="pmExtNameList">${names.map(n=>`<option value="${esc(n)}"></option>`).join('')}</datalist><button class="btn sm primary" onclick="_pmExtMark()">리뷰웹 밖 작업으로 표시</button></div>`
+    :'<div class="pmnote">남은 미확인 줄이 없습니다.</div>';
+  const done=marks.length?`<details class="pmext-done"${items.length?'':' open'}><summary>이 결과 파일에서 리뷰웹 밖 작업으로 표시한 줄 ${marks.length}건</summary>${marks.map(m=>`<div class="pmext-row"><span>${esc(m.workName)}</span><span>${esc(m.holder||'—')}</span><span class="num">${_pmNum(m.amount)}원</span><span class="muted">${esc(m.markedBy||'')}</span><button class="btn xs" onclick="_pmExtUndo('${esc(m.id)}')">되돌리기</button></div>`).join('')}</details>`:'';
+  box.innerHTML=`<section class="pmext">${pick}${done}</section>`;
+}
+async function _pmExtMark(){
+  const R=STATE.pmResult, el=document.getElementById('pmUnconfirmedOv'); if(!R||!el) return;
+  const seqs=[...el.querySelectorAll('.pmext-ck:checked')].map(x=>Number(x.value));
+  const name=(document.getElementById('pmExtName')?.value||'').trim();
+  if(!seqs.length){ toast('표시할 줄을 고르세요.'); return; }
+  if(!name){ toast('작업명을 적어 주세요(구글시트의 작업명 그대로).'); document.getElementById('pmExtName')?.focus(); return; }
+  const r=await api('/api/trackb/payment/batch/'+R.batch.id+'/external-work',{method:'POST',body:JSON.stringify({uploadId:R.preview.uploadId,seqs,workName:name})});
+  if(!r||!r.ok){ toast((r&&r.error)||'표시하지 못했습니다.'); return; }
+  toast(`${r.marked}건을 「${name}」 리뷰웹 밖 작업으로 표시했습니다.`);
+  await _pmExtRefresh();
+}
+async function _pmExtUndo(id){
+  const r=await api('/api/trackb/payment/external-work/'+encodeURIComponent(id),{method:'DELETE'});
+  if(!r||!r.ok){ toast((r&&r.error)||'되돌리지 못했습니다.'); return; }
+  toast('표시를 되돌렸습니다 — 다시 미확인으로 보입니다.');
+  await _pmExtRefresh();
+}
+/* 표시·되돌리기 뒤 — 미확인 목록을 서버에서 다시 받아 창을 다시 그리고, 대량이체 목록 숫자도 새로 받는다. */
+async function _pmExtRefresh(){
+  const R=STATE.pmResult; if(!R) return;
+  const r=await api('/api/trackb/payment/batch/'+R.batch.id+'/result-preview');
+  if(r&&r.ok){
+    R.preview=r;
+    const outside=Array.isArray(r.unmatchedResults)?r.unmatchedResults:[];
+    STATE.pmUnconfirmedGroups=Object.values(outside.reduce((acc,x)=>{
+      const memo=String(x&&x.memo||'통장표시 없음').trim()||'통장표시 없음';
+      (acc[memo]||(acc[memo]=[])).push(x); return acc;
+    },{})).map(g=>({ memo:String(g[0]&&g[0].memo||'통장표시 없음').trim()||'통장표시 없음', items:g }));
+  }
+  await _pmExtLoad(R.batch.id, R.preview.uploadId);
+  const el=document.getElementById('pmUnconfirmedOv');
+  const keep=Math.min(Number(el?.dataset.groupIndex||0), Math.max(0,(STATE.pmUnconfirmedGroups||[]).length-1));
+  const g=(STATE.pmUnconfirmedGroups||[])[keep];
+  _pmOpenUnconfirmedMatch(g?g.memo:'', keep);
+  _pmLoad(true);
 }
 function _pmUnconfirmedGroupsClose(){ const el=document.getElementById('pmUnconfirmedGroupsOv'); if(el) el.remove(); }
 function _pmOpenBatchUnconfirmedGroup(i){ _pmOpenUnconfirmedMatchList(i); }
@@ -14648,6 +14717,7 @@ function _pmSelectUnconfirmedMemo(i){
   if(out) out.innerHTML='<div class="muted" style="padding:9px 10px">추천 작업을 불러오는 중…</div>';
   el.querySelector('.pm-unconfirmed-search')?.classList.remove('on');
   _pmRenderUnconfirmedDirect();
+  _pmExtPaint();
   _pmUnconfirmedSearch({ live:true });
 }
 
@@ -14677,9 +14747,10 @@ function _pmOpenUnconfirmedMatch(memo, selectedGroupIndex=0){
   _pmUnconfirmedClose();
   const el=document.createElement('div'); el.className='pmrov'; el.id='pmUnconfirmedOv'; el.dataset.memo=memo; el.dataset.groupIndex=String(selectedGroupIndex);
   const groups=STATE.pmUnconfirmedGroups||[];
-  el.innerHTML=`<div class="pmrbox pm-unconfirmed-box"><div class="pmrhd"><h3>미확인 이체 작업 대조</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmUnconfirmedClose()">닫기</button></div><div class="pmrbd"><div class="pmnote">미확인 이체 <b>${groups.reduce((n,g)=>n+(g.items||[]).length,0)}건</b> 중 통장표시 그룹 하나를 선택해 대조합니다. 그룹 안의 이체결과는 작업 1개를 선택하면 함께 조회되며, 추천은 자동 반영되지 않습니다.</div><div id="pmUnconfirmedTransferList" class="pm-unconfirmed-listbox" style="margin-top:12px">${groups.map((g,i)=>`<button class="pm-unconfirmed-transfer ${i===selectedGroupIndex?'on':''}" onclick="_pmSelectUnconfirmedMemo(${i})"><b>${esc(g.memo)}</b><span>${(g.items||[]).length}건 · ${_pmNum((g.items||[]).reduce((n,x)=>n+Number(x.amount||0),0))}원 · 작업 대조</span></button>`).join('')}</div><div class="pm-unconfirmed-search"><label for="pmUnconfirmedQuery" class="muted">선택한 이체 그룹의 작업 또는 모집공고 검색</label><input id="pmUnconfirmedQuery" class="inp" value="${esc(memo)}" placeholder="작업명·공고명·입금명으로 검색" oninput="_pmUnconfirmedLiveSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();_pmUnconfirmedSearch()}"><div id="pmUnconfirmedCandidates" class="pm-unconfirmed-candidates"></div></div></div></div>`;
+  el.innerHTML=`<div class="pmrbox pm-unconfirmed-box"><div class="pmrhd"><h3>미확인 이체 작업 대조</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmUnconfirmedClose()">닫기</button></div><div class="pmrbd"><div class="pmnote">미확인 이체 <b>${groups.reduce((n,g)=>n+(g.items||[]).length,0)}건</b> 중 통장표시 그룹 하나를 선택해 대조합니다. 그룹 안의 이체결과는 작업 1개를 선택하면 함께 조회되며, 추천은 자동 반영되지 않습니다. 블로그·예약자리뷰처럼 <b>리뷰웹에 없는 작업</b>을 같이 보낸 줄이면 아래 「리뷰웹 밖 작업으로 표시」를 누르세요.</div><div id="pmUnconfirmedTransferList" class="pm-unconfirmed-listbox" style="margin-top:12px">${groups.map((g,i)=>`<button class="pm-unconfirmed-transfer ${i===selectedGroupIndex?'on':''}" onclick="_pmSelectUnconfirmedMemo(${i})"><b>${esc(g.memo)}</b><span>${(g.items||[]).length}건 · ${_pmNum((g.items||[]).reduce((n,x)=>n+Number(x.amount||0),0))}원 · 작업 대조</span></button>`).join('')}</div><div id="pmExtMark"></div><div class="pm-unconfirmed-search"><label for="pmUnconfirmedQuery" class="muted">선택한 이체 그룹의 작업 또는 모집공고 검색</label><input id="pmUnconfirmedQuery" class="inp" value="${esc(memo)}" placeholder="작업명·공고명·입금명으로 검색" oninput="_pmUnconfirmedLiveSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();_pmUnconfirmedSearch()}"><div id="pmUnconfirmedCandidates" class="pm-unconfirmed-candidates"></div></div></div></div>`;
   document.body.appendChild(el);
   _pmRenderUnconfirmedDirect();
+  _pmExtPaint();
 }
 
 function _pmResultModal(){
