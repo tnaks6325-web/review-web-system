@@ -3,7 +3,7 @@
  * 실행: PGTEST_URL=postgres://... node tests/splitPayoutPg.test.js   (★ 마이그레이션된 **복사본** DB 에서만 — 표를 지우지는 않지만 행을 넣는다)
  *
  * 스텁으로 못 잡는 것만 본다:
- *   ① 대상 SQL 이 split 작업에서만 "리뷰 제출·입금 칸" 조건을 풀고, 아닌 작업은 그대로인지
+ *   ① 대상 SQL 이 split 작업에서만 "입금 칸" 조건을 풀고(리뷰 제출 조건은 그대로 — 결정 318), 아닌 작업은 그대로인지
  *   ② 금액 = 리뷰비만 · 회차에 제품비 0 박제 · 구매 전 줄은 보류
  *   ③ 결과 반영(리뷰비만) 뒤 리뷰어 "페이백 완료"(PAID)·입금 칸이 안 바뀌고 우리 원장만 남는지 + 다시 대상에 안 나오는지
  *   ④ 업체 입금일 기록이 우리 리뷰비 회차에 막히지 않고, 칸을 비워도 리뷰비 항목이 풀리지 않는지
@@ -38,9 +38,9 @@ const ADV = 'adv_splittest01';
 const HEADERS = ['번호', '구매일자', '수취인', '연락처', '상품', '결제금액', '리뷰제출', '입금일'];
 // seq, 이름, 연락처, 결제금액, 리뷰
 const ROWS = [
-  [3, '가리뷰', '010-1000-0003', '5980', ''],              // 구매 · 리뷰 전 → 리뷰비 대상(1,000)
+  [3, '가리뷰', '010-1000-0003', '5980', ''],              // 구매 · 리뷰 전 → 대상 아님(결정 318) → 리뷰를 내면 리뷰비 대상(1,000)
   [4, '나리뷰', '010-1000-0004', '5980', 'https://r/4'],   // 구매 · 리뷰 끝 → 리뷰비 대상
-  [5, '다리뷰', '010-1000-0005', '', ''],                  // 구매 전 → not_purchased
+  [5, '다리뷰', '010-1000-0005', '', 'https://r/5'],       // 리뷰는 냈는데 결제금액 없음 → not_purchased
   [6, '라리뷰', '010-1000-0006', '5980', 'https://r/6'],   // 우리가 이미 제품비 보냄 → 대상 아님
 ];
 const key = seq => `${SHEET}||${TAB}||${seq}`;
@@ -106,10 +106,14 @@ async function targets(opts = {}) {
 
     console.log('\n[1] 대상 — 제품비 업체 · 리뷰비 우리');
     let { out, by } = await targets();
+    ok('★ 결정 318 — 리뷰 전 줄(가)은 대상 아님(리뷰 뒤에만 리뷰비)', !by.has(key(3)), by.get(key(3)));
+    await pool.query(`UPDATE campaign_participants SET row_json = row_json || '{"리뷰제출":"https://r/3"}'::jsonb WHERE sheet_id=$1 AND seq=3`, [SHEET]);
+    await ledger.rebuildLedgers({ sheetId: SHEET, tabName: TAB });
+    ({ out, by } = await targets());
     const a = by.get(key(3)), n = by.get(key(4)), d = by.get(key(5));
-    ok('리뷰 전 줄(가)도 대상 · 금액 = 리뷰비 1,000', a && a.payable && a.amount === 1000 && a.payoutMode === 'split', a && { p: a.payable, amt: a.amount, iss: a.issues });
+    ok('리뷰를 낸 뒤(가) 대상 · 금액 = 리뷰비 1,000', a && a.payable && a.amount === 1000 && a.payoutMode === 'split', a && { p: a.payable, amt: a.amount, iss: a.issues });
     ok('리뷰 끝 줄(나) 금액 = 1,000 · 은행 = 케이뱅크(split 값에서)', n && n.amount === 1000 && n.bank === 'kbank' && n.bankSource === 'campaign');
-    ok('구매 전 줄(다) = not_purchased 로 보류', d && !d.payable && d.issues.includes('not_purchased'), d && d.issues);
+    ok('결제금액 없는 줄(다) = not_purchased 로 보류', d && !d.payable && d.issues.includes('not_purchased'), d && d.issues);
     ok('⑤ 이미 제품비 보낸 줄(라)은 대상 아님', !by.has(key(6)));
     ok('작업별 진행 = 대상 2 · 구매 전 1', out.splitWorks.length === 1 && out.splitWorks[0].payable === 2 && out.splitWorks[0].notPurchased === 1, out.splitWorks);
 

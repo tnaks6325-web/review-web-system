@@ -8177,7 +8177,7 @@ const _ADV_PAYOUT_OFF_CONFIRM='업체입금을 다른 이체은행으로 바꿉�
 /* 결정 292 — 제품비 업체 · 리뷰비 우리(split). 서버 값 split_kbank|split_hana(리뷰비를 보낼 우리 은행이 함께 들어 있다). */
 const _SPLIT_PAYOUT_NOTE_HTML=`<div class="cndnote"><b>🏢 제품비 업체 · 리뷰비 우리</b>를 고르면 —<br>`+
   `· 제품비(구매대금 페이백)는 <b>업체가</b> 보내고 입금 칸에 입금일을 기록합니다(업체입금과 같은 계좌 공개)<br>`+
-  `· 우리 입금관리에는 <b>리뷰비만</b> 잡힙니다 — 리뷰 제출을 기다리지 않고 구매가 끝난 줄부터(고른 은행 서식)<br>`+
+  `· 우리 입금관리에는 <b>리뷰비만</b> 잡힙니다 — 일반 작업처럼 리뷰를 제출한 줄부터(고른 은행 서식)<br>`+
   `· 이미 우리가 제품비까지 보낸 줄은 그대로 끝입니다(리뷰비 추가 지급 없음)</div>`;
 const _isGoodsAdvBank=v=>v==='advertiser'||v==='split_kbank'||v==='split_hana';
 function _cndBankModal(cd){
@@ -13049,15 +13049,15 @@ function _pmFinishedNoteHtml(){
   return `<div class="pmnote">🏁 마감된 작업 <b>${Number(f.works)||0}개</b>의 <b>${Number(f.rows)||0}건</b>은 목록에서 뺐습니다${f.payable?` — 이 중 <b>지금 입금 가능한 ${Number(f.payable)}건</b>이 있습니다`:''}. <button class="btn sm" onclick="_pmToggleFinished()">보기</button></div>`;
 }
 
-/* 결정 292 — 제품비 업체 · 리뷰비 우리 작업: 금액이 리뷰비만이라는 사실과 진행(대상·구매 전)을 작업마다 한 줄로 말한다.
-     "투입이 다 끝나면 한 번에 전원 입금"(사용자 2026-10-26)을 고를 수 있게 구매 전 줄 수를 함께 보인다. */
+/* 결정 292 — 제품비 업체 · 리뷰비 우리 작업: 금액이 리뷰비만이라는 사실과 진행(대상·제품비 값 없음)을 작업마다 한 줄로 말한다.
+     결정 318 — 리뷰 제출 뒤에만 목록에 오므로 "구매 전"은 리뷰는 냈는데 제품비 값이 비어 있는 줄뿐이다(있을 때만 보인다). */
 function _pmSplitNoteHtml(){
   const ws=STATE.pmSplitWorks||[];
   if(!ws.length) return '';
   const lines=ws.map(w=>`<b>${esc(w.tabLabel||w.tabName)}</b> — 리뷰비 ${_pmNum(Number(w.reviewFee)||0)}원 · 지금 보낼 수 있음 <b>${Number(w.payable)||0}명</b>`+
-    (Number(w.notPurchased)?` · 구매 전 ${Number(w.notPurchased)}명`:' · 구매 전 0명(모두 투입 완료)')+
+    (Number(w.notPurchased)?` · 제품비 값 없음 ${Number(w.notPurchased)}명`:'')+
     (w.noAdvertiser?' · <span style="color:#B91C1C">⚠ 연결된 업체가 없어 제품비를 보내고 적을 사람이 없습니다(업체관리에서 연결)</span>':'')).join('<br>');
-  return `<div class="pmnote">🏢 제품비는 업체가 보내는 작업 — 아래 금액은 <b>리뷰비만</b>입니다(리뷰 제출 전에도 보낼 수 있음).<br>${lines}</div>`;
+  return `<div class="pmnote">🏢 제품비는 업체가 보내는 작업 — 아래 금액은 <b>리뷰비만</b>입니다(일반 작업처럼 리뷰를 제출한 줄만).<br>${lines}</div>`;
 }
 /* 결정 247 — 업체가 직접 입금하는 작업은 서버가 목록에서 뺀다(이체 회차에도 안 담긴다). 뺀 사실만 한 줄로 말한다. */
 function _pmAdvPaidNoteHtml(){

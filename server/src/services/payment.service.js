@@ -133,10 +133,11 @@ async function listPaymentTargets(opts = {}) {
   // ★ 선택 필터(sheetId·tabName)는 뒤에 push 되어 $3·$4 가 된다 — 자리표시자는 params.length 로 뽑으므로
   //   여기 순서만 지키면 어긋나지 않는다.
   const params = [payPatterns, AMOUNT_EXACT_KEYS];
-  /* ★ 결정 292 — 제품비 업체 · 리뷰비 우리(split) 작업은 **리뷰 제출을 기다리지 않고**(사용자 확정 2026-10-26 "바로 보내도 된다"),
-       입금 칸·입금 표시는 **업체가 보낸 제품비 기록**이라 우리 리뷰비의 "이미 입금됨" 근거가 아니다.
-       그래서 후보 작업(넓게)에서만 그 조건들을 풀고, 행을 읽은 뒤 split 이 아니면 아래 strictOk 로 원래 조건을 다시 건다.
-       우리 이중 지급 잠금(회차 pending/paid · 입금 원장 payment_records)·미작성 종결 제외는 **그대로** 둔다. */
+  /* ★ 결정 292 — 제품비 업체 · 리뷰비 우리(split) 작업의 입금 칸·입금 표시는 **업체가 보낸 제품비 기록**이라
+       우리 리뷰비의 "이미 입금됨" 근거가 아니다. 그래서 후보 작업(넓게)에서만 그 조건을 풀고, 행을 읽은 뒤 split 이 아니면
+       아래 strictOk 로 원래 조건을 다시 건다.
+       ★ 결정 318(사용자 정정 2026-11-02 "리뷰를 작성하고난 다음에 리뷰비") — 리뷰 제출·의무 대기 조건은 split 에서도 **풀지 않는다**
+       (292 의 "리뷰 전 지급" 폐지). 우리 이중 지급 잠금(회차 pending/paid · 입금 원장 payment_records)·미작성 종결 제외도 **그대로**. */
   const accountsOnlyMode = opts.accountsForAllRows === true;
   const splitKeys = accountsOnlyMode ? [] : await _splitCandidateKeys();
   let inSplit = 'FALSE';
@@ -150,7 +151,8 @@ async function listPaymentTargets(opts = {}) {
     return `(${c} OR (${inSplit} AND ${alt}))`;
   };
   const where = [
-    strict('ri.is_submitted = TRUE'),
+    // ★ 결정 318 — split 에서도 리뷰 제출 뒤에만(strict 로 감싸지 말 것 — 감싸면 리뷰 전 리뷰비 지급이 되살아난다)
+    'ri.is_submitted = TRUE',
     'ri.row_index IS NOT NULL',
     "COALESCE(ri.phone8,'') <> ''",
     // 알림톡 3회 성공 뒤 최종기한까지 미작성으로 종결된 작업은, 나중에 리뷰칸이 바뀌어도
@@ -159,8 +161,8 @@ async function listPaymentTargets(opts = {}) {
         SELECT 1 FROM review_closed_targets rrs
          WHERE rrs.sheet_id = ri.sheet_id AND rrs.tab_name = ri.tab_name
            AND rrs.row_index = ri.row_index AND rrs.review_status = 'closed_no_review')`,
-    strict(`NOT EXISTS (SELECT 1 FROM reviewer_participations p WHERE p.sheet_id=ri.sheet_id AND p.tab_name=ri.tab_name
-      AND p.row_index=ri.row_index AND p.lifecycle_status='active' AND p.review_obligation_status IN ('pending','unknown'))`),
+    `NOT EXISTS (SELECT 1 FROM reviewer_participations p WHERE p.sheet_id=ri.sheet_id AND p.tab_name=ri.tab_name
+      AND p.row_index=ri.row_index AND p.lifecycle_status='active' AND p.review_obligation_status IN ('pending','unknown'))`,
     // 미입금 — search.service._isPaid 와 동일 규칙(SQL 판)
     /* ★ 결정 292 — split 작업에서도 입금 칸을 **통째로** 풀지 않는다(레드팀): 채워진 입금 칸이 **모두 업체가 넣은 값**
          (활성 편집기록이 `업체#…` 이고 지금 칸 값과 같다 = 업체가 보낸 제품비 기록)일 때만 "아직 우리 리뷰비 미지급"으로 본다.
@@ -316,7 +318,7 @@ async function listPaymentTargets(opts = {}) {
   const wbAcctMap = await _loadWorkboardAccountEdits(rows);
   const acctChangeMap = await _loadAccountChangeTimes([
     ...Object.values(acctMap), ...Object.values(ownerAcctMap)].map(a => a && a.reviewerId).filter(Boolean));
-  /* ★ 결정 292 — split 후보로 조건을 풀어 읽은 행 중 **실제 입금 방식이 split 이 아닌** 작업의 행은 원래 조건(리뷰 제출·미입금)을
+  /* ★ 결정 292 — split 후보로 조건을 풀어 읽은 행 중 **실제 입금 방식이 split 이 아닌** 작업의 행은 원래 조건(미입금)을
        다시 건다(공고가 은행을 명시해 탭의 split 값이 무시되는 경우 등). 판정 = payoutModeFrom — 아래 금액·은행 계산과 같은 재료. */
   const _modeOf = key => payoutModeFrom(campMap[key] && campMap[key].transferBank, tabMap[key] && tabMap[key].transferBank);
   if (rows.some(r => r.strictOk === false)) {
@@ -1503,7 +1505,7 @@ function feeOnlyItemSql(alias = '') {
   const a = alias ? alias + '.' : '';
   return `(COALESCE(${a}product_price, 0) = 0 AND COALESCE(${a}review_fee, 0) > 0 AND ${a}amount = ${a}review_fee)`;
 }
-/** split 일 수 있는 작업 키(시트||탭) 후보 — 대상 SQL 에서 "리뷰 제출·입금 칸" 조건을 풀어 줄 범위.
+/** split 일 수 있는 작업 키(시트||탭) 후보 — 대상 SQL 에서 "입금 칸" 조건을 풀어 줄 범위(리뷰 제출 조건은 풀지 않는다 — 결정 318).
  *  ★ 넓게 잡는다(공고 여럿·탭 값) — 최종 판정은 행을 읽은 뒤 payoutModeFrom 이 하고, split 이 아니면 원래 조건을 다시 건다.
  *  ★ 조회 실패 = 빈 목록 = 조건을 풀지 않는다(리뷰비가 늦게 나갈 뿐 잘못 나가지 않는 쪽). */
 async function _splitCandidateKeys() {
