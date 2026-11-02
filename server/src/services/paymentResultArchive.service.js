@@ -1,5 +1,5 @@
 /**
- * paymentResultArchive.service — 이체결과 파일을 구글 드라이브 내부 폴더에 쌓는다(결정 315).
+ * paymentResultArchive.service — 이체결과 파일을 구글 드라이브 내부 폴더에 쌓는다(결정 316).
  *
  * ★ 보관 사본일 뿐이다 — 반영·입금 기록은 종전대로 `paymentResult.autoApplyResultFile` 하나(결정 309).
  *   원본은 이미 `payment_result_uploads.file_blob`(109)에 있으므로 여기서 실패해도 잃는 것이 없다.

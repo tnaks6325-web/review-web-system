@@ -48,6 +48,31 @@ const { service } = require('./reviewInspectionFailureSafety.test');
     assert.strictEqual(afterUnknown.resolution, beforeUnknown.resolution);
     assert.strictEqual(String(afterUnknown.resolved_at), String(beforeUnknown.resolved_at));
     assert.strictEqual(afterUnknown.resolved_by, beforeUnknown.resolved_by);
+    // A legacy key is not proof that new contradictory product evidence is identical.
+    for (const [kind, verdict, expectedStatus] of [
+      ['conflict', 'warn', 'suspect'], ['insufficient', 'skip', 'unverifiable'],
+    ]) {
+      const before = (await db.query('SELECT * FROM review_inspections')).rows[0];
+      const product = { verdict, expected: ['가상 세럼 5ml'], ocr: '0.5ml 가상 세럼',
+        primaryExpected: ['가상 세럼 5ml'], canonicalSource: 'manual',
+        comparison: { version: 'review-product-evidence-v2', kind,
+          reason: kind === 'conflict' ? 'numeric_conflict' : 'missing_axis', signature: 'FAKE_NEW_PROOF' },
+        ...(kind === 'insufficient' ? { evidence: 'unknown' } : {}),
+      };
+      const incoming = { ...base, status: expectedStatus, checks: { ...base.checks, product } };
+      const stored = await api.__upsertForTest(incoming);
+      assert.strictEqual(stored.persisted, true);
+      assert.strictEqual(stored.storedStatus, expectedStatus,
+        'same legacy key must not turn a new ' + kind + ' into a resolved human-approved result');
+      assert.deepStrictEqual(stored.storedChecks.product, product,
+        'old product checks must not overwrite current contradictory or missing evidence');
+      const after = (await db.query('SELECT * FROM review_inspections')).rows[0];
+      assert.strictEqual(after.product_resolution, before.product_resolution, 'retain historical product decision');
+      assert.strictEqual(after.product_resolved_by, before.product_resolved_by, 'retain historical actor');
+      assert.strictEqual(after.resolution, before.resolution, 'do not invent or erase historical whole-case outcome');
+      assert.strictEqual(String(after.resolved_at), String(before.resolved_at), 'do not invent a fresh confirmation time');
+      assert.strictEqual(after.resolved_by, before.resolved_by, 'do not invent a fresh confirmer');
+    }
     // Receipt evidence keeps its existing independent policy, including legacy skip behavior.
     const receipt = await api.__upsertForTest({ ...base, slotKey: 'receipt', status: 'pass', checks: {
       ...base.checks, receiptValidation: { verdict: 'pass', status: 'ok', businessNoMatched: true },

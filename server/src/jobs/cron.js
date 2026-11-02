@@ -584,7 +584,7 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
-  // ── 이체결과 파일 드라이브 보관(결정 315): 10분마다 아직 안 올린 파일을 몇 개씩 ──
+  // ── 이체결과 파일 드라이브 보관(결정 316): 10분마다 아직 안 올린 파일을 몇 개씩 ──
   //   보관 사본일 뿐이라 실패해도 반영·입금 기록은 그대로다. 지난 파일도 이 같은 길로 차례로 채워진다.
   if (process.env.PAYMENT_RESULT_DRIVE !== '0') {
     let resultArchiveRunning = false;

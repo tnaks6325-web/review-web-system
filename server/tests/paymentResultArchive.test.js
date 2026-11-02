@@ -1,5 +1,5 @@
 /**
- * paymentResultArchive.test.js — 결정 315 이체결과 파일 드라이브 보관 회귀가드(스텁 · DB·드라이브 없이)
+ * paymentResultArchive.test.js — 결정 316 이체결과 파일 드라이브 보관 회귀가드(스텁 · DB·드라이브 없이)
  * 실행: node tests/paymentResultArchive.test.js
  *
  * 고정하는 것:

@@ -519,7 +519,7 @@ async function copyFile(fileId, newParentId, newName) {
 }
 
 /**
- * 파일·폴더에 걸린 권한 종류 목록(anyone·domain·user·group) — 내부 보관 폴더가 공개 상태인지 보는 데 쓴다(결정 315).
+ * 파일·폴더에 걸린 권한 종류 목록(anyone·domain·user·group) — 내부 보관 폴더가 공개 상태인지 보는 데 쓴다(결정 316).
  * ★ 읽기만 한다. 조회 실패·자격 없음은 null(= 모름) — 부르는 쪽이 「모르면 올리지 않는다」로 접는다.
  * @param {string} fileId
  * @returns {Promise<string[]|null>}

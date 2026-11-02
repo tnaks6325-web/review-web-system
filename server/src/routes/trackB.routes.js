@@ -4068,7 +4068,7 @@ router.post('/payment/reviewer-account', authMiddleware, adminOrMasterMiddleware
 const paymentResultSvc = require('../services/paymentResult.service');
 const manualDepositRepairSvc = require('../services/manualDepositRepair.service');
 const paymentResultArchiveSvc = require('../services/paymentResultArchive.service');
-/* 결과 파일을 놓은 뒤 드라이브 보관을 한 번 당겨 둔다(결정 315) — 응답 뒤 · 실패해도 반영과 무관(cron 이 다시 한다). */
+/* 결과 파일을 놓은 뒤 드라이브 보관을 한 번 당겨 둔다(결정 316) — 응답 뒤 · 실패해도 반영과 무관(cron 이 다시 한다). */
 function _archiveSoon() { try { paymentResultArchiveSvc.kickSoon(); } catch (_) { /* 보관 실패는 반영과 무관 */ } }
 
 function _resultErr(err, res, next) {
@@ -4117,7 +4117,7 @@ router.post('/payment/result-auto-apply', authMiddleware, adminOrMasterMiddlewar
   } catch (err) { _resultErr(err, res, next); }
 });
 
-// 이체결과 파일 드라이브 보관 현황(결정 315) — 읽기만. 보관은 뒤에서(cron·kickSoon) 하고 반영과 무관하다.
+// 이체결과 파일 드라이브 보관 현황(결정 316) — 읽기만. 보관은 뒤에서(cron·kickSoon) 하고 반영과 무관하다.
 router.get('/payment/result-archive', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, ...(await paymentResultArchiveSvc.status()) }); }
   catch (err) {

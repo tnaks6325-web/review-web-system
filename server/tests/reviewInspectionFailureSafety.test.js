@@ -6,7 +6,7 @@ const path = require('path');
 const vm = require('vm');
 const crypto = require('crypto');
 const base = path.join(__dirname, '..');
-function service({ classify, write = 'ok', lookupFailure = '', rowTypeFailure = false, reviewType = '포토', workKind = null } = {}) {
+function service({ classify, write = 'ok', lookupFailure = '', rowTypeFailure = false, reviewType = '포토', workKind = null, criteria = {} } = {}) {
   const saved = [];
   const pure = new Map();
   const loadPure = name => {
@@ -27,7 +27,7 @@ function service({ classify, write = 'ok', lookupFailure = '', rowTypeFailure = 
     if (key === './workKindContext.service') return { CAMPAIGN_WORK_KIND_LATERAL: '' };
     if (key === '../utils/workKind') return { resolveWorkKind: () => workKind };
     if (key === './gemini.service') return { classifySubmissionImage: classify };
-    if (/^\.\.\/utils\/(workOrderLink|reviewType|captureSlots|inspectIssueTypes)$/.test(key)) return loadPure(key.split('/').pop());
+    if (/^\.\.\/utils\/(workOrderLink|reviewType|captureSlots|inspectIssueTypes|reviewProductEvidence|orderProductSummary)$/.test(key)) return loadPure(key.split('/').pop());
     throw new Error('Blocked dependency: ' + key);
   } };
   vm.runInNewContext(fs.readFileSync(path.join(base, 'src/services/reviewInspect.service.js'), 'utf8')
@@ -41,6 +41,7 @@ function service({ classify, write = 'ok', lookupFailure = '', rowTypeFailure = 
     if (sql.includes('FROM tab_configs c')) return { rows: [{
       inspect_product_names: '가상브랜드 보습 로션 500ml 1개', inspect_product_aliases: '', inspect_product_rules: [],
       tab_review_type: reviewType, camp_review_type: reviewType, channel: '쿠팡',
+      ...criteria,
     }] };
     if (sql.includes('INSERT INTO review_inspections')) {
       if (write === 'error') throw new Error('FAKE persistence failure');
