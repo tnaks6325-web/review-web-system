@@ -4067,6 +4067,9 @@ router.post('/payment/reviewer-account', authMiddleware, adminOrMasterMiddleware
    ★ 42P01(migration 100 미적용) = `not_ready` 로 사유를 말한다(마스킹된 200 방지 — 088 규율). */
 const paymentResultSvc = require('../services/paymentResult.service');
 const manualDepositRepairSvc = require('../services/manualDepositRepair.service');
+const paymentResultArchiveSvc = require('../services/paymentResultArchive.service');
+/* 결과 파일을 놓은 뒤 드라이브 보관을 한 번 당겨 둔다(결정 315) — 응답 뒤 · 실패해도 반영과 무관(cron 이 다시 한다). */
+function _archiveSoon() { try { paymentResultArchiveSvc.kickSoon(); } catch (_) { /* 보관 실패는 반영과 무관 */ } }
 
 function _resultErr(err, res, next) {
   if (err && err.code === '42P01') {
@@ -4094,6 +4097,7 @@ router.post('/payment/batch/:id/result-auto-apply', authMiddleware, adminOrMaste
       batchId: req.params.id, fileName: b.fileName, base64: b.base64 || b.file, by: _by(req),
       notifyFailed: b.notifyFailed !== false,
     }));
+    _archiveSoon();
   } catch (err) { _resultErr(err, res, next); }
 });
 
@@ -4109,7 +4113,17 @@ router.post('/payment/result-auto-apply', authMiddleware, adminOrMasterMiddlewar
       batchId: found.batchId, fileName: b.fileName, base64, by: _by(req), notifyFailed: b.notifyFailed !== false,
     });
     res.json({ ...out, found, alreadyDone: !found.pending });
+    _archiveSoon();
   } catch (err) { _resultErr(err, res, next); }
+});
+
+// 이체결과 파일 드라이브 보관 현황(결정 315) — 읽기만. 보관은 뒤에서(cron·kickSoon) 하고 반영과 무관하다.
+router.get('/payment/result-archive', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json({ ok: true, ...(await paymentResultArchiveSvc.status()) }); }
+  catch (err) {
+    if (err && err.code === '42P01') return res.json({ ok: true, enabled: false, notReady: true });
+    next(err);
+  }
 });
 
 // ── 통장 자동 대조(결정 293 · 하나은행 결정 303) — 케이뱅크·하나은행 거래내역으로 회차를 확정한다. 기록은 결과 파일 반영과 같은 경로. ──

@@ -519,6 +519,25 @@ async function copyFile(fileId, newParentId, newName) {
 }
 
 /**
+ * 파일·폴더에 걸린 권한 종류 목록(anyone·domain·user·group) — 내부 보관 폴더가 공개 상태인지 보는 데 쓴다(결정 315).
+ * ★ 읽기만 한다. 조회 실패·자격 없음은 null(= 모름) — 부르는 쪽이 「모르면 올리지 않는다」로 접는다.
+ * @param {string} fileId
+ * @returns {Promise<string[]|null>}
+ */
+async function listPermissionTypes(fileId) {
+  if (!fileId) return null;
+  const d = _getOAuthDrive() || _getReadDrive();
+  if (!d) return null;
+  try {
+    const r = await d.permissions.list({ fileId, fields: 'permissions(type, role)', supportsAllDrives: true });
+    return (r.data.permissions || []).map(p => p.type);
+  } catch (e) {
+    logger.warn(`[Drive] 권한 조회 실패: ${fileId} — ${e.message}`);
+    return null;
+  }
+}
+
+/**
  * 폴더를 "링크가 있는 모든 사용자 = 읽기"로 공유한다 (업체 보고용 폴더 공유링크).
  *  - tnaks(OAuth=소유자) 자격으로 읽기 권한만 부여 → 업체가 로그인 없이 열람·다운로드.
  *  - 원본은 tnaks 소유 그대로 → 직원이 자기 드라이브에 복제할 필요가 없다(= 직원 용량 0).
@@ -1536,6 +1555,7 @@ module.exports = {
   getFileParents,
   findFolderByName,
   uploadFileBase64,
+  listPermissionTypes,
   setFolderAnyoneReader,
   getOrCreateSubFolder,
   getOAuthStatus,

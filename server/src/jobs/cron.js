@@ -584,6 +584,29 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
+  // ── 이체결과 파일 드라이브 보관(결정 315): 10분마다 아직 안 올린 파일을 몇 개씩 ──
+  //   보관 사본일 뿐이라 실패해도 반영·입금 기록은 그대로다. 지난 파일도 이 같은 길로 차례로 채워진다.
+  if (process.env.PAYMENT_RESULT_DRIVE !== '0') {
+    let resultArchiveRunning = false;
+    cron.schedule(process.env.PAYMENT_RESULT_DRIVE_SCHEDULE || '7-59/10 * * * *', async () => {
+      if (resultArchiveRunning) return;
+      resultArchiveRunning = true;
+      try {
+        const { withJobLock } = require('../utils/jobLock');
+        const archive = require('../services/paymentResultArchive.service');
+        const r = await withJobLock('payment_result_drive_archive', () => archive.archivePending());
+        if (r && r.ran && r.total) {
+          logger.info(`[CRON-ResultArchive] done=${r.done} failed=${r.failed} blocked=${r.blocked} of ${r.total}`);
+        }
+      } catch (err) {
+        logger.error(`[CRON-ResultArchive] ${err.message}`);
+        logAbnormal({ flow: 'cron', step: 'payment_result_drive_archive', error: err, context: { job: 'payment_result_drive_archive' } });
+      } finally {
+        resultArchiveRunning = false;
+      }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
   // ── 리뷰 미작성 알림톡: 기본 OFF, KST 10~18시 매시 ──
   // 공급자 최종 성공(4000)만 회차로 세며, 3회 성공 뒤 final_due_at이 지나야 별도 상태로 종결한다.
   // 일일 상한은 서비스에서 다시 적용된다. 롤링배포 중복 실행은 advisory lock으로 막는다.
