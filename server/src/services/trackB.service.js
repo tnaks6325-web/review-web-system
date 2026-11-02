@@ -3029,7 +3029,7 @@ function _captureCheckLabels(raw) {
   for (const f of flags) {
     if (!f || typeof f !== 'object') continue;
     if (f.code === 'price_over') out.push(`결제금액 ${won(f.paid)} — 공고 ${won(f.expected)}보다 30% 넘게 많음(리뷰어 직원 확인 요청)`);
-    else if (f.code === 'price_diff') out.push(`결제금액 ${won(f.paid)} — 공고 ${won(f.expected)}와 다름(리뷰어 확인 후 제출)`);
+    else if (f.code === 'price_diff') out.push(`결제금액 ${won(f.paid)} — 공고 ${won(f.expected)}과 다름(리뷰어 확인 후 제출)`);
     else if (f.code === 'product_differs') out.push(`캡처는 「${String(f.captured || '').slice(0, 60)}」로 보이는데 리뷰어가 고른 「${String(f.chosen || '').slice(0, 60)}」가 맞다고 함`);
     else if (f.code === 'qty_differs') out.push(`결제금액 ${won(f.paid)}은 ${String(f.captured || '')} 금액인데 리뷰어가 고른 ${String(f.chosen || '')}가 맞다고 함`);
   }
