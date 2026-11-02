@@ -61,7 +61,7 @@ const C = (id, sha, at, seq, fileName = 'kbank_result.xlsx') => ({ id, sha, file
     AR.__setPoolForTest(pool); AR.__setDriveForTest(dv);
     const r = await AR.archivePending();
     assert.deepStrictEqual([r.done, r.failed, r.blocked], [2, 0, 0]);
-    assert.deepStrictEqual(dv.paths, [['ROOT', AR.PRIVATE_PREFIX, '2026-10'], ['ROOT', AR.PRIVATE_PREFIX, '2026-11']]);
+    assert.deepStrictEqual(dv.paths, [['ROOT', AR.PRIVATE_PREFIX, '2026년', '10월'], ['ROOT', AR.PRIVATE_PREFIX, '2026년', '11월']]);   // 연도/월 폴더(사용자 확정 2026-11-02)
     assert.ok(dv.ups.every(u => u.opts && u.opts.shareAnyone === false), '공개 링크 금지');
     assert.strictEqual(dv.ups[0].mime, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     assert.strictEqual(dv.ups[0].bytes, 'xlsx-bytes-u1', 'DB 원본 그대로');
@@ -119,7 +119,7 @@ const C = (id, sha, at, seq, fileName = 'kbank_result.xlsx') => ({ id, sha, file
     assert.strictEqual(pool.calls.length, 0);
     process.env.PAYMENT_RESULT_FOLDER_ID = 'OWN';
     await AR.archivePending();
-    assert.deepStrictEqual(dv.paths[0], ['OWN', '2026-11']);
+    assert.deepStrictEqual(dv.paths[0], ['OWN', '2026년', '11월']);
     delete process.env.PAYMENT_RESULT_FOLDER_ID; process.env.AI_REVIEW_FOLDER_ID = 'ROOT';
   });
 
@@ -136,7 +136,9 @@ const C = (id, sha, at, seq, fileName = 'kbank_result.xlsx') => ({ id, sha, file
       assert.ok(/res\.json\([\s\S]*\);\n\s*_archiveSoon\(\);/.test(m[0]), '응답 뒤에 당긴다');
     }
     assert.ok(/router\.get\('\/payment\/result-archive', authMiddleware, adminOrMasterMiddleware/.test(tb));
-    assert.ok(!/router\.(post|put|delete)\('\/payment\/result-archive/.test(tb), '보관을 직접 시키는 쓰기 입구 없음');
+    // 리뷰웹 결과 파일 보관을 직접 시키는 쓰기 입구는 없다 — 예외는 리뷰웹 밖 지난 파일 들여오기(import) 하나(사용자 확정 2026-11-02)
+    const writes = tb.match(/router\.(post|put|delete)\('\/payment\/result-archive[^']*'/g) || [];
+    assert.deepStrictEqual(writes, ["router.post('/payment/result-archive/import'"], '보관 쓰기 입구는 들여오기 하나뿐');
     assert.ok(/function _archiveSoon\(\) \{ try \{ paymentResultArchiveSvc\.kickSoon\(\); \} catch/.test(tb), '보관 실패가 응답을 깨지 않는다');
   });
   await t('4c 서비스 — 공개 링크 금지 문자열 · 마이그레이션 207(sha 기본키)', () => {
@@ -188,6 +190,72 @@ const C = (id, sha, at, seq, fileName = 'kbank_result.xlsx') => ({ id, sha, file
     assert.ok(/VALUES \(\$1, \$2, \$3, CASE WHEN \$3 = 'failed' THEN 1 ELSE 0 END/.test(src));
     assert.ok(/attempts = payment_result_drive_archive\.attempts \+ CASE WHEN EXCLUDED\.status = 'failed' THEN 1 ELSE 0 END/.test(src));
     assert.ok(!/attempts = payment_result_drive_archive\.attempts \+ 1,/.test(src));
+  });
+
+  // ── 지난 결과 파일 들여오기(사용자 확정 2026-11-02) ──
+  const XLSX = require('@e965/xlsx');
+  const kbankFile = (when) => {
+    const aoa = [[' ', '이체일시', '입금계좌', '예금주', '이체금액(원)', '수수료(원)', '받는분 통장표시', '처리결과'],
+      ['', when, '국민 12345678901', '가나다', '19,800', '0', '인애드리뷰', '이체완료']];
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'S');
+    return XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+  };
+  function importPool({ had = null, inRw = false } = {}) {
+    const log = [];
+    const client = { query: async (sql, params) => {
+      log.push(sql.trim().split(/\s+/).slice(0, 3).join(' '));
+      if (/FROM payment_result_drive_archive WHERE file_sha256/.test(sql)) return { rows: had ? [had] : [] };
+      if (/FROM payment_result_uploads/.test(sql)) return { rows: inRw ? [{ '?column?': 1 }] : [] };
+      if (/INSERT INTO payment_result_drive_archive/.test(sql)) { log.insert = params; return { rows: [] }; }
+      return { rows: [] };
+    }, release() {} };
+    return { log, connect: async () => client, query: client.query };
+  }
+
+  await t('6 폴더 규칙 = 연도/월 · 지난 파일 날짜 = 파일 안 첫 이체일시(없으면 파일 이름 날짜)', () => {
+    assert.deepStrictEqual(AR.monthPath(2025, 9), ['2025년', '9월']);
+    const f = AR.legacyFacts(Buffer.from(kbankFile('2026.08.24 13:23:10'), 'base64'), '26년 8월/상세보기_이체완료,일부오류_20260902.xls');
+    assert.ok(f.ok && f.bank === 'kbank'); assert.strictEqual(new Date(f.at).toISOString(), '2026-08-24T04:23:10.000Z');
+    const g = AR.legacyFacts(Buffer.from(kbankFile(''), 'base64'), '11월/x_20251107.xlsx');
+    assert.ok(g.ok && new Date(g.at).toISOString().startsWith('2025-11-07'));
+    const nr = AR.legacyFacts(Buffer.from('a,b\n1,2\n'), '25년_12월_사업소득대장.csv');
+    assert.ok(!nr.ok, '은행 결과 파일이 아니면 거부');
+  });
+
+  await t('6b ★ 들여오기 — 연도/월 폴더 · 비공개 · 이름 = 이체일_은행_원래이름 · 장부에 upload_id 없이 done', async () => {
+    const pool = importPool(); const dv = stubDrive(); AR.__setPoolForTest(pool); AR.__setDriveForTest(dv);
+    const r = await AR.importLegacyFile({ fileName: '26년 8월/상세보기_이체완료,일부오류_20260902.xls', base64: kbankFile('2026.08.24 13:23:10') });
+    assert.deepStrictEqual([r.result, r.folder, r.bank], ['uploaded', '2026년/8월', 'kbank']);
+    assert.deepStrictEqual(dv.paths[0], ['ROOT', AR.PRIVATE_PREFIX, '2026년', '8월']);
+    assert.strictEqual(dv.ups[0].name, '20260824_케이뱅크_상세보기_이체완료,일부오류_20260902.xls');
+    assert.strictEqual(dv.ups[0].opts.shareAnyone, false);
+    assert.ok(pool.log.insert && pool.log.insert[1] === 'D1' && /^[0-9a-f]{64}$/.test(pool.log.insert[0]));
+    assert.ok(pool.log.includes('SELECT pg_advisory_xact_lock($1, $2)') && pool.log.includes('COMMIT'));
+    // Codex P2 — cron 과 같은 잠금 열쇠(폴더 두 번 만들기 방지)
+    const src = fs.readFileSync(path.join(__dirname, '../src/services/paymentResultArchive.service.js'), 'utf8');
+    assert.ok(/_lockKeys\('payment_result_drive_archive'\)[\s\S]{0,80}pg_advisory_xact_lock\(\$1, \$2\)/.test(src));
+    assert.ok(/JOIN payment_result_drive_archive d ON d\.file_sha256 = u\.file_sha256 AND d\.status = 'done'/.test(src), '보관 수 = 리뷰웹 파일 중 done(들여오기 먼저여도)');
+  });
+
+  await t('6c 같은 내용은 한 번만 · 리뷰웹에 있는 파일은 건너뜀(cron 몫) · 결과 파일 아님 거부 · 공개 폴더면 안 올림', async () => {
+    let dv = stubDrive(); AR.__setDriveForTest(dv);
+    AR.__setPoolForTest(importPool({ had: { status: 'done', drive_name: 'x' } }));
+    assert.strictEqual((await AR.importLegacyFile({ fileName: 'a_20260801.xls', base64: kbankFile('2026.08.01 10:00:00') })).result, 'duplicate');
+    AR.__setPoolForTest(importPool({ inRw: true }));
+    assert.strictEqual((await AR.importLegacyFile({ fileName: 'a_20260801.xls', base64: kbankFile('2026.08.01 10:00:00') })).result, 'in_reviewweb');
+    assert.strictEqual(dv.ups.length, 0);
+    await assert.rejects(() => AR.importLegacyFile({ fileName: '사업소득대장.csv', base64: Buffer.from('a,b\n1,2\n').toString('base64') }), e => e.code === 'not_result');
+    dv = stubDrive({ perms: ['user', 'anyone'] }); AR.__setDriveForTest(dv); const pool = importPool(); AR.__setPoolForTest(pool);
+    await assert.rejects(() => AR.importLegacyFile({ fileName: 'a_20260801.xls', base64: kbankFile('2026.08.01 10:00:00') }), e => e.code === 'blocked');
+    assert.strictEqual(dv.ups.length, 0); assert.ok(pool.log.includes('ROLLBACK') && !pool.log.insert);
+  });
+
+  await t('6d 라우트 — 관리자만 · 보관 사본만(입금 서비스를 부르지 않음)', () => {
+    const r = fs.readFileSync(path.join(__dirname, '../src/routes/trackB.routes.js'), 'utf8');
+    assert.ok(/router\.post\('\/payment\/result-archive\/import', authMiddleware, adminOrMasterMiddleware/.test(r));
+    const src = fs.readFileSync(path.join(__dirname, '../src/services/paymentResultArchive.service.js'), 'utf8');
+    const body = src.slice(src.indexOf('async function importLegacyFile'), src.indexOf('/* 결과 파일을 놓은 직후 한 번'));
+    assert.ok(!/payment_records|payment_batch_items|autoApplyResultFile|paymentResult\.service/.test(body), '입금 기록을 건드리지 않는다');
   });
 
   AR.__setPoolForTest(null); AR.__setDriveForTest(null);
