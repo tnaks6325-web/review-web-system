@@ -15,7 +15,7 @@
  *
  * ★ 판정 재료
  *   · 공고 금액 = 고른 개수의 단계 금액(289) → 고른 상품의 금액(신청 시각 금액 · 275) → 공고 상품 글자의 `결제금액 N원`
- *     (글자 안 금액이 **하나일 때만** — 2종 이상이면 무엇이 정답인지 모르므로 보지 않는다).
+ *     (글자 안 금액이 **하나일 때만** — 2종 이상이면 무엇이 정답인지 모르므로 보지 않는다 · 글자에 금액이 없으면 work_detail.payAmount — 리뷰어 화면과 같은 규칙).
  *   · 결제금액 = 캡처에서 AI 가 읽은 금액(리뷰어가 고칠 수 없는 값) → 없으면 리뷰어가 적은 결제금액.
  *   · 구매처 = 공고의 구매처(recruit_campaigns.channel) — 리뷰어 캡처가 아니라 공고 설정으로 정한다.
  * ★ fail-open — 공고·금액·구매처를 모르거나 조회가 실패하면 아무 일도 하지 않는다(모르는 것으로 사람을 막지 않는다).
@@ -49,12 +49,29 @@ function channelKind(channel) {
 
 /** 공고 상품 글자의 `결제금액 N원` — 서로 다른 금액이 **하나일 때만** 그 금액(2종 이상·없음 = 0). */
 function uniquePayFromProductLines(text) {
+  const amts = _payAmountsInText(text);
+  return amts.size === 1 ? [...amts][0] : 0;
+}
+
+/** 글자 안 서로 다른 `결제금액 N원` 금액들. */
+function _payAmountsInText(text) {
   const amts = new Set();
   const re = /결제금액\s*([\d,]+)\s*원/g;
   let m;
   const s = String(text == null ? '' : text);
   while ((m = re.exec(s))) { const v = _won(m[1]); if (v) amts.add(v); }
-  return amts.size === 1 ? [...amts][0] : 0;
+  return amts;
+}
+
+/**
+ * 상품을 나누지 않은 공고의 1건 금액 — 리뷰어 화면(`campaign-workdetail.js` 작업 조건)과 **같은 규칙**:
+ *   글자 안 금액이 하나 = 그 금액 · 글자에 금액이 없음 = `work_detail.payAmount` · 2종 이상 = 모름(0).
+ */
+function wholeCampaignPay(productLines, payAmount) {
+  const amts = _payAmountsInText(productLines);
+  if (amts.size === 1) return [...amts][0];
+  if (amts.size === 0) return _won(payAmount);
+  return 0;
 }
 
 /**
@@ -90,7 +107,7 @@ function judge({ kind, expected, paid, staffReview = false, ack = false }) {
 async function loadExpected({ holdCtx, db = getPool() }) {
   if (!holdCtx || !holdCtx.verified || !holdCtx.campaignId) return null;
   const { rows } = await db.query(
-    `SELECT channel, work_detail->>'productLines' AS pl FROM recruit_campaigns WHERE id = $1 LIMIT 1`,
+    `SELECT channel, work_detail->>'productLines' AS pl, work_detail->>'payAmount' AS pay FROM recruit_campaigns WHERE id = $1 LIMIT 1`,
     [String(holdCtx.campaignId)]);
   if (!rows.length) return null;
   const kind = channelKind(rows[0].channel);
@@ -101,7 +118,7 @@ async function loadExpected({ holdCtx, db = getPool() }) {
     const o = opts.find(x => x.opt_key === String(holdCtx.optionKey));
     expected = o ? _won(o.pay_amount) : 0;
   }
-  if (!expected) expected = uniquePayFromProductLines(rows[0].pl);
+  if (!expected) expected = wholeCampaignPay(rows[0].pl, rows[0].pay);
   if (!expected) return null;
   return { kind, expected, channel: String(rows[0].channel || '') };
 }
@@ -128,5 +145,5 @@ async function decideAtSubmit({ holdCtx, capturePrice = '', typedPrice = '', sta
 
 module.exports = {
   COUPANG_OVER_RATIO, OTHER_DIFF_WON,
-  isEnabled, channelKind, uniquePayFromProductLines, judge, loadExpected, decideAtSubmit, __setPoolForTest,
+  isEnabled, channelKind, uniquePayFromProductLines, wholeCampaignPay, judge, loadExpected, decideAtSubmit, __setPoolForTest,
 };

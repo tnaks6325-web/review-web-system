@@ -61,6 +61,11 @@ function pure() {
   assert.equal(cpc.uniquePayFromProductLines('A - 결제금액 25,000원\nB - 결제금액 25000 원'), 25000, '같은 금액 두 줄 = 하나');
   assert.equal(cpc.uniquePayFromProductLines('A - 결제금액 25,000원\nB - 결제금액 30,000원'), 0, '2종 이상 = 모름');
   assert.equal(cpc.uniquePayFromProductLines(''), 0);
+  // 리뷰어 화면(campaign-workdetail)과 같은 규칙 — 글자에 금액이 없으면 payAmount · 2종 이상이면 payAmount 가 있어도 모름(Codex 리뷰)
+  assert.equal(cpc.wholeCampaignPay('앰플 50ml', 25000), 25000);
+  assert.equal(cpc.wholeCampaignPay('앰플 - 결제금액 26,000원', 25000), 26000, '글자 금액이 먼저(화면이 보여 주는 값)');
+  assert.equal(cpc.wholeCampaignPay('A 결제금액 1,000원 / B 결제금액 2,000원', 25000), 0);
+  assert.equal(cpc.wholeCampaignPay('', null), 0);
 }
 
 async function stubs() {
@@ -74,6 +79,9 @@ async function stubs() {
   // AI 값이 없으면 리뷰어가 적은 값
   d = await cpc.decideAtSubmit({ holdCtx: HOLD(), capturePrice: '', typedPrice: '43,000', db: stubDb([camp('네이버', '결제금액 25,000원')]) });
   assert.equal(d.action, 'warn'); assert.equal(d.paidSource, 'typed');
+  // 글자에 금액 없음 + payAmount (Codex 리뷰 재현: 화면엔 25,000원인데 43,000원이 그냥 통과하던 경우)
+  d = await cpc.decideAtSubmit({ holdCtx: HOLD(), capturePrice: '43000', db: stubDb([[/FROM recruit_campaigns/, [{ channel: '네이버', pl: '앰플 50ml', pay: '25000' }]]]) });
+  assert.equal(d.action, 'warn'); assert.equal(d.expected, 25000);
   // 고른 상품 금액(신청 시각 금액 규칙 — productMismatchVerify 와 같은 함수)
   const opts = [/FROM campaign_options/, [{ id: 1, opt_key: 'A', pay_amount: 10000, status: 'active' }, { id: 2, opt_key: 'B', pay_amount: 20000, status: 'active' }]];
   d = await cpc.decideAtSubmit({ holdCtx: HOLD({ optionKey: 'B' }), capturePrice: '30000', db: stubDb([camp('쿠팡', ''), opts]) });
