@@ -3018,6 +3018,24 @@ function _advertiserOrderInfoHeaders(headers, orderMap) {
   return add;
 }
 
+/**
+ * 결정 319 — 주문의 캡처 확인 🚩(order_submissions.capture_flags) → 작업보드에 보일 한 줄 설명 목록.
+ * 모르는 code·깨진 값은 버린다(빈 배열 = 표시 없음).
+ */
+function _captureCheckLabels(raw) {
+  const flags = raw && typeof raw === 'object' && Array.isArray(raw.flags) ? raw.flags : [];
+  const won = (n) => `${Number(n || 0).toLocaleString('ko-KR')}원`;
+  const out = [];
+  for (const f of flags) {
+    if (!f || typeof f !== 'object') continue;
+    if (f.code === 'price_over') out.push(`결제금액 ${won(f.paid)} — 공고 ${won(f.expected)}보다 30% 넘게 많음(리뷰어 직원 확인 요청)`);
+    else if (f.code === 'price_diff') out.push(`결제금액 ${won(f.paid)} — 공고 ${won(f.expected)}과 다름(리뷰어 확인 후 제출)`);
+    else if (f.code === 'product_differs') out.push(`캡처는 「${String(f.captured || '').slice(0, 60)}」로 보이는데 리뷰어가 고른 「${String(f.chosen || '').slice(0, 60)}」가 맞다고 함`);
+    else if (f.code === 'qty_differs') out.push(`결제금액 ${won(f.paid)}은 ${String(f.captured || '')} 금액인데 리뷰어가 고른 ${String(f.chosen || '')}가 맞다고 함`);
+  }
+  return out;
+}
+
 function _sameSheetRow(a, b) {
   const left = String(a == null ? '' : a).trim();
   const right = String(b == null ? '' : b).trim();
@@ -3653,7 +3671,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             ria.is_submitted AS submitted, FALSE AS paid, 'archive'::text AS source,
             NULL::uuid AS order_submission_id, NULL::text AS identity_key, ria.row_json, ria.submit_col, ria.submit_col2,
             NULL::uuid AS "popularPurposeApplicationId", NULL::text AS "popularPurposePhone8", NULL::jsonb AS "ruleFlags",
-            NULL::text AS "deliveryMemo", NULL::text AS "deliveryMemoCheck", NULL::int AS "purchaseQty"
+            NULL::text AS "deliveryMemo", NULL::text AS "deliveryMemoCheck", NULL::jsonb AS "captureFlags", NULL::int AS "purchaseQty"
        FROM review_index_archive ria
       WHERE ria.sheet_id=$1 AND ria.tab_name=$2
       ORDER BY ria.row_index`
@@ -3673,6 +3691,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             purpose_order.delivery_memo AS "deliveryMemo",
             -- 결정 260: 필수 배송메세지 확인 결과('staff_review' = 확인 안 된 채 직원 확인 요청으로 받음 · 내부 작업보드만 🚩)
             purpose_order.delivery_memo_check AS "deliveryMemoCheck",
+            -- 결정 319: 캡처 확인 🚩(결제금액·상품·개수 차이로 받은 주문 · 내부 작업보드만)
+            purpose_order.capture_flags AS "captureFlags",
             -- 결정 289 ④: 리뷰어가 고른 구매수량(공고 참여 주문만 · 없으면 NULL = 1개 기본) — 「구매수량」 가상 칸·판매 개수
             purpose_order.purchase_qty AS "purchaseQty"
        FROM campaign_participants cp
@@ -4051,6 +4071,11 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
         && String(r.deliveryMemo || '').trim()) syn.deliveryMemo = String(r.deliveryMemo).trim();
     /* 결정 260 — 필수 배송메세지가 확인 안 된 채 「직원 확인 요청」으로 받은 주문(🚩). 반려(주문 취소)는 직원 몫이라 내부에만 싣는다. */
     if (showEdits && r.deliveryMemoCheck === 'staff_review') syn.deliveryMemoCheck = 'staff_review';
+    /* 결정 319 — 캡처 확인 🚩(결제금액·상품·개수가 공고와 다른 채 받은 주문). 반려 판단은 직원 몫이라 내부에만 싣는다. */
+    if (showEdits) {
+      const cf = _captureCheckLabels(r.captureFlags);
+      if (cf.length) syn.captureCheck = cf;
+    }
     /* 결정 289 ④ — 고른 구매수량(내부·업체 모두 · 사용자 확정 「가」). 개인정보가 아니고 결제금액 칸이 이미 보인다. */
     if (r.purchaseQty != null && Number(r.purchaseQty) > 0) syn.purchaseQty = Number(r.purchaseQty);
     /* ★ 행마다 같은 판정을 실어 보낸다 — 제출물 미리보기 목록이 "채워진 줄"을 화면에서 다시
@@ -6772,6 +6797,7 @@ module.exports = {
   __advertiserOrderInfoHeadersForTest: _advertiserOrderInfoHeaders,
   __isAdvertiserUserIdHeaderForTest: _isAdvertiserUserIdHeader,
   __sameSheetRowForTest: _sameSheetRow,
+  _captureCheckLabels,
   // 회귀가드 전용 — tabStatsMap 의 30초 프로세스 캐시를 비운다(시나리오마다 다른 스텁 응답을 태우기 위해).
   //   운영 코드에서 부르지 말 것: 캐시는 "모든 내부 사용자의 홈 진입 경로"에 붙은 비용 절감 장치다.
   __resetTabStatsCacheForTest() { _tabStatsCache = { at: 0, map: null }; },

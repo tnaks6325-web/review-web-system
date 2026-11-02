@@ -50,7 +50,7 @@ assert.ok(/\['order_submissions', 'rule_flags'\]/.test(read('server/index.js')),
 const wd = read('frontend/workdesk.html');
 assert.ok(/⚠ 규칙 위반: '\+esc\(r\.ruleFlags\.join/.test(wd), 'view table badge');
 // 결정 260: 🚩(필수 배송메세지 미확인)가 ⚠ 와 이름 사이에 올 수 있다 — ⚠ 가 이름 앞이라는 검사 의미는 그대로.
-assert.ok(/\$\{ruleMark\}(?:\$\{memoMark\})?\$\{esc\(r\.name\|\|'—'\)\}/.test(wd), 'grid: red mark before the name (badge after would be clipped)');
+assert.ok(/\$\{ruleMark\}(?:\$\{memoMark\})?(?:\$\{capMark\})?\$\{esc\(r\.name\|\|'—'\)\}/.test(wd), 'grid: red mark before the name (badge after would be clipped)');
 const cc = read('frontend/js/campaign-cards.js');
 assert.ok(/ruleBad > 0/.test(cc) && /c\.ops\.ruleViolations === null/.test(cc), 'card orange badge; unknown = grey ?');
 const st = read('server/src/services/campaignState.service.js');

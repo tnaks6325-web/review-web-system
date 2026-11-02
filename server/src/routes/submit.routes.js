@@ -744,6 +744,9 @@ router.post('/order', async (req, res, next) => {
        ★ 위 멱등 게이트 **뒤**에 둔다 — 이미 접수된 홀드의 재전송을 다시 묻지 않는다.
        ★ 결정 236 ④ — "고른 상품이 맞다"고 답했는데 결제금액이 다른 상품 하나의 가격이면 한 번 더 묻는다(PRODUCT_PRICE_RECHECK · 쓰기 0).
          다시 확인하고도 맞다(priceRecheckAck)면 접수 + 이상로그(capture_price_mismatch_confirmed). */
+    /* ★★ 결정 319 — 캡처 확인 🚩(작업보드 내부만). 리뷰어가 「고른 상품·개수가 맞다」고 답했지만 AI 가 캡처에서 다른 상품·개수를
+       분명히 읽은 주문, 결제금액이 공고 금액과 다른 주문을 접수하되 담당자가 캡처를 보게 남긴다(order_submissions.capture_flags). */
+    const captureFlags = [];
     if (holdCtx && holdCtx.verified && holdCtx.optionKey) {
       const pv = require('../services/productMismatchVerify.service');
       const captureText = [b.productCaptureName, b.productCaptureOption]
@@ -785,6 +788,9 @@ router.post('/order', async (req, res, next) => {
         if (decision.action === 'wrong') {
           return res.json({ ok: false, code: 'PRODUCT_WRONG_PURCHASE', chosen: decision.chosen, bought: decision.bought, error: decision.error });
         }
+        // 결정 319 — AI 가 다른 상품을 읽었거나(글자) 결제금액이 다른 상품 가격인데 리뷰어가 「맞다」고 한 주문 = 🚩 상품 확인 필요.
+        const _otherSeen = decision.capturedKey || decision.priceOther || '';
+        if (_otherSeen) captureFlags.push({ code: 'product_differs', chosen: String(holdCtx.optionKey), captured: String(_otherSeen), paid: Number(decision.paid) || 0 });
       }
     }
 
@@ -818,6 +824,8 @@ router.post('/order', async (req, res, next) => {
         if (qd.action === 'wrong') {
           return res.json({ ok: false, code: 'PRODUCT_WRONG_PURCHASE', chosen: qd.chosen, bought: qd.bought, error: qd.error });
         }
+        // 결정 319 — 결제금액이 다른 개수의 금액인데 리뷰어가 고른 개수가 맞다고 한 주문 = 🚩 개수 확인 필요.
+        captureFlags.push({ code: 'qty_differs', chosen: qd.chosen.label, captured: qd.captured.label, paid: Number(qd.paid) || 0 });
       }
     }
 
@@ -1121,6 +1129,37 @@ router.post('/order', async (req, res, next) => {
         });
       }
     }
+    /* ★★ 결정 319 — 구매캡처 결제금액 ≠ 공고 결제금액(사용자 확정 2026-11-02). 아무것도 쓰기 전 · 필수 배송메세지 게이트 뒤.
+       · 쿠팡: 30% 넘게 비싸면 막는다(CAPTURE_PRICE_OVER). 같은 주문번호로 두 번째부터 「직원 확인 요청」(capturePriceStaffReview) → 접수 + 🚩.
+       · 쿠팡 밖: 1,000원 넘게 다르면 한 번 알린다(CAPTURE_PRICE_DIFF · 쓰기 0) → 「그대로 제출」(capturePriceAck) → 접수 + 🚩.
+       · 결정 236 의 「결제금액으로 다시 묻기」를 이미 확인하고 온 제출(priceRecheckAck)은 같은 금액을 또 묻지 않는다(🚩 는 남긴다).
+       ★ 검증된 홀드(공고 참여)만 · 공고 금액·구매처를 모르거나 조회 실패 = 종전대로 접수(fail-open). 판정은 capturePriceCheck 단일 출처. */
+    {
+      const cpc = require('../services/capturePriceCheck.service');
+      const _ack = b.capturePriceAck === true || b.capturePriceAck === 'true' || b.priceRecheckAck === true || b.priceRecheckAck === 'true';
+      const pd = await cpc.decideAtSubmit({ holdCtx, capturePrice: b.productCapturePrice, typedPrice: price,
+        staffReview: b.capturePriceStaffReview === true || b.capturePriceStaffReview === 'true', ack: _ack });
+      if (pd.action === 'block' || pd.action === 'warn') {
+        logger.info(`[submit/order] 결제금액 ${pd.action === 'block' ? '초과로 접수 안 함' : '불일치 확인 요청'} — 공고 ${pd.expected} · 결제 ${pd.paid}(${pd.paidSource}) · ${orderScope.tabName}`);
+        // 옛 화면(이 코드를 모름)은 이 문구를 실패 알림으로 보여 주고 제출을 멈춘다 — 새로고침하면 새 화면이 묻는다.
+        return res.json({ ok: false, code: pd.action === 'block' ? 'CAPTURE_PRICE_OVER' : 'CAPTURE_PRICE_DIFF',
+          expected: pd.expected, paid: pd.paid, error: pd.error + ' (화면을 새로고침한 뒤 다시 제출해 주세요)' });
+      }
+      if (pd.action === 'flag') {
+        captureFlags.push({ code: pd.code, expected: pd.expected, paid: pd.paid });
+        logAbnormal({
+          flow: 'order_submit', step: pd.code === 'price_over' ? 'capture_price_over_staff_review' : 'capture_price_diff_confirmed',
+          category: 'validation', source: 'server', severity: 'warn',
+          fingerprintKey: 'app-' + (holdCtx && holdCtx.applicationId),
+          error: new Error(`결제금액 ${pd.paid.toLocaleString('ko-KR')}원 ≠ 공고 ${pd.expected.toLocaleString('ko-KR')}원 — `
+            + (pd.code === 'price_over' ? '쿠팡 30% 초과 · 리뷰어가 직원 확인 요청으로 제출' : '리뷰어가 확인하고 그대로 제출')
+            + ` (작업보드 🚩) · 신청 #${holdCtx && holdCtx.applicationId}`),
+          context: { campaignId: holdCtx && holdCtx.campaignId, applicationId: holdCtx && holdCtx.applicationId, sheetId, tabName,
+                     loginPhone8: _idPhone8 ? '***' + _idPhone8.slice(-4) : '' },
+        });
+      }
+    }
+    if (captureFlags.length) orderData.captureFlags = captureFlags;
     // 통폐합 pilot/enabled에서 workboard_id가 연결된 작업만 큐 반영으로 전환한다.
     // 실패·미이관·legacy는 기존 무시트 즉시 반영을 그대로 탄다.
     let queuedWorkboardApply = false;
@@ -1319,6 +1358,15 @@ router.post('/order', async (req, res, next) => {
     }
 
     const captureSession = await _issueCaptureSession(ledger.orderSubmissionId, captureTarget, 'order_submit');
+    /* 결정 319 — 결제금액이 공고와 달라 🚩 로 받은 주문은 그 공고의 「가격 신고」(결정 266)에 센다(다른 리뷰어 2명 = 관리자 팝업).
+       응답을 기다리게 하지 않는다 · 실패해도 접수는 유효(recordPriceReport 는 예외를 던지지 않고 주문당 한 번만 센다). */
+    if (captureFlags.some(f => f.code === 'price_over' || f.code === 'price_diff')) {
+      const _osid = ledger.orderSubmissionId, _p8 = (holdCtx && holdCtx.phone8) || _idPhone8 || '';
+      setImmediate(() => {
+        require('../services/campaignPriceReport.service').recordPriceReport({ orderSubmissionId: _osid, phone8: _p8 })
+          .catch(e => logger.warn(`[submit/order] 결제금액 차이 가격 신고 실패(무시): ${e.message}`));
+      });
+    }
     // ★ 2026-10-02 B안 — 리뷰어가 캡처와 **다른 상품**을 골랐으면 막지 않고 접수하되(판독이 틀릴 수 있다)
     //   리뷰어 비정상로그에 남겨 담당자가 확인하게 한다. 둘 다 그 작업 선택지로 짝지어진 경우만(모르면 침묵).
     //   ★ 응답을 기다리게 하지 않는다 · 실패해도 접수에 영향 없음.

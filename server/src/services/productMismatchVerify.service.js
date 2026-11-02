@@ -396,5 +396,7 @@ async function checkManualEntries({ campaignId, items, db = getPool() }) {
 }
 
 module.exports = {
-  isEnabled, decideAtSubmit, decideQtyAtSubmit, qtyOtherTier, syncApplicationFromWorkboard, isProductColumn, priceOtherOption, checkManualEntries, __setPoolForTest,
+  isEnabled, decideAtSubmit, decideQtyAtSubmit,
+  // 결정 319 — 결제금액 검사(capturePriceCheck)가 같은 「신청 시각 금액」 규칙을 쓴다(사본 0).
+  loadOptionsAt: _loadOptions, qtyOtherTier, syncApplicationFromWorkboard, isProductColumn, priceOtherOption, checkManualEntries, __setPoolForTest,
 };

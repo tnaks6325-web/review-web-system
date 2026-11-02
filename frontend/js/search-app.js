@@ -9503,6 +9503,33 @@ async function submitOrderForm() {
         try { res = await gasPost(payload, 30000); } catch(_) { throw new Error("서버 연결 실패 (직원 확인 요청 제출)"); }
         if (!res) throw new Error("서버 응답이 없습니다.");
       }
+      // ★ 결정 319: 구매캡처 결제금액이 공고 결제금액과 다르다(서버 판정 · 쓰기 0).
+      //   쿠팡 밖(CAPTURE_PRICE_DIFF) = 한 번 알리고 「그대로 제출」하면 접수(작업보드 🚩 — 담당자가 캡처 확인).
+      //   쿠팡 30% 초과(CAPTURE_PRICE_OVER) = 막는다. 같은 주문번호로 두 번째부터 「직원 확인 요청」으로 받을 수 있다(결정 260 과 같은 탈출구).
+      if (!res.ok && (res.code === "CAPTURE_PRICE_DIFF" || res.code === "CAPTURE_PRICE_OVER")) {
+        const pre = orders.length > 1 ? `${i+1}번째 주문: ` : "";
+        const why = String(res.error || "결제금액이 공고 결제금액과 달라요.").replace(/\s*\(화면을 새로고침한 뒤 다시 제출해 주세요\)\s*$/, "");
+        let go = false, cpoN = 0;
+        if (res.code === "CAPTURE_PRICE_DIFF") {
+          go = confirm(`${pre}${why}\n\n주문 내역이 맞다면 그대로 제출할 수 있어요. 담당자가 구매캡처를 확인해요.\n\n그대로 제출할까요?`);
+          if (go) payload.capturePriceAck = "true";
+        } else {
+          cpoN = _rdmBump("cpo|" + ctx.tabName, o.orderNum);
+          if (cpoN >= 2) {
+            go = confirm(`${pre}${why}\n\n주문 내역을 확인했는데도 맞다면 「직원 확인 요청」으로 제출할 수 있어요.\n`
+              + `직원이 구매캡처를 직접 확인하고, 다른 상품·개수를 구매했으면 반려(주문 취소)될 수 있어요.\n\n직원 확인 요청으로 제출할까요?`);
+            if (go) payload.capturePriceStaffReview = "true";
+          }
+        }
+        if (!go) {
+          const cmsg = why + (cpoN === 1 ? " 주문 내역이 맞는데도 한 번 더 막히면 직원 확인 요청으로 제출할 수 있어요." : "");
+          showToast(pre + cmsg, "error");
+          results.push({ phone8: bh ? bh.phone8 : "", name: bh ? bh.name : "", ok: false, error: "결제금액 확인 필요 — " + cmsg });
+          continue;
+        }
+        try { res = await gasPost(payload, 30000); } catch(_) { throw new Error("서버 연결 실패 (결제금액 확인 후 제출)"); }
+        if (!res) throw new Error("서버 응답이 없습니다.");
+      }
       if (!res.ok && (res.code === "IDENTITY_APPROVAL_STALE" || res.code === "IDENTITY_CONTEXT_CHANGED")) {
         // ★ 조각 5: 명의 저장 정보가 바뀌어 승인이 낡았다 — 같은 토큰으로 재제출하면 영영 실패한다.
         //   명의 확인을 자동으로 다시 돌리고, 끝나면 다시 제출하게 한다.
