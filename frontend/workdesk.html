@@ -2389,6 +2389,7 @@
 .pmanydrop{display:flex;align-items:center;gap:12px;width:100%;margin:0 0 12px;padding:12px 14px;border:1.5px dashed #9AA8B8;border-radius:8px;background:#fff;font:inherit;text-align:left;cursor:pointer;color:inherit}
 .pmanydrop:hover,.pmanydrop.over{border-color:#1B75D0;background:#F5FAFF}
 .pmanydrop svg{flex:none;width:30px;height:30px}
+.pmneedfile{display:inline-flex;align-items:center;height:26px;padding:0 9px;border-radius:6px;border:1px solid #E5BF79;background:#FFF9ED;color:#9A6108;font-size:11.5px;font-weight:700}
 .pmanydrop b{display:block;font-size:13px}
 .pmanydrop .s{display:block;font-size:11.5px;color:var(--t2,#59626F);margin-top:2px}
 .pmanydrop .pick{margin-left:auto;flex:none;border:1px solid #1B75D0;color:#155BA5;background:#F5FAFF;border-radius:6px;padding:5px 11px;font-size:12px;font-weight:600}
@@ -13649,6 +13650,11 @@ async function _pmDepositBackfill(i){
 const _PM_RESULT_UPLOAD_ON=false;
 /* 통장 자동 대조가 되는 은행 — 서버가 알려 준 목록(개요 banks[])을 따른다(Codex P1 · 배포 스큐).
    옛 서버·아직 못 받음·실패 = 케이뱅크만(하나은행은 결과 파일 업로드가 남는다 — 기록할 길이 없어지면 안 된다). */
+/* 결정 317 — 결과 파일로만 완료하는 은행(케이뱅크). 옛 서버(confirmBy 없음)면 빈 목록 = 종전 동작. */
+function _pmFileOnlyBank(bank){
+  const k=STATE.pmBank;
+  return !!(k && !k.error && Array.isArray(k.banks) && k.banks.some(x=>x.bank===bank && x.confirmBy==='file'));
+}
 function _pmReconciledBanks(){
   const k=STATE.pmBank;
   return (k && !k.error && Array.isArray(k.banks) && k.banks.length) ? k.banks.map(x=>x.bank) : ['kbank'];
@@ -13661,7 +13667,8 @@ function _pmBatchActions(b,i){
   //   ★ 단 통장으로 정할 수 없는 대량이체는 남긴다(Codex P1): 통장 대조가 없는 은행 · 같은 금액이 통장에 더 찍혀 누가 받았는지 모르는 금액.
   //   결정 303 — 하나은행도 통장 대조를 한다(사용자 확정 2026-10-28).
   const bkU=_pmBankOf(b);
-  const uploadNeeded = !_pmReconciledBanks().includes(b.bank) || !!(bkU && (bkU.amounts||[]).some(a=>a.failures==null));
+  const uploadNeeded = !_pmReconciledBanks().includes(b.bank) || !!(bkU && (bkU.amounts||[]).some(a=>a.failures==null))
+    || (_pmFileOnlyBank(b.bank) && Number(b.pendingCount||0)>0);   // 결정 317 — 케이뱅크는 결과 파일로만 끝낸다
   const resultUpload = (_PM_RESULT_UPLOAD_ON || uploadNeeded) && (b.status==='downloaded' || b.status==='applied')
     ? `<button class="pmdrop" type="button" title="클릭하거나 결과 파일을 끌어 놓으세요" onclick="_pmPickResult(${i})" ondragover="_pmResultDragOver(event)" ondragleave="_pmResultDragLeave(event)" ondrop="_pmResultDrop(event,${i})"><span class="pmdropicon" aria-hidden="true">⇧</span><span>결과 파일 업로드</span></button>` : '';
   const manage = b.status==='downloaded' ? `<button class="btn sm" onclick="_pmRefileByIndex(${i})">⬇ 다시 받기</button>
@@ -13670,7 +13677,8 @@ function _pmBatchActions(b,i){
   const result = b.resultUploadId && b.resultSource!=='bank' ? `<button class="btn sm" onclick="_pmOpenResult(${i})">이체결과 확인</button>
     ` : '';
   const bk=_pmBankOf(b);
-  const bankAction = bk && bk.state==='review' ? `<button class="btn sm" style="color:#9A6108;border-color:#E5BF79;background:#FFF9ED" onclick="_pmOpenBankPick(${i})">통장 대조 · 확인 필요</button>`
+  const bankAction = bk && bk.fileOnly ? (bk.needFile ? `<span class="pmneedfile" title="통장에 이 대량이체 출금이 찍히고 30분이 지났습니다 — 케이뱅크는 이체결과 파일로만 완료합니다">결과 파일 필요</span>` : '')
+    : bk && bk.state==='review' ? `<button class="btn sm" style="color:#9A6108;border-color:#E5BF79;background:#FFF9ED" onclick="_pmOpenBankPick(${i})">통장 대조 · 확인 필요</button>`
     : bk && bk.state==='clean' ? `<button class="btn sm primary" onclick="_pmOpenBankPick(${i})">통장으로 확정</button>` : '';
   const unconfirmed=Number(b.resultUnconfirmedCount||0);
   const unconfirmedAction=unconfirmed ? `<button class="btn sm" style="color:#9A6108;border-color:#E5BF79;background:#FFF9ED" onclick="_pmOpenBatchUnconfirmed(${i})">미확인 ${unconfirmed}건 조치</button>` : '';
@@ -13871,12 +13879,19 @@ function _pmBankPickRender(){
   const items=r.items||[];
   const amounts=r.amounts||[];
   const ok=amounts.filter(a=>a.failures===0);
-  const okPending=ok.reduce((n,a)=>n+items.filter(it=>it.amount===a.amount&&it.status==='pending').length,0);
+  // 결정 317 — 하나은행(이름) = 통장 이름과 맞은 사람만 · 케이뱅크(결과 파일만) = 통장으로 확정하지 않는다
+  const nameMode=r.mode==='name';
+  const okPending=r.fileOnly?0:nameMode?items.filter(it=>it.status==='pending'&&it.matched).length
+    :ok.reduce((n,a)=>n+items.filter(it=>it.amount===a.amount&&it.status==='pending').length,0);
   const need=amounts.filter(a=>a.failures!==0);
   const pickedOf=a=>items.filter(it=>it.amount===a.amount&&st.picked.has(it.id)).length;
   const cl=r.cluster;
   // 결정 317(방식 B) — 리뷰웹 밖 줄이 섞인 대량이체는 통장으로 정하지 않는다(금액별 안내 대신 한 줄로)
-  const groups=r.mixed?`<div class="pmnote">이 대량이체 통장 출금에 <b>리뷰웹에 없는 줄 ${Number(r.outside&&r.outside.count)||0}건</b>(블로그·예약자리뷰 등)이 섞여 있어 통장만으로는 누가 받았는지 정하지 않습니다 — <b>케이뱅크 이체결과 파일을 입금관리에 놓아 주세요.</b> 놓은 뒤 남는 미확인 줄은 「리뷰웹 밖 작업」으로 표시하면 됩니다.</div>`:need.map(a=>{
+  const missing=nameMode?items.filter(it=>it.status==='pending'&&!it.matched):[];
+  const groups=r.fileOnly?`<div class="pmnote">케이뱅크 대량이체 통장 줄에는 받는 사람이 찍히지 않아 <b>통장으로는 이체 완료를 적지 않습니다</b> — 케이뱅크 이체결과 파일을 입금관리에 놓아 주세요.</div>`
+    :nameMode?(missing.length?`<div class="pmbp-grp"><div class="pmbp-hd"><b>통장에 이름이 안 보이는 사람 ${missing.length}명</b><span style="color:#80500F">실패로 적지 않고 '확인 필요'로 남깁니다 — 이체결과 파일을 놓아 확인해 주세요.</span></div>
+      ${missing.map(it=>`<div class="pmbp-row" style="cursor:default"><span>${esc(it.reviewerName||'-')}</span><span class="muted">${esc(it.tabName||'')}</span><span class="muted">${_pmNum(it.amount)}원</span></div>`).join('')}</div>`:'')
+    :r.mixed?`<div class="pmnote">이 대량이체 통장 출금에 <b>리뷰웹에 없는 줄 ${Number(r.outside&&r.outside.count)||0}건</b>(블로그·예약자리뷰 등)이 섞여 있어 통장만으로는 누가 받았는지 정하지 않습니다 — <b>케이뱅크 이체결과 파일을 입금관리에 놓아 주세요.</b> 놓은 뒤 남는 미확인 줄은 「리뷰웹 밖 작업」으로 표시하면 됩니다.</div>`:need.map(a=>{
     const rows=items.filter(it=>it.amount===a.amount);
     const already=rows.filter(it=>it.status==='failed').length;
     const head=`<b>${_pmNum(a.amount)}원</b><span>대량이체 ${a.count}명 · 통장 출금 ${a.bank}건${a.refunds?` · 취소로 돌아옴 ${a.refunds}건`:''}</span>`;
@@ -13897,7 +13912,7 @@ function _pmBankPickRender(){
   el.innerHTML=`<div class="pmrbox" style="width:min(760px,100%)"><div class="pmrhd"><h3>#${b.seq} 대량이체 통장 대조</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmBankPickClose()">닫기</button></div>
     <div class="pmrbd">
       <div class="pmnote">${esc((PAY_BANKS.find(x=>x[0]===st.data.bank)||[,'케이뱅크'])[1])} 통장 ${cl?`${esc(_pmDate(cl.start))} 대량이체 ${cl.rowCount}건 · ${_pmNum(cl.total)}원`:''}과 맞대 봤습니다. 통장에는 받는 사람이 찍히지 않아, 금액이 맞지 않는 사람만 아래에서 확인합니다.</div>
-      <div style="font-size:12.5px;margin:8px 0">통장과 맞는 금액: <b>${ok.length}종 · ${okPending}명</b>${okPending?' → 확정하면 이체 완료로 기록됩니다(결과 파일 반영과 같은 기록).':''}</div>
+      <div style="font-size:12.5px;margin:8px 0">${nameMode?`통장 이름과 맞은 사람: <b>${okPending}명</b>`:`통장과 맞는 금액: <b>${ok.length}종 · ${okPending}명</b>`}${okPending?' → 확정하면 이체 완료로 기록됩니다(결과 파일 반영과 같은 기록).':''}</div>
       ${groups||'<div class="muted" style="font-size:12.5px">확인이 필요한 금액이 없습니다.</div>'}
       <div class="pmnote" style="margin-top:10px">이름 옆 노란 표시는 고르기 힌트입니다(처음 받는 계좌 · 예금주가 리뷰어와 다름 · 예전에 이체 실패 · 같은 날 다른 작업에도 있음). 모르겠으면 고르지 말고 확정하세요 — 맞는 사람만 기록되고 나머지는 '확인 필요'로 남습니다.</div>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px"><button class="btn" onclick="_pmBankPickClose()">취소</button><button class="btn primary" ${okPending||picks.length?'':'disabled'} onclick="_pmBankPickSubmit()">${esc(btnLabel)}</button></div>
@@ -15802,6 +15817,11 @@ function _tckCardHtml(c,i,where){
   const outs=f.outside||[];
   const lineOf=k=>(c.lines||[]).find(l=>l.key===k);
   const rows=[];
+  // 결정 317 — 케이뱅크 결과 파일 대기 · 하나은행 통장에 이름이 안 보이는 사람
+  const nf=lineOf('need_file');
+  if(nf) rows.push(`<div class="tck-line"><span class="tck-tx">${esc(nf.text)}</span>${where==='payment'?'':`<button class="btn sm" onclick="_tckGo(${i})">바로 가기</button>`}</div>`);
+  const nm=lineOf('name_missing');
+  if(nm) rows.push(`<div class="tck-line"><span class="tck-tx">${esc(nm.text)}</span></div>`);
   const sh=lineOf('short');
   if(sh) rows.push(`<div class="tck-line"><span class="tck-tx">① ${esc(sh.text)}</span>${where==='payment'
       ? `<button class="btn sm" onclick="_tckPick(${i})">뺀 사람 고르기</button>`
@@ -15819,7 +15839,7 @@ function _tckCardHtml(c,i,where){
   });
   return `<div class="tck-card"><div class="tck-ch"><b>${_tckTitle(f)}</b><span class="tck-sub">${_tckSub(f)}</span>${c.manager?`<span class="tck-sub">담당 ${esc(c.manager)}</span>`:''}
       ${c.textSource==='ai'?'<span class="tck-ai" title="문장은 AI가 정리했고, 숫자는 시스템이 계산한 값입니다">AI 정리</span>':''}<span class="sp"></span>
-      <button class="btn sm" onclick="_tckCopy(${i})">메시지 복사</button>${where==='home'&&!sh?`<button class="btn sm" onclick="_tckGo(${i})">바로 가기</button>`:''}</div>${rows.join('')}</div>`;
+      <button class="btn sm" onclick="_tckCopy(${i})">메시지 복사</button>${where==='home'&&!sh&&!nf?`<button class="btn sm" onclick="_tckGo(${i})">바로 가기</button>`:''}</div>${rows.join('')}</div>`;
 }
 function _tckSetMgr(k){
   const managers=[...new Set((STATE.tckItems||[]).map(c=>c.manager).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ko'));

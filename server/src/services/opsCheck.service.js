@@ -56,10 +56,17 @@ function _kst(ms) {
 function buildClusterFacts({ cluster, rows, openRec, batch, paidElsewhere = [], feeWorks = new Map(), refundWindowMs, bank = 'kbank' }) {
   const left = _countBy(cluster.rows, r => Number(r.amount));
   const take = (a, n) => { const v = left.get(a) || 0; left.set(a, Math.max(0, v - n)); };
-  const short = []; const shortUnknown = [];
+  const short = []; const shortUnknown = []; const nameMissing = [];
+  const jobsOf = a => [...new Set((openRec.items || []).filter(it => Number(it.amount) === a && it.status === 'pending')
+    .map(it => String(it.tabName || '')).filter(Boolean))];
   if (openRec && Array.isArray(openRec.amounts)) {
     for (const a of openRec.amounts) {
       take(a.amount, Math.min(a.count, a.bank));   // 대량이체 몫(통장에 있는 만큼) — 남는 건 기록 없이 나간 돈
+      if (openRec.fileOnly) continue;   // 결정 317 — 케이뱅크는 통장으로 사람을 고르지 않는다(아래 needFile 한 줄)
+      if (openRec.mode === 'name') {    // 결정 317 — 하나은행: 통장에 이름이 안 보이는 사람
+        if (a.missing) nameMissing.push({ amount: a.amount, count: a.missing, jobs: jobsOf(a.amount) });
+        continue;
+      }
       if (a.failures == null) { shortUnknown.push({ amount: a.amount, count: a.count, bank: a.bank }); continue; }
       if (a.failures > 0) {
         const items = (openRec.items || []).filter(it => Number(it.amount) === a.amount && it.status === 'pending');
@@ -86,15 +93,20 @@ function buildClusterFacts({ cluster, rows, openRec, batch, paidElsewhere = [], 
       total: cluster.rows.reduce((s, r) => s + Number(r.amount), 0), date: t.md, time: t.hm },
     batch: batch ? { id: String(batch.id), seq: Number(batch.seq), createdBy: String(batch.createdBy || '') } : null,
     short, shortUnknown, outside,
+    // 결정 317 — 있을 때만 싣는다(없으면 예전 사실 모양·해시 그대로 — 쌓인 확인거리 문장을 다시 만들지 않게)
+    ...(openRec && openRec.needFile ? { needFile: { pending: (openRec.items || []).filter(it => it.status === 'pending').length } } : {}),
+    ...(nameMissing.length ? { nameMissing } : {}),
     outsideTotal: { count: outside.reduce((s, o) => s + o.count, 0), sum: outside.reduce((s, o) => s + o.amount * o.count, 0) },
   };
 }
 
-function hasWork(f) { return !!(f && (f.short.length || f.shortUnknown.length || f.outside.length)); }
+function hasWork(f) { return !!(f && (f.short.length || f.shortUnknown.length || f.outside.length || f.needFile || (f.nameMissing || []).length)); }
 
 /** 기대하는 문장 자리(키) — AI 도 정확히 이 키들로만 답해야 한다. */
 function expectedKeys(f) {
   const k = [];
+  if (f.needFile) k.push('need_file');
+  if ((f.nameMissing || []).length) k.push('name_missing');
   if (f.short.length) k.push('short');
   if (f.shortUnknown.length) k.push('short_unknown');
   if (f.outside.length) { k.push('out'); f.outside.forEach(o => k.push(o.key)); }
@@ -104,6 +116,13 @@ function expectedKeys(f) {
 /** 기본 문장(AI 없이도 늘 같은 뜻) */
 function fallbackLines(f) {
   const lines = [];
+  if (f.needFile) {
+    lines.push({ key: 'need_file', text: `${f.batch ? `#${f.batch.seq} ` : ''}대량이체 결과 파일을 아직 안 놓았습니다 — 이체결과 파일을 입금관리에 놓아 주세요(${f.needFile.pending}명 대기)` });
+  }
+  if ((f.nameMissing || []).length) {
+    const n = f.nameMissing.reduce((x, m) => x + m.count, 0);
+    lines.push({ key: 'name_missing', text: `통장에 이름이 안 보이는 사람 ${n}명 — ${f.nameMissing.map(m => `${m.jobs.length ? m.jobs.join('·') + ' ' : ''}${won(m.amount)}원 ${m.count}명`).join(' / ')}. 이체결과 파일을 놓아 확인해 주세요` });
+  }
   if (f.short.length) {
     const n = f.short.reduce((s, x) => s + x.failures, 0);
     const refunds = f.short.reduce((s, x) => s + (x.refunds || 0), 0);
@@ -139,6 +158,7 @@ function allowedNumbers(f) {
   walk(f);
   // 합계·건수 파생값(사람이 쓰는 말에 자연스럽게 나오는 것)
   add(f.short.reduce((s, x) => s + x.failures, 0));
+  add((f.nameMissing || []).reduce((s, x) => s + x.count, 0));
   add(f.outside.length);
   return set;
 }
@@ -166,6 +186,8 @@ function _factsForAi(f) {
   return {
     ...(f.bank === 'hana' ? { 통장: '하나은행' } : {}),
     대량이체: f.batch ? `#${f.batch.seq}` : '리뷰웹 대량이체와 이어지지 않은 묶음',
+    ...(f.needFile ? { 결과파일_대기: { 대기인원: f.needFile.pending } } : {}),
+    ...((f.nameMissing || []).length ? { 통장에_이름이_안보이는사람: f.nameMissing.map(x => ({ 작업: x.jobs, 금액: x.amount, 인원: x.count })) } : {}),
     통장묶음: { 날짜: f.cluster.date, 시각: f.cluster.time, 건수: f.cluster.rowCount, 합계: f.cluster.total },
     통장에서_안나간사람: f.short.map(x => ({ 작업: x.jobs, 금액: x.amount, 안나간사람: x.failures, 대량이체건수: x.count, 통장건수: x.bank, 취소로돌아옴: x.refunds })),
     통장에_더찍힌금액: f.shortUnknown.map(x => ({ 금액: x.amount, 대량이체건수: x.count, 통장건수: x.bank })),
@@ -183,6 +205,8 @@ async function writeLines(f) {
       '리뷰 체험단 회사의 입금 담당 직원에게 보여 줄 「확인할 것」 문장을 쓴다.',
       '아래 사실 JSON 만 근거로, 정해진 key 마다 한 문장씩 쓴다(key 순서 그대로).',
       `key 목록: ${JSON.stringify(keys)}`,
+      '- need_file: 대량이체 결과 파일을 아직 안 놓았으니 입금관리에 놓아 달라는 부탁과 대기 인원.',
+      '- name_missing: 통장에 이름이 안 보이는 사람 수와 작업·금액, 이체결과 파일을 놓아 확인해 달라는 부탁.',
       '- short: 통장에서 안 나간 사람 수와 작업·금액. 취소로 돌아온 돈이 0이면 "이체 파일에서 뺀 것으로 보입니다"라고 덧붙인다.',
       '- short_unknown: 그 금액은 통장만으로 누가 받았는지 알 수 없다는 사실.',
       '- out: 리뷰웹 기록 없이 같이 나간 돈의 합계와, 무슨 돈인지 골라 달라는 부탁.',
@@ -207,6 +231,7 @@ async function writeLines(f) {
  *  · 기록 없는 돈 묶음마다 '모르겠음' 아닌 답이 있을 때. */
 function isDone(f, answers) {
   if (!f) return true;
+  if (f.needFile || (f.nameMissing || []).length) return false;   // 결정 317
   if (f.short.length || (f.shortUnknown || []).length) return false;
   for (const o of f.outside) {
     const a = answers && answers[o.key];

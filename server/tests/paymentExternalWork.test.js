@@ -140,7 +140,7 @@ function stubProof({ used = false } = {}) {
     assert.ok(/api\('\/api\/trackb\/payment\/batch\/'\+R\.batch\.id\+'\/external-work',\{method:'POST'/.test(wd));
     assert.ok(/if\(!name\)\{ toast\('작업명을 적어 주세요/.test(wd));
     assert.ok(/_pmExtUndo\(/.test(wd) && /method:'DELETE'/.test(wd));
-    assert.ok(/const groups=r\.mixed\?/.test(wd), '통장 대조 창 섞인 묶음 안내');
+    assert.ok(/:r\.mixed\?`<div class="pmnote">/.test(wd), '통장 대조 창 섞인 묶음 안내');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

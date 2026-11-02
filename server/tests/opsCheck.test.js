@@ -115,5 +115,25 @@ const facts = oc.buildClusterFacts({
     assert.strictEqual(h.bank, 'hana');
     assert.strictEqual(oc.refKeyOf(h), `bank_cluster:hana:${START}`);
   });
+  await t('⑦ 결정 317 — 케이뱅크 결과 파일 필요 · 하나은행 이름 안 보이는 사람 · 없으면 예전 사실 모양 그대로', () => {
+    const c1 = { start: START, end: START, rows: rowsOf(19800, 2) };
+    const its = [{ id: 'k1', amount: 19800, status: 'pending', tabName: '탈모샴푸' }, { id: 'k2', amount: 19800, status: 'pending', tabName: '탈모샴푸' }];
+    const f = oc.buildClusterFacts({ cluster: c1, rows: [], refundWindowMs: 0, batch: { id: 'b', seq: 90, createdBy: '' },
+      openRec: { fileOnly: true, needFile: true, amounts: [{ amount: 19800, count: 2, bank: 2, failures: 1 }], items: its } });
+    assert.deepStrictEqual(f.short, []);
+    assert.deepStrictEqual(f.needFile, { pending: 2 });
+    assert.ok(oc.hasWork(f));
+    assert.deepStrictEqual(oc.expectedKeys(f), ['need_file']);
+    assert.ok(/#90 .*결과 파일.*2명 대기/.test(oc.fallbackLines(f)[0].text));
+    assert.strictEqual(oc.isDone(f, {}), false);
+    const h = oc.buildClusterFacts({ cluster: { start: START, end: START, rows: rowsOf(19800, 1) }, rows: [], refundWindowMs: 0, batch: null, bank: 'hana',
+      openRec: { mode: 'name', amounts: [{ amount: 19800, count: 2, bank: 1, missing: 1 }], items: its } });
+    assert.deepStrictEqual(h.nameMissing, [{ amount: 19800, count: 1, jobs: ['탈모샴푸'] }]);
+    assert.deepStrictEqual(oc.expectedKeys(h), ['name_missing']);
+    assert.ok(/이름이 안 보이는 사람 1명/.test(oc.fallbackLines(h)[0].text));
+    const plain = oc.buildClusterFacts({ cluster: c1, rows: [], refundWindowMs: 0, batch: null,
+      openRec: { amounts: [{ amount: 19800, count: 2, bank: 2, failures: 0 }], items: its } });
+    assert.ok(!('needFile' in plain) && !('nameMissing' in plain), '새 칸이 없을 때는 싣지 않는다(쌓인 확인거리 해시 유지)');
+  });
   console.log(`opsCheck: ${pass} passed`);
 })().catch(e => { console.error(e); process.exit(1); });

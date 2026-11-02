@@ -24,10 +24,16 @@ function __setFetchForTest(f) { _fetch = f || ((...a) => fetch(...a)); }
  *  settleMs = 묶음 끝에서 이만큼 지나야 확정. 케이뱅크는 실패가 같은 분에 '취소'로 돌아온다(82회차 실측).
  *  하나은행은 실패가 어떻게 찍히는지 실측이 아직 없다(2026-10-28) → 30분 기다리고, 반환으로 보이는 입금은
  *  그 금액을 '확인 필요'로 접는다(_markHanaRefunds). 모르면 확정하지 않는다. */
+/* 결정 317(사용자 확정 2026-11-02) — 은행마다 '이체 완료'를 정하는 근거가 다르다(confirmBy).
+ *  kbank = 'file' : 대량이체 통장 줄에 받는 사람이 없다 → 통장으로는 완료를 적지 않는다(결과 파일만). 통장은 알림·감시용.
+ *                   (회차 사람 실패 + 리뷰웹 밖 같은 금액 줄이 맞물리면 못 받은 사람을 완료로 적는 위험 — 코드로 구분 불가)
+ *  hana  = 'name' : 통장 줄마다 받는 사람 이름이 찍힌다 → 받을 때 이름+금액으로 우리 대량이체 사람과 맞추고(이름은 저장 안 함)
+ *                   맞은 사람만 완료. 이름이 안 보이는 사람은 실패로 적지 않고 '확인 필요'. */
 const BANKS = {
-  kbank: { code: '0089', label: '케이뱅크', settleMs: 10 * 60 * 1000 },
-  hana:  { code: '0081', label: '하나은행', settleMs: 30 * 60 * 1000 },
+  kbank: { code: '0089', label: '케이뱅크', settleMs: 10 * 60 * 1000, confirmBy: 'file' },
+  hana:  { code: '0081', label: '하나은행', settleMs: 30 * 60 * 1000, confirmBy: 'name' },
 };
+const NEED_FILE_AFTER_MS = 30 * 60 * 1000;   // 결정 317 — 케이뱅크 출금이 찍히고 30분이 지나도 결과 파일이 없으면 알린다
 const BANK_IDS = Object.keys(BANKS);
 const SYNC_MIN_GAP_MS = 3 * 60 * 1000;     // 3분에 한 번까지 받는다(입금관리 열 때마다 팝빌을 부르지 않게)
 const SYNC_DAYS = 7;                         // 최근 7일
@@ -81,7 +87,37 @@ function toBankRow(tx, bank = 'kbank') {
       : incoming ? 'other_in' : 'other_out');
   const balance = Number(tx.balance);
   const tid = String(tx.tid || '').trim() || `dt:${tx.tradeDT}:${amount}:${Number.isFinite(balance) ? balance : ''}:${kind}`;
-  return { tid, at, amount, kind, balance: Number.isFinite(balance) ? balance : null };
+  const row = { tid, at, amount, kind, balance: Number.isFinite(balance) ? balance : null };
+  // 결정 317 — 하나은행 출금 줄의 받는 사람 이름(remark1). ★ 저장하지 않는다 — 받는 순간 우리 대량이체 사람과 맞추는 데만 쓴다(결정 293).
+  if (bank === 'hana' && kind === 'bulk_out') Object.defineProperty(row, 'name', { value: normPayee(tx.remark1), enumerable: false });
+  return row;
+}
+
+/** 이름 비교용 — 공백·(주)·주식회사를 뺀다. */
+function normPayee(v) { return String(v || '').replace(/\s+/g, '').replace(/\(주\)|㈜|주식회사/g, ''); }
+
+/**
+ * 결정 317 — 하나은행 통장 줄을 대량이체 사람과 이름+금액으로 맞춘다(순수 계산).
+ * @param rows   이번에 받은 줄(bulk_out 만 name 이 있다) — 이미 맞춘 줄(taken.byTid)은 그대로 둔다
+ * @param items  후보 {id, amount, holder(정규화), createdAt}
+ * @param taken  { byTid: Map<tid, itemId>, items: Set<itemId> } — 저장된 짝(다시 받아도 바뀌지 않게)
+ * @returns Map<tid, itemId>
+ * 같은 이름·같은 금액이 여럿이면 일찍 만든 대량이체의 사람부터 하나씩. 은행이 이름을 자를 수 있어 정확히 같지 않으면
+ * 은행 이름이 예금주의 앞부분(2글자 이상)일 때만 맞춘다. 대량이체를 만들기 전(1분 여유) 출금·3일 뒤 출금은 맞추지 않는다.
+ */
+function matchByName(rows, items, taken = { byTid: new Map(), items: new Set() }) {
+  const out = new Map();
+  const used = new Set(taken.items);
+  const pool = [...items].sort((a, b) => a.createdAt - b.createdAt);
+  for (const r of [...rows].filter(x => x.kind === 'bulk_out').sort((a, b) => a.at - b.at)) {
+    if (taken.byTid.has(r.tid)) { out.set(r.tid, taken.byTid.get(r.tid)); continue; }
+    const nm = r.name || '';
+    if (!nm) continue;
+    const ok = it => !used.has(it.id) && it.amount === r.amount && r.at >= it.createdAt - 60 * 1000 && r.at <= it.createdAt + FIND_WINDOW_MS;
+    const hit = pool.find(it => ok(it) && it.holder === nm) || (nm.length >= 2 ? pool.find(it => ok(it) && it.holder.startsWith(nm)) : null);
+    if (hit) { used.add(hit.id); out.set(r.tid, hit.id); }
+  }
+  return out;
 }
 
 /**
@@ -121,7 +157,7 @@ function _countBy(list, f) { const m = new Map(); for (const x of list) { const 
  *   state: clean = 확정 가능 · review = 일부 '확인 필요' · not_found = 통장에서 이 회차 이체를 못 찾음 ·
  *          settling = 이체 직후(취소 반환 대기) · file = 결과 파일로 이미 처리된 건이 있음(파일이 기준) · done = 처리할 건 없음
  */
-function reconcileBatch({ batch, items, rows, claimedTimes = [], now = Date.now(), settleMs = SETTLE_MS }) {
+function reconcileBatch({ batch, items, rows, claimedTimes = [], now = Date.now(), settleMs = SETTLE_MS, mode = 'amount' }) {
   const live = items.filter(it => it.status !== 'cancelled');
   if (!live.length) return { state: 'empty' };
   // 결과 파일로 처리된 건이 하나라도 있으면 그 회차는 결과 파일이 기준이다(통장으로 덮지 않는다).
@@ -129,6 +165,7 @@ function reconcileBatch({ batch, items, rows, claimedTimes = [], now = Date.now(
     return { state: 'file' };
   }
   if (!live.some(it => it.status === 'pending')) return { state: 'done' };
+  if (mode === 'name') return _reconcileByName({ live, rows, now, settleMs });
 
   const want = _countBy(live, it => Number(it.amount));
   const created = Number(batch.createdAt);
@@ -175,12 +212,58 @@ function reconcileBatch({ batch, items, rows, claimedTimes = [], now = Date.now(
 }
 
 /**
+ * 결정 317 — 이름으로 맞춘 은행(하나은행): 받을 때 이 회차 사람과 맞춘 통장 줄(matchedItemId)만 본다.
+ *  - 맞춘 줄이 하나도 없으면 not_found · 맞춘 줄 끝에서 settleMs 전이면 settling.
+ *  - 맞춘 사람 = 완료 후보. 단 그 금액으로 반환(취소)이 들어왔으면 누구 것인지 몰라 그 금액은 전부 '확인 필요'.
+ *  - 안 맞은 사람 = '확인 필요'(실패로 적지 않는다 — 예금주 이름이 통장과 다를 수도 있다).
+ *  - 같은 시각 다른 줄(리뷰웹 밖 작업)은 이름이 달라 이 회차와 섞이지 않는다 — 회차 밖으로만 센다.
+ * amounts 는 화면·확인할 것과 같은 모양(failures: 0 = 다 맞음, null = 통장으로 모름).
+ */
+function _reconcileByName({ live, rows, now, settleMs }) {
+  const ids = new Set(live.map(it => String(it.id)));
+  const mine = rows.filter(r => r.kind === 'bulk_out' && r.matchedItemId && ids.has(String(r.matchedItemId)));
+  if (!mine.length) return { state: 'not_found', mode: 'name' };
+  const start = Math.min(...mine.map(r => r.at)); const end = Math.max(...mine.map(r => r.at));
+  const cluster = { start, end, rowCount: mine.length, total: mine.reduce((x, r) => x + r.amount, 0) };
+  if (now < end + settleMs) return { state: 'settling', cluster, mode: 'name' };
+  const refunds = _countBy(rows.filter(r => r.kind === 'refund_in' && r.at >= start && r.at <= end + REFUND_WINDOW_MS), r => r.amount);
+  const at = new Map(mine.map(r => [String(r.matchedItemId), r.at]));
+  const pending = live.filter(it => it.status === 'pending');
+  const matched = new Map(); const unresolved = [];
+  for (const it of pending) {
+    const t = at.get(String(it.id));
+    if (t != null && !refunds.get(Number(it.amount))) matched.set(String(it.id), t); else unresolved.push(it);
+  }
+  const amounts = [];
+  for (const [a, n] of _countBy(live, it => Number(it.amount))) {
+    const ofAmount = live.filter(it => Number(it.amount) === a);
+    const miss = unresolved.filter(it => Number(it.amount) === a).length;
+    amounts.push({ amount: a, count: n, bank: mine.filter(r => r.amount === a).length, refunds: refunds.get(a) || 0,
+      failures: miss ? null : 0, missing: miss, itemIds: ofAmount.map(it => it.id),
+      paidTimes: ofAmount.map(it => at.get(String(it.id))).filter(t => t != null) });
+  }
+  const inWin = rows.filter(r => r.kind === 'bulk_out' && r.at >= start - CLAIM_SLACK_MS && r.at <= end + CLAIM_SLACK_MS && !r.matchedItemId);
+  return { state: unresolved.length ? 'review' : 'clean', mode: 'name', cluster, amounts, matched,
+    unresolvedIds: unresolved.map(it => it.id), mixed: false,
+    outside: { count: inWin.length, sum: inWin.reduce((x, r) => x + r.amount, 0) } };
+}
+
+/**
  * 확정 계획 — reconcileBatch 결과 + 직접 고른 실패자 → paid / failed 목록.
  * failedItemIds 는 '확인 필요' 금액마다 정확히 failures 건이어야 한다(이미 실패로 정한 건 포함). 틀리면 거부.
  * auto(자동 확정)는 아무도 고르지 않는다 — 건수가 안 맞는 금액은 거부 대신 그 금액만 남긴다(다른 금액의 완료를 막지 않게).
  */
 function planConfirm(rec, items, failedItemIds = [], { auto = false } = {}) {
   const byId = new Map(items.map(it => [String(it.id), it]));
+  if (rec.mode === 'name') {   // 결정 317 — 이름으로 맞춘 사람만 완료 · 고르기 없음 · 실패로 적지 않음
+    if ((failedItemIds || []).length) throw new BankError('bad_pick', '하나은행은 통장 이름으로 정합니다 — 못 받은 사람은 결과 파일로 처리해 주세요.');
+    const paid = []; const unresolved = [];
+    for (const it of items.filter(x => x.status === 'pending')) {
+      const t = rec.matched && rec.matched.get(String(it.id));
+      if (t != null) paid.push({ item: it, at: t }); else unresolved.push({ amount: Number(it.amount), reason: 'name' });
+    }
+    return { paid, failed: [], unresolved };
+  }
   const picked = new Set((failedItemIds || []).map(String));
   for (const id of picked) {
     const it = byId.get(id);
@@ -215,10 +298,11 @@ function planConfirm(rec, items, failedItemIds = [], { auto = false } = {}) {
 /* ── 저장소 ───────────────────────────────────────────── */
 async function _loadRows(bank, fromMs, toMs) {
   const { rows } = await _db().query(
-    `SELECT tid, (EXTRACT(EPOCH FROM traded_at) * 1000)::bigint AS at, amount, kind
+    `SELECT tid, (EXTRACT(EPOCH FROM traded_at) * 1000)::bigint AS at, amount, kind, matched_item_id
        FROM payment_bank_rows WHERE bank = $1 AND traded_at >= $2 AND traded_at <= $3 ORDER BY traded_at`,
     [bank, new Date(fromMs).toISOString(), new Date(toMs).toISOString()]);
-  return rows.map(r => ({ tid: r.tid, at: Number(r.at), amount: Number(r.amount), kind: r.kind }));
+  return rows.map(r => ({ tid: r.tid, at: Number(r.at), amount: Number(r.amount), kind: r.kind,
+    matchedItemId: r.matched_item_id ? String(r.matched_item_id) : null }));
 }
 
 async function _loadBatchItems(batchId) {
@@ -253,8 +337,13 @@ async function inspectBatch(batchId, { now = Date.now() } = {}) {
   const [items, rows, claimedTimes] = await Promise.all([
     _loadBatchItems(batchId), _loadRows(b.bank, created - 60 * 1000, to), _claimedTimes(b.bank, batchId, created - 60 * 1000, to),
   ]);
-  const rec = reconcileBatch({ batch: { createdAt: created }, items, rows, claimedTimes, now, settleMs: cfg.settleMs });
-  return { batchId, seq: b.seq, bank: b.bank, ...rec, items };
+  const rec = reconcileBatch({ batch: { createdAt: created }, items, rows, claimedTimes, now, settleMs: cfg.settleMs,
+    mode: cfg.confirmBy === 'name' ? 'name' : 'amount' });
+  // 결정 317 — 결과 파일로만 끝내는 은행(케이뱅크): 통장에 이 회차 출금이 찍히고 30분이 지났는데 처리 안 된 사람이 있으면 '결과 파일 필요'
+  const fileOnly = cfg.confirmBy === 'file';
+  const needFile = fileOnly && !!rec.cluster && now >= rec.cluster.end + NEED_FILE_AFTER_MS
+    && ['clean', 'review', 'settling'].includes(rec.state) && items.some(i => i.status === 'pending');
+  return { batchId, seq: b.seq, bank: b.bank, ...rec, fileOnly, needFile, items };
 }
 
 /**
@@ -263,6 +352,8 @@ async function inspectBatch(batchId, { now = Date.now() } = {}) {
  */
 async function confirmBatchFromBank({ batchId, by, failedItemIds = [], notifyFailed, auto = false }) {
   const rec = await inspectBatch(batchId);
+  // 결정 317 — 케이뱅크는 통장으로 '이체 완료'를 적지 않는다(자동·수동 모두). 결과 파일이 기준.
+  if (rec.fileOnly) throw new BankError('file_only', `${(BANKS[rec.bank] || {}).label || ''} 대량이체는 이체결과 파일로 완료합니다 — 결과 파일을 입금관리에 놓아 주세요.`);
   if (!['clean', 'review'].includes(rec.state)) {
     const msg = {
       not_found: '통장에서 이 대량이체를 아직 찾지 못했습니다. 이체 뒤 통장 확인을 다시 눌러 주세요.',
@@ -338,6 +429,21 @@ async function _collectFromRelay(cfg, bank, account, fromMs, toMs) {
   return bank === 'hana' ? _markHanaRefunds(rows) : rows;
 }
 
+/** 결정 317 — 이번에 받은 하나은행 줄을 대량이체 사람과 이름+금액으로 맞춘다(같은 트랜잭션 · 이름은 저장 안 함). */
+async function _matchNames(client, bank, rows, fromMs) {
+  const { rows: items } = await client.query(
+    `SELECT i.id, i.amount, i.account_holder, (EXTRACT(EPOCH FROM b.created_at) * 1000)::bigint AS created
+       FROM payment_batch_items i JOIN payment_batches b ON b.id = i.batch_id
+      WHERE b.bank = $1 AND b.status <> 'cancelled' AND i.status <> 'cancelled' AND b.created_at >= $2`,
+    [bank, new Date(fromMs - FIND_WINDOW_MS).toISOString()]);
+  const { rows: prev } = await client.query(
+    `SELECT tid, matched_item_id FROM payment_bank_rows WHERE bank = $1 AND matched_item_id IS NOT NULL AND traded_at >= $2`,
+    [bank, new Date(fromMs - FIND_WINDOW_MS).toISOString()]);
+  const taken = { byTid: new Map(prev.map(r => [r.tid, String(r.matched_item_id)])), items: new Set(prev.map(r => String(r.matched_item_id))) };
+  return matchByName(rows, items.map(it => ({ id: String(it.id), amount: Number(it.amount), holder: normPayee(it.account_holder),
+    createdAt: Number(it.created) })), taken);
+}
+
 /** 한 은행 통장 받기(3분에 한 번 — 칸 하나를 조건부로 잡아 동시에 두 번 받지 않는다). */
 async function _syncOne(cfg, bank, { by, force, now }, getAccounts) {
   await _db().query(`INSERT INTO payment_bank_sync (bank) VALUES ($1) ON CONFLICT (bank) DO NOTHING`, [bank]);
@@ -355,13 +461,16 @@ async function _syncOne(cfg, bank, { by, force, now }, getAccounts) {
     const client = await _db().connect();
     try {
       await client.query('BEGIN');
+      // 결정 317 — 이름으로 맞추는 은행: 받는 사람 이름은 여기서만 쓰고 버린다. 저장하는 것은 '우리 쪽 누구와 맞았는지'뿐.
+      const matches = BANKS[bank].confirmBy === 'name' ? await _matchNames(client, bank, rows, fromMs) : new Map();
       for (const r of rows) {
         await client.query(
-          `INSERT INTO payment_bank_rows (bank, tid, traded_at, amount, kind, balance, collected_at)
-           VALUES ($1,$2,$3,$4,$5,$6,NOW())
+          `INSERT INTO payment_bank_rows (bank, tid, traded_at, amount, kind, balance, collected_at, matched_item_id)
+           VALUES ($1,$2,$3,$4,$5,$6,NOW(),$7)
            ON CONFLICT (bank, tid) DO UPDATE SET traded_at = EXCLUDED.traded_at, amount = EXCLUDED.amount,
-             kind = EXCLUDED.kind, balance = EXCLUDED.balance, collected_at = NOW()`,
-          [bank, r.tid, new Date(r.at).toISOString(), r.amount, r.kind, r.balance]);
+             kind = EXCLUDED.kind, balance = EXCLUDED.balance, collected_at = NOW(),
+             matched_item_id = COALESCE(payment_bank_rows.matched_item_id, EXCLUDED.matched_item_id)`,
+          [bank, r.tid, new Date(r.at).toISOString(), r.amount, r.kind, r.balance, matches.get(r.tid) || null]);
       }
       await client.query(
         `UPDATE payment_bank_sync SET last_ok = TRUE, last_error = '', range_from = $2, range_to = $3, row_count = $4 WHERE bank = $1`,
@@ -404,6 +513,7 @@ async function syncBank({ by, force = false, now = Date.now(), env = process.env
   for (const { id } of open) {
     try {
       const rec = await inspectBatch(id, { now });
+      if (rec.fileOnly) continue;   // 결정 317 — 케이뱅크는 결과 파일로만
       if (rec.state !== 'clean' && rec.state !== 'review') continue;
       const r = await confirmBatchFromBank({ batchId: id, by: `통장 자동확인${by ? `(${by})` : ''}`, auto: true });
       if (r.applied) autoConfirmed.push({ batchId: id, seq: rec.seq, applied: r.applied, remaining: r.remaining || 0 });
@@ -489,6 +599,7 @@ async function _bankOverviewOne(bank, now) {
     const rec = await inspectBatch(id, { now });
     batches.push({
       batchId: id, seq: rec.seq, bank, state: rec.state, cluster: rec.cluster || null, outside: rec.outside || null, mixed: !!rec.mixed,
+      fileOnly: !!rec.fileOnly, needFile: !!rec.needFile, mode: rec.mode || 'amount',   // 결정 317
       amounts: (rec.amounts || []).filter(x => x.failures !== 0).map(x => ({ amount: x.amount, count: x.count, bank: x.bank, refunds: x.refunds, failures: x.failures })),
       pending: (rec.items || []).filter(i => i.status === 'pending').length,
     });
@@ -500,7 +611,7 @@ async function _bankOverviewOne(bank, now) {
   const outside = outsideTransfers(rows, [...paid.map(p => ({ at: Number(p.at), amount: Number(p.amount) })), ...external],
     batches.filter(b => b.cluster).map(b => ({ start: b.cluster.start, end: b.cluster.end })), now, cfg.settleMs);
   return {
-    bank, label: cfg.label, settleMinutes: Math.round(cfg.settleMs / 60000),
+    bank, label: cfg.label, settleMinutes: Math.round(cfg.settleMs / 60000), confirmBy: cfg.confirmBy,
     sync: sync ? { lastSyncedAt: sync.last_synced_at, ok: sync.last_ok, error: sync.last_error || '', rowCount: sync.row_count } : null,
     outside, batches,
   };
@@ -595,6 +706,7 @@ module.exports = {
   autoSyncGap, autoSyncDue, autoSync, AUTO_SYNC_STEPS,
   BANK_STATUS, BankError, BANKS, BANK_IDS,
   relayConfig, toBankRow, parseTradeDT, _markHanaRefunds, depositStampOf, clusterBulk, reconcileBatch, planConfirm, outsideTransfers,
+  matchByName, normPayee, NEED_FILE_AFTER_MS,
   inspectBatch, confirmBatchFromBank, syncBank, bankOverview, itemHints,
   // 결정 302 — 「오늘 확인할 것」(opsCheck.service)이 같은 재료·같은 기준을 쓴다(사본 금지)
   loadRows: (...a) => _loadRows(...a),   // (bank, fromMs, toMs)

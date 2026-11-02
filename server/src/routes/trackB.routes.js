@@ -4150,9 +4150,11 @@ router.get('/payment/batch/:id/bank', authMiddleware, adminOrMasterMiddleware, a
     const hintIds = (rec.items || []).filter(i => needAmounts.has(i.amount) && i.status === 'pending').map(i => i.id);
     const hints = await paymentBankSvc.itemHints(req.params.id, hintIds).catch(e => { logger.warn(`[payment] 고르기 힌트 실패: ${e.message}`); return {}; });
     const items = (rec.items || []).map(i => ({ id: i.id, reviewerName: i.reviewerName, tabName: i.tabName, amount: i.amount, status: i.status,
-      hints: hints[String(i.id)] || [] }));
+      hints: hints[String(i.id)] || [],
+      ...(rec.mode === 'name' ? { matched: !!(rec.matched && rec.matched.has(String(i.id))) } : {}) }));   // 결정 317 — 통장 이름과 맞았나
     res.json({ ok: true, batchId: rec.batchId, seq: rec.seq, bank: rec.bank || null, state: rec.state, cluster: rec.cluster || null, outside: rec.outside || null,
       mixed: !!rec.mixed,   // 결정 317 — 리뷰웹 밖 줄이 섞인 묶음(통장으로 정하지 않음 · 결과 파일로)
+      mode: rec.mode || 'amount', fileOnly: !!rec.fileOnly, needFile: !!rec.needFile,   // 결정 317 — 케이뱅크 = 결과 파일만 · 하나 = 이름
       amounts: (rec.amounts || []).map(({ paidTimes, ...x }) => x), items });
   } catch (err) { _bankErr(err, res, next); }
 });

@@ -21,6 +21,11 @@ const pool = require('../src/db/pool');
 const ledger = require('../src/services/sheetlessLedger.service');
 const pay = require('../src/services/payment.service');
 const bank = require('../src/services/paymentBank.service');
+/* 결정 317 — 운영에서 케이뱅크는 결과 파일로만 완료(confirmBy 'file')·하나은행은 이름(confirmBy 'name')이다.
+   [1]~[3]·[8]·[9] 는 금액 대조 엔진과 공용 기록 경로(_commitBatchOutcome) 회귀 — 이 테스트 안에서만 케이뱅크를 금액 모드로 돌린다.
+   운영 규칙은 [10](케이뱅크 결과 파일만)·[11](하나은행 이름) 이 고정한다. */
+const KBANK_CONFIRM = bank.BANKS.kbank.confirmBy;
+bank.BANKS.kbank.confirmBy = 'amount';
 
 let pass = 0, fail = 0;
 function ok(name, cond, extra) {
@@ -48,6 +53,10 @@ const ROWS = [
   [15, '파통장', '010-2000-0015', '2500'],
   [16, '하통장', '010-2000-0016', '9100'],
   [17, '거통장', '010-2000-0017', '9100'],
+  [18, '너통장', '010-2000-0018', '3000'],   // [11] 하나은행 이름 — 받음
+  [19, '더통장', '010-2000-0019', '3000'],   //   받음
+  [20, '러통장', '010-2000-0020', '3000'],   //   계좌 오류로 빠짐(통장에 이름 없음) — 같은 금액의 리뷰웹 밖 줄이 대신 찍힘
+  [21, '머통장', '010-2000-0021', '4100'],   // [10] 케이뱅크 결과 파일만
 ];
 const NOW = Date.now();
 const MIN = 60 * 1000;
@@ -115,10 +124,10 @@ const items = async (batchId) => (await pool.query(
     const b1 = await makeBatch(T1 - 10 * MIN, [3, 4]);
     await bankRow('a1', T1, 5980, 'bulk_out');
     await bankRow('a2', T1 + 20 * 1000, 5980, 'bulk_out');
-    await bankRow('a3', T1 + 30 * 1000, 12345, 'bulk_out');   // 회차 밖 줄(⑤)
+    await bankRow('a3', T1 - 20 * MIN, 12345, 'bulk_out');   // 회차 밖 줄(⑤) — 묶음과 떨어진 따로 출금(결정 317: 묶음 안에 섞이면 통장으로 정하지 않는다 → [10]·paymentBank 2f)
     const rec1 = await bank.inspectBatch(b1.id);
-    ok('대조 = clean · 묶음 3줄', rec1.state === 'clean' && rec1.cluster.rowCount === 3, { s: rec1.state, c: rec1.cluster });
-    ok('회차 밖 1줄 12,345원', rec1.outside.count === 1 && rec1.outside.sum === 12345, rec1.outside);
+    ok('대조 = clean · 묶음 2줄 · 섞이지 않음', rec1.state === 'clean' && rec1.cluster.rowCount === 2 && !rec1.mixed, { s: rec1.state, c: rec1.cluster });
+    ok('묶음 안 회차 밖 줄 0', rec1.outside.count === 0, rec1.outside);
     const c1 = await bank.confirmBatchFromBank({ batchId: b1.id, by: 'bank-test', notifyFailed: false });
     ok('확정 2건', c1.ok && c1.applied === 2 && c1.failed === 0 && c1.remaining === 0, c1);
     const it1 = await items(b1.id);
@@ -194,7 +203,11 @@ const items = async (batchId) => (await pool.query(
     ok('케이뱅크 줄만 있으면 하나 회차는 못 찾음', rec7.state === 'not_found' && rec7.bank === 'hana', rec7.state);
     await bankRow('h7', T7, 3000, 'bulk_out', 'hana');
     rec7 = await bank.inspectBatch(b7.id);
-    ok('하나 통장 줄이 생기면 clean', rec7.state === 'clean' && rec7.cluster.rowCount === 1, rec7.state);
+    ok('결정 317 — 이름으로 맞추지 않은 하나 줄은 이 회차 것이 아니다(not_found)', rec7.state === 'not_found' && rec7.mode === 'name', rec7.state);
+    const { rows: [i8] } = await pool.query(`SELECT id FROM payment_batch_items WHERE batch_id=$1`, [b7.id]);
+    await pool.query(`UPDATE payment_bank_rows SET matched_item_id = $1 WHERE bank='hana' AND tid='banktest-h7'`, [i8.id]);
+    rec7 = await bank.inspectBatch(b7.id);
+    ok('받을 때 이름으로 맞춘 줄이면 clean', rec7.state === 'clean' && rec7.cluster.rowCount === 1, rec7.state);
     const c7 = await bank.confirmBatchFromBank({ batchId: b7.id, by: 'bank-test', notifyFailed: false });
     ok('하나 회차 확정 1건', c7.applied === 1 && c7.remaining === 0, c7);
     const { rows: up7 } = await pool.query(`SELECT bank, file_name FROM payment_result_uploads WHERE batch_id=$1`, [b7.id]);
@@ -279,9 +292,66 @@ const items = async (batchId) => (await pool.query(
     ok('★ 대량이체를 만들기 전 시각의 이체 파일은 그 대량이체로 가지 않는다(no_batch)', old.code === 'no_batch', old);
     const { rows: pr9 } = await pool.query(`SELECT row_index FROM payment_records WHERE sheet_id=$1 AND row_index BETWEEN 12 AND 17 ORDER BY row_index`, [SHEET]);
     ok('원장 = 12·13·15·16·17(실패한 14 없음 · 두 번 기록 없음)', pr9.map(r => r.row_index).join(',') === '12,13,15,16,17', pr9);
+
+    console.log('\n[10] 결정 317 — 케이뱅크는 통장으로 이체 완료를 적지 않는다(결과 파일만) · 30분 뒤 결과 파일 필요');
+    bank.BANKS.kbank.confirmBy = KBANK_CONFIRM;
+    ok('운영 설정 = 케이뱅크 file · 하나은행 name', bank.BANKS.kbank.confirmBy === 'file' && bank.BANKS.hana.confirmBy === 'name');
+    const T10 = NOW - 20 * MIN;
+    const b10 = await makeBatch(T10 - 5 * MIN, [21]);
+    await bankRow('f1', T10, 4100, 'bulk_out');
+    let rec10 = await bank.inspectBatch(b10.id);
+    ok('통장에서 찾고 clean 이어도 fileOnly · 30분 전이면 결과 파일 필요 아님', rec10.state === 'clean' && rec10.fileOnly && !rec10.needFile, { s: rec10.state, f: rec10.fileOnly, n: rec10.needFile });
+    rec10 = await bank.inspectBatch(b10.id, { now: T10 + 31 * MIN });
+    ok('출금 30분 뒤 = 결과 파일 필요', rec10.needFile === true, rec10.needFile);
+    let c10; try { c10 = await bank.confirmBatchFromBank({ batchId: b10.id, by: 'bank-test', notifyFailed: false }); } catch (e) { c10 = { code: e.code }; }
+    ok('★ 통장으로 확정 거부(file_only) — 사람이 눌러도', c10.code === 'file_only', c10);
+    await pool.query(`UPDATE payment_batches SET last_downloaded_at = $2 WHERE id = $1`, [b10.id, iso(T10 - 4 * MIN)]);
+    await pool.query(`UPDATE payment_bank_sync SET last_synced_at = NULL WHERE bank IN ('kbank','hana')`);
+    bank.__setFetchForTest(async (url) => url.endsWith('/api/bank/accounts')
+      ? { status: 200, ok: true, json: async () => ({ accounts: [{ bankCode: '0089', accountNumber: '700' }, { bankCode: '0081', accountNumber: '402' }] }) }
+      : { status: 200, ok: true, json: async () => ({ success: true, allPages: true, truncated: false, list: [] }) });
+    const a10 = await bank.syncBank({ by: 'bank-test', force: true, env: { POPBILL_RELAY_URL: 'http://relay.test' }, banks: ['kbank'] });
+    ok('★ 통장 받기는 되지만 자동 완료 0', a10.ok && !(a10.autoConfirmed || []).some(x => x.batchId === b10.id), a10.autoConfirmed);
+    ok('항목은 그대로 처리 전', (await items(b10.id)).every(i => i.status === 'pending'));
+    const ovb = (await bank.bankOverview({ env: { POPBILL_RELAY_URL: 'http://relay.test' } }));
+    ok('개요 = 은행별 confirmBy · 대량이체 줄에 fileOnly', ovb.banks.find(b => b.bank === 'kbank').confirmBy === 'file'
+      && ovb.batches.find(b => b.batchId === b10.id).fileOnly === true, ovb.banks.map(b => [b.bank, b.confirmBy]));
+
+    console.log('\n[11] 결정 317 — 하나은행은 받는 사람 이름으로 맞춘다 · 리뷰웹 밖 같은 금액 줄 + 빠진 사람이 겹쳐도 잘못 적지 않는다');
+    const T11 = NOW - 60 * MIN;
+    const b11 = await makeBatch(T11 - 10 * MIN, [18, 19, 20], 'hana');
+    const kst11 = ms => new Date(ms + 9 * 3600 * 1000).toISOString().replace(/\D/g, '').slice(0, 14);
+    bank.__setFetchForTest(async (url) => url.endsWith('/api/bank/accounts')
+      ? { status: 200, ok: true, json: async () => ({ accounts: [{ bankCode: '0081', accountNumber: '402' }] }) }
+      : { status: 200, ok: true, json: async () => ({ success: true, allPages: true, truncated: false, list: [
+        { tradeDT: kst11(T11), tradeAmt: 3000, tran_type: 'withdraw', remark1: '너통장', remark3: '타행송금', tid: 'banktest-n1', balance: 1 },
+        { tradeDT: kst11(T11), tradeAmt: 3000, tran_type: 'withdraw', remark1: '김바깥', remark3: '타행송금', tid: 'banktest-n2', balance: 1 },   // 리뷰웹 밖 작업
+        { tradeDT: kst11(T11), tradeAmt: 3000, tran_type: 'withdraw', remark1: '더 통장', remark3: '타행송금', tid: 'banktest-n3', balance: 1 },
+      ] }) });
+    await pool.query(`UPDATE payment_bank_sync SET last_synced_at = NULL WHERE bank = 'hana'`);
+    const a11 = await bank.syncBank({ by: 'bank-test', force: true, env: { POPBILL_RELAY_URL: 'http://relay.test' }, banks: ['hana'] });
+    const auto11 = (a11.autoConfirmed || []).find(x => x.batchId === b11.id);
+    ok('통장 3줄(같은 금액) 중 이름이 맞는 2명만 자동 완료 · 1명 남김', a11.ok && auto11 && auto11.applied === 2 && auto11.remaining === 1, a11.autoConfirmed);
+    const it11 = await items(b11.id);
+    const st11 = n => it11.find(i => i.row_index === n).status;
+    ok('★ 빠진 사람(러)은 실패도 완료도 아닌 처리 전(확인 필요)', st11(18) === 'paid' && st11(19) === 'paid' && st11(20) === 'pending', it11);
+    const { rows: m11 } = await pool.query(`SELECT tid, matched_item_id FROM payment_bank_rows WHERE bank='hana' AND tid LIKE 'banktest-n%' ORDER BY tid`);
+    ok('맞춘 줄 2개 · 리뷰웹 밖 줄은 짝 없음', m11.filter(r => r.matched_item_id).length === 2 && !m11.find(r => r.tid === 'banktest-n2').matched_item_id, m11);
+    const { rows: cols } = await pool.query(`SELECT column_name FROM information_schema.columns WHERE table_name='payment_bank_rows'`);
+    ok('★ 통장 줄 표에 이름 칸이 없다(결정 293 — 이름은 저장하지 않는다)', !cols.some(c => /name|holder|payee|memo|remark/.test(c.column_name)), cols.map(c => c.column_name));
+    const rec11 = await bank.inspectBatch(b11.id);
+    ok('남은 사람 = 확인 필요(review) · 회차 밖 1줄', rec11.state === 'review' && rec11.outside.count === 1 && rec11.unresolvedIds.length === 1, { s: rec11.state, o: rec11.outside });
+    await pool.query(`UPDATE payment_bank_sync SET last_synced_at = NULL WHERE bank = 'hana'`);
+    await bank.syncBank({ by: 'bank-test', force: true, env: { POPBILL_RELAY_URL: 'http://relay.test' }, banks: ['hana'] });
+    const { rows: m11b } = await pool.query(`SELECT tid, matched_item_id FROM payment_bank_rows WHERE bank='hana' AND tid LIKE 'banktest-n%' ORDER BY tid`);
+    ok('다시 받아도 짝이 바뀌지 않는다', JSON.stringify(m11b) === JSON.stringify(m11), m11b);
+    let p11; try { p11 = await bank.confirmBatchFromBank({ batchId: b11.id, by: 'bank-test', notifyFailed: false, failedItemIds: [it11.find(i => i.row_index === 20) && (await pool.query(`SELECT id FROM payment_batch_items WHERE batch_id=$1 AND row_index=20`, [b11.id])).rows[0].id] }); } catch (e) { p11 = { code: e.code }; }
+    ok('하나은행은 통장으로 실패를 고르지 않는다(bad_pick)', p11.code === 'bad_pick', p11);
+    bank.__setFetchForTest(null);
   } catch (e) {
     console.error(e); fail++;
   } finally {
+    bank.BANKS.kbank.confirmBy = KBANK_CONFIRM;
     await cleanup().catch(() => {});
     await pool.end();
     console.log(`\n${pass} passed, ${fail} failed`);

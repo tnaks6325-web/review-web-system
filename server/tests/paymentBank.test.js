@@ -357,6 +357,48 @@ const item = (id, amount, status = 'pending', resultStatus = '') => ({ id, amoun
     result.__setPoolForTest(null);
   });
 
+  console.log('§17 결정 317 — 하나은행 이름 맞추기(순수 계산)');
+  await t('17a 이름 정리 = 띄어쓰기·(주)·㈜·주식회사 제거', () => {
+    assert.strictEqual(bank.normPayee(' 홍 길동 '), '홍길동');
+    assert.strictEqual(bank.normPayee('(주)인애드'), '인애드');
+    assert.strictEqual(bank.normPayee('㈜인애드'), '인애드');
+    assert.strictEqual(bank.normPayee('주식회사 인애드'), '인애드');
+  });
+  await t('17b 같은 금액 셋 중 이름이 맞는 둘만 · 리뷰웹 밖 줄은 짝 없음 · 앞부분(2자) 일치 허용', () => {
+    const C = T - 10 * MIN;
+    const its = [{ id: 'i1', amount: 3000, holder: '김가나다', createdAt: C }, { id: 'i2', amount: 3000, holder: '이라마', createdAt: C }, { id: 'i3', amount: 3000, holder: '박바사', createdAt: C }];
+    const rows = [{ tid: 'r1', at: T, amount: 3000, kind: 'bulk_out', name: '김가나' }, { tid: 'r2', at: T, amount: 3000, kind: 'bulk_out', name: '최바깥' },
+      { tid: 'r3', at: T, amount: 3000, kind: 'bulk_out', name: '이라마' }, { tid: 'r4', at: T, amount: 3000, kind: 'bulk_out', name: '박' }];
+    const m = bank.matchByName(rows, its);
+    assert.deepStrictEqual([...m.entries()].sort(), [['r1', 'i1'], ['r3', 'i2']]);
+  });
+  await t('17c 금액이 다르거나 대량이체를 만들기 전 출금이면 맞추지 않는다 · 저장된 짝은 그대로', () => {
+    const C = T - 10 * MIN;
+    const its = [{ id: 'i1', amount: 3000, holder: '홍길동', createdAt: C }, { id: 'i2', amount: 3000, holder: '홍길동', createdAt: C }];
+    assert.strictEqual(bank.matchByName([{ tid: 'x', at: T, amount: 3100, kind: 'bulk_out', name: '홍길동' }], its).size, 0);
+    assert.strictEqual(bank.matchByName([{ tid: 'x', at: C - 5 * MIN, amount: 3000, kind: 'bulk_out', name: '홍길동' }], its).size, 0);
+    const taken = { byTid: new Map([['old', 'i1']]), items: new Set(['i1']) };
+    const m = bank.matchByName([{ tid: 'old', at: T, amount: 3000, kind: 'bulk_out', name: '홍길동' }, { tid: 'new', at: T + 1000, amount: 3000, kind: 'bulk_out', name: '홍길동' }], its, taken);
+    assert.deepStrictEqual([...m.entries()], [['old', 'i1'], ['new', 'i2']]);
+  });
+  await t('17d 이름 대조 = 맞춘 사람만 완료 · 못 맞춘 사람은 실패가 아니라 남김 · 실패 고르기 거부', () => {
+    const its = [item('h1', 3000), item('h2', 3000)];
+    const rows = [{ tid: 'n1', at: T, amount: 3000, kind: 'bulk_out', matchedItemId: 'h1' }, { tid: 'n2', at: T, amount: 3000, kind: 'bulk_out', matchedItemId: null }];
+    const rec = reconcileBatch({ batch, items: its, rows, now: T + 60 * MIN, mode: 'name' });
+    assert.strictEqual(rec.mode, 'name');
+    assert.strictEqual(rec.state, 'review');
+    const plan = planConfirm(rec, its);
+    assert.deepStrictEqual(plan.paid.map(p => p.item.id), ['h1']);
+    assert.strictEqual(plan.failed.length, 0);
+    assert.strictEqual(plan.unresolved.length, 1);
+    assert.throws(() => planConfirm(rec, its, ['h2']), e => e.code === 'bad_pick');
+    assert.strictEqual(reconcileBatch({ batch, items: its, rows: rows.map(r => ({ ...r, matchedItemId: null })), now: T + 60 * MIN, mode: 'name' }).state, 'not_found');
+  });
+  await t('17e 은행별 완료 방식 = 케이뱅크 결과 파일 · 하나은행 이름', () => {
+    assert.strictEqual(bank.BANKS.kbank.confirmBy, 'file');
+    assert.strictEqual(bank.BANKS.hana.confirmBy, 'name');
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

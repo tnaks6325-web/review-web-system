@@ -2,7 +2,7 @@
  * opsCheckPg.test.js — 결정 302 「오늘 확인할 것」 · **진짜 PG** 끝까지 검증
  * 실행: PGTEST_URL=postgres://... node tests/opsCheckPg.test.js   (★ 마이그레이션된 **복사본** DB 에서만 — 행을 넣는다)
  *
- *   ① 통장 받은 뒤 갱신 → 묶음 하나에 확인거리 1개(담당 만두 · 빠진 사람 19,800원 1명 · 기록 없는 돈 1,000원×3 · 332,200원×1 · 추정 작업)
+ *   ① 통장 받은 뒤 갱신 → 묶음 하나에 확인거리 1개(담당 만두 · 케이뱅크 = 결과 파일 필요(결정 317) · 기록 없는 돈 1,000원×3 · 332,200원×1 · 추정 작업)
  *   ② 같은 사실로 다시 갱신 → AI 를 다시 부르지 않는다 · 줄이 늘지 않는다
  *   ③ 답 저장 · 없는 키·잘못된 답 거부
  *   ④ 빠진 사람이 정해지면(이체 완료/실패 기록) 그 줄이 사라지고, 남은 답을 다 하면 처리 완료
@@ -83,7 +83,9 @@ async function bankRow(n, at, amount, kind = 'bulk_out') {
   ok('① 묶음 하나에 확인거리 1개', r.created === 1 && rows.length === 1, r);
   const c = rows[0];
   ok('① 담당 = 대량이체 만든 사람(박세희 → 만두)', c && c.manager === '만두', c && c.manager);
-  ok('① 빠진 사람 19,800원 1명 · 작업명 탈모샴푸', c && JSON.stringify(c.facts.short.map(x => [x.amount, x.failures, x.jobs])) === JSON.stringify([[19800, 1, ['탈모샴푸']]]), c && c.facts.short);
+  // 결정 317 — 케이뱅크는 통장으로 사람을 고르지 않는다: 「빠진 사람」 대신 출금 30분 뒤 「결과 파일 필요」 한 줄(금액 엔진의 빠진 사람 문장은 opsCheck.test.js)
+  ok('① 케이뱅크 = 빠진 사람 줄 없음 · 결과 파일 필요(5명 대기)', c && c.facts.short.length === 0 && c.facts.needFile && c.facts.needFile.pending === 5
+    && c.lines.some(l => l.key === 'need_file'), c && { short: c.facts.short, needFile: c.facts.needFile });
   ok('① 기록 없는 돈 1,000원×3 · 332,200원×1', c && JSON.stringify(c.facts.outside.map(o => [o.amount, o.count])) === JSON.stringify([[332200, 1], [1000, 3]]), c && c.facts.outside);
   ok('① 1,000원 = 리뷰비만 보내는 작업(누룽칩2차) 추정', c && (c.facts.outside.find(o => o.amount === 1000).guess || {}).works?.includes('누룽칩2차'));
   ok('① AI 가 틀리면 기본 문장', c && c.text_source === 'fallback' && c.lines.length === 4, c && c.lines);
