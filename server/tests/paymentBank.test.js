@@ -73,9 +73,25 @@ const item = (id, amount, status = 'pending', resultStatus = '') => ({ id, amoun
     assert.strictEqual(r.amounts[0].failures, null);
     assert.deepStrictEqual(r.outside, { count: 1, sum: 5980 });
   });
-  await t('2f 회차 밖 다른 금액 줄은 회차 확정을 막지 않고 회차 밖으로 센다', () => {
+  /* 결정 317(방식 B · 사용자 확정 2026-11-02) — 종전 2f(「회차 밖 다른 금액 줄은 확정을 막지 않는다」)를 바꿨다:
+       리뷰웹 밖 작업 줄이 섞인 묶음은 통장으로 정하지 않는다(회차 사람 실패 + 밖의 같은 금액 줄이면 못 받은 사람을 완료로 적게 됨). */
+  await t('2f ★ 회차 밖 줄이 섞인 묶음은 통장으로 정하지 않는다(mixed · 모든 금액 모름) · 회차 밖으로 센다', () => {
     const r = reconcileBatch({ batch, items: [item('a', 5980)], rows: [row(5980, T), row(39900, T + 1000)], now: T + 20 * MIN });
-    assert.deepStrictEqual([r.state, r.outside.count, r.outside.sum], ['clean', 1, 39900]);
+    assert.deepStrictEqual([r.state, r.mixed, r.outside.count, r.outside.sum], ['review', true, 1, 39900]);
+    assert.ok(r.amounts.every(x => x.failures === null));
+    const plan = planConfirm(r, [{ ...item('a', 5980), status: 'pending' }], [], { auto: true });
+    assert.deepStrictEqual([plan.paid.length, plan.failed.length], [0, 0], '아무도 확정하지 않는다 — 결과 파일로');
+  });
+  await t('2f2 ★ 위험 장면 — 회차 1명 실패 + 밖의 같은 금액 1줄 + 밖의 다른 금액 → 건수가 맞아 보여도 완료로 적지 않는다', () => {
+    const items = [item('a', 5980), item('b', 5980)];
+    const r = reconcileBatch({ batch, items, rows: [row(5980, T), row(5980, T + 500), row(30000, T + 900)], now: T + 20 * MIN });
+    assert.strictEqual(r.mixed, true);
+    const plan = planConfirm(r, items.map(x => ({ ...x, status: 'pending' })), [], { auto: true });
+    assert.strictEqual(plan.paid.length, 0);
+  });
+  await t('2f3 회차 밖 줄이 없으면 종전대로 clean(mixed 아님)', () => {
+    const r = reconcileBatch({ batch, items: [item('a', 5980)], rows: [row(5980, T)], now: T + 20 * MIN });
+    assert.deepStrictEqual([r.state, r.mixed], ['clean', false]);
   });
   await t('2g 통장에 이 회차 이체가 없으면 not_found · 절반도 안 맞아도 not_found', () => {
     assert.strictEqual(reconcileBatch({ batch, items: [item('a', 5980)], rows: [], now: T + 20 * MIN }).state, 'not_found');
@@ -339,6 +355,48 @@ const item = (id, amount, status = 'pending', resultStatus = '') => ({ id, amoun
     await result.__assertFileBelongsToBatchForTest(b, half, fileRows);   // 절반 맞으면 통과
     await result.__assertFileBelongsToBatchForTest(b, [], fileRows.slice(0, 4));   // 4줄은 판단 안 함
     result.__setPoolForTest(null);
+  });
+
+  console.log('§17 결정 317 — 하나은행 이름 맞추기(순수 계산)');
+  await t('17a 이름 정리 = 띄어쓰기·(주)·㈜·주식회사 제거', () => {
+    assert.strictEqual(bank.normPayee(' 홍 길동 '), '홍길동');
+    assert.strictEqual(bank.normPayee('(주)인애드'), '인애드');
+    assert.strictEqual(bank.normPayee('㈜인애드'), '인애드');
+    assert.strictEqual(bank.normPayee('주식회사 인애드'), '인애드');
+  });
+  await t('17b 같은 금액 셋 중 이름이 맞는 둘만 · 리뷰웹 밖 줄은 짝 없음 · 앞부분(2자) 일치 허용', () => {
+    const C = T - 10 * MIN;
+    const its = [{ id: 'i1', amount: 3000, holder: '김가나다', createdAt: C }, { id: 'i2', amount: 3000, holder: '이라마', createdAt: C }, { id: 'i3', amount: 3000, holder: '박바사', createdAt: C }];
+    const rows = [{ tid: 'r1', at: T, amount: 3000, kind: 'bulk_out', name: '김가나' }, { tid: 'r2', at: T, amount: 3000, kind: 'bulk_out', name: '최바깥' },
+      { tid: 'r3', at: T, amount: 3000, kind: 'bulk_out', name: '이라마' }, { tid: 'r4', at: T, amount: 3000, kind: 'bulk_out', name: '박' }];
+    const m = bank.matchByName(rows, its);
+    assert.deepStrictEqual([...m.entries()].sort(), [['r1', 'i1'], ['r3', 'i2']]);
+  });
+  await t('17c 금액이 다르거나 대량이체를 만들기 전 출금이면 맞추지 않는다 · 저장된 짝은 그대로', () => {
+    const C = T - 10 * MIN;
+    const its = [{ id: 'i1', amount: 3000, holder: '홍길동', createdAt: C }, { id: 'i2', amount: 3000, holder: '홍길동', createdAt: C }];
+    assert.strictEqual(bank.matchByName([{ tid: 'x', at: T, amount: 3100, kind: 'bulk_out', name: '홍길동' }], its).size, 0);
+    assert.strictEqual(bank.matchByName([{ tid: 'x', at: C - 5 * MIN, amount: 3000, kind: 'bulk_out', name: '홍길동' }], its).size, 0);
+    const taken = { byTid: new Map([['old', 'i1']]), items: new Set(['i1']) };
+    const m = bank.matchByName([{ tid: 'old', at: T, amount: 3000, kind: 'bulk_out', name: '홍길동' }, { tid: 'new', at: T + 1000, amount: 3000, kind: 'bulk_out', name: '홍길동' }], its, taken);
+    assert.deepStrictEqual([...m.entries()], [['old', 'i1'], ['new', 'i2']]);
+  });
+  await t('17d 이름 대조 = 맞춘 사람만 완료 · 못 맞춘 사람은 실패가 아니라 남김 · 실패 고르기 거부', () => {
+    const its = [item('h1', 3000), item('h2', 3000)];
+    const rows = [{ tid: 'n1', at: T, amount: 3000, kind: 'bulk_out', matchedItemId: 'h1' }, { tid: 'n2', at: T, amount: 3000, kind: 'bulk_out', matchedItemId: null }];
+    const rec = reconcileBatch({ batch, items: its, rows, now: T + 60 * MIN, mode: 'name' });
+    assert.strictEqual(rec.mode, 'name');
+    assert.strictEqual(rec.state, 'review');
+    const plan = planConfirm(rec, its);
+    assert.deepStrictEqual(plan.paid.map(p => p.item.id), ['h1']);
+    assert.strictEqual(plan.failed.length, 0);
+    assert.strictEqual(plan.unresolved.length, 1);
+    assert.throws(() => planConfirm(rec, its, ['h2']), e => e.code === 'bad_pick');
+    assert.strictEqual(reconcileBatch({ batch, items: its, rows: rows.map(r => ({ ...r, matchedItemId: null })), now: T + 60 * MIN, mode: 'name' }).state, 'not_found');
+  });
+  await t('17e 은행별 완료 방식 = 케이뱅크 결과 파일 · 하나은행 이름', () => {
+    assert.strictEqual(bank.BANKS.kbank.confirmBy, 'file');
+    assert.strictEqual(bank.BANKS.hana.confirmBy, 'name');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

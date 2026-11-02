@@ -83,6 +83,7 @@ function harness({ failRecord = false } = {}) {
       { seq: 9, memo: '테스트입금', holder: '조현기', amount: 7650, accountTail: '0172', success: true },
     ] } } }] };
     if (/FROM unconfirmed_transfer_reviews/.test(text)) return { rows: [] };
+    if (/FROM external_work_transfers e/.test(text)) return { rows: [] };   // 결정 317 — 리뷰웹 밖 작업 표시 없음
     if (/FROM review_index ri/.test(text) && /alreadyPaid/.test(text)) return { rows: [
       { reviewerName: '조현기', rowIndex: 77, rowJson: { 결제금액: '18,950' }, alreadyPaid: false },
     ] };

@@ -36,6 +36,7 @@ async function fixture() {
  CREATE TABLE unconfirmed_transfer_reviews(id uuid DEFAULT gen_random_uuid(),batch_id uuid,upload_id uuid,result_seq integer,memo text,sheet_id text,tab_name text,participant_row_index integer,decision text,review_note text,reviewed_by text,UNIQUE(upload_id,result_seq));
  CREATE TABLE payment_account_mismatch_reconciliations(upload_id uuid,result_seq integer);
  CREATE TABLE payment_amount_mismatch_reconciliations(upload_id uuid,result_seq integer);
+ CREATE TABLE external_work_transfers(file_sha256 text,result_seq integer);
  CREATE TABLE manual_payment_marks(sheet_id text,tab_name text,row_index integer);
  CREATE TABLE ops_checks(id integer,status text,answers jsonb); INSERT INTO ops_checks VALUES(1,'open','{}');
  CREATE TABLE payment_bank_rows(bank text,traded_at timestamptz,amount integer);

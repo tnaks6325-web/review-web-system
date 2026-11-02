@@ -2391,6 +2391,7 @@
 .pmanydrop svg{flex:none;width:30px;height:30px}
 .pmarchive{margin:-4px 0 12px;font-size:12px;color:var(--t2,#59626F)}
 .pmarchive a{margin-left:6px;color:#1B75D0;text-decoration:underline;text-underline-offset:2px}
+.pmneedfile{display:inline-flex;align-items:center;height:26px;padding:0 9px;border-radius:6px;border:1px solid #E5BF79;background:#FFF9ED;color:#9A6108;font-size:11.5px;font-weight:700}
 .pmanydrop b{display:block;font-size:13px}
 .pmanydrop .s{display:block;font-size:11.5px;color:var(--t2,#59626F);margin-top:2px}
 .pmanydrop .pick{margin-left:auto;flex:none;border:1px solid #1B75D0;color:#155BA5;background:#F5FAFF;border-radius:6px;padding:5px 11px;font-size:12px;font-weight:600}
@@ -2551,6 +2552,14 @@
 .pmrbd{padding:14px 18px;overflow:auto;flex:1;min-height:0}
 .pm-unconfirmed-box{width:min(880px,100%);min-height:min(590px,80vh)}
 .pm-unconfirmed-search{margin:16px 0 0;display:grid;gap:8px}
+.pmext{margin-top:12px;border:1px solid #CFE3DF;border-radius:10px;padding:12px;background:#F6FBFA;display:grid;gap:8px}
+.pmext-hd{display:grid;gap:2px}.pmext-hd b{font-size:13px}.pmext-hd span{font-size:11.5px;color:var(--t3,#6B7280)}
+.pmext-rows{display:grid;gap:4px;max-height:180px;overflow:auto}
+.pmext-row{display:grid;grid-template-columns:auto minmax(0,1.2fr) minmax(0,1fr) auto minmax(0,1fr);gap:8px;align-items:center;font-size:12.5px;padding:4px 6px;border-radius:6px;background:#fff}
+.pmext-done .pmext-row{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) auto minmax(0,.8fr) auto}
+.pmext-row .num{text-align:right;font-variant-numeric:tabular-nums}
+.pmext-act{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.pmext-act .inp{flex:1;min-width:200px;height:34px}
+.pmext-done summary{cursor:pointer;font-size:12.5px;color:#0F766E}
 .pm-unconfirmed-box .pm-unconfirmed-search{display:none}.pm-unconfirmed-box .pm-unconfirmed-search.on{display:grid}
 .pm-unconfirmed-search .inp{height:44px;font-size:15px;padding:0 13px}
 .pm-unconfirmed-candidates{position:static;display:grid;gap:7px;max-height:360px;overflow:auto;padding:2px}
@@ -13645,6 +13654,11 @@ async function _pmDepositBackfill(i){
 const _PM_RESULT_UPLOAD_ON=false;
 /* 통장 자동 대조가 되는 은행 — 서버가 알려 준 목록(개요 banks[])을 따른다(Codex P1 · 배포 스큐).
    옛 서버·아직 못 받음·실패 = 케이뱅크만(하나은행은 결과 파일 업로드가 남는다 — 기록할 길이 없어지면 안 된다). */
+/* 결정 317 — 결과 파일로만 완료하는 은행(케이뱅크). 옛 서버(confirmBy 없음)면 빈 목록 = 종전 동작. */
+function _pmFileOnlyBank(bank){
+  const k=STATE.pmBank;
+  return !!(k && !k.error && Array.isArray(k.banks) && k.banks.some(x=>x.bank===bank && x.confirmBy==='file'));
+}
 function _pmReconciledBanks(){
   const k=STATE.pmBank;
   return (k && !k.error && Array.isArray(k.banks) && k.banks.length) ? k.banks.map(x=>x.bank) : ['kbank'];
@@ -13657,7 +13671,8 @@ function _pmBatchActions(b,i){
   //   ★ 단 통장으로 정할 수 없는 대량이체는 남긴다(Codex P1): 통장 대조가 없는 은행 · 같은 금액이 통장에 더 찍혀 누가 받았는지 모르는 금액.
   //   결정 303 — 하나은행도 통장 대조를 한다(사용자 확정 2026-10-28).
   const bkU=_pmBankOf(b);
-  const uploadNeeded = !_pmReconciledBanks().includes(b.bank) || !!(bkU && (bkU.amounts||[]).some(a=>a.failures==null));
+  const uploadNeeded = !_pmReconciledBanks().includes(b.bank) || !!(bkU && (bkU.amounts||[]).some(a=>a.failures==null))
+    || (_pmFileOnlyBank(b.bank) && Number(b.pendingCount||0)>0);   // 결정 317 — 케이뱅크는 결과 파일로만 끝낸다
   const resultUpload = (_PM_RESULT_UPLOAD_ON || uploadNeeded) && (b.status==='downloaded' || b.status==='applied')
     ? `<button class="pmdrop" type="button" title="클릭하거나 결과 파일을 끌어 놓으세요" onclick="_pmPickResult(${i})" ondragover="_pmResultDragOver(event)" ondragleave="_pmResultDragLeave(event)" ondrop="_pmResultDrop(event,${i})"><span class="pmdropicon" aria-hidden="true">⇧</span><span>결과 파일 업로드</span></button>` : '';
   const manage = b.status==='downloaded' ? `<button class="btn sm" onclick="_pmRefileByIndex(${i})">⬇ 다시 받기</button>
@@ -13666,10 +13681,13 @@ function _pmBatchActions(b,i){
   const result = b.resultUploadId && b.resultSource!=='bank' ? `<button class="btn sm" onclick="_pmOpenResult(${i})">이체결과 확인</button>
     ` : '';
   const bk=_pmBankOf(b);
-  const bankAction = bk && bk.state==='review' ? `<button class="btn sm" style="color:#9A6108;border-color:#E5BF79;background:#FFF9ED" onclick="_pmOpenBankPick(${i})">통장 대조 · 확인 필요</button>`
+  const bankAction = bk && bk.fileOnly ? (bk.needFile ? `<span class="pmneedfile" title="통장에 이 대량이체 출금이 찍히고 30분이 지났습니다 — 케이뱅크는 이체결과 파일로만 완료합니다">결과 파일 필요</span>` : '')
+    : bk && bk.state==='review' ? `<button class="btn sm" style="color:#9A6108;border-color:#E5BF79;background:#FFF9ED" onclick="_pmOpenBankPick(${i})">통장 대조 · 확인 필요</button>`
     : bk && bk.state==='clean' ? `<button class="btn sm primary" onclick="_pmOpenBankPick(${i})">통장으로 확정</button>` : '';
   const unconfirmed=Number(b.resultUnconfirmedCount||0);
-  const unconfirmedAction=unconfirmed ? `<button class="btn sm" style="color:#9A6108;border-color:#E5BF79;background:#FFF9ED" onclick="_pmOpenBatchUnconfirmed(${i})">미확인 ${unconfirmed}건 조치</button>` : '';
+  const extCount=Number(b.resultExternalCount||0);   // 결정 317 — 다 표시한 뒤에도 되돌리기 입구를 남긴다(Codex P2)
+  const unconfirmedAction=unconfirmed ? `<button class="btn sm" style="color:#9A6108;border-color:#E5BF79;background:#FFF9ED" onclick="_pmOpenBatchUnconfirmed(${i})">미확인 ${unconfirmed}건 조치</button>`
+    : extCount ? `<button class="btn sm" onclick="_pmOpenBatchUnconfirmed(${i})">리뷰웹 밖 작업 ${extCount}건</button>` : '';
   return manage + result + bankAction + unconfirmedAction + resultUpload;
 }
 function _pmBatchTable(list){
@@ -13831,7 +13849,15 @@ function _pmBankStateHtml(b){
     const bl=((STATE.pmBank&&STATE.pmBank.banks)||[]).find(x=>x.bank===(bk.bank||b.bank));
     return `<span class="pmauto">통장 확인 중(이체 뒤 ${bl&&bl.settleMinutes?bl.settleMinutes:10}분 대기)</span>`;
   }
+  // 결정 317 — 케이뱅크는 통장으로 완료하지 않는다: 출금이 보였다는 것만 알린다
+  if(bk.fileOnly && (bk.state==='clean'||bk.state==='review')) return '<span class="pmauto">통장 출금 확인 — 결과 파일로 완료</span>';
   if(bk.state==='clean') return '<span class="pmauto">통장과 일치 — 확정 대기</span>';
+  if(bk.state==='review' && bk.mode==='name'){
+    // 결정 317 — 하나은행: 통장 이름과 맞은 사람은 확정만 · 이름이 안 보이는 사람만 '확인 필요'
+    const need=(bk.amounts||[]).reduce((n,a)=>n+(a.missing||0),0);
+    const okN=Math.max(0,(bk.pending||0)-need);
+    return `<span style="display:inline-flex;flex-wrap:wrap;gap:4px 7px;font-size:11.5px">${okN?`<span>통장 이름과 맞음 ${okN}건</span>`:''}<b style="color:#A66A10">확인 필요 ${need}건</b></span>`;
+  }
   if(bk.state==='review'){
     // 통장과 맞는 금액의 사람은 확정만 누르면 되고, 맞지 않는 금액의 사람만 '확인 필요'다.
     const need=(bk.amounts||[]).reduce((n,a)=>n+(a.count||0),0);
@@ -13867,11 +13893,19 @@ function _pmBankPickRender(){
   const items=r.items||[];
   const amounts=r.amounts||[];
   const ok=amounts.filter(a=>a.failures===0);
-  const okPending=ok.reduce((n,a)=>n+items.filter(it=>it.amount===a.amount&&it.status==='pending').length,0);
+  // 결정 317 — 하나은행(이름) = 통장 이름과 맞은 사람만 · 케이뱅크(결과 파일만) = 통장으로 확정하지 않는다
+  const nameMode=r.mode==='name';
+  const okPending=r.fileOnly?0:nameMode?items.filter(it=>it.status==='pending'&&it.matched).length
+    :ok.reduce((n,a)=>n+items.filter(it=>it.amount===a.amount&&it.status==='pending').length,0);
   const need=amounts.filter(a=>a.failures!==0);
   const pickedOf=a=>items.filter(it=>it.amount===a.amount&&st.picked.has(it.id)).length;
   const cl=r.cluster;
-  const groups=need.map(a=>{
+  // 결정 317(방식 B) — 리뷰웹 밖 줄이 섞인 대량이체는 통장으로 정하지 않는다(금액별 안내 대신 한 줄로)
+  const missing=nameMode?items.filter(it=>it.status==='pending'&&!it.matched):[];
+  const groups=r.fileOnly?`<div class="pmnote">케이뱅크 대량이체 통장 줄에는 받는 사람이 찍히지 않아 <b>통장으로는 이체 완료를 적지 않습니다</b> — 케이뱅크 이체결과 파일을 입금관리에 놓아 주세요.</div>`
+    :nameMode?(missing.length?`<div class="pmbp-grp"><div class="pmbp-hd"><b>통장에 이름이 안 보이는 사람 ${missing.length}명</b><span style="color:#80500F">실패로 적지 않고 '확인 필요'로 남깁니다 — 이체결과 파일을 놓아 확인해 주세요.</span></div>
+      ${missing.map(it=>`<div class="pmbp-row" style="cursor:default"><span>${esc(it.reviewerName||'-')}</span><span class="muted">${esc(it.tabName||'')}</span><span class="muted">${_pmNum(it.amount)}원</span></div>`).join('')}</div>`:'')
+    :r.mixed?`<div class="pmnote">이 대량이체 통장 출금에 <b>리뷰웹에 없는 줄 ${Number(r.outside&&r.outside.count)||0}건</b>(블로그·예약자리뷰 등)이 섞여 있어 통장만으로는 누가 받았는지 정하지 않습니다 — <b>케이뱅크 이체결과 파일을 입금관리에 놓아 주세요.</b> 놓은 뒤 남는 미확인 줄은 「리뷰웹 밖 작업」으로 표시하면 됩니다.</div>`:need.map(a=>{
     const rows=items.filter(it=>it.amount===a.amount);
     const already=rows.filter(it=>it.status==='failed').length;
     const head=`<b>${_pmNum(a.amount)}원</b><span>대량이체 ${a.count}명 · 통장 출금 ${a.bank}건${a.refunds?` · 취소로 돌아옴 ${a.refunds}건`:''}</span>`;
@@ -13891,10 +13925,10 @@ function _pmBankPickRender(){
   if(!el){ el=document.createElement('div'); el.className='pmrov'; el.id='pmBankPickOv'; document.body.appendChild(el); }
   el.innerHTML=`<div class="pmrbox" style="width:min(760px,100%)"><div class="pmrhd"><h3>#${b.seq} 대량이체 통장 대조</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmBankPickClose()">닫기</button></div>
     <div class="pmrbd">
-      <div class="pmnote">${esc((PAY_BANKS.find(x=>x[0]===st.data.bank)||[,'케이뱅크'])[1])} 통장 ${cl?`${esc(_pmDate(cl.start))} 대량이체 ${cl.rowCount}건 · ${_pmNum(cl.total)}원`:''}과 맞대 봤습니다. 통장에는 받는 사람이 찍히지 않아, 금액이 맞지 않는 사람만 아래에서 확인합니다.</div>
-      <div style="font-size:12.5px;margin:8px 0">통장과 맞는 금액: <b>${ok.length}종 · ${okPending}명</b>${okPending?' → 확정하면 이체 완료로 기록됩니다(결과 파일 반영과 같은 기록).':''}</div>
+      <div class="pmnote">${esc((PAY_BANKS.find(x=>x[0]===st.data.bank)||[,'케이뱅크'])[1])} 통장 ${cl?`${esc(_pmDate(cl.start))} 대량이체 ${cl.rowCount}건 · ${_pmNum(cl.total)}원`:''}과 맞대 봤습니다. ${nameMode?'하나은행 통장에는 받는 사람 이름이 찍혀, 이름과 금액이 맞는 사람만 이체 완료로 적습니다.':'통장에는 받는 사람이 찍히지 않아, 금액이 맞지 않는 사람만 아래에서 확인합니다.'}</div>
+      <div style="font-size:12.5px;margin:8px 0">${nameMode?`통장 이름과 맞은 사람: <b>${okPending}명</b>`:`통장과 맞는 금액: <b>${ok.length}종 · ${okPending}명</b>`}${okPending?' → 확정하면 이체 완료로 기록됩니다(결과 파일 반영과 같은 기록).':''}</div>
       ${groups||'<div class="muted" style="font-size:12.5px">확인이 필요한 금액이 없습니다.</div>'}
-      <div class="pmnote" style="margin-top:10px">이름 옆 노란 표시는 고르기 힌트입니다(처음 받는 계좌 · 예금주가 리뷰어와 다름 · 예전에 이체 실패 · 같은 날 다른 작업에도 있음). 모르겠으면 고르지 말고 확정하세요 — 맞는 사람만 기록되고 나머지는 '확인 필요'로 남습니다.</div>
+      ${nameMode||r.fileOnly?'':`<div class="pmnote" style="margin-top:10px">이름 옆 노란 표시는 고르기 힌트입니다(처음 받는 계좌 · 예금주가 리뷰어와 다름 · 예전에 이체 실패 · 같은 날 다른 작업에도 있음). 모르겠으면 고르지 말고 확정하세요 — 맞는 사람만 기록되고 나머지는 '확인 필요'로 남습니다.</div>`}
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px"><button class="btn" onclick="_pmBankPickClose()">취소</button><button class="btn primary" ${okPending||picks.length?'':'disabled'} onclick="_pmBankPickSubmit()">${esc(btnLabel)}</button></div>
     </div></div>`;
 }
@@ -14448,14 +14482,75 @@ async function _pmOpenBatchUnconfirmed(i){
   const r=await api('/api/trackb/payment/batch/'+b.id+'/result-preview');
   if(!r||!r.ok){ toast((r&&r.error)||'이체결과를 불러오지 못했습니다'); return; }
   const outside=Array.isArray(r.unmatchedResults)?r.unmatchedResults:[];
-  if(!outside.length){ toast('이 대량이체에 미확인 이체가 없습니다.'); return; }
+  await _pmExtLoad(b.id, r.uploadId);   // 결정 317 — 리뷰웹 밖 작업으로 표시한 줄·최근 작업명
+  if(!outside.length && !(STATE.pmExtMarks||[]).length){ toast('이 대량이체에 미확인 이체가 없습니다.'); return; }
   STATE.pmResult={ batch:b, file:{name:r.fileName||'결과 파일'}, preview:r, persisted:true };
   const groups=Object.values(outside.reduce((acc,x)=>{
     const memo=String(x&&x.memo||'통장표시 없음').trim()||'통장표시 없음';
     (acc[memo]||(acc[memo]=[])).push(x); return acc;
   },{}));
   STATE.pmUnconfirmedGroups=groups.map(g=>({ memo:String(g[0]&&g[0].memo||'통장표시 없음').trim()||'통장표시 없음', items:g }));
-  _pmOpenUnconfirmedMatchList(0);
+  // 결정 317 — 미확인이 다 표시돼 남은 줄이 없어도 「표시한 줄」·되돌리기 창은 연다(Codex P2)
+  if(STATE.pmUnconfirmedGroups.length) _pmOpenUnconfirmedMatchList(0); else _pmOpenUnconfirmedMatch('', 0);
+}
+/* ── 결정 317(방식 B) — 「리뷰웹 밖 작업」 표시 ──
+   블로그·예약자리뷰처럼 리뷰웹에 없는 작업을 엑셀에 직접 넣어 같은 대량이체로 보낸 줄은 결과 파일에서 '미확인'으로 남는다.
+   담당자가 작업명을 붙여 표시하면 미확인에서 빠진다(입금 기록·작업보드는 건드리지 않는 분류 기록 · 되돌리기 가능). */
+async function _pmExtLoad(batchId, uploadId){
+  try{
+    const [m,n]=await Promise.all([
+      api('/api/trackb/payment/batch/'+batchId+'/external-work?uploadId='+encodeURIComponent(uploadId||'')),
+      api('/api/trackb/payment/external-work/names')]);
+    STATE.pmExtMarks=(m&&m.ok&&m.items)||[]; STATE.pmExtNames=(n&&n.ok&&n.names)||[];
+  }catch(_){ STATE.pmExtMarks=[]; STATE.pmExtNames=[]; }
+}
+function _pmExtPaint(){
+  const box=document.getElementById('pmExtMark'), el=document.getElementById('pmUnconfirmedOv'); if(!box||!el) return;
+  const group=(STATE.pmUnconfirmedGroups||[])[Number(el.dataset.groupIndex)];
+  const items=(group&&group.items)||[], marks=STATE.pmExtMarks||[];
+  const names=STATE.pmExtNames||[];
+  const pick=items.length?`<div class="pmext-hd"><b>「${esc(group.memo)}」 ${items.length}건 — 리뷰웹 밖 작업이면 작업명을 붙여 표시하세요</b><span>입금 기록은 만들지 않고 미확인에서만 뺍니다. 리뷰웹 작업 사람이 섞였으면 그 줄은 체크를 풀고 위에서 작업 대조하세요.</span></div>
+    <div class="pmext-rows">${items.map(x=>`<label class="pmext-row"><input type="checkbox" class="pmext-ck" value="${Number(x.seq)}" checked><span>${esc(x.holder||'—')}</span><span class="muted">${esc(_pmAccountNumber(x))}</span><span class="num">${_pmNum(x.amount)}원</span><span class="muted">${esc(x.transferredAt||'')}</span></label>`).join('')}</div>
+    <div class="pmext-act"><label for="pmExtName" class="muted">작업명</label><input id="pmExtName" class="inp" list="pmExtNameList" placeholder="예: 블로그) 한옥카페 소담 방문 체험" value=""><datalist id="pmExtNameList">${names.map(n=>`<option value="${esc(n)}"></option>`).join('')}</datalist><button class="btn sm primary" onclick="_pmExtMark()">리뷰웹 밖 작업으로 표시</button></div>`
+    :'<div class="pmnote">남은 미확인 줄이 없습니다.</div>';
+  const done=marks.length?`<details class="pmext-done"${items.length?'':' open'}><summary>이 결과 파일에서 리뷰웹 밖 작업으로 표시한 줄 ${marks.length}건</summary>${marks.map(m=>`<div class="pmext-row"><span>${esc(m.workName)}</span><span>${esc(m.holder||'—')}</span><span class="num">${_pmNum(m.amount)}원</span><span class="muted">${esc(m.markedBy||'')}</span><button class="btn xs" onclick="_pmExtUndo('${esc(m.id)}')">되돌리기</button></div>`).join('')}</details>`:'';
+  box.innerHTML=`<section class="pmext">${pick}${done}</section>`;
+}
+async function _pmExtMark(){
+  const R=STATE.pmResult, el=document.getElementById('pmUnconfirmedOv'); if(!R||!el) return;
+  const seqs=[...el.querySelectorAll('.pmext-ck:checked')].map(x=>Number(x.value));
+  const name=(document.getElementById('pmExtName')?.value||'').trim();
+  if(!seqs.length){ toast('표시할 줄을 고르세요.'); return; }
+  if(!name){ toast('작업명을 적어 주세요(구글시트의 작업명 그대로).'); document.getElementById('pmExtName')?.focus(); return; }
+  const r=await api('/api/trackb/payment/batch/'+R.batch.id+'/external-work',{method:'POST',body:JSON.stringify({uploadId:R.preview.uploadId,seqs,workName:name})});
+  if(!r||!r.ok){ toast((r&&r.error)||'표시하지 못했습니다.'); return; }
+  toast(`${r.marked}건을 「${name}」 리뷰웹 밖 작업으로 표시했습니다.`);
+  await _pmExtRefresh();
+}
+async function _pmExtUndo(id){
+  const r=await api('/api/trackb/payment/external-work/'+encodeURIComponent(id),{method:'DELETE'});
+  if(!r||!r.ok){ toast((r&&r.error)||'되돌리지 못했습니다.'); return; }
+  toast('표시를 되돌렸습니다 — 다시 미확인으로 보입니다.');
+  await _pmExtRefresh();
+}
+/* 표시·되돌리기 뒤 — 미확인 목록을 서버에서 다시 받아 창을 다시 그리고, 대량이체 목록 숫자도 새로 받는다. */
+async function _pmExtRefresh(){
+  const R=STATE.pmResult; if(!R) return;
+  const r=await api('/api/trackb/payment/batch/'+R.batch.id+'/result-preview');
+  if(r&&r.ok){
+    R.preview=r;
+    const outside=Array.isArray(r.unmatchedResults)?r.unmatchedResults:[];
+    STATE.pmUnconfirmedGroups=Object.values(outside.reduce((acc,x)=>{
+      const memo=String(x&&x.memo||'통장표시 없음').trim()||'통장표시 없음';
+      (acc[memo]||(acc[memo]=[])).push(x); return acc;
+    },{})).map(g=>({ memo:String(g[0]&&g[0].memo||'통장표시 없음').trim()||'통장표시 없음', items:g }));
+  }
+  await _pmExtLoad(R.batch.id, R.preview.uploadId);
+  const el=document.getElementById('pmUnconfirmedOv');
+  const keep=Math.min(Number(el?.dataset.groupIndex||0), Math.max(0,(STATE.pmUnconfirmedGroups||[]).length-1));
+  const g=(STATE.pmUnconfirmedGroups||[])[keep];
+  _pmOpenUnconfirmedMatch(g?g.memo:'', keep);
+  _pmLoad(true);
 }
 function _pmUnconfirmedGroupsClose(){ const el=document.getElementById('pmUnconfirmedGroupsOv'); if(el) el.remove(); }
 function _pmOpenBatchUnconfirmedGroup(i){ _pmOpenUnconfirmedMatchList(i); }
@@ -14666,6 +14761,7 @@ function _pmSelectUnconfirmedMemo(i){
   if(out) out.innerHTML='<div class="muted" style="padding:9px 10px">추천 작업을 불러오는 중…</div>';
   el.querySelector('.pm-unconfirmed-search')?.classList.remove('on');
   _pmRenderUnconfirmedDirect();
+  _pmExtPaint();
   _pmUnconfirmedSearch({ live:true });
 }
 
@@ -14695,9 +14791,10 @@ function _pmOpenUnconfirmedMatch(memo, selectedGroupIndex=0){
   _pmUnconfirmedClose();
   const el=document.createElement('div'); el.className='pmrov'; el.id='pmUnconfirmedOv'; el.dataset.memo=memo; el.dataset.groupIndex=String(selectedGroupIndex);
   const groups=STATE.pmUnconfirmedGroups||[];
-  el.innerHTML=`<div class="pmrbox pm-unconfirmed-box"><div class="pmrhd"><h3>미확인 이체 작업 대조</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmUnconfirmedClose()">닫기</button></div><div class="pmrbd"><div class="pmnote">미확인 이체 <b>${groups.reduce((n,g)=>n+(g.items||[]).length,0)}건</b> 중 통장표시 그룹 하나를 선택해 대조합니다. 그룹 안의 이체결과는 작업 1개를 선택하면 함께 조회되며, 추천은 자동 반영되지 않습니다.</div><div id="pmUnconfirmedTransferList" class="pm-unconfirmed-listbox" style="margin-top:12px">${groups.map((g,i)=>`<button class="pm-unconfirmed-transfer ${i===selectedGroupIndex?'on':''}" onclick="_pmSelectUnconfirmedMemo(${i})"><b>${esc(g.memo)}</b><span>${(g.items||[]).length}건 · ${_pmNum((g.items||[]).reduce((n,x)=>n+Number(x.amount||0),0))}원 · 작업 대조</span></button>`).join('')}</div><div class="pm-unconfirmed-search"><label for="pmUnconfirmedQuery" class="muted">선택한 이체 그룹의 작업 또는 모집공고 검색</label><input id="pmUnconfirmedQuery" class="inp" value="${esc(memo)}" placeholder="작업명·공고명·입금명으로 검색" oninput="_pmUnconfirmedLiveSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();_pmUnconfirmedSearch()}"><div id="pmUnconfirmedCandidates" class="pm-unconfirmed-candidates"></div></div></div></div>`;
+  el.innerHTML=`<div class="pmrbox pm-unconfirmed-box"><div class="pmrhd"><h3>미확인 이체 작업 대조</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmUnconfirmedClose()">닫기</button></div><div class="pmrbd"><div class="pmnote">미확인 이체 <b>${groups.reduce((n,g)=>n+(g.items||[]).length,0)}건</b> 중 통장표시 그룹 하나를 선택해 대조합니다. 그룹 안의 이체결과는 작업 1개를 선택하면 함께 조회되며, 추천은 자동 반영되지 않습니다. 블로그·예약자리뷰처럼 <b>리뷰웹에 없는 작업</b>을 같이 보낸 줄이면 아래 「리뷰웹 밖 작업으로 표시」를 누르세요.</div><div id="pmUnconfirmedTransferList" class="pm-unconfirmed-listbox" style="margin-top:12px">${groups.map((g,i)=>`<button class="pm-unconfirmed-transfer ${i===selectedGroupIndex?'on':''}" onclick="_pmSelectUnconfirmedMemo(${i})"><b>${esc(g.memo)}</b><span>${(g.items||[]).length}건 · ${_pmNum((g.items||[]).reduce((n,x)=>n+Number(x.amount||0),0))}원 · 작업 대조</span></button>`).join('')}</div><div id="pmExtMark"></div><div class="pm-unconfirmed-search"><label for="pmUnconfirmedQuery" class="muted">선택한 이체 그룹의 작업 또는 모집공고 검색</label><input id="pmUnconfirmedQuery" class="inp" value="${esc(memo)}" placeholder="작업명·공고명·입금명으로 검색" oninput="_pmUnconfirmedLiveSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();_pmUnconfirmedSearch()}"><div id="pmUnconfirmedCandidates" class="pm-unconfirmed-candidates"></div></div></div></div>`;
   document.body.appendChild(el);
   _pmRenderUnconfirmedDirect();
+  _pmExtPaint();
 }
 
 function _pmResultModal(){
@@ -15749,6 +15846,11 @@ function _tckCardHtml(c,i,where){
   const outs=f.outside||[];
   const lineOf=k=>(c.lines||[]).find(l=>l.key===k);
   const rows=[];
+  // 결정 317 — 케이뱅크 결과 파일 대기 · 하나은행 통장에 이름이 안 보이는 사람
+  const nf=lineOf('need_file');
+  if(nf) rows.push(`<div class="tck-line"><span class="tck-tx">${esc(nf.text)}</span>${where==='payment'?'':`<button class="btn sm" onclick="_tckGo(${i})">바로 가기</button>`}</div>`);
+  const nm=lineOf('name_missing');
+  if(nm) rows.push(`<div class="tck-line"><span class="tck-tx">${esc(nm.text)}</span></div>`);
   const sh=lineOf('short');
   if(sh) rows.push(`<div class="tck-line"><span class="tck-tx">① ${esc(sh.text)}</span>${where==='payment'
       ? `<button class="btn sm" onclick="_tckPick(${i})">뺀 사람 고르기</button>`
@@ -15766,7 +15868,7 @@ function _tckCardHtml(c,i,where){
   });
   return `<div class="tck-card"><div class="tck-ch"><b>${_tckTitle(f)}</b><span class="tck-sub">${_tckSub(f)}</span>${c.manager?`<span class="tck-sub">담당 ${esc(c.manager)}</span>`:''}
       ${c.textSource==='ai'?'<span class="tck-ai" title="문장은 AI가 정리했고, 숫자는 시스템이 계산한 값입니다">AI 정리</span>':''}<span class="sp"></span>
-      <button class="btn sm" onclick="_tckCopy(${i})">메시지 복사</button>${where==='home'&&!sh?`<button class="btn sm" onclick="_tckGo(${i})">바로 가기</button>`:''}</div>${rows.join('')}</div>`;
+      <button class="btn sm" onclick="_tckCopy(${i})">메시지 복사</button>${where==='home'&&!sh&&!nf?`<button class="btn sm" onclick="_tckGo(${i})">바로 가기</button>`:''}</div>${rows.join('')}</div>`;
 }
 function _tckSetMgr(k){
   const managers=[...new Set((STATE.tckItems||[]).map(c=>c.manager).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ko'));

@@ -64,11 +64,23 @@ function stubPool(batches) {
     const f = await RES.findBatchForResultFile({ fileName: 'r.xlsx', base64: kFile });
     assert.strictEqual(f.batchId, 'A'); assert.strictEqual(f.pending, K.rows.length + 2);
   });
-  await t('2 ★ 절반 넘게 맞는 대량이체가 없으면 거부(no_batch)', async () => {
+  await t('2 ★ 파일 줄의 절반도, 그 대량이체 대상의 절반도 못 넘으면 거부(no_batch)', async () => {
     const half = Math.floor(K.rows.length / 2);
-    RES.__setPoolForTest(stubPool([{ id: 'A', seq: 87, bank: 'kbank', items: itemsOf(K.rows.slice(0, half)) }]));
+    // 대상 = 파일과 맞는 5명 + 파일에 없는 6명(11명 중 5명만 맞음) → 파일 절반(5/10)도, 대상 절반(5/11)도 못 넘는다
+    const others = Array.from({ length: half + 1 }, (_, i) => ({ bank_account: '9999000011' + i, amount: 1234, item_status: 'pending' }));
+    RES.__setPoolForTest(stubPool([{ id: 'A', seq: 87, bank: 'kbank', items: [...itemsOf(K.rows.slice(0, half)), ...others] }]));
     await assert.rejects(RES.findBatchForResultFile({ fileName: 'r.xlsx', base64: kFile }), e => e.code === 'no_batch' && /#87/.test(e.message));
     RES.__setPoolForTest(stubPool([]));
+    await assert.rejects(RES.findBatchForResultFile({ fileName: 'r.xlsx', base64: kFile }), e => e.code === 'no_batch');
+  });
+  await t('2d ★ 결정 317(방식 B) — 리뷰웹 밖 줄이 파일의 절반을 넘어도 그 대량이체 대상의 절반 넘게 맞으면 찾는다', async () => {
+    // 대상 4명 전원이 파일에 있고 파일 나머지 6줄은 리뷰웹 밖(블로그·예약자리뷰) → 파일 기준 4/10 이지만 대상 기준 4/4
+    RES.__setPoolForTest(stubPool([{ id: 'A', seq: 89, bank: 'kbank', items: itemsOf(K.rows.slice(0, 4)) }]));
+    const f = await RES.findBatchForResultFile({ fileName: 'r.xlsx', base64: kFile });
+    assert.deepStrictEqual([f.batchId, f.matchedRows, f.fileRows], ['A', 4, K.rows.length]);
+  });
+  await t('2e 대상 기준은 2줄 이상 맞을 때만 — 1명짜리 대량이체가 우연히 1줄 맞은 것으로는 찾지 않는다', async () => {
+    RES.__setPoolForTest(stubPool([{ id: 'A', seq: 90, bank: 'kbank', items: itemsOf(K.rows.slice(0, 1)) }]));
     await assert.rejects(RES.findBatchForResultFile({ fileName: 'r.xlsx', base64: kFile }), e => e.code === 'no_batch');
   });
   await t('2b ★ 두 대량이체가 비슷하게 맞으면 거부(ambiguous) — 둘째가 첫째의 80% 이상', async () => {

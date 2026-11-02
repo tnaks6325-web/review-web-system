@@ -71,7 +71,13 @@ t('#view=payment 딥링크는 admin/master 만 · pick 은 대량이체 id 모�
 t('결과 파일 업로드 버튼은 숨김(스위치 false) · 기능은 남김 · 통장으로 못 정하는 대량이체(대조 없는 은행·모르는 금액)는 남김', () => {
   assert.match(workdesk, /const _PM_RESULT_UPLOAD_ON=false;/);
   const act = sourceOf('_pmBatchActions');
-  assert.match(act, /const uploadNeeded = !_pmReconciledBanks\(\)\.includes\(b\.bank\) \|\| !!\(bkU && \(bkU\.amounts\|\|\[\]\)\.some\(a=>a\.failures==null\)\);/);
+  // 결정 317 — 종전 두 조건 그대로 + 결과 파일로만 끝내는 은행(케이뱅크)의 처리 안 된 대량이체(의미 강화)
+  assert.match(act, /const uploadNeeded = !_pmReconciledBanks\(\)\.includes\(b\.bank\) \|\| !!\(bkU && \(bkU\.amounts\|\|\[\]\)\.some\(a=>a\.failures==null\)\)\n\s*\|\| \(_pmFileOnlyBank\(b\.bank\) && Number\(b\.pendingCount\|\|0\)>0\);/);
+  const fo = new vm.Script(sourceOf('_pmFileOnlyBank') + '; [_pmFileOnlyBank("kbank"), _pmFileOnlyBank("hana")]');
+  const foRun = pmBank => JSON.parse(JSON.stringify(fo.runInNewContext({ STATE: { pmBank } })));   // vm 영역 배열 → 이 영역 값으로
+  assert.deepStrictEqual(foRun({ banks: [{ bank: 'kbank', confirmBy: 'file' }, { bank: 'hana', confirmBy: 'name' }] }), [true, false]);
+  assert.deepStrictEqual(foRun({ banks: [{ bank: 'kbank' }] }), [false, false], '옛 서버(confirmBy 없음) = 종전 동작');
+  assert.deepStrictEqual(foRun({ error: 'x' }), [false, false]);
   // 결정 303 · Codex P1 — 대조 은행은 서버가 알려 준 목록(banks[]) · 옛 서버/못 받음/실패 = 케이뱅크만(하나는 업로드 유지)
   const rb = new vm.Script(sourceOf('_pmReconciledBanks') + '; _pmReconciledBanks()');
   const run = pmBank => rb.runInNewContext({ STATE: { pmBank } });
