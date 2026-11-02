@@ -77,8 +77,9 @@ ok('모르는 채널·빈 값은 null(대조 생략)',
 /* ═══ ③ 상품명 대조 ═════════════════════════════════════════════ */
 console.log('\n▶ 상품명 대조');
 ok('정확히 같으면 통과', RI.matchProductName('히말라야 핑크솔트 400g', ['히말라야 핑크솔트 400g']).verdict === 'pass');
-ok('★ 부분 포함도 일치 — 쇼핑몰은 상품명을 줄여 쓴다',
-  RI.matchProductName('히말라야 핑크솔트', ['히말라야 핑크솔트 400g 대용량']).verdict === 'pass');
+ok('★ 잘린 용량은 일치 증거가 아니다 — 제출은 허용하고 미확인으로 남긴다',
+  (() => { const c = RI.matchProductName('히말라야 핑크솔트', ['히말라야 핑크솔트 400g 대용량']);
+    return c.verdict !== 'pass' && c.evidence === 'unknown' && c.comparison.kind === 'insufficient'; })());
 ok('공백·괄호·특수문자 차이는 무시',
   RI.matchProductName('[NEW] 블랑카우 모이스처 리페어', ['블랑카우 모이스처리페어']).verdict === 'pass');
 ok('다른 상품이면 경고(차단 아님)',
