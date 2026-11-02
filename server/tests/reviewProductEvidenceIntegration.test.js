@@ -35,6 +35,55 @@ async function run() {
   assert.strictEqual(conflict.comparison.kind, 'conflict');
   assert.strictEqual(conflict.comparison.version, 'review-product-evidence-v2');
   const { service, input } = require('./reviewInspectionFailureSafety.test');
+  async function inspectModelSegments(expected, observed, kind) {
+    const general = api.matchProductName(observed, [expected]);
+    const strict = api.classifyProductNameForAuto(observed, [expected]);
+    const inspected = service({ criteria: { inspect_product_names: expected },
+      classify: async () => ({ kind: 'review', confidence: 0.99, channel: 'coupang',
+        productName: observed,
+        reviewText: '실제 고객 자료가 아닌 충분히 긴 가상 리뷰 본문으로 모델 숫자 경계와 저장 결과를 검사합니다.',
+      }) });
+    const submitted = await inspected.api.inspectSubmission(input);
+    const actual = {
+      generalPass: general.verdict === 'pass', kind: general.comparison.kind, eligible: strict.eligible,
+      calculatedPass: submitted.status === 'pass', persisted: submitted.persisted,
+      submittedKind: submitted.checks.product.comparison.kind, savedCount: inspected.saved.length,
+      savedPass: inspected.saved[0]?.status === 'pass',
+      savedKind: inspected.saved[0]?.checks.product.comparison.kind,
+      expectedModels: general.comparison.axes.expected.dimensions.model,
+      observedModels: general.comparison.axes.observed.dimensions.model,
+    };
+    console.log('MODEL_SEGMENTS', JSON.stringify({ expected, observed, actual }));
+    const pass = kind === 'match';
+    assert.deepStrictEqual({ ...actual, expectedModels: undefined, observedModels: undefined }, {
+      generalPass: pass, kind, eligible: pass, calculatedPass: pass, persisted: true,
+      submittedKind: kind, savedCount: 1, savedPass: pass, savedKind: kind,
+      expectedModels: undefined, observedModels: undefined,
+    });
+    assert.deepStrictEqual(inspected.saved[0].checks.product.comparison,
+      JSON.parse(JSON.stringify(submitted.checks.product.comparison)), 'model comparison survives storage');
+  }
+  await inspectModelSegments('가상브랜드 기계 AB100-2', '가상브랜드 기계 AB10-02', 'conflict');
+  for (const [left, right] of [
+    ['AB100-2ML', 'AB10-02ML'], ['AB100A100-2', 'AB100A10-02'],
+    ['AB100-2A', 'AB1002A'], ['AB-CD-100-2', 'ABCD10-02'],
+    ['AB100-02', 'AB100-2'], ['AB100-2-03', 'AB100-20-3'],
+    ['AB100-2A10-02', 'AB100-2A100-2'], ['AB100-2x2', 'AB10-02x2'],
+  ]) {
+    await inspectModelSegments('가상기계 ' + left, '가상기계 ' + right, 'conflict');
+    await inspectModelSegments('가상기계 ' + right, '가상기계 ' + left, 'conflict');
+  }
+  for (const [left, right] of [
+    ['AB100', 'AB-100'],
+    ['AB100-2', 'AB-100-2'], ['AB100-A', 'AB-100A'],
+    ['AB100-2-A', 'AB-100-2A'], ['AB-CD-100-2ML', 'ABCD100-2ML'],
+    ['AB100A10-02', 'AB-100-A10-02'], ['AB100-2-03', 'AB-100-2-03'],
+    ['ＡＢ１００－２', 'ab100-2'], ['AB100-2x2', 'AB-100-2X2'],
+    ['AB100-2 0.5L2개', 'AB-100-2 2개500ml'], ['AB100ML', 'AB-100ML'],
+  ]) {
+    await inspectModelSegments('가상기계 ' + left, '가상기계 ' + right, 'match');
+    await inspectModelSegments('가상기계 ' + right, '가상기계 ' + left, 'match');
+  }
   async function inspectRawWorkOrder(products, { observed = '가상 로션', manual = '', text } = {}) {
     const raw = typeof products === 'string' ? products : JSON.stringify(products);
     const summary = text === undefined
@@ -141,6 +190,26 @@ async function run() {
     if (options.manual) assert.strictEqual(criteria.productSource, 'manual');
   }
   console.log('RAW_CRITERIA_COUNTS', JSON.stringify({ unknown: rawUnknownCount, positive: positiveCases.length }));
+  for (const [model, label, complete] of [
+    ['AB100-2', 'AB10-02', false], ['AB10-02', 'AB100-2', false],
+    ['AB100-2ML', 'AB10-02ML', false], ['AB100-2', 'AB1002', false],
+    ['AB100-2', 'AB100-2', true], ['AB100-2', 'AB-100-2', true],
+    ['AB100-2-A', 'AB100-2A', true], ['AB100ML', 'AB-100ML', true],
+  ]) {
+    const observed = '가상기계 ' + model;
+    const result = await inspectRawWorkOrder([{ name: observed, options: [{ label }] }], { observed });
+    if (!complete) assertUnknownRaw(result, 'structured model partition must not disappear: ' + label);
+    else {
+      assert.strictEqual(result.criteria.productCriteriaIncomplete, false, label);
+      assert.strictEqual(result.general.verdict, 'pass', label);
+      assert.strictEqual(result.strict.eligible, true, label);
+      assert.strictEqual(result.submitted.status, 'pass', label);
+      assert.strictEqual(result.submitted.persisted, true, label);
+      assert.strictEqual(result.saved.length, 1, label);
+      assert.strictEqual(result.saved[0].status, 'pass', label);
+    }
+    console.log('MODEL_OPTION', JSON.stringify({ model, label, complete }));
+  }
   // One ownership slice spans comparison, automatic eligibility and actual
   // inspectSubmission -> INSERT/RETURNING. Collect every case before failing
   // so RED demonstrates the persisted failure as well as the pure verdict.

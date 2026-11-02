@@ -35,7 +35,9 @@ function parse(value) {
   text = text.replace(/(?<![a-z0-9.])([a-z]+(?:-[a-z]+)*)-?(\d+(?:\.\d+)?)([a-z0-9]*(?:-[a-z0-9]+)*)(?![a-z0-9.])/g,
     (_, family, number, suffix) => {
       const f = family.replace(/-/g, '');
-      add('model', `${f}${number}${suffix.replace(/-/g, '')}`);
+      // Letter/number hyphens are cosmetic (AB-100-A); digit/digit
+      // boundaries identify model segments (AB100-2 must not become AB10-02).
+      add('model', `${f}${number}${suffix}`.replace(/(?<!\d)-|-(?!\d)/g, ''));
       families.push(f);
       if (number.includes('.')) ambiguousModel = true;
       return ' § ';

@@ -22,6 +22,47 @@ if (process.env.EVIDENCE_BASELINE === '1') {
   check('concentration contradiction', '세럼 5%', ['세럼 10%'], 'conflict');
   check('year contradiction', '에어컨 28년형', ['에어컨 26년형'], 'conflict');
   check('model numeric contradiction', '휴대폰 S25', ['휴대폰 S24'], 'conflict');
+  check('numeric model segment boundary cannot collapse', '가상브랜드 기계 AB10-02', ['가상브랜드 기계 AB100-2'], 'conflict');
+  // Enumerate every partition of fixed digit strings. Different partitions
+  // share their compact spelling but must never share model evidence.
+  for (const digits of ['1002', '0123', '12003']) {
+    const models = Array.from({ length: 2 ** (digits.length - 1) }, (_, mask) =>
+      [...digits].map((digit, index) => digit + (index < digits.length - 1 && (mask & (1 << index)) ? '-' : '')).join(''));
+    for (const expected of models) for (const observed of models) {
+      check(`model partition ${expected} / ${observed}`, `가상기계 AB${observed}`, [`가상기계 AB-${expected}`],
+        expected === observed ? 'match' : 'conflict');
+    }
+  }
+  for (const [left, right] of [
+    ['AB100-2ML', 'AB10-02ML'], ['AB100A100-2', 'AB100A10-02'],
+    ['AB100-2A', 'AB1002A'], ['AB-CD-100-2', 'ABCD10-02'],
+    ['AB100-02', 'AB100-2'], ['AB100-2-03', 'AB100-20-3'],
+    ['AB100-2A10-02', 'AB100-2A100-2'], ['AB100-2x2', 'AB10-02x2'],
+  ]) {
+    check(`whole model boundary ${left} / ${right}`, `가상기계 ${left}`, [`가상기계 ${right}`], 'conflict');
+    check(`whole model boundary reverse ${right} / ${left}`, `가상기계 ${right}`, [`가상기계 ${left}`], 'conflict');
+  }
+  for (const [left, right] of [
+    ['AB100', 'AB-100'],
+    ['AB100-2', 'AB-100-2'], ['AB100-A', 'AB-100A'],
+    ['AB100-2-A', 'AB-100-2A'], ['AB-CD-100-2ML', 'ABCD100-2ML'],
+    ['AB100A10-02', 'AB-100-A10-02'], ['AB100-2-03', 'AB-100-2-03'],
+    ['ＡＢ１００－２', 'ab100-2'], ['AB100-2x2', 'AB-100-2X2'],
+    ['AB100-2 0.5L2개', 'AB-100-2 2개500ml'], ['AB100ML', 'AB-100ML'],
+  ]) {
+    check(`segmented model positive ${left} / ${right}`, `가상기계 ${left}`, [`가상기계 ${right}`], 'match');
+    check(`segmented model positive reverse ${right} / ${left}`, `가상기계 ${right}`, [`가상기계 ${left}`], 'match');
+  }
+  cases.push({ name: 'model semantic signatures retain numeric partitions', run() {
+    const a = compare('가상기계 AB100-2', ['가상기계 AB100-2']);
+    const b = compare('가상기계 AB-100-2', ['가상기계 AB100-2']);
+    const c = compare('가상기계 AB10-02', ['가상기계 AB100-2']);
+    assert.deepEqual(a.axes.observed.dimensions.model, ['ab100-2']);
+    assert.deepEqual(c.axes.observed.dimensions.model, ['ab10-02']);
+    assert.equal(a.semanticSignature, b.semanticSignature);
+    assert.notEqual(a.semanticSignature, c.semanticSignature);
+    assert.notEqual(a.signature, b.signature, 'raw source changes remain visible');
+  }});
   check('model suffix contradiction', '기계 AB-100B', ['기계 AB-100A'], 'conflict');
   check('missing capacity expected', '크림', ['크림 500ml'], 'insufficient');
   check('missing capacity canonical', '크림 500ml', ['크림'], 'insufficient');
