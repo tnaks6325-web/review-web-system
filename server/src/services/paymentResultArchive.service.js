@@ -179,8 +179,12 @@ async function status() {
     `SELECT
        (SELECT COUNT(DISTINCT u.file_sha256)::int FROM payment_result_uploads u
          WHERE u.file_blob IS NOT NULL AND u.file_sha256 IS NOT NULL) AS files,
-       COUNT(*) FILTER (WHERE a.status = 'done' AND a.upload_id IS NOT NULL)::int AS done,
-       COUNT(*) FILTER (WHERE a.status = 'done' AND a.upload_id IS NULL)::int AS legacy,
+       -- 보관 = 리뷰웹 결과 파일(내용) 중 보관 장부에 done 이 있는 것 — 들여오기로 먼저 올린 파일을 나중에 리뷰웹에 놓아도 보관으로 센다(Codex P2)
+       (SELECT COUNT(DISTINCT u.file_sha256)::int FROM payment_result_uploads u
+          JOIN payment_result_drive_archive d ON d.file_sha256 = u.file_sha256 AND d.status = 'done'
+         WHERE u.file_blob IS NOT NULL AND u.file_sha256 IS NOT NULL) AS done,
+       COUNT(*) FILTER (WHERE a.status = 'done' AND NOT EXISTS (
+         SELECT 1 FROM payment_result_uploads u2 WHERE u2.file_sha256 = a.file_sha256))::int AS legacy,
        COUNT(*) FILTER (WHERE a.status = 'blocked')::int AS blocked,
        COUNT(*) FILTER (WHERE a.status = 'failed' AND a.attempts >= $1)::int AS gave_up,
        (SELECT root_folder_id FROM payment_result_drive_archive
@@ -239,7 +243,10 @@ async function importLegacyFile({ fileName, base64 } = {}) {
   const client = await _db().connect();
   try {
     await client.query('BEGIN');
-    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['result-archive:' + sha]);
+    // ★ cron 보관(withJobLock 'payment_result_drive_archive')과 같은 열쇠를 기다려 잡는다 — 들여오기끼리·cron 과
+    //   동시에 같은 연도/월 폴더를 두 번 만들지 않게(ensureFolderPath 는 찾고 없으면 만든다 · Codex P2). cron 은 이 동안 양보한다.
+    const [k1, k2] = require('../utils/jobLock')._lockKeys('payment_result_drive_archive');
+    await client.query('SELECT pg_advisory_xact_lock($1, $2)', [k1, k2]);
     const { rows: [had] } = await client.query(
       `SELECT status, drive_name FROM payment_result_drive_archive WHERE file_sha256 = $1`, [sha]);
     if (had && had.status === 'done') { await client.query('ROLLBACK'); return { ok: true, result: 'duplicate', name: had.drive_name }; }

@@ -230,7 +230,11 @@ const C = (id, sha, at, seq, fileName = 'kbank_result.xlsx') => ({ id, sha, file
     assert.strictEqual(dv.ups[0].name, '20260824_케이뱅크_상세보기_이체완료,일부오류_20260902.xls');
     assert.strictEqual(dv.ups[0].opts.shareAnyone, false);
     assert.ok(pool.log.insert && pool.log.insert[1] === 'D1' && /^[0-9a-f]{64}$/.test(pool.log.insert[0]));
-    assert.ok(pool.log.includes('SELECT pg_advisory_xact_lock(hashtext($1))') && pool.log.includes('COMMIT'));
+    assert.ok(pool.log.includes('SELECT pg_advisory_xact_lock($1, $2)') && pool.log.includes('COMMIT'));
+    // Codex P2 — cron 과 같은 잠금 열쇠(폴더 두 번 만들기 방지)
+    const src = fs.readFileSync(path.join(__dirname, '../src/services/paymentResultArchive.service.js'), 'utf8');
+    assert.ok(/_lockKeys\('payment_result_drive_archive'\)[\s\S]{0,80}pg_advisory_xact_lock\(\$1, \$2\)/.test(src));
+    assert.ok(/JOIN payment_result_drive_archive d ON d\.file_sha256 = u\.file_sha256 AND d\.status = 'done'/.test(src), '보관 수 = 리뷰웹 파일 중 done(들여오기 먼저여도)');
   });
 
   await t('6c 같은 내용은 한 번만 · 리뷰웹에 있는 파일은 건너뜀(cron 몫) · 결과 파일 아님 거부 · 공개 폴더면 안 올림', async () => {
