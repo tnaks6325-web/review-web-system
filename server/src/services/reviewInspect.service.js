@@ -526,11 +526,12 @@ function _cleanProductForMatch(s) {
     .trim();
 }
 
-/* ── 상품명 OCR 안전 자동처리(v1) ────────────────────────────────────
+/* ── 상품명 OCR 안전 자동처리(v2) ────────────────────────────────────
  * 사람이 한 번도 보지 않은 단독 OCR 군집은 반복 증거가 없다. 따라서 자동 통과는
  * 긴 문장의 한두 글자 OCR 오인식·끝 잘림처럼 **거의 동일한 경우**만 허용한다.
  * 용량·수량·연식이 서로 다르면 문장 전체가 닮아도 절대 자동 통과시키지 않는다. */
-const PRODUCT_AUTO_TRIAGE_VERSION = 'product-auto-v1';
+const { compareReviewProduct, PRODUCT_EVIDENCE_VERSION } = require('../utils/reviewProductEvidence');
+const PRODUCT_AUTO_TRIAGE_VERSION = 'product-auto-v2';
 const PRODUCT_AUTO_DICE_THRESHOLD = 0.96;
 
 function _autoNormProduct(s) {
@@ -551,99 +552,37 @@ function _realProductCandidates(expectedList) {
     .filter(s => s && !_isProductStructureLine(s) && _autoNormProduct(s));
 }
 
-function _bigramDice(a, b) {
-  if (a === b) return a ? 1 : 0;
-  if (a.length < 2 || b.length < 2) return 0;
-  const pairs = new Map();
-  for (let i = 0; i < a.length - 1; i++) {
-    const p = a.slice(i, i + 2);
-    pairs.set(p, (pairs.get(p) || 0) + 1);
-  }
-  let overlap = 0;
-  for (let i = 0; i < b.length - 1; i++) {
-    const p = b.slice(i, i + 2);
-    const left = pairs.get(p) || 0;
-    if (left > 0) { overlap++; pairs.set(p, left - 1); }
-  }
-  return (2 * overlap) / ((a.length - 1) + (b.length - 1));
-}
 
-function _quantityMap(s) {
-  const out = new Map();
-  const text = _cleanProductForMatch(s).normalize('NFKC').toLowerCase();
-  const re = /(\d+(?:\.\d+)?)\s*(년형|세대|mah|kg|mg|ml|cm|mm|g|l|정|포|개|박스|매|캡슐|입|종|세트|인치|%)/gi;
-  let m;
-  while ((m = re.exec(text))) {
-    const unit = m[2].toLowerCase();
-    if (!out.has(unit)) out.set(unit, new Set());
-    out.get(unit).add(m[1]);
-  }
-  return out;
-}
-
-function _quantityConflicts(expected, observed) {
-  const a = _quantityMap(expected), b = _quantityMap(observed), conflicts = [];
-  for (const [unit, values] of a.entries()) {
-    const other = b.get(unit);
-    if (!other || [...values].some(v => other.has(v))) continue;
-    conflicts.push({ unit, expected: [...values], observed: [...other] });
-  }
-  // 단위가 없는 연도·모델·옵션 숫자도 상품 식별자다. 한쪽 누락까지 포함해 순서가
-  // 조금이라도 다르면 자동 통과하지 않는다(예: 2025 ↔ 2026, S24 ↔ S25).
-  const numberSeq = s => _cleanProductForMatch(s).normalize('NFKC').match(/\d+(?:\.\d+)?/g) || [];
-  const expectedNumbers = numberSeq(expected), observedNumbers = numberSeq(observed);
-  if (JSON.stringify(expectedNumbers) !== JSON.stringify(observedNumbers)) {
-    conflicts.push({ unit: 'number_sequence', expected: expectedNumbers, observed: observedNumbers });
-  }
-  return conflicts;
-}
-
-function _autoSnapshotToken(clusterKeys) {
+function _autoSnapshotToken(clusterKeys, clusters, { sheetId, tabName, tabs } = {}) {
   const keys = [...new Set((Array.isArray(clusterKeys) ? clusterKeys : []).map(String).filter(Boolean))].sort();
+  const groups = new Map((clusters || []).map(g => [g.clusterKey, g.evidenceToken]));
+  const scope = [String(sheetId || ''), String(tabName || ''), Array.isArray(tabs)
+    ? [...new Set(tabs.map(t => JSON.stringify([String(t?.sheetId || ''), String(t?.tabName || '')])))].sort() : null];
   return crypto.createHash('sha256')
-    .update([PRODUCT_AUTO_TRIAGE_VERSION, ...keys].join('\u0000'))
+    .update(JSON.stringify([PRODUCT_AUTO_TRIAGE_VERSION, scope, keys.map(k => [k, groups.get(k) || 'missing'])]))
     .digest('hex').slice(0, 32);
 }
 
-function classifyProductNameForAuto(ocr, expectedList) {
-  const candidates = _realProductCandidates(expectedList);
-  const observedNorm = _autoNormProduct(ocr);
-  if (!candidates.length) {
-    return { eligible: false, reason: 'no_expected', score: 0, lengthRatio: 0,
-      bestExpected: '', conflicts: [], version: PRODUCT_AUTO_TRIAGE_VERSION };
-  }
-  if (!observedNorm) {
-    return { eligible: false, reason: 'no_ocr', score: 0, lengthRatio: 0,
-      bestExpected: '', conflicts: [], version: PRODUCT_AUTO_TRIAGE_VERSION };
-  }
-  let bestExpected = '', score = -1;
-  for (const expected of candidates) {
-    const s = _bigramDice(observedNorm, _autoNormProduct(expected));
-    if (s > score) { score = s; bestExpected = expected; }
-  }
-  const expectedNorm = _autoNormProduct(bestExpected);
-  const minLength = Math.min(observedNorm.length, expectedNorm.length);
-  const maxLength = Math.max(observedNorm.length, expectedNorm.length);
-  const lengthRatio = maxLength ? minLength / maxLength : 0;
-  const conflicts = _quantityConflicts(bestExpected, ocr);
-  let reason = 'low_similarity';
-  if (conflicts.length) reason = 'numeric_conflict';
-  else if (minLength < 12) reason = 'too_short';
-  else if (lengthRatio < 0.75) reason = 'length_gap';
-  else if (score >= PRODUCT_AUTO_DICE_THRESHOLD) reason = 'high_confidence_ocr';
-  else if (score >= 0.85) reason = 'borderline_similarity';
+function classifyProductNameForAuto(ocr, expectedList, { criteriaIncomplete = false } = {}) {
+  return _autoComparisonResult(compareReviewProduct(ocr, _realProductCandidates(expectedList), { criteriaIncomplete }));
+}
+
+function _autoComparisonResult(comparison) {
   return {
-    eligible: reason === 'high_confidence_ocr', reason,
-    score: Math.round(score * 10000) / 10000,
-    lengthRatio: Math.round(lengthRatio * 10000) / 10000,
-    bestExpected, conflicts, version: PRODUCT_AUTO_TRIAGE_VERSION,
+    eligible: comparison.kind === 'match',
+    reason: comparison.kind === 'match' ? 'high_confidence_ocr' : comparison.reason,
+    score: Math.round((comparison.score || 0) * 10000) / 10000,
+    lengthRatio: Math.round((comparison.lengthRatio || 0) * 10000) / 10000,
+    bestExpected: comparison.candidate || '',
+    conflicts: comparison.kind === 'conflict' ? [comparison.axes] : [],
+    version: PRODUCT_AUTO_TRIAGE_VERSION, comparison,
   };
 }
 
 /**
  * 캡처 속 상품명 ↔ 기대 상품명 대조.
- * ★ 쇼핑몰 화면은 상품명을 줄여 쓰거나 말줄임(…)하므로 **부분 포함도 일치로 인정**한다.
- *   기대값이 없으면 'skip'(대조 안 함) — 판정 불가를 불량으로 취급하지 않는다.
+ * General and automatic paths share semantic evidence. Truncation is not proof
+ * of a missing option; incomplete evidence remains unknown, never submission-blocking.
  * @returns {{verdict:'pass'|'warn'|'skip', expected:string[], ocr:string}}
  */
 /** 정규화 기준 중복 없이 병합 — 별칭 가산용(원본 표기는 보존). */
@@ -659,25 +598,20 @@ function _mergeProductNames(base, extra) {
   return out;
 }
 
-function matchProductName(ocr, expectedList) {
+function matchProductName(ocr, expectedList, { primaryExpected = expectedList, aliases = [],
+  canonicalSource = 'provided', criteriaIncomplete = false } = {}) {
   const list = (Array.isArray(expectedList) ? expectedList : [])
     .map(s => String(s || '').trim()).filter(Boolean);
-  const comparable = _realProductCandidates(list);
-  // ★ 말줄임·번호·URL 을 벗긴 뒤 대조한다(_cleanProductForMatch) — 벗기지 않으면
-  //   "이노크아든 …다회용…" vs "1. 이노크아든 …교체형 (https:" 처럼 같은 상품이 다름으로 나온다.
-  const o = _normProduct(_cleanProductForMatch(ocr));
-  if (!comparable.length) return { verdict: 'skip', reason: 'no_expected', evidence: 'unknown', expected: list, ocr: String(ocr || '') };
-  if (!o) return { verdict: 'skip', reason: 'no_ocr', evidence: 'unknown', expected: list, ocr: '' };
-  for (const e of comparable) {
-    const n = _normProduct(_cleanProductForMatch(e));
-    if (!n) continue;
-    if (o.includes(n) || n.includes(o)) return { verdict: 'pass', expected: list, ocr: String(ocr) };
-    // 말줄임 대비: 앞 6글자가 겹치면 같은 상품으로 본다(오탐보다 미탐을 택함)
-    if (n.length >= 6 && o.length >= 6 && n.slice(0, 6) === o.slice(0, 6)) {
-      return { verdict: 'pass', expected: list, ocr: String(ocr) };
-    }
-  }
-  return { verdict: 'warn', expected: list, ocr: String(ocr) };
+  const primary = _realProductCandidates(primaryExpected);
+  const comparison = compareReviewProduct(ocr, primary, { aliases, criteriaIncomplete });
+  const warning = comparison.kind === 'conflict' || comparison.reason === 'identity_mismatch';
+  return {
+    verdict: comparison.kind === 'match' ? 'pass' : warning ? 'warn' : 'skip',
+    reason: comparison.reason,
+    ...(comparison.kind === 'insufficient' ? { evidence: 'unknown' } : {}),
+    expected: list, ocr: String(ocr || ''), primaryExpected: primary, canonicalSource,
+    criteriaIncomplete: !!criteriaIncomplete, comparison,
+  };
 }
 
 /* ── 상품명 군집 학습(148) ──────────────────────────────────────────
@@ -724,6 +658,11 @@ function applyProductRule(check, rules, { sheetId, tabName } = {}) {
   if (!key) return { check: base, clusterKey: '' };
   const rule = _parseProductRules(rules).find(r => r.clusterKey === key && (r.verdict === 'pass' || r.verdict === 'fail'));
   if (!rule) return { check: base, clusterKey: key };
+  // Historical exact keys can lose decimals/options. A learned pass is never
+  // positive proof against fresh contradictory or incomplete product evidence.
+  if (rule.verdict === 'pass' && base.comparison && base.comparison.kind !== 'match') {
+    return { check: base, clusterKey: key };
+  }
   return {
     clusterKey: key,
     check: {
@@ -809,6 +748,71 @@ function productNamesFromWorkOrder(wo) {
  * 이 탭에 연결된 작업오더 1건. Track B 링크 우선 → work_orders.linked_tab_* 폴백.
  * ★ work_orders 는 **읽기만** 한다(Track A 승인 흐름이 linked_tab_* 를 보고 분기하므로).
  */
+function _workOrderProductCriteriaIncomplete(wo) {
+  if (!wo) return false;
+  // Option inclusion must preserve decimals, model tokens and unit roles.
+  // Only the shared evidence engine interprets numbers; unresolved axes stay unknown.
+  const includesEvidence = (name, label) => {
+    const comparison = compareReviewProduct(label, [name]);
+    const { expected, observed } = comparison.axes;
+    // An explicit unreadable/heading option is missing evidence. Unit-only
+    // labels still have meaningful dimensions even with an empty body.
+    if (comparison.reason === 'no_ocr' || (!observed.body && !Object.keys(observed.dimensions).length)) return false;
+    if (expected.ambiguous || observed.ambiguous) return false;
+    if (observed.body && observed.body !== expected.body && !String(name).split(/\s+/).some(word =>
+      compareReviewProduct(word, [word]).axes.observed.body === observed.body)) return false;
+    return Object.entries(observed.dimensions).every(([role, values]) => {
+      const remaining = [...(expected.dimensions[role] || [])];
+      return values.every(value => {
+        const index = remaining.indexOf(value);
+        if (index < 0) return false;
+        remaining.splice(index, 1);
+        return true;
+      });
+    });
+  };
+  let structuredNames = [];
+  try {
+    const parsed = JSON.parse(wo.product_options_json || '[]');
+    if (!Array.isArray(parsed)) return true;
+    // Validate every raw entry before name extraction or the summary metadata
+    // exemption: filtering first can silently erase an unnamed row's options.
+    for (const p of parsed) {
+      if (!p || typeof p !== 'object' || Array.isArray(p)) return true;
+      if (p.options != null && !Array.isArray(p.options)) return true;
+      const options = Array.isArray(p.options) ? p.options : [];
+      if (options.some(o => !o || typeof o !== 'object' || Array.isArray(o)
+        || typeof o.label !== 'string' || !o.label.trim())) return true;
+      if (typeof p.name !== 'string' || !_realProductCandidates([p.name]).length) return true;
+      const labels = options
+        .map(o => o.label.trim()).filter(s => s && !_isNonProduct(s));
+      if (labels.length > 1 || labels.some(label => !includesEvidence(p.name, label))) return true;
+      structuredNames.push(p.name);
+    }
+    if (structuredNames.length > 1) return true; // No per-row product selection is available here.
+  } catch (_) { return true; }
+  const names = structuredNames.length ? structuredNames : _realProductCandidates(productNamesFromWorkOrder(wo));
+  if (names.length > 1) return true;
+  // This module owns the summary grammar. Its head/count/cost lines are not
+  // product options; only an exactly reproduced summary certifies that fact.
+  const generated = require('../utils/orderProductSummary').productSummaryText(wo.product_options_json);
+  if (generated == null && structuredNames.length) return true;
+  if (generated != null && generated === String(wo.product_option || '')) return false;
+  return String(wo.product_option || '').split(/[\n\r]+/).some(line => {
+    const parts = line.split(/\s*[-–/|]\s*/);
+    const head = _stripPriceTail(parts[0]);
+    if (head && !_isNonProduct(head)) {
+      const comparison = compareReviewProduct(head, names);
+      // Fuzzy OCR tolerance cannot certify lossless work-order evidence.
+      if (comparison.kind !== 'match' || comparison.axes.expected.body !== comparison.axes.observed.body) return true;
+    }
+    return parts.slice(1).some(part => {
+      const label = _stripPriceTail(part);
+      return label && !_isNonProduct(label) && !names.some(name => includesEvidence(name, label));
+    });
+  });
+}
+
 async function _workOrderForTab({ sheetId, tabName, strict = false } = {}) {
   try {
     // ★★ 우선순위(ORDER BY link_rank)는 utils/workOrderLink 가 소유한다 — 준비 행 판정(블로그 총원)도
@@ -827,7 +831,8 @@ async function _workOrderForTab({ sheetId, tabName, strict = false } = {}) {
 
 /** 탭 설정에서 기대 채널·기대 상품명·리뷰타입을 읽는다. 실패는 빈 값(대조 생략). */
 async function loadTabExpectations({ sheetId, tabName } = {}) {
-  const out = { expectedChannel: null, productNames: [], productRules: [], reviewType: null, workKind: null };
+  const out = { expectedChannel: null, productNames: [], primaryProductNames: [], productAliases: [], productCriteriaIncomplete: false,
+    productRules: [], reviewType: null, workKind: null };
   if (!sheetId || !tabName) return out;
   try {
     // ★ LATERAL 최신 1행 — 서브쿼리를 둘로 나누면 채널과 커스텀값이 서로 **다른 공고**에서
@@ -875,10 +880,12 @@ async function loadTabExpectations({ sheetId, tabName } = {}) {
     //   manual/work_order 우선순위 규칙(manual 있으면 파생 안 봄)을 절대 바꾸지 않는다.
     const aliases = String(r.inspect_product_aliases || '')
       .split(/[\n\r]+/).map(s => s.trim()).filter(Boolean);
+    out.productAliases = aliases;
     out.productNames = String(r.inspect_product_names || '')
       .split(/[\n\r]+/).map(s => s.trim()).filter(Boolean);
     if (out.productNames.length) {
       out.productSource = 'manual';
+      out.primaryProductNames = [...out.productNames];
       out.productNames = _mergeProductNames(out.productNames, aliases);
       return out;
     }
@@ -886,6 +893,9 @@ async function loadTabExpectations({ sheetId, tabName } = {}) {
     // 직접 적어둔 값이 없으면 연결된 작업오더에서 파생한다
     const wo = await _workOrderForTab({ sheetId, tabName, strict: true });
     const derived = productNamesFromWorkOrder(wo);
+    const structured = productNamesFromWorkOrder(wo ? { ...wo, product_option: '' } : null);
+    out.primaryProductNames = structured.length ? structured : [...derived];
+    out.productCriteriaIncomplete = _workOrderProductCriteriaIncomplete(wo);
     if (derived.length) { out.productNames = _mergeProductNames(derived, aliases); out.productSource = 'work_order'; }
     else if (aliases.length) { out.productNames = aliases; out.productSource = 'aliases'; }
   } catch (e) {
@@ -1293,7 +1303,11 @@ async function inspectSubmission({
 
     // ② 상품명 (리뷰 슬롯만 · blog 탭 제외 — 위 주석 참조)
     checks.product = (isReview && !_isBlogTab)
-      ? matchProductName(cls && cls.productName, exp.productNames)
+      ? matchProductName(cls && cls.productName, exp.productNames, {
+        primaryExpected: exp.primaryProductNames, aliases: exp.productAliases,
+        canonicalSource: exp.productSource || 'none',
+        criteriaIncomplete: exp.productCriteriaIncomplete,
+      })
       : { verdict: 'skip' };
     const learnedProduct = applyProductRule(checks.product, exp.productRules, { sheetId, tabName });
     checks.product = learnedProduct.check;
@@ -1339,6 +1353,13 @@ async function _upsertInspection(p) {
   const otherUnknownSql = `NOT (EXCLUDED.checks ? 'receiptValidation') AND EXISTS (
     SELECT 1 FROM jsonb_each(EXCLUDED.checks - 'product') AS evidence
     WHERE evidence.value->>'evidence' = 'unknown')`;
+  // The historical key can conflate decimals. Keep the audit fields, but never
+  // replace fresh contradictory/missing semantic evidence with the old product check.
+  const preserveProductSql = `review_inspections.product_resolution IS NOT NULL
+    AND review_inspections.product_cluster_key = EXCLUDED.product_cluster_key
+    AND NOT (NOT (EXCLUDED.checks ? 'receiptValidation')
+      AND COALESCE(jsonb_extract_path(EXCLUDED.checks, 'product') ? 'comparison', false)
+      AND COALESCE(EXCLUDED.checks#>>'{product,comparison,kind}', '') <> 'match')`;
   try {
     const { rows } = await _db().query(
       `INSERT INTO review_inspections
@@ -1348,8 +1369,7 @@ async function _upsertInspection(p) {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,NOW(),NOW())
        ON CONFLICT (file_id) DO UPDATE
           SET status = CASE
-                WHEN review_inspections.product_resolution IS NOT NULL
-                  AND review_inspections.product_cluster_key = EXCLUDED.product_cluster_key
+                WHEN ${preserveProductSql}
                 THEN CASE
                   WHEN EXISTS (SELECT 1 FROM jsonb_each(EXCLUDED.checks - 'product') AS c
                                WHERE c.value->>'verdict' = 'fail') THEN 'fail'
@@ -1359,8 +1379,7 @@ async function _upsertInspection(p) {
                   ELSE 'resolved' END
                 ELSE EXCLUDED.status END,
               checks = CASE
-                WHEN review_inspections.product_resolution IS NOT NULL
-                  AND review_inspections.product_cluster_key = EXCLUDED.product_cluster_key
+                WHEN ${preserveProductSql}
                 THEN jsonb_set(EXCLUDED.checks, '{product}',
                        COALESCE(jsonb_extract_path(review_inspections.checks, 'product'), '{}'::jsonb), true)
                 ELSE EXCLUDED.checks END,
@@ -1382,8 +1401,7 @@ async function _upsertInspection(p) {
                 WHEN review_inspections.product_cluster_key = EXCLUDED.product_cluster_key
                   THEN review_inspections.product_resolved_by ELSE NULL END,
               resolution = CASE
-                WHEN review_inspections.product_resolution IS NOT NULL
-                  AND review_inspections.product_cluster_key = EXCLUDED.product_cluster_key
+                WHEN ${preserveProductSql}
                   AND NOT EXISTS (SELECT 1 FROM jsonb_each(EXCLUDED.checks - 'product') AS c
                                   WHERE c.value->>'verdict' IN ('warn','fail'))
                   AND NOT (${otherUnknownSql})
@@ -1391,15 +1409,13 @@ async function _upsertInspection(p) {
                   WHEN 'pass' THEN 'ok' WHEN 'fail' THEN 'bad' ELSE review_inspections.resolution END
                 ELSE review_inspections.resolution END,
               resolved_at = CASE
-                WHEN review_inspections.product_resolution IS NOT NULL
-                  AND review_inspections.product_cluster_key = EXCLUDED.product_cluster_key
+                WHEN ${preserveProductSql}
                   AND NOT EXISTS (SELECT 1 FROM jsonb_each(EXCLUDED.checks - 'product') AS c
                                   WHERE c.value->>'verdict' IN ('warn','fail'))
                   AND NOT (${otherUnknownSql})
                 THEN NOW() ELSE review_inspections.resolved_at END,
               resolved_by = CASE
-                WHEN review_inspections.product_resolution IS NOT NULL
-                  AND review_inspections.product_cluster_key = EXCLUDED.product_cluster_key
+                WHEN ${preserveProductSql}
                   AND NOT EXISTS (SELECT 1 FROM jsonb_each(EXCLUDED.checks - 'product') AS c
                                   WHERE c.value->>'verdict' IN ('warn','fail'))
                   AND NOT (${otherUnknownSql})
@@ -1815,6 +1831,32 @@ async function inspectionTypeCounts({ sheetId, tabName, tabs, status = 'open' } 
   return out;
 }
 
+/** Rebuild evidence from canonical provenance, never an old merged alias list. */
+function _productRowTriage(row) {
+  const pr = (row.checks && row.checks.product) || {};
+  const legacy = { eligible: false, reason: 'legacy_evidence', score: 0, lengthRatio: 0,
+    bestExpected: '', conflicts: [], version: PRODUCT_AUTO_TRIAGE_VERSION };
+  if (!Array.isArray(pr.primaryExpected) || !pr.primaryExpected.length
+    || !['manual', 'work_order'].includes(pr.canonicalSource) || !pr.comparison) return legacy;
+  if (pr.comparison.version !== PRODUCT_EVIDENCE_VERSION) return legacy;
+  const comparison = compareReviewProduct(row.ocr_product || pr.ocr || '', pr.primaryExpected,
+    { criteriaIncomplete: pr.criteriaIncomplete });
+  if (pr.comparison.signature !== comparison.signature || pr.comparison.semanticSignature !== comparison.semanticSignature) {
+    return { ...legacy, reason: 'stale_evidence' };
+  }
+  return _autoComparisonResult(comparison);
+}
+
+function _productEvidencePart(row, triage) {
+  return JSON.stringify([row.sheet_id, row.tab_name, row.file_id,
+    row.checks?.product?.canonicalSource, triage.comparison?.signature || 'legacy']);
+}
+
+function _productEvidenceToken(parts) {
+  return crypto.createHash('sha256')
+    .update(JSON.stringify([PRODUCT_AUTO_TRIAGE_VERSION, [...parts].sort()])).digest('hex');
+}
+
 /** 상품명 의심을 동일 작업·기대후보·OCR 표기 기준으로 묶는다. 목록 200건 상한과 무관하다. */
 async function listProductClusters({ sheetId, tabName, tabs, limit = 120, includeAll = false } = {}) {
   const { where, params } = _riScope({ sheetId, tabName, tabs });
@@ -1840,22 +1882,33 @@ async function listProductClusters({ sheetId, tabName, tabs, limit = 120, includ
       expectedList: pr.expected, ocr: row.ocr_product || pr.ocr,
     });
     if (!key) { unclustered++; continue; }
+    const triage = _productRowTriage(row);
     let g = grouped.get(key);
     if (!g) {
-      const triage = classifyProductNameForAuto(row.ocr_product || pr.ocr || '', pr.expected);
       const realExpected = _realProductCandidates(pr.expected);
       g = {
         clusterKey: key, sheetId: row.sheet_id, tabName: row.tab_name,
-        // 작업오더 구조문구는 화면에서 제외하되 군집 키는 기존 사람 판정 보존을 위해 그대로 둔다.
+        // Keep historical human grouping, but certify every row independently.
         expected: realExpected,
         observed: String(row.ocr_product || pr.ocr || ''), count: 0,
         seedFileId: row.file_id, sampleFileIds: [], latestAt: row.created_at || null,
-        triage,
+        triage, _evidenceParts: [],
       };
       grouped.set(key, g);
+    } else if (!triage.eligible) {
+      g.triage = triage;
+    } else if (g.triage.eligible
+      && g.triage.comparison.semanticSignature !== triage.comparison.semanticSignature) {
+      g.triage = { ...triage, eligible: false, reason: 'mixed_evidence' };
     }
+    g._evidenceParts.push(_productEvidencePart(row, triage));
     g.count++;
     if (g.sampleFileIds.length < 3) g.sampleFileIds.push(row.file_id);
+  }
+  for (const g of grouped.values()) {
+    g.evidenceToken = _productEvidenceToken(g._evidenceParts);
+    delete g._evidenceParts;
+    if (rows.length >= scanCap) g.triage = { ...g.triage, eligible: false, reason: 'scan_truncated' };
   }
   const allClusters = [...grouped.values()]
     .sort((a, b) => b.count - a.count || String(b.latestAt || '').localeCompare(String(a.latestAt || '')));
@@ -1889,7 +1942,7 @@ async function autoResolveProductClusters({ sheetId, tabName, tabs, by, dryRun =
   let eligible = currentEligible;
   if (!dryRun) {
     const confirmedKeys = [...new Set((Array.isArray(clusterKeys) ? clusterKeys : []).map(String).filter(Boolean))];
-    if (!confirmedKeys.length || _autoSnapshotToken(confirmedKeys) !== String(snapshotToken || '')) {
+    if (!confirmedKeys.length || _autoSnapshotToken(confirmedKeys, currentEligible, { sheetId, tabName, tabs }) !== String(snapshotToken || '')) {
       return { ok: false, error: '확인한 자동처리 스냅샷이 없거나 일치하지 않습니다.' };
     }
     const confirmed = new Set(confirmedKeys);
@@ -1905,7 +1958,7 @@ async function autoResolveProductClusters({ sheetId, tabName, tabs, by, dryRun =
     eligibleSingletons: eligible.filter(g => g.count === 1).length,
     totalClusters: snapshot.totalClusters, totalRows: snapshot.totalRows,
     singletonClusters: snapshot.singletonClusters,
-    snapshotToken: _autoSnapshotToken(eligibleKeys), clusterKeys: eligibleKeys,
+    snapshotToken: _autoSnapshotToken(eligibleKeys, eligible, { sheetId, tabName, tabs }), clusterKeys: eligibleKeys,
     samples: eligible.slice(0, 12).map(g => ({
       tabName: g.tabName, count: g.count, observed: g.observed,
       expected: g.triage.bestExpected, score: g.triage.score,
@@ -1922,6 +1975,7 @@ async function autoResolveProductClusters({ sheetId, tabName, tabs, by, dryRun =
         fileId: g.seedFileId, verdict: 'pass',
         note: `${PRODUCT_AUTO_TRIAGE_VERSION}; dice=${g.triage.score}; numeric-conflict=none`,
         by: `AUTO:${PRODUCT_AUTO_TRIAGE_VERSION}:${String(by || 'system').slice(0, 60)}`,
+        automatic: true, evidenceToken: g.evidenceToken,
       });
       if (!result || !result.ok) { skipped++; continue; }
       processedClusters++;
@@ -1951,6 +2005,10 @@ function _humanResolveProductCheck(checks, verdict) {
     // 복합 경고 카드와 유형 집계에서 "확정된 상품 불일치"가 사라지지 않는다.
     verdict: verdict === 'fail' ? 'fail' : 'pass',
   };
+  if ((verdict === 'pass' || verdict === 'fail') && out.product.evidence === 'unknown') {
+    out.product.machineEvidence = pr.machineEvidence || pr.evidence;
+    delete out.product.evidence;
+  }
   return out;
 }
 
@@ -2014,10 +2072,13 @@ async function _saveProductClusterRule(client, { seed, clusterKey, verdict, note
  * 한 상품명 군집을 사람 판단 한 번으로 종결하고 pass/fail exact 규칙을 작업에 저장한다.
  * 건 전체 resolution 을 상품명 정답으로 쓰지 않는다: 다른 축이 남으면 그 건은 계속 open 이다.
  */
-async function resolveProductCluster({ fileId, verdict, note, by } = {}) {
+async function resolveProductCluster({ fileId, verdict, note, by, automatic = false, evidenceToken } = {}) {
   const decision = String(verdict || '');
   if (!fileId || !PRODUCT_DECISIONS.includes(decision)) {
     return { ok: false, error: 'fileId와 올바른 상품명 판단이 필요합니다.' };
+  }
+  if (automatic && (decision !== 'pass' || !/^[a-f0-9]{64}$/.test(String(evidenceToken || '')))) {
+    return { ok: false, error: '자동처리 증거 확인값이 필요합니다.' };
   }
   return _withProductDecisionTx(async (client) => {
     const seedRows = await client.query(
@@ -2056,6 +2117,15 @@ async function resolveProductCluster({ fileId, verdict, note, by } = {}) {
     });
     if (!targets.length) return { ok: false, error: '처리할 미확인 군집이 없습니다.' };
 
+    if (automatic) {
+      const triages = targets.map(_productRowTriage);
+      const signatures = new Set(triages.map(t => t.comparison?.semanticSignature));
+      const currentToken = _productEvidenceToken(targets.map((row, index) => _productEvidencePart(row, triages[index])));
+      if (triages.some(t => !t.eligible) || signatures.size !== 1 || currentToken !== evidenceToken) {
+        return { ok: false, error: '자동처리 확인 이후 대상이나 상품 근거가 바뀌었습니다. 다시 확인해 주세요.' };
+      }
+    }
+
     const cleanNote = String(note || '').trim().slice(0, 500);
     let resolved = 0, remainsOpen = 0;
     for (const row of targets) {
@@ -2084,7 +2154,7 @@ async function resolveProductCluster({ fileId, verdict, note, by } = {}) {
       resolved++;
       if (!closesWhole) remainsOpen++;
     }
-    const ruleSaved = await _saveProductClusterRule(client, {
+    const ruleSaved = automatic ? false : await _saveProductClusterRule(client, {
       seed, clusterKey, verdict: decision, note: cleanNote, by, evidenceCount: targets.length,
     });
     return {

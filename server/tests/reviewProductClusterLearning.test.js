@@ -40,40 +40,49 @@ function productRow(fileId, { observed = '모키위키 모기 기피제', extra 
   assert.strictEqual(machine.verdict, 'warn');
   const a6Key = svc.productClusterKey({ sheetId: 'S', tabName: 'T', expectedList: machine.expected, ocr: machine.ocr });
   const learnedPass = svc.applyProductRule(machine, [{ id: 'r1', clusterKey: a6Key, verdict: 'pass', active: true }], { sheetId: 'S', tabName: 'T' });
-  assert.strictEqual(learnedPass.check.verdict, 'pass');
-  assert.strictEqual(learnedPass.check.machineVerdict, 'warn');
-  assert.strictEqual(learnedPass.check.learnedRuleId, 'r1');
+  assert.strictEqual(learnedPass.check.verdict, 'warn');
+  assert.strictEqual(learnedPass.check.comparison.kind, 'insufficient');
+  assert.strictEqual(learnedPass.check.evidence, 'unknown');
+  assert.strictEqual(learnedPass.check.learnedRuleId, undefined, '옛 정상 규칙으로 새 미확인 증거를 승격하지 않음');
   const learnedFail = svc.applyProductRule(machine, [{ id: 'r2', clusterKey: a6Key, verdict: 'fail', active: true }], { sheetId: 'S', tabName: 'T' });
   assert.strictEqual(learnedFail.check.verdict, 'fail');
   assert.strictEqual(svc.applyProductRule(machine, [{ id: 'x', clusterKey: a6Key, verdict: 'unknown' }], { sheetId: 'S', tabName: 'T' }).check.verdict, 'warn');
   ok('B1: pass/fail exact 규칙만 적용하고 기계 원판정 보존');
 
-  // B2. 단독 OCR 안전 자동처리: 긴 오타/잘림만 통과, 숫자 충돌·낮은 유사도는 보류
+  // B2. 오타와 실제 옵션 차이를 증명 없이 구분하지 않는다. 안전한 목록번호 정리는 유지한다.
   {
     const safe = svc.classifyProductNameForAuto(
-      '낫세린 슈퍼 넛 너리싱 밤 168시간 보습력 지속, 50ml, 1개',
-      ['[상품', '넛세린 슈퍼 넛 너리싱 밤 168시간 보습력 지속, 50ml, 1개', '[합계] 최종모집인원 200명']);
-    assert.strictEqual(safe.eligible, true);
-    assert.strictEqual(safe.reason, 'high_confidence_ocr');
+      '낫세린 슈퍼 넛 너리싱 밤 민감피부용 데일리 수분장벽 집중 보습 크림 50ml 1개',
+      ['[상품', '넛세린 슈퍼 넛 너리싱 밤 민감피부용 데일리 수분장벽 집중 보습 크림 50ml 1개', '[합계] 최종모집인원 200명']);
+    assert.strictEqual(safe.eligible, false, '높은 유사도만으로 본체 글자 차이를 자동 승인하지 않음');
+    assert.strictEqual(safe.reason, 'identity_mismatch');
+    assert.strictEqual(safe.comparison.kind, 'insufficient');
     assert.strictEqual(safe.bestExpected.startsWith('넛세린'), true, '작업오더 구조문구는 기대 상품에서 제외');
     const numberedSafe = svc.classifyProductNameForAuto(
-      '낫세린 슈퍼 넛 너리싱 밤 168시간 보습력 지속, 50ml, 1개',
-      ['1. 넛세린 슈퍼 넛 너리싱 밤 168시간 보습력 지속, 50ml, 1개 (https:']);
+      '넛세린 슈퍼 넛 너리싱 밤 민감피부용 데일리 수분장벽 집중 보습 크림 50ml 1개',
+      ['1. 넛세린 슈퍼 넛 너리싱 밤 민감피부용 데일리 수분장벽 집중 보습 크림 50ml 1개 (https:']);
     assert.strictEqual(numberedSafe.eligible, true, '작업오더 목록번호 1.은 상품 숫자 충돌로 세지 않음');
+    assert.strictEqual(numberedSafe.reason, 'high_confidence_ocr');
     const numberConflict = svc.classifyProductNameForAuto(
       '장수돌침대 28년형 올뉴블랙에디션 카본 탄소매트 전자파없는 전기매트',
       ['장수돌침대 26년형 올뉴블랙에디션 카본 탄소매트 전자파없는 전기매트']);
     assert.strictEqual(numberConflict.eligible, false);
-    assert.strictEqual(numberConflict.reason, 'numeric_conflict');
+    assert.strictEqual(numberConflict.reason, 'ambiguous_dimensions', '본체 사이 연식의 소속을 추측하지 않음');
+    assert.strictEqual(numberConflict.comparison.kind, 'insufficient');
+    const clearYearConflict = svc.classifyProductNameForAuto(
+      '가상가구탄소매트 28년형', ['가상가구탄소매트 26년형']);
+    assert.strictEqual(clearYearConflict.eligible, false);
+    assert.strictEqual(clearYearConflict.reason, 'numeric_conflict', '연속 본체에 붙은 명확한 연식 차이는 불일치 유지');
+    assert.strictEqual(clearYearConflict.comparison.kind, 'conflict');
     const bareNumberConflict = svc.classifyProductNameForAuto(
       '프리미엄 에디션 초경량 무선 청소기 모델 2026',
       ['프리미엄 에디션 초경량 무선 청소기 모델 2025']);
     assert.strictEqual(bareNumberConflict.eligible, false, '단위 없는 연도·모델 숫자도 자동통과 금지');
-    assert.strictEqual(bareNumberConflict.reason, 'numeric_conflict');
+    assert.strictEqual(bareNumberConflict.comparison.kind, 'insufficient', '역할을 모르는 맨숫자는 추측해 불일치로 단정하지 않음');
     assert.strictEqual(svc.classifyProductNameForAuto('바디로션', ['바디워시']).eligible, false);
     assert.strictEqual(svc.matchProductName('상품 상세페이지', ['[상품', '[합계] 최종모집인원 200명']).verdict, 'skip',
       '작업오더 구조문구만 있으면 상품명 기준 없음으로 처리');
-    ok('B2: 96% 고신뢰 OCR만 자동통과하고 숫자 충돌·짧은 표기는 보류');
+    ok('B2: 증명 없는 본체 차이와 숫자 충돌은 보류하고 안전한 목록번호·URL 정리는 유지');
   }
 
   // C. 목록 200건과 독립된 군집 집계
@@ -85,7 +94,7 @@ function productRow(fileId, { observed = '모키위키 모기 기피제', extra 
     assert.strictEqual(out.totalRows, 3);
     assert.strictEqual(out.totalClusters, 2);
     assert.strictEqual(out.singletonClusters, 1);
-    assert.ok(out.triageReasons && out.triageReasons.too_short);
+    assert.ok(out.triageReasons && out.triageReasons.legacy_evidence);
     assert.strictEqual(out.clusters[0].count, 2);
     assert.deepStrictEqual(out.clusters[0].sampleFileIds, ['F1', 'F2']);
     assert.ok(/LIMIT \$1/.test(String(pool.lastSql || '')) || out.clusters.length === 2);
@@ -101,9 +110,9 @@ function productRow(fileId, { observed = '모키위키 모기 기피제', extra 
     let calls = 0;
     svc.__setPoolForTest({ query: async () => { calls++; return { rows: [safe, blocked] }; } });
     const preview = await svc.autoResolveProductClusters({ dryRun: true });
-    assert.strictEqual(preview.eligibleClusters, 1);
-    assert.strictEqual(preview.eligibleRows, 1);
-    assert.strictEqual(preview.clusterKeys.length, 1);
+    assert.strictEqual(preview.eligibleClusters, 0, '출처 없는 과거 기대값은 유사도가 높아도 자동 승인 근거가 아님');
+    assert.strictEqual(preview.eligibleRows, 0);
+    assert.strictEqual(preview.clusterKeys.length, 0);
     assert.strictEqual(preview.snapshotToken.length, 32);
     const denied = await svc.autoResolveProductClusters({ dryRun: false });
     assert.strictEqual(denied.ok, false);

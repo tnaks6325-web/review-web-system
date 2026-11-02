@@ -30,7 +30,7 @@ function service({ write = 'ok', stored } = {}) {
       if (key === './drive.service') return { downloadFile: async () => ({ buffer: Buffer.from('FAKE IMAGE'), mimeType: 'image/jpeg' }) };
       if (key === './gemini.service') return { classifySubmissionImage: async () => ({ kind: 'receipt', confidence: 0.99 }) };
       if (key === './captureVerify.service') return { verifyCapture: async () => ({ status: 'ok', got: 'receipt', businessNo: '1234567890' }) };
-      if (/^\.\.\/utils\/(workOrderLink|reviewType|captureSlots|inspectIssueTypes)$/.test(key)) return loadPure(key.split('/').pop());
+      if (/^\.\.\/utils\/(workOrderLink|reviewType|captureSlots|inspectIssueTypes|reviewProductEvidence|orderProductSummary)$/.test(key)) return loadPure(key.split('/').pop());
       throw new Error('Blocked: ' + key);
     },
   });

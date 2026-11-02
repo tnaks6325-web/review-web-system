@@ -290,13 +290,16 @@ const fileRoute = require('../src/services/fileRoute.service');
     assert.ok(wd2.includes('riReinspectTab') && wd2.includes('/api/trackb/review-inspect/reinspect'), '리뷰검수 탭 [♻ 재검수] 배선');
     ok('F2: 소급 재검수(리뷰타입 뒤늦은 변경) — 초기화 범위·권한·UI 배선');
 
-    // F3: 상품명 매칭 — 실측 신고 원문 그대로 통과해야 한다(말줄임·번호·URL 꼬리)
+    // F3: Cleanup remains compatible, but truncation cannot prove missing product/option information.
     const { matchProductName } = require('../src/services/reviewInspect.service');
     const realOcr = '이노크아든 빨아쓰는 면마스크 다회용…';
     const realExpected = ['상품', '1. 이노크아든 빨아쓰는 면마스크 다회용 성인용 대형 패션 필터 교체형 (https:', '[합계] 최종모집인원 200명'];
-    assert.strictEqual(matchProductName(realOcr, realExpected).verdict, 'pass',
-      '실측 신고 케이스(이노크아든)가 pass 여야 함');
-    assert.strictEqual(matchProductName('힙스 골라담기...', ['2) 힙스 골라담기 세트']).verdict, 'pass', '... 말줄임 + 번호');
+    assert.strictEqual(matchProductName(realOcr, realExpected).comparison.kind, 'insufficient',
+      '실측 말줄임 원문에 없는 식별 정보는 미확인으로 남김');
+    assert.strictEqual(matchProductName(realOcr, realExpected).evidence, 'unknown');
+    assert.strictEqual(matchProductName('힙스 골라담기...', ['2) 힙스 골라담기 세트']).evidence, 'unknown', '말줄임은 누락 정보 증명이 아님');
+    assert.strictEqual(matchProductName('이노크아든 빨아쓰는 면마스크 다회용 성인용 대형 패션 필터 교체형', realExpected).verdict,
+      'pass', '실제 식별자가 전부 있으면 번호·URL 꼬리 정리는 여전히 통과');
     assert.strictEqual(matchProductName('전혀 다른 상품명입니다', ['이노크아든 빨아쓰는 면마스크']).verdict, 'warn',
       '진짜 다른 상품은 여전히 의심(느슨해지되 죽지 않음)');
     assert.strictEqual(matchProductName('이노크아든 빨아쓰는 면마스크', []).verdict, 'skip', '기대값 없음 = skip 불변');
