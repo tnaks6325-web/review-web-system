@@ -903,8 +903,8 @@ async function createOrderLedgerEntry(input) {
   const ORDER_INSERT_SQL = `INSERT INTO order_submissions
       (sheet_id, tab_name, gid, tab_gid, orderer, recipient, user_id, phone, address,
        order_num, date_str, selected_opt_key, bank, account, depositor, price, memo, blog_url,
-       selected_product, source, dedup_key, mirror_status, delivery_memo, delivery_memo_check)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,NULL,'pending',$21,$22)
+       selected_product, source, dedup_key, mirror_status, delivery_memo, delivery_memo_check, capture_flags)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,NULL,'pending',$21,$22,$23::jsonb)
      RETURNING id`;
   const orderInsertParams = [
     sheetId,
@@ -933,6 +933,8 @@ async function createOrderLedgerEntry(input) {
     orderData.deliveryMemo || '',
     // 결정 260 — 필수 배송메세지 확인 결과(''=해당 없음 · 'ok' · 'staff_review' — 작업보드 🚩).
     orderData.deliveryMemoCheck || '',
+    // 결정 319 — 캡처 확인 🚩(결제금액·상품·개수 차이로 받은 주문). 없으면 NULL.
+    Array.isArray(orderData.captureFlags) && orderData.captureFlags.length ? JSON.stringify({ flags: orderData.captureFlags }) : null,
   ];
 
   let orderSubmissionId;

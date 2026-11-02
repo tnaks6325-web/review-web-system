@@ -105,7 +105,7 @@ async function stubs() {
   const cols = m[1].split(',').map(s => s.trim()); const vals = m[2].split(',').map(s => s.trim());
   assert.equal(cols.length, vals.length);
   assert.equal(vals[cols.indexOf('delivery_memo_check')], '$22');
-  assert.ok(/orderData\.deliveryMemo \|\| '',\n[^\n]*\n\s*orderData\.deliveryMemoCheck \|\| '',\n  \];/.test(ol), '$22 param is deliveryMemoCheck (after deliveryMemo)');
+  assert.ok(/orderData\.deliveryMemo \|\| '',\n[^\n]*\n\s*orderData\.deliveryMemoCheck \|\| '',\n(?:[^\n]*\n\s*Array\.isArray\(orderData\.captureFlags\)[^\n]*\n)?  \];/.test(ol), '$22 param is deliveryMemoCheck (after deliveryMemo)');
 
   const mig = read('server/migrations/192_required_delivery_memo.sql');
   assert.ok(/ALTER TABLE recruit_campaigns ADD COLUMN IF NOT EXISTS required_delivery_memo TEXT NOT NULL DEFAULT ''/.test(mig));
@@ -148,7 +148,7 @@ async function stubs() {
   assert.ok(/NULL::text AS "deliveryMemoCheck"/.test(tb) && /purpose_order\.delivery_memo_check AS "deliveryMemoCheck"/.test(tb), 'both roster queries');
   assert.ok(/if \(showEdits && r\.deliveryMemoCheck === 'staff_review'\) syn\.deliveryMemoCheck = 'staff_review';/.test(tb), 'internal only');
   const wd = read('frontend/workdesk.html');
-  assert.ok(/\$\{ruleMark\}\$\{memoMark\}\$\{esc\(r\.name\|\|'—'\)\}/.test(wd), 'grid 🚩 before the name');
+  assert.ok(/\$\{ruleMark\}\$\{memoMark\}(?:\$\{capMark\})?\$\{esc\(r\.name\|\|'—'\)\}/.test(wd), 'grid 🚩 before the name');
   assert.ok(/\$\{r\.deliveryMemoCheck==='staff_review'\?' <span class="src"[^>]*>🚩 배송메세지 확인 필요<\/span>':''\}/.test(wd), 'view table badge (edit off)');
 }
 
