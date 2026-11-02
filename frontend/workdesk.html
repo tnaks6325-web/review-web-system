@@ -13703,10 +13703,15 @@ function _pmBatchTable(list){
   return `<div class="lgwrap pm-batch-scroll"><table class="lgtable pmtable">
     <thead><tr><th>대량이체</th><th>만든 시각</th><th>은행</th><th class="num">건수</th><th class="num">금액</th>
       <th>담당</th><th>다운로드</th><th>이체결과</th><th>작업보드</th><th>상태</th><th></th></tr></thead><tbody>
-    ${list.map((b,i)=>`<tr><td class="mono">#${b.seq}</td><td class="mono">${esc(_pmDate(b.createdAt))}</td>
+    ${list.map((b,i)=>`<tr><td class="mono">#${b.seq}</td><td class="mono">${_pmBatchWhen(b)}</td>
       <td>${esc(b.bankLabel)}</td><td class="num">${b.itemCount}</td><td class="num">${_pmNum(b.totalAmount)}</td>
-      <td>${esc(b.createdBy||'-')}</td><td class="mono">${b.downloadCount||0}회${b.lastDownloadedBy?' · '+esc(b.lastDownloadedBy):''}</td>
+      <td>${esc(b.historyOnly?'기록 복원':(b.createdBy||'-'))}</td><td class="mono">${b.downloadCount||0}회${b.lastDownloadedBy?' · '+esc(b.lastDownloadedBy):''}</td>
       <td>${_pmBatchResult(b)}</td><td>${_pmBatchWorkboard(b,i)}</td><td>${st(b)}</td><td>${_pmBatchActions(b,i)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+/* 결정 320 — 지난 이체를 나중에 기록한 회차(기록 전용)는 기록한 날이 아니라 **실제 이체 시각**을 보인다(작업보드 날짜와 맞춘다). */
+function _pmBatchWhen(b){
+  if(b.historyOnly && b.transferredAt) return `${esc(_pmDate(b.transferredAt))}<div class="muted" style="font-size:11px" title="${esc('기록한 시각 '+_pmDate(b.createdAt))}">지난 이체 기록</div>`;
+  return esc(_pmDate(b.createdAt));
 }
 function _pmDate(v){ if(!v) return '-'; const d=new Date(v); if(isNaN(d)) return '-';
   const k=new Date(d.getTime()+9*3600*1000); return k.toISOString().slice(5,16).replace('T',' '); }
