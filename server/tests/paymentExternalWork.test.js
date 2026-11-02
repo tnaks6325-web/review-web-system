@@ -98,17 +98,22 @@ function stubProof({ used = false } = {}) {
 
   await t('2 ★ 같은 줄 두 번 쓰기 검사에 표시가 들어 있다 — 질의 수는 늘리지 않는다(같은 줄에 UNION)', () => {
     const src = read('src/services/paymentProof.service.js');
-    assert.ok(/payment_amount_mismatch_reconciliations WHERE upload_id::text = ANY\(\$1::text\[\]\) AND result_seq = ANY\(\$2::int\[\]\)\s*UNION ALL\s*SELECT 1 FROM external_work_transfers e JOIN payment_result_uploads eu ON eu\.file_sha256 = e\.file_sha256/.test(src));
+    assert.ok(/payment_amount_mismatch_reconciliations WHERE upload_id::text = ANY\(\$1::text\[\]\) AND result_seq = ANY\(\$2::int\[\]\)\s*UNION ALL\s*SELECT 1 FROM external_work_transfers e WHERE e\.file_sha256 = \$3 AND e\.result_seq = ANY\(\$2::int\[\]\)/.test(src));
+    // Codex P2 — 저장된 지문 없는 옛 결과 파일도 잡히게 업로드 줄이 아니라 검증한 지문(normalizedSha)과 바로 맞댄다
+    assert.ok(/\[ids, seqs, normalizedSha\]/.test(src) && !/eu\.file_sha256 = e\.file_sha256/.test(src));
   });
   await t('3 표시한 줄은 미확인 목록(미리보기·작업 대조)과 대량이체 목록 건수에서 빠진다(파일 내용 기준)', () => {
     const res = read('src/services/paymentResult.service.js');
     assert.ok(/markedSeqsForUpload\(row\.id, _db\(\)\)\) reviewedSeqs\.add/.test(res), '미리보기');
     assert.ok(/markedSeqsForUpload\(uploadId, db\)\) reviewedSeqs\.add/.test(res), '작업 대조');
     const pay = read('src/services/payment.service.js');
-    assert.ok(/UNION SELECT e\.result_seq FROM external_work_transfers e WHERE e\.file_sha256 = ru\.file_sha256\) AS result_resolved_seqs/.test(pay));
+    assert.ok(/UNION SELECT e\.result_seq FROM external_work_transfers e\s*WHERE e\.file_sha256 = COALESCE\(ru\.file_sha256, encode\(sha256\(ru\.file_blob\), 'hex'\)\)\) AS result_resolved_seqs/.test(pay));
+    // Codex P2 — 지문 없는 옛 파일: 표시 목록·미확인 빼기도 파일 원본 지문으로
+    const extSrc = read('src/services/paymentExternalWork.service.js');
+    assert.strictEqual((extSrc.match(/JOIN payment_result_uploads u ON e\.file_sha256 = COALESCE\(u\.file_sha256, encode\(sha256\(u\.file_blob\), 'hex'\)\)/g) || []).length, 2);
+    assert.ok(/resultExternalCount: Number\(b\.result_external_count \|\| 0\)/.test(pay));
     assert.ok(/\.filter\(x => !resolved\.has\(Number\(x && x\.seq\)\)\)/.test(pay));
-    const ext = read('src/services/paymentExternalWork.service.js');
-    assert.ok(/JOIN payment_result_uploads u ON u\.file_sha256 = e\.file_sha256\s*WHERE u\.id = \$1/.test(ext), '다시 놓아도 유지');
+    assert.ok(/JOIN payment_result_uploads u ON e\.file_sha256 = COALESCE\(u\.file_sha256, encode\(sha256\(u\.file_blob\), 'hex'\)\)[^\n]*\n\s*WHERE u\.id = \$1/.test(extSrc), '다시 놓아도 유지(파일 내용 기준)');
   });
   await t('3b 표시한 성공 이체는 통장 「기록 없이 나간 돈」에서 빠진다', () => {
     const bank = read('src/services/paymentBank.service.js');

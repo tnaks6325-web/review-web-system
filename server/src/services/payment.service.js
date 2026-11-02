@@ -1875,7 +1875,11 @@ async function listBatches(limit = 50) {
             (ru.file_blob IS NOT NULL) AS result_has_file, ru.summary AS result_summary,
             -- 결정 317 — 이미 처리한 미확인 줄(작업 대조 승인·중복 · 「리뷰웹 밖 작업」 표시)은 미확인 건수에서 뺀다
             ARRAY(SELECT r.result_seq FROM unconfirmed_transfer_reviews r WHERE r.upload_id = ru.id
-                  UNION SELECT e.result_seq FROM external_work_transfers e WHERE e.file_sha256 = ru.file_sha256) AS result_resolved_seqs
+                  UNION SELECT e.result_seq FROM external_work_transfers e
+                   WHERE e.file_sha256 = COALESCE(ru.file_sha256, encode(sha256(ru.file_blob), 'hex'))) AS result_resolved_seqs,
+            -- 결정 317 — 표시만 남은 대량이체도 되돌리기 창을 열 수 있게(Codex P2)
+            (SELECT COUNT(*)::int FROM external_work_transfers e
+              WHERE e.file_sha256 = COALESCE(ru.file_sha256, encode(sha256(ru.file_blob), 'hex'))) AS result_external_count
        FROM payment_batches b
        LEFT JOIN LATERAL (
          SELECT id, file_name, row_count, success_count, failed_count, applied_count, applied,
@@ -1995,6 +1999,7 @@ function _batchView(b) {
     resultSuccessCount,
     resultFailedCount,
     resultUnconfirmedCount: unmatched.length,
+    resultExternalCount: Number(b.result_external_count || 0),   // 결정 317 — 리뷰웹 밖 작업으로 표시한 줄 수
     resultAppliedCount: Math.max(Number(b.result_applied_count || 0), Number(paidCount || 0)),
     resultApplied: b.result_applied === true,
     boardRecordedCount: Number(b.board_recorded_count || 0),

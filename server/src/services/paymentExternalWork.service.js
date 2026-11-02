@@ -111,7 +111,7 @@ async function listForUpload(uploadId, db = _db()) {
     `SELECT e.id, e.result_seq AS seq, e.work_name AS "workName", e.amount, e.holder, e.account_tail AS "accountTail",
             e.memo, e.transferred_at AS "transferredAt", e.marked_by AS "markedBy", e.marked_at AS "markedAt"
        FROM external_work_transfers e
-       JOIN payment_result_uploads u ON u.file_sha256 = e.file_sha256
+       JOIN payment_result_uploads u ON e.file_sha256 = COALESCE(u.file_sha256, encode(sha256(u.file_blob), 'hex'))   -- 지문 없는 옛 파일도(Codex P2)
       WHERE u.id = $1
       ORDER BY e.result_seq`, [uploadId]);
   return rows;
@@ -122,7 +122,7 @@ async function markedSeqsForUpload(uploadId, db = _db()) {
   if (!/^[0-9a-f-]{36}$/i.test(String(uploadId || ''))) return new Set();
   const { rows } = await db.query(
     `SELECT e.result_seq FROM external_work_transfers e
-       JOIN payment_result_uploads u ON u.file_sha256 = e.file_sha256
+       JOIN payment_result_uploads u ON e.file_sha256 = COALESCE(u.file_sha256, encode(sha256(u.file_blob), 'hex'))   -- 지문 없는 옛 파일도(Codex P2)
       WHERE u.id = $1`, [uploadId]);
   return new Set(rows.map(r => Number(r.result_seq)));
 }

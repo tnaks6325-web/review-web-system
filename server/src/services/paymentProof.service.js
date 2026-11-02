@@ -74,17 +74,17 @@ async function assertProofRowsUnused(db, { sha, uploadId, resultSeqs } = {}) {
   const ids = sameFileUploads.map(row => row.id);
   const used = () => proofError('proof_already_used', '같은 이체 결과 행이 이미 처리되어 다시 사용할 수 없습니다.');
   const checks = [
-    `SELECT 1 FROM unconfirmed_transfer_reviews WHERE upload_id::text = ANY($1::text[]) AND result_seq = ANY($2::int[]) LIMIT 1`,
-    `SELECT 1 FROM payment_account_mismatch_reconciliations WHERE upload_id::text = ANY($1::text[]) AND result_seq = ANY($2::int[]) LIMIT 1`,
+    [`SELECT 1 FROM unconfirmed_transfer_reviews WHERE upload_id::text = ANY($1::text[]) AND result_seq = ANY($2::int[]) LIMIT 1`, [ids, seqs]],
+    [`SELECT 1 FROM payment_account_mismatch_reconciliations WHERE upload_id::text = ANY($1::text[]) AND result_seq = ANY($2::int[]) LIMIT 1`, [ids, seqs]],
     // 결정 317 — 「리뷰웹 밖 작업」으로 표시한 줄도 다시 쓰지 않는다(키 = 파일 내용+줄 번호). 질의 수를 늘리지 않게 같은 줄에 붙인다.
-    `SELECT 1 FROM payment_amount_mismatch_reconciliations WHERE upload_id::text = ANY($1::text[]) AND result_seq = ANY($2::int[])
+    //   ★ 저장된 지문이 없는 옛 결과 파일도 잡히게 업로드 줄이 아니라 **검증한 지문**과 바로 맞댄다(Codex P2).
+    [`SELECT 1 FROM payment_amount_mismatch_reconciliations WHERE upload_id::text = ANY($1::text[]) AND result_seq = ANY($2::int[])
      UNION ALL
-     SELECT 1 FROM external_work_transfers e JOIN payment_result_uploads eu ON eu.file_sha256 = e.file_sha256
-      WHERE eu.id::text = ANY($1::text[]) AND e.result_seq = ANY($2::int[])
-     LIMIT 1`,
+     SELECT 1 FROM external_work_transfers e WHERE e.file_sha256 = $3 AND e.result_seq = ANY($2::int[])
+     LIMIT 1`, [ids, seqs, normalizedSha]],
   ];
-  for (const sql of checks) {
-    const { rows } = await db.query(sql, [ids, seqs]);
+  for (const [sql, params] of checks) {
+    const { rows } = await db.query(sql, params);
     if (rows.length) throw used();
   }
   const { rows: paid } = await db.query(
