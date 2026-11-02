@@ -600,7 +600,8 @@ async function _bankOverviewOne(bank, now) {
     batches.push({
       batchId: id, seq: rec.seq, bank, state: rec.state, cluster: rec.cluster || null, outside: rec.outside || null, mixed: !!rec.mixed,
       fileOnly: !!rec.fileOnly, needFile: !!rec.needFile, mode: rec.mode || 'amount',   // 결정 317
-      amounts: (rec.amounts || []).filter(x => x.failures !== 0).map(x => ({ amount: x.amount, count: x.count, bank: x.bank, refunds: x.refunds, failures: x.failures })),
+      amounts: (rec.amounts || []).filter(x => x.failures !== 0).map(x => ({ amount: x.amount, count: x.count, bank: x.bank, refunds: x.refunds, failures: x.failures,
+        ...(x.missing != null ? { missing: x.missing } : {}) })),   // 결정 317 — 하나은행 이름이 안 보이는 사람 수
       pending: (rec.items || []).filter(i => i.status === 'pending').length,
     });
   }
