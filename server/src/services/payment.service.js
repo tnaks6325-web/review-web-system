@@ -1870,6 +1870,8 @@ async function listBatches(limit = 50) {
             (SELECT COUNT(*)::int FROM payment_batch_items i WHERE i.batch_id = b.id AND i.status = 'paid')   AS paid_count,
             (SELECT COUNT(*)::int FROM payment_batch_items i WHERE i.batch_id = b.id AND i.status = 'failed') AS failed_count,
             (SELECT COUNT(*)::int FROM payment_batch_items i WHERE i.batch_id = b.id AND i.status = 'pending') AS pending_count,
+            -- 결정 320 — 기록 전용(과거 이체) 회차는 만든 시각이 아니라 실제 이체 시각을 보여 준다(은행 증빙 시각 = 항목 paid_at)
+            (SELECT MIN(i.paid_at) FROM payment_batch_items i WHERE i.batch_id = b.id AND i.status = 'paid') AS first_paid_at,
             ru.id AS result_upload_id, ru.file_name AS result_file_name, ru.row_count AS result_row_count,
             ru.success_count AS result_success_count, ru.failed_count AS result_failed_count,
             ru.applied_count AS result_applied_count, ru.applied AS result_applied,
@@ -1986,6 +1988,8 @@ function _batchView(b) {
   return {
     id: b.id, seq: Number(b.seq), bank: b.bank, bankLabel: BANK_LABEL[b.bank] || b.bank,
     historicalKey: b.historical_key || '', historyOnly: paymentProof.isHistoryOnlyKey(b.historical_key),
+    // 결정 320 — 기록 전용 회차의 실제 이체 시각(목록 조회에서만 채운다 · 없으면 null → 화면은 만든 시각)
+    transferredAt: paymentProof.isHistoryOnlyKey(b.historical_key) && b.first_paid_at ? b.first_paid_at : null,
     status: b.status, itemCount: b.item_count, totalAmount: Number(b.total_amount || 0),
     createdBy: b.created_by || '', createdAt: b.created_at,
     downloadCount: b.download_count, lastDownloadedAt: b.last_downloaded_at,
