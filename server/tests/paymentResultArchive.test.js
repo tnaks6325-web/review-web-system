@@ -156,6 +156,40 @@ const C = (id, sha, at, seq, fileName = 'kbank_result.xlsx') => ({ id, sha, file
     assert.ok(/catch\(_\)\{ STATE\.pmArchive=null; \}/.test(wd), '못 받으면 그 줄만 숨김');
   });
 
+  await t('5 ★ Codex P1 — 폴더 권한은 끝 페이지까지 읽는다(뒤 페이지의 공개 권한을 놓치지 않음) · 끝까지 못 읽으면 모른다(null)', async () => {
+    const { google } = require('googleapis');
+    const origDrive = google.drive;
+    Object.assign(process.env, { DRIVE_OAUTH_CLIENT_ID: 'x', DRIVE_OAUTH_CLIENT_SECRET: 'y', DRIVE_OAUTH_REFRESH_TOKEN: 'z' });
+    let mode = 'pages'; const seen = [];
+    google.drive = () => ({ permissions: { list: async (q) => {
+      seen.push(q);
+      if (mode === 'error') throw new Error('403');
+      if (mode === 'endless') return { data: { permissions: [{ type: 'user' }], nextPageToken: 'n' } };
+      return q.pageToken ? { data: { permissions: [{ type: 'anyone' }] } } : { data: { permissions: [{ type: 'user' }], nextPageToken: 'p2' } };
+    } } });
+    const p = require.resolve('../src/services/drive.service'); delete require.cache[p];
+    try {
+      const dv = require('../src/services/drive.service');
+      assert.deepStrictEqual(await dv.listPermissionTypes('F'), ['user', 'anyone']);
+      assert.ok(/nextPageToken/.test(seen[0].fields) && seen[1].pageToken === 'p2', JSON.stringify(seen));
+      mode = 'endless'; assert.strictEqual(await dv.listPermissionTypes('F'), null);
+      mode = 'error'; assert.strictEqual(await dv.listPermissionTypes('F'), null);
+    } finally { google.drive = origDrive; delete require.cache[p]; }
+  });
+
+  await t('5b Codex P2 — 보관함 링크용 폴더 찾기(findFolderPath)가 실제로 내보내져 있다', () => {
+    const dv = require('../src/services/drive.service');
+    assert.strictEqual(typeof dv.findFolderPath, 'function');
+    assert.strictEqual(typeof dv.listPermissionTypes, 'function');
+  });
+
+  await t('5c Codex P2 — 공개 폴더로 막힌(blocked) 확인은 재시도 횟수를 쓰지 않는다 · 올리기 실패만 센다', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../src/services/paymentResultArchive.service.js'), 'utf8');
+    assert.ok(/VALUES \(\$1, \$2, \$3, CASE WHEN \$3 = 'failed' THEN 1 ELSE 0 END/.test(src));
+    assert.ok(/attempts = payment_result_drive_archive\.attempts \+ CASE WHEN EXCLUDED\.status = 'failed' THEN 1 ELSE 0 END/.test(src));
+    assert.ok(!/attempts = payment_result_drive_archive\.attempts \+ 1,/.test(src));
+  });
+
   AR.__setPoolForTest(null); AR.__setDriveForTest(null);
   Object.assign(process.env, envBak);
   console.log(`\n${pass} passed, ${fail} failed`);

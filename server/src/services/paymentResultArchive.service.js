@@ -85,10 +85,11 @@ async function _mark(sha, uploadId, fields) {
   await _db().query(
     `INSERT INTO payment_result_drive_archive
        (file_sha256, upload_id, status, attempts, drive_file_id, drive_folder_id, root_folder_id, drive_name, last_error, archived_at, updated_at)
-     VALUES ($1, $2, $3, 1, $4, $5, $6, $7, $8, CASE WHEN $3 = 'done' THEN NOW() END, NOW())
+     VALUES ($1, $2, $3, CASE WHEN $3 = 'failed' THEN 1 ELSE 0 END, $4, $5, $6, $7, $8, CASE WHEN $3 = 'done' THEN NOW() END, NOW())
      ON CONFLICT (file_sha256) DO UPDATE SET
        upload_id = EXCLUDED.upload_id, status = EXCLUDED.status,
-       attempts = payment_result_drive_archive.attempts + 1,
+       -- attempts = 올리기 실패 횟수만(공개 폴더로 막힌 확인은 세지 않는다 — 공유를 고친 뒤 재시도 예산이 남게, Codex P2)
+       attempts = payment_result_drive_archive.attempts + CASE WHEN EXCLUDED.status = 'failed' THEN 1 ELSE 0 END,
        drive_file_id = COALESCE(EXCLUDED.drive_file_id, payment_result_drive_archive.drive_file_id),
        drive_folder_id = COALESCE(EXCLUDED.drive_folder_id, payment_result_drive_archive.drive_folder_id),
        root_folder_id = COALESCE(EXCLUDED.root_folder_id, payment_result_drive_archive.root_folder_id),

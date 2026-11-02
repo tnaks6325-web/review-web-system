@@ -529,8 +529,17 @@ async function listPermissionTypes(fileId) {
   const d = _getOAuthDrive() || _getReadDrive();
   if (!d) return null;
   try {
-    const r = await d.permissions.list({ fileId, fields: 'permissions(type, role)', supportsAllDrives: true });
-    return (r.data.permissions || []).map(p => p.type);
+    // 공유 드라이브는 한 번에 100개까지만 준다 — 끝 페이지까지 다 읽어야 '비공개'라고 말할 수 있다(Codex P1).
+    const types = []; let pageToken;
+    for (let page = 0; page < 50; page++) {
+      const r = await d.permissions.list({ fileId, fields: 'nextPageToken, permissions(type, role)', supportsAllDrives: true,
+        pageSize: 100, ...(pageToken ? { pageToken } : {}) });
+      types.push(...(r.data.permissions || []).map(p => p.type));
+      pageToken = r.data.nextPageToken;
+      if (!pageToken) return types;
+    }
+    logger.warn(`[Drive] 권한 페이지가 너무 많아 끝까지 못 읽음: ${fileId}`);
+    return null;   // 다 못 읽었으면 '모른다'
   } catch (e) {
     logger.warn(`[Drive] 권한 조회 실패: ${fileId} — ${e.message}`);
     return null;
@@ -1556,6 +1565,7 @@ module.exports = {
   findFolderByName,
   uploadFileBase64,
   listPermissionTypes,
+  findFolderPath,
   setFolderAnyoneReader,
   getOrCreateSubFolder,
   getOAuthStatus,
