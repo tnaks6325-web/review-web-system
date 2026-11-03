@@ -195,6 +195,13 @@ async function main(){const db=new PGlite();
   await pool.query(`INSERT INTO trackb_tab_finished(sheet_id,tab_name,tab_gid) VALUES('ts2','gid 없는 작업','')`);
   await assert.rejects(manager.answer({...tArgs,id:t6.id}),/바뀐/);assert.equal(await tabMgr('ts2','gid 없는 작업'),'');
   await manager.refresh(pool);assert.ok(!(await openRefs()).includes(TABQ+'ts2:name:gid 없는 작업'),'finished closes');
+  // Codex P2: a gid-less tab later acquires a gid and is finished by gid only → the old name-key question is obsolete:
+  //   answer → 409 (no write) and refresh closes it (no reopen under the new key because it is finished).
+  await tabRow('ts4','나중에 gid',null);await own('ts4',null);await manager.refresh(pool);const tg=await byRef(TABQ+'ts4:name:나중에 gid');assert.ok(tg,'name-key question while gid-less');
+  await pool.query(`UPDATE tab_configs SET tab_gid='g10' WHERE sheet_id='ts4'`);
+  await pool.query(`INSERT INTO trackb_tab_finished(sheet_id,tab_name,tab_gid) VALUES('ts4','옛 이름','g10')`);
+  await assert.rejects(manager.answer({...tArgs,id:tg.id}),/바뀐/);assert.equal(await tabMgr('ts4','나중에 gid'),'','no write to a tab finished by its current gid');
+  await manager.refresh(pool);refs=await openRefs();assert.ok(!refs.includes(TABQ+'ts4:name:나중에 gid'),'obsolete name-key closes');assert.ok(!refs.includes(TABQ+'ts4:g10'),'finished by gid: no new key');
   // Someone else filled the cell after the question was shown → 409, zero writes (blank-only).
   await tabRow('ts','나중에 채워짐','t7');await own('ts','t7');await manager.refresh(pool);const t7=await byRef(TABQ+'ts:t7');
   await pool.query(`UPDATE tab_configs SET manager='외부담당' WHERE tab_name='나중에 채워짐'`);

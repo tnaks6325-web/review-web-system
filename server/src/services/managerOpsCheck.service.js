@@ -112,8 +112,15 @@ async function tabStates(db, list, owned) {
   if (!fin.ok) throw new Error('마감 여부를 확인하지 못했습니다. 새로고침해 주세요.');
   const { rows } = await db.query(tabStateSql, [list.map(x => x.sheetId), list.map(x => x.tabName), list.map(x => x.tabGid == null ? '' : String(x.tabGid))]);
   const tabs = require('./trackB.service');
-  return rows.map(r => ({ ...r, owned_active: owned.has(`${r.sheet_id}\t${r.tab_name}`),
-    not_finished: !tabs.isTabFinishedIn(fin.map, r.sheet_id, r.tab_name, r.tab_gid) }));
+  return rows.map(r => {
+    // ★ gid = 지금 홈 목록이 아는 그 탭의 gid(질문 facts 에 박힌 옛 gid 가 아니다 · Codex P2 #1747).
+    //   gid 없던 탭이 나중에 gid 를 얻으면 옛 이름 키 질문은 키가 달라져 닫히고(refresh)·답은 409(answer),
+    //   마감 판정도 현재 gid 로 본다(gid 로만 남은 마감 기록을 놓치지 않는다).
+    const o = owned.get(`${r.sheet_id}\t${r.tab_name}`);
+    const tab_gid = o ? String(o.tabGid == null ? '' : o.tabGid).trim() : String(r.tab_gid == null ? '' : r.tab_gid).trim();
+    return { ...r, tab_gid, owned_active: !!o,
+      not_finished: !tabs.isTabFinishedIn(fin.map, r.sheet_id, r.tab_name, tab_gid) };
+  });
 }
 function eligibleTab(r) {
   return !!r && r.owned_active && r.not_finished && !String(r.tab_manager || '').trim() && !r.has_source_order
