@@ -46,6 +46,7 @@ const { logger } = require('../utils/logger');
      `trackb_custom_column_values` 는 `trackb_custom_columns` 에 FK CASCADE 라 따라 지워진다. */
 const DELETE_TABLES = [
   'participant_edits',
+  'qna_slots',                    // Q&A 날짜별 자리표(210) — 작업표 줄과 함께 사라진다(줄 번호를 가리킨다)
   'campaign_participants',
   'workdesk_participant_deletions',
   'review_submissions',

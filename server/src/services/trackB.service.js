@@ -4948,7 +4948,10 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
       parsedDates.forEach((d, i) => { if (d && (!best || d > best)) { best = d; bestRaw = rawDates[i]; } });
       return bestRaw;
     })();
-    const finalDateLabel = planLabel || lastSheetLabel || removedRaw;
+    /* ★★ Q&A체험단(결정 321) — 줄 = 날짜별 자리. 지운 줄의 **같은 날·같은 자리**로 보충하고(마지막 계획일로 보내지 않는다),
+       자리표가 새 줄을 가리키게 옮긴다(아래). 총 건수와 무관하게 늘 보충한다 — 자리가 사라지면 그날 공개글이 없어진다. */
+    const _qnaTab = await require('./qnaSlots.service').isQnaTab(client, sheetId, tabName);
+    const finalDateLabel = _qnaTab ? removedRaw : (planLabel || lastSheetLabel || removedRaw);
 
     // 행 자체는 실제 삭제한다. 삭제 표식은 별도 최소 테이블에 두어, 작업표 행을
     // 논리삭제 레코드로 남기지 않으면서도 재투영에 의해 같은 seq가 되살지 않게 한다.
@@ -4991,7 +4994,7 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
     // 예: 200건 작업에 201줄이 있을 때 1줄 삭제 → 200줄이므로 새 201번을 만들면 안 된다.
     const removedWasActive = tabRows.some(r => Number(r.seq) === Number(row.seq));
     const boardAfterDelete = Math.max(0, tabRows.length - (removedWasActive ? 1 : 0));
-    const shouldReplenish = !(boardTarget > 0 && boardAfterDelete >= boardTarget);
+    const shouldReplenish = _qnaTab || !(boardTarget > 0 && boardAfterDelete >= boardTarget);
     const blank = {};
     headers.forEach(h => { blank[h] = ''; });
     if (dateHeader) blank[dateHeader] = finalDateLabel;
@@ -5036,6 +5039,12 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
         if (tryInsert.rows.length) replacement = tryInsert;
       }
       if (!replacement) throw new HideRowError('replacement_slot_failed');
+    }
+    // ★ Q&A 자리표가 보충 줄을 가리키게 — 같은 트랜잭션(행 삭제가 롤백되면 이것도 롤백).
+    if (_qnaTab && replacement) {
+      await client.query(
+        'UPDATE qna_slots SET seq = $4, updated_at = NOW() WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3',
+        [sheetId, tabName, row.seq, replacement.rows[0].seq]);
     }
 
     // ★★ 표시 번호를 그 자리에서 다시 매긴다 (2026-08-23 신고: "1번 행을 지웠는데 2번이 시작번호").

@@ -56,6 +56,31 @@
 - 회귀가드: `server/tests/qnaWorkKind.test.js`.
   - 기존 가드 5개(blogWorkKind·reviewType·reviewTypeMixPipelineContract·campaignShortagePrompt·qtyTiersCampaign)는 패턴만 갱신했다 — 검사 의미 불변. 블로그 포함을 함께 고정해 오히려 강화했다.
 
+## 2단계 — 날짜별 자리표 (migration 210 · 사용자 확정 2026-11-03 추가분)
+- 추가 확정: **접수 뒤 건수·상품·하루 건수·공개 문구·시작일 변경 금지**(늘리려면 일정 끝 「추가 모집」) · 신청 후 1시간 + 그날 자정까지 제출, 자정 10분 전 신청 막음(3단계).
+- **생성 = `utils/qnaCalendar` 순수 함수**, 저장 = `qnaSlots.service.insertCalendar`(접수 때 작업표 줄과 같은 흐름 · 실패는 던짐).
+  - 상품(선택지)마다 **시작일부터 동시에** 하루 `daily` 건. 공개글은 하루 1건, 그날 첫 자리, 간격 `public_gap_days`.
+  - 줄 순서 = (날짜, 상품 순서, 상품 안 순번) — 같은 입력이면 같은 자리표.
+  - 오더 입력: v2 `product_options_json` 각 단위(`base` 또는 `options[i]`)의 `count`·`daily` + `qna:{public_count, public_texts[], public_gap_days}`. 없으면 전부 비공개.
+  - 잠금: 문구 부족·빈 문구 · 공개 > 총건수 · 하루 건수 0 · 시작일 없음 · 옛 형식(v1) · **총모집 ≠ 상품별 합**.
+- **날짜 건너뛰기 단일 출처 = `worktablePlan.businessDays`** — 리뷰 구매일자(`distributeDates`)도 이것을 탄다(뽑아내기 전과 600 조합 바이트 동일 — 회귀가드).
+- **작업표 칸**: 구매일자 → 「진행일자」(같은 dateStr 역할) · 「공개여부」·「문의문구」(역할 없음 — 제출 매퍼가 덮지 않음) 추가 · 리뷰옵션·주문번호·아이디·연락처·주소·결제금액 칸 없음. 이름(수취인)·입금 계좌·리뷰·입금일 칸은 둔다.
+- ★★ **작업표 자동 정리 격리 (완화 금지)** — 판정 `qnaSlots.isQnaTab`(조회 실패 = Q&A 로 본다 · fail-closed):
+  - 빈 줄 날짜 옮기기(`relayWorktableToProjection`) → 건너뜀.
+  - 총 건수 맞추기(`syncWorktableSlotsInTx`·저장 전 확인 `assertWorktableSlotsInTx`) → 줄 수가 바뀌면 `recruit_quota_qna_locked` 로 저장 전체 거절.
+  - 번호 겹친 빈 줄 정리(`cleanupPairedBlanks`) → 자리표에 묶인 줄 제외(`boundRowSql`).
+  - 빈 줄 고르기·덧붙이기(`writeOrderToWorktable`) → 자리 번호 없는 주문은 `qna_slot_required` 로 멈춤(3단계 Q&A 제출은 줄 번호로 들어온다).
+  - 행 삭제 보충(`hideWorkdeskRow`) → 지운 줄과 **같은 날**로 늘 보충하고 자리표 `seq` 를 새 줄로 옮김(같은 트랜잭션).
+  - 작업 삭제 → `qna_slots` 도 지움(`workTabDelete.DELETE_TABLES`).
+- ★★ **접수 뒤 수정 잠금 (완화 금지)** — 종전 잠금(`isSourceEditLocked`)은 공고·광고주 연결 뒤에만 걸려, **발행 전 Q&A 오더는 건수가 바뀌어도 자리표와 어긋난 채 저장**됐다(로컬 실측). `_qnaCalendarLocked`(Q&A 종류 + 그 오더의 자리표 존재 · 조회 실패 = 잠금)로 세 경로를 막는다:
+  - 인트라넷 원본 수정(`PUT /intake/source/:id`) — 양방향·담당자 갈래보다 먼저.
+  - 옛 갱신(`POST /intake/:id/update`).
+  - 리뷰웹 작업오더 수정 창(`orderAdminEdit`).
+  - 공유 패치(`sharedPatch._projectQuantityInTx`) — 건수·하루 건수 변경 `qna_calendar_locked`, 상품 더하기·빼기 영구 금지(`structurePermanentlyLocked`).
+  - 비교는 `_acceptedWorktableLockedFields` 한 곳 — 같은 값 재전송·상품 주소·안내 문구·특이사항은 통과.
+- 로컬 실측(가짜 DB · 운영 작업표 표준 열 복사 · 서버 TZ=UTC): 첫 실제 오더 모양 50자리, 공개 11/4·6·10·12·16 · 공개 줄 삭제 → 11/4 공개 자리로 보충·자리표 이동 · 인트라넷 수정 5종(건수·문구·시작일·하루건수 거절 / 주소·특이사항 통과) · 리뷰웹 수정 창 3종 거절 · 일반 리뷰 오더는 종전 그대로.
+- 회귀가드: `server/tests/qnaSlotCalendar.test.js`(43) · `qnaWorktableGuards.test.js`(29).
+
 ## 조사로 확인한 남은 단계의 함정 (2~5단계 착수 전 다시 읽을 것)
 - **순차진행(212·228)은 하루에 상품 하나뿐**(`sequentialSchedule.byDate` = 날짜당 1건) — 여러 상품을 동시에 하루 1건씩 여는 데 쓰면 안 된다.
   - 상품별 일건수는 균등 모드 + 선택지 `daily_limit`(결정 210) 으로 이미 된다.

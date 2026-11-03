@@ -357,6 +357,7 @@ async function cleanupPairedBlanks({ sheetId, tabName, dryRun = true, by = 'admi
             WHERE lower(btrim(k)) = ANY($3::text[])
             LIMIT 1) n ON TRUE
         WHERE p.sheet_id = $1 AND p.tab_name = $2 AND p.deleted_at IS NULL AND p.active = TRUE
+          AND NOT ${require('./qnaSlots.service').boundRowSql('p')}   -- ★ Q&A 자리 줄은 번호가 겹쳐도 지우지 않는다(결정 321)
      ), marked AS (
        SELECT b.*, bool_or(b.filled) FILTER (WHERE b.num <> '') OVER (PARTITION BY b.num) AS grp_filled
          FROM base b

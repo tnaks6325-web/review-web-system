@@ -875,6 +875,11 @@ async function _projectQuantityInTx(client, camp, prev, next, { preferRetireIds 
     const before = new Map((pp.options || []).map(o => [keyOf(o), o]));
     const changed = (pn.options || []).filter(o => { const b = before.get(keyOf(o));
       return !b || _num(b.recruitTotal) !== _num(o.recruitTotal) || _num(b.dailyLimit) !== _num(o.dailyLimit) || JSON.stringify(b.reviewTypeMix || []) !== JSON.stringify(o.reviewTypeMix || []); });
+    /* ★★ Q&A체험단(결정 321 · 사용자 확정 2026-11-03) — 건수·하루 건수는 날짜별 자리표가 정했다. 접수 뒤에는 바꾸지 않고
+       일정 끝 「추가 모집」으로 늘린다(자리표·작업표·공고 인원이 갈리지 않게 저장 전체를 거절). */
+    if (CANON.workKind(prev.work_kind || next.work_kind) === 'qna' && (total !== prevTotal || changed.length)) {
+      return reject('qna_calendar_locked', 'Q&A 작업은 접수 뒤 건수·하루 건수를 바꿀 수 없습니다 — 일정이 끝날 때 「추가 모집」으로 늘려 주세요.');
+    }
     const { rows: optRows } = await client.query(
       `SELECT id, opt_key, product_name, unit_kind, recruit_total, daily_limit FROM campaign_options WHERE campaign_id = $1 ORDER BY id FOR UPDATE`, [camp.id]);
     if (changed.length && optRows.length) {
@@ -936,11 +941,12 @@ function _unitsOf(state) {
     optKey: r.unitKind === 'product' ? String(r.productName || '').trim() : String(r.optKey || '').trim() }));
 }
 
-/** 접수 뒤 상품·옵션 더하기·지우기가 영구 금지인 작업인가(배송 혼합·회수 · 블로그 · 구매수량 단계 — 사용자 확정 2026-10-21 「4.가」). */
+/** 접수 뒤 상품·옵션 더하기·지우기가 영구 금지인 작업인가(배송 혼합·회수 · 블로그 · 구매수량 단계 — 사용자 확정 2026-10-21 「4.가」
+ *  · Q&A체험단 — 줄이 날짜별 자리라 상품을 더하거나 빼면 자리표와 어긋난다, 사용자 확정 2026-11-03 결정 321). */
 function structurePermanentlyLocked(st) {
   const { deliveryBaseType } = require('../utils/deliveryType');
   if (CANON.deliveryMix(st.delivery_type_mix) || ['혼합', '회수'].includes(deliveryBaseType(st.delivery_type))) return true;
-  if (CANON.workKind(st.work_kind) === 'blog') return true;
+  if (['blog', 'qna'].includes(CANON.workKind(st.work_kind))) return true;
   return (_parseList(st.product_options_json) || []).some(_tiersOn);
 }
 

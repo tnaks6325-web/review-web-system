@@ -23,7 +23,7 @@ const { isSheetHeaderRow } = require('./sheetHeader');
 //   여기서 어휘 표를 다시 만들면 검수(resolveReviewType)와 시트 표기가 갈라진다.
 const { REVIEW_TYPE_SHEET_LABELS, isReviewOptionHeader } = require('./reviewType');
 const { normalizeReviewTypeMix } = require('./reviewTypeMix');
-const { isBlogKind } = require('./workKind');
+const { isBlogKind, isQnaKind } = require('./workKind');
 const { isPostDateHeader } = require('./memoColumn');
 const { isTrackingHeader } = require('./trackingColumn');   // 택배송장 열 판정 단일 출처(사본 금지)
 const { deliveryBaseType, parseDeliveryType } = require('./deliveryType');   // 배송유형 기본형 판정 단일 출처(사본 금지)
@@ -104,24 +104,40 @@ function isWeekend(o) { const w = dowOf(o); return w === 0 || w === 6; }
  */
 const { isHoliday } = require('./krHolidays');
 
+/**
+ * 진행일 목록 — 시작일부터 `count` 개의 **진행 가능한 날**(주말·공휴일·제외일 건너뜀).
+ * ★ 날짜 건너뛰기 규칙의 단일 출처 — 리뷰 작업의 구매일자(distributeDates)와 Q&A 자리표(qnaCalendar)가
+ *   같은 날을 건너뛴다. MAX_DAYS 백스톱(달력 날 수)에 걸리면 모자란 채로 돌려준다.
+ */
+function businessDays({ count, startDate, skipWeekends = true, holidays = [] } = {}) {
+  const n = Math.max(0, parseInt(count, 10) || 0);
+  const start = parseYmd(startDate);
+  if (!n || !start) return [];
+  const skip = new Set((holidays || []).map(h => String(h || '').trim()).filter(Boolean));
+  const out = [];
+  let cur = start, guard = 0;
+  while (out.length < n && guard++ < MAX_DAYS) {
+    // ★★ "주말 제외" = 주말 + 법정공휴일 제외(2026-09-23 사용자 확정) — 공휴일에 줄을 깔면 발행 때
+    //   그 줄 수가 날짜별 계획으로 옮겨 적혀 공휴일 모집이 열린다. 판정 = utils/krHolidays 단일 출처.
+    if ((skipWeekends && (isWeekend(cur) || isHoliday(ymdStr(cur)))) || skip.has(ymdStr(cur))) { cur = addDays(cur, 1); continue; }
+    out.push({ date: ymdStr(cur), label: sheetDateStr(cur), dow: DOW[dowOf(cur)] });
+    cur = addDays(cur, 1);
+  }
+  return out;
+}
+
 function distributeDates({ total, daily, startDate, skipWeekends = true, holidays = [] } = {}) {
   const n = Math.max(0, parseInt(total, 10) || 0);
   const per = Math.max(0, parseInt(daily, 10) || 0);
   const start = parseYmd(startDate);
   if (!n || !per || !start) return { days: [], rowDates: new Array(n).fill(null) };
 
-  const skip = new Set((holidays || []).map(h => String(h || '').trim()).filter(Boolean));
   const days = [];
   const rowDates = [];
-  let cur = start, guard = 0;
-  while (rowDates.length < n && guard++ < MAX_DAYS) {
-    // ★★ "주말 제외" = 주말 + 법정공휴일 제외(2026-09-23 사용자 확정) — 공휴일에 줄을 깔면 발행 때
-    //   그 줄 수가 날짜별 계획으로 옮겨 적혀 공휴일 모집이 열린다. 판정 = utils/krHolidays 단일 출처.
-    if ((skipWeekends && (isWeekend(cur) || isHoliday(ymdStr(cur)))) || skip.has(ymdStr(cur))) { cur = addDays(cur, 1); continue; }
+  for (const day of businessDays({ count: Math.ceil(n / per), startDate, skipWeekends, holidays })) {
     const take = Math.min(per, n - rowDates.length);
-    days.push({ date: ymdStr(cur), label: sheetDateStr(cur), dow: DOW[dowOf(cur)], count: take });
-    for (let i = 0; i < take; i++) rowDates.push({ date: ymdStr(cur), label: sheetDateStr(cur) });
-    cur = addDays(cur, 1);
+    days.push({ date: day.date, label: day.label, dow: day.dow, count: take });
+    for (let i = 0; i < take; i++) rowDates.push({ date: day.date, label: day.label });
   }
   while (rowDates.length < n) rowDates.push(null);   // MAX_DAYS 백스톱에 걸린 나머지
   return { days, rowDates };
@@ -645,6 +661,39 @@ function ensureBlogColumns(columns) {
   return columns;
 }
 
+/* ── Q&A체험단 작업표 칸 (결정 321) ─────────────────────────────────────────
+   리뷰 작업의 「구매일자」 자리를 「진행일자」로 바꾼다 — 같은 날짜 역할(dateStr)이라 v2 열 배치·
+   그날 정원 인식·번호 정렬은 그대로 돌고, 이름만 "구매하는 날"이 아니게 된다.
+   공개여부·문의문구는 **시스템이 적는 칸**(역할 없음 — 리뷰어 제출 매퍼가 덮어쓰지 않는다).
+   ★ 리뷰옵션(리뷰 형태) 칸은 두지 않는다 — Q&A 에는 리뷰타입이 없다. */
+const QNA_DATE_HEADER = '진행일자';
+const QNA_VISIBILITY_HEADER = '공개여부';
+const QNA_TEXT_HEADER = '문의문구';
+const QNA_PLAN_HEADERS = [QNA_VISIBILITY_HEADER, QNA_TEXT_HEADER];
+const QNA_DROP_ROLES = new Set(['orderNum', 'userId', 'phone', 'address', 'price']);
+
+function isQnaWorkOrder(wo = {}) { return isQnaKind(wo.work_kind); }
+
+function ensureQnaColumns(columns) {
+  // ① 날짜 칸 이름 바꾸기(역할은 dateStr 그대로 — classifyHeaders 가 같은 역할로 읽는지 확인한다)
+  const di = _roleIndex(columns, 'dateStr');
+  if (di >= 0) {
+    const [dc] = classifyHeaders([QNA_DATE_HEADER], {});
+    columns[di] = { ...columns[di], name: dc.header, role: dc.role, label: dc.label, tier: dc.tier, origin: 'system', typeKey: 'qna' };
+  }
+  // ② 리뷰옵션 칸 + 구매 전용 칸 제거 — 구매가 없어 주문번호·아이디·연락처·주소·결제금액은 영영 비고,
+  //   연락처·주소를 받지 않는다(사용자 확정). 이름(수취인)·입금 계좌 칸은 둔다(누가 했는지 · 참여비 입금).
+  for (let i = columns.length - 1; i >= 0; i--) if (isReviewOptionHeader(columns[i].name)) columns.splice(i, 1);
+  _removeRoles(columns, QNA_DROP_ROLES);
+  // ③ 공개여부·문의문구 — 상품·옵션 칸 바로 뒤(없으면 날짜 칸 뒤)
+  let at = -1;
+  columns.forEach((c, i) => { if (['product', 'option_1', 'option_2'].includes(c.role)) at = i; });
+  if (at < 0) at = _roleIndex(columns, 'dateStr');
+  const add = QNA_PLAN_HEADERS.filter(h => !columns.some(c => c.name === h)).map(h => systemVariableColumn(h, 'qna'));
+  columns.splice(at + 1, 0, ...add);
+  return columns;
+}
+
 function systemVariableColumn(header, typeKey) {
   const [classified] = classifyHeaders([header], {});
   return {
@@ -824,9 +873,10 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
   /* ★ 127: 블로그 작업표에는 필수 3열(블로그URL·포스팅결과URL·포스팅제출일)을 시스템이 보장한다. */
   const isBlogPlan = isBlogWorkOrder(wo);
   if (isBlogPlan) ensureBlogColumns(columns);
+  const isQnaPlan = isQnaWorkOrder(wo);
 
   const rawTotal = o.total != null ? o.total : wo.recruit_count;
-  const total = Math.max(0, Math.min(parseInt(rawTotal, 10) || 0, MAX_ROWS));
+  let total = Math.max(0, Math.min(parseInt(rawTotal, 10) || 0, MAX_ROWS));
   const daily = Math.max(0, parseInt(o.daily != null ? o.daily : wo.daily_count, 10) || 0);
   // ★ 작업오더의 start_date 는 Date 객체일 수 있다 — parseYmd 로 정규화해 Y-M-D 문자열로 통일.
   const rawStart = o.startDate != null ? o.startDate : (wo.start_date || '');
@@ -853,6 +903,26 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     .map(h => String(h == null ? '' : h).trim())
     .filter(h => !!parseYmd(h))
     .map(h => ymdStr(parseYmd(h))))].sort();
+
+  /* ★★ Q&A체험단(결정 321) — 줄 = **날짜별 자리**. 건수·날짜·상품을 자리표가 정한다
+     (작업오더 총 건수·일건수 분배·옵션 배분을 쓰지 않는다). 미리보기의 총 건수 조정도 받지 않는다 —
+     자리표는 상품별 건수의 합이고, 접수 뒤 건수 변경은 일정 끝 추가 모집으로 한다(사용자 확정). */
+  let qnaCal = null;
+  if (isQnaPlan) {
+    const { qnaUnitsFromWorkOrder, buildQnaCalendar, unitDays } = require('./qnaCalendar');
+    const qu = qnaUnitsFromWorkOrder(wo);
+    const needDays = qu.units.reduce((m, u) => Math.max(m, unitDays(u)), 0);
+    qnaCal = buildQnaCalendar({ units: qu.units, days: businessDays({ count: needDays, startDate, skipWeekends, holidays }), startSeq: 1 });
+    qnaCal.blockers.unshift(...qu.blockers);
+    if (!isV2) qnaCal.blockers.push({ code: 'qna_requires_v2', message: 'Q&A 작업은 새 리뷰오더 형식(상품·옵션 단계형)으로만 만들 수 있습니다.' });
+    if (!startDate) qnaCal.blockers.push({ code: 'qna_no_start_date', message: 'Q&A 작업은 시작일이 있어야 날짜별 자리를 만들 수 있습니다.' });
+    // ★ 오더 총모집 ≠ 상품별 건수 합이면 공고 인원과 자리 수가 갈린다(접수 뒤엔 건수를 못 바꾼다 — 지금 잠근다).
+    const woTotal = parseInt(wo.recruit_count, 10) || 0;
+    if (!qnaCal.blockers.length && woTotal && woTotal !== qnaCal.total) {
+      qnaCal.blockers.push({ code: 'qna_total_mismatch', message: `총 모집 ${woTotal}건과 상품별 건수 합 ${qnaCal.total}건이 다릅니다 — 리뷰오더를 맞춘 뒤 접수하세요.` });
+    }
+    total = Math.min(qnaCal.total, MAX_ROWS);
+  }
 
   const stagedSelections = isV2 ? stagedSelectionsFromWorkOrder(wo) : [];
   const selectionByKey = new Map(stagedSelections.map(selection => [selection.selectionKey, selection]));
@@ -886,17 +956,19 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
   const productDistributionMode = normalizeProductDistributionMode(
     o.productDistributionMode != null ? o.productDistributionMode : wo.product_distribution_mode,
   );
-  const { buckets, rowOptions } = distributeOptions({
-    total, options: optKeys, includeSingle: isV2, distributionMode: productDistributionMode,
-  });
+  const { buckets, rowOptions } = isQnaPlan
+    ? { buckets: [], rowOptions: qnaCal.slots.map(s => s.unitKey) }
+    : distributeOptions({ total, options: optKeys, includeSingle: isV2, distributionMode: productDistributionMode });
   /* ★★ 127: 블로그체험단은 구매일자를 **미리 정할 수 없다**(모집·승인된 블로거가 생기면 그때 구매).
      날짜를 깔면 리뷰 규칙(그날 정원 파생)이 잘못 작동하므로 구매일자 칸을 통째로 비워 둔다 —
      바를참스킨 0804 시트(번호 1~50 + 구매일자 빈 칸)가 곧 블로그 표의 정상 모양이다. */
-  const { days, rowDates } = !isV2 && isBlogPlan
-    ? { days: [], rowDates: [] }
-    : distributeDates({ total, daily, startDate, skipWeekends, holidays });
+  const { days, rowDates } = isQnaPlan
+    ? _qnaDays(qnaCal.slots)
+    : !isV2 && isBlogPlan
+      ? { days: [], rowDates: [] }
+      : distributeDates({ total, daily, startDate, skipWeekends, holidays });
 
-  if (!isV2) {
+  if (!isV2 && !isQnaPlan) {
   /* ★★ 리뷰 종류(포토/텍스트/구매확정/별점) 행 배분 — 사용자 확정(2026-08-19).
      시트 시절 직원이 `리뷰옵션` 칸에 손으로 적던 ㉯ 작업옵션(리뷰형태) 선기입을 작업표
      생성이 대신한다. 이 값이 행에 있어야 리뷰어 안내(참여상품 팝업 D)와 행 단위 검수
@@ -1005,7 +1077,8 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
       placeV2StagedColumns(columns, stagedSelections);
       placeV2TrackingColumn(columns, courier.enabled);
     }
-    reviewOptions = reviewOptionAssignments({
+    // ★ Q&A 에는 리뷰타입이 없다 — 행별 리뷰 형태를 정하지 않는다(정하려 들면 invalid_review_type 으로 잠긴다).
+    if (!isQnaPlan) reviewOptions = reviewOptionAssignments({
       total,
       selections: stagedSelections,
       rowSelections,
@@ -1028,8 +1101,10 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
       selection: rowSelections[i],
       roundLabel: round.label,
       reviewOptionLabel: reviewOptions.labels[i] || '',
+      ...(isQnaPlan ? { qnaVisibility: qnaCal.slots[i].visibility, qnaText: qnaCal.slots[i].text } : {}),
     });
   }
+  if (isQnaPlan && columns.length) ensureQnaColumns(columns);
 
   /* ── 막을 것(blockers) — 그대로 만들면 반드시 잘못된 표가 되는 경우만 ── */
   const blockers = [];
@@ -1043,6 +1118,7 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
   if (courier.blocker) blockers.push({ code: courier.blocker, message: '배송유형과 택배발송대행 값이 일치하지 않습니다.' });
   if (reviewOptions.blocker) blockers.push({ code: reviewOptions.blocker, message: '리뷰유형 또는 유형별 수량을 행별로 확정할 수 없습니다.' });
   blockers.push(...variableColumnBlockers);
+  if (isQnaPlan) blockers.push(...qnaCal.blockers);
   const optSum = buckets.reduce((a, b) => a + b.count, 0);
   if (buckets.length && optSum !== total) {
     blockers.push({ code: 'option_sum', message: `옵션 배분 합계(${optSum})가 총 건수(${total})와 다릅니다.` });
@@ -1069,7 +1145,11 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
 
   /* ── 알릴 것(warnings) — 생성은 되지만 사람이 알아야 하는 것 ── */
   const warnings = [];
-  if (isBlogPlan) {
+  if (isQnaPlan) {
+    warnings.push({ code: 'qna_calendar', message: `Q&A체험단 — 상품별 날짜 자리 ${total}개(${days.length}일)를 만듭니다. 진행일자·공개여부·문의문구 칸이 자동 포함됩니다.` });
+    warnings.push(...qnaCal.warnings);
+  }
+  else if (isBlogPlan) {
     // 리뷰 규칙의 날짜 경고(no_start_date 등)는 blog 에선 전부 오탐 — 대신 사실을 한 줄로 말한다.
     warnings.push({ code: 'blog_no_dates', message: '블로그체험단 — 구매일자는 미리 깔지 않습니다(승인된 블로거가 구매할 때 채워집니다). 블로그URL·포스팅결과URL·포스팅제출일 열이 자동 포함됩니다.' });
   }
@@ -1162,7 +1242,18 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     startDate, skipWeekends, holidays,
     blockers, warnings,
     canCreate: blockers.length === 0,
+    ...(isQnaPlan ? { qnaCalendar: qnaCal } : {}),
   };
+}
+
+/** Q&A 자리표 → 날짜 요약(dates) + 줄별 날짜. */
+function _qnaDays(slots) {
+  const byDate = new Map();
+  for (const s of slots) {
+    const d = byDate.get(s.date) || { date: s.date, label: s.dateLabel, dow: '', count: 0 };
+    d.count++; byDate.set(s.date, d);
+  }
+  return { days: [...byDate.values()], rowDates: slots.map(s => ({ date: s.date, label: s.dateLabel })) };
 }
 
 /** 고를 수 있는 채널 목록(기본 4 + 직접 추가) — 미리보기 드롭다운이 그대로 쓴다. */
@@ -1190,7 +1281,7 @@ function planCellHeaders(headers) {
   for (const c of classifyHeaders(list)) {
     const h = c.header;
     if (!h) continue;
-    if (roles.has(c.role) || isReviewOptionHeader(h) || h === DELIVERY_KIND_HEADER || RECALL_HEADERS.includes(h)) {
+    if (roles.has(c.role) || isReviewOptionHeader(h) || h === DELIVERY_KIND_HEADER || RECALL_HEADERS.includes(h) || QNA_PLAN_HEADERS.includes(h)) {
       if (!out.includes(list[c.index])) out.push(list[c.index]);
     }
   }
@@ -1201,6 +1292,7 @@ module.exports = {
   buildWorktablePlan, buildColumns, distributeDates, distributeOptions, normalizeProductDistributionMode,
   distributeReviewTypes, reviewMixFromWorkOrder, optionReviewMixesFromWorkOrder,
   BLOG_REQUIRED_HEADERS, ensureBlogColumns, isBlogWorkOrder,
+  QNA_DATE_HEADER, QNA_VISIBILITY_HEADER, QNA_TEXT_HEADER, QNA_PLAN_HEADERS, ensureQnaColumns, isQnaWorkOrder, businessDays,
   REVIEW_SUBMIT_HEADER, ensureReviewColumn,
   productKeysFromWorkOrder,   // 138 — 상품 축 판정(작업오더 기준)
   DELIVERY_KIND_HEADER, RECALL_HEADERS,

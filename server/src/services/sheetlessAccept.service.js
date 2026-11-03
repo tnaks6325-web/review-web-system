@@ -157,13 +157,19 @@ async function createSheetlessWorktable({ workOrder: wo, tabName = '', planOptio
     };
   });
 
+  /* ★★ Q&A체험단(결정 321) — 날짜별 자리표를 작업표 줄과 **같은 흐름**에서 저장한다.
+     자리 i 의 줄 번호 = 작업표 줄 번호(headerRow + 1 + i) — 계획 줄 순서가 곧 자리표 순서다. */
+  const qnaSlots = plan.qnaCalendar
+    ? plan.qnaCalendar.slots.map((s, i) => ({ ...s, rowSeq: headerRow + 1 + i }))
+    : null;
+
   return {
     ok: true, sheetId, gid, tabName: title, campaignName,
     headerRow, columns: header, rows, filled,
     warnings: plan.warnings,
     // 실제 쓰기는 호출부(접수 라우트)가 등록과 같은 흐름에서 수행한다 — 아래 `persist` 참조.
     persist: () => persistSheetlessWorktable({ sheetId, gid, tabName: title, campaignName, headerRow, columns: header, rows, by,
-      workboardSchemaVersion: Number(wo.workboard_schema_version || 1) }),
+      workboardSchemaVersion: Number(wo.workboard_schema_version || 1), qnaSlots, workOrderId: wo.id }),
   };
 }
 
@@ -173,7 +179,7 @@ async function createSheetlessWorktable({ workOrder: wo, tabName = '', planOptio
  * ★ 호출 순서 계약: tab_configs 에 `sheetless=TRUE` 로 등록된 **뒤에** 불러야 한다.
  *   `rebuildLedgers` 가 fail-closed 로 그 플래그를 확인하기 때문(시트 기반 탭 덮어쓰기 차단).
  */
-async function persistSheetlessWorktable({ sheetId, gid, tabName, campaignName, headerRow, columns, rows, by = 'admin', workboardSchemaVersion = 1 } = {}) {
+async function persistSheetlessWorktable({ sheetId, gid, tabName, campaignName, headerRow, columns, rows, by = 'admin', workboardSchemaVersion = 1, qnaSlots = null, workOrderId = null } = {}) {
   const participants = require('./participants.service');
   const { rebuildLedgers } = require('./sheetlessLedger.service');
 
@@ -190,6 +196,12 @@ async function persistSheetlessWorktable({ sheetId, gid, tabName, campaignName, 
   const slots = await participants.createSlotsFromSheetRows({
     sheetId, tabName, tabGid: gid, campaignName, rows, by: `sheetless:${by}`,
   });
+
+  // ①-b Q&A 자리표 — 실패하면 던진다(접수 라우트가 장부 미완으로 보고). 자리표 없는 Q&A 탭은 신청이 막힌다(fail-closed).
+  if (Array.isArray(qnaSlots) && qnaSlots.length) {
+    const r = await require('./qnaSlots.service').insertCalendar({ workOrderId, sheetId, tabName, slots: qnaSlots, by: `sheetless:${by}` });
+    logger.info(`[sheetlessAccept] Q&A 자리표 ${r.inserted}/${qnaSlots.length}칸 tab=${tabName}`);
+  }
 
   // ② 장부 3권 — 열 구성을 함께 넘긴다(첫 생성이라 저장된 헤더가 없다).
   const ledger = await rebuildLedgers({ sheetId, tabName, columns, by: `sheetless-accept:${by}` });
