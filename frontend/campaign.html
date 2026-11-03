@@ -1715,7 +1715,7 @@ function _renderJoinedView(j, h){
       selectedOption: j.selectedOption,
       cashReceipt: j.cashReceipt,   // 현영 탭 공고만 서버가 내려줌(발행 안내 카드)
       qty: j.qty,                   // ★ 결정 289: 고른 개수 단계 — 상품 카드 결제금액을 그 단계 금액으로(1개 금액과 둘로 갈리지 않게)
-    }, { showOption: false, apiBase: API_BASE_URL, showInflow: !j.qnaSlot });
+    }, { showOption: false, apiBase: API_BASE_URL, showInflow: !j.qnaSlot, showProduct: !j.qnaSlot });
     // 💬 321: Q&A 공고는 구매양식(iframe) 대신 문의 카드 — 구매가 없다
     const _qna = !!j.qnaSlot;
     $('qnaBox').style.display = _qna ? '' : 'none';

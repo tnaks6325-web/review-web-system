@@ -202,9 +202,11 @@
         + (sub ? '<div class="sub">' + escAttr(sub) + '</div>' : '') + '</div></div></div>';
     }
 
-    // 상품 · 옵션 · 결제금액
-    html += '<div class="cwd-box"><div class="cwd-tt">📦 상품 · 옵션 · 결제금액</div>'
-      + '<div class="cwd-body">' + escAttr(fmtProduct(wd, d.qty)) + '</div></div>';
+    // 상품 · 옵션 · 결제금액 — 💬 321: Q&A 는 구매가 없어 숨긴다(showProduct:false · 상품은 Q&A 카드가 보여 준다)
+    if (o.showProduct !== false) {
+      html += '<div class="cwd-box"><div class="cwd-tt">📦 상품 · 옵션 · 결제금액</div>'
+        + '<div class="cwd-body">' + escAttr(fmtProduct(wd, d.qty)) + '</div></div>';
+    }
 
     // 🧾 현금영수증 발행 안내 — 연결 탭 진행방식이 '현영'인 공고만(d.cashReceipt는 서버가 판정).
     //   결제 단계를 지나면 발행을 되돌리기 어려우므로 상품 카드 바로 아래(구매 전 시점)에 둔다.

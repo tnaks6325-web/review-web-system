@@ -214,6 +214,7 @@ const st = require('../src/services/campaignState.service');
     const map = [...qna.qnaOptKeyMap(wo).values()];
     t('선택지 → 자리 단위가 자리표와 같은 기준(「단일」 옵션도 자리표에 있는 단위)', map.length === cal.length && map.every(u => cal.includes(u)));
   }
+  t('참여 후 화면: Q&A 는 상품·결제금액 카드를 숨긴다(구매 없음)', /showProduct: !j\.qnaSlot/.test(page9) && /if \(o\.showProduct !== false\)/.test(F('js/campaign-workdetail.js')));
   t('공개 목록: 선택지별 오늘 자리 수를 다시 만든 맵에도 싣는다', /_cntMap\.qnaToday = opts\[0\]\.qnaToday/.test(camp9));
   t('리뷰어 화면: Q&A 는 캡처 확인 전 완료 아님(자리 정보 못 받으면 다시 불러옴)',
     /function _isDoneDetail\(j\)[\s\S]{0,260}return !!\(j\.qnaSlot && j\.qnaSlot\.captureDone === true\)/.test(page9) && /_qnaSlotRetry\+\+/.test(page9));
