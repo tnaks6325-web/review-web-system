@@ -48,7 +48,7 @@ ok('only successful col edits are recorded for undo', /function _recordCellUndo\
 ok('undo waits for saving groups instead of navigating away', /if\(group\.pending\)\{[\s\S]{0,200}return true;/.test(workdeskSrc));
 ok('undo restores existing overlays by saving their previous value', /entry\.had[\s\S]{0,500}\/api\/trackb\/workdesk\/edit/.test(workdeskSrc));
 ok('undo removes first-time overlays through the revert endpoint', /\/api\/trackb\/workdesk\/revert/.test(workdeskSrc));
-ok('paste creates one shared undo group for all affected cells', /const undoGroup=_beginCellUndoGroup\('paste'\);[\s\S]{0,1200}commitCellEdit\(j\.rowId, j\.field, j\.val, j\.td, \{undoGroup\}\)/.test(workdeskSrc));
+ok('paste creates one shared undo group for all affected cells', /const undoGroup=_beginCellUndoGroup\('paste'\);[\s\S]{0,1200}commitCellEdit\(j\.rowId, j\.field, j\.val, j\.td, \{undoGroup[,}]/.test(workdeskSrc));
 
 async function runWorkdeskUndoExecution() {
   console.log('\n[3] workdesk undo execution');
