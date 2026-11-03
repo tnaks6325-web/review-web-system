@@ -1169,47 +1169,81 @@ router.post('/workdesk/unseen', authMiddleware, async (req, res, next) => {
 //   rowId ∈ (sheetId,tabName) 재검증·앵커 산출·거부조건은 서비스가 수행.
 router.post('/workdesk/edit', authMiddleware, async (req, res, next) => {
   try {
-    const { sheetId, tabName, rowId, field, value } = req.body || {};
-    if (!sheetId || !tabName || !rowId || !field) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId, field 필수' });
-    const g = await _ensureWorkdeskCellEditScope(req, { sheetId, tabName, field }); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
-    // 결제금액은 오버레이를 먼저 저장한 뒤 원장이 거절하면 화면/원장 금액이 갈라진다.
-    // 표준 금액열은 저장 전에 동일한 정규화·검증을 태워 둘 중 하나만 바뀌는 상태를 막는다.
-    const ledger = require('../services/orderLedger.service');
-    const normalized = typeof field === 'string' && field.indexOf('col:') === 0
-      ? await ledger.normalizeWorkdeskColumnValue({ sheetId, tabName, header: field.slice(4), value })
-      : { isPrice: false, ok: true, value };
-    const normalizedValue = normalized.value;
-    if (normalized.isPrice && !normalized.ok) {
-      return res.status(400).json({ ok: false, error: '결제금액은 0 이상의 원화 정수로 입력해 주세요.' });
+    await _workdeskEditCell(req, res, req.body || {});
+  } catch (err) { next(err); }
+});
+/* 셀 한 칸 저장의 **유일한 본문** — 한 칸 저장(/workdesk/edit)과 묶음 저장(/workdesk/edit-batch, 결정 327)이
+   둘 다 이것을 부른다(단일 출처). 권한 게이트·금액 정규화·editWorkdeskRow(잠금·충돌·participant_edits)·
+   주문 원장 through-write·참여 기록 맞춤·응답 상태코드가 칸마다 똑같이 적용된다.
+   res 는 진짜 응답(한 칸) 또는 칸별 결과를 받아 두는 대용품(묶음)이다. */
+async function _workdeskEditCell(req, res, cell) {
+  const { sheetId, tabName, rowId, field, value } = cell || {};
+  if (!sheetId || !tabName || !rowId || !field) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId, field 필수' });
+  const g = await _ensureWorkdeskCellEditScope(req, { sheetId, tabName, field }); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+  // 결제금액은 오버레이를 먼저 저장한 뒤 원장이 거절하면 화면/원장 금액이 갈라진다.
+  // 표준 금액열은 저장 전에 동일한 정규화·검증을 태워 둘 중 하나만 바뀌는 상태를 막는다.
+  const ledger = require('../services/orderLedger.service');
+  const normalized = typeof field === 'string' && field.indexOf('col:') === 0
+    ? await ledger.normalizeWorkdeskColumnValue({ sheetId, tabName, header: field.slice(4), value })
+    : { isPrice: false, ok: true, value };
+  const normalizedValue = normalized.value;
+  if (normalized.isPrice && !normalized.ok) {
+    return res.status(400).json({ ok: false, error: '결제금액은 0 이상의 원화 정수로 입력해 주세요.' });
+  }
+  const out = await svc.editWorkdeskRow({ sheetId, tabName, rowId, field, value: normalizedValue, by: _by(req) });
+  // 그리드 셀 편집(col:<헤더>) 성공 → 실제 주문 원장(order_submissions)에도 through-write 시도.
+  //   ★ editWorkdeskRow 트랜잭션 커밋 **뒤**, 별도 요청/락으로 수행 — 같은 tx 안에서 부르면
+  //     campaign_participants 행을 두 번 잠가 데드락 위험이 있어 라우트 레벨에서 분리했다(레드팀 지적).
+  //   ★ 광고주(advertiser)는 여기 도달하지 않는다(위 _ensureWorkdeskCellEditScope 가 role 무관 필드
+  //     범위만 검사할 뿐이라, 신원 through-write 는 내부인 전용으로 한 번 더 좁힌다).
+  let throughWrite = null;
+  const role = _role(req);
+  if (out.ok && out.orderSubmissionId && typeof field === 'string' && field.indexOf('col:') === 0 &&
+      (role === 'master' || role === 'admin' || role === 'staff')) {
+    try {
+      throughWrite = await require('../services/orderLedger.service').syncCellToOrderIdentity({
+        sheetId, tabName, header: field.slice(4), value: normalizedValue, oldValue: out.priorValue,
+        orderSubmissionId: out.orderSubmissionId, by: _by(req),
+      });
+    } catch (e) {
+      throughWrite = { attempted: true, ok: false, reason: 'exception', message: e.message };
     }
-    const out = await svc.editWorkdeskRow({ sheetId, tabName, rowId, field, value: normalizedValue, by: _by(req) });
-    // 그리드 셀 편집(col:<헤더>) 성공 → 실제 주문 원장(order_submissions)에도 through-write 시도.
-    //   ★ editWorkdeskRow 트랜잭션 커밋 **뒤**, 별도 요청/락으로 수행 — 같은 tx 안에서 부르면
-    //     campaign_participants 행을 두 번 잠가 데드락 위험이 있어 라우트 레벨에서 분리했다(레드팀 지적).
-    //   ★ 광고주(advertiser)는 여기 도달하지 않는다(위 _ensureWorkdeskCellEditScope 가 role 무관 필드
-    //     범위만 검사할 뿐이라, 신원 through-write 는 내부인 전용으로 한 번 더 좁힌다).
-    let throughWrite = null;
-    const role = _role(req);
-    if (out.ok && out.orderSubmissionId && typeof field === 'string' && field.indexOf('col:') === 0 &&
-        (role === 'master' || role === 'admin' || role === 'staff')) {
+  }
+  // ★ 결정 230 ③(가): 상품 칸을 고치면 그 리뷰어의 참여 기록(상품별 인원 세기)도 따라 바꾼다 — 커밋 뒤 별도 tx.
+  //   주문 원장에는 되쓰지 않는다(결정 018). 실패해도 편집 결과는 그대로(무시 · 로그).
+  let applicationSync = null;
+  if (out.ok && (role === 'master' || role === 'admin' || role === 'staff')) {
+    applicationSync = await require('../services/productMismatchVerify.service')
+      .syncApplicationFromWorkboard({ sheetId, tabName, rowId, field, by: _by(req) })
+      .catch(() => ({ synced: false, reason: 'exception' }));   // 편집은 이미 저장됨 — 응답을 실패로 바꾸지 않는다
+  }
+  res.status(out.ok ? 200 : (out.error === 'concurrent_edit_conflict' ? 409 : 400)).json({ ...out, throughWrite, applicationSync });
+}
+// ── 묶음 저장(결정 327) — 붙여넣기 수백 칸이 칸마다 요청 1개를 보내 직원별 요청 한도(분당 300)를 넘기고
+//   넘친 칸이 조용히 원래 값으로 돌아가던 사고(2026-10-15 300칸 중 3칸 누락)를 막는다.
+//   ★ 쓰기 규칙을 새로 만들지 않는다 — 칸마다 위 _workdeskEditCell 을 **차례로** 태운다(한 칸 저장과 같은 게이트·검증·기록).
+//   ★ 칸별 독립: 한 칸 저장이 원래 칸마다 별도 트랜잭션이고 원장 반영은 커밋 뒤라 되돌릴 수 없으므로,
+//     한 칸 실패가 나머지를 되돌리지 않는다. 칸별 결과(status + 한 칸 저장과 같은 응답 본문)를 순서대로 돌려준다.
+const WORKDESK_EDIT_BATCH_MAX = 50;
+router.post('/workdesk/edit-batch', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, cells } = req.body || {};
+    if (!sheetId || !tabName || !Array.isArray(cells) || !cells.length) return res.status(400).json({ ok: false, error: 'sheetId, tabName, cells 필수' });
+    if (cells.length > WORKDESK_EDIT_BATCH_MAX) return res.status(400).json({ ok: false, error: 'too_many_cells', max: WORKDESK_EDIT_BATCH_MAX });
+    const results = [];
+    for (const c of cells) {
+      const cell = (c && typeof c === 'object') ? c : {};
+      const cap = { code: 200, body: null, status(code) { this.code = code; return this; }, json(b) { this.body = b; return this; } };
       try {
-        throughWrite = await require('../services/orderLedger.service').syncCellToOrderIdentity({
-          sheetId, tabName, header: field.slice(4), value: normalizedValue, oldValue: out.priorValue,
-          orderSubmissionId: out.orderSubmissionId, by: _by(req),
-        });
+        await _workdeskEditCell(req, cap, { sheetId, tabName, rowId: cell.rowId, field: cell.field, value: cell.value });
       } catch (e) {
-        throughWrite = { attempted: true, ok: false, reason: 'exception', message: e.message };
+        console.error('[workdesk/edit-batch] 칸 저장 예외', e && e.message);
+        cap.code = 500; cap.body = { ok: false, error: 'server_error' };
       }
+      results.push({ rowId: cell.rowId, field: cell.field, status: cap.code, ...(cap.body || { ok: false, error: 'no_response' }) });
     }
-    // ★ 결정 230 ③(가): 상품 칸을 고치면 그 리뷰어의 참여 기록(상품별 인원 세기)도 따라 바꾼다 — 커밋 뒤 별도 tx.
-    //   주문 원장에는 되쓰지 않는다(결정 018). 실패해도 편집 결과는 그대로(무시 · 로그).
-    let applicationSync = null;
-    if (out.ok && (role === 'master' || role === 'admin' || role === 'staff')) {
-      applicationSync = await require('../services/productMismatchVerify.service')
-        .syncApplicationFromWorkboard({ sheetId, tabName, rowId, field, by: _by(req) })
-        .catch(() => ({ synced: false, reason: 'exception' }));   // 편집은 이미 저장됨 — 응답을 실패로 바꾸지 않는다
-    }
-    res.status(out.ok ? 200 : (out.error === 'concurrent_edit_conflict' ? 409 : 400)).json({ ...out, throughWrite, applicationSync });
+    const saved = results.filter(r => r.ok === true).length;
+    res.json({ ok: true, saved, failed: results.length - saved, results });
   } catch (err) { next(err); }
 });
 router.post('/workdesk/revert', authMiddleware, async (req, res, next) => {

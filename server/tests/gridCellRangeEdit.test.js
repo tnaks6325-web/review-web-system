@@ -110,7 +110,7 @@ function buildFakeGrid() {
 }
 
 function makeCtx(fake) {
-  const commits = [], toasts = [];
+  const commits = [], toasts = [], saves = [];
   const sandbox = {
     STATE: { canEdit: true, gSelRange: null, cur: { sheetId: 's', tabName: 't' } },
     $: sel => (sel === '#gbody' ? fake.body : (sel === '#gselstat' ? fake.stat : null)),
@@ -126,6 +126,9 @@ function makeCtx(fake) {
     toast: m => toasts.push(String(m)),
     confirm: () => true,
     commitCellEdit: (rowId, field, val) => commits.push({ rowId, field, val }),
+    // 결정 327: 붙여넣기 저장은 _saveCellJobs(묶음 저장 → commitCellEdit 한 경로)로 넘긴다.
+    //   여기서는 "어느 칸에 무엇을" 넘기는지만 본다 — 저장·결과 요약은 workdeskEditBatch.test.js 가 실제 실행으로 본다.
+    _saveCellJobs: (jobs, locked) => { jobs.forEach(j => commits.push({ rowId: j.rowId, field: j.field, val: j.val })); toasts.push(`${jobs.length}칸 저장 중…`); saves.push({ n: jobs.length, locked }); },
     _beginCellUndoGroup: kind => ({ kind, entries: [], pending: 0 }),
     _finishCellUndoGroup: () => {},
     _PASTE_MAX: 500,
@@ -135,7 +138,7 @@ function makeCtx(fake) {
   ['_selRanges', '_setCellSel', '_updateActiveSel', '_paintSel', '_clearCellSel', '_selAnchorTd', '_selectionGrid', '_cellCopyText', '_selectionTsv', '_moveCellSel', '_selectionStats', '_syncSelectionStat', '_pasteIntoSelection', '_dataEdgeIndex', '_cellHasValue', '_rowEdgeIndex', '_colEdgeIndex'].forEach(n => {
     vm.runInContext(grab(n), sandbox);
   });
-  return { sandbox, commits, toasts };
+  return { sandbox, commits, toasts, saves };
 }
 
 /* ── 1B. 고정 헤더에 가린 띠에서도 우클릭 메뉴가 열린다 (2026-08-19 신고) ──────────
@@ -215,14 +218,15 @@ console.log('\n[2] 직사각형 선택 · 복사 (세로 드래그 = 그 열만)
 console.log('\n[3] 붙여넣기 — 편집 가능한 칸에만');
 {
   const fake = buildFakeGrid();
-  const { sandbox, commits, toasts } = makeCtx(fake);
+  const { sandbox, commits, toasts, saves } = makeCtx(fake);
   vm.runInContext('_setCellSel({r0:0,c0:2,r1:0,c1:2})', sandbox);
   vm.runInContext('_pasteIntoSelection("가\\t나\\n다\\t라")', sandbox);
   eq('2×2 붙여넣기 = 4칸 저장', commits.length, 4);
+  eq('저장은 한 번에 묶어 넘긴다(결과 요약 한 번)', saves.length, 1);
   eq('첫 칸은 선택 시작 칸', commits[0].field, 'col:주문자제출');
   eq('오른쪽으로 이어짐', commits[1].field, 'col:수취인');
   eq('아래 행으로 이어짐', commits[2].rowId, 'r1');
-  ok('건수를 보고한다', toasts.some(t => /4개 칸 붙여넣음/.test(t)), toasts.join('|'));
+  ok('건수를 보고한다', toasts.some(t => /4칸 저장 중/.test(t)), toasts.join('|'));
 }
 {
   const fake = buildFakeGrid();
