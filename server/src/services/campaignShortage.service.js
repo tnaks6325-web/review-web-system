@@ -168,10 +168,13 @@ async function _optionCappedIds(db, ids, sinceMs) {
   }
 }
 
+/** 미달 연장 팝업에 올리지 않는 체험단 종류 — 블로그(하루 인원 개념 없음) · Q&A(못 채운 자리는 넘기지 않고 일정 끝에 담당자가 정한다, 사용자 확정 2026-11-03) */
+const NO_DAILY_CARRY_KINDS = ['blog', 'qna'];
+
 /** 잠근 행으로 다시 보는 후보 조건 — 후보 조회 SQL·필터와 같은 기준(그 사이 정책이 바뀌었으면 거절 — 코덱스 리뷰) */
 function _stillEligible(c) {
   return !!c && c.participation_mode === true && c.status === 'active' && !c.archived_at && !c.shortage_prompt_off_at
-    && !c.reviewer_hidden && (c.carry_strategy || 'next') === 'extend' && (c.work_kind || '') !== 'blog' && !st.isCarryHold(c);
+    && !c.reviewer_hidden && (c.carry_strategy || 'next') === 'extend' && !NO_DAILY_CARRY_KINDS.includes(c.work_kind || '') && !st.isCarryHold(c);
 }
 
 async function _loadCandidates(db) {
@@ -183,12 +186,12 @@ async function _loadCandidates(db) {
         AND archived_at IS NULL AND shortage_prompt_off_at IS NULL
         AND COALESCE(reviewer_hidden, FALSE) = FALSE
         AND COALESCE(carry_strategy,'next') = 'extend'
-        AND COALESCE(rc.work_kind,'') <> 'blog'`);   // 블로그는 하루 인원 개념이 없다(일건수 = 총원 보정값)
+        AND COALESCE(rc.work_kind,'') NOT IN ('blog','qna')`);   // 블로그는 하루 인원 개념이 없다(일건수 = 총원 보정값) · Q&A 는 못 채운 자리를 넘기지 않는다
   // ★ 리뷰어 숨김(테스트) 공고는 운영 팝업에 올리지 않는다(코덱스 리뷰).
   // ★ 이월 보류 판정은 정원 판정과 같은 isCarryHold 단일 출처(킬스위치 CAMPAIGN_CARRY_HOLD=0 반영 — SQL 사본 금지).
   // ★ 작업 종류는 공고 > 탭 순(단일 출처 resolveWorkKind) — 공고 칸이 비고 탭이 블로그인 옛 작업도 뺀다(코덱스 리뷰)
   const { resolveWorkKind } = require('../utils/workKind');
-  return rows.filter(c => !st.isCarryHold(c) && resolveWorkKind({ campaignKind: c.work_kind, tabKind: c._tab_work_kind }) !== 'blog');
+  return rows.filter(c => !st.isCarryHold(c) && !NO_DAILY_CARRY_KINDS.includes(resolveWorkKind({ campaignKind: c.work_kind, tabKind: c._tab_work_kind })));
 }
 
 /**

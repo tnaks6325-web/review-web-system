@@ -99,6 +99,9 @@ function precheckPolicy({ classified, expectedChannel, slotKey = 'review', revie
      그대로 두면 `kind='other'` 확신 0.9 에서 **첨부가 잠겨 정상 제출이 막힌다**(참여 소각).
      ★ `workKind` 가 null(미지정·조회 실패)이면 여기 안 걸린다 = 오늘 동작 그대로. */
   if (workKind === 'blog') return skip('blog_tab');
+  /* ★★ Q&A체험단 안전핀 (블로그와 같은 규율 · 완화 금지) — 결과물은 상품 페이지 **문의 화면** 캡처다.
+     리뷰 화면이 아니므로 "리뷰 화면인가"로 판정하면 정상 제출이 전부 `other` 로 잠긴다(참여 소각). */
+  if (workKind === 'qna') return skip('qna_tab');
 
   /* ★★ 087 안전핀 (완화 금지) — 구매확정 작업은 **어떤 경우에도 잠그지 않는다**.
      구매확정건의 리뷰어는 리뷰 화면이 아니라 '구매확정 완료 화면'을 올린다. 2차에서 AI 에
@@ -1275,11 +1278,12 @@ async function inspectSubmission({
        그대로 두면 blog 탭의 정상 제출이 전건 "리뷰 화면이 아님" 불량이 된다(087 실측 사고와 같은 모양).
        ★ 같은 파일(duplicate)은 **그대로 검사한다** — 슬롯 무관이고 캡처 재탕은 blog 에서도 신호다.
        ★ workKind 가 null(미지정·조회 실패)이면 종전 경로 그대로. */
-    const _isBlogTab = exp.workKind === 'blog';
+    // ★ Q&A체험단도 같은 갈래 — 결과물이 문의 화면 캡처라 리뷰 캡처 전제 판정 셋이 성립하지 않는다(같은 파일 검사는 유지).
+    const _isBlogTab = exp.workKind === 'blog' || exp.workKind === 'qna';
     // ★ 판정 기준은 **행 우선 유효 리뷰타입**(effReviewType) — 혼합 탭의 구매확정 행이 여기서 산다.
     const _okKinds = effReviewType === 'confirm' ? ['review', 'purchase_confirm'] : ['review'];
     if (_isBlogTab) {
-      checks.format = { verdict: 'skip', reason: 'blog_tab', kind: (cls && cls.kind) || '' };
+      checks.format = { verdict: 'skip', reason: exp.workKind === 'qna' ? 'qna_tab' : 'blog_tab', kind: (cls && cls.kind) || '' };
     } else if (!cls) {
       checks.format = { verdict: 'skip', reason: 'no_ai', ...(!isReceipt ? { evidence: 'unknown' } : {}) };
     } else if (!isReceipt && (typeof cls.kind !== 'string' || !cls.kind.trim()

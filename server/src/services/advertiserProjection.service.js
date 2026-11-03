@@ -223,7 +223,7 @@ async function projectIntranetAdvertiser(order, context, deps) {
        RETURNING id`,
       [
         _portalWorkId(), advertiserId, order.id, _text(order.manager_name || order.work_manager, 100),
-        order.work_kind === 'blog' ? '블로그 체험단' : '리뷰 체험단',
+        order.work_kind === 'blog' ? '블로그 체험단' : order.work_kind === 'qna' ? 'Q&A 체험단' : '리뷰 체험단',
         _text(order.product_option || order.title, 1000), _text(order.inflow_type, 100),
         _intOrZero(order.recruit_count), _dateOrNull(order.start_date),
         _text(context && context.workSheetUrl, 1000), _text(context && context.by, 100),

@@ -131,6 +131,14 @@ function _woIsBlogKind(raw) {
   return v === 'blog' || /블로그|blog/i.test(v);
 }
 
+function _woIsQnaKind(raw) {
+  const v = String(raw == null ? '' : raw).trim();
+  if (!v || _woIsBlogKind(v)) return false;
+  return v === 'qna' || /q\s*[&\/]\s*a|\bqna\b|큐앤에이|문의\s*등록/i.test(v);
+}
+
+function _woHasNoReviewType(raw) { return _woIsBlogKind(raw) || _woIsQnaKind(raw); }
+
 function _woCleanProductOption(raw, productUrl) {
   if (!raw || !String(raw).trim()) return "";
   const pu = (productUrl || "").trim();
@@ -490,10 +498,10 @@ function _woCampaignPrefill(o) {
     // ★ 087: 리뷰타입 — 인트라넷 발주 폼의 값이 그대로 온다(`포토` · `구매확정` ·
     //   `혼합(포토 10건, 텍스트 20건, …)`). 표준 key 변환은 발행 폼이 하고 저장 시 서버가 다시 정규화한다.
     //   ★ 여기서 미리 변환하지 않는 이유 = 이 모듈은 상세 표시도 겸해 **원문**을 그대로 보여줘야 한다.
-    //   ★ 099: 블로그체험단에는 리뷰타입이 없다(별도 축) — 프리필하지 않는다.
+    //   ★ 099: 블로그체험단에는 리뷰타입이 없다(별도 축) — 프리필하지 않는다. Q&A체험단도 같다.
     //     여기서 값을 흘리면 발행 폼이 블로그 공고에 리뷰타입을 저장해 캡처 검수가 개입한다.
-    review_type:   _woIsBlogKind(o.work_kind) ? "" : (o.review_type || ""),
-    review_type_mix: _woIsBlogKind(o.work_kind) ? [] : (o.review_type_mix || []),
+    review_type:   _woHasNoReviewType(o.work_kind) ? "" : (o.review_type || ""),
+    review_type_mix: _woHasNoReviewType(o.work_kind) ? [] : (o.review_type_mix || []),
     // ★ 099: 체험단 종류 — 발행 폼이 그대로 저장한다(빈 값 = 리뷰 = 기존 동작).
     work_kind:     String(o.work_kind || "").trim(),
     product_url:   o.product_url || "",
@@ -568,4 +576,4 @@ function _woCampaignPrefill(o) {
   return prefill;
 }
 
-module.exports = { _driveId, _woPickSections, _woCleanGuide, _woProductLines, _woManagerNick, _woIsBlogKind, _woCleanProductOption, _woGuideUrls, _woNormName, _woDeliveryBase, _woChannelFromUrl, _woChannel, _woProductMode, _woProductUnitSrc, _woUnitGuide, _woOptionRows, _woPlainGuideToHtml, _woReviewImgHtml, _woGuideImages, _woBuildInflowHtml, _woStripReviewMeta, _woFirstProductInfo, _woCampaignPrefill };
+module.exports = { _driveId, _woPickSections, _woCleanGuide, _woProductLines, _woManagerNick, _woIsBlogKind, _woIsQnaKind, _woHasNoReviewType, _woCleanProductOption, _woGuideUrls, _woNormName, _woDeliveryBase, _woChannelFromUrl, _woChannel, _woProductMode, _woProductUnitSrc, _woUnitGuide, _woOptionRows, _woPlainGuideToHtml, _woReviewImgHtml, _woGuideImages, _woBuildInflowHtml, _woStripReviewMeta, _woFirstProductInfo, _woCampaignPrefill };

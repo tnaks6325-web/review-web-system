@@ -34,7 +34,8 @@ if (intranetRoot) {
 assert.match(orderRoute, /review_type_mix JSONB NOT NULL DEFAULT '\[\]'::jsonb/);
 assert.match(orderRoute, /_reviewTypeMixJson\(b\.review_type_mix, b\.review_type\)/);
 assert.match(orderRoute, /review_type_mix = \$18/);
-assert.match(workOrderUi, /review_type_mix: _woIsBlogKind/);
+assert.match(workOrderUi, /review_type_mix: _woHasNoReviewType/);
+assert.match(workOrderUi, /function _woHasNoReviewType\(raw\) \{ return _woIsBlogKind\(raw\) \|\| _woIsQnaKind\(raw\); \}/);
 
 assert.match(recruitUi, /prefill\.review_type_mix/);
 assert.match(recruitUi, /reviewTypeMix:\s*o\.reviewTypeMix\s*\?\?\s*o\.review_type_mix\s*\?\?\s*\[\]/);

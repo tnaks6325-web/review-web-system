@@ -116,7 +116,7 @@ test('배선 — 잠금 안 게이트 · INSERT 뒤 UPDATE · 옵션 바꾸기 �
   assert.match(routes, /return require\('\.\.\/services\/campaignOptionRename\.service'\)\.applyOptionRenames\(client, campaignId, options\);/, '공고 창도 같은 단일 출처');
   assert.match(routes, /code: 'qty_tiers_present'/);
   assert.match(routes, /campaignQtyTiers\.insertTiers\(_insClient, rows\[0\]\.id, _qtyTierRows\)[^\n]*\n\s*if \(_insClient\) await _insClient\.query\('COMMIT'\)/, '복사는 공고 INSERT 와 같은 트랜잭션');
-  assert.match(routes, /workKindForStore\(work_kind\) !== 'blog'/, '블로그 체험단은 복사하지 않는다');
+  assert.match(routes, /!\['blog', 'qna'\]\.includes\(workKindForStore\(work_kind\)\)/, '블로그·Q&A 체험단은 복사하지 않는다');
   assert.match(routes, /function _publicTierView\(v\) \{\n\s*return \{ qty: v\.qty, status: v\.status, remaining: v\.remaining, buyMethod: v\.buyMethod \};/, '참여 전 응답에 금액을 싣지 않는다(결정 041)');
   assert.match(hold, /purchase_qty = COALESCE\(os\.purchase_qty, ca\.purchase_qty\)/);
   assert.match(hold, /qty_tier_amount = COALESCE\(os\.qty_tier_amount, ca\.qty_tier_amount\)/);

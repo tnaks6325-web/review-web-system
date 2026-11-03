@@ -224,7 +224,7 @@ t('★ 저장은 버튼군 UI 있는 화면에서만 전송(미전송=유지)',
 //   리뷰타입이 없다). 리뷰 오더는 종전대로 넘긴다는 검사 의미는 불변이고, 블로그 갈래의 부재는
 //   blogWorkKind 가드가 따로 고정한다.
 t('작업오더 프리필이 review_type 을 넘긴다(공유 모듈 1벌)',
-  /review_type:\s+_woIsBlogKind\(o\.work_kind\) \? "" : \(o\.review_type \|\| ""\)/.test(WOD));
+  /review_type:\s+_woHasNoReviewType\(o\.work_kind\) \? "" : \(o\.review_type \|\| ""\)/.test(WOD));
 
 t('★★ 프론트 프리필 표의 라벨이 서버 REVIEW_TYPES 와 일치(사본 드리프트 차단)', (() => {
   const m = REC.match(/const RF_REVIEW_TYPE_LABELS = \[([\s\S]*?)\];/);
