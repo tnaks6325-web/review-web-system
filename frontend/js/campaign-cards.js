@@ -972,6 +972,15 @@
       .map(x => x.c);
   }
 
+  /**
+   * Q&A 공고를 맨 앞으로(결정 321 변경 · 사용자 확정 2026-11-03 「탭 구분 없이 첫 번째로」) — 안정 분할이라
+   * Q&A 끼리·나머지 끼리는 들어온 순서(= sortByAvailability 결과)를 그대로 둔다.
+   */
+  function qnaFirst(list) {
+    const arr = list || [];
+    return arr.filter(c => c && c.work_kind === 'qna').concat(arr.filter(c => !(c && c.work_kind === 'qna')));
+  }
+
   /** 여러 카드를 2열 그리드로 감싼 HTML(호출부에서 partHtml 대신 사용 가능) */
   function gridHtml(list) {
     const parts = sortByAvailability((list || []).filter(c => c.participation_mode));
@@ -1542,5 +1551,5 @@
     });
   }
 
-  window.CampCards = { renderInto, cardHtml, gridHtml, _more, _closeMenu, toggleArchive, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePopular, openManualOrder, openWorkdesk, sortByAvailability, initChipMarquee: _initChipMarquee, needsFieldCleanup: _campNeedsFieldCleanup, _caeCarry };
+  window.CampCards = { renderInto, cardHtml, gridHtml, _more, _closeMenu, toggleArchive, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePopular, openManualOrder, openWorkdesk, sortByAvailability, qnaFirst, initChipMarquee: _initChipMarquee, needsFieldCleanup: _campNeedsFieldCleanup, _caeCarry };
 })();
