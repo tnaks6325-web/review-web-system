@@ -5,7 +5,8 @@
  * 고정하는 계약
  *  §1 블로그 칸 판정은 **매퍼 파생**(`blogUrlWriteColumns`) — 헤더 문자열 사본 금지
  *  §2 fail-closed 게이트(무시트 아님 · 블로그 아님 · 미등록 탭 · 열 없음 · 중복 · 값 누락)
- *  §3 쓰기 표면 = participants 한 곳(직접 INSERT 0) + 장부 재생성 · seq 재사용 금지
+ *  §3 쓰기 표면 = participants 한 곳(직접 INSERT·UPDATE 0) + 장부 재생성 · **준비된 빈 줄부터**(결정 328) · 모자라면 새 줄
+ *  §3b 여러 명(registerBloggers) — 묶음 안 중복 · 한 명 거부 = 전원 거부 · 탭 잠금 트랜잭션 · 주문은 등록 줄로(preRegisteredSeq)
  *  §4 라우트: `_ensureEditScope`(광고주 차단 · staff 담당 탭) + 검증 실패 400대
  *  §5 화면: 시트 기반·리뷰 명시 작업에는 안 보임 / 미지정은 열어 둔다 · body 직속 · Esc 1회
  *  §6 소스 위생
@@ -48,18 +49,21 @@ const HEAD = ['번호', '수취인', '연락처', '블로그주소', '결제금�
 function makeStub(over = {}) {
   const st = {
     sheetless: true, tab: [{ tab_gid: '77', campaign_name: '캠페인', work_kind: 'blog' }],
-    headers: HEAD, dup: [], maxSeq: 12, queries: [], slots: [], rebuilt: 0, ...over,
+    headers: HEAD, dup: [], open: [{ seq: 2 }, { seq: 3 }], maxSeq: 12, queries: [], fills: [], appends: [],
+    rebuilt: 0, fillOk: true, tx: [], ...over,
   };
-  st.pool = {
-    query: async (sql, params) => {
-      st.queries.push(String(sql));
-      if (/FROM tab_configs/.test(sql)) return { rows: st.tab };
-      if (/FROM raw_sheet_tabs/.test(sql)) return { rows: st.headers ? [{ detected_headers: st.headers, headers: null }] : [] };
-      if (/MAX\(seq\)/.test(sql)) return { rows: [{ m: st.maxSeq }] };
-      if (/FROM campaign_participants/.test(sql)) return { rows: st.dup };
-      return { rows: [] };
-    },
+  const q = async (sql, params) => {
+    st.queries.push(String(sql));
+    if (/^(BEGIN|COMMIT|ROLLBACK)$/.test(String(sql).trim())) { st.tx.push(String(sql).trim()); return { rows: [] }; }
+    if (/pg_advisory_xact_lock/.test(sql)) { st.tx.push('LOCK:' + params[0]); return { rows: [] }; }
+    if (/FROM tab_configs/.test(sql)) return { rows: st.tab };
+    if (/FROM raw_sheet_tabs/.test(sql)) return { rows: st.headers ? [{ detected_headers: st.headers, headers: null }] : [] };
+    if (/MAX\(seq\)/.test(sql)) return { rows: [{ m: st.maxSeq }] };
+    if (/AS p8/.test(sql)) return { rows: st.dup };
+    if (/SELECT cp\.seq FROM campaign_participants cp/.test(sql)) return { rows: st.open };
+    return { rows: [] };
   };
+  st.pool = { query: q, connect: async () => ({ query: q, release: () => { st.released = true; } }) };
   return st;
 }
 function withStubs(st, fn) {
@@ -67,14 +71,15 @@ function withStubs(st, fn) {
   const pservice = require(path.join(ROOT, 'src', 'services', 'participants.service.js'));
   const led = require(path.join(ROOT, 'src', 'services', 'sheetlessLedger.service.js'));
   const wkc = require(path.join(ROOT, 'src', 'services', 'workKindContext.service.js'));
-  const o = { s: scope.isSheetless, c: pservice.createSlotsFromSheetRows, r: led.rebuildLedgers, w: wkc.workKindForTab };
+  const o = { s: scope.isSheetless, f: pservice.fillPreparedRow, a: pservice.appendSlot, r: led.rebuildLedgers, w: wkc.workKindForTab };
   scope.isSheetless = async () => st.sheetless;
-  pservice.createSlotsFromSheetRows = async (a) => { st.slots.push(a); return { inserted: 1 }; };
+  pservice.fillPreparedRow = async (client, a) => { st.fills.push(a); return st.fillOk; };
+  pservice.appendSlot = async (client, a) => { const seq = st.maxSeq + 1 + st.appends.length; st.appends.push(a); return { seq }; };
   led.rebuildLedgers = async () => { st.rebuilt++; return { ok: true }; };
   wkc.workKindForTab = async () => (st.campKind === undefined ? null : st.campKind);
   svc.__setPoolForTest(st.pool);
   return Promise.resolve().then(fn).finally(() => {
-    scope.isSheetless = o.s; pservice.createSlotsFromSheetRows = o.c; led.rebuildLedgers = o.r; wkc.workKindForTab = o.w;
+    scope.isSheetless = o.s; pservice.fillPreparedRow = o.f; pservice.appendSlot = o.a; led.rebuildLedgers = o.r; wkc.workKindForTab = o.w;
     svc.__setPoolForTest(null);
   });
 }
@@ -87,21 +92,36 @@ async function expectCode(st, args, code, label) {
 }
 
 (async () => {
-  // 정상 등록
+  // 정상 등록 — 준비된 빈 줄부터(결정 328)
   {
     const st = makeStub();
     await withStubs(st, async () => {
       const r = await svc.registerBlogger({ ...GOOD, by: '만두' });
-      ok(r.ok === true && r.seq === 13, '★ seq = MAX(seq)+1 (삭제된 줄도 세어 재사용 금지)');
-      ok(st.slots.length === 1, '★ 줄 INSERT 는 participants.createSlotsFromSheetRows 한 곳');
-      const rj = st.slots[0].rows[0].rowJson;
-      ok(rj['수취인'] === '홍길동' && rj['연락처'] === '010-1234-5678', '이름·연락처 기입');
-      ok(rj['블로그주소'] === 'https://blog.naver.com/gd', '★ 블로그 주소는 매퍼가 쓰는 칸에');
-      ok(rj['배송주소'] === undefined, '없는 칸을 지어내지 않는다');
-      ok(st.slots[0].tabGid === '77', 'gid 는 서버가 tab_configs 에서 구한다(클라 값 불신)');
+      ok(r.ok === true && r.seq === 2 && r.appended === false, '★ 맨 뒤가 아니라 준비된 첫 빈 줄(2번)에 넣는다 — 모집인원을 넘기지 않는다');
+      ok(st.fills.length === 1 && st.appends.length === 0, '★ 줄 쓰기는 participants.fillPreparedRow 한 곳');
+      const f = st.fills[0];
+      ok(f.name === '홍길동' && f.phone8 === '12345678', '★ 이름·연락처 뒤 8자리를 칸에도 쓴다(안 쓰면 빈 줄로 판정돼 남의 주문이 이 줄을 먹는다)');
+      ok(f.rowPatch['수취인'] === '홍길동' && f.rowPatch['연락처'] === '010-1234-5678', '표에 이름·연락처 기입');
+      ok(f.rowPatch['블로그주소'] === 'https://blog.naver.com/gd', '★ 블로그 주소는 매퍼가 쓰는 칸에');
+      ok(f.rowPatch['배송주소'] === undefined, '없는 칸을 지어내지 않는다');
       ok(st.rebuilt === 1, '★ 장부 재생성 — 안 하면 표엔 있는데 검색 명단에 없는 줄이 된다');
-      const insDirect = st.queries.filter(q => /INSERT\s+INTO\s+campaign_participants/i.test(q));
-      ok(insDirect.length === 0, '★ 서비스가 campaign_participants 에 직접 INSERT 하지 않는다(쓰기 소유자 규율)');
+      ok(st.tx[0] === 'BEGIN' && st.tx[1] === 'LOCK:sheetless_worktable:S:T' && st.tx[st.tx.length - 1] === 'COMMIT',
+        '★ 주문 기록과 같은 탭 잠금 안에서 빈 줄을 고른다');
+      const direct = st.queries.filter(q => /(INSERT\s+INTO|UPDATE)\s+campaign_participants/i.test(q));
+      ok(direct.length === 0, '★ 서비스가 campaign_participants 에 직접 쓰지 않는다(쓰기 소유자 규율)');
+      const openQ = st.queries.find(q => /SELECT cp\.seq FROM campaign_participants cp/.test(q)) || '';
+      ok(/order_submission_id IS NULL/.test(openQ) && /row_json->>\$3/.test(openQ) && /row_json->>\$4/.test(openQ),
+        '★ 빈 줄 = 주문 판정과 같은 조건 + 표에 이름·연락처가 없는 줄(종전 방식으로 등록된 블로거 줄을 덮지 않는다)');
+    });
+  }
+  // 빈 줄이 없으면 맨 뒤 새 줄(종전 동작) — 알린다
+  {
+    const st = makeStub({ open: [] });
+    await withStubs(st, async () => {
+      const r = await svc.registerBlogger(GOOD);
+      ok(r.seq === 13 && r.appended === true, '★ 빈 줄이 없으면 새 줄(MAX(seq)+1)에 넣고 appended 로 알린다');
+      ok(st.appends.length === 1 && st.fills.length === 1 && st.fills[0].seq === 13, '새 줄도 같은 쓰기(칸까지 채움)');
+      ok(st.fills[0].rowPatch['번호'] === '12', '새 줄 번호 칸 = seq-1(헤더 줄 몫)');
     });
   }
   // dryRun 은 쓰기 0
@@ -109,9 +129,43 @@ async function expectCode(st, args, code, label) {
     const st = makeStub();
     await withStubs(st, async () => {
       const r = await svc.registerBlogger({ ...GOOD, dryRun: true });
-      ok(r.ok === true && r.dryRun === true && st.slots.length === 0 && st.rebuilt === 0, 'dryRun: 줄 생성·장부 재생성 0');
+      ok(r.ok === true && r.dryRun === true && r.seq === 2 && st.fills.length === 0 && st.appends.length === 0 && st.rebuilt === 0 && st.tx.length === 0,
+        'dryRun: 자리만 보여주고 쓰기·잠금·장부 재생성 0');
     });
   }
+  // §3b 여러 명
+  {
+    const st = makeStub({ open: [{ seq: 4 }] });
+    await withStubs(st, async () => {
+      const r = await svc.registerBloggers({ sheetId: 'S', tabName: 'T', lines: [GOOD, { name: '김블로', phone: '01098765432', blogUrl: 'https://blog.naver.com/kim' }] });
+      ok(r.rows.length === 2 && r.rows[0].seq === 4 && !r.rows[0].appended && r.rows[1].appended && r.appended === 1,
+        '★ 여러 명: 빈 줄부터 채우고 모자란 만큼만 새 줄');
+      ok(st.rebuilt === 1, '★ 장부 재생성은 묶음당 한 번');
+    });
+  }
+  await (async () => {
+    const st = makeStub();
+    await withStubs(st, async () => {
+      try { await svc.registerBloggers({ sheetId: 'S', tabName: 'T', lines: [GOOD, { ...GOOD, name: '다른이름' }] }); ok(false, '묶음 안 중복 거부'); }
+      catch (e) { ok(e.code === 'duplicate' && /2번째 줄/.test(e.message), '★ 묶음 안 같은 연락처 거부 + 몇 번째 줄인지 말한다'); }
+      ok(st.fills.length === 0, '거부 시 쓰기 0');
+    });
+  })();
+  await (async () => {
+    const st = makeStub();
+    await withStubs(st, async () => {
+      try { await svc.registerBloggers({ sheetId: 'S', tabName: 'T', lines: [GOOD, { name: '김', phone: '0101', blogUrl: 'https://blog.naver.com/k' }] }); ok(false, '한 명 거부'); }
+      catch (e) { ok(e.code === 'phone_required' && /2번째 줄/.test(e.message) && st.fills.length === 0, '★ 한 명이라도 거부되면 아무도 넣지 않는다'); }
+    });
+  })();
+  await (async () => {
+    const st = makeStub({ fillOk: false });
+    await withStubs(st, async () => {
+      try { await svc.registerBlogger(GOOD); ok(false, '경합'); }
+      catch (e) { ok(e.code === 'slot_taken' && st.tx.includes('ROLLBACK') && !st.tx.includes('COMMIT') && st.rebuilt === 0,
+        '★ 그 사이 주문이 들어온 줄이면 되돌리고 알린다(덮지 않는다)'); }
+    });
+  })();
   // 탭에 종류가 없어도 공고가 blog 면 통과(공고 > 탭)
   {
     const st = makeStub({ tab: [{ tab_gid: '77', campaign_name: 'C', work_kind: '' }], campKind: 'blog' });
@@ -133,12 +187,12 @@ async function expectCode(st, args, code, label) {
   await expectCode(makeStub({ headers: ['번호', '연락처', '블로그주소'] }), GOOD, 'no_name_column', '이름 열 없음');
   await expectCode(makeStub({ headers: ['번호', '수취인', '블로그주소'] }), GOOD, 'no_phone_column', '★ 연락처 열 없음');
   await expectCode(makeStub({ headers: ['번호', '수취인', '연락처'] }), GOOD, 'no_blog_column', '★ 블로그 열 없음 — 주소를 넣을 데가 없으면 등록하지 않는다');
-  await expectCode(makeStub({ dup: [{ seq: 5, reviewer_name: '홍길동' }] }), GOOD, 'duplicate', '같은 연락처 중복');
+  await expectCode(makeStub({ dup: [{ seq: 5, reviewer_name: '', name_cell: '홍길동', p8: '12345678' }] }), GOOD, 'duplicate', '★ 같은 연락처 중복 — 칸 또는 표에 적힌 연락처(종전 방식 등록 줄도 잡는다)');
   // 거부 시 쓰기 0
   {
     const st = makeStub({ headers: ['번호', '수취인', '연락처'] });
     await withStubs(st, async () => { try { await svc.registerBlogger(GOOD); } catch (_) {} });
-    ok(st.slots.length === 0 && st.rebuilt === 0, '★ 거부 시 줄 생성·장부 재생성 0');
+    ok(st.fills.length === 0 && st.appends.length === 0 && st.rebuilt === 0, '★ 거부 시 줄 쓰기·장부 재생성 0');
   }
 
   console.log('\n=== §4 라우트 ===');

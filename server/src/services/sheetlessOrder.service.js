@@ -724,6 +724,36 @@ async function writeOrderToWorktable({
         logger.warn(`[sheetlessOrder] Q&A 탭 — 자리 번호 없는 주문은 줄에 넣지 않음 tab=${tabName} os=${orderSubmissionId}`);
         return { ok: false, reason: 'qna_slot_required' };
       }
+      /* ★★ 결정 328 — 블로그 작업에 **미리 등록된 블로거**(같은 연락처 · 주문 아직 없음)면 그 사람 줄을 쓴다.
+         운영 기본(큐 반영) 경로는 줄 번호 없이 이 함수로 오므로 여기서 본다 — 안 보면 주문은 빈 줄로 가고
+         블로그 주소가 적힌 본인 줄은 주문 없이 남는다(한 사람 두 줄). 블로그가 아닌 작업은 판정 함수가 null.
+         ★ SAVEPOINT 로 감싼다 — 판정 쿼리가 실패해도 이 주문 기록 트랜잭션을 망가뜨리지 않고 종전 빈 줄 고르기로 간다.
+         ★ 옵션이 정해진 줄과 주문 옵션이 다르면 그 줄을 쓰지 않는다(아래 옵션 불일치 거절로 주문이 멈추지 않게). */
+      if (!cur.length && _digits(loginPhone8).length >= 8) {
+        await client.query('SAVEPOINT blog_prereg');
+        let pre = [];
+        try {
+          const preSeq = await require('./blogRegister.service').preRegisteredSeq(client, {
+            sheetId, tabName, phone8: loginPhone8, workboardId, lock: true });
+          if (preSeq) {
+            ({ rows: pre } = await client.query(
+              `SELECT id, seq, option_text, row_json FROM campaign_participants
+                WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL AND order_submission_id IS NULL`,
+              [sheetId, tabName, preSeq]));
+          }
+          await client.query('RELEASE SAVEPOINT blog_prereg');
+        } catch (preErr) {
+          await client.query('ROLLBACK TO SAVEPOINT blog_prereg');
+          pre = [];
+          logger.warn(`[sheetlessOrder] 사전등록 블로거 줄 판정 실패 — 빈 줄 고르기로 tab=${tabName}: ${preErr.message}`);
+        }
+        const preOpt = pre[0] && String(pre[0].option_text || '').trim();
+        if (pre.length && (!scheduledOptionKey || !preOpt || preOpt === scheduledOptionKey
+            || (process.env.WORKTABLE_STAGED_OPTION_MATCH !== '0' && _stagedLabelMatches(preOpt, scheduledOptionKey)))) {
+          cur = pre;
+          logger.info(`[sheetlessOrder] 사전등록 블로거 줄 사용 tab=${tabName} seq=${pre[0].seq} os=${orderSubmissionId}`);
+        }
+      }
       if (!cur.length) {
         /* ★★ 빈 줄 고르기(2026-09-26 · 결정 182) — 옵션 일치 → **오늘 날짜 줄 → 날짜 없는·지난 줄 →
            앞날 줄(가까운 날부터)** 순. 종전에는 번호(seq) 순이라 오늘 산 사람이 앞날 줄을 먹고, 그 줄의

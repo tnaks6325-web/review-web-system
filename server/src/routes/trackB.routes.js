@@ -3838,6 +3838,30 @@ router.post('/worktable/add-blogger', authMiddleware, async (req, res, next) => 
   } catch (err) { next(err); }
 });
 
+/* 블로거 여러 명 한 번에(결정 328) — 직원이 직접 섭외한 블로거를 공고·승인 없이 표에 넣는다.
+   ★ 권한·검증은 단건(add-blogger)과 같다(`_ensureEditScope` · 서비스 fail-closed). dryRun = 미리보기(쓰기 0).
+   ★ 한 명이라도 거부되면 아무도 넣지 않는다 — 거부 사유에 몇 번째 줄인지 담겨 온다. */
+router.post('/worktable/add-bloggers', authMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const sheetId = String(b.sheetId || ''), tabName = String(b.tabName || '');
+    const scope = await _ensureEditScope(req, sheetId, tabName);
+    if (!scope.ok) return res.status(scope.code).json({ ok: false, error: scope.error });
+    const { registerBloggers, BlogRegisterError } = require('../services/blogRegister.service');
+    const lines = (Array.isArray(b.lines) ? b.lines : []).map(x => ({
+      name: x && x.name, phone: x && x.phone, blogUrl: x && x.blogUrl }));
+    try {
+      res.json(await registerBloggers({ sheetId, tabName, lines, dryRun: b.dryRun === true, by: _by(req) }));
+    } catch (e) {
+      if (e instanceof BlogRegisterError) return res.status(400).json({ ok: false, code: e.code, error: e.message });
+      if (e && (e.code === '42P01' || e.code === '42703')) {
+        return res.status(503).json({ ok: false, code: 'not_ready', error: '마이그레이션 적용 대기 중입니다(101).' });
+      }
+      throw e;
+    }
+  } catch (err) { next(err); }
+});
+
 /* 표준 열 저장 — 8/23 전멸 사고 재발 방지 3종은 서비스가 판정한다(사본 금지).
    ★★ 거부 사유는 **여기서 400 으로 명시**해야 한다 — 이 경로는 `isAdminApi`(오류 마스킹 예외)
       목록에 없어서 그냥 throw 하면 `서버 오류가 발생했습니다.` 로 뭉개진다(무엇을 고칠지 모른다).

@@ -281,6 +281,29 @@ async function appendSlot(client, { sheetId, tabName, tabGid = null, campaignNam
   return rows[0] || null;
 }
 
+/**
+ * 준비된 빈 줄에 사람을 **미리 앉힌다**(블로거 사전등록 — 결정 328 · 2026-11-03).
+ *
+ * ★★ 이름·연락처를 칸(`reviewer_name`·`recipient_name`·`phone8`)에도 쓴다 — `row_json` 에만 두면 빈 줄 판정
+ *   (`utils/worktableOpenSlot.openSlotRowSql`)이 이 줄을 빈 줄로 봐서, 남의 주문이 이 줄을 먹고 본인 주문은
+ *   다른 빈 줄로 가 한 사람이 두 줄이 된다(2026-11-03 로컬 재현).
+ * ★ 쓰는 순간 **같은 빈 줄 조건으로 다시 확인**한다 — 그 사이 주문이 들어온 줄은 덮지 않는다(0행 = false).
+ * ★ `client` 를 받는다 — 호출부의 트랜잭션·탭 잠금(`sheetless_worktable:`) 안에서 실행돼야 한다.
+ */
+async function fillPreparedRow(client, { sheetId, tabName, seq, name, phone8, rowPatch = {}, by = 'admin' } = {}) {
+  if (!client || !sheetId || !tabName || !Number.isInteger(Number(seq))) throw new Error('fillPreparedRow: client, sheetId, tabName, seq 필수');
+  const { openSlotRowSql } = require('../utils/worktableOpenSlot');
+  const { rowCount } = await client.query(
+    `UPDATE campaign_participants cp
+        SET reviewer_name = $4, recipient_name = $4, phone8 = $5,
+            row_json = COALESCE(cp.row_json, '{}'::jsonb) || $6::jsonb,
+            updated_by = $7, updated_at = NOW()
+      WHERE cp.seq = $3 AND ${openSlotRowSql('cp', { sheet: '$1', tab: '$2', workboard: 'NULL' })}`,
+    [sheetId, tabName, Number(seq), String(name || '').slice(0, 100), String(phone8 || ''),
+     JSON.stringify(rowPatch && typeof rowPatch === 'object' ? rowPatch : {}), String(by).slice(0, 100)]);
+  return rowCount === 1;
+}
+
 /* (가져오기 되돌리기 전용 하드 삭제 purgeImportedRows — 시트 가져오기 서버 제거와 함께 2026-09-30 제거 · 결정 186 79번) */
 
 /* 정리(은퇴) 대상 선정 조건 — 조회·삭제가 **같은 조건**을 써야 미리보기와 결과가 갈리지 않는다.
@@ -490,7 +513,7 @@ async function listHeldRows({ sheetId, tabName, limit = 300 } = {}) {
 
 module.exports = {
   holdRows, listHeldRows,
-  createWorktableSlots, createSlotsFromSheetRows, appendSlot, retireRows,
+  createWorktableSlots, createSlotsFromSheetRows, appendSlot, fillPreparedRow, retireRows,
   importTabFromIndex,
   syncImportedTabs,
   compareWithIndex,
