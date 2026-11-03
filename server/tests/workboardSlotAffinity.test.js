@@ -141,7 +141,11 @@ test('동시 제출과 다른 작업 보호 규칙을 유지한다', () => {
   const source = read('src/services/sheetlessOrder.service.js');
   assert.match(source, /pg_advisory_xact_lock/);
   assert.match(source, /FOR UPDATE SKIP LOCKED/);
-  assert.match(source, /AND \(\$3::uuid IS NULL OR cp\.workboard_id = \$3\)/);
+  // 빈 줄 후보의 작업보드 제한 — 판정은 단일 출처 utils/worktableOpenSlot(결정 324 보강)로 옮겼다. 의미 불변:
+  //   writer 의 후보 3곳이 모두 그 함수에 대상 작업보드($3)를 넘기고, 그 함수가 다른 작업보드 줄을 거른다.
+  assert.equal((source.match(/openSlotRowSql\('cp', \{ sheet: '\$1', tab: '\$2', workboard: '\$3' \}\)/g) || []).length, 3);
+  const { openSlotRowSql } = require('../src/utils/worktableOpenSlot');
+  assert.match(openSlotRowSql('cp', { sheet: '$1', tab: '$2', workboard: '$3' }), /AND \(\$3::uuid IS NULL OR cp\.workboard_id = \$3::uuid\)/);
   assert.match(source, /if \(order\.source === 'admin_external'\) return true/);
 });
 

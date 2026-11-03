@@ -8,6 +8,7 @@
 
 const pool = require('../db/pool');
 const { _osRowToOrderData, markOrderWritten } = require('./orderLedger.service');
+const { NO_SLOT_QUEUE_ERROR } = require('../utils/workboardNoSlot');
 
 let _pool = null;
 function getPool() { return _pool || pool; }
@@ -107,6 +108,9 @@ async function applyQueuedWorkboardOrder({
     // 큐 누락 복구기가 만든 payload만 허용한다. write 함수가 원장 조건을 다시 검증한다.
     allowMissingQueueRecoveryOverflow: missingQueueRecovery === true,
   });
+  // ★★ 결정 324 — 빈 줄이 없으면 정해진 문장으로 실패시킨다. 매시 복구는 이 문장을 되살리지 않고(끝없는 실패 중단)
+  //   그 작업표에 빈 줄이 생기면 되살린다 · 홈 「오늘 확인할 것」이 이 문장으로 항목을 띄운다(utils/workboardNoSlot).
+  if (out && !out.ok && out.reason === 'no_open_slot') throw new Error(NO_SLOT_QUEUE_ERROR);
   if (!out || !out.ok) throw new Error(`작업보드 반영 실패: ${(out && (out.message || out.reason)) || 'unknown'}`);
   // 동일 주문이 이미 반영된 경우도 큐는 수렴 완료다. 새 슬롯을 만들지 않았다는 사실을 남긴다.
   if (out.reason === 'duplicate_row') {
