@@ -75,6 +75,22 @@ function wholeCampaignPay(productLines, payAmount) {
 }
 
 /**
+ * 리뷰어에게 보일 차이 문장 — 얼마나·몇 % 다른지까지(사용자 확정 2026-11-02: 「차이가 나요」만으로는 부족).
+ * 예) 제출하신 구매캡처 속 결제금액(43,000원)이 작업 조건 결제금액(25,000원)보다 18,000원 더 비쌉니다(72% 초과).
+ * ★ 비율은 반올림 정수 — 단 쿠팡 막힘 기준(30%) 언저리에서 반올림이 「30%」가 되면 소수 한 자리로 보인다(「30% 초과」로 막혔는데 30%로 읽히지 않게).
+ */
+function diffSentence(expected, paid) {
+  const e = _won(expected), p = _won(paid);
+  const diff = Math.abs(p - e);
+  const pct = e ? (diff / e) * 100 : 0;
+  let pctText = String(Math.round(pct));
+  if (Math.round(pct) === Math.round(COUPANG_OVER_RATIO * 100) && pct !== Math.round(pct)) pctText = pct.toFixed(1);
+  return p > e
+    ? `제출하신 구매캡처 속 결제금액(${_wonText(p)}원)이 작업 조건 결제금액(${_wonText(e)}원)보다 ${_wonText(diff)}원 더 비쌉니다(${pctText}% 초과).`
+    : `제출하신 구매캡처 속 결제금액(${_wonText(p)}원)이 작업 조건 결제금액(${_wonText(e)}원)보다 ${_wonText(diff)}원 더 쌉니다(${pctText}% 적음).`;
+}
+
+/**
  * 순수 판정 — 쓰기 0 · 예외 없음.
  * @returns {{action:'none'}|{action:'block',kind,expected,paid,error}|{action:'warn',kind,expected,paid,error}|{action:'flag',kind,expected,paid,code}}
  *   block = 쿠팡 30% 초과(직원 확인 요청이 없으면 막는다) · warn = 쿠팡 밖 1,000원 초과(리뷰어 확인 전) · flag = 접수 + 🚩
@@ -87,7 +103,7 @@ function judge({ kind, expected, paid, staffReview = false, ack = false }) {
     if (staffReview) return { action: 'flag', kind, expected: e, paid: p, code: 'price_over' };
     return {
       action: 'block', kind, expected: e, paid: p,
-      error: `결제금액 ${_wonText(p)}원이 이 공고의 결제금액 ${_wonText(e)}원보다 너무 많아요. `
+      error: `${diffSentence(e, p)} `
         + `다른 상품이나 다른 개수를 구매하지 않았는지 주문 내역을 확인하고, 맞는 구매캡처를 다시 올려 주세요.`,
     };
   }
@@ -95,8 +111,7 @@ function judge({ kind, expected, paid, staffReview = false, ack = false }) {
   if (ack) return { action: 'flag', kind, expected: e, paid: p, code: 'price_diff' };
   return {
     action: 'warn', kind, expected: e, paid: p,
-    error: `결제금액 ${_wonText(p)}원이 이 공고의 결제금액 ${_wonText(e)}원과 달라요. `
-      + `주문한 상품·개수·옵션이 맞는지 확인해 주세요.`,
+    error: `${diffSentence(e, p)} 주문한 상품·개수·옵션이 맞는지 확인해 주세요.`,
   };
 }
 
@@ -145,5 +160,5 @@ async function decideAtSubmit({ holdCtx, capturePrice = '', typedPrice = '', sta
 
 module.exports = {
   COUPANG_OVER_RATIO, OTHER_DIFF_WON,
-  isEnabled, channelKind, uniquePayFromProductLines, wholeCampaignPay, judge, loadExpected, decideAtSubmit, __setPoolForTest,
+  isEnabled, channelKind, diffSentence, uniquePayFromProductLines, wholeCampaignPay, judge, loadExpected, decideAtSubmit, __setPoolForTest,
 };
