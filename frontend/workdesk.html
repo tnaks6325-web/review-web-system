@@ -13609,6 +13609,7 @@ function _pmRender(){
   // 결정 231: 이전에 실패한 계좌 그대로인 줄(처음에 체크 해제) — 담당자 범위 전체에서 센다(체크 해제로 줄이 숨지 않게)
   const failedAgain = _pmFilterItems(allItems,{manager:_pmFilterState().manager}).filter(it=>it.payable && (it.warnings||[]).includes('failed_account'));
   STATE.pmFix = _pmBuildFix(items);   // 보완 창구(작업·리뷰어) — 표의 [보완] 버튼도 이 묶음을 쓴다
+  if(!$('#pmhead') || !$('#pmbody')) return;   // 집계를 기다리는 사이 다른 메뉴로 옮겼다 — 그릴 칸이 없으면 조용히 끝(화면 오류 기록 방지)
 
   $('#pmhead').innerHTML=`<div class="mh"><h1>입금관리</h1>
     <span class="bd g">${items.filter(_pmOn).length}건 대상</span>
@@ -15340,6 +15341,7 @@ function _bnNorm(s){
 }
 
 async function _bnOpen(){
+  if(!$('#pmhead') || !$('#pmbody')) return;   // 입금관리를 떠난 뒤 늦게 불렸다 — 그릴 칸이 없으면 조용히 끝
   $('#pmhead').innerHTML=`<div class="mh"><h1>입금관리</h1>
     <span class="bd">🏦 은행 이름 설정</span>
     <span class="sp" style="flex:1"></span>
@@ -15352,7 +15354,7 @@ async function _bnOpen(){
 /* ★ 자리표시자를 깐 함수는 **어떤 예외에도 화면을 종결**시킨다(사유 + [다시 시도]) —
    조용히 '불러오는 중…' 에 매달리는 화면 금지(리뷰검수 무한로딩과 같은 자리). */
 async function _bnLoad(force){
-  const fail=(why)=>{ $('#pmbody').innerHTML=`<div class="lgwrap" style="max-width:1400px">${_pmTabsHtml()}
+  const fail=(why)=>{ if(!$('#pmbody')) return; $('#pmbody').innerHTML=`<div class="lgwrap" style="max-width:1400px">${_pmTabsHtml()}
     <div class="empty">은행 목록을 불러오지 못했습니다.${why?' ('+esc(why)+')':''}<br>
     <button class="btn" style="margin-top:9px" onclick="_bnLoad(true)">다시 시도</button></div></div>`; };
   try{
@@ -15418,7 +15420,7 @@ function _bnUseCount(code){
 }
 
 function _bnRender(){
-  const S=STATE.bn; if(!S) return;
+  const S=STATE.bn; if(!S || !$('#pmbody')) return;   // 입금관리를 떠난 뒤 늦게 불렸다 — 그릴 칸이 없으면 조용히 끝
   const dup=_bnConflicts();
   const q=_bnNorm(S.q);
   const kwCount=S.rows.reduce((a,r)=>a+r.aliases.length,0);

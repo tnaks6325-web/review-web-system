@@ -509,7 +509,7 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
     <div class="product-strip" id="productStrip" style="display:none">
       <div class="thumb-wrap">
         <img id="productThumb" src="" alt="" class="hidden"
-             onerror="this.classList.add('hidden');document.getElementById('thumbFallback').classList.remove('hidden')"/>
+             onerror="this.classList.add('hidden');var f=document.getElementById('thumbFallback');if(f)f.classList.remove('hidden')"/>
         <div id="thumbFallback" class="thumb-fallback"><i class="fas fa-box"></i></div>
       </div>
       <div class="product-info">
