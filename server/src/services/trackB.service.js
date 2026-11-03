@@ -2083,6 +2083,10 @@ async function advertiserWorkSummary({ advertiserId, brandId = null } = {}) {
         sheetless: t.sheetless === true,
         active: t.active !== false,
         submitted: t.bSub || 0, paid: t.bPaid || 0,
+        // 진행 건수 = 구매양식이 실제로 기록된 줄(bTotal — 결정 283 채워진 줄 판정, 업체관리 표와 같은 값).
+        //   ★ 총건수(target)와는 다른 칸이다 — 이름을 total 로 싣지 않는다(총건수로 오해 금지).
+        //   ★ 모르면 null(0 으로 꾸미지 않는다) → 화면은 진행 칸을 생략한다.
+        filled: Number.isFinite(+t.bTotal) && t.bTotal != null ? +t.bTotal : null,
         target: recruitTotal || null,
         startDate: t.woStartDate ? String(t.woStartDate).slice(0, 10) : null,
         brandId: brandByTab.get(t.sheetId + '\t' + t.tabName) || null,
