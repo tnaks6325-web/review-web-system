@@ -10115,8 +10115,10 @@ function commitCellEdit(rowId, field, value, td, opt){
     const rollback=()=>{ if(r.customValues[cid]===value){ if(had) r.customValues[cid]=prev; else delete r.customValues[cid]; _paintGridCell(r, field, td); } };
     const say=(opt&&opt.report)||((kind,m)=>toast(m));
     const cbody={sheetId:t.sheetId,tabName:t.tabName,rowId,columnId:cid,value};
-    return ((opt&&opt.sendCustom)?opt.sendCustom(cbody):api('/api/trackb/workdesk/custom-value',{method:'POST',body:JSON.stringify(cbody)}))
+    const behind=!(opt&&opt.sendCustom)&&_cellPendingWrites.get(rowId+'|'+field);
+    return ((opt&&opt.sendCustom)?opt.sendCustom(cbody):(behind?behind:Promise.resolve()).then(()=>api('/api/trackb/workdesk/custom-value',{method:'POST',body:JSON.stringify(cbody)})))
       .then(resp=>{
+        if(resp&&resp.superseded) return 'superseded';
         if(resp&&resp.ok){ if(td&&td.classList){ td.classList.remove('cellfailed'); td.classList.add('cellsaved'); setTimeout(()=>{ td.classList.remove('cellsaved'); },600); } return true; }
         rollback(); say('fail', resp&&resp.error?('저장 거부: '+resp.error):'저장 실패', td); return false;
       })
@@ -10133,8 +10135,10 @@ function commitCellEdit(rowId, field, value, td, opt){
   //   ★ 낙관 반영·실패 롤백·실행취소 기록은 한 칸 저장과 이 한 경로 그대로다(사본 0).
   const say=(opt&&opt.report)||((kind,m)=>toast(m));
   const ebody={sheetId:t.sheetId,tabName:t.tabName,rowId,field,value};
-  return ((opt&&opt.send)?opt.send(ebody):api('/api/trackb/workdesk/edit',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,field,value})}))
+  const behind=!(opt&&opt.send)&&_cellPendingWrites.get(rowId+'|'+field);   // 같은 칸 붙여넣기 저장이 진행 중이면 그 뒤에(나중 편집이 이긴다)
+  return ((opt&&opt.send)?opt.send(ebody):(behind?behind.then(()=>api('/api/trackb/workdesk/edit',{method:'POST',body:JSON.stringify(ebody)})):api('/api/trackb/workdesk/edit',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,field,value})})))
     .then(resp=>{
+      if(resp&&resp.superseded){ undoGroup.pending=Math.max(0,undoGroup.pending-1); if(!(opt&&opt.undoGroup)) _finishCellUndoGroup(undoGroup); return 'superseded'; }   // 보내기 전에 사람이 다시 고침 — 그 편집이 이 칸의 값이다
       if(resp&&resp.ok){
         _recordCellUndo({rowId,field,value,had,prev,td},undoGroup);
         if(td&&td.classList){ td.classList.remove('cellfailed'); td.classList.add('cellsaved'); setTimeout(()=>{ td.classList.remove('cellsaved'); },600); }
@@ -10751,19 +10755,43 @@ async function _wdPostStatus(path, body){
   let j=null; try{ j=await r.json(); }catch(_){ j=null; }
   return {status:r.status, body:j};
 }
+/* ★★ 같은 칸의 쓰기 순서(Codex P2, PR #1753): 붙여넣기 대기열에 들어간 칸을 저장이 끝나기 전에(429 대기 20초 포함)
+   사람이 다시 고치면, 새 편집이 먼저 나가고 뒤늦게 나간 붙여넣기 값이 그것을 덮었다(화면=새 값 · 서버=붙여넣은 값).
+   → ① 대기열 칸은 **보내기 직전** 화면 값이 아직 그 값인지 본다 — 이미 바뀌었으면 보내지 않는다(superseded)
+     ② 그 칸의 대기열 쓰기가 **진행 중**이면 새 편집은 그것이 끝난 뒤에 보낸다(_cellPendingWrites) — 나중 편집이 이긴다. */
+const _cellPendingWrites=new Map();   // 'rowId|field' → 대기열 쓰기가 끝나면 풀리는 약속
+function _cellLocalIs(rowId, field, value){
+  const r=_gridRowById(rowId); if(!r) return false;
+  if(field.indexOf('ccol:')===0) return !!r.customValues && r.customValues[field.slice(5)]===value;
+  return !!r.cellEdits && r.cellEdits[field.slice(4)]===value;
+}
 function _wdCellSaveQueue(t){
   const edits=[], customs=[];
   let pauseUntil=0;
   const sleep=ms=>new Promise(ok=>setTimeout(ok,ms));
   const RL={ok:false,error:'요청이 너무 많습니다',rateLimited:true};
+  const SUP={ok:false,superseded:true};
   async function waitPause(){ const d=pauseUntil-Date.now(); if(d>0) await sleep(d); }
-  // 한 단위(묶음 또는 한 칸)를 보내고, 429 면 기다렸다 같은 단위를 다시 — 최대 _EDIT_429_TRIES 번.
-  async function sendWithRetry(path, body, onWait){
+  function enqueue(list, body, field){
+    const key=body.rowId+'|'+field;
+    let release; const gate=new Promise(r=>{ release=r; });
+    const prevGate=_cellPendingWrites.get(key);
+    _cellPendingWrites.set(key, prevGate?Promise.all([prevGate,gate]):gate);
+    return new Promise((ok,no)=>{
+      const fin=()=>{ if(it.done) return false; it.done=true; release(); if(_cellPendingWrites.get(key)===gate) _cellPendingWrites.delete(key); return true; };
+      const it={body, field, done:false, ok:v=>{ if(fin()) ok(v); }, no:e=>{ if(fin()) no(e); }};
+      list.push(it);
+    });
+  }
+  // 보내기 직전 판정 — 사람이 그 칸을 이미 다시 고쳤으면 보내지 않는다(덮어쓰기 방지).
+  const live=items=>items.filter(it=>{ if(it.done) return false; if(_cellLocalIs(it.body.rowId, it.field, it.body.value)) return true; it.ok(SUP); return false; });
+  // 한 단위(묶음 또는 한 칸)를 보내고, 429 면 기다렸다 **아직 보낼 칸만** 다시 — 최대 _EDIT_429_TRIES 번.
+  async function sendWithRetry(path, items, mkBody, onWait){
     for(let a=0;;a++){
       await waitPause();
-      const res=await _wdPostStatus(path, body);
-      if(res.status!==429) return res;
-      if(a>=_EDIT_429_TRIES) return res;
+      const now=live(items); if(!now.length) return {items:now, res:null};
+      const res=await _wdPostStatus(path, mkBody(now));
+      if(res.status!==429 || a>=_EDIT_429_TRIES) return {items:now, res};
       // 모든 일꾼이 같은 대기를 공유한다 — 이미 쉬는 중이면 기간을 늘리지 않고 안내도 다시 띄우지 않는다.
       if(pauseUntil<=Date.now()){ pauseUntil=Date.now()+_EDIT_429_WAIT_MS; if(onWait) onWait(); }
     }
@@ -10774,26 +10802,31 @@ function _wdCellSaveQueue(t){
   }
   async function perCell(path, items, onWait){
     await pool(items, _EDIT_FALLBACK_PAR, async it=>{
-      try{ const res=await sendWithRetry(path, it.body, onWait); it.ok(res.status===429?RL:(res.body||{ok:false,error:'HTTP '+res.status})); }
-      catch(e){ it.no(e); }
+      try{
+        const {res}=await sendWithRetry(path, [it], now=>now[0].body, onWait);
+        if(res) it.ok(res.status===429?RL:(res.body||{ok:false,error:'HTTP '+res.status}));
+      }catch(e){ it.no(e); }
     });
   }
   return {
-    send(body){ return new Promise((ok,no)=>edits.push({body,ok,no})); },
-    sendCustom(body){ return new Promise((ok,no)=>customs.push({body,ok,no})); },
+    send(body){ return enqueue(edits, body, body.field); },
+    sendCustom(body){ return enqueue(customs, body, 'ccol:'+body.columnId); },
+    // 예기치 못한 오류로 run 이 끝나지 못해도 대기 칸을 실패로 정리한다(그 칸의 다음 편집이 영영 기다리지 않게).
+    abort(e){ [...edits,...customs].forEach(it=>it.no(e||new Error('aborted'))); },
     async run(onWait){
       const groups=[]; for(let i=0;i<edits.length;i+=_EDIT_BATCH_MAX) groups.push(edits.slice(i,i+_EDIT_BATCH_MAX));
       const left=[];
       await pool(groups, _EDIT_BATCH_PAR, async g=>{
         if(_editBatchUnsupported){ left.push(...g); return; }
-        let res;
-        try{ res=await sendWithRetry('/api/trackb/workdesk/edit-batch',{sheetId:t.sheetId,tabName:t.tabName,cells:g.map(it=>({rowId:it.body.rowId,field:it.body.field,value:it.body.value}))}, onWait); }
+        let sent, res;
+        try{ ({items:sent, res}=await sendWithRetry('/api/trackb/workdesk/edit-batch', g, now=>({sheetId:t.sheetId,tabName:t.tabName,cells:now.map(it=>({rowId:it.body.rowId,field:it.body.field,value:it.body.value}))}), onWait)); }
         catch(e){ g.forEach(it=>it.no(e)); return; }
-        if(res.status===404||res.status===405){ _editBatchUnsupported=true; left.push(...g); return; }   // 구 서버 → 칸별 저장
+        if(!res) return;   // 보낼 칸이 남지 않았다(전부 사람이 다시 고침)
+        if(res.status===404||res.status===405){ _editBatchUnsupported=true; left.push(...sent); return; }   // 구 서버 → 칸별 저장
         const results=res.body&&Array.isArray(res.body.results)?res.body.results:null;
-        if(res.status===200&&results&&results.length===g.length){ g.forEach((it,k)=>it.ok(results[k])); return; }
+        if(res.status===200&&results&&results.length===sent.length){ sent.forEach((it,k)=>it.ok(results[k])); return; }
         const err=res.status===429?RL:{ok:false,error:(res.body&&res.body.error)||('HTTP '+res.status)};
-        g.forEach(it=>it.ok(err));
+        sent.forEach(it=>it.ok(err));
       });
       if(left.length) await perCell('/api/trackb/workdesk/edit', left, onWait);
       if(customs.length) await perCell('/api/trackb/workdesk/custom-value', customs, onWait);
@@ -10803,6 +10836,7 @@ function _wdCellSaveQueue(t){
 function _pasteSummary(o){
   const parts=[`${o.saved}칸 저장`];
   if(o.failed) parts.push(`${o.failed}칸 실패 — 빨간 테두리 칸은 원래 값 그대로입니다${o.reason?` (${o.reason})`:''}`);
+  if(o.later) parts.push(`저장 중에 다시 고친 ${o.later}칸은 고친 값으로`);
   if(o.through) parts.push(`주문 원장 반영 실패 ${o.through}칸 — 다시 시도해주세요`);
   if(o.locked) parts.push(`잠긴 칸 ${o.locked}개 건너뜀`);
   return parts.join(' · ');
@@ -10823,14 +10857,15 @@ function _saveCellJobs(jobs, locked){
   const ps=jobs.map(j=>commitCellEdit(j.rowId, j.field, j.val, j.td, {undoGroup, send:q.send, sendCustom:q.sendCustom, report}));
   ps.forEach(x=>Promise.resolve(x).then(v=>{ if(v===true) okSoFar++; }));
   const done=Promise.all(ps);
-  q.run(()=>{ toast(`요청이 많아 ${Math.round(_EDIT_429_WAIT_MS/1000)}초쯤 기다렸다가 남은 칸을 이어서 저장합니다 (지금까지 ${okSoFar}/${jobs.length}칸 저장)`, _EDIT_429_WAIT_MS); });
+  q.run(()=>{ toast(`요청이 많아 ${Math.round(_EDIT_429_WAIT_MS/1000)}초쯤 기다렸다가 남은 칸을 이어서 저장합니다 (지금까지 ${okSoFar}/${jobs.length}칸 저장)`, _EDIT_429_WAIT_MS); })
+    .catch(e=>e).then(e=>q.abort(e));
   return done.then(rs=>{
     _finishCellUndoGroup(undoGroup);
-    const saved=rs.filter(x=>x===true).length, failed=rs.length-saved;
+    const saved=rs.filter(x=>x===true).length, later=rs.filter(x=>x==='superseded').length, failed=rs.length-saved-later;
     const top=Object.keys(st.reasons).sort((a,b)=>st.reasons[b]-st.reasons[a])[0]||'';
-    toast(_pasteSummary({saved, failed, reason:top, through:st.through, locked}), failed||st.through?8000:2500);
+    toast(_pasteSummary({saved, failed, later, reason:top, through:st.through, locked}), failed||st.through?8000:2500);
     if(st.conflict) reloadWorkdesk();   // 동시 편집 = 최신 상태로 한 번만 새로고침
-    return {saved, failed};
+    return {saved, failed, later};
   });
 }
 /* 우클릭 메뉴 — 편집·복사·붙여넣기·되돌리기·배경색을 한 곳에서.

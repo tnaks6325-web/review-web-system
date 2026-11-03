@@ -163,6 +163,7 @@ async function call(handler, role, body) {
 
   console.log('\n[6] 한도 초과 재시도 · 구 서버 · 칸별 실패 표시 (가짜 서버 + 실제 화면 코드)');
   await fakeServerCases();
+  await supersedeCase();
 
   console.log(`\n${pass} pass / ${fail} fail`);
   process.exit(fail ? 1 : 0);
@@ -305,6 +306,38 @@ async function fakeServerCases() {
   }
 }
 
+async function supersedeCase() {
+  // Codex P2(PR #1753): 대기열에 있던 칸을 저장 전에 사람이 다시 고치면, 뒤늦은 붙여넣기 값이 그것을 덮으면 안 된다.
+  let release; const hold = new Promise(r => { release = r; });
+  const order = [];
+  const f = await fakeServer({
+    batch: async (req, res, st) => { st.batch++; await hold; res.json({ ok: true, results: req.body.cells.map(c => { order.push('batch:' + c.rowId); return okCell(st, c); }) }); },
+    single: (req, res, st) => { order.push('single:' + req.body.rowId); res.json(okCell(st, req.body)); },
+  });
+  try {
+    const { ctx, rows } = pasteSandbox(f.base, 'tok', 150);
+    const p = vm.runInContext('_runPaste()', ctx);
+    await new Promise(r => setTimeout(r, 30));
+    // 세 번째 묶음(r100~r149)은 아직 대기열 · 첫 묶음(r0~)은 서버에서 붙잡혀 진행 중
+    const e1 = vm.runInContext("_editNow(149,'사람이 고침')", ctx);   // 아직 안 보낸 칸
+    const e2 = vm.runInContext("_editNow(0,'진행중 칸 고침')", ctx);  // 이미 보낸(진행 중) 칸
+    await new Promise(r => setTimeout(r, 80));   // 새 편집이 (막지 않으면) 서버에 먼저 닿을 시간
+    release();
+    const r = await p; await e1; await e2;
+    await t('★ 대기 중 칸을 다시 고치면 고친 값이 서버에 남는다(붙여넣기 값이 덮지 않음)', () => {
+      assert.strictEqual(f.st.saved.get('r149|col:메모'), '사람이 고침');
+      assert.strictEqual(rows.r149.cellEdits['메모'], '사람이 고침');
+      assert.ok(!order.includes('batch:r149'), '이미 다시 고친 칸을 묶음으로 보냈다');
+    });
+    await t('★ 진행 중인 칸을 다시 고치면 묶음이 끝난 뒤에 보낸다(나중 편집이 이긴다)', () => {
+      assert.ok(order.indexOf('batch:r0') >= 0 && order.indexOf('single:r0') > order.indexOf('batch:r0'), order.slice(0, 5).join(','));
+      assert.strictEqual(f.st.saved.get('r0|col:메모'), '진행중 칸 고침');
+      assert.strictEqual(r.later, 1); assert.strictEqual(r.failed, 0);
+      assert.ok(/^149칸 저장 · 저장 중에 다시 고친 1칸은 고친 값으로$/.test(ctx.toasts[ctx.toasts.length - 1]), ctx.toasts.join(' | '));
+    });
+  } finally { f.close(); }
+}
+
 /* 화면(workdesk.html)에서 붙여넣기·저장 함수를 그대로 꺼내 vm 에서 실행한다. */
 function grabFrom(html, name) {
   const i = html.indexOf('function ' + name + '(');
@@ -335,7 +368,7 @@ function pasteSandbox(base, tok, N) {
   const ctx = { fetch, API_BASE: base, token: () => tok, rows, console, setTimeout, clearTimeout, Promise, JSON, Math, Object, Array, String, Number, Date,
     toasts: [], STATE: { cur: { sheetId: 's', tabName: 't' } }, tds };
   vm.createContext(ctx);
-  const names = ['_beginCellUndoGroup', '_finishCellUndoGroup', '_recordCellUndo', 'commitCellEdit', '_wdPostStatus', '_wdCellSaveQueue', '_pasteSummary'];
+  const names = ['_beginCellUndoGroup', '_finishCellUndoGroup', '_recordCellUndo', 'commitCellEdit', '_wdPostStatus', '_cellLocalIs', '_wdCellSaveQueue', '_pasteSummary'];
   vm.runInContext(`
     function toast(m){ toasts.push(String(m)); }
     function _dropSession(){}
@@ -343,10 +376,11 @@ function pasteSandbox(base, tok, N) {
     function _paintGridCell(){}
     function reloadWorkdesk(){ toasts.push('[reload]'); }
     function api(p,o){ return fetch(API_BASE+p,Object.assign({headers:{Authorization:'Bearer '+token(),'Content-Type':'application/json'}},o)).then(r=>r.json()); }
-    const _CELL_UNDO_MAX=1000; const _cellUndoStack=[];
+    const _CELL_UNDO_MAX=1000; const _cellUndoStack=[]; const _cellPendingWrites=new Map();
     ${['_EDIT_BATCH_MAX', '_EDIT_BATCH_PAR', '_EDIT_FALLBACK_PAR', '_EDIT_429_TRIES'].map(n => constLine(html, n)).join('\n')}
     let _EDIT_429_WAIT_MS=50; let _editBatchUnsupported=false;
     ${names.map(n => grabFrom(html, n)).join('\n')}
+    function _editNow(i,v){ return commitCellEdit('r'+i,'col:메모',v,tds[i]); }
     function _runPaste(){
       const jobs=tds.map((td,i)=>({rowId:'r'+i, field:'col:메모', val:'v'+i, td}));
       return _saveCellJobs(jobs, 0);
