@@ -714,7 +714,7 @@
     const isBlogCard = c.work_kind === 'blog';
     const blogChip = isBlogCard ? `<span class="pt-badge" style="background:#7C3AED;color:#fff">📝 블로그</span>`
       // 💬 결정 321: Q&A체험단 배지(확정 2) — 같은 자리·같은 규칙(정확 일치)
-      : c.work_kind === 'qna' ? `<span class="pt-badge" style="background:#1b64da;color:#fff">💬 Q&amp;A</span>` : '';
+      : c.work_kind === 'qna' ? `<span class="pt-badge" style="background:#1b64da;color:#fff">Q&amp;A</span>` : '';
     const badges = (channel || c.delivery_type || crChip || blogChip)
       ? `<div class="pt-badges">${blogChip}${channel ? `<span class="pt-badge ch">${_esc(channel)}</span>` : ''}${c.delivery_type ? `<span class="pt-badge dl">${_esc(_dlBadge(c.delivery_type))}</span>` : ''}${crChip}</div>`
       : '';
