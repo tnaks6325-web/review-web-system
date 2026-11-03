@@ -92,15 +92,17 @@
       var shorts = (it.shortages || []).map(function (x) { return '<span' + (x.paused ? ' title="품절로 멈춘 상품 — 추가 모집 전에 작업 조건 카드에서 다시 열어야 받을 수 있어요" style="background:#fde4e1;color:#b42318"' : '') + '>' + esc(x.optKey) + ' ' + (x.n | 0) + '건' + (x.paused ? ' · 품절 멈춤' : '') + '</span>'; }).join('');
       return '<div class="se-item' + (sel ? ' picked' : '') + '">' + thumbHtml(it) +
         '<div class="se-body"><div class="se-top"><b>' + esc(it.title) + '</b><span class="se-tag">' + (it.total | 0) + '건 모자람</span></div>' +
-        '<div class="se-meta">정규 일정 ' + esc(fmtMD(it.end)) + ' 끝 · 상품별 모자란 건수</div>' +
+        '<div class="se-meta">' + (it.kind === 'qna' ? 'Q&amp;A · ' : '') + '정규 일정 ' + esc(fmtMD(it.end)) + ' 끝 · 상품별 모자란 건수</div>' +
         '<div class="se-short">' + shorts + '</div>' +
         '<div class="se-acts">' +
-          '<button type="button" class="se-b" data-i="' + i + '" data-a="extra" aria-pressed="' + (sel === 'extra') + '">추가 모집 — 다음 영업일부터 같은 순서로</button>' +
+          // 💬 결정 321: Q&A 공고는 못 채운 자리를 같은 공개 여부·문구로 다음 영업일부터 같은 하루 건수로 다시 깐다
+          '<button type="button" class="se-b" data-i="' + i + '" data-a="extra" aria-pressed="' + (sel === 'extra') + '">' + (it.kind === 'qna' ? '추가 모집 — 다음 영업일부터 같은 하루 건수로' : '추가 모집 — 다음 영업일부터 같은 순서로') + '</button>' +
           '<button type="button" class="se-b" data-i="' + i + '" data-a="finish" aria-pressed="' + (sel === 'finish') + '">그대로 끝내기 — 공고 마감</button>' +
           '<button type="button" class="se-b" data-i="' + i + '" data-a="snooze" aria-pressed="false">1시간 뒤 다시</button>' +
         '</div></div></div>';
     }).join('');
-    ov.innerHTML = '<div class="se-box"><div class="se-hd"><h2 id="seTitle">순서대로 진행한 공고의 정규 일정이 끝났습니다</h2>' +
+    var allQna = list.every(function (x) { return x.kind === 'qna'; });
+    ov.innerHTML = '<div class="se-box"><div class="se-hd"><h2 id="seTitle">' + (allQna ? 'Q&amp;A 공고의 정규 일정이 끝났습니다' : list.some(function (x) { return x.kind === 'qna'; }) ? '정규 일정이 끝난 공고가 있습니다' : '순서대로 진행한 공고의 정규 일정이 끝났습니다') + '</h2>' +
       '<button type="button" class="se-x" data-x="1" aria-label="닫기">✕</button></div>' +
       '<p class="se-lead">못 채운 건은 다음 날로 넘기지 않았습니다. 공고마다 추가로 모집할지, 그대로 끝낼지 골라 주세요.</p>' +
       '<div class="se-list">' + rows + '</div>' +

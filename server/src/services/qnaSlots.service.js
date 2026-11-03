@@ -204,4 +204,344 @@ async function repairCalendarIfMissing({ workOrder, sheetId, tabName, by = 'admi
   return { ok: true, repaired: true, inserted: r.inserted };
 }
 
-module.exports = { insertCalendar, isQnaTab, isQnaCampaign, isBoundRow, boundSeqs, boundRowSql, calendarForTab, verifyRowsMatchPlan, repairCalendarIfMissing };
+/* ══════════════════════════════════════════════════════════════════════════════
+   3단계 — 리뷰어 신청 ↔ 자리 (사용자 확정 2026-11-03 「전부 권장」 · migration 211)
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+const DAY_MS = 86400000;
+const KST_MS = 9 * 3600000;
+/** 신청 뒤 제출 기한(분) — 신청 후 1시간과 그날 자정 중 빠른 쪽. */
+const QNA_SUBMIT_MIN = 60;
+/** 새 신청을 받지 않기 시작하는 시각(KST 분) — 23:50. 자정 직전에 묶여 10분 안에 못 쓰고 풀리는 자리를 만들지 않는다. */
+const QNA_APPLY_CUTOFF_MIN = 23 * 60 + 50;
+
+/** KST 기준 오늘 날짜(YYYY-MM-DD). */
+function kstDateStr(now = new Date()) {
+  return new Date(now.getTime() + KST_MS).toISOString().slice(0, 10);
+}
+/** 다음 KST 자정(= 오늘 자리의 마지막 순간). */
+function nextKstMidnight(now = new Date()) {
+  const k = now.getTime() + KST_MS;
+  return new Date(Math.floor(k / DAY_MS) * DAY_MS + DAY_MS - KST_MS);
+}
+/** 신청 홀드 마감 = min(신청 + 1시간, 그날 자정). */
+function qnaHoldExpiry(now = new Date()) {
+  return new Date(Math.min(now.getTime() + QNA_SUBMIT_MIN * 60000, nextKstMidnight(now).getTime()));
+}
+/** 오늘 새 신청 마감(23:50 KST)이 지났나. */
+function qnaApplyClosed(now = new Date()) {
+  const k = new Date(now.getTime() + KST_MS);
+  return k.getUTCHours() * 60 + k.getUTCMinutes() >= QNA_APPLY_CUTOFF_MIN;
+}
+/** 오늘 새 신청 마감 시각(Date) — 공고 상태의 마감 표시에 쓴다. */
+function qnaApplyCutoffAt(now = new Date()) {
+  return new Date(nextKstMidnight(now).getTime() - DAY_MS + QNA_APPLY_CUTOFF_MIN * 60000);
+}
+
+/**
+ * 공고 선택지 키(campaign_options.opt_key) → 자리표 단위 키(unit_key).
+ * ★ 공고 선택지는 작업오더에서 `_woOptionRows`(공고 프리필 단일 출처)로 만들어진다 — 같은 함수 결과를 **같은 순서로**
+ *   상품·옵션에 짝지어 그 줄이 가리키는 (상품, 옵션)의 `selectionKey` 를 붙인다(이름 규칙 사본 0).
+ *   옵션 없는 상품 줄은 공고에 **상품 이름이 키로** 저장된다(운영 실측 2026-11-03: unit_kind='product' 92건 전부 opt_key = product_name).
+ * ★ 못 짝지으면 그 선택지는 표에 없다 — 부르는 쪽이 "오늘 자리 없음"으로 접는다(fail-closed).
+ * @returns {Map<string,string>}
+ */
+function qnaOptKeyMap(workOrder) {
+  const out = new Map();
+  let arr;
+  try { arr = JSON.parse((workOrder && workOrder.product_options_json) || '[]'); } catch (_) { arr = null; }
+  if (!Array.isArray(arr)) return out;
+  const { _woOptionRows } = require('../utils/woCampaignPrefill.generated');
+  const { selectionKey } = require('./productOptions.service');
+  const rows = _woOptionRows(workOrder) || [];
+  const clean = v => String(v == null ? '' : v).replace(/\|/g, '').trim();
+  let i = 0;
+  for (const prod of arr) {
+    const name = String((prod && prod.name) || '').trim();
+    const opts = Array.isArray(prod && prod.options) ? prod.options : [];
+    const units = opts.length ? opts : (clean(prod && prod.name) ? [null] : []);
+    for (const op of units) {
+      const r = rows[i++];
+      if (!r) continue;
+      const key = clean(r.optKey) || clean(r.productName);
+      const unit = (op && r.unitKind !== 'product')
+        ? selectionKey(name, String((op.option_1 && op.option_1.value) || '').trim(), String((op.option_2 && op.option_2.value) || '').trim())
+        : selectionKey(name, '', '');
+      if (key && !out.has(key)) out.set(key, unit);
+    }
+  }
+  return out;
+}
+
+/**
+ * 공고별 오늘 자리 수 — Map(campaignId → { total, byOpt: Map(opt_key → n) }). Q&A 공고(연결 작업표에 자리표가 있는 공고)만 싣는다.
+ * ★ 「오늘 남은 자리」의 단일 출처 재료 — `campaignState.fetchCampaignCounts`(공고 정원)·`fetchOptionCountsBatch`(상품별)가 싣는다.
+ *   오늘 자리 수 = 오늘 날짜 자리(취소 제외) — 쓴 수(제출·유효 홀드)는 종전 집계가 뺀다(같은 신청 표).
+ * ★ 실패 = null(덮지 않음 — 표시는 종전). 실제 신청은 자리 묶기(`pickSlotInTx`)가 fail-closed 로 다시 막는다.
+ */
+async function loadTodayByCampaign(db, campaignIds, now = new Date()) {
+  const ids = (campaignIds || []).filter(Boolean).map(String);
+  if (!ids.length) return new Map();
+  const q = db || _pool();
+  const inTx = !!(db && typeof db.release === 'function');
+  let sp = false;
+  try {
+    if (inTx) { try { await q.query('SAVEPOINT qna_today'); sp = true; } catch (_) { sp = false; } }
+    const { rows } = await q.query(
+      `SELECT rc.id::text AS campaign_id, s.work_order_id, s.unit_key,
+              COUNT(*) FILTER (WHERE s.slot_date = $2::date AND s.status <> 'cancelled')::int AS today_n
+         FROM recruit_campaigns rc
+         JOIN qna_slots s ON s.sheet_id = rc.linked_sheet_id AND s.tab_name = rc.linked_tab_name
+        WHERE rc.id::text = ANY($1::text[])
+        GROUP BY 1, 2, 3`, [ids, kstDateStr(now)]);
+    const woIds = [...new Set(rows.map(r => r.work_order_id).filter(Boolean))];
+    const woMap = new Map();
+    if (woIds.length) {
+      const { rows: wos } = await q.query('SELECT id, product_options_json FROM work_orders WHERE id = ANY($1::text[])', [woIds]);
+      for (const w of wos) woMap.set(String(w.id), w);
+    }
+    if (sp) await q.query('RELEASE SAVEPOINT qna_today');
+    const out = new Map();
+    const byCamp = new Map();
+    for (const r of rows) {
+      if (!byCamp.has(r.campaign_id)) byCamp.set(r.campaign_id, []);
+      byCamp.get(r.campaign_id).push(r);
+    }
+    for (const [cid, list] of byCamp) {
+      const unitToday = new Map(list.map(r => [r.unit_key, Number(r.today_n) || 0]));
+      const wo = woMap.get(String(list[0].work_order_id));
+      const byOpt = new Map();
+      for (const [optKey, unitKey] of qnaOptKeyMap(wo)) byOpt.set(optKey, unitToday.get(unitKey) || 0);
+      out.set(cid, { total: list.reduce((a, r) => a + (Number(r.today_n) || 0), 0), byOpt });
+    }
+    return out;
+  } catch (e) {
+    if (sp) await q.query('ROLLBACK TO SAVEPOINT qna_today').catch(() => {});
+    logger.warn(`[qnaSlots] 오늘 자리 수 조회 실패(표시는 종전 · 신청은 자리 묶기가 막는다): ${e.message}`);
+    return null;
+  }
+}
+
+/**
+ * 오늘 빈 자리 하나를 고른다(그 상품의 그날 앞 자리부터 — 공개 자리가 그날 첫 자리라 먼저 찬다 · 확정 1).
+ * ★ 반드시 신청 트랜잭션 안·작업표 잠금(`camp_tab_daily`) 뒤에서 부른다 — 같은 작업표 신청이 한 줄로 서서 한 자리에 둘이 묶이지 않는다.
+ * ★ 마감이 지났는데 아직 스윕이 정리하지 않은 신청은 여기서 먼저 정리한다(부분 유일 색인이 그 신청을 살아 있다고 본다).
+ * @returns {Promise<null|{id,seq,unit_key,unit_seq,slot_date,visibility,question_text}>}
+ */
+async function pickSlotInTx(client, { sheetId, tabName, unitKey, now = new Date(), graceSec = 30 } = {}) {
+  if (!client || !sheetId || !tabName || !unitKey) return null;
+  const day = kstDateStr(now);
+  await client.query(
+    `UPDATE campaign_applications ca SET status = 'expired'
+       FROM qna_slots s
+      WHERE ca.qna_slot_id = s.id AND s.sheet_id = $1 AND s.tab_name = $2 AND s.unit_key = $3 AND s.slot_date = $4::date
+        AND ca.status = 'applied' AND ca.expires_at <= NOW() - make_interval(secs => $5)`,
+    [sheetId, tabName, unitKey, day, graceSec]);
+  const { rows } = await client.query(
+    `SELECT s.id, s.seq, s.unit_key, s.unit_seq, to_char(s.slot_date, 'YYYY-MM-DD') AS slot_date, s.visibility, s.question_text
+       FROM qna_slots s
+      WHERE s.sheet_id = $1 AND s.tab_name = $2 AND s.unit_key = $3 AND s.slot_date = $4::date AND s.status = 'open'
+        AND NOT EXISTS (SELECT 1 FROM campaign_applications ca
+                         WHERE ca.qna_slot_id = s.id AND ca.status IN ('applied', 'submitted'))
+      ORDER BY s.unit_seq
+      LIMIT 1
+      FOR UPDATE OF s`, [sheetId, tabName, unitKey, day]);
+  return rows[0] || null;
+}
+
+/** 신청에 묶인 자리(없으면 null). 화면 카드·제출이 읽는다. */
+/**
+ * 신청 트랜잭션 안에서 이 공고·선택지의 오늘 자리 하나를 묶을 대상을 고른다(`pickSlotInTx` 앞의 선택지→자리 단위 짝짓기).
+ * ★ 선택지 없는 공고는 자리 단위가 하나뿐일 때만 그 단위로 본다(여럿이면 고를 근거가 없다 → null).
+ * @returns {Promise<null|{slot, unitKey}>} null = 오늘 묶을 자리 없음(fail-closed — 부르는 쪽이 신청을 막는다)
+ */
+async function bindSlotForApply(client, { sheetId, tabName, optKey = null, now = new Date() } = {}) {
+  const { rows: w } = await client.query(
+    `SELECT wo.id, wo.product_options_json
+       FROM qna_slots s JOIN work_orders wo ON wo.id = s.work_order_id
+      WHERE s.sheet_id = $1 AND s.tab_name = $2
+      ORDER BY s.id LIMIT 1`, [sheetId, tabName]);
+  if (!w.length) return null;
+  const map = qnaOptKeyMap(w[0]);
+  let unitKey = null;
+  if (optKey) unitKey = map.get(String(optKey).trim()) || null;
+  else {
+    const units = [...new Set(map.values())];
+    if (units.length === 1) unitKey = units[0];
+  }
+  if (!unitKey) return null;
+  const slot = await pickSlotInTx(client, { sheetId, tabName, unitKey, now });
+  return slot ? { slot, unitKey } : null;
+}
+
+/**
+ * 리뷰어 화면에 내보내는 자리 정보(내부 번호·작업표 위치는 빼고 할 일만).
+ * deadline = 이 신청의 제출 기한(신청 홀드 마감).
+ */
+function publicSlotView(slot, deadline) {
+  if (!slot) return null;
+  const pub = slot.visibility === 'public';
+  return {
+    date: slot.slot_date || null,
+    visibility: pub ? 'public' : 'private',
+    questionText: pub ? String(slot.question_text || '') : '',
+    deadline: deadline ? new Date(deadline).toISOString() : null,
+  };
+}
+
+async function slotForApplication(db, applicationId) {
+  const { rows } = await (db || _pool()).query(
+    `SELECT s.id, s.sheet_id, s.tab_name, s.seq, s.unit_key, s.product_name, s.option1_value, s.option2_value,
+            to_char(s.slot_date, 'YYYY-MM-DD') AS slot_date, s.visibility, s.question_text, s.status
+       FROM campaign_applications ca JOIN qna_slots s ON s.id = ca.qna_slot_id
+      WHERE ca.id = $1 LIMIT 1`, [Number(applicationId) || 0]);
+  return rows[0] || null;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   3단계 — 일정 끝 「추가 모집 / 그대로 끝내기」 (사용자 확정 5 · 결정 321)
+   마지막 자리 날짜가 지난 Q&A 공고에 못 채운 자리가 있으면, 순차진행 끝 팝업(campaignSequentialEnd)과 **같은 창**에서 묻는다.
+   [추가 모집] = 못 채운 자리를 **같은 공개 여부·문구 그대로** 다음 영업일부터 그 상품의 하루 건수로 다시 깐다
+                (자리·작업표 줄을 새로 만들지 않고 그 줄의 진행일자만 옮긴다 — 줄 수·총원 불변).
+   [그대로 끝내기] = 못 채운 자리를 닫고(lapsed) 공고를 마감한다.
+   ★ 같은 일정 끝(end)에 대한 [추가 모집]은 한 번만(공고 행 잠금 뒤 기록 재확인).
+   ══════════════════════════════════════════════════════════════════════════════ */
+const QNA_END_ACTIONS = { extra: 'qna_extra', finish: 'qna_finish' };
+
+/** 못 채운 자리 = 그 날짜가 지났고(<= end) 열려 있고 제출된 신청이 없는 자리. */
+function _unfilledSql(alias) {
+  return `${alias}.status = 'open'
+      AND NOT EXISTS (SELECT 1 FROM campaign_applications ca2 WHERE ca2.qna_slot_id = ${alias}.id AND ca2.status = 'submitted')`;
+}
+
+/**
+ * 물을 Q&A 공고 — [{campaignId,title,thumbnailUrl,manager,end,sheetId,tabName,workOrderId,unfilled:[slot...]}]
+ * ★ 모르면 묻지 않는다 — 조회 실패는 부르는 쪽이 빈 목록으로 접는다.
+ */
+async function listQnaEnds(db, { campaignIds = null, now = new Date() } = {}) {
+  const q = db || _pool();
+  const today = kstDateStr(now);
+  const params = [today];
+  let idClause = '';
+  if (Array.isArray(campaignIds)) { params.push(campaignIds.map(String)); idClause = 'AND rc.id::text = ANY($2::text[])'; }
+  const { rows: camps } = await q.query(
+    `SELECT rc.id::text AS campaign_id, rc.title, rc.thumbnail_url, rc.manager, rc.linked_sheet_id AS sheet_id, rc.linked_tab_name AS tab_name,
+            MIN(s.work_order_id) AS work_order_id,
+            to_char(MAX(s.slot_date) FILTER (WHERE s.status <> 'cancelled'), 'YYYY-MM-DD') AS end_date
+       FROM recruit_campaigns rc
+       JOIN qna_slots s ON s.sheet_id = rc.linked_sheet_id AND s.tab_name = rc.linked_tab_name
+      WHERE rc.participation_mode AND rc.status = 'active' AND rc.archived_at IS NULL ${idClause}
+      GROUP BY rc.id, rc.title, rc.thumbnail_url, rc.manager, rc.linked_sheet_id, rc.linked_tab_name
+     HAVING MAX(s.slot_date) FILTER (WHERE s.status <> 'cancelled') < $1::date`, params);
+  if (!camps.length) return [];
+  const out = [];
+  for (const c of camps) {
+    const { rows: un } = await q.query(
+      `SELECT s.id, s.seq, s.unit_key, s.unit_seq, s.visibility, s.round, to_char(s.slot_date, 'YYYY-MM-DD') AS slot_date
+         FROM qna_slots s
+        WHERE s.sheet_id = $1 AND s.tab_name = $2 AND s.slot_date <= $3::date AND ${_unfilledSql('s')}
+        ORDER BY s.slot_date, s.unit_key, s.unit_seq`, [c.sheet_id, c.tab_name, c.end_date]);
+    if (!un.length) continue;
+    out.push({ campaignId: c.campaign_id, title: c.title || '', thumbnailUrl: c.thumbnail_url || '', manager: c.manager || '',
+      end: c.end_date, sheetId: c.sheet_id, tabName: c.tab_name, workOrderId: c.work_order_id, unfilled: un });
+  }
+  return out;
+}
+
+/** 팝업에 보일 상품별 모자란 건수 — 이름은 공고 선택지 이름(없으면 자리 단위 이름). */
+function qnaShortages(item, workOrder) {
+  const back = new Map();
+  for (const [optKey, unit] of qnaOptKeyMap(workOrder)) if (!back.has(unit)) back.set(unit, optKey);
+  const by = new Map();
+  for (const s of item.unfilled) by.set(s.unit_key, (by.get(s.unit_key) || 0) + 1);
+  return [...by].map(([unit, n]) => ({ optKey: back.get(unit) || unit, n }));
+}
+
+/**
+ * 결정 하나 반영(공고마다 독립 트랜잭션 — 부르는 쪽이 BEGIN/COMMIT 하지 않는다).
+ * @returns {{ok:true, moved?:number, lapsed?:number}}  실패는 throw(e.code 있음 = 사람에게 보일 말)
+ */
+async function applyQnaEnd({ campaignId, action, end, actor = 'admin', now = new Date() } = {}) {
+  if (!QNA_END_ACTIONS[action]) throw Object.assign(new Error('잘못된 결정입니다.'), { code: 'bad_action' });
+  const client = await _pool().connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: lock } = await client.query('SELECT id, status FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [campaignId]);
+    if (!lock.length || lock[0].status !== 'active') throw Object.assign(new Error('게시 중인 공고가 아닙니다.'), { code: 'not_active' });
+    const it = (await listQnaEnds(client, { campaignIds: [campaignId], now }))[0];
+    if (!it || (end && String(end) !== it.end)) throw Object.assign(new Error('그사이 상황이 바뀌었습니다 — 다시 확인해 주세요.'), { code: 'changed' });
+    const { rows: dup } = await client.query(
+      `SELECT 1 FROM campaign_plan_events WHERE campaign_id = $1 AND action = $2 AND detail->>'end' = $3 LIMIT 1`,
+      [campaignId, QNA_END_ACTIONS.extra, it.end]);
+    if (dup.length) throw Object.assign(new Error('다른 담당자가 방금 처리했습니다.'), { code: 'already' });
+    // 작업표 줄 기록(Q&A 제출)과 같은 잠금 — 옮기는 사이 그 줄에 제출이 끼지 않는다
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`sheetless_worktable:${it.sheetId}:${it.tabName}`]);
+    const { rows: wos } = await client.query('SELECT * FROM work_orders WHERE id = $1', [it.workOrderId]);
+    const wo = wos[0] || {};
+    const shortages = qnaShortages(it, wo);
+    let moved = 0, lapsed = 0;
+    if (action === 'extra') {
+      const { businessDays, normalizeHolidayList, QNA_DATE_HEADER } = require('../utils/worktablePlan');
+      // 그 상품의 하루 건수 = 처음 자리표에서 하루에 가장 많이 깔린 수(확정 5 — 같은 하루 건수)
+      const { rows: per } = await client.query(
+        `SELECT unit_key, MAX(n)::int AS per FROM (
+           SELECT unit_key, slot_date, COUNT(*) AS n FROM qna_slots
+            WHERE sheet_id = $1 AND tab_name = $2 AND status <> 'cancelled' GROUP BY unit_key, slot_date) t
+          GROUP BY unit_key`, [it.sheetId, it.tabName]);
+      const perDay = new Map(per.map(r => [r.unit_key, Math.max(1, r.per || 1)]));
+      const tomorrow = kstDateStr(new Date(now.getTime() + DAY_MS));
+      const holidays = normalizeHolidayList(wo.holidays);
+      const byUnit = new Map();
+      for (const s of it.unfilled) { if (!byUnit.has(s.unit_key)) byUnit.set(s.unit_key, []); byUnit.get(s.unit_key).push(s); }
+      for (const [unit, list] of byUnit) {
+        const pd = perDay.get(unit) || 1;
+        // 공개 자리가 그날 첫 자리라 먼저 찬다(확정 1) — 다시 깔 때도 그날 안에서 공개를 앞에 둔다
+        const days = businessDays({ count: Math.ceil(list.length / pd), startDate: tomorrow, skipWeekends: wo.skip_weekends !== false, holidays });
+        if (days.length * pd < list.length) throw Object.assign(new Error('다시 깔 날짜를 만들지 못했습니다.'), { code: 'no_days' });
+        for (let d = 0; d < days.length; d++) {
+          const chunk = list.slice(d * pd, (d + 1) * pd).sort((a, b) => (a.visibility === 'public' ? 0 : 1) - (b.visibility === 'public' ? 0 : 1) || a.unit_seq - b.unit_seq);
+          for (const s of chunk) {
+            await client.query(`UPDATE qna_slots SET slot_date = $2::date, round = round + 1, updated_at = NOW() WHERE id = $1`, [s.id, days[d].date]);
+            if (s.seq != null) {
+              await client.query(
+                `UPDATE campaign_participants
+                    SET start_date = $4, row_json = jsonb_set(COALESCE(row_json, '{}'::jsonb), ARRAY[$5::text], to_jsonb($4::text), true),
+                        updated_by = 'qna-extra', updated_at = NOW()
+                  WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL AND order_submission_id IS NULL`,
+                [it.sheetId, it.tabName, s.seq, days[d].label, QNA_DATE_HEADER]);
+            }
+            moved++;
+          }
+        }
+      }
+    } else {
+      const r = await client.query(
+        `UPDATE qna_slots s SET status = 'lapsed', updated_at = NOW()
+          WHERE s.id = ANY($1::bigint[]) AND ${_unfilledSql('s')}`, [it.unfilled.map(s => s.id)]);
+      lapsed = r.rowCount;
+      await client.query(`UPDATE recruit_campaigns SET status = 'closed', updated_at = NOW() WHERE id = $1`, [campaignId]);
+    }
+    await client.query(
+      `INSERT INTO campaign_plan_events (campaign_id, actor, action, detail) VALUES ($1,$2,$3,$4::jsonb)`,
+      [campaignId, String(actor).slice(0, 100), QNA_END_ACTIONS[action],
+       JSON.stringify({ end: it.end, after: kstDateStr(now), shortages, moved, lapsed })]);
+    await client.query('COMMIT');
+    if (action === 'extra') {
+      // 작업보드 장부를 새 날짜로 다시 만든다(커밋 뒤 · 실패해도 결정은 유효 — 다음 갱신이 맞춘다)
+      try { await require('./sheetlessLedger.service').rebuildLedgers({ sheetId: it.sheetId, tabName: it.tabName, by: 'qna-extra' }); }
+      catch (e) { logger.warn(`[qnaSlots] 추가 모집 뒤 장부 갱신 실패(다음 갱신이 맞춘다): ${e.message}`); }
+    }
+    logger.info(`[qnaSlots] 일정 끝 ${action} camp=${campaignId} end=${it.end} moved=${moved} lapsed=${lapsed}`);
+    return { ok: true, moved, lapsed, title: it.title, total: it.unfilled.length };
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+module.exports = { insertCalendar, isQnaTab, isQnaCampaign, isBoundRow, boundSeqs, boundRowSql, calendarForTab, verifyRowsMatchPlan, repairCalendarIfMissing,
+  QNA_SUBMIT_MIN, QNA_APPLY_CUTOFF_MIN, kstDateStr, nextKstMidnight, qnaHoldExpiry, qnaApplyClosed, qnaApplyCutoffAt,
+  qnaOptKeyMap, loadTodayByCampaign, pickSlotInTx, bindSlotForApply, publicSlotView, slotForApplication,
+  QNA_END_ACTIONS, listQnaEnds, qnaShortages, applyQnaEnd };

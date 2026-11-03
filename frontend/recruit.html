@@ -268,7 +268,7 @@ body{ background:#F4F5F8 !important; letter-spacing:-.01em; }
 .rc-footer-fixed{ background:#fff !important; border-top:1px solid #EFEFF3 !important; }
 </style>
 <script src="api.js"></script>
-<script src="js/campaign-cards.js?v=20261019-camppause"></script>
+<script src="js/campaign-cards.js?v=20261103-qna"></script>
   <script src="js/campaign-workdetail.js"></script>
 <link rel="stylesheet" href="css/toss-theme.css"/>
 </head>
@@ -295,6 +295,8 @@ body{ background:#F4F5F8 !important; letter-spacing:-.01em; }
       style="flex:0 0 auto;font-size:.8rem;font-weight:800;padding:7px 16px;border-radius:999px;border:1.5px solid #E5E7EB;background:#fff;color:#6B7280;cursor:pointer">리뷰체험단</button>
     <button type="button" class="rc-kt" data-kind="blog" onclick="setRecruitKind('blog')"
       style="flex:0 0 auto;font-size:.8rem;font-weight:800;padding:7px 16px;border-radius:999px;border:1.5px solid #E5E7EB;background:#fff;color:#6B7280;cursor:pointer">블로그체험단</button>
+    <button type="button" class="rc-kt" data-kind="qna" onclick="setRecruitKind('qna')"
+      style="flex:0 0 auto;font-size:.8rem;font-weight:800;padding:7px 16px;border-radius:999px;border:1.5px solid #E5E7EB;background:#fff;color:#6B7280;cursor:pointer">Q&amp;A체험단</button>
   </div>
   <div id="rcLoading" class="rc-loading">
     <i class="fas fa-circle-notch"></i>
@@ -412,10 +414,12 @@ async function loadSettings() {
    공고 목록 로드
 ═══════════════════════════════════ */
 /* 127: 체험단 종류 탭 — 판정은 서버 work_kind 정확 일치(빈 값·필드 부재 = 리뷰) */
-let _rcKind = (function(){ try{ const v = sessionStorage.getItem("rc_kind_v1"); return v === "blog" ? "blog" : "review"; }catch(_){ return "review"; } })();
-function _rcKindOf(c){ return c && c.work_kind === "blog" ? "blog" : "review"; }
+// 💬 결정 321: Q&A체험단 탭(확정 2). 모르는 값은 리뷰로 접힌다(종전과 같다).
+const _RC_KINDS = { review: 1, blog: 1, qna: 1 };
+let _rcKind = (function(){ try{ const v = sessionStorage.getItem("rc_kind_v1"); return _RC_KINDS[v] ? v : "review"; }catch(_){ return "review"; } })();
+function _rcKindOf(c){ return c && (c.work_kind === "blog" || c.work_kind === "qna") ? c.work_kind : "review"; }
 function setRecruitKind(k){
-  _rcKind = k === "blog" ? "blog" : "review";
+  _rcKind = _RC_KINDS[k] ? k : "review";
   try{ sessionStorage.setItem("rc_kind_v1", _rcKind); }catch(_){}
   _rcPaintKindTabs();
   const container = document.getElementById("rcList");

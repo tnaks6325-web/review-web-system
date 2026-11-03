@@ -181,7 +181,10 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbCol
 
   const startDateKeywords = ['시작일', '구매일', '주문일', '배정일'];
   const endDateKeywords = ['종료일', '마감일', '완료일', '제출마감'];
-  const startDateIdx = headers.findIndex(h => startDateKeywords.some(k => h.includes(k)));
+  let startDateIdx = headers.findIndex(h => startDateKeywords.some(k => h.includes(k)));
+  // ★ 결정 321: Q&A체험단 작업표는 「구매일자」 자리가 「진행일자」다 — 다른 날짜 칸이 하나도 없을 때만 그것을 본다
+  //   (종전 탭의 판정 순서는 그대로 · 진행일자를 따로 둔 리뷰 탭이 있어도 구매일 칸이 이긴다).
+  if (startDateIdx < 0) startDateIdx = headers.findIndex(h => h.includes('진행일자'));
   const endDateIdx = headers.findIndex(h => endDateKeywords.some(k => h.includes(k)));
 
   const roundKeywords = ['회차', '차수', 'round'];

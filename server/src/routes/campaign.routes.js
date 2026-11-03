@@ -43,12 +43,13 @@ const { deliveryBaseType } = require('../utils/deliveryType');
 const { normalizeDeliveryReviewFeeMix, validateDeliveryReviewFeeMix, DELIVERY_MIX_KEYS } = require('../utils/deliveryReviewFee');
 const { normalizeRecruitBadges } = require('../utils/recruitBadges');
 // ★ 099: 체험단 종류(리뷰/블로그) 저장 정규화 — 판정 단일 출처. 사본을 만들지 않는다.
-const { workKindForStore, resolveWorkKind, isBlogKind } = require('../utils/workKind');
+const { workKindForStore, resolveWorkKind, isBlogKind, isQnaKind } = require('../utils/workKind');
 const { weekendPublicationState } = require('../services/campaignWeekend.service');
 // ★ 101 블로그URL — 형식 판정은 포스팅URL 과 **같은 단일 출처**(둘 다 "사람이 붙여넣는 주소").
 //   라벨만 다르다: 블로그URL = 블로그 주소 / 포스팅URL = 쓴 글 주소.
 const { isPostUrl, BLOG_URL_HINT } = require('../utils/blogPostUrl');
 const { workKindForTab: tabWorkKind } = require('../services/workKindContext.service');
+const qnaSlots = require('../services/qnaSlots.service');   // ★ 결정 321 3단계 — Q&A 자리 묶기
 const { syncCampaignRecruitTotal, displayRecruitTotalForCampaign, assertCampaignRecruitTotal } = require('../services/linkedRecruitQuota.service');
 const { loadPopularCreditMatches, loadPopularCreditState, canUsePopularCredit } = require('../services/popularCredit.service');
 const { repurchaseDays } = require('../utils/repurchaseGuard');
@@ -1290,7 +1291,8 @@ router.get('/list', async (req, res, next) => {
                window_start, window_end, close_buffer_min, hold_ttl_min, start_date,
                multi_account_mode, sub_hold_ttl_min, is_popular,
                carry_mode, carry_strategy, skip_weekends, cash_receipt_required,  -- ★ 098/139: 상태엔진 입력. 빠지면 목록·apply 정원이 갈린다.
-               soldout_paused_at  -- ★ 결정 259: 공고 전체 품절 멈춤(카드 표시 — apply 게이트와 같은 칸)
+               soldout_paused_at,  -- ★ 결정 259: 공고 전체 품절 멈춤(카드 표시 — apply 게이트와 같은 칸)
+               work_kind  -- ★ 결정 321: 공개 목록 종류 탭(리뷰/블로그/Q&A)·Q&A 배지 재료 — 공개 칸 목록(PUBLIC_FIELDS_*)엔 있었는데 SELECT 에 빠져 늘 리뷰로 접혔다
                            --   정원, apply(SELECT *)는 보류 정원을 봐서 "카드는 열렸는데 참여 거부"
         FROM recruit_campaigns
         WHERE status IN ('active', 'closed')
@@ -1868,7 +1870,25 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
     // 옵션 변경은 유효 홀드(미제출) + 옵션 2개 이상 + **실제로 옮겨 갈 수 있는 선택지가 있을 때만**(결정 212 · Codex P2 —
     //   순차진행이면 나머지가 전부 대기라 시트를 열어도 고를 것이 없다). 판정 = change-option 과 같은 _optionChangeViews.
     //   ★ 조회 실패 = 종전 규칙(옵션 2개 이상) — 버튼이 보여도 서버가 다시 판정하므로 안전한 쪽이다.
-    let canChangeOption = validHold && options.length >= 2;
+    // ★ 결정 321: Q&A 신청이면 묶인 자리(날짜·공개 여부·문의 문구)와 제출 기한을 싣는다. 조회 실패 = null(카드 없이 종전 화면).
+    let qnaSlot = null;
+    try {
+      const slot = await qnaSlots.slotForApplication(pool, app.id);
+      if (slot) {
+        qnaSlot = qnaSlots.publicSlotView(slot, app.expires_at);
+        // 제출(줄 기록)까지 끝난 신청 — 캡처까지 냈는지와 캡처를 올릴 줄 번호(다시 올리기용 · 본인 줄만)
+        if (isSubmitted) {
+          const { rows: ri } = await pool.query(
+            `SELECT is_submitted FROM review_index WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3 LIMIT 1`,
+            [slot.sheet_id, slot.tab_name, Number(slot.seq)]);
+          qnaSlot.captureDone = !!(ri[0] && ri[0].is_submitted === true);
+          qnaSlot.rowIndex = Number(slot.seq);
+        }
+      }
+    } catch (e) {
+      logger.warn(`[campaign/work-detail] Q&A 자리 조회 실패 camp=${id}: ${e.message}`);
+    }
+    let canChangeOption = validHold && options.length >= 2 && !qnaSlot;   // Q&A 는 상품 변경 없음(change-option 이 다시 막는다)
     if (canChangeOption) {
       try {
         const { views } = await _optionChangeViews(pool, id, app, now);
@@ -1908,6 +1928,7 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
       options,               // [{ optKey, payAmount, remaining, todayRemaining, status, selectable, ... }]
       selectedOption,        // 내가 참여한 옵션(잠금표시·구매양식 고정용)
       canChangeOption,
+      qnaSlot,               // ★ 결정 321: { date, visibility:'public'|'private', questionText, deadline } | null(Q&A 아님)
       qty,                   // ★ 결정 289 ③-나: { purchaseQty, amount, tiers:[{qty,status,remaining,buyMethod,payAmount}], canChange } | null(단계 없음)
       joinedDisplay: joinedView,   // ★ 결정 214: { title, thumbnailUrl } | null
       workDetail,                                                // HTML은 응답 직전 방어적 재정화
@@ -1991,6 +2012,12 @@ router.post('/:id/change-option', applyLimiter, async (req, res, next) => {
       await client.query('ROLLBACK');
       return res.status(409).json({ ok: false, reason: 'not_changeable', error: '지금은 옵션을 변경할 수 없어요(제출 완료 또는 만료).' });
     }
+    // ★ 결정 321: Q&A 신청은 상품의 그날 자리 하나에 묶여 있다 — 상품을 바꾸려면 취소 후 다시 신청한다(자리 갈아타기 없음).
+    { const { rows: q } = await client.query('SELECT qna_slot_id FROM campaign_applications WHERE id=$1', [app.id]);
+      if (q[0] && q[0].qna_slot_id != null) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ ok: false, reason: 'qna_option_locked', error: 'Q&A 참여는 상품을 바꿀 수 없어요. 취소 후 다시 신청해주세요.' });
+      } }
     // ★ 결정 289 — 지금 고른 개수(위 SELECT 칸 목록은 회귀가드가 고정 — 같은 tx·이미 잠근 행이라 따로 읽는다)
     { const { rows: q } = await client.query('SELECT purchase_qty FROM campaign_applications WHERE id=$1', [app.id]); app.purchase_qty = q[0] ? q[0].purchase_qty : null; }
     if (!newKey) newKey = app.option_key || null;   // 개수만 바꾸는 요청 — 옵션은 그대로
@@ -2096,6 +2123,7 @@ async function _applyParticipation(req, res, next, campPre) {
   //   ★ **판정 실패·리뷰체험단은 종전 동작 그대로**(모르면 요구하지 않는다 — 멀쩡한 참여를 막는 쪽이 더 나쁘다).
   let blogUrlIns = null;
   let blogApply = false;   // ★ 127: 이 신청이 블로그체험단인가(승인제 분기의 근거)
+  let qnaApply = false;    // ★ 결정 321 3단계: Q&A체험단 — 신청 때 그날 자리 하나를 묶는다
   {
     let _kind = null;
     try {
@@ -2104,6 +2132,14 @@ async function _applyParticipation(req, res, next, campPre) {
         tabKind: await tabWorkKind({ sheetId: campPre.linked_tab_sheet_id, tabName: campPre.linked_tab_name }),
       });
     } catch (_) { _kind = null; }
+    if (isQnaKind(_kind)) {
+      qnaApply = true;
+      // ★ 23:50(KST) 부터 새 신청을 받지 않는다 — 자정에 그날 자리가 끝나 10분 안에 못 쓰고 풀리는 자리를 만들지 않는다(확정 7).
+      if (qnaSlots.qnaApplyClosed(new Date())) {
+        return res.status(409).json({ ok: false, reason: 'qna_day_closing',
+          error: '오늘 Q&A 신청은 마감됐어요(밤 11시 50분). 내일 다시 참여해주세요.' });
+      }
+    }
     if (isBlogKind(_kind)) {
       blogApply = true;
       const raw = String(req.body.blogUrl || '').trim().slice(0, 500);
@@ -2248,7 +2284,7 @@ async function _applyParticipation(req, res, next, campPre) {
        같은 캠페인 행 잠금 안이라 마지막 한 자리를 두 사람이 동시에 잡지 못한다. 단계 없는 공고는 조회 1번 뒤 그대로 통과.
        ★ SAVEPOINT 로 감싸지 않는다 — 옵션 게이트와 같이 실패하면 막힌다(표 존재는 필수 스키마 검사가 보장). */
     let qtyTierPick = null;
-    if (!blogApply) {
+    if (!blogApply && !qnaApply) {   // Q&A 는 구매가 없다(321) — 개수 단계도 없다
       const verdict = await campaignQtyTiers.judge(client, id, chosenOpt ? chosenOpt.opt_key : null, req.body.purchaseQty);
       if (verdict && !verdict.ok) {
         await client.query('ROLLBACK');
@@ -2489,7 +2525,12 @@ async function _applyParticipation(req, res, next, campPre) {
     //   위에서 읽은 같은 공고 제출시각으로 폴백한다. 단일 기간 계산 = utils/repurchaseGuard.
     //   ★ 하드 차단·예외 없음(리뷰어 셀프 참여는 관리자 확인 창구가 없다 — 관리자 대신등록만 예외 허용).
     //   조회 실패는 fail-open(막는 기능의 오류로 정상 참여를 막지 않는다 — 신원게이트와 같은 규율).
-    try {
+    // ★ 결정 321(확정 3): Q&A 는 구매가 없어 재구매 기간을 보지 않는다 — 대신 같은 공고 같은 명의는 한 번만(제출완료 = 영구 차단).
+    if (qnaApply && sameCampaignSubmittedAt) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ ok: false, reason: 'one_per_person', error: '이 Q&A 공고에는 이미 참여했어요.' });
+    }
+    if (!qnaApply) try {
       const { checkRepurchaseWindow, repurchaseWindowFromSubmittedAt } = require('../utils/repurchaseGuard');
       let rw = repurchaseWindowFromSubmittedAt(sameCampaignSubmittedAt, camp.repurchase_days, now.getTime());
       if (camp.linked_sheet_id && camp.linked_tab_name) {
@@ -2620,7 +2661,24 @@ async function _applyParticipation(req, res, next, campPre) {
     const ttlMin = isSubApply ? (Number(camp.sub_hold_ttl_min) || 15) : (Number(camp.hold_ttl_min) || 30);
     const ttlMs = ttlMin * 60000;
     const closesAt = kstTodayAt(camp.window_end, now);
-    const expiresAt = new Date(closesAt ? Math.min(now.getTime() + ttlMs, closesAt.getTime()) : now.getTime() + ttlMs);
+    // ★ 결정 321(확정 7): Q&A 제출 기한 = 신청 후 1시간과 그날 자정 중 빠른 쪽(공고 TTL 대신).
+    const _baseExp = qnaApply ? qnaSlots.qnaHoldExpiry(now).getTime() : now.getTime() + ttlMs;
+    const expiresAt = new Date(closesAt ? Math.min(_baseExp, closesAt.getTime()) : _baseExp);
+    /* ★★ 결정 321(확정 1): Q&A 신청은 그 상품의 오늘 빈 자리 하나를 묶는다(그날 앞 자리부터 — 공개 자리가 먼저 찬다).
+         작업표 잠금(camp_tab_daily) 안이라 같은 자리에 둘이 묶이지 않는다(뒤에는 부분 유일 색인 211 이 받친다).
+         못 고르면 막는다(fail-closed) — 자리 없는 신청은 제출할 줄이 없다. */
+    let qnaBind = null;
+    if (qnaApply) {
+      qnaBind = (camp.linked_sheet_id && camp.linked_tab_name)
+        ? await qnaSlots.bindSlotForApply(client, {
+          sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name,
+          optKey: chosenOpt ? chosenOpt.opt_key : null, now })
+        : null;
+      if (!qnaBind) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ ok: false, reason: 'qna_no_slot', error: '오늘 이 상품의 Q&A 자리가 모두 찼어요.' });
+      }
+    }
     const holdToken = crypto.randomBytes(24).toString('base64url');
     // 명의 표기값은 서버 권위(등록된 sub_accounts 값 우선 — 요청 오타로 홀드/신원판별 표기가 갈라지는 것 방지)
     const insName = isSubApply ? String((subEntry && subEntry.name) || subName).trim() : name;
@@ -2663,6 +2721,9 @@ async function _applyParticipation(req, res, next, campPre) {
        VALUES ($1,$2,$3,$4,$5,$12,$6,$7,$8,$9,$10,$11)
        RETURNING id, status, expires_at, option_key`,
       [id, insName, insPhone, holdP8, p8, insExpires, holdToken, chosenOpt ? chosenOpt.opt_key : null, feeSnapshot, blogUrlIns, camp.is_popular === true, insStatus]);
+    if (qnaBind) {   // ★ 결정 321 — INSERT 칸 목록은 고정(회귀가드) · 뒤이은 UPDATE 관용구로 묶은 자리를 새긴다
+      await client.query(`UPDATE campaign_applications SET qna_slot_id = $2 WHERE id = $1`, [ins.rows[0].id, qnaBind.slot.id]);
+    }
     if (qtyTierPick) {   // ★ 결정 289 — INSERT 칸 목록은 고정(회귀가드) · 뒤이은 UPDATE 관용구로 고른 개수·금액을 새긴다
       await client.query(
         `UPDATE campaign_applications SET purchase_qty = $2, qty_tier_amount = $3 WHERE id = $1`,
@@ -2755,6 +2816,7 @@ async function _applyParticipation(req, res, next, campPre) {
       participant: { type: isSubApply ? 'sub' : 'self', name: insName },
       expiresAt: ins.rows[0].expires_at, serverNow: now.toISOString(),
       optionKey: ins.rows[0].option_key || null,
+      qnaSlot: qnaBind ? qnaSlots.publicSlotView(qnaBind.slot, ins.rows[0].expires_at) : undefined,
     });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }

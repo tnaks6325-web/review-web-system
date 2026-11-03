@@ -278,6 +278,8 @@
     // 단일상품에서 상품 카드와 같은 이름을 세 번 노출시켜 읽기만 방해한다.
     // 단, 관리자 인라인 미리보기는 첫 선택지 가이드를 대표로 보여 주므로, 어떤
     // 선택지인지 확인할 수 있게 호출부가 명시한 경우에만 배지를 유지한다.
+    // 💬 결정 321: Q&A체험단은 유입방식이 없다(상품 페이지 링크는 Q&A 카드가 따로 준다) — 호출부가 끌 때만 카드째 뺀다
+    if (o.showInflow !== false) {
     html += '<div class="cwd-box"><div class="cwd-tt">🧭 유입가이드</div>'
       + (usingUnitGuide && o.showUnitGuideIdentity
         ? '<div class="cwd-note">📌 <b>' + escAttr(so.optKey) + '</b> 선택지 전용 안내예요.</div>'
@@ -291,6 +293,7 @@
       html += '<button type="button" class="cwd-btn" data-cwd-landing="' + escAttr(landingUrl) + '">🔗 ' + (hasSelectedOptionUrl ? '선택 옵션 링크 열기' : '상품 페이지 열기') + ' (새 탭)</button>';
     }
     html += '</div>';
+    }
 
     // 리뷰 가이드 ([리뷰등록 가이드] 섹션만) + 첨부 이미지
     // ★ 사진만 있고 글이 비어도 카드를 낸다 — 안 그리면 관리자가 넣은 사진이 통째로 사라진다.
