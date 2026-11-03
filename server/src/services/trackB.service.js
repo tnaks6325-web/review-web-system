@@ -2065,6 +2065,10 @@ async function advertiserWorkSummary({ advertiserId, brandId = null } = {}) {
   const brandsOut = brandId ? undefined : (await brandsForAdvertiser({ advertiserId }).catch(() => null));
   // 136: 작업별 브랜드 담당자 — 배치 1쿼리(fail-soft 빈 맵). 브랜드 관리 화면의 작업 행이 현재 값을 그린다.
   const bmgr = await tabBrandManagersMap({ advertiserId });
+  // 끝남 여부(불리언 하나) — 업체 화면이 마감한 작업을 계속 "진행중"으로 보여주던 문제(사용자 확정 2026-11-03 A안).
+  //   ★ 마감자·마감일·담당자는 싣지 않는다(087 「광고주에겐 마감 주석을 안 보낸다」의 이유 = 내부 정보 — 그대로 지킨다).
+  //   ★ 조회 실패면 칸 자체를 빼서(undefined) 화면이 종전 규칙(제출 ≥ 총건수)으로 판정한다 — "모름"을 "안 끝남"으로 꾸미지 않는다.
+  const finMap = await finishedTabsMap();
   // 계약 공유 묶음 — ★ 광고주에게 보이는 작업들 안에서만 센다(다른 업체·다른 브랜드 작업 수를 새지 않는다).
   //   인트라넷 계약 ID 는 이 렌즈에서 버리므로, 화면이 합계를 한 번만 세도록 불투명한 묶음 번호만 싣는다.
   const shareN = new Map(), shareGrp = new Map();
@@ -2090,6 +2094,8 @@ async function advertiserWorkSummary({ advertiserId, brandId = null } = {}) {
         // 없으면 화면이 종전대로 시트 제목을 그리므로, 이 한 칸이 빠지면 라벨 숨김이 조용히 무력화된다.
         sheetless: t.sheetless === true,
         active: t.active !== false,
+        ...(finMap.ok ? { finished: !!(finMap.map[_FIN_KEY(t.sheetId, t.tabName)]
+          || (String(t.tabGid == null ? '' : t.tabGid).trim() && finMap.map[_FIN_GKEY(t.sheetId, String(t.tabGid).trim())])) } : {}),
         submitted: t.bSub || 0, paid: t.bPaid || 0,
         // 진행 건수 = 구매양식이 실제로 기록된 줄(bTotal — 결정 283 채워진 줄 판정, 업체관리 표와 같은 값).
         //   ★ 총건수(target)와는 다른 칸이다 — 이름을 total 로 싣지 않는다(총건수로 오해 금지).

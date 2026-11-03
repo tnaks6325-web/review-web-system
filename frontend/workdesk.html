@@ -3977,7 +3977,9 @@ function _awProgress(it){
 }
 function _awStatus(it){   // 진행상황 칩 {label, tone, done}
   const p=_awProgress(it);
-  const done=it.active===false||(p.target>0&&p.submitted>=p.target);
+  // ★ 마감(🏁)한 작업은 덜 채웠어도 완료다(사용자 확정 2026-11-03) — 서버가 끝남 불리언만 싣는다(마감자·일자 없음).
+  //   칸이 없으면(구버전 서버·조회 실패) 종전 규칙 그대로.
+  const done=it.finished===true||it.active===false||(p.target>0&&p.submitted>=p.target);
   const state=done?'완료':'진행중';
   return {label:p.percent!=null?`${state} ${p.percent}%`:`${state} —`,tone:done?'safe':'ok',done};
 }
