@@ -2523,7 +2523,9 @@ async function _applyParticipation(req, res, next, campPre) {
           const o = other[0];
           let blocked = o.status !== 'submitted';
           let availableFrom = null;
-          if (!blocked) {
+          if (!blocked && qnaApply) {
+            blocked = true;   // ★ 결정 321(확정 3): Q&A 는 재구매 기간이 없다 — 다른 명의로 제출했으면 이 공고는 끝(같은 명의 규칙과 같다)
+          } else if (!blocked) {
             const { repurchaseWindowFromSubmittedAt } = require('../utils/repurchaseGuard');
             const rw = repurchaseWindowFromSubmittedAt(o.submitted_at, camp.repurchase_days, now.getTime());
             blocked = !!rw.blocked;

@@ -258,13 +258,16 @@ function qnaOptKeyMap(workOrder) {
   let i = 0;
   for (const prod of arr) {
     const name = String((prod && prod.name) || '').trim();
+    // ★ 자리 단위는 자리표(qnaCalendar.qnaUnitsFromWorkOrder)와 **같은 기준** = 상품의 product_mode.
+    //   선택지 행의 unitKind 로 정하면 「단일」·「없음」 같은 옵션 이름이 상품 선택지로 접혀 자리표에 없는 단위를 가리킨다.
+    const optMode = String((prod && prod.product_mode) || '').trim() === 'opt';
     const opts = Array.isArray(prod && prod.options) ? prod.options : [];
     const units = opts.length ? opts : (clean(prod && prod.name) ? [null] : []);
     for (const op of units) {
       const r = rows[i++];
       if (!r) continue;
       const key = clean(r.optKey) || clean(r.productName);
-      const unit = (op && r.unitKind !== 'product')
+      const unit = (op && optMode)
         ? selectionKey(name, String((op.option_1 && op.option_1.value) || '').trim(), String((op.option_2 && op.option_2.value) || '').trim())
         : selectionKey(name, '', '');
       if (key && !out.has(key)) out.set(key, unit);

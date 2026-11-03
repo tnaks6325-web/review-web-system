@@ -61,11 +61,11 @@ const st = require('../src/services/campaignState.service');
   t('상품별 재료도 같은 단일 출처(loadTodayByCampaign)', /fetchOptionCountsBatch[\s\S]*loadTodayByCampaign\(db, ids, now\)/.test(camp));
   t('Q&A 는 순차진행 규칙을 쓰지 않는다', /if \(qnaToday\) return views;/.test(camp));
 
-  // 선택지 키 ↔ 자리 단위
+  // 선택지 키 ↔ 자리 단위(옵션 상품 = product_mode 'opt' — 자리표와 같은 기준 · ⑨)
   const wo = { product_options_json: JSON.stringify([
     { name: '벨벳틴 상품1', base: { count: 2, daily: 1 }, options: [] },
-    { name: '양말', base: { count: 2 }, options: [{ label: '검정', option_1: { value: '검정' }, count: 1 }, { label: '흰색', option_1: { value: '흰색' }, count: 1 }] },
-    { name: '모자', base: { count: 1 }, options: [{ label: '검정', option_1: { value: '검정' }, count: 1 }] },
+    { name: '양말', product_mode: 'opt', base: { count: 2 }, options: [{ label: '검정', option_1: { value: '검정' }, count: 1 }, { label: '흰색', option_1: { value: '흰색' }, count: 1 }] },
+    { name: '모자', product_mode: 'opt', base: { count: 1 }, options: [{ label: '검정', option_1: { value: '검정' }, count: 1 }] },
   ]) };
   const m = qna.qnaOptKeyMap(wo);
   t('옵션 없는 상품 = 상품 이름 키', m.get('벨벳틴 상품1') === '벨벳틴 상품1');
@@ -203,6 +203,17 @@ const st = require('../src/services/campaignState.service');
   t('신청 종류 판정: 공고의 작업표 칸 이름(linked_sheet_id)', /tabWorkKind\(\{ sheetId: campPre\.linked_sheet_id/.test(camp9) && !/campPre\.linked_tab_sheet_id/.test(camp9));
   t('신청: 잠근 공고로 종류 재확인(갈리면 막음)', /isQnaKind\(_lockedKind\) !== qnaApply/.test(camp9));
   t('신청: 자리 이중 묶기 충돌 = 자리 찼음 안내', /err\.constraint === 'uq_campaign_apps_qna_slot'[\s\S]{0,120}reason: 'qna_no_slot'/.test(camp9));
+  t('1인 1회 공고: 다른 명의로 제출한 Q&A 도 기간 없이 막는다', /if \(!blocked && qnaApply\) \{\s*blocked = true;/.test(camp9));
+  {
+    const { qnaUnitsFromWorkOrder } = require('../src/utils/qnaCalendar');
+    const wo = { daily_count: 1, product_options_json: JSON.stringify([
+      { name: '상품', product_mode: 'opt', options: [{ label: '단일', option_1: { value: '단일' } }] },
+      { name: 'B', product_mode: 'opt', options: [{ label: '빨강', option_1: { value: '빨강' } }, { label: '파랑', option_1: { value: '파랑' } }] },
+      { name: 'C', product_mode: 'base', options: [] }]) };
+    const cal = qnaUnitsFromWorkOrder(wo).units.map(u => u.unitKey);
+    const map = [...qna.qnaOptKeyMap(wo).values()];
+    t('선택지 → 자리 단위가 자리표와 같은 기준(「단일」 옵션도 자리표에 있는 단위)', map.length === cal.length && map.every(u => cal.includes(u)));
+  }
   t('공개 목록: 선택지별 오늘 자리 수를 다시 만든 맵에도 싣는다', /_cntMap\.qnaToday = opts\[0\]\.qnaToday/.test(camp9));
   t('리뷰어 화면: Q&A 는 캡처 확인 전 완료 아님(자리 정보 못 받으면 다시 불러옴)',
     /function _isDoneDetail\(j\)[\s\S]{0,260}return !!\(j\.qnaSlot && j\.qnaSlot\.captureDone === true\)/.test(page9) && /_qnaSlotRetry\+\+/.test(page9));
