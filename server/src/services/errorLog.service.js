@@ -62,6 +62,8 @@ const STEP_LABELS = {
   wrong_qty_purchase:                 '잘못 구매(고른 개수와 다른 개수) — 제출 막음',
   capture_qty_mismatch_confirmed:     '결제금액이 다른 개수 금액 — 리뷰어가 고른 개수가 맞다고 함',
   manual_product_mismatch_confirmed:  '수동 입력 상품 확인 경고 — 담당자가 확인하고 접수',
+  // 결정 325 — 막지 않는 경고(업체 화면 총건수가 빌 수 있음)
+  zero_recruit_count:                 '리뷰오더 총모집 0 으로 접수 — 총건수가 빌 수 있어 리뷰오더 총모집 확인 필요',
 };
 
 // category: 무엇이(어떤 종류의) 에러가

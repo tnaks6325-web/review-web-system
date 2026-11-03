@@ -556,6 +556,8 @@ router.post('/intake', async (req, res, next) => {
       throw err;
     }
     _emitWorkOrderNew(data);
+    // ★ 결정 325: 총모집 0 은 막지 않고(인트라넷 원본 번호가 어긋나면 안 된다) 이상로그 경고만 — 기다리지 않는다(fail-safe).
+    void require('../services/zeroRecruitWarning.service').warnZeroRecruit(data, { stage: 'intake', by: requester });
     res.json({ ok: true, data });
   } catch (err) {
     // 인트라넷은 HTTP 실패를 기준으로 재시도를 판정한다. 다만 next(err)로 넘겨
@@ -2571,6 +2573,10 @@ _handlers.orderAdminAccept = async (req, res, next) => {
       }
     }
 
+    // ★ 결정 325: 저장된 오더의 총모집이 0 이면 접수는 그대로 두고 이상로그 경고 + 응답 표시만(막지 않는다).
+    const recruitCountZero = await require('../services/zeroRecruitWarning.service')
+      .warnZeroRecruit(upd[0], { stage: 'accept', by: req.admin?.name || '' });
+
     logger.info(`[order/accept] ${id} → 탭 "${tabName}"${wantSheetless ? '(무시트)' : ''} (${wasRegistered ? '기존탭 연결' : '신규 등록'}), 캠페인=${spreadsheetTitle}, 빌드=${indexBuilt}`);
 
     res.json({
@@ -2587,6 +2593,7 @@ _handlers.orderAdminAccept = async (req, res, next) => {
       advertiserProjection,
       workboardMapping,
       sheetless: wantSheetless || undefined,
+      recruitCountZero: recruitCountZero || undefined,   // 결정 325 — 리뷰오더 총모집 0(경고만)
       // 무시트일 때만: 만든 작업표 줄 수·장부 결과(실패 사유 포함 — 조용한 누락 금지)
       worktable: wantSheetless ? {
         rows: sheetlessResult && sheetlessResult.slots ? sheetlessResult.slots.created : undefined,
