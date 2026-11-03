@@ -138,6 +138,17 @@ router.post('/', authMiddleware, async (req, res, next) => {
 // (GET /api/diag/inaed-list(·viewer·image·blacklist) — 리뷰어 이름·전화 명단) 은 2026-10-04 제거 — 화면 호출 0 · 9/2 이후 호출 0 · 개인정보가 새는 입구(결정 186 92번).
 
 
+/* 결정 328 — 판독 실패를 리뷰어에게 보일 말로 바꾸는 곳은 여기 하나다.
+   AI 시간초과('[Gemini extract] timeout 9000ms')·AI 서버 오류·운영 내부 문구는 쉬운 한국어 안내로 바꾸고,
+   이미 리뷰어용으로 쓴 한국어 안내(아래 목록)만 그대로 보낸다. 원문은 이상로그(logAbnormal)에 err 째로 남는다.
+   ★ 시간 제한·재시도(gemini.service)는 건드리지 않는다 — 보이는 말만 바꾼다. */
+const EXTRACT_FAIL_REVIEWER_MSG = 'AI가 잠시 응답하지 않아요. [다시 분석하기]를 누르거나 아래 칸을 직접 채워 주세요.';
+const EXTRACT_REVIEWER_READY = [/^주문 정보를 인식하지 못했습니다/];
+function reviewerExtractErrorMessage(err) {
+  const raw = String((err && err.message) || '').trim();
+  return EXTRACT_REVIEWER_READY.some(re => re.test(raw)) ? raw : EXTRACT_FAIL_REVIEWER_MSG;
+}
+
 // ═══════════════════════════════════════════════════════════
 // POST /api/image/extract — 주문이미지 AI 분석 (Gemini Vision)
 // 프론트엔드 기대 응답: { ok, orderNumber, recipient, phone, address, price, orderer, ... }
@@ -205,7 +216,7 @@ router.post('/image-extract', imageApiLimiter, async (req, res, next) => {
     });
     const failed = {
       ok: false,
-      error: err.message || '이미지 분석 중 오류가 발생했습니다.',
+      error: reviewerExtractErrorMessage(err),   // 결정 328 — 원문은 위 logAbnormal 에만
       orderNumber: '', recipient: '', phone: '', address: '', price: ''
     };
     const proof = imageHash
