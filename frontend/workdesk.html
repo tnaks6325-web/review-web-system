@@ -15742,7 +15742,8 @@ async function _tckManagerAnswer(i,k){
     if(!r||!r.ok) {toast('저장 실패 — '+((r&&r.error)||'새로고침한 뒤 다시 선택해 주세요'));return;}
     const at=(STATE.tckManagerItems||[]).findIndex(x=>x===c);
     if(at>=0) STATE.tckManagerItems[at]=r.item;
-    toast('리뷰웹에 담당자와 답을 저장했습니다 — 인트라넷 전달 상태는 별도로 확인합니다');
+    // 인트라넷 오더가 없는 작업(결정 323 · remoteSync='not_linked')은 전달할 곳이 없다 — '별도로 확인'이라고 말하지 않는다.
+    toast(r.item&&r.item.remoteSync==='not_linked'?'리뷰웹에 담당자를 저장했습니다 — 인트라넷 오더가 없는 작업이라 리뷰웹에만 저장됩니다':'리뷰웹에 담당자와 답을 저장했습니다 — 인트라넷 전달 상태는 별도로 확인합니다');
   }catch(_){toast('저장 결과를 받지 못했습니다 — 같은 선택으로 다시 시도해 주세요');}
   finally{delete busy[c.id];if(document.getElementById('tckHomeMount')) _tckPaint();}
 }
@@ -15850,7 +15851,7 @@ function _tckHtml(where){
   if(!list.length) return `<div class="tck-wrap">${head}<div class="tck-empty">${where==='home'&&STATE.tckManagerError?'담당자 질문을 불러오지 못했습니다 — 새로고침해 주세요.':'지금 확인할 것이 없습니다.'}</div></div>`;
   const compact=where==='home' && _tckCompact();
   const cards=list.map((c,i)=>c.status==='done'
-    ? `<div class="tck-donerow"><span class="tck-ok">${c.kind==='manager_assignment'?'✓ 리뷰웹 저장 완료':'✓ 처리 완료'}</span><span>${_tckTitle(c.facts)}</span>${c.kind==='manager_assignment'?`<span class="tck-sub">${c.remoteSync==='delivered'?'인트라넷 전달 완료':['pending','processing'].includes(c.remoteSync)?'인트라넷 전달 대기':'인트라넷 전달 상태 확인 필요'}</span>`:''}<span class="tck-sub">${esc(c.doneBy||'')}</span></div>`
+    ? `<div class="tck-donerow"><span class="tck-ok">${c.kind==='manager_assignment'?'✓ 리뷰웹 저장 완료':'✓ 처리 완료'}</span><span>${_tckTitle(c.facts)}</span>${c.kind==='manager_assignment'?`<span class="tck-sub">${c.remoteSync==='delivered'?'인트라넷 전달 완료':c.remoteSync==='not_linked'?'인트라넷 오더 없음 · 리뷰웹에만 저장':['pending','processing'].includes(c.remoteSync)?'인트라넷 전달 대기':'인트라넷 전달 상태 확인 필요'}</span>`:''}<span class="tck-sub">${esc(c.doneBy||'')}</span></div>`
     : compact ? _tckRowHtml(c,i) : _tckCardHtml(c,i,where)).join('');
   return `<div class="tck-wrap">${head}${where==='home'&&STATE.tckItems===null?`<div class="tck-empty" role="alert">통장 확인 항목을 불러오지 못했습니다(${esc(STATE.tckError||'')}) — 새로고침해 주세요.</div>`:''}${where==='home'&&STATE.tckManagerError?`<div class="tck-empty">담당자 질문을 불러오지 못했습니다 — 새로고침해 주세요.</div>`:''}${cards}${where==='home'&&STATE.tckManagerMore?'<button type="button" class="btn sm" onclick="_tckLoadManagers(true)">담당자 질문 더 보기</button>':''}</div>`;
 }
