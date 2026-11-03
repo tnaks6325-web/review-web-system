@@ -263,5 +263,18 @@ async function t(name, fn) { await fn(); passed++; console.log('PASS ' + name); 
     assert.deepStrictEqual([fb.bTotal, fb.bSub, fb.bPaid], [3, 3, 3], '현재 이름 줄이 없으면 gid 로 찾는다');
   });
 
+  /* ── 업체관리 표 담당 열 = 직원 홈과 같은 판정(리뷰오더 작업담당 우선 · 2026-11-03) ── */
+  await t('★ 업체관리 담당 열: 탭 칸이 비어도 리뷰오더 작업담당(박은비→망고)을 싣는다 · 주석 없는 경로는 종전 그대로', async () => {
+    await db.exec(`
+      UPDATE tab_configs SET manager='' WHERE sheet_id='${S}' AND tab_name='새이름탭';
+      INSERT INTO work_orders (id, linked_tab_sheet_id, linked_tab_name, work_manager) VALUES ('wo-mgr','${S}','새이름탭','박은비');`);
+    svc.__resetTabStatsCacheForTest();
+    const own2 = await svc.ownedTabsForAdvertiser({ advertiserId: 'adv1', annotate: true });
+    const r = own2.rows.find(x => x.tabName === '새이름탭');
+    assert.strictEqual(r.manager, '망고', '홈과 같은 담당자');
+    const plain = (await svc.ownedTabsForAdvertiser({ advertiserId: 'adv1' })).rows.find(x => x.tabName === '새이름탭');
+    assert.strictEqual(plain.manager, '', '주석 없는 경로(업체 화면 재료)는 종전 그대로');
+  });
+
   console.log(`\n✅ statusCountUnify: ${passed} 통과`);
 })().catch(e => { console.error(e); process.exitCode = 1; });
