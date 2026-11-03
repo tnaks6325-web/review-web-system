@@ -276,6 +276,7 @@ async function _processOneSheet(sheetId, opts) {
         const riResult = { rowCount: renamed.reviewIndexUpdated };
         const imResult = { rowCount: renamed.indexMasterUpdated };
         if (renamed.campaignLinksUpdated) logger.info(`[smartBuild] 공고 연결 탭 이름 보정 ${renamed.campaignLinksUpdated}건: "${oldTabName}" → "${tabName}"`);
+        if (renamed.workOrdersUpdated || renamed.workOrderLinksUpdated) logger.info(`[smartBuild] 리뷰오더 연결 탭 이름 보정 직접 ${renamed.workOrdersUpdated || 0}건 · 발주 연결 ${renamed.workOrderLinksUpdated || 0}건: "${oldTabName}" → "${tabName}"`);
         // ── URL 교정: 정규화된 시트 URL로 업데이트 ──
         const correctUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
         await pool.query(
