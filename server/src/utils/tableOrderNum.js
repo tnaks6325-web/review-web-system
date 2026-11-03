@@ -27,7 +27,18 @@ function tableOrderNumSql(alias = 'cp') {
             ), ''), '\\D', '', 'g')`;
 }
 
+/**
+ * 같은 규칙의 JS 판 — 이미 읽어 온 `row_json` 하나에 쓴다(SQL 조각과 **같은 규칙**: 키에 `주문번호` 가 든 칸을 키 순서로 이어 숫자만).
+ * @param {object} rowJson
+ * @returns {string}
+ */
+function tableOrderNumOf(rowJson) {
+  const rj = rowJson && typeof rowJson === 'object' ? rowJson : {};
+  return Object.keys(rj).filter(k => k.includes('주문번호')).sort()
+    .map(k => String(rj[k] == null ? '' : rj[k])).join('').replace(/\D/g, '');
+}
+
 /** 표 주문번호로 "같은 구매"를 판정할 수 있는 최소 자릿수. 미만이면 판정하지 않는다(모르면 막지 않는다). */
 const MIN_ORDER_NUM_DIGITS = 6;
 
-module.exports = { tableOrderNumSql, MIN_ORDER_NUM_DIGITS };
+module.exports = { tableOrderNumSql, tableOrderNumOf, MIN_ORDER_NUM_DIGITS };

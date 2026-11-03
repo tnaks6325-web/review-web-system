@@ -199,8 +199,9 @@ async function registerBloggers({ sheetId, tabName, lines = [], dryRun = false, 
       blogCols.forEach(ci => { if (headers[ci]) rowPatch[headers[ci]] = r.blogUrl; });
       if (r.appended) {
         const rowJson = target.numHeader ? { [target.numHeader]: '' } : {};
+        // ★ minSeq 2 — 1번은 열 이름 줄이다. 빈 표에서 1번에 넣으면 장부가 그 줄을 건너뛰어 검색 명단에 안 들어간다(Codex P2).
         const added = await parts.appendSlot(client, {
-          sheetId, tabName, tabGid: target.tabGid || null, campaignName: target.campaignName, rowJson, by: `blog-register:${by}`,
+          sheetId, tabName, tabGid: target.tabGid || null, campaignName: target.campaignName, rowJson, by: `blog-register:${by}`, minSeq: 2,
         });
         if (!added) _e('append_failed', '새 줄을 만들지 못했습니다. 잠시 뒤 다시 시도해주세요.');
         r.seq = Number(added.seq);
@@ -237,20 +238,29 @@ async function preRegisteredSeq(q, { sheetId, tabName, phone8, workboardId = nul
   const p8 = String(phone8 || '').replace(/\D/g, '').slice(-8);
   if (!q || !sheetId || !tabName || p8.length !== 8) return null;
   try {
+    const { MANUAL_SEQ_BASE } = require('./participants.service');
+    const { tableOrderNumOf } = require('../utils/tableOrderNum');
+    /* ★★ 주문 링크가 비었다고 "구매 전"은 아니다(Codex P1) — 가져온 줄(source='import')·담당자 수기 주문 줄은 링크 없이
+         구매·제출·입금이 적혀 있다. 그런 줄을 등록 줄로 집으면 새 구매가 예전 구매를 덮어쓴다.
+         → 작업표가 만든 줄(source='worktable') · 표 주문번호 없음 · 제출/입금 표시 없음인 줄만. */
+    // 별칭 pr — 주문 기록의 중복 방어 조회(cp.phone8 + 표 주문번호)와 섞여 읽히지 않게.
+    const { rows } = await q.query(
+      `SELECT pr.seq, pr.row_json FROM campaign_participants pr
+        WHERE pr.sheet_id=$1 AND pr.tab_name=$2 AND pr.deleted_at IS NULL AND pr.active = TRUE
+          AND pr.order_submission_id IS NULL AND pr.phone8 = $3 AND pr.seq < ${MANUAL_SEQ_BASE}
+          AND pr.source = 'worktable' AND pr.is_submitted = FALSE AND pr.is_paid = FALSE
+          AND ($4::uuid IS NULL OR pr.workboard_id IS NULL OR pr.workboard_id = $4::uuid)
+        ORDER BY pr.seq LIMIT 1${lock ? ' FOR UPDATE OF pr' : ''}`,
+      [sheetId, tabName, p8, workboardId]);
+    // 표에 주문번호가 적힌 줄(담당자 수기 주문)은 구매가 있는 줄이다 — 판정은 tableOrderNum 과 같은 규칙.
+    if (!rows.length || tableOrderNumOf(rows[0].row_json)) return null;
+    // ★ 종류 판정은 **후보 줄이 있을 때만**(공고 > 탭) — 주문 대부분(리뷰 작업·미등록 리뷰어)은 위 한 번의 조회로 끝난다.
     const { rows: tc } = await q.query(`SELECT work_kind FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`, [sheetId, tabName]);
     if (!tc.length) return null;
     let campKind = null;
     try { campKind = await require('./workKindContext.service').workKindForTab({ sheetId, tabName }); } catch (_) { campKind = null; }
     if (!isBlogKind(campKind || resolveWorkKind({ tabKind: tc[0].work_kind }))) return null;
-    const { MANUAL_SEQ_BASE } = require('./participants.service');
-    const { rows } = await q.query(
-      `SELECT seq FROM campaign_participants
-        WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active = TRUE
-          AND order_submission_id IS NULL AND phone8 = $3 AND seq < ${MANUAL_SEQ_BASE}
-          AND ($4::uuid IS NULL OR workboard_id IS NULL OR workboard_id = $4::uuid)
-        ORDER BY seq LIMIT 1${lock ? ' FOR UPDATE' : ''}`,
-      [sheetId, tabName, p8, workboardId]);
-    return rows.length ? Number(rows[0].seq) : null;
+    return Number(rows[0].seq);
   } catch (e) {
     logger.warn(`[blog/register] 사전등록 줄 찾기 실패 — 종전 경로: ${e.message}`);
     return null;

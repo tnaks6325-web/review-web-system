@@ -267,17 +267,19 @@ async function createSlotsFromSheetRows({ sheetId, tabName, tabGid = null, campa
  * ★ `source='worktable'` — 'manual' 로 넣으면 투영의 상태 CASE 가 인정하지 않아
  *   리뷰제출·입금 표시가 영영 안 켜진다.
  */
-async function appendSlot(client, { sheetId, tabName, tabGid = null, campaignName = null, rowJson = {}, workboardId = null, by = 'sheetless-append' } = {}) {
+async function appendSlot(client, { sheetId, tabName, tabGid = null, campaignName = null, rowJson = {}, workboardId = null, by = 'sheetless-append', minSeq = 1 } = {}) {
   if (!client || !sheetId || !tabName) throw new Error('appendSlot: client, sheetId, tabName 필수');
+  // ★ minSeq — 빈 표에서 열 이름 줄(1번)을 피해야 하는 호출부(블로거 사전등록)만 2를 준다. 기본 1 = 종전 그대로.
   const { rows } = await client.query(
     `INSERT INTO campaign_participants
        (sheet_id, tab_gid, tab_name, campaign_name, seq, row_json, workboard_id, source, updated_by, updated_at)
-     SELECT $1, $2, $3, $4, COALESCE(MAX(seq) FILTER (WHERE seq < ${_MANUAL_SEQ_BASE}), 0) + 1, $5::jsonb, $6::uuid, 'worktable', $7, NOW()
+     SELECT $1, $2, $3, $4, GREATEST(COALESCE(MAX(seq) FILTER (WHERE seq < ${_MANUAL_SEQ_BASE}), 0) + 1, $8::int), $5::jsonb, $6::uuid, 'worktable', $7, NOW()
        FROM campaign_participants WHERE sheet_id = $1 AND tab_name = $3
      ON CONFLICT (sheet_id, tab_name, seq) DO NOTHING
      RETURNING id, seq, row_json`,
     [sheetId, tabGid, tabName, campaignName,
-     JSON.stringify(rowJson && typeof rowJson === 'object' ? rowJson : {}), workboardId, String(by).slice(0, 100)]);
+     JSON.stringify(rowJson && typeof rowJson === 'object' ? rowJson : {}), workboardId, String(by).slice(0, 100),
+     Math.max(1, parseInt(minSeq, 10) || 1)]);
   return rows[0] || null;
 }
 

@@ -59,8 +59,16 @@ test('② preRegisteredSeq — 블로그 작업·같은 연락처·주문 없는
     const q = stubQ();
     assert.equal(await svc.preRegisteredSeq(q, { sheetId: 'S', tabName: 'T', phone8: '010-3333-4444' }), 6);
     const sql = q.seen.find(s => /FROM campaign_participants/.test(s));
-    assert.match(sql, /order_submission_id IS NULL AND phone8 = \$3/);
-    assert.match(sql, /active = TRUE/);
+    assert.match(sql, /pr\.order_submission_id IS NULL AND pr\.phone8 = \$3/);
+    assert.match(sql, /pr\.active = TRUE/);
+    // ★ Codex P1 — 링크가 비었어도 가져온 줄·수기 주문 줄은 구매가 있다. 작업표가 만든·구매 흔적 없는 줄만.
+    assert.match(sql, /pr\.source = 'worktable' AND pr\.is_submitted = FALSE AND pr\.is_paid = FALSE/);
+    assert.equal(await svc.preRegisteredSeq({ query: async (q2) => /FROM campaign_participants/.test(q2)
+      ? { rows: [{ seq: 6, row_json: { 주문번호: '11111111' } }] } : { rows: [{ work_kind: 'blog' }] } },
+      { sheetId: 'S', tabName: 'T', phone8: '01033334444' }), null, '★ 표에 주문번호가 적힌 줄(수기 주문)은 등록 줄이 아니다');
+    const { tableOrderNumOf } = require('../src/utils/tableOrderNum');
+    assert.equal(tableOrderNumOf({ '쿠팡주문번호': '12-34', 주문번호: '5', 이름: '9' }), '51234', '주문번호 든 칸만 · 숫자만(SQL 조각과 같은 규칙)');
+    assert.equal(tableOrderNumOf({ 주문번호: '' }), '');
     assert.equal(await svc.preRegisteredSeq(stubQ({ kind: 'review' }), { sheetId: 'S', tabName: 'T', phone8: '01033334444' }), null,
       '★ 리뷰 작업의 줄 고르기는 종전 그대로');
     assert.equal(await svc.preRegisteredSeq(stubQ({ fail: true }), { sheetId: 'S', tabName: 'T', phone8: '01033334444' }), null,
@@ -68,7 +76,7 @@ test('② preRegisteredSeq — 블로그 작업·같은 연락처·주문 없는
     assert.equal(await svc.preRegisteredSeq(stubQ(), { sheetId: 'S', tabName: 'T', phone8: '1234' }), null, '연락처 8자리 아님 = null');
     const lq = stubQ();
     await svc.preRegisteredSeq(lq, { sheetId: 'S', tabName: 'T', phone8: '01033334444', lock: true });
-    assert.match(lq.seen.find(s => /FROM campaign_participants/.test(s)), /FOR UPDATE$/);
+    assert.match(lq.seen.find(s => /FROM campaign_participants/.test(s)), /FOR UPDATE OF pr$/);
     wkc.workKindForTab = async () => 'blog';
     assert.equal(await svc.preRegisteredSeq(stubQ({ kind: '' }), { sheetId: 'S', tabName: 'T', phone8: '01033334444' }), 6,
       '종류 판정은 공고 > 탭');
@@ -88,11 +96,22 @@ test('② 큐 반영 경로 — 빈 줄 고르기 앞에서, SAVEPOINT 안에서
   assert.ok(i > 0 && pick > i, '빈 줄 고르기보다 앞');
   assert.ok(WRITER.indexOf('isQnaTab(client, sheetId, tabName)') < i, 'Q&A 자리 번호 규칙 뒤(Q&A 는 그대로)');
   const block = WRITER.slice(i, pick);
-  assert.match(block, /preRegisteredSeq\(client, \{\s*sheetId, tabName, phone8: loginPhone8, workboardId, lock: true \}\)/);
+  assert.match(block, /preRegisteredSeq\(client, \{\s*sheetId, tabName, phone8: prePhone8, workboardId, lock: true \}\)/);
   assert.match(block, /RELEASE SAVEPOINT blog_prereg/);
   assert.match(block, /ROLLBACK TO SAVEPOINT blog_prereg/, '판정 실패가 주문 기록 트랜잭션을 망가뜨리지 않는다');
   assert.match(block, /_stagedLabelMatches\(preOpt, scheduledOptionKey\)/, '옵션 불일치면 쓰지 않는다(옵션 불일치 거절로 주문이 멈추지 않게)');
+  // ★ Codex P2 — 큐 누락 복구는 로그인 번호 없이 온다 → 원장 주문 연락처로
+  assert.match(WRITER, /const prePhone8 = _digits\(loginPhone8\)\.length >= 8 \? _digits\(loginPhone8\) : _digits\(orderData\.phone\);/);
+  // ★ Codex P2 — 등록 줄의 계획 상품은 빈 줄을 새로 고른 것과 똑같이 산 상품으로 맞춘다(판정은 _productWriteFor 공용)
+  assert.match(WRITER, /const pw = await _productWriteFor\(client, \{ sheetId, tabName, workboardId, productPick: prePick, labels: \[plan\] \}\);\n\s*if \(pw\.productWrite\) \{ freshClaim = true; claimedProductKey = pw\.productWrite; \}/);
+  assert.match(WRITER, /\(\{ productKey, productWrite \} = await _productWriteFor\(client, \{/, '_pickOpenSlot 도 같은 함수(사본 금지)');
   assert.ok((WRITER.match(/openSlotRowSql\(/g) || []).length >= 3, '빈 줄 판정 공용 함수 사용처 유지');
+});
+
+test('① 빈 표의 첫 블로거는 열 이름 줄(1번)을 피한다(Codex P2) — appendSlot minSeq', () => {
+  assert.match(PARTS, /GREATEST\(COALESCE\(MAX\(seq\) FILTER \(WHERE seq < \$\{_MANUAL_SEQ_BASE\}\), 0\) \+ 1, \$8::int\)/);
+  assert.match(PARTS, /minSeq = 1 \} = \{\}\) \{/, '기본 1 = 종전 그대로(주문 이어붙이기)');
+  assert.match(read('src/services/blogRegister.service.js'), /by: `blog-register:\$\{by\}`, minSeq: 2,/);
 });
 
 test('③ 여러 명 라우트 — 편집 스코프 → 서비스, 거부는 400', () => {
