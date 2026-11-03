@@ -21,5 +21,10 @@ vm.createContext(ctx);vm.runInContext(src,ctx);
  resolve({ok:false,error:'가짜 실패'});await pending;assert.equal(ctx.STATE.tckManagerItems[0].status,'open');
  ctx._tckHtml('home');ctx.api=async()=>({ok:true,item:{...q,status:'done',localSaved:true,remoteSync:'pending',answers:{manager:{choice:'mandu'}}}});
  await ctx._tckManagerAnswer(0,0);home=ctx._tckHtml('home');assert.match(home,/리뷰웹 저장 완료/);assert.match(home,/인트라넷 전달 대기/);
+ // 결정 323: 인트라넷 오더가 없는 작업(탭 칸 저장)은 '확인 필요'가 아니라 '리뷰웹에만 저장'으로 말한다
+ {let msg='';ctx.toast=m=>{msg=m;};ctx.STATE.tckManagerItems=[{...q,status:'open'}];ctx._tckHtml('home');
+  ctx.api=async()=>({ok:true,item:{...q,status:'done',localSaved:true,remoteSync:'not_linked',answers:{manager:{choice:'mango'}}}});
+  await ctx._tckManagerAnswer(0,1);home=ctx._tckHtml('home');
+  assert.match(home,/인트라넷 오더 없음 · 리뷰웹에만 저장/);assert.doesNotMatch(home,/전달 상태 확인 필요/);assert.match(msg,/리뷰웹에만 저장됩니다/);}
  console.log('manager home runtime: permission, escaping, home-only, chip, duplicate, failure, stored vs pending PASS');
 })().catch(e=>{console.error(e);process.exit(1)});
