@@ -1338,6 +1338,15 @@ router.post('/order', async (req, res, next) => {
      * 미러를 건너뛰며, 아래에서 반드시 workboard_apply를 enqueue한다.
      */
     const skipSheetMirrorForWrite = !!orderScope.sheetless || queuedWorkboardApply;
+    /* ★★ 결정 328 — 블로그 작업에 **미리 등록된 블로거**(직원이 직접 넣은 사람)면 그 사람 줄로 보낸다.
+       줄 번호 없이 오면 원장이 맨 위 빈 줄을 잡아, 블로그 주소가 적힌 본인 줄은 주문 없이 남고 한 사람이 두 줄이 됐다.
+       ★ 홀드(공고 신청) 주문·큐 반영·이미 줄 번호를 가진 요청은 종전 그대로. 판정 실패 = null(종전 경로). */
+    let ledgerSlotRow = slotRowNumber || null;
+    if (!ledgerSlotRow && !holdCtx && !queuedWorkboardApply && _idPhone8.length === 8) {
+      ledgerSlotRow = await require('../services/blogRegister.service')
+        .preRegisteredSeq(pool, { sheetId: orderScope.sheetId, tabName: orderScope.tabName, phone8: _idPhone8 });
+      if (ledgerSlotRow) logger.info(`[submit/order] 사전등록 블로거 줄로 배정 tab=${orderScope.tabName} seq=${ledgerSlotRow}`);
+    }
     const ledger = await createOrderLedgerEntry({
       sheetId: orderScope.sheetId,
       tabName: orderScope.tabName,
@@ -1345,7 +1354,7 @@ router.post('/order', async (req, res, next) => {
       skipSheetMirror: skipSheetMirrorForWrite,
       deferSheetlessApply: queuedWorkboardApply,
       orderData,
-      slotRowNumber: slotRowNumber || null,
+      slotRowNumber: ledgerSlotRow,
       loginPhone8: loginPhone8 || '',
       loginName: loginName || '',
       // ★ 참여형 캠페인 홀드 확정 문맥(전부 optional — 비참여 제출 무영향).

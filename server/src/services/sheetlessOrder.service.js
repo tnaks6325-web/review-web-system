@@ -323,6 +323,27 @@ async function _stagedSlotCandidates(client, { sheetId, tabName, workboardId, ke
  *   ★ 킬스위치 `WORKTABLE_OPTION_RELABEL=0` = 종전 동작(바꿔 쓰지 않음).
  * @returns {Promise<{rows:Array, relabelFrom:string}>} rows 는 잠근 줄 0~1개
  */
+/**
+ * 상품 단위 선택(옵션 키 없음)에서 그 줄에 적을 상품 표기 — 작업표 상품 표기가 2종 이상일 때만(1종이면 둘 다 '').
+ * `_pickOpenSlot` 과 사전등록 블로거 줄(결정 328)이 같이 쓴다(판정 사본 금지).
+ * ★ 짝을 못 지어도 미리 적힌 **다른** 상품을 남기지 않는다 — 표기가 달라도 정확한 값이 틀린 값보다 낫다.
+ */
+async function _productWriteFor(client, { sheetId, tabName, workboardId, productPick, labels = [] }) {
+  const own = [...new Set((labels || []).filter(Boolean))];
+  let allLabels = own;
+  try {
+    const { rows: lr } = await client.query(
+      `SELECT DISTINCT btrim(option_text) AS l FROM campaign_participants
+        WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND active = TRUE
+          AND ($3::uuid IS NULL OR workboard_id = $3) AND COALESCE(btrim(option_text), '') <> ''`,
+      [sheetId, tabName, workboardId]);
+    allLabels = [...new Set([...own, ...lr.map(x => x.l)])];
+  } catch (_) { /* 후보 표기만으로 판정 */ }
+  if (allLabels.length < 2) return { productKey: '', productWrite: '' };
+  const productKey = resolveProductLabel(productPick, allLabels);
+  return { productKey, productWrite: productKey || productPick };
+}
+
 async function _pickOpenSlot(client, { sheetId, tabName, workboardId, scheduledOptionKey, orderSubmissionId, headers, where, productPick = '' }) {
   const key = String(scheduledOptionKey || '');
   const { findDateColumnIndex } = require('./campaignSchedule.service');
@@ -411,21 +432,8 @@ async function _pickOpenSlot(client, { sheetId, tabName, workboardId, scheduledO
     let productKey = '';
     let productWrite = '';   // 처음 채우는 줄에 적을 값 — 짝지은 작업표 표기, 못 지으면 고른 상품 원문(상품 2종 이상일 때만)
     if (!key && productPick) {
-      const labels = [...new Set(cands.map(planOf).filter(Boolean))];
-      let allLabels = labels;
-      try {
-        const { rows: lr } = await client.query(
-          `SELECT DISTINCT btrim(option_text) AS l FROM campaign_participants
-            WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND active = TRUE
-              AND ($3::uuid IS NULL OR workboard_id = $3) AND COALESCE(btrim(option_text), '') <> ''`,
-          [sheetId, tabName, workboardId]);
-        allLabels = [...new Set([...labels, ...lr.map(x => x.l)])];
-      } catch (_) { /* 후보 표기만으로 판정 */ }
-      if (allLabels.length >= 2) {
-        productKey = resolveProductLabel(productPick, allLabels);
-        // ★ 짝을 못 지어도 미리 적힌 **다른** 상품을 남기지 않는다 — 표기가 달라도 정확한 값이 틀린 값보다 낫다.
-        productWrite = productKey || productPick;
-      }
+      ({ productKey, productWrite } = await _productWriteFor(client, {
+        sheetId, tabName, workboardId, productPick, labels: cands.map(planOf) }));
     }
     if (productKey) {
       const { isReviewOptionHeader } = require('../utils/reviewType');
@@ -723,6 +731,49 @@ async function writeOrderToWorktable({
         await client.query('ROLLBACK');
         logger.warn(`[sheetlessOrder] Q&A 탭 — 자리 번호 없는 주문은 줄에 넣지 않음 tab=${tabName} os=${orderSubmissionId}`);
         return { ok: false, reason: 'qna_slot_required' };
+      }
+      /* ★★ 결정 328 — 블로그 작업에 **미리 등록된 블로거**(같은 연락처 · 주문 아직 없음)면 그 사람 줄을 쓴다.
+         운영 기본(큐 반영) 경로는 줄 번호 없이 이 함수로 오므로 여기서 본다 — 안 보면 주문은 빈 줄로 가고
+         블로그 주소가 적힌 본인 줄은 주문 없이 남는다(한 사람 두 줄). 블로그가 아닌 작업은 판정 함수가 null.
+         ★ SAVEPOINT 로 감싼다 — 판정 쿼리가 실패해도 이 주문 기록 트랜잭션을 망가뜨리지 않고 종전 빈 줄 고르기로 간다.
+         ★ 옵션이 정해진 줄과 주문 옵션이 다르면 그 줄을 쓰지 않는다(아래 옵션 불일치 거절로 주문이 멈추지 않게). */
+      // ★ 큐 누락 복구는 로그인 번호 없이 다시 온다(Codex P2) — 그때는 원장에 남은 주문 연락처로 본다.
+      const prePhone8 = _digits(loginPhone8).length >= 8 ? _digits(loginPhone8) : _digits(orderData.phone);
+      if (!cur.length && prePhone8.length >= 8) {
+        await client.query('SAVEPOINT blog_prereg');
+        let pre = [];
+        try {
+          const preSeq = await require('./blogRegister.service').preRegisteredSeq(client, {
+            sheetId, tabName, phone8: prePhone8, workboardId, lock: true });
+          if (preSeq) {
+            ({ rows: pre } = await client.query(
+              `SELECT id, seq, option_text, row_json FROM campaign_participants
+                WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL AND order_submission_id IS NULL`,
+              [sheetId, tabName, preSeq]));
+          }
+          await client.query('RELEASE SAVEPOINT blog_prereg');
+        } catch (preErr) {
+          await client.query('ROLLBACK TO SAVEPOINT blog_prereg');
+          pre = [];
+          logger.warn(`[sheetlessOrder] 사전등록 블로거 줄 판정 실패 — 빈 줄 고르기로 tab=${tabName}: ${preErr.message}`);
+        }
+        const preOpt = pre[0] && String(pre[0].option_text || '').trim();
+        if (pre.length && (!scheduledOptionKey || !preOpt || preOpt === scheduledOptionKey
+            || (process.env.WORKTABLE_STAGED_OPTION_MATCH !== '0' && _stagedLabelMatches(preOpt, scheduledOptionKey)))) {
+          cur = pre;
+          logger.info(`[sheetlessOrder] 사전등록 블로거 줄 사용 tab=${tabName} seq=${pre[0].seq} os=${orderSubmissionId}`);
+          /* ★ 상품이 여러 개인 작업(Codex P2) — 등록은 상품을 고르지 않고 빈 줄에 앉혔으므로 그 줄에 미리 적힌 상품은 계획일 뿐이다.
+               빈 줄을 새로 고른 것과 똑같이 **산 상품으로 맞춘다**(안 하면 「빈 칸만 채움」 규칙에 막혀 계획 상품이 남는다). */
+          const prePick = scheduledOptionKey ? '' : String(orderData.selectedProduct || '').trim();
+          if (prePick) {
+            let productHeader = '';
+            try { productHeader = require('./orderLedger.service').PRODUCT_HEADER; } catch (_) { productHeader = ''; }
+            const plan = String(pre[0].option_text || '').trim()
+              || (productHeader ? String(((pre[0].row_json || {})[productHeader]) == null ? '' : pre[0].row_json[productHeader]).trim() : '');
+            const pw = await _productWriteFor(client, { sheetId, tabName, workboardId, productPick: prePick, labels: [plan] });
+            if (pw.productWrite) { freshClaim = true; claimedProductKey = pw.productWrite; }
+          }
+        }
       }
       if (!cur.length) {
         /* ★★ 빈 줄 고르기(2026-09-26 · 결정 182) — 옵션 일치 → **오늘 날짜 줄 → 날짜 없는·지난 줄 →

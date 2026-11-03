@@ -267,18 +267,43 @@ async function createSlotsFromSheetRows({ sheetId, tabName, tabGid = null, campa
  * ★ `source='worktable'` — 'manual' 로 넣으면 투영의 상태 CASE 가 인정하지 않아
  *   리뷰제출·입금 표시가 영영 안 켜진다.
  */
-async function appendSlot(client, { sheetId, tabName, tabGid = null, campaignName = null, rowJson = {}, workboardId = null, by = 'sheetless-append' } = {}) {
+async function appendSlot(client, { sheetId, tabName, tabGid = null, campaignName = null, rowJson = {}, workboardId = null, by = 'sheetless-append', minSeq = 1 } = {}) {
   if (!client || !sheetId || !tabName) throw new Error('appendSlot: client, sheetId, tabName 필수');
+  // ★ minSeq — 빈 표에서 열 이름 줄(1번)을 피해야 하는 호출부(블로거 사전등록)만 2를 준다. 기본 1 = 종전 그대로.
   const { rows } = await client.query(
     `INSERT INTO campaign_participants
        (sheet_id, tab_gid, tab_name, campaign_name, seq, row_json, workboard_id, source, updated_by, updated_at)
-     SELECT $1, $2, $3, $4, COALESCE(MAX(seq) FILTER (WHERE seq < ${_MANUAL_SEQ_BASE}), 0) + 1, $5::jsonb, $6::uuid, 'worktable', $7, NOW()
+     SELECT $1, $2, $3, $4, GREATEST(COALESCE(MAX(seq) FILTER (WHERE seq < ${_MANUAL_SEQ_BASE}), 0) + 1, $8::int), $5::jsonb, $6::uuid, 'worktable', $7, NOW()
        FROM campaign_participants WHERE sheet_id = $1 AND tab_name = $3
      ON CONFLICT (sheet_id, tab_name, seq) DO NOTHING
      RETURNING id, seq, row_json`,
     [sheetId, tabGid, tabName, campaignName,
-     JSON.stringify(rowJson && typeof rowJson === 'object' ? rowJson : {}), workboardId, String(by).slice(0, 100)]);
+     JSON.stringify(rowJson && typeof rowJson === 'object' ? rowJson : {}), workboardId, String(by).slice(0, 100),
+     Math.max(1, parseInt(minSeq, 10) || 1)]);
   return rows[0] || null;
+}
+
+/**
+ * 준비된 빈 줄에 사람을 **미리 앉힌다**(블로거 사전등록 — 결정 328 · 2026-11-03).
+ *
+ * ★★ 이름·연락처를 칸(`reviewer_name`·`recipient_name`·`phone8`)에도 쓴다 — `row_json` 에만 두면 빈 줄 판정
+ *   (`utils/worktableOpenSlot.openSlotRowSql`)이 이 줄을 빈 줄로 봐서, 남의 주문이 이 줄을 먹고 본인 주문은
+ *   다른 빈 줄로 가 한 사람이 두 줄이 된다(2026-11-03 로컬 재현).
+ * ★ 쓰는 순간 **같은 빈 줄 조건으로 다시 확인**한다 — 그 사이 주문이 들어온 줄은 덮지 않는다(0행 = false).
+ * ★ `client` 를 받는다 — 호출부의 트랜잭션·탭 잠금(`sheetless_worktable:`) 안에서 실행돼야 한다.
+ */
+async function fillPreparedRow(client, { sheetId, tabName, seq, name, phone8, rowPatch = {}, by = 'admin' } = {}) {
+  if (!client || !sheetId || !tabName || !Number.isInteger(Number(seq))) throw new Error('fillPreparedRow: client, sheetId, tabName, seq 필수');
+  const { openSlotRowSql } = require('../utils/worktableOpenSlot');
+  const { rowCount } = await client.query(
+    `UPDATE campaign_participants cp
+        SET reviewer_name = $4, recipient_name = $4, phone8 = $5,
+            row_json = COALESCE(cp.row_json, '{}'::jsonb) || $6::jsonb,
+            updated_by = $7, updated_at = NOW()
+      WHERE cp.seq = $3 AND ${openSlotRowSql('cp', { sheet: '$1', tab: '$2', workboard: 'NULL' })}`,
+    [sheetId, tabName, Number(seq), String(name || '').slice(0, 100), String(phone8 || ''),
+     JSON.stringify(rowPatch && typeof rowPatch === 'object' ? rowPatch : {}), String(by).slice(0, 100)]);
+  return rowCount === 1;
 }
 
 /* (가져오기 되돌리기 전용 하드 삭제 purgeImportedRows — 시트 가져오기 서버 제거와 함께 2026-09-30 제거 · 결정 186 79번) */
@@ -490,7 +515,7 @@ async function listHeldRows({ sheetId, tabName, limit = 300 } = {}) {
 
 module.exports = {
   holdRows, listHeldRows,
-  createWorktableSlots, createSlotsFromSheetRows, appendSlot, retireRows,
+  createWorktableSlots, createSlotsFromSheetRows, appendSlot, fillPreparedRow, retireRows,
   importTabFromIndex,
   syncImportedTabs,
   compareWithIndex,
