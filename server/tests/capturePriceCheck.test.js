@@ -42,6 +42,13 @@ function pure() {
   const so = J({ kind: 'coupang', expected: 25000, paid: 45000, staffReview: true });
   assert.deepEqual([so.action, so.code, so.expected, so.paid], ['flag', 'price_over', 25000, 45000]);
   assert.ok(/45,000원/.test(J({ kind: 'coupang', expected: 25000, paid: 45000 }).error) && /25,000원/.test(J({ kind: 'coupang', expected: 25000, paid: 45000 }).error));
+  // 차이 금액·비율까지 보인다(사용자 확정 2026-11-02)
+  assert.equal(J({ kind: 'other', expected: 25000, paid: 43000 }).error.split(' 주문한')[0],
+    '제출하신 구매캡처 속 결제금액(43,000원)이 작업 조건 결제금액(25,000원)보다 18,000원 더 비쌉니다(72% 초과).');
+  assert.ok(/보다 5,000원 더 쌉니다\(20% 적음\)/.test(J({ kind: 'other', expected: 25000, paid: 20000 }).error));
+  assert.ok(/보다 20,000원 더 비쌉니다\(80% 초과\)/.test(J({ kind: 'coupang', expected: 25000, paid: 45000 }).error));
+  assert.ok(/7,510원 더 비쌉니다\(30\.0% 초과\)/.test(J({ kind: 'coupang', expected: 25000, paid: 32510 }).error), '30% 언저리는 소수 한 자리');
+  assert.ok(/\(30\.4% 초과\)/.test(J({ kind: 'coupang', expected: 25000, paid: 32600 }).error));
   // 쿠팡 밖
   assert.equal(J({ kind: 'other', expected: 25000, paid: 26000 }).action, 'none', '1,000원 = 통과(넘을 때만)');
   assert.equal(J({ kind: 'other', expected: 25000, paid: 24000 }).action, 'none');
