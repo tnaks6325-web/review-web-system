@@ -240,5 +240,28 @@ async function t(name, fn) { await fn(); passed++; console.log('PASS ' + name); 
     } finally { wsh.loadTabStatusHeaders = orig; }
   });
 
+  /* ── 이름 바꾼 탭: 옛 이름 줄을 업체 숫자에 더하지 않는다(2026-11-03 운영 실측: 100 → 198) ── */
+  await t('★★ 같은 gid 에 옛 이름 줄이 남아 있어도 업체관리 숫자 = 현재 이름 줄만(홈·작업보드와 같음)', async () => {
+    await db.exec(`
+      INSERT INTO raw_sheet_tabs (sheet_id, spreadsheet_title, tab_gid, tab_name, row_count, is_system_tab, detected_headers, mirrored_at)
+        VALUES ('${S}','가짜 시트','104','새이름탭',4,FALSE,'["번호","수취인","리뷰제출","입금"]'::jsonb, NOW());
+      INSERT INTO tab_configs (sheet_id, tab_name, tab_gid, sheetless, is_closed, manager) VALUES ('${S}','새이름탭','104',TRUE,FALSE,'만두');
+      INSERT INTO campaign_participants (sheet_id, tab_gid, tab_name, seq, reviewer_name, recipient_name, phone8, is_submitted, is_paid, source, submit_col, submit_col2, row_json, active)
+      SELECT '${S}','104', CASE WHEN g<=4 THEN '새이름탭' ELSE '옛이름탭' END, g, '사람'||g, '수취'||g, lpad((40000000+g)::text,8,'0'),
+             TRUE, TRUE, 'worktable', '리뷰제출', '입금', jsonb_build_object('번호', g::text, '리뷰제출', 'O', '입금', '11/1'), TRUE
+        FROM generate_series(1,7) g;
+      -- 리네임이 줄을 못 따라간 탭(현재 이름 줄 0) — gid 폴백은 살아 있어야 한다
+      INSERT INTO raw_sheet_tabs (sheet_id, spreadsheet_title, tab_gid, tab_name, row_count, is_system_tab, detected_headers, mirrored_at)
+        VALUES ('${S}','가짜 시트','105','바뀐이름',3,FALSE,'["번호","수취인","리뷰제출","입금"]'::jsonb, NOW());
+      INSERT INTO campaign_participants (sheet_id, tab_gid, tab_name, seq, reviewer_name, recipient_name, phone8, is_submitted, is_paid, source, submit_col, submit_col2, row_json, active)
+      SELECT '${S}','105','바뀌기전이름', g, '폴백'||g, '수취'||g, lpad((50000000+g)::text,8,'0'),
+             TRUE, TRUE, 'worktable', '리뷰제출', '입금', jsonb_build_object('번호', g::text, '리뷰제출', 'O', '입금', '11/1'), TRUE
+        FROM generate_series(1,3) g;`);
+    const o = (await svc.ownedTabsForAdvertiser({ advertiserId: 'adv1' })).rows;
+    const cur = o.find(r => r.tabName === '새이름탭'), fb = o.find(r => r.tabName === '바뀐이름');
+    assert.deepStrictEqual([cur.bTotal, cur.bSub, cur.bPaid], [4, 4, 4], '옛 이름 3줄이 더해지면 7');
+    assert.deepStrictEqual([fb.bTotal, fb.bSub, fb.bPaid], [3, 3, 3], '현재 이름 줄이 없으면 gid 로 찾는다');
+  });
+
   console.log(`\n✅ statusCountUnify: ${passed} 통과`);
 })().catch(e => { console.error(e); process.exitCode = 1; });
