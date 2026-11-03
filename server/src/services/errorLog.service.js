@@ -64,6 +64,9 @@ const STEP_LABELS = {
   manual_product_mismatch_confirmed:  '수동 입력 상품 확인 경고 — 담당자가 확인하고 접수',
   // 결정 325 — 막지 않는 경고(업체 화면 총건수가 빌 수 있음)
   zero_recruit_count:                 '리뷰오더 총모집 0 으로 접수 — 총건수가 빌 수 있어 리뷰오더 총모집 확인 필요',
+  // 결정 326 — CORS 차단(허용 안 된 주소의 요청). 정상 차단은 경고, 운영 화면 주소가 막힌 것은 치명.
+  cors_blocked:                       '허용 목록 밖 주소의 요청 차단(정상 차단 · CORS)',
+  cors_own_origin_blocked:            '운영 화면 주소의 요청이 막힘(허용 주소 설정 누락 의심 · CORS)',
 };
 
 // category: 무엇이(어떤 종류의) 에러가
@@ -169,6 +172,52 @@ async function _enrichWithAI(rowId, { flow, step, message_raw, error_code }) {
   } catch (_) { /* noop — 템플릿 문장 유지 */ }
 }
 
+// ── 최근 일자별 횟수(결정 326 · 스키마 변경 0) ──
+// occurrence_count 는 같은 오류 묶음이 처음 생긴 뒤 계속 더해진 누적이다. 점검자가 "이번 주 몇 번?"을 알 수 있게
+// 기존 context JSON 안에 최근 DAILY_KEEP_DAYS 일의 일자별(KST) 횟수를 작게 유지한다.
+const DAILY_KEY = '_daily';
+const DAILY_FROM_KEY = '_dailyFrom';
+const DAILY_KEEP_DAYS = 14;
+const RECENT_WINDOW_DAYS = 7;
+const KST_TODAY_SQL = `to_char(NOW() AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')`;
+const KST_MS = 9 * 3600 * 1000;
+const DAY_MS = 86400 * 1000;
+
+/**
+ * 한 행의 "최근 7일(오늘 포함 KST 7일) 횟수".
+ *   recent_7d_count    — 숫자, 또는 모르면 null(집계 시작 전 기록만 있고 최근에 났던 행)
+ *   recent_7d_complete — true 면 정확한 값, false 면 집계 시작(recent_counts_since) 이후 분만 센 "최소" 값
+ *   recent_counts_since — 일자별 집계를 시작한 시각(없으면 null)
+ * ★ 모르는 것을 0 으로 꾸미지 않는다 — 마지막 발생이 7일 창보다 전일 때만 집계 없이도 0(확실)이다.
+ */
+function recentCounts(row, now = Date.now()) {
+  const out = { recent_7d_count: null, recent_7d_complete: false, recent_counts_since: null };
+  if (!row) return out;
+  const nowMs = now instanceof Date ? now.getTime() : Number(now);
+  const kstMidnight = Math.floor((nowMs + KST_MS) / DAY_MS) * DAY_MS - KST_MS; // 오늘 0시(KST)의 UTC ms
+  const windowStart = kstMidnight - (RECENT_WINDOW_DAYS - 1) * DAY_MS;
+  const ctx = row.context && typeof row.context === 'object' ? row.context : {};
+  const fromMs = typeof ctx[DAILY_FROM_KEY] === 'string' ? Date.parse(ctx[DAILY_FROM_KEY]) : NaN;
+  if (Number.isFinite(fromMs)) out.recent_counts_since = new Date(fromMs).toISOString();
+  const lastMs = row.last_seen_at ? new Date(row.last_seen_at).getTime() : NaN;
+  if (Number.isFinite(lastMs) && lastMs < windowStart) {
+    out.recent_7d_count = 0; out.recent_7d_complete = true; return out;
+  }
+  if (!Number.isFinite(fromMs)) return out; // 집계 전 기록만 있다 — 모름
+  const daily = ctx[DAILY_KEY] && typeof ctx[DAILY_KEY] === 'object' ? ctx[DAILY_KEY] : {};
+  let sum = 0;
+  for (let i = 0; i < RECENT_WINDOW_DAYS; i++) {
+    const key = new Date(kstMidnight - i * DAY_MS + KST_MS).toISOString().slice(0, 10);
+    const v = Number(daily[key]);
+    if (Number.isFinite(v) && v > 0) sum += v;
+  }
+  out.recent_7d_count = sum;
+  const firstMs = row.first_seen_at ? new Date(row.first_seen_at).getTime() : NaN;
+  // 집계가 창 시작 전에 이미 켜져 있었거나, 이 묶음이 집계 시작 뒤에 처음 생겼으면 빠진 발생이 없다.
+  out.recent_7d_complete = fromMs <= windowStart || (Number.isFinite(firstMs) && firstMs >= fromMs - 1000);
+  return out;
+}
+
 /**
  * 비정상 이벤트 1건 기록 (fail-safe, fire-and-forget 가능)
  *
@@ -203,7 +252,9 @@ async function logAbnormal(p = {}) {
     const message_raw = (error && (error.message || String(error))) || '';
     const error_code = String((error && (error.code || error.name || error.status || error.statusCode)) || '');
     const stack = (error && error.stack ? String(error.stack) : '').split('\n').slice(0, 6).join('\n');
-    const context = p.context && typeof p.context === 'object' ? p.context : {};
+    const context = p.context && typeof p.context === 'object' ? { ...p.context } : {};
+    // 일자별 횟수 칸은 이 서비스만 쓴다(호출부 값이 섞이면 집계가 틀어진다 · 결정 326)
+    delete context[DAILY_KEY]; delete context[DAILY_FROM_KEY];
     const fp = fingerprint({ flow, step, category, source, message_raw, key: p.fingerprintKey });
 
     // ── 기존 파이프라인 병행 (제거하지 않음) ──
@@ -222,7 +273,11 @@ async function logAbnormal(p = {}) {
       `INSERT INTO error_logs
          (severity, flow, flow_ko, step, step_ko, category, source,
           message_ko, message_raw, error_code, stack, context, fingerprint)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
+               $12::jsonb || jsonb_build_object(
+                 '${DAILY_KEY}', jsonb_build_object(${KST_TODAY_SQL}, 1),
+                 '${DAILY_FROM_KEY}', to_jsonb(NOW())),
+               $13)
        ON CONFLICT (fingerprint) WHERE status <> 'resolved'
        DO UPDATE SET
          occurrence_count = error_logs.occurrence_count + 1,
@@ -230,7 +285,26 @@ async function logAbnormal(p = {}) {
          message_raw      = EXCLUDED.message_raw,
          error_code       = EXCLUDED.error_code,
          stack            = EXCLUDED.stack,
-         context          = EXCLUDED.context,
+         -- ★ 최근 일자별 횟수(결정 326): 누적(occurrence_count)만으로는 "6월부터 506회"가 "이번 주 506회"로 읽힌다.
+         --   context._daily = { 'YYYY-MM-DD'(KST): 횟수 } 최근 ${DAILY_KEEP_DAYS}일만 유지 · _dailyFrom = 집계 시작 시각(처음 값 유지).
+         context          = EXCLUDED.context || jsonb_build_object(
+           '${DAILY_KEY}', (
+             SELECT COALESCE(jsonb_object_agg(d.k, d.v), '{}'::jsonb) FROM (
+               SELECT e.key AS k, e.value AS v
+                 FROM jsonb_each(CASE WHEN jsonb_typeof(error_logs.context->'${DAILY_KEY}') = 'object'
+                                      THEN error_logs.context->'${DAILY_KEY}' ELSE '{}'::jsonb END) e
+                WHERE e.key ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+                  AND jsonb_typeof(e.value) = 'number'
+                  AND e.key >  to_char((NOW() AT TIME ZONE 'Asia/Seoul') - interval '${DAILY_KEEP_DAYS} days', 'YYYY-MM-DD')
+                  AND e.key <> ${KST_TODAY_SQL}
+               UNION ALL
+               SELECT ${KST_TODAY_SQL},
+                      to_jsonb(COALESCE(CASE WHEN jsonb_typeof(error_logs.context->'${DAILY_KEY}'->${KST_TODAY_SQL}) = 'number'
+                                             THEN (error_logs.context->'${DAILY_KEY}'->>${KST_TODAY_SQL})::numeric END, 0)::int + 1)
+             ) d),
+           '${DAILY_FROM_KEY}', COALESCE(
+             CASE WHEN jsonb_typeof(error_logs.context->'${DAILY_FROM_KEY}') = 'string' THEN error_logs.context->'${DAILY_FROM_KEY}' END,
+             to_jsonb(NOW()))),
          severity         = CASE
            WHEN error_logs.severity = 'critical' OR EXCLUDED.severity = 'critical' THEN 'critical'
            WHEN error_logs.severity = 'error'    OR EXCLUDED.severity = 'error'    THEN 'error'
@@ -259,6 +333,7 @@ module.exports = {
   inferSource,
   composeKo,
   fingerprint,
+  recentCounts,
   FLOW_LABELS,
   STEP_LABELS,
   CATEGORY_PHRASES,

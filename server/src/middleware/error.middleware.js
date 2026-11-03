@@ -1,6 +1,7 @@
 const { logger } = require('../utils/logger');
 const { captureException, isSentryEnabled } = require('../utils/sentry');
 const { logAbnormal } = require('../services/errorLog.service');
+const { corsBlockKind, isCorsBlocked } = require('./cors.middleware');
 
 /**
  * 요청 경로 → 비정상 로그 flow/step 매핑
@@ -35,6 +36,11 @@ function flowFromPath(p) {
  * Phase 6: Sentry captureException 통합
  */
 function errorHandler(err, req, res, next) {
+  // ★ 정상 차단(CORS: 허용 안 된 주소의 요청)은 서버 오류가 아니다(결정 326).
+  //   종전엔 응답은 403 인데 기록은 statusCode 500 · severity 'error' 로 남아 "서버 오류 347회"처럼 보였다.
+  const corsKind = isCorsBlocked(err)
+    ? corsBlockKind(err.corsOrigin || (req.headers && req.headers.origin) || String(err.message).replace(/^CORS 차단:\s*/, ''))
+    : null;
   // ── 구조화 로깅 ──
   const errorContext = {
     message: err.message,
@@ -44,13 +50,14 @@ function errorHandler(err, req, res, next) {
     query: Object.keys(req.query || {}).length ? req.query : undefined,
     ip: req.ip,
     userAgent: (req.headers['user-agent'] || '').substring(0, 120),
-    statusCode: err.status || err.statusCode || 500,
+    statusCode: corsKind ? 403 : (err.status || err.statusCode || 500),
   };
 
-  logger.error(errorContext);
+  if (corsKind && corsKind !== 'own') logger.warn(errorContext);
+  else logger.error(errorContext);
 
-  // ── Sentry 에러 전송 ──
-  captureException(err, {
+  // ── Sentry 에러 전송 ── (정상 차단은 보내지 않는다 — 운영 화면 주소가 막힌 경우만)
+  if (!corsKind || corsKind === 'own') captureException(err, {
     path: req.path,
     method: req.method,
     query: req.query,
@@ -59,11 +66,14 @@ function errorHandler(err, req, res, next) {
   });
 
   // ── 비정상 로그(이상로그) 영구 기록 — fire-and-forget, 절대 throw 안 함 ──
+  //   개발자 PC·브라우저 확장 주소의 CORS 차단은 남기지 않는다(소음) · 그 밖의 차단은 경고 ·
+  //   ★ 운영 화면 주소가 막힌 것(허용 설정 누락)은 치명으로 남긴다 — 진짜 이상 신호는 지우지 않는다.
   const { flow, step } = flowFromPath(req.path);
-  logAbnormal({
+  if (corsKind !== 'local') logAbnormal({
     flow,
-    step,
-    severity: errorContext.statusCode >= 500 ? 'error' : 'warn',
+    step: corsKind === 'own' ? 'cors_own_origin_blocked' : corsKind ? 'cors_blocked' : step,
+    ...(corsKind ? { category: 'permission', source: 'server' } : {}),
+    severity: corsKind === 'own' ? 'critical' : corsKind ? 'warn' : (errorContext.statusCode >= 500 ? 'error' : 'warn'),
     error: err,
     context: {
       path: req.path,
@@ -76,7 +86,7 @@ function errorHandler(err, req, res, next) {
   });
 
   // CORS 오류
-  if (err.message && err.message.includes('CORS 차단')) {
+  if (corsKind || (err.message && err.message.includes('CORS 차단'))) {
     return res.status(403).json({ error: 'CORS 정책 위반' });
   }
 
