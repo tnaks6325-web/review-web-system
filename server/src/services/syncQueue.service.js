@@ -14,6 +14,7 @@
 
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
+const { NO_SLOT_QUEUE_ERRORS, openSlotExistsSql } = require('../utils/workboardNoSlot');   // 결정 324
 
 // ═══════════════════════════════════════════════════════════
 // ★★ 큐 타입 분류 — 단일 출처 (결정 271 → 결정 274 · 시트 시절 정리 마지막 단계)
@@ -276,13 +277,41 @@ async function retryAllFailed() {
   }
 
   // failed 상태 항목 재시도
+  //   ★★ 결정 324 — 작업표 빈 줄이 없어 막힌 작업보드 반영(NO_SLOT_QUEUE_ERRORS)은 여기서 되살리지 않는다
+  //     (빈 줄이 없으면 매시간 같은 실패만 되풀이한다 · 행은 failed 그대로 기록 · 홈 「오늘 확인할 것」이 직원에게 알린다).
+  //     그 작업표에 빈 줄이 생긴 것만 아래에서 따로 되살린다. 다른 실패 사유는 종전 그대로.
   const { rowCount } = await pool.query(
     `UPDATE sync_queue
      SET status = 'pending', attempts = 0, error_msg = NULL
      WHERE status = 'failed'
-       AND type = ANY($1::text[])`,
-    [live]
+       AND type = ANY($1::text[])
+       AND NOT (type = 'workboard_apply' AND COALESCE(error_msg, '') = ANY($2::text[]))`,
+    [live, [...NO_SLOT_QUEUE_ERRORS]]
   );
+
+  // ★★ 결정 324 — 빈 줄 없음으로 막힌 행은 **그 작업표에 빈 줄이 다시 생겼을 때만** 되살린다(직원이 줄을 늘린 경우).
+  //   실제 줄 고르기는 언제나 큐 실행부(writeOrderToWorktable)가 한다 — 여기는 「빈 줄이 하나라도 있나」 사전 확인만.
+  //   실패해도 나머지 복구를 막지 않는다(대상이 있을 때만 작업표 표를 읽는다).
+  let revivedNoSlot = 0;
+  try {
+    const { rows: anyNoSlot } = await pool.query(
+      `SELECT 1 FROM sync_queue WHERE status = 'failed' AND type = 'workboard_apply'
+          AND COALESCE(error_msg, '') = ANY($1::text[]) LIMIT 1`, [[...NO_SLOT_QUEUE_ERRORS]]);
+    if (anyNoSlot.length) {
+      const { rows: revived } = await pool.query(
+        `UPDATE sync_queue q
+            SET status = 'pending', attempts = 0, error_msg = NULL
+          WHERE q.status = 'failed' AND q.type = 'workboard_apply'
+            AND COALESCE(q.error_msg, '') = ANY($1::text[])
+            AND ${openSlotExistsSql(`q.payload->>'sheetId'`, `q.payload->>'tabName'`)}
+          RETURNING q.id, q.type, q.payload`, [[...NO_SLOT_QUEUE_ERRORS]]);
+      revivedNoSlot = revived.length;
+      for (const item of revived) await markWorkboardQueueOrderState(item, 'pending', null);
+      if (revivedNoSlot > 0) logger.info(`[syncQueue] 빈 줄이 생긴 작업표의 막힌 반영 ${revivedNoSlot}건 되살림`);
+    }
+  } catch (e) {
+    logger.warn(`[syncQueue] 빈 줄 없음 반영 되살리기 건너뜀(다음 시각에 다시): ${e.message}`);
+  }
 
   // pending이지만 attempts >= max_retry로 처리 불가능한 항목도 리셋
   const { rowCount: resetExhausted } = await pool.query(
@@ -296,7 +325,7 @@ async function retryAllFailed() {
     logger.info(`[syncQueue] ${resetExhausted}건 exhausted pending 항목 attempts 리셋`);
   }
 
-  return { retried: rowCount, unstuck, resetExhausted };
+  return { retried: rowCount, unstuck, resetExhausted, revivedNoSlot };
 }
 
 // ── 완료된 항목 정리 (24시간 이상 경과) ──

@@ -4239,6 +4239,26 @@ async function _refreshOpsChecks(by) {
   try { await opsCheckSvc.refreshBankChecks({ by }); }
   catch (e) { logger.warn(`[opsCheck] 확인할 것 갱신 실패(통장·확정은 그대로): ${e.message}`); }
 }
+// 결정 324 — 작업표 빈 줄이 없어 구매양식이 작업표에 못 들어간 주문(홈 전용 · 은행 목록·담당자 질문과 섞지 않는다).
+const slotCheckSvc = require('../services/workboardSlotOpsCheck.service');
+router.get('/ops-checks/slots', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    await slotCheckSvc.refresh(pool);
+    const allowed = await require('../utils/workdeskEditors').canEdit(req.admin);
+    res.json({ ok: true, ...await slotCheckSvc.list({ db: pool, allowed }) });
+  } catch (err) { next(err); }
+});
+router.post('/ops-checks/:id/slot-answer', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id), b = req.body || {};
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: '잘못된 요청입니다.' });
+    const item = await slotCheckSvc.answer({ db: pool, id, choice: String(b.choice || ''), admin: req.admin, by: _by(req) });
+    res.json({ ok: true, item });
+  } catch (err) {
+    if (err instanceof opsCheckSvc.OpsCheckError) return res.status(err.status || (err.code === 'forbidden' ? 403 : err.code === 'not_found' ? 404 : 400)).json({ ok: false, code: err.code, error: err.message });
+    next(err);
+  }
+});
 router.get('/ops-checks', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, items: await opsCheckSvc.listChecks({}) }); } catch (err) { next(err); }
 });
