@@ -1,6 +1,6 @@
 'use strict';
 /**
- * imageExtractFriendlyError.test.js — 결정 328: 구매캡처 AI 분석이 실패하면 리뷰어에게는 쉬운 한국어 안내를,
+ * imageExtractFriendlyError.test.js — 결정 331: 구매캡처 AI 분석이 실패하면 리뷰어에게는 쉬운 한국어 안내를,
  *   이상로그(error_logs)에는 원문을 그대로 남긴다.
  *
  * ★ 사고(2026-11-03 조사): Gemini 키 3개가 모두 9초를 넘기면(최악 약 28초) 구매양식 빨간 상자에

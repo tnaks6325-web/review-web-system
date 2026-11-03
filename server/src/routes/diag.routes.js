@@ -138,7 +138,7 @@ router.post('/', authMiddleware, async (req, res, next) => {
 // (GET /api/diag/inaed-list(·viewer·image·blacklist) — 리뷰어 이름·전화 명단) 은 2026-10-04 제거 — 화면 호출 0 · 9/2 이후 호출 0 · 개인정보가 새는 입구(결정 186 92번).
 
 
-/* 결정 328 — 판독 실패를 리뷰어에게 보일 말로 바꾸는 곳은 여기 하나다.
+/* 결정 331 — 판독 실패를 리뷰어에게 보일 말로 바꾸는 곳은 여기 하나다.
    AI 시간초과('[Gemini extract] timeout 9000ms')·AI 서버 오류·운영 내부 문구는 쉬운 한국어 안내로 바꾸고,
    이미 리뷰어용으로 쓴 한국어 안내(아래 목록)만 그대로 보낸다. 원문은 이상로그(logAbnormal)에 err 째로 남는다.
    ★ 시간 제한·재시도(gemini.service)는 건드리지 않는다 — 보이는 말만 바꾼다. */
@@ -216,7 +216,7 @@ router.post('/image-extract', imageApiLimiter, async (req, res, next) => {
     });
     const failed = {
       ok: false,
-      error: reviewerExtractErrorMessage(err),   // 결정 328 — 원문은 위 logAbnormal 에만
+      error: reviewerExtractErrorMessage(err),   // 결정 331 — 원문은 위 logAbnormal 에만
       orderNumber: '', recipient: '', phone: '', address: '', price: ''
     };
     const proof = imageHash
