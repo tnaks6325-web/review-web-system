@@ -588,6 +588,14 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       try { _rowReviewType = await require('../services/reviewTypeContext.service').reviewTypeForRow({ sheetId, tabName, rowIndex }); } catch (_) {}
     }
     const _effReviewType = _rowReviewType || _tabReviewType;
+    /* ★★ Q&A체험단(결정 321) — 결과물이 **상품 문의 화면**이라, 리뷰 칸에 "리뷰 화면"을 기대하는 업로드 검수가
+       정상 제출마다 형식 불일치 경고·관리자 알림·자동 이동을 만든다. 리뷰 칸의 업로드 검수만 건너뛴다
+       (같은 파일 검사는 2차 검수가 그대로 본다). 판정 실패·미등록 탭 = false = 종전 동작. */
+    let _isQnaUpload = false;
+    try {
+      _isQnaUpload = require('../utils/workKind').isQnaKind(
+        await require('../services/workKindContext.service').workKindForTab({ sheetId, tabName }));
+    } catch (_) { _isQnaUpload = false; }
 
     let slotLabel = null;
     if (slot !== 'review') {
@@ -778,7 +786,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
         // ── 3단계 AI 검수: 이 슬롯에 맞는 형식인지 판별(fail-open — 업로드는 이미 끝났고 막지 않는다) ──
         let verdict = null;
         try {
-          verdict = await verifyCapture({
+          if (!(_isQnaUpload && _slotRole === 'review')) verdict = await verifyCapture({
             base64: file.data, mimeType: file.mimeType || 'image/jpeg',
             // ★ 행 우선 유효 리뷰타입 — 혼합 탭의 구매확정 행은 구매확정 화면이 정상 제출이다.
             slotKey: _slotRole, companyBusinessNo: _companyBizNo, reviewType: _effReviewType,

@@ -66,6 +66,11 @@ const samples = ['', 'review', 'blog', 'qna', 'Q&A체험단', 'Q/A등록작업',
 for (const v of samples) {
   t(`★★ 판정 일치: ${JSON.stringify(v)}`, P._woIsQnaKind(v) === WK.isQnaKind(v) && P._woIsBlogKind(v) === (v !== '' && WK.isBlogKind(v)));
 }
+t('★★ 프론트 사본의 Q&A 표기 규칙 = 서버 QNA_PATTERN 글자 그대로(표본에 없는 갈래까지 잠금)', (() => {
+  const src = S('src/utils/workKind.js').match(/const QNA_PATTERN = (\/.*\/i);/);
+  return !!src && P._woIsQnaKind.toString().includes(src[1] + '.test(v)')
+    && F('js/work-order-detail.js').includes(src[1] + '.test(v)');
+})());
 t('★★ Q&A 오더는 리뷰타입을 프리필하지 않는다', (() => {
   const out = P._woCampaignPrefill({ work_kind: 'qna', review_type: '포토', review_type_mix: [{ type: 'photo', count: 3 }] });
   return out.review_type === '' && Array.isArray(out.review_type_mix) && out.review_type_mix.length === 0 && out.work_kind === 'qna';
@@ -99,7 +104,22 @@ console.log('\n5) 구매 전제 기능 제외');
 const cr = S('src/routes/campaign.routes.js').split(String.fromCharCode(0)).join('');
 t('인당 구매수량 단계 복사 제외', /!\['blog', 'qna'\]\.includes\(workKindForStore\(work_kind\)\)/.test(cr));
 const sh = S('src/services/campaignShortage.service.js');
-t('미달 연장 팝업 제외(SQL·잠금 재확인·공고>탭 판정 세 곳)', /NOT IN \('blog','qna'\)/.test(sh)
+t('미달 연장 팝업 제외(후보 SQL 1곳 + 잠금 재확인·공고>탭 판정 includes 2곳)', /NOT IN \('blog','qna'\)/.test(sh)
   && (sh.match(/NO_DAILY_CARRY_KINDS\.includes\(/g) || []).length === 2);
+
+/* ── 6) 코드 검토가 짚은 막다른 길·새는 자리 ─────────────────── */
+console.log('\n6) 막다른 길·새는 자리');
+const dg = S('src/routes/diag.routes.js');
+t('★★ 업로드 검수: qna 탭의 리뷰 칸은 형식 판정·자동 이동·불일치 알림을 만들지 않는다',
+  /_isQnaUpload = require\('\.\.\/utils\/workKind'\)\.isQnaKind\(/.test(dg)
+  && /if \(!\(_isQnaUpload && _slotRole === 'review'\)\) verdict = await verifyCapture\(\{/.test(dg)
+  && /\} catch \(_\) \{ _isQnaUpload = false; \}/.test(dg));
+t('작업보드 「＋ 블로거 추가」: qna 작업에는 안 보인다(서버가 거부하는 버튼)',
+  /\['review', 'qna'\]\.includes\(String\(t\.workKind \|\| ''\)\)\) return false;/.test(F('workdesk.html')));
+t('★ 발행 폼: qna 는 리뷰타입 카드를 숨기고 저장 때 비운다', /const noReviewType = isBlog \|\| _kind === "qna";/.test(ir)
+  && /row\.style\.display = noReviewType \? "none" : ""/.test(ir)
+  && /if \(payload\.work_kind === "blog" \|\| payload\.work_kind === "qna"\) \{\s*payload\.review_type = "";/.test(ir));
+t('발행 폼 종류 탭: qna 를 리뷰로 켜지 않는다', /t\.dataset\.kind === \(_kind \|\| "review"\)/.test(ir));
+t('광고주 포털 작업 종류: Q&A 체험단', /order\.work_kind === 'qna' \? 'Q&A 체험단' : '리뷰 체험단'/.test(S('src/services/advertiserProjection.service.js')));
 
 console.log(`\n✅ ${pass}개 통과\n`);

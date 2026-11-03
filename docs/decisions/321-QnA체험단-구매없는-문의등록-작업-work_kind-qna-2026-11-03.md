@@ -43,6 +43,13 @@
   - 2차는 형식·상품명·본문겹침을 skip 한다(블로그와 같은 갈래 `_isBlogTab`).
   - **같은 파일(중복) 검사는 그대로 둔다.**
   - 결과물이 문의 화면이라 리뷰 화면 판정이 정상 제출을 `other` 로 잠근다(참여 소각).
+- ★★ **업로드 검수도 격리(완화 금지)** — 사진을 올리는 순간 도는 `verifyCapture`(diag 업로드)는 리뷰 칸에 리뷰 화면을 기대한다.
+  - qna 탭의 리뷰 칸은 이 검수를 건너뛴다(`_isQnaUpload`). 형식 불일치 경고·관리자 알림·자동 이동이 생기지 않는다.
+  - 판정 실패·미등록 탭은 false = 종전 동작.
+- **막다른 길·새는 자리(코드 검토 반영)**:
+  - 작업보드 「＋ 블로거 추가」는 qna 작업에 안 보인다(서버가 blog 아님으로 거부하는 버튼).
+  - 발행 폼: qna 는 리뷰타입 카드를 숨기고 저장 때 비운다. 종류 탭은 qna 를 리뷰로 켜지 않는다(Q&A 탭 자체는 3단계).
+  - 광고주 포털 작업 종류 = 「Q&A 체험단」.
 - **구매 전제 기능 제외**:
   - 인당 구매수량 단계를 복사하지 않는다(`campaign.routes` 발행).
   - 미달 연장 팝업에 올리지 않는다(`campaignShortage.NO_DAILY_CARRY_KINDS`) — 확정 8.
@@ -57,3 +64,9 @@
 - **구매양식이 없으면 장부 줄이 안 생긴다.** 그러면 작업보드 채움·검색·입금이 전부 `order_submissions` 에 매달려 있어 아무것도 세지지 않는다. Q&A 제출 경로가 최소 장부 줄과 홀드 확정(`confirmHoldInTx`)을 만들어야 한다.
 - **입금**: `amount = productPrice + fee` 이고, `!productPrice` 면 `no_price` 로 막힌다(`payment.service`).
 - **전화번호**: 로그인·신청·홀드 유니크(`uq_campaign_apps_active_hold` = campaign_id+phone8)·블랙리스트·입금 대상(`ri.phone8 <> ''`)이 전부 phone8 이다. 계정 phone8 을 그대로 쓴다(확정 2) — 화면에서 묻지만 않는다.
+- **표기 규칙의 한계** — `faq/answer`·「문의등록 없음」 같은 자유 문구는 qna 로 잡히고, 전각 `Q＆A` 는 review 로 접힌다.
+  - 그래서 인트라넷(5단계)은 **코드값 `qna` 만** 보낸다. 규칙을 넓히지 않는다.
+- **아직 qna 를 리뷰로 다루는 곳(단계별로 고친다)**:
+  - 2단계: `worktablePlan.isBlogWorkOrder`(구매일자별 준비 행), `sharedPatch.structurePermanentlyLocked`(접수 뒤 상품 추가·삭제를 자리표와 함께 정한다).
+  - 3단계: `campaign.routes` 신청 분기, `campaign.html isBlogCampaign`, `search-app.js _isBlogItem`, `campaign-cards.js` 배지, `index.html`·`recruit.html _rcKindOf`, `index-recruit.js` 게시 전 점검(구매채널·구매시간 요구), `submit.routes` 리뷰 제출 경로, `recruit-modal.js` 종류 탭.
+  - 4단계: `payment.service`(종류 분기 없음 → `no_price`).

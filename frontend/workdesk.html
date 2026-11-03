@@ -5353,7 +5353,7 @@ let _BR = null;
 function _brCanAdd(){
   const t = STATE.cur;
   if (!t || t.sheetless !== true) return false;                 // 시트 기반은 서버가 거부한다(막다른 길 금지)
-  if (String(t.workKind || '') === 'review') return false;      // 리뷰체험단으로 **명시된** 작업만 숨김
+  if (['review', 'qna'].includes(String(t.workKind || ''))) return false;   // 리뷰·Q&A체험단으로 **명시된** 작업만 숨김(서버가 blog 아님으로 거부한다)
   return STATE.role === 'master' || STATE.role === 'admin' || STATE.role === 'staff';
 }
 function closeBloggerModal(){ const o = document.getElementById('brOv'); if (o) o.remove(); _BR = null; }
