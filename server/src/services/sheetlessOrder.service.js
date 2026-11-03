@@ -526,6 +526,7 @@ async function writeOrderToWorktable({
   sheetId, tabName, tabGid = '', sheetRow, orderData = {},
   orderSubmissionId, workboardId = null, loginPhone8 = '', loginName = '', recovered = false,
   allowMissingQueueRecoveryOverflow = false, allowConfirmedCampaignOverflow = false,
+  requireEmptyOrSame = false,
 } = {}) {
   if (!sheetId || !tabName || !orderSubmissionId) return { ok: false, reason: 'bad_request' };
   const db = getPool();
@@ -644,10 +645,18 @@ async function writeOrderToWorktable({
     let cur;
     if (seq != null) {
       ({ rows: cur } = await client.query(
-        `SELECT id, seq, option_text, row_json FROM campaign_participants
+        `SELECT id, seq, option_text, order_submission_id, row_json FROM campaign_participants
           WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL
             AND ($4::uuid IS NULL OR workboard_id = $4)
           FOR UPDATE`, [sheetId, tabName, seq, workboardId]));
+      /* ★ 결정 321: 줄 번호를 지정해 쓰는 쪽(Q&A 자리 줄)은 그 줄이 비었거나 이 주문의 줄일 때만 쓴다 —
+           줄 잠금 안에서 본다(바깥 확인과 잠금 사이에 다른 주문이 끼어도 남의 줄을 덮어쓰지 않는다). */
+      if (requireEmptyOrSame && cur.length && cur[0].order_submission_id
+          && String(cur[0].order_submission_id) !== String(orderSubmissionId)) {
+        await client.query('ROLLBACK');
+        logger.warn(`[sheetlessOrder] 지정 줄이 다른 주문의 줄 — 쓰지 않음 tab=${tabName} seq=${seq} os=${orderSubmissionId}`);
+        return { ok: false, reason: 'row_taken' };
+      }
     } else {
       // 재시도는 이미 연결된 행을 먼저 잠근다. 없을 때만 준비된 빈 슬롯을 선점한다.
       ({ rows: cur } = await client.query(

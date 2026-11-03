@@ -1617,6 +1617,7 @@ function renderMissing(missing){
 
 /* ═══ 참여 후 화면 ═══ */
 let _detailRetry = 0;
+let _qnaSlotRetry = 0;   // 💬 321: Q&A 자리 정보 못 받음 재시도
 // 당일 미제출 홀드는 재참여를 허용한다. 만료 토큰을 그대로 복원하면 서버는 계속 expired를
 // 반환하므로, 해당 명의의 로컬 홀드만 제거하고 참여 전 화면으로 되돌린다.
 /* ═══ 📝 127 블로그 승인제: 대기/반려 화면 ═══
@@ -1683,7 +1684,15 @@ async function enterJoined(){
     // 게시 여부와 무관한 가상 진행 화면이다. 미리보기 전용 옵션 뷰로 교체한다.
     if(_camp && Array.isArray(j.options)) _camp.options = j.options;
     // 💬 321: Q&A 는 줄 기록(제출) 뒤 캡처까지 내야 끝난다 — 캡처가 아직이면 다시 올리기 카드로(홀드 보존)
-    if(j.application && j.application.status === 'submitted' && !(j.qnaSlot && j.qnaSlot.captureDone === false)){ renderDone(); return; }
+    //   자리 정보를 못 받았으면(조회 실패) 끝난 화면으로 넘기지 않고 다시 불러온다 — 캡처를 안 낸 사람이 "완료"를 보면 기한을 놓친다
+    if(isQnaCampaign() && j.application && j.application.status === 'submitted' && !j.qnaSlot){
+      _qnaSlotRetry++;   // 위에서 _detailRetry 를 0 으로 되돌리므로 따로 센다(무한 재시도 방지)
+      if(_qnaSlotRetry <= 6) setTimeout(enterJoined, _qnaSlotRetry <= 2 ? 3000 : 8000);
+      else toast('정보를 불러오지 못했어요. 잠시 후 새로고침해주세요 (참여는 유지돼요)');
+      return;
+    }
+    _qnaSlotRetry = 0;
+    if(_isDoneDetail(j)){ renderDone(); return; }
     _renderJoinedView(j, h);
   }catch(e){ toast('불러오기 오류: ' + e.message); renderPre(); }
 }
@@ -1940,12 +1949,18 @@ async function pollOnce(){
     const j = await r.json().catch(()=>({}));
     if(r.ok && j.ok){
       if(j.serverNow) CampCards.setServerNow(j.serverNow);
-      if(j.application && j.application.status === 'submitted' && !(j.qnaSlot && j.qnaSlot.captureDone === false)){ renderDone(); }
+      if(_isDoneDetail(j)){ renderDone(); }
     }else if(j.reason === 'expired'){ await releaseExpiredHold(h); }
   }catch(_){ /* 네트워크 오류는 다음 폴링에서 */ }
 }
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) pollOnce(); });
 
+/** 참여가 끝났나 — 구매 확정(submitted). 💬 321 Q&A 는 캡처까지 낸 것이 확인돼야 끝이다(모르면 끝 아님). */
+function _isDoneDetail(j){
+  if(!(j && j.application && j.application.status === 'submitted')) return false;
+  if(isQnaCampaign() || j.qnaSlot) return !!(j.qnaSlot && j.qnaSlot.captureDone === true);
+  return true;
+}
 function renderDone(pendingConfirm){
   clearInterval(_pollTimer); clearInterval(_holdTick);
   // chatUrl은 제출확정 후에만 서버가 반환 → 제출 직후 _detail(제출 전 응답)엔 비어있어 1회 재조회로 채운다

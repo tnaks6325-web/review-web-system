@@ -95,8 +95,8 @@ const st = require('../src/services/campaignState.service');
   const fake = { query: async (sql, p) => { calls.push(sql); return /SELECT s\.id/.test(sql) ? { rows: [{ id: 7, seq: 3, unit_seq: 1, visibility: 'public', question_text: 'Q' }] } : { rows: [] }; } };
   const picked = await qna.pickSlotInTx(fake, { sheetId: 's', tabName: 't', unitKey: 'u', now: noon });
   t('지난 홀드를 먼저 expired 로(유일 색인이 살아 있다고 보지 않게)', /SET status = 'expired'/.test(calls[0]));
-  t('오늘 · 열린 · 묶이지 않은 자리 · unit_seq 순 · FOR UPDATE',
-    /s\.slot_date = \$4::date AND s\.status = 'open'[\s\S]*NOT EXISTS[\s\S]*ORDER BY s\.unit_seq[\s\S]*FOR UPDATE OF s/.test(calls[1]) && picked.id === 7);
+  t('오늘 · 열린 · 묶이지 않은 자리 · 공개 먼저 · unit_seq 순 · FOR UPDATE',
+    /s\.slot_date = \$4::date AND s\.status = 'open'[\s\S]*NOT EXISTS[\s\S]*ORDER BY \(s\.visibility <> 'public'\), s\.unit_seq[\s\S]*FOR UPDATE OF s/.test(calls[1]) && picked.id === 7);
   t('공개 자리는 문구를, 비공개는 빈 문구를 내보낸다',
     qna.publicSlotView({ visibility: 'public', question_text: 'Q', slot_date: '2026-11-03' }).questionText === 'Q'
     && qna.publicSlotView({ visibility: 'private', question_text: 'X' }).questionText === '');
@@ -115,7 +115,7 @@ const st = require('../src/services/campaignState.service');
   t('리뷰어 세션 필수', /verifyReviewerSession\(req\.headers\['x-reviewer-token'\]\)/.test(q));
   t('기한(+30초 여유) 확인이 장부 쓰기보다 앞', q.indexOf("app.status !== 'applied' || !app.in_time") > 0
     && q.indexOf("app.status !== 'applied' || !app.in_time") < q.indexOf('createOrderLedgerEntry('));
-  t('홀드 확정 실패(late)면 장부 줄 취소 · 기한 지남으로 응답', /holdResult !== 'confirmed'[\s\S]{0,300}deleted_at = NOW\(\)[\s\S]{0,600}QNA_EXPIRED/.test(q));
+  t('홀드 확정 실패(late)면 장부 줄 취소 · 기한 지남으로 응답', /holdResult !== 'confirmed'[\s\S]{0,300}deleted_at = NOW\(\)[\s\S]{0,1200}QNA_EXPIRED/.test(q));
   t('작업표는 그 자리 줄 번호로만(sheetRow: target.rowIndex)', /sheetRow: target\.rowIndex/.test(q));
   t('다른 주문이 앉은 줄은 덮지 않는다', /qna_row_taken/.test(q));
   t('다시 눌러도 같은 줄(이미 확정 = 줄만 다시 맞춤)', /holdCtx\.doneKind === 'confirmed'[\s\S]{0,1200}alreadySubmitted: true/.test(q));
@@ -131,7 +131,7 @@ const st = require('../src/services/campaignState.service');
     /UPDATE qna_slots SET slot_date = \$2::date, round = round \+ 1/.test(qs) && /order_submission_id IS NULL`/.test(qs) && !/appendSlot/.test(qs));
   t('같은 하루 건수 · 다음 영업일부터', /MAX\(n\)::int AS per/.test(qs) && /startDate: tomorrow/.test(qs));
   t('끝내기 = 못 채운 자리 닫음 + 공고 마감', /SET status = 'lapsed'/.test(qs) && /UPDATE recruit_campaigns SET status = 'closed'/.test(qs));
-  t('작업표 기록과 같은 잠금 안에서 옮긴다', /sheetless_worktable:\$\{it\.sheetId\}:\$\{it\.tabName\}/.test(qs));
+  t('작업표 기록과 같은 잠금 안에서 옮긴다(공고 잠금보다 먼저 잡는다 — ⑨)', /sheetless_worktable:\$\{pre\[0\]\.linked_sheet_id\}:\$\{pre\[0\]\.linked_tab_name\}/.test(qs));
   t('같은 일정 끝 추가 모집은 한 번만', /action = \$2 AND detail->>'end' = \$3/.test(qs));
 
   /* ── ⑦ 리뷰어 화면 ─────────────────────────────────────────── */
@@ -139,7 +139,8 @@ const st = require('../src/services/campaignState.service');
   const ch = F('campaign.html');
   t('Q&A 공고는 구매양식 대신 Q&A 카드', /\$\('qnaBox'\)\.style\.display = _qna \? '' : 'none'/.test(ch) && /\$\('orderBox'\)\.style\.display = _qna \? 'none' : ''/.test(ch));
   t('캡처 전에는 완료 화면으로 넘어가지 않는다(진입·폴링 둘 다)',
-    (ch.match(/status === 'submitted' && !\(j\.qnaSlot && j\.qnaSlot\.captureDone === false\)/g) || []).length === 2);
+    (ch.match(/if\(_isDoneDetail\(j\)\)\{ renderDone\(\);/g) || []).length === 2
+    && !/status === 'submitted' && !\(j\.qnaSlot && j\.qnaSlot\.captureDone === false\)/.test(ch));
   t('제출 순서 = 줄 기록 → 캡처 업로드 → 제출 완료', ch.indexOf("'/api/submit/qna'") < ch.indexOf("action:'uploadReviewImage'")
     && ch.indexOf("action:'uploadReviewImage'") < ch.indexOf("action:'submitReview'"));
   t('링크에 대각선 화살표 없음', !/[↗⬈]/.test(ch.slice(ch.indexOf('function renderQnaCard'), ch.indexOf('function startHoldCountdown'))));
@@ -155,6 +156,56 @@ const st = require('../src/services/campaignState.service');
   const colSrc = S('src/services/columnResolver.js');
   t('색인 날짜 칸: 진행일자는 다른 날짜 칸이 없을 때만', /if \(startDateIdx < 0\) startDateIdx = headers\.findIndex\(h => h\.includes\('진행일자'\)\)/.test(colSrc));
   void cr;
+
+  /* ── ⑨ 검토 반영(2026-11-03) ─────────────────────────────────────────── */
+  console.log('⑨ 검토 반영');
+  const qs9 = S('src/services/qnaSlots.service.js');
+  const sub9 = S('src/routes/submit.routes.js');
+  const so9 = S('src/services/sheetlessOrder.service.js');
+  const camp9 = S('src/routes/campaign.routes.js');
+  const cron9 = S('src/jobs/cron.js');
+  const page9 = F('campaign.html');
+  t('자리 고르기: 공개 자리 먼저(추가 모집으로 순서가 섞여도)', /ORDER BY \(s\.visibility <> 'public'\), s\.unit_seq/.test(qs9));
+  t('자리 고르기 유예 = 신청 홀드 유예(단일 출처)', /graceSec == null\) graceSec = require\('\.\/campaignHold\.service'\)\.HOLD_GRACE_SEC/.test(qs9));
+  {
+    const body = qs9.slice(qs9.indexOf('async function applyQnaEnd'));
+    const iTab = body.indexOf('pg_advisory_xact_lock'), iCamp = body.indexOf('FOR UPDATE');
+    t('일정 끝 반영: 작업표 잠금 → 공고 잠금 순서(교착 방지)', iTab > 0 && iCamp > iTab);
+    t('일정 끝 반영: 작업표 잠금은 한 번만', body.split('pg_advisory_xact_lock').length === 2);
+    t('일정 끝 반영: 잠근 뒤 공고의 작업표 연결 재확인', /lock\[0\]\.linked_sheet_id !== pre\[0\]\.linked_sheet_id/.test(body));
+    t('추가 모집: 줄이 안 움직이면 전부 되돌림', /mv\.rowCount !== 1\) throw/.test(body));
+  }
+  t('못 채운 자리 = 빈 줄이 살아 있는 자리', /cp2\.deleted_at IS NULL AND cp2\.order_submission_id IS NULL/.test(qs9));
+  t('캡처 기한 넘김: 줄 삭제 길(주문 취소·같은 자리 보충)로 푼다', /hideWorkdeskRow\(\{[\s\S]{0,200}by: 'qna-capture-timeout', expectedRevision: r\.revision/.test(qs9));
+  t('캡처 기한 넘김: 판정 = 그 줄 캡처 제출 여부', /NOT EXISTS \(SELECT 1 FROM review_index ri[\s\S]{0,200}ri\.is_submitted = TRUE/.test(qs9));
+  t('캡처 기한 넘김: 작업표 줄(진실원본)의 캡처 제출도 본다', /cp\.is_submitted IS NOT TRUE/.test(qs9));
+  t('리뷰어 화면 캡처 여부도 작업표 줄 + 색인', /cp\.is_submitted FROM campaign_participants cp[\s\S]{0,700}ri\.is_submitted = TRUE\)\) AS done/.test(camp9));
+  t('캡처 기한 넘김: 유예 + 여유 2분 뒤', qna.QNA_CAPTURE_SWEEP_BUFFER_SEC === 120 && /\[grace \+ QNA_CAPTURE_SWEEP_BUFFER_SEC/.test(qs9));
+  t('캡처 기한 넘김: 끄는 스위치', /QNA_CAPTURE_SWEEP === '0'/.test(qs9));
+  t('캡처 기한 넘김: 매분 스윕에 걸림(따로 잠금)', /withJobLock\('qna_capture_sweep'/.test(cron9));
+  {
+    process.env.QNA_CAPTURE_SWEEP = '0';
+    const off = await qna.sweepQnaCaptureTimeouts();
+    delete process.env.QNA_CAPTURE_SWEEP;
+    t('스위치 끄면 아무것도 안 함', off.off === true && off.released === 0);
+    const calls = [];
+    const fakeDb = { query: async (sql, params) => { calls.push(params); return { rows: [] }; } };
+    const r = await qna.sweepQnaCaptureTimeouts({ db: fakeDb, limit: 5 });
+    t('대상 없으면 0건(결과에 skipped 없음 — 잠금 양보 표식과 겹치지 않게)', r.released === 0 && r.failed === 0 && !('skipped' in r));
+    t('대상 조회 인자 = [유예+120, 한도]', calls[0][0] === require('../src/services/campaignHold.service').HOLD_GRACE_SEC + 120 && calls[0][1] === 5);
+  }
+  t('구매양식 창구는 Q&A 자리 신청을 받지 않는다', /holdCtx\.verified && holdCtx\.qnaSlotId\) \{\s*return res\.status\(409\)\.json\(\{ ok: false, reason: 'qna_use_capture'/.test(sub9));
+  t('홀드 조회가 qna_slot_id 를 같은 왕복에 읽는다', /ca\.purchase_qty, ca\.qty_tier_amount, ca\.qna_slot_id,/.test(sub9));
+  t('Q&A 제출: 로그인 번호는 세션 먼저', /String\(session\.loginPhone8 \|\| b\.loginPhone8/.test(sub9));
+  t('Q&A 제출: 줄 잠금 안에서 남의 줄 덮기 막음', /requireEmptyOrSame: true/.test(sub9)
+    && /requireEmptyOrSame && cur\.length && cur\[0\]\.order_submission_id[\s\S]{0,120}!== String\(orderSubmissionId\)\)[\s\S]{0,200}reason: 'row_taken'/.test(so9));
+  t('Q&A 제출: 두 번 눌러 먼저 확정됐으면 그 결과를 돌려줌', /alreadySubmitted: true, orderSubmissionId: done\[0\]\.order_submission_id/.test(sub9));
+  t('신청 종류 판정: 공고의 작업표 칸 이름(linked_sheet_id)', /tabWorkKind\(\{ sheetId: campPre\.linked_sheet_id/.test(camp9) && !/campPre\.linked_tab_sheet_id/.test(camp9));
+  t('신청: 잠근 공고로 종류 재확인(갈리면 막음)', /isQnaKind\(_lockedKind\) !== qnaApply/.test(camp9));
+  t('신청: 자리 이중 묶기 충돌 = 자리 찼음 안내', /err\.constraint === 'uq_campaign_apps_qna_slot'[\s\S]{0,120}reason: 'qna_no_slot'/.test(camp9));
+  t('공개 목록: 선택지별 오늘 자리 수를 다시 만든 맵에도 싣는다', /_cntMap\.qnaToday = opts\[0\]\.qnaToday/.test(camp9));
+  t('리뷰어 화면: Q&A 는 캡처 확인 전 완료 아님(자리 정보 못 받으면 다시 불러옴)',
+    /function _isDoneDetail\(j\)[\s\S]{0,260}return !!\(j\.qnaSlot && j\.qnaSlot\.captureDone === true\)/.test(page9) && /_qnaSlotRetry\+\+/.test(page9));
 
   console.log(`\n✅ ${pass}개 통과`);
 })().catch(e => { console.error(e); process.exit(1); });

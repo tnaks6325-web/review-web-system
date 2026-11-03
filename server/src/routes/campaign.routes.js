@@ -769,8 +769,10 @@ async function _fetchOptionsForCampaigns(db, ids, now = new Date()) {
   const seqIds = await fetchSequentialCampaignIds(db, campIds);   // ★ 결정 212
   for (const row of optRows) {
     if (!out.has(row.campaign_id)) out.set(row.campaign_id, []);
-    out.get(row.campaign_id).push({ row, cnt: (cntBy.get(row.campaign_id) || new Map()).get(row.opt_key),
-      sequential: sequentialFor(seqIds, row.campaign_id) });   // ★ 결정 228: 일정표 | true | false
+    const _cm = cntBy.get(row.campaign_id) || new Map();
+    out.get(row.campaign_id).push({ row, cnt: _cm.get(row.opt_key),
+      sequential: sequentialFor(seqIds, row.campaign_id),   // ★ 결정 228: 일정표 | true | false
+      qnaToday: _cm.qnaToday instanceof Map ? _cm.qnaToday : null });   // ★ 321: 선택지별 오늘 자리 수(맵을 다시 만들 때 함께 옮긴다)
   }
   return out;
 }
@@ -1352,7 +1354,9 @@ router.get('/list', async (req, res, next) => {
       if (r.participation_mode && opts && opts.length) {
         // ★ 살아있는 옵션이 하나도 없으면(= 관리자가 옵션 구조를 정리한 공고) 옵션 자체를 노출하지 않는다 —
         //   apply 게이트와 같은 `liveOptions` 판정이라 "카드엔 옵션 N종인데 참여는 옵션을 안 받는" 불일치가 없다.
-        const optViews = computeOptionViews(opts.map(o => o.row), new Map(opts.map(o => [o.row.opt_key, o.cnt])), view,
+        const _cntMap = new Map(opts.map(o => [o.row.opt_key, o.cnt]));
+        if (opts[0].qnaToday) _cntMap.qnaToday = opts[0].qnaToday;   // ★ 321: 빠뜨리면 Q&A 선택지가 일반 하루 한도로 계산된다
+        const optViews = computeOptionViews(opts.map(o => o.row), _cntMap, view,
           { sequential: (opts.find(o => o.sequential) || {}).sequential || false });   // ★ 결정 228: 일정표를 그대로
         if (liveOptions(optViews).length) {
           view.options = optViews.map(_publicOptionView);
@@ -1878,10 +1882,14 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
         qnaSlot = qnaSlots.publicSlotView(slot, app.expires_at);
         // 제출(줄 기록)까지 끝난 신청 — 캡처까지 냈는지와 캡처를 올릴 줄 번호(다시 올리기용 · 본인 줄만)
         if (isSubmitted) {
+          // 캡처 제출 = 작업표 줄(진실원본) 또는 색인 — 색인은 재생성 때 지워질 수 있어 줄을 함께 본다(자리 풀기 스윕과 같은 기준)
           const { rows: ri } = await pool.query(
-            `SELECT is_submitted FROM review_index WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3 LIMIT 1`,
+            `SELECT (COALESCE((SELECT cp.is_submitted FROM campaign_participants cp
+                                WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.seq = $3 AND cp.deleted_at IS NULL LIMIT 1), FALSE)
+                     OR EXISTS (SELECT 1 FROM review_index ri
+                                 WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $3 AND ri.is_submitted = TRUE)) AS done`,
             [slot.sheet_id, slot.tab_name, Number(slot.seq)]);
-          qnaSlot.captureDone = !!(ri[0] && ri[0].is_submitted === true);
+          qnaSlot.captureDone = !!(ri[0] && ri[0].done === true);
           qnaSlot.rowIndex = Number(slot.seq);
         }
       }
@@ -2129,7 +2137,8 @@ async function _applyParticipation(req, res, next, campPre) {
     try {
       _kind = resolveWorkKind({
         campaignKind: campPre.work_kind,
-        tabKind: await tabWorkKind({ sheetId: campPre.linked_tab_sheet_id, tabName: campPre.linked_tab_name }),
+        // ★ recruit_campaigns 는 linked_sheet_id 다(work_orders 의 linked_tab_sheet_id 아님 — 종전엔 늘 undefined 라 탭 값을 못 봤다)
+        tabKind: await tabWorkKind({ sheetId: campPre.linked_sheet_id, tabName: campPre.linked_tab_name }),
       });
     } catch (_) { _kind = null; }
     if (isQnaKind(_kind)) {
@@ -2161,6 +2170,22 @@ async function _applyParticipation(req, res, next, campPre) {
     if (!cRows.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' }); }
     const camp = cRows[0];
     const now = new Date();
+    /* ★ 결정 321: Q&A 여부는 잠금 앞(60초 캐시)에서 정했다 — 잠근 공고 행으로 한 번 더 맞춰 본다.
+         갈리면(그 사이 공고·탭 종류가 바뀜) 어느 쪽으로도 진행하지 않는다(fail-closed) — Q&A 탭에 구매 홀드가,
+         구매 탭에 Q&A 자리 묶기가 들어가지 않게. 조회는 풀 연결(트랜잭션 밖 읽기)이라 실패가 tx 를 깨지 않는다. */
+    {
+      let _lockedKind = null;
+      try {
+        _lockedKind = resolveWorkKind({
+          campaignKind: camp.work_kind,
+          tabKind: await tabWorkKind({ sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name }),
+        });
+      } catch (_) { _lockedKind = null; }
+      if (_lockedKind && isQnaKind(_lockedKind) !== qnaApply) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ ok: false, reason: 'kind_changed', error: '공고 정보가 방금 바뀌었어요. 새로고침 후 다시 참여해주세요.' });
+      }
+    }
 
     // ★ 타계정 게이트 1(063): 명의 형식 + 같은번호 배제(phone8=시스템 신원키 보호)
     //   ★★ 2026-10-05 사용자 확정 — 공고 설정은 두 가지뿐이다: 「1인 1회」(multi_account_mode=false)
@@ -2820,6 +2845,10 @@ async function _applyParticipation(req, res, next, campPre) {
     });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    // ★ 결정 321: Q&A 자리 이중 묶기 백스톱(uq_campaign_apps_qna_slot) — "이미 참여 중"이 아니라 자리가 찬 것이다
+    if (err.code === '23505' && err.constraint === 'uq_campaign_apps_qna_slot') {
+      return res.status(409).json({ ok: false, reason: 'qna_no_slot', error: '방금 그 자리가 찼어요. 다시 참여해주세요.' });
+    }
     if (err.code === '23505') return res.status(409).json({ ok: false, reason: 'duplicate_hold', error: '이미 참여 중인 캠페인입니다.' }); // uq_campaign_apps_active_hold 백스톱
     return next(err);
   } finally {

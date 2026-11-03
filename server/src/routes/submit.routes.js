@@ -559,7 +559,7 @@ async function _authoritativeHold(ctx) {
     const { rows } = await pool.query(
       `SELECT ca.phone8, ca.option_key, ca.owner_phone8, ca.blog_url, ca.status,
               ca.order_submission_id, ca.late_order_id, ca.applied_at,
-              ca.purchase_qty, ca.qty_tier_amount,
+              ca.purchase_qty, ca.qty_tier_amount, ca.qna_slot_id,
               co.unit_kind AS unit_kind,
               co.product_name AS product_name,
               (so.id IS NOT NULL) AS sub_alive,
@@ -602,6 +602,8 @@ async function _authoritativeHold(ctx) {
     // ★ 101: 블로그 주소도 **서버가 홀드에서 읽는다**(클라 전달 금지 — 옵션 서버권위와 같은 규율).
     //   같은 왕복이라 순증 0. 이 값이 주문 원장 INSERT 와 시트 '블로그URL' 칸으로 그대로 간다.
     ctx.blogUrl = rows[0].blog_url || null;
+    // ★ 결정 321: Q&A 자리에 묶인 신청인가(같은 왕복 · 순증 0). 칸은 부팅 필수 스키마(211)라 늘 있다.
+    ctx.qnaSlotId = rows[0].qna_slot_id == null ? null : Number(rows[0].qna_slot_id);
     // ★ 멱등 판정 재료: 이 홀드로 이미 접수된 "살아있는" 주문이 있는가.
     //   status='submitted' 확정건뿐 아니라 late_order_id(지각 접수)도 포함해야 한다 —
     //   confirmHoldInTx 의 late UPDATE 는 `late_order_id IS NULL` 조건이라 2회차 재제출은
@@ -689,7 +691,8 @@ router.post('/qna', async (req, res, next) => {
     if (!session || !session.ownerReviewerId) {
       return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_REQUIRED', error: '리뷰어 로그인을 다시 확인해주세요.' });
     }
-    const loginPhone8 = String(b.loginPhone8 || session.loginPhone8 || '').replace(/\D/g, '').slice(-8);
+    // 로그인 번호는 세션 값이 먼저다(요청 본문은 구버전 화면 대비 폴백)
+    const loginPhone8 = String(session.loginPhone8 || b.loginPhone8 || '').replace(/\D/g, '').slice(-8);
     const holdCtx = await _authoritativeHold(_campaignHoldCtx(b, loginPhone8));
     if (!holdCtx || !holdCtx.verified) {
       return res.status(403).json({ ok: false, code: 'QNA_HOLD_INVALID', error: '참여 내역을 찾을 수 없어요. 새로고침 후 다시 시도해주세요.' });
@@ -730,6 +733,7 @@ router.post('/qna', async (req, res, next) => {
         sheetId: target.sheetId, tabName: target.tabName, tabGid: target.gid, workboardId: wt.workboardId || null,
         sheetRow: target.rowIndex, orderData, orderSubmissionId,
         loginPhone8, loginName: orderData.orderer,
+        requireEmptyOrSame: true,   // 바깥 확인 뒤 줄 잠금 안에서 한 번 더(남의 주문 줄을 덮지 않는다)
       });
     };
 
@@ -788,6 +792,12 @@ router.post('/qna', async (req, res, next) => {
       await pool.query(`UPDATE order_submissions SET deleted_at = NOW(), mirror_status = 'canceled', sheet_error = 'qna_hold_not_confirmed' WHERE id = $1`, [qnaLedger.orderSubmissionId]);
       await pool.query(`UPDATE campaign_applications SET late_order_id = NULL WHERE id = $1 AND late_order_id = $2`, [holdCtx.applicationId, qnaLedger.orderSubmissionId]);
       logger.warn(`[submit/qna] 홀드 확정 안 됨(${qnaLedger.holdResult}) — 장부 줄 취소 app=${holdCtx.applicationId} os=${qnaLedger.orderSubmissionId}`);
+      // 같은 신청을 두 번 눌러 먼저 온 요청이 이미 확정했으면 그 결과를 돌려준다("기한 지남"으로 겁주지 않는다)
+      const { rows: done } = await pool.query(
+        `SELECT ca.order_submission_id FROM campaign_applications ca
+           JOIN order_submissions os ON os.id = ca.order_submission_id AND os.deleted_at IS NULL
+          WHERE ca.id = $1 AND ca.status = 'submitted' LIMIT 1`, [holdCtx.applicationId]);
+      if (done.length) return res.json({ ok: true, alreadySubmitted: true, orderSubmissionId: done[0].order_submission_id, target });
       return res.status(409).json({ ok: false, code: 'QNA_EXPIRED', error: '제출 기한이 지났어요. 자리가 다시 풀렸어요.' });
     }
     if (wt.workboardId) {
@@ -847,6 +857,13 @@ router.post('/order', async (req, res, next) => {
     const _idPhone8 = String(loginPhone8 || '').replace(/[^0-9]/g, '').slice(-8);
     // ★ 참여형 홀드 문맥(단일 출처, 063) — 신원게이트 owner 폴백·옵션 서버권위·확정 문맥 공용(1회 계산)
     const holdCtx = await _authoritativeHold(_campaignHoldCtx(b, loginPhone8));
+    /* ★ 결정 321: Q&A 자리에 묶인 신청은 구매양식으로 받지 않는다 — 구매가 없고, 이 길로 들어오면
+         자리(qna_slots)를 모르는 일반 홀드 확정이 되어 그날 자리 줄이 아닌 새 줄이 생긴다.
+         제출 창구는 POST /api/submit/qna 하나다(구버전 화면이 구매양식을 띄운 경우 막다른 길 대신 새로고침 안내). */
+    if (holdCtx && holdCtx.verified && holdCtx.qnaSlotId) {
+      return res.status(409).json({ ok: false, reason: 'qna_use_capture',
+        error: 'Q&A 참여는 구매양식이 아니라 문의 캡처로 제출해요. 화면을 새로고침해주세요.' });
+    }
     const orderScope = await _resolveCampaignOrderScope({ sheetId, gid, tabName, holdCtx });
     if (!orderScope) {
       return res.status(400).json({ error: '유효한 참여 문맥이 없어 구매양식을 제출할 수 없습니다.' });

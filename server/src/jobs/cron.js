@@ -548,6 +548,16 @@ function startCronJobs() {
       }
     } catch (err) {
       logger.error(`[CRON-HoldSweep] ${err.message}`);
+    }
+    // ★ 결정 321(확정 7): Q&A 캡처 기한을 넘긴 신청의 자리를 푼다 — 위 스윕과 따로 잠근다(한쪽 실패가 다른 쪽을 막지 않게).
+    try {
+      const { withJobLock } = require('../utils/jobLock');
+      const q = await withJobLock('qna_capture_sweep', () => require('../services/qnaSlots.service').sweepQnaCaptureTimeouts());
+      if (q && !q.skipped && ((q.released || 0) > 0 || (q.failed || 0) > 0)) {
+        logger.info(`[CRON-QnaCaptureSweep] released=${q.released || 0} failed=${q.failed || 0}`);
+      }
+    } catch (err) {
+      logger.error(`[CRON-QnaCaptureSweep] ${err.message}`);
     } finally {
       holdSweepRunning = false;
     }

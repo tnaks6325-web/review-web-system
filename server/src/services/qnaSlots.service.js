@@ -328,8 +328,10 @@ async function loadTodayByCampaign(db, campaignIds, now = new Date()) {
  * ★ 마감이 지났는데 아직 스윕이 정리하지 않은 신청은 여기서 먼저 정리한다(부분 유일 색인이 그 신청을 살아 있다고 본다).
  * @returns {Promise<null|{id,seq,unit_key,unit_seq,slot_date,visibility,question_text}>}
  */
-async function pickSlotInTx(client, { sheetId, tabName, unitKey, now = new Date(), graceSec = 30 } = {}) {
+async function pickSlotInTx(client, { sheetId, tabName, unitKey, now = new Date(), graceSec } = {}) {
   if (!client || !sheetId || !tabName || !unitKey) return null;
+  // 유예 = 신청 홀드와 같은 값(확정·만료 경계가 갈리지 않게 — 단일 출처)
+  if (graceSec == null) graceSec = require('./campaignHold.service').HOLD_GRACE_SEC;
   const day = kstDateStr(now);
   await client.query(
     `UPDATE campaign_applications ca SET status = 'expired'
@@ -343,7 +345,7 @@ async function pickSlotInTx(client, { sheetId, tabName, unitKey, now = new Date(
       WHERE s.sheet_id = $1 AND s.tab_name = $2 AND s.unit_key = $3 AND s.slot_date = $4::date AND s.status = 'open'
         AND NOT EXISTS (SELECT 1 FROM campaign_applications ca
                          WHERE ca.qna_slot_id = s.id AND ca.status IN ('applied', 'submitted'))
-      ORDER BY s.unit_seq
+      ORDER BY (s.visibility <> 'public'), s.unit_seq   -- 공개 자리가 먼저 찬다(확정 1 — 추가 모집으로 순서가 섞여도)
       LIMIT 1
       FOR UPDATE OF s`, [sheetId, tabName, unitKey, day]);
   return rows[0] || null;
@@ -410,8 +412,14 @@ const QNA_END_ACTIONS = { extra: 'qna_extra', finish: 'qna_finish' };
 
 /** 못 채운 자리 = 그 날짜가 지났고(<= end) 열려 있고 제출된 신청이 없는 자리. */
 function _unfilledSql(alias) {
+  /* ★ 줄 기준으로도 본다 — 자리 줄에 주문이 앉아 있으면(신청 상태와 어긋난 경우 포함) 채운 자리다.
+       줄이 지워진 자리(seq 가 가리키는 살아 있는 줄 없음)는 옮길 줄이 없어 묻지도 옮기지도 않는다. */
   return `${alias}.status = 'open'
-      AND NOT EXISTS (SELECT 1 FROM campaign_applications ca2 WHERE ca2.qna_slot_id = ${alias}.id AND ca2.status = 'submitted')`;
+      AND NOT EXISTS (SELECT 1 FROM campaign_applications ca2 WHERE ca2.qna_slot_id = ${alias}.id AND ca2.status = 'submitted')
+      AND (${alias}.seq IS NULL OR EXISTS (
+            SELECT 1 FROM campaign_participants cp2
+             WHERE cp2.sheet_id = ${alias}.sheet_id AND cp2.tab_name = ${alias}.tab_name AND cp2.seq = ${alias}.seq
+               AND cp2.deleted_at IS NULL AND cp2.order_submission_id IS NULL))`;
 }
 
 /**
@@ -466,16 +474,23 @@ async function applyQnaEnd({ campaignId, action, end, actor = 'admin', now = new
   const client = await _pool().connect();
   try {
     await client.query('BEGIN');
-    const { rows: lock } = await client.query('SELECT id, status FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [campaignId]);
+    /* ★ 잠금 순서 = 작업표 → 공고(다른 경로와 같은 순서 — 반대로 잡으면 교착 40P01).
+         어느 작업표인지는 잠그지 않고 먼저 읽고, 공고를 잠근 뒤 그 연결이 그대로인지 다시 본다. */
+    const { rows: pre } = await client.query('SELECT linked_sheet_id, linked_tab_name FROM recruit_campaigns WHERE id = $1', [campaignId]);
+    if (!pre.length || !pre[0].linked_sheet_id || !pre[0].linked_tab_name) throw Object.assign(new Error('게시 중인 공고가 아닙니다.'), { code: 'not_active' });
+    // 작업표 줄 기록(Q&A 제출)과 같은 잠금 — 옮기는 사이 그 줄에 제출이 끼지 않는다
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`sheetless_worktable:${pre[0].linked_sheet_id}:${pre[0].linked_tab_name}`]);
+    const { rows: lock } = await client.query('SELECT id, status, linked_sheet_id, linked_tab_name FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [campaignId]);
     if (!lock.length || lock[0].status !== 'active') throw Object.assign(new Error('게시 중인 공고가 아닙니다.'), { code: 'not_active' });
+    if (lock[0].linked_sheet_id !== pre[0].linked_sheet_id || lock[0].linked_tab_name !== pre[0].linked_tab_name) {
+      throw Object.assign(new Error('그사이 상황이 바뀌었습니다 — 다시 확인해 주세요.'), { code: 'changed' });
+    }
     const it = (await listQnaEnds(client, { campaignIds: [campaignId], now }))[0];
     if (!it || (end && String(end) !== it.end)) throw Object.assign(new Error('그사이 상황이 바뀌었습니다 — 다시 확인해 주세요.'), { code: 'changed' });
     const { rows: dup } = await client.query(
       `SELECT 1 FROM campaign_plan_events WHERE campaign_id = $1 AND action = $2 AND detail->>'end' = $3 LIMIT 1`,
       [campaignId, QNA_END_ACTIONS.extra, it.end]);
     if (dup.length) throw Object.assign(new Error('다른 담당자가 방금 처리했습니다.'), { code: 'already' });
-    // 작업표 줄 기록(Q&A 제출)과 같은 잠금 — 옮기는 사이 그 줄에 제출이 끼지 않는다
-    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`sheetless_worktable:${it.sheetId}:${it.tabName}`]);
     const { rows: wos } = await client.query('SELECT * FROM work_orders WHERE id = $1', [it.workOrderId]);
     const wo = wos[0] || {};
     const shortages = qnaShortages(it, wo);
@@ -503,12 +518,14 @@ async function applyQnaEnd({ campaignId, action, end, actor = 'admin', now = new
           for (const s of chunk) {
             await client.query(`UPDATE qna_slots SET slot_date = $2::date, round = round + 1, updated_at = NOW() WHERE id = $1`, [s.id, days[d].date]);
             if (s.seq != null) {
-              await client.query(
+              const mv = await client.query(
                 `UPDATE campaign_participants
                     SET start_date = $4, row_json = jsonb_set(COALESCE(row_json, '{}'::jsonb), ARRAY[$5::text], to_jsonb($4::text), true),
                         updated_by = 'qna-extra', updated_at = NOW()
                   WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL AND order_submission_id IS NULL`,
                 [it.sheetId, it.tabName, s.seq, days[d].label, QNA_DATE_HEADER]);
+              // 못 채운 자리 = 빈 줄이 살아 있는 자리(위 판정) — 잠금 안에서 줄이 안 움직이면 상황이 바뀐 것이다(전부 되돌린다)
+              if (mv.rowCount !== 1) throw Object.assign(new Error('그사이 상황이 바뀌었습니다 — 다시 확인해 주세요.'), { code: 'changed' });
             }
             moved++;
           }
@@ -541,7 +558,64 @@ async function applyQnaEnd({ campaignId, action, end, actor = 'admin', now = new
   }
 }
 
+/* ══════════════════════════════════════════════════════════════════════════════
+   3단계 — 캡처 기한 넘긴 신청 정리 (사용자 확정 7 · 결정 321)
+   제출 버튼(줄 기록)은 캡처 전에 신청을 확정한다(그래야 캡처를 올릴 줄이 생긴다). 그래서 기한까지 캡처를 안 올리면
+   확정된 채 자리를 쥐고 있게 된다 → 기한(+유예 30초 +여유 2분)이 지나도 캡처가 없으면 「줄 삭제」와 같은 길로 푼다:
+   주문 취소 + 신청 취소 + 그 줄 삭제 + **같은 날·같은 자리의 빈 줄 보충**(자리표가 새 줄을 가리킴 — trackB.hideWorkdeskRow).
+   ★ 판정 = 그 줄의 캡처 제출 여부 — 작업표 줄(campaign_participants.is_submitted · 진실원본)과 색인(review_index) 중
+     **하나라도** 냈다고 하면 낸 것(안전한 쪽 — 낸 사람의 자리를 푸는 것이 가장 나쁘다). 리뷰어 화면 captureDone 과 같은 기준.
+   ★ 줄 리비전을 넘긴다 — 목록을 읽은 뒤 그 줄이 바뀌었으면(캡처 반영 등) 건너뛴다(다음 주기에 다시 본다).
+   ★ 끄는 스위치 `QNA_CAPTURE_SWEEP=0`(자리를 풀지 않을 뿐 — 다른 동작 불변).
+   ══════════════════════════════════════════════════════════════════════════════ */
+const QNA_CAPTURE_SWEEP_BUFFER_SEC = 120;
+
+async function listQnaCaptureTimeouts(db, { limit = 20 } = {}) {
+  const grace = require('./campaignHold.service').HOLD_GRACE_SEC;
+  const { rows } = await (db || _pool()).query(
+    `SELECT ca.id AS app_id, ca.order_submission_id::text AS order_submission_id,
+            cp.id AS row_id, cp.updated_at::text AS revision, s.sheet_id, s.tab_name, s.seq
+       FROM campaign_applications ca
+       JOIN qna_slots s ON s.id = ca.qna_slot_id
+       JOIN campaign_participants cp
+         ON cp.sheet_id = s.sheet_id AND cp.tab_name = s.tab_name AND cp.seq = s.seq
+        AND cp.deleted_at IS NULL AND cp.order_submission_id = ca.order_submission_id
+      WHERE ca.status = 'submitted' AND ca.qna_slot_id IS NOT NULL
+        AND ca.expires_at <= NOW() - make_interval(secs => $1)
+        AND cp.is_submitted IS NOT TRUE   -- 캡처 제출의 진실원본 = 작업표 줄(색인은 재생성 때 지워질 수 있다)
+        AND NOT EXISTS (SELECT 1 FROM review_index ri
+                         WHERE ri.sheet_id = s.sheet_id AND ri.tab_name = s.tab_name AND ri.row_index = s.seq
+                           AND ri.is_submitted = TRUE)
+      ORDER BY ca.id
+      LIMIT $2`, [grace + QNA_CAPTURE_SWEEP_BUFFER_SEC, Math.max(1, Number(limit) || 20)]);
+  return rows;
+}
+
+async function sweepQnaCaptureTimeouts({ db = null, limit = 20 } = {}) {
+  if (process.env.QNA_CAPTURE_SWEEP === '0') return { off: true, released: 0 };
+  const due = await listQnaCaptureTimeouts(db, { limit });
+  let released = 0, failed = 0;   // ★ 'skipped' 는 withJobLock 의 「잠금 양보」 표식과 겹쳐 쓰지 않는다
+  for (const r of due) {
+    try {
+      const out = await require('./trackB.service').hideWorkdeskRow({
+        sheetId: r.sheet_id, tabName: r.tab_name, rowId: r.row_id, by: 'qna-capture-timeout', expectedRevision: r.revision });
+      if (out && out.ok) {
+        released++;
+        logger.info(`[qnaSlots] 캡처 기한 넘김 — 자리 풀기 app=${r.app_id} os=${r.order_submission_id} tab=${r.tab_name} seq=${r.seq} → 새 줄 ${out.replacementSeq || '-'}`);
+      } else {
+        failed++;
+        logger.warn(`[qnaSlots] 캡처 기한 넘김 정리 건너뜀 app=${r.app_id} seq=${r.seq}: ${(out && out.error) || 'unknown'}`);
+      }
+    } catch (e) {
+      failed++;
+      logger.warn(`[qnaSlots] 캡처 기한 넘김 정리 실패 app=${r.app_id} seq=${r.seq}: ${e.message}`);
+    }
+  }
+  return { released, failed };
+}
+
 module.exports = { insertCalendar, isQnaTab, isQnaCampaign, isBoundRow, boundSeqs, boundRowSql, calendarForTab, verifyRowsMatchPlan, repairCalendarIfMissing,
   QNA_SUBMIT_MIN, QNA_APPLY_CUTOFF_MIN, kstDateStr, nextKstMidnight, qnaHoldExpiry, qnaApplyClosed, qnaApplyCutoffAt,
   qnaOptKeyMap, loadTodayByCampaign, pickSlotInTx, bindSlotForApply, publicSlotView, slotForApplication,
-  QNA_END_ACTIONS, listQnaEnds, qnaShortages, applyQnaEnd };
+  QNA_END_ACTIONS, listQnaEnds, qnaShortages, applyQnaEnd,
+  QNA_CAPTURE_SWEEP_BUFFER_SEC, listQnaCaptureTimeouts, sweepQnaCaptureTimeouts };
