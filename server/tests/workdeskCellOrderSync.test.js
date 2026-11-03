@@ -722,6 +722,7 @@ function makeCtx(apiImpl) {
     _recordCellUndo: () => {},
     _finishCellUndoGroup: () => {},
     reloadWorkdesk: () => {},
+    _cellPendingWrites: new Map(),   // 결정 327: 붙여넣기 대기열과의 같은 칸 쓰기 순서 표(여기선 비어 있음)
     _toasts: toasts,
   };
   vm.createContext(ctx);

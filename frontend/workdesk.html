@@ -10138,7 +10138,6 @@ function commitCellEdit(rowId, field, value, td, opt){
   const behind=!(opt&&opt.send)&&_cellPendingWrites.get(rowId+'|'+field);   // 같은 칸 붙여넣기 저장이 진행 중이면 그 뒤에(나중 편집이 이긴다)
   return ((opt&&opt.send)?opt.send(ebody):(behind?behind.then(()=>api('/api/trackb/workdesk/edit',{method:'POST',body:JSON.stringify(ebody)})):api('/api/trackb/workdesk/edit',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,field,value})})))
     .then(resp=>{
-      if(resp&&resp.superseded){ undoGroup.pending=Math.max(0,undoGroup.pending-1); if(!(opt&&opt.undoGroup)) _finishCellUndoGroup(undoGroup); return 'superseded'; }   // 보내기 전에 사람이 다시 고침 — 그 편집이 이 칸의 값이다
       if(resp&&resp.ok){
         _recordCellUndo({rowId,field,value,had,prev,td},undoGroup);
         if(td&&td.classList){ td.classList.remove('cellfailed'); td.classList.add('cellsaved'); setTimeout(()=>{ td.classList.remove('cellsaved'); },600); }
@@ -10148,6 +10147,7 @@ function commitCellEdit(rowId, field, value, td, opt){
         undoGroup.pending=Math.max(0,undoGroup.pending-1); if(!(opt&&opt.undoGroup)) _finishCellUndoGroup(undoGroup);
         return true;
       }
+      if(resp&&resp.superseded){ undoGroup.pending=Math.max(0,undoGroup.pending-1); if(!(opt&&opt.undoGroup)) _finishCellUndoGroup(undoGroup); return 'superseded'; }   // 보내기 전에 사람이 다시 고침 — 그 편집이 이 칸의 값이다(롤백·실패 아님)
       rollback();
       undoGroup.pending=Math.max(0,undoGroup.pending-1); if(!(opt&&opt.undoGroup)) _finishCellUndoGroup(undoGroup);
       if(resp&&resp.error==='concurrent_edit_conflict'){ if(opt&&opt.report) say('conflict','동시 편집 감지', td); else { toast('동시 편집 감지 — 최신 상태로 새로고침'); reloadWorkdesk(); } }
