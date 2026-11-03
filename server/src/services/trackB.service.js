@@ -4479,13 +4479,21 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
       if (statusToggle) {
         await client.query('ROLLBACK'); return { ok: false, error: 'status_column_locked', field };
       }
-      // ★ Q&A체험단(결정 321) — 자리 줄의 진행일자·공개여부·문의문구는 자리표가 정한다. 칸만 고치면 화면·보충 줄이 자리표와 갈린다.
+      // ★ Q&A체험단(결정 321) — 자리 줄의 진행일자·공개여부·문의문구·상품·옵션 칸은 자리표가 정한다(접수 뒤 상품 변경 금지).
+      //   칸만 고치면 화면·보충 줄(_inheritSlotPlanInTx 가 상품·옵션 칸을 잇는다)이 자리표와 갈린다.
+      //   상품·옵션 칸 판정 = 주문 기록이 쓰는 칸과 같은 단일 출처(orderLedger.productWriteColumns·optionWriteColumns).
       const _wp = require('../utils/worktablePlan');
-      if ([_wp.QNA_DATE_HEADER, ..._wp.QNA_PLAN_HEADERS].includes(field.slice(4).trim())) {
+      const _hdr = field.slice(4).trim();
+      const _heads = Object.keys(row.row_json && typeof row.row_json === 'object' ? row.row_json : {});
+      const _hi = _heads.findIndex(h => String(h).trim() === _hdr);
+      const { optionWriteColumns: _owc, productWriteColumns: _pwc } = require('./orderLedger.service');
+      const _slotCell = [_wp.QNA_DATE_HEADER, ..._wp.QNA_PLAN_HEADERS].includes(_hdr)
+        || (_hi >= 0 && (_pwc(_heads).includes(_hi) || _owc(_heads).includes(_hi)));
+      if (_slotCell) {
         const qs = require('./qnaSlots.service');
         if (await qs.isQnaTab(client, sheetId, tabName) && await qs.isBoundRow(client, sheetId, tabName, row.seq)) {
           await client.query('ROLLBACK');
-          return { ok: false, error: 'qna_slot_cell_locked', field, message: 'Q&A 자리 줄의 진행일자·공개여부·문의문구는 바꿀 수 없습니다 — 날짜별 자리표가 정한 값입니다.' };
+          return { ok: false, error: 'qna_slot_cell_locked', field, message: 'Q&A 자리 줄의 진행일자·공개여부·문의문구·상품·옵션은 바꿀 수 없습니다 — 날짜별 자리표가 정한 값입니다.' };
         }
       }
       if (!await _isTabColumn(client, sheetId, tabName, row.tab_gid, field.slice(4), row.row_json)) {

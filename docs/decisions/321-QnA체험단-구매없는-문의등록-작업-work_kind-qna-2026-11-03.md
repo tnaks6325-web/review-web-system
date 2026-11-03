@@ -73,7 +73,7 @@
   - 행 삭제 보충(`hideWorkdeskRow`) → **자리표에 묶인 줄만**(`isBoundRow` · 실패 = 묶인 것) 지운 줄과 **같은 날**·같은 진행일 칸 표기로 늘 보충하고 자리표 `seq` 를 새 줄로 옮김(같은 트랜잭션). 자리 없는 줄(손으로 더한 줄)은 보충하지 않는다.
   - 줄 정리·중복 정리·짝 빈 줄 정리의 실행부(`sheetlessLedger.retireRows`) → 묶인 줄이 섞이면 `qna_slot_rows` 로 거절(차수 단위 정리는 통째로). 주문 취소보다 먼저 막힌다.
   - 주문 행 삭제(`deleteWorkdeskOrderRow`) → 묶인 줄은 `qna_slot_row`(409) — 「줄 삭제」로 안내(보충이 있는 쪽).
-  - 구매일자 달력(`setWorkdeskPurchaseDate`) → 묶인 줄의 진행일자는 `qna_slot_date_locked`. 일반 칸 편집(`editWorkdeskRow`)도 묶인 줄의 진행일자·공개여부·문의문구는 `qna_slot_cell_locked`(보충 줄이 고친 칸을 이어받아 자리표와 갈리지 않게).
+  - 구매일자 달력(`setWorkdeskPurchaseDate`) → 묶인 줄의 진행일자는 `qna_slot_date_locked`. 일반 칸 편집(`editWorkdeskRow`)도 묶인 줄의 진행일자·공개여부·문의문구·**상품·옵션 칸**(판정 = `orderLedger.productWriteColumns`·`optionWriteColumns` 단일 출처)은 `qna_slot_cell_locked`(보충 줄이 고친 칸을 이어받아 자리표와 갈리지 않게).
   - 번호 없는 주문 옮기기(`assignUnslottedOrderToOpenSlot`) → `qna_slot_required`.
   - 옛 신청 줄 덧붙이기(`sheetlessApplicant.addApplicantRow`) → 던진다(시트로도 넘기지 않음).
   - 차수 추가·삭제(`POST/DELETE /trackb/campaigns/:id/rounds`) → `rounds_qna_locked`(409 · `isQnaCampaign` 실패 = 막음). `_cdpFail` 에 `recruit_quota_qna_locked: 409`.

@@ -160,7 +160,8 @@ const scope = require('../src/utils/sheetlessScope');
     && /logger\.warn\(`\[order\] Q&A 자리표 조회 실패 — 접수 뒤 수정을 잠금\(fail-closed\)/.test(orr));
   t('옛 갱신 경로가 작업표 연결 칸을 읽는다(잠금 판정 재료)', /recall_courier, recall_product, work_kind, product_distribution_mode, start_date, product_options_json, linked_tab_name/.test(orr));
 
-  t('★ 일반 칸 편집: 자리 줄의 진행일자·공개여부·문의문구는 막는다', /QNA_DATE_HEADER, \.\.\._wp\.QNA_PLAN_HEADERS\]\.includes\(field\.slice\(4\)\.trim\(\)\)\) \{[\s\S]{0,200}isBoundRow\(client, sheetId, tabName, row\.seq\)\) \{\s*await client\.query\('ROLLBACK'\);\s*return \{ ok: false, error: 'qna_slot_cell_locked'/.test(tb));
+  t('★ 일반 칸 편집: 자리 줄의 진행일자·공개여부·문의문구·상품·옵션 칸은 막는다(상품·옵션 칸 판정 = 주문 기록과 같은 단일 출처)',
+    /const _slotCell = \[_wp\.QNA_DATE_HEADER, \.\.\._wp\.QNA_PLAN_HEADERS\]\.includes\(_hdr\)\s*\|\| \(_hi >= 0 && \(_pwc\(_heads\)\.includes\(_hi\) \|\| _owc\(_heads\)\.includes\(_hi\)\)\);[\s\S]{0,200}isBoundRow\(client, sheetId, tabName, row\.seq\)\) \{\s*await client\.query\('ROLLBACK'\);\s*return \{ ok: false, error: 'qna_slot_cell_locked'/.test(tb));
 
   /* ── ⑧ Q&A 잠금 비교 — 실제로 돌린다(운영과 같은 값 모양) ─────────────── */
   console.log('\n⑧ Q&A 잠금 비교 — 같은 값은 표기가 달라도 통과, 다른 값만 막는다');
