@@ -418,6 +418,8 @@ async function loadSettings() {
 const _RC_KINDS = { review: 1, blog: 1, qna: 1 };
 let _rcKind = (function(){ try{ const v = sessionStorage.getItem("rc_kind_v1"); return _RC_KINDS[v] ? v : "review"; }catch(_){ return "review"; } })();
 function _rcKindOf(c){ return c && (c.work_kind === "blog" || c.work_kind === "qna") ? c.work_kind : "review"; }
+// 결정 321 변경(사용자 확정 2026-11-03): 리뷰체험단(처음 열리는) 탭 맨 앞에도 Q&A 공고를 띄운다 — Q&A 탭은 그대로.
+function _rcShown(c){ const k = _rcKindOf(c); return k === _rcKind || (_rcKind === "review" && k === "qna"); }
 function setRecruitKind(k){
   _rcKind = _RC_KINDS[k] ? k : "review";
   try{ sessionStorage.setItem("rc_kind_v1", _rcKind); }catch(_){}
@@ -444,8 +446,8 @@ async function loadCampaigns() {
     // ★ M2: 참여형(participation_mode) 공고는 공용 카드 모듈로 렌더(campaign.html 상세로 이동).
     //   레거시 공고는 기존 카드/신청 흐름 그대로.
     // 정렬 = 지금 참여 가능한 공고가 위(오늘 마감된 건은 아래로) — 공용 규칙(campaign-cards.js)
-    const _partsRaw = (json.data || []).filter(c => c.participation_mode && c.status !== "closed" && _rcKindOf(c) === _rcKind);
-    const parts = window.CampCards ? CampCards.sortByAvailability(_partsRaw) : _partsRaw;
+    const _partsRaw = (json.data || []).filter(c => c.participation_mode && c.status !== "closed" && _rcShown(c));
+    const parts = window.CampCards ? CampCards.qnaFirst(CampCards.sortByAvailability(_partsRaw)) : _partsRaw;
     const all  = (json.data || []).filter(c => !c.participation_mode && _rcKindOf(c) === _rcKind);
 
     document.getElementById("rcLoading").style.display = "none";
