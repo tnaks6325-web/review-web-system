@@ -251,6 +251,7 @@ _handlers.noticesRead = async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 const errorDebug = require('../services/errorDebug.service');
 const { adminUiWhereSql, wantsExclusion } = require('../utils/adminUiErrorFilter');
+const { recentCounts } = require('../services/errorLog.service');
 
 // status 동기화 헬퍼: status 와 backward-compat 한 resolved 불리언을 함께 갱신
 const VALID_STATUSES = ['new', 'investigating', 'resolved', 'ignored'];
@@ -346,6 +347,10 @@ _handlers.errorLogsList = async (req, res, next) => {
       excludedCount = exRows[0]?.n || 0;
     }
 
+    // ★ 행마다 최근 7일 횟수를 싣는다(결정 326) — occurrence_count 는 처음부터의 누적이라 단독으로 읽으면 오판한다.
+    const nowMs = Date.now();
+    for (const l of logs) Object.assign(l, recentCounts(l, nowMs));
+
     res.json({ ok: true, logs, total, page, limit, summary, excludeAdminUi, excludedCount });
   } catch (err) { next(err); }
 };
@@ -358,7 +363,7 @@ _handlers.errorLogDetail = async (req, res, next) => {
     if (!id) return res.json({ error: 'id 필요' });
     const { rows } = await pool.query(`SELECT * FROM error_logs WHERE id = $1`, [id]);
     if (!rows.length) return res.json({ error: '대상을 찾을 수 없습니다.' });
-    const log = rows[0];
+    const log = Object.assign(rows[0], recentCounts(rows[0]));
     const analysis = log.analysis && Object.keys(log.analysis).length ? log.analysis : null;
     // 이행요청 게이트(문서 10장) 재계산 — 항상 최신 규칙 반영
     let transfer_blockers = ['아직 오류검증 및 분석을 실행하지 않음'];

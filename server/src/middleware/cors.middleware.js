@@ -42,7 +42,12 @@ const corsOptions = {
     if (process.env.NODE_ENV !== 'production' && origin.includes('.sandbox.novita.ai')) {
       return callback(null, true);
     }
-    callback(new Error(`CORS 차단: ${origin}`));
+    // ★ 정상 차단 표식(결정 326) — 오류 처리기가 403 으로 답하고 이상로그를 '서버 오류(500)'로 남기지 않게 한다.
+    const err = new Error(`CORS 차단: ${origin}`);
+    err.status = 403;
+    err.code = 'CORS_BLOCKED';
+    err.corsOrigin = origin;
+    callback(err);
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   // Cache-Control·Last-Event-ID: 리뷰어 앱의 서비스워커가 실시간 알림(EventSource) 요청을 다시 보낼 때
@@ -53,4 +58,27 @@ const corsOptions = {
   maxAge: 86400,
 };
 
-module.exports = { corsOptions };
+/**
+ * 막힌 주소가 어떤 종류인지(결정 326) — 이상로그에 어떻게 남길지 정하는 단일 출처.
+ *   'local' = 개발자 PC(localhost·127.x·사설망 IP)·브라우저 확장 → 운영 API 에 붙을 일이 없는 소음. 기록 안 함.
+ *   'own'   = 우리 운영 화면 주소(review-web-system / inadd-system pages.dev) → 원래 허용돼야 한다.
+ *             막혔다면 허용 설정(ALLOWED_ORIGINS) 누락 = 운영 화면이 통째로 막힌 것 → 치명으로 남긴다.
+ *   'other' = 그 밖(테스트 서버·남의 사이트) → 정상 차단. 경고로만 남긴다.
+ * ★ 판단이 안 서는 값(파싱 실패 등)은 'other' — 기록은 남는 쪽으로 접는다.
+ */
+function corsBlockKind(origin) {
+  let u;
+  try { u = new URL(String(origin || '')); } catch (_) { return 'other'; }
+  if (/^(chrome|moz|safari-web|ms-browser)-extension:$/.test(u.protocol)) return 'local';
+  const h = u.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (h === 'localhost' || h.endsWith('.localhost') || h === '::1' || h === '0.0.0.0'
+    || /^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h)) return 'local';
+  if (u.protocol === 'https:' && /(^|\.)(review-web-system|inadd-system)\.pages\.dev$/.test(h)) return 'own';
+  return 'other';
+}
+
+function isCorsBlocked(err) {
+  return !!err && (err.code === 'CORS_BLOCKED' || (typeof err.message === 'string' && err.message.startsWith('CORS 차단')));
+}
+
+module.exports = { corsOptions, corsBlockKind, isCorsBlocked };
