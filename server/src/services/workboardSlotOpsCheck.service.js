@@ -73,39 +73,46 @@ function linesOf(f) {
  * 목록을 사실에 맞춘다 — 막힌 주문은 열고(이미 「확인함」으로 닫은 것은 다시 열지 않는다),
  * 열린 항목 중 주문이 들어갔거나·취소됐거나·더 이상 빈 줄 문제가 아닌 것은 닫는다.
  * 다시 넣는 중(같은 주문의 workboard_apply 가 pending/processing)이면 열어 둔다.
+ *
+ * ★★ 닫기는 **한 문장(= 한 시점의 스냅숏)** 에서 「막힘·다시 넣는 중·들어감·취소」를 함께 본다(Codex P2 2026-11-03).
+ *   종전에는 막힌 목록을 먼저 읽고 열린 항목을 나중에 읽어, 그 사이 재시도가 다시 빈 줄 없음으로 끝나면
+ *   「막힘」에도 「다시 넣는 중」에도 없어 항목을 닫았고 — 위 upsert 가 열린 항목만 고쳐서 — 영영 닫혀 있었다.
+ *   큐 행은 processing → failed 를 한 문장으로 바꾸므로 한 스냅숏에서는 둘 중 하나로 반드시 보인다.
+ * ★ 시스템이 닫았는데(확인함 아님) 여전히 막힌 주문은 upsert 가 다시 연다 — 「확인함」(answers.ack)으로 닫은 것은 그대로.
  */
 async function refresh(db) {
   const { rows } = await db.query(blockedSql, [[...NO_SLOT_QUEUE_ERRORS]]);
   const hash = f => require('./opsCheck.service').factsHash(f);
-  const blocked = new Set();
   for (const r of rows) {
     const f = factsOf(r);
-    blocked.add(refKeyOf(f.orderSubmissionId));
     await db.query(
       `INSERT INTO ops_checks (kind, ref_key, facts, facts_hash, lines)
        VALUES ($1, $2, $3::jsonb, $4, $5::jsonb)
        ON CONFLICT (ref_key) DO UPDATE SET facts = EXCLUDED.facts, facts_hash = EXCLUDED.facts_hash,
-              lines = EXCLUDED.lines, updated_at = NOW()
-        WHERE ops_checks.status = 'open' AND ops_checks.facts_hash <> EXCLUDED.facts_hash`,
+              lines = EXCLUDED.lines, status = 'open', done_at = NULL, done_by = '', updated_at = NOW()
+        WHERE (ops_checks.status = 'open' AND ops_checks.facts_hash <> EXCLUDED.facts_hash)
+           OR (ops_checks.status <> 'open' AND NOT (COALESCE(ops_checks.answers, '{}'::jsonb) ? 'ack'))`,
       [KIND, refKeyOf(f.orderSubmissionId), JSON.stringify(f), hash(f), JSON.stringify(linesOf(f))]);
   }
-  const { rows: open } = await db.query(
-    `SELECT c.id, c.ref_key, c.facts->>'orderSubmissionId' AS os_id,
-            os.id IS NULL OR os.deleted_at IS NOT NULL OR os.mirror_status = 'canceled' AS gone,
-            COALESCE(os.mirror_status, '') = 'written' AS written,
-            EXISTS (SELECT 1 FROM sync_queue sq WHERE sq.type = 'workboard_apply'
-                     AND sq.status IN ('pending', 'processing')
-                     AND (sq.payload->>'orderSubmissionId') = c.facts->>'orderSubmissionId') AS retrying
-       FROM ops_checks c
-       LEFT JOIN order_submissions os ON os.id::text = c.facts->>'orderSubmissionId'
-      WHERE c.kind = $1 AND c.status = 'open'`, [KIND]);
-  for (const c of open) {
-    if (blocked.has(c.ref_key) && !c.written && !c.gone) continue;
-    if (c.retrying && !c.written && !c.gone) continue;
-    const why = c.written ? '작업표에 들어감' : c.gone ? '주문 취소됨' : '빈 줄 문제 아님(다른 사유는 자동 재시도)';
-    await db.query(`UPDATE ops_checks SET status = 'done', done_at = NOW(), done_by = $2, updated_at = NOW()
-                     WHERE id = $1 AND status = 'open'`, [c.id, why]);
-  }
+  await db.query(
+    `UPDATE ops_checks c
+        SET status = 'done', done_at = NOW(), updated_at = NOW(),
+            done_by = CASE WHEN s.written THEN '작업표에 들어감' WHEN s.gone THEN '주문 취소됨'
+                           ELSE '빈 줄 문제 아님(다른 사유는 자동 재시도)' END
+       FROM (SELECT c2.id,
+                    os.id IS NULL OR os.deleted_at IS NOT NULL OR os.mirror_status = 'canceled' AS gone,
+                    COALESCE(os.mirror_status, '') = 'written' AS written,
+                    EXISTS (SELECT 1 FROM sync_queue sq WHERE sq.type = 'workboard_apply'
+                             AND sq.status = 'failed' AND COALESCE(sq.error_msg, '') = ANY($2::text[])
+                             AND (sq.payload->>'orderSubmissionId') = c2.facts->>'orderSubmissionId') AS blocked,
+                    EXISTS (SELECT 1 FROM sync_queue sq WHERE sq.type = 'workboard_apply'
+                             AND sq.status IN ('pending', 'processing')
+                             AND (sq.payload->>'orderSubmissionId') = c2.facts->>'orderSubmissionId') AS retrying
+               FROM ops_checks c2
+               LEFT JOIN order_submissions os ON os.id::text = c2.facts->>'orderSubmissionId'
+              WHERE c2.kind = $1 AND c2.status = 'open') s
+      WHERE c.id = s.id AND c.status = 'open'
+        AND (s.written OR s.gone OR NOT (s.blocked OR s.retrying))`, [KIND, [...NO_SLOT_QUEUE_ERRORS]]);
 }
 
 async function _view(db, row, allowed) {
@@ -117,14 +124,17 @@ async function _view(db, row, allowed) {
   return { ...item, queueState: rows.length ? 'retrying' : 'blocked', canAnswer: !!allowed && item.status === 'open' };
 }
 
-/** 홈 전용 목록 — 열린 것만, 오래된 것부터(50개). */
-async function list({ db, allowed = false }) {
+/** 홈 전용 목록 — 열린 것만, 오래된 것부터 50개씩. after = 앞 쪽의 마지막 id(담당자 질문과 같은 커서 · Codex P2 — 50건 넘으면 「더 보기」). */
+async function list({ db, allowed = false, after = 0 }) {
+  if (!Number.isSafeInteger(after) || after < 0) {
+    throw new (require('./opsCheck.service').OpsCheckError)('bad_cursor', '목록을 새로고침해 주세요.');
+  }
   const { rows } = await db.query(
-    `SELECT * FROM ops_checks WHERE kind = $1 AND status = 'open' ORDER BY id LIMIT ${LIST_LIMIT + 1}`, [KIND]);
+    `SELECT * FROM ops_checks WHERE kind = $1 AND status = 'open' AND id > $2 ORDER BY id LIMIT ${LIST_LIMIT + 1}`, [KIND, after]);
   const page = rows.slice(0, LIST_LIMIT);
   const items = [];
   for (const r of page) items.push(await _view(db, r, allowed));
-  return { items, hasMore: rows.length > LIST_LIMIT };
+  return { items, hasMore: rows.length > LIST_LIMIT, nextAfter: page.length ? Number(page[page.length - 1].id) : after };
 }
 
 /**

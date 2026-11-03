@@ -11,6 +11,8 @@
  * 문장이 두 개인 이유: 이 결정 전 코드가 남긴 문장(`작업보드 반영 실패: no_open_slot`)도 같은 뜻이다
  *   (운영 2026-11-03 실측 1건 — 비타민C 10/26). 새 문장은 사람이 큐 표만 보고도 「보류」임을 알게 한다.
  */
+const { openSlotRowSql } = require('./worktableOpenSlot');
+
 const NO_SLOT_QUEUE_ERROR = '작업보드 반영 보류: no_open_slot — 작업표에 빈 줄이 없음(매시 재시도 제외 · 줄이 생기면 다시 넣음 · 결정 324)';
 const LEGACY_NO_SLOT_QUEUE_ERROR = '작업보드 반영 실패: no_open_slot';
 const NO_SLOT_QUEUE_ERRORS = Object.freeze([NO_SLOT_QUEUE_ERROR, LEGACY_NO_SLOT_QUEUE_ERROR]);
@@ -18,18 +20,19 @@ const NO_SLOT_QUEUE_ERRORS = Object.freeze([NO_SLOT_QUEUE_ERROR, LEGACY_NO_SLOT_
 /**
  * 「그 작업표에 빈 줄이 하나라도 있나」 — 되살릴지 정하는 **사전 확인**일 뿐이다.
  * 실제로 어느 줄에 넣을지(옵션·상품·날짜 순)는 언제나 `sheetlessOrder.writeOrderToWorktable`(_pickOpenSlot)이 정한다.
- * 조건은 그 함수의 빈 줄 기본 조건(살아 있음 · 주문 없음 · 이름·수취인·연락처 빈 칸)과 같다.
+ * ★ 한 줄 판정은 writer 와 **같은 함수**(`utils/worktableOpenSlot.openSlotRowSql`)다 — 사본 금지(Codex P2 2026-11-03).
+ *   대상 작업보드 = 큐 실행부와 같은 「그 작업의 활성 작업보드」(tab_configs.workboard_id · workboards.state='active').
+ *   다른 작업보드에 붙은 빈 줄은 세지 않는다(writer 가 workboard_id 로 거른다) · 작업보드가 빈 줄은 센다(writer 가 고르기 전에 붙인다).
+ *   활성 작업보드가 없으면 거짓(fail-closed — 큐 실행부가 그 작업을 반영하지 않는다).
  * sheetExpr·tabExpr = 시트ID·작업명 SQL 표현식(예: `q.payload->>'sheetId'` 또는 `$1`).
  */
 function openSlotExistsSql(sheetExpr, tabExpr) {
   return `EXISTS (
-    SELECT 1 FROM campaign_participants cp
-     WHERE cp.sheet_id = ${sheetExpr} AND cp.tab_name = ${tabExpr}
-       AND cp.deleted_at IS NULL AND cp.active = TRUE
-       AND cp.order_submission_id IS NULL
-       AND NULLIF(btrim(COALESCE(cp.reviewer_name, '')), '') IS NULL
-       AND NULLIF(btrim(COALESCE(cp.recipient_name, '')), '') IS NULL
-       AND NULLIF(btrim(COALESCE(cp.phone8, '')), '') IS NULL)`;
+    SELECT 1 FROM tab_configs slot_tc
+      JOIN workboards slot_w ON slot_w.id = slot_tc.workboard_id AND slot_w.state = 'active'
+      JOIN campaign_participants cp
+        ON ${openSlotRowSql('cp', { sheet: 'slot_tc.sheet_id', tab: 'slot_tc.tab_name', workboard: 'slot_tc.workboard_id', unboundJoinsTarget: true })}
+     WHERE slot_tc.sheet_id = ${sheetExpr} AND slot_tc.tab_name = ${tabExpr})`;
 }
 
 module.exports = { NO_SLOT_QUEUE_ERROR, LEGACY_NO_SLOT_QUEUE_ERROR, NO_SLOT_QUEUE_ERRORS, openSlotExistsSql };

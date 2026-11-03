@@ -175,6 +175,21 @@ const stub = (rel, exportsObj) => {
     assert.equal((await row(qA)).status, 'failed');
     assert.equal((await itemOf(osA)).status, 'open');
   });
+  await t('C3b 다른 작업보드의 빈 줄은 빈 줄로 세지 않는다 — [다시 넣기] 거부 · 매시 복구도 되살리지 않음(Codex P2 · 실제 줄 고르기와 같은 판정)', async () => {
+    const WB2 = '00000000-0000-4000-8000-0000000000bb';
+    await db.query(`INSERT INTO workboards VALUES ($1,'active')`, [WB2]);
+    await db.query(`INSERT INTO campaign_participants(sheet_id,tab_name,seq,workboard_id) VALUES ($1,$2,90,$3)`, [FULL.sheetId, FULL.tabName, WB2]);
+    const it = await itemOf(osA);
+    await assert.rejects(slot.answer({ db: pool, id: it.id, choice: 'retry', admin, by: '가짜' }), e => e.code === 'no_room');
+    const r = await sq.retryAllFailed();
+    assert.equal(r.revivedNoSlot, 0, '다른 작업보드 빈 줄로는 되살리지 않는다');
+    assert.equal((await row(qA)).status, 'failed');
+    // 판정 단일 출처 — 실제 줄 고르기(writer)도 같은 조건 함수를 쓴다(사본 금지)
+    const writerSrc = fs.readFileSync(path.join(SRC, 'services/sheetlessOrder.service.js'), 'utf8');
+    assert.ok((writerSrc.match(/openSlotRowSql\(/g) || []).length >= 3, 'writer 빈 줄 후보 3곳이 공용 판정을 쓴다');
+    assert.doesNotMatch(writerSrc, /NULLIF\(btrim\(COALESCE\(cp\.phone8, ''\)\), ''\) IS NULL/, 'writer 에 빈 줄 조건 사본이 남지 않는다');
+    await db.query(`DELETE FROM campaign_participants WHERE seq=90 AND sheet_id=$1`, [FULL.sheetId]);
+  });
   await t('C4 줄을 늘리면 매시 복구가 그 작업표의 막힌 행만 되살린다(주문 queued) · 다른 작업표는 그대로', async () => {
     await db.query(`INSERT INTO campaign_participants(sheet_id,tab_name,seq) VALUES ($1,$2,3)`, [OTHER.sheetId, OTHER.tabName]);
     const r = await sq.retryAllFailed();
@@ -248,6 +263,57 @@ const stub = (rel, exportsObj) => {
     await assert.rejects(slot.answer({ db: pool, id: it.id, choice: 'ack', admin: { role: 'admin', name: '명단밖' }, by: 'x' }), e => e.code === 'forbidden');
     await assert.rejects(slot.answer({ db: pool, id: it.id, choice: 'delete', admin, by: 'x' }), e => e.code === 'bad_choice');
     assert.equal((await itemOf(osD)).status, 'open');
+  });
+
+  await t('C10 갱신 도중 재시도가 다시 빈 줄 없음으로 끝나도 항목을 닫지 않는다(한 시점에서 판정 · Codex P2)', async () => {
+    const osR = await newOrder(FULL, { orderer: '경합' });
+    const qR = await enqueueFor(FULL, osR, 'failed', NO_SLOT_QUEUE_ERROR, 3);
+    await slot.refresh(pool);
+    assert.equal((await itemOf(osR)).status, 'open');
+    await db.query(`UPDATE sync_queue SET status='processing', error_msg=NULL WHERE id=$1`, [qR]);   // 다시 넣는 중
+    // 첫 조회(막힌 주문 목록)가 끝난 직후, 그 재시도가 다시 빈 줄 없음으로 최종 실패한다
+    let fired = false;
+    const racing = { query: async (sql, p) => {
+      const r = await pool.query(sql, p);
+      if (!fired) { fired = true; await db.query(`UPDATE sync_queue SET status='failed', error_msg=$2 WHERE id=$1`, [qR, NO_SLOT_QUEUE_ERROR]); }
+      return r;
+    } };
+    await slot.refresh(racing);
+    assert.ok(fired);
+    const c = (await db.query(`SELECT status, done_by FROM ops_checks WHERE ref_key=$1`, [slot.refKeyOf(osR)])).rows[0];
+    assert.equal(c.status, 'open', '여전히 막힌 주문의 항목을 닫으면 안 된다 — 닫힌 이유: ' + c.done_by);
+  });
+  await t('C11 시스템이 닫았는데 여전히 막혀 있으면 다음 갱신에서 다시 연다 · [확인함]으로 닫은 것은 그대로(C7)', async () => {
+    const osS = await newOrder(FULL, { orderer: '다시열림' });
+    await enqueueFor(FULL, osS, 'failed', NO_SLOT_QUEUE_ERROR, 3);
+    await slot.refresh(pool);
+    await db.query(`UPDATE ops_checks SET status='done', done_at=now(), done_by='빈 줄 문제 아님(다른 사유는 자동 재시도)' WHERE ref_key=$1`, [slot.refKeyOf(osS)]);
+    await slot.refresh(pool);
+    const c = (await db.query(`SELECT status, done_by, done_at FROM ops_checks WHERE ref_key=$1`, [slot.refKeyOf(osS)])).rows[0];
+    assert.equal(c.status, 'open');
+    assert.equal(c.done_by, '');
+    assert.equal(c.done_at, null);
+    const acked = (await db.query(`SELECT COUNT(*)::int AS n, COUNT(*) FILTER (WHERE status <> 'done')::int AS reopened
+                                     FROM ops_checks WHERE kind='workboard_no_slot' AND answers ? 'ack'`)).rows[0];
+    assert.ok(acked.n >= 1);
+    assert.equal(acked.reopened, 0, '[확인함]으로 닫은 것은 다시 열지 않는다');
+  });
+  await t('C12 목록이 50건을 넘으면 다음 쪽을 이어 받는다(after · hasMore · nextAfter — 담당자 질문과 같은 방식)', async () => {
+    const made = [];
+    for (let k = 0; k < 52; k++) { const os = await newOrder(FULL); made.push(os); await enqueueFor(FULL, os, 'failed', NO_SLOT_QUEUE_ERROR, 3); }
+    await slot.refresh(pool);
+    const p1 = await slot.list({ db: pool, allowed: true });
+    assert.equal(p1.items.length, 50);
+    assert.equal(p1.hasMore, true);
+    assert.ok(Number.isSafeInteger(p1.nextAfter) && p1.nextAfter > 0);
+    const p2 = await slot.list({ db: pool, allowed: true, after: p1.nextAfter });
+    assert.equal(p2.hasMore, false);
+    const all = new Set([...p1.items, ...p2.items].map(i => i.facts.orderSubmissionId));
+    for (const os of made) assert.ok(all.has(os), '두 쪽을 합치면 빠짐없이 보인다');
+    assert.ok(p2.items.every(i => i.id > p1.nextAfter));
+    await assert.rejects(slot.list({ db: pool, after: -1 }), e => e.code === 'bad_cursor');
+    // 다음 단계(라우트 D) 를 위해 정리 — 확인함으로 닫는다
+    await db.query(`UPDATE ops_checks SET status='done', answers='{"ack":{}}'::jsonb WHERE facts->>'orderSubmissionId' = ANY($1::text[])`, [made]);
   });
 
   // ═══ D. 실제 Express 라우트 ═══

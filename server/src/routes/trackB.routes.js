@@ -4243,9 +4243,11 @@ async function _refreshOpsChecks(by) {
 const slotCheckSvc = require('../services/workboardSlotOpsCheck.service');
 router.get('/ops-checks/slots', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
+    const after = Number(req.query.after || 0);   // 담당자 질문과 같은 커서(50개씩 · 「더 보기」)
+    if (!Number.isSafeInteger(after) || after < 0) return res.status(400).json({ ok: false, error: '목록을 새로고침해 주세요.' });
     await slotCheckSvc.refresh(pool);
     const allowed = await require('../utils/workdeskEditors').canEdit(req.admin);
-    res.json({ ok: true, ...await slotCheckSvc.list({ db: pool, allowed }) });
+    res.json({ ok: true, ...await slotCheckSvc.list({ db: pool, allowed, after }) });
   } catch (err) { next(err); }
 });
 router.post('/ops-checks/:id/slot-answer', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {

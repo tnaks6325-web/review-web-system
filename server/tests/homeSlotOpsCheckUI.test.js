@@ -67,7 +67,23 @@ vm.createContext(ctx); vm.runInContext(src, ctx);
   const urls = []; ctx.STATE.tckItems = []; ctx.document = { getElementById: id => (id === 'tckHomeMount' ? { innerHTML: '' } : null) };
   ctx.api = async u => { urls.push(u); return u.includes('/slots') ? { ok: true, items: [item] } : u.includes('/managers') ? { ok: true, items: [], hasMore: false, nextAfter: 0 } : { ok: true, items: [] }; };
   await ctx._tckLoad();
-  assert.ok(urls.includes('/api/trackb/ops-checks/slots'), urls.join(','));
+  assert.ok(urls.includes('/api/trackb/ops-checks/slots?after=0'), urls.join(','));
   assert.equal(ctx.STATE.tckSlotItems.length, 1);
+  // 50건 넘음 — 서버 hasMore 를 버리지 않는다: 「더 보기」로 다음 쪽(after=nextAfter)을 이어 붙인다(Codex P2 · 담당자 질문과 같은 방식)
+  const item2 = { ...item, id: 702, facts: { ...item.facts, orderSubmissionId: 'os-2' } };
+  ctx.api = async u => { urls.push(u);
+    if (u.includes('/slots')) return u.endsWith('after=0') ? { ok: true, items: [item], hasMore: true, nextAfter: 701 } : { ok: true, items: [item2, item], hasMore: false, nextAfter: 702 };
+    return u.includes('/managers') ? { ok: true, items: [], hasMore: false, nextAfter: 0 } : { ok: true, items: [] }; };
+  await ctx._tckLoad();
+  home = ctx._tckHtml('home');
+  assert.match(home, /onclick="_tckLoadSlots\(true\)"[^>]*>작업표 꽉 참 더 보기</, '더 보기 버튼');
+  await ctx._tckLoadSlots(true);
+  assert.equal(urls[urls.length - 1], '/api/trackb/ops-checks/slots?after=701');
+  assert.deepEqual(ctx.STATE.tckSlotItems.map(x => x.id), [701, 702], '이어 붙이고 중복은 하나로');
+  assert.doesNotMatch(ctx._tckHtml('home'), /작업표 꽉 참 더 보기/, '끝까지 받으면 더 보기 없음');
+  // 더 보기 실패 — 이미 받은 항목은 지우지 않는다
+  ctx.STATE.tckSlotMore = true; ctx.STATE.tckSlotAfter = 702; ctx.api = async () => { throw Error('net'); };
+  await ctx._tckLoadSlots(true);
+  assert.equal(ctx.STATE.tckSlotItems.length, 2); assert.equal(ctx.STATE.tckSlotError, true);
   console.log('home slot ops-check UI: server lines, escape, home-only, compact, permission, new-tab go, retry/ack, failure PASS');
 })().catch(e => { console.error(e); process.exit(1); });

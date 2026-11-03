@@ -31,6 +31,8 @@
 
 const { logger } = require('../utils/logger');
 const { tableOrderNumSql } = require('../utils/tableOrderNum');
+// ★ 빈 줄 판정 단일 출처 — 결정 324 사전 확인(workboardNoSlot)도 같은 함수를 쓴다(사본 금지).
+const { openSlotRowSql } = require('../utils/worktableOpenSlot');
 const pool = require('../db/pool');
 
 let _pool = null;
@@ -280,12 +282,7 @@ async function _stagedSlotCandidates(client, { sheetId, tabName, workboardId, ke
   try {
     const { rows } = await client.query(
       `SELECT cp.id, cp.seq, cp.option_text, cp.row_json FROM campaign_participants cp
-        WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.deleted_at IS NULL AND cp.active = TRUE
-          AND ($3::uuid IS NULL OR cp.workboard_id = $3)
-          AND cp.order_submission_id IS NULL
-          AND NULLIF(btrim(COALESCE(cp.reviewer_name, '')), '') IS NULL
-          AND NULLIF(btrim(COALESCE(cp.recipient_name, '')), '') IS NULL
-          AND NULLIF(btrim(COALESCE(cp.phone8, '')), '') IS NULL
+        WHERE ${openSlotRowSql('cp', { sheet: '$1', tab: '$2', workboard: '$3' })}
           AND cp.option_text LIKE '% · %'
         ORDER BY cp.seq LIMIT ${PICK_CANDIDATE_CAP}`, [sheetId, tabName, workboardId]);
     let productName = '';
@@ -494,12 +491,7 @@ async function _pickOpenSlot(client, { sheetId, tabName, workboardId, scheduledO
   if (!closedBy.size) return { rows: [], relabelFrom: '' };
   const { rows: others } = await client.query(
     `SELECT cp.id, cp.seq, cp.option_text, cp.row_json FROM campaign_participants cp
-      WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.deleted_at IS NULL AND cp.active = TRUE
-        AND ($3::uuid IS NULL OR cp.workboard_id = $3)
-        AND cp.order_submission_id IS NULL
-        AND NULLIF(btrim(COALESCE(cp.reviewer_name, '')), '') IS NULL
-        AND NULLIF(btrim(COALESCE(cp.recipient_name, '')), '') IS NULL
-        AND NULLIF(btrim(COALESCE(cp.phone8, '')), '') IS NULL
+      WHERE ${openSlotRowSql('cp', { sheet: '$1', tab: '$2', workboard: '$3' })}
         AND btrim(COALESCE(cp.option_text, '')) = ANY($4::text[])
       ORDER BY cp.seq LIMIT ${PICK_CANDIDATE_CAP}`, [sheetId, tabName, workboardId, [...closedBy.keys()]]);
   if (!others.length) return { rows: [], relabelFrom: '' };
@@ -741,12 +733,7 @@ async function writeOrderToWorktable({
           sheetId, tabName, workboardId, scheduledOptionKey, orderSubmissionId, headers,
           productPick: scheduledOptionKey ? '' : String(orderData.selectedProduct || '').trim(),
           where: `
-            WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.deleted_at IS NULL AND cp.active = TRUE
-              AND ($3::uuid IS NULL OR cp.workboard_id = $3)
-              AND cp.order_submission_id IS NULL
-              AND NULLIF(btrim(COALESCE(cp.reviewer_name, '')), '') IS NULL
-              AND NULLIF(btrim(COALESCE(cp.recipient_name, '')), '') IS NULL
-              AND NULLIF(btrim(COALESCE(cp.phone8, '')), '') IS NULL
+            WHERE ${openSlotRowSql('cp', { sheet: '$1', tab: '$2', workboard: '$3' })}
               AND (
                 ($4 <> '' AND (NULLIF(btrim(COALESCE(cp.option_text, '')), '') IS NULL OR cp.option_text = $4))
                 OR
