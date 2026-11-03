@@ -1831,6 +1831,15 @@ async function applySharedPatch(p) {
     const rnErr = renameShapeError(base, p.mine);
     if (rnErr) return await _abort(client, 409, { ok: false, code: 'structure_rename_conflict', sync_version: curVersion, error: rnErr });
     const plan = planSharedPatch({ base, mine: p.mine, theirs, origin: p.origin, forceMine: p.forceMine || [] });
+    /* ★★ Q&A체험단(결정 321) — 날짜별 자리표를 정한 칸(주말 제외·시작일·제외일)과 상품·옵션 이름은 접수 뒤 바꾸지 않는다.
+       주말 제외만 바꿔도 공고가 주말 모집을 닫아 이미 깔린 주말 자리가 열리지 않는다(자리표는 날짜를 옮기지 않는다). 쓰기 전에 멈춘다. */
+    if (CANON.workKind(theirs.work_kind) === 'qna') {
+      const qnaBlocked = plan.writes.filter(w => w.rename || (w.meta && w.meta.kind === 'field' && ['skip_weekends', 'start_date', 'holidays'].includes(w.meta.key)));
+      if (qnaBlocked.length) {
+        return await _abort(client, 409, { ok: false, code: 'qna_calendar_locked', sync_version: curVersion, fields: qnaBlocked.map(w => ({ path: w.path, label: _label(w) })),
+          error: 'Q&A 작업은 접수 뒤 주말 제외·시작일·제외일과 상품·옵션 이름을 바꿀 수 없습니다 — 날짜별 자리표가 이 값으로 깔렸습니다.' });
+      }
+    }
 
     /* ★ 배포 순서 안전장치(5단계 · 검토 2026-10-20) — 금액을 모르는 옛 인트라넷(저장 본문에 `bidir.money` 표시 없음)은 리뷰비·상품 금액을
        인트라넷 사본 값(리뷰웹에서 바뀐 금액을 못 받은 옛 값)으로 늘 다시 보낸다. 그대로 쓰면 저장할 때마다 리뷰웹 금액이 옛 값으로 되돌아간다.

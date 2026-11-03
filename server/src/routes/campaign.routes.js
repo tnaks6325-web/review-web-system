@@ -3941,6 +3941,13 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
        ★ 모든 검증이 끝난 뒤 여기서 부른다 — 공유 저장은 따로 커밋되므로, 앞선 검증 실패로 반쪽 저장이 남지 않게. */
     // ★ 7단계-④(사전 점검 2026-10-21): 연결 공고의 구조(옵션 더하기·지우기·이름·마감, 상품 방식, 배송 방식, 리뷰타입 종류, 체험단 종류)는
     //   공고만 바뀌고 오더·인트라넷에는 안 갔다(조용한 갈라짐). 스위치와 상관없이 여기서 막는다 — 모든 쓰기보다 앞.
+    // ★ Q&A체험단(결정 321) — 주말 제외는 날짜별 자리표를 정한 값이다. 공고에서 바꾸면 이미 깔린 주말 자리가 안 열린다 → 모든 쓰기보다 앞에서 막는다.
+    if (typeof skip_weekends === 'boolean') {
+      const { rows: wkc } = await pool.query('SELECT skip_weekends FROM recruit_campaigns WHERE id = $1', [id]);
+      if (wkc.length && wkc[0].skip_weekends !== skip_weekends && await require('../services/qnaSlots.service').isQnaCampaign(id)) {
+        return res.status(409).json({ ok: false, code: 'qna_calendar_locked', error: 'Q&A 작업은 접수 뒤 주말 제외를 바꿀 수 없습니다 — 날짜별 자리표가 이 값으로 깔렸습니다.' });
+      }
+    }
     const structBlock = await require('../services/campaignSharedSave.service').structureBlocked({
       campaignId: id, normOpts, body: req.body,
       store: {

@@ -78,7 +78,8 @@
   - 옛 신청 줄 덧붙이기(`sheetlessApplicant.addApplicantRow`) → 던진다(시트로도 넘기지 않음).
   - 차수 추가·삭제(`POST/DELETE /trackb/campaigns/:id/rounds`) → `rounds_qna_locked`(409 · `isQnaCampaign` 실패 = 막음). `_cdpFail` 에 `recruit_quota_qna_locked: 409`.
   - 작업 이름 바꾸기(`tabRename.renameTabState`) → `qna_slots.tab_name` 도 같은 트랜잭션에서 옮긴다(안 옮기면 자리표 잃은 탭이 리뷰 탭처럼 정리된다).
-  - 상품·선택지 이름 바꾸기(`campaignOptionRename.relabelEmptySlotsInTx`) → 자리표의 `unit_key`·`product_name`·선택지 값도 바꾼다. 키는 **임시 이름을 거쳐 두 단계로**(맞바꾸기·이어 바꾸기가 유일 색인에 걸리지 않게 — `applyRenamePlanInTx` 와 같은 방식).
+  - 상품·선택지 이름 바꾸기 → **막는다**(`campaignOptionRename.applyRenamePlanInTx` 가 `qna_rename_locked` 로 쓰기 전에 던짐 · 공유 저장은 `w.rename` 쓰기를 `qna_calendar_locked`). 「접수 뒤 상품 변경 금지」(확정 1.가)에 해당하고, 공고 선택지 키(예: `검정`)와 자리표 키(`양말 · 검정`)는 표기가 달라 따라 바꾸면 어긋난다(코덱스 재검토 — 이름 맞바꾸기에서 상품 이름이 한쪽으로 몰림). 자리표를 따라 바꾸는 사본은 두지 않는다.
+  - 주말 제외·시작일·제외일 → 공유 저장(`applySharedPatch`)이 쓰기 전에 `qna_calendar_locked`, 공고 창 저장(`PUT /campaign/admin/:id`)도 주말 제외 변경을 모든 쓰기보다 앞에서 409. 주말 제외만 바꿔도 공고가 주말 모집을 닫아 이미 깔린 주말 자리가 안 열린다(자리표는 날짜를 옮기지 않는다).
   - 작업 삭제 → `qna_slots` 도 지움(`workTabDelete.DELETE_TABLES`).
 - ★★ **자리표 저장 실패 = 접수를 끝내지 않는다 (완화 금지)** — 접수가 끝나면(상태 전이 `reviewing`) [접수하기] 버튼이 사라지고 재호출은 멱등 반환이라 **다시 깔 길이 없다**(막다른 길). 그래서 Q&A 는 저장 실패 시 상태를 바꾸기 **전에** `qna_calendar_failed`(409)로 멈추고, 다시 누르면 남은 줄을 재사용해 같은 자리표를 깐다.
   - 깔기 전에 **이미 있는 줄이 계획과 줄마다 같은지**(`verifyRowsMatchPlan` — 선택지·진행일 칸·공개여부·문의문구) 본다. 다르면 깔지 않고 멈춘다(어긋난 자리표는 없는 것보다 나쁘다 → 작업을 지우고 다시 접수).
@@ -93,7 +94,7 @@
   - 자리표 계획은 미리보기의 날짜 조정(시작일·주말·제외일)을 받지 않는다 — 잠금이 오더 값과 비교하므로, 조정값으로 깔면 "잠겼는데 표와 오더가 다른" 상태가 된다.
 - 로컬 실측(가짜 DB · 운영 작업표 표준 열 복사 · 서버 TZ=UTC): 첫 실제 오더 모양 50자리, 공개 11/4·6·10·12·16 · 공개 줄 삭제 → 11/4 공개 자리로 보충·자리표 이동 · 인트라넷 수정 5종(건수·문구·시작일·하루건수 거절 / 주소·특이사항 통과) · 리뷰웹 수정 창 3종 거절 · 일반 리뷰 오더는 종전 그대로.
 - 코드 검토 반영 뒤 로컬 실측(같은 조건): 같은 값 표기 차이 재전송 통과 / 제외일·하루 건수 변경 거절 · 자리표 저장 실패 흉내(로컬 DB 쓰기 막음) → 접수 안 끝남 → 다시 누르면 처음과 같은 50자리 · 줄 하나 날짜가 다르면 깔지 않음 · 자리 없는 줄 삭제 보충 없음 · 자리 줄 날짜 고치기 거절 · 차수 추가·삭제 거절 · 작업 이름 바꾸기에 자리표 따라감 · 리뷰 작업(줄 삭제 보충·날짜 고치기·접수 뒤 수정) 종전 그대로.
-- 회귀가드: `server/tests/qnaSlotCalendar.test.js`(47) · `qnaWorktableGuards.test.js`(66 — 이름 맞바꾸기는 메모리 표로 실제 실행 · 잠금 비교·자리 판정·복구 대조·이름 바꾸기는 실제 실행) · `sheetlessNoEmptyOverflow.test.js` 패턴 보정(Q&A 판정 조회는 덧붙이기 준비가 아님 — 검사 의미 불변).
+- 회귀가드: `server/tests/qnaSlotCalendar.test.js`(47) · `qnaWorktableGuards.test.js`(66 — 이름 바꾸기 막음은 실제 실행 · 잠금 비교·자리 판정·복구 대조·이름 바꾸기는 실제 실행) · `sheetlessNoEmptyOverflow.test.js` 패턴 보정(Q&A 판정 조회는 덧붙이기 준비가 아님 — 검사 의미 불변).
 
 ## 조사로 확인한 남은 단계의 함정 (2~5단계 착수 전 다시 읽을 것)
 - **순차진행(212·228)은 하루에 상품 하나뿐**(`sequentialSchedule.byDate` = 날짜당 1건) — 여러 상품을 동시에 하루 1건씩 여는 데 쓰면 안 된다.

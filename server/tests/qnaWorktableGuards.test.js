@@ -250,46 +250,28 @@ const scope = require('../src/utils/sheetlessScope');
   t('옛 신청 줄 덧붙이기: Q&A 탭은 던진다(시트로도 넘기지 않음)', /Q&A 작업표에는 신청자 줄을 덧붙이지 않습니다/.test(S('src/services/sheetlessApplicant.service.js')));
   t('★ 작업 이름 바꾸기: 자리표도 같은 트랜잭션에서 따라간다', /UPDATE qna_slots SET tab_name = \$1, updated_at = NOW\(\) WHERE sheet_id = \$2 AND tab_name = \$3/.test(S('src/services/tabRename.service.js')));
   {
+    // 상품·옵션 이름 바꾸기 — Q&A 공고는 막는다(접수 뒤 상품 변경 금지 · 공고 키와 자리표 키 표기가 달라 따라 바꾸면 어긋난다)
     const ren = require('../src/services/campaignOptionRename.service');
-    const log = [];
-    const client = { query: async (sql, params) => {
-      log.push({ sql: String(sql), params });
+    const mk = (isQna) => { const log = []; return { log, query: async (sql) => {
+      sql = String(sql); log.push(sql);
       if (/FROM recruit_campaigns WHERE id = \$1/.test(sql)) return { rows: [{ linked_sheet_id: 's', linked_tab_name: 't' }] };
-      if (/is_sheetless|sheetless/.test(sql)) return { rows: [{ sheetless: true }] };
-      return { rows: [] };
-    } };
-    const before = scope.isSheetless; scope.isSheetless = async () => true;
-    try { await ren.relabelEmptySlotsInTx(client, 'c1', [{ from: '가방 · 토프', to: '가방 · 토프색' }], [{ from: '가방', to: '토프 가방' }]); }
-    finally { scope.isSheetless = before; }
-    const qlog = log.filter(x => /UPDATE qna_slots/.test(x.sql));
-    t('★ 상품 이름을 먼저 바꾼다', /SET product_name = \$4/.test(qlog[0].sql) && JSON.stringify(qlog[0].params) === JSON.stringify(['s', 't', '가방', '토프 가방']));
-    const toTmp = qlog.filter(x => /SET unit_key = \$4 WHERE/.test(x.sql) && /^__qna_rename_/.test(x.params[3]));
-    const fromTmp = qlog.filter(x => /option1_value = CASE/.test(x.sql));
-    t('★★ 키는 임시 이름을 거쳐 두 단계로(맞바꾸기·이어 바꾸기에서 유일 색인 충돌 방지)', toTmp.length === 2 && fromTmp.length === 2
-      && qlog.indexOf(toTmp[1]) < qlog.indexOf(fromTmp[0]));
-    const opt = fromTmp.find(x => x.params[3] === '가방 · 토프색');
-    t('★ 선택지 이름 바꾸기: 키·선택지 값이 새 이름으로', opt && JSON.stringify(opt.params.slice(2)) === JSON.stringify([toTmp[0].params[3], '가방 · 토프색', '가방', '토프색', '']));
-    const prd = fromTmp.find(x => x.params[3] === '토프 가방');
-    t('옵션 없는 상품 이름 바꾸기: 키가 곧 상품 이름이라 함께 바뀐다', !!prd);
+      if (/SELECT \(EXISTS/.test(sql)) return { rows: [{ q: isQna }] };
+      return { rows: [], rowCount: 0 };
+    } }; };
+    const qc = mk(true); let err = null;
+    try { await ren.applyRenamePlanInTx(qc, 'c1', [{ from: '검정', to: '차콜' }]); } catch (e) { err = e; }
+    t('★★ Q&A 공고: 선택지 이름 바꾸기를 쓰기 전에 막는다(qna_rename_locked)', err && err.code === 'qna_rename_locked' && !qc.log.some(q => /UPDATE campaign_options/.test(q)));
+    const rc = mk(false);
+    await ren.applyRenamePlanInTx(rc, 'c1', [{ from: '검정', to: '차콜' }]);
+    t('리뷰 공고: 이름 바꾸기 종전 그대로', rc.log.some(q => /UPDATE campaign_options SET opt_key/.test(q)));
+    t('자리표 따라 바꾸기 코드는 없다(막았으므로 — 표기 차이로 어긋나는 사본을 두지 않는다)', !/UPDATE qna_slots/.test(S('src/services/campaignOptionRename.service.js')));
   }
+  t('★★ 공유 저장: Q&A 오더는 주말 제외·시작일·제외일·상품/옵션 이름 쓰기를 쓰기 전에 거절',
+    /CANON\.workKind\(theirs\.work_kind\) === 'qna'\) \{\s*const qnaBlocked = plan\.writes\.filter\(w => w\.rename \|\| \(w\.meta && w\.meta\.kind === 'field' && \['skip_weekends', 'start_date', 'holidays'\]\.includes\(w\.meta\.key\)\)\);/.test(S('src/services/sharedPatch.service.js')));
   {
-    // 실제 맞바꾸기 — 유일 색인을 흉내 내는 작은 메모리 표로 돌린다(A↔B)
-    const ren = require('../src/services/campaignOptionRename.service');
-    const table = [{ unit_key: 'A', unit_seq: 1, product_name: '가방' }, { unit_key: 'B', unit_seq: 1, product_name: '가방' }];
-    const client = { query: async (sql, p) => {
-      sql = String(sql);
-      if (/FROM recruit_campaigns WHERE id = \$1/.test(sql)) return { rows: [{ linked_sheet_id: 's', linked_tab_name: 't' }] };
-      if (/UPDATE qna_slots SET unit_key = \$4/.test(sql)) {
-        const hit = table.filter(r => r.unit_key === p[2]);
-        for (const r of hit) { if (table.some(o => o !== r && o.unit_key === p[3] && o.unit_seq === r.unit_seq)) throw Object.assign(new Error('uq'), { code: '23505' }); r.unit_key = p[3]; }
-        return { rowCount: hit.length };
-      }
-      return { rows: [] };
-    } };
-    const before = scope.isSheetless; scope.isSheetless = async () => true;
-    try { await ren.relabelEmptySlotsInTx(client, 'c1', [{ from: 'A', to: 'B' }, { from: 'B', to: 'A' }], []); }
-    finally { scope.isSheetless = before; }
-    t('★★ 두 선택지 이름 맞바꾸기(A↔B) — 충돌 없이 자리표 키가 서로 바뀐다', table[0].unit_key === 'B' && table[1].unit_key === 'A');
+    const cr = S('src/routes/campaign.routes.js');
+    const iW = cr.indexOf("code: 'qna_calendar_locked', error: 'Q&A 작업은 접수 뒤 주말 제외를");
+    t('★ 공고 창 저장: Q&A 공고의 주말 제외 변경은 모든 쓰기(공유 저장 포함)보다 앞에서 409', iW > 0 && iW < cr.indexOf("const bidirEdit = await require('../services/campaignSharedSave.service')"));
   }
 
   console.log(`\n✅ ${pass}개 통과\n`);
