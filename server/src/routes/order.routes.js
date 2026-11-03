@@ -794,6 +794,29 @@ function _acceptedWorktableLockedFields(cur, b, optionsJson) {
 }
 
 /**
+ * ★★ Q&A 접수 뒤 잠금 칸 — **자리표를 정한 값만**(총 건수·하루 건수·시작일·주말 제외·제외일·종류·상품 구성).
+ *   리뷰타입·배송유형 등은 Q&A 자리표와 무관해 잠그지 않는다(같은 값을 표기만 다르게 보내도 막히던 오판 방지).
+ *   ★ 비교는 자리표 계획이 읽는 모양 그대로 — 주말 제외는 「끔」만 구분(빈 값 = 제외, `buildWorktablePlan` 과 같다),
+ *     제외일은 `normalizeHolidayList`(정렬·중복 제거 — 계획과 단일 출처), 나머지는 공용 정규화(`sharedFields.canon`).
+ */
+function _qnaLockedFields(cur, b, optionsJson) {
+  const { canon } = require('../utils/sharedFields');
+  const { normalizeHolidayList } = require('../utils/worktablePlan');
+  const skipOff = v => canon('skip_weekends', v) === '0';
+  const SAME = {
+    recruit_count: (a, z) => canon('recruit_count', a) === canon('recruit_count', z),
+    daily_count: (a, z) => canon('daily_count', a) === canon('daily_count', z),
+    start_date: (a, z) => canon('start_date', a) === canon('start_date', z),
+    skip_weekends: (a, z) => skipOff(a) === skipOff(z),
+    holidays: (a, z) => normalizeHolidayList(a).join(',') === normalizeHolidayList(z).join(','),
+    work_kind: (a, z) => canon('work_kind', a) === canon('work_kind', z),
+  };
+  const locked = Object.keys(SAME).filter(k => b[k] !== undefined && !SAME[k](cur[k], b[k]));
+  if (optionsJson !== undefined && _productOptionsLockedChanged(cur.product_options_json, optionsJson)) locked.push('product_options_json');
+  return locked;
+}
+
+/**
  * ★★ Q&A체험단(결정 321 · 사용자 확정 2026-11-03) — 접수로 날짜별 자리표가 만들어진 오더인가.
  *   이런 오더는 **공고를 발행하기 전이라도** 건수·상품·하루 건수·공개 문구·시작일을 바꾸지 않는다
  *   (자리표·작업표 줄이 이미 그 값으로 깔렸다). 늘리려면 일정 끝 「추가 모집」으로 한다.
@@ -802,6 +825,8 @@ function _acceptedWorktableLockedFields(cur, b, optionsJson) {
 async function _qnaCalendarLocked(order) {
   const o = order || {};
   if (require('../utils/workKind').normalizeWorkKind(o.work_kind) !== 'qna' || !o.id) return false;
+  // ★ 작업표가 연결됐으면(접수됨) 자리표 저장이 실패했어도 잠근다 — 재접수가 같은 값으로 자리표를 다시 깔 수 있어야 한다.
+  if (o.linked_tab_name) return true;
   try {
     const { rows } = await pool.query('SELECT 1 FROM qna_slots WHERE work_order_id = $1 LIMIT 1', [o.id]);
     return rows.length > 0;
@@ -1189,7 +1214,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
     /* ★★ Q&A체험단(결정 321) — 자리표가 깔린 오더는 발행 전이라도 작업표 칸(건수·상품·하루 건수·공개 문구·시작일)을 원본에서 바꾸지 않는다.
        종전 잠금(isSourceEditLocked)은 공고 연결·광고주 연결 뒤에만 걸려, 접수만 된 Q&A 오더는 건수가 바뀌어도 자리표와 어긋난 채 저장됐다. */
     if (await _qnaCalendarLocked(current)) {
-      const locked = _acceptedWorktableLockedFields(current, b, optionsJson);
+      const locked = _qnaLockedFields(current, b, optionsJson);
       if (locked.length) {
         return res.status(409).json({ ok: false, code: 'qna_calendar_locked', blocked_fields: locked, work_order_id: current.id,
           error: 'Q&A 작업은 접수 뒤 건수·상품·하루 건수·공개 문구·시작일을 바꿀 수 없습니다 — 일정이 끝날 때 「추가 모집」으로 늘려 주세요.' });
@@ -1787,7 +1812,7 @@ async function _intakeUpdateHandler(req, res, next) {
     const { rows: cur } = await pool.query(
       `SELECT id, status, deleted_at, delivery_type, courier_proxy, linked_campaign_id, bidir_state, advertiser_id,
               recruit_count, daily_count, daily_count_text, skip_weekends, holidays, review_type, review_type_mix, delivery_type_mix,
-              recall_courier, recall_product, work_kind, product_distribution_mode, start_date, product_options_json
+              recall_courier, recall_product, work_kind, product_distribution_mode, start_date, product_options_json, linked_tab_name
          FROM work_orders WHERE id = $1 LIMIT 1`, [id]
     );
     if (cur.length === 0) {
@@ -1813,8 +1838,12 @@ async function _intakeUpdateHandler(req, res, next) {
     }
     /* ★ 7단계 🔴5(2026-10-20): 접수된 오더(작업표·공고가 이미 만들어짐)의 작업표 칸은 이 옛 경로로도 바꾸지 않는다 — 원본 수정(/intake/source)은
        접수 뒤 이 칸들을 409 로 막는데(SOURCE_EDIT_AFTER_ACCEPT) 이 경로만 잠금이 없어 작업표와 어긋날 수 있었다. 같은 값을 다시 보내는 것은 통과. */
+    const _legacyOptions = b.product_options_json !== undefined ? _requestOptionsJson(b) : undefined;
     if (isSourceEditLocked(cur[0]) || await _qnaCalendarLocked(cur[0])) {
-      const locked = _acceptedWorktableLockedFields(cur[0], b, b.product_options_json !== undefined ? _requestOptionsJson(b) : undefined);
+      // 종전 잠금이 걸린 오더는 종전 비교 그대로, Q&A 자리표 잠금만 걸린 오더는 자리표 칸만 본다.
+      const locked = isSourceEditLocked(cur[0])
+        ? _acceptedWorktableLockedFields(cur[0], b, _legacyOptions)
+        : _qnaLockedFields(cur[0], b, _legacyOptions);
       if (locked.length) {
         return res.status(409).json({ ok: false, code: 'accepted_worktable_locked', fields: locked,
           error: '이미 접수돼 작업표가 만들어진 오더라 이 칸은 여기서 바꿀 수 없습니다: ' + locked.join(', ') });
@@ -2416,8 +2445,23 @@ _handlers.orderAdminAccept = async (req, res, next) => {
           // 재접수(이미 만들어진 작업표) — 장부만 현재 작업표 기준으로 다시 만든다.
           const { rebuildLedgers } = require('../services/sheetlessLedger.service');
           sheetlessResult = { ledger: await rebuildLedgers({ sheetId, tabName, by: `sheetless-reaccept:${req.admin?.name || ''}` }) };
+          // ★ Q&A(결정 321) — 연결까지 끝난 오더를 다시 접수할 때(반려 뒤 재접수 등) 자리표가 비어 있으면 되살린다(줄과 같을 때만). 못 살리면 던진다.
+          if (require('../utils/workKind').normalizeWorkKind(o.work_kind) === 'qna') {
+            const qnaRepair = await require('../services/qnaSlots.service')
+              .repairCalendarIfMissing({ workOrder: o, sheetId, tabName, by: req.admin?.name || 'admin' });
+            if (!qnaRepair.ok) throw new Error(`Q&A 자리표 복구 실패: ${qnaRepair.error}`);
+            sheetlessResult.qnaRepair = qnaRepair;
+          }
         }
       } catch (slErr) {
+        /* ★★ Q&A(결정 321) — 자리표 없이 접수를 끝내면(상태 전이) [접수하기] 버튼이 사라져 다시 깔 길이 없다(막다른 길).
+           상태를 바꾸기 **전에** 멈춘다 — 다시 누르면 남은 작업표 줄을 재사용해(멱등 INSERT) 같은 자리표를 깐다
+           (`persistSheetlessWorktable` 이 줄과 계획이 같은지 먼저 본다). 리뷰·블로그는 종전대로(장부 미완 알림 + 접수 완료). */
+        if (require('../utils/workKind').normalizeWorkKind(o.work_kind) === 'qna') {
+          logger.error(`[order/accept] ${id} Q&A 자리표 저장 실패 — 접수를 끝내지 않음(다시 접수로 복구): ${slErr.message}`);
+          return res.status(409).json({ ok: false, code: 'qna_calendar_failed', work_order_id: o.id,
+            error: `Q&A 날짜별 자리표를 만들지 못해 접수를 끝내지 않았습니다 — [접수하기]를 다시 눌러 주세요. (${String(slErr.message || '').slice(0, 160)})` });
+        }
         // ★ 여기 실패는 "등록은 됐는데 아무 데도 안 보이는" 상태가 된다 → 조용히 넘기지 않는다.
         indexBuilt = false;
         sheetlessResult = { error: slErr.message };
@@ -2661,7 +2705,7 @@ _handlers.orderAdminEdit = async (req, res, next) => {
     /* ★★ Q&A체험단(결정 321) — 자리표가 깔린 오더는 이 화면에서도 작업표 칸(건수·상품·하루 건수·공개 문구·시작일)을 바꾸지 않는다.
        같은 값 재전송은 통과(작업표 칸 잠금과 같은 비교). 리뷰·블로그 오더는 자리표가 없어 종전 그대로. */
     if (await _qnaCalendarLocked(o)) {
-      const locked = _acceptedWorktableLockedFields(o, b, b.product_options_json !== undefined ? _requestOptionsJson(b) : undefined);
+      const locked = _qnaLockedFields(o, b, b.product_options_json !== undefined ? _requestOptionsJson(b) : undefined);
       if (locked.length) {
         return res.status(409).json({ ok: false, code: 'qna_calendar_locked', fields: locked,
           error: 'Q&A 작업은 접수 뒤 건수·상품·하루 건수·공개 문구·시작일을 바꿀 수 없습니다 — 일정이 끝날 때 「추가 모집」으로 늘려 주세요.' });

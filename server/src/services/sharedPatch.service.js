@@ -2004,7 +2004,7 @@ async function applySharedPatch(p) {
       || (w.meta.kind === 'leaf' && w.meta.key === 'base' && !_baseQuantityOrPayOnly(w, false) && _baseQuantityOrPayOnly(w, true))));
     if (typeSetWritten && structurePermanentlyLocked(theirs)) {
       return await _abort(client, 409, { ok: false, code: 'review_type_locked', sync_version: curVersion,
-        error: '배송 혼합·회수, 블로그, 구매수량 단계가 있는 작업은 접수 뒤 리뷰타입을 바꿀 수 없습니다. 바꿔야 하면 새 리뷰오더로 접수해 주세요.' });
+        error: '배송 혼합·회수, 블로그, Q&A, 구매수량 단계가 있는 작업은 접수 뒤 리뷰타입을 바꿀 수 없습니다. 바꿔야 하면 새 리뷰오더로 접수해 주세요.' });
     }
     // 7단계-④ ④ — 한 종류(또는 자율)로 바꾸면 남은 섞어 쓰기 수량을 함께 비운다(공고 창 저장과 같은 규칙 · 안 비우면 옛 혼합이 배지·작업표에 남는다)
     if (reviewTypeWritten && CANON.reviewType(next.review_type) !== 'mixed') {

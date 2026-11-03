@@ -123,7 +123,7 @@ function _layUnit(u, warnings) {
  * 자리표 생성.
  * @param {object} p
  * @param {Array}  p.units       qnaUnitsFromWorkOrder().units
- * @param {Array<{date:string,label:string}>} p.days  진행일 목록(0번째 = 시작일). 가장 긴 단위만큼 필요.
+ * @param {Array<{date:string,label:string,dow?:string}>} p.days  진행일 목록(0번째 = 시작일). 가장 긴 단위만큼 필요.
  * @param {number} [p.startSeq=1] 첫 행 seq
  * @returns {{ slots: Array, total: number, blockers: Array, warnings: Array }}
  */
@@ -155,7 +155,7 @@ function buildQnaCalendar({ units = [], days = [], startSeq = 1 } = {}) {
       all.push({
         unitKey: u.unitKey, unitIdx: u.unitIdx, unitSeq: i + 1,
         productName: u.productName, option1Value: u.option1Value, option2Value: u.option2Value,
-        dayIdx: s.dayIdx, date: day.date, dateLabel: day.label,
+        dayIdx: s.dayIdx, date: day.date, dateLabel: day.label, dow: day.dow || '',
         visibility: s.visibility,
         text: s.visibility === 'public' ? u.publicTexts[pubIdx++] : '',
       });

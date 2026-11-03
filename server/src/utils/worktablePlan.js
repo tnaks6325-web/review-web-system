@@ -105,6 +105,22 @@ function isWeekend(o) { const w = dowOf(o); return w === 0 || w === 6; }
 const { isHoliday } = require('./krHolidays');
 
 /**
+ * 제외 날짜 목록 정규화 — 배열 또는 JSON 글자 → 형식 맞는 Y-M-D 만, 중복 제거, 정렬.
+ * ★ 작업표 계획과 Q&A 접수 뒤 잠금 비교(order.routes `_qnaLockedFields`)가 같은 모양을 쓴다 — 단일 출처.
+ */
+function normalizeHolidayList(raw) {
+  let arr = raw;
+  if (typeof raw === 'string') {
+    try { arr = raw.trim() ? JSON.parse(raw) : []; } catch (_) { arr = []; }
+  }
+  if (!Array.isArray(arr)) arr = [];
+  return [...new Set(arr
+    .map(h => String(h == null ? '' : h).trim())
+    .filter(h => !!parseYmd(h))
+    .map(h => ymdStr(parseYmd(h))))].sort();
+}
+
+/**
  * 진행일 목록 — 시작일부터 `count` 개의 **진행 가능한 날**(주말·공휴일·제외일 건너뜀).
  * ★ 날짜 건너뛰기 규칙의 단일 출처 — 리뷰 작업의 구매일자(distributeDates)와 Q&A 자리표(qnaCalendar)가
  *   같은 날을 건너뛴다. MAX_DAYS 백스톱(달력 날 수)에 걸리면 모자란 채로 돌려준다.
@@ -879,30 +895,22 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
   let total = Math.max(0, Math.min(parseInt(rawTotal, 10) || 0, MAX_ROWS));
   const daily = Math.max(0, parseInt(o.daily != null ? o.daily : wo.daily_count, 10) || 0);
   // ★ 작업오더의 start_date 는 Date 객체일 수 있다 — parseYmd 로 정규화해 Y-M-D 문자열로 통일.
-  const rawStart = o.startDate != null ? o.startDate : (wo.start_date || '');
+  /* ★ Q&A(결정 321)는 미리보기의 날짜 조정(시작일·주말·제외일)을 받지 않는다 — 자리표는 리뷰오더 값으로만 깐다.
+     접수 뒤 잠금이 리뷰오더 값과 비교하므로, 조정값으로 깔면 "잠겼는데 표와 오더가 다른" 상태가 된다. */
+  const od = isQnaPlan ? {} : o;
+  const rawStart = od.startDate != null ? od.startDate : (wo.start_date || '');
   const parsedStart = parseYmd(rawStart);
   const startDate = parsedStart ? ymdStr(parsedStart) : '';
   /* 주말 제외 — 우선순위 = ① 미리보기 조정값 ② **작업오더 신호**(097) ③ 기본 제외.
      ★ ②는 `false` 와 "안 보냄"(NULL)을 구분해야 한다 — 구버전 인트라넷의 미전송을 `false` 로
        접으면 주말 제외가 조용히 꺼져 토·일에도 구매일이 잡힌다. */
-  const skipWeekends = (o.skipWeekends !== undefined && o.skipWeekends !== null)
-    ? o.skipWeekends !== false
+  const skipWeekends = (od.skipWeekends !== undefined && od.skipWeekends !== null)
+    ? od.skipWeekends !== false
     : (wo.skip_weekends === false || wo.skip_weekends === 'false' ? false : true);
 
   /* 제외 날짜(공휴일·업체 휴무) — ① 미리보기에서 담당자가 지정 ② 없으면 **작업오더 신호**(097).
      ★ 형식이 맞는 값만 받는다(잘못된 값은 조용히 무시 — 날짜 분배가 통째로 깨지는 것보다 낫다). */
-  let _rawHolidays = Array.isArray(o.holidays) ? o.holidays : null;
-  if (!_rawHolidays) {
-    try {
-      const parsedWo = Array.isArray(wo.holidays) ? wo.holidays
-        : (typeof wo.holidays === 'string' && wo.holidays.trim() ? JSON.parse(wo.holidays) : []);
-      _rawHolidays = Array.isArray(parsedWo) ? parsedWo : [];
-    } catch (_) { _rawHolidays = []; }
-  }
-  const holidays = [...new Set(_rawHolidays
-    .map(h => String(h == null ? '' : h).trim())
-    .filter(h => !!parseYmd(h))
-    .map(h => ymdStr(parseYmd(h))))].sort();
+  const holidays = normalizeHolidayList(Array.isArray(od.holidays) ? od.holidays : wo.holidays);
 
   /* ★★ Q&A체험단(결정 321) — 줄 = **날짜별 자리**. 건수·날짜·상품을 자리표가 정한다
      (작업오더 총 건수·일건수 분배·옵션 배분을 쓰지 않는다). 미리보기의 총 건수 조정도 받지 않는다 —
@@ -1250,7 +1258,7 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
 function _qnaDays(slots) {
   const byDate = new Map();
   for (const s of slots) {
-    const d = byDate.get(s.date) || { date: s.date, label: s.dateLabel, dow: '', count: 0 };
+    const d = byDate.get(s.date) || { date: s.date, label: s.dateLabel, dow: s.dow || '', count: 0 };
     d.count++; byDate.set(s.date, d);
   }
   return { days: [...byDate.values()], rowDates: slots.map(s => ({ date: s.date, label: s.dateLabel })) };
@@ -1292,7 +1300,7 @@ module.exports = {
   buildWorktablePlan, buildColumns, distributeDates, distributeOptions, normalizeProductDistributionMode,
   distributeReviewTypes, reviewMixFromWorkOrder, optionReviewMixesFromWorkOrder,
   BLOG_REQUIRED_HEADERS, ensureBlogColumns, isBlogWorkOrder,
-  QNA_DATE_HEADER, QNA_VISIBILITY_HEADER, QNA_TEXT_HEADER, QNA_PLAN_HEADERS, ensureQnaColumns, isQnaWorkOrder, businessDays,
+  QNA_DATE_HEADER, QNA_VISIBILITY_HEADER, QNA_TEXT_HEADER, QNA_PLAN_HEADERS, ensureQnaColumns, isQnaWorkOrder, businessDays, normalizeHolidayList,
   REVIEW_SUBMIT_HEADER, ensureReviewColumn,
   productKeysFromWorkOrder,   // 138 — 상품 축 판정(작업오더 기준)
   DELIVERY_KIND_HEADER, RECALL_HEADERS,

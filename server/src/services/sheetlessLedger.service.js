@@ -453,6 +453,16 @@ async function retireRows({ sheetId, tabName, rounds = [], seqs = [], dryRun = t
   await _assertSheetlessTab(db, sheetId, tabName,
     '시트 기반 탭입니다 — 표에서만 내려도 다음 시트 반영이 되살립니다. 시트에서 정리하거나 이관 후 이용하세요.');
 
+  /* ★★ Q&A체험단(결정 321) — 자리표에 묶인 줄은 내리지 않는다(그날 공개글 자리가 사라진다). 중복 정리·짝 빈 줄 정리도
+     이 함수로 오므로 한 곳에서 막는다. 지울 줄은 「줄 삭제」(같은 날 자리로 다시 채움)로. 차수 단위 정리는 Q&A 탭에서 통째로 막는다. */
+  const qs = require('./qnaSlots.service');
+  if (await qs.isQnaTab(db, sheetId, tabName)) {
+    const bound = (Array.isArray(rounds) && rounds.length) ? ['차수 단위'] : await qs.boundSeqs(db, sheetId, tabName, seqs);
+    if (bound.length) {
+      throw new LedgerError('qna_slot_rows', `Q&A 자리 줄은 줄 정리로 내리지 않습니다(${bound.slice(0, 5).join(', ')}) — 지울 줄은 「줄 삭제」로 지워 주세요(같은 날 자리로 다시 채워집니다).`);
+    }
+  }
+
   /* ★ 작업표 쓰기는 `participants.service` 가 소유한다(쓰기 소유자 규율) — 여기는 게이트·순서·장부만. */
   const r = await require('./participants.service')
     .retireRows({ sheetId, tabName, rounds, seqs, dryRun, by });

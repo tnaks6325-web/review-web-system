@@ -331,7 +331,7 @@ async function structureBlocked({ campaignId, store, normOpts, body, db } = {}) 
   const st0 = sp.readSharedState(link.wo);
   if ((shared.some(l => l !== '배송 방식') && sp.structurePermanentlyLocked(st0)) || (shared.includes('배송 방식') && !sp.deliverySwapOpen(st0))) {
     return { status: 409, body: { ok: false, code: 'structure_new_order', fields: shared,
-      error: `접수된 리뷰오더와 연결된 공고라 이 작업(배송 혼합·회수, 블로그, 구매수량 단계 중 하나)은 ${shared.join('·')}${_topic(shared[shared.length - 1])} 할 수 없습니다. 새 리뷰오더로 만들어 주세요.` } };
+      error: `접수된 리뷰오더와 연결된 공고라 이 작업(배송 혼합·회수, 블로그, Q&A, 구매수량 단계 중 하나)은 ${shared.join('·')}${_topic(shared[shared.length - 1])} 할 수 없습니다. 새 리뷰오더로 만들어 주세요.` } };
   }
   if ((await readBidirSwitch(pool)).campaign_edit !== 'on') return _countsPausedBlock(shared);
   if (!(Number(body && body.bidir_base_sync_version) > 0)) {

@@ -149,7 +149,8 @@ t('블로그 작업도 Q&A 칸 없음', !W.buildWorktablePlan({ workOrder: { ...
 console.log('\n6) 접수 저장');
 const acc = fs.readFileSync(path.join(__dirname, '..', 'src/services/sheetlessAccept.service.js'), 'utf8');
 t('★ 자리 i 의 줄 번호 = 작업표 줄 번호(headerRow + 1 + i)', /plan\.qnaCalendar\.slots\.map\(\(s, i\) => \(\{ \.\.\.s, rowSeq: headerRow \+ 1 \+ i \}\)\)/.test(acc));
-t('★ 작업표 줄과 같은 흐름에서 저장 · 실패는 던진다', /createSlotsFromSheetRows[\s\S]{0,400}qnaSlots\.service'\)\.insertCalendar/.test(acc));
+t('★ 작업표 줄과 같은 흐름에서 저장 · 실패는 던진다', /createSlotsFromSheetRows[\s\S]{0,900}qs\.insertCalendar/.test(acc));
+t('★ 줄이 계획과 같을 때만 붙인다(실패 잔재 재시도 — 다르면 던진다)', /verifyRowsMatchPlan\(\{ sheetId, tabName, planRows: rows \}\)[\s\S]{0,80}if \(!v\.ok\) throw[\s\S]{0,300}qs\.insertCalendar/.test(acc));
 const mig = fs.readFileSync(path.join(__dirname, '..', 'migrations/210_qna_slots.sql'), 'utf8');
 t('migration 210: 가산 전용·멱등', /CREATE TABLE IF NOT EXISTS qna_slots/.test(mig) && !/DROP |ALTER TABLE .* DROP|CHECK \(/.test(mig.replace(/^--.*$/mg, '')));
 t('같은 자리 중복 저장 차단(재접수 안전)', /uq_qna_slots_unit ON qna_slots \(sheet_id, tab_name, unit_key, unit_seq\)/.test(mig));

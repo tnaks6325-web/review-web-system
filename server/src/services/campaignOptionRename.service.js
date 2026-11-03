@@ -128,6 +128,24 @@ async function relabelEmptySlotsInTx(client, campaignId, pairs, productPairs = [
         [r.id, nextOt, JSON.stringify(rj)]);
       n += 1;
     }
+    /* ★ Q&A 자리표(결정 321) — 자리의 상품 이름·선택지 키도 함께(채운 자리 포함 — 신청의 선택지 키도 위에서 바뀐다).
+       선택지 값 칸은 새 키를 「상품 · 옵션1 · 옵션2」로 나눠, 상품 이름이 맞을 때만 고친다(이름에 ' · ' 가 든 상품은 키만). */
+    for (const [from, to] of map) {
+      const parts = String(to).split(' · ');
+      await client.query(
+        `UPDATE qna_slots SET unit_key = $4,
+                option1_value = CASE WHEN product_name = $5 THEN $6 ELSE option1_value END,
+                option2_value = CASE WHEN product_name = $5 THEN $7 ELSE option2_value END,
+                updated_at = NOW()
+          WHERE sheet_id = $1 AND tab_name = $2 AND unit_key = $3`,
+        [camp.linked_sheet_id, camp.linked_tab_name, from, to, parts[0], parts[1] || '', parts[2] || '']);
+    }
+    for (const [from, to] of pmap) {
+      await client.query(
+        `UPDATE qna_slots SET product_name = $4, unit_key = CASE WHEN unit_key = $3 THEN $4 ELSE unit_key END, updated_at = NOW()
+          WHERE sheet_id = $1 AND tab_name = $2 AND product_name = $3`,
+        [camp.linked_sheet_id, camp.linked_tab_name, from, to]);
+    }
     await client.query('RELEASE SAVEPOINT rename_slots');
     return n;
   } catch (e) {

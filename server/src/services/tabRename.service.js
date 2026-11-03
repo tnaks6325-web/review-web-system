@@ -49,6 +49,10 @@ async function renameTabState(db, { sheetId, oldTabName, newTabName, tabGid = ''
               tab_gid = COALESCE(NULLIF($2, ''), tab_gid),
               updated_at = NOW()
         WHERE sheet_id = $3 AND tab_name = $4`, withGid);
+    // Q&A 자리표(결정 321)는 작업표 줄 번호(seq)를 가리킨다 — 줄과 함께 옮기지 않으면 자리표가 사라진 탭이 되어
+    // 자동 정리(빈 줄·날짜 옮기기)가 자리 줄을 리뷰 줄처럼 손댄다.
+    await client.query(
+      'UPDATE qna_slots SET tab_name = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3', common);
 
     // 입금 전 pending 항목은 다운로드 여부와 무관하게 현재 행의 동일성 좌표를 따라간다.
     // 이미 만든 이체 파일의 표시명은 그 파일 자체가 스냅샷으로 보존한다. DB 좌표를 옛 이름에

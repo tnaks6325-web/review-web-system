@@ -4824,7 +4824,7 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
     // 숨기면 review_index/order_submissions 쪽의 "내 참여내역"이 남아 서로 다른
     // 사실을 말하게 된다. 행을 잠근 뒤, 이 행에만 연결된 신원·참여 링크를 함께 해제한다.
     const { rows } = await client.query(
-      `SELECT id, seq, phone8, row_json, order_submission_id, sheet_id, tab_name, identity_key, source, first_seen_at, updated_at::text AS revision, recipient_name, option_text
+      `SELECT id, seq, phone8, row_json, order_submission_id, sheet_id, tab_name, identity_key, source, first_seen_at, updated_at::text AS revision, recipient_name, option_text, start_date
          FROM campaign_participants
         WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL
         FOR UPDATE`,
@@ -4952,6 +4952,9 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
        자리표가 새 줄을 가리키게 옮긴다(아래). 총 건수와 무관하게 늘 보충한다 — 자리가 사라지면 그날 공개글이 없어진다. */
     const _qnaTab = await require('./qnaSlots.service').isQnaTab(client, sheetId, tabName);
     const finalDateLabel = _qnaTab ? removedRaw : (planLabel || lastSheetLabel || removedRaw);
+    // 지운 줄이 자리표의 자리인가 — 자리에 묶인 줄만 "늘 보충 + 자리 옮기기". 손으로 더한 줄(자리 없음)은 종전 규칙(총 건수 기준).
+    //   조회 실패 = 묶인 것으로 본다(보충은 안전 쪽 — 자리가 사라지는 것보다 줄 하나 남는 것이 싸다).
+    const _qnaBound = _qnaTab && await require('./qnaSlots.service').isBoundRow(client, sheetId, tabName, row.seq);
 
     // 행 자체는 실제 삭제한다. 삭제 표식은 별도 최소 테이블에 두어, 작업표 행을
     // 논리삭제 레코드로 남기지 않으면서도 재투영에 의해 같은 seq가 되살지 않게 한다.
@@ -4994,7 +4997,8 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
     // 예: 200건 작업에 201줄이 있을 때 1줄 삭제 → 200줄이므로 새 201번을 만들면 안 된다.
     const removedWasActive = tabRows.some(r => Number(r.seq) === Number(row.seq));
     const boardAfterDelete = Math.max(0, tabRows.length - (removedWasActive ? 1 : 0));
-    const shouldReplenish = _qnaTab || !(boardTarget > 0 && boardAfterDelete >= boardTarget);
+    // ★ Q&A 탭: 자리 줄 = 늘 보충 · 자리 없는 줄(손으로 더한 줄) = 보충 안 함(자리표 밖 줄을 새로 만들지 않는다).
+    const shouldReplenish = _qnaTab ? _qnaBound : !(boardTarget > 0 && boardAfterDelete >= boardTarget);
     const blank = {};
     headers.forEach(h => { blank[h] = ''; });
     if (dateHeader) blank[dateHeader] = finalDateLabel;
@@ -5035,13 +5039,14 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
            ON CONFLICT (sheet_id, tab_name, seq) DO NOTHING
            RETURNING id, seq`,
           [sheetId, (tabRows[0] && tabRows[0].tab_gid) || null, tabName,
-            finalDateLabel || null, JSON.stringify(blank), String(by).slice(0, 100), inheritedOptionText]);
+            // Q&A 자리 줄은 지운 줄의 진행일 칸(start_date)을 그대로 잇는다 — 표기까지 같아야 자리표 대조(verifyRowsMatchPlan)가 맞는다.
+            (_qnaBound && row.start_date) || finalDateLabel || null, JSON.stringify(blank), String(by).slice(0, 100), inheritedOptionText]);
         if (tryInsert.rows.length) replacement = tryInsert;
       }
       if (!replacement) throw new HideRowError('replacement_slot_failed');
     }
     // ★ Q&A 자리표가 보충 줄을 가리키게 — 같은 트랜잭션(행 삭제가 롤백되면 이것도 롤백).
-    if (_qnaTab && replacement) {
+    if (_qnaBound && replacement) {
       await client.query(
         'UPDATE qna_slots SET seq = $4, updated_at = NOW() WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3',
         [sheetId, tabName, row.seq, replacement.rows[0].seq]);
@@ -5212,6 +5217,11 @@ async function setWorkdeskPurchaseDate({ sheetId, tabName, rowId, date, by = 'ad
     [rowId, sheetId, tabName]);
   if (!pr.length) return { ok: false, error: 'row_not_found' };
   const row = pr[0];
+  // ★ Q&A체험단(결정 321) — 자리 줄의 진행일자는 자리표가 정한다(공개글 날짜). 여기서 바꾸면 자리표와 표가 갈린다.
+  const qs = require('./qnaSlots.service');
+  if (await qs.isQnaTab(db, sheetId, tabName) && await qs.isBoundRow(db, sheetId, tabName, row.seq)) {
+    return { ok: false, error: 'qna_slot_date_locked', message: 'Q&A 자리 줄의 진행일자는 바꿀 수 없습니다 — 날짜별 자리표가 정한 날입니다.' };
+  }
   const fmt = require('../utils/worktablePlan').sheetDateStr({ y: +dm[1], m: +dm[2], d: +dm[3] });
 
   if (row.order_submission_id) {
@@ -6544,6 +6554,8 @@ async function assignUnslottedOrderToOpenSlot({ sheetId, tabName, rowId, by = 'a
     if (!source) { await client.query('ROLLBACK'); return { ok: false, error: 'source_not_found' }; }
     if (!source.order_submission_id) { await client.query('ROLLBACK'); return { ok: false, error: 'not_an_order_row' }; }
     if (_displayNumber(source.row_json)) { await client.query('ROLLBACK'); return { ok: false, error: 'already_numbered' }; }
+    // ★ Q&A체험단(결정 321) — 주문은 신청 때 고른 그 자리(날짜·공개/비공개)에만 들어간다. 아무 빈 줄에나 옮기면 자리표와 어긋난다.
+    if (await require('./qnaSlots.service').isQnaTab(client, sheetId, tabName)) { await client.query('ROLLBACK'); return { ok: false, error: 'qna_slot_required' }; }
 
     const effectiveId = await _effectiveLinkedWorkOrderId(client, sheetId, tabName);
     const { rows: workOrders } = await client.query(

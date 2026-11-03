@@ -167,6 +167,7 @@ async function createSheetlessWorktable({ workOrder: wo, tabName = '', planOptio
     ok: true, sheetId, gid, tabName: title, campaignName,
     headerRow, columns: header, rows, filled,
     warnings: plan.warnings,
+    qnaSlots,   // Q&A 자리표(줄 번호 붙음) — 재접수 복구(`qnaSlots.repairCalendarIfMissing`)가 쓴다. 리뷰·블로그 = null
     // 실제 쓰기는 호출부(접수 라우트)가 등록과 같은 흐름에서 수행한다 — 아래 `persist` 참조.
     persist: () => persistSheetlessWorktable({ sheetId, gid, tabName: title, campaignName, headerRow, columns: header, rows, by,
       workboardSchemaVersion: Number(wo.workboard_schema_version || 1), qnaSlots, workOrderId: wo.id }),
@@ -198,8 +199,12 @@ async function persistSheetlessWorktable({ sheetId, gid, tabName, campaignName, 
   });
 
   // ①-b Q&A 자리표 — 실패하면 던진다(접수 라우트가 장부 미완으로 보고). 자리표 없는 Q&A 탭은 신청이 막힌다(fail-closed).
+  //   ★ 줄이 이미 있던 탭(실패 잔재 재시도)은 그 줄이 이 계획과 같을 때만 붙인다 — 줄 INSERT 가 기존 줄을 그대로 두기 때문.
   if (Array.isArray(qnaSlots) && qnaSlots.length) {
-    const r = await require('./qnaSlots.service').insertCalendar({ workOrderId, sheetId, tabName, slots: qnaSlots, by: `sheetless:${by}` });
+    const qs = require('./qnaSlots.service');
+    const v = await qs.verifyRowsMatchPlan({ sheetId, tabName, planRows: rows });
+    if (!v.ok) throw new Error(`Q&A 작업표 줄 ${v.mismatches.length}개가 자리표 계획과 다릅니다(줄 ${v.mismatches.slice(0, 5).join(', ')}) — 작업을 지우고 다시 접수하세요.`);
+    const r = await qs.insertCalendar({ workOrderId, sheetId, tabName, slots: qnaSlots, by: `sheetless:${by}` });
     logger.info(`[sheetlessAccept] Q&A 자리표 ${r.inserted}/${qnaSlots.length}칸 tab=${tabName}`);
   }
 
