@@ -120,8 +120,10 @@ function errorMetricsMiddleware(err, req, res, next) {
       metrics.recentErrors.length = MAX_RECENT_ERRORS;
     }
     
-    // Sentry로 전송
-    captureException(err, { path: req.path, method: req.method });
+    // Sentry로 전송 — 정상 CORS 차단(운영 화면 주소가 아닌 것)은 보내지 않는다(결정 326 · Codex P2 #1751)
+    let corsKind = null;
+    try { const c = require('./cors.middleware'); corsKind = c.isCorsBlocked(err) ? c.corsBlockKind(err.corsOrigin || (req.headers && req.headers.origin) || String(err.message).replace(/^CORS 차단:\s*/, '')) : null; } catch (_) { corsKind = null; }
+    if (!corsKind || corsKind === 'own') captureException(err, { path: req.path, method: req.method });
   } catch (_) { /* 무시 */ }
   
   next(err);

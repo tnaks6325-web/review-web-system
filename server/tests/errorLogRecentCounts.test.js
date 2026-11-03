@@ -85,6 +85,17 @@ const DAY = 86400e3;
   assert.deepStrictEqual([rc.recent_7d_count, rc.recent_7d_complete], [0, true]);
   n++; console.log('PASS 10일 전이 마지막 → 최근 7일 0(확실)');
 
+  // 5) 옛 서버가 0.5초 전에 만든 행(_daily 없음)에 새 서버가 처음 기록 — '완전'으로 오판하지 않는다(Codex P2)
+  await EL.logAbnormal({ flow: 'admin', error: new Error('legacy C') });
+  let c = await row('legacy C');
+  await db.query(`UPDATE error_logs SET occurrence_count = 1, first_seen_at = NOW() - interval '500 milliseconds', context = '{}'::jsonb WHERE id = $1`, [c.id]);
+  await EL.logAbnormal({ flow: 'admin', error: new Error('legacy C') });
+  c = await row('legacy C');
+  rc = EL.recentCounts(c);
+  assert.deepStrictEqual([c.occurrence_count, rc.recent_7d_count, rc.recent_7d_complete], [2, 1, false], '직전 옛 기록 1회가 빠졌으니 미완전 ' + JSON.stringify(rc));
+  await db.query(`DELETE FROM error_logs WHERE id = $1`, [c.id]);   // 아래 목록 행 수 단언과 분리
+  n++; console.log('PASS 직전 옛 행 → 미완전(유예 없음)');
+
   // 5) 조회 응답(목록·상세 — Track B 프록시가 위임하는 원본 핸들러)에 필드가 실린다
   const admin = require('../src/routes/admin.routes');
   const call = (name, query) => new Promise((resolve, reject) => {

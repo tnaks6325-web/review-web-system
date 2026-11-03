@@ -74,6 +74,7 @@ function errorHandler(err, req, res, next) {
     step: corsKind === 'own' ? 'cors_own_origin_blocked' : corsKind ? 'cors_blocked' : step,
     ...(corsKind ? { category: 'permission', source: 'server' } : {}),
     severity: corsKind === 'own' ? 'critical' : corsKind ? 'warn' : (errorContext.statusCode >= 500 ? 'error' : 'warn'),
+    ...(corsKind && corsKind !== 'own' ? { report: false } : {}),   // 정상 차단은 Sentry 로 보내지 않는다(logAbnormal 간접 전송 포함 · Codex P2 #1751)
     error: err,
     context: {
       path: req.path,

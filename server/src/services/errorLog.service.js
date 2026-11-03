@@ -214,7 +214,8 @@ function recentCounts(row, now = Date.now()) {
   out.recent_7d_count = sum;
   const firstMs = row.first_seen_at ? new Date(row.first_seen_at).getTime() : NaN;
   // 집계가 창 시작 전에 이미 켜져 있었거나, 이 묶음이 집계 시작 뒤에 처음 생겼으면 빠진 발생이 없다.
-  out.recent_7d_complete = fromMs <= windowStart || (Number.isFinite(firstMs) && firstMs >= fromMs - 1000);
+  // ★ 유예(-1초) 금지: 첫 INSERT 는 first_seen_at 과 _dailyFrom 을 같은 NOW() 로 쓴다 — 옛 서버가 직전에 만든 행을 '완전'으로 오판한다(Codex P2 #1751).
+  out.recent_7d_complete = fromMs <= windowStart || (Number.isFinite(firstMs) && firstMs >= fromMs);
   return out;
 }
 
@@ -258,8 +259,10 @@ async function logAbnormal(p = {}) {
     const fp = fingerprint({ flow, step, category, source, message_raw, key: p.fingerprintKey });
 
     // ── 기존 파이프라인 병행 (제거하지 않음) ──
-    logger.error(`[이상로그] ${message_ko} | ${flow}/${step || '-'} | ${message_raw}`);
-    if (error instanceof Error) {
+    // p.report === false = 예상된 정상 차단(결정 326 · CORS 외부 주소) — DB 기록만 남기고 Sentry·error 로그로 올리지 않는다
+    const report = p.report !== false;
+    (report ? logger.error : logger.warn).call(logger, `[이상로그] ${message_ko} | ${flow}/${step || '-'} | ${message_raw}`);
+    if (report && error instanceof Error) {
       try { captureException(error, { flow, step, category, source, ...context }); } catch (_) { /* noop */ }
     }
 

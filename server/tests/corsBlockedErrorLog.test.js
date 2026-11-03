@@ -22,6 +22,9 @@ delete process.env.TEST_AUTO_LOGIN;
 delete process.env.ERRORLOG_ENABLED;
 delete process.env.ERRORLOG_AI_ENRICH;
 
+const sentry = require('../src/utils/sentry');
+const caps = [];
+sentry.captureException = (e) => { caps.push(String(e && e.message)); };
 const pool = require('../src/db/pool');
 const inserts = [];
 pool.query = async (sql, params) => {
@@ -65,7 +68,7 @@ const server = app.listen(0, '127.0.0.1', async () => {
     n++; console.log('PASS 개발자 PC·확장 주소 차단 = 403 · 기록 없음');
 
     // ③ 테스트 서버 등 — 403, warn · statusCode 403
-    inserts.length = 0;
+    inserts.length = 0; caps.length = 0;
     const t = await req(port, 'https://testserver-inad.pages.dev');
     await tick();
     assert.strictEqual(t.status, 403);
@@ -74,14 +77,16 @@ const server = app.listen(0, '127.0.0.1', async () => {
     assert.strictEqual(inserts[0].context.statusCode, 403, '기록된 응답코드 = 실제 403 (500 아님)');
     assert.strictEqual(inserts[0].category, 'permission');
     assert.strictEqual(inserts[0].step, 'cors_blocked');
+    assert.strictEqual(caps.length, 0, '정상 차단은 Sentry 로 보내지 않는다(간접 전송 포함) — ' + JSON.stringify(caps));
     n++; console.log('PASS 허용 안 된 외부 주소 = 403 · 경고(warn) · statusCode 403');
 
     // ④ 운영 화면 주소가 막힘(ALLOWED_ORIGINS 누락) — critical 로 보인다
-    inserts.length = 0;
+    inserts.length = 0; caps.length = 0;
     const p = await req(port, 'https://review-web-system.pages.dev');
     await tick();
     assert.strictEqual(p.status, 403);
     assert.strictEqual(inserts.length, 1);
+    assert(caps.length >= 1, '운영 주소 차단은 Sentry 로 보낸다');
     assert.strictEqual(inserts[0].severity, 'critical', '운영 화면이 막히는 건 치명으로 보인다');
     assert.strictEqual(inserts[0].step, 'cors_own_origin_blocked');
     n++; console.log('PASS 운영 화면 주소 차단(설정 누락) = 치명(critical)');
