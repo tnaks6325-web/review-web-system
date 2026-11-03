@@ -8022,7 +8022,8 @@ async function _callCardExtractAi(cid, base64, mimeType) {
       if (st.analysisRequestId !== requestId) return;
       _stopCardCountdown(cid);
       document.getElementById(cid+"_aiLoading").classList.remove("show");
-      _showCardAiError(cid, fe.name==="AbortError" ? "⏱ 15초 안에 응답이 없었습니다." : "이미지 전송 실패: "+fe.message, true);
+      // 결정 331 — 대기 시간(35초)은 위 상수가 정한다. 숫자를 문구에 다시 적지 않는다(종전 「15초」가 실제와 어긋났다).
+      _showCardAiError(cid, fe.name==="AbortError" ? "⏱ AI가 잠시 응답하지 않아요. [다시 분석하기]를 누르거나 아래 칸을 직접 채워 주세요." : "이미지 전송 실패: "+fe.message, true);
       return;
     }
     _stopCardCountdown(cid);
