@@ -1008,7 +1008,15 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
                        WHEN NULLIF(BTRIM(cp.identity_key), '') IS NOT NULL THEN cp.identity_key
                        ELSE NULL END AS anchor_value
              FROM campaign_participants cp
-            WHERE cp.sheet_id = t.sheet_id AND (cp.tab_gid = t.tab_gid OR cp.tab_name = t.tab_name)
+            /* ★★ 줄 매칭 = **현재 이름 우선, gid 는 현재 이름 줄이 하나도 없을 때만**(2026-11-03 · 결정 281 의 남은 차이).
+               종전 gid-OR-이름 매칭은 이름을 바꾼(복사해 다시 쓴) 탭에서 옛 이름 줄까지 더해 업체 화면 숫자가
+               두 배가 됐다(운영 실측: 냉감베개1번 100 → 198 · 우유크림폭탄떡 160 → 252 — 옛 줄 92명이 새 줄과 같은 사람).
+               홈(tabStatsMap)·작업보드는 이름으로만 센다 → 같은 값. 이름 줄이 없는(리네임이 줄을 못 따라간) 탭만 gid 폴백. */
+            WHERE cp.sheet_id = t.sheet_id AND (cp.tab_name = t.tab_name OR (
+                    COALESCE(t.tab_gid, '') <> '' AND cp.tab_gid = t.tab_gid
+                    AND NOT EXISTS (SELECT 1 FROM campaign_participants x
+                                     WHERE x.sheet_id = t.sheet_id AND x.tab_name = t.tab_name
+                                       AND x.active = TRUE AND x.deleted_at IS NULL AND x.held_at IS NULL)))
               AND cp.deleted_at IS NULL AND cp.active = TRUE AND cp.held_at IS NULL
          ), anchored_rows AS (
            SELECT ar.*, COUNT(*) OVER (PARTITION BY ar.anchor_type, ar.anchor_value) AS anchor_count
