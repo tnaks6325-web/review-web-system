@@ -103,7 +103,8 @@ function scan() {
   assert.match(upd, /code: 'bidir_use_source'/);
   // ★ 7단계 🔴5: 접수 뒤 잠금 판정 재료(광고주·작업표 칸)를 같이 읽는다 — 검사 의미 불변 + 잠금 줄 추가(강화)
   assert.match(upd, /SELECT id, status, deleted_at, delivery_type, courier_proxy, linked_campaign_id, bidir_state, advertiser_id,/);
-  const lockAt = upd.indexOf('if (isSourceEditLocked(cur[0])) {');
+  // ★ Q&A체험단(결정 321): 자리표가 깔린 오더도 같은 잠금을 탄다 — 검사 의미 불변(+ Q&A 갈래 추가 · 강화)
+  const lockAt = upd.indexOf('if (isSourceEditLocked(cur[0]) || await _qnaCalendarLocked(cur[0])) {');
   assert.ok(lockAt > 0 && lockAt < upd.indexOf('UPDATE work_orders SET ${sets.join'), '옛 ID 직접 수정: 접수된 오더의 작업표 칸은 쓰기 전에 막는다');
   assert.match(upd, /code: 'accepted_worktable_locked'/);
   assert.match(ord, /o\.bidir_state === 'on' && \(await readBidirSwitch\(pool\)\)\.in2rw === 'apply'/, '관리자 수정 갈림');

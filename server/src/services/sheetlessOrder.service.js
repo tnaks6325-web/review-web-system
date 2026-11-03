@@ -716,6 +716,13 @@ async function writeOrderToWorktable({
                    seq: Number(dup[0].seq), duplicateOf: dupOf };
         }
       }
+      /* ★★ Q&A체험단(결정 321) — 줄 = 날짜별 자리. 자리는 신청 때 정해지고 주문은 **그 줄 번호로만** 들어온다.
+         번호 없이 온 주문이 아무 빈 줄(다른 날·공개 자리)을 먹거나 맨 뒤에 줄을 덧붙이지 않게 여기서 멈춘다. */
+      if (!cur.length && await require('./qnaSlots.service').isQnaTab(client, sheetId, tabName)) {
+        await client.query('ROLLBACK');
+        logger.warn(`[sheetlessOrder] Q&A 탭 — 자리 번호 없는 주문은 줄에 넣지 않음 tab=${tabName} os=${orderSubmissionId}`);
+        return { ok: false, reason: 'qna_slot_required' };
+      }
       if (!cur.length) {
         /* ★★ 빈 줄 고르기(2026-09-26 · 결정 182) — 옵션 일치 → **오늘 날짜 줄 → 날짜 없는·지난 줄 →
            앞날 줄(가까운 날부터)** 순. 종전에는 번호(seq) 순이라 오늘 산 사람이 앞날 줄을 먹고, 그 줄의

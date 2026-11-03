@@ -32,6 +32,11 @@ async function addApplicantRow({ sheetId, tabName, applicant, by = 'campaign-app
     sheetless = await require('../utils/sheetlessScope').isSheetless(db, sheetId, tabName);
   } catch (_) { sheetless = false; }          // 판정 실패 = 종전 경로(fail-open) — 시트 기반이 절대 다수다
   if (!sheetless) return { handled: false, reason: 'not_sheetless' };
+  /* ★ Q&A체험단(결정 321) — 줄 = 날짜별 자리. 맨 뒤에 줄을 덧붙이면 자리표 밖 줄이 생긴다(시트로도 넘기지 않는다 — 던진다).
+     호출부가 잡아 로그만 남기고 sheet_row_added 를 세우지 않는다. Q&A 신청은 자리에 바로 묶는 경로로 받는다(3단계). */
+  if (await require('./qnaSlots.service').isQnaTab(db, sheetId, tabName)) {
+    throw new Error('Q&A 작업표에는 신청자 줄을 덧붙이지 않습니다 — 날짜별 자리에 묶어야 합니다.');
+  }
 
   const { rows: tc } = await db.query(
     `SELECT tab_gid, campaign_name FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`, [sheetId, tabName]);

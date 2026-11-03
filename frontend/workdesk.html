@@ -10021,7 +10021,7 @@ function _wdDpPick(d){
     .then(r=>{
       _wdDpClose();
       if(r&&r.ok){ toast(`구매일자 저장: ${r.value||iso}`+(r.via==='order'?' · 주문 원장도 함께 교정':'')); reloadWorkdesk(); }
-      else toast(r&&r.error==='not_sheetless'?'이 작업은 시트 기반이라 시트에서 고쳐야 합니다':(r&&r.error?('저장 거부: '+r.error):'저장 실패'));
+      else toast(r&&r.message?r.message:(r&&r.error==='not_sheetless'?'이 작업은 시트 기반이라 시트에서 고쳐야 합니다':(r&&r.error?('저장 거부: '+r.error):'저장 실패')));
     })
     .catch(()=>{ _wdDpClose(); toast('저장 실패 — 네트워크'); });
 }
@@ -10138,7 +10138,7 @@ function commitCellEdit(rowId, field, value, td, opt){
       rollback();
       undoGroup.pending=Math.max(0,undoGroup.pending-1); if(!(opt&&opt.undoGroup)) _finishCellUndoGroup(undoGroup);
       if(resp&&resp.error==='concurrent_edit_conflict'){ toast('동시 편집 감지 — 최신 상태로 새로고침'); reloadWorkdesk(); }
-      else toast(resp&&resp.error?('편집 거부: '+resp.error):'편집 실패');
+      else toast(resp&&resp.message?resp.message:(resp&&resp.error?('편집 거부: '+resp.error):'편집 실패'));
       return false;
     })
     .catch(()=>{ rollback(); undoGroup.pending=Math.max(0,undoGroup.pending-1); if(!(opt&&opt.undoGroup)) _finishCellUndoGroup(undoGroup); toast('편집 실패 — 네트워크'); return false; });
@@ -18764,7 +18764,7 @@ async function assignUnslottedOrder(rowId){
   try{
     const result=await api('/api/trackb/workdesk/assign-unslotted-order',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,confirm:true})});
     if(!result||!result.ok){
-      const messages={no_open_slot:'목표 인원 안에 비어 있는 슬롯이 없습니다.',already_numbered:'이미 번호가 배정된 주문입니다.',work_order_target_missing:'작업오더 목표인원을 찾을 수 없습니다.',need_confirm:'확인 후 다시 시도해 주세요.'};
+      const messages={no_open_slot:'목표 인원 안에 비어 있는 슬롯이 없습니다.',already_numbered:'이미 번호가 배정된 주문입니다.',work_order_target_missing:'작업오더 목표인원을 찾을 수 없습니다.',need_confirm:'확인 후 다시 시도해 주세요.',qna_slot_required:'Q&A 작업은 주문을 아무 빈 줄로 옮기지 않습니다 — 신청 때 고른 자리에만 들어갑니다.'};
       toast(messages[result&&result.error]||(result&&result.error)||'번호 배정에 실패했습니다. 새로고침 후 다시 시도해 주세요.');
       return;
     }

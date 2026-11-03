@@ -36,7 +36,8 @@ async function run() {
     assert.deepEqual(result, { ok: false, reason: 'no_open_slot' }, 'full ordinary worktable must reject without an overflow row');
     assert.ok(calls.includes('ROLLBACK'), 'ordinary no-slot write must roll back');
     assert.ok(!calls.some(q => /INSERT INTO campaign_participants/.test(q)), 'ordinary no-slot write must not create an empty overflow slot');
-    assert.ok(!calls.some(q => /FROM tab_configs/.test(q)), 'only the confirmed external-manual exception may enter append preparation');
+    // Q&A 탭 판정(qnaSlots.isQnaTab — qna_slots·tab_configs.work_kind 를 함께 보는 한 줄)은 덧붙이기 준비가 아니다(결정 321).
+    assert.ok(!calls.some(q => /FROM tab_configs/.test(q) && !/FROM qna_slots/.test(q)), 'only the confirmed external-manual exception may enter append preparation');
     console.log('sheetless no-empty-overflow checks passed');
   } finally {
     ledgerSvc.loadRawTabContext = originalLoad;

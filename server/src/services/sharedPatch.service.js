@@ -875,6 +875,11 @@ async function _projectQuantityInTx(client, camp, prev, next, { preferRetireIds 
     const before = new Map((pp.options || []).map(o => [keyOf(o), o]));
     const changed = (pn.options || []).filter(o => { const b = before.get(keyOf(o));
       return !b || _num(b.recruitTotal) !== _num(o.recruitTotal) || _num(b.dailyLimit) !== _num(o.dailyLimit) || JSON.stringify(b.reviewTypeMix || []) !== JSON.stringify(o.reviewTypeMix || []); });
+    /* ★★ Q&A체험단(결정 321 · 사용자 확정 2026-11-03) — 건수·하루 건수는 날짜별 자리표가 정했다. 접수 뒤에는 바꾸지 않고
+       일정 끝 「추가 모집」으로 늘린다(자리표·작업표·공고 인원이 갈리지 않게 저장 전체를 거절). */
+    if (CANON.workKind(prev.work_kind || next.work_kind) === 'qna' && (total !== prevTotal || changed.length)) {
+      return reject('qna_calendar_locked', 'Q&A 작업은 접수 뒤 건수·하루 건수를 바꿀 수 없습니다 — 일정이 끝날 때 「추가 모집」으로 늘려 주세요.');
+    }
     const { rows: optRows } = await client.query(
       `SELECT id, opt_key, product_name, unit_kind, recruit_total, daily_limit FROM campaign_options WHERE campaign_id = $1 ORDER BY id FOR UPDATE`, [camp.id]);
     if (changed.length && optRows.length) {
@@ -936,11 +941,12 @@ function _unitsOf(state) {
     optKey: r.unitKind === 'product' ? String(r.productName || '').trim() : String(r.optKey || '').trim() }));
 }
 
-/** 접수 뒤 상품·옵션 더하기·지우기가 영구 금지인 작업인가(배송 혼합·회수 · 블로그 · 구매수량 단계 — 사용자 확정 2026-10-21 「4.가」). */
+/** 접수 뒤 상품·옵션 더하기·지우기가 영구 금지인 작업인가(배송 혼합·회수 · 블로그 · 구매수량 단계 — 사용자 확정 2026-10-21 「4.가」
+ *  · Q&A체험단 — 줄이 날짜별 자리라 상품을 더하거나 빼면 자리표와 어긋난다, 사용자 확정 2026-11-03 결정 321). */
 function structurePermanentlyLocked(st) {
   const { deliveryBaseType } = require('../utils/deliveryType');
   if (CANON.deliveryMix(st.delivery_type_mix) || ['혼합', '회수'].includes(deliveryBaseType(st.delivery_type))) return true;
-  if (CANON.workKind(st.work_kind) === 'blog') return true;
+  if (['blog', 'qna'].includes(CANON.workKind(st.work_kind))) return true;
   return (_parseList(st.product_options_json) || []).some(_tiersOn);
 }
 
@@ -1825,6 +1831,15 @@ async function applySharedPatch(p) {
     const rnErr = renameShapeError(base, p.mine);
     if (rnErr) return await _abort(client, 409, { ok: false, code: 'structure_rename_conflict', sync_version: curVersion, error: rnErr });
     const plan = planSharedPatch({ base, mine: p.mine, theirs, origin: p.origin, forceMine: p.forceMine || [] });
+    /* ★★ Q&A체험단(결정 321) — 날짜별 자리표를 정한 칸(주말 제외·시작일·제외일)과 상품·옵션 이름은 접수 뒤 바꾸지 않는다.
+       주말 제외만 바꿔도 공고가 주말 모집을 닫아 이미 깔린 주말 자리가 열리지 않는다(자리표는 날짜를 옮기지 않는다). 쓰기 전에 멈춘다. */
+    if (CANON.workKind(theirs.work_kind) === 'qna') {
+      const qnaBlocked = plan.writes.filter(w => w.rename || (w.meta && w.meta.kind === 'field' && ['skip_weekends', 'start_date', 'holidays'].includes(w.meta.key)));
+      if (qnaBlocked.length) {
+        return await _abort(client, 409, { ok: false, code: 'qna_calendar_locked', sync_version: curVersion, fields: qnaBlocked.map(w => ({ path: w.path, label: _label(w) })),
+          error: 'Q&A 작업은 접수 뒤 주말 제외·시작일·제외일과 상품·옵션 이름을 바꿀 수 없습니다 — 날짜별 자리표가 이 값으로 깔렸습니다.' });
+      }
+    }
 
     /* ★ 배포 순서 안전장치(5단계 · 검토 2026-10-20) — 금액을 모르는 옛 인트라넷(저장 본문에 `bidir.money` 표시 없음)은 리뷰비·상품 금액을
        인트라넷 사본 값(리뷰웹에서 바뀐 금액을 못 받은 옛 값)으로 늘 다시 보낸다. 그대로 쓰면 저장할 때마다 리뷰웹 금액이 옛 값으로 되돌아간다.
@@ -1998,7 +2013,7 @@ async function applySharedPatch(p) {
       || (w.meta.kind === 'leaf' && w.meta.key === 'base' && !_baseQuantityOrPayOnly(w, false) && _baseQuantityOrPayOnly(w, true))));
     if (typeSetWritten && structurePermanentlyLocked(theirs)) {
       return await _abort(client, 409, { ok: false, code: 'review_type_locked', sync_version: curVersion,
-        error: '배송 혼합·회수, 블로그, 구매수량 단계가 있는 작업은 접수 뒤 리뷰타입을 바꿀 수 없습니다. 바꿔야 하면 새 리뷰오더로 접수해 주세요.' });
+        error: '배송 혼합·회수, 블로그, Q&A, 구매수량 단계가 있는 작업은 접수 뒤 리뷰타입을 바꿀 수 없습니다. 바꿔야 하면 새 리뷰오더로 접수해 주세요.' });
     }
     // 7단계-④ ④ — 한 종류(또는 자율)로 바꾸면 남은 섞어 쓰기 수량을 함께 비운다(공고 창 저장과 같은 규칙 · 안 비우면 옛 혼합이 배지·작업표에 남는다)
     if (reviewTypeWritten && CANON.reviewType(next.review_type) !== 'mixed') {

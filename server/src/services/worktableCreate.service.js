@@ -31,6 +31,11 @@ function planToSheetValues(plan) {
   const idxOption2 = plan.columns.findIndex(c => c.role === 'option_2');
   const idxRound = plan.columns.findIndex(c => c.role === 'round');
   const idxReviewOption = plan.columns.findIndex(c => c.role === 'review_option_instruction');
+  // Q&A체험단(결정 321) — 자리마다 공개여부·문의문구. 비공개 자리는 안내 문구를 적는다(빈 칸 = 자리 정보 유실로 보인다).
+  const { QNA_VISIBILITY_HEADER, QNA_TEXT_HEADER } = require('../utils/worktablePlan');
+  const { QNA_VISIBILITY_LABEL, QNA_PRIVATE_GUIDE } = require('../utils/qnaCalendar');
+  const idxQnaVis = plan.columns.findIndex(c => c.name === QNA_VISIBILITY_HEADER);
+  const idxQnaText = plan.columns.findIndex(c => c.name === QNA_TEXT_HEADER);
   const body = plan.rows.map(r => {
     const row = new Array(header.length).fill('');
     if (idxSeq >= 0) row[idxSeq] = String(r.seq);
@@ -45,12 +50,16 @@ function planToSheetValues(plan) {
     if (idxOption2 >= 0 && r.selection?.option2Value) row[idxOption2] = r.selection.option2Value;
     if (idxRound >= 0 && r.roundLabel) row[idxRound] = r.roundLabel;
     if (idxReviewOption >= 0 && r.reviewOptionLabel) row[idxReviewOption] = r.reviewOptionLabel;
+    if (r.qnaVisibility) {
+      if (idxQnaVis >= 0) row[idxQnaVis] = QNA_VISIBILITY_LABEL[r.qnaVisibility] || '';
+      if (idxQnaText >= 0) row[idxQnaText] = r.qnaVisibility === 'public' ? (r.qnaText || '') : QNA_PRIVATE_GUIDE;
+    }
     return row;
   });
   return { header, body, filled: {
     seq: idxSeq >= 0, date: idxDate >= 0, option: idxOpt >= 0,
     product: idxProduct >= 0, option1: idxOption1 >= 0, option2: idxOption2 >= 0,
-    round: idxRound >= 0, reviewOption: idxReviewOption >= 0,
+    round: idxRound >= 0, reviewOption: idxReviewOption >= 0, qna: idxQnaVis >= 0 && idxQnaText >= 0,
     deliveryKind: idxDv >= 0, recall: idxRc >= 0 || idxRp >= 0,
   } };
 }

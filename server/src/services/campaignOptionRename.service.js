@@ -47,6 +47,15 @@ function planOptionRenames(currentKeys, options) {
 /** 계획대로 바꾼다(임시 이름 경유 두 단계 · 빈 작업표 줄 포함). @returns 실행한 계획 */
 async function applyRenamePlanInTx(client, campaignId, plan) {
   if (!plan.length) return plan;
+  /* ★★ Q&A체험단(결정 321 · 사용자 확정 2026-11-03 「접수 뒤 상품 변경 금지」) — 자리표는 접수 때 상품·옵션 이름으로 깔렸다.
+     공고 선택지 키와 자리표 키(상품 · 옵션 · 옵션)는 표기가 달라 따라 바꾸면 어긋나기 쉽다 → 이름 바꾸기 자체를 막는다(판정 실패 = 막음). */
+  const { rows: cr } = await client.query('SELECT linked_sheet_id, linked_tab_name FROM recruit_campaigns WHERE id = $1', [campaignId]);
+  if (cr[0] && cr[0].linked_sheet_id && cr[0].linked_tab_name
+      && await require('./qnaSlots.service').isQnaTab(client, cr[0].linked_sheet_id, cr[0].linked_tab_name)) {
+    const err = new Error('Q&A 작업은 접수 뒤 상품·옵션 이름을 바꿀 수 없습니다 — 바꿔야 하면 새 리뷰오더로 접수해 주세요.');
+    err.code = 'qna_rename_locked';
+    throw err;
+  }
   // ★ 임시 이름은 한 번만 만들어 두 표·두 단계에서 같은 값을 쓴다(호출마다 만들면 시각이 달라져
   //   선택지와 참여 기록이 서로 다른 임시 이름으로 흩어진다 — 코드리뷰 P1).
   const stamp = Date.now() + '_' + Math.random().toString(36).slice(2, 8);

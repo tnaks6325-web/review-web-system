@@ -59,11 +59,17 @@ async function deleteWorkdeskOrderRow({ sheetId, tabName, rowId, by = 'admin', p
   _assertArgs({ sheetId, tabName, rowId });
   const db = pool || require('../db/pool');
   const { rows } = await db.query(
-    `SELECT order_submission_id AS "orderSubmissionId"
+    `SELECT seq, order_submission_id AS "orderSubmissionId"
        FROM campaign_participants
       WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL AND active=TRUE AND order_submission_id IS NOT NULL`,
     [rowId, sheetId, tabName]);
   if (!rows.length) return { ok: false, error: 'row_not_found_or_not_order' };
+  /* ★ Q&A체험단(결정 321) — 자리표에 묶인 줄을 이 경로로 내리면 그 날 자리가 사라진다(보충 없음).
+     「줄 삭제」는 같은 날 자리로 다시 채운다 — 그쪽으로 안내한다. 판정 실패 = 묶인 것으로 본다(막음). */
+  const qs = require('./qnaSlots.service');
+  if (await qs.isQnaTab(db, sheetId, tabName) && await qs.isBoundRow(db, sheetId, tabName, rows[0].seq)) {
+    return { ok: false, code: 'qna_slot_row', error: 'Q&A 자리 줄은 여기서 지우지 않습니다 — 「줄 삭제」로 지우면 주문이 취소되고 같은 날 자리로 다시 채워집니다.' };
+  }
   const orderSubmissionId = rows[0].orderSubmissionId;
   const { cancelOrderSubmission } = require('./orderCancellation.service');
   try {

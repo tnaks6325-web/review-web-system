@@ -56,6 +56,46 @@
 - 회귀가드: `server/tests/qnaWorkKind.test.js`.
   - 기존 가드 5개(blogWorkKind·reviewType·reviewTypeMixPipelineContract·campaignShortagePrompt·qtyTiersCampaign)는 패턴만 갱신했다 — 검사 의미 불변. 블로그 포함을 함께 고정해 오히려 강화했다.
 
+## 2단계 — 날짜별 자리표 (migration 210 · 사용자 확정 2026-11-03 추가분)
+- 추가 확정: **접수 뒤 건수·상품·하루 건수·공개 문구·시작일 변경 금지**(늘리려면 일정 끝 「추가 모집」) · 신청 후 1시간 + 그날 자정까지 제출, 자정 10분 전 신청 막음(3단계).
+- **생성 = `utils/qnaCalendar` 순수 함수**, 저장 = `qnaSlots.service.insertCalendar`(접수 때 작업표 줄과 같은 흐름 · 실패는 던짐).
+  - 상품(선택지)마다 **시작일부터 동시에** 하루 `daily` 건. 공개글은 하루 1건, 그날 첫 자리, 간격 `public_gap_days`.
+  - 줄 순서 = (날짜, 상품 순서, 상품 안 순번) — 같은 입력이면 같은 자리표.
+  - 오더 입력: v2 `product_options_json` 각 단위(`base` 또는 `options[i]`)의 `count`·`daily` + `qna:{public_count, public_texts[], public_gap_days}`. 없으면 전부 비공개.
+  - 잠금: 문구 부족·빈 문구 · 공개 > 총건수 · 하루 건수 0(선택지에 0 을 적으면 0 그대로 — 안 적었을 때만 오더 하루 건수) · 시작일 없음 · 옛 형식(v1) · **총모집 ≠ 상품별 합** · 자리 합계 > 2000(`qna_too_many` — 자리를 펼치기 **전에** 본다, 큰 오타로 서버가 멈추지 않게).
+- **날짜 건너뛰기 단일 출처 = `worktablePlan.businessDays`** — 리뷰 구매일자(`distributeDates`)도 이것을 탄다(뽑아내기 전과 600 조합 바이트 동일 — 회귀가드).
+- **작업표 칸**: 구매일자 → 「진행일자」(같은 dateStr 역할) · 「공개여부」·「문의문구」(역할 없음 — 제출 매퍼가 덮지 않음) 추가 · 리뷰옵션·주문번호·아이디·연락처·주소·결제금액 칸 없음. 이름(수취인)·입금 계좌·리뷰·입금일 칸은 둔다.
+- ★★ **작업표 자동 정리 격리 (완화 금지)** — 판정 `qnaSlots.isQnaTab` = 자리표가 있거나 `tab_configs.work_kind='qna'`(자리표 저장이 실패한 Q&A 탭도 격리). 조회 실패(표 없음 포함) = Q&A 로 본다(fail-closed). 트랜잭션 연결에서는 SAVEPOINT 로 감싼다(조회 실패가 바깥 트랜잭션을 죽이지 않게). `qna_slots` 는 기동 필수 표(`REQUIRED_TABLES`).
+  - 빈 줄 날짜 옮기기(`relayWorktableToProjection`) → 건너뜀.
+  - 총 건수 맞추기(`syncWorktableSlotsInTx`·저장 전 확인 `assertWorktableSlotsInTx`) → 줄 수가 바뀌면 `recruit_quota_qna_locked` 로 저장 전체 거절.
+  - 번호 겹친 빈 줄 정리(`cleanupPairedBlanks`) → 자리표에 묶인 줄 제외(`boundRowSql`).
+  - 빈 줄 고르기·덧붙이기(`writeOrderToWorktable`) → 자리 번호 없는 주문은 `qna_slot_required` 로 멈춤(3단계 Q&A 제출은 줄 번호로 들어온다).
+  - 행 삭제 보충(`hideWorkdeskRow`) → **자리표에 묶인 줄만**(`isBoundRow` · 실패 = 묶인 것) 지운 줄과 **같은 날**·같은 진행일 칸 표기로 늘 보충하고 자리표 `seq` 를 새 줄로 옮김(같은 트랜잭션). 자리 없는 줄(손으로 더한 줄)은 보충하지 않는다.
+  - 줄 정리·중복 정리·짝 빈 줄 정리의 실행부(`sheetlessLedger.retireRows`) → 묶인 줄이 섞이면 `qna_slot_rows` 로 거절(차수 단위 정리는 통째로). 주문 취소보다 먼저 막힌다.
+  - 주문 행 삭제(`deleteWorkdeskOrderRow`) → 묶인 줄은 `qna_slot_row`(409) — 「줄 삭제」로 안내(보충이 있는 쪽).
+  - 구매일자 달력(`setWorkdeskPurchaseDate`) → 묶인 줄의 진행일자는 `qna_slot_date_locked`. 일반 칸 편집(`editWorkdeskRow`)도 묶인 줄의 진행일자·공개여부·문의문구·**상품·옵션 칸**(판정 = `orderLedger.productWriteColumns`·`optionWriteColumns` 단일 출처)은 `qna_slot_cell_locked`(보충 줄이 고친 칸을 이어받아 자리표와 갈리지 않게).
+  - 번호 없는 주문 옮기기(`assignUnslottedOrderToOpenSlot`) → `qna_slot_required`.
+  - 옛 신청 줄 덧붙이기(`sheetlessApplicant.addApplicantRow`) → 던진다(시트로도 넘기지 않음).
+  - 차수 추가·삭제(`POST/DELETE /trackb/campaigns/:id/rounds`) → `rounds_qna_locked`(409 · `isQnaCampaign` 실패 = 막음). `_cdpFail` 에 `recruit_quota_qna_locked: 409`.
+  - 작업 이름 바꾸기(`tabRename.renameTabState`) → `qna_slots.tab_name` 도 같은 트랜잭션에서 옮긴다(안 옮기면 자리표 잃은 탭이 리뷰 탭처럼 정리된다).
+  - 상품·선택지 이름 바꾸기 → **막는다**(`campaignOptionRename.applyRenamePlanInTx` 가 `qna_rename_locked` 로 쓰기 전에 던짐 · 공유 저장은 `w.rename` 쓰기를 `qna_calendar_locked`). 「접수 뒤 상품 변경 금지」(확정 1.가)에 해당하고, 공고 선택지 키(예: `검정`)와 자리표 키(`양말 · 검정`)는 표기가 달라 따라 바꾸면 어긋난다(코덱스 재검토 — 이름 맞바꾸기에서 상품 이름이 한쪽으로 몰림). 자리표를 따라 바꾸는 사본은 두지 않는다.
+  - 주말 제외·시작일·제외일 → 공유 저장(`applySharedPatch`)이 쓰기 전에 `qna_calendar_locked`, 공고 창 저장(`PUT /campaign/admin/:id`)도 주말 제외 변경을 모든 쓰기보다 앞에서 409. 주말 제외만 바꿔도 공고가 주말 모집을 닫아 이미 깔린 주말 자리가 안 열린다(자리표는 날짜를 옮기지 않는다).
+  - 작업 삭제 → `qna_slots` 도 지움(`workTabDelete.DELETE_TABLES`).
+- ★★ **자리표 저장 실패 = 접수를 끝내지 않는다 (완화 금지)** — 접수가 끝나면(상태 전이 `reviewing`) [접수하기] 버튼이 사라지고 재호출은 멱등 반환이라 **다시 깔 길이 없다**(막다른 길). 그래서 Q&A 는 저장 실패 시 상태를 바꾸기 **전에** `qna_calendar_failed`(409)로 멈추고, 다시 누르면 남은 줄을 재사용해 같은 자리표를 깐다.
+  - 깔기 전에 **이미 있는 줄이 계획과 줄마다 같은지**(`verifyRowsMatchPlan` — 선택지·진행일 칸·공개여부·문의문구) 본다. 다르면 깔지 않고 멈춘다(어긋난 자리표는 없는 것보다 나쁘다 → 작업을 지우고 다시 접수).
+  - 연결까지 끝난 오더의 재접수(반려 뒤 등)에서 자리표가 비어 있으면 `repairCalendarIfMissing` 으로 같은 대조 뒤 되살린다.
+  - ★ 3단계: 신청 때 자리표가 0칸이면 신청을 막는다(fail-closed) — 자동 복구를 붙이려면 같은 대조를 거친다.
+- ★★ **접수 뒤 수정 잠금 (완화 금지)** — 종전 잠금(`isSourceEditLocked`)은 공고·광고주 연결 뒤에만 걸려, **발행 전 Q&A 오더는 건수가 바뀌어도 자리표와 어긋난 채 저장**됐다(로컬 실측). `_qnaCalendarLocked`(Q&A 종류 + (작업표 연결 `linked_tab_name` 또는 자리표 존재) · 조회 실패 = 잠금)로 세 경로를 막는다:
+  - 인트라넷 원본 수정(`PUT /intake/source/:id`) — 양방향·담당자 갈래보다 먼저.
+  - 옛 갱신(`POST /intake/:id/update`).
+  - 리뷰웹 작업오더 수정 창(`orderAdminEdit`).
+  - 공유 패치(`sharedPatch._projectQuantityInTx`) — 건수·하루 건수 변경 `qna_calendar_locked`, 상품 더하기·빼기 영구 금지(`structurePermanentlyLocked`).
+  - 비교는 Q&A 전용 `_qnaLockedFields` — **자리표를 정한 칸만**(총 건수·하루 건수·시작일·주말 제외·제외일·종류·상품 구성) 자리표 계획이 읽는 모양으로 정규화해 비교한다(글자 숫자·시각 붙은 날짜·주말 true↔빈 값·제외일 순서/중복은 같은 값). 리뷰타입·배송유형은 Q&A 자리표와 무관해 잠그지 않는다. 제외일 정규화는 `worktablePlan.normalizeHolidayList` 단일 출처. 옛 갱신 경로는 종전 잠금이 걸린 오더면 종전 비교(`_acceptedWorktableLockedFields`) 그대로.
+  - 자리표 계획은 미리보기의 날짜 조정(시작일·주말·제외일)을 받지 않는다 — 잠금이 오더 값과 비교하므로, 조정값으로 깔면 "잠겼는데 표와 오더가 다른" 상태가 된다.
+- 로컬 실측(가짜 DB · 운영 작업표 표준 열 복사 · 서버 TZ=UTC): 첫 실제 오더 모양 50자리, 공개 11/4·6·10·12·16 · 공개 줄 삭제 → 11/4 공개 자리로 보충·자리표 이동 · 인트라넷 수정 5종(건수·문구·시작일·하루건수 거절 / 주소·특이사항 통과) · 리뷰웹 수정 창 3종 거절 · 일반 리뷰 오더는 종전 그대로.
+- 코드 검토 반영 뒤 로컬 실측(같은 조건): 같은 값 표기 차이 재전송 통과 / 제외일·하루 건수 변경 거절 · 자리표 저장 실패 흉내(로컬 DB 쓰기 막음) → 접수 안 끝남 → 다시 누르면 처음과 같은 50자리 · 줄 하나 날짜가 다르면 깔지 않음 · 자리 없는 줄 삭제 보충 없음 · 자리 줄 날짜 고치기 거절 · 차수 추가·삭제 거절 · 작업 이름 바꾸기에 자리표 따라감 · 리뷰 작업(줄 삭제 보충·날짜 고치기·접수 뒤 수정) 종전 그대로.
+- 회귀가드: `server/tests/qnaSlotCalendar.test.js`(47) · `qnaWorktableGuards.test.js`(66 — 이름 바꾸기 막음은 실제 실행 · 잠금 비교·자리 판정·복구 대조·이름 바꾸기는 실제 실행) · `sheetlessNoEmptyOverflow.test.js` 패턴 보정(Q&A 판정 조회는 덧붙이기 준비가 아님 — 검사 의미 불변).
+
 ## 조사로 확인한 남은 단계의 함정 (2~5단계 착수 전 다시 읽을 것)
 - **순차진행(212·228)은 하루에 상품 하나뿐**(`sequentialSchedule.byDate` = 날짜당 1건) — 여러 상품을 동시에 하루 1건씩 여는 데 쓰면 안 된다.
   - 상품별 일건수는 균등 모드 + 선택지 `daily_limit`(결정 210) 으로 이미 된다.

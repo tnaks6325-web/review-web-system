@@ -49,6 +49,11 @@ function _kstDateLabel(iso) {
  */
 async function relayWorktableToProjection({ client, sheetId, tabName, days = [], today = '', by = 'system' } = {}) {
   if (!client || !sheetId || !tabName) return { ok: false, reason: 'worktable_not_linked' };
+  /* ★★ Q&A체험단(결정 321) — 줄 날짜 = 날짜별 자리표. 예상 인원에 맞춰 빈 줄 날짜를 옮기면
+     "3일째 공개글" 같은 자리가 다른 날로 흩어진다 → 손대지 않는다(판정 실패도 손대지 않음). */
+  if (await require('./qnaSlots.service').isQnaTab(client, sheetId, tabName)) {
+    return { ok: true, skipped: true, reason: 'qna_slot_calendar', moved: 0 };
+  }
   const { parseDateColumn } = require('../utils/koreanDate');
   const anchor = String(today || '').match(/^(\d{4})-(\d{2})/);
   const parseOpts = { fallbackAnchor: anchor ? { y: Number(anchor[1]), m: Number(anchor[2]) } : undefined };

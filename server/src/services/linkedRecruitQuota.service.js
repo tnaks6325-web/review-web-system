@@ -82,6 +82,7 @@ async function syncWorktableSlotsInTx(client, campaign, target, by = 'quota-sync
   );
   const fixed = rows.filter(r => !_worktableSlotEmpty(r));
   const delta = worktableSlotDelta({ current: rows.length, protectedCount: fixed.length, target });
+  await _assertQnaCalendarUnchanged(client, campaign, delta);
   if (delta.retire) {
     // 7단계-④: 지우거나 마감한 선택지의 빈 줄을 먼저 정리한다(preferRetireIds) — 나머지는 종전대로 뒤에서부터
     const prefer = id => (preferRetireIds && preferRetireIds.has(String(id)) ? 0 : 1);
@@ -120,6 +121,16 @@ async function syncWorktableSlotsInTx(client, campaign, target, by = 'quota-sync
 }
 
 /** 작업오더 저장 전의 fail-fast 검사. 실제 증감은 동기화 트랜잭션에서 한 번만 한다. */
+/* ★★ Q&A체험단(결정 321 · 사용자 확정 2026-11-03) — 줄 = 날짜별 자리라 건수를 바꾸면 자리표와 어긋난다.
+   접수 뒤 건수 변경은 막고(저장 전 확인 · 같은 트랜잭션의 정원 저장도 함께 롤백), 늘리려면 일정 끝 「추가 모집」으로 한다.
+   ★ 확인(assert)과 실제 맞추기(sync) 두 곳이 이 함수 하나를 탄다 — 한쪽만 막으면 저장 뒤 실패가 된다. */
+async function _assertQnaCalendarUnchanged(client, campaign, delta) {
+  if (!(delta && (delta.retire || delta.add))) return;
+  if (await require('./qnaSlots.service').isQnaTab(client, campaign.linked_sheet_id, campaign.linked_tab_name)) {
+    throw quotaError('Q&A 작업은 접수 뒤 건수를 바꿀 수 없습니다 — 일정이 끝날 때 「추가 모집」으로 늘려 주세요.', 'recruit_quota_qna_locked');
+  }
+}
+
 async function assertWorktableSlotsInTx(client, campaign, target) {
   if (!campaign || !campaign.linked_sheet_id || !campaign.linked_tab_name) return { checked: false, reason: 'no_worktable_link' };
   const { isSheetless } = require('../utils/sheetlessScope');
@@ -142,7 +153,9 @@ async function assertWorktableSlotsInTx(client, campaign, target) {
       WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE FOR UPDATE`,
     [campaign.linked_sheet_id, campaign.linked_tab_name]
   );
-  return { checked: true, ...worktableSlotDelta({ current: rows.length, protectedCount: rows.filter(r => !_worktableSlotEmpty(r)).length, target }) };
+  const delta = worktableSlotDelta({ current: rows.length, protectedCount: rows.filter(r => !_worktableSlotEmpty(r)).length, target });
+  await _assertQnaCalendarUnchanged(client, campaign, delta);
+  return { checked: true, ...delta };
 }
 
 async function rebuildWorktableProjection(worktable, by, force = false) {
