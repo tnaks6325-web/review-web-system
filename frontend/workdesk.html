@@ -644,7 +644,7 @@
   .ecell.edited{background:var(--accent-soft);border-bottom-color:var(--accent)}
   @keyframes cellsaved{from{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--safe) 60%,transparent)}to{box-shadow:inset 0 0 0 2px transparent}}
   table.sheetgrid td.cellsaved{animation:cellsaved .55s ease-out}   /* 백그라운드 저장 완료 = 초록 링 페이드(엑셀식 즉시감) */
-  table.sheetgrid td.cellfailed{box-shadow:inset 0 0 0 2px var(--bad);background:var(--bad-soft)}   /* 붙여넣기 저장 실패 칸(결정 327) — 다시 저장에 성공하면 사라진다 */
+  table.sheetgrid td.cellfailed{box-shadow:inset 0 0 0 2px var(--bad);background:var(--bad-soft)}   /* 붙여넣기 저장 실패 칸(결정 330) — 다시 저장에 성공하면 사라진다 */
   .chk.clk{cursor:pointer;border-radius:4px;padding:0 4px} .chk.clk:hover{background:var(--card2)} .chk.clk.edited{outline:1px solid var(--accent);outline-offset:1px}
   .einp{font:inherit;font-size:12.5px;width:100%;min-width:60px;padding:2px 5px;border:1px solid var(--accent);border-radius:5px;background:var(--card);color:var(--ink)}
   /* 편집기록 코너마크 — 구글시트의 "이 셀에 기록이 있다" 표시와 같은 자리(오른쪽 위 삼각형). */
@@ -10131,7 +10131,7 @@ function commitCellEdit(rowId, field, value, td, opt){
   undoGroup.pending++;
   r.cellEdits[h]=value; _paintGridCell(r, field, td);
   const rollback=()=>{ if(r.cellEdits[h]===value){ if(had) r.cellEdits[h]=prev; else delete r.cellEdits[h]; _paintGridCell(r, field, td); } };
-  // opt.send = 묶음 저장 대기열(붙여넣기, 결정 327) · opt.report = 칸별 토스트 대신 결과를 모아 한 번에 말한다.
+  // opt.send = 묶음 저장 대기열(붙여넣기, 결정 330) · opt.report = 칸별 토스트 대신 결과를 모아 한 번에 말한다.
   //   ★ 낙관 반영·실패 롤백·실행취소 기록은 한 칸 저장과 이 한 경로 그대로다(사본 0).
   const say=(opt&&opt.report)||((kind,m)=>toast(m));
   const ebody={sheetId:t.sheetId,tabName:t.tabName,rowId,field,value};
@@ -10389,7 +10389,7 @@ function deleteCustomColumnPrompt(colKey){
    ★ 붙여넣기는 **편집 가능한 셀(.gedit)에만** 들어간다 — 참여자·연락처(신원)·# 는 잠금이라
       건너뛰고 그 건수를 말한다(조용한 누락 금지). 저장은 기존 `commitCellEdit` 한 경로. */
 const _CELL_COLORS=['#ffe9a8','#ffd0d0','#ffdcb0','#c9f2c0','#c7e3ff','#e6d3ff','#d9d9d9'];
-const _PASTE_MAX=500;   // 한 번에 붙여넣을 수 있는 셀 수(저장은 _EDIT_BATCH_MAX 칸씩 묶음 — 결정 327)
+const _PASTE_MAX=500;   // 한 번에 붙여넣을 수 있는 셀 수(저장은 _EDIT_BATCH_MAX 칸씩 묶음 — 결정 330)
 /* 좌표에 깔려 있는 표 셀 — 고정 헤더가 덮은 지점에서도 그 아래 셀을 찾는다.
    ★ `elementsFromPoint` 는 그 점에 **실제로 겹쳐 있는** 요소만 돌려주므로, 헤더 아래에 데이터 행이
      없는 평소(스크롤 최상단)에는 아무것도 못 찾아 종전 동작 그대로다(헤더 우클릭 = 브라우저 기본 메뉴). */
@@ -10731,7 +10731,7 @@ function _pasteIntoSelection(text){
   if(jobs.length>20 && !confirm(`${jobs.length}개 칸의 값을 붙여넣습니다. 진행할까요?`)) return;
   _saveCellJobs(jobs, locked);
 }
-/* ══ 붙여넣기 저장 = 묶음 저장(결정 327) ═══════════════════════════════════════
+/* ══ 붙여넣기 저장 = 묶음 저장(결정 330) ═══════════════════════════════════════
    ★ 종전엔 칸마다 저장 요청 1개를 한꺼번에 보냈다 → 직원별 요청 한도(분당 300, 화면의 다른 요청과 공유)를
      넘긴 칸이 429 로 거절돼 원래 값으로 돌아갔고, 거부 토스트가 칸 수만큼 덮어써 몇 칸이 실패했는지 몰랐다
      (10/15 300칸 중 3칸 누락). 그 뒤 1분간 화면의 다른 목록도 막혔다.

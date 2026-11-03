@@ -1172,7 +1172,7 @@ router.post('/workdesk/edit', authMiddleware, async (req, res, next) => {
     await _workdeskEditCell(req, res, req.body || {});
   } catch (err) { next(err); }
 });
-/* 셀 한 칸 저장의 **유일한 본문** — 한 칸 저장(/workdesk/edit)과 묶음 저장(/workdesk/edit-batch, 결정 327)이
+/* 셀 한 칸 저장의 **유일한 본문** — 한 칸 저장(/workdesk/edit)과 묶음 저장(/workdesk/edit-batch, 결정 330)이
    둘 다 이것을 부른다(단일 출처). 권한 게이트·금액 정규화·editWorkdeskRow(잠금·충돌·participant_edits)·
    주문 원장 through-write·참여 기록 맞춤·응답 상태코드가 칸마다 똑같이 적용된다.
    res 는 진짜 응답(한 칸) 또는 칸별 결과를 받아 두는 대용품(묶음)이다. */
@@ -1219,7 +1219,7 @@ async function _workdeskEditCell(req, res, cell) {
   }
   res.status(out.ok ? 200 : (out.error === 'concurrent_edit_conflict' ? 409 : 400)).json({ ...out, throughWrite, applicationSync });
 }
-// ── 묶음 저장(결정 327) — 붙여넣기 수백 칸이 칸마다 요청 1개를 보내 직원별 요청 한도(분당 300)를 넘기고
+// ── 묶음 저장(결정 330) — 붙여넣기 수백 칸이 칸마다 요청 1개를 보내 직원별 요청 한도(분당 300)를 넘기고
 //   넘친 칸이 조용히 원래 값으로 돌아가던 사고(2026-10-15 300칸 중 3칸 누락)를 막는다.
 //   ★ 쓰기 규칙을 새로 만들지 않는다 — 칸마다 위 _workdeskEditCell 을 **차례로** 태운다(한 칸 저장과 같은 게이트·검증·기록).
 //   ★ 칸별 독립: 한 칸 저장이 원래 칸마다 별도 트랜잭션이고 원장 반영은 커밋 뒤라 되돌릴 수 없으므로,

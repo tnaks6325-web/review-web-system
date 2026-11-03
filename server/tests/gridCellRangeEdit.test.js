@@ -126,7 +126,7 @@ function makeCtx(fake) {
     toast: m => toasts.push(String(m)),
     confirm: () => true,
     commitCellEdit: (rowId, field, val) => commits.push({ rowId, field, val }),
-    // 결정 327: 붙여넣기 저장은 _saveCellJobs(묶음 저장 → commitCellEdit 한 경로)로 넘긴다.
+    // 결정 330: 붙여넣기 저장은 _saveCellJobs(묶음 저장 → commitCellEdit 한 경로)로 넘긴다.
     //   여기서는 "어느 칸에 무엇을" 넘기는지만 본다 — 저장·결과 요약은 workdeskEditBatch.test.js 가 실제 실행으로 본다.
     _saveCellJobs: (jobs, locked) => { jobs.forEach(j => commits.push({ rowId: j.rowId, field: j.field, val: j.val })); toasts.push(`${jobs.length}칸 저장 중…`); saves.push({ n: jobs.length, locked }); },
     _beginCellUndoGroup: kind => ({ kind, entries: [], pending: 0 }),
