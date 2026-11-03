@@ -103,6 +103,14 @@ async function run() {
   ok('업체 항목은 총건수·제출·입금·시작일만 동봉(활성 작업행 수 미노출)',
     it.total === undefined && it.submitted === 651 && it.paid === 651 && it.target === 800 && it.startDate === '2026-04-21');
   ok('업체 총건수는 활성 작업행·발주보다 공고 모집 정원을 우선한다', it.target === 800 && it.target !== ownedRow.bTotal && it.target !== ownedRow.woRecruit);
+  ok('업체 진행 건수(filled) = 채워진 줄(bTotal) — 총건수와 별도 칸으로 싣는다(2026-11-03)',
+    it.filled === 675 && it.filled !== it.target);
+  {
+    const wd = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
+    const row = (wd.match(/<span class="acnt">[^\n]*<\/span>/) || [''])[0];
+    ok('업체 표 숫자 칸 = 총건수·진행·제출(입금 건수 미표시 — 2026-11-03 사용자 확정)',
+      /<span>총건수·진행·제출<\/span>/.test(wd) && /_awFilled\(it\)/.test(row) && !/입금/.test(row));
+  }
   const svcSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8');
   ok('업체 작업목록 제출 수는 제출 플래그가 아닌 작업표 리뷰제출 셀을 집계한다',
     /submit_header\.submit_header/.test(svcSrc)
@@ -189,8 +197,8 @@ async function run() {
   ok('loadTabs 가 광고주면 /my-work-summary 를 함께 받는다', src.includes("api('/api/trackb/my-work-summary')"));
 
   // ── 화면 A: 내 작업 목록 표 ──
-  ok('화면 A 컬럼: 시작일·진행상황·총건수/제출/입금·견적서·계산서·총비용·입금액·입금일·남은 입금액',
-    /<span>시작일<\/span><span>작업명<\/span><span>진행상황<\/span><span>총건수·제출·입금<\/span><span>자료 폴더<\/span><span>견적서<\/span><span>계산서<\/span><span>총비용<\/span><span>입금액<\/span><span>입금일<\/span><span>남은 입금액<\/span>/.test(src));
+  ok('화면 A 컬럼: 시작일·진행상황·총건수/진행/제출·견적서·계산서·총비용·입금액·입금일·남은 입금액',
+    /<span>시작일<\/span><span>작업명<\/span><span>진행상황<\/span><span>총건수·진행·제출<\/span><span>자료 폴더<\/span><span>견적서<\/span><span>계산서<\/span><span>총비용<\/span><span>입금액<\/span><span>입금일<\/span><span>남은 입금액<\/span>/.test(src));
   ok('남은 입금액 = 총비용 − 입금액 파생(0원 = 완납 표시)', /Math\.max\(tc-\(pa\|\|0\),0\)/.test(src) && src.includes("'0 ✓'"));
   ok('화면 A 컨테이너 폭 상한(1380px)', /#advHome\{max-width:1380px\}/.test(css));
 

@@ -97,7 +97,7 @@
   .awitem .unb{font-size:10px;font-weight:700;color:var(--accent-deep);background:var(--accent-soft);border-radius:999px;padding:1px 6px;flex:none}
   /* 화면 A — 내 작업 목록 표(업체관리 연결탭 표와 같은 컬럼 그리드 방식·고정폭 합) */
   #advHome{max-width:1380px}
-  .awlhead,.awlrow{display:grid;grid-template-columns:60px minmax(190px,1.4fr) 92px 128px 110px 64px 64px 94px 94px 68px 94px 44px;gap:8px;align-items:center;min-width:1150px}
+  .awlhead,.awlrow{display:grid;grid-template-columns:60px minmax(190px,1.4fr) 92px 160px 110px 64px 64px 94px 94px 68px 94px 44px;gap:8px;align-items:center;min-width:1182px}
   .awlhead{font-size:9.5px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);padding:0 14px 5px}
   .awlrow{padding:10px 14px;border:1px solid var(--line);border-radius:13px;margin-bottom:7px;cursor:pointer;background:var(--card);transition:box-shadow .2s,border-color .2s}
   .awlrow:hover{border-color:var(--accent-line);box-shadow:0 5px 14px rgba(16,24,40,.07)}
@@ -243,9 +243,9 @@
   body.brandv.nostl .awlhead>span:nth-child(n+6):nth-child(-n+11),
   body.brandv.nostl .awlrow>span:nth-child(n+6):nth-child(-n+11){display:none}
   body.brandv.nofol .awlhead>span:nth-child(5),body.brandv.nofol .awlrow>span:nth-child(5){display:none}
-  body.brandv.nofol .awlhead,body.brandv.nofol .awlrow{grid-template-columns:60px minmax(190px,1.4fr) 92px 128px 64px 64px 94px 94px 68px 94px 44px;min-width:auto}
-  body.brandv.nostl .awlhead,body.brandv.nostl .awlrow{grid-template-columns:60px minmax(190px,1.4fr) 92px 128px 110px 44px;min-width:auto}
-  body.brandv.nostl.nofol .awlhead,body.brandv.nostl.nofol .awlrow{grid-template-columns:60px minmax(190px,1.4fr) 92px 128px 44px;min-width:auto}
+  body.brandv.nofol .awlhead,body.brandv.nofol .awlrow{grid-template-columns:60px minmax(190px,1.4fr) 92px 160px 64px 64px 94px 94px 68px 94px 44px;min-width:auto}
+  body.brandv.nostl .awlhead,body.brandv.nostl .awlrow{grid-template-columns:60px minmax(190px,1.4fr) 92px 160px 110px 44px;min-width:auto}
+  body.brandv.nostl.nofol .awlhead,body.brandv.nostl.nofol .awlrow{grid-template-columns:60px minmax(190px,1.4fr) 92px 160px 44px;min-width:auto}
   /* A안: 자료 폴더 바로가기(🛒 구매캡쳐 / 📸 리뷰캡쳐) — 표 셀 미니 버튼 + 상세 헤더 버튼 공용 */
   .afol{display:flex;gap:4px;align-items:center}
   .fol{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:750;border-radius:7px;padding:2px 7px;border:1px solid;background:var(--card);text-decoration:none;white-space:nowrap;cursor:pointer}
@@ -303,13 +303,13 @@
   .adprow .pn{flex:1;min-width:0}
   .adprow .pn b{font-size:12.5px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .adprow .pn i{font-size:10px;color:var(--faint);margin-top:2px;display:block;font-style:normal;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .adgauge{width:168px;flex:none}
+  .adgauge{width:228px;flex:none}   /* 총·진행·제출 세 값이 한 줄에 들어가는 폭(2026-11-03) */
   @media(max-width:900px){.adgauge{width:110px}}
   .adbar{height:7px;border-radius:99px;background:var(--card2);overflow:hidden;display:flex}
   .adbar i{display:block;height:100%}
   .adbar .b1{background:var(--accent)} .adbar .b2{background:color-mix(in srgb,var(--accent) 32%,#fff)}
   .adglab{display:flex;justify-content:space-between;gap:6px;font-size:9.5px;color:var(--faint);margin-top:4px;font-weight:650}
-  .adglab b{color:var(--ink)}
+  .adglab b{color:var(--ink)} .adglab{flex-wrap:wrap} .adglab>span{white-space:nowrap}
   .adprow .ppct{font-size:13px;font-weight:800;color:var(--accent-deep);min-width:40px;text-align:right;flex:none}
   .adpipe{display:flex;flex-direction:column;gap:7px}
   .adstep{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--card2)}
@@ -3933,6 +3933,12 @@ function _awTarget(it){
   const t=Number(it&&it.target);
   return Number.isFinite(t)&&t>0?Math.round(t):0;
 }
+// 업체 진행 건수(구매가 실제로 기록된 줄) — 서버 `filled` 그대로. 구버전 서버(값 없음)면 null → 진행 칸 생략.
+//   ★ 업체 화면 숫자 = 총건수 · 진행 · 제출(사용자 확정 2026-11-03 위프코리아 요청 — 입금 건수는 업체 화면에서 뺀다).
+function _awFilled(it){
+  const v=it&&it.filled; if(v==null) return null;
+  const n=Number(v); return Number.isFinite(n)&&n>=0?Math.round(n):null;
+}
 // A안: 자료 폴더 바로가기 버튼 한 벌 — 표 셀(미니)·상세 헤더(big) 공용. 미연결은 회색 배지로 자리 유지(컬럼 정렬 보호).
 // A안(사용자 확정): 브랜드 화면에도 운영 주체(대행사)를 표기 — 문의처가 분명해진다.
 function _brandBadge(){
@@ -4105,7 +4111,7 @@ function _awRowHtml(it){
     <span class="adate">${esc(_awDate(it))}</span>
     <span class="anm"><b>${_awHi(_tabLabel(it))}</b><span class="asub">${_isNoSheet(it)?'':_awHi(it.spreadsheetTitle||'')}</span>${s?_shareBadge(s.sharedTabCount):''}</span>
     <span><span class="bb advprog ${st.tone}">${esc(st.label)}</span></span>
-    <span class="acnt"><b>${_awTarget(it)||'—'}</b>건 · 제출 <b class="c-sub">${it.submitted||0}</b> · 입금 <b class="c-paid">${it.paid||0}</b></span>
+    <span class="acnt"><b>${_awTarget(it)||'—'}</b>건${_awFilled(it)!=null?` · 진행 <b>${_awFilled(it)}</b>`:''} · 제출 <b class="c-sub">${it.submitted||0}</b></span>
     <span class="afol">${_awFolderBtns(it)}</span>
     <span>${s?`<span class="bb docv ${qs?qt:''}" onclick="awDocOpen(event,'quote',${i})" title="견적서 열람">${qs?esc(qs):'—'}</span>`:'<span class="bb" title="매칭된 견적서가 아직 없습니다">—</span>'}</span>
     <span>${s?`<span class="bb docv ${iv?(ivt||''):''}" onclick="awDocOpen(event,'invoice',${i})" title="세금계산서 열람">${iv?esc(iv):'—'}</span>`:'<span class="bb" title="매칭된 계약이 아직 없습니다">—</span>'}</span>
@@ -4122,7 +4128,7 @@ function _awMD(d){ const v=String(d||''); const m=v.match(/^(\d{4})-(\d{2})-(\d{
   const p=v.match(/^(\d{4})(\d{2})(\d{2})$/); return p?`${+p[2]}/${+p[3]}`:v.slice(0,10); }
 function _awListHtml(items, limit){
   const rows=(limit?items.slice(0,limit):items).map(_awRowHtml).join('');
-  return `<div class="awlwrap"><div class="awlhead"><span>시작일</span><span>작업명</span><span>진행상황</span><span>총건수·제출·입금</span><span>자료 폴더</span><span>견적서</span><span>계산서</span><span>총비용</span><span>입금액</span><span>입금일</span><span>남은 입금액</span><span></span></div>${rows}</div>`;
+  return `<div class="awlwrap"><div class="awlhead"><span>시작일</span><span>작업명</span><span>진행상황</span><span>총건수·진행·제출</span><span>자료 폴더</span><span>견적서</span><span>계산서</span><span>총비용</span><span>입금액</span><span>입금일</span><span>남은 입금액</span><span></span></div>${rows}</div>`;
 }
 // ── 화면 A-2: 전체 작업(목록 표) ──
 function _renderAdvList(){
@@ -4185,7 +4191,7 @@ function _brandRowsHtml(b,items,be){
       <span class="rdt">${esc(_awDate(it))}</span>
       <span class="rnm">${esc(_tabLabel(it))}</span>
       ${_bmCell(it,ix)}
-      <span class="rcnt">총 ${_awTarget(it)||'—'}건 · 제출 ${it.submitted||0}</span>
+      <span class="rcnt">총 ${_awTarget(it)||'—'}건${_awFilled(it)!=null?` · 진행 ${_awFilled(it)}`:''} · 제출 ${it.submitted||0}</span>
       <span class="bb advprog ${st.tone}">${esc(st.label)}</span></div>${_bmEditHtml(it,ix)}`;
   }).join('')}</div>`;
 }
@@ -4492,7 +4498,7 @@ function _renderAdvDash(){
       <span class="pd">${esc(_awDate(it))}</span>
       <span class="pn"><b>${esc(_tabLabel(it))}</b><i>${[_isNoSheet(it)?'':esc(it.spreadsheetTitle||''),tgt?`총 ${tgt}건`:''].filter(Boolean).join(' · ')}</i></span>
       <span class="adgauge"><span class="adbar"><i class="b1" style="width:${w1.toFixed(1)}%"></i><i class="b2" style="width:${w2.toFixed(1)}%"></i></span>
-        <span class="adglab"><span>총 <b>${tgt||'—'}</b> · 제출 <b>${sub}</b></span><span>${tgt?`제출 ${pct}%`:''}</span></span></span>
+        <span class="adglab"><span>총 <b>${tgt||'—'}</b>${_awFilled(it)!=null?` · 진행 <b>${_awFilled(it)}</b>`:''} · 제출 <b>${sub}</b></span><span>${tgt?`제출 ${pct}%`:''}</span></span></span>
       <span class="ppct"${tgt?'':' title="총건수를 확인할 수 없습니다"'}>${pct!=null?pct+'%':'—'}</span></div>`;
   }).join(''):`<div class="empty" style="padding:14px">진행 중인 작업이 없습니다.</div>`;
   // ③ 정산 파이프라인(견적→계산서→입금) — 연결된 건 기준
