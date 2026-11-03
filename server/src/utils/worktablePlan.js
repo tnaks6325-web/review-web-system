@@ -976,10 +976,11 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     : distributeOptions({ total, options: optKeys, includeSingle: isV2, distributionMode: productDistributionMode });
   /* ★★ 127: 블로그체험단은 구매일자를 **미리 정할 수 없다**(모집·승인된 블로거가 생기면 그때 구매).
      날짜를 깔면 리뷰 규칙(그날 정원 파생)이 잘못 작동하므로 구매일자 칸을 통째로 비워 둔다 —
-     바를참스킨 0804 시트(번호 1~50 + 구매일자 빈 칸)가 곧 블로그 표의 정상 모양이다. */
+     바를참스킨 0804 시트(번호 1~50 + 구매일자 빈 칸)가 곧 블로그 표의 정상 모양이다.
+     ★ v2 작업표도 같다(2026-11-03) — v2 도입(#1264) 때 v1 에만 걸려 v2 블로그 표에 날짜가 깔렸다. */
   const { days, rowDates } = isQnaPlan
     ? _qnaDays(qnaCal.slots)
-    : !isV2 && isBlogPlan
+    : isBlogPlan
       ? { days: [], rowDates: [] }
       : distributeDates({ total, daily, startDate, skipWeekends, holidays });
 
@@ -1092,8 +1093,9 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
       placeV2StagedColumns(columns, stagedSelections);
       placeV2TrackingColumn(columns, courier.enabled);
     }
-    // ★ Q&A 에는 리뷰타입이 없다 — 행별 리뷰 형태를 정하지 않는다(정하려 들면 invalid_review_type 으로 잠긴다).
-    if (!isQnaPlan) reviewOptions = reviewOptionAssignments({
+    // ★ Q&A·블로그에는 리뷰타입이 없다 — 행별 리뷰 형태를 정하지 않는다(정하려 들면 invalid_review_type 으로 잠긴다).
+    //   블로그는 인트라넷이 리뷰타입을 지워 보낸다(reviewOrderApplyBlogRule) — 빼지 않으면 v2 블로그 오더는 접수가 영영 막힌다(2026-11-03 실측).
+    if (!isQnaPlan && !isBlogPlan) reviewOptions = reviewOptionAssignments({
       total,
       selections: stagedSelections,
       rowSelections,

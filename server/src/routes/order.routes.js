@@ -819,6 +819,21 @@ function _qnaLockedFields(cur, b, optionsJson) {
 }
 
 /**
+ * ★★ 접수된 오더의 체험단 종류가 바뀌는 요청인가(2026-11-03).
+ *   접수가 종류대로 작업표 열(블로그 3열·리뷰옵션)·자리표(Q&A)를 이미 깔았고 작업 종류(`tab_configs.work_kind`)는
+ *   빈 값일 때만 채워져 다시 바뀌지 않는다. 종전 잠금(isSourceEditLocked)은 공고·광고주 연결 뒤에만 걸려,
+ *   **접수만 되고 광고주·공고가 없는 오더**는 종류가 그대로 저장돼 오더와 작업표의 종류가 갈라질 수 있었다.
+ *   ★ 삭제된 오더는 대상이 아니다(다른 잠금이 막는다). 보내지 않은 종류 = 리뷰(전체 갱신이 그렇게 쓴다).
+ */
+function _acceptedWorkKindChanged(order, nextKindRaw) {
+  const o = order || {};
+  if (!o.linked_tab_name || o.deleted_at) return false;
+  const { normalizeWorkKind } = require('../utils/workKind');
+  return normalizeWorkKind(nextKindRaw) !== normalizeWorkKind(o.work_kind);
+}
+const ACCEPTED_KIND_CHANGE_ERROR = '이미 접수돼 작업표가 만들어진 오더라 체험단 종류를 바꿀 수 없습니다 — 원래 종류로 되돌려 저장해 주세요.';
+
+/**
  * ★★ Q&A체험단(결정 321 · 사용자 확정 2026-11-03) — 접수로 날짜별 자리표가 만들어진 오더인가.
  *   이런 오더는 **공고를 발행하기 전이라도** 건수·상품·하루 건수·공개 문구·시작일을 바꾸지 않는다
  *   (자리표·작업표 줄이 이미 그 값으로 깔렸다). 늘리려면 일정 끝 「추가 모집」으로 한다.
@@ -1221,6 +1236,13 @@ async function _intakeSourceRevisionHandler(req, res, next) {
         return res.status(409).json({ ok: false, code: 'qna_calendar_locked', blocked_fields: locked, work_order_id: current.id,
           error: 'Q&A 작업은 접수 뒤 건수·상품·하루 건수·공개 문구·시작일을 바꿀 수 없습니다 — 일정이 끝날 때 「추가 모집」으로 늘려 주세요.' });
       }
+    }
+
+    // ★★ 접수된 오더의 종류 변경은 어떤 경로로도 통과시키지 않는다(작업표가 그 종류로 이미 깔렸다).
+    //   양방향 연결 오더는 아래 공유 저장이 같은 요청을 `structure_new_order` 로 막아 왔다 — 그 응답은 그대로 둔다.
+    if (current.bidir_state !== 'on' && _acceptedWorkKindChanged(current, b.work_kind)) {
+      return res.status(409).json({ ok: false, code: 'accepted_kind_locked', blocked_fields: ['work_kind'],
+        work_order_id: current.id, error: ACCEPTED_KIND_CHANGE_ERROR });
     }
 
     if (_sourceManagerCapability(b)) {
@@ -1841,6 +1863,9 @@ async function _intakeUpdateHandler(req, res, next) {
     /* ★ 7단계 🔴5(2026-10-20): 접수된 오더(작업표·공고가 이미 만들어짐)의 작업표 칸은 이 옛 경로로도 바꾸지 않는다 — 원본 수정(/intake/source)은
        접수 뒤 이 칸들을 409 로 막는데(SOURCE_EDIT_AFTER_ACCEPT) 이 경로만 잠금이 없어 작업표와 어긋날 수 있었다. 같은 값을 다시 보내는 것은 통과. */
     const _legacyOptions = b.product_options_json !== undefined ? _requestOptionsJson(b) : undefined;
+    if (b.work_kind !== undefined && _acceptedWorkKindChanged(cur[0], b.work_kind)) {
+      return res.status(409).json({ ok: false, code: 'accepted_kind_locked', fields: ['work_kind'], error: ACCEPTED_KIND_CHANGE_ERROR });
+    }
     if (isSourceEditLocked(cur[0]) || await _qnaCalendarLocked(cur[0])) {
       // 종전 잠금이 걸린 오더는 종전 비교 그대로, Q&A 자리표 잠금만 걸린 오더는 자리표 칸만 본다.
       const locked = isSourceEditLocked(cur[0])
