@@ -3686,6 +3686,13 @@ function renderFeeSchedule() {
 /* ═══════════════════════════════════════
    모달 열기/닫기
 ═══════════════════════════════════════ */
+/** 작업오더 프리필의 체험단 종류 → 발행 폼 값. blog·qna 만 그대로 두고 나머지는 ''(= 리뷰, 종전 동작).
+   ★ Q&A 를 여기서 지우면 Q&A 오더로 발행한 공고가 리뷰 공고로 저장된다(구매양식·리뷰 검수가 붙는다). */
+function _rfPrefillWorkKind(raw) {
+  const v = String(raw || "").trim();
+  return (v === "blog" || v === "qna") ? v : "";
+}
+
 /* ═══ 127: 발행 모달 체험단 종류(work_kind) UI ═══
    블로그 공고면 리뷰타입 카드(별도 축 — 블로그엔 없음)를 숨기고 안내 배너를 띄운다.
    값은 hidden `rf_work_kind` 하나(작업오더 프리필·편집 로드가 채우고 저장 payload 가 읽는다).
@@ -4178,7 +4185,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
       _setRecruitGlobalReviewTypeMix(prefillReviewMix);
       if (prefill.review_type) _rfPickBtn("review_type", _rfReviewTypeKey(prefill.review_type));
       /* ★ 127: 작업오더의 체험단 종류 → 공고에 그대로 전파(blog 면 리뷰타입 카드 숨김) */
-      { const _wk = document.getElementById("rf_work_kind"); if (_wk) _wk.value = (String(prefill.work_kind || "").trim() === "blog") ? "blog" : ""; _rfApplyWorkKindUi(); }
+      { const _wk = document.getElementById("rf_work_kind"); if (_wk) _wk.value = _rfPrefillWorkKind(prefill.work_kind); _rfApplyWorkKindUi(); }
 
       /* ★ 065: 연결 탭 자동 선택 — 접수 시 확정된 탭(work_sheet_url 은 제출 필수).
          탭 리네임 대비로 gid 우선 재매칭 후 이름 폴백. 미접수 오더는 값이 없어 그대로 수동. */
