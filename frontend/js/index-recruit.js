@@ -3703,7 +3703,7 @@ function _rfApplyWorkKindUi() {
   const isBlog = _kind === "blog";
   const noReviewType = isBlog || _kind === "qna";   // Q&A체험단도 리뷰타입이 없다(결정 321)
   // 시안 3차: 맨 위 체험단 종류 탭(보기 전용 — 체험단 종류는 리뷰오더에서 정하고 접수 뒤 바꾸지 않는다)
-  document.querySelectorAll("#rf_kind_tabs [data-kind]").forEach(t => t.classList.toggle("on", t.dataset.kind === (_kind || "review")));   // 탭이 없는 종류(qna)는 아무 탭도 켜지 않는다 — 리뷰로 보이면 안 된다
+  document.querySelectorAll("#rf_kind_tabs [data-kind]").forEach(t => t.classList.toggle("on", t.dataset.kind === (_kind || "review")));   // 모르는 종류는 아무 탭도 켜지 않는다 — 리뷰로 보이면 안 된다(Q&A 탭은 결정 321 3단계에서 추가)
   // 리뷰타입 UI(두 레이아웃 변형 모두) — 카드형은 .rf-hrow, 행형은 .rf-review-type-row
   document.querySelectorAll("#rf_review_type_btns").forEach(btns => {
     const row = btns.closest(".rf-hrow") || btns.closest(".rf-review-type-row") || btns.closest(".form-row");

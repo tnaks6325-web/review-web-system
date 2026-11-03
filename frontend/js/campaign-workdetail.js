@@ -202,9 +202,11 @@
         + (sub ? '<div class="sub">' + escAttr(sub) + '</div>' : '') + '</div></div></div>';
     }
 
-    // 상품 · 옵션 · 결제금액
-    html += '<div class="cwd-box"><div class="cwd-tt">📦 상품 · 옵션 · 결제금액</div>'
-      + '<div class="cwd-body">' + escAttr(fmtProduct(wd, d.qty)) + '</div></div>';
+    // 상품 · 옵션 · 결제금액 — 💬 321: Q&A 는 구매가 없어 숨긴다(showProduct:false · 상품은 Q&A 카드가 보여 준다)
+    if (o.showProduct !== false) {
+      html += '<div class="cwd-box"><div class="cwd-tt">📦 상품 · 옵션 · 결제금액</div>'
+        + '<div class="cwd-body">' + escAttr(fmtProduct(wd, d.qty)) + '</div></div>';
+    }
 
     // 🧾 현금영수증 발행 안내 — 연결 탭 진행방식이 '현영'인 공고만(d.cashReceipt는 서버가 판정).
     //   결제 단계를 지나면 발행을 되돌리기 어려우므로 상품 카드 바로 아래(구매 전 시점)에 둔다.
@@ -278,6 +280,8 @@
     // 단일상품에서 상품 카드와 같은 이름을 세 번 노출시켜 읽기만 방해한다.
     // 단, 관리자 인라인 미리보기는 첫 선택지 가이드를 대표로 보여 주므로, 어떤
     // 선택지인지 확인할 수 있게 호출부가 명시한 경우에만 배지를 유지한다.
+    // 💬 결정 321: Q&A체험단은 유입방식이 없다(상품 페이지 링크는 Q&A 카드가 따로 준다) — 호출부가 끌 때만 카드째 뺀다
+    if (o.showInflow !== false) {
     html += '<div class="cwd-box"><div class="cwd-tt">🧭 유입가이드</div>'
       + (usingUnitGuide && o.showUnitGuideIdentity
         ? '<div class="cwd-note">📌 <b>' + escAttr(so.optKey) + '</b> 선택지 전용 안내예요.</div>'
@@ -291,6 +295,7 @@
       html += '<button type="button" class="cwd-btn" data-cwd-landing="' + escAttr(landingUrl) + '">🔗 ' + (hasSelectedOptionUrl ? '선택 옵션 링크 열기' : '상품 페이지 열기') + ' (새 탭)</button>';
     }
     html += '</div>';
+    }
 
     // 리뷰 가이드 ([리뷰등록 가이드] 섹션만) + 첨부 이미지
     // ★ 사진만 있고 글이 비어도 카드를 낸다 — 안 그리면 관리자가 넣은 사진이 통째로 사라진다.

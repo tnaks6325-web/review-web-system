@@ -449,7 +449,7 @@
           <div id="editorScroller" class="compact-editor-scroller" tabindex="0" aria-label="모집공고 수정 항목">
             <!-- 공고 창 시안 3차(결정 275 · 사용자 확정 2026-10-22) — 체험단 종류 → 리뷰오더 고유 항목 → 리뷰오더와 맞춰지는 항목(양방향) → 리뷰웹에서만 정하는 값.
                  ★ 칸의 화면 뒤 이름(id)·동작은 그대로다(프리필·저장·잠금이 그 이름으로 묶여 있다). 옮긴 것은 줄의 자리뿐. -->
-            <div id="rf_kind_tabs" class="rf-kind-tabs" role="group" aria-label="체험단 종류(리뷰오더에서 정함)"><span data-kind="review" class="on">리뷰체험단</span><span data-kind="blog">블로그체험단</span></div>
+            <div id="rf_kind_tabs" class="rf-kind-tabs" role="group" aria-label="체험단 종류(리뷰오더에서 정함)"><span data-kind="review" class="on">리뷰체험단</span><span data-kind="blog">블로그체험단</span><span data-kind="qna">Q&amp;A체험단</span></div>
             <section class="section rf-order-own" data-sec="order">
               <div class="section-heading"><div><h3>리뷰오더 고유 항목</h3><span class="section-hint" id="rf_order_own_hint">리뷰오더에서 정한 값 · 연결된 공고에서는 보기 전용</span></div></div>
               <div class="row-form">

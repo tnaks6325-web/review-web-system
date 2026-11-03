@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
   <script src="api.js"></script>
-  <script src="js/campaign-cards.js?v=20261019-camppause"></script>
+  <script src="js/campaign-cards.js?v=20261103-qna"></script>
   <script src="js/campaign-workdetail.js"></script>
   <style>
     :root{ --p:#3182f6; --p-light:#e8f1fe; --p-dark:#1b64da; --ok:#12b886; --ok-light:#D1FAE5;
@@ -35,6 +35,16 @@
     .holdbar .l{flex:1;font-size:.78rem;font-weight:700;color:#92400E}
     .holdbar .v{font-size:1.15rem;font-weight:900;color:#92400E;font-variant-numeric:tabular-nums}
     .wd-tt{font-size:.78rem;font-weight:800;color:var(--t3);margin-bottom:8px}
+    /* 💬 결정 321 — Q&A체험단 참여 후 카드(기존 cardbx 안의 내용만 · 새 색 없음) */
+    .qna-meta{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+    .qna-chip{font-size:.74rem;font-weight:800;border-radius:999px;padding:4px 10px;background:var(--p-light);color:var(--p-dark)}
+    .qna-chip.priv{background:#EEF1F7;color:var(--t2)}
+    .qna-text{border:1.5px dashed var(--p);border-radius:10px;padding:11px 12px;font-size:.92rem;line-height:1.5;color:var(--t1);background:#fff;word-break:break-all;margin-bottom:8px}
+    .qna-steps{margin:10px 0 12px;padding-left:18px;font-size:.84rem;line-height:1.65;color:var(--t2)}
+    .qna-steps b{color:var(--t1)}
+    .qna-file{display:block;width:100%;box-sizing:border-box;border:1.5px dashed var(--border);border-radius:10px;padding:12px;text-align:center;font-size:.86rem;color:var(--t2);cursor:pointer;background:#FAFBFD;margin-bottom:10px}
+    .qna-file img{display:block;max-width:100%;max-height:260px;margin:0 auto 6px;border-radius:8px}
+    .qna-err{font-size:.8rem;color:#B42318;margin-top:8px;line-height:1.5}
     .wd-body{font-size:.88rem;color:var(--t1);white-space:pre-wrap;word-break:break-word;line-height:1.65}
     .wd-body img{max-width:100%;border-radius:10px;margin:6px 0}
     .lockcard{text-align:center;padding:26px 14px}
@@ -129,7 +139,7 @@
       </div>
       <div class="cardbx lockcard">
         <div class="e">🔒</div><div class="m">작업내용</div>
-        <div class="s">상품·옵션·결제금액, 유입가이드, 구매양식은<br/>참여 후에 확인할 수 있어요.</div>
+        <div class="s" id="preLockText">상품·옵션·결제금액, 유입가이드, 구매양식은<br/>참여 후에 확인할 수 있어요.</div>
       </div>
       <div class="cardbx">
         <div class="wd-tt">⏱ 참여 안내</div>
@@ -155,7 +165,7 @@
 
   <!-- 참여 후 -->
   <div id="vJoined" style="display:none">
-    <div class="holdbar"><span class="l">⏳ 구매양식 제출까지</span><span class="v" id="holdCd">--:--</span></div>
+    <div class="holdbar"><span class="l" id="holdLabel">⏳ 구매양식 제출까지</span><span class="v" id="holdCd">--:--</span></div>
     <div class="sec">
       <!-- 👥 063 2단계: 이 건의 참여 명의 + 여러 건이면 명의 전환 칩 (타계정 참여 시에만 노출) -->
       <div class="cardbx" id="acctBox" style="display:none;border-color:#7C3AED">
@@ -174,7 +184,12 @@
       <!-- 작업내용 4카드 = js/campaign-workdetail.js 공용 렌더러. 관리자 미리보기가 같은 코드를 써서
            "미리보기와 실제 화면이 다른" 문제가 구조적으로 생기지 않는다. -->
       <div id="wdCards"></div>
-      <div class="cardbx" style="border-color:var(--p)">
+      <!-- 💬 결정 321: Q&A체험단 — 구매양식 대신 오늘 남길 문의 + 캡처 제출 (Q&A 공고에서만 보임) -->
+      <div class="cardbx" id="qnaBox" style="display:none;border-color:var(--p)">
+        <div class="wd-tt" style="color:var(--p-dark)">💬 오늘 남길 문의 — 문의를 등록한 뒤 캡처를 올리세요</div>
+        <div id="qnaBody"></div>
+      </div>
+      <div class="cardbx" id="orderBox" style="border-color:var(--p)">
         <div class="wd-tt" style="color:var(--p-dark)">🧾 구매양식 — 구매를 마친 뒤 여기서 바로 제출하세요</div>
         <div class="pv-note" id="pvFormNote" style="display:none">이 공고에는 <b>연결된 작업시트 탭이 없어</b> 리뷰어에게도 구매양식이 표시되지 않습니다.<br/>공고 수정에서 작업시트 탭을 연결해주세요.</div>
         <iframe id="orderFrame" title="구매양식"></iframe>
@@ -183,7 +198,7 @@
       <!-- 👥 063 2단계: 타계정으로 한 건 더 참여(타계정 가능 공고 + 참여 가능한 명의 있을 때만 노출) -->
       <button class="btn" id="addSubBtn" style="margin-top:2px;display:none;background:linear-gradient(135deg,#7C3AED,#6D28D9)" onclick="onAddSubJoin()">＋ 타계정으로 추가참여하기</button>
       <button class="btn ghost" style="margin-top:2px" onclick="onCancel()">참여 취소</button>
-      <div class="muted" style="text-align:center;margin-top:6px">구매양식을 제출하지 않았다면 오늘 다시 참여할 수 있어요.</div>
+      <div class="muted" id="joinedFootNote" style="text-align:center;margin-top:6px">구매양식을 제출하지 않았다면 오늘 다시 참여할 수 있어요.</div>
     </div>
   </div>
 
@@ -550,10 +565,16 @@ function renderPre(){
   if(pc){ pc.onclick = null; pc.style.cursor='default';
     const b = pc.querySelector('.pbtn'); if(b) b.style.display='none'; }
   const ttl = holdTtlText();
-  $('preNotice').textContent =
-    '지금 참여하면 ' + (c.cutoffAt ? '늦어도 ' + CampCards._fmtHM(c.closesAt) + '까지' : ttl + ' 안에') +
+  // 💬 321: Q&A 는 구매가 없다 — 신청하면 오늘 자리가 정해지고 1시간(그날 자정 중 빠른 쪽) 안에 캡처 제출
+  $('preNotice').textContent = isQnaCampaign()
+    ? '참여하면 오늘 남길 문의가 바로 정해져요. 1시간 안에(밤 12시를 넘기지 않게) 상품 페이지에 문의를 등록하고 캡처를 제출해야 해요. 밤 11시 50분부터는 새로 참여할 수 없어요.\n' +
+      '이 캠페인은 상품을 사지 않아요. 문의를 남기고 캡처를 내면 참여비를 받아요.'
+    : '지금 참여하면 ' + (c.cutoffAt ? '늦어도 ' + CampCards._fmtHM(c.closesAt) + '까지' : ttl + ' 안에') +
     ' 구매와 구매양식 제출까지 완료해야 해요. 시간이 지나 자동 취소돼도 구매양식을 제출하지 않았다면 다시 참여할 수 있어요.\n' +
     '이 캠페인은 상품을 직접 구매(선결제)한 뒤 리뷰비와 함께 환급받는 방식이에요.';
+  if($('preLockText')) $('preLockText').innerHTML = isQnaCampaign()
+    ? '남길 문의(공개 문구 또는 비밀글)와 캡처 제출 창은<br/>참여 후에 확인할 수 있어요.'
+    : '상품·옵션·결제금액, 유입가이드, 구매양식은<br/>참여 후에 확인할 수 있어요.';
   const jb = $('joinBtn');
   const st = c.state;
   jb.disabled = st !== 'open';
@@ -948,7 +969,9 @@ function openOptSheet(){
   _optSheetMode = 'join';
   $('optSheetTitle').textContent = '참여할 옵션 선택';
   $('optSheetDesc').textContent = '어떤 옵션으로 참여하시겠어요?';
-  $('optSheetNote').textContent = '선택한 옵션으로 자리가 잡혀요. 구매 전까지는 다른 옵션으로 바꿀 수 있어요.';
+  $('optSheetNote').textContent = isQnaCampaign()   // 💬 321: Q&A 는 그 상품의 오늘 자리가 바로 묶이고 바꿀 수 없다
+    ? '고른 상품의 오늘 자리가 바로 정해져요. 참여 뒤에는 상품을 바꿀 수 없어요(취소 후 다시 참여).'
+    : '선택한 옵션으로 자리가 잡혀요. 구매 전까지는 다른 옵션으로 바꿀 수 있어요.';
   $('optSheetGo').textContent = '이 옵션으로 참여';
   _renderOptSheetList((_camp && _camp.options) || [], null);
   $('optSheet').style.display = 'flex';
@@ -1305,6 +1328,7 @@ function _isBlogUrl(v){
 }
 /** 이 공고가 블로그체험단인가 — 서버가 준 값 정확 일치(탭명·상품명 추측 금지) */
 function isBlogCampaign(){ return !!(_camp && _camp.work_kind === 'blog'); }
+function isQnaCampaign(){ return !!(_camp && _camp.work_kind === 'qna'); }
 let _blogUrl     = '';     // 이번 참여에 쓸 값(확인된 뒤에만 채운다)
 let _blogPending = null;   // 시트 확인 후 이어서 실행할 apply 인자 {optionKey, sub}
 function openBlogSheet(optionKey, sub, msg){
@@ -1593,6 +1617,7 @@ function renderMissing(missing){
 
 /* ═══ 참여 후 화면 ═══ */
 let _detailRetry = 0;
+let _qnaSlotRetry = 0;   // 💬 321: Q&A 자리 정보 못 받음 재시도
 // 당일 미제출 홀드는 재참여를 허용한다. 만료 토큰을 그대로 복원하면 서버는 계속 expired를
 // 반환하므로, 해당 명의의 로컬 홀드만 제거하고 참여 전 화면으로 되돌린다.
 /* ═══ 📝 127 블로그 승인제: 대기/반려 화면 ═══
@@ -1658,7 +1683,16 @@ async function enterJoined(){
     // 목록 API는 실제 모집 상태를 반영한 selectable 값을 주지만, 관리자 미리보기는
     // 게시 여부와 무관한 가상 진행 화면이다. 미리보기 전용 옵션 뷰로 교체한다.
     if(_camp && Array.isArray(j.options)) _camp.options = j.options;
-    if(j.application && j.application.status === 'submitted'){ renderDone(); return; }
+    // 💬 321: Q&A 는 줄 기록(제출) 뒤 캡처까지 내야 끝난다 — 캡처가 아직이면 다시 올리기 카드로(홀드 보존)
+    //   자리 정보를 못 받았으면(조회 실패) 끝난 화면으로 넘기지 않고 다시 불러온다 — 캡처를 안 낸 사람이 "완료"를 보면 기한을 놓친다
+    if(isQnaCampaign() && j.application && j.application.status === 'submitted' && !j.qnaSlot){
+      _qnaSlotRetry++;   // 위에서 _detailRetry 를 0 으로 되돌리므로 따로 센다(무한 재시도 방지)
+      if(_qnaSlotRetry <= 6) setTimeout(enterJoined, _qnaSlotRetry <= 2 ? 3000 : 8000);
+      else toast('정보를 불러오지 못했어요. 잠시 후 새로고침해주세요 (참여는 유지돼요)');
+      return;
+    }
+    _qnaSlotRetry = 0;
+    if(_isDoneDetail(j)){ renderDone(); return; }
     _renderJoinedView(j, h);
   }catch(e){ toast('불러오기 오류: ' + e.message); renderPre(); }
 }
@@ -1681,7 +1715,21 @@ function _renderJoinedView(j, h){
       selectedOption: j.selectedOption,
       cashReceipt: j.cashReceipt,   // 현영 탭 공고만 서버가 내려줌(발행 안내 카드)
       qty: j.qty,                   // ★ 결정 289: 고른 개수 단계 — 상품 카드 결제금액을 그 단계 금액으로(1개 금액과 둘로 갈리지 않게)
-    }, { showOption: false, apiBase: API_BASE_URL });
+    }, { showOption: false, apiBase: API_BASE_URL, showInflow: !j.qnaSlot, showProduct: !j.qnaSlot });
+    // 💬 321: Q&A 공고는 구매양식(iframe) 대신 문의 카드 — 구매가 없다
+    const _qna = !!j.qnaSlot;
+    $('qnaBox').style.display = _qna ? '' : 'none';
+    $('orderBox').style.display = _qna ? 'none' : '';
+    $('holdLabel').textContent = _qna ? '⏳ 캡처 제출까지' : '⏳ 구매양식 제출까지';
+    $('joinedFootNote').textContent = _qna ? '캡처를 제출하지 않았다면 오늘 다시 참여할 수 있어요.' : '구매양식을 제출하지 않았다면 오늘 다시 참여할 수 있어요.';
+    if(_qna){
+      renderQnaCard(j, h);
+      if(j.application.status === 'submitted') $('holdCd').textContent = '접수됨';
+      else startHoldCountdown(j.application.expiresAt || (h && h.expiresAt));
+      if(!PREVIEW) startPolling();
+      show('vJoined');
+      return;
+    }
     // 인라인 구매양식 iframe (동일 오리진 — search.html 재사용)
     const frame = $('orderFrame');
     frame.style.display = '';
@@ -1757,6 +1805,116 @@ function renderJoinedOption(j){
     (j.canChangeOption ? '<button class="chg" onclick="openChangeOptSheet()">옵션 변경</button>' : '');
 }
 
+/* ═══ 💬 결정 321 — Q&A체험단 참여 후 카드 ═══
+   흐름: 문의 등록 → 캡처 선택 → [캡처 제출] = ① 그 자리 줄 기록(/api/submit/qna · 신청 확정)
+         ② 기존 리뷰 캡처 업로드(review-upload) ③ 제출 완료(/api/submit/review). ②·③ 이 실패하면 ①은 남고
+         같은 카드가 "캡처 다시 올리기"로 남는다(새로고침해도 — work-detail 의 captureDone 이 단일 출처). */
+let _qnaB64 = '';
+function _qnaDateLabel(ymd){
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd||'')); if(!m) return '';
+  const d = new Date(Date.UTC(+m[1], +m[2]-1, +m[3]));
+  return (+m[2]) + '월 ' + (+m[3]) + '일 (' + '일월화수목금토'[d.getUTCDay()] + ')';
+}
+function _qnaHm(iso){
+  const t = Date.parse(iso||''); if(!t) return '';
+  const k = new Date(t + 9*3600000);
+  return String(k.getUTCHours()).padStart(2,'0') + ':' + String(k.getUTCMinutes()).padStart(2,'0');
+}
+function renderQnaCard(j, h){
+  const q = j.qnaSlot || {};
+  const pub = q.visibility === 'public';
+  const so = j.selectedOption || {};
+  const url = so.optionUrl || j.landingUrl || '';
+  const uploadOnly = !!(j.application && j.application.status === 'submitted');
+  let html = '<div class="qna-meta"><span class="qna-chip">' + _escAttr(_qnaDateLabel(q.date) || '오늘') + '</span>'
+    + '<span class="qna-chip' + (pub ? '' : ' priv') + '">' + (pub ? '공개 문의' : '비공개(비밀글) 문의') + '</span>'
+    + (so.optKey ? '<span class="qna-chip priv">' + _escAttr(so.optKey) + '</span>' : '') + '</div>';
+  if(pub){
+    html += '<div class="muted" style="margin-bottom:6px">아래 문구를 <b>그대로</b> 붙여 넣어 주세요. <b>비밀글로 체크하지 마세요.</b></div>'
+      + '<div class="qna-text" id="qnaText">' + _escAttr(q.questionText || '') + '</div>'
+      + '<button class="btn ghost" type="button" onclick="copyQnaText()">문구 복사</button>';
+  } else {
+    html += '<div class="muted" style="line-height:1.6">궁금한 점을 <b>자유롭게</b> 적어 주세요. 문의 등록 화면에서 <b>꼭 [비밀글]에 체크</b>해야 해요.</div>';
+  }
+  html += '<ol class="qna-steps">'
+    + '<li>' + (url ? '<a href="' + _escAttr(url) + '" target="_blank" rel="noopener">상품 페이지 열기</a>' : '상품 페이지') + ' → <b>Q&amp;A(문의하기)</b></li>'
+    + '<li>' + (pub ? '복사한 문구를 붙여 넣고 등록' : '내용을 적고 <b>비밀글 체크</b> 후 등록') + '</li>'
+    + '<li>등록된 내 문의가 보이게 <b>화면 캡처</b>' + (pub ? '' : '(자물쇠·비밀글 표시가 보이게)') + '</li>'
+    + '<li>아래에서 캡처 1장을 올리고 <b>캡처 제출</b></li></ol>';
+  if(q.deadline && !uploadOnly) html += '<div class="muted" style="margin-bottom:10px">제출 기한 <b>' + _escAttr(_qnaHm(q.deadline)) + '</b>까지 — 지나면 자리가 다른 분께 넘어가요.</div>';
+  if(uploadOnly) html += '<div class="muted" style="margin-bottom:10px;color:var(--t1)">참여는 접수됐어요. <b>캡처만 다시 올려 주세요.</b></div>';
+  html += '<label class="qna-file" id="qnaFileLbl"><input type="file" accept="image/*" id="qnaFile" style="display:none" onchange="onQnaFile(this)"/>'
+    + '<span id="qnaFileTxt">캡처 사진 선택</span></label>'
+    + '<button class="btn" type="button" id="qnaSubmitBtn" onclick="onQnaSubmit()">캡처 제출</button>'
+    + '<div class="qna-err" id="qnaErr" style="display:none"></div>';
+  $('qnaBody').innerHTML = html;
+  _qnaB64 = '';
+}
+async function copyQnaText(){
+  const t = ($('qnaText') && $('qnaText').textContent) || '';
+  try{ await navigator.clipboard.writeText(t); toast('문구를 복사했어요'); }
+  catch(_){
+    const r = document.createRange(); r.selectNodeContents($('qnaText'));
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    toast('문구를 길게 눌러 복사해 주세요');
+  }
+}
+function _qnaErr(msg){ const e = $('qnaErr'); if(!e) return; e.textContent = msg || ''; e.style.display = msg ? '' : 'none'; }
+function onQnaFile(inp){
+  const f = inp.files && inp.files[0];
+  _qnaB64 = ''; _qnaErr('');
+  if(!f) return;
+  const img = new Image(); const fr = new FileReader();
+  fr.onload = () => { img.src = fr.result; };
+  img.onload = () => {
+    // 긴 변 1600px · JPEG 85% 로 줄인다(업로드 시간 단축 — 글자는 충분히 읽힌다)
+    const k = Math.min(1, 1600 / Math.max(img.width, img.height));
+    const c = document.createElement('canvas'); c.width = Math.round(img.width*k); c.height = Math.round(img.height*k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    const url = c.toDataURL('image/jpeg', 0.85);
+    _qnaB64 = url.split(',')[1] || '';
+    $('qnaFileTxt').innerHTML = '<img src="' + url + '" alt="선택한 캡처"/>다른 사진으로 바꾸려면 누르세요';
+  };
+  img.onerror = () => _qnaErr('사진을 읽지 못했어요. 다른 사진을 골라 주세요.');
+  fr.readAsDataURL(f);
+}
+async function onQnaSubmit(){
+  if(PREVIEW) return toast('미리보기에서는 제출되지 않아요');
+  const h = getHold(); const sess = getSession();
+  if(!h || !_detail || !_detail.application) return toast('참여 정보를 다시 불러와 주세요');
+  if(!sess || !sess.reviewerToken) return needLogin(onQnaSubmit);
+  if(!_qnaB64) return _qnaErr('캡처 사진을 먼저 선택해 주세요.');
+  const btn = $('qnaSubmitBtn'); btn.disabled = true; btn.textContent = '제출 중…'; _qnaErr('');
+  try{
+    // ① 자리 줄 기록 + 신청 확정(이미 됐으면 같은 줄을 다시 돌려준다)
+    const r = await fetch(API_BASE_URL + '/api/submit/qna', { method:'POST',
+      headers: { 'Content-Type':'application/json', ..._getAuthHeaders() },
+      body: JSON.stringify({ campaignId: CAMP_ID, campaignApplicationId: _detail.application.id, holdToken: h.holdToken,
+        holdPhone8: h.phone8, loginPhone8: sess.phone8, loginName: sess.name }) });
+    const s = await r.json().catch(()=>({}));
+    if(!r.ok || !s.ok){
+      if(s.code === 'QNA_EXPIRED'){ await releaseExpiredHold(h); return; }
+      throw new Error(s.error || '제출에 실패했어요. 다시 눌러 주세요.');
+    }
+    const t = s.target;
+    // ② 캡처 업로드(기존 리뷰 캡처 경로 그대로)
+    const name = (h.name || sess.name || '').trim();
+    const up = await gasPostUpload({ action:'uploadReviewImage', sheetId:t.sheetId, tabName:t.tabName, gid:t.gid || '', rowIndex:t.rowIndex,
+      reviewerName:name, slotKey:'review', files:[{ name: name + '_1', mimeType:'image/jpeg', data:_qnaB64 }] }, 180000);
+    if(!up || (!up.ok && !up.success)) throw new Error((up && up.error) || '캡처를 올리지 못했어요. 다시 눌러 주세요.');
+    // ③ 제출 완료
+    const now = new Date();
+    const fin = await gasPost({ action:'submitReview', sheetId:t.sheetId, tabName:t.tabName, gid:t.gid || '', rowIndex:t.rowIndex,
+      reviewerName:name, value: (now.getMonth()+1) + '/' + now.getDate() + ' ' + String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0'),
+      uploadBatchId: up.uploadBatchId }, 30000);
+    if(!fin || (!fin.success && !fin.ok)) throw new Error((fin && fin.error) || '제출 기록에 실패했어요. 다시 눌러 주세요.');
+    renderDone();
+  }catch(e){
+    _qnaErr(e.message || '제출에 실패했어요. 다시 눌러 주세요.');
+    btn.disabled = false; btn.textContent = '캡처 제출';
+  }
+}
+
 function startHoldCountdown(expiresAtIso){
   clearInterval(_holdTick);
   const end = Date.parse(expiresAtIso || '');
@@ -1791,12 +1949,18 @@ async function pollOnce(){
     const j = await r.json().catch(()=>({}));
     if(r.ok && j.ok){
       if(j.serverNow) CampCards.setServerNow(j.serverNow);
-      if(j.application && j.application.status === 'submitted'){ renderDone(); }
+      if(_isDoneDetail(j)){ renderDone(); }
     }else if(j.reason === 'expired'){ await releaseExpiredHold(h); }
   }catch(_){ /* 네트워크 오류는 다음 폴링에서 */ }
 }
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) pollOnce(); });
 
+/** 참여가 끝났나 — 구매 확정(submitted). 💬 321 Q&A 는 캡처까지 낸 것이 확인돼야 끝이다(모르면 끝 아님). */
+function _isDoneDetail(j){
+  if(!(j && j.application && j.application.status === 'submitted')) return false;
+  if(isQnaCampaign() || j.qnaSlot) return !!(j.qnaSlot && j.qnaSlot.captureDone === true);
+  return true;
+}
 function renderDone(pendingConfirm){
   clearInterval(_pollTimer); clearInterval(_holdTick);
   // chatUrl은 제출확정 후에만 서버가 반환 → 제출 직후 _detail(제출 전 응답)엔 비어있어 1회 재조회로 채운다
@@ -1835,6 +1999,12 @@ function renderDone(pendingConfirm){
         sec.insertBefore(b, sec.firstChild);
       }
     }catch(_){ /* 정리 실패는 화면을 막지 않는다 */ }
+  }
+  // 💬 321: Q&A 는 구매양식이 없다 — 완료 문구만 바꾼다(다른 경우는 종전 문구 그대로)
+  if(!pendingConfirm && !PREVIEW){
+    $('vDone').querySelector('p').innerHTML = isQnaCampaign()
+      ? '문의 캡처가 제출되었어요.<br/>진행 상황은 리뷰어 홈의 참여현황에서 확인할 수 있어요.'
+      : '구매양식이 제출되었어요.<br/>진행 상황은 리뷰어 홈의 참여현황에서 확인할 수 있어요.';
   }
   if(pendingConfirm){
     $('vDone').querySelector('.e').textContent = '📨';

@@ -559,7 +559,7 @@ async function _authoritativeHold(ctx) {
     const { rows } = await pool.query(
       `SELECT ca.phone8, ca.option_key, ca.owner_phone8, ca.blog_url, ca.status,
               ca.order_submission_id, ca.late_order_id, ca.applied_at,
-              ca.purchase_qty, ca.qty_tier_amount,
+              ca.purchase_qty, ca.qty_tier_amount, ca.qna_slot_id,
               co.unit_kind AS unit_kind,
               co.product_name AS product_name,
               (so.id IS NOT NULL) AS sub_alive,
@@ -602,6 +602,8 @@ async function _authoritativeHold(ctx) {
     // ★ 101: 블로그 주소도 **서버가 홀드에서 읽는다**(클라 전달 금지 — 옵션 서버권위와 같은 규율).
     //   같은 왕복이라 순증 0. 이 값이 주문 원장 INSERT 와 시트 '블로그URL' 칸으로 그대로 간다.
     ctx.blogUrl = rows[0].blog_url || null;
+    // ★ 결정 321: Q&A 자리에 묶인 신청인가(같은 왕복 · 순증 0). 칸은 부팅 필수 스키마(211)라 늘 있다.
+    ctx.qnaSlotId = rows[0].qna_slot_id == null ? null : Number(rows[0].qna_slot_id);
     // ★ 멱등 판정 재료: 이 홀드로 이미 접수된 "살아있는" 주문이 있는가.
     //   status='submitted' 확정건뿐 아니라 late_order_id(지각 접수)도 포함해야 한다 —
     //   confirmHoldInTx 의 late UPDATE 는 `late_order_id IS NULL` 조건이라 2회차 재제출은
@@ -672,6 +674,155 @@ async function _issueCaptureSession(orderSubmissionId, target, source = 'order_s
   }
 }
 
+/* ══════════════════════════════════════════════════════════════════════════════
+   ★★ 결정 321 3단계 — Q&A체험단 제출(구매양식 대신).
+   Q&A 는 구매가 없어 구매양식(주문번호·주소·결제금액)이 없다. 신청 때 묶인 자리(qna_slots)의 줄에
+   ① 최소 장부 줄(order_submissions — 이름·연락처·입금 계좌·진행일자)을 만들고 홀드를 확정(confirmHoldInTx, 같은 트랜잭션)
+   ② 작업표의 **그 자리 줄 번호**에 기록(writeOrderToWorktable sheetRow) 한 뒤 그 줄 위치를 돌려준다.
+   화면은 이어서 기존 리뷰 캡처 업로드(/api/image/review-upload) → /api/submit/review 로 캡처를 낸다(같은 줄 · 사본 0).
+   ★ 기한(신청 후 1시간·그날 자정 중 빠른 쪽 + 30초 여유)이 지났으면 아무것도 쓰지 않는다(확정 7 — 자리는 스윕이 푼다).
+   ★ 멱등: 이미 확정된 신청이면 그 줄 위치를 다시 돌려준다(줄 기록이 빠졌으면 그 자리에서 다시 적는다).
+   ══════════════════════════════════════════════════════════════════════════════ */
+router.post('/qna', async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    let session = null;
+    try { session = verifyReviewerSession(req.headers['x-reviewer-token']); } catch (_) { session = null; }
+    if (!session || !session.ownerReviewerId) {
+      return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_REQUIRED', error: '리뷰어 로그인을 다시 확인해주세요.' });
+    }
+    // 로그인 번호는 세션 값이 먼저다(요청 본문은 구버전 화면 대비 폴백)
+    const loginPhone8 = String(session.loginPhone8 || b.loginPhone8 || '').replace(/\D/g, '').slice(-8);
+    const holdCtx = await _authoritativeHold(_campaignHoldCtx(b, loginPhone8));
+    if (!holdCtx || !holdCtx.verified) {
+      return res.status(403).json({ ok: false, code: 'QNA_HOLD_INVALID', error: '참여 내역을 찾을 수 없어요. 새로고침 후 다시 시도해주세요.' });
+    }
+    const qnaSlots = require('../services/qnaSlots.service');
+    const slot = await qnaSlots.slotForApplication(pool, holdCtx.applicationId);
+    if (!slot) return res.status(409).json({ ok: false, code: 'QNA_NOT_BOUND', error: 'Q&A 자리가 묶인 참여가 아니에요.' });
+    const scope = await _resolveCampaignOrderScope({ holdCtx });
+    const wt = scope && scope.worktable;
+    if (!wt || wt.sheetId !== slot.sheet_id || wt.tabName !== slot.tab_name) {
+      logger.error(`[submit/qna] 공고 작업표와 자리표가 다름 app=${holdCtx.applicationId} slot=${slot.id}`);
+      return res.status(409).json({ ok: false, code: 'QNA_TARGET_MISMATCH', error: '작업표를 찾지 못했어요. 담당자에게 알려주세요.' });
+    }
+    const target = { sheetId: wt.sheetId, tabName: wt.tabName, gid: wt.tabGid || '', rowIndex: Number(slot.seq) };
+
+    // 신청 행(소유자·명의·기한) — 같은 hold_token 으로 _authoritativeHold 가 인증한 행
+    const { rows: apps } = await pool.query(
+      `SELECT ca.status, ca.expires_at, ca.applicant_name, ca.applicant_phone, ca.owner_phone8, ca.owner_reviewer_id,
+              (ca.expires_at > NOW() - make_interval(secs => $2)) AS in_time
+         FROM campaign_applications ca WHERE ca.id = $1`,
+      [holdCtx.applicationId, require('../services/campaignHold.service').HOLD_GRACE_SEC]);
+    const app = apps[0];
+    if (!app) return res.status(403).json({ ok: false, code: 'QNA_HOLD_INVALID', error: '참여 내역을 찾을 수 없어요.' });
+    if (app.owner_reviewer_id && String(app.owner_reviewer_id) !== String(session.ownerReviewerId)) {
+      return res.status(403).json({ ok: false, code: 'QNA_HOLD_FORBIDDEN', error: '이 참여를 제출할 권한이 없어요.' });
+    }
+
+    const { writeOrderToWorktable } = require('../services/sheetlessOrder.service');
+    const ensureRow = async (orderSubmissionId, orderData) => {
+      const { rows: cur } = await pool.query(
+        `SELECT order_submission_id FROM campaign_participants
+          WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL LIMIT 1`,
+        [target.sheetId, target.tabName, target.rowIndex]);
+      if (!cur.length) return { ok: false, reason: 'qna_row_missing' };
+      if (cur[0].order_submission_id && String(cur[0].order_submission_id) === String(orderSubmissionId)) return { ok: true, already: true };
+      if (cur[0].order_submission_id) return { ok: false, reason: 'qna_row_taken' };   // 다른 주문이 이미 앉은 줄 — 덮지 않는다
+      return writeOrderToWorktable({
+        sheetId: target.sheetId, tabName: target.tabName, tabGid: target.gid, workboardId: wt.workboardId || null,
+        sheetRow: target.rowIndex, orderData, orderSubmissionId,
+        loginPhone8, loginName: orderData.orderer,
+        requireEmptyOrSame: true,   // 바깥 확인 뒤 줄 잠금 안에서 한 번 더(남의 주문 줄을 덮지 않는다)
+      });
+    };
+
+    if (holdCtx.doneKind === 'confirmed') {
+      // 재시도 — 줄 기록만 다시 맞춘다(원장에 있는 값 그대로)
+      const { rows: os } = await pool.query('SELECT * FROM order_submissions WHERE id = $1 AND deleted_at IS NULL', [holdCtx.doneOrderId]);
+      const w = os.length ? await ensureRow(holdCtx.doneOrderId, require('../services/orderLedger.service')._osRowToOrderData(os[0])) : { ok: false, reason: 'order_missing' };
+      if (!w.ok) {
+        logger.error(`[submit/qna] 재시도 줄 기록 실패 app=${holdCtx.applicationId} ${w.reason}`);
+        return res.status(500).json({ ok: false, code: 'QNA_ROW_WRITE_FAILED', retryable: true, error: '작업표 기록에 실패했어요. 잠시 후 다시 눌러주세요.' });
+      }
+      return res.json({ ok: true, alreadySubmitted: true, orderSubmissionId: holdCtx.doneOrderId, target });
+    }
+    if (app.status !== 'applied' || !app.in_time) {
+      return res.status(409).json({ ok: false, code: 'QNA_EXPIRED', error: '제출 기한이 지났어요. 자리가 다시 풀렸어요.' });
+    }
+
+    // 장부 줄 재료 — 이름·연락처 = 신청 명의(서버 기록), 입금 계좌 = 명의가 타계정이면 그 타계정 계좌(없으면 본계정)
+    const { rows: rv } = await pool.query(
+      `SELECT name, phone, bank_name, bank_account, account_holder, sub_accounts FROM reviewers WHERE id = $1::uuid LIMIT 1`,
+      [session.ownerReviewerId]);
+    const owner = rv[0] || {};
+    let bank = owner.bank_name || '', account = owner.bank_account || '', depositor = owner.account_holder || '';
+    if (holdCtx.isSub) {
+      const hit = require('../services/identity.service').findSubAccount(owner.sub_accounts, app.applicant_name, holdCtx.phone8);
+      const sub = hit && hit.sub;
+      if (sub && String(sub.bankAccount || '').trim()) {
+        bank = sub.bankName || ''; account = sub.bankAccount || ''; depositor = sub.accountHolder || app.applicant_name || '';
+      }
+    }
+    // 진행일자 칸은 자리표가 적어 둔 값 그대로 다시 쓴다(잠긴 칸 — 표기를 바꾸지 않는다)
+    let dateStr = slot.slot_date;
+    try {
+      const { QNA_DATE_HEADER } = require('../utils/worktablePlan');
+      const { rows: rj } = await pool.query(
+        `SELECT row_json FROM campaign_participants WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL LIMIT 1`,
+        [target.sheetId, target.tabName, target.rowIndex]);
+      const v = rj[0] && rj[0].row_json && rj[0].row_json[QNA_DATE_HEADER];
+      if (v != null && String(v).trim()) dateStr = String(v);
+    } catch (_) { /* 자리 날짜 그대로 */ }
+    const orderData = {
+      orderer: String(app.applicant_name || '').trim(), recipient: String(app.applicant_name || '').trim(),
+      phone: String(app.applicant_phone || '').trim(), bank, account, depositor, dateStr,
+    };
+
+    const qnaLedger = await createOrderLedgerEntry({
+      sheetId: scope.sheetId, tabName: scope.tabName, gid: '',
+      skipSheetMirror: true, orderData, loginPhone8, loginName: orderData.orderer, source: 'qna_submit',
+      campaignHold: { ...holdCtx, expectedOptKey: holdCtx.optionKey || null, orderIdentity: { phone: orderData.phone }, skipTabBinding: true },
+    });
+    if (!qnaLedger || !qnaLedger.orderSubmissionId) {
+      return res.status(500).json({ ok: false, code: 'QNA_LEDGER_FAILED', retryable: true, error: '제출에 실패했어요. 다시 눌러주세요.' });
+    }
+    if (qnaLedger.holdResult !== 'confirmed') {
+      // 확인과 확정 사이에 기한이 지난 경우 — 장부 줄을 남기지 않는다(자리 없는 Q&A 주문은 갈 곳이 없다)
+      await pool.query(`UPDATE order_submissions SET deleted_at = NOW(), mirror_status = 'canceled', sheet_error = 'qna_hold_not_confirmed' WHERE id = $1`, [qnaLedger.orderSubmissionId]);
+      await pool.query(`UPDATE campaign_applications SET late_order_id = NULL WHERE id = $1 AND late_order_id = $2`, [holdCtx.applicationId, qnaLedger.orderSubmissionId]);
+      logger.warn(`[submit/qna] 홀드 확정 안 됨(${qnaLedger.holdResult}) — 장부 줄 취소 app=${holdCtx.applicationId} os=${qnaLedger.orderSubmissionId}`);
+      // 같은 신청을 두 번 눌러 먼저 온 요청이 이미 확정했으면 그 결과를 돌려준다("기한 지남"으로 겁주지 않는다)
+      const { rows: done } = await pool.query(
+        `SELECT ca.order_submission_id FROM campaign_applications ca
+           JOIN order_submissions os ON os.id = ca.order_submission_id AND os.deleted_at IS NULL
+          WHERE ca.id = $1 AND ca.status = 'submitted' LIMIT 1`, [holdCtx.applicationId]);
+      if (done.length) return res.json({ ok: true, alreadySubmitted: true, orderSubmissionId: done[0].order_submission_id, target });
+      return res.status(409).json({ ok: false, code: 'QNA_EXPIRED', error: '제출 기한이 지났어요. 자리가 다시 풀렸어요.' });
+    }
+    if (wt.workboardId) {
+      await pool.query(`UPDATE order_submissions SET workboard_id = $2::uuid, updated_at = NOW() WHERE id = $1::uuid AND workboard_id IS NULL`,
+        [qnaLedger.orderSubmissionId, wt.workboardId]);
+    }
+    let w;
+    try { w = await ensureRow(qnaLedger.orderSubmissionId, orderData); } catch (e) { w = { ok: false, reason: 'exception', message: e.message }; }
+    if (!w || !w.ok) {
+      try { await markOrderMirrorFailed(qnaLedger.orderSubmissionId, (w && (w.message || w.reason)) || 'qna_row_write_failed'); } catch (_) { /* noop */ }
+      logAbnormal({
+        flow: 'qna_submit', step: 'worktable_write', severity: 'critical',
+        error: new Error(`Q&A 작업표 기록 실패: ${w && w.reason}`),
+        context: { campaignId: holdCtx.campaignId, applicationId: holdCtx.applicationId, orderSubmissionId: qnaLedger.orderSubmissionId, seq: target.rowIndex },
+      });
+      return res.status(500).json({ ok: false, code: 'QNA_ROW_WRITE_FAILED', retryable: true, error: '작업표 기록에 실패했어요. 잠시 후 다시 눌러주세요.' });
+    }
+    logger.info(`[submit/qna] 접수 app=${holdCtx.applicationId} os=${qnaLedger.orderSubmissionId} seq=${target.rowIndex}`);
+    try { emitOrderSubmit({ sheetId: target.sheetId, tabName: target.tabName, orderer: orderData.orderer }); } catch (_) { /* noop */ }
+    return res.json({ ok: true, orderSubmissionId: qnaLedger.orderSubmissionId, target });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/order', async (req, res, next) => {
   try {
     const b = req.body;
@@ -706,6 +857,13 @@ router.post('/order', async (req, res, next) => {
     const _idPhone8 = String(loginPhone8 || '').replace(/[^0-9]/g, '').slice(-8);
     // ★ 참여형 홀드 문맥(단일 출처, 063) — 신원게이트 owner 폴백·옵션 서버권위·확정 문맥 공용(1회 계산)
     const holdCtx = await _authoritativeHold(_campaignHoldCtx(b, loginPhone8));
+    /* ★ 결정 321: Q&A 자리에 묶인 신청은 구매양식으로 받지 않는다 — 구매가 없고, 이 길로 들어오면
+         자리(qna_slots)를 모르는 일반 홀드 확정이 되어 그날 자리 줄이 아닌 새 줄이 생긴다.
+         제출 창구는 POST /api/submit/qna 하나다(구버전 화면이 구매양식을 띄운 경우 막다른 길 대신 새로고침 안내). */
+    if (holdCtx && holdCtx.verified && holdCtx.qnaSlotId) {
+      return res.status(409).json({ ok: false, reason: 'qna_use_capture',
+        error: 'Q&A 참여는 구매양식이 아니라 문의 캡처로 제출해요. 화면을 새로고침해주세요.' });
+    }
     const orderScope = await _resolveCampaignOrderScope({ sheetId, gid, tabName, holdCtx });
     if (!orderScope) {
       return res.status(400).json({ error: '유효한 참여 문맥이 없어 구매양식을 제출할 수 없습니다.' });

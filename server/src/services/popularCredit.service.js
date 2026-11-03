@@ -96,6 +96,7 @@ async function loadPopularCreditMatches(db, reviewerPhone8s = null, { evaluatedA
         AND (
           (COALESCE(ca.is_popular_snapshot, rc.is_popular) IS NOT TRUE
             AND ca.status = 'submitted'
+            AND ca.qna_slot_id IS NULL   -- ★ 결정 321(확정 4): Q&A 참여는 인기 참여권을 만들지 않는다(구매가 없다)
             AND ca.submitted_at BETWEEN $1 AND $2)
           OR
           (COALESCE(ca.is_popular_snapshot, rc.is_popular) IS TRUE

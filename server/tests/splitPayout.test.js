@@ -68,7 +68,8 @@ async function t(name, fn) {
     // Codex PR #1699 — split 이라도 잠근 뒤 입금 칸 값이 업체가 넣은 것인지 다시 본다(직원이 그 사이 적은 날짜 = already_paid)
     assert.match(ps, /\(lockedPaid && !\(lateMode === 'split' && advEntered\)\) \? 'already_paid'/);
     assert.match(ps, /WHERE cp\.id = \$1 AND pe\.field = 'col:' \|\| \$2 AND pe\.reverted_at IS NULL\s*AND left\(pe\.created_by, 3\) = '업체#'/);
-    assert.match(ps, /it\.goodsByAdvertiser \? 0 : it\.productPrice, it\.reviewFee, it\.amount, it\.transferMemo/);
+    // 결정 321 4단계: Q&A 도 제품비 0 박제 + is_qna 표시(검사 의미 불변 — split 은 그대로 0)
+    assert.match(ps, /\(it\.goodsByAdvertiser \|\| it\.isQna\) \? 0 : it\.productPrice, it\.reviewFee, it\.amount, it\.transferMemo, it\.isQna === true/);
   });
   const ap = read('src/services/paymentApply.service.js');
   await t('2e ★ 결과 반영 — 리뷰비 전용은 PAID(페이백 완료)·입금 칸을 건드리지 않고 원장만', () => {

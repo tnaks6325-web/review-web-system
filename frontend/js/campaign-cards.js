@@ -712,7 +712,9 @@
     const crChip = c.cashReceiptRequired === true ? `<span class="pt-badge cr">🧾 현금영수증</span>` : '';
     // 📝 127: 블로그체험단 배지 — 서버가 준 work_kind 정확 일치(빈 값·필드 부재 = 리뷰 = 배지 없음)
     const isBlogCard = c.work_kind === 'blog';
-    const blogChip = isBlogCard ? `<span class="pt-badge" style="background:#7C3AED;color:#fff">📝 블로그</span>` : '';
+    const blogChip = isBlogCard ? `<span class="pt-badge" style="background:#7C3AED;color:#fff">📝 블로그</span>`
+      // 💬 결정 321: Q&A체험단 배지(확정 2) — 같은 자리·같은 규칙(정확 일치)
+      : c.work_kind === 'qna' ? `<span class="pt-badge" style="background:#1b64da;color:#fff">Q&amp;A</span>` : '';
     const badges = (channel || c.delivery_type || crChip || blogChip)
       ? `<div class="pt-badges">${blogChip}${channel ? `<span class="pt-badge ch">${_esc(channel)}</span>` : ''}${c.delivery_type ? `<span class="pt-badge dl">${_esc(_dlBadge(c.delivery_type))}</span>` : ''}${crChip}</div>`
       : '';
@@ -777,7 +779,8 @@
       // ★ 기준은 `reopensAt`(다음 오픈) — `opensAt`은 **오늘의** 오픈 시각이라 이미 지났다(카운트다운 0 고착).
       overlay = `<div class="pt-ovl pre"><span class="ol">오늘 모집 완료</span><span class="ot" data-camp-countdown="${_esc(c.reopensAt)}">--:--:--</span><span class="ol">${_esc(_fmtOpenWhen(c.reopensAt))} 다시 오픈</span></div>`;
     } else if (c.state === 'open' && c.cutoffAt) {
-      overlay = `<div class="pt-ovl now"><span class="live-pill"><span class="dot"></span>지금 구매 가능</span><span class="lab">오늘 구매마감까지</span><span class="ot" data-camp-countdown="${_esc(c.cutoffAt)}">--:--:--</span></div>`;
+      // 💬 결정 321: Q&A 는 구매가 없다 — 같은 카운트다운, 말만 "참여·신청"
+      overlay = `<div class="pt-ovl now"><span class="live-pill"><span class="dot"></span>${c.work_kind === 'qna' ? '지금 참여 가능' : '지금 구매 가능'}</span><span class="lab">${c.work_kind === 'qna' ? '오늘 신청마감까지' : '오늘 구매마감까지'}</span><span class="ot" data-camp-countdown="${_esc(c.cutoffAt)}">--:--:--</span></div>`;
     }
 
     // ★ 재참여(재구매) 기간 안내(사용자 확정 2026-08-24) — 리뷰어 개인별. 관리자 카드는 집계
@@ -900,7 +903,9 @@
       footer = `<button type="button" class="pbtn off">재참여 대기 중</button><div class="pnote">재참여 가능일 이후 다시 참여할 수 있어요</div>`;
     } else if (c.state === 'open') footer = isBlogCard
       ? `<button type="button" class="pbtn go">신청하기</button><div class="pnote">블로그 주소 제출 → 관리자 승인 후 구매 진행</div>`
-      : `<button type="button" class="pbtn go">참여하기</button>`;
+      : c.work_kind === 'qna'
+        ? `<button type="button" class="pbtn go">참여하기</button><div class="pnote">구매 없음 · 문의 등록 후 캡처 제출</div>`
+        : `<button type="button" class="pbtn go">참여하기</button>`;
     else if (weekendUnpublished) footer = `<button type="button" class="pbtn off">${_esc(_closedLabel(c))}</button><div class="pnote">${_esc(c.stateMessage || (_closedLabel(c) + ' · 다음 진행일 재개'))}</div>`;
     else if (c.state === 'cutoff') footer = `<button type="button" class="pbtn off">오늘 참여 마감</button><div class="pnote">진행 중인 분은 ${_fmtHM(c.closesAt)}까지 제출</div>`;
     else if (ended) footer = `<button type="button" class="pbtn off">모집 종료</button><div class="pnote">${_esc(_fmtMD(c.endDate))} 일정이 끝났어요</div>`;

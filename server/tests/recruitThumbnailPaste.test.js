@@ -27,7 +27,7 @@ for (const [name, html] of [['workdesk', workdeskHtml]]) {   // (admin-siand.htm
     `${name} 화면은 새 썸네일 동작이 든 index-recruit.js 버전을 불러야 합니다.`);
 }
 for (const [name, html] of [['workdesk', workdeskHtml]]) {
-  assert.match(html, /recruit-modal\.js\?v=(?:20260916-direct-delivery|20261022-cards|20261022-d4|20261024-reqmemo)/   /* 결정 260·277·278 버전도 붙여넣기 안내를 담는다 */,
+  assert.match(html, /recruit-modal\.js\?v=(?:20260916-direct-delivery|20261022-cards|20261022-d4|20261024-reqmemo|20261103-qna)/   /* 결정 260·277·278·321 버전도 붙여넣기 안내를 담는다 */,
     `${name} 화면은 새 붙여넣기 안내가 든 recruit-modal.js 버전을 불러야 합니다.`);
 }
 

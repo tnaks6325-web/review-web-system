@@ -26,6 +26,7 @@ const { logger } = require('../utils/logger'); // ★ 반대로 logger 는 { log
 const { PAYMENT_COL_KEYWORDS } = require('./search.service');
 const { resolveReviewFee, sheetDateToIso, toKstDate } = require('../utils/campaignFee');
 const { resolveDeliveryReviewFee } = require('../utils/deliveryReviewFee');
+const { resolveWorkKind } = require('../utils/workKind');   // 결정 321 4단계 — Q&A 입금(공고 > 탭 종류)
 const { resolveBank, bankFormLabel, normalizeAccount, normalizeMemo } = require('../utils/bankCodes');
 const _bankOv = require('./bankNameOverride.service');   // 화면에서 고친 은행 표기 → 판정 표에 적용
 const { extractAmountNumber, EXACT_KEYS: AMOUNT_EXACT_KEYS } = require('../utils/paymentAmount');
@@ -542,8 +543,12 @@ async function listPaymentTargets(opts = {}) {
     const tabMemo = normalizeMemo((tab && tab.depositName) || '');
     const memo = campMemo || tabMemo;
     const memoSource = campMemo ? 'campaign' : tabMemo ? 'tab' : null;
+    /* ★ 결정 321 4단계(사용자 확정 2026-11-03) — Q&A체험단은 상품을 사지 않는다 → 이체 금액 = **참여비(리뷰비)만**.
+         제품비 칸이 없어 0 이 정상이다(no_price 로 막지 않는다). 판정 = 공고 > 탭 종류(resolveWorkKind 단일 출처).
+         모르면(종류 칸 없음) 리뷰로 본다 = 종전처럼 no_price 로 막힌다(보내지 않는 쪽). */
+    const isQna = resolveWorkKind({ campaignKind: camp && camp.workKind, tabKind: tab && tab.workKind }) === 'qna';
     // ★ 결정 292 — 제품비는 업체가 보낸다 → 우리 이체 금액 = **리뷰비만**(회차에는 제품비 0 으로 박제 — createBatch).
-    const amount = goodsByAdvertiser ? fee : productPrice + fee;
+    const amount = (goodsByAdvertiser || isQna) ? fee : productPrice + fee;
 
     const issues = [];      // 있으면 다운로드에서 제외(막는 사유)
     const warnings = [];    // 진행은 되지만 사람이 알아야 하는 것
@@ -555,7 +560,7 @@ async function listPaymentTargets(opts = {}) {
       if (!String(acct.accountHolder || '').trim()) issues.push('no_holder');
     }
     // split: 제품비 값이 없다 = 아직 구매(투입) 전 — 리뷰비도 구매가 끝난 줄에만 보낸다(사용자 확정 2026-10-26).
-    if (!productPrice) issues.push(goodsByAdvertiser ? 'not_purchased' : 'no_price');
+    if (!productPrice && !isQna) issues.push(goodsByAdvertiser ? 'not_purchased' : 'no_price');
     if (amount <= 0) issues.push(goodsByAdvertiser ? 'split_no_fee' : 'zero_amount');
     /* ★★ 업체 직접 입금 작업(결정 247 · 사용자 확정 2026-10-14) — 업체가 페이백을 보내므로 **우리는 보내지 않는다**.
          맨 앞 사유로 둔다(createBatch 가 issues[0] 을 건너뛴 사유로 말한다). 모르면(조회 실패) 보내지 않는다(fail-closed —
@@ -636,6 +641,7 @@ async function listPaymentTargets(opts = {}) {
       productPrice, reviewFee: fee, amount, priceSource, feeSource, deliveryKind,
       // 결정 292 — 입금 방식(ours|advertiser|split). split = 제품비는 업체, 금액은 리뷰비만. 화면이 받은 값을 회차 만들 때 되돌려 대조한다.
       payoutMode: payout.mode, goodsByAdvertiser,
+      isQna,   // 결정 321 4단계 — createBatch 가 회차 항목에 is_qna 로 박제(isFeeOnlyItem 에서 빠지는 근거)
       workboardPrice, orderPrice, priceMismatch,
       qtyTierAmount: (ord && ord.qtyTierAmount) || linkedTierMap[key + '||' + r.rowIndex] || null,
       tabReviewFee: tabFee, campaignReviewFee: campFee,
@@ -782,6 +788,7 @@ async function _loadCampaigns(sheetIds, tabNames) {
             c.delivery_review_fee_mix AS "deliveryReviewFeeMix",
             c.transfer_bank AS "transferBank", c.transfer_memo AS "transferMemo",
             to_char(c.start_date,'YYYY-MM-DD') AS "campStartDate",
+            c.work_kind AS "workKind",
             wo.goods_cost_type AS "goodsCostType"
        FROM recruit_campaigns c
        LEFT JOIN LATERAL (
@@ -803,6 +810,7 @@ async function _loadCampaigns(sheetIds, tabNames) {
       deliveryReviewFeeMix: c.deliveryReviewFeeMix || [],
       transferBank: c.transferBank || null, transferMemo: c.transferMemo || '',
       campStartDate: c.campStartDate || null, goodsCostType: c.goodsCostType || '',
+      workKind: c.workKind || '',   // 결정 321 4단계 — Q&A 판정 재료(공고 > 탭 · resolveWorkKind)
       schedules: [],
     };
   }
@@ -1495,6 +1503,8 @@ function advertiserGoodsFrom(campRaw, tabRaw) { return payoutModeFrom(campRaw, t
  *  보통 건은 제품비가 없으면 no_price 로 막혀 회차에 들어올 수 없으므로 이 모양은 split 에서만 나온다. */
 function isFeeOnlyItem(it) {
   if (!it) return false;
+  // 결정 321 4단계 — Q&A 항목은 모양이 같아도 「리뷰비만」이 아니다(받을 돈 전부 = 참여비 · 입금일·PAID 를 남긴다)
+  if (it.isQna === true || it.is_qna === true) return false;
   const pp = Number(it.productPrice != null ? it.productPrice : it.product_price);
   const fee = Number(it.reviewFee != null ? it.reviewFee : it.review_fee);
   const amt = Number(it.amount);
@@ -1503,7 +1513,7 @@ function isFeeOnlyItem(it) {
 /** isFeeOnlyItem 의 SQL 판(payment_batch_items 별칭 없이 · 앞에 별칭을 붙여 쓰려면 feeOnlyItemSql('i')). */
 function feeOnlyItemSql(alias = '') {
   const a = alias ? alias + '.' : '';
-  return `(COALESCE(${a}product_price, 0) = 0 AND COALESCE(${a}review_fee, 0) > 0 AND ${a}amount = ${a}review_fee)`;
+  return `(COALESCE(${a}product_price, 0) = 0 AND COALESCE(${a}review_fee, 0) > 0 AND ${a}amount = ${a}review_fee AND NOT COALESCE(${a}is_qna, FALSE))`;
 }
 /** split 일 수 있는 작업 키(시트||탭) 후보 — 대상 SQL 에서 "입금 칸" 조건을 풀어 줄 범위(리뷰 제출 조건은 풀지 않는다 — 결정 318).
  *  ★ 넓게 잡는다(공고 여럿·탭 값) — 최종 판정은 행을 읽은 뒤 payoutModeFrom 이 하고, split 이 아니면 원래 조건을 다시 건다.
@@ -1620,6 +1630,7 @@ async function _loadTabMeta(sheetIds, tabNames) {
               tc.transfer_bank AS "transferBank", tc.deposit_name AS "depositName",
               tc.review_fee AS "reviewFee",
               tc.tab_gid AS "tabGid", tc.sheetless AS "sheetless",
+              tc.work_kind AS "workKind",
               wo.goods_cost_type AS "goodsCostType",
               -- ★ 담당자 판정 원천 = 인트라넷 작업담당(065) 하나뿐
               --   (담당AE 실명 칸은 여기서 읽지 않는다 — 065 이전 사고 자리)
@@ -1642,6 +1653,7 @@ async function _loadTabMeta(sheetIds, tabNames) {
         //   미설정이 조용히 0원이 되어 공고 값이 있는데도 탭 폴백이 이긴 것처럼 보인다.
         reviewFee: (t.reviewFee == null || t.reviewFee === '') ? null : Number(t.reviewFee),
         goodsCostType: t.goodsCostType || '',
+        workKind: t.workKind || '',
         sheetless: t.sheetless === true,
         tabGid: String(t.tabGid == null ? '' : t.tabGid),
         sheetUrl: tabSheetUrl({ sheetId: t.sheetId, tabGid: t.tabGid }),
@@ -1791,8 +1803,8 @@ async function createBatch({ bank, rows, by }) {
               owner_reviewer_id, participant_identity_id,
               bank_name, bank_code, bank_account, account_holder,
               account_reviewer_id, account_source, account_sub_phone8, account_fingerprint, account_snapshot_fingerprint,
-              product_price, review_fee, amount, transfer_memo)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) RETURNING *`,
+              product_price, review_fee, amount, transfer_memo, is_qna)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) RETURNING *`,
           [batch.id, it.sheetId, it.tabName, it.rowIndex, it.campaignId, it.reviewerName, it.phone8,
            it.ownerReviewerId || null, it.participantIdentityId || null,
            it.bankName, it.bankCode, it.bankAccount, it.accountHolder,
@@ -1802,9 +1814,10 @@ async function createBatch({ bank, rows, by }) {
            it.accountRef ? (it.accountRef.subPhone8 ? 'sub' : 'self') : null,
            it.accountRef && it.accountRef.subPhone8 || null, accountFingerprint(it.bankAccount), snapshotFingerprint(it.bankName, it.bankAccount, it.accountHolder),
            // 결정 292 — 리뷰비만 보내는 건은 제품비 0 으로 박제(인트라넷 페이백 장부가 "돌려준 상품값"으로 읽지 않게 · isFeeOnlyItem 판별 근거)
-           it.goodsByAdvertiser ? 0 : it.productPrice, it.reviewFee, it.amount, it.transferMemo]);
+           // 결정 321 4단계 — Q&A 는 제품비 0 · is_qna 표시(서버가 다시 계산한 대상값 — 화면 값을 믿지 않는다)
+           (it.goodsByAdvertiser || it.isQna) ? 0 : it.productPrice, it.reviewFee, it.amount, it.transferMemo, it.isQna === true]);
         await client.query('RELEASE SAVEPOINT sp_item');
-        saved.push({ ...it, id: row.id, ...(it.goodsByAdvertiser ? { productPrice: 0 } : {}) });
+        saved.push({ ...it, id: row.id, ...((it.goodsByAdvertiser || it.isQna) ? { productPrice: 0 } : {}) });
       } catch (e) {
         await client.query('ROLLBACK TO SAVEPOINT sp_item');
         if (e && e.code === '23505') skipped.push({ key: it.sheetId + '||' + it.tabName + '||' + it.rowIndex, reason: 'already_locked' });

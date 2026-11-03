@@ -513,8 +513,11 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
             { today: todayStr, plans: counts.plans || null }, eff, optionDayCapacity(counts.optionCaps)));
   // 동일 탭을 공유한 재발행 공고는 표의 채움 수가 탭 전체 수다. 호출부가 탭 전체 정원·신청·홀드를
   // 함께 전달하면 각 공고에 같은 표 수를 개별 정원으로 적용하지 않고 공유 정원으로 판정한다.
+  /* ★★ Q&A체험단(결정 321 · 3단계) — 오늘 정원 = 자리표의 오늘 자리 수(`qnaSlots.loadTodayByCampaign`). 시트 일정·이월·하루 인원보다 먼저.
+       못 채운 자리는 넘기지 않는다(확정 — 일정 끝 「추가 모집」). 작업표 진행일자 칸이 시트 일정처럼 읽혀도 이 값이 이긴다. */
+  const isQna = typeof counts.qnaToday === 'number' && Number.isFinite(counts.qnaToday);
   const tableTodayQuota = Number(counts.tableTodayQuota);
-  const quota = Number.isFinite(tableTodayQuota) ? Math.max(0, tableTodayQuota) : campaignQuota;
+  const quota = Number.isFinite(tableTodayQuota) ? Math.max(0, tableTodayQuota) : (isQna ? Math.max(0, counts.qnaToday) : campaignQuota);
   const ownTodaySubmitted = Math.max(0, Number(counts.todaySubmitted) || 0);
   const ownTodayActiveHolds = Math.max(0, Number(counts.todayActiveHolds) || 0);
   const groupedTodaySubmitted = Number(counts.tableTodaySubmitted);
@@ -540,7 +543,10 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
   const opensAt = kstTodayAt(c.window_start, now);
   const closesAt = kstTodayAt(c.window_end, now);
   const bufferMin = Number(c.close_buffer_min ?? 10) || 0;
-  const cutoffAt = closesAt ? new Date(closesAt.getTime() - bufferMin * 60 * 1000) : null;
+  const _winCutoff = closesAt ? new Date(closesAt.getTime() - bufferMin * 60 * 1000) : null;
+  // ★ Q&A — 23:50 부터 새 신청을 받지 않는다(신청 후 1시간·그날 자정 중 빠른 쪽이 제출 기한 · 확정 7).
+  const _qnaCut = isQna ? require('./qnaSlots.service').qnaApplyCutoffAt(now) : null;
+  const cutoffAt = _qnaCut && (!_winCutoff || _qnaCut < _winCutoff) ? _qnaCut : _winCutoff;
   const payload = {
     ...base,
     todayCount,
@@ -551,7 +557,7 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
     //   (조절 50을 "+10 이월"로 표기하면 관리자가 이월 사고로 오해).
     // ★ 기준선은 그 공고의 "평소 그날 인원" — 시트 일정 공고는 **시트의 그날 행 수**이지
     //   daily_limit 이 아니다(둘은 아무 관계가 없어 근거 없는 "+15 이월" 칩이 뜬다).
-    carryAdded: (ovToday !== null || _seqDayRoom(counts.optionCaps) !== null) ? 0   // ★ 결정 228: 일정표 공고엔 이월이 없다
+    carryAdded: (isQna || ovToday !== null || _seqDayRoom(counts.optionCaps) !== null) ? 0   // ★ 결정 228: 일정표 공고엔 이월이 없다(Q&A 도 — 321)
       : Math.max(0, quota - (sch ? (Number(sch.byDate[todayStr]) || 0) : eff.dailyLimit)),
     todayPlanned: ovToday,                 // 오늘의 명시 조절값(없으면 null)
     planAdjusted: ovToday !== null,        // 카드 "조절됨" 표시 재료(관리자 전용 소비)
@@ -690,6 +696,7 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
   if (todayCount >= quota) return { ...payload, state: 'daily_done', reopensAt: _reopenIso() };
 
   if (!allDay && t >= endMin - bufferMin) return { ...payload, state: 'cutoff' }; // 신규 신청만 차단
+  if (_qnaCut && now >= _qnaCut) return { ...payload, state: 'cutoff', stateReason: 'qna_day_closing' };   // 321: 23:50 이후 새 신청 없음
 
   return { ...payload, state: 'open' };
 }
@@ -798,6 +805,16 @@ async function fetchCampaignCounts(pool, campaignIds, now = new Date()) {
     for (const id of ids) {
       const o = out.get(id);
       if (o) o.optionCaps = capMap.get(id) || null;
+    }
+  }
+  /* ★ 결정 321 3단계: Q&A 공고의 오늘 자리 수 — 이 깔때기에 싣는다(목록·상세·참여 게이트가 같은 정원을 본다).
+     쿼리 순서 계약(066 q[0]/q[1])을 흔들지 않게 맨 뒤. 실패 = 미부착 = 종전 정원(참여는 자리 묶기가 다시 막는다). */
+  const qnaMap = await require('./qnaSlots.service').loadTodayByCampaign(pool, ids, now);
+  if (qnaMap) {
+    for (const id of ids) {
+      const o = out.get(id);
+      const q = qnaMap.get(String(id));
+      if (o && q) o.qnaToday = q.total;
     }
   }
   return out;
@@ -1621,6 +1638,17 @@ async function fetchOptionCountsBatch(db, campaignIds, now = new Date(), opts = 
       }
     }
   }
+  /* ★ 결정 321 3단계: Q&A 공고는 선택지마다 오늘 자리 수를 싣는다(Map 에 붙는 속성 — 선택지 목록 뷰가 하루 몫으로 쓴다).
+     조회 실패 = 미부착 = 종전 하루 몫. */
+  const qnaMap = await require('./qnaSlots.service').loadTodayByCampaign(db, ids, now);
+  if (qnaMap) {
+    for (const cid of ids) {
+      const q = qnaMap.get(String(cid));
+      if (!q) continue;
+      if (!out.has(cid)) out.set(cid, new Map());
+      out.get(cid).qnaToday = q.byOpt;
+    }
+  }
   return out;
 }
 
@@ -1806,7 +1834,9 @@ function computeOptionView(opt, cnt, campState, viewOpts = null) {
   // ★★ 오늘 남은 자리는 **남은 정원보다 클 수 없다** (사용자 확정 2026-10-02 — 정원 5·일건수 3 이면
   //   첫날 3 → 둘째 날은 잔량 2). 참여 차단은 원래 정원 소진(soldout)이 먼저 막았지만, 화면은
   //   "2자리 남음 · 오늘 3자리"로 실제보다 많이 말했다. 정원 무제한(null)이면 일건수 그대로.
-  const todayByDaily = dailyLimit > 0 ? Math.max(0, dailyLimit - todayUsed) : null;  // null=옵션 일일제한 없음
+  const qnaSlots = (viewOpts && Number.isFinite(viewOpts.qnaTodaySlots)) ? Math.max(0, viewOpts.qnaTodaySlots) : null;   // ★ 321
+  const todayByDaily = qnaSlots !== null ? Math.max(0, qnaSlots - todayUsed)
+    : (dailyLimit > 0 ? Math.max(0, dailyLimit - todayUsed) : null);  // null=옵션 일일제한 없음
   const todayRemaining = (todayByDaily !== null && remaining !== null) ? Math.min(todayByDaily, remaining) : todayByDaily;
 
   let status;
@@ -1837,7 +1867,7 @@ function computeOptionView(opt, cnt, campState, viewOpts = null) {
     payAmount: Math.max(0, Number(opt.pay_amount) || 0),
     // ★ 결정 214: 선택지별 사진(빈 값 = 공고 대표 사진). SELECT 에 칸이 없으면 '' — 종전 동작.
     thumbnailUrl: String(opt.thumbnail_url || ''),
-    recruitTotal, dailyLimit,
+    recruitTotal, dailyLimit: qnaSlots !== null ? qnaSlots : dailyLimit,
     used, remaining, todayUsed, todayRemaining,
     externalUsed: Math.max(0, Number(c.externalOrders) || 0),   // 그중 공고 밖 주문 수(관리자 표시용)
     status,
@@ -1875,7 +1905,11 @@ function computeOptionViews(rows, countsMap, campState, { sequential = false, to
          종전 조건(행 2개 이상)이면 하루 몫 재료(마감 행 제외 목록)에서 일정표가 꺼져 공고 정원이 공고 하루 인원으로 돌아간다. */
     && ((sequential && typeof sequential === 'object' && SEQUENTIAL_DAYS_ENABLED)
       || (list.length >= 2 && live.every(r => Math.max(0, Number(r.recruit_total) || 0) > 0)));
-  const views = list.map(r => computeOptionView(r, cm.get(r.opt_key), campState, seq ? { ignoreDailyLimit: true } : null));
+  // ★ 결정 321: Q&A 공고는 선택지 하루 몫 = 그 상품의 오늘 자리 수(없으면 0 — 오늘 자리가 없는 상품은 고를 수 없다)
+  const qnaToday = cm.qnaToday instanceof Map ? cm.qnaToday : null;
+  const views = list.map(r => computeOptionView(r, cm.get(r.opt_key), campState,
+    qnaToday ? { qnaTodaySlots: qnaToday.get(r.opt_key) || 0 } : (seq ? { ignoreDailyLimit: true } : null)));
+  if (qnaToday) return views;   // Q&A 는 순차진행 규칙을 쓰지 않는다(상품마다 동시에 · 321)
   if (!seq) return views;
   /* ★★ 결정 228 — 날짜별 상품 일정표(`sequential` 이 일정표 객체로 오면). 오늘 상품만 그 상품의 그날 몫으로 열고,
        나머지는 대기(다음으로 열리는 날 `opensOn` — 없으면 null = 정규 일정 뒤 추가 모집 결정 대기).

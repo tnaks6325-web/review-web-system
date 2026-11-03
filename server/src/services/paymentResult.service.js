@@ -160,6 +160,7 @@ function _itemView(r) {
     productPrice: Number(r.product_price || 0), reviewFee: Number(r.review_fee || 0),
     amount: Number(r.amount || 0),
     transferMemo: r.transfer_memo || '',
+    isQna: r.is_qna === true,   // 결정 321 4단계 — isFeeOnlyItem 판정 재료
     status: r.status, failReason: r.fail_reason || '', resultStatus: r.result_status || '',
   };
 }
@@ -1469,7 +1470,7 @@ async function backfillPaidDepositStamp({ batchId, by }) {
     if (paymentProof.isHistoryOnlyKey(batch.historical_key)) throw new ResultError('history_only', '과거 입금 기록에는 입금일을 기록할 수 없습니다.');
     if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 대량이체에는 입금일을 기록할 수 없습니다.');
     const { rows } = await client.query(
-      `SELECT i.sheet_id, i.tab_name, i.row_index, i.paid_at, i.product_price, i.review_fee, i.amount,
+      `SELECT i.sheet_id, i.tab_name, i.row_index, i.paid_at, i.product_price, i.review_fee, i.amount, i.is_qna,
               COALESCE(p.sheet_id, i.sheet_id) AS target_sheet_id,
               COALESCE(p.tab_name, i.tab_name) AS target_tab_name,
               COALESCE(p.submit_col2, target_r.submit_col2, r.submit_col2) AS submit_col2,

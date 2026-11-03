@@ -96,6 +96,16 @@
 - 코드 검토 반영 뒤 로컬 실측(같은 조건): 같은 값 표기 차이 재전송 통과 / 제외일·하루 건수 변경 거절 · 자리표 저장 실패 흉내(로컬 DB 쓰기 막음) → 접수 안 끝남 → 다시 누르면 처음과 같은 50자리 · 줄 하나 날짜가 다르면 깔지 않음 · 자리 없는 줄 삭제 보충 없음 · 자리 줄 날짜 고치기 거절 · 차수 추가·삭제 거절 · 작업 이름 바꾸기에 자리표 따라감 · 리뷰 작업(줄 삭제 보충·날짜 고치기·접수 뒤 수정) 종전 그대로.
 - 회귀가드: `server/tests/qnaSlotCalendar.test.js`(47) · `qnaWorktableGuards.test.js`(66 — 이름 바꾸기 막음은 실제 실행 · 잠금 비교·자리 판정·복구 대조·이름 바꾸기는 실제 실행) · `sheetlessNoEmptyOverflow.test.js` 패턴 보정(Q&A 판정 조회는 덧붙이기 준비가 아님 — 검사 의미 불변).
 
+## 3~5단계 — 사용자 확정 (2026-11-03 「전부 권장」)
+- 진행 방식: 3단계(리뷰어 신청·제출)와 5단계(인트라넷 Q&A 탭)를 동시에, 4단계(참여비만 입금)는 3단계 제출 기록 모양이 정해지면 바로. **운영 반영은 리뷰웹(3·4) 먼저, 인트라넷 탭 마지막.**
+1. 자리 배정 = 그 상품의 **오늘 빈 자리를 앞에서부터**(공개 자리가 그날 첫 자리라 먼저 채워진다). 리뷰어가 공개/비공개를 고르지 않는다.
+2. 모집 페이지 = **[Q&A] 탭·표시를 따로** 둔다(리뷰 탭에 섞지 않음).
+3. 재구매 제한(같은 상품 일정 기간)은 **적용하지 않는다**(구매가 아님). 같은 공고 1인 1회는 유지.
+4. 하루 신청 한도(10회)에는 **센다**, 인기 공고 참여 횟수에는 **세지 않는다**.
+5. 「추가 모집」 = 못 채운 자리를 **공개/비공개·문구 그대로**, 다음 진행일부터 같은 하루 건수로 다시 깐다.
+6. 인트라넷 Q&A 탭은 유입방식(유입 검색어·유입가이드)도 **숨긴다**.
+7. 캡처가 마감(신청 후 1시간·그날 자정 중 빠른 쪽) 전에 안 올라오면 **미제출 — 자리를 다시 푼다**(마감 뒤 30초 여유만 유지). 23:50부터 새 신청 막음.
+
 ## 조사로 확인한 남은 단계의 함정 (2~5단계 착수 전 다시 읽을 것)
 - **순차진행(212·228)은 하루에 상품 하나뿐**(`sequentialSchedule.byDate` = 날짜당 1건) — 여러 상품을 동시에 하루 1건씩 여는 데 쓰면 안 된다.
   - 상품별 일건수는 균등 모드 + 선택지 `daily_limit`(결정 210) 으로 이미 된다.
@@ -110,3 +120,39 @@
   - 2단계: `worktablePlan.isBlogWorkOrder`(구매일자별 준비 행), `sharedPatch.structurePermanentlyLocked`(접수 뒤 상품 추가·삭제를 자리표와 함께 정한다).
   - 3단계: `campaign.routes` 신청 분기, `campaign.html isBlogCampaign`, `search-app.js _isBlogItem`, `campaign-cards.js` 배지, `index.html`·`recruit.html _rcKindOf`, `index-recruit.js` 게시 전 점검(구매채널·구매시간 요구), `submit.routes` 리뷰 제출 경로, `recruit-modal.js` 종류 탭.
   - 4단계: `payment.service`(종류 분기 없음 → `no_price`).
+
+## 3단계 — 리뷰어 신청·제출 (2026-11-03 · migration 211)
+- **신청 = 그날 자리 하나를 묶는다** — `campaign_applications.qna_slot_id`(211). `_applyParticipation` 의 모든 게이트 뒤·INSERT 직후 UPDATE(INSERT 칸 목록 가드 유지). 고르기 = `qnaSlots.bindSlotForApply`(공고 선택지 키 → `qnaOptKeyMap` → 자리 단위) → `pickSlotInTx`(지난 홀드 정리 → 오늘·열린·묶이지 않은 자리 `unit_seq` 순 FOR UPDATE). `camp_tab_daily` 잠금 안. 한 자리에 둘 = 부분 유일 색인 `uq_campaign_apps_qna_slot`(applied·submitted). 못 고르면 `qna_no_slot`(fail-closed).
+- 기한 = `qnaHoldExpiry`(신청 + 1시간과 그날 자정 중 빠른 쪽) · 23:50 KST 부터 새 신청 막음(잠금 앞 `qna_day_closing` + 상태 엔진 `cutoff`). 마감 뒤 자리 풀기 = 줄 기록 전이면 기존 홀드 스윕(30초 여유), 줄 기록 뒤 캡처를 안 냈으면 아래 「검토 반영」의 캡처 기한 스윕 — 자리 점유는 신청 상태로만 판단하므로 자리 표에 쓸 것이 없다.
+- 개수 단계(289)·재구매 기간 판정 건너뜀. 같은 공고 같은 명의 제출완료 = `one_per_person`(확정 3). 하루 신청 한도는 그대로 센다 · 인기 참여권 적립에서 `qna_slot_id IS NULL`(확정 4). 상품 바꾸기(change-option) = `qna_option_locked`.
+- **오늘 정원 단일 출처** = `qnaSlots.loadTodayByCampaign`(오늘 날짜 자리 수, 취소 제외) — `fetchCampaignCounts`(맨 뒤 · 066 순서 계약)·`fetchOptionCountsBatch`(Map 속성 `qnaToday`)가 싣고, `computeCampaignState` 는 `counts.qnaToday` 가 숫자면 그것을 정원으로(이월 0), `computeOptionViews` 는 상품별 오늘 자리 수를 하루 몫으로 쓰며 순차진행 규칙을 쓰지 않는다. 조회 실패 = 미부착 = 종전 정원(신청은 자리 묶기가 다시 막는다).
+- **제출 창구 `POST /api/submit/qna`**(구매양식 대신): 리뷰어 세션 필수 → 홀드 인증(`_authoritativeHold`) → 기한(+30초) 확인 **뒤에만** 최소 장부 줄(이름·연락처·입금 계좌·진행일자 = 그 줄에 적힌 표기 그대로, `source='qna_submit'`) + 홀드 확정(같은 트랜잭션) → **그 자리 줄 번호로만** 작업표 기록(`writeOrderToWorktable sheetRow`). 확정이 `late` 면 장부 줄을 지운다(자리 없는 Q&A 주문은 갈 곳이 없다). 다른 주문이 앉은 줄은 덮지 않는다(`qna_row_taken`). 다시 누르면 같은 줄(줄 기록만 다시 맞춤).
+- 화면(`campaign.html`): Q&A 공고는 구매양식 대신 Q&A 카드(날짜·공개/비공개·문구 복사·상품 페이지·캡처 1장). 제출 = ① `/api/submit/qna` ② 기존 리뷰 캡처 업로드 ③ `/api/submit/review`. ②·③ 이 실패하면 ① 은 남고 **캡처 다시 올리기 카드**로 남는다 — 진입·폴링 둘 다 `qnaSlot.captureDone === false` 면 완료 화면(홀드 정리)으로 넘기지 않는다. 유입가이드 카드는 숨긴다(`showInflow:false`).
+- 모집 목록: 리뷰/블로그/Q&A 탭 · 💬 Q&A 배지 · 카드 문구 "참여·신청". ★ 공개 목록 SELECT 에 `work_kind` 가 빠져 있어 종류 탭이 늘 리뷰로 접히던 것을 함께 고쳤다(공개 칸 목록에는 있었다 · 운영 실측 2026-11-03: 목록에 오른 공고 20건 전부 리뷰라 지금 화면 변화 없음).
+- 검색 색인 날짜: Q&A 작업표의 날짜 칸은 「진행일자」 — 다른 날짜 칸이 없을 때만 그것을 시작일로 읽는다(`columnResolver`). 빠지면 관리자 카드 오늘 인원·리뷰 마감 안내가 날짜를 못 읽는다.
+- **일정 끝(확정 5)** — 순차진행 끝 창(`/api/trackb/sequential-end-prompts`)에 `kind:'qna'` 항목으로 함께 묻는다. 마지막 자리 날짜가 지났고 못 채운 자리(열림·제출 없음)가 있으면 대상. [추가 모집] = 못 채운 자리를 **같은 공개 여부·문구 그대로**, 다음 날부터 영업일에 그 상품의 하루 건수(처음 자리표의 하루 최대)로 **그 줄의 진행일자만** 옮긴다(새 줄·새 자리 없음 · 주문 붙은 줄 제외 · 작업표 기록과 같은 잠금 · 같은 일정 끝 한 번만 `campaign_plan_events.qna_extra`). [그대로 끝내기] = 못 채운 자리 `lapsed` + 공고 마감(`qna_finish`).
+- 로컬 실측(가짜 데이터): API 21항목 · 일정 끝 17항목 · 브라우저(참여 → Q&A 카드 → 캡처 제출 → 완료 / 줄 기록 뒤 캡처 실패 → 다시 올리기 카드 유지 → 완료) 통과. 회귀가드 `qnaReviewerFlow.test.js`.
+- ★ 완화 금지: 자리 묶기를 게이트 앞으로 옮기거나 fail-open 으로 바꾸지 않는다(빈 신청 = 제출할 줄이 없다) · 제출 창구의 기한 확인을 장부 쓰기 뒤로 옮기지 않는다 · 캡처 전 완료 화면 전환 금지(홀드 정리 = 다시 올릴 길이 사라진다).
+- **독립 검토 반영(2026-11-03 · PR #1744 2차 커밋)**
+  - ★ 캡처 기한 넘김 = 자리 풀기(확정 7을 실제로 지키기): 제출 창구 ①이 캡처 **전에** 신청을 확정(submitted)하므로 기존 홀드 스윕(applied 만 봄)으로는 풀리지 않았다. 매분 스윕에 `qnaSlots.sweepQnaCaptureTimeouts`(잠금 `qna_capture_sweep`)를 더했다 — 기한 + 30초 + 여유 2분이 지났고 캡처가 없으면 `trackB.hideWorkdeskRow`(「줄 삭제」와 같은 길: 주문 취소·신청 취소·줄 삭제·**같은 날·같은 자리 빈 줄 보충**·자리표 seq 이동)로 푼다. 줄 리비전을 넘겨 그 사이 바뀐 줄은 건너뛴다. 끄는 스위치 `QNA_CAPTURE_SWEEP=0`.
+  - ★ 캡처 제출 판정 = **작업표 줄 `campaign_participants.is_submitted`(진실원본) 또는 색인 `review_index.is_submitted`** — 색인만 보면 장부 재생성(`rebuildLedgers`)이 표시를 지워 **낸 사람의 자리를 푸는** 사고가 난다(로컬 실측으로 재현). 리뷰어 화면 `captureDone` 도 같은 기준.
+  - 일정 끝 반영 잠금 순서 = 작업표 잠금 → 공고 잠금(다른 경로와 같은 순서 · 반대면 교착) · 잠근 뒤 공고의 작업표 연결 재확인. 못 채운 자리 = 빈 줄이 살아 있는 자리(줄에 주문이 앉았거나 줄이 지워진 자리는 묻지도 옮기지도 않는다) · 잠금 안에서 줄이 안 움직이면 전부 되돌림.
+  - 자리 고르기 = 공개 자리 먼저(`ORDER BY (visibility <> 'public'), unit_seq` — 추가 모집으로 순서가 섞여도) · 유예 = `HOLD_GRACE_SEC` 단일 출처.
+  - 작업표 지정 줄 쓰기(`writeOrderToWorktable requireEmptyOrSame`) = 줄 잠금 안에서 남의 주문 줄이면 `row_taken`(바깥 확인과 잠금 사이 끼어들기 차단).
+  - 구매양식 창구(`/api/submit/order`)는 Q&A 자리 신청을 받지 않는다(`qna_use_capture`) — 홀드 조회가 같은 왕복에 `qna_slot_id` 를 읽는다(부팅 필수 칸이라 늘 있음).
+  - 신청 종류 판정이 공고의 없는 칸(`linked_tab_sheet_id`)을 읽어 탭 종류를 못 보던 것을 `linked_sheet_id` 로 고쳤다(운영 실측: 공고 종류 빈칸 + 탭 종류 블로그/Q&A 조합 0건 — 블로그 동작 변화 없음). 잠근 공고로 종류를 다시 맞춰 갈리면 `kind_changed`.
+  - 공개 목록의 선택지 카운트 맵을 다시 만들 때 `qnaToday` 를 함께 옮긴다(빠지면 Q&A 선택지가 일반 하루 한도로 계산). 자리 이중 묶기 충돌(23505 `uq_campaign_apps_qna_slot`) = 「자리 찼음」 안내. Q&A 제출은 세션 로그인 번호 우선 · 두 번 눌러 먼저 확정됐으면 그 결과를 돌려준다. 화면: Q&A 공고는 자리 정보를 못 받으면 완료 화면 대신 다시 불러온다.
+  - 1인 1회 공고(`multi_account_mode=false`)에서 다른 명의로 제출한 Q&A 도 재참여 기간 없이 막는다(같은 명의 규칙과 같음 · Codex P2).
+  - 선택지 → 자리 단위(`qnaOptKeyMap`)는 자리표(`qnaUnitsFromWorkOrder`)와 같은 기준 = 상품 `product_mode`('opt' 면 「상품 · 옵션」). 선택지 행의 unitKind 로 정하면 「단일」·「없음」 옵션이 상품으로 접혀 자리표에 없는 단위를 가리켜 참여가 막혔다(Codex P2).
+  - 로컬 실측: API 21 · 일정 끝 17 · 검토 반영 17(목록 오늘 자리 수 · 구매양식 막힘 · 캡처 안 낸 사람만 풀림 · 낸 사람 그대로 · 풀린 공개 자리를 다음 사람이 받음 · 재실행 0건) · 매분 스윕 본문 1회 실행 통과.
+  - ★ 완화 금지: 캡처 기한 스윕 판정에서 작업표 줄 `is_submitted` 를 빼지 않는다 · 일정 끝 잠금 순서(작업표 → 공고)를 뒤집지 않는다 · 지정 줄 쓰기의 줄 잠금 안 확인을 빼지 않는다.
+- 4단계 메모: (아래 「4단계」로 해결)
+
+## 4단계 — 참여비 입금 (사용자 확정 2026-11-03 · migration 212)
+- **Q&A 줄 = 참여비(리뷰비)만 보낸다.** `payment.service` 대상 계산에서 `isQna = resolveWorkKind({공고 work_kind, 탭 work_kind}) === 'qna'`(공고 > 탭 · `_loadCampaigns`/`_loadTabMeta` 가 같은 왕복에 읽는다). Q&A 면 `amount = fee`, 제품비 0 이어도 `no_price` 로 막지 않는다. 종류를 모르면 리뷰로 본다 = 종전처럼 막힌다(보내지 않는 쪽).
+- 대상 조건은 그대로 — 캡처 제출(`ri.is_submitted` + 리뷰 의무 fulfilled) 뒤에만. 입금 칸·PAID·회차·원장 잠금도 그대로.
+- **회차 항목에 `payment_batch_items.is_qna`(212) 박제** + 제품비 0. 결정 292 「리뷰비만 보낸 건」 판정(`isFeeOnlyItem`/`feeOnlyItemSql`)이 `is_qna` 면 빠진다 → 판정을 쓰는 8곳(리뷰어 입금 팝업·업체 입금 전환·결과 반영·PAID 가드·리뷰 종결·업체 계좌 공개·입금 칸 잠금·칸 비우기)이 일반 입금처럼 동작한다. 판정 기준을 바꾸지 않고 표시 하나로 가른 이유 = 모양(제품비 0 · 금액 = 리뷰비)이 split 과 같아 값으로는 구분할 수 없다. 기존 항목은 FALSE = 종전 그대로.
+- 인트라넷 페이백 장부는 `product_price`/`review_fee` 를 따로 합산만 한다(`review-paybacks.ts`) — Q&A 는 제품비 0 + 참여비로 정확히 잡힌다.
+- 로컬 실측(가짜 데이터): 입금 목록 노출·Q&A 판정·금액 = 참여비·회차 담기(is_qna·제품비 0)·「리뷰비만」 판정 제외(JS·SQL)·입금 기록 → PAID·작업표 입금일 칸 기록 통과(11 + 5항목).
+- ★ 완화 금지: `isFeeOnlyItem`/`feeOnlyItemSql` 의 is_qna 제외를 빼지 않는다(빼면 Q&A 입금이 입금일·페이백 완료 없이 끝나 리뷰어 화면이 "미입금"으로 남는다) · 회차 담기의 is_qna 값은 서버가 다시 계산한 대상값으로만 넣는다.
+

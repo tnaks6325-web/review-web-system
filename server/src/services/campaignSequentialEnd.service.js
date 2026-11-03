@@ -51,6 +51,44 @@ async function _decided(db, ids) {
  * @returns {{ok:true, items:Array<{campaignId,title,thumbnailUrl,end,regularEnd,shortages:Array<{optKey,n}>,total}>}}
  */
 async function listSequentialEnds(admin, opts = {}) {
+  const seq = await _listSequentialOnly(admin, opts);
+  const qna = await _listQnaEnds(admin, opts);
+  return { ok: true, items: (seq.items || []).concat(qna), today: seq.today || st.kstTodayStr(opts.now || new Date()) };
+}
+
+/* ★★ 결정 321 3단계(확정 5) — Q&A 공고의 일정 끝도 **같은 창**에서 묻는다(kind:'qna').
+   판정·반영은 qnaSlots.service(자리표 단일 출처) · 받는 사람 규칙은 순차진행과 같다(isRecipient · 마스터는 모두 본다).
+   ★ 조회 실패 = 빈 목록(모르면 묻지 않는다 — 순차진행 항목은 그대로 뜬다). */
+async function _listQnaEnds(admin, opts = {}) {
+  const db = opts.db || pool;
+  const now = opts.now || new Date();
+  const qs = require('./qnaSlots.service');
+  try {
+    const list = await qs.listQnaEnds(db, { campaignIds: opts.campaignIds || null, now });
+    if (!list.length) return [];
+    const ids = list.map(x => x.campaignId);
+    const { linkedWorkOrdersForCampaigns } = require('./linkedRecruitQuota.service');
+    const [wos, woRows] = await Promise.all([
+      linkedWorkOrdersForCampaigns(db, ids, ['created_by']).catch(() => new Map()),
+      db.query('SELECT * FROM work_orders WHERE id = ANY($1::text[])', [list.map(x => x.workOrderId).filter(Boolean)]).then(r => r.rows),
+    ]);
+    const woById = new Map(woRows.map(w => [String(w.id), w]));
+    const items = [];
+    for (const it of list) {
+      if (!opts.skipRecipient && !(admin && admin.role === 'master')
+        && !isRecipient(admin && admin.name, { manager: it.manager }, wos.get(it.campaignId) || wos.get(Number(it.campaignId)))) continue;
+      const shortages = qs.qnaShortages(it, woById.get(String(it.workOrderId)) || {});
+      items.push({ kind: 'qna', campaignId: it.campaignId, title: it.title, thumbnailUrl: it.thumbnailUrl,
+        end: it.end, regularEnd: it.end, shortages, total: it.unfilled.length });
+    }
+    return items;
+  } catch (e) {
+    logger.warn(`[sequentialEnd] Q&A 일정 끝 조회 실패(묻지 않음): ${e.message}`);
+    return [];
+  }
+}
+
+async function _listSequentialOnly(admin, opts = {}) {
   const db = opts.db || pool;
   const now = opts.now || new Date();
   const today = st.kstTodayStr(now);
@@ -109,6 +147,18 @@ async function applySequentialEnds(admin, decisions) {
     const cur = await listSequentialEnds(admin, { campaignIds: [campaignId] });
     const it = (cur.items || [])[0];
     if (!it) { results.push({ campaignId, ok: false, error: '이미 처리됐거나 물을 대상이 아닙니다.' }); continue; }
+    if (it.kind === 'qna') {   // ★ 결정 321 — 자리표 단일 출처로 반영(같은 결정 검사·잠금은 그쪽이 한다)
+      try {
+        const r = await require('./qnaSlots.service').applyQnaEnd({
+          campaignId, action, end: d.end || it.end, actor: (admin && admin.name) || 'admin' });
+        try { const cr = require('../routes/campaign.routes'); if (cr && typeof cr.invalidateListCache === 'function') cr.invalidateListCache(); } catch (_) { /* 무관 */ }
+        results.push({ campaignId, ok: true, action, title: it.title, total: it.total, kind: 'qna', moved: r.moved });
+      } catch (e) {
+        results.push({ campaignId, ok: false, error: e.code ? e.message : '반영에 실패했습니다.' });
+        if (!e.code) logger.warn(`[sequentialEnd] Q&A 반영 실패 camp=${campaignId}: ${e.message}`);
+      }
+      continue;
+    }
     if (d.end && String(d.end) !== it.end) { results.push({ campaignId, ok: false, error: '일정이 바뀌었습니다 — 다시 확인해 주세요.' }); continue; }
     const client = await pool.connect();
     try {
