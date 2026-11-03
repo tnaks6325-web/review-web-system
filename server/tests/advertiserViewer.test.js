@@ -105,6 +105,32 @@ async function run() {
   ok('업체 총건수는 활성 작업행·발주보다 공고 모집 정원을 우선한다', it.target === 800 && it.target !== ownedRow.bTotal && it.target !== ownedRow.woRecruit);
   ok('업체 진행 건수(filled) = 채워진 줄(bTotal) — 총건수와 별도 칸으로 싣는다(2026-11-03)',
     it.filled === 675 && it.filled !== it.target);
+  ok('마감 안 된 작업 = finished:false', it.finished === false);
+  {
+    // 마감(🏁) — 이름이 바뀌어도 gid 로 찾는다 · 끝남 불리언만(마감자·일자 미노출)
+    svc.__setPoolForTest(pool([...ownedRoutes(true),
+      [/FROM trackb_tab_finished WHERE deleted_at IS NULL/, () => ({ rows: [{ sheetId: 'S1', tabName: '옛이름', tabGid: '11', finishedAt: '2026-10-01', finishedBy: '만두' }] })]]));
+    const f = (await svc.advertiserWorkSummary({ advertiserId: 'adv-1' })).items[0];
+    const blob = JSON.stringify(f);
+    ok('★ 마감한 작업 = finished:true (gid 폴백) · 마감자·마감일은 싣지 않는다(087)',
+      f.finished === true && !blob.includes('만두') && !blob.includes('2026-10-01') && f.finishedBy === undefined && f.finishedAt === undefined);
+    svc.__setPoolForTest(pool([...ownedRoutes(true),
+      [/FROM trackb_tab_finished WHERE deleted_at IS NULL/, () => { throw new Error('db down'); }]]));
+    const u = (await svc.advertiserWorkSummary({ advertiserId: 'adv-1' })).items[0];
+    ok('★ 마감 조회 실패 = finished 칸 없음(화면이 종전 규칙으로 판정 — "모름"을 "안 끝남"으로 꾸미지 않음)', !('finished' in u));
+    svc.__setPoolForTest(pool(ownedRoutes(true)));
+    // 화면 판정 실행: 덜 채우고 마감 → 완료, 칸 없음 → 종전 규칙
+    const wd0 = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
+    const grabFn = (n) => { const i = wd0.indexOf('function ' + n + '('); let d = 0, j = wd0.indexOf('{', i);
+      for (let k = j; k < wd0.length; k++) { if (wd0[k] === '{') d++; else if (wd0[k] === '}') { d--; if (!d) return wd0.slice(i, k + 1); } } };
+    const vm = require('vm'); const box = {}; vm.createContext(box);
+    vm.runInContext(['_awTarget', '_awProgress', '_awStatus'].map(grabFn).join('\n'), box);
+    const s1 = box._awStatus({ target: 100, submitted: 77, active: true, finished: true });
+    const s2 = box._awStatus({ target: 100, submitted: 77, active: true });
+    const s3 = box._awStatus({ target: 100, submitted: 77, active: true, finished: false });
+    ok('★ 업체 화면: 덜 채우고 마감 = "완료 77%" · 칸 없음/false = "진행중 77%"',
+      s1.done && s1.label === '완료 77%' && !s2.done && s2.label === '진행중 77%' && !s3.done);
+  }
   {
     const wd = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
     const row = (wd.match(/<span class="acnt">[^\n]*<\/span>/) || [''])[0];
