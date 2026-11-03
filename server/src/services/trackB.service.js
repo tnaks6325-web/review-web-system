@@ -1152,6 +1152,10 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
     r.finished = !!(fin.map[k] || (g && fin.map[_FIN_GKEY(r.sheetId, g)]));
     /* ★★ 옛 ⬛ 마감 탭은 후보로 세지 않는다(258 완화 금지 — ⬛ 를 🏁 로 옮기지 않는다 · 결정 281). 판정은 그대로 finishCandidate 하나. */
     r.finishCand = !r.finished && r.isClosed !== true && finishCandidate(st.map[k]);
+    /* 담당 열 = 직원 홈과 같은 판정(resolveWorkManager — 리뷰오더 작업담당 우선, 탭 칸 폴백 · 2026-11-03).
+       종전에는 탭 칸(tc.manager)만 실어, 리뷰오더로 이미 '망고'인 작업이 업체관리 표에서만 빈칸이었다(운영 6건).
+       ★ 통계 조회 실패·값 없음이면 종전 탭 칸 값을 그대로 둔다(모르는 것을 빈칸으로 덮지 않는다). */
+    if (st.ok && st.map[k] && st.map[k].manager) r.manager = st.map[k].manager;
     const b = brandByTab.get(r.sheetId + '\t' + r.tabName);
     if (b) { r.brandId = b.id; r.brandName = b.name; r.brandColor = b.color; }
   }
