@@ -54,7 +54,9 @@ function qnaUnitsFromWorkOrder(wo) {
     const key = selectionKey(productName, option1Value, option2Value);
     if (seen.has(key)) { blockers.push({ code: 'qna_duplicate_unit', message: `같은 상품·옵션이 두 번 있습니다: ${key}` }); return; }
     seen.add(key);
-    const daily = _int(src && src.daily) || fallbackDaily;
+    // 선택지에 하루 건수를 적었으면(0 포함) 그 값 — 0 은 잠금(qna_daily_zero). 안 적었을 때만 오더 하루 건수를 쓴다.
+    const hasDaily = !!src && src.daily != null && String(src.daily).trim() !== '';
+    const daily = hasDaily ? _int(src.daily) : fallbackDaily;
     units.push({
       unitKey: key, unitIdx: units.length, productName,
       option1Value: option1Value || '', option2Value: option2Value || '',

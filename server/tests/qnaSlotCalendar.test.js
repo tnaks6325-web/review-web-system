@@ -155,4 +155,19 @@ const mig = fs.readFileSync(path.join(__dirname, '..', 'migrations/210_qna_slots
 t('migration 210: 가산 전용·멱등', /CREATE TABLE IF NOT EXISTS qna_slots/.test(mig) && !/DROP |ALTER TABLE .* DROP|CHECK \(/.test(mig.replace(/^--.*$/mg, '')));
 t('같은 자리 중복 저장 차단(재접수 안전)', /uq_qna_slots_unit ON qna_slots \(sheet_id, tab_name, unit_key, unit_seq\)/.test(mig));
 
+{
+  const { qnaUnitsFromWorkOrder: U, buildQnaCalendar: C } = require('../src/utils/qnaCalendar');
+  const mk = (daily) => ({ daily_count: 3, product_options_json: JSON.stringify([
+    { name: 'P1', product_mode: 'single', base: { count: 3, ...(daily === undefined ? {} : { daily }) } },
+    { name: 'P2', product_mode: 'single', base: { count: 3, daily: 3 } }]) });
+  const z = U(mk(0)).units;
+  t('★ 선택지에 하루 0건을 적으면 0 그대로 → 잠금(오더 하루 건수로 바꾸지 않는다)', z[0].daily === 0 && C({ units: z, days: [{ date: '2026-11-04', label: 'x' }] }).blockers.some(b => b.code === 'qna_daily_zero'));
+  t('하루 건수를 안 적었을 때만 오더 하루 건수', U(mk(undefined)).units[0].daily === 3 && U(mk('')).units[0].daily === 3);
+  const { buildWorktablePlan: BP } = require('../src/utils/worktablePlan');
+  const big = { workboard_schema_version: 2, work_kind: 'qna', start_date: '2026-11-04', recruit_count: 100000, daily_count: 100000,
+    product_options_json: JSON.stringify([{ name: 'P', product_mode: 'single', base: { count: 100000, daily: 100000 } }]) };
+  const t0 = Date.now();
+  const bp = BP({ workOrder: big, template: TEMPLATE });
+  t('★ 상한을 넘는 건수는 자리를 펼치기 전에 막는다(서버가 멈추지 않게)', !bp.canCreate && bp.blockers.some(b => b.code === 'qna_too_many') && Date.now() - t0 < 2000);
+}
 console.log(`\n✅ ${pass}개 통과\n`);

@@ -160,6 +160,8 @@ const scope = require('../src/utils/sheetlessScope');
     && /logger\.warn\(`\[order\] Q&A 자리표 조회 실패 — 접수 뒤 수정을 잠금\(fail-closed\)/.test(orr));
   t('옛 갱신 경로가 작업표 연결 칸을 읽는다(잠금 판정 재료)', /recall_courier, recall_product, work_kind, product_distribution_mode, start_date, product_options_json, linked_tab_name/.test(orr));
 
+  t('★ 일반 칸 편집: 자리 줄의 진행일자·공개여부·문의문구는 막는다', /QNA_DATE_HEADER, \.\.\._wp\.QNA_PLAN_HEADERS\]\.includes\(field\.slice\(4\)\.trim\(\)\)\) \{[\s\S]{0,200}isBoundRow\(client, sheetId, tabName, row\.seq\)\) \{\s*await client\.query\('ROLLBACK'\);\s*return \{ ok: false, error: 'qna_slot_cell_locked'/.test(tb));
+
   /* ── ⑧ Q&A 잠금 비교 — 실제로 돌린다(운영과 같은 값 모양) ─────────────── */
   console.log('\n⑧ Q&A 잠금 비교 — 같은 값은 표기가 달라도 통과, 다른 값만 막는다');
   {
@@ -259,10 +261,35 @@ const scope = require('../src/utils/sheetlessScope');
     const before = scope.isSheetless; scope.isSheetless = async () => true;
     try { await ren.relabelEmptySlotsInTx(client, 'c1', [{ from: '가방 · 토프', to: '가방 · 토프색' }], [{ from: '가방', to: '토프 가방' }]); }
     finally { scope.isSheetless = before; }
-    const kq = log.find(x => /UPDATE qna_slots SET unit_key = \$4/.test(x.sql));
-    const pq = log.find(x => /UPDATE qna_slots SET product_name = \$4/.test(x.sql));
-    t('★ 선택지 이름 바꾸기: 자리표의 선택지 키·값도 바꾼다', kq && JSON.stringify(kq.params) === JSON.stringify(['s', 't', '가방 · 토프', '가방 · 토프색', '가방', '토프색', '']));
-    t('★ 상품 이름 바꾸기: 자리표의 상품 이름도 바꾼다', pq && JSON.stringify(pq.params) === JSON.stringify(['s', 't', '가방', '토프 가방']));
+    const qlog = log.filter(x => /UPDATE qna_slots/.test(x.sql));
+    t('★ 상품 이름을 먼저 바꾼다', /SET product_name = \$4/.test(qlog[0].sql) && JSON.stringify(qlog[0].params) === JSON.stringify(['s', 't', '가방', '토프 가방']));
+    const toTmp = qlog.filter(x => /SET unit_key = \$4 WHERE/.test(x.sql) && /^__qna_rename_/.test(x.params[3]));
+    const fromTmp = qlog.filter(x => /option1_value = CASE/.test(x.sql));
+    t('★★ 키는 임시 이름을 거쳐 두 단계로(맞바꾸기·이어 바꾸기에서 유일 색인 충돌 방지)', toTmp.length === 2 && fromTmp.length === 2
+      && qlog.indexOf(toTmp[1]) < qlog.indexOf(fromTmp[0]));
+    const opt = fromTmp.find(x => x.params[3] === '가방 · 토프색');
+    t('★ 선택지 이름 바꾸기: 키·선택지 값이 새 이름으로', opt && JSON.stringify(opt.params.slice(2)) === JSON.stringify([toTmp[0].params[3], '가방 · 토프색', '가방', '토프색', '']));
+    const prd = fromTmp.find(x => x.params[3] === '토프 가방');
+    t('옵션 없는 상품 이름 바꾸기: 키가 곧 상품 이름이라 함께 바뀐다', !!prd);
+  }
+  {
+    // 실제 맞바꾸기 — 유일 색인을 흉내 내는 작은 메모리 표로 돌린다(A↔B)
+    const ren = require('../src/services/campaignOptionRename.service');
+    const table = [{ unit_key: 'A', unit_seq: 1, product_name: '가방' }, { unit_key: 'B', unit_seq: 1, product_name: '가방' }];
+    const client = { query: async (sql, p) => {
+      sql = String(sql);
+      if (/FROM recruit_campaigns WHERE id = \$1/.test(sql)) return { rows: [{ linked_sheet_id: 's', linked_tab_name: 't' }] };
+      if (/UPDATE qna_slots SET unit_key = \$4/.test(sql)) {
+        const hit = table.filter(r => r.unit_key === p[2]);
+        for (const r of hit) { if (table.some(o => o !== r && o.unit_key === p[3] && o.unit_seq === r.unit_seq)) throw Object.assign(new Error('uq'), { code: '23505' }); r.unit_key = p[3]; }
+        return { rowCount: hit.length };
+      }
+      return { rows: [] };
+    } };
+    const before = scope.isSheetless; scope.isSheetless = async () => true;
+    try { await ren.relabelEmptySlotsInTx(client, 'c1', [{ from: 'A', to: 'B' }, { from: 'B', to: 'A' }], []); }
+    finally { scope.isSheetless = before; }
+    t('★★ 두 선택지 이름 맞바꾸기(A↔B) — 충돌 없이 자리표 키가 서로 바뀐다', table[0].unit_key === 'B' && table[1].unit_key === 'A');
   }
 
   console.log(`\n✅ ${pass}개 통과\n`);

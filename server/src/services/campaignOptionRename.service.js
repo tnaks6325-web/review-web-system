@@ -129,22 +129,28 @@ async function relabelEmptySlotsInTx(client, campaignId, pairs, productPairs = [
       n += 1;
     }
     /* ★ Q&A 자리표(결정 321) — 자리의 상품 이름·선택지 키도 함께(채운 자리 포함 — 신청의 선택지 키도 위에서 바뀐다).
+       ① 상품 이름 먼저 ② 키는 **임시 이름을 거쳐 두 단계로**(`applyRenamePlanInTx` 와 같은 방식) — 두 선택지 이름을 맞바꾸거나
+       다른 선택지 이름으로 이어 바꾸면 한 번에 바꿀 때 (탭, 키, 순번) 유일 색인에 걸려 자리표만 옛 이름에 남는다.
        선택지 값 칸은 새 키를 「상품 · 옵션1 · 옵션2」로 나눠, 상품 이름이 맞을 때만 고친다(이름에 ' · ' 가 든 상품은 키만). */
-    for (const [from, to] of map) {
-      const parts = String(to).split(' · ');
+    const qc = [camp.linked_sheet_id, camp.linked_tab_name];
+    for (const [from, to] of pmap) {
+      await client.query('UPDATE qna_slots SET product_name = $4, updated_at = NOW() WHERE sheet_id = $1 AND tab_name = $2 AND product_name = $3', [...qc, from, to]);
+    }
+    const moves = new Map(map);
+    for (const [from, to] of pmap) if (!moves.has(from)) moves.set(from, to);   // 옵션 없는 상품 = 키가 곧 상품 이름
+    const tmp = [...moves.entries()].map(([from, to], i) => ({ from, to, t: `__qna_rename_${i}__` }));
+    for (const m of tmp) {
+      await client.query('UPDATE qna_slots SET unit_key = $4 WHERE sheet_id = $1 AND tab_name = $2 AND unit_key = $3', [...qc, m.from, m.t]);
+    }
+    for (const m of tmp) {
+      const parts = String(m.to).split(' · ');
       await client.query(
         `UPDATE qna_slots SET unit_key = $4,
                 option1_value = CASE WHEN product_name = $5 THEN $6 ELSE option1_value END,
                 option2_value = CASE WHEN product_name = $5 THEN $7 ELSE option2_value END,
                 updated_at = NOW()
           WHERE sheet_id = $1 AND tab_name = $2 AND unit_key = $3`,
-        [camp.linked_sheet_id, camp.linked_tab_name, from, to, parts[0], parts[1] || '', parts[2] || '']);
-    }
-    for (const [from, to] of pmap) {
-      await client.query(
-        `UPDATE qna_slots SET product_name = $4, unit_key = CASE WHEN unit_key = $3 THEN $4 ELSE unit_key END, updated_at = NOW()
-          WHERE sheet_id = $1 AND tab_name = $2 AND product_name = $3`,
-        [camp.linked_sheet_id, camp.linked_tab_name, from, to]);
+        [...qc, m.t, m.to, parts[0], parts[1] || '', parts[2] || '']);
     }
     await client.query('RELEASE SAVEPOINT rename_slots');
     return n;

@@ -919,8 +919,15 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
   if (isQnaPlan) {
     const { qnaUnitsFromWorkOrder, buildQnaCalendar, unitDays } = require('./qnaCalendar');
     const qu = qnaUnitsFromWorkOrder(wo);
-    const needDays = qu.units.reduce((m, u) => Math.max(m, unitDays(u)), 0);
-    qnaCal = buildQnaCalendar({ units: qu.units, days: businessDays({ count: needDays, startDate, skipWeekends, holidays }), startSeq: 1 });
+    // ★ 자리를 펼치기 **전에** 상한을 본다 — 잘못 친 큰 건수(10만 등)로 자리를 다 만든 뒤 자르면 서버가 멈춘다.
+    const qnaSum = qu.units.reduce((n, u) => n + u.total, 0);
+    if (qnaSum > MAX_ROWS) {
+      qnaCal = { slots: [], total: 0, warnings: [],
+        blockers: [{ code: 'qna_too_many', message: `Q&A 자리가 ${qnaSum}건으로 한 작업의 상한(${MAX_ROWS}건)을 넘습니다 — 상품별 건수를 확인하세요.` }] };
+    } else {
+      const needDays = qu.units.reduce((m, u) => Math.max(m, unitDays(u)), 0);
+      qnaCal = buildQnaCalendar({ units: qu.units, days: businessDays({ count: needDays, startDate, skipWeekends, holidays }), startSeq: 1 });
+    }
     qnaCal.blockers.unshift(...qu.blockers);
     if (!isV2) qnaCal.blockers.push({ code: 'qna_requires_v2', message: 'Q&A 작업은 새 리뷰오더 형식(상품·옵션 단계형)으로만 만들 수 있습니다.' });
     if (!startDate) qnaCal.blockers.push({ code: 'qna_no_start_date', message: 'Q&A 작업은 시작일이 있어야 날짜별 자리를 만들 수 있습니다.' });

@@ -4450,7 +4450,7 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
   try {
     await client.query('BEGIN');
     const { rows: pr } = await client.query(
-      `SELECT id, source, order_submission_id, identity_key, phone8, recipient_name, option_text, row_json, tab_gid,
+      `SELECT id, seq, source, order_submission_id, identity_key, phone8, recipient_name, option_text, row_json, tab_gid,
               submit_col, submit_col2
          FROM campaign_participants
         WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL FOR UPDATE`,
@@ -4470,6 +4470,15 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
       }
       if (statusToggle) {
         await client.query('ROLLBACK'); return { ok: false, error: 'status_column_locked', field };
+      }
+      // ★ Q&A체험단(결정 321) — 자리 줄의 진행일자·공개여부·문의문구는 자리표가 정한다. 칸만 고치면 화면·보충 줄이 자리표와 갈린다.
+      const _wp = require('../utils/worktablePlan');
+      if ([_wp.QNA_DATE_HEADER, ..._wp.QNA_PLAN_HEADERS].includes(field.slice(4).trim())) {
+        const qs = require('./qnaSlots.service');
+        if (await qs.isQnaTab(client, sheetId, tabName) && await qs.isBoundRow(client, sheetId, tabName, row.seq)) {
+          await client.query('ROLLBACK');
+          return { ok: false, error: 'qna_slot_cell_locked', field, message: 'Q&A 자리 줄의 진행일자·공개여부·문의문구는 바꿀 수 없습니다 — 날짜별 자리표가 정한 값입니다.' };
+        }
       }
       if (!await _isTabColumn(client, sheetId, tabName, row.tab_gid, field.slice(4), row.row_json)) {
         await client.query('ROLLBACK'); return { ok: false, error: 'field_not_editable', field };

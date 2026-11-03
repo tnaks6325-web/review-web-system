@@ -10138,7 +10138,7 @@ function commitCellEdit(rowId, field, value, td, opt){
       rollback();
       undoGroup.pending=Math.max(0,undoGroup.pending-1); if(!(opt&&opt.undoGroup)) _finishCellUndoGroup(undoGroup);
       if(resp&&resp.error==='concurrent_edit_conflict'){ toast('동시 편집 감지 — 최신 상태로 새로고침'); reloadWorkdesk(); }
-      else toast(resp&&resp.error?('편집 거부: '+resp.error):'편집 실패');
+      else toast(resp&&resp.message?resp.message:(resp&&resp.error?('편집 거부: '+resp.error):'편집 실패'));
       return false;
     })
     .catch(()=>{ rollback(); undoGroup.pending=Math.max(0,undoGroup.pending-1); if(!(opt&&opt.undoGroup)) _finishCellUndoGroup(undoGroup); toast('편집 실패 — 네트워크'); return false; });
