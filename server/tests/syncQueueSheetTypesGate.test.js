@@ -288,6 +288,28 @@ const stub = (rel, exportsObj) => {
     assert.equal((await db.query(`SELECT status FROM sync_queue WHERE id=$1`, [wbRow.id])).rows[0].status, 'pending');
   });
 
+  // ═══ H. 결정 336 — 「더 처리할 것 없음」 표시(status='dismissed')는 어떤 자동 경로도 바꾸거나 지우지 않는다 ═══
+  await t('H1 dismissed 시트 타입 행: 워커·주문별 드레인·매시 복구·retryItem·완료정리(purgeCompleted) 모두 무변경 · 삭제 0', async () => {
+    const oid = '00000000-0000-4000-8000-000000000336';
+    await db.exec(`DELETE FROM sync_queue`);
+    await db.query(`
+      INSERT INTO sync_queue(type, payload, status, attempts, error_msg, processed_at) VALUES
+        ('order_cancel', $1, 'dismissed', 3, '[dismissed:system:sheet-era-retire · 결정 336] 원래 상태=failed', now() - interval '30 days'),
+        ('order_append', $1, 'dismissed', 1, '[dismissed:system:sheet-era-retire · 결정 336] 원래 상태=pending', now() - interval '30 days'),
+        ('review_submit', '{}', 'dismissed', 3, '[dismissed:system:sheet-era-retire · 결정 336] 원래 상태=failed', now() - interval '30 days'),
+        ('workboard_apply', '{}', 'done', 1, NULL, now() - interval '30 days')`, [JSON.stringify({ orderSubmissionId: oid })]);
+    const snap = async () => (await db.query(`SELECT id, type, payload, status, attempts, error_msg, processed_at FROM sync_queue WHERE status = 'dismissed' ORDER BY id`)).rows;
+    const before = await snap();
+    assert.equal(before.length, 3);
+    await sq.processQueue(50, { interItemDelayMs: 0 });
+    await sq.drainOrderQueue(oid);
+    await sq.retryAllFailed();
+    for (const r of before) await assert.rejects(() => sq.retryItem(r.id), /작업보드 반영 타입만/);
+    const purged = await sq.purgeCompleted(1);
+    assert.equal(purged.purged, 1, '완료(done) 정리는 종전대로 done 만 지운다');
+    assert.deepEqual(await snap(), before, 'dismissed 행은 기록 그대로 남는다(결정 271·336 — 지우지 않는다)');
+  });
+
   console.log(`\n✅ syncQueueSheetTypesGate: ${passed}/${passed}`);
   process.exit(0);
 })().catch((e) => { console.error(e); process.exit(1); });
