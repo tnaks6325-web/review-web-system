@@ -921,6 +921,52 @@ function _sameAdvertiserError(same) {
      되살리려면 `POST /api/trackb/ownership` 의 담당 게이트와 **함께** 되살려야 한다(한쪽만 두면
      "담당 업체인데도 시트 때문에 막히는" 반쪽 규칙이 된다). */
 
+/* ── 작업(탭)의 총건수 재료 — ★★ 단일 출처(결정 335) ─────────────────────────────────
+   업체 화면(ownedTabsForAdvertiser → advertiserWorkSummary.target)과 직원 홈(tabRecruitTotalsFor →
+   /api/trackb/tabs?stats=1 의 tab.recruitQuota)이 **같은 LATERAL 두 개**와 같은 판정 함수(_tabRecruitQuota)를 탄다.
+   종전 홈은 「탭에 연결된 공고 → 그 공고와 짝지은 발주」만 봐서, 공고가 없거나 공고 총인원이 0 인 작업에
+   [＋ 발주 연결](trackb_work_order_links)로 오더를 이어도 홈 총건수만 빈칸이었다(2026-11-04 운영 확인).
+   ★ 별칭 t 는 (sheet_id, tab_name, tab_gid) 를 가져야 한다. wo = 명시 Track B 링크 우선 → work_orders.linked_tab 폴백
+     (작업 조건 카드와 같은 우선순위) · rc = 게시중 우선 → 최신 공고(작업 조건 카드와 같은 순서).
+   ★ 빈 gid 는 gid 매칭에 쓰지 않는다(빈 gid 공고가 같은 시트의 다른 탭에 붙는 것 방지 — 운영 raw_sheet_tabs 빈 gid 0건이라
+     업체 화면 값은 불변). 이 문자열을 고치면 두 화면이 함께 바뀐다 — 사본을 만들지 말 것. */
+const _TAB_QUOTA_LATERALS = `LEFT JOIN LATERAL (
+         /* 상세값은 명시 Track B 링크를 우선하고, 목록 정렬용 최신 의뢰시각은 전체 후보의 MAX로 분리한다.
+            최신 Track A 폴백이 명시 링크보다 상세값까지 덮으면 작업 조건 카드가 다른 오더를 보여준다. */
+         SELECT ranked.recruit_count, ranked.start_date,
+                ranked.created_at AS work_order_created_at,
+                MAX(ranked.created_at) OVER () AS latest_work_order_created_at
+           FROM (
+             SELECT w.recruit_count, w.start_date, w.created_at,
+                    CASE WHEN EXISTS (SELECT 1 FROM trackb_work_order_links l
+                                      WHERE l.work_order_id = w.id AND l.sheet_id = t.sheet_id
+                                        AND l.tab_name = t.tab_name AND l.deleted_at IS NULL)
+                         THEN 0 ELSE 1 END AS link_rank
+               FROM work_orders w
+              WHERE w.deleted_at IS NULL AND (
+                    (w.linked_tab_sheet_id = t.sheet_id AND w.linked_tab_name = t.tab_name)
+                    OR EXISTS (SELECT 1 FROM trackb_work_order_links l
+                                WHERE l.work_order_id = w.id AND l.sheet_id = t.sheet_id
+                                  AND l.tab_name = t.tab_name AND l.deleted_at IS NULL))
+           ) ranked
+          ORDER BY ranked.link_rank, ranked.created_at DESC LIMIT 1
+       ) wo ON TRUE
+       /* 총건수 = 작업 조건 카드와 같은 적용 정원(공고 우선, 없으면 발주).
+          활성 작업행 수는 내부 투영·정리용 값일 뿐 "총 건수"로 보이면 안 된다. */
+       LEFT JOIN LATERAL (
+          SELECT recruit_total,
+                 BOOL_OR(cash_receipt_required) OVER () AS cash_receipt_required
+            FROM recruit_campaigns rc
+          WHERE rc.linked_sheet_id = t.sheet_id
+            AND (rc.linked_tab_name = t.tab_name OR (NULLIF(t.tab_gid, '') IS NOT NULL AND rc.linked_tab_gid = t.tab_gid))
+          ORDER BY (rc.status = 'active') DESC, rc.created_at DESC
+          LIMIT 1
+       ) rc ON TRUE`;
+/** 위 LATERAL 결과 한 행 → 총건수 판정. 업체 화면·직원 홈 공용(결정 335) — 공고>0 이면 공고, 아니면 발주(displayRecruitTotal). */
+function _tabRecruitQuota(row) {
+  return require('./linkedRecruitQuota.service').displayRecruitTotal(row && row.recruitTotal, row && row.woRecruit);
+}
+
 // ── 업체 소유 시트의 전체 탭 나열(소유지정 상세 패널): 시트전체 소유=그 시트 모든 탭, 탭지정 소유=그 탭만.
 //    정렬 = "생성 최신순" 근사: 시스템에 탭 생성시각 원천이 없어 MIN(campaign_participants.first_seen_at)
 //    (재투영에도 보존되는 최초 관측시각) 우선, 미투영 탭은 raw_sheet_tabs.mirrored_at 폴백.
@@ -1070,38 +1116,7 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
            ) manual_edit ON TRUE
        ) cnt ON TRUE
        LEFT JOIN tab_configs tc ON tc.sheet_id = t.sheet_id AND tc.tab_name = t.tab_name
-       LEFT JOIN LATERAL (
-         /* 상세값은 명시 Track B 링크를 우선하고, 목록 정렬용 최신 의뢰시각은 전체 후보의 MAX로 분리한다.
-            최신 Track A 폴백이 명시 링크보다 상세값까지 덮으면 작업 조건 카드가 다른 오더를 보여준다. */
-         SELECT ranked.recruit_count, ranked.start_date,
-                ranked.created_at AS work_order_created_at,
-                MAX(ranked.created_at) OVER () AS latest_work_order_created_at
-           FROM (
-             SELECT w.recruit_count, w.start_date, w.created_at,
-                    CASE WHEN EXISTS (SELECT 1 FROM trackb_work_order_links l
-                                      WHERE l.work_order_id = w.id AND l.sheet_id = t.sheet_id
-                                        AND l.tab_name = t.tab_name AND l.deleted_at IS NULL)
-                         THEN 0 ELSE 1 END AS link_rank
-               FROM work_orders w
-              WHERE w.deleted_at IS NULL AND (
-                    (w.linked_tab_sheet_id = t.sheet_id AND w.linked_tab_name = t.tab_name)
-                    OR EXISTS (SELECT 1 FROM trackb_work_order_links l
-                                WHERE l.work_order_id = w.id AND l.sheet_id = t.sheet_id
-                                  AND l.tab_name = t.tab_name AND l.deleted_at IS NULL))
-           ) ranked
-          ORDER BY ranked.link_rank, ranked.created_at DESC LIMIT 1
-       ) wo ON TRUE
-       /* 업체 화면의 총건수도 작업 조건 카드와 같은 적용 정원(공고 우선, 없으면 발주)을 쓴다.
-          활성 작업행 수는 내부 투영·정리용 값일 뿐 업체에게 "총 건수"로 보이면 안 된다. */
-       LEFT JOIN LATERAL (
-          SELECT recruit_total,
-                 BOOL_OR(cash_receipt_required) OVER () AS cash_receipt_required
-            FROM recruit_campaigns rc
-          WHERE rc.linked_sheet_id = t.sheet_id
-            AND (rc.linked_tab_name = t.tab_name OR (t.tab_gid IS NOT NULL AND rc.linked_tab_gid = t.tab_gid))
-          ORDER BY (rc.status = 'active') DESC, rc.created_at DESC
-          LIMIT 1
-       ) rc ON TRUE
+       ${_TAB_QUOTA_LATERALS}
        LEFT JOIN LATERAL (
          SELECT s.sales_id, s.contract_number FROM trackb_settlement_links s
           WHERE s.sheet_id = t.sheet_id AND s.tab_name = t.tab_name AND s.deleted_at IS NULL
@@ -2086,8 +2101,8 @@ async function advertiserWorkSummary({ advertiserId, brandId = null } = {}) {
       const s = setlByTab.get(t.sheetId + '\t' + t.tabName) || null;
       // 총건수는 작업보드와 같은 공고 우선·발주 폴백 정원이다. bTotal(활성 작업행)은
       // 광고주 응답에서 버린다. 작업행 준비 상태가 "총 건수"로 오해되는 것을 구조적으로 막는다.
-      const { total: recruitTotal } = require('./linkedRecruitQuota.service')
-        .displayRecruitTotal(t.recruitTotal, t.woRecruit);
+      //   ★ 판정은 직원 홈과 같은 _tabRecruitQuota(결정 335 단일 출처).
+      const { total: recruitTotal } = _tabRecruitQuota(t);
       return {
         sheetId: t.sheetId, tabGid: t.tabGid, tabName: t.tabName, spreadsheetTitle: t.spreadsheetTitle,
         // 작업명 — 업체 화면도 목록·헤더가 같은 이름을 쓰게 한다(사용자 확정 2026-08-24).
@@ -6225,6 +6240,39 @@ async function tabStatsMap({ force = false } = {}) {
   }
 }
 
+/** 직원 홈 작업목록의 총건수 — 업체 화면과 **같은 판정**(결정 335 단일 출처: _TAB_QUOTA_LATERALS + _tabRecruitQuota).
+ *  @param {Array<{sheetId,tabName,tabGid}>} tabs  호출부가 스코프로 이미 거른 탭만(전 탭을 훑지 않는다 · 맵 통째 전달 금지)
+ *  @returns {Promise<{ok:boolean, map:Map<string,{total:number|null, source:string}>}>}  키 = `${sheetId}\t${tabName}`
+ *  ★ 배치 1회(N+1 금지). ★ 값을 모르면 total=null(0 으로 꾸미지 않는다).
+ *  ★ 조회 실패 = ok:false → 호출부가 칸을 싣지 않아 화면이 종전 경로(공고 주석의 recruitTotal)로 접힌다. */
+async function tabRecruitTotalsFor(tabs) {
+  const map = new Map();
+  try {
+    const seen = new Set(), keys = [];
+    for (const t of Array.isArray(tabs) ? tabs : []) {
+      if (!t || !t.sheetId || !t.tabName) continue;
+      const k = _FIN_KEY(t.sheetId, t.tabName);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      keys.push({ sheet_id: String(t.sheetId), tab_name: String(t.tabName), tab_gid: String(t.tabGid == null ? '' : t.tabGid).trim() });
+    }
+    if (!keys.length) return { ok: true, map };
+    const { rows } = await getPool().query(
+      `SELECT t.sheet_id AS "sheetId", t.tab_name AS "tabName",
+              wo.recruit_count AS "woRecruit", rc.recruit_total AS "recruitTotal"
+         FROM jsonb_to_recordset($1::jsonb) AS t(sheet_id text, tab_name text, tab_gid text)
+         ${_TAB_QUOTA_LATERALS}`, [JSON.stringify(keys)]);
+    for (const r of rows) {
+      const q = _tabRecruitQuota(r);
+      map.set(_FIN_KEY(r.sheetId, r.tabName), { total: q.total > 0 ? q.total : null, source: q.source });
+    }
+    return { ok: true, map };
+  } catch (err) {
+    logger.warn(`[trackB] tabRecruitTotalsFor 실패(홈 총건수는 공고 주석으로 접힘): ${err.message}`);
+    return { ok: false, map: new Map() };
+  }
+}
+
 /** 작업 ↔ 연결된 모집공고 주석 맵 — 홈 작업 목록의 [공고] 버튼 재료(`?stats=1` 전용).
  *
  *  ★★ **상태 판정은 카드·리뷰어 목록과 같은 계산을 쓴다**(`computeCampaignState` + 같은 재료).
@@ -6810,6 +6858,7 @@ module.exports = {
   autoFinishEligibleTabs,
   tabStatsMap,
   tabCampaignsMap,
+  tabRecruitTotalsFor,
   tabTodayProgress,
   tabConditionSummary,   // ★ 회귀가드가 스텁 pool 로 직접 실행(코드리뷰 P1 divergence 재현)
   _tpAdvertiserLens,   // 회귀가드가 렌즈를 직접 실행해 필드 누수를 확인한다

@@ -95,6 +95,20 @@ vm.createContext(sb); vm.runInContext(unpaidFn[0] + '\n' + src, sb);
 
 const T = (stats, camps, sheetless) => ({ stats, campaigns: camps, sheetless });
 const R = (t, filt) => sb._finNumCells(t, 0, filt || '');
+/* ── 결정 335: 서버의 탭 단위 총건수(recruitQuota = 업체 화면과 같은 판정)가 있으면 그것만 쓴다 ── */
+{
+  const withQ = (q, camps) => Object.assign(T({ total: 3, filled: 2, submitted: 1, paid: 0 }, camps, true), { recruitQuota: q });
+  const a = sb._finRecruitTotal(withQ({ total: 100, source: 'work_order' }, []));
+  ok('335: 공고가 없어도 recruitQuota 100(발주) 이면 총건수 100', a && a.total === 100 && a.source === 'work_order');
+  const b = sb._finRecruitTotal(withQ({ total: 100, source: 'work_order' }, [{ id: 'c', status: 'active', recruitTotal: 7, recruitTotalSource: 'campaign' }]));
+  ok('335: recruitQuota 가 공고 주석보다 우선(두 화면 단일 출처)', b && b.total === 100);
+  ok('335: recruitQuota total=null 은 모름 → 공고 주석으로 다시 줍지 않는다(null)',
+    sb._finRecruitTotal(withQ({ total: null, source: 'none' }, [{ id: 'c', status: 'active', recruitTotal: 7 }])) === null);
+  const legacy = sb._finRecruitTotal(T({ total: 3 }, [{ id: 'c', status: 'active', recruitTotal: 7, recruitTotalSource: 'campaign' }], true));
+  ok('335: recruitQuota 칸이 없으면(구버전 서버·조회 실패) 종전 공고 주석 경로', legacy && legacy.total === 7);
+  const cells = R(withQ({ total: 100, source: 'work_order' }, []));
+  ok('335: 총건수 칸이 100 으로 채워지고 * (줄 수 대체) 표식이 없다', /class="box tot">100</.test(cells) && !/100\*/.test(cells));
+}
 const h1 = R(T({ total: 581, filled: 208, submitted: 159, paid: 106 },
   [{ id: 'c1', status: 'active', recruitTotal: 500, recruitTotalSource: 'campaign' }], true));
 /* ★★ 시안 확정(2026-09-22) — 한 칸의 분수(`208/500`)를 **네 칸**으로 나눴다: 총건수·참여·제출·입금.

@@ -104,8 +104,11 @@ async function run() {
   t('folder_url·capture_folder_url 은 종전대로 함께 온다',
     /tc\.folder_url AS "folderUrl", tc\.capture_folder_url AS "captureFolderUrl"/.test(SVC));
   const ownedBlock = SVC.slice(SVC.indexOf('async function ownedTabsForAdvertiser'), SVC.indexOf('async function ownedTabsForAdvertiser') + 14000);
+  // 결정 335: 공고·발주 LATERAL 은 홈과 공용 조각(_TAB_QUOTA_LATERALS)으로 옮겼다 — 조각 본문 + ownedTabsForAdvertiser 사용을 함께 본다(검사 의미 불변).
+  const quotaFrag = SVC.slice(SVC.indexOf('const _TAB_QUOTA_LATERALS = `'), SVC.indexOf('function _tabRecruitQuota('));
   t('★ 재사용 탭 현영 여부는 최신 공고 1건이 아니라 연결 공고 전체를 합산한다',
-    /BOOL_OR\(cash_receipt_required\) OVER \(\) AS cash_receipt_required[\s\S]{0,300}ORDER BY \(rc\.status = 'active'\) DESC[\s\S]{0,100}LIMIT 1/.test(ownedBlock));
+    /BOOL_OR\(cash_receipt_required\) OVER \(\) AS cash_receipt_required[\s\S]{0,300}ORDER BY \(rc\.status = 'active'\) DESC[\s\S]{0,100}LIMIT 1/.test(quotaFrag)
+    && ownedBlock.includes('${_TAB_QUOTA_LATERALS}') && /rc\.cash_receipt_required AS "cashReceiptRequired"/.test(ownedBlock));
   const svc = require('../src/services/trackB.service');
   {
     svc.__resetTabStatsCacheForTest && svc.__resetTabStatsCacheForTest();
