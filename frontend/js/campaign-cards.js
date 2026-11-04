@@ -437,8 +437,10 @@
        명시값이 없는 오래된 공고에만 종전 URL 폴백을 남긴다. */
     const isLinkInflow = inflowType === 'link' || (!inflowType && !!c.landing_url);
     // ★ 결정 333 — 상품마다 유입방식이 섞인 공고(관리자 목록이 inflowMixed 를 싣는다 · 없으면 종전 칩)
+    const _unitTip = Array.isArray(c.inflowUnits) && c.inflowUnits.length   // 마우스를 올리면 상품마다 한 줄(사용자 확정 「1」)
+      ? ' title="' + _esc(c.inflowUnits.map(u => `${u.name} ${u.type === 'link' ? '링크유입' : '가이드유입'}`).join('\n')) + '"' : '';
     chips.push(c.inflowMixed === true
-      ? '<span class="sp-chip flow">가이드+링크유입</span>'
+      ? '<span class="sp-chip flow"' + _unitTip + '>가이드+링크유입</span>'
       : (isLinkInflow
         ? '<span class="sp-chip flow">링크유입</span>'
         : '<span class="sp-chip flow">가이드유입</span>'));

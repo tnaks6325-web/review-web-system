@@ -3147,12 +3147,15 @@ async function _adminCampaignList(req, res, next) {
     // ★ 결정 333 — 상품마다 유입방식이 섞인 공고(관리자 카드 칩 「가이드+링크유입」 재료). 판정은 줄의 실제 유입방식(줄 값 → 없으면 공고 전체 값).
     //   실패하면 섞임 표시 없이 종전 칩(공고 전체 값) — 조회 한 번(N+1 금지).
     const inflowMixed = new Set();
+    const inflowUnits = new Map();   // 공고 id → Map(상품 이름 → 실제 유입방식)
     try {
       const ids = rows.map(r => r.id);
       if (ids.length) {
         const { rows: ur } = await pool.query(
-          `SELECT campaign_id, COALESCE(inflow_type,'') AS inflow_type FROM campaign_options
-            WHERE campaign_id = ANY($1) AND COALESCE(status,'active') NOT IN ('closed','deleted')`, [ids]);
+          `SELECT campaign_id, COALESCE(inflow_type,'') AS inflow_type, COALESCE(NULLIF(product_name,''), opt_key) AS unit_name
+             FROM campaign_options
+            WHERE campaign_id = ANY($1) AND COALESCE(status,'active') NOT IN ('closed','deleted')
+            ORDER BY campaign_id, sort_order, id`, [ids]);
         const wdType = new Map(rows.map(r => [r.id, _savedInflowType(r.work_detail) || inflowFallback.get(r.id) || '']));
         const kinds = new Map();
         for (const x of ur) {
@@ -3160,6 +3163,11 @@ async function _adminCampaignList(req, res, next) {
           if (!eff) continue;
           if (!kinds.has(x.campaign_id)) kinds.set(x.campaign_id, new Set());
           kinds.get(x.campaign_id).add(eff);
+          // 상품마다 한 줄(카드에 마우스를 올리면 보인다 · 사용자 확정 2026-11-04 「1」) — 같은 상품의 줄은 첫 줄 값
+          if (!inflowUnits.has(x.campaign_id)) inflowUnits.set(x.campaign_id, new Map());
+          const um = inflowUnits.get(x.campaign_id);
+          const nm = String(x.unit_name || '').trim();
+          if (nm && !um.has(nm)) um.set(nm, eff);
         }
         for (const [cid, set] of kinds) if (set.size > 1) inflowMixed.add(cid);
       }
@@ -3259,7 +3267,10 @@ async function _adminCampaignList(req, res, next) {
         },
       };
     });
-    for (const d of data) if (d && inflowMixed.has(d.id)) d.inflowMixed = true;   // 결정 333 — 가산 필드(없으면 종전 칩)
+    for (const d of data) if (d && inflowMixed.has(d.id)) {
+      d.inflowMixed = true;
+      d.inflowUnits = [...(inflowUnits.get(d.id) || new Map())].map(([name, type]) => ({ name, type }));
+    }   // 결정 333 — 가산 필드(없으면 종전 칩)
     res.json({ ok: true, data, serverNow: now.toISOString(), archivedView: _archivedView, archivedCount: _archivedCount });
   } catch (err) {
     next(err);

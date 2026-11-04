@@ -247,16 +247,27 @@ t('⑤ 섞였나 판정 — 실제로 쓰는 값 기준(줄 값 · 없으면 전
   assert.strictEqual(U.orderInflowMixed(JSON.stringify([{ name: 'a', inflow_type: 'link' }, { name: 'b' }]), 'guide'), true);
   ['', null, '{oops', '[]', JSON.stringify([{ name: 'a', inflow_type: 'mixed' }])].forEach(v => assert.strictEqual(U.orderInflowMixed(v, 'guide'), false));
 });
+t('⑤ 상품마다 한 줄 재료 — 상품 이름 + 실제 값 · 이름 없는 상품·모르는 값은 뺀다(사용자 확정 「1」)', () => {
+  assert.deepStrictEqual(U.orderInflowUnits(MIXED.product_options_json, 'guide'), [{ name: '21호 수건', type: 'guide' }, { name: '23호 수건', type: 'link' }]);
+  assert.deepStrictEqual(U.orderInflowUnits(JSON.stringify([{ name: 'a|b', inflow_type: 'link' }, { name: '', inflow_type: 'guide' }, { name: 'c' }]), 'guide'),
+    [{ name: 'ab', type: 'link' }, { name: 'c', type: 'guide' }]);
+  assert.deepStrictEqual(U.orderInflowUnits('{oops', 'guide'), []);
+});
 t('⑤ 작업보드 — 오더 전체 값은 그대로 두고 표시만 따로 · 업체 화면 사본도 같은 값', () => {
   const tb = R('src/services/trackB.service.js');
   assert.ok(/inflowType: \(wo && wo\.inflowType\) \|\| null,\s*\n\s*\/\*[^*]*\*\/\s*\n\s*inflowMixed: !!\(wo && require\('\.\.\/utils\/unitInflow'\)\.orderInflowMixed\(wo\.productOptionsJson, wo\.inflowType\)\),/.test(tb));
   assert.ok(/inflowMixed: cd\.inflowMixed === true,/.test(tb));
+  assert.ok(/inflowUnits: \(wo && require\('\.\.\/utils\/unitInflow'\)\.orderInflowMixed\(wo\.productOptionsJson, wo\.inflowType\)\)\s*\n\s*\? require\('\.\.\/utils\/unitInflow'\)\.orderInflowUnits\(wo\.productOptionsJson, wo\.inflowType\) : null,/.test(tb), '섞였을 때만 상품별 줄');
+  assert.ok(/inflowUnits: Array\.isArray\(cd\.inflowUnits\) \? cd\.inflowUnits\.map\(u => \(\{ name: String\(u\.name \|\| ''\), type: u\.type === 'link' \? 'link' : 'guide' \}\)\) : null,/.test(tb), '업체 화면 사본 = 이름·값만');
+  assert.ok(/cd\.inflowUnits\.map\(u=>`\$\{esc\(u\.name\)\} \$\{u\.type==='link'\?'링크유입':'가이드유입'\}`\)\.join\('<br>'\)/.test(R('../frontend/workdesk.html')), '작업 조건 = 상품마다 한 줄(이름은 escape)');
   assert.ok(/const inflow=cd\.inflowMixed===true\?'가이드\+링크유입':\(v=>\{/.test(R('../frontend/workdesk.html')));
 });
 t('⑤ 공고 카드 · 관리자 목록 — 살아 있는 줄의 실제 값이 둘 이상이면 inflowMixed', () => {
   const cr = R('src/routes/campaign.routes.js');
   assert.ok(/effectiveInflow\(/.test(cr) && /d\.inflowMixed = true/.test(cr));
   assert.ok(/inflowMixed === true/.test(R('../frontend/js/campaign-cards.js')) && /가이드\+링크유입/.test(R('../frontend/js/campaign-cards.js')));
+  assert.ok(/d\.inflowUnits = \[\.\.\.\(inflowUnits\.get\(d\.id\) \|\| new Map\(\)\)\]/.test(cr), '관리자 목록 = 상품마다 한 줄');
+  assert.ok(/' title="' \+ _esc\(c\.inflowUnits\.map/.test(R('../frontend/js/campaign-cards.js')), '카드 = 마우스를 올리면 상품별 목록(escape)');
 });
 
 async function pg() {
@@ -342,6 +353,7 @@ async function pg() {
       assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 300));
       const me = (r.body.data || []).find(c => c.id === camp);
       assert.ok(me && me.inflowMixed === true, JSON.stringify(me && { id: me.id, inflowMixed: me.inflowMixed }));
+      assert.deepEqual(me.inflowUnits, [{ name: '21호 수건', type: 'guide' }, { name: '23호 수건', type: 'link' }]);
     });
     await ok('⑥ 그대로 다시 저장 = 오더 버전 그대로(쓰기 0)', async () => {
       ed = await openEditor();

@@ -90,10 +90,27 @@ function orderInflowMixed(productOptionsJson, orderType) {
   return seen.size > 1;
 }
 
+/**
+ * 상품마다 실제로 쓰는 유입방식 목록 — 「21호 수건 가이드유입 / 23호 수건 링크유입」 표시용(사용자 확정 2026-11-04 「1」).
+ * ★ 상품 단위(옵션은 상품을 따른다) · 이름 없는 상품·모르는 값은 뺀다. 섞였는지는 `orderInflowMixed` 가 정한다.
+ */
+function orderInflowUnits(productOptionsJson, orderType) {
+  const list = _parse(productOptionsJson);
+  if (!list) return [];
+  const out = [];
+  for (const p of list) {
+    if (!p || typeof p !== 'object' || Array.isArray(p)) continue;
+    const name = String(p.name || '').replace(/\|/g, '').trim();
+    const type = effectiveInflow(p.inflow_type, orderType);
+    if (name && type) out.push({ name, type });
+  }
+  return out;
+}
+
 /** 본문이 상품별 유입방식을 아는 인트라넷 창에서 왔나(`bidir.inflow` — 다른 능력 표시와 같은 모양). */
 function inflowCapable(body) {
   const bid = body && body.bidir && typeof body.bidir === 'object' && !Array.isArray(body.bidir) ? body.bidir : null;
   return !!(bid && (bid.inflow === 1 || bid.inflow === true || bid.inflow === '1'));
 }
 
-module.exports = { unitInflowType, effectiveInflow, guideMissingUnits, keepUnitInflowTypes, inflowCapable, orderInflowMixed };
+module.exports = { unitInflowType, effectiveInflow, guideMissingUnits, keepUnitInflowTypes, inflowCapable, orderInflowMixed, orderInflowUnits };

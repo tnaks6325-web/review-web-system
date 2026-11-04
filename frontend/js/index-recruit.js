@@ -2537,6 +2537,7 @@ function _buildProdGroup(g) {
   nameEl.addEventListener("input", () => {
     box.querySelectorAll(".rf-opt-row .rf-opt-prod").forEach(i => { i.value = nameEl.value; });
     _optSummary(); renderPartCheck(); _syncPreviewFromOptRows();
+    if (document.getElementById("rf_inflow_mixed_note")) _rfPaintCardInflows();   // 상품별 유입 안내의 상품 이름도 따라 바뀐다
   });
   // 상품 메인 주소 → 옵션 없는 상품이면 그 줄 주소(= 선택지 주소)도 같은 값 · 첫 상품이면 공고 상품 페이지(랜딩)도 같은 값
   let prevPu = urlEl.value;
@@ -2706,9 +2707,19 @@ function _rfPaintCardInflows(opts) {
       row.parentNode.insertBefore(note, row.nextSibling);
     }
   }
-  if (note) note.textContent = "상품마다 유입방식이 다릅니다(가이드유입 "
-    + boxes.filter(b => b.dataset.effInflow === "guide").length + " · 링크유입 "
-    + boxes.filter(b => b.dataset.effInflow === "link").length + ") — 위 버튼을 누르면 모든 상품이 그 방식으로 바뀝니다.";
+  if (note) {
+    // 상품마다 한 줄 — 「21호 수건 가이드유입」(사용자 확정 2026-11-04 「1」)
+    note.textContent = "";
+    const head = document.createElement("div");
+    head.textContent = "상품마다 유입방식이 다릅니다 — 위 버튼을 누르면 모든 상품이 그 방식으로 바뀝니다.";
+    note.appendChild(head);
+    boxes.forEach((b, i) => {
+      const line = document.createElement("div");
+      const nm = String(b.querySelector(".rf-gp-name")?.value || "").trim() || ("상품 " + (i + 1));
+      line.textContent = nm + " " + (b.dataset.effInflow === "link" ? "링크유입" : "가이드유입");
+      note.appendChild(line);
+    });
+  }
 }
 
 /** 첫 상품 카드의 메인 주소 = 공고 상품 페이지(랜딩) — 사람이 그 칸을 고쳤을 때만 옮긴다(불러온 값은 건드리지 않는다). */
