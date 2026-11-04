@@ -37,6 +37,7 @@ const {
 // ★ 087: 리뷰타입 판정은 utils/reviewType 단일 출처 — 여기서 정규식을 다시 만들지 말 것
 //   (화면마다 규칙을 두면 "공고는 구매확정인데 검수는 리뷰"로 갈라진다)
 const { normalizeReviewType } = require('../utils/reviewType');
+const { unitInflowType, guideMissingUnits } = require('../utils/unitInflow');   // ★ 결정 333 — 선택지마다 유입방식
 const { normalizeReviewTypeMix, validateReviewTypeMix, validateOptionReviewTypeMix } = require('../utils/reviewTypeMix');
 const { normalizeDeliveryTypeMix, validateDeliveryTypeMix } = require('../utils/deliveryTypeMix');
 const { deliveryBaseType } = require('../utils/deliveryType');
@@ -274,6 +275,12 @@ function _normalizeOptionsInput(arr) {
       //   빈 값 = "이 선택지 전용 가이드 없음" = 공고 공통 가이드로 접힌다(자동 폴백).
       inflowGuideHtml: sanitizeGuideHtml(obj.inflowGuideHtml ?? obj.inflow_guide_html ?? ''),
       inflowGuideImages: sanitizeGuideImages(obj.inflowGuideImages ?? obj.inflow_guide_images),
+      // ★ 결정 333 — 그 선택지의 유입방식('guide'|'link'|'' = 공고 전체 값을 따름).
+      //   안 보냄(undefined·null) = null = 저장된 값 유지 — 상품별 유입을 모르는 옛 공고 창이 저장해도 지워지지 않게(198 product_url 과 같은 3상태).
+      inflowType: (() => {
+        const raw = obj.inflowType !== undefined ? obj.inflowType : obj.inflow_type;
+        return (raw === undefined || raw === null) ? null : unitInflowType(raw);
+      })(),
       payAmount: _optNum(obj.payAmount ?? obj.pay_amount),
       recruitTotal: _optNum(obj.recruitTotal ?? obj.recruit_total),
       dailyLimit: _optNum(obj.dailyLimit ?? obj.daily_limit),
@@ -296,13 +303,15 @@ function _optionThumbError(options) {
 
 /** 가이드유입은 실제 참여 가능한 선택지마다 안내가 있어야 한다.
  * 공통 유입가이드는 레거시 공고를 읽는 호환값일 뿐, 신규 공고의 누락을 메우지 않는다. */
-function _validateActiveUnitInflowGuides(inflowType, options) {
-  if (inflowType !== 'guide' || !Array.isArray(options)) return '';
-  const missing = options
+/* ★ 결정 333 — 줄마다 **실제로 쓰는 유입방식**으로 본다(링크유입 상품 줄은 가이드가 필요 없다).
+ *   줄이 유입방식을 안 보냈으면(null = 저장값 유지) 저장된 값(`storedTypes` optKey → 값)으로, 그것도 없으면 공고 전체 값으로 판정한다. */
+function _validateActiveUnitInflowGuides(inflowType, options, storedTypes = null) {
+  if (!Array.isArray(options)) return '';
+  const rows = options
     .filter(option => option && option.status !== 'closed')
-    .filter(option => !String(option.inflowGuideHtml || '').trim()
-      && !(Array.isArray(option.inflowGuideImages) && option.inflowGuideImages.length))
-    .map(option => option.optKey || option.productName || '이름 없는 선택지');
+    .map(option => ({ ...option, inflowType: option.inflowType !== null && option.inflowType !== undefined
+      ? option.inflowType : ((storedTypes && (storedTypes.get(option.prevOptKey || option.optKey) ?? storedTypes.get(option.optKey))) || '') }));   // 이름을 바꾼 줄은 원래 이름으로
+  const missing = guideMissingUnits(rows, inflowType);
   return missing.length
     ? `가이드유입은 모든 활성 상품·옵션에 유입가이드를 설정해야 합니다: ${missing.join(', ')}`
     : '';
@@ -352,7 +361,8 @@ async function _saveCampaignOptions(campaignId, options, { linked = false } = {}
     if (linked) {
       const { rows: have } = await client.query(`SELECT opt_key FROM campaign_options WHERE campaign_id=$1 AND COALESCE(status,'active') <> 'deleted'`, [campaignId]);
       const haveKeys = new Set(have.map(r => r.opt_key));
-      options = options.filter(o => haveKeys.has(o.optKey)).map(o => ({ ...o, status: null }));
+      // ★ 결정 333 — 연결 공고의 줄 유입방식은 공유 저장(오더와 한 트랜잭션)만 쓴다 — 오래 열어 둔 창이 방금 인트라넷이 바꾼 값을 덮지 않게(null = 유지)
+      options = options.filter(o => haveKeys.has(o.optKey)).map(o => ({ ...o, status: null, inflowType: null }));
     } else {
       await _applyOptionRenames(client, campaignId, options, keep);
     }
@@ -378,8 +388,8 @@ async function _saveCampaignOptions(campaignId, options, { linked = false } = {}
       }
       await client.query(
         `INSERT INTO campaign_options (campaign_id, opt_key, option_url, pay_amount, recruit_total, daily_limit, review_type_mix, sort_order, status,
-                                      product_name, unit_kind, inflow_guide_html, inflow_guide_images, thumbnail_url, product_url, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,COALESCE($9,'active'),$10,$11,$12,$13::jsonb,COALESCE($14,''),$15,NOW())
+                                      product_name, unit_kind, inflow_guide_html, inflow_guide_images, thumbnail_url, product_url, inflow_type, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,COALESCE($9,'active'),$10,$11,$12,$13::jsonb,COALESCE($14,''),$15,COALESCE($16,''),NOW())
          ON CONFLICT (campaign_id, opt_key) DO UPDATE SET
            option_url=EXCLUDED.option_url, pay_amount=EXCLUDED.pay_amount, recruit_total=EXCLUDED.recruit_total,
            daily_limit=EXCLUDED.daily_limit, review_type_mix=EXCLUDED.review_type_mix, sort_order=EXCLUDED.sort_order,
@@ -388,11 +398,13 @@ async function _saveCampaignOptions(campaignId, options, { linked = false } = {}
            inflow_guide_html=EXCLUDED.inflow_guide_html, inflow_guide_images=EXCLUDED.inflow_guide_images,
            thumbnail_url=COALESCE($14, campaign_options.thumbnail_url),
            product_url=COALESCE($15, campaign_options.product_url),
+           inflow_type=COALESCE($16, campaign_options.inflow_type),
            updated_at=NOW()`,
         [campaignId, o.optKey, o.optionUrl, o.payAmount, o.recruitTotal, o.dailyLimit, JSON.stringify(o.reviewTypeMix || []), o.sortOrder, o.status,
          o.productName || '', o.unitKind || 'option', o.inflowGuideHtml || '', JSON.stringify(o.inflowGuideImages || []),
          (typeof o.thumbnailUrl === 'string') ? o.thumbnailUrl : null,
-         (typeof o.productUrl === 'string') ? o.productUrl : null]);
+         (typeof o.productUrl === 'string') ? o.productUrl : null,
+         (typeof o.inflowType === 'string') ? o.inflowType : null]);
     }
     const { rows: existing } = await client.query('SELECT opt_key FROM campaign_options WHERE campaign_id=$1', [campaignId]);
     // ★ 결정 239 — 바로 구매(정원 엔진이 그 상품에 귀속한 공고 밖 주문)만 있는 상품도 지우지 않고 닫는다.
@@ -662,7 +674,7 @@ function _applyCurrentFee(view, schedules, now) {
 /** 캠페인 옵션 뷰 목록(정렬: 활성 먼저, 마감 하단). campState 반영해 selectable 계산. 옵션 없으면 []. */
 async function _loadOptionViews(db, campaignId, campState, now = new Date()) {
   const { rows } = await db.query(
-    `SELECT opt_key, option_url, pay_amount, recruit_total, daily_limit, status,
+    `SELECT opt_key, option_url, pay_amount, recruit_total, daily_limit, status, inflow_type,
             product_name, unit_kind, inflow_guide_html, inflow_guide_images, thumbnail_url, paused_at
        FROM campaign_options WHERE campaign_id=$1 ORDER BY (status='closed'), sort_order, id`,
     [campaignId]);
@@ -760,7 +772,7 @@ async function _fetchOptionsForCampaigns(db, ids, now = new Date()) {
   const list = (ids || []).filter(Boolean);
   if (!list.length) return out;
   const { rows: optRows } = await db.query(
-    `SELECT campaign_id, opt_key, pay_amount, recruit_total, daily_limit, status, product_name, unit_kind, thumbnail_url, paused_at
+    `SELECT campaign_id, opt_key, inflow_type, pay_amount, recruit_total, daily_limit, status, product_name, unit_kind, thumbnail_url, paused_at
        FROM campaign_options WHERE campaign_id = ANY($1) ORDER BY campaign_id, (status='closed'), sort_order, id`, [list]);
   if (!optRows.length) return out;
   // ★ 결정 210: 선택지 카운트는 단일 출처(fetchOptionCountsBatch — 공고 밖 주문 포함)로 센다.
@@ -782,7 +794,7 @@ async function _loadOptionsRaw(db, campaignId) {
   const { rows } = await db.query(
     `SELECT opt_key AS "optKey", option_url AS "optionUrl", pay_amount AS "payAmount", recruit_total AS "recruitTotal", review_type_mix AS "reviewTypeMix",
             daily_limit AS "dailyLimit", sort_order AS "sortOrder", status,
-            product_name AS "productName", unit_kind AS "unitKind",
+            product_name AS "productName", unit_kind AS "unitKind", COALESCE(inflow_type,'') AS "inflowType",
             inflow_guide_html AS "inflowGuideHtml", inflow_guide_images AS "inflowGuideImages",
             thumbnail_url AS "thumbnailUrl", product_url AS "productUrl", paused_at AS "pausedAt", paused_reason AS "pausedReason"
        FROM campaign_options WHERE campaign_id=$1 ORDER BY (status='closed'), sort_order, id`,
@@ -3828,9 +3840,13 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         );
         const legacyGuideDetail = sanitizeWorkDetail(legacyGuideRows[0]?.work_detail) || {};
         const hasLegacySharedGuide = String(legacyGuideDetail.inflowGuideHtml || '').trim().length > 0;
+        // ★ 결정 333 — 유입방식을 안 보낸 줄(옛 공고 창)은 저장된 줄 값으로 판정한다(링크 상품에 가이드를 요구하지 않게)
+        const { rows: storedInflowRows } = await pool.query(
+          `SELECT opt_key, COALESCE(inflow_type,'') AS inflow_type FROM campaign_options WHERE campaign_id = $1`, [id]);
+        const storedInflow = new Map(storedInflowRows.map(r => [r.opt_key, r.inflow_type]));
         const inflowGuideError = hasLegacySharedGuide
           ? ''
-          : _validateActiveUnitInflowGuides(requestedInflowType, normOpts);
+          : _validateActiveUnitInflowGuides(requestedInflowType, normOpts, storedInflow);
         if (inflowGuideError) return res.status(400).json({ ok: false, error: inflowGuideError });
       }
     }

@@ -100,7 +100,7 @@ async function run() {
     ['title', 'manager_name', 'product_url', 'inflow_keyword', 'inflow_guide',
       'guide_images', 'review_guide', 'special_notes', 'pay_amount', 'thumbnail_url'].forEach(f =>
       assert.ok(ed.fields.includes(f), '허용 칸이 빠졌다: ' + f));
-    assert.deepStrictEqual(ed.productOptionKeys.slice().sort(), ['guide', 'pay', 'url'],
+    assert.deepStrictEqual(ed.productOptionKeys.slice().sort(), ['guide', 'inflow_type', 'pay', 'url'],   // 결정 333 — 상품별 유입방식
       '상품 구성에서 고칠 수 있는 키가 달라졌다');
     // 잠긴 칸이 섞이면 화면이 그 칸을 열어 준다 → 저장해야 막히는 막다른 길
     ['recruit_count', 'daily_count', 'start_date', 'purchase_channel', 'review_type',

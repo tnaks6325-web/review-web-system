@@ -29,11 +29,13 @@ const _pay = v => {
 /**
  * 작업오더 상품 구성에서 선택지별 1건당 금액을 뽑는다.
  * @param {string|Array|null} productOptionsJson
- * @returns {{units: Array<{optKey:string, productName:string, payAmount:number}>, single: number|null, distinct: number[]}}
+ * @returns {{units: Array<{optKey:string, productName:string, payAmount:number, inflowType:string}>, single: number|null, distinct: number[]}}
  *   · `units`  — 선택지 단위(공고 옵션과 `optKey` 로 짝짓는다)
  *   · `single` — 금액이 **한 종류뿐**일 때 그 값(여러 종류면 null — 글자 치환은 그때만 안전하다)
  *   · `distinct` — 나온 금액 종류(오름차순, 화면이 사유를 말할 때 쓴다)
  */
+const { unitInflowType } = require('./unitInflow');
+
 function payAmountsFromWorkOrder(productOptionsJson) {
   let arr = productOptionsJson;
   if (typeof arr === 'string') {
@@ -61,10 +63,12 @@ function payAmountsFromWorkOrder(productOptionsJson) {
           // ★ 가산 필드 — 유입가이드 전파가 **같은 선택 단위**(같은 optKey)를 보게 한다.
           //   금액 판정은 이 값을 읽지 않는다(추출 규칙 무변경).
           src: op,
+          // ★ 가산 필드(결정 333) — 그 선택지가 속한 상품의 유입방식(옵션은 상품을 따른다 · '' = 오더 전체 값). 금액 판정은 읽지 않는다.
+          inflowType: unitInflowType(prod.inflow_type),
         });
       }
     } else if (productName) {
-      units.push({ optKey: '', productName, payAmount: basePay, src: prod });
+      units.push({ optKey: '', productName, payAmount: basePay, src: prod, inflowType: unitInflowType(prod.inflow_type) });
     }
   }
 

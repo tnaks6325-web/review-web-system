@@ -35,6 +35,7 @@ const REQUIRED_SCHEMA = [
   ['work_orders', 'bidir_reconcile_skip_at'],       // 200 — 오더·공고 맞추기 목록 SELECT·따로 두기 UPDATE(없으면 맞추기 화면·담당자 팝업 42703 · 결정 284)
   ['recruit_campaigns', 'start_date_basis'],      // 199 — 공고 생성 INSERT·수정 UPDATE·새벽 첫 참여일 맞춤(없으면 공고 발행·수정 전면 42703 · 결정 279)
   ['campaign_options', 'product_url'],             // 198 — 상품 메인 주소(공고 창 저장 INSERT·편집 프리필 SELECT · 결정 277)
+  ['campaign_options', 'inflow_type'],             // 213 — 선택지 줄마다 유입방식(공고 창 저장·리뷰어 작업 안내 SELECT · 결정 333)
   ['campaign_options', 'sole_until'],              // 197 — 상품별 바로 구매 셈이 SELECT(없으면 셈 조회가 통째 실패 = 상품 정원 "모름")
   ['campaign_applications', 'purchase_qty'],      // 202 — 참여 게이트 UPDATE·단계 셈·주문 전파(결정 289 · 없으면 단계 공고 참여가 죽는다)
   ['campaign_applications', 'qty_tier_amount'],   // 202
