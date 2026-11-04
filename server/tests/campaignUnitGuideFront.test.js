@@ -361,7 +361,23 @@ console.log('\n[H] 자동점검 — 혼합 라벨 · 부분 가이드 고지');
   const t = mixedTable();
   const html = t.dom.byId.rf_opt_summary.innerHTML;
   ok('혼합이면 "선택지 N개(옵션 a · 상품 b)" 로 센다', /선택지 3개\(옵션 2 · 상품 1\)/.test(html));
-  ok('일부 선택지만 가이드가 있으면 저장 차단 고지', /선택지 유입가이드가 2\/3개만 설정됨 — 가이드유입 공고는 저장할 수 없습니다/.test(html));
+  // ★ 결정 333 — 가이드가 필요한 줄은 실제로 가이드유입인 줄만 센다(링크유입 공고·링크 줄은 가이드가 없어도 된다)
+  ok('링크유입 공고는 일부만 가이드가 있어도 저장 차단 고지 없음', !/개만 설정됨/.test(html));
+  t.dom.byId.rf_inflow_type_value.value = 'guide';
+  t.run('_optSummary()');
+  ok('가이드유입 공고에서 일부 선택지만 가이드가 있으면 저장 차단 고지',
+    /가이드유입 선택지 유입가이드가 2\/3개만 설정됨 — 이대로는 저장할 수 없습니다/.test(t.dom.byId.rf_opt_summary.innerHTML));
+  // 섞인 공고: 가이드 없는 줄(옵션B)이 든 상품A 를 링크유입으로 → 가이드유입 줄(상품B)은 모두 가이드가 있다 → 고지 없음
+  const boxes = t.dom.byId.rf_opt_rows.querySelectorAll('.rf-gp');
+  boxes[0].dataset.inflow = 'link'; boxes[1].dataset.inflow = 'guide';
+  t.run('_optSummary()');
+  ok('섞인 공고 — 링크유입 상품의 빈 가이드는 세지 않는다', !/개만 설정됨/.test(t.dom.byId.rf_opt_summary.innerHTML));
+  // 반대로 상품A 가 가이드유입 · 상품B 가 링크유입 → 가이드유입 줄 2개 중 1개만 → 고지
+  boxes[0].dataset.inflow = 'guide'; boxes[1].dataset.inflow = 'link';
+  t.run('_optSummary()');
+  ok('섞인 공고 — 가이드유입 상품 안에서만 센다(1/2)',
+    /가이드유입 선택지 유입가이드가 1\/2개만 설정됨/.test(t.dom.byId.rf_opt_summary.innerHTML));
+  t.dom.byId.rf_inflow_type_value.value = 'link'; boxes.forEach(b => { b.dataset.inflow = ''; });
 
   const t2 = makeTable();
   t2.sandbox._seed = [{ productName: '상품A', unitKind: 'option', optKey: '옵A' }, { productName: '상품A', unitKind: 'option', optKey: '옵B' }];

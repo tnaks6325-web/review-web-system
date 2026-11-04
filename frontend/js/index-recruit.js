@@ -1232,6 +1232,7 @@ function rfSetInflowType(type, button, opts) {
   _renderInflowOriginNote();
   syncRecruitProductMainUrl();
   if (typeof _rfRefreshCards === "function") _rfRefreshCards();
+  if (typeof _optSummary === "function") _optSummary();   // 결정 333 — 가이드 경고는 유입방식에 따라 달라진다
 }
 
 /**
@@ -3491,9 +3492,13 @@ function _optSummary() {
   if (dup) msgs.push("⚠ 옵션명 중복(저장 불가)");
   // 경고 전용 자동점검 — 게시를 막지 않는다(옵션 칸 자동점검과 같은 규율)
   if (namelessMsg) msgs.push(namelessMsg);
-  const withGuide = active.filter(o => String(o.inflowGuideHtml || "").trim() || (Array.isArray(o.inflowGuideImages) && o.inflowGuideImages.length)).length;
-  if (withGuide && withGuide < active.length) {
-    msgs.push("⚠ 선택지 유입가이드가 " + withGuide + "/" + active.length + "개만 설정됨 — 가이드유입 공고는 저장할 수 없습니다");
+  // ★ 결정 333 — 가이드가 필요한 줄 = **그 줄이 실제로 쓰는 유입방식이 가이드유입**인 줄만(링크유입 줄은 가이드가 없어도 된다).
+  //   줄 값('' = 공고 전체 값을 따름)은 readOptRows 가 섞였을 때만 싣는다 — 없으면 공고 전체 값(_rfInflowPlan().campaign).
+  const campInflow = (typeof _rfInflowPlan === "function") ? _rfInflowPlan().campaign : "guide";
+  const guideUnits = active.filter(o => (o.inflowType || campInflow) === "guide");
+  const withGuide = guideUnits.filter(o => String(o.inflowGuideHtml || "").trim() || (Array.isArray(o.inflowGuideImages) && o.inflowGuideImages.length)).length;
+  if (withGuide && withGuide < guideUnits.length) {
+    msgs.push("⚠ 가이드유입 선택지 유입가이드가 " + withGuide + "/" + guideUnits.length + "개만 설정됨 — 이대로는 저장할 수 없습니다");
   }
   el.innerHTML = msgs.join(" · ");
   el.style.color = (msgs.length > 1) ? "#B45309" : "var(--t3)";
