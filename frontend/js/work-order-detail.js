@@ -732,6 +732,8 @@ function _woOptionRows(o) {
     // ★ 134 — 상품마다 자기 메인 URL 을 갖는다(복합 작업은 상품이 둘 이상이라
     //   공고 공통 랜딩 하나로는 "그 선택지의 상품 페이지"가 되지 않는다).
     const prodUrl = clean(prod.url || prod.product_url || "");
+    // ★ 결정 333 — 상품별 유입방식('guide'|'link'). 상품마다 다를 때만 실린다 · 비면 '' = 공고 전체 값을 따른다(종전 동작).
+    const prodInflow = (prod.inflow_type === "guide" || prod.inflow_type === "link") ? prod.inflow_type : "";
     const basePay = Number(prod.base && prod.base.pay) || 0;
     // ★ 인트라넷은 일건수를 `daily` 로 보낸다(reviewOrderOptionsPayload) — 그 키를 안 읽으면
   //   오더가 정한 하루 진행 인원이 항상 0 으로 떨어져 발행 자동점검이 계속 빨간 상태가 된다.
@@ -764,6 +766,7 @@ function _woOptionRows(o) {
           // "옵션 없음"은 옵션 행이 아니라 상품 자체 선택지다. 이 형태도 인트라넷이
           // base.review_type_mix 에 보낸 상품별 조합을 써야 발행 검증에서 재입력이 생기지 않는다.
           reviewTypeMix: isNone ? productReviewTypeMix(prod) : optionReviewTypeMix(op),
+          inflowType: prodInflow,
         });
       }
     } else if (name) {
@@ -778,6 +781,7 @@ function _woOptionRows(o) {
         recruitTotal: Math.max(0, Number(prod.base && prod.base.count) || 0), dailyLimit: baseDaily,
         inflowGuideHtml: ug.html, inflowGuideImages: ug.images,
         reviewTypeMix: productReviewTypeMix(prod),
+        inflowType: prodInflow,
       });
     }
   }

@@ -231,9 +231,9 @@ async function run() {
     const line = SRC.match(/const PRODUCT_OPTION_EDITABLE_KEYS = new Set\(\[([\s\S]*?)\]\)/);
     assert.ok(line, 'PRODUCT_OPTION_EDITABLE_KEYS 선언 없음');
     const listed = (line[1].match(/'([a-z_0-9]+)'/g) || []).map(v => v.replace(/'/g, ''));
-    assert.deepStrictEqual(listed.slice().sort(), ['guide', 'pay', 'url'],
+    assert.deepStrictEqual(listed.slice().sort(), ['guide', 'inflow_type', 'pay', 'url'],
       '고칠 수 있는 키가 달라졌다 — 상품명·인원·옵션값은 표에 박히는 값이라 잠긴 채로 둔다'
-      + '(금액 pay 는 2026-09-21 사용자 확정으로 열렸다 — 공고 전파가 따라붙는다)');
+      + '(금액 pay 는 2026-09-21 · 상품별 유입방식 inflow_type 은 2026-11-04 결정 333 사용자 확정으로 열렸다 — 공고 전파가 따라붙는다)');
   });
 
   await t('④ 막을지 판정과 저장할지 판정이 같은 함수를 본다', async () => {

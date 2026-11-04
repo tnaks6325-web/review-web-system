@@ -15,6 +15,7 @@
 const { isWeekendClosedOn, closedKindOn } = require('./campaignWeekend.service');
 // ★ 결정 228: 순차진행 = 날짜별 상품 일정표(단일 출처 — 참여·하루 몫·앞날 예상·작업표·관리자 화면이 같은 표를 본다).
 const { buildSequentialSchedule, nextDateFor: _seqNextDateFor } = require('../utils/sequentialSchedule');
+const { unitInflowType } = require('../utils/unitInflow');   // ★ 결정 333 — 선택지마다 유입방식
 
 const KST_OFFSET_MS = 9 * 3600 * 1000; // Asia/Seoul 고정 +9 (DST 없음)
 
@@ -1864,6 +1865,8 @@ function computeOptionView(opt, cnt, campState, viewOpts = null) {
     //   가이드 공개는 홀드 게이트(work-detail) 뒤에서만.
     inflowGuideHtml: String(opt.inflow_guide_html || ''),
     inflowGuideImages: Array.isArray(opt.inflow_guide_images) ? opt.inflow_guide_images : [],
+    // ★ 결정 333 — 이 선택지의 유입방식('guide'|'link'|'' = 공고 전체 값을 따름). SELECT 에 칸이 없으면 '' = 종전 동작.
+    inflowType: unitInflowType(opt.inflow_type),
     payAmount: Math.max(0, Number(opt.pay_amount) || 0),
     // ★ 결정 214: 선택지별 사진(빈 값 = 공고 대표 사진). SELECT 에 칸이 없으면 '' — 종전 동작.
     thumbnailUrl: String(opt.thumbnail_url || ''),
