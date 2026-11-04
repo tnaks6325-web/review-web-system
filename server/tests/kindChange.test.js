@@ -28,7 +28,7 @@ const mkPool = (hits = {}) => {
       if (/^SELECT EXISTS/.test(q)) return { rows: [{ x: false }] };
       if (/^UPDATE work_orders SET linked_tab_sheet_id=''/.test(q)) return { rows: [{ id: 'wo_self', title: 't', status: 'reviewing', created_by: 'x', live: true }], rowCount: 1 };
       if (/^DELETE FROM campaign_participants/.test(q)) return { rows: [{ f: false }], rowCount: 1 };
-      if (/^DELETE FROM recruit_campaigns/.test(q)) return { rows: [{ draft: !!hits.draft, live: true }], rowCount: 1 };
+      if (/^DELETE FROM recruit_campaigns/.test(q)) return { rows: [{ draft: !!hits.draft, live: hits.archived ? false : true }], rowCount: 1 };
       if (/^DELETE|^UPDATE|^INSERT/.test(q)) return { rows: [], rowCount: 0 };
       return { rows: [] };
     },
@@ -67,6 +67,16 @@ const quietMemo = async (fn) => {
       untouched: { selfOrderId: 'wo_self', allowDraftCampaign: true }, beforeCommit: async () => ({ ok: true }) });
     assert.strictEqual(out.ok, false); assert.ok(out.reasons.includes('live_campaign')); assert.ok(!log.includes('COMMIT'));
   }));
+  await ok('게시했다가 보관한 공고(보관됨 · 임시저장 아님)도 종류 변경이면 되돌린다(Codex PR #1758)', () => quietMemo(async () => {
+    const { log, pool } = mkPool({ draft: false, archived: true });
+    const out = await svc.deleteTask({ sheetId: 's', tabName: 't', confirm: true, onlyIfUntouched: true, notifyIntranet: false, pool,
+      untouched: { selfOrderId: 'wo_self', allowDraftCampaign: true }, beforeCommit: async () => ({ ok: true }) });
+    assert.strictEqual(out.ok, false); assert.ok(out.reasons.includes('live_campaign')); assert.ok(!log.includes('COMMIT'));
+  }));
+  await ok('판정 쿼리 — 종류 변경은 게시 이력으로(보관 여부 무관) · 그 밖의 정리는 종전대로 보관 안 된 공고', () => {
+    const src = read('server/src/services/workTabDelete.service.js');
+    assert.ok(/CASE WHEN \$3::boolean\s+THEN NOT \(COALESCE\(rc\.status, ''\) = 'draft' AND rc\.published_at IS NULL\)\s+ELSE rc\.archived_at IS NULL END\) AS live,/.test(src));
+  });
   await ok('다른 오더가 지운 결과에 있으면 종류 변경이라도 되돌린다', () => quietMemo(async () => {
     const { log, pool } = mkPool({ draft: true });
     const out = await svc.deleteTask({ sheetId: 's', tabName: 't', confirm: true, onlyIfUntouched: true, notifyIntranet: false, pool,
@@ -106,6 +116,11 @@ const quietMemo = async (fn) => {
     assert.ok(/beforeCommit: async \(client\) =>/.test(branch));
     assert.ok(/WHERE id = \$1 AND COALESCE\(source_revision, 0\) = \$2 AND deleted_at IS NULL/.test(branch));
     assert.ok(/status = 'submitted', linked_campaign_id = '', bidir_state = 'off', advertiser_id = ''/.test(branch));
+  });
+  await ok('양방향 연결 오더는 창의 기준 버전이 지금과 같을 때만(아니면 지우기 전에 409 kind_change_stale · Codex PR #1758)', () => {
+    assert.ok(/code: 'kind_change_stale'/.test(branch));
+    assert.ok(branch.indexOf("code: 'kind_change_stale'") < branch.indexOf('deleteTask('), '삭제보다 먼저');
+    assert.ok(/Number\(base\) !== Number\(current\.sync_version \|\| 0\)/.test(branch));
   });
   await ok('리뷰↔블로그만(Q&A 제외) · 게시·완료 오더 제외', () => {
     assert.ok(/const KIND_CHANGE_KINDS = new Set\(\['review', 'blog'\]\)/.test(src));

@@ -1300,6 +1300,17 @@ async function _intakeSourceRevisionHandler(req, res, next) {
       const nextKind = normalizeWorkKind(b.work_kind);
       if (shape.ok && nextKind !== shape.from && KIND_CHANGE_KINDS.has(nextKind)
           && source.sourceRevision === Number(current.source_revision || 0) + 1) {
+        /* ★ 양방향 연결 오더(Codex PR #1758): 창을 연 뒤 리뷰웹에서 공유 칸(가이드 등)을 고쳤으면 그 버전이 앞서 있다.
+             아래에서 연결을 끊고 전체 저장으로 가면 공유 저장의 3방향 병합을 건너뛰어 리뷰웹 수정을 창의 옛 값으로 덮는다 —
+             기준 버전이 지금과 다르면 아무것도 지우지 않고 창을 다시 열게 한다(fail-closed). */
+        if (current.bidir_state === 'on' && (await readBidirSwitch(pool)).in2rw === 'apply') {
+          const base = b.bidir && typeof b.bidir === 'object' ? b.bidir.base_sync_version : undefined;
+          if (base === undefined || base === null || String(base).trim() === '' || Number(base) !== Number(current.sync_version || 0)) {
+            return res.status(409).json({ ok: false, code: 'kind_change_stale', blocked_fields: ['work_kind'], work_order_id: current.id,
+              sync_version: Number(current.sync_version || 0),
+              error: '수정 창을 연 뒤 리뷰웹에서 이 오더 내용이 바뀌었습니다 — 아무것도 지우지 않았습니다. 창을 닫고 다시 열어 종류를 바꿔 주세요.' });
+          }
+        }
         const verdict = await kindChangeVerdict(current);
         if (!verdict.allowed) {
           return res.status(409).json({ ok: false, code: 'kind_change_blocked', blocked_fields: ['work_kind'], reasons: verdict.reasons,

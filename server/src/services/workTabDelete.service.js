@@ -144,8 +144,11 @@ async function _untouchedReasons(q, sheetId, tabName, opts = {}) {
     `SELECT EXISTS (SELECT 1 FROM recruit_campaigns WHERE linked_sheet_id=$1 AND COALESCE(linked_tab_name,'') = '') AS x`, [sheetId]);
   if (amb[0] && amb[0].x) reasons.push('ambiguous_campaign');
   const { rows: rc } = await q(
-    `SELECT COUNT(*) FILTER (WHERE rc.archived_at IS NULL
-                              AND NOT ($3::boolean AND rc.status = 'draft' AND rc.published_at IS NULL)) AS live,
+    /* ★ 종류 변경(결정 332 · Codex PR #1758): 「게시한 적 있나」로 본다 — 게시했다가 보관한 공고도 막는다(보관 여부 무관).
+         그 밖의 정리는 종전대로 「보관 안 된 공고」. */
+    `SELECT COUNT(*) FILTER (WHERE CASE WHEN $3::boolean
+                                        THEN NOT (COALESCE(rc.status, '') = 'draft' AND rc.published_at IS NULL)
+                                        ELSE rc.archived_at IS NULL END) AS live,
             COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM campaign_applications a WHERE a.campaign_id = rc.id)
                               OR EXISTS (SELECT 1 FROM order_submissions o WHERE o.sheet_id = 'campaign:' || rc.id)) AS used
        FROM recruit_campaigns rc
@@ -572,10 +575,11 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, del
     const rc = await client.query(
       `DELETE FROM recruit_campaigns
         WHERE linked_sheet_id=$1 AND COALESCE(NULLIF(linked_tab_name,''), $2)=$2
-        RETURNING (status = 'draft' AND published_at IS NULL) AS draft, (archived_at IS NULL) AS live`,
+        RETURNING (COALESCE(status, '') = 'draft' AND published_at IS NULL) AS draft, (archived_at IS NULL) AS live`,
       [sheetId, tabName]);
     // ★ 결정 254: 자동 정리인데 보관 안 된 공고가 그사이 생겼으면 되돌린다(결과 검증) — 종류 변경은 게시한 적 없는 임시저장만 예외(결정 332)
-    if (onlyIfUntouched === true && (rc.rows || []).some(x => x && x.live && !(uopt.allowDraftCampaign && x.draft))) {
+    //   ★ 종류 변경은 보관 여부가 아니라 게시 이력으로 본다(게시했다가 보관한 공고도 되돌림 · Codex PR #1758)
+    if (onlyIfUntouched === true && (rc.rows || []).some(x => x && (uopt.allowDraftCampaign ? !x.draft : x.live))) {
       await client.query('ROLLBACK');
       return { ok: false, code: 'not_untouched', reasons: ['live_campaign'], raced: true };
     }
