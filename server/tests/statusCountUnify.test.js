@@ -276,5 +276,70 @@ async function t(name, fn) { await fn(); passed++; console.log('PASS ' + name); 
     assert.strictEqual(plain.manager, '', '주석 없는 경로(업체 화면 재료)는 종전 그대로');
   });
 
+
+  /* ── 결정 335: 홈 총건수 = 업체 화면 총건수(같은 SQL·같은 판정) ──
+     사고(2026-11-04): 공고가 없는 작업에 [＋ 발주 연결]로 리뷰오더(100건)를 이었더니 업체 화면은 100,
+     직원 홈은 빈칸 — 홈은 「공고 → 그 공고와 짝지은 발주」만 봤다. */
+  await t('★★ 결정 335: 홈 총건수(tabRecruitTotalsFor) ≡ 업체 화면 총건수(advertiserWorkSummary.target) — 발주 연결·공고·공고0+발주·없음', async () => {
+    // 업체 요약이 함께 읽는 작은 표(정산 노출 설정 · 브랜드 담당자) — 이 검사에만 필요하다
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS trackb_advertiser_prefs (advertiser_id text, settlement_visible boolean DEFAULT false);
+      CREATE TABLE IF NOT EXISTS trackb_tab_brand_managers (advertiser_id text, sheet_id text, tab_name text, managers jsonb);`);
+    await db.exec(`
+      INSERT INTO raw_sheet_tabs (sheet_id, spreadsheet_title, tab_gid, tab_name, row_count, is_system_tab, detected_headers, mirrored_at) VALUES
+       ('${S}','가짜 시트','201','Q1 발주연결만 100건',0,FALSE,'["번호"]'::jsonb, NOW()),
+       ('${S}','가짜 시트','202','Q2 공고50',0,FALSE,'["번호"]'::jsonb, NOW()),
+       ('${S}','가짜 시트','203','Q3 공고0+발주연결',0,FALSE,'["번호"]'::jsonb, NOW()),
+       ('${S}','가짜 시트','204','Q4 아무것도없음',0,FALSE,'["번호"]'::jsonb, NOW()),
+       ('${S}','가짜 시트','205','Q5 링크가 폴백을 이김',0,FALSE,'["번호"]'::jsonb, NOW());
+      INSERT INTO work_orders (id, recruit_count, created_at) VALUES ('wo-q1', 100, NOW() - interval '2 day'), ('wo-q3', 70, NOW() - interval '2 day'), ('wo-q5-link', 40, NOW() - interval '3 day');
+      INSERT INTO work_orders (id, recruit_count, linked_tab_sheet_id, linked_tab_name, created_at) VALUES ('wo-q5-fallback', 999, '${S}', 'Q5 링크가 폴백을 이김', NOW());
+      INSERT INTO trackb_work_order_links (sheet_id, tab_name, work_order_id) VALUES
+       ('${S}','Q1 발주연결만 100건','wo-q1'), ('${S}','Q3 공고0+발주연결','wo-q3'), ('${S}','Q5 링크가 폴백을 이김','wo-q5-link');
+      -- Q3 공고는 총인원 0 이고, 공고와 짝지은 발주(linked_campaign_id)가 없다 — 종전 홈은 여기서 빈칸이었다
+      INSERT INTO recruit_campaigns (id, linked_sheet_id, linked_tab_name, linked_tab_gid, recruit_total, status) VALUES
+       ('rc-q2','${S}','Q2 공고50','202',50,'active'), ('rc-q3','${S}','Q3 공고0+발주연결','203',0,'active');`);
+    const names = ['Q1 발주연결만 100건', 'Q2 공고50', 'Q3 공고0+발주연결', 'Q4 아무것도없음', 'Q5 링크가 폴백을 이김'];
+    const want = { 'Q1 발주연결만 100건': [100, 'work_order'], 'Q2 공고50': [50, 'campaign'], 'Q3 공고0+발주연결': [70, 'work_order'],
+                   'Q4 아무것도없음': [null, 'none'], 'Q5 링크가 폴백을 이김': [40, 'work_order'] };
+    const sum = await svc.advertiserWorkSummary({ advertiserId: 'adv1' });
+    const home = await svc.tabRecruitTotalsFor(names.map((n, i) => ({ sheetId: S, tabName: n, tabGid: String(201 + i) })));
+    assert.strictEqual(home.ok, true);
+    for (const n of names) {
+      const adv = sum.items.find(x => x.tabName === n);
+      assert.ok(adv, '업체 화면에 ' + n);
+      const h = home.map.get(S + '\t' + n);
+      assert.ok(h, '홈 맵에 ' + n);
+      assert.deepStrictEqual([h.total, h.source], want[n], '홈 ' + n);
+      assert.strictEqual(h.total, adv.target, `홈 ≡ 업체 화면: ${n}`);
+    }
+    // 재현 기록 — 종전 홈 재료(공고 주석)는 Q1(공고 없음)·Q3(공고 0 + 공고 짝 발주 없음)에서 총건수를 모른다.
+    const camps = await svc.tabCampaignsMap({ force: true });
+    assert.strictEqual(camps.map[S + '\tQ1 발주연결만 100건'], undefined, '종전: 공고 없음 → 홈 총건수 재료 없음');
+    assert.strictEqual(camps.map[S + '\tQ3 공고0+발주연결'][0].recruitTotal, null, '종전: 공고 0 → 탭 연결 발주를 못 봄');
+  });
+
+  await t('결정 335: 값을 모르면 null(0 금지) · 빈 목록 = 쿼리 0 · 조회 실패 = ok:false(호출부가 칸을 싣지 않는다)', async () => {
+    const none = await svc.tabRecruitTotalsFor([{ sheetId: S, tabName: 'Q4 아무것도없음', tabGid: '' }]);
+    assert.strictEqual(none.map.get(S + '\tQ4 아무것도없음').total, null);
+    let calls = 0; const prev = pool.query; pool.query = async (...a) => { calls++; return prev(...a); };
+    try { const e = await svc.tabRecruitTotalsFor([]); assert.strictEqual(e.ok, true); assert.strictEqual(calls, 0); }
+    finally { pool.query = prev; }
+    failOn = /jsonb_to_recordset\(\$1::jsonb\) AS t\(sheet_id text, tab_name text, tab_gid text\)/;
+    try { const f = await svc.tabRecruitTotalsFor([{ sheetId: S, tabName: 'Q2 공고50' }]); assert.strictEqual(f.ok, false); assert.strictEqual(f.map.size, 0); }
+    finally { failOn = null; }
+  });
+
+  await t('결정 335: 단일 출처 배선 — 두 화면이 같은 LATERAL 조각·같은 판정 함수 · 사본 없음 · 홈 응답에 recruitQuota', async () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8');
+    const own = src.slice(src.indexOf('async function ownedTabsForAdvertiser('), src.indexOf('async function', src.indexOf('async function ownedTabsForAdvertiser(') + 10));
+    const home = src.slice(src.indexOf('async function tabRecruitTotalsFor('), src.indexOf('async function', src.indexOf('async function tabRecruitTotalsFor(') + 10));
+    assert.ok(own.includes('${_TAB_QUOTA_LATERALS}') && home.includes('${_TAB_QUOTA_LATERALS}'), '두 곳 모두 공용 조각');
+    assert.strictEqual((src.match(/FROM recruit_campaigns rc\s+WHERE rc\.linked_sheet_id = t\.sheet_id/g) || []).length, 1, '공고 LATERAL 사본 금지');
+    assert.ok(/_tabRecruitQuota\(t\)/.test(src.slice(src.indexOf('async function advertiserWorkSummary('))), '업체 요약도 같은 판정 함수');
+    const rt = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'trackB.routes.js'), 'utf8');
+    assert.ok(/svc\.tabRecruitTotalsFor\(tabs\)/.test(rt) && /t\.recruitQuota = /.test(rt), '홈 응답 배선');
+  });
+
   console.log(`\n✅ statusCountUnify: ${passed} 통과`);
 })().catch(e => { console.error(e); process.exitCode = 1; });

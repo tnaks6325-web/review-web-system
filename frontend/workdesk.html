@@ -3882,11 +3882,12 @@ async function loadTabs(){
   if(!r||!r.ok){ const b=$('#segwrap'); if(b) b.innerHTML=''; _renderTaskMenu(); return; }
   // ★ 작업바 로드는 stats=1 을 붙이지 않는다(무거운 집계를 탭 전환마다 돌리지 않는다) — 대신 이미 받아둔
   //   통계를 **이월**해 마감 후보 배지가 화면을 오갈 때마다 사라졌다 나타나지 않게 한다(_finStatsAt 캐시와 정합).
-  const _prevStats={}, _prevFin={}, _prevCamp={}, _prevSod={};
+  const _prevStats={}, _prevFin={}, _prevCamp={}, _prevSod={}, _prevRq={};
   (STATE.tabs||[]).forEach(t=>{ const k=t.sheetId+'\t'+t.tabName;
     if(t.stats) _prevStats[k]=t.stats;
     if(t.sourceOrderDeleted) _prevSod[k]=t.sourceOrderDeleted;   // 결정 254: 「원본 오더 삭제됨」도 이월(작업바 로드엔 안 실린다)
     if(t.campaigns) _prevCamp[k]=t.campaigns;   // 공고 주석도 stats 와 같은 이월(작업바 로드엔 안 실린다)
+    if(t.recruitQuota) _prevRq[k]=t.recruitQuota;   // 결정 335: 탭 총건수도 같은 이월(작업바 로드엔 안 실린다)
     if(t.finished) _prevFin[k]={finishedAt:t.finishedAt,finishedBy:t.finishedBy}; });
   STATE.tabs=r.tabs||[];
   STATE.finTruncated=!!r.truncated;
@@ -3894,6 +3895,7 @@ async function loadTabs(){
   STATE.tabs.forEach(t=>{ const k=t.sheetId+'\t'+t.tabName;
     if(!t.stats){ const s=_prevStats[k]; if(s) t.stats=s; }
     if(!t.campaigns){ const c=_prevCamp[k]; if(c) t.campaigns=c; }
+    if(!t.recruitQuota){ const q=_prevRq[k]; if(q) t.recruitQuota=q; }
     if(!t.sourceOrderDeleted){ const d=_prevSod[k]; if(d) t.sourceOrderDeleted=d; }
     // ★ 마감 조회가 실패한 응답으로 기존 마감 표시를 지우지 않는다(그러면 마감 작업이 보드로 되살아난다)
     if(r.finishedUnavailable && _prevFin[k]){ t.finished=true; t.finishedAt=_prevFin[k].finishedAt; t.finishedBy=_prevFin[k].finishedBy; } });
@@ -4644,6 +4646,8 @@ function _finAbsorb(r){
     // ★ 공고 주석: 조회 실패면 **덮지 않는다**(빈 값으로 덮으면 화면이 '공고 없음'으로 읽어
     //   담당자가 이미 있는 공고를 또 발행한다). 성공했으면 없어진 연결도 반영해야 하므로 [] 로 대입.
     if(!r.campaignsUnavailable) t.campaigns=n.campaigns||[];
+    // ★ 결정 335: 탭 총건수(업체 화면과 같은 판정) — 조회 실패면 덮지 않고, 성공 응답이면 새 값으로(칸 없는 구버전 응답 = 지워서 종전 경로)
+    if(!r.recruitQuotaUnavailable){ if(n.recruitQuota&&typeof n.recruitQuota==='object') t.recruitQuota=n.recruitQuota; else delete t.recruitQuota; }
     if(!r.finishedUnavailable){ t.finished=!!n.finished; t.finishedAt=n.finishedAt; t.finishedBy=n.finishedBy; }
     // ★ 결정 254: 「원본 오더 삭제됨」 — 조회 실패면 덮지 않고, 성공했으면 없어진 표시도 반영(null)
     if(!r.sourceOrderDeletedUnavailable) t.sourceOrderDeleted=n.sourceOrderDeleted||null;
@@ -6084,6 +6088,13 @@ async function _tdGo(forcePayment){
      못 구하면 분모를 줄 수로 접은 뒤 그 사실을 툴팁으로 말한다(0 위장 금지).
    ★ 준비된 줄·빈 슬롯·제출·입금은 **툴팁**으로 남긴다(정보 손실 0, 줄 수는 늘리지 않는다). */
 function _finRecruitTotal(t){
+  /* ★★ 결정 335: 서버가 탭 단위 총건수(`recruitQuota` = 업체 화면과 같은 판정 — 공고 우선, 없으면 탭에 연결된 발주)를
+     실어 보내면 **그것만** 쓴다(total=null 이면 모름 → 아래 공고 경로로 가지 않고 null). 칸이 없을 때(구버전 서버·조회 실패)만
+     종전 공고 주석 경로로 접는다. */
+  if(t&&t.recruitQuota&&typeof t.recruitQuota==='object'){
+    const q=Number(t.recruitQuota.total);
+    return Number.isFinite(q)&&q>0 ? {total:q, source:String(t.recruitQuota.source||'')} : null;
+  }
   const cs=Array.isArray(t&&t.campaigns)?t.campaigns.filter(c=>c&&c.id):[];
   if(!cs.length) return null;
   // 기준 공고 = 작업 조건 카드와 같은 순서(게시중 우선 → 최신). 배열은 서버가 최신순으로 준다.

@@ -117,6 +117,10 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
       const camps = req.query.stats === '1' ? await svc.tabCampaignsMap({ force: req.query.fresh === '1' }) : null;
       // ★ 결정 254: 원본 오더가 인트라넷에서 삭제된 작업 주석(홈 작업 목록 전용 · 실패 = 주석 없음)
       const sod = req.query.stats === '1' ? await svc.sourceOrderDeletedMap() : null;
+      // ★★ 결정 335: 홈 총건수 = 업체 화면과 같은 판정(tabRecruitTotalsFor — 공고 우선, 없으면 탭에 연결된 발주).
+      //   이 응답의 탭만 넘긴다(스코프 단일 출처는 위 scopedActiveTabs). 실패 = 칸 미동봉 → 화면이 종전 경로로 접힌다.
+      const rqm = req.query.stats === '1' ? await svc.tabRecruitTotalsFor(tabs) : null;
+      if (rqm && !rqm.ok) out.recruitQuotaUnavailable = true;
       if (!fin.ok) out.finishedUnavailable = true;
       if (stats && !stats.ok) out.statsUnavailable = true;
       if (camps && !camps.ok) out.campaignsUnavailable = true;
@@ -134,6 +138,11 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
         if (camps) {
           const c = camps.map[`${t.sheetId}\t${t.tabName}`] || (g ? camps.map[`${t.sheetId}\tgid:${g}`] : null);
           if (c && c.length) t.campaigns = c;
+        }
+        if (rqm && rqm.ok) {
+          const v = rqm.map.get(`${t.sheetId}\t${t.tabName}`);
+          // 키가 없을 수 없지만(넘긴 탭 전부를 돌려준다) 만약 없으면 모름 = null(0 으로 꾸미지 않는다).
+          t.recruitQuota = v ? { total: v.total, source: v.source } : { total: null, source: 'none' };
         }
         if (sod) {
           const d = sod.map[`${t.sheetId}\t${t.tabName}`] || (g ? sod.map[`${t.sheetId}\tgid:${g}`] : null);

@@ -95,6 +95,39 @@ vm.createContext(sb); vm.runInContext(unpaidFn[0] + '\n' + src, sb);
 
 const T = (stats, camps, sheetless) => ({ stats, campaigns: camps, sheetless });
 const R = (t, filt) => sb._finNumCells(t, 0, filt || '');
+/* ── 결정 335: 서버의 탭 단위 총건수(recruitQuota = 업체 화면과 같은 판정)가 있으면 그것만 쓴다 ── */
+{
+  const withQ = (q, camps) => Object.assign(T({ total: 3, filled: 2, submitted: 1, paid: 0 }, camps, true), { recruitQuota: q });
+  const a = sb._finRecruitTotal(withQ({ total: 100, source: 'work_order' }, []));
+  ok('335: 공고가 없어도 recruitQuota 100(발주) 이면 총건수 100', a && a.total === 100 && a.source === 'work_order');
+  const b = sb._finRecruitTotal(withQ({ total: 100, source: 'work_order' }, [{ id: 'c', status: 'active', recruitTotal: 7, recruitTotalSource: 'campaign' }]));
+  ok('335: recruitQuota 가 공고 주석보다 우선(두 화면 단일 출처)', b && b.total === 100);
+  ok('335: recruitQuota total=null 은 모름 → 공고 주석으로 다시 줍지 않는다(null)',
+    sb._finRecruitTotal(withQ({ total: null, source: 'none' }, [{ id: 'c', status: 'active', recruitTotal: 7 }])) === null);
+  const legacy = sb._finRecruitTotal(T({ total: 3 }, [{ id: 'c', status: 'active', recruitTotal: 7, recruitTotalSource: 'campaign' }], true));
+  ok('335: recruitQuota 칸이 없으면(구버전 서버·조회 실패) 종전 공고 주석 경로', legacy && legacy.total === 7);
+  const cells = R(withQ({ total: 100, source: 'work_order' }, []));
+  ok('335: 총건수 칸이 100 으로 채워지고 * (줄 수 대체) 표식이 없다', /class="box tot">100</.test(cells) && !/100\*/.test(cells));
+}
+/* ── 결정 335 (Codex P2): 통계 재조회(_finAbsorb)·작업바 재로드(loadTabs)에서 recruitQuota 가 반영·이월된다 ── */
+{
+  const absorbSrc = (wd.match(/function _finAbsorb\(r\)\{[\s\S]*?\n\}/) || [])[0];
+  ok('335: _finAbsorb 구현을 꺼내 실행한다', !!absorbSrc);
+  const sb2 = { STATE: { tabs: [] }, _wtPruneFinished() {} };
+  vm.createContext(sb2); vm.runInContext(absorbSrc, sb2);
+  const tab = { sheetId: 'S', tabName: 'A' };
+  sb2.STATE.tabs = [tab];
+  sb2._finAbsorb({ tabs: [{ sheetId: 'S', tabName: 'A', recruitQuota: { total: 100, source: 'work_order' } }] });
+  ok('335: 기존 탭에 새 총건수 100 이 실린다', tab.recruitQuota && tab.recruitQuota.total === 100);
+  sb2._finAbsorb({ tabs: [{ sheetId: 'S', tabName: 'A', recruitQuota: { total: 200, source: 'work_order' } }] });
+  ok('335: 100 → 200 으로 바뀌면 200', tab.recruitQuota.total === 200);
+  sb2._finAbsorb({ recruitQuotaUnavailable: true, tabs: [{ sheetId: 'S', tabName: 'A' }] });
+  ok('335: 조회 실패 응답은 기존 값을 덮지 않는다', tab.recruitQuota && tab.recruitQuota.total === 200);
+  sb2._finAbsorb({ tabs: [{ sheetId: 'S', tabName: 'A' }] });
+  ok('335: 칸 없는 성공 응답(구버전 서버)은 지워 종전 경로로', !('recruitQuota' in tab));
+  ok('335: 작업바 재로드(loadTabs)도 recruitQuota 를 이월한다',
+    /if\(t\.recruitQuota\) _prevRq\[k\]=t\.recruitQuota;/.test(wd) && /if\(!t\.recruitQuota\)\{ const q=_prevRq\[k\]; if\(q\) t\.recruitQuota=q; \}/.test(wd));
+}
 const h1 = R(T({ total: 581, filled: 208, submitted: 159, paid: 106 },
   [{ id: 'c1', status: 'active', recruitTotal: 500, recruitTotalSource: 'campaign' }], true));
 /* ★★ 시안 확정(2026-09-22) — 한 칸의 분수(`208/500`)를 **네 칸**으로 나눴다: 총건수·참여·제출·입금.
