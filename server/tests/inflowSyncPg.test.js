@@ -51,6 +51,7 @@ async function t(name, fn) {
     sort_order INT DEFAULT 0,
     inflow_guide_html TEXT NOT NULL DEFAULT '',
     inflow_guide_images JSONB NOT NULL DEFAULT '[]'::jsonb,
+    inflow_type TEXT NULL,   -- 213 결정 333(칸 추가만 · NULL = 공고 전체 값을 따름)
     updated_at TIMESTAMPTZ DEFAULT NOW())`);
 
   const client = { query: (sql, params) => pg.query(String(sql), params || []), release: () => {} };

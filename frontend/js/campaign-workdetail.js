@@ -248,7 +248,18 @@
     // ★ 같은 사진이 안내글 HTML 과 배열 양쪽에 저장되므로(위 imageListHtml 주석) HTML 을 넘겨 접는다
     var unitPack = imageListHtml(so && so.inflowGuideImages, o.apiBase, '유입가이드 이미지', unitGuideHtml);
     var usingUnitGuide = !!(unitGuideHtml || unitPack.html);
-    var guideHtml = usingUnitGuide ? (unitGuideHtml + unitPack.html) : (wd.inflowGuideHtml || '');
+    /* ★★ 결정 333 — 상품마다 유입방식이 다를 수 있다(한 공고에 가이드유입 상품 + 링크유입 상품).
+       이 선택지에 유입방식이 적혀 있으면 그것이 이 사람의 유입방식이다(비면 공고 전체 값 = 종전 동작 그대로).
+       ★ 링크유입 선택지는 공고 공통 가이드로 접지 않는다 — 섞인 공고의 공통 안내는 가이드유입 상품 몫이라,
+         접으면 링크 상품 리뷰어가 남의 상품 검색 경로를 따라간다. */
+    var unitInflow = (so && (so.inflowType === 'guide' || so.inflowType === 'link')) ? so.inflowType : '';
+    var effInflow = unitInflow || d.inflowType || '';
+    var guideHtml = usingUnitGuide ? (unitGuideHtml + unitPack.html)
+      : (unitInflow === 'link'
+        ? ((so && so.optionUrl)
+          ? '링크유입 — 아래 버튼으로 상품 페이지에 들어가 구매를 진행하세요.'
+          : '링크유입 상품인데 상품 주소가 아직 등록되지 않았어요 — 구매 전에 운영자에게 문의해 주세요.')
+        : (wd.inflowGuideHtml || ''));
     // ★ seen 에 두 배열의 토큰을 함께 넘겨 같은 사진이 유입가이드 카드에 이중 노출되지 않게 한다
     //   (레거시 경로: 리뷰가이드 '평문'에 섞여 온 주소는 종전대로 유입가이드 카드에 붙는다 — 무회귀)
     var extraImgs = extractGuideImages(
@@ -270,12 +281,12 @@
     // "링크유입"이 남아 있다. 명시적으로 링크유입이라고 적힌 경우만 호환 처리한다.
     // ★ 판정 대상은 **지금 화면에 보이는 가이드** — 선택지 전용 가이드가 있는데 공고 공통 문구에
     //   "링크유입"이 남아 있다고 버튼을 열면, 그 선택지의 유입 경로 지정이 통째로 무의미해진다.
-    var legacyLinkInflow = !d.inflowType
+    var legacyLinkInflow = !effInflow
       && /링크\s*유입/.test(String(usingUnitGuide ? unitGuideHtml : (wd.inflowGuideHtml || '')).replace(/<[^>]*>/g, ' '));
     /* `inflowType`이 있는 신규 공고는 값만 단일 출처로 쓴다. 공통 가이드 제거 뒤
        비어 있는 안내를 링크유입으로 해석하면 가이드유입에서 잘못된 구매 버튼이 열린다.
        값이 없던 레거시 공고만 기존 문구/빈 안내 폴백을 허용한다. */
-    var isLinkInflow = d.inflowType === 'link' || legacyLinkInflow || (!d.inflowType && !hasGuide);
+    var isLinkInflow = effInflow === 'link' || legacyLinkInflow || (!effInflow && !hasGuide);
     // 리뷰어 화면은 상품별 가이드의 본문·사진만 보여 준다. 선택지명 반복 문구는
     // 단일상품에서 상품 카드와 같은 이름을 세 번 노출시켜 읽기만 방해한다.
     // 단, 관리자 인라인 미리보기는 첫 선택지 가이드를 대표로 보여 주므로, 어떤
@@ -290,7 +301,8 @@
     // 옵션 공고는 리뷰어가 참여 시 고른 옵션의 링크로 이동한다.
     // 옵션 링크가 비어 있는 기존 공고는 공고 공통 링크를 그대로 사용한다.
     var hasSelectedOptionUrl = !!(so && so.optionUrl);
-    var landingUrl = (so && so.optionUrl) || d.landingUrl;
+    // ★ 결정 333 — 유입방식이 적힌 선택지는 공고 대표 주소로 접지 않는다(섞인 공고의 대표 주소는 다른 상품일 수 있다 — 남의 상품을 사게 된다)
+    var landingUrl = (so && so.optionUrl) || (unitInflow ? '' : d.landingUrl);
     if (o.showLanding !== false && landingUrl && isLinkInflow) {
       html += '<button type="button" class="cwd-btn" data-cwd-landing="' + escAttr(landingUrl) + '">🔗 ' + (hasSelectedOptionUrl ? '선택 옵션 링크 열기' : '상품 페이지 열기') + ' (새 탭)</button>';
     }

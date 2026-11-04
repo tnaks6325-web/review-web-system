@@ -675,7 +675,9 @@ function _thumbnailUrl(v) {
 //   ★★ `pay`(1건당 결제금액)는 **모집공고까지 전파되는 조건으로** 열렸다(사용자 확정 2026-09-21):
 //     리뷰어가 보는 금액은 공고에 있어, 오더만 고치면 "통과했는데 화면은 옛 금액" 이 된다.
 //     전파는 `campaignPayAmountSync.service` 가 하고 **근거가 없으면 안 고치고 사유를 보고**한다.
-const PRODUCT_OPTION_EDITABLE_KEYS = new Set(['url', 'guide', 'pay']);
+//   ★★ `inflow_type`(상품별 유입방식 · 결정 333)도 열었다(사용자 확정 2026-11-04 「가」) — 오더 전체 유입방식(164)과 같은 이유로
+//     **작업표와 무관**하다(`utils/worktablePlan` 에 유입 참조 0건 — 164 회귀가드가 고정). 대신 공고까지 전파한다(`syncCampaignInflow`).
+const PRODUCT_OPTION_EDITABLE_KEYS = new Set(['url', 'guide', 'pay', 'inflow_type']);
 // 조건부 허용 칸 — "잠긴 부분이 그대로일 때만" 통과한다(전부 허용도, 전부 잠금도 아니다).
 const SOURCE_PARTIAL_JSON_COLUMN = 'product_options_json';
 
@@ -1280,7 +1282,11 @@ async function _intakeSourceRevisionHandler(req, res, next) {
     if (!current) {
       return res.status(404).json({ ok: false, error: '수정할 원본 작업오더를 찾을 수 없습니다.' });
     }
-    const optionsJson = _requestOptionsJson(b);
+    let optionsJson = _requestOptionsJson(b);
+    // ★ 결정 333 — 상품별 유입방식을 모르는 옛 인트라넷 창은 그 키를 빼고 보낸다 → 저장된 값을 그대로 둔다(공유 저장·종전 경로 둘 다 이 값을 쓴다).
+    if (optionsJson && !require('../utils/unitInflow').inflowCapable(b)) {
+      optionsJson = require('../utils/unitInflow').keepUnitInflowTypes(current.product_options_json, optionsJson);
+    }
     const deliveryType = _canonicalDeliveryType(b.delivery_type, b.courier_proxy);
     const courierProxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
 

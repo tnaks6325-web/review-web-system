@@ -241,6 +241,8 @@ async function run() {
     tables.forEach(x => {
       assert.ok(
         /^campaign_options: inflow_guide_html = \$3, inflow_guide_images = \$4::jsonb, updated_at = NOW\(\)$/.test(x)
+        // 결정 333 — 줄마다 유입방식(같은 표 · 유입 칸 하나 · 정원·옵션 구성 무접촉)
+        || /^campaign_options: inflow_type = \$3, updated_at = NOW\(\)$/.test(x)
         || /^recruit_campaigns: work_detail = \$2::jsonb, updated_at = NOW\(\)$/.test(x)
         || /^recruit_campaigns: window_start = \$2::time, window_end = \$3::time, time_range = \$4, updated_at = NOW\(\)$/.test(x)
         // 양방향 공유 저장(결정 275) 전용 — 레거시 공고에서 같은 글자 칸(time_range)만. 위 표면의 부분집합이다.
