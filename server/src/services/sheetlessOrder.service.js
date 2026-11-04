@@ -44,7 +44,8 @@ function _phone8(v) {
   const d = String(v || '').replace(/\D/g, '');
   return d.length >= 8 ? d.slice(-8) : '';
 }
-// 중복 판정 키 정규화 — SQL 쪽 regexp_replace(…, '\D', '', 'g') 와 **같은 규칙**이어야 한다.
+// 중복 판정 키 정규화 — SQL 쪽 regexp_replace(…, '[^0-9]', '', 'g') 와 **같은 규칙**이어야 한다.
+//   ★ SQL 은 JS 템플릿 문자열 안이라 `'\D'` 를 쓰면 백슬래시가 사라져 'D'(글자 D만 지움)가 된다 — 숫자만 남기기는 `'[^0-9]'` 로 쓴다(2026-11-04).
 function _digits(v) { return String(v == null ? '' : v).replace(/\D/g, ''); }
 
 /*
@@ -679,8 +680,8 @@ async function writeOrderToWorktable({
             WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.deleted_at IS NULL
               AND cp.order_submission_id <> $3::uuid
               AND os2.deleted_at IS NULL
-              AND regexp_replace(COALESCE(os2.order_num, ''), '\D', '', 'g') = $4
-              AND regexp_replace(COALESCE(os2.phone, ''), '\D', '', 'g') = $5
+              AND regexp_replace(COALESCE(os2.order_num, ''), '[^0-9]', '', 'g') = $4
+              AND regexp_replace(COALESCE(os2.phone, ''), '[^0-9]', '', 'g') = $5
             ORDER BY cp.seq
             LIMIT 1`,
           [sheetId, tabName, orderSubmissionId,
