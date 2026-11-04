@@ -2195,7 +2195,7 @@ async function applySharedPatch(p) {
     let campaign = { applied: [] };
     if (camp && !recArchived && (plan.writes.length || rec)) {   // 결정 312: 보관 공고에는 쓰지 않는다
       campaign = await projectToCampaignInTx(client, camp, next, writtenKeys, productsTouched,
-        { prev: theirs, payTouched, urlTouched: urlTouched || !!(rec && recPlan.force.urlTouched), guideTouched, inflowUnitTouched, quantityChanged: quantityChanged || !!(rec && recPlan.force.quantity), structureTouched, structure, reviewTypeChanged: reviewTypeWritten || writtenKeys.has('review_type_mix'), actor: p.actor || p.origin });
+        { prev: theirs, payTouched, urlTouched: urlTouched || !!(rec && recPlan.force.urlTouched), guideTouched, inflowUnitTouched: inflowUnitTouched || !!(rec && recPlan.force.inflow), quantityChanged: quantityChanged || !!(rec && recPlan.force.quantity), structureTouched, structure, reviewTypeChanged: reviewTypeWritten || writtenKeys.has('review_type_mix'), actor: p.actor || p.origin });
       if (campaign.reject) {
         const { campaignSyncNotice } = require('./campaignPayAmountSync.service');
         return await _abort(client, 409, { ok: false, code: 'campaign_rejected', sync_version: curVersion,

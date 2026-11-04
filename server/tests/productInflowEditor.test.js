@@ -97,6 +97,12 @@ console.log('\n[①] 공고 창 화면 판정(vm)');
     assert.deepStrictEqual(boxes.map(b => b.dataset.effInflow), ['link', 'link']);
     assert.ok(boxes.every(b => b.btns[1].classList.has('on') && !b.btns[0].classList.has('on')), '카드 버튼이 실제 값으로 칠해진다');
   });
+  t('① 상품을 지워 남은 카드가 모두 같아지면(가이드 1 · 링크 2 → 가이드 지움) 위 버튼도 그 값으로(Codex P2)', () => {
+    const { sb, hidden, boxes } = env('guide', ['link', 'link']);
+    vm.runInContext('_rfPaintCardInflows()', sb);   // 지우기 뒤 다시 그리기(settle 없음)
+    assert.strictEqual(hidden.value, 'link');
+    assert.deepStrictEqual(boxes.map(b => b.dataset.inflow), ['', '']);
+  });
   t('① 상품이 하나뿐이면(카드 선택이 숨겨짐) 카드 값을 위로 올린다 — 보이는 값과 저장 값이 갈리지 않게', () => {
     const { sb, hidden, boxes } = env('guide', ['link']);
     vm.runInContext('_rfPaintCardInflows()', sb);
@@ -236,6 +242,46 @@ console.log('\n[④] 맞추기');
       assert.deepStrictEqual(REC.diffFields({ ...wo, ...pl.T }, camp, after).map(f => f.id), []);
     });
   }
+}
+
+{
+  // 옵션 2개인 상품 — 유입방식 칸은 상품 단위 한 칸이고, 어느 쪽을 골라도 끝까지 맞춰진다(Codex P2 재현)
+  const prods = [
+    { name: '21호 수건', url: 'https://shop.example/21', option_schema_version: 2, product_mode: 'none', guide: { text: '21호 검색', images: [] }, base: { pay: 10000, count: 4 }, options: [] },
+    { name: '세트', url: 'https://shop.example/s', option_schema_version: 2, product_mode: 'opt', base: { pay: 0, count: 0 },
+      options: [{ label: 'A', pay: 1000, count: 3, guide: { text: 'A 검색', images: [] } }, { label: 'B', pay: 1000, count: 3, guide: { text: 'B 검색', images: [] } }] },
+  ];
+  const wo = { id: 'w2', source_review_order_id: 'r2', inflow_type: 'guide', product_options_json: JSON.stringify(prods), recruit_count: 10, review_fee: 0, skip_weekends: false };
+  const p = PJ.projectOrderToCampaign(wo);
+  const camp = { id: 'c2', review_fee: 0, recruit_total: 10, skip_weekends: false, review_type: '', time_range: p.time_range, work_detail: { inflowType: 'guide' } };
+  for (const k of PJ.SCALAR_KEYS) if (!(k in camp)) camp[k] = p[k];
+  const opts = p.options.map((r, i) => {
+    const [pn, ok] = r.key.split('|');
+    return { id: i + 1, opt_key: ok || pn, product_name: pn, unit_kind: r.unit_kind, status: 'active', option_url: r.option_url, product_url: r.product_url,
+      pay_amount: r.pay_amount, recruit_total: r.recruit_total, daily_limit: r.daily_limit, review_type_mix: [], inflow_guide_html: r.inflow_guide_html,
+      inflow_guide_images: [], inflow_type: pn === '세트' ? 'link' : 'guide' };
+  });
+  const plan0 = REC.planReconcile(wo, camp, opts);
+  t('④ 옵션 2개 상품 — 유입방식 칸은 상품 단위 한 칸 · 공고 쪽으로 옮길 수 있다', () => {
+    const f = plan0.fields.filter(x => /inflow_type$/.test(x.id));
+    assert.deepStrictEqual(f.map(x => [x.id, x.label]), [['option:세트.inflow_type', '유입방식 (세트)']]);
+    assert.deepStrictEqual(f[0].campaignSide, { ok: true }, JSON.stringify(f[0].campaignSide));
+  });
+  for (const side of ['campaign', 'order']) {
+    t(`④ 옵션 2개 상품 — ${side === 'campaign' ? '공고' : '오더'} 쪽을 고르면 두 옵션이 함께 · 끝 상태 차이 0`, () => {
+      const picks = {}; for (const f of plan0.fields) if (!f.derived) picks[f.id] = side;
+      const pl = REC.planReconcile(wo, camp, opts, picks);
+      assert.ok(!pl.error, JSON.stringify(pl.error));
+      const T = JSON.parse(pl.T.product_options_json).map(x => [x.name, x.inflow_type || null]);
+      assert.deepStrictEqual(T, side === 'campaign' ? [['21호 수건', 'guide'], ['세트', 'link']] : [['21호 수건', null], ['세트', null]]);
+      const after = side === 'campaign' ? opts : opts.map(o => ({ ...o, inflow_type: '' }));
+      assert.deepStrictEqual(REC.diffFields({ ...wo, ...pl.T }, camp, after).map(f => f.id), []);
+    });
+  }
+  t('④ 오더 쪽 고정 칸이면 공고 줄 유입방식을 다시 투영한다(force.inflow 배선)', () => {
+    assert.ok(/inflow: forced\.some\(f => f\.leaf === 'inflow_type'\),/.test(R('src/services/sharedReconcile.service.js')));
+    assert.ok(/inflowUnitTouched: inflowUnitTouched \|\| !!\(rec && recPlan\.force\.inflow\),/.test(R('src/services/sharedPatch.service.js')));
+  });
 }
 
 // ── ⑤ 표시 ──

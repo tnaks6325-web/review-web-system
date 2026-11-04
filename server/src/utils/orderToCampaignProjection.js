@@ -166,7 +166,8 @@ function compareOrderCampaign(order, campaign, optionRows) {
   // 결정 333 — 줄 유입방식은 한쪽이라도 줄 값이 있을 때만, 빈 값도 뜻이 있다(= 전체 값을 따름 · 채우기로 접지 않는다)
   const pushInflow = (oa, ob) => {
     if ((oa.inflow_explicit || ob.inflow_explicit) && oa.inflow_type !== ob.inflow_type) {
-      out.push({ field: `option:${oa.name}.inflow_type`, kind: 'diff', order: oa.inflow_type, campaign: ob.inflow_type });
+      // ★ 칸 이름은 **상품** 단위 — 유입방식은 상품마다 하나라 옵션마다 따로 고르면 맞출 수 없다(Codex P2 · 같은 상품의 옵션 줄은 한 칸으로 묶인다)
+      out.push({ field: `option:${oa.key.split('|')[0]}.inflow_type`, kind: 'diff', order: oa.inflow_type, campaign: ob.inflow_type });
     }
   };
   if (b.options.length && a.options.length) {

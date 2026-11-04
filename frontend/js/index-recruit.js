@@ -2676,7 +2676,8 @@ function _rfInflowPlan() {
 function _rfPaintCardInflows(opts) {
   const boxes = Array.from(document.querySelectorAll("#rf_opt_rows .rf-gp"));
   // 상품이 하나뿐이면 카드 선택은 숨겨져 있다 — 그 값은 위 버튼으로 올린다(보이는 값과 저장되는 값이 갈리지 않게)
-  if ((opts && opts.settle) || boxes.length <= 1) {
+  // 상품을 지워 남은 카드가 모두 같아진 경우도 위 버튼으로 올린다 — 위 버튼이 저장될 값과 다르게 보이지 않게(Codex P2)
+  if ((opts && opts.settle) || boxes.length <= 1 || boxes.some(b => _rfUnitInflow(b.dataset.inflow))) {
     const plan = _rfInflowPlan();
     if (!plan.mixed && boxes.length) {
       const hidden = document.getElementById("rf_inflow_type_value");

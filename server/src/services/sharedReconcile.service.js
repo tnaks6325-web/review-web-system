@@ -181,7 +181,7 @@ function _mixedBody({ from, to, pairs, S, fromIsOrder, hasRows }) {
     if (L('review_type_mix')) row.reviewTypeMix = _mixArr(t.review_type_mix);
     if (L('guide')) { row.inflowGuideHtml = t.inflow_guide_html; row.inflowGuideImages = t._images || []; }
     if (L('status')) row.status = t.status;
-    if (L('inflow_type')) row.inflowType = t.inflow_type || '';
+    if (pick(`option:${String((pr.o || pr.c).key || '').split('|')[0]}.inflow_type`)) row.inflowType = t.inflow_type || '';   // 상품 단위 칸 — 같은 상품의 옵션 줄이 함께 바뀐다
     if (L('option_url')) row.optionUrl = t.option_url;
     if (L('product_url')) row.productUrl = t.product_url;
     if (L('name') && f.key !== t.key) {
@@ -339,10 +339,11 @@ function planReconcile(wo, camp, opts, picks = null) {
   // 공고 쪽으로 못 옮긴 칸(오더 쪽 고정)은 P 에 오더 값이 남아 ② 에 차이가 없다 → 공고 반영을 강제로 건다
   const forced = fields.filter(f => picks[f.id] === 'order' && !allCamp.has(f.id) && !f.derived);
   const force = { urlTouched: forced.some(f => URL_LEAVES.has(f.leaf)) || forced.some(f => f.key === 'landing_url'), keys: [],
+    inflow: forced.some(f => f.leaf === 'inflow_type'),   // 결정 333 — 오더 쪽 고정 칸이면 공고 줄 유입방식을 오더 값으로 다시 투영한다
     quantity: derivedIds.length > 0 };   // 줄 있는 공고의 총모집·일건수가 줄 합과 어긋남 — 오더(줄 합)로 공고를 다시 맞춘다(검토 2026-10-21)
   const KEYMAP = { review_fee: 'review_fee', time_range: 'purchase_time', thumbnail_url: 'thumbnail_url', channel: 'purchase_channel', skip_weekends: 'skip_weekends', delivery_type: 'delivery_type', landing_url: 'product_url', required_delivery_memo: 'required_delivery_memo' };
   for (const f of forced) if (f.group === 'scalar' && KEYMAP[f.key]) force.keys.push(KEYMAP[f.key]);
-  const forcedUnknown = forced.filter(f => !(f.group === 'option' && URL_LEAVES.has(f.leaf)) && !(f.group === 'scalar' && KEYMAP[f.key]));
+  const forcedUnknown = forced.filter(f => !(f.group === 'option' && (URL_LEAVES.has(f.leaf) || f.leaf === 'inflow_type')) && !(f.group === 'scalar' && KEYMAP[f.key]));
   if (forcedUnknown.length) return { ...base, hasRows, error: { code: 'reconcile_unmappable', labels: forcedUnknown.map(f => `${f.label} — ${f.campaignSide.reason}`) } };
   return { ...base, hasRows, derivedIds, P, T, Tmine, force, O };
 }
