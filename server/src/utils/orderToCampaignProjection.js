@@ -13,6 +13,7 @@
 const { _woCampaignPrefill } = require('./woCampaignPrefill.generated');
 const { CANON } = require('./sharedFields');
 const { canonGuide, imageKey } = require('./guideCanon');
+const { unitInflowType, effectiveInflow } = require('./unitInflow');
 
 function _jsonArr(v) {
   if (v == null || v === '') return [];
@@ -26,7 +27,7 @@ const _memo = (v) => require('../services/requiredDeliveryMemo.service').normali
 function _mix(v) { return CANON.reviewTypeMix(v); }
 
 
-function _optionShape(r) {
+function _optionShape(r, summaryInflow = '') {
   const unitKind = _s(r.unitKind) || 'option';
   // ★ 6단계·D4: 선택지 가이드는 글자 모양이 아니라 {글·사진 자리, 사진(파일 id)} 로 비교한다 — 서버 투영(주소 줄 자리 <img> + 사진 목록)과
   //   공고 창 저장(자리 <img> + 끝에 <img> + 사진 목록)은 리뷰어에게 똑같이 보인다(`utils/guideCanon`). 글은 자리 표시가 든 비교용 글(view).
@@ -49,6 +50,10 @@ function _optionShape(r) {
     inflow_guide_images: g.images.map(imageKey).join(','),
     // 7단계-④ — 마감(참여자가 있어 지우지 않고 닫은 선택지). 오더는 그 줄에 closed:true, 공고는 status='closed'.
     status: r.closed === true || String(r.status || '') === 'closed' ? 'closed' : 'active',
+    // ★ 결정 333 — 그 줄이 실제로 쓰는 유입방식(줄 값 → 없으면 오더·공고 전체 값). 비교는 한쪽이라도 줄 값이 있을 때만(`inflow_explicit`)
+    //   — 전체 값만 다른 기존 작업이 줄마다 "다름" 으로 쏟아지지 않게(전체 값 차이는 이 비교의 대상이 아니다 · 종전 그대로).
+    inflow_type: effectiveInflow(r.inflowType, summaryInflow),
+    inflow_explicit: !!unitInflowType(r.inflowType),
   };
 }
 
@@ -94,7 +99,7 @@ function projectOrderToCampaign(order) {
     landing_url: _s(p.landing_url),
     options: (() => {
       const closed = unitClosedFlags(order && order.product_options_json);
-      return (p.options || []).map((o, i) => _optionShape({ ...o, closed: closed[i] === true }));
+      return (p.options || []).map((o, i) => _optionShape({ ...o, closed: closed[i] === true }, p.inflowType));
     })(),
   };
 }
@@ -103,6 +108,9 @@ function projectOrderToCampaign(order) {
 function readCampaignShared(c, optionRows) {
   const camp = c || {};
   const channel = _s(camp.channel) === '직접입력' ? _s(camp.channel_custom) : _s(camp.channel);
+  let wd = camp.work_detail;
+  if (typeof wd === 'string') { try { wd = JSON.parse(wd); } catch (_) { wd = null; } }
+  const summaryInflow = wd && typeof wd === 'object' ? wd.inflowType : '';
   return {
     time_range: CANON.time(camp.time_range),
     review_fee: CANON.int(camp.review_fee),
@@ -126,7 +134,8 @@ function readCampaignShared(c, optionRows) {
         productName: o.product_name, optKey: o.opt_key, unitKind: o.unit_kind, optionUrl: o.option_url, productUrl: o.product_url,
         payAmount: o.pay_amount, recruitTotal: o.recruit_total, dailyLimit: o.daily_limit,
         reviewTypeMix: o.review_type_mix, inflowGuideHtml: o.inflow_guide_html, inflowGuideImages: o.inflow_guide_images, status: o.status,
-      })),
+        inflowType: o.inflow_type,
+      }, summaryInflow)),
   };
 }
 
@@ -154,6 +163,13 @@ function compareOrderCampaign(order, campaign, optionRows) {
     out.push({ field, kind: (!x && y && !EMPTY_IS_VALUE.has(field)) ? 'fill' : 'diff', order: x, campaign: y });
   };
   for (const k of SCALAR_KEYS) push(k, a[k], b[k]);
+  // 결정 333 — 줄 유입방식은 한쪽이라도 줄 값이 있을 때만, 빈 값도 뜻이 있다(= 전체 값을 따름 · 채우기로 접지 않는다)
+  const pushInflow = (oa, ob) => {
+    if ((oa.inflow_explicit || ob.inflow_explicit) && oa.inflow_type !== ob.inflow_type) {
+      // ★ 칸 이름은 **상품** 단위 — 유입방식은 상품마다 하나라 옵션마다 따로 고르면 맞출 수 없다(Codex P2 · 같은 상품의 옵션 줄은 한 칸으로 묶인다)
+      out.push({ field: `option:${oa.key.split('|')[0]}.inflow_type`, kind: 'diff', order: oa.inflow_type, campaign: ob.inflow_type });
+    }
+  };
   if (b.options.length && a.options.length) {
     const byKey = new Map(b.options.map(o => [o.key, o]));
     const unmatchedA = [];
@@ -163,6 +179,7 @@ function compareOrderCampaign(order, campaign, optionRows) {
       byKey.delete(oa.key);
       for (const k of OPTION_KEYS) push(`option:${oa.name}.${k}`, oa[k], ob[k]);
       for (const k of OPTION_KEYS_IF_CAMPAIGN) if (ob[k]) push(`option:${oa.name}.${k}`, oa[k], ob[k]);
+      pushInflow(oa, ob);
     }
     const unmatchedB = [...byKey.values()];
     // ★ 이름이 바뀐 줄 — 남은 줄 수가 같으면 순서대로 짝짓고 "이름이 다름" 한 칸으로 센다
@@ -173,6 +190,7 @@ function compareOrderCampaign(order, campaign, optionRows) {
         push(`option:${oa.name}.name`, oa.name, ob.name);
         for (const k of OPTION_KEYS) push(`option:${oa.name}.${k}`, oa[k], ob[k]);
         for (const k of OPTION_KEYS_IF_CAMPAIGN) if (ob[k]) push(`option:${oa.name}.${k}`, oa[k], ob[k]);
+        pushInflow(oa, ob);
       });
     } else {
       for (const oa of unmatchedA) out.push({ field: `option:${oa.name}`, kind: 'diff', order: 'present', campaign: 'missing' });

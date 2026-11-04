@@ -168,6 +168,7 @@ function stand(rows, opts) {
   vm.createContext(sandbox);
   ['RF_REVIEW_MIX_TYPES', 'RF_MIX_LABEL'].forEach(c => vm.runInContext(grabConst(recruitSrc, c), sandbox));
   ['_prodMode', '_rfGroupUnit', '_rfRowProductName', '_optUnitEntries', 'readOptRows', '_rfRowProductUrl',
+   '_rfUnitInflow', '_rfTopInflow', '_rfInflowPlan', '_rfPaintCardInflows',   // 결정 333 — 상품 카드 유입방식
    '_readOptionReviewMix', '_writeOptionReviewMix', '_mixQuantity', '_mixVerdict',
    '_reviewMixRows', '_reviewMixKey', 'getRecruitOptionReviewTypeMix', '_isOptionReviewMix',
    '_mxBuild', '_mxAuto', '_mxMark', '_mxMarkAll', 'validateRecruitReviewTypeMix',

@@ -1197,12 +1197,15 @@
 #recruitModal #rf_opt_rows .rf-unit:last-child:not(.ug-on)>.rf-ug-cta{border-radius:0 0 8px 8px}
 /* 상품 그룹 머리 = 상품명 · 옵션 유무 · 총인원 · 삭제(4칸 — 종전 3칸이면 삭제가 칸 밖으로 나간다) */
 #recruitModal .rf-gp-head{grid-template-columns:minmax(0,1fr) auto .62fr 26px}
-#recruitModal .rf-gp-unit{display:inline-flex;flex:none}
-#recruitModal .rf-gp-unit button{min-height:24px;padding:4px 8px;border:1px solid #D5DEE9;background:#fff;color:#5D6B80;
+#recruitModal .rf-gp-unit,#recruitModal .rf-gp-inflow{display:inline-flex;flex:none}
+#recruitModal .rf-gp-unit button,#recruitModal .rf-gp-inflow button{min-height:24px;padding:4px 8px;border:1px solid #D5DEE9;background:#fff;color:#5D6B80;
   font:inherit;font-size:.64rem;font-weight:800;line-height:1;cursor:pointer}
-#recruitModal .rf-gp-unit button:first-child{border-radius:5px 0 0 5px}
-#recruitModal .rf-gp-unit button:last-child{border-radius:0 5px 5px 0;border-left:0}
-#recruitModal .rf-gp-unit button.on{border-color:#B9D2FB;background:#EDF4FF;color:#2563C8}
+#recruitModal .rf-gp-unit button:first-child,#recruitModal .rf-gp-inflow button:first-child{border-radius:5px 0 0 5px}
+#recruitModal .rf-gp-unit button:last-child,#recruitModal .rf-gp-inflow button:last-child{border-radius:0 5px 5px 0;border-left:0}
+#recruitModal .rf-gp-unit button.on,#recruitModal .rf-gp-inflow button.on{border-color:#B9D2FB;background:#EDF4FF;color:#2563C8}
+/* 결정 333 — 상품마다 유입방식. 상품이 하나뿐이면 위 「유입 방식」 하나로 충분해 카드 선택은 숨긴다 */
+#recruitModal #rf_opt_wrap.rf-cards:not(.rf-multi) .rf-gp-inflow{display:none}
+#recruitModal .rf-inflow-mixed{margin:4px 0 8px;padding:5px 7px;border-radius:6px;font-size:10px;font-weight:800;line-height:1.5;background:#FFF7ED;color:#9A3412;border:1px solid #FED7AA}
 /* 옵션 없는 상품 그룹: 옵션명 칸은 쓰지 않는다. ★ 칸을 **없애지 않고 잠근다** —
    머리줄은 그룹마다가 아니라 표 위에 한 줄뿐이라, 칸을 지우면 그 그룹만 열이 어긋난다. */
 #recruitModal .rf-gp-noopt .rf-opt-name{pointer-events:none;opacity:.45;background:#F4F6FA}
@@ -1308,7 +1311,7 @@
 #recruitModal #rf_opt_wrap.rf-cards .rf-unit>.rf-ug-cta{display:none}
 #recruitModal #rf_opt_wrap.rf-cards .rf-unit>.rf-ug{display:block;margin:0 10px 10px;padding:9px 10px 10px;border:1px solid #E3E9F1;border-radius:8px;background:#fff}
 #recruitModal #rf_opt_wrap.rf-cards .rf-gp-noopt .rf-unit>.rf-ug{margin:0 0 10px}
-#recruitModal #rf_opt_wrap.rf-cards[data-inflow="link"] .rf-unit:not(.ug-has)>.rf-ug{display:none}
+#recruitModal #rf_opt_wrap.rf-cards .rf-gp[data-eff-inflow="link"] .rf-unit:not(.ug-has)>.rf-ug{display:none}
 #recruitModal #rf_opt_wrap.rf-cards .rf-ug-h{display:flex;align-items:center;justify-content:space-between;margin:0 0 8px;font-size:.72rem;font-weight:850;color:#3E4D64}
 #recruitModal #rf_opt_wrap.rf-cards .rf-ug-badge{padding:2px 8px;border-radius:999px;background:#EEF2F7;color:#7A879A;font-size:.62rem;font-weight:800}
 #recruitModal #rf_opt_wrap.rf-cards .rf-unit.ug-has .rf-ug-badge{background:#E8F1FF;color:#2769DF}

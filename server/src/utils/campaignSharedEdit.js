@@ -18,6 +18,7 @@ const { _woCampaignPrefill, _woStripReviewMeta, _woPickSections } = require('./w
 const { sanitizeGuideImages } = require('./sanitizeGuideHtml');
 const { parsePurchaseTime } = require('./purchaseTimeWindow');
 const { CANON } = require('./sharedFields');
+const { unitInflowType, effectiveInflow, orderInflowMixed } = require('./unitInflow');
 
 const KNOWN_CHANNELS = new Set(['쿠팡', '네이버', '올리브영', '카카오메이커스']);
 const GUIDE_LABELS = ['리뷰등록 가이드', '리뷰가이드', '리뷰 가이드'];
@@ -694,7 +695,7 @@ function applyStructurePlan(ed, st) {
     const mix = _mixArray(o.reviewTypeMix ?? o.review_type_mix);
     const url = String(o.optionUrl ?? o.option_url ?? '').trim();
     const g = canonGuide(o.inflowGuideHtml ?? o.inflow_guide_html ?? '', o.inflowGuideImages ?? o.inflow_guide_images ?? []);
-    const guide = st.guideInflow && (g.text || g.images.length) ? { guide: { text: g.text, images: g.images } } : {};
+    const guide = _rowInflow(o, null, st.guideInflow) === 'guide' && (g.text || g.images.length) ? { guide: { text: g.text, images: g.images } } : {};   // 결정 333 — 줄이 실제로 쓰는 유입방식
     if (unit === 'product') {
       const sw = list.find(p => switching.has(p) && nameOf(p) === (pName || optKey) && p.product_mode === 'none');
       if (sw) { sw.base = { ...sw.base, pay, count, daily, review_type_mix: mix }; _setDaily(sw.base, daily); if (guide.guide) sw.guide = guide.guide; continue; }
@@ -817,8 +818,9 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
         continue;
       }
       const src = srcs[k];
-      // ── 6단계: 선택지 유입가이드(가이드유입 공고만 — 링크유입 공고의 가이드는 오더가 싣지 않는 공고 전용 값) ──
-      if (guideInflow && (o.inflowGuideHtml !== undefined || o.inflowGuideImages !== undefined)) {
+      // ── 6단계: 선택지 유입가이드(가이드유입 줄만 — 링크유입 줄의 가이드는 오더가 싣지 않는 공고 전용 값) ──
+      //   ★ 결정 333 — 판정은 그 줄이 실제로 쓰는 유입방식(줄 값 → 없으면 그 상품의 오더 값 → 공고 전체 값)
+      if (_rowInflow(o, products && src ? products[src.i] : null, guideInflow) === 'guide' && (o.inflowGuideHtml !== undefined || o.inflowGuideImages !== undefined)) {
         const dbRow = liveCampOpts.find(r => String(r.opt_key || '') === String(o.optKey ?? o.opt_key ?? '').trim());
         const gEdit = _planGuideEdit({ products, src, srcCount: srcs.length, rowCount: baseRows.length, o, name: baseRows[k].name, baseRow: baseRows[k], dbRow });
         if (gEdit.unmappable) unmappable.push({ key, ...gEdit.unmappable });
@@ -965,8 +967,87 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
       unmappable.push({ key: 'daily_limit', label: `일 진행 건수 — 상품·옵션 일건수 합계(${r.daily})가 일 진행 건수(${int(b.daily_limit)})가 되도록 맞춰 주세요`, want: CANON.int(b.daily_limit), got: String(r.daily) });
     }
   }
+  // ⑨ 결정 333 — 상품마다 유입방식(공고 창 상품 카드 → 오더 상품 `inflow_type`). 줄에 유입방식을 실은 화면만(옛 화면 = 손대지 않음).
+  const rowsCarryInflow = Array.isArray(b.options) && b.options.some(o => o && typeof o === 'object' && (o.inflowType !== undefined || o.inflow_type !== undefined));
+  if (!rowsCarryInflow && wdIn !== base.inflow_type && unitInflowType(wdIn) !== (unitInflowType(base.inflow_type) || 'link')
+      && orderInflowMixed(base.product_options_json, base.inflow_type)) {
+    // 옛 공고 창이 상품마다 다른 오더의 전체 유입방식을 바꿈 — 상품별 값은 그 창이 모르므로 반만 바뀐다(검토 지적) → 새로고침을 받는다
+    unmappable.push({ key: 'inflow', label: '유입방식 — 상품마다 유입방식이 다른 공고입니다. 창을 새로고침한 뒤 상품 카드에서 바꿔 주세요', want: String(wdIn || ''), got: String(base.inflow_type || '') });
+  }
+  if (rowsCarryInflow) {
+    const inf = _planUnitInflowEdit({ base, products, list: edited || products, body: b, wdIn });
+    unmappable.push(...inf.unmappable);
+    if (inf.list) { edited = inf.list; changed.push('유입방식(상품별)'); }
+    if (inf.summary) mine.inflow_type = inf.summary;
+  }
   if (edited && !unmappable.length) mine.product_options_json = JSON.stringify(edited);
   return { mine, changed, unmappable, keepProductLines };
+}
+
+/** 그 줄이 실제로 쓰는 유입방식 — 화면이 보낸 줄 값(빈 값 = 공고 전체 값) · 안 보냈으면(옛 화면) 그 상품의 오더 값 · 공고 전체 값. */
+function _rowInflow(o, product, guideInflow) {
+  const top = guideInflow ? 'guide' : 'link';
+  const sent = o && (o.inflowType !== undefined ? o.inflowType : o.inflow_type);
+  if (sent !== undefined) return unitInflowType(sent) || top;
+  return effectiveInflow(product && product.inflow_type, top);
+}
+
+/**
+ * ⑨ 결정 333 — 공고 창 줄 유입방식 → 오더 상품 `inflow_type`.
+ * ★ 오더 계약 그대로: **상품 단위**(같은 상품의 줄은 같은 값) · **상품마다 다를 때만** 키를 싣고(섞이면 오더 전체 값 = 'guide'),
+ *   다 같아지면 키를 지우고 오더 전체 값을 그 값으로. 'mixed' 같은 새 값은 만들지 않는다(unitInflow 머리 주석).
+ * ★ 담을 수 없으면(오더에 상품 구성이 없음 · 상품을 못 찾음 · 한 상품의 줄끼리 다름) 추측하지 않고 unmappable — 섞인 화면이 조용히 하나로 접히면
+ *   링크 상품 리뷰어가 남의 검색 경로를 따른다.
+ * @returns {{ list: object[]|null, summary: string, unmappable: object[] }} list = 바뀐 상품 구성(없으면 null) · summary = 바꿀 오더 전체 값('' = 그대로)
+ */
+function _planUnitInflowEdit({ base, products, list, body, wdIn }) {
+  const unmappable = [];
+  const top = unitInflowType(wdIn) || unitInflowType(base.inflow_type) || 'link';
+  const clean = v => String(v == null ? '' : v).replace(/\|/g, '').trim();
+  const want = new Map();   // 상품 이름 → 화면이 고른 유입방식(실제 값)
+  for (const o of body.options) {
+    if (!o || typeof o !== 'object' || String(o.status || '') === 'deleted') continue;
+    const sent = o.inflowType !== undefined ? o.inflowType : o.inflow_type;
+    if (sent === undefined) continue;
+    const unitP = String(o.unitKind ?? o.unit_kind ?? '') === 'product';
+    const name = clean(o.productName ?? o.product_name) || (unitP ? clean(o.optKey ?? o.opt_key) : '');
+    if (!name) continue;
+    const t = unitInflowType(sent) || top;
+    if (want.has(name) && want.get(name) !== t) {
+      unmappable.push({ key: `inflow:${name}`, label: `유입방식(${name}) — 같은 상품의 옵션끼리 유입방식이 다릅니다(유입방식은 상품마다 하나)`, want: t, got: want.get(name) });
+    } else want.set(name, t);
+  }
+  const kindsWanted = new Set(want.values());
+  if (!Array.isArray(list) || !list.length) {
+    if (kindsWanted.size > 1) unmappable.push({ key: 'inflow', label: '유입방식(상품별) — 리뷰오더에 상품 구성이 없어 상품마다 다른 유입방식을 담을 수 없습니다', want: [...kindsWanted].join(','), got: '' });
+    const one = kindsWanted.size === 1 ? [...kindsWanted][0] : '';
+    return { list: null, summary: one && _summaryWrite(one, base, wdIn) ? one : '', unmappable };
+  }
+  const names = new Set(list.map(p => clean(p && p.name)));
+  for (const n of want.keys()) {
+    if (!names.has(n) && kindsWanted.size > 1) unmappable.push({ key: `inflow:${n}`, label: `유입방식(${n}) — 리뷰오더에서 이 상품을 찾지 못했습니다`, want: want.get(n), got: '' });
+  }
+  const eff = list.map(p => (p && typeof p === 'object' && !Array.isArray(p))
+    ? (want.get(clean(p.name)) || effectiveInflow(p.inflow_type, top)) : '');
+  const kinds = new Set(eff.filter(Boolean));
+  const mixed = kinds.size > 1;
+  const summary = mixed ? 'guide' : (kinds.size ? [...kinds][0] : top);
+  let touched = false;
+  const out = list.map((p, i) => {
+    if (!p || typeof p !== 'object' || Array.isArray(p)) return p;
+    const next = mixed ? eff[i] : '';
+    if (unitInflowType(p.inflow_type) === next && (next || !Object.prototype.hasOwnProperty.call(p, 'inflow_type'))) return p;
+    touched = true;
+    const q = { ...p };
+    if (next) q.inflow_type = next; else delete q.inflow_type;
+    return q;
+  });
+  return { list: touched ? out : null, summary: _summaryWrite(summary, base, wdIn) ? summary : '', unmappable };
+}
+
+/** 오더 전체 값을 실어야 하나 — 지금 오더 값과 다르거나, 화면이 보낸 전체 값과 다를 때(글 칸 계획이 실은 값을 상품별 결과로 덮는다 · 섞이면 'guide'). */
+function _summaryWrite(summary, base, wdIn) {
+  return summary !== (unitInflowType(base.inflow_type) || 'link') || (unitInflowType(wdIn) || 'link') !== summary;
 }
 
 /** 옛 화면(기준 버전 없음)의 금액 판정 — 지금 공고 값과 다른 금액 칸 이름(있으면 저장 거부). */
