@@ -114,7 +114,14 @@ function _filledRowSql(alias) {
   return `(${filledSql(alias)} OR ${alias}.is_submitted OR ${alias}.is_paid)`;
 }
 
-async function _untouchedReasons(q, sheetId, tabName) {
+/**
+ * @param {object} [opts]  체험단 종류 변경(결정 332)만 쓰는 예외 — 기본값이면 종전 판정 그대로.
+ * @param {string} [opts.selfOrderId]        이 오더 자신의 연결은 「살아 있는 오더」로 치지 않는다(종류를 바꾸려는 그 오더다)
+ * @param {boolean} [opts.allowDraftCampaign] 게시한 적 없는 임시저장 공고(status='draft' · published_at 없음)는 「살아 있는 공고」로 치지 않는다
+ */
+async function _untouchedReasons(q, sheetId, tabName, opts = {}) {
+  const selfOrderId = String((opts && opts.selfOrderId) || '');
+  const allowDraft = !!(opts && opts.allowDraftCampaign);
   const reasons = [];
   const { rows: tc } = await q(`SELECT COALESCE(sheetless, FALSE) AS sl FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2`, [sheetId, tabName]);
   if (!tc.length) reasons.push('not_registered');
@@ -137,18 +144,23 @@ async function _untouchedReasons(q, sheetId, tabName) {
     `SELECT EXISTS (SELECT 1 FROM recruit_campaigns WHERE linked_sheet_id=$1 AND COALESCE(linked_tab_name,'') = '') AS x`, [sheetId]);
   if (amb[0] && amb[0].x) reasons.push('ambiguous_campaign');
   const { rows: rc } = await q(
-    `SELECT COUNT(*) FILTER (WHERE rc.archived_at IS NULL) AS live,
+    /* ★ 종류 변경(결정 332 · Codex PR #1758): 「게시한 적 있나」로 본다 — 게시했다가 보관한 공고도 막는다(보관 여부 무관).
+         그 밖의 정리는 종전대로 「보관 안 된 공고」. */
+    `SELECT COUNT(*) FILTER (WHERE CASE WHEN $3::boolean
+                                        THEN NOT (COALESCE(rc.status, '') = 'draft' AND rc.published_at IS NULL)
+                                        ELSE rc.archived_at IS NULL END) AS live,
             COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM campaign_applications a WHERE a.campaign_id = rc.id)
                               OR EXISTS (SELECT 1 FROM order_submissions o WHERE o.sheet_id = 'campaign:' || rc.id)) AS used
        FROM recruit_campaigns rc
-      WHERE rc.linked_sheet_id=$1 AND COALESCE(NULLIF(rc.linked_tab_name,''), $2)=$2`, [sheetId, tabName]);
+      WHERE rc.linked_sheet_id=$1 AND COALESCE(NULLIF(rc.linked_tab_name,''), $2)=$2`, [sheetId, tabName, allowDraft]);
   if (rc[0] && Number(rc[0].live) > 0) reasons.push('live_campaign');
   if (rc[0] && Number(rc[0].used) > 0) reasons.push('campaign_used');
   // 이 작업을 가리키는 살아 있는 작업오더가 있으면(다른 오더가 이어 쓰는 중) 지우지 않는다
   const { rows: wo } = await q(
-    `SELECT EXISTS (SELECT 1 FROM work_orders w WHERE w.deleted_at IS NULL AND w.linked_tab_sheet_id=$1 AND w.linked_tab_name=$2)
+    `SELECT EXISTS (SELECT 1 FROM work_orders w WHERE w.deleted_at IS NULL AND w.linked_tab_sheet_id=$1 AND w.linked_tab_name=$2
+                     AND w.id <> $3)
          OR EXISTS (SELECT 1 FROM trackb_work_order_links l JOIN work_orders w ON w.id = l.work_order_id AND w.deleted_at IS NULL
-                     WHERE l.sheet_id=$1 AND l.tab_name=$2 AND l.deleted_at IS NULL) AS x`, [sheetId, tabName]);
+                     WHERE l.sheet_id=$1 AND l.tab_name=$2 AND l.deleted_at IS NULL AND w.id <> $3) AS x`, [sheetId, tabName, selfOrderId]);
   if (wo[0] && wo[0].x) reasons.push('live_work_order');
   return reasons;
 }
@@ -381,7 +393,12 @@ async function previewTaskDelete({ sheetId, tabName, pool } = {}) {
  * 실행 — 한 트랜잭션. 확인(`confirm===true`) 없이는 아무것도 지우지 않는다.
  */
 async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, deleteDrive = false, by = 'admin', pool,
-  onlyIfUntouched = false, notifyIntranet = true } = {}) {
+  onlyIfUntouched = false, notifyIntranet = true, untouched = null, beforeCommit = null } = {}) {
+  /* ★ 체험단 종류 변경(결정 332) 전용 — `untouched` = _untouchedReasons 예외(자기 오더·임시저장 공고), `beforeCommit(client)` = 같은 트랜잭션에서
+       오더를 접수 대기로 되돌린다({ok:false} 면 통째로 되돌림). 둘 다 `onlyIfUntouched` 와 함께만 쓴다(사람 확인 없는 경로라 판정·결과 검증을 그대로 탄다). */
+  if ((untouched || beforeCommit) && onlyIfUntouched !== true) throw new Error('deleteTask: untouched/beforeCommit 은 onlyIfUntouched 와 함께만');
+  const uopt = untouched || {};
+  const selfOrderId = String(uopt.selfOrderId || '');
   _args(sheetId, tabName);
   if (confirm !== true) return { ok: false, code: 'confirm_required', error: '삭제 확인이 필요합니다.' };
 
@@ -410,7 +427,7 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, del
     /* ★★ 결정 254: 자동 정리(사람의 미리보기 없음)는 **잠근 뒤 같은 트랜잭션 안에서** "손대지 않은 빈 작업"인지 다시 본다 —
          하나라도 걸리면 쓰기 0건으로 돌려준다(주문·편집·공고 참여가 그사이 들어와도 지우지 않는다). */
     if (onlyIfUntouched === true) {
-      const reasons = await _untouchedReasons((t, p) => client.query(t, p), sheetId, tabName);
+      const reasons = await _untouchedReasons((t, p) => client.query(t, p), sheetId, tabName, uopt);
       if (reasons.length) {
         await client.query('ROLLBACK');
         return { ok: false, code: 'not_untouched', reasons };
@@ -544,8 +561,8 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, del
               tab_deleted_at=NOW(), tab_deleted_by=$3, tab_deleted_tab=$2, updated_at=NOW()
         WHERE linked_tab_sheet_id=$1 AND linked_tab_name=$2
         RETURNING id, title, status, created_by, (deleted_at IS NULL) AS live`, [sheetId, tabName, String(by || '')]);
-    // ★ 결정 254: 자동 정리인데 살아 있는 오더가 그사이 이 작업에 연결됐으면 되돌린다(결과 검증)
-    if (onlyIfUntouched === true && (wo.rows || []).some(x => x && x.live)) {
+    // ★ 결정 254: 자동 정리인데 살아 있는 오더가 그사이 이 작업에 연결됐으면 되돌린다(결과 검증) — 종류 변경은 자기 오더만 예외(결정 332)
+    if (onlyIfUntouched === true && (wo.rows || []).some(x => x && x.live && String(x.id) !== selfOrderId)) {
       await client.query('ROLLBACK');
       return { ok: false, code: 'not_untouched', reasons: ['live_work_order'], raced: true };
     }
@@ -558,10 +575,11 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, del
     const rc = await client.query(
       `DELETE FROM recruit_campaigns
         WHERE linked_sheet_id=$1 AND COALESCE(NULLIF(linked_tab_name,''), $2)=$2
-        RETURNING (archived_at IS NULL) AS live`,
+        RETURNING (COALESCE(status, '') = 'draft' AND published_at IS NULL) AS draft, (archived_at IS NULL) AS live`,
       [sheetId, tabName]);
-    // ★ 결정 254: 자동 정리인데 보관 안 된 공고가 그사이 생겼으면 되돌린다(결과 검증)
-    if (onlyIfUntouched === true && (rc.rows || []).some(x => x && x.live)) {
+    // ★ 결정 254: 자동 정리인데 보관 안 된 공고가 그사이 생겼으면 되돌린다(결과 검증) — 종류 변경은 게시한 적 없는 임시저장만 예외(결정 332)
+    //   ★ 종류 변경은 보관 여부가 아니라 게시 이력으로 본다(게시했다가 보관한 공고도 되돌림 · Codex PR #1758)
+    if (onlyIfUntouched === true && (rc.rows || []).some(x => x && (uopt.allowDraftCampaign ? !x.draft : x.live))) {
       await client.query('ROLLBACK');
       return { ok: false, code: 'not_untouched', reasons: ['live_campaign'], raced: true };
     }
@@ -580,6 +598,14 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, del
           AND NOT EXISTS (SELECT 1 FROM tab_configs tc WHERE tc.sheet_id=$1)
           AND NOT EXISTS (SELECT 1 FROM raw_sheet_tabs r WHERE r.sheet_id=$1)
           AND NOT EXISTS (SELECT 1 FROM index_master im WHERE im.sheet_id=$1)`, [sheetId]);
+
+    if (typeof beforeCommit === 'function') {
+      const bc = await beforeCommit(client);
+      if (!bc || bc.ok !== true) {
+        await client.query('ROLLBACK');
+        return { ok: false, code: (bc && bc.code) || 'before_commit_failed', reasons: [(bc && bc.code) || 'before_commit_failed'], raced: true };
+      }
+    }
 
     await client.query('COMMIT');
     logger.info(`[workTabDelete] "${tabName}" (${sheetId}) 삭제 by ${by} — 행 ${totalRows} · 공고 삭제 ${rc.rowCount} · 오더 링크 해제 ${wo.rowCount}`
@@ -732,6 +758,20 @@ async function autoCleanupDeletedOrderTab(workOrderId, { by = 'intranet-order-de
 }
 
 // untouchedReasons = 진단용(읽기만) — 기존 작업이 자동 정리 기준에 맞는지 미리 볼 때.
-module.exports = { previewTaskDelete, deleteTask, autoCleanupDeletedOrderTab, UNTOUCHED_BLOCK_TABLES,
+/**
+ * 결정 332 — 접수된 오더의 체험단 종류를 바꿔도 되는가(읽기 전용 판정). 걸리는 이유 목록(빈 배열 = 바꿔도 된다).
+ * ★ 판정은 「손대지 않은 빈 작업」(결정 254)과 같다 — 예외는 자기 오더 연결·게시한 적 없는 임시저장 공고 둘뿐.
+ * ★ 돈 기록이 있으면 'payment'(deleteTask 가 forcePayment 없이 거부하는 것과 같은 범위).
+ * ★ 조회 실패는 호출부로 던진다(fail-closed — 호출부가 「바꿀 수 없음」으로 접는다).
+ */
+async function kindChangeReasons(q, { sheetId, tabName, selfOrderId }) {
+  const reasons = await _untouchedReasons(q, sheetId, tabName, { selfOrderId, allowDraftCampaign: true });
+  const money = await _moneyRows(q, sheetId, tabName);
+  if (money.length) reasons.push('payment');
+  return reasons;
+}
+
+module.exports = {
+  kindChangeReasons, previewTaskDelete, deleteTask, autoCleanupDeletedOrderTab, UNTOUCHED_BLOCK_TABLES,
   untouchedReasons: (db, sheetId, tabName) => _untouchedReasons((t, p) => db.query(t, p), sheetId, tabName),
   DRIVE_FOLDER_KINDS, findOrphanCampaigns, deleteOrphanCampaigns, DELETE_TABLES, MONEY_TABLES, KEEP_TABLES, __setPoolForTest };

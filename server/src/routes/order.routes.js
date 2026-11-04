@@ -834,6 +834,68 @@ function _acceptedWorkKindChanged(order, nextKindRaw) {
 const ACCEPTED_KIND_CHANGE_ERROR = '이미 접수돼 작업표가 만들어진 오더라 체험단 종류를 바꿀 수 없습니다 — 원래 종류로 되돌려 저장해 주세요.';
 
 /**
+ * ★★ 결정 332 — 접수된 오더의 체험단 종류 바꾸기(리뷰↔블로그 · 사용자 확정 2026-11-03).
+ *   작업표가 그 종류로 이미 깔려 있어 「바꾸기」는 곧 **접수 되돌리기**다 — 손대지 않은 빈 작업(결정 254 판정 그대로)이면
+ *   작업표·임시저장 공고를 지우고 오더를 「접수 대기」로 돌린 뒤, 바뀐 종류로 저장한다(리뷰웹에서 다시 접수).
+ *   ★ 리뷰↔블로그만. Q&A 는 날짜별 자리표가 있어 대상이 아니다(종전 잠금 그대로).
+ *   ★ 게시·완료·삭제된 오더는 대상이 아니다(공고가 리뷰어에게 보였다).
+ */
+const KIND_CHANGE_KINDS = new Set(['review', 'blog']);
+const KIND_CHANGE_STATUSES = new Set(['reviewing', 'revision', 'rejected', 'await_chatroom']);
+function _kindChangeShape(order) {
+  const o = order || {};
+  const { normalizeWorkKind } = require('../utils/workKind');
+  const from = normalizeWorkKind(o.work_kind);
+  const ok = !!o.linked_tab_name && !!o.linked_tab_sheet_id && !o.deleted_at
+    && KIND_CHANGE_STATUSES.has(String(o.status || '')) && KIND_CHANGE_KINDS.has(from);
+  return { ok, from };
+}
+const KIND_CHANGE_REASON_TEXT = {
+  filled_rows: '작업표에 이미 사람이 들어와 있습니다',
+  live_campaign: '공고가 이미 게시됐습니다',
+  campaign_used: '공고에 신청·참여 기록이 있습니다',
+  ambiguous_campaign: '이 작업에 연결된 공고가 여러 개입니다',
+  live_work_order: '다른 오더가 같은 작업에 연결돼 있습니다',
+  payment: '입금·정산 기록이 있습니다',
+  trackb_settlement_links: '정산 연결이 있습니다',
+  campaign_elsewhere: '연결된 공고가 다른 작업을 가리킵니다',
+  not_registered: '작업표를 찾지 못했습니다',
+  sheet_based: '구글시트로 만든 작업이라 여기서 지울 수 없습니다',
+  status: '게시·완료된 오더입니다',
+  check_failed: '확인 중 오류가 났습니다 — 잠시 뒤 다시 시도해 주세요',
+};
+function _kindChangeReasonText(reasons) {
+  const list = (Array.isArray(reasons) ? reasons : []).map(r => KIND_CHANGE_REASON_TEXT[r] || '이미 진행된 기록이 있습니다');
+  return [...new Set(list)].join(' · ');
+}
+/** 이 오더의 공고가 이 작업 바깥을 가리키는가 — 지우는 작업과 다른 곳에 묶인 공고는 손대지 않는다(fail-closed). */
+async function _kindChangeCampaignElsewhere(q, order) {
+  const { rows } = await q(
+    `SELECT 1 FROM recruit_campaigns
+      WHERE (id = NULLIF($1,'') OR NULLIF(source_work_order_id,'') = $2)
+        AND NOT (linked_sheet_id = $3 AND COALESCE(NULLIF(linked_tab_name,''), $4) = $4)
+      LIMIT 1`,
+    [String(order.linked_campaign_id || ''), String(order.id), String(order.linked_tab_sheet_id || ''), String(order.linked_tab_name || '')]);
+  return rows.length > 0;
+}
+/** 읽기 전용 판정 — 수정 창이 리뷰↔블로그 탭을 열지 정한다. 조회 실패 = 못 바꿈(fail-closed). */
+async function kindChangeVerdict(order) {
+  const shape = _kindChangeShape(order);
+  if (!order || !order.linked_tab_name) return { allowed: false, accepted: false, from: shape.from, reasons: [] };
+  if (!shape.ok) return { allowed: false, accepted: true, from: shape.from, reasons: ['status'] };
+  try {
+    const q = (t, p) => pool.query(t, p);
+    const reasons = await require('../services/workTabDelete.service').kindChangeReasons(q, {
+      sheetId: order.linked_tab_sheet_id, tabName: order.linked_tab_name, selfOrderId: order.id });
+    if (await _kindChangeCampaignElsewhere(q, order)) reasons.push('campaign_elsewhere');
+    return { allowed: reasons.length === 0, accepted: true, from: shape.from, reasons: [...new Set(reasons)] };
+  } catch (e) {
+    logger.warn(`[order/kind-change] ${order.id} 판정 실패(바꿀 수 없음으로 접음): ${e.message}`);
+    return { allowed: false, accepted: true, from: shape.from, reasons: ['check_failed'] };
+  }
+}
+
+/**
  * ★★ Q&A체험단(결정 321 · 사용자 확정 2026-11-03) — 접수로 날짜별 자리표가 만들어진 오더인가.
  *   이런 오더는 **공고를 발행하기 전이라도** 건수·상품·하루 건수·공개 문구·시작일을 바꾸지 않는다
  *   (자리표·작업표 줄이 이미 그 값으로 깔렸다). 늘리려면 일정 끝 「추가 모집」으로 한다.
@@ -1214,7 +1276,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
       `SELECT * FROM work_orders WHERE source_review_order_id = $1 LIMIT 1`,
       [sourceReviewOrderId]
     );
-    const current = currentRows[0];
+    let current = currentRows[0];
     if (!current) {
       return res.status(404).json({ ok: false, error: '수정할 원본 작업오더를 찾을 수 없습니다.' });
     }
@@ -1228,6 +1290,66 @@ async function _intakeSourceRevisionHandler(req, res, next) {
     if (!sourceWorkLineageMatches(current, source)) {
       return res.status(409).json({ ok: false, code: 'work_round_immutable', error: '기존 작업오더의 작업 계열과 차수는 수정할 수 없습니다. 차수 추가를 사용하세요.', work_order_id: current.id });
     }
+    /* ★★ 결정 332 — 접수된 리뷰↔블로그 오더의 종류 바꾸기 = 손대지 않은 빈 작업이면 접수 되돌리기.
+       작업표·임시저장 공고 삭제 + 오더를 「접수 대기」로 되돌리기를 **한 트랜잭션**으로 하고(오더 되돌리기는 번호가 그대로일 때만),
+       성공하면 오더를 다시 읽어 아래 종전 전체 저장으로 바뀐 종류를 쓴다. 걸리는 게 있으면 아무것도 지우지 않고 409.
+       ★ 번호가 정확히 +1 인 요청만 — 낡은·중복 요청이 작업표를 지우면 안 된다(아래 번호 검사보다 먼저 오므로 여기서 본다). */
+    {
+      const { normalizeWorkKind } = require('../utils/workKind');
+      const shape = _kindChangeShape(current);
+      const nextKind = normalizeWorkKind(b.work_kind);
+      if (shape.ok && nextKind !== shape.from && KIND_CHANGE_KINDS.has(nextKind)
+          && source.sourceRevision === Number(current.source_revision || 0) + 1) {
+        /* ★ 양방향 연결 오더(Codex PR #1758): 창을 연 뒤 리뷰웹에서 공유 칸(가이드 등)을 고쳤으면 그 버전이 앞서 있다.
+             아래에서 연결을 끊고 전체 저장으로 가면 공유 저장의 3방향 병합을 건너뛰어 리뷰웹 수정을 창의 옛 값으로 덮는다 —
+             기준 버전이 지금과 다르면 아무것도 지우지 않고 창을 다시 열게 한다(fail-closed). */
+        if (current.bidir_state === 'on' && (await readBidirSwitch(pool)).in2rw === 'apply') {
+          const base = b.bidir && typeof b.bidir === 'object' ? b.bidir.base_sync_version : undefined;
+          if (base === undefined || base === null || String(base).trim() === '' || Number(base) !== Number(current.sync_version || 0)) {
+            return res.status(409).json({ ok: false, code: 'kind_change_stale', blocked_fields: ['work_kind'], work_order_id: current.id,
+              sync_version: Number(current.sync_version || 0),
+              error: '수정 창을 연 뒤 리뷰웹에서 이 오더 내용이 바뀌었습니다 — 아무것도 지우지 않았습니다. 창을 닫고 다시 열어 종류를 바꿔 주세요.' });
+          }
+        }
+        const verdict = await kindChangeVerdict(current);
+        if (!verdict.allowed) {
+          return res.status(409).json({ ok: false, code: 'kind_change_blocked', blocked_fields: ['work_kind'], reasons: verdict.reasons,
+            work_order_id: current.id,
+            error: `이 오더는 체험단 종류를 바꿀 수 없습니다 — ${_kindChangeReasonText(verdict.reasons)}. 원래 종류로 되돌려 저장해 주세요.` });
+        }
+        const by = `kind-change:${String(b.requester_name || b.created_by || 'intranet').trim()}`;
+        const revisionAtRead = Number(current.source_revision || 0);
+        const out = await require('../services/workTabDelete.service').deleteTask({
+          sheetId: current.linked_tab_sheet_id, tabName: current.linked_tab_name, confirm: true,
+          onlyIfUntouched: true, notifyIntranet: false, by, pool,
+          untouched: { selfOrderId: current.id, allowDraftCampaign: true },
+          beforeCommit: async (client) => {
+            const r = await client.query(
+              `UPDATE work_orders SET status = 'submitted', linked_campaign_id = '', bidir_state = 'off', advertiser_id = '',
+                      tab_deleted_at = NULL, tab_deleted_by = NULL, tab_deleted_tab = NULL, updated_at = NOW()
+                WHERE id = $1 AND COALESCE(source_revision, 0) = $2 AND deleted_at IS NULL`,
+              [current.id, revisionAtRead]);
+            return r.rowCount === 1 ? { ok: true } : { ok: false, code: 'revision_moved' };
+          },
+        });
+        if (!out || !out.ok) {
+          const reasons = (out && out.reasons) || ['check_failed'];
+          return res.status(409).json({ ok: false, code: 'kind_change_blocked', blocked_fields: ['work_kind'], reasons,
+            work_order_id: current.id,
+            error: `체험단 종류를 바꾸지 못했습니다 — ${_kindChangeReasonText(reasons)}. 아무것도 지우지 않았습니다.` });
+        }
+        try {
+          await require('../services/intranetMemo.service').appendMemoLog(pool, current.id, {
+            memo: `[종류 변경] ${shape.from === 'blog' ? '블로그' : '리뷰'} → ${nextKind === 'blog' ? '블로그' : '리뷰'} — 빈 작업표 "${current.linked_tab_name}"`
+              + `${out.campaignsDeleted ? '·임시저장 공고' : ''}를 지우고 접수 대기로 되돌렸습니다. 다시 접수해 주세요.`,
+            by, at: new Date().toISOString(), delivered: false, error: 'intranet_origin', kind: 'kind_changed' });
+        } catch (_) { /* fail-soft — 되돌리기는 이미 끝났다 */ }
+        const { rows: reread } = await pool.query(`SELECT * FROM work_orders WHERE id = $1`, [current.id]);
+        current = reread[0] || current;
+        logger.info(`[order/kind-change] ${current.id} ${shape.from}→${nextKind} — 작업 "${out.tabName}" 삭제·접수 대기로 되돌림`);
+      }
+    }
+
     /* ★★ Q&A체험단(결정 321) — 자리표가 깔린 오더는 발행 전이라도 작업표 칸(건수·상품·하루 건수·공개 문구·시작일)을 원본에서 바꾸지 않는다.
        종전 잠금(isSourceEditLocked)은 공고 연결·광고주 연결 뒤에만 걸려, 접수만 된 Q&A 오더는 건수가 바뀌어도 자리표와 어긋난 채 저장됐다. */
     if (await _qnaCalendarLocked(current)) {
@@ -1607,6 +1729,9 @@ router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) 
       // ★ 결정 285 — keep_names: 인트라넷 이름으로 저장해도 `bidir.rw_names` 짝으로 받는다(이 표시가 없는 옛 리뷰웹에 인트라넷 이름을 보내면 지우고 더하기로 읽힌다)
       manager_edit_capable: managerCapable,
       manager_base_version: Number(rows[0].sync_version || 0),
+      // ★ 결정 332 — 접수된 리뷰↔블로그 오더의 종류를 바꿀 수 있나(손대지 않은 빈 작업일 때만 · 바꾸면 접수 대기로 되돌아간다).
+      //   옛 리뷰웹엔 이 칸이 없다 → 인트라넷은 「못 바꿈」(종전 잠금)으로 읽는다.
+      kind_change: await kindChangeVerdict(rows[0]),
       capabilities: { bidir_v1: true, keep_names: true, manager: managerCapable },
     });
   } catch (err) {

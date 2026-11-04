@@ -259,9 +259,10 @@ console.log('\n[B] 입금 기록 — 기본 거부(쓰기 0건) · 두 번째 �
     ok('★ 시트 API 를 부르지 않는다(사용자 확정 — 시트 탭 삭제는 이 기능의 일이 아니다)',
       !/sheets\.service|getSpreadsheetMeta|batchUpdate|writeSheet\(|clearSheetValues/.test(src));
     ok('★ 큐에 넣지 않는다(시트 쓰기 경로 0)', !/enqueue\(/.test(src));
-    ok('돈 집계는 한 함수(_moneyRows) — 미리보기·실행이 같은 판정',
+    // ★ 결정 332: 종류 변경 판정(kindChangeReasons)도 같은 함수를 탄다 — 호출 3곳(미리보기·실행·종류 변경) + 정의 1
+    ok('돈 집계는 한 함수(_moneyRows) — 미리보기·실행·종류 변경이 같은 판정',
       (src.match(/function _moneyRows/g) || []).length === 1
-      && (src.match(/_moneyRows\(/g) || []).length === 3);
+      && (src.match(/_moneyRows\(/g) || []).length === 4);
   }
   {
     const router = require('../src/routes/trackB.routes');
