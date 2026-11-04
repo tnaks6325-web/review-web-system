@@ -74,10 +74,26 @@ function keepUnitInflowTypes(currentJson, nextJson) {
   return moved ? JSON.stringify(out) : nextJson;
 }
 
+/**
+ * 오더의 상품들이 실제로 쓰는 유입방식이 섞였나(가이드 상품 + 링크 상품) — 작업보드 「가이드+링크유입」 표시용.
+ * ★ 오더 전체 값은 그대로 두고 표시만 따로 얹는다('mixed' 값을 만들지 않는다 — 파일 머리 주석).
+ */
+function orderInflowMixed(productOptionsJson, orderType) {
+  const list = _parse(productOptionsJson);
+  if (!list) return false;
+  const seen = new Set();
+  for (const p of list) {
+    if (!p || typeof p !== 'object' || Array.isArray(p)) continue;
+    const t = effectiveInflow(p.inflow_type, orderType);
+    if (t) seen.add(t);
+  }
+  return seen.size > 1;
+}
+
 /** 본문이 상품별 유입방식을 아는 인트라넷 창에서 왔나(`bidir.inflow` — 다른 능력 표시와 같은 모양). */
 function inflowCapable(body) {
   const bid = body && body.bidir && typeof body.bidir === 'object' && !Array.isArray(body.bidir) ? body.bidir : null;
   return !!(bid && (bid.inflow === 1 || bid.inflow === true || bid.inflow === '1'));
 }
 
-module.exports = { unitInflowType, effectiveInflow, guideMissingUnits, keepUnitInflowTypes, inflowCapable };
+module.exports = { unitInflowType, effectiveInflow, guideMissingUnits, keepUnitInflowTypes, inflowCapable, orderInflowMixed };

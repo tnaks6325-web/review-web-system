@@ -436,9 +436,12 @@
        추론하면 선택지 전용 가이드만 있는 공고를 링크유입으로 오표기한다.
        명시값이 없는 오래된 공고에만 종전 URL 폴백을 남긴다. */
     const isLinkInflow = inflowType === 'link' || (!inflowType && !!c.landing_url);
-    chips.push(isLinkInflow
-      ? '<span class="sp-chip flow">링크유입</span>'
-      : '<span class="sp-chip flow">가이드유입</span>');
+    // ★ 결정 333 — 상품마다 유입방식이 섞인 공고(관리자 목록이 inflowMixed 를 싣는다 · 없으면 종전 칩)
+    chips.push(c.inflowMixed === true
+      ? '<span class="sp-chip flow">가이드+링크유입</span>'
+      : (isLinkInflow
+        ? '<span class="sp-chip flow">링크유입</span>'
+        : '<span class="sp-chip flow">가이드유입</span>'));
     // 결제·리뷰 형태 배지(공고 등록 시 고른 값) — 접지 않고 전부 노출
     (c.badges || []).forEach(b => {
       // 과거 자동 저장값인 "사진 5장+"는 실제 설정이 아닌 레거시 보조값이라 카드에 노출하지 않는다.

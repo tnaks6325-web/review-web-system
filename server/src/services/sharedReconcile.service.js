@@ -29,7 +29,7 @@ const SCALAR_LABEL = {
 };
 const LEAF_LABEL = {
   name: '이름', unit_kind: '옵션 있음·없음', option_url: '주소', product_url: '상품 주소', pay_amount: '결제금액', recruit_total: '인원', daily_limit: '일건수',
-  review_type_mix: '리뷰타입 수량', guide: '유입가이드', status: '마감 여부',
+  review_type_mix: '리뷰타입 수량', guide: '유입가이드', status: '마감 여부', inflow_type: '유입방식',
 };
 /** 공고 쪽 값을 오더로 옮기는 계산이 없는 칸 — 오더 쪽만(공고 반영을 강제로 건다).
  *  결정 277(2026-10-22): 옵션 주소·상품 주소도 공고 → 오더 계산이 생겼다(`planCampaignMoneyEdit` 주소 계획) — 비었다. */
@@ -62,6 +62,7 @@ function _text(key, raw) {
   if (key === 'review_type') return _rtName(v);
   if (key === 'status') return v === 'closed' ? '마감' : '모집 중';
   if (key === 'unit_kind') return v === 'product' ? '옵션 없음' : '옵션 있음';
+  if (key === 'inflow_type') return v === 'guide' ? '가이드유입' : (v === 'link' ? '링크유입' : v);
   if (key === 'review_type_mix') {
     try { const a = _mixArr(v); return a.length ? a.map(e => `${_rtName(e.type)} ${e.quantity}`).join(' · ') : '없음'; } catch (_) { return '(읽을 수 없는 값)'; }
   }
@@ -134,6 +135,7 @@ function _bodyRow(r, extra = {}) {
     payAmount: Number(r.pay_amount) || 0, recruitTotal: Number(r.recruit_total) || 0, dailyLimit: Number(r.daily_limit) || 0,
     reviewTypeMix: _mixArr(r.review_type_mix),
     inflowGuideHtml: r.inflow_guide_html, inflowGuideImages: r._images || [],
+    inflowType: r.inflow_type || '',   // 결정 333 — 실제로 쓰는 유입방식(되돌리기 계산이 상품별 값으로 옮긴다)
     status: r.status, ...extra,
   };
 }
@@ -179,6 +181,7 @@ function _mixedBody({ from, to, pairs, S, fromIsOrder, hasRows }) {
     if (L('review_type_mix')) row.reviewTypeMix = _mixArr(t.review_type_mix);
     if (L('guide')) { row.inflowGuideHtml = t.inflow_guide_html; row.inflowGuideImages = t._images || []; }
     if (L('status')) row.status = t.status;
+    if (L('inflow_type')) row.inflowType = t.inflow_type || '';
     if (L('option_url')) row.optionUrl = t.option_url;
     if (L('product_url')) row.productUrl = t.product_url;
     if (L('name') && f.key !== t.key) {

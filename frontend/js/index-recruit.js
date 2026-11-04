@@ -1223,6 +1223,8 @@ function rfSetInflowType(type, button, opts) {
   // ★ 사람이 누른 순간부터는 사람이 정한 값 — 출처 안내를 지운다.
   //   (모달 오픈 말미의 동기화 호출은 `{silent:true}` 라 표식을 유지한다.)
   if (!(opts && opts.silent)) window._rfInflowOrigin = "";
+  // ★ 결정 333 — 사람이 위 버튼을 누르면 **모든 상품에 적용**(상품마다 정한 값을 지운다 = 공고 전체 값을 따름)
+  if (!(opts && opts.silent)) document.querySelectorAll("#rf_opt_rows .rf-gp").forEach(b => { b.dataset.inflow = ""; });
   const hidden = document.getElementById("rf_inflow_type_value");
   if (hidden) hidden.value = value;
   const root = document.getElementById("rf_inflow_type_ui");
@@ -2501,11 +2503,25 @@ function _buildProdGroup(g) {
       '<button type="button" data-unit="product">옵션 없음</button>' +
       '<button type="button" data-unit="option">옵션 있음</button>' +
     '</span>' +
+    // ★ 결정 333 — 이 상품의 유입방식(상품이 둘 이상일 때만 보인다 · 하나면 위 「유입 방식」이 곧 이 상품 값)
+    '<span class="rf-gp-inflow" role="group" aria-label="이 상품의 유입방식">' +
+      '<button type="button" data-inflow="guide">가이드유입</button>' +
+      '<button type="button" data-inflow="link">링크유입</button>' +
+    '</span>' +
     '<span class="rf-gp-total" title="옵션 모집인원 합계(자동)">–</span>' +
     '<span class="rf-card-sp"></span>' +
     '<button type="button" class="rf-gp-shop" title="열어 둔 쇼핑몰 상품 페이지에서 상품명·주소·금액·옵션을 읽어 옵니다">쇼핑몰에서 가져오기</button>' +
     '<button type="button" class="rf-gp-del" title="이 상품(옵션 전체) 삭제">삭제</button>';
   box.appendChild(head);
+  // ★ 결정 333 — 줄에 저장된 유입방식(같은 상품의 줄은 같은 값). '' = 공고 전체 값을 따름.
+  box.dataset.inflow = (rows0.map(r => _rfUnitInflow(r.inflowType ?? r.inflow_type)).find(Boolean)) || "";
+  head.querySelectorAll(".rf-gp-inflow button").forEach(btn => {
+    btn.onclick = () => {
+      box.dataset.inflow = btn.dataset.inflow === "guide" ? "guide" : "link";
+      _rfPaintCardInflows({ settle: true });
+      _optSummary(); renderPartCheck(); _syncPreviewFromOptRows();
+    };
+  });
   const main = document.createElement("div");
   main.className = "rf-card-main";
   main.innerHTML =
@@ -2631,7 +2647,68 @@ function _rfRefreshCards() {
   });
   const wrap = document.getElementById("rf_opt_wrap");
   const inflow = document.getElementById("rf_inflow_type_value");
-  if (wrap) wrap.dataset.inflow = (inflow && inflow.value === "guide") ? "guide" : "link";
+  if (wrap) {
+    wrap.dataset.inflow = (inflow && inflow.value === "guide") ? "guide" : "link";
+    wrap.classList.toggle("rf-multi", boxes.length > 1 && window._rfUnitInflowOk !== false);   // 상품이 둘 이상일 때만 상품별 유입 선택을 보인다
+  }
+  _rfPaintCardInflows();
+}
+
+/* ══ 결정 333 — 상품마다 유입방식 ═══════════════════════════════════════════════
+   카드의 data-inflow = 사람이 그 상품에 정한 값('' = 공고 전체 값을 따름) · data-eff-inflow = 실제로 쓰는 값.
+   저장 약속은 리뷰오더와 같다: 모두 같으면 공고 전체 값 하나(줄 값 ''), 다르면 공고 전체 'guide' + 줄마다 그 상품 값. */
+function _rfUnitInflow(v) { return (v === "guide" || v === "link") ? v : ""; }
+function _rfTopInflow() { return document.getElementById("rf_inflow_type_value")?.value === "guide" ? "guide" : "link"; }
+function _rfInflowPlan() {
+  const top = _rfTopInflow();
+  const boxes = Array.from(document.querySelectorAll("#rf_opt_rows .rf-gp"));
+  const effOf = b => (window._rfUnitInflowOk !== false && _rfUnitInflow(b.dataset.inflow)) || top;   // 카드 선택을 숨긴 창은 위 값만
+  const kinds = new Set(boxes.map(effOf));
+  const mixed = kinds.size > 1;
+  return {
+    mixed,
+    campaign: mixed ? "guide" : (kinds.size ? [...kinds][0] : top),
+    unitOf: b => (mixed && b) ? effOf(b) : "",
+  };
+}
+/** 카드마다 실제 유입방식을 칠한다. settle = 사람이 카드를 눌렀다 — 모두 같아지면 그 값을 위 버튼으로 올리고 카드 값은 지운다(따름). */
+function _rfPaintCardInflows(opts) {
+  const boxes = Array.from(document.querySelectorAll("#rf_opt_rows .rf-gp"));
+  // 상품이 하나뿐이면 카드 선택은 숨겨져 있다 — 그 값은 위 버튼으로 올린다(보이는 값과 저장되는 값이 갈리지 않게)
+  if ((opts && opts.settle) || boxes.length <= 1) {
+    const plan = _rfInflowPlan();
+    if (!plan.mixed && boxes.length) {
+      const hidden = document.getElementById("rf_inflow_type_value");
+      // 「작업오더에서 불러온 값」 안내는 값이 실제로 바뀌었거나 사람이 눌렀을 때만 지운다(다시 그리기마다 지우면 안내가 사라진다 · 검토 지적)
+      if (hidden && hidden.value !== plan.campaign) { hidden.value = plan.campaign; window._rfInflowOrigin = ""; }
+      if (opts && opts.settle) window._rfInflowOrigin = "";
+      boxes.forEach(b => { b.dataset.inflow = ""; });
+    }
+  }
+  const top = _rfTopInflow();
+  const plan = _rfInflowPlan();
+  boxes.forEach(b => {
+    const eff = _rfUnitInflow(b.dataset.inflow) || top;
+    b.dataset.effInflow = eff;
+    b.querySelectorAll(".rf-gp-inflow button").forEach(x => x.classList.toggle("on", x.dataset.inflow === eff));
+  });
+  const ui = document.getElementById("rf_inflow_type_ui");
+  if (ui) ui.querySelectorAll("button").forEach(x => x.classList.toggle("active", !plan.mixed && x.dataset.inflow === top));
+  let note = document.getElementById("rf_inflow_mixed_note");
+  if (!plan.mixed) { if (note) note.remove(); return; }
+  if (!note && ui) {
+    // ★ 줄 **바깥** 아래에 둔다 — 버튼과 같은 칸에 넣으면 버튼이 밀려 찌그러진다(실측 캡처)
+    const row = ui.closest(".form-row") || ui.parentNode;
+    if (row && row.parentNode) {
+      note = document.createElement("div");
+      note.id = "rf_inflow_mixed_note";
+      note.className = "rf-inflow-mixed";
+      row.parentNode.insertBefore(note, row.nextSibling);
+    }
+  }
+  if (note) note.textContent = "상품마다 유입방식이 다릅니다(가이드유입 "
+    + boxes.filter(b => b.dataset.effInflow === "guide").length + " · 링크유입 "
+    + boxes.filter(b => b.dataset.effInflow === "link").length + ") — 위 버튼을 누르면 모든 상품이 그 방식으로 바뀝니다.";
 }
 
 /** 첫 상품 카드의 메인 주소 = 공고 상품 페이지(랜딩) — 사람이 그 칸을 고쳤을 때만 옮긴다(불러온 값은 건드리지 않는다). */
@@ -2960,6 +3037,7 @@ function renderOptRows(options, opts) {
       inflowGuideHtml: o.inflowGuideHtml ?? o.inflow_guide_html ?? "",
       inflowGuideImages: o.inflowGuideImages ?? o.inflow_guide_images ?? [],
       thumbnailUrl: o.thumbnailUrl ?? o.thumbnail_url ?? "",   // ★ 결정 214
+      inflowType:  _rfUnitInflow(o.inflowType ?? o.inflow_type),   // ★ 결정 333 — 줄 유입방식('' = 공고 전체 값)
       status:      o.status === "closed" ? "closed" : "active",
     };
   }));
@@ -3099,10 +3177,13 @@ function _optUnitEntries(opts) {
 function readOptRows() {
   const out = [];
   if (_prodMode() !== "opt") return out;
+  const inflowPlan = _rfInflowPlan();
   _optUnitEntries().forEach(({ row: r, optKey, unitKind, productName }) => {
     const optionUrl = String(r.querySelector(".rf-opt-url")?.value || "").trim();
     const guide = _ugCompose(r, r.dataset.ig);
     out.push({
+      // ★ 결정 333 — 상품마다 다를 때만 그 상품 값, 모두 같으면 ''(공고 전체 값을 따름 · 리뷰오더와 같은 약속)
+      inflowType:    inflowPlan.unitOf(r.closest(".rf-gp")),
       optKey,
       prevOptKey:    String(r.dataset.origKey || ""),
       productName,
@@ -3137,13 +3218,16 @@ function _rfRowProductUrl(row, unitKind) {
 /** 가이드유입 신규 공고는 실제 참여 가능한 모든 선택지에 안내가 있어야 한다.
  * 글 또는 사진만 있어도 유효하며, 마감 선택지는 리뷰어가 고를 수 없으므로 제외한다. */
 function validateActiveUnitInflowGuides(inflowType) {
-  if (inflowType !== "guide") return "";
   // 옵션 없는 단일상품은 아직 선택지 원장을 만들지 않는다. 이 모드에 전용 가이드 입력을
   // 제공하지 않으면서 검증만 걸면 새 공고를 저장할 수 없으므로, 실제 저장 선택지가 있는
   // 옵션 모드에서만 이 검증을 적용한다.
   if (_prodMode() !== "opt") return "";
   const missing = [];
   _optUnitEntries({ activeOnly: true }).forEach(({ row, optKey, productName }) => {
+    // ★ 결정 333 — 판정은 그 줄이 실제로 쓰는 유입방식(카드 값 → 없으면 공고 전체 값). 링크유입 상품은 가이드가 필요 없다(서버 guideMissingUnits 와 같은 규칙).
+    const box = row.closest(".rf-gp");
+    const eff = (box && box.dataset.effInflow) || (inflowType === "guide" ? "guide" : "link");
+    if (eff !== "guide") return;
     const guide = _ugCompose(row, row.dataset.ig);
     if (String(guide.html || "").trim() || (Array.isArray(guide.images) && guide.images.length)) return;
     missing.push(optKey || productName || "이름 없는 선택지");
@@ -3315,6 +3399,8 @@ function applyProductRowsFromOrder(prefill) {
       // 작업오더가 선택지 단위로 보낸 혼합 조합은 행 dataset의 진실원본이다.
       // 이 매핑에서 빼면 공고 생성 직후 모든 선택지가 "미입력"으로 초기화된다.
       reviewTypeMix: o.reviewTypeMix ?? o.review_type_mix ?? [],
+      // ★ 결정 333 — 리뷰오더 상품별 유입방식(섞인 오더만 실린다 · 빼면 섞인 오더가 전부 공고 전체 값으로 발행된다)
+      inflowType: _rfUnitInflow(o.inflowType ?? o.inflow_type),
     }));
   // 옵션 없는 단일 상품은 표가 모집공고의 정원 단일 출처다. 인트라넷이
   // 총인원·일건수를 상품 행이 아니라 오더 상단에 보낸 경우, 0인 행을 그대로
@@ -3768,6 +3854,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   window._recruitEditLoadedOpts = null;  // 저장 후 "바뀐 항목" 대조용 옵션표 원본(로드 실패 시 null=대조 안 함)
   window._recruitEditLoadedFees = null;
   window._rfBidirBase = null;   // ★ 양방향 4단계-2: 창을 연 시점의 리뷰오더 공유 버전(연결 공고만)
+  window._rfUnitInflowOk = true;   // ★ 결정 333 — 상품 카드 유입 선택을 보여도 되나(새 공고 = 예 · 수정 창 = 서버가 알려 줄 때만)
   _rfApplyFeeLinkLock();        // ★ 5단계: 지난 공고의 보기 전용 잠금을 푼다
   _rfApplyOrderLink(null, false);   // 시안 3차: 지난 공고의 연결 표시·시작일 잠금을 지운다
   window._rfOrderProductUrls = {};   // 결정 277: 연결 리뷰오더의 상품 메인 주소(보기용) — 새 공고·다른 공고에 남지 않게
@@ -3922,6 +4009,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
       /* ★ 양방향 4단계-2(결정 275): 리뷰오더와 맞춰지는 공고면 창을 연 시점의 버전을 기억했다가 저장 때 그대로 보낸다.
          안 보내면 서버는 "옛 화면" 으로 보고, 공통 칸이 지금 값과 다르면 저장을 막는다(창을 연 뒤 인트라넷이 고친 값을 덮지 않게). */
       window._rfBidirBase = (json && json.bidir && Number(json.bidir.sync_version) > 0) ? Number(json.bidir.sync_version) : null;
+      /* ★ 결정 333 — 연결 공고 저장에서 카드 유입방식을 리뷰오더로 옮기는 서버만 `unitInflow` 를 준다. 없으면(화면만 먼저 배포된 틈)
+         카드 선택을 숨긴다 — 옛 서버는 줄 값을 버리고 공고 전체 값만 써 링크 상품이 가이드로 바뀐다(검토 지적). */
+      window._rfUnitInflowOk = !!(json && json.unitInflow);
       /* ★ 차수 원장 잠금 — 서버가 총모집 전송값을 무시하는지 **열 때부터** 안다(null=모름). */
       window._rfRoundsLock = (json && json.roundsLock && typeof json.roundsLock === "object") ? json.roundsLock : null;
       window._recruitEditLoadedOpts = json.options || [];   // 저장 후 "바뀐 항목" 대조용(옵션표 원본)
@@ -6194,7 +6284,8 @@ async function saveRecruitPostImpl() {
       payload.work_detail = {
         productLines:    document.getElementById("rf_wd_product").value.trim(),
         // 작업오더가 연결되지 않은 직접 등록 공고도 링크/가이드 유입을 정확히 재현할 수 있게 저장한다.
-        inflowType:      document.getElementById("rf_inflow_type_value")?.value === "guide" ? "guide" : "link",
+        // ★ 결정 333 — 상품마다 다르면 'guide'(리뷰오더와 같은 약속 · 'mixed' 같은 새 값은 쓰지 않는다), 모두 같으면 그 값
+        inflowType:      _rfInflowPlan().campaign,
         // 공통 유입가이드는 신규 공고에서 생성하지 않는다. 레거시 값은 서버가 보존한다.
         reviewGuide:     document.getElementById("rf_wd_review").value.trim(),
         specialNotes:    document.getElementById("rf_wd_notes").value.trim(),
@@ -6221,9 +6312,7 @@ async function saveRecruitPostImpl() {
         const invalidProductUrl = Array.from(document.querySelectorAll("#rf_opt_rows .rf-gp-url"))
           .find(i => String(i.value || "").trim() && !_rfHttpUrl(i.value));
         if (invalidProductUrl) { renderPartCheck(); _rfSaveBlocked("상품 메인 URL은 http:// 또는 https:// 주소로 입력해주세요.", { go: _rfGoToCheck }); return; }
-        const inflowGuideError = validateActiveUnitInflowGuides(
-          document.getElementById("rf_inflow_type_value")?.value === "guide" ? "guide" : "link"
-        );
+        const inflowGuideError = validateActiveUnitInflowGuides(_rfInflowPlan().campaign);
         if (inflowGuideError) { renderPartCheck(); _rfSaveBlocked(inflowGuideError, { go: _rfGoToCheck }); return; }
       }
     }
@@ -6593,7 +6682,10 @@ function _rfFirstUnitGuide() {
       ? String(productName || "")
       : String(r.querySelector(".rf-opt-name")?.value || "")).replace(/\|/g, "").trim();
     if (!optKey) continue;
-    return { optKey, productName, unitKind, inflowGuideHtml: html, inflowGuideImages: imgs };
+    // ★ 결정 333 — 상품마다 유입방식이 다를 때만 그 상품 값(카드 값은 섞였을 때만 남는다) · 아니면 '' = 종전 미리보기 그대로
+    const box = r.closest ? r.closest(".rf-gp") : null;
+    const inflowType = (box && box.dataset && box.dataset.inflow) ? String(box.dataset.effInflow || "") : "";
+    return { optKey, productName, unitKind, inflowGuideHtml: html, inflowGuideImages: imgs, inflowType };
   }
   return null;
 }

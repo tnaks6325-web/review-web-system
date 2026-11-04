@@ -328,6 +328,7 @@ console.log('\n[D] 배선 — 상세 본문 · 발행 프리필');
   const mapExpr = apply.slice(apply.indexOf('(Array.isArray', mapStart), mapEnd + 3);
   const sb = { console, p: { options: null } };
   vm.createContext(sb);
+  vm.runInContext(grab(recruitSrc, '_rfUnitInflow'), sb);   // 결정 333 — 줄 유입방식 정규화
   sb.p.options = [
     { productName: '상품A', optKey: '옵션1', unitKind: 'option', inflowGuideHtml: '<p>옵션1</p>', inflowGuideImages: [img('1'.repeat(24))], optionUrl: 'https://coupang.com/A', payAmount: 12000, recruitTotal: 30, dailyLimit: 5, reviewTypeMix: [{ type: 'photo', quantity: 24 }, { type: 'text', quantity: 6 }] },
     { productName: '상품B', optKey: '', unit_kind: 'product', inflow_guide_html: '<p>상품B</p>', inflow_guide_images: [img('2'.repeat(24))], optionUrl: 'https://coupang.com/B', payAmount: 9000, reviewTypeMix: [{ type: 'photo', quantity: 4 }, { type: 'text', quantity: 1 }] },
@@ -342,6 +343,9 @@ console.log('\n[D] 배선 — 상세 본문 · 발행 프리필');
   ok('★★ 모집공고 설정 행에도 선택지별 리뷰 조합을 그대로 보존한다',
     JSON.stringify(mapped[0].reviewTypeMix) === JSON.stringify([{ type: 'photo', quantity: 24 }, { type: 'text', quantity: 6 }])
     && JSON.stringify(mapped[1].reviewTypeMix) === JSON.stringify([{ type: 'photo', quantity: 4 }, { type: 'text', quantity: 1 }]));
+  ok('★ 결정 333 — 발행 프리필이 줄 유입방식을 통과시킨다(없으면 빈 값 = 공고 전체 값 · 모르는 값은 버린다)',
+    (sb.p.options = [{ optKey: 'a', inflowType: 'link' }, { optKey: 'b', inflow_type: 'guide' }, { optKey: 'c' }, { optKey: 'd', inflowType: 'mixed' }],
+      JSON.stringify(vm.runInContext('(' + mapExpr + ')', sb).map(r => r.inflowType)) === JSON.stringify(['link', 'guide', '', ''])));
   ok('모르는 unitKind 는 option 으로 접는다(종전 동작)',
     (sb.p.options = [{ optKey: 'x', unitKind: 'weird' }], vm.runInContext('(' + mapExpr + ')', sb)[0].unitKind === 'option'));
 }

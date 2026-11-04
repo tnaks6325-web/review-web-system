@@ -196,6 +196,7 @@ function makeTable(opts) {
     '_lastOptProductName', '_markDupProductNames', 'renderOptRows',
     '_rfHttpUrl', '_rfGroupUnit', '_rfRowProductName', '_optUnitEntries',
     'readOptRows', '_readProdRows', '_readProdRowsRaw', '_syncPreviewFromOptRows', '_optSummary',
+    '_rfUnitInflow', '_rfTopInflow', '_rfInflowPlan', '_rfPaintCardInflows',   // 결정 333 — 상품 카드 유입방식
     '_rfQuotaNotice', '_syncQuotaLockUi',
     // ★ 작업오더 → 발행 프리필 → 저장까지 한 줄로 잇는 end-to-end 절(N)에서 쓴다
     'parseProductLinesToRows', 'applyProductRowsFromOrder',

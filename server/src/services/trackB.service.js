@@ -3548,6 +3548,8 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null,
       channel: (c && (String(c.channel || '').trim() === '직접입력' ? c.channelCustom : c.channel)) || null,
       productUrl: (wo && wo.productUrl) || null,
       inflowType: (wo && wo.inflowType) || null,
+      /* 상품마다 유입이 다르면(결정 333) 화면이 「가이드+링크유입」으로 적는다 — 위 값(오더 전체 요약)은 그대로. */
+      inflowMixed: !!(wo && require('../utils/unitInflow').orderInflowMixed(wo.productOptionsJson, wo.inflowType)),
       /* 작업담당은 홈·입금관리와 같은 단일 출처(work_manager 우선·탭 폴백).
          담당AE(manager_name)를 작업담당으로 읽지 않는다. 알 수 없는 이름은 내부 원문만,
          광고주 렌즈는 기존대로 별명 없는 실명을 폐기한다. */
@@ -6434,6 +6436,7 @@ function _condAdvertiserLens(cd, { brandSession = false } = {}) {
     qtyTiers: cd.qtyTiers || null,
     channel: cd.channel || null,
     inflowType: cd.inflowType || null,
+    inflowMixed: cd.inflowMixed === true,
     /* 담당 2인 — ★ **실명(`adminRaw`)은 폐기**하고 여기서 fail-closed 를 완결한다:
        닉네임이 있으면 닉네임, 없는데 **관리자는 있으면** `관리자`(리뷰어 화면과 같은 규율),
        관리자 자체가 없으면 null → 화면이 그 조각을 아예 안 적는다(사용자 확정 2026-08-24).

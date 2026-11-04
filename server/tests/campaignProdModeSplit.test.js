@@ -188,6 +188,7 @@ function makeTable(opts) {
     '_renderProdTable', '_buildProdGroup', '_syncGroupTotals', 'addOptRow', '_buildOptThumbLine', '_buildOptRowEl',
     '_lastOptProductName', '_markDupProductNames', 'renderOptRows', 'renderOptRowsWithProduct',
     'readOptRows', '_readProdRows', '_readProdRowsRaw', '_syncPreviewFromOptRows', '_optSummary',
+    '_rfUnitInflow', '_rfTopInflow', '_rfInflowPlan', '_rfPaintCardInflows',   // 결정 333 — 상품 카드 유입방식
     'parseProductLinesToRows', 'applyProductRowsFromOrder',
     '_renderProdModeHelp', '_rfQuotaNotice', '_syncQuotaLockUi',
   ].forEach(fn => vm.runInContext(grab(recruitSrc, fn), sandbox));
