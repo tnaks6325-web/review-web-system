@@ -1,6 +1,7 @@
 'use strict';
 
 const { payAmountsFromWorkOrder } = require('../utils/workOrderPayAmounts');
+const { unitInflowType } = require('../utils/unitInflow');   // ★ 결정 333
 
 // 상품·옵션 원본은 인트라넷에서 구조화한 값이 진실원본이다. label은 기존
 // 단일 옵션 소비처를 위한 파생 호환값일 뿐, 이 서비스가 label을 역분해하지 않는다.
@@ -175,12 +176,15 @@ function normalizeProductOptionsJson(raw, { requireStructured = false } = {}) {
     }
     // ★ 빈 단계 키는 구버전 배열에서도 지운다 — 남기면 접수된 옛 오더의 잠금 비교 모양이 바뀌어 모든 수정이 409(결정 167·250).
     //   빈 단계 키가 없으면 지금처럼 원문 바이트 그대로.
+    // ★ 결정 333 — 상품별 유입방식도 같은 규칙: 빈 값·모르는 값의 키는 뺀다(옵션 없는 상품만 있는 작업도 이 갈래로 온다).
+    const badInflow = product => Object.prototype.hasOwnProperty.call(product, 'inflow_type') && !unitInflowType(product.inflow_type);
     const hasEmptyKey = list.some(product => product && typeof product === 'object' && !Array.isArray(product)
-      && Object.prototype.hasOwnProperty.call(product, 'qty_tiers'));
+      && (Object.prototype.hasOwnProperty.call(product, 'qty_tiers') || badInflow(product)));
     if (hasEmptyKey) {
       const stripped = list.map(product => {
         if (!product || typeof product !== 'object' || Array.isArray(product)) return product;
         const { qty_tiers: _empty, ...rest } = product;
+        if (badInflow(rest)) delete rest.inflow_type;
         return rest;
       });
       return { json: JSON.stringify(stripped), value: stripped, structured: false };
@@ -239,8 +243,12 @@ function normalizeProductOptionsJson(raw, { requireStructured = false } = {}) {
         label: derivedLabel(option1.value, option2?.value || ''),
       };
     });
-    const { qty_tiers: rawTiers, ...productRest } = product;
+    const { qty_tiers: rawTiers, inflow_type: rawInflow, ...productRest } = product;
     const result = { ...productRest, name: productName, product_mode: mode, options: resultOptions };
+    // ★ 결정 333 — 상품별 유입방식('guide'|'link')만 남긴다. 빈 값·모르는 값은 키째 뺀다(= 공고 전체 값을 따름).
+    //   빈 값('')을 남기면 양방향 비교가 "키 없음"과 다른 값으로 읽어 옛 오더 저장마다 가짜 쓰기·충돌이 생긴다.
+    const inflow = unitInflowType(rawInflow);
+    if (inflow) result.inflow_type = inflow;
     const tiers = normalizeQtyTiers(rawTiers, result, productIndex);
     return tiers ? { ...result, qty_tiers: tiers } : result;
   });

@@ -30,6 +30,7 @@ const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const { payAmountsFromWorkOrder } = require('../utils/workOrderPayAmounts');
 const { PRODUCT_LINE_PAY_RE } = require('../utils/campaignProductLines');
+const { unitInflowType, guideMissingUnits } = require('../utils/unitInflow');   // ★ 결정 333 — 선택지마다 유입방식
 
 /** 테스트 주입용 */
 let _pool = null;
@@ -287,7 +288,7 @@ async function syncCampaignThumbnail({ workOrderId, thumbnailUrl, by = 'source' 
       ★ 옵션이 없는 공고는 화면 규칙이 검사하지 않지만 여기서는 **공통 가이드도 비면 거부**한다
         (화면보다 좁은 = 안전한 쪽. 넓히지 말 것).
 
-   ★ 쓰기 표면 = `campaign_options.inflow_guide_html/inflow_guide_images` ·
+   ★ 쓰기 표면 = `campaign_options.inflow_guide_html/inflow_guide_images/inflow_type`(결정 333) ·
                  `recruit_campaigns.work_detail` 둘뿐(정원·옵션 구성·작업표·주문·시트 무접촉).
    ★ **절대 throw 하지 않는다** — 전파 실패가 원본 수정 저장을 되돌리면 안 된다.
    ★ 선택 단위(optKey) 짝짓기는 **금액 전파와 같은 함수**(`payAmountsFromWorkOrder`)를 쓴다 —
@@ -296,8 +297,7 @@ async function syncCampaignThumbnail({ workOrderId, thumbnailUrl, by = 'source' 
 
 /** 유입방식으로 인정하는 값 — 그 외(빈 값·오타)는 "안 바뀜" 으로 읽는다. */
 function normalizeInflowType(v) {
-  const s = String(v == null ? '' : v).trim();
-  return (s === 'guide' || s === 'link') ? s : '';
+  return unitInflowType(v);   // ★ 단일 출처(결정 333 — 줄 단위 판정과 같은 규칙)
 }
 
 /**
@@ -320,6 +320,7 @@ async function syncCampaignInflowInTx(client, camp, { nextType, commonGuide, pro
     const { payAmountsFromWorkOrder } = require('../utils/workOrderPayAmounts');
     const parsed = payAmountsFromWorkOrder(productOptionsJson);
     const wanted = new Map();
+    const wantedType = new Map();   // ★ 결정 333 — 선택지마다 유입방식('' = 공고 전체 값을 따름)
     for (const u of parsed.units) {
       /* ★★ 공고의 선택지 키는 **옵션명, 옵션이 없는 상품이면 상품명**이다(137 `unit_kind='product'`).
          금액 전파는 옵션 없는 공고를 다른 경로로 처리해 `optKey` 만 보지만, 가이드는 상품 단위
@@ -329,14 +330,23 @@ async function syncCampaignInflowInTx(client, camp, { nextType, commonGuide, pro
       if (!key) continue;
       const src = u.optKey ? u.src : compose.productUnitSrc(u.src);
       wanted.set(key, compose.composeUnitGuide(src));
+      wantedType.set(key, u.inflowType || '');
     }
     if (wanted.size) {
       const { rows: liveOpts } = await client.query(
-        `SELECT opt_key, inflow_guide_html, inflow_guide_images
+        `SELECT opt_key, inflow_guide_html, inflow_guide_images, inflow_type
            FROM campaign_options WHERE campaign_id = $1 AND status <> 'closed'`, [camp.id]);
       for (const o of liveOpts) {
         const next = wanted.get(o.opt_key);
         if (!next) continue;
+        // ★ 결정 333 — 유입방식을 **가이드보다 먼저** 쓴다(아래 검사가 바뀐 뒤 상태를 본다 — 가이드→링크 전환이 옛 값으로 거부되지 않게)
+        const unitType = wantedType.get(o.opt_key) || '';
+        if (unitInflowType(o.inflow_type) !== unitType) {
+          await client.query(
+            `UPDATE campaign_options SET inflow_type = $3, updated_at = NOW() WHERE campaign_id = $1 AND opt_key = $2`,
+            [camp.id, o.opt_key, unitType]);
+          optionsChanged += 1;
+        }
         const curImgs = JSON.stringify(Array.isArray(o.inflow_guide_images) ? o.inflow_guide_images : []);
         const nextImgs = JSON.stringify(next.images);
         if (String(o.inflow_guide_html || '') === next.html && curImgs === nextImgs) continue;
@@ -371,21 +381,17 @@ async function syncCampaignInflowInTx(client, camp, { nextType, commonGuide, pro
 
   // ── 가이드유입 검사(전파가 끝난 상태로) ───────────────────────────────────
   const effectiveType = nextType || normalizeInflowType(wd.inflowType);
-  if (effectiveType === 'guide') {
-    const { rows: liveOpts } = await client.query(
-      `SELECT opt_key, product_name, inflow_guide_html, inflow_guide_images
-         FROM campaign_options WHERE campaign_id = $1 AND status <> 'closed'`, [camp.id]);
-    if (liveOpts.length) {
-      const missing = liveOpts
-        .filter(o => !String(o.inflow_guide_html || '').trim()
-          && !(Array.isArray(o.inflow_guide_images) && o.inflow_guide_images.length))
-        .map(o => o.opt_key || o.product_name || '이름 없는 선택지');
-      if (missing.length) {
-        return { applied: false, reason: 'guide_missing', campaignId: camp.id, detail: { missing } };
-      }
-    } else if (!String(nextWd.inflowGuideHtml || '').trim()) {
-      return { applied: false, reason: 'guide_missing', campaignId: camp.id, detail: { missing: ['공통 유입가이드'] } };
+  // ★ 결정 333 — 줄마다 실제로 쓰는 유입방식으로 본다(링크유입 줄은 가이드가 없어도 된다). 줄 값이 없으면 공고 전체 값 = 종전 판정 그대로.
+  const { rows: liveOpts } = await client.query(
+    `SELECT opt_key, product_name, inflow_guide_html, inflow_guide_images, inflow_type
+       FROM campaign_options WHERE campaign_id = $1 AND status <> 'closed'`, [camp.id]);
+  if (liveOpts.length) {
+    const missing = guideMissingUnits(liveOpts, effectiveType);
+    if (missing.length) {
+      return { applied: false, reason: 'guide_missing', campaignId: camp.id, detail: { missing } };
     }
+  } else if (effectiveType === 'guide' && !String(nextWd.inflowGuideHtml || '').trim()) {
+    return { applied: false, reason: 'guide_missing', campaignId: camp.id, detail: { missing: ['공통 유입가이드'] } };
   }
   return { applied: true, campaignId: camp.id, inflowType: effectiveType, options: optionsChanged, workDetail: wdChanged };
 }

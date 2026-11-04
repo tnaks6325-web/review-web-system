@@ -23,6 +23,7 @@ const { SHARED_FIELDS, FIELD_BY_KEY } = require('../utils/sharedFields');
 const { planSharedPatch, ABSENT, optionKey } = require('../utils/sharedPatchPlan');
 const { projectOrderToCampaign } = require('../utils/orderToCampaignProjection');
 const { CANON } = require('../utils/sharedFields');
+const { unitInflowType, guideMissingUnits } = require('../utils/unitInflow');   // ★ 결정 333 — 상품마다 유입방식
 
 const NEXT_VERSION_SQL = `GREATEST(sync_version + 1, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000000)::bigint)`;
 
@@ -189,6 +190,8 @@ function writablePath(row, origin) {
     return !(lab !== undefined && /^(옵션\s*없음|없음|단일(상품)?|해당\s*없음)$/.test(String(lab).trim()));
   }
   const isOption = String(m.parent || '').includes('|o:');
+  // ★ 결정 333 — 상품별 유입방식(상품 칸만 · 옵션은 상품을 따른다). 작업표와 무관하고(164) 공고 줄 유입방식으로 투영된다.
+  if (m.key === 'inflow_type') return !isOption;
   if (m.key === 'pay' && isOption) return row.base !== ABSENT && row.mine !== ABSENT;
   // 7단계-② 인원·일건수(옵션) — 옵션이 원래 있고 지금도 있을 때만(옵션 더하기·지우기는 구조 단계)
   if (['count', 'daily', 'daily_limit', 'dailyLimit'].includes(m.key) && isOption) return row.base !== ABSENT && row.mine !== ABSENT && set.has('recruit_count');
@@ -374,7 +377,7 @@ function _leafTarget(w) {
     const at = owner.indexOf('|o:');
     return { pName: at < 0 ? owner : owner.slice(0, at), oLabel: at < 0 ? '' : owner.slice(at + 3), leaf: m.key };
   }
-  const r = /^p:(.+?)(?:\|o:(.+))?\.(url|pay|base|guide|count|daily|daily_limit|dailyLimit|review_type_mix)$/.exec(w.path);
+  const r = /^p:(.+?)(?:\|o:(.+))?\.(url|pay|base|guide|count|daily|daily_limit|dailyLimit|review_type_mix|inflow_type)$/.exec(w.path);
   return r ? { pName: r[1], oLabel: r[2] || '', leaf: r[3] } : null;
 }
 
@@ -436,6 +439,7 @@ function applyWrites(theirs, mine, writes) {
   let productsTouched = false;
   let urlTouched = false;
   let guideTouched = false;
+  let inflowUnitTouched = false;   // ★ 결정 333
   let quantityTouched = false;
   const payProducts = new Set();
   const qtyProducts = new Set();
@@ -527,6 +531,8 @@ function applyWrites(theirs, mine, writes) {
       else { missed.push(w.path); continue; }
     } else if (leaf === 'url') { tp.url = mp.url; urlTouched = true; }
     else if (leaf === 'guide') { if (mp.guide === undefined) delete tp.guide; else tp.guide = mp.guide; guideTouched = true; }
+    // ★ 결정 333 — 상품별 유입방식(키 없음 = 오더 전체 값을 따름 — 섞이지 않으면 인트라넷이 키를 뺀다)
+    else if (leaf === 'inflow_type') { const t = unitInflowType(mp.inflow_type); if (t) tp.inflow_type = t; else delete tp.inflow_type; inflowUnitTouched = true; }
     else if (leaf === 'product_mode') {   // ⑤-3 옵션 있음↔없음(판정이 허락한 줄만) · 표기만 다른 것도 보낸 값으로
       if (mp.product_mode === undefined) delete tp.product_mode; else tp.product_mode = mp.product_mode;
       if (w.modeSwitch) {
@@ -590,7 +596,7 @@ function applyWrites(theirs, mine, writes) {
   structure.productRenameMap = productRenameMap;
   const structureTouched = structure.addedProducts.length + structure.removedProducts.length + structure.addedOptions.length
     + structure.removedOptions.length + structure.reopened.length + structure.renamedOptions.length + structure.renamedProducts.length + structure.modeSwitched.length > 0;
-  return { next, productsTouched, urlTouched, guideTouched, quantityTouched, payTouched: payProducts.size > 0, payProducts, qtyProducts, missed, structure, structureTouched };
+  return { next, productsTouched, urlTouched, guideTouched, inflowUnitTouched, quantityTouched, payTouched: payProducts.size > 0, payProducts, qtyProducts, missed, structure, structureTouched };
 }
 
 /** 상품 하나의 상품구입비 — 인트라넷 totals 와 같은 규칙(옵션 금액이 비면 상품 기본 금액 · `workOrderPayAmounts` 와 같다).
@@ -771,15 +777,68 @@ async function _projectGuideInTx(client, camp, prev, next) {
   return { applied: n > 0 };
 }
 
+/**
+ * ★ 결정 333 — 유입방식 → 공고(같은 트랜잭션). ① 공고 전체 값(work_detail.inflowType · 오더 전체 값이 바뀐 저장만)
+ *   ② 줄마다(campaign_options.inflow_type ← 오더 상품 inflow_type · 비면 '' = 공고 전체 값을 따름).
+ * ★ 줄 열쇠·값은 발행 프리필(`_woOptionRows` → row.inflowType)에서 — 가이드 투영과 같은 짝짓기(상품 줄은 상품명까지).
+ * ★ 상품별 값이 있는데 공고에서 그 줄을 못 찾으면 통째로 거부(오더만 바뀌고 리뷰어 화면은 옛 유입방식이 되지 않게).
+ *   공고에 옵션 줄이 하나도 없으면(옛 형식 · 옵션 없는 공고) 줄 값을 둘 자리가 없다 — 공고 전체 값만 쓴다.
+ * ★ 가이드 검사는 하지 않는다 — 호출부가 가이드 투영까지 끝낸 뒤 한 번 본다.
+ */
+async function _projectUnitInflowInTx(client, camp, next, { typeTouched = false } = {}) {
+  let n = 0;
+  if (typeTouched) {
+    const t = unitInflowType(next.inflow_type);
+    if (t) {
+      const { rows } = await client.query('SELECT work_detail FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [camp.id]);
+      let wd = rows[0] && rows[0].work_detail;
+      if (typeof wd === 'string') { try { wd = JSON.parse(wd); } catch (_) { wd = null; } }
+      if (!wd || typeof wd !== 'object' || Array.isArray(wd)) wd = {};
+      if (String(wd.inflowType || '') !== t) {
+        await client.query('UPDATE recruit_campaigns SET work_detail = $2::jsonb, updated_at = NOW() WHERE id = $1', [camp.id, JSON.stringify({ ...wd, inflowType: t })]);
+        n += 1;
+      }
+    }
+  }
+  const rows = (_prefillOf(next).options || []).map(o => ({
+    pName: String(o.productName || '').trim(), optKey: o.unitKind === 'product' ? '' : String(o.optKey || '').trim(),
+    name: o.optKey || o.productName, want: unitInflowType(o.inflowType),
+  }));
+  if (!rows.length) return { applied: n > 0 };
+  const { rows: live } = await client.query(
+    `SELECT id, opt_key, product_name, unit_kind, inflow_type FROM campaign_options
+      WHERE campaign_id = $1 AND COALESCE(status,'active') <> 'deleted' ORDER BY id FOR UPDATE`, [camp.id]);
+  if (!live.length) return { applied: n > 0 };
+  for (const r of rows) {
+    const hits = live.filter(x => (String(x.unit_kind || '') === 'product'
+      ? r.optKey === '' && (x.opt_key === r.pName || String(x.product_name || '').trim() === r.pName)
+      : r.optKey !== '' && x.opt_key === r.optKey));
+    if (!hits.length) {
+      if (!r.want) continue;   // 따름 값은 못 찾아도 리뷰어 화면이 같다(공고 전체 값)
+      return { reject: { kind: 'inflow', out: { applied: false, reason: 'option_key_mismatch', detail: { unmatched: [r.name] } },
+        error: `상품별 유입방식을 저장하지 않았습니다 — 모집공고에서 「${r.name}」 줄을 찾지 못했습니다(공고 쪽 상품 줄 이름이 다릅니다). 모집공고의 상품 줄 이름을 리뷰오더와 맞춘 뒤 다시 저장해 주세요.` } };
+    }
+    for (const h of hits) {
+      if (unitInflowType(h.inflow_type) === r.want) continue;
+      await client.query('UPDATE campaign_options SET inflow_type = $2, updated_at = NOW() WHERE id = $1', [h.id, r.want]);
+      n += 1;
+    }
+  }
+  return { applied: n > 0 };
+}
+
 /** 가이드유입 공고인데 가이드 없는 살아 있는 선택지 이름들(없으면 null) — 쓴 뒤 상태로 본다. */
-async function _guideMissingInTx(client, camp) {
+async function _guideMissingInTx(client, camp, { commonWhenNoRows = false } = {}) {
   const { rows: wdr } = await client.query('SELECT work_detail FROM recruit_campaigns WHERE id = $1', [camp.id]);
   const wd = (wdr[0] && wdr[0].work_detail && typeof wdr[0].work_detail === 'object') ? wdr[0].work_detail : {};
-  if (String(wd.inflowType || '') !== 'guide') return null;
+  // ★ 결정 333 — 줄마다 실제로 쓰는 유입방식으로 본다(링크유입 상품 줄은 가이드가 필요 없다 · 줄 값이 없으면 공고 전체 값 = 종전 판정)
   const { rows: after } = await client.query(
-    `SELECT opt_key, product_name, inflow_guide_html, inflow_guide_images FROM campaign_options WHERE campaign_id = $1 AND COALESCE(status,'active') NOT IN ('closed','deleted')`, [camp.id]);
-  const missing = after.filter(o => !String(o.inflow_guide_html || '').trim() && !(Array.isArray(o.inflow_guide_images) && o.inflow_guide_images.length))
-    .map(o => o.opt_key || o.product_name || '이름 없는 선택지');
+    `SELECT opt_key, product_name, inflow_guide_html, inflow_guide_images, inflow_type FROM campaign_options WHERE campaign_id = $1 AND COALESCE(status,'active') NOT IN ('closed','deleted')`, [camp.id]);
+  if (!after.length) {
+    // 옵션 줄이 없는 공고 — 공통 가이드가 그 공고의 유일한 안내다(syncCampaignInflowInTx 와 같은 판정 · 화면보다 좁은 = 안전한 쪽)
+    return (commonWhenNoRows && String(wd.inflowType || '') === 'guide' && !String(wd.inflowGuideHtml || '').trim()) ? ['공통 유입가이드'] : null;
+  }
+  const missing = guideMissingUnits(after, wd.inflowType);
   return missing.length ? missing : null;
 }
 
@@ -1427,10 +1486,14 @@ async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTo
     structureOut = await _projectStructureInTx(client, camp, extra.prev || {}, next, extra.structure || {});
     if (structureOut.reject) return { reject: structureOut.reject };
     applied.push('structure');
-    // 가이드유입 작업에 가이드 없는 선택지가 생기면 거부(선택지 가이드 투영과 같은 검사 — 구조 경로는 가이드 변경 표시를 안 세운다 · 검토 2026-10-21)
-    const gm = await _guideMissingInTx(client, camp);
-    if (gm) return { reject: { kind: 'inflow', out: { applied: false, reason: 'guide_missing', detail: { missing: gm } },
-      error: `가이드유입 작업인데 유입가이드가 없는 선택지가 있어 저장하지 않았습니다: ${gm.join(', ')}(원래부터 비어 있던 줄도 포함). 그 선택지에 가이드를 넣은 뒤 다시 저장해 주세요.` } };
+  }
+  /* ★ 결정 333 — 유입방식(공고 전체 · 줄마다)을 **가이드 검사보다 먼저** 맞춘다. 검사가 옛 유입방식을 보면
+     가이드→링크 전환이 "가이드 없음"으로 거부되고, 링크→가이드 전환은 가이드 없이 통과한다. 새로 더한 줄(구조)도 여기서 값을 받는다. */
+  const inflowTypesTouched = !!(extra.inflowUnitTouched || has('inflow_type') || extra.structureTouched);
+  if (inflowTypesTouched) {
+    const r = await _projectUnitInflowInTx(client, camp, next, { typeTouched: has('inflow_type') });
+    if (r.reject) return { reject: r.reject };
+    if (r.applied) applied.push('unit_inflow');
   }
   if (has('review_fee')) {
     const r = await require('./campaignFeeChange.service').applyFeeChangeInTx(client, camp, next.review_fee);
@@ -1508,6 +1571,19 @@ async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTo
     });
     if (!r.applied && r.reason === 'guide_missing') return { reject: { kind: 'inflow', out: r } };
     if (r.applied) applied.push('inflow');
+  }
+  // 가이드유입 작업에 가이드 없는 선택지가 생기면 거부 — 구조·유입방식·선택지 가이드·공통 가이드를 **다 쓴 뒤** 상태로 본다
+  //   (구조 경로는 가이드 변경 표시를 안 세운다 · 검토 2026-10-21 · 결정 333 에서 유입방식·가이드 투영 뒤로 옮김 = 최종 상태 판정)
+  if (inflowTypesTouched) {
+    // ★ 오더 전체 유입방식이 바뀐 저장은 옵션 줄 없는 공고도 본다(공통 가이드가 비면 거부 · 164 — 종전 유입 전파의 검사를 이 자리로 옮겼다)
+    const gm = await _guideMissingInTx(client, camp, { commonWhenNoRows: has('inflow_type') });
+    if (gm) {
+      const out = { applied: false, reason: 'guide_missing', campaignId: camp.id, detail: { missing: gm } };
+      // 유입방식만 바뀐 저장 = 종전 유입 전파 거부와 같은 모양(문구는 campaignSyncNotice 가 만든다)
+      if (!extra.structureTouched && !extra.inflowUnitTouched) return { reject: { kind: 'inflow', out } };
+      return { reject: { kind: 'inflow', out,
+        error: `가이드유입 작업인데 유입가이드가 없는 선택지가 있어 저장하지 않았습니다: ${gm.join(', ')}(원래부터 비어 있던 줄도 포함). 그 선택지에 가이드를 넣은 뒤 다시 저장해 주세요.` } };
+    }
   }
   if (has('purchase_time')) {
     const r = await sync.syncCampaignPurchaseWindowInTx(client, camp, next.purchase_time, { textOnlyWhenLegacy: true });
@@ -1848,10 +1924,16 @@ async function applySharedPatch(p) {
        새 인트라넷도 링크유입이면 가이드를 아예 안 싣는다(인트라넷 화면 규칙) — "없음" 을 "지웠다" 로 읽지 않는다(검토 · 사전 점검 🔴2). */
     if (p.origin === 'intranet') {
       const isGuide = w => w.meta && w.meta.kind === 'leaf' && w.meta.key === 'guide';
-      const linkInflow = String((p.mine && p.mine.inflow_type) || '').trim() !== 'guide';
+      // ★ 결정 333 — 링크유입인지는 **그 가이드가 속한 상품**의 유입방식으로 본다(상품 값이 없으면 오더 전체 값 = 종전 판정)
+      const mineProducts = (() => { try { const a = JSON.parse((p.mine && p.mine.product_options_json) || '[]'); return Array.isArray(a) ? a : []; } catch (_) { return []; } })();
+      const linkInflow = w => {
+        const t = _leafTarget(w);
+        const prod = t && mineProducts.find(x => x && (String(x.prev_name || '').trim() || String(x.name || '').trim()) === t.pName);
+        return (unitInflowType(prod && prod.inflow_type) || String((p.mine && p.mine.inflow_type) || '').trim()) !== 'guide';
+      };
       // ★ 옛 인트라넷의 가이드 차이는 "낡은 사본" 과 "진짜 수정" 을 가를 근거가 없다(옛 화면은 리뷰웹 가이드를 받지 못해 창 자체가 낡은 값으로 열린다).
       //   막으면 리뷰웹이 가이드를 한 번 바꾼 뒤로 그 오더의 옛 화면 저장이 전부 막힌다 → 버린다(기록). 그래서 배포는 인트라넷 먼저(결정 275 5·6단계).
-      const dropGuide = w => isGuide(w) && (p.guideCapable === false || (linkInflow && w.mine === ABSENT));
+      const dropGuide = w => isGuide(w) && (p.guideCapable === false || (linkInflow(w) && w.mine === ABSENT));
       const dropped = [...plan.writes, ...plan.conflicts].filter(dropGuide).map(w => w.path);
       if (dropped.length) {
         plan.writes = plan.writes.filter(w => !dropGuide(w));
@@ -1975,7 +2057,7 @@ async function applySharedPatch(p) {
       await client.query('COMMIT');
       return { status: 200, body: { ok: true, noop: true, sync_version: curVersion } };
     }
-    let { next, productsTouched, urlTouched, guideTouched, quantityTouched, payTouched, payProducts, qtyProducts, missed, structure, structureTouched } = applyWrites(theirs, p.mine, plan.writes);
+    let { next, productsTouched, urlTouched, guideTouched, inflowUnitTouched, quantityTouched, payTouched, payProducts, qtyProducts, missed, structure, structureTouched } = applyWrites(theirs, p.mine, plan.writes);
     if (missed.length) {
       return await _abort(client, 409, { ok: false, code: 'write_unmatched', sync_version: curVersion, fields: missed.map(path => ({ path, label: _label(path) })),
         error: `상품·옵션 짝을 찾지 못해 저장하지 않았습니다: ${[...new Set(missed.map(path => _label(path)))].join(', ')}. 창을 닫고 다시 열어 주세요.` });
@@ -2113,7 +2195,7 @@ async function applySharedPatch(p) {
     let campaign = { applied: [] };
     if (camp && !recArchived && (plan.writes.length || rec)) {   // 결정 312: 보관 공고에는 쓰지 않는다
       campaign = await projectToCampaignInTx(client, camp, next, writtenKeys, productsTouched,
-        { prev: theirs, payTouched, urlTouched: urlTouched || !!(rec && recPlan.force.urlTouched), guideTouched, quantityChanged: quantityChanged || !!(rec && recPlan.force.quantity), structureTouched, structure, reviewTypeChanged: reviewTypeWritten || writtenKeys.has('review_type_mix'), actor: p.actor || p.origin });
+        { prev: theirs, payTouched, urlTouched: urlTouched || !!(rec && recPlan.force.urlTouched), guideTouched, inflowUnitTouched, quantityChanged: quantityChanged || !!(rec && recPlan.force.quantity), structureTouched, structure, reviewTypeChanged: reviewTypeWritten || writtenKeys.has('review_type_mix'), actor: p.actor || p.origin });
       if (campaign.reject) {
         const { campaignSyncNotice } = require('./campaignPayAmountSync.service');
         return await _abort(client, 409, { ok: false, code: 'campaign_rejected', sync_version: curVersion,
