@@ -19,7 +19,7 @@ const SHARED = {
     'review_fee', 'pay_amount', 'product_option'],   // 5단계 — 리뷰비 · 결제합계 · 상품 요약 문장
   recruit_campaigns: ['work_detail', 'thumbnail_url', 'time_range', 'window_start', 'window_end', 'landing_url', 'channel', 'channel_custom',
     'review_fee'],   // 5단계
-  campaign_options: ['option_url', 'inflow_guide_html', 'inflow_guide_images', 'pay_amount'],   // 5단계 — 옵션 결제금액
+  campaign_options: ['option_url', 'inflow_guide_html', 'inflow_guide_images', 'pay_amount', 'inflow_type'],   // 5단계 — 옵션 결제금액 · 결정 333 줄 유입방식
 };
 /** 파일|함수(또는 라우트)|표 → 왜 괜찮은가. */
 const ALLOW = {
@@ -44,6 +44,8 @@ const ALLOW = {
   'services/campaignPayAmountSync.service.js|syncCampaignInflowInTx|recruit_campaigns': '공유 저장 투영 본체 + 옛 래퍼',
   'services/campaignPayAmountSync.service.js|syncCampaignInflowInTx|campaign_options': '공유 저장 투영 본체 + 옛 래퍼',
   'services/campaignPayAmountSync.service.js|syncCampaignPurchaseWindowInTx|recruit_campaigns': '공유 저장 투영 본체 + 옛 래퍼',
+  'services/sharedPatch.service.js|_projectUnitInflowInTx|recruit_campaigns': '공유 저장 투영(공고 전체 유입방식 · 가이드 검사 전에 · 같은 트랜잭션 · 결정 333)',
+  'services/sharedPatch.service.js|_projectUnitInflowInTx|campaign_options': '공유 저장 투영(줄마다 유입방식 ← 오더 상품 inflow_type · 같은 트랜잭션 · 결정 333)',
   'services/sharedPatch.service.js|projectToCampaignInTx|recruit_campaigns': '공유 저장 투영',
   'services/sharedPatch.service.js|projectToCampaignInTx|campaign_options': '공유 저장 투영',
 };

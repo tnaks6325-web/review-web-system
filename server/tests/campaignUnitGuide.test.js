@@ -239,6 +239,7 @@ async function pgChecks(url) {
       updated_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE (campaign_id, opt_key))`);
     // 뒤 마이그레이션이 더한 칸(상품 사진 · 결정 277 상품 주소) — 아래에서 코드의 INSERT 를 그대로 실행하므로 표도 지금 모양이어야 한다
     await c.query(`ALTER TABLE campaign_options ADD COLUMN thumbnail_url TEXT NOT NULL DEFAULT '', ADD COLUMN product_url TEXT NULL`);
+    await c.query(`ALTER TABLE campaign_options ADD COLUMN inflow_type TEXT NULL`);   // 213 결정 333 — 줄 유입방식
     await c.query(`INSERT INTO recruit_campaigns VALUES ('c1','복합')`);
     await c.query(`INSERT INTO campaign_options (campaign_id, opt_key) VALUES ('c1','옛옵션')`);
 
@@ -256,10 +257,10 @@ async function pgChecks(url) {
     const i = routes.indexOf('`INSERT INTO campaign_options (campaign_id, opt_key');
     const sql = routes.slice(i + 1, routes.indexOf('`', i + 1));
     const run = o => c.query(sql, ['c1', o.k, '', 0, 0, 0, '[]', o.s, o.status || 'active',
-      o.p || '', o.u || 'option', o.g || '', '[]', '', null]);
+      o.p || '', o.u || 'option', o.g || '', '[]', '', null, o.it === undefined ? null : o.it]);
     await run({ k: '옵션A', s: 0, p: '상품A', u: 'option', g: '<p>A</p>' });
     await run({ k: '옵션B', s: 1, p: '상품A', u: 'option', g: '<p>B</p>' });
-    await run({ k: '상품B', s: 2, p: '상품B', u: 'product', g: '<p>P</p>' });
+    await run({ k: '상품B', s: 2, p: '상품B', u: 'product', g: '<p>P</p>', it: 'link' });
     const units = await c.query(`SELECT opt_key, product_name, unit_kind FROM campaign_options
                                   WHERE campaign_id='c1' AND opt_key <> '옛옵션' ORDER BY sort_order`);
     assert.equal(units.rows.length, 3, '리뷰어 선택지 3가지(A옵션1·A옵션2·상품B)');
@@ -268,10 +269,13 @@ async function pgChecks(url) {
 
     // 업서트가 새 컬럼을 갱신하고 status 는 미지정 시 보존(COALESCE $9)
     await c.query(`UPDATE campaign_options SET status='closed' WHERE opt_key='상품B'`);
-    await c.query(sql, ['c1', '상품B', '', 0, 0, 0, '[]', 2, null, '상품B', 'product', '<p>수정</p>', '[]', '', null]);
-    const up = await c.query(`SELECT status, inflow_guide_html FROM campaign_options WHERE opt_key='상품B'`);
+    await c.query(sql, ['c1', '상품B', '', 0, 0, 0, '[]', 2, null, '상품B', 'product', '<p>수정</p>', '[]', '', null, null]);
+    const up = await c.query(`SELECT status, inflow_guide_html, inflow_type FROM campaign_options WHERE opt_key='상품B'`);
     assert.equal(up.rows[0].status, 'closed', 'status 미지정은 기존 상태 보존(조용한 재오픈 금지)');
     assert.equal(up.rows[0].inflow_guide_html, '<p>수정</p>', '가이드는 갱신');
+    assert.equal(up.rows[0].inflow_type, 'link', '결정 333 — 줄 유입방식 미지정(null)은 저장값 보존(옛 공고 창이 지우지 않는다)');
+    const fresh = await c.query(`SELECT inflow_type FROM campaign_options WHERE opt_key='옵션A'`);
+    assert.equal(fresh.rows[0].inflow_type, '', '새 줄 미지정 = 빈 값(공고 전체 값을 따름)');
     t('PG: 업서트 — 가이드는 갱신 / status 미지정은 보존', () => {});
   } finally {
     try { await c.query(`DROP SCHEMA ${schema} CASCADE`); } catch (_) { /* noop */ }
