@@ -95,7 +95,10 @@ router.post('/', authMiddleware, async (req, res, next) => {
            ON CONFLICT (phone) DO UPDATE SET name = $2, reason = $3`,
           [cleanPhone, name || '', reason || '', req.admin?.name || '']
         );
-        return res.json({ ok: true });
+        // ★ 결정 050 개정(2026-11-05): 어느 창구로 넣든 보관 안 된 공고 전부에 「참여 불가」 — 등록리뷰어DB 토글과 같은 함수
+        const { added } = await require('../services/reviewerGate.service')
+          .blockOnOpenCampaigns({ phone8: cleanPhone, name: name || '', by: req.admin?.name || '' });
+        return res.json({ ok: true, campaignBlocksAdded: added });
       }
       case 'remove': {
         if (!phone) return res.json({ error: '전화번호가 필요합니다.' });

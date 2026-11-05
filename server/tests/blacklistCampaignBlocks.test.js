@@ -121,10 +121,44 @@ async function withModule(rel, handler, run) {
     });
   });
 
-  await ta('2d 블랙리스트 등록(on)은 공고별 차단을 건드리지 않는다', async () => {
-    await withModule('services/reviewerGate.service', () => null, async (svc, calls) => {
-      await svc.setGlobalBlacklist({ phone: '01057671782', on: true, reason: 'r', by: 'x' });
-      assert.ok(!calls.some(c => /campaign_reviewer_gates/.test(c.sql)));
+  /* ★ 결정 050 개정(사용자 확정 2026-11-05 「b」) — 종전 2d(「등록은 공고별 차단을 건드리지 않는다」)를 뒤집는다.
+     등록 = 같은 트랜잭션에서 보관 안 된 공고 전부에 「참여 불가」를 **더하기만** 한다(기존 행 UPDATE·DELETE 0 · 허용 예외 무접촉). */
+  await ta('2d 블랙리스트 등록(on) = 같은 트랜잭션에서 보관 안 된 공고에 차단을 더한다(기존 행은 건드리지 않는다)', async () => {
+    await withModule('services/reviewerGate.service', (sql) => {
+      if (/INSERT INTO blacklist/.test(sql)) return { rows: [{ name: '김가짜' }] };
+      if (/INSERT INTO campaign_reviewer_gates/.test(sql)) return { rows: [], rowCount: 17 };
+    }, async (svc, calls) => {
+      const r = await svc.setGlobalBlacklist({ phone: '01057671782', on: true, reason: 'r', by: '박세희' });
+      assert.deepStrictEqual(r, { on: true, campaignBlocksAdded: 17 });
+      const kinds = calls.map(c => /^BEGIN|^COMMIT/.test(c.sql) ? c.sql : /INSERT INTO blacklist/.test(c.sql) ? 'blacklist' : /INSERT INTO campaign_reviewer_gates/.test(c.sql) ? 'gates' : '?');
+      assert.deepStrictEqual(kinds, ['BEGIN', 'blacklist', 'gates', 'COMMIT'], '한 트랜잭션');
+      const gate = calls.find(c => /INSERT INTO campaign_reviewer_gates/.test(c.sql));
+      assert.ok(/c\.archived_at IS NULL/.test(gate.sql), '보관된 공고는 대상 아님');
+      assert.ok(/NOT EXISTS[\s\S]*released_at IS NULL/.test(gate.sql), '활성 행(허용·이미 차단)이 있으면 건드리지 않는다');
+      assert.ok(/'block', 'closed'/.test(gate.sql), '「마감」으로 보인다');
+      assert.ok(/ON CONFLICT DO NOTHING/.test(gate.sql));
+      assert.deepStrictEqual(gate.params, ['57671782', '김가짜', '박세희 · 블랙리스트 자동']);
+      assert.ok(!calls.some(c => /UPDATE campaign_reviewer_gates|DELETE FROM campaign_reviewer_gates/.test(c.sql)));
+    });
+  });
+  await ta('2e 공고 차단을 넣다 실패하면 블랙리스트 등록도 되돌린다(반쪽 등록 금지)', async () => {
+    await withModule('services/reviewerGate.service', (sql) => {
+      if (/INSERT INTO campaign_reviewer_gates/.test(sql)) throw new Error('db down');
+    }, async (svc, calls) => {
+      await assert.rejects(() => svc.setGlobalBlacklist({ phone: '01057671782', on: true, reason: 'r', by: 'x' }));
+      assert.ok(calls.some(c => /ROLLBACK/.test(c.sql)) && !calls.some(c => /COMMIT/.test(c.sql)));
+    });
+  });
+  await ta('2f 새 공고 = 블랙리스트 전원을 그 공고에 차단(뒤 8자리 · 활성 행 있으면 무접촉)', async () => {
+    await withModule('services/reviewerGate.service', (sql) => {
+      if (/INSERT INTO campaign_reviewer_gates/.test(sql)) return { rows: [], rowCount: 50 };
+    }, async (svc, calls) => {
+      assert.deepStrictEqual(await svc.blockBlacklistOnCampaign('camp_x', '김담당'), { added: 50 });
+      assert.deepStrictEqual(calls[0].params, ['camp_x', '김담당 · 블랙리스트 자동']);
+      assert.ok(/FROM blacklist/.test(calls[0].sql) && /RIGHT\(REGEXP_REPLACE\(phone/.test(calls[0].sql));
+      assert.ok(/NOT EXISTS[\s\S]*released_at IS NULL/.test(calls[0].sql) && /ON CONFLICT DO NOTHING/.test(calls[0].sql));
+      assert.deepStrictEqual(await svc.blockBlacklistOnCampaign('', 'x'), { added: 0 });
+      assert.strictEqual(calls.length, 1);
     });
   });
 
@@ -134,6 +168,14 @@ async function withModule(rel, handler, run) {
   const wd = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
   t('3a 관리자 대시보드 옛 해제 경로도 같은 함수를 쓴다(어디서 풀든 같은 결과)', () =>
     assert.ok((() => { const i = dg.indexOf("case 'remove'"), j = dg.indexOf("case 'check'", i); return i >= 0 && j > i && /setGlobalBlacklist\(\{ phone: cleanPhone, on: false/.test(dg.slice(i, j)); })()));
+  t('3a3 ★ 옛 등록 경로도 공고별 차단을 같은 함수로 넣는다(결정 050 개정)', () =>
+    assert.ok((() => { const i = dg.indexOf("case 'add'"), j = dg.indexOf("case 'remove'", i); return i >= 0 && j > i && /blockOnOpenCampaigns\(\{ phone8: cleanPhone/.test(dg.slice(i, j)); })()));
+  t('3a4 ★ 새 공고 생성은 저장 직후 블랙리스트 전원을 차단한다(fail-soft)', () => {
+    const cr = fs.readFileSync(SRC('routes/campaign.routes.js'), 'utf8');
+    const ins = cr.indexOf('INSERT INTO recruit_campaigns'), call = cr.indexOf('.blockBlacklistOnCampaign(rows[0].id', ins);
+    assert.ok(ins > 0 && call > ins, '공고 INSERT 뒤에 부른다');
+    assert.ok(/try \{ await require\('\.\.\/services\/reviewerGate\.service'\)\.blockBlacklistOnCampaign[\s\S]{0,200}catch \(e\) \{ blacklistWarning/.test(cr), '실패해도 공고 생성은 유지');
+  });
   t('3a2 ★ 옛 해제 경로는 관리자·마스터만(일괄 해제 권한 확대 금지)', () =>
     assert.ok(/case 'remove'[\s\S]{0,500}role !== 'admin' && role !== 'master'[\s\S]{0,200}status\(403\)[\s\S]{0,400}setGlobalBlacklist/.test(dg)));
   t('3b 새 서버에는 따로 푸는 창구가 없고 화면 확인창도 없다 · 옛 서버 응답일 때만 옛 창구로 대신 푼다', () => {
