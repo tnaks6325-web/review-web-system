@@ -183,19 +183,87 @@ async function annotateReviewerRows(rows, db = pool) {
   });
 }
 
+/* ── ★★ 블랙리스트 → 공고별 「참여 불가」 자동 반영 (결정 050 개정 · 사용자 확정 2026-11-05 「b」) ──
+   종전(Q1=B)은 공고 팝업의 「모두 차단」을 누르는 순간의 명단을 복사했다 → 나중에 추가한 사람은 이미 차단을 눌러 둔
+   공고에서 빠졌다(운영 실측 11/05: 진행 공고 17곳 모두 「모두 차단」을 눌러 둠 · 그중 1곳에 1명 누락).
+   이제 ① 블랙리스트에 넣는 순간 보관 안 된 공고 전부에 ② 새로 만드는 공고에는 만들 때 블랙리스트 전원을 「참여 불가」로 넣는다.
+   ★ 대상 = 보관(archived_at) 안 된 공고 전부(작성중·게시중·마감) — 마감 뒤 다시 여는 공고도 빠지지 않게.
+   ★ 그 공고에 이미 활성 행(허용 예외 'allow' · 이미 차단)이 있으면 건드리지 않는다 — 사람이 정한 예외가 이긴다.
+   ★ 보이는 문구 = 'closed'(「마감」 — 기존 차단 3,641건 중 3,639건과 같음).
+   ★ 푸는 쪽은 종전 그대로 — 블랙리스트에서 빼면 그 번호의 모든 공고 차단을 함께 푼다(releaseCampaignBlocks). */
+const AUTO_BLOCK_BY = (by) => (String(by || '').slice(0, 60) + ' · 블랙리스트 자동').trim();
+/* ★ 등록과 공고 생성이 겹치면(Codex 리뷰) 등록 쪽 공고 훑기가 새 공고 커밋 전에 끝나고, 새 공고 쪽 명단 읽기가 등록 커밋 전에
+   끝나 둘 다 놓칠 수 있다 → 같은 트랜잭션 잠금으로 줄을 세운다. 새 공고 쪽은 공고가 커밋된 **뒤** 잠그므로,
+   등록이 먼저 잠그면 새 공고 쪽이 기다렸다가 등록된 명단을 보고, 새 공고 쪽이 먼저면 등록 쪽 훑기가 새 공고를 본다. */
+const PROPAGATION_LOCK_SQL = `SELECT pg_advisory_xact_lock(hashtext('blacklist_campaign_blocks'))`;
+async function _inTx(db, fn) {
+  const client = typeof db.connect === 'function' ? await db.connect() : null;
+  const q = client || db;
+  try {
+    if (client) await q.query('BEGIN');
+    await q.query(PROPAGATION_LOCK_SQL);
+    const out = await fn(q);
+    if (client) await q.query('COMMIT');
+    return out;
+  } catch (err) {
+    if (client) { try { await q.query('ROLLBACK'); } catch (_) { /* noop */ } }
+    throw err;
+  } finally { if (client) client.release(); }
+}
+
+async function blockOnOpenCampaigns({ phone8, name, by }, db = pool) {
+  const p8 = String(phone8 || '').replace(/[^0-9]/g, '').slice(-8);
+  if (p8.length !== 8) return { added: 0 };
+  const { rowCount } = await db.query(
+    `INSERT INTO campaign_reviewer_gates (campaign_id, phone8, reviewer_name, mode, message_type, created_by)
+     SELECT c.id, $1, $2, 'block', 'closed', $3
+       FROM recruit_campaigns c
+      WHERE c.archived_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM campaign_reviewer_gates g
+                         WHERE g.campaign_id = c.id AND g.phone8 = $1 AND g.released_at IS NULL)
+     ON CONFLICT DO NOTHING`,
+    [p8, String(name || '').slice(0, 40), AUTO_BLOCK_BY(by)]);
+  return { added: rowCount | 0 };
+}
+
+/** 새 공고 — 블랙리스트 전원을 이 공고의 「참여 불가」로 넣는다(공고가 커밋된 뒤 · 등록과 같은 잠금). */
+async function blockBlacklistOnCampaign(campaignId, by, db = pool) {
+  if (!campaignId) return { added: 0 };
+  return _inTx(db, async (q) => {
+    const { rowCount } = await q.query(
+      `INSERT INTO campaign_reviewer_gates (campaign_id, phone8, reviewer_name, mode, message_type, created_by)
+       SELECT $1, b.p8, b.name, 'block', 'closed', $2
+         FROM (SELECT DISTINCT ON (p8) p8, LEFT(COALESCE(name, ''), 40) AS name
+                 FROM (SELECT RIGHT(REGEXP_REPLACE(phone,'[^0-9]','','g'), 8) AS p8, name, added_at FROM blacklist) x
+                WHERE LENGTH(p8) = 8
+                ORDER BY p8, added_at DESC) b
+        WHERE NOT EXISTS (SELECT 1 FROM campaign_reviewer_gates g
+                           WHERE g.campaign_id = $1 AND g.phone8 = b.p8 AND g.released_at IS NULL)
+       ON CONFLICT DO NOTHING`,
+      [String(campaignId), AUTO_BLOCK_BY(by)]);
+    return { added: rowCount | 0 };
+  });
+}
+
 /* ── 전역 블랙리스트 등록/해제 — 등록리뷰어DB 토글(즉시 적용, 사용자 확정) ──
-   기존 blacklist 테이블(001, phone UNIQUE) 재사용. 효력 = 공고별 팝업 상단 자동 표시(Q1=B —
-   전역 자동 차단은 여전히 CAMPAIGN_REVIEWER_GATE_GLOBAL 옵트인 뒤에만). */
-async function setGlobalBlacklist({ phone, on, reason, by }, db = pool) {
+   기존 blacklist 테이블(001, phone UNIQUE) 재사용. 등록 = 같은 트랜잭션에서 보관 안 된 공고 전부에 「참여 불가」(위 개정).
+   (CAMPAIGN_REVIEWER_GATE_GLOBAL 옵트인은 종전 그대로 — 꺼져 있다.) */
+async function setGlobalBlacklist({ phone, on, reason, by, name }, db = pool) {
   const clean = String(phone || '').replace(/[^0-9]/g, '');
   if (clean.length < 8) throw new Error('전화번호가 올바르지 않습니다.');
   if (on) {
-    await db.query(
-      `INSERT INTO blacklist (phone, name, reason, added_by)
-       SELECT $1, (SELECT name FROM reviewers WHERE REGEXP_REPLACE(phone,'[^0-9]','','g') = $1 LIMIT 1), $2, $3
-       ON CONFLICT (phone) DO UPDATE SET reason = EXCLUDED.reason, added_by = EXCLUDED.added_by, added_at = NOW()`,
-      [clean, String(reason || '').slice(0, 200), String(by || '')]);
-    return { on: true };
+    // name = 옛 관리자 창구(/api/blacklist add)가 적어 보낸 이름 — 없으면 종전대로 리뷰어 명부의 이름
+    return _inTx(db, async (q) => {
+      const { rows: [b] } = await q.query(
+        `INSERT INTO blacklist (phone, name, reason, added_by)
+         SELECT $1, COALESCE(NULLIF($4, ''), (SELECT name FROM reviewers WHERE REGEXP_REPLACE(phone,'[^0-9]','','g') = $1 LIMIT 1)), $2, $3
+         ON CONFLICT (phone) DO UPDATE SET name = COALESCE(NULLIF($4, ''), blacklist.name),
+                                           reason = EXCLUDED.reason, added_by = EXCLUDED.added_by, added_at = NOW()
+         RETURNING name`,
+        [clean, String(reason || '').slice(0, 200), String(by || ''), String(name || '').trim()]);
+      const { added } = await blockOnOpenCampaigns({ phone8: clean, name: b && b.name, by }, q);
+      return { on: true, campaignBlocksAdded: added };
+    });
   }
   /* ★★ 블랙리스트 해제 = 다시 참여 가능 (사용자 확정 2026-10-01 — "똑같이 풀어져야 한다")
        공고별 "참여 불가"(campaign_reviewer_gates block)는 별개 표라, 블랙리스트만 지우면 리뷰어에게는
@@ -320,7 +388,7 @@ async function saveCriteria(raw, db = pool) {
 }
 
 module.exports = {
-  countCampaignBlocks, releaseCampaignBlocks,
+  countCampaignBlocks, releaseCampaignBlocks, blockOnOpenCampaigns, blockBlacklistOnCampaign,
   checkApplyGate, listGates, searchReviewers, applyGateChanges,
   getCriteria, saveCriteria,
   annotateReviewerRows, setGlobalBlacklist, listGlobalBlacklist,

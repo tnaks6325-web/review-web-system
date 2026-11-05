@@ -84,10 +84,13 @@ function ok(name, cond, extra) {
     const calls = [];
     const db = { query: async (sql, params) => { calls.push({ sql, params }); return { rows: [] }; } };
     await svc.setGlobalBlacklist({ phone: '010-1010-1234', on: true, reason: 'r', by: '만두' }, db);
-    ok('등록 = blacklist upsert(ON CONFLICT phone)', /INSERT INTO blacklist[\s\S]{0,200}ON CONFLICT \(phone\) DO UPDATE/.test(calls[0].sql)
-      && calls[0].params[0] === '01010101234');
+    // ★ 결정 050 개정: 등록 앞에 잠금 한 줄이 붙어 순번 대신 내용으로 찾는다(의미 불변)
+    const ins = calls.find(c => /INSERT INTO blacklist/.test(c.sql));
+    ok('등록 = blacklist upsert(ON CONFLICT phone)', !!ins && /INSERT INTO blacklist[\s\S]{0,300}ON CONFLICT \(phone\) DO UPDATE/.test(ins.sql)
+      && ins.params[0] === '01010101234');
     await svc.setGlobalBlacklist({ phone: '010-1010-1234', on: false }, db);
-    ok('해제 = DELETE(숫자 정규화 매칭)', /DELETE FROM blacklist/.test(calls[1].sql));
+    // ★ 결정 050 개정(2026-11-05): 등록이 공고별 차단 INSERT 를 한 번 더 하므로 순번 대신 내용으로 찾는다(의미 불변)
+    ok('해제 = DELETE(숫자 정규화 매칭)', calls.some(c => /DELETE FROM blacklist/.test(c.sql)));
     let threw = false;
     try { await svc.setGlobalBlacklist({ phone: '123', on: true }, db); } catch (_) { threw = true; }
     ok('짧은 번호는 거부', threw);

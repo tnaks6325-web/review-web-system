@@ -88,14 +88,14 @@ router.post('/', authMiddleware, async (req, res, next) => {
     switch (act) {
       case 'add': {
         if (!phone) return res.json({ error: '전화번호가 필요합니다.' });
+        // ★ 결정 050 개정(2026-11-05): 등록 = 보관 안 된 공고 전부에 「참여 불가」(일괄 차단) — 해제와 같은 권한(관리자·마스터)만.
+        //   등록리뷰어DB 토글과 같은 단일 함수(등록·공고 차단이 한 트랜잭션 — 반쪽 등록 없음).
+        const role = req.admin && req.admin.role;
+        if (role !== 'admin' && role !== 'master') return res.status(403).json({ ok: false, error: '관리자 권한이 필요합니다.' });
         const cleanPhone = phone.replace(/[^0-9]/g, '');
-        await pool.query(
-          `INSERT INTO blacklist (phone, name, reason, added_by)
-           VALUES ($1, $2, $3, $4)
-           ON CONFLICT (phone) DO UPDATE SET name = $2, reason = $3`,
-          [cleanPhone, name || '', reason || '', req.admin?.name || '']
-        );
-        return res.json({ ok: true });
+        const out = await require('../services/reviewerGate.service')
+          .setGlobalBlacklist({ phone: cleanPhone, on: true, reason: reason || '', name: name || '', by: req.admin?.name || '' });
+        return res.json({ ok: true, ...out });
       }
       case 'remove': {
         if (!phone) return res.json({ error: '전화번호가 필요합니다.' });

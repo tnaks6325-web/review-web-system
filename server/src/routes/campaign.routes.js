@@ -3638,6 +3638,11 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
     // ★ 061: 상품옵션 저장(제공 시). 원자 저장(캠페인 락) — 실패 시 응답에 경고 표면화(조용한 정원 오염 방지, 레드 #7).
     let optionsWarning = null;
     const requiredMemoWarning = await _saveRequiredDeliveryMemo(rows[0].id, required_delivery_memo, rows[0]);   // ★ 결정 260
+    /* ★★ 결정 050 개정(사용자 확정 2026-11-05 「b」): 새 공고에도 블랙리스트 전원을 「참여 불가」로 넣는다(「모두 차단」을 누르지 않아도).
+       fail-soft — 실패해도 공고는 만들어진다(종전처럼 팝업 「모두 차단」으로 넣을 수 있다) · 응답·로그에 남긴다. */
+    let blacklistWarning = null;
+    try { await require('../services/reviewerGate.service').blockBlacklistOnCampaign(rows[0].id, req.admin?.name || ''); }
+    catch (e) { blacklistWarning = '블랙리스트 자동 차단 실패 — 공고의 [🚫 리뷰어]에서 「모두 차단」을 눌러 주세요'; logger.warn('[campaign/create] 블랙리스트 자동 차단 실패: ' + e.message); }
     // 172: 처음부터 게시(모집중)로 만든 공고는 지금을 게시 시각으로 남긴다 — 실패해도 공고 생성은 유지(fail-soft)
     if (rows[0].status === 'active') { try { await pool.query(`UPDATE recruit_campaigns SET published_at = NOW() WHERE id = $1 AND published_at IS NULL`, [rows[0].id]); } catch (e) { logger.warn('[campaign/create] 게시 시각 기록 실패: ' + e.message); } }
     if (normOpts) { try { await _saveCampaignOptions(rows[0].id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/create] ' + optionsWarning); } }
@@ -3709,6 +3714,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       feeSchedules: await _loadFeeSchedules(pool, rows[0].id),
       ...(optionsWarning ? { optionsWarning } : {}), ...(feeWarning ? { feeWarning } : {}),
       ...(requiredMemoWarning ? { requiredMemoWarning } : {}),   // ★ 결정 260
+      ...(blacklistWarning ? { blacklistWarning } : {}),   // ★ 결정 050 개정
       ...(quotaSync ? { quotaSync } : {}),
       ...(bidirLink ? { bidirLink } : {}),
       ...(planPrefill ? { planPrefill } : {}) });

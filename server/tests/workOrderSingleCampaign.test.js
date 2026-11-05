@@ -81,7 +81,8 @@ const base = { title: '10/14 테스트 공고', status: 'draft' };
   console.log('\n[C] 오더 없이 만드는 공고는 종전 그대로');
   calls = []; released = 0; existing = [{ id: 'camp_old', title: 'x' }];
   await run({ ...base });
-  ok('잠금·확인 없음', !calls.some(c => /pg_advisory_xact_lock|c\.archived_at IS NULL AND c\.id <> \$2/.test(c.sql)));
+  // 결정 050 개정(2026-11-05): 공고 생성 뒤 블랙리스트 자동 차단이 자기 잠금(blacklist_campaign_blocks)을 쓴다 — 오더 잠금이 아니므로 제외(의미 불변)
+  ok('잠금·확인 없음', !calls.some(c => (/pg_advisory_xact_lock/.test(c.sql) && !/blacklist_campaign_blocks/.test(c.sql)) || /c\.archived_at IS NULL AND c\.id <> \$2/.test(c.sql)));
   const iInsC = calls.findIndex(c => /INSERT INTO recruit_campaigns/.test(c.sql));
   ok('저장은 기존처럼 pool 로(저장 전에 연결을 따로 잡지 않는다)', iInsC > -1 && calls[iInsC].via === 'pool'
     && !calls.slice(0, iInsC).some(c => c.via !== 'pool'));

@@ -6540,6 +6540,8 @@ async function saveRecruitPostImpl() {
        "저장됨" 으로만 보였다. 맨 위에 올려 다시 저장하게 한다(반쪽 저장을 조용히 넘기지 않는다). */
     if (saved && saved.feeWarning) _changed.unshift("⚠ " + saved.feeWarning + " — 다시 저장해 주세요");
     if (saved && saved.optionsWarning) _changed.unshift("⚠ " + saved.optionsWarning + " — 공고는 저장됐지만 옵션 표는 옛 값입니다. 다시 저장해 주세요");
+    // ★ 결정 050 개정: 새 공고에 블랙리스트 자동 차단이 실패했으면(공고는 만들어짐) 그 자리에서 할 일을 알린다
+    if (saved && saved.blacklistWarning) _changed.unshift("⚠ " + saved.blacklistWarning);
     /* ★ 결정 313: 인트라넷 오더로 만든 새 공고 — 발행 때 오더를 공고 값으로 자동 맞췄으면 그렇다고, 못 맞췄으면(값이 다른 채 연결 안 됨) 그 자리에서 알린다.
        판정·맞추기는 서버(bidirLink) — 화면은 말만 한다. 옛 서버(autoReconciled 없음)의 diverged 도 사실이므로 같은 ⚠ 를 띄운다. */
     if (saved && saved.bidirLink && !_recruitEditId) {
