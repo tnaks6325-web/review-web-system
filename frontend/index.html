@@ -335,6 +335,31 @@
       border-radius:9px; padding:1px 7px; min-width:20px; text-align:center;
     }
     .review-subtab.active .cnt { background:rgba(255,255,255,.28); color:#fff; }
+    /* 제출완료 정렬 줄 — 「제출완료 내역 N건」 + [최근 제출순 ▾] (사용자 요청 2026-11-05) */
+    .review-sortbar { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:2px 2px 10px; }
+    .review-sortbar .rs-title { font-size:.8rem; font-weight:700; color:var(--t1); min-width:0; }
+    .review-sortbar .rs-wrap { position:relative; flex-shrink:0; }
+    .review-sortbar .rs-btn {
+      display:flex; align-items:center; gap:6px; padding:7px 10px; border:1px solid var(--border);
+      border-radius:9px; background:#fff; color:var(--t1); font-size:.74rem; font-weight:700;
+      font-family:inherit; cursor:pointer;
+    }
+    .review-sortbar .rs-btn .rs-caret { font-size:.62rem; color:var(--t3); }
+    .review-sortbar .rs-wrap.open .rs-btn { border-color:var(--p); box-shadow:0 0 0 2px var(--p-light); }
+    .review-sortbar .rs-menu {
+      display:none; position:absolute; right:0; top:calc(100% + 4px); z-index:20; min-width:150px;
+      background:#fff; border:1px solid var(--border); border-radius:10px; padding:4px;
+      box-shadow:0 6px 18px rgba(15,23,42,.12);
+    }
+    .review-sortbar .rs-wrap.open .rs-menu { display:block; }
+    .review-sortbar .rs-opt {
+      display:flex; align-items:center; gap:8px; width:100%; padding:9px 10px; border:none; background:transparent;
+      border-radius:7px; font-size:.76rem; font-weight:600; color:var(--t1); font-family:inherit; cursor:pointer; text-align:left;
+    }
+    .review-sortbar .rs-opt:hover { background:#F1F5F9; }
+    .review-sortbar .rs-opt .fa-check { width:12px; color:var(--p); visibility:hidden; }
+    .review-sortbar .rs-opt.on { color:var(--p); font-weight:700; }
+    .review-sortbar .rs-opt.on .fa-check { visibility:visible; }
     /* 제출완료 카드도 눌러서 참여상품 정보 팝업(→ 이미지 확인·수정요청 / 1:1 문의)으로 들어간다 */
     .result-group-item-badge.done { background:var(--ok-light); color:#065F46; }
     .result-group-item-badge.paid { background:#E0E7FF; color:#3730A3; }
@@ -1700,6 +1725,7 @@ async function saveIdentityShoppingId(subIndex) {
    — 제출대기(기본) / 제출완료 서브탭
 ═══════════════════════════════════════ */
 let _reviewSubTab = 'pending';                       // 'pending' | 'done'
+let _reviewDoneSort = 'recent';                      // 제출완료 정렬: 'recent' 최근 제출순(기본) | 'old' 오래된 제출순
 let _reviewListData = { pending: [], done: [] };
 let _reviewListError = '';
 let _reviewListLoading = true;                       // 최초/재조회 중 스피너 유지용
@@ -1814,6 +1840,7 @@ async function loadReviewList(user, opts = {}) {
   }
   _reviewListLoading = false;
   renderReviewSubTab();
+  if (_reviewSubTab === 'done') _loadAllDoneHistory();
   _scheduleOrderPendingRefresh(user);
   _loadMissingCaptures(phone8);   // ⑤ 캡처 빠진 주문 보완 안내(해당 없으면 영역 자체가 숨겨짐)
   _loadReviewEarnings(phone8);    // ★ 리뷰내역 탭 상단 '받을 예정 금액' + 카드별 상품비/리뷰비(best-effort)
@@ -2170,6 +2197,7 @@ function switchReviewSubTab(key) {
   _saveReviewerHomeView();
   renderReviewSubTab();
   renderReviewSummary();   // 참여중=요약 노출 / 제출완료=숨김
+  if (_reviewSubTab === 'done') _loadAllDoneHistory();
 }
 
 /** yyyy.mm.dd 포맷 (제출완료 카드의 제출일 표시용) */
@@ -2189,6 +2217,57 @@ function _fmtReviewDateMeta(v) {
   const dd = String(d.getDate()).padStart(2, '0');
   const y = d.getFullYear();
   return (y === new Date().getFullYear()) ? `${mm}.${dd}` : `${String(y).slice(2)}.${mm}.${dd}`;
+}
+
+/** 제출완료 정렬 — 카드의 「제출 MM.DD」와 같은 값(reviewFileAt) 기준.
+ *  제출일이 없는 건은 두 순서 모두 맨 뒤 · 같은 시각이면 받은 순서 유지. 원본 배열은 건드리지 않는다. */
+function _sortDoneHistory(list, order) {
+  const at = v => { const n = v ? Date.parse(v) : NaN; return Number.isFinite(n) ? n : null; };
+  return list.map((item, i) => ({ item, i, t: at(item && item.reviewFileAt) }))
+    .sort((a, b) => {
+      if (a.t === null || b.t === null) return ((a.t === null) - (b.t === null)) || (a.i - b.i);
+      return (order === 'old' ? a.t - b.t : b.t - a.t) || (a.i - b.i);
+    })
+    .map(x => x.item);
+}
+
+/** 「제출완료 내역 N건 · [정렬 ▾]」 줄 — 목록 맨 위에 그린다(목록과 함께 다시 그려진다). */
+function _reviewSortBarEl(count) {
+  const bar = document.createElement('div');
+  bar.className = 'review-sortbar';
+  const label = _reviewDoneSort === 'old' ? '오래된 제출순' : '최근 제출순';
+  const opt = (key, text) => `<button type="button" class="rs-opt${_reviewDoneSort === key ? ' on' : ''}" role="option" aria-selected="${_reviewDoneSort === key}" onclick="setReviewDoneSort('${key}')"><i class="fas fa-check"></i>${text}</button>`;
+  bar.innerHTML = `<span class="rs-title">제출완료 내역 ${escHtml(String(count))}건</span>
+    <div class="rs-wrap" id="reviewSortWrap">
+      <button type="button" class="rs-btn" aria-haspopup="listbox" onclick="toggleReviewSortMenu(event)"><i class="fas fa-sort"></i>${label}<i class="fas fa-chevron-down rs-caret"></i></button>
+      <div class="rs-menu" role="listbox">${opt('recent', '최근 제출순')}${opt('old', '오래된 제출순')}</div>
+    </div>`;
+  return bar;
+}
+function toggleReviewSortMenu(ev) {
+  if (ev) ev.stopPropagation();
+  const w = document.getElementById('reviewSortWrap');
+  if (w) w.classList.toggle('open');
+}
+document.addEventListener('click', () => {
+  const w = document.getElementById('reviewSortWrap');
+  if (w) w.classList.remove('open');
+});
+async function setReviewDoneSort(key) {
+  _reviewDoneSort = key === 'old' ? 'old' : 'recent';
+  renderReviewSubTab();
+  await _loadAllDoneHistory();
+}
+/** 새 조회(50건씩 · 참여 생성 순으로 나눠 받음)는 받은 것만 정렬하면 두 순서 모두 틀린다
+ *  (최근 제출 건이 뒤쪽 페이지에 있을 수 있다) → 제출완료 탭이면 남은 페이지를 끝까지 받는다(최대 40쪽).
+ *  ★ 한 페이지라도 실패하면(커서가 그대로·오류) 멈춘다 — 같은 실패를 40번 되풀이하지 않는다. */
+async function _loadAllDoneHistory() {
+  for (let n = 0; n < 40; n++) {
+    if (_reviewSubTab !== 'done' || _historyMode !== 'owner_id' || !_historyCursors.done || _historyMoreBusy) return;
+    const before = _historyCursors.done;
+    await loadMoreReviewHistory();
+    if (_reviewListError || _historyCursors.done === before) return;
+  }
 }
 
 /** 대기 건 배지 텍스트 — 다중 캡처 슬롯 부분 제출이면 "n/m 제출"로 진행 표시 */
@@ -2261,7 +2340,7 @@ function renderReviewSubTab() {
     return;
   }
 
-  const list = isDone ? _reviewListData.done : _reviewListData.pending;
+  const list = isDone ? _sortDoneHistory(_reviewListData.done, _reviewDoneSort) : _reviewListData.pending;
   if (countEl) countEl.textContent = (_historyCounts?(_historyCounts.pending+_historyCounts.done):list.length) + "건";
 
   if (list.length === 0) {
@@ -2287,6 +2366,7 @@ function renderReviewSubTab() {
   });
 
   listEl.innerHTML = "";
+  if (isDone) listEl.appendChild(_reviewSortBarEl(_historyCounts ? _historyCounts.done : list.length));
   if(_reviewListError){
     const notice=document.createElement('div');notice.className='empty-state';
     notice.textContent='새로고침에 실패해 이전 내역을 표시합니다. '+_reviewListError;
