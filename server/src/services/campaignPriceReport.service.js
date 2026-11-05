@@ -153,6 +153,73 @@ async function recordPriceReport({ orderSubmissionId, phone8 = '', pool: dbPool 
 }
 
 /**
+ * 읽기 전용 일괄 상세. 신고 행을 기준으로 주문을 정확히 연결한다.
+ * 신청 명의는 같은 주문에 연결되고 신고자의 끝 8자리가 맞는 것만, 주문 명의도 같은 검증 후 사용.
+ * LATERAL 1건 + EXISTS로 신청/로그 중복이 신고 행을 늘리지 않게 한다.
+ * 현재 기록은 당시 신고 통로를 확정하지 못한다(두 근거가 있으면 둘 다 표시).
+ * 실패는 null — 신고 0건으로 꾸미지 않는다. 개인정보는 이 직원용 응답에만 가산한다.
+ */
+async function _reportersForCampaigns(db, campaignIds) {
+  if (!campaignIds.length) return [];
+  try {
+    const { rows } = await db.query(
+      `SELECT r.id, r.campaign_id, r.opt_key, r.order_submission_id AS order_id, r.created_at,
+              COALESCE(app.applicant_name, CASE WHEN ident.matches THEN os.orderer END) AS reporter_name,
+              COALESCE(app.applicant_phone, CASE WHEN ident.matches THEN ident.phone END) AS reporter_phone,
+              os.capture_flags,
+              EXISTS (SELECT 1 FROM reviewer_event_logs ev
+                       WHERE ev.order_submission_id::text = r.order_submission_id
+                         AND ev.event_type = 'order_canceled_by_reviewer'
+                         AND ev.context->>'reasonKey' = 'price') AS price_cancel
+         FROM campaign_price_reports r
+         LEFT JOIN order_submissions os ON os.id::text = r.order_submission_id
+         LEFT JOIN LATERAL (
+           SELECT regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g') AS phone,
+                  r.reporter ~ '^[0-9]{8}$'
+                  AND length(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g')) BETWEEN 10 AND 15
+                  AND right(regexp_replace(COALESCE(os.phone,''), '[^0-9]', '', 'g'),8) = r.reporter AS matches
+         ) ident ON TRUE
+         LEFT JOIN LATERAL (
+           SELECT ca.applicant_name,
+                  regexp_replace(ca.applicant_phone, '[^0-9]', '', 'g') AS applicant_phone
+             FROM campaign_applications ca
+            WHERE os.id IS NOT NULL AND ca.campaign_id = r.campaign_id
+              AND (ca.id = os.campaign_application_id OR ca.order_submission_id = os.id)
+              AND r.reporter ~ '^[0-9]{8}$'
+              AND length(regexp_replace(COALESCE(ca.applicant_phone,''), '[^0-9]', '', 'g')) BETWEEN 10 AND 15
+              AND right(regexp_replace(COALESCE(ca.applicant_phone,''), '[^0-9]', '', 'g'),8) = r.reporter
+            ORDER BY (ca.id = os.campaign_application_id) DESC NULLS LAST, ca.applied_at DESC NULLS LAST, ca.id DESC
+            LIMIT 1
+         ) app ON TRUE
+        WHERE r.campaign_id = ANY($1::text[]) AND r.cleared_at IS NULL
+          AND (EXISTS (SELECT 1 FROM campaign_options co WHERE co.campaign_id = r.campaign_id AND co.opt_key = r.opt_key AND COALESCE(co.status,'active') <> 'closed')
+               OR (r.opt_key = '' AND NOT EXISTS (SELECT 1 FROM campaign_options lo WHERE lo.campaign_id = r.campaign_id AND COALESCE(lo.status,'active') <> 'closed')))
+        ORDER BY r.created_at DESC, r.id DESC`, [[...new Set(campaignIds.map(String))]]);
+    return rows.map(r => {
+      const capture = _parseWd(r.capture_flags);
+      const flags = capture && Array.isArray(capture.flags) ? capture.flags : [];
+      const price = flags.find(f => f && (f.code === 'price_diff' || f.code === 'price_over'));
+      const sources = [];
+      if (price) sources.push('capture_price_check');
+      if (r.price_cancel) sources.push('reviewer_price_cancel');
+      const amount = v => v != null && v !== '' && Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : null;
+      return {
+        reportId: String(r.id), campaignId: String(r.campaign_id), optKey: r.opt_key,
+        orderSubmissionId: String(r.order_id), name: r.reporter_name || null, phone: r.reporter_phone || null,
+        reportedAt: r.created_at, sources, routeConfirmed: false,
+        evidenceLevel: sources.length ? 'record_evidence' : 'unknown',
+        reason: sources.length ? [price ? '금액 차이 검사 기록' : '', r.price_cancel ? '직접 가격 신고(가격 사유 취소) 기록' : ''].filter(Boolean).join(' · ') : '신고 경로 확인 안 됨',
+        expectedAmount: price ? amount(price.expected) : null, paidAmount: price ? amount(price.paid) : null,
+      };
+    });
+  } catch (_) {
+    // 오류 전문에 개인정보가 실릴 수 있어 고정 문구만 남긴다.
+    logger.warn('[price-report] 신고자 상세를 불러오지 못함');
+    return null;
+  }
+}
+
+/**
  * 열린 알림 목록(관리자 전원 공용). 공고·상품이 사라졌거나 마감·보관된 알림은 정리한다.
  * @returns {{ok:true, items:Array}}
  */
@@ -183,6 +250,8 @@ async function listOpenAlerts({ pool: dbPool } = {}) {
     });
   }
   if (gone.length) _closeGone(db, gone).catch(() => {});
+  const reporters = await _reportersForCampaigns(db, items.map(it => it.campaignId));
+  for (const it of items) it.reporters = reporters === null ? null : reporters.filter(r => r.campaignId === it.campaignId && r.optKey === it.optKey);
   return { ok: true, items };
 }
 
@@ -408,8 +477,9 @@ async function resolveAlert({ id, action, amount, by = '', pool: dbPool } = {}) 
 }
 
 /**
- * 작업조건 카드용 — 상품별 쌓인 가격 신고 수 + 최근 처리 이력. 실패 = null(카드는 그 줄을 그리지 않는다).
- * @returns {{open:Array<{optKey,reports}>, history:Array<{optKey,resolution,oldAmount,newAmount,by,at}>}|null}
+ * 작업조건 카드용 — 상품별 쌓인 가격 신고 수 + 최근 처리 이력 + 별도 신고자 상세.
+ * 기본 조회 실패 = null, 상세만 실패 = reporters:null(화면에서 실패 안내). open/history 기존 계약 불변.
+ * @returns {{open:Array<{optKey,reports}>, history:Array<{optKey,resolution,oldAmount,newAmount,by,at}>, reporters:Array|null}|null}
  */
 async function priceReportsForCampaign(db, campaignId) {
   if (!campaignId) return null;
@@ -429,6 +499,7 @@ async function priceReportsForCampaign(db, campaignId) {
         WHERE campaign_id = $1 AND resolved_at IS NOT NULL AND resolution IN ('edited','kept','deferred')
         ORDER BY resolved_at DESC LIMIT ${HISTORY_LIMIT}`, [campaignId]);
     return {
+      reporters: await _reportersForCampaigns(q, [campaignId]),
       open: open.map(r => ({ optKey: r.opt_key, reports: Number(r.who) || 0 })).filter(r => r.reports > 0),
       history: hist.map(r => ({
         optKey: r.opt_key, resolution: r.resolution,
