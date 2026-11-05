@@ -21,7 +21,8 @@ const stamp = Date.now();
 const id = (k) => `camp_bla_${k}_${stamp}`;
 const P1 = '010' + String(stamp).slice(-8), P1_8 = P1.slice(-8);
 const P2 = '010' + String(stamp + 7).slice(-8), P2_8 = P2.slice(-8);
-const ids = ['active', 'draft', 'closed', 'archived', 'allow', 'new'].map(id);
+const ids = ['active', 'draft', 'closed', 'archived', 'allow', 'new', 'race'].map(id);
+const P3 = '010' + String(stamp + 13).slice(-8), P3_8 = P3.slice(-8);
 let pass = 0;
 async function t(name, fn) { await fn(); pass++; console.log('  ✓ ' + name); }
 const active = async (cid, p8) => (await pool.query(
@@ -84,11 +85,29 @@ const active = async (cid, p8) => (await pool.query(
       assert.deepStrictEqual(await svc.checkApplyGate(pool, id('active'), P1_8), { blocked: false }, '풀린 뒤 참여 가능');
     });
 
+    await t('⑤ 등록과 공고 생성이 겹쳐도 빠지지 않는다(같은 잠금으로 줄 세우기 — Codex 리뷰)', async () => {
+      // 등록 트랜잭션이 잠금을 쥐고 아직 커밋 전 → 그 사이 새 공고가 커밋되고 새 공고 쪽 차단이 시작된다
+      const c1 = await pool.connect();
+      try {
+        await c1.query('BEGIN');
+        await c1.query(`SELECT pg_advisory_xact_lock(hashtext('blacklist_campaign_blocks'))`);
+        await c1.query(`INSERT INTO blacklist (phone, name, reason, added_by) VALUES ($1, '가짜셋', '', '')`, [P3]);
+        await mk(id('race'), 'draft');
+        let done = false;
+        const p = svc.blockBlacklistOnCampaign(id('race'), '김담당').then(r => { done = true; return r; });
+        await new Promise(r => setTimeout(r, 400));
+        assert.strictEqual(done, false, '등록이 끝날 때까지 기다린다');
+        await c1.query('COMMIT');
+        await p;
+      } finally { c1.release(); }
+      assert.deepStrictEqual(await active(id('race'), P3_8), [{ mode: 'block', message_type: 'closed' }], '등록 커밋 뒤 명단을 읽어 빠지지 않음');
+    });
+
     console.log(`\n✅ blacklistAutoCampaignBlocksPg: ${pass}개 통과`);
   } finally {
     await pool.query(`DELETE FROM campaign_reviewer_gates WHERE campaign_id = ANY($1)`, [ids]).catch(() => {});
     await pool.query(`DELETE FROM recruit_campaigns WHERE id = ANY($1)`, [ids]).catch(() => {});
-    await pool.query(`DELETE FROM blacklist WHERE phone = ANY($1)`, [[P1, P2]]).catch(() => {});
+    await pool.query(`DELETE FROM blacklist WHERE phone = ANY($1)`, [[P1, P2, P3]]).catch(() => {});
     await pool.end();
   }
 })().catch(e => { console.error(e); process.exitCode = 1; });
