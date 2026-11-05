@@ -80,9 +80,18 @@ async function stubs() {
   // 상품 글자 금액(상품 1개 공고 — 앰플 사례)
   let d = await cpc.decideAtSubmit({ holdCtx: HOLD(), capturePrice: '43,000', db: stubDb([camp('네이버', '앰플 - 결제금액 25,000원')]) });
   assert.equal(d.action, 'warn'); assert.equal(d.expected, 25000); assert.equal(d.paid, 43000); assert.equal(d.paidSource, 'capture');
-  // AI 값 우선 — 리뷰어가 적은 값으로 피해 가지 못한다
-  d = await cpc.decideAtSubmit({ holdCtx: HOLD(), capturePrice: '43000', typedPrice: '25000', db: stubDb([camp('네이버', '결제금액 25,000원')]) });
-  assert.equal(d.action, 'warn');
+  // AI 값 우선 — 리뷰어가 적은 값이 공고 금액과 다르면 AI 값으로 본다
+  d = await cpc.decideAtSubmit({ holdCtx: HOLD(), capturePrice: '43000', typedPrice: '30000', db: stubDb([camp('네이버', '결제금액 25,000원')]) });
+  assert.equal(d.action, 'warn'); assert.equal(d.paid, 43000); assert.equal(d.paidSource, 'capture');
+  // ★ 결정 319 개정(사용자 확정 2026-11-05 「b」) — 양식 금액 = 공고 금액이면 캡처와 상관없이 통과(배송비 잘린 캡처)
+  d = await cpc.decideAtSubmit({ holdCtx: HOLD(), capturePrice: '9,900', typedPrice: '12,400', db: stubDb([camp('올리브영', '결제금액 12,400원')]) });
+  assert.equal(d.action, 'none', '올리브영 배송비 잘린 캡처'); assert.equal(d.typedMatch, true);
+  d = await cpc.decideAtSubmit({ holdCtx: HOLD(), capturePrice: '45000', typedPrice: '25000', db: stubDb([camp('쿠팡', '결제금액 25,000원')]) });
+  assert.equal(d.action, 'none', '쿠팡도 같다(사용자가 위험을 알고 고름)');
+  d = await cpc.decideAtSubmit({ holdCtx: HOLD(), capturePrice: '9900', typedPrice: '9,900', db: stubDb([camp('올리브영', '결제금액 12,400원')]) });
+  assert.equal(d.action, 'warn', '양식도 9,900원이면 종전대로 알림');
+  d = await cpc.decideAtSubmit({ holdCtx: HOLD(), capturePrice: '9900', typedPrice: '', db: stubDb([camp('올리브영', '결제금액 12,400원')]) });
+  assert.equal(d.action, 'warn', '양식 금액이 없으면 종전대로');
   // AI 값이 없으면 리뷰어가 적은 값
   d = await cpc.decideAtSubmit({ holdCtx: HOLD(), capturePrice: '', typedPrice: '43,000', db: stubDb([camp('네이버', '결제금액 25,000원')]) });
   assert.equal(d.action, 'warn'); assert.equal(d.paidSource, 'typed');
@@ -179,37 +188,41 @@ async function pg() {
         VALUES ($1, '가짜', $2, 'applied', $3, NOW() + INTERVAL '1 hour') RETURNING id`, [cid, p8, tok]);
       return { campaignId: cid, campaignApplicationId: String(rows[0].id), holdToken: tok, holdPhone8: p8 };
     };
-    const base = { orderer: '가짜', recipient: '가짜', phone: '010-0000-0000', address: '가짜주소', price: '25000' };
+    const base = { orderer: '가짜', recipient: '가짜', phone: '010-0000-0000', address: '가짜주소' };
     const count = async (cid) => (await pool.query(`SELECT COUNT(*)::int n FROM order_submissions WHERE tab_name=$1`, ['campaign:' + cid])).rows[0].n;
 
     // 네이버 — 43,000원: 알림(쓰기 0) → 「그대로 제출」 → 접수 + 🚩 price_diff
     const N = await mk('네이버');
     const hN = await hold(N);
-    const r1 = await post({ ...base, ...hN, sheetId: 'campaign:' + N, tabName: 'campaign:' + N, orderNum: 'N1', productCapturePrice: '43,000' });
+    const r1 = await post({ ...base, ...hN, sheetId: 'campaign:' + N, tabName: 'campaign:' + N, orderNum: 'N1', productCapturePrice: '43,000', price: '43000' });
     assert.equal(r1.code, 'CAPTURE_PRICE_DIFF', JSON.stringify(r1)); assert.equal(r1.expected, 25000); assert.equal(r1.paid, 43000);
     assert.equal(await count(N), 0, '알림 = 쓰기 0');
-    const r2 = await post({ ...base, ...hN, sheetId: 'campaign:' + N, tabName: 'campaign:' + N, orderNum: 'N1', productCapturePrice: '43,000', capturePriceAck: 'true' });
+    const r2 = await post({ ...base, ...hN, sheetId: 'campaign:' + N, tabName: 'campaign:' + N, orderNum: 'N1', productCapturePrice: '43,000', price: '43000', capturePriceAck: 'true' });
     assert.equal(r2.ok, true, JSON.stringify(r2));
     // 네이버 — 25,500원(차이 500원) = 그냥 접수 · 🚩 없음
     const hN2 = await hold(N);
-    const r3 = await post({ ...base, ...hN2, sheetId: 'campaign:' + N, tabName: 'campaign:' + N, orderNum: 'N2', productCapturePrice: '25,500' });
+    const r3 = await post({ ...base, ...hN2, sheetId: 'campaign:' + N, tabName: 'campaign:' + N, orderNum: 'N2', productCapturePrice: '25,500', price: '25500' });
     assert.equal(r3.ok, true, JSON.stringify(r3));
+    // ★ 결정 319 개정 — 배송비 잘린 캡처(22,500원)라도 양식 금액이 공고 금액(25,000원)이면 알림 없이 접수 · 🚩·가격 신고 없음
+    const hN3 = await hold(N);
+    const r4 = await post({ ...base, ...hN3, sheetId: 'campaign:' + N, tabName: 'campaign:' + N, orderNum: 'N3', productCapturePrice: '22,500', price: '25000' });
+    assert.equal(r4.ok, true, JSON.stringify(r4));
     const rowsN = (await pool.query(`SELECT id, order_num, capture_flags FROM order_submissions WHERE tab_name=$1 ORDER BY order_num`, ['campaign:' + N])).rows;
-    assert.deepEqual(rowsN.map(r => [r.order_num, r.capture_flags && r.capture_flags.flags[0].code]), [['N1', 'price_diff'], ['N2', null]]);
+    assert.deepEqual(rowsN.map(r => [r.order_num, r.capture_flags && r.capture_flags.flags[0].code]), [['N1', 'price_diff'], ['N2', null], ['N3', null]]);
     assert.deepEqual(rowsN[0].capture_flags.flags[0], { code: 'price_diff', expected: 25000, paid: 43000 });
 
     // 쿠팡 — 45,000원: 막힘(쓰기 0) · 「그대로 제출」로 못 넘음 · 직원 확인 요청 → 접수 + 🚩 price_over · 30,000원(+20%) = 그냥 접수
     const C = await mk('쿠팡');
     const hC = await hold(C);
-    const c1 = await post({ ...base, ...hC, sheetId: 'campaign:' + C, tabName: 'campaign:' + C, orderNum: 'C1', productCapturePrice: '45000' });
+    const c1 = await post({ ...base, ...hC, sheetId: 'campaign:' + C, tabName: 'campaign:' + C, orderNum: 'C1', productCapturePrice: '45000', price: '45000' });
     assert.equal(c1.code, 'CAPTURE_PRICE_OVER', JSON.stringify(c1));
-    const c2 = await post({ ...base, ...hC, sheetId: 'campaign:' + C, tabName: 'campaign:' + C, orderNum: 'C1', productCapturePrice: '45000', capturePriceAck: 'true' });
+    const c2 = await post({ ...base, ...hC, sheetId: 'campaign:' + C, tabName: 'campaign:' + C, orderNum: 'C1', productCapturePrice: '45000', price: '45000', capturePriceAck: 'true' });
     assert.equal(c2.code, 'CAPTURE_PRICE_OVER', 'ack 로는 못 넘는다');
     assert.equal(await count(C), 0, '막힘 = 쓰기 0');
-    const c3 = await post({ ...base, ...hC, sheetId: 'campaign:' + C, tabName: 'campaign:' + C, orderNum: 'C1', productCapturePrice: '45000', capturePriceStaffReview: 'true' });
+    const c3 = await post({ ...base, ...hC, sheetId: 'campaign:' + C, tabName: 'campaign:' + C, orderNum: 'C1', productCapturePrice: '45000', price: '45000', capturePriceStaffReview: 'true' });
     assert.equal(c3.ok, true, JSON.stringify(c3));
     const hC2 = await hold(C);
-    const c4 = await post({ ...base, ...hC2, sheetId: 'campaign:' + C, tabName: 'campaign:' + C, orderNum: 'C2', productCapturePrice: '30000' });
+    const c4 = await post({ ...base, ...hC2, sheetId: 'campaign:' + C, tabName: 'campaign:' + C, orderNum: 'C2', productCapturePrice: '30000', price: '30000' });
     assert.equal(c4.ok, true);
     const rowsC = (await pool.query(`SELECT id, order_num, capture_flags FROM order_submissions WHERE tab_name=$1 ORDER BY order_num`, ['campaign:' + C])).rows;
     assert.deepEqual(rowsC.map(r => [r.order_num, r.capture_flags && r.capture_flags.flags[0].code]), [['C1', 'price_over'], ['C2', null]]);
