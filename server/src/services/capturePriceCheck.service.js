@@ -17,6 +17,10 @@
  *   · 공고 금액 = 고른 개수의 단계 금액(289) → 고른 상품의 금액(신청 시각 금액 · 275) → 공고 상품 글자의 `결제금액 N원`
  *     (글자 안 금액이 **하나일 때만** — 2종 이상이면 무엇이 정답인지 모르므로 보지 않는다 · 글자에 금액이 없으면 work_detail.payAmount — 리뷰어 화면과 같은 규칙).
  *   · 결제금액 = 캡처에서 AI 가 읽은 금액(리뷰어가 고칠 수 없는 값) → 없으면 리뷰어가 적은 결제금액.
+ *   · ★ 예외(사용자 확정 2026-11-05 「b」): 리뷰어가 양식에 적은 결제금액이 공고 금액과 **같으면** 캡처 금액과 상관없이 통과.
+ *     발단 = 올리브영 캡처 아래쪽 배송비가 잘려 상품가(9,900원)만 읽히고 공고 금액(12,400원 = 상품가+배송비 2,500원)과 달라
+ *     정상 구매가 알림·🚩·가격 신고로 쌓였다(11/02~11/05 금액 🚩 26건 전부 캡처가 배송비만큼 쌈 · 23건은 양식 금액 = 공고 금액).
+ *     감수한 위험: 다른 금액으로 산 사람이 양식에 공고 금액만 적으면 쿠팡 30% 막힘도 넘는다(사용자가 알고 고름).
  *   · 구매처 = 공고의 구매처(recruit_campaigns.channel) — 리뷰어 캡처가 아니라 공고 설정으로 정한다.
  * ★ fail-open — 공고·금액·구매처를 모르거나 조회가 실패하면 아무 일도 하지 않는다(모르는 것으로 사람을 막지 않는다).
  * ★ 판정은 **쓰기 전**(제출 라우트의 필수 배송메세지 게이트 바로 뒤).
@@ -150,6 +154,8 @@ async function decideAtSubmit({ holdCtx, capturePrice = '', typedPrice = '', sta
   try {
     const ex = await loadExpected({ holdCtx, db });
     if (!ex) return { action: 'none' };
+    // ★ 양식 금액 = 공고 금액이면 통과(결정 319 개정 2026-11-05) — 캡처는 배송비가 잘려 상품가만 보일 수 있다.
+    if (_won(typedPrice) === ex.expected) return { action: 'none', typedMatch: true };
     const d = judge({ kind: ex.kind, expected: ex.expected, paid, staffReview, ack });
     return d.action === 'none' ? d : { ...d, paidSource: _won(capturePrice) ? 'capture' : 'typed' };
   } catch (e) {
