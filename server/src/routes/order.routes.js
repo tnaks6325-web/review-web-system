@@ -20,6 +20,9 @@ const {
   normalizeProductOptionsJson,
   rawHasQtyTiers,
 } = require('../services/productOptions.service');
+const { rawHasDualChannels } = require('../utils/dualChannel');
+// 서버가 검증한 결과만 보관한다. HTTP 본문의 같은 이름 필드는 신뢰하지 않는다.
+const normalizedProductOptions = new WeakMap();
 const jwt = require('jsonwebtoken');
 const pool = require('../db/pool');
 const { authMiddleware, adminOrMasterMiddleware, isTrustedLoginToken } = require('../middleware/auth.middleware');
@@ -304,13 +307,13 @@ function _holidaysJson(v) {
  *
  * ★★ 전체 저장(`_insertWorkOrder`)과 부분 수정(`_intakeSourceRevisionHandler`)이 **이 함수 하나**를 쓴다 —
  *    한쪽만 폴백을 가지면 "같은 본문인데 경로마다 다른 값으로 비교되는" 자리가 생긴다.
- *    `_normalized_product_options_json` 은 두 경로 모두 핸들러 앞단에서 미리 채워 넣는 **정규화 결과**이고,
+ *    `normalizedProductOptions`는 두 경로 모두 핸들러 앞단에서 채우는 서버 전용 **정규화 결과**이고,
  *    나머지 두 갈래는 리뷰웹 내부 호출부(정규화를 거치지 않는 자리)를 위한 폴백이다.
  * ★ 값이 없으면 `''`(빈 원문) — `undefined`(모름)와 구분된다. 빈 원문끼리는 정상적으로 "같다"로 비교된다.
  */
 function _requestOptionsJson(b) {
   const o = b || {};
-  if (o._normalized_product_options_json !== undefined) return o._normalized_product_options_json;
+  if (normalizedProductOptions.has(o)) return normalizedProductOptions.get(o);
   if (typeof o.product_options_json === 'string') return o.product_options_json;
   return o.product_options_json ? JSON.stringify(o.product_options_json) : '';
 }
@@ -458,11 +461,12 @@ router.post('/intake', async (req, res, next) => {
       }
       throw err;
     }
-    // ★ 출처 계약 없는 옛 접수도 구매수량 단계가 실려 오면 정규화를 거친다 — 검증 안 된 단계가 저장되지 않게(구매수량 ①).
-    //   단계가 없으면 지금처럼 원문 그대로(동작 불변).
-    if (!sourceContract && rawHasQtyTiers(b.product_options_json)) {
+    // ★ 출처 계약 없는 옛 접수도 새 상품 설정은 정규화를 거친다.
+    //   동시진행은 아직 기본 닫힘 — 일반 오더처럼 축소 저장하지 않는다.
+    //   새 설정이 없으면 지금처럼 원문 그대로(동작 불변).
+    if (!sourceContract && (rawHasQtyTiers(b.product_options_json) || rawHasDualChannels(b.product_options_json))) {
       try {
-        b._normalized_product_options_json = normalizeProductOptionsJson(b.product_options_json).json;
+        normalizedProductOptions.set(b, normalizeProductOptionsJson(b.product_options_json).json);
       } catch (err) {
         if (err instanceof ProductOptionsError) {
           return res.status(400).json({ ok: false, code: err.code, error: err.message });
@@ -472,9 +476,9 @@ router.post('/intake', async (req, res, next) => {
     }
     if (sourceContract) {
       try {
-        b._normalized_product_options_json = normalizeProductOptionsJson(b.product_options_json, {
+        normalizedProductOptions.set(b, normalizeProductOptionsJson(b.product_options_json, {
           requireStructured: sourceContract.workboardSchemaVersion === 2,
-        }).json;
+        }).json);
       } catch (err) {
         if (err instanceof ProductOptionsError) {
           return res.status(400).json({ ok: false, code: err.code, error: err.message });
@@ -1256,9 +1260,9 @@ async function _intakeSourceRevisionHandler(req, res, next) {
       return res.status(400).json({ ok: false, error: '원본 리뷰오더 ID가 요청 경로와 일치해야 합니다.' });
     }
     try {
-      b._normalized_product_options_json = normalizeProductOptionsJson(b.product_options_json, {
+      normalizedProductOptions.set(b, normalizeProductOptionsJson(b.product_options_json, {
         requireStructured: source.workboardSchemaVersion === 2,
-      }).json;
+      }).json);
     } catch (err) {
       if (err instanceof ProductOptionsError) {
         return res.status(400).json({ ok: false, code: err.code, error: err.message });
@@ -2007,9 +2011,9 @@ async function _intakeUpdateHandler(req, res, next) {
           error: '이미 접수돼 작업표가 만들어진 오더라 이 칸은 여기서 바꿀 수 없습니다: ' + locked.join(', ') });
       }
     }
-    // ★ 이 옛 수정 경로는 상품 구성을 정규화 없이 그대로 쓴다. 구매수량 단계가 실려 오면 그때만 정규화·검증한다
-    //   (검증 안 된 단계 저장 금지 · 빈 단계 키는 지워 잠금 비교 모양을 예전과 같게 — 결정 167). 단계가 없으면 동작 불변.
-    if (b.product_options_json !== undefined && rawHasQtyTiers(b.product_options_json)) {
+    // ★ 이 옛 수정 경로도 구매수량 단계·동시진행 설정은 공통 검증을 거친다.
+    //   새 설정이 없으면 동작 불변(빈 단계 키의 잠금 비교 모양 보호 — 결정 167).
+    if (b.product_options_json !== undefined && (rawHasQtyTiers(b.product_options_json) || rawHasDualChannels(b.product_options_json))) {
       try {
         b.product_options_json = normalizeProductOptionsJson(b.product_options_json).json;
       } catch (err) {
@@ -2918,8 +2922,8 @@ _handlers.orderAdminEdit = async (req, res, next) => {
       b.recall_product = _rc.product;
     }
 
-    // ★ 관리자 수정도 구매수량 단계가 실려 오면 정규화·검증한다(검증 안 된 단계 저장 금지). 단계가 없으면 동작 불변.
-    if (b.product_options_json !== undefined && rawHasQtyTiers(b.product_options_json)) {
+    // ★ 관리자 수정도 구매수량 단계·동시진행 설정은 공통 검증을 거친다. 없으면 동작 불변.
+    if (b.product_options_json !== undefined && (rawHasQtyTiers(b.product_options_json) || rawHasDualChannels(b.product_options_json))) {
       try {
         b.product_options_json = normalizeProductOptionsJson(b.product_options_json).json;
       } catch (err) {

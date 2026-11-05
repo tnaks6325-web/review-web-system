@@ -24,6 +24,7 @@ const { planSharedPatch, ABSENT, optionKey } = require('../utils/sharedPatchPlan
 const { projectOrderToCampaign } = require('../utils/orderToCampaignProjection');
 const { CANON } = require('../utils/sharedFields');
 const { unitInflowType, guideMissingUnits } = require('../utils/unitInflow');   // ★ 결정 333 — 상품마다 유입방식
+const { rawHasDualChannels, DUAL_CHANNEL_NOT_READY } = require('../utils/dualChannel');
 
 const NEXT_VERSION_SQL = `GREATEST(sync_version + 1, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000000)::bigint)`;
 
@@ -1773,6 +1774,10 @@ async function applySharedPatch(p) {
     const { rows: woRows } = await client.query('SELECT * FROM work_orders WHERE id = $1 FOR UPDATE', [p.workOrderId]);
     let wo = woRows[0];
     if (!wo || wo.deleted_at) return await _abort(client, 404, { ok: false, code: 'order_not_found', error: '작업오더를 찾을 수 없습니다.' });
+    // 결정 338 — 신규·기존 설정 모두 전체 경로가 준비되기 전에는 공유 저장도 열지 않는다.
+    if (rawHasDualChannels(wo.product_options_json) || rawHasDualChannels(p.mine && p.mine.product_options_json)) {
+      return await _abort(client, 409, { ok: false, ...DUAL_CHANNEL_NOT_READY });
+    }
     if (managerOnly) {
       const rawTarget = String(p.mine && p.mine.work_manager || '').trim();
       const { mapWorkManager, isUndecidedWorkManager } = require('../utils/workManager');
@@ -2058,6 +2063,10 @@ async function applySharedPatch(p) {
       return { status: 200, body: { ok: true, noop: true, sync_version: curVersion } };
     }
     let { next, productsTouched, urlTouched, guideTouched, inflowUnitTouched, quantityTouched, payTouched, payProducts, qtyProducts, missed, structure, structureTouched } = applyWrites(theirs, p.mine, plan.writes);
+    // 입력뿐 아니라 병합 결과도 확인한다. 이후 상품 줄·금액·버전 쓰기 전에 통째로 거부한다.
+    if (rawHasDualChannels(next.product_options_json)) {
+      return await _abort(client, 409, { ok: false, ...DUAL_CHANNEL_NOT_READY });
+    }
     if (missed.length) {
       return await _abort(client, 409, { ok: false, code: 'write_unmatched', sync_version: curVersion, fields: missed.map(path => ({ path, label: _label(path) })),
         error: `상품·옵션 짝을 찾지 못해 저장하지 않았습니다: ${[...new Set(missed.map(path => _label(path)))].join(', ')}. 창을 닫고 다시 열어 주세요.` });
