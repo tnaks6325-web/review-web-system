@@ -40,6 +40,7 @@ function integer(value, label, min, max) {
 function httpUrl(value, label, max = Infinity) {
   if (typeof value !== 'string') throw new DualChannelError(`${label} 주소는 문자열이어야 합니다.`);
   const trimmed = value.trim();
+  if (/[\x00-\x1f\x7f]/.test(trimmed)) throw new DualChannelError(`${label} 주소가 올바르지 않습니다.`);
   let parsed;
   try { parsed = new URL(trimmed); } catch (_) {
     throw new DualChannelError(`${label} 주소가 올바르지 않습니다.`);
@@ -88,6 +89,24 @@ function rawHasDualChannels(raw) {
   return Array.isArray(list) && list.some(p => !Array.isArray(p) && own(p, 'channels'));
 }
 
+/** 공고 편집 입력의 존재 판정. 깨진 설정도 지워 버리고 일반 공고로 저장하지 않는다. */
+function campaignHasDualChannels(campaign) {
+  const c = campaign || {};
+  if (c.channel === '네이버+쿠팡' || c.channel_custom === '네이버+쿠팡') return true;
+  let wd = c.work_detail;
+  if (typeof wd === 'string') { try { wd = JSON.parse(wd); } catch (_) { wd = null; } }
+  return own(wd, 'dualChannelProduct') || rawHasDualChannels(c.options)
+    || rawHasDualChannels(c.product_options_json);
+}
+
+/** 동시진행이라고 명시한 자리에는 일반 상품·빈 값을 대신 넣을 수 없다. */
+function normalizeDualChannelProduct(product) {
+  if (!plainObject(product) || !own(product, 'channels')) {
+    throw new DualChannelError('동시진행 상품에는 두 구매처 설정이 필요합니다.');
+  }
+  return normalizeChannelProductList([product])[0];
+}
+
 /** No channels key means no rewrite, including legacy names, numbers and spacing. */
 function normalizeChannelProductList(list) {
   if (!Array.isArray(list)) throw new DualChannelError('상품 원본은 배열이어야 합니다.');
@@ -124,4 +143,4 @@ function normalizeChannelProductList(list) {
   }];
 }
 
-module.exports = { DualChannelError, normalizeChannelProductList, rawHasDualChannels, DUAL_CHANNEL_NOT_READY };
+module.exports = { DualChannelError, normalizeChannelProductList, normalizeDualChannelProduct, rawHasDualChannels, campaignHasDualChannels, DUAL_CHANNEL_NOT_READY };

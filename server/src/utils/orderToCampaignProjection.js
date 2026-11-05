@@ -14,6 +14,7 @@ const { _woCampaignPrefill } = require('./woCampaignPrefill.generated');
 const { CANON } = require('./sharedFields');
 const { canonGuide, imageKey } = require('./guideCanon');
 const { unitInflowType, effectiveInflow } = require('./unitInflow');
+const { normalizeDualChannelProduct } = require('./dualChannel');
 
 function _jsonArr(v) {
   if (v == null || v === '') return [];
@@ -95,6 +96,9 @@ function projectOrderToCampaign(order) {
     //   어느 쪽과도 같다고 보지 않아 연결 판정에서 직원이 고르게 한다(설계 완화 금지 11 · 운영 0건 2026-10-20).
     skip_weekends: (order && (order.skip_weekends === null || order.skip_weekends === undefined || order.skip_weekends === '')) ? 'unset' : (p.skip_weekends ? '1' : '0'),
     required_delivery_memo: _memo(p.required_delivery_memo),
+    ...(p.dualChannelProduct === undefined ? {} : {
+      dual_channel_product: normalizeDualChannelProduct(p.dualChannelProduct),
+    }),
     channel: _s(p.channel),
     landing_url: _s(p.landing_url),
     options: (() => {
@@ -126,6 +130,9 @@ function readCampaignShared(c, optionRows) {
     thumbnail_url: _s(camp.thumbnail_url),
     skip_weekends: camp.skip_weekends ? '1' : '0',
     required_delivery_memo: _memo(camp.required_delivery_memo),
+    ...(wd && Object.prototype.hasOwnProperty.call(wd, 'dualChannelProduct') ? {
+      dual_channel_product: normalizeDualChannelProduct(wd.dualChannelProduct),
+    } : {}),
     channel,
     landing_url: _s(camp.landing_url),
     options: (optionRows || [])
@@ -163,6 +170,15 @@ function compareOrderCampaign(order, campaign, optionRows) {
     out.push({ field, kind: (!x && y && !EMPTY_IS_VALUE.has(field)) ? 'fill' : 'diff', order: x, campaign: y });
   };
   for (const k of SCALAR_KEYS) push(k, a[k], b[k]);
+  // 상품 이름은 시스템마다 따로다(285). 선택지 원장이 없어도 상품 안의 사람 수를 함께 비교한다.
+  const dualA = a.dual_channel_product, dualB = b.dual_channel_product;
+  if (dualA || dualB) {
+    const shape = p => p ? CANON.json({ channels: p.channels, count: CANON.int(p.base.count),
+      daily: CANON.int(p.base.daily ?? 0) }) : '';
+    const x = shape(dualA);
+    const y = shape(dualB);
+    if (x !== y) out.push({ field: 'dual_channel_product', kind: 'diff', order: x, campaign: y });
+  }
   // 결정 333 — 줄 유입방식은 한쪽이라도 줄 값이 있을 때만, 빈 값도 뜻이 있다(= 전체 값을 따름 · 채우기로 접지 않는다)
   const pushInflow = (oa, ob) => {
     if ((oa.inflow_explicit || ob.inflow_explicit) && oa.inflow_type !== ob.inflow_type) {

@@ -1,0 +1,195 @@
+{
+  "originalRouteReplay": [
+    {
+      "name": "stored-dual-omitted-on-ordinary-draft-update",
+      "statusCode": 409,
+      "response": {
+        "ok": false,
+        "code": "dual_channel_not_ready",
+        "error": "네이버·쿠팡 동시진행은 준비 중입니다. 아직 접수하거나 모집을 시작할 수 없습니다."
+      },
+      "writeAttempts": [],
+      "readCount": 4
+    },
+    {
+      "name": "stored-dual-nonparticipation-main-update-activation",
+      "statusCode": 409,
+      "response": {
+        "ok": false,
+        "code": "dual_channel_not_ready",
+        "error": "네이버·쿠팡 동시진행은 준비 중입니다. 아직 접수하거나 모집을 시작할 수 없습니다."
+      },
+      "writeAttempts": [],
+      "readCount": 3
+    },
+    {
+      "name": "stored-dual-participation-main-update-activation",
+      "statusCode": 409,
+      "response": {
+        "ok": false,
+        "code": "dual_channel_not_ready",
+        "error": "네이버·쿠팡 동시진행은 준비 중입니다. 아직 접수하거나 모집을 시작할 수 없습니다."
+      },
+      "writeAttempts": [],
+      "readCount": 3
+    },
+    {
+      "name": "stored-dual-dedicated-status-activation",
+      "statusCode": 409,
+      "response": {
+        "ok": false,
+        "code": "dual_channel_not_ready",
+        "error": "네이버·쿠팡 동시진행은 준비 중입니다. 아직 접수하거나 모집을 시작할 수 없습니다."
+      },
+      "writeAttempts": [],
+      "readCount": 1
+    }
+  ],
+  "originalUiReplay": [
+    {
+      "name": "metadata, prev_name, explicit structure preserved through edit",
+      "passed": true,
+      "result": {
+        "option_schema_version": 2,
+        "product_mode": "none",
+        "name": "동일상품",
+        "url": "https://shop.example/main",
+        "base": {
+          "pay": 21000,
+          "count": 7,
+          "futureMetadata": {
+            "x": 3
+          }
+        },
+        "options": [],
+        "channels": {
+          "naver": {
+            "url": "https://naver.example/a",
+            "pay": 11000,
+            "inflow_type": "link",
+            "guide": {
+              "text": "남겨 둔 안내",
+              "images": []
+            }
+          },
+          "coupang": {
+            "url": "https://coupang.example/b",
+            "pay": 10000,
+            "inflow_type": "guide",
+            "guide": {
+              "text": "검색 안내",
+              "images": [
+                "https://images.example/1.png"
+              ]
+            }
+          }
+        },
+        "prev_name": "원래 상품",
+        "futureParent": {
+          "foo": "bar"
+        },
+        "guide": {
+          "text": "기존",
+          "images": []
+        }
+      }
+    },
+    {
+      "name": "failed foreign restore leaves valid edited draft readable",
+      "passed": true,
+      "result": "valid draft still usable"
+    },
+    {
+      "name": "one count, derived sum and invalid-sum suppression",
+      "passed": true,
+      "result": {
+        "count": 11,
+        "total": 11
+      }
+    },
+    {
+      "name": "canonical nested quota mismatch is detected with no option ledger",
+      "passed": true,
+      "result": [
+        {
+          "field": "dual_channel_product",
+          "kind": "diff",
+          "order": "{\"channels\":{\"coupang\":{\"guide\":{\"images\":[\"https://images.example/1.png\"],\"text\":\"검색 안내\"},\"inflow_type\":\"guide\",\"pay\":10000,\"url\":\"https://coupang.example/b\"},\"naver\":{\"guide\":{\"images\":[],\"text\":\"남겨 둔 안내\"},\"inflow_type\":\"link\",\"pay\":9000,\"url\":\"https://naver.example/a\"}},\"count\":\"7\",\"daily\":\"0\"}",
+          "campaign": "{\"channels\":{\"coupang\":{\"guide\":{\"images\":[\"https://images.example/1.png\"],\"text\":\"검색 안내\"},\"inflow_type\":\"guide\",\"pay\":10000,\"url\":\"https://coupang.example/b\"},\"naver\":{\"guide\":{\"images\":[],\"text\":\"남겨 둔 안내\"},\"inflow_type\":\"link\",\"pay\":9000,\"url\":\"https://naver.example/a\"}},\"count\":\"99\",\"daily\":\"0\"}"
+        }
+      ]
+    }
+  ],
+  "browserRecovery": {
+    "expected": 8,
+    "count": 8,
+    "checks": [
+      {
+        "width": 1440,
+        "name": "다른 불량 자료 복원 실패가 현재 정상 초안을 잠그지 않음",
+        "passed": true
+      },
+      {
+        "width": 1440,
+        "name": "복원 실패 후 현재 초안을 계속 수정·브라우저 보관 가능",
+        "passed": true
+      },
+      {
+        "width": 1440,
+        "name": "기존 공고 전체 인원과 내부 상품 인원이 다르면 폼 덮어쓰기 거부",
+        "passed": true
+      },
+      {
+        "width": 1440,
+        "name": "업무 저장 호출·외부 요청·페이지 오류 0",
+        "passed": true
+      },
+      {
+        "width": 390,
+        "name": "다른 불량 자료 복원 실패가 현재 정상 초안을 잠그지 않음",
+        "passed": true
+      },
+      {
+        "width": 390,
+        "name": "복원 실패 후 현재 초안을 계속 수정·브라우저 보관 가능",
+        "passed": true
+      },
+      {
+        "width": 390,
+        "name": "기존 공고 전체 인원과 내부 상품 인원이 다르면 폼 덮어쓰기 거부",
+        "passed": true
+      },
+      {
+        "width": 390,
+        "name": "업무 저장 호출·외부 요청·페이지 오류 0",
+        "passed": true
+      }
+    ]
+  },
+  "mutationResults": [
+    {
+      "kind": "storedCampaign",
+      "behaviorallyCaught": true
+    },
+    {
+      "kind": "scopedStoredCampaign",
+      "behaviorallyCaught": true
+    },
+    {
+      "kind": "uiRecovery",
+      "behaviorallyCaught": true
+    },
+    {
+      "kind": "uiQuota",
+      "behaviorallyCaught": true
+    },
+    {
+      "kind": "nestedCount",
+      "behaviorallyCaught": true
+    },
+    {
+      "kind": "nestedDaily",
+      "behaviorallyCaught": true
+    }
+  ]
+}

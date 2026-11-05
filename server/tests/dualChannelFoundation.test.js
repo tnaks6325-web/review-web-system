@@ -119,6 +119,44 @@ test('단축 주소와 http를 허용하며 앞뒤만 trim하고 URL href로 바
   assert.equal(p.channels.naver.url, '  HTTPS://Short.Example:443/a%2fb?q=%2f#Part  ');
 });
 
+for (const channel of ['naver', 'coupang']) {
+  for (const field of ['url', 'image']) {
+    test(`${channel} ${field} 내부 제어문자를 거부하고 원본과 오류 비노출을 지킨다`, () => {
+      for (const code of [10, 9, 13, ...[...Array(32).keys()].filter(n => ![10, 9, 13].includes(n)), 127]) {
+        const p = product();
+        const url = 'https://shop.example/private-url-marker' + String.fromCharCode(code) + 'item';
+        if (field === 'url') p.channels[channel].url = url;
+        else p.channels[channel].guide.images = [url];
+        const before = JSON.stringify(p);
+        assert.throws(() => foundation().normalizeChannelProductList([p]), error => {
+          assert.equal(error.code, 'invalid_dual_channel');
+          assert.match(error.message, /주소/);
+          assert.ok(!error.message.includes(url));
+          assert.doesNotMatch(error.message, /private-url-marker/);
+          return true;
+        }, `control ${code}`);
+        assert.equal(JSON.stringify(p), before);
+      }
+    });
+  }
+}
+
+test('인코딩된 제어문자 철자는 실제 제어문자와 구분하며 사진도 앞뒤만 trim한다', () => {
+  const p = product();
+  const url = 'HTTPS://Short.Example:443/a%0Ab%09c%00d%7f?q=%2f#Part';
+  for (const channel of Object.values(p.channels)) {
+    channel.url = '\n\t ' + url + ' \r\n';
+    channel.guide.images = ['\n\t ' + url + ' \r\n'];
+  }
+  const before = JSON.stringify(p);
+  const [result] = foundation().normalizeChannelProductList([p]);
+  for (const channel of Object.values(result.channels)) {
+    assert.equal(channel.url, url);
+    assert.deepEqual(channel.guide.images, [url]);
+  }
+  assert.equal(JSON.stringify(p), before);
+});
+
 test('상품 주소는 trim 뒤 정확히 2048자까지 허용한다', () => {
   const p = product();
   const url = 'https://example.test/' + 'x'.repeat(2048 - 'https://example.test/'.length);

@@ -1,0 +1,15 @@
+{
+  "delegation": "deleg_8d3aeaff",
+  "passed": true,
+  "security_concerns": [],
+  "logic_errors": [],
+  "reportedChecks": { "passed": 66, "failed": 0, "exitCode": 0 },
+  "scope": [
+    "stored-dual-configuration-omission-and-deletion-rejected-before-write",
+    "nonparticipation-campaign-activation-rejected",
+    "failed-restore-candidate-does-not-lock-current-draft",
+    "nested-count-and-daily-comparison-and-context-restore-validation"
+  ],
+  "limitations": "Read-only independent code/test verdict. Does not attest browser execution, real database integration, normal product save, recruitment, purchase, review or payment. A path-error invocation did not execute tests; corrected invocation was run once.",
+  "parentEvidence": "Parent separately verified related440 tests, full707 files and browser58 checks; do not add these overlapping counts."
+}

@@ -1,0 +1,103 @@
+{
+  "scope": "local-new-unlinked-draft-editor-and-settings-planning",
+  "productionReady": false,
+  "productionDataTouched": false,
+  "pushed": false,
+  "pullRequestCreated": false,
+  "deployed": false,
+  "baseCommit": "3fbebb4c",
+  "currentGate": "local-implementation-verified-independent-verdicts-passed",
+  "currentCandidateNeedsFullRetest": false,
+  "sourceCandidateSha256": "912abb471c8f15295f6b6d3520d5835a70b8cdfbdea0ebc02d7b8cff06528119",
+  "sourceFileCount": 23,
+  "javascriptSyntaxChecks": 21,
+  "javascriptSyntaxFailures": 0,
+  "generatedPrefillCheckExitCode": 0,
+  "gitDiffWhitespaceCheckExitCode": 0,
+  "staticAddedLineScan": {
+    "hardcodedCredentialMatches": 0,
+    "shellInjectionMatches": 0,
+    "evalMatches": 0,
+    "unsafeDeserializationMatches": 0,
+    "sqlInterpolationMatches": 0,
+    "note": "Pattern scan, not a complete security proof."
+  },
+  "fullSuite": {
+    "scopeNote": "After all six corrections and removal of one trailing blank line in a new test. Product code is identical to the fifth run and the 58 browser checks.",
+    "attempt": 6,
+    "passedFiles": 707,
+    "failedFiles": 0,
+    "totalFiles": 707,
+    "durationSeconds": 66.8,
+    "exitCode": 0
+  },
+  "focusedSuite": {
+    "passed": 440,
+    "failed": 0,
+    "skipped": 0,
+    "exitCode": 0,
+    "targets": "dualChannel*.test.js recruitTotalSaveLoss.test.js woCampaignPrefillGenerated.test.js"
+  },
+  "localDraftAndRendererRecheck": {
+    "passed": 79,
+    "failed": 0,
+    "skipped": 0,
+    "exitCode": 0,
+    "note": "Overlaps with focused and full suites; do not add counts. Supersedes the earlier in-progress renderer null-case failure."
+  },
+  "browserEditor": {
+    "viewports": [1440, 390],
+    "expected": 20,
+    "passed": 20,
+    "failed": 0,
+    "results": "checks.json"
+  },
+  "browserLocalHttpSqlRoundTrip": {
+    "storage": "ephemeral-pglite",
+    "viewports": [1440, 390],
+    "expected": 24,
+    "passed": 24,
+    "failed": 0,
+    "results": "server-checks.json"
+  },
+  "browserRecovery": {
+    "expected": 8, "passed": 8, "failed": 0,
+    "results": "editor-recovery-checks.json"
+  },
+  "browserGuidePositionAndUrlParity": {
+    "expected": 6, "passed": 6, "failed": 0,
+    "results": "guide-url-checks.json",
+    "imageProvider": "same-origin intercepted fake SVG; actual external image service not verified"
+  },
+  "browserTotals": {
+    "expected": 58, "passed": 58, "failed": 0,
+    "origin": "http://127.0.0.1:41933"
+  },
+  "reviewerPreview": {
+    "legacyCasesComparedDirectlyWithBaseCommit": 5,
+    "legacyHtmlByteIdentical": true,
+    "desktopBothChannelAmountsVisible": true,
+    "mobilePreviewVisible": false,
+    "mobileNote": "Existing responsive layout hides the right-hand preview. Both editor channel panels remain reachable by vertical scrolling."
+  },
+  "independentFinalReview": {
+    "status": "passed-local-scope-only",
+    "firstFourPassed": true,
+    "firstFourReport": "independent-first-four-review.json",
+    "lastTwoPassed": true,
+    "lastTwoReport": "independent-guide-url-review.json",
+    "delegations": ["deleg_8d3aeaff", "deleg_5fd0f68e"]
+  },
+  "notVerifiedOrNotImplemented": [
+    "normal-product-api-dual-channel-save",
+    "linked-shared-save-application",
+    "intranet-end-to-end-round-trip",
+    "all-recruitment-entrypoints",
+    "channel-specific-purchase-evidence",
+    "cross-order-delivery-address-verification",
+    "dual-review-completion",
+    "single-review-fee-payment",
+    "physical-mobile-device",
+    "multi-connection-postgresql-concurrency"
+  ]
+}

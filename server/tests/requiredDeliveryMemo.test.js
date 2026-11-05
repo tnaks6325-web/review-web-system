@@ -132,7 +132,7 @@ async function stubs() {
   // 옛 관리자 대시보드(admin.html · index-app.js)는 결정 267 로 폐기 — 공고 창은 작업보드에만 있다.
   {
     const h = read('frontend/workdesk.html');
-    assert.ok(/recruit-modal\.js\?v=(?:20261024-reqmemo|20261103-qna|20261104-inflow)/.test(h) && /index-recruit\.js\?v=(?:20261024-reqmemo|20261104-inflow)/.test(h), 'workdesk cache-bust');
+    assert.ok(/recruit-modal\.js\?v=(?:20261024-reqmemo|20261103-qna|20261104-inflow|20261105-dual-editor)/.test(h) && /index-recruit\.js\?v=(?:20261024-reqmemo|20261104-inflow|20261105-dual-editor)/.test(h), 'workdesk cache-bust');
   }
 
   const sa = read('frontend/js/search-app.js');

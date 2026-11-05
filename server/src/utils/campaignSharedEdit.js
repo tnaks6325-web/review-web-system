@@ -19,6 +19,7 @@ const { sanitizeGuideImages } = require('./sanitizeGuideHtml');
 const { parsePurchaseTime } = require('./purchaseTimeWindow');
 const { CANON } = require('./sharedFields');
 const { unitInflowType, effectiveInflow, orderInflowMixed } = require('./unitInflow');
+const { normalizeDualChannelProduct } = require('./dualChannel');
 
 const KNOWN_CHANNELS = new Set(['쿠팡', '네이버', '올리브영', '카카오메이커스']);
 const GUIDE_LABELS = ['리뷰등록 가이드', '리뷰가이드', '리뷰 가이드'];
@@ -732,6 +733,8 @@ function closedCountSum(products) {
 /**
  * @param {{ baseState:object, camp:object, body:object, campOptions?:object[] }} p
  * @returns {{ mine:object, changed:string[], unmappable:Array<{key,label,want,got}>, keepProductLines:boolean }}
+ * 338: own work_detail.dualChannelProduct만 구매처별 역계획으로 읽는다. 기존 단일 상품의 이름·공통 가이드는
+ * 보존하고 channels와 base.pay를 함께 계획한다. 인원·일건수는 기존 계획을 재사용하며, 실제 저장 기본닫힘은 그대로다.
  */
 function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
   const { projectOrderToCampaign } = require('./orderToCampaignProjection');
@@ -748,18 +751,113 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
   const unmappable = [];
   let keepProductLines = false;
 
-  // ① 리뷰비
+  const products = _parseProducts(base.product_options_json);
+  // 구매처별 설정은 명시한 화면만 읽는다. 검증 통과는 실제 공유 저장 허용이 아니다(338).
+  const dualSent = b.work_detail && typeof b.work_detail === 'object'
+    && Object.prototype.hasOwnProperty.call(b.work_detail, 'dualChannelProduct');
+  let dualProduct = null;
+  if (dualSent) {
+    try {
+      dualProduct = normalizeDualChannelProduct(b.work_detail.dualChannelProduct);
+      if (!products || products.length !== 1) throw new Error('기준 상품을 하나로 짝지을 수 없습니다.');
+      normalizeDualChannelProduct(products[0]);
+      // 결정 285: 남은 단위가 양쪽 하나이고, 이름 포함 또는 비어 있지 않은 같은 메인 주소가 있어야 한다.
+      const name = p => String(p.name || '').replace(/\s/g, '');
+      const a = name(products[0]), z = name(dualProduct);
+      const sameUrl = _t(products[0].url) && _t(products[0].url) === _t(dualProduct.url);
+      if (!(a && z && (a.includes(z) || z.includes(a))) && !sameUrl) {
+        throw new Error('기준 상품과 이름·주소로 같은 상품임을 확인할 수 없습니다.');
+      }
+      const live = (campOptions || []).filter(r => String(r.status || '') !== 'deleted');
+      if (live.length > 1 || live.some(r => r.unit_kind !== 'product' || r.status === 'closed')) {
+        throw new Error('기존 선택지 구조를 구매처 설정과 함께 바꿀 수 없습니다.');
+      }
+      if (live.length) {
+        const n = String(live[0].product_name || live[0].opt_key || '').replace(/\s/g, '');
+        const url = _t(live[0].product_url || live[0].option_url);
+        if (!(n && [a, z].some(x => x && (x.includes(n) || n.includes(x))))
+            && !(url && [products[0].url, dualProduct.url].some(x => _t(x) === url))) {
+          throw new Error('기존 선택지 원장을 같은 상품 단위로 짝지을 수 없습니다.');
+        }
+      }
+      b = { ...b };
+      const sentTop = v => v !== undefined && v !== null && v !== '';
+      if (sentTop(b.recruit_total) && CANON.int(b.recruit_total) !== String(dualProduct.base.count)) {
+        throw new Error('총모집과 구매처 상품의 사람 수가 다릅니다.');
+      }
+      b.recruit_total = dualProduct.base.count;
+      if (Object.prototype.hasOwnProperty.call(dualProduct.base, 'daily')) {
+        const raw = dualProduct.base.daily;
+        const daily = typeof raw === 'string' && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : raw;
+        if (!Number.isSafeInteger(daily) || daily < 0 || daily > 100000) throw new Error('상품 일건수는 0~100000 정수여야 합니다.');
+        if (sentTop(b.daily_limit) && CANON.int(b.daily_limit) !== String(daily)) throw new Error('일 진행 건수와 상품 일건수가 다릅니다.');
+        b.daily_limit = daily;
+      }
+      if (Object.prototype.hasOwnProperty.call(dualProduct.base, 'review_type_mix')) {
+        const mix = _mixArray(dualProduct.base.review_type_mix);
+        if (b.review_type_mix !== undefined && CANON.reviewTypeMix(_mixArray(b.review_type_mix)) !== CANON.reviewTypeMix(mix)) {
+          throw new Error('리뷰타입 혼합 수량과 상품 기본 수량이 다릅니다.');
+        }
+        b.review_type_mix = mix;
+      }
+      if (Object.prototype.hasOwnProperty.call(b, 'options')) {
+        if (!Array.isArray(b.options) || b.options.length > 1 || (live.length && !b.options.length)) {
+          throw new Error('구매처 설정과 상품·옵션 추가·삭제를 함께 계획할 수 없습니다.');
+        }
+        if (b.options.length) {
+          const row = b.options[0];
+          const pn = _t(row && (row.productName ?? row.product_name));
+          const key = _t(row && (row.optKey ?? row.opt_key));
+          const prev = _t(row && (row.prevOptKey ?? row.prev_opt_key));
+          if (!row || (row.unitKind ?? row.unit_kind) !== 'product'
+              || ![products[0].name, dualProduct.name].some(n => _t(n) === pn)
+              || (key && key !== pn) || (prev && prev !== key)
+              || ['closed', 'deleted'].includes(row.status)) {
+            throw new Error('같은 옵션 없는 상품 단위 하나만 계획할 수 있습니다.');
+          }
+          const pay = row.payAmount ?? row.pay_amount;
+          const count = row.recruitTotal ?? row.recruit_total;
+          const daily = row.dailyLimit ?? row.daily_limit;
+          const mix = row.reviewTypeMix ?? row.review_type_mix;
+          if ((pay !== undefined && CANON.int(pay) !== String(dualProduct.base.pay))
+              || (count !== undefined && CANON.int(count) !== String(dualProduct.base.count))
+              || (daily !== undefined && sentTop(b.daily_limit) && CANON.int(daily) !== CANON.int(b.daily_limit))
+              || (mix !== undefined && b.review_type_mix !== undefined && CANON.reviewTypeMix(_mixArray(mix)) !== CANON.reviewTypeMix(_mixArray(b.review_type_mix)))) {
+            throw new Error('선택지 금액·인원과 구매처 상품 기본값이 다릅니다.');
+          }
+          // 시스템별 이름은 보존하고, 동일 상품의 숫자·가이드·주소 계획만 기존 계산에 얹는다.
+          b.options = [{ ...row, productName: products[0].name, optKey: products[0].name,
+            payAmount: dualProduct.base.pay, recruitTotal: dualProduct.base.count,
+            ...(daily === undefined && b.daily_limit !== undefined ? { dailyLimit: b.daily_limit } : {}),
+            ...(b.review_type_mix !== undefined ? { reviewTypeMix: b.review_type_mix } : {}) }];
+        }
+      }
+    } catch (err) {
+      return { mine: {}, changed: [], unmappable: [{ key: 'dualChannelProduct', label: `구매처별 설정 — ${err.message}`, want: '', got: '' }], keepProductLines: false };
+    }
+  }
+  // ① 리뷰비 — 구매처 상품 검증 뒤에 투영한다(깨진 기준 상품도 예외 대신 전체 거부).
   if (b.review_fee !== undefined && b.review_fee !== null) {
     const sent = CANON.int(b.review_fee);
     const was = CANON.int(_woCampaignPrefill(JSON.parse(JSON.stringify(base))).review_fee);
     if (sent !== was) { mine.review_fee = Number(sent) || 0; changed.push('리뷰비'); }
   }
-
-  const products = _parseProducts(base.product_options_json);
   const baseRows = projectOrderToCampaign(base).options;
-  const liveCampOpts = (campOptions || []).filter(r => String(r.status || '') !== 'deleted');
+  const dbCampOpts = (campOptions || []).filter(r => String(r.status || '') !== 'deleted');
+  // 원장 없는 단일 상품도 같은 줄 계산을 재사용한다. 구조 계획의 추가·삭제는 위에서 금지했다.
+  const liveCampOpts = dualSent && !dbCampOpts.length && Array.isArray(b.options) && b.options.length === 1
+    ? baseRows.map(r => ({ opt_key: products[0].name, product_name: products[0].name, unit_kind: 'product',
+      pay_amount: r.pay_amount, recruit_total: r.recruit_total, daily_limit: r.daily_limit, status: r.status })) : dbCampOpts;
   let edited = null;
+  if (dualProduct && (CANON.json(dualProduct.channels) !== CANON.json(normalizeDualChannelProduct(products[0]).channels)
+      || CANON.int(dualProduct.base.pay) !== CANON.int(products[0].base.pay))) {
+    edited = JSON.parse(JSON.stringify(products));
+    edited[0].channels = dualProduct.channels;
+    edited[0].base.pay = dualProduct.base.pay;
+    changed.push('구매처별 설정');
+  }
   const want = new Map();   // 줄 열쇠 → 화면이 보낸 금액
+  if (dualProduct && baseRows.length === 1) want.set(baseRows[0].key, String(dualProduct.base.pay));
   const guideWant = new Map();   // 줄 열쇠 → 화면이 보낸 가이드(투영 비교 모양)
   const urlWant = new Map();     // 줄 열쇠 → {option_url?, product_url?} 화면이 보낸 주소(결정 277)
   const prodUrlSet = new Map();  // 상품 자리 i → 새 상품 주소(같은 상품의 줄끼리 다르면 담을 수 없다)
@@ -870,7 +968,7 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
         mine.product_url = prodUrlSet.get(0);
       }
     }
-  } else if (!liveCampOpts.length && b.work_detail && typeof b.work_detail === 'object'
+  } else if (!dualSent && !liveCampOpts.length && b.work_detail && typeof b.work_detail === 'object'
       && Object.prototype.hasOwnProperty.call(b.work_detail, 'productLines')) {
     // ③ 옵션 없는 공고(공고 옵션 줄 0개 — 단일 상품은 발행 프리필이 줄을 만들어도 공고에는 저장하지 않는다) — 상품 안내 글의 금액
     const wd = (camp && camp.work_detail && typeof camp.work_detail === 'object') ? camp.work_detail : {};
@@ -937,7 +1035,7 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
   //   화면이 옵션표를 보낸 저장만 — 옵션 없는 모드 저장(빈 목록)은 손대지 않은 저장이다. 인원 계획도 같은 줄로 본다(안 그러면 총모집이 원래 상품 인원으로 읽힌다).
   const soleVirtual = !liveCampOpts.length && !!products && baseRows.length === 1 && baseRows[0].unit_kind === 'product'
     && Array.isArray(b.options) && b.options.some(o => o && typeof o === 'object');
-  const liveForPlan = soleVirtual
+  const liveForPlan = dualSent && !Array.isArray(b.options) ? [] : soleVirtual
     ? [{ opt_key: baseRows[0].key.split('|')[0], status: 'active', recruit_total: baseRows[0].recruit_total, daily_limit: baseRows[0].daily_limit }] : liveCampOpts;
   const st = _planStructureEdit({ products, baseRows, body: b, guideInflow, soleVirtual, liveCampOpts: liveForPlan });
   unmappable.push(...st.unmappable);
@@ -950,6 +1048,10 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
   changed.push(...q.changed);
   Object.assign(mine, q.mine);
   if (q.edited) edited = q.edited;
+  // 한 상품의 명시적 일건수 0도 값이다. 기존 다상품 합계의 "모름" 처리로 누락하지 않는다.
+  if (dualProduct && edited && b.daily_limit !== undefined && CANON.int(b.daily_limit) !== CANON.int(base.daily_count)) {
+    mine.daily_count = Number(b.daily_limit);
+  }
   if (st.any && products) {
     const r = applyStructurePlan(edited || JSON.parse(JSON.stringify(products)), st);
     edited = r.products;
@@ -980,6 +1082,20 @@ function planCampaignMoneyEdit({ baseState, camp, body, campOptions = [] }) {
     if (inf.list) { edited = inf.list; changed.push('유입방식(상품별)'); }
     if (inf.summary) mine.inflow_type = inf.summary;
   }
+  const dualBase = products && products.some(p => p && Object.prototype.hasOwnProperty.call(p, 'channels'));
+  if (edited && (dualSent || dualBase)) {
+    try {
+      if (edited.length !== 1) throw new Error('구매처 상품은 정확히 하나여야 합니다.');
+      const finalProduct = normalizeDualChannelProduct(edited[0]);
+      if (dualProduct && (CANON.json(finalProduct.channels) !== CANON.json(dualProduct.channels)
+          || finalProduct.base.pay !== dualProduct.base.pay || finalProduct.base.count !== dualProduct.base.count)) {
+        throw new Error('다른 계획이 구매처별 설정·상품 기본값을 덮었습니다.');
+      }
+    } catch (err) {
+      unmappable.push({ key: 'dualChannelProduct', label: `구매처별 설정 — ${err.message}`, want: '', got: '' });
+    }
+  }
+  if ((dualSent || dualBase) && unmappable.length) return { mine: {}, changed: [], unmappable, keepProductLines: false };
   if (edited && !unmappable.length) mine.product_options_json = JSON.stringify(edited);
   return { mine, changed, unmappable, keepProductLines };
 }

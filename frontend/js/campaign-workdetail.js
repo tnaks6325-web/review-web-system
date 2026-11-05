@@ -25,7 +25,8 @@
     + '.cwd-note{font-size:.75rem;font-weight:700;color:#1b64da;background:#EFF5FF;border-radius:8px;padding:6px 8px;margin-bottom:8px}'
     + '.cwd-opt{display:flex;align-items:center;gap:10px}'
     + '.cwd-opt .nm{font-size:.9rem;font-weight:800;color:#111827}'
-    + '.cwd-opt .sub{font-size:.72rem;color:#4B5563;margin-top:2px}';
+    + '.cwd-opt .sub{font-size:.72rem;color:#4B5563;margin-top:2px}'
+    + '.cwd-dual-link{box-sizing:border-box;text-decoration:none}';
 
   function _injectCss() {
     if (document.getElementById('cwd-style')) return;
@@ -175,6 +176,111 @@
     return { html: html, tokens: tokens };
   }
 
+  // 동시진행 전용 방어. 기존 상품/선택지 렌더의 값 해석은 바꾸지 않는다.
+  function dualObject(v) { return v !== null && typeof v === 'object' && !Array.isArray(v); }
+  function dualInteger(v, min, max) {
+    var n = typeof v === 'string' && /^\d+$/.test(v.trim()) ? Number(v.trim()) : v;
+    return typeof n === 'number' && Number.isSafeInteger(n) && n >= min && n <= max ? n : null;
+  }
+  function dualHttpUrl(v) {
+    if (typeof v !== 'string') return '';
+    var s = v.trim();
+    if (!/^https?:\/\//i.test(s) || /[\x00-\x1f\x7f]/.test(s)) return '';
+    try {
+      var u = new URL(s);
+      return /^(https?:)$/.test(u.protocol) && u.hostname && !u.username && !u.password ? s : '';
+    } catch (_) { return ''; }
+  }
+  function dualNotice(text) {
+    return '<span class="cwd-muted">' + escAttr(text) + ' — 구매 전에 담당자에게 문의해 주세요.</span>';
+  }
+  function dualGuide(g, apiBase) {
+    if (!dualObject(g)) return { html: dualNotice('가이드 확인 필요'), valid: false };
+    var textOk = typeof g.text === 'string', imagesOk = Array.isArray(g.images);
+    var html = textOk ? escAttr(g.text) : dualNotice('가이드 글 확인 필요');
+    var badImage = !imagesOk, used = Object.create(null), imageCount = 0;
+    var allowed = Object.create(null), images = [];
+    var base = apiBase != null ? apiBase : (typeof window.API_BASE_URL !== 'undefined' ? window.API_BASE_URL : '');
+    (imagesOk ? g.images : []).forEach(function (image) {
+      var src = dualHttpUrl(image);
+      if (!src) { badImage = true; return; }
+      // 우리 프록시 토큰은 기존 헬퍼로 신뢰 API 주소에 재구성한다. 임의 호스트를 유지하지 않는다.
+      var proxy = src.match(/\/api\/order\/guide-image\/([-\w]{20,})$/);
+      var identity = proxy ? 'proxy:' + proxy[1] : src;
+      if (Object.prototype.hasOwnProperty.call(allowed, identity)) return;
+      var imageHtml;
+      if (proxy) {
+        if (base !== '' && !dualHttpUrl(base)) { badImage = true; return; }
+        imageHtml = imageListHtml([src], base, '유입가이드 이미지').html;
+      } else imageHtml = '<img src="' + escAttr(src) + '" alt="유입가이드 이미지" referrerpolicy="no-referrer">';
+      allowed[identity] = imageHtml;
+      images.push(identity);
+      imageCount++;
+    });
+    // 결정 278: 평문 전체를 HTML로 승격하지 않고, 허용 사진 주소 한 줄만 그 자리에서 치환한다.
+    if (textOk) html = g.text.split(/(\r?\n)/).map(function (line, index) {
+      if (index % 2) return line; // 줄바꿈은 보존하되 단독 CR은 URL 안의 제어문자로 거부한다.
+      var src = dualHttpUrl(line);
+      if (!src || src !== line || /[\x00-\x1f\x7f]/.test(line)) return escAttr(line);
+      var proxy = src.match(/\/api\/order\/guide-image\/([-\w]{20,})$/);
+      var identity = proxy ? 'proxy:' + proxy[1] : src;
+      if (!Object.prototype.hasOwnProperty.call(allowed, identity)) return escAttr(line);
+      if (used[identity]) return '';
+      used[identity] = true;
+      return allowed[identity];
+    }).join('');
+    images.forEach(function (identity) { if (!used[identity]) html += allowed[identity]; });
+    if (badImage) html += dualNotice('가이드 사진 확인 필요');
+    var hasGuide = (textOk && !!g.text.trim()) || imageCount > 0;
+    if (!hasGuide) html += dualNotice('가이드 확인 필요');
+    return { html: html, valid: textOk && imagesOk && !badImage && !!hasGuide };
+  }
+
+  /** 동시진행은 상품 하나와 두 필수 구매처다. 선택지/대표 주소/공통 유입으로 접지 않는다.
+   * 표시 검증일 뿐 모집/신청/구매 제출을 열지 않는다(결정 338). */
+  function dualProductHtml(p, o, unsupported) {
+    if (unsupported) return '<div class="cwd-box"><div class="cwd-tt">📦 네이버·쿠팡 동시진행</div>'
+      + '<div class="cwd-body">' + dualNotice('이 유형의 동시진행 안내는 준비 중입니다') + '</div></div>';
+    p = dualObject(p) ? p : {};
+    var base = dualObject(p.base) ? p.base : {};
+    var channels = dualObject(p.channels) ? p.channels : {};
+    var nameOk = typeof p.name === 'string' && !!p.name.replace(/\|/g, '').trim() && p.name.trim().length <= 200;
+    var total = dualInteger(base.pay, 0, 100000000), people = dualInteger(base.count, 1, 100000);
+    var shapeOk = nameOk && people !== null && p.product_mode === 'none'
+      && Array.isArray(p.options) && p.options.length === 0
+      && !Object.prototype.hasOwnProperty.call(p, 'qty_tiers')
+      && Object.keys(channels).length === 2;
+    var entries = ['naver', 'coupang'].map(function (key) {
+      var ch = Object.prototype.hasOwnProperty.call(channels, key) && dualObject(channels[key]) ? channels[key] : {};
+      var inflow = ch.inflow_type === 'guide' || ch.inflow_type === 'link' ? ch.inflow_type : '';
+      return { label: key === 'naver' ? '네이버' : '쿠팡', pay: dualInteger(ch.pay, 0, 100000000),
+        inflow: inflow, url: dualHttpUrl(ch.url), guide: inflow === 'guide' ? dualGuide(ch.guide, o.apiBase) : null };
+    });
+    var sumOk = total !== null && entries.every(function (ch) { return ch.pay !== null; })
+      && total === entries[0].pay + entries[1].pay;
+    var ready = shapeOk && sumOk && entries.every(function (ch) {
+      return ch.inflow && ch.url && (!ch.guide || ch.guide.valid);
+    });
+    var html = '<div class="cwd-box"><div class="cwd-tt">📦 상품 · 결제금액</div>'
+      + '<div class="cwd-note">네이버·쿠팡 동시진행 — 두 구매처 모두 진행해야 해요.</div>'
+      + '<div class="cwd-body">' + (nameOk ? escAttr(p.name) : dualNotice('상품명 확인 필요')) + '\n'
+      + (shapeOk && sumOk ? '합계 결제금액 ' + total.toLocaleString() + '원' : dualNotice('합계 결제금액 확인 필요'))
+      + (!shapeOk ? '\n' + dualNotice('동시진행 상품 설정 확인 필요') : '') + '</div></div>';
+    entries.forEach(function (ch) {
+      html += '<div class="cwd-box"><div class="cwd-tt">🧭 ' + ch.label + ' · 구매처별 안내</div>'
+        + '<div class="cwd-body">' + (ch.pay === null ? dualNotice('결제금액 확인 필요') : '결제금액 ' + ch.pay.toLocaleString() + '원')
+        + '\n' + (ch.inflow === 'guide' ? '가이드유입\n' + ch.guide.html
+          : ch.inflow === 'link' ? '링크유입' : dualNotice('유입방식 확인 필요'))
+        + (!ch.url ? '\n' + dualNotice('상품 주소 확인 필요') : '') + '</div>';
+      if (ready && ch.inflow === 'link' && o.showLanding !== false) {
+        html += '<a class="cwd-btn cwd-dual-link" href="' + escAttr(ch.url) + '" target="_blank" rel="noopener noreferrer">🔗 '
+          + ch.label + ' 상품 열기 (새 탭)</a>';
+      }
+      html += '</div>';
+    });
+    return html;
+  }
+
   /**
    * 작업내용 카드 HTML.
    * @param {object} d  { workDetail, landingUrl, inflowType, selectedOption }
@@ -183,11 +289,15 @@
   function cardsHtml(d, o) {
     d = d || {}; o = o || {};
     var wd = d.workDetail || {};
+    var dual = Object.prototype.hasOwnProperty.call(wd, 'dualChannelProduct');
     var html = '';
+    // Q&A/별도 유형 등 미결 범위는 구매 안내로 확대하지 않는다.
+    var dualUnsupported = o.showProduct === false || o.showInflow === false || d.type || d.campaignType || wd.type || wd.campaignType;
+    if (dual && o.showProduct === false) html += dualProductHtml(wd.dualChannelProduct, o, true);
 
     // 내가 참여한 옵션(옵션 등록 캠페인만)
     var so = d.selectedOption;
-    if (o.showOption !== false && so && so.optKey) {
+    if (!dual && o.showOption !== false && so && so.optKey) {
       // ★ 134 — 옵션 없는 상품은 그 상품 자체가 선택지다(키가 곧 상품명) → 라벨을 바꿔 말한다.
       //   옵션 단위는 어느 상품의 옵션인지 함께 적는다(복합 작업은 상품이 둘 이상이라 옵션명만으론 못 가린다).
       var isProdUnit = so.unitKind === 'product';
@@ -204,8 +314,11 @@
 
     // 상품 · 옵션 · 결제금액 — 💬 321: Q&A 는 구매가 없어 숨긴다(showProduct:false · 상품은 Q&A 카드가 보여 준다)
     if (o.showProduct !== false) {
+      if (dual) html += dualProductHtml(wd.dualChannelProduct, o, dualUnsupported);
+      else {
       html += '<div class="cwd-box"><div class="cwd-tt">📦 상품 · 옵션 · 결제금액</div>'
         + '<div class="cwd-body">' + escAttr(fmtProduct(wd, d.qty)) + '</div></div>';
+      }
     }
 
     // 🧾 현금영수증 발행 안내 — 연결 탭 진행방식이 '현영'인 공고만(d.cashReceipt는 서버가 판정).
@@ -244,6 +357,7 @@
      * ★ 선택지 사진은 배열(inflowGuideImages)로도 오므로 HTML 뒤에 이어 붙이고,
      *   그 토큰을 아래 중복 판정에 함께 넘겨 같은 사진이 두 번 그려지지 않게 한다.
      */
+    if (!dual) {
     var unitGuideHtml = (so && so.inflowGuideHtml) || '';
     // ★ 같은 사진이 안내글 HTML 과 배열 양쪽에 저장되므로(위 imageListHtml 주석) HTML 을 넘겨 접는다
     var unitPack = imageListHtml(so && so.inflowGuideImages, o.apiBase, '유입가이드 이미지', unitGuideHtml);
@@ -307,6 +421,7 @@
       html += '<button type="button" class="cwd-btn" data-cwd-landing="' + escAttr(landingUrl) + '">🔗 ' + (hasSelectedOptionUrl ? '선택 옵션 링크 열기' : '상품 페이지 열기') + ' (새 탭)</button>';
     }
     html += '</div>';
+    }
     }
 
     // 리뷰 가이드 ([리뷰등록 가이드] 섹션만) + 첨부 이미지

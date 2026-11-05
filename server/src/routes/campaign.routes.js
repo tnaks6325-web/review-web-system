@@ -38,6 +38,7 @@ const {
 //   (화면마다 규칙을 두면 "공고는 구매확정인데 검수는 리뷰"로 갈라진다)
 const { normalizeReviewType } = require('../utils/reviewType');
 const { unitInflowType, effectiveInflow, guideMissingUnits } = require('../utils/unitInflow');   // ★ 결정 333 — 선택지마다 유입방식
+const { campaignHasDualChannels, DUAL_CHANNEL_NOT_READY } = require('../utils/dualChannel');
 const { normalizeReviewTypeMix, validateReviewTypeMix, validateOptionReviewTypeMix } = require('../utils/reviewTypeMix');
 const { normalizeDeliveryTypeMix, validateDeliveryTypeMix } = require('../utils/deliveryTypeMix');
 const { deliveryBaseType } = require('../utils/deliveryType');
@@ -1042,6 +1043,8 @@ async function _scopedCampaignEdit(req, res) {
   const { rows: cur } = await pool.query('SELECT * FROM recruit_campaigns WHERE id = $1', [id]);
   if (!cur.length) return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
   const c = cur[0];
+  // 준비중 설정은 옛 화면이 본문에서 빼도 수정할 수 없다(업무 쓰기 전에 차단).
+  if (campaignHasDualChannels(c)) return res.status(409).json({ ok: false, ...DUAL_CHANNEL_NOT_READY });
   // 리뷰어 홈에는 참여형 카드만 노출 → 스코프 편집도 참여형 공고만(레거시 캠페인 미접촉)
   if (!c.participation_mode) {
     return res.status(403).json({ ok: false, error: '이 공고는 리뷰어 앱에서 수정할 수 없습니다.' });
@@ -1201,6 +1204,7 @@ async function _linkedTabFromWorkOrder(workOrderId) {
  *  "양쪽 설정(start<end)" 또는 "양쪽 미설정(자율주문=종일 오픈)"만 허용 — 한쪽만/역전은 차단. */
 function _participationActivationErrors(c) {
   const errs = [];
+  if (campaignHasDualChannels(c)) errs.push(DUAL_CHANNEL_NOT_READY.error);
   // 시트 없이도 모집공고를 저장·발행할 수 있다. 다만 연결 정보를 일부만 입력하면
   // 이후 어느 탭에 동기화해야 할지 모호해지므로, 입력을 시작한 경우에는 세 값 모두를 요구한다.
   const hasAnyLink = !!(c.linked_sheet_id || c.linked_tab_name || c.linked_tab_gid);
@@ -3365,6 +3369,7 @@ async function _saveRequiredDeliveryMemo(id, value, row) {
 // POST /api/campaign/admin/create — 캠페인 생성
 router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
+    if (campaignHasDualChannels(req.body)) return res.status(409).json({ ok: false, ...DUAL_CHANNEL_NOT_READY });
     const {
       title, channel, channel_custom, manager, time_range,
       delivery_type, review_fee, badges, notes, chat_url,
@@ -3727,6 +3732,7 @@ _handlers.adminCreate = lastRouteHandler(router); // Track B 프록시가 이 �
 // PUT /api/campaign/admin/:id — 캠페인 수정
 router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
+    if (campaignHasDualChannels(req.body)) return res.status(409).json({ ok: false, ...DUAL_CHANNEL_NOT_READY });
     // ★ 리뷰어앱 공고수정 스코프 토큰은 전용 화이트리스트 핸들러로 격리(레드팀 #2/#3/#6)
     //   ★ 옵션(정원·금액) 편집도 이 조기 반환으로 차단됨 — _scopedCampaignEdit는 options를 읽지 않는다
     //     (레드 #4 검토: 약한 신원 리뷰어앱 토큰이 옵션 정원/지급액을 변조하는 파괴표면 차단).
@@ -3976,8 +3982,10 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     let _updBankKept = null;
     {
       const { rows: tbRows } = await pool.query(
-        'SELECT transfer_bank, linked_sheet_id, linked_tab_name FROM recruit_campaigns WHERE id = $1', [id]);
+        'SELECT transfer_bank, linked_sheet_id, linked_tab_name, channel, channel_custom, work_detail FROM recruit_campaigns WHERE id = $1', [id]);
       const tb0 = tbRows[0] || {};
+      // 본문 미전송·설정 삭제·일반 공고 active 전환도 현재 저장본 기준으로 막는다.
+      if (campaignHasDualChannels(tb0)) return res.status(409).json({ ok: false, ...DUAL_CHANNEL_NOT_READY });
       const effSheet = intentionallyUnlinked ? '' : (lSheet || tb0.linked_sheet_id || '');
       const effTab = intentionallyUnlinked ? '' : (lTab || tb0.linked_tab_name || '');
       const tabChanged = effSheet !== String(tb0.linked_sheet_id || '') || effTab !== String(tb0.linked_tab_name || '');
@@ -4478,6 +4486,7 @@ router.put('/admin/:id/status', authMiddleware, adminOrMasterMiddleware, async (
     if (status === 'active') {
       const { rows: cur } = await pool.query('SELECT * FROM recruit_campaigns WHERE id = $1', [id]);
       if (!cur.length) return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
+      if (campaignHasDualChannels(cur[0])) return res.status(409).json({ ok: false, ...DUAL_CHANNEL_NOT_READY });
       if (cur[0].participation_mode) {
         const errs = _participationActivationErrors(cur[0]);
         if (errs.length) return res.status(400).json({ ok: false, error: '참여형 활성화 불가: ' + errs.join(', ') });

@@ -186,7 +186,7 @@ t('★ 프리필은 공유 모듈(work-order-detail.js) 한 벌', () => {
 });
 
 t('★ 미리보기 렌더러가 로드된다 — 없으면 미리보기 카드가 조용히 비어 보인다', () => {
-  assert.ok(/<script src="js\/campaign-workdetail\.js"><\/script>/.test(HTML),
+  assert.ok(/<script src="js\/campaign-workdetail\.js(?:\?v=20261105-dual-editor)?"><\/script>/.test(HTML),
     'workdesk 에 campaign-workdetail.js 미로드');
   assert.ok(HTML.indexOf('js/campaign-workdetail.js') < HTML.indexOf('js/index-recruit.js'),
     'index-recruit.js 보다 뒤면 _renderPreview 가 window.CampWorkDetail 을 못 찾는다');
