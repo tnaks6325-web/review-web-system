@@ -18,8 +18,9 @@ process.env.JWT_SECRET = 'test-price-report';
       work_detail JSONB, archived_at TIMESTAMPTZ, status TEXT DEFAULT 'active', updated_at TIMESTAMPTZ DEFAULT NOW());
     CREATE TABLE campaign_options (id SERIAL PRIMARY KEY, campaign_id TEXT, opt_key TEXT, pay_amount INTEGER DEFAULT 0,
       status TEXT DEFAULT 'active', thumbnail_url TEXT, product_name TEXT, unit_kind TEXT, updated_at TIMESTAMPTZ DEFAULT NOW());
-    CREATE TABLE campaign_applications (id SERIAL PRIMARY KEY, campaign_id TEXT, option_key TEXT, order_submission_id INTEGER, applied_at TIMESTAMPTZ DEFAULT NOW());
-    CREATE TABLE order_submissions (id SERIAL PRIMARY KEY, sheet_id TEXT, campaign_application_id INTEGER, selected_opt_key TEXT);
+    CREATE TABLE campaign_applications (id SERIAL PRIMARY KEY, campaign_id TEXT, option_key TEXT, order_submission_id INTEGER, applicant_name TEXT, applicant_phone TEXT, applied_at TIMESTAMPTZ DEFAULT NOW());
+    CREATE TABLE order_submissions (id SERIAL PRIMARY KEY, sheet_id TEXT, campaign_application_id INTEGER, selected_opt_key TEXT, orderer TEXT, phone TEXT, capture_flags JSONB);
+    CREATE TABLE reviewer_event_logs (order_submission_id INTEGER, event_type TEXT, context JSONB);
     CREATE TABLE campaign_plan_events (id SERIAL PRIMARY KEY, campaign_id TEXT, actor TEXT, action TEXT, detail JSONB);
   `);
   await db.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', '194_campaign_price_reports.sql'), 'utf8'));

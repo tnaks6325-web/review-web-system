@@ -1,7 +1,7 @@
 /**
  * price-alert-prompt.js — 가격 신고 알림 팝업 (결정 266 · 사용자 확정 2026-10-20)
  *
- * 리뷰어가 "화면과 가격이 달라요"로 취소한 리뷰어가 **2명**이 되면 관리자 전원(마스터·관리자·AE)에게 띄운다.
+ * 직접 가격 신고와 구매 금액 차이 검사로 세어진 리뷰어가 **2명**이 되면 관리자 전원(마스터·관리자·AE)에게 띄운다.
  *   [금액 고치기] — 칸에 적은 1건당 금액으로 리뷰웹 모집공고 금액을 바로 바꾼다(인트라넷 리뷰오더는 그대로 ·
  *     결정 280: 리뷰오더와 양방향으로 맞춰지는 공고는 리뷰오더 금액도 같은 길로 함께 바뀐다).
  *   [금액 맞음 — 그대로 두기] — 쌓인 신고를 정리한다.
@@ -92,6 +92,18 @@
     no_work_detail: '공고 내용을 읽지 못했어요. 모집공고 수정에서 고쳐 주세요.',
   };
 
+  function reportersHtml(reporters) {
+    if (reporters === null) return '<div class="pa-warn">신고자 상세를 불러오지 못했어요. 새로고침해 주세요.</div>';
+    if (!Array.isArray(reporters) || !reporters.length) return '';
+    return '<div class="pa-reporters" style="max-width:100%;min-width:0;overflow-x:auto"><table style="width:100%;min-width:540px;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>' +
+      ['이름', '전체 전화번호', '신고 시각', '이유 · 당시 금액'].map(function (h) { return '<th style="padding:4px 6px;white-space:nowrap;border-bottom:1px solid #dfe3ea">' + h + '</th>'; }).join('') + '</tr></thead><tbody>' +
+      reporters.map(function (r) {
+        var reason = esc(r.reason || '신고 경로 확인 안 됨');
+        if (r.expectedAmount != null || r.paidAmount != null) reason += '<br>' + esc('당시 기준 ' + (won(r.expectedAmount) || '모름') + ' / 결제 ' + (won(r.paidAmount) || '모름'));
+        return '<tr>' + [esc(r.name || '이름 확인 안 됨'), esc(r.phone || '전체번호 확인 안 됨'), esc(fmtTime(r.reportedAt) || '시각 확인 안 됨'), reason].map(function (v) { return '<td style="padding:4px 6px;white-space:nowrap;border-bottom:1px solid #dfe3ea">' + v + '</td>'; }).join('') + '</tr>';
+      }).join('') + '</tbody></table></div><div class="pa-meta">남아 있는 기록의 근거이며 당시 신고 경로를 확정하지는 못해요. 같은 사람의 여러 주문은 여러 줄로 보일 수 있어요.</div>';
+  }
+
   function itemHtml(it, i) {
     var dis = S.busy ? ' disabled' : '';
     var draft = S.draft[it.id] == null ? '' : S.draft[it.id];
@@ -106,7 +118,8 @@
     return '<div class="pa-item">' + thumbHtml(it) +
       '<div class="pa-body"><div class="pa-top"><b>' + esc(it.title) + '</b><span class="pa-tag">가격 신고 ' + (it.reportCount | 0) + '명</span></div>' +
       (it.hasOptions ? '<div class="pa-opt">상품: ' + esc(it.optKey) + '</div>' : '<div class="pa-opt">공고 전체(상품을 나누지 않은 공고)</div>') +
-      '<div class="pa-meta">리뷰어 ' + (it.reportCount | 0) + '명이 "화면과 가격이 달라요"로 주문을 취소했어요. 스토어 가격을 확인해 주세요.</div>' +
+      '<div class="pa-meta">직접 가격 신고와 구매 금액 차이 검사 기록을 함께 센 알림이에요. 스토어 가격을 확인해 주세요.</div>' +
+      reportersHtml(it.reporters) +
       '<div class="pa-now">지금 공고 금액 <b>' + (it.currentAmount ? esc(won(it.currentAmount)) : '모름') + '</b></div>' +
       edit +
       '<div class="pa-meta">' + esc([it.manager ? '담당 ' + it.manager : '', it.tabName ? '작업 ' + it.tabName : '', fmtTime(it.updatedAt || it.createdAt)].filter(Boolean).join(' · ')) + '</div>' +

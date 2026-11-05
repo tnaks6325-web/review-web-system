@@ -8064,19 +8064,23 @@ function _cndSalesToggle(button){
    ★ 금액 고치기는 팝업(다른 리뷰어 2명)에서만 — 카드에서 금액을 고치려면 종전 [결제금액] → 모집공고 수정. */
 function _cndPriceRow(cd){
   const pr=cd&&cd.priceReports;
-  if(!pr||STATE.role==='advertiser'||!cd.campaignId) return '';
+  if(STATE.role==='advertiser'||!['master','admin','staff'].includes(STATE.role)||!cd||!cd.campaignId) return '';
+  if(pr===null) return '<dt>가격 신고</dt><dd class="cndprice">가격 신고 정보를 불러오지 못했어요. 새로고침해 주세요.</dd>';
+  if(!pr) return '';
   const open=Array.isArray(pr.open)?pr.open:[], hist=Array.isArray(pr.history)?pr.history:[];
-  if(!open.length&&!hist.length) return '';
+  const reporters=Array.isArray(pr.reporters)?pr.reporters:[];
+  if(!open.length&&!hist.length&&!reporters.length&&pr.reporters!==null) return '';
   const won=n=>n==null?'':Number(n).toLocaleString('ko-KR')+'원';
   const when=t=>{ const d=new Date(t); return isNaN(d.getTime())?'':`${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
   const nm=k=>k?`「${k}」 `:'';
-  const chips=open.map(o=>`<span class="cndchip" title="리뷰어가 「화면과 가격이 달라요」로 취소한 신고입니다 — 다른 리뷰어 2명이면 관리자 모두에게 팝업이 뜹니다.">${esc(o.optKey?o.optKey+' ':'')}신고 ${Number(o.reports)}명</span>`).join(' ');
+  const chips=open.map(o=>`<span class="cndchip" title="직접 가격 신고와 구매 금액 차이 검사 기록을 함께 셉니다 — 다른 리뷰어 2명이면 관리자 모두에게 팝업이 뜹니다.">${esc(o.optKey?o.optKey+' ':'')}신고 ${Number(o.reports)}명</span>`).join(' ');
+  const detail=pr.reporters===null?'<div>신고자 상세를 불러오지 못했어요. 새로고침해 주세요.</div>':reporters.length?`<div style="max-width:100%;min-width:0;overflow-x:auto"><table style="width:100%;min-width:580px;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>${['이름','전체 전화번호','신고 시각','이유 · 당시 금액'].map(h=>`<th style="padding:4px 6px;white-space:nowrap;border-bottom:1px solid var(--line,#dfe3ea)">${h}</th>`).join('')}</tr></thead><tbody>${reporters.map(r=>`<tr>${[esc(r.name||'이름 확인 안 됨'),esc(r.phone||'전체번호 확인 안 됨'),esc(when(r.reportedAt)||'시각 확인 안 됨'),esc(nm(r.optKey)+(r.reason||'신고 경로 확인 안 됨'))+(r.expectedAmount!=null||r.paidAmount!=null?`<br>${esc('당시 기준 '+(won(r.expectedAmount)||'모름')+' / 결제 '+(won(r.paidAmount)||'모름'))}`:'')].map(v=>`<td style="padding:4px 6px;white-space:nowrap;border-bottom:1px solid var(--line,#dfe3ea)">${v}</td>`).join('')}</tr>`).join('')}</tbody></table></div><div class="cndpricehist">남아 있는 기록의 근거이며 당시 신고 경로를 확정하지는 못해요. 같은 사람의 여러 주문은 여러 줄로 보일 수 있어요.</div>`:'';
   const lines=hist.map(h=>{
     const what=h.resolution==='edited'?`${won(h.oldAmount)?esc(won(h.oldAmount))+' → ':''}<b>${esc(won(h.newAmount))}</b> 고침`
       :h.resolution==='kept'?`금액 맞음 — 그대로${h.oldAmount!=null?` (${esc(won(h.oldAmount))})`:''}`:'결정 보류';
     return `<div class="cndpricehist">${esc(when(h.at))} · ${esc(nm(h.optKey))}${what}${h.by?` · ${esc(h.by)}`:''}</div>`;
   }).join('');
-  return `<dt>가격 신고</dt><dd class="cndprice">${chips?`<div>${chips}</div>`:''}${lines}</dd>`;
+  return `<dt>가격 신고</dt><dd class="cndprice" style="min-width:0">${chips?`<div>${chips}</div>`:''}${detail}${lines}</dd>`;
 }
 async function _cndSale(i){
   const cd=STATE.wd&&STATE.wd.condition; const o=cd&&Array.isArray(cd.optionSales)?cd.optionSales[i]:null;

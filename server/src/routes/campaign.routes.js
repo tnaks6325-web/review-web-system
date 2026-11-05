@@ -4532,6 +4532,10 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
     );
     const purposeMatches = await loadPopularCreditMatches(pool,
       [...new Set(rows.map((row) => String(row.phone8 || '')).filter(Boolean))], { evaluatedAt, includeDirectPurchases: true });
+    const { loadPopularPurposeDetails } = require('../services/popularPurposeDetail.service');
+    const purposeDetails = await loadPopularPurposeDetails(pool, purposeMatches, rows.map(r => String(r.id)), {
+      onError: err => logger.warn('[campaign/admin/applications] 인기 목적 상세 조회 실패: ' + err.message),
+    });
     /* 주문 표시는 작업 로그와 같은 서버 판정값을 쓴다. 초과시간을 브라우저에서 다시 계산하면
        시간대/반올림 차이로 두 화면이 갈릴 수 있어 초 단위 정수까지 여기서 확정한다. */
     const controlRows = rows.map(r => {
@@ -4543,6 +4547,7 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
       return {
         ...r,
         popular_purpose: purposeMatches.matchedNormalIds.has(String(r.id)),
+        popular_purpose_detail: purposeDetails.get(String(r.id)) || null,
         order_submission_type: isLate ? 'late' : (r.order_source === 'admin_external' ? 'external' : 'standard'),
         order_overdue_seconds: orderOverdueSeconds,
       };
@@ -4688,6 +4693,11 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
           const dm = await loadPopularCreditMatches(pool,
             [...new Set(rowsDirect.map(r => r.phone8).filter(p => /^\d{8}$/.test(p)))], { evaluatedAt, includeDirectPurchases: true });
           for (const r of rowsDirect) r.popularPurpose = dm.matchedNormalIds.has('os:' + r.orderId);
+          // 상세 실패는 기존 매칭/목록을 지우지 않는다. 공개 API에는 이 서비스를 연결하지 않는다.
+          const directDetails = await loadPopularPurposeDetails(pool, dm, rowsDirect.map(r => 'os:' + r.orderId), {
+            onError: err => logger.warn('[campaign/admin/applications] 바로 구매 인기 목적 상세 조회 실패: ' + err.message),
+          });
+          for (const r of rowsDirect) r.popularPurposeDetail = directDetails.get('os:' + r.orderId) || null;
         } catch (e) { logger.warn(`[campaign/applications] 바로 구매 인기 목적 판정 실패 camp=${id}: ${e.message}`); }
       }
       if (Array.isArray(rowsDirect)) for (const r of rowsDirect) delete r.phone8;   // 전체 번호는 내리지 않는다

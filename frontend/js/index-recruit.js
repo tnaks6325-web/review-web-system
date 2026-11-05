@@ -5613,12 +5613,80 @@ function _campDirectTable(ds) {
   const th = t => `<th style="text-align:${t.a || "left"};font-weight:800;color:#6B7280;padding:5px 8px;border-bottom:1px solid #E5E7EB;white-space:nowrap">${t.l}</th>`;
   const td = (v, a) => `<td style="text-align:${a || "left"};padding:5px 8px;border-bottom:1px solid #F3F4F6;white-space:nowrap">${v}</td>`;
   const src = { link: "구매양식 링크", manual: "담당자 수동제출" };
-  const body = ds.rows.map(r => `<tr>${td(fmt(r.submittedAt))}${td("<b>" + escT(r.name || "(이름 없음)") + "</b>" + (r.popularPurpose ? ' <span style="font-size:.62rem;font-weight:800;background:#FFEDD5;color:#C2410C;border-radius:6px;padding:1px 6px" title="이 구매로 얻은 참여권이 이후 인기상품 참여에 실제로 쓰였습니다">🔥 인기상품목적 참여건</span>' : "")
+  const body = ds.rows.map(r => `<tr>${td(fmt(r.submittedAt))}${td("<b>" + escT(r.name || "(이름 없음)") + "</b>" + (r.popularPurpose ? ' ' + _campPurposeBadge(r.popularPurposeDetail, true) : "")
       + ((Array.isArray(r.ruleFlags) && r.ruleFlags.length) ? ' <span style="font-size:.62rem;font-weight:800;background:#FEE2E2;color:#B91C1C;border-radius:6px;padding:1px 6px" title="공고 참여 규칙에 걸린 바로 구매 — 막지 않고 표시만 합니다(입금 여부는 담당자가 정합니다)">⚠ ' + escT(r.ruleFlags.join(" · ")) + '</span>' : ""))}${td(r.phone4 ? "***" + escT(r.phone4) : "")}${td(escT(r.product || "-"))}${td(r.rowSeq != null ? r.rowSeq + "행" : "-", "center")}${td(src[r.source] || escT(r.source), "center")}</tr>`).join("");
   const more = ds.rows.length < (Number(ds.totalDirect) || 0) ? note(`최근 ${ds.rows.length}건만 보입니다(전체 ${ds.totalDirect}건).`) : "";
   return box(`<div style="overflow-x:auto;max-height:320px;overflow-y:auto"><table style="width:100%;border-collapse:collapse;font-size:.72rem">
       <thead><tr>${th({ l: "구매양식 제출" })}${th({ l: "이름" })}${th({ l: "연락처" })}${th({ l: "상품" })}${th({ l: "작업표", a: "center" })}${th({ l: "경로", a: "center" })}</tr></thead>
       <tbody>${body}</tbody></table></div>${more}`);
+}
+
+let _campPurposeDetails = [];
+let _campPurposeClose = null;
+
+// 데이터는 메모리에 두고 마크업에는 숫자 인덱스만 넣는다(인라인 JS 데이터 보간 금지).
+function _campPurposeBadge(detail, direct = false) {
+  const index = _campPurposeDetails.push(detail || null) - 1;
+  const style = direct
+    ? "font-size:.62rem;font-weight:800;background:#FFEDD5;color:#C2410C;border-radius:6px;padding:1px 6px"
+    : "font-size:.66rem;font-weight:800;background:#FFF7ED;color:#9A3412;border-radius:6px;padding:2px 8px;white-space:nowrap";
+  return `<button type="button" data-camp-purpose="${index}" aria-haspopup="dialog" title="이 구매로 얻은 참여권이 이후 인기상품 참여에 실제로 쓰였습니다 · 상세 보기" style="${style};border:0;font-family:inherit;cursor:pointer">🔥 인기상품목적 참여건</button>`;
+}
+
+function _campPurposeContent(detail) {
+  const esc = v => String(v == null || v === "" ? "미확인" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  const note = `<p style="margin:14px 0 0;color:#6B7280;font-size:.72rem;line-height:1.6">구매 기록 기준입니다. 구매양식·참여 신청에 기록된 선택값이며, 구매캡처 속 상품·옵션·수량과 같은지는 별도 확인이 필요합니다.</p>`;
+  if (!detail || detail.status !== "ok" || !detail.purchase) return `<p role="status" style="margin:0;color:#9A3412;line-height:1.6">상세를 불러오지 못했습니다. 목록을 다시 열어 확인해 주세요.</p>${note}`;
+  const p = detail.purchase;
+  const date = p.submittedAt ? new Date(p.submittedAt) : null;
+  const stamp = date && Number.isFinite(date.getTime()) ? date.toLocaleString("ko-KR", { timeZone: "Asia/Seoul", year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }) : null;
+  const field = (label, value) => `<div style="margin-top:12px"><div style="font-size:.7rem;font-weight:700;color:#6B7280;margin-bottom:4px">${label}</div><div style="font-size:.83rem;line-height:1.55;overflow-wrap:anywhere;white-space:pre-wrap">${esc(value)}</div></div>`;
+  const qty = Number.isInteger(p.quantity) && p.quantity > 0 ? `${p.quantity}개` : null;
+  const popularLabel = [detail.popularProduct, detail.popularOption].filter((v, i, all) => v && all.indexOf(v) === i).join(' · ');
+  return `<div style="font-size:.72rem;font-weight:800;color:#9A3412">비인기 상품 구매 기록</div>`
+    + field("상품명", p.product) + field("옵션", p.option) + field("고른 수량", qty) + field("구매양식 제출시각 (한국시간)", stamp)
+    + `<div style="border-top:1px solid #E5E7EB;margin-top:16px;padding-top:2px">${field("실제 연결된 인기 상품", popularLabel)}</div>${note}`;
+}
+
+function _campBindPurposeButtons(root) {
+  root.querySelectorAll('[data-camp-purpose]').forEach(button => button.addEventListener('click', () => {
+    _campOpenPurposeDetail(Number(button.dataset.campPurpose), button);
+  }));
+}
+
+function _campOpenPurposeDetail(index, trigger) {
+  if (!Number.isInteger(index) || index < 0 || index >= _campPurposeDetails.length) return;
+  if (_campPurposeClose) _campPurposeClose();
+  const previousFocus = trigger || document.activeElement;
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(15,23,42,.42);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box';
+  overlay.innerHTML = `<section role="dialog" aria-modal="true" aria-labelledby="campPurposeTitle" style="box-sizing:border-box;width:420px;max-width:100%;max-height:calc(100dvh - 40px);overflow:auto;background:#fff;border:1px solid #E5E7EB;border-radius:16px;box-shadow:0 20px 60px rgba(15,23,42,.22);padding:20px;color:#1F2937">
+    <div style="display:flex;align-items:center;gap:12px;justify-content:space-between;margin-bottom:16px"><h3 id="campPurposeTitle" style="margin:0;font-size:.95rem">🔥 인기상품목적 구매 상세</h3><button type="button" aria-label="닫기" style="border:1px solid #E5E7EB;background:#fff;border-radius:7px;padding:5px 9px;color:#6B7280;font:inherit;cursor:pointer">닫기</button></div>
+    ${_campPurposeContent(_campPurposeDetails[index])}</section>`;
+  const closeButton = overlay.querySelector('button');
+  const previousOverflow = document.body.style.overflow;
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey, true);
+    document.removeEventListener('focusin', onFocus, true);
+    document.body.style.overflow = previousOverflow;
+    _campPurposeClose = null;
+    if (previousFocus && previousFocus.isConnected) previousFocus.focus();
+  };
+  const onKey = e => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); close(); }
+    // 상세 안의 유일한 조작은 닫기. Tab/Shift+Tab 모두 배경으로 빠지지 않는다.
+    else if (e.key === 'Tab') { e.preventDefault(); e.stopImmediatePropagation(); closeButton.focus(); }
+  };
+  const onFocus = e => { if (!overlay.contains(e.target)) closeButton.focus(); };
+  closeButton.addEventListener('click', close);
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  document.body.appendChild(overlay);
+  document.body.style.overflow = 'hidden';
+  document.addEventListener('keydown', onKey, true);
+  document.addEventListener('focusin', onFocus, true);
+  _campPurposeClose = close;
+  closeButton.focus();
 }
 
 /** 👥 소유자별 묶음표(063 3단계): 타계정 건이 있는 소유자만 노출(본계정 단독 참여자는 기존 목록으로 충분).
@@ -5785,6 +5853,7 @@ async function _loadCampControl(campId) {
     if (!res.ok || !j.ok) throw new Error(j.error || "HTTP " + res.status);
     if (manageSeq !== _ccManageSeq || _ccMode !== "manage" || String(campId) !== String(_ccCampId)) return;
     const rows = j.data || [];
+    _campPurposeDetails = [];
     // 오늘(KST) 집계 — 유효홀드는 시각 기준(만료시각 경과분은 만료로 분류)
     const now = Date.now();
     const kstDay = ms => new Date(ms + 9 * 3600 * 1000).toISOString().slice(0, 10);
@@ -5820,6 +5889,7 @@ async function _loadCampControl(campId) {
     const sheetHtml = _campSheetInfo(j.sheetInfo);
     if (!items.length) {
       body.innerHTML = blogQueueHtml + sheetHtml + optTableHtml + directTableHtml + `<div style="padding:30px;text-align:center;color:#9CA3AF">공고 참여 이력이 없습니다.</div>`;
+      _campBindPurposeButtons(body);
       return;
     }
     const chip = (bg, fg, tx) => `<span style="font-size:.66rem;font-weight:800;background:${bg};color:${fg};border-radius:6px;padding:2px 8px;white-space:nowrap">${tx}</span>`;
@@ -5864,7 +5934,7 @@ async function _loadCampControl(campId) {
       // 단순 일반 참여가 아니라, 서버의 FIFO 크레딧 매칭에서 실제 인기상품 사용건과
       // 짝지어진 일반상품 제출만 별도로 표시한다.
       const popularPurpose = r.popular_purpose === true
-        ? chip("#FFF7ED", "#9A3412", "🔥 인기상품목적 참여건") : "";
+        ? _campPurposeBadge(r.popular_purpose_detail) : "";
       // 👥 063: 명의 구분 — 타계정 건은 소유자(본계정) 뒤4자리를 함께 표기(묶음 추적)
       const acct = _isSubRow(r) ? chip("#F1EAFE", "#7C3AED", "타 · 본계정 ***" + String(r.owner_phone8).slice(-4)) : "";
       // ★ 리뷰 #4: 확정 버튼은 만료·취소 건만(서버 의도 = 기구매 구제 경로).
@@ -5891,6 +5961,7 @@ async function _loadCampControl(campId) {
         ${orderStamp}
       </div>`;
     }).join("");
+    _campBindPurposeButtons(body);
   } catch (e) {
     if (manageSeq !== _ccManageSeq || _ccMode !== "manage" || String(campId) !== String(_ccCampId)) return;
     body.innerHTML = `<div style="padding:24px;text-align:center;color:#DC2626">불러오기 실패: ${String(e.message).replace(/</g, "&lt;")}</div>`;

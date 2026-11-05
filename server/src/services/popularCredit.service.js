@@ -38,6 +38,7 @@ function calculatePopularCreditMatches(events, evaluatedAt = new Date()) {
   const queues = new Map();
   const matchedNormalIds = new Set();
   const matchedPopularIds = new Set();
+  const matchedPairs = new Map(); // 표시 전용: 일반 이벤트 id → 실제 소비한 인기 이벤트 id (개인정보 없음)
   const popularEvents = [];
   for (const event of ordered) {
     if (!states.has(event.phone8)) states.set(event.phone8, _emptyState());
@@ -59,10 +60,11 @@ function calculatePopularCreditMatches(events, evaluatedAt = new Date()) {
     state.popularUsed += 1;
     matchedNormalIds.add(String(credit.id));
     matchedPopularIds.add(String(event.id));
+    matchedPairs.set(String(credit.id), String(event.id));
   }
 
   for (const state of states.values()) state.credits = Math.max(0, state.normalDone - state.popularUsed);
-  return { states, matchedNormalIds, matchedPopularIds, popularEvents,
+  return { states, matchedNormalIds, matchedPopularIds, matchedPairs, popularEvents,
     evaluatedAt: new Date(evaluatedAtMs), cutoff: new Date(cutoffMs) };
 }
 
