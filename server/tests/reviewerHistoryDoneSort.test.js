@@ -122,7 +122,7 @@ const rows = [
     assert.ok(!empty.__made.some(m => m.className === 'review-sortbar'), '빈 목록에는 정렬 줄이 없다');
   });
 
-  await t('6. 나눠 받는 조회에서 「오래된 제출순」을 고르면 남은 제출완료를 끝까지 받는다', async () => {
+  await t('6. 나눠 받는 조회는 정렬을 고르면 남은 제출완료를 끝까지 받고, 실패·진행 없음이면 멈춘다', async () => {
     let calls = 0;
     const ctx = makeCtx({ done: rows, mode: 'owner_id', cursors: { pending: null, done: 'c1' } });
     ctx.loadMoreReviewHistory = async () => { calls++; ctx._historyCursors.done = calls < 3 ? 'c' + (calls + 1) : null; };
@@ -132,9 +132,32 @@ const rows = [
 
     let calls2 = 0;
     const ctx2 = makeCtx({ done: rows, mode: 'owner_id', cursors: { pending: null, done: 'c1' } });
-    ctx2.loadMoreReviewHistory = async () => { calls2++; };
+    ctx2.loadMoreReviewHistory = async () => { calls2++; ctx2._historyCursors.done = calls2 < 2 ? 'x' : null; };
     await ctx2.setReviewDoneSort('recent');
-    assert.strictEqual(calls2, 0, '최근 제출순은 추가로 받지 않는다');
+    assert.strictEqual(calls2, 2, '최근 제출순도 끝까지 받는다(최근 제출 건이 뒤쪽 페이지에 있을 수 있다)');
+
+    let calls3 = 0;
+    const ctx3 = makeCtx({ done: rows, mode: 'owner_id', cursors: { pending: null, done: 'c1' } });
+    ctx3.loadMoreReviewHistory = async () => { calls3++; ctx3._reviewListError = '추가 내역을 불러오지 못했습니다.'; };
+    await ctx3.setReviewDoneSort('old');
+    assert.strictEqual(calls3, 1, '한 페이지가 실패하면 멈춘다');
+
+    let calls4 = 0;
+    const ctx4 = makeCtx({ done: rows, mode: 'owner_id', cursors: { pending: null, done: 'c1' } });
+    ctx4.loadMoreReviewHistory = async () => { calls4++; };
+    await ctx4.setReviewDoneSort('old');
+    assert.strictEqual(calls4, 1, '커서가 그대로면(진행 없음) 멈춘다');
+
+    let calls5 = 0;
+    const ctx5 = makeCtx({ done: rows, mode: 'legacy', cursors: { pending: null, done: 'c1' } });
+    ctx5.loadMoreReviewHistory = async () => { calls5++; };
+    await ctx5.setReviewDoneSort('old');
+    assert.strictEqual(calls5, 0, '한 번에 다 받는 옛 조회는 추가 요청 없음');
+  });
+
+  await t('6-1. 제출완료 탭으로 갈 때·목록을 새로 받을 때도 남은 페이지를 받는다', () => {
+    assert.ok(/renderReviewSummary\(\);[^\n]*\n  if \(_reviewSubTab === 'done'\) _loadAllDoneHistory\(\);/.test(home), '탭 전환');
+    assert.ok(/_reviewListLoading = false;\n  renderReviewSubTab\(\);\n  if \(_reviewSubTab === 'done'\) _loadAllDoneHistory\(\);/.test(home), '목록 새로 받기');
   });
 
   await t('7. 기본값은 최근 제출순', () => {
