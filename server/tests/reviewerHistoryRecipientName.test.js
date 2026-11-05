@@ -142,6 +142,7 @@ function renderFirstCard(item) {
     _reviewListLoading: false,
     _reviewListError: '',
     _reviewListTruncated: false,
+    _reviewDoneSort: 'recent', _sortDoneHistory: (l) => l, _reviewSortBarEl: () => el(),
     escHtml: (s) => String(s == null ? '' : s),
     _escAttrX: (s) => String(s == null ? '' : s),
     _fnum: (n) => String(n),
