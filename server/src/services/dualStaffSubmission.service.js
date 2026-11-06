@@ -29,6 +29,17 @@ const PAID_SQL = `SELECT 1 FROM payment_batch_items i WHERE i.status IN ('pendin
     SELECT 1 FROM campaign_participants cp WHERE cp.order_submission_id=$1 AND cp.active=TRUE AND cp.deleted_at IS NULL
       AND cp.sheet_id=i.sheet_id AND cp.tab_name=i.tab_name AND cp.seq=i.row_index)) LIMIT 1`;
 async function paidHit(q, id) { return (await q.query(PAID_SQL, [id])).rows.length > 0; }
+/** 보완 목록 대상 — 목록(listPlainPending)과 기존 캡처 보기(readPlainCapture)가 같은 조건을 쓴다($1 sheet · $2 tab · $3 source).
+ *  completePlainOrder 가 받는 조건과 같다(수동제출 · 묶음 아님 · 살아 있음). */
+const PLAIN_PENDING_WHERE = `os.sheet_id=$1 AND os.tab_name=$2 AND os.deleted_at IS NULL AND COALESCE(os.mirror_status,'')<>'canceled'
+        AND os.source=$3 AND os.purchase_bundle_version IS NULL`;
+/** 사진 종류는 바이트 머리로 정한다(저장소 종류 칸에 기대지 않음) · 모르면 jpeg(입구가 nosniff 를 건다). */
+function sniffImageType(b) {
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png';
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return 'image/gif';
+  if (b.length > 11 && b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP') return 'image/webp';
+  return 'image/jpeg';
+}
 
 function createService(deps = {}) {
   const db = deps.db || require('../db/pool');
@@ -76,7 +87,8 @@ function createService(deps = {}) {
     for (const ch of CHANNELS) {
       const d = require('./capturePriceCheck.service').decideForExpected({ channel: ch, expected: snapshot.channels[ch].pay, capturePrice: '',
         typedPrice: purchases[ch].paidAmount, staffReview: body[ch]?.capturePriceStaffReview === true, ack: body[ch]?.capturePriceAck === true });
-      if (d.action === 'block' || d.action === 'warn') fail(d.action === 'block' ? 'CAPTURE_PRICE_OVER' : 'CAPTURE_PRICE_DIFF', d.error);
+      // 결정 349 화면 후속 — 화면은 확인 한 번으로 두 구매처를 함께 확인 처리한다 → 문구에 어느 구매처인지 붙인다
+      if (d.action === 'block' || d.action === 'warn') fail(d.action === 'block' ? 'CAPTURE_PRICE_OVER' : 'CAPTURE_PRICE_DIFF', (ch === 'naver' ? '네이버' : '쿠팡') + ': ' + d.error);
       if (d.action === 'flag') flags.push({ channel: ch, ...d });
     }
     return flags;
@@ -339,8 +351,7 @@ function createService(deps = {}) {
     const rows = (await db.query(`SELECT os.id, os.recipient, os.phone, os.price, os.order_num, os.capture_file_id,
         (SELECT cp.seq FROM campaign_participants cp WHERE cp.order_submission_id=os.id AND cp.active=TRUE AND cp.deleted_at IS NULL ORDER BY cp.seq LIMIT 1) AS seq
       FROM order_submissions os
-      WHERE os.sheet_id=$1 AND os.tab_name=$2 AND os.deleted_at IS NULL AND COALESCE(os.mirror_status,'')<>'canceled'
-        AND os.source=$3 AND os.purchase_bundle_version IS NULL
+      WHERE ${PLAIN_PENDING_WHERE}
       ORDER BY os.submitted_at, os.id LIMIT 100`, [String(sheetId), String(tabName), manual().SOURCE_EXTERNAL])).rows;
     const items = [];
     for (const r of rows) {
@@ -352,9 +363,29 @@ function createService(deps = {}) {
     }
     return { ok: true, dual: true, items };
   }
-  return { submitStaffBundle, completePlainOrder, listPlainPending };
+  /** 결정 349 화면 후속 — 보완 목록 줄의 기존 구매캡처(네이버 것인지 쿠팡 것인지 눈으로 보고 고르게).
+   *  ★ 대상 = 보완 목록에 뜨는 주문만(목록과 같은 WHERE · 같은 동시진행 판정) — 임의 주문 사진 열람 통로가 되지 않게.
+   *    주문 id 하나만으로는 열리지 않고, 화면이 연 작업표(sheetId·tabName)와 그 주문의 작업표가 같아야 한다.
+   *  ★ 보완 목록 응답에 파일 id 를 싣지 않는다(무인증 사진 프록시로 새는 길 차단) — 사진은 이 함수만 읽는다. 거절은 사진 읽기 0. */
+  async function readPlainCapture({ orderSubmissionId, sheetId, tabName, gid = '' } = {}) {
+    const id = String(orderSubmissionId || '');
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) || !sheetId || !tabName) fail('BAD_REQUEST', 'orderSubmissionId, sheetId, tabName 필수', 400);
+    let scope;
+    try { scope = await lifecycle().discoverDualScope(db, [{ sheetId: String(sheetId), tabName: String(tabName), tabGid: String(gid || '') }]); }
+    catch (_) { fail('dual_channel_manual_check_failed', '동시진행 여부를 확인하지 못했어요 — 잠시 뒤 다시 시도해 주세요.'); }
+    if (!scope.campaignIds.length) fail('dual_channel_required', '이 작업은 네이버·쿠팡 동시진행이 아니에요.');
+    const row = (await db.query(`SELECT os.capture_file_id FROM order_submissions os WHERE ${PLAIN_PENDING_WHERE} AND os.id=$4`,
+      [String(sheetId), String(tabName), manual().SOURCE_EXTERNAL, id])).rows[0];
+    if (!row) fail('DUAL_CAPTURE_NOT_LISTED', '보완 목록에 있는 주문이 아닙니다.', 404);
+    if (!row.capture_file_id) fail('DUAL_NO_CAPTURE', '기존 주문에 구매캡처가 없습니다.', 404);
+    let buffer;
+    try { buffer = await drive.read(row.capture_file_id); } catch (_) { buffer = null; }
+    if (!Buffer.isBuffer(buffer) || !buffer.length) fail('DUAL_CAPTURE_READ_FAILED', '사진을 불러오지 못했습니다.', 502);
+    return { ok: true, buffer, mimeType: sniffImageType(buffer) };
+  }
+  return { submitStaffBundle, completePlainOrder, listPlainPending, readPlainCapture };
 }
 let production;
 const get = () => production || (production = createService());
 module.exports = { createService, submitStaffBundle: b => get().submitStaffBundle(b), completePlainOrder: b => get().completePlainOrder(b),
-  listPlainPending: b => get().listPlainPending(b) };
+  listPlainPending: b => get().listPlainPending(b), readPlainCapture: b => get().readPlainCapture(b) };

@@ -22,35 +22,47 @@ function boot(server) {
   const calls = [];
   let ovl = null;
   let pasteListener = null;
+  const keyListeners = [];   // 결정 349 화면 후속 — 크게 보기 창의 Esc
   const els = new Map();
   const stub = id => { if (!els.has(id)) els.set(id, { id, innerHTML: '', value: '', disabled: false, textContent: '', style: {}, classList: { add() {}, remove() {}, toggle() {} }, focus() {} }); return els.get(id); };
   const document = {
     head: { appendChild() {} },
     body: { appendChild(el) { ovl = el; } },
-    createElement() { return { style: {}, classList: { add() {}, remove() {}, toggle() {} }, addEventListener() {}, remove() { ovl = null; }, innerHTML: '', set className(_) {}, get offsetParent() { return null; } }; },
+    createElement() {
+      const el = { style: {}, kids: [], classList: { add() {}, remove() {}, toggle() {} }, addEventListener() {}, innerHTML: '', set className(_) {}, get offsetParent() { return null; },
+        appendChild(c) { if (!el.kids.includes(c)) el.kids.push(c); c.parentNode = el; },
+        remove() { if (el.parentNode && el.parentNode.kids) el.parentNode.kids = el.parentNode.kids.filter(k => k !== el); else ovl = null; el.parentNode = null; } };
+      return el;
+    },
     getElementById(id) {
       if (id === 'mo-style') return {};
       if (id === 'moOvl') return ovl;
       if (!ovl) return null;
       if (id === 'moSubmit' || id === 'moOptTip') return ovl.innerHTML.includes(`id="${id}"`) ? stub(id) : null;
+      if (/^moOc-/.test(id)) return ovl.innerHTML.includes(`id="${id}"`) ? stub(id) : null;
+      if (id === 'moCv') return (ovl.kids || []).find(k => k.id === 'moCv') || null;
       return null;
     },
     querySelector() { return null; },
     querySelectorAll() { return []; },
-    addEventListener(type, fn) { if (type === 'paste') pasteListener = fn; },
+    addEventListener(type, fn) { if (type === 'paste') pasteListener = fn; if (type === 'keydown') keyListeners.push(fn); },
+    removeEventListener(type, fn) { if (type === 'keydown') { const k = keyListeners.indexOf(fn); if (k >= 0) keyListeners.splice(k, 1); } },
   };
-  const dialogs = [], toasts = [];
+  const dialogs = [], toasts = [], revoked = [];
   const win = {
     document, console, setTimeout, clearTimeout, Promise, JSON, Math, Date, Array, Object, String, Number, RegExp, Map, Set, Error,
     sessionStorage: { getItem: () => 'tok' }, localStorage: { getItem: () => '' },
     location: { hostname: 'x' }, API_BASE_URL: 'http://api', MANUAL_ORDER_API: BASE,
     alert: m => dialogs.push('alert:' + m), confirm: m => { dialogs.push('confirm:' + m); return true; }, toast: m => toasts.push(m),
     FileReader: class { readAsDataURL(f) { setTimeout(() => { this.result = 'data:image/jpeg;base64,' + f.b64; this.onload(); }, 0); } },
+    URL: { createObjectURL: b => 'blob:' + b.tag, revokeObjectURL: u => revoked.push(u) },
     fetch: async (url, o) => {
       const p = String(url).replace('http://api', '');
       const body = o && o.body ? JSON.parse(o.body) : {};
-      calls.push({ p, body });
-      return { json: async () => server(p, body) };
+      calls.push({ p, body, auth: o && o.headers && o.headers.Authorization });
+      const out = await server(p, body);
+      if (out && out.__raw) return out.__raw;   // 사진 응답(결정 349 화면 후속)
+      return { json: async () => out };
     },
   };
   win.window = win;
@@ -60,7 +72,9 @@ function boot(server) {
   const img = b64 => ({ type: 'image/jpeg', size: 10, b64 });
   const cd = file => ({ items: [{ type: file.type, getAsFile: () => file }] });
   return {
-    M, calls, dialogs, toasts, img,
+    M, calls, dialogs, toasts, img, revoked, els,
+    cv: () => { const c = ovl && (ovl.kids || []).find(k => k.id === 'moCv'); return c ? c.innerHTML : ''; },
+    key: k => { const ev = { key: k, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, stopPropagation() {} }; keyListeners.slice().forEach(fn => fn(ev)); return ev; },
     html: () => (ovl ? ovl.innerHTML : ''),
     paste: async (i, text) => { const ev = { clipboardData: { items: [], getData: () => text }, preventDefault() { this.p = 1; }, target: {} }; M.rowPaste(ev, i); if (!ev.p) M.rowInput(i, text); await M.flush(); },
     capPaste: (i, ch, file) => M.onPaste({ clipboardData: cd(file), preventDefault() {} }, i, ch),
@@ -202,4 +216,76 @@ test('349 화면 ⑤ 칸 폭: 동시진행 모드 칸 합 ≤ 1600(옆으로 밀
   assert.ok(sum <= 1600, '동시진행 칸 합 ' + sum);
   for (const [k, w] of [['phone', 118], ['account', 128], ['userId', 74]]) assert.ok(new RegExp(`k: '${k}', label: '[^']+', w: ${w}`).test(block), k);
   assert.ok(/k: 'no'[^\n]*cls: 'stk r'/.test(block) && /k: 'raw'[^\n]*cls: 'stk2'/.test(block) && /k: 'st'[^\n]*cls: 'stkr'/.test(block), '고정 칸');
+});
+
+
+/* ── 결정 349 화면 후속(2026-11-07) — 보완 목록 줄의 기존 구매캡처 미리보기 · 크게 보기 · 금액 확인 문구 ── */
+const PEND3 = PEND.concat([{ orderSubmissionId: '00000000-0000-4000-8000-0000000000b5', name: '사아자', phoneTail: '1111', price: 8000, row: 9, hasCapture: false, hasOrderNum: false, paid: false }]);
+function capServer(fail) {
+  const base = fakeServer(true);
+  return async (p, body) => {
+    const q = p.split('?')[0];
+    if (q === BASE + '/dual/pending') return { ok: true, dual: true, items: PEND3 };
+    const m = q.match(/\/dual\/complete-capture\/([^/]+)$/);
+    if (m) {
+      if (fail && fail(m[1])) return { __raw: { ok: false, status: 404, headers: { get: () => 'application/json' }, blob: async () => ({ size: 0 }), json: async () => ({ ok: false }) } };
+      return { __raw: { ok: true, status: 200, headers: { get: () => 'image/png' }, blob: async () => ({ size: 9, type: 'image/png', tag: m[1].slice(-2) }) } };
+    }
+    return base(p, body);
+  };
+}
+test('349 화면 ⑥ 보완 목록 기존 캡처: 줄마다 작은 미리보기(입구는 같은 2단 권한 · 작업표 함께) · 캡처 없는 줄은 요청 0 · 실패는 글자로 · 누르면 크게 · Esc 로 닫힘', async () => {
+  const B = boot(capServer(id => id.endsWith('b4')));
+  open(B); await sleep(10);
+  B.M.openComplete(); await sleep(20);
+  const cap = B.calls.filter(c => /\/dual\/complete-capture\//.test(c.p));
+  assert.deepStrictEqual(cap.map(c => c.p.split('?')[0].split('/').pop()).sort(), [PEND3[0].orderSubmissionId, PEND3[1].orderSubmissionId].sort(), '캡처 있는 줄만 묻는다(없는 줄 요청 0)');
+  assert.ok(cap.every(c => c.p.startsWith(BASE + '/dual/complete-capture/') && /\?sheetId=s1&tabName=T&gid=0$/.test(c.p) && c.auth === 'Bearer tok'), '같은 입구(Track B 2단 권한) · 열린 작업표를 함께 · 토큰을 실어 보낸다');
+  // 화면을 다시 그리면 이미 받은 사진은 다시 묻지 않는다
+  B.M.pickBase(0, 'coupang'); await sleep(10);
+  assert.strictEqual(B.calls.filter(c => /\/dual\/complete-capture\//.test(c.p)).length, 2, '다시 그려도 재요청 0');
+  const h = B.html();
+  assert.ok(/<img src="blob:b3"/.test(h), '받은 사진을 작은 그림으로 보인다');
+  assert.ok(/aria-label="1번 줄 기존 구매캡처 크게 보기"/.test(h) && /title="눌러서 크게 보기/.test(h));
+  assert.ok(/사진을 불러오지 못했습니다/.test(h), '실패는 조용히 비우지 않고 글자로');
+  assert.ok(/>캡처 없음</.test(h), '캡처 없는 줄');
+  assert.ok(/class="mo-cap old"[^>]*>(?:(?!<\/div>).)*<img src="blob:b3"/.test(h), '기존 쪽 캡처 칸에도 그 사진을 보인다');
+  // 크게 보기 → 맥 시트 · 네이버/쿠팡 바로 고르기 · Esc 닫힘
+  B.M.viewCap(0);
+  const v = B.cv();
+  assert.ok(/role="dialog"/.test(v) && /aria-modal="true"/.test(v) && /<img src="blob:b3"/.test(v) && /가나다/.test(v), '크게 보기 창');
+  assert.ok(!/mo-btn pri/.test(v), '크게 보기 창에는 채운 파란 단추를 더하지 않는다');
+  const ev = B.key('Escape');
+  assert.ok(ev.defaultPrevented && B.cv() === '', 'Esc 로 닫힌다');
+  assert.ok(B.html().includes('보완 필요 3건'), '보완 목록은 그대로(Esc 가 수동제출 창까지 닫지 않는다)');
+  B.M.viewCap(0); B.M.pickBaseFromView(0, 'naver');
+  assert.strictEqual(B.cv(), '', '고르면 닫힌다');
+  assert.ok(/aria-pressed="true" onclick="ManualOrder\.pickBase\(0,'naver'\)"/.test(B.html()), '크게 본 창에서 고른 구매처가 기존 주문 쪽으로');
+  B.M.viewCap(1);
+  assert.strictEqual(B.cv(), '', '실패한 사진은 크게 보기를 열지 않는다');
+  // 다시 불러오기(실패 글자를 누름) · 창 닫으면 사진 주소를 풀어 준다
+  B.M.close();
+  assert.ok(B.revoked.includes('blob:b3'), '창을 닫으면 사진 주소를 정리한다');
+});
+
+test('349 화면 ⑦ 금액 확인 창: 넣은 두 구매처 금액이 모두 보이고 [확인] 한 번이면 두 구매처 모두 확인 처리(현재 동작 유지)', async () => {
+  let n = 0;
+  const base = fakeServer(true);
+  const B = boot(async (p, body) => {
+    if (p.split('?')[0] === BASE + '/dual/complete' && !body.naver.capturePriceAck) { n++; return { ok: false, code: 'CAPTURE_PRICE_DIFF', error: '네이버: 제출하신 구매캡처 속 결제금액(14,000원)이 작업 조건 결제금액(9,000원)보다 5,000원 더 비쌉니다(56% 초과).' }; }
+    return base(p, body);
+  });
+  open(B); await sleep(10);
+  B.M.openComplete();
+  B.M.pickBase(0, 'coupang');
+  B.M.dualEdit(0, 'naver', 'orderNum', 'N-555666'); B.M.dualEdit(0, 'naver', 'paidAmount', '14000');
+  B.capPaste(0, 'naver', B.img('N2N')); await sleep(30);
+  await B.M.submit();
+  const d = B.dialogs.find(x => /CAPTURE|결제금액\(14,000원\)/.test(x));
+  assert.ok(d, B.dialogs.join('\n'));
+  assert.ok(/네이버 14,000원/.test(d) && /쿠팡 10,000원\(기존\)/.test(d), '확인 창에 두 금액이 모두: ' + d);
+  assert.ok(/두 구매처 금액을 모두 확인한 것으로/.test(d), d);
+  const c = B.of('/dual/complete');
+  assert.strictEqual(n, 1); assert.strictEqual(c.length, 2);
+  assert.strictEqual(c[1].body.naver.capturePriceAck, true); assert.strictEqual(c[1].body.coupang.capturePriceAck, true);
 });

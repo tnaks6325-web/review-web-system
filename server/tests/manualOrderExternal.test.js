@@ -378,10 +378,13 @@ console.log('\nC. 라우트 권한');
   //   지금은 수동제출 창이 실제로 부르는 검색이 있고, 지켜야 할 것은 「무인증·권한 없는 검색 통로가 없다」이다.
   // 결정 349: 동시진행 직원 대리 묶음 제출·보완 입구 2개가 더해졌다(같은 2단 권한 — C2 가 같이 본다).
   // 결정 349 화면(2026-11-07): 보완 대상 목록 GET /dual/pending 이 더해졌다(이름·전화 뒤 4자리·금액·줄 번호만 · 같은 2단 권한 — C2 가 같이 본다).
-  ok('C1 라우트는 정확히 여섯 길이다(preview·submit·reviewer-search·dual/submit·dual/complete·dual/pending — 다른 PII 통로 없음)',
-    layers.length === 6 && !!find('/preview') && !!find('/submit') && !!find('/reviewer-search')
-    && !!find('/dual/submit') && !!find('/dual/complete') && !!find('/dual/pending')
-    && find('/reviewer-search').methods.join() === 'get' && find('/dual/pending').methods.join() === 'get');
+  // 결정 349 화면 후속(2026-11-07): 보완 목록 줄의 기존 구매캡처 사진 GET /dual/complete-capture/:id 가 더해졌다
+  //   (보완 목록에 뜨는 주문만 · 같은 2단 권한 — C2 가 같이 보고, 아래 C1c 가 실제 HTTP 로 두드린다).
+  ok('C1 라우트는 정확히 일곱 길이다(preview·submit·reviewer-search·dual/submit·dual/complete·dual/pending·dual/complete-capture — 다른 PII 통로 없음)',
+    layers.length === 7 && !!find('/preview') && !!find('/submit') && !!find('/reviewer-search')
+    && !!find('/dual/submit') && !!find('/dual/complete') && !!find('/dual/pending') && !!find('/dual/complete-capture/:orderSubmissionId')
+    && find('/reviewer-search').methods.join() === 'get' && find('/dual/pending').methods.join() === 'get'
+    && find('/dual/complete-capture/:orderSubmissionId').methods.join() === 'get');
   ok('C2 ★ 전부 authMiddleware + adminOrMasterMiddleware 뒤에 있다',
     layers.every(l => l.names.includes('authMiddleware') && l.names.includes('adminOrMasterMiddleware')));
   ok('C3 제출은 POST 전용', find('/submit').methods.join() === 'post');
@@ -427,6 +430,19 @@ console.log('\nC. 라우트 권한');
     const m = await hit({ role: 'master', name: '마스터' }, '김');
     ok('C1b 통과한 관리자도 2글자 미만은 빈 목록(DB 미접촉)', m.status === 200 && m.body && m.body.ok === true
       && Array.isArray(m.body.items) && m.body.items.length === 0 && m.body.tooShort === true);
+    /* ★ C1c(결정 349 화면 후속) — 기존 구매캡처 사진 입구도 같은 2단 권한: 무인증 401 · 광고주 403 · 편집 명단 밖 직원 403.
+       통과한 관리자라도 주문 id 모양이 틀리면 400(DB·사진 미접촉). */
+    const capUrl = id => `http://127.0.0.1:${srv.address().port}/api/trackb/manual-order/dual/complete-capture/${id}?sheetId=s&tabName=t`;
+    const capHit = async (tokPayload, id) => {
+      const headers = tokPayload ? { Authorization: 'Bearer ' + jwt.sign(tokPayload, process.env.JWT_SECRET) } : {};
+      const r = await fetch(capUrl(id || '00000000-0000-4000-8000-0000000000b3'), { headers });
+      return { status: r.status, type: r.headers.get('content-type') || '' };
+    };
+    ok('C1c ★ 무인증 사진 요청은 401', (await capHit(null)).status === 401);
+    ok('C1c ★ 광고주 토큰은 403', (await capHit({ role: 'advertiser', name: '광고주' })).status === 403);
+    ok('C1c ★ 편집 허용 명단 밖 직원은 403', (await capHit({ role: 'staff', via: 'intranet', ae: false, name: '명단밖직원' })).status === 403);
+    const bad = await capHit({ role: 'master', name: '마스터' }, 'nope');
+    ok('C1c 통과한 관리자도 틀린 주문 id 는 400(사진이 아님)', bad.status === 400 && !/^image\//.test(bad.type));
   } finally { srv.close(); }
 }
 

@@ -1738,6 +1738,10 @@ router.post('/manual-order/dual/complete', authMiddleware, internalMiddleware, e
 const _moDualPending = _handler(_moRoutes, 'manualOrderDualPending');
 router.get('/manual-order/dual/pending', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _moDualPending(req, res, next));
+// 결정 349 화면 후속 — 보완 목록 줄의 기존 구매캡처 사진(보완 목록에 뜨는 주문만) · 같은 2단 권한
+const _moDualCompleteCapture = _handler(_moRoutes, 'manualOrderDualCompleteCapture');
+router.get('/manual-order/dual/complete-capture/:orderSubmissionId', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _moDualCompleteCapture(req, res, next));
 // ★ 결정 348 — 줄마다 「기존 리뷰어 고르기」 검색. 리뷰어 이름·뒤 4자리를 보여 주는 개인정보 통로라
 //   제출과 **같은 2단 권한**(내부 직원 + 편집 허용 명단)을 건다 — 읽기라고 열람 권한(internal)만 걸지 않는다.
 router.get('/manual-order/reviewer-search', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>

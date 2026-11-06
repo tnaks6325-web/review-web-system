@@ -359,6 +359,20 @@ router.get('/dual/pending', authMiddleware, adminOrMasterMiddleware, async (req,
   } catch (e) { _dualStaffFail(res, next, e); }
 });
 _handlers.manualOrderDualPending = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다
+/* 결정 349 화면 후속 — 보완 목록 줄의 기존 구매캡처 사진(읽기 전용). 대상은 보완 목록에 뜨는 주문만(서비스가 같은 조건으로 다시 본다).
+   ★ 기존 무인증 사진 프록시(/api/drive/image/:id)를 쓰지 않는다 — 파일 id 를 목록에 실으면 권한 밖으로 샌다. 같은 2단 권한 · 리뷰어 정보 기록 없음. */
+router.get('/dual/complete-capture/:orderSubmissionId', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const q = req.query || {};
+    const r = await require('../services/dualStaffSubmission.service').readPlainCapture({
+      orderSubmissionId: req.params.orderSubmissionId, sheetId: q.sheetId, tabName: q.tabName, gid: q.gid || '' });
+    res.set('Content-Type', r.mimeType);
+    res.set('Cache-Control', 'private, no-store');
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.send(r.buffer);
+  } catch (e) { _dualStaffFail(res, next, e); }
+});
+_handlers.manualOrderDualCompleteCapture = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다
 // ── 리뷰어 연결 검색 (결정 348) ───────────────────────────────
 // 줄마다 「기존 리뷰어 고르기」를 하는 창의 검색. 예전 reviewer-search(PR #394 에서 제거)는 **화면이 쓰지 않는**
 // PII 통로였다 — 이번 것은 수동제출 창이 실제로 부르고, 위험을 막는 조건을 서비스·라우트가 함께 건다:

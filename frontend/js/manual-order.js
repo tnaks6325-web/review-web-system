@@ -87,6 +87,8 @@
   let CLS_RUN = null;
   let ACTIVE_CH = null; // ★ 결정 349 화면: 동시진행 모드에서 고른 구매처 칸('naver'|'coupang') — Ctrl+V 사진은 고른 줄 + 고른 칸에만
   let CROWS = [];      // ★ 결정 349 화면: 보완 목록 줄(서버 보완 대상 1건 = 한 줄)
+  const OCAP = new Map();   // ★ 결정 349 화면 후속: 보완 목록 기존 구매캡처 — 주문 id → { st:'loading'|'ok'|'fail', url }(창 하나 동안만)
+  let OC_IO = null, OC_RUN = 0; const OC_Q = [];
   const CHS = [['naver', '네이버'], ['coupang', '쿠팡']];
   const _slot = () => ({ orderNum: '', paidAmount: null, capture: null, capJob: null, capBusy: false, extract: null, extractPending: null, auto: {} });
   let RL = null;       // ★ 결정 348: 열린 「리뷰어 연결」 팝오버 { row, q, items, hasMore, state, err, seq, timer } — 한 번에 하나
@@ -272,6 +274,19 @@
 #moOvl .mo-lnk.w{color:var(--mo-orange)}
 #moOvl td.over .mo-cap{box-shadow:0 0 0 2px var(--mo-accent-ring);color:var(--mo-accent)}
 #moOvl .mo-cap.old{cursor:default;color:var(--mo-text-2);box-shadow:none;background:var(--mo-fill)}
+#moOvl .mo-cap.old img{object-position:top}
+#moOvl .mo-oc{display:inline-flex;align-items:center;gap:6px;height:24px;max-width:100%;padding:0 4px;border:0;border-radius:5px;background:none;font:inherit;font-size:12px;color:var(--mo-accent);cursor:pointer;white-space:nowrap}
+#moOvl button.mo-oc:hover{background:var(--mo-hover)}
+#moOvl button.mo-oc:focus-visible{outline:none;box-shadow:0 0 0 2px var(--mo-accent-ring)}
+#moOvl .mo-oc img{width:40px;height:22px;object-fit:cover;object-position:top;border-radius:3px;display:block;box-shadow:0 0 0 0.5px var(--mo-line)}
+#moOvl .mo-oc.fail{color:var(--mo-red);font-size:11px;padding:0 2px}
+#moOvl .mo-oc.wait,#moOvl .mo-oc.none{color:var(--mo-text-2);cursor:default}
+#moOvl .mo-cv{position:absolute;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--mo-scrim)}
+#moOvl .mo-cvb{background:var(--mo-bg);border-radius:12px;box-shadow:var(--mo-sheet-shadow);width:760px;max-width:100%;max-height:100%;display:flex;flex-direction:column;overflow:hidden}
+#moOvl .mo-cvi{flex:1;min-height:0;overflow:auto;background:var(--mo-fill);padding:10px}
+#moOvl .mo-cvi img{display:block;max-width:100%;height:auto;margin:0 auto;border-radius:4px;box-shadow:0 0 0 0.5px var(--mo-line)}
+#moOvl .mo-cvb .mo-ft{gap:8px}
+#moOvl .mo-cvl{font-size:12px;color:var(--mo-text-2);white-space:nowrap}
 #moOvl .mo-seg{display:inline-flex;border-radius:5px;box-shadow:var(--mo-btn-shadow);overflow:hidden}
 #moOvl .mo-seg button{height:24px;margin:0;padding:0 8px;font:inherit;font-size:12px;border:0;border-radius:0;background:var(--mo-bg);color:var(--mo-text);cursor:pointer;box-shadow:inset -0.5px 0 0 var(--mo-line)}
 #moOvl .mo-seg button:last-child{box-shadow:none}
@@ -292,6 +307,10 @@
   #moOvl .mo-sel{height:32px;font-size:16px}
   #moOvl .mo-ib{width:32px;height:32px;font-size:14px}
   #moOvl .mo-cap{height:32px}
+  #moOvl .mo-oc{height:32px}
+  #moOvl .mo-oc img{width:44px;height:28px}
+  #moOvl .mo-cv{align-items:flex-end;padding:0}
+  #moOvl .mo-cvb{width:100%;max-height:92%;border-radius:12px 12px 0 0}
   #moOvl .mo-ft{padding:10px 14px calc(10px + env(safe-area-inset-bottom))}
   #moOvl .mo-btn{height:44px;line-height:44px;font-size:15px;padding:0 16px}
   #moOvl .mo-ft .mo-tip{display:none}
@@ -322,7 +341,7 @@
     IME = false; PAINT_LATER = false;
     CTX.view = 'table'; CTX.apps = null;
     CTX.dual = false; CTX.pending = null;   // ★ 결정 349 화면: 서버가 알려 줄 때까지는 종전(일반) 화면
-    CROWS = []; ACTIVE_CH = null;
+    CROWS = []; ACTIVE_CH = null; _ocReset();
     ROWS.push(newRow(''));
     let ovl = document.getElementById('moOvl');
     if (!ovl) {
@@ -360,11 +379,11 @@
   }
   function close(ask) {
     if (ask && CTX && CTX.view === 'table' && _filled().length && !confirm('입력한 줄이 사라집니다. 닫을까요?')) return;
-    closeLink();
+    closeLink(); closeCap();
     const o = document.getElementById('moOvl');
     if (o) o.remove();
     CTX = null; ROWS = []; ACTIVE = null; DIRTY.clear(); clearTimeout(CLS_TIMER); CLS_TIMER = null; BUSY = false;
-    CROWS = []; ACTIVE_CH = null;
+    CROWS = []; ACTIVE_CH = null; _ocReset();
   }
 
   function shell(bodyHtml, footHtml, opt) {
@@ -391,7 +410,9 @@
       o.insertAdjacentHTML('afterbegin', html);
       return false;
     }
+    const cv = document.getElementById('moCv');   // 결정 349 화면 후속: 크게 보기 창은 다시 그려도 남긴다
     o.innerHTML = html;
+    if (cv) o.appendChild(cv);
     return false;
   }
   /** 다시 그리되 **입력 중인 칸(DOM 요소)은 그대로 둔다** — 그 칸의 조상 줄기만 남기고 나머지(옆 칸·다른 줄·머리·바닥)는
@@ -413,7 +434,7 @@
         const a = oc[d], b = nc[d];
         const kids = Array.from(np.childNodes);
         const at = kids.indexOf(b);
-        Array.from(op.childNodes).forEach(n => { if (n !== a && !(d === 0 && n.id === 'moRl')) op.removeChild(n); });   // 리뷰어 연결 팝오버는 남긴다(결정 348)
+        Array.from(op.childNodes).forEach(n => { if (n !== a && !(d === 0 && (n.id === 'moRl' || n.id === 'moCv'))) op.removeChild(n); });   // 리뷰어 연결 팝오버는 남긴다(결정 348)
         kids.slice(0, at).forEach(n => op.insertBefore(n, a));
         kids.slice(at + 1).forEach(n => op.appendChild(n));
         Array.from(a.attributes).forEach(x => { if (!b.hasAttribute(x.name)) a.removeAttribute(x.name); });
@@ -847,7 +868,9 @@
       const sl = it.dual[ch];
       const td = `<td ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="ManualOrder.onDrop(event,${i},'${ch}')">`;
       if (opt && opt.kept && opt.kept(it, ch, 'capture')) {
-        return `<td><div class="mo-cap old" title="이미 올린 구매캡처 1장을 그대로 씁니다"><i class="fa-regular fa-image" aria-hidden="true"></i><span class="k">기존 1장</span></div></td>`;
+        const oc = it.item && OCAP.get(it.item.orderSubmissionId);
+        const pic = oc && oc.st === 'ok' ? `<img src="${esc(oc.url)}" alt="">` : '<i class="fa-regular fa-image" aria-hidden="true"></i>';
+        return `<td><div class="mo-cap old" title="이미 올린 구매캡처 1장을 그대로 씁니다">${pic}<span class="k">기존 1장</span></div></td>`;
       }
       if (opt && opt.off && opt.off(it, ch)) return '<td></td>';
       const pick = `<label class="mo-ib" title="${i + 1}번 줄 ${nm} 캡처 파일 선택" aria-label="${i + 1}번 줄 ${nm} 캡처 파일 선택"><i class="fa-solid fa-paperclip" aria-hidden="true"></i><input type="file" accept="image/*"
@@ -1768,12 +1791,23 @@
         f.allowRepurchase = true; continue;
       }
       if (r.code === 'CAPTURE_PRICE_DIFF' && !f.ack) {
-        if (!confirm(`${name}: ${r.error || '넣은 금액이 공고 금액과 다릅니다'}\n[확인] 확인했고 그대로 접수(담당자 확인 기록) · [취소] 접수하지 않습니다.`)) break;
+        // 결정 349 화면 후속 — [확인] 한 번이 두 구매처를 함께 확인 처리하므로, 넣은 두 금액을 모두 보여 준다
+        const am = G && typeof G.amounts === 'string' && G.amounts ? G.amounts + '\n' : '';
+        if (!confirm(`${name}: ${r.error || '넣은 금액이 공고 금액과 다릅니다'}\n${am}[확인] 확인했고 그대로 접수(${am ? '두 구매처 금액을 모두 확인한 것으로 담당자 확인 기록' : '담당자 확인 기록'}) · [취소] 접수하지 않습니다.`)) break;
         f.ack = true; continue;
       }
       break;
     }
     return r || { ok: false, error: '오류' };
+  }
+  /** 금액 확인 창의 「넣은 금액 — 네이버 N원 · 쿠팡 N원」 한 줄({kept:N} = 비워 둔 기존 쪽 → 기존 금액) */
+  function _amtLine(nv, cp) {
+    const one = (nm, v) => {
+      const kept = v && typeof v === 'object';
+      const n = kept ? v.kept : v;
+      return `${nm} ${_amtOk(n) ? n.toLocaleString('ko-KR') + '원' : '-'}${kept ? '(기존)' : ''}`;
+    };
+    return `넣은 금액 — ${one('네이버', nv)} · ${one('쿠팡', cp)}`;
   }
   function _dualLinkWarn(res, want) {
     if (res && res.ok && !res.idempotent && want !== 'auto' && res.reviewerLinkApplied !== want) {
@@ -1798,6 +1832,7 @@
       const r0 = targets[k].r;
       if (btn) btn.textContent = `제출 중… ${k + 1}/${targets.length}`;
       const want = (r0.link && r0.link.mode) || 'auto';
+      G.amounts = _amtLine(r0.dual.naver.paidAmount, r0.dual.coupang.paidAmount);
       const res = await _postWithConfirms(r0.fields.recipient || '', (f, g) => api(_moBase() + '/dual/submit', { method: 'POST', body: JSON.stringify({
         sheetId: CTX.sheetId, tabName: CTX.tabName, gid: CTX.gid || '', campaignId: CTX.campaignId || null,
         fields: r0.fields,
@@ -1895,6 +1930,7 @@
       { k: 'name', label: '이름', w: 76, cell: r => `<td class="ro" title="${esc(r.item.name)}">${esc(r.item.name)}</td>` },
       { k: 'tail', label: '연락처', w: 64, cell: r => `<td class="ro">…${esc(r.item.phoneTail)}</td>` },
       { k: 'price', label: '기존 금액', w: 80, cls: 'r', title: '수동제출 때 들어간 한쪽 금액', cell: r => `<td class="r ro">${_amtOk(r.item.price) ? r.item.price.toLocaleString('ko-KR') : '-'}</td>` },
+      { k: 'oc', label: '기존 캡처', w: 164, title: '이미 들어간 구매캡처 — 눌러서 크게 보고 네이버 것인지 쿠팡 것인지 고르세요', cell: (r, i) => `<td>${ocCellInner(r, i)}</td>` },
       { k: 'base', label: '기존 주문은', w: 116, title: '이미 들어간 금액·캡처 1장이 어느 구매처 것인지', cell: (r, i) => (r.item.paid || !r.item.hasCapture) ? '<td></td>'
         : `<td><div class="mo-seg${r.base ? '' : ' need'}" role="group" aria-label="${i + 1}번 줄 기존 주문 구매처">${CHS.map(([c, nm]) =>
           `<button type="button" class="${r.base === c ? 'on' : ''}" aria-pressed="${r.base === c}" onclick="ManualOrder.pickBase(${i},'${c}')">${nm}</button>`).join('')}</div></td>` },
@@ -1924,6 +1960,127 @@
       { bar, keepEl });
     if (scroll) { const bd = document.getElementById('moBd'); if (bd) { bd.scrollTop = scroll.t; bd.scrollLeft = scroll.l; } }
     syncSubmitBtn();
+    _ocWatch();
+  }
+  /* ── 보완 목록 기존 구매캡처 보기(결정 349 화면 후속) — 네이버 것인지 쿠팡 것인지 눈으로 보고 고르게 ──
+     입구 = …/dual/complete-capture/<주문 id>?sheetId&tabName&gid(제출과 같은 2단 권한 · 보완 목록에 뜨는 주문만).
+     <img src> 는 토큰을 못 실으므로 토큰을 실어 받은 뒤 그 사진만 이 창 안 주소(blob:)로 보인다 · 창을 닫으면 정리.
+     지연 로드: 표 안에 보이게 된 줄만 받는다(IntersectionObserver · 없으면 바로) · 동시에 3장까지. 실패는 글자로(조용히 비우지 않음). */
+  function _ocReset() {
+    OCAP.forEach(v => { if (v && v.url) { try { URL.revokeObjectURL(v.url); } catch (_) {} } });
+    OCAP.clear(); OC_Q.length = 0;
+    if (OC_IO) { try { OC_IO.disconnect(); } catch (_) {} OC_IO = null; }
+  }
+  function ocCellInner(r, i) {
+    const it = r.item;
+    if (!it.hasCapture) return '<span class="mo-oc none">캡처 없음</span>';
+    const oc = OCAP.get(it.orderSubmissionId);
+    const id = `moOc-${r.uid}`;
+    if (oc && oc.st === 'ok') {
+      return `<button type="button" class="mo-oc" id="${id}" title="눌러서 크게 보기 — 네이버 것인지 쿠팡 것인지 확인하세요" aria-label="${i + 1}번 줄 기존 구매캡처 크게 보기"
+        onclick="ManualOrder.viewCap(${i})"><img src="${esc(oc.url)}" alt=""><span class="k">크게 보기</span></button>`;
+    }
+    if (oc && oc.st === 'fail') {
+      return `<button type="button" class="mo-oc fail" id="${id}" title="눌러서 다시 불러오기" aria-label="${i + 1}번 줄 기존 구매캡처 다시 불러오기"
+        onclick="ManualOrder.retryCap(${i})">사진을 불러오지 못했습니다</button>`;
+    }
+    return `<span class="mo-oc wait" id="${id}" data-oc="${esc(it.orderSubmissionId)}"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i><span class="k">불러오는 중</span></span>`;
+  }
+  function _ocPaint(oid) {
+    const k = CROWS.findIndex(r => r.item.orderSubmissionId === oid);
+    if (k < 0 || !CTX || CTX.view !== 'complete') return;
+    const r = CROWS[k];
+    const el = document.getElementById('moOc-' + r.uid);
+    if (r.base) { renderComplete(); return; }   // 기존 쪽 캡처 칸(기존 1장)의 작은 그림까지 — 입력 중인 칸·크게 보기 창은 그대로 남는다
+    if (el && el.parentNode && 'outerHTML' in el) el.outerHTML = ocCellInner(r, k);
+    else if (el) el.innerHTML = ocCellInner(r, k);
+  }
+  function _ocWatch() {
+    if (!CTX || CTX.view !== 'complete') return;
+    const want = CROWS.filter(r => r.item.hasCapture && !OCAP.has(r.item.orderSubmissionId));
+    if (!want.length) return;
+    const IO = typeof window.IntersectionObserver === 'function' ? window.IntersectionObserver : null;
+    const bd = document.getElementById('moBd');
+    if (!IO || !bd) { want.forEach(r => _ocLoad(r.item.orderSubmissionId)); return; }
+    if (!OC_IO) {
+      OC_IO = new IO(es => es.forEach(e => { if (e.isIntersecting) { OC_IO.unobserve(e.target); _ocLoad(e.target.getAttribute('data-oc')); } }), { root: bd, rootMargin: '200px' });
+    }
+    want.forEach(r => { const el = document.getElementById('moOc-' + r.uid); if (el) OC_IO.observe(el); });
+  }
+  function _ocLoad(oid) {
+    if (!oid || !CTX || OCAP.has(oid)) return;
+    OCAP.set(oid, { st: 'loading' });
+    OC_Q.push(oid); _ocPump();
+  }
+  function _ocPump() {
+    while (OC_RUN < 3 && OC_Q.length) {
+      const oid = OC_Q.shift(); const my = CTX;
+      if (!my) return;
+      OC_RUN++;
+      _ocFetch(my, oid).then(url => ({ st: 'ok', url }), () => ({ st: 'fail' })).then(v => {
+        OC_RUN--;
+        if (CTX !== my || !OCAP.has(oid)) { if (v.url) { try { URL.revokeObjectURL(v.url); } catch (_) {} } }
+        else { OCAP.set(oid, v); _ocPaint(oid); }
+        _ocPump();
+      });
+    }
+  }
+  async function _ocFetch(my, oid) {
+    const r = await fetch(_api() + _moBase() + '/dual/complete-capture/' + encodeURIComponent(oid) + '?sheetId=' + encodeURIComponent(my.sheetId)
+      + '&tabName=' + encodeURIComponent(my.tabName) + '&gid=' + encodeURIComponent(my.gid || ''), { headers: { Authorization: 'Bearer ' + tok() } });
+    const ct = (r && r.headers && typeof r.headers.get === 'function' && r.headers.get('content-type')) || '';
+    if (!r || !r.ok || !/^image\//i.test(ct)) throw new Error('capture_' + (r && r.status));
+    const b = await r.blob();
+    if (!b || !b.size) throw new Error('capture_empty');
+    return URL.createObjectURL(b);
+  }
+  function retryCap(k) {
+    const r = CROWS[k]; if (!r) return;
+    OCAP.delete(r.item.orderSubmissionId);
+    _ocLoad(r.item.orderSubmissionId);
+    _ocPaint(r.item.orderSubmissionId);
+  }
+  /** 크게 보기 — 맥 시트(휴대폰은 아래에서 올라오는 시트) · Esc·바깥·닫기로 닫힘 · 그 자리에서 네이버/쿠팡을 고를 수 있다 */
+  function viewCap(k) {
+    const r = CROWS[k]; const o = document.getElementById('moOvl');
+    const oc = r && OCAP.get(r.item.orderSubmissionId);
+    if (!r || !o || !oc || oc.st !== 'ok') return;
+    let el = document.getElementById('moCv');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'moCv'; el.className = 'mo-cv';
+      el.addEventListener('click', e => { if (e.target === el) closeCap(); });
+      o.appendChild(el);
+    }
+    const it = r.item;
+    const seg = (it.paid) ? '' : `<span class="mo-cvl">이 사진은</span><div class="mo-seg" role="group" aria-label="기존 주문 구매처">${CHS.map(([c, nm]) =>
+      `<button type="button" class="${r.base === c ? 'on' : ''}" aria-pressed="${r.base === c}" onclick="ManualOrder.pickBaseFromView(${k},'${c}')">${nm}</button>`).join('')}</div>`;
+    el.innerHTML = `<div class="mo-cvb" role="dialog" aria-modal="true" aria-label="${k + 1}번 줄 기존 구매캡처">
+      <div class="mo-hd"><span class="ttl">기존 구매캡처</span><span class="sub">${esc(it.name)} · …${esc(it.phoneTail)}${it.row ? ' · 작업표 ' + it.row + '번' : ''}</span><span class="sp"></span>
+        <button type="button" class="mo-x" id="moCvX" title="닫기(Esc)" aria-label="크게 보기 닫기" onclick="ManualOrder.closeCap()"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+      <div class="mo-cvi"><img src="${esc(oc.url)}" alt="${k + 1}번 줄 기존 구매캡처"></div>
+      <div class="mo-ft">${seg}<span class="sp"></span><button type="button" class="mo-btn" onclick="ManualOrder.closeCap()">닫기</button></div>
+    </div>`;
+    el.style.display = 'flex';
+    if (typeof document.removeEventListener === 'function') document.removeEventListener('keydown', _cvKey, true);
+    document.addEventListener('keydown', _cvKey, true);
+    setTimeout(() => { const x = document.getElementById('moCvX'); if (x && x.focus) x.focus(); }, 0);
+  }
+  function _cvKey(ev) {
+    if (ev.key !== 'Escape') return;
+    ev.preventDefault(); if (ev.stopPropagation) ev.stopPropagation();
+    closeCap();
+  }
+  function closeCap() {
+    if (typeof document.removeEventListener === 'function') document.removeEventListener('keydown', _cvKey, true);
+    const el = document.getElementById('moCv');
+    if (el) el.remove();
+  }
+  function pickBaseFromView(k, ch) {
+    const row = CROWS[k]; if (!row) return;
+    closeCap();
+    row.base = ch;
+    renderComplete();
   }
   /** 보완 제출 — 줄마다 POST …/dual/complete. 기존 쪽은 사진을 보내지 않는다(서버가 기존 캡처를 되읽는다) · 비운 값은 보내지 않는다(기존 값). */
   async function submitComplete() {
@@ -1953,7 +2110,7 @@
         orderSubmissionId: r0.item.orderSubmissionId,
         naver: Object.assign(side('naver'), f.ack ? { capturePriceAck: true } : {}),
         coupang: Object.assign(side('coupang'), f.ack ? { capturePriceAck: true } : {}),
-      }) }), { daily: true });
+      }) }), { daily: true, amounts: _amtLine(...CHS.map(([c]) => (c === r0.base && !_amtOk(r0.dual[c].paidAmount)) ? { kept: r0.item.price } : r0.dual[c].paidAmount)) });
       results.push(Object.assign({}, res, { index: k, name: r0.item.name, dual: true, completed: true, row: r0.item.row }));
     }
     if (!CTX) return;
@@ -2017,5 +2174,6 @@
     onPaste, onFile, onDrop, uncap,                                                    // 줄별 캡처 첨부
     openLink, closeLink, linkInput, linkKey, linkPick, linkSet,                        // 리뷰어 연결(결정 348)
     dualEdit, openComplete, backToTable, pickBase,                                     // 동시진행 대리 묶음 · 보완(결정 349 화면)
+    viewCap, closeCap, retryCap, pickBaseFromView,                                     // 보완 목록 기존 캡처 보기(결정 349 화면 후속)
   };
 })();
