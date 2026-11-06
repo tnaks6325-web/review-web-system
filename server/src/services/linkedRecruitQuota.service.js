@@ -904,6 +904,8 @@ module.exports = {
   syncWorkOrderRecruitTotal,
   syncCampaignRecruitTotalInTx,
   syncWorkOrderRecruitTotalInTx,
+  // 공고 전용 작업표 자동 생성(campaignWorktable)이 같은 트랜잭션에서 빈 줄을 준비할 때 쓴다(규칙 사본 0)
+  syncWorktableSlotsInTx,
   cleanupOverflowEmptyWorktableSlots,
   replenishWorktableSlotsToLinkedQuota,
   replenishWorktableSlotsToLinkedQuotaInTx,
