@@ -46,7 +46,7 @@ function harness(fieldsInOrder, search = '') {
   ctx._embedSaveForm();
   assert.equal(store.has('embedForm_APP1'), false, '옛 위치 초안은 지운다');
   const saved = JSON.parse(store.get('embedForm_APP1:id'));
-  assert.equal(saved.layout, 1);
+  assert.equal(saved.layout, vm.runInContext('_EMBED_FORM_LAYOUT', ctx), '초안에 지금 배치 번호를 적는다');
   assert.deepEqual(saved.fields, { oc_0_orderNumber: 'A-1', oc_0_price: '10,000', oc_0_saveIdChk: '1' });
   console.log('PASS 아이디 기준 저장 / 파일·아이디 없는 칸 제외 / 옛 위치 초안 정리');
 }
@@ -65,9 +65,11 @@ function harness(fieldsInOrder, search = '') {
 }
 
 // 3) 옛 위치 초안: 배치 1 + 칸 개수가 같을 때만 위치대로 옮기고, 아이디 초안으로 바꿔 둔다.
+//    (개편 1단계에서 소스 값은 2가 됐다 — "배치 1일 때의 이관" 규칙 자체는 여기서 1로 두고 그대로 검사한다.)
 {
   const els = [makeField('oc_0_orderNumber'), makeField('oc_0_price'), makeField('oc_0_saveIdChk', 'checkbox')];
   const { ctx, store } = harness(els);
+  vm.runInContext('_EMBED_FORM_LAYOUT = 1;', ctx);
   store.set('embedForm_APP1', JSON.stringify(['A-9', '9,900', '1']));
   ctx._embedRestoreForm();
   assert.equal(els[0].value, 'A-9'); assert.equal(els[1].value, '9,900'); assert.equal(els[2].checked, true);
@@ -78,6 +80,7 @@ function harness(fieldsInOrder, search = '') {
 {
   const els = [makeField('oc_0_orderNumber'), makeField('oc_0_price')];
   const { ctx, store } = harness(els);
+  vm.runInContext('_EMBED_FORM_LAYOUT = 1;', ctx);
   store.set('embedForm_APP1', JSON.stringify(['A-9', '9,900', '1']));   // 칸 개수 다름 = 위치 어긋남
   ctx._embedRestoreForm();
   assert.equal(els[0].value, ''); assert.equal(els[1].value, '');
@@ -85,6 +88,12 @@ function harness(fieldsInOrder, search = '') {
   console.log('PASS 칸 개수가 다른 옛 위치 초안은 넣지 않고 버린다');
 }
 
+// 4-0) 개편 1단계(2026-11-07)는 결제금액·아이디 저장 칸을 옮겼다 → 소스의 배치 번호는 2 이상이어야 한다.
+{
+  const m = source.match(/^const _EMBED_FORM_LAYOUT = (\d+);/m);
+  assert(m && Number(m[1]) >= 2, '칸을 옮긴 뒤에는 배치 번호가 2 이상');
+  console.log('PASS 칸을 옮긴 개편 뒤 배치 번호 ≥ 2');
+}
 // 4) 배치 번호를 올리면 옛 위치 초안은 읽지 않는다 — 칸 배치를 바꾸는 변경이 지켜야 할 약속.
 {
   const els = [makeField('oc_0_orderNumber'), makeField('oc_0_price')];
@@ -94,6 +103,16 @@ function harness(fieldsInOrder, search = '') {
   ctx._embedRestoreForm();
   assert.equal(els[0].value, ''); assert.equal(els[1].value, '');
   console.log('PASS 배치 번호를 올리면 옛 위치 초안은 버린다');
+}
+
+// 4-1) 배치 1 때 저장된 "아이디 초안"은 배치 번호가 올라가도 그대로 복원된다(아이디는 칸이 옮겨도 같다).
+{
+  const els = [makeField('oc_0_price'), makeField('oc_0_orderNumber')];
+  const { ctx, store } = harness(els);
+  store.set('embedForm_APP1:id', JSON.stringify({ layout: 1, fields: { oc_0_orderNumber: 'A-1', oc_0_price: '5,000' } }));
+  ctx._embedRestoreForm();
+  assert.equal(els[0].value, '5,000'); assert.equal(els[1].value, 'A-1');
+  console.log('PASS 배치 1 아이디 초안은 배치 번호가 올라가도 같은 칸으로 복원');
 }
 
 // 5) 동시진행(dual=1)·배치·미리보기는 종전대로 이 초안을 쓰지 않는다.

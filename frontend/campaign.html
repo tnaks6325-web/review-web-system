@@ -101,6 +101,30 @@
     /* 미리보기 배너가 상단을 차지하므로 리뷰어 화면의 sticky 겹침 해제 */
     body.pv .hd{position:static}
     body.pv .holdbar{position:static;top:auto}
+    /* ── 개편 1단계(승인 시안 v18 · 2026-11-07): 참여 후 화면 = 흰 바탕 한 장 흐름 ──
+       남은 시간 줄 → 상품 한 줄 → 작업 내용(특이사항 펼침·유입/리뷰 가이드 접힘) → 구매양식(틀 안).
+       카드 테두리·그림자를 걷고 얇은 줄로만 나눈다. 숫자·문구·버튼 동작은 그대로. */
+    #vJoined{background:#fff;min-height:calc(100vh - 64px)}
+    #vJoined .holdbar{top:64px;margin:0;padding:12px 16px;border:0;border-bottom:1px solid #d2d2d7;border-radius:0;background:#fff}
+    #vJoined .holdbar .l{font-size:14px;font-weight:400;color:#6e6e73}
+    #vJoined .holdbar .v{font-size:20px;font-weight:700;color:#1d1d1f;letter-spacing:.02em}
+    #vJoined .holdbar.is-soon .l,#vJoined .holdbar.is-soon .v{color:#c93400;font-weight:700}
+    #vJoined .sec{padding:0 16px}
+    #vJoined .cardbx{background:none;border:0;border-bottom:1px solid #e5e5ea;border-radius:0;box-shadow:none;padding:12px 0;margin:0}
+    #vJoined .wd-tt{color:#1d1d1f;font-size:13px;font-weight:700}
+    #vJoined #orderBox{border-bottom:0;padding:8px 0 4px;margin:0 -4px}
+    #vJoined{padding-bottom:60px;margin-bottom:-60px}
+    #vJoined #orderBox>.wd-tt{display:none}
+    #vJoined iframe#orderFrame{border-radius:0}
+    #vJoined .btn{border-radius:10px;font-size:15px;font-weight:600;padding:12px;margin-top:8px}
+    #vJoined .btn.ghost{background:#fff;border:1px solid #d2d2d7;color:#1d1d1f}
+    #vJoined #joinedFootNote{font-size:12px;color:#86868b;margin:8px 0 4px}
+    #vJoined #acctBox,#vJoined #joinedOptionBox,#vJoined #joinedQtyBox{border-color:#e5e5ea!important}
+    #vExpired h2{font-size:20px;font-weight:700;color:#1d1d1f}
+    #vExpired p{font-size:14px;color:#6e6e73}
+    #vExpired .btn{border-radius:10px;font-size:15px;font-weight:600}
+    #vExpired .btn.ghost{background:#fff;border:1px solid #d2d2d7;color:#1d1d1f;margin-top:8px}
+    #vExpired .lockcard{background:none;border:0;box-shadow:none;padding:16px 0}
     .pv-note{background:#F5F3FF;border:1.5px dashed #C4B5FD;color:#5B21B6;border-radius:12px;
       padding:14px;font-size:.78rem;line-height:1.6;text-align:center;margin-bottom:12px}
   </style>
@@ -165,7 +189,7 @@
 
   <!-- 참여 후 -->
   <div id="vJoined" style="display:none">
-    <div class="holdbar"><span class="l" id="holdLabel">⏳ 구매양식 제출까지</span><span class="v" id="holdCd">--:--</span></div>
+    <div class="holdbar" role="timer"><span class="l" id="holdLabel">구매양식 제출까지</span><span class="v" id="holdCd">--:--</span></div>
     <div class="sec">
       <!-- 👥 063 2단계: 이 건의 참여 명의 + 여러 건이면 명의 전환 칩 (타계정 참여 시에만 노출) -->
       <div class="cardbx" id="acctBox" style="display:none;border-color:#7C3AED">
@@ -234,10 +258,12 @@
   </div>
 
   <!-- 만료 -->
+  <!-- 개편 1단계(사용자 확정 2026-11-07): 제한시간 0이 되면 바로 이 화면(이미 누른 제출은 끊지 않음 — _onHoldTimeUp) -->
   <div id="vExpired" class="statebig" style="display:none">
-    <div class="e">⌛</div><h2>참여가 만료되었어요</h2>
-    <p>시간 안에 구매양식이 제출되지 않아 자동 취소되었어요.<br/><b>다시 참여해서 새 구매양식을 열어주세요.</b></p>
+    <div class="e">⌛</div><h2>제한시간이 만료되었어요</h2>
+    <p>시간 안에 구매양식이 제출되지 않아 참여가 자동 취소되었어요.<br/>구매양식을 제출하지 않았다면 오늘 다시 참여할 수 있어요.</p>
     <div class="sec">
+      <button class="btn" id="expiredRejoinBtn" onclick="rejoinAfterExpired()">다시 참여하기</button>
       <div class="cardbx lockcard"><div class="e">🛍️</div><div class="m">이미 구매하셨나요?</div>
         <div class="s">구매양식을 이미 제출한 경우에만 운영자에게 알려주세요.</div>
       </div>
@@ -1646,12 +1672,32 @@ async function retryBlogApply(){
 }
 
 async function releaseExpiredHold(h){
+  // ★ 사용자 확정 2026-11-07: 이미 누른 제출은 끊지 않는다 — 진행 중이면 화면을 덮지 않고 2초 뒤 다시 본다
+  //   (제출이 확정되면 다음 확인에서 완료 화면, 실패해 끝나면 그때 이 화면).
+  if(!PREVIEW && _formSubmitting()){ setTimeout(()=>{ if(_formSubmitting()) releaseExpiredHold(h); else pollOnce(); }, 2000); return; }
   clearInterval(_pollTimer); clearInterval(_holdTick);
   clearHold(h && h.phone8);
   _detail = null; _detailRetry = 0;
-  renderPre();
-  toast('참여 시간이 만료됐어요. 구매양식을 제출하지 않았다면 다시 참여할 수 있어요.');
+  // 개편 1단계(사용자 확정 2026-11-07): 토스트 한 줄 대신 "제한시간이 만료되었어요" 화면 + [다시 참여하기](= 참여 전 화면).
+  show('vExpired');
   try{ await loadCampaign(); }catch(_){ /* 다음 화면 갱신 주기에서 재시도 */ }
+}
+/** [다시 참여하기] — 참여 전 화면으로(오늘 다시 참여할 수 있어요). 홀드는 이미 지웠다. */
+function rejoinAfterExpired(){
+  renderPre();
+  try{ window.scrollTo(0, 0); }catch(_){}
+}
+/** 제출이 진행 중인가(같은 출처 틀 안의 구매양식) — 진행 중이면 0초가 돼도 화면을 덮지 않는다. */
+function _formSubmitting(){
+  try{ const w = $('orderFrame') && $('orderFrame').contentWindow; return !!(w && w._submitOrderFormInProgress); }catch(_){ return false; }
+}
+/** 남은 시간 0 — 바로 만료 화면으로(입력 잠금). 서버의 30초 유예는 처리 지연용이라 그대로 둔다.
+ *  ★ 이미 누른 제출은 끊지 않는다: 진행 중이면 2초마다 다시 보고, 그 사이 제출이 확정되면 폴링이 완료 화면으로 바꾼다. */
+function _onHoldTimeUp(){
+  if(PREVIEW) return;
+  if($('vJoined').style.display === 'none') return;
+  if(_formSubmitting()){ pollOnce(); setTimeout(_onHoldTimeUp, 2000); return; }
+  releaseExpiredHold(getHold());
 }
 async function enterJoined(){
   const h = getHold();
@@ -1715,12 +1761,12 @@ function _renderJoinedView(j, h){
       selectedOption: j.selectedOption,
       cashReceipt: j.cashReceipt,   // 현영 탭 공고만 서버가 내려줌(발행 안내 카드)
       qty: j.qty,                   // ★ 결정 289: 고른 개수 단계 — 상품 카드 결제금액을 그 단계 금액으로(1개 금액과 둘로 갈리지 않게)
-    }, { showOption: false, apiBase: API_BASE_URL, showInflow: !j.qnaSlot, showProduct: !j.qnaSlot });
+    }, { showOption: false, apiBase: API_BASE_URL, showInflow: !j.qnaSlot, showProduct: !j.qnaSlot, layout: 'v18' });
     // 💬 321: Q&A 공고는 구매양식(iframe) 대신 문의 카드 — 구매가 없다
     const _qna = !!j.qnaSlot;
     $('qnaBox').style.display = _qna ? '' : 'none';
     $('orderBox').style.display = _qna ? 'none' : '';
-    $('holdLabel').textContent = _qna ? '⏳ 캡처 제출까지' : '⏳ 구매양식 제출까지';
+    $('holdLabel').textContent = _qna ? '캡처 제출까지' : '구매양식 제출까지';
     $('joinedFootNote').textContent = _qna ? '캡처를 제출하지 않았다면 오늘 다시 참여할 수 있어요.' : '구매양식을 제출하지 않았다면 오늘 다시 참여할 수 있어요.';
     if(_qna){
       renderQnaCard(j, h);
@@ -1921,9 +1967,18 @@ function startHoldCountdown(expiresAtIso){
   clearInterval(_holdTick);
   const end = Date.parse(expiresAtIso || '');
   const el = $('holdCd');
+  // 개편 1단계(시안 v18): 제출 시간이 오늘 모집 마감에 잘렸으면 "오늘 모집 마감 HH:MM까지", 3분 미만이면 "· 곧 마감돼요"
+  const lab = $('holdLabel'), bar = el.closest('.holdbar');
+  const capAt = (_camp && _camp.closesAt) ? Date.parse(_camp.closesAt) : NaN;
+  const capped = isFinite(capAt) && isFinite(end) && Math.abs(end - capAt) <= 60000;
+  const baseLabel = capped ? ('오늘 모집 마감 ' + CampCards._fmtHM(_camp.closesAt) + '까지') : lab.textContent;
+  lab.textContent = baseLabel;
+  if(bar) bar.classList.remove('is-soon');
   _holdTick = setInterval(()=>{
     const remain = end - CampCards.serverNow();
-    if(remain <= 0){ clearInterval(_holdTick); el.textContent = '00 : 00'; pollOnce(); return; }
+    const soon = remain > 0 && remain < 180000;
+    if(bar && bar.classList.contains('is-soon') !== soon){ bar.classList.toggle('is-soon', soon); lab.textContent = baseLabel + (soon ? ' · 곧 마감돼요' : ''); }
+    if(remain <= 0){ clearInterval(_holdTick); el.textContent = '00 : 00'; pollOnce(); _onHoldTimeUp(); return; }
     // 📝 127: 블로그 구매기한(24h)처럼 1시간 이상 남으면 시:분으로 — 분:초로 '1440 : 00' 이 뜨지 않게
     if(remain >= 3600000){
       const hh = Math.floor(remain/3600000);

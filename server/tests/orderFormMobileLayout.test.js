@@ -57,4 +57,22 @@ test('제출 문구와 두 모달은 모바일 전용 스타일 훅을 가진다
   assert.strictEqual((HTML.match(/class="of-modal-card"/g) || []).length, 2);
 });
 
+test('입력칸은 얇은 테두리·작은 글자이고, 투명 테두리 테마에 가려지던 상태색과 포커스가 다시 보인다(개편 1단계-2)', () => {
+  const start = CSS.indexOf('/* 구매양식 입력칸 모양');
+  assert.ok(start > 0, '입력칸 모양 블록');
+  const block = CSS.slice(start, CSS.indexOf('/* ── 관리자 화면 너비 확장', start));
+  // toss-theme.css 가 모든 input 테두리를 투명 !important 로 덮는다 — 같은 !important + 아이디 범위로만 이긴다.
+  assert.match(block, /#screenOrderForm \.of-input\{[^}]*border:1px solid #b6b6bd!important;border-radius:6px!important/);
+  // 개편 1단계(시안 v18): 이름표 칸 96px("결제금액 (원)"·"주문번호 선택"이 한 줄에 들어가게)
+  assert.match(block, /#screenOrderForm \.of-label\{width:96px;text-align:left;font-size:13px;font-weight:400/);
+  assert.match(block, /@media\(max-width:600px\)\{\s*#screenOrderForm \.of-input\{min-height:32px;padding:5px 8px;font-size:14px;line-height:20px\}/);
+  assert.match(block, /#screenOrderForm \.of-input\{min-height:26px;padding:3px 8px;font-size:13px;line-height:18px/);
+  // 위 !important 테두리가 상태색을 지우지 않도록 같은 범위로 다시 지정하고, 포커스는 그 뒤(입력 중엔 파랑).
+  const ai = block.indexOf('.of-input.ai-filled,#screenOrderForm .of-input.ai-locked{border-color:#12b886!important}');
+  const star = block.indexOf('.of-input.ai-filled-asterisk{border-color:#F43F5E!important}');
+  const err = block.indexOf('.of-input.of-input--error{border-color:#EF4444!important}');
+  const focus = block.indexOf('#screenOrderForm .of-input:focus{border-color:var(--p)!important');
+  assert.ok(ai > 0 && star > 0 && err > 0 && focus > Math.max(ai, star, err), '상태색 재지정 + 포커스는 맨 뒤');
+});
+
 console.log('\n' + passed + ' mobile layout checks passed');

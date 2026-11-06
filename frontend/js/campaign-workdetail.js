@@ -446,14 +446,129 @@
     return html;
   }
 
+  /* ── 개편 1단계(승인 시안 v18) — 리뷰어 참여 화면에서만 켜는 배치(o.layout === 'v18').
+   *  ★ cardsHtml() 출력(관리자 미리보기·가드가 보는 HTML)은 그대로 두고, 그린 뒤 DOM 만 바꾼다:
+   *    상품 카드 = 한 줄 묶음 + [전체 안내] / "작업 내용" 아래 특이사항(펼침)→유입(접힘)→리뷰 가이드(접힘).
+   *    링크유입처럼 [상품 페이지 열기] 버튼이 든 유입 카드는 접지 않는다(구매 길을 숨기지 않게). */
+  var V18_CSS = ''
+    + '.cwd-v18 .cwd-box{background:none;border:0;border-radius:0;box-shadow:none;padding:0;margin:0}'
+    + '.cwd-v18 .cwd-product{padding:12px 0;border-bottom:1px solid #d2d2d7}'
+    + '.cwd-v18 .cwd-product>.cwd-tt{display:none}'
+    + '.cwd-v18 .cwd-p-name{font-size:16px;font-weight:700;color:#1d1d1f;line-height:1.4;white-space:normal}'
+    + '.cwd-v18 .cwd-p-meta{display:flex;align-items:baseline;gap:10px;margin-top:4px;color:#6e6e73;font-size:14px;white-space:normal}'
+    + '.cwd-v18 .cwd-p-meta span{flex:1;min-width:0;white-space:pre-wrap}'
+    + '.cwd-v18 .cwd-all{flex:0 0 auto;padding:2px 0;border:0;background:none;color:#0066cc;font:inherit;font-size:14px;font-weight:600;cursor:pointer}'
+    + '.cwd-v18 .cwd-brief-title{margin:16px 0 2px;color:#1d1d1f;font-size:13px;font-weight:700}'
+    + '.cwd-v18 details.cwd-fold{border-bottom:1px solid #e5e5ea}'
+    + '.cwd-v18 details.cwd-fold:last-child{border-bottom:0}'
+    + '.cwd-v18 details.cwd-fold>summary{display:flex;align-items:baseline;gap:8px;min-height:40px;padding:10px 0;margin:0;list-style:none;cursor:pointer;color:#1d1d1f;font-size:15px;font-weight:700}'
+    + '.cwd-v18 details.cwd-fold>summary::-webkit-details-marker{display:none}'
+    + '.cwd-v18 details.cwd-fold>summary::before{content:"";flex:0 0 auto;width:7px;height:7px;margin:0 3px 2px 1px;border-right:2px solid #3a3a3c;border-bottom:2px solid #3a3a3c;transform:rotate(-45deg);transition:transform .15s ease}'
+    + '.cwd-v18 details.cwd-fold[open]>summary::before{transform:rotate(45deg);margin-bottom:5px}'
+    + '.cwd-v18 .cwd-fold-title{flex:0 0 auto}'
+    + '.cwd-v18 .cwd-fold-preview{flex:1;min-width:0;overflow:hidden;color:#6e6e73;font-size:14px;font-weight:400;text-overflow:ellipsis;white-space:nowrap}'
+    + '.cwd-v18 details.cwd-fold[open] .cwd-fold-preview{display:none}'
+    + '.cwd-v18 details.cwd-fold>.cwd-body,.cwd-v18 details.cwd-fold>.cwd-note,.cwd-v18 details.cwd-fold>.cwd-btn{margin-bottom:12px}'
+    + '.cwd-v18 details.cwd-fold>.cwd-body{font-size:15px;color:#1d1d1f;line-height:1.6}'
+    + '.cwd-v18 .cwd-landing-box{padding:10px 0 12px;border-bottom:1px solid #e5e5ea}'
+    + '.cwd-v18 .cwd-landing-box>.cwd-tt{margin:0 0 6px;color:#1d1d1f;font-size:15px;font-weight:700}'
+    + '.cwd-v18 .cwd-landing-box .cwd-btn{background:#fff;border:1px solid #d2d2d7;border-radius:10px;color:#0066cc;font-size:15px;font-weight:600}';
+
+  function _plainTitle(box) {
+    var t = box && box.querySelector('.cwd-tt');
+    return t ? t.textContent.replace(/^[^\w가-힣]+/, '').trim() : '';
+  }
+  function _findBox(boxes, mark) {
+    for (var i = 0; i < boxes.length; i++) {
+      var t = boxes[i].querySelector('.cwd-tt');
+      if (t && t.textContent.trim().indexOf(mark) === 0) return boxes[i];
+    }
+    return null;
+  }
+  function _foldBox(box, open, title) {
+    var det = document.createElement('details');
+    det.className = box.className + ' cwd-fold';
+    if (box.getAttribute('style')) det.setAttribute('style', box.getAttribute('style'));
+    if (open) det.open = true;
+    var body = box.querySelector('.cwd-body');
+    var imgs = box.querySelectorAll('img').length;
+    var text = body ? body.textContent.replace(/\s+/g, ' ').trim() : '';
+    var sum = document.createElement('summary');
+    var st = document.createElement('span'); st.className = 'cwd-fold-title'; st.textContent = title;
+    var sp = document.createElement('span'); sp.className = 'cwd-fold-preview';
+    sp.textContent = (imgs ? '사진 ' + imgs + '장' + (text ? ' · ' : '') : '') + text.slice(0, 80);
+    sum.appendChild(st); sum.appendChild(sp);
+    det.appendChild(sum);
+    var tt = box.querySelector('.cwd-tt'); if (tt) tt.parentNode.removeChild(tt);
+    while (box.firstChild) det.appendChild(box.firstChild);
+    box.parentNode.replaceChild(det, box);
+    return det;
+  }
+  function _applyV18(el) {
+    if (!document.getElementById('cwd-style-v18')) {
+      var s = document.createElement('style'); s.id = 'cwd-style-v18'; s.textContent = V18_CSS; document.head.appendChild(s);
+    }
+    el.classList.add('cwd-v18');
+    var boxes = Array.prototype.slice.call(el.children).filter(function (b) { return b.classList && b.classList.contains('cwd-box'); });
+    var product = _findBox(boxes, '📦');
+    var inflow = _findBox(boxes, '🧭');
+    var review = _findBox(boxes, '📝');
+    var notes = _findBox(boxes, '📌');
+    var folds = [];
+    if (product) {
+      product.classList.add('cwd-product');
+      var pb = product.querySelector('.cwd-body');
+      if (pb) {
+        var lines = pb.textContent.split(/\n/).map(function (x) { return x.trim(); }).filter(Boolean);
+        pb.textContent = '';
+        var nm = document.createElement('div'); nm.className = 'cwd-p-name'; nm.textContent = lines.shift() || '';
+        var meta = document.createElement('div'); meta.className = 'cwd-p-meta';
+        var rest = document.createElement('span'); rest.textContent = lines.join('\n');
+        meta.appendChild(rest);
+        if (inflow || review || notes) {
+          var all = document.createElement('button'); all.type = 'button'; all.className = 'cwd-all'; all.textContent = '전체 안내';
+          all.setAttribute('data-cwd-all', '1');
+          meta.appendChild(all);
+        }
+        pb.appendChild(nm); pb.appendChild(meta);
+      }
+    }
+    var anchor = notes || inflow || review;
+    if (!anchor) return;
+    var head = document.createElement('div'); head.className = 'cwd-brief-title'; head.textContent = '작업 내용';
+    anchor.parentNode.insertBefore(head, anchor);
+    var after = head;
+    function place(node) { after.parentNode.insertBefore(node, after.nextSibling); after = node; }
+    if (notes) { place(notes); folds.push(_foldBox(notes, true, _plainTitle(notes) || '특이사항')); after = folds[folds.length - 1]; }
+    if (inflow) {
+      place(inflow);
+      if (inflow.querySelector('[data-cwd-landing]')) {
+        inflow.classList.add('cwd-landing-box');
+        var itt = inflow.querySelector('.cwd-tt'); if (itt) itt.textContent = '유입 · 링크유입';
+        after = inflow;
+      }
+      else { folds.push(_foldBox(inflow, false, '유입 · 가이드유입')); after = folds[folds.length - 1]; }
+    }
+    if (review) { place(review); folds.push(_foldBox(review, false, _plainTitle(review) || '리뷰 가이드')); after = folds[folds.length - 1]; }
+  }
+
   /** 컨테이너에 렌더 + [상품 페이지 열기] 위임 처리(한 번만 바인딩) */
   function renderInto(el, d, o) {
     if (!el) return;
     _injectCss();
     el.innerHTML = cardsHtml(d, o);
+    if (o && o.layout === 'v18') _applyV18(el); else el.classList.remove('cwd-v18');
     if (!el._cwdBound) {
       el._cwdBound = true;
       el.addEventListener('click', function (e) {
+        var all = e.target.closest && e.target.closest('[data-cwd-all]');
+        if (all) {   // [전체 안내] — 접힌 안내를 모두 펼친다(다시 누르면 특이사항만 남기고 접는다)
+          var ds = el.querySelectorAll('details.cwd-fold');
+          var anyClosed = Array.prototype.some.call(ds, function (x) { return !x.open; });
+          Array.prototype.forEach.call(ds, function (x, i) { x.open = anyClosed || i === 0; });
+          all.textContent = anyClosed ? '안내 접기' : '전체 안내';
+          return;
+        }
         var b = e.target.closest && e.target.closest('[data-cwd-landing]');
         if (!b) return;
         var u = b.getAttribute('data-cwd-landing');
