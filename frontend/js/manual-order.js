@@ -675,7 +675,7 @@
       { k: 'bank', label: '은행', w: 66, cell: fieldCell('bank', { label: '은행' }) },
       { k: 'account', label: '계좌번호', w: 128, cell: fieldCell('account', { label: '계좌번호' }) },
       { k: 'depositor', label: '예금주', w: 58, cell: fieldCell('depositor', { label: '예금주' }) },
-      { k: 'price', label: '금액', w: 64, cls: 'r', cell: fieldCell('price', { label: '금액', num: true }) },
+      { k: 'price', label: '금액', w: 76, cls: 'r', cell: fieldCell('price', { label: '금액', num: true }) },
     ];
     // ★ 칸 합은 PC 1440(상자 1392px) 안에 든다(작업보드 1368 · 참여형 1372 — 주소는 늘 길어 잘림 + 마우스 올림이라 주소 칸에서 덜었다) — 넘으면 구매캡처 클립 단추가 오른쪽 고정 칸(확인)에 가린다
     if (OPTS.length) {
