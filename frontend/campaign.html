@@ -120,6 +120,30 @@
     #vJoined .btn.ghost{background:#fff;border:1px solid #d2d2d7;color:#1d1d1f}
     #vJoined #joinedFootNote{font-size:12px;color:#86868b;margin:8px 0 4px}
     #vJoined #acctBox,#vJoined #joinedOptionBox,#vJoined #joinedQtyBox{border-color:#e5e5ea!important}
+    /* ── 여러 명의 한 번에 참여(사용자 확정 2026-11-07 · 결정 352): 명의 탭 + 옆으로 넘기기 ── */
+    .optrow .chk{width:18px;height:18px;border-radius:5px;border:2px solid var(--t3);flex-shrink:0;display:grid;place-items:center;color:#fff;font-size:12px;font-weight:900;line-height:1}
+    .optrow.sel .chk{border-color:#007aff;background:#007aff}
+    .optrow.sel .chk::after{content:"✓"}
+    .acct-tabs{position:sticky;top:113px;z-index:89;display:flex;gap:0;overflow-x:auto;background:#fff;border-bottom:1px solid #d2d2d7;padding:0 12px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+    .acct-tabs::-webkit-scrollbar{display:none}
+    .acct-tabs[hidden]{display:none}
+    .acct-tab{flex:1 0 auto;min-width:92px;display:flex;flex-direction:column;align-items:center;gap:1px;padding:8px 10px 7px;border:0;border-bottom:2px solid transparent;background:none;color:#6e6e73;font:inherit;cursor:pointer;white-space:nowrap}
+    .acct-tab .n{font-size:11px}
+    .acct-tab .nm{font-size:14px;font-weight:700;color:#1d1d1f;max-width:9em;overflow:hidden;text-overflow:ellipsis}
+    .acct-tab .t{font-size:12px;font-variant-numeric:tabular-nums}
+    .acct-tab.on{border-bottom-color:#007aff}
+    .acct-tab.on .nm{color:#007aff}
+    .acct-tab.done .t{color:#1a7f37;font-weight:700}
+    .acct-tab.soon .t{color:#c93400;font-weight:700}
+    .acct-tab:focus-visible{outline:2px solid #007aff;outline-offset:-2px;border-radius:6px}
+    .acct-tabs-help{font-size:12px;color:#6e6e73;padding:6px 16px 0}
+    .order-track{position:relative;overflow:hidden}
+    .order-track iframe{width:100%;border:none;background:#fff;min-height:560px;display:block}
+    .order-track iframe.slide-l{animation:ofSlideL .22s ease}
+    .order-track iframe.slide-r{animation:ofSlideR .22s ease}
+    @keyframes ofSlideL{from{transform:translateX(36%);opacity:.3}to{transform:none;opacity:1}}
+    @keyframes ofSlideR{from{transform:translateX(-36%);opacity:.3}to{transform:none;opacity:1}}
+    @media (prefers-reduced-motion: reduce){.order-track iframe.slide-l,.order-track iframe.slide-r{animation:none}}
     #vExpired h2{font-size:20px;font-weight:700;color:#1d1d1f}
     #vExpired p{font-size:14px;color:#6e6e73}
     #vExpired .btn{border-radius:10px;font-size:15px;font-weight:600}
@@ -190,6 +214,9 @@
   <!-- 참여 후 -->
   <div id="vJoined" style="display:none">
     <div class="holdbar" role="timer"><span class="l" id="holdLabel">구매양식 제출까지</span><span class="v" id="holdCd">--:--</span></div>
+    <!-- 여러 명의로 참여했을 때만: 명의 탭(1번째·2번째…) — 누르거나 구매양식을 옆으로 밀어 넘긴다(결정 352) -->
+    <div class="acct-tabs" id="acctTabs" role="tablist" aria-label="참여한 명의" hidden></div>
+    <div class="acct-tabs-help" id="acctTabsHelp" hidden>명의마다 구매양식을 따로 제출해요 · 옆으로 밀면 다음 명의</div>
     <div class="sec">
       <!-- 👥 063 2단계: 이 건의 참여 명의 + 여러 건이면 명의 전환 칩 (타계정 참여 시에만 노출) -->
       <div class="cardbx" id="acctBox" style="display:none;border-color:#7C3AED">
@@ -216,7 +243,8 @@
       <div class="cardbx" id="orderBox" style="border-color:var(--p)">
         <div class="wd-tt" style="color:var(--p-dark)">🧾 구매양식 — 구매를 마친 뒤 여기서 바로 제출하세요</div>
         <div class="pv-note" id="pvFormNote" style="display:none">이 공고에는 <b>연결된 작업시트 탭이 없어</b> 리뷰어에게도 구매양식이 표시되지 않습니다.<br/>공고 수정에서 작업시트 탭을 연결해주세요.</div>
-        <iframe id="orderFrame" title="구매양식"></iframe>
+        <!-- ★ 결정 352: 명의마다 틀 하나(처음 볼 때 만들고 유지 — 사진·입력 보존). 보고 있는 명의의 틀이 #orderFrame. 명의 하나면 종전 그대로 이 틀 하나. -->
+        <div class="order-track" id="orderTrack"><iframe id="orderFrame" class="order-frame" title="구매양식"></iframe></div>
         <button class="btn ghost" id="frameFallback" style="margin-top:8px;display:none" onclick="openFormWindow()">구매양식이 안 보이면 새 창에서 열기</button>
       </div>
       <!-- 👥 063 2단계: 타계정으로 한 건 더 참여(타계정 가능 공고 + 참여 가능한 명의 있을 때만 노출) -->
@@ -1068,6 +1096,7 @@ function onQtySheetConfirm(){
   const p = _qtyPending;
   if(!p || !_qtySel) return toast('구매수량을 선택해주세요');
   hideQtySheet();
+  if(p.mode === 'join' && p.many) return _applyMany(p.optionKey, p.many, _qtySel);   // 결정 352: 한 번 고른 개수로 모두
   if(p.mode === 'join') return _doApply(p.optionKey, p.sub, _qtySel);
   if(p.mode === 'change_opt') return _doChangeOption(p.optionKey, _qtySel);
   return _doChangeQty(_qtySel);
@@ -1119,6 +1148,12 @@ let _acctSel = null;       // 시트에서 고른 명의 { type:'self'|'sub', na
 let _acctOptKey = null;    // 옵션 공고에서 명의 선택 후 이어질 옵션키
 let _acctNext = 'apply';   // apply | option — 최초 참여는 명의를 먼저 고른 뒤 옵션으로 이동
 let _initialAcctSel = null;
+/* ★ 결정 352 — 여러 명의 한 번에 참여: 「타계정 허용」 공고(블로그·Q&A 제외)에서는 명의 고르기 창이 여러 개 체크.
+   체크한 명의마다 차례로 /apply 를 보내고(서버 규칙 그대로 — 명의당 1건·동시 10건·타계정 하루 한도),
+   자리를 잡은 명의만 탭이 된다. 옵션·구매수량은 한 번만 골라 모두 같게(답 3A). */
+let _acctSelMany = [];      // 시트에서 체크한 명의들(화면 순서)
+let _initialAcctSels = null; // 옵션 고르기로 넘어갈 때 들고 가는 체크 목록(2개 이상일 때만)
+function _acctMultiPick(){ return multiEnabled() && !isBlogCampaign() && !isQnaCampaign(); }
 const _acctBlocked = {};   // 서버가 거절한 명의 p8 → 사유문구(재선택 유도용, 세션 한정)
 let _repurchaseAccounts = {};
 
@@ -1192,20 +1227,34 @@ function _acctStateText(r){
     : (r.blockMsg || base + '참여 가능' + (r.credits > 0 ? ' · 참여권 ' + r.credits + '건' : ''));
 }
 function renderAcctList(){
-  const box = $('acctSheetList'); box.innerHTML = ''; _acctSel = null;
+  const box = $('acctSheetList'); box.innerHTML = ''; _acctSel = null; _acctSelMany = [];
   const rows = _acctRows();
+  const many = _acctMultiPick();
   rows.forEach((r, i) => {
     const pickable = r.state === 'ok' || r.state === 'verify';
     const div = document.createElement('div');
     div.className = 'optrow' + (pickable ? '' : ' dis');
-    div.innerHTML = '<span class="radio"></span><div class="oi"><div class="nm">' + _escAttr(r.name) +
+    div.innerHTML = '<span class="' + (many ? 'chk' : 'radio') + '"></span><div class="oi"><div class="nm">' + _escAttr(r.name) +
       (r.type === 'self' ? ' <span style="font-size:.62rem;color:var(--p-dark)">본계정</span>' : '') +
       '</div><div class="sub">' + _escAttr(_acctStateText(r)) + ' · ***' + _escAttr(r.phone8.slice(-4)) + '</div></div>' +
       (r.state === 'joined' ? '<span class="obadge cur">참여중</span>'
         : r.state === 'nocredit' ? '<span class="obadge soldout">참여권 0</span>'
         : r.state === 'verify' ? '<span class="obadge">확인</span>'
         : (pickable ? '' : '<span class="obadge soldout">불가</span>'));
-    if(pickable){
+    if(pickable && many){
+      // 여러 개 체크 — 누를 때마다 넣고 빼기. 순서는 목록 순서(본계정 먼저) = 탭 순서.
+      div.setAttribute('role', 'checkbox'); div.setAttribute('aria-checked', 'false'); div.tabIndex = 0;
+      const toggle = () => {
+        const on = !div.classList.contains('sel');
+        div.classList.toggle('sel', on); div.setAttribute('aria-checked', String(on));
+        _acctSelMany = rows.filter((x, k) => box.children[k] && box.children[k].classList.contains('sel'));
+        _acctSel = _acctSelMany[0] || null;
+        _syncAcctGo();
+      };
+      div.onclick = toggle;
+      div.onkeydown = (e) => { if(e.key === ' ' || e.key === 'Enter'){ e.preventDefault(); toggle(); } };
+    }
+    else if(pickable){
       div.onclick = () => {
         _acctSel = r;
         [...box.children].forEach(c => c.classList.remove('sel'));
@@ -1216,15 +1265,27 @@ function renderAcctList(){
     box.appendChild(div);
   });
   $('acctSheetGo').disabled = true;
+  if(many) _syncAcctGo();
   const canAny = rows.some(r => r.state === 'ok' || r.state === 'verify');
   const onlyNoCredit = !canAny && rows.some(r => r.state === 'nocredit');
   $('acctSheetNote').textContent = canAny
-    ? '선택한 명의로 자리가 잡혀요. 타계정 건은 제한시간이 더 짧아요(기본 10분).'
+    ? (many
+      // ★ 결정 352(답 2A): 순서대로 흐르는 시간은 3단계 — 지금은 체크한 명의 모두 참여하는 순간 각자 시간이 시작된다(서버 규칙 그대로)
+      ? '체크한 명의 모두 지금 바로 제한시간이 시작돼요 — 본계정 ' + ((_camp && Number(_camp.hold_ttl_min)) || 30) + '분 · 타계정 ' + ((_camp && Number(_camp.sub_hold_ttl_min)) || 15) + '분 안에 명의마다 제출해 주세요.'
+      : '선택한 명의로 자리가 잡혀요. 타계정 건은 제한시간이 더 짧아요(기본 10분).')
     : onlyNoCredit
       ? '참여권이 남은 명의가 없어요. 일반 모집을 구매양식 제출까지 완료하면 그 명의로 참여할 수 있어요.'
       : (!multiEnabled() && rows.some(r => r.state === 'joined'))
         ? '이 공고는 1인 1회라 이미 참여한 명의 하나로만 진행할 수 있어요.'
         : '지금 참여할 수 있는 명의가 없어요. 타계정을 추가하면 더 참여할 수 있어요.';
+}
+/** 여러 명의 체크일 때 버튼 문구 = 체크한 수(그 수만큼만 자리를 잡는다) */
+function _syncAcctGo(){
+  const n = _acctSelMany.length, go = $('acctSheetGo');
+  go.disabled = n === 0;
+  go.textContent = n === 0 ? '참여할 명의를 골라주세요'
+    : n === 1 ? (_acctNext === 'option' ? '이 명의로 계속' : '이 명의로 참여')
+    : (n + '개 명의로 ' + (_acctNext === 'option' ? '계속' : '참여'));
 }
 async function openAcctSheet(optionKey, next){
   if(PREVIEW) return _pvBlock('참여하기');
@@ -1240,8 +1301,11 @@ async function openAcctSheet(optionKey, next){
   }
   renderAcctList();
   $('acctSheetGo').textContent = _acctNext === 'option' ? '이 명의로 계속' : '이 명의로 참여';
+  if(_acctMultiPick()) _syncAcctGo();
   { const _rule = $('acctSheetRule'); if(_rule) _rule.innerHTML = multiEnabled()
-      ? '한 명의는 이 공고에 <b>1건만</b> 참여할 수 있어요.'
+      ? (_acctMultiPick()
+        ? '참여할 명의를 <b>모두 체크</b>하세요 — 체크한 수만큼만 구매양식이 열려요. 한 명의는 <b>1건만</b> 참여할 수 있어요.'
+        : '한 명의는 이 공고에 <b>1건만</b> 참여할 수 있어요.')
       : '이 공고는 <b>1인 1회</b>예요 — 내 명의 중 <b>하나로만</b> 참여할 수 있어요.'; }
   $('acctSheet').style.display = 'flex';
 }
@@ -1256,14 +1320,22 @@ function goRegisterSub(){
 function onAcctSheetConfirm(){
   if(!_acctSel) return toast('참여할 명의를 선택해주세요');
   hideAcctSheet();
+  // ★ 결정 352: 2개 이상 체크 → 옵션·수량을 한 번 고른 뒤 체크한 명의마다 자리를 잡는다
+  if(_acctMultiPick() && _acctSelMany.length > 1){
+    const sels = _acctSelMany.slice();
+    if(_acctNext === 'option'){ _initialAcctSels = sels; _initialAcctSel = sels[0]; return _continueInitialAcct(); }
+    return _applyMany(_acctOptKey, sels);
+  }
   const sel = _acctSel;
   if(_acctNext === 'option') {
-    _initialAcctSel = sel;
+    _initialAcctSel = sel; _initialAcctSels = null;
     return _continueInitialAcct();
   }
   _doApply(_acctOptKey, sel.type === 'sub' ? { name: sel.name, phone: sel.phone } : null);
 }
 function _applyInitialAcct(optionKey){
+  const many = _initialAcctSels; _initialAcctSels = null;
+  if(many && many.length > 1){ _initialAcctSel = null; return _applyMany(optionKey, many); }
   const sel = _initialAcctSel; _initialAcctSel = null;
   if(!sel) return toast('참여할 명의를 다시 선택해주세요');
   return _doApply(optionKey, sel.type === 'sub' ? { name: sel.name, phone: sel.phone } : null);
@@ -1272,11 +1344,13 @@ function _continueInitialAcct(){
   const opts = (_camp && _camp.options) || [];
   if(!opts.length) return _applyInitialAcct(null);
   const pickable = opts.filter(o => o.selectable);
-  if(!pickable.length){ _initialAcctSel = null; toast('지금은 선택 가능한 옵션이 없어요'); return loadCampaign(); }
+  if(!pickable.length){ _initialAcctSel = null; _initialAcctSels = null; toast('지금은 선택 가능한 옵션이 없어요'); return loadCampaign(); }
   if(pickable.length === 1) return _applyInitialAcct(pickable[0].optKey);
   _optSheetMode = 'join_identity';
   $('optSheetTitle').textContent = '참여할 옵션 선택';
-  $('optSheetDesc').textContent = (_initialAcctSel?.name || '선택 명의') + ' 명의로 참여할 옵션을 골라주세요.';
+  $('optSheetDesc').textContent = (_initialAcctSels && _initialAcctSels.length > 1)
+    ? '체크한 ' + _initialAcctSels.length + '개 명의가 모두 이 옵션으로 참여해요(참여 뒤 명의별로 바꿀 수 있어요).'
+    : (_initialAcctSel?.name || '선택 명의') + ' 명의로 참여할 옵션을 골라주세요.';
   $('optSheetNote').textContent = '선택한 명의와 옵션으로 자리가 잡혀요.';
   $('optSheetGo').textContent = '이 옵션으로 참여';
   _renderOptSheetList(opts, null);
@@ -1300,7 +1374,9 @@ function renderAcctPanel(h){
   const keys = Object.keys(m);
   const anySub = keys.some(k => m[k] && m[k].isSub);
   // 명의 카드: 타계정 건이 하나라도 있을 때만(본계정만 있으면 기존 화면 그대로)
-  if(anySub || keys.length > 1){
+  //   ★ 결정 352: 명의 탭이 보이면(2개 이상) 탭이 이 카드·전환 칩을 대신한다.
+  renderAcctTabs();
+  if((anySub || keys.length > 1) && !_tabsOn()){
     box.style.display = '';
     const cur = m[String(h.phone8)] || h;
     $('acctCur').innerHTML =
@@ -1327,15 +1403,158 @@ function renderAcctPanel(h){
   // 추가참여 버튼: 타계정 가능 공고 + 아직 참여 안 한 타계정이 있을 때
   if(addBtn){
     const remain = (_subs || []).filter(x => { const p = _p8(x.phone); return p.length === 8 && !m[p] && !_acctBlocked[p]; });
-    addBtn.style.display = (multiEnabled() && (remain.length || _subs === null)) ? '' : 'none';
+    // ★ 결정 352: 여러 명의를 처음에 한꺼번에 고르는 공고는 "고른 수까지만" — 나중에 명의를 더 붙이는 버튼은 숨긴다.
+    addBtn.style.display = (multiEnabled() && !_acctMultiPick() && (remain.length || _subs === null)) ? '' : 'none';
   }
 }
-/** 명의 전환 — 활성 포인터만 바꾸고 enterJoined() 재실행(= iframe 재로드로 인플라이트 제출 파기) */
+/** 명의 전환 — 활성 포인터만 바꾸고 enterJoined() 재실행. ★ 결정 352: 명의마다 틀이 따로 — 그 명의의 틀을 보여 줄 뿐 다시 열지 않는다
+ *  (옛 "틀 1개 + 재로드로 인플라이트 제출 파기"는 한 틀에서 다른 명의 제출이 나가지 않게 하려던 것 — 틀이 명의마다 따로면 애초에 섞이지 않는다). */
 async function switchAcct(p8){
   if(PREVIEW) return;
   const m = _allHolds(); if(!m[String(p8)]) return;
+  _keepFrameOnce = true;   // 결정 352 — 위 설명
   setActiveP8(p8);
   await enterJoined();
+}
+
+/* ═══ ★ 결정 352 — 명의 탭 + 명의마다 틀 하나 ═══
+   - 탭 = 지금 잡혀 있는 명의(+이 화면에서 제출을 끝낸 명의 ✓). 2개 이상일 때만 보인다(명의 하나면 종전 화면 그대로).
+   - 틀은 처음 볼 때 만들고 계속 둔다. 보고 있는 명의의 틀이 #orderFrame(다른 코드의 $('orderFrame') = 지금 보는 틀).
+   - 제출 완료는 **보낸 틀의 명의**로만 처리한다(지금 보고 있는 명의가 아니다 — 제출 중에 탭을 넘길 수 있다).
+   - 시간: 명의마다 따로 만료(이번엔 서버 규칙 그대로 · 순서대로 흐르는 시간은 3단계). 보고 있지 않은 명의가 만료되면 그 탭만 빠진다. */
+let _keepFrameOnce = false;
+let _slideDir = 0;
+let _viewDoneP8 = '';
+const _submittedTabs = {};            // p8 → {name, seq, isSub} — 이 화면에서 제출을 끝낸 명의(탭에 ✓)
+const _uploadsPendingP8 = new Set();  // 제출 뒤 구매캡처를 아직 올리는 중인 명의
+function _tabList(){
+  if(PREVIEW) return [];
+  const m = _allHolds();
+  const list = Object.keys(m).map(k => ({ p8:k, name: m[k].name || ('***' + String(k).slice(-4)), seq: Number(m[k].seq) || 0,
+    isSub: !!m[k].isSub, expiresAt: m[k].expiresAt, done:false }));
+  Object.keys(_submittedTabs).forEach(k => { if(!m[k]) list.push(Object.assign({ p8:k, done:true }, _submittedTabs[k])); });
+  list.sort((a, b) => (Number(a.isSub) - Number(b.isSub)) || (a.seq - b.seq) || String(a.name).localeCompare(String(b.name), 'ko'));
+  return list;
+}
+function _tabsOn(){ return _tabList().length >= 2; }
+function _framesAll(){ return [...document.querySelectorAll('#orderTrack iframe')]; }
+function _frameByP8(p8){ return _framesAll().find(f => f.dataset.p8 && f.dataset.p8 === String(p8)) || null; }
+function _frameOfSource(src){ return _framesAll().find(f => f.contentWindow === src) || null; }
+function _frameFor(p8){
+  let f = _frameByP8(p8); if(f) return f;
+  const frames = _framesAll();
+  const free = frames.find(x => !x.dataset.p8);
+  if(free){ free.dataset.p8 = String(p8 || ''); return free; }
+  if(!_tabsOn() && frames.length === 1){ frames[0].dataset.p8 = String(p8 || ''); return frames[0]; }   // 명의 하나 = 종전처럼 틀 하나
+  f = document.createElement('iframe');
+  f.className = 'order-frame'; f.title = '구매양식'; f.dataset.p8 = String(p8 || '');
+  $('orderTrack').appendChild(f);
+  return f;
+}
+function _activateFrame(f, dir){
+  if(!f) return;
+  _framesAll().forEach(x => { if(x !== f){ x.style.display = 'none'; if(x.id === 'orderFrame') x.removeAttribute('id'); } });
+  f.id = 'orderFrame'; f.style.display = '';
+  if(dir){ f.classList.remove('slide-l', 'slide-r'); void f.offsetWidth; f.classList.add(dir > 0 ? 'slide-l' : 'slide-r'); }
+}
+function _frameSubmitting(f){ try{ return !!(f && f.contentWindow && f.contentWindow._submitOrderFormInProgress); }catch(_){ return false; } }
+/** 만료된 명의의 틀 비우기(다른 명의가 재사용할 수 있게). 제출 중이면 건드리지 않는다. */
+function _releaseFrame(p8){
+  const f = _frameByP8(p8); if(!f || _frameSubmitting(f)) return;
+  f.dataset.p8 = ''; f.setAttribute('src', 'about:blank'); f.style.display = 'none';
+  if(f.id === 'orderFrame') f.removeAttribute('id');
+}
+function renderAcctTabs(){
+  const box = $('acctTabs'), help = $('acctTabsHelp'); if(!box) return;
+  const list = _tabList(), on = list.length >= 2;
+  box.hidden = !on; if(help) help.hidden = !on;
+  if(!on){ box.innerHTML = ''; return; }
+  const view = _viewDoneP8 || activeP8();
+  box.innerHTML = list.map((t, i) => '<button type="button" role="tab" class="acct-tab' + (t.p8 === view ? ' on' : '') + (t.done ? ' done' : '')
+    + '" data-p8="' + _escAttr(t.p8) + '" aria-selected="' + (t.p8 === view) + '">'
+    + '<span class="n">' + (i + 1) + '번째' + (t.isSub ? ' · 타계정' : '') + '</span><span class="nm">' + _escAttr(t.name) + '</span>'
+    + '<span class="t" data-tab-time="' + _escAttr(t.p8) + '">' + (t.done ? '✓ 제출됨' : '') + '</span></button>').join('');
+  const cur = box.querySelector('.acct-tab.on'); if(cur && cur.scrollIntoView) try{ cur.scrollIntoView({ block:'nearest', inline:'nearest' }); }catch(_){}
+  _tickTabs();
+}
+function _tickTabs(){
+  const m = _allHolds(), now = CampCards.serverNow(), act = activeP8();
+  document.querySelectorAll('[data-tab-time]').forEach(el => {
+    const p8 = el.dataset.tabTime, h = m[p8]; if(!h) return;
+    const left = Date.parse(h.expiresAt || '') - now;
+    const tab = el.closest('.acct-tab');
+    if(!isFinite(left)){ el.textContent = ''; return; }
+    if(left <= 0){ el.textContent = '00:00'; if(p8 !== act) _expireOtherTab(p8); return; }
+    el.textContent = left >= 3600000 ? (Math.floor(left / 3600000) + '시간 ' + String(Math.floor(left % 3600000 / 60000)).padStart(2, '0') + '분')
+      : String(Math.floor(left / 60000)).padStart(2, '0') + ':' + String(Math.floor(left % 60000 / 1000)).padStart(2, '0');
+    if(tab) tab.classList.toggle('soon', left < 180000);
+  });
+}
+setInterval(() => { const b = $('acctTabs'); if(b && !b.hidden && $('vJoined').style.display !== 'none') _tickTabs(); }, 1000);
+/** 보고 있지 않은 명의의 시간이 끝남 → 그 탭만 뺀다(제출 중이면 기다린다). 지금 보는 명의는 _onHoldTimeUp 이 맡는다. */
+function _expireOtherTab(p8){
+  const f = _frameByP8(p8);
+  if(_frameSubmitting(f)) return;
+  const h = getHold(p8); if(!h) return;
+  const act = activeP8();
+  clearHold(p8); if(act && act !== p8) setActiveP8(act);
+  _releaseFrame(p8);
+  toast((h.name || '명의') + ' 명의는 제한시간이 끝났어요' + (Object.keys(_allHolds()).length ? ' — 다른 명의는 계속 진행할 수 있어요' : ''));
+  renderAcctTabs(); renderAcctPanel(getHold());
+}
+/** 탭 누르기·옆으로 밀기 */
+async function _goTab(p8, dir){
+  const list = _tabList(); const t = list.find(x => x.p8 === String(p8)); if(!t) return;
+  const cur = _viewDoneP8 || activeP8();
+  if(t.p8 === cur) return;
+  const d = dir || (list.findIndex(x => x.p8 === t.p8) > list.findIndex(x => x.p8 === cur) ? 1 : -1);
+  if(t.done){
+    // 제출을 끝낸 명의 — 그 틀(제출 완료 화면)만 보여 준다. 시간 줄은 "제출 완료".
+    _viewDoneP8 = t.p8;
+    const f = _frameByP8(t.p8); if(f) _activateFrame(f, d);
+    clearInterval(_holdTick); $('holdLabel').textContent = t.name + ' 명의 · 제출 완료'; $('holdCd').textContent = '✓';
+    $('vJoined').querySelector('.holdbar').classList.remove('is-soon');
+    renderAcctTabs();
+    return;
+  }
+  _viewDoneP8 = '';
+  const f = _frameByP8(t.p8); if(f) _activateFrame(f, d); else _slideDir = d;   // 틀이 있으면 바로 넘기고 나머지는 뒤따라 그린다
+  await switchAcct(t.p8);
+}
+function _goTabStep(step){
+  const list = _tabList(); if(list.length < 2) return;
+  const cur = _viewDoneP8 || activeP8();
+  const i = list.findIndex(x => x.p8 === cur); const n = list[i + step];
+  if(n) _goTab(n.p8, step);
+}
+document.addEventListener('click', (e) => { const b = e.target.closest && e.target.closest('.acct-tab'); if(b && b.dataset.p8) _goTab(b.dataset.p8); });
+/** 어느 틀에서 제출이 끝났다 → 그 틀의 명의만 정리. 남은 명의가 있으면 다음 명의로, 없으면 완료 화면. */
+function _onTabSubmitted(frame, d){ return _onTabSubmittedP8(frame && frame.dataset.p8, d); }
+/** 확인 결과 지금 보는 명의가 이미 제출 완료(10초 확인·다시 열기) — 탭 화면이면 그 명의만 정리하고 다음 명의로 */
+function _tabDoneActive(){ return _tabsOn() && _onTabSubmittedP8(activeP8(), {}); }
+function _onTabSubmittedP8(p8, d){
+  p8 = p8 ? String(p8) : ''; const h = p8 ? getHold(p8) : null;
+  if(!h) return false;
+  _submittedTabs[p8] = { name: h.name || ('***' + p8.slice(-4)), seq: Number(h.seq) || 0, isSub: !!h.isSub };
+  if(d.uploadsPending === true){ _uploadsPendingP8.add(p8); window.addEventListener('beforeunload', _capSaveBeforeUnload); }
+  const act = activeP8();
+  clearHold(p8);
+  const rest = Object.keys(_allHolds());
+  const late = d.campaignHold && d.campaignHold !== 'confirmed';
+  if(!rest.length){
+    renderDone(late);
+    const names = Object.keys(_submittedTabs).map(k => _submittedTabs[k].name);
+    const msg = $('vDone').querySelector('p');
+    if(msg && names.length > 1 && !late) msg.innerHTML = '<b>' + names.map(_escAttr).join(' · ') + '</b> — ' + names.length + '개 명의 모두 구매양식을 제출했어요.<br/>진행 상황은 리뷰어 홈의 참여현황에서 확인할 수 있어요.';
+    if(_uploadsPendingP8.size) _capSaveHold(true);
+    return true;
+  }
+  const next = (act && act !== p8 && rest.includes(act)) ? act : _tabList().filter(t => !t.done)[0].p8;
+  setActiveP8(next);
+  toast(_submittedTabs[p8].name + ' 명의 제출 완료' + (late ? '(늦게 도착 — 운영자 확인 후 확정 · 다시 제출하지 마세요)' : '') + ' — 다음 명의를 이어서 작성하세요');
+  if(act === p8 && !_viewDoneP8){ _slideDir = 1; const nf = _frameByP8(next); if(nf) _activateFrame(nf, 1); _keepFrameOnce = true; enterJoined(); }
+  else renderAcctTabs();
+  return true;
 }
 
 /* ═══ 📝 블로그체험단: 블로그 주소 (M5) ═══
@@ -1519,7 +1738,7 @@ async function _doApply(optionKey, sub, purchaseQty){
       // ★ 홀드를 2건 이상 잡은 순간 TTL 을 못 박아 알린다 — 일괄 제출은 "제출"을 묶는 기능이지
       //   "구매"를 묶는 기능이 아니다. 다 사고 와서 한 번에 내면 뒤 건이 만료(지각)된다.
       if(Object.keys(_allHolds()).length > 1){
-        toast('여러 명의를 잡아뒀어요 — 자리는 곧 만료돼요. 구매를 먼저 끝내고 마지막에 한 번에 제출하세요.');
+        toast('여러 명의로 참여 중이에요 — 위 탭에서 명의마다 구매양식을 제출해 주세요. 자리는 명의마다 따로 만료돼요.');
       }
       await enterJoined();
       return;
@@ -1598,6 +1817,94 @@ async function _doApply(optionKey, sub, purchaseQty){
   finally{ if($('vPre').style.display !== 'none'){ const c=_camp; $('joinBtn').disabled = !(c && c.state==='open'); $('joinBtn').textContent='참여하기';
     if(c && c.state==='open' && c.soldoutPaused === true){ $('joinBtn').disabled = true; $('joinBtn').textContent = '품절로 잠시 멈춤'; } } }   // 결정 259: 거절 뒤에도 멈춤 표시 유지
 }
+
+/* ═══ ★ 결정 352 — 체크한 명의마다 자리 잡기 ═══
+   ★ 요청 본문은 _doApply 와 같은 칸(name·phone·phone8·optionKey·blogUrl 없음·subName/subPhone·purchaseQty)이다 — 회귀가드가 대조한다.
+   ★ 한 명의라도 잡히면 그 명의들로 진행하고, 안 된 명의와 이유를 알려준다(그 명의는 시트에서 잠금 · 자리는 점유되지 않았다).
+   ★ 아무 명의도 못 잡았고 이유가 명의 탓이 아니면(옵션 마감·모집 종료·내정보 미등록·인기 공고 조건 등) 첫 명의로 _doApply 를
+     한 번 더 불러 종전과 똑같은 안내 화면(옵션 다시 고르기·내정보 안내·참여권 안내…)을 띄운다 — 처리 경로를 새로 만들지 않는다. */
+const _MANY_IDENTITY_REASONS = ['already_today','already_submitted','duplicate_hold','sub_not_registered','sub_is_registered_reviewer',
+  'sub_shares_owner_phone','sub_invalid','blocked_by_other_owner','same_phone_other_name','sub_daily_limit','owner_hold_cap','popular_locked'];
+let _applyManyBusy = false;
+async function _applyMany(optionKey, sels, purchaseQty){
+  if(PREVIEW) return _pvSimulateApply(optionKey);
+  const s = getSession();
+  if(!s) return needLogin(onJoin);
+  if(_applyManyBusy) return;
+  hideOptSheet(); hideAcctSheet();
+  if(purchaseQty == null){ const tv = _qtyViewsFor(optionKey); if(tv && tv.length) return openQtySheet({ mode:'join', optionKey, many: sels, views: tv }); }
+  _applyManyBusy = true;
+  const jb = $('joinBtn'); if(jb){ jb.disabled = true; jb.textContent = '자리 잡는 중…'; }
+  const ok = [], fail = [];
+  let firstGlobal = null;
+  try{
+    const seq0 = Date.now();
+    for(let i = 0; i < sels.length; i++){
+      const sel = sels[i];
+      const sub = sel.type === 'sub' ? { name: sel.name, phone: sel.phone } : null;
+      if(jb) jb.textContent = '자리 잡는 중… (' + (i + 1) + '/' + sels.length + ')';
+      let r = { ok:false }, j = {};
+      try{
+        const body = { name: s.name, phone: s.phone8, phone8: s.phone8 };
+        if(optionKey) body.optionKey = optionKey;
+        if(sub){ body.subName = sub.name; body.subPhone = sub.phone; }
+        if(purchaseQty) body.purchaseQty = purchaseQty;
+        r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/apply', {
+          method:'POST', headers:{'Content-Type':'application/json', ..._getAuthHeaders()}, body: JSON.stringify(body)
+        });
+        j = await r.json().catch(()=>({}));
+      }catch(e){ j = { error: '연결 오류 — ' + e.message }; }
+      if(r.ok && j.ok){
+        setHold({ applicationId: j.applicationId, holdToken: j.holdToken, phone8: j.phone8, expiresAt: j.expiresAt,
+                  optionKey: optionKey || (j.optionKey || ''),
+                  name: (j.participant && j.participant.name) || (sub && sub.name) || s.name,
+                  isSub: !!(j.participant && j.participant.type === 'sub'),
+                  ownerPhone8: j.ownerPhone8 || s.phone8, seq: seq0 + i });
+        ok.push({ sel, phone8: j.phone8 });
+        continue;
+      }
+      const why = _applyReasonText(j);
+      if(!ok.length && !firstGlobal && j.reason && !_MANY_IDENTITY_REASONS.includes(j.reason)) firstGlobal = { sel, sub };
+      fail.push({ sel, why });
+      if(sub && _MANY_IDENTITY_REASONS.includes(j.reason)) _acctBlocked[_p8(sub.phone)] = why;
+      // 모집 자체가 닫힌 이유면 나머지 명의도 같은 이유 — 더 보내지 않는다
+      if(['closed','cutoff','daily_done','soft_full','campaign_paused','preopen','rate_limited','tier_unavailable','not_registered','profile_missing','reviewer_blocked'].includes(j.reason)) {
+        for(let k = i + 1; k < sels.length; k++) fail.push({ sel: sels[k], why });
+        break;
+      }
+    }
+  } finally {
+    _applyManyBusy = false;
+    if(jb && $('vPre').style.display !== 'none'){ const c=_camp; jb.disabled = !(c && c.state==='open'); jb.textContent='참여하기'; }
+  }
+  if(!ok.length){
+    if(firstGlobal) return _doApply(optionKey, firstGlobal.sub, purchaseQty);   // 종전 안내 화면 그대로
+    toast(fail.map(f => (f.sel.name || '명의') + ': ' + f.why).join(' / ') || '지금은 참여할 수 없어요');
+    renderAcctList(); $('acctSheet').style.display = 'flex';
+    return;
+  }
+  setActiveP8(ok[0].phone8);
+  const subMin = (_camp && Number(_camp.sub_hold_ttl_min)) || 15;
+  toast(fail.length
+    ? ok.length + '개 명의로 참여했어요. ' + fail.map(f => (f.sel.name || '명의') + ' — ' + f.why).join(' / ')
+    : ok.length + '개 명의로 참여했어요 — 위 탭에서 명의마다 구매양식을 제출해 주세요' + (ok.some(o => o.sel.type === 'sub') ? '(타계정은 ' + subMin + '분 안에)' : ''));
+  await enterJoined();
+}
+/** apply 거절 사유 → 사람 말(_doApply 의 안내문과 같은 표를 쓴다 · 모르는 사유는 서버 문구) */
+function _applyReasonText(j){
+  return (j && j.reason && _APPLY_REASON_TEXT[j.reason]) || (j && j.error) || '지금은 참여할 수 없어요';
+}
+const _APPLY_REASON_TEXT = {
+  preopen:'아직 오픈 전이에요', cutoff:'오늘 참여가 마감됐어요', daily_done:'오늘 인원이 모두 찼어요',
+  soft_full:'잔여 대기 중이에요', closed:'모집이 종료됐어요', campaign_paused:'품절로 잠시 멈춘 공고예요',
+  already_today:'오늘은 이미 참여 이력이 있어요', already_submitted:'이미 참여 완료한 명의예요',
+  duplicate_hold:'이미 참여 중이에요', owner_hold_cap:'동시에 잡아둘 수 있는 자리 수를 넘었어요',
+  sub_daily_limit:'타계정 참여 한도에 도달했어요', sub_not_registered:'등록된 타계정이 아니에요',
+  sub_is_registered_reviewer:'이미 리뷰어로 등록된 번호예요(본인 계정으로 참여)', sub_shares_owner_phone:'본계정과 같은 번호예요',
+  sub_invalid:'이름·전화번호를 확인해주세요', blocked_by_other_owner:'다른 계정에서 이미 참여 신청한 번호예요',
+  same_phone_other_name:'같은 번호의 다른 명의가 오늘 이미 참여했어요', popular_locked:'이 명의는 참여권이 없어요',
+  rate_limited:'요청이 너무 많아요. 잠시 후 다시 시도해주세요',
+};
 
 async function _doChangeOption(newKey, purchaseQty){
   if(PREVIEW) return _pvSimulateChangeOption(newKey);
@@ -1678,6 +1985,14 @@ async function releaseExpiredHold(h){
   clearInterval(_pollTimer); clearInterval(_holdTick);
   clearHold(h && h.phone8);
   _detail = null; _detailRetry = 0;
+  // ★ 결정 352: 다른 명의가 아직 진행 중이면 이 명의 탭만 빼고 다음 명의로 넘어간다(전체 만료 화면은 모두 끝났을 때만).
+  if(h && h.phone8 && Object.keys(_allHolds()).length){
+    _releaseFrame(h.phone8);
+    toast((h.name || '명의') + ' 명의는 제한시간이 끝났어요 — 다음 명의로 넘어갑니다');
+    _slideDir = 1; _keepFrameOnce = true;   // 남은 명의의 틀(사진·입력)은 다시 열지 않는다
+    await enterJoined();
+    return;
+  }
   // 개편 1단계(사용자 확정 2026-11-07): 토스트 한 줄 대신 "제한시간이 만료되었어요" 화면 + [다시 참여하기](= 참여 전 화면).
   show('vExpired');
   try{ await loadCampaign(); }catch(_){ /* 다음 화면 갱신 주기에서 재시도 */ }
@@ -1699,14 +2014,17 @@ function _onHoldTimeUp(){
   if(_formSubmitting()){ pollOnce(); setTimeout(_onHoldTimeUp, 2000); return; }
   releaseExpiredHold(getHold());
 }
+let _enterSeq = 0;
 async function enterJoined(){
   const h = getHold();
   clearInterval(_bpTimer);
   if(!h) return renderPre();
+  const seq = ++_enterSeq;   // ★ 결정 352: 탭을 빨리 넘기면 늦게 온 앞 명의 응답이 지금 명의 화면을 덮지 않게
   try{
     const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) +
       '/work-detail?phone8=' + encodeURIComponent(h.phone8) + '&holdToken=' + encodeURIComponent(h.holdToken));
     const j = await r.json().catch(()=>({}));
+    if(seq !== _enterSeq && _tabsOn()) return;
     if(!r.ok || !j.ok){
       /* 📝 127 블로그 승인제 — 대기/반려는 만료가 아니다(토큰 보존). 서버 reason 이 단일 출처. */
       if(j.reason === 'pending_approval'){ renderBlogPending(); return; }
@@ -1738,7 +2056,7 @@ async function enterJoined(){
       return;
     }
     _qnaSlotRetry = 0;
-    if(_isDoneDetail(j)){ renderDone(); return; }
+    if(_isDoneDetail(j)){ if(_tabDoneActive()) return; renderDone(); return; }
     _renderJoinedView(j, h);
   }catch(e){ toast('불러오기 오류: ' + e.message); renderPre(); }
 }
@@ -1777,7 +2095,10 @@ function _renderJoinedView(j, h){
       return;
     }
     // 인라인 구매양식 iframe (동일 오리진 — search.html 재사용)
-    const frame = $('orderFrame');
+    // ★ 결정 352: 명의마다 틀 하나 — 이 명의의 틀을 골라 보여 준다(명의 하나면 종전 그 틀 하나).
+    const keepFrame = _keepFrameOnce; _keepFrameOnce = false;
+    const frame = PREVIEW ? $('orderFrame') : _frameFor(h && h.phone8);
+    if(!PREVIEW){ _viewDoneP8 = ''; _activateFrame(frame, _slideDir); _slideDir = 0; }
     frame.style.display = '';
     if($('pvFormNote')) $('pvFormNote').style.display = 'none';
     // 구매양식은 시트가 아니라 캠페인 홀드 문맥으로 제출한다.
@@ -1816,8 +2137,11 @@ function _renderJoinedView(j, h){
       //   리뷰어 경로는 항상 재대입(기존 동작) — 옵션 변경 시 인플라이트 제출을 파기하는
       //   TOCTOU 봉합이 이 재로드에 의존하므로 절대 캐싱하지 않는다.
       if(!PREVIEW || frame.getAttribute('src') !== _src){
-        frame.src = _src;
-        frame.onerror = ()=>{ $('frameFallback').style.display=''; };
+        // ★ 탭 넘기기만 같은 주소 재대입을 건너뛴다(그 명의의 사진·입력 유지). 옵션·개수를 바꾸면 주소가 달라져 다시 연다.
+        if(!(keepFrame && frame.getAttribute('src') === _src)){
+          frame.src = _src;
+          frame.onerror = ()=>{ $('frameFallback').style.display=''; };
+        }
       }
       setTimeout(()=>{ $('frameFallback').style.display=''; }, 6000); // 폴백 버튼은 어차피 노출(새 창 경로 보장)
     startHoldCountdown(j.application.expiresAt || (h && h.expiresAt));
@@ -2006,7 +2330,7 @@ async function pollOnce(){
     const j = await r.json().catch(()=>({}));
     if(r.ok && j.ok){
       if(j.serverNow) CampCards.setServerNow(j.serverNow);
-      if(_isDoneDetail(j)){ renderDone(); }
+      if(_isDoneDetail(j)){ if(!_tabDoneActive()) renderDone(); }
     }else if(j.reason === 'expired'){ await releaseExpiredHold(h); }
   }catch(_){ /* 네트워크 오류는 다음 폴링에서 */ }
 }
@@ -2126,6 +2450,19 @@ let _batchActive = false;
 window.addEventListener('message', (ev)=>{
   if(ev.origin !== location.origin) return;
   const d = ev.data || {};
+  // ★ 결정 352: 명의마다 틀이 따로라 높이·완료는 "보낸 틀" 기준으로 처리한다.
+  const _srcFr = _frameOfSource(ev.source);
+  if(d.type === 'purchase-swipe' && _srcFr && _srcFr.id === 'orderFrame' && (d.dir === 1 || d.dir === -1)){ _goTabStep(d.dir); return; }
+  if(d.type === 'embed-height' && d.height && _srcFr && _srcFr.id !== 'orderFrame'){ _srcFr.style.height = Math.min(Math.max(d.height, 400), 4000) + 'px'; return; }
+  if(d.type === 'order-submitted' && !PREVIEW && _srcFr && _tabsOn() && _onTabSubmitted(_srcFr, d)) return;
+  if(d.type === 'capture-uploads-done' && _srcFr && _uploadsPendingP8.has(_srcFr.dataset.p8)){
+    const nm = (_submittedTabs[_srcFr.dataset.p8] || {}).name || '명의';
+    _uploadsPendingP8.delete(_srcFr.dataset.p8);
+    if(!_uploadsPendingP8.size) window.removeEventListener('beforeunload', _capSaveBeforeUnload);
+    if(!_uploadsPendingP8.size && $('vDone').style.display !== 'none') _capSaveHold(false, Number(d.failed) || 0);
+    else if(Number(d.failed)) toast(nm + ' 명의의 구매 캡처 일부를 저장하지 못했어요 — 그 탭에서 다시 올려 주세요');
+    return;
+  }
   if(d.type === 'purchase-field-focus'){
     const frame = $('orderFrame');
     if(frame && ev.source === frame.contentWindow && Number.isFinite(d.top) && d.top >= 0 && d.top <= 20000){

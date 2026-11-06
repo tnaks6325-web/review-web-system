@@ -4,7 +4,9 @@
  *
  * 고정하는 것(1단계 심판이 2단계로 이관한 필수 계약):
  *  ① 홀드 저장 v2(명의별 맵) + **구키 파기 금지**(당일 재참여 0회 정책이라 토큰 유실 = 참여권 소각)
- *  ② 단일 #orderFrame 불변식 — 명의 전환도 enterJoined() 재실행(=iframe 재로드로 인플라이트 제출 파기)
+ *  ② 틀(iframe) 불변식 — ★ 결정 352(2026-11-07)로 "틀 1개"→"명의마다 틀 1개"로 바뀜.
+ *     목적은 그대로: 한 틀에서 다른 명의의 제출이 나가지 않는다. 틀은 그 명의의 app·holdToken 주소로만 열리고,
+ *     제출 완료는 "보낸 틀의 명의"로만 처리한다(지금 보고 있는 명의가 아니다).
  *  ③ apply 요청 subName/subPhone, 응답 phone8=명의 계약
  *  ④ multi_account_mode=false 공고는 화면·경로 100% 현행(조기 반환)
  *  ⑤ PREVIEW 격리(홀드 읽기·쓰기 0) 유지
@@ -51,10 +53,38 @@ for (const r of ['multi_disabled', 'sub_invalid', 'sub_shares_owner_phone', 'sub
 ok('apply: 타계정 거절 시 그 명의만 잠그고 시트 재오픈(자리 미점유 · 재선택 유도)',
   /_acctBlocked\[p8\] = msg;\s*\n\s*renderAcctList\(\);/.test(camp));
 
-// ── ② 단일 iframe 불변식 ──
-ok('★ 명의 전환은 enterJoined() 재실행(iframe 재로드 = 인플라이트 제출 파기)',
-  /async function switchAcct\(p8\)\{[\s\S]{0,300}setActiveP8\(p8\);\s*\n\s*await enterJoined\(\);/.test(camp));
-ok('iframe은 여전히 단일 #orderFrame(추가 생성 없음)', (camp.match(/id="orderFrame"/g) || []).length === 1);
+// ── ② 틀(iframe) 불변식 — 결정 352: 명의마다 틀 하나 ──
+ok('★ 명의 전환은 enterJoined() 재실행(그 명의의 틀을 고른다)',
+  /async function switchAcct\(p8\)\{[\s\S]{0,600}setActiveP8\(p8\);\s*\n\s*await enterJoined\(\);/.test(camp));
+ok('마크업의 틀은 #orderFrame 하나(추가 틀은 명의마다 코드로만)', (camp.match(/id="orderFrame"/g) || []).length === 1);
+{
+  const ff = camp.slice(camp.indexOf('function _frameFor(p8){'), camp.indexOf('function _activateFrame('));
+  ok('★ 352: 새 틀은 _frameFor 한곳에서만 — 그 명의의 틀이 이미 있으면 그것을 쓴다(같은 명의 두 번째 틀 없음)',
+    (camp.match(/createElement\('iframe'\)/g) || []).length === 1 && ff.includes("createElement('iframe')")
+    && /let f = _frameByP8\(p8\); if\(f\) return f;/.test(ff) && /f\.dataset\.p8 = String\(p8 \|\| ''\);/.test(ff));
+  ok('★ 352: 탭 화면의 제출 완료는 "보낸 틀"의 명의로만 정리(지금 보는 명의 아님)',
+    /const _srcFr = _frameOfSource\(ev\.source\);/.test(camp)
+    && /if\(d\.type === 'order-submitted' && !PREVIEW && _srcFr && _tabsOn\(\) && _onTabSubmitted\(_srcFr, d\)\) return;/.test(camp)
+    && /function _onTabSubmitted\(frame, d\)\{ return _onTabSubmittedP8\(frame && frame\.dataset\.p8, d\); \}/.test(camp));
+  ok('★ 352: 탭 넘기기만 같은 주소 재대입을 건너뛴다(그 명의 틀 유지) — 그 밖에는 종전처럼 다시 연다',
+    /if\(!\(keepFrame && frame\.getAttribute\('src'\) === _src\)\)\{\s*\n\s*frame\.src = _src;/.test(camp));
+  ok('★ 352: 만료된 틀 비우기는 제출 중이면 건드리지 않는다',
+    /function _releaseFrame\(p8\)\{\s*\n\s*const f = _frameByP8\(p8\); if\(!f \|\| _frameSubmitting\(f\)\) return;/.test(camp));
+}
+// ── 결정 352: 여러 명의 한 번에 참여(고른 수까지만) ──
+{
+  const am = camp.slice(camp.indexOf('async function _applyMany('), camp.indexOf('function _applyReasonText('));
+  ok('★ 352: 여러 개 체크는 「타계정 허용」 공고만(블로그·Q&A 제외)',
+    /function _acctMultiPick\(\)\{ return multiEnabled\(\) && !isBlogCampaign\(\) && !isQnaCampaign\(\); \}/.test(camp));
+  ok('★ 352: 체크한 명의마다 한 번씩만 자리 요청(고른 수를 넘지 않음) · 요청 칸은 _doApply 와 같다',
+    /for\(let i = 0; i < sels\.length; i\+\+\)\{/.test(am) && (am.match(/\/apply'/g) || []).length === 1
+    && /body\.subName = sub\.name; body\.subPhone = sub\.phone;/.test(am) && /if\(purchaseQty\) body\.purchaseQty = purchaseQty;/.test(am)
+    && /if\(_applyManyBusy\) return;/.test(am));
+  ok('★ 352: 아무 명의도 못 잡고 이유가 명의 탓이 아니면 종전 _doApply 안내 화면으로',
+    /if\(firstGlobal\) return _doApply\(optionKey, firstGlobal\.sub, purchaseQty\);/.test(am));
+  ok('★ 352: 여러 명의 공고는 나중에 명의를 더 붙이는 버튼을 숨긴다(고른 수까지만)',
+    /addBtn\.style\.display = \(multiEnabled\(\) && !_acctMultiPick\(\) &&/.test(camp));
+}
 
 // ── ④ 비활성 공고 무영향 ──
 // ★ 2026-10-05: 「1인 1회」(multi_account_mode=false)도 타계정 이름으로 참여할 수 있어 명의를 고른다.
