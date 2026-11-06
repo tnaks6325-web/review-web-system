@@ -24,6 +24,16 @@ assert.match(modal, /id="rf_start_date_control" class="date-control">[\s\S]*id="
   '모집 시작일은 행 높이를 바꾸지 않는 오버레이 미니달력을 제공해야 합니다.');
 assert.match(modal, /\.row-form\.calendar-open\{overflow:visible\}[\s\S]*\.rf-start-calendar\{position:absolute;[\s\S]*z-index:40/,
   '열린 미니달력은 다음 설정 행 위에 겹쳐 표시되어야 합니다.');
+// 2026-11-06 신고: 구매시간 패널이 「구매 · 배송」 묶음(overflow:hidden) 안에서 첫 줄(00~05시)만
+// 보이고 06~23시가 잘려 07시 오픈 작업의 시간을 고를 수 없었다. 열린 동안 두 겹 모두 풀어야 한다.
+assert.match(modal, /\.rf-sync-sub\.calendar-open\{overflow:visible\}/,
+  '구매시간 패널이 열린 동안 「구매 · 배송」 묶음이 패널을 잘라내지 않아야 합니다.');
+assert.match(recruit, /function _rfTimePickerClipHosts\(picker\) \{[\s\S]{0,80}closest\("\.row-form"\)[\s\S]{0,60}closest\("\.rf-sync-sub"\)/,
+  '구매시간 패널을 감싸는 행 묶음과 「구매 · 배송」 묶음을 함께 찾아야 합니다.');
+assert.match(recruit, /function rfOpenTimePicker\(fieldId\) \{[\s\S]{0,700}_rfTimePickerClipHosts\(picker\)\.forEach\(host => host\.classList\.add\("calendar-open"\)\)/,
+  '구매시간 패널을 열 때 잘라내기를 풀어야 합니다.');
+assert.match(recruit, /function rfCloseTimePicker\(\) \{[\s\S]{0,200}_rfTimePickerClipHosts\(picker\)\.forEach\(host => host\.classList\.remove\("calendar-open"\)\)/,
+  '구매시간 패널을 닫을 때 잘라내기를 원래대로 되돌려야 합니다.');
 assert.match(recruit, /RecruitModal\?\.syncStartDateControl\?\.\(\)/,
   '시작일을 프리필하거나 변경해도 표시용 날짜가 동기화되어야 합니다.');
 assert.match(recruit, /function closeRecruitModal\(\) \{[\s\S]{0,160}RecruitModal\?\.closeStartDateCalendar\?\.\(\)/,
