@@ -171,6 +171,8 @@
 #moOvl .mo-in.num{text-align:right;font-variant-numeric:tabular-nums}
 #moOvl .mo-in.fixv{color:var(--mo-orange)}
 #moOvl .mo-miss{color:var(--mo-red);font-size:12px}
+#moOvl .mo-in.miss{box-shadow:inset 0 0 0 1px var(--mo-red)}
+#moOvl .mo-in.miss::placeholder{color:var(--mo-red);opacity:1}
 #moOvl .mo-tag{display:inline-block;margin-left:3px;padding:0 4px;height:16px;line-height:16px;border-radius:3px;font-size:11px;font-weight:600;background:var(--mo-fill);color:var(--mo-text-2);vertical-align:1px}
 #moOvl .mo-cellf{display:flex;align-items:center;gap:2px;min-width:0}
 #moOvl .mo-cellf .mo-in{flex:1}
@@ -621,6 +623,12 @@
       const f = it.fields || {};
       const v = f[key];
       if ((v == null || v === '') && (it.missing || []).some(l => FIELD_OF_LABEL[l] === key)) {
+        // ★ 다른 칸은 나뉘었고 이 칸만 빠졌으면(예: 결제금액 없는 양식) 빈 입력칸을 준다 — 「없음」 글자만 두면 고칠 길이 없다(막다른 길)
+        if (Object.keys(f).length) {
+          return `<td${opt && opt.num ? ' class="r"' : ''} title="양식에 이 칸이 없습니다 — 직접 넣어 주세요"><input class="mo-in miss${opt && opt.num ? ' num' : ''}" id="moF-${it.uid}-${key}" value="" placeholder="없음"
+            aria-label="${i + 1}번 줄 ${esc(opt && opt.label || key)}" inputmode="${opt && opt.num ? 'numeric' : 'text'}"
+            oninput="ManualOrder.edit(${i},'${key}',this.value)" onfocus="ManualOrder.selectRow(${i})" onkeydown="ManualOrder.keyNav(event,${i})"></td>`;
+        }
         return `<td title="양식에서 이 칸을 찾지 못했습니다"><span class="mo-miss">없음</span></td>`;
       }
       if (!it.ok && !Object.keys(f).length) return '<td></td>';

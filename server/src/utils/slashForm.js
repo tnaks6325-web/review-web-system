@@ -404,6 +404,29 @@ function parseSlashLine(line) {
     }
   }
 
+  // ★ 결제금액만 빠진 양식(규칙 보정으로도 못 맞춘 8칸 · 끝 슬래시로 9번째가 빈 칸 · 주소에 슬래시가 있는 경우 포함) — 사용자 확정 2026-11-06
+  //   나머지 8칸은 채워 보여 주고 금액만 비운다. 금액은 지어내지 않는다(ok:false + missing ['결제금액'] →
+  //   화면에서 금액 칸에 직접 넣으면 그 줄이 정상으로 바뀐다). 판정은 "금액 자리에 아무 숫자를 넣으면
+  //   정상 양식으로 조립되는가"로 한다 — 모양 검사(은행·계좌·예금주 자리·두 사람 붙음)는 그대로 거친다.
+  //   ★ 오류 문구에 "칸이 N개뿐"을 쓰지 않는다 — 그 문구가 AI 보정 폴백의 대상이고, 금액은 원문에 없어 AI 가 지어낼 위험만 있다.
+  if (!hasLabels) {
+    const pp = (parts.length >= FIELD_KEYS.length && parts[parts.length - 1] === '') ? parts.slice(0, -1) : parts;
+    // 은행 자리에 은행 이름이 있어야 한다(목록 밖 은행이면 종전 오류 — 보수적으로) · 금액처럼 보이는 값이 주소 뒤(계좌 자리 제외)에 있으면 금액이 빠진 게 아니라 칸이 밀린 것이다(끝에 옵션 한 칸 더 등)
+    const priceElsewhere = pp.some((v, i) => i > HEAD_COUNT && i !== pp.length - 2 && looksPrice(v));
+    if (pp.length >= FIELD_KEYS.length - 1 && !priceElsewhere && looksBank(pp[pp.length - 3]) && !looksPrice(pp[pp.length - 1]) && _assemblyOk(pp.concat(['1']))) {
+      const probe = parseSlashLine(pp.concat(['1']).join('/'));
+      if (probe.ok) {
+        const pw = probe.warnings || [];
+        return {
+          ok: false, raw, fields: Object.assign({}, probe.fields, { price: null }),
+          errors: ['결제금액이 없습니다 — 금액 칸에 직접 넣어 주세요'],
+          warnings: notes.map(r => r + ' — 값이 맞는지 확인하세요').concat(pw),
+          extraSlashInAddress: probe.extraSlashInAddress, repairs: notes.concat(probe.repairs || []), missing: ['결제금액'],
+        };
+      }
+    }
+  }
+
   if (parts.length < FIELD_KEYS.length) {
     const missing = diagnoseMissing(parts);
     const hints = [];
