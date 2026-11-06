@@ -22,6 +22,14 @@
      · 모양은 맥 시트(창 범위 CSS — 선택자는 전부 #moOvl 로 시작, 다른 화면에 새지 않는다).
      · 표 칸은 COLS 목록 하나에서 그린다 — 후속 칸(리뷰어 고르기 · 네이버/쿠팡 동시진행 칸)은 항목만 더하면 된다.
 
+   ★ 결정 349 화면(2026-11-07) — 네이버·쿠팡 동시진행 작업표면 「동시진행 모드」:
+     · 창이 열릴 때 GET …/dual/pending 이 동시진행인지(dual)·보완 필요 주문을 알려 준다(미리보기 dualAware 응답의 dual:true 도 같은 신호).
+       판정은 서버 하나(discoverDualScope) — 화면은 응답만 따른다. 옛 서버(입구 없음)면 종전 화면 그대로(미리보기 409 안내).
+     · 한 줄 = 한 사람 그대로, 금액·구매캡처 칸 대신 [네이버: 주문번호·금액·캡처] [쿠팡: 주문번호·금액·캡처].
+       캡처는 그 칸에만 붙는다(그 칸을 고른 뒤 Ctrl+V · 그 칸에 끌어다 놓기 · 클립). 양식 결제금액은 두 금액 합 대조용(비어도 됨).
+     · 제출은 줄마다 POST …/dual/submit — 일반 /submit 은 동시진행을 계속 거절한다(결정 344).
+     · 상단 「보완 필요 N건 — 보기」 → 같은 표 모양의 보완 목록(기존 쪽 고르기 + 빠진 쪽 주문번호·금액·캡처) → POST …/dual/complete.
+
    사용: ManualOrder.open({ sheetId, tabName, gid, campaignId, title, onSubmitted })
    ══════════════════════════════════════════════════════════════ */
 (function () {
@@ -77,6 +85,10 @@
   const DIRTY = new Set();        // 다시 나눠야 할 줄
   let CLS_TIMER = null;
   let CLS_RUN = null;
+  let ACTIVE_CH = null; // ★ 결정 349 화면: 동시진행 모드에서 고른 구매처 칸('naver'|'coupang') — Ctrl+V 사진은 고른 줄 + 고른 칸에만
+  let CROWS = [];      // ★ 결정 349 화면: 보완 목록 줄(서버 보완 대상 1건 = 한 줄)
+  const CHS = [['naver', '네이버'], ['coupang', '쿠팡']];
+  const _slot = () => ({ orderNum: '', paidAmount: null, capture: null, capJob: null, capBusy: false, extract: null, extractPending: null, auto: {} });
   let RL = null;       // ★ 결정 348: 열린 「리뷰어 연결」 팝오버 { row, q, items, hasMore, state, err, seq, timer } — 한 번에 하나
   const CLASSIFY_DELAY_MS = 500;  // 입력을 멈추고 이만큼 지나면 나눈다(붙여넣기·칸 벗어남은 즉시)
   const MAX_ROWS = 50;            // 서버 미리보기·제출 한 번 상한(MAX_LINES)과 같다 — 오붙여넣기 수백 건 방지
@@ -87,8 +99,14 @@
       ok: false, fields: {}, errors: [], warnings: [], repairs: [], missing: [], aiRepaired: false, raw: '',
       capture: null, capJob: null, capBusy: false, extract: null, extractPending: null,
       applications: [], targetApplicationId: '', optKey: '', optFullAck: false, productWarn: null,
-      link: _autoLink() };   // ★ 결정 348: 리뷰어 연결 — 기본 자동(종전)
+      link: _autoLink(),     // ★ 결정 348: 리뷰어 연결 — 기본 자동(종전)
+      dual: { naver: _slot(), coupang: _slot() } };   // ★ 결정 349 화면: 동시진행 모드의 구매처별 주문번호·금액·캡처
   }
+  const _isDual = () => !!(CTX && CTX.dual);
+  /** 이 줄에 붙은(또는 붙는 중인) 캡처가 하나라도 있나 — 일반 모드는 줄 캡처, 동시진행 모드는 두 구매처 칸 */
+  const _hasCap = r => !!(r && (r.capture || r.capBusy || CHS.some(([c]) => r.dual && (r.dual[c].capture || r.dual[c].capBusy))));
+  const _slotOf = (row, ch) => (ch && row && row.dual && row.dual[ch]) || row;
+  const _rowAt = i => (CTX && CTX.view === 'complete' ? CROWS : ROWS)[i];
   /** 리뷰어 연결 기본값 = 자동(종전 방식). existing 이면 reviewerId·이름·뒤 4자리·고를 때의 연락처 끝 8자리(p8)를 함께 둔다. */
   function _autoLink() { return { mode: 'auto', reviewerId: '', name: '', phoneTail: '', p8: '' }; }
   const _blank = r => !String((r && r.text) || '').trim();
@@ -97,7 +115,7 @@
   /** 맨 아래에 늘 빈 줄 하나(사진만 붙은 빈 줄은 빈 줄로 치지 않는다) */
   function ensureTail() {
     const last = ROWS[ROWS.length - 1];
-    if (!last || !_blank(last) || last.capture || last.capBusy) ROWS.push(newRow(''));
+    if (!last || !_blank(last) || _hasCap(last)) ROWS.push(newRow(''));
   }
 
   // ── 스타일(1회 주입) — ★ 선택자는 전부 #moOvl 로 시작(창 범위 · 다른 화면에 새지 않는다) ──────────
@@ -242,6 +260,24 @@
 #moOvl .mo-res .s{font-size:12px;color:var(--mo-text-2);line-height:1.55}
 #moOvl .mo-res .w{font-size:12px;color:var(--mo-orange);line-height:1.55}
 #moOvl .mo-sum{display:flex;gap:14px;padding:0 16px;height:36px;align-items:center;font-size:12px;color:var(--mo-text-2);border-bottom:0.5px solid var(--mo-line)}
+/* 동시진행 모드(결정 349 화면) — 구매처 묶음 머리 · 구매처 칸 · 보완 목록 */
+#moOvl .mo-tbl thead tr.grp th{height:24px;text-align:center;font-weight:700;color:var(--mo-text);box-shadow:inset 0.5px 0 0 var(--mo-line),inset 0 -0.5px 0 var(--mo-line)}
+#moOvl .mo-tbl thead tr.grp th[rowspan]{text-align:left;font-weight:600;color:var(--mo-text-2);box-shadow:inset 0 -0.5px 0 var(--mo-line)}
+#moOvl .mo-tbl thead tr.grp th.stk2[rowspan]{box-shadow:inset -0.5px 0 0 var(--mo-line),inset 0 -0.5px 0 var(--mo-line)}
+#moOvl .mo-tbl thead tr.grp th.stkr[rowspan]{box-shadow:inset 0.5px 0 0 var(--mo-line),inset 0 -0.5px 0 var(--mo-line)}
+#moOvl .mo-tbl.dual thead tr.lbl th{top:24px}
+#moOvl .mo-tbl th.chs,#moOvl .mo-tbl td.chs{box-shadow:inset 0.5px 0 0 var(--mo-line),inset 0 -0.5px 0 var(--mo-line-2)}
+#moOvl .mo-dtag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:5px;background:var(--mo-fill);color:var(--mo-text);font-weight:600}
+#moOvl .mo-lnk{font:inherit;font-size:12px;font-weight:600;color:var(--mo-accent);background:none;border:0;padding:0;margin:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px;white-space:nowrap}
+#moOvl .mo-lnk.w{color:var(--mo-orange)}
+#moOvl td.over .mo-cap{box-shadow:0 0 0 2px var(--mo-accent-ring);color:var(--mo-accent)}
+#moOvl .mo-cap.old{cursor:default;color:var(--mo-text-2);box-shadow:none;background:var(--mo-fill)}
+#moOvl .mo-seg{display:inline-flex;border-radius:5px;box-shadow:var(--mo-btn-shadow);overflow:hidden}
+#moOvl .mo-seg button{height:24px;margin:0;padding:0 8px;font:inherit;font-size:12px;border:0;border-radius:0;background:var(--mo-bg);color:var(--mo-text);cursor:pointer;box-shadow:inset -0.5px 0 0 var(--mo-line)}
+#moOvl .mo-seg button:last-child{box-shadow:none}
+#moOvl .mo-seg button.on{background:var(--mo-accent-bg);color:var(--mo-accent);font-weight:600}
+#moOvl .mo-seg.need{box-shadow:0 0 0 1px var(--mo-red)}
+#moOvl .mo-tbl td.ro{color:var(--mo-text);font-variant-numeric:tabular-nums}
 /* 휴대폰 — 아래에서 올라오는 시트 · 표는 옆으로 밀기 · 입력 36px(글자 16px, 확대 방지) · 주요 단추 44px */
 @media screen and (max-width:768px){
   #moOvl{align-items:flex-end;padding:0}
@@ -262,6 +298,7 @@
   #moOvl .mo-ack input{width:20px;height:20px}
   #moOvl .mo-tbl th.stk2,#moOvl .mo-tbl td.stk2,#moOvl .mo-tbl th.stkr,#moOvl .mo-tbl td.stkr{position:static;box-shadow:inset 0 -0.5px 0 var(--mo-line-2)}
   #moOvl .mo-lk{height:32px}
+  #moOvl .mo-seg button{height:32px;font-size:14px;padding:0 10px}
   #moOvl .mo-rl{left:0;right:0;top:auto;bottom:0;width:auto;max-height:80vh;border-radius:12px 12px 0 0;padding-bottom:env(safe-area-inset-bottom)}
   #moOvl .mo-rl-q,#moOvl .mo-rl-q .mo-in,#moOvl .mo-rl-q .mo-in:focus,#moOvl .mo-rl-q .mo-in:hover{height:36px}
   #moOvl .mo-rl-it{height:44px}
@@ -282,6 +319,8 @@
     ROWS = []; OPTS = []; ACTIVE = null; DIRTY.clear(); clearTimeout(CLS_TIMER); CLS_TIMER = null; BUSY = false;
     IME = false; PAINT_LATER = false;
     CTX.view = 'table'; CTX.apps = null;
+    CTX.dual = false; CTX.pending = null;   // ★ 결정 349 화면: 서버가 알려 줄 때까지는 종전(일반) 화면
+    CROWS = []; ACTIVE_CH = null;
     ROWS.push(newRow(''));
     let ovl = document.getElementById('moOvl');
     if (!ovl) {
@@ -298,6 +337,24 @@
     ovl.style.display = 'flex';
     renderPreview();
     setTimeout(() => { const t = ROWS[0] && document.getElementById('moRaw-' + ROWS[0].uid); if (t) t.focus(); }, 40);
+    loadDual();
+  }
+  /** ★ 결정 349 화면 — 이 작업표가 동시진행인지 + 보완 필요 주문(읽기 전용). 판정은 서버(discoverDualScope) 하나.
+   *  옛 서버(입구 없음)·실패 = 아무것도 바꾸지 않는다(종전 화면 · 미리보기가 종전처럼 409 로 알린다). */
+  async function loadDual() {
+    const my = CTX; if (!my) return;
+    let r = null;
+    try {
+      r = await api(_moBase() + '/dual/pending?sheetId=' + encodeURIComponent(my.sheetId) + '&tabName=' + encodeURIComponent(my.tabName)
+        + '&gid=' + encodeURIComponent(my.gid || ''));
+    } catch (_) { r = null; }
+    if (CTX !== my || !r || r.ok !== true || typeof r.dual !== 'boolean') return;
+    const was = !!my.dual;
+    my.dual = r.dual;
+    my.pending = r.dual && Array.isArray(r.items) ? r.items : null;
+    if (my.dual) OPTS = [];
+    if (my.view === 'complete') return;
+    if (was !== my.dual || my.dual) paint();
   }
   function close(ask) {
     if (ask && CTX && CTX.view === 'table' && _filled().length && !confirm('입력한 줄이 사라집니다. 닫을까요?')) return;
@@ -305,6 +362,7 @@
     const o = document.getElementById('moOvl');
     if (o) o.remove();
     CTX = null; ROWS = []; ACTIVE = null; DIRTY.clear(); clearTimeout(CLS_TIMER); CLS_TIMER = null; BUSY = false;
+    CROWS = []; ACTIVE_CH = null;
   }
 
   function shell(bodyHtml, footHtml, opt) {
@@ -314,7 +372,7 @@
     const html = `<div class="mo-box${opt && opt.narrow ? ' narrow' : ''}" role="dialog" aria-modal="true" aria-label="외부모집 수동제출">
       <div class="mo-hd">
         <span class="ttl">외부모집 수동제출</span>
-        <span class="sub">${esc(CTX.title || CTX.tabName)}${CTX.campaignId ? ' · 참여형(정원 차감)' : ''}</span>
+        <span class="sub">${esc(CTX.title || CTX.tabName)}${CTX.campaignId ? ' · 참여형(정원 차감)' : ''}${CTX.dual ? ' · 네이버+쿠팡 동시진행' : ''}</span>
         <span class="sp"></span>
         <button type="button" class="mo-x" title="닫기" aria-label="닫기" onclick="ManualOrder.close(true)"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
       </div>
@@ -407,10 +465,10 @@
   function rowBlur(i) {
     const row = ROWS[i]; if (!row) return;
     if (!_blank(row) && (row.ver !== row.done || row.netErr)) markDirty(row, true);   // 나누기 실패 줄은 칸을 벗어날 때 다시 시도
-    if (_blank(row) && !row.capture && !row.capBusy && ROWS[ROWS.length - 1] !== row) {
+    if (_blank(row) && !_hasCap(row) && ROWS[ROWS.length - 1] !== row) {
       setTimeout(() => {
         const k = ROWS.indexOf(row);
-        if (k < 0 || !_blank(row) || row.capture || row.capBusy || k === ROWS.length - 1) return;
+        if (k < 0 || !_blank(row) || _hasCap(row) || k === ROWS.length - 1) return;
         ROWS.splice(k, 1); DIRTY.delete(row); if (ACTIVE === row) ACTIVE = null;
         paint();
       }, 0);
@@ -421,7 +479,12 @@
     const row = ROWS[i]; if (!row) return;
     const cd = ev && ev.clipboardData;
     const imgs = _imagesFrom(cd);
-    if (imgs.length) { ev.preventDefault(); select(row); takeImages(row, imgs); return; }
+    if (imgs.length) {
+      ev.preventDefault(); select(row);
+      // 동시진행 모드는 구매처를 짐작하지 않는다 — 네이버·쿠팡 캡처 칸을 골라 붙이게 한다
+      if (_isDual()) { _toast((i + 1) + '번 줄의 네이버 또는 쿠팡 캡처 칸을 눌러 고른 뒤 붙여 넣으세요'); return; }
+      takeImages(row, imgs); return;
+    }
     const t = cd && typeof cd.getData === 'function' ? (cd.getData('text/plain') || cd.getData('text') || '') : '';
     const lines = String(t).split(/\r?\n/).filter(s => s.trim());
     if (lines.length <= 1) { row.pasteNow = true; return; }   // 한 줄 = 그대로 붙고, 이어지는 입력 이벤트에서 바로 나눈다
@@ -491,7 +554,7 @@
       let r;
       try {
         r = await api(_moBase() + '/preview', { method: 'POST',
-          body: JSON.stringify({ text, sheetId: CTX.sheetId, tabName: CTX.tabName, campaignId: CTX.campaignId || null }) });
+          body: JSON.stringify({ text, sheetId: CTX.sheetId, tabName: CTX.tabName, gid: CTX.gid || '', campaignId: CTX.campaignId || null, dualAware: true }) });
       } catch (e) { r = { ok: false, error: (e && e.message) ? e.message : '서버에 연결하지 못했습니다' }; }
       if (!CTX) return;   // 기다리는 사이 창을 닫았다
       if (!r || !r.ok) {
@@ -500,7 +563,9 @@
         continue;
       }
       // ★ 결정 211: 공고 화면 경로(campaignId)는 신청 선택이 옵션을 정하므로 상품 칸을 띄우지 않는다. 남은 자리는 늘 최신 응답으로.
-      OPTS = (!CTX.campaignId && Array.isArray(r.optionChoices)) ? r.optionChoices.filter(o => o && o.optKey) : [];
+      // ★ 결정 349 화면: 동시진행이면 서버가 dual:true 를 싣는다(새 화면 dualAware 일 때만) — 동시진행 모드는 상품을 고르지 않는다
+      if (r.dual === true && !CTX.dual) { CTX.dual = true; if (CTX.pending == null) loadDual(); }
+      OPTS = (!CTX.dual && !CTX.campaignId && Array.isArray(r.optionChoices)) ? r.optionChoices.filter(o => o && o.optKey) : [];
       const items = Array.isArray(r.items) ? r.items : [];
       part.forEach((row, j) => {
         row.parsing = false;
@@ -524,6 +589,11 @@
     row.repairs = (it.repairs || []).slice();
     row.missing = (it.missing || []).slice();
     row.aiRepaired = !!it.aiRepaired;
+    // ★ 결정 349 화면: 동시진행 모드의 양식 결제금액은 두 금액 합 대조용 — 그 칸만 빠졌으면 정상으로 본다(금액은 구매처 칸이 정본)
+    if (_isDual() && !row.ok && row.missing.length && row.missing.every(l => l === '결제금액')) {
+      row.ok = true; row.errors = row.errors.filter(m => !/결제금액/.test(m)); row.missing = [];
+      if (row.errors.length) row.ok = false;
+    }
     row.raw = it.raw || row.text;
     row.productWarn = null;
     if (row.extract && row.extract.orderNumber && !row.fields.orderNum) row.fields.orderNum = row.extract.orderNumber;
@@ -554,7 +624,21 @@
    *  같은 공고·같은 연락처 끝 8자리·applied/expired/cancelled 신청이 있고 선택이 없으면 그 줄 거절)와 같은 조건.
    *  후보(applications)는 loadApplicationCandidates 가 같은 상태 목록으로 거른다. 후보 조회 실패 = 빈 목록 = 막지 않음(서버가 최종 판정). */
   const appBlock = it => !!(CTX && CTX.campaignId && (it.applications || []).length && !it.targetApplicationId);
-  const submittable = it => !!it.ok && !_blank(it) && it.ver === it.done && !it.parsing && !optBlock(it) && !appBlock(it);
+  /** ★ 결정 349 화면: 동시진행 모드 — 한 구매처 칸이 다 찼나(주문번호·금액·캡처) / 빠진 것 이름 목록 */
+  const _amtOk = v => Number.isSafeInteger(v) && v >= 0;
+  function _slotMissing(sl, opt) {
+    const m = [];
+    if (!String(sl.orderNum || '').trim() && !(opt && opt.orderNumKept)) m.push('주문번호');
+    if (!_amtOk(sl.paidAmount)) m.push('금액');
+    if (!sl.capture && !(opt && opt.capKept)) m.push(sl.capBusy ? '캡처(줄이는 중)' : '캡처');
+    return m;
+  }
+  const dualReady = it => CHS.every(([c]) => !_slotMissing(it.dual[c]).length);
+  const _dualSum = it => CHS.reduce((a, [c]) => a + (it.dual[c].paidAmount || 0), 0);
+  /** 양식 결제금액이 두 금액 합과 다른가(둘 다 넣었고 양식에 금액이 있을 때만) */
+  const dualSumDiff = it => _isDual() && it.ok && CHS.every(([c]) => _amtOk(it.dual[c].paidAmount))
+    && it.fields && it.fields.price != null && it.fields.price !== '' && Number(it.fields.price) !== _dualSum(it);
+  const submittable = it => !!it.ok && !_blank(it) && it.ver === it.done && !it.parsing && !optBlock(it) && !appBlock(it) && (!_isDual() || dualReady(it));
   function optLabel(o) {
     const left = o.remaining == null ? '정원 없음' : (o.status === 'soldout' ? `마감(${o.used}/${o.recruitTotal})` : '남은 ' + o.remaining);
     const today = (o.status !== 'soldout' && o.todayRemaining != null && (o.remaining == null || o.todayRemaining < o.remaining))
@@ -600,20 +684,22 @@
   function syncSubmitBtn() {
     const btn = document.getElementById('moSubmit');
     if (!btn) return;
+    if (CTX && CTX.view === 'complete') { syncCompleteBtn(btn); return; }
     const n = ROWS.filter(submittable).length;
     if (!BUSY) { btn.disabled = !n; btn.textContent = n + '건 제출'; }
     const need = ROWS.filter(r => r.ok && !_blank(r) && optBlock(r) === 'need').length;
     const ack = ROWS.filter(r => r.ok && !_blank(r) && optBlock(r) === 'ack').length;
     const appNeed = ROWS.filter(r => r.ok && !_blank(r) && appBlock(r)).length;
     const busy = ROWS.filter(r => !_blank(r) && (r.parsing || r.ver !== r.done)).length;
+    const dualNeed = _isDual() ? ROWS.filter(r => r.ok && !_blank(r) && r.ver === r.done && !dualReady(r)).length : 0;
     const tip = document.getElementById('moOptTip');
-    if (tip) tip.textContent = need ? `상품을 고르지 않은 줄 ${need}개는 제출되지 않습니다` : appNeed ? `참여 신청을 고르지 않은 줄 ${appNeed}개는 제출되지 않습니다` : ack ? `남은 자리를 넘는 줄 ${ack}개는 확인 체크가 필요합니다` : busy ? `나누는 중인 줄 ${busy}개` : '';
+    if (tip) tip.textContent = dualNeed ? `네이버·쿠팡 주문번호·금액·캡처가 덜 찬 줄 ${dualNeed}개는 제출되지 않습니다` : need ? `상품을 고르지 않은 줄 ${need}개는 제출되지 않습니다` : appNeed ? `참여 신청을 고르지 않은 줄 ${appNeed}개는 제출되지 않습니다` : ack ? `남은 자리를 넘는 줄 ${ack}개는 확인 체크가 필요합니다` : busy ? `나누는 중인 줄 ${busy}개` : '';
   }
 
   // ── 줄 확인 문구(빨강 = 고쳐야 제출 · 주황 = 확인만) ──────────────────────
   /** 캡처에서 읽은 수취인이 그 줄 수취인과 다른가 — 다르면 캡처 이름, 같거나 모르면 ''. 마스킹(김*수)은 같은 길이·보이는 글자 일치면 같은 사람. */
-  function capNameMismatch(it) {
-    const ex = it && it.extract;
+  function capNameMismatch(it, sl) {
+    const ex = (sl || it) && (sl || it).extract;
     const nm0 = it && it.fields && it.fields.recipient;
     if (!ex || !ex.recipient || !nm0) return '';
     const norm = s => String(s || '').replace(/\s+/g, '');
@@ -626,6 +712,7 @@
   }
   /** 줄의 확인 문구 목록 — [{k:'e'|'w'|'g'|'m', t}] (첫 줄이 칸에 보이고, 전체는 마우스 올림) */
   function rowNotes(it) {
+    if (it && it.kind === 'complete') return completeNotes(it);
     if (_blank(it)) return it.capture ? [{ k: 'm', t: '양식을 붙여넣으면 이 캡처와 함께 제출됩니다' }] : [];
     if (it.parsing || it.ver !== it.done) return [{ k: 'm', t: '나누는 중…' }];
     const out = [];
@@ -642,9 +729,23 @@
       const capNm = capNameMismatch(it);
       if (capNm) out.push({ k: 'w', t: `이름이 다릅니다(캡처: ${capNm})` });
       if (appBlock(it)) out.push({ k: 'e', t: '기존 신청이 있어 확정할 신청을 골라야 제출할 수 있습니다' });
+      if (_isDual()) dualNotes(it, out);
     }
-    if (!out.length) out.push({ k: 'g', t: it.capture ? '정상 · 캡처 있음' : '정상' });
+    if (!out.length) out.push({ k: 'g', t: _isDual() ? '정상 · 캡처 2장' : it.capture ? '정상 · 캡처 있음' : '정상' });
     return out;
+  }
+  /** ★ 결정 349 화면: 동시진행 줄의 확인 문구 — 빠진 칸(빨강 · 줄은 칠하지 않음) · 금액 합 다름 · 캡처 이름 다름(주황) · 캡처에서 읽은 값(주황) */
+  function dualNotes(it, out, opt) {
+    const miss = CHS.map(([c, nm]) => { const m = _slotMissing(it.dual[c], opt && opt[c]); return m.length ? nm + ' ' + m.join('·') : ''; }).filter(Boolean);
+    if (miss.length) out.push({ k: 'e', t: miss.join(' / ') + ' 필요' });
+    if (dualSumDiff(it)) out.push({ k: 'w', t: `양식 금액 ${Number(it.fields.price).toLocaleString('ko-KR')} ≠ 두 금액 합 ${_dualSum(it).toLocaleString('ko-KR')} — 확인하세요` });
+    CHS.forEach(([c, nm]) => {
+      const sl = it.dual[c];
+      const capNm = capNameMismatch(it, sl);
+      if (capNm) out.push({ k: 'w', t: `${nm} 캡처 이름이 다릅니다(캡처: ${capNm})` });
+      const a = Object.keys(sl.auto || {}).filter(k => sl.auto[k]).map(k => k === 'orderNum' ? '주문번호' : '금액');
+      if (a.length) out.push({ k: 'w', t: `${nm} ${a.join('·')}는 캡처에서 읽었습니다 — 맞는지 확인하세요` });
+    });
   }
   function stCellInner(it) {
     const notes = rowNotes(it);
@@ -657,10 +758,12 @@
   function rowClass(it) {
     const c = [];
     if (it === ACTIVE) c.push('sel');
+    if (it && it.kind === 'complete') { if (it.item.paid || !it.item.hasCapture) c.push('bad'); return c.join(' '); }
     if (!_blank(it) && it.ver === it.done && !it.parsing) {
       // 상품 안 고름은 줄 전체를 빨갛게 칠하지 않는다(10줄을 붙이자마자 표 전체가 빨개진다) — 상품 칸 테두리 + 확인 칸 빨간 글자로 충분
       if (!it.ok || it.netErr || (it.productWarn || []).length) c.push('bad');
-      else if ((it.repairs || []).length || it.aiRepaired || capNameMismatch(it)) c.push('fix');
+      else if ((it.repairs || []).length || it.aiRepaired || capNameMismatch(it)
+        || (_isDual() && it.ok && (dualSumDiff(it) || CHS.some(([ch]) => capNameMismatch(it, it.dual[ch]))))) c.push('fix');
     }
     return c.join(' ');
   }
@@ -688,7 +791,8 @@
       const shown = key === 'price' && v != null && v !== '' ? Number(v).toLocaleString('ko-KR') : (v == null ? '' : v);
       const extra = key === 'reviewerName' && f.isSubAccount ? '<span class="mo-tag" title="리뷰어와 수취인이 달라 타계정 참여로 처리합니다">타계정</span>' : '';
       const cls = 'mo-in' + (opt && opt.num ? ' num' : '');
-      const inp = `<input class="${cls}" id="moF-${it.uid}-${key}" value="${esc(shown)}" title="${esc(shown)}" aria-label="${i + 1}번 줄 ${esc(opt && opt.label || key)}"
+      const ph = key === 'price' && _isDual() ? ' placeholder="대조용"' : '';
+      const inp = `<input class="${cls}" id="moF-${it.uid}-${key}" value="${esc(shown)}" title="${esc(shown)}"${ph} aria-label="${i + 1}번 줄 ${esc(opt && opt.label || key)}"
         oninput="ManualOrder.edit(${i},'${key}',this.value)" onfocus="ManualOrder.selectRow(${i})" onkeydown="ManualOrder.keyNav(event,${i})">`;
       return `<td${opt && opt.num ? ' class="r"' : ''}>${extra ? `<div class="mo-cellf">${inp}${extra}</div>` : inp}</td>`;
     };
@@ -715,6 +819,57 @@
     }
     return `<td><div class="mo-cellf"><div class="mo-cap empty" id="moCap-${it.uid}" tabindex="0" title="이 줄을 고른 뒤 Ctrl+V · 끌어다 놓기 · 클립 단추"
         onpaste="ManualOrder.onPaste(event,${i})" onfocus="ManualOrder.selectRow(${i})"><i class="fa-regular fa-image" aria-hidden="true"></i><span class="k">Ctrl+V</span></div>${pick}</div></td>`;
+  }
+  // ── 동시진행 구매처 칸(결정 349 화면) — 칸 id 는 moF-<줄>-<구매처>_<항목> (위아래 화살표·다시 그릴 때 포커스 유지가 같은 규칙을 쓴다) ──
+  /** 구매처 주문번호·금액 입력칸. opt.kept = 보완 목록의 기존 값(비우면 기존 값을 그대로 쓴다) */
+  function dualInCell(ch, key, opt) {
+    return (it, i) => {
+      const fresh = !(it.kind === 'complete');
+      if ((fresh && (_blank(it) || !it.ok)) || (opt && opt.off && opt.off(it, ch))) return `<td class="${key === 'orderNum' ? 'chs' : ''}"></td>`;
+      const sl = it.dual[ch];
+      const nm = ch === 'naver' ? '네이버' : '쿠팡';
+      const v = key === 'paidAmount' ? (_amtOk(sl.paidAmount) ? sl.paidAmount.toLocaleString('ko-KR') : '') : (sl.orderNum || '');
+      const kept = opt && opt.kept && opt.kept(it, ch, key);
+      const need = !v && !kept;
+      const ph = kept ? (key === 'paidAmount' && _amtOk(it.item && it.item.price) ? it.item.price.toLocaleString('ko-KR') : '기존 값') : (key === 'orderNum' ? '주문번호' : '금액');
+      const cls = 'mo-in' + (key === 'paidAmount' ? ' num' : '') + (need ? ' miss' : '') + (sl.auto && sl.auto[key] ? ' fixv' : '');
+      return `<td class="${key === 'orderNum' ? 'chs' : 'r'}"><input class="${cls}" id="moF-${it.uid}-${ch}_${key}" value="${esc(v)}" title="${esc(v || (kept ? '비워 두면 기존 주문의 값을 그대로 씁니다' : ''))}"
+        placeholder="${ph}" aria-label="${i + 1}번 줄 ${nm} ${key === 'orderNum' ? '주문번호' : '금액'}" inputmode="${key === 'paidAmount' ? 'numeric' : 'text'}" autocomplete="off" spellcheck="false"
+        oninput="ManualOrder.dualEdit(${i},'${ch}','${key}',this.value)" onfocus="ManualOrder.selectRow(${i},'${ch}')" onkeydown="ManualOrder.keyNav(event,${i})"></td>`;
+    };
+  }
+  /** 구매처 캡처 칸 — 그 칸을 고른 뒤 Ctrl+V · 그 칸에 끌어다 놓기 · 클립. 어느 길이든 이 줄 · 이 구매처에만 붙는다 */
+  function dualCapCell(ch, opt) {
+    return (it, i) => {
+      const nm = ch === 'naver' ? '네이버' : '쿠팡';
+      const sl = it.dual[ch];
+      const td = `<td ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="ManualOrder.onDrop(event,${i},'${ch}')">`;
+      if (opt && opt.kept && opt.kept(it, ch, 'capture')) {
+        return `<td><div class="mo-cap old" title="이미 올린 구매캡처 1장을 그대로 씁니다"><i class="fa-regular fa-image" aria-hidden="true"></i><span class="k">기존 1장</span></div></td>`;
+      }
+      if (opt && opt.off && opt.off(it, ch)) return '<td></td>';
+      const pick = `<label class="mo-ib" title="${i + 1}번 줄 ${nm} 캡처 파일 선택" aria-label="${i + 1}번 줄 ${nm} 캡처 파일 선택"><i class="fa-solid fa-paperclip" aria-hidden="true"></i><input type="file" accept="image/*"
+          onchange="ManualOrder.onFile(event,${i},'${ch}')"></label>`;
+      if (sl.capBusy) return `${td}<div class="mo-cap"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i><span class="k">줄이는 중</span></div></td>`;
+      if (sl.capture) {
+        const reading = !!sl.extractPending;
+        return `${td}<div class="mo-cellf"><div class="mo-cap" id="moCap-${it.uid}-${ch}" tabindex="0" title="${reading ? '캡처 읽는 중' : `이 줄의 ${nm} 구매캡처 — 눌러 고른 뒤 Ctrl+V 하면 바뀝니다`}"
+            onpaste="ManualOrder.onPaste(event,${i},'${ch}')" onfocus="ManualOrder.selectRow(${i},'${ch}')"><img src="data:${sl.capture.mime};base64,${sl.capture.base64}" alt="${i + 1}번 줄 ${nm} 캡처">${reading ? '<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>' : ''}</div>
+          <button type="button" class="mo-ib" title="${nm} 캡처 빼기" aria-label="${i + 1}번 줄 ${nm} 캡처 빼기" onclick="ManualOrder.uncap(${i},'${ch}')"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div></td>`;
+      }
+      return `${td}<div class="mo-cellf"><div class="mo-cap empty" id="moCap-${it.uid}-${ch}" tabindex="0" title="이 칸을 누른 뒤 Ctrl+V · 이 칸에 끌어다 놓기 · 클립 단추 — ${nm} 캡처만 이 칸에 붙습니다"
+          onpaste="ManualOrder.onPaste(event,${i},'${ch}')" onfocus="ManualOrder.selectRow(${i},'${ch}')"><i class="fa-regular fa-image" aria-hidden="true"></i><span class="k">캡처</span></div>${pick}</div></td>`;
+    };
+  }
+  /** 구매처 칸 3개(주문번호·금액·캡처) — 머리 묶음(grp)으로 「네이버」「쿠팡」을 위에 한 번 쓴다 */
+  function dualCols(opt) {
+    const L = [];
+    CHS.forEach(([c, nm]) => {
+      L.push({ k: c + '_on', label: '주문번호', w: 120, grp: nm, grpN: 3, cls: 'chs', cell: dualInCell(c, 'orderNum', opt) });
+      L.push({ k: c + '_amt', label: '금액', w: 72, grp: nm, cls: 'r', cell: dualInCell(c, 'paidAmount', opt) });
+      L.push({ k: c + '_cap', label: '캡처', w: 80, grp: nm, cell: dualCapCell(c, opt) });
+    });
+    return L;
   }
   function appCell(it, i) {
     if (_blank(it) || !it.ok) return '<td></td>';
@@ -901,6 +1056,7 @@
   }
 
   function cols() {
+    if (_isDual()) return dualTableCols();
     const L = [
       { k: 'no', label: '', w: 30, cls: 'stk r', cell: (it, i) => `<td class="no stk">${i + 1}</td>` },
       { k: 'raw', label: '구매양식 (한 줄 = 한 사람)', w: 124, cls: 'stk2', title: '리뷰어/수취인/아이디/전화번호/주소/은행/계좌번호/예금주/결제금액', cell: rawCell },
@@ -934,9 +1090,51 @@
     return L;
   }
 
+  /** ★ 결정 349 화면 — 동시진행 모드 칸. 칸 합이 PC 창(1392px)보다 넓다(구매처 칸 6개) → 표는 옆으로 밀고 번호·양식(왼쪽)·확인(오른쪽)은 고정.
+   *  연락처 118·계좌 128·아이디 74 는 일반 모드와 같은 폭(줄이면 값이 잘린다) — 늘 잘림 + 마우스 올림인 양식·주소와 리뷰어·연결·은행·예금주 칸에서 덜었다.
+   *  동시진행 모드 폭 상한 = 1600(가드 — 넘으면 밀어야 할 거리가 커진다). 상품 칸은 없다(대리 묶음 입구가 옵션을 받지 않는다). */
+  function dualTableCols() {
+    const L = [
+      { k: 'no', label: '', w: 30, cls: 'stk r', cell: (it, i) => `<td class="no stk">${i + 1}</td>` },
+      { k: 'raw', label: '구매양식 (한 줄 = 한 사람)', w: 96, cls: 'stk2', title: '리뷰어/수취인/아이디/전화번호/주소/은행/계좌번호/예금주/결제금액', cell: rawCell },
+      { k: 'reviewerName', label: '리뷰어', w: 64, cell: fieldCell('reviewerName', { label: '리뷰어' }) },
+      { k: 'link', label: '리뷰어 연결', w: 100, title: '자동(종전) · 기존 리뷰어 검색해서 고르기 · 새로 등록', cell: linkCell },
+      { k: 'recipient', label: '수취인', w: 58, cell: fieldCell('recipient', { label: '수취인' }) },
+      { k: 'userId', label: '아이디', w: 74, cell: fieldCell('userId', { label: '아이디' }) },
+      { k: 'phone', label: '연락처', w: 118, cell: fieldCell('phone', { label: '연락처' }) },
+      { k: 'address', label: '주소', w: 56, cell: fieldCell('address', { label: '주소' }) },
+      { k: 'bank', label: '은행', w: 60, cell: fieldCell('bank', { label: '은행' }) },
+      { k: 'account', label: '계좌번호', w: 128, cell: fieldCell('account', { label: '계좌번호' }) },
+      { k: 'depositor', label: '예금주', w: 56, cell: fieldCell('depositor', { label: '예금주' }) },
+      { k: 'price', label: '양식 금액', w: 70, cls: 'r', title: '두 금액 합과 대조만 합니다(비어 있어도 됨)', cell: fieldCell('price', { label: '양식 금액', num: true }) },
+    ];
+    if (CTX && CTX.campaignId) L.push({ k: 'app', label: '참여 신청', w: 156, cell: appCell });
+    L.push(...dualCols());
+    L.push({ k: 'st', label: '확인', w: 124, cls: 'stkr', cell: (it, i) => {
+      const del = (ROWS.length === 1 || (ROWS[ROWS.length - 1] === it && _blank(it) && !_hasCap(it))) ? ''
+        : `<button type="button" class="mo-ib del" title="${i + 1}번 줄 삭제" aria-label="${i + 1}번 줄 삭제" onclick="ManualOrder.delRow(${i})"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>`;
+      return `<td class="stkr"><div class="mo-stw"><div id="moSt-${it.uid}">${stCellInner(it)}</div>${del}</div></td>`;
+    } });
+    return L;
+  }
+  /** 머리 줄 — 묶음(grp) 칸이 있으면 두 줄(위 = 「네이버」「쿠팡」 · 나머지 칸은 두 줄을 차지) */
+  function headHtml(C) {
+    const th = (c, extra) => `<th class="${c.cls || ''}"${c.title ? ` title="${esc(c.title)}"` : ''}${extra || ''}>${esc(c.label)}</th>`;
+    if (!C.some(c => c.grp)) return `<tr>${C.map(c => th(c)).join('')}</tr>`;
+    const top = [];
+    C.forEach(c => {
+      if (!c.grp) top.push(th(c, ' rowspan="2"'));
+      else if (c.grpN) top.push(`<th class="chs" colspan="${c.grpN}">${esc(c.grp)}</th>`);
+    });
+    return `<tr class="grp">${top.join('')}</tr><tr class="lbl">${C.filter(c => c.grp).map(c => th(c)).join('')}</tr>`;
+  }
+
   function rowHtml(it, i, C) {
+    const dz = _isDual() || it.kind === 'complete'   // 동시진행·보완: 줄 전체가 아니라 구매처 캡처 칸이 받는다(줄에 놓으면 안내만 — 브라우저가 사진을 열지 않게 막음)
+      ? `ondragover="event.preventDefault()" ondrop="ManualOrder.onDrop(event,${i})"`
+      : `ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="ManualOrder.onDrop(event,${i})"`;
     return `<tr id="moR-${it.uid}" class="${rowClass(it)}" onmousedown="ManualOrder.selectRow(${i})"
-      ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="ManualOrder.onDrop(event,${i})">
+      ${dz}>
       ${C.map(c => c.cell(it, i)).join('')}</tr>`;
   }
 
@@ -956,33 +1154,39 @@
     const okN = done.filter(r => r.ok && !r.netErr).length;
     const badN = done.length - okN;
     const fixN = done.filter(r => (r.repairs || []).length || r.aiRepaired).length;
-    const capN = filled.filter(r => r.capture).length;
-    const nameN = done.filter(r => capNameMismatch(r)).length;
+    const dualM = _isDual();
+    const capN = dualM ? filled.reduce((a, r) => a + CHS.filter(([c]) => r.dual[c].capture).length, 0) : filled.filter(r => r.capture).length;
+    const nameN = done.filter(r => capNameMismatch(r) || (dualM && CHS.some(([c]) => capNameMismatch(r, r.dual[c])))).length;
+    const pend = dualM && Array.isArray(CTX.pending) ? CTX.pending.length : 0;
     const C = cols();
     const total = C.reduce((s, c) => s + c.w, 0);
     const bar = `<div class="mo-bar" role="status">
+        ${dualM ? `<span class="mo-dtag" title="네이버·쿠팡을 한 사람이 각각 구매하는 작업 — 줄마다 두 구매처를 함께 접수합니다">네이버+쿠팡 동시진행</span>` : ''}
+        ${pend ? `<button type="button" class="mo-lnk w" id="moPendLink" onclick="ManualOrder.openComplete()" title="동시진행 전에 수동제출로 들어간 보통 주문(한쪽 금액·캡처 1장) — 빠진 구매처를 넣어 보완합니다">보완 필요 ${pend}건 — 보기</button>` : ''}
         <span class="g"><span class="n">${okN}</span> 정상</span>
         <span class="e"><span class="n">${badN}</span> 오류</span>
         <span class="w" title="슬래시(/)가 빠진 자리를 시스템이 찾아 나눈 줄 — 값이 맞는지 꼭 확인하세요">자동보정 <span class="n">${fixN}</span>건</span>
-        <span>캡처 <span class="n">${capN}</span>/<span class="n">${filled.length}</span></span>
+        <span>캡처 <span class="n">${capN}</span>/<span class="n">${dualM ? filled.length * 2 : filled.length}</span></span>
         ${nameN ? `<span class="w">이름 다름 <span class="n">${nameN}</span></span>` : ''}
         <span class="sp"></span>
-        <span class="hint">줄을 누르고 <kbd>Ctrl</kbd>+<kbd>V</kbd> 하면 그 줄에 캡처가 붙습니다</span>
+        <span class="hint">${dualM ? '네이버·쿠팡 캡처 칸을 누르고 <kbd>Ctrl</kbd>+<kbd>V</kbd> 하면 그 칸에 붙습니다' : '줄을 누르고 <kbd>Ctrl</kbd>+<kbd>V</kbd> 하면 그 줄에 캡처가 붙습니다'}</span>
       </div>`;
     shell(`
       <div class="mo-tw">
-        <table class="mo-tbl" style="min-width:${total}px">
+        <table class="mo-tbl${dualM ? ' dual' : ''}" style="min-width:${total}px">
           <colgroup>${C.map(c => `<col${c.colCls ? ` class="${c.colCls}"` : ''} style="width:${c.w}px">`).join('')}</colgroup>
-          <thead><tr>${C.map(c => `<th class="${c.cls || ''}"${c.title ? ` title="${esc(c.title)}"` : ''}>${esc(c.label)}</th>`).join('')}</tr></thead>
+          <thead>${headHtml(C)}</thead>
           <tbody>${ROWS.map((it, i) => rowHtml(it, i, C)).join('')}</tbody>
         </table>
       </div>
-      <div class="mo-guide">
+      <div class="mo-guide">${dualM ? `
+        <b>네이버+쿠팡 동시진행</b> 작업입니다 — 줄마다 <b>네이버·쿠팡 주문번호·금액·캡처</b>를 모두 넣어야 제출됩니다. 캡처는 그 구매처 칸을 누르고 Ctrl+V · 그 칸에 끌어다 놓기 · 클립 단추<br>
+        양식의 결제금액은 두 금액 합과 <b>대조만</b> 합니다(비어 있어도 됨 · 다르면 주황 경고) · 작업표에는 두 금액의 합이 적힙니다 · 접수된 주문의 명의는 <b>직원 확인 필요</b>로 들어갑니다<br>` : ''}
         순서: <b>리뷰어 / 수취인 / 아이디 / 전화번호 / 주소 / 은행 / 계좌번호 / 예금주 / 결제금액</b> — 여러 줄을 한 번에 붙여넣으면 줄마다 나뉘고, 붙이는 즉시 옆 칸에 나뉜 값이 보입니다<br>
         주소에 슬래시(/)가 있어도 앞뒤 칸이 밀리지 않게 자동으로 주소로 합칩니다 · 리뷰어와 수취인이 다르면 <b>타계정 참여</b>로 처리합니다<br>
         <b>주황</b> = 슬래시가 빠진 자리를 시스템이 찾아 나눈 줄(자동보정 · AI 보정) — 값이 맞는지 꼭 확인하세요 · <b>빨강</b> = 고쳐야 제출됩니다 · 나뉜 칸을 눌러 바로 고칠 수 있습니다<br>
         <b>리뷰어 연결</b> 칸은 기본 「자동」(종전 방식)입니다 — 눌러서 기존 리뷰어를 검색해 고르거나 「새로 등록」으로 바꿀 수 있습니다(이미 등록된 번호를 새로 등록하면 그 줄은 접수되지 않습니다)<br>
-        구매캡처는 <b>줄마다</b> 붙입니다 — 그 줄을 누르고 Ctrl+V · 그 줄에 끌어다 놓기 · 클립 단추. 캡처 속 수취인 이름이 그 줄과 다르면 경고만 띄웁니다${CTX.campaignId ? `<br>
+        ${dualM ? '' : '구매캡처는 <b>줄마다</b> 붙입니다 — 그 줄을 누르고 Ctrl+V · 그 줄에 끌어다 놓기 · 클립 단추. '}캡처 속 수취인 이름이 그 줄과 다르면 경고만 띄웁니다${CTX.campaignId ? `<br>
         참여형 공고에서 기존 신청이 보이면 <b>확정할 신청을 반드시 선택</b>하세요. 전화번호만으로 새 신청을 자동 확정하지 않습니다` : ''}${OPTS.length >= 2 ? `<br>
         이 작업은 상품이 ${OPTS.length}개입니다 — <b>줄마다 상품을 골라야</b> 제출됩니다. 고른 상품이 작업표 「상품」 칸과 그 상품의 사용 수에 그대로 들어갑니다 ·
         이미 찬 상품은 막지 않고 <b>확인 체크</b>를 받습니다 — 이미 구매가 끝난 건이라 기록이 비는 것보다 낫기 때문입니다` : ''}
@@ -1003,13 +1207,18 @@
   }
   /** 표를 다시 그린다 — 한글 조합 중이면 조합이 끝난 뒤로 미룬다 · 결과 화면이면 건드리지 않는다 */
   function paint() {
-    if (!CTX || CTX.view !== 'table') return;
+    if (!CTX || (CTX.view !== 'table' && CTX.view !== 'complete')) return;
     if (IME) { PAINT_LATER = true; return; }
-    renderPreview();
+    if (CTX.view === 'complete') renderComplete(); else renderPreview();
   }
 
   /** 줄 고르기 — Ctrl+V 사진이 들어갈 줄. 표를 다시 그리지 않고 표시만 옮긴다(입력 중 커서 유지). */
-  function selectRow(i) { const row = ROWS[i]; if (row) select(row); }
+  function selectRow(i, ch) {
+    const row = _rowAt(i); if (!row) return;
+    // ★ 결정 349 화면: 구매처 칸(주문번호·금액·캡처)을 누르면 그 구매처를 고른다 — 다른 칸을 누르면 풀린다(Ctrl+V 사진을 짐작해 붙이지 않게)
+    ACTIVE_CH = ch === 'naver' || ch === 'coupang' ? ch : null;
+    select(row);
+  }
   function select(row) {
     if (ACTIVE === row) return;
     const prev = ACTIVE; ACTIVE = row;
@@ -1024,7 +1233,7 @@
     if (!ev || ev.isComposing) return;
     const d = ev.key === 'ArrowDown' || ev.key === 'Enter' ? 1 : ev.key === 'ArrowUp' ? -1 : 0;
     if (!d) return;
-    const to = ROWS[i + d]; if (!to) return;
+    const to = _rowAt(i + d); if (!to) return;
     const id = (ev.target && ev.target.id) || '';
     const m = /^mo(Raw|F)-\d+(-\w+)?$/.exec(id); if (!m) return;
     const el = document.getElementById(m[1] === 'Raw' ? 'moRaw-' + to.uid : 'moF-' + to.uid + m[2]);
@@ -1113,7 +1322,7 @@
     //   여전히 '정상'으로 남아 빈 주소·빈 계좌인 채로 제출된다(서버 최소검증은 수취인·전화만 본다).
     const f = it.fields;
     const pd = String(f.phone || '').replace(/[^0-9]/g, '');
-    const missing = REQUIRED.filter(k => !String(f[k] == null ? '' : f[k]).trim());
+    const missing = REQUIRED.filter(k => !(k === 'price' && _isDual()) && !String(f[k] == null ? '' : f[k]).trim());   // 동시진행: 양식 금액은 대조용(비어도 됨)
     const bad = missing.length > 0 || (pd.length !== 11 && pd.length !== 10);
     if (key === 'phone' && _linkPhoneGuard(it)) { const b = document.getElementById('moLk-' + it.uid); if (b && b.parentNode) b.parentNode.innerHTML = linkCell(it, i).replace(/^<td>|<\/td>$/g, ''); }
     it.ok = !bad;
@@ -1140,50 +1349,64 @@
     if (!out.length && cd && cd.files) for (const f of Array.from(cd.files)) if (f && f.type && f.type.indexOf('image/') === 0) out.push(f);
     return out;
   }
-  /** 한 줄에 사진을 넣는 길은 이 한 곳 — 한 줄 = 캡처 한 장(여러 장이면 첫 장만, 나머지는 버리고 알린다) */
-  function takeImages(row, files) {
+  /** 한 줄에 사진을 넣는 길은 이 한 곳 — 한 줄 = 캡처 한 장(여러 장이면 첫 장만, 나머지는 버리고 알린다).
+   *  ch = 동시진행 구매처 칸('naver'|'coupang') — 그 칸에만 붙는다. 동시진행 모드에서 칸 없이 오면 붙이지 않고 알린다. */
+  function takeImages(row, files, ch) {
     const imgs = Array.from(files || []).filter(f => f && f.type && f.type.indexOf('image/') === 0);
-    if (!imgs.length || !row || ROWS.indexOf(row) < 0) return;
-    if (imgs.length > 1) _toast('한 줄에 캡처 한 장 — 첫 장만 ' + (ROWS.indexOf(row) + 1) + '번 줄에 붙였습니다');
-    attach(row, imgs[0]);
+    const list = row && row.kind === 'complete' ? CROWS : ROWS;
+    if (!imgs.length || !row || list.indexOf(row) < 0) return;
+    const n = list.indexOf(row) + 1;
+    const dualRow = row.kind === 'complete' || _isDual();
+    if (dualRow && ch !== 'naver' && ch !== 'coupang') { _toast(n + '번 줄의 네이버 또는 쿠팡 캡처 칸을 골라 붙여 넣으세요'); return; }
+    if (row.kind === 'complete' && (!row.base || row.base === ch)) {   // 보완: 기존 쪽은 기존 캡처를 그대로 쓴다 · 기존 쪽을 먼저 고른다
+      _toast(row.base ? n + '번 줄 ' + (ch === 'naver' ? '네이버' : '쿠팡') + '는 기존 캡처를 그대로 씁니다' : n + '번 줄의 「기존 주문은」 칸을 먼저 고르세요'); return;
+    }
+    if (imgs.length > 1) _toast('한 칸에 캡처 한 장 — 첫 장만 ' + n + '번 줄' + (dualRow ? ' ' + (ch === 'naver' ? '네이버' : '쿠팡') : '') + '에 붙였습니다');
+    attach(row, imgs[0], dualRow ? ch : null);
   }
-  function onPaste(ev, i) {
+  function onPaste(ev, i, ch) {
     const imgs = _imagesFrom(ev.clipboardData);
     if (!imgs.length) return;
     ev.preventDefault();
-    const row = ROWS[i]; if (!row) return;
+    const row = _rowAt(i); if (!row) return;
+    ACTIVE_CH = ch || null;
     select(row);
-    takeImages(row, imgs);
+    takeImages(row, imgs, ch);
   }
-  function onFile(ev, i) {
+  function onFile(ev, i, ch) {
     const files = (ev.target && ev.target.files) || [];
-    const row = ROWS[i];
-    if (row) { select(row); takeImages(row, files); }
+    const row = _rowAt(i);
+    if (row) { ACTIVE_CH = ch || null; select(row); takeImages(row, files, ch); }
     try { ev.target.value = ''; } catch (_) {}
   }
-  function onDrop(ev, i) {
+  function onDrop(ev, i, ch) {
     ev.preventDefault();
+    if (ch && typeof ev.stopPropagation === 'function') ev.stopPropagation();   // 칸에 놓은 것을 줄(tr)이 다시 받지 않게
     try { if (ev.currentTarget && ev.currentTarget.classList) ev.currentTarget.classList.remove('over'); } catch (_) {}
-    const row = ROWS[i]; if (!row) return;
+    const row = _rowAt(i); if (!row) return;
+    if (ch) ACTIVE_CH = ch;
     select(row);
-    takeImages(row, (ev.dataTransfer && ev.dataTransfer.files) || []);
+    takeImages(row, (ev.dataTransfer && ev.dataTransfer.files) || [], ch);
   }
-  function uncap(i) {
-    const row = ROWS[i]; if (!row) return;
-    row.capture = null; row.extract = null; row.extractPending = null; row.productWarn = null;
+  function uncap(i, ch) {
+    const row = _rowAt(i); if (!row) return;
+    const sl = _slotOf(row, ch);
+    sl.capture = null; sl.extract = null; sl.extractPending = null; row.productWarn = null;
+    if (ch && sl.auto) sl.auto = {};
     paint();
   }
   /* ★ 표가 떠 있으면 칸을 따로 누르지 않아도 Ctrl+V 사진은 **고른 줄**로 — 고른 줄이 없으면 받지 않고 알린다(아무 줄에나 붙이지 않는다).
      칸·글자칸이 이미 처리했으면(defaultPrevented) 건너뛴다 · 사진이 없으면 가로채지 않는다(글자 붙여넣기 그대로). */
   document.addEventListener('paste', ev => {
     if (ev.defaultPrevented) return;
-    if (!CTX || CTX.view !== 'table' || !document.getElementById('moOvl')) return;
+    if (!CTX || (CTX.view !== 'table' && CTX.view !== 'complete') || !document.getElementById('moOvl')) return;
     const imgs = _imagesFrom(ev.clipboardData);
     if (!imgs.length) return;
     ev.preventDefault();
-    const row = ACTIVE && ROWS.indexOf(ACTIVE) >= 0 ? ACTIVE : null;
+    const list = CTX.view === 'complete' ? CROWS : ROWS;
+    const row = ACTIVE && list.indexOf(ACTIVE) >= 0 ? ACTIVE : null;
     if (!row) { _toast('캡처를 붙일 줄을 먼저 눌러 고르세요'); return; }
-    takeImages(row, imgs);
+    takeImages(row, imgs, ACTIVE_CH);   // 동시진행 모드는 고른 구매처 칸이 없으면 takeImages 가 안내만 한다
   });
 
   /**
@@ -1239,39 +1462,61 @@
   /** 제출 전에 캡처 줄이기·판독이 끝나기를 기다린다 — 판독 전에 보내면 캡처 글자 근거가 빠진 채 접수된다(결정 236).
    *  최대 25초(넘으면 판독 없이 보낸다 = 종전). */
   async function awaitCaptureReads(rows) {
-    const shrinking = ROWS.filter(r => r && r.capJob).map(r => r.capJob);
+    // 동시진행·보완 줄은 구매처 칸(slot)마다 캡처가 있다 — 줄 자신과 두 칸을 같이 기다린다
+    const slots = list => list.reduce((a, r) => a.concat(r ? [r].concat(r.dual ? CHS.map(([c]) => r.dual[c]) : []) : []), []);
+    const shrinking = slots(ROWS.concat(CROWS)).filter(r => r && r.capJob).map(r => r.capJob);
     if (shrinking.length) await Promise.race([Promise.all(shrinking), sleep(CAPTURE_WAIT_MS)]);
-    const jobs = rows.filter(r => r && r.capture && !r.extract).map(readCapture);
+    const jobs = slots(rows).filter(r => r && r.capture && !r.extract).map(readCapture);
     if (!jobs.length) return;
     await Promise.race([Promise.all(jobs), sleep(CAPTURE_WAIT_MS)]);
   }
-  /** 이 줄에만 캡처를 붙인다(i = 줄 번호 또는 줄 객체). 사진을 줄이는 동안 줄을 지우면 버린다. */
-  function attach(i, file) {
-    const row = typeof i === 'number' ? ROWS[i] : i; if (!row) return;
-    row.capBusy = true;
+  /** 이 줄에만 캡처를 붙인다(i = 줄 번호 또는 줄 객체). 사진을 줄이는 동안 줄을 지우면 버린다.
+   *  ch = 동시진행 구매처 칸 — 그 칸(slot)에만 붙고, 캡처에서 읽은 주문번호·금액은 빈 칸에만 넣고 주황으로 드러낸다(숨은 보정 금지). */
+  function attach(i, file, ch) {
+    const row = typeof i === 'number' ? _rowAt(i) : i; if (!row) return;
+    const list = row.kind === 'complete' ? CROWS : ROWS;
+    const sl = _slotOf(row, ch);
+    sl.capBusy = true;
     paint();
     const job = (async () => {
       const shrunk = await shrink(file);
-      if (row.capJob === job) { row.capBusy = false; row.capJob = null; }
-      if (ROWS.indexOf(row) < 0 || !CTX) return;   // 그사이 줄을 지웠거나 창을 닫았다
+      if (sl.capJob === job) { sl.capBusy = false; sl.capJob = null; }
+      if (list.indexOf(row) < 0 || !CTX) return;   // 그사이 줄을 지웠거나 창을 닫았다
       if (!shrunk || !shrunk.base64) { alert('이미지를 읽지 못했습니다.'); paint(); return; }
       const b64 = shrunk.base64;
-      row.capture = { base64: b64, mime: shrunk.mime };
+      sl.capture = { base64: b64, mime: shrunk.mime };
       row.productWarn = null;   // 캡처가 바뀌면 상품 확인 이유도 다시 판정한다(결정 236)
-      row.extract = null; row.extractPending = null;
-      ensureTail();
+      sl.extract = null; sl.extractPending = null;
+      if (list === ROWS) ensureTail();
       paint();
       // 캡처에서 수취인·주문번호 등 자동 인식(실패해도 첨부는 유지) — 이름이 다르면 경고만(제출은 막지 않는다)
-      const p = readCapture(row);
+      const p = readCapture(sl);
       paint();
       await p;
-      if (row.extract && row.capture && row.capture.base64 === b64) {
-        if (row.extract.orderNumber && row.fields && !row.fields.orderNum) row.fields.orderNum = row.extract.orderNumber;
+      if (sl.extract && sl.capture && sl.capture.base64 === b64) {
+        if (ch) {
+          const ex = sl.extract;
+          if (ex.orderNumber && !String(sl.orderNum || '').trim()) { sl.orderNum = String(ex.orderNumber); sl.auto.orderNum = true; }
+          const amt = parseInt(String(ex.price == null ? '' : ex.price).replace(/[^0-9]/g, ''), 10);
+          if (!_amtOk(sl.paidAmount) && Number.isSafeInteger(amt) && amt > 0) { sl.paidAmount = amt; sl.auto.paidAmount = true; }
+        } else if (row.extract.orderNumber && row.fields && !row.fields.orderNum) row.fields.orderNum = row.extract.orderNumber;
       }
       paint();
     })();
-    row.capJob = job;
+    sl.capJob = job;
     return job;
+  }
+  /** ★ 결정 349 화면: 구매처 칸 주문번호·금액 고치기 — 표는 다시 그리지 않는다(입력 중 커서 유지). 고치면 「캡처에서 읽음」 표시는 내린다. */
+  function dualEdit(i, ch, key, val) {
+    const row = _rowAt(i); if (!row || !row.dual || !row.dual[ch]) return;
+    const sl = row.dual[ch];
+    if (key === 'paidAmount') { const d = String(val == null ? '' : val).replace(/[^0-9]/g, ''); sl.paidAmount = d ? parseInt(d, 10) : null; }
+    else if (key === 'orderNum') sl.orderNum = String(val == null ? '' : val).trim();
+    else return;
+    if (sl.auto) sl.auto[key] = false;
+    const el = document.getElementById('moF-' + row.uid + '-' + ch + '_' + key);
+    if (el && el.classList) { el.classList.remove('fixv'); el.classList.toggle('miss', !String(val || '').trim() && !(row.kind === 'complete' && _cKept(row, ch, key))); }
+    _refreshRow(row);
   }
 
   // ── 제출 ──────────────────────────────────────────────────
@@ -1280,6 +1525,8 @@
     closeLink();
     await flush();   // 막 붙여넣은 줄이 아직 나뉘는 중이면 끝까지 기다린다(옛 값으로 보내지 않는다)
     if (!CTX) return;
+    if (CTX.view === 'complete') return submitComplete();
+    if (_isDual()) return submitDual();   // ★ 결정 349 화면: 동시진행은 대리 묶음 입구로만(일반 /submit 은 서버가 거절 — 결정 344)
     const targets = ROWS.map((r, i) => ({ r, i })).filter(x => submittable(x.r));
     if (!targets.length) return;
     // ★ 결정 348: 리뷰어 연결 방식별 건수를 확인창에 보여 준다(기존 고르기·새로 등록을 고른 줄이 있을 때만)
@@ -1494,6 +1741,232 @@
     renderResult(out, _refreshed);
   }
 
+  // ── 동시진행 대리 묶음 제출 · 보완(결정 349 화면) ───────────────────────────────
+  const _chBody = (sl, withImg) => Object.assign({ orderNum: String(sl.orderNum || '').trim(), paidAmount: sl.paidAmount },
+    withImg && sl.capture ? { imageBase64: sl.capture.base64, mimeType: sl.capture.mime } : {});
+  /** 확인이 필요한 거절(같은 구매 의심 · 재참여 기간 · 오늘 정원 · 캡처 금액 차이)을 사람에게 묻고 같은 줄만 다시 보낸다.
+   *  서버는 거절할 때 쓰기 0 이다(중복·재참여·정원은 저장 전 판정 · 캡처 금액은 저장 전 검사). 같은 확인은 한 줄에 한 번만. */
+  async function _postWithConfirms(name, send, G) {
+    const f = { force: false, allowRepurchase: false, ack: false };
+    let r;
+    for (let g = 0; g < 5; g++) {
+      try { r = await send(f, G); } catch (e) { r = { ok: false, error: (e && e.message) || '서버에 연결하지 못했습니다' }; }
+      if (!r || r.ok) break;
+      if (r.overDaily && !G.daily) {
+        const q = r.quota || {};
+        if (!confirm(`오늘 모집인원을 넘겨 기록됩니다(오늘 정원 ${q.quota}명 · 접수 ${q.todayCount}명).\n이미 구매가 끝난 건이라 접수를 미뤄도 구매는 취소되지 않습니다.\n[확인] 초과 상태로 기록 · [취소] ${name} 님은 접수하지 않습니다.`)) break;
+        G.daily = true; continue;
+      }
+      if (r.duplicate && !f.force) {
+        if (!confirm(`${name}: ${r.error || '이미 접수된 구매와 겹칩니다'}\n같은 구매를 두 번 등록하면 한 구매가 두 명으로 세어집니다.\n[확인] 다른 구매가 맞으니 따로 접수 · [취소] 접수하지 않습니다.`)) break;
+        f.force = true; f.allowRepurchase = true; continue;
+      }
+      if (r.repurchaseBlocked && !f.allowRepurchase) {
+        if (!confirm(`${name}: ${r.error || '최근 참여한 연락처입니다'}\n[확인] 다른 사람이 맞으니 강제 접수 · [취소] 접수하지 않습니다.`)) break;
+        f.allowRepurchase = true; continue;
+      }
+      if (r.code === 'CAPTURE_PRICE_DIFF' && !f.ack) {
+        if (!confirm(`${name}: ${r.error || '넣은 금액이 공고 금액과 다릅니다'}\n[확인] 확인했고 그대로 접수(담당자 확인 기록) · [취소] 접수하지 않습니다.`)) break;
+        f.ack = true; continue;
+      }
+      break;
+    }
+    return r || { ok: false, error: '오류' };
+  }
+  function _dualLinkWarn(res, want) {
+    if (res && res.ok && !res.idempotent && want !== 'auto' && res.reviewerLinkApplied !== want) {
+      (res.warnings = res.warnings || []).push(`리뷰어 연결(${want === 'existing' ? '기존 고르기' : '새로 등록'})이 서버에 반영되지 않아 자동으로 처리됐습니다 — 등록리뷰어DB에서 연결을 확인해 주세요`);
+    }
+  }
+  /** 동시진행 모드 제출 — 줄마다 POST …/dual/submit (두 구매처 사진을 함께 보낸다 · 별도 업로드 단계 없음) */
+  async function submitDual() {
+    const targets = ROWS.map((r, i) => ({ r, i })).filter(x => submittable(x.r));
+    if (!targets.length) return;
+    const _lk = m => targets.filter(x => ((x.r.link && x.r.link.mode) || 'auto') === m).length;
+    const _lkMsg = (_lk('existing') || _lk('new')) ? `리뷰어 연결 — 자동 ${_lk('auto')} · 기존 고르기 ${_lk('existing')} · 새로 등록 ${_lk('new')}` : '리뷰어 자동 등록';
+    if (!confirm(`${targets.length}건을 네이버·쿠팡 묶음으로 제출합니다.\n${_lkMsg}이 함께 진행되고, 명의는 직원 확인 필요로 접수됩니다.`)) return;
+    BUSY = true;
+    const btn = document.getElementById('moSubmit');
+    if (btn) { btn.disabled = true; btn.textContent = '캡처 읽는 중…'; }
+    await awaitCaptureReads(targets.map(x => x.r));
+    const G = { daily: false };
+    const results = [];
+    for (let k = 0; k < targets.length; k++) {
+      if (!CTX) return;
+      const r0 = targets[k].r;
+      if (btn) btn.textContent = `제출 중… ${k + 1}/${targets.length}`;
+      const want = (r0.link && r0.link.mode) || 'auto';
+      const res = await _postWithConfirms(r0.fields.recipient || '', (f, g) => api(_moBase() + '/dual/submit', { method: 'POST', body: JSON.stringify({
+        sheetId: CTX.sheetId, tabName: CTX.tabName, gid: CTX.gid || '', campaignId: CTX.campaignId || null,
+        fields: r0.fields,
+        naver: Object.assign(_chBody(r0.dual.naver, true), f.ack ? { capturePriceAck: true } : {}),
+        coupang: Object.assign(_chBody(r0.dual.coupang, true), f.ack ? { capturePriceAck: true } : {}),
+        targetApplicationId: r0.targetApplicationId || null,
+        force: f.force, allowRepurchase: f.allowRepurchase, allowOverDaily: g.daily,
+        reviewerLink: { mode: want, reviewerId: (r0.link && r0.link.reviewerId) || '' },
+      }) }), G);
+      const out1 = Object.assign({}, res, { index: k, name: r0.fields.recipient || '', dual: true });
+      _dualLinkWarn(out1, want);
+      results.push(out1);
+    }
+    if (!CTX) return;
+    const okRows = new Set(results.filter(r => r.ok).map(r => targets[r.index].r));
+    CTX.retry = ROWS.filter(r => !okRows.has(r) && !_blank(r));
+    const out = { ok: true, okCount: results.filter(r => r.ok).length, results };
+    out.failCount = results.length - out.okCount;
+    let _refreshed = false;
+    try { if (out.okCount > 0 && typeof CTX.onSubmitted === 'function') { _refreshed = true; CTX.onSubmitted(out); } } catch (_) {}
+    BUSY = false;
+    renderResult(out, true);
+  }
+
+  /* ── 보완 목록(결정 349 ③) — 동시진행 전에 수동제출로 들어간 보통 주문(한쪽 금액·캡처 1장) ──
+     기존 쪽(네이버/쿠팡)을 고르면 그 쪽은 기존 값·기존 캡처를 그대로 쓰고(비워 두면 기존 값), 빠진 쪽 주문번호·금액·캡처를 넣는다. */
+  function openComplete() {
+    if (!CTX || !Array.isArray(CTX.pending)) return;
+    closeLink();
+    const prev = new Map(CROWS.map(r => [r.item.orderSubmissionId, r]));
+    CROWS = CTX.pending.map(it => prev.get(it.orderSubmissionId) || { kind: 'complete', uid: ++SEQ, item: it, base: '',
+      dual: { naver: _slot(), coupang: _slot() }, ok: true, fields: { recipient: it.name } });
+    CTX.view = 'complete'; ACTIVE = null; ACTIVE_CH = null;
+    renderComplete();
+  }
+  function backToTable() { if (!CTX) return; CTX.view = 'table'; ACTIVE = null; ACTIVE_CH = null; renderPreview(); }
+  /** 기존 쪽으로 고른 구매처의 칸은 기존 값을 쓸 수 있다(주문번호는 기존 주문에 있을 때만 · 금액은 늘 · 캡처는 늘) */
+  function _cKept(row, ch, key) {
+    if (!row || row.kind !== 'complete' || row.base !== ch) return false;
+    if (key === 'orderNum') return !!row.item.hasOrderNum;
+    return key === 'paidAmount' || key === 'capture';
+  }
+  const _cOpt = row => Object.fromEntries(CHS.map(([c]) => [c, { orderNumKept: _cKept(row, c, 'orderNum'), capKept: _cKept(row, c, 'capture') }]));
+  function _cBaseAmount(row) { const sl = row.base && row.dual[row.base]; return sl && _amtOk(sl.paidAmount) ? sl.paidAmount : row.item.price; }
+  const cSubmittable = row => !!(row && row.kind === 'complete' && !row.item.paid && row.item.hasCapture && row.base
+    && CHS.every(([c]) => {
+      const m = _slotMissing(row.dual[c], _cOpt(row)[c]).filter(x => !(x === '금액' && _cKept(row, c, 'paidAmount') && _amtOk(row.item.price)));
+      return !m.length;
+    }));
+  function completeNotes(row) {
+    const it = row.item, out = [];
+    if (it.paid) return [{ k: 'e', t: '이미 입금 회차에 담긴 주문이라 보완할 수 없습니다 — 담당자가 따로 처리해 주세요' }];
+    if (!it.hasCapture) return [{ k: 'e', t: '기존 주문에 구매캡처가 없습니다 — 두 구매처 캡처가 모두 필요합니다(이 화면에서는 보완할 수 없음)' }];
+    if (!row.base) return [{ k: 'e', t: '기존 주문(금액·캡처)이 네이버인지 쿠팡인지 고르세요' }];
+    const miss = CHS.map(([c, nm]) => {
+      const m = _slotMissing(row.dual[c], _cOpt(row)[c]).filter(x => !(x === '금액' && _cKept(row, c, 'paidAmount') && _amtOk(it.price)));
+      return m.length ? nm + ' ' + m.join('·') : '';
+    }).filter(Boolean);
+    if (miss.length) out.push({ k: 'e', t: miss.join(' / ') + ' 필요' });
+    CHS.forEach(([c, nm]) => {
+      const sl = row.dual[c];
+      const a = Object.keys(sl.auto || {}).filter(k => sl.auto[k]).map(k => k === 'orderNum' ? '주문번호' : '금액');
+      if (a.length) out.push({ k: 'w', t: `${nm} ${a.join('·')}는 캡처에서 읽었습니다 — 맞는지 확인하세요` });
+    });
+    if (!out.length) {
+      const other = CHS.find(([c]) => c !== row.base);
+      const sum = _cBaseAmount(row) + (row.dual[other[0]].paidAmount || 0);
+      out.push({ k: 'g', t: `보완 가능 · 합계 ${sum.toLocaleString('ko-KR')}원` });
+    }
+    return out;
+  }
+  function pickBase(k, ch) {
+    const row = CROWS[k]; if (!row) return;
+    row.base = row.base === ch ? '' : ch;
+    renderComplete();
+  }
+  function syncCompleteBtn(btn) {
+    const n = CROWS.filter(cSubmittable).length;
+    if (!BUSY) { btn.disabled = !n; btn.textContent = n + '건 보완'; }
+    const tip = document.getElementById('moOptTip');
+    const left = CROWS.filter(r => !r.item.paid && r.item.hasCapture && !cSubmittable(r)).length;
+    if (tip) tip.textContent = left ? `입력이 덜 된 줄 ${left}개는 보완되지 않습니다` : '';
+  }
+  function renderComplete() {
+    if (!CTX) return;
+    CTX.view = 'complete';
+    const ae = document.activeElement;
+    const keepEl = ae && ae.tagName === 'INPUT' && ae.id && /^moF-/.test(ae.id) ? ae : null;
+    const bd0 = document.getElementById('moBd');
+    const scroll = bd0 ? { t: bd0.scrollTop, l: bd0.scrollLeft } : null;
+    const opt = { kept: (row, ch, key) => _cKept(row, ch, key), off: row => !row.base || row.item.paid || !row.item.hasCapture };
+    const C = [
+      { k: 'no', label: '', w: 30, cls: 'stk r', cell: (r, i) => `<td class="no stk">${i + 1}</td>` },
+      { k: 'row', label: '작업표 줄', w: 64, cls: 'r', cell: r => `<td class="r ro">${r.item.row ? r.item.row + '번' : '-'}</td>` },
+      { k: 'name', label: '이름', w: 76, cell: r => `<td class="ro" title="${esc(r.item.name)}">${esc(r.item.name)}</td>` },
+      { k: 'tail', label: '연락처', w: 64, cell: r => `<td class="ro">…${esc(r.item.phoneTail)}</td>` },
+      { k: 'price', label: '기존 금액', w: 80, cls: 'r', title: '수동제출 때 들어간 한쪽 금액', cell: r => `<td class="r ro">${_amtOk(r.item.price) ? r.item.price.toLocaleString('ko-KR') : '-'}</td>` },
+      { k: 'base', label: '기존 주문은', w: 116, title: '이미 들어간 금액·캡처 1장이 어느 구매처 것인지', cell: (r, i) => (r.item.paid || !r.item.hasCapture) ? '<td></td>'
+        : `<td><div class="mo-seg${r.base ? '' : ' need'}" role="group" aria-label="${i + 1}번 줄 기존 주문 구매처">${CHS.map(([c, nm]) =>
+          `<button type="button" class="${r.base === c ? 'on' : ''}" aria-pressed="${r.base === c}" onclick="ManualOrder.pickBase(${i},'${c}')">${nm}</button>`).join('')}</div></td>` },
+      ...dualCols(opt),
+      { k: 'st', label: '확인', w: 172, cls: 'stkr', cell: r => `<td class="stkr"><div class="mo-stw"><div id="moSt-${r.uid}">${stCellInner(r)}</div></div></td>` },
+    ];
+    const total = C.reduce((a, c) => a + c.w, 0);
+    const n = CROWS.length;
+    const bar = `<div class="mo-bar" role="status"><span class="mo-dtag">보완 필요 <span class="n">${n}</span>건</span>
+      <span>동시진행 전에 수동제출로 들어간 보통 주문 — 빠진 구매처를 넣으면 작업표 줄은 그대로 두고 금액을 두 금액 합으로 바꿉니다</span></div>`;
+    shell(`
+      <div class="mo-tw">
+        <table class="mo-tbl dual" style="min-width:${total}px">
+          <colgroup>${C.map(c => `<col style="width:${c.w}px">`).join('')}</colgroup>
+          <thead>${headHtml(C)}</thead>
+          <tbody>${n ? CROWS.map((r, i) => rowHtml(r, i, C)).join('') : `<tr><td colspan="${C.length}" class="ro">보완할 주문이 없습니다</td></tr>`}</tbody>
+        </table>
+      </div>
+      <div class="mo-guide">
+        <b>기존 주문은</b> 칸에서 이미 들어간 금액·캡처 1장이 네이버 것인지 쿠팡 것인지 고르세요 — 그 쪽은 기존 캡처를 그대로 쓰고, 주문번호·금액은 비워 두면 기존 값을 씁니다<br>
+        빠진 쪽의 <b>주문번호·금액·캡처</b>를 넣으면 보완됩니다 · 캡처는 그 칸을 누르고 Ctrl+V · 끌어다 놓기 · 클립 단추 · 보완된 주문의 명의는 <b>직원 확인 필요</b>로 바뀝니다<br>
+        이미 입금 회차에 담긴 주문은 보완하지 않습니다(돈이 이미 움직였습니다)
+      </div>`,
+      `<button type="button" class="mo-btn" onclick="ManualOrder.backToTable()">표로 돌아가기</button><span class="sp"></span>
+       <span class="mo-tip" id="moOptTip" role="status"></span>
+       <button type="button" class="mo-btn pri" id="moSubmit" disabled onclick="ManualOrder.submit()">0건 보완</button>`,
+      { bar, keepEl });
+    if (scroll) { const bd = document.getElementById('moBd'); if (bd) { bd.scrollTop = scroll.t; bd.scrollLeft = scroll.l; } }
+    syncSubmitBtn();
+  }
+  /** 보완 제출 — 줄마다 POST …/dual/complete. 기존 쪽은 사진을 보내지 않는다(서버가 기존 캡처를 되읽는다) · 비운 값은 보내지 않는다(기존 값). */
+  async function submitComplete() {
+    const targets = CROWS.map((r, i) => ({ r, i })).filter(x => cSubmittable(x.r));
+    if (!targets.length) return;
+    if (!confirm(`${targets.length}건을 네이버·쿠팡 묶음으로 보완합니다.\n작업표 줄은 그대로 두고 금액을 두 금액 합으로 바꾸며, 명의는 직원 확인 필요로 바뀝니다.`)) return;
+    BUSY = true;
+    const btn = document.getElementById('moSubmit');
+    if (btn) { btn.disabled = true; btn.textContent = '캡처 읽는 중…'; }
+    await awaitCaptureReads(targets.map(x => x.r));
+    const results = [];
+    for (let k = 0; k < targets.length; k++) {
+      if (!CTX) return;
+      const r0 = targets[k].r;
+      if (btn) btn.textContent = `보완 중… ${k + 1}/${targets.length}`;
+      const side = c => {
+        const sl = r0.dual[c];
+        if (c === r0.base) {   // 기존 쪽 — 사진 없음 · 넣은 값만
+          const o = {};
+          if (String(sl.orderNum || '').trim()) o.orderNum = String(sl.orderNum).trim();
+          if (_amtOk(sl.paidAmount)) o.paidAmount = sl.paidAmount;
+          return o;
+        }
+        return _chBody(sl, true);
+      };
+      const res = await _postWithConfirms(r0.item.name, f => api(_moBase() + '/dual/complete', { method: 'POST', body: JSON.stringify({
+        orderSubmissionId: r0.item.orderSubmissionId,
+        naver: Object.assign(side('naver'), f.ack ? { capturePriceAck: true } : {}),
+        coupang: Object.assign(side('coupang'), f.ack ? { capturePriceAck: true } : {}),
+      }) }), { daily: true });
+      results.push(Object.assign({}, res, { index: k, name: r0.item.name, dual: true, completed: true, row: r0.item.row }));
+    }
+    if (!CTX) return;
+    const done = new Set(results.filter(r => r.ok).map(r => targets[r.index].r.item.orderSubmissionId));
+    CROWS = CROWS.filter(r => !done.has(r.item.orderSubmissionId));
+    if (Array.isArray(CTX.pending)) CTX.pending = CTX.pending.filter(it => !done.has(it.orderSubmissionId));
+    const out = { ok: true, okCount: results.filter(r => r.ok).length, results };
+    out.failCount = results.length - out.okCount;
+    try { if (out.okCount > 0 && typeof CTX.onSubmitted === 'function') CTX.onSubmitted(out); } catch (_) {}
+    BUSY = false;
+    CTX.retry = ROWS.filter(r => !_blank(r));   // 보완 결과에서 [계속 입력] = 접수 표를 그대로 되살린다(보완은 표 줄을 건드리지 않았다)
+    renderResult(out, true);
+    loadDual();
+  }
+
   function renderResult(out, refreshed) {
     if (!CTX) return;
     CTX.view = 'result';
@@ -1503,15 +1976,20 @@
         if (r.reviewerLinkApplied === 'existing') bits.push(r.linkedOwner ? `기존 리뷰어 ‘${esc(r.linkedOwner)}’의 타계정으로 연결` : r.linkedReviewer ? `기존 리뷰어 ‘${esc(r.linkedReviewer)}’에 연결` : '기존 리뷰어 연결');   // 결정 348
         else if (r.reviewerLinkApplied === 'new' && r.reviewerRegistered) bits.push('리뷰어 새로 등록됨');
         else if (r.reviewerRegistered) bits.push(r.linkedOwner ? `‘${esc(r.linkedOwner)}’ 리뷰어의 타계정으로 등록` : '리뷰어 자동 등록됨');
+        if (r.dual) {   // ★ 결정 349 화면: 동시진행 대리 묶음 · 보완
+          if (r.idempotent) bits.push('같은 묶음이 이미 접수돼 있어 새로 만들지 않았습니다');
+          else if (Number.isFinite(Number(r.price))) bits.push(`네이버+쿠팡 합계 ${Number(r.price).toLocaleString('ko-KR')}원${r.completed ? '으로 보완' : ''}`);
+          if (r.completed && r.row) bits.push(`작업표 ${Number(r.row)}번 줄 그대로`);
+        }
         if (r.quotaCounted) bits.push('모집인원 1명 차감');
         if (r.captureAttached) bits.push('구매캡쳐 첨부됨');
         // ★ 결정 345 ⑦: 무시트 작업표에 바로 적혔으면 서버가 줄 번호를 준다 — "자동복구 대기"로 잘못 말하지 않는다
-        bits.push(r.worktableRow ? `작업표 ${Number(r.worktableRow)}번 줄에 기록됨` : r.queued ? '시트 기록 예약됨' : '시트 기록은 자동복구 대기');
+        if (!(r.dual && (r.idempotent || r.completed))) bits.push(r.worktableRow ? `작업표 ${Number(r.worktableRow)}번 줄에 기록됨` : r.queued ? '시트 기록 예약됨' : '시트 기록은 자동복구 대기');
         const warn = (r.warnings || []).length
           ? `<div class="w"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> ${(r.warnings || []).map(esc).join(' · ')}</div>` : '';
         return `<div class="mo-res ok"><span class="ci"><i class="fa-solid fa-circle-check" aria-hidden="true"></i></span><div>
-          <div class="t">${esc(r.name || '')} — 접수 완료</div>
-          <div class="s">${bits.join(' · ')}</div>${warn}</div></div>`;
+          <div class="t">${esc(r.name || '')} — ${r.completed ? '보완 완료' : '접수 완료'}</div>
+          <div class="s">${bits.join(' · ')}</div>${r.dual ? '<div class="s">명의 직원 확인 필요 — 동시진행 명의 확인에서 확정해야 지급 대상이 됩니다</div>' : ''}${warn}</div></div>`;
       }
       return `<div class="mo-res no"><span class="ci"><i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i></span><div>
         <div class="t">${esc(r.name || '')} — 실패</div>
@@ -1536,5 +2014,6 @@
     rowInput, rowPaste, rowBlur, pasteLines, flush, ime, selectRow, keyNav, delRow,   // 한 줄 = 한 사람 표
     onPaste, onFile, onDrop, uncap,                                                    // 줄별 캡처 첨부
     openLink, closeLink, linkInput, linkKey, linkPick, linkSet,                        // 리뷰어 연결(결정 348)
+    dualEdit, openComplete, backToTable, pickBase,                                     // 동시진행 대리 묶음 · 보완(결정 349 화면)
   };
 })();

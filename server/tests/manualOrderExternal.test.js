@@ -743,7 +743,7 @@ console.log('\nH. 슬래시 누락 자동 보정');
   const mo = F('js/manual-order.js');
   // 결정 347: 맥 규칙(이모지 금지)으로 그림문자를 뺐다 — 표시는 줄 왼쪽 주황 막대(tr.fix) + 확인 칸 「자동보정: …/AI 보정: …」 주황 글자(의미 불변)
   ok('H24 ★ 보정된 줄은 표에 드러난다(조용한 수정 금지)',
-    /it\.aiRepaired \? 'AI 보정' : \(it\.repairs \|\| \[\]\)\.length \? '자동보정'/.test(mo) && /\(it\.repairs \|\| \[\]\)\.length \|\| it\.aiRepaired \|\| capNameMismatch\(it\)\) c\.push\('fix'\)/.test(mo));
+    /it\.aiRepaired \? 'AI 보정' : \(it\.repairs \|\| \[\]\)\.length \? '자동보정'/.test(mo) && /\(it\.repairs \|\| \[\]\)\.length \|\| it\.aiRepaired \|\| capNameMismatch\(it\)(\s*\|\| \(_isDual\(\)[^\n]*\n?[^\n]*\))?\) c\.push\('fix'\)/.test(mo));   // 결정 349 화면: 동시진행 줄의 금액 합·구매처 캡처 이름 다름도 주황(의미 강화)
   ok('H25 보정 건수를 헤더에 요약', /자동보정 (<span class="n">)?\$\{fixN\}(<\/span>)?건/.test(mo));   // 결정 347: 숫자만 고정폭 글자로 감쌌다(의미 불변)
 }
 
@@ -764,23 +764,25 @@ console.log('\nI. 1단계 캡처 첨부');
   ok('I2 ★ 공용 보관함·이름 자동 배정이 없다(오배정의 뿌리 — 결정 345 P1·P2)',
     !/\bSTAGED\b/.test(mo) && !/distributeStaged/.test(mo) && !mo.includes('id="moStage"') && !mo.includes('id="moDrop"'));
   ok('I3 줄 글칸에 사진을 붙이면 그 줄 캡처로 받는다(관리자는 그냥 Ctrl+V)',
-    mo.includes('onpaste="ManualOrder.rowPaste(event,${i})"') && /function rowPaste\(ev, i\)[\s\S]{0,400}if \(imgs\.length\) \{ ev\.preventDefault\(\); select\(row\); takeImages\(row, imgs\); return; \}/.test(mo));
+    mo.includes('onpaste="ManualOrder.rowPaste(event,${i})"') && /function rowPaste\(ev, i\)[\s\S]{0,400}if \(imgs\.length\) \{\s*ev\.preventDefault\(\); select\(row\);[\s\S]{0,300}?takeImages\(row, imgs\); return;\s*\}/.test(mo)
+    // 결정 349 화면: 동시진행 모드만 구매처를 짐작하지 않고 안내(일반 모드는 종전 그대로 그 줄 캡처)
+    && /if \(_isDual\(\)\) \{ _toast\([^\n]*\); return; \}\s*takeImages\(row, imgs\); return;/.test(mo));
   ok('I4 붙여넣기·끌어놓기·파일선택 3경로 — 전부 그 줄 번호를 들고 온다',
     mo.includes('onpaste="ManualOrder.onPaste(event,${i})"') && mo.includes('ondrop="ManualOrder.onDrop(event,${i})"') && mo.includes('onchange="ManualOrder.onFile(event,${i})"'));
   ok('I5 넣는 길은 한 곳(takeImages → attach) · 한 줄 = 한 장',
     ['onPaste', 'onFile', 'onDrop'].every(fn => { const s = mo.slice(mo.indexOf('function ' + fn + '('), mo.indexOf('\n  }', mo.indexOf('function ' + fn + '('))); return /takeImages\(row, /.test(s); })
-    && /function takeImages\(row, files\)[\s\S]{0,500}attach\(row, imgs\[0\]\);/.test(mo));
-  ok('I6 잘못 넣은 캡처는 뺄 수 있다', /function uncap\(i\)/.test(mo) && mo.includes('ManualOrder.uncap(${i})'));
+    && /function takeImages\(row, files(, ch)?\)[\s\S]{0,1500}attach\(row, imgs\[0\](, dualRow \? ch : null)?\);/.test(mo));   // 결정 349 화면: 구매처 칸(ch)을 함께 넘긴다 — 넣는 길은 여전히 한 곳
+  ok('I6 잘못 넣은 캡처는 뺄 수 있다', /function uncap\(i(, ch)?\)/.test(mo) && mo.includes('ManualOrder.uncap(${i})'));
   ok('I7 줄별 캡처도 업로드 전에 줄인다(413 방지)', /const shrunk = await shrink\(file\);/.test(mo));
   ok('I8 계약에 줄별 첨부 핸들러가 노출된다',
     ['onPaste', 'onFile', 'onDrop', 'uncap', 'selectRow']
       .every(k => new RegExp('window\\.ManualOrder[\\s\\S]{0,600}\\b' + k + '\\b').test(mo)));
   ok('I9 ★ 고른 줄 없이 Ctrl+V 한 사진은 아무 줄에도 붙이지 않는다(알리기만)',
-    /const row = ACTIVE && ROWS\.indexOf\(ACTIVE\) >= 0 \? ACTIVE : null;\s*if \(!row\) \{ _toast\('캡처를 붙일 줄을 먼저 눌러 고르세요'\); return; \}/.test(mo));
-  ok('I10 사진을 줄이는 사이 그 줄을 지우면 버린다(다른 줄로 가지 않는다)', /if \(ROWS\.indexOf\(row\) < 0 \|\| !CTX\) return;   \/\/ 그사이 줄을 지웠거나/.test(mo));
+    /const row = ACTIVE && (ROWS|list)\.indexOf\(ACTIVE\) >= 0 \? ACTIVE : null;\s*if \(!row\) \{ _toast\('캡처를 붙일 줄을 먼저 눌러 고르세요'\); return; \}/.test(mo));   // 결정 349 화면: 보완 목록(CROWS)도 같은 규칙(list)
+  ok('I10 사진을 줄이는 사이 그 줄을 지우면 버린다(다른 줄로 가지 않는다)', /if \((ROWS|list)\.indexOf\(row\) < 0 \|\| !CTX\) return;   \/\/ 그사이 줄을 지웠거나/.test(mo));
   ok('I11 모달을 새로 열면 줄·캡처가 비워진다(다른 탭 캡처 혼입 금지)', /ROWS = \[\]; OPTS = \[\]; ACTIVE = null;/.test(mo));
   ok('I12 ★ 캡처 이름이 그 줄 수취인과 다르면 경고만(제출 막지 않음 · 마스킹 패턴 일치면 경고 없음)',
-    /function capNameMismatch\(it\)/.test(mo) && /이름이 다릅니다\(캡처: \$\{capNm\}\)/.test(mo)
+    /function capNameMismatch\(it(, sl)?\)/.test(mo) && /이름이 다릅니다\(캡처: \$\{capNm\}\)/.test(mo)
     && !/capNameMismatch/.test(mo.slice(mo.indexOf('const submittable'), mo.indexOf('\n', mo.indexOf('const submittable')))));
 }
 

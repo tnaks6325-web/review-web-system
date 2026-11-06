@@ -77,9 +77,11 @@ test('④ 이모지·그림문자 0 (아이콘은 Font Awesome) · 대각선 화
   assert.ok(iconBtns.length >= 4);
   for (const b of iconBtns) assert.ok(/title="/.test(b) && /aria-label="/.test(b), '아이콘 단추에 title·aria-label: ' + b.slice(0, 80));
 });
-test('⑤ 채운 파란 단추는 화면마다 1개 — 표 화면 [N건 제출] · 결과 화면 [완료]', () => {
+test('⑤ 채운 파란 단추는 화면마다 1개 — 표 화면 [N건 제출] · 보완 목록 [N건 보완] · 결과 화면 [완료]', () => {
   const pri = [...MO.matchAll(/class="mo-btn pri"/g)].length;
-  assert.strictEqual(pri, 2, '표·결과 두 화면 각 1개');
+  assert.strictEqual(pri, 3, '표·보완 목록(결정 349 화면)·결과 세 화면 각 1개');
+  const cmp = MO.slice(MO.indexOf('function renderComplete()'), MO.indexOf('async function submitComplete()'));
+  assert.strictEqual((cmp.match(/mo-btn pri/g) || []).length, 1, '보완 목록 화면도 1개');
   const tableFoot = MO.slice(MO.indexOf("`<button type=\"button\" class=\"mo-btn\" onclick=\"ManualOrder.close(true)\">닫기</button>"));
   assert.ok(/class="mo-btn pri" id="moSubmit"/.test(tableFoot.slice(0, 600)));
   const resFoot = MO.slice(MO.indexOf('function renderResult('));
@@ -100,5 +102,7 @@ test('⑧ 표 칸은 목록 하나(cols)에서 그린다 — 후속 칸(리뷰�
   const c = MO.slice(MO.indexOf('function cols()'), MO.indexOf('function rowHtml('));
   assert.ok(/const L = \[/.test(c) && /L\.push\(\{ k: 'cap'/.test(c) && /L\.push\(\{ k: 'st'/.test(c));
   const r = MO.slice(MO.indexOf('function renderPreview()'), MO.indexOf('function paint()'));
-  assert.ok(/const C = cols\(\);/.test(r) && /C\.map\(c => `<th/.test(r) && /rowHtml\(it, i, C\)/.test(r), '머리·줄·폭이 같은 목록에서');
+  // 결정 349 화면: 머리 줄은 headHtml(C) 하나가 그린다(동시진행 모드의 「네이버」「쿠팡」 묶음 머리 포함) — 같은 목록 C 에서
+  const h = MO.slice(MO.indexOf('function headHtml(C)'), MO.indexOf('function rowHtml('));
+  assert.ok(/const C = cols\(\);/.test(r) && /<thead>\$\{headHtml\(C\)\}<\/thead>/.test(r) && /C\.map\(c => th\(c\)\)/.test(h) && /rowHtml\(it, i, C\)/.test(r), '머리·줄·폭이 같은 목록에서');
 });
