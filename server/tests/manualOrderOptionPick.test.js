@@ -182,7 +182,7 @@ const OPT_ROWS = [
   const mo = fs.readFileSync(path.resolve(__dirname, '../../frontend/js/manual-order.js'), 'utf8');
   await ok('화면: 미리보기 요청에 작업 좌표를 싣고, 공고 화면 경로에서는 상품 칸을 띄우지 않는다', async () => {
     assert(/JSON\.stringify\(\{ text, sheetId: CTX\.sheetId, tabName: CTX\.tabName/.test(mo));
-    assert(/OPTS = \(!CTX\.campaignId && Array\.isArray\(r\.optionChoices\)\)/.test(mo));
+    assert(/OPTS = \((!CTX\.dual && )?!CTX\.campaignId && Array\.isArray\(r\.optionChoices\)\)/.test(mo));   // 결정 349 화면: 동시진행 모드는 상품 칸 없음(의미 불변)
   });
   await ok('화면: 제출은 고를 수 있는 줄만 · optionAware·optionFullAck 를 보낸다', async () => {
     assert(/filter\(x => submittable\(x\.r\)\)/.test(mo));
