@@ -25,7 +25,7 @@ function harness(cur, apiResult, copyOk = true) {
     _shareLinkOk: (m, sub) => log.ok.push([m, sub]), _shareLinkPopup: (...a) => log.popup.push(a),
   };
   vm.createContext(ctx);
-  vm.runInContext(fn('_advLinkUrl') + '\n' + fn('copyAdvertiserLink'), ctx);
+  vm.runInContext(fn('_advLinkUrl') + '\n' + fn('_advWorkLinkUrl') + '\n' + fn('copyAdvertiserLink'), ctx);
   return { ctx, log };
 }
 (async () => {
@@ -34,7 +34,7 @@ function harness(cur, apiResult, copyOk = true) {
       { ok: true, advertiser: { id: 'adv1', name: '친구사이' }, link: { token: 'tok123', active: true } });
     await ctx.copyAdvertiserLink();
     assert.deepEqual(log.calls[0], ['/api/trackb/advertiser-link', { action: 'for-tab', sheetId: 'S', tabName: 'T' }]);
-    assert.equal(log.copied[0], 'https://review-web-system.pages.dev/workdesk#a=tok123');
+    assert.equal(log.copied[0], 'https://review-web-system.pages.dev/workdesk#a=tok123&work='+encodeURIComponent(JSON.stringify({s:'S',t:'T'})));
     assert(/친구사이/.test(log.ok[0][0]) && !/옛업체/.test(log.ok[0][0])); assert(/광고주에게만/.test(log.ok[0][1]));
     assert.equal(log.alerts.length, 0);
   });
@@ -59,6 +59,31 @@ function harness(cur, apiResult, copyOk = true) {
     const { ctx, log } = harness({ sheetId: 'S', tabName: 'T' }, { ok: true, advertiser: { id: 'adv1', name: 'A' }, link: { token: 't', active: true } }, false);
     await ctx.copyAdvertiserLink();
     assert.equal(log.popup.length, 1); assert(/리뷰어 연락처·주소/.test(log.popup[0][3]));
+  });
+  await ok('홈에서 고른 작업을 복사하며 현재 열린 작업과 섞지 않는다', async () => {
+    const {ctx,log}=harness({sheetId:'OLD',tabName:'열린 작업'},{ok:true,advertiser:{name:'업체'},link:{token:'fake',active:true}});
+    ctx.STATE.tabs=[{sheetId:'HOME',tabName:'선택 작업'}];await ctx.copyAdvertiserLink(0);
+    assert.deepEqual(log.calls[0][1],{action:'for-tab',sheetId:'HOME',tabName:'선택 작업'});
+    assert.deepEqual(JSON.parse(new URLSearchParams(new URL(log.copied[0]).hash.slice(1)).get('work')),{s:'HOME',t:'선택 작업'});
+  });
+  await ok('복사 요청 도중 작업 좌표가 바뀌어도 처음 좌표를 전달한다',async()=>{
+    const {ctx,log}=harness({sheetId:'S',tabName:'처음'},null);let finish;
+    ctx.api=()=>new Promise(r=>{finish=r;});const copying=ctx.copyAdvertiserLink();ctx.STATE.cur.tabName='다음';
+    finish({ok:true,advertiser:{name:'업체'},link:{token:'fake',active:true}});await copying;
+    assert.equal(JSON.parse(new URLSearchParams(new URL(log.copied[0]).hash.slice(1)).get('work')).t,'처음');
+  });
+  await ok('홈 목록은 업체 접속 열과 인덱스 버튼을 추가하고 직원 공유는 유지한다',()=>{
+    const t={sheetId:'S',tabName:'작업',stats:{}};
+    const ctx={STATE:{role:'admin',tabs:[t]},_finVisible:()=>[t],_finCanEdit:()=>false,esc:String,
+      isFinishCandidate:()=>false,_tabTip:()=>'',_tabLabel:()=> '작업',_finNumCells:()=>'<td></td>'.repeat(4),
+      _folBtnsHtml:()=>'',_campBtnHtml:()=>'',_taskMoreCell:()=>'<td></td>'};
+    vm.createContext(ctx);vm.runInContext(fn('_isInternalRole')+'\n'+fn('_finBodyHtml'),ctx);
+    const rendered=ctx._finBodyHtml();
+    assert.match(rendered,/onclick="event.stopPropagation\(\);copyAdvertiserLink\(0\)"/);
+    assert.match(rendered,/작업별 업체 링크/);assert.match(rendered,/copyTaskLinkFromHome\(0\)/);
+    assert.equal((rendered.split('</thead>')[0].match(/<th[ >]/g)||[]).length,14);
+    for(const role of ['advertiser','reviewer']){ctx.STATE.role=role;assert.doesNotMatch(ctx._finBodyHtml(),/copyAdvertiserLink\(0\)/);}
+    ctx.STATE.role='staff';t.archived=true;assert.doesNotMatch(ctx._finBodyHtml(),/copyAdvertiserLink\(0\)/);
   });
   await ok('버튼: 내부 역할만 · [링크 복사] 바로 옆 · 마감 작업은 숨김(링크 복사와 같은 규칙)', async () => {
     assert(/const advLinkBtn=_isInternalRole\(\)\?/.test(html));

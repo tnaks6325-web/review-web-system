@@ -2320,6 +2320,10 @@
 .tck-ch .tck-sub{color:var(--faint);font-size:11.5px}
 .tck-line{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;padding:8px 11px;border-top:1px solid var(--line);font-size:12.5px;color:var(--ink)}
 .tck-line .tck-tx{flex:1 1 320px;min-width:0}
+.tck-result-upload{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
+.tck-result-drop{padding:7px 10px;border:1px dashed var(--line);border-radius:6px;color:var(--muted);cursor:pointer}
+.tck-result-drop.over{border-color:var(--accent);background:var(--card)}
+@media(max-width:720px){.tck-result-drop{display:none}.tck-result-upload .btn{min-height:44px}}
 .tck-line.sub{padding-left:26px}
 .tck-choice{font:inherit;font-size:11.5px;padding:3px 9px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);cursor:pointer}
 .tck-choice.on{border-color:#2563EB;background:#EEF4FF;color:#1D4ED8;font-weight:700}
@@ -2550,6 +2554,12 @@
   box-shadow:0 18px 48px rgba(18,21,26,.28);overflow:hidden}
 .pmrhd{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line,#E1E5EB)}
 .pmrhd h3{margin:0;font-size:15.5px;font-weight:800}
+@media(max-width:720px){
+  #tckHomeResultOv .pmrhd{flex-wrap:wrap;gap:4px}
+  #tckHomeResultOv .pmrhd h3{flex:1 0 100%;word-break:keep-all}
+  #tckHomeResultOv .pmrhd .sp{display:none}
+  #tckHomeResultOv .pmrhd .pmauto{max-width:100%;overflow-wrap:anywhere}
+}
 .pmrbd{padding:14px 18px;overflow:auto;flex:1;min-height:0}
 .pm-unconfirmed-box{width:min(880px,100%);min-height:min(590px,80vh)}
 .pm-unconfirmed-search{margin:16px 0 0;display:grid;gap:8px}
@@ -2890,6 +2900,7 @@ table.wbl-t td.nc .rest.on{position:static;transform:none;opacity:1;margin:0 0 0
   table.wbl-t tr.mob-open td:nth-child(11){grid-column:1/-1;grid-row:5}
   table.wbl-t tr.mob-open td:nth-child(12){grid-column:1/3;grid-row:6}
   table.wbl-t tr.mob-open td:nth-child(13){grid-column:3/6;grid-row:6}
+  table.wbl-t tr.mob-open td[data-label="업체 접속"]{grid-column:1/-1;grid-row:7}
   table.wbl-t td.wbl-btncol{width:auto}
   table.wbl-t td.wbl-c{text-align:left;align-items:stretch}
   table.wbl-t td .wbl-b{width:100%;min-height:38px;font-size:11px}
@@ -3131,6 +3142,7 @@ table.wbl-t td.nc .rest.on{position:static;transform:none;opacity:1;margin:0 0 0
 <div id="app"></div>
 <div class="toast" id="toast"></div>
 
+<script src="js/home-payment-result.js?v=20261106"></script>
 <script>
 const TEST_AUTO_LOGIN_HOST = 'test-review-wdb-web-production.up.railway.app';
 const TEST_AUTO_LOGIN_PR_HOST = /^test-review-wdb-web-review-web-system-pr-\d+\.up\.railway\.app$/i;
@@ -3165,6 +3177,17 @@ let _GO=null, _VIEW='', _PICK='';
   // #view=payment&pick=<대량이체 id> — 「오늘 확인할 것」[바로 가기](새 탭)가 입금관리 + 그 대량이체 고르기 창으로 연다(결정 302)
   try{ const pm=(location.hash||'').match(/[#&]pick=([0-9a-fA-F-]{36})(?:&|$)/); if(pm) _PICK=pm[1]; }catch(_){ }
 })();
+// 업체 작업 지정은 직원용 go와 분리한다. 옛 화면은 work를 무시하되 접속 열쇠는 보존한다.
+let _ADV_WORK=_readAdvertiserWork(location.hash);
+function _readAdvertiserWork(hash){
+  const m=String(hash||'').match(/[#&]work=([^&]*)/); if(!m) return null;
+  try{
+    const w=JSON.parse(decodeURIComponent(m[1]));
+    if(w && !Array.isArray(w) && typeof w.s==='string' && typeof w.t==='string'
+      && w.s.trim() && w.t.trim() && w.s.length<=2048 && w.t.length<=2048) return {s:w.s,t:w.t};
+  }catch(_){ }
+  return {invalid:true};
+}
 // ── 공유 링크(#w=<code>) 수신 — 메신저로 받은 "그 작업보드 주소" ──
 //   ★ 여기서는 코드만 집어 둔다. 로그인 전이면 boot 이 로그인 화면에서 되돌아오는데, _SHARE 는
 //     모듈 변수라 살아남아 **로그인 직후 boot 재실행 때 소비**된다(로그인 후 그 작업보드로 자동 이동).
@@ -3208,6 +3231,8 @@ async function tryTestAutoLogin(){
 // 만료/거부 토큰 정리 — "만료 배지 + 빈 목록" 유령 화면 대신 로그인으로. raw_sso 재주입 루프도 차단.
 let _pmLoadInFlight=null,_pmLoadGeneration=0;
 function _dropSession(msg){ sessionStorage.removeItem('admin_token'); try{ localStorage.removeItem('raw_sso'); }catch(_){ }
+  _ADV_WORK=null; STATE.pendingAdvertiserWork=null;
+  if(typeof _tckHomeReset==='function') _tckHomeReset();
   _pmLoadGeneration+=1;
   _pmLoadInFlight=null;
   if(typeof _wbOrderLiveStop==='function') _wbOrderLiveStop();
@@ -3268,7 +3293,7 @@ let STATE = { role:'', name:'', view:'', tabs:[], cur:null, wd:null, freezeUpto:
               canManageEditors:null,             // 서버가 판정한 편집 허용명단 관리 권한
               favs:null, _favLoaded:false,   // 작업목록 즐겨찾기(localStorage 영속)
               railTab:'thread',              // 우측 레일 탭(기본=협업/댓글)
-              ov:[], ovq:'', pendingTab:null, pendingAdv:null, pendingCndFix:null, lastBatch:null,
+              ov:[], ovq:'', pendingTab:null, pendingAdv:null, pendingAdvertiserWork:null, pendingCndFix:null, lastBatch:null,
               advWork:null, advView:'dash',   // 업체(광고주) 뷰어 — 작업 요약 + 첫 화면(대시보드 기본 | 전체 작업 표)
               advQ:'', advF:'all',            // 전체 작업 검색어 · 상태 칩(all|run|done) — 화면 전환에도 유지
               brandNew:null, brandEdit:null, brandOpen:null, bmEdit:null,  // 브랜드 추가 인라인(2안) · 카드 내 편집/확인 상태(브라우저 팝업 대체)
@@ -3313,9 +3338,10 @@ async function boot(){
   // 직원(관리자·AE)만 확장 프로그램 필수 설치 — 광고주(업체) 화면은 제외(js/product-reader-gate.js, 2026-10-13)
   try { window.productReaderGate && window.productReaderGate({ isStaff: STATE.role !== 'advertiser' }); } catch (_) { }
   // 새로고침은 현재 브라우저 항목을 다시 읽되, 다른 계정이 남긴 이력은 복원하지 않는다.
-  if(!_GO && _VIEW!=='logs' && _VIEW!=='payment' && _navCanRestore(history.state)) _navRestoreState(history.state);
+  if(!_GO && !_ADV_WORK && _VIEW!=='logs' && _VIEW!=='payment' && _navCanRestore(history.state)) _navRestoreState(history.state);
   _consumeGo();   // 리뷰어 로그 딥링크 → 작업보드 탭 + 해당 리뷰어 행 지정(셸 렌더 전에 세팅해야 loadTabs가 집어감)
   await _consumeShare();   // 공유 링크(#w=) → 그 작업보드/업체로 직행(서버가 대상과 스코프를 판정)
+  _consumeAdvertiserWork();   // 명시한 업체 작업은 옛 이력보다 우선하되, 목록으로 소유 범위를 확인한 뒤 연다.
   // #view=logs(대시보드 요약 카드에서 진입) — admin/staff만 로그 뷰 노출. 그 외/미지정은 기존 기본 뷰.
   if(_VIEW==='logs' && (STATE.role==='master'||STATE.role==='admin'||STATE.role==='staff')){ STATE.view='logs';
     try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ } }
@@ -3353,6 +3379,26 @@ function _consumeGo(){
   // 결정 324 — 작업만 여는 링크(「오늘 확인할 것」 작업표 꽉 참: 아직 줄이 없는 주문)는 짚을 행이 없다 → "행을 못 찾음" 안내를 띄우지 않는다
   STATE.pendingFocus=(g.p||g.n||g.r) ? { phone8:String(g.p||''), name:String(g.n||''), row:String(g.r||'') } : null;
   try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ }
+}
+function _consumeAdvertiserWork(){
+  if(STATE.role!=='advertiser' || !_ADV_WORK) return;
+  STATE.pendingAdvertiserWork=_ADV_WORK; _ADV_WORK=null;
+  STATE.view='workdesk'; STATE.cur=null; STATE.pendingTab=null; STATE.pendingFocus=null;
+}
+function _clearAdvertiserWorkHash(){
+  const hash=(location.hash||'').slice(1).split('&').filter(p=>!p.startsWith('work=')).join('&');
+  try{ history.replaceState(null,'',location.pathname+location.search+(hash?'#'+hash:'')); }catch(_){ }
+}
+function _openPendingAdvertiserWork(loaded){
+  const w=STATE.pendingAdvertiserWork; if(!w) return false;
+  const i=w.invalid?-1:STATE.tabs.findIndex(t=>t.sheetId===w.s&&t.tabName===w.t);
+  if(i>=0){ STATE.pendingAdvertiserWork=null; _clearAdvertiserWorkHash(); selTab(i); return true; }
+  _renderAdvHome();
+  if(w.invalid || loaded){
+    STATE.pendingAdvertiserWork=null; _clearAdvertiserWorkHash();
+    toast(w.invalid?'작업 링크 주소가 깨졌습니다. 담당자에게 다시 받아 주세요.':'지정한 작업을 더 이상 열 수 없습니다. 이 업체의 다른 작업을 선택해 주세요.');
+  }else toast('작업 목록을 불러오지 못해 지정한 작업을 확인하지 못했습니다. 새로고침해 다시 시도해 주세요.');
+  return true;
 }
 // 공유 링크 소비: 코드를 서버에 물어 대상(작업 or 업체)을 받아 예약한다.
 //   ★ 대상 해석·스코프 판정은 **전적으로 서버** — 화면은 코드만 넘긴다(주소를 손으로 만들어도 권한이 안 넓어진다).
@@ -3433,16 +3479,17 @@ function copyBoardLink(){ const t=STATE.cur; if(!t){ toast('작업을 먼저 여
      없으면 ensure 로 만들고(기존 링크는 바꾸지 않는다 · 회전은 업체관리에서만), 폐기된 링크는 복사하지 않는다.
    ★ 소유 업체는 **누르는 순간 서버가** 작업 좌표로 정한다(action 'for-tab' → advertiserForTab — 업체관리와 같은 판정).
      화면에 캐시된 advertiserId 를 쓰면 업체 이관 뒤 옛 업체 링크를 복사한다(Codex 리뷰 P1). */
-async function copyAdvertiserLink(){
-  const t=STATE.cur; if(!t){ toast('작업을 먼저 여세요'); return; }
-  let r=null; try{ r=await api('/api/trackb/advertiser-link',{method:'POST',body:JSON.stringify({action:'for-tab',sheetId:t.sheetId,tabName:t.tabName})}); }catch(_){ r=null; }
+async function copyAdvertiserLink(i){
+  const t=Number.isInteger(i)?(STATE.tabs||[])[i]:STATE.cur; if(!t){ toast('작업을 먼저 여세요'); return; }
+  const work={sheetId:t.sheetId,tabName:t.tabName};   // 요청 중 이동해도 처음 누른 좌표를 사용한다.
+  let r=null; try{ r=await api('/api/trackb/advertiser-link',{method:'POST',body:JSON.stringify({action:'for-tab',sheetId:work.sheetId,tabName:work.tabName})}); }catch(_){ r=null; }
   // ★ 미지정은 서버가 advertiser:null 로 **명시**할 때만 — 필드가 없는 응답(옛 서버 등)을 미지정으로 꾸미지 않는다.
   if(r&&r.ok&&r.advertiser===null){ alert('이 작업은 아직 업체(광고주)가 지정되지 않아 광고주 링크가 없습니다.\n업체관리에서 이 작업의 업체를 먼저 지정해 주세요.'); return; }
   const lk=r&&r.ok&&r.link;
   if(!lk||!lk.token){ alert('광고주 링크를 불러오지 못했습니다: '+((r&&r.error)||'서버 오류')); return; }
   const name=(r.advertiser&&r.advertiser.name)||'업체';
   if(lk.active===false){ alert(`"${name}" 광고주 링크는 폐기된 상태라 복사하지 않았습니다.\n업체관리 → ${name} → 광고주 접속 링크에서 [다시 활성] 후 사용하세요.`); return; }
-  const url=_advLinkUrl(lk.token);
+  const url=_advWorkLinkUrl(lk.token,work);
   // ★ 성공 알림에도 노출 범위를 말한다 — 경고가 마우스 올림(title)에만 있으면 터치 화면·평소 경로에서 못 본다(Codex 리뷰 P2).
   if(await _copyText(url)){ _shareLinkOk(`"${name}" 광고주 링크가 복사되었습니다`,
     '이 업체의 모든 작업(리뷰어 연락처·주소 포함)이 보이니 광고주에게만 전달하세요'); return; }
@@ -3485,6 +3532,8 @@ async function doLogin(){ const name=$('#lname').value.trim(), pw=$('#lpw').valu
   if(!(r&&r.success&&r.token)){ r=await api('/api/admin/intranet-login',{method:'POST',body:JSON.stringify({name,pw})}); }  // 인트라넷(inadd) 계정 폴백 — 마지막(자체 계정 자격을 외부로 안 흘리고, 인트라넷 장애 지연도 자체 계정에 무영향)
   if(r&&r.success&&r.token){ sessionStorage.setItem('admin_token',r.token); boot(); } else $('#lerr').textContent=(r&&(r.error||r.message))||'로그인 실패'; }
 function logout(){
+  _ADV_WORK=null; STATE.pendingAdvertiserWork=null;
+  if(typeof _tckHomeReset==='function') _tckHomeReset();
   if(typeof _wbOrderLiveStop==='function') _wbOrderLiveStop();
   window.__SHORTAGE_PENDING=null; if(window.ShortagePrompt) window.ShortagePrompt.stop();
   window.__SEQEND_PENDING=null; if(window.SequentialEndPrompt) window.SequentialEndPrompt.stop();
@@ -3859,12 +3908,12 @@ function renderWorkdeskView(){
 async function loadTabs(){
   // participantTabs=1 — 작업표 원장으로만 살아 있는 시트 기반 작업도 작업바에 싣는다(결정 281 · 보는 목록 전용).
   //   ★ 모집공고 발행 대상 선택(index-recruit)은 이 매개변수 없이 불러 그 작업을 받지 않는다.
-  const r = await api('/api/trackb/tabs?limit=300&participantTabs=1');
+  const r = await api('/api/trackb/tabs?limit=300&participantTabs=1').catch(e=>{ if(STATE.role==='advertiser') return null; throw e; });
   // ── 업체(광고주): 소유 탭 + 작업 요약(카운트·정산)을 함께 받아 사이드바 + "내 작업 목록"(화면 A)을 그린다 ──
   if(STATE.role==='advertiser'){
-    STATE.tabs=(r&&r.ok&&r.tabs)||[];
+    STATE.tabs=r&&r.ok&&Array.isArray(r.tabs)?r.tabs:[];
     const s=await api('/api/trackb/my-work-summary').catch(()=>null);
-    STATE.advWork=(s&&s.ok)?{items:s.items||[],settlementHidden:!!s.settlementHidden,brand:s.brand||null,brands:s.brands||[]}:{items:[],settlementHidden:false,brand:null,brands:[],failed:!s};
+    STATE.advWork=(s&&s.ok&&Array.isArray(s.items))?{items:s.items,settlementHidden:!!s.settlementHidden,brand:s.brand||null,brands:s.brands||[]}:{items:[],settlementHidden:false,brand:null,brands:[],failed:true};
     _brandLens();   // 094: 브랜드 세션의 미전송 칸(정산·폴더) 컬럼 제거
     // 요약에만 있는 탭(아카이브 등)도 열람 대상 — STATE.tabs 에 합류(selTab 인덱스 계약 유지)
     for(const it of STATE.advWork.items){
@@ -3873,6 +3922,7 @@ async function loadTabs(){
     }
     _renderAdvSidebar();
     refreshUnseen();
+    if(_openPendingAdvertiserWork(!!(r&&r.ok&&Array.isArray(r.tabs)&&s&&s.ok&&Array.isArray(s.items)))) return;
     if(STATE.pendingTab){ const pt=STATE.pendingTab; STATE.pendingTab=null; const o={nav:!!pt.__nav};
       const idx=STATE.tabs.findIndex(t=>t.sheetId===pt.sheetId&&t.tabName===pt.tabName);
       if(idx>=0) selTab(idx,o); else { STATE.tabs.push(pt); selTab(STATE.tabs.length-1,o); } }
@@ -6331,7 +6381,7 @@ function _finBodyHtml(){
       <td data-label="상태">${st}${sod}</td>
       <td class="wbl-c wbl-btncol" data-label="저장폴더">${_folBtnsHtml(t,i)}</td>
       <td class="wbl-c wbl-btncol" data-label="모집공고">${_campBtnHtml(t,i)}</td>
-      ${tdFinish}${_taskMoreCell(i)}</tr>`;
+      ${tdFinish}${_taskMoreCell(i)}<td class="wbl-c wbl-btncol" data-label="업체 접속">${_isInternalRole()&&!t.archived?`<button type="button" class="wbl-b" onclick="event.stopPropagation();copyAdvertiserLink(${i})" title="해당 작업부터 열리는 업체 접속 링크입니다. 같은 업체의 다른 작업과 리뷰어 연락처·주소도 보이니 광고주에게만 전달하세요.">작업별 업체 링크</button>`:''}</td></tr>`;
   }).join(''):'';
   // ★ 보관함에는 사람이 안 눌러도 들어온 작업이 섞인다 — 조용히 옮기지 않고 **왜 여기 있는지** 말한다.
   //   되돌리는 길([↩ 진행중으로 복귀])과 "되돌리면 다시 안 넘어온다"는 사실을 함께 적는다.
@@ -6341,7 +6391,7 @@ function _finBodyHtml(){
     ? `<div class="wbl-facts" style="margin:0;border-radius:0;border-left:0;border-right:0;border-top:0">인원·제출·입금이 모두 채워진 작업은 <b>자동으로 이곳으로 옮겨집니다</b>(마감자 칸에 <b>자동 마감</b>으로 표시). 아직 끝난 게 아니면 <b>[↩ 진행중으로 복귀]</b>를 누르세요 — 되돌린 작업은 다시 자동으로 넘어오지 않습니다.</div>`
     : '';
   return rows.length?`${autoNote}<div class="wbl-tw"><table class="wbl-t"><thead><tr>
-      <th>작업명</th><th class="wbl-c">작업표</th><th class="wbl-c">공유</th><th>담당</th><th class="nh">총건수</th><th class="nh">참여</th><th class="nh">제출</th><th class="nh">입금</th><th>상태</th><th class="wbl-c">저장폴더</th><th class="wbl-c">모집공고</th><th class="wbl-c">마감</th><th class="wbl-c">⋯</th>
+      <th>작업명</th><th class="wbl-c">작업표</th><th class="wbl-c">공유</th><th>담당</th><th class="nh">총건수</th><th class="nh">참여</th><th class="nh">제출</th><th class="nh">입금</th><th>상태</th><th class="wbl-c">저장폴더</th><th class="wbl-c">모집공고</th><th class="wbl-c">마감</th><th class="wbl-c">⋯</th><th class="wbl-c">업체 접속</th>
     </tr></thead><tbody>${body}</tbody></table></div>`
     : `${autoNote}<div class="wbl-empty">${fin?'마감한 작업이 없습니다.':(STATE.finQ||STATE.finMgr||filt)?'조건에 맞는 작업이 없습니다.':'진행 중인 작업이 없습니다.'}</div>`;
 }
@@ -7224,12 +7274,13 @@ function renderWorkdesk(wd){
   // [🔍 리뷰 점검] — 결정 298: 작업 중 언제나 · 직원·업체 누구나(업체 응답은 서버가 이름을 가린다).
   const checkBtn=`<button class="btn" type="button" onclick="openReviewCheck()" title="이 작업의 리뷰 사진 상태(같은 사진·두 번 제출·아직 사진 없는 사람·명단 밖 사진)를 지금 바로 검사합니다.">🔍 리뷰 점검</button>`;
   const logBtn=STATE.role==='advertiser'?'':`<button class="btn" type="button" onclick="openTabLog()" title="이 작업의 주문·취소·리뷰·편집·정원·정산 기록을 시간순으로 봅니다.">🗒 로그</button>`;
-  $('#main').innerHTML=`<div class="mh mh-wb"><span class="mh-title"><h1 class="${canEdit?'ttl-ed':''}" title="${esc(workdeskTitle)}${canEdit?' — 눌러서 작업명 수정':''}"${canEdit?' onclick="editWorkdeskTitle()"':''}>${esc(workdeskTitle)}</h1>${canEdit?'<button class="mh-title-edit" type="button" title="작업명 수정" aria-label="작업명 수정" onclick="editWorkdeskTitle()">✎</button>':''}</span>
+  $('#main').innerHTML=`${STATE.role==='advertiser'?`<div style="margin-bottom:8px"><button type="button" class="btn" onclick="advHome('list')">전체 작업</button></div>`:''}<div class="mh mh-wb"><span class="mh-title"><h1 class="${canEdit?'ttl-ed':''}" title="${esc(workdeskTitle)}${canEdit?' — 눌러서 작업명 수정':''}"${canEdit?' onclick="editWorkdeskTitle()"':''}>${esc(workdeskTitle)}</h1>${canEdit?'<button class="mh-title-edit" type="button" title="작업명 수정" aria-label="작업명 수정" onclick="editWorkdeskTitle()">✎</button>':''}</span>
     ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}${wd.archived?'<span class="bd">*마감 · 열람 전용</span>':''}${warn.join('')}
     ${wd.archived?'':shareBtn}
     ${wd.archived?'':advLinkBtn}
     ${wd.archived?'':formLinkBtn}
     ${wd.archived?'':planBtn}
+
     ${checkBtn}
     ${logBtn}
     ${wd.archived?'':_finBarHtml()}
@@ -14685,10 +14736,9 @@ async function _pmUploadResultAny(f){
   _pmAnyBusyAt=Date.now();
   try{
     toast('결과 파일에 맞는 대량이체를 찾는 중…');
-    let base64;
-    try { base64 = await _pmFileB64(f); }
-    catch(e){ toast('파일을 읽지 못했습니다: '+e.message); return; }
-    const r = await api('/api/trackb/payment/result-auto-apply', { method:'POST', body: JSON.stringify({ fileName:f.name, base64 }) });
+    let r;
+    try { r = await _pmPostResultFile(f); }
+    catch(e){ if(e.pmReadError){ toast('파일을 읽지 못했습니다: '+e.message); return; } throw e; }
     if(!r || !r.ok){ toast((r&&r.error)||'결과 파일을 해석하지 못했습니다.'); return; }
     const fd=r.found||{};
     if(r.alreadyDone && !(r.unmatchedResults||[]).length){ toast(`#${fd.seq} 대량이체 결과 파일입니다 — 이미 모두 처리돼 바꿀 것이 없습니다`); await _pmLoad(true); return; }
@@ -15958,19 +16008,82 @@ function _homeSyncBadges(){
    ★ onclick 에는 인덱스만(작업명 등 외부 문자열 보간 금지). [바로 가기]는 새 탭(사용자 확정).
    ══════════════════════════════════════════════════════════════ */
 const TCK_CHOICES=[['direct','리뷰비·페이백 직접 보냄'],['not_reviewer','리뷰어 돈 아님'],['unknown','모르겠음']];
-let _tckBusy=false;
+let _TCK_HOME=null;
+function _tckHomeAllowed(){ return STATE.role==='admin'||STATE.role==='master'; }
+function _tckHomeController(){
+  if(_TCK_HOME) return _TCK_HOME;
+  const mod=window.HomePaymentResult; if(!mod) return null;
+  _TCK_HOME=mod.createController({
+    readFile:_pmFileB64,request:api,identity:()=>token(),allowed:_tckHomeAllowed,isHome:()=>STATE.view==='home',
+    load:session=>_tckLoadOnce(session),show:_tckHomeResultShow,notice:message=>toast(message,6500),
+    onBusy:()=>{ if(document.getElementById('tckHomeMount')) _tckPaint(); }
+  });
+  return _TCK_HOME;
+}
+function _tckHomeSession(){ const c=_tckHomeController(); return c?c.capture():null; }
+function _tckHomeCurrent(session){ const c=_tckHomeController(); return !!(c&&session&&c.current(session)); }
+function _tckHomeReset(){
+  if(_TCK_HOME) _TCK_HOME.reset();
+  STATE.tckItems=undefined; STATE.tckView=[]; STATE.tckError=''; STATE.tckMgr='';
+  STATE.tckManagerItems=[]; STATE.tckManagerLoading=false; STATE.tckManagerSaving={}; STATE.tckManagerMore=false; STATE.tckManagerAfter=0; STATE.tckManagerError=false;
+  STATE.tckSlotItems=[]; STATE.tckSlotLoading=false; STATE.tckSlotSaving={}; STATE.tckSlotMore=false; STATE.tckSlotAfter=0; STATE.tckSlotError=false;
+  _tckSheetClose(); _tckHomeResultClose();
+}
+function _tckHomeTarget(i){
+  const item=(STATE.tckView||[])[i],mod=window.HomePaymentResult;
+  if(STATE.view!=='home'||!mod||!mod.canAttach(item,STATE.role)) return null;
+  const f=item.facts;
+  return {id:f.batch.id,seq:f.batch.seq,bankLabel:f.bank==='hana'?'하나은행':'케이뱅크'};
+}
+function _tckUploadPick(i){
+  const target=_tckHomeTarget(i),c=_tckHomeController(); if(!target||!c) return;
+  const session=c.capture();
+  const input=document.createElement('input'); input.type='file';
+  input.accept='.xls,.xlsx,.csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv';
+  input.onchange=()=>{ const file=input.files&&input.files[0]; if(file) return c.upload(file,target,session); };
+  input.click();
+}
+function _tckUploadDrop(event,i){
+  event.preventDefault(); event.stopPropagation();
+  if(event.currentTarget) event.currentTarget.classList.remove('over');
+  const files=event.dataTransfer&&event.dataTransfer.files;
+  if(!files||files.length!==1){ toast('결과 파일은 한 개만 놓아 주세요.'); return; }
+  const target=_tckHomeTarget(i),c=_tckHomeController(); if(target&&c) return c.upload(files[0],target,c.capture());
+}
+function _tckHomeUploadHtml(c,i){
+  const mod=window.HomePaymentResult; if(!mod||!mod.canAttach(c,STATE.role)) return '';
+  const controller=_tckHomeController(),busy=controller&&controller.isBusy(c.facts.batch.id);
+  return `<div class="tck-result-upload"><button type="button" class="btn sm pri" ${busy?'disabled':''} onclick="_tckUploadPick(${i})">${busy?'결과 확인 중…':'이체결과 파일 첨부'}</button>
+    <div class="tck-result-drop" tabindex="0" role="button" aria-label="이 대량이체 결과 파일 첨부" onclick="_tckUploadPick(${i})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();_tckUploadPick(${i})}" ondragover="event.preventDefault();event.stopPropagation();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="_tckUploadDrop(event,${i})">이 카드 안에 이체결과 파일을 놓으세요</div></div>`;
+}
+function _tckHomeResultShow(model){
+  if(!_tckHomeAllowed()||STATE.view!=='home') return;
+  _tckSheetClose();
+  STATE.tckHomeResult=model;
+  let el=document.getElementById('tckHomeResultOv');
+  if(!el){ el=document.createElement('div'); el.id='tckHomeResultOv'; el.className='pmrov'; el.setAttribute('role','dialog'); el.setAttribute('aria-modal','true'); el.setAttribute('aria-label','홈 이체결과 확인'); document.body.appendChild(el); }
+  el.innerHTML=window.HomePaymentResult.render(model);
+  if(!window._tckResultKeyBound){ window._tckResultKeyBound=true; document.addEventListener('keydown',e=>{ if(e.key==='Escape') _tckHomeResultClose(); }); }
+}
+function _tckHomeResultClose(){ const el=document.getElementById('tckHomeResultOv'); if(el) el.remove(); STATE.tckHomeResult=null; }
+async function _pmPostResultFile(file){
+  if(!window.HomePaymentResult) throw Error('결과 파일 기능을 불러오지 못했습니다. 화면을 새로고침해 주세요.');
+  return window.HomePaymentResult.postFile(file,{readFile:async f=>{try{return await _pmFileB64(f);}catch(e){e.pmReadError=true;throw e;}},request:api});
+}
 async function _tckLoadManagers(more){
+  const session=_tckHomeSession(); if(!_tckHomeCurrent(session)) return;
   if(STATE.tckManagerLoading) return;
   STATE.tckManagerLoading=true;
   try{
     const r=await api('/api/trackb/ops-checks/managers?after='+(more?(STATE.tckManagerAfter||0):0));
+    if(!_tckHomeCurrent(session)) return;
     if(!r||!r.ok||!Array.isArray(r.items)) throw Error('목록 오류');
     const combined=[...(more?(STATE.tckManagerItems||[]):[]),...r.items];
     STATE.tckManagerItems=[...new Map(combined.map(c=>[c.id,c])).values()];
     STATE.tckManagerMore=r.hasMore===true;STATE.tckManagerAfter=r.nextAfter;STATE.tckManagerError=false;
-  }catch(_){STATE.tckManagerError=true;if(!more) STATE.tckManagerItems=[];}
-  finally{STATE.tckManagerLoading=false;}
-  if(document.getElementById('tckHomeMount')) _tckPaint();
+  }catch(_){if(_tckHomeCurrent(session)){STATE.tckManagerError=true;if(!more) STATE.tckManagerItems=[];}}
+  finally{if(_tckHomeCurrent(session)) STATE.tckManagerLoading=false;}
+  if(_tckHomeCurrent(session)&&document.getElementById('tckHomeMount')) _tckPaint();
 }
 async function _tckManagerAnswer(i,k){
   const c=(STATE.tckView||[])[i],choice=['mandu','mango'][k];
@@ -15990,18 +16103,20 @@ async function _tckManagerAnswer(i,k){
 /* 결정 324 — 작업표 빈 줄이 없어 구매양식이 작업표에 못 들어간 주문(홈 전용 · 서버가 준 lines 를 그대로 그린다).
    [작업보드로 가기] = 새 탭(#go= · 로그인 이어받기) · [다시 넣기]·[확인함] = 서버 답(기존 수동 재시도 · 항목 닫기). */
 async function _tckLoadSlots(more){
+  const session=_tckHomeSession(); if(!_tckHomeCurrent(session)) return;
   if(STATE.tckSlotLoading) return;
   STATE.tckSlotLoading=true;
   try{
     // 50개씩 — 서버 hasMore·nextAfter 로 「더 보기」(담당자 질문 _tckLoadManagers 와 같은 방식 · 결정 324 보강)
     const r=await api('/api/trackb/ops-checks/slots?after='+(more?(STATE.tckSlotAfter||0):0));
+    if(!_tckHomeCurrent(session)) return;
     if(!r||!r.ok||!Array.isArray(r.items)) throw Error('목록 오류');
     const combined=[...(more?(STATE.tckSlotItems||[]):[]),...r.items];
     STATE.tckSlotItems=[...new Map(combined.map(c=>[c.id,c])).values()];
     STATE.tckSlotMore=r.hasMore===true;STATE.tckSlotAfter=r.nextAfter;STATE.tckSlotError=false;
-  }catch(_){STATE.tckSlotError=true;if(!more){STATE.tckSlotItems=[];STATE.tckSlotMore=false;}}
-  finally{STATE.tckSlotLoading=false;}
-  if(more&&document.getElementById('tckHomeMount')) _tckPaint();
+  }catch(_){if(_tckHomeCurrent(session)){STATE.tckSlotError=true;if(!more){STATE.tckSlotItems=[];STATE.tckSlotMore=false;}}}
+  finally{if(_tckHomeCurrent(session)) STATE.tckSlotLoading=false;}
+  if(_tckHomeCurrent(session)&&more&&document.getElementById('tckHomeMount')) _tckPaint();
 }
 async function _tckSlotAnswer(i,k){
   const c=(STATE.tckView||[])[i],choice=['retry','ack'][k];
@@ -16023,17 +16138,24 @@ function _tckSlotGo(i){
   const w=window.open(location.pathname+'#go='+encodeURIComponent(JSON.stringify({s:f.sheetId,t:f.tabName,g:f.tabGid||''})),'_blank');
   if(!w) toast('팝업이 차단되었습니다. 브라우저에서 새 탭 열기를 허용해 주세요.');
 }
-async function _tckLoad(){
-  if(_tckBusy) return; _tckBusy=true;
+function _tckLoad(afterWrite=false){
+  const c=_tckHomeController();
+  if(c) return c.load(afterWrite);
+  STATE.tckError='결과 파일 기능을 불러오지 못했습니다. 새로고침해 주세요.';
+  if(!Array.isArray(STATE.tckItems)) STATE.tckItems=null;
+  _tckPaint(); return Promise.resolve();
+}
+async function _tckLoadOnce(session){
+  if(!_tckHomeCurrent(session)) return;
   try{
     const r=await api('/api/trackb/ops-checks');
-    STATE.tckItems = r && r.ok && Array.isArray(r.items) ? r.items : null;
-    STATE.tckError = r && r.ok ? '' : ((r&&r.error)||'불러오지 못했습니다');
-
-  }catch(_){ STATE.tckItems=null; STATE.tckError='불러오지 못했습니다'; }
-  finally{ _tckBusy=false; }
+    if(!_tckHomeCurrent(session)) return;
+    if(r&&r.ok&&Array.isArray(r.items)){ STATE.tckItems=r.items; STATE.tckError=''; }
+    else{ if(!Array.isArray(STATE.tckItems)) STATE.tckItems=null; STATE.tckError=(r&&r.error)||'불러오지 못했습니다'; }
+  }catch(_){ if(!_tckHomeCurrent(session)) return; if(!Array.isArray(STATE.tckItems)) STATE.tckItems=null; STATE.tckError='불러오지 못했습니다'; }
+  if(!_tckHomeCurrent(session)) return;
   if(document.getElementById('tckHomeMount')) await Promise.all([_tckLoadManagers(false),_tckLoadSlots()]);
-  _tckPaint();
+  if(_tckHomeCurrent(session)){ _tckPaint(); return {ok:!STATE.tckError}; }
 }
 function _tckPaint(){
   const home=document.getElementById('tckHomeMount'); if(home) home.innerHTML=_tckHtml('home');
@@ -16124,14 +16246,15 @@ function _tckHtml(where){
   STATE.tckView=list;   // onclick 인덱스의 기준(그릴 때마다 새로)
   const open=list.filter(c=>c.status==='open');
   const chip=(v,l)=>`<button type="button" class="tck-mgr ${mgr===v?'on':''}" onclick="_tckSetMgr(${v?managers.indexOf(v):-1})">${esc(l)}</button>`;
-  const head=`<div class="tck-hd"><span class="tck-t">오늘 확인할 것</span>${open.length?`<span class="tck-n">${open.length}</span>`:''}<span class="sp"></span>${managers.length?chip('','전체')+managers.map(m=>chip(m,m)).join(''):''}</div>`;
+  const head=`<div class="tck-hd"><span class="tck-t">오늘 확인할 것</span>${STATE.tckError?'<span class="tck-sub">통장 목록 확인 불가</span>':open.length?`<span class="tck-n">${open.length}</span>`:''}<span class="sp"></span>${managers.length?chip('','전체')+managers.map(m=>chip(m,m)).join(''):''}</div>`;
+  const bankErr=STATE.tckError||STATE.tckItems===null?`<div class="tck-empty" role="alert">통장 확인 항목을 불러오지 못했습니다(${esc(STATE.tckError||'')}). 이전 목록일 수 있으니 새로고침해 주세요.</div>`:'';
   const slotErr=where==='home'&&STATE.tckSlotError?'<div class="tck-empty">작업표 빈 줄 확인 항목을 불러오지 못했습니다 — 새로고침해 주세요.</div>':'';
-  if(!list.length) return `<div class="tck-wrap">${head}${slotErr}<div class="tck-empty">${where==='home'&&STATE.tckManagerError?'담당자 질문을 불러오지 못했습니다 — 새로고침해 주세요.':'지금 확인할 것이 없습니다.'}</div></div>`;
+  if(!list.length) return `<div class="tck-wrap">${head}${bankErr}${slotErr}<div class="tck-empty">${where==='home'&&STATE.tckManagerError?'담당자 질문을 불러오지 못했습니다 — 새로고침해 주세요.':bankErr||slotErr?'전체 확인 항목을 확인하지 못했습니다.':'지금 확인할 것이 없습니다.'}</div></div>`;
   const compact=where==='home' && _tckCompact();
   const cards=list.map((c,i)=>c.status==='done'
     ? `<div class="tck-donerow"><span class="tck-ok">${c.kind==='manager_assignment'?'✓ 리뷰웹 저장 완료':'✓ 처리 완료'}</span><span>${_tckTitle(c.facts)}</span>${c.kind==='manager_assignment'?`<span class="tck-sub">${c.remoteSync==='delivered'?'인트라넷 전달 완료':c.remoteSync==='not_linked'?'인트라넷 오더 없음 · 리뷰웹에만 저장':['pending','processing'].includes(c.remoteSync)?'인트라넷 전달 대기':'인트라넷 전달 상태 확인 필요'}</span>`:''}<span class="tck-sub">${esc(c.doneBy||'')}</span></div>`
     : compact ? _tckRowHtml(c,i) : _tckCardHtml(c,i,where)).join('');
-  return `<div class="tck-wrap">${head}${where==='home'&&STATE.tckItems===null?`<div class="tck-empty" role="alert">통장 확인 항목을 불러오지 못했습니다(${esc(STATE.tckError||'')}) — 새로고침해 주세요.</div>`:''}${where==='home'&&STATE.tckManagerError?`<div class="tck-empty">담당자 질문을 불러오지 못했습니다 — 새로고침해 주세요.</div>`:''}${slotErr}${cards}${where==='home'&&STATE.tckManagerMore?'<button type="button" class="btn sm" onclick="_tckLoadManagers(true)">담당자 질문 더 보기</button>':''}${where==='home'&&STATE.tckSlotMore?'<button type="button" class="btn sm" onclick="_tckLoadSlots(true)">작업표 꽉 참 더 보기</button>':''}</div>`;
+  return `<div class="tck-wrap">${head}${bankErr}${where==='home'&&STATE.tckManagerError?`<div class="tck-empty">담당자 질문을 불러오지 못했습니다 — 새로고침해 주세요.</div>`:''}${slotErr}${cards}${where==='home'&&STATE.tckManagerMore?'<button type="button" class="btn sm" onclick="_tckLoadManagers(true)">담당자 질문 더 보기</button>':''}${where==='home'&&STATE.tckSlotMore?'<button type="button" class="btn sm" onclick="_tckLoadSlots(true)">작업표 꽉 참 더 보기</button>':''}</div>`;
 }
 function _tckCardHtml(c,i,where){
   const f=c.facts||{};
@@ -16156,7 +16279,7 @@ function _tckCardHtml(c,i,where){
   const rows=[];
   // 결정 317 — 케이뱅크 결과 파일 대기 · 하나은행 통장에 이름이 안 보이는 사람
   const nf=lineOf('need_file');
-  if(nf) rows.push(`<div class="tck-line"><span class="tck-tx">${esc(nf.text)}</span>${where==='payment'?'':`<button class="btn sm" onclick="_tckGo(${i})">바로 가기</button>`}</div>`);
+  if(nf) rows.push(`<div class="tck-line"><span class="tck-tx">${esc(nf.text)}</span>${where==='payment'?'':_tckHomeUploadHtml(c,i)+`<button class="btn sm" onclick="_tckGo(${i})">바로 가기</button>`}</div>`);
   const nm=lineOf('name_missing');
   if(nm) rows.push(`<div class="tck-line"><span class="tck-tx">${esc(nm.text)}</span></div>`);
   const sh=lineOf('short');
@@ -20105,6 +20228,10 @@ async function createAdvertiser(){
 // ── 광고주 전용 접속 링크(매직 링크) — master/admin 만. 광고주는 이 링크만 열면 로그인 없이
 //   이 업체 뷰(소유 탭·마스킹·읽기전용)로 진입. 유출 대비 회전/폐기 가능. 링크 CRUD = /api/trackb/advertiser-link. ──
 function _advLinkUrl(token){ return location.origin + '/workdesk#a=' + encodeURIComponent(token); }
+function _advWorkLinkUrl(token,work){
+  const url=_advLinkUrl(token);
+  return work&&work.sheetId&&work.tabName ? url+'&work='+encodeURIComponent(JSON.stringify({s:work.sheetId,t:work.tabName})) : url;
+}
 function _advLinkHtml(a){
   // ★ 게이트 = 서버 /advertiser-link(internalMiddleware) 와 1:1 — AE 포함(2026-08-19 사용자 확정).
   //   여기를 admin 으로 좁히면 개요 표의 [🔗 링크복사]가 안내하는 [다시 활성]·[회전]에 갈 곳이 없다.
