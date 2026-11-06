@@ -75,9 +75,26 @@ async function recomputeBundleReviewStateInTx(db,orderSubmissionId){
  const seats=(await db.query('SELECT * FROM campaign_participants WHERE order_submission_id=$1 AND active=TRUE AND deleted_at IS NULL',[orderSubmissionId])).rows;
  if(seats.length!==1)throw fail('order_target_changed');const seat=seats[0];
  await db.query(`UPDATE campaign_participants SET is_submitted=$2 WHERE id=$1`,[seat.id,state.complete]);
+ // Sheetless boards rebuild review_index.is_submitted from the worktable status cell; write it on the
+ // incomplete->complete transition in this transaction, like the legacy web completion (submit.routes).
+ if(state.complete && seat.is_submitted!==true){
+  const st=await require('./sheetlessStatus.service').markStatusCell({sheetId:seat.sheet_id,tabName:seat.tab_name,rowIndex:seat.seq,kind:'submit',by:'dual-review-complete',client:db});
+  if(st && st.handled && !st.ok)throw Object.assign(new Error(st.reason||'write_failed'),{code:'review_board_write_failed',status:409});
+ }
  const primary=state.current.find(r=>r.evidence_role==='review');
  await db.query(`UPDATE review_index SET is_submitted=$4,review_file_id=$5,review_file_url=$6,review_file_name=$7,review_file_count=$8
   WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3`,[seat.sheet_id,seat.tab_name,seat.seq,state.complete,primary?.file_id||null,primary?.file_url||null,primary?.file_name||null,state.current.filter(r=>r.evidence_role==='review').length]);
+ // Same participation-token binding as the legacy web completion (submit.routes): payment targets exclude
+ // rows whose active obligation is still pending, so a finished bundle must settle it here. Only web-fulfilled
+ // obligations return to pending when evidence is later removed; closed_no_review is never touched.
+ if(state.complete)await db.query(`UPDATE reviewer_participations p SET review_obligation_status='fulfilled',
+   review_evidence=p.review_evidence||jsonb_build_object('web_submission',cp.review_participation_id),record_version=p.record_version+1,updated_at=now()
+  FROM campaign_participants cp WHERE cp.id=$1 AND cp.active=TRUE AND cp.deleted_at IS NULL AND cp.is_submitted=TRUE
+   AND p.campaign_participant_id=cp.id AND p.lifecycle_status='active' AND p.index_snapshot->>'_review_participation_id'=cp.review_participation_id::text
+   AND p.review_obligation_status NOT IN ('fulfilled','closed_no_review')`,[seat.id]);
+ else await db.query(`UPDATE reviewer_participations p SET review_obligation_status='pending',record_version=p.record_version+1,updated_at=now()
+  FROM campaign_participants cp WHERE cp.id=$1 AND p.campaign_participant_id=cp.id AND p.lifecycle_status='active'
+   AND p.review_obligation_status='fulfilled' AND p.review_evidence->>'web_submission'=cp.review_participation_id::text`,[seat.id]);
  return state;
 }
 
@@ -172,8 +189,8 @@ function createService(deps={}){
   await client.query(`UPDATE review_submissions SET evidence_revision=$4 WHERE order_submission_id=$1 AND purchase_channel=$2 AND evidence_role=$3 AND superseded_at IS NULL`,[target.orderSubmissionId,slot.channel,slot.role,revision+1]);
   const snapshotHash=digest(bundle.parent.purchase_condition_snapshot);const uploadBatchId=crypto.randomUUID();
   const {rows}=await client.query(`INSERT INTO review_submissions(sheet_id,tab_name,row_index,reviewer_name,file_id,file_name,file_hash,source,slot_key,upload_batch_id,
-   order_submission_id,purchase_channel,evidence_role,evidence_revision,byte_sha256,condition_snapshot_hash)
-   VALUES($1,$2,$3,$4,$5,$6,$7,'upload',$8,$9,$10,$11,$12,$13,$7,$14) RETURNING *`,
+   order_submission_id,purchase_channel,evidence_role,evidence_revision,byte_sha256,condition_snapshot_hash,uploaded_at)
+   VALUES($1,$2,$3,$4,$5,$6,$7,'upload',$8,$9,$10,$11,$12,$13,$7,$14,NOW()) RETURNING *`,
   [target.sheetId,target.tabName,target.rowIndex,body.reviewerName||'',fileId,'dual-review-'+fileId,sha,slot.key,uploadBatchId,target.orderSubmissionId,slot.channel,slot.role,revision+1,snapshotHash]);
   await recomputeBundleReviewStateInTx(client,target.orderSubmissionId);
   const uploadToken=proof().sign('review-upload',{order:target.orderSubmissionId,owner,fileId,sha,channel:slot.channel,role:slot.role,revision:revision+1,snapshotHash});
