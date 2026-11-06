@@ -24,6 +24,12 @@ function staffLabel(staff) {
   return name.slice(0, 100);
 }
 
+/** 지급 전인가 — 회차(pending/paid) 항목이 이 주문(또는 그 작업표 줄)을 담았는가. 보완(트랜잭션 안)과 보완 목록이 같은 판정을 쓴다. */
+const PAID_SQL = `SELECT 1 FROM payment_batch_items i WHERE i.status IN ('pending','paid') AND (i.order_submission_id=$1 OR EXISTS (
+    SELECT 1 FROM campaign_participants cp WHERE cp.order_submission_id=$1 AND cp.active=TRUE AND cp.deleted_at IS NULL
+      AND cp.sheet_id=i.sheet_id AND cp.tab_name=i.tab_name AND cp.seq=i.row_index)) LIMIT 1`;
+async function paidHit(q, id) { return (await q.query(PAID_SQL, [id])).rows.length > 0; }
+
 function createService(deps = {}) {
   const db = deps.db || require('../db/pool');
   const runtime = () => deps.runtime || require('./dualChannelRuntime.service');
@@ -38,7 +44,7 @@ function createService(deps = {}) {
     if (!rootFolderId) fail('DUAL_DRIVE_NOT_CONFIGURED');
     return (await require('./captureFolder.service').resolveCaptureFolder({ sheetId: 'campaign:' + campaignId, tabName: 'campaign:' + campaignId, rootFolderId })).folderId;
   });
-  const ensureReviewer = deps.ensureReviewer || (f => manual().ensureExternalReviewer(f));
+  const ensureReviewer = deps.ensureReviewer || ((f, opt) => manual().ensureExternalReviewer(f, opt));
   const confirmApplication = deps.confirmApplication || ((client, a) => manual().confirmExternalApplication(client, a));
   const applyWorktable = deps.applyWorktable || defaultApplyWorktable;
 
@@ -155,6 +161,10 @@ function createService(deps = {}) {
       images[ch] = { buffer, sha: proof.sha(buffer), mime: body[ch].mimeType };
     }
     if (images.naver.sha === images.coupang.sha) fail('DUAL_IMAGE_REUSED', '두 구매처에 같은 사진을 올렸습니다.');
+    // 결정 348 리뷰어 연결 — 수동제출과 같은 판정(resolveReviewerLink: 고른 id 를 다시 읽음 · 새로 등록 중복 거절). 거절이면 쓰기 0.
+    //   값이 없으면(옛 화면) 자동 = 종전.
+    const linkCheck = await manual().resolveReviewerLink(db, body.reviewerLink, phoneDigits);
+    if (!linkCheck.ok) return { ok: false, reason: linkCheck.reason, error: linkCheck.error, reviewerLinkApplied: (body.reviewerLink && body.reviewerLink.mode) || 'auto' };
     const warnings = [];
     // 중복·재참여·일 정원 — 외부모집 수동제출과 같은 판정(재사용).
     if (!body.force) {
@@ -191,7 +201,7 @@ function createService(deps = {}) {
       bank: f.bank, account: f.account, depositor: f.depositor, captureFlags });
     // 리뷰어 등록·연결 — 기존 함수 그대로(호출만). 실패해도 접수는 계속(수동제출과 같은 계약).
     let reviewerInfo = { registered: false, ownerPhone8: null, warnings: [] };
-    try { reviewerInfo = await ensureReviewer(f); } catch (e) { warnings.push('리뷰어 등록 중 오류(제출은 계속): ' + e.message); }
+    try { reviewerInfo = await ensureReviewer(f, { link: linkCheck.link }); } catch (e) { warnings.push('리뷰어 등록 중 오류(제출은 계속): ' + e.message); }
     warnings.push(...(reviewerInfo.warnings || []));
     const ownerId = await ownerReviewerId(reviewerInfo.ownerPhone8 || p8);
     if (!ownerId) warnings.push('리뷰어 계정을 하나로 찾지 못했습니다 — 리뷰어가 리뷰를 내려면 담당자 연결이 필요합니다');
@@ -227,7 +237,8 @@ function createService(deps = {}) {
     if (out.overCapacity) warnings.push('총 모집 정원을 넘겨 기록했습니다');
     const written = out.idempotent ? null : await applyWorktable({ sheetId, tabName, gid, orderSubmissionId: out.orderSubmissionId, phone8: p8, name: f.recipient || '' });
     return { ok: true, orderSubmissionId: out.orderSubmissionId, applicationId: out.applicationId || null, idempotent: !!out.idempotent,
-      identity: 'staff_pending', price, worktableRow: out.idempotent ? null : worktableNote(written, warnings), reviewerRegistered: !!reviewerInfo.registered, warnings };
+      identity: 'staff_pending', price, worktableRow: out.idempotent ? null : worktableNote(written, warnings), reviewerRegistered: !!reviewerInfo.registered,
+      reviewerLinkApplied: linkCheck.link.mode, linkedOwner: reviewerInfo.linkedOwner || null, linkedReviewer: reviewerInfo.linkedReviewer || null, warnings };
   }
 
   /** 3) 보완 — 수동제출로 들어간 보통 주문(묶음 아님) 1건을 동시진행 묶음으로 완성한다.
@@ -287,10 +298,7 @@ function createService(deps = {}) {
       if (!o || o.deleted_at || o.mirror_status === 'canceled') fail('order_cancelled', '삭제·취소된 주문입니다.');
       if (check(o) === 'done') return { idempotent: true };
       // 지급 전인 주문만 — 회차에 담겼거나 보낸 건은 보완하지 않는다(돈이 이미 움직였다).
-      const paid = await client.query(`SELECT 1 FROM payment_batch_items i WHERE i.status IN ('pending','paid') AND (i.order_submission_id=$1 OR EXISTS (
-          SELECT 1 FROM campaign_participants cp WHERE cp.order_submission_id=$1 AND cp.active=TRUE AND cp.deleted_at IS NULL
-            AND cp.sheet_id=i.sheet_id AND cp.tab_name=i.tab_name AND cp.seq=i.row_index)) LIMIT 1`, [id]);
-      if (paid.rows.length) fail('dual_complete_already_paid', '이미 입금 회차에 담긴 주문이라 보완할 수 없습니다 — 담당자가 따로 처리해 주세요.');
+      if (await paidHit(client, id)) fail('dual_complete_already_paid', '이미 입금 회차에 담긴 주문이라 보완할 수 없습니다 — 담당자가 따로 처리해 주세요.');
       if (proof.hash(await sub.conditionForCampaign(client, dualId)) !== proof.hash(snapshot)) fail('DUAL_ARTIFACT_CHANGED');
       await lockShas(client, CHANNELS.map(ch => images[ch].sha));
       let appId = (await client.query(`SELECT id FROM campaign_applications WHERE campaign_id=$1 AND (order_submission_id=$2 OR id=$3) ORDER BY id LIMIT 2 FOR UPDATE`,
@@ -320,8 +328,33 @@ function createService(deps = {}) {
     const written = await applyWorktable({ sheetId: order.sheet_id, tabName: order.tab_name, gid: order.gid || '', orderSubmissionId: id, phone8: p8, name: order.recipient || '' });
     return { ok: true, orderSubmissionId: id, applicationId: out.applicationId, completed: true, identity: 'staff_pending', price, worktableRow: worktableNote(written, warnings), warnings };
   }
-  return { submitStaffBundle, completePlainOrder };
+  /** 결정 349 화면 — 보완 대상 목록(읽기 전용). 동시진행 작업표가 아니면 dual:false · 빈 목록. 판정 실패는 던진다(막음).
+   *  대상 = completePlainOrder 가 받는 것과 같은 조건(수동제출 · 묶음 아님 · 살아 있음). 개인정보는 이름·전화 뒤 4자리·금액·줄 번호만. */
+  async function listPlainPending({ sheetId, tabName, gid = '' } = {}) {
+    if (!sheetId || !tabName) fail('BAD_REQUEST', 'sheetId, tabName 필수', 400);
+    let scope;
+    try { scope = await lifecycle().discoverDualScope(db, [{ sheetId: String(sheetId), tabName: String(tabName), tabGid: String(gid || '') }]); }
+    catch (_) { fail('dual_channel_manual_check_failed', '동시진행 여부를 확인하지 못했어요 — 잠시 뒤 다시 시도해 주세요.'); }
+    if (!scope.campaignIds.length) return { ok: true, dual: false, items: [] };
+    const rows = (await db.query(`SELECT os.id, os.recipient, os.phone, os.price, os.order_num, os.capture_file_id,
+        (SELECT cp.seq FROM campaign_participants cp WHERE cp.order_submission_id=os.id AND cp.active=TRUE AND cp.deleted_at IS NULL ORDER BY cp.seq LIMIT 1) AS seq
+      FROM order_submissions os
+      WHERE os.sheet_id=$1 AND os.tab_name=$2 AND os.deleted_at IS NULL AND COALESCE(os.mirror_status,'')<>'canceled'
+        AND os.source=$3 AND os.purchase_bundle_version IS NULL
+      ORDER BY os.submitted_at, os.id LIMIT 100`, [String(sheetId), String(tabName), manual().SOURCE_EXTERNAL])).rows;
+    const items = [];
+    for (const r of rows) {
+      const amt = toAmount(r.price);
+      const seq = Number(r.seq);
+      items.push({ orderSubmissionId: r.id, name: String(r.recipient || ''), phoneTail: String(r.phone || '').replace(/\D/g, '').slice(-4),
+        price: typeof amt === 'number' ? amt : null, row: Number.isFinite(seq) && seq > 0 ? seq : null,
+        hasCapture: !!r.capture_file_id, hasOrderNum: !!String(r.order_num || '').trim(), paid: await paidHit(db, r.id) });
+    }
+    return { ok: true, dual: true, items };
+  }
+  return { submitStaffBundle, completePlainOrder, listPlainPending };
 }
 let production;
 const get = () => production || (production = createService());
-module.exports = { createService, submitStaffBundle: b => get().submitStaffBundle(b), completePlainOrder: b => get().completePlainOrder(b) };
+module.exports = { createService, submitStaffBundle: b => get().submitStaffBundle(b), completePlainOrder: b => get().completePlainOrder(b),
+  listPlainPending: b => get().listPlainPending(b) };

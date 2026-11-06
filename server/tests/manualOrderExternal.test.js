@@ -377,10 +377,11 @@ console.log('\nC. 라우트 권한');
   // ★ 결정 348 — C1 의미 강화: 예전(PR #394)엔 「화면이 안 쓰는 PII 통로」라 reviewer-search 자체를 지웠다.
   //   지금은 수동제출 창이 실제로 부르는 검색이 있고, 지켜야 할 것은 「무인증·권한 없는 검색 통로가 없다」이다.
   // 결정 349: 동시진행 직원 대리 묶음 제출·보완 입구 2개가 더해졌다(같은 2단 권한 — C2 가 같이 본다).
-  ok('C1 라우트는 정확히 다섯 길이다(preview·submit·reviewer-search·dual/submit·dual/complete — 다른 PII 통로 없음)',
-    layers.length === 5 && !!find('/preview') && !!find('/submit') && !!find('/reviewer-search')
-    && !!find('/dual/submit') && !!find('/dual/complete')
-    && find('/reviewer-search').methods.join() === 'get');
+  // 결정 349 화면(2026-11-07): 보완 대상 목록 GET /dual/pending 이 더해졌다(이름·전화 뒤 4자리·금액·줄 번호만 · 같은 2단 권한 — C2 가 같이 본다).
+  ok('C1 라우트는 정확히 여섯 길이다(preview·submit·reviewer-search·dual/submit·dual/complete·dual/pending — 다른 PII 통로 없음)',
+    layers.length === 6 && !!find('/preview') && !!find('/submit') && !!find('/reviewer-search')
+    && !!find('/dual/submit') && !!find('/dual/complete') && !!find('/dual/pending')
+    && find('/reviewer-search').methods.join() === 'get' && find('/dual/pending').methods.join() === 'get');
   ok('C2 ★ 전부 authMiddleware + adminOrMasterMiddleware 뒤에 있다',
     layers.every(l => l.names.includes('authMiddleware') && l.names.includes('adminOrMasterMiddleware')));
   ok('C3 제출은 POST 전용', find('/submit').methods.join() === 'post');

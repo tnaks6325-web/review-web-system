@@ -41,7 +41,7 @@ async function setup() {
     db,
     drive: { upload: async b => { const id = 'f-' + (files.size + 1); files.set(id, Buffer.from(b)); return id; }, read: async id => files.get(id) },
     resolveFolder: async () => 'folder',
-    ensureReviewer: async () => { calls.ensure++; return { registered: false, ownerPhone8: '12345678', warnings: [] }; },
+    ensureReviewer: async (f, opt) => { calls.ensure++; (calls.ensureOpts = calls.ensureOpts || []).push(opt || {}); return { registered: false, ownerPhone8: '12345678', warnings: [] }; },
     confirmApplication: async (client, a) => {
       calls.confirm++;
       const id = (await client.query('SELECT COALESCE(MAX(id),0)+1 AS id FROM campaign_applications')).rows[0].id;
@@ -171,4 +171,57 @@ test('② 입구: 대리 묶음 제출·보완은 수동제출과 같은 2단 �
   const handlers = require(root + '/src/routes/manualOrder.routes').handlers;
   assert.equal(typeof handlers.manualOrderDualSubmit, 'function');
   assert.equal(typeof handlers.manualOrderDualComplete, 'function');
+});
+
+/* ── 결정 349 화면(2026-11-07) — 보완 대상 목록 · 대리 제출의 리뷰어 연결 ───────────────────────── */
+test('③ 보완 목록: 동시진행 작업표의 수동제출 보통 주문만 · 이름·전화 뒤 4자리·금액·작업표 줄 번호만 · 지급된 것은 paid 표시', async () => {
+  const { db, svc } = await setup();
+  try {
+    const r = await svc.listPlainPending({ sheetId: 's', tabName: 't', gid: 'g' });
+    assert.equal(r.ok, true); assert.equal(r.dual, true);
+    assert.equal(r.items.length, 1, JSON.stringify(r.items));
+    const it = r.items[0];
+    assert.deepEqual(Object.keys(it).sort(), ['hasCapture', 'hasOrderNum', 'name', 'orderSubmissionId', 'paid', 'phoneTail', 'price', 'row'].sort());
+    assert.equal(it.orderSubmissionId, PLAIN); assert.equal(it.name, '가'); assert.equal(it.phoneTail, '5678');
+    assert.equal(it.price, 10000); assert.equal(it.row, 3); assert.equal(it.hasCapture, true); assert.equal(it.hasOrderNum, true); assert.equal(it.paid, false);
+    assert.ok(!JSON.stringify(r).includes('010-1234-5678') && !JSON.stringify(r).includes('서울'), '전체 번호·주소는 싣지 않는다');
+    await db.exec(`INSERT INTO payment_batch_items(status,sheet_id,tab_name,row_index) VALUES('pending','s','t',3)`);
+    assert.equal((await svc.listPlainPending({ sheetId: 's', tabName: 't', gid: 'g' })).items[0].paid, true);
+    // 보완이 끝나면 목록에서 빠진다
+    await db.exec('DELETE FROM payment_batch_items');
+    await svc.completePlainOrder({ orderSubmissionId: PLAIN, staff: { name: '망고' }, naver: { orderNum: 'N-555666', paidAmount: 9000, imageBase64: img('n2') } });
+    assert.equal((await svc.listPlainPending({ sheetId: 's', tabName: 't', gid: 'g' })).items.length, 0);
+    // 동시진행 아닌 작업표 = dual:false · 빈 목록
+    const plain = await svc.listPlainPending({ sheetId: 's', tabName: 'other', gid: '' });
+    assert.equal(plain.ok, true); assert.equal(plain.dual, false); assert.deepEqual(plain.items, []);
+  } finally { await db.close(); }
+});
+
+test('① 대리 제출 리뷰어 연결: 고른 리뷰어를 서버가 다시 읽어 넘긴다(수동제출과 같은 함수) · 틀린 id 는 쓰기 0 거절', async () => {
+  const { db, svc, calls } = await setup();
+  try {
+    await db.exec(`ALTER TABLE reviewers ADD COLUMN name text, ADD COLUMN phone text, ADD COLUMN sub_accounts jsonb, ADD COLUMN bank_account text;
+      UPDATE reviewers SET name='가', phone='010-1234-5678'`);
+    const before = await count(db, 'SELECT count(*)::int n FROM order_submissions');
+    const bad = await svc.submitStaffBundle(submitBody({ reviewerLink: { mode: 'existing', reviewerId: 'nope' } }));
+    assert.equal(bad.ok, false); assert.equal(bad.reason, 'reviewer_link_invalid'); assert.equal(bad.reviewerLinkApplied, 'existing');
+    assert.equal(calls.ensure, 0); assert.equal(await count(db, 'SELECT count(*)::int n FROM order_submissions'), before);
+    const ok = await svc.submitStaffBundle(submitBody({ reviewerLink: { mode: 'existing', reviewerId: '00000000-0000-4000-8000-0000000000aa' } }));
+    assert.equal(ok.ok, true, JSON.stringify(ok)); assert.equal(ok.reviewerLinkApplied, 'existing');
+    assert.equal(calls.ensureOpts[0].link.mode, 'existing'); assert.equal(calls.ensureOpts[0].link.reviewer.id, '00000000-0000-4000-8000-0000000000aa');
+    // 연결을 안 보낸 옛 화면 = 자동(종전)
+    const auto = await svc.submitStaffBundle(submitBody({ fields: { ...FIELDS, phone: '010-9999-0000' }, naver: { orderNum: 'N-777888', paidAmount: 9000, imageBase64: img('n3') }, coupang: { orderNum: 'C-999000', paidAmount: 10000, imageBase64: img('c3'), phone: '010-9999-0000' } }));
+    assert.equal(auto.ok, true, JSON.stringify(auto)); assert.equal(auto.reviewerLinkApplied, 'auto');
+  } finally { await db.close(); }
+});
+
+test('③ 입구: 보완 목록 GET 도 같은 2단 권한 · Track B 위임 · 직원 신원은 req.admin 만', () => {
+  const fs = require('node:fs');
+  const mo = fs.readFileSync(root + '/src/routes/manualOrder.routes.js', 'utf8');
+  const tb = fs.readFileSync(root + '/src/routes/trackB.routes.js', 'utf8');
+  assert.match(mo, /router\.get\('\/dual\/pending', authMiddleware, adminOrMasterMiddleware,/);
+  assert.match(tb, /router\.get\('\/manual-order\/dual\/pending', authMiddleware, internalMiddleware, editorOnlyMiddleware, \(req, res, next\) =>\s*_moDualPending\(req, res, next\)\)/);
+  assert.match(mo, /reviewerLink: b\.reviewerLink/);
+  const handlers = require(root + '/src/routes/manualOrder.routes').handlers;
+  assert.equal(typeof handlers.manualOrderDualPending, 'function');
 });
