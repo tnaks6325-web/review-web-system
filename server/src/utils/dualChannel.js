@@ -143,4 +143,36 @@ function normalizeChannelProductList(list) {
   }];
 }
 
-module.exports = { DualChannelError, normalizeChannelProductList, normalizeDualChannelProduct, rawHasDualChannels, campaignHasDualChannels, DUAL_CHANNEL_NOT_READY };
+/** Preserve omitted purchase channels without mutating either input. */
+function keepDualChannelProducts(currentJson, nextJson) {
+  const parse = raw => {
+    if (typeof raw !== 'string') return raw;
+    try { return JSON.parse(raw); } catch (_) { return null; }
+  };
+  const current = parse(currentJson);
+  const next = parse(nextJson);
+  const hasCurrent = rawHasDualChannels(current);
+  if (hasCurrent) {
+    normalizeChannelProductList(current);
+    if (!Array.isArray(next) || next.length !== 1 || !plainObject(next[0])) {
+      throw new DualChannelError('동시진행 상품은 삭제하거나 여러 상품으로 바꿀 수 없습니다.');
+    }
+    // Same stable key as flattenState: a nonempty prev_name wins, never a name fallback.
+    const p = next[0];
+    const prev = typeof p.prev_name === 'string' ? p.prev_name.trim() : '';
+    const name = typeof p.name === 'string' ? p.name.trim() : '';
+    if ((own(p, 'prev_name') && p.prev_name != null && typeof p.prev_name !== 'string')
+      || (prev || name) !== current[0].name.trim()) {
+      throw new DualChannelError('저장된 동시진행 상품과 같은 상품을 찾을 수 없습니다.');
+    }
+  }
+  if (rawHasDualChannels(next)) {
+    normalizeChannelProductList(next);
+    return nextJson;
+  }
+  if (!hasCurrent) return nextJson;
+  const restored = normalizeChannelProductList([{ ...next[0], channels: current[0].channels }]);
+  return typeof nextJson === 'string' ? JSON.stringify(restored) : restored;
+}
+
+module.exports = { DualChannelError, normalizeChannelProductList, normalizeDualChannelProduct, rawHasDualChannels, campaignHasDualChannels, DUAL_CHANNEL_NOT_READY, keepDualChannelProducts };
