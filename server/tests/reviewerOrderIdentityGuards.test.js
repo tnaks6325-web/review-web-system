@@ -97,9 +97,11 @@ ok('내정보 드롭다운은 아이디·수취인·연락처·배송주소 입�
 ok('드롭다운 선택값은 DOM 버튼으로 만들고 입력 임시저장 순서를 바꾸지 않는다',
   (appJs.match(/const option = document\.createElement\("button"\)/g) || []).length === 2
   && (appJs.match(/document\.createElement\("button"\)/g) || []).length >= 4
-  && /option\.textContent =/.test(appJs)
+  // 개편 1단계: 항목이 두 줄(이름·구분 / 값)이 됐다 — 값은 여전히 textContent 로만 넣는다(HTML 해석 없음 · 의미 불변/강화).
+  && /optTitle\.textContent = /.test(appJs) && /optHelp\.textContent = field === "phone"[\s\S]{0,140}?: String\(item\[spec\.key\]\);/.test(appJs)
+  && !/option\.innerHTML/.test(appJs)
   && !/<select class="of-saved-info-select"/.test(appJs)
-  // 결정 348: 초안은 칸 아이디 기준이라 순서가 바뀌어도 밀리지 않는다. 파일 칸 제외는 한 곳(_embedFormFields)에서 하고 저장·복원 둘 다 그걸 쓴다.
+  // 결정 350(번호 겹침으로 348→350): 초안은 칸 아이디 기준이라 순서가 바뀌어도 밀리지 않는다. 파일 칸 제외는 한 곳(_embedFormFields)에서 하고 저장·복원 둘 다 그걸 쓴다.
   && (appJs.match(/\.filter\(el => el\.type !== "file"\)/g) || []).length === 1
   && /function _embedFormFields\(scr\) \{\s*return \[\.\.\.scr\.querySelectorAll\("input, select, textarea"\)\]\.filter\(el => el\.type !== "file"\);/.test(appJs)
   && (appJs.match(/_embedFormFields\(scr\)/g) || []).length === 3);

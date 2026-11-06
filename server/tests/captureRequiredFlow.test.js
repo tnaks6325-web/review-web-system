@@ -17,7 +17,8 @@ const t = (name, fn) => { fn(); console.log('  ok   ' + name); pass++; };
 t('1. 캡처 섹션에서 "(선택)" 표기가 사라지고 [필수] 배지가 붙었다', () => {
   assert.ok(!/주문 캡처 자동추출 <span[^>]*>\(선택\)/.test(SA),
     '"(선택)" 표기가 남아 있으면 리뷰어는 안 올려도 되는 줄 안다 — 미첨부의 최대 원인');
-  const badges = (SA.match(/구매 캡처 <span[^>]*>필수<\/span>/g) || []);
+  // 개편 1단계(시안 v18): 구획 제목이 "구매사진"이 됐다 — 두 카드 모두 [필수] 표시는 그대로(의미 불변).
+  const badges = (SA.match(/구매사진 <span class="of-req">필수<\/span>/g) || []);
   assert.strictEqual(badges.length, 2, '쿠팡·일반 두 카드 모두 [필수] 배지가 있어야 함: ' + badges.length);
 });
 

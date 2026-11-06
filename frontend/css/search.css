@@ -757,14 +757,14 @@ input,textarea,button{font-family:inherit}
 }
 /* 구매양식 입력칸 모양 (리뷰어 구매양식 개편 1단계-2 · 승인 시안 v18)
    흰 바탕 + 얇은 회색 테두리 · 글자 휴대폰 14px/칸 32px, 넓은 화면 13px/26px · 이름표는 왼쪽 정렬 보통 굵기 13px.
-   칸 순서·위치는 그대로다(그래서 _EMBED_FORM_LAYOUT 은 올리지 않는다 — 결정 348).
+   (칸 순서를 옮긴 것은 아래 개편 1단계 묶음 — 그때 _EMBED_FORM_LAYOUT 을 2로 올렸다 · 결정 350·351)
    ★ toss-theme.css 가 모든 입력칸 테두리를 투명(!important)으로 덮으므로 여기도 !important 로 덮는다.
      그 때문에 지금까지 안 보이던 상태 테두리색(자동입력 초록·별표 분홍·필수 빨강)을 다시 지정하고, 포커스 파랑은 맨 뒤에 둬서 입력 중에는 파랑이 이긴다. */
-#screenOrderForm .of-label{width:76px;text-align:left;font-size:13px;font-weight:400;color:#1d1d1f;line-height:1.3;word-break:keep-all}
+#screenOrderForm .of-label{width:96px;text-align:left;font-size:13px;font-weight:400;color:#1d1d1f;line-height:1.3;word-break:keep-all}
 #screenOrderForm .of-input{min-height:26px;padding:3px 8px;font-size:13px;line-height:18px;color:#1d1d1f;background:#fff;border:1px solid #b6b6bd!important;border-radius:6px!important;box-sizing:border-box}
 #screenOrderForm .of-input::placeholder{font-size:inherit}
 #screenOrderForm .of-textarea{min-height:44px}
-#screenOrderForm .of-error-msg{margin-left:84px}
+#screenOrderForm .of-error-msg{margin-left:104px}
 #screenOrderForm .of-input.ai-filled,#screenOrderForm .of-input.ai-locked{border-color:#12b886!important}
 #screenOrderForm .of-input.ai-filled-asterisk{border-color:#F43F5E!important}
 #screenOrderForm .of-input.of-input--error{border-color:#EF4444!important}
@@ -772,12 +772,150 @@ input,textarea,button{font-family:inherit}
 @media(max-width:600px){
   #screenOrderForm .of-input{min-height:32px;padding:5px 8px;font-size:14px;line-height:20px}
   #screenOrderForm .of-textarea{min-height:52px}
-  #screenOrderForm .of-error-msg{margin-left:84px}
+  #screenOrderForm .of-field{grid-template-columns:96px minmax(0,1fr)}
+  #screenOrderForm .of-error-msg{margin-left:104px}
 }
 @media(max-width:340px){
   #screenOrderForm .of-label{font-size:12px}
-  #screenOrderForm .of-error-msg{margin-left:76px}
+  #screenOrderForm .of-field{grid-template-columns:84px minmax(0,1fr)}
+  #screenOrderForm .of-error-msg{margin-left:90px}
 }
+/* ══ 구매양식 개편 1단계 (승인 시안 v18 · 2026-11-07) ══════════════════════════════════════
+   흰 바탕 한 장 흐름: 카드 테두리를 걷고, 구획(구매사진·주문 정보·받는 사람·배송지·입금 계좌·비고)을 접는 머리줄로 나눈다.
+   ★ 새 모양은 새 클래스(.of-fold · .of-identity-block · .of-mask-note · .is-floating …) 아래에만 건다 —
+     동시진행(dual) 양식이 .of-field/.of-order-card 를 같이 쓰므로 옛 클래스 규칙을 바꾸면 그 화면까지 바뀐다.
+   ★ 배송주소·비고도 이름표 왼쪽 한 줄(시안). 칸 아이디·검증·저장은 그대로. */
+#screenOrderForm{background:#fff}
+#screenOrderForm .of-order-card{background:transparent;border:0;border-radius:0;padding:0;margin-bottom:8px;box-shadow:none}
+#screenOrderForm .of-order-card+.of-order-card{border-top:1px solid #d2d2d7;padding-top:14px;margin-top:6px}
+#ofOrderCardsWrap>.of-order-card:only-child>.ofc-header{display:none}
+#screenOrderForm .ofc-header{border-bottom:0;margin-bottom:2px;padding-bottom:0}
+#screenOrderForm .ofc-ai-section{background:transparent;border:0;border-radius:0;padding:0;margin-bottom:0}
+#screenOrderForm .ofc-ai-section-title{font-size:15px;font-weight:700;color:#1d1d1f;letter-spacing:0;margin:10px 0 8px}
+#screenOrderForm .of-req{margin-left:4px;color:#d70015;font-size:12px;font-weight:600;vertical-align:1px}
+/* 접는 머리줄: 왼쪽 꺾쇠 + 굵은 제목 */
+#screenOrderForm details.of-fold{margin:0 0 6px}
+#screenOrderForm details.of-fold>summary.of-fold-sum{display:flex;align-items:center;gap:8px;min-height:40px;padding:8px 0 6px;list-style:none;cursor:pointer;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+#screenOrderForm details.of-fold>summary.of-fold-sum::-webkit-details-marker{display:none}
+#screenOrderForm details.of-fold>summary.of-fold-sum::before{content:"";flex:0 0 auto;width:7px;height:7px;margin:0 3px 3px 2px;border-right:2px solid #3a3a3c;border-bottom:2px solid #3a3a3c;transform:rotate(45deg);transition:transform .15s ease}
+#screenOrderForm details.of-fold:not([open])>summary.of-fold-sum::before{transform:rotate(-45deg);margin-bottom:0}
+#screenOrderForm .of-fold-title{font-size:15px;font-weight:700;color:#1d1d1f;letter-spacing:-.01em}
+#screenOrderForm details.of-fold>summary.of-fold-sum:focus-visible{outline:2px solid #007aff;outline-offset:2px;border-radius:6px}
+#screenOrderForm details.of-fold .of-field{margin-bottom:8px}
+#screenOrderForm details.of-fold .of-label-required::after{content:none}
+#screenOrderForm details.of-fold .of-label:not(.of-label-required)::after{content:"선택";margin-left:5px;color:#86868b;font-size:12px;font-weight:400}
+#screenOrderForm details.of-fold .of-field--stack{display:grid;grid-template-columns:96px minmax(0,1fr);align-items:start;gap:8px}
+#screenOrderForm details.of-fold .of-field--stack>.of-label{padding-top:7px}
+#screenOrderForm details.of-fold .of-field--stack>.of-label,#screenOrderForm details.of-fold .of-field--stack>.of-field-control,#screenOrderForm details.of-fold .of-field--stack>.of-input{grid-column:auto}
+#screenOrderForm details.of-fold .of-textarea{min-height:26px;resize:none}
+@media(max-width:600px){#screenOrderForm details.of-fold .of-textarea{min-height:32px}}
+/* 구매사진: 빈 칸은 얇은 점선 상자, 올린 뒤에는 세로 썸네일 + 이름·[전체 보기]·[사진 변경] */
+#screenOrderForm details.of-fold .of-img-zone{border:1px dashed #b6b6bd;border-radius:10px;background:#fafafa;padding:14px 12px;margin-bottom:10px}
+#screenOrderForm details.of-fold .of-img-zone:hover,#screenOrderForm details.of-fold .of-img-zone.drag-over{border-color:#007aff;background:#f2f7ff}
+#screenOrderForm details.of-fold .of-img-zone .oiz-icon{font-size:1.3rem;margin-bottom:2px}
+#screenOrderForm details.of-fold .of-img-zone .oiz-title{color:#0066cc!important;font-size:14px!important;font-weight:600}
+#screenOrderForm details.of-fold .of-img-zone .oiz-sub{font-size:12px;color:#6e6e73}
+#screenOrderForm details.of-fold .of-img-preview{gap:14px!important;margin-bottom:10px!important;align-items:flex-start!important}
+#screenOrderForm details.of-fold .of-img-preview img{width:68px!important;height:104px!important;border-radius:8px!important;border:1px solid #e5e5ea!important;background:#f5f5f7}
+#screenOrderForm .of-img-info{display:flex;flex-direction:column;gap:4px;min-width:0;padding-top:6px}
+#screenOrderForm .of-img-info>span[id$="_imgLabel"],#screenOrderForm .of-img-info>span[id$="_img2Label"]{font-size:14px!important;font-weight:700;color:#1d1d1f!important;overflow-wrap:anywhere}
+#screenOrderForm .of-img-actions{display:flex;flex-wrap:wrap;gap:16px;margin-top:6px}
+#screenOrderForm .of-text-btn{padding:2px 0;border:0;background:none;color:#0066cc;font:inherit;font-size:14px;font-weight:500;cursor:pointer}
+#screenOrderForm .of-text-btn:focus-visible{outline:2px solid #007aff;outline-offset:2px;border-radius:4px}
+#screenOrderForm .of-img-big{display:block;width:100%;margin:0 0 10px;padding:0;border:1px solid #e5e5ea;border-radius:10px;background:#f5f5f7;cursor:zoom-out;text-align:center}
+#screenOrderForm .of-img-big[hidden]{display:none}
+#screenOrderForm .of-img-big img{display:block;width:100%;height:auto;border-radius:10px 10px 0 0}
+#screenOrderForm .of-img-big span{display:block;padding:6px;color:#6e6e73;font-size:12px}
+/* 주문자 안내·아이디 저장: 작은 회색 글자 한 줄 */
+#screenOrderForm details.of-fold .ofc-orderer-note{margin:0 0 8px;padding:0;border:0;background:none;color:#6e6e73;font-size:12px}
+#screenOrderForm details.of-fold .of-save-id{grid-column:auto;margin:2px 0 6px!important;font-size:13px!important;color:#1d1d1f!important;gap:8px!important}
+#screenOrderForm details.of-fold .of-save-id input{width:18px;height:18px;margin:0;accent-color:#007aff}
+/* "가려짐(*)" + "내 정보에서 선택" = 칸 아래 한 줄의 작은 글자 링크 */
+#screenOrderForm details.of-fold .of-field-control{display:flex;flex-wrap:wrap;align-items:center;column-gap:12px;row-gap:2px}
+#screenOrderForm details.of-fold .of-field-control>*{flex:0 0 100%}
+#screenOrderForm details.of-fold .of-field-control>.of-saved-info,#screenOrderForm details.of-fold .of-field-control>.of-mask-note{flex:0 0 auto}
+#screenOrderForm .of-mask-note{order:1;padding:4px 0;color:#8a5a00;font-size:13px;font-weight:500}
+#screenOrderForm .of-mask-note[hidden]{display:none}
+#screenOrderForm details.of-fold .of-saved-info{order:2;margin-top:0}
+#screenOrderForm details.of-fold .of-addr-help,#screenOrderForm details.of-fold .of-addr-save,#screenOrderForm details.of-fold .of-addr-pick{order:3}
+#screenOrderForm details.of-fold .of-saved-info-trigger{display:inline-flex;justify-content:flex-start;gap:5px;width:auto;min-height:28px;padding:4px 0;border:0;border-radius:0;background:none;box-shadow:none;color:#0066cc;font-size:13px;font-weight:500}
+#screenOrderForm details.of-fold .of-saved-info-trigger:disabled{background:none;color:#86868b}
+#screenOrderForm details.of-fold .of-saved-info-chevron{font-size:11px;color:#6e6e73;transform:translateY(-2px)}
+#screenOrderForm details.of-fold .of-saved-info.is-open .of-saved-info-chevron{transform:translateY(1px) rotate(180deg)}
+#screenOrderForm details.of-fold .of-field>.of-autocomplete-wrap{flex:1;min-width:0}
+#screenOrderForm details.of-fold .of-autocomplete-wrap>.of-input{width:100%;box-sizing:border-box}
+#screenOrderForm details.of-fold .of-addr-pick-btn{display:inline-flex;width:auto;max-width:100%;padding:4px 0;border:0;background:none;color:#0066cc;font-size:13px;font-weight:500}
+/* "내 정보에서 선택" 목록: 화면 폭 안(양쪽 8px), 두 줄 항목, 고른 값 ✓ — 위치는 _ofPlaceMenu 가 정한다 */
+.of-saved-info-menu.is-floating{position:fixed;right:auto;bottom:auto;z-index:1000;max-width:calc(100vw - 16px);padding:4px;border:1px solid #d2d2d7;border-radius:10px;background:#fff;box-shadow:0 10px 30px rgba(0,0,0,.16)}
+.of-saved-info-menu-head{padding:6px 10px 4px;color:#6e6e73;font-size:11px;font-weight:600}
+.of-saved-info-menu.is-floating .of-saved-info-option{position:relative;min-height:0;padding:8px 30px 8px 10px;border-radius:7px;color:#1d1d1f;font-size:13px;font-weight:600}
+.of-saved-info-menu.is-floating .of-saved-info-option-help{margin-top:2px;color:#6e6e73;font-size:12px;font-weight:400;line-height:1.4;overflow-wrap:anywhere}
+.of-saved-info-menu.is-floating .of-saved-info-option:hover,.of-saved-info-menu.is-floating .of-saved-info-option:focus-visible{background:#f2f2f7;color:#1d1d1f;box-shadow:none}
+.of-saved-info-menu.is-floating .of-saved-info-option.is-current::after{content:"✓";position:absolute;top:8px;right:10px;color:#007aff;font-weight:700}
+/* 현재 참여 명의 — 받는 사람 구획 맨 아래 두 줄 */
+#screenOrderForm .of-identity-block{margin:6px 0 4px}
+#screenOrderForm .of-identity-block .of-identity-context{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:8px;row-gap:3px;margin:0;padding:10px 0 0;border:0;border-top:1px solid #e5e5ea;border-radius:0;background:none;color:#1d1d1f}
+#screenOrderForm .of-identity-block .of-identity-context[hidden]{display:none}
+#screenOrderForm .of-identity-block .of-identity-kicker{color:#6e6e73;font-size:13px;font-weight:400;letter-spacing:0}
+#screenOrderForm .of-identity-block .of-identity-name{color:#1d1d1f;font-size:15px;font-weight:700}
+#screenOrderForm .of-identity-block .of-identity-kind{padding:0;border-radius:0;background:none;color:#6e6e73;font-size:13px;font-weight:400}
+#screenOrderForm .of-identity-block .of-identity-flag{margin-left:auto;font-size:13px;font-weight:700;white-space:nowrap}
+#screenOrderForm .of-identity-block .of-identity-flag:empty{display:none}
+#screenOrderForm .of-identity-block .of-identity-flag[data-state="ok"]{color:#1a7f37}
+#screenOrderForm .of-identity-block .of-identity-flag[data-state="warn"]{color:#8a5a00}
+#screenOrderForm .of-identity-block .of-identity-help{flex:0 0 100%;color:#6e6e73;font-size:12px}
+#screenOrderForm .of-identity-issues{margin:8px 0 2px;color:#1d1d1f;font-size:13px;line-height:1.5}
+#screenOrderForm .of-identity-issues .identity-issue-link{display:block;margin:2px 0 0;padding:6px 0;border:0;border-radius:0;background:none;color:#0066cc;font-size:13px;font-weight:600;text-align:left}
+#screenOrderForm .of-identity-issues .identity-issue-link:has(>b){display:grid;grid-template-columns:72px minmax(0,1fr);column-gap:8px;padding:5px 0;color:#1d1d1f;font-weight:400}
+#screenOrderForm .of-identity-issues .identity-issue-link>b{grid-column:1}
+#screenOrderForm .of-identity-issues .identity-issue-link>div{grid-column:2;color:#b42318}
+#screenOrderForm .of-identity-issues .identity-issue-link>span{grid-column:2;margin-top:0;color:#0066cc;font-size:12px}
+#screenOrderForm .of-identity-issues .identity-mismatch-notice{padding:8px 10px;border-radius:8px;background:#fff8e6;color:#5c3d00}
+/* 이름표는 입력칸 첫 줄 높이에 맞춘다(칸 아래 작은 링크가 있어도 이름표가 내려가지 않게) */
+#screenOrderForm details.of-fold .of-field{align-items:start}
+#screenOrderForm details.of-fold .of-field>.of-label{padding-top:4px}
+@media(max-width:600px){#screenOrderForm details.of-fold .of-field>.of-label{padding-top:7px}}
+#screenOrderForm details.of-fold .of-field--stack>.of-label{padding-top:4px}
+@media(max-width:600px){#screenOrderForm details.of-fold .of-field--stack>.of-label{padding-top:7px}}
+#screenOrderForm details.of-fold .of-field-control>.of-addr-pick{flex:0 1 auto;min-width:0;margin-top:0}
+#screenOrderForm details.of-fold .of-field-control>.of-addr-pick.is-open{flex-basis:100%}
+#screenOrderForm details.of-fold .of-addr-pick-pin{display:none}
+#screenOrderForm details.of-fold .of-addr-pick-car{color:#6e6e73;font-size:10px}
+/* 자주 쓰는 주문정보(운영에만 있는 기능 — 유지): 얇은 회색 묶음 */
+#screenOrderForm details.of-fold .of-order-info-suggestions{margin:0 0 10px;border:1px solid #e5e5ea;border-radius:10px;background:#fafafa;box-shadow:none}
+#screenOrderForm details.of-fold .of-order-info-heading{min-height:36px;background:#fafafa;color:#1d1d1f}
+#screenOrderForm details.of-fold .of-order-info-heading-main{font-size:13px}
+#screenOrderForm details.of-fold .of-order-info-heading-main i{color:#6e6e73}
+#screenOrderForm details.of-fold .of-order-info-count{background:#e5e5ea;color:#3a3a3c}
+#screenOrderForm details.of-fold .of-order-info-heading-help{color:#6e6e73;font-size:12px;font-weight:400}
+#screenOrderForm details.of-fold .of-order-info-list{background:#e5e5ea}
+#screenOrderForm details.of-fold .of-order-info-top{font-size:13px}
+#screenOrderForm details.of-fold .of-order-info-address{font-size:12px;color:#6e6e73}
+#screenOrderForm details.of-fold .of-order-info-dismiss{border-left-color:#e5e5ea}
+/* 제출 버튼: 맥 파랑 한 개 · 안내 한 줄은 작게 */
+#screenOrderForm #ofFinalGuide{font-size:12px!important;color:#6e6e73!important;font-weight:400!important}
+#screenOrderForm #btnOrderFormSubmit{min-height:46px;border-radius:10px!important;background:#007aff!important;box-shadow:none!important;font-size:16px!important;font-weight:600}
+/* 공고 화면 틀 안: 바깥 화면이 이미 좌우 여백(16px)을 주므로 안쪽 여백은 포커스 테두리가 잘리지 않을 4px 만 */
+body.embed-mode #screenOrderForm .screen-body{padding-left:4px!important;padding-right:4px!important}
+/* 날짜 안내: 비고 아래 작은 글자 */
+#screenOrderForm details.of-fold .of-date-note{margin:2px 0 0 104px;padding:0!important;border:0!important;background:none!important;color:#86868b!important;font-size:12px!important}
+@media(max-width:340px){
+  #screenOrderForm details.of-fold .of-date-note{margin-left:90px}
+  #screenOrderForm details.of-fold .of-field--stack{grid-template-columns:84px minmax(0,1fr)}
+}
+/* 직접 링크: 로그인한 리뷰어 = 얇은 한 줄 · 제공정보 = 얇은 묶음 · 주문 추가 = 작은 글자 버튼 */
+#orderFormReviewerInfo.of-reviewer-bar{margin:0 0 10px!important;padding:8px 0!important;border:0!important;border-bottom:1px solid #e5e5ea!important;border-radius:0!important;background:none!important;box-shadow:none!important}
+#orderFormProductCard.pane-card{margin:0 0 6px!important;padding:6px 0 12px!important;border:0!important;border-bottom:1px solid #e5e5ea!important;border-radius:0!important;background:none!important;box-shadow:none!important}
+#screenOrderForm #btnAddOrderCard.btn-add-order-card{display:inline-flex;width:auto;min-height:32px;margin:2px 0 14px;padding:4px 0;border:0;border-radius:0;background:none;color:#0066cc;font-size:14px;font-weight:600;gap:6px}
+#screenOrderForm #btnAddOrderCard.btn-add-order-card:disabled{color:#86868b}
+.of-reviewer-row{display:flex;align-items:center;flex-wrap:wrap;column-gap:8px;row-gap:2px;min-width:0}
+.of-reviewer-kicker{color:#6e6e73;font-size:12px}
+.of-reviewer-name{color:#1d1d1f;font-size:14px;font-weight:700}
+.of-reviewer-badge{padding:0 6px;border:1px solid #c7d7f0;border-radius:5px;color:#0066cc;font-size:11px;font-weight:600;line-height:18px}
+.of-reviewer-phone{color:#6e6e73;font-size:12px}
+.of-reviewer-home{margin-left:auto;padding:3px 0;border:0;background:none;color:#0066cc;font:inherit;font-size:13px;font-weight:500;cursor:pointer;white-space:nowrap}
+.of-reviewer-home:focus-visible{outline:2px solid #007aff;outline-offset:2px;border-radius:4px}
+.of-add-count{color:#86868b;font-size:12px;font-weight:500;margin-left:2px}
 /* ── 관리자 화면 너비 확장 ── */
 .admin-body{padding-top:0;max-width:1800px;width:100%;margin:0 auto;padding-left:24px;padding-right:24px;box-sizing:border-box}
 #screenAdmin .app-header .header-inner{max-width:1800px}

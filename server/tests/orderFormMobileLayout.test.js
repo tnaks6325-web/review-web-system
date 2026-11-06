@@ -63,7 +63,8 @@ test('입력칸은 얇은 테두리·작은 글자이고, 투명 테두리 테�
   const block = CSS.slice(start, CSS.indexOf('/* ── 관리자 화면 너비 확장', start));
   // toss-theme.css 가 모든 input 테두리를 투명 !important 로 덮는다 — 같은 !important + 아이디 범위로만 이긴다.
   assert.match(block, /#screenOrderForm \.of-input\{[^}]*border:1px solid #b6b6bd!important;border-radius:6px!important/);
-  assert.match(block, /#screenOrderForm \.of-label\{width:76px;text-align:left;font-size:13px;font-weight:400/);
+  // 개편 1단계(시안 v18): 이름표 칸 96px("결제금액 (원)"·"주문번호 선택"이 한 줄에 들어가게)
+  assert.match(block, /#screenOrderForm \.of-label\{width:96px;text-align:left;font-size:13px;font-weight:400/);
   assert.match(block, /@media\(max-width:600px\)\{\s*#screenOrderForm \.of-input\{min-height:32px;padding:5px 8px;font-size:14px;line-height:20px\}/);
   assert.match(block, /#screenOrderForm \.of-input\{min-height:26px;padding:3px 8px;font-size:13px;line-height:18px/);
   // 위 !important 테두리가 상태색을 지우지 않도록 같은 범위로 다시 지정하고, 포커스는 그 뒤(입력 중엔 파랑).
