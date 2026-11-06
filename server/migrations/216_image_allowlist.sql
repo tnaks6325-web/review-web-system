@@ -16,7 +16,7 @@
 --
 -- 롤백: DROP TABLE IF EXISTS guide_image_files;
 --       DROP INDEX IF EXISTS idx_os_capture_file_id, idx_os_capture_file_id_2, idx_review_edit_old_file,
---         idx_review_edit_new_file, idx_pss_capture_file, idx_rel_capture_file, idx_rel_context_file,
+--         idx_review_edit_new_file, idx_pss_capture_file, idx_rel_context_file,
 --         idx_payment_archive_drive_file;
 --       (코드를 되돌리면 옛 코드는 이 표·인덱스를 읽지 않는다 — 남겨 둬도 충돌 없음)
 
@@ -30,8 +30,6 @@ CREATE INDEX IF NOT EXISTS idx_review_edit_new_file
   ON review_edit_requests (new_file_id) WHERE new_file_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_pss_capture_file
   ON purchase_submission_sessions (capture_file_id) WHERE capture_file_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_rel_capture_file
-  ON reviewer_event_logs (capture_file_id) WHERE capture_file_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_rel_context_file
   ON reviewer_event_logs ((context->>'fileId')) WHERE (context->>'fileId') IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_payment_archive_drive_file

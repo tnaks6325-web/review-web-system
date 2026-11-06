@@ -56,7 +56,7 @@ const countingDb = { query: (...a) => { queryCount++; return db.query(...a); } }
     CREATE TABLE purchase_capture_artifacts (id SERIAL PRIMARY KEY, file_id TEXT NOT NULL);
     CREATE INDEX idx_purchase_artifact_file ON purchase_capture_artifacts(file_id);
     CREATE TABLE purchase_submission_sessions (id SERIAL PRIMARY KEY, capture_file_id TEXT);
-    CREATE TABLE reviewer_event_logs (id SERIAL PRIMARY KEY, capture_file_id TEXT, context JSONB NOT NULL DEFAULT '{}'::jsonb);
+    CREATE TABLE reviewer_event_logs (id SERIAL PRIMARY KEY, context JSONB NOT NULL DEFAULT '{}'::jsonb);
     CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMPTZ DEFAULT NOW());
     CREATE TABLE payment_result_drive_archive (file_sha256 TEXT PRIMARY KEY, drive_file_id TEXT);
     CREATE TABLE payment_result_uploads (id SERIAL PRIMARY KEY, file_blob BYTEA, file_name TEXT);
@@ -68,7 +68,7 @@ const countingDb = { query: (...a) => { queryCount++; return db.query(...a); } }
   const ids = {
     rs: id('RS'), os1: id('OS1'), os2: id('OS2'), ri: id('RI'), insp: id('INSP'),
     reOld: id('REOLD'), reNew: id('RENEW'), pca: id('PCA'), pss: id('PSS'),
-    logCol: id('LOGCOL'), logCtx: id('LOGCTX'), sample: id('SAMPLE'),
+    logCtx: id('LOGCTX'), sample: id('SAMPLE'),
     pay: id('PAY'), payAlsoRs: id('PAYRS'),
     gWo: id('GWO'), gWoGuide: id('GWOG'), gCs: id('GCS'), gOpt: id('GOPT'), gThumb: id('GTHUMB'), gSet: id('GSET'),
     unknown: id('UNKNOWN'),
@@ -80,7 +80,6 @@ const countingDb = { query: (...a) => { queryCount++; return db.query(...a); } }
   await db.query('INSERT INTO review_edit_requests(old_file_id,new_file_id) VALUES ($1,$2)', [ids.reOld, ids.reNew]);
   await db.query('INSERT INTO purchase_capture_artifacts(file_id) VALUES ($1)', [ids.pca]);
   await db.query('INSERT INTO purchase_submission_sessions(capture_file_id) VALUES ($1)', [ids.pss]);
-  await db.query('INSERT INTO reviewer_event_logs(capture_file_id) VALUES ($1)', [ids.logCol]);
   await db.query(`INSERT INTO reviewer_event_logs(context) VALUES (jsonb_build_object('fileId', $1::text))`, [ids.logCtx]);
   await db.query(`INSERT INTO app_settings(key,value) VALUES ('review_inspect_sample_x', $1)`,
     [JSON.stringify([`https://api.example.test/api/drive/image/${ids.sample}`])]);
@@ -117,7 +116,7 @@ const countingDb = { query: (...a) => { queryCount++; return db.query(...a); } }
 
   try {
     await t('drive/image: 화면이 번호를 얻는 출처마다 1개씩 허용(200 + 드라이브 1회 + 기존 캐시 헤더)', async () => {
-      for (const k of ['rs', 'os1', 'os2', 'ri', 'insp', 'reOld', 'reNew', 'pca', 'pss', 'logCol', 'logCtx', 'sample']) {
+      for (const k of ['rs', 'os1', 'os2', 'ri', 'insp', 'reOld', 'reNew', 'pca', 'pss', 'logCtx', 'sample']) {
         reads.length = 0;
         const r = await D(ids[k]);
         assert.equal(r.s, 200, k + ' 허용이어야 한다');
@@ -236,7 +235,6 @@ const countingDb = { query: (...a) => { queryCount++; return db.query(...a); } }
       'review_edit_requests.new_file_id',           // C/S 교체요청 변경
       'purchase_capture_artifacts.file_id',         // 동시진행 구매처별 캡처
       'purchase_submission_sessions.capture_file_id', // 구매캡처 업로드 세션
-      'reviewer_event_logs.capture_file_id',        // 리뷰어 로그 펼침
       "reviewer_event_logs.(context->>'fileId')",   // 리뷰어 로그 펼침(_logCapFileId)
       'app_settings.value',                         // AI 판별 예시(주소째 저장)
     ];
