@@ -70,7 +70,8 @@ const moSrc = fs.readFileSync(path.join(__dirname, '../src/services/manualOrder.
   console.log('\n[3] 화면 — 중복으로 되돌아온 건만 확인 후 force 재전송(막다른 길 금지)');
   const fe = fs.readFileSync(path.join(__dirname, '../../frontend/js/manual-order.js'), 'utf8');
   ok('force 를 요청 본문에 싣는다', /force: force === true/.test(fe));
-  ok('중복 건만 골라 다시 보낸다', /filter\(r => r && !r\.ok && r\.duplicate\)/.test(fe) && /post\(_overDailyOk, _repurchaseOk, idxs, true\)/.test(fe));
+  // 결정 344 ⑨: 건별 재참여 기간으로 돌아온 줄도 같은 확인으로 묶고, 다시 보낼 때 재참여 확인(allowRepurchase)을 함께 넘긴다
+  ok('중복 건만 골라 다시 보낸다', /filter\(r => r && !r\.ok && \(r\.duplicate \|\| r\.repurchaseBlocked\)\)/.test(fe) && /post\(_overDailyOk, true, idxs, true\)/.test(fe));
   ok('확인창을 거친다', /if \(okGo\) \{\s*const idxs = dups\.map/.test(fe));
   ok('다시 보낸 결과를 원래 자리로 되돌려 캡처 연결이 맞는 줄에 간다', /r2\.index = orig/.test(fe));
   ok('검사는 원장 기록보다 앞에 있다', moSrc.indexOf('⓪-0.5') > 0 && moSrc.indexOf('⓪-0.5') < moSrc.indexOf('createOrderLedgerEntry({'));

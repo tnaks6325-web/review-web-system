@@ -729,13 +729,13 @@ console.log('\nI. 1단계 캡처 첨부');
   ok('I4 붙여넣기·드래그·파일선택 3경로 — 하나만 두면 브라우저에 따라 막힌다',
     /function onStagePaste/.test(mo) && /function onDrop/.test(mo) && /function onStageFiles/.test(mo));
   ok('I5 여러 장을 한 번에 받는다', /_imagesFrom\(ev\.clipboardData\)/.test(mo) && /\.forEach\(stageImage\)/.test(mo));
-  ok('I6 잘못 넣은 캡처는 뺄 수 있다', /function unstage\(i\)/.test(mo) && mo.includes('ManualOrder.unstage('));
+  ok('I6 잘못 넣은 캡처는 뺄 수 있다', /function unstage\(id\)/.test(mo) && mo.includes('ManualOrder.unstage('));
   ok('I7 보관 캡처도 업로드 전에 줄인다(413 방지 — 줄별 첨부와 같은 경로)', /await shrink\(file\)/.test(mo));
   ok('I8 계약에 1단계 핸들러가 노출된다',
     ['onTextPaste', 'onStagePaste', 'onDrop', 'onStageFiles', 'unstage']
       .every(k => new RegExp('window\\.ManualOrder[\\s\\S]{0,400}\\b' + k + '\\b').test(mo)));
-  ok('I9 파싱 직후 보관 캡처를 각 줄에 배정한다', /distributeStaged\(\);/.test(mo)
-    && mo.indexOf('ROWS = (r.items') < mo.indexOf('distributeStaged();'));
+  ok('I9 파싱 직후 보관 캡처를 각 줄에 배정한다', /distributeStaged\(\) \|\|/.test(mo)
+    && mo.indexOf('ROWS = (r.items') < mo.indexOf('distributeStaged() ||'));
   ok('I10 2단계 줄별 첨부도 그대로 남아 있다(보완 경로)',
     mo.includes('ManualOrder.onPaste(event,') && mo.includes('ManualOrder.onFile(event,'));
   ok('I11 모달을 새로 열면 보관함이 비워진다(다른 탭 캡처 혼입 금지)', /ROWS = \[\]; STAGED = \[\];/.test(mo));

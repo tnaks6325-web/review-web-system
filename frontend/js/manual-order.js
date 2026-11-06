@@ -54,6 +54,10 @@
   let STAGED = [];     // 1단계에서 먼저 받아 둔 구매캡쳐(줄이 나뉜 뒤 수취인 이름으로 배정)
   let OPTS = [];       // ★ 결정 211: 작업보드 경로에서 고를 상품(선택지) 목록 — 서버 preview 가 연결 공고에서 싣는다
   let BUSY = false;
+  let PARSING = false; // [다음] 두 번 누름 방지(캡처 판독을 기다리는 동안)
+  let STAGE_SEQ = 0;   // ★ 결정 344 ⑤: 보관함 칩 고유 id — 순서 번호로 찾으면 빼기·읽기 실패 때 다른 칩이 사라진다
+  let UNASSIGNED = 0;  // ★ 결정 344 ④: 자동으로 붙이지 않고 남겨 둔 캡처 수(미리보기 머리에 알린다)
+  const STAGE_WAIT_MS = 25000;   // [다음]이 캡처 판독을 기다리는 상한(넘으면 순서로 붙이고 표시)
 
   // ── 스타일(1회 주입) ───────────────────────────────────────
   function styles() {
@@ -167,11 +171,12 @@
   }
 
   // ── 1단계: 붙여넣기 ────────────────────────────────────────
-  function renderInput() {
+  // ★ 결정 344 ⑥⑩: text = 다시 채울 글([← 다시 붙여넣기] = 직전 글 · [계속 입력] = 실패한 줄만)
+  function renderInput(text) {
     shell(`
       <div class="mo-pane">
         <h4>구매양식 붙여넣기 <span class="mo-bdg grn">여러 줄 = 여러 건</span></h4>
-        <textarea class="mo-ta" id="moText" onpaste="ManualOrder.onTextPaste(event)" placeholder="카톡에서 받은 슬래시양식을 그대로 붙여넣으세요 (한 줄 = 한 명)&#10;예) 이시현/이시현/kirei223/010-7701-1701/부산시 수영구 광안동 119-3번지, 109호/신한은행/496-04-007701/이시현/15800"></textarea>
+        <textarea class="mo-ta" id="moText" onpaste="ManualOrder.onTextPaste(event)" placeholder="카톡에서 받은 슬래시양식을 그대로 붙여넣으세요 (한 줄 = 한 명)&#10;예) 이시현/이시현/kirei223/010-7701-1701/부산시 수영구 광안동 119-3번지, 109호/신한은행/496-04-007701/이시현/15800">${esc(text || '')}</textarea>
         <div class="mo-hint">
           순서: <b>리뷰어 / 수취인 / 아이디 / 전화번호 / 주소 / 은행 / 계좌번호 / 예금주 / 결제금액</b><br>
           · 주소에 슬래시(/)가 있어도 앞뒤 칸이 밀리지 않게 자동으로 주소로 합칩니다<br>
@@ -198,7 +203,7 @@
           · 지금 안 넣어도 됩니다 — 다음 단계 표에서 줄마다 따로 넣을 수도 있어요
         </div>
       </div>`,
-      `<span class="sp"></span><button class="mo-btn pri" onclick="ManualOrder.parse()">다음 — 자동으로 나누기</button>`);
+      `<span class="sp"></span><button class="mo-btn pri" id="moNext" onclick="ManualOrder.parse()">다음 — 자동으로 나누기</button>`);
     renderStage();
     if (window.PasteReady) PasteReady.bind(document.getElementById('moDrop'), _stageAll, window.toast);
     setTimeout(() => { const t = document.getElementById('moText'); if (t) t.focus(); }, 40);
@@ -209,33 +214,35 @@
      `parse()` 뒤에 **캡처에서 읽은 수취인 이름**으로 각 줄에 배정한다(이름 실패 시 순서).
      카톡에서 캡처 여러 장을 연달아 복사하는 실제 흐름에 맞춘 자리다. */
   function stageImage(file) {
-    const idx = STAGED.length;
-    STAGED.push({ base64: '', mime: '', extract: null, thumb: '', busy: true });
+    // ★ 결정 344 ⑤: 칩은 객체 자체로 다룬다(순서 번호 X) — 그사이 앞 칩을 빼거나 읽기에 실패해 빠져도 엉뚱한 칩을 건드리지 않는다.
+    const s = { id: ++STAGE_SEQ, base64: '', mime: '', extract: null, thumb: '', busy: true, ready: null };
+    STAGED.push(s);
     renderStage();
-    (async () => {
-      const shrunk = await shrink(file);
-      if (!shrunk || !shrunk.base64) { STAGED.splice(idx, 1); renderStage(); return; }
-      const s = STAGED[idx];
-      if (!s) return;
-      s.base64 = shrunk.base64; s.mime = shrunk.mime;
-      s.thumb = 'data:' + shrunk.mime + ';base64,' + shrunk.base64;
-      renderStage();
-      // 수취인·주문번호 자동 인식(실패해도 첨부는 유지 — 순서로 배정된다)
+    // ★ 결정 344 ②: [다음]이 이 약속을 기다린다(판독 전에 배정하면 이름 대신 순서로 붙어 남의 주문에 올라간다). 거부하지 않는다.
+    s.ready = (async () => {
       try {
-        const r = await api('/api/image/image-extract', {
-          method: 'POST', body: JSON.stringify({ imageBase64: s.base64, mimeType: s.mime }),
-        });
-        if (r && r.ok) s.extract = r;
-      } catch (_) { /* 인식 실패는 무시 */ }
-      s.busy = false;
-      renderStage();
+        const shrunk = await shrink(file);
+        if (STAGED.indexOf(s) < 0) return;              // 그사이 [×]로 뺐다
+        if (!shrunk || !shrunk.base64) { STAGED.splice(STAGED.indexOf(s), 1); return; }
+        s.base64 = shrunk.base64; s.mime = shrunk.mime;
+        s.thumb = 'data:' + shrunk.mime + ';base64,' + shrunk.base64;
+        renderStage();
+        // 수취인·주문번호 자동 인식(실패해도 첨부는 유지 — 순서로 배정된다)
+        try {
+          const r = await api('/api/image/image-extract', {
+            method: 'POST', body: JSON.stringify({ imageBase64: s.base64, mimeType: s.mime }),
+          });
+          if (r && r.ok) s.extract = r;
+        } catch (_) { /* 인식 실패는 무시 */ }
+      } catch (_) { /* 축소 실패 — 아래에서 멈춘 칩으로 남기지 않는다 */ }
+      finally { s.busy = false; renderStage(); }
     })();
   }
   function renderStage() {
     const el = document.getElementById('moStage');
     if (!el) return;
     if (!STAGED.length) { el.innerHTML = ''; return; }
-    el.innerHTML = STAGED.map((s, i) => {
+    el.innerHTML = STAGED.map(s => {
       const who = s.busy ? '읽는 중…'
         : (s.extract && s.extract.recipient) ? esc(s.extract.recipient)
         : '이름 못 읽음';
@@ -243,11 +250,15 @@
       return `<div class="${cls}">
         ${s.thumb ? `<img src="${s.thumb}" alt="">` : '<span class="ph">⏳</span>'}
         <span class="nm">${who}</span>
-        <button type="button" title="빼기" onclick="ManualOrder.unstage(${i})">×</button>
+        <button type="button" title="빼기" onclick="ManualOrder.unstage(${s.id})">×</button>
       </div>`;
     }).join('');
   }
-  function unstage(i) { STAGED.splice(i, 1); renderStage(); }
+  function unstage(id) {
+    const k = STAGED.findIndex(s => String(s.id) === String(id));
+    if (k >= 0) STAGED.splice(k, 1);
+    renderStage();
+  }
 
   /** 텍스트 칸에 이미지가 붙여넣어지면 캡처로 받는다(관리자는 그냥 Ctrl+V만 한다) */
   /** 1단계 보관함에 넣는 길은 이 한 곳 — 붙여넣기·끌어놓기·파일 선택·[Ctrl+V] 칸 누르기 모두. 받았다는 표시(초록 깜빡임)도 여기서. */
@@ -300,54 +311,108 @@
 
   /**
    * 보관함의 캡처를 각 줄에 배정한다.
-   * ① 캡처에서 읽은 수취인 == 그 줄의 수취인(공백 무시) → 확실한 매칭
-   * ② 캡처에서 읽은 연락처 뒤 4자리 일치
-   * ③ 남은 것은 **붙인 순서대로** 남은 줄에 — 이름을 못 읽어도 첨부가 버려지지 않게
+   * ① 캡처에서 읽은 수취인 == 그 줄의 수취인(공백 무시) · 마스킹 이름(김*수)은 글자 패턴 — 단, 전화 끝4자리가 분명히 다르면 버린다
+   *    후보가 여럿(동명이인·마스킹 겹침)이면 **연락처로만** 가린다 — 못 가리면 순서로 보내지 않고 남긴다
+   * ② 이름으로 못 찾으면 연락처 뒤 4자리 — **정확히 한 줄**일 때만(여러 줄이면 남긴다)
+   * ③ 남은 것은 **붙인 순서대로** 남은 줄에(이름 못 읽은 캡처 먼저, 이름이 안 맞는 캡처 나중) — 그 줄에 '순서로 붙음' 표시
+   * ★ 나누기 실패 줄(ok:false)은 배정 대상이 아니다 · 한 사람에 2장 이상 맞으면 첫 장만 — 나머지는 남긴다(다른 사람 줄로 보내지 않음)
+   * ★ 결정 344: 이 함수만 떼어 실행하는 회귀가드가 있다 — 도우미는 함수 안에 둔다. 돌려주는 값 = { unassigned }
    */
   function distributeStaged() {
-    if (!STAGED.length) return;
+    const out = { unassigned: 0 };
+    if (!STAGED.length) return out;
     const norm = s => String(s || '').replace(/\s+/g, '');
-    const tail4 = s => String(s || '').replace(/[^0-9]/g, '').slice(-4);
-    const left = STAGED.filter(s => s.base64);
-    const take = (row, s) => {
-      row.capture = { base64: s.base64, mime: s.mime };
+    // 안심번호(050x)·4자리 미만은 "모름" — 다르다고 판단하지 않는다
+    const tail4 = s => { const d = String(s || '').replace(/[^0-9]/g, ''); return (d.length < 4 || /^050/.test(d)) ? '' : d.slice(-4); };
+    const MASK = /[*＊●○]/;
+    const nameHit = (cap, nm) => {
+      if (!nm) return false;
+      if (!MASK.test(cap)) return cap === nm;
+      const a = Array.from(cap), b = Array.from(nm);
+      return a.length === b.length && a.some(c => !MASK.test(c)) && a.every((c, i) => MASK.test(c) || c === b[i]);
+    };
+    const rows = ROWS.filter(r => r && r.fields && r.ok !== false);
+    const caps = STAGED.filter(s => s && s.base64);
+    out.unassigned = STAGED.length - caps.length;   // 사진 줄이기가 끝나지 않은 칩
+    const take = (row, s, byOrder) => {
+      row.capture = { base64: s.base64, mime: s.mime, stagedId: s.id };
+      row.captureByOrder = !!byOrder;
       if (s.extract) {
         row.extract = s.extract;
         if (s.extract.orderNumber && !row.fields.orderNum) row.fields.orderNum = s.extract.orderNumber;
       }
-      left.splice(left.indexOf(s), 1);
     };
-    ROWS.forEach(r => {
-      if (r.capture || !r.fields) return;
-      const nm = norm(r.fields.recipient);
-      const hit = nm && left.find(s => s.extract && norm(s.extract.recipient) === nm);
-      if (hit) take(r, hit);
+    const unread = [], misread = [];
+    caps.forEach(s => {
+      const ex = s.extract || {};
+      const nm = norm(ex.recipient), t4 = tail4(ex.phone);
+      let known = false, target = null;
+      if (nm) {
+        let c = rows.filter(r => nameHit(nm, norm(r.fields.recipient)));
+        if (t4) c = c.filter(r => { const rt = tail4(r.fields.phone); return !rt || rt === t4; });
+        if (c.length === 1) { known = true; target = c[0]; }
+        else if (c.length > 1) {
+          known = true;
+          const byPhone = t4 ? c.filter(r => tail4(r.fields.phone) === t4) : [];
+          if (byPhone.length === 1) target = byPhone[0];
+        }
+      }
+      if (!known && t4) {
+        const c = rows.filter(r => tail4(r.fields.phone) === t4);
+        if (c.length) known = true;
+        if (c.length === 1) target = c[0];
+      }
+      if (known) {
+        if (target && !target.capture) take(target, s, false);
+        else out.unassigned++;
+        return;
+      }
+      (nm || t4 ? misread : unread).push(s);
     });
-    ROWS.forEach(r => {
-      if (r.capture || !r.fields) return;
-      const t = tail4(r.fields.phone);
-      const hit = t && left.find(s => s.extract && tail4(s.extract.phone) === t);
-      if (hit) take(r, hit);
+    unread.concat(misread).forEach(s => {
+      const r = rows.find(x => !x.capture);
+      if (r) take(r, s, true); else out.unassigned++;
     });
-    ROWS.forEach(r => { if (!r.capture && left.length) take(r, left[0]); });
+    return out;
   }
 
   // ── 2단계: 파싱 미리보기 ───────────────────────────────────
   async function parse() {
+    if (PARSING) return;
     const el = document.getElementById('moText');
     const text = el ? el.value : '';
     if (!text.trim()) { alert('붙여넣은 내용이 없습니다.'); return; }
+    PARSING = true;
+    const btn = document.getElementById('moNext');
+    const btnTxt = btn ? btn.textContent : '';
+    try {
+      await _parse(text, btn);
+    } finally {
+      PARSING = false;
+      if (btn) { btn.disabled = false; btn.textContent = btnTxt; }
+    }
+  }
+  async function _parse(text, btn) {
+    // ★ 결정 344 ②: 캡처 판독(이름 읽기)·사진 줄이기가 끝나기 전에 배정하면 이름 대신 순서로 붙어 남의 주문에 올라간다
+    //   → 끝날 때까지 기다린다(상한 STAGE_WAIT_MS — 넘으면 그대로 순서로 붙이고 그 줄에 '순서로 붙음' 표시).
+    const pending = STAGED.filter(s => s && s.busy && s.ready);
+    if (btn) { btn.disabled = true; if (pending.length) btn.textContent = '캡처 읽는 중…'; }
+    const waitCaps = pending.length
+      ? Promise.race([Promise.all(pending.map(s => s.ready)), new Promise(res => setTimeout(res, STAGE_WAIT_MS))]) : null;
     let r;
     try {
       r = await api(_moBase() + '/preview', { method: 'POST',
         body: JSON.stringify({ text, sheetId: CTX.sheetId, tabName: CTX.tabName, campaignId: CTX.campaignId || null }) });
     } catch (e) { alert('분해 실패: ' + (e && e.message ? e.message : '서버에 연결하지 못했습니다')); return; }
     if (!r || !r.ok) { alert('분해 실패: ' + ((r && r.error) || '오류')); return; }
+    if (waitCaps) await waitCaps;
+    if (!CTX) return;   // 기다리는 사이 창을 닫았다
+    CTX.lastText = text;   // ★ 결정 344 ⑥: [← 다시 붙여넣기]가 이 글을 되살린다
     // ★ 결정 211: 공고 화면 경로(campaignId)는 신청 선택이 옵션을 정하므로 상품 칸을 띄우지 않는다.
     OPTS = (!CTX.campaignId && Array.isArray(r.optionChoices)) ? r.optionChoices.filter(o => o && o.optKey) : [];
     ROWS = (r.items || []).map(it => Object.assign({}, it, { capture: null, extract: null, applications: [], targetApplicationId: '',
       optKey: OPTS.length === 1 ? OPTS[0].optKey : '', optFullAck: false }));
-    distributeStaged();   // 1단계에서 먼저 받아 둔 캡처를 수취인 이름으로 각 줄에 붙인다
+    UNASSIGNED = (distributeStaged() || {}).unassigned || 0;   // 1단계에서 먼저 받아 둔 캡처를 수취인 이름으로 각 줄에 붙인다
     await loadApplicationCandidates();
     if (r.repairedCount) console.info('[ManualOrder] 자동보정 ' + r.repairedCount + '건');
     if (r.truncated) alert(`한 번에 최대 50건까지 처리합니다. ${r.truncated}건은 제외되었습니다.`);
@@ -465,6 +530,7 @@
       <td style="width:130px">
         <div class="${capCls}" tabindex="0" onpaste="ManualOrder.onPaste(event,${i})" onclick="this.focus()">${capTxt}</div>
         ${capPick}
+        ${it.capture && it.captureByOrder ? '<div style="margin-top:3px"><span class="mo-bdg amb" title="캡처에서 이름을 못 읽어 붙인 순서대로 붙였습니다 — 맞는 사람인지 확인하세요">순서로 붙음 — 확인</span></div>' : ''}
         ${appSelect}
         ${msgs}
       </td>
@@ -477,7 +543,7 @@
     const fixN = ROWS.filter(r => (r.repairs || []).length || r.aiRepaired).length;
     shell(`
       <div class="mo-pane">
-        <h4>분해 결과 확인 <span class="mo-bdg grn">정상 ${okN}건</span>${badN ? ` <span class="mo-bdg red">오류 ${badN}건</span>` : ''}${fixN ? ` <span class="mo-bdg amb">자동보정 ${fixN}건</span>` : ''}</h4>
+        <h4>분해 결과 확인 <span class="mo-bdg grn">정상 ${okN}건</span>${badN ? ` <span class="mo-bdg red">오류 ${badN}건</span>` : ''}${fixN ? ` <span class="mo-bdg amb">자동보정 ${fixN}건</span>` : ''}${UNASSIGNED ? ` <span class="mo-bdg amb" title="이름이 겹치거나 한 사람에 여러 장이라 자동으로 붙이지 않았습니다 — 줄마다 직접 붙여 주세요">배정 안 된 캡처 ${UNASSIGNED}장</span>` : ''}</h4>
         <div style="overflow-x:auto">
           <table class="mo-tbl">
             <thead><tr>
@@ -504,13 +570,42 @@
     syncSubmitBtn();
   }
 
-  function back() { renderInput(); }
+  /** [← 다시 붙여넣기] — 결정 344 ⑥: 직전 글을 되살리고, 2단계에서 줄에 직접 붙인 캡처는 보관함으로 돌려놓는다
+   *  (보관함에서 온 캡처는 보관함에 그대로 있다 — 다음 [다음]에서 다시 이름으로 배정된다). */
+  function back() {
+    ROWS.forEach(r => {
+      const c = r && r.capture;
+      if (!c || !c.base64 || c.stagedId) return;
+      STAGED.push({ id: ++STAGE_SEQ, base64: c.base64, mime: c.mime, extract: r.extract || null,
+        thumb: 'data:' + c.mime + ';base64,' + c.base64, busy: false, ready: null });
+    });
+    ROWS = []; UNASSIGNED = 0;
+    renderInput((CTX && CTX.lastText) || '');
+  }
+  /** 제출 결과 화면의 [계속 입력] — 결정 344 ①⑩: 접수된 줄은 다시 넣지 않는다(이중 등록 방지).
+   *  실패·미제출 줄만 입력칸에 다시 채우고, 그 줄들의 캡처만 보관함에 되돌린다(앞사람 캡처가 다음 사람에 붙지 않게). */
+  function again() {
+    const retry = (CTX && CTX.retry) || { text: '', caps: [] };
+    STAGED = retry.caps.slice(); ROWS = []; UNASSIGNED = 0;
+    if (CTX) { CTX.retry = null; CTX.lastText = retry.text; }
+    renderInput(retry.text);
+  }
+  /** 한 줄을 9칸 슬래시양식으로 되돌린다(고친 값 유지). 나누기 실패 줄은 원문(raw)이 있으면 원문 그대로. */
+  function _lineOf(r) {
+    if (r && r.ok === false && r.raw) return String(r.raw);
+    const f = (r && r.fields) || {};
+    return ['reviewerName', 'recipient', 'userId', 'phone', 'address', 'bank', 'account', 'depositor', 'price']
+      .map(k => String(f[k] == null ? '' : f[k]).replace(/\n/g, ' ')).join('/');
+  }
 
   async function loadApplicationCandidates() {
     if (!CTX || !CTX.campaignId || !ROWS.length) return;
     let data = [];
     try {
-      const r = await api('/api/campaign/admin/' + encodeURIComponent(CTX.campaignId) + '/applications');
+      // ★ 결정 344 ⑪: 경로는 호스트가 재기준한다(`window.CAMPAIGN_ADMIN_API` — campaign-cards 와 같은 장치).
+      //   인트라넷 로그인(리뷰웹시스템[3버전])은 /api/trackb/campaigns 로만 닿는다 — 같은 핸들러라 응답 모양이 같다.
+      const cb = (typeof window.CAMPAIGN_ADMIN_API === 'string' && window.CAMPAIGN_ADMIN_API) ? window.CAMPAIGN_ADMIN_API.replace(/\/$/, '') : '/api/campaign/admin';
+      const r = await api(cb + '/' + encodeURIComponent(CTX.campaignId) + '/applications');
       data = r && r.ok && Array.isArray(r.data) ? r.data : [];
     } catch (_) { return; }
     const p8 = v => String(v || '').replace(/\D/g, '').slice(-8);
@@ -643,6 +738,7 @@
       if (!shrunk || !shrunk.base64) { alert('이미지를 읽지 못했습니다.'); return; }
       const b64 = shrunk.base64;
       row.capture = { base64: b64, mime: shrunk.mime };
+      row.captureByOrder = false;   // 사람이 직접 붙였다
       row.productWarn = null;   // 캡처가 바뀌면 상품 확인 이유도 다시 판정한다(결정 236)
       renderPreview();
       // 캡처에서 주문번호 등 자동 인식(실패해도 첨부는 유지)
@@ -763,18 +859,20 @@
       // ★ 같은 구매로 보이는 건(24시간 내 같은 연락처 · 같은 주문번호·연락처 — 결정 193)은 서버가 **그 건만**
       //   접수하지 않고 되돌린다(나머지는 이미 접수됨). 다른 구매가 맞는 경우가 있어 막다른 길로 두지 않고,
       //   확인을 받은 뒤 **그 건들만** force 로 다시 보낸다. 결과는 원래 자리(index)에 덮어쓴다.
-      const dups = (out && out.ok && Array.isArray(out.results)) ? out.results.filter(r => r && !r.ok && r.duplicate) : [];
+      // ★ 결정 344 ⑨: 같은 연락처가 묶음에 두 줄이면 뒤 줄은 24시간 중복(또는 건별 재참여 기간)으로 돌아온다. 다시 보낼 때 재참여 기간
+      //   확인도 함께 넘긴다 — 안 넘기면 서버 사전 판정이 방금 접수된 앞 줄 때문에 다시 막아 "강제 등록 가능" 안내가 막다른 길이 된다.
+      const dups = (out && out.ok && Array.isArray(out.results)) ? out.results.filter(r => r && !r.ok && (r.duplicate || r.repurchaseBlocked)) : [];
       if (dups.length) {
         const list = dups.map(r => `· ${r.name || '(이름없음)'} — ${r.error || ''}`).join('\n');
         const okGo = confirm(
-          `${dups.length}건이 이미 접수된 구매와 겹쳐 접수하지 않았어요(나머지는 접수됨).\n\n${list}\n\n`
+          `${dups.length}건이 이미 접수된 구매와 겹치거나 최근 참여한 연락처라 접수하지 않았어요(나머지는 접수됨).\n\n${list}\n\n`
           + `같은 구매를 두 번 등록하면 한 구매가 두 명으로 세어져 모집이 일찍 마감됩니다.\n`
-          + `[확인] 다른 구매가 맞으니 따로 접수합니다.\n`
+          + `[확인] 다른 구매가 맞으니 따로 접수합니다(재참여 기간 확인도 함께 넘깁니다).\n`
           + `[취소] 이 건들은 접수하지 않습니다.`);
         if (okGo) {
           const idxs = dups.map(r => r.index);
           try {
-            const out2 = await post(_overDailyOk, _repurchaseOk, idxs, true);
+            const out2 = await post(_overDailyOk, true, idxs, true);
             if (out2 && out2.ok && Array.isArray(out2.results)) {
               for (const r2 of out2.results) {
                 const orig = idxs[r2.index];
@@ -799,6 +897,27 @@
       alert('제출 실패: ' + ((out && out.error) || '오류'));
       return;
     }
+
+    // ★ 결정 344 ①⑩: 이 묶음의 보관함 캡처는 여기서 끝 — [계속 입력] 때 앞사람 캡처가 다음 사람 주문에 또 붙지 않게 비운다.
+    //   실패·미제출 줄만 [계속 입력]이 입력칸·보관함에 되살린다(접수된 줄을 다시 내 이중 등록하지 않게).
+    {
+      const okRows = new Set();
+      (out.results || []).forEach((res, k) => {
+        if (!res || !res.ok) return;
+        const t = typeof res.index === 'number' ? targets[res.index] : targets[k];
+        if (t) okRows.add(t.r);
+      });
+      const failed = ROWS.filter(r => !okRows.has(r));
+      CTX.retry = {
+        text: failed.map(_lineOf).join('\n'),
+        caps: failed.filter(r => r.capture && r.capture.base64).map(r => ({ id: ++STAGE_SEQ, base64: r.capture.base64, mime: r.capture.mime,
+          extract: r.extract || null, thumb: 'data:' + r.capture.mime + ';base64,' + r.capture.base64, busy: false, ready: null })),
+      };
+      STAGED = [];
+    }
+    // ★ 결정 344 ⑧: 작업보드는 캡처 업로드를 기다리지 않고 바로 다시 불러온다(줄은 이미 기록됐다).
+    let _refreshed = false;
+    try { if ((Number(out.okCount) || 0) > 0 && typeof CTX.onSubmitted === 'function') { _refreshed = true; CTX.onSubmitted(out); } } catch (_) {}
 
     // 성공 건의 캡처를 주문에 연결(기존 업로드 경로 재사용 — 신규 저장소 0)
     for (let k = 0; k < (out.results || []).length; k++) {
@@ -835,17 +954,18 @@
     }
 
     BUSY = false;
-    renderResult(out);
+    renderResult(out, _refreshed);
   }
 
-  function renderResult(out) {
+  function renderResult(out, refreshed) {
     const rows = (out.results || []).map(r => {
       if (r.ok) {
         const bits = [];
         if (r.reviewerRegistered) bits.push(r.linkedOwner ? `‘${esc(r.linkedOwner)}’ 리뷰어의 타계정으로 등록` : '리뷰어 자동 등록됨');
         if (r.quotaCounted) bits.push('모집인원 1명 차감');
         if (r.captureAttached) bits.push('구매캡쳐 첨부됨');
-        bits.push(r.queued ? '시트 기록 예약됨' : '시트 기록은 자동복구 대기');
+        // ★ 결정 344 ⑦: 무시트 작업표에 바로 적혔으면 서버가 줄 번호를 준다 — "자동복구 대기"로 잘못 말하지 않는다
+        bits.push(r.worktableRow ? `작업표 ${Number(r.worktableRow)}번 줄에 기록됨` : r.queued ? '시트 기록 예약됨' : '시트 기록은 자동복구 대기');
         const warn = (r.warnings || []).length
           ? `<div class="mo-msg w" style="margin-top:4px">⚠ ${(r.warnings || []).map(esc).join(' · ')}</div>` : '';
         return `<div class="mo-res ok"><span class="ci">✓</span><div>
@@ -860,19 +980,20 @@
       <div class="mo-pane">
         <h4>제출 결과 <span class="mo-bdg grn">성공 ${out.okCount}건</span>${out.failCount ? ` <span class="mo-bdg red">실패 ${out.failCount}건</span>` : ''}</h4>
         ${rows}
-        ${out.failCount ? '<div class="mo-hint">실패한 건은 원인을 고쳐 다시 붙여넣어 제출하세요. 성공한 건은 이미 접수되어 다시 넣으면 중복됩니다.</div>' : ''}
+        ${out.failCount ? '<div class="mo-hint">[계속 입력]을 누르면 실패한 줄만 입력칸에 다시 채워집니다 — 원인을 고쳐 다시 제출하세요. 성공한 건은 이미 접수되어 다시 넣으면 중복됩니다.</div>' : ''}
       </div>`,
       `<span class="sp"></span>
-       <button class="mo-btn gh" onclick="ManualOrder.back()">계속 입력</button>
+       <button class="mo-btn gh" onclick="ManualOrder.again()">계속 입력</button>
        <button class="mo-btn pri" onclick="ManualOrder.close()">완료</button>`);
     // 목록/관제가 열려 있으면 갱신(있을 때만 — 없는 화면에서 조용히 무시)
     try { if (typeof loadTabDashboard === 'function') loadTabDashboard(); } catch (_) {}
     try { if (CTX && CTX.campaignId && typeof _loadCampControl === 'function') _loadCampControl(CTX.campaignId); } catch (_) {}
-    try { if ((Number(out.okCount) || 0) > 0 && typeof CTX.onSubmitted === 'function') CTX.onSubmitted(out); } catch (_) {}
+    // 캡처가 붙었으면 한 번 더(작업표의 캡처 칸) — 업로드 전에 이미 한 번 불렀다(⑧)
+    try { if ((!refreshed || (out.results || []).some(r => r && r.captureAttached)) && (Number(out.okCount) || 0) > 0 && typeof CTX.onSubmitted === 'function') CTX.onSubmitted(out); } catch (_) {}
   }
 
   window.ManualOrder = {
-    open, close, parse, back, edit, submit, pickApplication, pickOption, ackOption,
+    open, close, parse, back, again, edit, submit, pickApplication, pickOption, ackOption,
     onPaste, onFile,                                    // 2단계 표의 줄별 첨부
     onTextPaste, onStagePaste, onDrop, onStageFiles, unstage,   // 1단계 보관함
   };
