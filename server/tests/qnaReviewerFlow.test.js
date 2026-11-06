@@ -198,7 +198,10 @@ const st = require('../src/services/campaignState.service');
   t('홀드 조회가 qna_slot_id 를 같은 왕복에 읽는다', /ca\.purchase_qty, ca\.qty_tier_amount, ca\.qna_slot_id,/.test(sub9));
   t('Q&A 제출: 로그인 번호는 세션 먼저', /String\(session\.loginPhone8 \|\| b\.loginPhone8/.test(sub9));
   t('Q&A 제출: 줄 잠금 안에서 남의 줄 덮기 막음', /requireEmptyOrSame: true/.test(sub9)
-    && /requireEmptyOrSame && cur\.length && cur\[0\]\.order_submission_id[\s\S]{0,120}!== String\(orderSubmissionId\)\)[\s\S]{0,200}reason: 'row_taken'/.test(so9));
+    && /requireEmptyOrSame && cur\.length && cur\[0\]\.order_submission_id[\s\S]{0,120}!== String\(orderSubmissionId\)\)[\s\S]{0,400}reason: 'row_taken'/.test(so9));
+  t('Q&A 줄 충돌: 자체 tx만 롤백하고 외부 tx는 InTx 예외로 소유자에게 돌린다',
+    /if \(!suppliedClient\) await client\.query\('ROLLBACK'\);[\s\S]{0,300}reason: 'row_taken'/.test(so9)
+    && /async function writeOrderToWorktableInTx\(client,args=\{\}\)[\s\S]*writeOrderToWorktable\(args,client\)[\s\S]*if\(!result\.ok\)[\s\S]*throw e/.test(so9));
   t('Q&A 제출: 두 번 눌러 먼저 확정됐으면 그 결과를 돌려줌', /alreadySubmitted: true, orderSubmissionId: done\[0\]\.order_submission_id/.test(sub9));
   t('신청 종류 판정: 공고의 작업표 칸 이름(linked_sheet_id)', /tabWorkKind\(\{ sheetId: campPre\.linked_sheet_id/.test(camp9) && !/campPre\.linked_tab_sheet_id/.test(camp9));
   t('신청: 잠근 공고로 종류 재확인(갈리면 막음)', /isQnaKind\(_lockedKind\) !== qnaApply/.test(camp9));

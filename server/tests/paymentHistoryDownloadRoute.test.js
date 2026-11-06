@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const router = require('../src/routes/trackB.routes');
 const pool = require('../src/db/pool');
 const payment = require('../src/services/payment.service');
+const lifecycle = require('../src/services/dualChannelLifecycle.service');
 const layer = router.stack.find(entry => entry.route && entry.route.path === '/payment/batch/:id/file');
 assert.ok(layer, 'download endpoint exists');
 const handler = layer.route.stack[layer.route.stack.length - 1].handle;
@@ -17,7 +18,14 @@ const originals = {
   checkBatchReceiptEligibility: payment.checkBatchReceiptEligibility,
   buildWorkbook: payment.buildWorkbook,
   markDownloaded: payment.markDownloaded,
+  discover: lifecycle.discoverDualScope,
+  lock: lifecycle.lockDualScopeInTx,
+  provenance: lifecycle.assertDualProvenanceUnchanged,
 };
+// 이 검사는 과거 기록 회차 거부만 본다. 동시진행 선행잠금 순서는 dualFirstDownloadPrelock.test.js 가 실행으로 고정한다.
+lifecycle.discoverDualScope = async () => ({});
+lifecycle.lockDualScopeInTx = async () => {};
+lifecycle.assertDualProvenanceUnchanged = async () => {};
 
 pool.connect = async () => client;
 payment.getBatch = async () => ({
@@ -79,5 +87,8 @@ const response = {
     payment.checkBatchReceiptEligibility = originals.checkBatchReceiptEligibility;
     payment.buildWorkbook = originals.buildWorkbook;
     payment.markDownloaded = originals.markDownloaded;
+    lifecycle.discoverDualScope = originals.discover;
+    lifecycle.lockDualScopeInTx = originals.lock;
+    lifecycle.assertDualProvenanceUnchanged = originals.provenance;
   }
 })().catch(err => { console.error(err); process.exitCode = 1; });

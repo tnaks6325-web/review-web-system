@@ -31,11 +31,16 @@ const { _fieldToCol } = require('../src/services/orderLedger.service');
 
 function makePool(sc) {
   const q = [];
-  return {
+  const client = { query: (...args) => pool.query(...args), release() {} };
+  const pool = {
     q,
+    client,
+    async connect() { return client; },
     async query(sql, params) {
       const s = sql.replace(/\s+/g, ' ').trim();
       q.push({ s, params });
+      if (/SELECT order_submission_id, tab_gid FROM campaign_participants/.test(s)) return { rows: sc.noRow ? [] : [{ order_submission_id: sc.orderId || null, tab_gid: 'g1' }] };
+      if (/SELECT to_jsonb\(o\) AS submission/.test(s)) return { rows: [{ submission: { id: sc.orderId } }] };
       if (/COALESCE\(sheetless, FALSE\) AS s FROM tab_configs/.test(s)) return { rows: [{ s: sc.sheetless !== false }] };
       if (/SELECT id, seq, tab_gid, order_submission_id FROM campaign_participants/.test(s))
         return { rows: sc.noRow ? [] : [{ id: params[0], seq: 579, tab_gid: 'g1', order_submission_id: sc.orderId || null }] };
@@ -49,14 +54,15 @@ function makePool(sc) {
       return { rows: [], rowCount: 0 };
     },
   };
+  return pool;
 }
 
 async function run() {
-  const realWrite = so.writeOrderToWorktable;
+  const realWrite = so.writeOrderToWorktableInTx;
   const realMarkIdentity = st.markSheetlessIdentityName;
   const realRebuild = ledger.rebuildLedgers;
   let writeCalls = [];
-  so.writeOrderToWorktable = async (a) => { writeCalls.push(a); return { ok: true, written: true, seq: a.sheetRow }; };
+  so.writeOrderToWorktableInTx = async (client, a) => { writeCalls.push({ ...a, client }); return { ok: true, written: true, seq: a.sheetRow }; };
   // 장부 재생성은 다른 모듈의 자체 pool 을 쓴다(구매일자 회귀가드와 같은 이유로 여기서 stub —
   // 안 하면 스텁 pool 없이 real getPool()이 호출돼 실 네트워크 시도가 나간다).
   ledger.rebuildLedgers = async () => ({ ok: true });
@@ -71,7 +77,11 @@ async function run() {
     const up = pool.q.find(x => /UPDATE order_submissions SET orderer/.test(x.s));
     assert.ok(up, '원장 orderer 를 먼저 고친다(안 고치면 다음 재기록이 옛 이름을 도로 덮는다)');
     assert.equal(up.params[1], '박정은');
-    assert.ok(/last_edit_seq = GREATEST/.test(up.s), 'last_edit_seq 단조증가(stale 편집 보호 — 구매일자와 동일)');
+    assert.ok(/last_edit_seq\s*=\s*GREATEST/.test(up.s), 'last_edit_seq 단조증가(stale 편집 보호 — 구매일자와 동일)');
+    assert.equal(writeCalls[0].client, pool.client, '원장 SQL과 투영은 같은 빌린 client를 쓴다(pool과 별개)');
+    assert.ok(pool.q.findIndex(x => /^BEGIN$/.test(x.s)) < pool.q.findIndex(x => /sheetless_worktable/.test(x.params && x.params[0])));
+    assert.ok(pool.q.findIndex(x => /pg_advisory_xact_lock/.test(x.s)) < pool.q.findIndex(x => /FOR UPDATE/.test(x.s)), '탭을 행보다 먼저 잠근다');
+    assert.ok(pool.q.findIndex(x => /^COMMIT$/.test(x.s)) > pool.q.indexOf(up), '원장·투영 뒤에 커밋');
     assert.equal(writeCalls.length, 1, '실행부 = writeOrderToWorktable 한 벌(사본 0)');
     assert.equal(writeCalls[0].sheetRow, 579, '기존 연결 행을 지목(빈 슬롯을 새로 먹지 않는다)');
     console.log('  A. 주문 연결 줄(원장 우선·한 벌) — orderer 통과');
@@ -93,6 +103,8 @@ async function run() {
     r = await svc.setWorkdeskIdentityField({ sheetId: 'S', tabName: 'T', rowId: 'row-2', field: 'orderer', value: '박정은', by: 'm' });
     assert.equal(r.ok, true); assert.equal(r.via, 'cell');
     assert.equal(writeCalls.length, 0, '주문 없는 줄은 원장 경로를 타지 않는다');
+    const identityCell = pool.q.find(x => /UPDATE campaign_participants SET row_json/.test(x.s));
+    assert.deepEqual(identityCell.params, ['row-2', 'S', 'T', '주문자제출', '박정은', 'm'], '표시용 대역 성공이 아니라 실제 칸 SQL 대상·값을 고정한다');
     st.markSheetlessIdentityName = realMarkIdentity;
     console.log('  B. 주문 없는 줄(칸 직접 기록) 통과');
 
@@ -168,7 +180,7 @@ async function run() {
     assert.ok(/svc\.setWorkdeskIdentityField/.test(irBody), '서비스 위임');
     console.log('  G. 라우트 배선 통과');
   } finally {
-    so.writeOrderToWorktable = realWrite;
+    so.writeOrderToWorktableInTx = realWrite;
     st.markSheetlessIdentityName = realMarkIdentity;
     ledger.rebuildLedgers = realRebuild;
     svc.__setPoolForTest(null); st.__setPoolForTest(null);

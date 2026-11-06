@@ -32,6 +32,7 @@ async function issueForOrder({ orderSubmissionId, captureSheetId = '', captureTa
      SELECT os.id, $2, $3, $4, $5, NOW() + ($6 || ' hours')::interval
        FROM order_submissions os
       WHERE os.id = $1 AND os.deleted_at IS NULL
+        AND (to_jsonb(os)->>'purchase_bundle_version') IS NULL
      RETURNING id, order_submission_id AS "orderSubmissionId", expires_at AS "expiresAt"`,
     [orderSubmissionId, tokenHash, String(captureSheetId || ''), String(captureTabName || ''),
       String(source || 'order_submit').slice(0, 40), String(_ttlHours())]
@@ -57,6 +58,7 @@ async function inspectForUpload({ sessionId, sessionToken, orderSubmissionId, ca
       WHERE ps.id = $1 AND ps.order_submission_id = $2
         AND ps.token_hash = $3 AND ps.expires_at > NOW()
         AND os.deleted_at IS NULL
+        AND (to_jsonb(os)->>'purchase_bundle_version') IS NULL
       LIMIT 1`,
     [sessionId, orderSubmissionId, _hash(sessionToken)]
   );
@@ -86,6 +88,7 @@ async function markUploading({ sessionId, orderSubmissionId }) {
         AND ps.completed_at IS NULL AND COALESCE(ps.capture_file_id,'')=''
         AND EXISTS (SELECT 1 FROM order_submissions os
                      WHERE os.id=ps.order_submission_id AND os.deleted_at IS NULL
+                       AND (to_jsonb(os)->>'purchase_bundle_version') IS NULL
                        AND COALESCE(os.capture_file_id,'')='')
       RETURNING ps.attempt_count AS "attemptCount"`,
     [sessionId, orderSubmissionId]
@@ -106,6 +109,7 @@ async function completeCapture({ sessionId, sessionToken, orderSubmissionId, cap
          JOIN order_submissions os ON os.id=ps.order_submission_id
         WHERE ps.id=$1 AND ps.order_submission_id=$2 AND ps.token_hash=$3
           AND ps.expires_at > NOW() AND os.deleted_at IS NULL
+          AND (to_jsonb(os)->>'purchase_bundle_version') IS NULL
         FOR UPDATE OF ps, os`,
       [sessionId, orderSubmissionId, _hash(sessionToken)]
     );
@@ -153,6 +157,7 @@ async function completeCapture2({ sessionId, sessionToken, orderSubmissionId, ca
          JOIN order_submissions os ON os.id=ps.order_submission_id
         WHERE ps.id=$1 AND ps.order_submission_id=$2 AND ps.token_hash=$3
           AND ps.expires_at > NOW() AND os.deleted_at IS NULL
+          AND (to_jsonb(os)->>'purchase_bundle_version') IS NULL
         FOR UPDATE OF os`,
       [sessionId, orderSubmissionId, _hash(sessionToken)]
     );

@@ -481,9 +481,20 @@ function _woFirstProductInfo(o) {
   return { name, price: pm ? pm[1] + "원" : "" };
 }
 
+function _woDualChannelProduct(o) {
+  let products;
+  try { products = JSON.parse(o && o.product_options_json || "[]"); } catch (_) { return undefined; }
+  if (!Array.isArray(products)) return undefined;
+  const hasChannels = products.some(p => p && typeof p === "object" && Object.prototype.hasOwnProperty.call(p, "channels"));
+  if (!hasChannels) return undefined;
+  if (products.length !== 1) throw new Error("동시진행은 상품 하나만 지원합니다.");
+  return products[0];
+}
+
 function _woCampaignPrefill(o) {
   o = o || {};
   const _pi = (typeof _woFirstProductInfo === "function") ? _woFirstProductInfo(o) : { name: "", price: "" };
+  const dualProduct = _woDualChannelProduct(o);
   // 유입가이드 HTML(본문 + review_guide에 섞여온 첨부 이미지 승격) — 아래 wd_inflow_html/text 분기에 공용
   const _wdInflowHtml = (typeof _woBuildInflowHtml === "function") ? _woBuildInflowHtml(o) : "";
   const prefill = {
@@ -564,6 +575,7 @@ function _woCampaignPrefill(o) {
                       : "",
     // 🧩 상품 옵션 프리필: 새 인트라넷의 명시 모드를 우선하고, 옛 오더는 기존 추론을 유지한다.
     options:        (typeof _woOptionRows === "function") ? _woOptionRows(o) : [],
+    ...(dualProduct === undefined ? {} : { dualChannelProduct: dualProduct }),
     productMode:    (typeof _woProductMode === "function") ? _woProductMode(o) : "",
     // ★ 065: 구매채널 = 상품 URL 호스트 판정 / 담당자 = 작업담당 매핑(랜덤이면 빈 값=직접결정)
     channel:        _woChannel(o),
@@ -580,4 +592,4 @@ function _woCampaignPrefill(o) {
   return prefill;
 }
 
-module.exports = { _driveId, _woPickSections, _woCleanGuide, _woProductLines, _woManagerNick, _woIsBlogKind, _woIsQnaKind, _woHasNoReviewType, _woCleanProductOption, _woGuideUrls, _woNormName, _woDeliveryBase, _woChannelFromUrl, _woChannel, _woProductMode, _woProductUnitSrc, _woUnitGuide, _woOptionRows, _woPlainGuideToHtml, _woReviewImgHtml, _woGuideImages, _woBuildInflowHtml, _woStripReviewMeta, _woFirstProductInfo, _woCampaignPrefill };
+module.exports = { _driveId, _woPickSections, _woCleanGuide, _woProductLines, _woManagerNick, _woIsBlogKind, _woIsQnaKind, _woHasNoReviewType, _woCleanProductOption, _woGuideUrls, _woNormName, _woDeliveryBase, _woChannelFromUrl, _woChannel, _woProductMode, _woProductUnitSrc, _woUnitGuide, _woOptionRows, _woPlainGuideToHtml, _woReviewImgHtml, _woGuideImages, _woBuildInflowHtml, _woStripReviewMeta, _woFirstProductInfo, _woDualChannelProduct, _woCampaignPrefill };

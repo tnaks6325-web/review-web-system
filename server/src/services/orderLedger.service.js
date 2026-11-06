@@ -259,6 +259,19 @@ function mapOrderToSheetRow(headers, orderData = {}) {
 
   return (headers || []).map((h, colIdx) => {
     const key = String(h || '').toLowerCase().trim();
+    if (orderData.dualPurchases) {
+      const dualHeaders = {
+        '네이버 주문번호': ['naver', 'orderNum'], '쿠팡 주문번호': ['coupang', 'orderNum'],
+        '네이버 금액': ['naver', 'paidAmount'], '쿠팡 금액': ['coupang', 'paidAmount'],
+        '네이버아이디': ['naver', 'userId'], '쿠팡id': ['coupang', 'userId'],
+      };
+      const field = dualHeaders[key];
+      if (field) {
+        const purchase = orderData.dualPurchases[field[0]];
+        if (!purchase || purchase[field[1]] == null) throw new Error('동시구매 작업표 자료가 불완전합니다.');
+        return purchase[field[1]];
+      }
+    }
     // v2 리뷰유형 지시값은 상품 주문 옵션도, 구매양식 제출 대상도 아니다.
     // null은 buildBatchUpdateData에서 쓰기 자체를 생략해 미리 채운 값을 보존한다.
     if (isReviewOptionHeader(key)) return null;
@@ -570,8 +583,8 @@ async function loadRawTabContextFromSheet(sheetId, tabGid, tabName) {
   };
 }
 
-async function loadRawTabContext(sheetId, tabGid, tabName) {
-  const pool = getPool();
+async function loadRawTabContext(sheetId, tabGid, tabName, client = null) {
+  const pool = client || getPool();
   const params = [sheetId];
   let where = 'sheet_id = $1';
   if (tabGid) {
@@ -596,13 +609,13 @@ async function loadRawTabContext(sheetId, tabGid, tabName) {
     // ★ 미러 안 된 탭: per-제출 라이브읽기(버스트 시 시트 쿼터 위험) 대신
     //   그 시트를 백그라운드로 1회 자동미러(debounce) → 메타 채운 뒤 리컨실이 복구.
     //   이 주문은 일단 행 없음(null) → pending_no_row → 자동복구가 시트에 기록(손실 0).
-    _triggerSheetMirrorOnce(sheetId);
+    if (!client) _triggerSheetMirrorOnce(sheetId);
     return null;
   }
   // ★ D5b(#8): gid 없이 tab_name으로 매칭했는데 동명 탭이 여러 개(복제 후 미정리)면 임의 1개 선택 시
   //   다른 탭에 오배정 위험 → 보류(pending_no_row). 미러 재유도로 gid가 채워질 때까지 자가치유.
   if (!tabGid && parseInt(tab._dup, 10) > 1) {
-    _triggerSheetMirrorOnce(sheetId);
+    if (!client) _triggerSheetMirrorOnce(sheetId);
     return null;
   }
 
@@ -669,8 +682,8 @@ async function loadRawTabContext(sheetId, tabGid, tabName) {
  * 커밋 후 별도 요청에서 풀 커넥션으로 읽는다(연결 컨텍스트가 달라 통합하지 않았다).
  * gid 우선(리네임 대비), 못 찾으면 headers=[]·tabGid=''.
  */
-async function tabDetectedHeaders(sheetId, tabGid, tabName) {
-  const db = getPool();
+async function tabDetectedHeaders(sheetId, tabGid, tabName, client = null) {
+  const db = client || getPool();
   const { rows } = await db.query(
     `SELECT detected_headers, tab_gid FROM raw_sheet_tabs
       WHERE sheet_id=$1 AND (($2::text IS NOT NULL AND tab_gid=$2) OR tab_name=$3)
@@ -745,12 +758,17 @@ async function normalizeWorkdeskColumnValue({ sheetId, tabName, header, value } 
  * @param {string} [o.by]
  * @returns {Promise<{attempted:boolean, ok:boolean, reason?:string, role?:string|null, mode?:'sheetless'|'db_only'}>}
  */
-async function syncCellToOrderIdentity({ sheetId, tabName, header, value, oldValue, orderSubmissionId, by = 'admin' } = {}) {
+async function syncCellToOrderIdentity({ sheetId, tabName, header, value, oldValue, orderSubmissionId, by = 'admin' } = {}, suppliedClient = null) {
   if (!sheetId || !tabName || !header || !orderSubmissionId) return { attempted: false, ok: false, reason: 'bad_request' };
   if (process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return { attempted: false, ok: false, reason: 'ledger_write_disabled' };
   if (process.env.WORKDESK_CELL_ORDER_SYNC === '0') return { attempted: false, ok: false, reason: 'disabled' };
 
-  const { headers, tabGid } = await tabDetectedHeaders(sheetId, null, tabName);
+  const db = suppliedClient || getPool();
+  const marker=(await db.query("SELECT to_jsonb(os)->>'purchase_bundle_version' AS bundle_version FROM order_submissions os WHERE id=$1",[orderSubmissionId])).rows[0];
+  if(marker?.bundle_version==='1'){
+    const e=new Error('구매처별 주문 정보에서 수정해 주세요. 합계와 명의는 따로 바꿀 수 없습니다.');e.code='DUAL_CHANNEL_FIELD_REQUIRED';e.status=409;throw e;
+  }
+  const { headers, tabGid } = await tabDetectedHeaders(sheetId, null, tabName, suppliedClient);
   if (!headers.length) return { attempted: true, ok: false, reason: 'no_headers' };
   const idx = headers.findIndex(h => String(h == null ? '' : h).trim() === header);
   if (idx < 0) return { attempted: true, ok: false, reason: 'header_not_found' };
@@ -762,21 +780,23 @@ async function syncCellToOrderIdentity({ sheetId, tabName, header, value, oldVal
   if (!osCol) return { attempted: true, ok: false, reason: 'role_not_syncable', role: role || null };
 
   if (tabGid) {
-    const dbColMap = await require('./columnMapping.service').getTabColumnIndexMap(sheetId, tabGid).catch(() => null);
+    const dbColMap = suppliedClient
+      ? new Map((await db.query('SELECT db_field,col_index FROM tab_column_mappings WHERE sheet_id=$1 AND tab_gid=$2',[sheetId,tabGid])).rows.map(r=>[r.db_field,{colIndex:r.col_index}]))
+      : await require('./columnMapping.service').getTabColumnIndexMap(sheetId, tabGid).catch(() => null);
     const ov = dbColMap && dbColMap.get(osCol);
     if (ov && ov.colIndex !== idx) return { attempted: true, ok: false, reason: 'column_mapping_mismatch', role };
   }
 
   const { withJobLock } = require('../utils/jobLock');
   const { isSheetless } = require('../utils/sheetlessScope');
-  const db = getPool();
   const editSeq = Date.now();
   const newValue = role === 'price'
     ? normalizeWorkdeskPrice(value)
     : (value == null ? '' : String(value).slice(0, 2000));
   if (newValue == null) return { attempted: true, ok: false, reason: 'invalid_price', role };
 
-  const out = await withJobLock('order_ledger:' + orderSubmissionId, async () => {
+  const run = async () => {
+    if(suppliedClient)await db.query('SELECT pg_advisory_xact_lock(hashtext($1))',['order_ledger:'+orderSubmissionId]);
     const { rows } = await db.query(
       `UPDATE order_submissions SET ${osCol} = $2, updated_at = NOW(),
               last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $3)
@@ -806,6 +826,7 @@ async function syncCellToOrderIdentity({ sheetId, tabName, header, value, oldVal
           WHERE sheet_id = $5 AND tab_name = $6 AND order_submission_id = $7::uuid AND deleted_at IS NULL`,
         [header, newValue, role, p8, os.sheet_id, os.tab_name, orderSubmissionId]);
       if (rowCount !== 1) return { ok: false, reason: rowCount === 0 ? 'row_reassigned' : 'ambiguous_row' };
+      if(suppliedClient)return {ok:true,mode:'sheetless',postCommit:{sheetId:os.sheet_id,tabName:os.tab_name,by:'workdesk-cell-sync'}};
       try {
         await require('./sheetlessLedger.service').rebuildLedgers({ sheetId: os.sheet_id, tabName: os.tab_name, by: 'workdesk-cell-sync' });
       } catch (e) {
@@ -818,9 +839,10 @@ async function syncCellToOrderIdentity({ sheetId, tabName, header, value, oldVal
        큐가 시트 셀을 고쳤지만, 시트 쓰기 실행부를 지웠고 남은 시트 탭은 작업보드가 원본이다(사용자 결정 2026-10-23).
        작업보드 화면 값은 editWorkdeskRow 가 이미 저장했다. */
     return { ok: true, mode: 'db_only' };
-  }, { onBusy: () => ({ ok: false, reason: 'concurrent_edit' }) });
+  };
+  const out=suppliedClient?await run():await withJobLock('order_ledger:' + orderSubmissionId, run, {onBusy:()=>({ok:false,reason:'concurrent_edit'})});
 
-  return { attempted: true, ok: !!(out && out.ok), reason: out && out.reason, role, mode: out && out.mode };
+  return { attempted: true, ok: !!(out && out.ok), reason: out && out.reason, role, mode: out && out.mode, ...(out?.postCommit?{postCommit:out.postCommit}:{}) };
 }
 
 async function claimRow({ client, sheetId, tabGid, tabName, dedupKey, candidateRows, orderId, meta = {} }) {
@@ -890,6 +912,7 @@ async function claimRow({ client, sheetId, tabGid, tabName, dedupKey, candidateR
 
 async function createOrderLedgerEntry(input) {
   const db = getPool();
+  if (input.purchaseBundle) return require('./dualPurchaseSubmission.service').persistBundle(input);
   const {
     sheetId, tabName, gid, orderData,
     slotRowNumber, loginPhone8, loginName,
@@ -1491,7 +1514,14 @@ function unmappedSubmittedFields(headers, orderData = {}) {
 //  표 reverse_sync_proposals 는 기록으로 남는다(열린 제안은 migration 195 가 dismissed 로 닫았다).
 //  rowIdentityMatches 는 큐 실행부 order_update·order_cancel 의 신원 재확인이었다 — 그 실행부도 함께 지웠다.)
 
+async function syncCellToOrderIdentityInTx(client,args={}){
+  if(!client||typeof client.query!=='function')throw new TypeError('Transaction client required');
+  const out=await syncCellToOrderIdentity(args,client);
+  if(out.attempted&&!out.ok){const e=new Error(out.reason);e.code=out.reason;throw e;}
+  return out;
+}
 module.exports = {
+  syncCellToOrderIdentityInTx,
   computeDedupKey,
   softDeleteDuplicateOrders,
   buildCandidateRows,

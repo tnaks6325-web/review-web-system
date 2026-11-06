@@ -1,0 +1,31 @@
+{
+  "expected": 6,
+  "count": 6,
+  "checks": [
+    {
+      "name": "실제 공통 미리보기에서 글·사진·글 순서와 중복 없음",
+      "passed": true
+    },
+    {
+      "name": "실제 이미지 로딩·표시 확인",
+      "passed": true
+    },
+    {
+      "name": "사진 위치를 실제 HTTP·SQL 저장 후 다시 열어 보존",
+      "passed": true
+    },
+    {
+      "name": "상품 내부 개행 주소는 저장 전 거부·저장본 불변",
+      "passed": true
+    },
+    {
+      "name": "가이드 사진 내부 개행 주소는 저장 전 거부·저장본 불변",
+      "passed": true
+    },
+    {
+      "name": "외부 요청·페이지 오류 없음",
+      "passed": true
+    }
+  ],
+  "imageProvider": "same-origin intercepted fake SVG, not actual external image service"
+}

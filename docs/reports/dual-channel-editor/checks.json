@@ -1,0 +1,106 @@
+{
+  "expected": 20,
+  "count": 20,
+  "checks": [
+    {
+      "width": 1440,
+      "name": "실제 편집기의 한 상품·두 구매처",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "name": "합계·사람 수·일건수 복원",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "name": "돈·인원 변경과 브라우저 보관",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "name": "다시 열어 주소·금액·가이드 복원",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "name": "빈 금액·소수를 0원으로 만들지 않음",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "name": "가이드 변경·사진 주소를 별도로 유지",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "name": "잘못된 복원 뒤에도 실제 저장 호출 0",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "name": "휴대폰·PC 화면 바깥 가로 넘침 없음",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "name": "기존 일반 상품 모드로 비교·새 설정 미생성",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "name": "페이지 오류·외부 요청 없음",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "name": "실제 편집기의 한 상품·두 구매처",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "name": "합계·사람 수·일건수 복원",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "name": "돈·인원 변경과 브라우저 보관",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "name": "다시 열어 주소·금액·가이드 복원",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "name": "빈 금액·소수를 0원으로 만들지 않음",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "name": "가이드 변경·사진 주소를 별도로 유지",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "name": "잘못된 복원 뒤에도 실제 저장 호출 0",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "name": "휴대폰·PC 화면 바깥 가로 넘침 없음",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "name": "기존 일반 상품 모드로 비교·새 설정 미생성",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "name": "페이지 오류·외부 요청 없음",
+      "passed": true
+    }
+  ]
+}

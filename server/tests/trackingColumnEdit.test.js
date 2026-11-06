@@ -11,6 +11,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 
 const R = p => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
 const workdesk = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
@@ -148,16 +149,45 @@ const BODY = (field) => ({ sheetId: 's1', tabName: 't1', rowId: 'r1', field, val
   console.log('\n4) 화면 배선');
   t('★ 셀 편집 가능 판정은 행 단위가 아니라 칸 단위(canE || 송장)', () => {
     assert.match(workdesk, /const advTrackE = !canE && STATE\.role==='advertiser' && r\.trackingEditable===true;/);
-    assert.match(workdesk, /const cellE = canE \|\| \(advTrackE && _isTrackingField\(field\)\)/);
+    assert.match(workdesk, /const cellE = !\(r\.dualPurchase && \/금액\|price\|paid_amount\/i\.test\(field\)\) && \(canE \|\| \(advTrackE && _isTrackingField\(field\)\)/);
     // 결정 247: 업체가 더 여는 칸은 입금 칸 하나뿐이고, 서버 행 판정(depositEditable)이 있을 때만이다(검사 의미 불변 + 확장 고정).
-    assert.match(workdesk, /\|\| \(statusKind==='payment' && STATE\.role==='advertiser' && r\.depositEditable===true\);/);
+    assert.match(workdesk, /\|\| \(statusKind==='payment' && STATE\.role==='advertiser' && r\.depositEditable===true\)\);/);
     /* ★ 순서만 고정한다: locked → cellE → return cellE.
        고정 폭 창(`{0,120}`)으로 자르면 그 사이에 주석 한 줄만 들어와도 조용히 빨개진다
        (2026-08-23 리뷰제출 표기 보완에서 실제로 밟았다 — 검사 의미는 그대로다). */
     const iL = workdesk.indexOf('const locked=!!statusKind;');
-    const iC = workdesk.indexOf('const cellE = canE ||', iL);
+    const iC = workdesk.indexOf('const cellE = ', iL);
     const iR = workdesk.indexOf('return cellE', iC);
     assert.ok(iL > 0 && iC > iL && iR > iC, 'locked → cellE → return cellE 순서가 깨졌다');
+  });
+  t('★ 실제 셀 판정 실행: 업체 송장·서버 허용 입금만, 두 구매처 금액은 내부도 잠금', () => {
+    const tracking = workdesk.match(/const _TRACKING_HEADER_RE=.*;\nfunction _isTrackingHeader[^\n]+\nfunction _isTrackingField[^\n]+/);
+    const adv = workdesk.match(/const advTrackE = [^\n]+;/);
+    const cell = workdesk.match(/const cellE = [\s\S]*?;/);
+    assert.ok(tracking && adv && cell, 'extract exact production predicates');
+    const c = {};
+    vm.createContext(c);
+    vm.runInContext(tracking[0] + '\nthis.allowed = function(role, canE, r, field, statusKind){ const STATE={role};\n' + adv[0] + '\n' + cell[0] + '\nreturn cellE; };', c);
+    for (const dualPurchase of [undefined, {}]) {
+      const row = { dualPurchase, trackingEditable: true };
+      assert.strictEqual(c.allowed('advertiser', false, row, 'col:택배송장번호', ''), true);
+      for (const field of ['col:주소', 'col:연락처', 'col:송장', 'ccol:택배송장', 'is_paid']) {
+        assert.strictEqual(c.allowed('advertiser', false, row, field, ''), false, field);
+      }
+      assert.strictEqual(c.allowed('advertiser', false, { dualPurchase }, 'col:택배송장번호', ''), false, 'no server tracking permission');
+      assert.strictEqual(c.allowed('advertiser', false, { dualPurchase, trackingEditable: 'true' }, 'col:택배송장번호', ''), false, 'strict boolean tracking permission');
+      assert.strictEqual(c.allowed('reviewer', false, row, 'col:택배송장번호', ''), false);
+      assert.strictEqual(c.allowed('advertiser', false, row, 'col:입금', 'payment'), false);
+      assert.strictEqual(c.allowed('advertiser', false, { ...row, depositEditable: true }, 'col:입금', 'payment'), true);
+      assert.strictEqual(c.allowed('advertiser', false, { ...row, depositEditable: 'true' }, 'col:입금', 'payment'), false);
+      assert.strictEqual(c.allowed('advertiser', false, { ...row, depositEditable: true }, 'col:주소', ''), false);
+      for (const role of ['master', 'admin', 'staff']) {
+        assert.strictEqual(c.allowed(role, true, row, 'col:주소', ''), true);
+        for (const field of ['col:금액', 'col:price', 'paid_amount']) {
+          assert.strictEqual(c.allowed(role, true, row, field, ''), !dualPurchase, role + ':' + field);
+        }
+      }
+    }
   });
   t('붙여넣기 게이트가 _canEditCells 로 열린다(송장 열 일괄 입력)', () => {
     assert.ok(!/if\(!STATE\.canEdit \|\| !STATE\.gSelRange\) return;/.test(workdesk),

@@ -132,7 +132,7 @@ async function stubs() {
   // 옛 관리자 대시보드(admin.html · index-app.js)는 결정 267 로 폐기 — 공고 창은 작업보드에만 있다.
   {
     const h = read('frontend/workdesk.html');
-    assert.ok(/recruit-modal\.js\?v=(?:20261024-reqmemo|20261103-qna|20261104-inflow)/.test(h) && /index-recruit\.js\?v=(?:20261024-reqmemo|20261104-inflow)/.test(h), 'workdesk cache-bust');
+    assert.ok(/recruit-modal\.js\?v=(?:20261024-reqmemo|20261103-qna|20261104-inflow|20261105-dual-editor)/.test(h) && /index-recruit\.js\?v=(?:20261024-reqmemo|20261104-inflow|20261105-dual-editor)/.test(h), 'workdesk cache-bust');
   }
 
   const sa = read('frontend/js/search-app.js');
@@ -171,7 +171,10 @@ async function stubs() {
 
   const wd = read('frontend/workdesk.html');
   const start = wd.indexOf('function _rvRender2(pane){');
-  const fnSrc = wd.slice(start, wd.indexOf('\n}\n', start) + 3);
+  const panelStart = wd.indexOf('function _dualPurchasePanel(r){');
+  assert.ok(panelStart >= 0 && panelStart < start, 'real dual preview helper precedes renderer');
+  const panelSrc = wd.slice(panelStart, wd.indexOf('\n}\n', panelStart) + 3);
+  const fnSrc = panelSrc + wd.slice(start, wd.indexOf('\n}\n', start) + 3);
   const outs = [];
   const c = {
     STATE: { rvImgs: {}, rvSel: 'r1', wd: { roster: [] } },

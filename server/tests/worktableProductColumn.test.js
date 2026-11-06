@@ -101,8 +101,8 @@ console.log('\n[D] 원장 저장 · 재기록 재료');
     /scheduledOptionKey = selectedOptKey;/.test(sl) &&
     !/scheduledOptionKey\s*=\s*[^;]*selectedProduct/.test(sl) &&
     !/scheduledUnitKey/.test(sl));
-  ok('큐 원장을 다시 읽은 뒤에 옵션 키를 계산한다',
-    /orderData = ledgerSvc\._osRowToOrderData\(freshOrders\[0\]\);[\s\S]{0,180}scheduledOptionKey =/.test(sl));
+  // 최신 원장 → 옵션 키 순서 계약은 아래 [D-runtime]에서 실제 분기 실행으로 검증한다.
+  // dual loader 도입으로 대입이 삼항식이 됐으므로 문자열 거리/대입 모양은 계약이 아니다.
   // 2026-10-01: 상품은 **거르는 조건이 아니라 우선순위**(productPick)로만 넘긴다 — 슬롯 거르기(where)는 여전히 옵션 키뿐.
   //   표식(option_text)은 옵션 키가 없을 때 **처음 채우는 줄 + 작업표 표기와 짝지어진 상품**으로만 맞춘다.
   ok('슬롯 구분과 옵션 칸 기록은 옵션 키만 쓴다(상품은 우선순위·처음 채우는 줄 표식만)',
@@ -211,6 +211,75 @@ function makePool({ sheetless = true, registered = true, headers = ['번호', '�
 
 console.log('\n[G] 서비스 실제 실행 — 게이트 · 미리보기 · 소급');
 (async () => {
+  // 실제 writer의 원장 재조회~옵션 계산 구간을 실행한다(로직 사본 아님).
+  // DB 응답만 가짜이며 dual 공통 loader와 두 매퍼는 통합 모듈 그대로 사용한다.
+  // 행 쓰기/실제 DB 잠금 경합까지 증명하는 검사는 아니다.
+  console.log('\n[D-runtime] 큐 stale 입력보다 저장 원장이 우선');
+  {
+    const source = read('src/services/sheetlessOrder.service.js');
+    const start = source.indexOf('    if (workboardId || dual) {');
+    const end = source.indexOf('    let cur;', start);
+    assert(start >= 0 && end > start, '실제 writer 재조회 구간이 있어야 한다');
+    const block = source.slice(start, end);
+    const serviceRequire = require('module').createRequire(path.join(__dirname, '../src/services/sheetlessOrder.service.js'));
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+    async function run(dual, code = block, state = 'live') {
+      const seen = [];
+      const parent = { id: OID, selected_opt_key: '  저장옵션  ', selected_product: '저장상품',
+        price: '30', mirror_status: state === 'canceled' ? 'canceled' : 'queued', purchase_bundle_version: 1 };
+      const client = { query: async (sql, params) => {
+        const q = String(sql).replace(/\s+/g, ' '); seen.push(q);
+        assert.deepStrictEqual(params, [OID], '모든 조회는 같은 주문에 결속');
+        if (/FOR SHARE/.test(q)) return { rows: state === 'missing' ? [] : [parent] };
+        if (/bundle_channels/.test(q)) return { rows: [{ ...parent,
+          bundle_channels: [{ channel: 'naver', paid_amount: 10 }, { channel: 'coupang', paid_amount: 20 }],
+          bundle_artifacts: ['naver', 'coupang'].map(channel => ({ channel, role: 'primary' })) }] };
+        if (/FROM campaign_participants/.test(q)) return { rows: [] };
+        throw new Error('예상하지 않은 쿼리: ' + q);
+      } };
+      const execute = new AsyncFunction('client', 'ledgerSvc', 'require', 'dual', 'orderSubmissionId',
+        'orderData', `const workboardId='board', suppliedClient=client, sheetId='s', tabName='t';
+        let selectedOptKey='', scheduledOptionKey='', seq=null;
+        ${code}
+        return {orderData,selectedOptKey,scheduledOptionKey};`);
+      const result = await execute(client, LEDGER, serviceRequire, dual, OID,
+        { selectedOptKey: 'stale옵션', selectedProduct: 'stale상품', price: '999' });
+      return { result, seen };
+    }
+    async function assertFresh(dual, code = block) {
+      const { result, seen } = await run(dual, code);
+      assert.strictEqual(result.scheduledOptionKey, '저장옵션', '원장 재조회 뒤 옵션 키 계산');
+      assert.strictEqual(result.selectedOptKey, '저장옵션');
+      assert.strictEqual(result.orderData.selectedProduct, '저장상품', '오래된 상품 입력 폐기');
+      assert.strictEqual(String(result.orderData.price), '30', '오래된 금액 입력 폐기');
+      assert(/FOR SHARE/.test(seen[0]), '원장 잠금 조회가 먼저');
+      assert.strictEqual(seen.some(q => /bundle_channels/.test(q)), dual, 'dual만 공통 loader 사용');
+    }
+    for (const dual of [false, true]) {
+      await assertFresh(dual);
+      ok(`${dual ? 'dual 공통 loader' : 'normal 원장 매퍼'}: stale 옵션·상품·금액을 저장값으로 교체`, true);
+      for (const state of ['missing', 'canceled']) {
+        const { result, seen } = await run(dual, block, state);
+        ok(`${dual ? 'dual' : 'normal'}: ${state} 원장은 쓰지 않음`,
+          result.written === false && result.reason === 'deleted_or_canceled' && seen.length === 1);
+      }
+    }
+    // 메모리 사본에서만 보호 제거: 실제 작업 파일은 절대 변이하지 않는다.
+    const noNormalRefresh = block.replace('ledgerSvc._osRowToOrderData(freshOrders[0])', 'orderData');
+    const noDualRefresh = block.replace(/require\('\.\/dualPurchaseProjection.service'\)\.bundleWorkboardProjection\(await require\('\.\/dualPurchaseProjection.service'\)\.loadCommittedOrderForProjection\(client,orderSubmissionId\)\)/, 'orderData');
+    for (const [dual, mutant] of [[false, noNormalRefresh], [true, noDualRefresh]]) {
+      assert.notStrictEqual(mutant, block, '보호 제거 변이가 실제 적용돼야 한다');
+      await assert.rejects(() => assertFresh(dual, mutant), /원장 재조회 뒤 옵션 키 계산/);
+      ok(`${dual ? 'dual' : 'normal'}: 원장 교체를 빼면 stale 검사 실패`, true);
+    }
+    const calculation = "    selectedOptKey = String(orderData.selectedOptKey || '').trim();\n    scheduledOptionKey = selectedOptKey;";
+    assert(block.includes(calculation), '옵션 계산 구간을 정확히 변이');
+    const earlyCalculation = calculation + '\n' + block.replace(calculation, '');
+    for (const dual of [false, true]) {
+      await assert.rejects(() => assertFresh(dual, earlyCalculation), /원장 재조회 뒤 옵션 키 계산/);
+      ok(`${dual ? 'dual' : 'normal'}: 옵션을 재조회 전에 계산하면 검사 실패`, true);
+    }
+  }
   {
     const p = makePool({ sheetless: false });
     SVC.__setPoolForTest(p);

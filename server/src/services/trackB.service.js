@@ -4261,6 +4261,30 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     }
     out.push(syn);
   }
+  /* 동시진행(네이버+쿠팡) 줄 — 구매처별 금액·현행 구매캡처·배송지 확인 상태(결정 338 계열 · 내부 직원 화면만).
+     ★ 업체(광고주) 응답에는 싣지 않는다 — 업체에 어디까지 보일지 정한 결정 기록이 없어 기본 닫힘(묶음 해시·확인 기록은 내부값).
+     ★ 줄 판정 = dualChannelReview.bundleTargetsForRows(리뷰·지급과 같은 판정), 하위 자료 = dualPurchaseProjection 공용 로더.
+       하위 자료가 불완전·조회 실패면 금액·사진을 0/빈 값으로 꾸미지 않고 주문 id 만 남긴다(화면: 「불러오지 못했습니다」).
+       줄 판정 조회 자체가 실패하면 동시진행 여부를 몰라 종전 표 그대로다(경고만 · 쓰기 쪽은 전용 경로가 다시 막는다). */
+  if (showEdits && roster.some(r => r.order_submission_id)) {
+    try {
+      const targets = await require('./dualChannelReview.service').bundleTargetsForRows(db,
+        out.map(r => ({ sheetId, tabName, rowIndex: r.seq })));
+      if (targets.size) {
+        const projection = require('./dualPurchaseProjection.service');
+        const ids = [...targets.values()].map(t => String(t.orderSubmissionId));
+        let loaded = new Map();
+        try { loaded = await projection.loadCommittedOrdersForProjection(db, ids); }
+        catch (e) { logger.warn(`[trackB] 동시진행 구매 자료 조회 실패(확인 필요로 표시) sheet=${sheetId} tab=${tabName}: ${e.message}`); }
+        for (const syn of out) {
+          const t = targets.get([sheetId, tabName, Number(syn.seq)].join('\u0000'));
+          if (t) syn.dualPurchase = projection.workdeskDualPurchase(t.orderSubmissionId, loaded.get(String(t.orderSubmissionId)));
+        }
+      }
+    } catch (e) {
+      logger.warn(`[trackB] 동시진행 줄 판정 실패(종전 표) sheet=${sheetId} tab=${tabName}: ${e.message}`);
+    }
+  }
   /* ── 표시 순서 = 표의 `번호` 순(무시트 탭만) ─────────────────────────────────
      ★★ 번호를 구매일자 순으로 다시 매겨도(`rowNumbering.service`) 화면이 `seq` 순이면
         "8/5 건이 146 번인데 여전히 맨 아래" 가 된다. 그래서 **번호가 정한 순서**를 따른다.
@@ -4473,28 +4497,109 @@ async function _isTabColumn(client, sheetId, tabName, tabGid, colName, rowJson) 
   return !!(rowJson && typeof rowJson === 'object' && Object.prototype.hasOwnProperty.call(rowJson, colName));
 }
 
+// Discover all lifecycle keys before leasing/locking a business row. A row may still
+// refer to a bundle whose original campaign is no longer the displayed tab.
+async function _discoverWorkdeskMutation(db, { sheetId, tabName, rowId }) {
+  const { rows } = await db.query(`SELECT order_submission_id, tab_gid FROM campaign_participants
+    WHERE id=$1 AND sheet_id=$2 AND tab_name=$3`, [rowId, sheetId, tabName]);
+  const row = rows[0] || {};
+  const targets = [{ sheetId, tabName, tabGid: row.tab_gid || '' }];
+  if (row.order_submission_id) targets.push({ orderSubmissionId: row.order_submission_id });
+  const scope = await require('./dualChannelLifecycle.service').discoverDualScope(db, targets);
+  return { scope, orderId: row.order_submission_id || null, tabGid: row.tab_gid || '', sheetId, tabName, rowId };
+}
+async function _lockWorkdeskMutationInTx(client, context) {
+  const lifecycle = require('./dualChannelLifecycle.service');
+  await lifecycle.lockDualScopeInTx(client, context.scope);
+  await lifecycle.assertDualProvenanceUnchanged(client, context.scope);
+  const { rows } = await client.query(`SELECT order_submission_id, tab_gid FROM campaign_participants
+    WHERE id=$1 AND sheet_id=$2 AND tab_name=$3`, [context.rowId, context.sheetId, context.tabName]);
+  const row = rows[0] || {};
+  if ((row.order_submission_id || null) !== context.orderId || (row.tab_gid || '') !== context.tabGid) {
+    throw Object.assign(new Error('작업 연결이 바뀌었습니다. 다시 시도해 주세요.'), { code: 'dual_scope_changed_retry' });
+  }
+}
+// Only this wrapper owns transaction controls; extracted InTx bodies return business
+// refusals without committing a successful earlier statement.
+async function _runWorkdeskMutation(input, run) {
+  const db = getPool();
+  const context = await _discoverWorkdeskMutation(db, input);
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await _lockWorkdeskMutationInTx(client, context);
+    const out = await run(client, context);
+    await client.query(out && (out.ok === false || out.preflight) ? 'ROLLBACK' : 'COMMIT');
+    return out;
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    if (e && e.code === '23505') return { ok: false, error: 'concurrent_edit_conflict' };
+    throw e;
+  } finally { client.release(); }
+}
+async function _workdeskBundleParent(client, row) {
+  if (!row.order_submission_id) return null;
+  const { rows } = await client.query('SELECT to_jsonb(o) AS parent FROM order_submissions o WHERE id=$1', [row.order_submission_id]);
+  const parent = rows[0] && rows[0].parent;
+  if (!parent) throw Object.assign(new Error('order_not_found'), { code: 'order_not_found' });
+  if ([parent.purchase_bundle_version, parent.purchase_bundle_hash, parent.purchase_bundle_application_id].some(v => v != null)) {
+    if (parent.purchase_bundle_version !== 1) throw Object.assign(new Error('dual_order_required'), { code: 'dual_order_required' });
+    return parent;
+  }
+  return null;
+}
+function _dualAmountField(field) {
+  if (typeof field !== 'string' || !field.startsWith('col:')) return null;
+  const header = field.slice(4).trim();
+  if (header === '네이버 금액') return 'naver';
+  if (header === '쿠팡 금액') return 'coupang';
+  const { classifyHeaders } = require('../utils/worktableTemplate');
+  return (classifyHeaders([header])[0] || {}).role === 'price' ? 'total' : null;
+}
+
 // ── 리뷰웹시스템[3버전] 편집(오버레이-only, 물리컬럼 무편집) ──
 //   앵커: order_submission_id(불변 UUID) > manual(물리행 UUID, 재투영 면역) > identity_key(중복 아니면) > 거부.
 //   단일 tx + 대상행 FOR UPDATE(동일행 직렬화) + revert(활성)→insert(신규, append-only 감사).
 //   부분유니크 uq_participant_edits_active 가 cross-row 레이스 backstop(23505 → concurrent_edit_conflict).
 //   field: 물리필드(_EDIT_FIELD_KIND) 또는 'col:<시트헤더>'(그 탭 실재 컬럼만, text 오버레이) — 물리컬럼 무접촉.
-async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'admin' } = {}) {
+async function editWorkdeskRow(input = {}) {
+  const { sheetId, tabName, rowId, field } = input;
   if (!sheetId || !tabName || !rowId || !field) throw new Error('editWorkdeskRow: 필수 인자 누락');
+  if (!_EDIT_FIELD_KIND[field] && !(typeof field === 'string' && field.startsWith('col:'))) return { ok: false, error: 'field_not_editable', field };
+  return _runWorkdeskMutation(input, client => editWorkdeskRowInTx(client, input));
+}
+// Caller owns lifecycle + transaction. Never call a pool-owning writer from here.
+async function editWorkdeskRowInTx(client, { sheetId, tabName, rowId, field, value, by = 'admin' } = {}) {
   let kind = _EDIT_FIELD_KIND[field];
   const isCol = !kind && typeof field === 'string' && field.startsWith('col:');
-  if (!kind && !isCol) return { ok: false, error: 'field_not_editable', field };
-  const db = getPool();
-  const client = await db.connect();
-  try {
-    await client.query('BEGIN');
     const { rows: pr } = await client.query(
       `SELECT id, seq, source, order_submission_id, identity_key, phone8, recipient_name, option_text, row_json, tab_gid,
               submit_col, submit_col2
          FROM campaign_participants
         WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL FOR UPDATE`,
       [rowId, sheetId, tabName]);
-    if (!pr.length) { await client.query('ROLLBACK'); return { ok: false, error: 'row_not_found' }; }
+    if (!pr.length) { return { ok: false, error: 'row_not_found' }; }
     const row = pr[0];
+    const amountField = _dualAmountField(field);
+    const bundleParent = amountField && await _workdeskBundleParent(client, row);
+    if (bundleParent) {
+      if (amountField === 'total') {
+          return { ok: false, error: 'dual_total_read_only', field };
+      }
+      if (!await _isTabColumn(client, sheetId, tabName, row.tab_gid, field.slice(4), row.row_json)) {
+        return { ok: false, error: 'field_not_editable', field };
+      }
+      const normalized = require('./orderLedger.service').normalizeWorkdeskPrice(value);
+      if (normalized == null) {
+        return { ok: false, error: 'individual_purchase_amount_required', field };
+      }
+      const amountAmendment = await require('./dualChannelStaffReview.service').amendBundlePurchaseAmountInTx({
+        db: client, orderSubmissionId: row.order_submission_id, channel: amountField,
+        paidAmount: Number(normalized), expectedRevision: bundleParent.purchase_bundle_revision, actor: by,
+      });
+        return { ok: true, field, value: normalized, orderSubmissionId: row.order_submission_id,
+        amountAmendment, throughWriteHandled: true };
+    }
     // col:<헤더> 는 잠근 행 문맥으로 실재 컬럼 검증(그리드 표시와 동일 소스). 미실재면 거부(표시=수락 정합).
     if (isCol) {
       // 상태값은 시스템 전용이다. 행 포인터가 비어 있어도 탭의 실제 상태 열이면 일반 편집을 차단한다.
@@ -4503,11 +4608,10 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
         sheetId, tabName, tabGid: row.tab_gid, header: field.slice(4),
       });
       if (statusToggle === 'lookup_failed') {
-        await client.query('ROLLBACK');
-        return { ok: false, error: 'status_column_lookup_failed', field };
+          return { ok: false, error: 'status_column_lookup_failed', field };
       }
       if (statusToggle) {
-        await client.query('ROLLBACK'); return { ok: false, error: 'status_column_locked', field };
+        return { ok: false, error: 'status_column_locked', field };
       }
       // ★ Q&A체험단(결정 321) — 자리 줄의 진행일자·공개여부·문의문구·상품·옵션 칸은 자리표가 정한다(접수 뒤 상품 변경 금지).
       //   칸만 고치면 화면·보충 줄(_inheritSlotPlanInTx 가 상품·옵션 칸을 잇는다)이 자리표와 갈린다.
@@ -4522,12 +4626,11 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
       if (_slotCell) {
         const qs = require('./qnaSlots.service');
         if (await qs.isQnaTab(client, sheetId, tabName) && await qs.isBoundRow(client, sheetId, tabName, row.seq)) {
-          await client.query('ROLLBACK');
-          return { ok: false, error: 'qna_slot_cell_locked', field, message: 'Q&A 자리 줄의 진행일자·공개여부·문의문구·상품·옵션은 바꿀 수 없습니다 — 날짜별 자리표가 정한 값입니다.' };
+              return { ok: false, error: 'qna_slot_cell_locked', field, message: 'Q&A 자리 줄의 진행일자·공개여부·문의문구·상품·옵션은 바꿀 수 없습니다 — 날짜별 자리표가 정한 값입니다.' };
         }
       }
       if (!await _isTabColumn(client, sheetId, tabName, row.tab_gid, field.slice(4), row.row_json)) {
-        await client.query('ROLLBACK'); return { ok: false, error: 'field_not_editable', field };
+        return { ok: false, error: 'field_not_editable', field };
       }
       kind = 'text';
     }
@@ -4540,7 +4643,7 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
           WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE
             AND order_submission_id=$3::uuid`,
         [sheetId, tabName, row.order_submission_id]);
-      if ((odup[0] && odup[0].n || 0) > 1) { await client.query('ROLLBACK'); return { ok: false, error: 'ambiguous_order' }; }
+      if ((odup[0] && odup[0].n || 0) > 1) { return { ok: false, error: 'ambiguous_order' }; }
       anchorType = 'order'; anchorValue = String(row.order_submission_id);
     }
     else if (row.source === 'manual') { anchorType = 'manual'; anchorValue = String(row.id); }
@@ -4560,7 +4663,7 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
           WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE
             AND order_submission_id IS NULL AND source<>'manual' AND identity_key=$3`,
         [sheetId, tabName, ik]);
-      if ((dup[0].n || 0) > 1) { await client.query('ROLLBACK'); return { ok: false, error: 'ambiguous_identity' }; }
+      if ((dup[0].n || 0) > 1) { return { ok: false, error: 'ambiguous_identity' }; }
       anchorType = 'identity'; anchorValue = ik;
       }
     }
@@ -4591,7 +4694,6 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
           [sheetId, tabName, anchorType, anchorValue, linkedField, lb, String(by).slice(0, 100)]);
       }
     }
-    await client.query('COMMIT');
     // through-write(주문 원장 동기화) 재료 — 라우트가 커밋 뒤 별도로 사용한다(같은 tx 안에서 부르면
     // 데드락 위험이 있어 route.js 에서 분리했다). row_json 은 이 함수가 건드리지 않으므로 편집 전 값 그대로.
     const priorValue = (isCol && anchorType === 'order' && row.row_json && typeof row.row_json === 'object')
@@ -4601,47 +4703,41 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
       orderSubmissionId: anchorType === 'order' ? anchorValue : null,
       priorValue,
     };
-  } catch (e) {
-    try { await client.query('ROLLBACK'); } catch (_) {}
-    if (e && e.code === '23505') return { ok: false, error: 'concurrent_edit_conflict' };
-    throw e;
-  } finally { client.release(); }
 }
 
 // 편집 되돌리기(개별 행/필드) — 하드삭제 없이 reverted_at 마킹(감사 이력 보존).
-async function revertWorkdeskEdit({ sheetId, tabName, rowId, field, by = 'admin' } = {}) {
+async function revertWorkdeskEdit(input = {}) {
+  const { sheetId, tabName, rowId, field } = input;
   if (!sheetId || !tabName || !rowId || !field) throw new Error('revertWorkdeskEdit: 필수 인자 누락');
   if (field === 'is_submitted' || field === 'is_paid' ||
       (typeof field === 'string' && field.startsWith('col:') && _linkedToggle(field.slice(4)))) {
     return { ok: false, error: 'status_column_locked', field };
   }
-  const db = getPool();
-  const client = await db.connect();
-  try {
-    await client.query('BEGIN');
+  return _runWorkdeskMutation(input, client => revertWorkdeskEditInTx(client, input));
+}
+async function revertWorkdeskEditInTx(client, { sheetId, tabName, rowId, field, by = 'admin' } = {}) {
     const { rows: pr } = await client.query(
       `SELECT id, source, order_submission_id, identity_key, phone8, recipient_name, option_text, row_json, tab_gid,
               submit_col, submit_col2
          FROM campaign_participants WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 FOR UPDATE`,
       [rowId, sheetId, tabName]);
-    if (!pr.length) { await client.query('ROLLBACK'); return { ok: false, error: 'row_not_found' }; }
+    if (!pr.length) { return { ok: false, error: 'row_not_found' }; }
     const row = pr[0];
+    if (_dualAmountField(field) && await _workdeskBundleParent(client, row)) return { ok: false, error: 'dual_amount_undo_forbidden', field };
     if (typeof field === 'string' && field.startsWith('col:')) {
       let statusToggle = _statusToggleForRow(field.slice(4), row);
       if (!statusToggle) statusToggle = await _statusToggleForTab(client, {
         sheetId, tabName, tabGid: row.tab_gid, header: field.slice(4),
       });
       if (statusToggle === 'lookup_failed') {
-        await client.query('ROLLBACK');
         return { ok: false, error: 'status_column_lookup_failed', field };
       }
       if (statusToggle) {
-        await client.query('ROLLBACK');
         return { ok: false, error: 'status_column_locked', field };
       }
     }
     const a = _deriveAnchor(row);
-    if (!a) { await client.query('ROLLBACK'); return { ok: false, error: 'no_stable_anchor' }; }
+    if (!a) { return { ok: false, error: 'no_stable_anchor' }; }
     let n = 0;
     const doRevert = async (f) => {
       const { rowCount } = await client.query(
@@ -4664,10 +4760,7 @@ async function revertWorkdeskEdit({ sheetId, tabName, rowId, field, by = 'admin'
     //   ★ primary 가 실제로 되돌렸을 때만 연쇄(독립적으로 토글한 is_submitted 를 무관한 revert 로 지우지 않게).
     const linked = field.indexOf('col:') === 0 ? _linkedToggle(field.slice(4)) : null;
     if (linked && revertedPrimary > 0) n += await doRevert(linked);
-    await client.query('COMMIT');
     return { ok: true, reverted: n };
-  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} throw e; }
-  finally { client.release(); }
 }
 
 // 제거: manual 물리행=soft-delete(재투영 부활 없음), import행=hidden 오버레이(앵커 불변).
@@ -4696,24 +4789,31 @@ async function closeWorkdeskReview(args) {
   return out;
 }
 
-async function manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, fileIds, by = 'admin', preflight = false } = {}) {
+async function manualWorkdeskReviewSubmit(input = {}) {
+  const { sheetId, tabName, rowId, fileIds, preflight = false } = input;
   if (!sheetId || !tabName || !rowId) throw new Error('manualWorkdeskReviewSubmit: 필수 인자 누락');
+  if (!preflight && !_manualReviewFileIds(fileIds)) return { ok: false, error: 'invalid_review_files' };
+  const out = await _runWorkdeskMutation(input, client => manualWorkdeskReviewSubmitInTx(client, input));
+  if (out.ok && !preflight) {
+    const reviewer = out._reviewer; delete out._reviewer;
+    try { require('../utils/sse').emitReviewSubmit({ sheetId, tabName, reviewer, rowIndex: out.rowIndex, dbUpdated: true, sheetsWritten: false }); }
+    catch (_) { /* after COMMIT only; optional live update */ }
+  }
+  return out;
+}
+async function manualWorkdeskReviewSubmitInTx(client, { sheetId, tabName, rowId, fileIds, by = 'admin', preflight = false } = {}) {
   const ids = preflight ? [] : _manualReviewFileIds(fileIds);
-  if (!preflight && !ids) return { ok: false, error: 'invalid_review_files' };
-  const db = getPool();
-  const client = await db.connect();
-  try {
-    await client.query('BEGIN');
     const { rows: pr } = await client.query(
       `SELECT id, seq, reviewer_name, submit_col, is_submitted,
               source, order_submission_id, identity_key, phone8, recipient_name, option_text, row_json
          FROM campaign_participants
         WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL AND active=TRUE FOR UPDATE`,
       [rowId, sheetId, tabName]);
-    if (!pr.length) { await client.query('ROLLBACK'); return { ok: false, error: 'row_not_found' }; }
+    if (!pr.length) { return { ok: false, error: 'row_not_found' }; }
     const participant = pr[0];
+    const bundleParent = await _workdeskBundleParent(client, participant);
     const closed = await client.query(`SELECT 1 FROM review_closed_targets WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3`, [sheetId, tabName, participant.seq]);
-    if (closed.rows.length) { await client.query('ROLLBACK'); return { ok: false, error: 'closed_no_review' }; }
+    if (closed.rows.length) { return { ok: false, error: 'closed_no_review' }; }
     /* ★★ 수동·작업표로 추가한 줄은 `submit_col` 이 비어 있다 (2026-08-21 실측 `submit_column_missing`).
        그 칸은 **`review_index` 복제 경로(importTabFromIndex)에서만** 채워지고, `addParticipant`·
        `prepareRosterSlots`·`appendSlot` 등 사람이 만든 줄은 NULL 로 남는다 — 그런데 상태 칸은
@@ -4730,31 +4830,46 @@ async function manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, fileIds, by
           .statusHeaderForTab(client, { sheetId, tabName, kind: 'submit' }) || '').trim();
       } catch (_) { submitCol = ''; }
     }
-    if (!submitCol) { await client.query('ROLLBACK'); return { ok: false, error: 'submit_column_missing' }; }
+    if (!submitCol) { return { ok: false, error: 'submit_column_missing' }; }
 
     const { rows: ir } = await client.query(
       `SELECT is_submitted FROM review_index
         WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3 FOR UPDATE`,
       [sheetId, tabName, participant.seq]);
-    if (!ir.length) { await client.query('ROLLBACK'); return { ok: false, error: 'review_history_missing' }; }
+    if (!ir.length) { return { ok: false, error: 'review_history_missing' }; }
     if (participant.is_submitted || ir[0].is_submitted) {
-      await client.query('ROLLBACK'); return { ok: false, error: 'already_submitted' };
+      return { ok: false, error: 'already_submitted' };
     }
 
     // 사전 확인은 여기까지 — **쓰기 없이** 되돌리고 그 줄의 제출 칸 이름을 돌려준다.
     if (preflight) {
-      await client.query('ROLLBACK');
       return { ok: true, preflight: true, rowIndex: participant.seq, submitColumn: submitCol };
     }
 
-    // 파일 ID를 조작해 다른 행의 첨부를 제출하지 못하도록 업로드 원장을 대조한다.
-    const { rows: ownedFiles } = await client.query(
-      `SELECT file_id FROM review_submissions
-        WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3
-          AND slot_key = 'review' AND file_id = ANY($4::text[])`,
-      [sheetId, tabName, participant.seq, ids]);
-    if (new Set(ownedFiles.map(r => String(r.file_id))).size !== ids.length) {
-      await client.query('ROLLBACK'); return { ok: false, error: 'review_file_not_owned' };
+    // Manual completion may mark only current files linked to this order/seat.
+    // The shared snapshot evaluator (not cash receipt / identity payout gates) owns completeness.
+    if (bundleParent) {
+      const owned = await client.query(`SELECT file_id FROM review_submissions
+        WHERE order_submission_id=$1 AND sheet_id=$2 AND tab_name=$3 AND row_index=$4
+          AND evidence_role='review' AND slot_key IN ('review','slot2')
+          AND superseded_at IS NULL AND file_id=ANY($5::text[]) FOR UPDATE`,
+        [participant.order_submission_id, sheetId, tabName, participant.seq, ids]);
+      if (new Set(owned.rows.map(r => String(r.file_id))).size !== ids.length) return { ok: false, error: 'review_file_not_owned' };
+      await client.query(`UPDATE review_submissions SET completed_at=COALESCE(completed_at,NOW())
+        WHERE order_submission_id=$1 AND file_id=ANY($2::text[]) AND superseded_at IS NULL`, [participant.order_submission_id, ids]);
+      const state = await require('./dualChannelReview.service').evaluateBundleReviewCompletion(client, {
+        orderSubmissionId: participant.order_submission_id, lockedContext: {},
+      });
+      if (!state.complete) return { ok: false, error: 'dual_reviews_incomplete', reasons: state.reasons };
+      const current = new Set(state.current.filter(r => r.evidence_role === 'review').map(r => String(r.file_id)));
+      if (ids.some(id => !current.has(id))) return { ok: false, error: 'review_file_not_owned' };
+    } else {
+      const { rows: ownedFiles } = await client.query(
+        `SELECT file_id FROM review_submissions
+          WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3
+            AND slot_key = 'review' AND file_id = ANY($4::text[])`,
+        [sheetId, tabName, participant.seq, ids]);
+      if (new Set(ownedFiles.map(r => String(r.file_id))).size !== ids.length) return { ok: false, error: 'review_file_not_owned' };
     }
 
     // 잠금 도입 전의 직접 입력 오버레이가 새 시스템 값을 가리지 않도록, 대상 행 것만 감사 이력으로 되돌린다.
@@ -4799,19 +4914,8 @@ async function manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, fileIds, by
       `UPDATE index_master SET submitted_count = submitted_count + 1
         WHERE sheet_id=$1 AND tab_name=$2 AND submitted_count < row_count`,
       [sheetId, tabName]).catch(() => null);
-    await client.query('COMMIT');
 
-    try {
-      require('../utils/sse').emitReviewSubmit({
-        sheetId, tabName, reviewer: participant.reviewer_name || '', rowIndex: participant.seq,
-        dbUpdated: true, sheetsWritten: false,
-      });
-    } catch (_) { /* 실시간 알림 실패는 제출 상태를 되돌리지 않는다. */ }
-    return { ok: true, rowId, rowIndex: participant.seq, submitColumn: submitCol, submitValue: updated[0] && updated[0].submit_value };
-  } catch (e) {
-    try { await client.query('ROLLBACK'); } catch (_) {}
-    throw e;
-  } finally { client.release(); }
+    return { ok: true, rowId, rowIndex: participant.seq, submitColumn: submitCol, submitValue: updated[0] && updated[0].submit_value, _reviewer: participant.reviewer_name || '' };
 }
 
 
@@ -4874,7 +4978,7 @@ async function _inheritSlotPlanInTx(client, { sheetId, tabName, row, headers }) 
   return { cells, optionText };
 }
 
-async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expectedRevision }) {
+async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expectedRevision, requireCancelledOrder = false }) {
     // 작업표 행과 리뷰어 참여내역은 같은 참여 단위다. 기존처럼 화면 오버레이만
     // 숨기면 review_index/order_submissions 쪽의 "내 참여내역"이 남아 서로 다른
     // 사실을 말하게 된다. 행을 잠근 뒤, 이 행에만 연결된 신원·참여 링크를 함께 해제한다.
@@ -4888,6 +4992,10 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
     const row = rows[0];
 
     if (expectedRevision && row.revision !== expectedRevision) throw new HideRowError('row_changed');
+    if (requireCancelledOrder && row.order_submission_id) {
+      const current = await client.query('SELECT deleted_at FROM order_submissions WHERE id=$1', [row.order_submission_id]);
+      if (current.rows.length !== 1 || !current.rows[0].deleted_at) throw new HideRowError('row_changed');
+    }
 
     // ★ 무시트(sheetless) 작업만 지울 수 있다 — 시트 기반 작업은 다음 시트 반영이
     //   같은 행을 되살려 "지웠는데 돌아오는" 상태가 된다. 종전에는 이 게이트가 공고
@@ -5173,18 +5281,8 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRol
     return { ok: false, error: 'order_cancel_forbidden' };
   }
 
-  const runInOwnTx = async () => {
-    const client = await db.connect();
-    try {
-      await client.query('BEGIN');
-      const out = await _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expectedRevision });
-      await client.query('COMMIT');
-      return out;
-    } catch (e) {
-      try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
-      throw e;
-    } finally { client.release(); }
-  };
+  const runInOwnTx = () => _runWorkdeskMutation({ sheetId, tabName, rowId }, client =>
+    _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expectedRevision, requireCancelledOrder: true }));
 
   let result = null;
   let orderCanceled = false;
@@ -5195,6 +5293,14 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRol
       const canceled = await cancelOrderSubmission({
         orderSubmissionId: liveOrderId,
         canceledBy: by,
+        pool: db,
+        lifecycleTargets: [{ sheetId, tabName }],
+        // This callback runs after upper locks, before the first cancellation write.
+        beforeCancelMutation: async (client) => {
+          const { rows } = await client.query(`SELECT order_submission_id FROM campaign_participants
+            WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL FOR UPDATE`, [rowId, sheetId, tabName]);
+          if (rows.length !== 1 || String(rows[0].order_submission_id || '') !== String(liveOrderId)) throw new HideRowError('row_changed');
+        },
         // 행 제거·총원 보충을 주문 취소와 같은 트랜잭션에 둔다. 여기서 throw 하면 취소도 롤백된다.
         beforeCancelCommit: async (client) => { result = await _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expectedRevision }); },
       });
@@ -5255,55 +5361,51 @@ async function deleteWorkdeskOrderRow(args) {
  *   도로 덮는다(원장·작업표 드리프트). 주문 없는 줄만 `markSheetlessPurchaseDate` 직접 기록.
  * ★ 재번호는 fail-soft — 날짜는 이미 박혔고 5분 스윕이 백스톱이다.
  */
-async function setWorkdeskPurchaseDate({ sheetId, tabName, rowId, date, by = 'admin' } = {}) {
+async function setWorkdeskPurchaseDate(input = {}) {
+  const { sheetId, tabName, rowId, date, by = 'admin' } = input;
   if (!sheetId || !tabName || !rowId) return { ok: false, error: 'bad_request' };
   const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date || '').trim());
   if (!dm) return { ok: false, error: 'bad_date' };
+  const check = new Date(Date.UTC(+dm[1], +dm[2] - 1, +dm[3]));
+  if (check.getUTCFullYear() !== +dm[1] || check.getUTCMonth() + 1 !== +dm[2] || check.getUTCDate() !== +dm[3]) return { ok: false, error: 'bad_date' };
   const db = getPool();
-
-  let sheetless = false;
-  try { sheetless = await require('../utils/sheetlessScope').isSheetless(db, sheetId, tabName); }
-  catch (_) { sheetless = false; }
-  if (!sheetless) return { ok: false, error: 'not_sheetless' };
-
-  const { rows: pr } = await db.query(
-    `SELECT id, seq, tab_gid, order_submission_id FROM campaign_participants
-      WHERE id = $1 AND sheet_id = $2 AND tab_name = $3 AND deleted_at IS NULL LIMIT 1`,
-    [rowId, sheetId, tabName]);
-  if (!pr.length) return { ok: false, error: 'row_not_found' };
-  const row = pr[0];
-  // ★ Q&A체험단(결정 321) — 자리 줄의 진행일자는 자리표가 정한다(공개글 날짜). 여기서 바꾸면 자리표와 표가 갈린다.
-  const qs = require('./qnaSlots.service');
-  if (await qs.isQnaTab(db, sheetId, tabName) && await qs.isBoundRow(db, sheetId, tabName, row.seq)) {
-    return { ok: false, error: 'qna_slot_date_locked', message: 'Q&A 자리 줄의 진행일자는 바꿀 수 없습니다 — 날짜별 자리표가 정한 날입니다.' };
-  }
+  if (!await require('../utils/sheetlessScope').isSheetless(db, sheetId, tabName)) return { ok: false, error: 'not_sheetless' };
   const fmt = require('../utils/worktablePlan').sheetDateStr({ y: +dm[1], m: +dm[2], d: +dm[3] });
-
+  const out = await _runWorkdeskMutation(input, async (client, context) => {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`sheetless_worktable:${sheetId}:${tabName}`]);
+    return setWorkdeskPurchaseDateInTx(client, { ...input, formattedDate: fmt }, context.scope);
+  });
+  if (out.ok) {
+    try { await _rebuildWorkdeskLedgers({ sheetId, tabName, by }); } catch (_) { out.ledger = 'deferred'; }
+    if (out.via === 'cell') {
+      try { await require('./rowNumbering.service').renumberTab({ sheetId, tabName, by }); } catch (_) { /* sweep backstop */ }
+    }
+  }
+  return out;
+}
+async function setWorkdeskPurchaseDateInTx(client, { sheetId, tabName, rowId, formattedDate: fmt, by = 'admin' } = {}, lockedScope) {
+  const { rows } = await client.query(`SELECT id,seq,tab_gid,order_submission_id FROM campaign_participants
+    WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL FOR UPDATE`, [rowId, sheetId, tabName]);
+  if (!rows.length) return { ok: false, error: 'row_not_found' };
+  const row = rows[0];
+  const qs = require('./qnaSlots.service');
+  if (await qs.isQnaTab(client, sheetId, tabName) && await qs.isBoundRow(client, sheetId, tabName, row.seq)) return { ok: false, error: 'qna_slot_date_locked' };
   if (row.order_submission_id) {
-    // 원장 먼저(진실원본) — last_edit_seq 단조증가로 역동기·stale 편집 보호(order-edit 와 동일).
-    const { rowCount } = await db.query(
-      `UPDATE order_submissions SET date_str = $2, updated_at = NOW(),
-              last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $3)
-        WHERE id = $1 AND deleted_at IS NULL`,
-      [row.order_submission_id, fmt, Date.now()]);
-    if (!rowCount) return { ok: false, error: 'order_not_found' };
-    const { rows: full } = await db.query(`SELECT * FROM order_submissions WHERE id = $1`, [row.order_submission_id]);
-    const { _osRowToOrderData } = require('./orderLedger.service');
-    const w = await require('./sheetlessOrder.service').writeOrderToWorktable({
-      sheetId, tabName, tabGid: row.tab_gid || '', sheetRow: row.seq,
-      orderData: _osRowToOrderData(full[0]), orderSubmissionId: row.order_submission_id,
+    const changed = await client.query(`UPDATE order_submissions SET date_str=$2,updated_at=NOW(),
+      last_edit_seq=GREATEST(COALESCE(last_edit_seq,0),$3) WHERE id=$1 AND deleted_at IS NULL`, [row.order_submission_id, fmt, Date.now()]);
+    if (!changed.rowCount) return { ok: false, error: 'order_not_found' };
+    const full = (await client.query('SELECT * FROM order_submissions WHERE id=$1', [row.order_submission_id])).rows[0];
+    const w = await require('./sheetlessOrder.service').writeOrderToWorktableInTx(client, {
+      sheetId,tabName,tabGid:row.tab_gid || '',sheetRow:row.seq,orderSubmissionId:row.order_submission_id,
+      orderData:require('./orderLedger.service')._osRowToOrderData(full),lockedScope,
     });
-    return w && w.ok ? { ok: true, seq: row.seq, value: fmt, via: 'order' }
-                     : { ok: false, error: (w && w.reason) || 'write_failed', via: 'order' };
+    return w && w.ok ? { ok:true,seq:row.seq,value:fmt,via:'order' } : { ok:false,error:(w && w.reason)||'write_failed',via:'order' };
   }
-
-  const r = await require('./sheetlessStatus.service').markSheetlessPurchaseDate({
-    sheetId, tabName, rowIndex: row.seq, dateYmd: String(date).trim(), by });
-  if (!r || r.handled === false || !r.ok) {
-    return { ok: false, error: (r && r.reason) || 'write_failed', via: 'cell' };
-  }
-  try { await require('./rowNumbering.service').renumberTab({ sheetId, tabName, by }); } catch (_) { /* 5분 스윕 백스톱 */ }
-  return { ok: true, seq: row.seq, value: fmt, via: 'cell' };
+  const headers = await _workdeskStoredHeadersInTx(client, sheetId, tabName);
+  const index = require('./campaignSchedule.service').findDateColumnIndex(headers);
+  if (index < 0) return { ok:false,error:'no_date_column',via:'cell' };
+  await _writeWorkdeskCellInTx(client, { sheetId,tabName,rowId,header:headers[index],value:fmt,by });
+  return { ok:true,seq:row.seq,value:fmt,via:'cell' };
 }
 
 /**
@@ -5321,7 +5423,8 @@ async function setWorkdeskPurchaseDate({ sheetId, tabName, rowId, date, by = 'ad
  *   `identityCols`(workdeskTab 응답)로 화면에 실어 준다.
  * ★ 시트 기반 탭은 거부(409) — 시트가 진실원본, 화면은 종전 오버레이 그대로.
  */
-async function setWorkdeskIdentityField({ sheetId, tabName, rowId, field, value, by = 'admin' } = {}) {
+async function setWorkdeskIdentityField(input = {}) {
+  const { sheetId, tabName, rowId, field, value, by = 'admin' } = input;
   if (!sheetId || !tabName || !rowId) return { ok: false, error: 'bad_request' };
   if (field !== 'orderer' && field !== 'recipient') return { ok: false, error: 'bad_field' };
   const text = String(value == null ? '' : value).trim();
@@ -5333,40 +5436,50 @@ async function setWorkdeskIdentityField({ sheetId, tabName, rowId, field, value,
   catch (_) { sheetless = false; }
   if (!sheetless) return { ok: false, error: 'not_sheetless' };
 
-  const { rows: pr } = await db.query(
-    `SELECT id, seq, tab_gid, order_submission_id FROM campaign_participants
-      WHERE id = $1 AND sheet_id = $2 AND tab_name = $3 AND deleted_at IS NULL LIMIT 1`,
-    [rowId, sheetId, tabName]);
+  const out = await _runWorkdeskMutation(input, async (client, context) => {
+    // Match the projection writer's tab -> participant row lock order, including ordinary work.
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`sheetless_worktable:${sheetId}:${tabName}`]);
+    return setWorkdeskIdentityFieldInTx(client, { ...input, value: text }, context.scope);
+  });
+  if (out.ok) {
+    try { await _rebuildWorkdeskLedgers({ sheetId, tabName, by }); } catch (_) { out.ledger = 'deferred'; }
+  }
+  return out;
+}
+async function setWorkdeskIdentityFieldInTx(client, { sheetId, tabName, rowId, field, value, by = 'admin' } = {}, lockedScope) {
+  const text = String(value).trim();
+  const { rows: pr } = await client.query(`SELECT id, seq, tab_gid, order_submission_id FROM campaign_participants
+    WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL FOR UPDATE`, [rowId, sheetId, tabName]);
   if (!pr.length) return { ok: false, error: 'row_not_found' };
   const row = pr[0];
-
   if (row.order_submission_id) {
-    // 원장 먼저(진실원본) — last_edit_seq 단조증가로 역동기·stale 편집 보호(order-edit 와 동일).
     const sql = field === 'orderer'
-      ? `UPDATE order_submissions SET orderer = $2, updated_at = NOW(),
-                last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $3)
-          WHERE id = $1 AND deleted_at IS NULL`
-      : `UPDATE order_submissions SET recipient = $2, updated_at = NOW(),
-                last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $3)
-          WHERE id = $1 AND deleted_at IS NULL`;
-    const { rowCount } = await db.query(sql, [row.order_submission_id, text, Date.now()]);
-    if (!rowCount) return { ok: false, error: 'order_not_found' };
-    const { rows: full } = await db.query(`SELECT * FROM order_submissions WHERE id = $1`, [row.order_submission_id]);
-    const { _osRowToOrderData } = require('./orderLedger.service');
-    const w = await require('./sheetlessOrder.service').writeOrderToWorktable({
+      ? `UPDATE order_submissions SET orderer=$2, updated_at=NOW(), last_edit_seq=GREATEST(COALESCE(last_edit_seq,0),$3) WHERE id=$1 AND deleted_at IS NULL`
+      : `UPDATE order_submissions SET recipient=$2, updated_at=NOW(), last_edit_seq=GREATEST(COALESCE(last_edit_seq,0),$3) WHERE id=$1 AND deleted_at IS NULL`;
+    if (!(await client.query(sql, [row.order_submission_id, text, Date.now()])).rowCount) return { ok: false, error: 'order_not_found' };
+    const full = (await client.query('SELECT * FROM order_submissions WHERE id=$1', [row.order_submission_id])).rows[0];
+    const w = await require('./sheetlessOrder.service').writeOrderToWorktableInTx(client, {
       sheetId, tabName, tabGid: row.tab_gid || '', sheetRow: row.seq,
-      orderData: _osRowToOrderData(full[0]), orderSubmissionId: row.order_submission_id,
+      orderData: require('./orderLedger.service')._osRowToOrderData(full), orderSubmissionId: row.order_submission_id, lockedScope,
     });
     return w && w.ok ? { ok: true, seq: row.seq, value: text, via: 'order' }
-                     : { ok: false, error: (w && w.reason) || 'write_failed', via: 'order' };
+      : { ok: false, error: (w && w.reason) || 'write_failed', via: 'order' };
   }
-
-  const r = await require('./sheetlessStatus.service').markSheetlessIdentityName({
-    sheetId, tabName, rowIndex: row.seq, field, name: text, by });
-  if (!r || r.handled === false || !r.ok) {
-    return { ok: false, error: (r && r.reason) || 'write_failed', via: 'cell' };
-  }
+  const headers = await _workdeskStoredHeadersInTx(client, sheetId, tabName);
+  const index = require('./orderLedger.service')._fieldToCol(headers, field);
+  if (index < 0) return { ok: false, error: field === 'orderer' ? 'no_orderer_column' : 'no_recipient_column', via: 'cell' };
+  await _writeWorkdeskCellInTx(client, { sheetId, tabName, rowId, header: headers[index], value: text, by });
   return { ok: true, seq: row.seq, value: text, via: 'cell' };
+}
+async function _workdeskStoredHeadersInTx(client, sheetId, tabName) {
+  const { rows } = await client.query(`SELECT COALESCE(detected_headers, headers) AS h FROM raw_sheet_tabs
+    WHERE sheet_id=$1 AND tab_name=$2 ORDER BY mirrored_at DESC NULLS LAST LIMIT 1`, [sheetId, tabName]);
+  return Array.isArray(rows[0] && rows[0].h) ? rows[0].h : [];
+}
+async function _writeWorkdeskCellInTx(client, { sheetId, tabName, rowId, header, value, by }) {
+  await client.query(`UPDATE campaign_participants SET row_json=COALESCE(row_json,'{}'::jsonb)||jsonb_build_object($4::text,$5::text),
+    updated_at=NOW(),updated_by=$6 WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL`,
+    [rowId, sheetId, tabName, String(header).trim(), value, by]);
 }
 
 /**
@@ -5378,7 +5491,8 @@ async function setWorkdeskIdentityField({ sheetId, tabName, rowId, field, value,
  * ★ 값은 날짜로 해석 가능해야 한다(parseDateToken — '완료' 같은 임의 문구 차단).
  * ★ 기록 실행부 = `sheetlessStatus.markStatusCell` 한 벌(리뷰어 제출과 같은 경로 · 사본 0).
  */
-async function backfillWorkdeskReviewSubmitDate({ sheetId, tabName, rowId, value, by = 'admin' } = {}) {
+async function backfillWorkdeskReviewSubmitDate(input = {}) {
+  const { sheetId, tabName, rowId, value, by = 'admin' } = input;
   if (!sheetId || !tabName || !rowId) return { ok: false, error: 'bad_request' };
   const text = String(value == null ? '' : value).trim().slice(0, 40);
   if (!text) return { ok: false, error: 'empty_value' };
@@ -5387,23 +5501,37 @@ async function backfillWorkdeskReviewSubmitDate({ sheetId, tabName, rowId, value
   try { parsed = parseDateToken(text, { fallbackAnchor: new Date() }); } catch (_) { parsed = null; }
   if (!parsed) return { ok: false, error: 'bad_date', hint: '날짜로 읽히는 값만 기록할 수 있습니다(예: 8/1)' };
 
-  const db = getPool();
-  const { rows: pr } = await db.query(
-    `SELECT id, seq FROM campaign_participants
-      WHERE id = $1 AND sheet_id = $2 AND tab_name = $3 AND deleted_at IS NULL LIMIT 1`,
+  const out = await _runWorkdeskMutation(input, client => backfillWorkdeskReviewSubmitDateInTx(client, { ...input, value: text }));
+  if (out.ok) {
+    try { await _rebuildWorkdeskLedgers({ sheetId, tabName, by }); } catch (_) { out.ledger = 'deferred'; }
+  }
+  return out;
+}
+async function backfillWorkdeskReviewSubmitDateInTx(client, { sheetId, tabName, rowId, value, by = 'admin' } = {}) {
+  const text = value;
+  const { rows: pr } = await client.query(
+    `SELECT id, seq, order_submission_id FROM campaign_participants
+      WHERE id = $1 AND sheet_id = $2 AND tab_name = $3 AND deleted_at IS NULL FOR UPDATE`,
     [rowId, sheetId, tabName]);
   if (!pr.length) return { ok: false, error: 'row_not_found' };
   const seq = pr[0].seq;
+  if (await _workdeskBundleParent(client, pr[0])) {
+    const state = await require('./dualChannelReview.service').evaluateBundleReviewCompletion(client, {
+      orderSubmissionId: pr[0].order_submission_id, lockedContext: {},
+    });
+    if (!state.complete) return { ok: false, error: 'dual_reviews_incomplete', reasons: state.reasons };
+  }
 
-  const closed = await db.query(`SELECT 1 FROM review_closed_targets WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3`, [sheetId, tabName, seq]);
+
+  const closed = await client.query(`SELECT 1 FROM review_closed_targets WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3`, [sheetId, tabName, seq]);
   if (closed.rows.length) return { ok: false, error: 'closed_no_review' };
 
   const r = await require('./sheetlessStatus.service').markStatusCell({
-    sheetId, tabName, rowIndex: seq, kind: 'submit', value: text, by });
+    client, deferRebuild: true, sheetId, tabName, rowIndex: seq, kind: 'submit', value: text, by });
   if (!r || r.handled === false) return { ok: false, error: 'not_sheetless' };
   if (!r.ok) return { ok: false, error: r.reason || 'write_failed' };
   // 화면 즉시 일치용 물리 토글 — source 는 건드리지 않는다('manual' 로 두면 투영 상태 CASE 가 얼린다).
-  await db.query(
+  await client.query(
     `UPDATE campaign_participants SET is_submitted = TRUE, updated_by = $4, updated_at = NOW()
       WHERE id = $1 AND sheet_id = $2 AND tab_name = $3`,
     [rowId, sheetId, tabName, String(by).slice(0, 100)]);
@@ -5433,7 +5561,8 @@ async function backfillWorkdeskReviewSubmitDate({ sheetId, tabName, rowId, value
  * ★ 감사 로그는 셀 편집과 **같은 표**(`participant_edits`)에 남긴다 — 셀 편집기록 팝업이 모든 칸을
  *   한 곳에서 읽게 하기 위해서다(저장소를 나누면 "이 칸만 기록이 비어 보이는" 상태가 된다).
  */
-async function setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by = 'admin', advertiser = false, advertiserId = '' } = {}) {
+async function setWorkdeskDepositDate(input = {}) {
+  const { sheetId, tabName, rowId, date, by = 'admin', advertiser = false, advertiserId = '' } = input;
   if (!sheetId || !tabName || !rowId) return { ok: false, error: 'bad_request' };
   const raw = String(date == null ? '' : date).trim();
   const clearing = raw === '';
@@ -5461,42 +5590,74 @@ async function setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by = 'adm
     catch (e) { return { ok: false, error: 'lookup_failed', message: e.message }; }
   }
 
-  const client = await db.connect();
-  let ctx = null;
+  const ctx = await _runWorkdeskMutation(input, client => setWorkdeskDepositDateInTx(client,
+    { sheetId, tabName, rowId, by, advertiser, advertiserId, stamp, clearing, advCandidates }));
+  if (!ctx.ok || ctx.unchanged) return ctx;
+
+  /* 장부 재생성 — 입금관리 대상 제외·리뷰어 입금표시가 전부 이 파생을 읽는다.
+     ★ 실패해도 값은 작업표에 남아 다음 재생성(주문 유입 등)에 반영된다 → fail-soft 로 사실만 말한다. */
+  let ledger = 'ok';
   try {
-    await client.query('BEGIN');
+    await _rebuildWorkdeskLedgers({ sheetId, tabName, by });
+  } catch (e) {
+    ledger = 'deferred';
+    logger.warn(`[workdeskDeposit] 장부 재생성 실패(값은 작업표에 기록됨) tab=${tabName} row=${ctx.seq}: ${e.message}`);
+  }
+
+  /* ★ 비웠는데도 입금관리 목록에 안 돌아오는 경우를 **미리 말한다** — 이체 회차(payment_batch_items)에
+     살아있는 항목이 있으면 대상 추출이 그 줄을 계속 제외한다(다운로드 이력 잠금). 조용히 두면
+     "비웠는데 왜 목록에 없지" 가 된다. 조회 실패는 무시(표시용). */
+  let batchLocked = false;
+  if (clearing) {
+    try {
+      const { rows: bi } = await db.query(
+        `SELECT 1 FROM payment_batch_items
+          WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3 AND status IN ('pending','paid') LIMIT 1`,
+        [sheetId, tabName, ctx.seq]);
+      batchLocked = bi.length > 0;
+    } catch (_) { batchLocked = false; }
+  }
+
+  return { ok: true, seq: ctx.seq, column: ctx.header, value: stamp, prev: ctx.prev, cleared: clearing, ledger, batchLocked,
+    releasedBatchItems: ctx.releasedBatchItems };
+}
+
+// The public wrapper resolves slow advertiser candidates before any transaction;
+// authorization / ownership / audit and clearing exceptions stay on the same client.
+async function setWorkdeskDepositDateInTx(client, { sheetId, tabName, rowId, by = 'admin', advertiser = false,
+  advertiserId = '', stamp, clearing, advCandidates } = {}) {
     const { rows: pr } = await client.query(
       `SELECT id, seq, source, order_submission_id, identity_key, phone8, recipient_name,
               option_text, row_json, submit_col, submit_col2
          FROM campaign_participants
         WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL FOR UPDATE`,
       [rowId, sheetId, tabName]);
-    if (!pr.length) { await client.query('ROLLBACK'); return { ok: false, error: 'row_not_found' }; }
+    if (!pr.length) { return { ok: false, error: 'row_not_found' }; }
     const row = pr[0];
 
     const anchor = _deriveAnchor(row);
-    if (!anchor) { await client.query('ROLLBACK'); return { ok: false, error: 'no_stable_anchor' }; }
+    if (!anchor) { return { ok: false, error: 'no_stable_anchor' }; }
     if (anchor.type === 'order') {
       const { rows: dup } = await client.query(
         `SELECT COUNT(*)::int AS n FROM campaign_participants
           WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE
             AND order_submission_id=$3::uuid`, [sheetId, tabName, anchor.value]);
-      if ((dup[0] && dup[0].n) > 1) { await client.query('ROLLBACK'); return { ok: false, error: 'ambiguous_order' }; }
+      if ((dup[0] && dup[0].n) > 1) { return { ok: false, error: 'ambiguous_order' }; }
     } else if (anchor.type === 'identity') {
       const { rows: dup } = await client.query(
         `SELECT COUNT(*)::int AS n FROM campaign_participants
           WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE
             AND order_submission_id IS NULL AND source<>'manual' AND identity_key=$3`,
         [sheetId, tabName, anchor.value]);
-      if ((dup[0] && dup[0].n) > 1) { await client.query('ROLLBACK'); return { ok: false, error: 'ambiguous_identity' }; }
+      if ((dup[0] && dup[0].n) > 1) { return { ok: false, error: 'ambiguous_identity' }; }
     }
 
     // 어느 칸이 입금 열인가 = 파서가 그 탭에서 실제로 고른 헤더(사본 0 · 잠근 tx 안에서 조회).
     let header = '';
     try {
       header = await require('./sheetlessStatus.service').statusHeaderForTab(client, { sheetId, tabName, kind: 'paid' });
-    } catch (e) { await client.query('ROLLBACK'); return { ok: false, error: 'lookup_failed', message: e.message }; }
-    if (!header) { await client.query('ROLLBACK'); return { ok: false, error: 'no_status_column' }; }
+    } catch (e) { return { ok: false, error: 'lookup_failed', message: e.message }; }
+    if (!header) { return { ok: false, error: 'no_status_column' }; }
 
     const rj = (row.row_json && typeof row.row_json === 'object') ? row.row_json : {};
     const prev = String(rj[header] == null ? '' : rj[header]).trim();
@@ -5505,18 +5666,18 @@ async function setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by = 'adm
          ③ 칸에 값이 있으면 그 값을 업체가 넣었나(우리 직원·이체결과가 넣은 입금일은 업체가 고치거나 지우지 못한다 — 사용자 확정 2번). */
     if (advertiser) {
       const advPrefix = '업체#' + String(advertiserId || '') + ':';
-      if (!advertiserId) { await client.query('ROLLBACK'); return { ok: false, error: 'not_own_entry' }; }
+      if (!advertiserId) { return { ok: false, error: 'not_own_entry' }; }
       // FOR SHARE — 공고 수정·탭 이체설정 저장과 직렬화한다. 업체입금을 끄는 중이면 끝난 뒤 꺼진 값을 보고 거부한다(Codex 리뷰).
       // 결정 292 — 제품비 업체 · 리뷰비 우리(split)도 업체가 제품비 입금일을 적는다(입금 방식 ≠ 우리 입금이면 연다).
       const advMode = await require('./payment.service').payoutModeLocked(client, sheetId, tabName);
-      if (advMode === 'ours') { await client.query('ROLLBACK'); return { ok: false, error: 'advertiser_payout_off' }; }
+      if (advMode === 'ours') { return { ok: false, error: 'advertiser_payout_off' }; }
       // ② 우리 회차 — 리뷰비만 보낸 항목은 제외(우리가 제품비를 보낸 줄만 막는다 · 결정 292)
       const { rows: bi } = await client.query(
         `SELECT 1 FROM payment_batch_items
           WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3 AND status IN ('pending','paid')
             AND NOT ${require('./payment.service').feeOnlyItemSql()} LIMIT 1`,
         [sheetId, tabName, row.seq]);
-      if (bi.length) { await client.query('ROLLBACK'); return { ok: false, error: 'our_payout' }; }
+      if (bi.length) { return { ok: false, error: 'our_payout' }; }
       /* ④ 새 날짜는 **리뷰 제출이 끝난 줄에만**(계좌를 보여주는 대상과 같은 규칙 · 리뷰 반영) — 진행 중인 줄에 입금일이
            찍히면 리뷰어 화면에 페이백 날짜가 먼저 뜬다. 판정은 작업보드 카드와 같은 출처(의무 투영 → 없으면 리뷰 칸 분류).
            비우기는 막지 않는다(업체가 잘못 넣은 값을 거둬들일 수 있어야 한다). */
@@ -5537,8 +5698,8 @@ async function setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by = 'adm
           }
           fulfilled = require('./reviewObligation.service').classifyCell(submitHeader ? rj[submitHeader] : '', !!submitHeader) === 'fulfilled';
         }
-        if (cl.length || !fulfilled) { await client.query('ROLLBACK'); return { ok: false, error: 'review_not_submitted' }; }
-        if (!_advPayoutAcct({ accounts: advCandidates }, row)) { await client.query('ROLLBACK'); return { ok: false, error: 'not_payout_target' }; }
+        if (cl.length || !fulfilled) { return { ok: false, error: 'review_not_submitted' }; }
+        if (!_advPayoutAcct({ accounts: advCandidates }, row)) { return { ok: false, error: 'not_payout_target' }; }
       }
       if (prev) {
         const { rows: own } = await client.query(
@@ -5547,13 +5708,11 @@ async function setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by = 'adm
               AND reverted_at IS NULL AND left(created_by, length($6)) = $6
             ORDER BY created_at DESC LIMIT 1`,
           [sheetId, tabName, anchor.type, anchor.value, 'col:' + header, advPrefix]);
-        if (!own.length || String(own[0].value_text == null ? '' : own[0].value_text).trim() !== prev) {
-          await client.query('ROLLBACK'); return { ok: false, error: 'not_own_entry' };
+        if (!own.length || String(own[0].value_text == null ? '' : own[0].value_text).trim() !== prev) { return { ok: false, error: 'not_own_entry' };
         }
       }
     }
     if (prev === stamp) {
-      await client.query('ROLLBACK');
       return { ok: true, unchanged: true, seq: row.seq, column: header, value: stamp, prev, cleared: clearing };
     }
 
@@ -5608,41 +5767,7 @@ async function setWorkdeskDepositDate({ sheetId, tabName, rowId, date, by = 'adm
       `INSERT INTO participant_edits (sheet_id, tab_name, anchor_type, anchor_value, field, kind, value_bool, value_text, created_by)
        VALUES ($1,$2,$3,$4,'is_paid','bool',$5,NULL,$6)`,
       [sheetId, tabName, anchor.type, anchor.value, !clearing, String(by).slice(0, 100)]);
-
-    await client.query('COMMIT');
-    ctx = { seq: row.seq, header, prev, releasedBatchItems };
-  } catch (e) {
-    try { await client.query('ROLLBACK'); } catch (_) { /* 이미 끝난 tx */ }
-    if (e && e.code === '23505') return { ok: false, error: 'concurrent_edit_conflict' };
-    throw e;
-  } finally { client.release(); }
-
-  /* 장부 재생성 — 입금관리 대상 제외·리뷰어 입금표시가 전부 이 파생을 읽는다.
-     ★ 실패해도 값은 작업표에 남아 다음 재생성(주문 유입 등)에 반영된다 → fail-soft 로 사실만 말한다. */
-  let ledger = 'ok';
-  try {
-    await _rebuildWorkdeskLedgers({ sheetId, tabName, by });
-  } catch (e) {
-    ledger = 'deferred';
-    logger.warn(`[workdeskDeposit] 장부 재생성 실패(값은 작업표에 기록됨) tab=${tabName} row=${ctx.seq}: ${e.message}`);
-  }
-
-  /* ★ 비웠는데도 입금관리 목록에 안 돌아오는 경우를 **미리 말한다** — 이체 회차(payment_batch_items)에
-     살아있는 항목이 있으면 대상 추출이 그 줄을 계속 제외한다(다운로드 이력 잠금). 조용히 두면
-     "비웠는데 왜 목록에 없지" 가 된다. 조회 실패는 무시(표시용). */
-  let batchLocked = false;
-  if (clearing) {
-    try {
-      const { rows: bi } = await db.query(
-        `SELECT 1 FROM payment_batch_items
-          WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3 AND status IN ('pending','paid') LIMIT 1`,
-        [sheetId, tabName, ctx.seq]);
-      batchLocked = bi.length > 0;
-    } catch (_) { batchLocked = false; }
-  }
-
-  return { ok: true, seq: ctx.seq, column: ctx.header, value: stamp, prev: ctx.prev, cleared: clearing, ledger, batchLocked,
-    releasedBatchItems: ctx.releasedBatchItems };
+    return { ok: true, seq: row.seq, header, prev, releasedBatchItems };
 }
 
 /* ══ 이 셀의 편집기록 (구글시트 셀 편집기록과 같은 성격 · 읽기 전용) ═══════════════════════
@@ -6630,22 +6755,22 @@ function _mergeUnslottedOrderRow(slotRowJson, orderRowJson, slotSeq) {
  * 이미 주문/신원/리뷰/입금이 붙은 행은 후보에서 제외하고, 동시 실행 시에도 FOR UPDATE
  * 잠금으로 같은 슬롯을 두 번 쓰지 않는다.
  */
-async function assignUnslottedOrderToOpenSlot({ sheetId, tabName, rowId, by = 'admin' } = {}) {
+async function assignUnslottedOrderToOpenSlot(input = {}) {
+  const { sheetId, tabName, rowId } = input;
   if (!sheetId || !tabName || !rowId) throw new Error('assignUnslottedOrderToOpenSlot: sheetId, tabName, rowId 필수');
-  const db = getPool();
-  const client = await db.connect();
-  try {
-    await client.query('BEGIN');
+  return _runWorkdeskMutation(input, client => assignUnslottedOrderToOpenSlotInTx(client, input));
+}
+async function assignUnslottedOrderToOpenSlotInTx(client, { sheetId, tabName, rowId, by = 'admin' } = {}) {
     const { rows: sourceRows } = await client.query(
       `SELECT * FROM campaign_participants
         WHERE id=$3 AND sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE
         FOR UPDATE`, [sheetId, tabName, rowId]);
     const source = sourceRows[0];
-    if (!source) { await client.query('ROLLBACK'); return { ok: false, error: 'source_not_found' }; }
-    if (!source.order_submission_id) { await client.query('ROLLBACK'); return { ok: false, error: 'not_an_order_row' }; }
-    if (_displayNumber(source.row_json)) { await client.query('ROLLBACK'); return { ok: false, error: 'already_numbered' }; }
+    if (!source) { return { ok: false, error: 'source_not_found' }; }
+    if (!source.order_submission_id) { return { ok: false, error: 'not_an_order_row' }; }
+    if (_displayNumber(source.row_json)) { return { ok: false, error: 'already_numbered' }; }
     // ★ Q&A체험단(결정 321) — 주문은 신청 때 고른 그 자리(날짜·공개/비공개)에만 들어간다. 아무 빈 줄에나 옮기면 자리표와 어긋난다.
-    if (await require('./qnaSlots.service').isQnaTab(client, sheetId, tabName)) { await client.query('ROLLBACK'); return { ok: false, error: 'qna_slot_required' }; }
+    if (await require('./qnaSlots.service').isQnaTab(client, sheetId, tabName)) { return { ok: false, error: 'qna_slot_required' }; }
 
     const effectiveId = await _effectiveLinkedWorkOrderId(client, sheetId, tabName);
     const { rows: workOrders } = await client.query(
@@ -6653,7 +6778,7 @@ async function assignUnslottedOrderToOpenSlot({ sheetId, tabName, rowId, by = 'a
         WHERE deleted_at IS NULL AND ($3::text IS NOT NULL AND id=$3 OR (linked_tab_sheet_id=$1 AND linked_tab_name=$2))
         ORDER BY ($3::text IS NOT NULL AND id=$3) DESC, created_at DESC LIMIT 1`, [sheetId, tabName, effectiveId]);
     const target = Number(workOrders[0] && workOrders[0].recruit_count) || 0;
-    if (target < 1) { await client.query('ROLLBACK'); return { ok: false, error: 'work_order_target_missing' }; }
+    if (target < 1) { return { ok: false, error: 'work_order_target_missing' }; }
 
     const { rows: slots } = await client.query(
       `SELECT * FROM campaign_participants
@@ -6666,7 +6791,7 @@ async function assignUnslottedOrderToOpenSlot({ sheetId, tabName, rowId, by = 'a
         FOR UPDATE SKIP LOCKED
         LIMIT 1`, [sheetId, tabName, target]);
     const slot = slots[0];
-    if (!slot) { await client.query('ROLLBACK'); return { ok: false, error: 'no_open_slot', target }; }
+    if (!slot) { return { ok: false, error: 'no_open_slot', target }; }
 
     const merged = _mergeUnslottedOrderRow(slot.row_json, source.row_json, slot.seq);
     await client.query(
@@ -6688,12 +6813,7 @@ async function assignUnslottedOrderToOpenSlot({ sheetId, tabName, rowId, by = 'a
     await client.query(
       `UPDATE order_submissions SET sheet_row=COALESCE(sheet_row,$2), updated_at=NOW()
         WHERE id=$1::uuid AND deleted_at IS NULL`, [source.order_submission_id, slot.seq]);
-    await client.query('COMMIT');
     return { ok: true, sourceRowId: source.id, slotRowId: slot.id, slotSeq: slot.seq, target };
-  } catch (err) {
-    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
-    throw err;
-  } finally { client.release(); }
 }
 
 /* ── ⚠중복(앵커 겹침) 진단 — 읽기 전용 ────────────────────────────────────────

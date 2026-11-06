@@ -82,7 +82,10 @@ const roi = require('../src/services/reviewerOrderIdentity.service');
   const wd = read('frontend/workdesk.html');
   const start = wd.indexOf('function _rvRender2(pane){');
   const end = wd.indexOf('\n}\n', start) + 3;
-  const fnSrc = wd.slice(start, end);
+  const panelStart = wd.indexOf('function _dualPurchasePanel(r){');
+  assert.ok(panelStart >= 0 && panelStart < start, 'real dual preview helper precedes renderer');
+  const panelSrc = wd.slice(panelStart, wd.indexOf('\n}\n', panelStart) + 3);
+  const fnSrc = panelSrc + wd.slice(start, end);
   const outs = [];
   const ctx = {
     STATE: { rvImgs: {}, rvSel: 'r1', wd: { roster: [] } },

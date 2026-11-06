@@ -76,6 +76,22 @@ async function deleteWorkdeskOrderRow({ sheetId, tabName, rowId, by = 'admin', p
     const out = await cancelOrderSubmission({
       orderSubmissionId,
       canceledBy: by,
+      pool: db,
+      lifecycleTargets: [{ sheetId, tabName }],
+      beforeCancelMutation: async (client) => {
+        // Lifecycle + order job locks precede this first row lock. Recheck identity, not just the display name.
+        const { rows: current } = await client.query(
+          `SELECT seq, order_submission_id AS "orderSubmissionId"
+             FROM campaign_participants
+            WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL AND active=TRUE
+            FOR UPDATE`, [rowId, sheetId, tabName]);
+        if (current.length !== 1 || current[0].orderSubmissionId !== orderSubmissionId) {
+          throw Object.assign(new Error('선택한 행이 이미 변경되었습니다. 새로고침 후 다시 시도해 주세요.'), { code: 'row_changed' });
+        }
+        if (await qs.isQnaTab(client, sheetId, tabName) && await qs.isBoundRow(client, sheetId, tabName, current[0].seq)) {
+          throw Object.assign(new Error('Q&A 자리 줄은 「줄 삭제」로 지워 주세요.'), { code: 'qna_slot_row' });
+        }
+      },
       beforeCancelCommit: async (client) => {
         // 주문 ID까지 다시 대조해, 이름이 같은 다른 행을 지우는 일이 없게 한다.
         const removed = await client.query(
@@ -93,7 +109,7 @@ async function deleteWorkdeskOrderRow({ sheetId, tabName, rowId, by = 'admin', p
     });
     return { ...out, rowId, orderSubmissionId };
   } catch (err) {
-    if (err && err.code === 'row_changed') return { ok: false, code: err.code, error: err.message };
+    if (err && ['row_changed', 'qna_slot_row'].includes(err.code)) return { ok: false, code: err.code, error: err.message };
     throw err;
   }
 }

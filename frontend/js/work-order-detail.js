@@ -949,9 +949,21 @@ function _woAcceptSheetless(o) {
    ★ 어떤 칸이 자동으로 차는지는 문서 `frontend/docs/작업오더-모집공고_자동반영_와이어프레임.html`
      와 회귀가드(tests/woCampaignMapDoc.test.js)가 함께 고정한다.
    ══════════════════════════════════════════════════════════════ */
+/** 동시진행은 상품 하나 안의 설정이다. 선택지 두 줄로 나누거나 합계만 남기지 않는다. */
+function _woDualChannelProduct(o) {
+  let products;
+  try { products = JSON.parse(o && o.product_options_json || "[]"); } catch (_) { return undefined; }
+  if (!Array.isArray(products)) return undefined;
+  const hasChannels = products.some(p => p && typeof p === "object" && Object.prototype.hasOwnProperty.call(p, "channels"));
+  if (!hasChannels) return undefined;
+  if (products.length !== 1) throw new Error("동시진행은 상품 하나만 지원합니다.");
+  return products[0];
+}
+
 function _woCampaignPrefill(o) {
   o = o || {};
   const _pi = (typeof _woFirstProductInfo === "function") ? _woFirstProductInfo(o) : { name: "", price: "" };
+  const dualProduct = _woDualChannelProduct(o);
   // 유입가이드 HTML(본문 + review_guide에 섞여온 첨부 이미지 승격) — 아래 wd_inflow_html/text 분기에 공용
   const _wdInflowHtml = (typeof _woBuildInflowHtml === "function") ? _woBuildInflowHtml(o) : "";
   const prefill = {
@@ -1032,6 +1044,7 @@ function _woCampaignPrefill(o) {
                       : "",
     // 🧩 상품 옵션 프리필: 새 인트라넷의 명시 모드를 우선하고, 옛 오더는 기존 추론을 유지한다.
     options:        (typeof _woOptionRows === "function") ? _woOptionRows(o) : [],
+    ...(dualProduct === undefined ? {} : { dualChannelProduct: dualProduct }),
     productMode:    (typeof _woProductMode === "function") ? _woProductMode(o) : "",
     // ★ 065: 구매채널 = 상품 URL 호스트 판정 / 담당자 = 작업담당 매핑(랜덤이면 빈 값=직접결정)
     channel:        _woChannel(o),

@@ -99,8 +99,12 @@ assert.match(workdesk, /_MR_ERR\[k\] \|\|/, '모르는 코드는 원문을 남�
      ② 이미 올라온 캡처로 **업로드 없이** 제출할 수 있다(쌓인 파일이 곧 근거)
      ③ 리뷰제출 칸이 없으면 작업표 생성이 **만들어 붙인다**(표준 이름 = `리뷰`)
      ④ "제출 칸인가" 판정은 인덱스 빌드와 **같은 함수** */
-assert.match(manualBlock, /if \(preflight\) \{[\s\S]{0,200}ROLLBACK/,
-  '사전 확인은 쓰기 없이 되돌린다');
+assert.match(manualBlock, /_runWorkdeskMutation\(input, client => manualWorkdeskReviewSubmitInTx\(client, input\)\)/);
+assert.match(manualBlock, /if \(preflight\) \{[\s\S]{0,200}preflight: true/,
+  '본문은 사전 확인 결과를 외부 트랜잭션 소유자에게 돌려준다');
+assert.match(service.slice(service.indexOf('async function _runWorkdeskMutation'), service.indexOf('async function _workdeskBundleParent')),
+  /await _lockWorkdeskMutationInTx\(client, context\)[\s\S]*await run\(client, context\)[\s\S]*out\.ok === false \|\| out\.preflight\) \? 'ROLLBACK' : 'COMMIT'/,
+  '같은 client의 외부 소유자가 거부·사전 확인을 모두 롤백한다');
 assert.ok(manualBlock.indexOf('if (preflight)') < manualBlock.indexOf('FROM review_submissions'),
   '사전 확인은 파일 대조 앞에서 끝난다(파일 없이도 답한다)');
 const preAt = routes.indexOf("router.get('/workdesk/manual-review-precheck'");
@@ -136,9 +140,12 @@ assert.match(workdesk, /_WD_SUBMIT_HEADERS=new Set\(\['리뷰',/, '화면 폴백
   const svc = require('../src/services/trackB.service');
   const FID = 'FILE1234567890';
   const mk = (part, tabCol) => {
+    const calls = [];
     const client = {
       async query(sql) {
         const q = String(sql).replace(/\s+/g, ' ');
+        calls.push(q);
+        if (/SELECT order_submission_id, tab_gid FROM campaign_participants/.test(q)) return { rows: [{ order_submission_id: part.order_submission_id, tab_gid: part.tab_gid || '' }] };
         if (/^BEGIN|^ROLLBACK|^COMMIT/.test(q)) return { rows: [] };
         if (/FROM campaign_participants WHERE id=\$1/.test(q)) return { rows: [part] };
         if (/FROM review_index WHERE sheet_id = \$1 AND tab_name = \$2 AND COALESCE/.test(q)) return { rows: tabCol ? [{ h: tabCol }] : [] };
@@ -149,12 +156,22 @@ assert.match(workdesk, /_WD_SUBMIT_HEADERS=new Set\(\['리뷰',/, '화면 폴백
       },
       release() {},
     };
-    return { async connect() { return client; } };
+    return { calls, query: (...args) => client.query(...args), async connect() { return client; } };
   };
   const base = { id: 'p1', seq: 444, reviewer_name: '최은지', submit_col: null, is_submitted: false,
     source: 'manual', order_submission_id: null, identity_key: null, phone8: '0402',
     recipient_name: '최은지', option_text: null, row_json: {} };
   const call = () => svc.manualWorkdeskReviewSubmit({ sheetId: 's', tabName: 'T', rowId: 'p1', fileIds: [FID] });
+
+  const prePool = mk(base, '리뷰제출');
+  svc.__setPoolForTest(prePool);
+  const pre = await svc.manualWorkdeskReviewSubmit({ sheetId: 's', tabName: 'T', rowId: 'p1', preflight: true });
+  assert.equal(pre.ok, true);
+  assert.equal(pre.preflight, true);
+  assert.ok(prePool.calls.includes('ROLLBACK'));
+  assert.ok(!prePool.calls.includes('COMMIT'));
+  assert.ok(!prePool.calls.some(sql => /^(UPDATE|INSERT|DELETE)\b/.test(sql.trim())), '사전 확인은 SQL 쓰기 0건');
+  assert.ok(!prePool.calls.some(sql => /FROM review_submissions/.test(sql)), '파일 없어도 사전 확인');
 
   svc.__setPoolForTest(mk(base, '리뷰제출'));
   let r = await call();

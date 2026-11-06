@@ -27,6 +27,8 @@ const stub = (rel, exportsObj) => {
 (async () => {
   const db = new PGlite();
   await db.exec(`
+    -- 일반 취소의 공고 발견 조회는 실제 SQL로 실행하되, 연결된 공고는 없는 범위다.
+    CREATE TABLE recruit_campaigns(id text PRIMARY KEY, linked_sheet_id text, linked_tab_name text, linked_tab_gid text);
     CREATE TABLE sync_queue(id serial PRIMARY KEY, type text, payload jsonb, status text, attempts int DEFAULT 0,
       max_retry int DEFAULT 3, error_msg text, created_at timestamptz DEFAULT now(), processed_at timestamptz);
     CREATE TABLE order_submissions(id uuid PRIMARY KEY, deleted_at timestamptz, canceled_by text, updated_at timestamptz,

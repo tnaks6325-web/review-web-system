@@ -84,6 +84,8 @@ function services(pool, mutate = false) {
   const ids = [...fs.readFileSync(paymentFile, 'utf8').matchAll(/require\('([^']+)'\)/g)].map(x => x[1]);
   const paymentDeps = Object.fromEntries(ids.map(id => [id, forbidden]));
   paymentDeps['crypto'] = require('node:crypto'); paymentDeps['../db/pool'] = pool;
+  // 트랜잭션 문맥(AsyncLocalStorage)은 외부 의존이 아니라 Node 내장이다 — 동시진행 지급 잠금이 같은 연결을 쓰게 한다(결정 341).
+  paymentDeps['node:async_hooks'] = require('node:async_hooks');
   paymentDeps['../utils/logger'] = { logger };
   const payment = sourceModule('payment', paymentDeps);
   const apply = sourceModule('paymentApply', {}, text => {

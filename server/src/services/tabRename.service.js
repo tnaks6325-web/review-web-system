@@ -1,25 +1,75 @@
 'use strict';
 
 /**
- * 탭 이름 변경 때 함께 움직여야 하는 현재 좌표 원장.
- * pool을 받으면 자체 transaction, 이미 열린 client를 받으면 호출 transaction에 합류한다.
+ * Pool wrapper owns its transaction. A caller client joins ONLY a prelocked scope
+ * for dual work: never acquire new upper locks after the caller's lower locks.
  */
-async function renameTabState(db, { sheetId, oldTabName, newTabName, tabGid = '', sheetUrl = '' } = {}) {
+function _renameTargets({ sheetId, oldTabName, newTabName, tabGid = '' }) {
+  return [{ sheetId, tabName: oldTabName, tabGid: String(tabGid || '') },
+    { sheetId, tabName: newTabName, tabGid: String(tabGid || '') }];
+}
+function _scopeRequired() {
+  return Object.assign(new Error('동시진행 이름 변경은 호출 트랜잭션의 첫 잠금 전에 옛 이름·새 이름·gid 범위를 선점해야 합니다.'),
+    { code: 'dual_lifecycle_scope_required' });
+}
+function _assertArgs(db, { sheetId, oldTabName, newTabName } = {}) {
   if (!db || !sheetId || !oldTabName || !newTabName) throw new Error('탭 이름 변경 좌표가 필요합니다.');
-  if (oldTabName === newTabName) return {
-    reviewIndexUpdated: 0,
-    indexMasterUpdated: 0,
-    orderSubmissionsUpdated: 0,
-    campaignParticipantsUpdated: 0,
-    paymentItemsUpdated: 0,
-    workOrdersUpdated: 0,
-    workOrderLinksUpdated: 0,
-  };
-
-  const ownsTransaction = typeof db.connect === 'function';
-  const client = ownsTransaction ? await db.connect() : db;
+}
+function _emptyResult() {
+  return { reviewIndexUpdated: 0, indexMasterUpdated: 0, orderSubmissionsUpdated: 0,
+    campaignParticipantsUpdated: 0, paymentItemsUpdated: 0, workOrdersUpdated: 0, workOrderLinksUpdated: 0 };
+}
+async function renameTabState(db, args = {}, options = {}) {
+  _assertArgs(db, args);
+  if (args.oldTabName === args.newTabName) return _emptyResult();
+  // pg PoolClient also has connect(); release/connection distinguish it from Pool.
+  const ownsTransaction = typeof db.connect === 'function' && typeof db.release !== 'function' && !db.connection;
+  if (!ownsTransaction) return renameTabStateInTx(db, args, options);
+  const lifecycle = require('./dualChannelLifecycle.service');
+  const client = await db.connect();
+  let begun = false;
   try {
-    if (ownsTransaction) await client.query('BEGIN');
+    const scope = await lifecycle.discoverDualScope(client, _renameTargets(args));
+    await client.query('BEGIN'); begun = true;
+    await lifecycle.lockDualScopeInTx(client, scope);
+    await lifecycle.assertDualProvenanceUnchanged(client, scope);
+    const out = await _renameTabStateBody(client, args);
+    await client.query('COMMIT');
+    _invalidateRename(args);
+    return out;
+  } catch (e) {
+    if (begun) try { await client.query('ROLLBACK'); } catch (_) {}
+    throw e;
+  } finally { client.release(); }
+}
+
+/** No transaction control, new lifecycle locks, or client release. Caller owns all three. */
+async function renameTabStateInTx(client, args = {}, { lockedScope } = {}) {
+  _assertArgs(client, args);
+  if (args.oldTabName === args.newTabName) return _emptyResult();
+  const lifecycle = require('./dualChannelLifecycle.service');
+  const targets = _renameTargets(args);
+  if (lockedScope) {
+    await lifecycle.assertDualProvenanceUnchanged(client, lockedScope);
+    if (!targets.every(t => lockedScope.targets.some(s => t.sheetId === s.sheetId && t.tabName === s.tabName
+      && t.tabGid === (s.tabGid || '')))) throw _scopeRequired();
+  } else {
+    const scope = await lifecycle.discoverDualScope(client, targets);
+    if (scope.campaignIds.length) throw _scopeRequired();
+  }
+  const out = await _renameTabStateBody(client, args);
+  _invalidateRename(args); // existing caller-client cache behavior; transaction still belongs to caller
+  return out;
+}
+function _invalidateRename({ sheetId, oldTabName, newTabName }) {
+  try {
+    const { invalidateCashReceiptContext } = require('./cashReceiptContext.service');
+    invalidateCashReceiptContext(sheetId, oldTabName);
+    invalidateCashReceiptContext(sheetId, newTabName);
+  } catch (_) {}
+}
+
+async function _renameTabStateBody(client, { sheetId, oldTabName, newTabName, tabGid = '', sheetUrl = '' }) {
     const common = [newTabName, sheetId, oldTabName];
     const withGid = [newTabName, tabGid || null, sheetId, oldTabName];
 
@@ -136,13 +186,6 @@ async function renameTabState(db, { sheetId, oldTabName, newTabName, tabGid = ''
           `[tabRename] 새 이름 "${newTabName}" 에 이미 발주 연결이 있어 옛 이름 "${oldTabName}" 의 발주 연결(${leftLinks[0].work_order_id})은 옮기지 않음 — 작업보드에서 연결을 확인하세요`);
       } catch (_) { /* 로깅 실패는 무시 */ }
     }
-    if (ownsTransaction) await client.query('COMMIT');
-
-    try {
-      const { invalidateCashReceiptContext } = require('./cashReceiptContext.service');
-      invalidateCashReceiptContext(sheetId, oldTabName);
-      invalidateCashReceiptContext(sheetId, newTabName);
-    } catch (_) {}
     return {
       reviewIndexUpdated: ri.rowCount || 0,
       indexMasterUpdated: im.rowCount || 0,
@@ -153,12 +196,6 @@ async function renameTabState(db, { sheetId, oldTabName, newTabName, tabGid = ''
       workOrdersUpdated: (wo && wo.rowCount) || 0,
       workOrderLinksUpdated: (links && links.rowCount) || 0,
     };
-  } catch (e) {
-    if (ownsTransaction) try { await client.query('ROLLBACK'); } catch (_) {}
-    throw e;
-  } finally {
-    if (ownsTransaction) client.release();
-  }
 }
 
-module.exports = { renameTabState };
+module.exports = { renameTabState, renameTabStateInTx };

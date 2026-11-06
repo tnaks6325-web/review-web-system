@@ -2,6 +2,7 @@
 
 const { payAmountsFromWorkOrder } = require('../utils/workOrderPayAmounts');
 const { unitInflowType } = require('../utils/unitInflow');   // ★ 결정 333
+const { DualChannelError, normalizeChannelProductList, rawHasDualChannels, DUAL_CHANNEL_NOT_READY } = require('../utils/dualChannel');
 
 // 상품·옵션 원본은 인트라넷에서 구조화한 값이 진실원본이다. label은 기존
 // 단일 옵션 소비처를 위한 파생 호환값일 뿐, 이 서비스가 label을 역분해하지 않는다.
@@ -159,14 +160,33 @@ function normalizeQtyTiers(raw, product, productIndex) {
  * remain byte-for-byte untouched, so old workboard v1 records are never
  * silently converted. requireStructured is used when v2 becomes writable.
  */
-function normalizeProductOptionsJson(raw, { requireStructured = false } = {}) {
-  const list = parse(raw);
+function normalizeProductOptionsJson(raw, { requireStructured = false, allowDualChannels = false } = {}) {
+  let list = parse(raw);
   if (list === null) {
     if (requireStructured) throw new ProductOptionsError('v2 작업에는 상품·옵션 원본이 필요합니다.');
     return { json: '', value: null, structured: false };
   }
   if (!Array.isArray(list)) throw new ProductOptionsError('상품·옵션 원본은 JSON 배열이어야 합니다.');
   if (list.length > 100) throw new ProductOptionsError('상품은 최대 100개까지 입력할 수 있습니다.');
+  // 저장·구매·리뷰·정산의 전체 경로가 완성되기 전에는 내부 검증만 허용한다.
+  // 요청 본문의 표시나 환경변수만으로 이 옵션을 열지 않는다.
+  if (rawHasDualChannels(list) && allowDualChannels !== true) {
+    const err = new ProductOptionsError(DUAL_CHANNEL_NOT_READY.error);
+    err.code = DUAL_CHANNEL_NOT_READY.code;
+    throw err;
+  }
+  // 동시진행은 상품 두 개가 아니라 상품 하나 안의 구매처 두 개다.
+  // 구형·v2 분기 전에 함께 검증한다. 키 없는 기존 원문은 바이트까지 그대로 둔다.
+  try {
+    const next = normalizeChannelProductList(list);
+    if (next !== list) {
+      list = next;
+      raw = JSON.stringify(next);
+    }
+  } catch (err) {
+    if (err instanceof DualChannelError) throw new ProductOptionsError(err.message);
+    throw err;
+  }
   const structured = hasStructuredOption(list);
   if (!structured) {
     if (requireStructured) throw new ProductOptionsError('v2 작업의 옵션은 1차 옵션 원본이 필요합니다.');

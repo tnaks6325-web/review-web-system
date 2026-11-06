@@ -1,0 +1,126 @@
+{
+  "expected": 24,
+  "count": 24,
+  "checks": [
+    {
+      "width": 1440,
+      "name": "격리 DB 준비 확인 뒤 서버 저장 버튼 표시",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "name": "실제 화면에서 입력해 HTTP·SQL 임시저장",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "name": "메모리를 다시 열고 서버에서 두 구매처 복원",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "name": "같은 초안 수정은 같은 식별자로 저장",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "name": "인원 불일치 저장 거부",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "name": "모집중 전환 거부",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "name": "작업오더 연결 거부",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "name": "잘못된 금액 거부",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "name": "빈 전용 설정 거부",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "name": "외부 출처 요청은 로컬 서버에서도 거부",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "name": "실제 업무 API·외부 요청·화면 오류 0",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "name": "PC·휴대폰 바깥 넘침 없음",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "name": "격리 DB 준비 확인 뒤 서버 저장 버튼 표시",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "name": "실제 화면에서 입력해 HTTP·SQL 임시저장",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "name": "메모리를 다시 열고 서버에서 두 구매처 복원",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "name": "같은 초안 수정은 같은 식별자로 저장",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "name": "인원 불일치 저장 거부",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "name": "모집중 전환 거부",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "name": "작업오더 연결 거부",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "name": "잘못된 금액 거부",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "name": "빈 전용 설정 거부",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "name": "외부 출처 요청은 로컬 서버에서도 거부",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "name": "실제 업무 API·외부 요청·화면 오류 0",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "name": "PC·휴대폰 바깥 넘침 없음",
+      "passed": true
+    }
+  ]
+}

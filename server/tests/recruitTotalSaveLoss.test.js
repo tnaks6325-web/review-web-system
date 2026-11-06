@@ -42,7 +42,23 @@ t('★ 잠긴 공고는 사유를 말한다 — 헛수고 금지', () => {
 });
 
 t('★★ 입력칸을 읽기 전용으로 잠그지 않는다 (2026-08-19 사용자 확정 — 되돌리기 금지)', () => {
-  if (/readOnly\s*=\s*true/.test(fe)) {
+  // 동시진행의 합계·대표 주소는 구매처별 입력에서 나오는 파생값이다.
+  // 정확히 그 두 대입만 허용한다. 인원·일건수 잠금은 새 편집기 안에서도 계속 금지한다.
+  let checked = fe;
+  const derivedOnly = [
+    ['rfDualBuild', 'rfDualPaint', 'box.querySelector(".rf-opt-pay").readOnly = true;'],
+    ['rfDualPaint', 'rfDualSelect', 'const url = box.querySelector(".rf-gp-url"); if (url) url.readOnly = true;'],
+  ];
+  for (const [name, next, assignment] of derivedOnly) {
+    const start = checked.indexOf('function ' + name + '(');
+    if (start < 0) continue; // 동시진행 편집기가 없는 기준본에서도 종전 규율은 같다.
+    const end = checked.indexOf('\nfunction ' + next + '(', start);
+    if (end < 0) throw new Error('파생값 잠금 검사의 함수 경계를 찾지 못했습니다: ' + name);
+    const body = checked.slice(start, end);
+    if (body.split(assignment).length !== 2) throw new Error('허용한 파생값 대입이 정확히 한 곳이어야 합니다: ' + name);
+    checked = checked.slice(0, start) + body.replace(assignment, '') + checked.slice(end);
+  }
+  if (/readOnly\s*=\s*true/.test(checked)) {
     throw new Error('총인원·일건수는 수정 화면에서 고칠 수 있어야 한다(경고 전용) — 잠금은 그 확정을 되돌린다');
   }
 });

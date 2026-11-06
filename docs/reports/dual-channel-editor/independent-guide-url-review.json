@@ -1,0 +1,18 @@
+{
+  "delegation": "deleg_5fd0f68e",
+  "passed": true,
+  "security_concerns": [],
+  "logic_errors": [],
+  "reportedChecks": { "passed": 293, "failed": 0 },
+  "scope": [
+    "allowlisted-guide-image-line-renders-in-original-position",
+    "unlisted-url-and-html-remain-escaped-plain-text",
+    "proxy-host-reconstruction-and-token-deduplication",
+    "unused-allowlisted-images-remain-at-end",
+    "legacy-render-output-hashes-preserved",
+    "trim-then-reject-internal-ascii-control-and-del-in-url",
+    "url-spelling-and-percent-encoding-preserved"
+  ],
+  "limitations": "Read-only independent code/test verdict for the final two corrections. Editor URL validation was compared as code. Does not attest full-suite execution, actual browser execution, external image service, or normal product save, recruitment, purchase, review and payment. The earlier four corrections are covered by a separate verdict.",
+  "parentEvidence": "Parent separately verified related440 tests, full707 files and browser58 checks; do not add overlapping counts."
+}

@@ -194,8 +194,13 @@ const WRITE = /^\s*(INSERT|UPDATE|DELETE)\b/i;
     ok('리뷰어 범위 수정 → 날짜 맞추기', /relayCampaignWorktable\(id, \{ by: 'reviewer-scoped-edit' \}\)/.test(cr));
     ok('공고 발행 → 오더 휴무일 저장 → 날짜 맞추기', /saveOrderHolidayZeros\(rows\[0\], by\)[\s\S]{0,200}relayCampaignWorktable\(rows\[0\]\.id/.test(cr));
     const lq = rd('src/services/linkedRecruitQuota.service.js');
-    ok('인트라넷 오더 총 인원 변경 → 커밋 뒤 날짜 맞추기',
-      /COMMIT'\);[\s\S]{0,600}relayCampaignWorktable\(campaign\.id, \{ by: 'workorder-quota-sync' \}\)/.test(lq));
+    const quotaSync = lq.slice(lq.indexOf('async function syncWorkOrderRecruitTotal({'), lq.indexOf('\nmodule.exports ='));
+    const commitAt = quotaSync.indexOf("await client.query('COMMIT')");
+    const rebuildAt = quotaSync.indexOf("rebuildWorktableProjection(result.worktable, 'workorder-quota-sync')");
+    const relayAt = quotaSync.indexOf(".relayCampaignWorktable(result.campaignId, { by: 'workorder-quota-sync' })");
+    ok('인트라넷 오더 총 인원 변경 → 커밋 뒤 같은 결과의 장부·날짜 맞추기',
+      commitAt > 0 && rebuildAt > commitAt && relayAt > rebuildAt
+      && /const result = await _syncWorkOrderRecruitTotalInTx\(client,/.test(quotaSync));
     const tbs = rd('src/services/trackB.service.js');
     ok('행 삭제 → 커밋 뒤 날짜 맞추기', /relayCampaignWorktable\(result\.campaignId/.test(tbs));
     const cron = rd('src/jobs/cron.js');
@@ -203,6 +208,37 @@ const WRITE = /^\s*(INSERT|UPDATE|DELETE)\b/i;
       /CAMPAIGN_WORKTABLE_RELAY_CRON !== '0'/.test(cron) && /'20 4 \* \* \*'/.test(cron)
       && /withJobLock\('campaign_worktable_relay'/.test(cron)
       && /relayAllCampaignWorktables\(\{ by: 'cron' \}\)[\s\S]{0,600}timezone: 'Asia\/Seoul'/.test(cron));
+  }
+
+  console.log('\n[4] 공유 저장 후처리 — 실제 공통 함수 실행');
+  {
+    const shared = require('../src/services/sharedPatch.service');
+    const lq = require('../src/services/linkedRecruitQuota.service');
+    const tracking = require('../src/services/worktableTrackingColumn.service');
+    const keep = { rebuild: lq.rebuildWorktableProjection, relay: cp.relayCampaignWorktable, tracking: tracking.syncTrackingColumn };
+    const calls = [];
+    const after = { worktable: { sheetId: 'wt', tabName: 'T' }, reviewOptions: {}, tracking: { sheetId: 'wt', tabName: 'T' }, relay: true };
+    try {
+      lq.rebuildWorktableProjection = async (a, by) => { calls.push(['ledger', a, by]); return { projection: true }; };
+      tracking.syncTrackingColumn = async a => { calls.push(['tracking', a]); return { ok: true }; };
+      cp.relayCampaignWorktable = async (id, a) => { calls.push(['relay', id, a]); return { ok: true, moved: 1 }; };
+      await shared.finishSharedPatchAfterCommit({ workOrderId: 'wo1', camp: CAMP, campaign: { after } });
+      ok('장부 → 송장 칸 → 같은 공고 날짜 순서 · 장부 중복 없음', JSON.stringify(calls.map(c => c[0])) === '["ledger","tracking","relay"]'
+        && calls[0][1] === after.worktable && calls[2][1] === CAMP.id && after.relayResult.moved === 1);
+      calls.length = 0;
+      lq.rebuildWorktableProjection = async () => { throw new Error('ledger unavailable'); };
+      await shared.finishSharedPatchAfterCommit({ workOrderId: 'wo1', camp: CAMP, campaign: { after: { worktable: {}, relay: true } } });
+      ok('장부 실패도 날짜 맞추기를 막거나 저장 실패로 바꾸지 않는다', calls.length === 1 && calls[0][0] === 'relay');
+      calls.length = 0;
+      await shared.finishSharedPatchAfterCommit({ workOrderId: 'wo1', camp: CAMP, campaign: {} });
+      ok('후처리 대상이 없으면 쓰기·날짜 맞추기 0', calls.length === 0);
+      const sp = rd('src/services/sharedPatch.service.js');
+      ok('공유 저장 소유자는 COMMIT 뒤 공통 후처리 · 외부 tx 는 후처리 전달',
+        /if \(!inTxClient\) await client\.query\('COMMIT'\);[\s\S]*if \(!inTxClient && afterCommit\) await finishSharedPatchAfterCommit\(afterCommit\);/.test(sp)
+        && /inTxClient && afterCommit \? \{ afterCommit \}/.test(sp));
+    } finally {
+      lq.rebuildWorktableProjection = keep.rebuild; cp.relayCampaignWorktable = keep.relay; tracking.syncTrackingColumn = keep.tracking;
+    }
   }
 
   console.log(`\ncampaignPlanRelayTriggers: ${passed} passed`);

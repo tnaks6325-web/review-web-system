@@ -164,7 +164,17 @@ async function decideAtSubmit({ holdCtx, capturePrice = '', typedPrice = '', sta
   }
 }
 
+// Same judge and exact typed-price exception, applied to one channel snapshot.
+function decideForExpected({channel,expected,capturePrice,typedPrice,staffReview=false,ack=false}={}) {
+  if(!isEnabled())return {action:'none'};
+  const e=_won(expected),paid=_won(capturePrice)||_won(typedPrice);
+  if(!e||!paid)return {action:'none'};
+  if(_won(typedPrice)===e)return {action:'none',typedMatch:true};
+  const d=judge({kind:channelKind(channel),expected:e,paid,staffReview,ack});
+  return d.action==='none'?d:{...d,paidSource:_won(capturePrice)?'capture':'typed'};
+}
 module.exports = {
+  decideForExpected,
   COUPANG_OVER_RATIO, OTHER_DIFF_WON,
   isEnabled, channelKind, diffSentence, uniquePayFromProductLines, wholeCampaignPay, judge, loadExpected, decideAtSubmit, __setPoolForTest,
 };

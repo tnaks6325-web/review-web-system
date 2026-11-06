@@ -34,11 +34,13 @@ function txPool(handler) {
     calls,
     query: async (sql, params) => {
       calls.push({ sql: String(sql), params });
+      // These legacy fixtures have no migration215 native-parent metadata.
+      if(String(sql).startsWith('SELECT to_jsonb(s) AS submission'))return {rows:[]};
       return handler(String(sql), params, calls);
     },
     release() { calls.push({ sql: 'RELEASE' }); },
   };
-  return { connect: async () => client, client };
+  return { query: client.query, connect: async () => client, client };
 }
 
 (async () => {

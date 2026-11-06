@@ -14,7 +14,14 @@ async function isWorkFinished(db,{sheetId,tabName}) {
 }
 
 // Match cancellation: order -> participant -> index. The caller owns COMMIT/ROLLBACK.
-async function lockTarget(client,{sheetId,tabName,rowIndex,reviewerSession}) {
+async function lockTarget(client,{sheetId,tabName,rowIndex,reviewerSession,lockedScope}) {
+  const dual=await require('./dualChannelReview.service').bundleTargetForRow(client,{sheetId,tabName,rowIndex});
+  if(dual){
+    const lifecycle=require('./dualChannelLifecycle.service');
+    const scope=lockedScope||await lifecycle.discoverDualScope(client,[{orderSubmissionId:dual.orderSubmissionId}]);
+    if(!lockedScope)await lifecycle.lockDualScopeInTx(client,scope);
+    await lifecycle.assertDualProvenanceUnchanged(client,scope);
+  }
   const params=[sheetId,tabName,rowIndex];
   const peek=(await client.query(`SELECT id,order_submission_id FROM campaign_participants
     WHERE sheet_id=$1 AND tab_name=$2 AND seq=$3 AND active=TRUE AND deleted_at IS NULL`,params)).rows;

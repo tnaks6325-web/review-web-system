@@ -7,6 +7,21 @@
  * ※ order_submissions.id = UUID (campaign_applications.order_submission_id/late_order_id도 UUID — 045, 심판 J1).
  */
 const { logger } = require('../utils/logger');
+const CONFIRMED_CALLER_PRELOCK = Symbol('confirmed-caller-prelock');
+
+// These helpers can run AFTER an order/application lock. They MUST NOT acquire
+// lifecycle here. A dual caller prelocks before its FIRST existing business lock
+// and passes the server-discovered scope; missing/forged coverage fails closed.
+async function _assertCallerLifecycle(q, campaignId, lockedScope) {
+  const { rows } = await q.query('SELECT to_jsonb(c) AS campaign FROM recruit_campaigns c WHERE c.id=$1', [campaignId]);
+  if (!require('../utils/dualChannel').campaignHasDualChannels(rows[0]?.campaign)) return;
+  if (!lockedScope || !lockedScope.campaignIds?.includes(String(campaignId))) {
+    const e = new Error('동시진행 작업을 먼저 잠근 뒤 다시 시도해 주세요.');
+    e.code = 'dual_lifecycle_prelock_required'; throw e;
+  }
+  await require('./dualChannelLifecycle.service').assertDualProvenanceUnchanged(q, lockedScope);
+}
+
 
 // 처리지연 grace(사용자 유예 아님 — 유예 정책은 제거됨): 확정 UPDATE와 스윕이 같은 경계를 공유해
 // "TTL 마지막 초 제출이 처리지연으로 expired" 경합 창을 제거한다.
@@ -54,7 +69,8 @@ async function _isScheduleDriven(q, campaignId) {
 }
 
 /** closed 영속 단일 헬퍼 — 자동확정·수동확정·스윕 백스톱 공용. 멱등(WHERE status='active'). */
-async function maybePersistClosed(q, campaignId) {
+async function maybePersistClosed(q, campaignId, opts = {}) {
+  if (!opts[CONFIRMED_CALLER_PRELOCK]) await _assertCallerLifecycle(q, campaignId, opts.lockedScope);
   if (await _isScheduleDriven(q, campaignId)) return;
   await q.query(
     `UPDATE recruit_campaigns rc SET status = 'closed', updated_at = NOW()
@@ -85,6 +101,7 @@ async function maybeReopenAfterQuotaIncrease(q, campaignId, prevTotal, opts) {
   const sp = !!(opts && opts.savepoint);
   try {
     if (sp) await q.query('SAVEPOINT reopen_after_quota');
+    await _assertCallerLifecycle(q, campaignId, opts && opts.lockedScope);
     if (await _isScheduleDriven(q, campaignId)) {
       if (sp) await q.query('RELEASE SAVEPOINT reopen_after_quota');
       return false;
@@ -133,9 +150,11 @@ function detectIdentityDrift(row, orderIdentity) {
  * 반환: 'confirmed' | 'late' | 'tab_mismatch' | 'not_found' | 'invalid_params'
  *   — 어떤 반환값이든 주문 저장은 막지 않는다(호출측이 SAVEPOINT로 예외도 격리).
  */
-async function confirmHoldInTx(client, { applicationId, campaignId, phone8, holdToken, orderSubmissionId, sheetId, gid, tabName, expectedOptKey, orderIdentity, skipTabBinding = false }) {
+async function confirmHoldInTx(client, { applicationId, campaignId, phone8, holdToken, orderSubmissionId, sheetId, gid, tabName, expectedOptKey, orderIdentity, skipTabBinding = false, lockedScope }) {
   const appId = parseInt(applicationId, 10);
   if (!appId || !campaignId || !holdToken || !phone8) return 'invalid_params';
+
+  await _assertCallerLifecycle(client, campaignId, lockedScope);
 
   // 잠금 계층 1: 캠페인 행 — apply·수동확정과 동일 순서(교착 불가)
   const { rows: cRows } = await client.query('SELECT * FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [campaignId]);
@@ -200,7 +219,10 @@ async function confirmHoldInTx(client, { applicationId, campaignId, phone8, hold
       logger.warn(`[campaignHold] 명의 드리프트 감지 app=${appId} kind=${_drift.kind} ` +
         `홀드명의=***${String(conf.rows[0].phone8).slice(-4)} 주문연락처=***${_drift.orderP8.slice(-4)} — 관제 대조 필요`);
     }
-    await maybePersistClosed(client, campaignId);
+    // Confirmation already validated before its own provenance writes. Rechecking an
+    // application-target scope now would mistake OUR order link for concurrent drift.
+    if (lockedScope) await maybePersistClosed(client, campaignId, { [CONFIRMED_CALLER_PRELOCK]: true });
+    else await maybePersistClosed(client, campaignId);
     return 'confirmed';
   }
   // 지각/스윕 선점/취소 후 제출: 자동확정 없음 — 관제 수동확정 대상 표기(레드 #5·#7의 구제경로 입력)
@@ -252,28 +274,58 @@ async function logIdentityBlockedExpiries(pool, ids) {
   }
 }
 
-/** 만료 스윕(정리용 — 판정 SoT는 시각 기준이라 지연·미실행 무해). DB-only, 시트 쿼터 0. */
+/**
+ * Unlocked discovery only. Each dual campaign owns a separate lifecycle transaction;
+ * never hold application rows while discovering/acquiring another campaign's lock.
+ * Ordinary campaigns retain the existing autocommit/SKIP LOCKED path.
+ */
 async function sweepExpiredHolds(pool) {
+  const { campaignHasDualChannels } = require('../utils/dualChannel');
+  const { rows } = await pool.query('SELECT to_jsonb(rc) AS campaign FROM recruit_campaigns rc');
+  const dualIds = rows.filter(r => campaignHasDualChannels(r.campaign)).map(r => String(r.campaign.id)).sort();
+  const result = await sweepExpiredHoldsInTx(pool, { campaignIds: dualIds, exclude: true });
+  if (result.expiredIds.length) await logIdentityBlockedExpiries(pool, result.expiredIds);
+  for (const campaignId of dualIds) {
+    const { withDualLifecycleInTx } = require('./dualChannelLifecycle.service');
+    const part = await withDualLifecycleInTx({ db: pool, targets: [{ campaignId }], run: async client => {
+      await client.query('SELECT id FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [campaignId]);
+      return sweepExpiredHoldsInTx(client, { campaignIds: [campaignId],
+        dismissCap: Math.max(0, AUTO_DISMISS_CAP - result.autoDismissed) });
+    } });
+    if (part.expiredIds.length) await logIdentityBlockedExpiries(pool, part.expiredIds);
+    for (const key of ['expired', 'autoDismissed', 'revived', 'closedPersisted']) result[key] += part[key];
+  }
+  const { expiredIds, ...counts } = result;
+  return counts;
+}
+
+/**
+ * Same-client core, no transaction ownership. Caller must prelock lifecycle and
+ * campaign rows for included dual IDs; exclude=true is the ordinary-only path.
+ * Recheck every original SQL predicate AFTER those locks, including closed backstop.
+ */
+async function sweepExpiredHoldsInTx(pool, { campaignIds, exclude = false, dismissCap = AUTO_DISMISS_CAP }) {
+  const scope = (alias, param) => `${alias}campaign_id ${exclude ? '<> ALL' : '= ANY'}($${param}::text[])`;
   // ① grace 경과분만 만료(확정과 동일 경계 → 정시제출 경합 창 0). SKIP LOCKED = 확정 중 행 건너뜀(교착 0, 심판 J6).
   const exp = await pool.query(
     `UPDATE campaign_applications SET status = 'expired'
       WHERE id IN (
         SELECT id FROM campaign_applications
          WHERE status = 'applied' AND expires_at <= NOW() - make_interval(secs => $1)
+           AND ${scope('', 2)}
          ORDER BY id
          FOR UPDATE SKIP LOCKED)
       RETURNING id`,
-    [HOLD_GRACE_SEC]
+    [HOLD_GRACE_SEC, campaignIds]
   );
   // ①-2 명의 확인에 막혀 만료된 참여를 담당자 로그에 남긴다(보고서 원인 5 — 20일간 82건이 아무도
   //   모르게 만료됐다). 방금 만료된 id 만 보므로 같은 건이 두 번 쌓이지 않는다. 실패해도 스윕은 계속.
-  if (exp.rowCount) await logIdentityBlockedExpiries(pool, exp.rows.map(r => r.id));
   // ② late 백필: 확정 못 한 주문의 provenance 링크가 있으면 관제 수동확정 목록에 노출
   await pool.query(
     `UPDATE campaign_applications a SET late_order_id = o.id
        FROM order_submissions o
       WHERE o.campaign_application_id = a.id AND o.deleted_at IS NULL
-        AND a.status = 'expired' AND a.late_order_id IS NULL`
+        AND a.status = 'expired' AND a.late_order_id IS NULL AND ${scope('a.', 1)}`, [campaignIds]
   );
   // ③ 되살리기 — 자동 취소확정한 뒤에 주문이 붙은 건은 다시 관제 목록으로 올린다.
   //   ★ 만료 직후 도착 주문은 confirmHoldInTx 의 late 경로가 status IN ('expired','cancelled') 조건으로
@@ -284,16 +336,21 @@ async function sweepExpiredHolds(pool) {
   let revived = 0, autoDismissed = 0;
   if (AUTO_DISMISS_ON) {
     try {
+      if (!exclude) await pool.query('SAVEPOINT hold_sweep_optional');
       const rev = await pool.query(
         `UPDATE campaign_applications a
             SET dismissed_at = NULL, dismissed_by = NULL
-          WHERE a.dismissed_by = 'auto' AND a.dismissed_at IS NOT NULL
+          WHERE a.dismissed_by = 'auto' AND a.dismissed_at IS NOT NULL AND ${scope('a.', 1)}
             AND (a.late_order_id IS NOT NULL OR a.order_submission_id IS NOT NULL
                  OR EXISTS (SELECT 1 FROM order_submissions o
                              WHERE o.campaign_application_id = a.id AND o.deleted_at IS NULL))
-          RETURNING a.id`
+          RETURNING a.id`, [campaignIds]
       );
       revived = rev.rowCount;
+      if (!exclude) {
+        await pool.query('RELEASE SAVEPOINT hold_sweep_optional');
+        await pool.query('SAVEPOINT hold_sweep_optional');
+      }
       if (revived) logger.info(`[campaignHold] 자동 취소확정 되살림(기구매 도착): ${rev.rows.map(r => r.id).join(',')}`);
 
       // ④ 자동 취소확정 — (만료 | 취소) && 주문 흔적 0. 상태는 그대로 두고 마커만 붙인다.
@@ -302,11 +359,11 @@ async function sweepExpiredHolds(pool) {
       //     취소(cancelled) 줄에는 그 백필이 원래 닿지 않지만, 되살리기가 주문 원장 역참조(EXISTS)도
       //     보므로 링크 컬럼 없이도 감지된다 — 그래서 백필 조건을 넓히지 않았다(지각 배지 노이즈 방지).
       //   ★ quota/유효홀드는 시각 기준이라 이 마커는 정원·상태 계산에 일절 영향 없다(078 규율).
-      const dis = await pool.query(
+      const dis = dismissCap > 0 ? await pool.query(
         `UPDATE campaign_applications SET dismissed_at = NOW(), dismissed_by = 'auto'
           WHERE id IN (
             SELECT a.id FROM campaign_applications a
-             WHERE a.status IN ('expired', 'cancelled') AND a.dismissed_at IS NULL
+             WHERE a.status IN ('expired', 'cancelled') AND a.dismissed_at IS NULL AND ${scope('a.', 2)}
                AND a.late_order_id IS NULL AND a.order_submission_id IS NULL
                AND NOT EXISTS (SELECT 1 FROM order_submissions o
                                 WHERE o.campaign_application_id = a.id AND o.deleted_at IS NULL)
@@ -314,10 +371,15 @@ async function sweepExpiredHolds(pool) {
              LIMIT $1
              FOR UPDATE SKIP LOCKED)
           RETURNING id`,
-        [AUTO_DISMISS_CAP]
-      );
+        [dismissCap, campaignIds]
+      ) : { rowCount: 0 };
       autoDismissed = dis.rowCount;
+      if (!exclude) await pool.query('RELEASE SAVEPOINT hold_sweep_optional');
     } catch (e) {
+      if (!exclude) {
+        await pool.query('ROLLBACK TO SAVEPOINT hold_sweep_optional');
+        await pool.query('RELEASE SAVEPOINT hold_sweep_optional');
+      }
       // fail-soft: 자동 정리가 실패해도 만료 마킹·late 백필·closed 백스톱은 그대로 굴러가야 한다.
       logger.warn(`[campaignHold] 자동 취소확정 스킵: ${e.message}`);
     }
@@ -328,8 +390,9 @@ async function sweepExpiredHolds(pool) {
   const cand = await pool.query(
     `SELECT rc.id, rc.linked_sheet_id, rc.linked_tab_gid FROM recruit_campaigns rc
       WHERE rc.participation_mode AND rc.status = 'active' AND rc.recruit_total > 0
+        AND rc.id ${exclude ? '<> ALL' : '= ANY'}($1::text[])
         AND (SELECT COUNT(*) FROM campaign_applications ca
-              WHERE ca.campaign_id = rc.id AND ca.status = 'submitted') >= rc.recruit_total`
+              WHERE ca.campaign_id = rc.id AND ca.status = 'submitted') >= rc.recruit_total`, [campaignIds]
   );
   let ids = cand.rows.map(r => r.id);
   if (ids.length) {
@@ -346,11 +409,14 @@ async function sweepExpiredHolds(pool) {
   if (ids.length) {
     const closed = await pool.query(
       `UPDATE recruit_campaigns SET status = 'closed', updated_at = NOW()
-        WHERE id = ANY($1) AND status = 'active' RETURNING id`, [ids]);
+        WHERE id = ANY($1) AND status = 'active' AND recruit_total > 0
+          AND (SELECT COUNT(*) FROM campaign_applications ca
+                WHERE ca.campaign_id = recruit_campaigns.id AND ca.status = 'submitted') >= recruit_total
+        RETURNING id`, [ids]);
     closedCount = closed.rowCount;
     if (closedCount) logger.info(`[campaignHold] closed 영속(백스톱): ${closed.rows.map(r => r.id).join(',')}`);
   }
-  return { expired: exp.rowCount, autoDismissed, revived, closedPersisted: closedCount };
+  return { expired: exp.rowCount, autoDismissed, revived, closedPersisted: closedCount, expiredIds: exp.rows.map(r => r.id) };
 }
 
 module.exports = { HOLD_GRACE_SEC, tabMatchesCampaign, maybePersistClosed, maybeReopenAfterQuotaIncrease, confirmHoldInTx, detectIdentityDrift, sweepExpiredHolds, logIdentityBlockedExpiries };

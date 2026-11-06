@@ -27,7 +27,7 @@ async function run() {
   };
 
   ledgerSvc.loadRawTabContext = async () => ({ headers: ['수취인', '연락처'], tabGid: '1' });
-  orderSvc.__setPoolForTest({ connect: async () => client });
+  orderSvc.__setPoolForTest({ query: (...args) => client.query(...args), connect: async () => client });
   try {
     const result = await orderSvc.writeOrderToWorktable({
       sheetId: 'S', tabName: 'T', orderSubmissionId: '00000000-0000-0000-0000-000000000001',

@@ -524,7 +524,8 @@ function distributeOptions({ total, options = [], includeSingle = false, distrib
      [채널] + [뒤쪽 유형]`. 옵션·리뷰옵션처럼 작업지시 칸은 앞쪽(front), 택배송장번호처럼
      기록용 칸은 뒤쪽(back)에 붙인다.
    ★ **유형을 하나도 안 켜면 종전과 완전히 같은 순서**(공통 → 채널) — 안 쓰면 무변화. */
-function buildColumns({ template, channel, workTypes, tabOpts = {} } = {}) {
+const DUAL_PURCHASE_HEADERS=Object.freeze(['네이버 주문번호','쿠팡 주문번호','네이버 금액','쿠팡 금액','네이버아이디','쿠팡ID']);
+function buildColumns({ template, channel, workTypes, tabOpts = {}, dualChannel = false } = {}) {
   const norm = (arr) => (arr || []).map(s => String(s || '').trim()).filter(Boolean);
   const core = norm((template && template.core));
   const chan = norm((((template && template.channels) || {})[channel]));
@@ -558,6 +559,7 @@ function buildColumns({ template, channel, workTypes, tabOpts = {} } = {}) {
   frontCols.forEach(c => push(c.name, 'worktype', c.typeKey));
   core.slice(autoPrefix).forEach(n => push(n, 'common'));
   chan.forEach(n => push(n, 'channel'));
+  if(dualChannel)DUAL_PURCHASE_HEADERS.forEach(n=>push(n,'channel'));
   backCols.forEach(c => push(c.name, 'worktype', c.typeKey));
 
   const cls = classifyHeaders(names, tabOpts);
@@ -877,7 +879,8 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
      제안(`suggestedWorkTypes`)은 화면이 체크를 미리 해 주는 재료일 뿐, 여기서 조용히 적용하면
      "정하지 않았는데 정해진" 표가 만들어진다(설정 프리셋과 같은 규율). */
   const workTypes = (Array.isArray(o.workTypes) ? o.workTypes : []).map(k => String(k || '').trim()).filter(Boolean);
-  const columns = buildColumns({ template, channel, workTypes });
+  const dualChannel=require('./dualChannel').rawHasDualChannels(wo.product_options_json);
+  const columns = buildColumns({ template, channel, workTypes, dualChannel });
   /* ★ 리뷰 제출 시각이 들어갈 칸은 어느 작업표에나 있어야 한다(2026-08-21).
      ★ **택배송장·블로그 보장보다 먼저** 붙인다 — 나중에 붙이면 "back 유형 열이 맨 뒤"라는
        열 순서 계약이 깨진다(회귀가드가 잡았다). 리뷰는 템플릿 열 바로 뒤(상태 칸 자리). */
@@ -1306,6 +1309,7 @@ function planCellHeaders(headers) {
 }
 
 module.exports = {
+  DUAL_PURCHASE_HEADERS,
   buildWorktablePlan, buildColumns, distributeDates, distributeOptions, normalizeProductDistributionMode,
   distributeReviewTypes, reviewMixFromWorkOrder, optionReviewMixesFromWorkOrder,
   BLOG_REQUIRED_HEADERS, ensureBlogColumns, isBlogWorkOrder,

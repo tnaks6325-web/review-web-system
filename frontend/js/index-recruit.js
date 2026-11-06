@@ -2387,6 +2387,7 @@ function renderPartCheck() {
    ═══════════════════════════════════════ */
 /** 현재 진행상품 입력 모드 — 'none'(옵션 없는 작업) | 'opt'(옵션 있는 작업) */
 function _prodMode() {
+  if (typeof rfDualActive === "function" && rfDualActive()) return "none";
   /* ★★ 결정 277(사용자 확정 2026-10-22 「3.가」) — 공고 전체의 "옵션 없는/있는 작업" 스위치는 없다.
      상품 카드마다 옵션 있음·없음을 고르고(인트라넷 리뷰오더 상품 카드와 같다), 저장 모양(선택지 원장 유무)은
      **카드 구성에서 정해진다** — 작업오더 → 공고 자동 생성 규칙(`_woProductMode`)과 같은 규칙:
@@ -2553,6 +2554,7 @@ function _buildProdGroup(g) {
     _optSummary(); renderPartCheck(); _syncPreviewFromOptRows();
   });
   head.querySelector(".rf-gp-del").onclick = () => {
+    if (typeof rfDualActive === "function" && rfDualActive()) return rfDualError("동시진행 상품을 지우는 전환은 지원하지 않습니다.");
     _ugDropBox(box);
     box.remove(); _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); _syncGroupTotals();
   };
@@ -2568,6 +2570,7 @@ function _buildProdGroup(g) {
   const add = document.createElement("button");
   add.type = "button"; add.className = "rf-gp-add"; add.textContent = "+ 옵션 추가";
   add.onclick = () => {
+    if (typeof rfDualActive === "function" && rfDualActive()) return rfDualError("동시진행에는 옵션을 추가할 수 없습니다.");
     body.appendChild(_buildOptRowEl({ productName: nameEl.value }));
     _ugAttachAll();
     _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); _syncGroupTotals();
@@ -2583,6 +2586,7 @@ function _buildProdGroup(g) {
   head.querySelectorAll(".rf-gp-unit button").forEach(btn => {
     btn.onclick = () => {
       const u = btn.dataset.unit === "product" ? "product" : "option";
+      if (typeof rfDualActive === "function" && rfDualActive()) return rfDualError("동시진행은 옵션 없는 상품 하나만 지원합니다.");
       if (box.dataset.unit === u) return;
       if (u === "product") {
         const rows = Array.from(box.querySelectorAll(".rf-opt-row"));
@@ -2624,6 +2628,7 @@ function _syncGroupTotals() {
 
 /** [＋ 상품 추가] — 옵션 없는 작업이면 상품 한 줄, 옵션 있는 작업이면 상품 그룹 하나를 더한다 */
 function addOptRow(data) {
+  if (typeof rfDualActive === "function" && rfDualActive()) return rfDualError("동시진행에는 상품을 더할 수 없습니다.");
   const wrap = document.getElementById("rf_opt_rows");
   if (!wrap) return;
   window._rfForcedNone = false;   // 사람이 상품을 더했다 — 이제 카드 구성 규칙(_prodMode)대로
@@ -2654,6 +2659,7 @@ function _rfRefreshCards() {
     wrap.classList.toggle("rf-multi", boxes.length > 1 && window._rfUnitInflowOk !== false);   // 상품이 둘 이상일 때만 상품별 유입 선택을 보인다
   }
   _rfPaintCardInflows();
+  if (typeof rfDualPaint === "function") rfDualPaint();
 }
 
 /* ══ 결정 333 — 상품마다 유입방식 ═══════════════════════════════════════════════
@@ -2909,6 +2915,7 @@ function _buildOptRowEl(data) {
   if (status === "closed") row.querySelector(".rf-opt-name").title = "마감된 옵션(참여자 보호로 유지) — 재개 버튼으로 다시 모집할 수 있어요";
   row.querySelectorAll("input").forEach(i => i.addEventListener("input", () => { _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); }));
   const dropUnit = () => {   // ★ 껍데기째 — 행만 지우면 선택지 가이드 블록이 고아로 남는다
+    if (typeof rfDualActive === "function" && rfDualActive()) return rfDualError("동시진행 상품의 인원 줄은 삭제할 수 없습니다.");
     _ugDrop(row.dataset.ig);
     unitEl.remove(); _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); _syncGroupTotals();
   };
@@ -2916,6 +2923,7 @@ function _buildOptRowEl(data) {
   if (del) del.onclick = dropUnit;
   const plus = row.querySelector(".rf-opt-plus");
   if (plus) plus.onclick = () => {
+    if (typeof rfDualActive === "function" && rfDualActive()) return rfDualError("동시진행에는 옵션을 추가할 수 없습니다.");
     const box = unitEl.closest(".rf-gp");
     const next = _buildOptRowEl({ productName: box ? String(box.querySelector(".rf-gp-name")?.value || "") : "" });
     if (unitEl.nextSibling) unitEl.parentNode.insertBefore(next, unitEl.nextSibling); else unitEl.parentNode.appendChild(next);
@@ -3013,6 +3021,7 @@ function _markDupProductNames() {
  * ★ 자동은 제안까지 — 사람이 스위치로 언제든 바꾼다.
  */
 function renderOptRows(options, opts) {
+  if (typeof rfDualRenderInput === "function" && rfDualRenderInput(options, opts)) return;
   const wrap = document.getElementById("rf_opt_rows");
   if (!wrap) return;
   const list = options || [];
@@ -3062,6 +3071,10 @@ function renderOptRows(options, opts) {
  * 옵션이 없는 단일상품 공고는 원문만으로 행을 만든다(표가 비어 보이지 않게).
  */
 function renderOptRowsWithProduct(options, productLines, campaign) {
+  if (typeof rfRestoreDualChannelProduct === "function" && campaign?.work_detail
+      && Object.prototype.hasOwnProperty.call(campaign.work_detail, "dualChannelProduct")) {
+    return rfRestoreDualChannelProduct(campaign.work_detail.dualChannelProduct, campaign);
+  }
   const parsed = parseProductLinesToRows(productLines);
   const byOpt = new Map();
   parsed.forEach(r => { if (r.optKey) byOpt.set(r.optKey, r); });
@@ -3390,6 +3403,10 @@ function parseProductLinesToRows(text, fallbackProductName) {
  *    텍스트 분해가 상품명 속 하이픈·빗금을 옵션처럼 쪼개도 옵션으로 승격시키지 않는다.
  *    (2026-08-07 우레온 건: 상품명 조각이 옵션명이 되어 공고가 잠겼다) */
 function applyProductRowsFromOrder(prefill) {
+  if (typeof rfRestoreDualChannelProduct === "function" && prefill
+      && Object.prototype.hasOwnProperty.call(prefill, "dualChannelProduct")) {
+    return rfRestoreDualChannelProduct(prefill.dualChannelProduct, prefill);
+  }
   const wrap = document.getElementById("rf_opt_rows");
   if (!wrap) return;
   const p = prefill || {};
@@ -3901,6 +3918,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   switchRecruitPane("basic");   // 열 때는 항상 첫 탭 — 지난번 탭이 남으면 어디를 보는지 헷갈린다
 
   /* 폼 초기화 */
+  if (typeof rfResetDualChannelEditor === "function") rfResetDualChannelEditor();
   ["rf_title","rf_channel","rf_channel_custom","rf_time_range",
    "rf_review_fee","rf_notes","rf_chat_url","rf_sort_order","rf_max_slots"].forEach(i => {
     const el = document.getElementById(i);
@@ -4446,6 +4464,7 @@ function closeRecruitModal() {
    채널/담당자 버튼 선택 (공통)
 ═══════════════════════════════════════ */
 function selectRfBtn(group, btn) {
+  if (group === 'channel' && typeof rfDualSelect === "function" && !rfDualSelect(btn.dataset.val)) return;
   /* 같은 그룹 버튼만 비활성화 */
   const container = btn.closest('#rf_channel_btns, #rf_manager_btns, #rf_transfer_bank_btns, #rf_review_type_btns');
   if (container) {
@@ -6160,6 +6179,13 @@ function _rfGoToCheck() {
    공고 저장 (등록 / 수정)
 ═══════════════════════════════════════ */
 async function saveRecruitPostImpl() {
+  // Presence, not validity: incomplete/unknown dual settings must never fall through.
+  if (document.getElementById("rf_channel")?.value === "네이버+쿠팡"
+      || document.querySelector("#rf_opt_rows .rf-dual-editor") || window._rfDualRejected
+      || window._recruitEditLoaded?.work_detail?.dualChannelProduct) {
+    _rfSaveBlocked("네이버·쿠팡 동시진행은 준비 중입니다. 아직 저장하거나 모집을 시작할 수 없습니다.");
+    return;
+  }
   if (_recruitEditId && window._recruitEditLoadFailed) {
     _rfSaveBlocked("기존 공고 정보를 완전히 불러오지 못해 저장을 차단했습니다. 새로고침 후 다시 시도해주세요.");
     return;
@@ -6792,6 +6818,12 @@ function _renderPreview() {
 
   // 유입가이드: 저장할 값과 **같은 조립 함수**를 쓴다 — 미리보기와 실제 저장본이 갈라질 수 없다.
   const inflowHtml = ""; // 신규 미리보기는 선택지별 가이드만 표시한다.
+  let dualPreview;
+  if (typeof rfReadDualChannelProduct === "function"
+      && ((typeof rfDualActive === "function" && rfDualActive()) || window._rfDualRejected)) {
+    try { dualPreview = rfReadDualChannelProduct(); }
+    catch (_) { dualPreview = null; } // 잘못된 입력을 일반 상품·0원 안내로 꾸미지 않는다.
+  }
 
   // 시간 표기가 있으면 홀드 타이머 대신 실제 TTL을 보여준다(참여 후 화면의 상단 바)
   const ttlEl = document.getElementById("rf_prev_ttl");
@@ -6802,6 +6834,7 @@ function _renderPreview() {
 
   CampWorkDetail.renderInto(card, {
     workDetail: {
+      ...(dualPreview === undefined ? {} : { dualChannelProduct: dualPreview }),
       productLines:    _v("rf_wd_product"),
       inflowGuideHtml: inflowHtml,
       reviewGuide:     _v("rf_wd_review"),
@@ -7021,6 +7054,267 @@ selectRfBtn = function(group, btn) {
   _origSelectRfBtn(group, btn);
   _onPreviewInput();
 };
+
+/* RF_DUAL_CHANNEL_EDITOR */
+// Local-only editor. Keep this in the existing bundle so all modal hosts load it.
+// The server save boundary remains closed until the entire dual flow is ready.
+function rfDualActive() {
+  return !!document.querySelector("#rf_opt_rows .rf-dual-editor");
+}
+function rfDualError(message) {
+  let el = document.querySelector("#rf_opt_rows .rf-dual-error");
+  if (!el && message) {
+    if (typeof showToast === "function") showToast(message, true);
+    const rows = document.getElementById("rf_opt_rows");
+    if (rows) { el = document.createElement("div"); el.className = "rf-dual-error rf-dual-rejected"; el.setAttribute("role", "alert"); rows.appendChild(el); }
+  }
+  if (el) { el.textContent = message || ""; el.hidden = !message; }
+  return false;
+}
+function rfDualInteger(value, label, min, max) {
+  const n = typeof value === "string" && /^[0-9]+$/.test(value.trim()) ? Number(value.trim()) : value;
+  if (typeof n !== "number" || !Number.isSafeInteger(n) || n < min || n > max) {
+    throw new Error(label + "은 " + min + "~" + max + " 범위의 정수로 입력해주세요.");
+  }
+  return n;
+}
+function rfDualUrl(value, label, max) {
+  if (typeof value !== "string") throw new Error(label + " 주소를 확인해주세요.");
+  const raw = value.trim();
+  if (/[\x00-\x1f\x7f]/.test(raw)) throw new Error(label + " 주소를 확인해주세요.");
+  let u;
+  try { u = new URL(raw); } catch (_) { throw new Error(label + " 주소를 확인해주세요."); }
+  if (!/^https?:\/\//i.test(raw) || !["http:", "https:"].includes(u.protocol) || !u.hostname || u.username || u.password || raw.length > max) {
+    throw new Error(label + "은 로그인 정보 없는 http/https 주소로 입력해주세요.");
+  }
+  return raw;
+}
+function rfDualKeys(value, allowed, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(k => !allowed.includes(k))) {
+    throw new Error(label + "에 이 화면이 모르는 항목이 있습니다. 원본을 그대로 보존하고 편집을 중단합니다.");
+  }
+}
+function rfDualNormalize(product) {
+  if (!product || typeof product !== "object" || Array.isArray(product)) throw new Error("상품 하나가 필요합니다.");
+  const p = JSON.parse(JSON.stringify(product));
+  if (typeof p.name !== "string" || !p.name.replace(/\|/g, "").trim() || p.name.trim().length > 200) throw new Error("상품명을 200자 이하로 입력해주세요.");
+  if (p.product_mode !== "none" || !Array.isArray(p.options) || p.options.length || Object.prototype.hasOwnProperty.call(p, "qty_tiers") || p.closed === true) {
+    throw new Error("동시진행은 마감되지 않은 옵션 없는 상품 하나만 지원합니다. 옵션·수량 단계는 바꾸지 않습니다.");
+  }
+  if (!p.base || typeof p.base !== "object" || Array.isArray(p.base)) throw new Error("상품 기본값이 필요합니다.");
+  rfDualKeys(p.channels, ["naver", "coupang"], "구매처 설정");
+  ["naver", "coupang"].forEach(key => {
+    const label = key === "naver" ? "네이버" : "쿠팡";
+    const c = p.channels[key];
+    rfDualKeys(c, ["url", "pay", "inflow_type", "guide"], label);
+    c.url = rfDualUrl(c.url, label + " 상품", 2048);
+    c.pay = rfDualInteger(c.pay, label + " 결제금액", 0, 100000000);
+    if (!["guide", "link"].includes(c.inflow_type)) throw new Error(label + " 유입방식을 직접 선택해주세요.");
+    if (!Object.prototype.hasOwnProperty.call(c, "guide") && c.inflow_type === "link") c.guide = { text: "", images: [] };
+    rfDualKeys(c.guide, ["text", "images"], label + " 가이드");
+    if (typeof c.guide.text !== "string" || !Array.isArray(c.guide.images) || c.guide.images.length > 4) throw new Error(label + " 가이드 글과 사진(최대 4장)을 확인해주세요.");
+    c.guide.images = c.guide.images.map(url => rfDualUrl(url, label + " 가이드 사진", Infinity));
+    if (c.inflow_type === "guide" && !c.guide.text.trim() && !c.guide.images.length) throw new Error(label + " 가이드유입에는 안내 글 또는 사진이 필요합니다.");
+  });
+  p.base.count = rfDualInteger(p.base.count, "모집인원(사람 수)", 1, 100000);
+  if (Object.prototype.hasOwnProperty.call(p.base, "daily")) p.base.daily = rfDualInteger(p.base.daily, "일건수", 0, 100000);
+  p.base.pay = rfDualInteger(p.base.pay, "합계 결제금액", 0, 100000000);
+  if (p.base.pay !== p.channels.naver.pay + p.channels.coupang.pay) throw new Error("합계 결제금액이 두 구매처 금액과 다릅니다. 원본을 확인해주세요.");
+  return p;
+}
+function rfReadDualChannelProduct() {
+  if (window._rfDualRejected) throw new Error(window._rfDualRejectedMessage || "구매처 설정 원본을 확인해주세요.");
+  const box = document.querySelector("#rf_opt_rows .rf-gp");
+  if (!box || !box._rfDualSource) return null;
+  const p = JSON.parse(JSON.stringify(box._rfDualSource));
+  p.name = box.querySelector(".rf-gp-name").value;
+  p.base.count = box.querySelector(".rf-opt-rt").value;
+  const daily = box.querySelector(".rf-opt-dl").value;
+  if (Object.prototype.hasOwnProperty.call(p.base, "daily") || (daily !== "" && String(daily) !== "0")) {
+    p.base.daily = rfDualInteger(daily, "일건수", 0, 100000);
+  }
+  p.channels = {};
+  ["naver", "coupang"].forEach(key => {
+    const get = field => box.querySelector(".rf-dual-" + key + "-" + field).value;
+    const images = get("images");
+    p.channels[key] = { url: get("url"), pay: get("pay"), inflow_type: get("inflow"),
+      guide: { text: get("text"), images: images === "" ? [] : images.split("\n") } };
+  });
+  p.base.pay = rfDualInteger(p.channels.naver.pay, "네이버 결제금액", 0, 100000000)
+    + rfDualInteger(p.channels.coupang.pay, "쿠팡 결제금액", 0, 100000000);
+  return rfDualNormalize(p);
+}
+function rfDualSync() {
+  const box = document.querySelector("#rf_opt_rows .rf-gp");
+  if (!box || !box._rfDualSource) return;
+  const summary = box.querySelector(".rf-dual-total");
+  const preview = box.querySelector(".rf-dual-preview");
+  try {
+    const p = rfReadDualChannelProduct();
+    box.querySelector(".rf-opt-pay").value = String(p.base.pay);
+    summary.textContent = "1인 상품비 합계 " + p.base.pay.toLocaleString() + "원 · 모집 " + p.base.count + "명 · 리뷰비는 1인 1회";
+    preview.textContent = [p.name, ...["naver", "coupang"].map(key => {
+      const c = p.channels[key];
+      return (key === "naver" ? "네이버" : "쿠팡") + " · " + c.pay.toLocaleString() + "원 · " + (c.inflow_type === "link" ? "링크유입" : "가이드유입") + "\n" + c.url + "\n" + c.guide.text + (c.guide.images.length ? "\n" + c.guide.images.join("\n") : "");
+    })].join("\n\n");
+    rfDualError(window._rfDualRejectedMessage || "");
+    _syncPreviewFromOptRows();
+  } catch (error) {
+    box.querySelector(".rf-opt-pay").value = "";
+    summary.textContent = "합계 확인 필요 — 입력 오류를 고쳐주세요";
+    preview.textContent = "입력 내용을 확인하면 두 구매처 미리보기가 표시됩니다.";
+    rfDualError(error.message);
+  }
+}
+function rfDualBuild(box, p) {
+  box.classList.add("rf-dual-card");
+  const wrap = document.createElement("div"); wrap.className = "rf-dual-editor";
+  const note = document.createElement("div"); note.className = "rf-dual-notice";
+  note.textContent = "네이버+쿠팡 · 로컬 미리보기 전용 — 실제 저장·모집은 준비 중입니다. 모집인원은 사람 수이며 리뷰비는 한 번만 적용합니다. 기존 공통 가이드는 그대로 보존됩니다.";
+  wrap.appendChild(note);
+  if (p.guide) {
+    const legacy = document.createElement("pre"); legacy.className = "rf-dual-legacy";
+    legacy.textContent = "기존 상품 가이드(보존 · 구매처별 가이드와 별개)\n" + JSON.stringify(p.guide, null, 2);
+    wrap.appendChild(legacy);
+  }
+  ["naver", "coupang"].forEach(key => {
+    const panel = document.createElement("div"); panel.className = "rf-dual-channel";
+    const title = document.createElement("strong"); title.textContent = key === "naver" ? "네이버" : "쿠팡"; panel.appendChild(title);
+    const c = p.channels[key];
+    [["url", "상품 URL", "input", c.url], ["pay", "결제금액(원)", "input", c.pay],
+      ["text", "유입가이드 글", "textarea", c.guide.text], ["images", "유입가이드 사진 주소(한 줄에 하나 · 최대 4장)", "textarea", c.guide.images.join("\n")]].forEach(item => {
+      const label = document.createElement("label"); label.className = "rf-f";
+      const text = document.createElement("span"); text.className = "rf-f-l"; text.textContent = item[1]; label.appendChild(text);
+      const input = document.createElement(item[2]); input.className = "rform-input rf-dual-" + key + "-" + item[0];
+      // Text inputs preserve invalid decimals/negative/unknown values for correction.
+      if (item[2] === "input") input.type = "text";
+      if (item[0] === "pay") input.inputMode = "numeric";
+      input.value = String(item[3]); input.addEventListener("input", rfDualSync); label.appendChild(input); panel.appendChild(label);
+    });
+    const toggle = document.createElement("div"); toggle.className = "square-toggle";
+    const value = document.createElement("input"); value.type = "hidden"; value.className = "rf-dual-" + key + "-inflow"; value.value = c.inflow_type;
+    ["link", "guide"].forEach(kind => {
+      const button = document.createElement("button"); button.type = "button"; button.textContent = kind === "link" ? "링크유입" : "가이드유입";
+      button.dataset.inflow = kind; button.classList.toggle("active", kind === value.value);
+      button.onclick = () => { value.value = kind; toggle.querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.inflow === kind)); rfDualSync(); };
+      toggle.appendChild(button);
+    });
+    panel.appendChild(toggle); panel.appendChild(value); wrap.appendChild(panel);
+  });
+  [["div", "rf-dual-total"], ["div", "rf-dual-error"], ["pre", "rf-dual-preview"]].forEach(item => {
+    const el = document.createElement(item[0]); el.className = item[1];
+    if (item[1] === "rf-dual-error") el.setAttribute("role", "alert");
+    wrap.appendChild(el);
+  });
+  box.appendChild(wrap);
+  box.querySelector(".rf-opt-pay").readOnly = true;
+  box.querySelector(".rf-gp-name").addEventListener("input", rfDualSync);
+  box.querySelector(".rf-opt-rt").addEventListener("input", rfDualSync);
+  box.querySelector(".rf-opt-dl").addEventListener("input", rfDualSync);
+  rfDualPaint();
+}
+function rfDualPaint() {
+  if (!rfDualActive()) return;
+  const box = document.querySelector("#rf_opt_rows .rf-gp");
+  box.querySelectorAll(".rf-gp-unit button").forEach(b => { b.disabled = true; });
+  [".rf-gp-add", ".rf-gp-shop"].forEach(selector => { const el = box.querySelector(selector); if (el) el.disabled = true; });
+  box.querySelectorAll(".rf-opt-acts button").forEach(button => { button.disabled = true; });
+  const add = document.getElementById("rf_opt_addbtn"); if (add) add.disabled = true;
+  const url = box.querySelector(".rf-gp-url"); if (url) url.readOnly = true;
+  const urlRow = url && url.closest(".rf-f"); if (urlRow) urlRow.hidden = true;
+  const inflowRow = document.getElementById("rf_inflow_type_ui")?.closest(".form-row");
+  if (inflowRow) {
+    if (inflowRow._rfDualWasHidden === undefined) inflowRow._rfDualWasHidden = inflowRow.hidden;
+    inflowRow.hidden = true;
+  }
+}
+function rfDualSelect(value) {
+  if (value !== "네이버+쿠팡") {
+    if (rfDualActive() || window._rfDualRejected) return rfDualError("두 구매처 입력을 없애는 전환은 지원하지 않습니다. 새 공고에서 일반 구매채널을 선택해주세요.");
+    return true;
+  }
+  if (rfDualActive()) return true;
+  const workKind = String(document.getElementById("rf_work_kind")?.value || "").trim();
+  if (workKind && workKind !== "review") {
+    return rfDualError("이 작업 종류의 동시진행은 아직 지원하지 않습니다. 원래 설정은 그대로 두었습니다.");
+  }
+  if (typeof _woPrefillOrderId !== "undefined" && _woPrefillOrderId) {
+    return rfDualError("기존 리뷰오더를 일반 상품에서 동시진행으로 바꾸지는 않습니다. 리뷰오더에 두 구매처 설정이 있는 새 공고만 불러올 수 있습니다.");
+  }
+  const boxes = Array.from(document.querySelectorAll("#rf_opt_rows .rf-gp"));
+  if (_recruitEditId || window._rfLiveLedger || boxes.length !== 1 || boxes[0].dataset.unit !== "product" || boxes[0].querySelectorAll(".rf-opt-row").length !== 1) {
+    return rfDualError("동시진행은 새 공고의 옵션 없는 상품 하나만 지원합니다. 기존 상품·옵션은 그대로 두었습니다.");
+  }
+  const box = boxes[0];
+  const p = { option_schema_version: 2, product_mode: "none", name: box.querySelector(".rf-gp-name").value,
+    url: box.querySelector(".rf-gp-url").value, base: {pay: 0, count: box.querySelector(".rf-opt-rt").value}, options: [], channels: {} };
+  const row = box.querySelector(".rf-opt-row");
+  const legacy = _ugCompose(row, row.dataset.ig);
+  if (legacy.html || legacy.images.length) p.guide = { text: legacy.html, images: legacy.images.slice() };
+  ["naver", "coupang"].forEach(key => { p.channels[key] = {url: "", pay: "", inflow_type: "link", guide: {text: "", images: []}}; });
+  box._rfDualSource = p;
+  rfDualBuild(box, p);
+  rfDualSync();
+  return true;
+}
+function rfRestoreDualChannelProduct(product, expectedContext) {
+  let p;
+  try {
+    p = rfDualNormalize(product);
+    // Only explicit top-level quotas constrain a product-only/local restore.
+    [["recruit_total", "count", "모집인원", 1], ["daily_limit", "daily", "일건수", 0]].forEach(([key, field, label, min]) => {
+      if (expectedContext && Object.prototype.hasOwnProperty.call(expectedContext, key)
+          && rfDualInteger(expectedContext[key], label, min, 100000) !== (p.base[field] ?? 0)) {
+        throw new Error(label + "이 상품 설정과 다릅니다. 원본을 확인해주세요.");
+      }
+    });
+  }
+  catch (error) {
+    // A rejected candidate is not the source of an already mounted draft.
+    const box = document.querySelector("#rf_opt_rows .rf-gp");
+    window._rfDualRejected = !(rfDualActive() && box?._rfDualSource);
+    window._rfDualRejectedSource = product; window._rfDualRejectedMessage = error.message;
+    return rfDualError(error.message);
+  }
+  window._rfDualRestoring = true;
+  try { renderOptRows([{ productName: p.name, optionUrl: p.url || "", payAmount: p.base.pay, recruitTotal: p.base.count, dailyLimit: p.base.daily ?? 0 }], { mode: "none" }); }
+  finally { window._rfDualRestoring = false; }
+  window._rfDualRejected = false; window._rfDualRejectedSource = null; window._rfDualRejectedMessage = "";
+  const box = document.querySelector("#rf_opt_rows .rf-gp");
+  if (Object.prototype.hasOwnProperty.call(p.base, "daily")) box.querySelector(".rf-opt-dl").value = String(p.base.daily);
+  box._rfDualSource = p;
+  rfDualBuild(box, p);
+  const channel = document.getElementById("rf_channel"); if (channel) channel.value = "네이버+쿠팡";
+  document.querySelectorAll("#rf_channel_btns button").forEach(b => b.classList.toggle("active", b.dataset.val === "네이버+쿠팡"));
+  rfDualSync();
+  return true;
+}
+function rfDualRenderInput(options, opts) {
+  if (window._rfDualRestoring) return false;
+  if (opts && Object.prototype.hasOwnProperty.call(opts, "dualChannelProduct")) { rfRestoreDualChannelProduct(opts.dualChannelProduct); return true; }
+  if (Array.isArray(options) && options.some(p => p && Object.prototype.hasOwnProperty.call(p, "channels"))) {
+    rfRestoreDualChannelProduct(options.length === 1 ? options[0] : options); return true;
+  }
+  if (rfDualActive() || window._rfDualRejected) { rfDualError("구매처별 입력을 보존하기 위해 일반 상품으로 바꾸지 않았습니다."); return true; }
+  return false;
+}
+function rfResetDualChannelEditor() {
+  window._rfDualRejected = false; window._rfDualRejectedSource = null; window._rfDualRejectedMessage = "";
+  document.querySelectorAll("#rf_opt_rows .rf-gp").forEach(box => {
+    delete box._rfDualSource; box.classList.remove("rf-dual-card");
+    box.querySelectorAll(".rf-dual-editor").forEach(el => el.remove());
+    box.querySelectorAll(".rf-gp-unit button").forEach(el => { el.disabled = false; });
+    [".rf-gp-add", ".rf-gp-shop", ".rf-opt-pay", ".rf-gp-url"].forEach(selector => {
+      const el = box.querySelector(selector); if (el) { el.disabled = false; el.readOnly = false; }
+    });
+    const urlRow = box.querySelector(".rf-gp-url")?.closest(".rf-f"); if (urlRow) urlRow.hidden = false;
+  });
+  const inflowRow = document.getElementById("rf_inflow_type_ui")?.closest(".form-row");
+  if (inflowRow && inflowRow._rfDualWasHidden !== undefined) { inflowRow.hidden = inflowRow._rfDualWasHidden; delete inflowRow._rfDualWasHidden; }
+  document.querySelectorAll("#rf_opt_rows .rf-dual-rejected").forEach(el => el.remove());
+  const add = document.getElementById("rf_opt_addbtn"); if (add) add.disabled = false;
+}
+/* RF_DUAL_CHANNEL_EDITOR_END */
 
 const _origRefreshBadgeWrap = _refreshBadgeWrap;
 _refreshBadgeWrap = function() {

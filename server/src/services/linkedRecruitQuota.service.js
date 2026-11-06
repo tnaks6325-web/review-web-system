@@ -7,6 +7,59 @@
  */
 const pool = require('../db/pool');
 
+// Read-only preflight, before ANY existing L1/tab/row lock. Do not infer dual from
+// request flags. Loading the lifecycle module is unnecessary for ordinary work.
+async function _dualScopeForTargets(client, targets) {
+  const { campaignHasDualChannels } = require('../utils/dualChannel');
+  const campaigns = [];
+  for (const t of targets) {
+    let result;
+    if (t.campaignId) result = await client.query('SELECT to_jsonb(c) AS campaign FROM recruit_campaigns c WHERE c.id=$1', [t.campaignId]);
+    else if (t.workOrderId) result = await client.query(`SELECT to_jsonb(c) AS campaign FROM recruit_campaigns c
+      WHERE c.source_work_order_id=$1 OR c.id=(SELECT linked_campaign_id FROM work_orders WHERE id=$1)`, [t.workOrderId]);
+    else result = await client.query(`SELECT to_jsonb(c) AS campaign FROM recruit_campaigns c
+      WHERE c.linked_sheet_id=$1 AND (c.linked_tab_name=$2 OR ($3<>'' AND c.linked_tab_gid=$3))`, [t.sheetId,t.tabName,t.tabGid || '']);
+    campaigns.push(...result.rows.map(r => r.campaign));
+  }
+  // Slot helpers can lock other campaigns sharing the tab. Discover that entire
+  // set NOW, not after L1/campaign/participant locks have already been acquired.
+  const resolvedTargets = targets.slice();
+  const tabs = new Map();
+  for (const c of campaigns) if (c?.linked_sheet_id && c?.linked_tab_name) {
+    const t = { sheetId: c.linked_sheet_id, tabName: c.linked_tab_name, tabGid: c.linked_tab_gid || '' };
+    tabs.set(JSON.stringify(t), t);
+  }
+  for (const t of tabs.values()) {
+    resolvedTargets.push(t);
+    const { rows } = await client.query(`SELECT to_jsonb(c) AS campaign FROM recruit_campaigns c
+      WHERE c.linked_sheet_id=$1 AND (c.linked_tab_name=$2 OR ($3<>'' AND c.linked_tab_gid=$3))`, [t.sheetId,t.tabName,t.tabGid]);
+    campaigns.push(...rows.map(r => r.campaign));
+  }
+  if (!campaigns.some(campaignHasDualChannels)) return null;
+  return require('./dualChannelLifecycle.service').discoverDualScope(client, resolvedTargets);
+}
+
+async function _prelockDualInTx(client, targets) {
+  const scope = await _dualScopeForTargets(client, targets);
+  if (scope) {
+    const life = require('./dualChannelLifecycle.service');
+    await life.lockDualScopeInTx(client, scope);
+    await life.assertDualProvenanceUnchanged(client, scope);
+  }
+  return scope;
+}
+
+// InTx callers acquire lifecycle before entering this module's L1/tab/row layer.
+// Never try to repair missing coverage by taking an upper lock after a lower one.
+async function _assertDualPrelocked(client, targets, lockedScope) {
+  const current = await _dualScopeForTargets(client, targets);
+  if (current && (!lockedScope || current.campaignIds.some(id => !lockedScope.campaignIds?.includes(id)))) {
+    throw quotaError('동시진행 작업을 먼저 잠근 뒤 다시 시도해 주세요.', 'dual_lifecycle_prelock_required');
+  }
+  if (lockedScope) await require('./dualChannelLifecycle.service').assertDualProvenanceUnchanged(client, lockedScope);
+}
+
+
 function quota(value) {
   const n = Number(value);
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
@@ -102,7 +155,8 @@ async function syncWorktableSlotsInTx(client, campaign, target, by = 'quota-sync
       `SELECT COALESCE(MAX(seq), 0)::int AS max_seq FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2`,
       [campaign.linked_sheet_id, campaign.linked_tab_name]
     );
-    const maxSeq = Number(seqRows[0] && seqRows[0].max_seq) || 0;
+    // ★ 빈 표면 1번 줄(열 이름 줄 · 결정 098)을 비우고 2번부터 만든다 — 1번 줄은 검색 명단에서 빠진다.
+    const maxSeq = Math.max(1, Number(seqRows[0] && seqRows[0].max_seq) || 0);
     const tabGid = rows.find(r => r.tab_gid != null)?.tab_gid || null;
     for (let i = 0; i < delta.add; i++) {
       await client.query(
@@ -178,6 +232,20 @@ async function replenishWorktableSlotsToLinkedQuota({ sheetId, tabName, by = 'qu
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const lockedScope = await _prelockDualInTx(client, [{ sheetId, tabName }]);
+    const result = await replenishWorktableSlotsToLinkedQuotaInTx(client, { sheetId, tabName, by, lockedScope });
+    await client.query(result.synced ? 'COMMIT' : 'ROLLBACK');
+    return result;
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    throw err;
+  } finally { client.release(); }
+}
+
+/** Caller prelocks lifecycle; this core starts at the existing tab/row layer. */
+async function replenishWorktableSlotsToLinkedQuotaInTx(client, { sheetId, tabName, by = 'quota-replenish', lockedScope } = {}) {
+  if (!sheetId || !tabName) return { synced: false, reason: 'bad_target', add: 0 };
+  await _assertDualPrelocked(client, [{ sheetId, tabName }], lockedScope);
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',
       [`sheetless_worktable:${sheetId}:${tabName}`]);
     const { rows } = await client.query(
@@ -198,16 +266,15 @@ async function replenishWorktableSlotsToLinkedQuota({ sheetId, tabName, by = 'qu
         ORDER BY rc.updated_at DESC
         FOR UPDATE OF rc`, [sheetId, tabName]
     );
+    await _assertDualPrelocked(client, [{ sheetId, tabName }], lockedScope);
     const open = rows.filter(r => r.status === 'draft' || r.status === 'active');
     const tier = open.length ? open : rows;
     if (tier.length !== 1) {
-      await client.query('ROLLBACK');
       return { synced: false, reason: tier.length ? 'shared_worktable' : 'no_campaign', add: 0 };
     }
     const campaign = tier[0];
     const target = displayRecruitTotal(campaign.recruit_total, campaign.work_order_recruit_total).total;
     if (target <= 0) {
-      await client.query('ROLLBACK');
       return { synced: false, reason: 'no_positive_quota', add: 0 };
     }
     const { rows: liveRows } = await client.query(
@@ -220,23 +287,14 @@ async function replenishWorktableSlotsToLinkedQuota({ sheetId, tabName, by = 'qu
     // 초과 표는 이 보충 경로의 대상이 아니다. 보호 행이 목표보다 많아도 축소 판정에
     // 넣지 않으므로, 이미 존재하는 행을 건드리거나 오류로 보고하지 않는다.
     if (live >= target) {
-      await client.query('ROLLBACK');
       return { synced: false, reason: 'already_at_or_above_target', target, current: live, add: 0 };
     }
     const checked = await assertWorktableSlotsInTx(client, campaign, target);
     if (!checked.checked || checked.add <= 0) {
-      await client.query('ROLLBACK');
       return { ...checked, synced: false, reason: checked.reason || 'already_at_or_above_target', add: 0 };
     }
     const synced = await syncWorktableSlotsInTx(client, campaign, target, by);
-    await client.query('COMMIT');
     return synced;
-  } catch (err) {
-    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
-    throw err;
-  } finally {
-    client.release();
-  }
 }
 
 // 과거의 빈 초과 슬롯만 정리한다. 수동 진단 API와 자동 복구 크론이 같은 경로를 사용한다.
@@ -280,10 +338,25 @@ async function cleanupOverflowEmptyWorktableSlots({ dryRun = true, limit = 200, 
          OR COALESCE(pending_projection, FALSE)
       ORDER BY updated_at DESC LIMIT $1`, [cap]);
   const out = { ok: true, dryRun: !!dryRun, scanned: campaigns.length, retired: 0, skipped: 0, items: [] };
-  for (const campaign of campaigns) {
+  for (let campaign of campaigns) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      const lockedScope = await _prelockDualInTx(client, [{ campaignId: campaign.id }, {
+        sheetId: campaign.linked_sheet_id, tabName: campaign.linked_tab_name,
+      }]);
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',
+        [`sheetless_worktable:${campaign.linked_sheet_id}:${campaign.linked_tab_name}`]);
+      // Candidate totals/links are advisory only. Re-read under lifecycle + tab + campaign row locks.
+      const { rows: current } = await client.query(`SELECT rc.* FROM recruit_campaigns rc
+        WHERE rc.id=$1 AND rc.participation_mode AND rc.status='active'
+          AND rc.archived_at IS NULL AND rc.recruit_total > 0 FOR UPDATE`, [campaign.id]);
+      if (!current.length || current[0].linked_sheet_id !== campaign.linked_sheet_id
+          || current[0].linked_tab_name !== campaign.linked_tab_name) {
+        await client.query('ROLLBACK'); out.skipped++; continue;
+      }
+      campaign = { ...campaign, ...current[0] };
+      await _assertDualPrelocked(client, [{ campaignId: campaign.id }, { sheetId: campaign.linked_sheet_id, tabName: campaign.linked_tab_name }], lockedScope);
       const checked = await assertWorktableSlotsInTx(client, campaign, campaign.recruit_total);
       const retryProjection = !!campaign.pending_projection;
       if (checked.checked && checked.target > Number(MAX_RENUMBER_ROWS)) {
@@ -609,11 +682,13 @@ async function assertWorkOrderQuota({ workOrderId, recruitTotal }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const lockedScope = await _prelockDualInTx(client, [{ workOrderId }]);
     await lockWorkOrderCampaigns(client, [workOrderId]);              // ★ L1 먼저(잠금 순서 · 2026-10-20)
     const { rows } = await client.query('SELECT id, linked_campaign_id FROM work_orders WHERE id=$1 FOR UPDATE', [workOrderId]);
     if (!rows.length) { await client.query('ROLLBACK'); return null; }
     const campaign = await linkedCampaign(client, rows[0]);
     if (!campaign) { await client.query('ROLLBACK'); return null; }
+    await _assertDualPrelocked(client, [{ workOrderId }], lockedScope);
     await _assertTotalFloor(client, campaign.id, recruitTotal);
     await assertWorktableSlotsInTx(client, campaign, quota(recruitTotal));
     const { rows: options } = await client.query(
@@ -646,11 +721,13 @@ async function assertCampaignRecruitTotal({ campaignId, recruitTotal }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const lockedScope = await _prelockDualInTx(client, [{ campaignId }]);
     const { rows } = await client.query(
       'SELECT id, source_work_order_id, linked_sheet_id, linked_tab_name FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [campaignId]
     );
     if (!rows.length) { await client.query('ROLLBACK'); return null; }
     const campaign = rows[0];
+    await _assertDualPrelocked(client, [{ campaignId }], lockedScope);
     await _assertTotalFloor(client, campaign.id, recruitTotal);
     await assertWorktableSlotsInTx(client, campaign, quota(recruitTotal));
     await client.query('ROLLBACK');
@@ -671,17 +748,10 @@ async function assertCampaignRecruitTotal({ campaignId, recruitTotal }) {
  *   (`work_orders.linked_campaign_id`)은 **건너뛰지 않는다** — 그것까지 빠지면 연결이
  *   조용히 비는 별개 사고가 된다.
  */
-async function syncCampaignRecruitTotal({ campaignId, recruitTotal, skipWorktable = false }) {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    // ★ L1 먼저(잠금 순서 · 2026-10-20) — 종전엔 공고 행 → 오더 행 순이라 오더 쪽 저장(오더 행 → 공고 행)과 반대였다.
-    const preWoIds = await workOrderIdsForCampaign(client, campaignId);
-    await lockWorkOrderCampaigns(client, preWoIds);
-    const { rows } = await client.query('SELECT id, source_work_order_id, linked_sheet_id, linked_tab_name FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [campaignId]);
-    if (!rows.length) { await client.query('ROLLBACK'); return { linked: false }; }
-    const order = await linkedWorkOrder(client, rows[0]);
-    if (!order) { await client.query('ROLLBACK'); return { linked: false }; }
+async function _syncCampaignRecruitTotalInTx(client, { campaignId, recruitTotal, skipWorktable = false, lockedScope }, lockedRow, preWoIds) {
+    await _assertDualPrelocked(client, [{ campaignId }], lockedScope);
+    const order = await linkedWorkOrder(client, lockedRow);
+    if (!order) return { linked: false };
     if (!preWoIds.includes(order.id)) {   // 잠그기 전 읽은 짝과 다르다 = 그 사이 연결이 바뀌었다 → 그 오더의 L1 을 안 쥐었다
       throw quotaError('작업오더 연결이 방금 바뀌었습니다. 다시 저장해 주세요.', 'recruit_quota_link_changed');
     }
@@ -692,24 +762,45 @@ async function syncCampaignRecruitTotal({ campaignId, recruitTotal, skipWorktabl
     );
     const worktable = skipWorktable
       ? { synced: false, reason: 'quota_unchanged' }
-      : await syncWorktableSlotsInTx(client, rows[0], total, 'campaign-quota-sync');
+      : await syncWorktableSlotsInTx(client, lockedRow, total, 'campaign-quota-sync');
+    return { linked: true, workOrderId: order.id, recruitTotal: total, worktable };
+}
+
+/** Caller must hold lifecycle first and enter before this L1/row layer. No Tx/projection ownership. */
+async function syncCampaignRecruitTotalInTx(client, { campaignId, recruitTotal, skipWorktable = false, lockedScope }) {
+    await _assertDualPrelocked(client, [{ campaignId }], lockedScope);
+    // ★ L1 먼저(잠금 순서 · 2026-10-20) — 종전엔 공고 행 → 오더 행 순이라 오더 쪽 저장(오더 행 → 공고 행)과 반대였다.
+    const preWoIds = await workOrderIdsForCampaign(client, campaignId);
+    await lockWorkOrderCampaigns(client, preWoIds);
+    const { rows } = await client.query('SELECT id, source_work_order_id, linked_sheet_id, linked_tab_name FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [campaignId]);
+    if (!rows.length) return { linked: false };
+    return _syncCampaignRecruitTotalInTx(client, { campaignId, recruitTotal, skipWorktable, lockedScope }, rows[0], preWoIds);
+}
+
+async function syncCampaignRecruitTotal({ campaignId, recruitTotal, skipWorktable = false }) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const lockedScope = await _prelockDualInTx(client, [{ campaignId }]);
+    // ★ L1 먼저(잠금 순서 · 2026-10-20) — 종전엔 공고 행 → 오더 행 순이라 오더 쪽 저장(오더 행 → 공고 행)과 반대였다.
+    const preWoIds = await workOrderIdsForCampaign(client, campaignId);
+    await lockWorkOrderCampaigns(client, preWoIds);
+    const { rows } = await client.query('SELECT id, source_work_order_id, linked_sheet_id, linked_tab_name FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [campaignId]);
+    if (!rows.length) { await client.query('ROLLBACK'); return { linked: false }; }
+    const result = await _syncCampaignRecruitTotalInTx(client, { campaignId, recruitTotal, skipWorktable, lockedScope }, rows[0], preWoIds);
+    if (!result.linked) { await client.query('ROLLBACK'); return result; }
     await client.query('COMMIT');
-    return { linked: true, workOrderId: order.id, recruitTotal: total, worktable: await rebuildWorktableProjection(worktable, 'campaign-quota-sync') };
+    return { ...result, worktable: await rebuildWorktableProjection(result.worktable, 'campaign-quota-sync') };
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     throw err;
   } finally { client.release(); }
 }
 
-async function syncWorkOrderRecruitTotal({ workOrderId, recruitTotal }) {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    await lockWorkOrderCampaigns(client, [workOrderId]);              // ★ L1 먼저(잠금 순서 · 2026-10-20)
-    const { rows } = await client.query('SELECT id, linked_campaign_id FROM work_orders WHERE id=$1 FOR UPDATE', [workOrderId]);
-    if (!rows.length) { await client.query('ROLLBACK'); return { linked: false }; }
-    const campaign = await linkedCampaign(client, rows[0]);
-    if (!campaign) { await client.query('ROLLBACK'); return { linked: false }; }
+async function _syncWorkOrderRecruitTotalInTx(client, { workOrderId, recruitTotal, lockedScope }, lockedRow) {
+    await _assertDualPrelocked(client, [{ workOrderId }], lockedScope);
+    const campaign = await linkedCampaign(client, lockedRow);
+    if (!campaign) return { linked: false };
     const total = quota(recruitTotal);
     await _assertTotalFloor(client, campaign.id, total);
     // 차수 원장이 있는 공고는 recruit_total만 쓰면 다음 공고 수정에서 차수 합계가 다시
@@ -735,19 +826,49 @@ async function syncWorkOrderRecruitTotal({ workOrderId, recruitTotal }) {
     const { rows: options } = await client.query(
       `SELECT opt_key, recruit_total, status, sort_order FROM campaign_options WHERE campaign_id=$1 ORDER BY sort_order, id FOR UPDATE`, [campaign.id]
     );
-    const nextOptions = allocateOptionQuotas(await _sequentialPastAsClosed(client, campaign.id, options), total, await usedByOption(client, campaign.id));
+    // A dual product may legitimately have NO option-ledger row (product_mode=none).
+    // Keep the legacy allocation/error contract for ordinary campaigns unchanged.
+    let optionlessDual = false;
+    if (!options.length) {
+      const { rows: modeRows } = await client.query('SELECT to_jsonb(c) AS campaign FROM recruit_campaigns c WHERE c.id=$1', [campaign.id]);
+      optionlessDual = require('../utils/dualChannel').campaignHasDualChannels(modeRows[0]?.campaign);
+    }
+    const nextOptions = optionlessDual ? new Map()
+      : allocateOptionQuotas(await _sequentialPastAsClosed(client, campaign.id, options), total, await usedByOption(client, campaign.id));
     for (const [optKey, optionTotal] of nextOptions) {
       await client.query('UPDATE campaign_options SET recruit_total=$3, updated_at=NOW() WHERE campaign_id=$1 AND opt_key=$2', [campaign.id, optKey, optionTotal]);
     }
     const worktable = await syncWorktableSlotsInTx(client, campaign, total, 'workorder-quota-sync');
     await client.query('UPDATE recruit_campaigns SET recruit_total=$2, updated_at=NOW() WHERE id=$1', [campaign.id, total]);
+    return { linked: true, campaignId: campaign.id, recruitTotal: total, optionCount: nextOptions.size, worktable };
+}
+
+/** Caller must hold lifecycle first and enter before this L1/row layer. No Tx/projection ownership. */
+async function syncWorkOrderRecruitTotalInTx(client, { workOrderId, recruitTotal, lockedScope }) {
+    await _assertDualPrelocked(client, [{ workOrderId }], lockedScope);
+    await lockWorkOrderCampaigns(client, [workOrderId]);              // ★ L1 먼저(잠금 순서 · 2026-10-20)
+    const { rows } = await client.query('SELECT id, linked_campaign_id FROM work_orders WHERE id=$1 FOR UPDATE', [workOrderId]);
+    if (!rows.length) return { linked: false };
+    return _syncWorkOrderRecruitTotalInTx(client, { workOrderId, recruitTotal, lockedScope }, rows[0]);
+}
+
+async function syncWorkOrderRecruitTotal({ workOrderId, recruitTotal }) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const lockedScope = await _prelockDualInTx(client, [{ workOrderId }]);
+    await lockWorkOrderCampaigns(client, [workOrderId]);              // ★ L1 먼저(잠금 순서 · 2026-10-20)
+    const { rows } = await client.query('SELECT id, linked_campaign_id FROM work_orders WHERE id=$1 FOR UPDATE', [workOrderId]);
+    if (!rows.length) { await client.query('ROLLBACK'); return { linked: false }; }
+    const result = await _syncWorkOrderRecruitTotalInTx(client, { workOrderId, recruitTotal, lockedScope }, rows[0]);
+    if (!result.linked) { await client.query('ROLLBACK'); return result; }
     await client.query('COMMIT');
-    const rebuilt = await rebuildWorktableProjection(worktable, 'workorder-quota-sync');
+    const rebuilt = await rebuildWorktableProjection(result.worktable, 'workorder-quota-sync');
     /* ★ 결정 182 — 총 인원이 바뀌면 날짜별 예상 인원·종료일이 바뀐다 → 작업표 빈 줄 날짜도 따라간다.
        커밋 뒤·자기 트랜잭션(탭 잠금 순서 보존) · 절대 throw 없음(정원 동기화는 이미 끝났다). */
     const worktableRelay = await require('./campaignPlan.service')
-      .relayCampaignWorktable(campaign.id, { by: 'workorder-quota-sync' });
-    return { linked: true, campaignId: campaign.id, recruitTotal: total, optionCount: nextOptions.size, worktable: rebuilt, worktableRelay };
+      .relayCampaignWorktable(result.campaignId, { by: 'workorder-quota-sync' });
+    return { ...result, worktable: rebuilt, worktableRelay };
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     throw err;
@@ -781,6 +902,9 @@ module.exports = {
   assertCampaignRecruitTotal,
   syncCampaignRecruitTotal,
   syncWorkOrderRecruitTotal,
+  syncCampaignRecruitTotalInTx,
+  syncWorkOrderRecruitTotalInTx,
   cleanupOverflowEmptyWorktableSlots,
   replenishWorktableSlotsToLinkedQuota,
+  replenishWorktableSlotsToLinkedQuotaInTx,
 };

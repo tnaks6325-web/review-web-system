@@ -37,6 +37,8 @@ function makeConnectPool(scn) {
       const s = String(sql).replace(/\s+/g, ' ').trim();
       q.push({ s, params });
       if (/^BEGIN|^ROLLBACK|^COMMIT/.test(s)) return { rows: [] };
+      if (/SELECT order_submission_id, tab_gid FROM campaign_participants/.test(s)) return { rows: scn.row ? [scn.row] : [] };
+      if (/SELECT to_jsonb\(o\) AS submission/.test(s)) return { rows: [{ submission: { id: params[0] } }] };
       if (/FROM campaign_participants WHERE id=\$1 .* FOR UPDATE/.test(s)) return { rows: scn.row ? [scn.row] : [] };
       if (/UPDATE campaign_participants SET identity_key/.test(s)) return { rows: [] };
       if (/COUNT\(\*\)::int AS n FROM campaign_participants/.test(s)) return { rows: [{ n: scn.dupCount || 1 }] };
@@ -54,7 +56,7 @@ function makeConnectPool(scn) {
     },
     release() {},
   };
-  return { q, client, async connect() { return client; } };
+  return { q, client, query: (...args) => client.query(...args), async connect() { return client; } };
 }
 
 async function run() {

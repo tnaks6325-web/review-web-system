@@ -47,6 +47,52 @@ async function _removeUnpayableReceiptSlots(items) {
 }
 
 /**
+ * 동시진행(네이버+쿠팡) 행 — 작업표 좌표의 부모 주문 snapshot 으로 슬롯을 다시 정한다.
+ *   행 판정 = dualChannelReview.bundleTargetsForRows, 슬롯 = captureSlots.snapshotCaptureSlots,
+ *   제출 슬롯 = evaluateBundleReviewCompletion 의 현행 완료 증빙(업로드·검수·지급과 같은 해석기 · 사본 규칙 없음).
+ *   일반 행은 건드리지 않는다(키·값 불변). 동시진행 행에서 슬롯/완료를 모르면 그 필드를 **뺀다** —
+ *   화면이 단일 리뷰 슬롯이나 "아무것도 안 냄"으로 오인하지 않고 새로고침을 요구한다.
+ *   ★ 행 판정 조회 자체가 실패하면 동시진행 여부를 알 수 없어 종전 응답 그대로다(경고만) —
+ *     이 경우 일반 업로드 경로가 부모 주문을 다시 판정해 거부해야 한다(쓰기 쪽 기본 닫힘).
+ */
+async function _attachDualPurchaseProjection(items) {
+  const rows = (Array.isArray(items) ? items : []).filter(r => r && r.sheetId && r.tabName && r.rowIndex != null);
+  if (!rows.length) return;
+  const review = require('./dualChannelReview.service');
+  let targets;
+  try {
+    targets = await review.bundleTargetsForRows(pool, rows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName, rowIndex: r.rowIndex })));
+  } catch (e) {
+    logger.warn('[Search] 동시진행 행 판정 실패(종전 응답 유지): ' + e.message);
+    return;
+  }
+  if (!targets || !targets.size) return;
+  for (const item of rows) {
+    const target = targets.get([item.sheetId, item.tabName, Number(item.rowIndex)].join('\u0000'));
+    if (!target) continue;
+    const parent = target.parent || {};
+    item.purchaseConditionSnapshot = parent.purchase_condition_snapshot ?? null;
+    item.orderSubmissionId = target.orderSubmissionId;
+    item.purchaseBundleRevision = parent.purchase_bundle_revision ?? null;
+    delete item.captureSlots;
+    delete item.submittedSlots;
+    try {
+      const state = await review.evaluateBundleReviewCompletion(pool, { orderSubmissionId: target.orderSubmissionId });
+      const slots = Array.isArray(state.slots) ? state.slots : null;
+      if (!slots) continue;
+      const done = new Set(state.current.map(r => r.slot_key));
+      const revisions = state.revisions || {};
+      if (!slots.every(s => Number.isSafeInteger(revisions[s.key]))) continue;
+      // 화면은 이 revision 을 리뷰 사진 업로드의 expectedRevision 으로 그대로 보낸다.
+      item.captureSlots = slots.map(s => ({ ...s, evidenceRevision: revisions[s.key] }));
+      item.submittedSlots = slots.filter(s => done.has(s.key)).map(s => s.key);
+    } catch (e) {
+      logger.warn('[Search] 동시진행 슬롯 판정 실패(슬롯 생략 · 새로고침 요구): ' + e.message);
+    }
+  }
+}
+
+/**
  * rowJson (JSON 문자열 또는 객체) → row 객체로 파싱
  * DB에 TEXT로 저장된 JSON 문자열을 안전하게 파싱
  */
@@ -852,6 +898,7 @@ async function searchByName(query, phone8, opts = {}) {
       }
       await _removeUnpayableReceiptSlots(multiSlotItems);
     }
+    await _attachDualPurchaseProjection(results);   // 동시진행 행만 — 탭 슬롯 판정 뒤에 덮어쓴다
 
     // ── order_submissions 병합(append·best-effort) — 색인행 뒤에 붙어 results[0..n-1] 불변 ──
     if (includeSubmitted && mergePhoneList && !opts.ownerHistory) {
@@ -1069,6 +1116,7 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
     }
     await _removeUnpayableReceiptSlots(multiSlotItems);
   }
+  await _attachDualPurchaseProjection(results);
 
   // ── order_submissions 병합(폴백 경로도 누락 없이) — 폴백은 phoneList 미계산이므로 [p8] ──
   if (includeSubmitted && p8 && p8.length === 8) {

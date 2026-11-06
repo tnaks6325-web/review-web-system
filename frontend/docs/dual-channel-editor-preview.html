@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-src 'none'; form-action 'none'; base-uri 'none'">
+<title>네이버·쿠팡 공고 편집 · 로컬 시험</title>
+<style>
+:root{--p:#007aff;--t1:#1d1d1f;--t2:#475569;--t3:#64748b;--border:#dbe0e6;--bg:#f5f5f7;--ok:#15803d;--card:#fff;font:13px -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",sans-serif;color:var(--t1)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg)}button,input,textarea,select{font:inherit}button{cursor:pointer}button:disabled{cursor:not-allowed}button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--p);outline-offset:2px}.hidden,[hidden]{display:none!important}
+.preview-toolbar{position:relative;z-index:10000;background:#fff;border-bottom:1px solid var(--border);padding:10px 14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-height:58px}.preview-toolbar strong{font-size:13px}.preview-toolbar span{color:var(--t3);font-size:12px}.preview-toolbar button{padding:6px 10px;background:#fff;border:1px solid var(--border);border-radius:6px;color:var(--t1)}#previewResult{width:100%;margin:0;font-size:12px;white-space:pre-wrap}#recruitModal{position:relative!important;inset:auto!important;display:flex!important;justify-content:center;align-items:flex-start;padding:10px;background:transparent!important;height:calc(100vh - 108px);overflow:hidden}#recruitModal>.rf-box{height:100%;max-height:none!important;background:#fff;border:1px solid var(--border);border-radius:10px}.modal-header{padding:12px 16px;display:flex;justify-content:space-between;border-bottom:1px solid var(--border)}.modal-header h3{margin:0;font-size:15px}.btn-icon-sm{background:none;border:none}.rform-input{width:100%;border:1px solid var(--border);border-radius:5px;padding:7px;background:#fff;color:var(--t1)}.modal-footer{padding:10px}.btn{padding:7px 12px;border:1px solid var(--border);background:#fff;border-radius:6px}.btn.primary,.btn-primary{background:var(--p);color:#fff}.rchan-btn{border:1px solid var(--border);background:#fff;border-radius:5px;padding:5px 9px}.rchan-btn.active{background:var(--p);color:#fff}.preview-alert{color:#b42318}body[data-mode="before"] .rf-dual-editor{display:none}
+@media(max-width:600px){.preview-toolbar{padding:8px;gap:6px}.preview-toolbar span{width:100%}#recruitModal{padding:4px;height:calc(100vh - 150px)}#recruitModal>.rf-box{width:100%!important}}
+</style>
+</head>
+<body>
+<div class="preview-toolbar">
+<strong>로컬 시험 · 운영 미반영</strong><span>가짜 상품만 사용합니다. 실제 공고 저장·모집·발송은 하지 않습니다.</span>
+<button type="button" id="previewBefore">기존 공고</button><button type="button" id="previewDual">동시진행 예시</button>
+<button type="button" id="previewSave">내 컴퓨터에 보관</button><button type="button" id="previewRestore">다시 불러오기</button>
+<button type="button" id="previewServerSave" hidden>로컬 서버에 임시저장</button><button type="button" id="previewServerRestore" hidden>서버에서 다시 열기</button>
+<pre id="previewResult" role="status">입력한 값을 바꾸고 보관·복원을 시험할 수 있습니다. 서버 저장이 아닙니다.</pre>
+</div>
+<div id="recruitModalMount"></div>
+<script>
+window.API_BASE_URL=location.origin;
+window.escapeHtml=function(value){return String(value==null?'':value).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});};
+window.showToast=function(message){document.getElementById('previewResult').textContent=String(message);};
+window._getAuthHeaders=function(){return {};};
+window._previewNetworkCalls=[];
+window._previewDraftCalls=[];
+var nativePreviewFetch=window.fetch.bind(window);
+window.fetch=function(input,options){
+var url=new URL(String(input),location.href);
+var local=['127.0.0.1','localhost','[::1]'].includes(location.hostname);
+if(local&&new URLSearchParams(location.search).get('local_server')==='1'&&url.origin===location.origin&&url.pathname.startsWith('/__dual-preview/')){
+window._previewDraftCalls.push({path:url.pathname,method:options&&options.method||'GET'});return nativePreviewFetch(url.href,options);
+}
+window._previewNetworkCalls.push({input:String(input),method:options&&options.method||'GET'});return Promise.reject(new Error('로컬 시험에서는 운영 서버에 요청하지 않습니다.'));
+};
+</script>
+<script src="../js/recruit-modal.js"></script>
+<script src="../js/campaign-workdetail.js"></script>
+<script src="../js/index-recruit.js"></script>
+<script>
+(function(){
+'use strict';
+var KEY='rw.dual-channel-editor.local-preview.v1';
+var sample={option_schema_version:2,product_mode:'none',name:'로컬 시험 상품',url:'https://shop.example/naver',base:{pay:19000,count:3,daily:1},options:[],channels:{naver:{url:'https://shop.example/naver',pay:9000,inflow_type:'link',guide:{text:'',images:[]}},coupang:{url:'https://shop.example/coupang',pay:10000,inflow_type:'guide',guide:{text:'쇼핑몰 검색창에서 로컬 시험 상품을 찾아 구매하세요.',images:[]}}}};
+var result=document.getElementById('previewResult');
+var serverEnabled=false,serverDraftId=null;
+function defaults(){
+if(typeof recruitSaveBlockClear==='function')recruitSaveBlockClear();
+var fields={rf_title:'로컬 시험 상품 동시진행',rf_channel:'네이버',rf_manager:'망고',rf_daily_limit:'1',rf_recruit_total:'3',rf_status:'draft',rf_review_fee:'2000',rf_start_date:'2026-11-05',rf_inflow_type_value:'link',rf_hold_ttl:'30',rf_transfer_bank:'',rf_work_kind:''};
+Object.keys(fields).forEach(function(id){var el=document.getElementById(id);if(el)el.value=fields[id];});
+var participation=document.getElementById('rf_participation');if(participation)participation.checked=true;
+document.querySelectorAll('[data-part-only]').forEach(function(el){el.hidden=false;el.style.display='';});
+var modal=document.getElementById('recruitModal');modal.classList.remove('hidden');modal.style.display='flex';
+}
+function show(mode){
+defaults();window._rfDualRejected=false;document.body.dataset.mode=mode;
+if(mode==='dual'){rfRestoreDualChannelProduct(JSON.parse(JSON.stringify(sample)));}
+else{renderOptRows([{productName:sample.name,optionUrl:sample.url,payAmount:9000,recruitTotal:3,dailyLimit:1}],{mode:'none'});}
+var editor=document.querySelector('.rf-compact-main .editor')||document.querySelector('.rf-compact-main');
+var card=document.querySelector('#rf_opt_rows .rf-gp');if(card&&editor){card.scrollIntoView({block:'start'});}
+result.className='';result.textContent=mode==='dual'?'네이버 9,000원 + 쿠팡 10,000원 = 1인 상품비 19,000원 · 모집인원 3명 그대로':'기존 공고 편집기입니다. 동시진행을 켜지 않으면 기존 상품 입력을 그대로 사용합니다.';
+window.__previewReady=true;
+}
+document.getElementById('previewBefore').onclick=function(){var params=new URLSearchParams(location.search);params.set('mode','before');location.search=params.toString();};
+document.getElementById('previewDual').onclick=function(){show('dual');};
+document.getElementById('previewSave').onclick=function(){try{var p=rfReadDualChannelProduct();if(!p)throw new Error('동시진행 상품을 먼저 입력해주세요.');localStorage.setItem(KEY,JSON.stringify(p));result.className='';result.textContent='이 브라우저에만 보관했습니다. 서버 저장·실제 모집 없음. 1인 상품비 '+p.base.pay.toLocaleString()+'원 · '+p.base.count+'명';}catch(e){result.className='preview-alert';result.textContent=e.message;}};
+document.getElementById('previewRestore').onclick=function(){try{var raw=localStorage.getItem(KEY);if(!raw)throw new Error('아직 이 브라우저에 보관한 설정이 없습니다.');var p=JSON.parse(raw);if(!rfRestoreDualChannelProduct(p))throw new Error('보관한 설정을 복원하지 못했습니다.');document.body.dataset.mode='dual';result.className='';result.textContent='보관한 두 구매처 설정을 다시 불러왔습니다. 서버 저장 아님.';}catch(e){result.className='preview-alert';result.textContent=e.message;}};
+async function draftRequest(suffix,options){
+if(!serverEnabled)throw new Error('격리된 로컬 시험 서버가 확인되지 않았습니다.');
+var response=await fetch('/__dual-preview/drafts'+suffix,options);
+var json=await response.json();if(!response.ok||!json.ok)throw new Error(json.error||'로컬 임시저장을 마치지 못했습니다.');return json.data;
+}
+function serverBusy(value){document.getElementById('previewServerSave').disabled=value;document.getElementById('previewServerRestore').disabled=value;}
+document.getElementById('previewServerSave').onclick=async function(){
+serverBusy(true);try{
+var p=rfReadDualChannelProduct();if(!p)throw new Error('동시진행 상품을 먼저 입력해주세요.');
+var body={title:document.getElementById('rf_title').value,status:'draft',channel:'네이버+쿠팡',recruit_total:p.base.count,daily_limit:p.base.daily||0,work_detail:{dualChannelProduct:p}};
+var row=await draftRequest(serverDraftId?'/'+encodeURIComponent(serverDraftId):'',{method:serverDraftId?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+if(!row||typeof row.id!=='string'||!row.work_detail||!row.work_detail.dualChannelProduct)throw new Error('저장 응답에 상품 설정이 없습니다.');
+serverDraftId=row.id;localStorage.setItem(KEY+'.serverId',row.id);result.className='';result.textContent='격리된 로컬 시험 DB에 임시저장했습니다. 운영 공고·실제 모집·구매는 열리지 않습니다.';
+}catch(e){result.className='preview-alert';result.textContent=e.message;}finally{serverBusy(false);}
+};
+document.getElementById('previewServerRestore').onclick=async function(){
+serverBusy(true);try{
+serverDraftId=serverDraftId||localStorage.getItem(KEY+'.serverId');if(!serverDraftId)throw new Error('로컬 서버에 임시저장한 설정이 없습니다.');
+var row=await draftRequest('/'+encodeURIComponent(serverDraftId));
+if(!row||!row.work_detail||!rfRestoreDualChannelProduct(row.work_detail.dualChannelProduct))throw new Error('저장한 두 구매처 설정을 복원하지 못했습니다.');
+document.body.dataset.mode='dual';document.getElementById('rf_title').value=row.title;result.className='';result.textContent='로컬 시험 DB에서 두 구매처 설정을 다시 열었습니다. 운영 반영 아님.';
+}catch(e){result.className='preview-alert';result.textContent=e.message;}finally{serverBusy(false);}
+};
+show(new URLSearchParams(location.search).get('mode')==='before'?'before':'dual');
+if(new URLSearchParams(location.search).get('local_server')==='1'){
+fetch('/__dual-preview/status').then(function(r){if(!r.ok)throw new Error('로컬 시험 서버에 연결되지 않았습니다.');return r.json();}).then(function(cap){
+if(cap.localOnly!==true||cap.storage!=='pglite')throw new Error('격리된 시험 DB가 아닙니다.');
+serverEnabled=true;serverDraftId=localStorage.getItem(KEY+'.serverId');document.getElementById('previewServerSave').hidden=false;document.getElementById('previewServerRestore').hidden=false;
+result.textContent='격리된 로컬 DB 연결됨 · 서버 임시저장과 다시 열기를 시험할 수 있습니다. 운영 반영 없음.';
+}).catch(function(e){result.className='preview-alert';result.textContent=e.message;});
+}
+})();
+</script>
+</body>
+</html>

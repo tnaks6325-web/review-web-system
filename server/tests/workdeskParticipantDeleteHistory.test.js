@@ -71,6 +71,9 @@ test('가상 삭제: 참여기록을 실제 삭제해도 빈 슬롯을 보충해
   const client = {
     async query(sql, params = []) {
       calls.push({ sql, params });
+      if (/SELECT order_submission_id, tab_gid FROM campaign_participants/.test(sql)) return { rows: [{ order_submission_id: '00000000-0000-0000-0000-000000000001', tab_gid: 'gid-1' }] };
+      if (/SELECT to_jsonb\(o\) AS submission/.test(sql)) return { rows: [{ submission: { id: '00000000-0000-0000-0000-000000000001', deleted_at: '2026-08-21T00:00:00Z' } }] };
+      if (/SELECT deleted_at FROM order_submissions WHERE id=\$1/.test(sql)) return { rows: [{ deleted_at: '2026-08-21T00:00:00Z' }] };
       if (/SELECT id, seq, phone8, row_json, order_submission_id/.test(sql)) {
         return { rows: [{ id: 'row-1', seq: 77, phone8: '12345678', row_json: { '구매일자': '8/18 (화)' }, order_submission_id: '00000000-0000-0000-0000-000000000001' }] };
       }
@@ -97,7 +100,11 @@ test('가상 삭제: 참여기록을 실제 삭제해도 빈 슬롯을 보충해
   // 이 시나리오는 "살아 있는 구매양식이 없는 행"이다(진입점의 선조회가 빈 결과).
   // 구매기록이 붙은 행이 주문 취소와 한 트랜잭션으로 지워지는 경로는
   // workdeskRowDeleteOrderCancel.test.js 가 따로 실행해 고정한다.
-  trackB.__setPoolForTest({ connect: async () => client, query: async () => ({ rows: [] }) });
+  trackB.__setPoolForTest({ connect: async () => client, query: async (sql, params) => {
+    // 원장은 이미 취소됨: 살아 있는 구매양식 선조회만 비고, 재발견도 같은 행 메타를 본다.
+    if (/SELECT cp.order_submission_id AS oid/.test(sql)) return { rows: [] };
+    return client.query(sql, params);
+  } });
   // 삭제 후 장부 재생성 호출 자체도 검증하되, 단위 테스트에서는 외부 DB를 열지 않는다.
   let ledgerArgs = null;
   trackB.__setLedgerRebuildForTest(async args => { ledgerArgs = args; return { ok: true, indexRows: 99 }; });
@@ -119,6 +126,9 @@ test('가상 삭제: 참여기록을 실제 삭제해도 빈 슬롯을 보충해
     const app = calls.find(c => /UPDATE campaign_applications/.test(c.sql));
     const participant = calls.find(c => /DELETE FROM campaign_participants/.test(c.sql));
     assert.deepEqual(participant.params, ['row-1', 'sheet-a', '작업A'], '작업보드 참여자 행 자체를 실제 삭제한다');
+    const cancelled = calls.find(c => /SELECT deleted_at FROM order_submissions WHERE id=\$1/.test(c.sql));
+    assert.deepEqual(cancelled.params, ['00000000-0000-0000-0000-000000000001'], '같은 원장이 이미 취소됐는지 다시 확인한다');
+    assert.ok(calls.indexOf(cancelled) < calls.indexOf(participant), '취소 확인이 실제 행 삭제보다 먼저');
     assert.deepEqual(links.params, ['sheet-a', '작업A', 77], '다른 작업/행의 신원 링크를 삭제하지 않는다');
     assert.deepEqual(app.params, ['00000000-0000-0000-0000-000000000001'], '주문 UUID가 같은 참여신청만 취소한다');
     const replacement = calls.find(c => /INSERT INTO campaign_participants/.test(c.sql));

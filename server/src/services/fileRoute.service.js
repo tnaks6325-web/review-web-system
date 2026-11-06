@@ -14,12 +14,43 @@
 const { logger } = require('../utils/logger');
 const { routeMode, rejectEnabled, routeSlotLabel } = require('../utils/captureRoute');
 
+const dualRouteDb=new (require('node:async_hooks').AsyncLocalStorage)();
 let _pool;
 function _db() {
+  if(dualRouteDb.getStore())return dualRouteDb.getStore();
   if (!_pool) _pool = require('../db/pool');
   return _pool;
 }
 function __setPoolForTest(p) { _pool = p || null; }
+
+
+async function withRouteMutation(input,core,{duplicate=false}={}){
+ if(!input.fileId)return core(input,{dual:false});
+ const db=_db();const review=require('./dualChannelReview.service');const fileIds=[input.fileId];
+ if(duplicate){const row=(await db.query('SELECT checks FROM review_inspections WHERE file_id=$1',[input.fileId])).rows[0];if(row?.checks?.duplicate?.matchFileId)fileIds.push(row.checks.duplicate.matchFileId);}
+ return review.withReviewFilesMutation({db,fileIds,run:(client,ctx)=>ctx.dual?dualRouteDb.run(client,()=>core(input,ctx)):core(input,{dual:false})});
+}
+async function routeDualFile(input,ctx,undo=false){
+ const review=require('./dualChannelReview.service');const sub=ctx.submissions.find(r=>r.file_id===input.fileId);
+ if(!sub?.order_submission_id||sub.superseded_at)return {ok:false,error:'current_evidence_required'};
+ const {parent}=await review.loadBundle(_db(),sub.order_submission_id,{lock:true});
+ const slots=require('../utils/captureSlots').snapshotCaptureSlots(parent.purchase_condition_snapshot);
+ let key=undo?sub.routed_from_slot:String(input.target||'');
+ if(!undo && ['review','receipt'].includes(key))key=slots.find(s=>s.channel===sub.purchase_channel&&s.role===key)?.key;
+ const slot=slots.find(s=>s.key===key);if(!slot)return {ok:false,error:'dual_slot_required'};
+ if(sub.slot_key===slot.key)return {ok:false,error:'already_in_slot'};
+ const svc=require('./drive.service');
+ const cfg=(await _db().query('SELECT folder_url FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2',[sub.sheet_id,sub.tab_name])).rows[0];
+ const root=svc.extractFolderIdFromUrl(cfg?.folder_url||'');if(!root)return {ok:false,error:'review_folder_missing'};
+ const folder=await svc.getOrCreateSubFolder(root,slot.label);const targetFolder=folder.id||folder;
+ const parents=await svc.getFileParents(sub.file_id);const oldParent=parents.parents?.[0]||null;
+ if(oldParent!==targetFolder)await svc.moveFile(sub.file_id,targetFolder,oldParent);
+ const {rows}=await _db().query('SELECT COALESCE(max(evidence_revision),0)::int AS revision FROM review_submissions WHERE order_submission_id=$1 AND purchase_channel=$2 AND evidence_role=$3',[parent.id,slot.channel,slot.role]);
+ const revision=Number(rows[0].revision)+1;
+ await _db().query(`UPDATE review_submissions SET routed_from_slot=COALESCE(routed_from_slot,slot_key),slot_key=$2,purchase_channel=$3,evidence_role=$4,evidence_revision=$5,routed_at=NOW(),routed_by=$6 WHERE file_id=$1`,[sub.file_id,slot.key,slot.channel,slot.role,revision,input.by||'staff']);
+ await _db().query(`UPDATE review_inspections SET slot_key=$2,status='pending',resolution=NULL,resolved_at=NULL,resolved_by=NULL,checks=$3,updated_at=NOW() WHERE file_id=$1`,[sub.file_id,slot.key,JSON.stringify(slot.role==='receipt'?{receiptValidation:{verdict:'warn',reason:'receipt_route'}}:{replacement:{verdict:'skip',reason:'staff_route'}})]);
+ return {ok:true,from:sub.slot_key,to:slot.key};
+}
 
 /* ── 중복 판정 (반려의 유일한 근거) ─────────────────────────────────────
  * "같은 행·같은 리뷰어의 **대상 슬롯**에 같은 SHA-256 지문의 **다른 파일**이 이미 있음"
@@ -118,7 +149,10 @@ async function resolveTargetFolder({ target, sheetId, tabName, reviewBaseFolderI
 
 /** 업로드 직후 라우팅된 파일의 이동 이력 기록(INSERT 는 이미 최종 슬롯으로 됐다는 전제).
  *  091 미적용이면 warn 만 남기고 넘어간다(핫패스 보호). */
-async function markRouted({ fileId, fromSlot, by = 'auto:upload' } = {}) {
+// 동시진행 주문의 파일 이동·되돌리기·자동분류 기록·중복 제거는 1차 운영에서 막는다(utils/dualPhase1).
+const _phase1=()=>require('../utils/dualPhase1').phase1ManualResult();
+async function markRouted(input={}){return withRouteMutation(input,(input,ctx)=>ctx.dual?_phase1():markRoutedCore(input,ctx));}
+async function markRoutedCore({ fileId, fromSlot, by = 'auto:upload' } = {}) {
   try {
     await _db().query(
       `UPDATE review_submissions
@@ -137,6 +171,8 @@ async function markRouted({ fileId, fromSlot, by = 'auto:upload' } = {}) {
 async function recomputePrimary({ sheetId, tabName, rowIndex, db } = {}) {
   if (!sheetId || !tabName || rowIndex == null) return { ok: false, error: 'target_required' };
   const q = db || _db();
+  const review=require('./dualChannelReview.service');const target=await review.bundleTargetForRow(q,{sheetId,tabName,rowIndex});
+  if(target){await review.recomputeBundleReviewStateInTx(q,target.orderSubmissionId);return {ok:true};}
   try {
     const { rows } = await q.query(
       `SELECT file_id, file_url, file_name, uploaded_at FROM review_submissions
@@ -215,7 +251,8 @@ async function _tabRouteCtx(sheetId, tabName) {
  * 자동 이동 되돌리기 — 파일을 원래 슬롯 폴더로 옮기고 원장 slot_key 를 원복한다.
  * 근거는 routed_from_slot 이력뿐(이력 없는 파일은 되돌릴 수 없다 = 오호출 안전).
  */
-async function revertRoute({ fileId, by = 'revert' } = {}) {
+async function revertRoute(input={}){return withRouteMutation(input,(input,ctx)=>ctx.dual?_phase1():revertRouteCore(input));}
+async function revertRouteCore({ fileId, by = 'revert' } = {}) {
   if (!fileId) return { ok: false, error: 'fileId가 필요합니다.' };
   const driveService = require('./drive.service');
   const { rows } = await _db().query(
@@ -392,7 +429,8 @@ async function _recordRouteMove({ fileId, targetSlot, routedBy, receipt = false,
  */
 const MANUAL_ROUTE_TARGETS = { review: 'review', receipt: 'receipt', order_capture: 'capture' };
 
-async function manualRoute({ fileId, target, by = '' } = {}) {
+async function manualRoute(input={}){return withRouteMutation(input,(input,ctx)=>ctx.dual?_phase1():manualRouteCore(input));}
+async function manualRouteCore({ fileId, target, by = '' } = {}) {
   if (!fileId) return { ok: false, error: 'fileId가 필요합니다.' };
   const t = String(target || '');
   if (!MANUAL_ROUTE_TARGETS[t]) return { ok: false, error: '알 수 없는 이동 대상입니다.' };
@@ -455,7 +493,8 @@ async function manualRoute({ fileId, target, by = '' } = {}) {
  * ★ 근거(matchFileId) 없는 파일은 거부 — 제거 버튼이 안 보이는 유형을 API 직접 호출로 지우는 것 차단.
  * ★ 휴지통(trashFiles)만 — 영구삭제 API 금지(30일 복구창). 수동 경로에도 예외 없다.
  */
-async function dedupManual({ fileId, by = '' } = {}) {
+async function dedupManual(input={}){return withRouteMutation(input,(input,ctx)=>ctx.dual?_phase1():dedupManualCore(input,ctx),{duplicate:true});}
+async function dedupManualCore({ fileId, by = '' } = {}) {
   if (!fileId) return { ok: false, error: 'fileId가 필요합니다.' };
   const driveService = require('./drive.service');
   let sub, insp;

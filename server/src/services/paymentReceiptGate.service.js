@@ -22,6 +22,23 @@ async function cashReceiptSubmissionStates(db, rows, { lock = false } = {}) {
   }));
   const states = new Map();
   if (!source.length) return states;
+  // Native bundle evidence has fixed channel roles; never interpret its slot2 as a legacy receipt.
+  const review=require('./dualChannelReview.service');const bundles=[],legacy=[];
+  const nativeTargets=await review.bundleTargetsForRows(db,source);
+  for(const row of source){const target=nativeTargets.get(rowKey(row.sheetId,row.tabName,row.rowIndex));if(target)bundles.push({row,target});else legacy.push(row);}
+  if(bundles.length){
+    const old=legacy.length?await cashReceiptSubmissionStates(db,legacy,{lock}):new Map();
+    for(const [key,value] of old)states.set(key,value);
+    for(const {row,target} of bundles){
+      const value=await review.evaluateBundleReviewCompletion(db,{orderSubmissionId:target.orderSubmissionId,lockedContext:lock?{lock:true}:undefined});
+      const required=value.slots.filter(s=>s.role==='receipt');
+      const submitted=required.every(slot=>value.current.some(r=>r.purchase_channel===slot.channel&&r.evidence_role==='receipt'&&(
+        (r.inspection_status==='pass'&&r.checks?.receiptValidation?.verdict==='pass')||
+        (r.inspection_status==='resolved'&&r.resolution==='ok'&&r.checks?.receiptValidation))));
+      states.set(rowKey(row.sheetId,row.tabName,row.rowIndex),{required:required.length>0,configured:true,submitted});
+    }
+    return states;
+  }
 
   const pairs = [];
   const seenPairs = new Set();

@@ -115,7 +115,15 @@ test('배선 — 잠금 안 게이트 · INSERT 뒤 UPDATE · 옵션 바꾸기 �
   assert.match(rename, /await step\(plan\[i\]\.from, tmp\[i\]\);\n\s*for \(let i = 0; i < plan\.length; i\+\+\) await step\(tmp\[i\], plan\[i\]\.to\);/, '두 단계 모두 step');
   assert.match(routes, /return require\('\.\.\/services\/campaignOptionRename\.service'\)\.applyOptionRenames\(client, campaignId, options\);/, '공고 창도 같은 단일 출처');
   assert.match(routes, /code: 'qty_tiers_present'/);
-  assert.match(routes, /campaignQtyTiers\.insertTiers\(_insClient, rows\[0\]\.id, _qtyTierRows\)[^\n]*\n\s*if \(_insClient\) await _insClient\.query\('COMMIT'\)/, '복사는 공고 INSERT 와 같은 트랜잭션');
+  // 새 동시진행 연결도 같은 tx 안에 들어왔다. 바로 다음 줄이 COMMIT 인지 대신 소유 client·순서를 고정한다.
+  const createTx = routes.slice(routes.indexOf("router.post('/admin/create'"), routes.indexOf("router.put('/admin/:id', authMiddleware"));
+  const beginAt = createTx.indexOf("await _insClient.query('BEGIN')");
+  const insertAt = createTx.indexOf('INSERT INTO recruit_campaigns');
+  const tiersAt = createTx.indexOf('if (_insClient && _qtyTierRows.length) await campaignQtyTiers.insertTiers(_insClient, rows[0].id, _qtyTierRows)');
+  const commitAt = createTx.indexOf("if (_insClient) await _insClient.query('COMMIT')");
+  assert.ok(beginAt >= 0 && insertAt > beginAt && tiersAt > insertAt && commitAt > tiersAt, '복사는 공고 INSERT 와 같은 client·트랜잭션에서 COMMIT 전');
+  assert.equal((createTx.slice(beginAt, commitAt).match(/query\('COMMIT'\)/g) || []).length, 0, '단계 복사 앞 조기 COMMIT 금지');
+  assert.match(createTx.slice(commitAt), /catch \(insErr\) \{\s*if \(_insClient\) await _insClient\.query\('ROLLBACK'\)/, '단계 복사 오류도 공고와 함께 롤백');
   assert.match(routes, /!\['blog', 'qna'\]\.includes\(workKindForStore\(work_kind\)\)/, '블로그·Q&A 체험단은 복사하지 않는다');
   assert.match(routes, /function _publicTierView\(v\) \{\n\s*return \{ qty: v\.qty, status: v\.status, remaining: v\.remaining, buyMethod: v\.buyMethod \};/, '참여 전 응답에 금액을 싣지 않는다(결정 041)');
   assert.match(hold, /purchase_qty = COALESCE\(os\.purchase_qty, ca\.purchase_qty\)/);
@@ -126,6 +134,29 @@ test('배선 — 잠금 안 게이트 · INSERT 뒤 UPDATE · 옵션 바꾸기 �
   assert.match(index, /'campaign_qty_tiers',/);
   assert.ok(!/\bDROP\b|^\s*UPDATE\b|^\s*DELETE\b|^\s*INSERT\b/m.test(migration.replace(/^--.*$/gm, '')), '마이그레이션은 추가만(백필·삭제 없음)');
   assert.equal((migration.match(/IF NOT EXISTS/g) || []).length, 6, '여러 번 돌려도 안전');
+});
+
+test('발행 복사 실제 tx 꼬리 — 같은 client 에 단계 INSERT 뒤 COMMIT, 실패면 ROLLBACK·반납', async () => {
+  const start = routes.indexOf('      if (_insClient && _qtyTierRows.length) await campaignQtyTiers.insertTiers');
+  const end = routes.indexOf('    if (isDualCreate) {', routes.indexOf('    } finally {', start));
+  assert.ok(start > 0 && end > start, '실제 발행 핸들러 tx 꼬리를 찾는다');
+  // 실제 라우트 조각과 실제 insertTiers 를 실행한다. DB 만 대역이며 준비 스위치는 건드리지 않는다.
+  const run = new Function('_insClient', 'campaignQtyTiers', 'rows', '_qtyTierRows', 'isDualCreate',
+    'return (async () => { try {\n' + routes.slice(start, end) + '\n})();');
+  const tiers = svc.planTierCopy(wo({ mode: 'common', rows: [{ qty: 2, people: 3, amount: 20000 }] }), []);
+  for (const fail of [false, true]) {
+    const calls = [];
+    const client = { query: async (sql, params) => {
+      calls.push([String(sql).replace(/\s+/g, ' ').trim(), params]);
+      if (fail && /INSERT INTO campaign_qty_tiers/.test(sql)) throw new Error('tier insert failed');
+      return { rows: [] };
+    }, release() { calls.push(['RELEASE']); } };
+    const promise = run(client, svc, [{ id: 'camp-copy' }], tiers, false);
+    if (fail) await assert.rejects(promise, /tier insert failed/); else await promise;
+    assert.match(calls[0][0], /^INSERT INTO campaign_qty_tiers/);
+    assert.deepEqual(calls[0][1].slice(0, 7), ['camp-copy', '가습기', null, 2, 3, 20000, 'qty']);
+    assert.deepEqual(calls.slice(1).map(c => c[0]), [fail ? 'ROLLBACK' : 'COMMIT', 'RELEASE']);
+  }
 });
 
 // ★ 결정 289 「가」(사용자 확정 2026-10-26) — 공고가 나간 뒤 단계·상품 이름은 못 바꾼다(바꾸면 공고 단계와 참여 기록이 어긋나거나 단계가 조용히 빠진다)

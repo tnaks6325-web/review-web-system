@@ -27,7 +27,11 @@ console.log('── A. 실행부 ──');
 (async () => {
   // 스텁 db — 무엇이 어떤 파라미터로 나갔는지 본다
   const calls = [];
-  const db = { query: async (sql, params) => { calls.push({ sql, params }); return { rowCount: 2 }; } };
+  // 일반 작업: 공고 발견 SELECT는 빈 rows, 기존 UPDATE는 영향 2건을 돌려준다.
+  const db = { query: async (sql, params) => {
+    calls.push({ sql, params });
+    return { rows: [], rowCount: /^SELECT\b/i.test(sql.trim()) ? 0 : 2 };
+  } };
 
   const n = await renameCampaignLinkedTab(db, { sheetId: 'S1', oldTabName: '체험단시트양식1', newTabName: '맛고', tabGid: '1405976532' });
   t('고친 공고 수를 돌려준다(차수 재발행으로 여러 건일 수 있다)', n === 2);
