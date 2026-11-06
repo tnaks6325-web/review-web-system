@@ -272,7 +272,7 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
 
     const okCount = results.filter(r => r.ok).length;
     logger.info(`[manual-order] 제출 완료 tab=${tabName} ${okCount}/${results.length} by=${adminName}`);
-    // ★ 결정 344 ⑧: 리뷰어 구매제출과 같은 실시간 알림 — 열린 작업보드(같은 sheetId+tabName)가 바로 다시 불러온다.
+    // ★ 결정 345 ⑧: 리뷰어 구매제출과 같은 실시간 알림 — 열린 작업보드(같은 sheetId+tabName)가 바로 다시 불러온다.
     if (okCount > 0) {
       try {
         const okRes = results.filter(r => r.ok);

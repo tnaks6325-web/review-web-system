@@ -55,8 +55,8 @@
   let OPTS = [];       // ★ 결정 211: 작업보드 경로에서 고를 상품(선택지) 목록 — 서버 preview 가 연결 공고에서 싣는다
   let BUSY = false;
   let PARSING = false; // [다음] 두 번 누름 방지(캡처 판독을 기다리는 동안)
-  let STAGE_SEQ = 0;   // ★ 결정 344 ⑤: 보관함 칩 고유 id — 순서 번호로 찾으면 빼기·읽기 실패 때 다른 칩이 사라진다
-  let UNASSIGNED = 0;  // ★ 결정 344 ④: 자동으로 붙이지 않고 남겨 둔 캡처 수(미리보기 머리에 알린다)
+  let STAGE_SEQ = 0;   // ★ 결정 345 ⑤: 보관함 칩 고유 id — 순서 번호로 찾으면 빼기·읽기 실패 때 다른 칩이 사라진다
+  let UNASSIGNED = 0;  // ★ 결정 345 ④: 자동으로 붙이지 않고 남겨 둔 캡처 수(미리보기 머리에 알린다)
   const STAGE_WAIT_MS = 25000;   // [다음]이 캡처 판독을 기다리는 상한(넘으면 순서로 붙이고 표시)
 
   // ── 스타일(1회 주입) ───────────────────────────────────────
@@ -171,7 +171,7 @@
   }
 
   // ── 1단계: 붙여넣기 ────────────────────────────────────────
-  // ★ 결정 344 ⑥⑩: text = 다시 채울 글([← 다시 붙여넣기] = 직전 글 · [계속 입력] = 실패한 줄만)
+  // ★ 결정 345 ⑥⑩: text = 다시 채울 글([← 다시 붙여넣기] = 직전 글 · [계속 입력] = 실패한 줄만)
   function renderInput(text) {
     shell(`
       <div class="mo-pane">
@@ -214,11 +214,11 @@
      `parse()` 뒤에 **캡처에서 읽은 수취인 이름**으로 각 줄에 배정한다(이름 실패 시 순서).
      카톡에서 캡처 여러 장을 연달아 복사하는 실제 흐름에 맞춘 자리다. */
   function stageImage(file) {
-    // ★ 결정 344 ⑤: 칩은 객체 자체로 다룬다(순서 번호 X) — 그사이 앞 칩을 빼거나 읽기에 실패해 빠져도 엉뚱한 칩을 건드리지 않는다.
+    // ★ 결정 345 ⑤: 칩은 객체 자체로 다룬다(순서 번호 X) — 그사이 앞 칩을 빼거나 읽기에 실패해 빠져도 엉뚱한 칩을 건드리지 않는다.
     const s = { id: ++STAGE_SEQ, base64: '', mime: '', extract: null, thumb: '', busy: true, ready: null };
     STAGED.push(s);
     renderStage();
-    // ★ 결정 344 ②: [다음]이 이 약속을 기다린다(판독 전에 배정하면 이름 대신 순서로 붙어 남의 주문에 올라간다). 거부하지 않는다.
+    // ★ 결정 345 ②: [다음]이 이 약속을 기다린다(판독 전에 배정하면 이름 대신 순서로 붙어 남의 주문에 올라간다). 거부하지 않는다.
     s.ready = (async () => {
       try {
         const shrunk = await shrink(file);
@@ -316,7 +316,7 @@
    * ② 이름으로 못 찾으면 연락처 뒤 4자리 — **정확히 한 줄**일 때만(여러 줄이면 남긴다)
    * ③ 남은 것은 **붙인 순서대로** 남은 줄에(이름 못 읽은 캡처 먼저, 이름이 안 맞는 캡처 나중) — 그 줄에 '순서로 붙음' 표시
    * ★ 나누기 실패 줄(ok:false)은 배정 대상이 아니다 · 한 사람에 2장 이상 맞으면 첫 장만 — 나머지는 남긴다(다른 사람 줄로 보내지 않음)
-   * ★ 결정 344: 이 함수만 떼어 실행하는 회귀가드가 있다 — 도우미는 함수 안에 둔다. 돌려주는 값 = { unassigned }
+   * ★ 결정 345: 이 함수만 떼어 실행하는 회귀가드가 있다 — 도우미는 함수 안에 둔다. 돌려주는 값 = { unassigned }
    */
   function distributeStaged() {
     const out = { unassigned: 0 };
@@ -393,7 +393,7 @@
     }
   }
   async function _parse(text, btn) {
-    // ★ 결정 344 ②: 캡처 판독(이름 읽기)·사진 줄이기가 끝나기 전에 배정하면 이름 대신 순서로 붙어 남의 주문에 올라간다
+    // ★ 결정 345 ②: 캡처 판독(이름 읽기)·사진 줄이기가 끝나기 전에 배정하면 이름 대신 순서로 붙어 남의 주문에 올라간다
     //   → 끝날 때까지 기다린다(상한 STAGE_WAIT_MS — 넘으면 그대로 순서로 붙이고 그 줄에 '순서로 붙음' 표시).
     const pending = STAGED.filter(s => s && s.busy && s.ready);
     if (btn) { btn.disabled = true; if (pending.length) btn.textContent = '캡처 읽는 중…'; }
@@ -407,7 +407,7 @@
     if (!r || !r.ok) { alert('분해 실패: ' + ((r && r.error) || '오류')); return; }
     if (waitCaps) await waitCaps;
     if (!CTX) return;   // 기다리는 사이 창을 닫았다
-    CTX.lastText = text;   // ★ 결정 344 ⑥: [← 다시 붙여넣기]가 이 글을 되살린다
+    CTX.lastText = text;   // ★ 결정 345 ⑥: [← 다시 붙여넣기]가 이 글을 되살린다
     // ★ 결정 211: 공고 화면 경로(campaignId)는 신청 선택이 옵션을 정하므로 상품 칸을 띄우지 않는다.
     OPTS = (!CTX.campaignId && Array.isArray(r.optionChoices)) ? r.optionChoices.filter(o => o && o.optKey) : [];
     ROWS = (r.items || []).map(it => Object.assign({}, it, { capture: null, extract: null, applications: [], targetApplicationId: '',
@@ -570,7 +570,7 @@
     syncSubmitBtn();
   }
 
-  /** [← 다시 붙여넣기] — 결정 344 ⑥: 직전 글을 되살리고, 2단계에서 줄에 직접 붙인 캡처는 보관함으로 돌려놓는다
+  /** [← 다시 붙여넣기] — 결정 345 ⑥: 직전 글을 되살리고, 2단계에서 줄에 직접 붙인 캡처는 보관함으로 돌려놓는다
    *  (보관함에서 온 캡처는 보관함에 그대로 있다 — 다음 [다음]에서 다시 이름으로 배정된다). */
   function back() {
     ROWS.forEach(r => {
@@ -582,7 +582,7 @@
     ROWS = []; UNASSIGNED = 0;
     renderInput((CTX && CTX.lastText) || '');
   }
-  /** 제출 결과 화면의 [계속 입력] — 결정 344 ①⑩: 접수된 줄은 다시 넣지 않는다(이중 등록 방지).
+  /** 제출 결과 화면의 [계속 입력] — 결정 345 ①⑩: 접수된 줄은 다시 넣지 않는다(이중 등록 방지).
    *  실패·미제출 줄만 입력칸에 다시 채우고, 그 줄들의 캡처만 보관함에 되돌린다(앞사람 캡처가 다음 사람에 붙지 않게). */
   function again() {
     const retry = (CTX && CTX.retry) || { text: '', caps: [] };
@@ -602,7 +602,7 @@
     if (!CTX || !CTX.campaignId || !ROWS.length) return;
     let data = [];
     try {
-      // ★ 결정 344 ⑪: 경로는 호스트가 재기준한다(`window.CAMPAIGN_ADMIN_API` — campaign-cards 와 같은 장치).
+      // ★ 결정 345 ⑪: 경로는 호스트가 재기준한다(`window.CAMPAIGN_ADMIN_API` — campaign-cards 와 같은 장치).
       //   인트라넷 로그인(리뷰웹시스템[3버전])은 /api/trackb/campaigns 로만 닿는다 — 같은 핸들러라 응답 모양이 같다.
       const cb = (typeof window.CAMPAIGN_ADMIN_API === 'string' && window.CAMPAIGN_ADMIN_API) ? window.CAMPAIGN_ADMIN_API.replace(/\/$/, '') : '/api/campaign/admin';
       const r = await api(cb + '/' + encodeURIComponent(CTX.campaignId) + '/applications');
@@ -859,7 +859,7 @@
       // ★ 같은 구매로 보이는 건(24시간 내 같은 연락처 · 같은 주문번호·연락처 — 결정 193)은 서버가 **그 건만**
       //   접수하지 않고 되돌린다(나머지는 이미 접수됨). 다른 구매가 맞는 경우가 있어 막다른 길로 두지 않고,
       //   확인을 받은 뒤 **그 건들만** force 로 다시 보낸다. 결과는 원래 자리(index)에 덮어쓴다.
-      // ★ 결정 344 ⑨: 같은 연락처가 묶음에 두 줄이면 뒤 줄은 24시간 중복(또는 건별 재참여 기간)으로 돌아온다. 다시 보낼 때 재참여 기간
+      // ★ 결정 345 ⑨: 같은 연락처가 묶음에 두 줄이면 뒤 줄은 24시간 중복(또는 건별 재참여 기간)으로 돌아온다. 다시 보낼 때 재참여 기간
       //   확인도 함께 넘긴다 — 안 넘기면 서버 사전 판정이 방금 접수된 앞 줄 때문에 다시 막아 "강제 등록 가능" 안내가 막다른 길이 된다.
       const dups = (out && out.ok && Array.isArray(out.results)) ? out.results.filter(r => r && !r.ok && (r.duplicate || r.repurchaseBlocked)) : [];
       if (dups.length) {
@@ -898,7 +898,7 @@
       return;
     }
 
-    // ★ 결정 344 ①⑩: 이 묶음의 보관함 캡처는 여기서 끝 — [계속 입력] 때 앞사람 캡처가 다음 사람 주문에 또 붙지 않게 비운다.
+    // ★ 결정 345 ①⑩: 이 묶음의 보관함 캡처는 여기서 끝 — [계속 입력] 때 앞사람 캡처가 다음 사람 주문에 또 붙지 않게 비운다.
     //   실패·미제출 줄만 [계속 입력]이 입력칸·보관함에 되살린다(접수된 줄을 다시 내 이중 등록하지 않게).
     {
       const okRows = new Set();
@@ -915,7 +915,7 @@
       };
       STAGED = [];
     }
-    // ★ 결정 344 ⑧: 작업보드는 캡처 업로드를 기다리지 않고 바로 다시 불러온다(줄은 이미 기록됐다).
+    // ★ 결정 345 ⑧: 작업보드는 캡처 업로드를 기다리지 않고 바로 다시 불러온다(줄은 이미 기록됐다).
     let _refreshed = false;
     try { if ((Number(out.okCount) || 0) > 0 && typeof CTX.onSubmitted === 'function') { _refreshed = true; CTX.onSubmitted(out); } } catch (_) {}
 
@@ -964,7 +964,7 @@
         if (r.reviewerRegistered) bits.push(r.linkedOwner ? `‘${esc(r.linkedOwner)}’ 리뷰어의 타계정으로 등록` : '리뷰어 자동 등록됨');
         if (r.quotaCounted) bits.push('모집인원 1명 차감');
         if (r.captureAttached) bits.push('구매캡쳐 첨부됨');
-        // ★ 결정 344 ⑦: 무시트 작업표에 바로 적혔으면 서버가 줄 번호를 준다 — "자동복구 대기"로 잘못 말하지 않는다
+        // ★ 결정 345 ⑦: 무시트 작업표에 바로 적혔으면 서버가 줄 번호를 준다 — "자동복구 대기"로 잘못 말하지 않는다
         bits.push(r.worktableRow ? `작업표 ${Number(r.worktableRow)}번 줄에 기록됨` : r.queued ? '시트 기록 예약됨' : '시트 기록은 자동복구 대기');
         const warn = (r.warnings || []).length
           ? `<div class="mo-msg w" style="margin-top:4px">⚠ ${(r.warnings || []).map(esc).join(' · ')}</div>` : '';

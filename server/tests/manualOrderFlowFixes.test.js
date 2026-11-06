@@ -1,6 +1,6 @@
 'use strict';
 /**
- * manualOrderFlowFixes.test.js — 결정 344 회귀가드 (외부모집 수동제출 흐름 버그 묶음)
+ * manualOrderFlowFixes.test.js — 결정 345 회귀가드 (외부모집 수동제출 흐름 버그 묶음)
  * 실행: node --test tests/manualOrderFlowFixes.test.js   (DB·서버·브라우저 불필요)
  *
  * 실제 frontend/js/manual-order.js 를 vm 에 통째로 올리고, 아주 작은 가짜 DOM·fetch 로
