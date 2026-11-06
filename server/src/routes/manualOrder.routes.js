@@ -17,6 +17,7 @@ const { parseSlashForm } = require('../utils/slashForm');
 const { submitExternalOrder, dailyRemainingForCampaign, tabOptionChoices, manualDualBlock } = require('../services/manualOrder.service');
 const { checkRepurchaseWindowBatch, phone8Of, resolveCampaignRepurchaseDays } = require('../utils/repurchaseGuard');
 const { logger } = require('../utils/logger');
+const { emitOrderSubmit } = require('../utils/sse');
 
 const MAX_LINES = 50;   // 한 번에 처리할 최대 건수(오붙여넣기로 수백 건이 들어가는 사고 방지)
 
@@ -281,6 +282,17 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
 
     const okCount = results.filter(r => r.ok).length;
     logger.info(`[manual-order] 제출 완료 tab=${tabName} ${okCount}/${results.length} by=${adminName}`);
+    // ★ 결정 345 ⑧: 리뷰어 구매제출과 같은 실시간 알림 — 열린 작업보드(같은 sheetId+tabName)가 바로 다시 불러온다.
+    if (okCount > 0) {
+      try {
+        const okRes = results.filter(r => r.ok);
+        emitOrderSubmit({
+          sheetId, tabName, workboardId: null,
+          orderer: (okRes[0].name || '') + (okCount > 1 ? ` 외 ${okCount - 1}명` : ''), recipient: '',
+          dbSaved: true, sheetsWritten: false, queued: okRes.some(r => r.queued), manual: true,
+        });
+      } catch (_) { /* 알림 실패는 접수에 영향 없음 */ }
+    }
     res.json({ ok: true, okCount, failCount: results.length - okCount, results });
   } catch (err) { next(err); }
 });
