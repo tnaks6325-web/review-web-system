@@ -125,10 +125,17 @@ function stubPool(batches) {
     assert.ok(/paymentResultSvc\.autoApplyResultFile\(\{\s*batchId: found\.batchId/.test(m[0]));
     assert.ok(!/applyResultFile\(|_commitBatchOutcome/.test(m[0].replace(/autoApplyResultFile/g, '')), '다른 반영 경로 없음');
   });
-  await t('4b 화면 — 한 곳 놓기 · 화면 전체 놓기는 입금관리일 때만 · 다른 칸이 받았으면 안 올린다 · 줄 칸은 전파 막음', () => {
+  await t('4b 화면 — 기존 범용 전송 실행 · 화면 전체 놓기는 입금관리일 때만 · 다른 칸이 받았으면 안 올린다 · 줄 칸은 전파 막음', async () => {
     const wd = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
     assert.ok(/<div id="pmBankBar">\$\{_pmBankBarHtml\(\)\}<\/div>\n\s*\$\{_pmResultDropHtml\(\)\}/.test(wd));
-    assert.ok(/api\('\/api\/trackb\/payment\/result-auto-apply', \{ method:'POST'/.test(wd));
+    assert.match(wd,/try \{ r = await _pmPostResultFile\(f\); \}/);
+    const vm = require('vm');
+    const calls=[];
+    const ctx={window:{HomePaymentResult:require('../../frontend/js/home-payment-result')},_pmFileB64:async()=> 'fixture-b64',api:async(url,options)=>{calls.push({url,options});return {ok:true};}};
+    const transport=wd.match(/async function _pmPostResultFile\(file\)\{[\s\S]*?\n\}/);
+    assert.ok(transport,'actual shared transport wrapper');vm.createContext(ctx);vm.runInContext(transport[0],ctx);
+    await ctx._pmPostResultFile({name:'fixture.xlsx',size:10});
+    assert.strictEqual(calls.length,1);assert.strictEqual(calls[0].url,'/api/trackb/payment/result-auto-apply');assert.strictEqual(calls[0].options.method,'POST');assert.deepStrictEqual(JSON.parse(calls[0].options.body),{fileName:'fixture.xlsx',base64:'fixture-b64'});
     assert.ok(/document\.addEventListener\('drop', e=>\{[\s\S]{0,80}if\(e\.defaultPrevented \|\| !_pmDragHasFiles\(e\) \|\| !_pmPageDropOn\(\)\) return;/.test(wd));
     assert.ok(/function _pmPageDropOn\(\)\{ return STATE\.view==='payment' && !document\.querySelector\('\.pmrov'\) && !!document\.getElementById\('pmAnyDrop'\); \}/.test(wd));
     assert.ok(/function _pmResultDrop\(event, i\)\{\n  event\.preventDefault\(\);\n  event\.stopPropagation\(\);/.test(wd));

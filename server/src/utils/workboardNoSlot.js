@@ -26,13 +26,26 @@ const NO_SLOT_QUEUE_ERRORS = Object.freeze([NO_SLOT_QUEUE_ERROR, LEGACY_NO_SLOT_
  *   활성 작업보드가 없으면 거짓(fail-closed — 큐 실행부가 그 작업을 반영하지 않는다).
  * sheetExpr·tabExpr = 시트ID·작업명 SQL 표현식(예: `q.payload->>'sheetId'` 또는 `$1`).
  */
-function openSlotExistsSql(sheetExpr, tabExpr) {
-  return `EXISTS (
-    SELECT 1 FROM tab_configs slot_tc
+function _openSlotRowsFromSql(sheetExpr, tabExpr) {
+  return `FROM tab_configs slot_tc
       JOIN workboards slot_w ON slot_w.id = slot_tc.workboard_id AND slot_w.state = 'active'
       JOIN campaign_participants cp
         ON ${openSlotRowSql('cp', { sheet: 'slot_tc.sheet_id', tab: 'slot_tc.tab_name', workboard: 'slot_tc.workboard_id', unboundJoinsTarget: true })}
-     WHERE slot_tc.sheet_id = ${sheetExpr} AND slot_tc.tab_name = ${tabExpr})`;
+     WHERE slot_tc.sheet_id = ${sheetExpr} AND slot_tc.tab_name = ${tabExpr}`;
 }
 
-module.exports = { NO_SLOT_QUEUE_ERROR, LEGACY_NO_SLOT_QUEUE_ERROR, NO_SLOT_QUEUE_ERRORS, openSlotExistsSql };
+function openSlotExistsSql(sheetExpr, tabExpr) {
+  return `EXISTS (
+    SELECT 1 ${_openSlotRowsFromSql(sheetExpr, tabExpr)})`;
+}
+
+/**
+ * 「그 작업표에 빈 줄이 몇 개 남았나」 — 결정 340 모집공고 신청 관문(`worktableApplyRoom`)의 재료.
+ * ★ 위 사전 확인과 **같은 범위·같은 한 줄 판정**(활성 작업보드 · 작업보드가 빈 줄 포함 · 다른 작업보드 줄 제외) — 사본 금지.
+ *   옵션·상품·날짜는 가리지 않는다(작업표 전체의 빈 줄 수 — 옵션 짝은 실제 기록 때 writer 가 정한다).
+ */
+function openSlotCountSql(sheetExpr, tabExpr) {
+  return `(SELECT COUNT(*) ${_openSlotRowsFromSql(sheetExpr, tabExpr)})`;
+}
+
+module.exports = { NO_SLOT_QUEUE_ERROR, LEGACY_NO_SLOT_QUEUE_ERROR, NO_SLOT_QUEUE_ERRORS, openSlotExistsSql, openSlotCountSql };

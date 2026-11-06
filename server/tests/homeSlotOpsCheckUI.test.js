@@ -4,7 +4,8 @@ const assert = require('assert'), fs = require('fs'), path = require('path'), vm
 const html = fs.readFileSync(path.join(__dirname, '../../frontend/workdesk.html'), 'utf8');
 const src = html.slice(html.indexOf('const TCK_CHOICES='), html.indexOf('/** nav 뱃지', html.indexOf('const TCK_CHOICES=')));
 const opened = [];
-const ctx = { STATE: {}, window: { addEventListener() {}, open: (u, t) => { opened.push([u, t]); return {}; } },
+const ctx = { STATE: {role:'admin',view:'home'}, window: { HomePaymentResult:require('../../frontend/js/home-payment-result'),addEventListener() {}, open: (u, t) => { opened.push([u, t]); return {}; } },
+  token:()=> 'fake-slot-test-session',_pmFileB64:async()=> 'unused-fixture-b64',
   location: { pathname: '/workdesk' }, document: { getElementById: () => null },
   esc: s => String(s == null ? '' : s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;'),
   toast() {}, matchMedia: () => ({ matches: false, addEventListener() {} }) };

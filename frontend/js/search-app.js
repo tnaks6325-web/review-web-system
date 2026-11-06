@@ -8143,7 +8143,6 @@ async function _callCardExtractAi(cid, base64, mimeType) {
     }
     _stopCardCountdown(cid);
     document.getElementById(cid+"_aiLoading").classList.remove("show");
-    const lblDone = document.getElementById(cid+"_imgLabel"); if (lblDone) lblDone.textContent = "분석 완료 ✓";
     if (!json || json.error) {
       st.extractToken = json?.extractToken || "";
       st.imageHash = json?.imageHash || "";
@@ -8156,6 +8155,8 @@ async function _callCardExtractAi(cid, base64, mimeType) {
       return;
     }
 
+    // 결정 331 보강 — 「분석 완료 ✓」는 판독이 성공했을 때만(종전엔 오류 응답에도 먼저 찍혀 빨간 상자 옆에 남았다).
+    const lblDone = document.getElementById(cid+"_imgLabel"); if (lblDone) lblDone.textContent = "분석 완료 ✓";
     st.extractToken = json.extractToken || "";
     st.imageHash = json.imageHash || "";
     st.deliveryMemoToken = json.deliveryMemoToken || "";   // 결정 245: 배송메세지 — 서버 서명 그대로 제출에 싣는다
@@ -8504,7 +8505,7 @@ function _showCardAiError(cid, msg, showRetry) {
   const msgEl = document.getElementById(cid+"_aiErrorMsg"); if(msgEl) msgEl.textContent = msg;
   const retryBtn = document.getElementById(cid+"_aiRetryBtn");
   if(retryBtn) retryBtn.style.display = (showRetry && _cardAiState[cid]?.lastBase64) ? "block" : "none";
-  const lbl = document.getElementById(cid+"_imgLabel"); if(lbl&&lbl.textContent.includes("분석 중")) lbl.textContent="분석 실패 ✗";
+  const lbl = document.getElementById(cid+"_imgLabel"); if(lbl&&/분석 (중|완료)/.test(lbl.textContent)) lbl.textContent="분석 실패 ✗";   // 결정 331 보강 — 실패 상자 옆에 「분석 완료 ✓」를 남기지 않는다
 }
 
 /**

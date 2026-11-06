@@ -272,6 +272,8 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   const vm = require('vm');
   const bodyFn = WD.match(/function _finBodyHtml\(\)\{[\s\S]*?\n\}/);
   assert(bodyFn, '_finBodyHtml 을 찾지 못했습니다');
+  const internalRoleFn = WD.match(/function _isInternalRole\(\)\{[^\n]+\}/);
+  assert(internalRoleFn, 'actual internal-role rendering gate must exist');
   const runList = (opts) => {
     const sandbox = {
       STATE: { finTab: opts.fin ? 'fin' : '', tabs: opts.tabs || [], finFilter: '', finQ: '', finMgr: '', role: 'master' },
@@ -288,7 +290,7 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
       esc: v => String(v == null ? '' : v),
     };
     vm.createContext(sandbox);
-    vm.runInContext(bodyFn[0] + '\n_finBodyHtml();', sandbox);
+    vm.runInContext(internalRoleFn[0] + '\n' + bodyFn[0] + '\n_finBodyHtml();', sandbox);
     return vm.runInContext('_finBodyHtml()', sandbox);
   };
   const tab = { sheetId: 'S', tabName: 'A', advertiserName: '업체', stats: { manager: '만두', paid: 3 }, finishedAt: '2026-09-21', finishedBy: '자동 마감' };
@@ -305,8 +307,8 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
     !/자동으로 이곳으로 옮겨집니다/.test(htmlRun));
   // ⚠ `<th` 로 세면 `<thead>` 까지 잡혀 항상 +1 이 된다(이 가드를 쓰다 실제로 밟았다) — 경계 문자를 붙인다.
   const nTh = (htmlRun.match(/<th[\s>]/g) || []).length, nTd = (htmlRun.match(/<td[\s>]/g) || []).length;
-  t('진행 중 탭의 열 수는 그대로(헤더 칸 수 ≡ 행 칸 수 — 안내 추가로 표 구조가 밀리지 않았다)',
-    nTh === nTd && nTh === 13, `th=${nTh} td=${nTd}`);   // 시안 확정(2026-09-22): 숫자 4칸 분리로 12 → 14 · 2026-09-30 오늘완료 열 제거로 13
+  t('진행 중 탭은 헤더 칸 수 ≡ 행 칸 수(승인된 작업별 업체 링크 열 포함)',
+    nTh === nTd && nTh === 14, `th=${nTh} td=${nTd}`);   // 2026-11-06 승인: 기존 13열 + 업체 접속 1열. 안내가 표 밖에 있는 기존 검사는 유지.
 
   console.log(`\n✅ ${pass} 케이스 통과\n`);
   process.exit(0);

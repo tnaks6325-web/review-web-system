@@ -50,7 +50,9 @@ assert.match(load, /generation!==_pmLoadGeneration/,
   '쓰기 후 조회보다 늦게 끝난 예전 응답은 화면을 다시 덮으면 안 된다');
 assert.match(workdesk, /function _dropSession[\s\S]*?_pmLoadInFlight=null;/,
   '세션 만료 뒤 로그인하면 이전 계정의 미완료 요청을 재사용하면 안 된다');
-const logout = workdesk.slice(workdesk.indexOf('function logout()'), workdesk.indexOf('function logout()') + 500);
+const logoutMatch = workdesk.match(/function logout\(\)\{[\s\S]*?\n\}/);
+assert.ok(logoutMatch,'manual logout function must exist in full');
+const logout = logoutMatch[0];
 assert.match(logout, /_pmLoadGeneration\+=1/);
 assert.match(logout, /_pmLoadInFlight=null/,
   '수동 로그아웃도 이전 계정의 입금 조회를 폐기해야 한다');
