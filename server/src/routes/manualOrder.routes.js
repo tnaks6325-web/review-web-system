@@ -28,9 +28,16 @@ const AI_REPAIR_MAX = parseInt(process.env.SLASHFORM_AI_REPAIR_MAX || '10', 10);
 router.post('/preview', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
   // ★ 결정 344 — 동시진행 작업표·공고는 미리보기 단계에서 바로 알린다(분해·AI 보정 전 · 판정 실패도 거절 = fail-closed).
   //   화면은 `error` 를 그대로 alert 한다('분해 실패: …').
+  // ★ 결정 349 화면(2026-11-07) — 새 화면(dualAware:true)은 동시진행 작업표에서도 양식 나누기만 받는다(dual:true 를 실어 돌려준다).
+  //   접수는 /dual/submit 으로만(아래 /submit 의 거절은 그대로 · 결정 344 완화 금지). 옛 화면(dualAware 없음)은 종전처럼 409,
+  //   판정 실패(dual_channel_manual_check_failed)는 dualAware 여도 409(fail-closed).
+  let dualMode = false;
   { const pb = req.body || {};
     const blocked = await manualDualBlock(pool, { sheetId: pb.sheetId, tabName: pb.tabName, gid: pb.gid, campaignId: pb.campaignId });
-    if (blocked) return res.status(409).json(blocked); }
+    if (blocked) {
+      if (pb.dualAware === true && blocked.code === require('../utils/dualPhase1').DUAL_MANUAL_UNSUPPORTED) dualMode = true;
+      else return res.status(409).json(blocked);
+    } }
   const text = String((req.body && req.body.text) || '');
   const all = parseSlashForm(text);
   const items = all.slice(0, MAX_LINES);
@@ -74,11 +81,12 @@ router.post('/preview', authMiddleware, adminOrMasterMiddleware, async (req, res
   // ★ 결정 211: 작업보드 경로(공고 없이 탭 단위)면 그 탭에 연결된 공고의 상품(선택지) 목록을 함께 싣는다.
   //   공고 화면 경로(campaignId 있음)는 종전대로(신청 선택이 옵션을 정한다).
   const b = req.body || {};
-  const optCtx = (!b.campaignId && b.sheetId && b.tabName)
+  //   동시진행 모드는 상품을 고르지 않는다(대리 묶음 입구가 옵션을 받지 않는다 — 옵션 없는 같은 상품 · 결정 341).
+  const optCtx = (!dualMode && !b.campaignId && b.sheetId && b.tabName)
     ? await tabOptionChoices(pool, { sheetId: String(b.sheetId), tabName: String(b.tabName) }) : null;
 
   res.json({
-    ok: true, items,
+    ok: true, items, ...(dualMode ? { dual: true } : {}),
     optionChoices: optCtx ? optCtx.choices : [],
     truncated: all.length > MAX_LINES ? all.length - MAX_LINES : 0,
     okCount: items.filter(i => i.ok).length,
@@ -319,6 +327,7 @@ router.post('/dual/submit', authMiddleware, adminOrMasterMiddleware, async (req,
     const r = await require('../services/dualStaffSubmission.service').submitStaffBundle({
       sheetId: b.sheetId, tabName: b.tabName, gid: b.gid || '', campaignId: b.campaignId, fields: b.fields || {},
       naver: b.naver || {}, coupang: b.coupang || {}, targetApplicationId: b.targetApplicationId,
+      reviewerLink: b.reviewerLink || null,   // 결정 348 리뷰어 연결 — 서비스가 수동제출과 같은 resolveReviewerLink 로 다시 판정
       force: b.force === true, allowRepurchase: b.allowRepurchase === true, allowOverDaily: b.allowOverDaily === true,
       staff: _dualStaff(req),
     });
@@ -340,6 +349,30 @@ router.post('/dual/complete', authMiddleware, adminOrMasterMiddleware, async (re
   } catch (e) { _dualStaffFail(res, next, e); }
 });
 _handlers.manualOrderDualComplete = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다
+
+/* 결정 349 화면 — 보완 대상 목록(읽기 전용). 수동제출 창이 열릴 때 부른다: dual(동시진행 작업표인가) + 보완 필요 주문.
+   개인정보는 이름·전화 뒤 4자리·금액·작업표 줄 번호만(전체 번호·주소·계좌 없음). 판정 실패 = 409(모른다를 0건으로 꾸미지 않는다). */
+router.get('/dual/pending', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const q = req.query || {};
+    res.json(await require('../services/dualStaffSubmission.service').listPlainPending({ sheetId: q.sheetId, tabName: q.tabName, gid: q.gid || '' }));
+  } catch (e) { _dualStaffFail(res, next, e); }
+});
+_handlers.manualOrderDualPending = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다
+/* 결정 349 화면 후속 — 보완 목록 줄의 기존 구매캡처 사진(읽기 전용). 대상은 보완 목록에 뜨는 주문만(서비스가 같은 조건으로 다시 본다).
+   ★ 기존 무인증 사진 프록시(/api/drive/image/:id)를 쓰지 않는다 — 파일 id 를 목록에 실으면 권한 밖으로 샌다. 같은 2단 권한 · 리뷰어 정보 기록 없음. */
+router.get('/dual/complete-capture/:orderSubmissionId', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const q = req.query || {};
+    const r = await require('../services/dualStaffSubmission.service').readPlainCapture({
+      orderSubmissionId: req.params.orderSubmissionId, sheetId: q.sheetId, tabName: q.tabName, gid: q.gid || '' });
+    res.set('Content-Type', r.mimeType);
+    res.set('Cache-Control', 'private, no-store');
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.send(r.buffer);
+  } catch (e) { _dualStaffFail(res, next, e); }
+});
+_handlers.manualOrderDualCompleteCapture = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다
 // ── 리뷰어 연결 검색 (결정 348) ───────────────────────────────
 // 줄마다 「기존 리뷰어 고르기」를 하는 창의 검색. 예전 reviewer-search(PR #394 에서 제거)는 **화면이 쓰지 않는**
 // PII 통로였다 — 이번 것은 수동제출 창이 실제로 부르고, 위험을 막는 조건을 서비스·라우트가 함께 건다:

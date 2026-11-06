@@ -140,3 +140,33 @@ function FIELDS_LINE() {
   const f = FIELDS;
   return [f.reviewerName, f.recipient, f.userId, f.phone, f.address, f.bank, f.account, f.depositor, f.price].join('/');
 }
+
+/* ── 결정 349 화면(2026-11-07) — 수동제출 창이 동시진행 모드를 알게 한다 ─────────────────────────
+   새 화면은 미리보기에 dualAware:true 를 실어 보낸다 → 동시진행 작업표면 거절 대신 양식만 나눠 주고 dual:true 를 싣는다.
+   ★ 옛 화면(dualAware 없음)은 종전처럼 409 · 판정 실패는 dualAware 여도 409(fail-closed) · 일반 제출(submit)은 dualAware 여도 409(결정 344). */
+test('결정 349 화면: 동시진행 + dualAware 미리보기 → 나누기 허용 · dual:true · 상품 목록 없음 · 쓰기 0', async () => {
+  const fx = await dualDb();
+  const h = load((sql, p) => fx.query(sql, p));
+  const out = res();
+  await h.routes().handlers.manualOrderPreview({ body: { text: FIELDS_LINE(), sheetId: 's', tabName: 't', campaignId: null, dualAware: true }, admin: { name: '관리자' } }, out, e => { throw e; });
+  assert.equal(out.statusCode, 200, JSON.stringify(out.body));
+  assert.equal(out.body.ok, true); assert.equal(out.body.dual, true); assert.equal(out.body.okCount, 1);
+  assert.deepEqual(out.body.optionChoices, []);
+  assertNoWrites(h);
+});
+test('결정 349 화면: 판정 실패는 dualAware 여도 거절 · 일반 submit 은 dualAware 여도 409 · 일반 작업표엔 dual 표시 없음', async () => {
+  const hb = load(boom);
+  const p = res();
+  await hb.routes().handlers.manualOrderPreview({ body: { text: FIELDS_LINE(), sheetId: 's', tabName: 't', dualAware: true }, admin: { name: '관리자' } }, p, () => {});
+  assert.equal(p.statusCode, 409); assert.ok(/^dual_channel_manual_check_failed$/.test(p.body.code));
+  const fx = await dualDb();
+  const h = load((sql, q) => fx.query(sql, q));
+  const s = res();
+  await h.routes().handlers.manualOrderSubmit({ body: { sheetId: 's', tabName: 't', gid: 'g', dualAware: true, allowRepurchase: true, items: [{ fields: FIELDS }] }, admin: { name: '관리자' } }, s, e => { throw e; });
+  assert.equal(s.statusCode, 409); assert.equal(s.body.code, CODE);
+  assertNoWrites(h);
+  const hp = load(plainRead);
+  const pp = res();
+  await hp.routes().handlers.manualOrderPreview({ body: { text: FIELDS_LINE(), sheetId: 'plain', tabName: 'p', dualAware: true }, admin: { name: '관리자' } }, pp, e => { throw e; });
+  assert.equal(pp.statusCode, 200); assert.equal(pp.body.dual, undefined);
+});

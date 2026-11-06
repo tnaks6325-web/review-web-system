@@ -377,10 +377,14 @@ console.log('\nC. 라우트 권한');
   // ★ 결정 348 — C1 의미 강화: 예전(PR #394)엔 「화면이 안 쓰는 PII 통로」라 reviewer-search 자체를 지웠다.
   //   지금은 수동제출 창이 실제로 부르는 검색이 있고, 지켜야 할 것은 「무인증·권한 없는 검색 통로가 없다」이다.
   // 결정 349: 동시진행 직원 대리 묶음 제출·보완 입구 2개가 더해졌다(같은 2단 권한 — C2 가 같이 본다).
-  ok('C1 라우트는 정확히 다섯 길이다(preview·submit·reviewer-search·dual/submit·dual/complete — 다른 PII 통로 없음)',
-    layers.length === 5 && !!find('/preview') && !!find('/submit') && !!find('/reviewer-search')
-    && !!find('/dual/submit') && !!find('/dual/complete')
-    && find('/reviewer-search').methods.join() === 'get');
+  // 결정 349 화면(2026-11-07): 보완 대상 목록 GET /dual/pending 이 더해졌다(이름·전화 뒤 4자리·금액·줄 번호만 · 같은 2단 권한 — C2 가 같이 본다).
+  // 결정 349 화면 후속(2026-11-07): 보완 목록 줄의 기존 구매캡처 사진 GET /dual/complete-capture/:id 가 더해졌다
+  //   (보완 목록에 뜨는 주문만 · 같은 2단 권한 — C2 가 같이 보고, 아래 C1c 가 실제 HTTP 로 두드린다).
+  ok('C1 라우트는 정확히 일곱 길이다(preview·submit·reviewer-search·dual/submit·dual/complete·dual/pending·dual/complete-capture — 다른 PII 통로 없음)',
+    layers.length === 7 && !!find('/preview') && !!find('/submit') && !!find('/reviewer-search')
+    && !!find('/dual/submit') && !!find('/dual/complete') && !!find('/dual/pending') && !!find('/dual/complete-capture/:orderSubmissionId')
+    && find('/reviewer-search').methods.join() === 'get' && find('/dual/pending').methods.join() === 'get'
+    && find('/dual/complete-capture/:orderSubmissionId').methods.join() === 'get');
   ok('C2 ★ 전부 authMiddleware + adminOrMasterMiddleware 뒤에 있다',
     layers.every(l => l.names.includes('authMiddleware') && l.names.includes('adminOrMasterMiddleware')));
   ok('C3 제출은 POST 전용', find('/submit').methods.join() === 'post');
@@ -426,6 +430,19 @@ console.log('\nC. 라우트 권한');
     const m = await hit({ role: 'master', name: '마스터' }, '김');
     ok('C1b 통과한 관리자도 2글자 미만은 빈 목록(DB 미접촉)', m.status === 200 && m.body && m.body.ok === true
       && Array.isArray(m.body.items) && m.body.items.length === 0 && m.body.tooShort === true);
+    /* ★ C1c(결정 349 화면 후속) — 기존 구매캡처 사진 입구도 같은 2단 권한: 무인증 401 · 광고주 403 · 편집 명단 밖 직원 403.
+       통과한 관리자라도 주문 id 모양이 틀리면 400(DB·사진 미접촉). */
+    const capUrl = id => `http://127.0.0.1:${srv.address().port}/api/trackb/manual-order/dual/complete-capture/${id}?sheetId=s&tabName=t`;
+    const capHit = async (tokPayload, id) => {
+      const headers = tokPayload ? { Authorization: 'Bearer ' + jwt.sign(tokPayload, process.env.JWT_SECRET) } : {};
+      const r = await fetch(capUrl(id || '00000000-0000-4000-8000-0000000000b3'), { headers });
+      return { status: r.status, type: r.headers.get('content-type') || '' };
+    };
+    ok('C1c ★ 무인증 사진 요청은 401', (await capHit(null)).status === 401);
+    ok('C1c ★ 광고주 토큰은 403', (await capHit({ role: 'advertiser', name: '광고주' })).status === 403);
+    ok('C1c ★ 편집 허용 명단 밖 직원은 403', (await capHit({ role: 'staff', via: 'intranet', ae: false, name: '명단밖직원' })).status === 403);
+    const bad = await capHit({ role: 'master', name: '마스터' }, 'nope');
+    ok('C1c 통과한 관리자도 틀린 주문 id 는 400(사진이 아님)', bad.status === 400 && !/^image\//.test(bad.type));
   } finally { srv.close(); }
 }
 
@@ -742,7 +759,7 @@ console.log('\nH. 슬래시 누락 자동 보정');
   const mo = F('js/manual-order.js');
   // 결정 347: 맥 규칙(이모지 금지)으로 그림문자를 뺐다 — 표시는 줄 왼쪽 주황 막대(tr.fix) + 확인 칸 「자동보정: …/AI 보정: …」 주황 글자(의미 불변)
   ok('H24 ★ 보정된 줄은 표에 드러난다(조용한 수정 금지)',
-    /it\.aiRepaired \? 'AI 보정' : \(it\.repairs \|\| \[\]\)\.length \? '자동보정'/.test(mo) && /\(it\.repairs \|\| \[\]\)\.length \|\| it\.aiRepaired \|\| capNameMismatch\(it\)\) c\.push\('fix'\)/.test(mo));
+    /it\.aiRepaired \? 'AI 보정' : \(it\.repairs \|\| \[\]\)\.length \? '자동보정'/.test(mo) && /\(it\.repairs \|\| \[\]\)\.length \|\| it\.aiRepaired \|\| capNameMismatch\(it\)(\s*\|\| \(_isDual\(\)[^\n]*\n?[^\n]*\))?\) c\.push\('fix'\)/.test(mo));   // 결정 349 화면: 동시진행 줄의 금액 합·구매처 캡처 이름 다름도 주황(의미 강화)
   ok('H25 보정 건수를 헤더에 요약', /자동보정 (<span class="n">)?\$\{fixN\}(<\/span>)?건/.test(mo));   // 결정 347: 숫자만 고정폭 글자로 감쌌다(의미 불변)
 }
 
@@ -763,23 +780,25 @@ console.log('\nI. 1단계 캡처 첨부');
   ok('I2 ★ 공용 보관함·이름 자동 배정이 없다(오배정의 뿌리 — 결정 345 P1·P2)',
     !/\bSTAGED\b/.test(mo) && !/distributeStaged/.test(mo) && !mo.includes('id="moStage"') && !mo.includes('id="moDrop"'));
   ok('I3 줄 글칸에 사진을 붙이면 그 줄 캡처로 받는다(관리자는 그냥 Ctrl+V)',
-    mo.includes('onpaste="ManualOrder.rowPaste(event,${i})"') && /function rowPaste\(ev, i\)[\s\S]{0,400}if \(imgs\.length\) \{ ev\.preventDefault\(\); select\(row\); takeImages\(row, imgs\); return; \}/.test(mo));
+    mo.includes('onpaste="ManualOrder.rowPaste(event,${i})"') && /function rowPaste\(ev, i\)[\s\S]{0,400}if \(imgs\.length\) \{\s*ev\.preventDefault\(\); select\(row\);[\s\S]{0,300}?takeImages\(row, imgs\); return;\s*\}/.test(mo)
+    // 결정 349 화면: 동시진행 모드만 구매처를 짐작하지 않고 안내(일반 모드는 종전 그대로 그 줄 캡처)
+    && /if \(_isDual\(\)\) \{ _toast\([^\n]*\); return; \}\s*takeImages\(row, imgs\); return;/.test(mo));
   ok('I4 붙여넣기·끌어놓기·파일선택 3경로 — 전부 그 줄 번호를 들고 온다',
     mo.includes('onpaste="ManualOrder.onPaste(event,${i})"') && mo.includes('ondrop="ManualOrder.onDrop(event,${i})"') && mo.includes('onchange="ManualOrder.onFile(event,${i})"'));
   ok('I5 넣는 길은 한 곳(takeImages → attach) · 한 줄 = 한 장',
     ['onPaste', 'onFile', 'onDrop'].every(fn => { const s = mo.slice(mo.indexOf('function ' + fn + '('), mo.indexOf('\n  }', mo.indexOf('function ' + fn + '('))); return /takeImages\(row, /.test(s); })
-    && /function takeImages\(row, files\)[\s\S]{0,500}attach\(row, imgs\[0\]\);/.test(mo));
-  ok('I6 잘못 넣은 캡처는 뺄 수 있다', /function uncap\(i\)/.test(mo) && mo.includes('ManualOrder.uncap(${i})'));
+    && /function takeImages\(row, files(, ch)?\)[\s\S]{0,1500}attach\(row, imgs\[0\](, dualRow \? ch : null)?\);/.test(mo));   // 결정 349 화면: 구매처 칸(ch)을 함께 넘긴다 — 넣는 길은 여전히 한 곳
+  ok('I6 잘못 넣은 캡처는 뺄 수 있다', /function uncap\(i(, ch)?\)/.test(mo) && mo.includes('ManualOrder.uncap(${i})'));
   ok('I7 줄별 캡처도 업로드 전에 줄인다(413 방지)', /const shrunk = await shrink\(file\);/.test(mo));
   ok('I8 계약에 줄별 첨부 핸들러가 노출된다',
     ['onPaste', 'onFile', 'onDrop', 'uncap', 'selectRow']
       .every(k => new RegExp('window\\.ManualOrder[\\s\\S]{0,600}\\b' + k + '\\b').test(mo)));
   ok('I9 ★ 고른 줄 없이 Ctrl+V 한 사진은 아무 줄에도 붙이지 않는다(알리기만)',
-    /const row = ACTIVE && ROWS\.indexOf\(ACTIVE\) >= 0 \? ACTIVE : null;\s*if \(!row\) \{ _toast\('캡처를 붙일 줄을 먼저 눌러 고르세요'\); return; \}/.test(mo));
-  ok('I10 사진을 줄이는 사이 그 줄을 지우면 버린다(다른 줄로 가지 않는다)', /if \(ROWS\.indexOf\(row\) < 0 \|\| !CTX\) return;   \/\/ 그사이 줄을 지웠거나/.test(mo));
+    /const row = ACTIVE && (ROWS|list)\.indexOf\(ACTIVE\) >= 0 \? ACTIVE : null;\s*if \(!row\) \{ _toast\('캡처를 붙일 줄을 먼저 눌러 고르세요'\); return; \}/.test(mo));   // 결정 349 화면: 보완 목록(CROWS)도 같은 규칙(list)
+  ok('I10 사진을 줄이는 사이 그 줄을 지우면 버린다(다른 줄로 가지 않는다)', /if \((ROWS|list)\.indexOf\(row\) < 0 \|\| !CTX\) return;   \/\/ 그사이 줄을 지웠거나/.test(mo));
   ok('I11 모달을 새로 열면 줄·캡처가 비워진다(다른 탭 캡처 혼입 금지)', /ROWS = \[\]; OPTS = \[\]; ACTIVE = null;/.test(mo));
   ok('I12 ★ 캡처 이름이 그 줄 수취인과 다르면 경고만(제출 막지 않음 · 마스킹 패턴 일치면 경고 없음)',
-    /function capNameMismatch\(it\)/.test(mo) && /이름이 다릅니다\(캡처: \$\{capNm\}\)/.test(mo)
+    /function capNameMismatch\(it(, sl)?\)/.test(mo) && /이름이 다릅니다\(캡처: \$\{capNm\}\)/.test(mo)
     && !/capNameMismatch/.test(mo.slice(mo.indexOf('const submittable'), mo.indexOf('\n', mo.indexOf('const submittable')))));
 }
 
