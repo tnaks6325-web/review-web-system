@@ -4193,6 +4193,33 @@ router.post('/payment/result-auto-apply', authMiddleware, adminOrMasterMiddlewar
   } catch (err) { _resultErr(err, res, next); }
 });
 
+// 홈의 회차에 결속된 입구 — 파일의 실제 회차를 읽기 전용으로 찾고 일치할 때만 기존 반영 엔진으로 전달한다.
+router.post('/payment/batch/:id/home-result-auto-apply', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  const batchId = String(req.params.id || '');
+  if (!_UUID_RE.test(batchId)) return res.status(400).json({ ok: false, code: 'bad_request', error: '대량이체 id 형식이 올바르지 않습니다.' });
+  let payload;
+  try {
+    const b = req.body || {};
+    const base64 = b.base64 || b.file;
+    const found = await paymentResultSvc.findBatchForResultFile({ fileName: b.fileName, base64 });
+    if (String(found.batchId).toLowerCase() !== batchId.toLowerCase()) {
+      return res.status(409).json({ ok: false, code: 'wrong_batch', error: '이 파일은 선택한 대량이체의 결과가 아닙니다. 파일을 다시 확인해 주세요.' });
+    }
+    const out = await paymentResultSvc.autoApplyResultFile({
+      batchId: found.batchId, fileName: b.fileName, base64, by: _by(req), notifyFailed: b.notifyFailed !== false,
+    });
+    // 이미 반영된 파일의 재시도도 알림만 다시 맞춘다(직전 입금 성공 뒤 알림 갱신 실패 복구).
+    // true 는 호출 완료일 뿐, 내부 대조가 전부 끝났다는 뜻은 아니다.
+    const opsRefresh = out.ok === true && (out.autoApplied === true || found.pending === 0)
+      ? await _refreshOpsChecks(_by(req)) : null;
+    payload = { ...out, found, alreadyDone: !found.pending, opsRefresh,
+      ...(opsRefresh === false ? { opsWarning: '입금 결과는 유지됩니다. 홈 확인 목록을 갱신하지 못했으니 같은 파일로 다시 확인해 주세요.' } : {}),
+    };
+  } catch (err) { return _resultErr(err, res, next); }
+  res.json(payload);
+  _archiveSoon();
+});
+
 // 이체결과 파일 드라이브 보관 현황(결정 316) — 읽기만. 보관은 뒤에서(cron·kickSoon) 하고 반영과 무관하다.
 router.get('/payment/result-archive', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, ...(await paymentResultArchiveSvc.status()) }); }
@@ -4303,8 +4330,8 @@ router.post('/ops-checks/:id/manager-answer', authMiddleware, adminOrMasterMiddl
   }
 });
 async function _refreshOpsChecks(by) {
-  try { await opsCheckSvc.refreshBankChecks({ by }); }
-  catch (e) { logger.warn(`[opsCheck] 확인할 것 갱신 실패(통장·확정은 그대로): ${e.message}`); }
+  try { await opsCheckSvc.refreshBankChecks({ by }); return true; }
+  catch (e) { logger.warn(`[opsCheck] 확인할 것 갱신 실패(통장·확정은 그대로): ${e.message}`); return false; }
 }
 // 결정 324 — 작업표 빈 줄이 없어 구매양식이 작업표에 못 들어간 주문(홈 전용 · 은행 목록·담당자 질문과 섞지 않는다).
 const slotCheckSvc = require('../services/workboardSlotOpsCheck.service');
