@@ -230,8 +230,98 @@ function createService(deps = {}) {
       identity: 'staff_pending', price, worktableRow: out.idempotent ? null : worktableNote(written, warnings), reviewerRegistered: !!reviewerInfo.registered, warnings };
   }
 
-  return { submitStaffBundle };
+  /** 3) 보완 — 수동제출로 들어간 보통 주문(묶음 아님) 1건을 동시진행 묶음으로 완성한다.
+   *  작업표 줄·리뷰어·기존 캡처 1장을 살리고, 부족한 쪽(다른 구매처 주문번호·금액·캡처)을 채워 구매처 기록 2·묶음 버전·합계 금액으로 바꾼다. 멱등. */
+  async function completePlainOrder(body = {}) {
+    runtime().assertDualChannelReady('purchase');
+    const staff = staffLabel(body.staff);
+    const id = String(body.orderSubmissionId || '');
+    if (!/^[0-9a-f-]{36}$/i.test(id)) fail('BAD_REQUEST', 'orderSubmissionId 필수', 400);
+    const order = (await db.query('SELECT * FROM order_submissions WHERE id=$1', [id])).rows[0];
+    if (!order) fail('order_not_found', '주문을 찾을 수 없습니다.', 404);
+    if (order.deleted_at || order.mirror_status === 'canceled') fail('order_cancelled', '삭제·취소된 주문입니다.');
+    const dualId = await dualCampaignFor({ sheetId: order.sheet_id, tabName: order.tab_name, gid: order.gid });
+    // 기존 캡처 1장 = 사진이 없는 쪽. 두 쪽 다 새 사진이면 기존 캡처는 쓰지 않는다.
+    const missing = CHANNELS.filter(ch => !body[ch]?.imageBase64);
+    if (missing.length > 1) fail('DUAL_TWO_CAPTURES_REQUIRED', '구매캡처가 없는 쪽이 둘입니다 — 다른 구매처 캡처를 올려 주세요.', 400);
+    const existingCh = missing[0] || null;
+    // 기존 쪽 기본값 = 그 주문의 값. 이미 묶음이 된 뒤(재호출)에는 부모 금액이 합계이므로 저장된 구매처 기록에서 읽는다.
+    const stored = order.purchase_bundle_version === 1
+      ? Object.fromEntries((await db.query('SELECT * FROM order_purchase_channels WHERE order_submission_id=$1', [id])).rows.map(c => [c.channel, c])) : {};
+    const purchases = cleanChannels(body, ch => stored[ch]
+      ? { orderNum: stored[ch].order_num, userId: stored[ch].user_id, recipient: stored[ch].recipient, phone: stored[ch].phone, address: stored[ch].address, paidAmount: stored[ch].paid_amount }
+      : ch === existingCh
+        ? { orderNum: order.order_num, userId: order.user_id, recipient: order.recipient, phone: order.phone, address: order.address, paidAmount: toAmount(order.price) }
+        : { userId: order.user_id, recipient: order.recipient, phone: order.phone, address: order.address });
+    const typedVerdict = sub.identityVerdict(purchases.naver, purchases.coupang);
+    const images = {};
+    for (const ch of CHANNELS.filter(c => c !== existingCh)) { const buffer = proof.bytes(body[ch].imageBase64); images[ch] = { buffer, sha: proof.sha(buffer), mime: body[ch].mimeType }; }
+    if (existingCh) {
+      if (order.purchase_bundle_version === 1) {
+        const a = (await db.query(`SELECT byte_sha256 FROM purchase_capture_artifacts WHERE order_submission_id=$1 AND channel=$2 AND role='primary' AND status='committed' AND superseded_at IS NULL`, [id, existingCh])).rows[0];
+        images[existingCh] = { sha: a ? a.byte_sha256 : '', fileId: order.capture_file_id, existing: true };
+      } else {
+        if (!order.capture_file_id) fail('DUAL_TWO_CAPTURES_REQUIRED', '기존 주문에 구매캡처가 없습니다 — 두 구매처 캡처를 모두 올려 주세요.', 400);
+        images[existingCh] = { sha: proof.sha(await drive.read(order.capture_file_id)), fileId: order.capture_file_id, existing: true };
+      }
+    }
+    if (images.naver.sha === images.coupang.sha) fail('DUAL_IMAGE_REUSED', '두 구매처에 같은 사진을 올렸습니다.');
+    const snapshot = await sub.conditionForCampaign(db, dualId);
+    const captureFlags = priceFlags(body, snapshot, purchases);
+    const price = purchases.naver.paidAmount + purchases.coupang.paidAmount;
+    if (!Number.isSafeInteger(price) || price > 2147483647) fail('DUAL_AMOUNT_INVALID');
+    const hash = proof.hash({ kind: 'staff_complete_v1', orderSubmissionId: id, campaignId: dualId, purchases, captureShas: { naver: images.naver.sha, coupang: images.coupang.sha }, captureFlags });
+    const check = o => {
+      if (o.purchase_bundle_version === 1) {
+        if (o.purchase_bundle_hash === hash) return 'done';
+        fail('DUAL_BUNDLE_CONFLICT', '이미 다른 내용으로 동시진행 묶음이 된 주문입니다.');
+      }
+      if (o.source !== manual().SOURCE_EXTERNAL) fail('dual_complete_source_invalid', '외부모집 수동제출로 들어간 주문만 보완할 수 있습니다.');
+      return 'todo';
+    };
+    if (check(order) === 'done') return { ok: true, orderSubmissionId: id, idempotent: true, price };
+    const folder = await resolveFolder(dualId);
+    for (const ch of CHANNELS) if (!images[ch].existing) images[ch].fileId = await uploadVerified(images[ch].buffer, images[ch].mime, folder, images[ch].sha);
+    const out = await lifecycle().withDualLifecycleInTx({ db, targets: [{ campaignId: dualId }], run: async client => {
+      const o = (await client.query('SELECT * FROM order_submissions WHERE id=$1 FOR UPDATE', [id])).rows[0];
+      if (!o || o.deleted_at || o.mirror_status === 'canceled') fail('order_cancelled', '삭제·취소된 주문입니다.');
+      if (check(o) === 'done') return { idempotent: true };
+      // 지급 전인 주문만 — 회차에 담겼거나 보낸 건은 보완하지 않는다(돈이 이미 움직였다).
+      const paid = await client.query(`SELECT 1 FROM payment_batch_items i WHERE i.status IN ('pending','paid') AND (i.order_submission_id=$1 OR EXISTS (
+          SELECT 1 FROM campaign_participants cp WHERE cp.order_submission_id=$1 AND cp.active=TRUE AND cp.deleted_at IS NULL
+            AND cp.sheet_id=i.sheet_id AND cp.tab_name=i.tab_name AND cp.seq=i.row_index)) LIMIT 1`, [id]);
+      if (paid.rows.length) fail('dual_complete_already_paid', '이미 입금 회차에 담긴 주문이라 보완할 수 없습니다 — 담당자가 따로 처리해 주세요.');
+      if (proof.hash(await sub.conditionForCampaign(client, dualId)) !== proof.hash(snapshot)) fail('DUAL_ARTIFACT_CHANGED');
+      await lockShas(client, CHANNELS.map(ch => images[ch].sha));
+      let appId = (await client.query(`SELECT id FROM campaign_applications WHERE campaign_id=$1 AND (order_submission_id=$2 OR id=$3) ORDER BY id LIMIT 2 FOR UPDATE`,
+        [dualId, id, o.campaign_application_id || null])).rows.map(r => r.id);
+      if (appId.length > 1) fail('dual_application_ambiguous', '이 주문에 연결된 참여 신청이 여러 개입니다.');
+      appId = appId[0];
+      if (!appId) {
+        const p8 = String(o.phone || '').replace(/\D/g, '').slice(-8);
+        const app = await confirmApplication(client, { campaignId: dualId, name: o.recipient || '', phone: o.phone || '', phone8: p8, optionKey: null,
+          orderSubmissionId: id, allowOverCapacity: true, sheetId: o.sheet_id, gid: o.gid || '', tabName: o.tab_name });
+        if (!app || !app.ok || !app.applicationId) fail('dual_application_failed', (app && app.error) || '참여 신청을 확정하지 못해 보완하지 않았어요.');
+        appId = app.applicationId;
+      }
+      await client.query(`UPDATE order_submissions SET price=$2,purchase_bundle_version=1,purchase_bundle_application_id=$3,purchase_bundle_hash=$4,
+          purchase_condition_snapshot=$5,purchase_identity_result='uncertain',purchase_identity_review=$6,purchase_bundle_revision=1,
+          capture_flags=COALESCE($7,capture_flags) WHERE id=$1 AND purchase_bundle_version IS NULL`,
+        [id, String(price), appId, hash, snapshot, { status: 'pending', staffProxy: { by: staff, typedVerdict, completedFrom: 'admin_external_plain', priorPrice: o.price } },
+          captureFlags.length ? { flags: captureFlags } : null]);
+      const artifactIds = [];
+      for (const ch of CHANNELS) artifactIds.push(await insertArtifact(client, { applicationId: appId, channel: ch, fileId: images[ch].fileId, sha: images[ch].sha, purchase: purchases[ch], snapshot, staff }));
+      await sub.finishBundleInTx(client, { orderSubmissionId: id, purchases, verdict: 'uncertain', artifactIds, price });
+      return { applicationId: appId };
+    } });
+    if (out.idempotent) return { ok: true, orderSubmissionId: id, idempotent: true, price };
+    const warnings = [];
+    const p8 = String(order.phone || '').replace(/\D/g, '').slice(-8);
+    const written = await applyWorktable({ sheetId: order.sheet_id, tabName: order.tab_name, gid: order.gid || '', orderSubmissionId: id, phone8: p8, name: order.recipient || '' });
+    return { ok: true, orderSubmissionId: id, applicationId: out.applicationId, completed: true, identity: 'staff_pending', price, worktableRow: worktableNote(written, warnings), warnings };
+  }
+  return { submitStaffBundle, completePlainOrder };
 }
 let production;
 const get = () => production || (production = createService());
-module.exports = { createService, submitStaffBundle: b => get().submitStaffBundle(b) };
+module.exports = { createService, submitStaffBundle: b => get().submitStaffBundle(b), completePlainOrder: b => get().completePlainOrder(b) };

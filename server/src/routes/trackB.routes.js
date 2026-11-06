@@ -1728,8 +1728,11 @@ router.post('/manual-order/submit', authMiddleware, internalMiddleware, editorOn
   _moSubmit(req, res, next));
 // 결정 349 — 동시진행 직원 대리 묶음 제출 · 수동제출 보통 주문 보완(같은 2단 권한 · 같은 핸들러 위임)
 const _moDualSubmit = _handler(_moRoutes, 'manualOrderDualSubmit');
+const _moDualComplete = _handler(_moRoutes, 'manualOrderDualComplete');
 router.post('/manual-order/dual/submit', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _moDualSubmit(req, res, next));
+router.post('/manual-order/dual/complete', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _moDualComplete(req, res, next));
 
 // ── 모집공고 ────────────────────────────────────────────────
 //   목록·상세·발행·수정·플래그·삭제·관제 — 전부 기존 campaign 라우트 핸들러에 위임한다.

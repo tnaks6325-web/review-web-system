@@ -101,6 +101,7 @@ test('② 거절: 동시진행 아닌 작업표 · 준비 상태 닫힘 · 캡�
     await assert.rejects(svc.submitStaffBundle(submitBody({ tabName: 'other', gid: '' })), e => e.code === 'dual_channel_required' && e.status === 409);
     runtime().__setReadinessForTest({});
     await assert.rejects(svc.submitStaffBundle(submitBody()), e => e.code === 'dual_channel_not_ready');
+    await assert.rejects(svc.completePlainOrder({ orderSubmissionId: PLAIN, staff: { name: '망고' } }), e => e.code === 'dual_channel_not_ready');
     runtime().__setReadinessForTest(OPEN);
     await assert.rejects(svc.submitStaffBundle(submitBody({ coupang: { orderNum: 'C-1', paidAmount: 10000 } })), e => e.code === 'DUAL_TWO_CAPTURES_REQUIRED');
     await assert.rejects(svc.submitStaffBundle(submitBody({ coupang: { orderNum: 'C-1', paidAmount: 10000, recipient: '나', imageBase64: img('c') } })), e => e.code === 'DUAL_IDENTITY_MISMATCH');
@@ -111,13 +112,63 @@ test('② 거절: 동시진행 아닌 작업표 · 준비 상태 닫힘 · 캡�
   } finally { runtime().__setReadinessForTest(OPEN); await db.close(); }
 });
 
+test('③ 보완: 보통 주문 1건 → 묶음(작업표 줄·리뷰어·기존 캡처 1장 유지 · 합계 금액) · 멱등 · 지급 보류가 풀리고 동시진행 지급 판정으로 넘어간다', async () => {
+  const { db, svc, calls } = await setup();
+  try {
+    const payout = require(root + '/src/services/dualChannelPayout.service');
+    const key = ['s', 't', 3].join('\u0000');
+    assert.equal((await payout.dualBundleIncompleteRows(db, [{ sheetId: 's', tabName: 't', rowIndex: 3 }])).get(key), 'dual_bundle_incomplete');
+    const body = { orderSubmissionId: PLAIN, staff: { name: '망고' }, naver: { orderNum: 'N-555666', paidAmount: 9000, imageBase64: img('n2') }, coupang: {} };
+    const r = await svc.completePlainOrder(body);
+    assert.equal(r.ok, true, JSON.stringify(r)); assert.equal(r.price, 19000);
+    const o = (await db.query('SELECT * FROM order_submissions WHERE id=$1', [PLAIN])).rows[0];
+    assert.equal(o.purchase_bundle_version, 1); assert.equal(o.price, '19000'); assert.equal(o.source, 'admin_external');
+    assert.equal(o.purchase_identity_result, 'uncertain'); assert.equal(o.purchase_identity_review.staffProxy.priorPrice, '10000');
+    const ch = (await db.query('SELECT channel,order_num,paid_amount FROM order_purchase_channels WHERE order_submission_id=$1 ORDER BY channel', [PLAIN])).rows;
+    assert.deepEqual(ch.map(c => [c.channel, c.order_num, c.paid_amount]), [['coupang', 'C-1', 10000], ['naver', 'N-555666', 9000]]);
+    const arts = (await db.query(`SELECT channel,file_id FROM purchase_capture_artifacts WHERE order_submission_id=$1 AND status='committed' ORDER BY channel`, [PLAIN])).rows;
+    assert.equal(arts.find(a => a.channel === 'coupang').file_id, 'cap-old', '기존 캡처 1장을 살린다');
+    assert.equal(await count(db, `SELECT count(*)::int n FROM campaign_participants WHERE order_submission_id=$1`, [PLAIN]), 1, '작업표 줄은 그대로 하나');
+    assert.equal(calls.apply.length, 1); assert.equal(calls.apply[0].orderSubmissionId, PLAIN);
+    assert.equal(calls.ensure, 0, '리뷰어는 기존 그대로');
+    // 멱등 — 두 번째 호출은 아무것도 바꾸지 않는다
+    const again = await svc.completePlainOrder(body);
+    assert.equal(again.ok, true); assert.equal(again.idempotent, true);
+    assert.equal(await count(db, 'SELECT count(*)::int n FROM order_purchase_channels WHERE order_submission_id=$1', [PLAIN]), 2);
+    assert.equal(calls.apply.length, 1);
+    // 다른 내용으로 다시 → 충돌
+    await assert.rejects(svc.completePlainOrder({ ...body, naver: { ...body.naver, paidAmount: 9100 } }), e => e.code === 'DUAL_BUNDLE_CONFLICT');
+    // 지급 보류(묶음 아님)는 풀리고, 이제 동시진행 지급 판정이 본다
+    assert.equal((await payout.dualBundleIncompleteRows(db, [{ sheetId: 's', tabName: 't', rowIndex: 3 }])).has(key), false);
+  } finally { await db.close(); }
+});
+
+test('③ 보완 거절: 지급 회차에 담긴 주문 · 수동제출 아닌 주문 · 동시진행 아닌 작업표 — 쓰기 0', async () => {
+  const { db, svc } = await setup();
+  try {
+    const body = { orderSubmissionId: PLAIN, staff: { name: '망고' }, naver: { orderNum: 'N-555666', paidAmount: 9000, imageBase64: img('n2') } };
+    await db.exec(`INSERT INTO payment_batch_items(status,sheet_id,tab_name,row_index) VALUES('paid','s','t',3)`);
+    await assert.rejects(svc.completePlainOrder(body), e => e.code === 'dual_complete_already_paid');
+    await db.exec(`DELETE FROM payment_batch_items; UPDATE order_submissions SET source='order_submit' WHERE id='${PLAIN}'`);
+    await assert.rejects(svc.completePlainOrder(body), e => e.code === 'dual_complete_source_invalid');
+    await db.exec(`UPDATE order_submissions SET source='admin_external',tab_name='other',gid='' WHERE id='${PLAIN}'`);
+    await assert.rejects(svc.completePlainOrder(body), e => e.code === 'dual_channel_required');
+    assert.equal(await count(db, 'SELECT count(*)::int n FROM order_purchase_channels WHERE order_submission_id=$1', [PLAIN]), 0);
+    assert.equal((await db.query('SELECT purchase_bundle_version FROM order_submissions WHERE id=$1', [PLAIN])).rows[0].purchase_bundle_version, null);
+    assert.equal(await count(db, `SELECT count(*)::int n FROM purchase_capture_artifacts WHERE order_submission_id IS NULL`), 0, '잠긴 캡처 기록도 남지 않는다(트랜잭션 되돌림)');
+  } finally { await db.close(); }
+});
+
 test('② 입구: 대리 묶음 제출·보완은 수동제출과 같은 2단 권한 · Track B 는 같은 핸들러 위임 · 일반 수동제출의 결정 344 차단은 그대로', () => {
   const fs = require('node:fs');
   const mo = fs.readFileSync(root + '/src/routes/manualOrder.routes.js', 'utf8');
   const tb = fs.readFileSync(root + '/src/routes/trackB.routes.js', 'utf8');
   assert.match(mo, /router\.post\('\/dual\/submit', authMiddleware, adminOrMasterMiddleware,/);
+  assert.match(mo, /router\.post\('\/dual\/complete', authMiddleware, adminOrMasterMiddleware,/);
   assert.match(tb, /router\.post\('\/manual-order\/dual\/submit', authMiddleware, internalMiddleware, editorOnlyMiddleware, \(req, res, next\) =>\s*_moDualSubmit\(req, res, next\)\)/);
+  assert.match(tb, /router\.post\('\/manual-order\/dual\/complete', authMiddleware, internalMiddleware, editorOnlyMiddleware, \(req, res, next\) =>\s*_moDualComplete\(req, res, next\)\)/);
   assert.equal((mo.match(/manualDualBlock\(pool,/g) || []).length, 2, '일반 미리보기·제출의 동시진행 차단 유지');
   const handlers = require(root + '/src/routes/manualOrder.routes').handlers;
   assert.equal(typeof handlers.manualOrderDualSubmit, 'function');
+  assert.equal(typeof handlers.manualOrderDualComplete, 'function');
 });

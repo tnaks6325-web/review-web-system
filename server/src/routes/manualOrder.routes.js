@@ -328,6 +328,15 @@ router.post('/dual/submit', authMiddleware, adminOrMasterMiddleware, async (req,
 });
 _handlers.manualOrderDualSubmit = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다
 
+router.post('/dual/complete', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    res.json(await require('../services/dualStaffSubmission.service').completePlainOrder({
+      orderSubmissionId: b.orderSubmissionId, naver: b.naver || {}, coupang: b.coupang || {}, staff: _dualStaff(req),
+    }));
+  } catch (e) { _dualStaffFail(res, next, e); }
+});
+_handlers.manualOrderDualComplete = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다
 
 // ★ 이름을 빼거나 바꾸면 trackB 가 기동 시 바로 실패한다(fail-closed) — 옛 공개 경로를 지워도 Track B 는 그대로다.
 router.handlers = Object.freeze(_handlers);
