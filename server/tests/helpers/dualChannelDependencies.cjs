@@ -1,15 +1,8 @@
 'use strict';
-// Read-only dependency bridge for the parallel-owned implementations; no source copies.
-const Module=require('node:module');const resolve=Module._resolveFilename;
-const paths={
- './dualChannelRuntime.service':'/Users/sooman/dev/wt/rw-dualchannel-settings/server/src/services/dualChannelRuntime.service.js',
- './dualChannelLifecycle.service':'/Users/sooman/dev/wt/rw-dualchannel-settings/server/src/services/dualChannelLifecycle.service.js',
- './dualPurchaseProof.service':'/Users/sooman/dev/wt/rw-dualchannel-purchase/server/src/services/dualPurchaseProof.service.js',
-};
+// Resolves the dual-channel services to THIS checkout only (the parallel-worktree bridge is retired).
+const Module=require('node:module');const path=require('node:path');const resolve=Module._resolveFilename;
+const names=new Set(['./dualChannelRuntime.service','./dualChannelLifecycle.service','./dualPurchaseProof.service']);
 Module._resolveFilename=function(name,parent,...rest){
- if(paths[name]&&parent?.filename.startsWith(require('node:path').resolve(__dirname,'../..')+'/')){
-  const local=require('node:path').resolve(__dirname,'../../src/services',name+'.js');
-  return require('node:fs').existsSync(local)?local:paths[name];
- }
+ if(names.has(name)&&parent?.filename.startsWith(path.resolve(__dirname,'../..')+'/'))return path.resolve(__dirname,'../../src/services',name+'.js');
  return resolve.call(this,name,parent,...rest);
 };
