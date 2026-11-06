@@ -852,7 +852,8 @@ async function writeOrderToWorktable({
           return { ok: false, reason: 'no_open_slot' };
         }
         const appended = await require('./participants.service').appendSlot(client, {
-          sheetId, tabName, tabGid: gid || null, workboardId, by: 'sheetless-order-append',
+          // ★ minSeq 2 — 빈 표의 1번 줄은 열 이름 줄이다(결정 098). 1번에 넣으면 장부가 그 줄을 건너뛰어 리뷰를 못 낸다.
+          sheetId, tabName, tabGid: gid || null, workboardId, by: 'sheetless-order-append', minSeq: 2,
         });
         if (!appended) { if (!suppliedClient) await client.query('ROLLBACK'); return { ok: false, reason: 'append_failed' }; }
         logger.warn(`[sheetlessOrder] 확정된 초과 주문을 정원 밖에 기록 tab=${tabName} seq=${appended.seq} os=${orderSubmissionId}`);

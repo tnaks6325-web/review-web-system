@@ -13,7 +13,8 @@ async function fixture(){
  CREATE TABLE reviewer_delivery_addresses(id uuid,recipient text,address text,owner_reviewer_id uuid);
  CREATE TABLE reviewer_identity_cards(id uuid,kind text,name_key text,phone8 text,status text,merged_into uuid,owner_reviewer_id uuid);
  CREATE TABLE reviewer_identities(id uuid,member_no int,current_name text,current_phone text,current_phone8 text,shopping_id text,owner_reviewer_id uuid,status text);
- CREATE TABLE recruit_campaigns(id text PRIMARY KEY,multi_account_mode boolean,work_detail jsonb);
+ CREATE TABLE IF NOT EXISTS tab_configs(sheet_id text,tab_name text,income_type text);
+ CREATE TABLE recruit_campaigns(id text PRIMARY KEY,multi_account_mode boolean,work_detail jsonb,linked_sheet_id text,linked_tab_name text);
  CREATE TABLE campaign_applications(id int PRIMARY KEY,campaign_id text,applicant_name text,applicant_phone text,phone8 text,owner_phone8 text,owner_reviewer_id uuid,participant_identity_id uuid,participant_card_id uuid,status text,expires_at timestamptz,hold_token text,order_submission_id uuid);
  CREATE TABLE reviewer_identity_match_audits(campaign_application_id int,owner_reviewer_id uuid,participant_identity_id uuid,selected_identity_hash text,image_hash text,extracted_fields_hash text,status text,approval_mode text,reason_codes jsonb);
  CREATE TABLE order_submissions(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),sheet_id text,tab_name text,gid text,tab_gid text,orderer text,recipient text,user_id text,phone text,address text,order_num text,date_str text,bank text,account text,depositor text,price text,memo text,source text,dedup_key text,mirror_status text,owner_reviewer_id uuid,participant_card_id uuid,participant_identity_key_hash text,purchase_bundle_version int,purchase_bundle_application_id int UNIQUE,purchase_bundle_hash text,purchase_condition_snapshot jsonb,purchase_identity_result text,purchase_identity_review jsonb,purchase_bundle_revision int,deleted_at timestamptz);

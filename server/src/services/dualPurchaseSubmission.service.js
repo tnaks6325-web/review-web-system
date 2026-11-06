@@ -41,10 +41,14 @@ function createService(deps={}) {
   return identity.resolveApplicationIdentity({...args,campaignId:a.campaign_id},client);
  }
  async function condition(client,ctx){
-  const r=await client.query("SELECT work_detail,to_jsonb(rc)->'cash_receipt_required' AS cash_receipt_required FROM recruit_campaigns rc WHERE id=$1",[ctx.application.campaign_id]);
+  // 현금영수증 필요 = 공고 직접 설정 OR 연결 작업표 진행방식 '현영' — 리뷰어 구매 안내(campaign.routes _cashReceiptInfo)와 같은 기준.
+  const r=await client.query(`SELECT rc.work_detail,to_jsonb(rc)->'cash_receipt_required' AS cash_receipt_required,
+    (SELECT tc.income_type FROM tab_configs tc WHERE tc.sheet_id=rc.linked_sheet_id AND tc.tab_name=rc.linked_tab_name LIMIT 1) AS income_type
+    FROM recruit_campaigns rc WHERE rc.id=$1`,[ctx.application.campaign_id]);
   const product=r.rows[0]?.work_detail?.dualChannelProduct;
   if(!product?.channels?.naver || !product?.channels?.coupang) proof.fail('DUAL_CONDITION_MISSING');
-  return {...product,cashReceiptRequired:r.rows[0].cash_receipt_required===true};
+  const cashReceiptRequired=r.rows[0].cash_receipt_required===true || String(r.rows[0].income_type||'').includes('현영');
+  return {...product,cashReceiptRequired};
  }
  async function inTx(body,run){
   return lifecycle().withDualLifecycleInTx({db,targets:[{applicationId:body.campaignApplicationId}],run});

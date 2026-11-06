@@ -17,6 +17,7 @@ async function fixture(){
  CREATE TABLE reviewer_delivery_addresses(id uuid,recipient text,address text,owner_reviewer_id uuid);
  CREATE TABLE reviewer_identity_cards(id uuid,kind text,name_key text,phone8 text,status text,merged_into uuid,owner_reviewer_id uuid);
  CREATE TABLE reviewer_identities(id uuid,member_no int,current_name text,current_phone text,current_phone8 text,shopping_id text,owner_reviewer_id uuid,status text);
+ CREATE TABLE IF NOT EXISTS tab_configs(sheet_id text,tab_name text,income_type text);
  CREATE TABLE recruit_campaigns(id text PRIMARY KEY,multi_account_mode boolean,work_detail jsonb,channel text,source_work_order_id text,linked_sheet_id text,linked_tab_name text,linked_tab_gid text,participation_mode boolean,status text,recruit_total int,updated_at timestamptz);
  CREATE TABLE campaign_applications(id int PRIMARY KEY,campaign_id text REFERENCES recruit_campaigns(id),applicant_name text,applicant_phone text,phone8 text,owner_phone8 text,owner_reviewer_id uuid,participant_identity_id uuid,participant_card_id uuid,status text,expires_at timestamptz,hold_token text,order_submission_id uuid,review_fee_snapshot int,delivery_review_fee_mix_snapshot jsonb,blog_url text,purchase_qty int,qty_tier_amount int,option_key text,submitted_at timestamptz,late_order_id uuid);
  CREATE TABLE reviewer_identity_match_audits(campaign_application_id int,owner_reviewer_id uuid,participant_identity_id uuid,selected_identity_hash text,image_hash text,extracted_fields_hash text,status text,approval_mode text,reason_codes jsonb);

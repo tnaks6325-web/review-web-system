@@ -33,7 +33,9 @@ require.cache[poolPath] = { id: poolPath, filename: poolPath, loaded: true, expo
 /** 같은 파일의 HEAD 원본을 같은 require 문맥에서 적재한다(일반 행 불변 대조용). */
 function loadHead(rel) {
   const filename = path.join(server, rel);
-  const source = cp.execFileSync('git', ['show', 'HEAD:server/' + rel], { cwd: repo, encoding: 'utf8' });
+  // 비교 기준 = 동시진행 화면 연결 전 커밋(dualSubmitFixture.baselineSource 와 같은 기준).
+  //   HEAD 로 두면 연결을 커밋한 순간 기준도 바뀌어 "HEAD 와 같다" 검사가 스스로 깨진다.
+  const source = cp.execFileSync('git', ['show', '123802a9:server/' + rel], { cwd: repo, encoding: 'utf8' });
   const mod = { exports: {} };
   vm.runInThisContext('(function(require,module,exports,__filename,__dirname){' + source + '\n})', { filename: filename + '#HEAD' })(
     createRequire(filename), mod, mod.exports, filename, path.dirname(filename));

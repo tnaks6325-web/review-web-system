@@ -155,7 +155,8 @@ async function syncWorktableSlotsInTx(client, campaign, target, by = 'quota-sync
       `SELECT COALESCE(MAX(seq), 0)::int AS max_seq FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2`,
       [campaign.linked_sheet_id, campaign.linked_tab_name]
     );
-    const maxSeq = Number(seqRows[0] && seqRows[0].max_seq) || 0;
+    // ★ 빈 표면 1번 줄(열 이름 줄 · 결정 098)을 비우고 2번부터 만든다 — 1번 줄은 검색 명단에서 빠진다.
+    const maxSeq = Math.max(1, Number(seqRows[0] && seqRows[0].max_seq) || 0);
     const tabGid = rows.find(r => r.tab_gid != null)?.tab_gid || null;
     for (let i = 0; i < delta.add; i++) {
       await client.query(
