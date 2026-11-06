@@ -667,7 +667,7 @@
     const L = [
       { k: 'no', label: '', w: 30, cls: 'stk r', cell: (it, i) => `<td class="no stk">${i + 1}</td>` },
       { k: 'raw', label: '구매양식 (한 줄 = 한 사람)', w: 156, cls: 'stk2', title: '리뷰어/수취인/아이디/전화번호/주소/은행/계좌번호/예금주/결제금액', cell: rawCell },
-      { k: 'reviewerName', label: '리뷰어', w: 96, cell: fieldCell('reviewerName', { label: '리뷰어' }) },
+      { k: 'reviewerName', label: '리뷰어', w: 84, cell: fieldCell('reviewerName', { label: '리뷰어' }) },
       { k: 'recipient', label: '수취인', w: 62, cell: fieldCell('recipient', { label: '수취인' }) },
       { k: 'userId', label: '아이디', w: 74, cell: fieldCell('userId', { label: '아이디' }) },
       { k: 'phone', label: '연락처', w: 118, cell: fieldCell('phone', { label: '연락처' }) },
