@@ -225,14 +225,15 @@ test('old review completion without dual metadata on a bundle row is refused 409
   const { fixture } = require('./helpers/dualChannelRealFixture');
   const db = await fixture();
   // Ordinary review tables so the old completion path can actually reach its board write.
-  await db.exec(`CREATE TABLE review_closed_targets(sheet_id text,tab_name text,row_index int,resolution_id text,order_submission_id uuid,closed_at timestamptz,close_reason text,review_status text);
-   CREATE TABLE tab_configs(sheet_id text,tab_name text,tab_gid text,capture_slots jsonb,income_type text,is_closed boolean DEFAULT false,archived_rounds text,sheetless boolean DEFAULT true,workboard_id uuid,review_type text,work_kind text,created_at timestamptz DEFAULT now());
+  await db.exec(`CREATE TABLE IF NOT EXISTS review_closed_targets(sheet_id text,tab_name text,row_index int,resolution_id text,order_submission_id uuid,closed_at timestamptz,close_reason text,review_status text);
+   DROP TABLE IF EXISTS tab_configs;  -- the shared real fixture now creates a narrower tab_configs; this test needs the legacy-completion columns
+   CREATE TABLE IF NOT EXISTS tab_configs(sheet_id text,tab_name text,tab_gid text,capture_slots jsonb,income_type text,is_closed boolean DEFAULT false,archived_rounds text,sheetless boolean DEFAULT true,workboard_id uuid,review_type text,work_kind text,created_at timestamptz DEFAULT now(),workboard_schema_version integer,folder_url text);
    INSERT INTO tab_configs(sheet_id,tab_name) VALUES('s','t');
-   CREATE TABLE index_master_archive(sheet_id text,tab_name text);
-   CREATE TABLE index_master(sheet_id text,tab_name text,submitted_count int DEFAULT 0,row_count int DEFAULT 9);
-   ALTER TABLE campaign_participants ADD COLUMN round text; ALTER TABLE campaign_participants ADD COLUMN review_participation_id uuid;
-   CREATE TABLE reviewer_participations(id uuid,campaign_participant_id uuid,lifecycle_status text,review_obligation_status text,review_evidence jsonb,record_version int,updated_at timestamptz,index_snapshot jsonb);
-   ALTER TABLE review_index ADD COLUMN round text; ALTER TABLE review_index ADD COLUMN built_at timestamptz;`);
+   CREATE TABLE IF NOT EXISTS index_master_archive(sheet_id text,tab_name text);
+   CREATE TABLE IF NOT EXISTS index_master(sheet_id text,tab_name text,submitted_count int DEFAULT 0,row_count int DEFAULT 9);
+   ALTER TABLE campaign_participants ADD COLUMN IF NOT EXISTS round text; ALTER TABLE campaign_participants ADD COLUMN IF NOT EXISTS review_participation_id uuid;
+   CREATE TABLE IF NOT EXISTS reviewer_participations(id uuid,campaign_participant_id uuid,lifecycle_status text,review_obligation_status text,review_evidence jsonb,record_version int,updated_at timestamptz,index_snapshot jsonb);
+   ALTER TABLE review_index ADD COLUMN IF NOT EXISTS round text; ALTER TABLE review_index ADD COLUMN IF NOT EXISTS built_at timestamptz;`);
   h.usePool(db);
   try {
     const staff = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET);
