@@ -1204,7 +1204,8 @@ async function _linkedTabFromWorkOrder(workOrderId) {
  *  "양쪽 설정(start<end)" 또는 "양쪽 미설정(자율주문=종일 오픈)"만 허용 — 한쪽만/역전은 차단. */
 function _participationActivationErrors(c) {
   const errs = [];
-  if (campaignHasDualChannels(c)) errs.push(DUAL_CHANNEL_NOT_READY.error);
+  // 결정 341 출시: 준비 상태(recruitment)가 닫혀 있을 때만 동시진행 활성화를 막는다(코드 상수 · 되돌리기 = 출시 커밋 revert).
+  if (campaignHasDualChannels(c) && !require('../services/dualChannelRuntime.service').isDualChannelReady('recruitment')) errs.push(DUAL_CHANNEL_NOT_READY.error);
   // 시트 없이도 모집공고를 저장·발행할 수 있다. 다만 연결 정보를 일부만 입력하면
   // 이후 어느 탭에 동기화해야 할지 모호해지므로, 입력을 시작한 경우에는 세 값 모두를 요구한다.
   const hasAnyLink = !!(c.linked_sheet_id || c.linked_tab_name || c.linked_tab_gid);
@@ -4587,7 +4588,7 @@ router.put('/admin/:id/status', authMiddleware, adminOrMasterMiddleware, async (
     if (status === 'active') {
       const { rows: cur } = await pool.query('SELECT * FROM recruit_campaigns WHERE id = $1', [id]);
       if (!cur.length) return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
-      if (campaignHasDualChannels(cur[0])) return res.status(409).json({ ok: false, ...DUAL_CHANNEL_NOT_READY });
+      if (campaignHasDualChannels(cur[0]) && !require('../services/dualChannelRuntime.service').isDualChannelReady('recruitment')) return res.status(409).json({ ok: false, ...DUAL_CHANNEL_NOT_READY });
       if (cur[0].participation_mode) {
         const errs = _participationActivationErrors(cur[0]);
         if (errs.length) return res.status(400).json({ ok: false, error: '참여형 활성화 불가: ' + errs.join(', ') });

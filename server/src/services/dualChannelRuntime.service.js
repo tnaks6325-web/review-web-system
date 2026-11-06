@@ -1,7 +1,10 @@
 'use strict';
-// No environment, request-body or DB fallback may enable this feature.
+// No environment, request-body or DB fallback may enable or disable this feature.
+// 출시 상태는 코드 상수다(결정 341 「출시(켜기)」 2026-11-06) — 끄려면 이 커밋을 되돌린다.
+// 시험만 __setReadinessForTest 로 닫거나 열 수 있다(NODE_ENV=test 전용).
 const KEYS = Object.freeze(['settings', 'roundtrip', 'recruitment', 'purchase', 'review', 'payment', 'operationalEnabled']);
-let readiness = Object.freeze(Object.fromEntries([['version', 1], ...KEYS.map(k => [k, false])]));
+const RELEASED = Object.freeze(Object.fromEntries([['version', 1], ...KEYS.map(k => [k, true])]));
+let readiness = RELEASED;
 function getDualChannelReadiness() { return { ...readiness }; }
 function isDualChannelReady(operation) {
   if (!KEYS.includes(operation) || operation === 'operationalEnabled') throw new TypeError('Unknown dual channel operation');

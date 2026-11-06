@@ -73,7 +73,8 @@ test('review upload HTTP rejects missing, staff and forged reviewer sessions bef
   assert.equal(calls.length, 0);
 });
 
-test('readiness stays closed by default: body, header and environment flags cannot open review upload (409, no DB)', async () => {
+test('closed readiness: body, header and environment flags cannot open review upload (409, no DB)', async () => {
+  require('../src/services/dualChannelRuntime.service').__setReadinessForTest({}); // 결정 341 출시 뒤 기본은 열림 — 명시적으로 닫고 검사
   const pool = require('../src/db/pool');
   let dbTouches = 0;
   const originalQuery = pool.query, originalConnect = pool.connect;

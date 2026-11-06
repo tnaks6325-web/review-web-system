@@ -34,6 +34,8 @@ const product = () => ({
     coupang: {url: 'https://coupang.example/b', pay: 10000, inflow_type: 'guide', guide: {text: '검색 안내', images: ['https://images.example/1.png']}}
   }
 });
+// 결정 341 출시: 동시진행 저장은 열렸지만, 불완전·불량 입력은 네트워크 전에 이유와 함께 막힌다.
+const DUAL_SAVE_BLOCKED = /^동시진행 공고를 저장할 수 없습니다 — \S/;
 function restore(t, p = product()) { t.sandbox.input = p; return t.run('rfRestoreDualChannelProduct(input)'); }
 function read(t) { return JSON.parse(t.run('JSON.stringify(rfReadDualChannelProduct())')); }
 
@@ -54,7 +56,7 @@ test('one product restores both purchase channels, one human quota, derived sum 
   assert.equal(read(t).channels.coupang.guide.text, '검색 안내');
 });
 
-test('actual save blocks even incomplete dual selection before validation or any network request', async () => {
+test('actual save blocks incomplete dual selection with a reason before validation or any network request', async () => {
   const t = editor(); t.load('saveRecruitPostImpl');
   const blocked = [];
   t.sandbox._rfSaveBlocked = message => blocked.push(message);
@@ -62,12 +64,12 @@ test('actual save blocks even incomplete dual selection before validation or any
   t.sandbox.syncRecruitAutomaticBadges = () => { throw new Error('ordinary save validation must not run'); };
   t.dom.byId.rf_channel.value = '네이버+쿠팡';
   await t.run('saveRecruitPostImpl()');
-  assert.match(blocked.pop(), /준비 중/);
+  assert.match(blocked.pop(), DUAL_SAVE_BLOCKED);
   restore(t);
   t.dom.byId.rf_channel.value = '쿠팡'; // DOM presence must independently protect against mode drift.
   t.dom.byId.rf_opt_rows.querySelector('.rf-dual-naver-pay').value = '';
   await t.run('saveRecruitPostImpl()');
-  assert.match(blocked.pop(), /준비 중/);
+  assert.match(blocked.pop(), DUAL_SAVE_BLOCKED);
 });
 
 test('channel button enters dual editor without recreating the parent or losing legacy guides', () => {
@@ -193,7 +195,7 @@ test('unknown or malformed restore is preserved, visibly rejected, and cannot be
   assert.throws(() => read(t), /원본|확인|모르는/);
   t.load('saveRecruitPostImpl'); t.sandbox._rfSaveBlocked = message => errors.push(message);
   await t.run('saveRecruitPostImpl()');
-  assert.match(errors.pop(), /준비 중/);
+  assert.match(errors.pop(), DUAL_SAVE_BLOCKED);
 });
 
 test('rejected restore candidates preserve the current editable draft and local JSON round trip', async () => {
@@ -232,7 +234,7 @@ test('rejected restore candidates preserve the current editable draft and local 
     t.sandbox._rfSaveBlocked = message => blocked.push(message);
     t.sandbox.fetch = () => { throw new Error('NETWORK MUST NOT RUN'); };
     await t.run('saveRecruitPostImpl()');
-    assert.match(blocked.pop(), /준비 중/);
+    assert.match(blocked.pop(), DUAL_SAVE_BLOCKED);
   }
 });
 
@@ -263,7 +265,7 @@ test('dual entry points reject conflicting top-level quotas without replacing th
       fresh.sandbox._rfSaveBlocked = message => blocked.push(message);
       fresh.sandbox.fetch = () => { throw new Error('NETWORK MUST NOT RUN'); };
       await fresh.run('saveRecruitPostImpl()');
-      assert.match(blocked.pop(), /준비 중/);
+      assert.match(blocked.pop(), DUAL_SAVE_BLOCKED);
     }
     for (const top of [{}, {recruit_total:'7',daily_limit:'0'}]) {
       const t = editor(); const p = product();
@@ -323,7 +325,7 @@ test('null and unsupported dual values cannot silently fall through to normal sa
     assert.deepEqual(t.sandbox._rfDualRejectedSource, p);
     assert.throws(() => read(t));
     const messages = []; t.load('saveRecruitPostImpl'); t.sandbox._rfSaveBlocked = m => messages.push(m);
-    await t.run('saveRecruitPostImpl()'); assert.match(messages.pop(), /준비 중/);
+    await t.run('saveRecruitPostImpl()'); assert.match(messages.pop(), DUAL_SAVE_BLOCKED);
   }
 });
 
@@ -386,3 +388,42 @@ for (const kind of ['blog', 'qna', 'unknown']) {
     assert.equal(input.value, kind);
   });
 }
+
+test('출시: 완성된 두 구매처 입력은 저장용 상품으로 그대로 읽히고 공고 본문에 실린다', () => {
+  const t = editor(); restore(t);
+  t.dom.byId.rf_channel.value = '네이버+쿠팡';
+  const saved = JSON.parse(t.run('JSON.stringify(rfDualSaveProduct())'));
+  assert.deepEqual(saved, product());
+  t.sandbox.payload = { channel: '네이버+쿠팡', channel_custom: 'x', recruit_total: 7, daily_limit: 0, options: [],
+    work_detail: { productLines: '동일상품', reviewGuide: '' } };
+  t.sandbox.saved = saved;
+  t.run('rfDualApplyToPayload(payload, saved)');
+  const body = JSON.parse(JSON.stringify(t.sandbox.payload)); // vm 영역 객체를 같은 영역 값으로
+  assert.equal(body.channel, '네이버+쿠팡');
+  assert.equal(body.channel_custom, '');
+  assert.deepEqual(body.options, []);
+  assert.equal(body.work_detail.productLines, '동일상품');
+  // 서버 normalizeSettings: 보낸 일건수와 상품 일건수가 같아야 한다(0 = 미지정과 같은 뜻 · 결정 338).
+  assert.deepEqual(body.work_detail.dualChannelProduct, { ...product(), base: { ...product().base, daily: 0 } });
+  assert.equal(body.work_detail.dualChannelProduct.base.count, body.recruit_total);
+});
+
+test('출시: 불완전·불일치 입력은 저장용 상품을 만들지 않고 이유를 낸다', () => {
+  const t = editor();
+  t.dom.byId.rf_channel.value = '네이버+쿠팡';
+  assert.throws(() => t.run('rfDualSaveProduct()'), /구매처/);
+  restore(t);
+  const pay = t.dom.byId.rf_opt_rows.querySelector('.rf-dual-naver-pay'); pay.value = ''; pay.fire('input');
+  assert.throws(() => t.run('rfDualSaveProduct()'), /네이버 결제금액/);
+  pay.value = '9000'; pay.fire('input');
+  t.dom.byId.rf_channel.value = '쿠팡';
+  assert.throws(() => t.run('rfDualSaveProduct()'), /네이버\+쿠팡/);
+  t.dom.byId.rf_channel.value = '네이버+쿠팡';
+  const p = product(); p.base.count = 99;
+  t.sandbox.input = { recruit_total: 7, dualChannelProduct: p };
+  t.run('applyProductRowsFromOrder(input)');
+  assert.throws(() => t.run('rfDualSaveProduct()'), /인원|확인/);
+  t.sandbox.payload = { recruit_total: 8, daily_limit: 0, work_detail: {} };
+  t.sandbox.saved = product();
+  assert.throws(() => t.run('rfDualApplyToPayload(payload, saved)'), /모집인원/);
+});
