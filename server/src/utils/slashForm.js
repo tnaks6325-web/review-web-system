@@ -448,7 +448,7 @@ function _splitCandidates(t, kind) {
   const seen = new Set();
   return out.filter(([a, b]) => { const k = a + '\u0000' + b; if (seen.has(k)) return false; seen.add(k); return _shapeKind(a) !== 'unknown' && _shapeKind(b) !== 'unknown'; });
 }
-/** 생김새 자리 찾기 + 슬래시 빠진 곳 나누기(최대 2곳). 나누는 방법이 둘 이상의 다른 결과로 갈리면 null(애매 = 넣지 않음). */
+/** 생김새 자리 찾기 + 슬래시 빠진 곳 나누기(최대 3곳). 나누는 방법이 둘 이상의 다른 결과로 갈리면 null(애매 = 넣지 않음). */
 function placeByShapeWithSplits(parts) {
   const direct = placeByShape(parts);
   if (direct) return direct;
@@ -464,7 +464,7 @@ function placeByShapeWithSplits(parts) {
     return res;
   };
   let level = [{ parts, cuts: [] }];
-  for (let depth = 0; depth < 2; depth++) {
+  for (let depth = 0; depth < 3; depth++) {
     level = expand(level);
     if (level.length > 4000) return null;
     const ok = new Map();

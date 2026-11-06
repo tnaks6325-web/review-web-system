@@ -56,3 +56,11 @@ test('still ambiguous → error, nothing silently placed', () => {
   const r = parseSlashLine(`김수만/${ID}/010-8592-6325/${A}/하나은행/338-910-330-03807/110-222-333444/15800`);
   assert.equal(r.ok, false);
 });
+
+test('three missing slashes + no price (user-style line) → all 8 filled, price missing', () => {
+  const r = parseSlashLine(`김수만/${ID}010-8592-6325/${A}하나은행/338-910-330-03807김수만`);
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.missing, ['결제금액']);
+  for (const k of Object.keys(EXP)) if (k !== 'price') assert.equal(r.fields[k], EXP[k], k);
+  assert.match(shown(r), /슬래시\(\/\)가 빠진 곳을 나눴습니다/);
+});
