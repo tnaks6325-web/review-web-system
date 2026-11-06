@@ -63,7 +63,8 @@ const OPT_ROWS = [
   svc.submitExternalOrder = async (a) => { calls.push(a); return { ok: true, warnings: [] }; };
   svc.tabOptionChoices = async () => choices;
   const realQuery = poolMod.query;
-  poolMod.query = async () => ({ rows: [] });
+  // 결정 344: 수동제출 동시진행 판정(discoverDualScope)이 공고 행을 읽는다 — 이 공고는 있고 동시진행이 아니다(fixture 모양만 · 검사 불변).
+  poolMod.query = async (sql, params) => (/AS campaign FROM recruit_campaigns c WHERE c\.id/.test(String(sql)) ? { rows: [{ campaign: { id: String((params || [])[0]) } }] } : { rows: [] });
   delete require.cache[require.resolve('../src/routes/manualOrder.routes')];
   const router = require('../src/routes/manualOrder.routes');
   const layer = router.stack.find(l => l.route && l.route.path === '/submit');
@@ -145,6 +146,7 @@ const OPT_ROWS = [
     const seen = [];
     poolMod.query = async (sql, params) => {
       const q = String(sql); seen.push({ q, params });
+      if (/AS campaign FROM recruit_campaigns c WHERE c\.id/.test(q)) return { rows: [{ campaign: { id: String(params[0]) } }] }; // 결정 344 판정용 fixture(비동시진행 공고)
       if (/SELECT unit_kind, product_name FROM campaign_options/.test(q)) return { rows: [{ unit_kind: 'product', product_name: NU[0] }] };
       return { rows: [] };
     };
