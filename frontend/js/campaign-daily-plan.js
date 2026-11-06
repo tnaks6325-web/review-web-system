@@ -891,6 +891,132 @@
     var placed = (p.days || []).reduce(function (a, x) { return a + (Number(x.quota) || 0); }, 0);
     return Math.max(0, Number(p.remaining) - placed);
   }
+  /* ── 결정 343: 상품 일건수 바꾸기 ─────────────────────────── */
+  /** 상품 일건수 합(하루 몫 상한) — 서버가 상한이 걸린다고 판정한 공고만(null = 상한 없음·모름 → 경고 없음) */
+  function odCapNow() {
+    var od = S && S.data && S.data.optionDaily;
+    return (od && Number(od.cap) > 0 && Array.isArray(od.options) && od.options.length) ? Number(od.cap) : null;
+  }
+  /** 그날 사람이 정한 값 — 저장 전 바꾼 값 · 아니면 저장된 계획 · 아니면 규칙 값.
+   *  ★ 표의 숫자(planFor)는 서버가 실제로 여는 값이라 저장된 40도 20으로 보인다 — 그래서 "정한 값"은 따로 본다(2026-11-06 실사례). */
+  function odWant(d) {
+    if (S.pj && S.pj.pend[d] != null) return S.pj.pend[d];
+    if (S.pj && S.pj.rm[d]) return planFor(d);
+    return S.base[d] != null ? S.base[d] : planFor(d);
+  }
+  function odWarnHtml(cap, over, killOff) {
+    if (cap == null || !over.length) return '';
+    return '<div class="cdp-note warn cdp-od"><span>⚠ <b>' + _esc(over.slice(0, 6).join('·')) + (over.length > 6 ? ' 외 ' + (over.length - 6) + '일' : '')
+      + '</b>은 상품 일건수(하루 <b>' + cap + '명</b>)를 넘어 실제로는 <b>' + cap + '명만</b> 열립니다.</span>'
+      + (killOff ? '' : '<button type="button" class="cdp-btn sm" id="cdpOdOpen" onclick="CampaignDailyPlan._odOpen()">상품 일건수 바꾸기</button>')
+      + '</div>';
+  }
+  function _odEl(id) { return document.getElementById(id); }
+  function _odOpen() {
+    if (!S || !S.data || odCapNow() == null) return;
+    var od = S.data.optionDaily, mx = 0;
+    rowDates().forEach(function (d) { mx = Math.max(mx, odWant(d)); });
+    var one = od.options.length === 1;
+    // 상품이 하나면 날짜별로 정한 가장 큰 값을 미리 넣는다 · 둘 이상이면 지금 값(직원이 직접 나눈다 — 사용자 확정 A)
+    S.od = { campId: S.campId, want: mx, rows: od.options.map(function (o) {
+      return { optKey: o.optKey, name: o.name, cur: o.dailyLimit, next: one ? Math.max(o.dailyLimit, mx) : o.dailyLimit };
+    }) };
+    _odEl('cdpOdRows').innerHTML = S.od.rows.map(function (o, i) {
+      return '<div class="op"><span class="nm" title="' + _esc(o.name) + '">' + _esc(o.name) + '</span><span class="cur">지금 ' + o.cur + '</span><span>→</span>'
+        + '<input type="text" inputmode="numeric" data-i="' + i + '" value="' + o.next + '" aria-label="' + _esc(o.name) + ' 새 일건수"></div>';
+    }).join('');
+    Array.prototype.forEach.call(_odEl('cdpOdRows').querySelectorAll('input'), function (inp) {
+      // 합계·안내 글자만 고친다(입력 칸은 다시 그리지 않는다 — IME 규율 7w 그대로 'input' 이벤트는 쓰지 않는다)
+      var upd = function () {
+        var n = parseInt(String(inp.value).replace(/[^0-9]/g, ''), 10);
+        S.od.rows[+inp.getAttribute('data-i')].next = isNaN(n) ? 0 : n;
+        _odSync();
+      };
+      inp.addEventListener('keyup', upd);
+      inp.addEventListener('change', upd);
+    });
+    _odEl('cdpOdStep1').hidden = false; _odEl('cdpOdStep2').hidden = true;
+    _odEl('cdpOdApply').disabled = false; _odEl('cdpOdApply').textContent = '바꾸기';
+    _odSync();
+    _odEl('cdpOd').style.display = 'flex';
+    setTimeout(function () { var f = _odEl('cdpOdRows').querySelector('input'); if (f) f.select(); }, 0);
+  }
+  function _odTotal() { return S.od.rows.reduce(function (a, o) { return a + o.next; }, 0); }
+  function _odSync() {
+    var t = _odTotal();
+    _odEl('cdpOdSum').textContent = t + '명';
+    var zero = S.od.rows.some(function (o) { return !(o.next >= 1); });
+    var big = S.od.rows.some(function (o) { return o.next > 9999; });
+    var same = S.od.rows.every(function (o) { return o.next === o.cur; });
+    _odEl('cdpOdErr').textContent = zero ? '일건수는 1명 이상이어야 합니다.' : big ? '일건수가 너무 큽니다.'
+      : (S.od.want > t ? '날짜별로 정한 가장 큰 값(' + S.od.want + '명)보다 작아 그 날은 ' + t + '명만 열립니다.' : '');
+    _odEl('cdpOdNext').disabled = zero || big || same;
+  }
+  function _odNext() {
+    var t = _odTotal(), j = S.data;
+    _odEl('cdpOdList').innerHTML = S.od.rows.filter(function (o) { return o.next !== o.cur; }).map(function (o) {
+      return '<li>상품 일건수 「' + _esc(o.name) + '」 ' + o.cur + ' → <b>' + o.next + '</b>명</li>';
+    }).join('')
+      + '<li>공고 기본 일건수 ' + (j.defaultDaily || 0) + ' → <b>' + t + '</b>명</li>'
+      + (j.optionDaily.linked ? '<li>인트라넷 리뷰오더 일 진행 건수 ' + (j.defaultDaily || 0) + ' → <b>' + t + '</b>명</li>' : '');
+    _odEl('cdpOdNewDaily').textContent = t;
+    _odEl('cdpOdStep1').hidden = true; _odEl('cdpOdStep2').hidden = false;
+  }
+  function _odBack() { _odEl('cdpOdStep1').hidden = false; _odEl('cdpOdStep2').hidden = true; }
+  function _odCancel() { var o = _odEl('cdpOd'); if (o) o.style.display = 'none'; if (S) S.od = null; }
+  /** 저장 전 조절(바꾼 날·되돌린 날·처음 값·재설정 표시)을 들고 있다가 새 자료 위에 다시 얹는다 — 작업 연속(사용자 확정 2026-11-06) */
+  function _odKeep() { return S && S.pj ? { pend: S.pj.pend, rm: S.pj.rm, orig: S.pj.orig, reset: S.pj.reset } : null; }
+  function _odRestore(keep) {
+    if (!S || !S.pj || !keep) return;
+    if (!Object.keys(keep.pend).length && !Object.keys(keep.rm).length && keep.reset == null) return;
+    S.pj.pend = keep.pend; S.pj.rm = keep.rm; S.pj.orig = keep.orig || {}; S.pj.reset = keep.reset;
+    pjPreview();
+  }
+  /** 서버 자료를 다시 받아 조절 창을 다시 그린다(저장 전 조절은 유지) */
+  async function _odReload(campId) {
+    var keep = _odKeep();
+    var j = await _req('GET', EP + encodeURIComponent(campId) + '/daily-plan');
+    if (!S || S.campId !== campId) return false;
+    applyOverview(j);
+    _odRestore(keep);
+    return true;
+  }
+  async function _odApply() {
+    if (!S || !S.od) return;
+    var b = _odEl('cdpOdApply'), od = S.od, campId = S.campId, r;
+    b.disabled = true; b.textContent = '바꾸는 중…';
+    try {
+      r = await _req('POST', EP + encodeURIComponent(campId) + '/option-daily', {
+        options: od.rows.map(function (o) { return { optKey: o.optKey, dailyLimit: o.next, from: o.cur }; }),
+      });
+    } catch (e) {
+      b.disabled = false; b.textContent = '바꾸기';
+      _odEl('cdpOdStep1').hidden = false; _odEl('cdpOdStep2').hidden = true;
+      _odEl('cdpOdErr').textContent = String(e.message || e);
+      // ★ 그 사이 누가 바꿨으면(검토 2026-11-06) 새 값을 다시 불러와 팝업을 새 값으로 다시 연다 — 옛 값으로 계속 409 나는 막다른 길 금지
+      if (e.code === 'option_daily_stale') {
+        var msg = String(e.message || e);
+        try {
+          if (await _odReload(campId) && S && odCapNow() != null) { _odOpen(); _odEl('cdpOdErr').textContent = msg; }
+          else { _odCancel(); toast(msg); }
+        } catch (e2) { _odCancel(); toast(msg + ' (다시 불러오지 못했습니다: ' + (e2.message || e2) + ')'); }
+      }
+      return;
+    }
+    // 여기부터는 이미 저장됐다 — 실패를 숨은 팝업에 쓰지 않고 토스트로 알린다
+    _odCancel();
+    if (!S || S.campId !== campId) return;
+    var t = (r.applied && r.applied.campaignDaily) || od.rows.reduce(function (a, o) { return a + o.next; }, 0);
+    toast('상품 일건수를 하루 ' + t + '명으로 바꿨습니다' + (r.applied && r.applied.intranet ? ' — 공고와 인트라넷 리뷰오더에도 반영됐습니다' : ' — 공고에도 반영됐습니다') + '. 이어서 조절하세요.');
+    try {
+      if (r.reload || !r.campaignId) { await _odReload(campId); return; }
+      var keep = _odKeep();
+      applyOverview(r);
+      _odRestore(keep);
+    } catch (e3) {
+      toast('바꾼 값은 저장됐지만 화면을 다시 그리지 못했습니다 — 창을 닫고 다시 열어 주세요 (' + (e3.message || e3) + ')');
+    }
+  }
   function renderProj() {
     var j = S.data, p = S.pj.proj;
     var bd = document.getElementById('cdpBody');
@@ -902,6 +1028,8 @@
     // 인트라넷 오더 휴무일(접수 때 0명으로 저장 · 작성자 `오더휴무:`)은 "조절"이 아니라 휴무로 보인다
     var orderHol = {};
     (j.plans || []).forEach(function (p) { if (/^오더휴무:/.test(String(p.updatedBy || ''))) orderHol[String(p.date).slice(0, 10)] = 1; });
+    /* ★ 결정 343 — 상품 일건수 합(cap)보다 크게 정한 날은 실제로 cap 명만 열린다(결정 210). 조용히 두지 않고 그 줄과 위쪽에 알린다. */
+    var odCap = odCapNow(), odOver = [];
     var rows = dates.map(function (d, i) {
       var v = planFor(d), isToday = d === j.today;
       var pend = S.pj.pend[d] != null, rm = !!S.pj.rm[d], saved = S.base[d] != null && !rm;
@@ -919,7 +1047,9 @@
         + (hol ? '<span class="cdp-tag hol">' + _esc(hol) + '</span>' : '') + '</span>'
         + '<span class="cdp-state" title="' + _esc(tag) + '">' + stateText + '</span>'
         + '<span class="cdp-num"><input type="text" inputmode="numeric" class="cdp-in" data-i="' + i + '" value="' + v + '"'
-        + (killOff ? ' disabled' : '') + '><small>' + (conf > 0 ? '<i>확정 ' + conf + '</i> ' : '') + _esc(tag) + reset + '</small></span>'
+        + (killOff ? ' disabled' : '') + '><small>' + (conf > 0 ? '<i>확정 ' + conf + '</i> ' : '') + _esc(tag) + reset + '</small>'
+        + ((odCap != null && odWant(d) > odCap) ? (odOver.push(fmtMD(d).replace(/\s*\(.*$/, '')), '<span class="odw">' + odWant(d) + '명 중 ' + odCap + '명만</span>') : '')
+        + '</span>'
         + '<div class="cdp-ctl">'
         + '<button type="button" class="cdp-st" data-i="' + i + '" data-d="-1"' + (killOff ? ' disabled' : '') + '>−</button>'
         + '<div class="cdp-g" data-i="' + i + '" aria-label="' + _esc(fmtMD(d)) + ' 모집인원 조절">'
@@ -983,7 +1113,7 @@
       + '<section class="cdp-main"><div class="cdp-fix">'
       + (killOff ? '<div class="cdp-note err">킬스위치(CAMPAIGN_DAILY_PLAN=0)로 날짜별 계획이 꺼져 있습니다 — 조절을 잠갔습니다.</div>' : '')
       + (j.status !== 'active' ? '<div class="cdp-publish">현재 <b>' + (j.status === 'closed' ? '마감' : '임시저장') + '</b> 상태입니다. 모집을 다시 열려면 공고 카드에서 게시를 켜세요.</div>' : '')
-      + quotaBlk + sumBlk
+      + quotaBlk + sumBlk + odWarnHtml(odCap, odOver, killOff)
       + '<div class="cdp-sub"><span>날짜별 모집 인원 — 규칙으로 계산한 값입니다. 바꾼 날만 저장됩니다</span>'
       + '<span>기본 일건수 <b>' + (j.defaultDaily || 0) + '명</b> · ' + (j.skipWeekends === true ? '주말·공휴일 제외' : '주말 포함') + ' · 확정 <b>' + done + '명</b></span></div>'
       + '</div><div class="cdp-sc">'
@@ -1182,7 +1312,23 @@
     + '#cdpChoice .op b{display:block;font-size:.76rem;margin-bottom:2px}'
     + '#cdpChoice .op small{color:var(--t3,#64748b);font-size:.68rem;line-height:1.45;display:block}'
     + '#cdpChoice .op:disabled{opacity:.45;cursor:default}'
-    + '#cdpChoice .cx{display:block;margin:5px auto 0;border:0;background:none;color:var(--t3,#94a3b8);font-size:.7rem;cursor:pointer;text-decoration:underline}';
+    + '#cdpChoice .cx{display:block;margin:5px auto 0;border:0;background:none;color:var(--t3,#94a3b8);font-size:.7rem;cursor:pointer;text-decoration:underline}'
+    /* 결정 343 — 상품 일건수 경고 줄 · 바꾸기 팝업(기존 cdp-note warn · ch-box 모양을 따른다) */
+    + '#cdpModal .cdp-note.cdp-od{display:flex;gap:8px;align-items:center;flex-wrap:wrap}#cdpModal .cdp-note.cdp-od>span{flex:1 1 260px}'
+    + '#cdpModal .cdp-num .odw{display:block;margin-top:2px;color:#b45309;font-size:.62rem;font-weight:800;white-space:nowrap;line-height:1.2}'
+    + '#cdpOd{position:fixed;inset:0;z-index:10060;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.45);padding:16px}'
+    + '#cdpOd .ch-box{width:440px;max-width:100%;box-sizing:border-box;background:var(--card,#fff);color:var(--t1,#1f2937);border-radius:14px;padding:18px;box-shadow:0 12px 40px rgba(15,23,42,.3)}'
+    + '#cdpOd h4{font-size:.9rem;margin:0 0 4px}#cdpOd .cd{font-size:.74rem;color:var(--t3,#64748b);margin-bottom:12px}'
+    + '#cdpOd .op{display:grid;grid-template-columns:minmax(0,1fr) 52px 16px 72px;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid #edf1f5;font-size:.8rem}'
+    + '#cdpOd .op .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#cdpOd .op .cur{text-align:right;color:#64748b;font-variant-numeric:tabular-nums}'
+    + '#cdpOd .op input{width:100%;box-sizing:border-box;padding:5px 7px;border:1px solid #cbd5e1;border-radius:7px;font:inherit;text-align:right;font-variant-numeric:tabular-nums}'
+    + '#cdpOd .sum{display:flex;justify-content:space-between;padding:9px 0 2px;font-size:.8rem}#cdpOd .sum b{font-variant-numeric:tabular-nums}'
+    + '#cdpOd .chg{margin:0;padding:10px 12px;border:1px solid #fde68a;background:#fffbeb;border-radius:9px;font-size:.76rem;color:#78350f}#cdpOd .chg ul{margin:4px 0 0;padding-left:18px}'
+    + '#cdpOd .err{color:#b42318;font-size:.74rem;margin-top:6px;min-height:1em}'
+    + '#cdpOd .ft{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}'
+    + '#cdpOd .cdp-btn{border:1px solid var(--border,#d1d5db);background:var(--card,#fff);color:var(--t1,#374151);border-radius:8px;padding:7px 14px;font-size:.76rem;font-weight:700;cursor:pointer}'
+    + '#cdpOd .cdp-btn.pri{background:#2563eb;border-color:#2563eb;color:#fff}#cdpOd .cdp-btn:disabled{opacity:.45;cursor:default}'
+    + '@media (max-width:560px){#cdpOd{align-items:flex-end;padding:0}#cdpOd .ch-box{border-radius:14px 14px 0 0;width:100%}}';
 
   function ensureMount() {
     if (document.getElementById('cdpModal')) return;
@@ -1211,6 +1357,19 @@
       + '<button type="button" class="op" id="cdpChSpread" onclick="CampaignDailyPlan._chSpread()"><b>㉯ 남은 날 분산 (종료일 유지)</b><small id="cdpChSpreadDesc"></small></button>'
       + '<button type="button" class="cx" onclick="CampaignDailyPlan._chCancel()">취소 (원래 인원으로 되돌리기)</button></div>';
     document.body.appendChild(ch);
+    var od = document.createElement('div');   // 결정 343 — 상품 일건수 바꾸기
+    od.id = 'cdpOd';
+    od.setAttribute('role', 'dialog'); od.setAttribute('aria-modal', 'true');
+    od.innerHTML = '<div class="ch-box"><div id="cdpOdStep1"><h4>상품 일건수 바꾸기</h4>'
+      + '<div class="cd">하루에 받을 수 있는 인원은 상품 일건수의 합까지입니다.</div>'
+      + '<div id="cdpOdRows"></div><div class="sum"><span>하루 최대</span><b id="cdpOdSum"></b></div><div class="err" id="cdpOdErr"></div>'
+      + '<div class="ft"><button type="button" class="cdp-btn" onclick="CampaignDailyPlan._odCancel()">취소</button>'
+      + '<button type="button" class="cdp-btn pri" id="cdpOdNext" onclick="CampaignDailyPlan._odNext()">다음</button></div></div>'
+      + '<div id="cdpOdStep2" hidden><h4>이렇게 바꿉니다</h4><div class="chg"><b>함께 바뀌는 곳</b><ul id="cdpOdList"></ul></div>'
+      + '<div class="cd" style="margin:10px 0 0">날짜를 따로 정하지 않은 날도 하루 <b id="cdpOdNewDaily"></b>명씩 모집됩니다. 총 인원은 그대로입니다.</div>'
+      + '<div class="ft"><button type="button" class="cdp-btn" onclick="CampaignDailyPlan._odBack()">돌아가기</button>'
+      + '<button type="button" class="cdp-btn pri" id="cdpOdApply" onclick="CampaignDailyPlan._odApply()">바꾸기</button></div></div></div>';
+    document.body.appendChild(od);
   }
 
   /* ── 열기/닫기 ───────────────────────────────────────────── */
@@ -1279,6 +1438,8 @@
     if (m) m.style.display = 'none';
     var c = document.getElementById('cdpChoice');
     if (c) c.style.display = 'none';
+    var odv = document.getElementById('cdpOd');
+    if (odv) odv.style.display = 'none';
     S = null;
   }
 
@@ -1907,6 +2068,10 @@
       var parts = (d.set || []).map(function (x) { return fmtMD(x.date) + ' ' + x.count + '명'; })
         .concat((d.remove || []).map(function (x) { return fmtMD(x) + ' 기본으로'; }));
       return '계획 저장: ' + parts.join(', ') + (d.note ? ' · ' + d.note : '');
+    }
+    if (ev.action === 'option_daily') {   // 결정 343 — [상품 일건수 바꾸기]
+      return '상품 일건수: ' + (d.options || []).map(function (x) { return x.from + '→' + x.to + '명'; }).join(', ')
+        + (d.campaignDaily != null ? ' · 공고 기본 ' + d.campaignDaily + '명' : '') + (d.linked ? ' · 리뷰오더도 함께' : '');
     }
     return ev.action;
   }
@@ -2548,6 +2713,7 @@
     _roundForm: _roundForm, _roundAdd: _roundAdd, _roundRemove: _roundRemove,
     _heldApply: _heldApply, _pjHeld: _pjHeld,
     _pinClosed: _pinClosed,
+    _odOpen: _odOpen, _odNext: _odNext, _odBack: _odBack, _odCancel: _odCancel, _odApply: _odApply,
     quickApplyHeld: quickApplyHeld, _quickDo: _quickDo, _quickDetail: _quickDetail, _quickClose: _quickClose,
   };
 })();
