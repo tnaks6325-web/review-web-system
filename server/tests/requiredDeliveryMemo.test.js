@@ -171,7 +171,10 @@ async function stubs() {
 
   const wd = read('frontend/workdesk.html');
   const start = wd.indexOf('function _rvRender2(pane){');
-  const fnSrc = wd.slice(start, wd.indexOf('\n}\n', start) + 3);
+  const panelStart = wd.indexOf('function _dualPurchasePanel(r){');
+  assert.ok(panelStart >= 0 && panelStart < start, 'real dual preview helper precedes renderer');
+  const panelSrc = wd.slice(panelStart, wd.indexOf('\n}\n', panelStart) + 3);
+  const fnSrc = panelSrc + wd.slice(start, wd.indexOf('\n}\n', start) + 3);
   const outs = [];
   const c = {
     STATE: { rvImgs: {}, rvSel: 'r1', wd: { roster: [] } },

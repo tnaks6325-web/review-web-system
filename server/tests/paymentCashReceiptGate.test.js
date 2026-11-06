@@ -20,6 +20,14 @@ const rows = [
 
 const db = {
   async query(sql, params) {
+    if (/WITH wanted AS \(SELECT \* FROM jsonb_to_recordset/.test(sql)) {
+      assert.match(sql, /to_jsonb\(os\)->>'purchase_bundle_version'='1'/,
+        '새 구매 묶음 조회는 명시된 버전만 분류해야 한다');
+      assert.deepStrictEqual(JSON.parse(params[0]), rows.map(row => ({
+        sheetId: row.sheetId, tabName: row.tabName, rowIndex: Number(row.rowIndex ?? row.rowNum),
+      })), '일반 구매도 같은 좌표로 새 구매 묶음 여부를 확인해야 한다');
+      return { rows: [] }; // 이 자료에는 새 구매 묶음이 없으며 기존 영수증 규칙을 계속 적용한다.
+    }
     if (/tc\.capture_slots AS "captureSlots"/.test(sql)) {
       assert.strictEqual(params[0].length, 5, '탭 쌍은 중복 제거해야 한다');
       return { rows: [
@@ -91,10 +99,10 @@ const db = {
     '옛 입금처리 옆길(/api/payment — 회차를 건너뛰는 수동 이체완료)은 결정 186 57번에서 제거 — 되살리지 않는다');
   const trackBRoute = fs.readFileSync(path.join(__dirname, '../src/routes/trackB.routes.js'), 'utf8');
   const searchService = fs.readFileSync(path.join(__dirname, '../src/services/search.service.js'), 'utf8');
-  assert.match(paymentService, /filterReceiptEligiblePaymentRows\(pool, pageRows\)/,
+  assert.match(paymentService, /filterReceiptEligiblePaymentRows\(_db\(\), pageRows\)/,
     '입금관리 목록이 현금영수증 공용 게이트를 거치지 않는다');
   const paymentList = paymentService.match(/async function listPaymentTargets[\s\S]*?\n}/)?.[0] || '';
-  assert.match(paymentList, /while \(rows\.length < resultLimit\)[\s\S]*filterReceiptEligiblePaymentRows\(pool, pageRows\)[\s\S]*rows\.push/,
+  assert.match(paymentList, /while \(rows\.length < resultLimit\)[\s\S]*filterReceiptEligiblePaymentRows\(_db\(\), pageRows\)[\s\S]*rows\.push/,
     '현금영수증 게이트를 페이지 LIMIT 뒤 한 번만 적용하면 뒤쪽 정상 지급 대상이 막힌다');
   assert.match(paymentList, /LIMIT \$\$\{limitParam\} OFFSET \$\$\{offsetParam\}/,
     '입금 후보는 지급 가능 2,000건을 채울 때까지 페이지 이동해야 한다');
@@ -108,7 +116,7 @@ const db = {
   const createBatch = paymentService.match(/async function createBatch[\s\S]*?\n}/)?.[0] || '';
   assert.match(createBatch, /listPaymentTargets\((\{ includeFinished: true(, includeAdvertiserPaid: true)? \})?\)/,
     '회차 생성 직전에 서버 입금대상을 다시 계산하지 않는다');
-  assert.match(trackBRoute, /BEGIN ISOLATION LEVEL SERIALIZABLE[\s\S]*getBatch\(req\.params\.id, \{ db: client, lock: true \}\)[\s\S]*downloadCount \|\| 0\) === 0[\s\S]*checkBatchReceiptEligibility\(out, \{ db: client, lock: true \}\)[\s\S]*cash_receipt_not_verified[\s\S]*buildWorkbook[\s\S]*markDownloaded\(out\.batch\.id, _by\(req\), \{ db: client \}\)[\s\S]*COMMIT/,
+  assert.match(trackBRoute, /BEGIN ISOLATION LEVEL SERIALIZABLE[\s\S]*lockDualScopeInTx\(client, dualScope\)[\s\S]*getBatch\(req\.params\.id, \{ db: client, lock: true \}\)[\s\S]*downloadCount \|\| 0\) === 0[\s\S]*checkBatchReceiptEligibility\(out, \{ db: client, lock: true, lockedScope: dualScope \}\)[\s\S]*cash_receipt_not_verified[\s\S]*buildWorkbook[\s\S]*markDownloaded\(out\.batch\.id, _by\(req\), \{ db: client \}\)[\s\S]*COMMIT/,
     '최초 이체파일 다운로드 직전에 현금영수증 현재 상태를 다시 검증해야 한다');
   assert.match(searchService, /cashReceiptSubmissionStates\(pool, source\)[\s\S]*state && state\.submitted[\s\S]*submittedSlots = \[\.\.\.\(item\.submittedSlots \|\| \[\]\), receipt\.key\][\s\S]*item\.submittedSlots = \(item\.submittedSlots \|\| \[\]\)\.filter/,
     '검증된 과거 key는 현재 영수증 슬롯으로 복원하고, 거절·보류된 파일은 재제출 슬롯을 다시 열어야 한다');
@@ -175,6 +183,13 @@ const db = {
   let pendingWrite = null;
   inspect.__setPoolForTest({
     query: async (sql, params) => {
+      if (/^SELECT to_jsonb\(s\) AS submission FROM review_submissions s WHERE s\.file_id=ANY/.test(sql)) {
+        assert.strictEqual(params[0].length, 1, '검수할 파일 하나의 현재 근거만 조회한다');
+        return { rows: [{ submission: {
+          file_id: params[0][0], sheet_id: 'S', tab_name: 'cash', row_index: 9,
+          reviewer_name: '가상리뷰어', slot_key: 'receipt', order_submission_id: null,
+        } }] };
+      }
       if (/company_business_no/.test(sql)) return { rows: [{ value: '123-45-67890' }] };
       if (/FROM review_submissions WHERE file_id/.test(sql)) return { rows: [{
         file_id: params[0], file_hash: null, sheet_id: 'S', tab_name: 'cash', row_index: 9,

@@ -114,7 +114,8 @@ const scope = require('../src/utils/sheetlessScope');
   const iPick = so.indexOf('const picked = await _pickOpenSlot(client');
   const iAppend = so.indexOf("require('./participants.service').appendSlot(client");
   t('★★ Q&A 탭은 자리 번호 없는 주문을 빈 줄 고르기·덧붙이기 **전에** 멈춘다', iQ > 0 && iQ < iPick && iQ < iAppend);
-  t('멈출 때 트랜잭션을 되돌린다', /isQnaTab\(client, sheetId, tabName\)\) \{\s*await client\.query\('ROLLBACK'\);/.test(so));
+  t('자체 트랜잭션은 되돌리고 외부 client는 거부 결과를 예외로 전달한다', /isQnaTab\(client, sheetId, tabName\)\) \{\s*if \(!suppliedClient\) await client\.query\('ROLLBACK'\);/.test(so)
+    && /async function writeOrderToWorktableInTx\(client,args=\{\}\)[\s\S]*writeOrderToWorktable\(args,client\)[\s\S]*if\(!result\.ok\)[\s\S]*throw e/.test(so));
 
   /* ── ⑤ 행 삭제 보충 ─────────────────────────────────────────── */
   console.log('\n⑤ 행 삭제 보충');
@@ -161,7 +162,9 @@ const scope = require('../src/utils/sheetlessScope');
   t('옛 갱신 경로가 작업표 연결 칸을 읽는다(잠금 판정 재료)', /recall_courier, recall_product, work_kind, product_distribution_mode, start_date, product_options_json, linked_tab_name/.test(orr));
 
   t('★ 일반 칸 편집: 자리 줄의 진행일자·공개여부·문의문구·상품·옵션 칸은 막는다(상품·옵션 칸 판정 = 주문 기록과 같은 단일 출처)',
-    /const _slotCell = \[_wp\.QNA_DATE_HEADER, \.\.\._wp\.QNA_PLAN_HEADERS\]\.includes\(_hdr\)\s*\|\| \(_hi >= 0 && \(_pwc\(_heads\)\.includes\(_hi\) \|\| _owc\(_heads\)\.includes\(_hi\)\)\);[\s\S]{0,200}isBoundRow\(client, sheetId, tabName, row\.seq\)\) \{\s*await client\.query\('ROLLBACK'\);\s*return \{ ok: false, error: 'qna_slot_cell_locked'/.test(tb));
+    /const _slotCell = \[_wp\.QNA_DATE_HEADER, \.\.\._wp\.QNA_PLAN_HEADERS\]\.includes\(_hdr\)\s*\|\| \(_hi >= 0 && \(_pwc\(_heads\)\.includes\(_hi\) \|\| _owc\(_heads\)\.includes\(_hi\)\)\);[\s\S]{0,200}isBoundRow\(client, sheetId, tabName, row\.seq\)\) \{\s*return \{ ok: false, error: 'qna_slot_cell_locked'/.test(tb)
+    && /_runWorkdeskMutation\(input, client => editWorkdeskRowInTx\(client, input\)\)/.test(tb)
+    && /const out = await run\(client, context\);\s*await client\.query\(out && \(out\.ok === false \|\| out\.preflight\) \? 'ROLLBACK' : 'COMMIT'\)/.test(tb));
 
   /* ── ⑧ Q&A 잠금 비교 — 실제로 돌린다(운영과 같은 값 모양) ─────────────── */
   console.log('\n⑧ Q&A 잠금 비교 — 같은 값은 표기가 달라도 통과, 다른 값만 막는다');
@@ -247,7 +250,9 @@ const scope = require('../src/utils/sheetlessScope');
   }
   t('주문 행 삭제: 자리 줄은 「줄 삭제」로 안내(409)', /code: 'qna_slot_row'/.test(S('src/services/workdeskOrderDelete.service.js')) && /out\.code === 'qna_slot_row' \? 409/.test(tbr));
   t('구매일자 달력: 자리 줄의 진행일자는 못 바꾼다', /error: 'qna_slot_date_locked'/.test(tb));
-  t('번호 없는 주문 옮기기: Q&A 탭은 거절', /isQnaTab\(client, sheetId, tabName\)\) \{ await client\.query\('ROLLBACK'\); return \{ ok: false, error: 'qna_slot_required' \}; \}/.test(tb));
+  t('번호 없는 주문 옮기기: Q&A 탭은 거절하고 외부 wrapper가 되돌린다', /isQnaTab\(client, sheetId, tabName\)\) \{ return \{ ok: false, error: 'qna_slot_required' \}; \}/.test(tb)
+    && /_runWorkdeskMutation\(input, client => assignUnslottedOrderToOpenSlotInTx\(client, input\)\)/.test(tb)
+    && /out\.ok === false \|\| out\.preflight\) \? 'ROLLBACK' : 'COMMIT'/.test(tb));
   t('옛 신청 줄 덧붙이기: Q&A 탭은 던진다(시트로도 넘기지 않음)', /Q&A 작업표에는 신청자 줄을 덧붙이지 않습니다/.test(S('src/services/sheetlessApplicant.service.js')));
   t('★ 작업 이름 바꾸기: 자리표도 같은 트랜잭션에서 따라간다', /UPDATE qna_slots SET tab_name = \$1, updated_at = NOW\(\) WHERE sheet_id = \$2 AND tab_name = \$3/.test(S('src/services/tabRename.service.js')));
   {

@@ -37,6 +37,10 @@ const FR = require('../src/services/fileRoute.service');
 function seqPool(handlers) {
   const calls = []; let i = 0;
   return { calls, query: async (sql, params) => {
+    if (/^SELECT to_jsonb\(s\) AS submission FROM review_submissions s/.test(sql)
+        || /SELECT os.id FROM campaign_participants cp JOIN order_submissions os/.test(sql)) return { rows: [] };
+    // The scope preflight reads the same duplicate evidence without consuming core responses.
+    if (sql === 'SELECT checks FROM review_inspections WHERE file_id=$1') return handlers[1] || { rows: [] };
     calls.push({ sql, params });
     const h = handlers[Math.min(i, Math.max(handlers.length - 1, 0))]; i++;
     return typeof h === 'function' ? h(sql, params) : (h || { rows: [], rowCount: 0 });

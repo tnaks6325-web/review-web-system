@@ -125,23 +125,25 @@ const fileRoute = require('../src/services/fileRoute.service');
     const calls = [];
     fileRoute.__setPoolForTest({
       query: async (sql, params) => {
+        if (/SELECT os.id FROM campaign_participants cp JOIN order_submissions os/.test(sql)) return { rows: [] };
         calls.push({ sql, params });
         if (/SELECT file_id/.test(sql)) return { rows: [{ file_id: 'A', file_url: 'u', file_name: 'n', uploaded_at: 'ts' }] };
-        return { rows: [] };
+        return { rows: [], rowCount: 1 };
       },
     });
-    await fileRoute.recomputePrimary({ sheetId: 's', tabName: 't', rowIndex: 3 });
+    assert.strictEqual((await fileRoute.recomputePrimary({ sheetId: 's', tabName: 't', rowIndex: 3 })).ok, true);
     assert.ok(/slot_key = 'review'/.test(calls[0].sql), '대표 후보는 review 슬롯만');
     assert.ok(/review_file_id = \$1/.test(calls[1].sql) && calls[1].params[0] === 'A', '남은 리뷰 파일로 대표 갱신');
     calls.length = 0;
     fileRoute.__setPoolForTest({
       query: async (sql, params) => {
+        if (/SELECT os.id FROM campaign_participants cp JOIN order_submissions os/.test(sql)) return { rows: [] };
         calls.push({ sql, params });
         if (/SELECT file_id/.test(sql)) return { rows: [] };
-        return { rows: [] };
+        return { rows: [], rowCount: 1 };
       },
     });
-    await fileRoute.recomputePrimary({ sheetId: 's', tabName: 't', rowIndex: 3 });
+    assert.strictEqual((await fileRoute.recomputePrimary({ sheetId: 's', tabName: 't', rowIndex: 3 })).ok, true);
     assert.ok(/review_file_id = NULL/.test(calls[1].sql), '리뷰 파일 0장 = 대표 비움(영수증이 대표로 남지 않게)');
     ok('D1: recomputePrimary — 대표 재계산·비움 실행 확인');
     fileRoute.__setPoolForTest(null);
@@ -211,7 +213,7 @@ const fileRoute = require('../src/services/fileRoute.service');
   {
     const ri = read('src/services/reviewInspect.service.js');
     assert.ok(ri.includes('async function submissionSamples') && ri.includes('loadRouteSamples'), '조립 헬퍼·route 로더 존재');
-    assert.ok(ri.includes("opts.samples || await submissionSamples({ expectedChannel: exp.expectedChannel, slotKey: slotRole })"),
+    assert.ok(ri.includes("opts.samples || await submissionSamples({ expectedChannel: exp.expectedChannel, slotKey: dualSlot ? dualSlot.role : slotRole })"),
       '2차 검수 폴백도 같은 조립 사용');
     assert.ok(ri.includes("key: 'route_' + s.key"), 'route 예시 key 접두(캐시 지문 충돌 방지)');
     const rk = read('src/utils/routeSampleKinds.js');

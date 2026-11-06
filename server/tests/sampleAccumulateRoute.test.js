@@ -45,6 +45,8 @@ function seqPool(handlers) {
   return {
     calls,
     query: async (sql, params) => {
+      if (/^SELECT to_jsonb\(s\) AS submission FROM review_submissions s/.test(sql)
+          || /SELECT os.id FROM campaign_participants cp JOIN order_submissions os/.test(sql)) return { rows: [] };
       calls.push({ sql, params });
       const h = handlers[Math.min(i, handlers.length - 1)]; i++;
       return typeof h === 'function' ? h(sql, params) : (h || { rows: [], rowCount: 0 });
@@ -148,9 +150,12 @@ function seqPool(handlers) {
   console.log('\nC) manualRoute — 수동 분류(이동)');
   {
     // C1: 검증 분기
+    // Scope discovery also runs for a bad target; supply an ordinary DB before that call.
+    let p = seqPool([{ rows: [] }]);
+    FR.__setPoolForTest(p);
     assert.strictEqual((await FR.manualRoute({})).ok, false);
     assert.strictEqual((await FR.manualRoute({ fileId: 'F', target: 'trash' })).ok, false, '대상 화이트리스트');
-    let p = seqPool([{ rows: [] }]);
+    p = seqPool([{ rows: [] }]);
     FR.__setPoolForTest(p);
     assert.ok(/원장에 없는/.test((await FR.manualRoute({ fileId: 'F', target: 'receipt' })).error));
     p = seqPool([

@@ -23,6 +23,9 @@ const reviewerOrderIdentity = require('../services/reviewerOrderIdentity.service
 const { verifyReviewerSession } = require('../services/reviewerSession.service');
 const { recipientNameForRow } = require('../services/captureOwnerName.service');
 
+// Dual-channel evidence is kept separate from the legacy primary/supplement upload pointers.
+router.use('/dual', require('./dualChannelHttp.routes').createDualPurchaseImageRouter());
+
 /** 리뷰어 화면이 보낸 세션에서 서버가 검증한 신원만 반환한다. */
 function verifiedReviewerIdentity(req) {
   const token = req.headers['x-reviewer-token'];

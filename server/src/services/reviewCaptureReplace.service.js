@@ -29,20 +29,22 @@ const FILE_ID_RE = /^[-\w]{10,}$/;
 
 async function _rowFiles(db, { sheetId, tabName, rowId }) {
   const { rows: pr } = await db.query(
-    `SELECT id, seq, reviewer_name, recipient_name
+    `SELECT id, seq, reviewer_name, recipient_name, to_jsonb(campaign_participants)->>'order_submission_id' AS order_submission_id
        FROM campaign_participants
       WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL`,
     [rowId, sheetId, tabName]);
   if (!pr.length) return { ok: false, error: 'row_not_found' };
   const p = pr[0];
   if (p.seq == null) return { ok: false, error: 'no_review' };
+  const target=p.order_submission_id?await require('./dualChannelReview.service').bundleTargetForRow(db,{sheetId,tabName,rowIndex:p.seq,orderSubmissionId:p.order_submission_id}):null;
   const { rows: subs } = await db.query(
     `SELECT file_id, COALESCE(uploaded_at, created_at) AS at
        FROM review_submissions
       WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3 AND file_id IS NOT NULL
-        AND COALESCE(slot_key, 'review') = 'review'
+        AND ${target?"evidence_role='review' AND superseded_at IS NULL":"COALESCE(slot_key, 'review') = 'review'"}
       ORDER BY COALESCE(uploaded_at, created_at) NULLS LAST`,
     [sheetId, tabName, p.seq]);
+  p.dualBundle=!!target;
   const files = subs.map(r => ({ fileId: r.file_id, at: r.at || null }));
   // 원장(032) 이전 과거 행은 대표 이미지(031)만 있다 — 그것도 바꿀 수 있게 목록에 넣는다.
   const { rows: idx } = await db.query(
@@ -55,12 +57,12 @@ async function _rowFiles(db, { sheetId, tabName, rowId }) {
   return { ok: true, participant: p, files };
 }
 
-async function _pendingRequest(db, { sheetId, tabName, rowIndex }) {
+async function _pendingRequest(db, { sheetId, tabName, rowIndex, allSlots=false }) {
   try {
     const { rows } = await db.query(
       `SELECT id FROM review_edit_requests
         WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3
-          AND COALESCE(slot_key,'review')='review' AND status='pending' LIMIT 1`,
+          AND ${allSlots?'TRUE':"COALESCE(slot_key,'review')='review'"} AND status='pending' LIMIT 1`,
       [sheetId, tabName, rowIndex]);
     return rows.length > 0;
   } catch (e) {
@@ -75,7 +77,7 @@ async function previewReviewReplace({ sheetId, tabName, rowId }) {
   const db = _db();
   const r = await _rowFiles(db, { sheetId, tabName, rowId });
   if (!r.ok) return { ok: false, error: r.error };
-  const pending = await _pendingRequest(db, { sheetId, tabName, rowIndex: r.participant.seq });
+  const pending = await _pendingRequest(db, { sheetId, tabName, rowIndex: r.participant.seq,allSlots:r.participant.dualBundle });
   return {
     ok: true,
     name: r.participant.recipient_name || r.participant.reviewer_name || '',
@@ -116,8 +118,26 @@ async function replaceReviewCapture({ sheetId, tabName, rowId, oldFileId, imageB
   if (!r.ok) return { ok: false, error: r.error };
   const p = r.participant;
   if (!r.files.some(f => f.fileId === oldFileId)) return { ok: false, error: 'capture_changed' };
-  if (await _pendingRequest(db, { sheetId, tabName, rowIndex: p.seq })) return { ok: false, error: 'pending_edit_request' };
+  if (await _pendingRequest(db, { sheetId, tabName, rowIndex: p.seq,allSlots:p.dualBundle })) return { ok: false, error: 'pending_edit_request' };
 
+
+  const native=await require('./dualChannelReview.service').fileMutationContext(db,[oldFileId]);
+  if(native.dual){
+    const old=native.submissions.find(s=>s.file_id===oldFileId);
+    const review=require('./dualChannelReview.service');const svc=review.createService({db});
+    const result=await require('./dualChannelLifecycle.service').withDualLifecycleInTx({db,targets:native.targets,run:async(client,lockedScope)=>{
+      if(await _pendingRequest(client,{sheetId,tabName,rowIndex:p.seq,allSlots:true}))throw Object.assign(new Error('pending_edit_request'),{code:'pending_edit_request'});
+      const body={orderSubmissionId:old.order_submission_id,sheetId,tabName,rowIndex:p.seq,slotKey:old.slot_key,imageBase64,mimeType:mime,expectedRevision:old.evidence_revision,replaceFileId:oldFileId};
+      const uploaded=await svc.recordReviewUploadInTx({client,lockedScope,body,actor:by});
+      await svc.completeReviewUploadInTx({client,lockedScope,body:{...body,uploadTokens:[uploaded.uploadToken]},actor:by});
+      return uploaded;
+    }});
+    let oldTrashed=false;
+    if(!(await db.query('SELECT file_id FROM review_submissions WHERE file_id=$1 AND superseded_at IS NULL',[oldFileId])).rows.length){
+      try{oldTrashed=!!(await driveService.trashFiles([{id:oldFileId,name:''}])).success;}catch(_){}
+    }
+    return {ok:true,fileId:result.fileId,oldFileId,oldTrashed,oldKept:oldTrashed?'':'in_use'};
+  }
   const { targetFolderId } = await require('../routes/reviewEdit.routes')._resolveFolders(sheetId, tabName, 'review');
   let owner = '';
   try {

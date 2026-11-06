@@ -1157,8 +1157,8 @@ async function manualConfirm(body, reviewer) {
   return { ok: true, status: 'MANUAL_CONFIRMED', mode, approvalToken };
 }
 
-async function verifyApprovalForSubmission(body, reviewer) {
-  const context = await resolveApplicationIdentity(contextArgs(body, reviewer));
+async function verifyApprovalForSubmission(body, reviewer, db = pool) {
+  const context = await resolveApplicationIdentity(contextArgs(body, reviewer), db);
   const approval = verifyScoped(body.identityApprovalToken, PURPOSE_APPROVAL);
   const mismatch = String(approval.ownerReviewerId) !== String(context.owner.id)
     || Number(approval.applicationId) !== Number(context.application.id)

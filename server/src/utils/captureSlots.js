@@ -48,7 +48,27 @@ function isCashReceiptIncome(incomeType) {
  *     (`captureVerify._expectedKind(slotKey, reviewType)`).
  *   현영과 겹칠 때만 슬롯이 2개가 되므로 그때는 리뷰 자리를 구매확정으로 치환한다.
  */
-function effectiveCaptureSlots(captureSlots, incomeType, reviewType, campaignCashReceiptRequired = false) {
+function snapshotCaptureSlots(snapshot) {
+  if (!snapshot) return null;
+  const product = snapshot.dualChannelProduct || snapshot.product || snapshot;
+  if (!product.channels || !product.channels.naver || !product.channels.coupang) {
+    throw new Error('dual_snapshot_incomplete');
+  }
+  const slots = [
+    {key:'review', label:'네이버 리뷰', channel:'naver', role:'review'},
+    {key:'slot2', label:'쿠팡 리뷰', channel:'coupang', role:'review'},
+  ];
+  if (snapshot.cashReceiptRequired === true || snapshot.cash_receipt_required === true) {
+    slots.push({key:'receipt',label:'네이버 현금영수증',channel:'naver',role:'receipt',required:false},
+      {key:'receipt2',label:'쿠팡 현금영수증',channel:'coupang',role:'receipt',required:false});
+  }
+  return slots;
+}
+function resolveSnapshotSlot(snapshot, key) {
+  return (snapshotCaptureSlots(snapshot) || []).find(s => s.key === key) || null;
+}
+function effectiveCaptureSlots(captureSlots, incomeType, reviewType, campaignCashReceiptRequired = false, snapshot = null) {
+  if (snapshot) return snapshotCaptureSlots(snapshot);
   if (Array.isArray(captureSlots) && captureSlots.length > 0) {
     const valid = captureSlots.filter(s => s && s.key);
     if (valid.length) {
@@ -82,8 +102,8 @@ function effectiveCaptureSlots(captureSlots, incomeType, reviewType, campaignCas
  *   JSONB에 `"required": false`를 적으면 그 슬롯만 선택이 된다.
  * ★ 전부 선택으로 설정된 병적 케이스는 전체 필수로 폴백 — "아무 슬롯 없이 완료"를 막는다.
  */
-function requiredSlotKeys(captureSlots, incomeType, reviewType, campaignCashReceiptRequired = false) {
-  const eff = effectiveCaptureSlots(captureSlots, incomeType, reviewType, campaignCashReceiptRequired);
+function requiredSlotKeys(captureSlots, incomeType, reviewType, campaignCashReceiptRequired = false, snapshot = null) {
+  const eff = effectiveCaptureSlots(captureSlots, incomeType, reviewType, campaignCashReceiptRequired, snapshot);
   if (!eff) return ['review'];
   const req = eff.filter(s => s.required !== false).map(s => s.key);
   return req.length ? req : eff.map(s => s.key);
@@ -206,6 +226,7 @@ function slotLabel(captureSlots, incomeType, key, reviewType, campaignCashReceip
 }
 
 module.exports = {
+  snapshotCaptureSlots, resolveSnapshotSlot,
   REVIEW_SLOT, RECEIPT_SLOT, CONFIRM_SLOT,
   isCashReceiptIncome, effectiveCaptureSlots, requiredSlotKeys, slotLabel,
   hasCashReceiptSlot, cashReceiptSlotInfo, isCashReceiptSlot, cashReceiptNote, CR_MISCONFIG_NOTE,

@@ -112,6 +112,8 @@ const edit = (type, value, field, text) =>
         const s = String(sql).replace(/\s+/g, ' ').trim();
         calls.push({ s, params });
         if (/^BEGIN|^ROLLBACK|^COMMIT/.test(s)) return { rows: [] };
+        if (/SELECT order_submission_id, tab_gid FROM campaign_participants/.test(s)) return { rows: row ? [row] : [] };
+        if (/SELECT to_jsonb\(o\) AS submission/.test(s)) return { rows: [{ submission: { id: params[0] } }] };
         if (/FROM campaign_participants WHERE id=\$1 .* FOR UPDATE/.test(s)) return { rows: row ? [row] : [] };
         if (/COUNT\(\*\)::int AS n FROM campaign_participants/.test(s)) return { rows: [{ n: opts.dup || 1 }] };
         if (/FROM raw_sheet_tabs/.test(s)) return { rows: [{ detected_headers: ['택배송장번호'] }] };
@@ -121,7 +123,7 @@ const edit = (type, value, field, text) =>
       },
       release() {},
     };
-    return { calls, async connect() { return client; } };
+    return { calls, query: (...args) => client.query(...args), async connect() { return client; } };
   }
 
   let cp = connPool({ id: 'p-empty', source: 'worktable', order_submission_id: null, identity_key: null, phone8: '', recipient_name: null, option_text: null, row_json: {}, tab_gid: '1' });

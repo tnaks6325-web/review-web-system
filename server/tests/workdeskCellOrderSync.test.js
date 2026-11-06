@@ -674,13 +674,15 @@ t('9b priorValue 는 row_json(편집 전 값)에서만 읽는다(편집 자체�
   assert.ok(/isCol && anchorType === 'order'/.test(fn));
 });
 
-t('9c priorValue 계산은 COMMIT 뒤(트랜잭션과 무관 — 추가 쿼리 없음)', () => {
+t('9c priorValue는 잠근 행에서 계산하고 외부 wrapper가 커밋한 뒤 반환한다', () => {
   const body = read('services/trackB.service.js');
   const i = body.indexOf('async function editWorkdeskRow');
   const fn = body.slice(i, body.indexOf('} catch (e) {', i));
-  const commitIdx = fn.indexOf("await client.query('COMMIT')");
   const priorIdx = fn.indexOf('const priorValue');
-  assert.ok(commitIdx > 0 && priorIdx > commitIdx);
+  assert.ok(priorIdx > 0);
+  assert.match(fn, /_runWorkdeskMutation\(input, client => editWorkdeskRowInTx\(client, input\)\)/);
+  const wrapper = body.slice(body.indexOf('async function _runWorkdeskMutation'), body.indexOf('async function _workdeskBundleParent'));
+  assert.match(wrapper, /await _lockWorkdeskMutationInTx\(client, context\)[\s\S]*const out = await run\(client, context\)[\s\S]*'ROLLBACK' : 'COMMIT'\);\s*return out/);
 });
 
 /* ══════════════ §10 프론트 — 토스트 ══════════════ */

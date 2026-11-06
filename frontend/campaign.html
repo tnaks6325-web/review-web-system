@@ -1738,6 +1738,8 @@ function _renderJoinedView(j, h){
     // 과거 공고의 연결 시트 정보도 iframe URL로 전달하지 않는다.
     // mode=form은 임베드 진입을 보장하는 기존 보호 장치다.
     const qp = new URLSearchParams({ embed:'1', mode:'form', campId:CAMP_ID });
+    // The marker selects UI only. The embedded form reloads the authoritative work detail.
+    if(j.selectedOption?.dualChannelProduct || j.workDetail?.dualChannelProduct) qp.set('dual','1');
       // ★ 미리보기: 홀드 문맥(app·holdToken·holdPhone8) 미전달 + preview=1 → 구매양식이 제출을 차단한다.
       //   리뷰어 경로는 기존과 동일하게 홀드 문맥을 싣는다(preview 파라미터 없음 = 동작 불변).
       if(PREVIEW){ qp.set('preview','1'); }

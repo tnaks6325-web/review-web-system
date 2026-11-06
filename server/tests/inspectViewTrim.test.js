@@ -73,7 +73,7 @@ const RI = require('../src/services/reviewInspect.service');
     assert.strictEqual(_q.length, 0, '★ 대상이 없으면 쿼리 0(빈 UPDATE 금지)');
     _q = [];
     r = await RI.reinspectTab({ sheetId: 'S', tabName: 'T' });
-    assert.ok(_q[0] && /sheet_id = \$1/.test(_q[0].sql), '작업 전체 경로는 종전 그대로');
+    assert.ok(_q.some(q => /UPDATE review_inspections/.test(q.sql) && /sheet_id = \$1/.test(q.sql)), '사전조회 뒤 작업 전체 UPDATE 범위는 종전 그대로');
     ok('A3: ★ 대상 없음 = 쿼리 0 + 안내 / 작업 경로 무회귀');
 
     const tb = read('src/routes/trackB.routes.js');

@@ -55,7 +55,7 @@ async function ensureCampaignWorktable({ campaignId, by = 'system' } = {}) {
     await client.query('BEGIN');
     /* ★ 공고 행 잠금 — 같은 공고에 주문이 동시에 들어와도 작업표가 두 개 생기지 않는다. */
     const { rows } = await client.query(
-      `SELECT id, title, landing_url, linked_sheet_id, linked_tab_name, linked_tab_gid, workboard_id
+      `SELECT id, title, landing_url, channel, work_detail, linked_sheet_id, linked_tab_name, linked_tab_gid, workboard_id
          FROM recruit_campaigns WHERE id = $1 FOR UPDATE`, [campaignId]);
     if (!rows.length) { await client.query('ROLLBACK'); return { ok: false, reason: 'campaign_not_found' }; }
     const c = rows[0];
@@ -78,7 +78,8 @@ async function ensureCampaignWorktable({ campaignId, by = 'system' } = {}) {
     const template = await getTemplate();
     let channel = '';
     try { channel = channelFromUrl(c.landing_url || '') || ''; } catch (_) { channel = ''; }
-    const columns = buildColumns({ template, channel, workTypes: [] }).map(x => x.name);
+    const dualChannel=require('../utils/dualChannel').campaignHasDualChannels(c);
+    const columns = buildColumns({ template, channel, workTypes: [], dualChannel }).map(x => x.name);
     if (!columns.length) { await client.query('ROLLBACK'); return { ok: false, reason: 'no_columns' }; }
 
     /* ★★ 가상 ID 는 **결정적 파생**(sheetlessAccept 단일 출처) — 랜덤 발급 금지.

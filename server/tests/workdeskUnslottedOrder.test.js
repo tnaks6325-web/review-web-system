@@ -23,7 +23,13 @@ t('주문값은 옮기되 유효 슬롯 번호는 보존', () => {
   assert.deepStrictEqual(row, { 번호: '601', 담당자: '만두', 구매일자: '', 주문자제출: '임은진', 결제금액: '78000' });
 });
 t('서버는 목표 안의 빈 슬롯만 FOR UPDATE로 선택', () => {
-  const src = svc.assignUnslottedOrderToOpenSlot.toString();
+  const service = fs.readFileSync(path.join(__dirname, '..', 'src/services/trackB.service.js'), 'utf8');
+  const start = service.indexOf('async function assignUnslottedOrderToOpenSlotInTx');
+  assert.ok(start > 0, '실제 재배정 본문을 찾는다');
+  const src = service.slice(start, service.indexOf('\n}', start) + 2);
+  assert.match(svc.assignUnslottedOrderToOpenSlot.toString(), /_runWorkdeskMutation\(input, client => assignUnslottedOrderToOpenSlotInTx\(client, input\)\)/);
+  const wrapper = service.slice(service.indexOf('async function _runWorkdeskMutation'), service.indexOf('async function _workdeskBundleParent'));
+  assert.match(wrapper, /await _lockWorkdeskMutationInTx\(client, context\)[\s\S]*await run\(client, context\)[\s\S]*out\.ok === false[\s\S]*'ROLLBACK' : 'COMMIT'/);
   assert.match(src, /seq BETWEEN 1 AND \$3/);
   assert.match(src, /order_submission_id IS NULL/);
   assert.match(src, /FOR UPDATE SKIP LOCKED/);

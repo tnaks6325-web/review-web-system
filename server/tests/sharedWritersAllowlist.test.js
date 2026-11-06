@@ -46,6 +46,7 @@ const ALLOW = {
   'services/campaignPayAmountSync.service.js|syncCampaignPurchaseWindowInTx|recruit_campaigns': '공유 저장 투영 본체 + 옛 래퍼',
   'services/sharedPatch.service.js|_projectUnitInflowInTx|recruit_campaigns': '공유 저장 투영(공고 전체 유입방식 · 가이드 검사 전에 · 같은 트랜잭션 · 결정 333)',
   'services/sharedPatch.service.js|_projectUnitInflowInTx|campaign_options': '공유 저장 투영(줄마다 유입방식 ← 오더 상품 inflow_type · 같은 트랜잭션 · 결정 333)',
+  'services/sharedPatch.service.js|_projectDualChannelProductInTx|recruit_campaigns': '공유 저장 projectToCampaignInTx 내부의 단일 동시진행 상품 투영 — 같은 client·트랜잭션에서 검증한 구매처 조건만 work_detail.dualChannelProduct 에 쓰고 공고 상품 이름은 유지(결정 285·338)',
   'services/sharedPatch.service.js|projectToCampaignInTx|recruit_campaigns': '공유 저장 투영',
   'services/sharedPatch.service.js|projectToCampaignInTx|campaign_options': '공유 저장 투영',
 };

@@ -24,6 +24,8 @@ const shortLinkSvc = require('../services/shortLink.service');
 //   그 자리는 평소 안 타서 드러나지 않았을 뿐 ReferenceError 였다. 여기서 함께 바로잡는다.
 const { logger } = require('../utils/logger');
 
+router.use('/dual-purchase', require('./dualChannelStaffHttp.routes').createDualStaffPurchaseRouter());
+
 function _by(req) { return String((req.admin && (req.admin.name || req.admin.role)) || 'admin').slice(0, 100); }
 function _role(req) { return (req.admin && req.admin.role) || ''; }
 
@@ -3995,8 +3997,14 @@ router.get('/payment/batches', authMiddleware, adminOrMasterMiddleware, async (r
 router.get('/payment/batch/:id/file', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   let client;
   try {
+    // 동시진행: 회차 행 잠금보다 먼저 정렬된 lifecycle 잠금을 잡아야 한다(결정 108 순서 위에 얹음).
+    // 발견은 트랜잭션 밖에서 읽기만 하고, 잠근 뒤 같은 출처인지 다시 확인한다.
+    const dualLifecycle = require('../services/dualChannelLifecycle.service');
+    const dualScope = await dualLifecycle.discoverDualScope(pool, [{ batchId: String(req.params.id) }]);
     client = await pool.connect();
     await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+    await dualLifecycle.lockDualScopeInTx(client, dualScope);
+    await dualLifecycle.assertDualProvenanceUnchanged(client, dualScope);
     // 같은 회차의 동시 최초 다운로드도 직렬화한다. 첫 요청이 검증·기록을 마칠 때까지
     // 다른 요청은 이 행 잠금 뒤에서 기다린다.
     const out = await paymentSvc.getBatch(req.params.id, { db: client, lock: true });
@@ -4016,7 +4024,7 @@ router.get('/payment/batch/:id/file', authMiddleware, adminOrMasterMiddleware, a
     if (Number(out.batch.downloadCount || 0) === 0) {
       // 검증 대상 제출·검수 행을 잠근 채 파일 생성과 다운로드 기록까지 끝낸다.
       // 그 사이 영수증 반려·교체·재배정이 끼어 지급 근거가 바뀌지 않는다.
-      const receiptCheck = await paymentSvc.checkBatchReceiptEligibility(out, { db: client, lock: true });
+      const receiptCheck = await paymentSvc.checkBatchReceiptEligibility(out, { db: client, lock: true, lockedScope: dualScope });
       if (!receiptCheck.ok) {
         await client.query('ROLLBACK');
         return res.status(409).json({ ok: false, code: 'cash_receipt_not_verified',

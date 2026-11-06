@@ -25,6 +25,8 @@ const { projectOrderToCampaign } = require('../utils/orderToCampaignProjection')
 const { CANON } = require('../utils/sharedFields');
 const { unitInflowType, guideMissingUnits } = require('../utils/unitInflow');   // ★ 결정 333 — 상품마다 유입방식
 const { rawHasDualChannels, DUAL_CHANNEL_NOT_READY } = require('../utils/dualChannel');
+const dualRuntime = require('./dualChannelRuntime.service');
+const dualSettings = require('./dualChannelSettings.service');
 
 const NEXT_VERSION_SQL = `GREATEST(sync_version + 1, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000000)::bigint)`;
 
@@ -191,6 +193,7 @@ function writablePath(row, origin) {
     return !(lab !== undefined && /^(옵션\s*없음|없음|단일(상품)?|해당\s*없음)$/.test(String(lab).trim()));
   }
   const isOption = String(m.parent || '').includes('|o:');
+  if (m.key === 'channels') return !isOption && dualRuntime.isDualChannelReady('roundtrip') && row.mine !== ABSENT;
   // ★ 결정 333 — 상품별 유입방식(상품 칸만 · 옵션은 상품을 따른다). 작업표와 무관하고(164) 공고 줄 유입방식으로 투영된다.
   if (m.key === 'inflow_type') return !isOption;
   if (m.key === 'pay' && isOption) return row.base !== ABSENT && row.mine !== ABSENT;
@@ -534,6 +537,7 @@ function applyWrites(theirs, mine, writes) {
     else if (leaf === 'guide') { if (mp.guide === undefined) delete tp.guide; else tp.guide = mp.guide; guideTouched = true; }
     // ★ 결정 333 — 상품별 유입방식(키 없음 = 오더 전체 값을 따름 — 섞이지 않으면 인트라넷이 키를 뺀다)
     else if (leaf === 'inflow_type') { const t = unitInflowType(mp.inflow_type); if (t) tp.inflow_type = t; else delete tp.inflow_type; inflowUnitTouched = true; }
+    else if (leaf === 'channels') { tp.channels = JSON.parse(JSON.stringify(mp.channels)); }
     else if (leaf === 'product_mode') {   // ⑤-3 옵션 있음↔없음(판정이 허락한 줄만) · 표기만 다른 것도 보낸 값으로
       if (mp.product_mode === undefined) delete tp.product_mode; else tp.product_mode = mp.product_mode;
       if (w.modeSwitch) {
@@ -1477,9 +1481,28 @@ async function _projectProductLinesInTx(client, camp, prev, next) {
 
 /** 공고 반영 — 쓴 칸만. 거부 사유가 있으면 {reject} 를 돌려 호출부가 통째로 되돌린다.
  *  @param {object} [extra] { prev: 저장 전 상태(금액 비교) · payTouched · actor } */
+async function _projectDualChannelProductInTx(client, camp, next) {
+  if (!rawHasDualChannels(next.product_options_json)) return { applied: false };
+  const product = dualSettings.normalizeSettings(next.product_options_json, next, 'roundtrip').value[0];
+  const { rows } = await client.query('SELECT work_detail FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [camp.id]);
+  if (!rows.length) throw new Error('동시진행 공고가 사라졌습니다.');
+  let wd = rows[0].work_detail;
+  if (typeof wd === 'string') wd = JSON.parse(wd);
+  if (!wd || typeof wd !== 'object' || Array.isArray(wd)) throw new Error('공고 작업내용을 읽을 수 없습니다.');
+  const previous = wd.dualChannelProduct;
+  // 결정 285: 공고 상품 이름은 오더의 이름으로 덮지 않는다.
+  const projected = { ...product, ...(previous && typeof previous.name === 'string' ? { name: previous.name } : {}) };
+  await client.query(`UPDATE recruit_campaigns SET work_detail = jsonb_set(work_detail, '{dualChannelProduct}', $2::jsonb, true), updated_at = NOW() WHERE id = $1`, [camp.id, JSON.stringify(projected)]);
+  return { applied: true };
+}
+
 async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTouched, extra = {}) {
   const sync = require('./campaignPayAmountSync.service');
   const applied = [];
+  if (rawHasDualChannels(next.product_options_json)) {
+    const r = await _projectDualChannelProductInTx(client, camp, next);
+    if (r.applied) applied.push('dual_channel_product');
+  }
   const has = k => writtenKeys.has(k);
   // 7단계-④ 상품·옵션 더하기·지우기·마감 — 줄을 먼저 맞춘다(뒤이은 인원·가이드·금액 투영이 그 줄을 찾는다)
   let structureOut = null;
@@ -1739,11 +1762,6 @@ async function _managerEditProtection(client, wo) {
   return null;
 }
 
-async function _abort(client, status, body) {
-  try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
-  return { status, body };
-}
-
 /**
  * @param {object} p
  * @param {string} p.workOrderId
@@ -1761,22 +1779,66 @@ async function _abort(client, status, body) {
  * @param {boolean} [p.moneyCapable] false = 금액을 모르는 옛 인트라넷 저장(금액 칸은 받지 않는다 · 5단계 배포 순서 안전장치)
  * @param {object} [p.db] 시험용 pool
  */
-async function applySharedPatch(p) {
+async function finishSharedPatchAfterCommit({ workOrderId, camp, campaign }) {
+  const wo = { id: workOrderId };
+  if (camp && campaign.after) {
+      const lrq = require('./linkedRecruitQuota.service');
+      try { if (campaign.after.worktable) campaign.after.rebuilt = await lrq.rebuildWorktableProjection(campaign.after.worktable, 'bidir-quota'); }
+      catch (e) { logger.warn(`[bidir/apply] ${wo.id} 작업표 장부 다시 만들기 실패(저장은 끝남): ${e.message}`); }
+      // 리뷰옵션을 다시 나눴으면 장부도(검수가 장부의 리뷰옵션을 읽는다) — 줄 수 맞추기에서 이미 다시 만들었으면 건너뛴다
+      try {
+        if (campaign.after.reviewOptions && !(campaign.after.rebuilt && campaign.after.rebuilt.projection)) {
+          campaign.after.rebuilt = await lrq.rebuildWorktableProjection(campaign.after.reviewOptions, 'bidir-review-type', true);
+        }
+      } catch (e) { logger.warn(`[bidir/apply] ${wo.id} 리뷰옵션 장부 다시 만들기 실패(저장은 끝남): ${e.message}`); }
+      // 7단계-④ ⑤ 택배발송대행으로 들어가거나 나온 작업 — 작업표 송장 칸(들어가면 더함 · 나오면 송장이 하나도 없을 때만 뺌). 실패해도 저장은 끝났다(기록).
+      if (campaign.after.tracking) {
+        try { campaign.after.trackingResult = await require('./worktableTrackingColumn.service').syncTrackingColumn({ ...campaign.after.tracking, by: 'bidir-delivery' }); }
+        catch (e) { logger.warn(`[bidir/apply] ${wo.id} 작업표 송장 칸 맞추기 실패(저장은 끝남): ${e.message}`); }
+      }
+      if (campaign.after.relay) {
+        try { campaign.after.relayResult = await require('./campaignPlan.service').relayCampaignWorktable(camp.id, { by: 'bidir-quota' }); }
+        catch (e) { logger.warn(`[bidir/apply] ${wo.id} 작업표 날짜 다시 배치 실패(저장은 끝남): ${e.message}`); }
+      }
+    }
+}
+
+async function applySharedPatch(p, inTxClient = null) {
   if (String(process.env.BIDIR_HARD_OFF || '').trim() === '1') return { status: 503, body: { ok: false, code: 'bidir_off', error: '양방향 동기화가 꺼져 있습니다.' } };
   const managerOnly = p && p.managerOnly === true && ['rw_manager', 'intranet_manager'].includes(p.origin);
   const lrq = require('./linkedRecruitQuota.service');
-  const client = await (p.db || getPool()).connect();
+  const client = inTxClient || await (p.db || getPool()).connect();
+  const _abort = async (_client, status, body) => {
+    if (!inTxClient) { try { await client.query('ROLLBACK'); } catch (_) { /* noop */ } }
+    return { status, body };
+  };
   try {
-    await client.query('BEGIN');
+    const lifecycle = require('./dualChannelLifecycle.service');
+    // Read-only discovery must precede BEGIN and every existing business lock.
+    const dualScope = !inTxClient && dualRuntime.isDualChannelReady('roundtrip')
+      ? await lifecycle.discoverDualScope(client, [{ workOrderId: p.workOrderId }]) : null;
+    if (!inTxClient) await client.query('BEGIN');
     await client.query(`SET LOCAL lock_timeout = '5s'`);
     await client.query(`SET LOCAL statement_timeout = '10s'`);
+    if (dualScope) {
+      await lifecycle.lockDualScopeInTx(client, dualScope);
+      await lifecycle.assertDualProvenanceUnchanged(client, dualScope);
+    }
     await lrq.lockWorkOrderCampaigns(client, [p.workOrderId]);                                  // L1
     const { rows: woRows } = await client.query('SELECT * FROM work_orders WHERE id = $1 FOR UPDATE', [p.workOrderId]);
     let wo = woRows[0];
     if (!wo || wo.deleted_at) return await _abort(client, 404, { ok: false, code: 'order_not_found', error: '작업오더를 찾을 수 없습니다.' });
     // 결정 338 — 신규·기존 설정 모두 전체 경로가 준비되기 전에는 공유 저장도 열지 않는다.
-    if (rawHasDualChannels(wo.product_options_json) || rawHasDualChannels(p.mine && p.mine.product_options_json)) {
+    if ((rawHasDualChannels(wo.product_options_json) || rawHasDualChannels(p.mine && p.mine.product_options_json)) && !dualRuntime.isDualChannelReady('roundtrip')) {
       return await _abort(client, 409, { ok: false, ...DUAL_CHANNEL_NOT_READY });
+    }
+    if (!rawHasDualChannels(wo.product_options_json) && rawHasDualChannels(p.mine && p.mine.product_options_json)) {
+      return await _abort(client, 409, { ok: false, code: 'new_dual_work_required', error: '동시진행은 새 전용 작업으로 만들어 주세요. 기존 일반 작업은 전환할 수 없습니다.' });
+    }
+    if (rawHasDualChannels(wo.product_options_json) || rawHasDualChannels(p.mine && p.mine.product_options_json)) {
+      try {
+        dualSettings.normalizeSettings(wo.product_options_json, wo, 'roundtrip');
+      } catch (e) { return await _abort(client, 409, { ok: false, code: e.code || 'invalid_dual_channel', error: e.message }); }
     }
     if (managerOnly) {
       const rawTarget = String(p.mine && p.mine.work_manager || '').trim();
@@ -1813,7 +1875,7 @@ async function applySharedPatch(p) {
         // Home answers may only finish inside the same protected transaction, including exact retries.
         if (p.managerCommitHook) {
           await p.managerCommitHook(client, wo);
-          await client.query('COMMIT');
+          if (!inTxClient) await client.query('COMMIT');
           return { status: 200, body: { ok: true, noop: true, idempotent: true, data: wo, sync_version: currentVersion } };
         }
         return await _abort(client, 200, { ok: true, noop: true, idempotent: true, data: wo, sync_version: currentVersion });
@@ -1853,7 +1915,7 @@ async function applySharedPatch(p) {
           [saved.id, Number(saved.sync_version)]);
       }
       if (p.managerCommitHook) await p.managerCommitHook(client, saved);
-      await client.query('COMMIT');
+      if (!inTxClient) await client.query('COMMIT');
       return { status: 200, body: { ok: true, data: saved, sync_version: Number(saved.sync_version), applied: ['work_manager'], manager_only: true } };
     }
     const peek = await lrq.liveCampaignForWorkOrders(client, [wo.id]);                          // 보관(마감) 공고 제외
@@ -1906,6 +1968,12 @@ async function applySharedPatch(p) {
     if (p.origin === 'intranet' && p.nameMap) {
       const al = alignIntranetNames(base, p.mine, p.nameMap);
       if (al.aligned) { p = { ...p, mine: al.mine }; logger.info(`[bidir/apply] ${wo.id} 인트라넷 이름 ${al.aligned}개를 리뷰웹 이름으로 읽음`); }
+    }
+    if (rawHasDualChannels(wo.product_options_json) && p.mine && Object.prototype.hasOwnProperty.call(p.mine, 'product_options_json')) {
+      try {
+        const normalized = dualSettings.preserveSettings(wo.product_options_json, p.mine.product_options_json, { ...wo, ...p.mine }, 'roundtrip');
+        p = { ...p, mine: { ...p.mine, product_options_json: normalized.json } };
+      } catch (e) { return await _abort(client, 409, { ok: false, code: e.code || 'invalid_dual_channel', error: e.message }); }
     }
     // 7단계-④ ③ — 기준에 없는 원래 이름(prev_name/prev_label)은 이름 바꾸기가 아니다(재전송 등) — 지우고 판정한다
     p = { ...p, mine: sanitizeRenames(base, p.mine) };
@@ -2059,13 +2127,17 @@ async function applySharedPatch(p) {
       || (p.managerRepairValue !== undefined && require('../utils/sharedFields').canon('work_manager', p.managerRepairValue)
         !== require('../utils/sharedFields').canon('work_manager', wo.work_manager)));
     if (!plan.writes.length && !extra.length && !rec && !managerRepair) {
-      await client.query('COMMIT');
+      if (!inTxClient) await client.query('COMMIT');
       return { status: 200, body: { ok: true, noop: true, sync_version: curVersion } };
     }
     let { next, productsTouched, urlTouched, guideTouched, inflowUnitTouched, quantityTouched, payTouched, payProducts, qtyProducts, missed, structure, structureTouched } = applyWrites(theirs, p.mine, plan.writes);
     // 입력뿐 아니라 병합 결과도 확인한다. 이후 상품 줄·금액·버전 쓰기 전에 통째로 거부한다.
-    if (rawHasDualChannels(next.product_options_json)) {
+    if (rawHasDualChannels(next.product_options_json) && !dualRuntime.isDualChannelReady('roundtrip')) {
       return await _abort(client, 409, { ok: false, ...DUAL_CHANNEL_NOT_READY });
+    }
+    if (rawHasDualChannels(next.product_options_json)) {
+      try { next.product_options_json = dualSettings.normalizeSettings(next.product_options_json, next, 'roundtrip').json; }
+      catch (e) { return await _abort(client, 409, { ok: false, code: e.code || 'invalid_dual_channel', error: e.message }); }
     }
     if (missed.length) {
       return await _abort(client, 409, { ok: false, code: 'write_unmatched', sync_version: curVersion, fields: missed.map(path => ({ path, label: _label(path) })),
@@ -2243,43 +2315,25 @@ async function applySharedPatch(p) {
           WHERE shared_sync_outbox.status IN ('delivered', 'superseded')`,
         [wo.id, newVersion, managerRepair && !plan.writes.length && !rec ? 'manager' : 'full']);
     }
-    await client.query('COMMIT');
+    if (!inTxClient) await client.query('COMMIT');
     // 7단계-② 커밋 뒤 — 작업표 투영 장부 다시 만들기 · 빈 줄 날짜 다시 배치(정원 동기화와 같은 순서 · 탭 잠금은 자기 트랜잭션 · 실패해도 저장은 끝났다)
-    if (camp && campaign.after) {
-      const lrq = require('./linkedRecruitQuota.service');
-      try { if (campaign.after.worktable) campaign.after.rebuilt = await lrq.rebuildWorktableProjection(campaign.after.worktable, 'bidir-quota'); }
-      catch (e) { logger.warn(`[bidir/apply] ${wo.id} 작업표 장부 다시 만들기 실패(저장은 끝남): ${e.message}`); }
-      // 리뷰옵션을 다시 나눴으면 장부도(검수가 장부의 리뷰옵션을 읽는다) — 줄 수 맞추기에서 이미 다시 만들었으면 건너뛴다
-      try {
-        if (campaign.after.reviewOptions && !(campaign.after.rebuilt && campaign.after.rebuilt.projection)) {
-          campaign.after.rebuilt = await lrq.rebuildWorktableProjection(campaign.after.reviewOptions, 'bidir-review-type', true);
-        }
-      } catch (e) { logger.warn(`[bidir/apply] ${wo.id} 리뷰옵션 장부 다시 만들기 실패(저장은 끝남): ${e.message}`); }
-      // 7단계-④ ⑤ 택배발송대행으로 들어가거나 나온 작업 — 작업표 송장 칸(들어가면 더함 · 나오면 송장이 하나도 없을 때만 뺌). 실패해도 저장은 끝났다(기록).
-      if (campaign.after.tracking) {
-        try { campaign.after.trackingResult = await require('./worktableTrackingColumn.service').syncTrackingColumn({ ...campaign.after.tracking, by: 'bidir-delivery' }); }
-        catch (e) { logger.warn(`[bidir/apply] ${wo.id} 작업표 송장 칸 맞추기 실패(저장은 끝남): ${e.message}`); }
-      }
-      if (campaign.after.relay) {
-        try { campaign.after.relayResult = await require('./campaignPlan.service').relayCampaignWorktable(camp.id, { by: 'bidir-quota' }); }
-        catch (e) { logger.warn(`[bidir/apply] ${wo.id} 작업표 날짜 다시 배치 실패(저장은 끝남): ${e.message}`); }
-      }
-    }
+    const afterCommit = camp && campaign.after ? { workOrderId: wo.id, camp, campaign } : null;
+    if (!inTxClient && afterCommit) await finishSharedPatchAfterCommit(afterCommit);
     if (overwritten.length) logger.info(`[bidir/apply] ${wo.id} 겹친 칸을 나중 저장 값으로(${p.origin}·${p.actor || ''}): ${overwritten.map(o => o.label).join(', ')}`);
     // push_back = 저장 결과가 보낸 값과 달라 인트라넷이 받아 가야 하는가(인트라넷발만 의미 있음). false 면 인트라넷은 이 버전을
     // 자기 사본과 같다고 적는다(remote_sync_version) — 안 적으면 늦게 도착한 옛 송신이 방금 저장한 수정을 되돌린다(검토 2026-10-20).
     const pushBack = p.origin === 'intranet' && (managerRepair || _pushBackKeys(p.mine, next).length > 0);   // 쓴 칸이 없어도(번호만) 사본이 다를 수 있다
-    return { status: 200, body: { ok: true, data: saved, sync_version: newVersion, push_back: pushBack, applied: plan.writes.map(w => w.path), campaign_applied: campaign.applied, overwritten,
+    return { status: 200, ...(inTxClient && afterCommit ? { afterCommit } : {}), body: { ok: true, data: saved, sync_version: newVersion, push_back: pushBack, applied: plan.writes.map(w => w.path), campaign_applied: campaign.applied, overwritten,
       ...(closure.restored.length ? { closed_options: closure.restored } : {}) } };
   } catch (e) {
-    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    try { if (!inTxClient) await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     if (['40P01', '55P03', '57014'].includes(e && e.code)) {
       logger.warn(`[bidir/apply] ${p.workOrderId} 잠금 대기 초과(${e.code}) — 다시 시도 안내`);
       return { status: 503, body: { ok: false, code: 'busy_retry', error: '같은 작업이 다른 저장으로 바쁩니다. 잠시 뒤 다시 저장해 주세요.' } };
     }
     throw e;
   } finally {
-    client.release();
+    if (!inTxClient) client.release();
   }
 }
 
@@ -2288,33 +2342,32 @@ async function applySharedPatch(p) {
  * ★ 마감(보관) 공고는 대상이 아니다(사용자 확정 2026-10-20) · 공고 없는 오더도 대상 아님.
  * @returns {{ status:number, body:object }}
  */
-async function linkSharedOrder({ workOrderId, actor = '', dryRun = false, db } = {}) {
+const _linkResult = (status, body) => ({ status, body });
+// Caller owns transaction and must acquire lifecycle before any business lock.
+async function linkSharedOrderInTx(client, { workOrderId, actor = '', dryRun = false } = {}) {
   const { compareOrderCampaign } = require('../utils/orderToCampaignProjection');
   const lrq = require('./linkedRecruitQuota.service');
-  const client = await (db || getPool()).connect();
-  try {
-    await client.query('BEGIN');
     await lrq.lockWorkOrderCampaigns(client, [workOrderId]);
     const { rows: woRows } = await client.query('SELECT * FROM work_orders WHERE id = $1 FOR UPDATE', [workOrderId]);
     const wo = woRows[0];
-    if (!wo || wo.deleted_at) return await _abort(client, 404, { ok: false, code: 'order_not_found' });
-    if (!String(wo.source_review_order_id || '').trim()) return await _abort(client, 409, { ok: false, code: 'not_intranet_order', error: '인트라넷 리뷰오더로 들어온 오더가 아닙니다.' });
-    if (wo.bidir_state === 'on') return await _abort(client, 200, { ok: true, state: 'on', already: true, sync_version: Number(wo.sync_version) });
+    if (!wo || wo.deleted_at) return await _linkResult( 404, { ok: false, code: 'order_not_found' });
+    if (rawHasDualChannels(wo.product_options_json) && !dualRuntime.isDualChannelReady('roundtrip')) return _linkResult(409, { ok: false, ...DUAL_CHANNEL_NOT_READY });
+    if (!String(wo.source_review_order_id || '').trim()) return await _linkResult( 409, { ok: false, code: 'not_intranet_order', error: '인트라넷 리뷰오더로 들어온 오더가 아닙니다.' });
+    if (wo.bidir_state === 'on') return await _linkResult( 200, { ok: true, state: 'on', already: true, sync_version: Number(wo.sync_version) });
     const peek = await lrq.liveCampaignForWorkOrders(client, [wo.id]);
     if (!peek) {
       const { rows: arch } = await client.query('SELECT id FROM recruit_campaigns WHERE id = $1 AND archived_at IS NOT NULL', [String(wo.linked_campaign_id || '')]);
-      return await _abort(client, 409, arch.length
+      return await _linkResult( 409, arch.length
         ? { ok: false, code: 'campaign_archived', error: '마감(보관)된 공고의 오더는 연결하지 않습니다.' }
         : { ok: false, code: 'no_campaign', error: '연결된 모집공고가 없습니다.' });
     }
     const { rows: cRows } = await client.query('SELECT * FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [peek.id]);
     const { rows: opts } = await client.query('SELECT * FROM campaign_options WHERE campaign_id = $1 ORDER BY sort_order, id', [peek.id]);
     const diffs = compareOrderCampaign(wo, cRows[0], opts).filter(d => d.kind === 'diff');
-    if (dryRun) return await _abort(client, 200, { ok: true, dryRun: true, state: diffs.length ? 'diverged' : 'on', diffs });
+    if (dryRun) return await _linkResult( 200, { ok: true, dryRun: true, state: diffs.length ? 'diverged' : 'on', diffs });
     if (diffs.length) {
       await client.query(`UPDATE work_orders SET bidir_state = 'diverged', updated_at = NOW() WHERE id = $1`, [wo.id]);
-      await client.query('COMMIT');
-      return { status: 200, body: { ok: true, state: 'diverged', diffs } };
+        return { status: 200, body: { ok: true, state: 'diverged', diffs } };
     }
     const { rows: v } = await client.query(
       `UPDATE work_orders SET bidir_state = 'on', sync_version = ${NEXT_VERSION_SQL}, updated_at = NOW()
@@ -2324,17 +2377,28 @@ async function linkSharedOrder({ workOrderId, actor = '', dryRun = false, db } =
       `INSERT INTO work_order_shared_snapshots (work_order_id, sync_version, origin, op_id, state, actor)
        VALUES ($1, $2, 'link', '', $3::jsonb, $4)`,
       [wo.id, Number(saved.sync_version), JSON.stringify(readSharedState(saved)), String(actor || '')]);
-    await client.query('COMMIT');
     return { status: 200, body: { ok: true, state: 'on', sync_version: Number(saved.sync_version) } };
-  } catch (e) {
-    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
-    throw e;
-  } finally {
-    client.release();
-  }
 }
+async function linkSharedOrder(p = {}) {
+  const db = p.db || getPool();
+  const lifecycle = require('./dualChannelLifecycle.service');
+  // Preserve default-closed legacy behavior: readiness alone never enables writes.
+  const scope = dualRuntime.isDualChannelReady('roundtrip')
+    ? await lifecycle.discoverDualScope(db, [{ workOrderId: p.workOrderId }]) : null;
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    if (scope) { await lifecycle.lockDualScopeInTx(client, scope); await lifecycle.assertDualProvenanceUnchanged(client, scope); }
+    const out = await linkSharedOrderInTx(client, p);
+    await client.query(out.status === 200 && !p.dryRun ? 'COMMIT' : 'ROLLBACK');
+    return out;
+  } catch (e) { await client.query('ROLLBACK'); throw e; }
+  finally { client.release(); }
+}
+// This entry never acquires a client and never controls its caller's transaction.
+async function applySharedPatchInTx(client, p) { return applySharedPatch(p, client); }
 
 module.exports = {
-  applySharedPatch, linkSharedOrder, readSharedState, sanitizeRenames, alignIntranetNames, renamedParents, renameShapeError, RENAME_FIELD, MODE_FIELD, applyWrites, writablePath, projectToCampaignInTx, derivePayFields, validateQuantities, markStructureRows, STRUCTURE_FIELD, structureOpenFor, structurePermanentlyLocked,
+  applySharedPatch, applySharedPatchInTx, finishSharedPatchAfterCommit, linkSharedOrder, linkSharedOrderInTx, readSharedState, sanitizeRenames, alignIntranetNames, renamedParents, renameShapeError, RENAME_FIELD, MODE_FIELD, applyWrites, writablePath, projectToCampaignInTx, derivePayFields, validateQuantities, markStructureRows, STRUCTURE_FIELD, structureOpenFor, structurePermanentlyLocked,
   PHASE3_SHARED_FIELDS, PHASE5_SHARED_FIELDS, PHASE7Q_SHARED_FIELDS, PHASE7W_SHARED_FIELDS, PHASE7R_SHARED_FIELDS, PHASE7D_SHARED_FIELDS, deliverySwapOpen, PUSH_VIEW_KEYS, WRITABLE_BY_ORIGIN, INTRANET_EDITABLE_AFTER_ACCEPT, NEXT_VERSION_SQL, _pushBackKeys, _prefillOf,
 };

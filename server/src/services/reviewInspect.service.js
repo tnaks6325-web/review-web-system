@@ -46,8 +46,10 @@ const BLOCK_EXEMPT_CHANNELS = String(process.env.REVIEW_PRECHECK_EXEMPT || 'kaka
    이 갈래는 **켜져 있어도 절대 잠그지 않는다** — pass/warn 만 낸다. */
 const CONFIRM_VERIFY = process.env.REVIEW_CONFIRM_VERIFY !== '0';
 
+const inspectionDbContext=new (require('node:async_hooks').AsyncLocalStorage)();
 let _pool;
 function _db() {
+  if(inspectionDbContext.getStore())return inspectionDbContext.getStore();
   if (!_pool) _pool = require('../db/pool');
   return _pool;
 }
@@ -86,7 +88,12 @@ function expectedChannelKey(channel) {
  * @returns {{verdict:'pass'|'warn'|'block'|'skip', code:string, message:string,
  *            channel:string, confidence:number, blockable:boolean}}
  */
-function precheckPolicy({ classified, expectedChannel, slotKey = 'review', reviewType = null, workKind = null } = {}) {
+function precheckPolicy({ classified, expectedChannel, slotKey = 'review', reviewType = null, workKind = null, conditionSnapshot = null } = {}) {
+  if (conditionSnapshot) {
+    const slot = require('../utils/captureSlots').resolveSnapshotSlot(conditionSnapshot, slotKey);
+    slotKey = slot?.role || 'unknown';
+    expectedChannel = slot?.channel || null;
+  }
   const skip = (code) => ({ verdict: 'skip', code, message: '', channel: '', confidence: 0, blockable: false });
 
   if (!PRECHECK_ENABLED) return skip('disabled');
@@ -1189,12 +1196,27 @@ async function findAuthorReuse({ authorMask, fileId, sheetId, tabName, reviewerN
  * ★ 절대 throw 하지 않는다: 업로드는 이미 끝난 뒤의 후처리라, 여기서 예외가 오르면
  *   "파일은 올라갔는데 제출이 실패"로 보이는 사고가 난다(csBridge 와 같은 규율).
  */
-async function inspectSubmission({
+async function inspectSubmission(input={}){
+ const review=require('./dualChannelReview.service');
+ return review.withReviewFilesMutation({db:_db(),fileIds:[input.fileId],run:(db,context)=>inspectionDbContext.run(db,async()=>{
+  const row=context.submissions.find(s=>s.file_id===input.fileId&&s.order_submission_id);
+  if(row){
+   if(row.superseded_at)return {persisted:false,reason:'superseded'};
+   if(input.base64){const proof=require('./dualPurchaseProof.service');if(proof.sha(proof.bytes(input.base64))!==row.byte_sha256)return {persisted:false,reason:'review_file_changed'};}
+   input={...input,fileHash:row.byte_sha256};
+   const ctx=await review.inspectionContextForOrder(db,{orderSubmissionId:row.order_submission_id,slotKey:row.slot_key});
+   input={...input,...ctx,slotKey:row.slot_key,slotRole:row.evidence_role};
+  }
+  return inspectSubmissionCore(input);
+ })}).catch(e=>{logger.warn(`[reviewInspect] current evidence check failed: ${e.message}`);return {persisted:false,status:'unverifiable',error:e.message};});
+}
+async function inspectSubmissionCore({
   base64, mimeType, fileId, fileHash, sheetId, tabName, rowIndex, reviewerName, slotKey = 'review',
   slotRole = slotKey, captureVerdict = null,
   ...opts
 } = {}) {
-  const requestedSlotRole = String(slotRole || slotKey || 'review');
+  const dualSlot = opts.conditionSnapshot ? require('../utils/captureSlots').resolveSnapshotSlot(opts.conditionSnapshot, slotKey) : null;
+  const requestedSlotRole = String(dualSlot?.role || slotRole || slotKey || 'review');
   // 일반 리뷰검수를 꺼도 현금영수증 지급 증빙은 반드시 기록한다. 업로드는 허용하되
   // 판정 결과가 없으면 내부 확인 전까지 지급만 보류하는 독립 안전장치다.
   if (!fileId || !sheetId || !tabName || (!ENABLED && requestedSlotRole !== 'receipt')) return null;
@@ -1208,7 +1230,8 @@ async function inspectSubmission({
 
     // ★ 기대값을 **먼저** 읽는다 — 예시이미지 선택에 기대 채널이 필요하고,
     //   같은 samples 를 써야 review-upload 의 verifyCapture 와 캐시가 공유된다.
-    const exp = isReview ? await loadTabExpectations({ sheetId, tabName }) : { expectedChannel: null, productNames: [] };
+    let exp = isReview ? await loadTabExpectations({ sheetId, tabName }) : { expectedChannel: null, productNames: [] };
+    if (dualSlot) exp = { ...exp, expectedChannel: dualSlot.channel };
 
     /* ★★ 행 단위 리뷰타입(리뷰옵션 칸) — 혼합 오더(포토+구매확정)는 탭·공고 값이 mixed 라
        null 로 떨어지고, "어느 행이 무슨 유형인지"는 그 행의 작업옵션 칸에만 적혀 있다
@@ -1227,7 +1250,7 @@ async function inspectSubmission({
       try {
         // ★ 첨부 시점 1차 필터가 이미 같은 이미지를 판정했다면 캐시 히트 = AI 콜 0
         const { classifySubmissionImage } = require('./gemini.service');
-        inspectionSamples = opts.samples || await submissionSamples({ expectedChannel: exp.expectedChannel, slotKey: slotRole });
+        inspectionSamples = opts.samples || await submissionSamples({ expectedChannel: exp.expectedChannel, slotKey: dualSlot ? dualSlot.role : slotRole });
         cls = await classifySubmissionImage(base64, mimeType || 'image/jpeg', { samples: inspectionSamples });
       } catch (_) { cls = null; }   // fail-open
     }
@@ -1353,6 +1376,9 @@ async function inspectSubmission({
 }
 
 async function _upsertInspection(p) {
+ return require('./dualChannelReview.service').withReviewFilesMutation({db:_db(),fileIds:[p.fileId],run:(db,ctx)=>ctx.dual?inspectionDbContext.run(db,()=>_upsertInspectionCore(p)):_upsertInspectionCore(p)});
+}
+async function _upsertInspectionCore(p) {
   // 상품명만 확인한 사람 판정으로 다른 축의 미확인까지 종결하지 않는다. 영수증의 독립 정책은 유지한다.
   const otherUnknownSql = `NOT (EXCLUDED.checks ? 'receiptValidation') AND EXISTS (
     SELECT 1 FROM jsonb_each(EXCLUDED.checks - 'product') AS evidence
@@ -1456,7 +1482,10 @@ async function saveFileHash({ fileId, fileHash } = {}) {
  * 먼저 기존 정상 종결을 무효화해 다운로드·AI 실패 중에도 지급 게이트가 열리지 않게 하고,
  * 실패하면 pending 상태를 남겨 정기 스윕이 이어받는다.
  */
-async function reinspectReceiptFile({ fileId } = {}) {
+async function reinspectReceiptFile(input={}){
+ return require('./dualChannelReview.service').withReviewFilesMutation({db:_db(),fileIds:[input.fileId],run:db=>inspectionDbContext.run(db,()=>reinspectReceiptFileCore(input))});
+}
+async function reinspectReceiptFileCore({ fileId } = {}) {
   if (!fileId) return { ok: false, error: 'fileId가 필요합니다.' };
   const { rows } = await _db().query(
     `SELECT file_id, file_hash, sheet_id, tab_name, row_index, reviewer_name, slot_key
@@ -1639,15 +1668,22 @@ async function _giveUpStaleReceipts() {
  * ★ attempts 0 리셋 — 재시도 상한으로 unverifiable 종결된 건도 다시 본다.
  * ★ 스윕이 이미 도는 중이면 busy 로 알리고 초기화만 남긴다(10분 크론이 이어받는다).
  */
-async function reinspectTab({ sheetId, tabName, fileIds, limit = 100 } = {}) {
+function reinspectionFileIds(fileIds) {
+ return Array.isArray(fileIds)?[...new Set(fileIds.map(v=>String(v||'')).filter(Boolean))].slice(0,500):null;
+}
+async function reinspectTab(input={}){
+ const ids=reinspectionFileIds(input.fileIds);
+ if(!ids?.length && (!input.sheetId||!input.tabName))return reinspectTabCore(input);
+ const files=ids?.length?ids:(await _db().query('SELECT file_id FROM review_submissions WHERE sheet_id=$1 AND tab_name=$2',[input.sheetId,input.tabName])).rows.map(r=>r.file_id);
+ return require('./dualChannelReview.service').withReviewFilesMutation({db:_db(),fileIds:files,run:(db,ctx)=>ctx.dual?inspectionDbContext.run(db,()=>reinspectTabCore(input,true)):reinspectTabCore(input)});
+}
+async function reinspectTabCore({ sheetId, tabName, fileIds, limit = 100 } = {}, deferSweep=false) {
   /* ★★ 대상 지정 두 가지 — **작업(탭) 전체** 또는 **화면이 고른 건들(fileIds)**.
      후자는 "리뷰화면 아님만 일괄 재검수" 같은 **유형별 재검수**에 쓴다.
      ★ 유형 판정은 화면(`_riIssueTypes`)이 단일 출처다 — 서버에 유형 조건을 다시 만들면
        "칩 건수 ≠ 재검수 대상"으로 갈라진다. 그래서 서버는 **파일ID 목록만** 받는다.
      ★ 상한 500 — 화면 목록 자체가 최대 500건이라 그보다 클 수 없다(초과분은 잘라 보고). */
-  const ids = Array.isArray(fileIds)
-    ? [...new Set(fileIds.map(v => String(v || '')).filter(Boolean))].slice(0, 500)
-    : null;
+  const ids = reinspectionFileIds(fileIds);
   if (!ids || !ids.length) {
     if (!sheetId || !tabName) return { ok: false, error: 'sheetId, tabName 또는 fileIds 가 필요합니다.' };
   }
@@ -1664,6 +1700,7 @@ async function reinspectTab({ sheetId, tabName, fileIds, limit = 100 } = {}) {
         WHERE sheet_id = $1 AND tab_name = $2
           AND status IN ('fail', 'suspect', 'unverifiable')`,
       [sheetId, tabName]);
+  if(deferSweep)return {ok:true,reset:rowCount||0,deferred:true}; // cron rechecks each file after this lifecycle transaction commits.
   const cap = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 100);
   const { withJobLock } = require('../utils/jobLock');
   const sweep = await withJobLock('review_inspect_sweep',
@@ -2023,6 +2060,7 @@ function _statusAfterProductDecision(checks) {
 }
 
 async function _withProductDecisionTx(fn) {
+  if(inspectionDbContext.getStore())return fn(inspectionDbContext.getStore());
   const pool = _db();
   if (typeof pool.connect !== 'function') return fn(pool);
   const client = await pool.connect();
@@ -2076,7 +2114,10 @@ async function _saveProductClusterRule(client, { seed, clusterKey, verdict, note
  * 한 상품명 군집을 사람 판단 한 번으로 종결하고 pass/fail exact 규칙을 작업에 저장한다.
  * 건 전체 resolution 을 상품명 정답으로 쓰지 않는다: 다른 축이 남으면 그 건은 계속 open 이다.
  */
-async function resolveProductCluster({ fileId, verdict, note, by, automatic = false, evidenceToken } = {}) {
+async function resolveProductCluster(input={}){
+ return require('./dualChannelReview.service').withReviewFilesMutation({db:_db(),fileIds:[input.fileId],run:(db,ctx)=>ctx.dual?inspectionDbContext.run(db,()=>resolveProductClusterCore(input)):resolveProductClusterCore(input)});
+}
+async function resolveProductClusterCore({ fileId, verdict, note, by, automatic = false, evidenceToken } = {}) {
   const decision = String(verdict || '');
   if (!fileId || !PRODUCT_DECISIONS.includes(decision)) {
     return { ok: false, error: 'fileId와 올바른 상품명 판단이 필요합니다.' };
@@ -2223,9 +2264,12 @@ function _aliasCandidate(row) {
   return v && v.length >= 4 ? v : null;   // 너무 짧은 조각은 별칭으로 안 삼는다(아무거나 통과 방지)
 }
 
-async function resolveInspection({ fileId, by, resolution } = {}) {
+async function resolveInspection(input = {}) {
+ return require('./dualChannelReview.service').withReviewFilesMutation({db:_db(),fileIds:[input.fileId],run:db=>inspectionDbContext.run(db,()=>resolveInspectionInTx(input,db))});
+}
+async function resolveInspectionInTx({ fileId, by, resolution } = {}, db) {
   const rkind = _RESOLUTIONS.includes(resolution) ? resolution : null;
-  const { rows } = await _db().query(
+  const { rows } = await db.query(
     `UPDATE review_inspections
         SET status = 'resolved',
             resolution = CASE
@@ -2339,7 +2383,13 @@ async function notifyInspectionReject({ fileId, message, by, card } = {}) {
  * ★ adminOrMaster 전용(라우트) — 대량 종결은 되돌리기 어렵다.
  * ★ resolution 'ok' 면 상품명 의심 건들의 캡처 표기를 별칭으로 **한 번에** 학습한다.
  */
-async function resolveInspectionsBulk({ sheetId, tabName, resolution = 'ok', by } = {}) {
+async function resolveInspectionsBulk(input={}){
+ if(!input.sheetId||!input.tabName)return resolveInspectionsBulkCore(input);
+ // The core closes the whole tab, so the lock scope must also come from the whole tab (never a caller subset).
+ const files=(await _db().query('SELECT file_id FROM review_submissions WHERE sheet_id=$1 AND tab_name=$2',[input.sheetId,input.tabName])).rows.map(r=>r.file_id);
+ return require('./dualChannelReview.service').withReviewFilesMutation({db:_db(),fileIds:files,run:(db,ctx)=>ctx.dual?inspectionDbContext.run(db,()=>resolveInspectionsBulkCore(input)):resolveInspectionsBulkCore(input)});
+}
+async function resolveInspectionsBulkCore({ sheetId, tabName, resolution = 'ok', by } = {}) {
   if (!sheetId || !tabName) return { ok: false, error: 'sheetId, tabName이 필요합니다.' };
   const rkind = _RESOLUTIONS.includes(resolution) ? resolution : 'ok';
   const { rows } = await _db().query(

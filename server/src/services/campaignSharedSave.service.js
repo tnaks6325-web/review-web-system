@@ -29,7 +29,7 @@ const { planCampaignSharedEdit, driftFromCampaign, landingIsShared, campaignRowV
 // inflowGuideHtml = 옛 공고 공통 유입가이드(공유 저장의 유입 투영이 쓴다) — 편집 저장이 미리 읽은 옛 값으로 되돌리지 않게 함께 지킨다(검토 2026-10-20).
 // payAmount = 옵션 없는 공고의 상품 금액(5단계 — 공유 저장의 금액 투영이 쓴다 · 화면은 보내지 않는다).
 // productLines(상품 안내 글)는 여기 없다 — 창을 연 뒤 리뷰오더에서 금액이 바뀐 경우에만 따로($54) 지금 값을 남긴다(평소엔 화면 글이 저장된다).
-const WD_SHARED_KEYS = Object.freeze(['reviewGuide', 'specialNotes', 'reviewGuideImages', 'specialNotesImages', 'inflowType', 'inflowGuideHtml', 'payAmount']);
+const WD_SHARED_KEYS = Object.freeze(['reviewGuide', 'specialNotes', 'reviewGuideImages', 'specialNotesImages', 'inflowType', 'inflowGuideHtml', 'payAmount', 'dualChannelProduct']);
 
 function _wd(camp) {
   let wd = camp && camp.work_detail;
@@ -58,7 +58,7 @@ async function findBidirLink(db, campaignId) {
  * PUT /admin/:id 의 UPDATE 직전에 부른다.
  * @returns {Promise<{active:false} | {response:{status:number, body:object}} | {active:true, landingShared:boolean, participation:boolean, windowsWritable:boolean, shared:object|null, link:object}>}
  */
-async function applyCampaignSharedSave({ campaignId, body, actor, db } = {}) {
+async function applyCampaignSharedSave({ campaignId, body, actor, db, inTxClient = null } = {}) {
   const pool = db || getPool();
   const sw = await readBidirSwitch(pool);
   if (sw.campaign_edit !== 'on') return { active: false };
@@ -124,8 +124,9 @@ async function applyCampaignSharedSave({ campaignId, body, actor, db } = {}) {
   }
   if (!Object.keys(plan.mine).length) return strip(null, plan.windowsWritable);
 
-  const { applySharedPatch } = require('./sharedPatch.service');
-  const out = await applySharedPatch({
+  const { applySharedPatch, applySharedPatchInTx } = require('./sharedPatch.service');
+  const save = inTxClient ? p => applySharedPatchInTx(inTxClient, p) : applySharedPatch;
+  const out = await save({ db: pool,
     workOrderId: wo.id, mine: plan.mine, baseVersion: base, origin: 'campaign', conflictPolicy: 'last_writer',
     actor: actor || '리뷰웹 공고', opId: b.bidir_op_id ? String(b.bidir_op_id).slice(0, 120) : '',
   });
@@ -137,10 +138,10 @@ async function applyCampaignSharedSave({ campaignId, body, actor, db } = {}) {
       && !(b.work_detail && typeof b.work_detail === 'object' && Object.prototype.hasOwnProperty.call(b.work_detail, 'productLines') && nl(b.work_detail.productLines) !== nl(wd0.productLines))) {
     keepProductLines = true;
   }
-  return strip({
+  return { ...strip({
     sync_version: out.body.sync_version, changed: plan.changed,
     overwritten: out.body.overwritten || [], applied: out.body.applied || [], idempotent: out.body.idempotent === true,
-  }, plan.windowsWritable);
+  }, plan.windowsWritable), ...(out.afterCommit ? { afterCommit: out.afterCommit } : {}) };
 }
 
 /**

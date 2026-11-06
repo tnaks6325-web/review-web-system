@@ -48,6 +48,31 @@ const _EMBED_CTX = (() => {
 /** 미리보기(제출 차단) 단일 판정 — embed 컨텍스트 안에서만 참이 될 수 있다. */
 const _PREVIEW_MODE = !!(_EMBED_CTX && _EMBED_CTX.preview);
 let _activeIdentityContext = null;
+let _dualPurchaseController = null;
+let _dualPurchaseLoading = false;
+async function _initDualChannelPurchase() {
+  _dualPurchaseLoading = true;
+  const host = document.getElementById('ofOrderCardsWrap');
+  host.innerHTML = '<p role="status">두 구매처의 조건을 확인하고 있습니다…</p>';
+  const submit = document.getElementById('btnOrderFormSubmit');
+  if(submit) submit.style.display='none';
+  const add = document.getElementById('btnAddOrderCard');
+  if(add) add.style.display='none';
+  try {
+    if(!window.DualChannelPurchase) await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='/js/dual-channel-purchase.js?v=2';s.onload=resolve;s.onerror=reject;document.head.appendChild(s);});
+    const loadDetail=async()=>{
+      let response,detail;
+      try{response=await fetch(API_BASE_URL+'/api/campaign/'+encodeURIComponent(_EMBED_CTX.campId)+'/work-detail?phone8='+encodeURIComponent(_EMBED_CTX.holdPhone8)+'&holdToken='+encodeURIComponent(_EMBED_CTX.holdToken),{headers:_getAuthHeaders(),cache:'no-store'});detail=await response.json();}
+      catch(_){throw Error('현재 참여 정보를 불러오지 못했습니다. 인터넷 연결을 확인하고 다시 시도해주세요.');}
+      if(!response.ok || !detail.ok || !DualChannelPurchase.product(detail)) throw Error('동시진행 조건을 확인하지 못했습니다. 준비 중이거나 정보가 바뀌었습니다. 새로고침해주세요.');
+      if(String(detail.application?.id)!==String(_EMBED_CTX.app)) throw Error('참여 정보가 바뀌었습니다. 공고에서 다시 열어주세요.');
+      return detail;
+    };
+    const detail=await loadDetail();
+    _dualPurchaseController=DualChannelPurchase.mount(host,detail,{campaignId:_EMBED_CTX.campId,campaignApplicationId:_EMBED_CTX.app,campaignHoldToken:_EMBED_CTX.holdToken},DualChannelPurchase.apiRequest(API_BASE_URL,_getAuthHeaders),result=>_embedPost({type:'order-submitted',campaignHold:result.campaignHold}),{loadServerState:async()=>(await loadDetail()).dualPurchaseDraft});
+  } catch(e) { host.textContent=e.message || '동시진행 준비 중입니다. 새로고침해주세요.'; }
+  finally { _dualPurchaseLoading=false; }
+}
 let _identityContextPromise = null;
 let _orderInfoSuggestions = [];
 let _dismissedOrderInfoIds = {};
@@ -836,6 +861,7 @@ const _EMBED_FORM_KEY = (_EMBED_CTX && !_EMBED_CTX.preview && _EMBED_CTX.app) ? 
 /** 외부 쇼핑몰(쿠팡 앱 전환 등) 복귀 시 브라우저가 iframe을 리로드해도 입력값이 살아나도록 저장/복원 */
 function _embedSaveForm() {
   if (!_EMBED_CTX || !_EMBED_FORM_KEY) return;
+  if (new URLSearchParams(location.search).get('dual')==='1') return; // dedicated keyed input draft, never positional legacy restoration
   if (_BATCH) return;   // ★ 배치는 명의(phone8) 앵커로 따로 저장한다 — 위치 기반은 카드 수가 변하면 밀린다
   try {
     const scr = document.getElementById("screenOrderForm");
@@ -848,6 +874,7 @@ function _embedSaveForm() {
 }
 function _embedRestoreForm() {
   if (!_EMBED_CTX || !_EMBED_FORM_KEY) return;
+  if (new URLSearchParams(location.search).get('dual')==='1') return;
   if (_BATCH) return;   // ★ 위치 복원이 배치 카드를 밀어 채우면 "남의 명의 주문"이 된다(_batchRestoreForm 이 담당)
   try {
     const raw = sessionStorage.getItem(_EMBED_FORM_KEY);
@@ -2446,7 +2473,14 @@ function renderResults(results) {
  * items: Item 배열 (1건이면 [item], 다건이면 [item1, item2, ...])
  * 공통 진입점(옛 단건 openSubmit 은 2026-10-05 제거 — 결정 186 106번)
  */
+function _dualSlotsForItem(item) {
+  const slots=item?.captureSlots;
+  if(!item?.purchaseConditionSnapshot && !item?.purchase_condition_snapshot) return slots;
+  if(!Array.isArray(slots) || !slots.some(s=>s.key==='review'&&s.channel==='naver'&&s.role==='review') || !slots.some(s=>s.key==='slot2'&&s.channel==='coupang'&&s.role==='review')) throw Error('두 구매처 리뷰 정보를 불러오지 못했습니다. 새로고침해주세요.');
+  return slots;
+}
 function openSubmitMulti(items) {
+  try { items.forEach(_dualSlotsForItem); } catch(e) { showToast(e.message,'error'); return; }
   S.selectedRows = items;
   S.selectedRow  = items[0];          // 하위 호환
   S.filesByIdx   = {};
@@ -2458,7 +2492,7 @@ function openSubmitMulti(items) {
   // ── 캡처 슬롯 모드 판정 ──
   //   단일 행 + 탭에 다중 캡처 슬롯(capture_slots, 2개 이상)이 설정된 경우만 슬롯 모드.
   //   (다중 행 선택 시에는 기존 행별 슬롯 UI를 유지 — MVP는 슬롯×행 매트릭스 미지원)
-  const cs0 = items[0] && Array.isArray(items[0].captureSlots) ? items[0].captureSlots : null;
+  const cs0 = items[0] && Array.isArray(items[0].captureSlots) ? _dualSlotsForItem(items[0]) : null;
   S.captureSlots = (items.length === 1 && cs0 && cs0.length > 1) ? cs0 : null;
   const receiptSlot = S.captureSlots && S.captureSlots.find(_csIsReceiptSlot);
   S.receiptStepMode = !!receiptSlot;
@@ -2880,6 +2914,7 @@ function _renderCaptureSlots(item, slots, paneCard) {
  *   이미지·라벨은 서버 provider-info의 cashReceiptGuideList(채널 표 단일 출처) 그대로 —
  *   프론트에 채널 사본을 두지 않는다. 등록된 이미지가 없거나 조회 실패 = 아무것도 안 그림. */
 function _csIsReceiptSlot(slot) {
+  if(slot?.role) return slot.role==='receipt';
   return !!(slot && (slot.key === 'receipt' || /현금영수증|현영|지출증빙/.test(String(slot.label || ''))));
 }
 
@@ -3948,6 +3983,7 @@ async function _submitReviewSlots(item) {
           optionFolderName,
           memo,
           slotKey:          slot.key,
+          ...(item.purchaseConditionSnapshot || item.purchase_condition_snapshot ? {orderSubmissionId:item.orderSubmissionId,purchaseChannel:slot.channel,evidenceRole:slot.role,expectedBundleRevision:item.purchaseBundleRevision} : {}),
           files: fileData.map((b64, fi) => ({
             name:     reviewerName + "_" + (fi + 1),
             mimeType: files[fi].type || "image/jpeg",
@@ -3974,7 +4010,7 @@ async function _submitReviewSlots(item) {
         const rejectedF = flist.filter(r => r && r.rejected);
         const routedF = flist.filter(r => r && r.routed);
         const stayed = flist.some(r => r && r.fileId && !r.routed);
-        const suppliedReview = (slot.key === 'review' && stayed)
+        const suppliedReview = ((slot.key === 'review' || ((item.purchaseConditionSnapshot || item.purchase_condition_snapshot) && slot.role==='review')) && stayed)
           || routedF.some(r => r.routed && r.routed.to === 'review');
         if (suppliedReview && upRes.uploadBatchId) reviewUploadBatchId = upRes.uploadBatchId;
         slotOutcome[slot.key] = { stayed, movedTo: routedF.map(r => r.routed.to) };
@@ -4948,6 +4984,10 @@ function initOrderFormMode() {
 
   // ★ 임베드(M2): 크롬 숨김 + 높이 보고 + 입력값 저장/복원 활성화
   if (_EMBED_CTX) _activateEmbedMode();
+  if (_EMBED_CTX && !_PREVIEW_MODE && params.get('dual') === '1') {
+    _initDualChannelPurchase();
+    return true;
+  }
 
   // ★ 결정 243: "참여하기" 없이 연 구매양식이 인기 공고면 참여권을 먼저 확인(없으면 안내 · 막지 않음).
   //   양식은 그대로 뜨고 안내 창만 위에 얹는다(판정은 서버 단일 출처 · 실패는 조용히 지나감).
@@ -8927,6 +8967,8 @@ function _finishPreviewSubmit() {
 }
 
 async function submitOrderForm() {
+  if(_dualPurchaseController) return _dualPurchaseController.submitFromUi();
+  if(_dualPurchaseLoading || (_EMBED_CTX && new URLSearchParams(location.search).get('dual')==='1')) { showToast('동시진행 정보를 확인하지 못했습니다. 새로고침해주세요.','error'); return; }
   // ★ 최종 방어선: 재제출 등 팝업을 건너뛰는 내부 호출까지 포함해 미리보기에서는 주문이 절대 생성되지 않는다.
   if (_PREVIEW_MODE) { _finishPreviewSubmit(); return; }
   // ★ 결정 243: 인기 공고 양식 — 카드 수가 남은 참여권보다 많으면 한 번 안내(막지 않음 · [참여하러 가기]를 고르면 제출하지 않고 이동)

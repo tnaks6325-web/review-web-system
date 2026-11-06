@@ -92,8 +92,27 @@ async function t(name, fn) {
     assert.match(tb, /if \(advPayout\.batchSeqs\.has\(Number\(r\.seq\)\)\) \{ cur\[h\] = h === '은행' \? '인애드가 제품비 지급 — 보내지 마세요' : ''; continue; \}/);
     assert.match(tb, /if \(advPayout\.lockAll === 'unknown'\) \{ cur\[h\]/);
   });
-  await t('3b 업체 기록 — split 도 열고, 리뷰비 전용 회차는 막지 않고, 비워도 리뷰비 항목을 풀지 않는다', () => {
-    assert.match(tb, /if \(advMode === 'ours'\) \{ await client\.query\('ROLLBACK'\); return \{ ok: false, error: 'advertiser_payout_off' \}; \}/);
+  await t('3b 업체 기록 — split 도 열고, 리뷰비 전용 회차는 막지 않고, 비워도 리뷰비 항목을 풀지 않는다', async () => {
+    assert.match(tb, /if \(advMode === 'ours'\) \{ return \{ ok: false, error: 'advertiser_payout_off' \}; \}/);
+    assert.match(tb, /_runWorkdeskMutation\(input, client => setWorkdeskDepositDateInTx\(client,/,
+      '업체 입금 거부도 공통 거래 실행기로 반환해야 한다');
+    // 거래 제어가 공통 실행기로 이동했다. 거부값과 실제 ROLLBACK을 함께 실행 검증한다.
+    const vm = require('vm');
+    const wrapper = tb.match(/async function _runWorkdeskMutation\([\s\S]*?\n}/)?.[0];
+    assert.ok(wrapper, '공통 거래 실행기가 있어야 한다');
+    const calls = [];
+    const client = { query: async sql => { calls.push(sql); return { rows: [] }; }, release: () => calls.push('release') };
+    const run = vm.runInNewContext(`(${wrapper})`, {
+      getPool: () => ({ connect: async () => client }),
+      _discoverWorkdeskMutation: async () => ({}),
+      _lockWorkdeskMutationInTx: async () => {},
+    });
+    const denied = { ok: false, error: 'advertiser_payout_off' };
+    assert.strictEqual(await run({}, async actual => {
+      assert.strictEqual(actual, client, '같은 거래 연결이어야 한다');
+      return denied;
+    }), denied);
+    assert.deepStrictEqual(calls, ['BEGIN', 'ROLLBACK', 'release'], '업체입금 거부는 COMMIT 없이 반드시 되돌린다');
     assert.ok((tb.match(/NOT \$\{require\('\.\/payment\.service'\)\.feeOnlyItemSql\(\)\}/g) || []).length >= 3);
   });
   await t('3c 리뷰어 참여정보 팝업은 리뷰비 전용 항목을 페이백으로 보이지 않는다', () => {

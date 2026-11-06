@@ -41,6 +41,9 @@ function makeHidePool({ row, edits = [], editsThrow = false, tabRows }) {
   const answer = (sql, params) => {
     const q = String(sql).replace(/\s+/g, ' ').trim();
     log.push({ sql: q, params });
+    // 실제 삭제 경로의 사전 조회를 답해야 주문 취소 + 보충의 같은 tx 로 들어간다.
+    if (q.includes('SELECT cp.order_submission_id AS oid')) return { rows: row.order_submission_id ? [{ oid: row.order_submission_id }] : [] };
+    if (q.includes('SELECT order_submission_id FROM campaign_participants')) return { rows: [{ order_submission_id: row.order_submission_id }] };
     if (q.includes('SELECT id, seq, phone8, row_json, order_submission_id')) return { rows: [row] };
     if (q.includes('COALESCE(sheetless,FALSE) AS sheetless')) return { rows: [{ sheetless: true }] };
     if (q.includes('SELECT rc.id AS campaign_id')) return { rows: [{ campaign_id: 'camp-1', is_open: true, is_linked: false }] };
@@ -113,8 +116,15 @@ const insertOf = log => log.find(l => l.sql.startsWith('INSERT INTO campaign_par
     svc.__setPoolForTest(pool);
     const cancelPath = require.resolve('../src/services/orderCancellation.service');
     require.cache[cancelPath] = { id: cancelPath, filename: cancelPath, loaded: true,
-      exports: { cancelOrderSubmission: async (a) => { await a.beforeCancelCommit(await pool.connect()); return { ok: true, cleared: true }; } } };
-    await svc.hideWorkdeskRow({ sheetId: 's1', tabName: 't1', rowId: 'row-32', by: '망고', actorRole: 'staff' });
+      exports: { cancelOrderSubmission: async (a) => {
+        const client = await pool.connect();
+        await a.beforeCancelMutation(client);
+        await a.beforeCancelCommit(client);
+        return { ok: true, cleared: true };
+      } } };
+    const out = await svc.hideWorkdeskRow({ sheetId: 's1', tabName: 't1', rowId: 'row-32', by: '망고', actorRole: 'staff' });
+    ok('주문 취소 전 행 잠금 확인과 보충이 같은 client 에서 실행된다', out.ok === true
+      && log.some(l => l.sql.startsWith('SELECT order_submission_id FROM campaign_participants') && l.sql.endsWith('FOR UPDATE')));
     delete require.cache[cancelPath];
     const ins = insertOf(log);
     const rj = ins && JSON.parse(ins.params[4]);

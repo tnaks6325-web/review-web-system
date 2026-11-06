@@ -22,6 +22,19 @@ const MIG_LOCK_RETRIES = 3;
 // 실행 코드가 요구하는 컬럼(없으면 사용자 대면 500). 마이그레이션이 실패해도 listen 하면
 // /health 는 통과하고 해당 기능만 42703 으로 죽어 "무신호 전면장애"가 된다.
 const REQUIRED_SCHEMA = [
+  // 215 — dual purchase bundle, evidence lineage and payout identity.
+  ...['purchase_bundle_version', 'purchase_bundle_application_id', 'purchase_bundle_hash',
+    'purchase_condition_snapshot', 'purchase_identity_result', 'purchase_identity_review',
+    'purchase_bundle_revision'].map(c => ['order_submissions', c]),
+  ...['order_submission_id', 'purchase_channel', 'evidence_role', 'evidence_revision',
+    'byte_sha256', 'condition_snapshot_hash', 'superseded_at'].map(c => ['review_submissions', c]),
+  ...['order_submission_id', 'eligibility_fingerprint'].map(c => ['payment_batch_items', c]),
+  ...['order_submission_id', 'channel', 'order_num', 'user_id', 'recipient', 'phone',
+    'address', 'paid_amount', 'identity_result'].map(c => ['order_purchase_channels', c]),
+  ...['id', 'application_id', 'order_submission_id', 'channel', 'role', 'revision', 'file_id',
+    'byte_sha256', 'extraction_json', 'extraction_proof_hash', 'final_input_hash',
+    'condition_snapshot_hash', 'status', 'superseded_at', 'created_by',
+    'created_at'].map(c => ['purchase_capture_artifacts', c]),
   ['payment_batch_items', 'is_qna'],               // 212 — Q&A 입금 항목 표시(없으면 회차 담기 INSERT 실패)
   ['campaign_applications', 'qna_slot_id'],      // 211 — Q&A 신청 ↔ 날짜별 자리(없으면 Q&A 신청·인기 참여권 집계 실패)
   ['shared_sync_outbox', 'view_scope'],             // 206 — 담당자 단독 송신과 전체 공유 송신의 durable scope(없으면 공유 저장·송신 실패)
@@ -180,6 +193,8 @@ const REQUIRED_SCHEMA = [
 // 이 표 자체가 없으면 새 V2 탭에서 리뷰·입금 상태를 안전하게 처리할 수 없으므로
 // 컬럼 프리플라이트와 함께 부팅을 막는다.
 const REQUIRED_TABLES = [
+  'order_purchase_channels',                      // 215 — two purchases under one parent
+  'purchase_capture_artifacts',                   // 215 — staged/current/historical evidence
   'qna_slots',                                    // 210 — Q&A 날짜별 자리표(결정 321 · 없으면 무시트 탭 자동 정리·행 삭제가 깨진다)
   'payment_bank_rows',                            // 203 — 입금 통장 자동 대조(결정 293 · 없으면 입금관리 통장 확인이 죽는다)
   'payment_bank_sync',                            // 203 — 통장 받아 온 기록(같은 결정)

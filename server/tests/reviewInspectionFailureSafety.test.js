@@ -22,6 +22,8 @@ function service({ classify, write = 'ok', lookupFailure = '', rowTypeFailure = 
   const module = { exports: {} };
   const context = { module, exports: module.exports, Buffer, process: { env: {} }, require: key => {
     if (key === 'crypto') return crypto;
+    if (key === 'node:async_hooks') return require('node:async_hooks');
+    if (key === './dualChannelReview.service') return require('../src/services/dualChannelReview.service');
     if (key === '../utils/logger') return { logger: { warn() {}, info() {} } };
     if (key === './reviewTypeContext.service') return { CAMPAIGN_REVIEW_TYPE_LATERAL: '', reviewTypeForRow: async () => { if (rowTypeFailure) throw new Error('FAKE row type lookup failure'); return null; } };
     if (key === './workKindContext.service') return { CAMPAIGN_WORK_KIND_LATERAL: '' };

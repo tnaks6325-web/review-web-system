@@ -598,13 +598,13 @@ async function _ensureLinkedWorktableDeliveryColumns(campaignId, by = 'campaign'
 /** 구간 저장(replace-set). 배열 아님=미전달=변경 없음(옵션표와 같은 계약).
  *  ★ 옵션 저장과 동일한 잠금 계층(recruit_campaigns 행 FOR UPDATE)을 써서 apply 와 상호배제 —
  *    참여 판정이 "저장 중간 상태"의 구간표를 보는 창을 없앤다. 실패 시 전체 롤백(부분 저장 없음). */
-async function _saveFeeSchedules(campaignId, schedules) {
+async function _saveFeeSchedules(campaignId, schedules, inTxClient = null) {
   if (!Array.isArray(schedules)) return;
-  const client = await pool.connect();
+  const client = inTxClient || await pool.connect();
   try {
-    await client.query('BEGIN');
+    if (!inTxClient) await client.query('BEGIN');
     const { rows: lock } = await client.query('SELECT id FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [campaignId]);
-    if (!lock.length) { await client.query('ROLLBACK'); return; }
+    if (!lock.length) { if (!inTxClient) await client.query('ROLLBACK'); return; }
     const keep = schedules.map(s => s.effectiveFrom);
     for (const s of schedules) {
       await client.query(
@@ -622,12 +622,12 @@ async function _saveFeeSchedules(campaignId, schedules) {
     } else {
       await client.query('DELETE FROM campaign_fee_schedules WHERE campaign_id=$1', [campaignId]);
     }
-    await client.query('COMMIT');
+    if (!inTxClient) await client.query('COMMIT');
   } catch (e) {
-    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    try { if (!inTxClient) await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     throw e;
   } finally {
-    client.release();
+    if (!inTxClient) client.release();
   }
 }
 
@@ -3369,7 +3369,13 @@ async function _saveRequiredDeliveryMemo(id, value, row) {
 // POST /api/campaign/admin/create — 캠페인 생성
 router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    if (campaignHasDualChannels(req.body)) return res.status(409).json({ ok: false, ...DUAL_CHANNEL_NOT_READY });
+    const isDualCreate = campaignHasDualChannels(req.body);
+    const dualSettings = require('../services/dualChannelSettings.service');
+    if (isDualCreate) {
+      if (!require('../services/dualChannelRuntime.service').isDualChannelReady('settings')) return res.status(409).json({ ok: false, ...DUAL_CHANNEL_NOT_READY });
+      try { req.body = dualSettings.normalizeCampaignSettings(req.body); }
+      catch (e) { return res.status(409).json({ ok: false, code: e.code || 'invalid_dual_channel', error: e.message }); }
+    }
     const {
       title, channel, channel_custom, manager, time_range,
       delivery_type, review_fee, badges, notes, chat_url,
@@ -3518,12 +3524,22 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
        ★ 짝짓기는 역방향(work_orders.linked_campaign_id)까지 — linkedRecruitQuota 단일 출처(Codex PR #1632).
        ★ 오더 없이 만드는 공고(source_work_order_id 빈 값)는 종전 그대로 — 검사·잠금 없음. */
     const _srcWoId = String(source_work_order_id || '').trim();
-    const _insClient = _srcWoId ? await pool.connect() : null;
+    const _campaignId = _genCampaignId();
+    const lifecycle = require('../services/dualChannelLifecycle.service');
+    const dualScope = isDualCreate && _srcWoId ? await lifecycle.discoverDualScope(pool, [{ workOrderId: _srcWoId }]) : null;
+    const _insClient = (_srcWoId || isDualCreate) ? await pool.connect() : null;
+    let dualLink = null;
     let rows;
     let _qtyTierRows = [];   // ★ 결정 289 — 같은 트랜잭션에서 공고와 함께 저장
     try {
       if (_insClient) {
         await _insClient.query('BEGIN');
+        if (isDualCreate) {
+          // A new campaign is not discoverable yet. Reserve its ID with the
+          // discovered source scope, all sorted before L1 or row locks.
+          for (const id of [...new Set([_campaignId, ...(dualScope?.campaignIds || [])])].sort()) await _insClient.query(`SELECT pg_advisory_xact_lock(hashtext('dual_channel_lifecycle'), hashtext($1))`, [id]);
+          if (dualScope) await lifecycle.assertDualProvenanceUnchanged(_insClient, dualScope);
+        }
         const _lrq = require('../services/linkedRecruitQuota.service');
         await _lrq.lockWorkOrderCampaigns(_insClient, [_srcWoId]);
         const _dup = await _lrq.liveCampaignForWorkOrders(_insClient, [_srcWoId]);
@@ -3576,7 +3592,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
                $45,$46,$47,$48,$49,$50,$51)
        RETURNING *`,
       [
-        _genCampaignId(),
+        _campaignId,
         title.trim(),
         channel || '',
         channel_custom || '',
@@ -3631,12 +3647,37 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       ]
     ));
       if (_insClient && _qtyTierRows.length) await campaignQtyTiers.insertTiers(_insClient, rows[0].id, _qtyTierRows);   // ★ 결정 289
+      if (isDualCreate) {
+        const memo = require('../services/requiredDeliveryMemo.service').normalizeRequired(required_delivery_memo);
+        await _insClient.query('UPDATE recruit_campaigns SET required_delivery_memo=$2 WHERE id=$1', [rows[0].id, memo]);
+        rows[0].required_delivery_memo = memo;
+        await _saveFeeSchedules(rows[0].id, normalizeFeeSchedules(fee_schedules), _insClient);
+        if (rows[0].status === 'active') await _insClient.query('UPDATE recruit_campaigns SET published_at=NOW() WHERE id=$1', [rows[0].id]);
+        // Read-only discovery after INSERT validates the campaign just reserved
+        // above; it does NOT acquire a new upper lock beneath L1.
+        const createdScope = await lifecycle.discoverDualScope(_insClient, [{ campaignId: rows[0].id }]);
+        dualLink = await dualSettings.finishCampaignCreateInTx(_insClient, rows[0], req.admin?.name || '', createdScope);
+      }
       if (_insClient) await _insClient.query('COMMIT');
     } catch (insErr) {
       if (_insClient) await _insClient.query('ROLLBACK').catch(() => {});
       throw insErr;
     } finally {
       if (_insClient) _insClient.release();
+    }
+    if (isDualCreate) {
+      if (dualLink?.quota?.worktable) await require('../services/linkedRecruitQuota.service').rebuildWorktableProjection(dualLink.quota.worktable, 'dual-campaign-create');
+      if (dualLink?.afterCommit) {
+        await require('../services/sharedPatch.service').finishSharedPatchAfterCommit(dualLink.afterCommit);
+        delete dualLink.afterCommit;
+      }
+      // Existing optional work remains after the single durable business commit.
+      let blacklistWarning = null;
+      try { await require('../services/reviewerGate.service').blockBlacklistOnCampaign(rows[0].id, req.admin?.name || ''); }
+      catch (e) { blacklistWarning = '블랙리스트 자동 차단 실패 — 공고에서 다시 확인해 주세요'; logger.warn('[campaign/create] ' + e.message); }
+      if (hasWorkboardDisplayName) rows[0].workboard_display_name = await _saveWorkboardDisplayName({ sheetId: lSheet, tabName: lTab, displayName: workboardDisplayName });
+      require('../services/cashReceiptContext.service').invalidateCashReceiptContext(rows[0].linked_sheet_id, rows[0].linked_tab_name);
+      return res.json({ ok: true, data: rows[0], options: [], feeSchedules: await _loadFeeSchedules(pool, rows[0].id), bidirLink: dualLink, ...(blacklistWarning ? { blacklistWarning } : {}) });
     }
     require('../services/cashReceiptContext.service')
       .invalidateCashReceiptContext(rows[0].linked_sheet_id, rows[0].linked_tab_name);
@@ -3732,7 +3773,7 @@ _handlers.adminCreate = lastRouteHandler(router); // Track B 프록시가 이 �
 // PUT /api/campaign/admin/:id — 캠페인 수정
 router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    if (campaignHasDualChannels(req.body)) return res.status(409).json({ ok: false, ...DUAL_CHANNEL_NOT_READY });
+    if (campaignHasDualChannels(req.body) && !require('../services/dualChannelRuntime.service').isDualChannelReady('settings')) return res.status(409).json({ ok: false, ...DUAL_CHANNEL_NOT_READY });
     // ★ 리뷰어앱 공고수정 스코프 토큰은 전용 화이트리스트 핸들러로 격리(레드팀 #2/#3/#6)
     //   ★ 옵션(정원·금액) 편집도 이 조기 반환으로 차단됨 — _scopedCampaignEdit는 options를 읽지 않는다
     //     (레드 #4 검토: 약한 신원 리뷰어앱 토큰이 옵션 정원/지급액을 변조하는 파괴표면 차단).
@@ -3980,12 +4021,15 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
          ② 업체입금 끄기 = 화면이 확인을 받은 표시(transfer_bank_disable_ack)가 있을 때만. 없으면(업체입금을 모르는 옛 화면) 유지. */
     let _updTransferBank = transfer_bank;
     let _updBankKept = null;
+    let _dualUpdate = false;
     {
       const { rows: tbRows } = await pool.query(
         'SELECT transfer_bank, linked_sheet_id, linked_tab_name, channel, channel_custom, work_detail FROM recruit_campaigns WHERE id = $1', [id]);
       const tb0 = tbRows[0] || {};
       // 본문 미전송·설정 삭제·일반 공고 active 전환도 현재 저장본 기준으로 막는다.
-      if (campaignHasDualChannels(tb0)) return res.status(409).json({ ok: false, ...DUAL_CHANNEL_NOT_READY });
+      _dualUpdate = campaignHasDualChannels(tb0);
+      if (_dualUpdate && !require('../services/dualChannelRuntime.service').isDualChannelReady('settings')) return res.status(409).json({ ok: false, ...DUAL_CHANNEL_NOT_READY });
+      if (!_dualUpdate && campaignHasDualChannels(req.body)) return res.status(409).json({ ok: false, code: 'new_dual_work_required', error: '동시진행은 새 전용 공고로 만들어 주세요.' });
       const effSheet = intentionallyUnlinked ? '' : (lSheet || tb0.linked_sheet_id || '');
       const effTab = intentionallyUnlinked ? '' : (lTab || tb0.linked_tab_name || '');
       const tabChanged = effSheet !== String(tb0.linked_sheet_id || '') || effTab !== String(tb0.linked_tab_name || '');
@@ -4031,6 +4075,22 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         };
         const errs = _participationActivationErrors(eff);
         if (errs.length) return res.status(400).json({ ok: false, error: '참여형 활성화 불가: ' + errs.join(', ') });
+      }
+    }
+
+    if (_dualUpdate) {
+      try {
+        const out = await require('../services/dualChannelSettings.service').saveCampaignSettings({ db: pool, campaignId: id,
+          body: { ...req.body, start_date: _startDateEff, window_start: _wsEff, window_end: _weEff, transfer_bank: _updTransferBank === undefined ? undefined : _normTransferBank(_updTransferBank),
+            ...(badgesForStore == null ? {} : { badges: badgesForStore }),
+            ...(reviewMixForStore == null ? {} : { review_type_mix: reviewMixForStore }) }, actor: req.admin?.name || '' });
+        if (out.status === 200 && hasWorkboardDisplayName) out.body.data.workboard_display_name = await _saveWorkboardDisplayName({ sheetId: lSheet, tabName: lTab, displayName: workboardDisplayName });
+        if (out.status === 200) require('../services/cashReceiptContext.service').invalidateCashReceiptContext(out.body.data.linked_sheet_id, out.body.data.linked_tab_name);
+        return res.status(out.status).json(out.body);
+      } catch (e) {
+        if (e.response) return res.status(e.response.status).json(e.response.body);
+        if (e.code === 'dual_channel_not_ready' || e.code === 'invalid_dual_channel') return res.status(409).json({ ok: false, code: e.code, error: e.message });
+        throw e;
       }
     }
 
@@ -4210,7 +4270,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
                         (CASE WHEN $52::boolean AND $30::jsonb IS NULL THEN work_detail
                               WHEN $52::boolean
                               THEN $30::jsonb || COALESCE((SELECT jsonb_object_agg(k, work_detail->k)
-                                                             FROM unnest(ARRAY['reviewGuide','specialNotes','reviewGuideImages','specialNotesImages','inflowType','inflowGuideHtml','payAmount']
+                                                             FROM unnest(ARRAY['reviewGuide','specialNotes','reviewGuideImages','specialNotesImages','inflowType','inflowGuideHtml','payAmount','dualChannelProduct']
                                                                          || CASE WHEN $54::boolean THEN ARRAY['productLines'] ELSE ARRAY[]::text[] END) AS k
                                                             WHERE work_detail ? k), '{}'::jsonb)
                               ELSE $30::jsonb END)

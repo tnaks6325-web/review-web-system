@@ -28,13 +28,20 @@ async function recordResolution(client, row, resolution, by, reason) {
     row.source||null,row.first_seen_at||null,resolution,reason,String(by||'admin').slice(0,100),row.review_participation_id||null]);
 }
 
-async function closeWithoutReview({ db, sheetId, tabName, rowId, expectedRevision, confirm, by, deriveAnchor }) {
+async function closeWithoutReview(input){
+ if(!input.sheetId||!input.tabName||!UUID.test(String(input.rowId||''))||input.confirm!==true||!input.expectedRevision)throw fail('confirmation_required','선택한 행과 종결 내용을 확인한 뒤 다시 실행해 주세요.');
+ const p=(await input.db.query('SELECT seq FROM campaign_participants WHERE id=$1 AND sheet_id=$2 AND tab_name=$3',[input.rowId,input.sheetId,input.tabName])).rows[0];
+ const target=p?await require('./dualChannelReview.service').bundleTargetForRow(input.db,{sheetId:input.sheetId,tabName:input.tabName,rowIndex:p.seq}):null;
+ if(!target)return closeWithoutReviewCore(input);
+ return require('./dualChannelLifecycle.service').withDualLifecycleInTx({db:input.db,targets:[{orderSubmissionId:target.orderSubmissionId}],run:client=>closeWithoutReviewCore(input,client)});
+}
+async function closeWithoutReviewCore({ db, sheetId, tabName, rowId, expectedRevision, confirm, by, deriveAnchor }, prelocked) {
   if (!sheetId || !tabName || !UUID.test(String(rowId || '')) || confirm !== true || !expectedRevision) {
     throw fail('confirmation_required', '선택한 행과 종결 내용을 확인한 뒤 다시 실행해 주세요.');
   }
-  const c=await db.connect();
+  const c=prelocked||await db.connect();
   try {
-    await c.query('BEGIN');
+    if(!prelocked)await c.query('BEGIN');
     // Match cancellation's lock order: order first, participant second.
     const peek=(await c.query('SELECT order_submission_id FROM campaign_participants WHERE id=$1 AND sheet_id=$2 AND tab_name=$3', [rowId,sheetId,tabName])).rows[0];
     if (!peek) throw fail('row_not_found','선택한 참여행이 없습니다.');
@@ -51,7 +58,7 @@ async function closeWithoutReview({ db, sheetId, tabName, rowId, expectedRevisio
       throw fail('identity_missing','참여 식별정보가 없어 종결할 수 없습니다. 주문 연결을 확인해 주세요.');
     }
     const existing=await c.query(`SELECT 1 FROM review_closed_targets WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3`,[sheetId,tabName,row.seq]);
-    if (existing.rows.length) { await c.query('COMMIT'); return {ok:true,alreadyClosed:true}; }
+    if (existing.rows.length) { if(!prelocked)await c.query('COMMIT'); return {ok:true,alreadyClosed:true}; }
     const config=(await c.query('SELECT is_closed,sheetless,archived_rounds FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 FOR SHARE',[sheetId,tabName])).rows[0];
     const archived=await c.query('SELECT 1 FROM index_master_archive WHERE sheet_id=$1 AND tab_name=$2',[sheetId,tabName]);
     const archivedRound=String(row.round||'').trim() && String(config?.archived_rounds||'').split(',').map(s=>s.trim()).includes(String(row.round).trim());
@@ -64,7 +71,7 @@ async function closeWithoutReview({ db, sheetId, tabName, rowId, expectedRevisio
     const batches=await c.query(`SELECT 1 FROM payment_batch_items WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3 AND status IN ('pending','paid')
       AND NOT ${require('./payment.service').feeOnlyItemSql()} LIMIT 1`,[sheetId,tabName,row.seq]);
     if (batches.rows.length) throw fail('payment_in_progress','이체 처리 중이거나 입금된 건입니다. 정산 내역을 먼저 확인해 주세요.');
-    const files=await c.query(`SELECT 1 FROM review_submissions WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3 AND slot_key='review' AND completed_at IS NOT NULL LIMIT 1`,[sheetId,tabName,row.seq]);
+    const files=await c.query(`SELECT 1 FROM review_submissions WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3 AND (slot_key='review' OR to_jsonb(review_submissions)->>'evidence_role'='review') AND completed_at IS NOT NULL LIMIT 1`,[sheetId,tabName,row.seq]);
     if (files.rows.length) throw fail('review_record_exists','완료된 리뷰 첨부가 있습니다. 제출 내역을 먼저 확인해 주세요.');
     const fulfilled=await c.query(`SELECT 1 FROM reviewer_participations WHERE campaign_participant_id=$1
       AND lifecycle_status='active' AND review_obligation_status='fulfilled' LIMIT 1`,[row.id]);
@@ -101,8 +108,8 @@ async function closeWithoutReview({ db, sheetId, tabName, rowId, expectedRevisio
       row_json=coalesce(row_json,'{}'::jsonb)||jsonb_build_object($2::text,$3::text),built_at=NOW() WHERE id=$1`,[ri.id,header,CLOSED_LABEL]);
     if(row.order_submission_id) await c.query(`UPDATE review_reminder_states SET review_status='closed_no_review',closed_at=NOW(),close_reason='admin_confirmed_long_overdue',updated_at=NOW() WHERE order_submission_id=$1`,[row.order_submission_id]);
     await c.query(`UPDATE index_master SET submitted_count=(SELECT count(*) FROM review_index WHERE sheet_id=$1 AND tab_name=$2 AND is_submitted=TRUE) WHERE sheet_id=$1 AND tab_name=$2`,[sheetId,tabName]);
-    await c.query('COMMIT'); return {ok:true,resolution:'closed_no_review'};
-  } catch(e) {try{await c.query('ROLLBACK')}catch(_){} throw e;} finally {c.release();}
+    if(!prelocked)await c.query('COMMIT'); return {ok:true,resolution:'closed_no_review'};
+  } catch(e) {try{if(!prelocked)await c.query('ROLLBACK')}catch(_){} throw e;} finally {if(!prelocked)c.release();}
 }
 
 module.exports={CLOSED_LABEL,closeWithoutReview,recordResolution};

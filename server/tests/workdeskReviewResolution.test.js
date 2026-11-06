@@ -1,4 +1,6 @@
 'use strict';
+// Exercise embedded SQL even in isolated runs without a caller-provided path.
+process.env.PGLITE_MODULE = process.env.PGLITE_MODULE || require.resolve('@electric-sql/pglite');
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -170,7 +172,7 @@ function menuContext({ field='col:리뷰제출', role='staff', count=1, archived
           if (/UPDATE review_index SET/.test(sql)) throw Error('injected failure');
           return query(sql,params);
         },release(){}};
-        await assert.rejects(close(revision,{db:{connect:async()=>failing}}),/injected failure/);
+        await assert.rejects(close(revision,{db:{query,connect:async()=>failing}}),/injected failure/);
         assert.equal((await query('SELECT * FROM workdesk_review_resolutions')).rows.length,0);
         assert.equal((await query('SELECT row_json FROM campaign_participants')).rows[0].row_json['리뷰제출'],'');
       });

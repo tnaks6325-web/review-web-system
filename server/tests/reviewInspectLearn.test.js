@@ -28,6 +28,9 @@ function stubPool(handlers) {
   return {
     calls,
     query: async (sql, params) => {
+      // Ordinary fixtures have no dual bundle. Discovery must not consume UPDATE responses.
+      if (/^SELECT to_jsonb\(s\) AS submission FROM review_submissions s/.test(sql)
+          || /^SELECT file_id FROM review_submissions WHERE sheet_id=/.test(sql)) return { rows: [] };
       calls.push({ sql, params });
       const h = handlers[Math.min(i, handlers.length - 1)]; i++;
       return typeof h === 'function' ? h(sql, params) : (h || { rows: [], rowCount: 0 });

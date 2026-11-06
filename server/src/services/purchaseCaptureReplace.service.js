@@ -53,7 +53,8 @@ async function resolveRowOrder(db, { sheetId, tabName, rowId }) {
   const gid = (tc[0] && tc[0].gid) || '';
   const tnum = _digits(p.table_order_num);
   const { rows: cands } = await db.query(
-    `SELECT os.id, os.capture_file_id, os.capture_file_id_2, os.recipient, os.orderer, os.phone, os.order_num
+    `SELECT os.id, os.capture_file_id, os.capture_file_id_2, os.recipient, os.orderer, os.phone, os.order_num,
+            to_jsonb(os)->>'purchase_bundle_version' AS purchase_bundle_version
        FROM order_submissions os
       WHERE os.deleted_at IS NULL
         AND ((os.sheet_id = $1 AND os.tab_name = $2)
@@ -78,6 +79,7 @@ async function previewReplace({ sheetId, tabName, rowId }) {
   if (!sheetId || !tabName || !rowId) return { ok: false, error: 'bad_request' };
   const r = await resolveRowOrder(_db(), { sheetId, tabName, rowId });
   if (!r.ok) return { ok: false, error: r.error };
+  if(r.order.purchase_bundle_version)return {ok:false,error:'dual_capture_required',message:'구매처별 구매사진 교체를 이용해 주세요.'};
   return {
     ok: true,
     orderSubmissionId: r.order.id,
@@ -123,6 +125,7 @@ async function replaceCapture({ sheetId, tabName, rowId, imageBase64, mimeType, 
   const db = _db();
   const r = await resolveRowOrder(db, { sheetId, tabName, rowId });
   if (!r.ok) return { ok: false, error: r.error };
+  if(r.order.purchase_bundle_version)return {ok:false,error:'dual_capture_required',message:'구매처별 구매사진 교체를 이용해 주세요.'};
   const orderId = r.order.id;
   const before = String(r.order[col] || '');
   if (String(expectFileId || '') !== before) return { ok: false, error: 'capture_changed' };

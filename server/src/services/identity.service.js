@@ -144,7 +144,8 @@ async function addressSame(a, b, { name = '', phone = '', useGemini = true } = {
       { recipient: name, phone, address: a },
       { recipient: name, phone, address: b }
     );
-    if (r && r.ok) {
+    // A zero-confidence / parse-failed answer is not evidence of a different address.
+    if (r && r.ok && r.confidence !== 0 && r.parseFailed !== true && typeof r.isSamePerson === 'boolean') {
       return {
         verdict: r.isSamePerson ? 'match' : 'mismatch',
         score: h.score,

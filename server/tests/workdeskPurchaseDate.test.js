@@ -27,15 +27,20 @@ const { DATE_HEADER_KEYWORDS } = require('../src/services/campaignSchedule.servi
 
 function makePool(sc) {
   const q = [];
-  return {
+  const client = { query: (...args) => pool.query(...args), release() {} };
+  const pool = {
     q,
+    client,
+    async connect() { return client; },
     async query(sql, params) {
       const s = sql.replace(/\s+/g, ' ').trim();
       q.push({ s, params });
+      if (/SELECT order_submission_id, tab_gid FROM campaign_participants/.test(s)) return { rows: sc.noRow ? [] : [{ order_submission_id: sc.orderId || null, tab_gid: 'g1' }] };
+      if (/SELECT to_jsonb\(o\) AS submission/.test(s)) return { rows: [{ submission: { id: sc.orderId } }] };
       if (/COALESCE\(sheetless, FALSE\) AS s FROM tab_configs/.test(s)) return { rows: [{ s: sc.sheetless !== false }] };
-      if (/SELECT id, seq, tab_gid, order_submission_id FROM campaign_participants/.test(s))
+      if (/SELECT id,\s*seq,\s*tab_gid,\s*order_submission_id FROM campaign_participants/.test(s))
         return { rows: sc.noRow ? [] : [{ id: params[0], seq: 84, tab_gid: 'g1', order_submission_id: sc.orderId || null }] };
-      if (/SELECT id, seq FROM campaign_participants/.test(s))
+      if (/SELECT id, seq(?:, order_submission_id)? FROM campaign_participants/.test(s))
         return { rows: sc.noRow ? [] : [{ id: params[0], seq: 113 }] };
       if (/UPDATE order_submissions SET date_str/.test(s)) return { rowCount: 1, rows: [] };
       if (/SELECT \* FROM order_submissions/.test(s))
@@ -47,16 +52,17 @@ function makePool(sc) {
       return { rows: [], rowCount: 0 };
     },
   };
+  return pool;
 }
 
 async function run() {
-  const realWrite = so.writeOrderToWorktable;
+  const realWrite = so.writeOrderToWorktableInTx;
   const realMarkDate = st.markSheetlessPurchaseDate;
   const realMarkStatus = st.markStatusCell;
   const realRenumber = rn.renumberTab;
   const realRebuild = ledger.rebuildLedgers;
   let writeCalls = [], renumCalls = [], markStatusCalls = [];
-  so.writeOrderToWorktable = async (a) => { writeCalls.push(a); return { ok: true, written: true, seq: a.sheetRow }; };
+  so.writeOrderToWorktableInTx = async (client, a) => { writeCalls.push({ ...a, client }); return { ok: true, written: true, seq: a.sheetRow }; };
   rn.renumberTab = async (a) => { renumCalls.push(a); return { ok: true }; };
   ledger.rebuildLedgers = async () => ({ ok: true });
 
@@ -70,7 +76,10 @@ async function run() {
     const up = pool.q.find(x => /UPDATE order_submissions SET date_str/.test(x.s));
     assert.ok(up, '원장 date_str 를 먼저 고친다(안 고치면 다음 재기록이 옛 날짜를 도로 덮는다)');
     assert.equal(up.params[1], '7 / 27 (월)', '표기 = sheetDateStr(M / D (요일)) — 재번호 파서가 그대로 읽는다');
-    assert.ok(/last_edit_seq = GREATEST/.test(up.s), 'last_edit_seq 단조증가(stale 편집 보호 — order-edit 와 동일)');
+    assert.ok(/last_edit_seq\s*=\s*GREATEST/.test(up.s), 'last_edit_seq 단조증가(stale 편집 보호 — order-edit 와 동일)');
+    assert.equal(writeCalls[0].client, pool.client, '원장 SQL과 투영은 같은 빌린 client를 쓴다(pool과 별개)');
+    assert.ok(pool.q.findIndex(x => /pg_advisory_xact_lock/.test(x.s)) < pool.q.findIndex(x => /FOR UPDATE/.test(x.s)), '탭을 행보다 먼저 잠근다');
+    assert.ok(pool.q.findIndex(x => /^COMMIT$/.test(x.s)) > pool.q.indexOf(up), '원장·투영 뒤에 커밋');
     assert.equal(writeCalls.length, 1, '실행부 = writeOrderToWorktable 한 벌(사본 0)');
     assert.equal(writeCalls[0].sheetRow, 84, '기존 연결 행을 지목(빈 슬롯을 새로 먹지 않는다)');
     console.log('  A. 주문 연결 줄(원장 우선·한 벌) 통과');
@@ -83,6 +92,8 @@ async function run() {
     r = await svc.setWorkdeskPurchaseDate({ sheetId: 'S', tabName: 'T', rowId: 'row-2', date: '2026-07-29', by: 'm' });
     assert.equal(r.ok, true); assert.equal(r.via, 'cell');
     assert.equal(writeCalls.length, 0, '주문 없는 줄은 주문 경로를 타지 않는다');
+    const dateCell = pool.q.find(x => /UPDATE campaign_participants SET row_json/.test(x.s));
+    assert.deepEqual(dateCell.params, ['row-2', 'S', 'T', '구매일자', '7 / 29 (수)', 'm'], '주문 없는 줄도 실제 칸 SQL의 대상·값을 고정한다');
     assert.equal(renumCalls.length, 1, '기록 후 재번호(날짜 순 자리 이동)');
     st.markSheetlessPurchaseDate = realMarkDate;
     console.log('  B. 주문 없는 줄(칸 기록·재번호) 통과');
@@ -106,6 +117,8 @@ async function run() {
     assert.equal(r.ok, true); assert.equal(r.seq, 113);
     assert.equal(markStatusCalls.length, 1, '기록 실행부 = markStatusCell 한 벌(리뷰어 제출과 같은 경로)');
     assert.equal(markStatusCalls[0].kind, 'submit');
+    assert.equal(markStatusCalls[0].client, pool.client, '수동 완료 기록은 외부 트랜잭션과 같은 빌린 client');
+    assert.equal(markStatusCalls[0].deferRebuild, true, '장부 재생성은 커밋 뒤로 미룬다');
     assert.equal(markStatusCalls[0].value, '8/1', '명시 날짜가 그대로 칸에 기록된다');
     assert.ok(pool.q.some(x => /UPDATE campaign_participants SET is_submitted = TRUE/.test(x.s)), '물리 토글 즉시 일치');
     assert.ok(!pool.q.some(x => /source\s*=/.test(x.s)), "source 는 건드리지 않는다('manual' 이면 투영이 얼린다)");
@@ -168,7 +181,7 @@ async function run() {
     assert.ok(/review-submit-date', authMiddleware, adminOrMasterMiddleware/.test(routes), '리뷰제출일 백필 = adminOrMaster(증빙 없는 상태 확정)');
     console.log('  G. 라우트 배선 통과');
   } finally {
-    so.writeOrderToWorktable = realWrite;
+    so.writeOrderToWorktableInTx = realWrite;
     st.markSheetlessPurchaseDate = realMarkDate;
     st.markStatusCell = realMarkStatus;
     rn.renumberTab = realRenumber;

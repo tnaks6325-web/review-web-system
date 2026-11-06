@@ -526,10 +526,16 @@ async function writeOrderToWorktable({
   sheetId, tabName, tabGid = '', sheetRow, orderData = {},
   orderSubmissionId, workboardId = null, loginPhone8 = '', loginName = '', recovered = false,
   allowMissingQueueRecoveryOverflow = false, allowConfirmedCampaignOverflow = false,
-  requireEmptyOrSame = false,
-} = {}) {
+  requireEmptyOrSame = false, lockedScope = null,
+} = {}, suppliedClient = null) {
   if (!sheetId || !tabName || !orderSubmissionId) return { ok: false, reason: 'bad_request' };
-  const db = getPool();
+  const db = suppliedClient || getPool();
+  const marker=(await db.query("SELECT to_jsonb(os)->>'purchase_bundle_version' AS bundle_version FROM order_submissions os WHERE id=$1",[orderSubmissionId])).rows[0];
+  const dual=marker?.bundle_version==='1';
+  if(dual)requireEmptyOrSame=true;
+  const lifecycle=dual?require('./dualChannelLifecycle.service'):null;
+  const scope=dual?(suppliedClient?lockedScope:await lifecycle.discoverDualScope(db,[{orderSubmissionId}])):null;
+  if(dual&&suppliedClient&&!scope)throw new Error('Server locked dual scope required');
 
   // 새 통폐합 경로에서는 작업보드 ID가 진짜 대상이다. 전달된 예전 키는 그 작업보드에
   // 연결된 호환키로 다시 확정하고, 불일치·보관 보드는 쓰지 않는다.
@@ -554,13 +560,13 @@ async function writeOrderToWorktable({
 
   // ── 열 구성 = 장부(raw_sheet_tabs)에서. 시트 경로와 **같은 로더**를 쓴다(사본 0). ──
   let ctx = null;
-  try { ctx = await loadRawTabContext(sheetId, tabGid, tabName); } catch (_) { ctx = null; }
+  try { ctx = await loadRawTabContext(sheetId, tabGid, tabName, suppliedClient || undefined); } catch (_) { ctx = null; }
   let headers = (ctx && ctx.headers) || [];
   // 과거 작업보드는 RAW 탭 메타가 비어 있을 수 있다. 이미 준비된 작업보드
   // 슬롯의 row_json 열 이름을 같은 DB 원본으로 사용해 복구를 막지 않는다.
   if (!headers.length) {
     try {
-      const { rows: stored } = await getPool().query(
+      const { rows: stored } = await db.query(
         `SELECT row_json FROM campaign_participants
           WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
             AND row_json IS NOT NULL
@@ -596,7 +602,7 @@ async function writeOrderToWorktable({
   // ── 작업표 줄에 병합 ────────────────────────────────────────────────
   //   ★ 행 잠금(FOR UPDATE) — 같은 줄에 동시에 두 건이 들어오는 경우는 claim 이 막지만,
   //     재기록(reconcile)·관리자 편집과의 경합까지 직렬화한다.
-  const client = await db.connect();
+  const client = suppliedClient || await db.connect();
   let optionSuppressed = [];
   let optionUnmapped = '';
   let productSuppressed = [];
@@ -608,7 +614,13 @@ async function writeOrderToWorktable({
   //   **재제출 → 새 주문 → 작업보드 중복 줄**이 된다(2026-08-19 실사고).
   let seq = requestedSeq;
   try {
-    await client.query('BEGIN');
+    if (!suppliedClient) await client.query('BEGIN');
+    if(dual){
+      if(!suppliedClient)await lifecycle.lockDualScopeInTx(client,scope);
+      await lifecycle.assertDualProvenanceUnchanged(client,scope);
+      const discovered=await lifecycle.discoverDualScope(client,[{orderSubmissionId}]);
+      if(discovered.campaignIds.some(id=>!scope.campaignIds.includes(id)))throw new Error('Dual scope does not cover order');
+    }
     /* ★ 탭 단위 직렬화 — 빈 슬롯 선점과 줄 이어붙이기(MAX(seq)+1)가 겹쳐도 두 건이 같은
        번호를 집지 않는다. 트랜잭션 스코프라 누수 불가이고, 장부 재생성 락은 커밋 뒤
        별도 트랜잭션에서 잡히므로 중첩(=교착) 이 생기지 않는다. */
@@ -623,22 +635,30 @@ async function writeOrderToWorktable({
           sheetId, tabName, expectedWorkboardId: workboardId,
         });
       if (!affinity.workboardId || String(affinity.workboardId) !== String(workboardId)) {
-        await client.query('ROLLBACK');
+        if (!suppliedClient) await client.query('ROLLBACK');
         return { ok: false, reason: 'workboard_target_mismatch' };
       }
     }
     // 새 큐 경로에서는 직원 수정과 늦은 반영이 경합해도 최신 원장값이 이긴다. 기존 무시트
     // 즉시 반영은 호출 직전에 만든 orderData를 그대로 써서, 전환 전 동작과 쿼리 수를 보존한다.
-    if (workboardId) {
+    if (workboardId || dual) {
       const { rows: freshOrders } = await client.query(
         `SELECT * FROM order_submissions WHERE id = $1 AND deleted_at IS NULL FOR SHARE`,
         [orderSubmissionId]
       );
       if (!freshOrders.length || freshOrders[0].mirror_status === 'canceled') {
-        await client.query('ROLLBACK');
+        if (!suppliedClient) await client.query('ROLLBACK');
         return { ok: true, written: false, reason: 'deleted_or_canceled' };
       }
-      orderData = ledgerSvc._osRowToOrderData(freshOrders[0]);
+      orderData = dual
+        ? require('./dualPurchaseProjection.service').bundleWorkboardProjection(await require('./dualPurchaseProjection.service').loadCommittedOrderForProjection(client,orderSubmissionId))
+        : ledgerSvc._osRowToOrderData(freshOrders[0]);
+      if(dual){
+        const priorRows=(await client.query('SELECT seq,sheet_id,tab_name FROM campaign_participants WHERE order_submission_id=$1 AND deleted_at IS NULL FOR UPDATE',[orderSubmissionId])).rows;
+        if(priorRows.length>1)throw new Error('Dual order has multiple worktable rows');
+        if(priorRows.some(r=>r.sheet_id!==sheetId||r.tab_name!==tabName))throw new Error('Dual worktable target changed');
+        if(priorRows.length)seq=Number(priorRows[0].seq);
+      }
     }
     selectedOptKey = String(orderData.selectedOptKey || '').trim();
     scheduledOptionKey = selectedOptKey;
@@ -653,7 +673,7 @@ async function writeOrderToWorktable({
            줄 잠금 안에서 본다(바깥 확인과 잠금 사이에 다른 주문이 끼어도 남의 줄을 덮어쓰지 않는다). */
       if (requireEmptyOrSame && cur.length && cur[0].order_submission_id
           && String(cur[0].order_submission_id) !== String(orderSubmissionId)) {
-        await client.query('ROLLBACK');
+        if (!suppliedClient) await client.query('ROLLBACK');
         logger.warn(`[sheetlessOrder] 지정 줄이 다른 주문의 줄 — 쓰지 않음 tab=${tabName} seq=${seq} os=${orderSubmissionId}`);
         return { ok: false, reason: 'row_taken' };
       }
@@ -715,7 +735,7 @@ async function writeOrderToWorktable({
           // 이미 반영된 구매다. 새 줄을 만들지 않고 그 줄을 가리켜 돌려준다.
           //   ★ 기존 줄의 `order_submission_id` 는 **바꾸지 않는다** — 링크를 빼앗으면 원래 주문이
           //     "미반영"으로 되살아나 복구 잡이 다시 줄을 만든다(막으려던 사고의 재현).
-          await client.query('ROLLBACK');
+          if (!suppliedClient) await client.query('ROLLBACK');
           /* ★ 표 주문번호로 찾은 줄은 **링크가 비어 있을 수 있다**(담당자 수기 입력 줄).
                그때 `String(null)` 은 문자열 "null" 이 되어 로그·응답이 거짓을 말한다. */
           const dupOf = dup[0].order_submission_id ? String(dup[0].order_submission_id) : null;
@@ -728,7 +748,7 @@ async function writeOrderToWorktable({
       /* ★★ Q&A체험단(결정 321) — 줄 = 날짜별 자리. 자리는 신청 때 정해지고 주문은 **그 줄 번호로만** 들어온다.
          번호 없이 온 주문이 아무 빈 줄(다른 날·공개 자리)을 먹거나 맨 뒤에 줄을 덧붙이지 않게 여기서 멈춘다. */
       if (!cur.length && await require('./qnaSlots.service').isQnaTab(client, sheetId, tabName)) {
-        await client.query('ROLLBACK');
+        if (!suppliedClient) await client.query('ROLLBACK');
         logger.warn(`[sheetlessOrder] Q&A 탭 — 자리 번호 없는 주문은 줄에 넣지 않음 tab=${tabName} os=${orderSubmissionId}`);
         return { ok: false, reason: 'qna_slot_required' };
       }
@@ -817,7 +837,7 @@ async function writeOrderToWorktable({
           allowMissingQueueRecoveryOverflow, allowConfirmedCampaignOverflow, workboardId,
         });
         if (!confirmedOverflow) {
-          await client.query('ROLLBACK');
+          if (!suppliedClient) await client.query('ROLLBACK');
           logger.warn(`[sheetlessOrder] 빈 슬롯 없음 — 일반 주문은 작업표를 늘리지 않음 tab=${tabName} os=${orderSubmissionId}`);
           return { ok: false, reason: 'no_open_slot' };
         }
@@ -828,13 +848,13 @@ async function writeOrderToWorktable({
           `SELECT COALESCE(sheetless, FALSE) AS sheetless FROM tab_configs
             WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`, [sheetId, tabName]);
         if (!tc.length || !tc[0].sheetless) {
-          await client.query('ROLLBACK');
+          if (!suppliedClient) await client.query('ROLLBACK');
           return { ok: false, reason: 'no_open_slot' };
         }
         const appended = await require('./participants.service').appendSlot(client, {
           sheetId, tabName, tabGid: gid || null, workboardId, by: 'sheetless-order-append',
         });
-        if (!appended) { await client.query('ROLLBACK'); return { ok: false, reason: 'append_failed' }; }
+        if (!appended) { if (!suppliedClient) await client.query('ROLLBACK'); return { ok: false, reason: 'append_failed' }; }
         logger.warn(`[sheetlessOrder] 확정된 초과 주문을 정원 밖에 기록 tab=${tabName} seq=${appended.seq} os=${orderSubmissionId}`);
         cur = [appended];
       }
@@ -844,7 +864,7 @@ async function writeOrderToWorktable({
     // ★ v2 「상품 · 옵션」 표식은 같은 선택이면 일치로 본다(고른 줄이든 미리 정해진 줄이든 — 옵션 표기만 다르다)
     if (!relabelFrom && cur[0] && scheduledOptionKey && cur[0].option_text && String(cur[0].option_text) !== scheduledOptionKey
         && !(process.env.WORKTABLE_STAGED_OPTION_MATCH !== '0' && _stagedLabelMatches(cur[0].option_text, scheduledOptionKey))) {
-      await client.query('ROLLBACK');
+      if (!suppliedClient) await client.query('ROLLBACK');
       return { ok: false, reason: 'scheduled_option_mismatch' };
     }
     if (stagedFrom) {
@@ -898,7 +918,7 @@ async function writeOrderToWorktable({
       // UPDATE 대상이 사라졌다면 "완결"로 진행하면 안 된다. 이 함수의 성공은 실제 작업표 행과
       // 주문 원장이 연결됐다는 뜻이어야 한다.
       if (persisted.rowCount !== 1) {
-        await client.query('ROLLBACK');
+        if (!suppliedClient) await client.query('ROLLBACK');
         return { ok: false, reason: 'workboard_row_not_linked', message: '선점한 작업표 행을 갱신하지 못했습니다.' };
       }
       /* ★★ 결정 227 — 처음 채운 빈 줄에 담당자가 손으로 적어 둔 상품이 **실제로 산 상품과 다르면** 그 손 글씨를 내린다.
@@ -940,14 +960,14 @@ async function writeOrderToWorktable({
       // 행 번호가 명시됐어도 없는 번호에 일반 주문 행을 만들면, 오래된 행배정 값 하나가
       // 모집 인원을 넘는 빈 슬롯을 재생성한다. 위와 같은 확정 초과 주문만 예외로 허용한다.
       if (requestedSeq == null) {
-        await client.query('ROLLBACK');
+        if (!suppliedClient) await client.query('ROLLBACK');
         return { ok: false, reason: 'no_open_slot' };
       }
       const confirmedOverflow = await _canAppendConfirmedOverflowOrder(client, orderSubmissionId, {
         allowMissingQueueRecoveryOverflow, allowConfirmedCampaignOverflow, workboardId,
       });
       if (!confirmedOverflow) {
-        await client.query('ROLLBACK');
+        if (!suppliedClient) await client.query('ROLLBACK');
         logger.warn(`[sheetlessOrder] 없는 지정 행 거부 — 일반 주문은 작업표를 늘리지 않음 tab=${tabName} seq=${requestedSeq} os=${orderSubmissionId}`);
         return { ok: false, reason: 'no_open_slot' };
       }
@@ -965,7 +985,7 @@ async function writeOrderToWorktable({
       // 지정 행이 다른 행과 충돌해 INSERT가 0건이면, 종전에는 이후 단계가 그대로 진행되어
       // "큐 done + 작업표 미기록"이 될 수 있었다. 이 경우는 재시도 가능한 실패다.
       if (inserted.rowCount !== 1) {
-        await client.query('ROLLBACK');
+        if (!suppliedClient) await client.query('ROLLBACK');
         return { ok: false, reason: 'workboard_row_not_linked', message: '지정 작업표 행이 이미 점유되어 주문을 연결하지 못했습니다.' };
       }
     }
@@ -980,7 +1000,7 @@ async function writeOrderToWorktable({
       [sheetId, tabName, seq, orderSubmissionId, workboardId]
     );
     if (linkedRows.length !== 1) {
-      await client.query('ROLLBACK');
+      if (!suppliedClient) await client.query('ROLLBACK');
       return { ok: false, reason: 'workboard_row_not_linked', message: '작업표 행과 주문 원장 연결을 검증하지 못했습니다.' };
     }
     // 주문원장에 이미 확정된 코드 신원을 작업표 참여행에도 그대로 전파한다. 여기서 이름/번호로
@@ -1005,14 +1025,18 @@ async function writeOrderToWorktable({
     await require('./rowNumbering.service')
       .renumberTabInTx(client, { sheetId, tabName, by: 'auto-order' });
 
-    await client.query('COMMIT');
+    if (!suppliedClient) await client.query('COMMIT');
   } catch (err) {
-    try { await client.query('ROLLBACK'); } catch (_) {}
+    try { if (!suppliedClient) await client.query('ROLLBACK'); } catch (_) {}
+    if(suppliedClient)throw err;
     logger.error(`[sheetlessOrder] 작업표 기록 실패 tab=${tabName} seq=${seq}: ${err.message}`);
     return { ok: false, reason: 'write_failed', message: err.message };
   } finally {
-    client.release();
+    if (!suppliedClient) client.release();
   }
+
+  // InTx callers own the transaction and run projections only after their COMMIT.
+  if(suppliedClient)return {ok:true,seq,postCommit:{sheetId,tabName,orderSubmissionId,seq,by:'sheetless-order'}};
 
   // ── 장부 3권 재생성 — 이래야 리뷰어 검색·리뷰내역·홈 통계가 즉시 따라온다 ──
   let ledger = null;
@@ -1034,7 +1058,7 @@ async function writeOrderToWorktable({
   }
   try {
     const { recordParticipationLink } = require('./participation.service');
-    const { rows: identityRows } = await getPool().query(
+    const { rows: identityRows } = await db.query(
       `SELECT owner_reviewer_id AS "ownerReviewerId", participant_identity_id AS "participantIdentityId"
          FROM order_submissions WHERE id = $1`, [orderSubmissionId]
     );
@@ -1360,7 +1384,15 @@ async function repairWrittenMarkForBoardRows({ limit = 500, dryRun = true, by = 
   return result;
 }
 
+// No BEGIN/COMMIT/whole ROLLBACK or second pool client. Caller must hold lifecycle scope.
+async function writeOrderToWorktableInTx(client,args={}){
+  if(!client||typeof client.query!=='function')throw new TypeError('Transaction client required');
+  const result=await writeOrderToWorktable(args,client);
+  if(!result.ok){const e=new Error(result.message||result.reason);e.code=result.reason;throw e;}
+  return result;
+}
 module.exports = {
+  writeOrderToWorktableInTx,
   writeOrderToWorktable,
   repairWrittenMarkForBoardRows,
   REPAIRABLE_MIRROR_STATUSES,

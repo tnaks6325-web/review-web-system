@@ -299,6 +299,35 @@ async function _trashDriveFolders(folders, by) {
 function _db() { return _pool || (_pool = require('../db/pool')); }
 function __setPoolForTest(p) { _pool = p; }
 
+// 215 children have no sheet/tab columns. Resolve scope before deleting any parent.
+async function _dualDeleteScope(client, sheetId, tabName) {
+  const { rows } = await client.query(`SELECT to_regclass('public.order_purchase_channels') AS channels,
+    to_regclass('public.purchase_capture_artifacts') AS artifacts`);
+  const state = rows[0];
+  if (!state || (!state.channels && !state.artifacts)) return null;
+  if (!state.channels || !state.artifacts) throw new Error('Incomplete dual purchase schema');
+  const { rows: scope } = await client.query(`
+    WITH campaigns AS (
+      SELECT id FROM recruit_campaigns WHERE linked_sheet_id=$1 AND COALESCE(NULLIF(linked_tab_name,''),$2)=$2
+    ), applications AS (
+      SELECT id FROM campaign_applications WHERE campaign_id IN (SELECT id FROM campaigns)
+    ), orders AS (
+      SELECT id FROM order_submissions WHERE (sheet_id=$1 AND tab_name=$2)
+        OR sheet_id IN (SELECT 'campaign:' || id FROM campaigns)
+        OR purchase_bundle_application_id IN (SELECT id FROM applications)
+    )
+    SELECT ARRAY(SELECT id FROM applications) AS applications,
+      ARRAY(SELECT id FROM orders) AS orders,
+      EXISTS (SELECT 1 FROM order_submissions o WHERE o.id IN (SELECT id FROM orders)
+        AND NOT ((o.sheet_id=$1 AND o.tab_name=$2) OR o.sheet_id IN (SELECT 'campaign:' || id FROM campaigns)))
+      OR EXISTS (SELECT 1 FROM purchase_capture_artifacts a
+        WHERE (a.application_id IN (SELECT id FROM applications) AND a.order_submission_id IS NOT NULL AND a.order_submission_id NOT IN (SELECT id FROM orders))
+           OR (a.order_submission_id IN (SELECT id FROM orders) AND a.application_id NOT IN (SELECT id FROM applications))) AS conflicting`, [sheetId, tabName]);
+  if (!scope[0] || !Array.isArray(scope[0].applications) || !Array.isArray(scope[0].orders)) throw new Error('Unknown dual purchase delete scope');
+  if (scope[0].conflicting !== false) throw new Error('Conflicting dual purchase delete scope');
+  return scope[0];
+}
+
 function _args(sheetId, tabName) {
   if (!sheetId || !tabName) {
     const e = new Error('sheetId, tabName 이 필요합니다.');
@@ -466,6 +495,7 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, del
     const deleted = {};
     let totalRows = 0;
     let recordedTombstones = 0;   // 고아 캡처 정리용 좌표 기록 건수(청소 편의 — 삭제 결과에 영향 없음)
+    const dualScope = await _dualDeleteScope(client, sheetId, tabName);
 
     /* ★★ 두 번째 확인을 받은 경우에만 — 돈 기록도 함께 지운다(사용자 확정 2026-08-19).
        ★ 순서 계약: 대조 이력(119, batch_item_id 가 RESTRICT)을 **먼저** 지워야 회차 항목이 지워진다.
@@ -530,6 +560,29 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, del
       logger.warn(`[workTabDelete] 캡처 묘비 기록 실패(삭제는 계속) "${tabName}": ${tombErr.message}`);
     }
 
+    // Read all artifact history (including staged files) before application CASCADE.
+    // Unlike legacy optional tombstones, new evidence lookup errors must abort deletion.
+    if (dualScope) {
+      const tomb = await client.query(`INSERT INTO orphan_capture_tombstones
+        (file_id,file_name,sheet_id,tab_name,reviewer_name,slot_key,reason,recorded_by)
+        SELECT file_id,NULL,$1,$2,NULL,'capture','work_deleted',$3
+        FROM purchase_capture_artifacts
+        WHERE application_id=ANY($4::int[]) OR order_submission_id=ANY($5::uuid[])
+        ON CONFLICT (file_id) DO NOTHING`, [sheetId, tabName, String(by || 'admin').slice(0,100), dualScope.applications, dualScope.orders]);
+      recordedTombstones += tomb.rowCount || 0;
+      for (const [table, sql, params] of [
+        ['purchase_capture_artifacts', `DELETE FROM purchase_capture_artifacts WHERE application_id=ANY($1::int[]) OR order_submission_id=ANY($2::uuid[])`, [dualScope.applications,dualScope.orders]],
+        ['order_purchase_channels', `DELETE FROM order_purchase_channels WHERE order_submission_id=ANY($1::uuid[])`, [dualScope.orders]],
+      ]) {
+        const r = await client.query(sql, params);
+        if (r.rowCount) { deleted[table]=r.rowCount; totalRows+=r.rowCount; }
+        if (onlyIfUntouched === true && r.rowCount) {
+          await client.query('ROLLBACK');
+          return { ok:false, code:'not_untouched', reasons:[table], raced:true };
+        }
+      }
+    }
+
     /* ★★ 결정 254(코드리뷰 🔴): 자동 정리는 **지운 결과로 다시 검증**한다 — 판정과 삭제 사이에 잠금 없는 쓰기(셀 편집·메모·스레드 등)가
          커밋됐으면 그 행이 여기서 함께 지워진다. 사람이 쓰는 표에서 한 줄이라도 지워졌거나, 지운 줄 중 채워진 줄이 있으면 통째로 되돌린다. */
     const raced = [];
@@ -542,7 +595,9 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, del
         if (r && r.rowCount) { deleted[t] = r.rowCount; totalRows += r.rowCount; }
         continue;
       }
-      const r = await client.query(`DELETE FROM ${t} WHERE sheet_id=$1 AND tab_name=$2`, [sheetId, tabName]);
+      const r = dualScope && t === 'order_submissions'
+        ? await client.query('DELETE FROM order_submissions WHERE id=ANY($1::uuid[])', [dualScope.orders])
+        : await client.query(`DELETE FROM ${t} WHERE sheet_id=$1 AND tab_name=$2`, [sheetId, tabName]);
       if (r && r.rowCount) { deleted[t] = r.rowCount; totalRows += r.rowCount; }
       if (onlyIfUntouched === true && r && r.rowCount && UNTOUCHED_BLOCK_TABLES.includes(t)) raced.push(t);
     }

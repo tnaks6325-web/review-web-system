@@ -88,8 +88,9 @@ function _candidateQuery({ exact = false, scoped = false, lock = false } = {}) {
            WHERE i.status IN ('suspect','fail')
              AND i.checks->'duplicate'->>'verdict' = 'fail'
              AND s.file_id <> k.file_id
-             AND COALESCE(s.slot_key, 'review') = 'review'
-             AND COALESCE(k.slot_key, 'review') = 'review'
+             AND (COALESCE(s.slot_key, 'review') = 'review' OR (s.slot_key='slot2' AND to_jsonb(s)->>'evidence_role'='review'))
+             AND (COALESCE(k.slot_key, 'review') = 'review' OR (k.slot_key='slot2' AND to_jsonb(k)->>'evidence_role'='review'))
+             AND to_jsonb(s)->>'superseded_at' IS NULL AND to_jsonb(k)->>'superseded_at' IS NULL
              AND s.file_hash IS NOT NULL AND s.file_hash = k.file_hash
              AND ${_completionOrderSql('s')} IS NOT NULL
              AND ${_completionOrderSql('k')} IS NOT NULL
@@ -147,8 +148,10 @@ async function listConfirmedDuplicates({ sheetId, tabName, limit = PREVIEW_LIMIT
   };
 }
 
-async function _withTx(fn) {
+async function _withTx(fn, fileIds=[]) {
   const pool = _db();
+  const review=require('./dualChannelReview.service');
+  if((await review.fileMutationContext(pool,fileIds)).dual)return review.withReviewFilesMutation({db:pool,fileIds,run:fn});
   if (typeof pool.connect !== 'function') return fn(pool);
   const client = await pool.connect();
   try {
@@ -202,7 +205,7 @@ async function _removeOne({ fileId, matchFileId, sheetId, tabName, by } = {}) {
         `UPDATE review_submissions
             SET routed_from_slot = COALESCE(routed_from_slot, slot_key), slot_key = 'trashed',
                 routed_at = NOW(), routed_by = $2
-          WHERE file_id = $1 AND COALESCE(slot_key, 'review') = 'review'`,
+          WHERE file_id = $1 AND (COALESCE(slot_key, 'review') = 'review' OR (slot_key='slot2' AND to_jsonb(review_submissions)->>'evidence_role'='review'))`,
         [fileId, `dedup-auto:${VERSION}:${String(by || 'admin').slice(0, 60)}`]
       );
       if (Number(upd.rowCount) !== 1) throw new Error('제거 대상 원장 상태가 실행 중 변경되었습니다.');
@@ -220,7 +223,7 @@ async function _removeOne({ fileId, matchFileId, sheetId, tabName, by } = {}) {
       );
       event = row;
       return { ok: true, fileId, matchFileId };
-    });
+    }, [fileId,matchFileId]);
   } catch (e) {
     // Drive와 DB는 한 트랜잭션으로 묶을 수 없다. Drive 이동 뒤 DB가 실패하면 즉시 복구해
     // 원장에는 review인데 실제 파일만 휴지통인 반쪽 상태를 남기지 않는다.

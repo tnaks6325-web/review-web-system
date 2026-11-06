@@ -21,8 +21,33 @@ const {
   rawHasQtyTiers,
 } = require('../services/productOptions.service');
 const { rawHasDualChannels } = require('../utils/dualChannel');
+const dualRuntime = require('../services/dualChannelRuntime.service');
+const dualSettings = require('../services/dualChannelSettings.service');
 // 서버가 검증한 결과만 보관한다. HTTP 본문의 같은 이름 필드는 신뢰하지 않는다.
 const normalizedProductOptions = new WeakMap();
+function _normalizeRequestProductOptions(body, options = {}) {
+  const result = normalizeProductOptionsJson(body.product_options_json, { ...options, allowDualChannels: dualRuntime.isDualChannelReady('settings') });
+  if (rawHasDualChannels(result.json)) {
+    try { dualSettings.normalizeSettings(result.json, body); }
+    catch (err) { const wrapped = new ProductOptionsError(err.message); wrapped.code = err.code || wrapped.code; throw wrapped; }
+  }
+  return result;
+}
+function _prepareDualEditProductOptions(current, body) {
+  if (!rawHasDualChannels(current.product_options_json) && !rawHasDualChannels(body.product_options_json)) return;
+  try {
+    if (!rawHasDualChannels(current.product_options_json)) {
+      dualRuntime.assertDualChannelReady('settings');
+      const err = new Error('동시진행은 새 전용 작업으로 만들어 주세요.'); err.code = 'new_dual_work_required'; throw err;
+    }
+    const raw = body.product_options_json === undefined ? current.product_options_json : body.product_options_json;
+    const normalized = dualSettings.preserveSettings(current.product_options_json, raw, { ...current, ...body });
+    if (body.product_options_json !== undefined) {
+      body.product_options_json = normalized.json;
+      normalizedProductOptions.set(body, normalized.json);
+    }
+  } catch (err) { const wrapped = new ProductOptionsError(err.message); wrapped.code = err.code || wrapped.code; throw wrapped; }
+}
 const jwt = require('jsonwebtoken');
 const pool = require('../db/pool');
 const { authMiddleware, adminOrMasterMiddleware, isTrustedLoginToken } = require('../middleware/auth.middleware');
@@ -466,7 +491,7 @@ router.post('/intake', async (req, res, next) => {
     //   새 설정이 없으면 지금처럼 원문 그대로(동작 불변).
     if (!sourceContract && (rawHasQtyTiers(b.product_options_json) || rawHasDualChannels(b.product_options_json))) {
       try {
-        normalizedProductOptions.set(b, normalizeProductOptionsJson(b.product_options_json).json);
+        normalizedProductOptions.set(b, _normalizeRequestProductOptions(b).json);
       } catch (err) {
         if (err instanceof ProductOptionsError) {
           return res.status(400).json({ ok: false, code: err.code, error: err.message });
@@ -476,7 +501,7 @@ router.post('/intake', async (req, res, next) => {
     }
     if (sourceContract) {
       try {
-        normalizedProductOptions.set(b, normalizeProductOptionsJson(b.product_options_json, {
+        normalizedProductOptions.set(b, _normalizeRequestProductOptions(b, {
           requireStructured: sourceContract.workboardSchemaVersion === 2,
         }).json);
       } catch (err) {
@@ -992,6 +1017,10 @@ function _sourceSharedMine(b, derived, source) {
   for (const f of SHARED_FIELDS) if (Object.prototype.hasOwnProperty.call(v, f.key)) mine[f.key] = v[f.key];
   mine.product_options_json = v.product_options_json;
   mine.product_option = v.product_option;
+  // Source preflight already aligned the product before restoring channels.
+  // Preserve decision 285's summary rule as well: never accept IN names in RW.
+  if (rawHasDualChannels(derived.optionsJson) && require('../services/sharedPatch.service').alignIntranetNames(
+      { product_options_json: derived.optionsJson }, { product_options_json: b.product_options_json }, _bidirNameMap(b.bidir)).aligned) delete mine.product_option;
   mine.sales_id = String(b.sales_id || '').trim();
   mine.quote_id = String(b.quote_id || '').trim();
   mine.contract_number = String(b.contract_number || '').trim();
@@ -1260,7 +1289,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
       return res.status(400).json({ ok: false, error: '원본 리뷰오더 ID가 요청 경로와 일치해야 합니다.' });
     }
     try {
-      normalizedProductOptions.set(b, normalizeProductOptionsJson(b.product_options_json, {
+      normalizedProductOptions.set(b, _normalizeRequestProductOptions(b, {
         requireStructured: source.workboardSchemaVersion === 2,
       }).json);
     } catch (err) {
@@ -1287,9 +1316,24 @@ async function _intakeSourceRevisionHandler(req, res, next) {
       return res.status(404).json({ ok: false, error: '수정할 원본 작업오더를 찾을 수 없습니다.' });
     }
     let optionsJson = _requestOptionsJson(b);
+    // 결정 285: identify the RW product BEFORE either omitted per-product
+    // field is restored; IN's independent display name is not a deletion.
+    if (rawHasDualChannels(current.product_options_json) && optionsJson) {
+      optionsJson = require('../services/sharedPatch.service').alignIntranetNames(
+        { product_options_json: current.product_options_json },
+        { product_options_json: optionsJson }, _bidirNameMap(b.bidir)).mine.product_options_json;
+    }
     // ★ 결정 333 — 상품별 유입방식을 모르는 옛 인트라넷 창은 그 키를 빼고 보낸다 → 저장된 값을 그대로 둔다(공유 저장·종전 경로 둘 다 이 값을 쓴다).
     if (optionsJson && !require('../utils/unitInflow').inflowCapable(b)) {
       optionsJson = require('../utils/unitInflow').keepUnitInflowTypes(current.product_options_json, optionsJson);
+    }
+    try {
+      const edit = { ...b, product_options_json: optionsJson };
+      _prepareDualEditProductOptions(current, edit);
+      optionsJson = edit.product_options_json;
+    } catch (err) {
+      if (err instanceof ProductOptionsError) return res.status(400).json({ ok: false, code: err.code, error: err.message });
+      throw err;
     }
     const deliveryType = _canonicalDeliveryType(b.delivery_type, b.courier_proxy);
     const courierProxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
@@ -1983,6 +2027,11 @@ async function _intakeUpdateHandler(req, res, next) {
     if (cur[0].status === 'done') {
       return res.status(409).json({ ok: false, error: '완료된 작업오더는 수정할 수 없습니다.' });
     }
+    try { _prepareDualEditProductOptions(cur[0], b); }
+    catch (err) {
+      if (err instanceof ProductOptionsError) return res.status(400).json({ ok: false, code: err.code, error: err.message });
+      throw err;
+    }
 
     /* ★ 양방향 4단계-3(결정 275): 양방향 연결 오더의 공유 칸은 이 옛 경로(작업오더 ID 직접 수정)로 바꾸지 않는다 —
        공유 저장(applySharedPatch)을 건너뛰면 버전·스냅숏·공고 투영·인트라넷 송신이 모두 빠진다. 지금 인트라넷은 이 경로를
@@ -2015,7 +2064,7 @@ async function _intakeUpdateHandler(req, res, next) {
     //   새 설정이 없으면 동작 불변(빈 단계 키의 잠금 비교 모양 보호 — 결정 167).
     if (b.product_options_json !== undefined && (rawHasQtyTiers(b.product_options_json) || rawHasDualChannels(b.product_options_json))) {
       try {
-        b.product_options_json = normalizeProductOptionsJson(b.product_options_json).json;
+        b.product_options_json = _normalizeRequestProductOptions(b).json;
       } catch (err) {
         if (err instanceof ProductOptionsError) {
           return res.status(400).json({ ok: false, code: err.code, error: err.message });
@@ -2869,6 +2918,11 @@ _handlers.orderAdminEdit = async (req, res, next) => {
     const o = cur[0];
     if (o.deleted_at) return res.status(409).json({ ok: false, error: '삭제된 작업오더는 수정할 수 없습니다.' });
     if (o.status === 'done') return res.status(409).json({ ok: false, error: '완료된 작업오더는 수정할 수 없습니다.' });
+    try { _prepareDualEditProductOptions(o, b); }
+    catch (err) {
+      if (err instanceof ProductOptionsError) return res.status(400).json({ ok: false, code: err.code, error: err.message });
+      throw err;
+    }
     /* ★★ Q&A체험단(결정 321) — 자리표가 깔린 오더는 이 화면에서도 작업표 칸(건수·상품·하루 건수·공개 문구·시작일)을 바꾸지 않는다.
        같은 값 재전송은 통과(작업표 칸 잠금과 같은 비교). 리뷰·블로그 오더는 자리표가 없어 종전 그대로. */
     if (await _qnaCalendarLocked(o)) {
@@ -2925,7 +2979,7 @@ _handlers.orderAdminEdit = async (req, res, next) => {
     // ★ 관리자 수정도 구매수량 단계·동시진행 설정은 공통 검증을 거친다. 없으면 동작 불변.
     if (b.product_options_json !== undefined && (rawHasQtyTiers(b.product_options_json) || rawHasDualChannels(b.product_options_json))) {
       try {
-        b.product_options_json = normalizeProductOptionsJson(b.product_options_json).json;
+        b.product_options_json = _normalizeRequestProductOptions(b).json;
       } catch (err) {
         if (err instanceof ProductOptionsError) return res.status(400).json({ ok: false, code: err.code, error: err.message });
         throw err;

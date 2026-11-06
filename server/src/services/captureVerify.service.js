@@ -28,7 +28,8 @@ const ENABLED = process.env.CAPTURE_VERIFY !== '0';
  *   그래서 리뷰타입을 함께 받아 리뷰 자리의 기대를 바꾼다.
  * ★ reviewType 이 없으면(미지정·판정 실패) 종전과 **완전히 동일**하다.
  */
-function _expectedKind(slotKey, reviewType) {
+function _expectedKind(slotKey, reviewType, conditionSnapshot) {
+  if (conditionSnapshot) return require('../utils/captureSlots').resolveSnapshotSlot(conditionSnapshot, slotKey)?.role || null;
   if (slotKey === 'receipt') return 'receipt';            // 영수증 자리는 리뷰타입과 무관
   if (slotKey === 'confirm') return 'purchase_confirm';   // 구매확정 + 현영 2슬롯일 때
   if (slotKey === 'review') return reviewType === 'confirm' ? 'purchase_confirm' : 'review';
@@ -41,8 +42,8 @@ function _expectedKind(slotKey, reviewType) {
  *            confidence:number, message:string, businessNo:string, amount:number}}
  *   status: ok=형식 일치 / mismatch=명백히 다른 형식(경고) / skipped=판정 안 함(통과)
  */
-async function verifyCapture({ base64, mimeType, slotKey, companyBusinessNo, samples, reviewType } = {}) {
-  const expected = _expectedKind(slotKey, reviewType);
+async function verifyCapture({ base64, mimeType, slotKey, companyBusinessNo, samples, reviewType, conditionSnapshot } = {}) {
+  const expected = _expectedKind(slotKey, reviewType, conditionSnapshot);
   const skip = (message) => ({ status: 'skipped', expected, got: null, confidence: 0, message, businessNo: '', amount: 0, sure: false });
   if (!ENABLED || !expected || !base64) return skip('');
 
