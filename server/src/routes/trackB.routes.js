@@ -4042,6 +4042,12 @@ router.get('/payment/batch/:id/file', authMiddleware, adminOrMasterMiddleware, a
       const receiptCheck = await paymentSvc.checkBatchReceiptEligibility(out, { db: client, lock: true, lockedScope: dualScope });
       if (!receiptCheck.ok) {
         await client.query('ROLLBACK');
+        // 결정 349 ④ — 동시진행 작업표의 묶음 아닌 항목은 영수증 문제가 아니다(사람이 할 일이 다르다).
+        if (receiptCheck.blocked.some(x => (x.reasons || []).some(r => r === 'dual_bundle_incomplete' || r === 'dual_bundle_check_failed'))) {
+          return res.status(409).json({ ok: false, code: 'dual_bundle_incomplete',
+            error: '네이버·쿠팡 동시진행 작업인데 두 구매처가 묶이지 않은 주문이 들어 있습니다. 이 대량이체를 취소하고, 그 주문을 동시진행으로 보완한 뒤 새 대량이체를 만들어 주세요.',
+            blocked: receiptCheck.blocked.map(x => ({ reviewerName: x.reviewerName })) });
+        }
         return res.status(409).json({ ok: false, code: 'cash_receipt_not_verified',
           error: '대량이체 생성 후 현금영수증 상태가 변경되었습니다. 이 대량이체를 취소하고 검수 완료 후 새 대량이체를 만들어 주세요.',
           blocked: receiptCheck.blocked.map(x => ({ reviewerName: x.reviewerName })) });

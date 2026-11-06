@@ -135,6 +135,8 @@ async function withStubPool(handler, run) {
           amountCells: opts.amountCells || null,
         }] };
       }
+      // 결정 349 ④ 동시진행 작업표 판정(discoverDualScope)이 읽는 공고 행 모양 — 「있고 동시진행 아님」(검사 의미 불변)
+      if (/to_jsonb\(c\) AS campaign/.test(sql)) return { rows: (opts.campRows || []).map(c => ({ campaign: { id: c.id } })) };
       if (/FROM recruit_campaigns c/.test(sql)) return { rows: opts.campRows || [] };
       if (/campaign_fee_schedules/.test(sql)) return { rows: [] };
       if (/FROM order_submissions/.test(sql)) return { rows: opts.orderRows || [] };
