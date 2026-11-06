@@ -77,6 +77,7 @@
   const DIRTY = new Set();        // 다시 나눠야 할 줄
   let CLS_TIMER = null;
   let CLS_RUN = null;
+  let RL = null;       // ★ 결정 348: 열린 「리뷰어 연결」 팝오버 { row, q, items, hasMore, state, err, seq, timer } — 한 번에 하나
   const CLASSIFY_DELAY_MS = 500;  // 입력을 멈추고 이만큼 지나면 나눈다(붙여넣기·칸 벗어남은 즉시)
   const MAX_ROWS = 50;            // 서버 미리보기·제출 한 번 상한(MAX_LINES)과 같다 — 오붙여넣기 수백 건 방지
   const CAPTURE_WAIT_MS = 25000;  // 제출이 캡처 줄이기·판독을 기다리는 상한(결정 236)
@@ -85,8 +86,11 @@
     return { uid: ++SEQ, text: String(text || ''), ver: 0, done: 0, parsing: false, netErr: '',
       ok: false, fields: {}, errors: [], warnings: [], repairs: [], missing: [], aiRepaired: false, raw: '',
       capture: null, capJob: null, capBusy: false, extract: null, extractPending: null,
-      applications: [], targetApplicationId: '', optKey: '', optFullAck: false, productWarn: null };
+      applications: [], targetApplicationId: '', optKey: '', optFullAck: false, productWarn: null,
+      link: _autoLink() };   // ★ 결정 348: 리뷰어 연결 — 기본 자동(종전)
   }
+  /** 리뷰어 연결 기본값 = 자동(종전 방식). existing 이면 reviewerId·이름·뒤 4자리·고를 때의 연락처 끝 8자리(p8)를 함께 둔다. */
+  function _autoLink() { return { mode: 'auto', reviewerId: '', name: '', phoneTail: '', p8: '' }; }
   const _blank = r => !String((r && r.text) || '').trim();
   const _oneLine = s => String(s || '').replace(/[\r\n]+/g, ' ').trim();
   const _filled = () => ROWS.filter(r => !_blank(r));
@@ -183,6 +187,35 @@
 #moOvl .mo-ack{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--mo-orange);cursor:pointer;white-space:nowrap;flex:none}
 #moOvl .mo-ack input{margin:0}
 #moOvl .mo-auto{font-size:12px;color:var(--mo-text-2)}
+/* 리뷰어 연결 칸(결정 348) — 누르면 작은 팝오버 · 기본 「자동」 */
+#moOvl .mo-lk{display:flex;align-items:center;gap:4px;width:100%;height:24px;margin:0;padding:0 5px;font:inherit;font-size:12px;color:var(--mo-text);
+  background:var(--mo-bg);border:0;border-radius:5px;box-shadow:var(--mo-btn-shadow);cursor:pointer;min-width:0;text-align:left}
+#moOvl .mo-lk .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#moOvl .mo-lk.auto{color:var(--mo-text-2)}
+#moOvl .mo-lk.existing{color:var(--mo-accent)}
+#moOvl .mo-lk.new{font-weight:600}
+#moOvl .mo-lk:focus-visible,#moOvl .mo-lk.open{outline:none;box-shadow:0 0 0 2px var(--mo-accent-ring)}
+#moOvl .mo-rl{position:fixed;z-index:10;width:320px;background:var(--mo-bg);border-radius:10px;box-shadow:var(--mo-sheet-shadow);display:flex;flex-direction:column;overflow:hidden}
+#moOvl .mo-rl-hd{display:flex;align-items:center;gap:8px;padding:10px 12px 8px}
+#moOvl .mo-rl-hd .t{font-size:13px;font-weight:700;white-space:nowrap}
+#moOvl .mo-rl-hd .s{flex:1;min-width:0;font-size:12px;color:var(--mo-text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#moOvl .mo-rl-q{display:flex;align-items:center;gap:6px;margin:0 12px 8px;padding:0 8px;height:28px;border-radius:6px;background:var(--mo-fill)}
+#moOvl .mo-rl-q i{font-size:12px;color:var(--mo-text-2)}
+#moOvl .mo-rl-q .mo-in,#moOvl .mo-rl-q .mo-in:focus,#moOvl .mo-rl-q .mo-in:hover{height:28px;padding:0;background:transparent;box-shadow:none}
+#moOvl .mo-rl-q:focus-within{box-shadow:0 0 0 2px var(--mo-accent-ring)}
+#moOvl .mo-rl-list{max-height:252px;overflow:auto;border-top:0.5px solid var(--mo-line-2)}
+#moOvl .mo-rl-it{display:flex;align-items:center;gap:8px;width:100%;height:28px;margin:0;padding:0 12px;border:0;border-radius:0;background:var(--mo-bg);
+  font:inherit;font-size:13px;color:var(--mo-text);cursor:pointer;text-align:left;box-shadow:inset 0 -0.5px 0 var(--mo-line-2)}
+#moOvl .mo-rl-it:hover,#moOvl .mo-rl-it:focus{background:var(--mo-accent-bg);outline:none}
+#moOvl .mo-rl-it .nm{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#moOvl .mo-rl-it .ph,#moOvl .mo-rl-it .ac{flex:none;font-size:12px;color:var(--mo-text-2);font-variant-numeric:tabular-nums;white-space:nowrap}
+#moOvl .mo-rl-it .sp{flex:1}
+#moOvl .mo-rl-it .fa-check{color:var(--mo-accent);font-size:12px}
+#moOvl .mo-rl-msg{padding:10px 12px;font-size:12px;color:var(--mo-text-2);line-height:1.5}
+#moOvl .mo-rl-msg.e{color:var(--mo-red)}
+#moOvl .mo-rl-ft{display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:0.5px solid var(--mo-line-2)}
+#moOvl .mo-rl-ft .sp{flex:1}
+#moOvl .mo-rl-ft .mo-btn.on{box-shadow:0 0 0 2px var(--mo-accent-ring)}
 /* 캡처 칸 — 작은 미리보기 + 빼기 · 비었으면 받는 자리 */
 #moOvl .mo-cap{display:flex;align-items:center;gap:4px;height:24px;border-radius:5px;padding:0 4px;outline:none;cursor:pointer;color:var(--mo-text-2);font-size:12px}
 #moOvl .mo-cap.empty{box-shadow:inset 0 0 0 0.5px var(--mo-line)}
@@ -228,6 +261,11 @@
   #moOvl col.mo-c-opt.ack{width:236px !important}   /* 초과 확인 줄이 있으면 상품 칸을 넓힌다(표는 옆으로 밀기 · 한 줄 유지) */
   #moOvl .mo-ack input{width:20px;height:20px}
   #moOvl .mo-tbl th.stk2,#moOvl .mo-tbl td.stk2,#moOvl .mo-tbl th.stkr,#moOvl .mo-tbl td.stkr{position:static;box-shadow:inset 0 -0.5px 0 var(--mo-line-2)}
+  #moOvl .mo-lk{height:32px}
+  #moOvl .mo-rl{left:0;right:0;top:auto;bottom:0;width:auto;max-height:80vh;border-radius:12px 12px 0 0;padding-bottom:env(safe-area-inset-bottom)}
+  #moOvl .mo-rl-q,#moOvl .mo-rl-q .mo-in,#moOvl .mo-rl-q .mo-in:focus,#moOvl .mo-rl-q .mo-in:hover{height:36px}
+  #moOvl .mo-rl-it{height:44px}
+  #moOvl .mo-rl-list{max-height:50vh}
 }
 `;
     document.head.appendChild(st);
@@ -240,6 +278,7 @@
     CTX = Object.assign({ sheetId: '', tabName: '', gid: '', campaignId: null, title: '' }, ctx || {});
     if (!CTX.sheetId || !CTX.tabName) { alert('연결된 작업(시트·탭) 정보가 없어 수동제출을 열 수 없습니다.'); return; }
     // ★ 새로 열면 줄·캡처를 비운다(다른 탭 캡처 혼입 금지)
+    closeLink();
     ROWS = []; OPTS = []; ACTIVE = null; DIRTY.clear(); clearTimeout(CLS_TIMER); CLS_TIMER = null; BUSY = false;
     IME = false; PAINT_LATER = false;
     CTX.view = 'table'; CTX.apps = null;
@@ -252,6 +291,8 @@
       ovl.addEventListener('click', e => { if (e.target === ovl && (!CTX || CTX.view === 'result' || !_filled().length)) close(); });
       ovl.addEventListener('compositionstart', _onCompStart, true);
       ovl.addEventListener('compositionend', _onCompEnd, true);
+      ovl.addEventListener('mousedown', _onOvlDown, true);    // 리뷰어 연결 팝오버 밖을 누르면 닫는다(결정 348)
+      ovl.addEventListener('scroll', _placeLink, true);       // 표를 밀면 팝오버가 그 칸을 따라간다
       document.body.appendChild(ovl);
     }
     ovl.style.display = 'flex';
@@ -260,6 +301,7 @@
   }
   function close(ask) {
     if (ask && CTX && CTX.view === 'table' && _filled().length && !confirm('입력한 줄이 사라집니다. 닫을까요?')) return;
+    closeLink();
     const o = document.getElementById('moOvl');
     if (o) o.remove();
     CTX = null; ROWS = []; ACTIVE = null; DIRTY.clear(); clearTimeout(CLS_TIMER); CLS_TIMER = null; BUSY = false;
@@ -281,6 +323,14 @@
       <div class="mo-ft">${footHtml}</div>
     </div>`;
     if (opt && opt.keepEl && _morphKeep(o, html, opt.keepEl)) return true;
+    // ★ 결정 348: 리뷰어 연결 팝오버가 열려 있으면 그 요소는 그대로 둔다 — 검색칸에서 한글을 치는 중에
+    //   표가 다시 그려져도(나누기 결과 도착) 검색칸의 포커스·조합이 끊기지 않게. 없으면 종전대로 통째로 그린다.
+    const pop = RL && document.getElementById('moRl');
+    if (pop && pop.parentNode === o && typeof o.insertAdjacentHTML === 'function') {
+      Array.from(o.childNodes).forEach(n => { if (n !== pop) o.removeChild(n); });
+      o.insertAdjacentHTML('afterbegin', html);
+      return false;
+    }
     o.innerHTML = html;
     return false;
   }
@@ -303,7 +353,7 @@
         const a = oc[d], b = nc[d];
         const kids = Array.from(np.childNodes);
         const at = kids.indexOf(b);
-        Array.from(op.childNodes).forEach(n => { if (n !== a) op.removeChild(n); });
+        Array.from(op.childNodes).forEach(n => { if (n !== a && !(d === 0 && n.id === 'moRl')) op.removeChild(n); });   // 리뷰어 연결 팝오버는 남긴다(결정 348)
         kids.slice(0, at).forEach(n => op.insertBefore(n, a));
         kids.slice(at + 1).forEach(n => op.appendChild(n));
         Array.from(a.attributes).forEach(x => { if (!b.hasAttribute(x.name)) a.removeAttribute(x.name); });
@@ -350,6 +400,8 @@
   function _onCompEnd(ev) {
     const i = _imeTarget(ev);
     if (i == null) ime(0); else ime(0, i, ev.target.value);
+    // 리뷰어 연결 검색칸 — 조합 중 입력은 건너뛰었으니 조합이 끝난 글로 검색한다(결정 348)
+    if (ev && ev.target && ev.target.id === 'moRlQ') linkInput(ev.target.value);
   }
   /** 칸을 벗어나면 바로 나눈다 · 비운 중간 줄(캡처도 없음)은 치운다 */
   function rowBlur(i) {
@@ -475,6 +527,7 @@
     row.raw = it.raw || row.text;
     row.productWarn = null;
     if (row.extract && row.extract.orderNumber && !row.fields.orderNum) row.fields.orderNum = row.extract.orderNumber;
+    _linkPhoneGuard(row);
   }
 
   // ── 상품(선택지) 고르기 (결정 211) ─────────────────────────
@@ -671,29 +724,209 @@
           <option value="">신청 선택 필수</option>${apps.map(a => `<option value="${esc(a.id)}" ${String(it.targetApplicationId) === String(a.id) ? 'selected' : ''}>#${esc(a.id)} · ${esc(a.applicant_name || '')} · ${esc(a.status)} · ${esc(a.applied_at || '')}</option>`).join('')}
         </select></td>`;
   }
+  // ── 리뷰어 연결(결정 348) — 줄마다 「자동 / 기존 리뷰어 검색해서 고르기 / 새로 등록」 ─────────────
+  //    서버가 고른 id 를 다시 읽어 판정한다(본인·타계정·중복 거절) — 화면은 mode·id 만 보낸다.
+  const _p8Of = it => String((it && it.fields && it.fields.phone) || '').replace(/\D/g, '').slice(-8);
+  function _linkLabel(l) {
+    if (l && l.mode === 'existing') return `기존: ${l.name}(…${l.phoneTail})`;
+    if (l && l.mode === 'new') return '새로 등록';
+    return '자동';
+  }
+  /** 고른 뒤 그 줄의 연락처가 바뀌면(다른 사람 양식으로 바꿔 붙임) 고른 연결을 자동으로 되돌리고 알린다(남의 리뷰어에 붙지 않게). */
+  function _linkPhoneGuard(row) {
+    const l = row && row.link;
+    if (!l || l.mode === 'auto' || !l.p8 || l.p8 === _p8Of(row)) return false;
+    row.link = _autoLink();
+    _toast((ROWS.indexOf(row) + 1) + '번 줄 연락처가 바뀌어 리뷰어 연결을 「자동」으로 되돌렸습니다 — 필요하면 다시 고르세요');
+    return true;
+  }
+  function linkCell(it, i) {
+    if (_blank(it) || !it.ok) return '<td></td>';
+    const l = it.link || _autoLink();
+    const self = l.mode === 'existing' && _p8Of(it).slice(-4) === l.phoneTail;
+    const tip = l.mode === 'existing'
+      ? (self ? `기존 리뷰어 ${l.name}(…${l.phoneTail}) 본인 건으로 연결 — 빈 칸만 채우고 계좌는 바꾸지 않습니다`
+              : `수취인을 기존 리뷰어 ${l.name}(…${l.phoneTail})의 타계정으로 연결합니다`)
+      : l.mode === 'new' ? '이 연락처로 리뷰어를 새로 등록합니다 — 이미 등록된 번호면 그 줄은 접수되지 않고 안내가 뜹니다'
+      : '자동 — 붙여넣은 이름·연락처로 등록하거나 기존 리뷰어에 연결합니다(종전 방식) · 눌러서 바꾸기';
+    const open = RL && RL.row === it ? ' open' : '';
+    return `<td><button type="button" class="mo-lk ${esc(l.mode)}${open}" id="moLk-${it.uid}" title="${esc(tip)}" aria-haspopup="dialog"
+      aria-label="${i + 1}번 줄 리뷰어 연결: ${esc(_linkLabel(l))}" onclick="ManualOrder.openLink(${i})"><span class="t">${esc(_linkLabel(l))}</span></button></td>`;
+  }
+  function _linkListHtml() {
+    if (!RL) return '';
+    if (RL.state === 'short') return '<div class="mo-rl-msg">두 글자 이상 넣어 주세요 — 이름 · 전화 뒤 4자리 · 계좌 숫자</div>';
+    if (RL.state === 'err') return `<div class="mo-rl-msg e">검색하지 못했습니다: ${esc(RL.err)}</div>`;
+    if (RL.state !== 'ok' && !RL.items.length) return '<div class="mo-rl-msg"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> 찾는 중…</div>';
+    if (!RL.items.length) return '<div class="mo-rl-msg">찾는 리뷰어가 없습니다 — 처음 오는 사람이면 [새로 등록]을 고르세요</div>';
+    const p4 = _p8Of(RL.row).slice(-4);
+    const cur = RL.row.link || _autoLink();
+    return RL.items.map((x, k) => {
+      const on = cur.mode === 'existing' && cur.reviewerId === x.id;
+      const same = x.phoneTail && x.phoneTail === p4;
+      const tip = `${x.name} · 전화 …${x.phoneTail}${x.accountTail ? ' · 계좌 …' + x.accountTail : ''}`
+        + (same ? ' — 수취인 연락처 뒤 4자리와 같습니다(본인 건)' : ' — 수취인을 이 리뷰어의 타계정으로 연결합니다');
+      return `<button type="button" class="mo-rl-it" id="moRlIt-${k}" role="option" aria-selected="${on}" title="${esc(tip)}"
+        onclick="ManualOrder.linkPick(${k})" onkeydown="ManualOrder.linkKey(event,${k})"><span class="nm">${esc(x.name)}</span><span class="ph">…${esc(x.phoneTail)}</span>${x.accountTail ? `<span class="ac">계좌 …${esc(x.accountTail)}</span>` : ''}${same ? '<span class="mo-tag">번호 같음</span>' : ''}<span class="sp"></span>${on ? '<i class="fa-solid fa-check" aria-hidden="true"></i>' : ''}</button>`;
+    }).join('') + (RL.hasMore ? '<div class="mo-rl-msg">20명까지만 보입니다 — 더 자세히 넣어 주세요</div>' : '');
+  }
+  function _paintLinkList() {
+    const el = document.getElementById('moRlList');
+    if (el) el.innerHTML = _linkListHtml();
+    _placeLink();
+  }
+  /** 팝오버를 그 줄의 [리뷰어 연결] 칸 바로 아래(공간이 없으면 위)에 둔다 · 휴대폰은 CSS 가 아래 시트로 붙인다 */
+  function _placeLink() {
+    const pop = RL && document.getElementById('moRl');
+    if (!pop || !pop.style) return;
+    const W = window.innerWidth || 1440, H = window.innerHeight || 900;
+    if (W <= 768) { pop.style.left = ''; pop.style.top = ''; return; }
+    const b = document.getElementById('moLk-' + RL.row.uid);
+    if (!b || typeof b.getBoundingClientRect !== 'function') return;
+    const r = b.getBoundingClientRect();
+    const ph = pop.offsetHeight || 360;
+    let top = r.bottom + 4;
+    if (top + ph > H - 8) top = Math.max(8, r.top - ph - 4);
+    pop.style.left = Math.max(8, Math.min(r.left, W - 320 - 8)) + 'px';
+    pop.style.top = top + 'px';
+  }
+  /** [리뷰어 연결] 칸을 누름 — 검색어 기본값 = 그 줄 리뷰어 이름. 같은 칸을 다시 누르면 닫는다. */
+  function openLink(i) {
+    const row = ROWS[i]; if (!row || !CTX) return;
+    if (RL && RL.row === row) { closeLink(true); return; }
+    closeLink();
+    const o = document.getElementById('moOvl'); if (!o) return;
+    const f = row.fields || {};
+    RL = { row, q: String(f.reviewerName || f.recipient || '').trim(), items: [], hasMore: false, state: 'idle', err: '', seq: 0, timer: null };
+    const cur = row.link || _autoLink();
+    const pop = document.createElement('div');
+    pop.id = 'moRl'; pop.className = 'mo-rl';
+    pop.setAttribute('role', 'dialog');
+    pop.setAttribute('aria-label', (i + 1) + '번 줄 리뷰어 연결');
+    pop.innerHTML = `<div class="mo-rl-hd"><span class="t">리뷰어 연결</span><span class="s">${i + 1}번 줄 · 수취인 ${esc(f.recipient || '')} · 연락처 …${esc(_p8Of(row).slice(-4))}</span>
+        <button type="button" class="mo-x" title="닫기" aria-label="리뷰어 연결 닫기" onclick="ManualOrder.closeLink(true)"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+      <div class="mo-rl-q"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input class="mo-in" id="moRlQ" value="${esc(RL.q)}"
+        placeholder="이름 · 전화 뒤 4자리 · 계좌 숫자" aria-label="기존 리뷰어 검색" autocomplete="off" spellcheck="false"
+        oninput="ManualOrder.linkInput(this.value,event)" onkeydown="ManualOrder.linkKey(event)"></div>
+      <div class="mo-rl-list" id="moRlList" role="listbox" aria-label="검색 결과"></div>
+      <div class="mo-rl-ft"><span class="mo-auto">없으면</span>
+        <button type="button" class="mo-btn${cur.mode === 'new' ? ' on' : ''}" onclick="ManualOrder.linkSet('new')" title="이 연락처로 리뷰어를 새로 등록합니다">새로 등록</button>
+        <span class="sp"></span>
+        <button type="button" class="mo-btn${cur.mode === 'auto' ? ' on' : ''}" onclick="ManualOrder.linkSet('auto')" title="붙여넣은 이름·연락처로 자동 처리(종전 방식)">자동</button></div>`;
+    o.appendChild(pop);
+    const b = document.getElementById('moLk-' + row.uid);
+    if (b && b.classList) b.classList.add('open');
+    _paintLinkList();
+    _linkSearch(true);
+    const q = document.getElementById('moRlQ');
+    if (q) { q.focus(); try { q.select(); } catch (_) {} }
+  }
+  /** 팝오버 닫기 — refocus 면 그 줄 칸으로 포커스를 돌려준다(키보드 사용자) */
+  function closeLink(refocus) {
+    if (!RL) return;
+    const row = RL.row;
+    clearTimeout(RL.timer);
+    RL = null;
+    const p = document.getElementById('moRl');
+    if (p && typeof p.remove === 'function') p.remove();
+    const b = row && document.getElementById('moLk-' + row.uid);
+    if (b && b.classList) b.classList.remove('open');
+    if (refocus && b && typeof b.focus === 'function') b.focus();
+  }
+  function _onOvlDown(e) {
+    if (!RL) return;
+    const t = e && e.target;
+    if (t && typeof t.closest === 'function' && (t.closest('#moRl') || t.closest('#moLk-' + RL.row.uid))) return;
+    closeLink();
+  }
+  function _linkSearch(now) {
+    if (!RL) return;
+    clearTimeout(RL.timer);
+    const q = String(RL.q || '').trim();
+    if (Array.from(q.replace(/\s+/g, '')).length < 2) {   // 서버와 같은 하한 — 두 글자 미만은 묻지도 않는다
+      RL.state = 'short'; RL.items = []; RL.hasMore = false; _paintLinkList(); return;
+    }
+    RL.state = 'loading'; _paintLinkList();
+    const cur = RL;
+    cur.timer = setTimeout(async () => {
+      const my = ++cur.seq;
+      let r;
+      try { r = await api(_moBase() + '/reviewer-search?q=' + encodeURIComponent(q)); }
+      catch (e) { r = { ok: false, error: (e && e.message) || '서버에 연결하지 못했습니다' }; }
+      if (RL !== cur || my !== cur.seq) return;   // 그사이 닫았거나 더 새 검색이 나갔다
+      if (r && r.ok) { cur.items = Array.isArray(r.items) ? r.items : []; cur.hasMore = !!r.hasMore; cur.state = r.tooShort ? 'short' : 'ok'; }
+      else { cur.items = []; cur.hasMore = false; cur.state = 'err'; cur.err = (r && r.error) || '오류'; }
+      _paintLinkList();
+    }, now ? 0 : 250);
+  }
+  /** 검색칸 입력 — ★ 한글 조합 중에는 묻지 않는다(조합이 끝나면 창 루트 compositionend 가 다시 부른다) */
+  function linkInput(val, ev) {
+    if (ev && ev.isComposing) return;
+    if (!RL) return;
+    const v = String(val == null ? '' : val);
+    if (v === RL.q && RL.state !== 'idle') return;
+    RL.q = v;
+    _linkSearch(false);
+  }
+  function linkKey(ev, k) {
+    if (!ev || ev.isComposing || !RL) return;
+    if (ev.key === 'Escape') { ev.preventDefault(); closeLink(true); return; }
+    const d = ev.key === 'ArrowDown' ? 1 : ev.key === 'ArrowUp' ? -1 : 0;
+    if (ev.key === 'Enter' && k == null) { ev.preventDefault(); return; }   // 검색칸 Enter 로는 고르지 않는다(낡은 결과를 잘못 고르지 않게)
+    if (!d) return;
+    const to = k == null ? (d > 0 ? 0 : -1) : k + d;
+    const el = to < 0 ? document.getElementById('moRlQ') : document.getElementById('moRlIt-' + to);
+    if (el && typeof el.focus === 'function') { ev.preventDefault(); el.focus(); }
+  }
+  function _afterLink(row) {
+    closeLink();
+    paint();
+    const b = document.getElementById('moLk-' + row.uid);
+    if (b && typeof b.focus === 'function') b.focus();
+  }
+  /** 검색 결과에서 고름 → 「기존: 이름(…뒤4)」 */
+  function linkPick(k) {
+    if (!RL) return;
+    const x = RL.items[k]; const row = RL.row;
+    if (!x || !row) return;
+    row.link = { mode: 'existing', reviewerId: String(x.id), name: String(x.name || ''), phoneTail: String(x.phoneTail || ''), p8: _p8Of(row) };
+    _afterLink(row);
+  }
+  /** [새로 등록] · [자동] */
+  function linkSet(mode) {
+    if (!RL) return;
+    const row = RL.row;
+    row.link = mode === 'new' ? Object.assign(_autoLink(), { mode: 'new', p8: _p8Of(row) }) : _autoLink();
+    _afterLink(row);
+  }
+
   function cols() {
     const L = [
       { k: 'no', label: '', w: 30, cls: 'stk r', cell: (it, i) => `<td class="no stk">${i + 1}</td>` },
-      { k: 'raw', label: '구매양식 (한 줄 = 한 사람)', w: 156, cls: 'stk2', title: '리뷰어/수취인/아이디/전화번호/주소/은행/계좌번호/예금주/결제금액', cell: rawCell },
-      { k: 'reviewerName', label: '리뷰어', w: 84, cell: fieldCell('reviewerName', { label: '리뷰어' }) },
+      { k: 'raw', label: '구매양식 (한 줄 = 한 사람)', w: 124, cls: 'stk2', title: '리뷰어/수취인/아이디/전화번호/주소/은행/계좌번호/예금주/결제금액', cell: rawCell },
+      { k: 'reviewerName', label: '리뷰어', w: 76, cell: fieldCell('reviewerName', { label: '리뷰어' }) },
+      // ★ 결정 348 — 리뷰어 연결(자동 / 기존 고르기 / 새로 등록). 리뷰어 이름 바로 옆(시안 자리)
+      { k: 'link', label: '리뷰어 연결', w: 128, title: '자동(종전) · 기존 리뷰어 검색해서 고르기 · 새로 등록', cell: linkCell },
       { k: 'recipient', label: '수취인', w: 62, cell: fieldCell('recipient', { label: '수취인' }) },
       { k: 'userId', label: '아이디', w: 74, cell: fieldCell('userId', { label: '아이디' }) },
       { k: 'phone', label: '연락처', w: 118, cell: fieldCell('phone', { label: '연락처' }) },
-      { k: 'address', label: '주소', w: 104, cell: fieldCell('address', { label: '주소' }) },
+      { k: 'address', label: '주소', w: 72, cell: fieldCell('address', { label: '주소' }) },
       { k: 'bank', label: '은행', w: 66, cell: fieldCell('bank', { label: '은행' }) },
       { k: 'account', label: '계좌번호', w: 128, cell: fieldCell('account', { label: '계좌번호' }) },
       { k: 'depositor', label: '예금주', w: 58, cell: fieldCell('depositor', { label: '예금주' }) },
-      { k: 'price', label: '금액', w: 76, cls: 'r', cell: fieldCell('price', { label: '금액', num: true }) },
+      { k: 'price', label: '금액', w: 68, cls: 'r', cell: fieldCell('price', { label: '금액', num: true }) },
     ];
-    // ★ 칸 합은 PC 1440(상자 1392px) 안에 든다(작업보드 1368 · 참여형 1372 — 주소는 늘 길어 잘림 + 마우스 올림이라 주소 칸에서 덜었다) — 넘으면 구매캡처 클립 단추가 오른쪽 고정 칸(확인)에 가린다
+    // ★ 칸 합은 PC 1440(상자 1392px) 안에 든다(작업보드 1380 · 참여형 1380) — 넘으면 구매캡처 클립 단추가 오른쪽 고정 칸(확인)에 가린다.
+    //   결정 348: 리뷰어 연결 128(「기존: 김수만(…6325)」 글자 108px + 여백)을 넣으며, 늘 잘림 + 마우스 올림인 양식·주소 칸과 확인·금액·리뷰어 칸에서 덜었다
+    //   (연락처 118·계좌 128·아이디 74 는 그대로 — 줄이면 실제 값이 잘린다: 실브라우저 scrollWidth 로 잼)
     if (OPTS.length) {
       const anyAck = ROWS.some(r => r.ok && !_blank(r) && _optOf(r) && _optOver(r));
       L.push({ k: 'opt', label: '상품(옵션)', w: 156, colCls: 'mo-c-opt' + (anyAck ? ' ack' : ''), cell: optCell });
     }
-    if (CTX && CTX.campaignId) L.push({ k: 'app', label: '참여 신청', w: 160, cell: appCell });
+    if (CTX && CTX.campaignId) L.push({ k: 'app', label: '참여 신청', w: 156, cell: appCell });
     L.push({ k: 'cap', label: '구매캡처', w: 88, cell: capCell });
     // 확인 칸은 오른쪽에 고정(표를 옆으로 밀어도 늘 보인다) — 줄 삭제 단추도 이 칸 끝에
-    L.push({ k: 'st', label: '확인', w: 168, cls: 'stkr', cell: (it, i) => {
+    L.push({ k: 'st', label: '확인', w: 132, cls: 'stkr', cell: (it, i) => {
       const del = (ROWS.length === 1 || (ROWS[ROWS.length - 1] === it && _blank(it) && !it.capture)) ? ''
         : `<button type="button" class="mo-ib del" title="${i + 1}번 줄 삭제" aria-label="${i + 1}번 줄 삭제" onclick="ManualOrder.delRow(${i})"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>`;
       return `<td class="stkr"><div class="mo-stw"><div id="moSt-${it.uid}">${stCellInner(it)}</div>${del}</div></td>`;
@@ -748,6 +981,7 @@
         순서: <b>리뷰어 / 수취인 / 아이디 / 전화번호 / 주소 / 은행 / 계좌번호 / 예금주 / 결제금액</b> — 여러 줄을 한 번에 붙여넣으면 줄마다 나뉘고, 붙이는 즉시 옆 칸에 나뉜 값이 보입니다<br>
         주소에 슬래시(/)가 있어도 앞뒤 칸이 밀리지 않게 자동으로 주소로 합칩니다 · 리뷰어와 수취인이 다르면 <b>타계정 참여</b>로 처리합니다<br>
         <b>주황</b> = 슬래시가 빠진 자리를 시스템이 찾아 나눈 줄(자동보정 · AI 보정) — 값이 맞는지 꼭 확인하세요 · <b>빨강</b> = 고쳐야 제출됩니다 · 나뉜 칸을 눌러 바로 고칠 수 있습니다<br>
+        <b>리뷰어 연결</b> 칸은 기본 「자동」(종전 방식)입니다 — 눌러서 기존 리뷰어를 검색해 고르거나 「새로 등록」으로 바꿀 수 있습니다(이미 등록된 번호를 새로 등록하면 그 줄은 접수되지 않습니다)<br>
         구매캡처는 <b>줄마다</b> 붙입니다 — 그 줄을 누르고 Ctrl+V · 그 줄에 끌어다 놓기 · 클립 단추. 캡처 속 수취인 이름이 그 줄과 다르면 경고만 띄웁니다${CTX.campaignId ? `<br>
         참여형 공고에서 기존 신청이 보이면 <b>확정할 신청을 반드시 선택</b>하세요. 전화번호만으로 새 신청을 자동 확정하지 않습니다` : ''}${OPTS.length >= 2 ? `<br>
         이 작업은 상품이 ${OPTS.length}개입니다 — <b>줄마다 상품을 골라야</b> 제출됩니다. 고른 상품이 작업표 「상품」 칸과 그 상품의 사용 수에 그대로 들어갑니다 ·
@@ -798,6 +1032,7 @@
   }
   function delRow(i) {
     const row = ROWS[i]; if (!row) return;
+    if (RL && RL.row === row) closeLink();
     ROWS.splice(i, 1); DIRTY.delete(row);
     if (ACTIVE === row) ACTIVE = null;
     if (!ROWS.length) ROWS.push(newRow(''));
@@ -809,6 +1044,7 @@
    *  실패·미제출 줄만 표에 남긴다 — 캡처는 그 줄 자신의 것이라 다른 사람에게 옮겨 붙지 않는다. */
   function again() {
     const keep = ((CTX && CTX.retry) || []).filter(r => r && !_blank(r));
+    closeLink();
     ROWS = keep; ACTIVE = null; DIRTY.clear();
     if (CTX) CTX.retry = null;
     ensureTail();
@@ -879,6 +1115,7 @@
     const pd = String(f.phone || '').replace(/[^0-9]/g, '');
     const missing = REQUIRED.filter(k => !String(f[k] == null ? '' : f[k]).trim());
     const bad = missing.length > 0 || (pd.length !== 11 && pd.length !== 10);
+    if (key === 'phone' && _linkPhoneGuard(it)) { const b = document.getElementById('moLk-' + it.uid); if (b && b.parentNode) b.parentNode.innerHTML = linkCell(it, i).replace(/^<td>|<\/td>$/g, ''); }
     it.ok = !bad;
     it.errors = bad ? (missing.length ? ['필수 항목이 비어 있습니다'] : ['전화번호 자릿수가 이상합니다']) : [];
     it.netErr = '';
@@ -1040,11 +1277,17 @@
   // ── 제출 ──────────────────────────────────────────────────
   async function submit() {
     if (BUSY) return;
+    closeLink();
     await flush();   // 막 붙여넣은 줄이 아직 나뉘는 중이면 끝까지 기다린다(옛 값으로 보내지 않는다)
     if (!CTX) return;
     const targets = ROWS.map((r, i) => ({ r, i })).filter(x => submittable(x.r));
     if (!targets.length) return;
-    if (!confirm(`${targets.length}건을 제출합니다.\n리뷰어 자동 등록${CTX.campaignId ? ' · 모집 정원 차감' : ''}이 함께 진행됩니다.`)) return;
+    // ★ 결정 348: 리뷰어 연결 방식별 건수를 확인창에 보여 준다(기존 고르기·새로 등록을 고른 줄이 있을 때만)
+    const _lk = m => targets.filter(x => ((x.r.link && x.r.link.mode) || 'auto') === m).length;
+    const _lkMsg = (_lk('existing') || _lk('new'))
+      ? `리뷰어 연결 — 자동 ${_lk('auto')} · 기존 고르기 ${_lk('existing')} · 새로 등록 ${_lk('new')}`
+      : '리뷰어 자동 등록';
+    if (!confirm(`${targets.length}건을 제출합니다.\n${_lkMsg}${CTX.campaignId ? ' · 모집 정원 차감' : ''}이 함께 진행됩니다.`)) return;
     BUSY = true;
     const btn = document.getElementById('moSubmit');
     if (btn) { btn.disabled = true; btn.textContent = '캡처 읽는 중…'; }
@@ -1069,6 +1312,8 @@
         items: (subset ? subset.map(i => targets[i]) : targets)
           .map(x => ({ fields: x.r.fields, optionKey: x.r.optKey || x.r.fields.optionKey || '', optionFullAck: x.r.optFullAck === true,
                        targetApplicationId: x.r.targetApplicationId || null,
+                       // ★ 결정 348: 리뷰어 연결 — 서버는 mode·id 만 받아 다시 판정한다(옛 서버는 무시 → 결과의 reviewerLinkApplied 로 감지)
+                       reviewerLink: { mode: (x.r.link && x.r.link.mode) || 'auto', reviewerId: (x.r.link && x.r.link.reviewerId) || '' },
                        captureName: (x.r.extract && x.r.extract.productName) || '',
                        captureOption: (x.r.extract && typeof x.r.extract.productOption === 'string') ? x.r.extract.productOption : '' })),
       }),
@@ -1197,6 +1442,15 @@
         if (t) okRows.add(t.r);
       });
       CTX.retry = ROWS.filter(r => !okRows.has(r) && !_blank(r));
+      // ★ 결정 348 배포 스큐: 기존 고르기·새로 등록을 골랐는데 서버가 적용 방식을 돌려주지 않으면(옛 서버) 자동으로 처리된 것이다 — 경고로 알린다.
+      (out.results || []).forEach((res, k) => {
+        if (!res || !res.ok) return;
+        const t = typeof res.index === 'number' ? targets[res.index] : targets[k];
+        const want = (t && t.r && t.r.link && t.r.link.mode) || 'auto';
+        if (want !== 'auto' && res.reviewerLinkApplied !== want) {
+          (res.warnings = res.warnings || []).push(`리뷰어 연결(${want === 'existing' ? '기존 고르기' : '새로 등록'})이 서버에 반영되지 않아 자동으로 처리됐습니다 — 등록리뷰어DB에서 연결을 확인해 주세요`);
+        }
+      });
     }
     // ★ 결정 345 ⑧: 작업보드는 캡처 업로드를 기다리지 않고 바로 다시 불러온다(줄은 이미 기록됐다).
     let _refreshed = false;
@@ -1246,7 +1500,9 @@
     const rows = (out.results || []).map(r => {
       if (r.ok) {
         const bits = [];
-        if (r.reviewerRegistered) bits.push(r.linkedOwner ? `‘${esc(r.linkedOwner)}’ 리뷰어의 타계정으로 등록` : '리뷰어 자동 등록됨');
+        if (r.reviewerLinkApplied === 'existing') bits.push(r.linkedOwner ? `기존 리뷰어 ‘${esc(r.linkedOwner)}’의 타계정으로 연결` : r.linkedReviewer ? `기존 리뷰어 ‘${esc(r.linkedReviewer)}’에 연결` : '기존 리뷰어 연결');   // 결정 348
+        else if (r.reviewerLinkApplied === 'new' && r.reviewerRegistered) bits.push('리뷰어 새로 등록됨');
+        else if (r.reviewerRegistered) bits.push(r.linkedOwner ? `‘${esc(r.linkedOwner)}’ 리뷰어의 타계정으로 등록` : '리뷰어 자동 등록됨');
         if (r.quotaCounted) bits.push('모집인원 1명 차감');
         if (r.captureAttached) bits.push('구매캡쳐 첨부됨');
         // ★ 결정 345 ⑦: 무시트 작업표에 바로 적혔으면 서버가 줄 번호를 준다 — "자동복구 대기"로 잘못 말하지 않는다
@@ -1279,5 +1535,6 @@
     open, close, submit, again, edit, pickApplication, pickOption, ackOption,
     rowInput, rowPaste, rowBlur, pasteLines, flush, ime, selectRow, keyNav, delRow,   // 한 줄 = 한 사람 표
     onPaste, onFile, onDrop, uncap,                                                    // 줄별 캡처 첨부
+    openLink, closeLink, linkInput, linkKey, linkPick, linkSet,                        // 리뷰어 연결(결정 348)
   };
 })();

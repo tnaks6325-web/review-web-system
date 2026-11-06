@@ -14,7 +14,7 @@ const _handlers = {};
 const pool = require('../db/pool');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const { parseSlashForm } = require('../utils/slashForm');
-const { submitExternalOrder, dailyRemainingForCampaign, tabOptionChoices, manualDualBlock } = require('../services/manualOrder.service');
+const { submitExternalOrder, dailyRemainingForCampaign, tabOptionChoices, manualDualBlock, searchReviewersForLink } = require('../services/manualOrder.service');
 const { checkRepurchaseWindowBatch, phone8Of, resolveCampaignRepurchaseDays } = require('../utils/repurchaseGuard');
 const { logger } = require('../utils/logger');
 const { emitOrderSubmit } = require('../utils/sse');
@@ -251,6 +251,9 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
           allowOverDaily,            // 오늘 정원 초과 확인을 받은 뒤 재시도할 때만
           allowRepurchase,           // 재참여 기간 제한 확인을 받은 뒤 재시도할 때만
           repurchaseDaysOverride: effectiveRepurchaseDays, // 선택한 모집공고의 저장값(사전·최종 판정 일치)
+          // ★ 결정 348: 줄마다 고른 리뷰어 연결 — 서버가 id 로 다시 읽어 판정한다(화면 값은 mode·id 만 받는다)
+          reviewerLink: (it.reviewerLink && typeof it.reviewerLink === 'object')
+            ? { mode: String(it.reviewerLink.mode || ''), reviewerId: it.reviewerLink.reviewerId == null ? '' : String(it.reviewerLink.reviewerId) } : null,
         });
         // ★ 초과 접수는 결과 화면에 남긴다 — 확인을 받았더라도 "조용히 넘어간" 것으로 보이면
         //   이번에 문제가 된 상태(정원을 넘긴 줄 모름)가 그대로 되돌아온다.
@@ -337,6 +340,20 @@ router.post('/dual/complete', authMiddleware, adminOrMasterMiddleware, async (re
   } catch (e) { _dualStaffFail(res, next, e); }
 });
 _handlers.manualOrderDualComplete = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다
+// ── 리뷰어 연결 검색 (결정 348) ───────────────────────────────
+// 줄마다 「기존 리뷰어 고르기」를 하는 창의 검색. 예전 reviewer-search(PR #394 에서 제거)는 **화면이 쓰지 않는**
+// PII 통로였다 — 이번 것은 수동제출 창이 실제로 부르고, 위험을 막는 조건을 서비스·라우트가 함께 건다:
+//  ① 실제 입구는 /api/trackb/manual-order/reviewer-search 하나(내부 직원 + 편집 허용 명단 2단 · app.js 옛 입구 없음)
+//  ② 검색어 2글자 미만은 DB 를 보지 않음 · 최대 20명 · 전화·계좌는 뒤 4자리만 · 주소 미반환(searchReviewersForLink)
+//  ③ 읽기 전용(GET) — 검색어는 로그에 남기지 않는다(개인정보).
+router.get('/reviewer-search', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const out = await searchReviewersForLink(req.query && req.query.q, pool);
+    if (out.items.length) logger.info(`[manual-order] 리뷰어 연결 검색 n=${out.items.length} by=${(req.admin && req.admin.name) || '?'}`);
+    res.json(out);
+  } catch (err) { next(err); }
+});
+_handlers.manualOrderReviewerSearch = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 348)
 
 // ★ 이름을 빼거나 바꾸면 trackB 가 기동 시 바로 실패한다(fail-closed) — 옛 공개 경로를 지워도 Track B 는 그대로다.
 router.handlers = Object.freeze(_handlers);

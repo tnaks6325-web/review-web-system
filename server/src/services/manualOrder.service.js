@@ -62,11 +62,19 @@ const { optionColIndexes, existingOptionKeyAt } = require('./orderLedger.service
  * 전화가 11자리가 아니면 등록 자체가 불가(registerReviewer 계약) → 생략하고 경고만.
  * @returns {{registered:boolean, linkedOwner:string|null, warnings:string[], ownerPhone8:string|null}}
  */
-async function ensureExternalReviewer(f, { db = pool } = {}) {
+async function ensureExternalReviewer(f, { db = pool, link = null } = {}) {
   const warnings = [];
   const phoneDigits = digits(f.phone);
   const p8 = phoneDigits.slice(-8);
   const isSub = !!f.isSubAccount;
+
+  // ★ 결정 348 — 담당자가 고른 기존 리뷰어(existing). 서버가 방금 다시 읽은 행(resolveReviewerLink)만 받는다.
+  //   수취인 번호 = 그 리뷰어 번호 → 본인 건(빈 칸만 채움) · 다르면 그 리뷰어의 타계정(이름 검색 대신 이 선택).
+  if (link && link.mode === 'existing' && link.reviewer) {
+    const sel = link.reviewer;
+    if (String(sel.phone8 || '') === p8) return _fillSelectedSelf(sel, f, warnings, db);
+    return _linkSubToOwner(sel, f, p8, warnings, db);
+  }
 
   if (phoneDigits.length !== 11) {
     warnings.push('전화번호가 11자리가 아니어서 리뷰어 자동등록을 건너뜁니다');
@@ -74,8 +82,9 @@ async function ensureExternalReviewer(f, { db = pool } = {}) {
   }
 
   // ── 타계정 건: 소유자(리뷰어명)를 기존 리뷰어에서 찾는다 ──
+  // ★ 결정 348 — new(새로 등록)는 소유자 이름 검색을 건너뛰고 아래 명의 등록으로 간다(그 번호의 리뷰어를 새로 만든다).
   let owner = null;
-  if (isSub) {
+  if (isSub && !(link && link.mode === 'new')) {
     const { rows } = await db.query(
       `SELECT id, name, phone, phone8, sub_accounts FROM reviewers
         WHERE REPLACE(LOWER(name), ' ', '') = $1 AND status <> 'inactive'
@@ -86,44 +95,7 @@ async function ensureExternalReviewer(f, { db = pool } = {}) {
     else warnings.push(`소유자 '${f.reviewerName}'을(를) 찾지 못해 수취인 명의로 단독 등록합니다`);
   }
 
-  if (owner) {
-    // 수취인을 소유자의 타계정 명부에 등록(이미 있으면 그대로) — findSubAccount와 같은 정규화 사용
-    let subs = owner.sub_accounts;
-    if (typeof subs === 'string') { try { subs = JSON.parse(subs); } catch (_) { subs = []; } }
-    if (!Array.isArray(subs)) subs = [];
-    // ★ 사칭 차단(063과 같은 규율): 이미 리뷰어로 등록된 번호는 남의 타계정으로 붙이지 않는다.
-    //   sub_accounts 는 소유 증명이 없는 자기신고 배열이고, 여기서 소유자는 **붙여넣은 이름**만으로
-    //   찾는다 — 카톡 양식의 이름 한 번 겹치면 실존 리뷰어의 신원이 남의 계정에 매달린다.
-    const policy = String(process.env.CAMPAIGN_SUB_REGISTERED_POLICY || 'block').toLowerCase();
-    let registeredElsewhere = false;
-    if (policy !== 'allow') {
-      try {
-        const { rows: ex } = await db.query(
-          `SELECT 1 FROM reviewers WHERE phone8 = $1 AND status <> 'inactive' LIMIT 1`, [p8]);
-        registeredElsewhere = ex.length > 0;
-      } catch (_) { /* 조회 실패는 기존 동작(연결 진행) */ }
-    }
-    if (registeredElsewhere && policy === 'block') {
-      warnings.push(`'${f.recipient}'(***${p8.slice(-4)})은 이미 등록된 리뷰어라 '${owner.name}'의 타계정으로 연결하지 않았습니다`);
-      return { registered: true, linkedOwner: null, ownerPhone8: null, warnings };
-    }
-    if (registeredElsewhere) warnings.push(`'${f.recipient}'은 이미 등록된 리뷰어입니다 — 타계정 연결을 확인하세요`);
-    if (!findSubAccount(subs, f.recipient, p8)) {
-      // ★ 조각 2-2(결정 177): 잠금 → 다시 읽기 → 그 사이 누가 먼저 넣었으면 건너뜀 → id 로 저장 · 카드 즉시 맞춤.
-      const entry = {
-        name: String(f.recipient || '').trim(),
-        phone: f.phone,
-        address: f.address || '',
-        bankName: f.bank || '', bankAccount: f.account || '', accountHolder: f.depositor || '',
-      };
-      await mutateSubAccounts(owner.id, (cur) => {
-        if (findSubAccount(cur, f.recipient, p8)) return null;
-        cur.push(entry);
-        return cur;
-      }, { db: typeof db.connect === 'function' ? db : pool, source: 'external_order' });
-    }
-    return { registered: true, linkedOwner: owner.name, ownerPhone8: owner.phone8 || null, warnings };
-  }
+  if (owner) return _linkSubToOwner(owner, f, p8, warnings, db);
 
   // ── 본인 건 or 소유자 미확인 → 명의(수취인) 기준 등록 ──
   const regName = String((isSub ? f.recipient : (f.reviewerName || f.recipient)) || '').trim();
@@ -158,6 +130,166 @@ async function ensureExternalReviewer(f, { db = pool } = {}) {
   } catch (e) { warnings.push('주소·계좌 저장 중 일부 실패(제출은 계속)'); }
 
   return { registered: true, linkedOwner: null, ownerPhone8: null, warnings };
+}
+
+const _tail4 = v => String(v == null ? '' : v).replace(/[^0-9]/g, '').slice(-4);
+/** 계좌 비교 — 숫자만 · 둘 다 있고 다를 때만 true(한쪽이 비면 '다름'이 아니라 '모름'). */
+const _acctDiffers = (a, b) => {
+  const x = String(a == null ? '' : a).replace(/[^0-9]/g, ''), y = String(b == null ? '' : b).replace(/[^0-9]/g, '');
+  return !!(x && y && x !== y);
+};
+
+/**
+ * 수취인을 소유자의 타계정 명부(sub_accounts)에 붙인다 — 자동(이름 정확일치 1명) · 기존 고르기(결정 348) 공용.
+ * ★ 사칭 차단·잠금 규율은 종전 그대로(사본 금지 — 두 경로가 한 함수를 탄다).
+ * ★ 이미 있는 타계정 칸은 덮지 않는다 — 계좌가 다르면 경고만(결정 348).
+ */
+async function _linkSubToOwner(owner, f, p8, warnings, db) {
+  // 수취인을 소유자의 타계정 명부에 등록(이미 있으면 그대로) — findSubAccount와 같은 정규화 사용
+  let subs = owner.sub_accounts;
+  if (typeof subs === 'string') { try { subs = JSON.parse(subs); } catch (_) { subs = []; } }
+  if (!Array.isArray(subs)) subs = [];
+  // ★ 사칭 차단(063과 같은 규율): 이미 리뷰어로 등록된 번호는 남의 타계정으로 붙이지 않는다.
+  //   sub_accounts 는 소유 증명이 없는 자기신고 배열이고, 자동 경로의 소유자는 **붙여넣은 이름**만으로
+  //   찾는다 — 카톡 양식의 이름 한 번 겹치면 실존 리뷰어의 신원이 남의 계정에 매달린다.
+  //   (기존 고르기도 같은 판정 — 담당자가 소유자를 골랐어도 그 번호의 본계정 주인은 따로 있다.)
+  const policy = String(process.env.CAMPAIGN_SUB_REGISTERED_POLICY || 'block').toLowerCase();
+  let registeredElsewhere = false;
+  if (policy !== 'allow') {
+    try {
+      const { rows: ex } = await db.query(
+        `SELECT 1 FROM reviewers WHERE phone8 = $1 AND status <> 'inactive' LIMIT 1`, [p8]);
+      registeredElsewhere = ex.length > 0;
+    } catch (_) { /* 조회 실패는 기존 동작(연결 진행) */ }
+  }
+  if (registeredElsewhere && policy === 'block') {
+    warnings.push(`'${f.recipient}'(***${p8.slice(-4)})은 이미 등록된 리뷰어라 '${owner.name}'의 타계정으로 연결하지 않았습니다`);
+    return { registered: true, linkedOwner: null, ownerPhone8: null, warnings };
+  }
+  if (registeredElsewhere) warnings.push(`'${f.recipient}'은 이미 등록된 리뷰어입니다 — 타계정 연결을 확인하세요`);
+  const had = findSubAccount(subs, f.recipient, p8);
+  if (had && _acctDiffers(had.sub && had.sub.bankAccount, f.account)) {
+    warnings.push(`'${owner.name}'의 타계정 '${f.recipient}'에 등록된 계좌(…${_tail4(had.sub.bankAccount)})와 붙여넣은 계좌(…${_tail4(f.account)})가 다릅니다 — 등록된 계좌를 그대로 둡니다`);
+  }
+  if (!had) {
+    // ★ 조각 2-2(결정 177): 잠금 → 다시 읽기 → 그 사이 누가 먼저 넣었으면 건너뜀 → id 로 저장 · 카드 즉시 맞춤.
+    const entry = {
+      name: String(f.recipient || '').trim(),
+      phone: f.phone,
+      address: f.address || '',
+      bankName: f.bank || '', bankAccount: f.account || '', accountHolder: f.depositor || '',
+    };
+    await mutateSubAccounts(owner.id, (cur) => {
+      if (findSubAccount(cur, f.recipient, p8)) return null;
+      cur.push(entry);
+      return cur;
+    }, { db: typeof db.connect === 'function' ? db : pool, source: 'external_order' });
+  }
+  return { registered: true, linkedOwner: owner.name, ownerPhone8: owner.phone8 || null, warnings };
+}
+
+/**
+ * 결정 348 — 기존 리뷰어 고르기 · 본인 건: 그 리뷰어 행(id)의 **빈 칸만** 채운다(registerReviewer 안 부름 — 이미 있다).
+ * ★ 계좌는 절대 덮지 않는다(정산 사고) — 등록된 계좌와 붙여넣은 계좌가 다르면 경고만.
+ */
+async function _fillSelectedSelf(sel, f, warnings, db) {
+  const n = s => String(s == null ? '' : s).replace(/\s+/g, '');
+  if (f.reviewerName && n(sel.name) !== n(f.reviewerName)) {
+    warnings.push(`고른 리뷰어 '${sel.name}'과(와) 붙여넣은 리뷰어 이름 '${f.reviewerName}'이 다릅니다 — 고른 리뷰어로 연결했습니다`);
+  }
+  if (_acctDiffers(sel.bank_account, f.account)) {
+    warnings.push(`'${sel.name}'의 등록된 계좌(…${_tail4(sel.bank_account)})와 붙여넣은 계좌(…${_tail4(f.account)})가 다릅니다 — 등록된 계좌를 그대로 둡니다`);
+  }
+  try {
+    const _fillRes = await db.query(
+      `UPDATE reviewers SET
+         address        = CASE WHEN COALESCE(address,'')        = '' THEN $2 ELSE address END,
+         bank_name      = CASE WHEN COALESCE(bank_name,'')      = '' THEN $3 ELSE bank_name END,
+         bank_account   = CASE WHEN COALESCE(bank_account,'')   = '' THEN $4 ELSE bank_account END,
+         account_holder = CASE WHEN COALESCE(account_holder,'') = '' THEN $5 ELSE account_holder END
+       WHERE id = $1
+       RETURNING id`,
+      [sel.id, f.address || '', f.bank || '', f.account || '', f.depositor || '']);
+    if (typeof db.connect === 'function') {
+      try { for (const row of (_fillRes && _fillRes.rows) || []) require('./reviewerIdentityCards.service').syncOwnerCardsSoon(row.id, { source: 'external_order' }); } catch (_) { /* noop */ }
+    }
+  } catch (e) { warnings.push('주소·계좌 저장 중 일부 실패(제출은 계속)'); }
+  return { registered: true, linkedOwner: null, ownerPhone8: null, linkedReviewer: sel.name, warnings };
+}
+
+const REVIEWER_LINK_MODES = new Set(['auto', 'existing', 'new']);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * 결정 348 — 줄마다 고른 리뷰어 연결을 **원장 기록 전에** 서버가 다시 확인한다(읽기만 · 거절이면 쓰기 0).
+ *  - 값 없음·모르는 mode = auto(옛 화면 · 종전 그대로)
+ *  - existing: 그 id 의 살아 있는 리뷰어를 다시 읽는다 — 없음·비활성·모양 틀림 = 거절(화면 값은 믿지 않는다)
+ *  - new: 그 번호가 이미 리뷰어로 등록돼 있으면 거절 + 「기존 고르기로 바꿔 주세요」(이름 + 뒤 4자리만)
+ * @returns {Promise<{ok:true, link:{mode, reviewer?}} | {ok:false, reason, error}>}
+ */
+async function resolveReviewerLink(db, raw, phoneDigits) {
+  const mode = raw && REVIEWER_LINK_MODES.has(String(raw.mode)) ? String(raw.mode) : 'auto';
+  if (mode === 'auto') return { ok: true, link: { mode } };
+  if (mode === 'existing') {
+    const id = String((raw && raw.reviewerId) || '').trim();
+    if (!UUID_RE.test(id)) return { ok: false, reason: 'reviewer_link_invalid', error: '고른 리뷰어 정보가 올바르지 않습니다 — 리뷰어 연결 칸에서 다시 골라 주세요' };
+    const { rows } = await db.query(
+      `SELECT id, name, phone, phone8, sub_accounts, bank_account, status FROM reviewers WHERE id = $1`, [id]);
+    if (!rows.length) return { ok: false, reason: 'reviewer_link_invalid', error: '고른 리뷰어를 찾을 수 없습니다(삭제됨) — 리뷰어 연결 칸에서 다시 골라 주세요' };
+    if (rows[0].status === 'inactive') return { ok: false, reason: 'reviewer_link_invalid', error: `고른 리뷰어 '${rows[0].name}'은(는) 비활성 상태입니다 — 다른 리뷰어를 고르거나 자동으로 바꿔 주세요` };
+    return { ok: true, link: { mode, reviewer: rows[0] } };
+  }
+  // new
+  if (phoneDigits.length !== 11) return { ok: false, reason: 'reviewer_link_invalid', error: `전화번호가 11자리가 아니라 새로 등록할 수 없습니다(${phoneDigits.length}자리)` };
+  const { rows } = await db.query(
+    `SELECT name, phone FROM reviewers WHERE phone8 = $1 ORDER BY (status = 'inactive'), registered_at ASC LIMIT 1`, [phoneDigits.slice(-8)]);
+  if (rows.length) {
+    return { ok: false, reason: 'reviewer_already_registered',
+      error: `이미 등록된 리뷰어 ${rows[0].name}(…${_tail4(rows[0].phone)}) — 기존 고르기로 바꿔 주세요` };
+  }
+  return { ok: true, link: { mode } };
+}
+
+const LINK_SEARCH_LIMIT = 20;
+/**
+ * 결정 348 — 수동제출 「리뷰어 연결」 검색. reviewerGate.searchReviewers 와 같은 모양(이름 부분일치 ∪ 전화 뒤자리 ∪ 계좌 숫자)이되
+ *   이 창에 필요한 최소만 돌려준다: id · 이름 · 전화 뒤 4자리 · 계좌 뒤 4자리. 주소·phone8·전체 번호는 돌려주지 않는다.
+ * ★ 검색어 2글자 미만은 DB 를 보지 않는다(한 글자로 전체 명단을 훑는 통로 차단) · 숫자 검색은 4자리 이상 · 최대 20명.
+ * ★ LIKE 특수문자(% _ \)는 글자로 취급한다('%%' 로 전체를 훑지 못하게).
+ * ★ 권한은 라우트가 맡는다(/api/trackb/manual-order/reviewer-search = 내부 직원 + 편집 허용 명단).
+ */
+async function searchReviewersForLink(q, db = pool) {
+  const term = String(q == null ? '' : q).trim().slice(0, 40);
+  if (Array.from(term.replace(/\s+/g, '')).length < 2) return { ok: true, items: [], hasMore: false, tooShort: true };
+  const dg = term.replace(/[^0-9]/g, '');
+  const likeEsc = s => s.replace(/[\\%_]/g, c => '\\' + c);
+  const conds = [];
+  const params = [];
+  const nameTerm = term.replace(/[0-9\s-]/g, '');
+  if (nameTerm) {
+    params.push(`%${likeEsc(term)}%`);
+    conds.push(`name ILIKE $${params.length} ESCAPE '\\'`);
+  }
+  if (dg.length >= 4) {
+    params.push(`%${dg}`);
+    conds.push(`REGEXP_REPLACE(phone,'[^0-9]','','g') LIKE $${params.length}`);
+    params.push(`%${dg}%`);
+    conds.push(`REGEXP_REPLACE(COALESCE(bank_account,''),'[^0-9]','','g') LIKE $${params.length}`);
+  }
+  if (!conds.length) return { ok: true, items: [], hasMore: false };
+  params.push(term.replace(/\s+/g, '').toLowerCase());
+  const exactAt = params.length;
+  params.push(LINK_SEARCH_LIMIT + 1);
+  const { rows } = await db.query(
+    `SELECT id, name, phone, bank_account FROM reviewers
+      WHERE status IS DISTINCT FROM 'inactive' AND (${conds.join(' OR ')})
+      ORDER BY (REPLACE(LOWER(name), ' ', '') = $${exactAt}) DESC, registered_at DESC
+      LIMIT $${params.length}`, params);
+  const hasMore = rows.length > LINK_SEARCH_LIMIT;
+  const items = rows.slice(0, LINK_SEARCH_LIMIT).map(r => ({
+    id: r.id, name: r.name, phoneTail: _tail4(r.phone), accountTail: _tail4(r.bank_account),
+  }));
+  return { ok: true, items, hasMore };
 }
 
 /**
@@ -478,6 +610,7 @@ async function submitExternalOrder({
   allowOverDaily = false, allowRepurchase = false,
   repurchaseDaysOverride,
   optionCampaignId = null,   // ★ 결정 211: 작업보드 경로(campaignId 없음)에서 고른 상품을 풀이할 연결 공고(정원 차감·신청 생성 없음)
+  reviewerLink = null,       // ★ 결정 348: 줄마다 고른 리뷰어 연결 {mode:'auto'|'existing'|'new', reviewerId} — 없으면 auto(옛 화면)
 }) {
   // ★ 결정 344 — 맨 앞(리뷰어 자동등록·원장·큐·작업표 쓰기보다 앞): 동시진행 작업표·공고면 쓰기 0건으로 거절(fail-closed).
   //   라우트 사전 판정을 건너뛴 직접 호출(낡은 화면·다른 입구)도 여기서 다시 걸린다.
@@ -491,6 +624,12 @@ async function submitExternalOrder({
     // phone8이 8자리 미만이면 검색·행배정·정원 키가 전부 어긋난다 → 접수 자체를 거부
     return { ok: false, error: `전화번호 자릿수가 이상합니다 (${phoneDigits.length}자리)` };
   }
+
+  // ⓪-0 ★ 결정 348 — 고른 리뷰어 연결을 서버가 다시 확인한다(읽기만). 거절이면 이 줄은 쓰기 0.
+  //   (동시진행 차단보다 뒤 · 리뷰어 등록/연결·원장 기록보다 앞 — 순서 계약은 종전 그대로)
+  const linkCheck = await resolveReviewerLink(pool, reviewerLink, phoneDigits);
+  if (!linkCheck.ok) return { ok: false, reason: linkCheck.reason, error: linkCheck.error, reviewerLinkApplied: (reviewerLink && reviewerLink.mode) || 'auto' };
+  const link = linkCheck.link;
 
   // ⓪ 중복 접수 방지 — 재붙여넣기는 **예상되는 복구 동작**이다(결과 화면이 그렇게 안내하고,
   //    배치가 끊기면 무엇이 들어갔는지 모른다). 주문번호가 없는 건이 대부분이라 dedupKey가
@@ -619,7 +758,7 @@ async function submitExternalOrder({
 
   // ① 리뷰어 등록·연결 (실패해도 주문 접수는 계속 — 카톡으로 이미 약속된 구매다)
   let reviewerInfo = { registered: false, linkedOwner: null, ownerPhone8: null, warnings: [] };
-  try { reviewerInfo = await ensureExternalReviewer(f); }
+  try { reviewerInfo = await ensureExternalReviewer(f, { link }); }
   catch (e) { warnings.push('리뷰어 등록 중 오류(제출은 계속): ' + e.message); }
   warnings.push(...reviewerInfo.warnings);
 
@@ -767,6 +906,8 @@ async function submitExternalOrder({
     queued,
     reviewerRegistered: reviewerInfo.registered,
     linkedOwner: reviewerInfo.linkedOwner,
+    linkedReviewer: reviewerInfo.linkedReviewer || null,   // ★ 결정 348: 기존 고르기 · 본인 건으로 연결한 리뷰어 이름
+    reviewerLinkApplied: link.mode,                       // ★ 결정 348: 서버가 실제로 적용한 연결 방식(없으면 = 옛 서버 → 화면이 경고)
     applicationId: application ? application.applicationId : null,
     quotaCounted: !!application,
     worktableRow: worktableRowOf(sheetlessDone),   // ★ 결정 345 ⑦: 무시트 작업표에 바로 적힌 줄 번호(화면이 '자동복구 대기'로 잘못 말하지 않게)
@@ -791,6 +932,8 @@ module.exports = {
   worktableRowOf,
   dailyRemainingForCampaign,
   ensureExternalReviewer,
+  resolveReviewerLink,
+  searchReviewersForLink,
   confirmExternalApplication,
   todayKstDateStr,
   existingOptionKeyAt,

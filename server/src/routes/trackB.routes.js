@@ -1721,6 +1721,7 @@ router.put('/work-orders/edit', authMiddleware, internalMiddleware, editorOnlyMi
 const _moRoutes = require('./manualOrder.routes');
 const _moPreview = _handler(_moRoutes, 'manualOrderPreview');
 const _moSubmit = _handler(_moRoutes, 'manualOrderSubmit');
+const _moReviewerSearch = _handler(_moRoutes, 'manualOrderReviewerSearch');
 
 router.post('/manual-order/preview', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _moPreview(req, res, next));
@@ -1733,6 +1734,10 @@ router.post('/manual-order/dual/submit', authMiddleware, internalMiddleware, edi
   _moDualSubmit(req, res, next));
 router.post('/manual-order/dual/complete', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _moDualComplete(req, res, next));
+// ★ 결정 348 — 줄마다 「기존 리뷰어 고르기」 검색. 리뷰어 이름·뒤 4자리를 보여 주는 개인정보 통로라
+//   제출과 **같은 2단 권한**(내부 직원 + 편집 허용 명단)을 건다 — 읽기라고 열람 권한(internal)만 걸지 않는다.
+router.get('/manual-order/reviewer-search', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _moReviewerSearch(req, res, next));
 
 // ── 모집공고 ────────────────────────────────────────────────
 //   목록·상세·발행·수정·플래그·삭제·관제 — 전부 기존 campaign 라우트 핸들러에 위임한다.

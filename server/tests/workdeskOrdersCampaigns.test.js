@@ -43,7 +43,9 @@ const WRITE = ['POST /work-orders/accept', 'PUT /work-orders/status',
   // (GET /worktable/plan (결정 186 40번 — 작업표 미리보기 창·GET /worktable/plan 제거) · create·delete·delete-tab 은 제거 (결정 186 10번 — 2026-09-28 시트 탭 생성 createWorktable 제거))
   // 외부모집 구매양식 수동제출 — 리뷰어 등록·주문 원장·정원 차감·시트 쓰기를 일으키는 창구라
   // 접수·발행과 같은 공통 권한을 적용한다.
-  'POST /manual-order/preview', 'POST /manual-order/submit'];
+  'POST /manual-order/preview', 'POST /manual-order/submit',
+  // 결정 348 — 리뷰어 연결 검색(이름·뒤 4자리 = 개인정보)은 읽기지만 제출과 같은 편집 게이트 뒤에 둔다.
+  'GET /manual-order/reviewer-search'];
 const AE_CAMPAIGN_CONTROL = [
   'GET /campaigns/:id/daily-plan', 'POST /campaigns/:id/daily-plan',
   'PUT /campaigns/:id/carry-strategy',
@@ -103,7 +105,7 @@ const _moHandler = (m, p) => {
   return l.route.stack;
 };
 t('★ 로직 복제 0 — 원본 핸들러를 그대로 태운다', () => {
-  [['preview', 'post', '/preview'], ['submit', 'post', '/submit']].forEach(([name, m, p]) => {
+  [['preview', 'post', '/preview'], ['submit', 'post', '/submit'], ['reviewer-search', 'get', '/reviewer-search']].forEach(([name, m, p]) => {
     const src = _moHandler(m, p);
     const proxy = router.stack.find(l => l.route && l.route.path === '/manual-order/' + name);
     assert.ok(proxy, '프록시 없음: ' + name);
@@ -112,8 +114,8 @@ t('★ 로직 복제 0 — 원본 핸들러를 그대로 태운다', () => {
   });
 });
 t('★ 원본 /api/manual-order/* 게이트는 무변경(adminOrMaster)', () => {
-  ['/preview', '/submit'].forEach(p => {
-    const names = _moHandler('post', p).map(s => s.name);
+  [['post', '/preview'], ['post', '/submit'], ['get', '/reviewer-search']].forEach(([m, p]) => {
+    const names = _moHandler(m, p).map(s => s.name);
     assert.ok(names.includes('authMiddleware') && names.includes('adminOrMasterMiddleware'),
       p + ': 원본 게이트가 느슨해졌다');
   });

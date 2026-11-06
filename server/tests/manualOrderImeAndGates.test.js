@@ -200,7 +200,8 @@ test('③ 초과 확인 체크가 붙은 상품 칸 — 고르는 칸은 최소 
   const wide = /#moOvl col\.mo-c-opt\.ack\{width:(\d+)px !important\}/.exec(mob);
   assert.ok(wide && Number(wide[1]) >= 220, '휴대폰: 초과 확인이 있는 상품 칸은 넓힌다');
   // PC: 상품 칸 156px(안쪽 148) = 고르는 칸 최소 폭 + 사이 + 확인 체크(체크 13 + 글자 두 자) 안에 든다
-  const optW = colWidths(h)[11];
+  // (결정 348: 리뷰어 연결 칸이 앞에 들어와 순번이 밀린다 — 순번이 아니라 상품 칸 표시로 찾는다 · 검사 의미 불변)
+  const optW = Number((/<col class="mo-c-opt[^"]*" style="width:(\d+)px">/.exec(h) || [])[1]);
   assert.ok(optW - 8 >= Number(minW[1]) + 4 + 13 + 4 + 2 * 12, 'PC 상품 칸 안에 고르는 칸 최소 폭 + 확인 체크가 든다: ' + optW);
   assert.match(h, /<label class="mo-ack" [^>]*><input type="checkbox" id="moAck-\d+" aria-label="1번 줄 남은 자리 초과 확인"/);
 });
