@@ -755,6 +755,29 @@ input,textarea,button{font-family:inherit}
   #screenOrderForm .of-label{font-size:.71rem}
   #screenOrderForm .of-error-msg{margin-left:76px}
 }
+/* 구매양식 입력칸 모양 (리뷰어 구매양식 개편 1단계-2 · 승인 시안 v18)
+   흰 바탕 + 얇은 회색 테두리 · 글자 휴대폰 14px/칸 32px, 넓은 화면 13px/26px · 이름표는 왼쪽 정렬 보통 굵기 13px.
+   칸 순서·위치는 그대로다(그래서 _EMBED_FORM_LAYOUT 은 올리지 않는다 — 결정 348).
+   ★ toss-theme.css 가 모든 입력칸 테두리를 투명(!important)으로 덮으므로 여기도 !important 로 덮는다.
+     그 때문에 지금까지 안 보이던 상태 테두리색(자동입력 초록·별표 분홍·필수 빨강)을 다시 지정하고, 포커스 파랑은 맨 뒤에 둬서 입력 중에는 파랑이 이긴다. */
+#screenOrderForm .of-label{width:76px;text-align:left;font-size:13px;font-weight:400;color:#1d1d1f;line-height:1.3;word-break:keep-all}
+#screenOrderForm .of-input{min-height:26px;padding:3px 8px;font-size:13px;line-height:18px;color:#1d1d1f;background:#fff;border:1px solid #b6b6bd!important;border-radius:6px!important;box-sizing:border-box}
+#screenOrderForm .of-input::placeholder{font-size:inherit}
+#screenOrderForm .of-textarea{min-height:44px}
+#screenOrderForm .of-error-msg{margin-left:84px}
+#screenOrderForm .of-input.ai-filled,#screenOrderForm .of-input.ai-locked{border-color:#12b886!important}
+#screenOrderForm .of-input.ai-filled-asterisk{border-color:#F43F5E!important}
+#screenOrderForm .of-input.of-input--error{border-color:#EF4444!important}
+#screenOrderForm .of-input:focus{border-color:var(--p)!important;box-shadow:0 0 0 3px rgba(49,130,246,.15)!important}
+@media(max-width:600px){
+  #screenOrderForm .of-input{min-height:32px;padding:5px 8px;font-size:14px;line-height:20px}
+  #screenOrderForm .of-textarea{min-height:52px}
+  #screenOrderForm .of-error-msg{margin-left:84px}
+}
+@media(max-width:340px){
+  #screenOrderForm .of-label{font-size:12px}
+  #screenOrderForm .of-error-msg{margin-left:76px}
+}
 /* ── 관리자 화면 너비 확장 ── */
 .admin-body{padding-top:0;max-width:1800px;width:100%;margin:0 auto;padding-left:24px;padding-right:24px;box-sizing:border-box}
 #screenAdmin .app-header .header-inner{max-width:1800px}
