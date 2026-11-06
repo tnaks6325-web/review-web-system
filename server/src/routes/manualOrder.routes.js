@@ -14,7 +14,7 @@ const _handlers = {};
 const pool = require('../db/pool');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const { parseSlashForm } = require('../utils/slashForm');
-const { submitExternalOrder, dailyRemainingForCampaign, tabOptionChoices } = require('../services/manualOrder.service');
+const { submitExternalOrder, dailyRemainingForCampaign, tabOptionChoices, manualDualBlock } = require('../services/manualOrder.service');
 const { checkRepurchaseWindowBatch, phone8Of, resolveCampaignRepurchaseDays } = require('../utils/repurchaseGuard');
 const { logger } = require('../utils/logger');
 
@@ -25,6 +25,11 @@ const MAX_LINES = 50;   // 한 번에 처리할 최대 건수(오붙여넣기로
 const AI_REPAIR_MAX = parseInt(process.env.SLASHFORM_AI_REPAIR_MAX || '10', 10);   // 한 요청당 AI 호출 상한
 
 router.post('/preview', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
+  // ★ 결정 344 — 동시진행 작업표·공고는 미리보기 단계에서 바로 알린다(분해·AI 보정 전 · 판정 실패도 거절 = fail-closed).
+  //   화면은 `error` 를 그대로 alert 한다('분해 실패: …').
+  { const pb = req.body || {};
+    const blocked = await manualDualBlock(pool, { sheetId: pb.sheetId, tabName: pb.tabName, gid: pb.gid, campaignId: pb.campaignId });
+    if (blocked) return res.status(409).json(blocked); }
   const text = String((req.body && req.body.text) || '');
   const all = parseSlashForm(text);
   const items = all.slice(0, MAX_LINES);
@@ -94,6 +99,11 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
 
     const items = Array.isArray(b.items) ? b.items.slice(0, MAX_LINES) : [];
     if (!items.length) return res.status(400).json({ ok: false, error: '제출할 건이 없습니다' });
+
+    // ★ 결정 344 — 동시진행 작업표·공고는 배치를 시작하기 전에 쓰기 0건으로 거절(fail-closed).
+    //   서버 최종 방어는 건별 `submitExternalOrder` 맨 앞의 같은 판정(manualDualBlock)이 맡는다.
+    { const blocked = await manualDualBlock(pool, { sheetId, tabName, gid, campaignId });
+      if (blocked) return res.status(409).json(blocked); }
 
     const allowOverDaily = b.allowOverDaily === true;
     const allowRepurchase = b.allowRepurchase === true;

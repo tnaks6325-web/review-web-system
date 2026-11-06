@@ -849,7 +849,10 @@ console.log('\nJ. 일 정원 확인 게이트');
   const realQuery = poolMod.query, realCounts = stateSvc.fetchCampaignCounts;
   const realDerive = schedSvc.deriveSchedules;
 
-  poolMod.query = async (sql) => (/FROM recruit_campaigns WHERE id/i.test(String(sql))
+  // 결정 344: 수동제출 동시진행 판정(discoverDualScope)이 공고 행을 읽는다 — 이 공고는 있고 동시진행이 아니다(fixture 모양만 · 검사 불변).
+  poolMod.query = async (sql, params) => /AS campaign FROM recruit_campaigns c WHERE c\.id/.test(String(sql))
+    ? { rows: [{ campaign: { id: String((params || [])[0]) } }] }
+    : (/FROM recruit_campaigns WHERE id/i.test(String(sql))
     ? { rows: [{ id: 'c1', participation_mode: true, status: 'active', daily_limit: 15, recruit_total: 0,
                  window_start: null, window_end: null, start_date: null }] }
     : { rows: [] });
@@ -892,8 +895,10 @@ console.log('\nJ. 일 정원 확인 게이트');
   const schedSvc = require('../src/services/campaignSchedule.service');
   const realQuery = poolMod.query, realCounts = stateSvc.fetchCampaignCounts, realDerive = schedSvc.deriveSchedules;
   let writes = 0;
-  poolMod.query = async (sql) => {
+  poolMod.query = async (sql, params) => {
     const q = String(sql);
+    // 결정 344: 수동제출 동시진행 판정(discoverDualScope)이 공고 행을 읽는다 — 이 공고는 있고 동시진행이 아니다(fixture 모양만 · 검사 불변).
+    if (/AS campaign FROM recruit_campaigns c WHERE c\.id/.test(q)) return { rows: [{ campaign: { id: String((params || [])[0]) } }] };
     // 재참여 사전 확인은 `WITH ... SELECT` 읽기 쿼리다. 선두 WITH만으로 쓰기로 오인하지 않되,
     // 데이터 변경 CTE는 INSERT/UPDATE/DELETE 키워드가 있으므로 계속 쓰기로 센다.
     if (!/^\s*(?:SELECT|WITH)\b/i.test(q) || /\b(?:INSERT|UPDATE|DELETE)\b/i.test(q)) writes++;
