@@ -24,7 +24,7 @@ async function fixture(){
  CREATE TABLE raw_sheet_rows(sheet_id text,tab_name text,tab_gid text,row_index integer,cells jsonb);
  `);
  const local=path.resolve(__dirname,'../../migrations/215_dual_channel_purchase_bundles.sql');
- const migration=fs.readFileSync(fs.existsSync(local)?local:'/Users/sooman/dev/wt/rw-dualchannel-storage/server/migrations/215_dual_channel_purchase_bundles.sql','utf8');
+ const migration=fs.readFileSync(local,'utf8');
  await pg.exec(migration);await pg.exec(migration);
  await pg.query(`INSERT INTO recruit_campaigns VALUES('campaign',$1,'s','t','g',NULL)`,[JSON.stringify({dualChannelProduct:snapshot})]);
  await pg.exec(`INSERT INTO campaign_applications VALUES(1,'campaign',NULL)`);
