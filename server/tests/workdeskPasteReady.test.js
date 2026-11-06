@@ -83,20 +83,20 @@ const P = ctx.window.PasteReady;
   await t('부품이 안 실렸을 때(옛 캐시 등)는 종전 문구로 그린다 — 빈 칸이 되지 않는다', () => {
     assert.match(wd, /window\.PasteReady   \/\/ 결정 264[\s\S]{0,900}로 리뷰 캡처를 붙여넣으세요/);
     assert.match(wd, /로 새 \$\{K\.label\}를 붙여넣으세요/);
-    assert.match(mo, /window\.PasteReady[\s\S]{0,300}여기에 <b>Ctrl\+V<\/b> 하거나 이미지를 끌어다 놓으세요/);
+    // 결정 347: 수동 주문은 공용 보관함 칸을 없애고 줄마다 작은 캡처 칸(Ctrl+V · 끌어다 놓기 · 클립)을 쓴다 — 부품(PasteReady)에 기대지 않아 옛 캐시에서도 빈 칸이 되지 않는다
+    assert.ok(!/PasteReady/.test(mo) && /<span class="k">Ctrl\+V<\/span>/.test(mo));
   });
   await t('받았을 때만 초록 깜빡임', () => {
     assert.match(wd, /const grew=next\.length>st\.files\.length;[\s\S]{0,120}if\(grew&&window\.PasteReady\) PasteReady\.flash\(document\.getElementById\('wrpDrop'\)\)/);
     assert.match(wd, /const grew=_RM\.files\.length>n0;[\s\S]{0,120}PasteReady\.flash\(document\.getElementById\('rmAtt'\)\)/);
   });
-  await t('수동 주문: 넣는 길 한 곳(_stageAll) · 화면이 떠 있으면 칸을 안 눌러도 Ctrl+V · 글자·이미 처리한 붙여넣기는 건드리지 않음', () => {
-    for (const fn of ['onTextPaste', 'onStagePaste', 'onDrop', 'onStageFiles']) {
-      const b = mo.slice(mo.indexOf('function ' + fn), mo.indexOf('\n  }', mo.indexOf('function ' + fn)));
-      assert.match(b, /_stageAll\(/, fn); assert.ok(!/forEach\(stageImage\)/.test(b), fn + ' 사본 금지');
+  await t('수동 주문(결정 347): 넣는 길 한 곳(takeImages) · 표가 떠 있으면 칸을 안 눌러도 Ctrl+V 는 고른 줄로 · 글자·이미 처리한 붙여넣기는 건드리지 않음', () => {
+    for (const fn of ['onPaste', 'onFile', 'onDrop']) {
+      const b = mo.slice(mo.indexOf('function ' + fn + '('), mo.indexOf('\n  }', mo.indexOf('function ' + fn + '(')));
+      assert.match(b, /takeImages\(row, /, fn); assert.ok(!/attach\(/.test(b), fn + ' 사본 금지');
     }
-    const d = mo.slice(mo.indexOf("document.addEventListener('paste'"), mo.indexOf('function onDrop'));
-    assert.match(d, /if \(ev\.defaultPrevented\) return;[\s\S]*offsetParent\) return;[\s\S]*if \(!imgs\.length\) return;\s*\n\s*ev\.preventDefault\(\);/);
-    assert.match(mo, /PasteReady\.html\(\{ dropSub: '여러 장 가능', file: \{ onchange: 'ManualOrder\.onStageFiles\(event\)', multiple: true \} \}\)/);
+    const d = mo.slice(mo.indexOf("document.addEventListener('paste'"), mo.indexOf('function shrink('));
+    assert.match(d, /if \(ev\.defaultPrevented\) return;[\s\S]*CTX\.view !== 'table'[\s\S]*if \(!imgs\.length\) return;\s*\n\s*ev\.preventDefault\(\);[\s\S]*ACTIVE/);
   });
   console.log(`\n✅ workdeskPasteReady: ${passed}/${passed}`);
 })().catch(e => { console.error(e); process.exit(1); });

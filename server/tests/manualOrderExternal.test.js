@@ -405,8 +405,9 @@ console.log('\nD. 프론트 배선');
 {
   const mo = F('js/manual-order.js');
   ok('D1 공용 모달이 window.ManualOrder 로 노출', /window\.ManualOrder\s*=\s*\{/.test(mo));
-  ok('D2 open/close/parse/submit 이 계약에 포함',
-    ['open', 'close', 'parse', 'back', 'edit', 'onPaste', 'submit'].every(k =>
+  // 결정 347: [다음]·[← 다시 붙여넣기] 단계가 없어졌다 — 줄 입력·붙여넣기·나누기(flush)가 그 자리를 맡는다(의미: 열기·입력·나누기·고치기·캡처·제출이 계약에 있다)
+  ok('D2 open/close/줄 입력·붙여넣기·나누기/edit/onPaste/submit 이 계약에 포함',
+    ['open', 'close', 'rowInput', 'rowPaste', 'flush', 'edit', 'onPaste', 'submit'].every(k =>
       new RegExp('window\\.ManualOrder\\s*=\\s*\\{[^}]*\\b' + k + '\\b').test(mo)));
   ok('D2b 붙여넣기가 안 먹는 브라우저용 파일 선택 폴백이 있다(첨부 경로 단일화 금지)',
     mo.includes('onFile') && mo.includes('type="file"'));
@@ -539,7 +540,9 @@ console.log('\nE. 데이터 보전 가드');
   ok('E21 분해 요청도 오류를 잡는다(프록시 HTML 응답에 버튼이 죽던 문제)',
     /try \{\s*r = await api\(_moBase\(\) \+ '\/preview'/.test(mo));
   ok('E22 결과↔제출건 매칭은 서버가 준 index 로', /res\.index === 'number'\) \? targets\[res\.index\]/.test(mo));
-  ok('E23 셀을 고치면 옛 오류 문구도 지운다', /querySelectorAll\('\.mo-msg'\)\.forEach\(el => el\.remove\(\)\)/.test(mo));
+  // 결정 347: 줄의 문구는 확인 칸 하나(moSt-<줄>)가 그린다 — 셀을 고치면 그 칸을 통째로 다시 그려 옛 문구가 남지 않는다(의미 불변)
+  ok('E23 셀을 고치면 옛 오류 문구도 지운다', /function edit\(i, key, val\)[\s\S]{0,2600}_refreshRow\(it\);/.test(mo)
+    && /const st = document\.getElementById\('moSt-' \+ it\.uid\);\s*if \(st\) st\.innerHTML = stCellInner\(it\);/.test(mo));
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -695,7 +698,7 @@ console.log('\nH. 슬래시 누락 자동 보정');
   ok('H17 AI 폴백은 칸 부족으로 실패한 줄에만 시도(정상 줄은 AI로 안 보냄)',
     rt.includes('items.filter(i => !i.ok') && rt.includes('칸이 \\d+개뿐'));
   ok('H18 ★ AI 결과도 같은 파서로 재검증한다(파서 우회 금지)',
-    rt.includes('parseSlashLine(rebuilt)') && rt.includes("re.ok"));
+    rt.includes('parseSlashLine(rebuilt, { noShape: true })') && rt.includes("re.ok"));   // 2026-11-06: 표준 순서로만 재검증(강화)
   ok('H19 ★ AI 호출에 상한이 있다(오붙여넣기가 통째로 AI로 가지 않게)', /AI_REPAIR_MAX/.test(rt));
   ok('H20 킬스위치', rt.includes('SLASHFORM_AI_REPAIR'));
   ok('H21 AI 보정 줄은 원문을 보존해 사람이 대조할 수 있다', rt.includes('raw: it.raw'));
@@ -706,9 +709,10 @@ console.log('\nH. 슬래시 누락 자동 보정');
     gs.includes("if (!s('phone')) return null;"));
 
   const mo = F('js/manual-order.js');
-  ok('H24 ★ 보정된 줄은 표에 배지로 드러난다(조용한 수정 금지)',
-    mo.includes('🔧 자동보정') && mo.includes('🤖 AI 보정'));
-  ok('H25 보정 건수를 헤더에 요약', /자동보정 \$\{fixN\}건/.test(mo));
+  // 결정 347: 맥 규칙(이모지 금지)으로 그림문자를 뺐다 — 표시는 줄 왼쪽 주황 막대(tr.fix) + 확인 칸 「자동보정: …/AI 보정: …」 주황 글자(의미 불변)
+  ok('H24 ★ 보정된 줄은 표에 드러난다(조용한 수정 금지)',
+    /it\.aiRepaired \? 'AI 보정' : \(it\.repairs \|\| \[\]\)\.length \? '자동보정'/.test(mo) && /\(it\.repairs \|\| \[\]\)\.length \|\| it\.aiRepaired \|\| capNameMismatch\(it\)\) c\.push\('fix'\)/.test(mo));
+  ok('H25 보정 건수를 헤더에 요약', /자동보정 (<span class="n">)?\$\{fixN\}(<\/span>)?건/.test(mo));   // 결정 347: 숫자만 고정폭 글자로 감쌌다(의미 불변)
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -723,61 +727,29 @@ console.log('\nI. 1단계 캡처 첨부');
     ok(`I1-${f} 옛 명칭 잔여 없음`, !F(f).includes('외부참여 수동제출'));
   });
 
-  ok('I2 1단계에 캡처 보관함이 있다', mo.includes('id="moDrop"') && mo.includes('id="moStage"'));
-  ok('I3 텍스트 칸에 이미지를 붙여도 캡처로 받는다(관리자는 그냥 Ctrl+V)',
-    mo.includes('onpaste="ManualOrder.onTextPaste(event)"') && /function onTextPaste\(ev\)/.test(mo));
-  ok('I4 붙여넣기·드래그·파일선택 3경로 — 하나만 두면 브라우저에 따라 막힌다',
-    /function onStagePaste/.test(mo) && /function onDrop/.test(mo) && /function onStageFiles/.test(mo));
-  ok('I5 여러 장을 한 번에 받는다', /_imagesFrom\(ev\.clipboardData\)/.test(mo) && /\.forEach\(stageImage\)/.test(mo));
-  ok('I6 잘못 넣은 캡처는 뺄 수 있다', /function unstage\(i\)/.test(mo) && mo.includes('ManualOrder.unstage('));
-  ok('I7 보관 캡처도 업로드 전에 줄인다(413 방지 — 줄별 첨부와 같은 경로)', /await shrink\(file\)/.test(mo));
-  ok('I8 계약에 1단계 핸들러가 노출된다',
-    ['onTextPaste', 'onStagePaste', 'onDrop', 'onStageFiles', 'unstage']
-      .every(k => new RegExp('window\\.ManualOrder[\\s\\S]{0,400}\\b' + k + '\\b').test(mo)));
-  ok('I9 파싱 직후 보관 캡처를 각 줄에 배정한다', /distributeStaged\(\);/.test(mo)
-    && mo.indexOf('ROWS = (r.items') < mo.indexOf('distributeStaged();'));
-  ok('I10 2단계 줄별 첨부도 그대로 남아 있다(보완 경로)',
-    mo.includes('ManualOrder.onPaste(event,') && mo.includes('ManualOrder.onFile(event,'));
-  ok('I11 모달을 새로 열면 보관함이 비워진다(다른 탭 캡처 혼입 금지)', /ROWS = \[\]; STAGED = \[\];/.test(mo));
-
-  // ★ 배정 규칙을 실제로 실행 — 이름 → 전화 → 순서
-  const src = mo.slice(mo.indexOf('function distributeStaged()'));
-  let d = 0, k = src.indexOf('{');
-  for (; k < src.length; k++) { const c = src[k]; if (c === '{') d++; else if (c === '}') { d--; if (!d) break; } }
-  const body = src.slice(0, k + 1);
-  let ROWS = [], STAGED = [];
-  eval(body);   // eslint-disable-line no-eval — 가드 전용(브라우저 코드를 그대로 실행해 규칙 고정)
-
-  ROWS = [
-    { fields: { recipient: '이시현', phone: '010-7701-1701' }, capture: null, extract: null },
-    { fields: { recipient: '김하나', phone: '010-1111-2222' }, capture: null, extract: null },
-    { fields: { recipient: '박서준', phone: '010-3333-4444' }, capture: null, extract: null },
-  ];
-  STAGED = [
-    { base64: 'B', mime: 'i', extract: { recipient: '김 하나', orderNumber: 'ORD-B' } },
-    { base64: 'C', mime: 'i', extract: { recipient: '', phone: '010-3333-4444' } },
-    { base64: 'A', mime: 'i', extract: null },
-  ];
-  distributeStaged();
-  ok('I12 ★ 수취인 이름으로 붙는다(공백 차이 무시)', ROWS[1].capture.base64 === 'B');
-  ok('I13 이름을 못 읽으면 연락처 뒤 4자리로', ROWS[2].capture.base64 === 'C');
-  ok('I14 그래도 못 맞추면 붙인 순서대로(첨부를 버리지 않는다)', ROWS[0].capture.base64 === 'A');
-  ok('I15 캡처에서 읽은 주문번호가 빈 칸에 채워진다', ROWS[1].fields.orderNum === 'ORD-B');
-
-  ROWS = [{ fields: { recipient: 'A' }, capture: null }, { fields: { recipient: 'B' }, capture: null }];
-  STAGED = [{ base64: 'X', mime: 'i', extract: null }];
-  distributeStaged();
-  ok('I16 캡처가 줄보다 적으면 남는 줄은 빈 채로', !!ROWS[0].capture && !ROWS[1].capture);
-
-  ROWS = [{ fields: { recipient: 'A' }, capture: null }];
-  STAGED = [];
-  distributeStaged();
-  ok('I17 캡처가 없으면 무동작(기존 동작 불변)', ROWS[0].capture === null);
-
-  ROWS = [{ fields: { recipient: 'A' }, capture: { base64: 'KEEP' } }];
-  STAGED = [{ base64: 'NEW', mime: 'i', extract: { recipient: 'A' } }];
-  distributeStaged();
-  ok('I18 이미 붙은 캡처를 덮어쓰지 않는다', ROWS[0].capture.base64 === 'KEEP');
+  // ★ 결정 347: 공용 보관함(STAGED)·이름 자동 배정(distributeStaged)을 없앴다 — 캡처는 줄마다. I2~I18(보관함·배정 규칙)은
+  //   「줄마다 첨부 = 다른 줄에 안 붙음」 검사로 바꾼다(실행 검사는 manualOrderRowTable.test.js).
+  ok('I2 ★ 공용 보관함·이름 자동 배정이 없다(오배정의 뿌리 — 결정 345 P1·P2)',
+    !/\bSTAGED\b/.test(mo) && !/distributeStaged/.test(mo) && !mo.includes('id="moStage"') && !mo.includes('id="moDrop"'));
+  ok('I3 줄 글칸에 사진을 붙이면 그 줄 캡처로 받는다(관리자는 그냥 Ctrl+V)',
+    mo.includes('onpaste="ManualOrder.rowPaste(event,${i})"') && /function rowPaste\(ev, i\)[\s\S]{0,400}if \(imgs\.length\) \{ ev\.preventDefault\(\); select\(row\); takeImages\(row, imgs\); return; \}/.test(mo));
+  ok('I4 붙여넣기·끌어놓기·파일선택 3경로 — 전부 그 줄 번호를 들고 온다',
+    mo.includes('onpaste="ManualOrder.onPaste(event,${i})"') && mo.includes('ondrop="ManualOrder.onDrop(event,${i})"') && mo.includes('onchange="ManualOrder.onFile(event,${i})"'));
+  ok('I5 넣는 길은 한 곳(takeImages → attach) · 한 줄 = 한 장',
+    ['onPaste', 'onFile', 'onDrop'].every(fn => { const s = mo.slice(mo.indexOf('function ' + fn + '('), mo.indexOf('\n  }', mo.indexOf('function ' + fn + '('))); return /takeImages\(row, /.test(s); })
+    && /function takeImages\(row, files\)[\s\S]{0,500}attach\(row, imgs\[0\]\);/.test(mo));
+  ok('I6 잘못 넣은 캡처는 뺄 수 있다', /function uncap\(i\)/.test(mo) && mo.includes('ManualOrder.uncap(${i})'));
+  ok('I7 줄별 캡처도 업로드 전에 줄인다(413 방지)', /const shrunk = await shrink\(file\);/.test(mo));
+  ok('I8 계약에 줄별 첨부 핸들러가 노출된다',
+    ['onPaste', 'onFile', 'onDrop', 'uncap', 'selectRow']
+      .every(k => new RegExp('window\\.ManualOrder[\\s\\S]{0,600}\\b' + k + '\\b').test(mo)));
+  ok('I9 ★ 고른 줄 없이 Ctrl+V 한 사진은 아무 줄에도 붙이지 않는다(알리기만)',
+    /const row = ACTIVE && ROWS\.indexOf\(ACTIVE\) >= 0 \? ACTIVE : null;\s*if \(!row\) \{ _toast\('캡처를 붙일 줄을 먼저 눌러 고르세요'\); return; \}/.test(mo));
+  ok('I10 사진을 줄이는 사이 그 줄을 지우면 버린다(다른 줄로 가지 않는다)', /if \(ROWS\.indexOf\(row\) < 0 \|\| !CTX\) return;   \/\/ 그사이 줄을 지웠거나/.test(mo));
+  ok('I11 모달을 새로 열면 줄·캡처가 비워진다(다른 탭 캡처 혼입 금지)', /ROWS = \[\]; OPTS = \[\]; ACTIVE = null;/.test(mo));
+  ok('I12 ★ 캡처 이름이 그 줄 수취인과 다르면 경고만(제출 막지 않음 · 마스킹 패턴 일치면 경고 없음)',
+    /function capNameMismatch\(it\)/.test(mo) && /이름이 다릅니다\(캡처: \$\{capNm\}\)/.test(mo)
+    && !/capNameMismatch/.test(mo.slice(mo.indexOf('const submittable'), mo.indexOf('\n', mo.indexOf('const submittable')))));
 }
 
 /* ══════════════════════════════════════════════════════════

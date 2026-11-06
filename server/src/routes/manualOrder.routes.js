@@ -53,7 +53,7 @@ router.post('/preview', authMiddleware, adminOrMasterMiddleware, async (req, res
           //   (AI 출력이 파서를 우회해 그대로 접수되는 일이 없게)
           const rebuilt = [f.reviewerName, f.recipient, f.userId, f.phone, f.address,
             f.bank, f.account, f.depositor, f.price].map(v => String(v || '').replace(/\//g, ' ')).join('/');
-          const re = parseSlashLine(rebuilt);
+          const re = parseSlashLine(rebuilt, { noShape: true });   // AI 결과는 표준 순서로만 재검증(생김새 자리 찾기로 덮지 않는다)
           if (!re.ok) {
             it.errors = it.errors.concat([`AI 보정도 실패: ${re.errors[0]}`]);
             return;

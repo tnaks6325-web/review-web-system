@@ -357,7 +357,131 @@ function normalizeLine(raw) {
  * 한 줄 파싱.
  * @returns {{ok:boolean, fields:object, errors:string[], warnings:string[], raw:string, extraSlashInAddress:boolean, repairs:string[], missing:string[]}}
  */
-function parseSlashLine(line) {
+
+/* ══════════════════════════════════════════════════════════════
+   생김새로 자리 찾기(자동 배치) — 사용자 확정 2026-11-06
+   칸 순서가 양식과 다르거나 칸이 빠진 줄을 값의 생김새로 9칸에 놓는다. 표준 순서로 읽히지 않을 때만 쓴다.
+   ① 이름 1개 → 리뷰어·수취인·예금주 모두  ② 이름 2개 → 계좌번호 바로 옆 = 예금주, 남은 하나 = 리뷰어·수취인
+   ③ 이름 3개 → 계좌번호 옆 = 예금주, 남은 둘 = 나온 순서대로 리뷰어·수취인  ④ 아이디 없으면 빈칸
+   ★ 애매하면 놓지 않는다(null): 전화·은행·계좌가 정확히 1개가 아님 · 금액·아이디 2개 이상 · 주소 조각이 떨어져 있음 ·
+     어느 칸인지 모를 값이 남음 · 예금주를 하나로 못 정함. 엉뚱한 칸에 조용히 들어가는 것보다 멈추는 쪽이 안전하다.
+   ══════════════════════════════════════════════════════════════ */
+const NAME_RE = /^[가-힣*]{2,5}$/;
+function _shapeKind(v) {
+  const t = String(v || '').trim();
+  if (!t) return 'empty';
+  if (/^[0-9+\s().-]+$/.test(t) && looksPhone(t)) return 'phone';
+  if (/^[0-9][0-9\s-]{5,}$/.test(t) && (/-/.test(t) || digits(t).length >= 9)) return 'account';
+  if (!/-/.test(t) && digits(t).length <= 8 && /[0-9]/.test(t) && looksPrice(t)) return 'price';
+  if (looksBankName(t)) return 'bank';
+  if (!/[가-힣\s]/.test(t) && (/@/.test(t) || (/^[A-Za-z0-9._-]{3,}$/.test(t) && /[A-Za-z]/.test(t)))) return 'id';
+  if (NAME_RE.test(t) && !looksBankName(t)) return 'name';
+  if (looksAddress(t)) return 'address';
+  return 'unknown';
+}
+function placeByShape(parts) {
+  const kinds = parts.map(_shapeKind);
+  if (kinds.includes('unknown')) return null;
+  const at = k => kinds.reduce((a, x, i) => (x === k ? a.concat(i) : a), []);
+  const [ph, bk, ac, pr, id, ad, nm] = ['phone', 'bank', 'account', 'price', 'id', 'address', 'name'].map(at);
+  if (ph.length !== 1 || bk.length !== 1 || ac.length !== 1 || pr.length > 1 || id.length > 1 || !ad.length || !nm.length) return null;
+  if (ad[ad.length - 1] - ad[0] !== ad.length - 1) return null;          // 주소 조각은 붙어 있어야 한다
+  const val = i => String(parts[i]).trim();
+  const notes = [];
+  let reviewerName, recipient, depositor;
+  const distinct = [...new Set(nm.map(val))];
+  if (distinct.length === 1) {
+    reviewerName = recipient = depositor = distinct[0];
+    notes.push(`이름이 하나뿐이라 리뷰어·수취인·예금주에 모두 '${distinct[0]}'을(를) 넣었습니다`);
+  } else {
+    const nextToAcct = nm.filter(i => Math.abs(i - ac[0]) === 1);
+    if (nextToAcct.length !== 1 || nm.length > 3) return null;
+    depositor = val(nextToAcct[0]);
+    const rest = nm.filter(i => i !== nextToAcct[0]).map(val);
+    if (rest.length === 1) { reviewerName = recipient = rest[0]; }
+    else { [reviewerName, recipient] = rest; }
+  }
+  notes.unshift('칸 순서가 양식과 달라 값의 생김새로 자리를 찾았습니다(자동 배치)');
+  if (!id.length) notes.push('아이디 칸이 없어 비워 두었습니다');
+  return {
+    parts: [reviewerName, recipient, id.length ? val(id[0]) : '', val(ph[0]), ad.map(val).join('/'),
+      val(bk[0]), val(ac[0]), depositor].concat(pr.length ? [val(pr[0])] : []),
+    notes,
+  };
+}
+
+/** 붙은 칸 하나를 둘로 가르는 후보들(슬래시 빠짐) — 칸 순서와 무관. 주소·아이디처럼 이미 알아본 칸은 전화 앞뒤·끝 은행명에서만 자른다
+ *  (주소를 숫자 경계에서 자르면 '26' 같은 가짜 금액이 생긴다). */
+function _splitCandidates(t, kind) {
+  const out = [];
+  const add = (a, b) => { a = a.trim(); b = b.trim(); if (a && b) out.push([a, b]); };
+  const pm = /01[0-9][-\s]?\d{3,4}[-\s]?\d{4}/.exec(t);
+  if (pm && pm[0].length < t.length) {
+    if (pm.index > 0) add(t.slice(0, pm.index), t.slice(pm.index));
+    const end = pm.index + pm[0].length;
+    if (end < t.length) add(t.slice(0, end), t.slice(end));
+  }
+  // 끝 은행명 — '…211호하나은행'처럼 앞 글자가 한글이면 경계가 모호하다 → 알려진 은행 이름(이체 서식 단일 출처)과 정확히 맞는 길이만 쓴다
+  const bw = new RegExp('(' + BANK_WORDS.join('|') + ')$', 'i').exec(t);
+  if (bw && bw.index >= 4) {
+    const opts = [];
+    for (let k = 0; k <= 6 && bw.index - k >= 4; k++) {
+      const b = t.slice(bw.index - k).trim(); const a = t.slice(0, bw.index - k);
+      if (k > 0 && !/[가-힣A-Za-z]/.test(t[bw.index - k])) break;
+      opts.push([a, b]);
+    }
+    const known = opts.filter(([, b]) => _bankByAlias(b));
+    (known.length ? known.slice(0, 1) : opts.slice(0, 1)).forEach(([a, b]) => add(a, b));
+  }
+  if (kind === 'unknown') {
+    for (const [re, , guard] of SPLITTERS) {
+      const m = re.exec(t);
+      if (m && (!guard || guard(m[1].trim()))) add(m[1], m[2]);
+    }
+    for (let i = 1; i < t.length; i++) {
+      const a = t[i - 1], b = t[i];
+      const cls = c => (/[가-힣]/.test(c) ? 'h' : /[0-9]/.test(c) ? 'd' : /[A-Za-z@._]/.test(c) ? 'l' : 'o');
+      const ca = cls(a), cb = cls(b);
+      if (ca !== cb && ca !== 'o' && cb !== 'o' && !(ca === 'l' && cb === 'd') && !(ca === 'd' && cb === 'l')) add(t.slice(0, i), t.slice(i));
+    }
+  }
+  const seen = new Set();
+  return out.filter(([a, b]) => { const k = a + '\u0000' + b; if (seen.has(k)) return false; seen.add(k); return _shapeKind(a) !== 'unknown' && _shapeKind(b) !== 'unknown'; });
+}
+/** 생김새 자리 찾기 + 슬래시 빠진 곳 나누기(최대 3곳). 나누는 방법이 둘 이상의 다른 결과로 갈리면 null(애매 = 넣지 않음). */
+function placeByShapeWithSplits(parts) {
+  const direct = placeByShape(parts);
+  if (direct) return direct;
+  const expand = list => {
+    const res = [];
+    list.forEach(({ parts: ps, cuts }) => {
+      ps.forEach((t, i) => {
+        _splitCandidates(String(t).trim(), _shapeKind(t)).forEach(([a, b]) => {
+          res.push({ parts: ps.slice(0, i).concat([a, b], ps.slice(i + 1)), cuts: cuts.concat([`'${a}' / '${b}'`]) });
+        });
+      });
+    });
+    return res;
+  };
+  let level = [{ parts, cuts: [] }];
+  for (let depth = 0; depth < 3; depth++) {
+    level = expand(level);
+    if (level.length > 4000) return null;
+    const ok = new Map();
+    level.forEach(c => {
+      const pl = placeByShape(c.parts);
+      if (pl) { const key = pl.parts.join('/'); if (!ok.has(key)) ok.set(key, { pl, cuts: c.cuts }); }
+    });
+    if (ok.size === 1) {
+      const { pl, cuts } = [...ok.values()][0];
+      return { parts: pl.parts, notes: pl.notes.concat([`슬래시(/)가 빠진 곳을 나눴습니다: ${cuts.join(', ')}`]) };
+    }
+    if (ok.size > 1) return null;
+  }
+  return null;
+}
+
+function parseSlashLine(line, _opt) {
   const raw = String(line == null ? '' : line);
   const norm = normalizeLine(raw);
   let parts = norm.line.split('/').map(s => s.trim());
@@ -389,6 +513,22 @@ function parseSlashLine(line) {
     ok: false, raw, fields: {}, warnings, extraSlashInAddress: false, repairs: [], missing: missing || [], errors: errs,
   });
 
+  // 생김새로 자리 찾기 — 표준 순서로 읽히지 않을 때만(재귀 1단 · 결과는 표준 경로로 다시 검증)
+  const tryShape = () => {
+    if (hasLabels || (_opt && _opt.noShape)) return null;
+    const placed = placeByShapeWithSplits(parts.filter(v => String(v).trim() !== ''));
+    if (!placed) return null;
+    const re = parseSlashLine(placed.parts.join('/'), { noShape: true });
+    if (!re.ok && !(re.missing || []).includes('결제금액')) return null;
+    const extra = notes.concat(placed.notes);
+    return Object.assign(re, {
+      raw,
+      repairs: extra.concat(re.repairs || []),
+      warnings: extra.map(r => r + ' — 값이 맞는지 확인하세요').concat(re.warnings || []),
+      shapePlaced: true,
+    });
+  };
+
   // ★ 라벨식 여러 줄(한 사람이 여러 줄) — 범위 밖. 알아듣게 돌려보낸다(AI 폴백 대상 아님)
   if (hasLabels && parts.length <= 2) {
     return fail([`한 사람은 한 줄로 적어 주세요 — '항목: 값'을 줄마다 나눈 형식은 읽지 못합니다 (${FIELD_LABELS.join('/')} 순서로 슬래시(/)로 이어 주세요)`]);
@@ -404,6 +544,30 @@ function parseSlashLine(line) {
     }
   }
 
+  // ★ 결제금액만 빠진 양식(규칙 보정으로도 못 맞춘 8칸 · 끝 슬래시로 9번째가 빈 칸 · 주소에 슬래시가 있는 경우 포함) — 사용자 확정 2026-11-06
+  //   나머지 8칸은 채워 보여 주고 금액만 비운다. 금액은 지어내지 않는다(ok:false + missing ['결제금액'] →
+  //   화면에서 금액 칸에 직접 넣으면 그 줄이 정상으로 바뀐다). 판정은 "금액 자리에 아무 숫자를 넣으면
+  //   정상 양식으로 조립되는가"로 한다 — 모양 검사(은행·계좌·예금주 자리·두 사람 붙음)는 그대로 거친다.
+  //   ★ 오류 문구에 "칸이 N개뿐"을 쓰지 않는다 — 그 문구가 AI 보정 폴백의 대상이고, 금액은 원문에 없어 AI 가 지어낼 위험만 있다.
+  if (!hasLabels) {
+    const pp = (parts.length >= FIELD_KEYS.length && parts[parts.length - 1] === '') ? parts.slice(0, -1) : parts;
+    // 은행 자리에 은행 이름이 있어야 한다(목록 밖 은행이면 종전 오류 — 보수적으로) · 금액처럼 보이는 값이 주소 뒤(계좌 자리 제외)에 있으면 금액이 빠진 게 아니라 칸이 밀린 것이다(끝에 옵션 한 칸 더 등)
+    const priceElsewhere = pp.some((v, i) => i > HEAD_COUNT && i !== pp.length - 2 && looksPrice(v));
+    if (pp.length >= FIELD_KEYS.length - 1 && !priceElsewhere && looksBank(pp[pp.length - 3]) && !looksPrice(pp[pp.length - 1]) && _assemblyOk(pp.concat(['1']))) {
+      const probe = parseSlashLine(pp.concat(['1']).join('/'));
+      if (probe.ok) {
+        const pw = probe.warnings || [];
+        return {
+          ok: false, raw, fields: Object.assign({}, probe.fields, { price: null }),
+          errors: ['결제금액이 없습니다 — 금액 칸에 직접 넣어 주세요'],
+          warnings: notes.map(r => r + ' — 값이 맞는지 확인하세요').concat(pw),
+          extraSlashInAddress: probe.extraSlashInAddress, repairs: notes.concat(probe.repairs || []), missing: ['결제금액'],
+        };
+      }
+    }
+  }
+
+  if (parts.length < FIELD_KEYS.length) { const sp = tryShape(); if (sp) return sp; }
   if (parts.length < FIELD_KEYS.length) {
     const missing = diagnoseMissing(parts);
     const hints = [];
@@ -465,6 +629,7 @@ function parseSlashLine(line) {
       shape = [`끝에 칸이 더 있습니다 ('${parts[n - 1]}') — 결제금액이 맨 끝 칸이어야 합니다. 주문번호·옵션 같은 값은 빼 주세요`];
     }
   }
+  if (shape.length) { const sp = tryShape(); if (sp) return sp; }
   errors.push(...shape);
   const shapeBad = shape.length > 0;
 
@@ -519,7 +684,7 @@ function parseSlashForm(text) {
 module.exports = {
   parseSlashForm, parseSlashLine,
   formatPhone, parsePrice, parsePriceDetail, digits,
-  repairSlashParts, repairLooksSane, diagnoseMissing, shapeProblems, normalizeLine,
+  repairSlashParts, repairLooksSane, diagnoseMissing, shapeProblems, normalizeLine, placeByShape,
   looksPhone, looksPrice, looksAccount, looksBank, looksAddress,
   FIELD_KEYS, FIELD_LABELS, HEAD_COUNT, TAIL_COUNT,
 };
