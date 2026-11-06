@@ -254,7 +254,9 @@ t('4f 수동 입력 화면: 확인 단계를 순서와 무관하게 반복 처�
   assert.ok(/needConfirm === 'repurchase_window' && !_repurchaseOk/.test(f) && /needConfirm === 'over_daily' && !_overDailyOk/.test(f) && /needConfirm === 'product_check' && !_productOk/.test(f));
   assert.ok(/await awaitCaptureReads\(targets\.map\(x => x\.r\)\);/.test(f) && /function readCapture\(row\)/.test(f));
   assert.ok(f.indexOf('await awaitCaptureReads(') < f.indexOf('out = await post(false, false);'), '판독을 기다린 뒤 보낸다');
-  assert.ok(/\/\^⚠ 상품 확인:\/\.test\(el\.textContent\)/.test(f), '금액·연락처를 고치면 상품 칸 문구도 지운다');
+  // 결정 347: 줄의 문구는 확인 칸 하나가 그린다(그림문자 ⚠ 제거) — 금액·연락처를 고치면 이유를 지우고 그 칸을 다시 그린다(의미 불변)
+  assert.ok(/if \(key === 'price' \|\| key === 'phone'\) it\.productWarn = null;/.test(f) && /function edit\(i, key, val\)[\s\S]{0,2600}_refreshRow\(it\);/.test(f)
+    && /_productWarnList\(it\)\.forEach/.test(f), '금액·연락처를 고치면 상품 칸 문구도 지운다');
 });
 t('4c 이상로그 단계 이름표', () => {
   const { STEP_LABELS } = require('../src/services/errorLog.service');
