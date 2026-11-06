@@ -7879,8 +7879,8 @@ function addOrderCard() {
 
   _updateCardCountBadge();
   _ofpRender(cid);
-  // 스크롤
-  setTimeout(() => cardEl.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+  // 스크롤 — 주문 칸이 탭으로 넘어가면(결정 352) 탭 줄로
+  setTimeout(() => (document.getElementById("ofCardTabs") && !document.getElementById("ofCardTabs").hidden ? document.getElementById("ofCardTabs") : cardEl).scrollIntoView({ behavior: "smooth", block: "start" }), 100);
 }
 
 /** ── 주문카드 삭제 ── */
@@ -8854,9 +8854,98 @@ function formatPriceInput(el) {
  * 칸이 접힌 구획(details.of-fold) 안에 있으면 보여주기·스크롤 전에 그 구획을 먼저 연다.
  * 오류 표시(_ofShowError)·명의 칸 안내·캡처 선택·옵션/상품 고르기·별표 칸 이동이 모두 이걸 거친다. */
 function _ofReveal(el) {
+  // 주문이 여러 건이라 옆으로 넘기는 칸(탭)에 숨어 있으면 그 주문 칸을 먼저 보여 준다(결정 352).
+  const card = el && el.closest ? el.closest("#ofOrderCardsWrap > .of-order-card") : null;
+  if (card && card.classList.contains("of-card-off")) _ofShowCard(card.id, 0);
   for (let d = el && el.closest ? el.closest("details.of-fold") : null; d; d = d.parentElement ? d.parentElement.closest("details.of-fold") : null) d.open = true;
   return el;
 }
+/* ── 결정 352: 주문이 여러 건이면 아래로 늘어놓지 않고 위 탭(1번째·2번째…) + 옆으로 밀어 넘긴다 ──
+ *  대상: 구매양식 링크의 [주문 추가] 카드, 네이버+쿠팡 두 카드. 동시진행(dual=1) 양식은 자체 화면이라 제외.
+ *  ★ 칸은 숨기기만 한다(지우지 않음) — 검증·저장·제출은 모든 카드를 그대로 읽는다. 오류 칸은 _ofReveal 이 그 카드를 연다. */
+let _ofActiveCard = "";
+function _ofCardEls() {
+  const wrap = document.getElementById("ofOrderCardsWrap");
+  if (!wrap || new URLSearchParams(location.search).get("dual") === "1") return [];
+  return [...wrap.children].filter((el) => el.classList && el.classList.contains("of-order-card") && /^oc_/.test(el.id));
+}
+function _ofRenderCardTabs() {
+  const wrap = document.getElementById("ofOrderCardsWrap"); if (!wrap) return;
+  const cards = _ofCardEls();
+  let bar = document.getElementById("ofCardTabs");
+  if (cards.length < 2) {
+    if (bar) bar.hidden = true;
+    cards.forEach((c) => c.classList.remove("of-card-off"));
+    wrap.classList.remove("of-cards-tabbed");
+    _ofActiveCard = cards[0] ? cards[0].id : "";
+    return;
+  }
+  if (!bar) {
+    bar = document.createElement("div"); bar.id = "ofCardTabs"; bar.className = "of-card-tabs"; bar.setAttribute("role", "tablist");
+    bar.addEventListener("click", (e) => { const b = e.target.closest(".of-card-tab"); if (b) _ofShowCard(b.dataset.cid); });
+    wrap.parentNode.insertBefore(bar, wrap);
+  }
+  bar.hidden = false; wrap.classList.add("of-cards-tabbed");
+  // 위에 붙는 제목 줄 바로 아래에 탭 줄이 붙게(제목이 두 줄이면 더 내려온다)
+  { const hd = document.getElementById("orderFormHeader"); const h = hd && getComputedStyle(hd).position === "sticky" ? hd.getBoundingClientRect().height : 0; bar.style.setProperty("--of-card-tabs-top", Math.round(h) + "px"); }
+  if (!cards.some((c) => c.id === _ofActiveCard)) _ofActiveCard = cards[cards.length - 1].id;
+  bar.innerHTML = cards.map((c, i) => {
+    const raw = (c.querySelector(".ofc-badge-num")?.textContent || "").replace(/[^\p{L}\p{N}\s+·]/gu, "").trim();
+    const label = /번째 주문$/.test(raw) || !raw ? (i + 1) + "번째 주문" : raw;
+    const on = c.id === _ofActiveCard;
+    return '<button type="button" role="tab" class="of-card-tab' + (on ? " on" : "") + '" data-cid="' + c.id + '" aria-selected="' + on + '">' + _safeText(label) + "</button>";
+  }).join("");
+  cards.forEach((c) => c.classList.toggle("of-card-off", c.id !== _ofActiveCard));
+}
+function _ofShowCard(cid, dir) {
+  const cards = _ofCardEls(); if (cards.length < 2) return;
+  const prev = cards.findIndex((c) => c.id === _ofActiveCard), next = cards.findIndex((c) => c.id === cid);
+  if (next < 0) return;
+  _ofActiveCard = cid;
+  _ofRenderCardTabs();
+  const el = document.getElementById(cid);
+  const d = dir === undefined ? (next > prev ? 1 : -1) : dir;
+  if (el && d) { el.classList.remove("of-slide-l", "of-slide-r"); void el.offsetWidth; el.classList.add(d > 0 ? "of-slide-l" : "of-slide-r"); }
+}
+function _ofCardStep(dir) {
+  const cards = _ofCardEls(); if (cards.length < 2) return false;
+  const i = cards.findIndex((c) => c.id === _ofActiveCard), n = cards[i + dir];
+  if (n) _ofShowCard(n.id, dir);
+  return true;
+}
+(function _ofWatchCards() {
+  const start = () => {
+    const wrap = document.getElementById("ofOrderCardsWrap"); if (!wrap) return;
+    let before = new Set(_ofCardEls().map((c) => c.id));
+    new MutationObserver(() => {
+      const now = _ofCardEls(), added = now.find((c) => !before.has(c.id));
+      before = new Set(now.map((c) => c.id));
+      if (added && now.length > 1) _ofActiveCard = added.id;   // 방금 추가한 주문 칸을 보여 준다
+      _ofRenderCardTabs();
+    }).observe(wrap, { childList: true });
+    _ofRenderCardTabs();
+  };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start); else start();
+})();
+/* 옆으로 밀기: 주문 칸이 여러 건이면 그 칸을 넘기고, 공고 화면 틀 안(명의 하나 = 칸 하나)이면 부모에게 "다음 명의"를 알린다.
+ *  입력칸·목록·큰 사진 위에서 시작한 밀기는 무시(글자 선택·스크롤을 빼앗지 않게). */
+(function _ofSwipe() {
+  let sx = 0, sy = 0, st = 0, armed = false;
+  document.addEventListener("touchstart", (e) => {
+    const t = e.touches && e.touches[0];
+    armed = !!t && e.touches.length === 1 && !(e.target.closest && e.target.closest("input, textarea, select, .of-saved-info-menu, .of-img-big, .of-autocomplete-list, [contenteditable]"));
+    if (t) { sx = t.clientX; sy = t.clientY; st = Date.now(); }
+  }, { passive: true });
+  document.addEventListener("touchend", (e) => {
+    if (!armed) return; armed = false;
+    const t = e.changedTouches && e.changedTouches[0]; if (!t) return;
+    const dx = t.clientX - sx, dy = t.clientY - sy;
+    if (Date.now() - st > 700 || Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 2) return;
+    const dir = dx < 0 ? 1 : -1;
+    if (_ofCardStep(dir)) return;
+    if (window.parent !== window && _EMBED_CTX) { try { window.parent.postMessage({ type: "purchase-swipe", dir }, location.origin); } catch (_) {} }
+  }, { passive: true });
+})();
 /** 구매사진 [전체 보기] — 틀(iframe) 안에서는 화면 고정 창이 엉뚱한 곳에 뜨므로 사진 아래에 크게 펼친다. 누르면 닫힌다. */
 function _ofViewCapture(cid) {
   const prev = document.getElementById(cid + "_imgPreview"), src = document.getElementById(cid + "_imgThumb")?.src || "";
@@ -10070,6 +10159,7 @@ async function submitOrderForm() {
   if (addBtnEl) addBtnEl.style.display = "none";
   if (guideEl)  guideEl.style.display  = "none";
   if (subBtn)   subBtn.style.display   = "none";
+  { const tabsEl = document.getElementById("ofCardTabs"); if (tabsEl) tabsEl.hidden = true; }   // 결정 352: 주문 탭 줄도 함께 접는다
   const doneMsgEl = document.getElementById("orderFormDoneMsg");
   if (doneMsgEl) {
     const total = orders.length;

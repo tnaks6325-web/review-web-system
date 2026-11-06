@@ -139,7 +139,8 @@ const st = require('../src/services/campaignState.service');
   const ch = F('campaign.html');
   t('Q&A 공고는 구매양식 대신 Q&A 카드', /\$\('qnaBox'\)\.style\.display = _qna \? '' : 'none'/.test(ch) && /\$\('orderBox'\)\.style\.display = _qna \? 'none' : ''/.test(ch));
   t('캡처 전에는 완료 화면으로 넘어가지 않는다(진입·폴링 둘 다)',
-    (ch.match(/if\(_isDoneDetail\(j\)\)\{ renderDone\(\);/g) || []).length === 2
+    // ★ 결정 352: 여러 명의 탭 화면이면 그 명의만 정리하고 다음 명의로(_tabDoneActive) — 판정은 여전히 _isDoneDetail 하나
+    (ch.match(/if\(_isDoneDetail\(j\)\)\{ (?:if\(_tabDoneActive\(\)\) return; |if\(!_tabDoneActive\(\)\) )?renderDone\(\);/g) || []).length === 2
     && !/status === 'submitted' && !\(j\.qnaSlot && j\.qnaSlot\.captureDone === false\)/.test(ch));
   t('제출 순서 = 줄 기록 → 캡처 업로드 → 제출 완료', ch.indexOf("'/api/submit/qna'") < ch.indexOf("action:'uploadReviewImage'")
     && ch.indexOf("action:'uploadReviewImage'") < ch.indexOf("action:'submitReview'"));
