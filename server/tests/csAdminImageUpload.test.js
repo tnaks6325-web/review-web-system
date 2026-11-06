@@ -50,7 +50,7 @@ function uploadBody(src) {
   let i = src.indexOf("router.post('/upload'");
   if (i < 0) i = src.indexOf("router.post('/cs/upload'");
   assert(i >= 0, '업로드 라우트를 찾지 못함');
-  return src.slice(i, i + 1800);
+  return src.slice(i, i + 2200);   // 결정 352 — 허용 목록 등록 두 줄이 늘어 창을 넓힘(검사 의미 불변)
 }
 const adminUp = uploadBody(csRoutes);
 const revUp = uploadBody(revRoutes);

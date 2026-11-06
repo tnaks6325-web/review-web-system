@@ -1651,6 +1651,8 @@ router.post('/cs/upload', imageApiLimiter, async (req, res, next) => {
     if (!/\.[a-z0-9]+$/i.test(name)) name += '.' + ext;
 
     const up = await drive.uploadFileBase64(data, name, mime || 'image/png', folderId, { shareAnyone: true });
+    // 결정 352 — 주소를 돌려주기 전에 guide-image 허용 목록에 등록(올린 즉시 열리게).
+    await require('../services/imageAllowlist.service').registerGuideImage(up.id, 'upload:cs-reviewer');
     const base = (process.env.PUBLIC_API_URL || ('https://' + req.get('host'))).replace(/\/+$/, '');
     res.json({ ok: true, url: `${base}/api/order/guide-image/${up.id}` });
   } catch (err) {
