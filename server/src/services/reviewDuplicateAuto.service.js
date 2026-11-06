@@ -151,7 +151,8 @@ async function listConfirmedDuplicates({ sheetId, tabName, limit = PREVIEW_LIMIT
 async function _withTx(fn, fileIds=[]) {
   const pool = _db();
   const review=require('./dualChannelReview.service');
-  if((await review.fileMutationContext(pool,fileIds)).dual)return review.withReviewFilesMutation({db:pool,fileIds,run:fn});
+  // 동시진행 주문의 중복파일 자동 제거는 1차 운영에서 건너뛴다(utils/dualPhase1 · 직원 수동 처리).
+  if((await review.fileMutationContext(pool,fileIds)).dual)return { ok: false, reason: require('../utils/dualPhase1').DUAL_PHASE1_MANUAL };
   if (typeof pool.connect !== 'function') return fn(pool);
   const client = await pool.connect();
   try {
@@ -309,4 +310,5 @@ module.exports = {
   listConfirmedDuplicates, autoResolveConfirmedDuplicates,
   __setDepsForTest,
   _snapshotToken,
+  __test: { _removeOne },
 };

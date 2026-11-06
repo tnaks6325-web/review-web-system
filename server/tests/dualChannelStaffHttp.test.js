@@ -42,6 +42,12 @@ test('actual staff HTTP rejects untrusted roles and body readiness, then forward
     assert.equal(calls.length, 0);
     runtime.__setReadinessForTest({ version: 1, settings: true, roundtrip: true, recruitment: true, purchase: true, review: true, payment: true, operationalEnabled: true });
     for (const [method, route, target] of routes) {
+      if (target === 'replacePurchaseArtifact') {
+        // 1차 운영: 준비가 모두 켜져도 구매사진 교체·복원은 닫혀 있고 서비스는 불리지 않는다(dualPhase1Manual.test.js).
+        const closed = await request(method, route, { orderSubmissionId: orderId }, token('staff'));
+        assert.equal(closed.status, 409); assert.equal(closed.body.code, 'dual_phase1_manual');
+        continue;
+      }
       const result = await request(method, route, { orderSubmissionId: orderId, actor: 'foreign', db: 'foreign', lockedScope: { campaignIds: [] }, paidAmount: 10000, channel: 'coupang', expectedRevision: 1, note: '가짜 확인', decision: 'confirmed' }, token('staff'));
       assert.equal(result.status, 200);
       assert.equal(result.body.ok, true);
@@ -53,7 +59,7 @@ test('actual staff HTTP rejects untrusted roles and body readiness, then forward
       if (target !== 'replacePurchaseArtifact') assert.equal(call.input.db, db);
       else assert.equal(Object.hasOwn(call.input, 'db'), false);
     }
-    assert.equal(calls.length, 3);
+    assert.equal(calls.length, 2);
   } finally {
     runtime.__setReadinessForTest({});
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve));

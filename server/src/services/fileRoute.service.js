@@ -149,7 +149,9 @@ async function resolveTargetFolder({ target, sheetId, tabName, reviewBaseFolderI
 
 /** 업로드 직후 라우팅된 파일의 이동 이력 기록(INSERT 는 이미 최종 슬롯으로 됐다는 전제).
  *  091 미적용이면 warn 만 남기고 넘어간다(핫패스 보호). */
-async function markRouted(input={}){return withRouteMutation(input,markRoutedCore);}
+// 동시진행 주문의 파일 이동·되돌리기·자동분류 기록·중복 제거는 1차 운영에서 막는다(utils/dualPhase1).
+const _phase1=()=>require('../utils/dualPhase1').phase1ManualResult();
+async function markRouted(input={}){return withRouteMutation(input,(input,ctx)=>ctx.dual?_phase1():markRoutedCore(input,ctx));}
 async function markRoutedCore({ fileId, fromSlot, by = 'auto:upload' } = {}) {
   try {
     await _db().query(
@@ -249,7 +251,7 @@ async function _tabRouteCtx(sheetId, tabName) {
  * 자동 이동 되돌리기 — 파일을 원래 슬롯 폴더로 옮기고 원장 slot_key 를 원복한다.
  * 근거는 routed_from_slot 이력뿐(이력 없는 파일은 되돌릴 수 없다 = 오호출 안전).
  */
-async function revertRoute(input={}){return withRouteMutation(input,(input,ctx)=>ctx.dual?routeDualFile(input,ctx,true):revertRouteCore(input));}
+async function revertRoute(input={}){return withRouteMutation(input,(input,ctx)=>ctx.dual?_phase1():revertRouteCore(input));}
 async function revertRouteCore({ fileId, by = 'revert' } = {}) {
   if (!fileId) return { ok: false, error: 'fileId가 필요합니다.' };
   const driveService = require('./drive.service');
@@ -427,7 +429,7 @@ async function _recordRouteMove({ fileId, targetSlot, routedBy, receipt = false,
  */
 const MANUAL_ROUTE_TARGETS = { review: 'review', receipt: 'receipt', order_capture: 'capture' };
 
-async function manualRoute(input={}){return withRouteMutation(input,(input,ctx)=>ctx.dual?routeDualFile(input,ctx):manualRouteCore(input));}
+async function manualRoute(input={}){return withRouteMutation(input,(input,ctx)=>ctx.dual?_phase1():manualRouteCore(input));}
 async function manualRouteCore({ fileId, target, by = '' } = {}) {
   if (!fileId) return { ok: false, error: 'fileId가 필요합니다.' };
   const t = String(target || '');
@@ -491,7 +493,7 @@ async function manualRouteCore({ fileId, target, by = '' } = {}) {
  * ★ 근거(matchFileId) 없는 파일은 거부 — 제거 버튼이 안 보이는 유형을 API 직접 호출로 지우는 것 차단.
  * ★ 휴지통(trashFiles)만 — 영구삭제 API 금지(30일 복구창). 수동 경로에도 예외 없다.
  */
-async function dedupManual(input={}){return withRouteMutation(input,dedupManualCore,{duplicate:true});}
+async function dedupManual(input={}){return withRouteMutation(input,(input,ctx)=>ctx.dual?_phase1():dedupManualCore(input,ctx),{duplicate:true});}
 async function dedupManualCore({ fileId, by = '' } = {}) {
   if (!fileId) return { ok: false, error: 'fileId가 필요합니다.' };
   const driveService = require('./drive.service');

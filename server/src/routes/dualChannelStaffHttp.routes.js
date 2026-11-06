@@ -23,6 +23,12 @@ function createDualStaffPurchaseRouter({ staffService, artifactService, db } = {
           return res.status(400).json({ ok: false, code: 'dual_order_invalid', error: '구매 기록을 다시 확인해주세요.' });
         }
         require('../services/dualChannelRuntime.service').assertDualChannelReady(route.operation);
+        // 구매사진 교체·복원은 1차 운영에서 막는다(utils/dualPhase1) — 준비 상태와 무관하게 닫힌다.
+        if (route.call === 'replacePurchaseArtifact') {
+          const { phase1ManualResult } = require('../utils/dualPhase1');
+          const blocked = phase1ManualResult();
+          return res.status(409).json({ ok: false, code: blocked.code, error: blocked.message });
+        }
         const input = Object.fromEntries(route.fields.filter(field => Object.hasOwn(req.body, field)).map(field => [field, req.body[field]]));
         input.actor = String(req.admin.username || req.admin.name || req.admin.id || req.admin.role);
         let service;

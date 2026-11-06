@@ -122,6 +122,8 @@ async function replaceReviewCapture({ sheetId, tabName, rowId, oldFileId, imageB
 
 
   const native=await require('./dualChannelReview.service').fileMutationContext(db,[oldFileId]);
+  // 동시진행 주문의 리뷰 사진 교체는 1차 운영에서 막는다(utils/dualPhase1) — 아래 경로는 2차에 연다.
+  if(native.dual)return require('../utils/dualPhase1').phase1ManualResult();
   if(native.dual){
     const old=native.submissions.find(s=>s.file_id===oldFileId);
     const review=require('./dualChannelReview.service');const svc=review.createService({db});
