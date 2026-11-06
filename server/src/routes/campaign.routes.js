@@ -1938,6 +1938,17 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
     } catch (e) {
       logger.warn(`[campaign/work-detail] 구매수량 조회 실패(개수 표시 생략) camp=${id}: ${e.message}`);
     }
+    // 동시진행 구매양식 재열기 — 위에서 phone8+holdToken 으로 확인한 **이 신청**의 현행 사진 참조만.
+    //   준비 닫힘·조회 실패 = 필드 생략(화면은 사진 보관을 거부하고 다시 확인을 요구한다). 일반 공고는 키 자체가 없다.
+    let dualPurchaseDraft = null;
+    if (workDetail && workDetail.dualChannelProduct) {
+      try {
+        dualPurchaseDraft = await require('../services/dualPurchaseProjection.service')
+          .reviewerPurchaseDraft(pool, { campaignId: camp.id, applicationId: app.id });
+      } catch (e) {
+        logger.warn(`[campaign/work-detail] 동시진행 재열기 상태 조회 실패(생략) camp=${id}: ${e.message}`);
+      }
+    }
 
     res.json({
       ok: true,
@@ -1968,6 +1979,7 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
         tabName: camp.linked_tab_name || '',
         displayName: camp.title || '',
       },
+      ...(dualPurchaseDraft ? { dualPurchaseDraft } : {}),
     });
   } catch (err) {
     next(err);

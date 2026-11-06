@@ -35,4 +35,10 @@ async function evidence(db,channel,role){ const file=channel+'-'+role; const key
  await db.query('INSERT INTO review_submissions(order_submission_id,purchase_channel,evidence_role,evidence_revision,slot_key,file_id,byte_sha256,condition_snapshot_hash) VALUES($1,$2,$3,1,$4,$5,$6,$7)',[id,channel,role,key,file,crypto.createHash('sha256').update(file).digest('hex'),hash]);
  await db.query(`INSERT INTO review_inspections VALUES($1,$2,NULL,$3)`,[file,role==='receipt'?'pass':'warning',JSON.stringify(role==='receipt'?{receiptValidation:{verdict:'pass'}}:{})]);
 }
-module.exports={fixture,evidence,id,snapshot,hash};
+// Automatic identity match as the real submission records it: verdict + binding to the evidence it was computed from.
+async function bindAutoMatch(db,orderId=id){
+ const review=require('../../src/services/dualChannelReview.service');
+ const bound=review.identityEvidenceHash(await review.loadBundle(db,orderId));
+ await db.query("UPDATE order_submissions SET purchase_identity_result='match',purchase_identity_review=COALESCE(purchase_identity_review,'{}'::jsonb)||jsonb_build_object('submittedEvidenceHash',$2::text) WHERE id=$1",[orderId,bound]);
+}
+module.exports={fixture,evidence,id,snapshot,hash,bindAutoMatch};

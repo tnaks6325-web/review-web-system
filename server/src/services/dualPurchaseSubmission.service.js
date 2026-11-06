@@ -28,7 +28,9 @@ function createService(deps={}) {
  };
  function contextArgs(body,reviewerSession){
   if(!reviewerSession?.ownerReviewerId) proof.fail('REVIEWER_AUTH_REQUIRED','리뷰어 로그인 확인이 필요합니다.',401);
-  return {ownerReviewerId:reviewerSession.ownerReviewerId,applicationId:body.campaignApplicationId,campaignId:body.campaignId,holdToken:body.campaignHoldToken};
+  // The reviewer UI carries the application id from its query string. Only canonical digits are accepted.
+  const raw=body.campaignApplicationId,applicationId=typeof raw==='string'&&/^[1-9][0-9]{0,9}$/.test(raw)&&Number(raw)<=2147483647?Number(raw):raw;
+  return {ownerReviewerId:reviewerSession.ownerReviewerId,applicationId,campaignId:body.campaignId,holdToken:body.campaignHoldToken};
  }
  async function context(body,reviewerSession,client=db){
   const args=contextArgs(body,reviewerSession);
@@ -230,6 +232,10 @@ function createService(deps={}) {
    if(attributed.rows.length!==b.artifacts.length)proof.fail('DUAL_ARTIFACT_OWNED');
    const sum=(await client.query('SELECT count(*)::int AS n,sum(paid_amount)::int AS total FROM order_purchase_channels WHERE order_submission_id=$1',[orderSubmissionId])).rows[0];
    if(sum.n!==2 || sum.total!==price)proof.fail('DUAL_TOTAL_INVALID');
+   // Bind the automatic identity verdict to the evidence it was computed from (payout rechecks this hash).
+   const reviewSvc=require('./dualChannelReview.service');
+   const submittedEvidenceHash=reviewSvc.identityEvidenceHash(await reviewSvc.loadBundle(client,orderSubmissionId));
+   await client.query("UPDATE order_submissions SET purchase_identity_review=COALESCE(purchase_identity_review,'{}'::jsonb)||jsonb_build_object('submittedEvidenceHash',$2::text) WHERE id=$1",[orderSubmissionId,submittedEvidenceHash]);
    await client.query('SAVEPOINT hold_confirm');let holdResult;
    try{holdResult=await(deps.confirmHoldInTx || require('./campaignHold.service').confirmHoldInTx)(client,{applicationId:b.ctx.application.id,campaignId:b.ctx.application.campaign_id,holdToken:command.body.campaignHoldToken,phone8:b.ctx.application.phone8,orderSubmissionId,sheetId:input.sheetId,tabName:input.tabName,gid:input.gid,lockedScope});await client.query('RELEASE SAVEPOINT hold_confirm');}
    catch(_){await client.query('ROLLBACK TO SAVEPOINT hold_confirm');holdResult='error';}

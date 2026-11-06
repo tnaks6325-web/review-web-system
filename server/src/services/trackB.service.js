@@ -4261,6 +4261,30 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     }
     out.push(syn);
   }
+  /* 동시진행(네이버+쿠팡) 줄 — 구매처별 금액·현행 구매캡처·배송지 확인 상태(결정 338 계열 · 내부 직원 화면만).
+     ★ 업체(광고주) 응답에는 싣지 않는다 — 업체에 어디까지 보일지 정한 결정 기록이 없어 기본 닫힘(묶음 해시·확인 기록은 내부값).
+     ★ 줄 판정 = dualChannelReview.bundleTargetsForRows(리뷰·지급과 같은 판정), 하위 자료 = dualPurchaseProjection 공용 로더.
+       하위 자료가 불완전·조회 실패면 금액·사진을 0/빈 값으로 꾸미지 않고 주문 id 만 남긴다(화면: 「불러오지 못했습니다」).
+       줄 판정 조회 자체가 실패하면 동시진행 여부를 몰라 종전 표 그대로다(경고만 · 쓰기 쪽은 전용 경로가 다시 막는다). */
+  if (showEdits && roster.some(r => r.order_submission_id)) {
+    try {
+      const targets = await require('./dualChannelReview.service').bundleTargetsForRows(db,
+        out.map(r => ({ sheetId, tabName, rowIndex: r.seq })));
+      if (targets.size) {
+        const projection = require('./dualPurchaseProjection.service');
+        const ids = [...targets.values()].map(t => String(t.orderSubmissionId));
+        let loaded = new Map();
+        try { loaded = await projection.loadCommittedOrdersForProjection(db, ids); }
+        catch (e) { logger.warn(`[trackB] 동시진행 구매 자료 조회 실패(확인 필요로 표시) sheet=${sheetId} tab=${tabName}: ${e.message}`); }
+        for (const syn of out) {
+          const t = targets.get([sheetId, tabName, Number(syn.seq)].join('\u0000'));
+          if (t) syn.dualPurchase = projection.workdeskDualPurchase(t.orderSubmissionId, loaded.get(String(t.orderSubmissionId)));
+        }
+      }
+    } catch (e) {
+      logger.warn(`[trackB] 동시진행 줄 판정 실패(종전 표) sheet=${sheetId} tab=${tabName}: ${e.message}`);
+    }
+  }
   /* ── 표시 순서 = 표의 `번호` 순(무시트 탭만) ─────────────────────────────────
      ★★ 번호를 구매일자 순으로 다시 매겨도(`rowNumbering.service`) 화면이 `seq` 순이면
         "8/5 건이 146 번인데 여전히 맨 아래" 가 된다. 그래서 **번호가 정한 순서**를 따른다.

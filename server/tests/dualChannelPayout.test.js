@@ -21,7 +21,7 @@ test('actual SQL: reviews complete independently, staff pending and both receipt
  assert.equal(result.eligible,false);assert.ok(result.reasons.includes('identity_staff_pending'));
  for(const c of ['naver','coupang']) await evidence(db,c,'receipt');
  result=await payout.evaluateOrderPayoutEligibility(db,options);assert.equal(result.eligible,false);
- await db.query(`UPDATE order_submissions SET purchase_identity_result='match' WHERE id=$1`,[id]);
+ await require('./helpers/dualChannelFixture').bindAutoMatch(db,id);
  result=await payout.evaluateOrderPayoutEligibility(db,options);assert.equal(result.eligible,true);assert.equal(result.productPrice,19000);assert.equal(result.reviewFee,1000);
  const goodFingerprint=result.fingerprint;
  const split=await payout.evaluateOrderPayoutEligibility(db,{...options,financialContext:async()=>({...await financialContext(),payoutMode:'split'})});

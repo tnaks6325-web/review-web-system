@@ -145,3 +145,108 @@ test('two current primary artifacts and approvals submit one command; failure pr
   const other=createController({campaignApplicationId:12,campaignHoldToken:'other'},request);
   assert.equal(other.state.channels.naver.approvalToken,undefined);
 });
+
+// ── 동시진행 리뷰 사진: 새 두 입구(review-stage/review-complete) 연결 · 일반 리뷰 불변 ──
+function topLevelFunctions(source,names){
+ return names.map(name=>{
+  let start=source.indexOf('\nasync function '+name+'(');if(start===-1)start=source.indexOf('\nfunction '+name+'(');
+  assert.notEqual(start,-1,name+' missing');return source.slice(start+1,source.indexOf('\n}',start)+2);
+ }).join('\n');
+}
+function dualReviewHelperNames(source){return [...source.matchAll(/^(?:async )?function (_dualReview\w*)\(/gm)].map(m=>m[1]);}
+async function runReviewSlots(source,{item,slots,filesBySlot,trigger=null,fetchImpl,uploadImpl}){
+ const calls={fetch:[],upload:[],post:[],toast:[]};const nodes={};
+ const el=id=>nodes[id]||(nodes[id]={id,textContent:'',className:'',innerHTML:'',disabled:false,value:id==='csMemo'?'메모':'',style:{},classList:{toggle(){},add(){},remove(){}}});
+ const g={console:{log(){},warn(){},error(){}},Date,Set,Map,Array,Object,Number,String,JSON,Error,Promise,setTimeout,clearTimeout,AbortController,
+  S:{captureSlots:slots,filesBySlot,slotSubmitTrigger:trigger,receiptStepMode:false,step:2},
+  API_BASE_URL:'https://api.invalid',_getAuthHeaders:()=>({'X-Reviewer-Token':'reviewer-jwt'}),
+  fetch:async(url,init)=>{const body=JSON.parse(init.body);calls.fetch.push({url,method:init.method,headers:init.headers,body});return fetchImpl(url,body);},
+  gasPostUpload:async p=>{calls.upload.push(JSON.stringify(p));return uploadImpl?uploadImpl(p):{ok:true,uploadBatchId:'batch-1',files:p.files.map((f,i)=>({fileId:'legacy-'+i}))};},
+  gasPost:async p=>{calls.post.push(JSON.stringify(p));return {ok:true,complete:true,missingSlots:[]};},
+  showToast:(m,t)=>calls.toast.push(String(m)),showLoading(){},hideLoading(){},show(){},goStep(){},_updateReceiptStepActions(){},_clearSearchCache(){},
+  escHtml:String,extractProductOption:()=>({options:[{value:'옵션A'}]}),_csIsReceiptSlot:s=>s?.role?s.role==='receipt':s?.key==='receipt',
+  _isBlogItem:()=>false,_isPostUrl:()=>false,_BLOG_POST_URL_HINT:'',_preHasBlock:()=>false,_preBlockedMessage:()=>'',
+  _csShowVerdict(){},_showDuplicateBlockModal(){},_csClearRouteNotice(){},_csShowRouteNotice(){},_csClearVerdict(){},
+  document:{getElementById:el}};
+ const names=['_submitReviewSlots',...dualReviewHelperNames(source)];
+ vm.runInNewContext(topLevelFunctions(source,names)+'\nthis.__run=_submitReviewSlots;',g);
+ await g.__run(item);return {calls,nodes};
+}
+const dualSlots=()=>[{key:'review',label:'네이버 리뷰',channel:'naver',role:'review',evidenceRevision:0},{key:'slot2',label:'쿠팡 리뷰',channel:'coupang',role:'review',evidenceRevision:2},{key:'receipt',label:'네이버 현금영수증',channel:'naver',role:'receipt',required:false,evidenceRevision:0}];
+const dualItem=()=>({sheetId:'sheet',tabName:'tab',gid:'0',rowIndex:7,recipientName:'시험명',submitCol:'리뷰제출',campaignName:'공고',row:{},purchaseConditionSnapshot:{channels:{}},orderSubmissionId:'parent-1',purchaseBundleRevision:1,submittedSlots:[]});
+function stagingServer(overrides={}){
+ let n=0;
+ return async(url,body)=>{
+  if(overrides[url.split('/').pop()])return overrides[url.split('/').pop()](body);
+  if(url.endsWith('/review-stage')){const slot=dualSlots().find(s=>s.key===body.slotKey);return {ok:true,json:async()=>({ok:true,fileId:'f'+(++n),uploadToken:'tok-'+n,slotKey:slot.key,channel:slot.channel,role:slot.role,revision:body.expectedRevision+1})};}
+  return {ok:true,json:async()=>({ok:true,complete:true,reasons:[],submittedSlots:['review','slot2']})};
+ };
+}
+const searchSource=()=>fs.readFileSync(path.resolve(__dirname,'../../frontend/js/search-app.js'),'utf8');
+test('dual review slots stage every photo through review-stage with server roles and chained revisions, then complete once',async()=>{
+ const files={review:[{b64:'QUFB',type:'image/png',size:3},{b64:'QkJC',type:'image/jpeg',size:3}],slot2:[{b64:'Q0ND',type:'image/png',size:3}]};
+ const {calls,nodes}=await runReviewSlots(searchSource(),{item:dualItem(),slots:dualSlots(),filesBySlot:files,fetchImpl:stagingServer()});
+ assert.equal(calls.upload.length,0,'legacy metadata-less upload must not run for dual');assert.equal(calls.post.length,0,'legacy submitReview must not run for dual');
+ assert.deepEqual(calls.fetch.map(c=>c.url),['https://api.invalid/api/image/dual/review-stage','https://api.invalid/api/image/dual/review-stage','https://api.invalid/api/image/dual/review-stage','https://api.invalid/api/image/dual/review-complete']);
+ assert.ok(calls.fetch.every(c=>c.method==='POST'&&c.headers['X-Reviewer-Token']==='reviewer-jwt'));
+ const stage=calls.fetch.slice(0,3).map(c=>c.body);
+ assert.deepEqual(stage,[
+  {orderSubmissionId:'parent-1',sheetId:'sheet',tabName:'tab',rowIndex:7,slotKey:'review',imageBase64:'QUFB',mimeType:'image/png',expectedRevision:0},
+  {orderSubmissionId:'parent-1',sheetId:'sheet',tabName:'tab',rowIndex:7,slotKey:'review',imageBase64:'QkJC',mimeType:'image/jpeg',expectedRevision:1},
+  {orderSubmissionId:'parent-1',sheetId:'sheet',tabName:'tab',rowIndex:7,slotKey:'slot2',imageBase64:'Q0ND',mimeType:'image/png',expectedRevision:2}]);
+ assert.deepEqual(calls.fetch[3].body,{orderSubmissionId:'parent-1',sheetId:'sheet',tabName:'tab',rowIndex:7,uploadTokens:['tok-1','tok-2','tok-3']});
+ assert.match(nodes.successModal?.innerHTML||nodes.successMessage.innerHTML,/리뷰가 제출되었습니다/);
+ assert.equal(calls.toast.length,0);
+});
+test('dual review without server channel/role/revision asks for refresh and sends nothing (no legacy fallback)',async()=>{
+ for(const broken of [s=>{delete s[1].channel;},s=>{delete s[0].role;},s=>{delete s[0].evidenceRevision;},s=>{s[1].evidenceRevision=-1;}]){
+  const slots=dualSlots();broken(slots);
+  const {calls}=await runReviewSlots(searchSource(),{item:dualItem(),slots,filesBySlot:{review:[{b64:'QUFB',type:'image/png',size:3}]},fetchImpl:stagingServer()});
+  assert.equal(calls.fetch.length+calls.upload.length+calls.post.length,0);
+  assert.match(calls.toast.join(' '),/새로고침/);
+ }
+});
+test('dual review partial completion follows the server decision and a stage conflict never calls legacy paths',async()=>{
+ let r=await runReviewSlots(searchSource(),{item:dualItem(),slots:dualSlots(),filesBySlot:{review:[{b64:'QUFB',type:'image/png',size:3}]},
+  fetchImpl:stagingServer({'review-complete':()=>({ok:true,json:async()=>({ok:true,complete:false,reasons:['missing_coupang_review'],submittedSlots:['review']})})})});
+ assert.match(r.nodes.successMessage.innerHTML,/쿠팡 리뷰 을\(를\) 보완 제출/);assert.equal(r.calls.upload.length+r.calls.post.length,0);
+ r=await runReviewSlots(searchSource(),{item:dualItem(),slots:dualSlots(),filesBySlot:{review:[{b64:'QUFB',type:'image/png',size:3}]},
+  fetchImpl:stagingServer({'review-stage':()=>({ok:false,status:409,json:async()=>({ok:false,code:'review_revision_changed',error:'사진이 바뀌었습니다. 새로고침해주세요.'})})})});
+ assert.equal(r.calls.fetch.length,1);assert.equal(r.calls.upload.length+r.calls.post.length,0);assert.match(r.calls.toast.join(' '),/사진이 바뀌었습니다/);
+ r=await runReviewSlots(searchSource(),{item:dualItem(),slots:dualSlots(),filesBySlot:{review:[{b64:'QUFB',type:'image/png',size:3}]},
+  fetchImpl:stagingServer({'review-stage':()=>({ok:false,status:404,json:async()=>{throw Error('html');}})})});
+ assert.match(r.calls.toast.join(' '),/준비 중/);assert.equal(r.calls.fetch.length,1);
+});
+test('ordinary review slot submission bytes and requests equal untouched HEAD; no dual endpoint is called',async()=>{
+ const cp=require('node:child_process');
+ const baseline=cp.execFileSync('git',['show','HEAD:frontend/js/search-app.js'],{cwd:path.resolve(__dirname,'../..'),encoding:'utf8'});
+ const ordinary=()=>({...dualItem(),purchaseConditionSnapshot:undefined,orderSubmissionId:undefined,purchaseBundleRevision:undefined});
+ const legacySlots=()=>[{key:'review',label:'리뷰'},{key:'slot2',label:'추가 캡처'},{key:'receipt',label:'현금영수증',required:false}];
+ const files=()=>({review:[{b64:'QUFB',type:'image/png',size:3},{b64:'QkJC',type:'image/jpeg',size:3}],slot2:[{b64:'Q0ND',type:'',size:3}]});
+ for(const trigger of [null,'reviewThenReceipt']){
+  const before=await runReviewSlots(baseline,{item:ordinary(),slots:legacySlots(),filesBySlot:files(),trigger,fetchImpl:stagingServer()});
+  const after=await runReviewSlots(searchSource(),{item:ordinary(),slots:legacySlots(),filesBySlot:files(),trigger,fetchImpl:stagingServer()});
+  assert.equal(after.calls.fetch.length,0);assert.ok(after.calls.upload.length>0);
+  assert.deepEqual(after.calls.upload.map(p=>p.replace(/"value":"[^"]*"/,'')),before.calls.upload.map(p=>p.replace(/"value":"[^"]*"/,'')));
+  assert.deepEqual(after.calls.post.map(p=>p.replace(/"value":"[^"]*"/,'')),before.calls.post.map(p=>p.replace(/"value":"[^"]*"/,'')));
+  assert.deepEqual(after.calls.toast,before.calls.toast);
+ }
+});
+test('a dual order cannot enter the grouped multi-row legacy review submission',()=>{
+ const source=searchSource();const toasts=[];const S={};
+ const g={S,showToast:m=>toasts.push(m),console};
+ vm.runInNewContext(topLevelFunctions(source,['_dualSlotsForItem','openSubmitMulti',...dualReviewHelperNames(source)])+'\nthis.__open=openSubmitMulti;',g);
+ g.__open([{...dualItem(),captureSlots:dualSlots()},{sheetId:'sheet',tabName:'tab',rowIndex:8,captureSlots:[]}]);
+ assert.equal(toasts.length,1);assert.match(toasts[0],/동시진행/);assert.equal(S.selectedRows,undefined);
+});
+test('dual review retry keeps already staged photos (no duplicate upload) and continues from the server revision',async()=>{
+ const slots=dualSlots();const files={review:[{b64:'QUFB',type:'image/png',size:3},{b64:'QkJC',type:'image/png',size:3}]};
+ let failSecond=true;const server=stagingServer();
+ const fetchImpl=async(url,body)=>{if(url.endsWith('/review-stage')&&body.imageBase64==='QkJC'&&failSecond)return {ok:false,status:500,json:async()=>({ok:false,code:'dual_review_failed',error:'리뷰 사진을 처리하지 못했습니다.'})};return server(url,body);};
+ const first=await runReviewSlots(searchSource(),{item:dualItem(),slots,filesBySlot:files,fetchImpl});
+ assert.deepEqual(first.calls.fetch.map(c=>c.url.split('/').pop()),['review-stage','review-stage']);
+ failSecond=false;
+ const second=await runReviewSlots(searchSource(),{item:dualItem(),slots,filesBySlot:files,fetchImpl});
+ assert.deepEqual(second.calls.fetch.map(c=>[c.url.split('/').pop(),c.body.imageBase64,c.body.expectedRevision]),[['review-stage','QkJC',1],['review-complete',undefined,undefined]]);
+ assert.deepEqual(second.calls.fetch[1].body.uploadTokens,['tok-1','tok-2']);
+});

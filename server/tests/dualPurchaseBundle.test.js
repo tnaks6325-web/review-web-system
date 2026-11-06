@@ -76,6 +76,9 @@ test('two real identity-approved staged photos commit one parent/two children an
  const loaded=await require('../src/services/dualPurchaseProjection.service').loadCommittedOrderForProjection(f.db,first.orderSubmissionId);
  const projection=require('../src/services/dualPurchaseProjection.service').bundleWorkboardProjection(loaded);
  assert.equal(projection.price,'19000');assert.equal(projection.dualPurchases.naver.orderNum,'naver123456');
+ const reviewSvc=require('../src/services/dualChannelReview.service');
+ const storedReview=(await f.db.query('SELECT purchase_identity_review FROM order_submissions WHERE id=$1',[first.orderSubmissionId])).rows[0].purchase_identity_review;
+ assert.equal(storedReview.submittedEvidenceHash,reviewSvc.identityEvidenceHash(await reviewSvc.loadBundle(f.db,first.orderSubmissionId)),'real persisted identity binding equals the payout recheck hash');
  const changed=JSON.parse(JSON.stringify(f.body));changed.bank='다른 은행';
  changed.bundleApprovalToken=(await f.service.issueBundleApproval({body:changed,reviewerSession:f.reviewerSession})).bundleApprovalToken;
  await assert.rejects(f.service.prepareBundle({body:changed,reviewerSession:f.reviewerSession}),e=>e.code==='DUAL_BUNDLE_CONFLICT');

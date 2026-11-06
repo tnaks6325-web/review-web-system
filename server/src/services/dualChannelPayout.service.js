@@ -11,7 +11,11 @@ async function evaluateOrderPayoutEligibility(db,{target,lockedContext,financial
  if(sum!==Number(parent.price))reasons.push('purchase_total_mismatch');
  if(!['naver','coupang'].every(c=>artifacts.filter(a=>a.channel===c&&a.role==='primary').length===1))reasons.push('purchase_artifacts_incomplete');
  const identityHash=identityEvidenceHash(state.bundle);
- if(parent.purchase_identity_result!=='match' && !(parent.purchase_identity_review?.decision==='confirmed' && parent.purchase_identity_review?.evidenceHash===identityHash))reasons.push('identity_staff_pending');
+ // An automatic match counts only while the card/identity/recipient/photo evidence is the one it was computed from.
+ const identityReview=parent.purchase_identity_review||{};
+ const autoMatch=parent.purchase_identity_result==='match' && identityReview.submittedEvidenceHash===identityHash;
+ const staffConfirmed=identityReview.decision==='confirmed' && identityReview.evidenceHash===identityHash;
+ if(!autoMatch && !staffConfirmed)reasons.push('identity_staff_pending');
  for(const slot of state.slots.filter(s=>s.role==='receipt')){
  const receipts=state.current.filter(r=>r.purchase_channel===slot.channel&&r.evidence_role==='receipt');
  if(!receipts.some(r=>(r.inspection_status==='pass'&&r.checks?.receiptValidation?.verdict==='pass')||(r.inspection_status==='resolved'&&r.resolution==='ok'&&r.checks?.receiptValidation)))reasons.push('missing_validated_'+slot.channel+'_receipt');

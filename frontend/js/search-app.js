@@ -2480,7 +2480,11 @@ function _dualSlotsForItem(item) {
   return slots;
 }
 function openSubmitMulti(items) {
-  try { items.forEach(_dualSlotsForItem); } catch(e) { showToast(e.message,'error'); return; }
+  try {
+    items.forEach(_dualSlotsForItem);
+    // 묶음(다건) 화면은 옛 업로드·완료 경로뿐이다 — 동시진행 주문은 그 길로 보내지 않는다.
+    if (items.length > 1 && items.some(_dualReviewItem)) throw Error('동시진행 작업은 다른 작업과 묶어서 제출할 수 없습니다. 담당자에게 문의해주세요.');
+  } catch(e) { showToast(e.message,'error'); return; }
   S.selectedRows = items;
   S.selectedRow  = items[0];          // 하위 호환
   S.filesByIdx   = {};
@@ -3892,12 +3896,67 @@ function renderPreviews() {
   prev.appendChild(add);
 }
 
+/* ── 동시진행 리뷰 증빙 — 서버가 준 captureSlots(channel+role)·evidenceRevision 만 따른다 ──
+   화면이 역할을 추측하지 않는다. 정보가 없으면 옛 단일 리뷰 경로로 돌리지 않고 새로고침을 안내한다. */
+function _dualReviewItem(item) {
+  return !!(item && (item.purchaseConditionSnapshot || item.purchase_condition_snapshot));
+}
+function _dualReviewSlotsReady(slots) {
+  return Array.isArray(slots) && slots.length > 0 && slots.every(s => s && typeof s.key === 'string' && s.key
+    && (s.channel === 'naver' || s.channel === 'coupang') && (s.role === 'review' || s.role === 'receipt')
+    && Number.isSafeInteger(s.evidenceRevision) && s.evidenceRevision >= 0);
+}
+async function _dualReviewPost(path, body, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(API_BASE_URL + path, { method: 'POST', headers: { 'Content-Type': 'application/json', ..._getAuthHeaders() }, body: JSON.stringify(body), signal: controller.signal });
+  } catch (_) {
+    throw new Error('연결을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.');
+  } finally { clearTimeout(timer); }
+  let data = null;
+  try { data = await response.json(); } catch (_) { data = null; }
+  if (!response.ok || !data || data.ok !== true) {
+    const message = response.status === 404 || response.status === 503 || !data
+      ? '동시진행 리뷰 제출이 아직 준비 중입니다. 잠시 후 새로고침해주세요.'
+      : (data.error || '리뷰 사진을 저장하지 못했습니다. 새로고침 후 다시 시도해주세요.');
+    throw Object.assign(new Error(message), { status: response.status, code: data && data.code });
+  }
+  return data;
+}
+function _dualReviewTarget(item) {
+  return { orderSubmissionId: item.orderSubmissionId, sheetId: item.sheetId, tabName: item.tabName, rowIndex: item.rowIndex };
+}
+// 사진 한 장 = review-stage 한 번. 서버가 돌려준 revision 을 다음 사진의 expectedRevision 으로 잇는다.
+async function _dualReviewStageSlot(item, slot, files, tokens) {
+  for (const fo of files) {
+    if (fo._dualReviewToken) { tokens.push(fo._dualReviewToken); continue; }   // 재시도 — 이미 보관된 사진은 다시 올리지 않는다
+    if (!fo.b64) throw new Error("이미지 데이터가 없습니다. 다시 선택해주세요.");
+    const expectedRevision = slot.evidenceRevision;
+    const staged = await _dualReviewPost('/api/image/dual/review-stage', { ..._dualReviewTarget(item),
+      slotKey: slot.key, imageBase64: fo.b64, mimeType: fo.type || "image/jpeg", expectedRevision }, 180000);
+    if (staged.slotKey !== slot.key || staged.channel !== slot.channel || staged.role !== slot.role
+      || staged.revision !== expectedRevision + 1 || typeof staged.uploadToken !== 'string' || !staged.uploadToken) {
+      throw new Error('서버의 리뷰 정보가 바뀌었습니다. 새로고침해주세요.');
+    }
+    slot.evidenceRevision = staged.revision;
+    fo._dualReviewToken = staged.uploadToken;
+    tokens.push(staged.uploadToken);
+  }
+}
+
 /* ── 캡처 슬롯 모드 제출 (단일 행에 리뷰/현금영수증 등 여러 종류 캡처) ── */
 async function _submitReviewSlots(item) {
   const slots = S.captureSlots || [];
   const submitted = new Set(Array.isArray(item.submittedSlots) ? item.submittedSlots : []);
   const slotSubmitTrigger = S.slotSubmitTrigger;
   S.slotSubmitTrigger = null;
+  const dualReview = _dualReviewItem(item);
+  if (dualReview && !_dualReviewSlotsReady(slots)) {
+    showToast("두 구매처 리뷰 정보를 불러오지 못했습니다. 새로고침해주세요.", "error");
+    return;
+  }
 
   // 2단계에서는 리뷰만, 3단계에서는 현금영수증만 업로드한다.
   const slotsToUpload = slots.filter(s =>
@@ -3960,6 +4019,8 @@ async function _submitReviewSlots(item) {
   const slotOutcome = {};   // 자동 분류 결과: { stayed(그 칸에 남은 파일 있음), movedTo:[대상 슬롯키] }
   let replacedCurrent = false;
   let reviewUploadBatchId = null;
+  const dualUploadTokens = [];
+  let dualDone = null;
   try {
     // ── 슬롯별 업로드 (슬롯당 1회 호출, slotKey 전달) ──
     for (const slot of slotsToUpload) {
@@ -3969,6 +4030,14 @@ async function _submitReviewSlots(item) {
       showLoading(`${slot.label || slot.key} 업로드 중...`);
       btn.innerHTML = `<i class="fas fa-circle-notch fa-spin"></i> ${escHtml(slot.label || slot.key)} 업로드 중...`;
       try {
+        if (dualReview) {
+          await _dualReviewStageSlot(item, slot, files, dualUploadTokens);
+          slotOutcome[slot.key] = { stayed: true, movedTo: [] };
+          _csClearRouteNotice(slot.key);
+          _csClearVerdict(slot.key);
+          if (status) { status.textContent = "✓ 업로드됨"; status.className = "mr-slot-status ok"; }
+          continue;
+        }
         const fileData = files.map(fo => fo.b64);
         if (fileData.some(b => !b)) throw new Error("이미지 데이터가 없습니다. 다시 선택해주세요.");
         const upRes = await gasPostUpload({
@@ -3983,7 +4052,6 @@ async function _submitReviewSlots(item) {
           optionFolderName,
           memo,
           slotKey:          slot.key,
-          ...(item.purchaseConditionSnapshot || item.purchase_condition_snapshot ? {orderSubmissionId:item.orderSubmissionId,purchaseChannel:slot.channel,evidenceRole:slot.role,expectedBundleRevision:item.purchaseBundleRevision} : {}),
           files: fileData.map((b64, fi) => ({
             name:     reviewerName + "_" + (fi + 1),
             mimeType: files[fi].type || "image/jpeg",
@@ -4010,7 +4078,7 @@ async function _submitReviewSlots(item) {
         const rejectedF = flist.filter(r => r && r.rejected);
         const routedF = flist.filter(r => r && r.routed);
         const stayed = flist.some(r => r && r.fileId && !r.routed);
-        const suppliedReview = ((slot.key === 'review' || ((item.purchaseConditionSnapshot || item.purchase_condition_snapshot) && slot.role==='review')) && stayed)
+        const suppliedReview = (slot.key === 'review' && stayed)
           || routedF.some(r => r.routed && r.routed.to === 'review');
         if (suppliedReview && upRes.uploadBatchId) reviewUploadBatchId = upRes.uploadBatchId;
         slotOutcome[slot.key] = { stayed, movedTo: routedF.map(r => r.routed.to) };
@@ -4054,7 +4122,14 @@ async function _submitReviewSlots(item) {
 
     // 이미 리뷰가 끝난 건에 현금영수증만 추가하면 원래 리뷰 완료 시각을 다시 쓰지 않는다.
     let result;
-    if (receiptOnlyAfterComplete) {
+    if (dualReview) {
+      // 완료 판정은 서버(두 리뷰 모두 확인)가 한다 — 영수증만 추가해도 완료 시각을 다시 쓰지 않는다.
+      dualDone = await _dualReviewPost('/api/image/dual/review-complete', { ..._dualReviewTarget(item), uploadTokens: dualUploadTokens }, 60000);
+      if (typeof dualDone.complete !== 'boolean' || !Array.isArray(dualDone.submittedSlots)) throw new Error("서버의 리뷰 완료 확인이 없습니다. 새로고침 후 확인해주세요.");
+      const doneKeys = new Set(dualDone.submittedSlots);
+      result = { success: true, ok: true, complete: dualDone.complete,
+        missingSlots: slots.filter(s => s.role === 'review' && !doneKeys.has(s.key)).map(s => s.key) };
+    } else if (receiptOnlyAfterComplete) {
       result = { success: true, ok: true, complete: true, missingSlots: [] };
     } else {
       const now = new Date();
@@ -4092,7 +4167,7 @@ async function _submitReviewSlots(item) {
     Object.keys(slotOutcome).forEach(k => (slotOutcome[k].movedTo || []).forEach(mk => {
       if (slots.some(s => s.key === mk)) justUploaded.add(mk);
     }));
-    const coveredKeys = new Set([...submitted, ...justUploaded]);
+    const coveredKeys = dualDone ? new Set(dualDone.submittedSlots) : new Set([...submitted, ...justUploaded]);
     const receiptStored = slots
       .filter(_csIsReceiptSlot)
       .some(s => justUploaded.has(s.key));

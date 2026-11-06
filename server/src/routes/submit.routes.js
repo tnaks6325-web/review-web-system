@@ -102,6 +102,10 @@ router.post('/find-slot', async (req, res, next) => {
 //   1. DB 즉시 업데이트 (is_submitted = TRUE · 무시트는 작업표 칸)
 //   (2~4. 시트 동시 쓰기·실패 시 review_submit 큐·헤더 캐시 — 2026-10-23 제거 · 결정 274)
 // ═══════════════════════════════════════════════════════════
+function _dualReviewRequiredBody() {
+  return { ok: false, retryable: false, code: 'dual_review_upload_required',
+    error: '네이버·쿠팡 동시진행 작업은 구매처별 리뷰 제출 화면으로 내야 해요. 화면을 새로고침해주세요.' };
+}
 router.post('/review', async (req, res, next) => {
   try {
     const { sheetId, gid, tabName, rowIndex, submitCol, value, phone8, memo, uploadBatchId } = req.body;
@@ -122,6 +126,17 @@ router.post('/review', async (req, res, next) => {
           || ['reviewer_campaign', 'intranet'].includes(internal.via)) {
         return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_REQUIRED', error: '리뷰어 로그인을 다시 확인해주세요.' });
       }
+    }
+    /* ★ 결정 338 — 동시진행 묶음 주문 행은 구매처·역할 메타데이터가 있는 전용 업로드 완료만 받는다.
+       옛 완료(메타데이터 없음)는 고정 코드로 거부(쓰기 0). 판정 = dualChannelReview.bundleTargetForRow 단일 출처.
+       조회 실패는 여기서 막지 않는다(일반 리뷰 응답 불변) — 완료 트랜잭션 안에서 같은 판정을 다시 한다. */
+    try {
+      if (await require('../services/dualChannelReview.service').bundleTargetForRow(pool, { sheetId, tabName, rowIndex })) {
+        return res.status(409).json(_dualReviewRequiredBody());
+      }
+    } catch (dualErr) {
+      if (dualErr && dualErr.code === 'order_target_ambiguous') return res.status(409).json(_dualReviewRequiredBody());
+      logger.warn(`[submit/review] 동시진행 행 판정 실패(완료 트랜잭션에서 재확인): ${dualErr && dualErr.message}`);
     }
     if (reviewerSession) {
       const ownsTarget = await require('../services/reviewerTargetOwnership.service').ownsReviewerTarget({
@@ -262,6 +277,10 @@ router.post('/review', async (req, res, next) => {
       if (complete) {
         completionClient = await pool.connect();
         await completionClient.query('BEGIN');
+        // ★ 결정 338 — 동시진행 묶음 행 재확인(잠금 없는 읽기 · lockTarget 의 lifecycle 선점보다 앞서도 잠금 순서 불변).
+        if (await require('../services/dualChannelReview.service').bundleTargetForRow(completionClient, { sheetId, tabName, rowIndex })) {
+          throw Object.assign(new Error(_dualReviewRequiredBody().error), { code: 'dual_review_upload_required' });
+        }
         const lockedIndex=await require('../services/reviewCompletionTransaction.service').lockTarget(completionClient,{sheetId,tabName,rowIndex,reviewerSession});
         wasSubmitted=lockedIndex.is_submitted===true;
         if(isMultiSlot && !_isBlog) {
@@ -470,7 +489,7 @@ router.post('/review', async (req, res, next) => {
     }
 
     if (completionHistoryError) {
-      const terminal=['REVIEW_CLOSED_NO_REVIEW','REVIEW_TARGET_ARCHIVED','REVIEW_TARGET_CHANGED','REVIEW_SUBMIT_TARGET_FORBIDDEN','REVIEW_LEGACY_RESOLUTION_PENDING'].includes(completionHistoryError.code);
+      const terminal=['REVIEW_CLOSED_NO_REVIEW','REVIEW_TARGET_ARCHIVED','REVIEW_TARGET_CHANGED','REVIEW_SUBMIT_TARGET_FORBIDDEN','REVIEW_LEGACY_RESOLUTION_PENDING','dual_review_upload_required'].includes(completionHistoryError.code);
       if(terminal) return res.status(completionHistoryError.code==='REVIEW_SUBMIT_TARGET_FORBIDDEN'?403:409).json({
         ok:false,retryable:false,code:completionHistoryError.code,error:completionHistoryError.message});
       return res.status(503).json({
@@ -565,8 +584,10 @@ async function _authoritativeHold(ctx) {
               (so.id IS NOT NULL) AS sub_alive,
               (lo.id IS NOT NULL) AS late_alive,
               so.mirror_status AS sub_mirror_status,
-              lo.mirror_status AS late_mirror_status
+              lo.mirror_status AS late_mirror_status,
+              to_jsonb(rc) AS dual_campaign_probe
          FROM campaign_applications ca
+         LEFT JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
          LEFT JOIN campaign_options co
                 ON co.campaign_id = ca.campaign_id AND co.opt_key = ca.option_key
          LEFT JOIN order_submissions so
@@ -578,6 +599,9 @@ async function _authoritativeHold(ctx) {
       [ctx.applicationId, ctx.campaignId, ctx.holdToken]);
     if (!rows.length) return ctx;                     // 미확인 = 기존 late 경로(오확정 없음)
     ctx.verified = true;
+    // ★ 결정 338 — 동시진행(네이버+쿠팡) 공고인가. 홀드 확인과 같은 왕복(순증 0) · 판정은 utils/dualChannel 단일 출처.
+    ctx.dualCampaign = !!rows[0].dual_campaign_probe
+      && require('../utils/dualChannel').campaignHasDualChannels(rows[0].dual_campaign_probe);
     const srv = String(rows[0].phone8 || '').replace(/\D/g, '').slice(-8);
     const ownerPhone8 = String(rows[0].owner_phone8 || '').replace(/\D/g, '').slice(-8);
     ctx.isSub = ownerPhone8.length === 8 && srv.length === 8 && ownerPhone8 !== srv;
@@ -826,6 +850,7 @@ router.post('/qna', async (req, res, next) => {
 router.post('/order', async (req, res, next) => {
   try {
     const b = req.body;
+    if (_isDualOrderBody(b)) return await _submitDualOrder(req, res);
     const { sheetId, gid, tabName, orderer, recipient, userId, phone,
             address, bank, account, depositor, price, dateStr, orderNum,
             memo, selectedOptKey, isCoupang, ncMode,
@@ -857,6 +882,8 @@ router.post('/order', async (req, res, next) => {
     const _idPhone8 = String(loginPhone8 || '').replace(/[^0-9]/g, '').slice(-8);
     // ★ 참여형 홀드 문맥(단일 출처, 063) — 신원게이트 owner 폴백·옵션 서버권위·확정 문맥 공용(1회 계산)
     const holdCtx = await _authoritativeHold(_campaignHoldCtx(b, loginPhone8));
+    // ★ 결정 338 — 동시진행 공고는 일반(단일 구매처) 구매양식으로 받지 않는다(이미 접수된 묶음의 재전송 포함 · 쓰기 0).
+    if (holdCtx && holdCtx.verified && holdCtx.dualCampaign) return _dualBundleRequired(res);
     /* ★ 결정 321: Q&A 자리에 묶인 신청은 구매양식으로 받지 않는다 — 구매가 없고, 이 길로 들어오면
          자리(qna_slots)를 모르는 일반 홀드 확정이 되어 그날 자리 줄이 아닌 새 줄이 생긴다.
          제출 창구는 POST /api/submit/qna 하나다(구버전 화면이 구매양식을 띄운 경우 막다른 길 대신 새로고침 안내). */
@@ -867,6 +894,17 @@ router.post('/order', async (req, res, next) => {
     const orderScope = await _resolveCampaignOrderScope({ sheetId, gid, tabName, holdCtx });
     if (!orderScope) {
       return res.status(400).json({ error: '유효한 참여 문맥이 없어 구매양식을 제출할 수 없습니다.' });
+    }
+    /* ★ 결정 338 — 공고 참여 없이 낸 구매양식(시트 좌표)이 동시진행 공고의 연결 작업표를 가리키면 받지 않는다.
+       판정 = 공용 lifecycle 발견기(discoverDualScope) 단일 출처. 조회 실패는 종전 경로(fail-open · 응답 불변). */
+    if (!orderScope.sheetless) {
+      let dualTab = false;
+      try {
+        const found = await require('../services/dualChannelLifecycle.service').discoverDualScope(pool,
+          [{ sheetId: String(orderScope.sheetId), tabName: String(orderScope.tabName), tabGid: String(orderScope.gid || '') }]);
+        dualTab = found.campaignIds.length > 0;
+      } catch (e) { logger.warn(`[submit/order] 동시진행 작업표 판정 실패(종전 경로): ${e.message}`); }
+      if (dualTab) return _dualBundleRequired(res);
     }
 
     // ★★ 홀드 멱등 게이트(중복 원장·중복 시트행 차단) — 일괄 제출(batch) 도입의 선행 조건.
@@ -1609,6 +1647,135 @@ router.post('/order', async (req, res, next) => {
     next(err);
   }
 });
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   ★★ 결정 338 — 네이버+쿠팡 동시진행 최종 구매 제출(두 구매처를 한 명령으로).
+   화면 본문 = {campaignApplicationId,campaignHoldToken,bundleApprovalToken,purchases:{naver,coupang},bank,account,depositor}.
+   · 준비 상태(assertDualChannelReady)가 닫혀 있으면 DB 조회 0 으로 409(기본 닫힘 — 본문·헤더·환경변수로 열지 않는다).
+   · 리뷰어 = x-reviewer-token 검증 결과만. 본문 owner·campaignId·purchaseBundle·sheetId 는 서비스에 넘기지 않는다(허용 키만 복사).
+   · 공고는 신청 행에서 SQL 로 도출, 작업표는 공고의 연결 작업표(서버 매핑). 증빙 검증은 서비스(prepareBundle)가 다시 한다.
+   · 같은 서명 재시도 = 같은 부모 주문(멱등). 일반 구매 세션(부모 사진 칸) 발급 없음.
+   ══════════════════════════════════════════════════════════════════════════════ */
+const DUAL_ORDER_KEYS = Object.freeze(['campaignApplicationId', 'campaignHoldToken', 'bundleApprovalToken', 'purchases', 'bank', 'account', 'depositor']);
+function _isDualOrderBody(b) {
+  return !!b && typeof b === 'object' && !Array.isArray(b)
+    && (Object.prototype.hasOwnProperty.call(b, 'bundleApprovalToken') || Object.prototype.hasOwnProperty.call(b, 'purchases'));
+}
+function _dualBundleRequired(res) {
+  return res.status(409).json({ ok: false, code: 'dual_channel_bundle_required',
+    error: '네이버·쿠팡 동시진행 작업은 두 구매처를 함께 제출해야 해요. 화면을 새로고침해주세요.' });
+}
+async function _submitDualOrder(req, res) {
+  const { sendDualChannelHttpFailure } = require('./dualChannelHttp.routes');
+  try {
+    require('../services/dualChannelRuntime.service').assertDualChannelReady('purchase');
+    const reviewerToken = req.headers['x-reviewer-token'];
+    if (!reviewerToken) {
+      return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_REQUIRED', error: '리뷰어 로그인이 만료되었습니다. 다시 로그인해주세요.' });
+    }
+    let reviewerSession;
+    try { reviewerSession = verifyReviewerSession(reviewerToken); } catch (_) {
+      return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_INVALID', error: '리뷰어 로그인이 만료되었거나 유효하지 않습니다.' });
+    }
+    const raw = req.body;
+    const appRaw = raw.campaignApplicationId;
+    const applicationId = typeof appRaw === 'string' && /^[1-9][0-9]{0,9}$/.test(appRaw) ? Number(appRaw) : appRaw;
+    if (!Number.isSafeInteger(applicationId) || applicationId < 1 || applicationId > 2147483647
+        || typeof raw.campaignHoldToken !== 'string' || !raw.campaignHoldToken.trim()
+        || !raw.purchases || typeof raw.purchases !== 'object' || Array.isArray(raw.purchases)) {
+      return res.status(400).json({ ok: false, code: 'dual_body_invalid', error: '구매양식 요청을 다시 확인해주세요.' });
+    }
+    const body = {};
+    for (const key of DUAL_ORDER_KEYS) if (Object.prototype.hasOwnProperty.call(raw, key)) body[key] = raw[key];
+    body.campaignApplicationId = applicationId;
+
+    // 공고는 신청 행에서만 도출한다(본문 campaignId 무시). 소유권·명의·증빙은 서비스가 다시 본다.
+    const { rows: apps } = await pool.query(
+      `SELECT ca.campaign_id, to_jsonb(rc) AS campaign
+         FROM campaign_applications ca
+         JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
+        WHERE ca.id = $1 AND ca.hold_token = $2 AND ca.hold_token <> '' LIMIT 1`,
+      [applicationId, body.campaignHoldToken]);
+    if (!apps.length) {
+      return res.status(403).json({ ok: false, code: 'DUAL_APPLICATION_INVALID', error: '참여 내역을 찾을 수 없어요. 새로고침 후 다시 시도해주세요.' });
+    }
+    if (!require('../utils/dualChannel').campaignHasDualChannels(apps[0].campaign)) {
+      return res.status(409).json({ ok: false, code: 'dual_channel_campaign_required', error: '동시진행 작업이 아니에요. 화면을 새로고침해주세요.' });
+    }
+    const campaignId = String(apps[0].campaign_id);
+    const command = await require('../services/dualPurchaseSubmission.service')
+      .prepareBundle({ body, reviewerSession: { ...reviewerSession } });
+
+    const scope = await _resolveCampaignOrderScope({ holdCtx: { applicationId, campaignId, holdToken: body.campaignHoldToken, verified: true } });
+    let wt = scope && scope.worktable;
+    if (!wt) {
+      const ens = await require('../services/campaignWorktable.service').ensureCampaignWorktable({ campaignId, by: 'order-submit' });
+      if (ens && ens.ok) wt = { sheetId: ens.sheetId, tabName: ens.tabName, tabGid: ens.tabGid || '', workboardId: ens.workboardId || null };
+    }
+    if (!wt) {
+      return res.status(409).json({ ok: false, code: 'DUAL_WORKTABLE_REQUIRED', error: '작업표를 찾지 못했어요. 담당자에게 알려주세요.' });
+    }
+    // 홀드 확정은 공고의 연결 작업표 결속을 본다 — 원장 좌표 = 서버가 정한 그 작업표(HTTP 값 아님).
+    const bundleLedger = await createOrderLedgerEntry({ purchaseBundle: command, sheetId: wt.sheetId, tabName: wt.tabName, gid: wt.tabGid || '' });
+    const orderSubmissionId = bundleLedger && bundleLedger.orderSubmissionId;
+    if (!orderSubmissionId) throw new Error('dual bundle ledger returned no order');
+
+    // ── 커밋 뒤: 기존 작업표 반영 경로(큐 또는 무시트 즉시 기록). 작성기는 DB 묶음을 다시 읽는다. ──
+    const loginPhone8 = String(reviewerSession.loginPhone8 || '');
+    const loginName = String(reviewerSession.loginName || '');
+    if (wt.workboardId) {
+      try {
+        await pool.query(`UPDATE order_submissions SET workboard_id=$2::uuid, updated_at=NOW()
+                           WHERE id=$1::uuid AND workboard_id IS NULL`, [orderSubmissionId, wt.workboardId]);
+      } catch (e) { logger.warn(`[submit/order:dual] workboard_id 연결 실패(주문은 저장됨): ${e.message}`); }
+    }
+    let queuedTarget = false;
+    try {
+      queuedTarget = !!(await require('../services/workboardQueueApply.service')
+        .resolveQueuedWorkboardTarget({ sheetId: wt.sheetId, tabName: wt.tabName })).enabled;
+    } catch (e) { logger.warn(`[submit/order:dual] workboard_apply 대상 판정 실패 — 즉시 기록: ${e.message}`); }
+    let queued = false;
+    let written = null;
+    if (queuedTarget) {
+      try {
+        await enqueue('workboard_apply', { sheetId: wt.sheetId, tabName: wt.tabName, gid: wt.tabGid || '', orderSubmissionId, loginPhone8, loginName });
+        await markOrderQueued(orderSubmissionId);
+        queued = true; written = { ok: true, queued: true };
+      } catch (e) { written = { ok: false, reason: 'queue_enqueue_failed', message: e.message }; }
+    } else {
+      try {
+        written = await require('../services/sheetlessOrder.service').writeOrderToWorktable({
+          sheetId: wt.sheetId, tabName: wt.tabName, tabGid: wt.tabGid || '', workboardId: wt.workboardId || null,
+          orderData: {}, orderSubmissionId, loginPhone8, loginName, allowConfirmedCampaignOverflow: true,
+        });
+      } catch (e) { written = { ok: false, reason: 'exception', message: e.message }; }
+    }
+    if (!written || !written.ok) {
+      try { await markOrderMirrorFailed(orderSubmissionId, (written && (written.message || written.reason)) || 'dual_worktable_write_failed'); }
+      catch (e) { logger.error(`[submit/order:dual] 작업표 실패상태 저장 실패(원장 저장은 완료): ${e.message}`); }
+      logAbnormal({
+        flow: 'order_submit', step: queuedTarget ? 'workboard_apply_enqueue' : 'dual_worktable_write', severity: 'critical',
+        error: new Error(`동시진행 작업보드 반영 실패: ${written && written.reason}`),
+        context: { campaignId, applicationId, orderSubmissionId },
+      });
+    }
+    res.json({
+      ok: true, dbSaved: true, orderSubmissionId,
+      campaignHold: bundleLedger.holdResult || null,
+      mirrorStatus: queuedTarget ? (queued ? 'queued' : 'failed') : (written && written.ok ? 'written' : 'failed'),
+      ...(bundleLedger.idempotent ? { alreadySubmitted: true } : {}),
+    });
+    try {
+      emitOrderSubmit({ tabName: wt.tabName, sheetId: wt.sheetId, workboardId: wt.workboardId || null, orderer: loginName, recipient: '',
+        dbSaved: true, sheetsWritten: false, queued, usedSlot: false, sheetRow: null });
+    } catch (_) { /* noop */ }
+    if (queued) {
+      try { require('../jobs/queuePump').kickQueuePump(); } catch (e) { logger.warn(`[submit/order:dual] kick 실패(무시): ${e.message}`); }
+    }
+  } catch (err) {
+    return sendDualChannelHttpFailure(res, err, 500);
+  }
+}
 
 // POST /api/submit/check-files(무인증 · 폴더 파일 개수) 은 2026-10-05 제거 — 결정 186 103번(옛 리뷰제출 화면의 열 수 없는 진단 창 전용 · 9/2 이후 호출 0).
 

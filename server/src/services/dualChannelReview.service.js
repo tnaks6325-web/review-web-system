@@ -26,11 +26,12 @@ async function evaluateBundleReviewCompletion(db,{orderSubmissionId,lockedContex
  const {parent}=bundle;
  const slots=snapshotCaptureSlots(parent.purchase_condition_snapshot);
  const rows=(await db.query(`SELECT rs.*,ri.status AS inspection_status,ri.resolution,ri.checks FROM review_submissions rs LEFT JOIN review_inspections ri ON ri.file_id=rs.file_id WHERE rs.order_submission_id=$1 ORDER BY rs.evidence_revision,rs.id`,[parent.id])).rows;
- const reasons=[]; const current=[];
+ const reasons=[]; const current=[]; const revisions={};
  const expectedHash=digest(parent.purchase_condition_snapshot);
  for(const slot of slots){
  const same=rows.filter(r=>r.purchase_channel===slot.channel && r.evidence_role===slot.role);
  const revision=Math.max(0,...same.map(r=>Number(r.evidence_revision)||0));
+ revisions[slot.key]=revision; // same rule as recordReviewUploadInTx expectedRevision
  const valid=same.filter(r=>!r.superseded_at && r.slot_key===slot.key && Number(r.evidence_revision)===revision && revision>0 && r.completed_at && String(r.file_id||'').trim() && /^[a-f0-9]{64}$/.test(r.byte_sha256||'') && r.condition_snapshot_hash===expectedHash);
  if(!valid.length){if(slot.role==='review')reasons.push('missing_'+slot.channel+'_review');continue;}
  current.push(...valid);
@@ -41,7 +42,7 @@ async function evaluateBundleReviewCompletion(db,{orderSubmissionId,lockedContex
  files.add(r.file_id);hashes.add(r.byte_sha256);
  }
  if(parent.deleted_at)reasons.push('order_cancelled');
- return {complete:!reasons.length,reasons,current,bundle,slots};
+ return {complete:!reasons.length,reasons,current,bundle,slots,revisions};
 }
 async function inspectionContextForOrder(db,{orderSubmissionId,slotKey}){
  const {parent}=await loadBundle(db,orderSubmissionId);
