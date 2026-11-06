@@ -311,7 +311,9 @@ test('347 제출 본문 모양은 그대로 — 최상위 칸·줄 칸이 종전
   await B.M.submit();
   const body = B.calls.find(c => c.p === '/api/manual-order/submit').body;
   assert.deepStrictEqual(Object.keys(body), ['sheetId', 'tabName', 'gid', 'campaignId', 'allowOverDaily', 'allowRepurchase', 'force', 'optionAware', 'productCheck', 'allowProductMismatch', 'items']);
-  assert.deepStrictEqual(Object.keys(body.items[0]), ['fields', 'optionKey', 'optionFullAck', 'targetApplicationId', 'captureName', 'captureOption']);
+  // 결정 348: 줄 칸에 reviewerLink(리뷰어 연결 {mode, reviewerId}) 하나가 더해졌다 — 옛 서버는 모르는 칸이라 무시하고 auto 로 처리한다
+  assert.deepStrictEqual(Object.keys(body.items[0]), ['fields', 'optionKey', 'optionFullAck', 'targetApplicationId', 'reviewerLink', 'captureName', 'captureOption']);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(body.items[0].reviewerLink)), { mode: 'auto', reviewerId: '' }, '고르지 않으면 자동(종전)');
   assert.deepStrictEqual(body.items[0].fields, Object.assign({}, F.KIM, { orderNum: 'ORD-1' }));
   assert.strictEqual(body.items[0].captureName, '클렌저');
   assert.strictEqual(body.campaignId, null);

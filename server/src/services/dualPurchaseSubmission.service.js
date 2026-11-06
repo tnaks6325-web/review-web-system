@@ -15,6 +15,44 @@ function cleanPurchase(p={}) {
  if(!Number.isSafeInteger(p.paidAmount) || p.paidAmount<0 || p.paidAmount>2147483647) proof.fail('DUAL_AMOUNT_INVALID');
  out.paidAmount=p.paidAmount;return out;
 }
+/** 현금영수증 필요 = 공고 직접 설정 OR 연결 작업표 진행방식 '현영' — 리뷰어 구매 안내(campaign.routes _cashReceiptInfo)와 같은 기준.
+ *  리뷰어 구매 제출과 직원 대리 묶음 제출(결정 349)이 같은 함수를 쓴다(사본 금지). */
+async function conditionForCampaign(client,campaignId){
+ const r=await client.query(`SELECT rc.work_detail,to_jsonb(rc)->'cash_receipt_required' AS cash_receipt_required,
+   (SELECT tc.income_type FROM tab_configs tc WHERE tc.sheet_id=rc.linked_sheet_id AND tc.tab_name=rc.linked_tab_name LIMIT 1) AS income_type
+   FROM recruit_campaigns rc WHERE rc.id=$1`,[campaignId]);
+ const product=r.rows[0]?.work_detail?.dualChannelProduct;
+ if(!product?.channels?.naver || !product?.channels?.coupang) proof.fail('DUAL_CONDITION_MISSING');
+ const cashReceiptRequired=r.rows[0].cash_receipt_required===true || String(r.rows[0].income_type||'').includes('현영');
+ return {...product,cashReceiptRequired};
+}
+/** 두 구매처의 수취인·연락처·주소 판정(아이디는 달라도 된다 — 결정 341 ②). 다르면 던지고, 가려졌거나 비면 'uncertain'. */
+function identityVerdict(a,b){
+ let verdict='match';
+ for(const k of ['recipient','phone']){
+  const norm=v=>String(v||'').replace(k==='phone'?/\D/g:/\s/g,'');
+  if(!a[k]||!b[k]||mask.test(a[k])||mask.test(b[k])){verdict='uncertain';continue;}
+  if(norm(a[k])!==norm(b[k]))proof.fail('DUAL_IDENTITY_MISMATCH');
+ }
+ if(!a.address||!b.address||mask.test(a.address)||mask.test(b.address))return 'uncertain';
+ const v=addressHeuristic(a.address,b.address).verdict;
+ if(v==='mismatch')proof.fail('DUAL_ADDRESS_MISMATCH');if(v!=='match')verdict='uncertain';
+ return verdict;
+}
+/** 부모 주문이 이미 있는 상태에서 구매처 기록 2·구매캡처 귀속·합계 검사·명의 판정 근거 해시를 같은 트랜잭션에 남긴다.
+ *  리뷰어 묶음 제출(persistBundle)과 직원 대리 묶음 제출·보완(결정 349)이 같은 함수를 쓴다. */
+async function finishBundleInTx(client,{orderSubmissionId,purchases,verdict,artifactIds,price}){
+ for(const channel of channels){const p=purchases[channel];await client.query(`INSERT INTO order_purchase_channels(order_submission_id,channel,order_num,user_id,recipient,phone,address,paid_amount,identity_result) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,[orderSubmissionId,channel,p.orderNum,p.userId,p.recipient,p.phone,p.address,p.paidAmount,{result:verdict}]);}
+ const attributed=await client.query(`UPDATE purchase_capture_artifacts SET order_submission_id=$1,status='committed' WHERE id=ANY($2::uuid[]) AND order_submission_id IS NULL RETURNING id`,[orderSubmissionId,artifactIds]);
+ if(attributed.rows.length!==artifactIds.length)proof.fail('DUAL_ARTIFACT_OWNED');
+ const sum=(await client.query('SELECT count(*)::int AS n,sum(paid_amount)::int AS total FROM order_purchase_channels WHERE order_submission_id=$1',[orderSubmissionId])).rows[0];
+ if(sum.n!==2 || sum.total!==price)proof.fail('DUAL_TOTAL_INVALID');
+ // Bind the automatic identity verdict to the evidence it was computed from (payout rechecks this hash).
+ const reviewSvc=require('./dualChannelReview.service');
+ const submittedEvidenceHash=reviewSvc.identityEvidenceHash(await reviewSvc.loadBundle(client,orderSubmissionId));
+ await client.query("UPDATE order_submissions SET purchase_identity_review=COALESCE(purchase_identity_review,'{}'::jsonb)||jsonb_build_object('submittedEvidenceHash',$2::text) WHERE id=$1",[orderSubmissionId,submittedEvidenceHash]);
+ return submittedEvidenceHash;
+}
 function createService(deps={}) {
  const db=deps.db || require('../db/pool');
  const identity=deps.identity || identityDefault;
@@ -40,16 +78,7 @@ function createService(deps={}) {
   // Campaign affiliation comes only from the application, never the HTTP body.
   return identity.resolveApplicationIdentity({...args,campaignId:a.campaign_id},client);
  }
- async function condition(client,ctx){
-  // 현금영수증 필요 = 공고 직접 설정 OR 연결 작업표 진행방식 '현영' — 리뷰어 구매 안내(campaign.routes _cashReceiptInfo)와 같은 기준.
-  const r=await client.query(`SELECT rc.work_detail,to_jsonb(rc)->'cash_receipt_required' AS cash_receipt_required,
-    (SELECT tc.income_type FROM tab_configs tc WHERE tc.sheet_id=rc.linked_sheet_id AND tc.tab_name=rc.linked_tab_name LIMIT 1) AS income_type
-    FROM recruit_campaigns rc WHERE rc.id=$1`,[ctx.application.campaign_id]);
-  const product=r.rows[0]?.work_detail?.dualChannelProduct;
-  if(!product?.channels?.naver || !product?.channels?.coupang) proof.fail('DUAL_CONDITION_MISSING');
-  const cashReceiptRequired=r.rows[0].cash_receipt_required===true || String(r.rows[0].income_type||'').includes('현영');
-  return {...product,cashReceiptRequired};
- }
+ async function condition(client,ctx){return conditionForCampaign(client,ctx.application.campaign_id);}
  async function inTx(body,run){
   return lifecycle().withDualLifecycleInTx({db,targets:[{applicationId:body.campaignApplicationId}],run});
  }
@@ -146,21 +175,10 @@ function createService(deps={}) {
     artifacts.push(r);
    }
   }
-  let verdict='match';
-  const compare=(a,b)=>{
-   for(const k of ['recipient','phone']){
-    const norm=v=>String(v||'').replace(k==='phone'?/\D/g:/\s/g,'');
-    if(!a[k]||!b[k]||mask.test(a[k])||mask.test(b[k])){verdict='uncertain';continue;}
-    if(norm(a[k])!==norm(b[k]))proof.fail('DUAL_IDENTITY_MISMATCH');
-   }
-   if(!a.address||!b.address||mask.test(a.address)||mask.test(b.address)){verdict='uncertain';return;}
-   const v=addressHeuristic(a.address,b.address).verdict;
-   if(v==='mismatch')proof.fail('DUAL_ADDRESS_MISMATCH');if(v!=='match')verdict='uncertain';
-  };
-  compare(purchases.naver,purchases.coupang);
+  let verdict=identityVerdict(purchases.naver,purchases.coupang);
   const primary=channels.map(channel=>artifacts.find(a=>a.channel===channel&&a.role==='primary').extraction_json);
   if(primary.some(a=>a.ok===false||['no_capture','ai_error','match_error'].includes(a.approval.mode)))verdict='uncertain';
-  else compare(primary[0].extracted,primary[1].extracted);
+  else if(identityVerdict(primary[0].extracted,primary[1].extracted)!=='match')verdict='uncertain';
   const captureFlags=[];
   for(const channel of channels){
    const a=artifacts.find(a=>a.channel===channel&&a.role==='primary').extraction_json;
@@ -231,15 +249,7 @@ function createService(deps={}) {
      command.body.bank,command.body.account,command.body.depositor,String(price),b.ctx.owner.id,b.ctx.selected.cardId||null,identity._test.stableHash(b.ctx.selected.identityKey),b.ctx.application.id,b.hash,b.snapshot,b.verdict,{status:b.verdict==='uncertain'?'pending':'not_required'}]);
    const orderSubmissionId=ins.rows[0].id;
    await client.query('UPDATE order_submissions SET capture_flags=$2,date_str=$3,dedup_key=$4,participant_identity_id=$5 WHERE id=$1',[orderSubmissionId,b.captureFlags.length?{flags:b.captureFlags}:null,require('./manualOrder.service').todayKstDateStr(),'osid:'+orderSubmissionId,b.ctx.selected.participantIdentityId||null]);
-   for(const channel of channels){const p=b.purchases[channel];await client.query(`INSERT INTO order_purchase_channels(order_submission_id,channel,order_num,user_id,recipient,phone,address,paid_amount,identity_result) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,[orderSubmissionId,channel,p.orderNum,p.userId,p.recipient,p.phone,p.address,p.paidAmount,{result:b.verdict}]);}
-   const attributed=await client.query(`UPDATE purchase_capture_artifacts SET order_submission_id=$1,status='committed' WHERE id=ANY($2::uuid[]) AND order_submission_id IS NULL RETURNING id`,[orderSubmissionId,b.artifacts.map(a=>a.id)]);
-   if(attributed.rows.length!==b.artifacts.length)proof.fail('DUAL_ARTIFACT_OWNED');
-   const sum=(await client.query('SELECT count(*)::int AS n,sum(paid_amount)::int AS total FROM order_purchase_channels WHERE order_submission_id=$1',[orderSubmissionId])).rows[0];
-   if(sum.n!==2 || sum.total!==price)proof.fail('DUAL_TOTAL_INVALID');
-   // Bind the automatic identity verdict to the evidence it was computed from (payout rechecks this hash).
-   const reviewSvc=require('./dualChannelReview.service');
-   const submittedEvidenceHash=reviewSvc.identityEvidenceHash(await reviewSvc.loadBundle(client,orderSubmissionId));
-   await client.query("UPDATE order_submissions SET purchase_identity_review=COALESCE(purchase_identity_review,'{}'::jsonb)||jsonb_build_object('submittedEvidenceHash',$2::text) WHERE id=$1",[orderSubmissionId,submittedEvidenceHash]);
+   await finishBundleInTx(client,{orderSubmissionId,purchases:b.purchases,verdict:b.verdict,artifactIds:b.artifacts.map(a=>a.id),price});
    await client.query('SAVEPOINT hold_confirm');let holdResult;
    try{holdResult=await(deps.confirmHoldInTx || require('./campaignHold.service').confirmHoldInTx)(client,{applicationId:b.ctx.application.id,campaignId:b.ctx.application.campaign_id,holdToken:command.body.campaignHoldToken,phone8:b.ctx.application.phone8,orderSubmissionId,sheetId:input.sheetId,tabName:input.tabName,gid:input.gid,lockedScope});await client.query('RELEASE SAVEPOINT hold_confirm');}
    catch(_){await client.query('ROLLBACK TO SAVEPOINT hold_confirm');holdResult='error';}
@@ -250,4 +260,4 @@ function createService(deps={}) {
 }
 let production;
 const get=()=>production || (production=createService());
-module.exports={createService,cleanPurchase,extractPurchase:args=>get().extractPurchase(args),stagePurchaseArtifact:args=>get().stagePurchaseArtifact(args),issueBundleApproval:args=>get().issueBundleApproval(args),prepareBundle:args=>get().prepareBundle(args),persistBundle:input=>{const c=commands.get(input.purchaseBundle);if(!c)proof.fail('DUAL_COMMAND_REQUIRED');return c.service.persistBundle(input);}};
+module.exports={createService,cleanPurchase,conditionForCampaign,identityVerdict,finishBundleInTx,extractPurchase:args=>get().extractPurchase(args),stagePurchaseArtifact:args=>get().stagePurchaseArtifact(args),issueBundleApproval:args=>get().issueBundleApproval(args),prepareBundle:args=>get().prepareBundle(args),persistBundle:input=>{const c=commands.get(input.purchaseBundle);if(!c)proof.fail('DUAL_COMMAND_REQUIRED');return c.service.persistBundle(input);}};

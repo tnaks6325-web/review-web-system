@@ -374,8 +374,13 @@ console.log('\nC. 라우트 권한');
     names: l.route.stack.map(s => s.name),
   }));
   const find = p => layers.find(l => l.path === p);
-  ok('C1 라우트가 등록돼 있다(미배선 PII 표면 없음 — reviewer-search 는 제거)',
-    layers.length === 2 && !!find('/preview') && !!find('/submit') && !find('/reviewer-search'));
+  // ★ 결정 348 — C1 의미 강화: 예전(PR #394)엔 「화면이 안 쓰는 PII 통로」라 reviewer-search 자체를 지웠다.
+  //   지금은 수동제출 창이 실제로 부르는 검색이 있고, 지켜야 할 것은 「무인증·권한 없는 검색 통로가 없다」이다.
+  // 결정 349: 동시진행 직원 대리 묶음 제출·보완 입구 2개가 더해졌다(같은 2단 권한 — C2 가 같이 본다).
+  ok('C1 라우트는 정확히 다섯 길이다(preview·submit·reviewer-search·dual/submit·dual/complete — 다른 PII 통로 없음)',
+    layers.length === 5 && !!find('/preview') && !!find('/submit') && !!find('/reviewer-search')
+    && !!find('/dual/submit') && !!find('/dual/complete')
+    && find('/reviewer-search').methods.join() === 'get');
   ok('C2 ★ 전부 authMiddleware + adminOrMasterMiddleware 뒤에 있다',
     layers.every(l => l.names.includes('authMiddleware') && l.names.includes('adminOrMasterMiddleware')));
   ok('C3 제출은 POST 전용', find('/submit').methods.join() === 'post');
@@ -396,6 +401,32 @@ console.log('\nC. 라우트 권한');
   // 옛 입구는 결정 186 54번에서 제거 — 게이트가 더 넓은(adminOrMaster) 두 번째 문을 다시 열지 않는다.
   ok('C8 ★ app.js 에 옛 입구 /api/manual-order 를 다시 마운트하지 않는다(3버전 /api/trackb/manual-order 만)',
     !/app\.use\('\/api\/manual-order'/.test(app) && !/manualOrder\.routes/.test(app));
+}
+{
+  /* ★ C1b(결정 348) — 리뷰어 연결 검색 입구를 실제 HTTP 로 두드린다: 무인증 401 · 광고주 403 · 편집 명단 밖 직원 403.
+     명단 조회가 실패해도 열리지 않는다(fail-closed). 통과한 관리자라도 2글자 미만은 DB 를 보지 않고 빈 목록. */
+  process.env.JWT_SECRET = process.env.JWT_SECRET || 'mo-c1b-secret';
+  const express = require('express');
+  const jwt = require('jsonwebtoken');
+  const app = express(); app.use(express.json());
+  app.use('/api/trackb', require('../src/routes/trackB.routes'));
+  const srv = await new Promise(res => { const x = app.listen(0, '127.0.0.1', () => res(x)); });
+  const base = `http://127.0.0.1:${srv.address().port}/api/trackb/manual-order/reviewer-search?q=`;
+  const hit = async (tokPayload, q) => {
+    const headers = tokPayload ? { Authorization: 'Bearer ' + jwt.sign(tokPayload, process.env.JWT_SECRET) } : {};
+    const r = await fetch(base + encodeURIComponent(q || '김수만'), { headers });
+    let body = null; try { body = await r.json(); } catch (_) { /* noop */ }
+    return { status: r.status, body };
+  };
+  try {
+    ok('C1b ★ 무인증 검색은 401', (await hit(null)).status === 401);
+    ok('C1b ★ 광고주 토큰은 403(내부 직원만)', (await hit({ role: 'advertiser', name: '광고주' })).status === 403);
+    const intr = await hit({ role: 'staff', via: 'intranet', ae: false, name: '명단밖직원' });
+    ok('C1b ★ 편집 허용 명단 밖 직원은 403(명단 조회 실패도 막음)', intr.status === 403);
+    const m = await hit({ role: 'master', name: '마스터' }, '김');
+    ok('C1b 통과한 관리자도 2글자 미만은 빈 목록(DB 미접촉)', m.status === 200 && m.body && m.body.ok === true
+      && Array.isArray(m.body.items) && m.body.items.length === 0 && m.body.tooShort === true);
+  } finally { srv.close(); }
 }
 
 /* ══════════════════════════════════════════════════════════

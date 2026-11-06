@@ -674,6 +674,14 @@ async function listPaymentTargets(opts = {}) {
       it.issues=[...new Set([...it.issues,...result.reasons])];it.payable=it.issues.length===0;
       it.productPrice=result.productPrice;it.reviewFee=result.reviewFee;it.amount=result.productPrice+result.reviewFee;
     }
+    /* ★★ 결정 349 ④ — 동시진행 작업표의 묶음 아닌 줄(수동제출로 들어간 보통 주문 등)은 보통 주문으로 지급하지 않는다.
+         판정 실패도 막는다(fail-closed). 묶음 줄은 위 동시진행 지급 판정이 본다. */
+    const plainRows=items.filter(it=>!nativeTargets.has([it.sheetId,it.tabName,Number(it.rowIndex)].join('\u0000')));
+    const incomplete=await payout.dualBundleIncompleteRows(_db(),plainRows);
+    for(const it of plainRows){
+      const reason=incomplete.get([it.sheetId,it.tabName,Number(it.rowIndex)].join('\u0000'));if(!reason)continue;
+      it.issues=[...new Set([...it.issues,reason])];it.payable=false;
+    }
   }
   flagPriceOutliers(items, workboardPopulation);
 
@@ -1989,9 +1997,15 @@ async function checkBatchReceiptEligibility({ items } = {}, { db = pool, lock = 
   const eligible = await filterReceiptEligiblePaymentRows(db, coords, { lock });
   const allowed = new Set(eligible.map(item => `${item.sheetId}\u0000${item.tabName}\u0000${item.rowIndex}`));
   const blocked = live.filter(item => !allowed.has(`${item.sheet_id}\u0000${item.tab_name}\u0000${item.row_index}`));
+  // ★★ 결정 349 ④ — 이미 만든 회차의 보통 항목이 동시진행 작업표 줄이면 다운로드에서도 막는다(판정 실패도 막음).
+  const incomplete = await require('./dualChannelPayout.service').dualBundleIncompleteRows(db,
+    live.map(item => ({ sheetId: item.sheet_id, tabName: item.tab_name, rowIndex: item.row_index })));
+  const dualPlain = live.filter(item => incomplete.has(`${item.sheet_id}\u0000${item.tab_name}\u0000${Number(item.row_index)}`));
   return {
-    ok: blocked.length === 0 && dual.ok,
-    blocked: [...blocked.map(item => ({ itemId: item.id, reviewerName: item.reviewer_name || '' })),...dual.blocked],
+    ok: blocked.length === 0 && dual.ok && dualPlain.length === 0,
+    blocked: [...blocked.map(item => ({ itemId: item.id, reviewerName: item.reviewer_name || '' })),...dual.blocked,
+      ...dualPlain.map(item => ({ itemId: item.id, reviewerName: item.reviewer_name || '',
+        reasons: [incomplete.get(`${item.sheet_id}\u0000${item.tab_name}\u0000${Number(item.row_index)}`)] }))],
   };
 }
 

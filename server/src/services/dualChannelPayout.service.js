@@ -48,4 +48,32 @@ async function checkBatchDualEligibility({items=[]}={}, {db,lockedScope,lock=fal
  }
  return {ok:!blocked.length,blocked};
 }
-module.exports={evaluateOrderPayoutEligibility,checkBatchDualEligibility};
+/** 결정 349 ④ — 동시진행 작업표의 줄인데 묶음 주문(purchase_bundle_version=1)이 아니면 보통 주문으로 지급하지 않는다.
+ *  결정 344 차단 전에 외부모집 수동제출로 들어간 보통 주문(한쪽 금액·캡처 1장)이 일반 지급 경로로 나가는 길을 막는다.
+ *  판정 = 공용 발견기 discoverDualScope(작업표 좌표) + 묶음 줄 = bundleTargetsForRows(사본 금지).
+ *  ★ 판정 실패는 막는다(fail-closed · 'dual_bundle_check_failed') — 돈이 나가는 경로다.
+ *  @returns Map<sheetId\0tabName\0rowIndex, reason> — 보류할 줄만 담는다(일반 작업표·묶음 줄은 없음). */
+async function dualBundleIncompleteRows(db,rows=[]){
+ const out=new Map(),byTab=new Map();
+ for(const r of rows){
+  if(!r||!r.sheetId||!r.tabName)continue;
+  const k=String(r.sheetId)+'\u0000'+String(r.tabName);
+  if(!byTab.has(k))byTab.set(k,{sheetId:String(r.sheetId),tabName:String(r.tabName),tabGid:String(r.tabGid||''),rows:[]});
+  byTab.get(k).rows.push(r);
+ }
+ const lifecycle=require('./dualChannelLifecycle.service'),review=require('./dualChannelReview.service');
+ for(const t of byTab.values()){
+  let reason=null,bundles=new Map();
+  try{
+   const scope=await lifecycle.discoverDualScope(db,[{sheetId:t.sheetId,tabName:t.tabName,tabGid:t.tabGid}]);
+   if(!scope.campaignIds.length)continue;
+   bundles=await review.bundleTargetsForRows(db,t.rows.map(r=>({sheetId:t.sheetId,tabName:t.tabName,rowIndex:Number(r.rowIndex)})));
+  }catch(_){reason='dual_bundle_check_failed';}
+  for(const r of t.rows){
+   const key=[t.sheetId,t.tabName,Number(r.rowIndex)].join('\u0000');
+   if(reason||!bundles.has(key))out.set(key,reason||'dual_bundle_incomplete');
+  }
+ }
+ return out;
+}
+module.exports={evaluateOrderPayoutEligibility,checkBatchDualEligibility,dualBundleIncompleteRows};

@@ -1721,11 +1721,23 @@ router.put('/work-orders/edit', authMiddleware, internalMiddleware, editorOnlyMi
 const _moRoutes = require('./manualOrder.routes');
 const _moPreview = _handler(_moRoutes, 'manualOrderPreview');
 const _moSubmit = _handler(_moRoutes, 'manualOrderSubmit');
+const _moReviewerSearch = _handler(_moRoutes, 'manualOrderReviewerSearch');
 
 router.post('/manual-order/preview', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _moPreview(req, res, next));
 router.post('/manual-order/submit', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _moSubmit(req, res, next));
+// 결정 349 — 동시진행 직원 대리 묶음 제출 · 수동제출 보통 주문 보완(같은 2단 권한 · 같은 핸들러 위임)
+const _moDualSubmit = _handler(_moRoutes, 'manualOrderDualSubmit');
+const _moDualComplete = _handler(_moRoutes, 'manualOrderDualComplete');
+router.post('/manual-order/dual/submit', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _moDualSubmit(req, res, next));
+router.post('/manual-order/dual/complete', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _moDualComplete(req, res, next));
+// ★ 결정 348 — 줄마다 「기존 리뷰어 고르기」 검색. 리뷰어 이름·뒤 4자리를 보여 주는 개인정보 통로라
+//   제출과 **같은 2단 권한**(내부 직원 + 편집 허용 명단)을 건다 — 읽기라고 열람 권한(internal)만 걸지 않는다.
+router.get('/manual-order/reviewer-search', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _moReviewerSearch(req, res, next));
 
 // ── 모집공고 ────────────────────────────────────────────────
 //   목록·상세·발행·수정·플래그·삭제·관제 — 전부 기존 campaign 라우트 핸들러에 위임한다.
@@ -4042,6 +4054,12 @@ router.get('/payment/batch/:id/file', authMiddleware, adminOrMasterMiddleware, a
       const receiptCheck = await paymentSvc.checkBatchReceiptEligibility(out, { db: client, lock: true, lockedScope: dualScope });
       if (!receiptCheck.ok) {
         await client.query('ROLLBACK');
+        // 결정 349 ④ — 동시진행 작업표의 묶음 아닌 항목은 영수증 문제가 아니다(사람이 할 일이 다르다).
+        if (receiptCheck.blocked.some(x => (x.reasons || []).some(r => r === 'dual_bundle_incomplete' || r === 'dual_bundle_check_failed'))) {
+          return res.status(409).json({ ok: false, code: 'dual_bundle_incomplete',
+            error: '네이버·쿠팡 동시진행 작업인데 두 구매처가 묶이지 않은 주문이 들어 있습니다. 이 대량이체를 취소하고, 그 주문을 동시진행으로 보완한 뒤 새 대량이체를 만들어 주세요.',
+            blocked: receiptCheck.blocked.map(x => ({ reviewerName: x.reviewerName })) });
+        }
         return res.status(409).json({ ok: false, code: 'cash_receipt_not_verified',
           error: '대량이체 생성 후 현금영수증 상태가 변경되었습니다. 이 대량이체를 취소하고 검수 완료 후 새 대량이체를 만들어 주세요.',
           blocked: receiptCheck.blocked.map(x => ({ reviewerName: x.reviewerName })) });

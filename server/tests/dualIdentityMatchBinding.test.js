@@ -38,6 +38,9 @@ test('match bound to current evidence is payable; changing a channel recipient a
 test('submission stores the binding hash in the same transaction as the parent order', () => {
   const src = require('fs').readFileSync(require('path').join(__dirname, '../src/services/dualPurchaseSubmission.service.js'), 'utf8');
   const persist = src.slice(src.indexOf('async function persistBundle('), src.indexOf("await client.query('SAVEPOINT hold_confirm')"));
-  assert.match(persist, /identityEvidenceHash\(/);
-  assert.match(persist, /submittedEvidenceHash/);
+  // 결정 349: 구매처 기록·귀속·합계·근거 해시는 공용 finishBundleInTx 로 옮겼다(직원 대리 묶음 제출과 공용) — 같은 트랜잭션 client 로 부른다.
+  assert.match(persist, /await finishBundleInTx\(client,/);
+  const finish = src.slice(src.indexOf('async function finishBundleInTx('), src.indexOf('function createService('));
+  assert.match(finish, /identityEvidenceHash\(/);
+  assert.match(finish, /submittedEvidenceHash/);
 });
