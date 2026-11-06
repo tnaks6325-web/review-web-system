@@ -2007,6 +2007,21 @@ router.post('/campaigns/:id/daily-plan/preview', authMiddleware, internalMiddlew
     res.json({ ok: true, ...(await previewPlanProjection(String(req.params.id), req.body)) });
   } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
 });
+/* 결정 343 — 조절 창의 [상품 일건수 바꾸기] 팝업. 상품 일건수·공고 기본 일건수·(연결 공고면) 리뷰오더 일 진행 건수를 함께 바꾼다.
+   권한 = 조절 창과 같은 내부 직원(사용자 확정 2026-11-06 「A」 — 차수·가격 고치기와 같은 급). 판정·쓰기는 campaignOptionDaily.service 한 곳. */
+router.post('/campaigns/:id/option-daily', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const campaignId = String(req.params.id);
+    const out = await require('../services/campaignOptionDaily.service')
+      .changeOptionDaily({ campaignId, body: req.body, actor: _by(req) });
+    if (out.status !== 200) return res.status(out.status).json(out.body);
+    // 이미 저장됐다 — 다시 읽기가 실패해도 "실패"로 보이지 않게(화면이 창을 다시 연다)
+    let ov = null;
+    try { ov = await require('../services/campaignPlan.service').getPlanOverview(campaignId); }
+    catch (e) { logger.warn(`[option-daily] 저장 뒤 다시 읽기 실패 camp=${campaignId}: ${e.message}`); }
+    res.json({ ...(ov || {}), ...out.body, ok: true, reload: !ov });
+  } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
+});
 // 공고 설정의 "모집이월 방식"과 [📅 인원] 팝업이 같은 저장값을 쓴다.
 // 계획을 바로 펼칠 수 없는 수동 조절 상태에서도 선택을 잃지 않게 별도 저장한다.
 router.put('/campaigns/:id/carry-strategy', authMiddleware, internalMiddleware, async (req, res, next) => {

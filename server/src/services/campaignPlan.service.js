@@ -18,7 +18,7 @@
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const { kstTodayStr, dateOnlyStr, isCarryHold, carryStrategy, heldCarry, pendingCarry, fetchCampaignCounts,
-  computeCampaignState, totalQuotaUsage, projectDailyQuotas } = require('./campaignState.service');
+  computeCampaignState, totalQuotaUsage, projectDailyQuotas, optionDayCapacity } = require('./campaignState.service');
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_PLAN_ENTRIES = 120;
@@ -249,6 +249,35 @@ async function getPlanOverview(campaignId) {
     Number(quotaMaterial.todaySubmitted) || 0
   ) + (Number(quotaMaterial.todayActiveHolds) || 0);
 
+  /* ★ 결정 343 — 상품 일건수가 하루 몫을 묶고 있으면(결정 210 · 순차진행 아님 · 모든 열린 줄에 일건수) 그 줄들을 실어 보낸다.
+     화면은 날짜별 값 > cap 인 날을 "cap 명만 열림"으로 알리고 [상품 일건수 바꾸기] 팝업을 연다. 조회 실패 = null(경고 없음 — 종전 화면). */
+  let optionDaily = null;
+  try {
+    const caps = quotaCounts && quotaCounts.optionCaps;
+    // Q&A(결정 321 — 자리표가 하루 몫) · 순차진행(결정 212·228 — 정원·일정표가 하루 몫)은 상품 일건수가 정하지 않는다 → 경고 없음
+    const isQna = quotaCounts && typeof quotaCounts.qnaToday === 'number';
+    const isSeq = !isQna && Array.isArray(caps) && caps.length
+      && (await require('./campaignState.service').fetchSequentialCampaignIds(pool, [camp.id])).has(String(camp.id));
+    if (!isQna && !isSeq && Array.isArray(caps) && caps.length && !caps.sequentialSchedule && optionDayCapacity(caps) !== null) {
+      const { rows: od } = await pool.query(
+        `SELECT opt_key, product_name, unit_kind, daily_limit FROM campaign_options
+          WHERE campaign_id = $1 AND COALESCE(status, 'active') = 'active' ORDER BY sort_order, opt_key`, [camp.id]);
+      if (od.length && od.every(r => Number(r.daily_limit) > 0)) {
+        optionDaily = {
+          cap: od.reduce((a, r) => a + (Number(r.daily_limit) || 0), 0),
+          options: od.map(r => {
+            const k = String(r.opt_key || ''), p = String(r.product_name || '');
+            return { optKey: k, name: (!p || p === k || String(r.unit_kind) === 'product') ? k : `${p} · ${k}`, dailyLimit: Number(r.daily_limit) || 0 };
+          }),
+          // 확인창이 "인트라넷 리뷰오더도 바뀝니다"를 말할지(판정 실패 = true — 모르면 바뀐다고 알린다)
+          linked: await require('./campaignSharedSave.service').bidirOrderLinked(camp.id),
+        };
+      }
+    }
+  } catch (e) {
+    optionDaily = null;
+    logger.warn(`[campaignPlan] 상품 일건수 조회 실패(경고 생략) camp=${camp.id}: ${e.message}`);
+  }
   return {
     campaignId: camp.id,
     title: camp.title || '',
@@ -307,6 +336,7 @@ async function getPlanOverview(campaignId) {
     // 차수 합계 ≠ 총모집 = 드리프트(다른 창구가 총모집을 고친 흔적) — 화면이 경고한다.
     roundsDrift: rounds.length > 0 && roundsTotal !== (Number(camp.recruit_total) || 0),
     events: eventsQ.rows.map(r => ({ actor: r.actor || '', action: r.action, detail: r.detail || null, at: r.created_at })),
+    optionDaily,
   };
 }
 
