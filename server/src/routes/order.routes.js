@@ -52,6 +52,7 @@ const jwt = require('jsonwebtoken');
 const pool = require('../db/pool');
 const { authMiddleware, adminOrMasterMiddleware, isTrustedLoginToken } = require('../middleware/auth.middleware');
 const drive = require('../services/drive.service');
+const imageAllowlist = require('../services/imageAllowlist.service');
 const { getSpreadsheetMeta } = require('../services/sheets.service');
 const { buildOneSheet } = require('../services/indexBuilder.service');
 const { mirrorOneSheet } = require('../services/rawMirror.service');
@@ -2234,6 +2235,10 @@ router.post('/guide-image', async (req, res, next) => {
 
     // 표시(프록시/썸네일)를 위해 링크 읽기 가능으로 저장. UI에는 프록시 URL만 노출.
     const up = await drive.uploadFileBase64(b.imageBase64, name, b.mimeType || 'image/png', folderId, { shareAnyone: true });
+    // 결정 352 — 주소를 돌려주기 전에 허용 목록에 등록(올린 즉시 열리게). 실패하면 올리기 실패로 알린다.
+    const _intakeKey = (b.intakeKey) || req.headers['x-intake-key'];
+    await imageAllowlist.registerGuideImage(up.id,
+      (process.env.ORDER_INTAKE_KEY && _intakeKey === process.env.ORDER_INTAKE_KEY) ? 'upload:intranet' : 'upload:order');
 
     // 리뷰웹 프록시 URL — Drive 파일은 비공개, 서버가 꺼내 스트리밍
     const proxy = `${_publicApiBase(req)}/api/order/guide-image/${up.id}`;
@@ -2247,11 +2252,18 @@ _handlers.guideImageUpload = lastRouteHandler(router); // Track B 프록시가 �
 // GET /api/order/guide-image/:id — Drive 파일을 서버가 받아 스트리밍 (이미지 표시용)
 // <img src>가 헤더 인증을 못 보내므로 토큰 없이 동작. id는 추측 불가한 Drive fileId.
 // 스트리밍 실패 시(권한/네트워크) Drive thumbnail로 302 폴백.
+//   ★ 결정 352 — guide_image_files 에 등록된 번호만(올린 곳 3곳이 등록 · 지난 사진은 migration 216 이 들여옴).
+//     목록 밖·캡처·이체결과 = 404 + 드라이브 읽기 0. 판정 조회 실패는 fail-open 이되 사진(image/*)만.
 router.get('/guide-image/:id', async (req, res) => {
   const id = String(req.params.id || '');
   if (!/^[-\w]{20,}$/.test(id)) return res.status(400).send('bad id');
+  const verdict = await imageAllowlist.checkGuideImage(id);
+  if (!verdict.ok) { res.set('Cache-Control', 'no-store'); return res.status(404).send('not found'); }
   try {
     const f = await drive.downloadFile(id);
+    if (verdict.failOpen && !imageAllowlist.isImageMime(f.mimeType)) {
+      res.set('Cache-Control', 'no-store'); return res.status(404).send('not found');
+    }
     res.set('Content-Type', f.mimeType || 'application/octet-stream');
     // 크로스도메인 <img> 임베드 허용 (helmet 기본 same-origin 이면 pages.dev에서 못 박힘)
     res.set('Cross-Origin-Resource-Policy', 'cross-origin');
