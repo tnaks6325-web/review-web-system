@@ -5874,8 +5874,18 @@ function _campDateFull(v){ if(!v) return ''; const d=new Date(v); return isNaN(d
    별도 "작업스케줄 저장" 경로를 만들면 공고 정원과 무시트 작업표가 갈라진다.
    campaignPlan.savePlans()가 모집계획 저장 → 미배정 행 재배치 → 장부 투영을 한 흐름으로
    수행하므로, 여기서는 연결 공고 식별·진입만 담당한다. */
+/* 지금 열린 작업의 **목록 쪽 최신 항목** — 작업 목록을 다시 받으면 STATE.tabs 가 새 객체로 바뀌는데 STATE.cur 는 옛 객체로 남는다.
+   공고 주석(campaigns)은 새 목록 항목에만 붙으므로, 옛 객체만 보면 "연결된 모집공고가 없습니다"로 막힌다
+   (2026-11-06 실사례 — 주소 링크로 바로 연 비오진 작업). 같은 시트·작업 이름의 목록 항목을 찾아 그 주석을 쓴다. */
+function _curTabLive(){
+  const t=STATE.cur; if(!t) return null;
+  const tabs=STATE.tabs||[];
+  if(tabs.includes(t)) return t;
+  return tabs.find(x=>x&&x.sheetId===t.sheetId&&x.tabName===t.tabName)||t;
+}
 async function openCurrentCampaignDailyPlan(){
-  const t=STATE.cur; if(!t) return;
+  if(!STATE.cur) return;
+  let t=_curTabLive();
   if(!window.CampaignDailyPlan || typeof window.CampaignDailyPlan.open!=='function'){
     toast('모집인원 조절 모듈을 불러오지 못했습니다. 새로고침 후 다시 시도하세요.'); return;
   }
@@ -5883,6 +5893,7 @@ async function openCurrentCampaignDailyPlan(){
   // 조회 실패를 "연결 없음"으로 해석하지 않는다.
   if(!Array.isArray(t.campaigns) && !STATE.campsUnavailable){
     await _finEnsureStats(true);
+    t=_curTabLive()||t;   // 통계를 받으며 목록 항목이 새로 붙었을 수 있다
   }
   if(STATE.campsUnavailable){ toast('연결된 모집공고를 불러오지 못했습니다. 새로고침 후 다시 시도하세요.'); return; }
   const cs=Array.isArray(t.campaigns)?t.campaigns.filter(c=>c&&c.id):[];
@@ -5903,7 +5914,7 @@ function _wbPlanPick(i){ const c=(STATE.wbPlanCandidates||[])[i]; _wbPlanPickerC
 // 공용 모달 저장/재구성 후, 현재 열린 작업이 그 공고와 연결됐을 때만 작업보드를 새로 읽는다.
 // 카드 화면에서 모달을 연 경우에는 아무 동작도 하지 않아 기존 목록 갱신 흐름을 유지한다.
 window.CAMPAIGN_DAILY_PLAN_SAVED=function(ev){
-  const t=STATE.cur, campId=String(ev&&ev.campaignId||'');
+  const t=_curTabLive(), campId=String(ev&&ev.campaignId||'');
   if(!t||!campId||!Array.isArray(t.campaigns)||!t.campaigns.some(c=>String(c&&c.id||'')===campId)) return;
   const i=(STATE.tabs||[]).findIndex(x=>x===t || (x.sheetId===t.sheetId&&x.tabName===t.tabName));
   if(i<0) return;
