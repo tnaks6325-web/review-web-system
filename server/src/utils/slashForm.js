@@ -374,7 +374,7 @@ function _shapeKind(v) {
   if (/^[0-9][0-9\s-]{5,}$/.test(t) && (/-/.test(t) || digits(t).length >= 9)) return 'account';
   if (!/-/.test(t) && digits(t).length <= 8 && /[0-9]/.test(t) && looksPrice(t)) return 'price';
   if (looksBankName(t)) return 'bank';
-  if (/@/.test(t) || (/^[A-Za-z0-9._-]{3,}$/.test(t) && /[A-Za-z]/.test(t))) return 'id';
+  if (!/[가-힣\s]/.test(t) && (/@/.test(t) || (/^[A-Za-z0-9._-]{3,}$/.test(t) && /[A-Za-z]/.test(t)))) return 'id';
   if (NAME_RE.test(t) && !looksBankName(t)) return 'name';
   if (looksAddress(t)) return 'address';
   return 'unknown';
@@ -408,6 +408,77 @@ function placeByShape(parts) {
       val(bk[0]), val(ac[0]), depositor].concat(pr.length ? [val(pr[0])] : []),
     notes,
   };
+}
+
+/** 붙은 칸 하나를 둘로 가르는 후보들(슬래시 빠짐) — 칸 순서와 무관. 주소·아이디처럼 이미 알아본 칸은 전화 앞뒤·끝 은행명에서만 자른다
+ *  (주소를 숫자 경계에서 자르면 '26' 같은 가짜 금액이 생긴다). */
+function _splitCandidates(t, kind) {
+  const out = [];
+  const add = (a, b) => { a = a.trim(); b = b.trim(); if (a && b) out.push([a, b]); };
+  const pm = /01[0-9][-\s]?\d{3,4}[-\s]?\d{4}/.exec(t);
+  if (pm && pm[0].length < t.length) {
+    if (pm.index > 0) add(t.slice(0, pm.index), t.slice(pm.index));
+    const end = pm.index + pm[0].length;
+    if (end < t.length) add(t.slice(0, end), t.slice(end));
+  }
+  // 끝 은행명 — '…211호하나은행'처럼 앞 글자가 한글이면 경계가 모호하다 → 알려진 은행 이름(이체 서식 단일 출처)과 정확히 맞는 길이만 쓴다
+  const bw = new RegExp('(' + BANK_WORDS.join('|') + ')$', 'i').exec(t);
+  if (bw && bw.index >= 4) {
+    const opts = [];
+    for (let k = 0; k <= 6 && bw.index - k >= 4; k++) {
+      const b = t.slice(bw.index - k).trim(); const a = t.slice(0, bw.index - k);
+      if (k > 0 && !/[가-힣A-Za-z]/.test(t[bw.index - k])) break;
+      opts.push([a, b]);
+    }
+    const known = opts.filter(([, b]) => _bankByAlias(b));
+    (known.length ? known.slice(0, 1) : opts.slice(0, 1)).forEach(([a, b]) => add(a, b));
+  }
+  if (kind === 'unknown') {
+    for (const [re, , guard] of SPLITTERS) {
+      const m = re.exec(t);
+      if (m && (!guard || guard(m[1].trim()))) add(m[1], m[2]);
+    }
+    for (let i = 1; i < t.length; i++) {
+      const a = t[i - 1], b = t[i];
+      const cls = c => (/[가-힣]/.test(c) ? 'h' : /[0-9]/.test(c) ? 'd' : /[A-Za-z@._]/.test(c) ? 'l' : 'o');
+      const ca = cls(a), cb = cls(b);
+      if (ca !== cb && ca !== 'o' && cb !== 'o' && !(ca === 'l' && cb === 'd') && !(ca === 'd' && cb === 'l')) add(t.slice(0, i), t.slice(i));
+    }
+  }
+  const seen = new Set();
+  return out.filter(([a, b]) => { const k = a + '\u0000' + b; if (seen.has(k)) return false; seen.add(k); return _shapeKind(a) !== 'unknown' && _shapeKind(b) !== 'unknown'; });
+}
+/** 생김새 자리 찾기 + 슬래시 빠진 곳 나누기(최대 2곳). 나누는 방법이 둘 이상의 다른 결과로 갈리면 null(애매 = 넣지 않음). */
+function placeByShapeWithSplits(parts) {
+  const direct = placeByShape(parts);
+  if (direct) return direct;
+  const expand = list => {
+    const res = [];
+    list.forEach(({ parts: ps, cuts }) => {
+      ps.forEach((t, i) => {
+        _splitCandidates(String(t).trim(), _shapeKind(t)).forEach(([a, b]) => {
+          res.push({ parts: ps.slice(0, i).concat([a, b], ps.slice(i + 1)), cuts: cuts.concat([`'${a}' / '${b}'`]) });
+        });
+      });
+    });
+    return res;
+  };
+  let level = [{ parts, cuts: [] }];
+  for (let depth = 0; depth < 2; depth++) {
+    level = expand(level);
+    if (level.length > 4000) return null;
+    const ok = new Map();
+    level.forEach(c => {
+      const pl = placeByShape(c.parts);
+      if (pl) { const key = pl.parts.join('/'); if (!ok.has(key)) ok.set(key, { pl, cuts: c.cuts }); }
+    });
+    if (ok.size === 1) {
+      const { pl, cuts } = [...ok.values()][0];
+      return { parts: pl.parts, notes: pl.notes.concat([`슬래시(/)가 빠진 곳을 나눴습니다: ${cuts.join(', ')}`]) };
+    }
+    if (ok.size > 1) return null;
+  }
+  return null;
 }
 
 function parseSlashLine(line, _opt) {
@@ -445,7 +516,7 @@ function parseSlashLine(line, _opt) {
   // 생김새로 자리 찾기 — 표준 순서로 읽히지 않을 때만(재귀 1단 · 결과는 표준 경로로 다시 검증)
   const tryShape = () => {
     if (hasLabels || (_opt && _opt.noShape)) return null;
-    const placed = placeByShape(parts.filter(v => String(v).trim() !== '' ));
+    const placed = placeByShapeWithSplits(parts.filter(v => String(v).trim() !== ''));
     if (!placed) return null;
     const re = parseSlashLine(placed.parts.join('/'), { noShape: true });
     if (!re.ok && !(re.missing || []).includes('결제금액')) return null;
