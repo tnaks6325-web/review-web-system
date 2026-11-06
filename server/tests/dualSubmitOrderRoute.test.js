@@ -191,7 +191,8 @@ const REVIEW_SCENARIOS = [
   ['staff, empty rows', { sheetId: 'S', tabName: 'T', rowIndex: 2 }, 'staff', () => ({ rows: [] })],
 ];
 
-test('ordinary single purchase and ordinary review responses are byte-identical to the baseline route', async () => {
+// 개발 중 검증용(기준 커밋 필요 · DUAL_BASELINE_COMPARE=1). 기본 실행·CI 얕은 체크아웃에서는 건너뛴다.
+test('ordinary single purchase and ordinary review responses are byte-identical to the baseline route', { skip: process.env.DUAL_BASELINE_COMPARE !== '1' && 'baseline comparison is opt-in (DUAL_BASELINE_COMPARE=1)' }, async () => {
   h.ready();
   const baseline = h.loadRouterFromSource(h.baselineSource());
   const candidate = router();
