@@ -2696,6 +2696,35 @@ async function _applyParticipation(req, res, next, campPre) {
       }
     }
 
+    /* ★★ 결정 340 — 작업표 자리 관문(사용자 확정 A안 2026-11-06). 무시트 작업표에 이 신청이 나중에 들어갈 빈 줄이 없으면
+         리뷰어가 사기 **전에** 막는다(빈 줄 − 진행 중 홀드 − 줄 기다리는 주문 ≤ 0). 문구·사유는 총원 충족과 같은 idiom(soft_full).
+         ★ 다른 관문을 다 지난 뒤(홀드 INSERT 바로 앞) — 본인 홀드는 서비스가 빼고 세므로 「이미 참여 중」 이어 열기는 그대로다.
+         ★ 블로그(승인제 — 자리 미점유)·Q&A(날짜 자리 묶기 · qna_no_slot)는 종전. 작업표(무시트+활성 작업보드) 없으면 종전.
+         ★ fail-open — 조회 실패는 SAVEPOINT 로 접고 종전대로 받는다(모든 신청이 막히면 안 된다).
+         작업표 잠금(camp_tab_daily) 안이라 마지막 한 자리를 두 사람이 동시에 받지 못한다. */
+    if (!blogApply && !qnaApply && camp.linked_sheet_id && camp.linked_tab_name) {
+      const roomSvc = require('../services/worktableApplyRoom.service');
+      let room = null;
+      if (roomSvc.enabled()) {
+        try {
+          await client.query('SAVEPOINT wt_room');
+          room = await roomSvc.worktableRoomForApply(client, {
+            sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name, campaignId: id, phone8: holdP8 });
+          await client.query('RELEASE SAVEPOINT wt_room');
+        } catch (e) {
+          room = null;
+          try { await client.query('ROLLBACK TO SAVEPOINT wt_room'); } catch (_e) { /* noop */ }
+          logger.warn('[campaign/apply] 작업표 자리 확인 실패(fail-open · 종전대로 받음): ' + e.message);
+        }
+      }
+      if (roomSvc.isFull(room)) {
+        await client.query('ROLLBACK');
+        logger.info(`[campaign/apply] 작업표 빈 줄 없음 — 신청 거절 camp=${id} open=${room.openSlots} holds=${room.holds} waiting=${room.waitingOrders}`);
+        return res.status(409).json({ ok: false, reason: 'soft_full', state: { ...st, state: 'soft_full', stateReason: 'worktable_full' },
+          error: '지금은 신청할 수 없습니다.' });
+      }
+    }
+
     // 홀드 생성: expires_at = min(now+TTL, 오늘 window_end) — state=open이므로 closesAt는 유효·미래.
     // ★ 자율주문(시간창 미설정)은 closesAt이 null → TTL만 적용. ★ 063 §09-2: 타계정 건 TTL = sub_hold_ttl_min(기본 10분)
     const ttlMin = isSubApply ? (Number(camp.sub_hold_ttl_min) || 15) : (Number(camp.hold_ttl_min) || 30);
