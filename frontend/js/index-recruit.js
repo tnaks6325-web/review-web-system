@@ -1038,15 +1038,27 @@ function rfRenderTimePicker() {
 function rfOpenTimePicker(fieldId) {
   if (_isRecruitAutoOrder()) return;
   _rfActiveTimePickerField = fieldId;
-  document.getElementById("rf_time_picker")?.removeAttribute("hidden");
+  const picker = document.getElementById("rf_time_picker");
+  picker?.removeAttribute("hidden");
+  // 시간 패널은 「구매 · 배송」 묶음(.rf-sync-sub)과 행 묶음(.row-form) 안에 떠 있는데, 둘 다
+  // 둥근 테두리 때문에 overflow:hidden 이라 패널이 첫 줄(00~05시)만 보이고 나머지 시가 잘려
+  // 고를 수 없었다(2026-11-06 신고 · 07시 오픈 작업). 모집 시작일 달력과 같은 방식으로
+  // 열려 있는 동안만 잘라내기를 푼다 — 닫기는 rfCloseTimePicker 한 곳에서 되돌린다.
+  _rfTimePickerClipHosts(picker).forEach(host => host.classList.add("calendar-open"));
   [["rf_window_start", "rf_window_start_button"], ["rf_window_end", "rf_window_end_button"]].forEach(([, buttonId]) => {
     document.getElementById(buttonId)?.setAttribute("aria-expanded", String(buttonId === `${fieldId}_button`));
   });
   rfRenderTimePicker();
 }
 
+function _rfTimePickerClipHosts(picker) {
+  return [picker?.closest(".row-form"), picker?.closest(".rf-sync-sub")].filter(Boolean);
+}
+
 function rfCloseTimePicker() {
-  document.getElementById("rf_time_picker")?.setAttribute("hidden", "");
+  const picker = document.getElementById("rf_time_picker");
+  picker?.setAttribute("hidden", "");
+  _rfTimePickerClipHosts(picker).forEach(host => host.classList.remove("calendar-open"));
   ["rf_window_start_button", "rf_window_end_button"].forEach(id => document.getElementById(id)?.setAttribute("aria-expanded", "false"));
 }
 

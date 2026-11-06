@@ -1045,7 +1045,7 @@
 #recruitModal .rf-compact-main .rf-order-linkbar .rf-linkstate{font-weight:850;color:#1D4ED8}
 #recruitModal .rf-compact-main .rf-order-linkbar .rf-linkstate.off{color:#8A5A00}
 #recruitModal .rf-compact-main .rf-order-linkbar small{color:#7F8A9B}
-#recruitModal .rf-compact-main .rf-sync-sub{margin-top:10px;border:1px solid #DCE3EC;border-radius:8px;overflow:hidden;background:#fff}
+#recruitModal .rf-compact-main .rf-sync-sub{margin-top:10px;border:1px solid #DCE3EC;border-radius:8px;overflow:hidden;background:#fff}#recruitModal .rf-compact-main .rf-sync-sub.calendar-open{overflow:visible}
 #recruitModal .rf-compact-main .rf-sync-sub:first-of-type{margin-top:0}
 #recruitModal .rf-compact-main .rf-sync-subhead{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 12px;background:#F5F7FA;color:#45536A;font-size:10.5px;font-weight:850}
 #recruitModal .rf-compact-main .rf-sync-sub .row-form,#recruitModal .rf-compact-main .rf-sync-sub .product-editor{border:0;border-radius:0}
