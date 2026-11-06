@@ -730,13 +730,24 @@ async function submitExternalOrder({
     linkedOwner: reviewerInfo.linkedOwner,
     applicationId: application ? application.applicationId : null,
     quotaCounted: !!application,
+    worktableRow: worktableRowOf(sheetlessDone),   // ★ 결정 344 ⑦: 무시트 작업표에 바로 적힌 줄 번호(화면이 '자동복구 대기'로 잘못 말하지 않게)
     warnings,
   };
+}
+
+/** 결정 344 ⑦ — 무시트 작업표 기록 결과 → 화면에 보여 줄 줄 번호(적히지 않았으면 null).
+ *  같은 구매가 이미 그 줄에 있으면(duplicate_row) 그 줄 번호 · 삭제·취소로 안 적힌 건·실패는 null(종전 문구). */
+function worktableRowOf(done) {
+  if (!done || !done.ok) return null;
+  if (done.written === false && done.reason !== 'duplicate_row') return null;
+  const n = Number(done.seq);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 module.exports = {
   tabOptionChoices,
   submitExternalOrder,
+  worktableRowOf,
   dailyRemainingForCampaign,
   ensureExternalReviewer,
   confirmExternalApplication,
