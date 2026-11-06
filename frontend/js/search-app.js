@@ -858,39 +858,67 @@ function _embedPost(msg) {
 }
 // 미리보기는 입력값 저장/복원 안 함(관리자 시연 입력이 리뷰어 세션 저장소에 남지 않게)
 const _EMBED_FORM_KEY = (_EMBED_CTX && !_EMBED_CTX.preview && _EMBED_CTX.app) ? ("embedForm_" + _EMBED_CTX.app) : "";
+/* ★ 입력값 초안은 **칸 아이디(id)** 로 저장·복원한다(결정 046 의 위치 밀림을 단건에도 적용).
+ *   옛 방식(`_EMBED_FORM_KEY` = 화면 순서 배열)은 칸 순서·위치가 바뀌는 배포 순간 옛 초안을 **엉뚱한 칸**에 넣는다
+ *   (예: 결제금액 값이 계좌 칸으로). 그래서 새 초안은 `_EMBED_FORM_KEY + ":id"` 에 `{아이디: 값}` 으로 둔다.
+ *   - 아이디가 없는 칸·파일 칸은 저장하지 않는다(어디로 돌아갈지 모르는 값은 버린다).
+ *   - 옛 위치 초안은 **화면 배치 번호 `_EMBED_FORM_LAYOUT` 이 1일 때만** 한 번 읽어 옮긴 뒤 지운다.
+ *     ★★ 구매양식 칸의 순서·위치·개수를 바꾸는 변경은 이 번호를 올린다 — 그러면 옛 위치 초안은 읽지 않고 버린다. */
+const _EMBED_FORM_LAYOUT = 1;
+const _EMBED_FORM_ID_KEY = _EMBED_FORM_KEY ? (_EMBED_FORM_KEY + ":id") : "";
+function _embedFormFields(scr) {
+  return [...scr.querySelectorAll("input, select, textarea")].filter(el => el.type !== "file");
+}
 /** 외부 쇼핑몰(쿠팡 앱 전환 등) 복귀 시 브라우저가 iframe을 리로드해도 입력값이 살아나도록 저장/복원 */
 function _embedSaveForm() {
-  if (!_EMBED_CTX || !_EMBED_FORM_KEY) return;
+  if (!_EMBED_CTX || !_EMBED_FORM_ID_KEY) return;
   if (new URLSearchParams(location.search).get('dual')==='1') return; // dedicated keyed input draft, never positional legacy restoration
   if (_BATCH) return;   // ★ 배치는 명의(phone8) 앵커로 따로 저장한다 — 위치 기반은 카드 수가 변하면 밀린다
   try {
     const scr = document.getElementById("screenOrderForm");
     if (!scr) return;
-    const vals = [...scr.querySelectorAll("input, select, textarea")]
-      .filter(el => el.type !== "file")
-      .map(el => (el.type === "checkbox" || el.type === "radio") ? (el.checked ? "1" : "") : (el.value || ""));
-    sessionStorage.setItem(_EMBED_FORM_KEY, JSON.stringify(vals));
+    const fields = {};
+    _embedFormFields(scr).forEach(el => {
+      if (!el.id) return;
+      fields[el.id] = (el.type === "checkbox" || el.type === "radio") ? (el.checked ? "1" : "") : (el.value || "");
+    });
+    sessionStorage.setItem(_EMBED_FORM_ID_KEY, JSON.stringify({ layout: _EMBED_FORM_LAYOUT, fields }));
+    sessionStorage.removeItem(_EMBED_FORM_KEY);   // 옛 위치 초안은 새 초안이 생기는 순간 필요 없다
   } catch (_) { /* noop */ }
 }
+function _embedFillField(el, v) {
+  if (v === undefined || v === null || v === "" || el.value) return; // 이미 값 있으면 미덮어씀
+  if (el.type === "checkbox" || el.type === "radio") { if (v === "1") el.checked = true; }
+  else el.value = v;
+}
 function _embedRestoreForm() {
-  if (!_EMBED_CTX || !_EMBED_FORM_KEY) return;
+  if (!_EMBED_CTX || !_EMBED_FORM_ID_KEY) return;
   if (new URLSearchParams(location.search).get('dual')==='1') return;
   if (_BATCH) return;   // ★ 위치 복원이 배치 카드를 밀어 채우면 "남의 명의 주문"이 된다(_batchRestoreForm 이 담당)
   try {
+    const scr = document.getElementById("screenOrderForm");
+    if (!scr) return;
+    const els = _embedFormFields(scr);
+    let saved = null;
+    try { saved = JSON.parse(sessionStorage.getItem(_EMBED_FORM_ID_KEY) || "null"); } catch (_) { saved = null; }
+    if (saved && saved.fields && typeof saved.fields === "object") {
+      els.forEach(el => {
+        try { if (el.id && Object.prototype.hasOwnProperty.call(saved.fields, el.id)) _embedFillField(el, saved.fields[el.id]); }
+        catch (_) { /* 개별 요소 실패가 나머지 복원을 막지 않게 */ }
+      });
+      return;
+    }
+    // 옛 위치 초안(배포 직전에 쓰던 탭): 화면 배치가 그때와 같을 때만 위치대로 옮긴다.
     const raw = sessionStorage.getItem(_EMBED_FORM_KEY);
     if (!raw) return;
+    sessionStorage.removeItem(_EMBED_FORM_KEY);
+    if (_EMBED_FORM_LAYOUT !== 1) return;
     const vals = JSON.parse(raw);
-    const scr = document.getElementById("screenOrderForm");
-    if (!scr || !Array.isArray(vals)) return;
-    const els = [...scr.querySelectorAll("input, select, textarea")]
-      .filter(el => el.type !== "file");
+    if (!Array.isArray(vals) || vals.length !== els.length) return;   // 칸 개수가 다르면 위치가 어긋난 것 — 버린다
     els.forEach((el, i) => {
-      try {
-        if (i >= vals.length || vals[i] === "" || el.value) return; // 이미 값 있으면 미덮어씀
-        if (el.type === "checkbox" || el.type === "radio") { if (vals[i] === "1") el.checked = true; }
-        else el.value = vals[i];
-      } catch (_) { /* 개별 요소 실패가 나머지 복원을 막지 않게 */ }
+      try { _embedFillField(el, vals[i]); } catch (_) { /* noop */ }
     });
+    _embedSaveForm();   // 옮긴 값은 바로 아이디 초안으로 남긴다
   } catch (_) { /* noop */ }
 }
 /** ★ 061 참여형 옵션 잠금: embed에 optionKey가 오면 시트 옵션 피커 대신 "참여한 옵션" 잠금표시.
@@ -9878,7 +9906,7 @@ async function submitOrderForm() {
 
   // ★ 임베드(M2): 부모(campaign.html)에 제출완료 통지 → 확정/운영자확인중 화면 전환. 저장해둔 입력값 정리.
   if (_EMBED_CTX) {
-    try { sessionStorage.removeItem(_EMBED_FORM_KEY); _batchClearDraft(); } catch (_) { /* noop */ }
+    try { sessionStorage.removeItem(_EMBED_FORM_KEY); if (_EMBED_FORM_ID_KEY) sessionStorage.removeItem(_EMBED_FORM_ID_KEY); _batchClearDraft(); } catch (_) { /* noop */ }
     // ★ 단수 campaignHold 는 "마지막 카드 값"이라 배치에서 항상 거짓말한다 → 성공분에서 파생한다.
     //   하나라도 confirmed 가 아니면 부모가 "운영자 확인 중"을 안내하도록 그 값을 올린다.
     const _okr = results.filter(r => r.ok);

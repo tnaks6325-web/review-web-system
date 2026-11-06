@@ -99,7 +99,10 @@ ok('드롭다운 선택값은 DOM 버튼으로 만들고 입력 임시저장 순
   && (appJs.match(/document\.createElement\("button"\)/g) || []).length >= 4
   && /option\.textContent =/.test(appJs)
   && !/<select class="of-saved-info-select"/.test(appJs)
-  && (appJs.match(/\.filter\(el => el\.type !== "file"\)/g) || []).length === 2);
+  // 결정 348: 초안은 칸 아이디 기준이라 순서가 바뀌어도 밀리지 않는다. 파일 칸 제외는 한 곳(_embedFormFields)에서 하고 저장·복원 둘 다 그걸 쓴다.
+  && (appJs.match(/\.filter\(el => el\.type !== "file"\)/g) || []).length === 1
+  && /function _embedFormFields\(scr\) \{\s*return \[\.\.\.scr\.querySelectorAll\("input, select, textarea"\)\]\.filter\(el => el\.type !== "file"\);/.test(appJs)
+  && (appJs.match(/_embedFormFields\(scr\)/g) || []).length === 3);
 // 결정 219 — 서버는 "목록에서 골랐음" 기록이 아니라 **값**으로 확인한다(기록은 화면이 임의로 보내 막는 효과가 없다).
 ok('가림 이름 OCR 보정은 수취인 값이 현재 참여 명의 이름과 같은지 서버에서 다시 검증한다',
   /st\.savedIdentitySelections\[appliedField\] = identity\.identityKey/.test(appJs)
