@@ -13315,6 +13315,14 @@ const PAY_ISSUE_LABEL = {
   advertiser_pays_orphan:'이체은행이 업체입금인데 연결된 업체 없음 — 이체은행 확인',
   // 결정 292 — 제품비 업체 · 리뷰비 우리
   not_purchased:'구매 전(결제금액 없음) — 리뷰비는 구매 뒤에', split_no_fee:'리뷰비 미설정 — 작업 조건에서 리뷰비를 정해 주세요',
+  // 결정 338·349 — 네이버·쿠팡 동시진행 지급 판정(코드 이름이 화면에 그대로 뜨지 않게)
+  dual_bundle_incomplete:'동시진행 보완 필요 — 네이버·쿠팡이 묶이지 않은 주문', dual_bundle_check_failed:'동시진행 확인 실패(새로고침)',
+  dual_channel_not_ready:'동시진행 지급 준비 안 됨', purchase_channels_incomplete:'동시진행 구매처 기록 부족',
+  purchase_total_mismatch:'동시진행 두 금액 합계 불일치', purchase_artifacts_incomplete:'동시진행 구매캡처 부족',
+  identity_staff_pending:'동시진행 명의 직원 확인 필요', order_target_changed:'작업표 줄이 바뀜(새로고침)',
+  workboard_total_mismatch:'작업표 결제금액 ≠ 두 금액 합계', already_locked:'다른 회차에 이미 담김',
+  financial_amount_changed:'금액이 바뀜(새로고침)', financial_context_unverified:'입금 정보 확인 안 됨',
+  missing_validated_naver_receipt:'네이버 영수증 검수 전', missing_validated_coupang_receipt:'쿠팡 영수증 검수 전',
 };
 const PAY_BANKS = [['kbank','케이뱅크'],['hana','하나은행']];
 /* 보완 창구 분류 — ★ 사유마다 "고치는 곳"이 다르다.

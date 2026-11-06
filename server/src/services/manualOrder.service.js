@@ -247,6 +247,17 @@ async function resolveReviewerLink(db, raw, phoneDigits) {
     return { ok: false, reason: 'reviewer_already_registered',
       error: `이미 등록된 리뷰어 ${rows[0].name}(…${_tail4(rows[0].phone)}) — 기존 고르기로 바꿔 주세요` };
   }
+  // ★ 다른 리뷰어의 타계정 명부에 이미 있는 번호도 「새로 등록」을 막는다(사용자 확정 2026-11-07) — 같은 사람이 두 명부에 갈린다.
+  //   역조회 모양은 csRecipient(sub_accounts jsonb 배열의 phone 뒤 8자리)와 같다. 조회 실패는 막지 않는다(자동 경로와 같은 경고 흐름).
+  const sub = await db.query(
+    `SELECT r.name, r.phone FROM reviewers r,
+            jsonb_array_elements(CASE WHEN jsonb_typeof(r.sub_accounts)='array' THEN r.sub_accounts ELSE '[]'::jsonb END) s
+      WHERE RIGHT(regexp_replace(COALESCE(s->>'phone',''), '[^0-9]', '', 'g'), 8) = $1
+      ORDER BY (r.status = 'inactive'), r.registered_at ASC LIMIT 1`, [phoneDigits.slice(-8)]).catch(() => ({ rows: [] }));
+  if (sub.rows.length) {
+    return { ok: false, reason: 'reviewer_already_registered',
+      error: `${sub.rows[0].name}(…${_tail4(sub.rows[0].phone)})의 타계정으로 이미 등록된 번호입니다 — 기존 고르기로 ${sub.rows[0].name} 님을 골라 주세요` };
+  }
   return { ok: true, link: { mode } };
 }
 

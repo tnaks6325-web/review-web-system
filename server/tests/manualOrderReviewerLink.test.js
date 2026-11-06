@@ -234,3 +234,15 @@ test('검색 — 2글자 미만은 DB 를 보지 않는다 · 최대 20 · 뒤 4
   assert.equal((await h.svc.searchReviewersForLink('%%')).items.length, 0, '% 로 전체를 훑지 못한다');
   assert.equal((await h.svc.searchReviewersForLink('__')).items.length, 0, '_ 로 전체를 훑지 못한다');
 });
+
+test('new — 다른 리뷰어의 타계정으로 이미 등록된 번호도 그 줄을 쓰기 0으로 거절(사용자 확정 2026-11-07)', async () => {
+  await seed(); const h = await load();
+  const pg = await db();
+  await pg.query(`UPDATE reviewers SET sub_accounts = '[{"name":"이타계","phone":"010-4444-3210"}]'::jsonb WHERE id = $1`, [B_ID]);
+  const n0 = await count();
+  const r = await submit(h, F({ reviewerName: '이타계', recipient: '이타계', phone: '010-4444-3210' }), { mode: 'new' });
+  assert.equal(r.ok, false); assert.equal(r.reason, 'reviewer_already_registered');
+  assert.match(r.error, /박본계\(…6666\)의 타계정으로 이미 등록된 번호/);
+  assert.equal(h.ledgerAt(), -1, '원장 0'); assert.deepEqual(h.writes(), [], '쓰기 0');
+  assert.equal(await count(), n0);
+});
