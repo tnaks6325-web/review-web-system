@@ -698,7 +698,7 @@ console.log('\nH. 슬래시 누락 자동 보정');
   ok('H17 AI 폴백은 칸 부족으로 실패한 줄에만 시도(정상 줄은 AI로 안 보냄)',
     rt.includes('items.filter(i => !i.ok') && rt.includes('칸이 \\d+개뿐'));
   ok('H18 ★ AI 결과도 같은 파서로 재검증한다(파서 우회 금지)',
-    rt.includes('parseSlashLine(rebuilt)') && rt.includes("re.ok"));
+    rt.includes('parseSlashLine(rebuilt, { noShape: true })') && rt.includes("re.ok"));   // 2026-11-06: 표준 순서로만 재검증(강화)
   ok('H19 ★ AI 호출에 상한이 있다(오붙여넣기가 통째로 AI로 가지 않게)', /AI_REPAIR_MAX/.test(rt));
   ok('H20 킬스위치', rt.includes('SLASHFORM_AI_REPAIR'));
   ok('H21 AI 보정 줄은 원문을 보존해 사람이 대조할 수 있다', rt.includes('raw: it.raw'));

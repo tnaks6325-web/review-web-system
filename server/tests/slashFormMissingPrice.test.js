@@ -52,12 +52,11 @@ test('complete 9-field line is unchanged', () => {
   assert.deepEqual(r.missing, []);
 });
 
-test('8 fields missing something other than the price keep the old error', () => {
-  // 아이디 칸 빠짐(금액은 있음)
+test('8 fields missing the id (price present) → placed by shape, id empty, flagged', () => {
   const r = parseSlashLine('김수만/김수만/010-1234-5678/서울시 마포구 12/신한은행/110-123-456789/김수만/15800');
-  assert.equal(r.ok, false);
-  assert.match(r.errors[0], /칸이 8개뿐/);
-  assert.deepEqual(r.fields, {});
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+  assert.equal(r.fields.userId, '');
+  assert.ok(r.shapePlaced);
 });
 
 test('8 fields with bank/account swapped are not silently filled', () => {

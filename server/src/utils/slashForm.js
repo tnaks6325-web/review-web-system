@@ -357,7 +357,60 @@ function normalizeLine(raw) {
  * 한 줄 파싱.
  * @returns {{ok:boolean, fields:object, errors:string[], warnings:string[], raw:string, extraSlashInAddress:boolean, repairs:string[], missing:string[]}}
  */
-function parseSlashLine(line) {
+
+/* ══════════════════════════════════════════════════════════════
+   생김새로 자리 찾기(자동 배치) — 사용자 확정 2026-11-06
+   칸 순서가 양식과 다르거나 칸이 빠진 줄을 값의 생김새로 9칸에 놓는다. 표준 순서로 읽히지 않을 때만 쓴다.
+   ① 이름 1개 → 리뷰어·수취인·예금주 모두  ② 이름 2개 → 계좌번호 바로 옆 = 예금주, 남은 하나 = 리뷰어·수취인
+   ③ 이름 3개 → 계좌번호 옆 = 예금주, 남은 둘 = 나온 순서대로 리뷰어·수취인  ④ 아이디 없으면 빈칸
+   ★ 애매하면 놓지 않는다(null): 전화·은행·계좌가 정확히 1개가 아님 · 금액·아이디 2개 이상 · 주소 조각이 떨어져 있음 ·
+     어느 칸인지 모를 값이 남음 · 예금주를 하나로 못 정함. 엉뚱한 칸에 조용히 들어가는 것보다 멈추는 쪽이 안전하다.
+   ══════════════════════════════════════════════════════════════ */
+const NAME_RE = /^[가-힣*]{2,5}$/;
+function _shapeKind(v) {
+  const t = String(v || '').trim();
+  if (!t) return 'empty';
+  if (/^[0-9+\s().-]+$/.test(t) && looksPhone(t)) return 'phone';
+  if (/^[0-9][0-9\s-]{5,}$/.test(t) && (/-/.test(t) || digits(t).length >= 9)) return 'account';
+  if (!/-/.test(t) && digits(t).length <= 8 && /[0-9]/.test(t) && looksPrice(t)) return 'price';
+  if (looksBankName(t)) return 'bank';
+  if (/@/.test(t) || (/^[A-Za-z0-9._-]{3,}$/.test(t) && /[A-Za-z]/.test(t))) return 'id';
+  if (NAME_RE.test(t) && !looksBankName(t)) return 'name';
+  if (looksAddress(t)) return 'address';
+  return 'unknown';
+}
+function placeByShape(parts) {
+  const kinds = parts.map(_shapeKind);
+  if (kinds.includes('unknown')) return null;
+  const at = k => kinds.reduce((a, x, i) => (x === k ? a.concat(i) : a), []);
+  const [ph, bk, ac, pr, id, ad, nm] = ['phone', 'bank', 'account', 'price', 'id', 'address', 'name'].map(at);
+  if (ph.length !== 1 || bk.length !== 1 || ac.length !== 1 || pr.length > 1 || id.length > 1 || !ad.length || !nm.length) return null;
+  if (ad[ad.length - 1] - ad[0] !== ad.length - 1) return null;          // 주소 조각은 붙어 있어야 한다
+  const val = i => String(parts[i]).trim();
+  const notes = [];
+  let reviewerName, recipient, depositor;
+  const distinct = [...new Set(nm.map(val))];
+  if (distinct.length === 1) {
+    reviewerName = recipient = depositor = distinct[0];
+    notes.push(`이름이 하나뿐이라 리뷰어·수취인·예금주에 모두 '${distinct[0]}'을(를) 넣었습니다`);
+  } else {
+    const nextToAcct = nm.filter(i => Math.abs(i - ac[0]) === 1);
+    if (nextToAcct.length !== 1 || nm.length > 3) return null;
+    depositor = val(nextToAcct[0]);
+    const rest = nm.filter(i => i !== nextToAcct[0]).map(val);
+    if (rest.length === 1) { reviewerName = recipient = rest[0]; }
+    else { [reviewerName, recipient] = rest; }
+  }
+  notes.unshift('칸 순서가 양식과 달라 값의 생김새로 자리를 찾았습니다(자동 배치)');
+  if (!id.length) notes.push('아이디 칸이 없어 비워 두었습니다');
+  return {
+    parts: [reviewerName, recipient, id.length ? val(id[0]) : '', val(ph[0]), ad.map(val).join('/'),
+      val(bk[0]), val(ac[0]), depositor].concat(pr.length ? [val(pr[0])] : []),
+    notes,
+  };
+}
+
+function parseSlashLine(line, _opt) {
   const raw = String(line == null ? '' : line);
   const norm = normalizeLine(raw);
   let parts = norm.line.split('/').map(s => s.trim());
@@ -388,6 +441,22 @@ function parseSlashLine(line) {
   const fail = (errs, missing) => ({
     ok: false, raw, fields: {}, warnings, extraSlashInAddress: false, repairs: [], missing: missing || [], errors: errs,
   });
+
+  // 생김새로 자리 찾기 — 표준 순서로 읽히지 않을 때만(재귀 1단 · 결과는 표준 경로로 다시 검증)
+  const tryShape = () => {
+    if (hasLabels || (_opt && _opt.noShape)) return null;
+    const placed = placeByShape(parts.filter(v => String(v).trim() !== '' ));
+    if (!placed) return null;
+    const re = parseSlashLine(placed.parts.join('/'), { noShape: true });
+    if (!re.ok && !(re.missing || []).includes('결제금액')) return null;
+    const extra = notes.concat(placed.notes);
+    return Object.assign(re, {
+      raw,
+      repairs: extra.concat(re.repairs || []),
+      warnings: extra.map(r => r + ' — 값이 맞는지 확인하세요').concat(re.warnings || []),
+      shapePlaced: true,
+    });
+  };
 
   // ★ 라벨식 여러 줄(한 사람이 여러 줄) — 범위 밖. 알아듣게 돌려보낸다(AI 폴백 대상 아님)
   if (hasLabels && parts.length <= 2) {
@@ -427,6 +496,7 @@ function parseSlashLine(line) {
     }
   }
 
+  if (parts.length < FIELD_KEYS.length) { const sp = tryShape(); if (sp) return sp; }
   if (parts.length < FIELD_KEYS.length) {
     const missing = diagnoseMissing(parts);
     const hints = [];
@@ -488,6 +558,7 @@ function parseSlashLine(line) {
       shape = [`끝에 칸이 더 있습니다 ('${parts[n - 1]}') — 결제금액이 맨 끝 칸이어야 합니다. 주문번호·옵션 같은 값은 빼 주세요`];
     }
   }
+  if (shape.length) { const sp = tryShape(); if (sp) return sp; }
   errors.push(...shape);
   const shapeBad = shape.length > 0;
 
@@ -542,7 +613,7 @@ function parseSlashForm(text) {
 module.exports = {
   parseSlashForm, parseSlashLine,
   formatPhone, parsePrice, parsePriceDetail, digits,
-  repairSlashParts, repairLooksSane, diagnoseMissing, shapeProblems, normalizeLine,
+  repairSlashParts, repairLooksSane, diagnoseMissing, shapeProblems, normalizeLine, placeByShape,
   looksPhone, looksPrice, looksAccount, looksBank, looksAddress,
   FIELD_KEYS, FIELD_LABELS, HEAD_COUNT, TAIL_COUNT,
 };
