@@ -262,7 +262,12 @@
       return ch.inflow && ch.url && (!ch.guide || ch.guide.valid);
     });
     var html = '<div class="cwd-box"><div class="cwd-tt">📦 상품 · 결제금액</div>'
-      + '<div class="cwd-note">네이버·쿠팡 동시진행 — 두 구매처 모두 진행해야 해요.</div>'
+      + '<div class="cwd-note">네이버·쿠팡 동시진행 — 두 구매처 모두 진행해야 해요.'
+      // 정책 확정(결정 341 · 2026-11-06): 한쪽 품절·취소 = 진행 중단, 두 곳 받는 사람 일치(서버 dualPurchaseSubmission 이 판정).
+      //   [참여 취소] 는 campaign.html 참여 화면의 실제 버튼, 「리뷰 내역 → 1:1 문의」 는 리뷰어 홈의 실제 창구다.
+      + '<br>한 곳이라도 품절이면 진행할 수 없어요. 구매하지 말고, 이미 참여했다면 [참여 취소]를 눌러 주세요.'
+      + '<br>구매 후 한 곳 주문이 취소되면 진행이 중단되고 리뷰비는 지급되지 않아요 — 리뷰 내역 → 1:1 문의로 담당자에게 알려 주세요.'
+      + '<br>두 곳의 아이디는 달라도 되지만 받는 사람·연락처·배송 주소는 같아야 해요.</div>'
       + '<div class="cwd-body">' + (nameOk ? escAttr(p.name) : dualNotice('상품명 확인 필요')) + '\n'
       + (shapeOk && sumOk ? '합계 결제금액 ' + total.toLocaleString() + '원' : dualNotice('합계 결제금액 확인 필요'))
       + (!shapeOk ? '\n' + dualNotice('동시진행 상품 설정 확인 필요') : '') + '</div></div>';

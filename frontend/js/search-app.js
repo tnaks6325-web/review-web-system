@@ -59,7 +59,7 @@ async function _initDualChannelPurchase() {
   const add = document.getElementById('btnAddOrderCard');
   if(add) add.style.display='none';
   try {
-    if(!window.DualChannelPurchase) await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='/js/dual-channel-purchase.js?v=2';s.onload=resolve;s.onerror=reject;document.head.appendChild(s);});
+    if(!window.DualChannelPurchase) await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='/js/dual-channel-purchase.js?v=3';s.onload=resolve;s.onerror=reject;document.head.appendChild(s);});
     const loadDetail=async()=>{
       let response,detail;
       try{response=await fetch(API_BASE_URL+'/api/campaign/'+encodeURIComponent(_EMBED_CTX.campId)+'/work-detail?phone8='+encodeURIComponent(_EMBED_CTX.holdPhone8)+'&holdToken='+encodeURIComponent(_EMBED_CTX.holdToken),{headers:_getAuthHeaders(),cache:'no-store'});detail=await response.json();}
