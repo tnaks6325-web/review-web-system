@@ -312,7 +312,7 @@ function _dualStaffFail(res, next, e) {
   }
   return next(e);
 }
-function _dualStaff(req) { const a = req.admin || req.user || {}; return { name: a.name || a.username || '', id: a.id || null }; }
+function _dualStaff(req) { const a = req.admin || {}; return { name: a.name || a.username || '', id: a.id || null }; }
 router.post('/dual/submit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const b = req.body || {};
