@@ -55,7 +55,7 @@ async function ensureCampaignWorktable({ campaignId, by = 'system' } = {}) {
     await client.query('BEGIN');
     /* ★ 공고 행 잠금 — 같은 공고에 주문이 동시에 들어와도 작업표가 두 개 생기지 않는다. */
     const { rows } = await client.query(
-      `SELECT id, title, landing_url, channel, work_detail, linked_sheet_id, linked_tab_name, linked_tab_gid, workboard_id
+      `SELECT id, title, landing_url, channel, work_detail, linked_sheet_id, linked_tab_name, linked_tab_gid, workboard_id, recruit_total, work_kind
          FROM recruit_campaigns WHERE id = $1 FOR UPDATE`, [campaignId]);
     if (!rows.length) { await client.query('ROLLBACK'); return { ok: false, reason: 'campaign_not_found' }; }
     const c = rows[0];
@@ -115,6 +115,23 @@ async function ensureCampaignWorktable({ campaignId, by = 'system' } = {}) {
       sheetId, tabName: title, by: `campaign-worktable:${by}`, client,
     });
 
+    /* ★ 결정 340 신청 관문은 빈 줄이 있어야 신청을 받는다 — 0줄로 만들면 둘째 신청자부터 막힌다(2026-11-06 실측).
+       접수로 만든 작업표처럼 모집인원만큼 빈 줄을 같은 트랜잭션에서 준비한다(정원 맞추기 단일 출처 · 2번 줄부터).
+       정원이 없거나 Q&A(날짜 자리표가 줄을 정한다)면 종전대로 0줄(주문이 들어올 때 이어붙인다).
+       ★ fail-soft — 빈 줄 준비가 실패해도 작업표 생성(= 이 주문이 기록될 곳)은 살린다(SAVEPOINT · 종전 0줄 모양). */
+    const recruitTotal = Number(c.recruit_total);
+    if (Number.isInteger(recruitTotal) && recruitTotal > 0 && !require('../utils/workKind').isQnaKind(c.work_kind)) {
+      await client.query('SAVEPOINT campaign_worktable_slots');
+      try {
+        await require('./linkedRecruitQuota.service').syncWorktableSlotsInTx(client,
+          { id: campaignId, linked_sheet_id: sheetId, linked_tab_name: title }, recruitTotal, `campaign-worktable:${by}`);
+        await client.query('RELEASE SAVEPOINT campaign_worktable_slots');
+      } catch (e) {
+        await client.query('ROLLBACK TO SAVEPOINT campaign_worktable_slots');
+        logger.warn(`[campaignWorktable] 빈 줄 준비 실패(0줄로 생성 · 주문은 이어붙임) camp=${campaignId}: ${e.message}`);
+      }
+    }
+
     await client.query('COMMIT');
     made = { sheetId, tabName: title, tabGid: gid, workboardId: mapping.workboardId || null, columns };
   } catch (err) {
@@ -126,7 +143,7 @@ async function ensureCampaignWorktable({ campaignId, by = 'system' } = {}) {
   }
 
   /* ② 장부 3권 — 등록(sheetless=TRUE)이 커밋된 **뒤에** 부른다(rebuildLedgers 가 그 플래그를
-     fail-closed 로 확인한다). 줄은 0개로 시작하고 주문이 들어올 때마다 이어붙는다. */
+     fail-closed 로 확인한다). 줄은 모집인원만큼 준비돼 있고(정원 없으면 0줄), 넘치는 확정 주문은 이어붙인다. */
   try {
     await require('./sheetlessLedger.service').rebuildLedgers({
       sheetId: made.sheetId, tabName: made.tabName, columns: made.columns,
