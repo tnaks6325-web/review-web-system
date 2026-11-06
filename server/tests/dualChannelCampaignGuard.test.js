@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const pool = require('../src/db/pool');
 const router = require('../src/routes/campaign.routes');
+require('../src/services/dualChannelRuntime.service').__setReadinessForTest({}); // 결정 341 출시 뒤 기본은 열림 — 닫힌 상태의 거부(쓰기 0)를 검사하려고 명시적으로 닫는다
 const originalQuery = pool.query;
 const originalConnect = pool.connect;
 test.after(() => { pool.query = originalQuery; pool.connect = originalConnect; });

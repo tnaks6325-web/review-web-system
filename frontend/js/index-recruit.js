@@ -6180,11 +6180,17 @@ function _rfGoToCheck() {
 ═══════════════════════════════════════ */
 async function saveRecruitPostImpl() {
   // Presence, not validity: incomplete/unknown dual settings must never fall through.
+  // ★ 결정 341 출시 — 동시진행 표시(채널·편집기·거부된 후보·저장본)가 하나라도 있으면 편집기 값이
+  //   완전할 때만 저장한다. 불완전·불명은 일반 저장으로 흘리지 않고 이유와 함께 네트워크 전에 막는다.
+  let _rfDualProduct = null;
   if (document.getElementById("rf_channel")?.value === "네이버+쿠팡"
       || document.querySelector("#rf_opt_rows .rf-dual-editor") || window._rfDualRejected
       || window._recruitEditLoaded?.work_detail?.dualChannelProduct) {
-    _rfSaveBlocked("네이버·쿠팡 동시진행은 준비 중입니다. 아직 저장하거나 모집을 시작할 수 없습니다.");
-    return;
+    try { _rfDualProduct = rfDualSaveProduct(); }
+    catch (e) {
+      _rfSaveBlocked("동시진행 공고를 저장할 수 없습니다 — " + ((e && e.message) || "두 구매처 입력을 확인해주세요."));
+      return;
+    }
   }
   if (_recruitEditId && window._recruitEditLoadFailed) {
     _rfSaveBlocked("기존 공고 정보를 완전히 불러오지 못해 저장을 차단했습니다. 새로고침 후 다시 시도해주세요.");
@@ -6440,6 +6446,13 @@ async function saveRecruitPostImpl() {
     const _feeChk = renderFeeSchedule();
     if (_feeChk.dup) { _rfSaveBlocked("리뷰비 구간의 시작일이 중복됐어요 — 날짜를 다르게 하거나 삭제해주세요."); return; }
     payload.fee_schedules = document.getElementById("rf_fee_sched_on")?.checked ? readFeeRows() : [];
+  }
+
+  /* ★ 결정 341 출시 — 동시진행은 편집기 상품 하나를 work_detail.dualChannelProduct 로, 채널은 '네이버+쿠팡' 으로 보낸다
+     (서버 dualChannelSettings.normalizeCampaignSettings 계약 · 선택지 표는 빈 배열). 어긋나면 보내지 않는다. */
+  if (_rfDualProduct) {
+    try { rfDualApplyToPayload(payload, _rfDualProduct); }
+    catch (e) { _rfSaveBlocked("동시진행 공고를 저장할 수 없습니다 — " + ((e && e.message) || "두 구매처 입력을 확인해주세요.")); return; }
   }
 
   /* ★ 양방향 5단계(사용자 확정 D3): 리뷰오더와 맞춰지는 공고의 결제금액·리뷰비는 리뷰어 화면과 리뷰오더까지 바로 바뀐다 — 저장 전에 확인받는다. */
@@ -7144,6 +7157,36 @@ function rfReadDualChannelProduct() {
     + rfDualInteger(p.channels.coupang.pay, "쿠팡 결제금액", 0, 100000000);
   return rfDualNormalize(p);
 }
+/* 결정 341 출시 — 저장용 동시진행 상품. 편집기 값(rfReadDualChannelProduct → rfDualNormalize)만 쓰고,
+   거부된 복원 후보가 남아 있거나 채널 표기가 어긋나면 이유와 함께 던진다(fail-closed). */
+function rfDualSaveProduct() {
+  if (window._rfDualRejected || window._rfDualRejectedMessage) {
+    throw new Error(window._rfDualRejectedMessage || "구매처 설정 원본을 확인해주세요.");
+  }
+  const p = rfReadDualChannelProduct();
+  if (!p) throw new Error("네이버·쿠팡 구매처 입력이 없습니다. 「네이버+쿠팡」을 다시 선택해 두 구매처를 입력해주세요.");
+  const channel = document.getElementById("rf_channel");
+  if (!channel || channel.value !== "네이버+쿠팡") throw new Error("구매채널이 「네이버+쿠팡」이 아닙니다. 창을 닫고 다시 열어주세요.");
+  return p;
+}
+/* 서버가 기대하는 모양 그대로 싣는다: 상품 인원 = 총모집, 상품 일건수 = 일 진행 건수(0 = 미지정과 같은 뜻 · 결정 338). */
+function rfDualApplyToPayload(payload, product) {
+  const p = JSON.parse(JSON.stringify(product));
+  if (!payload.work_detail || typeof payload.work_detail !== "object") throw new Error("작업 내용을 불러오지 못했습니다. 창을 닫고 다시 열어주세요.");
+  if (payload.recruit_total !== undefined && Number(payload.recruit_total) !== p.base.count) {
+    throw new Error("모집인원(" + payload.recruit_total + "명)이 상품 설정(" + p.base.count + "명)과 다릅니다. 상품 카드의 인원을 확인해주세요.");
+  }
+  if (payload.daily_limit !== undefined) {
+    const daily = Number(payload.daily_limit) || 0;
+    if ((p.base.daily ?? 0) !== daily) throw new Error("일 진행 건수가 상품 설정과 다릅니다. 상품 카드의 일건수를 확인해주세요.");
+    p.base.daily = daily;
+  }
+  payload.channel = "네이버+쿠팡";
+  payload.channel_custom = "";
+  if (Object.prototype.hasOwnProperty.call(payload, "options")) payload.options = [];
+  payload.work_detail.dualChannelProduct = p;
+  return payload;
+}
 function rfDualSync() {
   const box = document.querySelector("#rf_opt_rows .rf-gp");
   if (!box || !box._rfDualSource) return;
@@ -7170,7 +7213,7 @@ function rfDualBuild(box, p) {
   box.classList.add("rf-dual-card");
   const wrap = document.createElement("div"); wrap.className = "rf-dual-editor";
   const note = document.createElement("div"); note.className = "rf-dual-notice";
-  note.textContent = "네이버+쿠팡 · 로컬 미리보기 전용 — 실제 저장·모집은 준비 중입니다. 모집인원은 사람 수이며 리뷰비는 한 번만 적용합니다. 기존 공통 가이드는 그대로 보존됩니다.";
+  note.textContent = "네이버+쿠팡 · 한 사람이 같은 상품을 네이버와 쿠팡에서 각각 구매합니다. 모집인원은 사람 수이며 리뷰비는 한 번만 적용합니다. 기존 공통 가이드는 그대로 보존됩니다.";
   wrap.appendChild(note);
   if (p.guide) {
     const legacy = document.createElement("pre"); legacy.className = "rf-dual-legacy";

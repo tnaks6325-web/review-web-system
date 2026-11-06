@@ -6,6 +6,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { PGlite } = require('@electric-sql/pglite');
 const service = require('../src/services/sharedPatch.service');
+require('../src/services/dualChannelRuntime.service').__setReadinessForTest({}); // 결정 341 출시 뒤 기본은 열림 — 닫힌 상태의 거부(쓰기 0)를 검사하려고 명시적으로 닫는다
 const pg = new PGlite();
 const db = { connect: async () => ({ query: (sql, params) => pg.query(sql, params), release() {} }) };
 
