@@ -109,12 +109,15 @@ async function _loadOrderIdentityContext() {
         const identityKind = identity.type === "sub" ? "타계정" : "본계정";
         const phoneDigits = String(identity.phone || "").replace(/[^0-9]/g, "");
         const maskedPhone = phoneDigits ? "***" + phoneDigits.slice(-4) : "";
+        // 개편 1단계(시안 v18): 두 줄 — ① 현재 참여 명의 · 이름 · 본계정 ***0000 · (오른쪽) 상태  ② AI 대조 문구
         who.innerHTML = '<span class="of-identity-kicker">현재 참여 명의</span>'
           + '<strong class="of-identity-name">' + _safeText(identityName) + '</strong>'
-          + '<span class="of-identity-kind">' + identityKind + '</span>'
-          + '<span class="of-identity-help">' + (maskedPhone ? _safeText(maskedPhone) + ' · ' : '')
-          + 'AI가 캡처와 이 명의를 확인합니다.</span>';
+          + '<span class="of-identity-kind">' + identityKind + (maskedPhone ? ' ' + _safeText(maskedPhone) : '') + '</span>'
+          + '<span class="of-identity-flag" aria-live="polite"></span>'
+          + '<span class="of-identity-help"></span>';
         who.setAttribute("aria-label", "현재 참여 명의 " + identityName + " " + identityKind);
+        who.hidden = false;
+        _renderIdentityHead(cid);
       }
     });
     _renderSavedOrderInfoPickers();
@@ -238,8 +241,62 @@ function _toggleSavedInfoDropdown(trigger) {
   wrap.classList.toggle("is-open", opening);
   trigger.setAttribute("aria-expanded", String(opening));
   menu.hidden = !opening;
-  if (opening) menu.querySelector(".of-saved-info-option")?.focus({ preventScroll: true });
+  if (opening) {
+    _ofMarkCurrentOption(trigger, menu);
+    _ofPlaceMenu(trigger, menu);
+    menu.querySelector(".of-saved-info-option")?.focus({ preventScroll: true });
+  }
 }
+
+/* 개편 1단계(시안 v17) — "내 정보에서 선택" 목록은 화면 좌우 폭(양쪽 8px)을 넘지 않게 화면 기준으로 띄운다.
+ *  구매양식이 공고 화면의 틀(iframe) 안에 있으면 틀이 내용 높이만큼 늘어나 있어 틀 안 창 높이로는 "보이는 아래 공간"을
+ *  알 수 없다 → 같은 출처인 부모 화면에서 틀 위치·보이는 높이를 읽어 위/아래를 정한다. 못 읽으면 아래로 연다. */
+function _ofVisibleBand() {
+  let top = 0, bottom = window.innerHeight;
+  try {
+    if (window.parent !== window && window.frameElement) {
+      const fr = window.frameElement.getBoundingClientRect();
+      const ph = window.parent.visualViewport ? window.parent.visualViewport.height : window.parent.innerHeight;
+      top = Math.max(0, -fr.top); bottom = Math.min(window.innerHeight, ph - fr.top);
+    } else if (window.visualViewport) bottom = window.visualViewport.height;
+  } catch (_) {}
+  return { top, bottom };
+}
+function _ofPlaceMenu(trigger, menu) {
+  const vw = Math.min(document.documentElement.clientWidth || window.innerWidth, window.innerWidth);
+  const width = Math.max(200, Math.min(vw - 16, 340));
+  const r = trigger.getBoundingClientRect();
+  menu.classList.add("is-floating");
+  menu.style.width = width + "px";
+  menu.style.left = Math.max(8, Math.min(r.left, vw - 8 - width)) + "px";
+  menu.style.maxHeight = "";
+  const band = _ofVisibleBand();
+  const want = Math.min(menu.scrollHeight, 280);
+  const below = band.bottom - r.bottom - 8, above = r.top - band.top - 8;
+  const up = below < Math.min(want, 180) && above > below;
+  const room = Math.max(120, Math.min(280, (up ? above : below) - 3));
+  menu.style.maxHeight = room + "px";
+  const h = Math.min(want, room);
+  menu.style.top = (up ? r.top - 3 - h : r.bottom + 3) + "px";
+  menu.classList.toggle("is-up", up);
+}
+function _ofMarkCurrentOption(trigger, menu) {
+  const field = trigger.dataset.field, cid = trigger.dataset.cid;
+  const el = field && cid ? document.getElementById(cid + "_" + field) : null;
+  const cur = el ? String(el.value || "").replace(/[\s-]/g, "") : "";
+  menu.querySelectorAll(".of-saved-info-option").forEach((o) => {
+    const v = String(o.querySelector(".of-saved-info-option-help")?.textContent || "").replace(/[\s-]/g, "");
+    o.classList.toggle("is-current", !!cur && v === cur);
+  });
+}
+window.addEventListener("scroll", () => { if (document.querySelector(".of-saved-info.is-open")) _closeSavedInfoDropdowns(); }, { passive: true });
+// 틀(iframe)은 내용이 바뀔 때마다 높이가 다시 맞춰져 resize 가 자주 온다 — 폭이 바뀔 때만 닫는다.
+let _ofMenuVw = window.innerWidth;
+window.addEventListener("resize", () => {
+  if (window.innerWidth === _ofMenuVw) return;
+  _ofMenuVw = window.innerWidth;
+  if (document.querySelector(".of-saved-info.is-open")) _closeSavedInfoDropdowns();
+});
 
 document.addEventListener("click", (event) => {
   const trigger = event.target.closest(".of-saved-info-trigger");
@@ -303,6 +360,13 @@ function _renderSavedOrderInfoPickers() {
       if (!wrap || !trigger || !triggerLabel || !menu) return;
       const available = identities.filter((item) => String(item?.[spec.key] || "").trim());
       menu.replaceChildren();
+      if (available.length) {
+        const head = document.createElement("div");
+        head.className = "of-saved-info-menu-head";
+        const ownerName = String(_activeIdentityContext?.selectedIdentity?.name || "").trim();
+        head.textContent = spec.label + " · " + (ownerName ? ownerName + " 명의 정보" : "내 정보");
+        menu.appendChild(head);
+      }
       available.forEach((item) => {
         const option = document.createElement("button");
         option.type = "button";
@@ -310,9 +374,18 @@ function _renderSavedOrderInfoPickers() {
         option.dataset.cid = cid;
         option.dataset.field = field;
         option.dataset.savedIdentityKey = item.identityKey;
-        option.textContent = (item.name || "저장 정보") + " · "
-          + (item.type === "sub" ? "타계정" : item.type === "delivery" ? "추가 배송지" : "본계정") + " — " + item[spec.key];
-        option.addEventListener("click", () => window._applySavedOrderInfo(option));
+        // 개편 1단계(시안 v17): 두 줄 — 이름·구분 / 값(긴 주소는 줄바꿈)
+        const kind = item.type === "sub" ? "타계정" : item.type === "delivery" ? "추가 배송지" : "본계정";
+        const optTitle = document.createElement("span");
+        optTitle.className = "of-saved-info-option-title";
+        optTitle.textContent = (item.name || "저장 정보") + " · " + kind;
+        const optHelp = document.createElement("span");
+        optHelp.className = "of-saved-info-option-help";
+        optHelp.textContent = field === "phone"
+          ? String(item[spec.key]).replace(/^(01\d)(\d{3,4})(\d{4})$/, "$1-$2-$3") : String(item[spec.key]);
+        option.append(optTitle, optHelp);
+        option.setAttribute("aria-label", (item.name || "저장 정보") + " · " + kind + " — " + item[spec.key]);
+        option.addEventListener("click", () => { window._applySavedOrderInfo(option); _syncMaskNotes(cid); });
         menu.appendChild(option);
       });
       triggerLabel.textContent = available.length ? "내 정보에서 선택" : spec.emptyLabel;
@@ -864,7 +937,7 @@ const _EMBED_FORM_KEY = (_EMBED_CTX && !_EMBED_CTX.preview && _EMBED_CTX.app) ? 
  *   - 아이디가 없는 칸·파일 칸은 저장하지 않는다(어디로 돌아갈지 모르는 값은 버린다).
  *   - 옛 위치 초안은 **화면 배치 번호 `_EMBED_FORM_LAYOUT` 이 1일 때만** 한 번 읽어 옮긴 뒤 지운다.
  *     ★★ 구매양식 칸의 순서·위치·개수를 바꾸는 변경은 이 번호를 올린다 — 그러면 옛 위치 초안은 읽지 않고 버린다. */
-const _EMBED_FORM_LAYOUT = 1;
+const _EMBED_FORM_LAYOUT = 2;   // 2 = 개편 1단계(2026-11-07): 결제금액·아이디 저장 칸을 「주문 정보」 구획 안으로 옮김
 const _EMBED_FORM_ID_KEY = _EMBED_FORM_KEY ? (_EMBED_FORM_KEY + ":id") : "";
 function _embedFormFields(scr) {
   return [...scr.querySelectorAll("input, select, textarea")].filter(el => el.type !== "file");
@@ -1135,7 +1208,7 @@ function _batchIdentityGuard() {
   if (!bad.length) return true;
   showToast("사진의 수취인과 참여 명의가 달라 보이는 카드가 있어요. 카드에서 확인해주세요.", "warning");
   const el = document.getElementById(bad[0]);
-  if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  if (el) _ofReveal(el).scrollIntoView({ behavior: "smooth", block: "center" });
   return false;
 }
 
@@ -6017,7 +6090,7 @@ function _buildCoupangCardHtml(cid) {
 
     <!-- AI 캡처 추출 섹션 -->
     <div class="ofc-ai-section">
-      <div class="ofc-ai-section-title">📸 쿠팡 구매 캡처 <span style="font-weight:800;color:#fff;background:#E5484D;border-radius:4px;padding:1px 5px;font-size:.6rem;vertical-align:middle">필수</span></div>
+      <div class="ofc-ai-section-title">쿠팡 구매사진 <span class="of-req">필수</span></div>
       <div class="of-img-zone" id="${cid}_imgZone"
            ondragover="event.preventDefault();this.classList.add('drag-over')"
            ondragleave="this.classList.remove('drag-over')"
@@ -6332,16 +6405,10 @@ function _buildOrderCardHtml(cid, idx, type) {
       ${isFirst ? "" : `<button class="ofc-remove-btn" onclick="removeOrderCard('${cid}')"><i class="fas fa-times"></i> 삭제</button>`}
     </div>
 
-    <!-- AI 캡처 추출 섹션 -->
+    <!-- AI 캡처 추출 섹션 — 개편 1단계: 접는 구획 "구매사진" (칸 아이디·순서는 그대로) -->
+    <details class="of-fold" data-fold="photo" open>
+    <summary class="of-fold-sum"><span class="of-fold-title">구매사진 <span class="of-req">필수</span></span></summary>
     <div class="ofc-ai-section">
-      <div class="ofc-ai-section-title">📸 구매 캡처 <span style="font-weight:800;color:#fff;background:#E5484D;border-radius:4px;padding:1px 5px;font-size:.6rem;vertical-align:middle">필수</span></div>
-      <div id="${cid}_identityWho" class="of-identity-context" aria-label="선택한 참여 명의 확인">
-        <span class="of-identity-kicker">현재 참여 명의</span>
-        <strong class="of-identity-name">선택한 참여 명의</strong>
-        <span class="of-identity-kind">AI 확인</span>
-        <span class="of-identity-help">AI가 캡처와 이 명의를 확인합니다.</span>
-      </div>
-      <div id="${cid}_identityStatus" style="display:none;border-radius:9px;padding:9px 11px;margin-bottom:8px;font-size:.75rem;line-height:1.55"></div>
       <div class="of-img-zone" id="${cid}_imgZone"
            ondragover="event.preventDefault();this.classList.add('drag-over')"
            ondragleave="this.classList.remove('drag-over')"
@@ -6358,7 +6425,10 @@ function _buildOrderCardHtml(cid, idx, type) {
           <img id="${cid}_imgThumb" src="" alt="주문캡처" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1.5px solid #cce0fb">
           <button class="oip-remove" onclick="removeCardImg('${cid}')" title="이미지 제거"><i class="fas fa-times"></i></button>
         </div>
-        <span id="${cid}_imgLabel" style="font-size:.75rem;color:#6B7280">이미지 첨부됨</span>
+        <div class="of-img-info">
+          <span id="${cid}_imgLabel" style="font-size:.75rem;color:#6B7280">이미지 첨부됨</span>
+          <span class="of-img-actions"><button type="button" class="of-text-btn" onclick="_ofViewCapture('${cid}')">전체 보기</button><button type="button" class="of-text-btn" onclick="_ofChangeCapture('${cid}')">사진 변경</button></span>
+        </div>
       </div>
       <!-- ★ 결정 288: 구매캡처 2장째(선택) — 아이폰 등은 구매내역이 한 화면에 다 안 담긴다(배송메세지 잘림).
            사진 칸에서 두 장을 한 번에 고르면 둘째 장이 여기 보인다(별도 추가 버튼 없음 · 사용자 요청 2026-10-16). -->
@@ -6418,12 +6488,14 @@ function _buildOrderCardHtml(cid, idx, type) {
         </button>
       </div>
     </div>
+    </details>
+
+    <!-- 개편 1단계: 접는 구획 "주문 정보" — 상품·옵션·수량 → 주문번호 → 주문자 → 쇼핑몰 아이디 → 결제금액 → 아이디 저장 -->
+    <details class="of-fold" data-fold="order" open>
+    <summary class="of-fold-sum"><span class="of-fold-title">주문 정보</span></summary>
 
     <!-- ★ 2026-10-02 B안: 구매한 상품(상품 2종 이상인 작업 · 구매양식 링크 화면에서만 _ofpRender 가 채운다) -->
     <div class="ofp" id="${cid}_prodPick" hidden></div>
-
-    <!-- 입력 폼 -->
-    <div style="font-size:.68rem;font-weight:700;color:var(--t3);margin-bottom:10px;letter-spacing:.04em">✏️ 아래 정보를 입력해주세요<span style="color:#F43F5E;font-weight:600">(*별표포함시 직접수정 필수.)</span></div>
 
     <!-- 옵션 선택 (1번 카드에만 표시됨, JS로 동적 처리) -->
     ${isFirst ? `
@@ -6477,14 +6549,28 @@ function _buildOrderCardHtml(cid, idx, type) {
 
     <!-- 아이디 (필수, 각 건마다 별도) -->
     <div class="of-field">
-      <label class="of-label of-label-required" for="${cid}_userId">아이디</label>
+      <label class="of-label of-label-required" for="${cid}_userId">쇼핑몰 아이디</label>
       <div class="of-field-control">
         <input id="${cid}_userId" class="of-input" type="text" placeholder="쇼핑몰 아이디" oninput="_ofClearError('${cid}_userId')">
         ${_savedOrderInfoMarkup(cid, "userId")}
-        <label class="of-save-id" style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:.7rem;color:#4B5563;cursor:pointer"><input id="${cid}_saveIdChk" type="checkbox" onchange="_selectShoppingIdSave('${cid}')"> 수정한 아이디를 이 명의에 저장</label>
       </div>
     </div>
     <div class="of-error-msg" id="${cid}_userId_err"><i class="fas fa-exclamation-circle"></i> 아이디는 필수 입력 항목입니다.</div>
+
+    <!-- 결제금액 -->
+    <div class="of-field">
+      <label class="of-label of-label-required" for="${cid}_price">결제금액 (원)</label>
+      <input id="${cid}_price" class="of-input" type="text" placeholder="결제한 금액 (예: 47,000)"
+        oninput="formatPriceInput(this);this.classList.remove('ai-filled');this.dataset.userEdited='1';_ofClearError('${cid}_price')" inputmode="numeric">
+    </div>
+
+    <!-- 아이디 저장 — 주문 정보 맨 아래 (★ 칸 순서가 바뀌어 _EMBED_FORM_LAYOUT 을 2로 올렸다) -->
+    <label class="of-save-id" style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:.7rem;color:#4B5563;cursor:pointer"><input id="${cid}_saveIdChk" type="checkbox" onchange="_selectShoppingIdSave('${cid}')"> 수정한 아이디를 이 명의에 저장</label>
+    </details>
+
+    <!-- 개편 1단계: 접는 구획 "받는 사람·배송지" — 자주 쓰는 주문정보 → 수취인 → 연락처 → 배송주소 → 현재 참여 명의(두 줄) -->
+    <details class="of-fold" data-fold="delivery" open>
+    <summary class="of-fold-sum"><span class="of-fold-title">받는 사람·배송지</span></summary>
 
     <!-- 수취인 -->
     ${_orderInfoSuggestionsMarkup(cid)}
@@ -6495,6 +6581,7 @@ function _buildOrderCardHtml(cid, idx, type) {
           <input id="${cid}_recipient" class="of-input" type="text" placeholder="수취인 이름" oninput="_clearSavedIdentitySelection('${cid}','recipient');_ofClearError('${cid}_recipient');_invalidateIdentityApproval('${cid}')">
         </div>
         ${_savedOrderInfoMarkup(cid, "recipient")}
+        <span class="of-mask-note" id="${cid}_recipient_mask" hidden>가려짐(*)</span>
       </div>
     </div>
     <!-- 연락처 -->
@@ -6505,6 +6592,7 @@ function _buildOrderCardHtml(cid, idx, type) {
           <input id="${cid}_phone" class="of-input" type="tel" placeholder="010-0000-0000" oninput="_clearSavedIdentitySelection('${cid}','phone');formatPhoneInput(this);_ofClearError('${cid}_phone');_invalidateIdentityApproval('${cid}')" maxlength="13">
         </div>
         ${_savedOrderInfoMarkup(cid, "phone")}
+        <span class="of-mask-note" id="${cid}_phone_mask" hidden>가려짐(*)</span>
       </div>
     </div>
     <!-- 배송주소 -->
@@ -6513,11 +6601,28 @@ function _buildOrderCardHtml(cid, idx, type) {
       <div class="of-field-control">
         ${_addressChipMarkup(cid)}
         <div class="of-input-status-wrap">
-          <textarea id="${cid}_address" class="of-input of-textarea" rows="2" placeholder="배송받을 주소" oninput="_clearSavedIdentitySelection('${cid}','address');_ofClearError('${cid}_address');_invalidateIdentityApproval('${cid}');_syncAddressTools('${cid}',true)"></textarea>
+          <textarea id="${cid}_address" class="of-input of-textarea" rows="1" placeholder="배송받을 주소" oninput="_clearSavedIdentitySelection('${cid}','address');_ofClearError('${cid}_address');_invalidateIdentityApproval('${cid}');_syncAddressTools('${cid}',true)"></textarea>
         </div>
         ${_addressToolsMarkup(cid)}
+        <span class="of-mask-note" id="${cid}_address_mask" hidden>가려짐(*)</span>
       </div>
     </div>
+
+    <!-- 현재 참여 명의 (두 줄) — 공고에서 열 때만 채워 보인다(직접 링크엔 명의 문맥이 없다). 아이디 두 개는 그대로. -->
+    <div class="of-identity-block" id="${cid}_identityBlock">
+      <div id="${cid}_identityWho" class="of-identity-context" aria-label="선택한 참여 명의 확인" hidden>
+        <span class="of-identity-kicker">현재 참여 명의</span>
+        <strong class="of-identity-name">선택한 참여 명의</strong>
+        <span class="of-identity-kind">AI 확인</span>
+        <span class="of-identity-help">AI가 캡처와 이 명의를 확인합니다.</span>
+      </div>
+      <div id="${cid}_identityStatus" style="display:none;border-radius:9px;padding:9px 11px;margin-bottom:8px;font-size:.75rem;line-height:1.55"></div>
+    </div>
+    </details>
+
+    <!-- 개편 1단계: 접는 구획 "이번 주문의 입금 계좌" -->
+    <details class="of-fold" data-fold="bank" open>
+    <summary class="of-fold-sum"><span class="of-fold-title">이번 주문의 입금 계좌</span></summary>
 
     <!-- 은행/계좌/예금주 (공유 가능) -->
     <div id="${cid}_bankWrap" class="${lockClass}">
@@ -6531,7 +6636,7 @@ function _buildOrderCardHtml(cid, idx, type) {
         </div>
       </div>
       <div class="of-field">
-        <label class="of-label of-label-required" for="of_account">계좌</label>
+        <label class="of-label of-label-required" for="of_account">계좌번호</label>
         <input id="of_account" class="of-input" type="text" placeholder="계좌번호" oninput="_ofClearError('of_account')">
       </div>
       <div class="of-field">
@@ -6546,7 +6651,7 @@ function _buildOrderCardHtml(cid, idx, type) {
         <input id="${cid}_bank" class="of-input" type="text" placeholder="은행명" readonly style="background:#F9FAFB;color:var(--t3)" oninput="_ofClearError('${cid}_bank')">
       </div>
       <div class="of-field">
-        <label class="of-label of-label-required" for="${cid}_account">계좌</label>
+        <label class="of-label of-label-required" for="${cid}_account">계좌번호</label>
         <input id="${cid}_account" class="of-input" type="text" placeholder="계좌번호" readonly style="background:#F9FAFB;color:var(--t3)" oninput="_ofClearError('${cid}_account')">
       </div>
       <div class="of-field">
@@ -6554,23 +6659,20 @@ function _buildOrderCardHtml(cid, idx, type) {
         <input id="${cid}_depositor" class="of-input" type="text" placeholder="예금주" readonly style="background:#F9FAFB;color:var(--t3)" oninput="_ofClearError('${cid}_depositor')">
       </div>`}
     </div>
+    </details>
 
-    <!-- 결제금액 -->
-    <div class="of-field">
-      <label class="of-label of-label-required" for="${cid}_price">결제금액</label>
-      <input id="${cid}_price" class="of-input" type="text" placeholder="결제한 금액 (예: 47,000)"
-        oninput="formatPriceInput(this);this.classList.remove('ai-filled');this.dataset.userEdited='1';_ofClearError('${cid}_price')" inputmode="numeric">
-    </div>
-
-    <!-- 비고 (모든 카드에 표시) -->
+    <!-- 비고 (모든 카드에 표시) — 개편 1단계: 접는 구획 "비고"(처음부터 열림) -->
+    <details class="of-fold" data-fold="memo" open>
+    <summary class="of-fold-sum"><span class="of-fold-title">비고</span></summary>
     <div class="of-field of-field--stack" id="${cid}_memo_wrap">
       <label class="of-label" id="${cid}_memo_label" for="${cid}_memo">비고</label>
-      <textarea id="${cid}_memo" class="of-input of-textarea" rows="2" placeholder="포스팅URL 또는 기타메모 입력"></textarea>
+      <textarea id="${cid}_memo" class="of-input of-textarea" rows="1" placeholder="포스팅URL 또는 기타메모 입력"></textarea>
     </div>
 
-    <div style="font-size:.7rem;color:var(--t3);padding:6px 8px;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
+    <div class="of-date-note" style="font-size:.7rem;color:var(--t3);padding:6px 8px;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
       <i class="fas fa-info-circle" style="color:#6B7280;margin-right:3px"></i>날짜는 제출 시점 기준으로 자동 입력됩니다.
     </div>
+    </details>
 
     ${!isFirst ? `
     <!-- 공유 체크 (하단 배치) -->
@@ -7917,6 +8019,7 @@ function onCardImgDrop(e, cid) {
 }
 
 function removeCardImg(cid) {
+  _ofHideCaptureView(cid);
   const st = _cardAiState[cid];
   if (st) { if (st.abortCtrl) { st.abortCtrl.abort(); st.abortCtrl = null; } if (st.countdownId) { clearInterval(st.countdownId); st.countdownId = null; } st.analysisRequestId=(Number(st.analysisRequestId)||0)+1; st.lastBase64=""; st.lastMime=""; st.extracted=null; st.proofExtracted=null; st.extractToken=""; st.deliveryMemoToken=""; st.approvalToken=""; st.priorApprovalToken=""; st.reviewToken=""; st.matchError=false; }
   if (st) { st.identityBusy = false; st.identityStatus = ""; st.identityCanManual = false; st.identityChecks = []; st.identityReasonCodes = []; st.savedIdentitySelections = {}; }
@@ -8262,7 +8365,7 @@ function _identityIssues(cid) {
 function _pointToIdentityField(cid, field) {
   if (!["recipient", "phone", "address", "price"].includes(field)) return;
   const el = document.getElementById(cid + "_" + field); if (!el) return;
-  el.scrollIntoView({ behavior:"smooth", block:"center" });
+  _ofReveal(el).scrollIntoView({ behavior:"smooth", block:"center" });
   el.focus({ preventScroll:true });
   // iframe 전체 높이가 커진 모바일 화면에서도 부모 스크롤을 해당 항목으로 옮긴다.
   if (window.parent !== window) window.parent.postMessage({ type:"purchase-field-focus", top:el.getBoundingClientRect().top + window.scrollY }, location.origin);
@@ -8296,6 +8399,7 @@ function _purchasePrimaryAction() {
 }
 
 function _syncSubmissionIdentityAction() {
+  if (typeof _renderIdentityHead === "function") (_orderCardIds || []).forEach(_renderIdentityHead);
   if (!_EMBED_CTX || _PREVIEW_MODE) return;
   const panel = document.getElementById("orderIdentityAction");
   const btn = document.getElementById("btnOrderFormSubmit");
@@ -8341,6 +8445,7 @@ function _identityMismatchNotice(st) {
 function _retrySubmissionIdentity(cid) {
   const st = _cardAiState[cid];
   if (st?.identityBusy) return;
+  _ofReveal(document.getElementById(cid + "_imgZone"));
   if (_identityNeedsNewCapture(st)) {
     const input = document.getElementById(cid + "_imgInput");
     if (input) { input.value = ""; input.click(); }
@@ -8367,7 +8472,9 @@ function _renderIdentityMatchState(cid, status, reasons, canManual) {
       el.addEventListener("input", () => _renderIdentityMatchState(cid, st.identityStatus, st.identityReasons, st.identityCanManual));
     }
   }
-  box.style.cssText = "border-radius:9px;padding:10px;margin-bottom:8px;font-size:.8rem;line-height:1.6;background:#FFFBEB;color:#81450c;border:1px solid #FCD34D";
+  // 개편 1단계: 노란 상자 대신 명의 두 줄 아래 항목 목록(of-identity-issues). 문구·버튼은 종전 그대로.
+  if (box.classList) box.classList.add("of-identity-issues");
+  box.style.cssText = "";
   box.style.display = status === "MATCH" && !issues.length ? "none" : "block";
   box.innerHTML = issues.map((item) => '<button type="button" class="identity-issue-link" onclick="_pointToIdentityField(\'' + cid + '\',\'' + item.field + '\')"><b>'
     + item.label + '</b><div>' + _safeText(item.reason) + '</div><span>입력칸으로 이동 ↑</span></button>').join('');
@@ -8743,9 +8850,91 @@ function formatPriceInput(el) {
  * 입력값 수집 → GAS submitOrderForm 호출 → 완료 화면 표시
  */
 /** 필수 입력 오류 표시 헬퍼 */
+/* ── 개편 1단계(시안 v18) 구매양식 도우미 ─────────────────────────────
+ * 칸이 접힌 구획(details.of-fold) 안에 있으면 보여주기·스크롤 전에 그 구획을 먼저 연다.
+ * 오류 표시(_ofShowError)·명의 칸 안내·캡처 선택·옵션/상품 고르기·별표 칸 이동이 모두 이걸 거친다. */
+function _ofReveal(el) {
+  for (let d = el && el.closest ? el.closest("details.of-fold") : null; d; d = d.parentElement ? d.parentElement.closest("details.of-fold") : null) d.open = true;
+  return el;
+}
+/** 구매사진 [전체 보기] — 틀(iframe) 안에서는 화면 고정 창이 엉뚱한 곳에 뜨므로 사진 아래에 크게 펼친다. 누르면 닫힌다. */
+function _ofViewCapture(cid) {
+  const prev = document.getElementById(cid + "_imgPreview"), src = document.getElementById(cid + "_imgThumb")?.src || "";
+  if (!prev || !src || src === location.href) return;
+  let big = document.getElementById(cid + "_imgBig");
+  if (big && !big.hidden) { big.hidden = true; return; }
+  if (!big) {
+    big = document.createElement("button"); big.type = "button"; big.id = cid + "_imgBig"; big.className = "of-img-big";
+    big.setAttribute("aria-label", "구매캡처 크게 보기 — 누르면 닫힙니다");
+    big.innerHTML = '<img alt="구매캡처 전체"><span>누르면 닫혀요</span>';
+    big.onclick = () => { big.hidden = true; };
+    prev.after(big);
+  }
+  big.querySelector("img").src = src; big.hidden = false;
+}
+function _ofHideCaptureView(cid) { const big = document.getElementById(cid + "_imgBig"); if (big) big.hidden = true; }
+/** 구매사진 [사진 변경] — 사진 칸을 다시 누른 것과 같다. */
+function _ofChangeCapture(cid) {
+  _ofHideCaptureView(cid);
+  const input = document.getElementById(cid + "_imgInput"); if (input) { input.value = ""; input.click(); }
+}
+/** 수취인·연락처·배송주소에 가림문자(*)가 있으면 칸 아래 "가려짐(*)" 표시. 값은 여러 경로(AI 적용·내 정보 선택·복원)로
+ *  바뀌므로 입력 이벤트 + 짧은 주기 확인 두 가지로 맞춘다(화면 표시만 — 검증·제출은 종전 그대로). */
+function _syncMaskNotes(cid) {
+  for (const f of ["recipient", "phone", "address"]) {
+    const note = document.getElementById(cid + "_" + f + "_mask"); if (!note) continue;
+    const el = document.getElementById(cid + "_" + f);
+    const masked = !!el && _hasIdentityMask(String(el.value || ""));
+    if (note.hidden === masked) note.hidden = !masked;
+  }
+}
+document.addEventListener("input", (e) => {
+  const m = /^(.+)_(recipient|phone|address)$/.exec((e.target && e.target.id) || "");
+  if (m) _syncMaskNotes(m[1]);
+}, true);
+/** 배송주소·비고는 한 줄로 시작해 내용만큼 늘어난다(시안 · 최대 220px, 넘으면 칸 안에서 스크롤). */
+function _ofAutosize(el) {
+  if (!el || el.tagName !== "TEXTAREA" || !el.closest("details.of-fold") || !el.getClientRects().length) return;
+  const cs = getComputedStyle(el);
+  el.style.height = "0px";
+  const h = el.scrollHeight + parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+  el.style.height = Math.max(parseFloat(cs.minHeight) || 0, Math.min(h, 220)) + "px";
+  el.style.overflowY = h > 220 ? "auto" : "hidden";
+}
+document.addEventListener("input", (e) => { if (e.target && e.target.tagName === "TEXTAREA") _ofAutosize(e.target); }, true);
+document.addEventListener("toggle", (e) => { if (e.target && e.target.matches && e.target.matches("details.of-fold") && e.target.open) e.target.querySelectorAll("textarea").forEach(_ofAutosize); }, true);
+setInterval(() => {
+  (typeof _orderCardIds !== "undefined" ? _orderCardIds : []).forEach((cid) => {
+    _syncMaskNotes(cid);
+    for (const f of ["address", "memo"]) {
+      const el = document.getElementById(cid + "_" + f);
+      if (el && el.dataset.ofSizedValue !== el.value) { el.dataset.ofSizedValue = el.value; _ofAutosize(el); }
+    }
+  });
+}, 800);
+/** 현재 참여 명의 두 줄의 오른쪽 상태(✓ 명의 확인됨 / 확인 필요 N개)와 둘째 줄 문구. 판정은 종전 함수(_identityIssues)를 그대로 쓴다. */
+function _renderIdentityHead(cid) {
+  const who = document.getElementById(cid + "_identityWho"); if (!who || who.hidden) return;
+  const st = _cardAiState[cid] || {};
+  const flag = who.querySelector(".of-identity-flag"), help = who.querySelector(".of-identity-help");
+  const hasCapture = !!(st.lastBase64 || st.extractToken || st.identityStatus);
+  const issues = hasCapture ? _identityIssues(cid) : [];
+  const ok = !!st.approvalToken && !issues.length;
+  const box = document.getElementById(cid + "_identityStatus");
+  const boxOpen = !!box && box.style.display !== "none" && !!box.innerHTML;
+  if (flag) {
+    flag.textContent = st.identityBusy ? "확인 중" : ok ? "✓ 명의 확인됨" : (hasCapture && (issues.length || boxOpen)) ? ("확인 필요" + (issues.length ? " " + issues.length + "개" : "")) : "";
+    flag.dataset.state = ok ? "ok" : (flag.textContent && !st.identityBusy) ? "warn" : "";
+  }
+  if (help) help.textContent = ok ? "AI 대조 · 수취인·연락처·배송주소 모두 맞아요"
+    : boxOpen ? "AI 대조 · 아래 내용을 확인해 주세요"
+    : hasCapture ? "AI가 캡처와 이 명의를 대조하고 있어요"
+    : "구매캡처를 올리면 AI가 이 명의와 대조해요";
+}
+
 function _ofShowError(inputId) {
   const el = document.getElementById(inputId);
-  if (el) el.classList.add("of-input--error");
+  if (el) { el.classList.add("of-input--error"); _ofReveal(el); }
   const msg = document.getElementById(inputId + "_err");
   if (msg) msg.classList.add("visible");
 }
@@ -8961,7 +9150,7 @@ function _captureGateAttach() {   // [지금 캡처 올리기] — 첫 미첨부
   _closeCaptureGate();
   const cid = (window._captureGateCids || [])[0]; if (!cid) return;
   const zone = document.getElementById(cid + "_imgZone");
-  if (zone) { try { zone.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (_) { zone.scrollIntoView(); } }
+  if (zone) { _ofReveal(zone); try { zone.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (_) { zone.scrollIntoView(); } }
   setTimeout(() => { try { document.getElementById(cid + "_imgInput")?.click(); } catch (_) {} }, 320);
 }
 function _captureGateSkip() {     // [캡처 없이 제출] — 기존 확인 모달로 진행(완료화면·리뷰어홈에서 회수)
@@ -9135,7 +9324,7 @@ async function submitOrderForm() {
   const pickerWrap = document.getElementById("of_option_picker_wrap");
   if (pickerWrap && pickerWrap.style.display !== "none" && _selectedOptKey === null) {
     showToast("먼저 본인의 옵션을 선택해주세요.", "warning");
-    pickerWrap.scrollIntoView({ behavior: "smooth", block: "center" });
+    _ofReveal(pickerWrap).scrollIntoView({ behavior: "smooth", block: "center" });
     _resetBtn(); return;
   }
 
@@ -9145,7 +9334,7 @@ async function submitOrderForm() {
     if (unselected.length > 0) {
       showToast("옵션을 선택해주세요: " + unselected.map(([k]) => k).join(", "), "warning");
       const pickerEl = document.getElementById("of_option_picker_wrap");
-      if (pickerEl) pickerEl.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (pickerEl) _ofReveal(pickerEl).scrollIntoView({ behavior: "smooth", block: "center" });
       _resetBtn(); return;
     }
   }
@@ -9154,7 +9343,7 @@ async function submitOrderForm() {
     const _ofpMiss = _orderCardIds.filter(c => !_OFP.pick[c]);
     if (_ofpMiss.length) {
       showToast("구매한 상품을 골라주세요.", "warning");
-      document.getElementById(_ofpMiss[0] + "_prodPick")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      _ofReveal(document.getElementById(_ofpMiss[0] + "_prodPick"))?.scrollIntoView({ behavior: "smooth", block: "center" });
       _resetBtn(); return;
     }
   }
@@ -9237,7 +9426,7 @@ async function submitOrderForm() {
 
   if (hasError) {
     const firstErr = document.querySelector(".of-input--error");
-    if (firstErr) firstErr.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (firstErr) _ofReveal(firstErr).scrollIntoView({ behavior: "smooth", block: "center" });
     const _uniqMissing = [...new Set(_missingLabels)];
     showToast(_uniqMissing.length
       ? "필수 항목을 입력해주세요: " + _uniqMissing.join(", ")
@@ -9265,7 +9454,7 @@ async function submitOrderForm() {
       }
     }
     if (asteriskFound) {
-      if (asteriskField) asteriskField.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (asteriskField) _ofReveal(asteriskField).scrollIntoView({ behavior: "smooth", block: "center" });
       showToast("⚠️ 자동 보완되지 않은 가림 문자가 남아 있습니다.\n정확한 정보를 입력한 뒤 수동 확인해주세요.", "error");
       _resetBtn(); return;
     }

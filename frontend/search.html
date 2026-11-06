@@ -681,28 +681,14 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
     </header>
     <main class="screen-body" style="max-width:520px;margin:0 auto;padding:20px 16px 40px">
 
-      <!-- ★ 로그인된 리뷰어 정보 (최상단) -->
-      <div id="orderFormReviewerInfo" class="pane-card" style="display:none;margin-bottom:12px;padding:12px 16px">
-        <div style="display:flex;align-items:center;gap:10px;justify-content:space-between">
-          <div style="display:flex;align-items:center;gap:10px;min-width:0">
-            <div style="width:38px;height:38px;border-radius:50%;background:#e8f1fe;display:flex;align-items:center;justify-content:center;color:#1b64da;flex-shrink:0">
-              <i class="fas fa-user" style="font-size:1rem"></i>
-            </div>
-            <div style="line-height:1.45;min-width:0">
-              <div style="font-size:.68rem;color:var(--t3);font-weight:700;letter-spacing:.03em">👤 로그인된 리뷰어</div>
-              <div style="font-size:.95rem;font-weight:700;color:var(--t1)">
-                <span id="ofReviewerName">-</span>
-                <span id="ofReviewerBadge" style="display:none;margin-left:6px;font-size:.62rem;font-weight:700;color:#1b64da;background:#e8f1fe;border:1px solid #a6c8fb;border-radius:6px;padding:1px 6px;vertical-align:middle">회원</span>
-              </div>
-              <div id="ofReviewerPhone" style="display:none;font-size:.72rem;color:var(--t3)"></div>
-            </div>
-          </div>
-          <button type="button" onclick="goToReviewerMain()" title="메인화면으로 돌아가기"
-            style="flex-shrink:0;display:inline-flex;align-items:center;gap:5px;padding:7px 12px;border:1.5px solid #cce0fb;border-radius:9px;background:#f2f7ff;color:#1b64da;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .12s"
-            onmouseover="this.style.background='#1b64da';this.style.color='#fff';this.style.borderColor='#1b64da'"
-            onmouseout="this.style.background='#f2f7ff';this.style.color='#1b64da';this.style.borderColor='#cce0fb'">
-            <i class="fas fa-home"></i> 메인화면
-          </button>
+      <!-- ★ 로그인된 리뷰어 정보 (최상단) — 개편 1단계: 얇은 한 줄(이름·회원·연락처 끝자리·[메인화면]). 아이디 3개는 그대로. -->
+      <div id="orderFormReviewerInfo" class="pane-card of-reviewer-bar" style="display:none">
+        <div class="of-reviewer-row">
+          <span class="of-reviewer-kicker">로그인</span>
+          <span id="ofReviewerName" class="of-reviewer-name">-</span>
+          <span id="ofReviewerBadge" class="of-reviewer-badge" style="display:none">회원</span>
+          <span id="ofReviewerPhone" class="of-reviewer-phone" style="display:none"></span>
+          <button type="button" class="of-reviewer-home" onclick="goToReviewerMain()" title="메인화면으로 돌아가기">메인화면</button>
         </div>
       </div>
 
@@ -727,7 +713,7 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
 
       <!-- + 주문 추가 버튼 -->
       <button id="btnAddOrderCard" class="btn-add-order-card" onclick="addOrderCard()">
-        <i class="fas fa-plus-circle"></i> 주문 추가 <span id="addCardCountBadge" style="font-size:.7rem;background:#e8f1fe;color:#1b64da;border-radius:10px;padding:1px 7px;margin-left:4px">1 / 5</span>
+        <i class="fas fa-plus" aria-hidden="true"></i> 주문 추가 <span id="addCardCountBadge" class="of-add-count">1 / 5</span>
       </button>
 
       <!-- 최종확인 안내 -->
