@@ -339,13 +339,43 @@ async function _productWriteFor(client, { sheetId, tabName, workboardId, product
       [sheetId, tabName, workboardId]);
     allLabels = [...new Set([...own, ...lr.map(x => x.l)])];
   } catch (_) { /* 후보 표기만으로 판정 */ }
+  /* ★★ 결정 346(R2) — 작업표 상품 표기가 1종뿐이어도(상품 계획이 상품 칸에만 있어 배정 표식이 비어 있는 표 등),
+       연결 공고가 상품 2종 이상이고 산 상품이 그 표기와 짝지어지지 않으면 **다른 상품**이다 → 산 상품으로 적는다.
+       종전엔 1종으로 보고 덮지 않아, 고등어 줄에 옥돔 주문이 들어가도 「고등어」가 남았다.
+     ★ 공고가 1종·없음·조회 실패 = 종전 그대로(상품 1개 공고는 표기가 달라도 같은 상품 — 결정 252).
+     ★ SAVEPOINT 격리 · throw 없음. 끄는 스위치 `WORKTABLE_SLOT_PRODUCT_GUARD=0`. */
+  if (allLabels.length === 1 && productPick && !resolveProductLabel(productPick, allLabels)
+      && process.env.WORKTABLE_SLOT_PRODUCT_GUARD !== '0') {
+    let campLabels = [];
+    await client.query('SAVEPOINT slot_pick_camp_products');
+    try {
+      const { rows: cp } = await client.query(
+        `SELECT DISTINCT btrim(COALESCE(NULLIF(o.product_name, ''), o.opt_key)) AS l
+           FROM recruit_campaigns rc
+           JOIN campaign_options o ON o.campaign_id = rc.id
+           LEFT JOIN tab_configs tc ON tc.sheet_id = $1 AND tc.tab_name = $2
+          WHERE rc.linked_sheet_id = $1
+            AND (rc.linked_tab_name = $2 OR (COALESCE(tc.tab_gid, '') <> '' AND rc.linked_tab_gid = tc.tab_gid))
+            AND rc.archived_at IS NULL
+            AND COALESCE(btrim(COALESCE(NULLIF(o.product_name, ''), o.opt_key)), '') <> ''`, [sheetId, tabName]);
+      await client.query('RELEASE SAVEPOINT slot_pick_camp_products');
+      const norm = v => String(v || '').replace(/\s+/g, '').toLowerCase();
+      campLabels = [...new Map(cp.map(x => [norm(x.l), x.l])).values()];
+    } catch (e) {
+      try { await client.query('ROLLBACK TO SAVEPOINT slot_pick_camp_products'); } catch (_) {}
+      logger.warn(`[sheetlessOrder] 공고 상품 조회 실패(종전대로 — 상품 1종 표로 본다): ${e.message}`);
+      campLabels = [];
+    }
+    if (campLabels.length >= 2) return { productKey: '', productWrite: productPick };
+  }
   if (allLabels.length < 2) return { productKey: '', productWrite: '' };
   const productKey = resolveProductLabel(productPick, allLabels);
   return { productKey, productWrite: productKey || productPick };
 }
 
-async function _pickOpenSlot(client, { sheetId, tabName, workboardId, scheduledOptionKey, orderSubmissionId, headers, where, productPick = '' }) {
+async function _pickOpenSlot(client, { sheetId, tabName, workboardId, scheduledOptionKey, orderSubmissionId, headers, where, productPick = '', strictProduct = false }) {
   const key = String(scheduledOptionKey || '');
+  const productGuard = process.env.WORKTABLE_SLOT_PRODUCT_GUARD !== '0';
   const { findDateColumnIndex } = require('./campaignSchedule.service');
   const { parseDateColumn } = require('../utils/koreanDate');
   const { kstTodayStr } = require('./campaignState.service');
@@ -390,8 +420,10 @@ async function _pickOpenSlot(client, { sheetId, tabName, workboardId, scheduledO
        ★ 옵션 키가 있는 선택(1·2차 옵션)은 종전 그대로(이 갈래 무접촉). */
     const overlayById = new Map();
     let productHeader = '';
-    if (!key && productPick) {
+    if (!key && (productPick || productGuard)) {
       try { productHeader = require('./orderLedger.service').PRODUCT_HEADER; } catch (_) { productHeader = ''; }
+    }
+    if (!key && productPick) {
       if (productHeader && process.env.WORKTABLE_SLOT_OVERLAY_PLAN !== '0') {
         await client.query('SAVEPOINT slot_pick_overlay');
         try {
@@ -422,7 +454,12 @@ async function _pickOpenSlot(client, { sheetId, tabName, workboardId, scheduledO
     const optTier = r => {
       const ot = planOf(r);
       if (key) return ot === key ? 0 : 1;
-      return ot ? 1 : 0;
+      if (ot) return productGuard && !productPick ? 2 : 1;
+      /* ★ 결정 346(R1) — 상품을 고르지 않은 주문은 **상품 칸까지 비어 있는 빈 줄**을 먼저 쓴다(상품이 미리 적힌 줄은 그다음 ·
+           표식이 있는 줄은 종전대로 마지막). 종전엔 다른 상품이 미리 적힌 오늘 줄을 가져가 그 상품 이름이 남았다. */
+      if (productGuard && !productPick && productHeader
+          && String(((r.row_json || {})[productHeader]) == null ? '' : (r.row_json || {})[productHeader]).trim()) return 1;
+      return 0;
     };
     /* ★★ 상품 단위 선택(옵션 키 없음) — 그 상품으로 미리 정해진 빈 줄을 먼저 쓴다(2026-10-01).
          종전에는 상품을 보지 않고 아무 빈 줄을 써서, 그 줄에 미리 적힌 다른 상품이 그대로 남았다.
@@ -435,6 +472,13 @@ async function _pickOpenSlot(client, { sheetId, tabName, workboardId, scheduledO
       ({ productKey, productWrite } = await _productWriteFor(client, {
         sheetId, tabName, workboardId, productPick, labels: cands.map(planOf) }));
     }
+    /* ★★ 결정 346 — 새 줄을 붙일 수 있는 주문(strictProduct: 정원 밖 허용 판정 `_canAppendConfirmedOverflowOrder` 단일 출처)은
+         **다른 상품으로 계획된 빈 줄을 절대 가져가지 않는다** — 그 상품 줄 → 상품 미지정 빈 줄만 후보, 없으면 0줄(→ 호출부가 끝에 새 줄).
+       ★ 새 줄을 못 붙이는 주문(큐 등)은 종전대로 다른 상품 줄을 마지막 순위로 쓴다(결정 227 · 줄을 늘리지 않는다 — 결정 324·252)
+         — 그때는 아래 productWrite 로 그 줄의 상품 이름을 산 상품으로 덮는다. */
+    const strict = !!strictProduct && !key && !!productPick && productGuard && !!(productKey || productWrite);
+    const pickFrom = strict ? cands.filter(r => { const p = planOf(r); return !p || (!!productKey && p === productKey); }) : cands;
+    const _planFrom = rows => (rows.length ? String(planOf(rows[0]) || '') : '');
     if (productKey) {
       const { isReviewOptionHeader } = require('../utils/reviewType');
       const rvHeader = (headers || []).find(h => isReviewOptionHeader(h));
@@ -463,11 +507,11 @@ async function _pickOpenSlot(client, { sheetId, tabName, workboardId, scheduledO
         //   종전엔 둘이 같은 순위라 날짜가 앞선 다른 상품 자리(예: 손 글씨 「옥돔」)를 가져갔다.
         return ot ? (sameRv ? 2 : 4) : (sameRv ? 1 : 3);
       };
-      const rows = await lockFirst(rank(cands, prodTier));
-      return { rows, relabelFrom: '', productKey, productWrite, rowOverlay: _rowOverlayOf(rows) };
+      const rows = await lockFirst(rank(pickFrom, prodTier));
+      return { rows, relabelFrom: '', productKey, productWrite, rowOverlay: _rowOverlayOf(rows), planFrom: _planFrom(rows), strict };
     }
-    const rows = await lockFirst(rank(cands, optTier));
-    return { rows, relabelFrom: '', productKey: '', productWrite, rowOverlay: _rowOverlayOf(rows) };
+    const rows = await lockFirst(rank(pickFrom, optTier));
+    return { rows, relabelFrom: '', productKey: '', productWrite, rowOverlay: _rowOverlayOf(rows), planFrom: _planFrom(rows), strict };
   }
 
   // ── v2 「상품 · 옵션」 빈 줄: 같은 선택이면 그 줄을 쓴다(옵션 이름 바꿔 쓰기보다 먼저 — 같은 선택의 계획 자리다) ──
@@ -598,6 +642,10 @@ async function writeOrderToWorktable({
   let freshClaim = false;
   let claimedProductKey = '';
   let claimedRowOverlay = null;   // 결정 227 — 고른 빈 줄에 담당자가 손으로 적어 둔 상품(null = 없음 · '' = 비워 둠)
+  let claimedPlanFrom = '';       // 결정 346 — 고른 빈 줄의 원래 상품 계획(덮을 때 옵션 칸의 옛 상품 이름을 찾는다)
+  let strictAppendProduct = '';   // 결정 346 — 엄격 규칙으로 끝에 새 줄을 붙일 때 적을 상품 표기
+  let overflowAllowed = null;     // 결정 346 — 정원 밖 허용 판정(한 번만 묻는다 · null = 아직 안 물음)
+  let strictProduct = false;
 
   // ── 작업표 줄에 병합 ────────────────────────────────────────────────
   //   ★ 행 잠금(FOR UPDATE) — 같은 줄에 동시에 두 건이 들어오는 경우는 claim 이 막지만,
@@ -796,6 +844,21 @@ async function writeOrderToWorktable({
         }
       }
       if (!cur.length) {
+        /* ★★ 결정 346 — 상품이 정해진 주문이 **새 줄을 붙일 수 있는 주문**(정원 밖 허용 판정 단일 출처 + 무시트 탭)이면
+             다른 상품으로 계획된 빈 줄을 가져가지 않는다(엄격 규칙). 판정은 아래 이어붙이기와 같은 함수·같은 탭 조건 —
+             붙일 수 없는데 엄격하게 고르면 막다른 길(no_open_slot)이 되므로 둘 다 참일 때만. 결과는 아래에서 다시 쓴다. */
+        const pickProduct = scheduledOptionKey ? '' : String(orderData.selectedProduct || '').trim();
+        if (pickProduct && process.env.WORKTABLE_SLOT_PRODUCT_GUARD !== '0') {
+          overflowAllowed = await _canAppendConfirmedOverflowOrder(client, orderSubmissionId, {
+            allowMissingQueueRecoveryOverflow, allowConfirmedCampaignOverflow, workboardId,
+          });
+          if (overflowAllowed) {
+            const { rows: stc } = await client.query(
+              `SELECT COALESCE(sheetless, FALSE) AS sheetless FROM tab_configs
+                WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`, [sheetId, tabName]);
+            strictProduct = !!(stc.length && stc[0].sheetless);
+          }
+        }
         /* ★★ 빈 줄 고르기(2026-09-26 · 결정 182) — 옵션 일치 → **오늘 날짜 줄 → 날짜 없는·지난 줄 →
            앞날 줄(가까운 날부터)** 순. 종전에는 번호(seq) 순이라 오늘 산 사람이 앞날 줄을 먹고, 그 줄의
            날짜를 오늘로 바꿔 써서 날짜별 줄 수가 주문마다 틀어졌다. 판정은 `_pickOpenSlot` 한 곳.
@@ -803,6 +866,7 @@ async function writeOrderToWorktable({
         const picked = await _pickOpenSlot(client, {
           sheetId, tabName, workboardId, scheduledOptionKey, orderSubmissionId, headers,
           productPick: scheduledOptionKey ? '' : String(orderData.selectedProduct || '').trim(),
+          strictProduct,
           where: `
             WHERE ${openSlotRowSql('cp', { sheet: '$1', tab: '$2', workboard: '$3' })}
               AND (
@@ -826,6 +890,8 @@ async function writeOrderToWorktable({
         freshClaim = cur.length > 0;
         claimedProductKey = picked.productWrite || '';
         claimedRowOverlay = picked.rowOverlay == null ? null : String(picked.rowOverlay);
+        claimedPlanFrom = picked.planFrom || '';
+        strictAppendProduct = picked.strict ? (picked.productWrite || '') : '';
         relabelFrom = picked.relabelFrom;
         stagedFrom = picked.stagedFrom || '';
       }
@@ -833,7 +899,7 @@ async function writeOrderToWorktable({
         /* ★★ 일반 주문은 준비된 정원 안의 빈 슬롯만 쓴다. 예외는 외부모집 수동 확정 주문,
            최근 48시간 내 큐 누락 복구 주문, 서버가 확정한 참여형 구매뿐이며 원장 필드와
            캠페인 상태를 같은 트랜잭션에서 다시 확인한다. */
-        const confirmedOverflow = await _canAppendConfirmedOverflowOrder(client, orderSubmissionId, {
+        const confirmedOverflow = overflowAllowed != null ? overflowAllowed : await _canAppendConfirmedOverflowOrder(client, orderSubmissionId, {
           allowMissingQueueRecoveryOverflow, allowConfirmedCampaignOverflow, workboardId,
         });
         if (!confirmedOverflow) {
@@ -858,6 +924,8 @@ async function writeOrderToWorktable({
         if (!appended) { if (!suppliedClient) await client.query('ROLLBACK'); return { ok: false, reason: 'append_failed' }; }
         logger.warn(`[sheetlessOrder] 확정된 초과 주문을 정원 밖에 기록 tab=${tabName} seq=${appended.seq} os=${orderSubmissionId}`);
         cur = [appended];
+        // ★ 결정 346 — 엄격 규칙으로 붙인 새 줄: 상품 칸·배정 표식을 산 상품(작업표 표기)으로 적는다.
+        if (strictAppendProduct) { freshClaim = true; claimedProductKey = strictAppendProduct; claimedRowOverlay = null; claimedPlanFrom = ''; }
       }
       seq = Number(cur[0].seq);
     }
@@ -888,6 +956,19 @@ async function writeOrderToWorktable({
     /* ★ 처음 채우는 빈 줄 + 상품 단위 선택(상품 표기 2종 이상으로 짝지어진 경우)일 때만 상품 칸을
          실제 선택으로 덮는다. 값은 작업표 표기(claimedProductKey) — 표기를 섞지 않는다. */
     const productOverwrite = freshClaim && !!claimedProductKey;
+    /* ★ 결정 346 — 다른 상품으로 계획된 빈 줄을 쓴 경우, 옵션 칸에 **옛 상품 이름과 정확히 같은 값**이 적혀 있으면 산 상품으로 바꾼다
+         (옵션 이름 바꿔 쓰기와 같은 규율 — 시스템이 배분한 값만, 다른 작업지시가 적힌 칸은 그대로 · 결정 018). */
+    if (productOverwrite && claimedPlanFrom && claimedPlanFrom !== claimedProductKey
+        && process.env.WORKTABLE_SLOT_PRODUCT_GUARD !== '0') {
+      const { optionWriteColumns } = require('./orderLedger.service');
+      const relabeled = { ...currentRowJson };
+      for (const i of optionWriteColumns(headers)) {
+        const h = headers[i];
+        if (h && String(relabeled[h] == null ? '' : relabeled[h]).trim() === claimedPlanFrom) relabeled[h] = claimedProductKey;
+      }
+      currentRowJson = relabeled;
+      logger.info(`[sheetlessOrder] 다른 상품 빈 줄 상품 이름 바꿔 쓰기 tab=${tabName} seq=${cur[0] && cur[0].seq} ${claimedPlanFrom} → ${claimedProductKey} os=${orderSubmissionId}`);
+    }
     const patchOrderData = productOverwrite ? { ...orderData, selectedProduct: claimedProductKey } : orderData;
     const built = buildRowPatch(headers, patchOrderData, currentRowJson, { productOverwrite });
     optionSuppressed = built.optionSuppressed;

@@ -392,12 +392,42 @@ async function tabOptionChoices(db, { sheetId, tabName } = {}, now = new Date())
   }
 }
 
+/**
+ * ★ 결정 344 — 수동제출 동시진행 판정(서비스 최종 방어 · 라우트 사전 판정 공용 · 사본 금지).
+ *   판정 = 공용 lifecycle 발견기(discoverDualScope) 단일 출처 — 리뷰어 구매양식(submit.routes 결정 338)과 같은 함수.
+ *   대상 = 작업표 좌표(sheetId/tabName/gid) + 들어온 공고 id(campaignId·optionCampaignId) 중 하나라도 동시진행이면 거절.
+ *   ★★ fail-closed(판정 예외 = 거절): 리뷰어 경로는 라이브 핫패스라 판정 실패를 종전 경로로 접지만(fail-open),
+ *     여기는 관리자가 대리로 넣는 돈 걸린 경로다 — 잘못 열리면 동시진행 공고에 한쪽 금액짜리 보통 주문이 생겨
+ *     지급·정원이 어긋나고(운영 실사고 3건), 막히면 사람이 잠시 뒤 다시 누르면 된다. 그래서 반대로 접는다.
+ * @returns {Promise<null|object>} null = 통과, 객체 = 그대로 돌려줄 거절 결과(쓰기 0)
+ */
+async function manualDualBlock(db, { sheetId, tabName, gid, campaignId, optionCampaignId } = {}) {
+  const dual = require('../utils/dualPhase1');
+  const targets = [];
+  if (sheetId && tabName) targets.push({ sheetId: String(sheetId), tabName: String(tabName), tabGid: String(gid || '') });
+  for (const id of [campaignId, optionCampaignId]) {
+    if (id != null && String(id).trim()) targets.push({ campaignId: String(id) });
+  }
+  if (!targets.length) return null;
+  try {
+    const scope = await require('./dualChannelLifecycle.service').discoverDualScope(db, targets);
+    return scope.campaignIds.length > 0 ? dual.manualDualUnsupportedResult() : null;
+  } catch (e) {
+    logger.warn(`[manual-order] 동시진행 판정 실패 → 거절(fail-closed): ${e.message}`);
+    return dual.manualDualCheckFailedResult();
+  }
+}
+
 async function submitExternalOrder({
   sheetId, tabName, gid, fields, campaignId, optionKey, targetApplicationId, adminName, allowOverCapacity = true, force = false,
   allowOverDaily = false, allowRepurchase = false,
   repurchaseDaysOverride,
   optionCampaignId = null,   // ★ 결정 211: 작업보드 경로(campaignId 없음)에서 고른 상품을 풀이할 연결 공고(정원 차감·신청 생성 없음)
 }) {
+  // ★ 결정 344 — 맨 앞(리뷰어 자동등록·원장·큐·작업표 쓰기보다 앞): 동시진행 작업표·공고면 쓰기 0건으로 거절(fail-closed).
+  //   라우트 사전 판정을 건너뛴 직접 호출(낡은 화면·다른 입구)도 여기서 다시 걸린다.
+  const dualBlocked = await manualDualBlock(pool, { sheetId, tabName, gid, campaignId, optionCampaignId });
+  if (dualBlocked) return dualBlocked;
   const warnings = [];
   const f = fields || {};
   const phoneDigits = digits(f.phone);
@@ -747,6 +777,7 @@ function worktableRowOf(done) {
 module.exports = {
   tabOptionChoices,
   submitExternalOrder,
+  manualDualBlock,
   worktableRowOf,
   dailyRemainingForCampaign,
   ensureExternalReviewer,
