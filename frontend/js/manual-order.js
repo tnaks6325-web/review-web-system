@@ -277,6 +277,7 @@
 #moOvl .mo-seg button:last-child{box-shadow:none}
 #moOvl .mo-seg button.on{background:var(--mo-accent-bg);color:var(--mo-accent);font-weight:600}
 #moOvl .mo-seg.need{box-shadow:0 0 0 1px var(--mo-red)}
+#moOvl .mo-in.onum{font-size:12px;font-variant-numeric:tabular-nums}   /* 네이버 주문번호 16자리가 한 칸에 들게 */
 #moOvl .mo-tbl td.ro{color:var(--mo-text);font-variant-numeric:tabular-nums}
 /* 휴대폰 — 아래에서 올라오는 시트 · 표는 옆으로 밀기 · 입력 36px(글자 16px, 확대 방지) · 주요 단추 44px */
 @media screen and (max-width:768px){
@@ -287,6 +288,7 @@
   #moOvl .mo-tbl td{height:44px}
   #moOvl .mo-in{height:36px;font-size:16px}
   #moOvl .mo-in.raw{font-size:16px}
+  #moOvl .mo-in.onum{font-size:16px}   /* 휴대폰 확대 방지(16px) — 주문번호 칸은 옆으로 밀어 본다 */
   #moOvl .mo-sel{height:32px;font-size:16px}
   #moOvl .mo-ib{width:32px;height:32px;font-size:14px}
   #moOvl .mo-cap{height:32px}
@@ -832,7 +834,7 @@
       const kept = opt && opt.kept && opt.kept(it, ch, key);
       const need = !v && !kept;
       const ph = kept ? (key === 'paidAmount' && _amtOk(it.item && it.item.price) ? it.item.price.toLocaleString('ko-KR') : '기존 값') : (key === 'orderNum' ? '주문번호' : '금액');
-      const cls = 'mo-in' + (key === 'paidAmount' ? ' num' : '') + (need ? ' miss' : '') + (sl.auto && sl.auto[key] ? ' fixv' : '');
+      const cls = 'mo-in' + (key === 'paidAmount' ? ' num' : ' onum') + (need ? ' miss' : '') + (sl.auto && sl.auto[key] ? ' fixv' : '');
       return `<td class="${key === 'orderNum' ? 'chs' : 'r'}"><input class="${cls}" id="moF-${it.uid}-${ch}_${key}" value="${esc(v)}" title="${esc(v || (kept ? '비워 두면 기존 주문의 값을 그대로 씁니다' : ''))}"
         placeholder="${ph}" aria-label="${i + 1}번 줄 ${nm} ${key === 'orderNum' ? '주문번호' : '금액'}" inputmode="${key === 'paidAmount' ? 'numeric' : 'text'}" autocomplete="off" spellcheck="false"
         oninput="ManualOrder.dualEdit(${i},'${ch}','${key}',this.value)" onfocus="ManualOrder.selectRow(${i},'${ch}')" onkeydown="ManualOrder.keyNav(event,${i})"></td>`;
@@ -865,7 +867,7 @@
   function dualCols(opt) {
     const L = [];
     CHS.forEach(([c, nm]) => {
-      L.push({ k: c + '_on', label: '주문번호', w: 120, grp: nm, grpN: 3, cls: 'chs', cell: dualInCell(c, 'orderNum', opt) });
+      L.push({ k: c + '_on', label: '주문번호', w: 136, grp: nm, grpN: 3, cls: 'chs', cell: dualInCell(c, 'orderNum', opt) });
       L.push({ k: c + '_amt', label: '금액', w: 72, grp: nm, cls: 'r', cell: dualInCell(c, 'paidAmount', opt) });
       L.push({ k: c + '_cap', label: '캡처', w: 80, grp: nm, cell: dualCapCell(c, opt) });
     });
@@ -1092,7 +1094,7 @@
 
   /** ★ 결정 349 화면 — 동시진행 모드 칸. 칸 합이 PC 창(1392px)보다 넓다(구매처 칸 6개) → 표는 옆으로 밀고 번호·양식(왼쪽)·확인(오른쪽)은 고정.
    *  연락처 118·계좌 128·아이디 74 는 일반 모드와 같은 폭(줄이면 값이 잘린다) — 늘 잘림 + 마우스 올림인 양식·주소와 리뷰어·연결·은행·예금주 칸에서 덜었다.
-   *  동시진행 모드 폭 상한 = 1600(가드 — 넘으면 밀어야 할 거리가 커진다). 상품 칸은 없다(대리 묶음 입구가 옵션을 받지 않는다). */
+   *  네이버 주문번호(16자리)가 잘리지 않게 주문번호 칸 136·글자 12px · 동시진행 모드 폭 상한 = 1600(가드 — 넘으면 밀어야 할 거리가 커진다). 상품 칸은 없다(대리 묶음 입구가 옵션을 받지 않는다). */
   function dualTableCols() {
     const L = [
       { k: 'no', label: '', w: 30, cls: 'stk r', cell: (it, i) => `<td class="no stk">${i + 1}</td>` },
@@ -1110,7 +1112,7 @@
     ];
     if (CTX && CTX.campaignId) L.push({ k: 'app', label: '참여 신청', w: 156, cell: appCell });
     L.push(...dualCols());
-    L.push({ k: 'st', label: '확인', w: 124, cls: 'stkr', cell: (it, i) => {
+    L.push({ k: 'st', label: '확인', w: 112, cls: 'stkr', cell: (it, i) => {
       const del = (ROWS.length === 1 || (ROWS[ROWS.length - 1] === it && _blank(it) && !_hasCap(it))) ? ''
         : `<button type="button" class="mo-ib del" title="${i + 1}번 줄 삭제" aria-label="${i + 1}번 줄 삭제" onclick="ManualOrder.delRow(${i})"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>`;
       return `<td class="stkr"><div class="mo-stw"><div id="moSt-${it.uid}">${stCellInner(it)}</div>${del}</div></td>`;
@@ -1901,7 +1903,7 @@
     ];
     const total = C.reduce((a, c) => a + c.w, 0);
     const n = CROWS.length;
-    const bar = `<div class="mo-bar" role="status"><span class="mo-dtag">보완 필요 <span class="n">${n}</span>건</span>
+    const bar = `<div class="mo-bar" role="status"><span class="mo-dtag">보완 필요 ${n}건</span>
       <span>동시진행 전에 수동제출로 들어간 보통 주문 — 빠진 구매처를 넣으면 작업표 줄은 그대로 두고 금액을 두 금액 합으로 바꿉니다</span></div>`;
     shell(`
       <div class="mo-tw">

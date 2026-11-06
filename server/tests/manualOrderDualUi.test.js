@@ -163,7 +163,7 @@ test('349 화면 ③ 보완 목록: 기존 쪽을 고르고 빠진 쪽만 넣으
   open(B); await sleep(10);
   B.M.openComplete();
   const h = B.html();
-  assert.ok(/보완 필요 <span class="n">2<\/span>건/.test(h) && h.includes('3번') && h.includes('…5678') && h.includes('10,000'));
+  assert.ok(/보완 필요 2건/.test(h) && h.includes('3번') && h.includes('…5678') && h.includes('10,000'));
   assert.ok(/이미 입금 회차에 담긴 주문이라 보완할 수 없습니다/.test(h), '지급된 주문은 막고 이유를 보인다');
   assert.ok(/기존 주문\(금액·캡처\)이 네이버인지 쿠팡인지 고르세요/.test(h));
   B.M.pickBase(0, 'coupang');
