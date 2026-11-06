@@ -418,6 +418,61 @@ async function manualDualBlock(db, { sheetId, tabName, gid, campaignId, optionCa
   }
 }
 
+/** ⓪ 중복 접수 방지(24시간 같은 연락처 · 같은 주문번호+연락처) — 외부모집 수동제출과 동시진행 직원 대리 묶음 제출(결정 349)이
+ *  같은 판정을 쓴다(사본 금지). 막을 때는 결과 객체, 통과면 null. 조회 실패는 경고만 남기고 통과(종전 동작). */
+async function externalDuplicateGuard(db, { sheetId, tabName, gid, campaignId, phone, orderNum, warnings = [] } = {}) {
+  const p8 = digits(phone).slice(-8);
+  try {
+    const { rows: dupRows } = await db.query(
+      `SELECT id, submitted_at FROM order_submissions
+        WHERE sheet_id = $1 AND tab_name = $2 AND phone = $3
+          AND deleted_at IS NULL AND submitted_at > NOW() - interval '24 hours'
+        ORDER BY submitted_at DESC LIMIT 1`,
+      [sheetId, tabName, phone || '']);
+    if (dupRows.length) {
+      return {
+        ok: false, duplicate: true,
+        error: `같은 연락처의 주문이 24시간 내에 이미 접수돼 있습니다 (제출 ${new Date(dupRows[0].submitted_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })})`,
+      };
+    }
+  } catch (e) { warnings.push('중복 확인 실패(제출은 계속): ' + e.message); }
+
+  // ⓪-0.5 같은 구매의 이중 등록 방지 (2026-09-30 모기위키 사고 — 결정 193).
+  //   리뷰어가 앱(모집공고)으로 낸 주문은 `campaign:<공고ID>` 좌표에 저장돼 위 24시간 확인(작업표 좌표만 봄)에
+  //   안 잡힌다. 그래서 앱으로 이미 참여한 사람을 외부모집으로 **같은 주문번호** 로 다시 등록하면 기록 2건·표 줄 1개가
+  //   되어 총원 마감이 표보다 먼저 닫혔다. → 주문번호(6자리 이상) + 연락처 끝 8자리가 같은 살아 있는 기록을
+  //   **이 작업표 좌표 + 이 작업표에 연결된 공고 좌표** 전체에서 찾는다(기간 무관 — 같은 구매는 언제 와도 같은 구매).
+  //   ★ force(중복 경고 확인 후 재시도)로만 통과 — 기존 24시간 중복과 같은 계약.
+  const onum = digits(orderNum || '');
+  if (onum.length >= 6 && p8.length === 8) {
+    try {
+      const { rows: sameBuy } = await db.query(
+        `SELECT os.submitted_at, (os.sheet_id LIKE 'campaign:%') AS via_app
+           FROM order_submissions os
+          WHERE os.deleted_at IS NULL
+            AND os.dedup_key = $3
+            AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = $4
+            AND ((os.sheet_id = $1 AND os.tab_name = $2)
+              OR os.sheet_id = 'campaign:' || NULLIF($5, '')
+              OR os.sheet_id IN (SELECT 'campaign:' || rc.id FROM recruit_campaigns rc
+                                  WHERE rc.linked_sheet_id = $1
+                                    AND (rc.linked_tab_name = $2
+                                         -- 탭 이름이 바뀌어 공고의 연결 탭 이름이 옛 이름인 경우(gid 폴백 · 빈 gid 는 절 미발동)
+                                         OR (NULLIF($6, '') IS NOT NULL AND NULLIF(rc.linked_tab_gid, '') = $6))))
+          ORDER BY os.submitted_at DESC LIMIT 1`,
+        [sheetId, tabName, 'num:' + onum, p8, campaignId ? String(campaignId) : '', gid ? String(gid) : '']);
+      if (sameBuy.length) {
+        const at = new Date(sameBuy[0].submitted_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+        return {
+          ok: false, duplicate: true, sameOrderNum: true,
+          error: `같은 주문번호·연락처로 이미 접수된 구매가 있습니다${sameBuy[0].via_app ? ' (리뷰어가 앱으로 직접 참여)' : ''} — 제출 ${at}. 다시 등록하면 한 구매가 두 명으로 세어집니다`,
+        };
+      }
+    } catch (e) { warnings.push('같은 주문번호 확인 실패(제출은 계속): ' + e.message); }
+  }
+  return null;
+}
+
 async function submitExternalOrder({
   sheetId, tabName, gid, fields, campaignId, optionKey, targetApplicationId, adminName, allowOverCapacity = true, force = false,
   allowOverDaily = false, allowRepurchase = false,
@@ -441,54 +496,8 @@ async function submitExternalOrder({
   //    배치가 끊기면 무엇이 들어갔는지 모른다). 주문번호가 없는 건이 대부분이라 dedupKey가
   //    `osid:<uuid>` 폴백으로 매번 새 값이 되어 원장 자체로는 중복을 못 막는다.
   if (!force) {
-    try {
-      const { rows: dupRows } = await pool.query(
-        `SELECT id, submitted_at FROM order_submissions
-          WHERE sheet_id = $1 AND tab_name = $2 AND phone = $3
-            AND deleted_at IS NULL AND submitted_at > NOW() - interval '24 hours'
-          ORDER BY submitted_at DESC LIMIT 1`,
-        [sheetId, tabName, f.phone || '']);
-      if (dupRows.length) {
-        return {
-          ok: false, duplicate: true,
-          error: `같은 연락처의 주문이 24시간 내에 이미 접수돼 있습니다 (제출 ${new Date(dupRows[0].submitted_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })})`,
-        };
-      }
-    } catch (e) { warnings.push('중복 확인 실패(제출은 계속): ' + e.message); }
-
-    // ⓪-0.5 같은 구매의 이중 등록 방지 (2026-09-30 모기위키 사고 — 결정 193).
-    //   리뷰어가 앱(모집공고)으로 낸 주문은 `campaign:<공고ID>` 좌표에 저장돼 위 24시간 확인(작업표 좌표만 봄)에
-    //   안 잡힌다. 그래서 앱으로 이미 참여한 사람을 외부모집으로 **같은 주문번호** 로 다시 등록하면 기록 2건·표 줄 1개가
-    //   되어 총원 마감이 표보다 먼저 닫혔다. → 주문번호(6자리 이상) + 연락처 끝 8자리가 같은 살아 있는 기록을
-    //   **이 작업표 좌표 + 이 작업표에 연결된 공고 좌표** 전체에서 찾는다(기간 무관 — 같은 구매는 언제 와도 같은 구매).
-    //   ★ force(중복 경고 확인 후 재시도)로만 통과 — 기존 24시간 중복과 같은 계약.
-    const onum = digits(f.orderNum || '');
-    if (onum.length >= 6 && p8.length === 8) {
-      try {
-        const { rows: sameBuy } = await pool.query(
-          `SELECT os.submitted_at, (os.sheet_id LIKE 'campaign:%') AS via_app
-             FROM order_submissions os
-            WHERE os.deleted_at IS NULL
-              AND os.dedup_key = $3
-              AND RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = $4
-              AND ((os.sheet_id = $1 AND os.tab_name = $2)
-                OR os.sheet_id = 'campaign:' || NULLIF($5, '')
-                OR os.sheet_id IN (SELECT 'campaign:' || rc.id FROM recruit_campaigns rc
-                                    WHERE rc.linked_sheet_id = $1
-                                      AND (rc.linked_tab_name = $2
-                                           -- 탭 이름이 바뀌어 공고의 연결 탭 이름이 옛 이름인 경우(gid 폴백 · 빈 gid 는 절 미발동)
-                                           OR (NULLIF($6, '') IS NOT NULL AND NULLIF(rc.linked_tab_gid, '') = $6))))
-            ORDER BY os.submitted_at DESC LIMIT 1`,
-          [sheetId, tabName, 'num:' + onum, p8, campaignId ? String(campaignId) : '', gid ? String(gid) : '']);
-        if (sameBuy.length) {
-          const at = new Date(sameBuy[0].submitted_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
-          return {
-            ok: false, duplicate: true, sameOrderNum: true,
-            error: `같은 주문번호·연락처로 이미 접수된 구매가 있습니다${sameBuy[0].via_app ? ' (리뷰어가 앱으로 직접 참여)' : ''} — 제출 ${at}. 다시 등록하면 한 구매가 두 명으로 세어집니다`,
-          };
-        }
-      } catch (e) { warnings.push('같은 주문번호 확인 실패(제출은 계속): ' + e.message); }
-    }
+    const dup = await externalDuplicateGuard(pool, { sheetId, tabName, gid, campaignId, phone: f.phone, orderNum: f.orderNum, warnings });
+    if (dup) return dup;
   }
 
   // ⓪-1.5 재참여(재구매) 기간 제한 — **"같은 작업(탭)" 기준**(사용자 확정 2026-08-24). 위 24시간
@@ -778,6 +787,7 @@ module.exports = {
   tabOptionChoices,
   submitExternalOrder,
   manualDualBlock,
+  externalDuplicateGuard,
   worktableRowOf,
   dailyRemainingForCampaign,
   ensureExternalReviewer,

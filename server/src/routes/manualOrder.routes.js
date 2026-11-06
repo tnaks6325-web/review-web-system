@@ -298,6 +298,37 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
 });
 _handlers.manualOrderSubmit = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
+/* ── 결정 349: 네이버·쿠팡 동시진행 — 직원 대리 묶음 제출 · 수동제출 보통 주문 보완 ──
+   ★ 결정 344 차단(위 preview/submit 의 manualDualBlock)은 그대로 둔다 — 동시진행은 **이 두 입구로만** 받는다.
+     반대로 동시진행이 아닌 작업표는 서비스가 409 dual_channel_required 로 거절한다.
+   ★ 권한 = 수동제출과 같은 2단(원본 adminOrMaster · Track B 위임은 내부인 + AE/편집 허용 admin).
+   ★ 준비 상태가 닫히면 409 dual_channel_not_ready(서비스 맨 앞). */
+function _dualStaffFail(res, next, e) {
+  if (e && e.code && (Number.isInteger(e.status) || e.code === 'dual_channel_not_ready')) {
+    return res.status(Number.isInteger(e.status) ? e.status : 409).json({ ok: false, code: e.code, error: e.message, message: e.message });
+  }
+  return next(e);
+}
+function _dualStaff(req) { const a = req.admin || req.user || {}; return { name: a.name || a.username || '', id: a.id || null }; }
+router.post('/dual/submit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const r = await require('../services/dualStaffSubmission.service').submitStaffBundle({
+      sheetId: b.sheetId, tabName: b.tabName, gid: b.gid || '', campaignId: b.campaignId, fields: b.fields || {},
+      naver: b.naver || {}, coupang: b.coupang || {}, targetApplicationId: b.targetApplicationId,
+      force: b.force === true, allowRepurchase: b.allowRepurchase === true, allowOverDaily: b.allowOverDaily === true,
+      staff: _dualStaff(req),
+    });
+    if (r.ok && !r.idempotent) {
+      try { emitOrderSubmit({ sheetId: b.sheetId, tabName: b.tabName, workboardId: null, orderer: (b.fields || {}).recipient || '', recipient: '',
+        dbSaved: true, sheetsWritten: false, queued: false, manual: true }); } catch (_) { /* 알림 실패는 접수에 영향 없음 */ }
+    }
+    res.json(r);
+  } catch (e) { _dualStaffFail(res, next, e); }
+});
+_handlers.manualOrderDualSubmit = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다
+
+
 // ★ 이름을 빼거나 바꾸면 trackB 가 기동 시 바로 실패한다(fail-closed) — 옛 공개 경로를 지워도 Track B 는 그대로다.
 router.handlers = Object.freeze(_handlers);
 

@@ -374,8 +374,9 @@ console.log('\nC. 라우트 권한');
     names: l.route.stack.map(s => s.name),
   }));
   const find = p => layers.find(l => l.path === p);
+  // 결정 349: 동시진행 직원 대리 묶음 제출·보완 입구가 더해졌다(같은 2단 권한 — C2 가 같이 본다).
   ok('C1 라우트가 등록돼 있다(미배선 PII 표면 없음 — reviewer-search 는 제거)',
-    layers.length === 2 && !!find('/preview') && !!find('/submit') && !find('/reviewer-search'));
+    layers.length === 3 && !!find('/preview') && !!find('/submit') && !!find('/dual/submit') && !find('/reviewer-search'));
   ok('C2 ★ 전부 authMiddleware + adminOrMasterMiddleware 뒤에 있다',
     layers.every(l => l.names.includes('authMiddleware') && l.names.includes('adminOrMasterMiddleware')));
   ok('C3 제출은 POST 전용', find('/submit').methods.join() === 'post');
