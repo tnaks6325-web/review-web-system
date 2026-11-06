@@ -124,9 +124,10 @@ ok('⑤-4 미리보기 iframe에는 홀드 문맥(app·holdToken) 미전달', ((
   const m = camp.match(/if\(PREVIEW\)\{ qp\.set\('preview','1'\); \}/);
   return !!m && !/qp\.set\('preview','1'\);\s*qp\.set\('app'/.test(camp);
 })());
-ok('⑤-5 미리보기는 폼 입력값을 저장/복원하지 않음(_EMBED_FORM_KEY 공란)',
+ok('⑤-5 미리보기는 폼 입력값을 저장/복원하지 않음(_EMBED_FORM_KEY 공란 → 아이디 초안 키도 공란)',
   /!_EMBED_CTX\.preview && _EMBED_CTX\.app\) \? \("embedForm_"/.test(sapp)
-  && /if \(!_EMBED_CTX \|\| !_EMBED_FORM_KEY\) return;/.test(sapp));
+  && /const _EMBED_FORM_ID_KEY = _EMBED_FORM_KEY \? \(_EMBED_FORM_KEY \+ ":id"\) : "";/.test(sapp)
+  && (sapp.match(/if \(!_EMBED_CTX \|\| !_EMBED_FORM_ID_KEY\) return;/g) || []).length === 2);
 ok('⑤-6 로그인 강제 우회는 미리보기 한정(리뷰어는 기존 게이트 유지)',
   /if \(_PREVIEW_MODE\) \{\s*\n\s*authSession = \{ name: "미리보기", phone8: "" \};\s*\n\s*\}/.test(sapp)
   && /if \(!authSession \|\| !authSession\.name\) \{/.test(sapp));
