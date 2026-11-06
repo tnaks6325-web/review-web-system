@@ -5,10 +5,11 @@
    기존에는 관리자가 구글시트에 직접 수기 입력했고, 그게 "유령 written"(DB=성공/시트=없음)
    사고의 유발 조건이자 모집 정원 누락·리뷰어 미등록의 원인이었다.
 
-   진입점 3곳이 이 모듈 하나를 쓴다(사본을 두면 화면마다 규칙이 어긋난다):
-     ① 작업보드(workdesk) 탭 단위   ② 참여형 관제 패널(#ccMoBtn)   ③ 리뷰어 홈 참여형 카드
-   ③은 **진짜 admin_token 보유자에게만** 노출한다 — 리뷰어앱 공고수정 스코프 토큰
-   (via:'reviewer_campaign')은 이 API에 도달할 수 없어(403) 버튼을 보여주면 막다른 길이 된다.
+   진입점 2곳이 이 모듈 하나를 쓴다(사본을 두면 화면마다 규칙이 어긋난다):
+     ① 작업보드(workdesk) 탭 단위(openExternalManualOrder)   ② 참여형 관제 패널(#ccMoBtn)
+   리뷰어 홈(index.html)은 이 모듈을 싣지 않아 칩이 없다(의도 — campaign-cards.js moChip 주석: 옛 입구
+   /api/manual-order 는 결정 186 에서 제거됐고 모듈은 /api/trackb/manual-order 로 재기준하는 화면만 싣는다).
+   칩 코드는 window.ManualOrder 가 있을 때만 + 진짜 admin_token 보유자에게만 그린다(스코프 토큰 403 막다른 길 금지).
 
    ★ 결정 347(2026-11-06 사용자 확정) — 한 화면 표:
      · 한 줄 = 한 사람 = 입력칸 하나(슬래시양식 한 줄). 맨 아래엔 늘 빈 줄 하나.
@@ -176,7 +177,8 @@
 #moOvl .mo-sel{display:block;width:100%;height:24px;margin:0;padding:0 4px;font:inherit;font-size:12px;color:var(--mo-text);background:var(--mo-bg);
   border:0;border-radius:5px;box-shadow:var(--mo-btn-shadow);min-width:0}
 #moOvl .mo-sel.need{box-shadow:0 0 0 1px var(--mo-red);color:var(--mo-red)}
-#moOvl .mo-ack{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--mo-orange);cursor:pointer;white-space:nowrap}
+#moOvl .mo-cellf .mo-sel{flex:1 1 auto;min-width:96px}   /* 초과 확인 체크가 옆에 붙어도 고르는 칸이 찌그러지지 않게 */
+#moOvl .mo-ack{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--mo-orange);cursor:pointer;white-space:nowrap;flex:none}
 #moOvl .mo-ack input{margin:0}
 #moOvl .mo-auto{font-size:12px;color:var(--mo-text-2)}
 /* 캡처 칸 — 작은 미리보기 + 빼기 · 비었으면 받는 자리 */
@@ -221,6 +223,8 @@
   #moOvl .mo-btn{height:44px;line-height:44px;font-size:15px;padding:0 16px}
   #moOvl .mo-ft .mo-tip{display:none}
   #moOvl .mo-bar .hint{display:none}
+  #moOvl col.mo-c-opt.ack{width:236px !important}   /* 초과 확인 줄이 있으면 상품 칸을 넓힌다(표는 옆으로 밀기 · 한 줄 유지) */
+  #moOvl .mo-ack input{width:20px;height:20px}
   #moOvl .mo-tbl th.stk2,#moOvl .mo-tbl td.stk2,#moOvl .mo-tbl th.stkr,#moOvl .mo-tbl td.stkr{position:static;box-shadow:inset 0 -0.5px 0 var(--mo-line-2)}
 }
 `;
@@ -235,6 +239,7 @@
     if (!CTX.sheetId || !CTX.tabName) { alert('연결된 작업(시트·탭) 정보가 없어 수동제출을 열 수 없습니다.'); return; }
     // ★ 새로 열면 줄·캡처를 비운다(다른 탭 캡처 혼입 금지)
     ROWS = []; OPTS = []; ACTIVE = null; DIRTY.clear(); clearTimeout(CLS_TIMER); CLS_TIMER = null; BUSY = false;
+    IME = false; PAINT_LATER = false;
     CTX.view = 'table'; CTX.apps = null;
     ROWS.push(newRow(''));
     let ovl = document.getElementById('moOvl');
@@ -243,6 +248,8 @@
       ovl.id = 'moOvl'; ovl.className = 'mo-ovl';
       // 뒤 배경을 눌러 닫는 것은 아무것도 안 넣었을 때만 — 붙여 둔 10줄이 실수로 사라지지 않게
       ovl.addEventListener('click', e => { if (e.target === ovl && (!CTX || CTX.view === 'result' || !_filled().length)) close(); });
+      ovl.addEventListener('compositionstart', _onCompStart, true);
+      ovl.addEventListener('compositionend', _onCompEnd, true);
       document.body.appendChild(ovl);
     }
     ovl.style.display = 'flex';
@@ -260,7 +267,7 @@
     const o = document.getElementById('moOvl');
     if (!o) return;
     const bar = (opt && opt.bar) || '';
-    o.innerHTML = `<div class="mo-box${opt && opt.narrow ? ' narrow' : ''}" role="dialog" aria-modal="true" aria-label="외부모집 수동제출">
+    const html = `<div class="mo-box${opt && opt.narrow ? ' narrow' : ''}" role="dialog" aria-modal="true" aria-label="외부모집 수동제출">
       <div class="mo-hd">
         <span class="ttl">외부모집 수동제출</span>
         <span class="sub">${esc(CTX.title || CTX.tabName)}${CTX.campaignId ? ' · 참여형(정원 차감)' : ''}</span>
@@ -271,27 +278,76 @@
       <div class="mo-bd" id="moBd">${bodyHtml}</div>
       <div class="mo-ft">${footHtml}</div>
     </div>`;
+    if (opt && opt.keepEl && _morphKeep(o, html, opt.keepEl)) return true;
+    o.innerHTML = html;
+    return false;
+  }
+  /** 다시 그리되 **입력 중인 칸(DOM 요소)은 그대로 둔다** — 그 칸의 조상 줄기만 남기고 나머지(옆 칸·다른 줄·머리·바닥)는
+   *  새 것으로 바꾼다. 포커스·커서·입력기 상태가 그 요소에 붙어 있어, 요소를 새로 만들면 조합 경계(끝→다음 글자 시작)에서
+   *  글자가 깨지거나 포커스가 튄다(실브라우저 검증 2026-11-06). 구조가 달라 못 하면 false → 종전처럼 통째로 그린다. */
+  function _morphKeep(o, html, keepEl) {
+    try {
+      if (!keepEl || !keepEl.id || typeof o.contains !== 'function' || !o.contains(keepEl)) return false;
+      const tpl = document.createElement('div');
+      tpl.innerHTML = html;
+      const nk = tpl.querySelector('[id="' + keepEl.id + '"]');
+      if (!nk || nk.tagName !== keepEl.tagName || nk.type !== keepEl.type) return false;
+      const oc = [], nc = [];
+      for (let e = keepEl; e && e !== o; e = e.parentNode) oc.unshift(e);
+      for (let e = nk; e && e !== tpl; e = e.parentNode) nc.unshift(e);
+      if (oc.length !== nc.length || oc.some((e, k) => e.tagName !== nc[k].tagName)) return false;
+      let op = o, np = tpl;
+      for (let d = 0; d < oc.length; d++) {
+        const a = oc[d], b = nc[d];
+        const kids = Array.from(np.childNodes);
+        const at = kids.indexOf(b);
+        Array.from(op.childNodes).forEach(n => { if (n !== a) op.removeChild(n); });
+        kids.slice(0, at).forEach(n => op.insertBefore(n, a));
+        kids.slice(at + 1).forEach(n => op.appendChild(n));
+        Array.from(a.attributes).forEach(x => { if (!b.hasAttribute(x.name)) a.removeAttribute(x.name); });
+        Array.from(b.attributes).forEach(x => { if (a.getAttribute(x.name) !== x.value) a.setAttribute(x.name, x.value); });
+        op = a; np = b;
+      }
+      return true;
+    } catch (_) { return false; }
   }
 
   // ── 줄 입력 · 붙여넣기 ─────────────────────────────────────
   /** 한 줄 칸에 글을 쓸 때 — 잠깐 멈추면 나눈다(붙여넣기 직후는 즉시). 표는 다시 그리지 않는다(입력 중 커서 유지). */
   function rowInput(i, val, ev) {
     const row = ROWS[i]; if (!row) return;
+    // ★ 조합 판정이 글 저장보다 먼저다 — 조합 중 글을 먼저 저장하면 compositionend 때 '같은 글'로 보여
+    //   조기 반환되고, 한글만 고친 줄이 다시 나뉘지 않는다(실브라우저 검증 2026-11-06).
+    if (ev && ev.isComposing) return;          // 한글 조합 중 — 조합이 끝나면(창 루트 compositionend) 다시 온다
     const v = String(val == null ? '' : val).replace(/[\r\n]+/g, ' ');
     if (v === row.text && !row.pasteNow) return;
     row.text = v; row.ver++; row.productWarn = null;
     const now = !!row.pasteNow; row.pasteNow = false;
-    if (ev && ev.isComposing) return;          // 한글 조합 중 — 조합이 끝나면(compositionend) 다시 온다
     const wasTail = ROWS[ROWS.length - 1] === row;
     if (wasTail && !_blank(row)) { ensureTail(); paint(); }   // 맨 아래 빈 줄을 쓰기 시작하면 새 빈 줄
     markDirty(row, now);
   }
   function ime(on, i, val) {
     IME = !!on;
-    if (!IME) {
-      if (typeof i === 'number') rowInput(i, val);
-      if (PAINT_LATER) { PAINT_LATER = false; paint(); }
-    }
+    if (IME) { clearTimeout(CLS_TIMER); CLS_TIMER = null; return; }   // 조합 중엔 분류를 쉰다(끝나면 다시 건다)
+    if (typeof i === 'number') rowInput(i, val);
+    if (DIRTY.size && !CLS_TIMER) markDirty(null, false);           // 조합 시작 때 멈춘 분류 타이머 재시작
+    if (PAINT_LATER) { PAINT_LATER = false; paint(); }
+  }
+  /* ★ 조합 시작·끝은 **창 루트에 캡처 단계로** 묶는다 — 인라인 oncompositionstart/oncompositionend 속성은
+     Chromium·WebKit 이 지원하지 않아('oncompositionstart' in HTMLElement.prototype === false) 한 번도 안 불렸고,
+     그래서 0.5초 분류 타이머가 조합 도중 표를 다시 그려 '김민수'가 '김미민민ㅅ수'로 깨졌다(실브라우저 검증 2026-11-06). */
+  function _imeTarget(ev) {
+    const id = String((ev && ev.target && ev.target.id) || '');
+    const m = /^moRaw-(\d+)$/.exec(id);
+    if (!m) return null;
+    const i = ROWS.findIndex(r => String(r.uid) === m[1]);
+    return i < 0 ? null : i;
+  }
+  function _onCompStart() { ime(1); }
+  function _onCompEnd(ev) {
+    const i = _imeTarget(ev);
+    if (i == null) ime(0); else ime(0, i, ev.target.value);
   }
   /** 칸을 벗어나면 바로 나눈다 · 비운 중간 줄(캡처도 없음)은 치운다 */
   function rowBlur(i) {
@@ -439,7 +495,11 @@
     return '';
   }
   // 나눈 뒤 다시 고치지 않은(ver === done) 정상 줄만 — 나누는 중인 줄을 옛 값으로 보내지 않는다
-  const submittable = it => !!it.ok && !_blank(it) && it.ver === it.done && !it.parsing && !optBlock(it);
+  /** 참여형: 확정할 기존 신청이 있는데 안 골랐는가 — 서버(manualOrder.service ⓪-2 application_selection_required:
+   *  같은 공고·같은 연락처 끝 8자리·applied/expired/cancelled 신청이 있고 선택이 없으면 그 줄 거절)와 같은 조건.
+   *  후보(applications)는 loadApplicationCandidates 가 같은 상태 목록으로 거른다. 후보 조회 실패 = 빈 목록 = 막지 않음(서버가 최종 판정). */
+  const appBlock = it => !!(CTX && CTX.campaignId && (it.applications || []).length && !it.targetApplicationId);
+  const submittable = it => !!it.ok && !_blank(it) && it.ver === it.done && !it.parsing && !optBlock(it) && !appBlock(it);
   function optLabel(o) {
     const left = o.remaining == null ? '정원 없음' : (o.status === 'soldout' ? `마감(${o.used}/${o.recruitTotal})` : '남은 ' + o.remaining);
     const today = (o.status !== 'soldout' && o.todayRemaining != null && (o.remaining == null || o.todayRemaining < o.remaining))
@@ -460,8 +520,9 @@
       const why = (o.remaining > 0
         ? `이 상품은 남은 자리가 ${o.remaining}개라 이 줄부터 정원을 넘습니다`
         : `이미 찬 상품입니다(${o.used}/${o.recruitTotal})`) + ' — 이미 산 주문이라 확인 후 등록합니다';
-      ack = `<label class="mo-ack" title="${esc(why)}"><input type="checkbox" id="moAck-${it.uid}" ${it.optFullAck ? 'checked' : ''}
-        onchange="ManualOrder.ackOption(${i},this.checked)"> 초과 확인</label>`;
+      // 글자는 두 자(「초과」) — PC 상품 칸 156px 안에서 고르는 칸 최소 폭(96px)을 지킨다 · 전체 이유는 마우스 올림 + 확인 칸
+      ack = `<label class="mo-ack" title="${esc(why)}"><input type="checkbox" id="moAck-${it.uid}" aria-label="${i + 1}번 줄 남은 자리 초과 확인" ${it.optFullAck ? 'checked' : ''}
+        onchange="ManualOrder.ackOption(${i},this.checked)">초과</label>`;
     }
     if (OPTS.length === 1) return `<td><div class="mo-cellf"><span class="mo-auto" title="상품이 하나라 자동으로 고릅니다">자동</span>&nbsp;<span class="t">${esc(_optName(OPTS[0]))}</span>${ack ? '&nbsp;' + ack : ''}</div></td>`;
     return `<td><div class="mo-cellf">
@@ -488,9 +549,10 @@
     if (!BUSY) { btn.disabled = !n; btn.textContent = n + '건 제출'; }
     const need = ROWS.filter(r => r.ok && !_blank(r) && optBlock(r) === 'need').length;
     const ack = ROWS.filter(r => r.ok && !_blank(r) && optBlock(r) === 'ack').length;
+    const appNeed = ROWS.filter(r => r.ok && !_blank(r) && appBlock(r)).length;
     const busy = ROWS.filter(r => !_blank(r) && (r.parsing || r.ver !== r.done)).length;
     const tip = document.getElementById('moOptTip');
-    if (tip) tip.textContent = need ? `상품을 고르지 않은 줄 ${need}개는 제출되지 않습니다` : ack ? `남은 자리를 넘는 줄 ${ack}개는 확인 체크가 필요합니다` : busy ? `나누는 중인 줄 ${busy}개` : '';
+    if (tip) tip.textContent = need ? `상품을 고르지 않은 줄 ${need}개는 제출되지 않습니다` : appNeed ? `참여 신청을 고르지 않은 줄 ${appNeed}개는 제출되지 않습니다` : ack ? `남은 자리를 넘는 줄 ${ack}개는 확인 체크가 필요합니다` : busy ? `나누는 중인 줄 ${busy}개` : '';
   }
 
   // ── 줄 확인 문구(빨강 = 고쳐야 제출 · 주황 = 확인만) ──────────────────────
@@ -517,14 +579,14 @@
     if (it.ok) {
       const ob = optBlock(it);
       if (ob === 'need') out.push({ k: 'e', t: '상품을 골라야 제출할 수 있습니다' });
-      else if (ob === 'ack') out.push({ k: 'w', t: '고른 상품의 남은 자리를 넘습니다 — 상품 칸에서 확인 체크' });
+      else if (ob === 'ack') out.push({ k: 'w', t: '고른 상품의 남은 자리를 넘습니다 — 상품 칸 「초과」 체크' });
       else if (OPTS.length && _optOf(it) && _optOf(it).todayRemaining === 0) out.push({ k: 'w', t: '오늘 몫은 찼지만 총 정원은 남아 있습니다 — 그대로 등록됩니다' });
       _productWarnList(it).forEach(t => out.push({ k: 'e', t }));
       const lbl = it.aiRepaired ? 'AI 보정' : (it.repairs || []).length ? '자동보정' : '';
       (it.warnings || []).forEach(m => out.push({ k: 'w', t: (lbl && !/^AI가/.test(m) ? lbl + ': ' : '') + m }));
       const capNm = capNameMismatch(it);
       if (capNm) out.push({ k: 'w', t: `이름이 다릅니다(캡처: ${capNm})` });
-      if (CTX && CTX.campaignId && (it.applications || []).length && !it.targetApplicationId) out.push({ k: 'w', t: '기존 신청은 반드시 선택해야 합니다' });
+      if (appBlock(it)) out.push({ k: 'e', t: '기존 신청이 있어 확정할 신청을 골라야 제출할 수 있습니다' });
     }
     if (!out.length) out.push({ k: 'g', t: it.capture ? '정상 · 캡처 있음' : '정상' });
     return out;
@@ -576,8 +638,7 @@
     return `<td class="stk2"><input class="mo-in raw" id="moRaw-${it.uid}" value="${esc(it.text)}" title="${esc(it.text)}" placeholder="${esc(ph)}"
       aria-label="${i + 1}번 줄 구매양식" autocomplete="off" spellcheck="false"
       oninput="ManualOrder.rowInput(${i},this.value,event)" onpaste="ManualOrder.rowPaste(event,${i})" onblur="ManualOrder.rowBlur(${i})"
-      onfocus="ManualOrder.selectRow(${i})" onkeydown="ManualOrder.keyNav(event,${i})"
-      oncompositionstart="ManualOrder.ime(1)" oncompositionend="ManualOrder.ime(0,${i},this.value)"></td>`;
+      onfocus="ManualOrder.selectRow(${i})" onkeydown="ManualOrder.keyNav(event,${i})"></td>`;
   }
   function capCell(it, i) {
     // 붙여넣기가 안 먹는 브라우저(파이어폭스 등)를 위한 파일 선택 폴백 — 첨부 경로가 하나뿐이면 막힌다
@@ -610,14 +671,18 @@
       { k: 'recipient', label: '수취인', w: 62, cell: fieldCell('recipient', { label: '수취인' }) },
       { k: 'userId', label: '아이디', w: 74, cell: fieldCell('userId', { label: '아이디' }) },
       { k: 'phone', label: '연락처', w: 118, cell: fieldCell('phone', { label: '연락처' }) },
-      { k: 'address', label: '주소', w: 116, cell: fieldCell('address', { label: '주소' }) },
+      { k: 'address', label: '주소', w: 104, cell: fieldCell('address', { label: '주소' }) },
       { k: 'bank', label: '은행', w: 66, cell: fieldCell('bank', { label: '은행' }) },
-      { k: 'account', label: '계좌번호', w: 140, cell: fieldCell('account', { label: '계좌번호' }) },
+      { k: 'account', label: '계좌번호', w: 128, cell: fieldCell('account', { label: '계좌번호' }) },
       { k: 'depositor', label: '예금주', w: 58, cell: fieldCell('depositor', { label: '예금주' }) },
       { k: 'price', label: '금액', w: 64, cls: 'r', cell: fieldCell('price', { label: '금액', num: true }) },
     ];
-    if (OPTS.length) L.push({ k: 'opt', label: '상품(옵션)', w: 156, cell: optCell });
-    if (CTX && CTX.campaignId) L.push({ k: 'app', label: '참여 신청', w: 170, cell: appCell });
+    // ★ 칸 합은 PC 1440(상자 1392px) 안에 든다(작업보드 1368 · 참여형 1372 — 주소는 늘 길어 잘림 + 마우스 올림이라 주소 칸에서 덜었다) — 넘으면 구매캡처 클립 단추가 오른쪽 고정 칸(확인)에 가린다
+    if (OPTS.length) {
+      const anyAck = ROWS.some(r => r.ok && !_blank(r) && _optOf(r) && _optOver(r));
+      L.push({ k: 'opt', label: '상품(옵션)', w: 156, colCls: 'mo-c-opt' + (anyAck ? ' ack' : ''), cell: optCell });
+    }
+    if (CTX && CTX.campaignId) L.push({ k: 'app', label: '참여 신청', w: 160, cell: appCell });
     L.push({ k: 'cap', label: '구매캡처', w: 88, cell: capCell });
     // 확인 칸은 오른쪽에 고정(표를 옆으로 밀어도 늘 보인다) — 줄 삭제 단추도 이 칸 끝에
     L.push({ k: 'st', label: '확인', w: 168, cls: 'stkr', cell: (it, i) => {
@@ -641,6 +706,8 @@
     const ae = document.activeElement;
     const keep = ae && ae.id && /^mo(Raw|F|Opt|Ack|Cap)-/.test(ae.id)
       ? { id: ae.id, s: ae.selectionStart, e: ae.selectionEnd } : null;
+    // 글자 칸(양식·나뉜 값)에 포커스가 있으면 그 요소를 살린 채 다시 그린다(_morphKeep)
+    const keepEl = keep && ae.tagName === 'INPUT' && /^mo(Raw|F)-/.test(ae.id) ? ae : null;
     const bd0 = document.getElementById('moBd');
     const scroll = bd0 ? { t: bd0.scrollTop, l: bd0.scrollLeft } : null;
     const filled = _filled();
@@ -664,7 +731,7 @@
     shell(`
       <div class="mo-tw">
         <table class="mo-tbl" style="min-width:${total}px">
-          <colgroup>${C.map(c => `<col style="width:${c.w}px">`).join('')}</colgroup>
+          <colgroup>${C.map(c => `<col${c.colCls ? ` class="${c.colCls}"` : ''} style="width:${c.w}px">`).join('')}</colgroup>
           <thead><tr>${C.map(c => `<th class="${c.cls || ''}"${c.title ? ` title="${esc(c.title)}"` : ''}>${esc(c.label)}</th>`).join('')}</tr></thead>
           <tbody>${ROWS.map((it, i) => rowHtml(it, i, C)).join('')}</tbody>
         </table>
@@ -681,12 +748,12 @@
       `<button type="button" class="mo-btn" onclick="ManualOrder.close(true)">닫기</button><span class="sp"></span>
        <span class="mo-tip" id="moOptTip" role="status"></span>
        <button type="button" class="mo-btn pri" id="moSubmit" ${okN ? '' : 'disabled'} onclick="ManualOrder.submit()">${okN}건 제출</button>`,
-      { bar });
+      { bar, keepEl });
     if (scroll) {
       const bd = document.getElementById('moBd'); if (bd) bd.scrollTop = scroll.t;
       if (bd) bd.scrollLeft = scroll.l;
     }
-    if (keep) {
+    if (keep && !(keepEl && keepEl.isConnected && document.activeElement === keepEl)) {
       const el = document.getElementById(keep.id);
       if (el) { el.focus(); try { if (keep.s != null && el.setSelectionRange) el.setSelectionRange(keep.s, keep.e); } catch (_) {} }
     }
