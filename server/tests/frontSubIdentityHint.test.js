@@ -44,9 +44,15 @@ for (const [label, src] of Object.entries(files)) {
     const ctx = { document: { getElementById: (id) => (id === 'inlineSubConfirm' ? box : el(id)) },
       showToast: (m) => { toasted = m; }, saveInlineSubAccount: () => { reconfirm++; },
       gasPost: async () => { posted++; return { ok: true }; }, getSavedUser: () => ({ name: '인하늘', phone8: '41490001' }),
-      _getReviewerSession: () => ({ name: '인하늘', phone8: '41490001' }), window: { _reviewerProfile: { subAccounts: [] } },
-      _parseSubAccounts: () => [], renderInlineSubList() {}, _renderInlineSubList() {}, cancelInlineSubForm() {} };
+      // found:true = 불러온 프로필(결정 358 — 리뷰어 홈은 프로필을 받은 화면에서만 타계정을 저장한다)
+      _getReviewerSession: () => ({ name: '인하늘', phone8: '41490001' }), window: { _reviewerProfile: { subAccounts: [], found: true } },
+      _parseSubAccounts: () => [], renderInlineSubList() {}, _renderInlineSubList() {}, cancelInlineSubForm() {},
+      loadSecureIdentityProfile() {}, reloadInlineProfile() {} };
     vm.createContext(ctx);
+    // 결정 358 도우미(리뷰어 홈에만 있음) — 저장확정이 부르는 실제 함수를 그대로 싣는다.
+    for (const helper of ['_subAccountsBase', '_inlineSubPhoneValue', '_afterSubAccountsSaved']) {
+      if (src.includes('function ' + helper + '(')) vm.runInContext(extract(src, helper), ctx);
+    }
     vm.runInContext(extract(src, '_inlineSubSnapshot'), ctx);
     vm.runInContext(extract(src, 'confirmSaveInlineSubAccount').replace(/^/, 'async '), ctx);
     box.dataset.snap = ctx._inlineSubSnapshot();
