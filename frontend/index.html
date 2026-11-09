@@ -2569,9 +2569,10 @@ function _reEditImgUrl(fileId){
   return base + '/api/drive/image/' + encodeURIComponent(fileId);
 }
 /* ★ 썸네일 URL 규칙은 `js/drive-thumb.js` 한 곳 — 여기는 위임(사본 0).
-   모듈이 없으면 원본 프록시로 접는다(마크업의 onerror 폴백은 그대로). */
-function _reEditThumb(fileId){
-  return window.DriveThumb ? DriveThumb.url(fileId, 400) : _reEditImgUrl(fileId);
+   결정 354 — 수정요청 창의 작은 사진 = 공용 사다리(js/drive-thumb.js attrs): 빠른 길 → 구글 썸네일 → 원본 → 빈 칸.
+   서명은 파일 목록 응답(my-files 의 files[].t)이 싣는다. 모듈이 없으면 원본 프록시(종전 폴백과 같은 그림). */
+function _reEditImgAttrs(fileId){
+  return window.DriveThumb ? DriveThumb.attrs(fileId, 400, _reEditImgUrl(fileId)) : ' src="' + _reEditImgUrl(fileId) + '"';
 }
 
 function _reEditRegister(item){
@@ -2667,6 +2668,7 @@ async function _reEditLoadFiles(){
     const res = await _reEditFetchMyFiles(c);
     if (!res || res.ok === false) throw new Error((res && res.error) || '조회에 실패했습니다.');
     _reEditFiles = res.files || [];
+    if (window.DriveThumb && DriveThumb.seed) DriveThumb.seed(_reEditFiles.map(f => f && f.t));   // 결정 354 — 응답의 빠른 길 서명
     _reEditPending = res.pending || [];
     _reEditRenderFiles();
   }catch(e){
@@ -2688,7 +2690,7 @@ function _reEditRenderFiles(){
     _reEditFiles.forEach(f => {
       const pend = pendById[f.fileId];
       html += '<div class="re-edit-card">' +
-        '<img src="' + _reEditThumb(f.fileId) + '" loading="lazy" onerror="this.onerror=null;this.src=\'' + _reEditImgUrl(f.fileId) + '\'">' +
+        '<img' + _reEditImgAttrs(f.fileId) + ' loading="lazy">' +
         '<div class="re-edit-cap">' + escHtml(f.slotLabel || '리뷰') + '</div>' +
         (pend
           ? '<div class="re-edit-pendtag">수정요청 검토중</div><button class="re-edit-cancel" onclick="_reEditCancel(\'' + pend.id + '\')">요청 취소</button>'
@@ -2709,7 +2711,7 @@ function _reEditStartReplace(oldFileId){
     '<button class="re-edit-back" onclick="_reEditRenderFiles()"><i class="fas fa-chevron-left"></i> 뒤로</button>' +
     '<div style="font-size:.8rem;color:#5B6472;margin:6px 0 10px">아래에 <b>올바른 이미지</b>를 선택하면 관리자에게 교체 요청이 전송됩니다. <span style="color:#98A0AC">(즉시 교체되지 않고 승인 후 반영)</span></div>' +
     '<div class="re-edit-compare">' +
-      '<div><div class="re-edit-lbl">현재</div><img src="' + _reEditThumb(oldFileId) + '" onerror="this.onerror=null;this.src=\'' + _reEditImgUrl(oldFileId) + '\'"></div>' +
+      '<div><div class="re-edit-lbl">현재</div><img' + _reEditImgAttrs(oldFileId) + '></div>' +
       '<div class="re-edit-arrow"><i class="fas fa-arrow-right"></i></div>' +
       '<div><div class="re-edit-lbl">교체할 이미지</div><div id="reEditNewPrev" class="re-edit-newprev"><i class="fas fa-image"></i></div></div>' +
     '</div>' +
@@ -4264,6 +4266,7 @@ async function loadRecruitPreview() {
     // ★ 결정 359: 20초 제한 + 본문 판정 — 서버 오류(200+{error}·500)를 「현재 진행 중인 모집공고가 없습니다」로,
     //   멈춘 서버를 영원한 「불러오는 중」으로 보이지 않는다.
     const json = await _rhFetchJson(API_BASE_URL + "/api/campaign/list", 20000);
+    if (window.CampCards && CampCards.seedThumbs) CampCards.seedThumbs(json);   // 결정 354 — 썸네일 빠른 길 서명
     _rcLastJson = json;
     _renderRecruitPreview(json);
   } catch(e) {

@@ -221,7 +221,7 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
     const toasts = [];
     const ctx = Object.assign({
       console, JSON, String, Number, Object, Array, Promise, Date, URLSearchParams, AbortController, setTimeout, clearTimeout, Error,
-      API_BASE_URL: 'http://t', els, el, toasts,
+      API_BASE_URL: 'http://t', els, el, toasts, window: {},
       document: { getElementById: (id) => els[id] || null },
       escHtml: (s) => String(s == null ? '' : s).replace(/</g, '&lt;'),
       showToast: (m) => toasts.push(String(m)), confirm: () => true,

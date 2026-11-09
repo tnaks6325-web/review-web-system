@@ -186,5 +186,71 @@
     if (u) img.src = u; else img.removeAttribute('src');       // 원본도 없으면 깨진 아이콘 대신 빈 칸
   }
 
-  window.DriveThumb = { url: url, attrs: attrs, fall: fall, seed: seed, edgeUrl: edgeUrl, kindOf: kindOf };
+  /* ── 결정 354 남은 화면 — 가이드·공고 사진(우리 가이드 사진 통로 · 구글 큰 썸네일) ──
+     ★ 저장된 주소는 그대로 두고 **그릴 때만** 갈아 끼운다(가이드 HTML·사진 배열·썸네일 주소는 인트라넷에도 주소째 저장).
+     ★ 서명은 그 화면의 응답이 실어 준 것(seed) 또는 직원 화면의 일괄 서명(want) — 무인증 서명 입구 없음.
+     ★ 사다리(한 방향): 빠른 길(data-dt="e") → 종전 주소(data-g) → 화면 자기 onerror(있으면) → 멈춤.
+     ★ 서명이 없고 직원 토큰도 없으면 **종전과 글자 하나 다르지 않은** src 한 개만 낸다(화면 모양·동작 불변). */
+  var GUIDE_RES = [
+    /\/api\/order\/guide-image\/([-\w]{20,})(?:[?#]|$)/,
+    /^https:\/\/drive\.google\.com\/thumbnail\?id=([-\w]{20,})(?:&|$)/
+  ];
+  function guideId(src) {
+    var s = String(src || '');
+    for (var i = 0; i < GUIDE_RES.length; i++) { var m = GUIDE_RES[i].exec(s); if (m) return m[1]; }
+    return '';
+  }
+  function canSign() { return !off && !!staffToken() && typeof fetch === 'function'; }
+  function guideOnErr(onErr) { return onErr ? 'if(!DriveThumb.guideFall(this)){' + onErr + '}' : 'DriveThumb.guideFall(this)'; }
+
+  /** <img> 속성 — src(빠른 길 또는 종전 주소) + 사다리 표지. onErr = 화면이 원래 쓰던 onerror 코드(종전 주소마저 실패할 때). */
+  function guideAttrs(src, px, onErr) {
+    var s = String(src || ''), id = guideId(s), k = kindOf(px);
+    var plain = ' src="' + esc(s) + '"' + (onErr ? ' onerror="' + esc(onErr) + '"' : '');
+    if (!id) return plain;
+    var e = edgeUrl(id, k);
+    if (!e) {
+      if (dead[k + ':' + id] || !canSign()) return plain;
+      want(id, k);
+    }
+    return ' src="' + esc(e || s) + '" data-dt="' + (e ? 'e' : 'g') + '" data-dt-id="' + esc(id) + '" data-dt-k="' + k + '"'
+      + ' data-g="' + esc(s) + '" onerror="' + esc(guideOnErr(onErr)) + '"';
+  }
+
+  /** 가이드 사진의 빠른 길 실패 → 종전 주소로(1회). @returns 처리했나(false = 화면 자기 폴백 몫) */
+  function guideFall(img) {
+    if (!img || !img.getAttribute || img.getAttribute('data-dt') !== 'e') return false;
+    var id = img.getAttribute('data-dt-id'), k = img.getAttribute('data-dt-k') || 'm';
+    if (id) dead[k + ':' + id] = 1;                           // 이 페이지에서 다시 빠른 길로 가지 않는다
+    img.setAttribute('data-dt', 'x');
+    var g = img.getAttribute('data-g') || '';
+    if (!g) return false;
+    img.src = g;
+    return true;
+  }
+
+  /** 아직 문서에 붙지 않은 조각(template.content 등) 안의 가이드 사진 <img> 를 갈아 끼운다. @returns 빠른 길로 바꾼 수 */
+  function upgrade(root, px) {
+    if (!root || !root.querySelectorAll) return 0;
+    var list = root.querySelectorAll('img'), n = 0, k = kindOf(px || 1600);
+    for (var i = 0; i < list.length; i++) {
+      var img = list[i];
+      if (img.getAttribute('data-dt')) continue;               // 이미 사다리에 오른 사진(작은 사진 등)
+      var s = img.getAttribute('src') || '', id = guideId(s);
+      if (!id) continue;
+      var e = edgeUrl(id, k);
+      if (!e && (dead[k + ':' + id] || !canSign())) continue;   // 서명 없음 = 손대지 않는다(종전 그대로)
+      if (!e) want(id, k);
+      img.setAttribute('data-dt', e ? 'e' : 'g');
+      img.setAttribute('data-dt-id', id);
+      img.setAttribute('data-dt-k', k);
+      img.setAttribute('data-g', s);
+      img.setAttribute('onerror', guideOnErr(img.getAttribute('onerror') || ''));
+      if (e) { img.setAttribute('src', e); n++; }
+    }
+    return n;
+  }
+
+  window.DriveThumb = { url: url, attrs: attrs, fall: fall, seed: seed, edgeUrl: edgeUrl, kindOf: kindOf,
+    guideId: guideId, guideAttrs: guideAttrs, guideFall: guideFall, upgrade: upgrade };
 })();

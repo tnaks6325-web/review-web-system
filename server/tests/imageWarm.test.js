@@ -302,28 +302,28 @@ async function pgliteFixture() {
   const { PGlite } = require('@electric-sql/pglite');
   const db = new PGlite();
   await db.exec(`
-    CREATE TABLE review_submissions (file_id TEXT, created_at TIMESTAMPTZ);
+    CREATE TABLE review_submissions (file_id TEXT, created_at TIMESTAMPTZ, slot_key TEXT NOT NULL DEFAULT 'review');
     CREATE TABLE order_submissions (capture_file_id TEXT, capture_file_id_2 TEXT, capture_uploaded_at TIMESTAMPTZ,
       capture2_uploaded_at TIMESTAMPTZ, submitted_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ);
     CREATE TABLE review_index (review_file_id TEXT, review_file_at TIMESTAMPTZ);
     CREATE TABLE review_inspections (file_id TEXT, created_at TIMESTAMPTZ);
-    CREATE TABLE review_edit_requests (old_file_id TEXT, new_file_id TEXT, created_at TIMESTAMPTZ);
+    CREATE TABLE review_edit_requests (old_file_id TEXT, new_file_id TEXT, created_at TIMESTAMPTZ, status TEXT NOT NULL DEFAULT 'pending');
     CREATE TABLE purchase_capture_artifacts (file_id TEXT, created_at TIMESTAMPTZ);
-    CREATE TABLE purchase_submission_sessions (capture_file_id TEXT, created_at TIMESTAMPTZ);
+    CREATE TABLE purchase_submission_sessions (capture_file_id TEXT, created_at TIMESTAMPTZ, status TEXT NOT NULL DEFAULT 'prepared');
     CREATE TABLE reviewer_event_logs (context JSONB, occurred_at TIMESTAMPTZ);
     CREATE TABLE guide_image_files (file_id TEXT PRIMARY KEY, created_at TIMESTAMPTZ);
     CREATE TABLE payment_result_drive_archive (drive_file_id TEXT);
   `);
   const d = (n) => `now() - interval '${n} days'`;
   await db.exec(`
-    INSERT INTO review_submissions VALUES ('${ID(1)}', ${d(1)}), ('${ID(2)}', ${d(90)}), ('', ${d(1)}), (NULL, ${d(1)});
+    INSERT INTO review_submissions (file_id, created_at) VALUES ('${ID(1)}', ${d(1)}), ('${ID(2)}', ${d(90)}), ('', ${d(1)}), (NULL, ${d(1)});
     INSERT INTO order_submissions VALUES ('${ID(3)}', '${ID(4)}', ${d(2)}, NULL, ${d(3)}, NULL),
                                          ('${ID(5)}', NULL, ${d(2)}, NULL, ${d(2)}, now());
     INSERT INTO review_index VALUES ('${ID(1)}', ${d(5)});
     INSERT INTO review_inspections VALUES ('${ID(6)}', ${d(10)});
-    INSERT INTO review_edit_requests VALUES ('${ID(7)}', '${ID(8)}', ${d(4)});
+    INSERT INTO review_edit_requests (old_file_id, new_file_id, created_at) VALUES ('${ID(7)}', '${ID(8)}', ${d(4)});
     INSERT INTO purchase_capture_artifacts VALUES ('${ID(9)}', ${d(6)});
-    INSERT INTO purchase_submission_sessions VALUES ('${ID(3)}', ${d(2)});
+    INSERT INTO purchase_submission_sessions (capture_file_id, created_at) VALUES ('${ID(3)}', ${d(2)});
     INSERT INTO reviewer_event_logs VALUES ('{"fileId":"${ID(10)}"}', ${d(7)}), ('{"other":1}', ${d(1)});
     INSERT INTO guide_image_files VALUES ('${ID(11)}', ${d(8)}), ('${ID(12)}', ${d(3)});
     INSERT INTO payment_result_drive_archive VALUES ('${ID(12)}');
@@ -341,6 +341,32 @@ test('D1 최근 N일 사진 번호 — 출처 전부 · 중복 제거 · 최신�
     assert.ok(!ids.includes(ID(12)), '이체결과 보관 파일');
     assert.deepEqual(await warm.collectRecentIds(db, { days: 60, limit: 2 }), [ID(1), ID(3)]);
     assert.equal((await warm.collectRecentIds(db, { days: 100 })).length, 10);
+  } finally { await db.close(); }
+});
+
+// 결정 354 남은 화면(2026-11-09) — 운영 일괄 실행의 실패 23장이 전부 「쓰지 않는 사진」(원본 404)이었다.
+//   휴지통 캡처(slot_key='trashed') · 반려/취소된 수정요청의 새 사진 · 끝난 임시 구매캡처 세션(실제 값: prepared/uploading
+//   /completed/failed — 'pending' 은 없다)은 대상에서 뺀다. 같은 번호가 살아 있는 다른 출처에 있으면 그대로 잡힌다.
+test('D4 쓰지 않는 사진은 대상 수에 안 잡힌다(dry-run) · 살아 있는 다른 출처의 같은 번호는 그대로', async () => {
+  const db = await pgliteFixture();
+  try {
+    const d = (n) => `now() - interval '${n} days'`;
+    await db.exec(`
+      INSERT INTO review_submissions (file_id, created_at, slot_key) VALUES ('${ID(20)}', ${d(1)}, 'trashed');
+      INSERT INTO review_edit_requests (old_file_id, new_file_id, created_at, status) VALUES
+        ('${ID(7)}', '${ID(21)}', ${d(1)}, 'rejected'), ('${ID(7)}', '${ID(22)}', ${d(1)}, 'cancelled'),
+        ('${ID(7)}', '${ID(23)}', ${d(1)}, 'approved');
+      INSERT INTO purchase_submission_sessions (capture_file_id, created_at, status) VALUES
+        ('${ID(24)}', ${d(1)}, 'completed'), ('${ID(25)}', ${d(1)}, 'failed'), ('${ID(26)}', ${d(1)}, 'uploading');
+      INSERT INTO review_submissions (file_id, created_at, slot_key) VALUES ('${ID(9)}', ${d(1)}, 'trashed');
+    `);
+    const ids = await warm.collectRecentIds(db, { days: 60 });
+    for (const n of [20, 21, 22, 24, 25]) assert.ok(!ids.includes(ID(n)), `쓰지 않는 사진 ${n} 이 대상에 잡혔다`);
+    assert.ok(ids.includes(ID(23)), '승인된 수정요청의 새 사진은 대상');
+    assert.ok(ids.includes(ID(26)), '진행 중 임시 세션은 대상');
+    assert.ok(ids.includes(ID(9)), '휴지통에도 있지만 살아 있는 다른 출처(구매캡처 기록)의 번호는 대상');
+    const r = await imgWarmScript.main(['--dry-run', '--days', '60'], { db, fetch: fakeFetch(), log: () => {}, env: {} });
+    assert.equal(r.total, 11, '종전 9장 + 승인 새 사진 1 + 진행 중 세션 1');
   } finally { await db.close(); }
 });
 
@@ -402,7 +428,7 @@ test('E 스크립트 출처 표가 허용 목록 출처를 전부 다룬다 · �
   const sql = fs.readdirSync(path.join(SERVER, 'migrations')).filter(f => f.endsWith('.sql'))
     .map(f => fs.readFileSync(path.join(SERVER, 'migrations', f), 'utf8')).join('\n').replace(/--[^\n]*/g, '').replace(/\s+/g, ' ');
   for (const s of warm.WARM_SOURCES) {
-    for (const col of s.timeColumns) {
+    for (const col of s.timeColumns.concat(s.whereColumns || [])) {   // 결정 354: 거르는 칸(where)도 실제 칸이어야 한다
       const ok = new RegExp(`CREATE TABLE (?:IF NOT EXISTS )?${s.table} ?\\([^;]*[(,] ?${col} `, 'i').test(sql)
         || new RegExp(`ALTER TABLE (?:IF EXISTS )?(?:ONLY )?${s.table} [^;]*ADD COLUMN (?:IF NOT EXISTS )?${col} `, 'i').test(sql);
       assert.ok(ok, `${s.table}.${col} 은 실제 마이그레이션이 만든 칸이 아니다`);
