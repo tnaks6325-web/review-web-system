@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const driveService = require('../services/drive.service');
 const imageAllowlist = require('../services/imageAllowlist.service');
+const imageEdge = require('../services/imageEdge.service');
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 
@@ -117,7 +118,8 @@ router.get('/report/:code', async (req, res, next) => {
       ok: true,
       title: (displayName || tabName || '리뷰 보고'),
       count: images.length,
-      images,
+      // ★ 결정 354 — 무인증 화면이라 응답이 서명 주소(t, 목록용 작은 사진)를 싣는다. 열쇠 없으면 그대로.
+      images: imageEdge.withThumbs(images),
     });
   } catch (err) {
     next(err);
