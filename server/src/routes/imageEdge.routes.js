@@ -50,7 +50,7 @@ async function _verdict(id) {
 
 // ── POST /api/img/sign ──
 const signRouter = express.Router();
-signRouter.post('/sign', authMiddleware, async (req, res) => {
+async function signHandler(req, res) {
   const who = req.admin;   // ★ req.admin 만(결정 201 — req.user 금지)
   if (!who) return res.status(401).json({ ok: false, error: '인증이 필요합니다.' });
   const b = req.body || {};
@@ -74,7 +74,8 @@ signRouter.post('/sign', authMiddleware, async (req, res) => {
   }
   await Promise.all(Array.from({ length: Math.min(SIGN_CONCURRENCY, ids.length) }, worker));
   return res.json({ ok: true, enabled: true, urls });
-});
+}
+signRouter.post('/sign', authMiddleware, signHandler);
 
 // ── GET /api/img-internal/:kind/:fileId ──
 const internalRouter = express.Router();
@@ -126,4 +127,4 @@ function mount(app, { beforeLimiter }) {
   app.use('/api/img-internal', internalRouter);
 }
 
-module.exports = { mount, signRouter, internalRouter, GEN_MAX, __genStats: () => ({ active: _genActive, queued: _genQueue.length }) };
+module.exports = { mount, signRouter, signHandler, internalRouter, GEN_MAX, __genStats: () => ({ active: _genActive, queued: _genQueue.length }) };
