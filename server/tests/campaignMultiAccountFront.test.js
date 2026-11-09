@@ -82,6 +82,10 @@ ok('마크업의 틀은 #orderFrame 하나(추가 틀은 명의마다 코드로�
     && /if\(_applyManyBusy\) return;/.test(am));
   ok('★ 353: 아무 명의도 못 잡고 이유가 명의 탓이 아니면 종전 _doApply 안내 화면으로',
     /if\(firstGlobal\) return _doApply\(optionKey, firstGlobal\.sub, purchaseQty\);/.test(am));
+  ok('353 도움말: [어떻게 하나요?]는 여러 명의 체크 공고에서만 · 이미지는 처음 열 때만 받는다',
+    /_hl\.style\.display = _acctMultiPick\(\) \? '' : 'none';/.test(camp)
+    && /if\(img && !img\.getAttribute\('src'\)\) img\.setAttribute\('src', '\/docs\/help\/multi-identity-join\.jpg'\);/.test(camp)
+    && fs.existsSync(path.join(__dirname, '..', '..', 'frontend/docs/help/multi-identity-join.jpg')));
   ok('★ 353: 여러 명의 공고는 나중에 명의를 더 붙이는 버튼을 숨긴다(고른 수까지만)',
     /addBtn\.style\.display = \(multiEnabled\(\) && !_acctMultiPick\(\) &&/.test(camp));
 }
