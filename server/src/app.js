@@ -15,6 +15,7 @@ const { getStatus: getSSEStatus } = require('./utils/sse');
 const indexRoutes    = require('./routes/index.routes');
 const tabRoutes      = require('./routes/tabconfig.routes');
 const reviewerRoutes = require('./routes/reviewer.routes');
+const { createPurchaseCaptureRouters } = require('./routes/purchaseCapture.routes');
 const adminRoutes    = require('./routes/admin.routes');
 const driveRoutes    = require('./routes/drive.routes');
 const shortRoutes    = require('./routes/shortlink.routes');
@@ -79,6 +80,10 @@ app.use('/api/tab',       tabRoutes);
 
 // 리뷰어 관리 (Section 7)
 app.use('/api/reviewer',  reviewerRoutes);
+// 구매사진 셀프 보완: 기존 일반 업로드·명의/지급 처리와 분리된 인증 경로.
+const purchaseCaptureRouters = createPurchaseCaptureRouters();
+app.use('/api/reviewer', purchaseCaptureRouters.reviewerRouter);
+app.use('/api/trackb', purchaseCaptureRouters.staffRouter);
 
 // 관리자 인증 + Staff (Section 8)
 app.use('/api/admin',     adminRoutes);

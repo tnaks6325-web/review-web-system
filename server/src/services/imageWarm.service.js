@@ -148,6 +148,7 @@ const WARM_SOURCES = Object.freeze([
   { table: 'review_edit_requests', column: 'new_file_id', at: 'created_at', timeColumns: ['created_at'],
     where: "status NOT IN ('rejected', 'cancelled')", whereColumns: ['status'] },   // 반려·취소된 요청의 새 사진
   { table: 'purchase_capture_artifacts', column: 'file_id', at: 'created_at', timeColumns: ['created_at'] },
+  { table: 'purchase_capture_supplements', column: 'file_id', at: 'created_at', timeColumns: ['created_at'] },
   // 끝난 임시 세션(completed = 진짜 사진은 order_submissions 쪽 출처가 맡는다 · failed) 제외 — 실제 값 prepared/uploading/completed/failed
   { table: 'purchase_submission_sessions', column: 'capture_file_id', at: 'created_at', timeColumns: ['created_at'],
     where: "status IN ('prepared', 'uploading')", whereColumns: ['status'] },
