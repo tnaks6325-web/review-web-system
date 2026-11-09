@@ -182,13 +182,19 @@
       .rc-view-row .pcard .pt-badges{top:7px;right:8px;max-width:calc(100% - 104px)}
       /* [인기!]·상태 리본: 본문 시작점(썸네일 오른쪽) 상단 */
       .rc-view-row .pcard .pt-topleft{top:7px;left:102px;flex-direction:row;flex-wrap:wrap;gap:4px;max-width:calc(100% - 190px)}
+      /* 인기 배지: 이모지 글꼴 때문에 기본 줄높이가 커져 제목 윗부분을 덮었다(크롬 4px) → 줄높이 고정 */
+      .rc-view-row .pcard .pt-pop{line-height:1.2}
+      /* 재참여 띠(시안 A = 썸네일 하단 띠): 행 보기는 썸네일이 position:static 이라 띠가 카드 전체 폭으로
+         번져 [참여하기]·안내문을 덮었다 → 카운트다운 오버레이(.pt-ovl)와 같이 좌측 92px 썸네일 안에만 */
+      .rc-view-row .pcard .pt-sash{right:auto;width:92px;padding:4px 5px;flex-wrap:wrap;gap:2px 4px}
+      .rc-view-row .pcard .pt-sash .ps-t{word-break:keep-all;line-height:1.25}
       .rc-view-row .pcard .peditchip{bottom:6px;left:6px;font-size:.55rem;padding:2px 6px}
       /* 행 보기에선 우하단에 [참여하기] 버튼이 와서 겹친다 → 수정 칩 위로 쌓는다 */
       .rc-view-row .pcard .pmochip{bottom:25px;left:6px;right:auto;font-size:.55rem;padding:2px 6px}
       /* 본문: 배지열과 겹치지 않게 상단 여백. ★ min-width:0 필수 —
          flex 자식 기본값 min-width:auto 라 긴 제목이 줄지 않고 행 전체가 가로로 넘친다(말줄임도 안 먹음) */
       .rc-view-row .pcard .pbody{padding:26px 10px 9px;gap:4px;justify-content:center;min-width:0;flex:1 1 auto}
-      .rc-view-row .pcard .ptitle{-webkit-line-clamp:1;font-size:.79rem;overflow:hidden}
+      .rc-view-row .pcard .ptitle{-webkit-line-clamp:1;font-size:.79rem;overflow:hidden;display:block;white-space:nowrap;text-overflow:ellipsis}
       .rc-view-row .pcard .pmeta{font-size:.65rem;gap:5px}
       /* 게이지: 라벨과 막대를 한 줄로 압축(행 높이 절약) */
       .rc-view-row .pcard .pgauge{flex-direction:row;align-items:center;gap:7px;margin-top:0}

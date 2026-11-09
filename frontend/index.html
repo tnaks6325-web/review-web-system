@@ -571,10 +571,16 @@
   .results-badge{ background:#e8f1fe; color:#3182f6; }
 
   /* ===== 모집공고 종류 탭 (127 — 리뷰체험단/블로그체험단) ===== */
-  .rc-kind-tabs{display:flex;gap:6px;margin:2px 0 10px}
+  .rc-kind-tabs{display:flex;gap:6px;margin:2px 0 10px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .rc-kind-tabs::-webkit-scrollbar{display:none}
   .rc-kt{flex:0 0 auto;font-size:.78rem;font-weight:800;padding:6px 14px;border-radius:999px;border:1.5px solid var(--border,#E5E7EB);background:#fff;color:#6B7280;cursor:pointer}
   .rc-kt.on{background:var(--p,#6C5CE7);border-color:var(--p,#6C5CE7);color:#fff}
   .rc-kt .n{font-weight:700;opacity:.85;margin-left:3px;font-size:.7rem}
+  /* 320 폭 휴대폰: 세 탭이 한 줄에 들어가게 여백만 줄인다(넘치면 위 overflow-x 로 탭 줄 안에서만 넘김 —
+     화면 전체가 옆으로 밀리지 않게, 2026-11-09 점검) */
+  @media (max-width:360px){ .rc-kt{padding:6px 8px} }
+  /* 공지 본문의 띄어쓰기 없는 긴 주소가 홈 전체 폭을 밀어내지 않게 칸 안에서 줄바꿈(2026-11-09 점검) */
+  #reviewerNoticeList{overflow-wrap:anywhere;word-break:break-word}
 
   /* ===== 모집공고 카드/행 전환 토글 ===== */
   .rc-title-row{ justify-content:space-between; }
@@ -714,7 +720,7 @@
   .re-edit-reason{ width:100%; box-sizing:border-box; min-height:56px; border:1px solid #E6E6EC; border-radius:10px; padding:9px; font-size:.82rem; font-family:inherit; resize:vertical; margin-bottom:10px; }
   .re-edit-submit{ width:100%; padding:12px; background:#3182f6; color:#fff; border:none; border-radius:12px; font-size:.9rem; font-weight:800; cursor:pointer; }
   .re-edit-submit:disabled{ background:#C4C9D2; cursor:not-allowed; }
-  .obx{ background:#fff; border-radius:24px 24px 0 0; width:100%; max-width:440px; padding:8px 24px 26px; animation:obIn .3s cubic-bezier(.2,.8,.2,1); }
+  .obx{ background:#fff; border-radius:24px 24px 0 0; width:100%; max-width:440px; max-height:88vh; overflow-y:auto; padding:8px 24px 26px; animation:obIn .3s cubic-bezier(.2,.8,.2,1); }
   @keyframes obIn{ from{ transform:translateY(100%); } to{ transform:none; } }
   .ohandle{ width:40px; height:4px; border-radius:4px; background:#E6E6EC; margin:8px auto 18px; }
   .oic{ width:60px; height:60px; border-radius:20px; background:#e8f1fe; color:#3182f6; display:grid; place-items:center; font-size:1.6rem; margin-bottom:16px; }
@@ -1933,7 +1939,12 @@ function renderReviewSummary() {
 const _INTERNAL_KEY_RE = /^(campaign:|wt_)/i;
 function _taskLabel(item, fallback) {
   const it = item || {};
-  const cands = [it.displayNameTC, it.tcDisplayName, it.displayName, it.campaignName, it.tabName];
+  // 리뷰 내역 항목(서버 search.service)은 displayName 이 **사람 이름** 자리다 — 늘 idxName 과 함께 온다.
+  // 그 모양에서는 displayName 을 작업 이름 후보에서 뺀다(공고 제목·탭 표시명이 비면 리뷰어 본인 이름이
+  // 작업 이름으로 찍히던 문제, 2026-11-09 점검 L10). 오래된 리뷰 경고·구매 캡처 보완의 displayName 은
+  // 작업 이름이고 idxName 이 없으므로 종전 그대로다.
+  const personSlot = Object.prototype.hasOwnProperty.call(it, 'idxName');
+  const cands = [it.displayNameTC, it.tcDisplayName, personSlot ? '' : it.displayName, it.campaignName, it.tabName];
   for (const c of cands) {
     const v = String(c == null ? '' : c).trim();
     if (v && !_INTERNAL_KEY_RE.test(v)) return v;
@@ -3344,7 +3355,7 @@ function _partInfoCloseCapture(){
 function _partInfoSubmit(index){
   const items = _partInfoSubmitItems || [];
   const i = Number(index);
-  if (!Number.isInteger(i) || i < 0 || i >= items.length) return toast('제출할 참여 건을 선택해주세요');
+  if (!Number.isInteger(i) || i < 0 || i >= items.length) return showToast('제출할 참여 건을 선택해주세요');
   closePartInfo();
   goToSubmit([items[i]]);
 }
@@ -4300,13 +4311,14 @@ function _renderRecruitPreview(json) {
           if (isFull) {
             actionBtn = `<button class="rc-apply-btn rc-closed" disabled><i class="fas fa-ban"></i> 모집 마감</button>`;
           } else if (c.chat_url) {
-            actionBtn = `<button class="rc-apply-btn rc-kakao" onclick="handleApplyClick('${escHtml(c.chat_url).replace(/'/g,"&apos;")}')"><i class="fas fa-comment"></i> 참여 신청하기</button>`;
+            // 카톡 주소는 onclick 코드에 끼우지 않고 data- 속성 글자로 읽는다(따옴표가 든 값이 스크립트로 실행되던 구멍 — 점검 L3)
+            actionBtn = `<button class="rc-apply-btn rc-kakao" data-chat-url="${_escAttrX(c.chat_url)}" onclick="handleApplyClick(this.dataset.chatUrl)"><i class="fas fa-comment"></i> 참여 신청하기</button>`;
           } else {
-            actionBtn = `<button class="rc-apply-btn rc-default" onclick="handleApplyClick(null,'${c.id}')"><i class="fas fa-hand-pointer"></i> 참여 신청하기</button>`;
+            actionBtn = `<button class="rc-apply-btn rc-default" onclick="handleApplyClick(null,'${c.id}',this)"><i class="fas fa-hand-pointer"></i> 참여 신청하기</button>`;
           }
 
           return `
-            <div class="rc-card" data-ch="${escHtml(channel)}">
+            <div class="rc-card" data-ch="${_escAttrX(channel)}">
               <div class="rc-row">
                 <div class="rc-thumb">
                   <span class="rc-thumb-emoji">${channel.indexOf("네이버")>=0?"📗":channel.indexOf("쿠팡")>=0?"📦":channel.indexOf("마켓")>=0?"🛒":channel.indexOf("스토어")>=0?"🟢":channel.indexOf("11")>=0?"🛍️":"📢"}</span>
@@ -4336,8 +4348,8 @@ function _renderRecruitPreview(json) {
                   <input type="tel" class="rc-input" id="rcPhone_${c.id}" placeholder="연락처 (010-XXXX-XXXX)">
                 </div>
                 <div class="rc-form-actions">
-                  <button class="rc-submit-btn" onclick="submitInlineApply('${c.id}')"><i class="fas fa-check"></i> 신청 완료</button>
-                  <button class="rc-cancel-btn" onclick="closeInlineApply('${c.id}')">취소</button>
+                  <button class="rc-submit-btn" onclick="submitInlineApply('${c.id}',this)"><i class="fas fa-check"></i> 신청 완료</button>
+                  <button class="rc-cancel-btn" onclick="closeInlineApply('${c.id}',this)">취소</button>
                 </div>
               </div>
             </div>`;
@@ -4359,7 +4371,7 @@ function _renderRecruitPreview(json) {
 }
 
 /* ═══ 참여 신청 핸들러 ═══ */
-function handleApplyClick(chatUrl, campId) {
+function handleApplyClick(chatUrl, campId, el) {
   const user = getSavedUser();
   if (!user) {
     showToast('로그인 후 참여하실 수 있습니다');
@@ -4367,33 +4379,50 @@ function handleApplyClick(chatUrl, campId) {
     if (loginInput) { loginInput.scrollIntoView({ behavior:'smooth', block:'center' }); loginInput.focus(); }
     return;
   }
-  if (chatUrl) { window.open(chatUrl, '_blank'); return; }
-  if (campId) openInlineApply(campId);
+  if (chatUrl) {
+    // 직원이 넣은 주소가 javascript:·data: 이면 새 창에서 이 사이트 권한으로 실행된다 → 열지 않는다(점검 L3)
+    if (/^\s*(javascript|data|vbscript):/i.test(chatUrl)) { showToast('참여 링크가 올바르지 않습니다. 1:1 문의로 알려주세요'); return; }
+    window.open(chatUrl, '_blank'); return;
+  }
+  if (campId) openInlineApply(campId, el);
 }
 
-function openInlineApply(campId) {
-  document.querySelectorAll('.rc-inline-form').forEach(el => el.style.display = 'none');
-  const form = document.getElementById('rcForm_' + campId);
+/* 같은 옛 방식 공고 카드가 로그인 화면 목록(#recruitPreviewList)과 홈 목록(#recruitPreviewList2)에
+   두 벌 그려져 신청칸 id(rcForm_·rcName_·rcPhone_)가 겹친다 → getElementById 는 먼저 나오는
+   「숨겨진 로그인 화면」 쪽을 열어 눌러도 아무 일이 없었다(2026-11-09 점검).
+   누른 버튼이 든 카드 안의 신청칸을 쓰고, 버튼을 못 받으면 보이는 카드 쪽을 고른다. */
+function _rcInlineForm(campId, el) {
+  const card = el && el.closest ? el.closest('.rc-card') : null;
+  const own = card ? card.querySelector('.rc-inline-form') : null;
+  if (own) return own;
+  const all = Array.from(document.querySelectorAll('.rc-inline-form')).filter(f => f.id === 'rcForm_' + campId);
+  return all.find(f => { const c = f.closest('.rc-card'); return !!c && c.getClientRects().length > 0; }) || all[0] || null;
+}
+
+function openInlineApply(campId, el) {
+  document.querySelectorAll('.rc-inline-form').forEach(f => f.style.display = 'none');
+  const form = _rcInlineForm(campId, el);
   if (!form) return;
   form.style.display = '';
   const user = getSavedUser();
   if (user) {
-    const nameInput = document.getElementById('rcName_' + campId);
-    const phoneInput = document.getElementById('rcPhone_' + campId);
+    const nameInput = form.querySelector('input[type="text"]');
+    const phoneInput = form.querySelector('input[type="tel"]');
     if (nameInput && user.name) nameInput.value = user.name;
     if (phoneInput && user.phone) phoneInput.value = user.phone;
     else if (phoneInput && user.phone8) phoneInput.value = user.phone8;
   }
 }
 
-function closeInlineApply(campId) {
-  const form = document.getElementById('rcForm_' + campId);
+function closeInlineApply(campId, el) {
+  const form = _rcInlineForm(campId, el);
   if (form) form.style.display = 'none';
 }
 
-async function submitInlineApply(campId) {
-  const nameInput = document.getElementById('rcName_' + campId);
-  const phoneInput = document.getElementById('rcPhone_' + campId);
+async function submitInlineApply(campId, el) {
+  const form = _rcInlineForm(campId, el);
+  const nameInput = form ? form.querySelector('input[type="text"]') : null;
+  const phoneInput = form ? form.querySelector('input[type="tel"]') : null;
   const name = (nameInput ? nameInput.value : '').trim();
   const phone = (phoneInput ? phoneInput.value : '').trim();
 
@@ -4409,7 +4438,7 @@ async function submitInlineApply(campId) {
     const json = await res.json();
     if (json.ok) {
       showToast('✅ 참여 신청이 완료되었습니다!');
-      closeInlineApply(campId);
+      closeInlineApply(campId, el);
       loadRecruitPreview();
     } else {
       showToast(json.error || '신청 실패');
