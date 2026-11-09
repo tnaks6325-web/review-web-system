@@ -276,7 +276,28 @@
 
   // ★ 결정 359: 보내기 성공이 확인된 뒤에만 입력칸·첨부를 비운다. 실패하면 쓴 글·사진을 그대로 두고 이유를 알린다.
   //   (종전: 보내기 전에 먼저 비우고 `ok === false` 만 실패로 봐서, 통신 실패 {error} 때 글이 아무 안내 없이 사라졌다)
+  // ★ 결정 361: 쓴 글 하나마다 키(clientMsgId)를 만들어, 같은 글을 다시 보낼 때마다 같은 키를 싣는다.
+  //   시간 초과·끊김으로 응답만 못 받았는데 실제로는 저장됐으면, 서버가 같은 키를 알아보고 새로 저장하지 않는다(두 번 남지 않음).
+  //   키는 「계정·방·글·사진」이 같을 때만 다시 쓴다 — 글이나 사진을 고치면 새 키(고친 글이 조용히 버려지지 않게).
+  //   성공이 확인되면 키를 버린다(그다음 같은 글을 또 보내는 건 새 메시지).
   let _sending = false;
+  let _draftKey = null;       // { fp, key }
+  function newMsgKey() {
+    try { if (typeof crypto !== "undefined" && crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID(); } catch (_) {}
+    let hex = "";
+    try {
+      if (typeof crypto !== "undefined" && crypto && typeof crypto.getRandomValues === "function") {
+        const a = new Uint8Array(16); crypto.getRandomValues(a);
+        hex = Array.prototype.map.call(a, b => ("0" + b.toString(16)).slice(-2)).join("");
+      }
+    } catch (_) { hex = ""; }
+    if (!hex) for (let i = 0; i < 4; i++) hex += Math.floor(Math.random() * 0x100000000).toString(16).padStart(8, "0");
+    return "rcs-" + Date.now().toString(36) + "-" + hex;
+  }
+  function draftKeyFor(fp) {
+    if (!_draftKey || _draftKey.fp !== fp) _draftKey = { fp, key: newMsgKey() };
+    return _draftKey.key;
+  }
   async function send() {
     if (!_open || _sending) return;
     const user = getUser();
@@ -289,6 +310,8 @@
     if (!content && imageUrls.length === 0) return;
     const room = _open;
     const sentAttach = _pending.slice();
+    const fp = JSON.stringify([String(user && user.phone8 || ""), room.campaignKey || "", room.campaignSource || "", content, imageUrls]);
+    const clientMsgId = draftKeyFor(fp);
     const btn = document.getElementById("rcsSendBtn");
     _sending = true;
     if (btn) btn.disabled = true;
@@ -297,16 +320,19 @@
       data = await gasPost({
         action: "csReviewerSend", phone8: user.phone8, name: user.name,
         campaignKey: room.campaignKey, campaignLabel: room.campaignLabel,
-        campaignSource: room.campaignSource, content, imageUrls,
+        campaignSource: room.campaignSource, content, imageUrls, clientMsgId,
       });
     } catch (err) { data = { ok: false, error: (err && err.message) || "" }; }
     _sending = false;
     if (btn) btn.disabled = false;
     if (failed(data)) {
-      // 입력칸·첨부는 건드리지 않는다 — 그대로 다시 [보내기] 누르면 된다.
+      // 같은 키인데 내용이 다르다고 서버가 거절하면(드묾) 키를 버린다 — 다음 [보내기]는 새 메시지로 간다(막다른 길 방지).
+      if (data && data.code === "cs_client_msg_conflict" && _draftKey && _draftKey.key === clientMsgId) _draftKey = null;
+      // 입력칸·첨부는 건드리지 않는다 — 그대로 다시 [보내기] 누르면 된다(같은 키라 두 번 저장되지 않는다).
       toast("전송하지 못했어요. " + friendlyErr(data, "잠시 후 다시 보내 주세요."), true);
       return;
     }
+    if (_draftKey && _draftKey.key === clientMsgId) _draftKey = null;   // 성공 확인 → 이 글의 키는 끝
     room.threadId = data.threadId || room.threadId;
     if (_open !== room) return;                       // 그 사이 다른 방으로 옮겼다
     if (ta.value.trim() === content) { ta.value = ""; ta.style.height = "auto"; }
