@@ -155,7 +155,7 @@ console.log('\nB-2) 결정 354 빠른 길 — 서명 주소 우선 · 실패 사
     await tick();
     const f = fetches[0];
     const body = f && JSON.parse(f.init.body);
-    ok('★ 일괄 서명 1회 — POST /api/img/sign · 직원 토큰 · kind t · 두 장 같이', fetches.length === 1 && f.u === 'https://api.example.com/api/img/sign'
+    ok('★ 일괄 서명 1회 — POST /api/trackb/img/sign · 직원 토큰 · kind t · 두 장 같이', fetches.length === 1 && f.u === 'https://api.example.com/api/trackb/img/sign'
       && f.init.headers.Authorization === 'Bearer TOK' && body.kind === 't' && body.ids.length === 2, JSON.stringify(body));
     ok('★ 늦게 온 서명 → 아직 안 뜬 사진은 빠른 길로 갈아 끼운다', pending.src === E2 && pending.a['data-dt'] === 'e', pending.src);
     ok('★ 이미 다 뜬 사진은 건드리지 않는다', /^https:\/\/drive\.google\.com/.test(loaded.src));

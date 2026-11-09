@@ -16,7 +16,7 @@
 
    ── 결정 354 — 사진 빠른 길(우리 사이트 `/img/<t|m>/<id>?e=&s=`, Cloudflare R2 + 서울 엣지 캐시) ──
    ★ 서명 주소가 있으면 그것을 먼저 쓰고, 없으면 종전(구글 썸네일) 그대로. 서명은 서버만 만든다:
-     ① 로그인 화면 = 이 모듈이 `POST /api/img/sign` 으로 한 번에 받아 온다(직원 토큰이 있을 때만)
+     ① 로그인 화면 = 이 모듈이 `POST /api/trackb/img/sign` 으로 한 번에 받아 온다(직원 토큰이 있을 때만)
      ② 무인증 화면 = 그 화면의 응답이 실어 준 주소를 `DriveThumb.seed([...])` 로 넣는다.
    ★ 실패 사다리(한 칸씩, 되돌아가지 않는다 — 무한 루프 금지):
        빠른 길(data-dt="e") → 구글 썸네일(data-dt="g") → 원본 프록시(data-tf) → 빈 칸
@@ -128,7 +128,7 @@
 
   function sign(k, ids, tok, base) {
     ids.forEach(function (id) { asked[k + ':' + id] = 1; });
-    fetch(base + '/api/img/sign', {
+    fetch(base + '/api/trackb/img/sign', {   // ★ Track B 경로 — 인트라넷 SSO 토큰은 /api/trackb/* 밖이 403(결정 354 보강)
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json' },
       body: JSON.stringify({ kind: k, ids: ids })

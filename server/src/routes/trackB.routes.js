@@ -1723,6 +1723,12 @@ const _moPreview = _handler(_moRoutes, 'manualOrderPreview');
 const _moSubmit = _handler(_moRoutes, 'manualOrderSubmit');
 const _moReviewerSearch = _handler(_moRoutes, 'manualOrderReviewerSearch');
 
+// ── 사진 빠른 길 일괄 서명(결정 354 보강) ───────────────────────
+//   원본 `POST /api/img/sign` 은 인트라넷 SSO 토큰(via:'intranet')이 authMiddleware 에서 403 으로 막혀
+//   작업보드 사진이 전부 구글 썸네일로만 떴다(2026-11-09 운영 실측 · 같은 재기준 누락 계열).
+//   ★ 로직 복제 0 — 같은 핸들러(허용 목록 통과 번호만 서명). 게이트는 내부인(광고주·리뷰어 토큰은 옛 길 그대로).
+router.post('/img/sign', authMiddleware, internalMiddleware, require('./imageEdge.routes').signHandler);
+
 router.post('/manual-order/preview', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _moPreview(req, res, next));
 router.post('/manual-order/submit', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
