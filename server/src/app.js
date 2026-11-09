@@ -49,7 +49,12 @@ app.use(morgan('combined'));
 // 제한기에 의해 바로 끝나는 429도 관측해야 실제 제한 경로를 추적할 수 있다.
 // rateLimiter 뒤에 두면 429는 finish 메트릭 자체를 남기지 못해 오류율 0%로 보인다.
 app.use(metricsMiddleware);
+// ★ 결정 353 — 사진 빠른 길: Pages Function 의 내부 생성 입구는 **열쇠(X-Img-Key)가 맞을 때만** 속도 제한 앞에서 처리
+//   (Cloudflare 의 몇 개 주소로 몰려 와 주소별 분당 120 에 걸린다). 열쇠 없음·틀림은 제한을 거친 뒤 401.
+const imageEdgeRoutes = require('./routes/imageEdge.routes');
+imageEdgeRoutes.mount(app, { beforeLimiter: true });
 app.use('/api/', rateLimiter);
+imageEdgeRoutes.mount(app, { beforeLimiter: false });   // 일괄 서명 · 내부 입구(나머지) · 옛 통로 카운터
 
 // PR preview can be pointed at production data for verification.  Keep this
 // enforcement on the server (not only in the UI) so an accidental save request

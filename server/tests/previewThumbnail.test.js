@@ -35,8 +35,9 @@ function bodyOf(src, name) {
 }
 
 console.log('\nA) 규칙 단일 출처 — js/drive-thumb.js');
-ok('모듈이 url/attrs/fall 을 노출한다',
-  /window\.DriveThumb\s*=\s*\{\s*url: url,\s*attrs: attrs,\s*fall: fall\s*\}/.test(MOD));
+// (결정 353 — 빠른 길 seed/edgeUrl/kindOf 가 더해졌다. url/attrs/fall 세 개는 그대로 — 검사 의미 불변)
+ok('모듈이 url/attrs/fall 을 노출한다(+ 빠른 길 seed/edgeUrl/kindOf)',
+  /window\.DriveThumb\s*=\s*\{\s*url: url,\s*attrs: attrs,\s*fall: fall,\s*seed: seed,\s*edgeUrl: edgeUrl,\s*kindOf: kindOf\s*\}/.test(MOD));
 ok('★ 파일ID 형식 검증 후에만 CDN URL 을 만든다(임의 문자열 주입 차단)',
   /\/\^\[-\\w\]\{20,\}\$\/\.test\(s\)/.test(MOD));
 ok('★ 크기는 100~1600 으로 접는다', /Math\.max\(100, Math\.min\(1600,/.test(MOD));
@@ -91,6 +92,101 @@ console.log('\nB) 실행 — 속성·폴백 (grep 만으로는 "그린다"를 �
   ok('★ 원본 URL 이 없으면 src 를 제거', img2.removed === true);
 }
 
+console.log('\nB-2) 결정 353 빠른 길 — 서명 주소 우선 · 실패 사다리 · 늦은 서명 갈아 끼우기 (vm 실행)');
+{
+  const FID = 'F1bbbbbbbbbbbbbbbbbbbb';
+  const FID2 = 'F2cccccccccccccccccccc';
+  const FULL = 'https://api.example.com/api/drive/image/' + FID;
+  const exp = Math.floor(Date.now() / 1000) + 12 * 3600;
+  const SIG = 'A'.repeat(43);
+  const E1 = `/img/t/${FID}?e=${exp}&s=${SIG}`;
+  const E2 = `/img/t/${FID2}?e=${exp}&s=${SIG}`;
+  const mem = {};
+  const fetches = [];
+  let reply = null;
+  const imgs = [];
+  function mkImg(attrStr) {
+    const a = {}; attrStr.replace(/([\w-]+)="([^"]*)"/g, (_, k, v) => { a[k] = v.replace(/&amp;/g, '&'); });
+    const img = { a, dataset: {}, complete: false, naturalWidth: 0,
+      getAttribute(k) { return this.a[k]; }, setAttribute(k, v) { this.a[k] = String(v); },
+      removeAttribute(k) { delete this.a[k]; if (k === 'src') this.removed = true; },
+      get src() { return this.a.src; }, set src(v) { this.a.src = v; } };
+    imgs.push(img); return img;
+  }
+  const timers = [];
+  const sb = {
+    console, Date, JSON, Math, Object, String, Number, Promise,
+    setTimeout: (fn) => { timers.push(fn); return 1; },
+    sessionStorage: { getItem: k => (k in mem ? mem[k] : null), setItem: (k, v) => { mem[k] = String(v); } },
+    fetch: (u, init) => { fetches.push({ u, init }); return Promise.resolve({ ok: true, json: () => Promise.resolve(reply) }); },
+    document: { querySelectorAll: () => imgs.filter(i => i.a['data-dt'] === 'g' && i.a['data-dt-id']) },
+    API_BASE_URL: 'https://api.example.com',
+  };
+  sb.window = sb;
+  vm.createContext(sb);
+  vm.runInContext(MOD, sb);
+  const T = sb.DriveThumb;
+  const tick = async () => { while (timers.length) timers.shift()(); for (let i = 0; i < 5; i++) await Promise.resolve(); };
+
+  (async () => {
+    // ① 비로그인(토큰 없음) = 서명 요청 0 · 종전 그대로
+    let a = T.attrs(FID, 400, FULL); await tick();
+    ok('★ 토큰 없는 화면은 서명을 묻지 않는다(무인증 화면은 seed 로만)', fetches.length === 0 && /src="https:\/\/drive\.google\.com\/thumbnail/.test(a), a);
+    // ② seed → attrs 가 빠른 길을 먼저 쓴다(+ 구글·원본 사다리 속성)
+    ok('seed 는 형식이 맞는 서명 주소만 받는다', T.seed([E1, 'https://evil.example/img/t/x', '/img/t/' + FID + '?e=1&s=' + SIG, undefined]) === 1);
+    a = T.attrs(FID, 400, FULL);
+    ok('★ 서명 주소가 있으면 src = 우리 사이트 빠른 길', a.includes('src="' + E1.replace(/&/g, '&amp;') + '"') && /data-dt="e"/.test(a), a);
+    ok('★ 사다리 속성 — 구글(data-g) · 원본(data-full) · onerror', /data-g="https:\/\/drive\.google\.com\/thumbnail\?id=/.test(a) && a.includes('data-full="' + FULL + '"') && /onerror="DriveThumb\.fall\(this\)"/.test(a), a);
+    ok('★ 401~1600 은 m(크게 보기용), 400 이하는 t', T.kindOf(600) === 'm' && T.kindOf(400) === 't' && T.edgeUrl(FID, 'm') === '');
+    // ③ 실패 사다리: 빠른 길 → 구글 → 원본 → 멈춤
+    const img = mkImg(a);
+    T.fall(img);
+    ok('★ 빠른 길 실패 1회차 → 구글 썸네일', /^https:\/\/drive\.google\.com\/thumbnail/.test(img.src) && img.a['data-dt'] === 'g', img.src);
+    T.fall(img);
+    ok('★ 2회차 → 원본 프록시', img.src === FULL, img.src);
+    img.src = 'THIRD'; T.fall(img);
+    ok('★ 3회차는 아무 일도 하지 않는다(무한 루프 금지)', img.src === 'THIRD');
+    ok('★ 빠른 길이 한 번 실패한 사진은 이 페이지에서 다시 쓰지 않는다', T.edgeUrl(FID, 't') === '' && /data-dt="g"/.test(T.attrs(FID, 400, FULL)));
+    // ④ 로그인 화면: 서명을 한 번에 묻고, 늦게 온 서명으로 아직 안 뜬 사진만 갈아 끼운다
+    mem.admin_token = 'TOK';
+    reply = { ok: true, enabled: true, urls: { [FID2]: E2 } };
+    const pending = mkImg(T.attrs(FID2, 400, FULL));
+    const loaded = mkImg(T.attrs('F3dddddddddddddddddddd', 400, FULL)); loaded.complete = true; loaded.naturalWidth = 400;
+    await tick();
+    const f = fetches[0];
+    const body = f && JSON.parse(f.init.body);
+    ok('★ 일괄 서명 1회 — POST /api/img/sign · 직원 토큰 · kind t · 두 장 같이', fetches.length === 1 && f.u === 'https://api.example.com/api/img/sign'
+      && f.init.headers.Authorization === 'Bearer TOK' && body.kind === 't' && body.ids.length === 2, JSON.stringify(body));
+    ok('★ 늦게 온 서명 → 아직 안 뜬 사진은 빠른 길로 갈아 끼운다', pending.src === E2 && pending.a['data-dt'] === 'e', pending.src);
+    ok('★ 이미 다 뜬 사진은 건드리지 않는다', /^https:\/\/drive\.google\.com/.test(loaded.src));
+    // 구글이 이미 실패해 원본으로 가던 사진도 갈아 끼우고, 빠른 길이 또 실패하면 원본으로 되돌린 뒤 멈춘다
+    {
+      const FID6 = 'F6gggggggggggggggggggg';
+      T.seed([`/img/t/${FID6}?e=${exp}&s=${SIG}`]);
+      const slow = mkImg(T.attrs(FID6, 400, FULL).replace('data-dt="e"', 'data-dt="g"'));
+      slow.dataset.tf = '1'; slow.src = FULL;
+      T.seed([`/img/t/${FID6}?e=${exp}&s=${SIG}`]);
+      ok('★ 느린 원본으로 가던 사진도 빠른 길로 갈아 끼운다', slow.a['data-dt'] === 'e' && /^\/img\/t\//.test(slow.src), slow.src);
+      T.fall(slow);
+      ok('★ 그 빠른 길이 실패하면 원본으로 되돌린다(구글은 이미 실패)', slow.src === FULL && slow.a['data-dt'] === 'x', slow.src);
+      slow.src = 'AFTER'; T.fall(slow);
+      ok('★ 그다음 실패는 멈춘다(무한 루프 금지)', slow.src === 'AFTER');
+    }
+    T.attrs('F3dddddddddddddddddddd', 400, FULL); await tick();
+    ok('★ 서명을 못 받은 번호(허용 목록 밖)는 다시 묻지 않는다', fetches.length === 1);
+    ok('서명은 탭 보관소(sessionStorage)에 남아 새로고침 첫 화면부터 빠른 길', /F2c/.test(mem.dt_edge_v1 || ''));
+    // ⑤ 서버가 꺼 두면(enabled:false) 그 페이지에서 그만 묻는다
+    reply = { ok: true, enabled: false, urls: {} };
+    T.attrs('F4eeeeeeeeeeeeeeeeeeee', 400, FULL); await tick();
+    T.attrs('F5ffffffffffffffffffff', 400, FULL); await tick();
+    ok('★ 서버가 빠른 길을 꺼 두면(열쇠 없음) 한 번 묻고 그친다', fetches.length === 2, fetches.length);
+    ok('★ 모듈 코드에 원본 프록시 주소 규칙이 여전히 없다', !/api\/drive\/image/.test(MOD.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')));
+    ok('★ 보고 페이지는 응답이 실어 준 서명(t)을 seed 로 넣는다', /DriveThumb\.seed\(data\.images\.map\(function\(im\)\{ return im\.t; \}\)\)/.test(RP));
+    finish();
+  })().catch(e => { ok('B-2 실행', false, e && e.stack); finish(); });
+}
+
+function finish() {
 console.log('\nC) 소비처 — 썸네일 자리만 CDN');
 ok('① 작업보드 제출물 미리보기 패널(rvone)',
   /<img class="rvone"\$\{_thumbAttrs\(list\[i\]\.fileId,600,list\[i\]\.url\)\}/.test(WD));
@@ -143,3 +239,4 @@ ok('★ 모듈이 없으면 원본으로 접는다 — 소비처 5곳 모두 win
 
 console.log(`\n결과: ${pass} 통과 / ${fail} 실패`);
 process.exit(fail ? 1 : 0);
+}
