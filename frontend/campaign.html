@@ -134,6 +134,8 @@
     .acct-tab.on{border-bottom-color:#007aff}
     .acct-tab.on .nm{color:#007aff}
     .acct-tab.done .t{color:#1a7f37;font-weight:700}
+    .acct-tab.waiting .t{color:#8e8e93}                 /* 결정 356 — 차례를 기다리는 명의 */
+    .optrow.chain-late .sub{color:#c2410c}              /* 결정 356 — 오늘 마감 전에 차례가 안 오는 명의 */
     .acct-tab.soon .t{color:#c93400;font-weight:700}
     .acct-tab:focus-visible{outline:2px solid #007aff;outline-offset:-2px;border-radius:6px}
     .acct-tabs-help{font-size:12px;color:#6e6e73;padding:6px 16px 0}
@@ -207,7 +209,7 @@
     <div class="sec">
       <div class="cardbx lockcard">
         <div class="e">🧾</div><div class="m">내 정보를 먼저 등록해주세요</div>
-        <div class="s">참여 후에는 <b id="missTtl">30분</b> 안에 구매와 구매양식 제출까지 끝나야 해서,<br/>지금 미리 등록해두는 거예요. <b>아직 자리는 차지하지 않았어요.</b></div>
+        <div class="s">참여 후에는 <b id="missTtl">20분</b> 안에 구매와 구매양식 제출까지 끝나야 해서,<br/>지금 미리 등록해두는 거예요. <b>아직 자리는 차지하지 않았어요.</b></div>
         <div class="misslist" id="missList"></div>
         <button class="btn" onclick="location.href='/'">리뷰어 홈에서 내 정보 등록하기</button>
         <button class="btn ghost" style="margin-top:8px" onclick="showPre()">다음에 할게요</button>
@@ -368,7 +370,7 @@
 <!-- 여러 명의로 한 번에 참여하는 방법(도움말 이미지 · 화면 속 이름·상품은 예시) -->
 <div class="sheet-ovl" id="multiHelp" onclick="if(event.target===this) hideMultiHelp()">
   <div class="sheet" role="dialog" aria-label="여러 명의로 한 번에 참여하는 방법">
-    <img id="multiHelpImg" alt="여러 명의로 한 번에 참여하는 방법: 1. 참여하기를 눌러요 2. 참여할 명의를 모두 체크해요 3. 위에 명의 탭이 생겨요 4. 탭을 누르거나 옆으로 밀어 명의마다 구매양식을 작성해요 5. 한 명의씩 제출해요 6. 모두 제출하면 끝이에요. 체크한 명의 모두 바로 제한시간이 시작되니 시간이 짧은 타계정부터 제출하세요. 처음에 고른 명의 수만큼만 참여되고, 참여한 뒤에는 명의를 추가할 수 없어요.">
+    <img id="multiHelpImg" alt="여러 명의로 한 번에 참여하는 방법: 1. 참여하기를 눌러요 2. 참여할 명의를 모두 체크해요 3. 위에 명의 탭이 생겨요 4. 탭을 누르거나 옆으로 밀어 명의마다 구매양식을 작성해요 5. 한 명의씩 제출해요 6. 모두 제출하면 끝이에요. 시간은 한 명의씩 차례로 흘러요(본계정 20분, 타계정 15분). 앞 명의가 제출·취소되거나 시간이 끝나면 다음 명의 시간이 시작되고, 차례 전에 미리 제출해도 돼요. 내 차례 시작 때 마감까지 10분 이상 남는 명의만 고를 수 있어요. 처음에 고른 명의 수만큼만 참여되고, 참여한 뒤에는 명의를 추가할 수 없어요.">
     <button class="btn" style="margin-top:12px" onclick="hideMultiHelp()">닫기</button>
   </div>
 </div>
@@ -425,6 +427,7 @@ let PREVIEW = false;   // init에서 토큰 확보 후 확정(그 전에 호출�
 let _camp = null;          // /api/campaign/:id 공개 페이로드
 let _detail = null;        // work-detail 응답
 let _holdTick = null;
+let _cdEnd = '';   // ★ 결정 356 — 지금 세는 마감(서버가 당기면 다시 센다)
 let _pollTimer = null;
 let _campaignLoadPromise = null; // 같은 화면의 동시 새로고침은 하나의 요청만 사용
 let _campaign429Retried = false; // 429 자동 재시도는 제한 창마다 한 번만
@@ -566,7 +569,8 @@ function recoverActiveHolds(preferredPhone){
         m[p8] = {
           applicationId:h.applicationId, holdToken:String(h.holdToken), phone8:p8,
           expiresAt:h.expiresAt || null, optionKey:h.optionKey || '', name:h.name || '',
-          isSub:!!h.isSub, ownerPhone8:_p8(h.ownerPhone8 || s.phone8)
+          isSub:!!h.isSub, ownerPhone8:_p8(h.ownerPhone8 || s.phone8),
+          startsAt:h.startsAt || null, chainState:h.chainState || null   // ★ 결정 356 — 서버가 준 차례 정보(없으면 종전)
         };
         if(!recovered.includes(p8)) recovered.push(p8);
       }
@@ -580,6 +584,92 @@ function recoverActiveHolds(preferredPhone){
     }catch(_){ return false; }
   })().finally(()=>{ _holdRecoveryPromise = null; });
   return _holdRecoveryPromise;
+}
+
+/* ═══ ★ 결정 356 — 차례 타이머(화면 쪽). 서버가 준 값으로만 대기/진행·마감을 바꾼다. 토큰은 서버가 '만료'라고 할 때만 지운다. ═══ */
+function _chainOn(){ return !!(_camp && _camp.holdChain === true) && _acctMultiPick(); }
+/** 서버 차례 정보(work-detail.chain) 반영 — 없으면(구서버) 아무것도 안 바꾼다 · 지우지 않는다 · 모르는 명의는 복구만(재시도 없음). */
+let _chainRecoverAt = 0;
+function _applyChainView(list){
+  if(PREVIEW || !Array.isArray(list)) return false;
+  const m = _allHolds(), byApp = {}; let changed = false, unknown = false;
+  Object.keys(m).forEach(k => { if(m[k] && m[k].applicationId) byApp[String(m[k].applicationId)] = k; });
+  for(const c of list){
+    const k = c && byApp[String(c.applicationId)]; if(!k){ unknown = true; continue; }
+    const h = m[k];
+    const nx = { expiresAt: isFinite(Date.parse(c.expiresAt || '')) ? c.expiresAt : h.expiresAt,
+                 startsAt: c.sequential ? (c.startsAt || null) : null, chainState: c.sequential ? c.state : null };
+    for(const f in nx) if(h[f] !== nx[f]){ h[f] = nx[f]; changed = true; }
+  }
+  if(changed) _saveHolds(m);
+  if(unknown && Date.now() - _chainRecoverAt > 30000){ _chainRecoverAt = Date.now(); recoverActiveHolds().then(ok => { if(ok) renderAcctTabs(); }); }
+  return changed;
+}
+/** 로컬 0초 → 서버에 한 번 묻고, 만료라고 할 때만 정리한다(RED-13). 보고 있는 명의가 하나뿐이면 결정 351 대로 만료 화면부터 띄운다(토큰은 남김). */
+const _expiryAsk = {};
+async function _confirmHoldExpiry(p8, opt){
+  const h = getHold(p8); if(!h) return;
+  const active = !!(opt && opt.active), st = _expiryAsk[p8] || (_expiryAsk[p8] = { at: 0, n: 0 });
+  if(Date.now() - st.at < Math.min(60000, 4000 * Math.pow(2, st.n))) return;
+  st.at = Date.now();
+  const alone = active && Object.keys(_allHolds()).length <= 1;
+  if(alone) show('vExpired');
+  let r = null, j = null;
+  try{
+    r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/work-detail?phone8=' + encodeURIComponent(h.phone8)
+      + '&holdToken=' + encodeURIComponent(h.holdToken), { cache:'no-store' });
+    j = await r.json().catch(()=>({}));
+  }catch(_){ j = null; }
+  if(j && (j.reason === 'expired' || j.reason === 'no_hold')){ delete _expiryAsk[p8]; return active ? releaseExpiredHold(h) : _expireOtherTab(p8); }
+  if(r && r.ok && j && j.ok){
+    delete _expiryAsk[p8];
+    if(j.serverNow) CampCards.setServerNow(j.serverNow);
+    if(!_applyChainView(j.chain) && j.application && j.application.expiresAt){ const m = _allHolds(); if(m[p8]){ m[p8].expiresAt = j.application.expiresAt; _saveHolds(m); } }
+    if(_isDoneDetail(j)){ if(active){ if(!_tabDoneActive()) renderDone(); } else _onTabSubmittedP8(p8, {}); return; }
+    if(active){ if(alone) show('vJoined'); startHoldCountdown(j.application.expiresAt); }
+    renderAcctTabs(); return;
+  }
+  st.n++;   // 확인 불가(오프라인·429) — 토큰은 남긴다. 다음 틱이 간격을 늘려 다시 묻는다.
+  if(active) setTimeout(() => _confirmHoldExpiry(p8, opt), Math.min(60000, 4000 * Math.pow(2, st.n)));
+}
+/** 명의 고르기 어림 — 서버 shapeLink 와 같은 규칙(가드가 같은 표로 대조). 쓰는 값은 전부 서버가 준 것. */
+function _chainPreview(order){
+  const c = _camp || {}, now = CampCards.serverNow(), m = _allHolds();
+  const close = Date.parse(c.closesAt || ''), cut0 = Date.parse(c.cutoffAt || '');
+  const cut = isFinite(close) ? (isFinite(cut0) ? cut0 : close - (Number(c.close_buffer_min ?? 10) || 0) * 60000) : NaN;
+  let tail = now; Object.keys(m).forEach(k => { const e = Date.parse((m[k] && m[k].expiresAt) || ''); if(e > now) tail = Math.max(tail, e); });
+  const main = Number(c.hold_ttl_min) || 20, sub = Number(c.sub_hold_ttl_min) || 15;
+  return order.map(r => {
+    const full = Math.max(1, r.type === 'sub' ? sub : main) * 60000, st = tail;
+    // 서버 shapeLink 와 같은 규칙: 기다리는 명의(st > now)는 마감까지 최소 10분(답 24① — 마감 전 막기 0분 공고 포함)
+    const cutW = (st > now && isFinite(close)) ? (isFinite(cut) ? Math.min(cut, close - 600000) : close - 600000) : cut;
+    if(isFinite(cutW) && !(st < cutW)) return { p8: r.phone8, ok: false, startsAt: st };
+    const en = isFinite(close) ? Math.min(st + full, close) : st + full; tail = en;
+    return { p8: r.phone8, ok: true, startsAt: st, endsAt: en, clipped: en < st + full };
+  });
+}
+/** 체크를 바꿀 때마다 — 위에서부터 다시 계산해 차례가 안 오는 명의를 잠근다(체크는 풀린다). 위 명의를 빼면 다시 풀린다. */
+function _refreshChainLocks(box, rows){
+  if(!_chainOn()) return;
+  const picked = [];
+  rows.forEach((r, k) => {
+    const el = box.children[k]; if(!el || !(r.state === 'ok' || r.state === 'verify')) return;
+    const p = _chainPreview(picked.concat([r])).pop();
+    const sub = el.querySelector('.sub');
+    if(!p.ok){
+      el.classList.add('dis', 'chain-late'); el.classList.remove('sel');
+      el.setAttribute('aria-checked', 'false'); el.setAttribute('aria-disabled', 'true');
+      if(sub) sub.textContent = '오늘 마감 전에 차례가 안 와요 · ***' + r.phone8.slice(-4);
+      return;
+    }
+    el.classList.remove('dis', 'chain-late'); el.removeAttribute('aria-disabled');
+    if(sub) sub.textContent = _acctStateText(r) + ' · ' + CampCards._fmtHM(new Date(p.startsAt).toISOString()) + '~'
+      + CampCards._fmtHM(new Date(p.endsAt).toISOString()) + (p.clipped ? '(마감까지)' : '') + ' · ***' + r.phone8.slice(-4);
+    if(el.classList.contains('sel')) picked.push(r);
+  });
+  _acctSelMany = rows.filter((x, k) => box.children[k] && box.children[k].classList.contains('sel'));
+  _acctSel = _acctSelMany[0] || null;
+  _syncAcctGo();
 }
 
 /* ═══ 작업내용 표시 정규화 (표시 직전 · 스냅샷 불변 · 문제 패턴일 때만 개입) ═══ */
@@ -909,7 +999,7 @@ function goPopNormal(id){
   try{ sessionStorage.setItem('pop_return_camp', JSON.stringify({ campaignId:CAMP_ID })); }catch(_){}
   location.href = 'campaign.html?id=' + encodeURIComponent(id);
 }
-function holdTtlText(){ return ((_camp && Number(_camp.hold_ttl_min)) || 30) + '분'; } // 공개 화이트리스트의 hold_ttl_min 사용
+function holdTtlText(){ return ((_camp && Number(_camp.hold_ttl_min)) || 20) + '분'; } // 공개 화이트리스트의 hold_ttl_min 사용
 
 /* ═══ 상품옵션 (061 2단계) ═══ */
 let _optSheetMode = 'join';   // 'join' | 'change'
@@ -1169,6 +1259,7 @@ let _acctSelMany = [];      // 시트에서 체크한 명의들(화면 순서)
 let _initialAcctSels = null; // 옵션 고르기로 넘어갈 때 들고 가는 체크 목록(2개 이상일 때만)
 function _acctMultiPick(){ return multiEnabled() && !isBlogCampaign() && !isQnaCampaign(); }
 const _acctBlocked = {};   // 서버가 거절한 명의 p8 → 사유문구(재선택 유도용, 세션 한정)
+const _chainLate = new Set(); // ★ 결정 356 — chain_after_close 로 잠근 명의(시트를 다시 열 때 새로 판정)
 let _repurchaseAccounts = {};
 
 function multiEnabled(){ return !!(_camp && _camp.multi_account_mode === true); }
@@ -1259,11 +1350,13 @@ function renderAcctList(){
       // 여러 개 체크 — 누를 때마다 넣고 빼기. 순서는 목록 순서(본계정 먼저) = 탭 순서.
       div.setAttribute('role', 'checkbox'); div.setAttribute('aria-checked', 'false'); div.tabIndex = 0;
       const toggle = () => {
+        if(div.classList.contains('chain-late')) return;   // ★ 결정 356 — 차례가 안 오는 명의는 못 고른다
         const on = !div.classList.contains('sel');
         div.classList.toggle('sel', on); div.setAttribute('aria-checked', String(on));
         _acctSelMany = rows.filter((x, k) => box.children[k] && box.children[k].classList.contains('sel'));
         _acctSel = _acctSelMany[0] || null;
         _syncAcctGo();
+        _refreshChainLocks(box, rows);   // ★ 결정 356 — 위 명의를 넣고 빼면 아래 명의의 차례 시각·잠금이 바뀐다
       };
       div.onclick = toggle;
       div.onkeydown = (e) => { if(e.key === ' ' || e.key === 'Enter'){ e.preventDefault(); toggle(); } };
@@ -1280,13 +1373,17 @@ function renderAcctList(){
   });
   $('acctSheetGo').disabled = true;
   if(many) _syncAcctGo();
+  if(many) _refreshChainLocks(box, rows);   // ★ 결정 356
   const canAny = rows.some(r => r.state === 'ok' || r.state === 'verify');
   const onlyNoCredit = !canAny && rows.some(r => r.state === 'nocredit');
   $('acctSheetNote').textContent = canAny
     ? (many
       // ★ 결정 353(답 2A): 순서대로 흐르는 시간은 3단계 — 지금은 체크한 명의 모두 참여하는 순간 각자 시간이 시작된다(서버 규칙 그대로)
-      ? '체크한 명의 모두 지금 바로 제한시간이 시작돼요 — 본계정 ' + ((_camp && Number(_camp.hold_ttl_min)) || 30) + '분 · 타계정 ' + ((_camp && Number(_camp.sub_hold_ttl_min)) || 15) + '분 안에 명의마다 제출해 주세요.'
-      : '선택한 명의로 자리가 잡혀요. 타계정 건은 제한시간이 더 짧아요(기본 10분).')
+      ? (_chainOn()
+        // ★ 결정 356 — 서버가 차례 줄을 만들 수 있다고 알릴 때만(없으면 아래 종전 문구 · RED-04)
+        ? '한 명의씩 차례로 시간이 흘러요 — 본계정 ' + ((_camp && Number(_camp.hold_ttl_min)) || 20) + '분 · 타계정 ' + ((_camp && Number(_camp.sub_hold_ttl_min)) || 15) + '분. 앞 명의가 제출·취소되거나 시간이 끝나면 다음 명의 시간이 시작돼요(차례 전에 미리 제출해도 돼요). 오늘 마감 전에 차례가 오지 않는 명의는 고를 수 없어요.'
+        : '체크한 명의 모두 지금 바로 제한시간이 시작돼요 — 본계정 ' + ((_camp && Number(_camp.hold_ttl_min)) || 20) + '분 · 타계정 ' + ((_camp && Number(_camp.sub_hold_ttl_min)) || 15) + '분 안에 명의마다 제출해 주세요.')
+      : '선택한 명의로 자리가 잡혀요. 타계정 건은 제한시간이 더 짧아요(기본 ' + ((_camp && Number(_camp.sub_hold_ttl_min)) || 15) + '분).')
     : onlyNoCredit
       ? '참여권이 남은 명의가 없어요. 일반 모집을 구매양식 제출까지 완료하면 그 명의로 참여할 수 있어요.'
       : (!multiEnabled() && rows.some(r => r.state === 'joined'))
@@ -1316,6 +1413,9 @@ async function openAcctSheet(optionKey, next){
   await loadSubs();
   if(_subsLoadError){ toast('명의 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요'); return; }
   await loadPopCredit();          // ★ 명의별 참여권이 도착한 뒤에 그린다(모르면 종전대로 그린다)
+  // ★ 결정 356 — 차례 어림은 서버 마감으로(다른 기기 홀드 포함). 차례 거절은 매번 새로 판정(앞 명의가 끝나면 다시 고를 수 있다)
+  _chainLate.forEach(p => { delete _acctBlocked[p]; }); _chainLate.clear();
+  if(_chainOn() && Object.keys(_allHolds()).length) { try{ await recoverActiveHolds(); }catch(_){ /* 어림만 덜 정확 — 서버가 최종 판정 */ } }
   // 타계정이 하나도 없고 본계정도 이미 참여중이면 → 등록 유도
   const rows = _acctRows();
   if(!(_subs || []).length && !rows.some(r => r.type === 'self' && r.state === 'ok')){
@@ -1454,9 +1554,11 @@ function _tabList(){
   if(PREVIEW) return [];
   const m = _allHolds();
   const list = Object.keys(m).map(k => ({ p8:k, name: m[k].name || ('***' + String(k).slice(-4)), seq: Number(m[k].seq) || 0,
-    isSub: !!m[k].isSub, expiresAt: m[k].expiresAt, done:false }));
+    isSub: !!m[k].isSub, expiresAt: m[k].expiresAt, ord: Date.parse(m[k].startsAt || ''), done:false }));
   Object.keys(_submittedTabs).forEach(k => { if(!m[k]) list.push(Object.assign({ p8:k, done:true }, _submittedTabs[k])); });
-  list.sort((a, b) => (Number(a.isSub) - Number(b.isSub)) || (a.seq - b.seq) || String(a.name).localeCompare(String(b.name), 'ko'));
+  // ★ 결정 356 — 모두 차례 줄 명의면 서버의 차례 시작 순(제출한 명의도 제자리) · 하나라도 종전 홀드면 종전 순서
+  if(list.length && list.every(t => isFinite(t.ord))) list.sort((a, b) => (a.ord - b.ord) || String(a.p8).localeCompare(String(b.p8)));
+  else list.sort((a, b) => (Number(a.isSub) - Number(b.isSub)) || (a.seq - b.seq) || String(a.name).localeCompare(String(b.name), 'ko'));
   return list;
 }
 function _tabsOn(){ return _tabList().length >= 2; }
@@ -1506,8 +1608,11 @@ function _tickTabs(){
     const p8 = el.dataset.tabTime, h = m[p8]; if(!h) return;
     const left = Date.parse(h.expiresAt || '') - now;
     const tab = el.closest('.acct-tab');
+    const ws = h.chainState === 'waiting' ? Date.parse(h.startsAt || '') : NaN;   // ★ 결정 356 — 차례 대기
+    if(tab) tab.classList.toggle('waiting', ws > now);
+    if(ws > now){ el.textContent = '대기 · ' + CampCards._fmtHM(h.startsAt) + '부터'; return; }
     if(!isFinite(left)){ el.textContent = ''; return; }
-    if(left <= 0){ el.textContent = '00:00'; if(p8 !== act) _expireOtherTab(p8); return; }
+    if(left <= 0){ el.textContent = '00:00'; if(p8 !== act) _confirmHoldExpiry(p8); return; }   // ★ 356 — 서버가 만료라고 할 때만 뺀다
     el.textContent = left >= 3600000 ? (Math.floor(left / 3600000) + '시간 ' + String(Math.floor(left % 3600000 / 60000)).padStart(2, '0') + '분')
       : String(Math.floor(left / 60000)).padStart(2, '0') + ':' + String(Math.floor(left % 60000 / 1000)).padStart(2, '0');
     if(tab) tab.classList.toggle('soon', left < 180000);
@@ -1558,7 +1663,7 @@ function _tabDoneActive(){ return _tabsOn() && _onTabSubmittedP8(activeP8(), {})
 function _onTabSubmittedP8(p8, d){
   p8 = p8 ? String(p8) : ''; const h = p8 ? getHold(p8) : null;
   if(!h) return false;
-  _submittedTabs[p8] = { name: h.name || ('***' + p8.slice(-4)), seq: Number(h.seq) || 0, isSub: !!h.isSub };
+  _submittedTabs[p8] = { name: h.name || ('***' + p8.slice(-4)), seq: Number(h.seq) || 0, isSub: !!h.isSub, ord: Date.parse(h.startsAt || '') };
   if(d.uploadsPending === true){ _uploadsPendingP8.add(p8); window.addEventListener('beforeunload', _capSaveBeforeUnload); }
   const act = activeP8();
   clearHold(p8);
@@ -1577,7 +1682,7 @@ function _onTabSubmittedP8(p8, d){
   setActiveP8(next);
   toast(_submittedTabs[p8].name + ' 명의 제출 완료' + (late ? '(늦게 도착 — 운영자 확인 후 확정 · 다시 제출하지 마세요)' : '') + ' — 다음 명의를 이어서 작성하세요');
   if(act === p8 && !_viewDoneP8){ _slideDir = 1; const nf = _frameByP8(next); if(nf) _activateFrame(nf, 1); _keepFrameOnce = true; enterJoined(); }
-  else renderAcctTabs();
+  else { renderAcctTabs(); pollOnce(); }   // ★ 결정 356 — 서버가 다음 명의 시간을 당겼다 → 바로 맞춘다
   return true;
 }
 
@@ -1748,17 +1853,21 @@ async function _doApply(optionKey, sub, purchaseQty){
     if(isBlogCampaign() && _blogUrl) body.blogUrl = _blogUrl;
     if(sub && sub.name && sub.phone){ body.subName = sub.name; body.subPhone = sub.phone; }
     if(purchaseQty) body.purchaseQty = purchaseQty;   // ★ 결정 289
+    if(_chainOn()) body.sequential = true;   // ★ 결정 356 — 서버가 차례 줄을 만들 수 있다고 알릴 때만
     const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/apply', {
       method:'POST', headers:{'Content-Type':'application/json', ..._getAuthHeaders()}, body: JSON.stringify(body)
     });
     const j = await r.json().catch(()=>({}));
+    const _prevAct = activeP8();   // ★ 결정 356 — 기다리는 명의를 더하면 지금 진행 중인 명의를 계속 보여 준다
     if(r.ok && j.ok){
       // ★ j.phone8 = "명의" p8(서버 계약) — 홀드 맵의 키이자 work-detail/cancel/embed의 holdPhone8
       setHold({ applicationId: j.applicationId, holdToken: j.holdToken, phone8: j.phone8, expiresAt: j.expiresAt,
                 optionKey: optionKey || (j.optionKey || ''),   // ★ 일괄 제출 카드별 옵션의 유일 출처
                 name: (j.participant && j.participant.name) || (sub && sub.name) || s.name,
                 isSub: !!(j.participant && j.participant.type === 'sub'),
-                ownerPhone8: j.ownerPhone8 || s.phone8 });
+                ownerPhone8: j.ownerPhone8 || s.phone8,
+                startsAt: (j.chain && j.chain.startsAt) || null, chainState: (j.chain && j.chain.state) || null });   // ★ 결정 356
+      if(j.chain && j.chain.state === 'waiting' && _prevAct && _prevAct !== j.phone8 && _allHolds()[_prevAct]) setActiveP8(_prevAct);
       // ★ 홀드를 2건 이상 잡은 순간 TTL 을 못 박아 알린다 — 일괄 제출은 "제출"을 묶는 기능이지
       //   "구매"를 묶는 기능이 아니다. 다 사고 와서 한 번에 내면 뒤 건이 만료(지각)된다.
       if(Object.keys(_allHolds()).length > 1){
@@ -1824,10 +1933,11 @@ async function _doApply(optionKey, sub, purchaseQty){
       sub_daily_limit:'이 공고의 타계정 참여 한도에 도달했어요',
       blocked_by_other_owner:'이 번호는 다른 계정에서 이미 참여 신청했어요',
       same_phone_other_name:'같은 번호의 다른 명의가 오늘 이미 참여했어요',
+      chain_after_close:'오늘 마감 전에 이 명의 차례가 안 와요',   // ★ 결정 356
     }[j.reason] || (j.error || '지금은 참여할 수 없어요');
     // 타계정 명의 사유면 그 명의를 시트에서 잠그고 재선택 유도(자리는 점유되지 않았음)
     if(sub && ['already_today','already_submitted','duplicate_hold','sub_not_registered','sub_is_registered_reviewer',
-               'sub_shares_owner_phone','sub_invalid','blocked_by_other_owner','same_phone_other_name'].includes(j.reason)){
+               'sub_shares_owner_phone','sub_invalid','blocked_by_other_owner','same_phone_other_name','chain_after_close'].includes(j.reason)){
       toast(msg);
       const p8 = _p8(sub.phone);
       _acctBlocked[p8] = msg;
@@ -1848,7 +1958,8 @@ async function _doApply(optionKey, sub, purchaseQty){
    ★ 아무 명의도 못 잡았고 이유가 명의 탓이 아니면(옵션 마감·모집 종료·내정보 미등록·인기 공고 조건 등) 첫 명의로 _doApply 를
      한 번 더 불러 종전과 똑같은 안내 화면(옵션 다시 고르기·내정보 안내·참여권 안내…)을 띄운다 — 처리 경로를 새로 만들지 않는다. */
 const _MANY_IDENTITY_REASONS = ['already_today','already_submitted','duplicate_hold','sub_not_registered','sub_is_registered_reviewer',
-  'sub_shares_owner_phone','sub_invalid','blocked_by_other_owner','same_phone_other_name','sub_daily_limit','owner_hold_cap','popular_locked'];
+  'sub_shares_owner_phone','sub_invalid','blocked_by_other_owner','same_phone_other_name','sub_daily_limit','owner_hold_cap','popular_locked',
+  'chain_after_close'];   // ★ 결정 356 — 이 명의만 막힌다(자리 미점유) · 다음 명의는 계속
 let _applyManyBusy = false;
 async function _applyMany(optionKey, sels, purchaseQty){
   if(PREVIEW) return _pvSimulateApply(optionKey);
@@ -1858,6 +1969,7 @@ async function _applyMany(optionKey, sels, purchaseQty){
   hideOptSheet(); hideAcctSheet();
   if(purchaseQty == null){ const tv = _qtyViewsFor(optionKey); if(tv && tv.length) return openQtySheet({ mode:'join', optionKey, many: sels, views: tv }); }
   _applyManyBusy = true;
+  const _prevActMany = activeP8();   // ★ 결정 356
   const jb = $('joinBtn'); if(jb){ jb.disabled = true; jb.textContent = '자리 잡는 중…'; }
   const ok = [], fail = [];
   let firstGlobal = null;
@@ -1873,6 +1985,7 @@ async function _applyMany(optionKey, sels, purchaseQty){
         if(optionKey) body.optionKey = optionKey;
         if(sub){ body.subName = sub.name; body.subPhone = sub.phone; }
         if(purchaseQty) body.purchaseQty = purchaseQty;
+        if(_chainOn()) body.sequential = true;   // ★ 결정 356 — _doApply 와 같은 칸
         r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/apply', {
           method:'POST', headers:{'Content-Type':'application/json', ..._getAuthHeaders()}, body: JSON.stringify(body)
         });
@@ -1883,14 +1996,16 @@ async function _applyMany(optionKey, sels, purchaseQty){
                   optionKey: optionKey || (j.optionKey || ''),
                   name: (j.participant && j.participant.name) || (sub && sub.name) || s.name,
                   isSub: !!(j.participant && j.participant.type === 'sub'),
-                  ownerPhone8: j.ownerPhone8 || s.phone8, seq: seq0 + i });
-        ok.push({ sel, phone8: j.phone8 });
+                  ownerPhone8: j.ownerPhone8 || s.phone8, seq: seq0 + i,
+                  startsAt: (j.chain && j.chain.startsAt) || null, chainState: (j.chain && j.chain.state) || null });   // ★ 결정 356
+        ok.push({ sel, phone8: j.phone8, startsAt: (j.chain && j.chain.startsAt) || '' });
         continue;
       }
       const why = _applyReasonText(j);
       if(!ok.length && !firstGlobal && j.reason && !_MANY_IDENTITY_REASONS.includes(j.reason)) firstGlobal = { sel, sub };
       fail.push({ sel, why });
       if(sub && _MANY_IDENTITY_REASONS.includes(j.reason)) _acctBlocked[_p8(sub.phone)] = why;
+      if(j.reason === 'chain_after_close'){ const _cp = _p8(sub ? sub.phone : s.phone8); _acctBlocked[_cp] = why; _chainLate.add(_cp); }   // ★ 356 본계정도
       // 모집 자체가 닫힌 이유면 나머지 명의도 같은 이유 — 더 보내지 않는다
       if(['closed','cutoff','daily_done','soft_full','campaign_paused','preopen','rate_limited','tier_unavailable','not_registered','profile_missing','reviewer_blocked'].includes(j.reason)) {
         for(let k = i + 1; k < sels.length; k++) fail.push({ sel: sels[k], why });
@@ -1899,6 +2014,8 @@ async function _applyMany(optionKey, sels, purchaseQty){
     }
   } finally {
     _applyManyBusy = false;
+    // ★ 결정 356(RED-10) — 응답을 못 받은 요청이 있으면 서버에 잡힌 자리를 한 번 받아 온다(다시 보내지 않는다 · 결정 353)
+    if(fail.some(f => /^연결 오류/.test(f.why || ''))) { try{ await recoverActiveHolds(); }catch(_){ /* 다음 확인에서 */ } }
     if(jb && $('vPre').style.display !== 'none'){ const c=_camp; jb.disabled = !(c && c.state==='open'); jb.textContent='참여하기'; }
   }
   if(!ok.length){
@@ -1907,11 +2024,16 @@ async function _applyMany(optionKey, sels, purchaseQty){
     renderAcctList(); $('acctSheet').style.display = 'flex';
     return;
   }
-  setActiveP8(ok[0].phone8);
+  { // ★ 결정 356 — 이미 진행 중인 명의가 있으면 그대로, 없으면 차례가 가장 빠른 명의를 보여 준다
+    const _pa = _prevActMany && _allHolds()[_prevActMany] ? _prevActMany : '';
+    const _first = ok.slice().sort((a, b) => String(a.startsAt).localeCompare(String(b.startsAt)))[0];
+    setActiveP8(_pa || _first.phone8);
+  }
   const subMin = (_camp && Number(_camp.sub_hold_ttl_min)) || 15;
+  const _seqOk = ok.some(o => o.startsAt);
   toast(fail.length
     ? ok.length + '개 명의로 참여했어요. ' + fail.map(f => (f.sel.name || '명의') + ' — ' + f.why).join(' / ')
-    : ok.length + '개 명의로 참여했어요 — 위 탭에서 명의마다 구매양식을 제출해 주세요' + (ok.some(o => o.sel.type === 'sub') ? '(타계정은 ' + subMin + '분 안에)' : ''));
+    : ok.length + '개 명의로 참여했어요 — 위 탭에서 명의마다 구매양식을 제출해 주세요' + (_seqOk ? '(한 명의씩 차례로 시간이 흘러요)' : (ok.some(o => o.sel.type === 'sub') ? '(타계정은 ' + subMin + '분 안에)' : '')));
   await enterJoined();
 }
 /** apply 거절 사유 → 사람 말(_doApply 의 안내문과 같은 표를 쓴다 · 모르는 사유는 서버 문구) */
@@ -1927,6 +2049,7 @@ const _APPLY_REASON_TEXT = {
   sub_is_registered_reviewer:'이미 리뷰어로 등록된 번호예요(본인 계정으로 참여)', sub_shares_owner_phone:'본계정과 같은 번호예요',
   sub_invalid:'이름·전화번호를 확인해주세요', blocked_by_other_owner:'다른 계정에서 이미 참여 신청한 번호예요',
   same_phone_other_name:'같은 번호의 다른 명의가 오늘 이미 참여했어요', popular_locked:'이 명의는 참여권이 없어요',
+  chain_after_close:'오늘 마감 전에 차례가 안 와요',   // ★ 결정 356
   rate_limited:'요청이 너무 많아요. 잠시 후 다시 시도해주세요',
 };
 
@@ -2036,7 +2159,7 @@ function _onHoldTimeUp(){
   if(PREVIEW) return;
   if($('vJoined').style.display === 'none') return;
   if(_formSubmitting()){ pollOnce(); setTimeout(_onHoldTimeUp, 2000); return; }
-  releaseExpiredHold(getHold());
+  const h = getHold(); if(h) _confirmHoldExpiry(h.phone8, { active:true });   // ★ 결정 356 — 토큰은 서버 판정으로만 지운다
 }
 let _enterSeq = 0;
 async function enterJoined(){
@@ -2068,6 +2191,7 @@ async function enterJoined(){
     }
     _detailRetry = 0;
     _detail = j;
+    _applyChainView(j.chain);   // ★ 결정 356 — 같은 소유자 명의들의 차례·마감을 서버 값으로
     // 목록 API는 실제 모집 상태를 반영한 selectable 값을 주지만, 관리자 미리보기는
     // 게시 여부와 무관한 가상 진행 화면이다. 미리보기 전용 옵션 뷰로 교체한다.
     if(_camp && Array.isArray(j.options)) _camp.options = j.options;
@@ -2319,12 +2443,16 @@ function startHoldCountdown(expiresAtIso){
   const lab = $('holdLabel'), bar = el.closest('.holdbar');
   const capAt = (_camp && _camp.closesAt) ? Date.parse(_camp.closesAt) : NaN;
   const capped = isFinite(capAt) && isFinite(end) && Math.abs(end - capAt) <= 60000;
-  const baseLabel = capped ? ('오늘 모집 마감 ' + CampCards._fmtHM(_camp.closesAt) + '까지') : lab.textContent;
+  _cdEnd = expiresAtIso || '';
+  const _h0 = getHold(), _ws = (_h0 && _h0.chainState === 'waiting') ? Date.parse(_h0.startsAt || '') : NaN;   // ★ 결정 356
+  const _plain = capped ? ('오늘 모집 마감 ' + CampCards._fmtHM(_camp.closesAt) + '까지') : lab.textContent;
+  let baseLabel = (_ws > CampCards.serverNow()) ? ('차례 대기 · ' + CampCards._fmtHM(_h0.startsAt) + '부터 시작 · 미리 제출해도 돼요') : _plain;
   lab.textContent = baseLabel;
   if(bar) bar.classList.remove('is-soon');
   _holdTick = setInterval(()=>{
     const remain = end - CampCards.serverNow();
-    const soon = remain > 0 && remain < 180000;
+    if(baseLabel !== _plain && !(_ws > CampCards.serverNow())){ baseLabel = _plain; lab.textContent = baseLabel; }   // ★ 356 — 차례 시작
+    const soon = remain > 0 && remain < 180000 && !(_ws > CampCards.serverNow());   // 기다리는 동안은 '곧 마감' 표시 안 함
     if(bar && bar.classList.contains('is-soon') !== soon){ bar.classList.toggle('is-soon', soon); lab.textContent = baseLabel + (soon ? ' · 곧 마감돼요' : ''); }
     if(remain <= 0){ clearInterval(_holdTick); el.textContent = '00 : 00'; pollOnce(); _onHoldTimeUp(); return; }
     // 📝 127: 블로그 구매기한(24h)처럼 1시간 이상 남으면 시:분으로 — 분:초로 '1440 : 00' 이 뜨지 않게
@@ -2355,6 +2483,10 @@ async function pollOnce(){
     if(r.ok && j.ok){
       if(j.serverNow) CampCards.setServerNow(j.serverNow);
       if(_isDoneDetail(j)){ if(!_tabDoneActive()) renderDone(); }
+      else if(_applyChainView(j.chain)){   // ★ 결정 356 — 다른 기기 제출·담당자 확정·취소로 당겨진 시간을 10초 안에 맞춘다
+        renderAcctTabs();
+        if(j.application && j.application.expiresAt && j.application.expiresAt !== _cdEnd) startHoldCountdown(j.application.expiresAt);
+      }
     }else if(j.reason === 'expired'){ await releaseExpiredHold(h); }
   }catch(_){ /* 네트워크 오류는 다음 폴링에서 */ }
 }
