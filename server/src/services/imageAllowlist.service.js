@@ -89,17 +89,19 @@ function _withTimeout(p) {
  * @returns {Promise<{ok:boolean, failOpen?:boolean}>}
  *   ok=false → 404(드라이브 읽기 0) · failOpen=true → 내려받은 뒤 image/* 일 때만 내준다.
  */
-async function check(kind, id) {
+async function check(kind, id, opts = {}) {
   const key = `${kind}:${id}`;
   const hit = cache.get(key);
-  if (hit && hit.until > Date.now()) return { ok: hit.ok };
+  // fresh = 기억된 거절은 무시하고 다시 본다(통과 기억은 그대로 쓴다)
+  if (hit && hit.until > Date.now() && (hit.ok || !opts.fresh)) return { ok: hit.ok };
   if (inflight.has(key)) return inflight.get(key);
   const p = (async () => {
     try {
       const { rows } = await _withTimeout(_db().query(SQL[kind], [id]));
       const r = rows && rows[0] || {};
       const ok = !r.private && !!r.allowed;
-      _remember(key, ok);
+      if (ok || !opts.fresh) _remember(key, ok);
+      else cache.delete(key);
       return { ok };
     } catch (err) {
       _warnFailOpen(kind, id, err);
@@ -114,6 +116,21 @@ async function check(kind, id) {
 
 /** 조회 실패(fail-open) 때 내줘도 되는 파일인가 — 사진만. 이체결과(엑셀·CSV)는 여기서 걸린다. */
 function isImageMime(mime) { return /^image\//i.test(String(mime || '')); }
+
+/**
+ * 결정 354 미리 만들기 — 업로드 직후(아직 DB 기록 전일 수 있다) 서버가 스스로 묻는 판정.
+ *   ★ 거절을 기억하지 않는다 — 기억하면 바로 뒤 화면 판정이 5초 동안 404(옛 통로)·서명 0 이 된다.
+ *   ★ 기억된 거절도 무시하고 다시 본다. 통과는 기억한다(뒤이은 내부 생성 입구 판정이 조회 0).
+ *   drive 통로 먼저, 아니면 guide 통로. 조회 실패 = { ok:true, failOpen:true } (호출 쪽이 건너뛴다).
+ */
+async function checkFresh(id) {
+  const d = await check('drive', id, { fresh: true });
+  if (d.ok && !d.failOpen) return d;
+  const g = await check('guide', id, { fresh: true });
+  if (g.ok && !g.failOpen) return g;
+  if (d.failOpen || g.failOpen) return { ok: true, failOpen: true };
+  return { ok: false };
+}
 
 /**
  * guide-image 주소를 만들기 **전에** 부른다(올린 즉시 열리게). 실패하면 던진다 —
@@ -131,6 +148,7 @@ async function registerGuideImage(fileId, source) {
 module.exports = {
   checkDriveImage: (id) => check('drive', id),
   checkGuideImage: (id) => check('guide', id),
+  checkFresh,
   isImageMime,
   registerGuideImage,
   DRIVE_IMAGE_SOURCES,
