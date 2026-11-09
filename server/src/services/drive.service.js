@@ -432,6 +432,12 @@ async function uploadFileBase64(base64Data, fileName, mimeType, parentFolderId, 
 
   logger.info(`[Drive] 업로드 성공: ${data.id} (${usedClient})`);
 
+  /* 결정 354 미리 만들기 — 사진이면 화면용 작은 사진을 첫 조회 전에 R2 에 만들어 둔다(단일 지점).
+     ★ 기다리지 않는다(지연 뒤 허용 목록에 기록된 것만 · 실패 무시) · 열쇠 없음·사진 아님 = 아무것도 안 함.
+     ★ 이 자리를 건너뛰는 업로드 경로를 만들지 않는다(회귀가드 imageWarm.test.js C2). */
+  try { require('./imageWarm.service').scheduleUploadWarm(data.id, mimeType || 'image/jpeg'); }
+  catch (_) { /* 업로드 결과에 영향 0 */ }
+
   // 파일을 "링크가 있는 모든 사용자" 읽기 가능으로 설정
   // opts.shareAnyone === false 면 공개하지 않음(비공개 유지 — 예: 유입가이드 이미지는 서버 프록시로만 노출)
   /* ★★ opts.deferShare === true 면 **응답을 기다리지 않고** 뒤에서 건다.
