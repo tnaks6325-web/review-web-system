@@ -1,0 +1,21 @@
+'use strict';
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),vm=require('node:vm');
+let source=fs.readFileSync(path.resolve(__dirname,'../../frontend/js/cs-inquiry.js'),'utf8');
+assert(source.includes('function csOpenPurchaseCaptureCheck('),'Existing inquiry must expose capture-check handling');
+source=source.replace('window.CsInquiry = { mount: mount, html: HTML };','window.CsInquiry = { mount: mount, html: HTML }; window.__renderCaptureTest = _csRenderMessages;');
+const box={innerHTML:'',scrollTop:0,scrollHeight:30},opened=[];
+const w={CS_PURCHASE_CAPTURE_CAN_ACT:()=>true,PurchaseCaptureStaff:{open:o=>opened.push(o)}};
+const ctx={window:w,document:{getElementById:id=>id==='csConvThread'?box:null,addEventListener(){}},sessionStorage:{getItem:k=>k==='admin_token'?'fictional-staff-token':null},API_BASE:'http://localhost',console,Date,setTimeout,clearTimeout,Map,Set};
+vm.createContext(ctx);vm.runInContext(source,ctx);
+const requestId='11111111-1111-4111-8111-111111111111';
+w.__renderCaptureTest([{senderRole:'reviewer',senderName:'예시',content:'이미 냈어요',meta:{purchaseCaptureCheck:{requestId}}}]);
+assert(box.innerHTML.includes('구매사진 확인 · 보완 처리'));assert(box.innerHTML.includes(requestId));
+w.csOpenPurchaseCaptureCheck(requestId);assert.equal(opened.length,1);assert.equal(opened[0].requestId,requestId);assert.equal(opened[0].apiBase,'http://localhost');
+(async()=>{
+ assert.equal(await opened[0].getToken(),'fictional-staff-token');
+ w.__renderCaptureTest([{senderRole:'reviewer',content:'<img src=x onerror=alert(1)>',meta:{purchaseCaptureCheck:{requestId:"bad');alert(1)//"}}}]);
+ assert(!box.innerHTML.includes('csOpenPurchaseCaptureCheck('));assert(box.innerHTML.includes('&lt;img'));assert(!box.innerHTML.includes('<img src=x'));
+ w.CS_PURCHASE_CAPTURE_CAN_ACT=()=>false;w.__renderCaptureTest([{senderRole:'reviewer',content:'safe',meta:{purchaseCaptureCheck:{requestId}}}]);assert(!box.innerHTML.includes('구매사진 확인 · 보완 처리'));
+ w.csOpenPurchaseCaptureCheck(requestId);assert.equal(opened.length,1,'denied UI cannot open staff handler');
+ console.log('purchaseCaptureCsWiring: staff dispatch, token isolation, XSS and role preservation passed');
+})().catch(e=>{console.error(e);process.exitCode=1;});
