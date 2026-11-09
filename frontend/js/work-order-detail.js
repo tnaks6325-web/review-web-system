@@ -46,7 +46,8 @@ function _driveId(url) {
 }
 
 // 이미지 라이트박스(화면 내 팝업) — 화면맞춤으로 열고 [원본크기보기] 토글 제공
-function woImageModal(url) {
+/* alt = 첫 주소(원본 빠른 길 o)가 실패하면 한 번 갈아 끼울 종전 원본 프록시 주소(결정 354 원본 빠른 길). 없으면 종전 동작. */
+function woImageModal(url, alt) {
   let ov = document.getElementById("woImgModal");
   if (!ov) {
     ov = document.createElement("div");
@@ -78,6 +79,7 @@ function woImageModal(url) {
     im.addEventListener("click", e => { e.stopPropagation(); ov._toggle(); });
     er.addEventListener("click", e => e.stopPropagation());
     im.addEventListener("error", () => {
+      if (ov._alt) { const a = ov._alt; ov._alt = ""; ov._lastUrl = a; im.src = a; return; }   // 빠른 길 실패 → 종전 원본(1회)
       im.style.display = "none"; btn.style.display = "none";
       const u = ov._lastUrl || im.src;
       const dbg = u + (u.indexOf("?") >= 0 ? "&" : "?") + "debug=1";
@@ -89,6 +91,7 @@ function woImageModal(url) {
     document.addEventListener("keydown", e => { if (e.key === "Escape") ov.style.display = "none"; });
   }
   ov._lastUrl = url;
+  ov._alt = alt && alt !== url ? alt : "";
   ov.querySelector("#woImgModalErr").style.display = "none";
   const im = ov.querySelector("#woImgModalImg");
   ov._fit();                       // 항상 화면맞춤으로 시작

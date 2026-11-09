@@ -24,7 +24,7 @@ function grab(names) {
     const m = rest.slice(1).search(/\n(function |const |\/\* |\/\/ ══)/);
     return rest.slice(0, m < 0 ? rest.length : m + 1);
   }).join('\n');
-  const sb = { STATE: {}, API_BASE: '', _rvPopRender(){}, esc: s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])), console };
+  const sb = { STATE: {}, API_BASE: '', window: {}, _rvPopRender(){}, esc: s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])), console };
   vm.createContext(sb);
   vm.runInContext(src, sb);
   return sb;
@@ -179,7 +179,7 @@ console.log('\nC-1) 제출 인라인 필터 — 네 수치만 실제 행으로 �
 
 console.log('\nD) 팝업 무대 — 좌우 동시');
 {
-  const sb = grab(['_rvNo', '_rvWho', '_rvKindFiles', '_rvUrl', '_rvPeople', '_rvReceiptApplies', '_rvReceiptSubmitted', '_rvPopEligible', '_rvPopIdx', '_rvPopStep2', '_RV_POP_COL', '_rvPopCol', '_rvPopItem']);
+  const sb = grab(['_rvNo', '_rvWho', '_rvKindFiles', '_rvUrl', '_rvPeople', '_rvReceiptApplies', '_rvReceiptSubmitted', '_rvPopEligible', '_rvPopIdx', '_rvPopStep2', '_RV_POP_COL', '_rvPopCol', '_rvPopItem', '_fullAttrs']);   // 결정 354: 팝업 원본 = _fullAttrs(모듈 없으면 종전 src)
   sb.STATE.rvPop = { people: [], idx: 0, i2: { cap: 0, rev: 0 } };
   const files = [{ slot: 'order_capture', url: 'u1' }, { slot: 'order_capture', url: 'u2' }, { slot: 'review', url: 'u3' }];
   const cap = sb._rvPopCol('cap', files), rev = sb._rvPopCol('rev', files);
