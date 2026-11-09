@@ -1799,8 +1799,96 @@ router.get('/cs/messages', async (req, res, next) => {
   }
 });
 
+// ── 1:1문의 다시 보내기 중복 방지(결정 361 · migration 221) ──
+//   대화창이 쓴 글 하나마다 키(clientMsgId)를 만들어, 같은 글을 다시 보낼 때마다 같은 키를 싣는다.
+//   서버는 (문의방, 키) 로 한 번만 저장한다 — 시간 초과·끊김으로 응답만 못 받은 첫 전송이 이미
+//   저장됐으면, 다시 보내기는 새로 저장·관리자 알림·웹훅·미확인 숫자 증가 없이 **저장된 메시지를 성공으로** 돌려준다.
+//   ★ 키가 없거나 모양이 틀리면 종전 경로 그대로(구버전 화면 = 동작 불변).
+const CS_CLIENT_MSG_ID_RE = /^[A-Za-z0-9_-]{16,100}$/;
+function _csClientMsgId(v) {
+  const s = (v == null ? '' : v).toString().trim();
+  return CS_CLIENT_MSG_ID_RE.test(s) ? s : '';
+}
+// 스레드 upsert (xmax=0 → 신규 insert) — 종전 경로와 키 경로가 같은 문장을 쓴다(사본 금지).
+const CS_THREAD_UPSERT_SQL = `
+      INSERT INTO cs_threads
+        (reviewer_phone8, reviewer_name, campaign_key, campaign_label, campaign_source,
+         status, last_message_at, last_message_preview, admin_unread_count)
+      VALUES ($1,$2,$3,$4,$5,'open',NOW(),$6,1)
+      ON CONFLICT (reviewer_phone8, campaign_key) DO UPDATE SET
+        reviewer_name = EXCLUDED.reviewer_name,
+        campaign_label = EXCLUDED.campaign_label,
+        campaign_source = EXCLUDED.campaign_source,
+        status = 'open',
+        last_message_at = NOW(),
+        last_message_preview = EXCLUDED.last_message_preview,
+        admin_unread_count = cs_threads.admin_unread_count + 1,
+        updated_at = NOW()
+      RETURNING id, (xmax = 0) AS "isNew"
+    `;
+const CS_FIND_BY_CLIENT_ID_SQL =
+  `SELECT id, sender_name AS "senderName", content, image_urls AS "imageUrls", created_at AS "createdAt"
+     FROM cs_messages
+    WHERE thread_id = $1 AND client_msg_id = $2 AND sender_role = 'reviewer'
+    LIMIT 1`;
+function _sameCsPayload(row, content, imageUrls) {
+  const urls = Array.isArray(row.imageUrls) ? row.imageUrls : [];
+  return String(row.content || '') === content && JSON.stringify(urls) === JSON.stringify(imageUrls);
+}
+/** 키가 있는 전송 — 한 트랜잭션 안에서 「문의방 잠금 → 같은 키 확인 → 저장」.
+ *  ★ 문의방 upsert 가 그 방 줄을 잠그므로 같은 방 동시 전송은 줄을 서고, 뒤에 선 쪽은 앞쪽이 COMMIT 한
+ *    메시지를 다음 문장(READ COMMITTED 새 스냅숏)에서 본다. 같은 키가 이미 있으면 ROLLBACK(미확인 +1·미리보기 갱신까지 되돌림).
+ *    최후 방어선은 부분 유일 색인(uq_cs_messages_thread_client_msg) — 23505 는 저장된 쪽을 다시 읽어 같은 처리.
+ *  반환: { kind:'new', threadId, isNew, row } | { kind:'dup', threadId, row } | { kind:'conflict', threadId }
+ *        | null(이 칸이 아직 없는 DB — 종전 경로로 접는다: 보내기는 살리고 중복 방지만 빠진다). */
+async function _csSendWithClientId({ phone8, reviewerName, campaignKey, campaignLabel, source, content, imageUrls, clientMsgId }) {
+  const client = await pool.connect();
+  let threadId = null;
+  try {
+    await client.query('BEGIN');
+    const { rows: tRows } = await client.query(CS_THREAD_UPSERT_SQL, [phone8, reviewerName, campaignKey, campaignLabel, source,
+      (content || `사진 ${imageUrls.length}장`).slice(0, 120)]);
+    threadId = tRows[0].id;
+    const isNew = tRows[0].isNew;
+    const { rows: found } = await client.query(CS_FIND_BY_CLIENT_ID_SQL, [threadId, clientMsgId]);
+    if (found.length) {
+      await client.query('ROLLBACK');
+      return _sameCsPayload(found[0], content, imageUrls)
+        ? { kind: 'dup', threadId, row: found[0] }
+        : { kind: 'conflict', threadId };
+    }
+    const { rows: mRows } = await client.query(
+      `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content, image_urls, client_msg_id)
+       VALUES ($1, 'reviewer', $2, $3, $4::jsonb, $5) RETURNING id, created_at AS "createdAt"`,
+      [threadId, reviewerName, content, JSON.stringify(imageUrls), clientMsgId]
+    );
+    await client.query('COMMIT');
+    return { kind: 'new', threadId, isNew, row: mRows[0] };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* 이미 정리됨 */ }
+    if (err && err.code === '42703') {
+      logger.warn(`[cs] client_msg_id 칸 없음(migration 221 미적용) — 중복 방지 없이 종전 경로로 보냄: ${err.message}`);
+      return null;
+    }
+    if (err && err.code === '23505' && threadId) {
+      // 같은 연결로 다시 읽는다(ROLLBACK 뒤라 자동 커밋 — 연결을 하나 더 빌리지 않는다).
+      const { rows: again } = await client.query(CS_FIND_BY_CLIENT_ID_SQL, [threadId, clientMsgId]);
+      if (again.length) {
+        return _sameCsPayload(again[0], content, imageUrls)
+          ? { kind: 'dup', threadId, row: again[0] }
+          : { kind: 'conflict', threadId };
+      }
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 // POST /api/reviewer/cs/message — 문의 메시지 전송(스레드 upsert + 관리자 알림 + 웹훅)
-// body: { phone8, name, campaignKey, campaignLabel, campaignSource, content, imageUrls? }
+// body: { phone8, name, campaignKey, campaignLabel, campaignSource, content, imageUrls?, clientMsgId? }
+//   clientMsgId(결정 361): 같은 글의 다시 보내기면 이미 저장된 메시지를 { ok:true, threadId, message, duplicate:true } 로 돌려준다.
+//   같은 키인데 글·사진이 다르면 409 { ok:false, code:'cs_client_msg_conflict' } — 접어서 성공으로 답하지 않는다(결정 262 와 같은 원칙).
 router.post('/cs/message', async (req, res, next) => {
   try {
     const b = req.body || {};
@@ -1823,35 +1911,43 @@ router.post('/cs/message', async (req, res, next) => {
     const { rows: rev } = await pool.query(`SELECT name FROM reviewers WHERE phone8 = $1 LIMIT 1`, [phone8]);
     const reviewerName = (rev[0] && rev[0].name) || (b.name || '').toString().trim() || '리뷰어';
 
-    // 스레드 upsert (xmax=0 → 신규 insert)
-    const { rows: tRows } = await pool.query(`
-      INSERT INTO cs_threads
-        (reviewer_phone8, reviewer_name, campaign_key, campaign_label, campaign_source,
-         status, last_message_at, last_message_preview, admin_unread_count)
-      VALUES ($1,$2,$3,$4,$5,'open',NOW(),$6,1)
-      ON CONFLICT (reviewer_phone8, campaign_key) DO UPDATE SET
-        reviewer_name = EXCLUDED.reviewer_name,
-        campaign_label = EXCLUDED.campaign_label,
-        campaign_source = EXCLUDED.campaign_source,
-        status = 'open',
-        last_message_at = NOW(),
-        last_message_preview = EXCLUDED.last_message_preview,
-        admin_unread_count = cs_threads.admin_unread_count + 1,
-        updated_at = NOW()
-      RETURNING id, (xmax = 0) AS "isNew"
-    `, [phone8, reviewerName, campaignKey, campaignLabel, source,
-        (content || `사진 ${imageUrls.length}장`).slice(0, 120)]);
-    const threadId = tRows[0].id;
-    const isNew = tRows[0].isNew;
+    // ★ 결정 361 — 키가 있으면 「같은 방·같은 키는 한 번만」. 다시 보내기면 저장·알림·웹훅 없이 저장된 메시지로 답한다.
+    const clientMsgId = _csClientMsgId(b.clientMsgId);
+    const keyed = clientMsgId
+      ? await _csSendWithClientId({ phone8, reviewerName, campaignKey, campaignLabel, source, content, imageUrls, clientMsgId })
+      : null;
+    if (keyed && keyed.kind === 'conflict') {
+      return res.status(409).json({ ok: false, code: 'cs_client_msg_conflict',
+        error: '같은 메시지를 다시 보내는 중 내용이 바뀌었어요. 한 번 더 보내 주세요.' });
+    }
+    if (keyed && keyed.kind === 'dup') {
+      const r = keyed.row;
+      return res.json({ ok: true, threadId: keyed.threadId, duplicate: true, message: {
+        id: r.id, threadId: keyed.threadId, senderRole: 'reviewer', senderName: r.senderName || reviewerName,
+        content: r.content, imageUrls: Array.isArray(r.imageUrls) ? r.imageUrls : [], createdAt: r.createdAt,
+      } });
+    }
 
-    const { rows: mRows } = await pool.query(
-      `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content, image_urls)
-       VALUES ($1, 'reviewer', $2, $3, $4::jsonb) RETURNING id, created_at AS "createdAt"`,
-      [threadId, reviewerName, content, JSON.stringify(imageUrls)]
-    );
+    let threadId, isNew, mRow;
+    if (keyed) {
+      ({ threadId, isNew, row: mRow } = keyed);
+    } else {
+      // 종전 경로(키 없음 · 구버전 화면 · 칸 없는 DB) — 동작 불변
+      const { rows: tRows } = await pool.query(CS_THREAD_UPSERT_SQL, [phone8, reviewerName, campaignKey, campaignLabel, source,
+          (content || `사진 ${imageUrls.length}장`).slice(0, 120)]);
+      threadId = tRows[0].id;
+      isNew = tRows[0].isNew;
+
+      const { rows: mRows } = await pool.query(
+        `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content, image_urls)
+         VALUES ($1, 'reviewer', $2, $3, $4::jsonb) RETURNING id, created_at AS "createdAt"`,
+        [threadId, reviewerName, content, JSON.stringify(imageUrls)]
+      );
+      mRow = mRows[0];
+    }
     const message = {
-      id: mRows[0].id, threadId, senderRole: 'reviewer', senderName: reviewerName,
-      content, imageUrls, createdAt: mRows[0].createdAt,
+      id: mRow.id, threadId, senderRole: 'reviewer', senderName: reviewerName,
+      content, imageUrls, createdAt: mRow.createdAt,
     };
 
     // 관리자 실시간 알림 (대시보드 뱃지/토스트/목록 갱신)

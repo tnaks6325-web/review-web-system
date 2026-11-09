@@ -22,6 +22,7 @@ const MIG_LOCK_RETRIES = 3;
 // 실행 코드가 요구하는 컬럼(없으면 사용자 대면 500). 마이그레이션이 실패해도 listen 하면
 // /health 는 통과하고 해당 기능만 42703 으로 죽어 "무신호 전면장애"가 된다.
 const REQUIRED_SCHEMA = [
+  ['cs_messages', 'client_msg_id'],               // 221 — 1:1문의 다시 보내기 중복 방지(결정 361 · 없으면 키 경로가 종전 경로로 접혀 중복 방지만 빠진다)
   // 219/220 — append-only supplements and independent photo checks (all persisted columns).
   ...['id', 'order_submission_id', 'channel', 'file_id', 'byte_sha256', 'mime_type',
     'request_key', 'check_request_id', 'request_payload_hash', 'created_by',
