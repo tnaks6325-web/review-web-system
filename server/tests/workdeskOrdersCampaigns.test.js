@@ -388,7 +388,7 @@ t('★ 전역 공개 — 호출부·onclick 문자열이 이름 그대로 쓴다
   assert.ok(/DriveThumb\.guideAttrs\(src, 1600, "_woImgError\(this\)"\)/.test(WOD) && / src="\$\{escHtml\(src\)\}" onerror="_woImgError\(this\)"/.test(WOD));
 });
 t('첨부 이미지는 클릭하면 크게 본다(라이트박스)', () => {
-  assert.ok(/function woImageModal\(url\)/.test(WOD) && /woImgModal/.test(WOD));
+  assert.ok(/function woImageModal\(url(?:, alt)?\)/.test(WOD) && /woImgModal/.test(WOD));   // 결정 354: alt = 원본 빠른 길 실패 시 1회 대체 주소
   assert.ok(/\.woldoc img\{max-width:min\(100%,360px\)\}/.test(HTML), '펼침행에서 이미지 폭 제한이 없다');
 });
 

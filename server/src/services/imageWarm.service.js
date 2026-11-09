@@ -1,6 +1,8 @@
 'use strict';
 /**
- * 결정 354 「미리 만들기(2026-11-09)」 — 사진 빠른 길의 작은 사진(t)을 첫 조회 **전에** R2 에 만들어 둔다.
+ * 결정 354 「미리 만들기(2026-11-09)」 — 사진 빠른 길의 사진을 첫 조회 **전에** R2 에 만들어 둔다.
+ *   「모든 사진 미리 만들기(2026-11-09 사용자 확정)」 — 한 장마다 t(목록) → m(크게 보기) → o(원본, 바이트 동일)
+ *   세 가지를 **차례로**(WARM_KINDS). 원본 서버 내부 입구의 원본 캐시(imageSourceCache)가 있어 드라이브는 1회만 읽는다.
  *
  *   운영 실측: 아무도 안 본 사진의 첫 조회 1.7~2.8초(드라이브 원본 → WebP) · R2/엣지에 있으면 0.04~0.07초.
  *
@@ -14,15 +16,16 @@
  *         imageAllowlist.checkFresh(거절을 기억하지 않는 판정)로 확인하고, 아직이면 RETRY_DELAY 뒤 1회만 다시 본다.
  *         끝내 목록 밖(패배한 중복 파일·시험 업로드)이면 부르지 않는다. 조회 실패(fail-open)도 부르지 않는다.
  *       ★ 응답을 기다리지 않는다 · 실패는 삼키고 경고 로그만(파일 번호 없이) · 동시 WARM_MAX · 대기열 QUEUE_MAX(넘치면 버림).
- *   warmOne(id)                 — 한 장 GET. 응답 X-Img-Src 로 'hit'(r2·edge 이미 있음) / 'made'(origin 새로 만듦) /
+ *   warmOne(id, {kind})         — 한 장 HEAD(몸통은 받지 않는다 — Function 이 HEAD 에도 만들어 담는다). 응답 X-Img-Src 로 'hit'(r2·edge 이미 있음) / 'made'(origin 새로 만듦) /
  *                                 'skip'(404 — 사진 아님·허용 밖) / 'fail' / 'off'(열쇠 없음) 를 돌려준다.
  *   collectRecentIds(db, {days, limit}) — 일괄 스크립트(scripts/img-warm.js)용: 허용 목록 출처 칸에서 최근 N일 번호를
- *                                 중복 제거·최신순으로(이체결과 보관 파일·삭제된 주문 제외).
+ *                                 중복 제거·최신순으로(이체결과 보관 파일·삭제된 주문 제외). days=null = 기간 제한 없음(전체).
  */
 const imageEdge = require('./imageEdge.service');
 const { logger } = require('../utils/logger');
 
 const DEFAULT_PUBLIC_ORIGIN = 'https://review-web-system.pages.dev';
+const WARM_KINDS = Object.freeze(['t', 'm', 'o']);   // ★ 순서 = 목록에 먼저 보이는 것부터(t) — 바꾸지 말 것
 const WARM_MAX = 2;                 // 업로드 미리 만들기 동시 수(원본 서버 내부 입구 동시 12 안쪽, 화면 첫 조회 몫을 남긴다)
 const QUEUE_MAX = 200;
 const FIRST_DELAY_MS = 5000;        // 업로드 → 허용 목록 기록(커밋)까지의 여유
@@ -61,7 +64,8 @@ async function warmOne(fileId, { fetch: fetchImpl, kind = 't', env = process.env
   if (!url) return 'off';
   const f = fetchImpl || _fetch();
   try {
-    const init = { method: 'GET', headers: { 'User-Agent': 'review-web-img-warm/1' } };
+    // HEAD — 이미 있으면 Function 이 R2 head() 만 보고 답한다(원본 o 를 다시 내려받지 않는다). 없으면 만들어 담는다.
+    const init = { method: 'HEAD', headers: { 'User-Agent': 'review-web-img-warm/1' } };
     if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) init.signal = AbortSignal.timeout(timeoutMs);
     const r = await f(url, init);
     if (!r) return 'fail';
@@ -76,16 +80,22 @@ async function warmOne(fileId, { fetch: fetchImpl, kind = 't', env = process.env
 }
 
 // ── 업로드 미리 만들기 줄(동시 WARM_MAX) ──
+/** 한 장 = t → m → o 차례로(동시 아님 — 원본 캐시가 드라이브 1회를 나눠 쓰게). 404(사진 아님·허용 밖)면 나머지도 건너뛴다. */
+async function _warmKinds(id) {
+  for (const kind of WARM_KINDS) {
+    const res = await warmOne(id, { kind });
+    if (res === 'made') _stats.made++;
+    else if (res === 'hit') _stats.hit++;
+    else if (res === 'skip') { _stats.skip++; if (kind === 't') return; }
+    else if (res === 'fail') { _stats.failed++; _warn('미리 만들기 실패(첫 조회 때 다시 만든다)'); }
+    else if (res === 'off') return;
+  }
+}
 function _pump() {
   while (_active < WARM_MAX && _queue.length) {
     const id = _queue.shift();
     _active++;
-    warmOne(id).then((res) => {
-      if (res === 'made') _stats.made++;
-      else if (res === 'hit') _stats.hit++;
-      else if (res === 'skip') _stats.skip++;
-      else if (res === 'fail') { _stats.failed++; _warn('미리 만들기 실패(첫 조회 때 다시 만든다)'); }
-    }).catch(() => { _stats.failed++; }).finally(() => { _active--; _pump(); });
+    _warmKinds(id).catch(() => { _stats.failed++; }).finally(() => { _active--; _pump(); });
   }
 }
 function _enqueue(id) {
@@ -163,7 +173,7 @@ function _collectSql() {
   const parts = WARM_SOURCES.map((s) => {
     const col = s.column || s.expr;
     return `SELECT ${col} AS id, ${s.at} AS at FROM ${s.table}
-      WHERE ${col} IS NOT NULL AND ${col} <> '' AND ${s.at} >= now() - make_interval(days => $1::int)${s.where ? ` AND ${s.where}` : ''}`;
+      WHERE ${col} IS NOT NULL AND ${col} <> '' AND ($1::int IS NULL OR ${s.at} >= now() - make_interval(days => $1::int))${s.where ? ` AND ${s.where}` : ''}`;
   });
   const priv = require('./imageAllowlist.service').PRIVATE_SOURCES
     .map(s => `SELECT ${s.column} FROM ${s.table} WHERE ${s.column} IS NOT NULL`).join(' UNION ');
@@ -176,16 +186,16 @@ function _collectSql() {
   LIMIT $2`;
 }
 
-/** @returns {Promise<string[]>} 최근 N일 사진 번호(중복 제거·최신순). db = { query(sql, params) } */
+/** @returns {Promise<string[]>} 최근 N일 사진 번호(중복 제거·최신순). days=null = 전체. db = { query(sql, params) } */
 async function collectRecentIds(db, { days = 60, limit = 50000 } = {}) {
-  const d = Math.max(1, Math.min(3650, Math.floor(Number(days) || 60)));
+  const d = days === null ? null : Math.max(1, Math.min(3650, Math.floor(Number(days) || 60)));
   const l = Math.max(1, Math.min(500000, Math.floor(Number(limit) || 50000)));
   const r = await db.query(_collectSql(), [d, l]);
   return (r.rows || []).map(x => String(x.id)).filter(x => imageEdge.ID_RE.test(x));
 }
 
 module.exports = {
-  WARM_MAX, QUEUE_MAX, FIRST_DELAY_MS, RETRY_DELAY_MS, DEFAULT_PUBLIC_ORIGIN,
+  WARM_KINDS, WARM_MAX, QUEUE_MAX, FIRST_DELAY_MS, RETRY_DELAY_MS, DEFAULT_PUBLIC_ORIGIN,
   WARM_SOURCES, WARM_SKIPPED,
   scheduleUploadWarm, warmOne, edgeUrl, publicOrigin, collectRecentIds,
   __collectSql: _collectSql,

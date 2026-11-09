@@ -14,9 +14,15 @@
  * ★ 이 Function 은 frontend/_routes.json 의 `/img/*` 에서만 돈다 — 정적 파일·_headers·_redirects 영향 0.
  * ★ Workers 전역(Request/Response/crypto.subtle/caches)만 쓴다 — Node 에서도 그대로 시험된다.
  *
+ * ★ kind o(원본 — 2026-11-09 「모든 사진 미리 만들기」): 원본 바이트를 **그대로** R2 `orig/<fileId>` 에 담고 내준다
+ *   (재압축·변환 0, Content-Type 원본). 래스터 사진 형식만(ORIGINAL_TYPE_RE — 서버 imageEdge.service 와 같다),
+ *   응답에 `Content-Security-Policy: sandbox`(우리 사이트에서 문서로 열려도 스크립트 0).
+ * ★ HEAD = 미리 만들기용 — R2 에 있으면 head() 만(몸통 읽기 0), 없으면 GET 과 똑같이 만들어 담고 머리글만 낸다.
+ *
  * 환경: IMG_SIGNING_KEY(비밀) · IMG_ORIGIN_KEY(비밀) · ORIGIN_API(선택, 기본 운영 서버) · R2 바인딩 IMG_BUCKET
  */
-const KINDS = { t: true, m: true };
+const KINDS = { t: true, m: true, o: true };
+const ORIGINAL_TYPE_RE = /^image\/(?:jpeg|jpg|pjpeg|png|webp|gif|avif|heic|heif|bmp)$/i;
 const ID_RE = /^[-\w]{20,128}$/;
 const SIG_RE = /^[-\w]{43}$/;
 const MIN_KEY_LEN = 32;
@@ -65,16 +71,22 @@ export async function verifySig(secret, kind, fileId, e, s, nowSec = Math.floor(
 function _plain(status, text) {
   return new Response(text, { status, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' } });
 }
-function _image(bytes, type, exp, src) {
+function _image(bytes, type, exp, src, head) {
   const maxAge = Math.max(0, Math.min(exp - Math.floor(Date.now() / 1000), BROWSER_MAX_AGE));
-  return new Response(bytes, { status: 200, headers: {
+  return new Response(head ? null : bytes, { status: 200, headers: {
     'Content-Type': type || 'image/webp',
     'Cache-Control': `private, max-age=${maxAge}`,
     'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': 'sandbox',
     'X-Img-Src': src,
   } });
 }
-function _r2Key(kind, fileId) { return `thumb/${kind}/${fileId}.webp`; }
+/** o = 원본(이름에 형식을 붙이지 않는다 — 형식은 httpMetadata.contentType 이 원본 그대로 갖는다) */
+function _r2Key(kind, fileId) { return kind === 'o' ? `orig/${fileId}` : `thumb/${kind}/${fileId}.webp`; }
+function _typeOk(kind, type) {
+  const t = String(type || '').split(';')[0].trim();
+  return kind === 'o' ? ORIGINAL_TYPE_RE.test(t) : /^image\//i.test(t);
+}
 function _cacheKey(request, kind, fileId) {
   return new Request(new URL(`/img-cache/${kind}/${fileId}`, request.url).toString(), { method: 'GET' });
 }
@@ -96,7 +108,7 @@ async function _fromOrigin(env, kind, fileId, fetchImpl) {
   if (r.status === 404) return { status: 404 };
   if (r.status !== 200) return { status: 502 };
   const type = r.headers.get('Content-Type') || '';
-  if (!/^image\//i.test(type)) return { status: 502 };
+  if (!_typeOk(kind, type)) return { status: 502 };
   return { status: 200, bytes: await r.arrayBuffer(), type, fallback: r.headers.get('X-Img-Fallback') === 'original' };
 }
 
@@ -110,13 +122,14 @@ async function onGet(ctx, fetchImpl) {
   const verdict = await verifySig(env.IMG_SIGNING_KEY, kind, fileId, q.get('e'), q.get('s'));
   if (verdict !== 'ok') return _plain(403, 'forbidden');
   const exp = Number(q.get('e'));
+  const head = request.method === 'HEAD';
 
   const cache = _cache();
   const ck = _cacheKey(request, kind, fileId);
   if (cache) {
     try {
       const hit = await cache.match(ck);
-      if (hit) return _image(await hit.arrayBuffer(), hit.headers.get('Content-Type'), exp, 'edge');
+      if (hit) return _image(head ? null : await hit.arrayBuffer(), hit.headers.get('Content-Type'), exp, 'edge', head);
     } catch (_) { /* 캐시 실패 = R2 로 */ }
   }
   const remember = (bytes, type) => {
@@ -125,13 +138,19 @@ async function onGet(ctx, fetchImpl) {
       'Content-Type': type || 'image/webp', 'Cache-Control': `public, max-age=${EDGE_MAX_AGE}` } })));
   };
 
+  if (head && typeof env.IMG_BUCKET.head === 'function') {
+    // 미리 만들기(HEAD) — 이미 있으면 몸통을 읽지 않고 「있음」만 알린다(원본 25MB 를 다시 내려보내지 않게).
+    let h = null;
+    try { h = await env.IMG_BUCKET.head(_r2Key(kind, fileId)); } catch (_) { h = null; }
+    if (h) return _image(null, (h.httpMetadata && h.httpMetadata.contentType) || 'image/webp', exp, 'r2', true);
+  }
   let obj = null;
   try { obj = await env.IMG_BUCKET.get(_r2Key(kind, fileId)); } catch (_) { obj = null; }
   if (obj) {
     const bytes = await obj.arrayBuffer();
     const type = (obj.httpMetadata && obj.httpMetadata.contentType) || 'image/webp';
     remember(bytes, type);
-    return _image(bytes, type, exp, 'r2');
+    return _image(bytes, type, exp, 'r2', head);
   }
 
   if (String(env.IMG_ORIGIN_KEY || '').length < MIN_KEY_LEN) return _plain(503, 'not configured');
@@ -151,7 +170,7 @@ async function onGet(ctx, fetchImpl) {
   const o = await job;
   if (o.status === 404) return _plain(404, 'not found');
   if (o.status !== 200) return _plain(502, 'origin failed');
-  return _image(o.bytes.slice(0), o.type, exp, 'origin');
+  return _image(head ? null : o.bytes.slice(0), o.type, exp, 'origin', head);
 }
 
 /** 사본 지우기(작업 삭제·사진 교체 연동용) — 서버만 부른다(X-Img-Key). 엣지 캐시는 이 지역 것만 지워진다. */
