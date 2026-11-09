@@ -7216,6 +7216,9 @@ function editSubAccount(idx) {
 
 /** 타계정 삭제 */
 async function deleteSubAccount(idx) {
+  // ★ 결정 358 후속 — 서버에서 받은 목록이 있어야만 지운다(못 받은 화면의 빈 목록으로 통째 저장 금지).
+  const base = _subAccountsBase();
+  if (!base) { _subAccountsNotLoaded(); return; }
   if (!confirm((idx+1) + "번 타계정을 삭제하시겠습니까?")) return;
 
   const auth = _getReviewerSession() || {};
@@ -7223,22 +7226,26 @@ async function deleteSubAccount(idx) {
   const myPhone8 = auth.phone8 || "";
   if (!myName || !myPhone8) { showToast("세션이 만료되었습니다.", "warning"); return; }
 
-  const profile = window._reviewerProfile;
-  const subs    = JSON.parse(JSON.stringify(_parseSubAccounts(profile?.subAccounts)));
+  const subs    = JSON.parse(JSON.stringify(base));
   if (idx < 0 || idx >= subs.length) return;
   subs.splice(idx, 1);
 
   try {
+    // 기준 목록을 함께 보낸다 — 그사이 다른 곳에서 바뀌었으면 서버가 쓰지 않고 stale_sub_accounts.
     const res = await gasPost({
       action: "saveSubAccounts",
       name: myName,
       phone8: myPhone8,
-      subAccounts: JSON.stringify(subs)
+      subAccounts: JSON.stringify(subs),
+      baseSubAccounts: JSON.stringify(base)
     });
     if (res?.ok) {
       showToast("타계정이 삭제되었습니다.");
-      if (window._reviewerProfile) window._reviewerProfile.subAccounts = subs;
+      _afterSubAccountsSaved(Array.isArray(res.subAccounts) ? res.subAccounts : subs);
       _renderReviewerProfileModal(window._reviewerProfile);
+    } else if (res?.code === "stale_sub_accounts") {
+      await _reloadAfterStaleSubAccounts(res);
+      if (window._reviewerProfile) _renderReviewerProfileModal(window._reviewerProfile);
     } else {
       showToast("❌ " + (res?.error || "삭제 실패"), "error");
     }
@@ -7258,6 +7265,42 @@ function _parseSubAccounts(val) {
   if (Array.isArray(val)) return val;
   if (typeof val === 'string') { try { const arr = JSON.parse(val); return Array.isArray(arr) ? arr : []; } catch(_) { return []; } }
   return [];
+}
+
+/** ★ 결정 358 후속 — 타계정 저장의 기준 = 이 화면이 서버에서 **실제로 받은** 목록(`found:true` 일 때만 · 사본).
+ *  못 받았으면 null → 추가·수정·삭제를 보내지 않는다. 빈 목록 기준으로 통째 저장하면 기존 타계정이 지워진다(사고 S1). */
+function _subAccountsBase() {
+  const p = window._reviewerProfile;
+  if (!p || p.found !== true) return null;
+  return JSON.parse(JSON.stringify(_parseSubAccounts(p.subAccounts)));
+}
+
+/** 타계정 한 칸의 이름(띄어쓰기 무시)+번호 뒤 8자리 — 그사이 목록이 바뀐 뒤 「수정하던 칸」을 다시 찾을 때 쓴다. */
+function _subAccountSig(sub) {
+  return String(sub && sub.name || "").replace(/\s+/g, "") + "|" + String(sub && sub.phone || "").replace(/[^0-9]/g, "").slice(-8);
+}
+
+/** 내 정보를 못 받은 화면에서 타계정을 고치려 할 때 — 보내지 않고 안내한 뒤 다시 불러온다(막다른 길 방지). */
+function _subAccountsNotLoaded() {
+  showToast("내 정보를 아직 불러오지 못했어요. 다시 불러오는 중이니 잠시 뒤 다시 눌러 주세요.", "warning");
+  if (typeof _loadInlineProfile === "function") _loadInlineProfile();
+}
+
+/** 타계정 저장·삭제 성공 뒤 — 서버가 돌려준 실제 저장 목록을 다음 기준으로(구버전 서버면 보낸 목록).
+ *  명의 정보(쇼핑 아이디 짝)는 순번으로 짝지어 그리므로 옛 것을 비우고 다시 받는다(결정 358 ⑥과 같은 이유). */
+function _afterSubAccountsSaved(subs) {
+  if (!window._reviewerProfile) window._reviewerProfile = {};
+  window._reviewerProfile.subAccounts = subs;
+  window._secureReviewerProfile = null;
+  _renderInlineSubList(subs);
+  if (typeof _loadSecureIdentityProfile === "function") _loadSecureIdentityProfile();
+}
+
+/** 서버가 stale_sub_accounts 로 거절(쓰기 0) — 서버 안내를 보이고, 낡은 기준은 버린 뒤 내 정보를 다시 불러온다. */
+async function _reloadAfterStaleSubAccounts(res) {
+  showToast("❌ " + ((res && res.error) || "타계정 정보가 그사이 바뀌었어요. 다시 불러온 뒤 한 번 더 저장해 주세요."), "error");
+  if (window._reviewerProfile) window._reviewerProfile.found = false;   // 다시 받기 전에는 낡은 목록으로 저장하지 않는다
+  if (typeof _loadInlineProfile === "function") await _loadInlineProfile();
 }
 
 /** 전화번호 뒤 8자리 자동 포맷 (0000-0000) */
@@ -7371,8 +7414,11 @@ function toggleInlineSubForm() {
     form.style.display = "none";
     return;
   }
+  // ★ 결정 358 후속 — 내 정보를 못 받은 화면에서는 추가 폼을 열지 않는다(「0/10 · 반드시 추가」를 믿고 추가하면 기존 타계정이 지워졌다).
+  const base = _subAccountsBase();
+  if (!base) { _subAccountsNotLoaded(); return; }
   // 현재 개수 체크
-  const subs = _parseSubAccounts(window._reviewerProfile?.subAccounts);
+  const subs = base;
   if (subs.length >= 10) { showToast("타계정은 최대 10개까지 등록 가능합니다.", "warning"); return; }
   // 추가 모드로 초기화
   document.getElementById("inlineSubFormTitle").textContent = "타계정 추가";
@@ -7387,7 +7433,8 @@ function toggleInlineSubForm() {
 
 /** 인라인 타계정 폼 수정 모드 열기 */
 function editInlineSubAccount(idx) {
-  const subs = _parseSubAccounts(window._reviewerProfile?.subAccounts);
+  const subs = _subAccountsBase();   // 결정 358 후속 — 받은 목록에서만 고친다
+  if (!subs) { _subAccountsNotLoaded(); return; }
   if (idx < 0 || idx >= subs.length) return;
   const sub = subs[idx];
   const form = document.getElementById("inlineSubForm");
@@ -7415,23 +7462,30 @@ function cancelInlineSubForm() {
 
 /** 인라인 타계정 삭제 */
 async function deleteInlineSubAccount(idx) {
+  // ★ 결정 358 후속 — 서버에서 받은 목록이 있어야만 지운다 + 그 목록을 기준으로 함께 보낸다.
+  const base = _subAccountsBase();
+  if (!base) { _subAccountsNotLoaded(); return; }
   if (!confirm((idx+1) + "번 타계정을 삭제하시겠습니까?")) return;
   const auth = _getReviewerSession() || {};
   const myName = auth.name || "";
   const myPhone8 = auth.phone8 || "";
   if (!myName || !myPhone8) { showToast("세션이 만료되었습니다.", "warning"); return; }
 
-  const subs = JSON.parse(JSON.stringify(_parseSubAccounts(window._reviewerProfile?.subAccounts)));
+  const subs = JSON.parse(JSON.stringify(base));
   if (idx < 0 || idx >= subs.length) return;
   subs.splice(idx, 1);
 
   try {
-    const res = await gasPost({ action: "saveSubAccounts", name: myName, phone8: myPhone8, subAccounts: JSON.stringify(subs) });
+    const res = await gasPost({ action: "saveSubAccounts", name: myName, phone8: myPhone8,
+      subAccounts: JSON.stringify(subs), baseSubAccounts: JSON.stringify(base) });
     if (res?.ok) {
       showToast("타계정이 삭제되었습니다.");
-      if (window._reviewerProfile) window._reviewerProfile.subAccounts = subs;
-      _renderInlineSubList(subs);
+      _afterSubAccountsSaved(Array.isArray(res.subAccounts) ? res.subAccounts : subs);
       cancelInlineSubForm();
+    } else if (res?.code === "stale_sub_accounts") {
+      // 쓰기 0 — 다시 불러온 목록에서 다시 고르게 한다. 순번이 바뀌었을 수 있어 열린 수정 폼은 닫는다(추가 폼의 입력은 둔다).
+      if (parseInt(document.getElementById("inlineSubEditIdx")?.value || "-1", 10) >= 0) cancelInlineSubForm();
+      await _reloadAfterStaleSubAccounts(res);
     } else {
       showToast("❌ " + (res?.error || "삭제 실패"), "error");
     }
@@ -7550,11 +7604,16 @@ async function confirmSaveInlineSubAccount() {
   const myPhone8 = auth.phone8 || "";
   if (!myName || !myPhone8) { showToast("세션이 만료되었습니다.", "warning"); return; }
 
+  // ★ 결정 358 후속 — 기준 = 서버에서 받은 목록. 못 받았으면 보내지 않는다(입력값은 그대로 둔다).
+  const base = _subAccountsBase();
+  if (!base) { _subAccountsNotLoaded(); return; }
+
   // 확인창 제거
   const confirmEl = document.getElementById("inlineSubConfirm");
   if (confirmEl) confirmEl.remove();
 
-  const subs = JSON.parse(JSON.stringify(_parseSubAccounts(window._reviewerProfile?.subAccounts)));
+  const subs = JSON.parse(JSON.stringify(base));
+  const editOrig = (editIdx >= 0 && editIdx < base.length) ? base[editIdx] : null;   // 그사이 바뀌면 이 칸을 새 목록에서 다시 찾는다
   const newSub = {
     name,
     phone: phone.slice(0,3) + "-" + phone.slice(3,7) + "-" + phone.slice(7),
@@ -7573,16 +7632,34 @@ async function confirmSaveInlineSubAccount() {
   if (btn) { btn.disabled = true; btn.textContent = "저장 중..."; }
 
   try {
-    const res = await gasPost({ action: "saveSubAccounts", name: myName, phone8: myPhone8, subAccounts: JSON.stringify(subs) });
+    const res = await gasPost({ action: "saveSubAccounts", name: myName, phone8: myPhone8,
+      subAccounts: JSON.stringify(subs), baseSubAccounts: JSON.stringify(base) });
     if (res?.ok) {
       showToast(editIdx >= 0 ? "타계정이 수정되었습니다." : "타계정이 추가되었습니다.");
-      if (!window._reviewerProfile) window._reviewerProfile = {};
-      window._reviewerProfile.subAccounts = subs;
-      _renderInlineSubList(subs);
+      _afterSubAccountsSaved(Array.isArray(res.subAccounts) ? res.subAccounts : subs);
       cancelInlineSubForm();
       // 모달 쪽도 동기화 (열려있으면)
       if (typeof _renderReviewerProfileModal === "function" && document.getElementById("reviewerProfileModal")?.style.display === "flex") {
         _renderReviewerProfileModal(window._reviewerProfile);
+      }
+    } else if (res?.code === "stale_sub_accounts") {
+      // 쓰기 0 — 서버 안내 + 다시 불러오기. 입력한 값은 폼에 그대로 둔다(다시 [저장]만 누르면 새 목록 기준으로 저장).
+      await _reloadAfterStaleSubAccounts(res);
+      if (editOrig) {
+        // 수정 중이던 칸은 순번이 아니라 이름·번호로 새 목록에서 다시 찾는다(엉뚱한 칸을 덮지 않게).
+        const fresh = _subAccountsBase();
+        const at = fresh ? fresh.findIndex((s) => _subAccountSig(s) === _subAccountSig(editOrig)) : -1;
+        if (at >= 0) {
+          const idxEl = document.getElementById("inlineSubEditIdx");
+          if (idxEl) idxEl.value = String(at);
+          const titleEl = document.getElementById("inlineSubFormTitle");
+          if (titleEl) titleEl.textContent = "타계정 수정 [" + (at+1) + "]";
+        } else {
+          // 없어졌거나(다른 곳에서 지움·이름/번호 변경) 다시 받지 못했으면 — 옛 순번으로 엉뚱한 칸을 덮지 않게 폼을 닫는다.
+          cancelInlineSubForm();
+          showToast(fresh ? "수정하던 타계정이 다른 곳에서 바뀌었거나 지워졌어요. 목록을 확인한 뒤 다시 수정해 주세요."
+            : "내 정보를 다시 불러오지 못했어요. 잠시 뒤 목록을 확인하고 다시 수정해 주세요.", "warning");
+        }
       }
     } else {
       showToast("❌ " + (res?.error || "저장에 실패했습니다."), "error");
@@ -9140,51 +9217,61 @@ async function _runIdentityPrecheck(auth, orders) {
   return false;
 }
 
-/** 신원 불일치 감지 시 현재 주문 입력값을 타계정으로 자동 등록 */
+/** 신원 불일치 감지 시 현재 주문 입력값을 타계정으로 자동 등록
+ *  ★ 결정 358 후속 — 저장 직전에 받은 목록을 기준(baseSubAccounts)으로 함께 보낸다. 받은 뒤 저장하기까지 그 짧은 사이에
+ *    다른 곳(리뷰어 홈·다른 기기)에서 타계정이 바뀌면 서버가 쓰지 않는다(stale_sub_accounts) → **새로 받아 한 번 더**
+ *    (사람에게 다시 묻지 않음 — 제출 흐름을 멈추지 않는다). 두 번 연속이면 서버 안내로 멈춘다(다른 등록 실패와 같은 처리).
+ *    기준 없이 통째 저장하는 길로 되돌아가지 않는다 — 그 길이 다른 곳에서 고친 타계정을 덮어 지우는 사고다. */
 async function _registerSubAccountFromOrder(auth, idn) {
   try {
-    const prof = await gasGet({ action: "getReviewerProfile", name: auth.name, phone8: auth.phone8 });
-    if (!prof?.ok || !prof.profile) {
-      return { ok: false, code: prof?.code || "PROFILE_LOAD_FAILED", error: prof?.error || "내정보를 불러오지 못했습니다." };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const prof = await gasGet({ action: "getReviewerProfile", name: auth.name, phone8: auth.phone8 });
+      if (!prof?.ok || !prof.profile) {
+        return { ok: false, code: prof?.code || "PROFILE_LOAD_FAILED", error: prof?.error || "내정보를 불러오지 못했습니다." };
+      }
+      const subs = Array.isArray(prof.profile.subAccounts) ? prof.profile.subAccounts : [];
+      const base = JSON.parse(JSON.stringify(subs));   // 이 목록을 받고 고쳤다는 기준
+      // 같은 전화번호가 이미 있으면 새 행을 추가하지 않는다. 이름까지 같으면 등록 완료로
+      // 간주하고, 이름이 다르면 어느 값을 고쳐야 하는지 알려준다.
+      const _n = (idn.name || "").replace(/\s+/g, "");
+      const _p8 = (idn.phone || "").replace(/[^0-9]/g, "").slice(-8);
+      if (!_n || _p8.length !== 8) {
+        return { ok: false, code: "SUB_ACCOUNT_IDENTITY_REQUIRED", error: "타계정 이름과 연락처를 확인해주세요." };
+      }
+      const samePhone = subs.find(s => (s?.phone || "").replace(/[^0-9]/g, "").slice(-8) === _p8);
+      if (samePhone) {
+        const savedName = (samePhone?.name || "").trim();
+        if (savedName.replace(/\s+/g, "") === _n) return { ok: true, alreadyRegistered: true };
+        return {
+          ok: false,
+          code: "SUB_PHONE_NAME_MISMATCH",
+          error: `이 연락처는 이미 타계정 '${savedName || "이름 미등록"}'으로 등록되어 있습니다. 입력 이름과 등록 이름을 확인해주세요.`,
+        };
+      }
+      if (subs.length >= 10) {
+        return { ok: false, code: "SUB_ACCOUNT_LIMIT", error: "타계정은 최대 10개까지 등록할 수 있습니다. 기존 타계정을 정리한 뒤 다시 시도해주세요." };
+      }
+      subs.push({
+        name: (idn.name || "").trim(),
+        phone: (idn.phone || "").trim(),
+        incomeName: "", jumin: "",
+        address: (idn.address || "").trim(),
+        // ★ 타계정별 개별 계좌정보
+        bankName: (idn.bankName || "").trim(),
+        bankAccount: (idn.bankAccount || "").trim(),
+        accountHolder: (idn.accountHolder || "").trim(),
+      });
+      // origin = 구매양식에서 등록했다는 표시(결정 224 — 관찰용, 동작 무변경)
+      const r = await gasPost({ action: "saveSubAccounts", name: auth.name, phone8: auth.phone8, subAccounts: JSON.stringify(subs), baseSubAccounts: JSON.stringify(base), origin: "order_form" });
+      if (r?.ok) {
+        // 서버가 돌려준 실제 저장 목록(없으면 = 구버전 서버 → 보낸 목록)을 화면의 목록으로
+        if (window._reviewerProfile) window._reviewerProfile.subAccounts = Array.isArray(r.subAccounts) ? r.subAccounts : subs;
+        return { ok: true, registered: true };
+      }
+      if (r?.code === "stale_sub_accounts" && attempt === 0) continue;   // 그사이 바뀜 — 새로 받아 한 번 더
+      return { ok: false, code: r?.code || "SUB_ACCOUNT_SAVE_FAILED", error: r?.error || "타계정 등록에 실패했습니다." };
     }
-    const subs = Array.isArray(prof.profile.subAccounts) ? prof.profile.subAccounts : [];
-    // 같은 전화번호가 이미 있으면 새 행을 추가하지 않는다. 이름까지 같으면 등록 완료로
-    // 간주하고, 이름이 다르면 어느 값을 고쳐야 하는지 알려준다.
-    const _n = (idn.name || "").replace(/\s+/g, "");
-    const _p8 = (idn.phone || "").replace(/[^0-9]/g, "").slice(-8);
-    if (!_n || _p8.length !== 8) {
-      return { ok: false, code: "SUB_ACCOUNT_IDENTITY_REQUIRED", error: "타계정 이름과 연락처를 확인해주세요." };
-    }
-    const samePhone = subs.find(s => (s?.phone || "").replace(/[^0-9]/g, "").slice(-8) === _p8);
-    if (samePhone) {
-      const savedName = (samePhone?.name || "").trim();
-      if (savedName.replace(/\s+/g, "") === _n) return { ok: true, alreadyRegistered: true };
-      return {
-        ok: false,
-        code: "SUB_PHONE_NAME_MISMATCH",
-        error: `이 연락처는 이미 타계정 '${savedName || "이름 미등록"}'으로 등록되어 있습니다. 입력 이름과 등록 이름을 확인해주세요.`,
-      };
-    }
-    if (subs.length >= 10) {
-      return { ok: false, code: "SUB_ACCOUNT_LIMIT", error: "타계정은 최대 10개까지 등록할 수 있습니다. 기존 타계정을 정리한 뒤 다시 시도해주세요." };
-    }
-    subs.push({
-      name: (idn.name || "").trim(),
-      phone: (idn.phone || "").trim(),
-      incomeName: "", jumin: "",
-      address: (idn.address || "").trim(),
-      // ★ 타계정별 개별 계좌정보
-      bankName: (idn.bankName || "").trim(),
-      bankAccount: (idn.bankAccount || "").trim(),
-      accountHolder: (idn.accountHolder || "").trim(),
-    });
-    // origin = 구매양식에서 등록했다는 표시(결정 224 — 관찰용, 동작 무변경)
-    const r = await gasPost({ action: "saveSubAccounts", name: auth.name, phone8: auth.phone8, subAccounts: JSON.stringify(subs), origin: "order_form" });
-    if (r?.ok) {
-      if (window._reviewerProfile) window._reviewerProfile.subAccounts = subs;
-      return { ok: true, registered: true };
-    }
-    return { ok: false, code: r?.code || "SUB_ACCOUNT_SAVE_FAILED", error: r?.error || "타계정 등록에 실패했습니다." };
+    return { ok: false, code: "SUB_ACCOUNT_SAVE_FAILED", error: "타계정 등록에 실패했습니다." };
   } catch (e) {
     console.warn("[subRegister] 실패:", e.message);
     return { ok: false, code: "SUB_ACCOUNT_SAVE_FAILED", error: e.message || "타계정 등록 중 오류가 발생했습니다." };
