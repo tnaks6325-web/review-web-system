@@ -560,6 +560,31 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, del
       logger.warn(`[workTabDelete] 캡처 묘비 기록 실패(삭제는 계속) "${tabName}": ${tombErr.message}`);
     }
 
+    // 219 supplements cascade with their order: preserve file coordinates before any evidence deletion.
+    // Legacy fixtures may predate 219; discovery/INSERT errors must abort the whole transaction.
+    const { rows: supplementSchema } = await client.query(
+      `SELECT to_regclass('public.purchase_capture_supplements') AS supplements`);
+    if (supplementSchema[0] && supplementSchema[0].supplements) {
+      const scopeSql = `(o.sheet_id=$1 AND o.tab_name=$2)
+        OR o.id=ANY($3::uuid[])
+        OR o.sheet_id IN (SELECT 'campaign:' || id FROM recruit_campaigns
+          WHERE linked_sheet_id=$1 AND COALESCE(NULLIF(linked_tab_name,''),$2)=$2)`;
+      const scopeArgs = [sheetId, tabName, dualScope ? dualScope.orders : []];
+      const targets = await client.query(`SELECT o.id FROM order_submissions o
+        WHERE ${scopeSql} ORDER BY o.id`, scopeArgs);
+      // Share capture writers' existing advisory key, not an early order-row lock:
+      // tabRename writes review rows before order rows. Preserve that row-lock order.
+      await require('../utils/purchaseCaptureLock').lockPurchaseCaptureOrdersInTx(client,targets.rows.map(o=>o.id));
+      // A separate statement is essential: see commits made while the advisory lock waited.
+      const tomb = await client.query(`INSERT INTO orphan_capture_tombstones
+        (file_id,file_name,sheet_id,tab_name,reviewer_name,slot_key,reason,recorded_by)
+        SELECT s.file_id,NULL,$1,$2,NULL,'capture','work_deleted',$4
+        FROM purchase_capture_supplements s JOIN order_submissions o ON o.id=s.order_submission_id
+        WHERE ${scopeSql}
+        ON CONFLICT (file_id) DO NOTHING`, [...scopeArgs, String(by || 'admin').slice(0,100)]);
+      recordedTombstones += tomb.rowCount || 0;
+    }
+
     // Read all artifact history (including staged files) before application CASCADE.
     // Unlike legacy optional tombstones, new evidence lookup errors must abort deletion.
     if (dualScope) {

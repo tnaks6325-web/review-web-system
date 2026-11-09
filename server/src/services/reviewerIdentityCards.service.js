@@ -456,6 +456,11 @@ function mapSubsToCards(reviewer, cards) {
   return { byIndex, merged, misses };
 }
 
-module.exports = { buildCardsFromReviewer, syncOwnerCards, planOwnerSync, reconcileCards,
+// Existing order binding verification only; no identity values or card writes.
+async function readOrderCardBinding(db, cardId) {
+  return (await db.query('SELECT owner_reviewer_id,phone8 FROM reviewer_identity_cards WHERE id=$1', [cardId])).rows[0];
+}
+
+module.exports = { buildCardsFromReviewer, syncOwnerCards, planOwnerSync, reconcileCards, readOrderCardBinding,
   findSubIndex, syncCardsAfterWrite, mutateSubAccountsInTx, mutateSubAccounts,
   cardKeysEnabled, loadActiveCards, mapSubsToCards, findParticipationCard, syncOwnerCardsSoon, _test: { nameKey, phone8Of } };

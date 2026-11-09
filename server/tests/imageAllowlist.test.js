@@ -55,6 +55,7 @@ const countingDb = { query: (...a) => { queryCount++; return db.query(...a); } }
     CREATE TABLE review_edit_requests (id SERIAL PRIMARY KEY, old_file_id TEXT, new_file_id TEXT);
     CREATE TABLE purchase_capture_artifacts (id SERIAL PRIMARY KEY, file_id TEXT NOT NULL);
     CREATE INDEX idx_purchase_artifact_file ON purchase_capture_artifacts(file_id);
+    CREATE TABLE purchase_capture_supplements (file_id TEXT PRIMARY KEY);
     CREATE TABLE purchase_submission_sessions (id SERIAL PRIMARY KEY, capture_file_id TEXT);
     CREATE TABLE reviewer_event_logs (id SERIAL PRIMARY KEY, context JSONB NOT NULL DEFAULT '{}'::jsonb);
     CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMPTZ DEFAULT NOW());
@@ -67,7 +68,7 @@ const countingDb = { query: (...a) => { queryCount++; return db.query(...a); } }
   const G = (x) => `https://api.example.test/api/order/guide-image/${x}`;
   const ids = {
     rs: id('RS'), os1: id('OS1'), os2: id('OS2'), ri: id('RI'), insp: id('INSP'),
-    reOld: id('REOLD'), reNew: id('RENEW'), pca: id('PCA'), pss: id('PSS'),
+    reOld: id('REOLD'), reNew: id('RENEW'), pca: id('PCA'), pcs: id('PCS'), pss: id('PSS'),
     logCtx: id('LOGCTX'), sample: id('SAMPLE'),
     pay: id('PAY'), payAlsoRs: id('PAYRS'),
     gWo: id('GWO'), gWoGuide: id('GWOG'), gCs: id('GCS'), gOpt: id('GOPT'), gThumb: id('GTHUMB'), gSet: id('GSET'),
@@ -79,6 +80,7 @@ const countingDb = { query: (...a) => { queryCount++; return db.query(...a); } }
   await db.query('INSERT INTO review_inspections(file_id) VALUES ($1)', [ids.insp]);
   await db.query('INSERT INTO review_edit_requests(old_file_id,new_file_id) VALUES ($1,$2)', [ids.reOld, ids.reNew]);
   await db.query('INSERT INTO purchase_capture_artifacts(file_id) VALUES ($1)', [ids.pca]);
+  await db.query('INSERT INTO purchase_capture_supplements(file_id) VALUES ($1)', [ids.pcs]);
   await db.query('INSERT INTO purchase_submission_sessions(capture_file_id) VALUES ($1)', [ids.pss]);
   await db.query(`INSERT INTO reviewer_event_logs(context) VALUES (jsonb_build_object('fileId', $1::text))`, [ids.logCtx]);
   await db.query(`INSERT INTO app_settings(key,value) VALUES ('review_inspect_sample_x', $1)`,
@@ -116,7 +118,7 @@ const countingDb = { query: (...a) => { queryCount++; return db.query(...a); } }
 
   try {
     await t('drive/image: 화면이 번호를 얻는 출처마다 1개씩 허용(200 + 드라이브 1회 + 기존 캐시 헤더)', async () => {
-      for (const k of ['rs', 'os1', 'os2', 'ri', 'insp', 'reOld', 'reNew', 'pca', 'pss', 'logCtx', 'sample']) {
+      for (const k of ['rs', 'os1', 'os2', 'ri', 'insp', 'reOld', 'reNew', 'pca', 'pcs', 'pss', 'logCtx', 'sample']) {
         reads.length = 0;
         const r = await D(ids[k]);
         assert.equal(r.s, 200, k + ' 허용이어야 한다');
@@ -234,6 +236,7 @@ const countingDb = { query: (...a) => { queryCount++; return db.query(...a); } }
       'review_edit_requests.old_file_id',           // C/S 교체요청 기존
       'review_edit_requests.new_file_id',           // C/S 교체요청 변경
       'purchase_capture_artifacts.file_id',         // 동시진행 구매처별 캡처
+      'purchase_capture_supplements.file_id',       // 본인 추가 사진(원본 보존)
       'purchase_submission_sessions.capture_file_id', // 구매캡처 업로드 세션
       "reviewer_event_logs.(context->>'fileId')",   // 리뷰어 로그 펼침(_logCapFileId)
       'app_settings.value',                         // AI 판별 예시(주소째 저장)
@@ -253,15 +256,17 @@ const countingDb = { query: (...a) => { queryCount++; return db.query(...a); } }
       const col = (s.column || s.expr).replace(/[()]/g, '\\$&');
       const re = new RegExp(`ON ${s.table} ?\\((?:\\(?\\s*)?${col}`, 'i');
       const pk = new RegExp(`CREATE TABLE IF NOT EXISTS ${s.table} \\( ?${s.column} TEXT PRIMARY KEY`, 'i');
-      assert.ok(re.test(all) || pk.test(all), `${s.table}.${s.column || s.expr} 인덱스 없음`);
+      // Inline UNIQUE creates a real B-tree index too; keep checking its exact table/column.
+      const inlineUnique = s.column && new RegExp(`CREATE TABLE IF NOT EXISTS ${s.table} \\( [^;]*?\\b${s.column} TEXT NOT NULL UNIQUE`, 'i');
+      assert.ok(re.test(all) || pk.test(all) || (inlineUnique && inlineUnique.test(all)), `${s.table}.${s.column || s.expr} 인덱스 없음`);
     }
   });
 
   await t('회귀가드: 화면에서 drive/image 주소를 만드는 자리 수 고정(새 자리 = 출처 목록 재점검)', async () => {
     const files = ['frontend/workdesk.html', 'frontend/js/search-app.js', 'frontend/index.html',
-      'frontend/js/cs-review-edit-card.js', 'frontend/report.html'];
+      'frontend/js/cs-review-edit-card.js', 'frontend/report.html', 'frontend/js/reviewer-purchase-capture.js'];
     const count = files.map(f => (fs.readFileSync(path.join(REPO, f), 'utf8').match(/\/api\/drive\/image\/['`$]/g) || []).length);
-    assert.deepEqual(count, [9, 2, 1, 1, 1], '자리가 늘거나 줄었다 — 결정 352 표와 위 AUDITED 를 다시 맞춘다');
+    assert.deepEqual(count, [9, 2, 1, 1, 1, 1], '자리가 늘거나 줄었다 — 결정 352 표와 위 AUDITED 를 다시 맞춘다');
   });
 
   await t('회귀가드: 서버에서 guide-image 주소를 만드는 자리는 전부 목록 등록을 먼저 한다', async () => {

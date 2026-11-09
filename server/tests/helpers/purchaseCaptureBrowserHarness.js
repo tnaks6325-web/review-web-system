@@ -1,0 +1,44 @@
+'use strict';
+const fs=require('node:fs'),path=require('node:path');
+const {fixture,OWNER}=require('./purchaseCaptureIntegrationFixture');
+async function start({port=0}={}){
+ process.env.NODE_ENV='test';process.env.JWT_SECRET='local-capture-browser-only-not-a-credential';
+ const h=await fixture(),root=path.resolve(__dirname,'../../..');
+ await h.pg.exec(`ALTER TABLE review_submissions ADD COLUMN file_id text;
+ CREATE TABLE review_index(sheet_id text,tab_name text,campaign_name text,review_file_id text,product_name text,round text,is_submitted boolean,is_submitted2 text,row_index int,row_json jsonb,phone8 text,built_at timestamptz);
+ ALTER TABLE order_submissions ADD COLUMN order_num text,ADD COLUMN address text,ADD COLUMN selected_opt_key text,ADD COLUMN date_str text,ADD COLUMN sheet_row int;
+ ALTER TABLE tab_configs ADD COLUMN campaign_name text;
+ CREATE TABLE review_inspections(file_id text);
+ CREATE TABLE review_edit_requests(old_file_id text,new_file_id text);
+ CREATE TABLE reviewer_event_logs(context jsonb);
+ CREATE TABLE app_settings(key text,value text);
+ CREATE TABLE payment_result_drive_archive(drive_file_id text);
+ CREATE TABLE guide_image_files(file_id text PRIMARY KEY);
+ CREATE TABLE admin_nicknames(login_name text,nickname text);`);
+ await h.pg.exec(fs.readFileSync(path.join(root,'server/migrations/077_cs_message_images.sql'),'utf8'));
+ const poolPath=require.resolve('../../src/db/pool');require.cache[poolPath]={id:poolPath,filename:poolPath,loaded:true,exports:h.db};
+ const drivePath=require.resolve('../../src/services/drive.service');require.cache[drivePath]={id:drivePath,filename:drivePath,loaded:true,exports:{downloadFile:async id=>{const buffer=h.files.get(id);if(!buffer)throw new Error('Missing local fixture image');return {buffer,mimeType:'image/png'};}}};
+ const express=require('express'),app=express();app.use(express.json({limit:'15mb'}));
+ app.use((_q,res,next)=>{res.set('Content-Security-Policy',"default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; frame-src 'self'; object-src 'none'");next();});
+ const {createPurchaseCaptureRouters}=require('../../src/routes/purchaseCapture.routes');
+ const routers=createPurchaseCaptureRouters({core:h.core,checks:h.checks,uploadLimiter:(_q,_s,next)=>next()});
+ app.use('/api/reviewer',routers.reviewerRouter);app.use('/api/trackb',routers.staffRouter);
+ app.use('/api/cs',require('../../src/routes/cs.routes'));
+ app.use('/api/trackb/cs',require('../../src/routes/cs.routes'));
+ app.use('/api/drive',require('../../src/routes/drive.routes'));
+ const {issueReviewerSession}=require('../../src/services/reviewerSession.service');
+ const user={name:'시험 리뷰어',phone8:'12345678',reviewerToken:issueReviewerSession({ownerReviewerId:OWNER,loginKind:'self',loginPhone8:'12345678',loginName:'시험 리뷰어'})};
+ const token=require('jsonwebtoken').sign({name:'시험 직원',role:'staff'},process.env.JWT_SECRET,{expiresIn:'2h'});
+ app.get('/integrated-preview',(_q,res)=>{
+  let html=fs.readFileSync(path.join(root,'frontend/index.html'),'utf8');
+  const boot=`<script>window.REVIEW_API_URL=location.origin;window.CAPTURE_TEST_USER=${JSON.stringify(user)};window.addEventListener('load',()=>{document.getElementById('viewLogin').style.display='none';document.getElementById('viewHome').style.display='';document.getElementById('loginBarName').textContent='로컬 시험용 계정';document.querySelectorAll('.home-section').forEach(n=>{if(n.id!=='sectionMissingCapture')n.style.display='none'});_mountPurchaseCapture(window.CAPTURE_TEST_USER);});</script>`;
+  html=html.replace('<head>','<head>'+boot);res.type('html').send(html);
+ });
+ app.get('/staff-preview',(_q,res)=>res.type('html').send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>로컬 문의함 연결 검사</title><link rel="stylesheet" href="/css/reviewer-purchase-capture.css"><style>body{font:14px system-ui;margin:16px}#csInquiryMount{min-width:1000px}#tab-cs-inquiry{display:block!important}</style><p>로컬 가상 주문 · 운영 연결 없음</p><div id="csInquiryMount"></div><script>window.REVIEW_API_URL=location.origin;sessionStorage.setItem('admin_token',${JSON.stringify(token)});const STATE={role:'staff'};window.CS_PURCHASE_CAPTURE_CAN_ACT=function(){return ['master','admin','staff'].includes(STATE.role)};</script><script src="/api.js"></script><script src="/js/reviewer-purchase-capture.js"></script><script src="/js/cs-inquiry.js"></script><script>loadCsRooms();</script>`));
+ app.use('/api',(_q,res)=>res.status(404).json({ok:false,error:'이 로컬 시험에서 다루지 않는 기존 기능입니다.'}));
+ app.use(express.static(path.join(root,'frontend')));
+ app.use((error,_req,res,_next)=>{console.error('LOCAL_HARNESS_ERROR',error.message);res.status(500).json({ok:false,error:'로컬 시험 오류'});});
+ const server=app.listen(port,'127.0.0.1');await new Promise(r=>server.once('listening',r));
+ return {...h,user,token,base:'http://127.0.0.1:'+server.address().port,server,close:async()=>{server.closeAllConnections();await new Promise(r=>server.close(r));await h.pg.close();}};
+}
+module.exports={start};

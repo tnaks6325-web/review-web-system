@@ -270,6 +270,7 @@ const UPLOAD_SITES = {
   'src/services/dualStaffSubmission.service.js': '동시진행 대리 접수(purchase_capture_artifacts)',
   'src/services/paymentResultArchive.service.js': '★ 이체결과 보관(엑셀·CSV — 사진 아님, 훅이 형식으로 거른다 · 허용 판정도 거절)',
   'src/services/purchaseCaptureReplace.service.js': '구매캡처 교체(order_submissions)',
+  'src/services/purchaseCaptureSelfService.service.js': '추가 구매사진(purchase_capture_supplements.file_id)',
   'src/services/reviewCaptureReplace.service.js': '리뷰캡처 교체(review_submissions)',
 };
 function walk(dir) {
@@ -310,6 +311,7 @@ async function pgliteFixture() {
     CREATE TABLE review_inspections (file_id TEXT, created_at TIMESTAMPTZ);
     CREATE TABLE review_edit_requests (old_file_id TEXT, new_file_id TEXT, created_at TIMESTAMPTZ, status TEXT NOT NULL DEFAULT 'pending');
     CREATE TABLE purchase_capture_artifacts (file_id TEXT, created_at TIMESTAMPTZ);
+    CREATE TABLE purchase_capture_supplements (file_id TEXT, created_at TIMESTAMPTZ);
     CREATE TABLE purchase_submission_sessions (capture_file_id TEXT, created_at TIMESTAMPTZ, status TEXT NOT NULL DEFAULT 'prepared');
     CREATE TABLE reviewer_event_logs (context JSONB, occurred_at TIMESTAMPTZ);
     CREATE TABLE guide_image_files (file_id TEXT PRIMARY KEY, created_at TIMESTAMPTZ);
@@ -342,6 +344,16 @@ test('D1 최근 N일 사진 번호 — 출처 전부 · 중복 제거 · 최신�
     assert.ok(!ids.includes(ID(12)), '이체결과 보관 파일');
     assert.deepEqual(await warm.collectRecentIds(db, { days: 60, limit: 2 }), [ID(1), ID(3)]);
     assert.equal((await warm.collectRecentIds(db, { days: 100 })).length, 10);
+  } finally { await db.close(); }
+});
+
+test('D1b 추가 구매사진도 기존 최근 사진 수집에 포함한다', async () => {
+  const db = await pgliteFixture();
+  try {
+    await db.query('INSERT INTO purchase_capture_supplements VALUES ($1, now())', [ID(13)]);
+    const ids = await warm.collectRecentIds(db, { days: 60 });
+    assert.equal(ids[0], ID(13));
+    assert.equal(ids.length, 10);
   } finally { await db.close(); }
 });
 
