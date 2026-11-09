@@ -25,6 +25,13 @@ const { logger } = require('../utils/logger');
 const { slotLabel: slotLabelOf, isCashReceiptSlot } = require('../utils/captureSlots');
 const driveService = require('../services/drive.service');
 const fileRouteService = require('../services/fileRoute.service');
+const imageEdge = require('../services/imageEdge.service');
+/* 결정 354 남은 화면 — 수정요청 창이 그리는 작은 사진의 빠른 길 서명(t). 이 응답이 이미 내주는 번호(소유 확인을
+   통과한 행의 제출 이미지)에만 붙인다 · 열쇠 없으면 필드 없음(화면은 종전 길) · 원본 대조·교체는 종전 통로. */
+function _withT(o) {
+  const t = o && o.fileId ? imageEdge.signImage(o.fileId, 't') : null;
+  return t ? Object.assign(o, { t }) : o;
+}
 const { _getReviewerPhoneList } = require('../services/search.service');
 const { reviewerSessionMiddleware } = require('../services/reviewerSession.service');
 const { authMiddleware } = require('../middleware/auth.middleware');
@@ -234,7 +241,7 @@ router.get('/my-files', reviewerSessionMiddleware, async (req, res) => {
 
     res.json({
       ok: true,
-      files: files.map(f => ({
+      files: files.map(f => _withT({
         fileId: f.file_id,
         fileName: f.file_name || '',
         slotKey: f.slot_key || 'review',

@@ -42,6 +42,17 @@
     ));
   }
 
+  /* 결정 354 — 카드 썸네일 빠른 길. 우리 가이드 사진 통로 주소만 drive-thumb 사다리(빠른 길 → 종전 주소),
+     그 밖(쇼핑몰 CDN 등)·모듈 없음 = 종전과 같은 src 한 개. 서명은 목록 응답의 thumbs(seedThumbs). */
+  function _ptImgAttrs(u) {
+    if (window.DriveThumb && DriveThumb.guideAttrs && DriveThumb.guideId(u)) return DriveThumb.guideAttrs(u, 400);
+    return ' src="' + _esc(u) + '"';
+  }
+  /** 목록 응답(/api/campaign/list)이 실어 준 썸네일 서명(t)을 넣는다 — 카드를 그리기 전에 부른다. */
+  function seedThumbs(j) {
+    if (j && Array.isArray(j.thumbs) && window.DriveThumb && DriveThumb.seed) DriveThumb.seed(j.thumbs);
+  }
+
   function _fmtHM(iso) {
     if (!iso) return '';
     const d = new Date(iso);
@@ -705,7 +716,7 @@
     const pct = quota > 0 ? Math.max(3, Math.min(100, Math.round((today / quota) * 100))) : 0;
 
     const thumbInner = c.thumbnail_url
-      ? `<img class="pt-img" src="${_esc(c.thumbnail_url)}" alt="" loading="lazy">`
+      ? `<img class="pt-img"${_ptImgAttrs(c.thumbnail_url)} alt="" loading="lazy">`
       : `<div class="pt-ph">🛍️</div>`;
     // 인기상품만 관리자에게 ON/OFF로 제공한다. 별표 우선노출은 제거됐다.
     const popToggle = c.participation_mode && (admin || _realAdminTok())
@@ -1556,5 +1567,5 @@
     });
   }
 
-  window.CampCards = { renderInto, cardHtml, gridHtml, _more, _closeMenu, toggleArchive, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePopular, openManualOrder, openWorkdesk, sortByAvailability, qnaFirst, initChipMarquee: _initChipMarquee, needsFieldCleanup: _campNeedsFieldCleanup, _caeCarry };
+  window.CampCards = { renderInto, cardHtml, seedThumbs, gridHtml, _more, _closeMenu, toggleArchive, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePopular, openManualOrder, openWorkdesk, sortByAvailability, qnaFirst, initChipMarquee: _initChipMarquee, needsFieldCleanup: _campNeedsFieldCleanup, _caeCarry };
 })();

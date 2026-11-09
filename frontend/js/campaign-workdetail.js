@@ -552,11 +552,23 @@
     if (review) { place(review); folds.push(_foldBox(review, false, _plainTitle(review) || '리뷰 가이드')); after = folds[folds.length - 1]; }
   }
 
+  /* 결정 354 — 가이드 사진 빠른 길. 저장된 HTML·주소는 그대로 두고, **문서에 붙이기 전** 조각(template)에서
+     가이드 사진 <img> 만 drive-thumb 로 갈아 끼운다(붙인 뒤 바꾸면 종전 주소를 이미 받기 시작한다).
+     모듈이 없거나 template 를 못 쓰면 종전 그대로(innerHTML). 서명이 없으면 upgrade 가 아무것도 바꾸지 않는다. */
+  function _fill(el, html) {
+    var tpl = window.DriveThumb && DriveThumb.upgrade && document.createElement('template');
+    if (!tpl || !('content' in tpl)) { el.innerHTML = html; return; }
+    tpl.innerHTML = html;
+    DriveThumb.upgrade(tpl.content, 1600);
+    el.innerHTML = '';
+    el.appendChild(tpl.content);
+  }
+
   /** 컨테이너에 렌더 + [상품 페이지 열기] 위임 처리(한 번만 바인딩) */
   function renderInto(el, d, o) {
     if (!el) return;
     _injectCss();
-    el.innerHTML = cardsHtml(d, o);
+    _fill(el, cardsHtml(d, o));
     if (o && o.layout === 'v18') _applyV18(el); else el.classList.remove('cwd-v18');
     if (!el._cwdBound) {
       el._cwdBound = true;

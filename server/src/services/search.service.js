@@ -7,6 +7,11 @@ const { workKindsForTabs } = require('./workKindContext.service');
 const { campaignTitlesForTabs } = require('./campaignTitleContext.service');
 const { cashReceiptRequirementsForRows } = require('./cashReceiptContext.service');
 const { cashReceiptSubmissionStates, cashReceiptSubmissionRowKey } = require('./paymentReceiptGate.service');
+const imageEdge = require('./imageEdge.service');
+
+/* 결정 354 남은 화면 — 「내 제출 현황」 작은 사진의 빠른 길 서명(t). 이미 이 응답이 내주는 번호에만 붙인다
+   (보고 페이지 withThumbs 와 같은 방식 · 무인증 서명 입구를 새로 열지 않는다). 열쇠 없으면 null → 화면은 종전 길. */
+function _thumbT(fid) { return fid ? imageEdge.signImage(fid, 't') : null; }
 
 // 참여자 신원도 소유자와 같은 우선순위로 고른다. 상위 행의 소유자 UUID와 충돌하는
 // 주문·신청·과거 링크의 identity는 데이터 보강에 사용하지 않는다.
@@ -863,6 +868,7 @@ async function searchByName(query, phone8, opts = {}) {
       // ★ 제출 화면 "내 제출 현황"의 썸네일용 — 파일ID만(무인증 프록시 /api/drive/image/<id> 로 표시).
       //   그 행의 대표 이미지라 **그 리뷰어 본인 것**이고, 이미 완료 카드가 보여주는 정보와 같은 범위다.
       reviewFileId: row.reviewFileId || null,
+      reviewThumb: _thumbT(row.reviewFileId),   // 결정 354 — 위 썸네일의 빠른 길 서명(t) · 없으면 null
       isPaid:      _isPaid(row.isSubmitted2, rowObj), // 입금완료 배지용 (row 비우기 전 판정)
       score:       row.score, // 유사도 점수 (1.0=정확매칭, <1.0=유사매칭)
       };
@@ -1082,6 +1088,7 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
     submitCol:   row.isSubmitted ? null : row.submitCol,
     reviewFileAt: row.reviewFileAt || null,
     reviewFileId: row.reviewFileId || null,
+    reviewThumb: _thumbT(row.reviewFileId),
     isPaid:      _isPaid(row.isSubmitted2, rowObj),
     };
   });
