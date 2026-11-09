@@ -927,6 +927,12 @@
           <button type="button" class="pf-edit" onclick="focusKakaoIdInput()">등록하기</button>
         </div>
 
+        <!-- 결정 358(H3) — 내 정보 불러오기 실패. 「미등록」으로 꾸미지 않고 카드를 숨긴 채 다시 불러오기만 보인다(타계정 저장도 잠금). -->
+        <div id="pfLoadError" role="alert" style="display:none;margin:0 2px 10px;padding:12px;border-radius:10px;background:#FEF2F2;border:1px solid #FCA5A5;color:#991B1B;font-size:.8rem;line-height:1.5">
+          <b>내 정보를 불러오지 못했어요</b><br>통신이 잠시 불안정했을 수 있어요. 등록한 정보는 아래 버튼으로 다시 불러와 주세요.
+          <div style="margin-top:8px"><button type="button" id="btnReloadProfile" class="pf-edit" onclick="reloadInlineProfile()">다시 불러오기</button></div>
+        </div>
+
         <!-- 본인 통합 카드 (내 등록정보 + 계좌) -->
         <article class="pf-acct self">
           <div class="pf-head">
@@ -1025,6 +1031,7 @@
                 <span style="font-size:.82rem;font-weight:600;color:var(--t1);white-space:nowrap">010-</span>
                 <input id="inlineSubPhone" type="tel" placeholder="0000-0000" oninput="formatPhoneLast8(this)" style="flex:1;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box" maxlength="9">
               </div>
+              <div id="inlineSubPhoneNote" style="display:none;margin-top:4px;font-size:.68rem;color:var(--t3);line-height:1.45"></div>
             </div>
             <div style="margin-bottom:8px">
               <label style="font-size:.7rem;font-weight:600;color:var(--t2)">소득명의 <span style="color:var(--t3);font-weight:400">(선택)</span></label>
@@ -1600,89 +1607,135 @@ function doLogout() {
 /* ═══════════════════════════════════════
    내 등록정보 (프로필) 로드
 ═══════════════════════════════════════ */
+// 결정 358 — 불러오기 세대 번호(늦게 온 옛 응답 버리기) · 마지막으로 불러온 이 탭의 리뷰어(다시 불러오기용)
+let _inlineProfileGen = 0, _secureProfileGen = 0, _inlineProfileUser = null;
+
 async function loadInlineProfile(user) {
   const section = document.getElementById("inlineProfileSection");
   if (!section) return;
 
   const name = user.name || "";
   const phone8 = user.phone8 || "";
+  _inlineProfileUser = user;
+  const gen = ++_inlineProfileGen;
 
   // 즉시 이름 표시
   const nameEl = document.getElementById("inlineSelfName");
   if (nameEl) nameEl.textContent = name || "-";
   section.style.display = "";
 
+  let res = null;
   try {
-    const res = await gasGet({ action: "getReviewerProfile", name, phone8 });
-    if (res && res.ok && res.profile) {
-      const p = res.profile;
-      window._reviewerProfile = { ...res, ...p, found: true };
-      if (nameEl) nameEl.textContent = p.name || name || "-";
-      const phoneEl = document.getElementById("inlineSelfPhone");
-      if (phoneEl) phoneEl.textContent = (typeof fmtPhone==='function'?fmtPhone(p.phone):p.phone) || "-";
-      
-      renderSelfKakaoId(p.kakaoId);
+    res = await gasGet({ action: "getReviewerProfile", name, phone8 });
+  } catch (e) {
+    console.warn("[inlineProfile]", e.message);
+    res = null;
+  }
+  if (gen !== _inlineProfileGen) return;   // 그사이 다시 불러오기가 시작됨 — 옛 응답은 버린다
+  if (!(res && res.ok && res.profile)) {
+    // ★ 결정 358(H3·S1) — 모르는 것을 「미등록」·0/10 으로 꾸미지 않는다. 프로필은 「모름」(null)으로 두고
+    //   타계정 추가·수정·삭제는 잠긴다(_subAccountsBase). 빈 목록 기준으로 통째 저장해 기존 타계정을 지우던 사고.
+    window._reviewerProfile = null;
+    _showInlineProfileLoadError(true);
+    return;
+  }
+  try {
+    const p = res.profile;
+    let subs = p.subAccounts || [];
+    if (typeof subs === 'string') { try { subs = JSON.parse(subs); } catch(_) { subs = []; } }
+    if (!Array.isArray(subs)) subs = [];
+    window._reviewerProfile = { ...res, ...p, subAccounts: subs, found: true };
+    _showInlineProfileLoadError(false);
+    if (nameEl) nameEl.textContent = p.name || name || "-";
+    const phoneEl = document.getElementById("inlineSelfPhone");
+    if (phoneEl) phoneEl.textContent = (typeof fmtPhone==='function'?fmtPhone(p.phone):p.phone) || "-";
 
-      const incomeEl = document.getElementById("inlineSelfIncomeName");
-      if (incomeEl) {
-        const incVal = p.incomeType || "";
-        incomeEl.textContent = incVal || "미등록";
-        incomeEl.classList.toggle("pf-muted", !incVal);
-        const btnInc = document.getElementById("btnAddIncomeInfo");
-        if (btnInc) btnInc.style.display = incVal ? "none" : "";
-      }
-      
-      const juminEl = document.getElementById("inlineSelfJumin");
-      if (juminEl) {
-        const jd = (p.residentNum || "").replace(/[^0-9]/g, "");
-        const eyeBtn = document.getElementById("btnJuminEye");
-        if (jd.length === 13) {
-          const full = jd.slice(0,6) + "-" + jd.slice(6);
-          const mask = jd.slice(0,6) + "-" + jd.slice(6,7) + "••••••";
-          juminEl.textContent = mask;
-          juminEl.className = "pf-jumin pf-num";
-          juminEl.setAttribute("data-mask", mask);
-          juminEl.setAttribute("data-full", full);
-          juminEl.setAttribute("data-revealed", "0");
-          if (eyeBtn) { eyeBtn.style.display = ""; eyeBtn.innerHTML = '<i class="fas fa-eye"></i>'; }
-        } else if (jd) {
-          juminEl.textContent = "등록됨";
-          juminEl.className = "";
-          if (eyeBtn) eyeBtn.style.display = "none";
-        } else {
-          juminEl.textContent = "미등록";
-          juminEl.className = "pf-muted";
-          if (eyeBtn) eyeBtn.style.display = "none";
-        }
-        const btnJm = document.getElementById("btnAddJuminInfo");
-        if (btnJm) btnJm.style.display = jd ? "none" : "";
-      }
-      
-      // 주소(본인)
-      renderSelfAddress(p.address);
+    renderSelfKakaoId(p.kakaoId);
 
-      // 계좌 정보
-      renderBankInfo(p.bankName, p.bankAccount, p.accountHolder);
+    renderSelfIncomeInfo(p.incomeType, p.residentNum);
 
-      // 타계정 목록
-      let subs = p.subAccounts || [];
-      if (typeof subs === 'string') { try { subs = JSON.parse(subs); } catch(_) { subs = []; } }
-      if (!Array.isArray(subs)) subs = [];
-      renderInlineSubList(subs);
-      await loadSecureIdentityProfile();
-    } else {
-      const phoneEl = document.getElementById("inlineSelfPhone");
-      if (phoneEl) phoneEl.textContent = "-";
-    }
+    // 주소(본인)
+    renderSelfAddress(p.address);
+
+    // 계좌 정보
+    renderBankInfo(p.bankName, p.bankAccount, p.accountHolder);
+
+    // 타계정 목록
+    renderInlineSubList(subs);
+    await loadSecureIdentityProfile();
   } catch(e) {
     console.warn("[inlineProfile]", e.message);
   }
 }
 
+/** 결정 358(H3) — 불러오기 실패 상자. 실패면 본인 카드·타계정 칸·열린 폼을 숨기고, 성공이면 되돌린다. */
+function _showInlineProfileLoadError(show) {
+  const box = document.getElementById("pfLoadError");
+  if (box) box.style.display = show ? "" : "none";
+  const section = document.getElementById("inlineProfileSection");
+  if (section && typeof section.querySelectorAll === "function") {
+    section.querySelectorAll(".pf-acct.self, .pf-subsec").forEach((el) => { el.style.display = show ? "none" : ""; });
+  }
+  if (show) {
+    ["inlineAddressForm", "inlineIncomeForm", "inlineBankForm", "inlineSubForm", "pfKakaoNotice"].forEach((id) => {
+      const el = document.getElementById(id); if (el) el.style.display = "none";
+    });
+  }
+}
+
+async function reloadInlineProfile() {
+  const user = _inlineProfileUser || getSavedUser();
+  if (!user || !user.phone8) { showToast("세션이 만료되었습니다"); return; }
+  const btn = document.getElementById("btnReloadProfile");
+  if (btn) { btn.disabled = true; btn.textContent = "불러오는 중..."; }
+  try { await loadInlineProfile(user); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = "다시 불러오기"; } }
+}
+
+/** 본인 소득명의·주민번호 칸 그리기 — 불러오기와 저장 뒤 한 곳(결정 358 L6). */
+function renderSelfIncomeInfo(incomeType, residentNum) {
+  const incomeEl = document.getElementById("inlineSelfIncomeName");
+  if (incomeEl) {
+    const incVal = incomeType || "";
+    incomeEl.textContent = incVal || "미등록";
+    incomeEl.classList.toggle("pf-muted", !incVal);
+    const btnInc = document.getElementById("btnAddIncomeInfo");
+    if (btnInc) btnInc.style.display = incVal ? "none" : "";
+  }
+
+  const juminEl = document.getElementById("inlineSelfJumin");
+  if (juminEl) {
+    const jd = (residentNum || "").replace(/[^0-9]/g, "");
+    const eyeBtn = document.getElementById("btnJuminEye");
+    if (jd.length === 13) {
+      const full = jd.slice(0,6) + "-" + jd.slice(6);
+      const mask = jd.slice(0,6) + "-" + jd.slice(6,7) + "••••••";
+      juminEl.textContent = mask;
+      juminEl.className = "pf-jumin pf-num";
+      juminEl.setAttribute("data-mask", mask);
+      juminEl.setAttribute("data-full", full);
+      juminEl.setAttribute("data-revealed", "0");
+      if (eyeBtn) { eyeBtn.style.display = ""; eyeBtn.innerHTML = '<i class="fas fa-eye"></i>'; }
+    } else if (jd) {
+      juminEl.textContent = "등록됨";
+      juminEl.className = "";
+      if (eyeBtn) eyeBtn.style.display = "none";
+    } else {
+      juminEl.textContent = "미등록";
+      juminEl.className = "pf-muted";
+      if (eyeBtn) eyeBtn.style.display = "none";
+    }
+    const btnJm = document.getElementById("btnAddJuminInfo");
+    if (btnJm) btnJm.style.display = jd ? "none" : "";
+  }
+}
+
 async function loadSecureIdentityProfile() {
+  const gen = ++_secureProfileGen;
   try {
     const response = await fetch(API_BASE_URL + "/api/reviewer/profile/secure", { headers: _getAuthHeaders() });
     const data = await response.json();
+    if (gen !== _secureProfileGen) return;   // 결정 358(M4) — 타계정 저장 전 요청의 늦은 응답은 버린다(순번 짝이 어긋난다)
     if (!response.ok || !data?.ok || !Array.isArray(data.profile?.identities)) return;
     window._secureReviewerProfile = data.profile;
     const self = data.profile.identities.find(x => x.type === "self");
@@ -3603,30 +3656,15 @@ async function saveIncomeInfoInline() {
       residentNum: juminRaw
     });
     if (res && res.ok) {
-      showToast("✅ 소득명의/주민번호가 저장되었습니다");
       if (!window._reviewerProfile) window._reviewerProfile = {};
-      if (incomeName) window._reviewerProfile.incomeType = incomeName;
-      if (juminRaw) window._reviewerProfile.residentNum = juminRaw;
-
-      const incomeEl = document.getElementById("inlineSelfIncomeName");
-      if (incomeEl) {
-        incomeEl.textContent = incomeName || "미등록";
-        incomeEl.style.color = incomeName ? "var(--t2)" : "#DC2626";
-        const btnInc = document.getElementById("btnAddIncomeInfo");
-        if (btnInc) btnInc.style.display = incomeName ? "none" : "";
-      }
-      const juminEl = document.getElementById("inlineSelfJumin");
-      if (juminEl) {
-        if (juminRaw.length === 13) {
-          juminEl.textContent = juminRaw.slice(0,6) + "-" + juminRaw.slice(6,7) + "••••••";
-          juminEl.style.color = "var(--t2)";
-        } else {
-          juminEl.textContent = juminRaw ? "등록됨" : "미등록";
-          juminEl.style.color = juminRaw ? "var(--t2)" : "#DC2626";
-        }
-        const btnJm = document.getElementById("btnAddJuminInfo");
-        if (btnJm) btnJm.style.display = juminRaw ? "none" : "";
-      }
+      const prof = window._reviewerProfile;
+      // ★ 결정 358(L6) — 서버는 빈 칸을 지우지 않고 기존 값을 그대로 둔다(COALESCE). 화면도 남아 있는 값을 그린다
+      //   (종전: 비운 칸을 「미등록」으로 그려 새로고침하면 옛 값이 다시 보였다).
+      const keptOld = (!incomeName && !!prof.incomeType) || (!juminRaw && !!String(prof.residentNum || "").replace(/[^0-9]/g, ""));
+      if (incomeName) prof.incomeType = incomeName;
+      if (juminRaw) prof.residentNum = juminRaw;
+      showToast(keptOld ? "✅ 저장되었습니다 (비운 칸은 기존 값이 그대로 남아요)" : "✅ 소득명의/주민번호가 저장되었습니다");
+      renderSelfIncomeInfo(prof.incomeType, prof.residentNum);
       cancelIncomeInfoForm();
     } else {
       showToast("❌ " + (res?.error || "저장 실패"));
@@ -3648,16 +3686,48 @@ function _parseSubAccounts(val) {
   return [];
 }
 
+/** ★ 결정 358(S1) — 타계정 저장의 기준 목록 = 이 화면이 서버에서 실제로 받은 목록(복사본).
+ *  프로필을 못 받았으면(실패·불러오는 중) null — 그 상태에서 목록 전체를 저장하면 기존 타계정이 지워진다. */
+function _subAccountsBase() {
+  const p = window._reviewerProfile;
+  if (!p || p.found !== true) return null;
+  return JSON.parse(JSON.stringify(_parseSubAccounts(p.subAccounts)));
+}
+
+/** 타계정 저장·삭제 성공 뒤 — 서버가 돌려준 실제 저장 목록을 다음 기준으로, 명의 정보(쇼핑 아이디 짝)는 다시 받는다.
+ *  ★ 결정 358(M4) — 옛 명의 정보는 순번 짝이 어긋나 이웃 명의의 아이디를 보여 준다 → 먼저 비우고 그린 뒤 다시 받는다. */
+function _afterSubAccountsSaved(subs) {
+  if (!window._reviewerProfile) window._reviewerProfile = {};
+  window._reviewerProfile.subAccounts = subs;
+  window._secureReviewerProfile = null;
+  renderInlineSubList(subs);
+  loadSecureIdentityProfile();
+}
+
+/** 결정 358(L7) — 수정 폼에서 번호를 고치지 않았으면 원래 번호(옛 01x 포함)를 그대로, 고쳤으면 010 + 뒤 8자리. */
+function _inlineSubPhoneValue(phoneLast8, editIdx) {
+  const el = document.getElementById("inlineSubPhone");
+  const ds = (el && el.dataset) || {};
+  const orig = String(ds.origPhone || "");
+  if (editIdx >= 0 && orig && ds.origLast8 === phoneLast8 && orig.replace(/[^0-9]/g, "").length >= 10) return orig;
+  const p = "010" + phoneLast8;
+  return p.slice(0,3) + "-" + p.slice(3,7) + "-" + p.slice(7);
+}
+
 function toggleInlineSubForm() {
   const form = document.getElementById("inlineSubForm");
   if (!form) return;
   if (form.style.display !== "none") { form.style.display = "none"; return; }
-  const subs = _parseSubAccounts(window._reviewerProfile?.subAccounts);
+  const base = _subAccountsBase();
+  if (!base) { showToast("내 정보를 불러오지 못했어요. [다시 불러오기] 후 이용해 주세요"); return; }
+  const subs = base;
   if (subs.length >= 10) { showToast("타계정은 최대 10개까지 등록 가능합니다"); return; }
   document.getElementById("inlineSubFormTitle").textContent = "타계정 추가";
   document.getElementById("inlineSubEditIdx").value = "-1";
   document.getElementById("inlineSubName").value = "";
   document.getElementById("inlineSubPhone").value = "";
+  { const ph = document.getElementById("inlineSubPhone"); ph.dataset.origPhone = ""; ph.dataset.origLast8 = "";
+    const note = document.getElementById("inlineSubPhoneNote"); if (note) { note.style.display = "none"; note.textContent = ""; } }
   document.getElementById("inlineSubIncomeName").value = "";
   document.getElementById("inlineSubJumin").value = "";
   document.getElementById("inlineSubAddr").value = "";
@@ -3669,7 +3739,8 @@ function toggleInlineSubForm() {
 }
 
 function editInlineSubAccount(idx) {
-  const subs = _parseSubAccounts(window._reviewerProfile?.subAccounts);
+  const subs = _subAccountsBase();
+  if (!subs) { showToast("내 정보를 불러오지 못했어요. [다시 불러오기] 후 이용해 주세요"); return; }
   if (idx < 0 || idx >= subs.length) return;
   const sub = subs[idx];
   const form = document.getElementById("inlineSubForm");
@@ -3681,6 +3752,13 @@ function editInlineSubAccount(idx) {
   const rawPhone = (sub.phone || "").replace(/[^0-9]/g, "");
   const last8 = rawPhone.startsWith("010") ? rawPhone.slice(3) : rawPhone.slice(-8);
   document.getElementById("inlineSubPhone").value = last8.length > 4 ? last8.slice(0,4)+"-"+last8.slice(4) : last8;
+  { const ph = document.getElementById("inlineSubPhone"); ph.dataset.origPhone = sub.phone || ""; ph.dataset.origLast8 = last8;
+    const note = document.getElementById("inlineSubPhoneNote");
+    if (note) {
+      const old01x = rawPhone.length >= 10 && !rawPhone.startsWith("010");
+      note.textContent = old01x ? "지금 번호 " + (sub.phone || "") + " — 뒷번호를 그대로 두면 이 번호가 유지돼요. 바꾸면 010 번호로 저장돼요." : "";
+      note.style.display = old01x ? "" : "none";
+    } }
   document.getElementById("inlineSubIncomeName").value = sub.incomeName || "";
   const jd = (sub.jumin || sub.residentNo || "").replace(/[^0-9]/g, "");
   document.getElementById("inlineSubJumin").value = jd.length > 6 ? jd.slice(0,6)+"-"+jd.slice(6) : jd;
@@ -3700,21 +3778,28 @@ function cancelInlineSubForm() {
 }
 
 async function deleteInlineSubAccount(idx) {
+  const base = _subAccountsBase();
+  if (!base) { showToast("내 정보를 불러오지 못했어요. [다시 불러오기] 후 이용해 주세요"); return; }
   if (!confirm((idx+1) + "번 타계정을 삭제하시겠습니까?")) return;
   const user = getSavedUser();
   if (!user || !user.name || !user.phone8) { showToast("세션이 만료되었습니다"); return; }
 
-  const subs = JSON.parse(JSON.stringify(_parseSubAccounts(window._reviewerProfile?.subAccounts)));
+  const subs = JSON.parse(JSON.stringify(base));
   if (idx < 0 || idx >= subs.length) return;
   subs.splice(idx, 1);
 
   try {
-    const res = await gasPost({ action: "saveSubAccounts", name: user.name, phone8: user.phone8, subAccounts: JSON.stringify(subs) });
+    // ★ 결정 358 — 기준 목록을 함께 보낸다. 그사이 다른 곳에서 바뀌었으면 서버가 쓰지 않고 stale_sub_accounts.
+    const res = await gasPost({ action: "saveSubAccounts", name: user.name, phone8: user.phone8,
+      subAccounts: JSON.stringify(subs), baseSubAccounts: JSON.stringify(base) });
     if (res && res.ok) {
       showToast("✅ 타계정이 삭제되었습니다");
-      if (window._reviewerProfile) window._reviewerProfile.subAccounts = subs;
-      renderInlineSubList(subs);
+      _afterSubAccountsSaved(Array.isArray(res.subAccounts) ? res.subAccounts : subs);
       cancelInlineSubForm();
+    } else if (res && res.code === "stale_sub_accounts") {
+      showToast("❌ " + res.error);
+      cancelInlineSubForm();
+      reloadInlineProfile();
     } else {
       showToast("❌ " + (res?.error || "삭제 실패"));
     }
@@ -3755,7 +3840,6 @@ function _inlineSubSnapshot() {
 async function saveInlineSubAccount() {
   const name = (document.getElementById("inlineSubName")?.value || "").trim();
   const phoneLast8 = (document.getElementById("inlineSubPhone")?.value || "").replace(/[^0-9]/g, "");
-  const phone = "010" + phoneLast8;
   const incomeName = (document.getElementById("inlineSubIncomeName")?.value || "").trim();
   const juminDigits = (document.getElementById("inlineSubJumin")?.value || "").replace(/[^0-9]/g, "");
   const editIdx = parseInt(document.getElementById("inlineSubEditIdx")?.value || "-1", 10);
@@ -3765,7 +3849,8 @@ async function saveInlineSubAccount() {
   if (juminDigits && juminDigits.length !== 13) { showToast("주민번호는 13자리 숫자여야 합니다"); return; }
 
   // 확인 단계
-  const phoneFormatted = phone.slice(0,3) + "-" + phone.slice(3,7) + "-" + phone.slice(7);
+  const phoneFormatted = _inlineSubPhoneValue(phoneLast8, editIdx);   // 결정 358(L7) — 안 고친 옛 01x 번호는 그대로
+  const phone = phoneFormatted;
   const juminFormatted = juminDigits ? (juminDigits.slice(0,6) + "-" + juminDigits.slice(6)) : "(미입력)";
   const formArea = document.getElementById("inlineSubForm");
   if (!formArea) return;
@@ -3805,7 +3890,6 @@ async function confirmSaveInlineSubAccount() {
   }
   const name = (document.getElementById("inlineSubName")?.value || "").trim();
   const phoneLast8 = (document.getElementById("inlineSubPhone")?.value || "").replace(/[^0-9]/g, "");
-  const phone = "010" + phoneLast8;
   const incomeName = (document.getElementById("inlineSubIncomeName")?.value || "").trim();
   const juminDigits = (document.getElementById("inlineSubJumin")?.value || "").replace(/[^0-9]/g, "");
   const editIdx = parseInt(document.getElementById("inlineSubEditIdx")?.value || "-1", 10);
@@ -3813,13 +3897,17 @@ async function confirmSaveInlineSubAccount() {
   const user = getSavedUser();
   if (!user || !user.name || !user.phone8) { showToast("세션이 만료되었습니다"); return; }
 
+  // ★ 결정 358(S1) — 프로필을 못 받은 화면에서는 저장하지 않는다(빈 목록 기준 통째 저장 = 기존 타계정 삭제).
+  const base = _subAccountsBase();
+  if (!base) { showToast("내 정보를 불러오지 못했어요. [다시 불러오기] 후 이용해 주세요"); return; }
+
   const confirmEl = document.getElementById("inlineSubConfirm");
   if (confirmEl) confirmEl.remove();
 
-  const subs = JSON.parse(JSON.stringify(_parseSubAccounts(window._reviewerProfile?.subAccounts)));
+  const subs = JSON.parse(JSON.stringify(base));
   const newSub = {
     name,
-    phone: phone.slice(0,3) + "-" + phone.slice(3,7) + "-" + phone.slice(7),
+    phone: _inlineSubPhoneValue(phoneLast8, editIdx),
     incomeName,
     jumin: juminDigits,
     address: (document.getElementById("inlineSubAddr")?.value || "").trim(),
@@ -3841,13 +3929,18 @@ async function confirmSaveInlineSubAccount() {
   if (btn) { btn.disabled = true; btn.textContent = "저장 중..."; }
 
   try {
-    const res = await gasPost({ action: "saveSubAccounts", name: user.name, phone8: user.phone8, subAccounts: JSON.stringify(subs) });
+    const res = await gasPost({ action: "saveSubAccounts", name: user.name, phone8: user.phone8,
+      subAccounts: JSON.stringify(subs), baseSubAccounts: JSON.stringify(base) });
     if (res && res.ok) {
       showToast(editIdx >= 0 ? "✅ 타계정이 수정되었습니다" : "✅ 타계정이 추가되었습니다");
-      if (!window._reviewerProfile) window._reviewerProfile = {};
-      window._reviewerProfile.subAccounts = subs;
-      renderInlineSubList(subs);
+      _afterSubAccountsSaved(Array.isArray(res.subAccounts) ? res.subAccounts : subs);
       cancelInlineSubForm();
+    } else if (res && res.code === "stale_sub_accounts") {
+      // 그사이 다른 곳(다른 기기·구매양식 자동등록 등)에서 바뀌었다 — 덮지 않고 다시 불러온다.
+      //   추가 중이던 입력은 남겨 다시 [저장]할 수 있게, 수정은 순번이 바뀌었을 수 있어 닫는다.
+      showToast("❌ " + res.error);
+      if (editIdx >= 0) cancelInlineSubForm();
+      reloadInlineProfile();
     } else {
       showToast("❌ " + (res?.error || "저장에 실패했습니다."));
     }
