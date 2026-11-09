@@ -132,6 +132,33 @@ function _savedInflowType(workDetail) {
  *   (tab_configs.income_type)은 이전 공고만을 위한 호환 폴백이며, 신규 공고 폼은 직접 설정한다.
  *   실패는 null(fail-soft) — 안내 조회 장애가 작업내용 응답을 막지 않는다.
  */
+/* ══ 결정 354 남은 화면 — 가이드·공고 사진의 빠른 길 서명 ══
+   ★ 저장 값(가이드 HTML·사진 주소 배열·썸네일 주소 — 인트라넷에도 주소째 저장)은 **바꾸지 않는다**.
+     응답에 서명 주소 목록만 **가산**하고, 화면(drive-thumb.js)이 그릴 때 그 번호의 <img> 만 갈아 끼운다.
+   ★ 허용 목록(결정 352) 통과 번호만 서명 · 조회 실패(fail-open)는 서명 0 = 화면은 종전 주소(edge.signAllowed 한 곳).
+   ★ 무인증 서명 입구를 새로 열지 않는다 — 이 공고 응답이 이미 내주는 주소 안의 번호뿐이다. 열쇠 없으면 필드 없음. */
+const imageEdge = require('../services/imageEdge.service');
+async function _guideThumbs(...parts) {
+  if (!imageEdge.signingEnabled()) return undefined;
+  try {
+    const urls = await imageEdge.signAllowed(imageEdge.guideIdsIn(parts), 'm', { budgetMs: 800 });
+    return Object.values(urls);
+  } catch (_) { return undefined; }
+}
+/** 공개 목록 카드 썸네일(우리 가이드 사진 통로 주소만) → t 서명. 목록은 지연이 곧 체감이라 예산 150ms. */
+async function _listThumbs(data) {
+  if (!imageEdge.signingEnabled() || !Array.isArray(data)) return undefined;
+  try {
+    const ids = imageEdge.guideIdsIn(data.map(v => {
+      const u = String((v && v.thumbnail_url) || '');
+      return /\/api\/order\/guide-image\//.test(u) ? u : '';
+    }), 300);
+    if (!ids.length) return undefined;
+    const urls = await imageEdge.signAllowed(ids, 't', { budgetMs: 150 });
+    return Object.values(urls);
+  } catch (_) { return undefined; }
+}
+
 async function _cashReceiptInfo(camp) {
   try {
     if (!camp) return null;
@@ -1382,7 +1409,9 @@ router.get('/list', async (req, res, next) => {
       }
       return view;
     });
-    res.json({ ok: true, data, serverNow: now.toISOString() });
+    // 결정 354 — 카드 썸네일 빠른 길 서명(t, 가산). 예산 안에 끝난 것만 · 없으면 필드 없음(화면은 종전 주소)
+    const thumbs = await _listThumbs(data);
+    res.json({ ok: true, data, serverNow: now.toISOString(), ...(thumbs ? { thumbs } : {}) });
   } catch (err) {
     next(err);
   }
@@ -1961,6 +1990,7 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
           .ownerChainView(pool, { campaignId: id, ownerP8: app.owner_phone8 || p8, now });
       } catch (e) { chain = undefined; logger.warn(`[campaign/work-detail] 차례 정보 생략: ${e.message}`); }
     }
+    const cashReceipt = await _cashReceiptInfo(camp);
     res.json({
       ok: true,
       serverNow: now.toISOString(),
@@ -1981,7 +2011,8 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
       joinedDisplay: joinedView,   // ★ 결정 214: { title, thumbnailUrl } | null
       workDetail,                                                // HTML은 응답 직전 방어적 재정화
       inflowType,                                                 // 'guide' | 'link' | '' — 랜딩 버튼 게이트
-      cashReceipt: await _cashReceiptInfo(camp),                  // 현영 탭만 {required, businessNo, guideImageUrl} — 아니면 null
+      cashReceipt,                                                // 현영 탭만 {required, businessNo, guideImageUrl} — 아니면 null
+      guideThumbs: await _guideThumbs(workDetail, selectedOption, cashReceipt),   // 결정 354 — 가이드 사진 빠른 길 서명(m, 가산)
       // 카톡 팀채팅방 URL은 제출확정 후에만 반환(화면 숨김을 API에서도 강제 — DevTools 우회 차단)
       chatUrl: isSubmitted ? (camp.chat_url || '') : '',
       landingUrl: camp.landing_url || '',
@@ -4993,6 +5024,7 @@ router.get('/admin/:id/preview', authMiddleware, adminOrMasterMiddleware, async 
     const inflowType = (workDetail && workDetail.inflowType) || (await _lookupInflowType(camp.id, camp.source_work_order_id)) || '';
     const ttlMin = Number(camp.hold_ttl_min) || require('../services/campaignHoldChain.service').MAIN_HOLD_TTL_DEFAULT_MIN;
 
+    const cashReceipt = await _cashReceiptInfo(camp);
     res.json({
       ok: true,
       preview: true,                        // 프론트 배너·가드의 단일 신호
@@ -5012,7 +5044,8 @@ router.get('/admin/:id/preview', authMiddleware, adminOrMasterMiddleware, async 
       canChangeOption: false,               // 미리보기에서는 옵션 변경 불가(서버 상태 무변경)
       workDetail,
       inflowType,
-      cashReceipt: await _cashReceiptInfo(camp),   // 미리보기 = 실제 화면(현영 안내 카드 포함)
+      cashReceipt,                          // 미리보기 = 실제 화면(현영 안내 카드 포함)
+      guideThumbs: await _guideThumbs(workDetail, sample, optionGuides, cashReceipt),   // 결정 354(가산)
       chatUrl: camp.chat_url || '',         // 관리자는 원래 카톡 URL을 설정·조회하는 주체
       landingUrl: camp.landing_url || '',
       form: {

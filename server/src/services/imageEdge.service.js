@@ -61,6 +61,85 @@ function withThumbs(list, kind = 't') {
   });
 }
 
+/** 서버가 스스로 고른 번호 목록(그 응답의 스코프를 이미 통과한 번호) → 서명 주소 배열. 열쇠 없으면 []. */
+function signedList(ids, kind = 't') {
+  if (!signingEnabled() || !Array.isArray(ids)) return [];
+  const out = [];
+  for (const id of new Set(ids.map(x => String(x || '')))) {
+    const u = signImage(id, kind);
+    if (u) out.push(u);
+  }
+  return out;
+}
+
+// ── 허용 판정(결정 352) — 일괄 서명 입구 · 내부 생성 입구 · 응답 서명이 같은 판정 한 곳을 쓴다 ──
+/** drive 통로 먼저(대부분), 아니면 guide 통로. 이체결과는 두 판정 모두 거절한다. */
+async function allowVerdict(id) {
+  const imageAllowlist = require('./imageAllowlist.service');
+  const d = await imageAllowlist.checkDriveImage(id);
+  if (d.ok && !d.failOpen) return d;
+  const g = await imageAllowlist.checkGuideImage(id);
+  if (g.ok && !g.failOpen) return g;
+  if (d.failOpen || g.failOpen) return { ok: true, failOpen: true };
+  return { ok: false };
+}
+
+const SIGN_MAX_IDS = 300;
+const SIGN_CONCURRENCY = 16;
+/**
+ * 허용 목록 통과 번호만 서명 → { id: url }. ★ 조회 실패(fail-open) 번호는 서명하지 않는다(옛 통로가 맡는다).
+ *   budgetMs > 0 이면 그 시간까지 끝난 판정만 쓴다 — 공개 목록처럼 지연이 곧 사용자 체감인 응답용(늦은 번호 = 종전 길).
+ */
+async function signAllowed(ids, kind, opts = {}) {
+  const urls = {};
+  if (!KINDS[kind] || !signingEnabled() || !Array.isArray(ids)) return urls;
+  const list = [...new Set(ids.map(String).filter(x => ID_RE.test(x)))].slice(0, opts.max || SIGN_MAX_IDS);
+  let at = 0, stop = false;
+  async function worker() {
+    while (!stop && at < list.length) {
+      const id = list[at++];
+      try {
+        const v = await allowVerdict(id);
+        if (!stop && v.ok && !v.failOpen) { const u = signImage(id, kind); if (u) urls[id] = u; }
+      } catch (_) { /* 한 장 실패는 그 장만 옛 길 */ }
+    }
+  }
+  const all = Promise.all(Array.from({ length: Math.min(SIGN_CONCURRENCY, list.length) }, worker));
+  if (opts.budgetMs > 0) {
+    let timer;
+    await Promise.race([all, new Promise(r => { timer = setTimeout(r, opts.budgetMs); })]);
+    clearTimeout(timer);
+    stop = true;
+    return Object.assign({}, urls);
+  }
+  await all;
+  return urls;
+}
+
+// ── 가이드·공고 사진 — 저장된 값(주소째 저장, 인트라넷도 같은 값)은 바꾸지 않고 응답에서 번호만 읽는다 ──
+const GUIDE_ID_RES = [
+  /\/api\/order\/guide-image\/([-\w]{20,128})/g,                          // 우리 가이드 사진 통로
+  /drive\.google\.com\/[^\s"'<>]*?(?:\/file\/d\/|\/d\/|[?&]id=)([-\w]{20,128})/g,   // 드라이브 주소(화면이 구글 w1600 으로 그리던 것)
+];
+const GUIDE_MAX = 40;
+/** 값(문자열·배열·객체, 깊이 6) 안의 가이드 사진 번호(중복 제거, 최대 40). */
+function guideIdsIn(value, max = GUIDE_MAX) {
+  const seen = new Set();
+  const walk = (v, depth) => {
+    if (seen.size >= max || v == null || depth > 6) return;
+    if (typeof v === 'string') {
+      for (const re of GUIDE_ID_RES) {
+        re.lastIndex = 0;
+        let m;
+        while ((m = re.exec(v)) && seen.size < max) seen.add(m[1]);
+      }
+    } else if (Array.isArray(v)) v.forEach(x => walk(x, depth + 1));
+    else if (typeof v === 'object') Object.keys(v).forEach(k => walk(v[k], depth + 1));
+  };
+  walk(value, 0);
+  return [...seen];
+}
+
 function _safeEqual(a, b) {
   const x = Buffer.from(String(a || '')), y = Buffer.from(String(b || ''));
   if (x.length !== y.length || !x.length) return false;
@@ -145,7 +224,8 @@ function legacyCounter(req, res, next) { if (req.method === 'GET') noteLegacy(re
 
 module.exports = {
   KINDS, ID_RE, BUCKET_SEC, MIN_TTL_SEC, MAX_SOURCE_BYTES,
-  signImage, withThumbs, signingEnabled, expFor,
+  signImage, withThumbs, signedList, signingEnabled, expFor,
+  allowVerdict, signAllowed, guideIdsIn, SIGN_MAX_IDS,
   originKeyOk, originKeyConfigured,
   makeThumb,
   noteLegacy, legacyCounter,

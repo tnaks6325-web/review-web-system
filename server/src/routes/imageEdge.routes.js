@@ -19,8 +19,7 @@ const driveService = require('../services/drive.service');
 const edge = require('../services/imageEdge.service');
 const { logger } = require('../utils/logger');
 
-const SIGN_MAX_IDS = 300;
-const SIGN_CONCURRENCY = 16;
+const SIGN_MAX_IDS = edge.SIGN_MAX_IDS;
 
 // ── 생성 동시 처리 상한 — 처음 여는 큰 목록(수백 장)이 한꺼번에 와도 드라이브 동시 읽기·메모리를 묶는다.
 //   줄이 넘치면 503 → Function 502 → 화면은 종전 주소로(다음 조회 때 다시 만든다).
@@ -38,15 +37,8 @@ function _genRelease() {
   if (next) next(); else _genActive--;
 }
 
-/** 허용 판정 — drive 통로 먼저(대부분), 아니면 guide 통로. 이체결과는 두 판정 모두 거절한다. */
-async function _verdict(id) {
-  const d = await imageAllowlist.checkDriveImage(id);
-  if (d.ok && !d.failOpen) return d;
-  const g = await imageAllowlist.checkGuideImage(id);
-  if (g.ok && !g.failOpen) return g;
-  if (d.failOpen || g.failOpen) return { ok: true, failOpen: true };
-  return { ok: false };
-}
+/** 허용 판정 = imageEdge.allowVerdict 한 곳(일괄 서명·응답 서명과 같은 판정 — 사본 0). */
+const _verdict = (id) => edge.allowVerdict(id);
 
 // ── POST /api/img/sign ──
 const signRouter = express.Router();
@@ -58,21 +50,8 @@ async function signHandler(req, res) {
   if (!edge.KINDS[kind]) return res.status(400).json({ ok: false, error: 'bad kind' });
   res.set('Cache-Control', 'no-store');
   if (!edge.signingEnabled()) return res.json({ ok: true, enabled: false, urls: {} });
-  const ids = [...new Set((Array.isArray(b.ids) ? b.ids : []).map(String).filter(x => edge.ID_RE.test(x)))]
-    .slice(0, SIGN_MAX_IDS);
-  const urls = {};
-  let at = 0;
-  async function worker() {
-    while (at < ids.length) {
-      const id = ids[at++];
-      try {
-        const v = await _verdict(id);
-        // ★ 조회 실패(fail-open)는 서명하지 않는다 — 그 번호는 옛 통로(사진만 fail-open)가 맡는다.
-        if (v.ok && !v.failOpen) { const u = edge.signImage(id, kind); if (u) urls[id] = u; }
-      } catch (_) { /* 한 장 실패는 그 장만 옛 길 */ }
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(SIGN_CONCURRENCY, ids.length) }, worker));
+  // ★ 허용 목록 통과 번호만 · 조회 실패(fail-open)는 서명 0 — 판정·서명은 서비스 한 곳(edge.signAllowed)
+  const urls = await edge.signAllowed(Array.isArray(b.ids) ? b.ids : [], kind, { max: SIGN_MAX_IDS });
   return res.json({ ok: true, enabled: true, urls });
 }
 signRouter.post('/sign', authMiddleware, signHandler);

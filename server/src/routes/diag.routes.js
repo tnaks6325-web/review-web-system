@@ -12,6 +12,7 @@ const { imageApiLimiter, imageUploadLimiter } = require('../middleware/rateLimit
 const captureLinkBackfill = require('../services/captureLinkBackfill.service');
 const { extractOrderFromImage, verifyAddressMatch } = require('../services/gemini.service');
 const driveService = require('../services/drive.service');
+const imageEdge = require('../services/imageEdge.service');
 const { emitImageExtract, emitImageUpload } = require('../utils/sse');
 const { logger } = require('../utils/logger');
 const { slotLabel: slotLabelOf, effectiveCaptureSlots, isCashReceiptSlot } = require('../utils/captureSlots');
@@ -416,12 +417,16 @@ router.post('/review-precheck', imageApiLimiter, async (req, res) => {
     const dupOf = async () => {
       if (!base64 || !reviewerIdentity) return null;
       try {
-        return await inspect.findOwnDuplicate({
+        const dup = await inspect.findOwnDuplicate({
           fileHash: inspect.hashBase64(base64),
           sheetId, tabName, rowIndex,
           reviewerName: reviewerIdentity.reviewerName || reviewerName,
           phone8: reviewerIdentity.phone8,
         });
+        // 결정 354 — 안내에 그리는 작은 사진(앞서 낸 내 캡처)의 빠른 길 서명(t). 이 응답이 이미 내주는 번호에만 ·
+        //   열쇠 없으면 필드를 싣지 않는다(화면은 종전 길). 가산 필드라 구버전 화면은 무시한다.
+        const t = dup && dup.fileId ? imageEdge.signImage(dup.fileId, 't') : null;
+        return t ? Object.assign({}, dup, { t }) : dup;
       } catch (_) { return null; }
     };
     const pass = async (code) => res.json({

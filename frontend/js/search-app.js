@@ -2681,6 +2681,8 @@ function _renderMySubmitStatus(items) {
   if (old) old.remove();
   const list = Array.isArray(items) ? items : [];
   if (!list.some(it => it && it.isSubmitted)) return;   // 낸 것이 없으면 안내가 필요 없다
+  // 결정 354 — 응답이 실어 준 빠른 길 서명(reviewThumb)을 먼저 넣는다(없으면 종전 구글 썸네일 그대로)
+  if (window.DriveThumb && DriveThumb.seed) DriveThumb.seed(list.map(it => it && it.reviewThumb));
 
   const rowHtml = list.map((it, i) => {
     const label = escHtml(it.tcDisplayName || it.productName || "상품명 없음");
@@ -3290,6 +3292,7 @@ function _preRenderDup(scope, anchor) {
     el.addEventListener('click', (e) => e.stopPropagation());   // 드롭존 파일창이 같이 열리지 않게
     anchor.appendChild(el);
   }
+  if (d.t && window.DriveThumb && DriveThumb.seed) DriveThumb.seed([d.t]);   // 결정 354 — 응답의 빠른 길 서명(없으면 종전)
   const _du = d.fileId ? `${API_BASE_URL}/api/drive/image/${encodeURIComponent(d.fileId)}` : '';
   const thumb = d.fileId
     ? `<img${window.DriveThumb ? DriveThumb.attrs(d.fileId, 400, _du) : ` src="${_du}"`} alt="앞서 제출한 리뷰 캡처"

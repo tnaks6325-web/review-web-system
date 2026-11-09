@@ -43,9 +43,9 @@ ok('판정 안 되는 채널은 이미지 없이 문구만(틀린 발행방법�
 ok('조회 실패는 null 폴백 — 안내 장애가 작업내용 응답을 막지 않는다',
   /async function _cashReceiptInfo[\s\S]{0,1400}catch \(_\) \{\s*\n\s*return null;/.test(camp));
 ok('리뷰어 work-detail 응답에 cashReceipt 동봉',
-  /cashReceipt: await _cashReceiptInfo\(camp\),\s*\/\/ 현영 탭만/.test(camp));
+  /const cashReceipt = await _cashReceiptInfo\(camp\);\s*\n\s*res\.json\(\{[\s\S]{0,3000}?\n\s*cashReceipt,\s*\/\/ 현영 탭만/.test(camp)   /* 결정 354: 응답 직전 한 번 계산(guideThumbs 도 같은 값) */);
 ok('관리자 미리보기도 같은 값 — 미리보기 = 실제 화면',
-  /cashReceipt: await _cashReceiptInfo\(camp\),\s*\/\/ 미리보기/.test(camp));
+  /const cashReceipt = await _cashReceiptInfo\(camp\);\s*\n\s*res\.json\(\{[\s\S]{0,3000}?\n\s*cashReceipt,\s*\/\/ 미리보기/.test(camp));
 
 /* ── 설정: 채널별 이미지 등록 ── */
 // ★ authMiddleware 가 반드시 앞에 와야 한다 — 빠지면 req.admin 이 undefined 라 전원 403.

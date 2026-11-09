@@ -81,7 +81,7 @@ function stubPool(handler) {
   console.log('\nB) 첨부 즉시 판정 라우트');
   {
     const dg = read('src/routes/diag.routes.js');
-    const block = dg.slice(dg.indexOf("router.post('/review-precheck'"), dg.indexOf("router.post('/review-precheck'") + 3500);
+    const block = dg.slice(dg.indexOf("router.post('/review-precheck'"), dg.indexOf("router.post('/review-precheck'") + 4500);   // 결정 354: dupOf 에 서명 줄이 더해져 범위만 넓힘
     assert.ok(/verifiedReviewerIdentity\(req\)/.test(block), '리뷰어 세션에서 검증한 신원 사용');
     assert.ok(/findOwnDuplicate\(\{[\s\S]*?fileHash: inspect\.hashBase64\(base64\)/.test(block),
       '지문은 서버가 계산(클라가 보내지 않는다)');

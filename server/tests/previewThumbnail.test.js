@@ -37,7 +37,7 @@ function bodyOf(src, name) {
 console.log('\nA) 규칙 단일 출처 — js/drive-thumb.js');
 // (결정 354 — 빠른 길 seed/edgeUrl/kindOf 가 더해졌다. url/attrs/fall 세 개는 그대로 — 검사 의미 불변)
 ok('모듈이 url/attrs/fall 을 노출한다(+ 빠른 길 seed/edgeUrl/kindOf)',
-  /window\.DriveThumb\s*=\s*\{\s*url: url,\s*attrs: attrs,\s*fall: fall,\s*seed: seed,\s*edgeUrl: edgeUrl,\s*kindOf: kindOf\s*\}/.test(MOD));
+  /window\.DriveThumb\s*=\s*\{\s*url: url,\s*attrs: attrs,\s*fall: fall,\s*seed: seed,\s*edgeUrl: edgeUrl,\s*kindOf: kindOf\s*(,[^}]*)?\}/.test(MOD));
 ok('★ 파일ID 형식 검증 후에만 CDN URL 을 만든다(임의 문자열 주입 차단)',
   /\/\^\[-\\w\]\{20,\}\$\/\.test\(s\)/.test(MOD));
 ok('★ 크기는 100~1600 으로 접는다', /Math\.max\(100, Math\.min\(1600,/.test(MOD));
@@ -234,7 +234,7 @@ console.log('\nD) 배선 — 스크립트 태그 · 모듈 부재 시 원본으�
 ok('★ 모듈이 없으면 원본으로 접는다 — 소비처 5곳 모두 window.DriveThumb 를 확인한다',
   (SA.match(/window\.DriveThumb \?/g) || []).length === 2
   && /window\.DriveThumb \?/.test(CS)
-  && /window\.DriveThumb \?/.test(RP) && /window\.DriveThumb \? DriveThumb\.url\(fileId, 400\)/.test(IX)
+  && /window\.DriveThumb \?/.test(RP) && /window\.DriveThumb \? DriveThumb\.attrs\(fileId, 400, _reEditImgUrl\(fileId\)\) : ' src=\"' \+ _reEditImgUrl\(fileId\)/.test(IX)   /* 결정 354: index 수정요청 창도 공용 사다리(attrs) */
   && /window\.DriveThumb \? DriveThumb\.attrs\(id, px, full\)/.test(WD));
 
 console.log(`\n결과: ${pass} 통과 / ${fail} 실패`);
