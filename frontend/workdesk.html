@@ -21139,8 +21139,11 @@ window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';
   /* 리뷰캡처 교체요청도 같은 이유로 Track B 네임스페이스(AE 담당 탭 스코프는 서버가 건다).
      ★ 버튼 노출은 true — 최종 판정은 서버(_reCanTouch). AE 는 애초에 담당 탭 건만 받는다. */
   window.REVIEW_EDIT_API_BASE = '/api/trackb/review-edit';
-  window.CS_REVIEW_EDIT_CAN_ACT = function () { return true; };</script>
+  window.CS_REVIEW_EDIT_CAN_ACT = function () { return true; };
+  window.CS_PURCHASE_CAPTURE_CAN_ACT = function () { return ['master','admin','staff'].includes(STATE.role); };</script>
 <!-- C/S 대화 안의 리뷰캡처 교체요청 카드 — 관리자·리뷰어 화면 공용 렌더러 -->
+<link rel="stylesheet" href="css/reviewer-purchase-capture.css?v=20261109-self-service">
+<script src="js/reviewer-purchase-capture.js?v=20261109-self-service"></script>
 <script src="js/cs-review-edit-card.js"></script>
 <script src="js/cs-inquiry.js"></script>
 <!-- 작업보드 우측 미니 C/S — 같은 C/S API의 현재 작업 방만 축약 표시 -->

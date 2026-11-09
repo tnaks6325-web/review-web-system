@@ -32,6 +32,7 @@ const DRIVE_IMAGE_SOURCES = Object.freeze([
   { table: 'review_edit_requests', column: 'old_file_id' },
   { table: 'review_edit_requests', column: 'new_file_id' },
   { table: 'purchase_capture_artifacts', column: 'file_id' },
+  { table: 'purchase_capture_supplements', column: 'file_id' },
   { table: 'purchase_submission_sessions', column: 'capture_file_id' },
   { table: 'reviewer_event_logs', expr: "(context->>'fileId')" },
   // AI 판별 예시 — 주소째(`…/api/drive/image/<id>`) 저장된다. 설정 표는 수백 줄이라 인덱스 없이도 즉시.

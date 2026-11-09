@@ -22,6 +22,8 @@
   <script src="js/drive-thumb.js"></script>
   <!-- 업로드 직전 이미지 축소(단일 출처) — 구매 캡처 보완 첨부가 413 되는 것 방지 -->
   <script src="js/image-shrink.js"></script>
+  <link rel="stylesheet" href="css/reviewer-purchase-capture.css?v=20261109-self-service"/>
+  <script src="js/reviewer-purchase-capture.js?v=20261109-self-service"></script>
   <script src="js/campaign-cards.js?v=20261104-inflow"></script>
   <script src="js/campaign-workdetail.js"></script>
   <style>
@@ -1622,6 +1624,7 @@ function doLogout() {
   // ★ 홈에서 받은 관리자 토큰도 함께 정리 — 공용 PC에서 리뷰어만 로그아웃하고
   //   관리자 권한이 남아 있는 상태를 만들지 않는다.
   sessionStorage.removeItem("admin_token");
+  if (window.ReviewerPurchaseCapture) window.ReviewerPurchaseCapture.reset();
   _historyCoordinator.reset(); _historySessionKey='';
   _reviewListData={pending:[],done:[]}; _reviewEarnings={totals:null,doneTotals:null,items:{}};
   window._reviewerProfile = null;
@@ -2121,7 +2124,34 @@ async function goToOverdueReview() {
 }
 
 let _mcItems = [], _mcTargetId = '';
+/* 구매사진 확인은 이 탭의 명의로만 요청한다. 토큰 갱신이 다른 탭의 로그인까지
+   바꾸지 않도록 공용 저장소·홈 세션에는 쓰지 않는다(기존 수정요청과 같은 규율). */
+function _purchaseCaptureOptions(user) {
+  const snapshot = { ...(user || {}) };
+  return {
+    user: snapshot,
+    apiBase: API_BASE_URL,
+    getToken: async function (forceRefresh) {
+      const force = forceRefresh === true || !!(forceRefresh && forceRefresh.forceRefresh);
+      if (!force && _reviewerTokenFresh(snapshot.reviewerToken)) return snapshot.reviewerToken;
+      const next = await _refreshReviewerHomeSession(snapshot, { syncShared:false, persist:false });
+      if (!next || !next.reviewerToken) throw new Error('다시 로그인한 뒤 구매사진을 확인해 주세요.');
+      snapshot.reviewerToken = next.reviewerToken;
+      return snapshot.reviewerToken;
+    },
+  };
+}
+function _mountPurchaseCapture(user) {
+  const section = document.getElementById('sectionMissingCapture');
+  if (!section || !user || !user.phone8 || !window.ReviewerPurchaseCapture) return false;
+  section.dataset.captureSelfService = '1';
+  section.style.display = _currentTab === 'cs' ? 'none' : '';
+  window.ReviewerPurchaseCapture.mount({ ..._purchaseCaptureOptions(user), container:section });
+  return true;
+}
 async function _loadMissingCaptures(phone8) {
+  // 새 서버의 상태·가능 동작을 사용한다. 구모듈만 남은 캐시는 기존 경로를 유지한다.
+  if (_mountPurchaseCapture(_reEditTabUser || getSavedUser())) return;
   const sessionKey=_historySessionKey;
   const sec = document.getElementById('sectionMissingCapture');
   if (!sec || !phone8) return;
@@ -3994,7 +4024,11 @@ function switchTab(tab) {
   show(csInbox,    key === 'cs');
   // 구매 캡처 보완 알림은 다른 탭에서는 종전대로 두고 문의함에서만 숨긴다(문의 목록만 보이는 화면 유지)
   const mc = document.getElementById('sectionMissingCapture');
-  if (mc) { if (key === 'cs') mc.style.display = 'none'; else if (_mcItems.length) mc.style.display = ''; }
+  if (mc) {
+    if (mc.dataset.captureSelfService === '1') mc.style.display = key === 'cs' ? 'none' : '';
+    else if (key === 'cs') mc.style.display = 'none';
+    else if (_mcItems.length) mc.style.display = '';
+  }
   // 앱바 타이틀
   const t = document.getElementById('greetingText');
   if (t) t.textContent = key === 'my' ? '내정보 / 현황' : key === 'review' ? '리뷰 내역' : key === 'cs' ? '1:1 문의' : '홈';

@@ -546,6 +546,24 @@ async function csReloadConversation(threadId) {
   }
 }
 
+/* 구매사진 확인은 같은 문의방에서 처리한다. 카드의 번호만 입구로 쓰고,
+   실제 사진·최신 버전·권한은 전용 API가 다시 확인한다. */
+function _csPurchaseCaptureCheckHtml(message) {
+  const requestId = message && message.meta && message.meta.purchaseCaptureCheck && message.meta.purchaseCaptureCheck.requestId;
+  if (typeof requestId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId)) return '';
+  if (!window.PurchaseCaptureStaff || typeof window.CS_PURCHASE_CAPTURE_CAN_ACT !== 'function' || !window.CS_PURCHASE_CAPTURE_CAN_ACT()) return '';
+  return `<button type="button" onclick="csOpenPurchaseCaptureCheck('${requestId}')" style="margin-top:6px;border:0;background:transparent;color:#0066cc;font-size:.78rem;cursor:pointer;padding:5px 0">구매사진 확인 · 보완 처리</button>`;
+}
+function csOpenPurchaseCaptureCheck(requestId) {
+  if (!window.PurchaseCaptureStaff || typeof window.CS_PURCHASE_CAPTURE_CAN_ACT !== 'function' || !window.CS_PURCHASE_CAPTURE_CAN_ACT()) return;
+  if (typeof requestId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId)) return;
+  return window.PurchaseCaptureStaff.open({
+    requestId,
+    apiBase: typeof API_BASE !== 'undefined' ? API_BASE : (typeof API_BASE_URL !== 'undefined' ? API_BASE_URL : ''),
+    getToken: async function () { return sessionStorage.getItem('admin_token') || ''; },
+    onChanged: function () { if (_csActiveThreadId) csReloadConversation(_csActiveThreadId); loadCsRooms(); },
+  });
+}
 function _csRenderMessages(messages) {
   const box = document.getElementById("csConvThread");
   if (!box) return;
@@ -590,7 +608,7 @@ function _csRenderMessages(messages) {
     const textHtml = m.content ? `<div style="max-width:78%;background:${isAdmin ? '#3182f6' : '#fff'};color:${isAdmin ? '#fff' : '#111827'};border:1px solid ${isAdmin ? '#3182f6' : '#e5e7eb'};padding:8px 11px;border-radius:12px;font-size:.83rem;line-height:1.45;white-space:pre-wrap;word-break:break-word">${escHtml(m.content)}</div>` : '';
     return `<div style="display:flex;flex-direction:column;align-items:${isAdmin ? 'flex-end' : 'flex-start'}">
       <div style="font-size:.66rem;color:#9CA3AF;margin-bottom:2px">${escHtml(m.senderName || (isAdmin ? '관리자' : '리뷰어'))}</div>
-      ${textHtml}${imgHtml}
+      ${textHtml}${imgHtml}${_csPurchaseCaptureCheckHtml(m)}
       <div style="font-size:.62rem;color:#cbd5e1;margin-top:2px">${ts}</div>
     </div>`;
   }).join("");
@@ -826,6 +844,7 @@ function csReloadAfterReviewEdit() {
     loadCsRooms: loadCsRooms, csSetReadFilter: csSetReadFilter, csSetRoomSearch: csSetRoomSearch,
     csToggleAllGroups: csToggleAllGroups, csToggleGroup: csToggleGroup,
     csOpenConversation: csOpenConversation, csLoadOrderContext: csLoadOrderContext,
+    csOpenPurchaseCaptureCheck: csOpenPurchaseCaptureCheck,
     csReloadConversation: csReloadConversation, csViewImage: csViewImage,
     // 열려 있는 방을 다시 그린다 — 닉네임을 바꾸면 이미 보낸 답장의 표시 이름까지 바뀌므로
     // 설정 화면(admin-settings.js)이 저장 직후 부른다. _csActiveThreadId 는 모듈 스코프라

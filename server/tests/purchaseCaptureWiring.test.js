@@ -1,0 +1,28 @@
+'use strict';
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),vm=require('node:vm');
+const root=path.resolve(__dirname,'../..');
+const home=fs.readFileSync(path.join(root,'frontend/index.html'),'utf8');
+const staff=fs.readFileSync(path.join(root,'frontend/workdesk.html'),'utf8');
+const app=fs.readFileSync(path.join(root,'server/src/app.js'),'utf8');
+assert(home.includes('js/reviewer-purchase-capture.js'),'Reviewer home must load the approved capture module');
+assert(home.includes('css/reviewer-purchase-capture.css'),'Reviewer home must load scoped capture styles');
+assert(staff.includes('js/reviewer-purchase-capture.js'),'Staff inquiry must load the same capture module');
+assert(staff.includes('css/reviewer-purchase-capture.css'),'Staff capture dialog must load its scoped styles');
+assert(app.includes('createPurchaseCaptureRouters'),'Actual app must create the authenticated capture routers');
+assert(/app\.use\('\/api\/reviewer',\s*purchaseCaptureRouters\.reviewerRouter\)/.test(app),'Reviewer router must be mounted after read-only preview enforcement');
+assert(/app\.use\('\/api\/trackb',\s*purchaseCaptureRouters\.staffRouter\)/.test(app),'Staff route must remain under SSO-authorized Track B');
+assert(app.indexOf("app.use('/api/reviewer', purchaseCaptureRouters.reviewerRouter)")>app.indexOf('if (readOnlyPreview)'),'Read-only preview must still block writes');
+const start=home.indexOf('function _purchaseCaptureOptions('),end=home.indexOf('\nfunction _mountPurchaseCapture(',start);
+assert(start>=0&&end>start,'Snapshot-based token adapter must exist');
+let refreshCalls=0,refreshOptions;
+const ctx={API_BASE_URL:'http://localhost',_reviewerTokenFresh:t=>t==='fresh',_refreshReviewerHomeSession:async(user,options)=>{refreshCalls++;refreshOptions=options;return{...user,reviewerToken:'fresh'};}};
+vm.createContext(ctx);vm.runInContext(home.slice(start,end)+'\nthis.getOptions=_purchaseCaptureOptions;',ctx);
+(async()=>{
+ const original={name:'첫 명의',phone8:'12345678',reviewerToken:'expired'};const options=ctx.getOptions(original);
+ original.name='다른 탭의 명의';original.phone8='87654321';
+ assert.equal(options.user.name,'첫 명의');assert.equal(options.user.phone8,'12345678');
+ assert.equal(await options.getToken(),'fresh');assert.equal(refreshCalls,1);assert.equal(refreshOptions.syncShared,false);assert.equal(refreshOptions.persist,false);
+ assert.equal(await options.getToken(),'fresh');assert.equal(refreshCalls,1,'fresh snapshot must not repeatedly refresh');
+ await options.getToken({forceRefresh:true});assert.equal(refreshCalls,2);await options.getToken(true);assert.equal(refreshCalls,3);
+ console.log('purchaseCaptureWiring: entrypoint contracts and 6 snapshot-token assertions passed');
+})().catch(e=>{console.error(e);process.exitCode=1;});
