@@ -374,6 +374,7 @@ test('D4) 기간 없음(null) SQL 이 PGlite 에서 오래된 사진까지 잡�
       CREATE TABLE review_inspections (file_id TEXT, created_at TIMESTAMPTZ);
       CREATE TABLE review_edit_requests (old_file_id TEXT, new_file_id TEXT, created_at TIMESTAMPTZ, status TEXT NOT NULL DEFAULT 'pending');
       CREATE TABLE purchase_capture_artifacts (file_id TEXT, created_at TIMESTAMPTZ);
+      CREATE TABLE purchase_capture_supplements (file_id TEXT, created_at TIMESTAMPTZ);
       CREATE TABLE purchase_submission_sessions (capture_file_id TEXT, created_at TIMESTAMPTZ, status TEXT NOT NULL DEFAULT 'prepared');
       CREATE TABLE reviewer_event_logs (context JSONB, occurred_at TIMESTAMPTZ);
       CREATE TABLE guide_image_files (file_id TEXT PRIMARY KEY, created_at TIMESTAMPTZ);
