@@ -10,6 +10,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { authMiddleware, adminOrMasterMiddleware, masterOnlyMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
+const imageEdge = require('../services/imageEdge.service');
 const svc = require('../services/trackB.service');
 const participants = require('../services/participants.service');
 const authSvc = require('../services/auth.service');
@@ -1107,13 +1108,27 @@ router.get('/workdesk/review-images', authMiddleware, async (req, res, next) => 
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
     const g = await _ensureThreadScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
     const includeReceipt = ['master', 'admin', 'staff'].includes(_role(req));
+    const rows = await svc.reviewImagesForTab({ sheetId, tabName, includeReceipt });
     res.json({
       ok: true,
       receiptIncluded: includeReceipt,
-      rows: await svc.reviewImagesForTab({ sheetId, tabName, includeReceipt }),
+      rows,
+      // 결정 354 남은 화면 — 업체(광고주·브랜드 링크)는 일괄 서명 입구(/img/sign = 내부인 전용)를 못 쓴다.
+      //   그래서 **위 스코프 판정을 통과한 이 rows 의 번호만** 서버가 서명해 싣는다(제출물 미리보기 = m).
+      //   내부인은 화면이 보이는 사진만 일괄 서명으로 받으므로 싣지 않는다(응답 크기 불변). 열쇠 없으면 [].
+      ...(!includeReceipt ? { edge: imageEdge.signedList(_reviewImageIds(rows), 'm') } : {}),
     });
   } catch (err) { next(err); }
 });
+/** review-images 응답 rows({seq:[{fileId,…}]}) 의 파일 번호만 — 서명 대상은 그 응답이 이미 내주는 번호뿐이다. */
+function _reviewImageIds(rows) {
+  const out = [];
+  if (!rows || typeof rows !== 'object') return out;
+  Object.keys(rows).forEach(k => {
+    (Array.isArray(rows[k]) ? rows[k] : []).forEach(f => { if (f && f.fileId) out.push(String(f.fileId)); });
+  });
+  return [...new Set(out)];
+}
 
 router.post('/settlement/visibility', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {

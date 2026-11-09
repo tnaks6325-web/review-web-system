@@ -108,8 +108,13 @@ function _woImgError(img) {
 }
 
 // 팝업으로 열리는 이미지 태그 (카드 내 미리보기 크기 제한)
+// ★ 결정 354 — 카드 안 미리보기만 빠른 길(js/drive-thumb.js guideAttrs: 빠른 길 → 종전 주소 → _woImgError).
+//   크게 보기(data-openurl)는 종전 원본 주소 그대로(결정 008). 모듈이 없으면 종전 태그와 글자까지 같다.
 function _woImgTag(src, openUrl) {
-  return `<img src="${escHtml(src)}" data-openurl="${escHtml(openUrl || src)}" style="max-width:min(100%,360px);max-height:240px;width:auto;height:auto;border-radius:8px;margin:4px 0;cursor:zoom-in;border:1px solid #E5E7EB" loading="lazy" title="클릭하면 크게 보기" onclick="woImageModal(this.dataset.openurl||this.src)" onerror="_woImgError(this)">`;
+  const a = (typeof window !== "undefined" && window.DriveThumb && DriveThumb.guideAttrs)
+    ? DriveThumb.guideAttrs(src, 1600, "_woImgError(this)")
+    : ` src="${escHtml(src)}" onerror="_woImgError(this)"`;
+  return `<img${a} data-openurl="${escHtml(openUrl || src)}" style="max-width:min(100%,360px);max-height:240px;width:auto;height:auto;border-radius:8px;margin:4px 0;cursor:zoom-in;border:1px solid #E5E7EB" loading="lazy" title="클릭하면 크게 보기" onclick="woImageModal(this.dataset.openurl||this.src)">`;
 }
 
 // 평문 → 안전 HTML: 줄바꿈 보존, URL 링크화, Drive 파일 URL은 이미지로 자동 임베드
