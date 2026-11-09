@@ -146,6 +146,7 @@ const WARM_SOURCES = Object.freeze([
   { table: 'review_edit_requests', column: 'old_file_id', at: 'created_at', timeColumns: ['created_at'] },
   { table: 'review_edit_requests', column: 'new_file_id', at: 'created_at', timeColumns: ['created_at'] },
   { table: 'purchase_capture_artifacts', column: 'file_id', at: 'created_at', timeColumns: ['created_at'] },
+  { table: 'purchase_capture_supplements', column: 'file_id', at: 'created_at', timeColumns: ['created_at'] },
   { table: 'purchase_submission_sessions', column: 'capture_file_id', at: 'created_at', timeColumns: ['created_at'] },
   { table: 'reviewer_event_logs', expr: "(context->>'fileId')", at: 'occurred_at', timeColumns: ['occurred_at'] },
   { table: 'guide_image_files', column: 'file_id', at: 'created_at', timeColumns: ['created_at'] },

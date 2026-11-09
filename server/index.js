@@ -22,6 +22,14 @@ const MIG_LOCK_RETRIES = 3;
 // 실행 코드가 요구하는 컬럼(없으면 사용자 대면 500). 마이그레이션이 실패해도 listen 하면
 // /health 는 통과하고 해당 기능만 42703 으로 죽어 "무신호 전면장애"가 된다.
 const REQUIRED_SCHEMA = [
+  // 219/220 — append-only supplements and independent photo checks (all persisted columns).
+  ...['id', 'order_submission_id', 'channel', 'file_id', 'byte_sha256', 'mime_type',
+    'request_key', 'check_request_id', 'request_payload_hash', 'created_by',
+    'created_at'].map(c => ['purchase_capture_supplements', c]),
+  ...['id', 'order_submission_id', 'channel', 'evidence_hash', 'status', 'note',
+    'cs_message_id', 'created_at', 'updated_at'].map(c => ['purchase_capture_check_requests', c]),
+  ...['id', 'request_id', 'status', 'note', 'actor', 'cs_message_id',
+    'created_at'].map(c => ['purchase_capture_check_history', c]),
   // 215 — dual purchase bundle, evidence lineage and payout identity.
   ...['purchase_bundle_version', 'purchase_bundle_application_id', 'purchase_bundle_hash',
     'purchase_condition_snapshot', 'purchase_identity_result', 'purchase_identity_review',
@@ -221,6 +229,9 @@ const REQUIRED_TABLES = [
   'work_order_shared_snapshots',                  // 196 — 양방향 공유 저장의 3방향 기준(없으면 연결된 오더 저장이 409/500)
   'shared_sync_outbox',                           // 196 — 리뷰웹발 공유 저장의 인트라넷 전송 대기열
   'campaign_option_price_history',                // 196 — 옵션 결제금액 이력(5단계 · 잘못구매 판정은 신청 시각 금액 — 쓰기·읽기 모두 실패해도 지금 금액으로 접힌다)
+  'purchase_capture_supplements',                  // 219 — append-only uploaded evidence
+  'purchase_capture_check_requests',               // 220 — independent photo check requests
+  'purchase_capture_check_history',                // 220 — staff decisions, cascades with request
   'guide_image_files',                            // 216 — guide-image 허용 목록(결정 352 · 없으면 가이드·공고·C/S 사진 판정이 전부 fail-open)
 ];
 
