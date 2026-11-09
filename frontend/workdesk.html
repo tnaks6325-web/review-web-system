@@ -7421,6 +7421,7 @@ async function _rvBoot(t){
   // 구버전 백엔드처럼 receiptIncluded 표식이 없으면 외부 유출 방지를 위해 현영 칸을 열지 않는다.
   STATE.rvReceiptIncluded=!!(r&&r.ok&&r.receiptIncluded===true);
   STATE.rvImgs=(r&&r.ok&&r.rows)?r.rows:(r?{}:null);
+  _rvSeedEdge(r);
   _rvBind();
   const first=document.querySelector('#gbody tr[data-rid]');   // 첫 행을 기본 선택(바로 보이게)
   if(first) _rvSelect(first.dataset.rid,{scroll:false}); else _rvRender();
@@ -12159,7 +12160,12 @@ function _capOpen(rowId, anchorEl, kind, pick){
 async function _capRefreshImages(t){
   const r=await api(`/api/trackb/workdesk/review-images?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`).catch(()=>null);
   if(!(STATE.cur&&STATE.cur.sheetId===t.sheetId&&STATE.cur.tabName===t.tabName)) return;
-  if(r&&r.ok&&r.rows){ STATE.rvImgs=r.rows; STATE.rvIdx={}; _rvRender(); }
+  if(r&&r.ok&&r.rows){ _rvSeedEdge(r); STATE.rvImgs=r.rows; STATE.rvIdx={}; _rvRender(); }
+}
+/* 결정 354 남은 화면 — 업체(광고주·브랜드 링크)는 일괄 서명 입구가 닫혀 있어 서버가 review-images 응답에
+   그 rows 의 서명(edge, m)을 싣는다. 넣어 두면 미리보기(_thumbAttrs 600 → m)가 바로 빠른 길을 쓴다. 없으면 종전. */
+function _rvSeedEdge(r){
+  if(r&&r.ok&&Array.isArray(r.edge)&&window.DriveThumb&&DriveThumb.seed) DriveThumb.seed(r.edge);
 }
 async function _capSubmit(){
   const st=_capState;

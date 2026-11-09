@@ -136,7 +136,8 @@ function scheduleUploadWarm(fileId, mimeType) {
 // ── 일괄 스크립트용 출처 표 — 허용 목록(imageAllowlist) 출처 칸 + 그 줄의 시각 칸 ──
 //   ★ 허용 목록에 출처가 늘면 회귀가드 imageWarm.test.js E 가 여기에 더하라고 알린다.
 const WARM_SOURCES = Object.freeze([
-  { table: 'review_submissions', column: 'file_id', at: 'created_at', timeColumns: ['created_at'] },
+  { table: 'review_submissions', column: 'file_id', at: 'created_at', timeColumns: ['created_at'],
+    where: "COALESCE(slot_key, '') <> 'trashed'", whereColumns: ['slot_key'] },   // 휴지통 캡처(드라이브 원본도 지움)
   { table: 'order_submissions', column: 'capture_file_id', at: 'COALESCE(capture_uploaded_at, submitted_at)',
     where: 'deleted_at IS NULL', timeColumns: ['capture_uploaded_at', 'submitted_at', 'deleted_at'] },
   { table: 'order_submissions', column: 'capture_file_id_2', at: 'COALESCE(capture2_uploaded_at, submitted_at)',
@@ -144,10 +145,13 @@ const WARM_SOURCES = Object.freeze([
   { table: 'review_index', column: 'review_file_id', at: 'review_file_at', timeColumns: ['review_file_at'] },
   { table: 'review_inspections', column: 'file_id', at: 'created_at', timeColumns: ['created_at'] },
   { table: 'review_edit_requests', column: 'old_file_id', at: 'created_at', timeColumns: ['created_at'] },
-  { table: 'review_edit_requests', column: 'new_file_id', at: 'created_at', timeColumns: ['created_at'] },
+  { table: 'review_edit_requests', column: 'new_file_id', at: 'created_at', timeColumns: ['created_at'],
+    where: "status NOT IN ('rejected', 'cancelled')", whereColumns: ['status'] },   // 반려·취소된 요청의 새 사진
   { table: 'purchase_capture_artifacts', column: 'file_id', at: 'created_at', timeColumns: ['created_at'] },
   { table: 'purchase_capture_supplements', column: 'file_id', at: 'created_at', timeColumns: ['created_at'] },
-  { table: 'purchase_submission_sessions', column: 'capture_file_id', at: 'created_at', timeColumns: ['created_at'] },
+  // 끝난 임시 세션(completed = 진짜 사진은 order_submissions 쪽 출처가 맡는다 · failed) 제외 — 실제 값 prepared/uploading/completed/failed
+  { table: 'purchase_submission_sessions', column: 'capture_file_id', at: 'created_at', timeColumns: ['created_at'],
+    where: "status IN ('prepared', 'uploading')", whereColumns: ['status'] },
   { table: 'reviewer_event_logs', expr: "(context->>'fileId')", at: 'occurred_at', timeColumns: ['occurred_at'] },
   { table: 'guide_image_files', column: 'file_id', at: 'created_at', timeColumns: ['created_at'] },
 ]);

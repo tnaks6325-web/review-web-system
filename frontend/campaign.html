@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
   <script src="api.js"></script>
+  <script src="js/drive-thumb.js"></script>
   <script src="js/campaign-cards.js?v=20261104-inflow"></script>
   <script src="js/campaign-workdetail.js"></script>
   <style>
@@ -964,6 +965,7 @@ async function openPopGate(gateInfo){
   try{
     const r = await fetch(API_BASE_URL + '/api/campaign/list');
     const j = await r.json();
+    if (window.CampCards && CampCards.seedThumbs) CampCards.seedThumbs(j);   // 결정 354 — 썸네일 빠른 길 서명
     const rows = (j.data || []).filter(x =>
       x.participation_mode && x.is_popular !== true && x.state === 'open' && String(x.id) !== String(CAMP_ID));
     if(!rows.length){
@@ -2220,6 +2222,8 @@ function _renderJoinedView(j, h){
     // 작업내용 렌더 — 공용 렌더러(js/campaign-workdetail.js). 관리자 미리보기와 동일 코드.
     //   표시 직전 정규화(상품 금액 합치기·리뷰가이드 섹션 추출·첨부 이미지 병합)는 모듈이 담당.
     //   옵션 카드는 아래 renderJoinedOption이 [변경] 버튼과 함께 그리므로 여기선 제외.
+    // 결정 354 — 가이드 사진 빠른 길 서명(m, 응답 가산 필드) · 없으면 종전 주소 그대로
+    if (window.DriveThumb && Array.isArray(j.guideThumbs)) DriveThumb.seed(j.guideThumbs);
     CampWorkDetail.renderInto($('wdCards'), {
       workDetail: j.workDetail || {},
       landingUrl: j.landingUrl,

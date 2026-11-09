@@ -383,7 +383,9 @@ t('★ 전역 공개 — 호출부·onclick 문자열이 이름 그대로 쓴다
     .forEach(n => assert.ok(new RegExp(n + ': ' + n + '[,\\s]').test(WOD), '미공개: ' + n));
   assert.ok(/window\[k\] = EXPORTS\[k\]/.test(WOD));
   // onclick/onerror 문자열은 전역이어야 동작한다(모듈 스코프면 조용히 죽는다)
-  assert.ok(/onclick="woImageModal\(this\.dataset\.openurl\|\|this\.src\)" onerror="_woImgError\(this\)"/.test(WOD));
+  //   결정 354: onerror 는 빠른 길 사다리(guideAttrs)가 붙이고, 마지막 폴백으로 같은 전역 _woImgError 를 부른다(모듈 없으면 종전 그대로)
+  assert.ok(/onclick="woImageModal\(this\.dataset\.openurl\|\|this\.src\)"/.test(WOD));
+  assert.ok(/DriveThumb\.guideAttrs\(src, 1600, "_woImgError\(this\)"\)/.test(WOD) && / src="\$\{escHtml\(src\)\}" onerror="_woImgError\(this\)"/.test(WOD));
 });
 t('첨부 이미지는 클릭하면 크게 본다(라이트박스)', () => {
   assert.ok(/function woImageModal\(url\)/.test(WOD) && /woImgModal/.test(WOD));
