@@ -563,6 +563,12 @@ function startCronJobs() {
     }
   }, { timezone: 'Asia/Seoul' });
 
+  // ── 결정 356: 차례 타이머 불변식 점검(읽기 전용) — 같은 소유자·공고에서 동시에 진행 중인 명의 · 0분 차례 ──
+  cron.schedule('*/10 * * * *', async () => {
+    try { await require('../services/campaignHoldChain.service').auditChains(pool); }
+    catch (err) { logger.warn(`[CRON-HoldChainAudit] ${err.message}`); }
+  }, { timezone: 'Asia/Seoul' });
+
   // ── 입금 통장 자동 받기(사용자 확정 2026-10-28 · 결정 304): 5분마다 '받을 때인지'만 본다 ──
   //   이체 파일 다운로드 뒤 1시간 안 = 5분마다 · 1~2시간 = 30분마다 · 그 뒤 = 안 받는다(팝빌은 조금만).
   //   받은 뒤 회차 자동 확정(맞는 사람만) + 「오늘 확인할 것」 갱신. 은행마다 3분 칸 잡기가 있어 화면 받기와 겹쳐도 한 번만 받는다.

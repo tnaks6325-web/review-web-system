@@ -1740,6 +1740,7 @@ async function getCampaignDetail(req, res, next) {
       ? await _withFreshTableTodayFilled(pool, row, countsMap && countsMap.get(id), now)
       : null;
     const view = _publicView(row, detailCounts, now, schedMap && scheduleFor(schedMap, row));
+    if (row.participation_mode) view.holdChain = require('../services/campaignHoldChain.service').chainEligibleCampaign(row);   // ★ 결정 356
     _applyCurrentFee(view, await _loadFeeSchedules(pool, id), now);   // ★ 082: 오늘 구간 리뷰비
     // ★ D안 ①: 참여 전 상세에도 현금영수증 대상 여부(불리언만 — 상세 안내는 참여 후 work-detail)
     const _crm = await _cashReceiptFlags([row]);
@@ -1830,7 +1831,7 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
 
     // holdToken은 신청 시 발급된 1회성 열쇠 — phone8만 아는 제3자의 열람 차단(정확 일치)
     const { rows: apps } = await pool.query(
-      `SELECT id, status, expires_at, applied_at, submitted_at, option_key, reject_reason, decided_at
+      `SELECT id, status, expires_at, applied_at, submitted_at, option_key, owner_phone8, reject_reason, decided_at
          FROM campaign_applications
         WHERE campaign_id = $1 AND phone8 = $2 AND hold_token = $3 AND hold_token <> ''
         ORDER BY applied_at DESC
@@ -1951,6 +1952,15 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
       }
     }
 
+    // ★ 결정 356: 같은 소유자의 이 공고 살아 있는 홀드들(차례·마감) — 화면이 10초 확인마다 탭 시간을 맞춘다. 토큰·이름·번호 없음.
+    //   조회 실패는 생략(fail-open: 화면은 종전 동작). validHold(유예 없음 · 결정 351)는 위에서 그대로.
+    let chain;
+    if (camp.multi_account_mode === true) {   // 차례 줄은 타계정 허용 공고에만 생긴다(1인1회·종전 공고 응답은 키까지 그대로)
+      try {
+        chain = await require('../services/campaignHoldChain.service')
+          .ownerChainView(pool, { campaignId: id, ownerP8: app.owner_phone8 || p8, now });
+      } catch (e) { chain = undefined; logger.warn(`[campaign/work-detail] 차례 정보 생략: ${e.message}`); }
+    }
     res.json({
       ok: true,
       serverNow: now.toISOString(),
@@ -1962,6 +1972,7 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
         submittedAt: app.submitted_at,
         optionKey: app.option_key || null,
       },
+      chain,
       options,               // [{ optKey, payAmount, remaining, todayRemaining, status, selectable, ... }]
       selectedOption,        // 내가 참여한 옵션(잠금표시·구매양식 고정용)
       canChangeOption,
@@ -1997,21 +2008,43 @@ router.post('/:id/cancel', applyLimiter, async (req, res, next) => {
     if (p8.length !== 8 || !token) {
       return res.status(400).json({ ok: false, error: 'phone8(8자리)과 holdToken이 필요합니다.' });
     }
-    // status 조건부 UPDATE — 제출확정·스윕과의 경합에서도 원자적(이미 submitted면 0행)
-    //   ★ 127: 블로그 승인 대기(blog_pending)도 리뷰어가 직접 취소할 수 있다(자리 미점유 상태라 무해).
-    const { rows } = await pool.query(
-      `UPDATE campaign_applications
-          SET status = 'cancelled'
-        WHERE campaign_id = $1 AND phone8 = $2 AND hold_token = $3 AND hold_token <> ''
-          AND status IN ('applied', 'blog_pending')
-        RETURNING id`,
-      [id, p8, token]
-    );
-    if (rows.length === 0) {
-      return res.status(404).json({ ok: false, error: '취소할 수 있는 참여가 없습니다.' });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // ★ 결정 356: 차례 줄 행(turn_starts_at 은 INSERT 때 정해져 바뀌지 않는다)이면 캠페인 행을 먼저 잠근다 —
+      //   apply·확정·수동확정과 같은 순서(캠페인 행 → 신청 행) = 교착 없음(RED-09). 종전 행은 종전 그대로(잠금 없음).
+      const { rows: chained } = await client.query(
+        `SELECT 1 FROM campaign_applications
+          WHERE campaign_id = $1 AND phone8 = $2 AND hold_token = $3 AND hold_token <> ''
+            AND status = 'applied' AND turn_starts_at IS NOT NULL LIMIT 1`, [id, p8, token]);
+      if (chained.length) await client.query('SELECT id FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [id]);
+      // status 조건부 UPDATE — 제출확정·스윕과의 경합에서도 원자적(이미 submitted면 0행)
+      //   ★ 127: 블로그 승인 대기(blog_pending)도 리뷰어가 직접 취소할 수 있다(자리 미점유 상태라 무해).
+      const { rows } = await client.query(
+        `UPDATE campaign_applications
+            SET status = 'cancelled'
+          WHERE campaign_id = $1 AND phone8 = $2 AND hold_token = $3 AND hold_token <> ''
+            AND status IN ('applied', 'blog_pending')
+          RETURNING id`,
+        [id, p8, token]
+      );
+      if (rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ ok: false, error: '취소할 수 있는 참여가 없습니다.' });
+      }
+      if (chained.length) {   // 진행 중이었으면 다음 명의 시작 · 대기 중이었으면 뒤 명의만 앞으로(자기 SAVEPOINT — 실패해도 취소는 그대로)
+        await require('../services/campaignHoldChain.service').pullChainEarlierSafe(client,
+          { campaignId: id, endedIds: rows.map(r => r.id), cause: 'cancel', actor: 'reviewer' });
+      }
+      await client.query('COMMIT');
+      logger.info(`[campaign/cancel] camp=${id} app=${rows[0].id} phone8=***${p8.slice(-4)}`);
+      res.json({ ok: true, message: '참여가 취소되었습니다. 오늘은 이 캠페인에 다시 참여할 수 없어요.' });
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+      throw e;
+    } finally {
+      client.release();
     }
-    logger.info(`[campaign/cancel] camp=${id} app=${rows[0].id} phone8=***${p8.slice(-4)}`);
-    res.json({ ok: true, message: '참여가 취소되었습니다. 오늘은 이 캠페인에 다시 참여할 수 없어요.' });
   } catch (err) {
     next(err);
   }
@@ -2392,7 +2425,7 @@ async function _applyParticipation(req, res, next, campPre) {
         await client.query('ROLLBACK');
         return res.status(403).json({
           ok: false, reason: 'profile_missing', missing,
-          error: `내 정보를 먼저 등록해주세요: ${missing.join(', ')} — 참여 후 15분 안에 제출까지 끝나야 해서, 미리 등록이 필요해요.`,
+          error: `내 정보를 먼저 등록해주세요: ${missing.join(', ')} — 참여 후 제한시간 안에 제출까지 끝나야 해서, 미리 등록이 필요해요.`,
         });
       }
     }
@@ -2744,12 +2777,39 @@ async function _applyParticipation(req, res, next, campPre) {
 
     // 홀드 생성: expires_at = min(now+TTL, 오늘 window_end) — state=open이므로 closesAt는 유효·미래.
     // ★ 자율주문(시간창 미설정)은 closesAt이 null → TTL만 적용. ★ 063 §09-2: 타계정 건 TTL = sub_hold_ttl_min(기본 10분)
-    const ttlMin = isSubApply ? (Number(camp.sub_hold_ttl_min) || 15) : (Number(camp.hold_ttl_min) || 30);
+    // ★ 결정 356(R1): 본계정 기본 20분 — 서버 폴백 단일 출처 = holdChain.MAIN_HOLD_TTL_DEFAULT_MIN(migration 218 DEFAULT 와 같은 값)
+    const holdChain = require('../services/campaignHoldChain.service');
+    const ttlMin = isSubApply ? (Number(camp.sub_hold_ttl_min) || 15) : (Number(camp.hold_ttl_min) || holdChain.MAIN_HOLD_TTL_DEFAULT_MIN);
     const ttlMs = ttlMin * 60000;
     const closesAt = kstTodayAt(camp.window_end, now);
     // ★ 결정 321(확정 7): Q&A 제출 기한 = 신청 후 1시간과 그날 자정 중 빠른 쪽(공고 TTL 대신).
     const _baseExp = qnaApply ? qnaSlots.qnaHoldExpiry(now).getTime() : now.getTime() + ttlMs;
-    const expiresAt = new Date(closesAt ? Math.min(_baseExp, closesAt.getTime()) : _baseExp);
+    let expiresAt = new Date(closesAt ? Math.min(_baseExp, closesAt.getTime()) : _baseExp);
+    /* ★★ 결정 356(R2·R5): 새 화면이 sequential:true 를 보낼 때만 차례 줄에 선다(옛 화면 = 종전 동시 시간 · RED-05).
+         Q&A·블로그·동시진행·1인1회 제외. 차례 시작 = 이 소유자의 이 공고 살아 있는 홀드 최대 마감(없으면 지금).
+         그 시작이 오늘 cutoffAt(= 마감 − close_buffer_min, 상태 엔진이 이미 계산한 st.cutoffAt) 이상이면 **이 명의만** 거절(자리 미점유).
+         계획 조회 실패는 종전 동시 시간으로(fail-open = 오늘과 같은 동작) — 참여를 막지 않는다. */
+    let chainPlan = null;
+    if (req.body.sequential === true && !qnaApply && !blogApply && holdChain.chainEligibleCampaign(camp)) {
+      try {
+        await client.query('SAVEPOINT chain_plan');
+        chainPlan = await holdChain.planChainLink(client, {
+          campaignId: id, ownerP8: p8, ttlMin, now, closesAt: st.closesAt, cutoffAt: st.cutoffAt });
+        await client.query('RELEASE SAVEPOINT chain_plan');
+      } catch (e) {
+        try { await client.query('ROLLBACK TO SAVEPOINT chain_plan'); } catch (_) { /* noop */ }
+        chainPlan = null;
+        logger.warn(`[campaign/apply] 차례 계획 실패(동시 시간으로 진행): ${e.code || ''} ${e.message}`);
+      }
+      if (chainPlan && chainPlan.refuse) {
+        await client.query('ROLLBACK');
+        logger.info(`[campaign/apply] chain_after_close camp=${id} phone8=***${holdP8.slice(-4)} turn=${chainPlan.turnStartsAt.toISOString()}`);
+        return res.status(409).json({ ok: false, reason: 'chain_after_close',
+          turnStartsAt: chainPlan.turnStartsAt.toISOString(), closesAt: st.closesAt, cutoffAt: st.cutoffAt,
+          error: '오늘 마감 전에 이 명의 차례가 안 와요. 앞 명의를 먼저 제출하면 다시 참여할 수 있어요.' });
+      }
+      if (chainPlan) expiresAt = chainPlan.expiresAt;
+    }
     /* ★★ 결정 321(확정 1): Q&A 신청은 그 상품의 오늘 빈 자리 하나를 묶는다(그날 앞 자리부터 — 공개 자리가 먼저 찬다).
          작업표 잠금(camp_tab_daily) 안이라 같은 자리에 둘이 묶이지 않는다(뒤에는 부분 유일 색인 211 이 받친다).
          못 고르면 막는다(fail-closed) — 자리 없는 신청은 제출할 줄이 없다. */
@@ -2807,6 +2867,10 @@ async function _applyParticipation(req, res, next, campPre) {
        VALUES ($1,$2,$3,$4,$5,$12,$6,$7,$8,$9,$10,$11)
        RETURNING id, status, expires_at, option_key`,
       [id, insName, insPhone, holdP8, p8, insExpires, holdToken, chosenOpt ? chosenOpt.opt_key : null, feeSnapshot, blogUrlIns, camp.is_popular === true, insStatus]);
+    if (chainPlan && ins.rows[0].status === 'applied') {   // ★ 결정 356 — INSERT 칸 목록 고정(회귀가드) · 뒤이은 UPDATE 관용구
+      await client.query(`UPDATE campaign_applications SET turn_starts_at = $2, chain_ttl_min = $3 WHERE id = $1`,
+        [ins.rows[0].id, chainPlan.turnStartsAt.toISOString(), chainPlan.ttlMin]);
+    }
     if (qnaBind) {   // ★ 결정 321 — INSERT 칸 목록은 고정(회귀가드) · 뒤이은 UPDATE 관용구로 묶은 자리를 새긴다
       await client.query(`UPDATE campaign_applications SET qna_slot_id = $2 WHERE id = $1`, [ins.rows[0].id, qnaBind.slot.id]);
     }
@@ -2903,6 +2967,9 @@ async function _applyParticipation(req, res, next, campPre) {
       expiresAt: ins.rows[0].expires_at, serverNow: now.toISOString(),
       optionKey: ins.rows[0].option_key || null,
       qnaSlot: qnaBind ? qnaSlots.publicSlotView(qnaBind.slot, ins.rows[0].expires_at) : undefined,
+      // ★ 결정 356: 차례 줄에 섰을 때만 — 없으면(종전·구서버) 화면은 종전 동작. expiresAt 은 위 값 그대로(= 진짜 마감).
+      chain: chainPlan ? { sequential: true, state: chainPlan.turnStartsAt.getTime() > now.getTime() ? 'waiting' : 'running',
+        startsAt: chainPlan.turnStartsAt.toISOString(), expiresAt: chainPlan.expiresAt.toISOString() } : undefined,
     });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
@@ -3662,7 +3729,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         window_start || null,
         window_end || null,
         Number.isFinite(Number(close_buffer_min)) && close_buffer_min !== null && close_buffer_min !== undefined && close_buffer_min !== '' ? Number(close_buffer_min) : 10,
-        Number.isFinite(Number(hold_ttl_min)) && hold_ttl_min !== null && hold_ttl_min !== undefined && hold_ttl_min !== '' ? Number(hold_ttl_min) : 30,
+        Number.isFinite(Number(hold_ttl_min)) && hold_ttl_min !== null && hold_ttl_min !== undefined && hold_ttl_min !== '' ? Number(hold_ttl_min) : require('../services/campaignHoldChain.service').MAIN_HOLD_TTL_DEFAULT_MIN,
         _prepWorkDetail(work_detail) ?? null,
         _srcWoId,   // ★ 결정 246: 잠그고 확인한 바로 그 값(앞뒤 공백 정규화)을 저장 — 원문을 저장하면 다음 확인이 못 찾는다
         start_date || null,
@@ -4620,7 +4687,7 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
       `SELECT ca.id, ca.campaign_id, ca.applicant_name, ca.applicant_phone, ca.applicant_inad,
               ca.status, ca.sheet_row_added, ca.applied_at, ca.phone8, ca.expires_at, ca.submitted_at,
               ca.order_submission_id, ca.late_order_id, ca.option_key, ca.owner_phone8, ca.dismissed_at,
-              ca.dismissed_by, ca.blog_url, ca.reject_reason, ca.decided_at, ca.decided_by,
+              ca.dismissed_by, ca.blog_url, ca.reject_reason, ca.decided_at, ca.decided_by, ca.turn_starts_at,
               COALESCE(linked_order.submitted_at, history_order.submitted_at) AS order_submitted_at,
               COALESCE(linked_order.source, history_order.source) AS order_source,
               (COALESCE(linked_order.campaign_was_late, history_order.campaign_was_late, FALSE)
@@ -4924,7 +4991,7 @@ router.get('/admin/:id/preview', authMiddleware, adminOrMasterMiddleware, async 
     const workDetail = sanitizeWorkDetail(camp.work_detail);
     // 미리보기에도 모집공고 직접 설정을 우선 적용한다.
     const inflowType = (workDetail && workDetail.inflowType) || (await _lookupInflowType(camp.id, camp.source_work_order_id)) || '';
-    const ttlMin = Number(camp.hold_ttl_min) || 30;
+    const ttlMin = Number(camp.hold_ttl_min) || require('../services/campaignHoldChain.service').MAIN_HOLD_TTL_DEFAULT_MIN;
 
     res.json({
       ok: true,
@@ -5080,9 +5147,9 @@ router.post('/admin/:id/confirm', authMiddleware, adminOrMasterMiddleware, async
     }
     // 같은 (campaign, phone8)의 진행 중 홀드만 정리한다. 기간을 지킨 재참여는 과거 submitted 행과
     // 함께 존재할 수 있으므로, 늦게 도착한 구매양식의 수동확정도 과거 확정을 이유로 영구 차단하지 않는다.
-    await client.query(
+    const preCancel = await client.query(
       `UPDATE campaign_applications SET status = 'cancelled'
-        WHERE campaign_id = $1 AND phone8 = $2 AND id <> $3 AND status = 'applied'`, [id, a.phone8, appId]);
+        WHERE campaign_id = $1 AND phone8 = $2 AND id <> $3 AND status = 'applied' RETURNING id`, [id, a.phone8, appId]);
     // 레드 #8②: submitted_at 소급 — late 주문의 제출시각(order_submissions.submitted_at = 생성시각; created_at 컬럼 없음, 심판 J5)
     //   → 없으면 applied_at → NOW(). 과거시각 소급 = 오늘 쿼터 미소비("일 시작 고정" 약속 보존).
     await client.query(
@@ -5096,6 +5163,10 @@ router.post('/admin/:id/confirm', authMiddleware, adminOrMasterMiddleware, async
         WHERE ca.id = $1`, [appId]);
     const { maybePersistClosed } = require('../services/campaignHold.service');
     await maybePersistClosed(client, id); // 레드 #8③: 수동 경로도 closed 영속 복제
+    if (cRows[0].multi_account_mode === true) {   // ★ 결정 356(R4): 확정·선-취소된 명의가 차례 줄에 있었으면 뒤 명의를 앞으로(자기 SAVEPOINT · 실패해도 확정 유지)
+      await require('../services/campaignHoldChain.service').pullChainEarlierSafe(client, {
+        campaignId: id, endedIds: [appId, ...preCancel.rows.map(r => r.id)], cause: 'admin_confirm', actor: req.admin && req.admin.name });
+    }
     await client.query('COMMIT');
     logger.info(`[campaign/confirm] 수동확정 camp=${id} app=${appId} by=${req.admin && req.admin.name}`);
     res.json({ ok: true });

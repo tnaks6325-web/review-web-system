@@ -357,7 +357,7 @@ async function confirmExternalApplication(client, {
   sheetId, gid, tabName,
 }) {
   const { rows: cRows } = await client.query(
-    `SELECT id, participation_mode, is_popular, recruit_total, linked_sheet_id, linked_tab_gid, linked_tab_name
+    `SELECT id, participation_mode, is_popular, recruit_total, linked_sheet_id, linked_tab_gid, linked_tab_name, multi_account_mode
        FROM recruit_campaigns WHERE id = $1 FOR UPDATE`, [campaignId]);
   if (!cRows.length) return { ok: false, error: '캠페인을 찾을 수 없습니다' };
   if (!cRows[0].participation_mode) return { ok: false, skipped: 'not_participation' };
@@ -444,6 +444,10 @@ async function confirmExternalApplication(client, {
       `UPDATE campaign_applications
           SET status = 'submitted', submitted_at = NOW(), order_submission_id = $2, option_key = COALESCE($3, option_key)
         WHERE id = $1`, [appId, orderSubmissionId, optionKey || null]);
+    // ★ 결정 356(R4): 담당자 확정도 끝남 — 살아 있던 홀드(진행·대기)였을 때만 뒤 명의를 앞으로(끝난 행 확정은 차례와 무관)
+    if (selectedApplication.status === 'applied' && cRows[0].multi_account_mode === true) {
+      await require('./campaignHoldChain.service').pullChainEarlierSafe(client, { campaignId, endedIds: [appId], cause: 'staff_confirm' });
+    }
   } else {
     const { rows: candidates } = await client.query(
       `SELECT id FROM campaign_applications

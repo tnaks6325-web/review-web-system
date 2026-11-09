@@ -227,7 +227,7 @@
           </div>
           <details style="margin-top:8px"><summary style="font-size:.74rem;font-weight:700;color:var(--t3,#94A3B8);cursor:pointer">고급 설정 (참여 제한시간·마감 버퍼)</summary>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px">
-              <div><label class="rform-label">참여 제한시간(분)</label><input id="rf_hold_ttl" type="number" min="5" class="rform-input" value="30"></div>
+              <div><label class="rform-label">참여 제한시간(분)</label><input id="rf_hold_ttl" type="number" min="5" class="rform-input" value="20"></div>
               <div><label class="rform-label">종료 전 신규참여 마감(분)</label><input id="rf_close_buffer" type="number" min="0" class="rform-input" value="10"></div>
             </div>
           </details>
@@ -402,7 +402,7 @@
           <div class="rf-hrow"><span class="rf-hl">랜딩 URL</span><input id="rf_landing_url" type="text" class="rform-input" placeholder="링크유입 URL은 진행상품 URL에서 자동 제공됩니다"></div>
           <div class="rf-hrow rf-hrow-top"><span class="rf-hl">모집이월 방식</span><div><input id="rf_carry_mode" type="hidden" value="auto"><div class="rf-inline-buttons"><button type="button" id="rf_carry_auto" class="rchan-btn active" onclick="rfCarrySet('auto')">자동 반영 (기본)</button><button type="button" id="rf_carry_hold" class="rchan-btn" onclick="rfCarrySet('hold')">보류 후 수동 반영</button></div><div id="rf_carry_hold_note" class="rf-help" style="display:none"></div></div></div>
           <div class="rf-hrow rf-hrow-top"><span class="rf-hl">다계정 허용</span><div><label class="rf-checkline"><input type="checkbox" id="rf_multi_account" onchange="onMultiAccountToggle(this.checked)"> 허용 <span>— 명의당 1건</span></label><div id="rf_multi_section" style="display:none"><div class="rf-inline-inputs"><label>하루 한도 <input id="rf_multi_daily" type="number" min="0" class="rform-input" value="1" oninput="renderPartCheck()"></label><label>제한시간 <input id="rf_sub_ttl" type="number" min="1" class="rform-input" value="15"></label></div></div></div></div>
-          <details class="rf-advanced"><summary>고급 설정 (참여 제한시간·마감 버퍼)</summary><div class="rf-inline-inputs"><label>참여 제한시간 <input id="rf_hold_ttl" type="number" min="5" class="rform-input" value="30"></label><label>종료 전 신규참여 마감 <input id="rf_close_buffer" type="number" min="0" class="rform-input" value="10"></label></div></details>
+          <details class="rf-advanced"><summary>고급 설정 (참여 제한시간·마감 버퍼)</summary><div class="rf-inline-inputs"><label>참여 제한시간 <input id="rf_hold_ttl" type="number" min="5" class="rform-input" value="20"></label><label>종료 전 신규참여 마감 <input id="rf_close_buffer" type="number" min="0" class="rform-input" value="10"></label></div></details>
         </div>
       </section>
       </template>
@@ -510,7 +510,7 @@
                 <div class="form-row"><span class="form-label">모집이월 방식</span><div class="form-control"><input id="rf_carry_mode" type="hidden" value="auto"><input id="rf_carry_strategy" type="hidden" value="extend"><div class="square-toggle carry-strategy"><button type="button" id="rf_carry_next" onclick="rfCarrySet('next')">다음날에 더하기</button><button type="button" id="rf_carry_spread" onclick="rfCarrySet('spread')">남은 날에 나눠담기</button><button type="button" id="rf_carry_extend" onclick="rfCarrySet('extend')">종료일 뒤에 붙이기</button></div><span class="tag public" id="rf_carry_strategy_note">기본</span></div></div>
                 <div class="form-row tall" data-part-only><span class="form-label">안내배지</span><div class="form-control"><div class="badge-field"><div id="rf_badge_presets" class="badge-presets"><button type="button" onclick="addPresetBadge('3.3% 공제')">+ 3.3% 공제</button><button type="button" onclick="addPresetBadge('텍스트 제공')">+ 텍스트 제공</button><button type="button" onclick="addPresetBadge('옵션지정')">+ 옵션지정</button><button type="button" onclick="addPresetBadge('일반결제')">+ 일반결제</button></div><div id="rf_badges_wrap" class="badge-wrap" onclick="document.getElementById('rf_badge_input').focus()"><input id="rf_badge_input" placeholder="배지 직접 입력 후 Enter" onkeydown="handleBadgeInput(event)"></div></div></div></div>
               </div>
-              <input id="rf_deadline" type="hidden"><input id="rf_deadline_day" type="hidden"><input id="rf_deadline_warn" type="hidden"><input id="rf_max_slots" type="hidden" value="0"><input id="rf_close_buffer" type="hidden" value="10"><input id="rf_hold_ttl" type="hidden" value="15">
+              <input id="rf_deadline" type="hidden"><input id="rf_deadline_day" type="hidden"><input id="rf_deadline_warn" type="hidden"><input id="rf_max_slots" type="hidden" value="0"><input id="rf_close_buffer" type="hidden" value="10"><input id="rf_hold_ttl" type="hidden" value="20">
             </section>
             <input type="checkbox" id="rf_participation" checked onchange="onParticipationToggle(this.checked)" hidden><input type="hidden" id="rf_work_kind">
           </div>

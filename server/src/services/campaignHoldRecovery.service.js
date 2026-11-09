@@ -56,7 +56,7 @@ async function recoverActiveHolds(db, { campaignId, session }) {
   const phone8s = [...byPhone.keys()];
   const { rows } = await db.query(
     `SELECT id, status, expires_at, applied_at, option_key, hold_token, phone8,
-            owner_phone8, applicant_name
+            owner_phone8, applicant_name, turn_starts_at
        FROM campaign_applications
       WHERE campaign_id = $1
         AND phone8 = ANY($4::text[])
@@ -94,6 +94,9 @@ async function recoverActiveHolds(db, { campaignId, session }) {
       name: identity.displayName,
       isSub: identity.type === 'sub',
       status: row.status,
+      // ★ 결정 356: 차례 줄 명의만 — 없으면(종전 홀드) 화면은 종전 동작
+      startsAt: row.turn_starts_at || null,
+      chainState: row.turn_starts_at ? (new Date(row.turn_starts_at).getTime() > Date.now() ? 'waiting' : 'running') : null,
     });
   }
   return { authorized: true, holds };

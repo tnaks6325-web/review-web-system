@@ -223,6 +223,11 @@ async function confirmHoldInTx(client, { applicationId, campaignId, phone8, hold
     // application-target scope now would mistake OUR order link for concurrent drift.
     if (lockedScope) await maybePersistClosed(client, campaignId, { [CONFIRMED_CALLER_PRELOCK]: true });
     else await maybePersistClosed(client, campaignId);
+    // ★ 결정 356: 제출 확정 = 이 명의 끝남 — 진행 중이었으면 다음 명의 시작, 대기 중(R3 미리 제출)이었으면 뒤 명의만 앞으로.
+    //   자기 SAVEPOINT(hold_chain) · 던지지 않음 → 'confirmed' 는 무엇이 실패해도 그대로(RED-03). 차례 줄은 타계정 허용 공고에만 생긴다.
+    if (camp.multi_account_mode === true) {
+      await require('./campaignHoldChain.service').pullChainEarlierSafe(client, { campaignId, endedIds: [appId], cause: 'submit' });
+    }
     return 'confirmed';
   }
   // 지각/스윕 선점/취소 후 제출: 자동확정 없음 — 관제 수동확정 대상 표기(레드 #5·#7의 구제경로 입력)
