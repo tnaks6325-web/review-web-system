@@ -42,7 +42,7 @@ let dbDown = false;
 allow.__setPoolForTest({ async query(sql, [fid]) {
   if (dbDown) throw new Error('db down');
   const guide = /guide_image_files/.test(sql);
-  const allowed = guide ? fid === IDS.guide : [IDS.drive, IDS.big, IDS.xlsx, IDS.broken, IDS.fail, IDS.pay].includes(fid);
+  const allowed = guide ? fid === IDS.guide : ([IDS.drive, IDS.big, IDS.xlsx, IDS.broken, IDS.fail, IDS.pay].includes(fid) || /^GEN\d/.test(fid));
   return { rows: [{ private: fid === IDS.pay, allowed }] };
 } });
 
@@ -86,7 +86,8 @@ test.before(async () => {
   server = await startApp();
 });
 test.after(() => server && server.close());
-test.beforeEach(() => { allow.__resetCacheForTest(); reads.length = 0; dbDown = false; edge.__setSharpForTest(undefined); });
+test.beforeEach(() => { allow.__resetCacheForTest(); reads.length = 0; dbDown = false; edge.__setSharpForTest(undefined);
+  require(path.join(SERVER, 'src/services/imageSourceCache.service')).__resetForTest(); });   // 시험끼리 원본 캐시를 나눠 쓰지 않게
 
 test('A) signImage — 열쇠 없음·짧음 = null · 형식 불량 null · 6시간 칸', () => {
   const now = Date.UTC(2026, 10, 9, 2, 0, 0);
@@ -94,7 +95,8 @@ test('A) signImage — 열쇠 없음·짧음 = null · 형식 불량 null · 6�
   assert.match(u, /^\/img\/t\/[-\w]{20,}\?e=\d+&s=[-\w]{43}$/);
   assert.equal(Number(new URL(u, 'https://x').searchParams.get('e')) % (6 * 3600), 0, '6시간 칸 경계');
   assert.equal(edge.signImage('짧은번호', 't', now), null);
-  assert.equal(edge.signImage(IDS.drive, 'o', now), null, '원본 kind 는 없다(대조는 원본 통로)');
+  assert.equal(edge.signImage(IDS.drive, 'x', now), null, '모르는 kind 는 서명 0');
+  assert.match(edge.signImage(IDS.drive, 'o', now), /^\/img\/o\//, '원본 kind o(2026-11-09 사용자 확정 · 바이트 동일 — imageEdgeOriginal.test.js)');
   const save = process.env.IMG_SIGNING_KEY;
   try {
     process.env.IMG_SIGNING_KEY = ''; assert.equal(edge.signImage(IDS.drive, 't', now), null);
@@ -109,7 +111,7 @@ test('B-1) 내부 입구 — 설정 없음 503 · 열쇠 없음/틀림 401 · ki
   finally { process.env.IMG_ORIGIN_KEY = save; }
   assert.equal((await req(server, 'GET', `/api/img-internal/t/${IDS.drive}`)).status, 401);
   assert.equal((await req(server, 'GET', `/api/img-internal/t/${IDS.drive}`, { headers: { 'X-Img-Key': 'x'.repeat(48) } })).status, 401);
-  assert.equal((await req(server, 'GET', `/api/img-internal/o/${IDS.drive}`, { headers: KEYH })).status, 400);
+  assert.equal((await req(server, 'GET', `/api/img-internal/x/${IDS.drive}`, { headers: KEYH })).status, 400);
   assert.equal(reads.length, 0);
 });
 
@@ -160,7 +162,8 @@ test('B-5) 생성 동시 처리 상한 — 한꺼번에 와도 드라이브 동�
   drive.downloadFile = async (fid) => { now++; peak = Math.max(peak, now); await new Promise(r => setTimeout(r, 20)); now--; return { buffer: PNG, mimeType: 'image/png', name: fid }; };
   edge.__setSharpForTest(null);
   try {
-    const rs = await Promise.all(Array.from({ length: routes.GEN_MAX * 2 + 3 }, () => req(server, 'GET', `/api/img-internal/t/${IDS.drive}`, { headers: KEYH })));
+    // ★ 서로 다른 사진들(같은 사진의 동시 요청은 원본 캐시가 한 번 읽기로 합친다 — imageEdgeOriginal B3)
+    const rs = await Promise.all(Array.from({ length: routes.GEN_MAX * 2 + 3 }, (_, i) => req(server, 'GET', `/api/img-internal/t/${id('GEN' + i)}`, { headers: KEYH })));
     assert.ok(rs.every(r => r.status === 200));
     assert.ok(peak <= routes.GEN_MAX && peak > 1, 'peak ' + peak);
     assert.deepEqual(routes.__genStats(), { active: 0, queued: 0 });
@@ -178,7 +181,7 @@ test('C) 일괄 서명 — 로그인 필수 · 허용 번호만 · kind 불량 4
   assert.deepEqual(Object.keys(j.urls).sort(), [IDS.drive, IDS.guide].sort());
   assert.match(j.urls[IDS.drive], /^\/img\/t\//);
   assert.equal(reads.length, 0, '서명은 드라이브를 읽지 않는다');
-  assert.equal((await req(server, 'POST', '/api/img/sign', { body: { kind: 'o', ids: [IDS.drive] }, headers: auth })).status, 400);
+  assert.equal((await req(server, 'POST', '/api/img/sign', { body: { kind: 'x', ids: [IDS.drive] }, headers: auth })).status, 400);
   dbDown = true; allow.__resetCacheForTest();
   const down = JSON.parse((await req(server, 'POST', '/api/img/sign', { body, headers: auth })).body);
   assert.deepEqual(down.urls, {}, 'DB 조회 실패 중에는 서명하지 않는다(화면은 옛 길 — fail-open 은 옛 통로가 맡는다)');

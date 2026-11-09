@@ -8,7 +8,7 @@
  *   ④ 흐름: 엣지 캐시 → R2 → 원본 서버 내부 입구(X-Img-Key) → R2 저장 + 캐시. 두 번째는 원본 호출 0.
  *   ⑤ 원본이 sharp 실패로 원본 바이트를 주면(X-Img-Fallback) R2 에 저장하지 않는다.
  *   ⑥ 브라우저 캐시는 private + 서명 만료까지만.
- *   ⑦ DELETE(내부 열쇠) = R2 사본 두 종 삭제.
+ *   ⑦ DELETE(내부 열쇠) = R2 사본 세 종(t·m·o) 삭제.
  *
  * Function 은 Workers 전역(Request/Response/crypto.subtle/caches)만 쓴다 — Node 의 같은 전역으로 실행한다.
  * 실행: node tests/imageEdgeFunction.test.js
@@ -111,7 +111,8 @@ test('② 403 — 서명 없음·위조·만료·다른 파일·kind 바꿔치�
     '위조': `/img/t/${FID}?e=${q.get('e')}&s=${'A'.repeat(43)}`,
     '다른 파일': `/img/t/${FID2}?e=${q.get('e')}&s=${q.get('s')}`,
     'kind 바꿔치기': `/img/m/${FID}?e=${q.get('e')}&s=${q.get('s')}`,
-    '모르는 kind': `/img/o/${FID}?e=${q.get('e')}&s=${q.get('s')}`,
+    'kind 바꿔치기(t→o 원본)': `/img/o/${FID}?e=${q.get('e')}&s=${q.get('s')}`,
+    '모르는 kind': `/img/x/${FID}?e=${q.get('e')}&s=${q.get('s')}`,
   };
   for (const [name, url] of Object.entries(cases)) {
     const res = await call(url, { env: envWith(r2) }, origin);
@@ -210,7 +211,7 @@ test('⑤ 원본이 sharp 실패로 원본 바이트를 주면(X-Img-Fallback) �
   assert.equal(cache.m.size, 0);
 });
 
-test('⑦ DELETE — 내부 열쇠 있어야, R2 사본 두 종 삭제 · 열쇠 없음 401', async () => {
+test('⑦ DELETE — 내부 열쇠 있어야, R2 사본 세 종(t·m·o) 삭제 · 열쇠 없음 401', async () => {
   const r2 = makeR2(); globalThis.caches = { default: makeCache() };
   r2.store.set(`thumb/t/${FID}.webp`, { bytes: new Uint8Array([1]) });
   const bad = await call(`/img/t/${FID}`, { env: envWith(r2), method: 'DELETE' });
@@ -218,7 +219,7 @@ test('⑦ DELETE — 내부 열쇠 있어야, R2 사본 두 종 삭제 · 열쇠
   assert.equal(r2.deletes.length, 0);
   const ok = await call(`/img/t/${FID}`, { env: envWith(r2), method: 'DELETE', headers: { 'X-Img-Key': ORIGIN_KEY } });
   assert.equal(ok.status, 200);
-  assert.deepEqual(r2.deletes.sort(), [`thumb/m/${FID}.webp`, `thumb/t/${FID}.webp`]);
+  assert.deepEqual(r2.deletes.sort(), [`orig/${FID}`, `thumb/m/${FID}.webp`, `thumb/t/${FID}.webp`]);
 });
 
 test('⑧ 다른 경로 영향 0 — frontend/_routes.json 이 /img/* 만 Function 으로 보낸다', () => {

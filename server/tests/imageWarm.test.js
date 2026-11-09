@@ -94,7 +94,7 @@ test('A2 사진이 아니거나 번호 형식이 틀리면 부르지 않는다',
   assert.equal(f.calls.length, 0);
 }));
 
-test('A3 허용 목록 통과 뒤 서명 주소(PUBLIC_ORIGIN + /img/t/…)를 한 번 GET 한다', withKey(async () => {
+test('A3 허용 목록 통과 뒤 서명 주소(PUBLIC_ORIGIN + /img/t/…)를 먼저 부르고, 이어 m·o 를 차례로 부른다(모든 사진 미리 만들기)', withKey(async () => {
   process.env.PUBLIC_ORIGIN = 'https://example-front.test/';
   const f = fakeFetch();
   const asked = [];
@@ -102,13 +102,14 @@ test('A3 허용 목록 통과 뒤 서명 주소(PUBLIC_ORIGIN + /img/t/…)를 �
   assert.equal(warm.scheduleUploadWarm(ID(3), 'image/jpeg'), true);
   await settle();
   assert.deepEqual(asked, [ID(3)]);
-  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls.length, 3, 't → m → o');
+  assert.deepEqual(f.calls.map(c => new URL(c).pathname.split('/')[2]), ['t', 'm', 'o']);
   const u = new URL(f.calls[0]);
   assert.equal(u.origin, 'https://example-front.test');
   assert.equal(u.pathname, `/img/t/${ID(3)}`);
   const signed = edge.signImage(ID(3), 't');
   assert.equal(u.pathname + u.search, signed, '서버 서명 단일 출처(imageEdge.signImage)를 그대로 쓴다');
-  assert.equal(warm.__stats().made, 1);
+  assert.equal(warm.__stats().made, 3);
 }));
 
 test('A3b PUBLIC_ORIGIN 이 없으면 운영 프론트(pages.dev)', withKey(async () => {
@@ -126,7 +127,7 @@ test('A4 아직 DB 기록 전(거절)이면 1회만 다시 본다 — 두 번째
   warm.scheduleUploadWarm(ID(5), 'image/jpeg');
   await settle();
   assert.equal(n, 2);
-  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls.length, 3, '통과한 1장 = t·m·o');
 
   const g = fakeFetch();
   let m = 0;
@@ -182,7 +183,7 @@ test('A7 동시 수 상한(WARM_MAX) · 대기열 상한 넘치면 버린다', w
   assert.equal(warm.__stats().dropped, 10 - warm.WARM_MAX - 3);
   while (release.length) { release.shift()(); await settle(); }
   assert.equal(peak, warm.WARM_MAX);
-  assert.equal(warm.__stats().made, warm.WARM_MAX + 3);
+  assert.equal(warm.__stats().made, (warm.WARM_MAX + 3) * warm.WARM_KINDS.length, '장마다 t·m·o');
 }));
 
 test('A8 응답 출처 헤더로 이미 있음(r2·edge) / 새로 만듦(origin) / 건너뜀(404) / 실패를 가른다', withKey(async () => {
@@ -418,7 +419,7 @@ test('D3 실제 실행: 동시 수 상한 · 이미 있음/새로 만듦/건너�
       if (typeof k === 'number') return new Response('x', { status: k });
       return new Response('x', { status: 200, headers: { 'X-Img-Src': k, 'Content-Type': 'image/webp' } });
     };
-    const r = await imgWarmScript.main(['--days', '60', '--concurrency', '3'], { db, fetch: f, log, env: { IMG_SIGNING_KEY: KEY } });
+    const r = await imgWarmScript.main(['--days', '60', '--concurrency', '3', '--kinds', 't'], { db, fetch: f, log, env: { IMG_SIGNING_KEY: KEY } });
     assert.equal(peak, 3);
     assert.equal(r.total, 9);
     assert.deepEqual({ hit: r.hit, made: r.made, skip: r.skip, fail: r.fail }, { hit: 4, made: 2, skip: 2, fail: 1 });
@@ -427,7 +428,7 @@ test('D3 실제 실행: 동시 수 상한 · 이미 있음/새로 만듦/건너�
     // 동시 수 기본 4 · 상한 6(원본 서버 내부 입구 동시 12 안쪽)
     assert.equal(imgWarmScript.parseArgs([]).concurrency, 4);
     assert.equal(imgWarmScript.parseArgs(['--concurrency', '50']).concurrency, 6);
-    assert.equal(imgWarmScript.parseArgs([]).days, 60);
+    assert.equal(imgWarmScript.parseArgs([]).days, null, '--days 없으면 전체(모든 사진 미리 만들기 — imageEdgeOriginal D2)');
   } finally { await db.close(); }
 });
 

@@ -34,7 +34,7 @@ console.log('\n▶ ① 돋보기');
 const zoomFn = /function riZoom\(i, which\)\{[\s\S]*?\n\}/.exec(wd);
 assert(zoomFn, 'riZoom 을 찾지 못했다');
 ok('★★ 실행부는 공유 라이트박스 한 벌(woImageModal) — 오버레이를 새로 만들지 않는다',
-  /woImageModal\(url\)/.test(zoomFn[0])
+  /woImageModal\(_fullUrl\(id, url\), url\)/.test(zoomFn[0])   /* 결정 354: 첫 주소 = 원본 빠른 길(o), 실패 시 url(원본 프록시) — 같은 라이트박스 한 벌 */
   && !/createElement\(["']div["']\)/.test(zoomFn[0]));
 ok('★ 모듈이 없으면 사유를 말한다(조용히 죽지 않는다)',
   /typeof woImageModal!=='function'/.test(zoomFn[0]) && /_toast\(/.test(zoomFn[0]));

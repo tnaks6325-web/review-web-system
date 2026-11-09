@@ -181,7 +181,7 @@ console.log('\nB-2) 결정 354 빠른 길 — 서명 주소 우선 · 실패 사
     T.attrs('F5ffffffffffffffffffff', 400, FULL); await tick();
     ok('★ 서버가 빠른 길을 꺼 두면(열쇠 없음) 한 번 묻고 그친다', fetches.length === 2, fetches.length);
     ok('★ 모듈 코드에 원본 프록시 주소 규칙이 여전히 없다', !/api\/drive\/image/.test(MOD.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')));
-    ok('★ 보고 페이지는 응답이 실어 준 서명(t)을 seed 로 넣는다', /DriveThumb\.seed\(data\.images\.map\(function\(im\)\{ return im\.t; \}\)\)/.test(RP));
+    ok('★ 보고 페이지는 응답이 실어 준 서명(t, 라이트박스·저장용 원본 o)을 seed 로 넣는다', /DriveThumb\.seed\(\[\]\.concat\.apply\(\[\], data\.images\.map\(function\(im\)\{ return \[im\.t, im\.o\]; \}\)\)\)/.test(RP));
     finish();
   })().catch(e => { ok('B-2 실행', false, e && e.stack); finish(); });
 }
@@ -199,16 +199,21 @@ ok('⑥ C/S 교체요청 카드(132×132)', /DriveThumb\.attrs\(fileId, 400, u\)
 ok('⑦ 리뷰 보고 페이지 그리드(150px)', /DriveThumb\.attrs\(im\.id, 400, IMG\(im\.id\)\)/.test(RP));
 // ⑧ (옛 대시보드 「리뷰 캡처 정리」 인라인 펼침은 결정 186 72번에서 창째 제거 · 옛 대시보드 자체가 결정 267 로 폐기 — 검사 대상 파일 없음)
 
-console.log('\nC-2) 원본 유지 자리 (완화 금지)');
-ok('★ 작업보드 크게 보기 팝업은 원본 프록시', (() => {
+console.log('\nC-2) 원본 유지 자리 (완화 금지) — 원본 = 원본 빠른 길 o(바이트 동일) 또는 원본 프록시, 변환본(t·m) 0');
+/* 결정 354 「원본 빠른 길(2026-11-09)」: 원본 유지 자리는 공용 원본 함수(_fullAttrs → DriveThumb.fullAttrs)를 거친다.
+   그 함수가 t·m 을 절대 내지 않는다는 것은 imageEdgeOriginal.test.js E1·E2(vm 실행)가, o 가 바이트 동일이라는 것은 A1·B1 이 지킨다. */
+ok('★ 작업보드 크게 보기 팝업은 원본(o 또는 원본 프록시) — 작은 사진 함수 0', (() => {
   const b = bodyOf(WD, '_rvPopCol');
-  return /<img src="\$\{esc\(list\[i\]\.url\)\}"/.test(b) && !/_thumbAttrs/.test(b);
+  return /<img\$\{_fullAttrs\(list\[i\]\.fileId,list\[i\]\.url\)\}/.test(b) && !/_thumbAttrs|_thumbUrl/.test(b);
 })());
-ok('★ 검수 상세의 대조 이미지(rizoomable)는 원본',
-  (WD.match(/class="rizoomable" src="\$\{_riImg\(/g) || []).length >= 3);
+ok('★ 검수 상세의 대조 이미지(rizoomable)는 원본(_riFull = 원본 함수 + 원본 프록시)',
+  (WD.match(/class="rizoomable"\$\{_riFull\(/g) || []).length >= 3
+  && /function _riFull\(id\)\{ return _fullAttrs\(id, _riImg\(id\)\); \}/.test(WD)
+  && !/class="rizoomable"\$\{_thumbAttrs/.test(WD));
 ok('★ C/S 교체요청 확대(zoomPair)는 원본', /var uOld = imgUrl\(oldId\), uNew = imgUrl\(newId\);/.test(CS));
-ok('★ 리뷰 보고 라이트박스·이미지 저장은 원본',
-  /im\.src=IMG\(id\);/.test(RP) && /dl\.href=IMG\(id\);/.test(RP));
+ok('★ 리뷰 보고 라이트박스·이미지 저장은 원본(o 또는 원본 프록시 IMG)',
+  /var FU = window\.DriveThumb && DriveThumb\.full \? DriveThumb\.full\(id, IMG\(id\)\) : IMG\(id\);/.test(RP)
+  && /im\.src=FU;/.test(RP) && /dl\.href=FU;/.test(RP));
 ok('★ 원본 프록시 URL 규칙(_rvUrl/_riImg/imgUrl)은 그대로',
   /function _rvUrl\(id\)\{ return \/\^\[-\\w\]\{20,\}\$\/\.test\(String\(id\|\|''\)\) \? API_BASE\+'\/api\/drive\/image\/'/.test(WD)
   && /function _riImg\(id\)\{ return \/\^\[-\\w\]\{20,\}\$\/\.test\(String\(id\|\|''\)\) \? API_BASE\+'\/api\/drive\/image\/'/.test(WD)
