@@ -36,6 +36,8 @@ const REQUIRED_SCHEMA = [
     'condition_snapshot_hash', 'status', 'superseded_at', 'created_by',
     'created_at'].map(c => ['purchase_capture_artifacts', c]),
   ['payment_batch_items', 'is_qna'],               // 212 — Q&A 입금 항목 표시(없으면 회차 담기 INSERT 실패)
+  ['campaign_applications', 'turn_starts_at'],   // 217 — 차례 타이머(결정 356): 참여 후속 UPDATE·취소 잠금 판정·작업조회·당기기(없으면 /apply 42703)
+  ['campaign_applications', 'chain_ttl_min'],    // 217
   ['campaign_applications', 'qna_slot_id'],      // 211 — Q&A 신청 ↔ 날짜별 자리(없으면 Q&A 신청·인기 참여권 집계 실패)
   ['shared_sync_outbox', 'view_scope'],             // 206 — 담당자 단독 송신과 전체 공유 송신의 durable scope(없으면 공유 저장·송신 실패)
   ['campaign_participants', 'review_participation_id'],

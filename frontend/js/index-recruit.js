@@ -3988,7 +3988,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   //   다음 공고를 열어도 이전 공고의 수량·기준값이 그대로 남아(early-return) 저장값이 안 보인다.
   resetRecruitReviewMixRender();
   syncRecruitReviewTypeMix();
-  const _ttlEl = document.getElementById("rf_hold_ttl"); if (_ttlEl) _ttlEl.value = "30";
+  const _ttlEl = document.getElementById("rf_hold_ttl"); if (_ttlEl) _ttlEl.value = "20";   // ★ 결정 356(R1)
   const _bufEl = document.getElementById("rf_close_buffer"); if (_bufEl) _bufEl.value = "10";
   /* 모집이월 기본 = 종료일 뒤에 붙이기 */
   if (typeof rfCarrySet === "function" && document.getElementById("rf_carry_mode")) rfCarrySet("extend", { silent: true });
@@ -4160,7 +4160,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
         setV("rf_recruit_total", c.recruit_total ?? "");
         setV("rf_landing_url", c.landing_url || "");
         setV("rf_product_url", c.landing_url || "");
-        setV("rf_hold_ttl", c.hold_ttl_min ?? 30);
+        setV("rf_hold_ttl", c.hold_ttl_min ?? 20);
         setV("rf_close_buffer", c.close_buffer_min ?? 10);
         /* 모집이월 방식 복원 — 서버 저장 이전 공고는 현행 next로 열어 일정 변동을 막는다. */
         if (typeof rfCarrySet === "function") {
@@ -5987,7 +5987,7 @@ async function _loadCampControl(campId) {
         <b style="min-width:64px">${escT(r.applicant_name)}</b>
         <span style="color:#9CA3AF;font-size:.7rem">***${String(r.phone8 || "").replace(/\D/g, "").slice(-4)}</span>
         ${st}${late}${popularPurpose}${acct}
-        <span style="margin-left:auto;color:#9CA3AF;font-size:.68rem">신청 ${fmtT(r.applied_at)}${r.expires_at ? " · 마감 " + fmtT(r.expires_at) : ""}</span>
+        <span style="margin-left:auto;color:#9CA3AF;font-size:.68rem">신청 ${fmtT(r.applied_at)}${r.status === "applied" && r.turn_starts_at && new Date(r.turn_starts_at) > new Date() ? " · 대기 " + fmtT(r.turn_starts_at) + " 시작" : ""}${r.expires_at ? " · 마감 " + fmtT(r.expires_at) : ""}</span>
         ${actions}
         ${orderStamp}
       </div>`;
@@ -6362,7 +6362,7 @@ async function saveRecruitPostImpl() {
       }
       const reviewMixError = validateRecruitReviewTypeMix();
       if (reviewMixError) { _rfSaveBlocked(reviewMixError); return; }
-      payload.hold_ttl_min   = Number(document.getElementById("rf_hold_ttl").value) || 30;
+      payload.hold_ttl_min   = Number(document.getElementById("rf_hold_ttl").value) || 20;
       /* ⏸ 098 이월 반영 방식 — ★ 세그먼트 UI 있는 페이지에서만 전송(미전송=서버 COALESCE 유지) */
       if (document.getElementById("rf_carry_mode")) {
         payload.carry_mode = document.getElementById("rf_carry_mode").value === "hold" ? "hold" : "auto";
@@ -6853,7 +6853,7 @@ function _renderPreview() {
   // 시간 표기가 있으면 홀드 타이머 대신 실제 TTL을 보여준다(참여 후 화면의 상단 바)
   const ttlEl = document.getElementById("rf_prev_ttl");
   if (ttlEl) {
-    const ttl = Number(_v("rf_hold_ttl")) || 30;
+    const ttl = Number(_v("rf_hold_ttl")) || 20;
     ttlEl.textContent = String(ttl).padStart(2, "0") + ":00";
   }
 
