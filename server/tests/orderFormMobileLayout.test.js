@@ -75,4 +75,20 @@ test('입력칸은 얇은 테두리·작은 글자이고, 투명 테두리 테�
   assert.ok(ai > 0 && star > 0 && err > 0 && focus > Math.max(ai, star, err), '상태색 재지정 + 포커스는 맨 뒤');
 });
 
+test('결정 353: 주문이 여러 건이면 위 탭 + 옆으로 넘기기 — 칸은 숨기기만(지우지 않음), 오류 칸은 그 주문을 연다', () => {
+  // 2건부터만 탭, 동시진행(dual=1) 양식은 제외
+  assert.match(APP, /if \(!wrap \|\| new URLSearchParams\(location\.search\)\.get\("dual"\) === "1"\) return \[\];/);
+  assert.match(APP, /if \(cards\.length < 2\) \{\s*\n\s*if \(bar\) bar\.hidden = true;\s*\n\s*cards\.forEach\(\(c\) => c\.classList\.remove\("of-card-off"\)\);/);
+  // 숨김은 CSS 클래스만 — 검증·저장·제출은 모든 카드를 그대로 읽는다(카드를 지우는 코드는 removeOrderCard 하나)
+  assert.match(CSS, /#ofOrderCardsWrap\.of-cards-tabbed>\.of-order-card\.of-card-off\{display:none\}/);
+  assert.equal((APP.match(/el\.remove\(\);/g) || []).length >= 1, true);
+  // 오류·포커스로 숨은 주문 칸의 입력을 가리키면 그 주문 칸부터 보여 준다
+  assert.match(APP, /function _ofReveal\(el\) \{[\s\S]{0,260}if \(card && card\.classList\.contains\("of-card-off"\)\) _ofShowCard\(card\.id, 0\);/);
+  // 밀기는 입력칸·목록 위에서 시작하면 무시, 공고 화면 틀 안이면 부모에 다음 명의를 알린다(같은 출처로만)
+  assert.match(APP, /closest\("input, textarea, select, \.of-saved-info-menu/);
+  assert.match(APP, /window\.parent\.postMessage\(\{ type: "purchase-swipe", dir \}, location\.origin\)/);
+  // 제출 완료 화면에서는 탭 줄도 접는다
+  assert.match(APP, /const tabsEl = document\.getElementById\("ofCardTabs"\); if \(tabsEl\) tabsEl\.hidden = true;/);
+});
+
 console.log('\n' + passed + ' mobile layout checks passed');
