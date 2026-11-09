@@ -2118,6 +2118,13 @@ function _renderMissingCaptures() {
   }).join('');
 }
 function _mcPick(id) {
+  /* 결정 355: 네이버·쿠팡 동시진행 주문은 여기서 옛 1장 첨부를 받지 않는다(서버가 막는다) —
+     세션 오류로 끝내지 않고 할 일을 안내한다. 카드 모양은 그대로. */
+  const it = _mcItems.find(x => String(x.id) === String(id));
+  if (it && it.dualBundle) {
+    alert('네이버·쿠팡 동시 구매 주문은 여기서 사진을 붙일 수 없습니다. 담당자에게 문의해주세요.');
+    return;
+  }
   _mcTargetId = id;
   const inp = document.getElementById('mcFileInput');
   if (inp) { inp.value = ''; inp.click(); }

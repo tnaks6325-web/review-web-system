@@ -13,6 +13,7 @@
 const { logger } = require('../utils/logger');
 
 let _pool;
+const { dualCaptureCompleteSql } = require('../utils/dualCaptureComplete');
 function getPool() {
   if (!_pool) _pool = require('../db/pool');
   return _pool;
@@ -322,7 +323,7 @@ async function resolveReviewerEvent(id, by = 'admin') {
 /**
  * 자동 해결 — 원인이 소멸된 미해결 로그를 정리해 알림 창을 "지금 문제만" 보이게 유지.
  *   - order_lost/order_unmirrored: 주문이 written 복귀(재기록 성공) 시
- *   - order_no_capture: 캡처가 뒤늦게 연결된 경우
+ *   - order_no_capture: 캡처가 뒤늦게 연결된 경우 · 동시진행 묶음은 두 구매처 사진이 다 있는 경우(결정 355)
  */
 async function autoResolveHealed() {
   const db = getPool();
@@ -338,7 +339,9 @@ async function autoResolveHealed() {
       WHERE l.resolved_at IS NULL AND l.event_type = 'order_no_capture'
         AND l.order_submission_id IS NOT NULL
         AND EXISTS (SELECT 1 FROM order_submissions os
-                     WHERE os.id = l.order_submission_id AND os.capture_uploaded_at IS NOT NULL)`
+                     WHERE os.id = l.order_submission_id
+                       AND (os.capture_uploaded_at IS NOT NULL
+                            OR ${dualCaptureCompleteSql('os')}))`   /* 결정 355: 동시진행 묶음은 구매처별 사진으로 판정 */
   );
   // 취소·삭제된 주문의 로그는 원인 자체가 소멸 → 수동 [확인] 없이 정리(잔존 노이즈 방지)
   const r3 = await db.query(

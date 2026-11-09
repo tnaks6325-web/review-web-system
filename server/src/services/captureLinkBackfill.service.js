@@ -16,6 +16,7 @@ const pool = require('../db/pool');
 const driveService = require('./drive.service');
 const { logger } = require('../utils/logger');
 const { withJobLock } = require('../utils/jobLock');
+const { isDualBundleSql } = require('../utils/dualCaptureComplete');
 
 /* 테스트 주입용(레포 선례와 동일) */
 let _pool = null;
@@ -74,6 +75,7 @@ async function auditCaptureLinks(opts = {}) {
                       AND l.event_type = 'order_no_capture' AND l.resolved_at IS NULL) AS "hasOpenLog"
        FROM order_submissions os
       WHERE os.deleted_at IS NULL AND os.capture_uploaded_at IS NULL
+        AND NOT ${isDualBundleSql('os')}   -- 결정 355·338: 동시진행 묶음은 옛 1장 칸에 붙이지 않는다(사진은 구매처별 표)
         AND os.submitted_at < NOW() - interval '20 minutes'
         AND os.submitted_at > NOW() - ($1 || ' days')::interval
         AND ($4::text IS NULL OR os.tab_name = $4)
@@ -292,7 +294,8 @@ async function _runLinking(planned, result) {
       const { rowCount } = await db().query(
         `UPDATE order_submissions
             SET capture_file_id = $2, capture_uploaded_at = COALESCE($3::timestamptz, NOW())
-          WHERE id = $1 AND capture_uploaded_at IS NULL AND deleted_at IS NULL`,
+          WHERE id = $1 AND capture_uploaded_at IS NULL AND deleted_at IS NULL
+            AND NOT ${isDualBundleSql('order_submissions')}`,
         [it.id, it.fileId, it.fileCreatedTime || null]
       );
       if (rowCount === 1) { result.linked++; it._linked = true; }
