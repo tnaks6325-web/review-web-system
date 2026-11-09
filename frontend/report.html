@@ -61,8 +61,12 @@
 
     function _openLb(id){
       var lb=document.getElementById('lb'), im=document.getElementById('lbImg'), dl=document.getElementById('lbDl');
-      im.src=IMG(id); im.onerror=function(){ this.onerror=null; this.src=THUMB(id); };
-      dl.href=IMG(id);
+      // 결정 354 원본 빠른 길 — 응답이 실어 준 o(원본 바이트 그대로)가 있으면 그것, 없으면 종전 원본 프록시.
+      //   사다리: o → 원본 프록시(1회) → 구글 썸네일(종전 마지막 칸). 저장 링크도 같은 원본(바이트 동일).
+      var FU = window.DriveThumb && DriveThumb.full ? DriveThumb.full(id, IMG(id)) : IMG(id);
+      var back = FU!==IMG(id);
+      im.src=FU; im.onerror=function(){ if (back) { back=false; this.src=IMG(id); return; } this.onerror=null; this.src=THUMB(id); };
+      dl.href=FU;
       lb.classList.add('on'); document.body.style.overflow='hidden';
     }
     function _closeLb(){ document.getElementById('lb').classList.remove('on'); document.body.style.overflow=''; }
@@ -78,7 +82,8 @@
         return;
       }
       // ★ 결정 354 — 응답이 실어 준 서명 주소(t)를 먼저 넣는다 → 목록 사진이 우리 사이트의 빠른 길로(없으면 종전 그대로).
-      if (window.DriveThumb && DriveThumb.seed) DriveThumb.seed(data.images.map(function(im){ return im.t; }));
+      //   o = 라이트박스·이미지 저장용 원본(바이트 동일) 서명 — 없으면(옛 서버) 종전 원본 프록시 그대로.
+      if (window.DriveThumb && DriveThumb.seed) DriveThumb.seed([].concat.apply([], data.images.map(function(im){ return [im.t, im.o]; })));
       // 리뷰어별 그룹핑(이름 없으면 '기타')
       var groups = {};
       var order = [];

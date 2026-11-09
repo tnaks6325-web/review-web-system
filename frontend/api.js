@@ -270,22 +270,31 @@ async function gasGet(params, timeout) {
     };
   }
 
+  let res = null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
     fetchOpts.signal = controller.signal;
 
-    const res = await fetch(url, fetchOpts);
-    clearTimeout(timer);
-
+    res = await fetch(url, fetchOpts);
     const json = await res.json();
     return json;
   } catch (err) {
+    // ★ 결정 359: 서버에 닿지 못했거나(끊김·시간 초과) 응답을 읽지 못한 실패에는 ok:false 를 함께 싣는다.
+    //   `ok === false` 로만 실패를 보던 화면(1:1문의 전송·문의함·수정요청 등)이 {error} 만 받고 성공으로 접었다.
+    //   가산 필드 — 기존 error 키는 그대로(res.error 검사 소비처 무변경). 문구는 리뷰어가 읽는 쉬운 한국어.
     if (err.name === 'AbortError') {
-      return { error: '요청 시간이 초과되었습니다.' };
+      return { ok: false, networkError: true, timeout: true, error: '요청 시간이 초과되었습니다.' };
     }
     console.error('[gasGet] 오류:', action, err.message);
-    return { error: err.message };
+    if (res) {
+      return { ok: false, badResponse: true, httpStatus: res.status, error: res.status === 413
+        ? '보내는 내용이 너무 커요. 사진 크기를 줄여 다시 시도해 주세요.'
+        : '서버에 일시적인 문제가 있어요. 잠시 후 다시 시도해 주세요.' };
+    }
+    return { ok: false, networkError: true, error: '인터넷 연결이 불안정해요. 잠시 후 다시 시도해 주세요.' };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -314,11 +323,11 @@ async function gasPost(body, timeout) {
   const url = API_BASE_URL + _resolveApiPath(route.path);
   const timeoutMs = timeout || 60000;
 
+  let res = null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-    const res = await fetch(url, {
+    res = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -327,7 +336,6 @@ async function gasPost(body, timeout) {
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
-    clearTimeout(timer);
 
     const json = await res.json();
 
@@ -343,10 +351,18 @@ async function gasPost(body, timeout) {
       const msg = isUpload
         ? '이미지 업로드 시간이 초과되었습니다. 네트워크 상태를 확인하고 이미지 수를 줄여 다시 시도해주세요.'
         : '요청 시간이 초과되었습니다.';
-      return { error: msg };
+      return { ok: false, networkError: true, timeout: true, error: msg };
     }
     console.error('[gasPost] 오류:', action, err.message);
-    return { error: err.message };
+    // ★ 결정 359 — gasGet 과 같은 규칙(가산 ok:false · 쉬운 한국어). 응답은 왔는데 읽지 못함 = badResponse.
+    if (res) {
+      return { ok: false, badResponse: true, httpStatus: res.status, error: res.status === 413
+        ? '보내는 내용이 너무 커요. 사진 크기를 줄여 다시 시도해 주세요.'
+        : '서버에 일시적인 문제가 있어요. 잠시 후 다시 시도해 주세요.' };
+    }
+    return { ok: false, networkError: true, error: '인터넷 연결이 불안정해요. 잠시 후 다시 시도해 주세요.' };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -441,7 +457,7 @@ function _xhrPost(url, jsonBody, timeoutMs, onProgress) {
       //   413은 아무리 기다려도 안 풀려 더 줄여 보내야 한다.
       let out;
       try { out = JSON.parse(xhr.responseText); }
-      catch(_) { out = { error: '서버 응답 파싱 실패 (HTTP ' + xhr.status + ')' }; }
+      catch(_) { out = { ok: false, error: '서버 응답 파싱 실패 (HTTP ' + xhr.status + ')' }; }   // ok:false = 결정 359(가산)
       if (out && typeof out === 'object') { try { out._httpStatus = xhr.status; } catch(_) {} }
       resolve(out);
     };
@@ -487,15 +503,16 @@ async function gasPostUpload(body, timeout) {
 
     if (isTimeout) {
       _apiToast('⏱ 업로드 시간 초과 — 네트워크 상태를 확인하고 다시 시도해주세요.\n이미지 크기가 크면 자동 압축 후 재시도됩니다.', 'error', 6000);
-      return { error: '업로드 시간이 초과되었습니다. 이미지 크기를 줄이거나 네트워크를 확인하세요.', _transport: true };
+      return { ok: false, networkError: true, timeout: true, error: '업로드 시간이 초과되었습니다. 이미지 크기를 줄이거나 네트워크를 확인하세요.', _transport: true };
     }
     if (isAborted || isNetwork) {
       _apiToast('📡 업로드가 중단되었습니다 — 네트워크 연결을 확인하고 다시 시도해주세요.', 'error', 6000);
-      return { error: '업로드가 중단되었습니다. 네트워크 연결을 확인하세요.', _transport: true };
+      return { ok: false, networkError: true, error: '업로드가 중단되었습니다. 네트워크 연결을 확인하세요.', _transport: true };
     }
     _apiToast('❌ 업로드 실패: ' + err.message, 'error', 5000);
     // ★ _transport = 요청이 서버에 닿지 못했다(응답 없음) — 서버가 판독에 실패한 것과 화면이 구분한다(가산 필드 · 2026-10-30).
-    return { error: err.message, _transport: true };
+    //   ok:false·networkError 도 가산(결정 359) — `ok === false` 로 판정하는 화면이 성공으로 접지 않게.
+    return { ok: false, networkError: true, error: err.message, _transport: true };
   }
 }
 
@@ -506,6 +523,27 @@ async function gasPostUpload(body, timeout) {
 /** GAS URL이 사용되던 곳에서 API_BASE_URL로 대체 */
 function getApiBaseUrl() {
   return API_BASE_URL;
+}
+
+/**
+ * ★ 결정 359 — 리뷰어에게 보일 오류 문구 단일 출처.
+ * 브라우저·서버가 만든 개발자 말('Failed to fetch' · 'Load failed' · '… is not valid JSON' · 'Internal Server Error')을
+ * 쉬운 한국어로 바꾼다. 서버가 준 한국어 사유(업무상 거절)는 **그대로** 돌려준다(가리지 않는다).
+ * 인자: Error · gasGet/gasPost 결과 객체({error, networkError, timeout}) · 문자열 모두 받는다.
+ */
+function apiFriendlyErrorMessage(err, fallback) {
+  const NET = '인터넷 연결이 불안정해요. 잠시 후 다시 시도해 주세요.';
+  const SLOW = '응답이 늦어지고 있어요. 잠시 후 다시 시도해 주세요.';
+  const SERVER = '서버에 일시적인 문제가 있어요. 잠시 후 다시 시도해 주세요.';
+  const e = err == null ? {} : (typeof err === 'object' ? err : { message: String(err) });
+  const raw = e.message != null && e.message !== '' ? e.message : (e.error != null ? e.error : '');
+  const msg = String(raw || '').trim();
+  if (e.name === 'AbortError' || e.timeout === true) return SLOW;
+  if (e.networkError === true && !/[가-힣]/.test(msg)) return NET;
+  if (/failed to fetch|load failed|networkerror|network request failed|network connection was lost|internet connection appears to be offline/i.test(msg)) return NET;
+  if (e.name === 'SyntaxError' || /is not valid json|unexpected token|unexpected end of json|json\.parse|internal server error|bad gateway|service unavailable|gateway time-?out|서버 응답 파싱 실패/i.test(msg)) return SERVER;
+  if (msg && /[가-힣]/.test(msg)) return msg;
+  return fallback || SERVER;
 }
 
 /** 세션 정리 (로그아웃) */

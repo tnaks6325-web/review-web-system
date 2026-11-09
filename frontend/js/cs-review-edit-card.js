@@ -180,11 +180,14 @@
        처음 받으므로, 그냥 두면 한 장이 먼저 뜨고 다른 한 장이 뒤늦게 끼어들며 레이아웃이 흔들린다
        (대조하려고 연 화면인데 비교 시작 시점이 어긋난다) → **둘 다 그릴 준비가 될 때까지 감췄다가
        한꺼번에 보여준다**. 감춘 동안은 "불러오는 중"을 띄워 멈춘 것처럼 보이지 않게 한다. */
-    var side = function (u, label, tone, on) {
+    /* 결정 354 원본 빠른 길 — 대조는 원본으로(결정 008): o(바이트 동일) 또는 종전 원본 프록시. 작은 사진(t·m) 0. */
+    var aOld = window.DriveThumb && DriveThumb.fullAttrs ? DriveThumb.fullAttrs(oldId, uOld) : ' src="' + _esc(uOld) + '"';
+    var aNew = window.DriveThumb && DriveThumb.fullAttrs ? DriveThumb.fullAttrs(newId, uNew) : ' src="' + _esc(uNew) + '"';
+    var side = function (a, label, tone, on) {
       return '<div data-ovclose="1" style="flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;gap:8px">'
         + '<div style="font-size:.82rem;font-weight:800;color:' + tone + '">' + _esc(label)
         + (on ? ' <span style="font-size:.7rem;font-weight:700;color:#E5E7EB">· 클릭한 이미지</span>' : '') + '</div>'
-        + '<img data-pair="1" src="' + _esc(u) + '" style="max-width:100%;max-height:78vh;object-fit:contain;border-radius:10px;'
+        + '<img data-pair="1"' + a + ' style="max-width:100%;max-height:78vh;object-fit:contain;border-radius:10px;'
         + 'border:' + (on ? '3px solid ' + tone : '1px solid rgba(255,255,255,.25)') + ';background:#fff;'
         + 'opacity:0;transition:opacity .15s ease">'
         + '</div>';
@@ -197,8 +200,8 @@
       + ' style="padding:5px 13px;border-radius:8px;border:1px solid rgba(255,255,255,.35);background:transparent;'
       + 'color:#fff;font-size:.78rem;font-weight:700;cursor:pointer">닫기 ✕</button></div>'
       + '<div data-ovclose="1" style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">'
-      + side(uOld, '기존', '#D1D5DB', !isNew)
-      + side(uNew, '변경 요청', '#93C5FD', isNew)
+      + side(aOld, '기존', '#D1D5DB', !isNew)
+      + side(aNew, '변경 요청', '#93C5FD', isNew)
       + '</div></div>';
     ov.style.display = 'flex';
     _revealTogether(ov);

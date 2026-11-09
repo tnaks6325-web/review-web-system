@@ -29,6 +29,14 @@
     if (typeof showToast === "function") { try { showToast(msg, err); return; } catch (_) {} }
     alert(msg);
   }
+  // ★ 결정 359 — 오류 문구는 api.js 단일 출처(apiFriendlyErrorMessage)로 쉬운 한국어로 바꾼다.
+  //   옛 api.js 가 캐시에 남아 함수가 없으면 종전 문구 그대로(배포 순서가 갈려도 멈추지 않는다).
+  function friendlyErr(e, fallback) {
+    try { if (typeof apiFriendlyErrorMessage === "function") return apiFriendlyErrorMessage(e, fallback); } catch (_) {}
+    return (e && (e.message || e.error)) || fallback || "잠시 후 다시 시도해 주세요.";
+  }
+  // 응답 판정 — 통신 실패({ok:false|error})·서버 오류(200+{error})를 모두 실패로 본다(결정 359 · 결정 028 과 같은 본문 판정).
+  function failed(d) { return !d || d.ok === false || !!d.error; }
   function timeFmt(iso) {
     if (!iso) return "";
     try { return new Date(iso).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }); }
@@ -69,7 +77,8 @@
       try {
         const d = await gasGet({ action: "csReviewerUnread", phone8: user.phone8 });
         const cur = getUser();
-        if (cur && String(cur.phone8) === key && d && d.ok !== false) setTabBadge(d.totalUnread || 0);
+        // ★ 결정 359: 조회 실패면 배지를 0으로 지우지 않고 그대로 둔다(모르는 것을 "0건"으로 꾸미지 않는다).
+        if (cur && String(cur.phone8) === key && !failed(d)) setTabBadge(d.totalUnread || 0);
       } catch (_) {}
       finally { _unreadAt = Date.now(); _unreadInflight = null; }
     })();
@@ -151,14 +160,16 @@
       // 예전 호출부를 위한 폴백이다. 서버는 threadId와 phone8 소유권을 함께 확인한다.
       const data = await gasGet({ action: "csReviewerMessages", phone8: user.phone8,
         threadId: _open.threadId || undefined, campaignKey: _open.campaignKey });
-      if (!data || data.ok === false) throw new Error((data && data.error) || "불러오기 실패");
+      if (failed(data)) throw new Error((data && data.error) || "대화를 불러오지 못했어요.");
+      if (!_open) return;
       _open.threadId = data.threadId || _open.threadId;
       renderMessages(data.messages || []);
       // 이 방을 열람하면 서버에서 해당 방 미확인이 리셋됨 → 탭 총 뱃지 갱신
       refreshUnread(true);
     } catch (err) {
       const box = document.getElementById("rcsThread");
-      if (box) box.innerHTML = `<div style="text-align:center;color:#EF4444;font-size:.82rem">오류: ${esc(err.message)}</div>`;
+      // ★ 결정 359: 실패를 빈 방(「첫 메시지를 남겨보세요」)으로 보이지 않는다 — 이유 + [다시 불러오기].
+      if (box) box.innerHTML = `<div style="text-align:center;color:#EF4444;font-size:.82rem;line-height:1.6">대화를 불러오지 못했어요<br><span style="color:#9CA3AF;font-size:.76rem">${esc(friendlyErr(err, "잠시 후 다시 시도해 주세요."))}</span><br><button type="button" onclick="ReviewerCS.reload()" style="margin-top:8px;border:1px solid #e5e7eb;background:#fff;color:#374151;border-radius:10px;padding:6px 14px;font-size:.8rem;cursor:pointer">다시 불러오기</button></div>`;
     }
   }
 
@@ -238,10 +249,10 @@
       try {
         const d = await gasPost({ action: "csReviewerUpload", phone8: user.phone8, fileName: f.name,
                                   mimeType: f.type, imageBase64: dataUrl }, 120000);
-        if (!d || d.ok === false || !d.url) throw new Error((d && d.error) || "업로드 실패");
+        if (failed(d) || !d.url) throw new Error((d && d.error) || "업로드 실패");
         item.url = d.url;
       } catch (e) {
-        toast("사진 업로드 실패: " + e.message, true);
+        toast("사진 업로드 실패: " + friendlyErr(e, "잠시 후 다시 시도해 주세요."), true);
         const idx = _pending.indexOf(item);
         if (idx > -1) _pending.splice(idx, 1);
       }
@@ -263,8 +274,11 @@
     v.style.display = "flex";
   }
 
+  // ★ 결정 359: 보내기 성공이 확인된 뒤에만 입력칸·첨부를 비운다. 실패하면 쓴 글·사진을 그대로 두고 이유를 알린다.
+  //   (종전: 보내기 전에 먼저 비우고 `ok === false` 만 실패로 봐서, 통신 실패 {error} 때 글이 아무 안내 없이 사라졌다)
+  let _sending = false;
   async function send() {
-    if (!_open) return;
+    if (!_open || _sending) return;
     const user = getUser();
     const ta = document.getElementById("rcsInput");
     if (!ta) return;
@@ -273,24 +287,32 @@
     if (_pending.some(p => !p.url)) { toast("사진 업로드가 끝나면 전송할 수 있어요"); return; }
     const imageUrls = _pending.map(p => p.url).filter(Boolean);
     if (!content && imageUrls.length === 0) return;
-    ta.value = ""; ta.style.height = "auto";
+    const room = _open;
     const sentAttach = _pending.slice();
-    _pending = []; renderAttachBar();
+    const btn = document.getElementById("rcsSendBtn");
+    _sending = true;
+    if (btn) btn.disabled = true;
+    let data = null;
     try {
-      const data = await gasPost({
+      data = await gasPost({
         action: "csReviewerSend", phone8: user.phone8, name: user.name,
-        campaignKey: _open.campaignKey, campaignLabel: _open.campaignLabel,
-        campaignSource: _open.campaignSource, content, imageUrls,
+        campaignKey: room.campaignKey, campaignLabel: room.campaignLabel,
+        campaignSource: room.campaignSource, content, imageUrls,
       });
-      if (!data || data.ok === false) throw new Error((data && data.error) || "전송 실패");
-      _open.threadId = data.threadId || _open.threadId;
-      await reloadChat();
-      if (typeof window.loadCsInbox === "function") { try { window.loadCsInbox(); } catch (_) {} }
-    } catch (err) {
-      toast("전송 오류: " + err.message, true);
-      ta.value = content;
-      _pending = sentAttach; renderAttachBar();   // 실패 시 첨부 복구
+    } catch (err) { data = { ok: false, error: (err && err.message) || "" }; }
+    _sending = false;
+    if (btn) btn.disabled = false;
+    if (failed(data)) {
+      // 입력칸·첨부는 건드리지 않는다 — 그대로 다시 [보내기] 누르면 된다.
+      toast("전송하지 못했어요. " + friendlyErr(data, "잠시 후 다시 보내 주세요."), true);
+      return;
     }
+    room.threadId = data.threadId || room.threadId;
+    if (_open !== room) return;                       // 그 사이 다른 방으로 옮겼다
+    if (ta.value.trim() === content) { ta.value = ""; ta.style.height = "auto"; }
+    _pending = _pending.filter(p => sentAttach.indexOf(p) < 0); renderAttachBar();
+    await reloadChat();
+    if (typeof window.loadCsInbox === "function") { try { window.loadCsInbox(); } catch (_) {} }
   }
 
   // ── SSE (관리자 답장 실시간) ──
@@ -338,5 +360,5 @@
   else init();
 
   window.ReviewerCS = { open: openInbox, openChat, send, back: backToInbox, close: closeAll,
-                        pickFiles, removeAttach, viewImage, refreshUnread, syncSession };
+                        pickFiles, removeAttach, viewImage, refreshUnread, syncSession, reload: reloadChat };
 })();

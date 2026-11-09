@@ -7355,6 +7355,15 @@ function _thumbUrl(id, px){ return window.DriveThumb ? DriveThumb.url(id, px) : 
 function _thumbAttrs(id, px, full){
   return window.DriveThumb ? DriveThumb.attrs(id, px, full) : ` src="${esc(full||'')}"`;
 }
+/* ★★ 원본 유지 자리(결정 008 — 크게 보기 팝업 · 검수 대조 · 돋보기) = 원본 빠른 길(o, 바이트 동일) 또는 종전 원본 프록시.
+   t·m(변환본)은 여기서 절대 나오지 않는다(drive-thumb.js fullAttrs/full 이 보장 · 회귀가드 imageEdgeOriginal F1).
+   o 가 실패하면 원본 프록시로 1회 접는다. 모듈이 없으면 종전 src 그대로. */
+function _fullAttrs(id, full){
+  return window.DriveThumb && DriveThumb.fullAttrs ? DriveThumb.fullAttrs(id, full) : ` src="${esc(full||'')}"`;
+}
+function _fullUrl(id, full){
+  return window.DriveThumb && DriveThumb.full ? DriveThumb.full(id, full) : full;
+}
 /* 사람 옆 번호 = **작업보드 표의 「번호」**(서버가 실어 주는 `boardNo`) — `seq`(시트 행 번호)가
    아니다. 담당자가 표에서 눈으로 보는 값과 같아야 "몇 번 줄 사람인지"가 통한다.
    ★ 판정(어느 칸이 번호인가)은 서버 `utils/rowNumbering.numberColumnKey` 단일 출처 — 화면은
@@ -7652,7 +7661,7 @@ function _rvPopCol(kind,files,r){
   const m=_RV_POP_COL[kind], applicable=kind!=='receipt'||_rvReceiptApplies(r), list=applicable?_rvKindFiles(files,kind):[], n=list.length, i2=_rvPopIdx();
   const i=Math.min(i2[kind]||0,Math.max(0,n-1)); i2[kind]=i;
   const body=n
-    ? `<div class="rvpbody"><img src="${esc(list[i].url)}" alt="${esc(m[1])}"></div>`+
+    ? `<div class="rvpbody"><img${_fullAttrs(list[i].fileId,list[i].url)} alt="${esc(m[1])}"></div>`+
       `<div class="rvppg"${n>1?'':' style="visibility:hidden"'}>`+
         `<button type="button"${i===0?' disabled':''} onclick="_rvPopStep2('${kind}',-1,${n})">‹</button>`+
         `<span>${i+1} / ${n}</span>`+
@@ -16755,9 +16764,11 @@ function riZoom(i, which){
   const url=_riImg(id);
   if(!url){ _toast('이 건에는 볼 수 있는 이미지가 없습니다.'); return; }
   if(typeof woImageModal!=='function'){ _toast('이미지 보기 모듈(js/work-order-detail.js)을 불러오지 못했습니다.'); return; }
-  woImageModal(url);
+  woImageModal(_fullUrl(id, url), url);   // 원본 빠른 길(o) — 실패하면 원본 프록시로 1회(woImageModal 두 번째 인자)
 }
 function _riImg(id){ return /^[-\w]{20,}$/.test(String(id||'')) ? API_BASE+'/api/drive/image/'+encodeURIComponent(id) : ''; }
+/** 검수 대조(rizoomable) 속성 — 원본(o 또는 원본 프록시). ★ 작은 사진(_thumbAttrs) 금지(결정 008 대조는 원본으로). */
+function _riFull(id){ return _fullAttrs(id, _riImg(id)); }
 
 async function renderInspectView(){
   STATE.riContext=null;   // 작업 로그 카드에서 온 일회성 처리 후에도 본래 검수 화면은 자기 목록을 갱신한다.
@@ -17437,7 +17448,7 @@ function _riProductLabRender(){
     </main></div></div>`;
 }
 function riProductLabPick(i){if(_riProductLab.busy)return;_riProductLab.idx=Math.max(0,Math.min(Number(i)||0,_riProductLab.clusters.length-1));_riProductLabRender();}
-function riProductZoom(i){const c=(_riProductLab.clusters||[])[_riProductLab.idx];const id=c&&(c.sampleFileIds||[])[Number(i)];const url=_riImg(id);if(url&&typeof woImageModal==='function')woImageModal(url);}
+function riProductZoom(i){const c=(_riProductLab.clusters||[])[_riProductLab.idx];const id=c&&(c.sampleFileIds||[])[Number(i)];const url=_riImg(id);if(url&&typeof woImageModal==='function')woImageModal(_fullUrl(id, url), url);}
 function riProductLabClose(){const m=$('#riProductLab');if(m)m.remove();if(_riProductLab.changed)_loadInspect();}
 
 async function riProductAutoResolve(){
@@ -17535,7 +17546,7 @@ function riOpenDetail(i){
       <button class="btn" onclick="riCloseDetail()">닫기</button></div>
     <div class="rimbody">
       <div class="rimleft">
-        ${_riImg(r.file_id)?`<img class="rizoomable" src="${_riImg(r.file_id)}" alt="" title="클릭하면 크게 보기" onclick="riZoom(${idx})">`:'<div class="empty">이미지 없음</div>'}
+        ${_riImg(r.file_id)?`<img class="rizoomable"${_riFull(r.file_id)} alt="" title="클릭하면 크게 보기" onclick="riZoom(${idx})">`:'<div class="empty">이미지 없음</div>'}
         <div class="rimeta">${esc(r.file_name||'')}</div>
       </div>
       <div class="rimright">
@@ -17559,7 +17570,7 @@ function riOpenDetail(i){
               ? `"${esc(c.author.ocr||'')}" 가 <b>${esc((c.author.others||[]).join(', '))}</b> 제출에도 나타납니다 — 실명 대조가 아니라 <b>같은 표기의 재사용</b>만 봅니다`
               : '실명 대조는 하지 않습니다(화면에 마스킹되어 나옴). 같은 표기가 다른 리뷰어 제출에 반복되는지만 봅니다')}
         </table>
-        ${dup.verdict==='fail'&&dup.matchFileId?`<div class="risbs"><div><div class="rimeta">지금 제출</div><img class="rizoomable" src="${_riImg(r.file_id)}" alt="" title="클릭하면 크게 보기" onclick="riZoom(${idx})"></div><div><div class="rimeta">이전 제출 · ${esc(dup.matchReviewer||'')}</div><img class="rizoomable" src="${_riImg(dup.matchFileId)}" alt="" title="클릭하면 크게 보기" onclick="riZoom(${idx},'dup')"></div></div>`:''}
+        ${dup.verdict==='fail'&&dup.matchFileId?`<div class="risbs"><div><div class="rimeta">지금 제출</div><img class="rizoomable"${_riFull(r.file_id)} alt="" title="클릭하면 크게 보기" onclick="riZoom(${idx})"></div><div><div class="rimeta">이전 제출 · ${esc(dup.matchReviewer||'')}</div><img class="rizoomable"${_riFull(dup.matchFileId)} alt="" title="클릭하면 크게 보기" onclick="riZoom(${idx},'dup')"></div></div>`:''}
         ${r.ocr_text?`<div class="riocr"><div class="rimeta">캡처에서 읽어낸 리뷰 글</div>${esc(r.ocr_text)}</div>`:''}
       </div>
     </div>

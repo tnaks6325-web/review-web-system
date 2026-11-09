@@ -250,6 +250,7 @@ async function lookupPhone(phone8) {
 async function handleReviewerProfile(body = {}) {
   const {
     action, phone8, name, subAccounts, incomeInfo,
+    baseSubAccounts,                           // saveSubAccounts — 결정 358 기준 목록(선택)
     incomeName, residentNum, jumin,            // saveIncomeInfo (프론트는 top-level로 전송)
     bankName, bankAccount, accountHolder,      // saveBankInfo
     onlyIfEmpty,                               // saveBankInfo — 빈 칸만 채움(구매양식 제출 후 자동 저장)
@@ -298,6 +299,17 @@ async function handleReviewerProfile(body = {}) {
     }
     if (!Array.isArray(subs)) subs = [];
     if (subs.length > 50) return { ok: false, error: '타계정은 최대 50명까지 등록할 수 있습니다.' };
+    // ★ 결정 358 — 화면이 고치기 전에 받았던 목록(기준). 있으면 잠금 안에서 지금 목록과 비교해 다르면 쓰지 않는다
+    //   (불러오기 실패 화면·오래 열어 둔 화면이 통째 저장으로 기존 타계정을 지우던 사고 S1).
+    //   없으면(구버전 화면 캐시 · 리뷰 제출 화면) 종전 동작 그대로 — 배포 스큐에서 아무것도 막히지 않게.
+    let baseSubs = null;
+    if (baseSubAccounts !== undefined && baseSubAccounts !== null) {
+      baseSubs = baseSubAccounts;
+      if (typeof baseSubs === 'string') {
+        try { baseSubs = JSON.parse(baseSubs); } catch (_) { baseSubs = undefined; }
+      }
+      if (!Array.isArray(baseSubs)) return { ok: false, error: '타계정 데이터 형식이 올바르지 않습니다.' };
+    }
     // 코드가 부여된 소유자는 배열을 통째로 바꾸면 member_no와 실제 참여자 UUID의 대응이
     // 깨질 수 있다. 코드 관리 화면에 "타계정 추가/분리" 절차가 생기기 전까지는 fail-closed.
     // 기존(코드 미부여) 리뷰어의 종전 프로필 저장은 그대로 허용한다.
@@ -358,7 +370,8 @@ async function handleReviewerProfile(body = {}) {
     // shoppingId 필드를 싣지 않은 채 타계정의 다른 항목을 수정해도 기존 아이디를 잃지 않게
     // 정확한 이름+전화 매칭을 우선하고, 이름/전화 자체를 편집한 1개 행은 같은 인덱스로 보존한다.
     let droppedFolded = 0;
-    await mutateSubAccounts(owner.id, async (currentSubs, _rv, txClient) => {
+    let staleBase = false;
+    const saved = await mutateSubAccounts(owner.id, async (currentSubs, _rv, txClient) => {
       const usedOld = new Set();
       // 잠금을 잡은 뒤 한 번 더 — 위에서 읽은 뒤 잠금을 기다리는 사이에 정리가 끝났을 수 있다(레드팀 2).
       //   ★ 같은 트랜잭션 커넥션으로 읽는다 — 풀에서 또 빌리면 동시 저장이 풀을 다 잡았을 때 서로 기다린다(Codex P2).
@@ -373,6 +386,22 @@ async function handleReviewerProfile(body = {}) {
       } catch (_) {
         try { await txClient.query('ROLLBACK TO SAVEPOINT fold_sig_read'); } catch (__) { /* noop */ }
         /* 조회 실패는 앞서 읽은 목록으로 */
+      }
+      // ★ 결정 358 — 기준 목록 비교(잠금 안 · 지금 목록 currentSubs 와). 다르면 null = 쓰지 않음(창구 규약).
+      //   shoppingId 는 전용 PATCH 로만 바뀌고 아래에서 보존하므로 비교에서 뺀다(같은 화면의 아이디 저장이 오탐 되지 않게).
+      //   정리(결정 226)로 지운 칸이 기준에만 남아 있으면 그 칸은 비교에서 뺀다 — 정리 전에 연 화면도 종전처럼 저장(정리 칸만 빠짐).
+      if (baseSubs) {
+        const canon = (v) => {
+          if (Array.isArray(v)) return '[' + v.map(canon).join(',') + ']';
+          if (v && typeof v === 'object') {
+            return '{' + Object.keys(v).filter((k) => k !== 'shoppingId' && k !== 'shopping_id').sort()
+              .map((k) => JSON.stringify(k) + ':' + canon(v[k])).join(',') + '}';
+          }
+          return JSON.stringify(v === undefined ? null : v);
+        };
+        const curSigSet = new Set(currentSubs.map((x) => sig(x)));
+        const baseCmp = baseSubs.filter((b) => !(foldedSigs.has(sig(b)) && !curSigSet.has(sig(b))));
+        if (canon(baseCmp) !== canon(currentSubs)) { staleBase = true; return null; }
       }
       if (foldedSigs.size) {
         const keep = subs.filter((sub) => !foldedSigs.has(sig(sub)) || currentSubs.some((old) => sig(old) === sig(sub)));
@@ -393,13 +422,20 @@ async function handleReviewerProfile(body = {}) {
       });
       return subs;
     }, { source: _fromOrderForm ? 'order_form_register' : 'profile' });
+    if (staleBase) {
+      return { ok: false, code: 'stale_sub_accounts',
+        error: '타계정 정보가 그사이 다른 곳에서 바뀌었어요. 내 정보를 다시 불러온 뒤 한 번 더 저장해 주세요.' };
+    }
     if (_fromOrderForm) _event('order_form_register', [{ id: owner.id }]);   // 결정 224 — 관찰
+    // 결정 358 — 실제로 저장된 목록(shoppingId 보존·정리 칸 빼기 반영)을 돌려준다. 화면은 이것을 다음 저장의 기준으로 쓴다.
+    //   기준 목록을 보낸 화면에만 싣는다(같은 요청 주체가 'get' 으로 이미 받는 값 — 노출 범위 불변).
+    const extra = baseSubs && saved && Array.isArray(saved.subs) ? { subAccounts: saved.subs } : {};
     // 본계정으로 합친 칸을 다시 넣으려 했으면 알린다(조용히 빠지지 않게 · 화면은 ok 로 처리 — 막지 않는다).
     if (droppedBefore + droppedFolded > 0) {
       return { ok: true, foldedSkipped: droppedBefore + droppedFolded,
-        message: '본계정과 같은 번호의 타계정은 본계정으로 합쳐져 있어 다시 저장하지 않았어요.' };
+        message: '본계정과 같은 번호의 타계정은 본계정으로 합쳐져 있어 다시 저장하지 않았어요.', ...extra };
     }
-    return { ok: true };
+    return { ok: true, ...extra };
   }
 
   if (action === 'saveIncomeInfo') {
