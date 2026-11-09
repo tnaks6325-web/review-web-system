@@ -82,6 +82,8 @@ ok('마크업의 틀은 #orderFrame 하나(추가 틀은 명의마다 코드로�
     && /if\(_applyManyBusy\) return;/.test(am));
   ok('★ 353: 아무 명의도 못 잡고 이유가 명의 탓이 아니면 종전 _doApply 안내 화면으로',
     /if\(firstGlobal\) return _doApply\(optionKey, firstGlobal\.sub, purchaseQty\);/.test(am));
+  ok('353 보강: 탭 화면의 [참여 취소]는 그 명의만 — 남은 명의가 있으면 참여 전 화면이 아니라 다음 명의로',
+    /clearHold\(h\.phone8\);\s*\n[\s\S]{0,200}if\(Object\.keys\(_allHolds\(\)\)\.length\)\{\s*\n\s*_releaseFrame\(h\.phone8\);[\s\S]{0,260}await enterJoined\(\);\s*\n\s*return;/.test(camp));
   ok('353 도움말: [어떻게 하나요?]는 여러 명의 체크 공고에서만 · 이미지는 처음 열 때만 받는다',
     /_hl\.style\.display = _acctMultiPick\(\) \? '' : 'none';/.test(camp)
     && /if\(img && !img\.getAttribute\('src'\)\) img\.setAttribute\('src', '\/docs\/help\/multi-identity-join\.jpg'\);/.test(camp)
