@@ -14,6 +14,7 @@ const {
   handleReviewerProfile,
 } = require('../services/reviewer.service');
 const pool = require('../db/pool');
+const { isDualBundleSql, dualCaptureCompleteSql } = require('../utils/dualCaptureComplete');
 const { logger } = require('../utils/logger');
 const { addClient, emitCsInquiry } = require('../utils/sse');
 const { _getReviewerPhoneList, PAYMENT_COL_KEYWORDS } = require('../services/search.service');
@@ -2041,7 +2042,8 @@ router.get('/my-missing-captures', async (req, res, next) => {
              COALESCE(NULLIF(rc.linked_tab_name, ''), os.tab_name) AS "captureTabName",
              COALESCE(NULLIF(rc.title, ''), NULLIF(wt.display_name, ''), NULLIF(wt.tab_name, ''),
                       NULLIF(tc.display_name, ''), NULLIF(tc.campaign_name, '')) AS "displayName",
-             COALESCE(NULLIF(rc.title, ''), NULLIF(tc.campaign_name, '')) AS "campaignName"
+             COALESCE(NULLIF(rc.title, ''), NULLIF(tc.campaign_name, '')) AS "campaignName",
+             ${isDualBundleSql('os')} AS "dualBundle"
         FROM order_submissions os
         LEFT JOIN tab_configs tc ON tc.sheet_id = os.sheet_id AND tc.tab_name = os.tab_name
         LEFT JOIN campaign_applications ca ON ca.id = os.campaign_application_id
@@ -2051,6 +2053,9 @@ router.get('/my-missing-captures', async (req, res, next) => {
        WHERE RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = $1
          AND os.deleted_at IS NULL
          AND os.capture_uploaded_at IS NULL
+         /* ★★ 네이버·쿠팡 동시진행 묶음 주문은 사진을 구매처별 표에 두고 위 옛 칸을 채우지 않는다(결정 338).
+            두 구매처 사진이 다 있으면 보완 대상이 아니다(결정 355 — 2026-11-09 묶음 17건 전부 오판). */
+         AND NOT ${dualCaptureCompleteSql('os')}
          /* 구매 캡처가 빠졌더라도, 연결된 참여 작업의 리뷰가 제출완료라면 이미 끝난
             작업이다. 홈과 리뷰 내역 상단의 보완 알림에서 다시 독촉하지 않는다.
             campaign_participants.order_submission_id → 작업표 행의 불변 주문 링크로만
@@ -2083,6 +2088,9 @@ router.get('/my-missing-captures', async (req, res, next) => {
        LIMIT 30`, [phone8, String(days), cutoff]);
 
     const items = await Promise.all(rows.map(async row => {
+      /* 동시진행 묶음 주문은 옛 1장 첨부 세션을 받을 수 없다(서버가 일부러 막는다 — 결정 338).
+         세션 발급을 시도하지 않고 표시만 내려 화면이 "담당자에게 문의" 로 안내한다(결정 355). */
+      if (row.dualBundle) return { ...row, dualBundle: true, captureSession: null };
       try {
         const captureSession = await purchaseSessions.issueForOrder({
           orderSubmissionId: row.id,

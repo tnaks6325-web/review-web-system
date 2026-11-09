@@ -21,6 +21,7 @@
 // ═══════════════════════════════════════════════════════════
 const { logger } = require('../utils/logger');
 const { logReviewerEvent, autoResolveHealed } = require('./reviewerEventLog.service');
+const { dualCaptureCompleteSql } = require('../utils/dualCaptureComplete');
 
 let _pool;
 function getPool() {
@@ -349,6 +350,7 @@ async function detectMissingCaptures({ limit = 50 } = {}) {
             RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) AS phone8
        FROM order_submissions os
       WHERE os.deleted_at IS NULL AND os.capture_uploaded_at IS NULL
+        AND NOT ${dualCaptureCompleteSql('os')}   -- 결정 355: 두 구매처 사진을 다 낸 동시진행 묶음은 미첨부가 아니다
         AND os.submitted_at < NOW() - interval '20 minutes'
         AND os.submitted_at > GREATEST(NOW() - interval '3 days', $1::timestamptz)
       ORDER BY os.submitted_at DESC
