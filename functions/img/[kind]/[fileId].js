@@ -1,5 +1,5 @@
 /**
- * 결정 353 — 사진 빠른 길: Cloudflare Pages Function  GET /img/:kind/:fileId?e=<만료>&s=<서명>
+ * 결정 354 — 사진 빠른 길: Cloudflare Pages Function  GET /img/:kind/:fileId?e=<만료>&s=<서명>
  *
  *   서명·만료 검사(상수시간) → 엣지 캐시(caches.default, 열쇠 = kind+파일 — 서명 제외)
  *   → R2(IMG_BUCKET, `thumb/<kind>/<fileId>.webp`) → 없으면 원본 서버 내부 입구

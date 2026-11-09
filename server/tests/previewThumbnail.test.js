@@ -35,7 +35,7 @@ function bodyOf(src, name) {
 }
 
 console.log('\nA) 규칙 단일 출처 — js/drive-thumb.js');
-// (결정 353 — 빠른 길 seed/edgeUrl/kindOf 가 더해졌다. url/attrs/fall 세 개는 그대로 — 검사 의미 불변)
+// (결정 354 — 빠른 길 seed/edgeUrl/kindOf 가 더해졌다. url/attrs/fall 세 개는 그대로 — 검사 의미 불변)
 ok('모듈이 url/attrs/fall 을 노출한다(+ 빠른 길 seed/edgeUrl/kindOf)',
   /window\.DriveThumb\s*=\s*\{\s*url: url,\s*attrs: attrs,\s*fall: fall,\s*seed: seed,\s*edgeUrl: edgeUrl,\s*kindOf: kindOf\s*\}/.test(MOD));
 ok('★ 파일ID 형식 검증 후에만 CDN URL 을 만든다(임의 문자열 주입 차단)',
@@ -92,7 +92,7 @@ console.log('\nB) 실행 — 속성·폴백 (grep 만으로는 "그린다"를 �
   ok('★ 원본 URL 이 없으면 src 를 제거', img2.removed === true);
 }
 
-console.log('\nB-2) 결정 353 빠른 길 — 서명 주소 우선 · 실패 사다리 · 늦은 서명 갈아 끼우기 (vm 실행)');
+console.log('\nB-2) 결정 354 빠른 길 — 서명 주소 우선 · 실패 사다리 · 늦은 서명 갈아 끼우기 (vm 실행)');
 {
   const FID = 'F1bbbbbbbbbbbbbbbbbbbb';
   const FID2 = 'F2cccccccccccccccccccc';

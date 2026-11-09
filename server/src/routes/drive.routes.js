@@ -118,7 +118,7 @@ router.get('/report/:code', async (req, res, next) => {
       ok: true,
       title: (displayName || tabName || '리뷰 보고'),
       count: images.length,
-      // ★ 결정 353 — 무인증 화면이라 응답이 서명 주소(t, 목록용 작은 사진)를 싣는다. 열쇠 없으면 그대로.
+      // ★ 결정 354 — 무인증 화면이라 응답이 서명 주소(t, 목록용 작은 사진)를 싣는다. 열쇠 없으면 그대로.
       images: imageEdge.withThumbs(images),
     });
   } catch (err) {

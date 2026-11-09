@@ -1,6 +1,6 @@
 'use strict';
 /**
- * 결정 353 — 사진 빠른 길 서버 입구 2개.
+ * 결정 354 — 사진 빠른 길 서버 입구 2개.
  *
  *   POST /api/img/sign              로그인 화면(작업보드 등)용 일괄 서명. 로그인 필수(req.admin),
  *                                   허용 목록(결정 352 imageAllowlist — drive 또는 guide) 통과 번호만 서명.

@@ -897,6 +897,24 @@ input,textarea,button{font-family:inherit}
 #screenOrderForm #btnOrderFormSubmit{min-height:46px;border-radius:10px!important;background:#007aff!important;box-shadow:none!important;font-size:16px!important;font-weight:600}
 /* 공고 화면 틀 안: 바깥 화면이 이미 좌우 여백(16px)을 주므로 안쪽 여백은 포커스 테두리가 잘리지 않을 4px 만 */
 body.embed-mode #screenOrderForm .screen-body{padding-left:4px!important;padding-right:4px!important}
+/* 주문이 여러 건 = 위 탭 + 옆으로 넘기기(결정 353). 숨긴 칸도 지우지 않는다(검증·제출은 모든 칸을 읽는다). */
+#screenOrderForm .of-card-tabs{position:sticky;top:var(--of-card-tabs-top,0px);z-index:6;background:#fff;display:flex;gap:0;margin:0 0 10px;border-bottom:1px solid #d2d2d7;overflow-x:auto;scrollbar-width:none;scroll-margin-top:var(--of-card-tabs-top,0px)}
+#screenOrderForm .of-card-tabs::-webkit-scrollbar{display:none}
+#screenOrderForm .of-card-tabs[hidden]{display:none}
+#screenOrderForm .of-card-tab{flex:1 0 auto;min-width:84px;padding:9px 10px 8px;border:0;border-bottom:2px solid transparent;background:none;color:#6e6e73;font:inherit;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap}
+#screenOrderForm .of-card-tab.on{border-bottom-color:#007aff;color:#007aff}
+#screenOrderForm .of-card-tab,#screenOrderForm .of-card-tab.on{border-radius:0!important;box-shadow:none!important;background:none!important;transform:none!important}
+#ofOrderCardsWrap.of-cards-tabbed>.of-order-card>.ofc-header>span:first-child{display:none}
+#ofOrderCardsWrap.of-cards-tabbed>.of-order-card>.ofc-header{justify-content:flex-end}
+#ofOrderCardsWrap.of-cards-tabbed>.of-order-card>.ofc-header:not(:has(.ofc-remove-btn)){display:none}
+#screenOrderForm .of-card-tab:focus-visible{outline:2px solid #007aff;outline-offset:-2px;border-radius:6px}
+#ofOrderCardsWrap.of-cards-tabbed>.of-order-card.of-card-off{display:none}
+#ofOrderCardsWrap.of-cards-tabbed>.of-order-card+.of-order-card{border-top:0;padding-top:0;margin-top:0}
+#ofOrderCardsWrap>.of-order-card.of-slide-l{animation:ofCardL .22s ease}
+#ofOrderCardsWrap>.of-order-card.of-slide-r{animation:ofCardR .22s ease}
+@keyframes ofCardL{from{transform:translateX(30%);opacity:.3}to{transform:none;opacity:1}}
+@keyframes ofCardR{from{transform:translateX(-30%);opacity:.3}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion: reduce){#ofOrderCardsWrap>.of-order-card.of-slide-l,#ofOrderCardsWrap>.of-order-card.of-slide-r{animation:none}}
 /* 날짜 안내: 비고 아래 작은 글자 */
 #screenOrderForm details.of-fold .of-date-note{margin:2px 0 0 104px;padding:0!important;border:0!important;background:none!important;color:#86868b!important;font-size:12px!important}
 @media(max-width:340px){

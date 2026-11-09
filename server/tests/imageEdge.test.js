@@ -1,6 +1,6 @@
 'use strict';
 /**
- * 결정 353 — 사진 빠른 길의 서버 쪽 회귀가드.
+ * 결정 354 — 사진 빠른 길의 서버 쪽 회귀가드.
  *
  *   A) signImage — 열쇠 없음/짧음 = null(화면이 옛 길) · 형식 불량 null · 6시간 칸 반올림
  *   B) 내부 생성 입구 GET /api/img-internal/:kind/:fileId (Pages Function 만 부른다, X-Img-Key)

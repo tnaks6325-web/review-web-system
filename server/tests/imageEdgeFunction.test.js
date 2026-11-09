@@ -1,6 +1,6 @@
 'use strict';
 /**
- * 결정 353 — 사진 빠른 길(Cloudflare Pages Function `/img/:kind/:fileId?e=&s=`) 회귀가드.
+ * 결정 354 — 사진 빠른 길(Cloudflare Pages Function `/img/:kind/:fileId?e=&s=`) 회귀가드.
  *
  *   ① 서버(Node crypto)가 만든 서명을 Function(crypto.subtle)이 그대로 받아들인다(형식 호환).
  *   ② 서명 없음·위조·만료·다른 파일·kind 바꿔치기·지나치게 먼 만료 = 403, 드라이브(원본 서버) 호출 0.

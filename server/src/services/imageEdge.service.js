@@ -1,6 +1,6 @@
 'use strict';
 /**
- * 결정 353 — 사진 빠른 길(Cloudflare R2 + Pages Function `/img/:kind/:fileId?e=&s=`)의 서버 쪽 단일 출처.
+ * 결정 354 — 사진 빠른 길(Cloudflare R2 + Pages Function `/img/:kind/:fileId?e=&s=`)의 서버 쪽 단일 출처.
  *
  *   signImage(fileId, kind)  — 화면용 작은 사진의 만료 서명 주소(프론트 사이트 기준 상대경로). 열쇠 없으면 null
  *                              → 화면은 종전 주소(구글 썸네일·/api/drive/image)를 그대로 쓴다.
