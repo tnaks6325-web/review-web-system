@@ -11,8 +11,9 @@
  * ★ 서명 형식(Function `functions/img/[kind]/[fileId].js` 의 verifySig 와 같아야 한다 — 회귀가드 imageEdgeFunction.test.js):
  *     s = base64url(HMAC-SHA256(IMG_SIGNING_KEY, `${kind}/${fileId}/${e}`))   (43자, 패딩 없음)
  *     e = ceil((지금 + 12시간) / 6시간) × 6시간  → 같은 6시간 칸이면 같은 주소(브라우저·엣지 캐시가 듣는다), 유효 12~18시간
- * ★ kind = t(목록용 가로 400) · m(크게 보기용 가로 1600). **원본은 없다** — 대조·크게 보기 원본·저장·AI 판정은
- *   종전 원본 통로 그대로(결정 008 완화 금지).
+ * ★ kind = t(목록용 가로 400) · m(크게 보기용 가로 1600) · o(원본 — 2026-11-09 사용자 확정 「모든 사진 미리 만들기」).
+ *   o 는 **드라이브 원본 바이트 그대로**(재압축·변환·형식 바꾸기 0, Content-Type 원본) — 결정 008 「원본 유지」 자리
+ *   (크게 보기·대조·라이트박스·저장)가 이 길을 쓴다. AI 판정·업로드(서버 쪽)는 이 길과 무관하게 종전 그대로.
  */
 const crypto = require('crypto');
 const { logger } = require('../utils/logger');
@@ -20,7 +21,12 @@ const { logger } = require('../utils/logger');
 const KINDS = Object.freeze({
   t: Object.freeze({ width: 400, quality: 72 }),
   m: Object.freeze({ width: 1600, quality: 78 }),
+  o: Object.freeze({ original: true }),             // ★ 변환 규격 없음 — makeThumb 를 타지 않는다
 });
+/* o 로 내줄 수 있는 원본 형식(래스터 사진만). SVG 는 우리 프론트 사이트에서 문서로 열리면 스크립트가 돈다 →
+   o 길은 내주지 않는다(404 → 화면은 종전 원본 프록시로 1회 접는다). Function 쪽 ORIGINAL_TYPE_RE 와 같아야 한다. */
+const ORIGINAL_TYPE_RE = /^image\/(?:jpeg|jpg|pjpeg|png|webp|gif|avif|heic|heif|bmp)$/i;
+function originalTypeOk(mime) { return ORIGINAL_TYPE_RE.test(String(mime || '').split(';')[0].trim()); }
 const ID_RE = /^[-\w]{20,128}$/;
 const BUCKET_SEC = 6 * 3600;
 const MIN_TTL_SEC = 12 * 3600;
@@ -52,12 +58,16 @@ function signImage(fileId, kind, nowMs = Date.now()) {
   return `/img/${kind}/${encodeURIComponent(id)}?e=${e}&s=${_sig(key, kind, id, e)}`;
 }
 
-/** 무인증 화면(보고 페이지 등) 응답용 — 사진 목록 [{id,…}] 에 서명 주소 t 를 싣는다(열쇠 없으면 그대로). */
-function withThumbs(list, kind = 't') {
+/** 무인증 화면(보고 페이지 등) 응답용 — 사진 목록 [{id,…}] 에 서명 주소를 kind 이름 칸으로 싣는다
+ *  (기본 t·o — 목록 작은 사진 + 라이트박스·이미지 저장 원본). 열쇠 없으면 그대로. */
+function withThumbs(list, kinds = ['t', 'o']) {
   if (!Array.isArray(list) || !signingEnabled()) return list;
+  const ks = [].concat(kinds).filter(k => KINDS[k]);
   return list.map(im => {
-    const t = im && signImage(im.id, kind);
-    return t ? Object.assign({}, im, { t }) : im;
+    if (!im) return im;
+    const add = {};
+    for (const k of ks) { const u = signImage(im.id, k); if (u) add[k] = u; }
+    return Object.keys(add).length ? Object.assign({}, im, add) : im;
   });
 }
 
@@ -164,6 +174,7 @@ function _loadSharp() {
 /** @returns {Promise<{buffer:Buffer, mimeType:string, fallback:boolean}>} */
 async function makeThumb(buffer, mimeType, kind) {
   const spec = KINDS[kind];
+  if (spec && spec.original) return { buffer, mimeType, fallback: false };   // o = 변환 0(호출 쪽도 부르지 않는다)
   const sharp = _loadSharp();
   if (!sharp || !spec) return { buffer, mimeType, fallback: true };
   try {
@@ -223,7 +234,7 @@ function _flushLegacy() {
 function legacyCounter(req, res, next) { if (req.method === 'GET') noteLegacy(req); next(); }
 
 module.exports = {
-  KINDS, ID_RE, BUCKET_SEC, MIN_TTL_SEC, MAX_SOURCE_BYTES,
+  KINDS, ID_RE, BUCKET_SEC, MIN_TTL_SEC, MAX_SOURCE_BYTES, ORIGINAL_TYPE_RE, originalTypeOk,
   signImage, withThumbs, signedList, signingEnabled, expFor,
   allowVerdict, signAllowed, guideIdsIn, SIGN_MAX_IDS,
   originKeyOk, originKeyConfigured,
