@@ -448,7 +448,7 @@
 
   /* ── 개편 1단계(승인 시안 v18) — 리뷰어 참여 화면에서만 켜는 배치(o.layout === 'v18').
    *  ★ cardsHtml() 출력(관리자 미리보기·가드가 보는 HTML)은 그대로 두고, 그린 뒤 DOM 만 바꾼다:
-   *    상품 카드 = 한 줄 묶음 + [전체 안내] / "작업 내용" 아래 특이사항(펼침)→유입(접힘)→리뷰 가이드(접힘).
+   *    상품 카드 = 한 줄 묶음 + [전체 안내] / "작업 내용" 아래 특이사항(펼침)→유입(펼침)→리뷰 가이드(접힘).
    *    링크유입처럼 [상품 페이지 열기] 버튼이 든 유입 카드는 접지 않는다(구매 길을 숨기지 않게). */
   var V18_CSS = ''
     + '.cwd-v18 .cwd-box{background:none;border:0;border-radius:0;box-shadow:none;padding:0;margin:0}'
@@ -547,7 +547,7 @@
         var itt = inflow.querySelector('.cwd-tt'); if (itt) itt.textContent = '유입 · 링크유입';
         after = inflow;
       }
-      else { folds.push(_foldBox(inflow, false, '유입 · 가이드유입')); after = folds[folds.length - 1]; }
+      else { folds.push(_foldBox(inflow, true, '유입 · 가이드유입')); after = folds[folds.length - 1]; }
     }
     if (review) { place(review); folds.push(_foldBox(review, false, _plainTitle(review) || '리뷰 가이드')); after = folds[folds.length - 1]; }
   }
