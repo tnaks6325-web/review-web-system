@@ -2797,7 +2797,10 @@ function _manualSendArgs(req) {
   const b = req.body || {};
   return { sheetId: String(b.sheetId || ''), tabName: String(b.tabName || ''),
     ids: Array.isArray(b.ids) ? b.ids : [], text: String(b.text || ''), kind: String(b.kind || ''),
-    by: (req.admin && req.admin.name) || '담당자' };
+    by: (req.admin && req.admin.name) || '담당자',
+    // ★ 결정 364 — 화면이 「같은 줄 선택·방식·내용」마다 만든 다시 보내기 키. 응답만 못 받은 첫 발송 뒤 다시 보내도
+    //   이미 보낸 사람에게는 공급자를 다시 부르지 않는다(사람마다 한 번). 없으면 종전 그대로.
+    clientSendId: String(b.clientSendId || '') };
 }
 router.post('/workdesk/manual-send/preview', authMiddleware, internalMiddleware, async (req, res) => {
   try {
@@ -2832,8 +2835,8 @@ router.post('/workdesk/manual-send', authMiddleware, internalMiddleware, async (
     const a = _manualSendArgs(req);
     if (!a.sheetId || !a.tabName || !a.ids.length) return res.status(400).json({ ok: false, error: 'sheetId, tabName, ids 가 필요합니다.' });
     const svc = require('../services/manualMessage.service');
-    if (a.kind === 'sms') return res.json(await svc.sendManualSms(a));
-    if (a.kind === 'alimtalk') return res.json(await svc.sendManualAlimtalk(a));
+    const send = a.kind === 'sms' ? svc.sendManualSms : a.kind === 'alimtalk' ? svc.sendManualAlimtalk : null;
+    if (send) { const out = await send(a); return res.status(out && out.code === svc.SEND_CONFLICT ? 409 : 200).json(out); }
     res.status(400).json({ ok: false, error: '보낼 방식(sms|alimtalk)이 필요합니다.' });
   } catch (e) {
     logger.warn(`[trackB] 수동 발송 실패: ${e.message}`);

@@ -11417,17 +11417,30 @@ function _msConfirmBack(){
   document.querySelectorAll('#msOv .msseg button').forEach(b=>b.disabled=false);
   _msPaintBtns(); _msPlace();
 }
+/* 다시 보내기 키(결정 364) — 「같은 작업·같은 줄 선택·같은 방식·같은 내용」이면 창을 닫았다 다시 열어도 같은 키.
+   api.js 가 이 스크립트보다 뒤에 실리므로 처음 보낼 때 만든다(createCsStaffDraftKey 단일 출처). 없으면 키 없이 종전 동작.
+   ★ 키는 고른 줄(_MS.ids) 기준 — 보낼 수 있는 사람 목록은 첫 발송 뒤 바뀔 수 있다(알림톡 회차·결과 확인 중). */
+function _msDraftKeyer(){ if(!_msDraftKeyer.k&&typeof createCsStaffDraftKey==='function') _msDraftKeyer.k=createCsStaffDraftKey(); return _msDraftKeyer.k||null; }
+function _msKeyFor(ms,kind,text){ const k=_msDraftKeyer(); if(!k||!ms) return '';
+  return k.keyFor(['manual-send',kind,ms.sheetId,ms.tabName,(ms.ids||[]).map(String).sort(),kind==='sms'?text:'']); }
+/* 키를 버리는 때 = 모두 보냄(이미 보낸 것 포함)이 확인됐거나 같은 키·다른 내용(409). 그 밖(통신 실패·일부 실패·
+   결과 모름·처리 중)은 그대로 둔다 — 같은 내용으로 다시 보내면 이미 받은 사람은 건너뛰고 못 받은 사람에게만 간다. */
+function _msSettleKey(key,d){ const k=_msDraftKeyer(); if(!k||!key||!d) return;
+  const rs=Array.isArray(d.results)?d.results:[];
+  if(d.code==='manual_send_conflict'||(rs.length&&rs.every(x=>x&&x.sent))) k.settle(key); }
 async function _msSendConfirmed(){
   if(!_MS||_MS.busy||!_MS.confirming) return;
   const n=_msOkItems().length; if(!n) return;
   const kind=_MS.tab;
   const text=String((document.getElementById('msText')||{}).value||'').trim();
   _MS.busy=true; _msPaintBtns();
+  const key=_msKeyFor(_MS,kind,text);
   let d=null;
   try{
     d=await api('/api/trackb/workdesk/manual-send',{method:'POST',body:JSON.stringify({sheetId:_MS.sheetId,tabName:_MS.tabName,
-      ids:_msOkItems().map(x=>x.participantId), kind, text})});
+      ids:_msOkItems().map(x=>x.participantId), kind, text, ...(key?{clientSendId:key}:{})})});
   }catch(e){ d={ok:false,error:'발송 실패. '+(e.message||'네트워크 오류')}; }
+  _msSettleKey(key,d);   // ★ 창을 이미 닫았어도 응답 기준으로 키를 정리한다
   if(!_MS) return;
   _MS.busy=false; _MS.confirming=false;
   { const box=document.querySelector('#msOv .msbox'); if(box) box.classList.remove('msconfirming');
