@@ -33,7 +33,8 @@ assert.match(mini, /csAdminUpload/, '작업보드 미니도 기존 C/S 이미지
 assert.match(mini, /clipboardData.*items[\s\S]*getAsFile/s, '작업보드 미니에서 클립보드 이미지를 붙여넣어 첨부한다');
 assert.match(mini, /addEventListener\('drop'/, '작업보드 미니에서 드래그앤드롭 이미지를 첨부한다');
 assert.match(mini, /pending\.some\(item => !item\.url\)/, '이미지 업로드가 끝나기 전에는 전송하지 않는다');
-assert.match(mini, /imageUrls \}/, '첨부 이미지 URL을 같은 C/S 답장 API로 전송한다');
+// 결정 362: 같은 호출에 다시 보내기 키(clientMsgId)가 뒤에 더 실린다 — 검사 의미(같은 답장 API 에 imageUrls 동봉) 불변·강화.
+assert.match(mini, /action: 'csAdminReply', threadId: activeThreadId, content, imageUrls(, clientMsgId)? \}/, '첨부 이미지 URL을 같은 C/S 답장 API로 전송한다');
 assert.match(mini, /pendingImages\(\)\.push\(item\)[\s\S]*await readFile/, '비동기 파일 읽기 전에 첨부 슬롯을 예약해 5장 제한을 지킨다');
 assert.match(mini, /isCurrentComposer\(uploadState, uploadThreadId\)/, '방을 바꾸면 이전 방에서 시작한 첨부 배치를 이어 보내지 않는다');
 assert.match(mini, /!form\.contains\(event\.relatedTarget\)/, '드래그가 입력 영역 밖으로 나가면 드롭 안내를 닫는다');

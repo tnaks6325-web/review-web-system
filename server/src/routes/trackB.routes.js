@@ -2891,6 +2891,9 @@ router.post('/cs/notify-participants', authMiddleware, internalMiddleware, async
     const content = String(b.content || '').trim();
     const imageUrls = require('../utils/csImageUrls').sanitizeCsImageUrls(b.imageUrls);
     const expect = (b.expect && typeof b.expect === 'object') ? b.expect : null;
+    // ★ 결정 362 — 화면이 쓴 글마다 만든 키. 응답만 못 받은 첫 전송 뒤 [다시 보내기]면, 이미 받은 리뷰어 방에는
+    //   새로 저장하지 않고(duplicate:true · 보낸 것으로 센다) 아직 못 받은 사람에게만 보낸다. 없으면 종전 그대로.
+    const clientMsgId = String(b.clientMsgId || '');
     if (!sheetId || !tabName || !ids.length) return res.status(400).json({ ok: false, error: 'sheetId, tabName, participantIds 가 필요합니다.' });
     if (!content && !imageUrls.length) return res.status(400).json({ ok: false, error: '보낼 내용이 비어 있습니다.' });
     if (content.length > _MSG_MAX) return res.status(400).json({ ok: false, error: `내용은 ${_MSG_MAX}자까지 보낼 수 있습니다.` });
@@ -2911,19 +2914,21 @@ router.post('/cs/notify-participants', authMiddleware, internalMiddleware, async
       const dup = seenPhone.get(it.phone8);
       if (dup) { merged.push({ participantId: it.participantId, rowName: it.rowName || '', name: it.name, withParticipantId: dup }); continue; }
       // ★ 실패 사유를 그대로 화면에 올린다 — "보내지 못했습니다" 한 줄로 뭉개면 담당자가 손쓸 수 없다.
-      let why = '';
+      let why = '', whyCode = '';
       const out = await _csBridge.postAdminNotice({
         sheetId, tabName, rowIndex: it.seq,
-        reviewerName: it.name || it.rowName, phone8: it.phone8, message: content, by, imageUrls,
-        onError: (e) => { why = (e && (e.message || e.code)) ? `${e.message || ''}${e.code ? ` [${e.code}]` : ''}` : ''; },
+        reviewerName: it.name || it.rowName, phone8: it.phone8, message: content, by, imageUrls, clientMsgId,
+        onError: (e) => { whyCode = String((e && e.code) || ''); why = (e && (e.message || e.code)) ? `${e.message || ''}${e.code ? ` [${e.code}]` : ''}` : ''; },
       });
       if (!out) {
         failed.push({ participantId: it.participantId, rowName: it.rowName || '',
-          reason: why ? `메시지 전송에 실패했습니다 — ${why}` : '메시지 전송에 실패했습니다.' });
+          reason: why ? `메시지 전송에 실패했습니다 — ${why}` : '메시지 전송에 실패했습니다.',
+          ...(whyCode === 'cs_client_msg_conflict' ? { code: whyCode } : {}) });   // 화면이 키를 버리는 신호(가산)
         continue;
       }
       seenPhone.set(it.phone8, it.participantId);
-      sent.push({ participantId: it.participantId, name: it.name, phone: it.phoneFull || '', phone8Tail: it.phone8.slice(-4), threadId: out.threadId, isSub: !!it.isSub });
+      sent.push({ participantId: it.participantId, name: it.name, phone: it.phoneFull || '', phone8Tail: it.phone8.slice(-4), threadId: out.threadId, isSub: !!it.isSub,
+        ...(out.duplicate ? { duplicate: true } : {}) });   // 이미 받은 방(다시 보내기) — 가산 표시, 화면은 보낸 것으로 센다
     }
     res.json({ ok: sent.length > 0, sent, failed, merged, total: items.length });
   } catch (e) {

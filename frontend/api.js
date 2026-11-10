@@ -226,6 +226,53 @@ function _resolveApiPath(p) {
   return (base && p.indexOf('/api/cs/') === 0) ? base + p.slice('/api/cs'.length) : p;
 }
 
+/**
+ * 직원(관리자·AE) 1:1문의 보내기 키 — 결정 362(결정 361 의 직원 쪽).
+ *
+ * 쓴 글 하나마다 키(clientMsgId)를 만들어, 같은 글을 다시 보낼 때마다 같은 키를 싣는다.
+ * 응답만 못 받은(시간 초과·끊김) 첫 전송이 서버에 이미 저장됐으면 서버가 같은 키를 알아보고 새로 저장하지 않는다.
+ *   - 키는 「로그인 계정 + 화면이 넘긴 초안(방·글·사진 …)」이 같을 때만 다시 쓴다 — 고치면 새 키
+ *     (고친 글이 「이미 저장됨」으로 조용히 버려지지 않게 · 결정 262 와 같은 원칙).
+ *   - 성공이 확인되면 settle(key) 로 버린다(그다음 같은 글을 또 보내는 건 의도한 새 메시지).
+ *   - 서버가 409 cs_client_msg_conflict 를 주면 settle(key) — 다음 [보내기]는 새 키(막다른 길 방지).
+ * 대화창마다 하나씩 만든다: `const k = createCsStaffDraftKey(); k.keyFor([...]); k.settle(key)`.
+ * 키 모양 = 서버 규칙 `^[A-Za-z0-9_-]{16,100}$`(utils/csClientMsgId) — crypto 가 없는 브라우저에서도 생긴다.
+ */
+function _csNewClientMsgKey() {
+  try { if (typeof crypto !== 'undefined' && crypto && typeof crypto.randomUUID === 'function') return crypto.randomUUID(); } catch (_) {}
+  let hex = '';
+  try {
+    if (typeof crypto !== 'undefined' && crypto && typeof crypto.getRandomValues === 'function') {
+      const a = new Uint8Array(16); crypto.getRandomValues(a);
+      hex = Array.prototype.map.call(a, b => ('0' + b.toString(16)).slice(-2)).join('');
+    }
+  } catch (_) { hex = ''; }
+  if (!hex) for (let i = 0; i < 4; i++) hex += Math.floor(Math.random() * 0x100000000).toString(16).padStart(8, '0');
+  return 'scs-' + Date.now().toString(36) + '-' + hex;
+}
+/** 로그인 계정 구분값(토큰 본문의 id·username·name) — 다른 계정으로 바뀌면 같은 글이라도 새 키. 읽지 못하면 ''. */
+function _csStaffAccountFp() {
+  try {
+    const t = sessionStorage.getItem('admin_token') || '';
+    const part = t.split('.')[1];
+    if (!part) return '';
+    const bin = atob(part.replace(/-/g, '+').replace(/_/g, '/'));   // base64url + UTF-8(한글 이름) — workdesk parseJwt 와 같은 방식
+    const p = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0))));
+    return [p.id, p.username, p.name].map(v => (v == null ? '' : String(v))).join('|');
+  } catch (_) { return ''; }
+}
+function createCsStaffDraftKey() {
+  let cur = null;   // { fp, key }
+  return {
+    keyFor(parts) {
+      const fp = JSON.stringify([_csStaffAccountFp()].concat(parts || []));
+      if (!cur || cur.fp !== fp) cur = { fp, key: _csNewClientMsgKey() };
+      return cur.key;
+    },
+    settle(key) { if (cur && cur.key === key) cur = null; },
+  };
+}
+
 // ═══════════════════════════════════════════════════════════
 // gasGet — GAS doGet 대체 (GET 요청)
 // 기존 호출: gasGet({ action: "searchAll", query: "홍길동" })
