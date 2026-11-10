@@ -27,6 +27,7 @@ const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const { emitCsInquiry, emitCsReplyToReviewer, broadcast } = require('../utils/sse');
 const adminNickname = require('./adminNickname.service');
+const _csKey = require('../utils/csClientMsgId');   // 다시 보내기 키(결정 361·362 단일 출처)
 
 /** C/S 스레드 키 — 리뷰어 UI(`index.html`)·`/api/reviewer/cs/campaigns` 와 **같은 규칙**이어야
  *  이미 열려 있는 문의방에 이어 붙는다(다르면 같은 탭에 방이 두 개 생긴다). */
@@ -217,7 +218,11 @@ async function markReviewEditCancelled(r) {
 /* ★ `onError` 는 **가산 옵션**이다 — 반환 계약(성공 객체 | null)은 그대로 두고, 실패 사유만
      호출자에게 흘려보낸다. 이게 없으면 화면이 "보내지 못했습니다" 한 줄로 뭉개 원인을 감춘다
      (조용한 실패 금지). 기존 호출부는 넘기지 않으므로 동작 불변. */
-async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, phone8, message, by, card, imageUrls, onError } = {}) {
+/* ★ 결정 362 — `clientMsgId` 도 **가산 옵션**이다(작업보드 [리뷰어에게 메시지] 만 넘긴다). 넘기면 같은 방·같은 키
+     메시지가 이미 있을 때 새로 저장·실시간 알림·미확인 +1 없이 `{ threadId, messageId, duplicate:true }` 를 돌려주고,
+     같은 키인데 글·사진·보낸 사람이 다르면 저장 0 + onError(code 'cs_client_msg_conflict') + null.
+     안 넘기면(검수 반려·입금 실패 안내 등 기존 호출부) 동작 불변. */
+async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, phone8, message, by, clientMsgId, card, imageUrls, onError } = {}) {
   try {
     /* ★ 첨부는 **우리 프록시 주소만**(`utils/csImageUrls` 단일 출처) — 리뷰어 화면에 그대로 <img> 로 나간다. */
     const imgs = require('../utils/csImageUrls').sanitizeCsImageUrls(imageUrls);
@@ -227,6 +232,9 @@ async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, 
     const name = _clip(reviewerName || '리뷰어', 100);
     const text = _clip(String(message == null ? '' : message).trim(), 1000);
     const preview = _clip((text || `사진 ${imgs.length}장`).replace(/\n/g, ' '), 120);
+    // 카드가 있는 통지(검수 반려 사진 카드)는 키를 쓰지 않는다 — 키는 직원이 쓴 글(text)의 다시 보내기 전용.
+    const staffKey = card ? '' : _csKey.staffCsClientMsgKey(clientMsgId);
+    const senderName = _clip(by || '관리자', 100);   // DB 엔 로그인명(책임추적) — 표시 치환은 읽는 시점
 
     /* ★★ 방 생성 · 메시지 · 방 갱신은 **한 트랜잭션**이다 (실사고 2026-08-21).
        방을 먼저 만들고(그때 `last_message_preview` 까지 채운다) 메시지를 따로 넣던 구조라,
@@ -234,11 +242,12 @@ async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, 
        관리자 목록에는 보낸 것처럼 보이는데 열면 "아직 메시지가 없습니다" 인 상태(실측 신고).
        실패하면 통째로 되돌려 **그런 방이 아예 안 생기게** 한다. */
     const client = await pool.connect();
-    let threadId, mRows;
+    let threadId, mRows, dupOf = null, noKeyColumn = '';
     try {
     await client.query('BEGIN');
     const { rows: tRows } = await client.query(
-      `SELECT id FROM cs_threads WHERE reviewer_phone8=$1 AND campaign_key=$2`,
+      // 키가 있으면 그 방 줄을 잠근다 — 같은 방 동시 두 전송이 줄을 서서 뒤쪽이 앞쪽 저장을 본다(새 방은 아래 upsert 가 잠근다).
+      `SELECT id FROM cs_threads WHERE reviewer_phone8=$1 AND campaign_key=$2${staffKey ? ' FOR UPDATE' : ''}`,
       [phone8, campaignKey]
     );
     if (tRows.length) threadId = tRows[0].id;
@@ -256,7 +265,14 @@ async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, 
       threadId = rows[0].id;
     }
 
-    const senderName = _clip(by || '관리자', 100);   // DB 엔 로그인명(책임추적) — 표시 치환은 읽는 시점
+    if (staffKey) {
+      const { rows: found } = await client.query(_csKey.CS_FIND_STAFF_BY_KEY_SQL, [threadId, staffKey]);
+      if (found.length) dupOf = found[0];
+    }
+    if (dupOf) {
+      // ★ 이미 저장된 같은 글(응답만 못 받은 첫 전송) — 아무것도 바꾸지 않고 되돌린 뒤 그 메시지로 답한다.
+      await client.query('ROLLBACK');
+    } else {
     /* ★ 사진 카드(선택) — 교체요청 카드와 같은 구조(meta + 파일ID, 프론트가 신뢰 베이스로 URL 재구성).
        ★★ meta 는 리뷰어 응답에 **그대로 실린다** — 관리자 실명·시트 제목을 넣지 않는다(080 규율).
        ★ 파일ID 형식이 아닌 값은 버린다(잘못된 값이 <img> 로 나가지 않게). */
@@ -279,11 +295,11 @@ async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, 
        **23502 로 전건 실패**했고, 이 함수는 절대 throw 하지 않아 warn 로그로만 남아 있었다
        (실측 2026-08-21 — 로컬 PG16 재현). 컬럼 목록은 그대로 두고 SQL 에서 접는다. */
     ({ rows: mRows } = await client.query(
-      `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content, msg_type, meta, image_urls)
-       VALUES ($1,'admin',$2,$3,$4,COALESCE($5::jsonb,'{}'::jsonb),COALESCE($6::jsonb,'[]'::jsonb))
+      `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content, msg_type, meta, image_urls${staffKey ? ', client_msg_id' : ''})
+       VALUES ($1,'admin',$2,$3,$4,COALESCE($5::jsonb,'{}'::jsonb),COALESCE($6::jsonb,'[]'::jsonb)${staffKey ? ',$7' : ''})
        RETURNING id, created_at AS "createdAt"`,
       [threadId, senderName, text, meta ? 'inspect_result' : 'text', meta ? JSON.stringify(meta) : null,
-       JSON.stringify(imgs)]
+       JSON.stringify(imgs)].concat(staffKey ? [staffKey] : [])
     ));
     await client.query(
       `UPDATE cs_threads
@@ -293,10 +309,35 @@ async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, 
       [threadId, preview]
     );
     await client.query('COMMIT');
+    }
     } catch (e) {
       try { await client.query('ROLLBACK'); } catch (_) {}
-      throw e;                       // 바깥 catch 가 로그·onError·null 반환을 맡는다
+      if (staffKey && e && e.code === '23505' && threadId) {
+        // 부분 유일 색인(최후 방어선) — 다른 요청이 먼저 저장했다. 같은 연결로 다시 읽어 같은 처리.
+        try {
+          const { rows: again } = await client.query(_csKey.CS_FIND_STAFF_BY_KEY_SQL, [threadId, staffKey]);
+          if (again.length) dupOf = again[0];
+        } catch (_) { /* 아래 throw 로 */ }
+      }
+      if (!dupOf) {
+        if (!(staffKey && e && e.code === '42703')) throw e;   // 바깥 catch 가 로그·onError·null 반환을 맡는다
+        noKeyColumn = String(e.message || '42703');
+      }
     } finally { client.release(); }
+    if (noKeyColumn) {
+      // 칸이 없는 DB(migration 221 전) — 키 없이 종전 경로로 한 번 더(보내기는 살리고 중복 방지만 빠진다).
+      logger.warn(`[csBridge] client_msg_id 칸 없음(migration 221 미적용) — 중복 방지 없이 종전 경로로 보냄: ${noKeyColumn}`);
+      return postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, phone8, message, by, card, imageUrls, onError });
+    }
+    if (dupOf) {
+      if (!_csKey.sameStaffCsMessage(dupOf, { senderName, content: text, imageUrls: imgs })) {
+        const ce = new Error('같은 메시지를 다시 보내는 중 내용이 바뀌었어요. 한 번 더 보내 주세요.');
+        ce.code = _csKey.CS_CLIENT_MSG_CONFLICT;
+        throw ce;                      // 저장 0 — 바깥 catch 가 onError·null 반환을 맡는다
+      }
+      // ★ 이미 저장된 같은 글 — 실시간 알림·관리자 화면 갱신 방송을 다시 하지 않는다(이미 한 번 갔다).
+      return { threadId, messageId: dupOf.id, duplicate: true };
+    }
     /* ── 여기부터는 커밋된 뒤의 후처리(실시간 푸시) — 실패해도 저장은 남는다 ── */
     try {
       const nickMap = await adminNickname.getNicknameMap().catch(() => null);

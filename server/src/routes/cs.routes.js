@@ -183,7 +183,68 @@ router.get('/messages', async (req, res, next) => {
 });
 _handlers.csMessages = lastRouteHandler(router); // Track B 프록시가 이 이름으로 부른다(결정 270)
 
-// POST /api/cs/reply { threadId, content } — 관리자 답장
+// ── 직원 답장 다시 보내기 중복 방지(결정 362 · migration 221 칸 재사용) ──
+//   대화창이 쓴 답장 하나마다 키(clientMsgId)를 만들어, 같은 답장을 다시 보낼 때마다 같은 키를 싣는다.
+//   시간 초과·끊김으로 응답만 못 받은 첫 전송이 이미 저장됐으면, 다시 보내기는 **새로 저장·리뷰어 실시간 알림·
+//   다른 관리자 화면 갱신·리뷰어 미확인 +1·미리보기 갱신 없이** 저장된 답장을 성공으로 돌려준다.
+//   ★ 키가 없거나 모양이 틀리면 종전 경로 그대로(구버전 화면 = 동작 불변).
+//   ★ 저장 키는 `staff:` 접두(utils/csClientMsgId) — 같은 방의 리뷰어 키와 만드는 방식만으로 겹치지 않는다.
+const _csKey = require('../utils/csClientMsgId');
+// 관리자 답장 → 리뷰어 미확인 +1, 방 갱신(닫혀있었어도 last_message는 갱신) — 종전 경로와 키 경로가 같은 문장을 쓴다(사본 금지).
+const CS_REPLY_THREAD_BUMP_SQL = `UPDATE cs_threads
+         SET reviewer_unread_count = reviewer_unread_count + 1,
+             last_message_at = NOW(),
+             last_message_preview = $2,
+             updated_at = NOW()
+       WHERE id = $1`;
+/** 키가 있는 답장 — 한 트랜잭션 안에서 「문의방 줄 잠금 → 같은 키 확인 → 저장 → 방 갱신」.
+ *  ★ 같은 방 동시 두 답장은 방 줄 잠금(FOR UPDATE)에서 줄을 서고, 뒤에 선 쪽은 앞쪽이 COMMIT 한 답장을
+ *    다음 문장(READ COMMITTED 새 스냅숏)에서 본다. 최후 방어선 = 부분 유일 색인 → 23505 는 다시 읽어 같은 처리.
+ *  반환: { kind:'new', thread, row } | { kind:'dup', thread, row } | { kind:'conflict' } | { kind:'notFound' }
+ *        | null(칸이 아직 없는 DB — 종전 경로로 접는다: 보내기는 살리고 중복 방지만 빠진다). */
+async function _csReplyWithClientId({ threadId, senderName, content, imageUrls, staffKey }) {
+  const client = await pool.connect();
+  let thread = null;
+  const judge = (row) => (_csKey.sameStaffCsMessage(row, { senderName, content, imageUrls })
+    ? { kind: 'dup', thread, row } : { kind: 'conflict' });
+  try {
+    await client.query('BEGIN');
+    const { rows: tRows } = await client.query(
+      `SELECT id, reviewer_phone8 AS "reviewerPhone8", campaign_label AS "campaignLabel"
+       FROM cs_threads WHERE id = $1 LIMIT 1 FOR UPDATE`, [threadId]
+    );
+    if (tRows.length === 0) { await client.query('ROLLBACK'); return { kind: 'notFound' }; }
+    thread = tRows[0];
+    const { rows: found } = await client.query(_csKey.CS_FIND_STAFF_BY_KEY_SQL, [threadId, staffKey]);
+    if (found.length) { await client.query('ROLLBACK'); return judge(found[0]); }
+    const { rows: mRows } = await client.query(
+      `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content, image_urls, client_msg_id)
+       VALUES ($1, 'admin', $2, $3, $4::jsonb, $5) RETURNING id, created_at AS "createdAt"`,
+      [threadId, senderName, content, JSON.stringify(imageUrls), staffKey]
+    );
+    await client.query(CS_REPLY_THREAD_BUMP_SQL, [threadId, (content || `사진 ${imageUrls.length}장`).slice(0, 120)]);
+    await client.query('COMMIT');
+    return { kind: 'new', thread, row: mRows[0] };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* 이미 정리됨 */ }
+    if (err && err.code === '42703') {
+      logger.warn(`[cs] client_msg_id 칸 없음(migration 221 미적용) — 중복 방지 없이 종전 경로로 답장: ${err.message}`);
+      return null;
+    }
+    if (err && err.code === '23505' && thread) {
+      // 같은 연결로 다시 읽는다(ROLLBACK 뒤라 자동 커밋 — 연결을 하나 더 빌리지 않는다).
+      const { rows: again } = await client.query(_csKey.CS_FIND_STAFF_BY_KEY_SQL, [threadId, staffKey]);
+      if (again.length) return judge(again[0]);
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// POST /api/cs/reply { threadId, content, imageUrls?, clientMsgId? } — 관리자 답장
+//   clientMsgId(결정 362): 같은 답장의 다시 보내기면 저장된 답장을 { ok:true, message, duplicate:true } 로 돌려준다.
+//   같은 키인데 글·사진·보낸 사람이 다르면 409 { ok:false, code:'cs_client_msg_conflict' } — 접어서 성공으로 답하지 않는다.
 router.post('/reply', async (req, res, next) => {
   try {
     const b = req.body || {};
@@ -193,37 +254,56 @@ router.post('/reply', async (req, res, next) => {
     if (!threadId) return res.status(400).json({ ok: false, error: 'threadId가 필요합니다.' });
     if (!content && imageUrls.length === 0) return res.status(400).json({ ok: false, error: '메시지 내용이 비어 있습니다.' });
 
-    const { rows: tRows } = await pool.query(
-      `SELECT id, reviewer_phone8 AS "reviewerPhone8", campaign_label AS "campaignLabel"
-       FROM cs_threads WHERE id = $1 LIMIT 1`, [threadId]
-    );
-    if (tRows.length === 0) return res.status(404).json({ ok: false, error: '문의방을 찾을 수 없습니다.' });
-    const thread = tRows[0];
     // ★ 저장은 로그인명 그대로 — 닉네임은 읽는 시점에 붙인다(닉네임을 바꾸면 과거 답장까지 함께 바뀜)
     const senderName = req.admin?.name || '관리자';
-    const nickMap = await adminNickname.getNicknameMap();
+    const staffKey = _csKey.staffCsClientMsgKey(b.clientMsgId);
+    // 닉네임 표는 저장 전에 읽는다(종전 순서와 같다 — 읽기 실패면 아무것도 저장하지 않고 500).
+    let nickMap = staffKey ? await adminNickname.getNicknameMap() : null;
+    const keyed = staffKey
+      ? await _csReplyWithClientId({ threadId, senderName, content, imageUrls, staffKey })
+      : null;
+    if (keyed && keyed.kind === 'notFound') return res.status(404).json({ ok: false, error: '문의방을 찾을 수 없습니다.' });
+    if (keyed && keyed.kind === 'conflict') {
+      return res.status(409).json({ ok: false, code: _csKey.CS_CLIENT_MSG_CONFLICT,
+        error: '같은 답장을 다시 보내는 중 내용이 바뀌었어요. 한 번 더 보내 주세요.' });
+    }
+    if (keyed && keyed.kind === 'dup') {
+      // ★ 이미 저장된 답장 — 리뷰어 실시간 알림·관리자 화면 갱신 방송·미확인 +1 을 다시 하지 않는다.
+      const r = keyed.row;
+      return res.json({ ok: true, duplicate: true, message: {
+        id: r.id, threadId, senderRole: 'admin',
+        senderName: adminNickname.toAdminName(r.senderName || senderName, nickMap),
+        content: r.content, imageUrls: Array.isArray(r.imageUrls) ? r.imageUrls : [], createdAt: r.createdAt,
+      } });
+    }
 
-    const { rows: mRows } = await pool.query(
-      `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content, image_urls)
-       VALUES ($1, 'admin', $2, $3, $4::jsonb) RETURNING id, created_at AS "createdAt"`,
-      [threadId, senderName, content, JSON.stringify(imageUrls)]
-    );
+    let thread, mRow;
+    if (keyed) {
+      ({ thread, row: mRow } = keyed);
+    } else {
+      // 종전 경로(키 없음 · 구버전 화면 · 칸 없는 DB) — 동작 불변
+      const { rows: tRows } = await pool.query(
+        `SELECT id, reviewer_phone8 AS "reviewerPhone8", campaign_label AS "campaignLabel"
+         FROM cs_threads WHERE id = $1 LIMIT 1`, [threadId]
+      );
+      if (tRows.length === 0) return res.status(404).json({ ok: false, error: '문의방을 찾을 수 없습니다.' });
+      thread = tRows[0];
+      nickMap = await adminNickname.getNicknameMap();
+
+      const { rows: mRows } = await pool.query(
+        `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content, image_urls)
+         VALUES ($1, 'admin', $2, $3, $4::jsonb) RETURNING id, created_at AS "createdAt"`,
+        [threadId, senderName, content, JSON.stringify(imageUrls)]
+      );
+      mRow = mRows[0];
+
+      await pool.query(CS_REPLY_THREAD_BUMP_SQL, [threadId, (content || `사진 ${imageUrls.length}장`).slice(0, 120)]);
+    }
     const message = {
-      id: mRows[0].id, threadId, senderRole: 'admin',
+      id: mRow.id, threadId, senderRole: 'admin',
       senderName: adminNickname.toAdminName(senderName, nickMap),   // 관리자 화면
-      content, imageUrls, createdAt: mRows[0].createdAt,
+      content, imageUrls, createdAt: mRow.createdAt,
     };
-
-    // 관리자 답장 → 리뷰어 미확인 +1, 방 갱신(닫혀있었어도 last_message는 갱신)
-    await pool.query(
-      `UPDATE cs_threads
-         SET reviewer_unread_count = reviewer_unread_count + 1,
-             last_message_at = NOW(),
-             last_message_preview = $2,
-             updated_at = NOW()
-       WHERE id = $1`,
-      [threadId, (content || `사진 ${imageUrls.length}장`).slice(0, 120)]
-    );
 
     // 해당 리뷰어에게만 실시간 푸시 + 다른 관리자 세션 갱신용 브로드캐스트
     // ★ 리뷰어에게 가는 실시간 푸시는 반드시 리뷰어용 이름으로(실명 유출 경로가 여기에도 있다)

@@ -79,7 +79,8 @@ ok('드래그오버는 파일 드래그일 때만 반응(텍스트 드래그로 
 console.log('\n④ 전송 규칙 · 배선');
 ok('업로드 중이면 전송 차단(리뷰어측과 동일 규칙)',
   /_csPending\.some\(p => !p\.url\)/.test(appJs) && /사진 업로드가 끝나면 전송할 수 있어요/.test(appJs));
-ok('전송 시 imageUrls 동봉', /gasPost\(\{ action: "csAdminReply", threadId, content, imageUrls \}\)/.test(appJs));
+// 결정 362: 같은 호출에 다시 보내기 키(clientMsgId)가 뒤에 더 실린다 — 검사 의미(imageUrls 동봉) 불변.
+ok('전송 시 imageUrls 동봉', /gasPost\(\{ action: "csAdminReply", threadId, content, imageUrls(, clientMsgId)? \}\)/.test(appJs));
 ok('실패 시 첨부 복구(전송 실패해도 사진 안 사라짐)', /_csPending = sentAttach; csRenderAttachBar\(\);/.test(appJs));
 ok('방 전환 시 이전 첨부 폐기(다른 방에 잘못 붙는 사고 방지)', /_csPending = \[\];   \/\/ 방을 바꾸면 이전 첨부는 버린다/.test(appJs));
 ok('api.js 액션 매핑(csAdminUpload)', /'csAdminUpload':\s*\{ method: 'POST', path: '\/api\/cs\/upload' \}/.test(apiJs));

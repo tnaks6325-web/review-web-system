@@ -11460,6 +11460,13 @@ async function _msSendConfirmed(){
    ★ 광고주에게는 메뉴를 그리지 않는다(서버도 internalMiddleware 로 막는다). */
 let _RM=null;
 const _RM_MAX_FILES=5, _RM_MAX_ONE=8*1024*1024;
+/* 다시 보내기 키(결정 362) — api.js 가 이 스크립트보다 뒤에 실리므로 처음 보낼 때 만든다. 없으면 키 없이 종전 동작. */
+function _rmDraftKeyer(){ if(!_rmDraftKeyer.k&&typeof createCsStaffDraftKey==='function') _rmDraftKeyer.k=createCsStaffDraftKey(); return _rmDraftKeyer.k||null; }
+/* 응답을 받았으면(성공·부분 성공) 그 글의 키는 끝 · 같은 키·다른 내용(cs_client_msg_conflict)이면 버려 다음 누름은 새 키로.
+   통신 실패·전부 실패면 키를 그대로 둔다(그대로 다시 누르면 같은 키 → 이미 받은 방에는 두 번 가지 않는다). */
+function _rmSettleKey(keyer,key,d){
+  if(keyer&&d&&(d.ok!==false||(d.sent&&d.sent.length)||(d.failed||[]).some(x=>x&&x.code==='cs_client_msg_conflict'))) keyer.settle(key);
+}
 function _rmClose(){
   const o=document.getElementById('rmOv');
   if(_RM) (_RM.files||[]).forEach(f=>{ try{ if(f.thumb) URL.revokeObjectURL(f.thumb); }catch(_){ } });
@@ -11692,12 +11699,17 @@ async function _rmSend(){
   const oks=(_RM.items||[]).filter(x=>x.ok);
   // ★ 미리보기에서 본 대상 그대로 보낸다 — 그 사이 바뀌었으면 서버가 그 건을 보내지 않는다(TOCTOU).
   const expect={}; oks.forEach(x=>{ expect[x.participantId]=x.phone8; });
+  /* ★ 결정 362 — 같은 글을 같은 줄들에 다시 보내면 같은 키. 응답만 못 받은 첫 전송이 저장됐으면 서버가 그 방에는
+       새로 넣지 않고(보낸 것으로 센다) 못 받은 사람에게만 보낸다. 글·사진·대상 줄을 바꾸면 새 키. */
+  const keyer=_rmDraftKeyer(), pids=oks.map(x=>x.participantId);
+  const clientMsgId=keyer?keyer.keyFor([_RM.sheetId,_RM.tabName,pids,content,imageUrls]):'';
   _RM.busy=true; _rmPaintFoot();
   let d=null;
   try{
     d=await api('/api/trackb/cs/notify-participants',{method:'POST',body:JSON.stringify({
-      sheetId:_RM.sheetId, tabName:_RM.tabName, participantIds:oks.map(x=>x.participantId), content, imageUrls, expect })});
+      sheetId:_RM.sheetId, tabName:_RM.tabName, participantIds:pids, content, imageUrls, expect, clientMsgId })});
   }catch(e){ d={ok:false,error:'전송 실패 — '+(e.message||'네트워크 오류')}; }
+  _rmSettleKey(keyer,clientMsgId,d);
   if(!_RM) return;
   _RM.busy=false;
   if(!d||(d.ok===false&&!(d.sent&&d.sent.length))){
