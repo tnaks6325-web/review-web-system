@@ -379,8 +379,8 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
     return Number(rows[0] && rows[0].n) || 0;
   }
 
-  async function ensureState(row, deadline, now) {
-    await db.query(`
+  async function ensureState(row, deadline, now, q = db) {
+    await q.query(`
       INSERT INTO review_reminder_states
         (order_submission_id, review_index_id, sheet_id, tab_name, row_index, reviewer_name,
          phone8, product_name, review_deadline_at, created_at, updated_at)
@@ -393,6 +393,71 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
         updated_at=EXCLUDED.updated_at`,
       [row.orderSubmissionId, row.reviewIndexId, row.sheetId, row.tabName, row.rowIndex,
        row.reviewerName || '', row.phone8 || '', row.productName || row.campaignName || '', deadline, now]);
+  }
+
+  /**
+   * ★ 결정 365 — 원장 줄(= 이 회차 발송 선점) 넣기를 그 주문의 상태 줄 잠금 안에서 한다.
+   *   미리보기(_summarizePreview) 와 원장 INSERT 사이에 잠금이 없으면, 같은 줄을 동시에 보내는 두 요청
+   *   (두 담당자 · 키 없는 구버전 화면 · 크론 + 담당자)이 둘 다 「보낼 수 있음」을 보고 둘 다 공급자를 부른다.
+   *   ① BEGIN → 상태 줄 upsert + FOR UPDATE(주문당 한 줄 = 직렬화 지점 · 스키마 변경 0)
+   *   ② 「미리보기 뒤 바뀐 것」만 다시 본다 — 상태가 대기 아님 · 회차가 올라감 · 이 회차 원장 줄이 'accepted'/'delivered'
+   *      · 미리보기가 본 것보다 새 시도가 있음 → 보내지 않음(sent_by_other_before_send). 판정 규칙 자체는 미리보기 한 벌.
+   *   ③ 원장 줄 INSERT('accepted') → COMMIT. 공급자 호출은 **COMMIT 뒤**(잠금을 외부 호출 동안 잡지 않는다).
+   *   잠금 대기는 lock_timeout 5초로 자른다(넘으면 보내지 않음 · reminder_busy_before_send) — 정상이면 ms 단위.
+   *   유일 색인 충돌(23505)도 던지지 않고 보내지 않음으로 접는다(fail-closed). 그 밖 오류는 종전처럼 던진다.
+   */
+  async function _claimDelivery(item, { deadline, now, finalDue, variables, templateId }) {
+    const { row, phone, reminderNo } = item;
+    const client = typeof db.connect === 'function' ? await db.connect() : db;
+    let open = false;
+    try {
+      await client.query('BEGIN');
+      open = true;
+      await client.query("SET LOCAL lock_timeout = '5s'");
+      await ensureState(row, deadline, now, client);
+      const { rows: st } = await client.query(`
+        SELECT review_status AS "reviewStatus", reminder_count::int AS "reminderCount"
+          FROM review_reminder_states WHERE order_submission_id=$1 FOR UPDATE`, [row.orderSubmissionId]);
+      const { rows: att } = await client.query(`
+        SELECT COALESCE(MAX(attempt_no),0)::int + 1 AS n,
+               COALESCE(BOOL_OR(provider_status IN ('accepted','delivered')), FALSE) AS taken,
+               MAX(requested_at) AS "latestAt"
+          FROM review_reminder_deliveries
+         WHERE order_submission_id=$1 AND reminder_no=$2`, [row.orderSubmissionId, reminderNo]);
+      const s = st[0] || {};
+      const a = att[0] || {};
+      const count = s.reminderCount == null ? Number(row.reminderCount || 0) : Number(s.reminderCount);
+      const seenAt = row.latestAttemptAt ? new Date(row.latestAttemptAt).getTime() : null;
+      const nowAt = a.latestAt ? new Date(a.latestAt).getTime() : null;
+      let blocked = null;
+      if (s.reviewStatus && s.reviewStatus !== 'pending') blocked = 'review_not_pending_before_send';
+      else if (count !== reminderNo - 1 || a.taken || (nowAt != null && (seenAt == null || nowAt > seenAt))) blocked = 'sent_by_other_before_send';
+      if (blocked) {
+        open = false;
+        await client.query('ROLLBACK');
+        return { blocked };
+      }
+      const attemptNo = Number(a.n) || 1;
+      const { rows: inserted } = await client.query(`
+        INSERT INTO review_reminder_deliveries
+          (order_submission_id, reminder_no, attempt_no, template_name, template_id,
+           target_phone, template_variables, provider_status, final_due_at, requested_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,'accepted',$8,$9)
+        RETURNING id`,
+        [row.orderSubmissionId, reminderNo, attemptNo, TEMPLATE_NAMES[reminderNo], templateId,
+         phone, JSON.stringify(variables), finalDue, now]);
+      open = false;
+      await client.query('COMMIT');
+      return { id: inserted[0].id };
+    } catch (err) {
+      if (open) { try { await client.query('ROLLBACK'); } catch (_) { /* noop */ } }
+      const code = String((err && err.code) || '');
+      if (code === '23505') return { blocked: 'sent_by_other_before_send' };
+      if (code === '55P03') return { blocked: 'reminder_busy_before_send' };
+      throw err;
+    } finally {
+      if (client !== db && typeof client.release === 'function') client.release();
+    }
   }
 
   async function sendOne(item, config, now) {
@@ -416,23 +481,10 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
     if (cancelled.rows.length) return { sent: false, reason: 'cancelled_before_send' };
     const finalDue = reminderNo === 3 ? _addKstDaysEnd(now, config.finalGraceDays) : null;
     const variables = buildTemplateVariables(reminderNo, row, deadline, finalDue, config.reviewLink);
-    await ensureState(row, deadline, now);
-
-    const { rows: attempts } = await db.query(`
-      SELECT COALESCE(MAX(attempt_no),0)::int + 1 AS n
-        FROM review_reminder_deliveries
-       WHERE order_submission_id=$1 AND reminder_no=$2`, [row.orderSubmissionId, reminderNo]);
-    const attemptNo = Number(attempts[0] && attempts[0].n) || 1;
     const templateId = provider._config ? provider._config().templateIds[reminderNo] : `configured-${reminderNo}`;
-    const { rows: inserted } = await db.query(`
-      INSERT INTO review_reminder_deliveries
-        (order_submission_id, reminder_no, attempt_no, template_name, template_id,
-         target_phone, template_variables, provider_status, final_due_at, requested_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,'accepted',$8,$9)
-      RETURNING id`,
-      [row.orderSubmissionId, reminderNo, attemptNo, TEMPLATE_NAMES[reminderNo], templateId,
-       phone, JSON.stringify(variables), finalDue, now]);
-    const deliveryId = inserted[0].id;
+    const claim = await _claimDelivery(item, { deadline, now, finalDue, variables, templateId });
+    if (claim.blocked) return { sent: false, reason: claim.blocked };
+    const deliveryId = claim.id;
 
     try {
       const response = await provider.sendReviewAlimTalk({
