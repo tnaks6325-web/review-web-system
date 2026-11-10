@@ -56,6 +56,25 @@ pool.query = async (sql, params) => {
   if (failNext) { const e = failNext(sql); if (e) { failNext = null; throw e; } }
   const rel = await lock(); try { return await db.query(sql, params); } finally { rel(); }
 };
+// 결정 366 — 문자 선점은 번호 잠금 트랜잭션(BEGIN~COMMIT)으로 간다. PGlite 는 연결 하나라 트랜잭션 동안 줄을 독점한다
+// (advisory 잠금이 하는 일의 모형 · 실제 잠금 대기는 sameTextWindow 테스트의 실 PostgreSQL 갈래가 본다).
+pool.connect = async () => {
+  let held = null;
+  return {
+    async query(sql, params) {
+      const s = String(sql).trim();
+      if (failNext) { const e = failNext(s); if (e) { failNext = null; throw e; } }
+      if (/^BEGIN/i.test(s) && !held) held = await lock();
+      const rel = held ? null : await lock();
+      try { return await db.query(sql, params); }
+      finally {
+        if (rel) rel();
+        if (/^(COMMIT|ROLLBACK)/i.test(s) && held) { const h = held; held = null; h(); }
+      }
+    },
+    release() { if (held) { const h = held; held = null; h(); } },
+  };
+};
 
 // ── 공급자·주변 흉내(실제 발송 업체는 절대 부르지 않는다) ──
 const solapi = require(path.join(SERVER, 'src/services/solapi.service'));
@@ -153,10 +172,17 @@ const fnSrc = (src, name, prefix = 'function ') => {
   /* ── B. 실제 라우트 · 문자 ── */
   {
     await freshDb();
+    // ★ 결정 366 이후: 키 없음(구버전 화면)도 같은 번호·같은 글 10분 막기를 탄다 — 키 판정(364)만 빠진다.
+    //   「키 없음 = 364 다시 보내기 판정 없음」은 창을 끈 상태(0)에서 본다(검사 의미 불변 · 창 규칙은 manualSmsSameTextWindow.test.js).
+    process.env.MANUAL_SMS_SAME_TEXT_WINDOW_MIN = '0';
     let r1 = await send(smsBody());
     let r2 = await send(smsBody());
-    ok('키 없음 = 종전 그대로(두 번 누르면 두 번 발송 · 구버전 화면)', smsCalls.length === 2 && r1.body.ok && r2.body.ok);
-    ok('키 없음 기록은 키 칸 NULL', (await rowsOf()).every(x => x.key === null && x.state === null));
+    ok('키 없음 = 364 키 판정 없음(창 끔 상태에서 두 번 누르면 두 번 발송 · 구버전 화면)', smsCalls.length === 2 && r1.body.ok && r2.body.ok);
+    ok('키 없음 기록은 키 칸 NULL · 결과 sent(결정 366: 공급자 전 선점 줄)', (await rowsOf()).every(x => x.key === null && x.state === 'sent'));
+    delete process.env.MANUAL_SMS_SAME_TEXT_WINDOW_MIN;
+    await freshDb();
+    await send(smsBody()); const r3 = await send(smsBody());
+    ok('키 없음 + 창 켬(기본 10분) = 같은 글 두 번째는 보내지 않음(결정 366)', smsCalls.length === 1 && r3.body.results[0].code === 'manual_sms_same_text_window');
 
     await freshDb();
     const first = await send(smsBody({ clientSendId: K1 }));   // ← 이 응답이 화면까지 못 갔다고 친다
@@ -166,8 +192,8 @@ const fnSrc = (src, name, prefix = 'function ') => {
     ok('★ 응답 유실 뒤 같은 키 다시 보내기 = 공급자 호출 0(총 1번) · 문의방 기록도 1번', smsCalls.length === 1 && rooms.length === 1);
     ok('다시 보내기 응답 = 「보냄」(duplicate:true) · 200', again.status === 200 && again.body.ok === true && again.body.results[0].sent === true && again.body.results[0].duplicate === true);
     ok('기록은 한 사람 한 줄', (await rowsOf()).length === 1);
-    const other = await send(smsBody({ clientSendId: K2 }));
-    ok('새 키(= 화면이 새로 쓴 발송) = 새로 보낸다', smsCalls.length === 2 && other.body.results[0].sent === true && !other.body.results[0].duplicate);
+    const other = await send(smsBody({ clientSendId: K2, text: '리뷰 부탁드립니다 (다시 안내)' }));
+    ok('새 키(= 화면이 새로 쓴 발송 · 글이 다름) = 새로 보낸다', smsCalls.length === 2 && other.body.results[0].sent === true && !other.body.results[0].duplicate);
 
     // 같은 키·다른 글 / 다른 보낸 사람 = 409, 공급자 0
     const c1 = await send(smsBody({ clientSendId: K1, text: '고친 글' }));
@@ -409,7 +435,9 @@ const fnSrc = (src, name, prefix = 'function ') => {
     ok('서버 키 모양 = utils/csClientMsgId 단일 출처(정규식 사본 0)', /require\('\.\.\/utils\/csClientMsgId'\)/.test(src) && !/\[A-Za-z0-9_-\]\{16,100\}/.test(src));
     ok('선점(INSERT … ON CONFLICT DO NOTHING)이 공급자 호출보다 앞선다(문자)', (() => {
       const body = fnSrc(src, '_sendManualSmsKeyed', 'async function ');
-      return body.indexOf('_claim(') > -1 && body.indexOf('_claim(') < body.indexOf('solapi.sendSms(');
+      // 결정 366: 문자 선점은 번호 잠금 트랜잭션(_claimSmsTx → _claim) — 검사 의미 불변(선점이 공급자 호출보다 앞선다)
+      const tx = fnSrc(src, '_claimSmsTx', 'async function ');
+      return body.indexOf('_claimSmsTx(') > -1 && body.indexOf('_claimSmsTx(') < body.indexOf('solapi.sendSms(') && /await _claim\(c, client\)/.test(tx);
     })());
     ok('선점이 공급자 호출보다 앞선다(알림톡)', (() => {
       const body = fnSrc(src, '_sendManualAlimtalkKeyed', 'async function ');

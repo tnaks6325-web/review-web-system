@@ -37,6 +37,18 @@ pool.query = async (sql, params) => {
   if (/INSERT INTO app_settings/.test(sql)) { SETTINGS.set(params[0], params[1]); return { rowCount: 1 }; }
   throw new Error('예상하지 못한 쿼리: ' + sql.slice(0, 80));
 };
+// 결정 366 — 문자 선점은 번호 잠금 트랜잭션 연결로 간다(BEGIN·잠금·같은 글 창 조회·COMMIT). 이 가드는 창 판정과 무관 —
+// 창 조회는 0건, 나머지(선점 INSERT)는 위 정규식 db 로 넘긴다(검사 의미 불변: 발송 기록 1줄·누가·무엇을).
+const origConnect = pool.connect;
+pool.connect = async () => ({
+  query: async (sql, params) => {
+    if (/^\s*(BEGIN|COMMIT|ROLLBACK|SET LOCAL)/i.test(sql) || /pg_advisory_xact_lock/.test(sql)) return { rows: [], rowCount: 0 };
+    if (/FROM manual_message_sends/.test(sql)) return { rows: [], rowCount: 0 };
+    if (/INSERT INTO manual_message_sends/.test(sql)) { logs.push(params); return { rows: [{ id: 'row' + logs.length }], rowCount: 1 }; }
+    return pool.query(sql, params);
+  },
+  release() {},
+});
 
 (async () => {
   console.log('\n▶ ① 문자');
@@ -272,6 +284,6 @@ pool.query = async (sql, params) => {
   }
   ok('문안으로 보낸 상품명을 그 작업 이름으로 기억한다', /_msTplProduct\(text\)[\s\S]{0,300}save:true/.test(wd));
   console.log(`\n✅ manualMessageSend: ${passed}개 통과`);
-  pool.query = origQuery;
+  pool.query = origQuery; pool.connect = origConnect;
   process.exit(0);
 })().catch(e => { console.error('❌', e.message); process.exit(1); });

@@ -157,6 +157,108 @@ function _sendFp({ kind, sheetId, tabName, text, by }) {
     .update(JSON.stringify([String(kind || ''), String(sheetId || ''), String(tabName || ''), String(text || '').trim(), String(by || '')]))
     .digest('hex');
 }
+/* ══ 같은 번호·같은 글 N분 안 다시 보내기 막기 (결정 366 · 사장님 확정 2026-11-10 · 스키마 변경 0) ══
+   ★ 키(결정 364)와 무관하게 모든 수동 문자에 적용 — 새 화면(키 있음)·구버전 화면(키 없음)·다른 담당자 모두.
+   ★ 같은 사람 = 받는 번호 숫자만(참여 줄·본계정/타계정과 무관) · 같은 글 = 실제로 나가는 최종 글(안내 문구 포함)을
+     앞뒤 공백 자르고 공백·줄바꿈 묶음을 한 칸으로 본 것.
+   ★ 막는 앞선 기록 = 창(기본 10분) 안의 sent·pending(보내는 중)·unknown(결과 모름) · 종전 경로 기록(send_state 없음)은 accepted 만.
+     확실한 실패(failed · 종전 기록의 accepted=false)는 막지 않는다.
+   ★ 동시에 두 요청 — 짧은 트랜잭션: 번호 advisory 잠금(lock_timeout 5초) → 창 안 기록 확인 → '대기' 줄 선점 → COMMIT
+     → 공급자 호출은 잠금 밖(결정 364·365 와 같은 「선점 → 호출」 모양). 둘째는 첫째의 '대기' 줄을 보고 보내지 않는다.
+   ★ 같은 키 다시 보내기는 364 결과(보냄=duplicate · 결과 모름 · 처리 중)가 우선 — 자기 키 줄이 있으면(확실한 실패 제외) 창 판정을 하지 않는다. */
+const SMS_WINDOW_ENV = 'MANUAL_SMS_SAME_TEXT_WINDOW_MIN';
+const SMS_WINDOW_DEFAULT_MIN = 10;
+const SMS_WINDOW_MAX_MIN = 24 * 60;
+const SMS_SAME_TEXT = 'manual_sms_same_text_window';
+const SMS_BUSY = 'manual_sms_busy';
+/** 창(분) — 환경변수(Railway Variables). 비었거나 잘못된 값 = 기본 10분(보호를 끄지 않는 쪽) · 0 = 규칙 끔 · 상한 1440. */
+function smsSameTextWindowMin(env = process.env) {
+  const raw = env[SMS_WINDOW_ENV];
+  if (raw == null || String(raw).trim() === '') return SMS_WINDOW_DEFAULT_MIN;
+  const n = Number(String(raw).trim());
+  if (!Number.isFinite(n) || n < 0) return SMS_WINDOW_DEFAULT_MIN;
+  return Math.min(SMS_WINDOW_MAX_MIN, Math.floor(n));
+}
+function smsPhoneKey(phone) { return String(phone || '').replace(/[^0-9]/g, ''); }
+function smsTextKey(text) { return String(text || '').trim().replace(/\s+/g, ' '); }
+/** 막혔을 때 결과 목록에 그대로 나가는 한국어(화면 수정 0 — 화면은 r.reason 을 그린다). */
+function smsWindowReason({ state, ageSec, windowMin }) {
+  const ago = Math.floor(Math.max(0, ageSec) / 60);
+  const left = Math.max(1, Math.ceil((windowMin * 60 - Math.max(0, ageSec)) / 60));
+  const when = ago < 1 ? '방금' : `${ago}분 전에`;
+  const tail = `두 번 나가지 않게 이번에는 보내지 않았습니다. 꼭 다시 보내야 하면 ${left}분 뒤에 보내거나 내용을 고쳐 주세요`;
+  if (state === 'pending') return `같은 번호로 같은 문자를 ${when} 보내기 시작해 아직 처리 중입니다 — ${tail}`;
+  if (state === 'unknown') return `같은 번호로 같은 문자를 ${when} 보냈는데 결과를 확인하지 못했습니다(이미 받았을 수 있습니다) — ${tail}`;
+  return `같은 번호로 같은 문자를 ${when} 보냈습니다 — ${tail}`;
+}
+const SMS_BUSY_MSG = '같은 번호로 문자를 보내는 다른 요청이 처리 중입니다 — 두 번 나가지 않게 이번에는 보내지 않았습니다. 잠시 뒤 창을 다시 열어 확인한 뒤 보내 주세요';
+/** 창 안에 같은 번호·같은 글의 「보냈거나 보냈을 수 있는」 기록이 있나 — 트랜잭션 안(번호 잠금 뒤)에서만 부른다. */
+async function _smsWindowHit(db, { phoneKey, text, windowMin }) {
+  const { rows } = await db.query(
+    `SELECT message_text AS text, send_state AS state,
+            GREATEST(0, EXTRACT(EPOCH FROM (NOW() - COALESCE(send_state_at, created_at))))::float8 AS "ageSec"
+       FROM manual_message_sends
+      WHERE kind = 'sms'
+        AND regexp_replace(target_phone, '[^0-9]', '', 'g') = $1
+        AND COALESCE(send_state_at, created_at) > NOW() - make_interval(secs => $2)
+        AND (send_state IN ('sent', 'pending', 'unknown') OR (send_state IS NULL AND accepted))
+      ORDER BY COALESCE(send_state_at, created_at) DESC
+      LIMIT 200`, [phoneKey, windowMin * 60]);
+  const want = smsTextKey(text);
+  const hit = rows.find(r => smsTextKey(r.text) === want);
+  if (!hit) return null;
+  const ageSec = Number(hit.ageSec) || 0;
+  const state = hit.state === 'pending' && ageSec * 1000 >= PENDING_STALE_MS ? 'unknown' : (hit.state || 'sent');
+  return { state, ageSec };
+}
+const _CLAIM_NOKEY_SQL = `
+  INSERT INTO manual_message_sends
+    (kind, sheet_id, tab_name, participant_id, order_submission_id, reviewer_name, target_phone,
+     message_text, message_type, reminder_no, accepted, provider_message_id, provider_reason, sent_by, send_state, send_state_at)
+  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'pending',NOW())
+  RETURNING id`;
+/**
+ * 문자 한 사람 선점(키 있음·없음 공용) — 번호 잠금 안에서 창 판정 후 '대기' 줄을 넣고 COMMIT.
+ * → _claim 과 같은 모양 + { window:{state,ageSec} } | { lockBusy }
+ * ★ 공급자 호출 전에만 부른다 · 칸·색인 없음(42703·42P10)은 그대로 던진다(호출부가 종전 경로로 접는다).
+ */
+async function _claimSmsTx(c) {
+  const windowMin = smsSameTextWindowMin();
+  const phoneKey = smsPhoneKey(c.targetPhone);
+  const client = await pool.connect();
+  let open = false;
+  try {
+    await client.query('BEGIN'); open = true;
+    await client.query(`SET LOCAL lock_timeout = '5s'`);
+    if (windowMin > 0 && phoneKey) {
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext('manual_sms_same_text'), hashtext($1))`, [phoneKey]);
+      let own = null;
+      if (c.key) {
+        const r = await client.query(`SELECT send_state AS state FROM manual_message_sends WHERE client_send_id = $1 AND participant_id = $2 LIMIT 1`,
+          [c.key, String(c.participantId)]);
+        own = r.rows[0] || null;
+      }
+      // 같은 키 줄이 있으면(확실한 실패 제외) 364 결과가 우선 — 창 판정 없이 _claim 이 dup/결과 모름/처리 중을 돌려준다.
+      if (!own || own.state === 'failed') {
+        const hit = await _smsWindowHit(client, { phoneKey, text: c.text, windowMin });
+        if (hit) { await client.query('ROLLBACK'); open = false; return { window: { ...hit, windowMin } }; }
+      }
+    }
+    const out = c.key
+      ? await _claim(c, client)
+      : { own: (await client.query(_CLAIM_NOKEY_SQL, [c.kind, c.sheetId, c.tabName, String(c.participantId), '', c.reviewerName || '',
+          c.targetPhone || '', c.text || '', '', null, false, null, '', c.by || ''])).rows[0].id, fresh: true };
+    await client.query('COMMIT'); open = false;
+    return out;
+  } catch (e) {
+    if (open) await client.query('ROLLBACK').catch(() => {});
+    if (e && String(e.code || '') === '55P03') return { lockBusy: true };
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 /** 같은 키·다른 내용이 이미 있나(요청 맨 앞 · 칸이 없으면 42703 을 던져 호출부가 종전 경로로). */
 async function _keyConflict(key, fp) {
   const { rows } = await pool.query(
@@ -173,13 +275,14 @@ const _CLAIM_SQL = `
 /**
  * 한 사람 선점 — { own:id, fresh } | { dup:row } | { conflict } | { busy, stale } | { unknown } | { error }
  * ★ 공급자 호출 전에만 부른다. 칸·색인 없음(42703·42P10)은 그대로 던진다(호출부가 첫 사람에서 종전 경로로 접는다).
+ * ★ db = 문자는 번호 잠금 트랜잭션의 연결(_claimSmsTx · 결정 366), 알림톡은 풀.
  */
-async function _claim(c) {
+async function _claim(c, db = pool) {
   for (let tries = 0; tries < 2; tries++) {
-    const ins = await pool.query(_CLAIM_SQL, [c.kind, c.sheetId, c.tabName, String(c.participantId), c.reviewerName || '',
+    const ins = await db.query(_CLAIM_SQL, [c.kind, c.sheetId, c.tabName, String(c.participantId), c.reviewerName || '',
       c.targetPhone || '', c.text || '', c.type || '', c.by || '', c.key, c.fp]);
     if (ins.rows && ins.rows[0]) return { own: ins.rows[0].id, fresh: true };
-    const { rows } = await pool.query(
+    const { rows } = await db.query(
       `SELECT id, client_send_fp AS fp, send_state AS state, send_state_at AS "stateAt", message_type AS type,
               reminder_no AS "reminderNo", target_phone AS phone
          FROM manual_message_sends WHERE client_send_id = $1 AND participant_id = $2 LIMIT 1`, [c.key, String(c.participantId)]);
@@ -189,7 +292,7 @@ async function _claim(c) {
     if (row.state === 'sent') return { dup: row };
     if (row.state === 'failed') {
       // 확실한 실패만 다시 보낸다 — 한 문장 CAS 라 동시 재시도 중 하나만 이긴다.
-      const re = await pool.query(
+      const re = await db.query(
         `UPDATE manual_message_sends SET send_state='pending', send_state_at=NOW(), sent_by=$3, provider_reason=''
           WHERE id=$1 AND client_send_fp=$2 AND send_state='failed' RETURNING id`, [row.id, c.fp, c.by || '']);
       if (re.rows && re.rows[0]) return { own: re.rows[0].id, fresh: false };
@@ -258,10 +361,16 @@ async function sendManualSms({ sheetId, tabName, ids, text, by, clientSendId }) 
   if (!solapi.getSolapiStatus().configured) return { ok: false, error: '문자 발송 설정이 비어 있습니다' };
   const gate = await _keyGate({ clientSendId, kind: 'sms', sheetId, tabName, text: body, by });
   if (gate && gate.conflict) return { ok: false, code: SEND_CONFLICT, error: KEY_MSG.conflict };
-  if (gate) {
-    try { return await _sendManualSmsKeyed({ sheetId, tabName, ids, body, full, by, ...gate }); }
-    catch (e) { if (!(e instanceof _SchemaGapFallback)) throw e; logger.warn(`[manualMessage] 발송 선점 색인 없음 — 종전 경로: ${e.message}`); }
-  }
+  // ★ 결정 366 — 키가 있든 없든 선점 경로(번호 잠금 · 같은 번호·같은 글 창 판정 · 공급자 전 '대기' 줄).
+  //   키 없음(구버전 화면) = key null → 키 판정만 빠지고 창 판정·동시 보호는 같다.
+  try { return await _sendManualSmsKeyed({ sheetId, tabName, ids, body, full, by, key: gate ? gate.key : null, fp: gate ? gate.fp : null }); }
+  catch (e) { if (!(e instanceof _SchemaGapFallback)) throw e; logger.warn(`[manualMessage] 발송 선점 색인 없음 — 종전 경로(같은 글 막기 없음): ${e.message}`); }
+  return _sendManualSmsLegacy({ sheetId, tabName, ids, body, full, by });
+}
+
+/* 문자 — 종전 경로(발송 뒤 기록). ★ 이제는 마이그레이션 222 전 DB(칸·색인 없음 · 42703/42P10)에서만 탄다 —
+   그때는 같은 글 막기(결정 366)·다시 보내기 키(364)가 빠지고 보내기만 살린다. */
+async function _sendManualSmsLegacy({ sheetId, tabName, ids, body, full, by }) {
   const { items } = await previewManualSend({ sheetId, tabName, ids, withBilling: false });
   const results = [];
   const seen = new Map();
@@ -295,8 +404,10 @@ async function sendManualSms({ sheetId, tabName, ids, text, by, clientSendId }) 
   return { ok: results.some(r => r.sent), results };
 }
 
-/* 문자 — 키 경로. 받는 사람 판정·같은 번호 한 번·문의방 기록·결과 모양은 종전 경로와 같다(+ duplicate · code).
-   ★ 사람마다 「선점 → 공급자 → 결과 적기」. 선점 못 한 사람에게는 공급자를 부르지 않는다. */
+/* 문자 — 선점 경로(키 있음 = 결정 364 · 키 없음 = key null). 받는 사람 판정·같은 번호 한 번·문의방 기록·결과 모양은
+   종전 경로와 같다(+ duplicate · code).
+   ★ 사람마다 「선점(번호 잠금 · 같은 글 창 판정 · 결정 366) → 공급자 → 결과 적기」. 선점 못 한 사람에게는 공급자를 부르지 않는다.
+   ★ 키 없음의 결과 문구는 종전과 같다(구버전 화면 · 결과 모름도 「문자 발송 실패 — 사유」). */
 async function _sendManualSmsKeyed({ sheetId, tabName, ids, body, full, by, key, fp }) {
   const { items } = await previewManualSend({ sheetId, tabName, ids, withBilling: false });
   const results = [];
@@ -305,22 +416,29 @@ async function _sendManualSmsKeyed({ sheetId, tabName, ids, body, full, by, key,
   for (const it of items) {
     const base = { participantId: it.participantId, rowName: it.rowName || '' };
     if (!it.sms.ok) { results.push({ ...base, sent: false, reason: it.sms.reason }); continue; }
-    if (seen.has(it.sms.phone)) { results.push({ ...base, sent: false, merged: true, reason: '같은 번호에 이미 보냈습니다(한 번만 발송)' }); continue; }
-    seen.set(it.sms.phone, true);
+    const phoneKey = smsPhoneKey(it.sms.phone) || it.sms.phone;
+    if (seen.has(phoneKey)) { results.push({ ...base, sent: false, merged: true, reason: '같은 번호에 이미 보냈습니다(한 번만 발송)' }); continue; }
+    seen.set(phoneKey, true);
     let c;
     try {
-      c = await _claim({ kind: 'sms', sheetId, tabName, participantId: it.participantId, reviewerName: it.sms.name,
+      c = await _claimSmsTx({ kind: 'sms', sheetId, tabName, participantId: it.participantId, reviewerName: it.sms.name,
         targetPhone: it.sms.phone, text: full, by, key, fp });
     } catch (e) {
       if (_schemaGap(e) && calls === 0 && !results.some(r => r.sent || r.code)) throw new _SchemaGapFallback(e.code);
       logger.warn(`[manualMessage] 문자 발송 선점 실패(보내지 않음): ${e.message}`);
       c = { error: true };
     }
-    if (c.dup) {
-      results.push({ ...base, name: it.sms.name, phone: it.sms.phone, sent: true, duplicate: true, type: c.dup.type || undefined, reason: '' });
+    const who = { ...base, name: it.sms.name, phone: it.sms.phone };
+    if (c.window) {
+      results.push({ ...who, sent: false, code: SMS_SAME_TEXT, reason: smsWindowReason(c.window) });
       continue;
     }
-    if (!c.own) { results.push({ ...base, name: it.sms.name, phone: it.sms.phone, ..._claimOutcome(c, {}, 'sms') }); continue; }
+    if (c.lockBusy) { results.push({ ...who, sent: false, code: SMS_BUSY, reason: SMS_BUSY_MSG }); continue; }
+    if (c.dup) {
+      results.push({ ...who, sent: true, duplicate: true, type: c.dup.type || undefined, reason: '' });
+      continue;
+    }
+    if (!c.own) { results.push({ ...who, ..._claimOutcome(c, {}, 'sms') }); continue; }
     calls++;
     let out, state;
     try {
@@ -341,11 +459,11 @@ async function _sendManualSmsKeyed({ sheetId, tabName, ids, body, full, by, key,
     }
     await _finish(c.own, { state, accepted: out.accepted, type: out.type, messageId: out.messageId,
       reason: state === 'unknown' ? `UNCERTAIN:${out.reason || ''}` : out.reason, reviewerName: it.sms.name, targetPhone: it.sms.phone });
-    if (state === 'unknown') {
-      results.push({ ...base, name: it.sms.name, phone: it.sms.phone, sent: false, code: SEND_UNKNOWN, reason: KEY_MSG.smsUnknown });
+    if (state === 'unknown' && key) {
+      results.push({ ...who, sent: false, code: SEND_UNKNOWN, reason: KEY_MSG.smsUnknown });
       continue;
     }
-    results.push({ ...base, name: it.sms.name, phone: it.sms.phone, sent: !!out.accepted, type: out.type,
+    results.push({ ...who, sent: !!out.accepted, type: out.type,
       roomOk, reason: out.accepted ? '' : `문자 발송 실패 — ${out.reason || '사유 없음'}` });
   }
   return { ok: results.some(r => r.sent), results };
@@ -507,4 +625,4 @@ async function saveShortName({ sheetId, tabName, name, by }) {
   return { ok: true, name: n };
 }
 
-module.exports = { SEND_CONFLICT, SEND_IN_PROGRESS, SEND_UNKNOWN, PENDING_STALE_MS, productShortName, saveShortName, normalizeShortName, derivedFromSource, cleanProductSource: _cleanProductSource, SHORT_MAX_BYTES, previewManualSend, sendManualSms, sendManualAlimtalk, composeSms, smsFooter, homeLink, homeHost, hasHomeLink, MAX_ROWS };
+module.exports = { SMS_SAME_TEXT, SMS_BUSY, SMS_WINDOW_ENV, SMS_WINDOW_DEFAULT_MIN, smsSameTextWindowMin, smsWindowReason, smsTextKey, smsPhoneKey, SMS_BUSY_MSG, SEND_CONFLICT, SEND_IN_PROGRESS, SEND_UNKNOWN, PENDING_STALE_MS, productShortName, saveShortName, normalizeShortName, derivedFromSource, cleanProductSource: _cleanProductSource, SHORT_MAX_BYTES, previewManualSend, sendManualSms, sendManualAlimtalk, composeSms, smsFooter, homeLink, homeHost, hasHomeLink, MAX_ROWS };
