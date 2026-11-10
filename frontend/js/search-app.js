@@ -5276,11 +5276,19 @@ async function _prefillBankFromProfile() {
     if (!auth) return;
     const name = auth.name || "", phone8 = auth.phone8 || "";
     if (!name || !phone8) return;
+    const seq = ++_reviewerProfileReqSeq;
     try {
       const res = await gasGet({ action: "getReviewerProfile", name, phone8 });
       if (res?.ok && res.profile) {
-        profile = { ...(window._reviewerProfile || {}), ...res.profile };
-        window._reviewerProfile = profile;
+        // ★ 결정 358 후속 2(W8) — 서버가 준 전체 내 정보(타계정 목록 포함)라 found:true(받은 목록 = 저장 기준).
+        //   단 더 나중에 시작한 요청의 응답이 이미 들어와 있으면 공유 프로필은 그대로 두고(늦은 옛 응답이 기준·화면을 덮지 않게)
+        //   빈 칸 채우기만 이 응답으로 한다.
+        if (_claimReviewerProfileSeq(seq)) {
+          profile = _receivedReviewerProfile(res, window._reviewerProfile);
+          window._reviewerProfile = profile;
+        } else {
+          profile = window._reviewerProfile?.found === true ? window._reviewerProfile : res.profile;
+        }
       }
     } catch(_) { return; }
   }
@@ -7009,6 +7017,27 @@ function _validateIncomeInput() {
 // ★ v9.14: 리뷰어 프로필 / 타계정 관리
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+// ★ 결정 358 후속 2(W8) — 내 정보(getReviewerProfile) 불러오기 순서 번호.
+//   이 파일의 세 곳(인라인 내정보 · 구매양식 소득신고 칸 · 구매양식 계좌 자동완성)이 같은 window._reviewerProfile 에 쓴다.
+//   ㉮ _reviewerProfileReqSeq/AppliedSeq — 요청을 시작한 순서. 더 나중에 시작한 요청의 응답이 이미 들어와 있으면
+//      먼저 시작한 요청의 늦은 응답은 공유 프로필에 쓰지 않는다(옛 타계정 목록이 저장 기준이 되거나 화면을 덮지 않게).
+//   ㉯ _inlineProfileGen — 인라인 내정보 화면 그리기 번호(다시 불러오기가 겹치면 옛 응답은 화면에 그리지 않는다).
+//   ★ 번호를 하나로 합치지 않는다 — 로그인 직후 인라인과 구매양식 자동완성이 동시에 나가면 인라인 응답이 버려져 화면이 안 그려진다.
+let _reviewerProfileReqSeq = 0, _reviewerProfileAppliedSeq = 0, _inlineProfileGen = 0;
+
+/** 이 순서 번호의 응답을 공유 프로필에 써도 되나 — 더 나중에 시작한 요청의 응답이 이미 들어와 있으면 false. */
+function _claimReviewerProfileSeq(seq) {
+  if (seq < _reviewerProfileAppliedSeq) return false;
+  _reviewerProfileAppliedSeq = seq;
+  return true;
+}
+
+/** 서버에서 받은 내 정보 → 공유 프로필 모양(타계정 목록은 배열 · found:true = 이 목록이 타계정 저장 기준이 된다 · 결정 358). */
+function _receivedReviewerProfile(res, prev) {
+  const p = res.profile || {};
+  return { ...(prev || {}), ...res, ...p, subAccounts: _parseSubAccounts(p.subAccounts), found: true };
+}
+
 /** 현재 인증된 리뷰어의 프로필 로드 → 소득신고 섹션 초기화 */
 async function _loadReviewerProfileForForm() {
   const incomeType = window._incomeType || "";
@@ -7021,12 +7050,13 @@ async function _loadReviewerProfileForForm() {
   const phone8 = auth.phone8 || "";
   if (!name || !phone8) return;
 
+  const seq = ++_reviewerProfileReqSeq;
   try {
     const res = await gasGet({ action: "getReviewerProfile", name, phone8 });
     if (res?.ok && res.profile) {
-      const p = res.profile;
-      window._reviewerProfile = { ...res, ...p, found: true };
-      _initIncomeSection(incomeType, window._reviewerProfile);
+      if (_claimReviewerProfileSeq(seq)) window._reviewerProfile = _receivedReviewerProfile(res);
+      // 더 나중에 받은 내 정보가 이미 있으면 그것으로 칸을 채운다(늦게 온 옛 응답으로 덮지 않는다)
+      _initIncomeSection(incomeType, window._reviewerProfile?.found === true ? window._reviewerProfile : _receivedReviewerProfile(res));
     } else {
       // 프로필 없어도 섹션은 표시 (직접 입력)
       _initIncomeSection(incomeType, null);
@@ -7042,7 +7072,10 @@ async function _loadReviewerProfileForForm() {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-/** ★ 인라인 프로필 자동 로드 (로그인 후 메인 화면에 즉시 표시) */
+/** ★ 인라인 프로필 자동 로드 (로그인 후 메인 화면에 즉시 표시)
+ *  ★ 결정 358 후속 2(W8) — 불러오기 실패는 「미등록」·0/10·「타계정이 있다면 반드시 추가하세요」가 아니라
+ *    리뷰어 홈(index.html #pfLoadError)과 같은 오류 상자 + [다시 불러오기]. 본인 카드·타계정 칸·열린 폼은 숨기고
+ *    타계정 저장은 잠근다(found=false → _subAccountsBase() null). 실패해도 토스트는 띄우지 않는다(구매양식 iframe 위로 튀지 않게). */
 async function _loadInlineProfile() {
   const section = document.getElementById("inlineProfileSection");
   if (!section) return;
@@ -7058,52 +7091,92 @@ async function _loadInlineProfile() {
   if (nameEl) nameEl.textContent = name || "-";
   section.style.display = "";
 
+  const gen = ++_inlineProfileGen;
+  const seq = ++_reviewerProfileReqSeq;
+  let res = null;
   try {
-    const res = await gasGet({ action: "getReviewerProfile", name, phone8 });
-    if (res?.ok && res.profile) {
-      const p = res.profile;
-      window._reviewerProfile = { ...res, ...p, found: true };
-      if (nameEl) nameEl.textContent = p.name || name || "-";
-      const phoneEl = document.getElementById("inlineSelfPhone");
-      if (phoneEl) phoneEl.textContent = (typeof fmtPhone==='function'?fmtPhone(p.phone):p.phone) || "-";
-      const incomeEl = document.getElementById("inlineSelfIncomeName");
-      if (incomeEl) {
-        const incVal = p.incomeType || "";
-        incomeEl.textContent = incVal || "미등록";
-        incomeEl.style.color = incVal ? "var(--t2)" : "#DC2626";
-        const btnInc = document.getElementById("btnAddIncomeInfo");
-        if (btnInc) btnInc.style.display = incVal ? "none" : "";
-      }
-      const juminEl = document.getElementById("inlineSelfJumin");
-      if (juminEl) {
-        const jd = (p.residentNum || "").replace(/[^0-9]/g, "");
-        if (jd.length === 13) {
-          juminEl.textContent = jd.slice(0,6) + "-" + jd.slice(6,7) + "••••••";
-          juminEl.style.color = "var(--t2)";
-        } else if (jd) {
-          juminEl.textContent = "등록됨";
-          juminEl.style.color = "var(--t2)";
-        } else {
-          juminEl.textContent = "미등록";
-          juminEl.style.color = "#DC2626";
-        }
-        const btnJm = document.getElementById("btnAddJuminInfo");
-        if (btnJm) btnJm.style.display = jd ? "none" : "";
-      }
-      // 타계정 목록 (인라인 렌더러 사용)
-      let subs = p.subAccounts || [];
-      if (typeof subs === 'string') { try { subs = JSON.parse(subs); } catch(_) { subs = []; } }
-      if (!Array.isArray(subs)) subs = [];
-      _renderInlineSubList(subs);
-      await _loadSecureIdentityProfile();
-    } else {
-      // 프로필 미등록 상태
-      const phoneEl = document.getElementById("inlineSelfPhone");
-      if (phoneEl) phoneEl.textContent = "-";
+    res = await gasGet({ action: "getReviewerProfile", name, phone8 });
+  } catch(e) {
+    console.warn("[inlineProfile]", e.message);
+    res = null;
+  }
+  if (gen !== _inlineProfileGen) return;   // 그사이 다시 불러오기가 시작됨 — 옛 응답은 화면에 그리지 않는다
+
+  let p = null;
+  if (res?.ok && res.profile && _claimReviewerProfileSeq(seq)) {
+    window._reviewerProfile = _receivedReviewerProfile(res);
+    p = window._reviewerProfile;
+  } else if (window._reviewerProfile?.found === true && _reviewerProfileAppliedSeq > seq) {
+    p = window._reviewerProfile;   // 더 나중에 시작한 요청(구매양식 쪽)이 이미 받아 둔 내 정보로 그린다
+  }
+  if (!p) {
+    // 모르는 것을 「미등록」·0/10 으로 꾸미지 않는다 — 받은 목록이 없으니 타계정 저장도 잠근다.
+    // 실패도 순서 번호를 차지한다 — 이보다 먼저 시작한 요청의 늦은 응답이 뒤늦게 기준이 되지 않게.
+    _claimReviewerProfileSeq(seq);
+    if (window._reviewerProfile) window._reviewerProfile.found = false;
+    _showInlineProfileLoadError(true);
+    return;
+  }
+  _showInlineProfileLoadError(false);
+
+  try {
+    if (nameEl) nameEl.textContent = p.name || name || "-";
+    const phoneEl = document.getElementById("inlineSelfPhone");
+    if (phoneEl) phoneEl.textContent = (typeof fmtPhone==='function'?fmtPhone(p.phone):p.phone) || "-";
+    const incomeEl = document.getElementById("inlineSelfIncomeName");
+    if (incomeEl) {
+      const incVal = p.incomeType || "";
+      incomeEl.textContent = incVal || "미등록";
+      incomeEl.style.color = incVal ? "var(--t2)" : "#DC2626";
+      const btnInc = document.getElementById("btnAddIncomeInfo");
+      if (btnInc) btnInc.style.display = incVal ? "none" : "";
     }
+    const juminEl = document.getElementById("inlineSelfJumin");
+    if (juminEl) {
+      const jd = (p.residentNum || "").replace(/[^0-9]/g, "");
+      if (jd.length === 13) {
+        juminEl.textContent = jd.slice(0,6) + "-" + jd.slice(6,7) + "••••••";
+        juminEl.style.color = "var(--t2)";
+      } else if (jd) {
+        juminEl.textContent = "등록됨";
+        juminEl.style.color = "var(--t2)";
+      } else {
+        juminEl.textContent = "미등록";
+        juminEl.style.color = "#DC2626";
+      }
+      const btnJm = document.getElementById("btnAddJuminInfo");
+      if (btnJm) btnJm.style.display = jd ? "none" : "";
+    }
+    // 타계정 목록 (인라인 렌더러 사용)
+    _renderInlineSubList(_parseSubAccounts(p.subAccounts));
+    await _loadSecureIdentityProfile();
   } catch(e) {
     console.warn("[inlineProfile]", e.message);
   }
+}
+
+/** 결정 358 후속 2(W8) — 내 정보 불러오기 실패 상자(리뷰어 홈 #pfLoadError 와 같은 모양·문구).
+ *  실패면 본인 카드·타계정 칸·열린 폼을 숨기고, 성공이면 되돌린다. 상자가 없는 옛 search.html 이면 건너뛴다. */
+function _showInlineProfileLoadError(show) {
+  const box = document.getElementById("pfLoadError");
+  if (box) box.style.display = show ? "" : "none";
+  ["inlineSelfCard", "inlineSubSection"].forEach((id) => {
+    const el = document.getElementById(id); if (el) el.style.display = show ? "none" : "";
+  });
+  if (show) {
+    ["inlineIncomeForm", "inlineSubForm"].forEach((id) => {
+      const el = document.getElementById(id); if (el) el.style.display = "none";
+    });
+  }
+}
+
+/** 오류 상자의 [다시 불러오기] */
+async function reloadInlineProfile() {
+  if (!_getReviewerSession()) { showToast("세션이 만료되었습니다.", "warning"); return; }
+  const btn = document.getElementById("btnReloadProfile");
+  if (btn) { btn.disabled = true; btn.textContent = "불러오는 중..."; }
+  try { await _loadInlineProfile(); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = "다시 불러오기"; } }
 }
 
 async function _loadSecureIdentityProfile() {
