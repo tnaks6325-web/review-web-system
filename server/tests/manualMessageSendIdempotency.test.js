@@ -305,13 +305,13 @@ const fnSrc = (src, name, prefix = 'function ') => {
   }
 
   {
-    // 같은 번호 두 줄(본계정·타계정) — 종전처럼 한 번만, 다시 보내기도 한 번
+    // 같은 번호 두 줄(본계정·타계정) — 참여건마다 한 번씩(사장님 확정 2026-11-10), 다시 보내기는 추가 0
     await freshDb();
     contacts = [{ participantId: 'p1', ok: true, name: '김하나', phoneFull: '01011110001', phone8: '11110001' },
       { participantId: 'p2', ok: true, name: '김하나', phoneFull: '01011110001', phone8: '11110001', isSub: true }];
     const r = await send(smsBody({ ids: ['p1', 'p2'], clientSendId: K1 }));
     await send(smsBody({ ids: ['p1', 'p2'], clientSendId: K1 }));
-    ok('같은 번호 두 줄 = 공급자 1번(다시 보내기 포함)', smsCalls.length === 1 && r.body.results[1].merged === true);
+    ok('같은 번호 두 줄 = 참여건마다 1번 = 공급자 2번(같은 키 다시 보내기는 추가 0)', smsCalls.length === 2 && r.body.results[1].sent === true && !r.body.results[1].merged, r.body);
   }
 
   /* ── B-2. 알림톡 ── */

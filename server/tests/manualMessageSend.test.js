@@ -89,13 +89,13 @@ pool.connect = async () => ({
   await svc.previewManualSend({ sheetId: 's', tabName: 't', ids: ['a'] });
   ok('미리보기는 단가를 조회한다', billingCalls === 1);
   solapi.getAccountBilling = origBilling;
-  ok('같은 번호는 한 번만 보낸다', sent.length === 1 && sent[0].to === '01011112222');
+  ok('★ 같은 번호라도 참여건(줄)마다 따로 보낸다(사장님 확정 2026-11-10 · 결정 366)', sent.length === 2 && sent.every(x => x.to === '01011112222'));
   ok('보낸 문자에 안내 문구가 붙어 있다', /발신 전용/.test(sent[0].text));
-  ok('1:1 문의방에는 안내 없이 본문만 남긴다', rooms.length === 1 && rooms[0].message === '리뷰 부탁드립니다' && rooms[0].phone8 === '11112222' && rooms[0].by === '망고');
+  ok('1:1 문의방에는 안내 없이 본문만 · 같은 번호(같은 문의방)는 한 번만 남긴다', rooms.length === 1 && rooms[0].message === '리뷰 부탁드립니다' && rooms[0].phone8 === '11112222' && rooms[0].by === '망고');
   const by = Object.fromEntries(r.results.map(x => [x.participantId, x]));
   ok('결과: 보냄/중복/번호 모호/대상 없음을 구분해 말한다',
-    by.a.sent && by.a.roomOk && by.b.merged && /전체 번호를 특정할 수 없습니다/.test(by.c.reason) && /로그인 계정/.test(by.d.reason));
-  ok('발송 기록이 남는다(누가·무엇을)', logs.length === 1 && logs[0][0] === 'sms' && logs[0][13] === '망고' && /발신 전용/.test(logs[0][7]));
+    by.a.sent && by.a.roomOk && by.b.sent && by.b.roomOk && !by.b.merged && /전체 번호를 특정할 수 없습니다/.test(by.c.reason) && /로그인 계정/.test(by.d.reason));
+  ok('발송 기록이 참여건마다 남는다(누가·무엇을)', logs.length === 2 && logs[0][0] === 'sms' && logs[0][13] === '망고' && /발신 전용/.test(logs[0][7]));
 
   r = await svc.sendManualSms({ sheetId: 's', tabName: 't', ids: ['a'], text: '   ' });
   ok('빈 내용은 거부', r.ok === false && /입력/.test(r.error));

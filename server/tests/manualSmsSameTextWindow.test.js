@@ -294,10 +294,12 @@ const fnSrc = (src, name, prefix = 'function ') => {
     ok('★ 3명 중 1명이 10분 안 같은 글 = 그 1명만 막고 2명은 보냄(공급자 총 3번)', smsCalls.length === 3 && by.p1.sent && by.p3.sent
       && by.p2.sent === false && by.p2.code === SAME && r.body.ok === true, r.body);
     ok('막힌 사람 결과에도 이름·번호가 있다(결과 목록에 그대로)', by.p2.name === '이둘' && by.p2.phone === '01011110002');
-    // 같은 요청 안 같은 번호 두 줄 = 종전처럼 merged(창 사유 아님)
+    // 같은 요청 안 같은 번호 두 줄(다른 참여건) = 둘 다 보냄(사장님 확정 2026-11-10 · merged 폐지 · 창은 참여건 단위라 서로 안 막음)
     await freshDb();
     const m = await send(smsBody({ ids: ['p1', 'p4'], clientSendId: K1 }));
-    ok('같은 요청 안 같은 번호 두 줄 = 종전처럼 「같은 번호에 이미 보냈습니다」(merged) · 공급자 1번', smsCalls.length === 1 && m.body.results[1].merged === true && !m.body.results[1].code);
+    ok('★ 같은 요청 안 같은 번호 두 참여건 = 공급자 2번 · 둘 다 sent · 창 사유 없음', smsCalls.length === 2 && m.body.results.every(x => x.sent === true && !x.merged && !x.code), m.body);
+    const m2 = await send(smsBody({ ids: ['p1', 'p4'], clientSendId: K2 }));
+    ok('★ 새 키로 같은 글 다시 = 두 참여건 모두 창에 막힘(공급자 추가 0)', smsCalls.length === 2 && m2.body.results.every(x => x.code === SAME), m2.body);
   }
 
   {
@@ -393,6 +395,18 @@ const fnSrc = (src, name, prefix = 'function ') => {
       const hits = [];
       (function walk(d) { for (const f of fs.readdirSync(d)) { const p = path.join(d, f); if (fs.statSync(p).isDirectory()) walk(p); else if (/\.js$/.test(f) && /\.sendSms\(/.test(fs.readFileSync(p, 'utf8'))) hits.push(path.relative(dir, p)); } })(dir);
       return hits.length === 1 && hits[0] === path.join('services', 'manualMessage.service.js');
+    })());
+    ok('★ 작업보드 화면도 같은 번호 두 참여건을 둘 다 보낸다(_msOkItems 번호당 1명 폐지 · 사장님 확정 2026-11-10)', (() => {
+      const html = fs.readFileSync(path.join(SERVER, '..', 'frontend', 'workdesk.html'), 'utf8');
+      const m = html.match(/function _msOkItems\(\)\{[\s\S]*?\n\}/);
+      if (!m) return false;
+      const vm = require('vm');
+      const ctx = { _MS: { tab: 'sms', items: [
+        { participantId: 'p1', sms: { ok: true, phone: '01011110001' } },
+        { participantId: 'p4', sms: { ok: true, phone: '01011110001', isSub: true } },
+        { participantId: 'p9', sms: { ok: false } }] } };
+      vm.createContext(ctx); vm.runInContext(m[0] + '\nthis.out = _msOkItems().map(x => x.participantId);', ctx);
+      return JSON.stringify(ctx.out) === JSON.stringify(['p1', 'p4']);
     })());
   }
 

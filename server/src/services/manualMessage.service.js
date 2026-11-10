@@ -380,8 +380,8 @@ async function _sendManualSmsLegacy({ sheetId, tabName, ids, body, full, by }) {
   for (const it of items) {
     const base = { participantId: it.participantId, rowName: it.rowName || '' };
     if (!it.sms.ok) { results.push({ ...base, sent: false, reason: it.sms.reason }); continue; }
-    if (seen.has(it.sms.phone)) { results.push({ ...base, sent: false, merged: true, reason: '같은 번호에 이미 보냈습니다(한 번만 발송)' }); continue; }
-    seen.set(it.sms.phone, true);
+    // ★ 같은 번호라도 참여건(줄)마다 따로 보낸다(사장님 확정 2026-11-10 — 종전 「같은 번호 한 번만(merged)」 폐지).
+    //   1:1 문의방 기록만 번호당 한 번(같은 문의방에 같은 글 두 번 쌓지 않게).
     let out;
     try {
       out = await solapi.sendSms({ to: it.sms.phone, text: full, subject: 'IA리뷰 안내',
@@ -391,12 +391,14 @@ async function _sendManualSmsLegacy({ sheetId, tabName, ids, body, full, by }) {
     }
     // 같은 내용을 1:1 문의방에도 남긴다(리뷰어가 링크로 들어와 바로 답할 수 있게). 실패해도 문자 결과는 유지.
     let roomOk = false;
-    if (out.accepted) {
+    if (out.accepted && seen.has(it.sms.phone)) roomOk = seen.get(it.sms.phone);
+    else if (out.accepted) {
       try {
         const r = await csBridge.postAdminNotice({ sheetId, tabName, rowIndex: it.seq,
           reviewerName: it.sms.name || it.rowName, phone8: it.sms.phone8, message: body, by });
         roomOk = !!r;
       } catch (_) { roomOk = false; }
+      seen.set(it.sms.phone, roomOk);
     }
     await _log({ kind: 'sms', sheetId, tabName, participantId: it.participantId, reviewerName: it.sms.name,
       targetPhone: it.sms.phone, text: full, type: out.type, accepted: out.accepted,
@@ -420,8 +422,8 @@ async function _sendManualSmsKeyed({ sheetId, tabName, ids, body, full, by, key,
     const base = { participantId: it.participantId, rowName: it.rowName || '' };
     if (!it.sms.ok) { results.push({ ...base, sent: false, reason: it.sms.reason }); continue; }
     const phoneKey = smsPhoneKey(it.sms.phone) || it.sms.phone;
-    if (seen.has(phoneKey)) { results.push({ ...base, sent: false, merged: true, reason: '같은 번호에 이미 보냈습니다(한 번만 발송)' }); continue; }
-    seen.set(phoneKey, true);
+    // ★ 같은 번호라도 참여건(줄)마다 따로 보낸다(사장님 확정 2026-11-10 — 종전 merged 폐지 · 결정 366).
+    //   같은 글 창(결정 366)도 참여건 단위라 같은 요청 안 두 참여건은 서로 막지 않는다. 문의방 기록만 번호당 한 번.
     let c;
     try {
       c = await _claimSmsTx({ kind: 'sms', sheetId, tabName, participantId: it.participantId, reviewerName: it.sms.name,
@@ -453,12 +455,14 @@ async function _sendManualSmsKeyed({ sheetId, tabName, ids, body, full, by, key,
       state = _smsErrorUncertain(e) ? 'unknown' : 'failed';
     }
     let roomOk = false;
-    if (out.accepted) {
+    if (out.accepted && seen.has(phoneKey)) roomOk = seen.get(phoneKey);
+    else if (out.accepted) {
       try {
         const r = await csBridge.postAdminNotice({ sheetId, tabName, rowIndex: it.seq,
           reviewerName: it.sms.name || it.rowName, phone8: it.sms.phone8, message: body, by });
         roomOk = !!r;
       } catch (_) { roomOk = false; }
+      seen.set(phoneKey, roomOk);
     }
     await _finish(c.own, { state, accepted: out.accepted, type: out.type, messageId: out.messageId,
       reason: state === 'unknown' ? `UNCERTAIN:${out.reason || ''}` : out.reason, reviewerName: it.sms.name, targetPhone: it.sms.phone });
