@@ -3602,7 +3602,10 @@ router.post('/worktable/dup-watch', authMiddleware, adminOrMasterMiddleware, asy
    ★ 리뷰어에게 다시 받을 필요가 없는 건들이다(이미 낸 증빙).
    ★ 경로가 /api/trackb/* 인 이유 = 인트라넷 SSO 토큰(via:'intranet')은 /api/diag/* 에 도달 불가.
    ★ 게이트는 원본 감사(/api/diag/no-capture-audit)와 같은 adminOrMaster — 넓히지 않는다
-     (파일명·수취인 등 PII 가 실린다). */
+     (파일명·수취인 등 PII 가 실린다).
+   ★ 아래 require 를 지우지 말 것 — 코드 다이어트(6a097320, 결정 186)에서 맨 위 require 가 함께 지워져
+     두 경로가 "captureLinkBackfill is not defined" 로 500 이 났다(2026-11-10 발견 · 회귀가드 captureLinkRoutesRequire). */
+const captureLinkBackfill = require('../services/captureLinkBackfill.service');
 router.get('/capture-link/audit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const r = await captureLinkBackfill.auditCaptureLinks({
