@@ -236,6 +236,27 @@ async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, 
     const staffKey = card ? '' : _csKey.staffCsClientMsgKey(clientMsgId);
     const senderName = _clip(by || '관리자', 100);   // DB 엔 로그인명(책임추적) — 표시 치환은 읽는 시점
 
+    /* ★ 사진 카드(선택) — 교체요청 카드와 같은 구조(meta + 파일ID, 프론트가 신뢰 베이스로 URL 재구성).
+       ★★ meta 는 리뷰어 응답에 **그대로 실린다** — 관리자 실명·시트 제목을 넣지 않는다(080 규율).
+       ★ 파일ID 형식이 아닌 값은 버린다(잘못된 값이 <img> 로 나가지 않게).
+       ★★ 결정 363 — DB 와 무관한 값이라 **트랜잭션 블록 밖(여기)** 에서 만든다. 블록 안에서 선언하면
+         커밋 뒤 실시간 알림 줄이 이 이름을 못 읽어 ReferenceError 가 나고, 그 줄의 catch 가 삼켜
+         **저장 1 · 리뷰어 실시간 알림 0** 이 된다(2026-08-21 ~ 2026-11-10 실제로 그랬다). */
+    const _fid = (v) => { const s = String(v || '').replace(/[^-\w]/g, ''); return s.length >= 10 ? s : ''; };
+    const meta = card ? {
+      kind: _clip(card.kind, 40),
+      fileId: _fid(card.fileId),
+      matchFileId: _fid(card.matchFileId),
+      work: _clip(card.work || tabName || '', 120),
+      product: _clip(card.product, 120),
+      ordinal: Number(card.ordinal) || 0,
+      submittedAt: card.submittedAt || null,
+      matchProduct: _clip(card.matchProduct, 120),
+      matchOrdinal: Number(card.matchOrdinal) || 0,
+      matchAt: card.matchAt || null,
+      to: _clip(card.to, 40),
+    } : null;
+
     /* ★★ 방 생성 · 메시지 · 방 갱신은 **한 트랜잭션**이다 (실사고 2026-08-21).
        방을 먼저 만들고(그때 `last_message_preview` 까지 채운다) 메시지를 따로 넣던 구조라,
        메시지 INSERT 가 실패하면 **미리보기만 있고 메시지가 0건인 빈 방**이 남았다 —
@@ -273,23 +294,6 @@ async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, 
       // ★ 이미 저장된 같은 글(응답만 못 받은 첫 전송) — 아무것도 바꾸지 않고 되돌린 뒤 그 메시지로 답한다.
       await client.query('ROLLBACK');
     } else {
-    /* ★ 사진 카드(선택) — 교체요청 카드와 같은 구조(meta + 파일ID, 프론트가 신뢰 베이스로 URL 재구성).
-       ★★ meta 는 리뷰어 응답에 **그대로 실린다** — 관리자 실명·시트 제목을 넣지 않는다(080 규율).
-       ★ 파일ID 형식이 아닌 값은 버린다(잘못된 값이 <img> 로 나가지 않게). */
-    const _fid = (v) => { const s = String(v || '').replace(/[^-\w]/g, ''); return s.length >= 10 ? s : ''; };
-    const meta = card ? {
-      kind: _clip(card.kind, 40),
-      fileId: _fid(card.fileId),
-      matchFileId: _fid(card.matchFileId),
-      work: _clip(card.work || tabName || '', 120),
-      product: _clip(card.product, 120),
-      ordinal: Number(card.ordinal) || 0,
-      submittedAt: card.submittedAt || null,
-      matchProduct: _clip(card.matchProduct, 120),
-      matchOrdinal: Number(card.matchOrdinal) || 0,
-      matchAt: card.matchAt || null,
-      to: _clip(card.to, 40),
-    } : null;
     /* ★★ `meta` 는 **NOT NULL DEFAULT '{}'**(080) — 기본값은 컬럼을 **생략했을 때만** 적용된다.
        카드 없는 안내(검수 반려 본문·입금 실패 안내·작업보드 선톡)는 여기서 `null` 을 넘겨
        **23502 로 전건 실패**했고, 이 함수는 절대 throw 하지 않아 warn 로그로만 남아 있었다
@@ -338,7 +342,9 @@ async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, 
       // ★ 이미 저장된 같은 글 — 실시간 알림·관리자 화면 갱신 방송을 다시 하지 않는다(이미 한 번 갔다).
       return { threadId, messageId: dupOf.id, duplicate: true };
     }
-    /* ── 여기부터는 커밋된 뒤의 후처리(실시간 푸시) — 실패해도 저장은 남는다 ── */
+    /* ── 여기부터는 커밋된 뒤의 후처리(실시간 푸시) — 실패해도 저장은 남는다 ──
+       ★ 결정 363 — 실패를 **조용히 삼키지 않는다**(경고 로그). 맨 `catch (_) {}` 가 3개월 가까이
+         ReferenceError 를 숨겨 리뷰어 실시간 알림이 한 번도 안 나갔다. 계약(절대 throw 없음)은 그대로. */
     try {
       const nickMap = await adminNickname.getNicknameMap().catch(() => null);
       emitCsReplyToReviewer(phone8, {
@@ -348,7 +354,9 @@ async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, 
         campaignLabel: tabName || '문의',
         msgType: meta ? 'inspect_result' : 'text', meta: meta || null,   // 실시간 푸시에도 카드가 그려지게
       });
-    } catch (_) {}
+    } catch (e) {
+      try { logger.warn(`[csBridge] 저장은 됐지만 리뷰어 실시간 알림 실패(${threadId}): ${e && e.message}`); } catch (_) {}
+    }
     try { broadcast('cs_message', { threadId, senderRole: 'admin', reviewerPhone8: phone8 }); } catch (_) {}
     return { threadId, messageId: mRows[0].id };
   } catch (err) {
