@@ -159,7 +159,8 @@ function _sendFp({ kind, sheetId, tabName, text, by }) {
 }
 /* ══ 같은 번호·같은 글 N분 안 다시 보내기 막기 (결정 366 · 사장님 확정 2026-11-10 · 스키마 변경 0) ══
    ★ 키(결정 364)와 무관하게 모든 수동 문자에 적용 — 새 화면(키 있음)·구버전 화면(키 없음)·다른 담당자 모두.
-   ★ 같은 사람 = 받는 번호 숫자만(참여 줄·본계정/타계정과 무관) · 같은 글 = 실제로 나가는 최종 글(안내 문구 포함)을
+   ★ 같은 대상 = 같은 참여건(sheet_id·tab_name·participant_id) + 같은 받는 번호(숫자만). 번호가 같아도 참여건이 다르면
+     (본계정·타계정 각자 참여 등) 따로 보낸다(사장님 확정 2026-11-10). · 같은 글 = 실제로 나가는 최종 글(안내 문구 포함)을
      앞뒤 공백 자르고 공백·줄바꿈 묶음을 한 칸으로 본 것.
    ★ 막는 앞선 기록 = 창(기본 10분) 안의 sent·pending(보내는 중)·unknown(결과 모름) · 종전 경로 기록(send_state 없음)은 accepted 만.
      확실한 실패(failed · 종전 기록의 accepted=false)는 막지 않는다.
@@ -187,23 +188,24 @@ function smsWindowReason({ state, ageSec, windowMin }) {
   const left = Math.max(1, Math.ceil((windowMin * 60 - Math.max(0, ageSec)) / 60));
   const when = ago < 1 ? '방금' : `${ago}분 전에`;
   const tail = `두 번 나가지 않게 이번에는 보내지 않았습니다. 꼭 다시 보내야 하면 ${left}분 뒤에 보내거나 내용을 고쳐 주세요`;
-  if (state === 'pending') return `같은 번호로 같은 문자를 ${when} 보내기 시작해 아직 처리 중입니다 — ${tail}`;
-  if (state === 'unknown') return `같은 번호로 같은 문자를 ${when} 보냈는데 결과를 확인하지 못했습니다(이미 받았을 수 있습니다) — ${tail}`;
-  return `같은 번호로 같은 문자를 ${when} 보냈습니다 — ${tail}`;
+  if (state === 'pending') return `이 참여건에 같은 문자를 ${when} 보내기 시작해 아직 처리 중입니다 — ${tail}`;
+  if (state === 'unknown') return `이 참여건에 같은 문자를 ${when} 보냈는데 결과를 확인하지 못했습니다(이미 받았을 수 있습니다) — ${tail}`;
+  return `이 참여건에 같은 문자를 ${when} 보냈습니다 — ${tail}`;
 }
 const SMS_BUSY_MSG = '같은 번호로 문자를 보내는 다른 요청이 처리 중입니다 — 두 번 나가지 않게 이번에는 보내지 않았습니다. 잠시 뒤 창을 다시 열어 확인한 뒤 보내 주세요';
 /** 창 안에 같은 번호·같은 글의 「보냈거나 보냈을 수 있는」 기록이 있나 — 트랜잭션 안(번호 잠금 뒤)에서만 부른다. */
-async function _smsWindowHit(db, { phoneKey, text, windowMin }) {
+async function _smsWindowHit(db, { phoneKey, text, windowMin, sheetId, tabName, participantId }) {
   const { rows } = await db.query(
     `SELECT message_text AS text, send_state AS state,
             GREATEST(0, EXTRACT(EPOCH FROM (NOW() - COALESCE(send_state_at, created_at))))::float8 AS "ageSec"
        FROM manual_message_sends
       WHERE kind = 'sms'
         AND regexp_replace(target_phone, '[^0-9]', '', 'g') = $1
+        AND sheet_id = $3 AND tab_name = $4 AND participant_id = $5
         AND COALESCE(send_state_at, created_at) > NOW() - make_interval(secs => $2)
         AND (send_state IN ('sent', 'pending', 'unknown') OR (send_state IS NULL AND accepted))
       ORDER BY COALESCE(send_state_at, created_at) DESC
-      LIMIT 200`, [phoneKey, windowMin * 60]);
+      LIMIT 200`, [phoneKey, windowMin * 60, String(sheetId || ''), String(tabName || ''), String(participantId || '')]);
   const want = smsTextKey(text);
   const hit = rows.find(r => smsTextKey(r.text) === want);
   if (!hit) return null;
@@ -240,7 +242,8 @@ async function _claimSmsTx(c) {
       }
       // 같은 키 줄이 있으면(확실한 실패 제외) 364 결과가 우선 — 창 판정 없이 _claim 이 dup/결과 모름/처리 중을 돌려준다.
       if (!own || own.state === 'failed') {
-        const hit = await _smsWindowHit(client, { phoneKey, text: c.text, windowMin });
+        const hit = await _smsWindowHit(client, { phoneKey, text: c.text, windowMin,
+          sheetId: c.sheetId, tabName: c.tabName, participantId: c.participantId });
         if (hit) { await client.query('ROLLBACK'); open = false; return { window: { ...hit, windowMin } }; }
       }
     }

@@ -7,7 +7,7 @@
  *      - 같은 번호·같은 글·창 안 = 막음(키가 달라도 · 키 없어도 · 다른 담당자여도) · 공백/줄바꿈 차이는 같은 글
  *      - 다른 글 = 보냄 · 창 지남 = 보냄 · 앞선 확실한 실패 = 보냄 · 앞선 결과 모름 = 막음 · 설정 0 = 규칙 끔
  *      - 동시에 두 요청(키 다름) = 공급자 1번 · 여러 명 중 막힌 사람만 빠짐 · 같은 키 다시 보내기는 364 duplicate 우선
- *      - 같은 번호의 다른 참여 줄(타계정)도 막음 · 번호 모양(하이픈) 무관 · 종전 기록(send_state 없음) accepted 만 막음
+ *      - 같은 번호라도 다른 참여건(타계정 줄)은 따로 보냄 · 번호 모양(하이픈) 무관 · 종전 기록(send_state 없음) accepted 만 막음
  *      - 잠금 대기 초과(55P03) = 보내지 않음 + 한국어 · 창 조회 실패 = 보내지 않음(fail-closed) · 222 전 DB = 종전 경로
  *   B. 문구·설정 단위 · 정적 순서 가드(잠금 → 창 판정 → 선점 → COMMIT, 공급자 호출은 선점 뒤)
  *   C. (선택) 실제 PostgreSQL 동시 접속 — SMS_WINDOW_NATIVE_PG_TEST=1 일 때만:
@@ -157,7 +157,7 @@ const fnSrc = (src, name, prefix = 'function ') => {
     const b = await send(smsBody({ clientSendId: K2 }), { role: 'staff', name: '만두' });
     ok('★ 같은 번호·같은 글·10분 안(다른 담당자·다른 키) = 둘째는 공급자 0 · 총 1번', smsCalls.length === 1 && a.body.results[0].sent === true && b.body.results[0].sent === false, b.body);
     ok('막힘 응답 = 200 · code manual_sms_same_text_window · 사유 한국어(방금 · 10분 뒤)', b.status === 200 && b.body.results[0].code === SAME
-      && b.body.results[0].reason === '같은 번호로 같은 문자를 방금 보냈습니다 — 두 번 나가지 않게 이번에는 보내지 않았습니다. 꼭 다시 보내야 하면 10분 뒤에 보내거나 내용을 고쳐 주세요', b.body.results[0].reason);
+      && b.body.results[0].reason === '이 참여건에 같은 문자를 방금 보냈습니다 — 두 번 나가지 않게 이번에는 보내지 않았습니다. 꼭 다시 보내야 하면 10분 뒤에 보내거나 내용을 고쳐 주세요', b.body.results[0].reason);
     ok('막힌 사람에게는 문의방 기록도 남기지 않는다 · 기록 줄도 늘지 않는다', rooms.length === 1
       && Number((await db.query(`SELECT COUNT(*)::int n FROM manual_message_sends`)).rows[0].n) === 1);
     const c = await send(smsBody());   // 구버전 화면(키 없음)
@@ -167,9 +167,11 @@ const fnSrc = (src, name, prefix = 'function ') => {
     const e = await send(smsBody({ text: '리뷰 부탁드립니다!' , clientSendId: K3 }));
     ok('★ 글이 다르면 보낸다', smsCalls.length === 2 && e.body.results[0].sent === true);
     const f = await send(smsBody({ ids: ['p4'], clientSendId: '55555555-2222-4333-8444-555555555555' }));
-    ok('★ 같은 번호의 다른 참여 줄(타계정)도 같은 사람 = 막음', smsCalls.length === 2 && f.body.results[0].code === SAME);
+    ok('★ 같은 번호라도 다른 참여건(타계정 줄) = 따로 보낸다(사장님 확정 2026-11-10)', smsCalls.length === 3 && f.body.results[0].sent === true, f.body);
+    const f2 = await send(smsBody({ ids: ['p4'], clientSendId: '66666666-2222-4333-8444-666666666666' }));
+    ok('★ 그 참여건에 다시 같은 글 = 막음', smsCalls.length === 3 && f2.body.results[0].code === SAME);
     const g = await send(smsBody({ ids: ['p2'] }));
-    ok('다른 번호 = 보낸다', smsCalls.length === 3 && g.body.results[0].sent === true);
+    ok('다른 번호 = 보낸다', smsCalls.length === 4 && g.body.results[0].sent === true);
   }
 
   {
@@ -188,7 +190,7 @@ const fnSrc = (src, name, prefix = 'function ') => {
     // 다른 키·결과 모름 = 창 규칙으로 막음(결과 모름 문구)
     const u2 = await send(smsBody({ clientSendId: K2 }));
     ok('★ 앞선 결과 모름(시간 초과) + 다른 키 = 막음 · 「결과를 확인하지 못했습니다(이미 받았을 수 있습니다)」', smsCalls.length === 1
-      && u2.body.results[0].code === SAME && /^같은 번호로 같은 문자를 방금 보냈는데 결과를 확인하지 못했습니다\(이미 받았을 수 있습니다\)/.test(u2.body.results[0].reason), u2.body);
+      && u2.body.results[0].code === SAME && /^이 참여건에 같은 문자를 방금 보냈는데 결과를 확인하지 못했습니다\(이미 받았을 수 있습니다\)/.test(u2.body.results[0].reason), u2.body);
     // 키 없음 결과 모름 = 종전 문구(구버전 화면) · 다음 같은 글은 막힘
     await freshDb();
     smsImpl = async () => { throw new TypeError('fetch failed'); };
@@ -231,7 +233,7 @@ const fnSrc = (src, name, prefix = 'function ') => {
     await ageBack(4);
     const r0 = await send(smsBody({ clientSendId: K2 }));
     ok('4분 전 보냄 → 「4분 전에 보냈습니다 … 6분 뒤에」', r0.body.results[0].code === SAME
-      && r0.body.results[0].reason === '같은 번호로 같은 문자를 4분 전에 보냈습니다 — 두 번 나가지 않게 이번에는 보내지 않았습니다. 꼭 다시 보내야 하면 6분 뒤에 보내거나 내용을 고쳐 주세요', r0.body.results[0].reason);
+      && r0.body.results[0].reason === '이 참여건에 같은 문자를 4분 전에 보냈습니다 — 두 번 나가지 않게 이번에는 보내지 않았습니다. 꼭 다시 보내야 하면 6분 뒤에 보내거나 내용을 고쳐 주세요', r0.body.results[0].reason);
     await ageBack(11);
     const r = await send(smsBody({ clientSendId: K2 }));
     ok('★ 10분 지남 = 보낸다', smsCalls.length === 2 && r.body.results[0].sent === true);
@@ -265,7 +267,7 @@ const fnSrc = (src, name, prefix = 'function ') => {
     const b = await send(smsBody({ clientSendId: K2 }), { role: 'staff', name: '만두' });
     const c = await send(smsBody());
     ok('★ 동시에 다른 키·키 없음 = 둘째·셋째는 공급자 0 · 「보내기 시작해 아직 처리 중」', smsCalls.length === 1 && b.body.results[0].code === SAME
-      && /^같은 번호로 같은 문자를 방금 보내기 시작해 아직 처리 중입니다 — /.test(b.body.results[0].reason) && c.body.results[0].code === SAME, b.body);
+      && /^이 참여건에 같은 문자를 방금 보내기 시작해 아직 처리 중입니다 — /.test(b.body.results[0].reason) && c.body.results[0].code === SAME, b.body);
     open();
     const a = await pa;
     ok('첫 요청은 그대로 보냄 · 공급자 총 1번', a.body.results[0].sent === true && smsCalls.length === 1);
@@ -302,7 +304,7 @@ const fnSrc = (src, name, prefix = 'function ') => {
     // 종전 기록(send_state 없음 · 배포 직전 기록) · 번호 모양
     await freshDb();
     const full = svc.composeSms(TEXT);
-    await db.query(`INSERT INTO manual_message_sends (kind, participant_id, target_phone, message_text, accepted) VALUES ('sms','old','010-1111-0001',$1,TRUE)`, [full]);
+    await db.query(`INSERT INTO manual_message_sends (kind, sheet_id, tab_name, participant_id, target_phone, message_text, accepted) VALUES ('sms',$2,$3,'p1','010-1111-0001',$1,TRUE)`, [full, S, T]);
     const r = await send(smsBody({ clientSendId: K1 }));
     ok('종전 기록(상태 칸 없음) accepted = 막음 · 하이픈 번호도 같은 번호', smsCalls.length === 0 && r.body.results[0].code === SAME);
     await db.query(`UPDATE manual_message_sends SET accepted = FALSE`);
@@ -365,7 +367,7 @@ const fnSrc = (src, name, prefix = 'function ') => {
       && svc.smsSameTextWindowMin({ MANUAL_SMS_SAME_TEXT_WINDOW_MIN: '99999' }) === 1440);
     ok('설정 이름 = MANUAL_SMS_SAME_TEXT_WINDOW_MIN · 기본 10', svc.SMS_WINDOW_ENV === 'MANUAL_SMS_SAME_TEXT_WINDOW_MIN' && svc.SMS_WINDOW_DEFAULT_MIN === 10);
     ok('문구: 125초 전·10분 창 = 「2분 전에 … 8분 뒤에」', svc.smsWindowReason({ state: 'sent', ageSec: 125, windowMin: 10 })
-      === '같은 번호로 같은 문자를 2분 전에 보냈습니다 — 두 번 나가지 않게 이번에는 보내지 않았습니다. 꼭 다시 보내야 하면 8분 뒤에 보내거나 내용을 고쳐 주세요');
+      === '이 참여건에 같은 문자를 2분 전에 보냈습니다 — 두 번 나가지 않게 이번에는 보내지 않았습니다. 꼭 다시 보내야 하면 8분 뒤에 보내거나 내용을 고쳐 주세요');
     ok('문구: 남은 시간은 최소 1분', /1분 뒤에/.test(svc.smsWindowReason({ state: 'sent', ageSec: 599.5, windowMin: 10 })));
     ok('같은 글 판정 = trim + 공백 묶음 한 칸', svc.smsTextKey(' a \n\n b\t c ') === 'a b c' && svc.smsPhoneKey('010-1111 0001') === '01011110001');
     const src = fs.readFileSync(path.join(SERVER, 'src/services/manualMessage.service.js'), 'utf8');
