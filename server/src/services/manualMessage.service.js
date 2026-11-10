@@ -26,6 +26,9 @@ const SEND_REASON = {
   fulfilled_before_send: '리뷰 의무가 이미 끝났습니다',
   review_not_pending_before_send: '리뷰 대기 상태가 아닙니다',
   cancelled_before_send: '주문이 취소됐습니다',
+  // 결정 365 — 같은 줄을 동시에 보낸 다른 요청(다른 담당자·구버전 화면·자동 알림)이 먼저 이 회차를 잡았다(공급자 호출 0).
+  sent_by_other_before_send: '다른 담당자(또는 자동 알림)가 방금 이 회차 알림톡을 보냈습니다 — 두 번 나가지 않게 이번에는 보내지 않았습니다. 창을 다시 열면 결과가 보입니다',
+  reminder_busy_before_send: '같은 리뷰어에게 다른 알림톡을 보내는 중입니다 — 두 번 나가지 않게 이번에는 보내지 않았습니다. 잠시 뒤 창을 다시 열어 확인해 주세요',
 };
 const TEXT_MAX_BYTES = solapi.LMS_MAX_BYTES;
 
