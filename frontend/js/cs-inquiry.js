@@ -629,6 +629,11 @@ function csViewImage(url) {
   v.style.display = "flex";
 }
 
+/* ★ 결정 362: 쓴 답장 하나마다 키(clientMsgId)를 만들어, 같은 답장을 다시 보낼 때마다 같은 키를 싣는다.
+     시간 초과·끊김으로 응답만 못 받았는데 실제로는 저장됐으면, 서버가 같은 키를 알아보고 새로 저장하지 않는다.
+     키는 「계정·방·글·사진」이 같을 때만 다시 쓴다(api.js createCsStaffDraftKey 단일 출처) · 성공 확인 또는 409 에서 버린다. */
+const _csReplyDraftKey = (typeof createCsStaffDraftKey === "function") ? createCsStaffDraftKey() : null;
+
 async function csSendReply(threadId) {
   const ta = document.getElementById("csReplyText");
   if (!ta) return;
@@ -637,12 +642,18 @@ async function csSendReply(threadId) {
   if (_csPending.some(p => !p.url)) { showToast("사진 업로드가 끝나면 전송할 수 있어요"); return; }
   const imageUrls = _csPending.map(p => p.url).filter(Boolean);
   if (!content && imageUrls.length === 0) return;
+  const clientMsgId = _csReplyDraftKey ? _csReplyDraftKey.keyFor([String(threadId), content, imageUrls]) : "";
   ta.value = "";
   const sentAttach = _csPending.slice();
   _csPending = []; csRenderAttachBar();
   try {
-    const data = await gasPost({ action: "csAdminReply", threadId, content, imageUrls });
-    if (!data || data.ok === false) throw new Error((data && data.error) || "전송 실패");
+    const data = await gasPost({ action: "csAdminReply", threadId, content, imageUrls, clientMsgId });
+    if (!data || data.ok === false) {
+      // 같은 키인데 내용이 다르다고 서버가 거절하면(드묾) 키를 버린다 — 다음 [보내기]는 새 답장으로 간다.
+      if (data && data.code === "cs_client_msg_conflict" && _csReplyDraftKey) _csReplyDraftKey.settle(clientMsgId);
+      throw new Error((data && data.error) || "전송 실패");
+    }
+    if (_csReplyDraftKey) _csReplyDraftKey.settle(clientMsgId);   // 성공 확인 → 이 답장의 키는 끝
     await csReloadConversation(threadId);
     loadCsRooms();
   } catch (err) {

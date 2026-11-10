@@ -7,6 +7,8 @@
 
   let state = null;
   let mountRevision = 0;
+  // 다시 보내기 키(결정 362) — api.js createCsStaffDraftKey 단일 출처. 없으면 키 없이 종전 동작.
+  const draftKey = (typeof createCsStaffDraftKey === 'function') ? createCsStaffDraftKey() : null;
 
   const esc = (value) => String(value == null ? '' : value)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -233,14 +235,20 @@
     if (!content && !imageUrls.length) return;
     const activeThreadId = state.activeThreadId;
     const sentImages = pending.slice();
+    // ★ 결정 362 — 같은 답장의 다시 보내기는 같은 키(응답만 못 받은 첫 전송이 저장됐으면 서버가 새로 저장하지 않는다).
+    const clientMsgId = draftKey ? draftKey.keyFor([String(activeThreadId), content, imageUrls]) : '';
     state.draft = '';
     state.pendingImages = [];
     state.sending = true;
     render();
     try {
-      const data = await gasPost({ action: 'csAdminReply', threadId: activeThreadId, content, imageUrls });
+      const data = await gasPost({ action: 'csAdminReply', threadId: activeThreadId, content, imageUrls, clientMsgId });
       const error = requestError(data, '전송 실패');
-      if (error) throw new Error(error);
+      if (error) {
+        if (data && data.code === 'cs_client_msg_conflict' && draftKey) draftKey.settle(clientMsgId);   // 409 → 다음 누름은 새 답장
+        throw new Error(error);
+      }
+      if (draftKey) draftKey.settle(clientMsgId);   // 성공 확인 → 이 답장의 키는 끝
       if (!state || String(state.activeThreadId) !== String(activeThreadId)) return;
       state.sending = false;
       await openRoom(activeThreadId);

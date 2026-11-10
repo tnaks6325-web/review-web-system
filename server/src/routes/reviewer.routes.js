@@ -1804,11 +1804,8 @@ router.get('/cs/messages', async (req, res, next) => {
 //   서버는 (문의방, 키) 로 한 번만 저장한다 — 시간 초과·끊김으로 응답만 못 받은 첫 전송이 이미
 //   저장됐으면, 다시 보내기는 새로 저장·관리자 알림·웹훅·미확인 숫자 증가 없이 **저장된 메시지를 성공으로** 돌려준다.
 //   ★ 키가 없거나 모양이 틀리면 종전 경로 그대로(구버전 화면 = 동작 불변).
-const CS_CLIENT_MSG_ID_RE = /^[A-Za-z0-9_-]{16,100}$/;
-function _csClientMsgId(v) {
-  const s = (v == null ? '' : v).toString().trim();
-  return CS_CLIENT_MSG_ID_RE.test(s) ? s : '';
-}
+//   ★ 키 모양 판정·내용 비교는 `utils/csClientMsgId` 단일 출처 — 직원 답장(결정 362)과 같은 규칙.
+const { normalizeCsClientMsgId: _csClientMsgId, sameCsPayload: _sameCsPayload } = require('../utils/csClientMsgId');
 // 스레드 upsert (xmax=0 → 신규 insert) — 종전 경로와 키 경로가 같은 문장을 쓴다(사본 금지).
 const CS_THREAD_UPSERT_SQL = `
       INSERT INTO cs_threads
@@ -1831,10 +1828,6 @@ const CS_FIND_BY_CLIENT_ID_SQL =
      FROM cs_messages
     WHERE thread_id = $1 AND client_msg_id = $2 AND sender_role = 'reviewer'
     LIMIT 1`;
-function _sameCsPayload(row, content, imageUrls) {
-  const urls = Array.isArray(row.imageUrls) ? row.imageUrls : [];
-  return String(row.content || '') === content && JSON.stringify(urls) === JSON.stringify(imageUrls);
-}
 /** 키가 있는 전송 — 한 트랜잭션 안에서 「문의방 잠금 → 같은 키 확인 → 저장」.
  *  ★ 문의방 upsert 가 그 방 줄을 잠그므로 같은 방 동시 전송은 줄을 서고, 뒤에 선 쪽은 앞쪽이 COMMIT 한
  *    메시지를 다음 문장(READ COMMITTED 새 스냅숏)에서 본다. 같은 키가 이미 있으면 ROLLBACK(미확인 +1·미리보기 갱신까지 되돌림).
