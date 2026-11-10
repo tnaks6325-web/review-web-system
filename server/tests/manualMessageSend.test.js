@@ -37,6 +37,18 @@ pool.query = async (sql, params) => {
   if (/INSERT INTO app_settings/.test(sql)) { SETTINGS.set(params[0], params[1]); return { rowCount: 1 }; }
   throw new Error('예상하지 못한 쿼리: ' + sql.slice(0, 80));
 };
+// 결정 366 — 문자 선점은 번호 잠금 트랜잭션 연결로 간다(BEGIN·잠금·같은 글 창 조회·COMMIT). 이 가드는 창 판정과 무관 —
+// 창 조회는 0건, 나머지(선점 INSERT)는 위 정규식 db 로 넘긴다(검사 의미 불변: 발송 기록 1줄·누가·무엇을).
+const origConnect = pool.connect;
+pool.connect = async () => ({
+  query: async (sql, params) => {
+    if (/^\s*(BEGIN|COMMIT|ROLLBACK|SET LOCAL)/i.test(sql) || /pg_advisory_xact_lock/.test(sql)) return { rows: [], rowCount: 0 };
+    if (/FROM manual_message_sends/.test(sql)) return { rows: [], rowCount: 0 };
+    if (/INSERT INTO manual_message_sends/.test(sql)) { logs.push(params); return { rows: [{ id: 'row' + logs.length }], rowCount: 1 }; }
+    return pool.query(sql, params);
+  },
+  release() {},
+});
 
 (async () => {
   console.log('\n▶ ① 문자');
@@ -77,13 +89,13 @@ pool.query = async (sql, params) => {
   await svc.previewManualSend({ sheetId: 's', tabName: 't', ids: ['a'] });
   ok('미리보기는 단가를 조회한다', billingCalls === 1);
   solapi.getAccountBilling = origBilling;
-  ok('같은 번호는 한 번만 보낸다', sent.length === 1 && sent[0].to === '01011112222');
+  ok('★ 같은 번호라도 참여건(줄)마다 따로 보낸다(사장님 확정 2026-11-10 · 결정 366)', sent.length === 2 && sent.every(x => x.to === '01011112222'));
   ok('보낸 문자에 안내 문구가 붙어 있다', /발신 전용/.test(sent[0].text));
-  ok('1:1 문의방에는 안내 없이 본문만 남긴다', rooms.length === 1 && rooms[0].message === '리뷰 부탁드립니다' && rooms[0].phone8 === '11112222' && rooms[0].by === '망고');
+  ok('1:1 문의방에는 안내 없이 본문만 · 같은 번호(같은 문의방)는 한 번만 남긴다', rooms.length === 1 && rooms[0].message === '리뷰 부탁드립니다' && rooms[0].phone8 === '11112222' && rooms[0].by === '망고');
   const by = Object.fromEntries(r.results.map(x => [x.participantId, x]));
   ok('결과: 보냄/중복/번호 모호/대상 없음을 구분해 말한다',
-    by.a.sent && by.a.roomOk && by.b.merged && /전체 번호를 특정할 수 없습니다/.test(by.c.reason) && /로그인 계정/.test(by.d.reason));
-  ok('발송 기록이 남는다(누가·무엇을)', logs.length === 1 && logs[0][0] === 'sms' && logs[0][13] === '망고' && /발신 전용/.test(logs[0][7]));
+    by.a.sent && by.a.roomOk && by.b.sent && by.b.roomOk && !by.b.merged && /전체 번호를 특정할 수 없습니다/.test(by.c.reason) && /로그인 계정/.test(by.d.reason));
+  ok('발송 기록이 참여건마다 남는다(누가·무엇을)', logs.length === 2 && logs[0][0] === 'sms' && logs[0][13] === '망고' && /발신 전용/.test(logs[0][7]));
 
   r = await svc.sendManualSms({ sheetId: 's', tabName: 't', ids: ['a'], text: '   ' });
   ok('빈 내용은 거부', r.ok === false && /입력/.test(r.error));
@@ -272,6 +284,6 @@ pool.query = async (sql, params) => {
   }
   ok('문안으로 보낸 상품명을 그 작업 이름으로 기억한다', /_msTplProduct\(text\)[\s\S]{0,300}save:true/.test(wd));
   console.log(`\n✅ manualMessageSend: ${passed}개 통과`);
-  pool.query = origQuery;
+  pool.query = origQuery; pool.connect = origConnect;
   process.exit(0);
 })().catch(e => { console.error('❌', e.message); process.exit(1); });

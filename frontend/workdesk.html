@@ -11314,7 +11314,8 @@ async function _msLoad(){
 }
 function _msOkItems(){
   const items=(_MS&&_MS.items)||[];
-  if(_MS.tab==='sms'){ const seen=new Set(); return items.filter(x=>x.sms&&x.sms.ok&&!seen.has(x.sms.phone)&&seen.add(x.sms.phone)); }
+  // ★ 결정 366(사장님 확정 2026-11-10) — 같은 번호라도 참여건(줄)마다 한 통씩 보낸다(서버와 같은 셈 · 종전 번호당 1명 폐지)
+  if(_MS.tab==='sms') return items.filter(x=>x.sms&&x.sms.ok);
   return items.filter(x=>x.ata&&x.ata.ok);
 }
 function _msPaintList(){
