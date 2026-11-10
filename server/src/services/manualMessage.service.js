@@ -16,6 +16,7 @@ const solapi = require('./solapi.service');
 const reminder = require('./reviewReminder.service');
 const { reviewerContactsForRows } = require('./reviewerContact.service');
 const csBridge = require('./csBridge.service');
+const { normalizeCsClientMsgId } = require('../utils/csClientMsgId');   // 키 모양 단일 출처(결정 361·362) — 정규식 사본 0
 
 const MAX_ROWS = 200;
 const SEND_REASON = {
@@ -115,12 +116,149 @@ async function _log(row) {
   }
 }
 
-async function sendManualSms({ sheetId, tabName, ids, text, by }) {
+/* ══ 다시 보내기 키(clientSendId) — 응답만 못 받은 첫 발송 뒤 다시 보내도 한 사람에게 한 번만 (결정 364 · migration 222) ══
+   ★ 화면이 「같은 줄 선택·방식·내용」마다 키 하나를 만들어 다시 보낼 때마다 같은 키를 싣는다(createCsStaffDraftKey).
+   ★ 서버는 받는 사람(참여 줄)마다 **공급자를 부르기 전에** 발송 기록에 '대기(pending)' 줄을 먼저 넣는다 —
+     부분 유일 색인 (client_send_id, participant_id) 때문에 같은 키·같은 사람은 한 요청만 선점한다.
+     선점한 요청만 공급자를 부르고, 결과로 sent / failed / unknown 을 적는다.
+   ★ 다시 온 요청이 본 상태:
+       sent    → 공급자를 부르지 않고 「보냄」(duplicate:true)
+       failed  → 확실한 실패(공급자가 거절했다고 답함) → 같은 키로 다시 선점해 다시 보낸다
+       unknown → 시간 초과·끊김(받았을 수도 있다) → **다시 보내지 않는다**(돈이 두 번 들 수 있다)
+       pending → 앞선 요청이 아직 처리 중(또는 처리 중 서버가 멈춤) → 다시 보내지 않는다
+   ★ 같은 키인데 내용(방식·작업·글·보낸 사람)이 다르면 409 manual_send_conflict — 아무것도 보내지 않는다.
+   ★ 키가 없거나 모양이 틀리면 종전 경로 한 줄도 안 바뀜. 칸·색인이 없는 DB(42703·42P10)도 종전 경로. */
+const SEND_CONFLICT = 'manual_send_conflict';
+const SEND_IN_PROGRESS = 'manual_send_in_progress';
+const SEND_UNKNOWN = 'manual_send_unknown';
+const PENDING_STALE_MS = 2 * 60 * 1000;   // 공급자 시간 제한(12초)보다 한참 길게 — 이보다 오래된 대기 = 처리 중 멈춘 것(결과 모름)
+const KEY_MSG = {
+  conflict: '같은 발송 요청인데 내용이 달라 보내지 않았습니다 — 창을 닫고 다시 열어 보내 주세요',
+  inProgress: '앞서 누른 발송이 아직 처리 중입니다 — 잠시 뒤 창을 다시 열어 결과를 확인해 주세요(두 번 나가지 않게 이번에는 보내지 않았습니다)',
+  smsUnknown: '문자 발송 결과를 확인하지 못했습니다(이미 받았을 수 있습니다) — 두 번 나가지 않게 다시 보내지 않았습니다. 꼭 다시 보내야 하면 리뷰어에게 확인한 뒤 내용을 조금 고치거나 화면을 새로고침하고 보내 주세요',
+  ataUnknown: '알림톡 발송 결과를 확인하지 못했습니다(이미 받았을 수 있습니다) — 두 번 나가지 않게 다시 보내지 않았습니다',
+  claimFailed: '발송 기록을 남기지 못해 보내지 않았습니다 — 잠시 뒤 다시 보내 주세요',
+};
+const _SCHEMA_GAP = new Set(['42703', '42P10']);   // 칸 없음 · ON CONFLICT 에 맞는 유일 색인 없음(마이그레이션 222 전)
+function _schemaGap(e) { return !!(e && _SCHEMA_GAP.has(String(e.code || ''))); }
+/* 문자 공급자 오류가 「확실한 실패」인가 — HTTP 응답이 있었으면(거절) 또는 요청을 보내기도 전의 오류면 확실한 실패.
+   그 밖(시간 초과·연결 끊김·응답 읽다 끊김)은 공급자가 받았을 수 있다 = 결과 모름. */
+const _SMS_PRE_REQUEST = new Set(['SOLAPI_NOT_CONFIGURED', 'SOLAPI_FETCH_UNAVAILABLE', 'SMS_EMPTY', 'SMS_TOO_LONG']);
+function _smsErrorUncertain(e) {
+  if (e && e.status) return false;
+  const c = String((e && (e.code || e.message)) || '');
+  return !_SMS_PRE_REQUEST.has(c);
+}
+function _sendFp({ kind, sheetId, tabName, text, by }) {
+  return require('crypto').createHash('sha256')
+    .update(JSON.stringify([String(kind || ''), String(sheetId || ''), String(tabName || ''), String(text || '').trim(), String(by || '')]))
+    .digest('hex');
+}
+/** 같은 키·다른 내용이 이미 있나(요청 맨 앞 · 칸이 없으면 42703 을 던져 호출부가 종전 경로로). */
+async function _keyConflict(key, fp) {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM manual_message_sends WHERE client_send_id = $1 AND client_send_fp IS DISTINCT FROM $2 LIMIT 1`, [key, fp]);
+  return rows.length > 0;
+}
+const _CLAIM_SQL = `
+  INSERT INTO manual_message_sends
+    (kind, sheet_id, tab_name, participant_id, reviewer_name, target_phone, message_text, message_type,
+     accepted, provider_reason, sent_by, client_send_id, client_send_fp, send_state, send_state_at)
+  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,FALSE,'',$9,$10,$11,'pending',NOW())
+  ON CONFLICT (client_send_id, participant_id) WHERE client_send_id IS NOT NULL DO NOTHING
+  RETURNING id`;
+/**
+ * 한 사람 선점 — { own:id, fresh } | { dup:row } | { conflict } | { busy, stale } | { unknown } | { error }
+ * ★ 공급자 호출 전에만 부른다. 칸·색인 없음(42703·42P10)은 그대로 던진다(호출부가 첫 사람에서 종전 경로로 접는다).
+ */
+async function _claim(c) {
+  for (let tries = 0; tries < 2; tries++) {
+    const ins = await pool.query(_CLAIM_SQL, [c.kind, c.sheetId, c.tabName, String(c.participantId), c.reviewerName || '',
+      c.targetPhone || '', c.text || '', c.type || '', c.by || '', c.key, c.fp]);
+    if (ins.rows && ins.rows[0]) return { own: ins.rows[0].id, fresh: true };
+    const { rows } = await pool.query(
+      `SELECT id, client_send_fp AS fp, send_state AS state, send_state_at AS "stateAt", message_type AS type,
+              reminder_no AS "reminderNo", target_phone AS phone
+         FROM manual_message_sends WHERE client_send_id = $1 AND participant_id = $2 LIMIT 1`, [c.key, String(c.participantId)]);
+    const row = rows[0];
+    if (!row) continue;   // 그 사이 지워진 선점(공급자까지 안 간 알림톡) — 한 번 더 선점해 본다
+    if (row.fp !== c.fp) return { conflict: true };
+    if (row.state === 'sent') return { dup: row };
+    if (row.state === 'failed') {
+      // 확실한 실패만 다시 보낸다 — 한 문장 CAS 라 동시 재시도 중 하나만 이긴다.
+      const re = await pool.query(
+        `UPDATE manual_message_sends SET send_state='pending', send_state_at=NOW(), sent_by=$3, provider_reason=''
+          WHERE id=$1 AND client_send_fp=$2 AND send_state='failed' RETURNING id`, [row.id, c.fp, c.by || '']);
+      if (re.rows && re.rows[0]) return { own: re.rows[0].id, fresh: false };
+      continue;
+    }
+    if (row.state === 'unknown') return { unknown: true };
+    const age = row.stateAt ? Date.now() - new Date(row.stateAt).getTime() : Infinity;
+    return { busy: true, stale: !(age < PENDING_STALE_MS) };
+  }
+  return { busy: true, stale: false };
+}
+/** 결과 적기 — 실패해도 발송 결과는 그대로(줄은 '대기'로 남아 다시 보내기가 보내지 않는다 = 안전한 쪽). */
+async function _finish(id, r) {
+  try {
+    await pool.query(
+      `UPDATE manual_message_sends
+          SET send_state=$2, send_state_at=NOW(), accepted=$3,
+              message_type=COALESCE(NULLIF($4,''), message_type), provider_message_id=$5, provider_reason=$6,
+              message_text=COALESCE(NULLIF($7,''), message_text), reminder_no=COALESCE($8, reminder_no),
+              order_submission_id=COALESCE(NULLIF($9,''), order_submission_id),
+              reviewer_name=COALESCE(NULLIF($10,''), reviewer_name), target_phone=COALESCE(NULLIF($11,''), target_phone)
+        WHERE id=$1`,
+      [id, r.state, !!r.accepted, r.type || '', r.messageId || null, String(r.reason || ''), r.text || '',
+       r.reminderNo || null, r.orderSubmissionId ? String(r.orderSubmissionId) : '', r.reviewerName || '', r.targetPhone || '']);
+  } catch (e) {
+    logger.warn(`[manualMessage] 발송 결과 기록 실패(발송 결과는 유지 · 그 줄은 다시 보내지 않음): ${e.message}`);
+  }
+}
+/** 공급자까지 안 간 선점 풀기 — 이번에 넣은 줄은 지우고(종전처럼 기록 없음), 다시 선점한 실패 줄은 실패로 되돌린다. */
+async function _release(claim, reason) {
+  try {
+    if (claim.fresh) await pool.query(`DELETE FROM manual_message_sends WHERE id=$1 AND send_state='pending'`, [claim.own]);
+    else await pool.query(`UPDATE manual_message_sends SET send_state='failed', send_state_at=NOW(), provider_reason=$2
+                            WHERE id=$1 AND send_state='pending'`, [claim.own, String(reason || '')]);
+  } catch (e) {
+    logger.warn(`[manualMessage] 발송 선점 풀기 실패(그 줄은 잠시 '처리 중'으로 보임): ${e.message}`);
+  }
+}
+/** 선점 못 한 사람의 결과 한 줄(공급자 호출 0). */
+function _claimOutcome(c, base, kind) {
+  if (c.conflict) return { ...base, sent: false, code: SEND_CONFLICT, reason: KEY_MSG.conflict };
+  if (c.unknown || (c.busy && c.stale)) return { ...base, sent: false, code: SEND_UNKNOWN, reason: kind === 'sms' ? KEY_MSG.smsUnknown : KEY_MSG.ataUnknown };
+  if (c.busy) return { ...base, sent: false, code: SEND_IN_PROGRESS, reason: KEY_MSG.inProgress };
+  return { ...base, sent: false, reason: KEY_MSG.claimFailed };
+}
+/** 키 경로 입구 — { key, fp } | null(키 없음) · 같은 키·다른 내용이면 { conflict } · 칸 없으면 null(종전 경로). */
+async function _keyGate({ clientSendId, kind, sheetId, tabName, text, by }) {
+  const key = normalizeCsClientMsgId(clientSendId);
+  if (!key) return null;
+  const fp = _sendFp({ kind, sheetId, tabName, text, by });
+  try {
+    if (await _keyConflict(key, fp)) return { conflict: true };
+  } catch (e) {
+    if (_schemaGap(e)) { logger.warn(`[manualMessage] 다시 보내기 키 칸 없음(migration 222 전) — 종전 경로: ${e.code}`); return null; }
+    throw e;
+  }
+  return { key, fp };
+}
+class _SchemaGapFallback extends Error {}
+
+async function sendManualSms({ sheetId, tabName, ids, text, by, clientSendId }) {
   const body = String(text || '').trim();
   if (!body) return { ok: false, error: '보낼 내용을 입력하세요' };
   const full = composeSms(body);
   if (solapi.smsBytes(full) > TEXT_MAX_BYTES) return { ok: false, error: '내용이 너무 깁니다(안내 문구 포함 2000바이트까지)' };
   if (!solapi.getSolapiStatus().configured) return { ok: false, error: '문자 발송 설정이 비어 있습니다' };
+  const gate = await _keyGate({ clientSendId, kind: 'sms', sheetId, tabName, text: body, by });
+  if (gate && gate.conflict) return { ok: false, code: SEND_CONFLICT, error: KEY_MSG.conflict };
+  if (gate) {
+    try { return await _sendManualSmsKeyed({ sheetId, tabName, ids, body, full, by, ...gate }); }
+    catch (e) { if (!(e instanceof _SchemaGapFallback)) throw e; logger.warn(`[manualMessage] 발송 선점 색인 없음 — 종전 경로: ${e.message}`); }
+  }
   const { items } = await previewManualSend({ sheetId, tabName, ids, withBilling: false });
   const results = [];
   const seen = new Map();
@@ -154,9 +292,127 @@ async function sendManualSms({ sheetId, tabName, ids, text, by }) {
   return { ok: results.some(r => r.sent), results };
 }
 
-async function sendManualAlimtalk({ sheetId, tabName, ids, by }) {
+/* 문자 — 키 경로. 받는 사람 판정·같은 번호 한 번·문의방 기록·결과 모양은 종전 경로와 같다(+ duplicate · code).
+   ★ 사람마다 「선점 → 공급자 → 결과 적기」. 선점 못 한 사람에게는 공급자를 부르지 않는다. */
+async function _sendManualSmsKeyed({ sheetId, tabName, ids, body, full, by, key, fp }) {
+  const { items } = await previewManualSend({ sheetId, tabName, ids, withBilling: false });
+  const results = [];
+  const seen = new Map();
+  let calls = 0;
+  for (const it of items) {
+    const base = { participantId: it.participantId, rowName: it.rowName || '' };
+    if (!it.sms.ok) { results.push({ ...base, sent: false, reason: it.sms.reason }); continue; }
+    if (seen.has(it.sms.phone)) { results.push({ ...base, sent: false, merged: true, reason: '같은 번호에 이미 보냈습니다(한 번만 발송)' }); continue; }
+    seen.set(it.sms.phone, true);
+    let c;
+    try {
+      c = await _claim({ kind: 'sms', sheetId, tabName, participantId: it.participantId, reviewerName: it.sms.name,
+        targetPhone: it.sms.phone, text: full, by, key, fp });
+    } catch (e) {
+      if (_schemaGap(e) && calls === 0 && !results.some(r => r.sent || r.code)) throw new _SchemaGapFallback(e.code);
+      logger.warn(`[manualMessage] 문자 발송 선점 실패(보내지 않음): ${e.message}`);
+      c = { error: true };
+    }
+    if (c.dup) {
+      results.push({ ...base, name: it.sms.name, phone: it.sms.phone, sent: true, duplicate: true, type: c.dup.type || undefined, reason: '' });
+      continue;
+    }
+    if (!c.own) { results.push({ ...base, name: it.sms.name, phone: it.sms.phone, ..._claimOutcome(c, {}, 'sms') }); continue; }
+    calls++;
+    let out, state;
+    try {
+      out = await solapi.sendSms({ to: it.sms.phone, text: full, subject: 'IA리뷰 안내',
+        customFields: { participantId: String(it.participantId), kind: 'manual_sms' } });
+      state = out.accepted ? 'sent' : 'failed';
+    } catch (e) {
+      out = { accepted: false, reason: e.code || e.message || '발송 실패' };
+      state = _smsErrorUncertain(e) ? 'unknown' : 'failed';
+    }
+    let roomOk = false;
+    if (out.accepted) {
+      try {
+        const r = await csBridge.postAdminNotice({ sheetId, tabName, rowIndex: it.seq,
+          reviewerName: it.sms.name || it.rowName, phone8: it.sms.phone8, message: body, by });
+        roomOk = !!r;
+      } catch (_) { roomOk = false; }
+    }
+    await _finish(c.own, { state, accepted: out.accepted, type: out.type, messageId: out.messageId,
+      reason: state === 'unknown' ? `UNCERTAIN:${out.reason || ''}` : out.reason, reviewerName: it.sms.name, targetPhone: it.sms.phone });
+    if (state === 'unknown') {
+      results.push({ ...base, name: it.sms.name, phone: it.sms.phone, sent: false, code: SEND_UNKNOWN, reason: KEY_MSG.smsUnknown });
+      continue;
+    }
+    results.push({ ...base, name: it.sms.name, phone: it.sms.phone, sent: !!out.accepted, type: out.type,
+      roomOk, reason: out.accepted ? '' : `문자 발송 실패 — ${out.reason || '사유 없음'}` });
+  }
+  return { ok: results.some(r => r.sent), results };
+}
+
+/* 알림톡 — 키 경로. 선점한 줄만 reminder.sendManual 에 넘긴다(회차·원장·종결 흐름은 종전 sendOne 그대로).
+   ★ 이게 없으면: 첫 알림톡이 빨리 도착 확인된 뒤 다시 보내기가 **다음 회차를 바로** 보낸다(날짜 전 앞당김 허용 규칙). */
+async function _sendManualAlimtalkKeyed({ sheetId, tabName, want, cps, by, key, fp }) {
+  const slots = [];
+  const own = new Map();   // seq → { claim, participantId, rowName, slot }
+  const done = new Set();
+  for (const id of want) {
+    const cp = cps.find(c => c.id === id);
+    if (!cp) { slots.push({ participantId: id, sent: false, reason: '표에 없는 줄입니다' }); continue; }
+    if (done.has(Number(cp.seq))) { slots.push({ participantId: id, rowName: cp.rowName, sent: false, reason: '같은 줄 — 한 번만 발송' }); continue; }
+    done.add(Number(cp.seq));
+    let c;
+    try {
+      c = await _claim({ kind: 'alimtalk', sheetId, tabName, participantId: id, reviewerName: cp.rowName, by, key, fp });
+    } catch (e) {
+      if (_schemaGap(e) && !own.size && !slots.some(r => r.sent || r.code)) throw new _SchemaGapFallback(e.code);
+      logger.warn(`[manualMessage] 알림톡 발송 선점 실패(보내지 않음): ${e.message}`);
+      c = { error: true };
+    }
+    const base = { participantId: id, rowName: cp.rowName };
+    if (c.dup) {
+      slots.push({ ...base, sent: true, duplicate: true, reminderNo: c.dup.reminderNo || undefined,
+        phoneTail: c.dup.phone ? String(c.dup.phone).slice(-4) : undefined, reason: '' });
+      continue;
+    }
+    if (!c.own) { slots.push(_claimOutcome(c, base, 'alimtalk')); continue; }
+    const slot = { ...base, sent: false, reason: '결과가 없습니다' };
+    slots.push(slot);
+    own.set(Number(cp.seq), { claim: c, slot });
+  }
+  let out = { ok: true, results: [] };
+  if (own.size) {
+    // ★ 던지면(DB 오류 등) 선점 줄은 '대기'로 둔다 — 공급자까지 갔는지 모르므로 다시 보내기가 또 보내지 않게(안전한 쪽).
+    out = await reminder.sendManual({ sheetId, tabName, rowIndexes: [...own.keys()] });
+  }
+  const bySeq = new Map((out.results || []).map(r => [Number(r.rowIndex), r]));
+  for (const [seq, o] of own) {
+    const r = bySeq.get(seq) || { sent: false, reason: '결과가 없습니다' };
+    const accepted = !!(r.sent && r.accepted);
+    if (!r.sent) {
+      await _release(o.claim, r.reason);
+      Object.assign(o.slot, { sent: false, reminderNo: r.reminderNo, phoneTail: r.phoneTail, reason: SEND_REASON[r.reason] || r.reason || '보내지 못했습니다' });
+      continue;
+    }
+    const state = accepted ? 'sent' : (r.uncertain ? 'unknown' : 'failed');
+    await _finish(o.claim.own, { state, accepted, type: 'ATA', text: `리뷰미작성_${r.reminderNo}차`, reminderNo: r.reminderNo,
+      orderSubmissionId: r.orderSubmissionId, reviewerName: r.reviewerName || o.slot.rowName, targetPhone: r.targetPhone,
+      reason: state === 'unknown' ? `UNCERTAIN:${r.reason || ''}` : r.reason });
+    if (state === 'unknown') { Object.assign(o.slot, { sent: false, reminderNo: r.reminderNo, phoneTail: r.phoneTail, code: SEND_UNKNOWN, reason: KEY_MSG.ataUnknown }); continue; }
+    Object.assign(o.slot, { sent: accepted, reminderNo: r.reminderNo, phoneTail: r.phoneTail,
+      reason: accepted ? '' : (SEND_REASON[r.reason] || r.reason || '보내지 못했습니다') });
+  }
+  return { ok: slots.some(r => r.sent), error: out.ok === false ? out.error : undefined, results: slots };
+}
+
+async function sendManualAlimtalk({ sheetId, tabName, ids, by, clientSendId }) {
   if (!solapi.getSolapiStatus().configured) return { ok: false, error: '알림톡 발송 설정이 비어 있습니다' };
+  const gate = await _keyGate({ clientSendId, kind: 'alimtalk', sheetId, tabName, text: '', by });
+  if (gate && gate.conflict) return { ok: false, code: SEND_CONFLICT, error: KEY_MSG.conflict };
   const want = _ids(ids);
+  if (gate) {
+    const cpsK = await _participants(sheetId, tabName, want);
+    try { return await _sendManualAlimtalkKeyed({ sheetId, tabName, want, cps: cpsK, by, ...gate }); }
+    catch (e) { if (!(e instanceof _SchemaGapFallback)) throw e; logger.warn(`[manualMessage] 발송 선점 색인 없음 — 종전 경로: ${e.message}`); }
+  }
   const cps = await _participants(sheetId, tabName, want);
   const seqs = [...new Set(cps.map(c => Number(c.seq)))];
   const out = await reminder.sendManual({ sheetId, tabName, rowIndexes: seqs });
@@ -248,4 +504,4 @@ async function saveShortName({ sheetId, tabName, name, by }) {
   return { ok: true, name: n };
 }
 
-module.exports = { productShortName, saveShortName, normalizeShortName, derivedFromSource, cleanProductSource: _cleanProductSource, SHORT_MAX_BYTES, previewManualSend, sendManualSms, sendManualAlimtalk, composeSms, smsFooter, homeLink, homeHost, hasHomeLink, MAX_ROWS };
+module.exports = { SEND_CONFLICT, SEND_IN_PROGRESS, SEND_UNKNOWN, PENDING_STALE_MS, productShortName, saveShortName, normalizeShortName, derivedFromSource, cleanProductSource: _cleanProductSource, SHORT_MAX_BYTES, previewManualSend, sendManualSms, sendManualAlimtalk, composeSms, smsFooter, homeLink, homeHost, hasHomeLink, MAX_ROWS };
