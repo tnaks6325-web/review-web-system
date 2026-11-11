@@ -1,0 +1,116 @@
+
+> review-web-group-backup-worker@1.0.0 test
+> node --test tests/*.test.js
+
+✔ key is reversible actual Drive ID chain plus name, no normalization (0.932583ms)
+✔ authentication precedes every route and any R2 access (33.61575ms)
+✖ manifest part immutable bytes + receipts pagination support DB-free discovery (1.42225ms)
+✖ current first create, BigInt monotonic CAS, delayed generation and exact retry recovery (0.219292ms)
+✖ conditional null never becomes successful current; two publishers one CAS winner (0.1575ms)
+✖ manifest schema, unknown fields, duplicate receipts, hash, limits and index base rejected (0.142083ms)
+✔ put verifies body proof, awaits actual R2 body rehash and immutable receipt (22.171292ms)
+✔ copy reads only fixed orig path and verifies MD5 or SHA bytes not source metadata (2.042458ms)
+✔ put null alone is failure; crash after object before receipt is repairable on retry (2.476958ms)
+✔ proof mismatch, readback corruption and immutable key collision never succeed (1.0435ms)
+✔ unknown fields, proof version, excluded ancestor, invalid MIME and byte budget rejected (0.389042ms)
+✔ get and head use only generated-key grammar and return wire metadata (1.269875ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 8
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 162.224792
+
+✖ failing tests:
+
+test at tests/manifest.test.js:5:1
+✖ manifest part immutable bytes + receipts pagination support DB-free discovery (1.42225ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'undefined'
+  - 'function'
+  
+      at TestContext.<anonymous> (file:///Users/sooman/dev/wt/rw-image-group-worker/backup-worker/tests/manifest.test.js:6:9)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/manifest.test.js:14:1
+✖ current first create, BigInt monotonic CAS, delayed generation and exact retry recovery (0.219292ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'undefined'
+  - 'function'
+  
+      at TestContext.<anonymous> (file:///Users/sooman/dev/wt/rw-image-group-worker/backup-worker/tests/manifest.test.js:15:9)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/manifest.test.js:21:1
+✖ conditional null never becomes successful current; two publishers one CAS winner (0.1575ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'undefined'
+  - 'function'
+  
+      at TestContext.<anonymous> (file:///Users/sooman/dev/wt/rw-image-group-worker/backup-worker/tests/manifest.test.js:22:9)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/manifest.test.js:25:1
+✖ manifest schema, unknown fields, duplicate receipts, hash, limits and index base rejected (0.142083ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'undefined'
+  - 'function'
+  
+      at TestContext.<anonymous> (file:///Users/sooman/dev/wt/rw-image-group-worker/backup-worker/tests/manifest.test.js:26:9)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

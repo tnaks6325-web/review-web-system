@@ -1,0 +1,26 @@
+
+> review-web-group-backup-worker@1.0.0 test:runtime
+> node tests/runtime/run.mjs
+
+PASS native-workerd SHA256 + MD5 + R2 create-only null + etag CAS null + GET hash
+PASS all routes invalid JWT/old key/no auth ->401; authentication-before-R2 zero
+PASS binary MD5 PUT matches cross-language fixed fixture and immutable receipt
+PASS SHA proof no MD5 path succeeds in workerd
+PASS safe SVG original GET/HEAD attachment CSP no-store length etag actual hash
+PASS 25MiB maximum body SHA proof persists and one extra byte is rejected
+PASS real HTTP active-body admission rejects concurrent request then recovers
+PASS copy SOURCE_MISSING exact fallback
+PASS copy SOURCE_MISMATCH same-length source does not write; valid orig MD5 works
+PASS R2 put-null missing object is failure, not success
+PASS R2 put reject and independent GET corruption fail
+PASS crash window object-before-receipt stays incomplete
+PRE_RESTART_COUNTERS {"sourceGet":3,"sourceHead":0,"sourcePut":0,"sourceDelete":0,"backupGet":16,"backupHead":1,"backupList":0,"backupPut":15,"backupNull":3}
+PASS real runtime restart persistent R2 crash repair + lost-response idempotency
+PASS manifest part/index immutable bytes, safe download and list cursor
+PASS BigInt current first-create exact retry and native etag CAS monotonic
+PASS unknown fields, excluded root, oversize and no arbitrary URL/DELETE
+COUNTERS {"sourceGet":0,"sourceHead":0,"sourcePut":0,"sourceDelete":0,"backupGet":25,"backupHead":0,"backupList":5,"backupPut":10,"backupNull":4}
+PASS SOURCE_IMAGES production path put/delete calls remain zero
+PASS actual production entry/config compiles locally and absent secret fails closed
+RUNTIME_RESULT {"groups":18,"failed":0,"wrangler":"4.160.0","localOnly":true,"restarted":true,"md5ExternalPackage":false}
+LOCAL_EVIDENCE_DIR /Users/sooman/.hermes/cache/scratch/backup-worker-runtime-xUkvSd

@@ -1,0 +1,42 @@
+✖ an expired older response cannot release the newer request active-body slot (23.581042ms)
+✖ Drive identifiers are strings not numbers coerced by regular expressions (20.166291ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 101.109584
+
+✖ failing tests:
+
+test at tests/http.test.js:31:1
+✖ an expired older response cannot release the newer request active-body slot (23.581042ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  200 !== 429
+  
+      at TestContext.<anonymous> (file:///Users/sooman/dev/wt/rw-image-group-worker/backup-worker/tests/http.test.js:34:248)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 200,
+    expected: 429,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/storage.test.js:34:1
+✖ Drive identifiers are strings not numbers coerced by regular expressions (20.166291ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (file:///Users/sooman/dev/wt/rw-image-group-worker/backup-worker/tests/storage.test.js:35:16)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }

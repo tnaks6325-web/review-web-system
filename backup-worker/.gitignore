@@ -1,0 +1,6 @@
+node_modules/
+.wrangler/
+.dev.vars*
+.env*
+# Keep original local RED/GREEN evidence despite the root *.log ignore.
+!tests/evidence/*.log

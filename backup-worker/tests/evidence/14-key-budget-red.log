@@ -1,0 +1,40 @@
+✖ name-length overflow is a key byte-budget error, never truncated or mislabeled (1.267708ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 62.285292
+
+✖ failing tests:
+
+test at tests/boundary.test.js:17:1
+✖ name-length overflow is a key byte-budget error, never truncated or mislabeled (1.267708ms)
+  AssertionError [ERR_ASSERTION]: The validation function is expected to return "true". Received false
+  
+  Caught error:
+  
+  Error: BAD_DESCRIPTOR
+      at TestContext.<anonymous> (file:///Users/sooman/dev/wt/rw-image-group-worker/backup-worker/tests/boundary.test.js:18:9)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: Error: BAD_DESCRIPTOR
+        at fail (file:///Users/sooman/dev/wt/rw-image-group-worker/backup-worker/src/storage.js:8:36)
+        at validName (file:///Users/sooman/dev/wt/rw-image-group-worker/backup-worker/src/storage.js:27:149)
+        at validDescriptor (file:///Users/sooman/dev/wt/rw-image-group-worker/backup-worker/src/storage.js:32:2)
+        at Module.buildObjectKey (file:///Users/sooman/dev/wt/rw-image-group-worker/backup-worker/src/storage.js:47:2)
+        at file:///Users/sooman/dev/wt/rw-image-group-worker/backup-worker/tests/boundary.test.js:18:28
+        at getActual (node:assert:580:5)
+        at strict.throws (node:assert:728:24)
+        at TestContext.<anonymous> (file:///Users/sooman/dev/wt/rw-image-group-worker/backup-worker/tests/boundary.test.js:18:9)
+        at Test.runInAsyncScope (node:async_hooks:226:14)
+        at Test.run (node:internal/test_runner/test:1402:25),
+    operator: 'throws',
+    diff: 'simple'
+  }

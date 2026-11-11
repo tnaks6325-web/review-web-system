@@ -1,0 +1,38 @@
+
+> review-web-group-backup-worker@1.0.0 test
+> node --test tests/*.test.js
+
+✔ key is reversible actual Drive ID chain plus name, no normalization (1.881666ms)
+✔ names preserve slash, traversal-looking text, Unicode forms and folder IDs; keys never truncate (1.527292ms)
+✔ name-length overflow is a key byte-budget error, never truncated or mislabeled (0.21825ms)
+✔ authentication precedes every route and any R2 access (45.308875ms)
+✔ fixed wire fixture binary PUT, GET, HEAD, receipt; no CORS and safe SVG attachment (24.820709ms)
+✔ entire independent wire fixture joins receipt, part, index and exact current hash/etag (13.380042ms)
+✔ copy fixed errors are exact fallback wire; SHA body proof path succeeds (2.176375ms)
+✔ HTTP strict fields, canonical base64, methods/query/key/URL rejection before storage (1.624333ms)
+✔ HTTP manifests/current uses exact pointer request and returns etag (9.926334ms)
+✔ an expired older response cannot release the newer request active-body slot (1.277875ms)
+✔ one active body per isolate rejects overlap then releases after body consumed (0.916792ms)
+✔ manifest part immutable bytes + receipts pagination support DB-free discovery (27.622833ms)
+✔ current first create, BigInt monotonic CAS, delayed generation and exact retry recovery (6.667583ms)
+✔ conditional null never becomes successful current; two publishers one CAS winner (1.627458ms)
+✔ duplicate receipt IDs, mismatched receipt/key and immutable generation conflicts rejected (2.290208ms)
+✔ manifest schema, unknown fields, duplicate receipts, hash, limits and index base rejected (1.107666ms)
+✔ mutation killed: removing body proof permits same-length wrong original (23.704208ms)
+✔ mutation killed: removing final R2 CAS lets stale in-flight publisher replace new current (10.525791ms)
+✔ put verifies body proof, awaits actual R2 body rehash and immutable receipt (21.470209ms)
+✔ copy reads only fixed orig path and verifies MD5 or SHA bytes not source metadata (3.715083ms)
+✔ put null alone is failure; crash after object before receipt is repairable on retry (2.703458ms)
+✔ proof mismatch, readback corruption and immutable key collision never succeed (1.425625ms)
+✔ unknown fields, proof version, excluded ancestor, invalid MIME and byte budget rejected (0.62ms)
+✔ empty or malformed root configuration fails closed before either bucket (0.125084ms)
+✔ Drive identifiers are strings not numbers coerced by regular expressions (0.060083ms)
+✔ get and head use only generated-key grammar and return wire metadata (1.439291ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 147.508792
