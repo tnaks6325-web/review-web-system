@@ -1,0 +1,3 @@
+# Preserve test-runner assertion output verbatim, including blank-line spaces.
+# This exception applies to raw evidence only, never source/config/tests.
+tests/evidence/*.log -whitespace

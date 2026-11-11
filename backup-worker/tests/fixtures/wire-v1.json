@@ -1,0 +1,181 @@
+{
+  "envelope": {
+    "v": 1,
+    "descriptor": {
+      "fileId": "file_0123456789",
+      "rootId": "root_0123456789",
+      "chain": [
+        {
+          "id": "root_0123456789",
+          "name": "root"
+        },
+        {
+          "id": "parent_0123456789",
+          "name": "work/name"
+        }
+      ],
+      "name": "photo.svg",
+      "mime": "image/svg+xml",
+      "size": 3,
+      "sourceVersion": "5",
+      "section": "internal"
+    },
+    "proof": {
+      "kind": "drive-md5",
+      "md5": "900150983cd24fb0d6963f7d28e17f72",
+      "size": 3,
+      "sourceVersion": "5"
+    }
+  },
+  "descriptorHeader": "eyJkZXNjcmlwdG9yIjp7ImNoYWluIjpbeyJpZCI6InJvb3RfMDEyMzQ1Njc4OSIsIm5hbWUiOiJyb290In0seyJpZCI6InBhcmVudF8wMTIzNDU2Nzg5IiwibmFtZSI6IndvcmsvbmFtZSJ9XSwiZmlsZUlkIjoiZmlsZV8wMTIzNDU2Nzg5IiwibWltZSI6ImltYWdlL3N2Zyt4bWwiLCJuYW1lIjoicGhvdG8uc3ZnIiwicm9vdElkIjoicm9vdF8wMTIzNDU2Nzg5Iiwic2VjdGlvbiI6ImludGVybmFsIiwic2l6ZSI6Mywic291cmNlVmVyc2lvbiI6IjUifSwicHJvb2YiOnsia2luZCI6ImRyaXZlLW1kNSIsIm1kNSI6IjkwMDE1MDk4M2NkMjRmYjBkNjk2M2Y3ZDI4ZTE3ZjcyIiwic2l6ZSI6Mywic291cmNlVmVyc2lvbiI6IjUifSwidiI6MX0",
+  "bodyBase64": "YWJj",
+  "canonicalReceiptMaterial": "{\"descriptor\":{\"chain\":[{\"id\":\"root_0123456789\",\"name\":\"root\"},{\"id\":\"parent_0123456789\",\"name\":\"work/name\"}],\"fileId\":\"file_0123456789\",\"mime\":\"image/svg+xml\",\"name\":\"photo.svg\",\"rootId\":\"root_0123456789\",\"section\":\"internal\",\"size\":3,\"sourceVersion\":\"5\"},\"key\":\"v1/internal/cm9vdA~root_0123456789/d29yay9uYW1l~parent_0123456789/cGhvdG8uc3Zn~file_0123456789/ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\"mime\":\"image/svg+xml\",\"proof\":{\"kind\":\"drive-md5\",\"md5\":\"900150983cd24fb0d6963f7d28e17f72\",\"size\":3,\"sourceVersion\":\"5\"},\"sha256\":\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\"size\":3}",
+  "receipt": {
+    "v": 1,
+    "key": "v1/internal/cm9vdA~root_0123456789/d29yay9uYW1l~parent_0123456789/cGhvdG8uc3Zn~file_0123456789/ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    "fileId": "file_0123456789",
+    "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    "size": 3,
+    "mime": "image/svg+xml",
+    "objectEtag": "900150983cd24fb0d6963f7d28e17f72",
+    "receiptId": "7ead7b2026fd3cb78d804a1ccd448d9741507e206a9b46f97906cfac470cd67c",
+    "verified": true
+  },
+  "receiptDocument": {
+    "v": 1,
+    "descriptor": {
+      "fileId": "file_0123456789",
+      "rootId": "root_0123456789",
+      "chain": [
+        {
+          "id": "root_0123456789",
+          "name": "root"
+        },
+        {
+          "id": "parent_0123456789",
+          "name": "work/name"
+        }
+      ],
+      "name": "photo.svg",
+      "mime": "image/svg+xml",
+      "size": 3,
+      "sourceVersion": "5",
+      "section": "internal"
+    },
+    "proof": {
+      "kind": "drive-md5",
+      "md5": "900150983cd24fb0d6963f7d28e17f72",
+      "size": 3,
+      "sourceVersion": "5"
+    },
+    "object": {
+      "v": 1,
+      "key": "v1/internal/cm9vdA~root_0123456789/d29yay9uYW1l~parent_0123456789/cGhvdG8uc3Zn~file_0123456789/ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "fileId": "file_0123456789",
+      "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "size": 3,
+      "mime": "image/svg+xml",
+      "objectEtag": "900150983cd24fb0d6963f7d28e17f72",
+      "receiptId": "7ead7b2026fd3cb78d804a1ccd448d9741507e206a9b46f97906cfac470cd67c",
+      "verified": true
+    }
+  },
+  "currentRequest": {
+    "v": 1,
+    "generation": "9007199254740993",
+    "baseGeneration": null,
+    "expectedEtag": null,
+    "indexSha256": "129ca0502ef0f78ddcb4bb4b85d23447f1a7c165e6c2abf3d4f08df6c0bb291f"
+  },
+  "current": {
+    "v": 1,
+    "generation": "9007199254740993",
+    "indexSha256": "129ca0502ef0f78ddcb4bb4b85d23447f1a7c165e6c2abf3d4f08df6c0bb291f",
+    "etag": "3cbe33a7a8c82b903724d1273f464663"
+  },
+  "fallbackErrors": [
+    {
+      "status": 404,
+      "body": {
+        "v": 1,
+        "error": {
+          "code": "SOURCE_MISSING",
+          "retryable": false
+        }
+      }
+    },
+    {
+      "status": 409,
+      "body": {
+        "v": 1,
+        "error": {
+          "code": "SOURCE_MISMATCH",
+          "retryable": false
+        }
+      }
+    }
+  ],
+  "manifestPart": {
+    "v": 1,
+    "generation": "9007199254740993",
+    "part": "p000000",
+    "entries": [
+      {
+        "receiptId": "7ead7b2026fd3cb78d804a1ccd448d9741507e206a9b46f97906cfac470cd67c",
+        "key": "v1/internal/cm9vdA~root_0123456789/d29yay9uYW1l~parent_0123456789/cGhvdG8uc3Zn~file_0123456789/ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        "fileId": "file_0123456789",
+        "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        "size": 3,
+        "mime": "image/svg+xml",
+        "descriptor": {
+          "fileId": "file_0123456789",
+          "rootId": "root_0123456789",
+          "chain": [
+            {
+              "id": "root_0123456789",
+              "name": "root"
+            },
+            {
+              "id": "parent_0123456789",
+              "name": "work/name"
+            }
+          ],
+          "name": "photo.svg",
+          "mime": "image/svg+xml",
+          "size": 3,
+          "sourceVersion": "5",
+          "section": "internal"
+        },
+        "proof": {
+          "kind": "drive-md5",
+          "md5": "900150983cd24fb0d6963f7d28e17f72",
+          "size": 3,
+          "sourceVersion": "5"
+        },
+        "presence": "observed"
+      }
+    ]
+  },
+  "manifestPartBodyBase64": "eyJlbnRyaWVzIjpbeyJkZXNjcmlwdG9yIjp7ImNoYWluIjpbeyJpZCI6InJvb3RfMDEyMzQ1Njc4OSIsIm5hbWUiOiJyb290In0seyJpZCI6InBhcmVudF8wMTIzNDU2Nzg5IiwibmFtZSI6IndvcmsvbmFtZSJ9XSwiZmlsZUlkIjoiZmlsZV8wMTIzNDU2Nzg5IiwibWltZSI6ImltYWdlL3N2Zyt4bWwiLCJuYW1lIjoicGhvdG8uc3ZnIiwicm9vdElkIjoicm9vdF8wMTIzNDU2Nzg5Iiwic2VjdGlvbiI6ImludGVybmFsIiwic2l6ZSI6Mywic291cmNlVmVyc2lvbiI6IjUifSwiZmlsZUlkIjoiZmlsZV8wMTIzNDU2Nzg5Iiwia2V5IjoidjEvaW50ZXJuYWwvY205dmRBfnJvb3RfMDEyMzQ1Njc4OS9kMjl5YXk5dVlXMWx+cGFyZW50XzAxMjM0NTY3ODkvY0dodmRHOHVjM1pufmZpbGVfMDEyMzQ1Njc4OS9iYTc4MTZiZjhmMDFjZmVhNDE0MTQwZGU1ZGFlMjIyM2IwMDM2MWEzOTYxNzdhOWNiNDEwZmY2MWYyMDAxNWFkIiwibWltZSI6ImltYWdlL3N2Zyt4bWwiLCJwcmVzZW5jZSI6Im9ic2VydmVkIiwicHJvb2YiOnsia2luZCI6ImRyaXZlLW1kNSIsIm1kNSI6IjkwMDE1MDk4M2NkMjRmYjBkNjk2M2Y3ZDI4ZTE3ZjcyIiwic2l6ZSI6Mywic291cmNlVmVyc2lvbiI6IjUifSwicmVjZWlwdElkIjoiN2VhZDdiMjAyNmZkM2NiNzhkODA0YTFjY2Q0NDhkOTc0MTUwN2UyMDZhOWI0NmY5NzkwNmNmYWM0NzBjZDY3YyIsInNoYTI1NiI6ImJhNzgxNmJmOGYwMWNmZWE0MTQxNDBkZTVkYWUyMjIzYjAwMzYxYTM5NjE3N2E5Y2I0MTBmZjYxZjIwMDE1YWQiLCJzaXplIjozfV0sImdlbmVyYXRpb24iOiI5MDA3MTk5MjU0NzQwOTkzIiwicGFydCI6InAwMDAwMDAiLCJ2IjoxfQ==",
+  "manifestPartSha256": "2fb3435f8053867dc4ae877aebc62a17bb5067122dfaef32496d8889a2ab307a",
+  "manifestIndex": {
+    "v": 1,
+    "generation": "9007199254740993",
+    "baseGeneration": null,
+    "rootSetHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "scanComplete": true,
+    "parts": [
+      {
+        "part": "p000000",
+        "sha256": "2fb3435f8053867dc4ae877aebc62a17bb5067122dfaef32496d8889a2ab307a",
+        "size": 829,
+        "count": 1
+      }
+    ],
+    "counts": {
+      "total": 1
+    }
+  },
+  "manifestIndexBodyBase64": "eyJiYXNlR2VuZXJhdGlvbiI6bnVsbCwiY291bnRzIjp7InRvdGFsIjoxfSwiZ2VuZXJhdGlvbiI6IjkwMDcxOTkyNTQ3NDA5OTMiLCJwYXJ0cyI6W3siY291bnQiOjEsInBhcnQiOiJwMDAwMDAwIiwic2hhMjU2IjoiMmZiMzQzNWY4MDUzODY3ZGM0YWU4NzdhZWJjNjJhMTdiYjUwNjcxMjJkZmFlZjMyNDk2ZDg4ODlhMmFiMzA3YSIsInNpemUiOjgyOX1dLCJyb290U2V0SGFzaCI6ImFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiLCJzY2FuQ29tcGxldGUiOnRydWUsInYiOjF9",
+  "manifestIndexSha256": "129ca0502ef0f78ddcb4bb4b85d23447f1a7c165e6c2abf3d4f08df6c0bb291f"
+}

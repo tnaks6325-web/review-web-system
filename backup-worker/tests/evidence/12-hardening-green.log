@@ -1,0 +1,31 @@
+
+> review-web-group-backup-worker@1.0.0 test
+> node --test tests/*.test.js
+
+✔ key is reversible actual Drive ID chain plus name, no normalization (0.808833ms)
+✔ authentication precedes every route and any R2 access (29.844208ms)
+✔ fixed wire fixture binary PUT, GET, HEAD, receipt; no CORS and safe SVG attachment (20.899083ms)
+✔ copy fixed errors are exact fallback wire; SHA body proof path succeeds (2.626166ms)
+✔ HTTP strict fields, canonical base64, methods/query/key/URL rejection before storage (1.917083ms)
+✔ HTTP manifests/current uses exact pointer request and returns etag (7.171833ms)
+✔ an expired older response cannot release the newer request active-body slot (1.644417ms)
+✔ one active body per isolate rejects overlap then releases after body consumed (0.848416ms)
+✔ manifest part immutable bytes + receipts pagination support DB-free discovery (21.813125ms)
+✔ current first create, BigInt monotonic CAS, delayed generation and exact retry recovery (2.582208ms)
+✔ conditional null never becomes successful current; two publishers one CAS winner (0.7165ms)
+✔ manifest schema, unknown fields, duplicate receipts, hash, limits and index base rejected (0.476042ms)
+✔ put verifies body proof, awaits actual R2 body rehash and immutable receipt (19.094584ms)
+✔ copy reads only fixed orig path and verifies MD5 or SHA bytes not source metadata (2.59075ms)
+✔ put null alone is failure; crash after object before receipt is repairable on retry (2.177125ms)
+✔ proof mismatch, readback corruption and immutable key collision never succeed (0.67475ms)
+✔ unknown fields, proof version, excluded ancestor, invalid MIME and byte budget rejected (0.37525ms)
+✔ Drive identifiers are strings not numbers coerced by regular expressions (0.071ms)
+✔ get and head use only generated-key grammar and return wire metadata (0.757708ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 130.289625

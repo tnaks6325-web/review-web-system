@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "review-web-group-backup",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-11",
+  "workers_dev": true,
+  "preview_urls": false,
+  "vars": {
+    "IMAGE_BACKUP_ALLOWED_ROOT_IDS": "[]",
+    "IMAGE_BACKUP_EXCLUDED_ROOT_IDS": "[]"
+  },
+  "r2_buckets": [
+    {"binding": "BACKUP", "bucket_name": "review-web-group-backups", "remote": false},
+    {"binding": "SOURCE_IMAGES", "bucket_name": "review-web-images", "remote": false}
+  ],
+  "observability": {
+    "enabled": true,
+    "logs": {"enabled": true, "invocation_logs": false},
+    "traces": {"enabled": false}
+  }
+}

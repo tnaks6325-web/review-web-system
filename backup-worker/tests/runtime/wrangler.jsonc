@@ -1,0 +1,16 @@
+{
+  "name": "group-backup-local-test-only",
+  "main": "harness.js",
+  "compatibility_date": "2026-11-11",
+  "workers_dev": false,
+  "preview_urls": false,
+  "vars": {
+    "IMAGE_BACKUP_ALLOWED_ROOT_IDS": "[\"root_0123456789\"]",
+    "IMAGE_BACKUP_EXCLUDED_ROOT_IDS": "[\"excluded_0123456789\"]",
+    "IMAGE_BACKUP_API_KEY": "unit-test-only-not-a-production-secret"
+  },
+  "r2_buckets": [
+    {"binding": "BACKUP", "bucket_name": "local-backup-only", "remote": false},
+    {"binding": "SOURCE_IMAGES", "bucket_name": "local-source-only", "remote": false}
+  ]
+}

@@ -1,0 +1,43 @@
+
+> review-web-group-backup-worker@1.0.0 test
+> node --test tests/*.test.js
+
+✔ key is reversible actual Drive ID chain plus name, no normalization (1.257458ms)
+✔ authentication precedes every route and any R2 access (25.894084ms)
+✔ manifest part immutable bytes + receipts pagination support DB-free discovery (19.977792ms)
+✔ current first create, BigInt monotonic CAS, delayed generation and exact retry recovery (2.921458ms)
+✖ conditional null never becomes successful current; two publishers one CAS winner (0.991ms)
+✔ manifest schema, unknown fields, duplicate receipts, hash, limits and index base rejected (0.831916ms)
+✔ put verifies body proof, awaits actual R2 body rehash and immutable receipt (14.520333ms)
+✔ copy reads only fixed orig path and verifies MD5 or SHA bytes not source metadata (1.145625ms)
+✔ put null alone is failure; crash after object before receipt is repairable on retry (1.1805ms)
+✔ proof mismatch, readback corruption and immutable key collision never succeed (0.678459ms)
+✔ unknown fields, proof version, excluded ancestor, invalid MIME and byte budget rejected (0.196291ms)
+✔ get and head use only generated-key grammar and return wire metadata (0.598958ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 11
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 101.999625
+
+✖ failing tests:
+
+test at tests/manifest.test.js:21:1
+✖ conditional null never becomes successful current; two publishers one CAS winner (0.991ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  2 !== 1
+  
+      at TestContext.<anonymous> (file:///Users/sooman/dev/wt/rw-image-group-worker/backup-worker/tests/manifest.test.js:23:256)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

@@ -147,7 +147,7 @@ async function archivePending({ limit = BATCH_PER_RUN } = {}) {
         'SELECT file_blob FROM payment_result_uploads WHERE id = $1', [c.id]);
       if (!blob || !blob.file_blob) throw new Error('원본 파일이 없습니다');
       const up = await _dv().uploadFileBase64(Buffer.from(blob.file_blob).toString('base64'), name, _mime(c.fileName),
-        folder.id, { shareAnyone: false });
+        folder.id, { shareAnyone: false, backupSource: 'payment_result' });
       await _mark(c.sha, c.id, { status: 'done', driveFileId: up && up.id, folderId: folder.id,
         rootFolderId: null, name });
       out.done++;
@@ -264,7 +264,7 @@ async function importLegacyFile({ fileName, base64 } = {}) {
     }
     const safe = orig.replace(/[\\/:*?"<>|\r\n]+/g, '_').trim() || '이체결과.xls';
     const name = `${k.ymd}_${BANK_LABEL[facts.bank] || facts.bank}_${safe}`.slice(0, 200);
-    const up = await _dv().uploadFileBase64(base64, name, _mime(orig), folder.id, { shareAnyone: false });
+    const up = await _dv().uploadFileBase64(base64, name, _mime(orig), folder.id, { shareAnyone: false, backupSource: 'payment_result' });
     const top = root.prefix.length ? await _dv().findFolderPath(root.rootId, root.prefix).catch(() => null) : { id: root.rootId };
     await client.query(
       `INSERT INTO payment_result_drive_archive

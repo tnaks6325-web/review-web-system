@@ -438,6 +438,18 @@ async function uploadFileBase64(base64Data, fileName, mimeType, parentFolderId, 
   try { require('./imageWarm.service').scheduleUploadWarm(data.id, mimeType || 'image/jpeg'); }
   catch (_) { /* 업로드 결과에 영향 0 */ }
 
+  // Independent backup: metadata only, no hash/DB/network in the response path.
+  // Reservation can be lost before durable enqueue; nightly repairs survivors only.
+  if (process.env.IMAGE_BACKUP_ENABLED === '1') {
+    try {
+      Promise.resolve(require('./imageBackup.service').scheduleUploaded({
+        fileId: data.id, parentId: parentFolderId, name: fileName,
+        mime: mimeType || 'image/jpeg', size: buffer.length,
+        uploadedAt: new Date().toISOString(), source: opts.backupSource || 'upload',
+      })).catch(() => {});
+    } catch (_) { /* Import/reservation failures never change upload or sharing. */ }
+  }
+
   // 파일을 "링크가 있는 모든 사용자" 읽기 가능으로 설정
   // opts.shareAnyone === false 면 공개하지 않음(비공개 유지 — 예: 유입가이드 이미지는 서버 프록시로만 노출)
   /* ★★ opts.deferShare === true 면 **응답을 기다리지 않고** 뒤에서 건다.
@@ -1558,7 +1570,35 @@ async function transferOwnershipInFolders(folderIds, opts = {}) {
   return { dryRun, targetOwnerEmail, usedSourceToken: !!sourceClient, summary, actions, failures };
 }
 
+// Backup-only read surface. These adapters do not expose mutation methods;
+// this is a code boundary, not a claim that the credentials are read-only.
+function getBackupReadClients() {
+  const fields = 'id,name,parents,mimeType,size,md5Checksum,version,modifiedTime,trashed';
+  return [{kind:'sa',client:_getReadDrive()}, {kind:'oauth',client:_getOAuthDrive()}]
+    .filter(r => r.client).map(({kind,client}) => Object.freeze({
+      kind,
+      async getMetadata(fileId, signal) {
+        const r = await client.files.get({fileId,fields,supportsAllDrives:true}, {timeout:30000,signal});
+        return r.data;
+      },
+      async listChildren(folderId, pageToken, signal) {
+        if (!/^[A-Za-z0-9_-]{10,200}$/.test(folderId)) throw new Error('BAD_DESCRIPTOR');
+        const r = await client.files.list({q:`'${folderId}' in parents and trashed = false`,
+          fields:`nextPageToken,incompleteSearch,files(${fields})`,pageSize:25,
+          ...(pageToken ? {pageToken} : {}),supportsAllDrives:true,includeItemsFromAllDrives:true},
+          {timeout:30000,signal});
+        return r.data;
+      },
+      async download(fileId, signal) {
+        const r = await client.files.get({fileId,alt:'media',supportsAllDrives:true},
+          {responseType:'stream',timeout:30000,signal});
+        return r.data;
+      },
+    }));
+}
+
 module.exports = {
+  getBackupReadClients,
   invalidateSubFolderById,
   listFolderContents,
   downloadFile,

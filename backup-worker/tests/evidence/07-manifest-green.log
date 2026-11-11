@@ -1,0 +1,24 @@
+
+> review-web-group-backup-worker@1.0.0 test
+> node --test tests/*.test.js
+
+✔ key is reversible actual Drive ID chain plus name, no normalization (0.8735ms)
+✔ authentication precedes every route and any R2 access (24.893ms)
+✔ manifest part immutable bytes + receipts pagination support DB-free discovery (23.231542ms)
+✔ current first create, BigInt monotonic CAS, delayed generation and exact retry recovery (2.308209ms)
+✔ conditional null never becomes successful current; two publishers one CAS winner (0.874542ms)
+✔ manifest schema, unknown fields, duplicate receipts, hash, limits and index base rejected (0.65925ms)
+✔ put verifies body proof, awaits actual R2 body rehash and immutable receipt (15.080542ms)
+✔ copy reads only fixed orig path and verifies MD5 or SHA bytes not source metadata (1.232875ms)
+✔ put null alone is failure; crash after object before receipt is repairable on retry (1.968041ms)
+✔ proof mismatch, readback corruption and immutable key collision never succeed (0.836625ms)
+✔ unknown fields, proof version, excluded ancestor, invalid MIME and byte budget rejected (0.216791ms)
+✔ get and head use only generated-key grammar and return wire metadata (0.769209ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 99.170292

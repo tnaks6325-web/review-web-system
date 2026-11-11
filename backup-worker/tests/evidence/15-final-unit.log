@@ -1,0 +1,36 @@
+
+> review-web-group-backup-worker@1.0.0 test
+> node --test tests/*.test.js
+
+✔ key is reversible actual Drive ID chain plus name, no normalization (1.508833ms)
+✔ names preserve slash, traversal-looking text, Unicode forms and folder IDs; keys never truncate (0.644417ms)
+✔ name-length overflow is a key byte-budget error, never truncated or mislabeled (0.201417ms)
+✔ authentication precedes every route and any R2 access (39.186375ms)
+✔ fixed wire fixture binary PUT, GET, HEAD, receipt; no CORS and safe SVG attachment (28.338959ms)
+✔ copy fixed errors are exact fallback wire; SHA body proof path succeeds (6.811791ms)
+✔ HTTP strict fields, canonical base64, methods/query/key/URL rejection before storage (2.101292ms)
+✔ HTTP manifests/current uses exact pointer request and returns etag (7.933ms)
+✔ an expired older response cannot release the newer request active-body slot (1.49475ms)
+✔ one active body per isolate rejects overlap then releases after body consumed (0.801625ms)
+✔ manifest part immutable bytes + receipts pagination support DB-free discovery (32.052459ms)
+✔ current first create, BigInt monotonic CAS, delayed generation and exact retry recovery (7.927042ms)
+✔ conditional null never becomes successful current; two publishers one CAS winner (1.010459ms)
+✔ duplicate receipt IDs, mismatched receipt/key and immutable generation conflicts rejected (2.704125ms)
+✔ manifest schema, unknown fields, duplicate receipts, hash, limits and index base rejected (1.598ms)
+✔ mutation killed: removing body proof permits same-length wrong original (26.08375ms)
+✔ mutation killed: removing final R2 CAS lets stale in-flight publisher replace new current (6.097208ms)
+✔ put verifies body proof, awaits actual R2 body rehash and immutable receipt (29.877417ms)
+✔ copy reads only fixed orig path and verifies MD5 or SHA bytes not source metadata (2.629166ms)
+✔ put null alone is failure; crash after object before receipt is repairable on retry (5.0405ms)
+✔ proof mismatch, readback corruption and immutable key collision never succeed (1.106417ms)
+✔ unknown fields, proof version, excluded ancestor, invalid MIME and byte budget rejected (0.191458ms)
+✔ Drive identifiers are strings not numbers coerced by regular expressions (0.05275ms)
+✔ get and head use only generated-key grammar and return wire metadata (0.785875ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 138.421375

@@ -1,0 +1,22 @@
+
+> review-web-group-backup-worker@1.0.0 test:runtime
+> node tests/runtime/run.mjs
+
+PASS native-workerd SHA256 + MD5 + R2 create-only null + etag CAS null + GET hash
+PASS all routes invalid JWT/old key/no auth ->401; authentication-before-R2 zero
+PASS binary MD5 PUT matches cross-language fixed fixture and immutable receipt
+PASS SHA proof no MD5 path succeeds in workerd
+PASS safe SVG original GET/HEAD attachment CSP no-store length etag actual hash
+PASS copy SOURCE_MISSING exact fallback
+PASS copy SOURCE_MISMATCH same-length source does not write; valid orig MD5 works
+PASS R2 put-null missing object is failure, not success
+PASS R2 put reject and independent GET corruption fail
+PASS crash window object-before-receipt stays incomplete
+PASS real runtime restart persistent R2 crash repair + lost-response idempotency
+PASS manifest part/index immutable bytes, safe download and list cursor
+PASS BigInt current first-create exact retry and native etag CAS monotonic
+PASS unknown fields, excluded root, oversize and no arbitrary URL/DELETE
+COUNTERS {"sourceGet":0,"sourceHead":0,"sourcePut":0,"sourceDelete":0,"backupPut":10,"backupNull":4}
+PASS SOURCE_IMAGES production path put/delete calls remain zero
+RUNTIME_RESULT {"groups":15,"failed":0,"wrangler":"4.160.0","localOnly":true,"restarted":true,"md5ExternalPackage":false}
+LOCAL_EVIDENCE_DIR /var/folders/sb/lp0dxq0n5vvcvgn8y3s5mq7w0000gn/T/backup-worker-runtime-3L7tpd

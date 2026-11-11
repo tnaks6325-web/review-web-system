@@ -1,0 +1,107 @@
+
+> review-web-group-backup-worker@1.0.0 test
+> node --test tests/*.test.js
+
+✔ key is reversible actual Drive ID chain plus name, no normalization (0.50625ms)
+✔ authentication precedes every route and any R2 access (37.993791ms)
+✖ fixed wire fixture binary PUT, GET, HEAD, receipt; no CORS and safe SVG attachment (10.236583ms)
+✖ copy fixed errors are exact fallback wire; SHA body proof path succeeds (1.287958ms)
+✔ HTTP strict fields, canonical base64, methods/query/key/URL rejection before storage (1.660875ms)
+✖ HTTP manifests/current uses exact pointer request and returns etag (0.684042ms)
+✖ one active body per isolate rejects overlap then releases after body consumed (1.320708ms)
+✔ manifest part immutable bytes + receipts pagination support DB-free discovery (20.184958ms)
+✔ current first create, BigInt monotonic CAS, delayed generation and exact retry recovery (2.21875ms)
+✔ conditional null never becomes successful current; two publishers one CAS winner (0.660791ms)
+✔ manifest schema, unknown fields, duplicate receipts, hash, limits and index base rejected (0.436209ms)
+✔ put verifies body proof, awaits actual R2 body rehash and immutable receipt (16.186084ms)
+✔ copy reads only fixed orig path and verifies MD5 or SHA bytes not source metadata (1.136625ms)
+✔ put null alone is failure; crash after object before receipt is repairable on retry (1.358125ms)
+✔ proof mismatch, readback corruption and immutable key collision never succeed (0.585042ms)
+✔ unknown fields, proof version, excluded ancestor, invalid MIME and byte budget rejected (0.182833ms)
+✔ get and head use only generated-key grammar and return wire metadata (0.770792ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 13
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 111.363334
+
+✖ failing tests:
+
+test at tests/http.test.js:6:1
+✖ fixed wire fixture binary PUT, GET, HEAD, receipt; no CORS and safe SVG attachment (10.236583ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  404 !== 200
+  
+      at TestContext.<anonymous> (file:///Users/sooman/dev/wt/rw-image-group-worker/backup-worker/tests/http.test.js:7:41)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 404,
+    expected: 200,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/http.test.js:13:1
+✖ copy fixed errors are exact fallback wire; SHA body proof path succeeds (1.287958ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+      error: {
+  +     code: 'NOT_FOUND',
+  -     code: 'SOURCE_MISSING',
+        retryable: false
+      },
+      v: 1
+    }
+  
+      at TestContext.<anonymous> (file:///Users/sooman/dev/wt/rw-image-group-worker/backup-worker/tests/http.test.js:14:165)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { v: 1, error: { code: 'NOT_FOUND', retryable: false } },
+    expected: { v: 1, error: { code: 'SOURCE_MISSING', retryable: false } },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/http.test.js:24:1
+✖ HTTP manifests/current uses exact pointer request and returns etag (0.684042ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  404 !== 200
+  
+      at TestContext.<anonymous> (file:///Users/sooman/dev/wt/rw-image-group-worker/backup-worker/tests/http.test.js:26:120)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 404,
+    expected: 200,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/http.test.js:31:1
+✖ one active body per isolate rejects overlap then releases after body consumed (1.320708ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  404 !== 200
+  
+      at TestContext.<anonymous> (file:///Users/sooman/dev/wt/rw-image-group-worker/backup-worker/tests/http.test.js:33:40)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 404,
+    expected: 200,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

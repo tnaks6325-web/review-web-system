@@ -1,0 +1,20 @@
+
+> review-web-group-backup-worker@1.0.0 test
+> node --test tests/*.test.js
+
+✔ key is reversible actual Drive ID chain plus name, no normalization (1.292042ms)
+✔ authentication precedes every route and any R2 access (97.425791ms)
+✔ put verifies body proof, awaits actual R2 body rehash and immutable receipt (49.084666ms)
+✔ copy reads only fixed orig path and verifies MD5 or SHA bytes not source metadata (3.145458ms)
+✔ put null alone is failure; crash after object before receipt is repairable on retry (4.059917ms)
+✔ proof mismatch, readback corruption and immutable key collision never succeed (0.985041ms)
+✔ unknown fields, proof version, excluded ancestor, invalid MIME and byte budget rejected (0.387666ms)
+✔ get and head use only generated-key grammar and return wire metadata (1.6025ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 241.813875
