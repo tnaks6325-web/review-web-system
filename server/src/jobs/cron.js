@@ -623,6 +623,33 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
+  // Independent backup scheduler: no business advisory lock or business pool.
+  // Each operation fences itself with durable scan/outbox leases.
+  if (process.env.IMAGE_BACKUP_ENABLED === '1') {
+    const imageBackupTicks = new Set();
+    const guarded = async (lane, fn) => {
+      if (imageBackupTicks.has(lane)) return;
+      imageBackupTicks.add(lane);
+      try { await fn(); }
+      catch (_) { logger.warn('[image-backup] BACKUP_JOB_FAILED'); }
+      finally { imageBackupTicks.delete(lane); }
+    };
+    cron.schedule('*/15 * * * * *', () => guarded('drain', () =>
+      require('../services/imageBackup.service').drainOnce({limit:1})), {timezone:'Asia/Seoul'});
+    cron.schedule('* * * * *', () => guarded('resume', async () => {
+      const b = require('../services/imageBackup.service');
+      const pool = require('../db/imageBackupPool').getPool();
+      if (!(await b.checkBackupSchema({pool})).ready) return;
+      const r = await pool.query("SELECT id FROM image_backup_scans WHERE state IN ('running','incomplete','publishing') LIMIT 1");
+      if (r.rows.length) await require('../services/imageBackupScan.service').scanStep({scanId:r.rows[0].id,budgetMs:10000});
+    }), {timezone:'Asia/Seoul'});
+    cron.schedule('30 3 * * *', () => guarded('nightly', async () => {
+      const scan = require('../services/imageBackupScan.service');
+      const s = await scan.startScan();
+      await scan.scanStep({scanId:s.id,budgetMs:10000});
+    }), {timezone:'Asia/Seoul'});
+  }
+
   // ── 리뷰 미작성 알림톡: 기본 OFF, KST 10~18시 매시 ──
   // 공급자 최종 성공(4000)만 회차로 세며, 3회 성공 뒤 final_due_at이 지나야 별도 상태로 종결한다.
   // 일일 상한은 서비스에서 다시 적용된다. 롤링배포 중복 실행은 advisory lock으로 막는다.

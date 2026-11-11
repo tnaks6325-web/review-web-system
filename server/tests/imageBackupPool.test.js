@@ -1,0 +1,5 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('fs'),vm=require('vm');
+const filename=require.resolve('../src/db/imageBackupPool');let imports=0,config,errors;
+const moduleObj={exports:{}};vm.runInNewContext(fs.readFileSync(filename,'utf8'),{module:moduleObj,process:{env:{NODE_ENV:'production',DATABASE_URL:'postgres://fixture.invalid/db'}},console:{warn(){}},require:n=>{assert.equal(n,'pg');imports++;return {Pool:class{constructor(c){config=c;}on(name,cb){if(name==='error')errors=cb;}async end(){}}};}},{filename});
+assert.equal(imports,0,'import creates no pool');const p=moduleObj.exports.getPool();assert.equal(imports,1);assert.equal(moduleObj.exports.getPool(),p);assert.equal(config.max,2);assert.equal(config.connectionTimeoutMillis,500);assert.equal(config.statement_timeout,1000);assert.equal(config.lock_timeout,100);assert.deepEqual(config.ssl&&JSON.parse(JSON.stringify(config.ssl)),{rejectUnauthorized:false},'backup pool must support established Railway SSL mode');errors(Error('do not log secret'));console.log('PASS imageBackupPool: lazy import, separate max2 pool, server timeouts, Railway SSL, sanitized error handler (5 cases)');

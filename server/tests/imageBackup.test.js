@@ -1,0 +1,24 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { PGlite } = require('@electric-sql/pglite');
+(async () => {
+ const migration = path.join(__dirname,'../migrations/223_image_group_backup.sql');
+ assert.ok(fs.existsSync(migration), 'independent backup migration must exist');
+ const db = new PGlite();
+ await db.exec(fs.readFileSync(migration,'utf8')); await db.exec(fs.readFileSync(migration,'utf8'));
+ const svc = require('../src/services/imageBackup.service');
+ assert.equal((await svc.checkBackupSchema({pool:db})).ready,true);
+ assert.equal((await svc.enqueue({fileId:'file00000001',parentId:'root00000001',name:'x',mime:'image/jpeg',size:1},{pool:db})).accepted,true);
+ await svc.enqueue({fileId:'file00000001',parentId:'root00000001',name:'x',mime:'image/jpeg',size:1},{pool:db});
+ assert.equal((await db.query('SELECT count(*)::int AS n FROM image_backup_outbox')).rows[0].n,1);
+ const a = await svc.claim({pool:db,limit:1});
+ assert.equal(a.length,1); assert.equal((await svc.claim({pool:db,limit:1})).length,0);
+ assert.equal(await svc.finish({pool:db,job:{...a[0],lease_token:'00000000-0000-0000-0000-000000000000'},status:'done',receipt:{}}),false);
+ await db.query("UPDATE image_backup_outbox SET lease_until=now()-interval '1 second'");
+ assert.equal(await svc.finish({pool:db,job:a[0],status:'done',receipt:{}}),false);
+ const b=await svc.claim({pool:db,limit:1});assert.notEqual(b[0].lease_token,a[0].lease_token);
+ assert.equal(await svc.finish({pool:db,job:b[0],status:'done',receipt:{verified:true}}),true);
+ await db.close(); console.log('PASS imageBackup: migration twice, schema, enqueue dedupe, claim exclusion, stale/expired CAS, expired reclaim (8 cases)');
+})().catch(e=>{console.error(e);process.exitCode=1;});
