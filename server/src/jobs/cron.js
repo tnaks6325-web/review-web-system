@@ -625,7 +625,7 @@ function startCronJobs() {
 
   // Independent backup scheduler: no business advisory lock or business pool.
   // Each operation fences itself with durable scan/outbox leases.
-  if (process.env.IMAGE_BACKUP_ENABLED === '1') {
+  if (require('../services/imageBackup.service').enabled()) {
     const imageBackupTicks = new Set();
     const guarded = async (lane, fn) => {
       if (imageBackupTicks.has(lane)) return;

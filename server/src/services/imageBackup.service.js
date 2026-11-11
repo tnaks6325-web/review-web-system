@@ -2,7 +2,10 @@
 const crypto=require('node:crypto');
 const columns={image_backup_outbox:'id job_key file_id observation status attempts next_attempt_at lease_token lease_until receipt last_error_code created_at updated_at',image_backup_scans:'id state root_set_hash roots lease_token lease_until base_generation base_etag counts started_at completed_at',image_backup_scan_entries:'scan_id entry_key kind data job_key state'};
 const getPool=()=>require('../db/imageBackupPool').getPool();
-const enabled=()=>process.env.IMAGE_BACKUP_ENABLED==='1';
+// Railway PR/test deployments may inherit variables; they must never write the live backup.
+// No Railway metadata means an explicitly enabled, local operator CLI (same key/root checks).
+const productionScope=()=>!process.env.RAILWAY_ENVIRONMENT_NAME||process.env.RAILWAY_ENVIRONMENT_NAME==='production';
+const enabled=()=>process.env.IMAGE_BACKUP_ENABLED==='1'&&productionScope();
 const canonical=v=>JSON.stringify(sort(v));
 function sort(v){if(v===undefined)throw new Error('BAD_DESCRIPTOR');if(Array.isArray(v))return v.map(sort);if(v&&typeof v==='object')return Object.fromEntries(Object.keys(v).sort().map(k=>[k,sort(v[k])]));return v;}
 const sha=v=>crypto.createHash('sha256').update(v).digest('hex');
@@ -56,7 +59,7 @@ function verifyReceipt(receipt,descriptor,proof){
  return receipt;
 }
 async function drainOnce({limit=1,signal,deps={}}={}){
- const result={claimed:0,verified:0,retry:0,blocked:0};if(drainRunning)return result;drainRunning=true;
+ const result={claimed:0,verified:0,retry:0,blocked:0};if(!productionScope()||drainRunning)return result;drainRunning=true;
  try{
  const scan=require('./imageBackupScan.service'),d=await scan.dependencies(deps);
  if(!(await checkBackupSchema({pool:d.pool})).ready)return result;
