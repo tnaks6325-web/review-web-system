@@ -2,6 +2,9 @@
 const crypto=require('node:crypto');
 const backup=require('./imageBackup.service');
 const FOLDER='application/vnd.google-apps.folder';
+// Exact native document types only; shortcuts, unknown Google types and binary
+// non-images remain unresolved/blocked. These have no downloadable image bytes.
+const NATIVE_DOCUMENTS=new Set(['document','spreadsheet','presentation','drawing','form','script','site'].map(t=>'application/vnd.google-apps.'+t));
 function fail(code){return Object.assign(new Error(code),{code});}
 function config(env=process.env){
  const allowed=JSON.parse(env.IMAGE_BACKUP_ALLOWED_ROOT_IDS||'[]'),excluded=JSON.parse(env.IMAGE_BACKUP_EXCLUDED_ROOT_IDS||'[]');
@@ -56,6 +59,7 @@ async function observe({fileId,rootId,reader,source,deps,cache}){
  const hints=await deps.loadHints({fileId,pool:deps.pool});
  const scope=await classifyScope({chain,fileId,...hints,source:source==='payment_result'?source:(hints.source||source),excludedRootIds:deps.excluded});
  if(scope.decision!=='include')return {scope,metadata};
+ if(NATIVE_DOCUMENTS.has(metadata.mimeType))return {scope:{decision:'exclude',section:scope.section,reason:'NATIVE_DOCUMENT_EXCLUDED'},metadata};
  const size=Number(metadata.size);if(!Number.isSafeInteger(size)||size<0)throw fail('UNRESOLVED_SIZE');
  if(!/^image\//.test(metadata.mimeType||''))throw fail('UNSUPPORTED_MIME');
  const descriptor={fileId,rootId,chain,name:metadata.name,mime:metadata.mimeType.toLowerCase(),size,sourceVersion:String(metadata.version||'') ,section:scope.section};
@@ -82,27 +86,46 @@ async function startScan({deps={}}={}){
  });
 }
 async function scanStep({scanId,budgetMs=10000,deps={}}={}){
- const d=await dependencies(deps);const token=crypto.randomUUID();const start=Date.now();
+ const d=await dependencies(deps);const token=crypto.randomUUID();const now=d.now||Date.now;const start=now();const caches=new Map();
+ const withinBudget=()=>now()-start<Math.min(budgetMs,60000);
  const got=await d.pool.query(`UPDATE image_backup_scans SET lease_token=$2,lease_until=now()+interval '120 seconds',state='running'
  WHERE id=$1 AND state IN ('running','incomplete','publishing') AND (lease_until IS NULL OR lease_until<=now()) RETURNING *`,[scanId,token]);
  if(!got.rows.length)return {state:'incomplete',cursor:{scanId,reason:'LEASE_BUSY'}};const scan=got.rows[0];
  if(backup.sha(backup.canonical(d.roots))!==scan.root_set_hash){await d.pool.query("UPDATE image_backup_scans SET state='failed',lease_token=NULL,lease_until=NULL WHERE id=$1 AND lease_token=$2",[scanId,token]);return {state:'incomplete',cursor:{scanId,reason:'ROOT_SET_CHANGED'}};}
  const owned=async c=>{const r=await c.query('SELECT id FROM image_backup_scans WHERE id=$1 AND lease_token=$2 AND lease_until>now() FOR UPDATE',[scanId,token]);if(!r.rows.length)throw fail('LEASE_LOST');};
  try{
- while(Date.now()-start<Math.min(budgetMs,60000)){
+ while(withinBudget()){
  const entry=(await d.pool.query("SELECT * FROM image_backup_scan_entries WHERE scan_id=$1 AND kind='folder' AND state='pending' ORDER BY entry_key LIMIT 1",[scanId])).rows[0];if(!entry)break;
- const data=entry.data,reader=d.readers.find(r=>r.kind===data.readerKind);if(!reader)throw fail('READER_UNAVAILABLE');
- let page;try{page=await reader.listChildren(data.folderId,data.pageToken);}catch(e){if(e.code===400||e.response?.status===400)await d.pool.query("UPDATE image_backup_scan_entries SET data=jsonb_set(data,'{pageToken}','null') WHERE scan_id=$1 AND entry_key=$2 AND EXISTS(SELECT 1 FROM image_backup_scans WHERE id=$1 AND lease_token=$3 AND lease_until>now())",[scanId,entry.entry_key,token]);throw e;}
- if(!Array.isArray(page.files)||page.incompleteSearch||page.nextPageToken===data.pageToken&&data.pageToken)throw fail('INCOMPLETE_SEARCH');
- const records=[];const cache=new Map(page.files.map(m=>[m.id,m]));
- for(const m of page.files){if(m.trashed)continue;
- if(m.mimeType===FOLDER){if(d.excluded.includes(m.id))continue;records.push({key:`folder:${data.rootId}:${reader.kind}:${m.id}`,kind:'folder',data:{rootId:data.rootId,readerKind:reader.kind,folderId:m.id,pageToken:null,metadata:m},state:'pending'});}
- else{const o=await observe({fileId:m.id,rootId:data.rootId,reader,deps:d,cache});if(o.scope.decision==='retry')throw fail(o.scope.reason);records.push({key:'file:'+m.id,kind:'file',data:o.observation||{fileId:m.id,reason:o.scope.reason},state:o.scope.decision==='exclude'?'excluded':'pending',jobKey:o.jobKey});}}
- await transaction(d.pool,async c=>{await owned(c);
- for(const r of records){const old=(await c.query('SELECT data,job_key FROM image_backup_scan_entries WHERE scan_id=$1 AND entry_key=$2',[scanId,r.key])).rows[0];if(old&&r.kind==='file'&&backup.canonical({...old.data,readerKind:null})!==backup.canonical({...r.data,readerKind:null}))throw fail('AMBIGUOUS_ROOT');
- if(r.jobKey)await backup.enqueue({...r.data,fileId:r.data.descriptor.fileId,jobKey:r.jobKey},{pool:c});
- await c.query('INSERT INTO image_backup_scan_entries(scan_id,entry_key,kind,data,job_key,state) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING',[scanId,r.key,r.kind,JSON.stringify(r.data),r.jobKey||null,r.state]);}
- await c.query('UPDATE image_backup_scan_entries SET data=$3,state=$4 WHERE scan_id=$1 AND entry_key=$2',[scanId,entry.entry_key,JSON.stringify({...data,pageToken:page.nextPageToken||null}),page.nextPageToken?'pending':'done']);});
+ let data=entry.data;const reader=d.readers.find(r=>r.kind===data.readerKind);if(!reader)throw fail('READER_UNAVAILABLE');
+ const cacheKey=data.rootId+':'+reader.kind;if(!caches.has(cacheKey))caches.set(cacheKey,new Map());const cache=caches.get(cacheKey);
+ // Persist a bounded page BEFORE its expensive per-file metadata/hint work.
+ // Offset and outbox reservation commit together: restart never repeats a whole slow page.
+ if(!data.page){
+  let page;try{page=await reader.listChildren(data.folderId,data.pageToken);}catch(e){if(e.code===400||e.response?.status===400)await d.pool.query("UPDATE image_backup_scan_entries SET data=jsonb_set(data,'{pageToken}','null') WHERE scan_id=$1 AND entry_key=$2 AND EXISTS(SELECT 1 FROM image_backup_scans WHERE id=$1 AND lease_token=$3 AND lease_until>now())",[scanId,entry.entry_key,token]);throw e;}
+  if(!Array.isArray(page.files)||page.incompleteSearch||page.nextPageToken===data.pageToken&&data.pageToken)throw fail('INCOMPLETE_SEARCH');
+  data={...data,page:{files:page.files,nextPageToken:page.nextPageToken||null,offset:0}};
+  await transaction(d.pool,async c=>{await owned(c);await c.query('UPDATE image_backup_scan_entries SET data=$3 WHERE scan_id=$1 AND entry_key=$2',[scanId,entry.entry_key,JSON.stringify(data)]);});
+ }
+ for(const m of data.page.files)cache.set(m.id,m);
+ while(data.page.offset<data.page.files.length&&withinBudget()){
+  const m=data.page.files[data.page.offset];let r;
+  if(!m.trashed){
+   if(m.mimeType===FOLDER){if(!d.excluded.includes(m.id))r={key:`folder:${data.rootId}:${reader.kind}:${m.id}`,kind:'folder',data:{rootId:data.rootId,readerKind:reader.kind,folderId:m.id,pageToken:null,metadata:m},state:'pending'};}
+   else{const o=await observe({fileId:m.id,rootId:data.rootId,reader,deps:d,cache});if(o.scope.decision==='retry')throw fail(o.scope.reason);r={key:'file:'+m.id,kind:'file',data:o.observation||{fileId:m.id,reason:o.scope.reason},state:o.scope.decision==='exclude'?'excluded':'pending',jobKey:o.jobKey};}
+  }
+  const next={...data,page:{...data.page,offset:data.page.offset+1}};
+  await transaction(d.pool,async c=>{await owned(c);
+   if(r){const old=(await c.query('SELECT data,job_key FROM image_backup_scan_entries WHERE scan_id=$1 AND entry_key=$2',[scanId,r.key])).rows[0];if(old&&r.kind==='file'&&backup.canonical({...old.data,readerKind:null})!==backup.canonical({...r.data,readerKind:null}))throw fail('AMBIGUOUS_ROOT');
+    if(r.jobKey)await backup.enqueue({...r.data,fileId:r.data.descriptor.fileId,jobKey:r.jobKey},{pool:c});
+    await c.query('INSERT INTO image_backup_scan_entries(scan_id,entry_key,kind,data,job_key,state) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING',[scanId,r.key,r.kind,JSON.stringify(r.data),r.jobKey||null,r.state]);
+    if(!old&&r.state==='excluded'&&r.data.reason==='NATIVE_DOCUMENT_EXCLUDED')await c.query("UPDATE image_backup_scans SET counts=jsonb_set(counts,'{excludedNativeDocuments}',to_jsonb(COALESCE((counts->>'excludedNativeDocuments')::int,0)+1)) WHERE id=$1",[scanId]);}
+   await c.query('UPDATE image_backup_scan_entries SET data=$3 WHERE scan_id=$1 AND entry_key=$2',[scanId,entry.entry_key,JSON.stringify(next)]);
+  });data=next;
+ }
+ if(data.page.offset===data.page.files.length){
+  const next={...data,pageToken:data.page.nextPageToken};delete next.page;
+  await transaction(d.pool,async c=>{await owned(c);await c.query('UPDATE image_backup_scan_entries SET data=$3,state=$4 WHERE scan_id=$1 AND entry_key=$2',[scanId,entry.entry_key,JSON.stringify(next),next.pageToken?'pending':'done']);});
+ }
  }
  const superseded=(await d.pool.query("SELECT 1 FROM image_backup_scan_entries e JOIN image_backup_outbox o ON o.job_key=e.job_key WHERE e.scan_id=$1 AND o.status='superseded' LIMIT 1",[scanId])).rows.length;
  if(superseded){await d.pool.query("UPDATE image_backup_scans SET state='failed',counts=counts||'{\"lastError\":\"SOURCE_CHANGED\"}'::jsonb WHERE id=$1 AND lease_token=$2 AND lease_until>now()",[scanId,token]);return {state:'incomplete',cursor:{scanId,reason:'SOURCE_CHANGED'}};}
