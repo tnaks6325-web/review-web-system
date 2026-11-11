@@ -6,7 +6,7 @@ function createClient({url=process.env.IMAGE_BACKUP_URL,apiKey=process.env.IMAGE
  if(!apiKey||/[\r\n]/.test(apiKey))throw new Error('BACKUP_CONFIG_INVALID');
  async function request(path,{method='GET',body,headers={},signal,raw=false,head=false,cap=MAX}={}){
   const timeout=AbortSignal.timeout(30000);const combined=signal?AbortSignal.any([signal,timeout]):timeout;
-  const r=await fetcher(base.origin+path,{method,body,signal:combined,redirect:'error',headers:{Authorization:'Bearer '+apiKey,...headers}});
+  const r=await fetcher(base.origin+path,{method,body,signal:combined,redirect:'error',headers:{Authorization:'Bearer '+apiKey,...(head?{'Accept-Encoding':'identity'}:{}),...headers}});
   if(!r.ok){let error;try{error=(await r.json()).error;}catch(_){}const e=new Error(error?.code||r.headers.get('X-Backup-Error')||'STORE_UNAVAILABLE');e.code=e.message;e.retryable=error?.retryable===true;throw e;}
   if(head)return {size:Number(r.headers.get('Content-Length')),mime:r.headers.get('Content-Type'),sha256:r.headers.get('X-Backup-Sha256'),etag:r.headers.get('ETag')};
   const bytes=await readBounded(r.body,cap);if(raw)return {bytes,etag:r.headers.get('ETag')};return JSON.parse(bytes.toString('utf8'));
