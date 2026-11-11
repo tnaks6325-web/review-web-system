@@ -144,4 +144,15 @@ async function ensureReviewFoldersForActiveTabs(opts = {}) {
   return out;
 }
 
-module.exports = { ensureReviewFoldersForActiveTabs, getRootFolderId };
+/**
+ * 한 작업의 [리뷰] 폴더 경로를 만들거나 찾는다(시트제목 → 탭명 → [리뷰]). DB 는 쓰지 않는다 — 연결은 부르는 쪽이 한다.
+ * 결정 367: 동시진행 리뷰 제출이 폴더 미연결 작업에서 막히지 않게 같은 규칙을 쓴다.
+ */
+async function ensureReviewFolderPathForTab({ sheetId, tabName, campaignName }) {
+  const rootFolderId = getRootFolderId();
+  if (!rootFolderId) throw new Error('AI_REVIEW_FOLDER_ID 미설정');
+  const sheetTitle = await _resolveSheetTitle(sheetId, campaignName || tabName, tabName);
+  return driveService.ensureReviewFolderPath(rootFolderId, sheetTitle, tabName);
+}
+
+module.exports = { ensureReviewFoldersForActiveTabs, getRootFolderId, ensureReviewFolderPathForTab };

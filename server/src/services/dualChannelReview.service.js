@@ -6,6 +6,37 @@ const {snapshotCaptureSlots,resolveSnapshotSlot}=require('../utils/captureSlots'
 // Purchase and review must hash the exact same canonical snapshot, including JSONB key order.
 const digest=value=>proof().hash(value);
 const fail=code=>Object.assign(new Error(code),{code,status:409});
+const _folderUrl=id=>`https://drive.google.com/drive/folders/${id}`;
+/* 결정 367: 동시진행 리뷰 사진의 보관 폴더. [리뷰] 폴더가 연결돼 있지 않으면(일반 업로드는 자동으로 만든다)
+   ① 같은 작업의 [구매캡처] 옆(같은 작업 폴더)에 [리뷰]를 만들고, ② 그 폴더도 없으면 일반 업로드와 같은 규칙
+   (시트제목 → 탭명 → [리뷰])으로 만든 뒤, 비어 있을 때만 연결한다(그 사이 먼저 연결된 폴더가 있으면 그것을 쓴다).
+   ★ 등록 안 된 작업·폴더 준비 실패는 review_folder_missing 으로 막는다 — 드라이브 루트에 흩뿌리지 않는다. */
+async function resolveReviewFolderInTx(client,target,slot,opts={}){
+ const svc=opts.driveService||require('./drive.service');
+ const sel='SELECT folder_url, capture_folder_url, campaign_name FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2';
+ const cfg=(await client.query(sel,[target.sheetId,target.tabName])).rows[0];
+ if(!cfg)throw fail('review_folder_missing');
+ let root=svc.extractFolderIdFromUrl(cfg.folder_url||'');
+ if(!root){
+  let made=null;
+  try{
+   const capId=svc.extractFolderIdFromUrl(cfg.capture_folder_url||'');
+   const tabFolder=capId?((await svc.getFileParents(capId)).parents||[])[0]:null;
+   if(tabFolder){const f=await svc.getOrCreateSubFolder(tabFolder,'[리뷰]');const id=f.id||f;made={id,url:_folderUrl(id)};}
+   else{
+    const ensure=opts.ensureReviewFolderPath||require('./reviewFolders.service').ensureReviewFolderPathForTab;
+    made=await ensure({sheetId:target.sheetId,tabName:target.tabName,campaignName:cfg.campaign_name||null});
+   }
+  }catch(_){made=null;}
+  if(!made||!made.id)throw fail('review_folder_missing');
+  const url=made.url||_folderUrl(made.id);
+  const up=await client.query(`UPDATE tab_configs SET folder_url=$1, updated_at=NOW() WHERE sheet_id=$2 AND tab_name=$3 AND (folder_url IS NULL OR folder_url='')`,[url,target.sheetId,target.tabName]);
+  if(up.rowCount===1)root=made.id;
+  else{const again=(await client.query(sel,[target.sheetId,target.tabName])).rows[0];root=svc.extractFolderIdFromUrl(again?.folder_url||'')||made.id;}
+ }
+ const sub=await svc.getOrCreateSubFolder(root,slot.label);
+ return sub.id||sub;
+}
 async function loadBundle(db,orderSubmissionId,{lock=false}={}){
  const parent=(await db.query('SELECT * FROM order_submissions WHERE id=$1'+(lock?' FOR UPDATE':''),[orderSubmissionId])).rows[0];
  if(!parent || parent.purchase_bundle_version!==1)throw fail('dual_order_required');
@@ -176,11 +207,7 @@ function createService(deps={}){
   const duplicate=await shaGuard.evidenceShaUsesInTx(client,sha);
   if(duplicate.length)throw fail('duplicate_evidence');
   let folder=deps.folderForSlot?await deps.folderForSlot(client,target,slot):null;
-  if(!folder && !deps.drive){
-   const cfg=(await client.query('SELECT folder_url FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2',[target.sheetId,target.tabName])).rows[0];
-   const svc=require('./drive.service');const root=svc.extractFolderIdFromUrl(cfg?.folder_url||'');if(!root)throw fail('review_folder_missing');
-   folder=await svc.getOrCreateSubFolder(root,slot.label);folder=folder.id||folder;
-  }
+  if(!folder && !deps.drive)folder=await resolveReviewFolderInTx(client,target,slot);
   const fileId=await drive.upload(bytes,mime,folder);
   const actual=await drive.read(fileId);if(!Buffer.isBuffer(actual)||proof().sha(actual)!==sha)throw fail('review_file_changed');
   // Replacing one selected photo retains other photos in the slot at the same new revision.
@@ -216,7 +243,7 @@ function createService(deps={}){
   completeReviewUpload:input=>withScope(input,(client,lockedScope)=>completeReviewUploadInTx({...input,client,lockedScope}))};
 }
 
-module.exports={removeReviewEvidence,removeReviewEvidenceInTx,bundleTargetsForRows,withReviewFilesMutation,fileMutationContext,createService,bundleTargetForRow,recomputeBundleReviewStateInTx,
+module.exports={resolveReviewFolderInTx,removeReviewEvidence,removeReviewEvidenceInTx,bundleTargetsForRows,withReviewFilesMutation,fileMutationContext,createService,bundleTargetForRow,recomputeBundleReviewStateInTx,
  stageReviewUpload:input=>createService().stageReviewUpload(input),
  completeReviewUpload:input=>createService().completeReviewUpload(input),
  recordReviewUploadInTx:input=>createService().recordReviewUploadInTx(input),
