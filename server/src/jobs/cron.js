@@ -266,6 +266,26 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
+  // ── 이체은행 [자동] + 리뷰오더 물건비 업체입금 → 입금 방식 자동 저장 (결정 369 2단계): 매시 41분 ──
+  //   업체 연결·공고 저장 직후 훅이 먼저 처리하고, 이 점검은 놓친 것(훅 실패·다른 경로로 연결된 업체)을 줍는다.
+  //   ★ 사람이 고른 이체은행은 건드리지 않는다([자동]일 때만) · 저장은 기존 창구(guardTransferBankWrite).
+  //   되돌리기 = Railway `AUTO_PAYOUT_MODE_CRON=0`.
+  if (process.env.AUTO_PAYOUT_MODE_CRON !== '0') {
+    const apSchedule = process.env.AUTO_PAYOUT_MODE_CRON_SCHEDULE || '41 * * * *';
+    let apRunning = false;
+    cron.schedule(apSchedule, async () => {
+      if (apRunning) return;
+      apRunning = true;
+      try {
+        const { withJobLock } = require('../utils/jobLock');
+        const r = await withJobLock('auto_payout_mode', () => require('../services/advertiserPayoutAuto.service').applyAutoPayout());
+        if (r && r.applied && r.applied.length) logger.info(`[CRON-AutoPayout] 자동 설정 ${r.applied.length}건`);
+      } catch (err) {
+        logger.error(`[CRON-AutoPayout] error: ${err.message}`);
+      } finally { apRunning = false; }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
   // ── 명의 카드 거울(조각 2-1 · 결정 기록 176): 10분마다 카드를 리뷰어 정보(sub_accounts)에 맞춘다 ──
   //   ★ 저장 경로 19곳은 건드리지 않는다 — 달라진 리뷰어만 짧은 트랜잭션으로 맞춘다(FOR NO KEY UPDATE + lock_timeout).
   //   ★ 아직 아무도 카드를 읽지 않으므로 최대 10분 늦어도 영향 없다. 되돌리기 = Railway `IDENTITY_CARDS_RECONCILE=0`.

@@ -304,6 +304,10 @@ async function ensureTabOwnership({ advertiserId, sheetId, tabGid, by } = {}, de
       }
     }
     await client.query('COMMIT');
+    // 결정 369 2단계 — 업체가 연결되면 [자동]+물건비 업체입금 작업의 입금 방식을 자동 저장(뒤에서 · 주입 pool 시험에서는 생략)
+    if (result.status === 'assigned' && !(deps && deps.pool)) {
+      try { require('./advertiserPayoutAuto.service').kickAutoPayout({ sheetId: sid }); } catch (_) {}
+    }
     return result;
   } catch (err) {
     if (client) { try { await client.query('ROLLBACK'); } catch (_) {} }

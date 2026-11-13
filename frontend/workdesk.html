@@ -7811,10 +7811,15 @@ function _topToggle(){
 /* 결정 369 — 이체은행 칸 끝 경고: 리뷰오더 물건비는 「업체입금」인데 이체은행이 우리 은행(서버 판정 `transferBankOrderMismatch` 그대로).
    ★ 새 줄을 만들지 않는다(세 박스 높이 규율) — 그 칸의 <dd> 안 맨 끝에 한 마디, 마우스를 올리면 자세한 설명.
    ★ 광고주에게는 그리지 않는다(서버 렌즈도 이 값을 안 보낸다). 구버전 백엔드(필드 부재) = 종전 그대로. */
-const _CND_BANK_WARN_TIP='리뷰오더의 물건비가 「업체입금」입니다. 이체은행이 우리 은행이면 ① 업체 화면에 리뷰어 계좌가 안 보여 업체가 제품비를 못 보내고 ② 입금관리는 제품비까지 우리가 보내게 돼 보류됩니다. 이체은행을 「제품비 업체 · 리뷰비 케이뱅크/하나은행」(리뷰비는 우리가) 또는 「업체입금」(업체가 전부)으로 바꿔 주세요.';
+const _CND_BANK_WARN_TIP='리뷰오더의 물건비가 「업체입금」인데 이체은행을 사람이 케이뱅크·하나은행으로 골랐습니다. 이대로면 ① 업체 화면에 리뷰어 계좌가 안 보여 업체가 제품비를 못 보내고 ② 입금관리는 제품비까지 우리가 보내게 돼 보류됩니다. 이체은행을 「제품비 업체 · 리뷰비 케이뱅크/하나은행」(리뷰비는 우리가) 또는 「업체입금」(업체가 전부)으로 바꿔 주세요.';
+/* 결정 369 2단계 — [자동]이라 업체가 연결되면 시스템이 알아서 정하는 경우(아직 업체 미연결 등) */
+const _CND_BANK_AUTO_TIP='리뷰오더의 물건비가 「업체입금」입니다. 이체은행이 [자동]이라 업체가 이 작업에 연결되면 자동으로 「제품비 업체 · 리뷰비 케이뱅크」(리뷰비가 없으면 「업체입금」)로 설정됩니다. 그 전까지 입금관리에서는 보류됩니다.';
 function _cndBankWarn(cd,kind,isAdv,ddHtml){
   if(kind!=='bank' || isAdv || !cd || cd.transferBankOrderMismatch!==true) return ddHtml;
-  const chip=` <span class="cndbankwarn" title="${esc(_CND_BANK_WARN_TIP)}">⚠ 리뷰오더는 업체입금</span>`;
+  const auto=cd.transferBankAutoPending===true;
+  const chip=auto
+    ? ` <span class="cndbankwarn" title="${esc(_CND_BANK_AUTO_TIP)}">업체 연결 시 자동 설정</span>`
+    : ` <span class="cndbankwarn" title="${esc(_CND_BANK_WARN_TIP)}">⚠ 리뷰오더는 업체입금</span>`;
   return ddHtml.replace(/<\/dd>$/, chip+'</dd>');
 }
 /* 리뷰타입 표기 — 값은 서버가 준 것을 그리기만 한다(판정 사본 0).
@@ -13368,7 +13373,7 @@ const PAY_ISSUE_LABEL = {
   advertiser_pays:'업체 직접 입금 작업', advertiser_payout_unknown:'업체입금 여부 확인 실패(새로고침)',
   advertiser_pays_orphan:'이체은행이 업체입금인데 연결된 업체 없음 — 이체은행 확인',
   // 결정 369 — 리뷰오더 물건비는 업체입금인데 이체은행이 우리 은행(제품비 이중 입금 방지 보류)
-  order_goods_by_advertiser:'리뷰오더 물건비가 업체입금 — 작업 조건에서 이체은행을 「제품비 업체」나 「업체입금」으로',
+  order_goods_by_advertiser:'리뷰오더 물건비가 업체입금 — 이체은행 확인([자동]이면 업체 연결 시 자동 설정)',
   // 결정 292 — 제품비 업체 · 리뷰비 우리
   not_purchased:'구매 전(결제금액 없음) — 리뷰비는 구매 뒤에', split_no_fee:'리뷰비 미설정 — 작업 조건에서 리뷰비를 정해 주세요',
   // 결정 338·349 — 네이버·쿠팡 동시진행 지급 판정(코드 이름이 화면에 그대로 뜨지 않게)

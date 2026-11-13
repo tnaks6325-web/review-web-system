@@ -194,6 +194,68 @@ const _otherIssues = it => (it.issues || []).filter(x => x !== 'dual_bundle_chec
     r = run('kbank', '', '계산서(농협)', false); assert.strictEqual(r.asked.length, 0, '물건비가 업체입금이 아니면 종전 그대로');
   });
 
+  console.log('\n§4 [자동] + 물건비 업체입금 → 입금 방식 자동 저장(2단계 · 사용자 확정: 리뷰비 있으면 제품비 업체·리뷰비 케이뱅크 / 없으면 업체입금 / 공고 없는 작업도)');
+  const auto = require(SRC('services/advertiserPayoutAuto.service'));
+  const advSvc = require(SRC('services/advertiserPayout.service'));
+  const paySvc = require(SRC('services/payment.service'));
+  const runAuto = async ({ cands, allowed = true, paid = 0, kept = false }) => {
+    const saves = [], realSave = paySvc.saveTransferSetting, realAllow = advSvc.checkAdvertiserPayoutAllowed;
+    paySvc.saveTransferSetting = async a => { saves.push(a); return { ok: true, target: a.campaignId ? 'campaign' : 'tab', ...(kept ? { transferBankKept: 'advertiser' } : {}) }; };
+    advSvc.checkAdvertiserPayoutAllowed = async () => allowed ? { ok: true, advertiserName: '스마트윈' } : { ok: false, error: 'no_advertiser' };
+    const db = { query: async (sql) => /FROM tab_configs tc/.test(sql) ? { rows: cands } : /payment_batch_items/.test(sql) ? { rows: [{ n: paid }] } : { rows: [] } };
+    try { return { r: await auto.applyAutoPayout({ db }), saves }; }
+    finally { paySvc.saveTransferSetting = realSave; advSvc.checkAdvertiserPayoutAllowed = realAllow; }
+  };
+  const C = o => ({ sheetId: 'S1', tabName: 'T1', campaignId: 'camp_1', campaignFee: 1000, tabFee: null, scheduleMax: null, deliveryMix: [], goodsCostType: '업체입금(입금명: 배성화)', ...o });
+
+  await ta('4a ★★ 리뷰비 있음 → 제품비 업체 · 리뷰비 케이뱅크(split_kbank)를 기존 창구(saveTransferSetting)로 공고에 저장', async () => {
+    const { r, saves } = await runAuto({ cands: [C()] });
+    assert.deepStrictEqual(saves, [{ sheetId: 'S1', tabName: 'T1', campaignId: 'camp_1', bank: 'split_kbank' }]);
+    assert.strictEqual(r.applied.length, 1);
+  });
+  await ta('4b ★ 리뷰비 없음 + 공고 없음 → 업체입금(advertiser)을 탭 설정에(남이섬 같은 옛 작업)', async () => {
+    const { saves } = await runAuto({ cands: [C({ campaignId: null, campaignFee: null, goodsCostType: '업체입금 / 선입금미완료' })] });
+    assert.deepStrictEqual(saves, [{ sheetId: 'S1', tabName: 'T1', campaignId: null, bank: 'advertiser' }]);
+  });
+  await ta('4c 기간별 구간·배송유형별 금액·탭 금액 중 하나라도 있으면 리뷰비 있음', () => {
+    assert.strictEqual(auto.hasReviewFee({ campaignFee: 0, scheduleMax: 500 }), true);
+    assert.strictEqual(auto.hasReviewFee({ campaignFee: 0, tabFee: 300 }), true);
+    assert.strictEqual(auto.hasReviewFee({ campaignFee: 0, deliveryMix: [{ type: 'real', reviewFee: 1000 }, { type: 'empty', reviewFee: 0 }] }), true);
+    assert.strictEqual(auto.hasReviewFee({ campaignFee: 0, tabFee: null, scheduleMax: null, deliveryMix: [] }), false);
+  });
+  await ta('4d ★★ 고를 수 없는 작업(업체 미연결 등) = 저장하지 않는다(연결되면 다시)', async () => {
+    const { r, saves } = await runAuto({ cands: [C()], allowed: false });
+    assert.strictEqual(saves.length, 0); assert.strictEqual(r.skipped[0].reason, 'no_advertiser');
+  });
+  await ta('4e ★★ 우리가 이미 이체 회차에 담은 줄이 있으면 바꾸지 않는다(fail-closed)', async () => {
+    const { r, saves } = await runAuto({ cands: [C()], paid: 2 });
+    assert.strictEqual(saves.length, 0); assert.strictEqual(r.skipped[0].reason, 'our_payout_exists');
+  });
+  await ta('4f 물건비가 업체입금이 아니면 고르지 않는다 · 저장 창구가 그대로 뒀으면(kept) 적용 아님', async () => {
+    assert.strictEqual(auto.autoPayoutChoice({ goodsCostType: '계산서(농협)', feePositive: true }), null);
+    const { r } = await runAuto({ cands: [C()], kept: true });
+    assert.strictEqual(r.applied.length, 0); assert.strictEqual(r.skipped[0].reason, 'kept');
+  });
+  await ta('4g ★★ 후보 조회 = 기준 공고(가장 최근) 이체은행과 탭 이체은행이 **둘 다 비어 있을 때만**([자동] · 사람이 고른 값 무접촉)', () => {
+    const q = auto.CANDIDATE_SQL;
+    assert.ok(/btrim\(COALESCE\(c\.transfer_bank, ''\)\) = ''/.test(q) && /btrim\(COALESCE\(tc\.transfer_bank, ''\)\) = ''/.test(q));
+    assert.ok(/ORDER BY rc\.created_at DESC LIMIT 1/.test(q), '입금관리와 같은 공고(가장 최근)');
+    assert.ok(/goods_cost_type ~ '업체\\\\s\*입금'/.test(read('src/services/advertiserPayoutAuto.service.js')), '서버 판정과 같은 정규식');
+  });
+  await ta('4h 배선 — 공고 생성·수정 · 업체 소유 지정·이관·자동 소유 · 매시 점검(끌 수 있음)', () => {
+    const cr = read('src/routes/campaign.routes.js');
+    assert.strictEqual((cr.match(/advertiserPayoutAuto\.service'\)\.kickAutoPayout\(/g) || []).length, 2, '공고 생성·수정 두 곳');
+    assert.strictEqual((TB.match(/advertiserPayoutAuto\.service'\)\.kickAutoPayout\(/g) || []).length, 2, 'setOwnership·transferOwnership');
+    assert.ok(/advertiserPayoutAuto\.service'\)\.kickAutoPayout\(\{ sheetId: sid \}\)/.test(read('src/services/advertiserProjection.service.js')));
+    const cj = read('src/jobs/cron.js');
+    assert.ok(/AUTO_PAYOUT_MODE_CRON !== '0'/.test(cj) && /withJobLock\('auto_payout_mode'/.test(cj));
+  });
+  await ta('4i 카드 — [자동]이면 「업체 연결 시 자동 설정」, 사람이 고른 은행이면 「⚠ 리뷰오더는 업체입금」', () => {
+    assert.ok(/transferBankAutoPending: payoutMode\.mode === 'ours' && !campBank && !tabBank/.test(TB));
+    const fn = HTML.match(/function _cndBankWarn\(cd,kind,isAdv,ddHtml\)\{[\s\S]*?\n\}/)[0];
+    assert.ok(/cd\.transferBankAutoPending===true/.test(fn) && /업체 연결 시 자동 설정/.test(fn) && /⚠ 리뷰오더는 업체입금/.test(fn));
+  });
+
   console.log(`\n결과: ${pass} 통과 / ${fail} 실패`);
   process.exit(fail ? 1 : 0);
 })();

@@ -3892,6 +3892,8 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         logger.warn('[campaign/create] 달력 프리필 실패(공고는 발행됨): ' + e.message);
       }
     }
+    /* ★ 결정 369 2단계 — 이체은행 [자동] + 리뷰오더 물건비 업체입금이면 입금 방식을 자동 저장(기존 창구 · 고를 수 없으면 업체 연결 뒤 다시) */
+    if (lSheet && lTab) { try { require('../services/advertiserPayoutAuto.service').kickAutoPayout({ sheetId: lSheet, tabName: lTab }); } catch (_) {} }
     res.json({ ok: true, optionThumbnails: true /* ★ 결정 214: 상품 사진 저장을 아는 서버(배포 시차 판별) */,
       advertiserPayoutBank: true /* ★ 결정 247: 이체은행 업체입금을 아는 서버(배포 시차 판별) */,
       splitPayoutBank: true /* ★ 결정 292: 이체은행 제품비 업체(split)를 아는 서버(배포 시차 판별) */,
@@ -4588,6 +4590,10 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     const worktableRelay = rows[0].participation_mode
       ? await require('../services/campaignPlan.service').relayCampaignWorktable(id, { by: req.admin?.name || 'admin' })
       : null;
+    /* ★ 결정 369 2단계 — 이체은행 [자동] + 리뷰오더 물건비 업체입금이면 입금 방식을 자동 저장(기존 창구) */
+    if (rows[0].linked_sheet_id && rows[0].linked_tab_name) {
+      try { require('../services/advertiserPayoutAuto.service').kickAutoPayout({ sheetId: rows[0].linked_sheet_id, tabName: rows[0].linked_tab_name }); } catch (_) {}
+    }
     res.json({ ok: true, optionThumbnails: true /* ★ 결정 214: 상품 사진 저장을 아는 서버(배포 시차 판별) */,
       advertiserPayoutBank: true /* ★ 결정 247: 이체은행 업체입금을 아는 서버(배포 시차 판별) */,
       splitPayoutBank: true /* ★ 결정 292: 이체은행 제품비 업체(split)를 아는 서버(배포 시차 판별) */,
