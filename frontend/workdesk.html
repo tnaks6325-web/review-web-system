@@ -7624,6 +7624,7 @@ function _rvOpen(rid,fileIndex){
   if(f){ const k=(f.slot==='order_capture')?'cap':(f.slot==='receipt'?'receipt':'rev');
          i2[k]=Math.max(0,_rvKindFiles(files,k).findIndex(x=>x.fileId===f.fileId)); }
   STATE.rvPop={people,allPeople:people,idx,i2,filter:null,filterOpen:false,showReceipt:_rvReceiptActive()}; _rvPopRender();
+  _rvPopWarm(STATE.rvPop);
 }
 function _rvPopPick(idx){ const p=STATE.rvPop; if(!p||!p.people[idx]) return; p.idx=idx; p.i2={cap:0,rev:0,receipt:0}; _rvPopRender(); }
 function _rvPopStep(delta){ const p=STATE.rvPop; if(!p||!p.people.length) return; p.idx=(p.idx+delta+p.people.length)%p.people.length; p.i2={cap:0,rev:0,receipt:0}; _rvPopRender(); }
@@ -7716,6 +7717,22 @@ function _rvPopRender(){
     `<div class="rvpstage"><button type="button" class="rvpclose" aria-label="닫기" onclick="_rvPopClose()">×</button>`+
       (cur?`<div class="rvpmeta">${esc(who||'—')}<span>${no?'번호 '+esc(no):'번호 —'} · ${p.idx+1}/${p.people.length}</span></div><div class="rvpcols${p.showReceipt?' hasreceipt':''}">${_rvPopCol('cap',cur.files,cur.r)}${_rvPopCol('rev',cur.files,cur.r)}${p.showReceipt?_rvPopCol('receipt',cur.files,cur.r):''}</div>`:`<div class="rvpempty warn"><b>조건에 맞는 참여자가 없습니다</b><span>제출 필터를 다시 눌러 전체 목록으로 돌아가세요.</span></div>`)+
     `</div></section>`;
+  _rvPopPrefetch(p);
+}
+/* ★ 팝업 사진 빠른 길(결정 354 보강 2026-11-13 · 사람을 넘길 때 1~3초 늦던 문제) — 규칙·묶음·상한은 drive-thumb.js 한 곳.
+   ① 열 때 목록 전원의 구매·리뷰(현영 표시 시 영수증) 원본(o) 서명을 한 묶음으로 묻는다(wantFull)
+   ② 그릴 때마다(서명이 도착했을 때도) 앞·뒤 사람의 지금 장(사람을 넘기면 첫 장) 원본을 미리 받는다(prefetch)
+   ★ 원본 자리라 t·m 은 쓰지 않는다(결정 008). 업체(광고주) 화면은 일괄 서명이 닫혀 있어 종전 그대로 둔다. */
+function _rvPopKinds(p,x){ return ['cap','rev'].concat(p.showReceipt&&_rvReceiptApplies(x&&x.r)?['receipt']:[]); }
+function _rvPopWarm(p){
+  if(!p||STATE.role==='advertiser'||!window.DriveThumb||!DriveThumb.wantFull) return;
+  const ids=[]; (p.allPeople||[]).forEach(x=>_rvPopKinds(p,x).forEach(k=>_rvKindFiles(x.files,k).forEach(f=>ids.push(f.fileId))));
+  DriveThumb.wantFull(ids,()=>{ if(STATE.rvPop===p) _rvPopPrefetch(p); });
+}
+function _rvPopPrefetch(p){
+  if(!p||STATE.role==='advertiser'||!window.DriveThumb||!DriveThumb.prefetch) return;
+  const n=(p.people||[]).length; if(n<2) return;
+  [p.idx+1,p.idx-1].forEach(j=>{ const x=p.people[(j+n)%n]; if(x) _rvPopKinds(p,x).forEach(k=>{ const f=_rvKindFiles(x.files,k)[0]; if(f) DriveThumb.prefetch(f.fileId); }); });
 }
 
 /* ── 시안 B: 상단 3단 — [작업 조건 · 진행 현황 · 정산] 3분할 카드 ──────────────────────
