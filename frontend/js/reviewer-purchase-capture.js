@@ -190,6 +190,14 @@
     if(ch.saveState==='saved')return ['접수됨','ok'];
     return ['상태 확인 불가','mid'];
   }
+  // 줄 왼쪽 작은 상품 사진(공고 썸네일). https 주소만 · 없거나 안 뜨면 회색 빈 자리(줄 높이 그대로).
+  function productThumb(item) {
+    const box=el('span',null,'rpc-rowthumb');box.setAttribute('aria-hidden','true');
+    const url=typeof item.thumbnailUrl==='string'&&/^https:\/\/[^\s"'<>\\]+$/.test(item.thumbnailUrl)?item.thumbnailUrl:'';
+    if(url){const img=el('img');img.alt='';img.loading='lazy';img.decoding='async';img.src=url;img.addEventListener('error',()=>{img.remove();box.classList.add('empty');},{once:true});box.append(img);}
+    else box.classList.add('empty');
+    return box;
+  }
   function compactRow(c,item) {
     const key='row:'+String(item.orderSubmissionId),open=c.folds.get(key)===true;
     const row=el('div',null,'rpc-row'+(open?' open':''));row.dataset.order=String(item.orderSubmissionId);
@@ -197,7 +205,7 @@
     const main=el('span',null,'rpc-rowmain');main.append(el('span',item.displayName||'구매사진','rpc-rowname'),el('span',item.participantName||'','rpc-rowwho'));
     const chips=el('span',null,'rpc-chips');
     item.channels.forEach(ch=>{const [text,tone]=chipOf(ch);chips.append(el('span',(item.channels.length>1?(ch.label||ch.channel)+' ':'')+text,'rpc-chip '+tone));});
-    head.append(main,chips,el('span','›','rpc-caret'));
+    head.append(productThumb(item),main,chips,el('span','›','rpc-caret'));
     head.addEventListener('click',()=>{if(c.busy)return;[...c.folds.keys()].forEach(k=>{if(k.startsWith('row:'))c.folds.delete(k);});if(!open)c.folds.set(key,true);render(c);});
     row.append(head);
     if(open)for(const ch of item.channels){

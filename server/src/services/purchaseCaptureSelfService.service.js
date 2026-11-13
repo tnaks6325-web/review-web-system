@@ -61,7 +61,7 @@ function createService({db,drive,requestInTx}={}){
   const configs=(await client.query(`SELECT tc.*,${finishedSql} AS finished,EXISTS(SELECT 1 FROM index_master_archive a WHERE a.sheet_id=tc.sheet_id AND a.tab_name=tc.tab_name) AS archived FROM tab_configs tc WHERE (sheet_id=$1 AND tab_name=$2) OR (sheet_id=$3 AND tab_name=$4)`,[order.sheet_id,order.tab_name,campaign?.linked_sheet_id||'',campaign?.linked_tab_name||''])).rows;
   const linked=configs.find(c=>c.sheet_id===campaign?.linked_sheet_id&&c.tab_name===campaign?.linked_tab_name);
   const direct=configs.find(c=>c.sheet_id===order.sheet_id&&c.tab_name===order.tab_name);
-  const context={order,channels:order.purchase_bundle_version?['naver','coupang']:['single'],evidenceByChannel:{},displayName:campaign?.title||linked?.display_name||linked?.tab_name||direct?.display_name||order.tab_name||'구매 작업',participantName:order.recipient||order.orderer||'',session,actor};
+  const context={order,channels:order.purchase_bundle_version?['naver','coupang']:['single'],evidenceByChannel:{},displayName:campaign?.title||linked?.display_name||linked?.tab_name||direct?.display_name||order.tab_name||'구매 작업',participantName:order.recipient||order.orderer||'',session,actor,campaignThumb:campaign?campaign.thumbnail_url:undefined};
   const supplements=(await client.query('SELECT * FROM purchase_capture_supplements WHERE order_submission_id=$1 ORDER BY id',[order.id])).rows;
   const uploadSession=order.purchase_bundle_version?null:(await client.query('SELECT status,failure_code FROM purchase_submission_sessions WHERE order_submission_id=$1 ORDER BY updated_at DESC,id DESC LIMIT 1',[order.id])).rows[0];
   const artifacts=order.purchase_bundle_version?(await client.query("SELECT * FROM purchase_capture_artifacts WHERE order_submission_id=$1 AND status='committed' AND superseded_at IS NULL ORDER BY channel,role,id FOR UPDATE",[order.id])).rows:[];
@@ -85,7 +85,24 @@ function createService({db,drive,requestInTx}={}){
     reviewState:r?.status||'not_requested',reason:r?.status==='needs_photo'?r.note:context.order.purchase_bundle_version&&context.order.purchase_identity_review?.status==='pending'?'명의 확인은 별도로 진행 중이에요. 사진 확인과 입금 승인은 별개예요.':null,
     request:publicRequest(r),capabilities:e.capabilities};
   });
-  return {orderSubmissionId:context.order.id,displayName:context.displayName,participantName:context.participantName,channels};
+  return {orderSubmissionId:context.order.id,displayName:context.displayName,participantName:context.participantName,thumbnailUrl:await thumbnailInTx(client,context),channels};
+ }
+ // 리뷰어 창의 작은 상품 사진(결정 370) = 모집공고 카드와 같은 공고 썸네일. 참여 연결이 없는 작업 주문은 그 작업에 연결된 공고에서 찾는다.
+ // https 주소만 내보낸다(화면이 그대로 <img src> 로 쓰므로). 없으면 null → 화면은 빈 자리 표시.
+ async function thumbnailInTx(client,context){
+  let url=context.campaignThumb;
+  if(url===undefined){
+   // 사진은 꾸밈이다 — 이 조회가 실패해도 목록·사진 처리 트랜잭션을 깨지 않게 SAVEPOINT 로 가둔다(실패 = 빈 자리).
+   try{await client.query('SAVEPOINT purchase_capture_thumb');}catch(_){return null;}
+   try{
+    url=(await client.query(`SELECT thumbnail_url FROM recruit_campaigns
+     WHERE (linked_sheet_id=$1 AND linked_tab_name=$2) OR $1='campaign:'||id
+     ORDER BY (NULLIF(thumbnail_url,'') IS NULL),id DESC LIMIT 1`,[context.order.sheet_id,context.order.tab_name])).rows[0]?.thumbnail_url;
+    await client.query('RELEASE SAVEPOINT purchase_capture_thumb');
+   }catch(_){await client.query('ROLLBACK TO SAVEPOINT purchase_capture_thumb');await client.query('RELEASE SAVEPOINT purchase_capture_thumb');return null;}
+  }
+  url=String(url||'').trim();
+  return /^https:\/\/[^\s"'<>\\]+$/.test(url)&&url.length<=2048?url:null;
  }
  async function withOrderTransaction(input,run){
   checkCaller(input);

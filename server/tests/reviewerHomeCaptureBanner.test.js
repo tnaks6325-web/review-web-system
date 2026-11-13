@@ -73,7 +73,7 @@ async function harness(fn,{engine='chromium',width=390}={}){
   const browser=await pw[engine].launch({executablePath:pw[engine].executablePath()});
   const page=await browser.newPage({viewport:{width,height:844}});page.setDefaultTimeout(15000);const writes=[],errors=[];
   page.on('pageerror',e=>errors.push(String(e)));
-  await page.route('**/*',route=>{const r=route.request(),u=new URL(r.url());if(u.hostname!=='127.0.0.1')return route.abort();if(r.method()!=='GET')writes.push(r.method()+' '+u.pathname);return route.continue();});
+  await page.route('**/*',route=>{const r=route.request(),u=new URL(r.url());if(u.hostname==='thumb.test'&&u.pathname==='/ok.svg')return route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" fill="#fa0"/></svg>'});if(u.hostname!=='127.0.0.1')return route.abort();if(r.method()!=='GET')writes.push(r.method()+' '+u.pathname);return route.continue();});
   try{await page.goto('http://127.0.0.1:'+server.address().port);await fn(page,{writes,errors});assert.deepEqual(errors,[]);}
   finally{await browser.close();await new Promise(r=>server.close(r));}
 }
@@ -162,6 +162,19 @@ test('늦게 온 옛 응답이 새 알림을 덮지 않는다 · 로그아웃(re
   await serve(page,[need('1','x')]);await banner(page);await page.locator('.rpc-banner').waitFor();
   await page.evaluate(()=>ReviewerPurchaseCapture.reset());
   assert.equal(await page.locator('#sectionMissingCapture').evaluate(n=>n.childElementCount),0);
+}));
+
+test('줄 왼쪽 작은 상품 사진 — https 만 · 없거나 안 뜨면 회색 빈 자리 · 모든 줄이 같은 자리·크기',()=>harness(async page=>{
+  const withThumb=(it,u)=>({...it,thumbnailUrl:u});
+  await serve(page,[withThumb(need('1','정상'),'https://thumb.test/ok.svg'),need('2','없음'),withThumb(done('3','위험 주소'),'javascript:alert(1)'),withThumb(done('4','http 주소'),'http://thumb.test/ok.svg'),withThumb(done('5','안 뜸'),'https://thumb.test/missing.svg')]);
+  await banner(page);await page.locator('.rpc-banner').click();
+  const sheet=page.locator('dialog.rpc-sheet');await sheet.locator('.rpc-row').nth(4).waitFor();
+  await page.waitForFunction(()=>document.querySelectorAll('dialog .rpc-rowthumb.empty').length===4);
+  const rows=await sheet.locator('.rpc-row').evaluateAll(rs=>rs.map(r=>{const t=r.querySelector('.rpc-rowthumb'),b=t.getBoundingClientRect(),img=t.querySelector('img');
+    return {name:r.querySelector('.rpc-rowname').textContent,empty:t.classList.contains('empty'),img:img?img.getAttribute('src'):null,loaded:img?img.naturalWidth>0:false,left:Math.round(b.left),w:Math.round(b.width),h:Math.round(b.height),first:t===r.querySelector('.rpc-rowhead').firstElementChild};}));
+  assert.deepEqual(rows.map(r=>[r.name,r.empty,r.img]),[['정상',false,'https://thumb.test/ok.svg'],['없음',true,null],['위험 주소',true,null],['http 주소',true,null],['안 뜸',true,null]]);
+  assert.equal(rows[0].loaded,true);
+  assert.ok(rows.every(r=>r.first&&r.w===36&&r.h===36&&r.left===rows[0].left),JSON.stringify(rows));
 }));
 
 test('직원 창·기존 펼침 목록은 종전 모양 그대로',()=>harness(async page=>{
