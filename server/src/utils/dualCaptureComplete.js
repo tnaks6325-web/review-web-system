@@ -12,6 +12,12 @@
  * ★ 묶음 여부는 `to_jsonb(<a>)->>'purchase_bundle_version'`(purchaseSubmissionSession 과 같은 idiom).
  */
 const CHANNELS = ['naver', 'coupang'];
+const CHANNEL_LABELS = { naver: '네이버', coupang: '쿠팡' };
+
+/** 「지금 사진」 = 확정됐고(committed) 다른 사진으로 교체되지 않았다 — 판정·읽기가 같은 조건 한 벌을 쓴다. */
+function currentArtifactSql(x) {
+  return `${x}.status = 'committed' AND ${x}.superseded_at IS NULL`;
+}
 
 function isDualBundleSql(a = 'os') {
   return `((to_jsonb(${a})->>'purchase_bundle_version') IS NOT NULL)`;
@@ -20,8 +26,37 @@ function isDualBundleSql(a = 'os') {
 function dualCaptureCompleteSql(a = 'os') {
   const has = ch => `EXISTS (SELECT 1 FROM purchase_capture_artifacts dcc_${ch}
       WHERE dcc_${ch}.order_submission_id = ${a}.id AND dcc_${ch}.channel = '${ch}'
-        AND dcc_${ch}.role = 'primary' AND dcc_${ch}.status = 'committed' AND dcc_${ch}.superseded_at IS NULL)`;
+        AND dcc_${ch}.role = 'primary' AND ${currentArtifactSql(`dcc_${ch}`)})`;
   return `(${isDualBundleSql(a)} AND ${CHANNELS.map(has).join(' AND ')})`;
 }
 
-module.exports = { isDualBundleSql, dualCaptureCompleteSql, CHANNELS };
+/**
+ * 묶음 주문 한 건의 지금 사진 목록 (결정 371 — 리뷰 내역 「참여상품 정보」 [📷 구매캡처보기]).
+ * ★ 권한 판정은 하지 않는다 — 부르는 쪽이 소유권을 이미 확인한 주문 id 로만 부른다.
+ * 순서 = 네이버 → 쿠팡, 같은 구매처 안에서는 첫 장(primary) → 둘째 장(supplement).
+ * @returns {Promise<Array<{fileId:string, label:string, channel:string, createdAt:any}>>}
+ */
+async function listCurrentDualCaptures(db, orderSubmissionId) {
+  const { rows } = await db.query(
+    `SELECT dca.channel, dca.role, dca.file_id, dca.created_at
+       FROM purchase_capture_artifacts dca
+      WHERE dca.order_submission_id = $1 AND ${currentArtifactSql('dca')}
+        AND COALESCE(dca.file_id, '') <> ''
+      ORDER BY CASE dca.channel WHEN 'naver' THEN 0 WHEN 'coupang' THEN 1 ELSE 2 END,
+               CASE dca.role WHEN 'primary' THEN 0 ELSE 1 END, dca.revision, dca.created_at`,
+    [orderSubmissionId]
+  );
+  const seen = {};
+  return rows.map(r => {
+    const base = CHANNEL_LABELS[r.channel] || '구매사진';
+    seen[base] = (seen[base] || 0) + 1;
+    return {
+      fileId: String(r.file_id),
+      label: seen[base] > 1 ? `${base} ${seen[base]}장째` : base,
+      channel: String(r.channel || ''),
+      createdAt: r.created_at || null,
+    };
+  });
+}
+
+module.exports = { isDualBundleSql, dualCaptureCompleteSql, listCurrentDualCaptures, CHANNELS, CHANNEL_LABELS };

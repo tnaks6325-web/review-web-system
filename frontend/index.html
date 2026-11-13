@@ -239,8 +239,9 @@
     .status-badge-submitted { font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:var(--ok-light); color:#065F46; }
     .status-badge-paid { font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:#E0E7FF; color:#3730A3; }
     .status-badge-order { font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:#E0EDFF; color:#1B4F9C; }
-    .status-badge-order.attention { background:#FEE2E2; color:#991B1B; }
-    .status-badge-order.reflected { background:#DCFCE7; color:#166534; }
+    /* 결정 371 — 참여중 카드 상태 두 가지 색: todo = 리뷰어가 할 일(리뷰 제출) / wait = 기다리면 됨(반영 중·담당자 확인 중) */
+    .status-badge-order.todo { background:#E0EDFF; color:#1B4F9C; }
+    .status-badge-order.wait { background:#F1F3F6; color:#4B5563; }
     .result-card.is-order-pending { cursor:default; }
 
     /* ─── 리뷰 내역 3줄 카드 (참여중): 썸네일 + 날짜·이름 / 상품명 / 상품비·리뷰비 ─── */
@@ -257,7 +258,14 @@
     /* 완료 건의 입금완료 배지는 상태 배지 아래에 유지한다. */
     .result-right.rr-col { flex-direction:column; align-items:flex-end; gap:4px; }
     .result-right .rr-row { display:flex; align-items:center; gap:6px; }
-    .status-badge-order.reflected { padding:5px 9px; }
+    .status-badge-order.todo, .status-badge-order.wait { padding:5px 9px; white-space:nowrap; }
+    /* 못 누르는 카드의 이유 한 줄(결정 371) — 눌러도 아무 일이 없던 이유와 할 일 */
+    .c-reason { display:flex; align-items:flex-start; gap:5px; margin-top:6px; font-size:.66rem; font-weight:600; line-height:1.45; color:var(--t3); word-break:keep-all; }
+    .c-reason i { flex:none; margin-top:2px; font-size:.62rem; color:#9CA3AF; }
+    .c-reason b { color:var(--t2); font-weight:800; }
+    .result-group-reason { padding:0 14px 10px; }
+    .result-group-reason .c-reason { margin-top:0; }
+    .result-group-reason .c-reason + .c-reason { margin-top:4px; }
     .c-name { font-size:.83rem; font-weight:700; color:var(--t1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin:2px 0 6px; }
     .fee-line { display:flex; align-items:center; gap:4px 6px; flex-wrap:wrap; overflow:visible; }
     .fee { font-size:.63rem; font-weight:800; padding:3px 8px; border-radius:7px; white-space:nowrap; font-variant-numeric:tabular-nums; flex:none; }
@@ -365,9 +373,8 @@
     /* 제출완료 카드도 눌러서 참여상품 정보 팝업(→ 이미지 확인·수정요청 / 1:1 문의)으로 들어간다 */
     .result-group-item-badge.done { background:var(--ok-light); color:#065F46; }
     .result-group-item-badge.paid { background:#E0E7FF; color:#3730A3; }
-    .result-group-item-badge.order { background:#E0EDFF; color:#1B4F9C; }
-    .result-group-item-badge.order.attention { background:#FEE2E2; color:#991B1B; }
-    .result-group-item-badge.order.reflected { background:#DCFCE7; color:#166534; }
+    .result-group-item-badge.todo { background:#E0EDFF; color:#1B4F9C; }
+    .result-group-item-badge.wait { background:#F1F3F6; color:#4B5563; }
 
     /* 참여상품 정보: 좁은 휴대폰에서도 2열×3행을 유지한다. 각 열은 정확히 1fr. */
     .part-info-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:8px; }
@@ -392,6 +399,8 @@
     .part-info-capture-ovl { z-index:430; }
     .part-info-capture-wrap { padding:10px 0 4px; }
     .part-info-capture-meta { margin-bottom:9px; color:#6B7280; font-size:.7rem; line-height:1.45; }
+    /* 결정 371 — 동시진행 묶음 주문의 구매처 이름(네이버/쿠팡) 줄 */
+    .part-info-capture-meta.part-info-capture-ch { margin-bottom:6px; color:#111827; font-size:.76rem; font-weight:800; }
     .part-info-capture-img { display:block; width:100%; max-height:66vh; object-fit:contain; border-radius:12px; background:#111827; }
     .part-info-capture-choice { width:100%; display:flex; align-items:center; gap:9px; margin-top:8px; padding:11px 12px; border:1px solid #BDE5CA; border-radius:11px; background:#EFFBF3; color:#17643A; font-family:inherit; font-size:.76rem; font-weight:800; text-align:left; cursor:pointer; }
     @media (max-width:360px) {
@@ -1091,7 +1100,7 @@
     <div class="home-section" id="sectionReviewList">
       <div class="results-header">
         <span class="results-title"><i class="fas fa-clipboard-list" style="color:var(--p)"></i> 리뷰 내역</span>
-        <span id="reviewResultsCount" class="results-badge">0건</span>
+        <span id="reviewResultsCount" class="results-badge" hidden></span>
       </div>
       <!-- 받을 예정 금액 (참여중 캠페인 기준 상품비 + 리뷰비 자동합계) -->
       <div class="sumcard" id="reviewEarnings" style="display:none">
@@ -2408,13 +2417,27 @@ async function _loadAllDoneHistory() {
   }
 }
 
-/** 대기 건 배지 텍스트 — 다중 캡처 슬롯 부분 제출이면 "n/m 제출"로 진행 표시 */
+/** 대기 건 배지 텍스트 — 참여중 카드 상태의 단일 출처 (결정 371).
+ *  단건 카드 · 다건 그룹 줄 · 누를 수 있는지 · 못 누르는 이유를 이 함수 하나가 정한다(사본을 두면 두 카드가 또 갈린다).
+ *  · 리뷰를 쓸 차례 → 「리뷰 제출 필요」 / 여러 장 중 일부만 냄 → 「리뷰 n/m 제출」 (누를 수 있음)
+ *  · 구매양식이 아직 작업표·목록에 반영 중(isOrderPending: processing·reflected) → 「반영 중」 (못 누름 · 잠시 뒤 가능)
+ *  · 담당자가 봐야 하는 상태(reviewObligationStatus 'unknown' · orderStage 'attention') → 「담당자 확인 중」 (못 누름 · 할 일 없음)
+ *  ★ 누를 수 있는 카드 집합은 종전과 같다 — isOrderPending 또는 'unknown' 만 못 누른다. */
+function _pendingCardState(item) {
+  const it = item || {};
+  const staffReason = '따로 하실 일은 없어요.';
+  if (it.isOrderPending) {
+    if (it.orderStage === 'attention') return { text:'담당자 확인 중', tone:'wait', tappable:false, reason:staffReason };
+    return { text:'반영 중', tone:'wait', tappable:false, reason:'잠시 뒤 리뷰를 제출할 수 있어요.' };
+  }
+  if (it.reviewObligationStatus === 'unknown') return { text:'담당자 확인 중', tone:'wait', tappable:false, reason:staffReason };
+  const total = Array.isArray(it.captureSlots) ? it.captureSlots.length : 0;
+  const done = Array.isArray(it.submittedSlots) ? Math.min(it.submittedSlots.length, total) : 0;
+  if (total > 1 && done > 0) return { text:'리뷰 ' + done + '/' + total + ' 제출', tone:'todo', tappable:true, reason:'' };
+  return { text:'리뷰 제출 필요', tone:'todo', tappable:true, reason:'' };
+}
 function _pendingBadgeText(item) {
-  if(item.reviewObligationStatus==='unknown') return '관리자 확인 중';
-  const total = Array.isArray(item.captureSlots) ? item.captureSlots.length : 0;
-  const done = Array.isArray(item.submittedSlots) ? Math.min(item.submittedSlots.length, total) : 0;
-  if (total > 1 && done > 0) return "리뷰 " + done + "/" + total + " 제출";
-  return "구매양식반영완료";
+  return _pendingCardState(item).text;
 }
 
 /** 리뷰 완료 뒤 현금영수증만 남은 참여 건 — search.html과 같은 슬롯/제출 원장을 사용한다. */
@@ -2435,17 +2458,6 @@ function _hasPurchaseFormReflected(item) {
   return orderNumber != null && String(orderNumber).trim() !== '';
 }
 
-/** 구매양식 주문(isOrderPending) 카드의 배지 상태 → CSS 클래스 / 문구.
- *  reflected = 시트 반영완료, attention = 확인필요, processing = 반영중 */
-function _orderStageClass(stage) {
-  return stage === 'attention' ? 'attention' : stage === 'reflected' ? 'reflected' : '';
-}
-function _orderStageLabel(stage, short) {
-  if (stage === 'attention') return '확인필요';
-  if (stage === 'reflected') return '반영완료';
-  return short ? '반영중' : '구매양식 반영중';
-}
-
 /** 현재 서브탭 기준 리뷰 내역 렌더 */
 function renderReviewSubTab() {
   const listEl = document.getElementById("reviewResultsList");
@@ -2464,14 +2476,17 @@ function renderReviewSubTab() {
   if (cntDone) cntDone.textContent = _historyCounts?_historyCounts.done:_reviewListData.done.length;
 
   // 로딩 중에는 스피너 유지 (빈 상태 문구로 착각하지 않게)
+  /* ★ 결정 371 — 머리글 옆 숫자는 뺀다. 예전 조회는 '지금 탭 개수', 새 조회는 '전체 개수'를 말해 뜻이 갈렸고,
+     참여중·제출완료 탭이 이미 각자 개수를 보여 준다. 머리글 자리는 「조회 실패」 같은 상태만 말한다(결정 359). */
+  const setHeadStatus = (text) => { if (!countEl) return; countEl.textContent = text; countEl.hidden = !text; };
   if (_reviewListLoading) {
-    if (countEl) countEl.textContent = "-";
+    setHeadStatus('');
     listEl.innerHTML = `<div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>`;
     return;
   }
 
   if (_reviewListError && !_reviewListData.pending.length && !_reviewListData.done.length) {
-    if (countEl) countEl.textContent = "조회 실패";
+    setHeadStatus("조회 실패");
     if (cntPending) cntPending.textContent = "—";
     if (cntDone) cntDone.textContent = "—";
     listEl.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i>리뷰 내역 로드 실패<br><span style="font-size:.72rem;color:var(--t4)">${escHtml(_reviewListError)}</span><br><button onclick="loadReviewList(getSavedUser(),{force:true})">다시 불러오기</button></div>`;
@@ -2479,7 +2494,7 @@ function renderReviewSubTab() {
   }
 
   const list = isDone ? _sortDoneHistory(_reviewListData.done, _reviewDoneSort) : _reviewListData.pending;
-  if (countEl) countEl.textContent = (_historyCounts?(_historyCounts.pending+_historyCounts.done):list.length) + "건";
+  setHeadStatus('');
 
   if (list.length === 0) {
     if(_reviewListError){
@@ -2517,14 +2532,13 @@ function renderReviewSubTab() {
 
     if (isSingle) {
       const item = items[0];
+      const st = _pendingCardState(item);   // ★ 결정 371 — 배지 글자·누를 수 있는지·이유를 한 함수가 정한다
       // 상태 배지 — 완료 건의 "입금완료"는 배지 아랫줄(subBadgeHtml)로 내려 제목 잘림을 줄인다
       const badgeHtml = isDone
         ? '<span class="status-badge-submitted">제출완료</span>'
-        : item.isOrderPending
-          ? `<span class="status-badge-order ${_orderStageClass(item.orderStage)}">${_orderStageLabel(item.orderStage)}</span>`
-          : item.reviewObligationStatus==='unknown'
-            ? '<span class="status-badge-order">관리자 확인 중</span>'
-            : '<span class="status-badge-order reflected">구매양식반영완료</span>';
+        : `<span class="status-badge-order ${st.tone}">${escHtml(st.text)}</span>`;
+      // 못 누르는 카드 = 왜 지금은 안 되는지 · 무엇을 하면 되는지 한 줄(눌러도 아무 일이 없던 이유)
+      const reasonHtml = (!st.tappable && st.reason) ? `<div class="c-reason"><i class="fas fa-circle-info"></i><span>${escHtml(st.reason)}</span></div>` : '';
       const subBadgeHtml = (isDone && item.isPaid) ? '<span class="status-badge-paid">입금완료</span>' : '';
       const receiptBadgeHtml = isDone && _hasPendingCashReceipt(item)
         ? '<span style="font-size:.62rem;font-weight:800;color:#B45309">현금영수증 미제출</span>' : '';
@@ -2580,16 +2594,17 @@ function renderReviewSubTab() {
           ${metaHtml}
           ${nameHtml}
           ${feeLineHtml}
+          ${reasonHtml}
         </div>
         <div class="result-right rr-col">
           <div class="rr-row">
             ${badgeHtml}
-            ${item.isOrderPending||item.reviewObligationStatus==='unknown' ? '' : '<i class="fas fa-chevron-right result-chevron"></i>'}
+            ${st.tappable ? '<i class="fas fa-chevron-right result-chevron"></i>' : ''}
           </div>
           ${receiptBadgeHtml || subBadgeHtml}
         </div>`;
-      if (item.isOrderPending||item.reviewObligationStatus==='unknown') {
-        card.classList.add("is-order-pending");   // 시트반영 전 주문 = 제출 대상 아님(클릭 비활성)
+      if (!st.tappable) {
+        card.classList.add("is-order-pending");   // 시트반영 전 주문·담당자 확인 중 = 제출 대상 아님(클릭 비활성 · 이유는 reasonHtml)
       } else {
         card.addEventListener("click", () => openPartInfoSheet(isDone ? [item] : items, { done: isDone }));
       }
@@ -2599,8 +2614,14 @@ function renderReviewSubTab() {
       const groupCard = document.createElement("div");
       groupCard.className = "result-group-card" + (isDone ? " done" : "");
       const campLabel = _taskLabel(items[0], "");
-      const groupSubmitItems = items.filter(i => !i.isOrderPending&&i.reviewObligationStatus!=='unknown');
+      const groupSubmitItems = items.filter(i => _pendingCardState(i).tappable);
       const groupClickable = !isDone && groupSubmitItems.length > 0;
+      // 못 누르는 줄의 이유 — 같은 이유는 한 번만(결정 371)
+      const groupReasons = [];
+      if (!isDone) items.forEach(i => {
+        const s = _pendingCardState(i);
+        if (!s.tappable && s.reason && !groupReasons.some(r => r.reason === s.reason)) groupReasons.push(s);
+      });
 
       const itemLines = items.map(item => {
         const taskDate = item.startDate || "";
@@ -2609,14 +2630,18 @@ function renderReviewSubTab() {
         const participantName = _partInfoParticipantName(item);
         const rowLabel = [taskDate, participantName].filter(Boolean).join(" ") || "참여 건";
         const doneDate = isDone ? _fmtReviewDate(item.reviewFileAt) : '';
+        const lineState = _pendingCardState(item);
         return `<div class="result-group-item">
           <i class="fas ${isDone ? 'fa-check' : 'fa-box'}" style="color:${isDone ? 'var(--ok)' : 'var(--p)'};font-size:.72rem;flex-shrink:0"></i>
           <span class="result-group-item-label">${escHtml(rowLabel)}${doneDate ? ` <span style="color:var(--t4)">· 제출 ${doneDate}</span>` : ''}</span>
           ${isDone && _hasPendingCashReceipt(item) ? '<span class="result-group-item-badge" style="background:#FEF3C7;color:#B45309">현금영수증 미제출</span>' : isDone && item.isPaid ? '<span class="result-group-item-badge paid">입금완료</span>' : ''}
-          <span class="result-group-item-badge${isDone ? ' done' : ''}${item.isOrderPending ? ' order ' + _orderStageClass(item.orderStage) : ''}">${isDone ? '제출완료' : item.isOrderPending ? _orderStageLabel(item.orderStage, true) : escHtml(_pendingBadgeText(item))}</span>
+          <span class="result-group-item-badge ${isDone ? 'done' : lineState.tone}">${isDone ? '제출완료' : escHtml(lineState.text)}</span>
           ${isDone ? _reEditBtnHtml(item) : ''}
         </div>`;
       }).join("");
+      const groupReasonHtml = groupReasons.length
+        ? `<div class="result-group-reason">${groupReasons.map(s => `<div class="c-reason"><i class="fas fa-circle-info"></i><span><b>${escHtml(s.text)}</b> ${escHtml(s.reason)}</span></div>`).join('')}</div>`
+        : '';
 
       groupCard.innerHTML = `
         <div class="result-group-header">
@@ -2627,7 +2652,7 @@ function renderReviewSubTab() {
           <span class="result-group-badge"><i class="fas fa-layer-group"></i> ${items.length}건</span>
           ${(groupClickable || isDone) ? '<i class="fas fa-chevron-right" style="color:var(--t3);font-size:.8rem;flex-shrink:0"></i>' : ''}
         </div>
-        <div class="result-group-items">${itemLines}</div>`;
+        <div class="result-group-items">${itemLines}</div>${groupReasonHtml}`;
       // 대기 그룹: 참여상품 정보 시트(→ 리뷰제출) / 완료 그룹: 시트(카톡 재입장). 수정요청 미니버튼은 stopPropagation 격리.
       if (groupClickable) { groupCard.style.cursor = "pointer"; groupCard.addEventListener("click", () => openPartInfoSheet(groupSubmitItems, { done: false })); }
       else if (isDone) { groupCard.style.cursor = "pointer"; groupCard.addEventListener("click", () => openPartInfoSheet(items, { done: true })); }
@@ -3071,7 +3096,8 @@ async function _partInfoLoadBrief(list, done, requestSeq){
     _partInfoCaptureItems = results.map((result, index) => {
       const pc = result && result.brief && result.brief.purchaseCapture;
       if (!pc || !pc.fileId) return null;
-      return { fileId:String(pc.fileId), fileId2:pc.fileId2 ? String(pc.fileId2) : '', uploadedAt:pc.uploadedAt ? String(pc.uploadedAt) : '', label:_partInfoGroupRowLabel(items[index]) };   // fileId2 = 결정 288 두 번째 장
+      return { fileId:String(pc.fileId), fileId2:pc.fileId2 ? String(pc.fileId2) : '', uploadedAt:pc.uploadedAt ? String(pc.uploadedAt) : '', label:_partInfoGroupRowLabel(items[index]),   // fileId2 = 결정 288 두 번째 장
+        photos:_partInfoCapturePhotos(pc) };   // 결정 371 — 동시진행 묶음 주문의 구매처별 사진(네이버/쿠팡). 없으면 null(종전 두 칸)
     }).filter(Boolean);
     const firstCapture = _partInfoCaptureItems[0] || null;
     _partInfoCaptureFileId = firstCapture ? firstCapture.fileId : '';
@@ -3436,13 +3462,31 @@ function _partInfoOpenCapture(index){
     + '<div class="part-info-capture-wrap">'
     + '<div class="part-info-capture-meta">' + escHtml(capture.label || _partInfoCoordLabel || '참여상품')
     + (at ? '<br>' + escHtml(at) + ' 제출' : '') + '</div>'
-    + '<img class="part-info-capture-img" src="' + _escAttrX(_reEditImgUrl(capture.fileId)) + '" alt="내가 제출한 구매 캡처">'
-    /* 결정 288 — 두 번째 장이 있으면 아래에 이어서 보여 준다. */
-    + (capture.fileId2 ? '<div class="part-info-capture-meta" style="margin-top:10px">2장째</div><img class="part-info-capture-img" src="' + _escAttrX(_reEditImgUrl(capture.fileId2)) + '" alt="내가 제출한 구매 캡처 2장째">' : '')
+    + _partInfoCapturePhotosHtml(capture)
     + '<div style="font-size:.68rem;color:#9CA3AF;line-height:1.5;margin-top:9px">주문번호와 주소 등 개인정보가 포함될 수 있어 본인 참여 내역에서만 확인할 수 있습니다.</div>'
     + '</div></div>';
   ovl.classList.add('on');
   document.body.style.overflow = 'hidden';
+}
+/* 결정 371 — 서버가 준 구매처별 사진 목록(동시진행 묶음 주문)만 받는다. 이상한 항목은 버리고, 없으면 null(종전 두 칸). */
+function _partInfoCapturePhotos(pc){
+  const list = pc && Array.isArray(pc.photos) ? pc.photos : null;
+  if (!list) return null;
+  const out = list.filter(p => p && p.fileId).map(p => ({ fileId:String(p.fileId), label:String(p.label || '') }));
+  return out.length ? out : null;
+}
+/* 캡처 창 사진 부분 — 구매처별 사진이 있으면 이름(네이버/쿠팡)을 붙여 차례로, 없으면 종전 1장 + 「2장째」(결정 288). */
+function _partInfoCapturePhotosHtml(capture){
+  if (capture.photos && capture.photos.length) {
+    return capture.photos.map(function(p, i){
+      const name = p.label || ((i + 1) + '장째');
+      return '<div class="part-info-capture-meta part-info-capture-ch"' + (i ? ' style="margin-top:10px"' : '') + '>' + escHtml(name) + '</div>'
+        + '<img class="part-info-capture-img" src="' + _escAttrX(_reEditImgUrl(p.fileId)) + '" alt="' + _escAttrX('내가 제출한 구매 캡처 ' + name) + '">';
+    }).join('');
+  }
+  return '<img class="part-info-capture-img" src="' + _escAttrX(_reEditImgUrl(capture.fileId)) + '" alt="내가 제출한 구매 캡처">'
+    /* 결정 288 — 두 번째 장이 있으면 아래에 이어서 보여 준다. */
+    + (capture.fileId2 ? '<div class="part-info-capture-meta" style="margin-top:10px">2장째</div><img class="part-info-capture-img" src="' + _escAttrX(_reEditImgUrl(capture.fileId2)) + '" alt="내가 제출한 구매 캡처 2장째">' : '');
 }
 function _partInfoCloseCapture(){
   const ovl = document.getElementById('partInfoCaptureOvl');
