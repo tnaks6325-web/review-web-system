@@ -85,13 +85,17 @@ async function observeLive({fileId,deps:d}){
   const k=o.jobKey||'excluded:'+o.scope.reason;if(!found.has(k))found.set(k,o.jobKey?{data:o.observation,jobKey:o.jobKey,state:'pending'}:{data:{fileId,reason:o.scope.reason},jobKey:null,state:'excluded'});
  }
  if(found.size===1)return [...found.values()][0];
- return {data:{fileId,reason:found.size?'AMBIGUOUS_ROOT':'SOURCE_GONE'},jobKey:null,state:'unresolved'};
+ // Not visible under any approved root/reader (definitive 404 / outside scope, never a network error —
+ // those throw above) = deleted or moved out of scope. Earlier copies stay (2A); excluded and counted.
+ if(!found.size)return {data:{fileId,reason:'SOURCE_GONE'},jobKey:null,state:'excluded'};
+ return {data:{fileId,reason:'AMBIGUOUS_ROOT'},jobKey:null,state:'unresolved'};
 }
 async function revisit(c,{scanId,key,old,live}){
  const fileId=key.slice(5),revisits=(Number(old.data?.scanRevisits)||0)+1;
  const next=live.state!=='unresolved'&&revisits>MAX_FILE_REVISITS?{data:{fileId,reason:'SOURCE_UNSTABLE'},jobKey:null,state:'unresolved'}:live;
  if(next.jobKey)await backup.enqueue({...next.data,fileId:next.data.descriptor.fileId,jobKey:next.jobKey},{pool:c});
  await c.query('UPDATE image_backup_scan_entries SET data=$3,job_key=$4,state=$5 WHERE scan_id=$1 AND entry_key=$2',[scanId,key,JSON.stringify({...next.data,scanRevisits:revisits}),next.jobKey,next.state]);
+ if(next.state==='excluded'&&next.data.reason==='SOURCE_GONE')await c.query("UPDATE image_backup_scans SET counts=jsonb_set(counts,'{excludedSourceGone}',to_jsonb(COALESCE((counts->>'excludedSourceGone')::int,0)+1)) WHERE id=$1",[scanId]);
 }
 async function transaction(pool,fn){const c=pool.connect?await pool.connect():pool;try{await c.query('BEGIN');const r=await fn(c);await c.query('COMMIT');return r;}catch(e){await c.query('ROLLBACK').catch(()=>{});throw e;}finally{if(c!==pool)c.release();}}
 async function startScan({deps={}}={}){
@@ -164,7 +168,8 @@ async function scanStep({scanId,budgetMs=10000,deps={}}={}){
  const left=(await d.pool.query("SELECT count(*) FILTER (WHERE state NOT IN ('done','excluded','unresolved'))::int pending,count(*) FILTER (WHERE state='unresolved')::int unresolved FROM image_backup_scan_entries WHERE scan_id=$1",[scanId])).rows[0];
  if(left.pending)return {state:'running',cursor:{scanId}};
  // Unresolved files never become complete: honest incomplete, no new current.
- if(left.unresolved){await d.pool.query("UPDATE image_backup_scans SET state='incomplete',counts=counts||jsonb_build_object('lastError','UNRESOLVED_ENTRIES','unresolved',$3::int) WHERE id=$1 AND lease_token=$2 AND lease_until>now()",[scanId,token,left.unresolved]);return {state:'incomplete',cursor:{scanId,reason:'UNRESOLVED_ENTRIES',unresolved:left.unresolved}};}
+ // Ends as 'failed' (never complete, not resumable) so the single active-scan slot is freed for the next night.
+ if(left.unresolved){await d.pool.query("UPDATE image_backup_scans SET state='failed',counts=counts||jsonb_build_object('lastError','UNRESOLVED_ENTRIES','unresolved',$3::int) WHERE id=$1 AND lease_token=$2 AND lease_until>now()",[scanId,token,left.unresolved]);return {state:'incomplete',cursor:{scanId,reason:'UNRESOLVED_ENTRIES',unresolved:left.unresolved}};}
  const complete=await publishStep({scan,token,deps:d});return {state:complete?'complete':'running',cursor:complete?null:{scanId,phase:'publishing'}};
  }catch(e){await d.pool.query("UPDATE image_backup_scans SET state=$4,counts=counts||jsonb_build_object('lastError',$3::text) WHERE id=$1 AND lease_token=$2 AND lease_until>now()",[scanId,token,e.code||'SCAN_FAILED',e.code==='PRECONDITION_FAILED'?'failed':'incomplete']);return {state:'incomplete',cursor:{scanId,reason:e.code||'SCAN_FAILED'}};
  }finally{await d.pool.query('UPDATE image_backup_scans SET lease_token=NULL,lease_until=NULL WHERE id=$1 AND lease_token=$2',[scanId,token]);}

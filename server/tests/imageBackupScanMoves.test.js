@@ -15,7 +15,7 @@ function drive(meta,{onList}={}){
 const img=(id,parent,extra={})=>({id,name:'x-'+id,parents:[parent],mimeType:'image/jpeg',size:'3',version:'1',modifiedTime:'2026-11-12T00:00:00.000Z',md5Checksum:'900150983cd24fb0d6963f7d28e17f72',...extra});
 async function setup(meta,roots,opts){const db=new PGlite();await db.exec(MIGRATION);const reader=drive(meta,opts);const deps={pool:db,roots,excluded:[],readers:[reader],api,loadHints:hints};return {db,reader,deps};}
 const q=async(db,sql,a)=>(await db.query(sql,a)).rows;
-async function steps(id,deps,n=6){let r;for(let i=0;i<n;i++)r=await s.scanStep({scanId:id,budgetMs:60000,deps});return r;}
+async function steps(id,deps,n=6){let r;for(let i=0;i<n;i++){r=await s.scanStep({scanId:id,budgetMs:60000,deps});if(r.state==='incomplete')break;}return r;}
 const cases=[],failures=[];
 async function run(fn){try{await fn();}catch(e){failures.push(e.message);console.error('FAIL case:',e.message);}}
 (async()=>{
@@ -57,18 +57,43 @@ async function run(fn){try{await fn();}catch(e){failures.push(e.message);console
   const e=(await q(db,'SELECT state,data FROM image_backup_scan_entries WHERE entry_key=$1',['file:'+F1]))[0];assert.equal(e.state,'unresolved');assert.equal(e.data.reason,'AMBIGUOUS_ROOT');
   await db.query("UPDATE image_backup_outbox SET status='done'");r=await steps(scan.id,deps,3);
   const st=(await q(db,'SELECT state,counts FROM image_backup_scans'))[0];
-  assert.equal(r.state,'incomplete');assert.equal(r.cursor.reason,'UNRESOLVED_ENTRIES');assert.equal(st.state,'incomplete','honest incomplete, not running/complete');
-  assert.equal(st.counts.unresolved,1);assert.equal(st.counts.publication,undefined,'no new current publication while unresolved remains');
+  assert.equal(r.state,'incomplete');assert.equal(r.cursor.reason,'UNRESOLVED_ENTRIES');assert.equal(st.state,'failed','ends (not complete, not resumable) so the single scan slot is freed');
+  assert.equal(st.counts.lastError,'UNRESOLVED_ENTRIES');assert.equal(st.counts.unresolved,1);assert.equal(st.counts.publication,undefined,'no new current publication while unresolved remains');
+  const fresh=await s.startScan({deps});assert.notEqual(String(fresh.id),String(scan.id),'next scan can start fresh');
   await db.close();cases.push('ambiguous two-root file unresolved alone; scan incomplete, no publish, no running loop');});
  // ④ a file that keeps changing is capped, then unresolved (no endless re-observation).
  await run(async()=>{const meta={[R]:{id:R,name:'root',mimeType:FOLDER},[F1]:img(F1,R)};
   const {db,deps}=await setup(meta,[{rootId:R,readerKinds:['sa']}]);const scan=await s.startScan({deps});await steps(scan.id,deps,1);let r;
-  for(let v=2;v<=s.MAX_FILE_REVISITS+3;v++){meta[F1].version=String(v);meta[F1].modifiedTime='2026-11-13T03:00:0'+(v%10)+'.000Z';await db.query("UPDATE image_backup_outbox o SET status='superseded' FROM image_backup_scan_entries e WHERE e.job_key=o.job_key AND e.entry_key=$1",['file:'+F1]);r=await s.scanStep({scanId:scan.id,budgetMs:60000,deps});}
+  for(let v=2;v<=s.MAX_FILE_REVISITS+3;v++){meta[F1].version=String(v);meta[F1].modifiedTime='2026-11-13T03:00:0'+(v%10)+'.000Z';await db.query("UPDATE image_backup_outbox o SET status='superseded' FROM image_backup_scan_entries e WHERE e.job_key=o.job_key AND e.entry_key=$1",['file:'+F1]);r=await s.scanStep({scanId:scan.id,budgetMs:60000,deps});if(r.state==='incomplete')break;}
   const e=(await q(db,'SELECT state,data FROM image_backup_scan_entries WHERE entry_key=$1',['file:'+F1]))[0];
   assert.equal(e.state,'unresolved');assert.equal(e.data.reason,'SOURCE_UNSTABLE');
   assert.ok((await q(db,'SELECT count(*)::int n FROM image_backup_outbox'))[0].n<=s.MAX_FILE_REVISITS+1,'bounded re-enqueue');
-  assert.equal(r.state,'incomplete');assert.equal(r.cursor.reason,'UNRESOLVED_ENTRIES');assert.notEqual((await q(db,'SELECT state FROM image_backup_scans'))[0].state,'failed');
+  assert.equal(r.state,'incomplete');assert.equal(r.cursor.reason,'UNRESOLVED_ENTRIES');assert.equal((await q(db,'SELECT state FROM image_backup_scans'))[0].state,'failed','unresolved-only scan frees the slot');
   await db.close();cases.push('continuously changing file capped then unresolved');});
+ // ⑦ photo deleted from Drive mid-scan (duplicate trashed / replaced): definitive 404 from every approved
+ //    reader = gone. Its earlier copy is kept (2A); it is excluded with a count, not left unresolved forever.
+ await run(async()=>{const meta={[R]:{id:R,name:'root',mimeType:FOLDER},[F1]:img(F1,R),[F2]:img(F2,R)};
+  const {db,deps,reader}=await setup(meta,[{rootId:R,readerKinds:['sa']}]);const get=reader.getMetadata;
+  reader.getMetadata=async id=>{if(id===F1&&meta[F1].gone)throw Object.assign(new Error('File not found'),{code:404});return get(id);};
+  const scan=await s.startScan({deps});await steps(scan.id,deps,1);
+  const oldKey=(await q(db,'SELECT job_key FROM image_backup_scan_entries WHERE entry_key=$1',['file:'+F1]))[0].job_key;
+  meta[F1].gone=true;await db.query("UPDATE image_backup_outbox SET status='superseded' WHERE job_key=$1",[oldKey]);await db.query("UPDATE image_backup_outbox SET status='done' WHERE file_id=$1",[F2]);
+  await s.scanStep({scanId:scan.id,budgetMs:60000,deps});const r=await s.scanStep({scanId:scan.id,budgetMs:60000,deps});
+  const e=(await q(db,'SELECT state,data FROM image_backup_scan_entries WHERE entry_key=$1',['file:'+F1]))[0];
+  assert.equal(e.state,'excluded');assert.equal(e.data.reason,'SOURCE_GONE');
+  assert.equal((await q(db,'SELECT status FROM image_backup_outbox WHERE job_key=$1',[oldKey]))[0].status,'superseded','earlier job row kept');
+  assert.equal(r.cursor?.phase,'publishing','a deleted photo does not block the scan');
+  assert.equal((await q(db,'SELECT counts FROM image_backup_scans'))[0].counts.excludedSourceGone,1,'gone photos are counted, not hidden');
+  await db.close();cases.push('photo deleted mid-scan excluded with count, earlier copy kept, scan proceeds');});
+ // ⑧ a transient reader failure during live re-observation is NOT treated as deleted.
+ await run(async()=>{const meta={[R]:{id:R,name:'root',mimeType:FOLDER},[F1]:img(F1,R)};
+  const {db,deps,reader}=await setup(meta,[{rootId:R,readerKinds:['sa']}]);const get=reader.getMetadata;
+  const scan=await s.startScan({deps});await steps(scan.id,deps,1);
+  reader.getMetadata=async id=>{if(id===F1)throw Object.assign(new Error('getaddrinfo ENOTFOUND'),{code:'ENOTFOUND'});return get(id);};
+  await db.query("UPDATE image_backup_outbox SET status='superseded'");const r=await s.scanStep({scanId:scan.id,budgetMs:60000,deps});
+  const e=(await q(db,'SELECT state FROM image_backup_scan_entries WHERE entry_key=$1',['file:'+F1]))[0];
+  assert.equal(e.state,'pending','network failure leaves the file pending, never excluded/gone');assert.equal(r.state,'incomplete');
+  await db.close();cases.push('transient failure during re-observation stays pending (fail-closed)');});
  // ⑤ resume of a scan already stuck by the OLD code (production scan 3 shape): no migration.
  await run(async()=>{const meta={[R]:{id:R,name:'root',mimeType:FOLDER},[FA]:{id:FA,name:'A',parents:[R],mimeType:FOLDER},[FB]:{id:FB,name:'B',parents:[R],mimeType:FOLDER},[F1]:img(F1,FA)};
   const {db,reader,deps}=await setup(meta,[{rootId:R,readerKinds:['sa']}]);const scan=await s.startScan({deps});
