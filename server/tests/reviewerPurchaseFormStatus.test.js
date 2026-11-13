@@ -13,8 +13,14 @@ assert.match(page, /function _hasPurchaseFormReflected\(item\)/,
 // "반영완료를 말하는 배지가 있다 / 미제출로 부르지 않는다".
 // 2026-11-13(결정 371): 반영이 끝난 카드의 배지 글자가 「구매양식반영완료」 → 할 일을 말하는 「리뷰 제출 필요」로 바뀌고,
 // 단건·다건이 같은 함수(_pendingCardState)를 쓴다 — 검사 의미 그대로(전용 배지가 있다) + 단일 출처로 강화.
-assert.match(page, /return \{ text:'리뷰 제출 필요', tone:'todo', tappable:true/,
+// 2026-11-13(사용자 확정): 카드와 참여상품 정보 창 머리를 같은 말 「리뷰 미제출」로 맞춘다 — 「리뷰」를 붙여 무엇을 안 냈는지 말한다
+// (그냥 「미제출」은 구매양식 미제출로 읽혀 금지 · 검사 의미 그대로 + 창 머리까지 강화).
+assert.match(page, /return \{ text:'리뷰 미제출', tone:'todo', tappable:true/,
   'a reflected purchase form must have a dedicated badge');
+assert.doesNotMatch(page, /vertical-align:middle">미제출<\/span>/,
+  'the participation sheet header must say what is unsubmitted (리뷰 미제출), not a bare 미제출');
+assert.match(page, /vertical-align:middle">리뷰 미제출<\/span>/,
+  'the participation sheet header must use the same words as the card badge');
 assert.match(page, /status-badge-order \$\{st\.tone\}">\$\{escHtml\(st\.text\)\}/,
   'single review cards must draw the badge from the shared card-state function');
 assert.doesNotMatch(page, /return "미제출";/,
