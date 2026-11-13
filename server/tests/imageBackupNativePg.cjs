@@ -112,6 +112,28 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
    assert.equal(calls,3,'only the interrupted file is retried');assert.equal(lists,1);
    console.log('PASS individual operation past lease: honest incomplete, earlier progress kept, stale write zero, durable offset recovery');
   }
+  if(mode==='all'||mode==='moves'){
+   // 결정 368: move between folders and superseded job during a live scan, on real PostgreSQL.
+   await reset();const FA='fa0000000001',FB='fb0000000001',F1='file00000001',F2='file00000002';
+   const img=(id,p)=>({id,name:'x-'+id,parents:[p],mimeType:'image/jpeg',size:'3',version:'1',modifiedTime:'2026-11-12T00:00:00.000Z',md5Checksum:'900150983cd24fb0d6963f7d28e17f72'});
+   const meta={[root]:rootMeta,[FA]:{id:FA,name:'A',parents:[root],mimeType:FOLDER},[FB]:{id:FB,name:'B',parents:[root],mimeType:FOLDER},[F1]:img(F1,FA),[F2]:img(F2,FB)};
+   const clone=v=>v&&JSON.parse(JSON.stringify(v));
+   const reader={kind:'sa',getMetadata:async id=>clone(meta[id]),listChildren:async id=>{if(id===FB){meta[F1].parents=[FB];meta[F1].modifiedTime='2026-11-13T01:00:00.000Z';}return {files:Object.values(meta).filter(m=>(m.parents||[]).includes(id)).map(clone),nextPageToken:null};}};
+   const deps={pool,roots,readers:[reader],api,loadHints:hints,excluded:[]};const started=await scan.startScan({deps});
+   for(let i=0;i<3;i++)await scan.scanStep({scanId:started.id,budgetMs:60000,deps});
+   const st=(await pool.query('SELECT state,counts FROM image_backup_scans')).rows[0];assert.notEqual(st.counts.lastError,'AMBIGUOUS_ROOT');
+   assert.equal((await pool.query("SELECT count(*)::int n FROM image_backup_scan_entries WHERE kind='folder' AND state<>'done'")).rows[0].n,0);
+   const e=(await pool.query("SELECT data,job_key FROM image_backup_scan_entries WHERE entry_key=$1",['file:'+F1])).rows[0];assert.equal(e.data.descriptor.chain.at(-1).id,FB);
+   const jobs=(await pool.query('SELECT job_key,status FROM image_backup_outbox WHERE file_id=$1 ORDER BY id',[F1])).rows;assert.equal(jobs.length,2);assert.equal(jobs[0].status,'pending');assert.equal(jobs[1].job_key,e.job_key);
+   console.log('PASS real PG move during scan: latest path job enqueued, earlier job kept, pages done');
+   meta[F1].version='2';meta[F1].md5Checksum='e80b5017098950fc58aad83c8c14978e';
+   await pool.query("UPDATE image_backup_outbox SET status='superseded' WHERE job_key=$1",[e.job_key]);await pool.query("UPDATE image_backup_outbox SET status='done' WHERE job_key<>$1",[e.job_key]);
+   const r=await scan.scanStep({scanId:started.id,budgetMs:60000,deps});assert.equal(r.state,'running');assert.notEqual((await pool.query('SELECT state FROM image_backup_scans')).rows[0].state,'failed');
+   const e2=(await pool.query("SELECT data,job_key,state FROM image_backup_scan_entries WHERE entry_key=$1",['file:'+F1])).rows[0];assert.equal(e2.data.descriptor.sourceVersion,'2');assert.notEqual(e2.job_key,e.job_key);
+   assert.equal((await pool.query("SELECT state FROM image_backup_scan_entries WHERE entry_key=$1",['file:'+F2])).rows[0].state,'done');
+   await pool.query("UPDATE image_backup_outbox SET status='done' WHERE job_key=$1",[e2.job_key]);const p=await scan.scanStep({scanId:started.id,budgetMs:60000,deps});assert.equal(p.cursor?.phase,'publishing');
+   console.log('PASS real PG superseded mid-scan: only that file re-observed, others done, scan reaches publication');
+  }
  }finally{
   if(a)await a.end().catch(()=>{});if(b)await b.end().catch(()=>{});if(pool)await pool.end().catch(()=>{});
   if(!pid&&fs.existsSync(path.join(dir,'postmaster.pid')))pid=Number(fs.readFileSync(path.join(dir,'postmaster.pid'),'utf8').split('\n')[0]);
