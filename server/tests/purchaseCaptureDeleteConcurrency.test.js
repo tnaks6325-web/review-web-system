@@ -4,7 +4,7 @@ const {fixture,OWNER,SINGLE,BUNDLE,IMAGE}=require('./helpers/purchaseCaptureInte
 const {startNativeCaptureDatabase,addDeletionSchema,gate,tracedPool,waitUntilBlocked}=require('./helpers/captureNativePgFixture');
 const session={ownerReviewerId:OWNER,loginKind:'self',loginPhone8:'12345678',loginName:'시험 리뷰어'};
 const enabled=process.env.CAPTURE_NATIVE_PG_TEST==='1';
-async function uploadArgs(h,id,channel){const {item}=await h.core.getForReviewer({session,orderSubmissionId:id});return {session,orderSubmissionId:id,channel,imageBase64:IMAGE.toString('base64'),mimeType:'image/png',requestKey:require('node:crypto').randomUUID(),expectedEvidenceHash:item.channels.find(c=>c.channel===channel).evidenceHash};}
+async function uploadArgs(h,id,channel){const {item}=await h.core.getForReviewer({session,orderSubmissionId:id});return {session,orderSubmissionId:id,channel,imageBase64:IMAGE.toString('base64'),mimeType:'image/png',requestCheck:true,requestKey:require('node:crypto').randomUUID(),expectedEvidenceHash:item.channels.find(c=>c.channel===channel).evidenceHash};}
 function coreWith(h,pool,extras={}){return require('../src/services/purchaseCaptureSelfService.service').createService({db:pool,drive:{upload:h.fakeUpload,read:async id=>h.files.get(id)},requestInTx:(...a)=>h.checks.requestInTx(...a),...extras});}
 const reached=(checkpoint,operation)=>Promise.race([checkpoint.promise,operation.then(()=>{throw new Error('Service completed before reaching the intended concurrency checkpoint');})]);
 const tombSql=sql=>sql.includes('INSERT INTO orphan_capture_tombstones')&&sql.includes('purchase_capture_supplements');
