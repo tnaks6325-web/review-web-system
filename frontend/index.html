@@ -22,8 +22,8 @@
   <script src="js/drive-thumb.js"></script>
   <!-- 업로드 직전 이미지 축소(단일 출처) — 구매 캡처 보완 첨부가 413 되는 것 방지 -->
   <script src="js/image-shrink.js"></script>
-  <link rel="stylesheet" href="css/reviewer-purchase-capture.css?v=20261110-home-inset"/>
-  <script src="js/reviewer-purchase-capture.js?v=20261109-self-service"></script>
+  <link rel="stylesheet" href="css/reviewer-purchase-capture.css?v=20261113-home-banner"/>
+  <script src="js/reviewer-purchase-capture.js?v=20261113-home-banner"></script>
   <script src="js/campaign-cards.js?v=20261104-inflow"></script>
   <script src="js/campaign-workdetail.js"></script>
   <style>
@@ -2209,8 +2209,10 @@ function _mountPurchaseCapture(user) {
   const section = document.getElementById('sectionMissingCapture');
   if (!section || !user || !user.phone8 || !window.ReviewerPurchaseCapture) return false;
   section.dataset.captureSelfService = '1';
-  section.style.display = _currentTab === 'cs' ? 'none' : '';
-  window.ReviewerPurchaseCapture.mount({ ..._purchaseCaptureOptions(user), container:section });
+  // 홈 탭 맨 위 한 줄 알림만 둔다 — 목록은 누르면 뜨는 창에서(결정 370). 옛 모듈이 캐시에 남았으면 종전 펼침 목록.
+  section.style.display = ['review','cs','my'].includes(_currentTab) ? 'none' : '';   // 첫 화면(_currentTab 'all')도 홈
+  if (typeof window.ReviewerPurchaseCapture.banner === 'function') window.ReviewerPurchaseCapture.banner({ ..._purchaseCaptureOptions(user), container:section });
+  else window.ReviewerPurchaseCapture.mount({ ..._purchaseCaptureOptions(user), container:section });
   return true;
 }
 async function _loadMissingCaptures(phone8) {
@@ -4126,10 +4128,11 @@ function switchTab(tab) {
   show(profile,    key === 'my');
   show(reviewList, key === 'review');
   show(csInbox,    key === 'cs');
-  // 구매 캡처 보완 알림은 다른 탭에서는 종전대로 두고 문의함에서만 숨긴다(문의 목록만 보이는 화면 유지)
+  // 구매사진 한 줄 알림은 홈 탭에서만(결정 370 — 리뷰내역·내정보 목록이 맨 위에서 바로 시작).
+  // 옛 서버용 보완 목록(_mcItems)은 종전대로 문의함에서만 숨긴다.
   const mc = document.getElementById('sectionMissingCapture');
   if (mc) {
-    if (mc.dataset.captureSelfService === '1') mc.style.display = key === 'cs' ? 'none' : '';
+    if (mc.dataset.captureSelfService === '1') mc.style.display = key === 'home' ? '' : 'none';
     else if (key === 'cs') mc.style.display = 'none';
     else if (_mcItems.length) mc.style.display = '';
   }
