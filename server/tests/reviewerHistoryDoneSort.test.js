@@ -53,6 +53,7 @@ function makeCtx({ subTab = 'done', done = [], pending = [], sort = 'recent', co
     _taskLabel: (it) => it.displayNameTC || '참여 작업',
     _fmtReviewDate: () => '', _fmtReviewDateMeta: () => '', _feeForItem: () => null,
     _pendingBadgeText: () => '', _reEditBtnHtml: () => '',
+    _pendingCardState: () => ({ text: '', tone: '', tappable: true, reason: '' }),   // 결정 371 — 카드 상태 단일 출처(이 점검과 무관해 가짜로 끼운다)
     openPartInfoSheet() {}, loadReviewList() {}, getSavedUser: () => ({}),
     loadMoreReviewHistory() {},
   };

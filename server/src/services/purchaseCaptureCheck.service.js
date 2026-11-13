@@ -52,7 +52,8 @@ function createService({ db, core, notify = notifyCreated } = {}) {
     const phone8 = String(owner?.phone || '').replace(/\D/g,'').slice(-8);
     if (!/^\d{8}$/.test(phone8)) throw fault(409,'CS_RECIPIENT_UNAVAILABLE','문의받을 본계정 정보를 확인할 수 없습니다.');
     const campaignKey = require('./csBridge.service').campaignKeyOf(context.order.sheet_id,context.order.tab_name);
-    const content = '구매 사진 확인을 요청했습니다.' + (textNote ? `\n${textNote}` : '');
+    const hasSupplements = context.evidenceByChannel[channel].photos?.some(photo => photo.isSupplement === true);
+    const content = (hasSupplements ? '추가사진을 제출하고 확인을 요청했어요.' : '리뷰어가 구매사진 확인을 요청했어요.') + (textNote ? `\n${textNote}` : '');
     const thread = (await client.query(`INSERT INTO cs_threads
       (reviewer_phone8,reviewer_name,campaign_key,campaign_label,campaign_source,status,admin_unread_count)
       VALUES($1,$2,$3,$4,'review_index','open',0)
@@ -101,7 +102,14 @@ function createService({ db, core, notify = notifyCreated } = {}) {
     });
   }
   async function getForStaff(args) {
-    return staffTransaction(args,async(client,context,row)=>({request:publicRequest(row),item:await getCore().viewInTx(client,context)}));
+    return staffTransaction(args,async(client,context,row)=>{
+      const item=await getCore().viewInTx(client,context);
+      // Keep the selected historical card readable, but never promote its old decision to new photos.
+      item.channels=item.channels.map(channel=>channel.channel===row.channel
+        ? {...channel,request:publicRequest(row),evidenceChanged:channel.evidenceHash!==row.evidence_hash}
+        : channel);
+      return {request:publicRequest(row),item};
+    });
   }
   async function decideForStaff({actor,requestId,decision,note,expectedEvidenceHash}) {
     staffActor(actor);

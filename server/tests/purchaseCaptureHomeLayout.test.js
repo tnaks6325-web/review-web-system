@@ -65,6 +65,9 @@ test('reviewer home keeps purchase text inside white section without changing di
       assert.ok(dimensions.right>=15.5,`status text right inset must be at least 16px: ${JSON.stringify(dimensions)}`);
       assert.ok(dimensions.documentWidth<=width,'home must not overflow horizontally');
       await page.locator('.rpc summary').click();
+      // 결정 373: 정상 제출 사진은 「사진에 문제가 있나요?」를 눌러야 추가·확인 요청이 보인다 — 펼친 뒤 같은 여백을 잰다.
+      assert.equal(await page.locator('[data-action="add"]').isVisible(),false);
+      await page.locator('[data-action="problem"]').click();
       assert.equal(await page.locator('[data-action="add"]').isVisible(),true);
       assert.equal(await page.locator('[data-action="request"]').isVisible(),true);
       assert.equal(await page.locator('textarea').isVisible(),true);

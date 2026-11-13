@@ -94,7 +94,7 @@ async function exerciseCore(){
  const imageBase64='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jU1sAAAAASUVORK5CYII=';
  async function uploadArgs(orderSubmissionId=single,channel='single'){
  const {item}=await core.getForReviewer({session,orderSubmissionId});
- return {session,orderSubmissionId,channel,imageBase64,mimeType:'image/png',requestKey:require('node:crypto').randomUUID(),expectedEvidenceHash:item.channels.find(c=>c.channel===channel).evidenceHash};
+ return {session,orderSubmissionId,channel,imageBase64,mimeType:'image/png',requestCheck:true,requestKey:require('node:crypto').randomUUID(),expectedEvidenceHash:item.channels.find(c=>c.channel===channel).evidenceHash};
  }
  await t('bundle originals are saved, never called missing because the old first-photo field is empty',async()=>{
  await pg.query('UPDATE order_submissions SET capture_file_id=NULL,capture_file_id_2=NULL WHERE id=$1',[bundle]);
