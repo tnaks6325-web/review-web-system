@@ -11,8 +11,12 @@ assert.match(page, /function _hasPurchaseFormReflected\(item\)/,
   'workboard rows must expose purchase-form reflection independently of review submission');
 // 2026-08-19: 배지가 금액 줄(.fee)에서 상태 배지로 옮겨졌다(7768c3d) — 검사 의미는 그대로
 // "반영완료를 말하는 배지가 있다 / 미제출로 부르지 않는다".
-assert.match(page, /status-badge-order reflected">구매양식반영완료</,
+// 2026-11-13(결정 371): 반영이 끝난 카드의 배지 글자가 「구매양식반영완료」 → 할 일을 말하는 「리뷰 제출 필요」로 바뀌고,
+// 단건·다건이 같은 함수(_pendingCardState)를 쓴다 — 검사 의미 그대로(전용 배지가 있다) + 단일 출처로 강화.
+assert.match(page, /return \{ text:'리뷰 제출 필요', tone:'todo', tappable:true/,
   'a reflected purchase form must have a dedicated badge');
+assert.match(page, /status-badge-order \$\{st\.tone\}">\$\{escHtml\(st\.text\)\}/,
+  'single review cards must draw the badge from the shared card-state function');
 assert.doesNotMatch(page, /return "미제출";/,
   'unsubmitted review cards must not be labelled as purchase-form unsubmitted');
 assert.match(search, /AND NOT \([\s\S]*FROM review_index ri[\s\S]*ri\.tab_name = rc\.title/,

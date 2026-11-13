@@ -40,6 +40,7 @@ const sse = require('../utils/sse');
 const csBridge = require('../services/csBridge.service');
 const { reviewTypeForTab } = require('../services/reviewTypeContext.service');
 const { recipientNameForRow } = require('../services/captureOwnerName.service');
+const { isDualBundleSql, listCurrentDualCaptures } = require('../utils/dualCaptureComplete');
 
 // ── 공통 헬퍼 ──
 
@@ -403,11 +404,15 @@ router.get('/participation-brief', reviewerSessionMiddleware, async (req, res) =
     /* ★ 본인이 제출한 구매 캡처 — 위의 강한 행 소유권 검증을 통과한 뒤, 현재 작업표 줄이
        직접 가리키는 주문 원장만 읽는다. 좌표가 같다는 이유로 과거 주문을 추측해 붙이면
        재사용된 줄에서 다른 리뷰어의 캡처가 노출될 수 있으므로 `order_submission_id` 없는
-       레거시 줄은 fail-closed(버튼 비활성)한다. 파일 ID는 기존 이미지 프록시에서만 사용한다. */
+       레거시 줄은 fail-closed(버튼 비활성)한다. 파일 ID는 기존 이미지 프록시에서만 사용한다.
+       ★ 결정 371 — 네이버·쿠팡 동시진행 묶음 주문은 사진을 구매처별 표에 두고 옛 칸을 채우지 않는다(결정 338/355).
+         같은 소유권 조건을 통과한 **같은 주문 줄**이 묶음이면 그 주문의 지금 사진을 구매처 이름과 함께 내려준다.
+         보통 주문은 종전 응답 그대로({fileId,fileId2,uploadedAt}). */
     let purchaseCapture = null;
     try {
       const { rows: caps } = await pool.query(
-        `SELECT os.capture_file_id, os.capture_uploaded_at, os.submitted_at, os.capture_file_id_2
+        `SELECT os.capture_file_id, os.capture_uploaded_at, os.submitted_at, os.capture_file_id_2,
+                os.id AS order_submission_id, ${isDualBundleSql('os')} AS is_dual_bundle
            FROM campaign_participants cp
            JOIN order_submissions os
              ON os.id = cp.order_submission_id
@@ -415,7 +420,7 @@ router.get('/participation-brief', reviewerSessionMiddleware, async (req, res) =
             AND os.sheet_row = cp.seq
           WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.seq = $3
             AND cp.deleted_at IS NULL
-            AND COALESCE(os.capture_file_id, '') <> ''
+            AND (COALESCE(os.capture_file_id, '') <> '' OR ${isDualBundleSql('os')})
             AND (
               (COALESCE(cp.owner_reviewer_id, os.owner_reviewer_id) = $4
                AND (cp.owner_reviewer_id IS NULL OR cp.owner_reviewer_id = $4)
@@ -433,7 +438,18 @@ router.get('/participation-brief', reviewerSessionMiddleware, async (req, res) =
           LIMIT 1`,
         [sheetId, tabName, rowIndex, String(req.reviewer.ownerReviewerId), phoneList, req.reviewer.loginKind === 'sub']
       );
-      if (caps.length) {
+      if (caps.length && caps[0].is_dual_bundle) {
+        const photos = await listCurrentDualCaptures(pool, caps[0].order_submission_id);
+        if (photos.length) {
+          purchaseCapture = {
+            // 옛 화면(배포 순서)도 두 장을 보게 첫 두 장을 종전 두 칸에 싣는다. 새 화면은 photos(구매처 이름)를 쓴다.
+            fileId: photos[0].fileId,
+            fileId2: photos[1] ? photos[1].fileId : '',
+            uploadedAt: photos[0].createdAt || caps[0].submitted_at || null,
+            photos: photos.map(p => ({ fileId: p.fileId, label: p.label })),
+          };
+        }
+      } else if (caps.length) {
         purchaseCapture = {
           fileId: String(caps[0].capture_file_id || ''),
           // 결정 288 — 구매캡처 두 번째 장(없으면 ''). 같은 소유권 검증을 통과한 같은 주문의 칸이다.
