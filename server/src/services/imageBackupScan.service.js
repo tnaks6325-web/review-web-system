@@ -68,6 +68,38 @@ async function observe({fileId,rootId,reader,source,deps,cache}){
  const jobKey='obs:'+backup.sha(backup.canonical({descriptor,modifiedTime:observation.modifiedTime,md5Checksum:observation.md5Checksum}));
  return {scope,metadata,observation,jobKey};
 }
+// 결정 368: a live service keeps moving/replacing photos during a multi-hour scan.
+// A file seen again with a different observation (or whose job was superseded) is
+// re-read LIVE from every approved root; only that file is updated/re-enqueued.
+// Earlier jobs/copies are never removed. Unknowable or endlessly changing files
+// become 'unresolved' alone, and the scan ends incomplete without publishing.
+const MAX_FILE_REVISITS=5;
+const plain=d=>{if(!d||typeof d!=='object')return d;const {readerKind,scanRevisits,...rest}=d;return rest;};
+const notHere=e=>['UNRESOLVED_PATH','SOURCE_CHANGED'].includes(e.code)||e.code===404||e.response?.status===404;
+async function observeLive({fileId,deps:d}){
+ const found=new Map();
+ for(const root of d.roots)for(const kind of root.readerKinds){
+  const reader=d.readers.find(r=>r.kind===kind);if(!reader)throw fail('READER_UNAVAILABLE');let o;
+  try{o=await observe({fileId,rootId:root.rootId,reader,deps:d,cache:new Map()});}catch(e){if(notHere(e))continue;throw e;}
+  if(o.scope.decision==='retry')throw fail(o.scope.reason);
+  const k=o.jobKey||'excluded:'+o.scope.reason;if(!found.has(k))found.set(k,o.jobKey?{data:o.observation,jobKey:o.jobKey,state:'pending'}:{data:{fileId,reason:o.scope.reason},jobKey:null,state:'excluded'});
+ }
+ if(found.size===1)return [...found.values()][0];
+ // Not visible under any approved root/reader (definitive 404 / outside scope, never a network error —
+ // those throw above) = deleted or moved out of scope. Earlier copies stay (2A); excluded and counted.
+ if(!found.size)return {data:{fileId,reason:'SOURCE_GONE'},jobKey:null,state:'excluded'};
+ return {data:{fileId,reason:'AMBIGUOUS_ROOT'},jobKey:null,state:'unresolved'};
+}
+async function revisit(c,{scanId,key,old,live}){
+ const fileId=key.slice(5),revisits=(Number(old.data?.scanRevisits)||0)+1;
+ const next=live.state!=='unresolved'&&revisits>MAX_FILE_REVISITS?{data:{fileId,reason:'SOURCE_UNSTABLE'},jobKey:null,state:'unresolved'}:live;
+ if(next.jobKey){await backup.enqueue({...next.data,fileId:next.data.descriptor.fileId,jobKey:next.jobKey},{pool:c});
+  // Live state returned to an earlier observation (A→B→A): its row may already be terminal 'superseded'
+  // (enqueue is ON CONFLICT DO NOTHING). Make exactly that row runnable again; done rows stay done.
+  await c.query("UPDATE image_backup_outbox SET status='pending',attempts=0,next_attempt_at=now(),lease_token=NULL,lease_until=NULL,last_error_code=NULL,updated_at=now() WHERE job_key=$1 AND status='superseded'",[next.jobKey]);}
+ await c.query('UPDATE image_backup_scan_entries SET data=$3,job_key=$4,state=$5 WHERE scan_id=$1 AND entry_key=$2',[scanId,key,JSON.stringify({...next.data,scanRevisits:revisits}),next.jobKey,next.state]);
+ if(next.state==='excluded'&&next.data.reason==='SOURCE_GONE')await c.query("UPDATE image_backup_scans SET counts=jsonb_set(counts,'{excludedSourceGone}',to_jsonb(COALESCE((counts->>'excludedSourceGone')::int,0)+1)) WHERE id=$1",[scanId]);
+}
 async function transaction(pool,fn){const c=pool.connect?await pool.connect():pool;try{await c.query('BEGIN');const r=await fn(c);await c.query('COMMIT');return r;}catch(e){await c.query('ROLLBACK').catch(()=>{});throw e;}finally{if(c!==pool)c.release();}}
 async function startScan({deps={}}={}){
  const d=await dependencies(deps);if(!(await backup.checkBackupSchema({pool:d.pool})).ready)throw fail('BACKUP_SCHEMA_UNAVAILABLE');
@@ -114,8 +146,13 @@ async function scanStep({scanId,budgetMs=10000,deps={}}={}){
    else{const o=await observe({fileId:m.id,rootId:data.rootId,reader,deps:d,cache});if(o.scope.decision==='retry')throw fail(o.scope.reason);r={key:'file:'+m.id,kind:'file',data:o.observation||{fileId:m.id,reason:o.scope.reason},state:o.scope.decision==='exclude'?'excluded':'pending',jobKey:o.jobKey};}
   }
   const next={...data,page:{...data.page,offset:data.page.offset+1}};
+  // Same file seen again differently (moved/renamed/replaced mid-scan): follow the live state.
+  let old,live,keep=false;
+  if(r?.kind==='file'){old=(await d.pool.query('SELECT data,job_key,state FROM image_backup_scan_entries WHERE scan_id=$1 AND entry_key=$2',[scanId,r.key])).rows[0];
+   if(old&&backup.canonical(plain(old.data))!==backup.canonical(plain(r.data))){if(old.state==='unresolved')keep=true;else{live=await observeLive({fileId:m.id,deps:d});if(live.state===old.state&&backup.canonical(plain(live.data))===backup.canonical(plain(old.data)))keep=true;}}}
   await transaction(d.pool,async c=>{await owned(c);
-   if(r){const old=(await c.query('SELECT data,job_key FROM image_backup_scan_entries WHERE scan_id=$1 AND entry_key=$2',[scanId,r.key])).rows[0];if(old&&r.kind==='file'&&backup.canonical({...old.data,readerKind:null})!==backup.canonical({...r.data,readerKind:null}))throw fail('AMBIGUOUS_ROOT');
+   if(live&&!keep)await revisit(c,{scanId,key:r.key,old,live});
+   else if(r&&!keep){old=(await c.query('SELECT data,job_key FROM image_backup_scan_entries WHERE scan_id=$1 AND entry_key=$2',[scanId,r.key])).rows[0];
     if(r.jobKey)await backup.enqueue({...r.data,fileId:r.data.descriptor.fileId,jobKey:r.jobKey},{pool:c});
     await c.query('INSERT INTO image_backup_scan_entries(scan_id,entry_key,kind,data,job_key,state) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING',[scanId,r.key,r.kind,JSON.stringify(r.data),r.jobKey||null,r.state]);
     if(!old&&r.state==='excluded'&&r.data.reason==='NATIVE_DOCUMENT_EXCLUDED')await c.query("UPDATE image_backup_scans SET counts=jsonb_set(counts,'{excludedNativeDocuments}',to_jsonb(COALESCE((counts->>'excludedNativeDocuments')::int,0)+1)) WHERE id=$1",[scanId]);}
@@ -127,11 +164,15 @@ async function scanStep({scanId,budgetMs=10000,deps={}}={}){
   await transaction(d.pool,async c=>{await owned(c);await c.query('UPDATE image_backup_scan_entries SET data=$3,state=$4 WHERE scan_id=$1 AND entry_key=$2',[scanId,entry.entry_key,JSON.stringify(next),next.pageToken?'pending':'done']);});
  }
  }
- const superseded=(await d.pool.query("SELECT 1 FROM image_backup_scan_entries e JOIN image_backup_outbox o ON o.job_key=e.job_key WHERE e.scan_id=$1 AND o.status='superseded' LIMIT 1",[scanId])).rows.length;
- if(superseded){await d.pool.query("UPDATE image_backup_scans SET state='failed',counts=counts||'{\"lastError\":\"SOURCE_CHANGED\"}'::jsonb WHERE id=$1 AND lease_token=$2 AND lease_until>now()",[scanId,token]);return {state:'incomplete',cursor:{scanId,reason:'SOURCE_CHANGED'}};}
- await d.pool.query("UPDATE image_backup_scan_entries e SET state='done' FROM image_backup_outbox o WHERE e.scan_id=$1 AND e.kind='file' AND e.job_key=o.job_key AND o.status='done' AND EXISTS(SELECT 1 FROM image_backup_scans WHERE id=$1 AND lease_token=$2 AND lease_until>now())",[scanId,token]);
- const n=(await d.pool.query("SELECT count(*)::int n FROM image_backup_scan_entries WHERE scan_id=$1 AND state NOT IN ('done','excluded')",[scanId])).rows[0].n;
- if(n)return {state:'running',cursor:{scanId}};
+ // Superseded job (source changed after enqueue): re-observe ONLY that file, bounded per file.
+ const superseded=(await d.pool.query("SELECT e.entry_key,e.data,e.job_key FROM image_backup_scan_entries e JOIN image_backup_outbox o ON o.job_key=e.job_key WHERE e.scan_id=$1 AND e.kind='file' AND e.state='pending' AND o.status='superseded' ORDER BY e.entry_key LIMIT 100",[scanId])).rows;
+ for(const old of superseded){if(!withinBudget())break;const live=await observeLive({fileId:old.entry_key.slice(5),deps:d});await transaction(d.pool,async c=>{await owned(c);await revisit(c,{scanId,key:old.entry_key,old,live});});}
+ await d.pool.query("UPDATE image_backup_scan_entries e SET state='done' FROM image_backup_outbox o WHERE e.scan_id=$1 AND e.kind='file' AND e.state='pending' AND e.job_key=o.job_key AND o.status='done' AND EXISTS(SELECT 1 FROM image_backup_scans WHERE id=$1 AND lease_token=$2 AND lease_until>now())",[scanId,token]);
+ const left=(await d.pool.query("SELECT count(*) FILTER (WHERE state NOT IN ('done','excluded','unresolved'))::int pending,count(*) FILTER (WHERE state='unresolved')::int unresolved FROM image_backup_scan_entries WHERE scan_id=$1",[scanId])).rows[0];
+ if(left.pending)return {state:'running',cursor:{scanId}};
+ // Unresolved files never become complete: honest incomplete, no new current.
+ // Ends as 'failed' (never complete, not resumable) so the single active-scan slot is freed for the next night.
+ if(left.unresolved){await d.pool.query("UPDATE image_backup_scans SET state='failed',counts=counts||jsonb_build_object('lastError','UNRESOLVED_ENTRIES','unresolved',$3::int) WHERE id=$1 AND lease_token=$2 AND lease_until>now()",[scanId,token,left.unresolved]);return {state:'incomplete',cursor:{scanId,reason:'UNRESOLVED_ENTRIES',unresolved:left.unresolved}};}
  const complete=await publishStep({scan,token,deps:d});return {state:complete?'complete':'running',cursor:complete?null:{scanId,phase:'publishing'}};
  }catch(e){await d.pool.query("UPDATE image_backup_scans SET state=$4,counts=counts||jsonb_build_object('lastError',$3::text) WHERE id=$1 AND lease_token=$2 AND lease_until>now()",[scanId,token,e.code||'SCAN_FAILED',e.code==='PRECONDITION_FAILED'?'failed':'incomplete']);return {state:'incomplete',cursor:{scanId,reason:e.code||'SCAN_FAILED'}};
  }finally{await d.pool.query('UPDATE image_backup_scans SET lease_token=NULL,lease_until=NULL WHERE id=$1 AND lease_token=$2',[scanId,token]);}
@@ -173,4 +214,4 @@ async function publishStep({scan,token,deps:d}){
  }
  throw fail('INVALID_STATE');
 }
-module.exports={config,dependencies,loadHints,resolveActualPath,classifyScope,observe,transaction,startScan,scanStep,publishStep};
+module.exports={MAX_FILE_REVISITS,observeLive,config,dependencies,loadHints,resolveActualPath,classifyScope,observe,transaction,startScan,scanStep,publishStep};
