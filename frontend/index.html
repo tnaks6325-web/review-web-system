@@ -18,6 +18,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
   <script src="api.js"></script>
+  <script src="js/reviewer-sheet-back.js?v=20261113-w15"></script>
   <script src="js/reviewer-history-loader.js"></script>
   <script src="js/drive-thumb.js"></script>
   <!-- 업로드 직전 이미지 축소(단일 출처) — 구매 캡처 보완 첨부가 413 되는 것 방지 -->
@@ -201,11 +202,13 @@
     .pf-ln { display:grid; grid-template-columns:42px 1fr; gap:10px; align-items:baseline; padding:5px 0; border-top:1px solid #f1f3f7; }
     .pf-ln:first-child { border-top:none; }
     .pf-k { font-size:.62rem; font-weight:400; letter-spacing:.02em; color:var(--t3); }
-    .pf-v { font-size:.76rem; font-weight:400; color:var(--t1); line-height:1.4; font-variant-numeric:tabular-nums; word-break:break-all; }
+    .pf-v { min-width:0; font-size:.76rem; font-weight:400; color:var(--t1); line-height:1.4; font-variant-numeric:tabular-nums; word-break:break-all; } /* min-width:0 — 좁은 화면에서 [저장] 단추가 칸 밖으로 밀리지 않게(결정 372) */
     .pf-num { font-variant-numeric:tabular-nums; letter-spacing:.02em; }
     .pf-dot { color:#d3d8e1; margin:0 6px; }
     .pf-muted { color:var(--t3); }
-    .pf-edit { font-size:.6rem; font-weight:500; color:var(--p-dark); background:var(--p-light); border:none; border-radius:999px; padding:2px 8px; margin-left:6px; cursor:pointer; font-family:inherit; vertical-align:middle; }
+    .pf-edit { position:relative; font-size:.75rem; font-weight:500; color:var(--p-dark); background:var(--p-light); border:none; border-radius:999px; padding:5px 11px; margin:-2px 0 -2px 6px; cursor:pointer; font-family:inherit; vertical-align:middle; line-height:1; }
+    /* 결정 372 — 보이는 알약은 작게(22px) 두고, 누르는 자리만 위아래로 넓혀 30px(줄 간격은 거의 그대로) */
+    .pf-edit::after, .pf-eye::after { content:""; position:absolute; inset:-4px -3px; }
     .pf-subsec { margin-top:14px; }
     .pf-subhead { display:flex; align-items:center; justify-content:space-between; margin:0 2px 8px; }
     .pf-subtitle { font-size:.82rem; font-weight:700; color:var(--t1); }
@@ -214,7 +217,9 @@
     .pf-subadd:disabled { opacity:.5; cursor:default; }
     .pf-sublist { display:flex; flex-direction:column; gap:9px; }
     .pf-subempty { text-align:center; padding:14px 10px; color:var(--t3); font-size:.76rem; background:var(--card); border:1px dashed var(--border); border-radius:12px; }
-    .pf-eye { font-size:.66rem; color:var(--t3); background:none; border:none; padding:1px 4px; margin-left:4px; cursor:pointer; vertical-align:middle; line-height:1; }
+    .pf-eye { position:relative; font-size:.75rem; color:var(--t3); background:none; border:none; padding:5px 6px; margin:-2px 0 -2px 2px; cursor:pointer; vertical-align:middle; line-height:1; }
+    /* 결정 372 — 은행·예금주 이름은 좁은 화면에서도 중간에서 끊지 않는다(줄바꿈은 조각 사이에서만) */
+    .pf-keep { white-space:nowrap; word-break:keep-all; }
     .pf-eye:hover { color:var(--p); }
 
     /* ─── Result Card (review list) ─── */
@@ -842,7 +847,7 @@
 
   <div id="overdueReviewWarning" class="orw-layer" role="dialog" aria-modal="true" aria-labelledby="orwTitle" aria-hidden="true">
     <section class="orw-modal">
-      <div class="orw-strip"><i class="fas fa-clock" aria-hidden="true"></i><span id="orwElapsed">리뷰 미제출 · 10일 경과</span></div>
+      <div class="orw-strip"><i class="fas fa-clock" aria-hidden="true"></i><span id="orwElapsed">리뷰 미제출</span></div>
       <button type="button" class="orw-x" onclick="closeOverdueReviewWarning()" aria-label="리뷰 제출 알림 닫기">×</button>
       <div class="orw-body">
         <h2 class="orw-title" id="orwTitle">리뷰를 제출해 주세요</h2>
@@ -2049,10 +2054,47 @@ function _taskLabel(item, fallback) {
   return fallback === undefined ? '참여 작업' : fallback;
 }
 
+// ── 휴대폰 뒤로가기 = 열린 창 닫기(결정 372 · js/reviewer-sheet-back.js) ─────
+// 도우미 파일이 없으면(옛 캐시·다른 화면) 아무 일도 하지 않는다 — 창은 단추로 종전처럼 닫힌다.
+function _rhSheetOpened(id, close) { try { if (typeof window !== 'undefined' && window.RhSheetBack) window.RhSheetBack.opened(id, close); } catch (_) {} }
+function _rhSheetClosed(id) { try { if (typeof window !== 'undefined' && window.RhSheetBack) window.RhSheetBack.closed(id); } catch (_) {} }
+function _rhSheetLeave(url) {
+  if (typeof window !== 'undefined' && window.RhSheetBack && typeof window.RhSheetBack.leave === 'function') { window.RhSheetBack.leave(url); return; }
+  window.location.href = url;
+}
+
 // ── 로그인 시 오래된 리뷰 경고 ───────────────────────────────────
 // 장기 숨김 상태는 저장하지 않는다. X는 현재 화면에서만 닫고, 다음 로그인에는 다시 조회한다.
+// 결정 372: 같은 탭에서 새로고침·다른 화면 갔다 오기마다 다시 뜨지 않게, 이 탭(sessionStorage)에만
+//   「리뷰어 · 로그인 시각 · 오늘 날짜」로 한 번 띄운 표시를 남긴다. 새로 로그인·새 탭·다음 날엔 다시 뜬다.
+//   localStorage 에는 남기지 않는다. 표시를 읽거나 쓰지 못하면 종전처럼 띄운다(숨기는 쪽으로 접지 않는다).
 let _orwItem = null;
 let _orwRequested = false;
+const ORW_SHOWN_KEY = 'iad_orw_shown_v1';
+
+function _orwShownKey(user) {
+  const phone8 = String(user && user.phone8 || '').replace(/[^0-9]/g, '').slice(-8);
+  if (phone8.length !== 8) return '';
+  return ORW_SHOWN_KEY + ':' + phone8 + ':' + String(user.loginAt || 0);
+}
+function _orwToday() {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Seoul', year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date());
+  } catch (_) {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+}
+function _orwShownToday(user) {
+  const key = _orwShownKey(user);
+  if (!key) return false;
+  try { return sessionStorage.getItem(key) === _orwToday(); } catch (_) { return false; }
+}
+function _orwMarkShown(user) {
+  const key = _orwShownKey(user);
+  if (!key) return;
+  try { sessionStorage.setItem(key, _orwToday()); } catch (_) { /* 못 남기면 다음 화면에서도 띄운다 */ }
+}
 
 function _orwFormatSubmittedAt(value) {
   if (!value) return '';
@@ -2068,12 +2110,15 @@ function _orwFormatSubmittedAt(value) {
 function _orwPaint(item) {
   const layer = document.getElementById('overdueReviewWarning');
   if (!layer || !item) return;
-  const days = Math.max(10, Number(item.elapsedDays) || 10);
-  document.getElementById('orwElapsed').textContent = `리뷰 미제출 · ${days}일 경과`;
+  // 경과일은 서버가 정한 값 그대로(10일 기준은 서버 한 곳). 값이 없으면 날짜 수를 빼고 말한다.
+  const days = Number(item.elapsedDays);
+  document.getElementById('orwElapsed').textContent = (Number.isFinite(days) && days >= 1)
+    ? `리뷰 미제출 · ${Math.floor(days)}일 경과` : '리뷰 미제출';
   document.getElementById('orwTaskName').textContent = _taskLabel({ displayName:item.displayName }, '참여 작업');
   document.getElementById('orwSubmittedAt').textContent = _orwFormatSubmittedAt(item.submittedAt);
   layer.classList.add('on');
   layer.setAttribute('aria-hidden', 'false');
+  _rhSheetOpened('overdueWarning', closeOverdueReviewWarning);
   requestAnimationFrame(() => layer.querySelector('.orw-x')?.focus({ preventScroll:true }));
 }
 
@@ -2082,6 +2127,7 @@ async function loadOverdueReviewWarning(user) {
   _orwRequested = true;
   try {
     let current = user || getSavedUser();
+    if (_orwShownToday(current)) return;
     let token = current && current.reviewerToken;
     if (!token) return;
     const url = API_BASE_URL + '/api/reviewer/overdue-review-warning';
@@ -2095,6 +2141,7 @@ async function loadOverdueReviewWarning(user) {
     const json = await response.json().catch(() => ({}));
     if (!response.ok || !json.ok || !json.item) return;
     _orwItem = json.item;
+    _orwMarkShown(current);
     _orwPaint(_orwItem);
   } catch (_) { /* 경고 조회 실패가 홈 사용을 막지 않는다. */ }
 }
@@ -2104,6 +2151,7 @@ function closeOverdueReviewWarning() {
   if (!layer) return;
   layer.classList.remove('on');
   layer.setAttribute('aria-hidden', 'true');
+  _rhSheetClosed('overdueWarning');
   // 리뷰 미제출 경고를 닫은 뒤 기다리던 계정 안내가 있으면 이어서 띄운다.
   if (typeof _ifnShowIfReady === 'function') _ifnShowIfReady();
 }
@@ -2146,12 +2194,14 @@ function _ifnShowIfReady() {
   document.getElementById('ifnOwnerName').textContent = _ifnNotice.ownerName || '';
   layer.classList.add('on');
   layer.setAttribute('aria-hidden', 'false');
+  _rhSheetOpened('identityFold', closeIdentityFoldNotice);
   requestAnimationFrame(() => layer.querySelector('.orw-go')?.focus({ preventScroll:true }));
 }
 
 async function closeIdentityFoldNotice(dismiss) {
   const layer = document.getElementById('identityFoldNotice');
   if (layer) { layer.classList.remove('on'); layer.setAttribute('aria-hidden', 'true'); }
+  _rhSheetClosed('identityFold');
   _ifnNotice = null;
   if (!dismiss) return;
   try {
@@ -2775,12 +2825,14 @@ async function openReviewEditModal(regId){
   document.getElementById('reEditBody').innerHTML = '<div style="text-align:center;color:#98A0AC;padding:24px"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
   document.getElementById('reEditOvl').classList.add('on');
   document.body.style.overflow = 'hidden';
+  _rhSheetOpened('reEdit', closeReviewEditModal);
   await _reEditLoadFiles();
 }
 function closeReviewEditModal(){
   const o = document.getElementById('reEditOvl');
   if (o) o.classList.remove('on');
   document.body.style.overflow = '';
+  _rhSheetClosed('reEdit');
 }
 
 async function _reEditLoadFiles(){
@@ -2946,7 +2998,8 @@ function goToSubmit(items) {
   if (items && items.length > 0) {
     sessionStorage.setItem("iad_direct_submit_items", JSON.stringify(items));
   }
-  window.location.href = '/search';
+  // 결정 372: 창을 닫고 바로 넘어가는 길 — 쌓아 둔 창 칸을 이 주소로 바꿔, 돌아왔을 때 뒤로가기 헛 칸이 남지 않게.
+  _rhSheetLeave('/search');
 }
 
 /* ═══════════════════════════════════════
@@ -2986,6 +3039,7 @@ function closePartInfo(){
   const o = document.getElementById('partInfoOvl'); if (o) o.classList.remove('on');
   const cap = document.getElementById('partInfoCaptureOvl'); if (cap) cap.classList.remove('on');
   document.body.style.overflow='';
+  _rhSheetClosed('partInfo');
 }
 
 function _partInfoLabel(it){
@@ -3052,6 +3106,7 @@ function openPartInfoSheet(items, opts){
     '<div id="partInfoBtns" style="margin-top:11px"></div>';
   _partInfoRenderBtns(done, '');
   document.getElementById('partInfoOvl').classList.add('on');
+  _rhSheetOpened('partInfo', closePartInfo);
   document.body.style.overflow = 'hidden';
   _partInfoLoadBrief(list, done, briefSeq);
 }
@@ -3525,8 +3580,11 @@ function renderInlineSubList(subs) {
     const subJd = (sub.jumin || sub.residentNo || "").replace(/[^0-9]/g, "");
     const addr = (sub.address || "").trim();
     const addrHtml = addr ? escHtml(addr) : '<span class="pf-muted">본인과 동일 / 미입력</span>';
-    const bankParts = [sub.bankName, sub.bankAccount, sub.accountHolder].filter(Boolean)
-      .map((b, i) => i === 1 ? '<span class="pf-num">' + escHtml(b) + '</span>' : escHtml(b));
+    // 결정 372: 은행·예금주 이름은 좁은 화면에서도 중간에서 끊지 않는다(본인 계좌 줄과 같은 규칙). 계좌번호는 어느 칸이 비어도 숫자 모양.
+    const bankParts = [];
+    if (sub.bankName) bankParts.push('<span class="pf-keep">' + escHtml(sub.bankName) + '</span>');
+    if (sub.bankAccount) bankParts.push('<span class="pf-num">' + escHtml(sub.bankAccount) + '</span>');
+    if (sub.accountHolder) bankParts.push('<span class="pf-keep">' + escHtml(sub.accountHolder) + '</span>');
     const bankHtml = bankParts.length ? bankParts.join(_dot) : '<span class="pf-muted">본인 계좌로 입금</span>';
     const incName = (sub.incomeName || "").trim();
     const incHtml = incName ? escHtml(incName) : '<span class="pf-muted">미등록</span>';
@@ -3690,9 +3748,9 @@ function renderBankInfo(bankName, bankAccount, accountHolder) {
     if (line) {
       line.classList.remove("pf-muted");
       const parts = [];
-      if (bankName) parts.push(escHtml(bankName));
+      if (bankName) parts.push('<span class="pf-keep">' + escHtml(bankName) + '</span>');
       if (bankAccount) parts.push('<span class="pf-num">' + escHtml(bankAccount) + '</span>');
-      if (accountHolder) parts.push(escHtml(accountHolder));
+      if (accountHolder) parts.push('<span class="pf-keep">' + escHtml(accountHolder) + '</span>');
       line.innerHTML = parts.join('<span class="pf-dot">·</span>');
     }
     if (btn) btn.textContent = "수정";
@@ -4152,6 +4210,13 @@ document.addEventListener("DOMContentLoaded", async () => {
 /* ═══ 탭 네비게이션 ═══ */
 let _currentTab = 'all';
 
+/* 결정 372 — 광고 배너는 홈 탭에서만(첫 화면 'all' = 홈). 받은 배너가 없으면 홈에서도 숨김(종전 그대로). */
+function _rhSyncHomeOnly() {
+  const onHome = !_currentTab || _currentTab === 'home' || _currentTab === 'all';
+  const banner = document.getElementById('reviewerHomeBanner');
+  if (banner) banner.style.display = (onHome && banner.dataset.hasBanner === '1') ? '' : 'none';
+}
+
 function switchTab(tab) {
   // 신규 4탭 체계: home(소식·공지 + 모집공고) / review(리뷰 내역) / cs(내 문의함) / my(내정보 + 참여현황)
   //   (구 호출 호환: recruit·all→home, status·info→my)
@@ -4172,6 +4237,7 @@ function switchTab(tab) {
   show(profile,    key === 'my');
   show(reviewList, key === 'review');
   show(csInbox,    key === 'cs');
+  _rhSyncHomeOnly();
   // 구매사진 한 줄 알림은 홈 탭에서만(결정 370 — 리뷰내역·내정보 목록이 맨 위에서 바로 시작).
   // 옛 서버용 보완 목록(_mcItems)은 종전대로 문의함에서만 숨긴다.
   const mc = document.getElementById('sectionMissingCapture');
@@ -4354,6 +4420,7 @@ async function loadReviewerNoticesHome() {
 async function loadReviewerHomeBanner() {
   const wrap = document.getElementById('reviewerHomeBanner');
   if (!wrap) return;
+  wrap.dataset.hasBanner = '';
   wrap.style.display = 'none';
   wrap.innerHTML = '';
   try {
@@ -4364,7 +4431,8 @@ async function loadReviewerHomeBanner() {
     const imageUrl = escHtml(banner.imageUrl);
     const clickUrl = escHtml(banner.clickUrl);
     wrap.innerHTML = `<a href="${clickUrl}" target="_blank" rel="noopener noreferrer" style="display:block;border-radius:12px;overflow:hidden;background:#F1F5F9;box-shadow:0 2px 8px rgba(15,23,42,.08)"><img src="${imageUrl}" alt="광고 배너" width="1080" height="240" style="display:block;width:100%;height:auto;aspect-ratio:4.5/1;object-fit:cover"></a>`;
-    wrap.style.display = '';
+    wrap.dataset.hasBanner = '1';
+    _rhSyncHomeOnly();   // 결정 372: 응답이 늦게 와도 지금 탭이 홈일 때만 보인다
   } catch (_) { /* 배너 오류는 홈의 다른 콘텐츠를 막지 않는다. */ }
 }
 
@@ -4677,14 +4745,14 @@ function applyRecruitView(){
 }
 
 /* ═══ 첫 이용 온보딩 ═══ */
-function openOnboard(){ const o=document.getElementById('onboard'); if(o) o.classList.add('on'); }
-function closeOnboard(){ const o=document.getElementById('onboard'); if(o) o.classList.remove('on'); localStorage.setItem('inad_onboarded','1'); }
+function openOnboard(){ const o=document.getElementById('onboard'); if(o) { o.classList.add('on'); _rhSheetOpened('guide', closeOnboard); } }
+function closeOnboard(){ const o=document.getElementById('onboard'); if(o) o.classList.remove('on'); _rhSheetClosed('guide'); localStorage.setItem('inad_onboarded','1'); }
 </script>
 <script src="js/pwa.js"></script>
 <!-- 리뷰어 C/S 문의창구 -->
 <!-- C/S 대화 안의 리뷰캡처 교체요청 카드 — 관리자·리뷰어 화면 공용 렌더러 -->
 <script src="js/cs-review-edit-card.js"></script>
-<script src="js/reviewer-cs.js"></script>
+<script src="js/reviewer-cs.js?v=20261113-w15"></script>
     <!-- 리뷰어 앱 공고수정 로그인 — 인트라넷에서 관리자로 지정된 직원만 (결정 257).
          ★ body 직속: 로그인 전 화면(viewLogin)·홈(viewHome) 어느 쪽에서 눌러도 보여야 한다 — viewHome 안에 두면 로그인 전엔 숨은 부모에 갇힌다. -->
     <div id="campEditLoginOvl" style="display:none;position:fixed;inset:0;z-index:100002;background:rgba(17,24,39,.5);align-items:center;justify-content:center;padding:20px">
