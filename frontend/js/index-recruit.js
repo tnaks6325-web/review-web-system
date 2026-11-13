@@ -631,6 +631,13 @@ function _optColumnCheckItems() {
  *   _rfPickBtn 을 재사용하지 않는 이유 = 그쪽은 hidden id 를 channel/manager 로만 매핑하고
  *   '직접입력' 폴백이 붙어 있어, 은행처럼 값이 고정된 그룹에 쓰면 엉뚱한 분기를 탄다.
  */
+/* 결정 369 — 리뷰오더 물건비에 「업체입금」(제품비를 업체가 보냄)이라고 적혀 있나.
+ *   ★ 서버 payment.service.goodsCostSaysAdvertiser 와 같은 정규식(회귀가드가 둘을 대조한다).
+ *   이체은행을 케이뱅크·하나은행으로 두면 업체에 계좌가 안 보이고 입금관리는 보류된다 → 안내 줄 + 저장 직전 확인. */
+function _rfOrderSaysAdv(goodsCostType) { return /업체\s*입금/.test(String(goodsCostType == null ? "" : goodsCostType)); }
+const RF_ORDER_ADV_HINT = v => `작업오더 물건비 "${v}" — [자동]으로 두면 업체가 작업에 연결될 때 「제품비 업체 · 리뷰비 케이뱅크」(리뷰비가 없으면 「업체입금」)로 자동 설정돼요. 케이뱅크·하나은행을 직접 고르면 업체 화면에 계좌가 안 보이고 입금관리에서 보류돼요.`;
+const RF_ORDER_ADV_CONFIRM = "작업오더 물건비가 「업체입금」인데 이체은행을 우리 은행으로 저장합니다.\n\n· 업체 화면에 리뷰어 계좌가 보이지 않아 업체가 제품비를 보낼 수 없습니다\n· 우리 입금관리에서는 이 작업이 보류됩니다(제품비를 우리가 또 보내지 않게)\n· [자동]으로 두면 업체가 연결될 때 「제품비 업체 · 리뷰비 케이뱅크」(리뷰비가 없으면 「업체입금」)로 자동 설정됩니다\n\n그래도 우리 은행으로 저장할까요?";
+
 /**
  * ★ 086: [자동]일 때 무슨 근거로 어느 은행이 되는지 화면에 보여준다.
  *   판정 규칙은 서버(payment.service.bankFromGoodsCostType)와 같아야 하므로 문자열도 같이 맞춘다.
@@ -639,10 +646,21 @@ function _optColumnCheckItems() {
 function _rfTransferHint(goodsCostType) {
   window._rfLastGoodsCost = goodsCostType;   // 업체입금에서 다른 은행으로 돌아갈 때 안내를 되살리는 재료
   const el = document.getElementById("rf_transfer_bank_hint");
-  if (!el) return;
+  if (!el) {
+    /* 결정 369 — 안내 줄이 없는 모양(설정 표 · 작업보드 모집공고 창)은 업체입금 전용 줄에 말한다.
+       업체입금 계열을 이미 고른 상태면 그 안내(_rfAdvPayoutHint)가 우선이라 건드리지 않는다. */
+    const adv = document.getElementById("rf_transfer_bank_adv");
+    if (adv && !_rfIsGoodsAdv((document.getElementById("rf_transfer_bank") || {}).value || "")) {
+      const on = _rfOrderSaysAdv(goodsCostType);
+      adv.textContent = on ? RF_ORDER_ADV_HINT(String(goodsCostType).trim()) : "";
+      adv.hidden = !on;
+    }
+    return;
+  }
   const base = "현금이체 → 하나은행 · 수수료(세금계산서) → 케이뱅크";
   const v = String(goodsCostType || "").trim();
   if (!v) { el.textContent = base; el.style.color = "#8B94A1"; return; }
+  if (_rfOrderSaysAdv(v)) { el.textContent = RF_ORDER_ADV_HINT(v); el.style.color = "#B3382E"; return; }   // 결정 369
   const bank = /현금/.test(v) ? "하나은행" : (/계산서|세금|수수료/.test(v) ? "케이뱅크" : "");
   if (!bank) { el.textContent = `작업오더 물건비 "${v}" — 은행을 정할 수 없어요. 직접 골라주세요`; el.style.color = "#B3382E"; return; }
   // 한글 조사 — 받침 있으면 '으로', 없으면 '로'("케이뱅크으로"가 되던 것)
@@ -6391,6 +6409,11 @@ async function saveRecruitPostImpl() {
         if (_rfIsGoodsAdv(window._rfOrigTransferBank) && !_rfIsGoodsAdv(payload.transfer_bank)) {
           if (!confirm(RF_ADV_PAYOUT_OFF_CONFIRM)) { _rfSaveBlocked("이체은행 변경을 취소했습니다 — 저장하지 않았습니다."); return; }
           payload.transfer_bank_disable_ack = true;   // 서버는 이 표시가 있을 때만 업체입금을 끈다
+        }
+        // 결정 369 — 작업오더 물건비가 업체입금인데 우리 은행(케이뱅크·하나)을 명시로 고르면 저장 직전 확인(자동은 입금관리가 「미지정」으로 막는다)
+        if (_rfOrderSaysAdv(window._rfLastGoodsCost) && (payload.transfer_bank === "kbank" || payload.transfer_bank === "hana")
+            && window._rfOrigTransferBank !== payload.transfer_bank) {
+          if (!confirm(RF_ORDER_ADV_CONFIRM)) { _rfSaveBlocked("이체은행을 다시 골라 주세요 — 저장하지 않았습니다."); return; }
         }
         payload.transfer_memo = (document.getElementById("rf_transfer_memo")?.value || "").trim();
       }

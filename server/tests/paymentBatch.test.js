@@ -118,7 +118,7 @@ t('알 수 없는 값·빈 값은 null (은행 미지정으로 드러남)', () =
 
 t('프론트 힌트 판정이 서버 규칙과 같은 문자열을 본다', () => {
   const js = RF('js/index-recruit.js');
-  const m = js.match(/function _rfTransferHint[\s\S]{0,1400}?\n}/);
+  const m = js.match(/function _rfTransferHint[\s\S]{0,2400}?\n}/);
   assert.ok(m, '_rfTransferHint 가 없다');
   assert.ok(/\/현금\//.test(m[0]), '현금 판정이 없다');
   assert.ok(/계산서\|세금\|수수료/.test(m[0]), '계산서/세금/수수료 판정이 서버와 다르다');

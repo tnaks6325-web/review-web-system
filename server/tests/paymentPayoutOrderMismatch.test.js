@@ -1,0 +1,261 @@
+/**
+ * 회귀가드 — 리뷰오더 물건비 「업체입금」 ↔ 이체은행 우리 은행 어긋남 (결정 369 · 사용자 요청 2026-11-13 "미연에 방지")
+ *
+ * 사고: 11/11 플라워민트·누룽칩 3차 — 리뷰오더 물건비는 「업체입금」인데 모집공고 이체은행이 케이뱅크로 저장됐다
+ *   (공고를 만들 때 업체가 아직 작업에 연결되지 않아 업체입금 계열을 고를 수 없었다). 그 결과
+ *   ① 업체 화면에 리뷰어 계좌가 안 보여 업체가 제품비를 못 보냈고 ② 우리 입금관리는 제품비까지 보내려 했다(이중 입금 위험).
+ *
+ * 고정하는 것:
+ *   §1 판정 단일 출처 payment.goodsCostSaysAdvertiser — 프론트(index-recruit _rfOrderSaysAdv)도 같은 정규식
+ *   §2 입금관리 — 이체은행이 우리 은행이고 물건비가 업체입금이면 보류(order_goods_by_advertiser) · 제품비 업체·업체입금이면 해당 없음
+ *   §3 배선 — 작업 조건 카드 경고(서버 값 그대로 · 광고주 제외) · 입금관리 라벨·보완 창구 · 모집공고 창 안내·저장 확인
+ *
+ * 실행: node tests/paymentPayoutOrderMismatch.test.js
+ */
+'use strict';
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+
+let pass = 0, fail = 0;
+async function ta(name, fn) {
+  try { await fn(); console.log('  ✓ ' + name); pass++; }
+  catch (e) { console.log('  ✗ ' + name + '\n      ' + (e && e.stack || e)); fail++; }
+}
+const ROOT = path.join(__dirname, '..');
+const SRC = p => path.join(ROOT, 'src', p);
+const read = p => fs.readFileSync(path.join(ROOT, p), 'utf8');
+const FRONT = p => fs.readFileSync(path.join(ROOT, '..', 'frontend', p), 'utf8');
+
+const _tbMod = require(SRC('services/trackB.service'));
+_tbMod.advertiserForTab = async () => ({ id: 'adv_1', name: '스마트윈' });
+
+function withStubPool(handler, run) {
+  const poolPath = require.resolve(SRC('db/pool'));
+  const modPath = require.resolve(SRC('services/payment.service'));
+  const advPath = require.resolve(SRC('services/advertiserPayout.service'));
+  const stub = {
+    query: async (sql, params) => (await handler(String(sql), params)) || { rows: [], rowCount: 0 },
+    connect: async () => ({ query: stub.query, release() {} }),
+  };
+  const orig = require.cache[poolPath];
+  require.cache[poolPath] = { id: poolPath, filename: poolPath, loaded: true, exports: stub };
+  delete require.cache[modPath]; delete require.cache[advPath];
+  return Promise.resolve()
+    .then(() => run(require(modPath)))
+    .finally(() => {
+      delete require.cache[modPath]; delete require.cache[advPath];
+      if (orig) require.cache[poolPath] = orig; else delete require.cache[poolPath];
+    });
+}
+
+/* o.campBank: 공고 이체은행(undefined = 공고 없음) · o.campGoods: 공고의 리뷰오더 물건비 · o.tabBank · o.tabGoods */
+function payHandler(o = {}) {
+  return (sql) => {
+    if (/FROM review_index ri/.test(sql)) return { rows: [{
+      sheetId: 'S1', tabName: 'T1', rowIndex: 7, reviewerName: '김혜진', phone8: '83540507',
+      startDate: '11 / 11 (화)', productName: '인형꽃다발', amountCells: { '결제금액': '21,900' },
+    }] };
+    if (/SELECT transfer_bank FROM tab_configs/.test(sql)) return { rows: [{ transfer_bank: o.tabBank || '' }] };
+    if (/SELECT transfer_bank FROM recruit_campaigns/.test(sql)) return { rows: [] };
+    if (/FROM recruit_campaigns c/.test(sql)) return { rows: o.campBank === undefined ? [] : [{
+      id: 'camp_1', title: '플라워민트', sheetId: 'S1', tabName: 'T1', reviewFee: 1000, transferBank: o.campBank,
+      transferMemo: '네꽃다발만두', goodsCostType: o.campGoods || '' }] };
+    if (/FROM tab_configs tc/.test(sql)) return { rows: [{ sheetId: 'S1', tabName: 'T1', label: '플라워민트',
+      transferBank: o.tabBank || '', depositName: '네꽃다발만두', goodsCostType: o.tabGoods || '' }] };
+    if (/FROM order_submissions/.test(sql) && !/FROM unnest/.test(sql)) return { rows: [{
+      sheetId: 'S1', tabName: 'T1', sheetRow: 7, price: '21900', feeSnapshot: null, orderedAt: '2026-11-11T09:00:00+09:00',
+      bank: '우리은행', account: '1002345678901', depositor: '김혜진' }] };
+    return { rows: [] };
+  };
+}
+
+/* 스텁 pool 에는 동시진행 묶음 조회 재료가 없어 dual_bundle_check_failed 가 붙는다(이 검사와 무관한 스텁 한계) — 그 사유만 빼고 본다 */
+const _otherIssues = it => (it.issues || []).filter(x => x !== 'dual_bundle_check_failed');
+
+(async function main() {
+  console.log('\n§1 판정 단일 출처');
+  const pay = require(SRC('services/payment.service'));
+
+  await ta('1a 업체입금 표기(입금명 괄호·띄어쓰기·선입금 꼬리)는 참, 그 밖은 거짓', () => {
+    for (const v of ['업체입금', '업체입금(입금명: 배성화)', '업체 입금', '업체입금 / 선입금미완료', '제품비 업체입금']) {
+      assert.strictEqual(pay.goodsCostSaysAdvertiser(v), true, v);
+    }
+    for (const v of ['', null, undefined, '계산서(농협)', '현금(하나은행)', '계산서(법인 농협) / 선입금완료', '업체']) {
+      assert.strictEqual(pay.goodsCostSaysAdvertiser(v), false, String(v));
+    }
+  });
+
+  await ta('1b 프론트 판정(_rfOrderSaysAdv)이 서버와 같은 정규식', () => {
+    const js = FRONT('js/index-recruit.js');
+    const m = js.match(/function _rfOrderSaysAdv\([^)]*\)\s*\{[^\n]*\}/);
+    assert.ok(m, '_rfOrderSaysAdv 가 없다');
+    assert.ok(m[0].includes('/업체\\s*입금/'), '프론트 정규식이 서버와 다르다');
+    assert.ok(/\/업체\\s\*입금\//.test(read('src/services/payment.service.js')), '서버 정규식이 바뀌었다');
+  });
+
+  console.log('\n§2 입금관리 — 어긋난 작업은 보류');
+
+  await ta('2a ★★ 공고 이체은행 케이뱅크 + 리뷰오더 물건비 업체입금 = 보류(order_goods_by_advertiser · 이체 불가)', () =>
+    withStubPool(payHandler({ campBank: 'kbank', campGoods: '업체입금(입금명: 배성화)' }), async svc => {
+      const r = await svc.listPaymentTargets();
+      assert.strictEqual(r.items.length, 1);
+      assert.ok(r.items[0].issues.includes('order_goods_by_advertiser'), JSON.stringify(r.items[0].issues));
+      assert.strictEqual(r.items[0].payable, false);
+    }));
+
+  await ta('2b ★ 탭 쪽 물건비(공고 없음)도 같은 판정 — 탭 이체은행 케이뱅크', () =>
+    withStubPool(payHandler({ tabBank: '케이뱅크', tabGoods: '업체입금 / 선입금미완료' }), async svc => {
+      const r = await svc.listPaymentTargets();
+      assert.ok(r.items[0].issues.includes('order_goods_by_advertiser'));
+      assert.strictEqual(r.items[0].payable, false);
+    }));
+
+  await ta('2c 제품비 업체 · 리뷰비 케이뱅크(split) = 해당 없음(리뷰비만 정상 지급 대상)', () =>
+    withStubPool(payHandler({ campBank: 'split_kbank', campGoods: '업체입금(입금명: 배성화)' }), async svc => {
+      const r = await svc.listPaymentTargets();
+      assert.ok(!r.items[0].issues.includes('order_goods_by_advertiser'), JSON.stringify(r.items[0].issues));
+      assert.deepStrictEqual(_otherIssues(r.items[0]), [], JSON.stringify(r.items[0].issues));
+      assert.strictEqual(r.items[0].amount, 1000, '리뷰비만');
+    }));
+
+  await ta('2d 물건비가 계산서면 종전 그대로(케이뱅크 지급 가능)', () =>
+    withStubPool(payHandler({ campBank: 'kbank', campGoods: '계산서(농협)' }), async svc => {
+      const r = await svc.listPaymentTargets();
+      assert.ok(!r.items[0].issues.includes('order_goods_by_advertiser'));
+      assert.deepStrictEqual(_otherIssues(r.items[0]), [], JSON.stringify(r.items[0].issues));
+    }));
+
+  await ta('2e 업체입금 작업은 이 사유를 더하지 않는다(맨 앞 사유 advertiser_pays 그대로)', () =>
+    withStubPool(payHandler({ campBank: 'advertiser', campGoods: '업체입금' }), async svc => {
+      const r = await svc.listPaymentTargets({ includeAdvertiserPaid: true });
+      assert.strictEqual(r.items[0].issues[0], 'advertiser_pays');
+      assert.ok(!r.items[0].issues.includes('order_goods_by_advertiser'));
+    }));
+
+  console.log('\n§3 배선');
+  const HTML = FRONT('workdesk.html');
+  const TB = read('src/services/trackB.service.js');
+
+  await ta('3a 작업 조건 카드 — 서버가 같은 판정 함수로 transferBankOrderMismatch 를 싣고(우리 은행일 때만), 업체 렌즈에는 없다', () => {
+    assert.ok(/transferBankOrderMismatch:\s*payoutMode\.mode === 'ours'\s*&& require\('\.\/payment\.service'\)\.goodsCostSaysAdvertiser\(/.test(TB));
+    const lens = TB.slice(TB.indexOf('function _condAdvertiserLens'), TB.indexOf('function _condAdvertiserLens') + 6000);
+    assert.ok(!/transferBankOrderMismatch/.test(lens), '업체 렌즈로 새면 안 된다');
+  });
+
+  await ta('3b 카드 경고는 서버 값 그대로 · 광고주 제외 · 이체은행 칸 안(새 줄 없음)', () => {
+    const fn = HTML.match(/function _cndBankWarn\(cd,kind,isAdv,ddHtml\)\{[\s\S]*?\n\}/);
+    assert.ok(fn, '_cndBankWarn 없음');
+    assert.ok(/kind!=='bank' \|\| isAdv \|\| !cd \|\| cd\.transferBankOrderMismatch!==true/.test(fn[0]));
+    assert.ok(/_cndBankWarn\(cd,kind,isAdv,v==null\?unset\(kind\):val\(v,kind\)\)/.test(HTML), '카드 렌더에 안 걸렸다');
+  });
+
+  await ta('3c 입금관리 — 사유 라벨 · 작업 단위 보완(작업 조건으로 가는 버튼)', () => {
+    assert.ok(/order_goods_by_advertiser:'리뷰오더 물건비가 업체입금/.test(HTML));
+    assert.ok(/no_bank:'work', order_goods_by_advertiser:'work'/.test(HTML));
+    assert.ok(/if\(iss\.includes\('no_bank'\) \|\| iss\.includes\('order_goods_by_advertiser'\)\)\{/.test(HTML), '행 보완이 막다른 길');
+    assert.ok(/if\(w\.needPayoutMode\) need\.push\(/.test(HTML), '작업 카드에 고칠 것이 안 뜬다');
+  });
+
+  await ta('3d 모집공고 창 — 물건비 업체입금이면 안내 줄 + 우리 은행을 새로 고를 때 저장 직전 확인', () => {
+    const js = FRONT('js/index-recruit.js');
+    const hint = js.match(/function _rfTransferHint[\s\S]{0,2400}?\n}/);
+    assert.ok(hint && /if \(_rfOrderSaysAdv\(v\)\) \{ el\.textContent = RF_ORDER_ADV_HINT\(v\)/.test(hint[0]));
+    // 안내 줄이 없는 모양(작업보드 모집공고 창)은 업체입금 전용 줄에 같은 안내를 띄운다(업체입금 계열을 고른 상태면 그 안내 우선)
+    assert.ok(/getElementById\("rf_transfer_bank_adv"\)[\s\S]{0,200}!_rfIsGoodsAdv\([\s\S]{0,200}RF_ORDER_ADV_HINT/.test(hint[0]), '작업보드 모집공고 창에 안내가 안 뜬다');
+    assert.ok(/if \(_rfOrderSaysAdv\(window\._rfLastGoodsCost\) && \(payload\.transfer_bank === "kbank" \|\| payload\.transfer_bank === "hana"\)/.test(js));
+    assert.ok(/if \(!confirm\(RF_ORDER_ADV_CONFIRM\)\) \{ _rfSaveBlocked\(/.test(js), '취소하면 저장하지 않아야 한다');
+  });
+
+  await ta('3e ★ 저장 직전 확인을 실제로 돌린다 — 물건비 업체입금 + 케이뱅크 새로 고름 = 확인(취소 시 저장 안 함) · 자동/제품비 업체/원래 값 그대로 = 묻지 않음', () => {
+    const vm = require('vm');
+    const js = FRONT('js/index-recruit.js');
+    const a = js.indexOf('if (document.getElementById("rf_transfer_bank_btns")) {\n        payload.transfer_bank');
+    const b = js.indexOf('payload.transfer_memo', a);
+    assert.ok(a > 0 && b > a, '이체은행 저장 블록을 못 찾았다');
+    const head = js.slice(js.indexOf('function _rfOrderSaysAdv'), js.indexOf('/**\n * ★ 086: [자동]일 때')).replace(/const RF_/g, 'var RF_');
+    const run = (bank, orig, goods, answer) => {
+      const asked = [], blocked = [];
+      const ctx = { window: { _rfOrigTransferBank: orig, _rfLastGoodsCost: goods }, payload: {}, asked, blocked,
+        document: { getElementById: id => id === 'rf_transfer_bank_btns' ? {} : (id === 'rf_transfer_bank' ? { value: bank } : null) },
+        confirm: m => { asked.push(m); return answer; }, _rfSaveBlocked: m => blocked.push(m),
+        _rfIsGoodsAdv: v => v === 'advertiser' || v === 'split_kbank' || v === 'split_hana', RF_ADV_PAYOUT_OFF_CONFIRM: 'OFF' };
+      vm.createContext(ctx);
+      vm.runInContext(head + '\n(function(){ ' + js.slice(a, b) + '} ctx_done = true; })();', Object.assign(ctx, { ctx_done: false }));
+      return { asked, blocked, done: ctx.ctx_done };
+    };
+    const G = '업체입금(입금명: 배성화)';
+    let r = run('kbank', '', G, false);
+    assert.strictEqual(r.asked.length, 1); assert.ok(/업체입금/.test(r.asked[0])); assert.strictEqual(r.done, false, '취소하면 저장으로 넘어가면 안 된다'); assert.strictEqual(r.blocked.length, 1);
+    r = run('hana', '', G, true);  assert.strictEqual(r.asked.length, 1); assert.strictEqual(r.done, true, '확인하면 저장 진행');
+    r = run('', '', G, false);     assert.strictEqual(r.asked.length, 0, '[자동]은 묻지 않는다(입금관리가 막는다)'); assert.strictEqual(r.done, true);
+    r = run('split_kbank', '', G, false); assert.strictEqual(r.asked.length, 0); assert.strictEqual(r.done, true);
+    r = run('kbank', 'kbank', G, false);  assert.strictEqual(r.asked.length, 0, '이미 저장된 값 그대로면 다시 묻지 않는다');
+    r = run('kbank', '', '계산서(농협)', false); assert.strictEqual(r.asked.length, 0, '물건비가 업체입금이 아니면 종전 그대로');
+  });
+
+  console.log('\n§4 [자동] + 물건비 업체입금 → 입금 방식 자동 저장(2단계 · 사용자 확정: 리뷰비 있으면 제품비 업체·리뷰비 케이뱅크 / 없으면 업체입금 / 공고 없는 작업도)');
+  const auto = require(SRC('services/advertiserPayoutAuto.service'));
+  const advSvc = require(SRC('services/advertiserPayout.service'));
+  const paySvc = require(SRC('services/payment.service'));
+  const runAuto = async ({ cands, allowed = true, paid = 0, kept = false }) => {
+    const saves = [], realSave = paySvc.saveTransferSetting, realAllow = advSvc.checkAdvertiserPayoutAllowed;
+    paySvc.saveTransferSetting = async a => { saves.push(a); return { ok: true, target: a.campaignId ? 'campaign' : 'tab', ...(kept ? { transferBankKept: 'advertiser' } : {}) }; };
+    advSvc.checkAdvertiserPayoutAllowed = async () => allowed ? { ok: true, advertiserName: '스마트윈' } : { ok: false, error: 'no_advertiser' };
+    const db = { query: async (sql) => /FROM tab_configs tc/.test(sql) ? { rows: cands } : /payment_batch_items/.test(sql) ? { rows: [{ n: paid }] } : { rows: [] } };
+    try { return { r: await auto.applyAutoPayout({ db }), saves }; }
+    finally { paySvc.saveTransferSetting = realSave; advSvc.checkAdvertiserPayoutAllowed = realAllow; }
+  };
+  const C = o => ({ sheetId: 'S1', tabName: 'T1', campaignId: 'camp_1', campaignFee: 1000, tabFee: null, scheduleMax: null, deliveryMix: [], goodsCostType: '업체입금(입금명: 배성화)', ...o });
+
+  await ta('4a ★★ 리뷰비 있음 → 제품비 업체 · 리뷰비 케이뱅크(split_kbank)를 기존 창구(saveTransferSetting)로 공고에 저장', async () => {
+    const { r, saves } = await runAuto({ cands: [C()] });
+    assert.deepStrictEqual(saves, [{ sheetId: 'S1', tabName: 'T1', campaignId: 'camp_1', bank: 'split_kbank' }]);
+    assert.strictEqual(r.applied.length, 1);
+  });
+  await ta('4b ★ 리뷰비 없음 + 공고 없음 → 업체입금(advertiser)을 탭 설정에(남이섬 같은 옛 작업)', async () => {
+    const { saves } = await runAuto({ cands: [C({ campaignId: null, campaignFee: null, goodsCostType: '업체입금 / 선입금미완료' })] });
+    assert.deepStrictEqual(saves, [{ sheetId: 'S1', tabName: 'T1', campaignId: null, bank: 'advertiser' }]);
+  });
+  await ta('4c 기간별 구간·배송유형별 금액·탭 금액 중 하나라도 있으면 리뷰비 있음', () => {
+    assert.strictEqual(auto.hasReviewFee({ campaignFee: 0, scheduleMax: 500 }), true);
+    assert.strictEqual(auto.hasReviewFee({ campaignFee: 0, tabFee: 300 }), true);
+    assert.strictEqual(auto.hasReviewFee({ campaignFee: 0, deliveryMix: [{ type: 'real', reviewFee: 1000 }, { type: 'empty', reviewFee: 0 }] }), true);
+    assert.strictEqual(auto.hasReviewFee({ campaignFee: 0, tabFee: null, scheduleMax: null, deliveryMix: [] }), false);
+  });
+  await ta('4d ★★ 고를 수 없는 작업(업체 미연결 등) = 저장하지 않는다(연결되면 다시)', async () => {
+    const { r, saves } = await runAuto({ cands: [C()], allowed: false });
+    assert.strictEqual(saves.length, 0); assert.strictEqual(r.skipped[0].reason, 'no_advertiser');
+  });
+  await ta('4e ★★ 우리가 이미 이체 회차에 담은 줄이 있으면 바꾸지 않는다(fail-closed)', async () => {
+    const { r, saves } = await runAuto({ cands: [C()], paid: 2 });
+    assert.strictEqual(saves.length, 0); assert.strictEqual(r.skipped[0].reason, 'our_payout_exists');
+  });
+  await ta('4f 물건비가 업체입금이 아니면 고르지 않는다 · 저장 창구가 그대로 뒀으면(kept) 적용 아님', async () => {
+    assert.strictEqual(auto.autoPayoutChoice({ goodsCostType: '계산서(농협)', feePositive: true }), null);
+    const { r } = await runAuto({ cands: [C()], kept: true });
+    assert.strictEqual(r.applied.length, 0); assert.strictEqual(r.skipped[0].reason, 'kept');
+  });
+  await ta('4g ★★ 후보 조회 = 기준 공고(가장 최근) 이체은행과 탭 이체은행이 **둘 다 비어 있을 때만**([자동] · 사람이 고른 값 무접촉)', () => {
+    const q = auto.CANDIDATE_SQL;
+    assert.ok(/btrim\(COALESCE\(c\.transfer_bank, ''\)\) = ''/.test(q) && /btrim\(COALESCE\(tc\.transfer_bank, ''\)\) = ''/.test(q));
+    assert.ok(/ORDER BY rc\.created_at DESC LIMIT 1/.test(q), '입금관리와 같은 공고(가장 최근)');
+    assert.ok(/goods_cost_type ~ '업체\\\\s\*입금'/.test(read('src/services/advertiserPayoutAuto.service.js')), '서버 판정과 같은 정규식');
+  });
+  await ta('4h 배선 — 공고 생성·수정 · 업체 소유 지정·이관·자동 소유 · 매시 점검(끌 수 있음)', () => {
+    const cr = read('src/routes/campaign.routes.js');
+    assert.strictEqual((cr.match(/advertiserPayoutAuto\.service'\)\.kickAutoPayout\(/g) || []).length, 2, '공고 생성·수정 두 곳');
+    assert.strictEqual((TB.match(/advertiserPayoutAuto\.service'\)\.kickAutoPayout\(/g) || []).length, 2, 'setOwnership·transferOwnership');
+    assert.ok(/advertiserPayoutAuto\.service'\)\.kickAutoPayout\(\{ sheetId: sid \}\)/.test(read('src/services/advertiserProjection.service.js')));
+    const cj = read('src/jobs/cron.js');
+    assert.ok(/AUTO_PAYOUT_MODE_CRON !== '0'/.test(cj) && /withJobLock\('auto_payout_mode'/.test(cj));
+  });
+  await ta('4i 카드 — [자동]이면 「업체 연결 시 자동 설정」, 사람이 고른 은행이면 「⚠ 리뷰오더는 업체입금」', () => {
+    assert.ok(/transferBankAutoPending: payoutMode\.mode === 'ours' && !campBank && !tabBank/.test(TB));
+    const fn = HTML.match(/function _cndBankWarn\(cd,kind,isAdv,ddHtml\)\{[\s\S]*?\n\}/)[0];
+    assert.ok(/cd\.transferBankAutoPending===true/.test(fn) && /업체 연결 시 자동 설정/.test(fn) && /⚠ 리뷰오더는 업체입금/.test(fn));
+  });
+
+  console.log(`\n결과: ${pass} 통과 / ${fail} 실패`);
+  process.exit(fail ? 1 : 0);
+})();
