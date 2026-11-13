@@ -1,7 +1,7 @@
 /* Purchase capture self-service: no shared-page state or legacy upload writes. */
 (function (global) {
   'use strict';
-  let reviewer = null, staff = null, generation = 0;
+  let reviewer = null, staff = null, homeBanner = null, generation = 0;
   const saveLabels = {saved:'사진 접수',failed:'저장 실패',unknown:'연결 확인 중',missing:'사진 미접수',uploading:'사진 저장 중'};
   const reviewLabels = {not_requested:'확인 요청 전',pending:'담당자 확인 중',needs_photo:'사진 보완 필요',confirmed:'사진 확인 완료'};
   function el(tag, text, cls) {
@@ -19,7 +19,7 @@
     return JSON.stringify(user,function(key,value){return key==='reviewerToken'?undefined:value;});
   }
   function alive(c) {
-    return !c.dead && (c.staff ? staff : reviewer) === c && c.root.isConnected &&
+    return !c.dead && (c.staff ? staff : c.banner ? homeBanner : reviewer) === c && c.root.isConnected &&
       c.identity === identityOf(c.user);
   }
   function errorText(error) {
@@ -43,6 +43,10 @@
       return data;
     }
   }
+  // 리뷰어가 지금 손볼 것이 있는 갈래 = 사진 미접수·저장 실패·연결 확인 중·저장 중·보완 요청(결정 370).
+  // 펼쳐 보이기(renderItem)·홈 한 줄 알림 건수·창의 「보완 필요」 묶음이 모두 이 판정 하나를 쓴다.
+  function channelNeedsAction(ch) {return ch.reviewState==='needs_photo'||['failed','missing','unknown','uploading'].includes(ch.saveState);}
+  function needsAction(item) {return Array.isArray(item.channels)&&item.channels.some(channelNeedsAction);}
   function itemValid(c,item) {
     return item && item.orderSubmissionId!=null && Array.isArray(item.channels) &&
       item.channels.every(ch=>ch && ['single','naver','coupang'].includes(ch.channel) && Array.isArray(ch.photos) && ch.photos.every(p=>p && typeof p==='object')) &&
@@ -69,18 +73,27 @@
     return c;
   }
   function shell(c) {
-    c.root.classList.add('rpc');
+    c.root.classList.remove('rpc-bannerhost');c.root.classList.add('rpc');
     c.content=el('div',null,'rpc-content');c.message=el('p',null,'rpc-message');c.message.setAttribute('role','status');
     c.root.replaceChildren(c.message,c.content);
   }
-  function modal(opts,isStaff) {
-    const dialog=el('dialog',null,'rpc rpc-dialog');
-    const head=el('header');head.append(el('h2',isStaff?'구매사진 확인':'구매 캡처 확인'));
+  function modal(opts,isStaff,compact) {
+    const sheet=!isStaff&&compact===true;
+    const dialog=el('dialog',null,'rpc rpc-dialog'+(sheet?' rpc-sheet':''));
+    const head=el('header');head.append(el('h2',isStaff?'구매사진 확인':sheet?'구매사진':'구매 캡처 확인'));
     const root=el('div');dialog.append(head,root);document.body.append(dialog);
-    const c=context(opts,isStaff,root);c.dialog=dialog;
-    head.append(button('닫기','close',()=>{if(c.busy){c.message.textContent='사진 처리가 끝날 때까지 기다려 주세요.';return;}dispose(c);}));
-    dialog.addEventListener('cancel',e=>{e.preventDefault();if(!c.busy) dispose(c);});
-    dialog.showModal();shell(c);return c;
+    const c=context(opts,isStaff,root);c.dialog=dialog;c.compact=sheet;c.onClosed=sheet?opts.onClosed:null;
+    const close=()=>{dispose(c);if(c.onClosed){try{c.onClosed();}catch(_){/* 홈 알림 새로고침 실패가 창 닫기를 막지 않는다 */}}};
+    const x=button(sheet?'':'닫기','close',()=>{if(c.busy){c.message.textContent='사진 처리가 끝날 때까지 기다려 주세요.';return;}close();});
+    if(sheet){x.classList.add('rpc-x');x.setAttribute('aria-label','닫기');x.title='닫기';
+      // 아이콘 글꼴(외부)이 안 떠도 보이게 그림으로 그린다
+      const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 12 12');svg.setAttribute('width','11');svg.setAttribute('height','11');svg.setAttribute('aria-hidden','true');
+      const line=document.createElementNS('http://www.w3.org/2000/svg','path');line.setAttribute('d','M2 2l8 8M10 2l-8 8');line.setAttribute('stroke','currentColor');line.setAttribute('stroke-width','1.8');line.setAttribute('stroke-linecap','round');svg.append(line);x.append(svg);
+      dialog.prepend(el('div',null,'rpc-grab'));}
+    head.append(x);
+    dialog.addEventListener('cancel',e=>{e.preventDefault();if(!c.busy) close();});
+    if(sheet)dialog.tabIndex=-1;
+    dialog.showModal();if(sheet)dialog.focus();shell(c);return c;
   }
   function photo(c,p,index) {
     const wrap=el('div',null,'rpc-thumb');
@@ -153,7 +166,7 @@
       const section=el('details');section.dataset.channel=ch.channel;
       const foldKey=JSON.stringify([String(item.orderSubmissionId),ch.channel]);
       section.dataset.foldKey=foldKey;
-      section.open=c.folds.has(foldKey)?c.folds.get(foldKey):ch.reviewState==='needs_photo'||ch.saveState==='failed'||ch.saveState==='missing'||ch.saveState==='unknown'||ch.saveState==='uploading';
+      section.open=c.folds.has(foldKey)?c.folds.get(foldKey):channelNeedsAction(ch);
       section.addEventListener('toggle',()=>{if(section.isConnected)c.folds.set(foldKey,section.open);});
       const summary=el('summary');summary.append(el('strong',ch.channel==='single'?(ch.label||'구매사진'):(ch.label||ch.channel)+' 구매사진'),el('span',(saveLabels[ch.saveState]||'저장 상태 확인 불가')+' · '+(reviewLabels[ch.reviewState]||'확인 상태 없음')));section.append(summary);
       const body=el('div',null,'rpc-section');
@@ -165,6 +178,46 @@
     }
     box.append(el('p','사진 확인과 명의·리뷰·입금 승인은 별개예요.','rpc-muted'));
     return box;
+  }
+  // 홈 창(compact): 주문 한 줄씩 · 보완 필요 묶음이 위 · 누른 줄만 펼침(한 번에 하나)
+  // 창의 줄 표시는 짧게(승인 시안 그대로). 자세한 상태 글자(saveLabels·reviewLabels)는 종전 펼침 목록·직원 창이 쓴다.
+  function chipOf(ch) {
+    if(ch.reviewState==='needs_photo')return ['보완 필요','bad'];
+    if(ch.saveState==='missing'||ch.saveState==='failed')return ['사진 없음','bad'];
+    if(ch.saveState==='unknown'||ch.saveState==='uploading')return ['확인 중','mid'];
+    if(ch.reviewState==='pending')return ['담당자 확인 중','mid'];
+    if(ch.reviewState==='confirmed')return ['확인 완료','ok'];
+    if(ch.saveState==='saved')return ['접수됨','ok'];
+    return ['상태 확인 불가','mid'];
+  }
+  function compactRow(c,item) {
+    const key='row:'+String(item.orderSubmissionId),open=c.folds.get(key)===true;
+    const row=el('div',null,'rpc-row'+(open?' open':''));row.dataset.order=String(item.orderSubmissionId);
+    const head=el('button',null,'rpc-rowhead');head.type='button';head.dataset.action='row';head.setAttribute('aria-expanded',open?'true':'false');
+    const main=el('span',null,'rpc-rowmain');main.append(el('span',item.displayName||'구매사진','rpc-rowname'),el('span',item.participantName||'','rpc-rowwho'));
+    const chips=el('span',null,'rpc-chips');
+    item.channels.forEach(ch=>{const [text,tone]=chipOf(ch);chips.append(el('span',(item.channels.length>1?(ch.label||ch.channel)+' ':'')+text,'rpc-chip '+tone));});
+    head.append(main,chips,el('span','›','rpc-caret'));
+    head.addEventListener('click',()=>{if(c.busy)return;[...c.folds.keys()].forEach(k=>{if(k.startsWith('row:'))c.folds.delete(k);});if(!open)c.folds.set(key,true);render(c);});
+    row.append(head);
+    if(open)for(const ch of item.channels){
+      const body=el('div',null,'rpc-rowbody');body.dataset.channel=ch.channel;
+      if(item.channels.length>1)body.append(el('p',(ch.label||ch.channel)+' 구매사진','rpc-rowlabel'));
+      if(ch.reason)body.append(el('p',ch.reason,'rpc-reason'));
+      const photos=el('div',null,'rpc-photos');(Array.isArray(ch.photos)?ch.photos:[]).forEach((p,i)=>photos.append(photo(c,p,i)));if(photos.childNodes.length)body.append(photos);
+      if(ch.request&&ch.request.note&&ch.request.note!==ch.reason)body.append(el('p',ch.request.note,'rpc-muted'));
+      reviewerActions(c,item,ch,body);row.append(body);
+    }
+    return row;
+  }
+  function renderCompact(c) {
+    const need=c.items.filter(needsAction),rest=c.items.filter(i=>!needsAction(i));
+    const group=(label,tone,list)=>{c.content.append(el('p',label,'rpc-grp'+(tone?' '+tone:'')));const g=el('div',null,'rpc-group');list.forEach(i=>g.append(compactRow(c,i)));c.content.append(g);};
+    if(need.length)group('보완 필요 '+need.length+'건','bad',need);
+    if(rest.length)group('사진 낸 주문 '+rest.length+'건','',rest);
+    if(!c.items.length)c.content.append(el('p','지금 표시할 구매사진 내역이 없어요.','rpc-muted'));
+    if(c.hasMore)c.content.append(el('p','표시되지 않은 내역이 더 있을 수 있어요.','rpc-muted'));
+    if(c.items.length)c.content.append(el('p','줄을 누르면 사진 추가·확인 요청을 할 수 있어요. 사진 확인과 명의·리뷰·입금 승인은 별개예요.','rpc-foot'));
   }
   function reviewerActions(c,item,ch,body) {
     const path='/api/reviewer/purchase-captures/'+encodeURIComponent(item.orderSubmissionId);
@@ -182,6 +235,7 @@
       finally{if(alive(c)){lock(c,false);render(c);}}
     });
     const note=el('textarea');note.placeholder='확인할 내용 (선택)';note.setAttribute('aria-label',(ch.label||ch.channel)+' 확인할 내용');note.maxLength=1000;
+    if(c.compact)note.addEventListener('input',()=>{note.style.height='';const h=note.scrollHeight+2;if(h>42)note.style.height=Math.min(h,120)+'px';note.style.overflowY=h>120?'auto':'';});   // 창에서는 한 줄로 두고 적는 만큼 늘린다
     const request=button('이미 제출했어요 · 확인 요청','request',()=>write(c,path+'/check-requests',{channel:ch.channel,expectedEvidenceHash:ch.evidenceHash,note:note.value.trim()},'확인 요청을 접수했어요. 담당자 확인을 기다려 주세요.',item.orderSubmissionId));
     capability(body,ch,request,'canRequestCheck');
     actions.append(add,input,request);body.append(actions,note);
@@ -197,7 +251,8 @@
     // an already-small image helper resolves immediately after a user click.
     c.content.querySelectorAll('details[data-fold-key]').forEach(n=>c.folds.set(n.dataset.foldKey,n.open));
     c.content.replaceChildren();
-    if(c.items){for(const item of c.items)c.content.append(renderItem(c,item));if(!c.items.length)c.content.append(el('p','지금 표시할 구매사진 내역이 없어요.'));if(c.hasMore)c.content.append(el('p','표시되지 않은 내역이 더 있을 수 있어요.','rpc-muted'));}
+    if(c.items&&c.compact)renderCompact(c);
+    else if(c.items){for(const item of c.items)c.content.append(renderItem(c,item));if(!c.items.length)c.content.append(el('p','지금 표시할 구매사진 내역이 없어요.'));if(c.hasMore)c.content.append(el('p','표시되지 않은 내역이 더 있을 수 있어요.','rpc-muted'));}
     if(c.loadFailed)c.content.append(button('다시 조회','reload',()=>load(c)));
     if(c.staff&&c.item&&c.request) staffActions(c);
     if(c.busy) { c.root.querySelectorAll('button,input,textarea').forEach(n=>{n.disabled=true;}); }
@@ -231,10 +286,35 @@
     checked.addEventListener('change',()=>{need.disabled=confirm.disabled=!checked.checked||!target.evidenceHash||c.loadFailed;});
     section.append(need,confirm);c.content.append(section);
   }
+  // 리뷰어 홈: 한 줄 알림만 두고 목록은 창(compact)에서 연다(결정 370). 조회 실패는 「없음」으로 접지 않는다(결정 359).
+  async function banner(opts) {
+    const root=typeof opts.container==='string'?document.querySelector(opts.container):opts.container;
+    if(!root)return;
+    if(homeBanner)homeBanner.dead=true;   // 옛 응답은 버리되, 새 결과가 올 때까지 지금 줄은 그대로 둔다(깜빡임 없음)
+    const c=context(opts,false,root);c.banner=true;homeBanner=c;
+    global.removeEventListener('beforeunload',c.unload);   // 한 줄 알림은 쓰기를 하지 않는다
+    root.classList.remove('rpc');root.classList.add('rpc-bannerhost');
+    if(!root.querySelector(':scope>.rpc-banner'))root.replaceChildren();   // 종전 목록·안내 문구는 비운다
+    const show=(text,count,go,tone,onClick)=>{
+      const b=el('button',null,'rpc-banner'+(tone?' '+tone:''));b.type='button';b.dataset.action='banner';
+      const t=el('span',null,'rpc-banner-text');t.append(el('i',null,'rpc-dot'),el('span',text));if(count)t.append(el('b',count));
+      b.append(t,el('span',go,'rpc-banner-go'));b.addEventListener('click',onClick);root.replaceChildren(b);
+    };
+    let items;
+    try{const data=await api(c,'/api/reviewer/purchase-captures');items=data.items;if(!Array.isArray(items)||!items.every(i=>itemValid(c,i)))throw new Error('invalid item');}
+    catch(e){if(e.stale||!alive(c))return;show('구매사진 내역을 불러오지 못했어요','','다시 조회','warn',()=>banner(opts));return;}
+    if(!alive(c))return;
+    if(!items.length){root.replaceChildren();return;}
+    const need=items.filter(needsAction).length;
+    const openSheet=()=>{if(homeBanner===c&&alive(c))global.ReviewerPurchaseCapture.open({...opts,orderSubmissionId:null,compact:true,onClosed:()=>{if(homeBanner===c&&alive(c))banner(opts);}});};
+    if(need)show('구매사진 보완 필요',need+'건','확인하기','need',openSheet);
+    else show('구매사진',items.length+'건 접수','보기','',openSheet);
+  }
   global.ReviewerPurchaseCapture={
+    banner:banner,
     mount:function(opts){dispose(reviewer);reviewer=context(opts,false,typeof opts.container==='string'?document.querySelector(opts.container):opts.container);shell(reviewer);return load(reviewer);},
-    open:function(opts){dispose(reviewer);reviewer=modal(opts,false);return load(reviewer);},
-    reset:function(){dispose(reviewer);reviewer=null;}
+    open:function(opts){dispose(reviewer);reviewer=modal(opts,false,opts&&opts.compact===true);return load(reviewer);},
+    reset:function(){dispose(reviewer);reviewer=null;dispose(homeBanner);homeBanner=null;}
   };
   global.PurchaseCaptureStaff={open:function(opts){dispose(staff);staff=modal(opts,true);return load(staff);}};
 })(window);
