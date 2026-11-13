@@ -32,6 +32,9 @@
      그 번호의 o 는 묻지 않는다(옛 서버는 kind o 를 400 으로 거절 — 그 400 이 빠른 길 전체를 끄지 않게).
    ★ 미리 불러두기(prefetch): 목록 사진 위에 마우스를 올리면(또는 손가락이 닿으면) 그 사진의 o 를 미리 받아 둔다 —
      동시 2장 · 대기 4장(오래된 것부터 버림) · 한 페이지 120장 · 같은 사진 1회.
+   ★ 크게 보기 팝업(2026-11-13 · 사람을 넘길 때 1~3초 늦던 문제): 팝업이 열릴 때 `wantFull(목록 전원 번호)` 로 o 서명을
+     한 묶음(SIGN_CHUNK)으로 묻고, 서명이 늦게 와도 이미 그려진 원본 자리 사진(직원 화면의 프록시 갈래 = data-dt="p")을
+     **아직 다 안 뜬 것만** o 로 갈아 끼운다(실패 → fullFall 로 원본 프록시 1회). 여기서도 t·m 은 나오지 않는다.
    ══════════════════════════════════════════════════════════════ */
 (function () {
   'use strict';
@@ -62,6 +65,7 @@
   var queue = { t: {}, m: {}, o: {} };
   var oldServer = false;  // 서버가 덤(more)을 모른다 → o 를 따로 묻지 않는다(옛 서버는 kind o 를 400 으로 거절)
   var timer = null;
+  var onSigned = null;    // wantFull 을 부른 화면의 「서명 도착」 알림(마지막 한 개만 — 팝업을 다시 열면 바뀐다)
   var off = false;        // 서버가 빠른 길을 꺼 두었거나(열쇠 없음) 서명 입구가 실패 → 이 페이지에서 그만 묻는다
 
   function kindOf(px) { return (Number(px) || 400) > 400 ? 'm' : 't'; }
@@ -167,6 +171,7 @@
       }
       persist();
       swapIn();
+      if (onSigned) { try { onSigned(); } catch (_) {} }
     }).catch(function () { off = true; });                         // 실패 = 종전 그대로(구글 썸네일)
   }
 
@@ -182,6 +187,18 @@
       if (!u) continue;
       img.setAttribute('data-dt', 'e');
       img.src = u;
+    }
+    // 원본 자리(fullAttrs 프록시 갈래) — ★ o 만(바이트 동일). t·m 으로 바꾸는 갈래는 없다(결정 008).
+    var ps = document.querySelectorAll('img[data-dt="p"][data-dt-id]');
+    for (var j = 0; j < ps.length; j++) {
+      var pi = ps[j];
+      if (pi.complete && pi.naturalWidth > 0) continue;        // 이미 다 뜬 원본은 그대로
+      var ou = edgeUrl(pi.getAttribute('data-dt-id'), 'o');
+      if (!ou) continue;
+      pi.setAttribute('data-full', pi.getAttribute('src') || '');
+      pi.setAttribute('data-dt', 'o');
+      pi.setAttribute('onerror', 'DriveThumb.fullFall(this)');
+      pi.src = ou;
     }
   }
 
@@ -294,8 +311,31 @@
   function fullAttrs(id, proxy) {
     var s = String(id || ''), p = proxy || '';
     var e = ID_RE.test(s) ? edgeUrl(s, 'o') : '';
-    if (!e) { if (ID_RE.test(s)) want(s, 'o'); return ' src="' + esc(p) + '"'; }
+    if (!e) {
+      var plain = ' src="' + esc(p) + '"';
+      if (!ID_RE.test(s)) return plain;
+      want(s, 'o');
+      // 직원 화면에서 서명을 묻는 중일 때만 표지를 단다 — 서명이 늦게 와도 swapIn 이 o 로 갈아 끼울 수 있게.
+      // 무인증(seed 전용)·꺼진 빠른 길·옛 서버·실패한 번호는 종전과 글자 하나 다르지 않은 src 한 개.
+      if (!p || dead['o:' + s] || oldServer || !canSign()) return plain;
+      return plain + ' data-dt="p" data-dt-id="' + esc(s) + '"';
+    }
     return ' src="' + esc(e) + '" data-dt="o" data-dt-id="' + esc(s) + '" data-full="' + esc(p) + '" onerror="DriveThumb.fullFall(this)"';
+  }
+  /** 원본(o) 서명을 미리 묶어 묻는다(크게 보기 팝업 목록 전원 등) — want/flush/sign 묶음 그대로.
+      onDone = 서명 응답이 올 때마다 부를 함수(선택 · 마지막 호출 것만). @returns 새로 물은 번호 수 */
+  function wantFull(ids, onDone) {
+    if (typeof onDone === 'function') onSigned = onDone;
+    var n = 0, seen = {};
+    (ids || []).forEach(function (x) {
+      var s = String(x || '');
+      if (!ID_RE.test(s) || seen[s] || edgeUrl(s, 'o')) return;
+      seen[s] = 1;
+      var key = 'o:' + s, before = !!queue.o[s];
+      want(s, 'o');
+      if (!before && queue.o[s] && !asked[key]) n++;
+    });
+    return n;
   }
   /** o 실패 → 원본 프록시로 한 번. @returns 처리했나 */
   function fullFall(img) {
@@ -350,5 +390,5 @@
 
   window.DriveThumb = { url: url, attrs: attrs, fall: fall, seed: seed, edgeUrl: edgeUrl, kindOf: kindOf,
     guideId: guideId, guideAttrs: guideAttrs, guideFall: guideFall, upgrade: upgrade,
-    full: full, fullAttrs: fullAttrs, fullFall: fullFall, prefetch: prefetch };
+    full: full, fullAttrs: fullAttrs, fullFall: fullFall, prefetch: prefetch, wantFull: wantFull };
 })();
