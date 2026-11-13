@@ -13,6 +13,10 @@ function getPool() {
    idleTimeoutMillis:10000,statement_timeout:1000,query_timeout:1500,lock_timeout:100,
    idle_in_transaction_session_timeout:2000,application_name:'image-backup'});
   pool.on('error',()=>console.warn('[image-backup] DB_UNAVAILABLE'));
+  // A checked-out client loses the pool's idle listener; an unhandled 'error' event there
+  // would terminate the whole server. Only observe it: the pending query still rejects,
+  // the caller rolls back/releases, and pg discards the broken client (결정 368).
+  pool.on('connect',client=>client.on('error',()=>console.warn('[image-backup] DB_CLIENT_ERROR')));
  }
  return pool;
 }
