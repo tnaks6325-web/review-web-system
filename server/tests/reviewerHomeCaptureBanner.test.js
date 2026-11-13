@@ -101,7 +101,7 @@ for(const engine of ['chromium','webkit'])for(const width of [320,390,1280]){
     assert.equal(await b.locator('.rpc-banner-go').innerText(),'확인하기');
     assert.equal(await page.locator('#sectionMissingCapture .rpc-item, #sectionMissingCapture details').count(),0,'홈에 카드를 쌓지 않는다');
     const h=await page.locator('#sectionMissingCapture').evaluate(n=>n.getBoundingClientRect().height);
-    assert.ok(h<=56,'홈 알림 높이 '+h);
+    assert.ok(h<=(width<=360?52:56),'홈 알림 높이 '+h);
     await b.click();
     const sheet=page.locator('dialog.rpc-sheet');await sheet.locator('.rpc-row').first().waitFor();
     assert.deepEqual(await sheet.locator('.rpc-grp').allInnerTexts(),['보완 필요 2건','사진 낸 주문 3건']);
@@ -115,11 +115,16 @@ for(const engine of ['chromium','webkit'])for(const width of [320,390,1280]){
     const bg=await sheet.locator('[data-action="request"]').evaluate(n=>getComputedStyle(n).backgroundColor);
     assert.equal(bg,'rgb(0, 113, 227)','주 단추는 파랑 채움');
     const tall=await sheet.locator('[data-action="add"],[data-action="request"],textarea').evaluateAll(ns=>ns.map(n=>Math.round(n.getBoundingClientRect().height)));
-    assert.ok(tall.every(x=>x>=40),'단추·입력칸 40px 이상 '+tall);
+    const minTap=width<=360?36:40;   // 작은 휴대폰(360 이하)은 한 단계 작게(사용자 요청 2026-11-13)
+    assert.ok(tall.every(x=>x>=minTap),'단추·입력칸 '+minTap+'px 이상 '+tall);
+    const req=await sheet.locator('[data-action="request"]').evaluate(n=>n.scrollWidth<=n.clientWidth);
+    assert.equal(req,true,'「이미 제출했어요 · 확인 요청」 글자가 단추 안에 들어간다');
     assert.equal(await sheet.locator('textarea').evaluate(n=>getComputedStyle(n).fontSize),'16px','아이폰 확대 방지');
     await groups.nth(1).locator('.rpc-rowhead').first().click();
     assert.equal(await sheet.locator('.rpc-row.open').count(),1,'한 번에 한 줄');
     assert.equal(await sheet.locator('.rpc-row.open .rpc-rowname').innerText(),'[11/09] 바삭 김부각 스낵 5봉');
+    const tw=await sheet.locator('.rpc-rowthumb').first().evaluate(n=>Math.round(n.getBoundingClientRect().width));
+    assert.equal(tw,width<=360?30:36,'상품 사진 크기(작은 휴대폰은 한 단계 작게)');
     const sw=await page.evaluate(()=>document.documentElement.scrollWidth);assert.ok(sw<=width,'옆으로 밀림 '+sw);
     const before=await page.evaluate(()=>window.listCalls);
     await page.evaluate(()=>{window.items=window.items.slice(1);});

@@ -34,13 +34,37 @@ require('node:test').test('actual connected browser integration: all 12 engine/w
     await page.locator('#sectionMissingCapture').screenshot({path:path.join(out,`${engine}-${width}-${channel}-home.png`)});
     let section=await openRow();
     const previousPhotos=await section.locator('[data-action="photo"]').count();assert(previousPhotos>=2);
-    await page.waitForFunction(()=>[...document.querySelectorAll('dialog.rpc-sheet .rpc-row.open img')].every(i=>i.complete&&i.naturalWidth>0));
+    // Horizontal off-screen thumbnails are lazy: require decoding for the visible strip here;
+    // the last photo is scrolled into view and decoded in its full-size dialog below.
+    await page.waitForFunction(()=>{
+     const visible=[...document.querySelectorAll('dialog.rpc-sheet .rpc-row.open img')].filter(i=>{
+      const r=i.getBoundingClientRect(),strip=i.closest('.rpc-photos').getBoundingClientRect();
+      return r.right>strip.left&&r.left<strip.right&&r.bottom>0&&r.top<innerHeight;
+     });
+     return visible.length>0&&visible.every(i=>i.complete&&i.naturalWidth>0);
+    });
     await sheet.screenshot({path:path.join(out,`${engine}-${width}-${channel}-before.png`)});
+    const problem=section.locator('[data-action="problem"]');
+    if(await problem.count())await problem.click();
+    const inquiryState=async()=>Object.fromEntries(await Promise.all(['purchase_capture_check_requests','cs_messages','cs_threads'].map(async t=>[t,(await h.db.query(`SELECT to_jsonb(t) v FROM ${t} t ORDER BY to_jsonb(t)::text`)).rows])));
+    const inquiriesBefore=await inquiryState();
     await section.locator('input[type=file]').setInputFiles({name:'local-proof.png',mimeType:'image/png',buffer:photo});
     await section.locator('[data-action="save"]').waitFor({state:'visible'});
+    const requestCheck=section.getByLabel('사진 저장 후 담당자에게 확인 요청',{exact:true});
+    assert.equal(await requestCheck.isChecked(),false);
     await section.locator('[data-action="save"]').click();
-    await page.waitForFunction(()=>document.querySelector('dialog.rpc-sheet .rpc-message').textContent.includes('사진을 접수했어요'));
+    await page.waitForFunction(()=>document.querySelector('dialog.rpc-sheet .rpc-message').textContent.includes('확인 요청은 보내지 않았어요'));
     assert.equal(await section.locator('[data-action="photo"]').count(),previousPhotos+1);
+    assert.deepEqual(await inquiryState(),inquiriesBefore,'Default photo-only save must not create/change inquiries or unread counts');
+    const saveOnly=(await h.db.query('SELECT check_request_id,file_id FROM purchase_capture_supplements WHERE order_submission_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1',[orderId])).rows[0];
+    assert.equal(saveOnly.check_request_id,null);assert(h.files.get(saveOnly.file_id)?.length>0);
+    await section.locator('input[type=file]').setInputFiles({name:'local-proof-check.png',mimeType:'image/png',buffer:photo});
+    await section.locator('[data-action="save"]').waitFor({state:'visible'});
+    assert.equal(await requestCheck.isChecked(),false,'New photo selection never inherits earlier consent');
+    await requestCheck.check();
+    await section.locator('[data-action="save"]').click();
+    await page.waitForFunction(()=>{const text=document.querySelector('dialog.rpc-sheet .rpc-message').textContent;return text.includes('사진을 접수')&&text.includes('담당자에게 확인을 요청했어요');});
+    assert.equal(await section.locator('[data-action="photo"]').count(),previousPhotos+2);
     const added=(await h.db.query('SELECT check_request_id,file_id FROM purchase_capture_supplements WHERE order_submission_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1',[orderId])).rows[0];
     assert(added?.check_request_id);assert.equal(h.files.get(added.file_id).length>0,true);
     const req=(await h.db.query('SELECT * FROM purchase_capture_check_requests WHERE id=$1',[added.check_request_id])).rows[0];
@@ -74,6 +98,20 @@ require('node:test').test('actual connected browser integration: all 12 engine/w
     await section.locator('[data-action="photo"]').last().click();
     await page.waitForFunction(()=>{const img=document.querySelector('dialog.rpc-photo-dialog img');return img&&img.complete&&img.naturalWidth>0;});
     await page.locator('[data-action="close-photo"]').click();
+    await dialog.locator('[data-action="close"]').click();
+    const beforeHistorySave=await inquiryState();
+    const historyProblem=section.locator('[data-action="problem"]');
+    if(await historyProblem.count()&&await historyProblem.getAttribute('aria-expanded')==='false')await historyProblem.click();
+    await section.locator('input[type=file]').setInputFiles({name:'local-proof-history.png',mimeType:'image/png',buffer:photo});
+    await section.locator('[data-action="save"]').click();
+    await page.waitForFunction(()=>document.querySelector('dialog.rpc-sheet .rpc-message').textContent.includes('확인 요청은 보내지 않았어요'));
+    assert.deepEqual(await inquiryState(),beforeHistorySave,'Adding a photo must not rewrite the old inquiry or decision');
+    await card.click();
+    await staff.waitForFunction(()=>document.querySelector('dialog.rpc-dialog .rpc-staff')?.textContent.includes('확인 요청 뒤 사진이 바뀌었어요'));
+    assert.equal(await dialog.locator('[data-action="confirmed"]').count(),0);
+    assert.equal(await dialog.locator('[data-action="needs_photo"]').count(),0);
+    assert.equal(await dialog.locator(`details[data-channel="${channel}"] [data-action="photo"]`).count(),previousPhotos+3);
+    await dialog.screenshot({path:path.join(out,`${engine}-${width}-${channel}-historical-readonly.png`)});
     const measurement=await sheet.evaluate(n=>({viewport:innerWidth,document:document.documentElement.scrollWidth,section:n.getBoundingClientRect().width}));
     assert(measurement.section<=width,JSON.stringify(measurement));
     await closeSheet();await page.evaluate(()=>switchTab('review'));
@@ -83,7 +121,7 @@ require('node:test').test('actual connected browser integration: all 12 engine/w
     assert(measurement.document<=width,JSON.stringify(measurement));assert.equal(featureErrors.length,0,featureErrors.join('\n'));
     assert(featureResponses.every(r=>r.status===200),JSON.stringify(featureResponses.filter(r=>r.status!==200)));
     assert.deepEqual(await snapshots(),before,'Original purchase/review/payment state must not change');
-    results.push({engine,width,orderId,channel,previousPhotos,afterPhotos:previousPhotos+1,requestId:req.id,measurement,featureErrors,featureResponses,blockedExternal:blocked.length});
+    results.push({engine,width,orderId,channel,previousPhotos,afterPhotos:previousPhotos+3,saveOnlyFileId:saveOnly.file_id,defaultSaveCreatedInquiry:false,historicalInquiryReadable:true,requestId:req.id,measurement,featureErrors,featureResponses,blockedExternal:blocked.length});
     console.log('PASS actual connected browser',engine,width,channel,'photo → CS card → reason → confirmation → original preservation');
    }catch(error){for(const [i,p]of context.pages().entries())await p.screenshot({path:path.join(out,`${engine}-${width}-${channel}-failure-${i}.png`),fullPage:true}).catch(()=>{});throw error;}
    finally{await browser.close();}

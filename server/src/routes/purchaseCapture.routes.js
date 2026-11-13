@@ -45,7 +45,7 @@ function createPurchaseCaptureRouters({core,checks,uploadLimiter=imageUploadLimi
   });
   reviewerRouter.post('/purchase-captures/:orderId/supplements',...reviewer,uploadLimiter,async(req,res)=>{
     try{
-      const fields=bodyFields(req.body,['channel','imageBase64','mimeType','requestKey','expectedEvidenceHash']);
+      const fields=bodyFields(req.body,['channel','imageBase64','mimeType','requestKey','expectedEvidenceHash','requestCheck']);
       const result=await photos().addSupplement({...fields,session:req.reviewer,orderSubmissionId:identifier(req.params.orderId)});
       if(!result||!result.item)throw new Error('invalid supplement response');
       return res.json({ok:true,item:result.item,request:result.request||null});

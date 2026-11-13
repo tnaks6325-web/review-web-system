@@ -73,7 +73,7 @@ function createService({db,drive,requestInTx}={}){
    const originalVersion=channel==='single'?[order.capture_file_id,order.capture_uploaded_at,order.capture_file_id_2,order.capture2_uploaded_at]:artifacts.filter(a=>a.channel===channel).map(a=>[a.id,a.role,a.revision,a.file_id,a.byte_sha256]);
    const known=!!(direct||linked);
    const active=known&&!order.deleted_at&&!['canceled','cancelled'].includes(order.mirror_status)&&!configs.some(c=>c.is_closed||c.finished||c.archived);
-   context.evidenceByChannel[channel]={photos,evidenceHash:digest([order.id,channel,originalVersion,extra.map(s=>[s.id,s.file_id,s.byte_sha256])]),saveState:photos.length?'saved':uploadSession?.status==='failed'&&uploadSession.failure_code?'failed':uploadSession?.status==='uploading'?'uploading':'unknown',capabilities:{canAdd:active,canRequestCheck:active&&photos.length>0,reason:active?null:known?'진행이 종료된 주문이에요.':'작업 정보를 확인할 수 없어요. 담당자에게 문의해 주세요.'}};
+   context.evidenceByChannel[channel]={photos,evidenceHash:digest([order.id,channel,originalVersion,extra.map(s=>[s.id,s.file_id,s.byte_sha256])]),saveState:photos.length?'saved':uploadSession?.status==='failed'&&uploadSession.failure_code?'failed':uploadSession?.status==='uploading'?'uploading':'unknown',capabilities:{canSaveWithoutCheck:true,canAdd:active,canRequestCheck:active&&photos.length>0,reason:active?null:known?'진행이 종료된 주문이에요.':'작업 정보를 확인할 수 없어요. 담당자에게 문의해 주세요.'}};
   }
   return context;
  }
@@ -141,9 +141,15 @@ function createService({db,drive,requestInTx}={}){
  async function addSupplement(input){
   const {session,orderSubmissionId,channel,imageBase64,mimeType,requestKey}=input;
   checkCaller({session});
+  const hasRequestCheck=Object.hasOwn(input,'requestCheck');
+  if(hasRequestCheck&&typeof input.requestCheck!=='boolean')throw fail('CAPTURE_REQUEST_INVALID','사진 확인 요청 여부를 다시 선택해 주세요.',400);
   if(typeof requestKey!=='string'||!UUID.test(requestKey))throw fail('CAPTURE_REQUEST_INVALID','요청 번호가 올바르지 않아요. 다시 시도해 주세요.');
-  const payloadHash=digest([imageBase64,mimeType,input.expectedEvidenceHash]);
+  // Absent-field retries keep the pre-opt-in digest, including committed checked uploads.
+  const payload=[imageBase64,mimeType,input.expectedEvidenceHash];
+  if(hasRequestCheck)payload.push(input.requestCheck);
+  const payloadHash=digest(payload);
   function validate(context){
+   if(!hasRequestCheck)throw fail('CAPTURE_REFRESH_REQUIRED','사진 저장 기능이 바뀌었어요. 새로고침 후 다시 저장해 주세요.');
    if(!context.channels.includes(channel))throw fail('CAPTURE_CHANNEL_INVALID','이 주문의 구매처를 다시 선택해 주세요.');
    if(!context.evidenceByChannel[channel].capabilities.canAdd)throw fail('CAPTURE_ORDER_CLOSED','진행이 종료된 주문이라 사진을 추가할 수 없어요.');
    if(context.evidenceByChannel[channel].evidenceHash!==input.expectedEvidenceHash)throw fail('CAPTURE_EVIDENCE_CHANGED','사진이 바뀌었어요. 새로고침한 뒤 다시 확인해 주세요.');
@@ -152,8 +158,8 @@ function createService({db,drive,requestInTx}={}){
    const prior=(await client.query('SELECT * FROM purchase_capture_supplements WHERE order_submission_id=$1 AND channel=$2 AND request_key=$3',[context.order.id,channel,requestKey])).rows[0];
    if(!prior)return null;
    if(prior.request_payload_hash!==payloadHash)throw fail('CAPTURE_REQUEST_CONFLICT','같은 요청 번호로 다른 사진을 보낼 수 없어요.');
-   const r=(await client.query('SELECT * FROM purchase_capture_check_requests WHERE id=$1',[prior.check_request_id])).rows[0];
-   if(!r)throw unavailable();
+   const r=prior.check_request_id==null?null:(await client.query('SELECT * FROM purchase_capture_check_requests WHERE id=$1',[prior.check_request_id])).rows[0];
+   if(prior.check_request_id!=null&&!r)throw unavailable();
    return {item:await viewInTx(client,context),request:publicRequest(r),created:false};
   };
   const initial=await withOrderTransaction({session,orderSubmissionId},async(client,context)=>{const replay=await priorInTx(client,context);if(!replay)validate(context);return {context,replay};});
@@ -192,6 +198,7 @@ function createService({db,drive,requestInTx}={}){
    const replay=await priorInTx(client,before);if(replay)return replay;validate(before);
    const added=await client.query(`INSERT INTO purchase_capture_supplements(order_submission_id,channel,file_id,byte_sha256,mime_type,request_key,request_payload_hash,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,[orderSubmissionId,channel,fileId,byteHash,mimeType,requestKey,payloadHash,session.ownerReviewerId]);
    const context=await inspectInTx(client,{session,orderSubmissionId});
+   if(input.requestCheck!==true)return {item:await viewInTx(client,context),request:null,created:false};
    const requested=await (requestInTx||require('./purchaseCaptureCheck.service').requestInTx)(client,{context,channel,note:'구매사진을 추가했어요. 사진 확인을 부탁드려요.'});
    await client.query('UPDATE purchase_capture_supplements SET check_request_id=$2 WHERE id=$1',[added.rows[0].id,requested.request.id]);
    return {item:await viewInTx(client,context),request:publicRequest(requested.request),created:requested.created===true,...(requested.created&&requested.notification?{notification:requested.notification}:{})};
