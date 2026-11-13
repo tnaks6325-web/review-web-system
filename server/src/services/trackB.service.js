@@ -534,6 +534,8 @@ async function setOwnership({ advertiserId, sheetId, tabGid = null, by = 'admin'
      ON CONFLICT (advertiser_id, sheet_id, COALESCE(tab_gid,'')) DO UPDATE
        SET deleted_at = NULL, assigned_by = EXCLUDED.assigned_by`,
     [advertiserId, sheetId, tabGid, String(by).slice(0, 100)]);
+  // 결정 369 2단계 — 업체가 연결되면 [자동]+물건비 업체입금 작업의 입금 방식을 자동 저장(뒤에서 · 실패는 매시 점검이 다시)
+  try { require('./advertiserPayoutAuto.service').kickAutoPayout({ sheetId }); } catch (_) {}
   return { ok: true };
 }
 async function removeOwnership({ advertiserId, sheetId, tabGid = null } = {}) {
@@ -585,6 +587,7 @@ async function transferOwnership({ sheetId, tabGid = null, toAdvertiserId, by = 
             WHERE ac.deleted_at IS NULL AND ac.sheet_id = $1 AND ac.tab_gid IS NOT NULL AND ac.advertiser_id <> $2`,
       [sid, to]);
     await client.query('COMMIT');
+    try { require('./advertiserPayoutAuto.service').kickAutoPayout({ sheetId: sid }); } catch (_) {}   // 결정 369 2단계
     return {
       ok: true, toAdvertiserId: to, toAdvertiserName: adv[0].name,
       scope: gid ? 'tab' : 'sheet', tabGid: gid,
@@ -3615,6 +3618,13 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null,
       /* 이체은행 — 값·라벨·출처를 함께 싣는다(화면이 판정을 다시 하지 않게).
          null = 정할 근거가 없음 = [미설정](작업오더 물건비도 비어 자동판정이 안 된 경우). */
       transferBank, bankSource,
+      /* 결정 369 — 리뷰오더 물건비는 「업체입금」인데 이체은행이 우리 은행(케이뱅크·하나·자동·미설정) — 업체에 계좌가 안 보이고
+         입금관리는 보류된다. 판정 = payment.goodsCostSaysAdvertiser(입금관리 보류와 같은 함수). 옛 화면은 이 값을 몰라 종전대로 그린다. */
+      transferBankOrderMismatch: payoutMode.mode === 'ours'
+        && require('./payment.service').goodsCostSaysAdvertiser((wo && wo.goodsCostType) || ''),
+      /* 결정 369 2단계 — 그중 사람이 은행을 고르지 않은([자동]) 경우 = 업체가 연결되면 시스템이 자동 저장한다(카드가 그 사실을 말한다) */
+      transferBankAutoPending: payoutMode.mode === 'ours' && !campBank && !tabBank
+        && require('./payment.service').goodsCostSaysAdvertiser((wo && wo.goodsCostType) || ''),
       transferBankLabel: advertiserPayout ? ADVERTISER_PAYOUT_LABEL
         : splitPayout ? `제품비 업체 · 리뷰비 ${BANK_LABEL[payoutMode.bank] || ''}`
         : (transferBank ? (BANK_LABEL[transferBank] || transferBank) : null),
