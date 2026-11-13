@@ -18,7 +18,7 @@ async function fixture({engine,database}={}){
  capture_file_id text,capture_file_id_2 text,capture_uploaded_at timestamptz,capture2_uploaded_at timestamptz,
  delivery_memo text,submitted_at timestamptz DEFAULT now(),updated_at timestamptz DEFAULT now());
  CREATE TABLE campaign_applications(id int PRIMARY KEY,campaign_id text,order_submission_id uuid,owner_reviewer_id uuid,participant_identity_id uuid,participant_card_id uuid,phone8 text,status text);
- CREATE TABLE recruit_campaigns(id text PRIMARY KEY,title text,channel text,work_detail jsonb,options jsonb,source_work_order_id text,linked_sheet_id text,linked_tab_name text,linked_tab_gid text);
+ CREATE TABLE recruit_campaigns(id text PRIMARY KEY,title text,channel text,work_detail jsonb,options jsonb,source_work_order_id text,linked_sheet_id text,linked_tab_name text,linked_tab_gid text,thumbnail_url text DEFAULT '');
  CREATE TABLE tab_configs(sheet_id text,tab_name text,tab_gid text,display_name text,is_closed boolean DEFAULT false);
  CREATE TABLE trackb_tab_finished(sheet_id text,tab_name text,tab_gid text,deleted_at timestamptz);
  CREATE TABLE index_master_archive(sheet_id text,tab_name text);

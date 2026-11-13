@@ -81,6 +81,15 @@ function bankFromGoodsCostType(v) {
   return null;
 }
 
+/** 리뷰오더 물건비에 「업체입금」(제품비를 업체가 보낸다)이라고 적혀 있나 (결정 369).
+ *  ★ 이체은행이 우리 은행(케이뱅크·하나·자동)인데 이 값이 참이면 = 어긋남:
+ *    업체 화면에 계좌가 안 보이고(업체가 못 보냄), 우리 입금관리는 제품비까지 보내려 한다(업체도 보내면 이중 입금).
+ *    그래서 입금 대상은 보류(`order_goods_by_advertiser`)하고, 작업 조건 카드·모집공고 창이 같은 판정으로 경고한다.
+ *  ★ 프론트(index-recruit.js `_rfOrderSaysAdv`)도 같은 정규식을 쓴다(회귀가드 paymentPayoutOrderMismatch). */
+function goodsCostSaysAdvertiser(v) {
+  return /업체\s*입금/.test(String(v == null ? '' : v));
+}
+
 /**
  * 어떤 표기로 저장돼 있든 `kbank` | `hana` 로 해석 — **판정 단일 출처**.
  *
@@ -574,6 +583,12 @@ async function listPaymentTargets(opts = {}) {
     // split: 제품비 값이 없다 = 아직 구매(투입) 전 — 리뷰비도 구매가 끝난 줄에만 보낸다(사용자 확정 2026-10-26).
     if (!productPrice && !isQna) issues.push(goodsByAdvertiser ? 'not_purchased' : 'no_price');
     if (amount <= 0) issues.push(goodsByAdvertiser ? 'split_no_fee' : 'zero_amount');
+    /* ★★ 결정 369 — 리뷰오더 물건비는 「업체입금」인데 이체은행이 우리 은행(케이뱅크·하나·자동)인 작업은 **보류**.
+         그대로 두면 제품비까지 우리가 보낸다(업체도 보내면 이중 입금 · 2026-11-13 플라워민트·누룽칩 3차가 이 상태였다).
+         이체은행을 「제품비 업체 · 리뷰비 …」나 「업체입금」으로 바꾸면 풀린다. 업체입금·제품비 업체 작업은 해당 없음. */
+    if (payout.mode === 'ours' && goodsCostSaysAdvertiser((camp && camp.goodsCostType) || (tab && tab.goodsCostType))) {
+      issues.push('order_goods_by_advertiser');
+    }
     /* ★★ 업체 직접 입금 작업(결정 247 · 사용자 확정 2026-10-14) — 업체가 페이백을 보내므로 **우리는 보내지 않는다**.
          맨 앞 사유로 둔다(createBatch 가 issues[0] 을 건너뛴 사유로 말한다). 모르면(조회 실패) 보내지 않는다(fail-closed —
          업체도 보내고 우리도 보내면 되돌릴 수 없다). */
@@ -2443,7 +2458,7 @@ module.exports = {
   resolveDualFinancialContext,
   campaignForTab,
 
-  BANK_LABEL, bankFromGoodsCostType, normalizeBankChoice, tabBankLabel, tabSheetUrl,
+  BANK_LABEL, bankFromGoodsCostType, goodsCostSaysAdvertiser, normalizeBankChoice, tabBankLabel, tabSheetUrl,
   listPaymentTargets, createBatch, cancelBatch, listBatches, getBatch, markDownloaded,
   checkBatchReceiptEligibility,
   buildWorkbook, batchFileName, batchFileFormat,
