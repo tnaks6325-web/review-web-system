@@ -85,6 +85,12 @@
     return _unreadInflight;
   }
 
+  // ── 휴대폰 뒤로가기 = 대화창 닫기(결정 372 · js/reviewer-sheet-back.js) ──
+  //   도우미가 없는 화면·옛 캐시에서는 아무 일도 하지 않는다.
+  function sheetBack(kind, id, close) {
+    try { if (window.RhSheetBack && typeof window.RhSheetBack[kind] === "function") window.RhSheetBack[kind](id, close); } catch (_) {}
+  }
+
   // ── 공통 오버레이 ──
   function overlay() {
     let ov = document.getElementById("rcsOverlay");
@@ -102,6 +108,7 @@
     _open = null;
     const ov = document.getElementById("rcsOverlay");
     if (ov) ov.style.display = "none";
+    sheetBack('closed', 'csChat');
   }
 
   const SHEET = "background:#fff;width:560px;max-width:100vw;height:84vh;border-radius:18px 18px 0 0;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 -6px 30px rgba(0,0,0,.2)";
@@ -126,6 +133,7 @@
     const headerSub = "관리자에게 문의를 남겨주세요";
     _pending = [];                                   // 방을 바꾸면 이전 첨부는 버린다
     const ov = overlay();
+    sheetBack('opened', 'csChat', backToInbox);
     ov.innerHTML = `<div style="${SHEET}">
       <div style="padding:12px 14px;border-bottom:1px solid #eef2f7;display:flex;align-items:center;gap:8px">
         <button onclick="ReviewerCS.back()" style="width:30px;height:30px;border:none;background:#F3F4F6;border-radius:8px;color:#6B7280;cursor:pointer"><i class="fas fa-arrow-left"></i></button>
@@ -267,11 +275,12 @@
       v = document.createElement("div");
       v.id = "rcsImgView";
       v.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:9800;display:flex;align-items:center;justify-content:center;padding:16px";
-      v.onclick = () => { v.style.display = "none"; };
+      v.onclick = () => { v.style.display = "none"; sheetBack('closed', 'csImage'); };
       document.body.appendChild(v);
     }
     v.innerHTML = `<img src="${esc(url)}" style="max-width:100%;max-height:100%;border-radius:10px">`;
     v.style.display = "flex";
+    sheetBack('opened', 'csImage', () => { v.style.display = "none"; sheetBack('closed', 'csImage'); });
   }
 
   // ★ 결정 359: 보내기 성공이 확인된 뒤에만 입력칸·첨부를 비운다. 실패하면 쓴 글·사진을 그대로 두고 이유를 알린다.
