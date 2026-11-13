@@ -2469,7 +2469,8 @@ async function _loadAllDoneHistory() {
 
 /** 대기 건 배지 텍스트 — 참여중 카드 상태의 단일 출처 (결정 371).
  *  단건 카드 · 다건 그룹 줄 · 누를 수 있는지 · 못 누르는 이유를 이 함수 하나가 정한다(사본을 두면 두 카드가 또 갈린다).
- *  · 리뷰를 쓸 차례 → 「리뷰 제출 필요」 / 여러 장 중 일부만 냄 → 「리뷰 n/m 제출」 (누를 수 있음)
+ *  · 리뷰를 쓸 차례 → 「리뷰 미제출」(참여상품 정보 창 머리와 같은 말) / 여러 장 중 일부만 냄 → 「리뷰 n/m 제출」 (누를 수 있음)
+ *    ★ 그냥 「미제출」은 금지 — 구매양식을 안 냈다로 읽힌다(reviewerPurchaseFormStatus 가드).
  *  · 구매양식이 아직 작업표·목록에 반영 중(isOrderPending: processing·reflected) → 「반영 중」 (못 누름 · 잠시 뒤 가능)
  *  · 담당자가 봐야 하는 상태(reviewObligationStatus 'unknown' · orderStage 'attention') → 「담당자 확인 중」 (못 누름 · 할 일 없음)
  *  ★ 누를 수 있는 카드 집합은 종전과 같다 — isOrderPending 또는 'unknown' 만 못 누른다. */
@@ -2484,7 +2485,7 @@ function _pendingCardState(item) {
   const total = Array.isArray(it.captureSlots) ? it.captureSlots.length : 0;
   const done = Array.isArray(it.submittedSlots) ? Math.min(it.submittedSlots.length, total) : 0;
   if (total > 1 && done > 0) return { text:'리뷰 ' + done + '/' + total + ' 제출', tone:'todo', tappable:true, reason:'' };
-  return { text:'리뷰 제출 필요', tone:'todo', tappable:true, reason:'' };
+  return { text:'리뷰 미제출', tone:'todo', tappable:true, reason:'' };
 }
 function _pendingBadgeText(item) {
   return _pendingCardState(item).text;
@@ -3091,7 +3092,7 @@ function openPartInfoSheet(items, opts){
   const many = list.length > 1;
   const statusChip = done
     ? '<span style="font-size:.6rem;font-weight:800;background:#D1FAE5;color:#0ca678;border-radius:8px;padding:2px 7px;margin-left:6px;vertical-align:middle">제출완료</span>'
-    : '<span style="font-size:.6rem;font-weight:800;background:#FEF3C7;color:#B45309;border-radius:8px;padding:2px 7px;margin-left:6px;vertical-align:middle">미제출</span>';
+    : '<span style="font-size:.6rem;font-weight:800;background:#FEF3C7;color:#B45309;border-radius:8px;padding:2px 7px;margin-left:6px;vertical-align:middle">리뷰 미제출</span>';
   const listRows = many
     ? '<div style="margin-top:8px;display:flex;flex-direction:column;gap:5px">' + list.map(x =>
         '<div style="font-size:.74rem;color:#374151;display:flex;gap:6px;align-items:center"><i class="fas fa-box" style="color:#3182f6;font-size:.66rem;flex:none"></i><span style="min-width:0">' + escHtml(_partInfoGroupRowLabel(x)) + '</span></div>').join('') + '</div>'
