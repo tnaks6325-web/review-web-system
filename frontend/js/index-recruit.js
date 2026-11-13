@@ -646,7 +646,17 @@ const RF_ORDER_ADV_CONFIRM = "작업오더 물건비가 「업체입금」인데
 function _rfTransferHint(goodsCostType) {
   window._rfLastGoodsCost = goodsCostType;   // 업체입금에서 다른 은행으로 돌아갈 때 안내를 되살리는 재료
   const el = document.getElementById("rf_transfer_bank_hint");
-  if (!el) return;
+  if (!el) {
+    /* 결정 369 — 안내 줄이 없는 모양(설정 표 · 작업보드 모집공고 창)은 업체입금 전용 줄에 말한다.
+       업체입금 계열을 이미 고른 상태면 그 안내(_rfAdvPayoutHint)가 우선이라 건드리지 않는다. */
+    const adv = document.getElementById("rf_transfer_bank_adv");
+    if (adv && !_rfIsGoodsAdv((document.getElementById("rf_transfer_bank") || {}).value || "")) {
+      const on = _rfOrderSaysAdv(goodsCostType);
+      adv.textContent = on ? RF_ORDER_ADV_HINT(String(goodsCostType).trim()) : "";
+      adv.hidden = !on;
+    }
+    return;
+  }
   const base = "현금이체 → 하나은행 · 수수료(세금계산서) → 케이뱅크";
   const v = String(goodsCostType || "").trim();
   if (!v) { el.textContent = base; el.style.color = "#8B94A1"; return; }

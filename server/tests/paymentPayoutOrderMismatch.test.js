@@ -159,10 +159,39 @@ const _otherIssues = it => (it.issues || []).filter(x => x !== 'dual_bundle_chec
 
   await ta('3d 모집공고 창 — 물건비 업체입금이면 안내 줄 + 우리 은행을 새로 고를 때 저장 직전 확인', () => {
     const js = FRONT('js/index-recruit.js');
-    const hint = js.match(/function _rfTransferHint[\s\S]{0,1400}?\n}/);
+    const hint = js.match(/function _rfTransferHint[\s\S]{0,2400}?\n}/);
     assert.ok(hint && /if \(_rfOrderSaysAdv\(v\)\) \{ el\.textContent = RF_ORDER_ADV_HINT\(v\)/.test(hint[0]));
+    // 안내 줄이 없는 모양(작업보드 모집공고 창)은 업체입금 전용 줄에 같은 안내를 띄운다(업체입금 계열을 고른 상태면 그 안내 우선)
+    assert.ok(/getElementById\("rf_transfer_bank_adv"\)[\s\S]{0,200}!_rfIsGoodsAdv\([\s\S]{0,200}RF_ORDER_ADV_HINT/.test(hint[0]), '작업보드 모집공고 창에 안내가 안 뜬다');
     assert.ok(/if \(_rfOrderSaysAdv\(window\._rfLastGoodsCost\) && \(payload\.transfer_bank === "kbank" \|\| payload\.transfer_bank === "hana"\)/.test(js));
     assert.ok(/if \(!confirm\(RF_ORDER_ADV_CONFIRM\)\) \{ _rfSaveBlocked\(/.test(js), '취소하면 저장하지 않아야 한다');
+  });
+
+  await ta('3e ★ 저장 직전 확인을 실제로 돌린다 — 물건비 업체입금 + 케이뱅크 새로 고름 = 확인(취소 시 저장 안 함) · 자동/제품비 업체/원래 값 그대로 = 묻지 않음', () => {
+    const vm = require('vm');
+    const js = FRONT('js/index-recruit.js');
+    const a = js.indexOf('if (document.getElementById("rf_transfer_bank_btns")) {\n        payload.transfer_bank');
+    const b = js.indexOf('payload.transfer_memo', a);
+    assert.ok(a > 0 && b > a, '이체은행 저장 블록을 못 찾았다');
+    const head = js.slice(js.indexOf('function _rfOrderSaysAdv'), js.indexOf('/**\n * ★ 086: [자동]일 때')).replace(/const RF_/g, 'var RF_');
+    const run = (bank, orig, goods, answer) => {
+      const asked = [], blocked = [];
+      const ctx = { window: { _rfOrigTransferBank: orig, _rfLastGoodsCost: goods }, payload: {}, asked, blocked,
+        document: { getElementById: id => id === 'rf_transfer_bank_btns' ? {} : (id === 'rf_transfer_bank' ? { value: bank } : null) },
+        confirm: m => { asked.push(m); return answer; }, _rfSaveBlocked: m => blocked.push(m),
+        _rfIsGoodsAdv: v => v === 'advertiser' || v === 'split_kbank' || v === 'split_hana', RF_ADV_PAYOUT_OFF_CONFIRM: 'OFF' };
+      vm.createContext(ctx);
+      vm.runInContext(head + '\n(function(){ ' + js.slice(a, b) + '} ctx_done = true; })();', Object.assign(ctx, { ctx_done: false }));
+      return { asked, blocked, done: ctx.ctx_done };
+    };
+    const G = '업체입금(입금명: 배성화)';
+    let r = run('kbank', '', G, false);
+    assert.strictEqual(r.asked.length, 1); assert.ok(/업체입금/.test(r.asked[0])); assert.strictEqual(r.done, false, '취소하면 저장으로 넘어가면 안 된다'); assert.strictEqual(r.blocked.length, 1);
+    r = run('hana', '', G, true);  assert.strictEqual(r.asked.length, 1); assert.strictEqual(r.done, true, '확인하면 저장 진행');
+    r = run('', '', G, false);     assert.strictEqual(r.asked.length, 0, '[자동]은 묻지 않는다(입금관리가 막는다)'); assert.strictEqual(r.done, true);
+    r = run('split_kbank', '', G, false); assert.strictEqual(r.asked.length, 0); assert.strictEqual(r.done, true);
+    r = run('kbank', 'kbank', G, false);  assert.strictEqual(r.asked.length, 0, '이미 저장된 값 그대로면 다시 묻지 않는다');
+    r = run('kbank', '', '계산서(농협)', false); assert.strictEqual(r.asked.length, 0, '물건비가 업체입금이 아니면 종전 그대로');
   });
 
   console.log(`\n결과: ${pass} 통과 / ${fail} 실패`);
