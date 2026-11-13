@@ -82,10 +82,12 @@
     if (selfNav) { selfNav = false; lastDepth = d; return; }
     var target = d - base;
     if (target < 0) target = 0;
-    var closedAny = false;
-    while (stack.length > target) {
-      var top = stack.pop();
-      closedAny = true;
+    // 닫을 창을 먼저 떼어 낸 뒤 닫는다 — 닫히면서 곧바로 여는 다음 창(미제출 경고 → 계정 안내)은
+    // opened() 로 새 칸을 받아 남는다(PR #1826 코드 리뷰: 반복이 새 창까지 같이 닫던 문제).
+    var toClose = stack.length > target ? stack.splice(target) : [];
+    var closedAny = toClose.length > 0;
+    for (var i = toClose.length - 1; i >= 0; i--) {
+      var top = toClose[i];
       try { if (top && typeof top.close === 'function') top.close(); } catch (_) {}
     }
     var wasted = !closedAny && !stack.length && !owed && !leaving && d < lastDepth;

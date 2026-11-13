@@ -99,6 +99,22 @@ test('VM 닫자마자 다른 창을 열면(경고→참여상품, 참여상품�
   w.history.back(); await tick(); assert.equal(w.left, 1);
 });
 
+test('VM 뒤로가기로 닫힌 창이 닫히면서 다음 창을 열면(미제출 경고 → 계정 안내) 새 창은 남는다 · 뒤로 한 번 더에 닫힌다', async () => {
+  // 코드 리뷰 지적(PR #1826): closeOverdueReviewWarning() 이 _ifnShowIfReady() 로 계정 안내를 곧바로 연다 —
+  // 뒤로가기 처리 반복이 새로 쌓인 창까지 같이 닫아 버리면 안 된다.
+  const w = loadSheetBack(); const warn = sheet(w, 'warn'), notice = sheet(w, 'notice');
+  const hideWarn = warn.hide; warn.hide = () => { hideWarn(); notice.show(); };
+  w.RhSheetBack.opened('warn', warn.hide); warn.open = true;
+  w.history.back(); await tick();
+  assert.deepEqual([warn.open, notice.open], [false, true], '경고만 닫히고 계정 안내는 남는다');
+  assert.equal(w.left, 0);
+  assert.ok(w.history.state && w.history.state.rhSheetDepth > 0, '남은 안내 창에도 뒤로가기 칸이 있다');
+  w.history.back(); await tick();
+  assert.equal(notice.open, false, '뒤로 한 번 더 = 안내 닫힘'); assert.equal(w.left, 0);
+  w.history.back(); await tick();
+  assert.equal(w.left, 1, '창이 없으면 그대로 나간다');
+});
+
 test('VM 창을 연 채 다른 화면으로 이동(leave) — 되돌리기와 겹치지 않고 창 칸을 그 주소로 바꾼다', async () => {
   const w = loadSheetBack(); const a = sheet(w, 'a');
   a.show(); a.hide(); w.RhSheetBack.leave('/search'); await tick();
