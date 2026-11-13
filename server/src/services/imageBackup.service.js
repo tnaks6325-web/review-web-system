@@ -72,7 +72,7 @@ async function drainOnce({limit=1,signal,deps={}}={}){
    const matrix=async()=>{for(const root of d.roots)for(const kind of root.readerKinds){const reader=d.readers.find(r=>r.kind===kind);if(!reader)throw Object.assign(new Error(),{code:'READER_UNAVAILABLE'});try{const o=await scan.observe({fileId:job.file_id,rootId:root.rootId,reader,source:old.source,deps:d});observations.push(o);}catch(e){if(e.code!=='UNRESOLVED_PATH'&&e.response?.status!==404&&e.code!==404)throw e;}}};
    if(old.descriptor){const reader=d.readers.find(r=>r.kind===old.readerKind);if(!reader)throw Object.assign(new Error(),{code:'READER_UNAVAILABLE'});
     // 결정 368: moved out of its root (e.g. into another approved root) = new observation → superseded below.
-    try{observations=[await scan.observe({fileId:job.file_id,rootId:old.descriptor.rootId,reader,source:old.source,deps:d})];}catch(e){if(e.code!=='UNRESOLVED_PATH')throw e;await matrix();}}
+    try{observations=[await scan.observe({fileId:job.file_id,rootId:old.descriptor.rootId,reader,source:old.source,deps:d})];}catch(e){if(e.code!=='UNRESOLVED_PATH'&&e.code!==404&&e.response?.status!==404)throw e;await matrix();}}
    else await matrix();
    if(!observations.length)throw Object.assign(new Error(),{code:'UNRESOLVED_PATH'});
    if(observations.some(o=>o.scope.decision==='exclude')){await finish({pool:d.pool,job,status:'superseded',code:'SCOPE_DENIED'});continue;}

@@ -116,6 +116,31 @@ async function run(fn){try{await fn();}catch(e){failures.push(e.message);console
   assert.equal(r.retry,0,'moved-to-other-root is a new observation, not a retry');assert.equal(jobs[0].status,'superseded');
   assert.equal(jobs.length,2);assert.equal(jobs[1].observation.descriptor.rootId,R2);assert.equal(jobs[1].status,'pending');
   await db.close();cases.push('drain follows cross-root move via superseded replacement');});
+ // ⑨ review: A→B→A (parent renamed back, same version) — live observation returns to a job key that is
+ //    already superseded. That terminal row must become runnable again, not consume revisits until SOURCE_UNSTABLE.
+ await run(async()=>{const meta={[R]:{id:R,name:'root',mimeType:FOLDER},[F1]:img(F1,R)};
+  const {db,deps}=await setup(meta,[{rootId:R,readerKinds:['sa']}]);const scan=await s.startScan({deps});await steps(scan.id,deps,1);
+  const key=(await q(db,'SELECT job_key FROM image_backup_scan_entries WHERE entry_key=$1',['file:'+F1]))[0].job_key;
+  let r;for(let i=0;i<s.MAX_FILE_REVISITS+2;i++){await db.query("UPDATE image_backup_outbox SET status='superseded' WHERE job_key=$1 AND status='superseded'",[key]);
+   if(i===0)await db.query("UPDATE image_backup_outbox SET status='superseded' WHERE job_key=$1",[key]);r=await s.scanStep({scanId:scan.id,budgetMs:60000,deps});if(r.state==='incomplete')break;}
+  const e=(await q(db,'SELECT state,job_key,data FROM image_backup_scan_entries WHERE entry_key=$1',['file:'+F1]))[0];
+  assert.equal(e.state,'pending','a source that stopped changing is not SOURCE_UNSTABLE');assert.equal(e.job_key,key);
+  assert.equal((await q(db,'SELECT status FROM image_backup_outbox WHERE job_key=$1',[key]))[0].status,'pending','adopted superseded job made runnable again');
+  await db.query("UPDATE image_backup_outbox SET status='done'");r=await s.scanStep({scanId:scan.id,budgetMs:60000,deps});
+  assert.equal(r.cursor?.phase,'publishing');await db.close();cases.push('re-adopted superseded job key becomes runnable (A→B→A)');});
+ // ⑩ review: file moved from an SA-readable root to an OAuth-only root; the old SA reader now answers 404.
+ //    Drain must try the approved matrix (OAuth finds it), not retry the old reader until blocked.
+ await run(async()=>{const meta={[R]:{id:R,name:'r1',mimeType:FOLDER},[R2]:{id:R2,name:'r2',mimeType:FOLDER},[F1]:img(F1,R)};
+  const db=new PGlite();await db.exec(MIGRATION);const sa=drive(meta),oauth={...drive(meta),kind:'oauth'};let oauthCalls=0;
+  const saGet=sa.getMetadata,oGet=oauth.getMetadata;
+  oauth.getMetadata=async id=>{oauthCalls++;return oGet(id);};
+  const deps={pool:db,roots:[{rootId:R,readerKinds:['sa']},{rootId:R2,readerKinds:['oauth']}],excluded:[],readers:[sa,oauth],api,loadHints:hints};
+  const o=await s.observe({fileId:F1,rootId:R,reader:sa,deps});await b.enqueue({...o.observation,fileId:F1,jobKey:o.jobKey},{pool:db});
+  meta[F1].parents=[R2];sa.getMetadata=async id=>{if(id===F1)throw Object.assign(new Error('File not found'),{code:404});return saGet(id);};
+  const r=await b.drainOnce({limit:1,deps});const jobs=await q(db,'SELECT status,observation FROM image_backup_outbox ORDER BY id');
+  assert.ok(oauthCalls>0,'approved OAuth reader consulted');assert.equal(r.retry,0,'old-reader 404 is not a retry loop');
+  assert.equal(jobs[0].status,'superseded');assert.equal(jobs.length,2);assert.equal(jobs[1].observation.descriptor.rootId,R2);
+  await db.close();cases.push('old-reader 404 falls back to the approved reader matrix');});
  if(failures.length)throw new Error(failures.length+' case(s) failed');
  console.log('PASS imageBackupScanMoves: '+cases.join('; ')+' ('+cases.length+' cases)');
 })().catch(e=>{console.error(e);process.exitCode=1;});

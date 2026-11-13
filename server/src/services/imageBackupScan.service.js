@@ -93,7 +93,10 @@ async function observeLive({fileId,deps:d}){
 async function revisit(c,{scanId,key,old,live}){
  const fileId=key.slice(5),revisits=(Number(old.data?.scanRevisits)||0)+1;
  const next=live.state!=='unresolved'&&revisits>MAX_FILE_REVISITS?{data:{fileId,reason:'SOURCE_UNSTABLE'},jobKey:null,state:'unresolved'}:live;
- if(next.jobKey)await backup.enqueue({...next.data,fileId:next.data.descriptor.fileId,jobKey:next.jobKey},{pool:c});
+ if(next.jobKey){await backup.enqueue({...next.data,fileId:next.data.descriptor.fileId,jobKey:next.jobKey},{pool:c});
+  // Live state returned to an earlier observation (A→B→A): its row may already be terminal 'superseded'
+  // (enqueue is ON CONFLICT DO NOTHING). Make exactly that row runnable again; done rows stay done.
+  await c.query("UPDATE image_backup_outbox SET status='pending',attempts=0,next_attempt_at=now(),lease_token=NULL,lease_until=NULL,last_error_code=NULL,updated_at=now() WHERE job_key=$1 AND status='superseded'",[next.jobKey]);}
  await c.query('UPDATE image_backup_scan_entries SET data=$3,job_key=$4,state=$5 WHERE scan_id=$1 AND entry_key=$2',[scanId,key,JSON.stringify({...next.data,scanRevisits:revisits}),next.jobKey,next.state]);
  if(next.state==='excluded'&&next.data.reason==='SOURCE_GONE')await c.query("UPDATE image_backup_scans SET counts=jsonb_set(counts,'{excludedSourceGone}',to_jsonb(COALESCE((counts->>'excludedSourceGone')::int,0)+1)) WHERE id=$1",[scanId]);
 }
