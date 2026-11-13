@@ -182,6 +182,42 @@ test('줄 왼쪽 작은 상품 사진 — https 만 · 없거나 안 뜨면 회�
   assert.ok(rows.every(r=>r.first&&r.w===36&&r.h===36&&r.left===rows[0].left),JSON.stringify(rows));
 }));
 
+// 결정 372·370: 구매사진 창·사진 크게 보기도 휴대폰 뒤로가기 = 그 창만 닫기(실기 안드로이드에서 홈을 통째로 떠나던 문제).
+async function backHarness(fn,engine){
+  const server=http.createServer((req,res)=>{
+    const p=req.url.split('?')[0];
+    if(p==='/next'){res.setHeader('Content-Type','text/html; charset=utf-8');return res.end('<!doctype html><meta charset="utf-8"><a id="go" href="/">home</a>');}
+    if(p==='/'){res.setHeader('Content-Type','text/html; charset=utf-8');return res.end('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/frontend/css/reviewer-purchase-capture.css"></head><body><main><div class="home-section" id="sectionMissingCapture"></div></main><script src="/frontend/js/reviewer-sheet-back.js"></script><script src="/frontend/js/reviewer-purchase-capture.js"></script></body></html>');}
+    if(p.startsWith('/api/drive/image/')){res.setHeader('Content-Type','image/svg+xml');return res.end('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="14"/>');}
+    try{res.setHeader('Content-Type',p.endsWith('.css')?'text/css':'text/javascript');res.end(fs.readFileSync(path.join(root,p)));}catch{res.statusCode=404;res.end();}
+  });
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));
+  const base='http://127.0.0.1:'+server.address().port;
+  const browser=await pw[engine].launch({executablePath:pw[engine].executablePath()});
+  const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(15000);
+  try{await page.goto(base+'/next');await page.click('#go');await page.waitForURL(base+'/');await fn(page,base);}
+  finally{await browser.close();await new Promise(r=>server.close(r));}
+}
+for(const engine of ['chromium','webkit'])test(`${engine} 뒤로가기: 구매사진 창·사진 크게 보기는 그 창만 닫고 홈에 남는다 · 단추로 닫은 뒤엔 한 번에 나간다`,()=>backHarness(async(page,base)=>{
+  await serve(page,[done('3','사진 낸 주문'),need('1','사진 없는 주문')]);await banner(page);
+  await page.locator('.rpc-banner').click();await page.locator('dialog.rpc-sheet .rpc-row').first().waitFor();
+  await page.goBack();await page.waitForTimeout(300);
+  assert.equal(page.url(),base+'/','뒤로가기 한 번에 홈을 떠나면 안 된다');
+  assert.equal(await page.locator('dialog.rpc-sheet').count(),0,'창은 닫힌다');
+  await page.waitForFunction(()=>window.listCalls>=2);   // 닫으면 한 줄 알림 건수를 다시 읽는다(단추로 닫을 때와 같다)
+  // 사진 크게 보기 → 뒤로 = 사진만 닫힘 → 뒤로 = 창 닫힘
+  await page.locator('.rpc-banner').click();await page.locator('dialog.rpc-sheet .rpc-row').first().waitFor();
+  await page.locator('dialog.rpc-sheet .rpc-group').nth(1).locator('.rpc-rowhead').first().click();
+  await page.locator('dialog.rpc-sheet [data-action="photo"]').first().click();await page.locator('dialog.rpc-photo-dialog').waitFor();
+  await page.goBack();await page.waitForTimeout(300);
+  assert.deepEqual([page.url(),await page.locator('dialog.rpc-photo-dialog').count(),await page.locator('dialog.rpc-sheet').count()],[base+'/',0,1],'사진만 닫힌다');
+  await page.goBack();await page.waitForTimeout(300);
+  assert.deepEqual([page.url(),await page.locator('dialog.rpc-sheet').count()],[base+'/',0]);
+  // 단추(×)로 닫은 뒤에는 뒤로가기 한 번에 이전 페이지로(두 번 누르기 없음)
+  await page.locator('.rpc-banner').click();await page.locator('dialog.rpc-sheet .rpc-x').click();await page.waitForTimeout(300);
+  await page.goBack();await page.waitForURL(base+'/next');
+},engine));
+
 test('직원 창·기존 펼침 목록은 종전 모양 그대로',()=>harness(async page=>{
   const v=await page.evaluate(()=>{const d=document.createElement('div');d.className='rpc rpc-dialog';const t=document.createElement('textarea');const b=document.createElement('button');b.dataset.action='request';d.append(t,b);document.body.append(d);
     const r={pad:getComputedStyle(d).paddingLeft,ta:getComputedStyle(t).minHeight,bg:getComputedStyle(b).backgroundColor};d.remove();return r;});

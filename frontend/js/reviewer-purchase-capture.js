@@ -58,10 +58,14 @@
     const matches=item.channels.filter(ch=>ch.request && String(ch.request.id)===String(requestId));
     return matches.length===1?matches[0]:null;
   }
+  // 휴대폰 뒤로가기 = 열린 창 닫기(결정 372 의 RhSheetBack). 리뷰어 홈에만 있고, 없으면(직원 화면 등) 아무 일도 안 한다.
+  function backOpened(id,close){try{if(global.RhSheetBack)global.RhSheetBack.opened(id,close);}catch(_){}}
+  function backClosed(id){try{if(global.RhSheetBack)global.RhSheetBack.closed(id);}catch(_){}}
   function dispose(c) {
     if(!c) return;
     c.dead=true; c.pending=null;
-    if(c.photoDialog) c.photoDialog.remove();
+    if(c.photoDialog){c.photoDialog.remove();backClosed('rpc-photo');}
+    if(c.dialog&&!c.staff) backClosed('rpc-dialog');
     if(c.unload) global.removeEventListener('beforeunload',c.unload);
     if(c.dialog) c.dialog.remove(); else c.root.replaceChildren();
   }
@@ -94,7 +98,10 @@
     head.append(x);
     dialog.addEventListener('cancel',e=>{e.preventDefault();if(!c.busy) close();});
     if(sheet)dialog.tabIndex=-1;
-    dialog.showModal();if(sheet)dialog.focus();shell(c);return c;
+    dialog.showModal();if(sheet)dialog.focus();shell(c);
+    // 뒤로가기로 닫기 — 사진 처리 중이면 닫지 않고 안내한 뒤 뒤로가기 칸을 다시 받는다(다음 뒤로가기가 홈을 떠나지 않게)
+    if(!isStaff){const onBack=()=>{if(c.dead)return;if(c.busy){c.message.textContent='사진 처리가 끝날 때까지 기다려 주세요.';backOpened('rpc-dialog',onBack);return;}close();};backOpened('rpc-dialog',onBack);}
+    return c;
   }
   function photo(c,p,index) {
     const wrap=el('div',null,'rpc-thumb');
@@ -105,13 +112,15 @@
     const url=c.base+'/api/drive/image/'+encodeURIComponent(String(p.fileId));
     const b=button('','photo',()=>{
       if(!alive(c)) return;
-      if(c.photoDialog) c.photoDialog.remove();
+      if(c.photoDialog){c.photoDialog.remove();backClosed('rpc-photo');}
       const view=el('dialog',null,'rpc rpc-photo-dialog');
       c.photoDialog=view;
       const img=el('img');img.alt=label;img.src=url;
-      view.append(button('닫기','close-photo',()=>view.remove()),img);
-      view.addEventListener('cancel',e=>{e.preventDefault();view.remove();});
+      const shut=()=>{view.remove();if(c.photoDialog===view)c.photoDialog=null;backClosed('rpc-photo');};
+      view.append(button('닫기','close-photo',shut),img);
+      view.addEventListener('cancel',e=>{e.preventDefault();shut();});
       document.body.append(view);view.showModal();
+      if(!c.staff)backOpened('rpc-photo',()=>{view.remove();if(c.photoDialog===view)c.photoDialog=null;});
       img.addEventListener('error',()=>{img.replaceWith(el('p','사진 연결 확인 불가 · 저장 기록과는 별개예요.'));});
     });
     b.setAttribute('aria-label',label+' 전체 보기');
