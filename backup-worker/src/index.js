@@ -1,4 +1,5 @@
 import * as store from './storage.js';
+import {admit,BASE_RESERVE} from './admission.js';
 const {BackupError,fail}=store;
 const status={AUTH_REQUIRED:401,BAD_DESCRIPTOR:400,SCOPE_DENIED:403,NOT_FOUND:404,SOURCE_MISSING:404,SOURCE_MISMATCH:409,SOURCE_CHANGED:409,KEY_CONFLICT:409,PRECONDITION_FAILED:412,TOO_LARGE:413,BUSY:429,STORE_UNAVAILABLE:503,VERIFY_FAILED:502};
 export function response(body,init={}) { const headers=new Headers(init.headers); headers.set('Cache-Control','no-store');headers.set('X-Content-Type-Options','nosniff');headers.set('Content-Security-Policy',"sandbox; default-src 'none'"); return new Response(body,{...init,headers}); }
@@ -13,17 +14,17 @@ function contentType(request,type) {if(!new RegExp('^'+type.replace('/','\\/')+'
 function lengthCheck(request,max) {const value=request.headers.get('content-length');if(value!==null){if(!/^(0|[1-9][0-9]*)$/.test(value))fail('BAD_DESCRIPTOR');if(BigInt(value)>BigInt(max))fail('TOO_LARGE');}}
 async function readJson(request,limit) {contentType(request,'application/json');lengthCheck(request,limit);return store.json(await store.readBounded(request.body,limit));}
 function download(body,{size,mime,etag,sha256}) {return response(body,{headers:{'Content-Length':String(size),'Content-Type':mime,'Content-Disposition':'attachment; filename="backup.bin"','ETag':'"'+etag+'"',...(sha256?{'X-Backup-Sha256':sha256}:{})}});}
-async function route(request,env) {
+async function route(request,env,slot) {
  const u=new URL(request.url),path=u.pathname,m=request.method;
  if(path!=='/v1/manifests'&&u.search)fail('BAD_DESCRIPTOR');
  if(path==='/v1/objects'&&m==='PUT'){
   contentType(request,'application/octet-stream');lengthCheck(request,store.MAX_BYTES);
   const header=request.headers.get('x-backup-descriptor');if(!header||header.length>10924)fail('BAD_DESCRIPTOR');
-  const decoded=store.unb64(header);if(decoded.byteLength>8192)fail('BAD_DESCRIPTOR');const envelope=store.validateEnvelope(env,store.json(decoded));
+  const decoded=store.unb64(header);if(decoded.byteLength>8192)fail('BAD_DESCRIPTOR');const envelope=store.validateEnvelope(env,store.json(decoded));slot.grow(2*envelope.descriptor.size);
   return jsonResponse(await store.putVerifiedObject(env,{...envelope,body:request.body}));
  }
  if(path==='/v1/objects/copy'&&m==='POST'){
-  const envelope=store.validateEnvelope(env,await readJson(request,8192));return jsonResponse(await store.copyVerifiedOrig(env,envelope));
+  const envelope=store.validateEnvelope(env,await readJson(request,8192));slot.grow(2*envelope.descriptor.size);return jsonResponse(await store.copyVerifiedOrig(env,envelope));
  }
  let match;
  if((match=path.match(/^\/v1\/objects\/([A-Za-z0-9_-]+)$/))&&['GET','HEAD'].includes(m)){
@@ -53,7 +54,6 @@ async function route(request,env) {
  }
  fail('NOT_FOUND');
 }
-let active=false; // Isolate-local budget only; no cross-isolate concurrency claim.
 function errorResponse(request,error) {
  const code=error instanceof BackupError?error.code:'STORE_UNAVAILABLE',headers={'X-Backup-Error':code};
  return request.method==='HEAD'?response(null,{status:status[code],headers}):jsonResponse({v:1,error:{code,retryable:['BUSY','STORE_UNAVAILABLE','VERIFY_FAILED','SOURCE_CHANGED'].includes(code)}},{status:status[code],headers});
@@ -66,14 +66,14 @@ function releaseOnBodyEnd(res,release) {
  return new Response(body,{status:res.status,headers:res.headers});
 }
 export default {async fetch(request,env,ctx) {
- let owns=false;
+ let owns=false,slot=null;
  try {
-  await authenticate(request,env);if(active)fail('BUSY');active=true;owns=true;
-  let timer,timedOut=false,released=false;const release=()=>{if(!released){released=true;active=false;}};
-  const pending=route(request,env).then(r=>{if(timedOut){void r.body?.cancel().catch(()=>{});release();}return r;},e=>{if(timedOut)release();throw e;});
+  await authenticate(request,env);slot=admit(BASE_RESERVE);owns=true;
+  let timer,timedOut=false;const release=()=>slot.release();
+  const pending=route(request,env,slot).then(r=>{if(timedOut){void r.body?.cancel().catch(()=>{});release();}return r;},e=>{if(timedOut)release();throw e;});
   // R2 binding calls cannot be aborted. A timed-out operation retains its slot
   // until it settles; do not multiply live writes by releasing early.
   if(ctx)ctx.waitUntil(pending.catch(()=>{}));
   try {const r=await Promise.race([pending,new Promise((_,reject)=>{timer=setTimeout(()=>{timedOut=true;owns=false;reject(new BackupError('STORE_UNAVAILABLE'));},30000);})]);clearTimeout(timer);owns=false;return releaseOnBodyEnd(r,release);}catch(e){clearTimeout(timer);throw e;}
- } catch(error) {if(owns)active=false;return errorResponse(request,error);}
+ } catch(error) {if(owns&&slot)slot.release();return errorResponse(request,error);}
 }};
