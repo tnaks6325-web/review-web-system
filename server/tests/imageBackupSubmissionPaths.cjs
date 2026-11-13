@@ -108,9 +108,11 @@ function normalize(v){return JSON.parse(JSON.stringify(v,(k,val)=>['uploadBatchI
    const session={ownerReviewerId:captureFixture.OWNER,loginKind:'self',loginPhone8:'12345678'};
    const before=(await f.db.query('SELECT * FROM order_submissions ORDER BY id')).rows;
    const {item}=await core.getForReviewer({session,orderSubmissionId:captureFixture.SINGLE});
-   await withHttp(router,async post=>{const token=sessions.issueReviewerSession({...session,loginName:'local'});const r=await post('/purchase-captures/'+captureFixture.SINGLE+'/supplements',{channel:'single',imageBase64:captureFixture.IMAGE.toString('base64'),mimeType:'image/png',requestKey:crypto.randomUUID(),expectedEvidenceHash:item.channels[0].evidenceHash},{'x-reviewer-token':token});assert.equal(r.status,200,JSON.stringify(r.body));assert.equal(r.body.ok,true);assert.equal(r.body.item.channels[0].photos.length,3);assert.equal(r.body.item.channels[0].photos[2].fileId,'file00000001');});
+   await withHttp(router,async post=>{const token=sessions.issueReviewerSession({...session,loginName:'local'});const r=await post('/purchase-captures/'+captureFixture.SINGLE+'/supplements',{channel:'single',imageBase64:captureFixture.IMAGE.toString('base64'),mimeType:'image/png',requestCheck:true,requestKey:crypto.randomUUID(),expectedEvidenceHash:item.channels[0].evidenceHash},{'x-reviewer-token':token});assert.equal(r.status,200,JSON.stringify(r.body));assert.equal(r.body.ok,true);assert.equal(r.body.item.channels[0].photos.length,3);assert.equal(r.body.item.channels[0].photos[2].fileId,'file00000001');});
    assert.deepEqual((await f.db.query('SELECT * FROM order_submissions ORDER BY id')).rows,before);
    assert.equal((await f.db.query('SELECT count(*)::int n FROM purchase_capture_supplements')).rows[0].n,1);
+   assert.equal((await f.db.query('SELECT count(*)::int n FROM purchase_capture_check_requests')).rows[0].n,1);
+   assert.ok((await f.db.query('SELECT check_request_id FROM purchase_capture_supplements')).rows[0].check_request_id);
    await new Promise(r=>setImmediate(r));invariant();
   }finally{await f.pg.close();}}
   console.log('PASS additional: actual HTTP router + SQL core + default uploader, OFF/ON faults preserve third photo, check request, original orders');

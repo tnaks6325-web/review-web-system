@@ -60,8 +60,13 @@ async function harness(channels=['single']) {
       return db.transaction(async client => run(client,await inspectInTx(client,args)));
     },
     async viewInTx(client,ctx) {
-      const request = (await client.query('SELECT id,status,note FROM purchase_capture_check_requests WHERE order_submission_id=$1 AND evidence_hash=$2',[ctx.order.id,hash])).rows[0] || null;
-      return {orderSubmissionId:ctx.order.id,displayName:ctx.displayName,channels:[{channel:'single',evidenceHash:hash,reviewState:request?.status||'not_requested',request}]};
+      const views=[];
+      for(const channel of channels){
+        const row = (await client.query('SELECT * FROM purchase_capture_check_requests WHERE order_submission_id=$1 AND channel=$2 AND evidence_hash=$3',[ctx.order.id,channel,hash])).rows[0] || null;
+        const request=row?{id:row.id,status:row.status,note:row.note||'',createdAt:row.created_at,updatedAt:row.updated_at}:null;
+        views.push({channel,evidenceHash:hash,reviewState:request?.status||'not_requested',request});
+      }
+      return {orderSubmissionId:ctx.order.id,displayName:ctx.displayName,channels:views};
     }
   };
   const { createService } = require('../src/services/purchaseCaptureCheck.service');
@@ -116,7 +121,8 @@ test('staff decision is atomic, replay safe and private while reviewer state mat
     const out=await h.service.decideForStaff(args);
     assert.equal(out.request.status,'needs_photo');assert.equal(out.item.channels[0].reviewState,'needs_photo');
     const replay=await h.service.decideForStaff(args);assert.deepEqual(replay,out);
-    const staff=await h.service.getForStaff({actor,requestId:a.request.id});assert.deepEqual(staff,out);
+    const staff=await h.service.getForStaff({actor,requestId:a.request.id});
+    assert.deepEqual(staff,{...out,item:{...out.item,channels:out.item.channels.map(c=>({...c,evidenceChanged:false}))}});
     assert(h.calls.some(c=>c[0]==='inspect'&&c[1].forStaff===true&&c[1].actor===actor));
     const messages=(await h.db.query('SELECT * FROM cs_messages ORDER BY created_at,id')).rows;
     assert.equal(messages.length,2);
@@ -297,6 +303,30 @@ test('naver and coupang requests remain independent and all internal roles can i
   await assert.rejects(h.service.requestCheck({...args,channel:'single'}),e=>e.status===409);
   assert.deepEqual((await h.db.query('SELECT * FROM order_submissions')).rows,before);
  }finally{await h.db.close();}
+});
+
+test('historical staff inquiries remain readable without writes and cannot decide newer photos',async()=>{
+ for(const channels of [['single'],['naver','coupang']]){
+  const h=await harness(channels);try{
+   const requests=[];
+   for(const channel of channels)requests.push(await h.service.requestCheck({session:h.session,orderSubmissionId:ORDER,channel,expectedEvidenceHash:'hash-v1'}));
+   h.setHash('hash-v2');
+   const snapshot=async()=>{
+    const rows={};for(const table of ['order_submissions','purchase_capture_check_requests','purchase_capture_check_history','cs_messages','cs_threads'])rows[table]=(await h.db.query(`SELECT * FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows;
+    return rows;
+   };
+   const before=await snapshot(),notices=h.notifications.length;
+   for(const [i,channel]of channels.entries()){
+    const out=await h.service.getForStaff({actor,requestId:requests[i].request.id});
+    assert.deepEqual(out.request,requests[i].request);
+    const selected=out.item.channels.find(c=>c.channel===channel);
+    assert.deepEqual(selected.request,requests[i].request);assert.equal(selected.evidenceChanged,true);assert.equal(selected.evidenceHash,'hash-v2');assert.equal(selected.reviewState,'not_requested');
+    for(const other of out.item.channels.filter(c=>c.channel!==channel)){assert.equal(other.request,null);assert.equal(Object.hasOwn(other,'evidenceChanged'),false);}
+    for(const expectedEvidenceHash of ['hash-v1','hash-v2'])await assert.rejects(h.service.decideForStaff({actor,requestId:out.request.id,decision:'confirmed',expectedEvidenceHash}),e=>e.status===409);
+   }
+   assert.deepEqual(await snapshot(),before);assert.equal(h.notifications.length,notices);
+  }finally{await h.db.close();}
+ }
 });
 
 test('internal actor identity is recorded without leaking into messages or public responses',async()=>{

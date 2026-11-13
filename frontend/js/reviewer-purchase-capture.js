@@ -3,7 +3,7 @@
   'use strict';
   let reviewer = null, staff = null, generation = 0;
   const saveLabels = {saved:'사진 접수',failed:'저장 실패',unknown:'연결 확인 중',missing:'사진 미접수',uploading:'사진 저장 중'};
-  const reviewLabels = {not_requested:'확인 요청 전',pending:'담당자 확인 중',needs_photo:'사진 보완 필요',confirmed:'사진 확인 완료'};
+  const reviewLabels = {not_requested:'',pending:'담당자 확인 중',needs_photo:'사진 보완 필요',confirmed:'사진 확인 완료'};
   function el(tag, text, cls) {
     const node = document.createElement(tag);
     if (text != null) node.textContent = String(text);
@@ -23,6 +23,7 @@
       c.identity === identityOf(c.user);
   }
   function errorText(error) {
+    if(error.code==='CAPTURE_REFRESH_REQUIRED')return '사진 저장 기능이 바뀌었어요. 새로고침 후 다시 저장해 주세요.';
     return ({401:'로그인이 만료됐어요. 다시 로그인해 주세요.',403:'이 사진을 처리할 권한이 없어요.',404:'이 주문이나 요청을 찾을 수 없어요.',409:'사진이나 처리 상태가 바뀌었어요. 새로 확인해 주세요.',413:'사진이 너무 커요. 작은 사진으로 다시 선택해 주세요.',503:'지금은 처리할 수 없어요. 잠시 뒤 다시 시도해 주세요.'})[error.status] || '연결하지 못했어요. 잠시 뒤 다시 시도해 주세요.';
   }
   function stale() { const e=new Error('stale'); e.stale=true; return e; }
@@ -63,7 +64,7 @@
   function context(opts,isStaff,container) {
     const base=String(opts.apiBase||'').replace(/\/$/,'').replace(/\/api$/,'');
     const c={staff:isStaff,user:opts.user,identity:identityOf(opts.user),getToken:opts.getToken,base,generation:++generation,root:container,order:opts.orderSubmissionId==null?null:String(opts.orderSubmissionId),requestId:opts.requestId==null?null:String(opts.requestId),onChanged:opts.onChanged,onOpenThread:opts.onOpenThread,busy:false,pending:null};
-    c.folds=new Map();
+    c.folds=new Map();c.problems=new Map();
     c.unload=e=>{if(c.busy){e.preventDefault();e.returnValue='';}};
     global.addEventListener('beforeunload',c.unload);
     return c;
@@ -155,7 +156,9 @@
       section.dataset.foldKey=foldKey;
       section.open=c.folds.has(foldKey)?c.folds.get(foldKey):ch.reviewState==='needs_photo'||ch.saveState==='failed'||ch.saveState==='missing'||ch.saveState==='unknown'||ch.saveState==='uploading';
       section.addEventListener('toggle',()=>{if(section.isConnected)c.folds.set(foldKey,section.open);});
-      const summary=el('summary');summary.append(el('strong',ch.channel==='single'?(ch.label||'구매사진'):(ch.label||ch.channel)+' 구매사진'),el('span',(saveLabels[ch.saveState]||'저장 상태 확인 불가')+' · '+(reviewLabels[ch.reviewState]||'확인 상태 없음')));section.append(summary);
+      const saveLabel=ch.saveState==='saved'?'구매사진 제출 완료':(saveLabels[ch.saveState]||'저장 상태 확인 불가');
+      const reviewLabel=Object.hasOwn(reviewLabels,ch.reviewState)?reviewLabels[ch.reviewState]:'확인 상태 없음';
+      const summary=el('summary');summary.append(el('strong',ch.channel==='single'?(ch.label||'구매사진'):(ch.label||ch.channel)+' 구매사진'),el('span',saveLabel+(reviewLabel?' · '+reviewLabel:'')));section.append(summary);
       const body=el('div',null,'rpc-section');
       if(ch.reason)body.append(el('p',ch.reason,'rpc-reason'));
       const photos=el('div',null,'rpc-photos');(Array.isArray(ch.photos)?ch.photos:[]).forEach((p,i)=>photos.append(photo(c,p,i)));body.append(photos);
@@ -176,7 +179,7 @@
       lock(c,true);c.message.textContent='사진을 준비하고 있어요…';
       try {
         const data=await readFile(input.files[0]);if(!alive(c))return;
-        c.pending={order:String(item.orderSubmissionId),channel:ch.channel,path:path+'/supplements',body:{channel:ch.channel,imageBase64:data.base64,mimeType:data.mime,requestKey:global.crypto.randomUUID(),expectedEvidenceHash:ch.evidenceHash}};
+        c.pending={order:String(item.orderSubmissionId),channel:ch.channel,path:path+'/supplements',body:{channel:ch.channel,imageBase64:data.base64,mimeType:data.mime,requestKey:global.crypto.randomUUID(),expectedEvidenceHash:ch.evidenceHash,requestCheck:false}};
         c.message.textContent='선택한 사진을 저장해 주세요. 기존 사진은 그대로 남아요.';
       }catch(e){if(alive(c))c.message.textContent=e.friendly||'사진을 읽지 못했어요.';}
       finally{if(alive(c)){lock(c,false);render(c);}}
@@ -184,10 +187,30 @@
     const note=el('textarea');note.placeholder='확인할 내용 (선택)';note.setAttribute('aria-label',(ch.label||ch.channel)+' 확인할 내용');note.maxLength=1000;
     const request=button('이미 제출했어요 · 확인 요청','request',()=>write(c,path+'/check-requests',{channel:ch.channel,expectedEvidenceHash:ch.evidenceHash,note:note.value.trim()},'확인 요청을 접수했어요. 담당자 확인을 기다려 주세요.',item.orderSubmissionId));
     capability(body,ch,request,'canRequestCheck');
-    actions.append(add,input,request);body.append(actions,note);
+    actions.append(add,input,request);
+    const controls=el('div');controls.append(actions,note);
+    const problemKey=JSON.stringify([String(item.orderSubmissionId),ch.channel]);
+    if(ch.saveState==='saved'&&ch.reviewState!=='needs_photo'){
+      const toggle=button('사진에 문제가 있나요?','problem',()=>{
+        const open=controls.hidden;c.problems.set(problemKey,open);controls.hidden=!open;toggle.setAttribute('aria-expanded',String(open));
+      });
+      controls.hidden=c.problems.get(problemKey)!==true;toggle.setAttribute('aria-expanded',String(!controls.hidden));
+      body.append(toggle);
+    }
+    body.append(controls);
     if(c.pending && c.pending.order===String(item.orderSubmissionId)&&c.pending.channel===ch.channel) {
       const pending=c.pending;
-      body.append(el('p','선택한 추가 사진 · 아직 접수 여부를 확정하지 않았어요.','rpc-muted'),button('사진 저장 · 다시 시도','save',()=>write(c,pending.path,pending.body,'사진을 접수했어요. 담당자 확인을 기다려 주세요.',pending.order)));
+      const consent=el('input');consent.type='checkbox';consent.checked=pending.body.requestCheck===true;consent.disabled=pending.attempted===true;
+      const label=el('label','사진 저장 후 담당자에게 확인 요청');label.prepend(consent);
+      consent.addEventListener('change',()=>{if(!pending.attempted)pending.body.requestCheck=consent.checked;});
+      const save=button('사진 저장 · 다시 시도','save',()=>{
+        if(ch.capabilities?.canSaveWithoutCheck!==true)return;
+        pending.attempted=true;
+        write(c,pending.path,pending.body,pending.body.requestCheck?'사진을 접수하고 담당자에게 확인을 요청했어요.':'사진을 접수했어요. 확인 요청은 보내지 않았어요.',pending.order);
+      });
+      save.disabled=ch.capabilities?.canSaveWithoutCheck!==true;
+      body.append(el('p','선택한 추가 사진 · 아직 접수 여부를 확정하지 않았어요.','rpc-muted'),label,save);
+      if(save.disabled)body.append(el('p','사진 저장 기능을 업데이트 중이에요. 잠시 후 새로고침해 주세요.','rpc-muted'));
     }
     if(ch.request&&c.onOpenThread)body.append(button('문의 보기','thread',()=>c.onOpenThread(ch.request)));
   }
@@ -217,6 +240,10 @@
   function staffActions(c) {
     const target=staffTarget(c.item,c.requestId);
     const section=el('section',null,'rpc-staff');
+    if(target.evidenceChanged===true){
+      section.append(el('h3','이전 확인 요청'),el('p','확인 요청 뒤 사진이 바뀌었어요. 현재 사진은 볼 수 있지만 이 요청으로 확인 완료나 보완 처리는 할 수 없어요.','rpc-reason'));
+      c.content.append(section);return;
+    }
     const note=el('textarea');note.setAttribute('aria-label','보완 사유');note.placeholder='보완이 필요하면 이유를 적어 주세요';note.maxLength=1000;
     const checked=el('input');checked.type='checkbox';const label=el('label','현재 요청 구매처의 사진을 직접 확인했어요');label.prepend(checked);
     function decide(decision){
