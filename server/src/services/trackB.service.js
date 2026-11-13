@@ -3615,6 +3615,10 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null,
       /* 이체은행 — 값·라벨·출처를 함께 싣는다(화면이 판정을 다시 하지 않게).
          null = 정할 근거가 없음 = [미설정](작업오더 물건비도 비어 자동판정이 안 된 경우). */
       transferBank, bankSource,
+      /* 결정 369 — 리뷰오더 물건비는 「업체입금」인데 이체은행이 우리 은행(케이뱅크·하나·자동·미설정) — 업체에 계좌가 안 보이고
+         입금관리는 보류된다. 판정 = payment.goodsCostSaysAdvertiser(입금관리 보류와 같은 함수). 옛 화면은 이 값을 몰라 종전대로 그린다. */
+      transferBankOrderMismatch: payoutMode.mode === 'ours'
+        && require('./payment.service').goodsCostSaysAdvertiser((wo && wo.goodsCostType) || ''),
       transferBankLabel: advertiserPayout ? ADVERTISER_PAYOUT_LABEL
         : splitPayout ? `제품비 업체 · 리뷰비 ${BANK_LABEL[payoutMode.bank] || ''}`
         : (transferBank ? (BANK_LABEL[transferBank] || transferBank) : null),
