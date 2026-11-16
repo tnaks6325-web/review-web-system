@@ -134,7 +134,7 @@ const F = require('./helpers/qnaExtraPgFixture');
     assert.equal(v.first, '2026-11-03'); assert.equal(v.last, '2026-11-12'); assert.equal(v.ended, true);
     assert.equal(v.days[0].open, 1, '11/03 에 못 채운 자리 1');
     assert.ok(v.extra && v.extra.total === 1 && v.extra.canDecide === true && v.extra.start && v.extra.start.default === 'today', JSON.stringify(v.extra));
-    const other = await qs.qnaPlanView(pool, { id: F.CAMP, linked_sheet_id: F.SHEET, linked_tab_name: F.TAB }, { admin: { name: '다른직원', role: 'admin' }, now: NOW });
+    const other = await qs.qnaPlanView(pool, { id: F.CAMP, linked_sheet_id: F.SHEET, linked_tab_name: F.TAB }, { admin: { name: '다른직원', role: 'staff' }, now: NOW });
     assert.equal(other.extra.canDecide, false, '받는 사람이 아니면 팝업에서 정할 수 없다(막다른 버튼 금지)');
     // 실제 조절 창 조회(getPlanOverview) — Q&A 공고는 qna 칸, 일반 공고는 칸 자체가 없다(종전 응답 그대로)
     const cp = require('../src/services/campaignPlan.service');

@@ -857,7 +857,7 @@
       extraBlk = '<div class="cdp-note warn cdp-od cdp-qextra"><span>자리표가 <b>' + _esc(fmtMD(ex.end)) + '</b>에 끝났고 못 채운 자리 <b>' + (ex.total | 0) + '개</b>가 남아 있습니다. '
         + (exTd && exTd.ok ? '[추가 모집]에서 <b>오늘부터</b> 다시 열 수 있습니다.' : '[추가 모집]에서 시작일을 골라 다시 여세요.') + '</span>'
         + (ex.canDecide === false
-          ? '<span class="cdp-qwho">추가 모집은 공고 담당자·오더를 보낸 사람·마스터가 정합니다.</span>'
+          ? '<span class="cdp-qwho">추가 모집은 공고 담당자·오더를 보낸 사람·관리자가 정합니다.</span>'
           : '<button type="button" class="cdp-btn sm pri" id="cdpQnaExtra" onclick="CampaignDailyPlan._qnaExtra()">추가 모집 정하기</button>')
         + '</div>';
     } else if (q.ended) {
@@ -903,7 +903,7 @@
     } catch (e) { r = { ok: false, reason: 'load_failed' }; }
     if (r && r.ok) return;
     var why = r && r.reason;
-    toast(why === 'not_listed' ? '이 공고의 추가 모집은 공고 담당자·오더를 보낸 사람·마스터가 정합니다(이미 처리됐을 수도 있습니다)'
+    toast(why === 'not_listed' ? '이 공고의 추가 모집은 공고 담당자·오더를 보낸 사람·관리자가 정합니다(이미 처리됐을 수도 있습니다)'
       : why === 'not_started' ? '추가 모집 창이 아직 준비되지 않았습니다 — 화면을 새로고침한 뒤 다시 눌러 주세요'
       : '추가 모집 창을 불러오지 못했습니다 — 잠시 뒤 다시 눌러 주세요');
   }
