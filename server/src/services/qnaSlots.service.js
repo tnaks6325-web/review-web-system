@@ -410,6 +410,12 @@ async function slotForApplication(db, applicationId) {
                 (자리·작업표 줄을 새로 만들지 않고 그 줄의 진행일자만 옮긴다 — 줄 수·총원 불변).
    [그대로 끝내기] = 못 채운 자리를 닫고(lapsed) 공고를 마감한다.
    ★ 같은 일정 끝(end)에 대한 [추가 모집]은 한 번만(공고 행 잠금 뒤 기록 재확인).
+   ★★ 결정 377(사용자 확정 2026-11-16 「선택 B」) — 시작일을 **오늘부터 / 내일부터** 고른다(321 확정 5 「다음 날부터」를 이만큼 바꿈).
+     · 오늘부터 = 오늘 정원 판정(computeCampaignState)이 아직 오늘 신청을 받을 수 있을 때만(마감 시각 전 · 휴무·종료 아님 · 영업일).
+       판정 실패·모름 = 거절(fail-closed). 화면을 믿지 않고 잠금 안에서 다시 잰다.
+     · 0명(휴무)으로 닫아 둔 날은 **건너뛴다** — 자리를 깔아도 그날 공고가 닫혀(rest_day) 아무도 못 받는다.
+       판정 = planOverrideFor(=== 0) 단일 출처 · 날짜 고르기는 종전 그대로 businessDays 의 제외일 목록에 더한다.
+     · 시작일을 안 보낸 옛 화면 = 내일부터(종전).
    ══════════════════════════════════════════════════════════════════════════════ */
 const QNA_END_ACTIONS = { extra: 'qna_extra', finish: 'qna_finish' };
 
@@ -468,12 +474,136 @@ function qnaShortages(item, workOrder) {
   return [...by].map(([unit, n]) => ({ optKey: back.get(unit) || unit, n }));
 }
 
+/** 결정 377 — 추가 모집 시작일 고르기. 없음(옛 화면) = 'tomorrow'(종전). */
+const QNA_EXTRA_STARTS = ['today', 'tomorrow'];
+
+/** 0명(휴무)으로 정해 둔 날 — 공고 정원 판정과 같은 판정(planOverrideFor === 0). from 이후만. */
+function qnaRestDays(plans, from) {
+  const { planOverrideFor } = require('./campaignState.service');
+  return Object.keys(plans || {}).filter(d => d >= from && planOverrideFor(plans, d) === 0).sort();
+}
+
+/**
+ * 오늘부터 다시 깔아도 되나 — **오늘 정원 판정(computeCampaignState) 그대로**(사본 0).
+ *   열림 = 게시 중 · 모집 중/오늘 시간 전/오늘 몫이 차서 닫힘(사유 없음) · 신청 마감 시각(cutoffAt) 전 · 영업일.
+ *   막힘 = 마감 시각 지남 · 0명 휴무(rest_day) · 종료·총원 충족 · 주말·공휴일·제외일 · 오늘 자리 수를 모름.
+ * @param c       recruit_campaigns 행 · counts = fetchCampaignCounts 결과(qnaToday 실림)
+ * @returns {{ok:boolean, code?:string, why?:string, cutoffAt?:string}}
+ */
+function qnaTodayStartCheck(c, counts, now = new Date(), { skipWeekends = true, holidays = [] } = {}) {
+  // Q&A 판정 재료(오늘 자리 수)가 없으면 마감 시각도 모른다 — 모르면 열지 않는다
+  if (!c || !counts || typeof counts.qnaToday !== 'number') return { ok: false, code: 'unknown', why: '오늘 모집 상태를 확인하지 못해 오늘부터 열 수 없습니다' };
+  let s = null;
+  try { s = require('./campaignState.service').computeCampaignState(c, counts, now, null); } catch (_) { s = null; }
+  if (!s) return { ok: false, code: 'unknown', why: '오늘 모집 상태를 확인하지 못해 오늘부터 열 수 없습니다' };
+  if (s.stateReason === 'rest_day') return { ok: false, code: 'rest_day', why: '오늘은 0명(휴무)으로 정해 둔 날이라 오늘부터 열 수 없습니다 — 모집인원 조절 창에서 오늘을 [기본으로] 되돌리면 열 수 있습니다' };
+  const cut = s.cutoffAt ? new Date(s.cutoffAt) : null;
+  if (s.state === 'cutoff' || !cut || now >= cut) return { ok: false, code: 'cutoff', why: '오늘 신청 마감 시각이 지나 오늘부터 열 수 없습니다' };
+  if (!['open', 'preopen', 'daily_done'].includes(s.state) || s.stateReason) return { ok: false, code: 'closed', why: '지금은 모집이 닫혀 있어 오늘부터 열 수 없습니다' };
+  const today = kstDateStr(now);
+  const { businessDays } = require('../utils/worktablePlan');
+  const bd = businessDays({ count: 1, startDate: today, skipWeekends, holidays });
+  if (!bd.length || bd[0].date !== today) return { ok: false, code: 'not_business_day', why: '오늘은 주말·공휴일·제외일이라 오늘부터 열 수 없습니다' };
+  return { ok: true, cutoffAt: cut.toISOString() };
+}
+
+/**
+ * 못 채운 자리를 어느 날로 옮길지(쓰기 0건) — 반영(applyQnaEnd)과 팝업 미리보기가 같은 계산을 쓴다.
+ *   그 상품의 하루 건수 = 처음 자리표에서 하루에 가장 많이 깔린 수(321 확정 5 — 같은 하루 건수).
+ * @returns {{moves:Array<{slot,date,label}>, days:string[], skipped:string[]}}  skipped = 건너뛴 0명 휴무일(실제 깔린 기간 안)
+ */
+async function qnaExtraPlan(db, it, wo, { startDate, restDays = [] } = {}) {
+  const { businessDays, normalizeHolidayList } = require('../utils/worktablePlan');
+  const { rows: per } = await db.query(
+    `SELECT unit_key, MAX(n)::int AS per FROM (
+       SELECT unit_key, slot_date, COUNT(*) AS n FROM qna_slots
+        WHERE sheet_id = $1 AND tab_name = $2 AND status <> 'cancelled' GROUP BY unit_key, slot_date) t
+      GROUP BY unit_key`, [it.sheetId, it.tabName]);
+  const perDay = new Map(per.map(r => [r.unit_key, Math.max(1, r.per || 1)]));
+  const holidays = normalizeHolidayList(wo.holidays).concat(restDays);
+  const byUnit = new Map();
+  for (const s of it.unfilled) { if (!byUnit.has(s.unit_key)) byUnit.set(s.unit_key, []); byUnit.get(s.unit_key).push(s); }
+  const moves = [];
+  for (const [, list] of byUnit) {
+    const pd = perDay.get(list[0].unit_key) || 1;
+    // 공개 자리가 그날 첫 자리라 먼저 찬다(확정 1) — 다시 깔 때도 그날 안에서 공개를 앞에 둔다
+    const days = businessDays({ count: Math.ceil(list.length / pd), startDate, skipWeekends: wo.skip_weekends !== false, holidays });
+    if (days.length * pd < list.length) throw Object.assign(new Error('다시 깔 날짜를 만들지 못했습니다.'), { code: 'no_days' });
+    for (let d = 0; d < days.length; d++) {
+      const chunk = list.slice(d * pd, (d + 1) * pd).sort((a, b) => (a.visibility === 'public' ? 0 : 1) - (b.visibility === 'public' ? 0 : 1) || a.unit_seq - b.unit_seq);
+      for (const s of chunk) moves.push({ slot: s, date: days[d].date, label: days[d].label });
+    }
+  }
+  const dayList = [...new Set(moves.map(m => m.date))].sort();
+  const last = dayList[dayList.length - 1] || startDate;
+  return { moves, days: dayList, skipped: restDays.filter(d => d >= startDate && d <= last) };
+}
+
+/**
+ * 팝업에 보일 시작일 선택지(쓰기 0건 · 결정 377). 실패는 던진다 — 부르는 쪽이 칸을 빼서 화면이 종전 버튼으로 접힌다.
+ * @returns {{default:'today'|'tomorrow', today:{ok,code?,why?,cutoffAt?,days?,skipped?}, tomorrow:{ok:true,days,skipped}}}
+ */
+async function qnaExtraStartOptions(db, it, wo, camp, counts, now = new Date()) {
+  const { normalizeHolidayList } = require('../utils/worktablePlan');
+  const today = kstDateStr(now);
+  const tomorrow = kstDateStr(new Date(now.getTime() + DAY_MS));
+  const rest = qnaRestDays(counts && counts.plans, today);
+  const chk = qnaTodayStartCheck(camp, counts, now, { skipWeekends: wo.skip_weekends !== false, holidays: normalizeHolidayList(wo.holidays).concat(rest) });
+  const tPlan = await qnaExtraPlan(db, it, wo, { startDate: tomorrow, restDays: rest });
+  const out = { today: { ...chk }, tomorrow: { ok: true, days: tPlan.days, skipped: tPlan.skipped }, default: 'tomorrow' };
+  if (chk.ok) {
+    const p = await qnaExtraPlan(db, it, wo, { startDate: today, restDays: rest });
+    out.today.days = p.days; out.today.skipped = p.skipped;
+    out.default = 'today';
+  }
+  return out;
+}
+
+/**
+ * 조절 창(모집인원 조절)의 Q&A 화면 재료 — 자리표가 하루 인원을 정하는 공고만(결정 377).
+ *   days = 자리표 날짜별 자리 수(취소 제외 = 오늘 정원 loadTodayByCampaign 과 같은 셈) · filled = 제출된 자리 · open = 못 채운/남은 자리.
+ *   extra = 정규 일정 끝 결정 대상이면(listQnaEnds — 팝업과 같은 판정) { end, total, canDecide, start }.
+ *     canDecide = 이 사람이 팝업에서 정할 수 있나(받는 사람 규칙 — 팝업 목록 그대로) · null = 모름(사람 정보 없음).
+ */
+async function qnaPlanView(db, camp, { admin = null, now = new Date() } = {}) {
+  const q = db || _pool();
+  const today = kstDateStr(now);
+  const { rows } = await q.query(
+    `SELECT to_char(s.slot_date, 'YYYY-MM-DD') AS d,
+            COUNT(*) FILTER (WHERE s.status <> 'cancelled')::int AS slots,
+            COUNT(*) FILTER (WHERE s.status <> 'cancelled' AND EXISTS (
+              SELECT 1 FROM campaign_applications ca WHERE ca.qna_slot_id = s.id AND ca.status = 'submitted'))::int AS filled,
+            COUNT(*) FILTER (WHERE ${_unfilledSql('s')})::int AS open
+       FROM qna_slots s
+      WHERE s.sheet_id = $1 AND s.tab_name = $2
+      GROUP BY 1 ORDER BY 1`, [camp.linked_sheet_id, camp.linked_tab_name]);
+  const days = rows.filter(r => r.slots > 0).map(r => ({ date: r.d, slots: r.slots, filled: r.filled, open: r.open }));
+  const first = days.length ? days[0].date : null;
+  const last = days.length ? days[days.length - 1].date : null;
+  const view = { today, days, first, last, ended: !!(last && last < today),
+    total: days.reduce((a, x) => a + x.slots, 0), filled: days.reduce((a, x) => a + x.filled, 0), extra: null };
+  if (view.ended) {
+    const all = await listQnaEnds(q, { campaignIds: [String(camp.id)], now });
+    if (all.length) {
+      view.extra = { end: all[0].end, total: all[0].unfilled.length, canDecide: null, start: null };
+      if (admin) {
+        const mine = await require('./campaignSequentialEnd.service').listQnaEndItems(admin, { db: q, campaignIds: [String(camp.id)], now });
+        view.extra.canDecide = mine.length > 0;
+        if (mine[0] && mine[0].start) view.extra.start = mine[0].start;
+      }
+    }
+  }
+  return view;
+}
+
 /**
  * 결정 하나 반영(공고마다 독립 트랜잭션 — 부르는 쪽이 BEGIN/COMMIT 하지 않는다).
  * @returns {{ok:true, moved?:number, lapsed?:number}}  실패는 throw(e.code 있음 = 사람에게 보일 말)
  */
-async function applyQnaEnd({ campaignId, action, end, actor = 'admin', now = new Date() } = {}) {
+async function applyQnaEnd({ campaignId, action, end, start = null, actor = 'admin', now = new Date() } = {}) {
   if (!QNA_END_ACTIONS[action]) throw Object.assign(new Error('잘못된 결정입니다.'), { code: 'bad_action' });
+  // 결정 377 — 시작일(없음 = 내일부터 · 옛 화면). 모르는 값은 막는다(조용히 내일로 접지 않는다)
+  if (start != null && !QNA_EXTRA_STARTS.includes(start)) throw Object.assign(new Error('시작일을 다시 골라 주세요.'), { code: 'bad_start' });
   const client = await _pool().connect();
   try {
     await client.query('BEGIN');
@@ -497,42 +627,47 @@ async function applyQnaEnd({ campaignId, action, end, actor = 'admin', now = new
     const { rows: wos } = await client.query('SELECT * FROM work_orders WHERE id = $1', [it.workOrderId]);
     const wo = wos[0] || {};
     const shortages = qnaShortages(it, wo);
-    let moved = 0, lapsed = 0;
+    let moved = 0, lapsed = 0, extraFrom = null, skipped = [];
     if (action === 'extra') {
-      const { businessDays, normalizeHolidayList, QNA_DATE_HEADER } = require('../utils/worktablePlan');
-      // 그 상품의 하루 건수 = 처음 자리표에서 하루에 가장 많이 깔린 수(확정 5 — 같은 하루 건수)
-      const { rows: per } = await client.query(
-        `SELECT unit_key, MAX(n)::int AS per FROM (
-           SELECT unit_key, slot_date, COUNT(*) AS n FROM qna_slots
-            WHERE sheet_id = $1 AND tab_name = $2 AND status <> 'cancelled' GROUP BY unit_key, slot_date) t
-          GROUP BY unit_key`, [it.sheetId, it.tabName]);
-      const perDay = new Map(per.map(r => [r.unit_key, Math.max(1, r.per || 1)]));
-      const tomorrow = kstDateStr(new Date(now.getTime() + DAY_MS));
-      const holidays = normalizeHolidayList(wo.holidays);
-      const byUnit = new Map();
-      for (const s of it.unfilled) { if (!byUnit.has(s.unit_key)) byUnit.set(s.unit_key, []); byUnit.get(s.unit_key).push(s); }
-      for (const [unit, list] of byUnit) {
-        const pd = perDay.get(unit) || 1;
-        // 공개 자리가 그날 첫 자리라 먼저 찬다(확정 1) — 다시 깔 때도 그날 안에서 공개를 앞에 둔다
-        const days = businessDays({ count: Math.ceil(list.length / pd), startDate: tomorrow, skipWeekends: wo.skip_weekends !== false, holidays });
-        if (days.length * pd < list.length) throw Object.assign(new Error('다시 깔 날짜를 만들지 못했습니다.'), { code: 'no_days' });
-        for (let d = 0; d < days.length; d++) {
-          const chunk = list.slice(d * pd, (d + 1) * pd).sort((a, b) => (a.visibility === 'public' ? 0 : 1) - (b.visibility === 'public' ? 0 : 1) || a.unit_seq - b.unit_seq);
-          for (const s of chunk) {
-            await client.query(`UPDATE qna_slots SET slot_date = $2::date, round = round + 1, updated_at = NOW() WHERE id = $1`, [s.id, days[d].date]);
-            if (s.seq != null) {
-              const mv = await client.query(
-                `UPDATE campaign_participants
-                    SET start_date = $4, row_json = jsonb_set(COALESCE(row_json, '{}'::jsonb), ARRAY[$5::text], to_jsonb($4::text), true),
-                        updated_by = 'qna-extra', updated_at = NOW()
-                  WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL AND order_submission_id IS NULL`,
-                [it.sheetId, it.tabName, s.seq, days[d].label, QNA_DATE_HEADER]);
-              // 못 채운 자리 = 빈 줄이 살아 있는 자리(위 판정) — 잠금 안에서 줄이 안 움직이면 상황이 바뀐 것이다(전부 되돌린다)
-              if (mv.rowCount !== 1) throw Object.assign(new Error('그사이 상황이 바뀌었습니다 — 다시 확인해 주세요.'), { code: 'changed' });
-            }
-            moved++;
-          }
+      const { normalizeHolidayList, QNA_DATE_HEADER } = require('../utils/worktablePlan');
+      /* ★ 결정 377 — 시작일·0명 휴무일은 **잠근 뒤** 이 트랜잭션에서 다시 잰다(화면 값 불신).
+           재료 = 정원 판정 깔때기(fetchCampaignCounts — 계획·오늘 자리 수). 실패는 SAVEPOINT 로 가둔다:
+           오늘부터 = 거절(모르면 열지 않는다) · 내일부터 = 휴무일 건너뛰기 없이 종전 그대로. */
+      let counts = null;
+      await client.query('SAVEPOINT qna_extra_counts');
+      try {
+        counts = (await require('./campaignState.service').fetchCampaignCounts(client, [campaignId], now)).get(campaignId) || null;
+        await client.query('RELEASE SAVEPOINT qna_extra_counts');
+      } catch (e) {
+        await client.query('ROLLBACK TO SAVEPOINT qna_extra_counts');
+        logger.warn(`[qnaSlots] 추가 모집 — 정원 재료 조회 실패 camp=${campaignId}: ${e.message}`);
+      }
+      const today = kstDateStr(now);
+      const rest = qnaRestDays(counts && counts.plans, today);
+      if (start === 'today') {
+        const { rows: cr } = await client.query('SELECT * FROM recruit_campaigns WHERE id = $1', [campaignId]);
+        const chk = qnaTodayStartCheck(cr[0], counts, now, { skipWeekends: wo.skip_weekends !== false, holidays: normalizeHolidayList(wo.holidays).concat(rest) });
+        if (!chk.ok) throw Object.assign(new Error(chk.why), { code: 'today_' + chk.code });
+        extraFrom = today;
+      } else {
+        extraFrom = kstDateStr(new Date(now.getTime() + DAY_MS));
+      }
+      const plan = await qnaExtraPlan(client, it, wo, { startDate: extraFrom, restDays: rest });
+      skipped = plan.skipped;
+      for (const m of plan.moves) {
+        const s = m.slot;
+        await client.query(`UPDATE qna_slots SET slot_date = $2::date, round = round + 1, updated_at = NOW() WHERE id = $1`, [s.id, m.date]);
+        if (s.seq != null) {
+          const mv = await client.query(
+            `UPDATE campaign_participants
+                SET start_date = $4, row_json = jsonb_set(COALESCE(row_json, '{}'::jsonb), ARRAY[$5::text], to_jsonb($4::text), true),
+                    updated_by = 'qna-extra', updated_at = NOW()
+              WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL AND order_submission_id IS NULL`,
+            [it.sheetId, it.tabName, s.seq, m.label, QNA_DATE_HEADER]);
+          // 못 채운 자리 = 빈 줄이 살아 있는 자리(위 판정) — 잠금 안에서 줄이 안 움직이면 상황이 바뀐 것이다(전부 되돌린다)
+          if (mv.rowCount !== 1) throw Object.assign(new Error('그사이 상황이 바뀌었습니다 — 다시 확인해 주세요.'), { code: 'changed' });
         }
+        moved++;
       }
     } else {
       const r = await client.query(
@@ -544,7 +679,8 @@ async function applyQnaEnd({ campaignId, action, end, actor = 'admin', now = new
     await client.query(
       `INSERT INTO campaign_plan_events (campaign_id, actor, action, detail) VALUES ($1,$2,$3,$4::jsonb)`,
       [campaignId, String(actor).slice(0, 100), QNA_END_ACTIONS[action],
-       JSON.stringify({ end: it.end, after: kstDateStr(now), shortages, moved, lapsed })]);
+       JSON.stringify({ end: it.end, after: kstDateStr(now), shortages, moved, lapsed,
+         ...(action === 'extra' ? { start: start === 'today' ? 'today' : 'tomorrow', from: extraFrom, skipped } : {}) })]);
     await client.query('COMMIT');
     if (action === 'extra') {
       // 작업보드 장부를 새 날짜로 다시 만든다(커밋 뒤 · 실패해도 결정은 유효 — 다음 갱신이 맞춘다)
@@ -552,7 +688,7 @@ async function applyQnaEnd({ campaignId, action, end, actor = 'admin', now = new
       catch (e) { logger.warn(`[qnaSlots] 추가 모집 뒤 장부 갱신 실패(다음 갱신이 맞춘다): ${e.message}`); }
     }
     logger.info(`[qnaSlots] 일정 끝 ${action} camp=${campaignId} end=${it.end} moved=${moved} lapsed=${lapsed}`);
-    return { ok: true, moved, lapsed, title: it.title, total: it.unfilled.length };
+    return { ok: true, moved, lapsed, title: it.title, total: it.unfilled.length, ...(action === 'extra' ? { from: extraFrom, skipped } : {}) };
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     throw e;
@@ -621,4 +757,5 @@ module.exports = { insertCalendar, isQnaTab, isQnaCampaign, isBoundRow, boundSeq
   QNA_SUBMIT_MIN, QNA_APPLY_CUTOFF_MIN, kstDateStr, nextKstMidnight, qnaHoldExpiry, qnaApplyClosed, qnaApplyCutoffAt,
   qnaOptKeyMap, loadTodayByCampaign, pickSlotInTx, bindSlotForApply, publicSlotView, slotForApplication,
   QNA_END_ACTIONS, listQnaEnds, qnaShortages, applyQnaEnd,
+  QNA_EXTRA_STARTS, qnaRestDays, qnaTodayStartCheck, qnaExtraPlan, qnaExtraStartOptions, qnaPlanView,
   QNA_CAPTURE_SWEEP_BUFFER_SEC, listQnaCaptureTimeouts, sweepQnaCaptureTimeouts };

@@ -79,7 +79,27 @@ async function _listQnaEnds(admin, opts = {}) {
         && !isRecipient(admin && admin.name, { manager: it.manager }, wos.get(it.campaignId) || wos.get(Number(it.campaignId)))) continue;
       const shortages = qs.qnaShortages(it, woById.get(String(it.workOrderId)) || {});
       items.push({ kind: 'qna', campaignId: it.campaignId, title: it.title, thumbnailUrl: it.thumbnailUrl,
-        end: it.end, regularEnd: it.end, shortages, total: it.unfilled.length });
+        end: it.end, regularEnd: it.end, shortages, total: it.unfilled.length, _it: it });
+    }
+    /* ★ 결정 377 — 시작일 선택지(오늘부터/내일부터). 판정 = 반영(applyQnaEnd)과 같은 함수 · 재료 = 정원 판정 깔때기.
+         ★ 실패 = 칸을 뺀다(화면은 종전 버튼 하나 = 내일부터) — 모르는 채 「오늘부터」를 켜지 않는다. */
+    if (items.length) {
+      let counts = null, camps = null;
+      try {
+        [counts, camps] = await Promise.all([
+          st.fetchCampaignCounts(db, items.map(x => x.campaignId), now),
+          db.query('SELECT * FROM recruit_campaigns WHERE id::text = ANY($1::text[])', [items.map(x => String(x.campaignId))]).then(r => new Map(r.rows.map(c => [String(c.id), c]))),
+        ]);
+      } catch (e) { counts = null; logger.warn(`[sequentialEnd] Q&A 시작일 재료 조회 실패(종전 버튼): ${e.message}`); }
+      for (const x of items) {
+        if (counts && camps) {
+          try {
+            x.start = await qs.qnaExtraStartOptions(db, x._it, woById.get(String(x._it.workOrderId)) || {}, camps.get(String(x.campaignId)),
+              counts.get(x.campaignId) || counts.get(String(x.campaignId)) || null, now);
+          } catch (e) { logger.warn(`[sequentialEnd] Q&A 시작일 계산 실패 camp=${x.campaignId}(종전 버튼): ${e.message}`); }
+        }
+        delete x._it;
+      }
     }
     return items;
   } catch (e) {
@@ -134,7 +154,8 @@ async function _listSequentialOnly(admin, opts = {}) {
  * 결정 반영 — decisions: [{campaignId, action:'extra'|'finish', end}]
  * ★ 서버가 다시 계산한 값으로만 반영(화면 숫자 불신) · 받는 사람이 아닌 공고는 거절 · 공고마다 독립 트랜잭션.
  */
-async function applySequentialEnds(admin, decisions) {
+async function applySequentialEnds(admin, decisions, opts = {}) {
+  const now = opts.now || undefined;   // 시험용 시각(없으면 지금) — 결정 377
   const list = Array.isArray(decisions) ? decisions : [];
   if (!list.length) { const e = new Error('반영할 결정이 없습니다.'); e.code = 'empty'; throw e; }
   // ★ Codex P2: 조용히 자르지 않는다 — 화면은 50개씩 나눠 보낸다(어제 부족 팝업과 같은 규율)
@@ -144,15 +165,17 @@ async function applySequentialEnds(admin, decisions) {
     const campaignId = String((d && d.campaignId) || '');
     const action = d && ACTIONS[d.action] ? d.action : null;
     if (!campaignId || !action) { results.push({ campaignId, ok: false, error: '잘못된 결정입니다.' }); continue; }
-    const cur = await listSequentialEnds(admin, { campaignIds: [campaignId] });
+    const cur = await listSequentialEnds(admin, { campaignIds: [campaignId], now });
     const it = (cur.items || [])[0];
     if (!it) { results.push({ campaignId, ok: false, error: '이미 처리됐거나 물을 대상이 아닙니다.' }); continue; }
     if (it.kind === 'qna') {   // ★ 결정 321 — 자리표 단일 출처로 반영(같은 결정 검사·잠금은 그쪽이 한다)
       try {
+        // ★ 결정 377 — 시작일(오늘부터/내일부터). 안 보낸 옛 화면 = 내일부터(종전) · 판정은 applyQnaEnd 가 잠근 뒤 다시 한다
+        const startOpt = (action === 'extra' && d.start != null) ? String(d.start) : null;
         const r = await require('./qnaSlots.service').applyQnaEnd({
-          campaignId, action, end: d.end || it.end, actor: (admin && admin.name) || 'admin' });
+          campaignId, action, end: d.end || it.end, start: startOpt, actor: (admin && admin.name) || 'admin', ...(now ? { now } : {}) });
         try { const cr = require('../routes/campaign.routes'); if (cr && typeof cr.invalidateListCache === 'function') cr.invalidateListCache(); } catch (_) { /* 무관 */ }
-        results.push({ campaignId, ok: true, action, title: it.title, total: it.total, kind: 'qna', moved: r.moved });
+        results.push({ campaignId, ok: true, action, title: it.title, total: it.total, kind: 'qna', moved: r.moved, ...(r.from ? { from: r.from, skipped: r.skipped || [] } : {}) });
       } catch (e) {
         results.push({ campaignId, ok: false, error: e.code ? e.message : '반영에 실패했습니다.' });
         if (!e.code) logger.warn(`[sequentialEnd] Q&A 반영 실패 camp=${campaignId}: ${e.message}`);
@@ -256,4 +279,7 @@ async function freezeSequentialPast({ db = pool, now = new Date() } = {}) {
   return { ok: true, campaigns: touched, frozen, failed };
 }
 
-module.exports = { listSequentialEnds, applySequentialEnds, freezeSequentialPast, ACTIONS };
+/** 결정 377 — 조절 창이 「이 사람이 팝업에서 정할 수 있나」를 팝업과 같은 목록(받는 사람 규칙 포함)으로 본다. */
+async function listQnaEndItems(admin, opts = {}) { return _listQnaEnds(admin, opts); }
+
+module.exports = { listSequentialEnds, applySequentialEnds, freezeSequentialPast, listQnaEndItems, ACTIONS };
