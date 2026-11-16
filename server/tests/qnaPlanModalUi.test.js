@@ -111,7 +111,7 @@ const clickRows = (m, sel, i) => {
     assert.ok(/11\/3더로우/.test(ov.innerHTML) && !/다른 공고/.test(ov.innerHTML), '그 공고 하나만 보인다');
     const miss = await P.win.SequentialEndPrompt.openFor('nope', {});
     assert.equal(miss.ok, false); assert.equal(miss.reason, 'not_listed');
-    assert.match(CDP, /not_listed' \? '이 공고의 추가 모집은 공고 담당자·오더를 보낸 사람·마스터가 정합니다/);
+    assert.match(CDP, /not_listed' \? '이 공고의 추가 모집은 공고 담당자·오더를 보낸 사람·관리자가 정합니다/);
     assert.match(SEP, /'#seOv\.over\{z-index:10100\}/);
     assert.match(CDP, /#cdpModal\{position:fixed;inset:0;z-index:10050;/);
   });

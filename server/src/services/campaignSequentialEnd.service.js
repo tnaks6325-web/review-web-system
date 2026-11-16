@@ -18,7 +18,7 @@
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const st = require('./campaignState.service');
-const { isRecipient } = require('./campaignShortage.service');
+const { isRecipient, canDecideAll } = require('./campaignShortage.service');
 
 const ACTIONS = { extra: 'sequential_extra', finish: 'sequential_finish' };
 
@@ -57,7 +57,7 @@ async function listSequentialEnds(admin, opts = {}) {
 }
 
 /* ★★ 결정 321 3단계(확정 5) — Q&A 공고의 일정 끝도 **같은 창**에서 묻는다(kind:'qna').
-   판정·반영은 qnaSlots.service(자리표 단일 출처) · 받는 사람 규칙은 순차진행과 같다(isRecipient · 마스터는 모두 본다).
+   판정·반영은 qnaSlots.service(자리표 단일 출처) · 받는 사람 규칙은 순차진행과 같다(isRecipient · 마스터·관리자는 모두 본다 — 결정 378 canDecideAll).
    ★ 조회 실패 = 빈 목록(모르면 묻지 않는다 — 순차진행 항목은 그대로 뜬다). */
 async function _listQnaEnds(admin, opts = {}) {
   const db = opts.db || pool;
@@ -75,7 +75,7 @@ async function _listQnaEnds(admin, opts = {}) {
     const woById = new Map(woRows.map(w => [String(w.id), w]));
     const items = [];
     for (const it of list) {
-      if (!opts.skipRecipient && !(admin && admin.role === 'master')
+      if (!opts.skipRecipient && !canDecideAll(admin)
         && !isRecipient(admin && admin.name, { manager: it.manager }, wos.get(it.campaignId) || wos.get(Number(it.campaignId)))) continue;
       const shortages = qs.qnaShortages(it, woById.get(String(it.workOrderId)) || {});
       items.push({ kind: 'qna', campaignId: it.campaignId, title: it.title, thumbnailUrl: it.thumbnailUrl,
@@ -137,7 +137,7 @@ async function _listSequentialOnly(admin, opts = {}) {
     const sch = seq.plans.get(id);
     if ((decided.get(id) || new Set()).has(sch.end)) continue;
     // ★ 레드팀 P1-3: 마스터는 받는 사람이 아니어도 본다(담당자 칸이 비었거나 보낸 사람 이름이 직원과 다르면 아무도 못 정하는 공고가 남는다)
-    if (!opts.skipRecipient && !(admin && admin.role === 'master') && !isRecipient(admin && admin.name, c, wos.get(c.id) || wos.get(id))) continue;
+    if (!opts.skipRecipient && !canDecideAll(admin) && !isRecipient(admin && admin.name, c, wos.get(c.id) || wos.get(id))) continue;
     const cm = counts.get(c.id) || counts.get(id) || new Map();
     const views = optRows.filter(o => String(o.campaign_id) === id && String(o.status || 'active') !== 'closed')
       .map(o => st.computeOptionView(o, cm.get(o.opt_key), null, { ignoreDailyLimit: true }));
