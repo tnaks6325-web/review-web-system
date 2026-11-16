@@ -4902,13 +4902,15 @@ async function manualWorkdeskReviewSubmitInTx(client, { sheetId, tabName, rowId,
     }
 
     // 제출시각을 실제 작업보드 리뷰제출 열에 쓰고, 두 원장의 제출 상태를 같은 트랜잭션에서 확정한다.
+    // 시각 식은 결정 375 단일 출처(sheetlessStatus.SUBMIT_TIME_SQL — 동시진행 묶음 완료와 같은 값).
+    const { SUBMIT_TIME_SQL } = require('./sheetlessStatus.service');
     const { rows: updated } = await client.query(
       `UPDATE campaign_participants
           SET is_submitted=TRUE,
-              row_json=COALESCE(row_json, '{}'::jsonb) || jsonb_build_object($4::text, to_char(NOW() AT TIME ZONE 'Asia/Seoul', 'FMMM/FMDD HH24:MI')),
+              row_json=COALESCE(row_json, '{}'::jsonb) || jsonb_build_object($4::text, ${SUBMIT_TIME_SQL}),
               updated_at=NOW(), updated_by=$5
         WHERE id=$1 AND sheet_id=$2 AND tab_name=$3
-        RETURNING to_char(NOW() AT TIME ZONE 'Asia/Seoul', 'FMMM/FMDD HH24:MI') AS submit_value`,
+        RETURNING ${SUBMIT_TIME_SQL} AS submit_value`,
       [rowId, sheetId, tabName, submitCol, String(by).slice(0, 100)]);
     await client.query(
       `UPDATE review_index SET is_submitted = TRUE, built_at = NOW()

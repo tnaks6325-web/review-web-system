@@ -46,6 +46,19 @@ function __setPoolForTest(p) { _pool = p; }
 const SUBMIT_MARK = 'O';
 
 /**
+ * 결정 375: 시스템이 리뷰제출 칸에 쓰는 **제출 시각** — KST `M/D HH:MM`(결정 137 「그 칸의 집주인 형식」).
+ * 리뷰어 웹 제출 화면이 만드는 값(`search-app.js` submitTimeValue)과 같은 모양이고, 서버가 스스로 시각을
+ * 정하는 경로(직원 수동 리뷰제출 · 동시진행 묶음 완료)는 이 SQL 식 한 벌을 쓴다. `NOW()` 는 트랜잭션 시작
+ * 시각이라 같은 트랜잭션의 `completed_at`·`updated_at` 과 같은 순간이다.
+ * ★ markStatusCell 의 kind 기본값('제출'/'O')은 바꾸지 않는다 — 시각을 쓰려면 호출부가 value 로 넘긴다.
+ */
+const SUBMIT_TIME_SQL = "to_char(NOW() AT TIME ZONE 'Asia/Seoul', 'FMMM/FMDD HH24:MI')";
+async function submitTimeValue(db) {
+  const { rows } = await db.query(`SELECT ${SUBMIT_TIME_SQL} AS v`);
+  return String((rows[0] && rows[0].v) || '').trim();
+}
+
+/**
  * 그 탭이 쓰는 상태 칸(리뷰제출·입금) 헤더명 — **줄이 아니라 탭 단위**로 해석한다.
  * ★ 소비처가 둘이다: 무시트 상태 기록(markStatusCell)과 **관리자 수동 리뷰제출**
  *   (수동/작업표로 추가한 줄은 `campaign_participants.submit_col` 이 비어 있다 —
@@ -416,5 +429,7 @@ module.exports = {
   markSheetlessPurchaseDate,
   markSheetlessIdentityName,
   SUBMIT_MARK,
+  SUBMIT_TIME_SQL,
+  submitTimeValue,
   __setPoolForTest,
 };
