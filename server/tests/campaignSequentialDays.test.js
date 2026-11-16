@@ -256,7 +256,7 @@ const flat = s => s.days.map(d => `${d.date.slice(5)}:${d.optKey}${d.amount}`).j
   ok('P2-1: 미리보기도 바꾼 계획을 일정표에 얹는다', /planPatch: \(\) => \(\{ \.\.\.plans \}\)/.test(plan));
   ok('P2-5: 작업표 날짜 맞추기도 손 글씨 상품을 본다', /SAVEPOINT relay_hand/.test(rd('src/services/sheetlessDailyPlan.service.js')));
   ok('P2-10: 차례 아닌 상품 거절 문구 = 여는 날', /function _waitingMsg\(ov\)/.test(cr) && (cr.match(/error: _waitingMsg\(ov\)/g) || []).length === 2);
-  ok('P2-11: 화면 파일 버전 표기를 올렸다(옛 조절 창이 남지 않게)', /campaign-daily-plan\.js\?v=20261012-seqdays/.test(wd));
+  ok('P2-11: 화면 파일 버전 표기를 올렸다(옛 조절 창이 남지 않게)', /campaign-daily-plan\.js\?v=(?:20261012-seqdays|20261116-qnaplan)/.test(wd)   /* 결정 377: 이후 버전도 같은 조절 창(검사 의미 불변) */);
 
   console.log('[8] Codex 리뷰 반영');
   {

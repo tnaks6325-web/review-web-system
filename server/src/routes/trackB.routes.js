@@ -2030,7 +2030,7 @@ router.post('/price-alerts/:id/resolve', authMiddleware, internalMiddleware, asy
 router.get('/campaigns/:id/daily-plan', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { getPlanOverview } = require('../services/campaignPlan.service');
-    res.json({ ok: true, ...(await getPlanOverview(String(req.params.id))) });
+    res.json({ ok: true, ...(await getPlanOverview(String(req.params.id), { admin: req.admin })) });
   } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
 });
 router.post('/campaigns/:id/daily-plan', authMiddleware, internalMiddleware, async (req, res, next) => {
@@ -2038,7 +2038,7 @@ router.post('/campaigns/:id/daily-plan', authMiddleware, internalMiddleware, asy
     const { savePlans, getPlanOverview } = require('../services/campaignPlan.service');
     const campaignId = String(req.params.id);
     const out = await savePlans(campaignId, req.body, _by(req));
-    res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId)) });
+    res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId, { admin: req.admin })) });
   } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
 });
 /* 저장하지 않고 날짜별 예상 인원을 다시 계산(결정 182 — 조절 창이 바꾸는 즉시 보여준다). 쓰기 0건. */
