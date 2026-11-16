@@ -32,7 +32,8 @@ const { resolveDeliveryReviewFee } = require('../utils/deliveryReviewFee');
 const { resolveWorkKind } = require('../utils/workKind');   // 결정 321 4단계 — Q&A 입금(공고 > 탭 종류)
 const { resolveBank, bankFormLabel, normalizeAccount, normalizeMemo } = require('../utils/bankCodes');
 const _bankOv = require('./bankNameOverride.service');   // 화면에서 고친 은행 표기 → 판정 표에 적용
-const { extractAmountNumber, EXACT_KEYS: AMOUNT_EXACT_KEYS } = require('../utils/paymentAmount');
+const { extractAmountNumber, isExplicitZeroAmountText, rowAmountIsExplicitZero, EXACT_KEYS: AMOUNT_EXACT_KEYS } = require('../utils/paymentAmount');
+const { payAmountsFromWorkOrder } = require('../utils/workOrderPayAmounts');   // 결정 376 — 리뷰오더 1건당 금액(단일 출처)
 const { loadWorkboardAmounts, loadWorkboardAmountPopulation, workboardAmountKey } = require('./paymentWorkboardAmount.service');
 const { filterReceiptEligiblePaymentRows } = require('./paymentReceiptGate.service');
 const paymentProof = require('./paymentProof.service');
@@ -334,6 +335,9 @@ async function listPaymentTargets(opts = {}) {
   //   경고를 줄이는 재료로만 쓴다 — 계좌·금액 판정에는 넣지 않는다(위 연결 계좌 조회와 분리).
   const linkedTierMap = await _loadLinkedQtyTierAmounts(
     rows.filter(r => !orderMap[r.sheetId + '||' + r.tabName + '||' + r.rowIndex]));
+  /* ★ 결정 376 재료 — 작업표 줄에 연결된 주문의 금액(공고 경유 주문은 좌표 조회에 안 걸린다).
+       「0원 구매 · 리뷰비만」을 **막는 쪽으로만** 쓴다(금액·계좌 판정에는 넣지 않는다). 조회 실패 = null = 전 건 보류(fail-closed). */
+  const linkedOrderPrices = await _loadLinkedOrderPrices(rows);
   // ★ 결정 231 재료 — 이 줄에서 이미 이체 실패한 계좌 · 등록 계좌가 마지막으로 바뀐 시각(둘 다 실패해도 종전 동작)
   const failedAcctMap = await _loadFailedAccounts(rows);
   // ★ 결정 233 재료 — 직원이 작업보드에서 고친 은행·계좌번호·예금주(조회 실패 = 빈 결과 = 종전 동작)
@@ -568,6 +572,17 @@ async function listPaymentTargets(opts = {}) {
          제품비 칸이 없어 0 이 정상이다(no_price 로 막지 않는다). 판정 = 공고 > 탭 종류(resolveWorkKind 단일 출처).
          모르면(종류 칸 없음) 리뷰로 본다 = 종전처럼 no_price 로 막힌다(보내지 않는 쪽). */
     const isQna = resolveWorkKind({ campaignKind: camp && camp.workKind, tabKind: tab && tab.workKind }) === 'qna';
+    /* ★★ 결정 376(사용자 확정 2026-11-16 "결제금액 0원 작업은 리뷰비만 입금관리에 올라오게") — 일반(우리 은행) 작업에서
+         리뷰어가 **0원에 구매**한 줄은 제품비 없이 리뷰비만 보낸다. 판정 = zeroPricePurchaseOf 하나(fail-closed — 모르면 보류).
+         금액은 아래 식 그대로(productPrice 0 + 리뷰비) — 금액 식을 바꾸지 않는다. 회차 항목에 zero_price_purchase 로 박제(createBatch). */
+    const zeroPricePurchase = zeroPricePurchaseOf({
+      payoutMode: payout.mode, isQna, productPrice,
+      workboardAmountZero: rowAmountIsExplicitZero(displayed.rowJson || r.amountCells),
+      orderPrices: linkedOrderPrices === null ? null
+        : [...(ord ? [ord.price] : []), ...(linkedOrderPrices.get(key + '||' + r.rowIndex) || [])],
+      workOrder: (camp && camp.workOrder) || (tab && tab.workOrder) || null,
+      fee,
+    });
     // ★ 결정 292 — 제품비는 업체가 보낸다 → 우리 이체 금액 = **리뷰비만**(회차에는 제품비 0 으로 박제 — createBatch).
     const amount = (goodsByAdvertiser || isQna) ? fee : productPrice + fee;
 
@@ -581,7 +596,7 @@ async function listPaymentTargets(opts = {}) {
       if (!String(acct.accountHolder || '').trim()) issues.push('no_holder');
     }
     // split: 제품비 값이 없다 = 아직 구매(투입) 전 — 리뷰비도 구매가 끝난 줄에만 보낸다(사용자 확정 2026-10-26).
-    if (!productPrice && !isQna) issues.push(goodsByAdvertiser ? 'not_purchased' : 'no_price');
+    if (!productPrice && !isQna && !zeroPricePurchase) issues.push(goodsByAdvertiser ? 'not_purchased' : 'no_price');
     if (amount <= 0) issues.push(goodsByAdvertiser ? 'split_no_fee' : 'zero_amount');
     /* ★★ 결정 369 — 리뷰오더 물건비는 「업체입금」인데 이체은행이 우리 은행(케이뱅크·하나·자동)인 작업은 **보류**.
          그대로 두면 제품비까지 우리가 보낸다(업체도 보내면 이중 입금 · 2026-11-13 플라워민트·누룽칩 3차가 이 상태였다).
@@ -669,6 +684,7 @@ async function listPaymentTargets(opts = {}) {
       // 결정 292 — 입금 방식(ours|advertiser|split). split = 제품비는 업체, 금액은 리뷰비만. 화면이 받은 값을 회차 만들 때 되돌려 대조한다.
       payoutMode: payout.mode, goodsByAdvertiser,
       isQna,   // 결정 321 4단계 — createBatch 가 회차 항목에 is_qna 로 박제(isFeeOnlyItem 에서 빠지는 근거)
+      zeroPricePurchase,   // 결정 376 — 0원 구매 · 리뷰비만(createBatch 가 zero_price_purchase 로 박제 · isFeeOnlyItem 에서 빠지는 근거)
       workboardPrice, orderPrice, priceMismatch,
       qtyTierAmount: (ord && ord.qtyTierAmount) || linkedTierMap[key + '||' + r.rowIndex] || null,
       tabReviewFee: tabFee, campaignReviewFee: campFee,
@@ -686,6 +702,8 @@ async function listPaymentTargets(opts = {}) {
       const target=nativeTargets.get([it.sheetId,it.tabName,Number(it.rowIndex)].join('\u0000'));if(!target)continue;
       const result=await payout.evaluateOrderPayoutEligibility(_db(),{target,financialContext:async()=>financialFromPaymentItem(it)});
       it.orderSubmissionId=result.orderSubmissionId;it.eligibilityFingerprint=result.fingerprint;
+      // 결정 376 — 동시진행 묶음 줄은 「0원 구매 · 리뷰비만」을 쓰지 않는다(묶음 금액은 이 판정이 정한다 · 종전 no_price 그대로)
+      if (it.zeroPricePurchase) { it.zeroPricePurchase = false; it.issues = [...new Set([...it.issues, 'no_price'])]; }
       it.issues=[...new Set([...it.issues,...result.reasons])];it.payable=it.issues.length===0;
       it.productPrice=result.productPrice;it.reviewFee=result.reviewFee;it.amount=result.productPrice+result.reviewFee;
     }
@@ -836,10 +854,11 @@ async function _loadCampaigns(sheetIds, tabNames) {
             c.transfer_bank AS "transferBank", c.transfer_memo AS "transferMemo",
             to_char(c.start_date,'YYYY-MM-DD') AS "campStartDate",
             c.work_kind AS "workKind",
-            wo.goods_cost_type AS "goodsCostType"
+            wo.goods_cost_type AS "goodsCostType",
+            wo.id AS "workOrderId", wo.pay_amount AS "workOrderPayAmount", wo.product_options_json AS "workOrderOptionsJson"
        FROM recruit_campaigns c
        LEFT JOIN LATERAL (
-            SELECT w.goods_cost_type FROM work_orders w
+            SELECT w.goods_cost_type, w.id, w.pay_amount, w.product_options_json FROM work_orders w
              WHERE w.deleted_at IS NULL
                AND w.linked_tab_sheet_id = c.linked_sheet_id
                AND w.linked_tab_name = c.linked_tab_name
@@ -858,6 +877,7 @@ async function _loadCampaigns(sheetIds, tabNames) {
       transferBank: c.transferBank || null, transferMemo: c.transferMemo || '',
       campStartDate: c.campStartDate || null, goodsCostType: c.goodsCostType || '',
       workKind: c.workKind || '',   // 결정 321 4단계 — Q&A 판정 재료(공고 > 탭 · resolveWorkKind)
+      workOrder: _workOrderPayOf(c),   // 결정 376 — 연결 리뷰오더 결제금액(없으면 null)
       schedules: [],
     };
   }
@@ -879,6 +899,72 @@ async function _loadCampaigns(sheetIds, tabNames) {
     }
   } catch (e) { logger.warn('[payment] 리뷰비 구간 조회 실패(기존 값 사용): ' + e.message); }
   return map;
+}
+
+/** 결정 376 — LATERAL 로 읽은 연결 리뷰오더(가장 최근 1건)의 결제금액 재료. 리뷰오더가 없으면 null. */
+function _workOrderPayOf(r) {
+  if (!r || !r.workOrderId) return null;
+  return { payAmount: r.workOrderPayAmount == null ? null : Number(r.workOrderPayAmount), optionsJson: r.workOrderOptionsJson == null ? null : r.workOrderOptionsJson };
+}
+
+/**
+ * ★★ 결정 376 「0원 구매 · 리뷰비만」 판정 — **단일 출처**(사용자 확정 2026-11-16 "결제금액 0원 작업은 리뷰비만 입금관리에 올라오게").
+ *
+ * 일반(우리 은행) 작업인데 리뷰어가 0원에 구매한 줄은 돌려줄 제품값이 없다 → 리뷰비만 보낸다.
+ * **전부 참일 때만** 참(하나라도 모르면 거짓 = 종전처럼 no_price 보류 · fail-closed):
+ *   ① 입금 방식 = 우리(ours) — 제품비 업체(split)·업체입금은 자기 규칙(292·247) 그대로
+ *   ② Q&A 아님 — Q&A 는 is_qna(321) 쪽 하나
+ *   ③ 계산된 제품비 0
+ *   ④ 작업표 결제금액 칸(정확일치 헤더 · 작업보드 표시값)이 **명시적 0**(빈칸·숫자 아님·음수는 거짓 — rowAmountIsExplicitZero)
+ *   ⑤ 아는 주문 금액(좌표 주문·작업표 줄에 연결된 주문)이 전부 명시적 0 — 하나라도 > 0·모름이면 거짓 · 조회 실패(null)도 거짓
+ *   ⑥ 연결 리뷰오더가 있고 결제금액(합계 pay_amount)이 0 이며 상품 구성(1건당 금액)에도 0 보다 큰 금액이 없다
+ *   ⑦ 리뷰비 > 0(보낼 돈이 없으면 보류 — zero_amount)
+ * ★ 이 판정은 **보류를 푸는 쪽**이다 — 조건을 느슨하게 만들지 말 것(실수로 0 을 적은 일반 작업이 리뷰비만 받고 끝난다).
+ */
+function zeroPricePurchaseOf({ payoutMode, isQna, productPrice, workboardAmountZero, orderPrices, workOrder, fee } = {}) {
+  if (payoutMode !== 'ours' || isQna === true) return false;
+  if (Number(productPrice) !== 0 || productPrice == null) return false;
+  if (workboardAmountZero !== true) return false;
+  if (!Array.isArray(orderPrices) || !orderPrices.every(p => isExplicitZeroAmountText(p))) return false;
+  if (!workOrder || workOrder.payAmount == null || !Number.isFinite(Number(workOrder.payAmount)) || Number(workOrder.payAmount) !== 0) return false;
+  // 상품 구성이 있으면 그 안의 1건당 금액도 0 이어야 한다(깨진 표 = 모름 = 거짓). 구성 칸이 비어 있으면 합계 0 만으로 본다.
+  const oj = workOrder.optionsJson;
+  if (oj != null && String(typeof oj === 'string' ? oj : JSON.stringify(oj)).trim() !== '') {
+    if (typeof oj === 'string') { try { JSON.parse(oj); } catch (_) { return false; } }
+    if (payAmountsFromWorkOrder(oj).distinct.length) return false;
+  }
+  const f = Number(fee);
+  return fee != null && Number.isFinite(f) && f > 0;
+}
+
+/**
+ * 결정 376 재료 — 작업표 줄(활성 참여행)에 연결된 주문의 금액. Map(시트||탭||줄 → [price 원문…]).
+ * ★ 막는 쪽으로만 쓴다(0원 구매 판정 ⑤). 연결 주문의 줄 번호 일치까지는 요구하지 않는다(넓게 보고 하나라도 > 0 이면 보류).
+ * ★ 조회 실패 = null → 판정이 전 건 거짓(fail-closed — 금액을 모르면 리뷰비만 보내지 않는다).
+ */
+async function _loadLinkedOrderPrices(rows) {
+  const out = new Map();
+  if (!rows || !rows.length) return out;
+  try {
+    const { rows: found } = await _db().query(
+      `/* zero_price_linked_orders */
+       SELECT t.sheet_id AS "sheetId", t.tab_name AS "tabName", t.row_index AS "rowIndex", os.price AS "price"
+         FROM unnest($1::text[], $2::text[], $3::int[]) AS t(sheet_id, tab_name, row_index)
+         JOIN campaign_participants cp
+           ON cp.sheet_id = t.sheet_id AND cp.tab_name = t.tab_name AND cp.seq = t.row_index
+          AND cp.deleted_at IS NULL AND cp.active = TRUE
+         JOIN order_submissions os ON os.id = cp.order_submission_id AND os.deleted_at IS NULL`,
+      [rows.map(r => r.sheetId), rows.map(r => r.tabName), rows.map(r => Number(r.rowIndex))]);
+    for (const f of found) {
+      const k = f.sheetId + '||' + f.tabName + '||' + f.rowIndex;
+      if (!out.has(k)) out.set(k, []);
+      out.get(k).push(f.price == null ? null : String(f.price));
+    }
+    return out;
+  } catch (e) {
+    logger.warn('[payment] 연결 주문 금액 조회 실패(0원 구매 판정 보류): ' + e.message);
+    return null;
+  }
 }
 
 /** 행별 실제 결제금액(상품비) + 리뷰비 스냅샷 근거 — 주문 원장 */
@@ -1552,6 +1638,8 @@ function isFeeOnlyItem(it) {
   if (!it) return false;
   // 결정 321 4단계 — Q&A 항목은 모양이 같아도 「리뷰비만」이 아니다(받을 돈 전부 = 참여비 · 입금일·PAID 를 남긴다)
   if (it.isQna === true || it.is_qna === true) return false;
+  // 결정 376 — 0원 구매 항목도 같다(제품값 0 이 정상 · 받을 돈 전부 = 리뷰비 · 입금일·PAID 를 남긴다)
+  if (it.zeroPricePurchase === true || it.zero_price_purchase === true) return false;
   const pp = Number(it.productPrice != null ? it.productPrice : it.product_price);
   const fee = Number(it.reviewFee != null ? it.reviewFee : it.review_fee);
   const amt = Number(it.amount);
@@ -1560,7 +1648,7 @@ function isFeeOnlyItem(it) {
 /** isFeeOnlyItem 의 SQL 판(payment_batch_items 별칭 없이 · 앞에 별칭을 붙여 쓰려면 feeOnlyItemSql('i')). */
 function feeOnlyItemSql(alias = '') {
   const a = alias ? alias + '.' : '';
-  return `(COALESCE(${a}product_price, 0) = 0 AND COALESCE(${a}review_fee, 0) > 0 AND ${a}amount = ${a}review_fee AND NOT COALESCE(${a}is_qna, FALSE))`;
+  return `(COALESCE(${a}product_price, 0) = 0 AND COALESCE(${a}review_fee, 0) > 0 AND ${a}amount = ${a}review_fee AND NOT COALESCE(${a}is_qna, FALSE) AND NOT COALESCE(${a}zero_price_purchase, FALSE))`;
 }
 /** split 일 수 있는 작업 키(시트||탭) 후보 — 대상 SQL 에서 "입금 칸" 조건을 풀어 줄 범위(리뷰 제출 조건은 풀지 않는다 — 결정 318).
  *  ★ 넓게 잡는다(공고 여럿·탭 값) — 최종 판정은 행을 읽은 뒤 payoutModeFrom 이 하고, split 이 아니면 원래 조건을 다시 건다.
@@ -1679,12 +1767,13 @@ async function _loadTabMeta(sheetIds, tabNames) {
               tc.tab_gid AS "tabGid", tc.sheetless AS "sheetless",
               tc.work_kind AS "workKind",
               wo.goods_cost_type AS "goodsCostType",
+              wo.id AS "workOrderId", wo.pay_amount AS "workOrderPayAmount", wo.product_options_json AS "workOrderOptionsJson",
               -- ★ 담당자 판정 원천 = 인트라넷 작업담당(065) 하나뿐
               --   (담당AE 실명 칸은 여기서 읽지 않는다 — 065 이전 사고 자리)
               wo.work_manager AS "orderWorkManager"
          FROM tab_configs tc
          LEFT JOIN LATERAL (
-              SELECT w.goods_cost_type, w.work_manager FROM work_orders w
+              SELECT w.id, w.pay_amount, w.product_options_json, w.goods_cost_type, w.work_manager FROM work_orders w
                WHERE w.deleted_at IS NULL
                  AND w.linked_tab_sheet_id = tc.sheet_id
                  AND w.linked_tab_name = tc.tab_name
@@ -1701,6 +1790,7 @@ async function _loadTabMeta(sheetIds, tabNames) {
         reviewFee: (t.reviewFee == null || t.reviewFee === '') ? null : Number(t.reviewFee),
         goodsCostType: t.goodsCostType || '',
         workKind: t.workKind || '',
+        workOrder: _workOrderPayOf(t),   // 결정 376 — 연결 리뷰오더 결제금액(없으면 null)
         sheetless: t.sheetless === true,
         tabGid: String(t.tabGid == null ? '' : t.tabGid),
         sheetUrl: tabSheetUrl({ sheetId: t.sheetId, tabGid: t.tabGid }),
@@ -1858,8 +1948,8 @@ async function createBatch({ bank, rows, by }) {
               owner_reviewer_id, participant_identity_id,
               bank_name, bank_code, bank_account, account_holder,
               account_reviewer_id, account_source, account_sub_phone8, account_fingerprint, account_snapshot_fingerprint,
-              product_price, review_fee, amount, transfer_memo, is_qna${it.orderSubmissionId?', order_submission_id, eligibility_fingerprint':''})
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23${it.orderSubmissionId?',$24,$25':''}) RETURNING *`,
+              product_price, review_fee, amount, transfer_memo, is_qna, zero_price_purchase${it.orderSubmissionId?', order_submission_id, eligibility_fingerprint':''})
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24${it.orderSubmissionId?',$25,$26':''}) RETURNING *`,
           [batch.id, it.sheetId, it.tabName, it.rowIndex, it.campaignId, it.reviewerName, it.phone8,
            it.ownerReviewerId || null, it.participantIdentityId || null,
            it.bankName, it.bankCode, it.bankAccount, it.accountHolder,
@@ -1870,7 +1960,9 @@ async function createBatch({ bank, rows, by }) {
            it.accountRef && it.accountRef.subPhone8 || null, accountFingerprint(it.bankAccount), snapshotFingerprint(it.bankName, it.bankAccount, it.accountHolder),
            // 결정 292 — 리뷰비만 보내는 건은 제품비 0 으로 박제(인트라넷 페이백 장부가 "돌려준 상품값"으로 읽지 않게 · isFeeOnlyItem 판별 근거)
            // 결정 321 4단계 — Q&A 는 제품비 0 · is_qna 표시(서버가 다시 계산한 대상값 — 화면 값을 믿지 않는다)
-           (it.goodsByAdvertiser || it.isQna) ? 0 : it.productPrice, it.reviewFee, it.amount, it.transferMemo, it.isQna === true,...(it.orderSubmissionId?[it.orderSubmissionId,it.eligibilityFingerprint]:[])]);
+           // 결정 376 — 0원 구매 표시는 서버가 다시 계산한 값이고, 모양(제품비 0 · 금액 = 리뷰비)이 맞을 때만 박제(어긋나면 FALSE = 종전 판정)
+           (it.goodsByAdvertiser || it.isQna) ? 0 : it.productPrice, it.reviewFee, it.amount, it.transferMemo, it.isQna === true,
+           it.zeroPricePurchase === true && Number(it.productPrice) === 0 && Number(it.amount) === Number(it.reviewFee),...(it.orderSubmissionId?[it.orderSubmissionId,it.eligibilityFingerprint]:[])]);
         await client.query('RELEASE SAVEPOINT sp_item');
         saved.push({ ...it, id: row.id, ...((it.goodsByAdvertiser || it.isQna) ? { productPrice: 0 } : {}) });
       } catch (e) {
@@ -2467,7 +2559,7 @@ module.exports = {
   _acctChangedAt, _holderKey,
   advertiserPayoutAccounts, advertiserPayoutLocked, advertiserPaysFrom, isAdvertiserPayoutChoice,
   __splitCandidateKeysForTest: _splitCandidateKeys,
-  payoutModeFrom, payoutModeLocked, advertiserGoodsFrom, splitBankOf, transferBankCodeOf, isFeeOnlyItem, feeOnlyItemSql, SPLIT_PAYOUT, SPLIT_PAYOUT_LABEL,
+  payoutModeFrom, payoutModeLocked, advertiserGoodsFrom, splitBankOf, transferBankCodeOf, isFeeOnlyItem, feeOnlyItemSql, zeroPricePurchaseOf, SPLIT_PAYOUT, SPLIT_PAYOUT_LABEL,
   ADVERTISER_PAYOUT, ADVERTISER_PAYOUT_LABEL, _classifyAdvertiserPayout,
   _loadLinkedQtyTierAmounts,
 };
