@@ -24,7 +24,7 @@ function modalSetup(o,opts){const document=doc(),alerts=[];const x={document,con
 async function click(node){for(const f of node.listeners.click||[])await f({});await new Promise(r=>setImmediate(r));}
 (async()=>{
  await test('permission, capability, archive and exact order identity fail closed',()=>{
-  const {x,cd}=setup();assert.equal(x._cndManagerGate(cd),true);assert.equal((x._cndManagerButtons(cd).match(/class="cndmgrbtn"/g)||[]).length,2);
+  const {x,cd}=setup();assert.equal(x._cndManagerGate(cd),true);assert.equal((x._cndManagerButtons(cd).match(/class="cndmgrbtn"/g)||[]).length,3,"만두·망고·기타(결정 374)");
   for(const role of ['staff','advertiser','']){x.STATE.role=role;assert.equal(x._cndManagerButtons(cd),'');}
   x.STATE.role='admin';x.STATE.wd.archived=true;assert.equal(x._cndManagerButtons(cd),'');x.STATE.wd.archived=false;
   for(const change of [{managerEdit:undefined},{managerEdit:{capable:true,workOrderId:'other',syncVersion:19}},{managerEdit:{capable:true,workOrderId:'wo_FAKE',syncVersion:'bad'}}])assert.equal(x._cndManagerButtons({...cd,...change}),'');
