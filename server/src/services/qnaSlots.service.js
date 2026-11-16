@@ -600,7 +600,7 @@ async function qnaPlanView(db, camp, { admin = null, now = new Date() } = {}) {
  * 결정 하나 반영(공고마다 독립 트랜잭션 — 부르는 쪽이 BEGIN/COMMIT 하지 않는다).
  * @returns {{ok:true, moved?:number, lapsed?:number}}  실패는 throw(e.code 있음 = 사람에게 보일 말)
  */
-async function applyQnaEnd({ campaignId, action, end, start = null, actor = 'admin', now = new Date() } = {}) {
+async function applyQnaEnd({ campaignId, action, end, start = null, actor = 'admin', now: nowIn = null, clock = null } = {}) {
   if (!QNA_END_ACTIONS[action]) throw Object.assign(new Error('잘못된 결정입니다.'), { code: 'bad_action' });
   // 결정 377 — 시작일(없음 = 내일부터 · 옛 화면). 모르는 값은 막는다(조용히 내일로 접지 않는다)
   if (start != null && !QNA_EXTRA_STARTS.includes(start)) throw Object.assign(new Error('시작일을 다시 골라 주세요.'), { code: 'bad_start' });
@@ -618,6 +618,10 @@ async function applyQnaEnd({ campaignId, action, end, start = null, actor = 'adm
     if (lock[0].linked_sheet_id !== pre[0].linked_sheet_id || lock[0].linked_tab_name !== pre[0].linked_tab_name) {
       throw Object.assign(new Error('그사이 상황이 바뀌었습니다 — 다시 확인해 주세요.'), { code: 'changed' });
     }
+    /* ★ 결정 377 — 「지금」은 **잠금을 얻은 뒤** 읽는다. 들어올 때 잰 시각을 쓰면, 마감 직전에 들어와 잠금을 기다리는 사이
+         마감이 지나도 오늘로 옮기고 성공이라 답한다(리뷰어는 이미 신청 불가). 이 아래의 정원 재료·오늘 판정·옮길 날짜는
+         모두 이 한 시각을 쓴다. clock = 시험용(잠금 뒤 시계), now = 시험용 고정 시각. 운영은 둘 다 없음 = 실제 시계. */
+    const now = clock ? clock() : (nowIn || new Date());
     const it = (await listQnaEnds(client, { campaignIds: [campaignId], now }))[0];
     if (!it || (end && String(end) !== it.end)) throw Object.assign(new Error('그사이 상황이 바뀌었습니다 — 다시 확인해 주세요.'), { code: 'changed' });
     const { rows: dup } = await client.query(

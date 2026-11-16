@@ -6,6 +6,7 @@
  *  E3 마감(23:50) 뒤 = 오늘 선택지 막힘 · 오늘부터 반영 거절 · 아무것도 안 옮김(fail-closed)
  *  E4 오늘이 0명 휴무 = 오늘부터 거절 · 내일부터 = 휴무일 건너뜀 · 옛 화면(시작일 없음) = 내일부터
  *  E5 모르는 시작일 값 = 거절 · 시간창 공고는 창 끝 − 여유가 마감 · 주말 제외 공고의 토요일 = 오늘 불가
+ *  E7 잠금 대기 중 마감이 지나면 잠근 뒤 시각으로 거절(현재 시각은 잠금 뒤에 읽는다)
  *  E6 조절 창 재료: Q&A 공고만 qna 칸(자리표 날짜별 자리 수 · 일정 끝 · 못 채운 1 · 정할 수 있음) · 일반 공고는 칸 없음
  */
 const assert = require('assert');
@@ -141,6 +142,17 @@ const F = require('./helpers/qnaExtraPgFixture');
     assert.ok(ov.qna && Array.isArray(ov.qna.days) && ov.qna.days.length === 10, JSON.stringify(ov.qna));
     const ovR = await cp.getPlanOverview(F.CAMP_REVIEW, { admin: master });
     assert.ok(!('qna' in ovR), '일반 공고 응답에는 qna 칸이 없다');
+  });
+
+  await t('E7 잠금을 기다리는 사이 마감이 지나면 — 잠근 뒤 시각으로 다시 재서 거절 · 아무것도 안 옮김(Codex 리뷰 P2)', async () => {
+    await F.seed(pool, {});
+    // 들어올 때는 23:49:59(마감 전) · 잠금을 얻은 뒤 시계는 23:50:01(마감 뒤)
+    const r = qs.applyQnaEnd({ campaignId: F.CAMP, action: 'extra', end: '2026-11-12', start: 'today',
+      now: new Date('2026-11-16T23:49:59+09:00'), clock: () => new Date('2026-11-16T23:50:01+09:00') });
+    await assert.rejects(r, e => e.code === 'today_cutoff');
+    assert.equal((await slotOf()).d, '2026-11-03');
+    assert.equal((await rowOf()).pd, '11 / 3 (화)');
+    assert.equal((await pool.query(`SELECT 1 FROM campaign_plan_events WHERE campaign_id=$1`, [F.CAMP])).rows.length, 0);
   });
 
   console.log(`\n${passed}개 통과`);

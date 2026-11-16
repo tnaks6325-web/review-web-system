@@ -152,7 +152,12 @@
       var it = (S.view || [])[i]; if (!it) return;
       var sv = t.getAttribute('data-s');
       if (sv) { if (!t.disabled) { S.start[it.campaignId] = sv; render(); } return; }
-      if (a === 'snooze') { var sn = readSnooze(); sn[it.campaignId] = Date.now() + SNOOZE_MS; writeSnooze(sn); delete S.sel[it.campaignId]; render(); return; }
+      if (a === 'snooze') {
+        var sn = readSnooze(); sn[it.campaignId] = Date.now() + SNOOZE_MS; writeSnooze(sn); delete S.sel[it.campaignId];
+        // 결정 377 — [추가 모집 정하기]로 연 팝업(그 공고 하나)에서 미루면 닫는다(집중 보기는 미룸을 무시해 같은 항목이 다시 그려진다)
+        if (S.focus && String(it.campaignId) === S.focus) { closeFocus(); return; }
+        render(); return;
+      }
       S.sel[it.campaignId] = S.sel[it.campaignId] === a ? '' : a;
       render();
     });

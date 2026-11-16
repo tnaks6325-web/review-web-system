@@ -5,6 +5,7 @@
  *  U3 배포 스큐: Q&A 공고라도 서버가 qna 칸을 안 주면(구버전 서버) 종전 화면 · 일반 공고는 Q&A 문구 0
  *  U4 [추가 모집 정하기] → 정규 일정 끝 팝업을 그 공고 하나만 · 조절 창보다 위(z-index) · 못 찾으면 안내
  *  U5 팝업: 시작일 선택(오늘부터 기본) · 내일부터로 바꾸면 그 값을 보냄 · 마감 뒤 오늘 버튼 잠김 · 서버가 선택지를 안 주면 종전 버튼·시작일 안 보냄
+ *  U7 집중 모드에서 1시간 뒤 다시 = 닫힘
  *  U6 정적: 조절 창 모듈에 'input' 이벤트 금지(IME 7w) 유지 · onclick 보간 없음
  */
 const assert = require('assert');
@@ -156,6 +157,21 @@ const clickRows = (m, sel, i) => {
     click(O, { 'data-i': 0, 'data-a': 'extra' }); await tick();
     click(O, { 'data-apply': 1 }); await tick(40);
     assert.ok(!('start' in sent[1][0]), '구버전 서버에는 시작일을 보내지 않는다(서버 종전 = 내일부터)');
+  });
+
+  await t('U7 [추가 모집 정하기]로 연 팝업에서 「1시간 뒤 다시」 = 팝업이 닫힌다(같은 항목을 다시 그리지 않음 · Codex 리뷰 P2)', async () => {
+    const P = loadModule(SEP, {});
+    P.win.SequentialEndPrompt.start({ api: async () => ({ ok: true, items: clone(FX.popup.items) }), name: '망고' });
+    await tick();
+    const r = await P.win.SequentialEndPrompt.openFor(FX.qna.campaignId, {});
+    assert.equal(r.ok, true);
+    let ov = P.dom.document.getElementById('seOv');
+    assert.ok(ov && ov.classList.contains('over'));
+    const btn = { disabled: false, getAttribute: k => ({ 'data-i': '0', 'data-a': 'snooze' })[k] == null ? null : ({ 'data-i': '0', 'data-a': 'snooze' })[k] };
+    (ov._listeners.click || []).forEach(fn => fn({ target: { closest: () => btn } }));
+    await tick();
+    ov = P.dom.document.getElementById('seOv');
+    assert.ok(!ov, '미룬 항목만 있던 팝업은 닫혀야 한다');
   });
 
   await t('U6 정적: 조절 창 모듈 \'input\' 이벤트 금지 유지 · onclick 서버 문자열 보간 없음', async () => {
