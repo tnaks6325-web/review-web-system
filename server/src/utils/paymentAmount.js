@@ -55,6 +55,37 @@ function extractAmountNumber(rowJson) {
 }
 
 /**
+ * 결제금액 원문이 **명시적 0** 인가 — 결정 376 「0원 구매 · 리뷰비만」 판정 재료.
+ * ★ 빈칸·숫자 아님·음수·소수·기호는 전부 거짓(= 금액 모름 → 종전처럼 보류 · fail-closed).
+ *   `extractAmountNumber` 는 이들을 모두 0 으로 접기 때문에 "0원 구매"와 "값 없음"을 가르지 못한다 — 그래서 원문을 본다.
+ * 허용 = 숫자 0 만(쉼표·공백·끝의 `원` 허용): `0` `0원` `0 원` `00` `0,000`.
+ * @param {*} raw
+ * @returns {boolean}
+ */
+function isExplicitZeroAmountText(raw) {
+  if (raw == null) return false;
+  const t = String(raw).replace(/[\s,]/g, '').replace(/원$/, '');
+  return /^0+$/.test(t);
+}
+
+/**
+ * 결정 376 — 행의 결제금액이 **명시적 0** 인가(행 단위).
+ * ★ `extractAmountText` 와 같은 칸을 보되 **정확일치 헤더(결제금액·결제금·금액·결제)에서 읽힌 값만** 인정한다 —
+ *   `결제금액` 칸이 비었는데 `옵션금액` 같은 부분일치 칸이 "0" 이라고 0원 구매로 보지 않는다(빈칸 = 모름 · fail-closed).
+ * @param {object|null} rowJson
+ * @returns {boolean}
+ */
+function rowAmountIsExplicitZero(rowJson) {
+  if (!rowJson || typeof rowJson !== 'object') return false;
+  const entries = Object.entries(rowJson);
+  for (const c of EXACT_KEYS) {
+    const hit = entries.find(([k]) => _norm(k) === c);
+    if (hit && _hasVal(hit[1])) return isExplicitZeroAmountText(hit[1]);
+  }
+  return false;
+}
+
+/**
  * 위 판정이 **볼 수도 있는** 헤더인가(상위집합 필터).
  * ★ 서버가 `row_json` 을 통째로 끌어오지 않기 위해 SQL 에서 후보 칸만 남길 때 쓴다 —
  *   여기서 넓게 거르고 **최종 판정은 위 함수가** 한다(SQL 에 판정 사본 금지).
@@ -66,4 +97,4 @@ function isAmountCandidateHeader(key) {
   return k.includes('금액') || EXACT_KEYS.includes(k);
 }
 
-module.exports = { extractAmountText, extractAmountNumber, isAmountCandidateHeader, EXACT_KEYS };
+module.exports = { extractAmountText, extractAmountNumber, isExplicitZeroAmountText, rowAmountIsExplicitZero, isAmountCandidateHeader, EXACT_KEYS };

@@ -233,12 +233,13 @@ const st = require('../src/services/campaignState.service');
   const ps = S('src/services/payment.service.js');
   t('Q&A 판정 = 공고 > 탭 종류(resolveWorkKind 단일 출처)', /const isQna = resolveWorkKind\(\{ campaignKind: camp && camp\.workKind, tabKind: tab && tab\.workKind \}\) === 'qna';/.test(ps));
   t('Q&A 금액 = 참여비만', /const amount = \(goodsByAdvertiser \|\| isQna\) \? fee : productPrice \+ fee;/.test(ps));
-  t('Q&A 는 금액 없음(no_price)으로 막지 않는다', /if \(!productPrice && !isQna\) issues\.push/.test(ps));
+  // 결정 376 — 0원 구매 · 리뷰비만도 같은 자리에서 빠진다(Q&A 제외는 그대로 · 검사 의미 불변)
+  t('Q&A 는 금액 없음(no_price)으로 막지 않는다', /if \(!productPrice && !isQna && !zeroPricePurchase\) issues\.push/.test(ps));
   t('회차 항목에 is_qna 박제 · 제품비 0', /\(it\.goodsByAdvertiser \|\| it\.isQna\) \? 0 : it\.productPrice, it\.reviewFee, it\.amount, it\.transferMemo, it\.isQna === true/.test(ps));
   t('「리뷰비만」(JS): Q&A 항목은 아님', pay.isFeeOnlyItem({ product_price: 0, review_fee: 2000, amount: 2000, is_qna: true }) === false
     && pay.isFeeOnlyItem({ productPrice: 0, reviewFee: 2000, amount: 2000, isQna: true }) === false);
   t('「리뷰비만」(JS): 같은 모양 split 건은 종전대로', pay.isFeeOnlyItem({ product_price: 0, review_fee: 2000, amount: 2000 }) === true);
-  t('「리뷰비만」(SQL): is_qna 면 빠진다', /AND NOT COALESCE\(i\.is_qna, FALSE\)\)$/.test(pay.feeOnlyItemSql('i')));
+  t('「리뷰비만」(SQL): is_qna 면 빠진다', /AND NOT COALESCE\(i\.is_qna, FALSE\) AND NOT COALESCE\(i\.zero_price_purchase, FALSE\)\)$/.test(pay.feeOnlyItemSql('i')));
   t('결과 반영 항목 보기에 isQna', /isQna: r\.is_qna === true/.test(S('src/services/paymentResult.service.js')));
   t('입금일 다시 쓰기 조회에 is_qna', /i\.amount, i\.is_qna,/.test(S('src/services/paymentResult.service.js')));
   t('부팅 필수 칸 payment_batch_items.is_qna(212)', /\['payment_batch_items', 'is_qna'\]/.test(S('index.js')) && /ADD COLUMN IF NOT EXISTS is_qna BOOLEAN NOT NULL DEFAULT FALSE/.test(S('migrations/212_payment_item_qna.sql')));
