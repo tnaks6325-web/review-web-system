@@ -8332,12 +8332,12 @@ function _cndManagerButtons(cd){
   const busy=_cndManagerPending.has(String(cd.managerEdit.workOrderId));
   const mg=cd.manager||{},name=String(mg.adminNick||mg.adminRaw||'');
   const nick=typeof _woManagerNick==='function'?_woManagerNick(name):name;
-  return `<span class="cndmgrchoices" aria-label="작업담당 배정">${[['박세희','만두'],['박은비','망고']].map(([raw,label])=>
+  return `<span class="cndmgrchoices" aria-label="작업담당 배정">${[['박세희','만두'],['박은비','망고'],['기타','기타']].map(([raw,label])=>
     `<button type="button" class="cndmgrbtn" aria-pressed="${nick===label}" ${busy?'disabled':''} onclick="_cndAssignManager('${raw}')" title="${label}(으)로 작업담당을 정합니다 — 인트라넷에도 전달됩니다">${label}</button>`).join('')}${busy?'<span class="cndmgrstatus" role="status">저장 중…</span>':''}</span>`;
 }
 async function _cndAssignManager(value){
   const t=STATE.cur,cd=STATE.wd&&STATE.wd.condition;
-  if(!t||!_cndManagerGate(cd)||!['박세희','박은비'].includes(value)) return;
+  if(!t||!_cndManagerGate(cd)||!['박세희','박은비','기타'].includes(value)) return;   // 기타 = 결정 374
   const e=cd.managerEdit,id=String(e.workOrderId);
   if(_cndManagerPending.has(id)) return;
   _cndManagerPending.add(id);
@@ -16222,7 +16222,7 @@ async function _tckLoadManagers(more){
   if(_tckHomeCurrent(session)&&document.getElementById('tckHomeMount')) _tckPaint();
 }
 async function _tckManagerAnswer(i,k){
-  const c=(STATE.tckView||[])[i],choice=['mandu','mango'][k];
+  const c=(STATE.tckView||[])[i],choice=['mandu','mango','etc'][k];   // 기타 = 만두·망고 둘 다 아닌 작업(예: 블로그 · 결정 374)
   if(!c||c.kind!=='manager_assignment'||c.status!=='open'||c.canAnswer!==true||!choice) return;
   const busy=STATE.tckManagerSaving||(STATE.tckManagerSaving={});if(busy[c.id]) return;
   busy[c.id]=true;_tckPaint();
@@ -16396,8 +16396,8 @@ function _tckCardHtml(c,i,where){
   const f=c.facts||{};
   if(c.kind==='manager_assignment'){
     const busy=!!(STATE.tckManagerSaving||{})[c.id];
-    const buttons=c.canAnswer===true ? ['만두','망고'].map((label,k)=>`<button type="button" class="tck-choice" ${busy?'disabled':''} onclick="_tckManagerAnswer(${i},${k})">${label}</button>`).join('') : '<span class="tck-sub">담당자를 수정할 수 있는 관리자에게 배정을 요청해 주세요.</span>';
-    return `<div class="tck-card"><div class="tck-ch"><b>${_tckTitle(f)}</b><span class="tck-sub">담당자 배정</span></div><div class="tck-line"><span class="tck-tx">${esc(((c.lines||[])[0]||{}).text||'작업담당이 미지정입니다. 만두·망고 중 누가 맡을까요?')}</span>${buttons}${busy?'<span class="tck-sub">저장 중…</span>':''}</div></div>`;
+    const buttons=c.canAnswer===true ? ['만두','망고','기타'].map((label,k)=>`<button type="button" class="tck-choice" ${busy?'disabled':''} onclick="_tckManagerAnswer(${i},${k})">${label}</button>`).join('') : '<span class="tck-sub">담당자를 수정할 수 있는 관리자에게 배정을 요청해 주세요.</span>';
+    return `<div class="tck-card"><div class="tck-ch"><b>${_tckTitle(f)}</b><span class="tck-sub">담당자 배정</span></div><div class="tck-line"><span class="tck-tx">${esc(((c.lines||[])[0]||{}).text||'작업담당이 미지정입니다. 만두·망고 중 누가 맡을까요? 둘 다 아니면(블로그 등) 기타를 골라 주세요.')}</span>${buttons}${busy?'<span class="tck-sub">저장 중…</span>':''}</div></div>`;
   }
   if(c.kind==='workboard_no_slot'){   // 결정 324 — 문장은 서버 lines 그대로(비어 있는 줄은 건너뜀)
     const busy=!!(STATE.tckSlotSaving||{})[c.id], retrying=c.queueState==='retrying';
