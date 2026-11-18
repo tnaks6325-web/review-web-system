@@ -35,7 +35,7 @@ async function loadHints({fileId,pool}){
  return {transferIds:new Set(transfer.rows.map(r=>r.drive_file_id)),privateHints:hints,source};
 }
 async function resolveActualPath({fileId,rootId,reader,cache=new Map()}){
- async function get(id){if(!cache.has(id)){const m=await reader.getMetadata(id);if(!m||m.id!==id||m.trashed)throw fail('SOURCE_CHANGED');cache.set(id,m);}return cache.get(id);}
+ async function get(id){if(!cache.has(id)){const m=await reader.getMetadata(id);if(!m||m.id!==id)throw fail('SOURCE_CHANGED');if(m.trashed)throw fail('SOURCE_TRASHED');cache.set(id,m);}return cache.get(id);}
  const metadata=await get(fileId);const chain=[];let m=metadata;const seen=new Set([fileId]);
  if(fileId===rootId)return {chain:[{id:rootId,name:metadata.name}],metadata};
  for(let depth=0;depth<100;depth++){
@@ -75,7 +75,7 @@ async function observe({fileId,rootId,reader,source,deps,cache}){
 // become 'unresolved' alone, and the scan ends incomplete without publishing.
 const MAX_FILE_REVISITS=5;
 const plain=d=>{if(!d||typeof d!=='object')return d;const {readerKind,scanRevisits,...rest}=d;return rest;};
-const notHere=e=>['UNRESOLVED_PATH','SOURCE_CHANGED'].includes(e.code)||e.code===404||e.response?.status===404;
+const notHere=e=>['UNRESOLVED_PATH','SOURCE_CHANGED','SOURCE_TRASHED'].includes(e.code)||e.code===404||e.response?.status===404;
 async function observeLive({fileId,deps:d}){
  const found=new Map();
  for(const root of d.roots)for(const kind of root.readerKinds){
