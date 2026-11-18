@@ -12,6 +12,7 @@
  *       판정은 여전히 `_prodMode()` 한 곳이고 저장·원문이 그것을 본다(단일 출처 불변).
  *  C. 자동 판정 = 살아있는 옵션 유무(서버 `liveOptions` 와 같은 기준) — 마감만 남은 카드는 세지 않는다
  *  D. 옵션 원장이 빈 공고/오더는 텍스트 분해가 쪼갠 조각을 **옵션으로 승격시키지 않는다**
+ *     D-2(결정 382): 대신 금액만 걷어낸 **그 줄 원문**을 상품명으로 — 열고 그대로 저장해도 상품 줄 불변
  *  E. 카드의 옵션 있음↔없음 전환 — 옵션을 없애는 방향은 확인창(조용한 값 소실 금지)
  *  F. 인트라넷이 옵션 구조를 신호로 보낸다(product_options_json) + 리뷰웹이 옵션인원으로 프리필
  *
@@ -328,7 +329,8 @@ console.log('\n[D] 옵션 신호 없는 오더·공고 — 추측 승격 금지'
   ok('옵션 배열 없는 오더 → none 모드', t.run('_prodMode()') === 'none');
   ok('옵션 배열 없는 오더 → 저장 옵션 0건(상품명 조각 승격 없음)', t.run('JSON.stringify(readOptRows())') === '[]');
   const rows = JSON.parse(t.run('JSON.stringify(_readProdRowsRaw())'));
-  ok('쪼개진 조각은 상품명으로 되붙는다(값 유실 0)', rows.length === 1 && rows[0].productName === '우레온 모이스처 바디 리셋 미스트 150ml');
+  // ★ 결정 382 — 되붙일 땐 그 줄 원문 그대로(구분자 「-」까지 유지 · 값 유실 0)
+  ok('쪼개진 조각은 상품명으로 되붙는다(값 유실 0 · 구분자 유지)', rows.length === 1 && rows[0].productName === '우레온 모이스처 바디-리셋 미스트 150ml');
 
   // 편집 프리필: 옵션 원장이 비었으면 원문 분해 결과도 옵션이 아니다
   const t2 = makeTable();
@@ -358,7 +360,7 @@ console.log('\n[D] 옵션 신호 없는 오더·공고 — 추측 승격 금지'
   // 같은 줄 조각은 종전대로 되붙는다(결정 042) · 작업오더 원문은 종전대로 오더 상품명을 이어받는다(옵션 글자 줄)
   const tl2 = makeTable();
   tl2.run(`renderOptRowsWithProduct([], '우레온 미스트 - 리필 - 결제금액 9,000원\\n샴푸 - 결제금액 10,000원')`);
-  ok('같은 줄 조각은 되붙는다', JSON.parse(tl2.run('JSON.stringify(_readProdRowsRaw())')).map(r => r.productName).join(',') === '우레온 미스트 리필,샴푸');
+  ok('같은 줄 조각은 되붙는다(결정 382 — 그 줄 원문 그대로)', JSON.parse(tl2.run('JSON.stringify(_readProdRowsRaw())')).map(r => r.productName).join(',') === '우레온 미스트 - 리필,샴푸');
   const to = makeTable();
   to.run(`applyProductRowsFromOrder({ product_name: '샴푸', wd_product: '블랙 - 결제금액 10,000원\\n화이트 - 결제금액 12,000원' })`);
   ok('작업오더 글자 옵션은 오더 상품명을 이어받는다(무회귀)', JSON.parse(to.run('JSON.stringify(_readProdRowsRaw())')).map(r => r.productName).join(',') === '샴푸 블랙,샴푸 화이트');
@@ -368,6 +370,72 @@ console.log('\n[D] 옵션 신호 없는 오더·공고 — 추측 승격 금지'
   t3.run(`applyProductRowsFromOrder({ options: [{ optKey:'콰이어트', payAmount:31400, recruitTotal:20 }, { optKey:'어나더', payAmount:31400, recruitTotal:20 }] })`);
   const o3 = JSON.parse(t3.run('JSON.stringify(readOptRows())'));
   ok('옵션 배열 오더 → opt 모드 · 옵션 2건 · 옵션인원 프리필', t3.run('_prodMode()') === 'opt' && o3.length === 2 && o3[0].recruitTotal === 20);
+}
+
+/* ══════════════ D-2. 결정 382 — 옵션 없는 공고는 열고 그대로 저장해도 상품 줄이 안 바뀐다 ══════════════ */
+console.log('\n[D-2] 결정 382 — 옵션 없는 공고 상품 줄 원문 보존(구분자 / - – | · 유지)');
+{
+  // 수정 창 흐름 그대로: 저장된 productLines → rf_wd_product → renderOptRowsWithProduct(원장 0) → _syncPreviewFromOptRows
+  //   → 저장은 rf_wd_product.value.trim() 을 보낸다(index-recruit.js 저장부). 손대지 않으면 같은 글이어야 한다.
+  const reopen = (pl, camp) => {
+    const t = makeTable();
+    t.dom.byId.rf_wd_product.value = pl;
+    t.sandbox._pl = pl; t.sandbox._camp = camp || {};
+    t.run('renderOptRowsWithProduct([], _pl, _camp)');
+    return { t, saved: String(t.dom.byId.rf_wd_product.value || '').trim() };
+  };
+  // 운영 형태 표본(2026-11-18 운영 공고 전수 재현에서 바뀌던 모양) — 그대로 돌아와야 한다
+  const SAME = [
+    '글쓰기      세라모사이드 3가지 맛 중 택1 (피치 / 레몬 / 스트로베리) - 결제금액 12,400원',   // camp_e4a143db7c60
+    '1. 본품+리필1p 세트 / 23호 - 결제금액 39,900원',                                         // 살아 있는 draft
+    '피치맛/레몬맛/스트로베리맛 중 1개 선택 - 결제금액 12,400원',
+    '쿠팡상품번호: 9555922807 - 28940810757 서울대 밥스누 파이토 블랙약콩샴푸 100ml - 결제금액 8,600원',
+    'HA-HD2000 / 배송메시지 : 00 - 결제금액 199,000원',
+    '앰플 | 50ml · 2개입 – 본품 - 결제금액 15,000원',
+    '우레온 미스트 - 리필 - 결제금액 9,000원\n샴푸 - 결제금액 10,000원',
+    '샴푸 - 결제금액 10,000원\n샴푸 리필 / 2개 - 결제금액 12,000원',
+    '샴푸 - 결제금액 10,000원\n샴푸 리필 - 결제금액 12,000원',   // 둘째 줄이 첫 줄 이름으로 시작해도 잘리지 않는다
+    '1+1 (2,000원 할인) - 결제금액 12,400원',                     // 상품명 속 「N원」은 금액이 아니다
+    '리보 세럼 40ml',                                                // 금액 없는 줄
+  ];
+  for (const pl of SAME) {
+    const { t, saved } = reopen(pl, { recruit_total: 30, daily_limit: 5 });
+    ok('열고 그대로 저장 = 상품 줄 불변: ' + JSON.stringify(pl).slice(0, 60), saved === pl);
+    ok('  └ 옵션으로 승격하지 않는다(none · 옵션 0건, 결정 042)', t.run('_prodMode()') === 'none' && t.run('JSON.stringify(readOptRows())') === '[]');
+  }
+  // 상품 카드에 보이는 이름 = 금액만 걷어낸 그 줄 원문
+  {
+    const { t } = reopen(SAME[0], { recruit_total: 30 });
+    const raw = JSON.parse(t.run('JSON.stringify(_readProdRowsRaw())'));
+    ok('카드 상품명 = 금액만 걷어낸 원문(「/」 유지)', raw.length === 1 && raw[0].productName === '글쓰기      세라모사이드 3가지 맛 중 택1 (피치 / 레몬 / 스트로베리)' && raw[0].payAmount === 12400);
+    ok('카드 금액·정원 = 종전대로(12,400 · 총 30)', t.dom.byId.rf_recruit_total.value === 30);
+  }
+  // 예전 오염 문장(금액이 두 번 들어간 줄)은 금액 표기만 한 번으로 정리 — 상품명 글자·주소는 지킨다
+  {
+    const a = reopen('우레온 모이스처 바디 리셋 미스트 결제금액 22,000원 - 결제금액 22,000원').saved;
+    ok('금액 두 번 오염 줄 → 금액 한 번(상품명 그대로)', a === '우레온 모이스처 바디 리셋 미스트 - 결제금액 22,000원');
+    const u = reopen('블랑카우 바디로션 500ml 결제금액 20,300원 - 결제금액 20,300원 https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000261295').saved;
+    ok('상품 줄 속 주소의 「/」가 지워지지 않는다', u.includes('https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000261295') && /- 결제금액 20,300원$/.test(u));
+    ok('한 번 정리된 글은 다시 열어도 그대로(안정)', reopen(u).saved === u && reopen(a).saved === a);
+  }
+  // 작업오더로 새 공고를 만들 때도 같은 줄 원문(구분자 유지) · 오더 상품명 이어받기는 무회귀
+  {
+    const t = makeTable();
+    t.run(`applyProductRowsFromOrder({ product_name: '세라모사이드', wd_product: '글쓰기 세라모사이드 택1 (피치 / 레몬) - 결제금액 12,400원' })`);
+    const raw = JSON.parse(t.run('JSON.stringify(_readProdRowsRaw())'));
+    ok('작업오더 프리필: 줄 원문 유지(「/」)', raw.length === 1 && raw[0].productName === '글쓰기 세라모사이드 택1 (피치 / 레몬)' && t.run('_prodMode()') === 'none');
+    ok('작업오더 프리필: 옵션 0건(승격 없음)', t.run('JSON.stringify(readOptRows())') === '[]');
+  }
+  // 옵션 있는 공고(원장 살아 있음)는 종전 그대로 — 원문 분해로 상품명을 되찾는다
+  {
+    const t = makeTable();
+    t.sandbox._opts = [{ optKey: '레몬', payAmount: 12400, recruitTotal: 5, status: 'active' }, { optKey: '피치', payAmount: 12400, recruitTotal: 5, status: 'active' }];
+    t.run(`renderOptRowsWithProduct(_opts, '세라모사이드 - 레몬 - 결제금액 12,400원\\n세라모사이드 - 피치 - 결제금액 12,400원', {})`);
+    const o = JSON.parse(t.run('JSON.stringify(readOptRows())'));
+    ok('옵션 공고: opt 모드 · 옵션 2건 · 상품명은 원문 첫 조각(무회귀)', t.run('_prodMode()') === 'opt' && o.length === 2
+      && o.map(x => x.optKey).join(',') === '레몬,피치' && o.every(x => x.productName === '세라모사이드'));
+    ok('옵션 공고: 상품 원문 = 「상품명 - 옵션 - 결제금액」(무회귀)', t.dom.byId.rf_wd_product.value === '세라모사이드 - 레몬 - 결제금액 12,400원\n세라모사이드 - 피치 - 결제금액 12,400원');
+  }
 }
 
 /* ══════════════ E. 카드의 옵션 있음↔없음 · 확인창 ══════════════ */
