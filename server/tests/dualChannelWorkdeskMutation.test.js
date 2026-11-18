@@ -235,7 +235,7 @@ test('fallback refuses a newly attached live order instead of deleting only its 
 test('preservation: ordinary total remains an overlay; clearing keeps split and historical fees locked', async()=>{
   const f=await fixture({dual:false});try{
     assert.equal((await f.svc.editWorkdeskRow({...args,field:'col:결제금액',value:'999'})).ok,true);
-    await f.pg.exec(`ALTER TABLE payment_batch_items ADD amount integer,ADD is_qna boolean;
+    await f.pg.exec(`ALTER TABLE payment_batch_items ADD amount integer,ADD is_qna boolean,ADD zero_price_purchase boolean;
       UPDATE campaign_participants SET row_json=row_json||'{"입금":"11/1"}'::jsonb;
       INSERT INTO payment_batches VALUES('00000000-0000-4000-8000-000000000010',NULL),('00000000-0000-4000-8000-000000000011','historical-fee:test');
       INSERT INTO payment_batch_items(id,batch_id,sheet_id,tab_name,row_index,status,product_price,review_fee,amount) VALUES

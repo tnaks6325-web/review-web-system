@@ -129,7 +129,11 @@ const st = require('../src/services/campaignState.service');
   const qs = S('src/services/qnaSlots.service.js');
   t('추가 모집 = 그 줄의 진행일자만 옮긴다(새 줄·새 자리 없음 · 주문 붙은 줄 제외)',
     /UPDATE qna_slots SET slot_date = \$2::date, round = round \+ 1/.test(qs) && /order_submission_id IS NULL`/.test(qs) && !/appendSlot/.test(qs));
-  t('같은 하루 건수 · 다음 영업일부터', /MAX\(n\)::int AS per/.test(qs) && /startDate: tomorrow/.test(qs));
+  // ★ 결정 377: 시작일 기본 = 다음 날(옛 화면) · 오늘부터는 잠근 뒤 오늘 정원 판정(qnaTodayStartCheck)을 통과할 때만 · 0명 휴무일은 건너뜀
+  t('같은 하루 건수 · 기본 다음 날부터 · 오늘부터는 판정 통과 때만 · 0명 휴무일 건너뜀(결정 377)',
+    /MAX\(n\)::int AS per/.test(qs) && /extraFrom = kstDateStr\(new Date\(now\.getTime\(\) \+ DAY_MS\)\)/.test(qs)
+    && /if \(start === 'today'\) \{[\s\S]{0,400}qnaTodayStartCheck\([\s\S]{0,300}if \(!chk\.ok\) throw/.test(qs)
+    && /normalizeHolidayList\(wo\.holidays\)\.concat\(restDays\)/.test(qs));
   t('끝내기 = 못 채운 자리 닫음 + 공고 마감', /SET status = 'lapsed'/.test(qs) && /UPDATE recruit_campaigns SET status = 'closed'/.test(qs));
   t('작업표 기록과 같은 잠금 안에서 옮긴다(공고 잠금보다 먼저 잡는다 — ⑨)', /sheetless_worktable:\$\{pre\[0\]\.linked_sheet_id\}:\$\{pre\[0\]\.linked_tab_name\}/.test(qs));
   t('같은 일정 끝 추가 모집은 한 번만', /action = \$2 AND detail->>'end' = \$3/.test(qs));
@@ -229,12 +233,13 @@ const st = require('../src/services/campaignState.service');
   const ps = S('src/services/payment.service.js');
   t('Q&A 판정 = 공고 > 탭 종류(resolveWorkKind 단일 출처)', /const isQna = resolveWorkKind\(\{ campaignKind: camp && camp\.workKind, tabKind: tab && tab\.workKind \}\) === 'qna';/.test(ps));
   t('Q&A 금액 = 참여비만', /const amount = \(goodsByAdvertiser \|\| isQna\) \? fee : productPrice \+ fee;/.test(ps));
-  t('Q&A 는 금액 없음(no_price)으로 막지 않는다', /if \(!productPrice && !isQna\) issues\.push/.test(ps));
+  // 결정 376 — 0원 구매 · 리뷰비만도 같은 자리에서 빠진다(Q&A 제외는 그대로 · 검사 의미 불변)
+  t('Q&A 는 금액 없음(no_price)으로 막지 않는다', /if \(!productPrice && !isQna && !zeroPricePurchase\) issues\.push/.test(ps));
   t('회차 항목에 is_qna 박제 · 제품비 0', /\(it\.goodsByAdvertiser \|\| it\.isQna\) \? 0 : it\.productPrice, it\.reviewFee, it\.amount, it\.transferMemo, it\.isQna === true/.test(ps));
   t('「리뷰비만」(JS): Q&A 항목은 아님', pay.isFeeOnlyItem({ product_price: 0, review_fee: 2000, amount: 2000, is_qna: true }) === false
     && pay.isFeeOnlyItem({ productPrice: 0, reviewFee: 2000, amount: 2000, isQna: true }) === false);
   t('「리뷰비만」(JS): 같은 모양 split 건은 종전대로', pay.isFeeOnlyItem({ product_price: 0, review_fee: 2000, amount: 2000 }) === true);
-  t('「리뷰비만」(SQL): is_qna 면 빠진다', /AND NOT COALESCE\(i\.is_qna, FALSE\)\)$/.test(pay.feeOnlyItemSql('i')));
+  t('「리뷰비만」(SQL): is_qna 면 빠진다', /AND NOT COALESCE\(i\.is_qna, FALSE\) AND NOT COALESCE\(i\.zero_price_purchase, FALSE\)\)$/.test(pay.feeOnlyItemSql('i')));
   t('결과 반영 항목 보기에 isQna', /isQna: r\.is_qna === true/.test(S('src/services/paymentResult.service.js')));
   t('입금일 다시 쓰기 조회에 is_qna', /i\.amount, i\.is_qna,/.test(S('src/services/paymentResult.service.js')));
   t('부팅 필수 칸 payment_batch_items.is_qna(212)', /\['payment_batch_items', 'is_qna'\]/.test(S('index.js')) && /ADD COLUMN IF NOT EXISTS is_qna BOOLEAN NOT NULL DEFAULT FALSE/.test(S('migrations/212_payment_item_qna.sql')));

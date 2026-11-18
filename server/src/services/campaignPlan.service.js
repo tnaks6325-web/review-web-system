@@ -76,7 +76,7 @@ async function _todayUsed(db, campaignId, dayStartUtcIso) {
 }
 
 /* ── 조회(모달 재료) ─────────────────────────────────────── */
-async function getPlanOverview(campaignId) {
+async function getPlanOverview(campaignId, { admin = null } = {}) {
   const camp = await _loadCampaign(campaignId);
   if (!camp.participation_mode) { const e = new Error('참여형 공고만 인원 조절을 지원합니다.'); e.code = 'not_participation'; throw e; }
   const today = kstTodayStr();
@@ -278,6 +278,14 @@ async function getPlanOverview(campaignId) {
     optionDaily = null;
     logger.warn(`[campaignPlan] 상품 일건수 조회 실패(경고 생략) camp=${camp.id}: ${e.message}`);
   }
+  /* ★ 결정 377 — Q&A 공고(서버가 자리표로 하루 몫을 정하는 공고 — computeCampaignState 의 isQna 와 같은 판정:
+       quotaCounts.qnaToday 가 숫자)는 화면이 날짜별 조절·이월 대신 자리표를 그리도록 재료를 싣는다.
+       ★ Q&A 가 아니면 칸 자체를 싣지 않는다(종전 응답 그대로) · 자리표 조회 실패 = { error:true }(화면은 안내만 — 가짜 숫자 금지). */
+  let qna;
+  if (quotaCounts && typeof quotaCounts.qnaToday === 'number') {
+    try { qna = await require('./qnaSlots.service').qnaPlanView(pool, camp, { admin }); }
+    catch (e) { qna = { error: true }; logger.warn(`[campaignPlan] Q&A 자리표 조회 실패 camp=${camp.id}: ${e.message}`); }
+  }
   return {
     campaignId: camp.id,
     title: camp.title || '',
@@ -337,6 +345,7 @@ async function getPlanOverview(campaignId) {
     roundsDrift: rounds.length > 0 && roundsTotal !== (Number(camp.recruit_total) || 0),
     events: eventsQ.rows.map(r => ({ actor: r.actor || '', action: r.action, detail: r.detail || null, at: r.created_at })),
     optionDaily,
+    ...(qna !== undefined ? { qna } : {}),
   };
 }
 

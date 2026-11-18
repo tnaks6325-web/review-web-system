@@ -791,6 +791,122 @@
      ★ 예상 인원이 없는 공고(시트 일정 · 구버전 서버)는 종전 화면(균형 모드)을 그대로 쓴다. */
   var PJ_PREVIEW_MS = 250;
   function projOn() { return !!(S && S.pj); }
+  /* ══ 결정 377 — Q&A 공고(자리표가 하루 인원을 정함) ═══════════════════════════════
+     서버가 `qna` 칸을 실은 공고만(판정 = 서버 computeCampaignState 의 isQna 와 같은 재료 — 사본 0).
+     ★ 칸이 없으면(일반 공고·구버전 서버) 이 갈래는 한 줄도 타지 않는다 — 종전 화면 그대로.
+     ★ [＋]/[−]·이월 방식은 그리지 않는다(Q&A 의 하루 인원을 바꾸지 못하는 막다른 버튼). 0명 휴무만 실제로 먹히므로
+       저장된 계획의 [기본으로]는 남긴다 — 저장은 종전 [확정 저장](remove) 그대로. */
+  function qnaOn() { return !!(S && S.qna); }
+  function qnaDay(d) {
+    if (!S.qna._m) { var m = {}; (S.qna.days || []).forEach(function (x) { m[x.date] = x; }); S.qna._m = m; }
+    return S.qna._m[d] || null;
+  }
+  function qnaDates() {
+    var t = S.data.today, ds = {};
+    (S.qna.days || []).forEach(function (x) { if (x.date >= t) ds[x.date] = 1; });
+    Object.keys(S.base).forEach(function (d) { if (d >= t) ds[d] = 1; });
+    if (S.pj) Object.keys(S.pj.rm).forEach(function (d) { ds[d] = 1; });
+    return Object.keys(ds).sort();
+  }
+  function renderQna() {
+    var j = S.data, q = S.qna;
+    var bd = document.getElementById('cdpBody');
+    var save = document.getElementById('cdpSaveBtn');
+    var hint = document.getElementById('cdpHint');
+    var killOff = j.planEnabled === false;
+    var dates = rowDates();   // ★ 행 이벤트(bindRowEvents)와 같은 목록
+    var restWarn = [];
+    var rows = dates.map(function (d, i) {
+      var x = qnaDay(d), slots = x ? x.slots : 0, isToday = d === j.today;
+      var rm = !!(S.pj && S.pj.rm[d]), saved = S.base[d] != null && !rm, pv = S.base[d];
+      var rest = saved && pv === 0;
+      if (rest && slots > 0) restWarn.push(fmtMD(d));
+      var stateText = rm ? '변경' : rest ? '휴무' : (isToday ? '오늘' : '자리표');
+      var seat = x ? '남은 자리 ' + x.open + ' / ' + slots : '';
+      var note = rm ? (pv === 0 ? '0명(휴무) 해제 — 저장 전' : '직접 정한 값 해제 — 저장 전')
+        : rest ? (slots > 0 ? '휴무로 닫힘 — 자리 ' + slots + '개가 열리지 않습니다' : '0명(휴무)으로 정해 둔 날' + (q.extra ? ' — 추가 모집은 이 날을 건너뜁니다' : ''))
+        : saved ? (seat ? seat + ' · ' : '') + '직접 정한 값 ' + pv + '명 — Q&amp;A 에서는 하루 인원에 쓰이지 않습니다'
+        : seat;
+      var dk = dayKind(d), hol = holidayName(d);
+      return '<div class="cdp-row cdp-qrow' + (isToday ? ' today' : '') + (rest ? ' zero' : '') + '">'
+        + '<span class="cdp-d' + (dk ? ' ' + dk : '') + '"' + (hol ? ' title="' + _esc(hol) + '"' : '') + '>' + _esc(fmtMD(d))
+        + (hol ? '<span class="cdp-tag hol">' + _esc(hol) + '</span>' : '') + '</span>'
+        + '<span class="cdp-state">' + stateText + '</span>'
+        + '<span class="cdp-num">' + slots + '</span>'
+        + '<span class="cdp-qnote' + (rest && slots > 0 ? ' warn' : '') + '">' + note
+        + (saved ? ' <button type="button" class="cdp-reset" data-i="' + i + '"' + (killOff ? ' disabled' : '') + '>기본으로</button>' : '') + '</span>'
+        + '</div>';
+    }).join('');
+    var done = Number(j.submittedAll) || 0, tot = totalFor();
+    var lastTxt = q.last ? fmtMD(q.last) : '없음';
+    var statBlk = '<div class="cdp-stat"><div class="r1">'
+      + '<span class="big">모집 현황 <em>' + done + '</em> / ' + (tot > 0 ? tot + '명' : '무제한') + '</span></div>'
+      + (tot > 0 ? '<div class="bar"><i style="width:' + Math.min(100, done / tot * 100).toFixed(1) + '%"></i></div>' : '')
+      + '<div class="kv">'
+      + (tot > 0 ? '<span>남은 모집 <b>' + Math.max(0, tot - done) + '</b>명</span>' : '')
+      + (q.error ? '' : '<span>자리표 마지막 날 <b class="end">' + _esc(lastTxt) + '</b></span>')
+      + '</div></div>';
+    var side = '<div class="cdp-note cdp-qside">💬 <b>Q&amp;A 공고</b><br>하루 인원은 <b>자리표</b>가 정합니다. 일건수·이월 방식은 쓰지 않습니다.</div>';
+    var lead = q.error
+      ? '<div class="cdp-note err">Q&amp;A 자리표를 읽지 못했습니다 — 날짜별 자리를 보여 드릴 수 없습니다. 잠시 뒤 다시 열어 주세요.</div>'
+      : '<div class="cdp-note cdp-qlead"><b>이 공고는 Q&amp;A 자리표가 하루 인원을 정합니다.</b> 여기서 숫자를 바꿔도 하루 인원은 바뀌지 않습니다 — 0명(휴무)으로 닫아 둔 날만 그날 모집이 멈춥니다.</div>';
+    var ex = q.extra;
+    var extraBlk = '';
+    if (ex) {
+      var exTd = ex.start && ex.start.today;
+      extraBlk = '<div class="cdp-note warn cdp-od cdp-qextra"><span>자리표가 <b>' + _esc(fmtMD(ex.end)) + '</b>에 끝났고 못 채운 자리 <b>' + (ex.total | 0) + '개</b>가 남아 있습니다. '
+        + (exTd && exTd.ok ? '[추가 모집]에서 <b>오늘부터</b> 다시 열 수 있습니다.' : '[추가 모집]에서 시작일을 골라 다시 여세요.') + '</span>'
+        + (ex.canDecide === false
+          ? '<span class="cdp-qwho">추가 모집은 공고 담당자·오더를 보낸 사람·관리자가 정합니다.</span>'
+          : '<button type="button" class="cdp-btn sm pri" id="cdpQnaExtra" onclick="CampaignDailyPlan._qnaExtra()">추가 모집 정하기</button>')
+        + '</div>';
+    } else if (q.ended) {
+      extraBlk = '<div class="cdp-note">자리표가 <b>' + _esc(lastTxt) + '</b>에 끝났습니다 — 못 채운 자리가 없습니다.</div>';
+    }
+    var restBlk = restWarn.length
+      ? '<div class="cdp-note warn"><b>' + _esc(restWarn.join('·')) + '</b>은 0명(휴무)으로 닫아 둬서 그날 자리가 열리지 않습니다 — 그 줄의 [기본으로]를 누르고 [확정 저장]하세요.</div>' : '';
+    bd.innerHTML = '<div class="cdp-layout"><aside class="cdp-side">' + statBlk + side + '</aside>'
+      + '<section class="cdp-main"><div class="cdp-fix">'
+      + (killOff ? '<div class="cdp-note err">킬스위치(CAMPAIGN_DAILY_PLAN=0)로 날짜별 계획이 꺼져 있습니다 — 조절을 잠갔습니다.</div>' : '')
+      + (j.status !== 'active' ? '<div class="cdp-publish">현재 <b>' + (j.status === 'closed' ? '마감' : '임시저장') + '</b> 상태입니다. 모집을 다시 열려면 공고 카드에서 게시를 켜세요.</div>' : '')
+      + lead + extraBlk + restBlk
+      + '<div class="cdp-sub"><span>날짜별 자리 — 자리표 기준(오늘부터)</span>'
+      + '<span>자리 <b>' + (q.total | 0) + '개</b> · 확정 <b>' + done + '명</b></span></div>'
+      + '</div><div class="cdp-sc">'
+      + '<div class="cdp-colhead cdp-qrow"><span>날짜</span><span>상태</span><span class="n">자리</span><span>안내</span></div>'
+      + '<div id="cdpRows">' + (rows || '<div class="cdp-note">오늘부터 깔린 자리가 없습니다.</div>') + '</div>'
+      + '<div class="cdp-end"><span>자리표 마지막 날: <b>' + _esc(lastTxt) + '</b></span>'
+      + '<button type="button" class="cdp-btn" onclick="CampaignDailyPlan._revert()" style="padding:5px 10px;font-size:.66rem">바꾼 내용 되돌리기</button></div>'
+      + '<details class="cdp-more"><summary>조정 이력</summary>'
+      + '<div class="cdp-note">Q&amp;A 공고는 접수 때 만든 자리표대로 날짜별로 열립니다. 못 채운 자리는 다음 날로 넘어가지 않고, 정규 일정이 끝나면 [추가 모집]으로 다시 엽니다. 차수 추가는 Q&amp;A 공고에 쓰지 않습니다.</div>'
+      + histHtml() + '</details>'
+      + '</div></section></div>';
+    bindRowEvents();
+    var dirty = S.pj ? pjDirtyList().length : 0;
+    save.disabled = killOff || S.saving || !dirty;
+    hint.textContent = dirty ? '바꾼 날 ' + dirty + '일 — [확정 저장]을 누르면 반영됩니다'
+      : 'Q&A 공고 — 하루 인원은 자리표가 정합니다';
+  }
+  /** [추가 모집 정하기] — 정규 일정 끝 팝업(같은 창·같은 반영 길)을 이 공고 하나만 보이게 연다. 반영되면 이 창을 다시 불러온다. */
+  async function _qnaExtra() {
+    if (!S || !S.qna || !S.qna.extra) return;
+    var P = window.SequentialEndPrompt;
+    if (!P || typeof P.openFor !== 'function') { toast('추가 모집 창을 열 수 없습니다 — 화면을 새로고침한 뒤 다시 눌러 주세요'); return; }
+    var campId = S.campId;
+    var r;
+    try {
+      r = await P.openFor(campId, { onDone: function () {
+        if (!S || S.campId !== campId) return;
+        _odReload(campId).then(function () { toast('추가 모집을 반영했습니다 — 날짜별 자리를 다시 불러왔습니다'); })
+          .catch(function (e) { toast('반영은 됐지만 이 창을 다시 그리지 못했습니다 — 창을 닫고 다시 열어 주세요 (' + (e.message || e) + ')'); });
+      } });
+    } catch (e) { r = { ok: false, reason: 'load_failed' }; }
+    if (r && r.ok) return;
+    var why = r && r.reason;
+    toast(why === 'not_listed' ? '이 공고의 추가 모집은 공고 담당자·오더를 보낸 사람·관리자가 정합니다(이미 처리됐을 수도 있습니다)'
+      : why === 'not_started' ? '추가 모집 창이 아직 준비되지 않았습니다 — 화면을 새로고침한 뒤 다시 눌러 주세요'
+      : '추가 모집 창을 불러오지 못했습니다 — 잠시 뒤 다시 눌러 주세요');
+  }
   function _pjSetProj(p) {
     S.pj.proj = p || null;
     var m = {};
@@ -838,6 +954,7 @@
   function pjReset(d) {
     delete S.pj.pend[d];
     if (S.base[d] != null) S.pj.rm[d] = 1;
+    if (qnaOn()) { render(); return; }   // 결정 377 — Q&A 는 앞날 예상을 다시 잴 것이 없다(자리표가 정한다)
     pjPreview();   // ★ 「다시 계산 중」·저장 잠금과 함께 다시 그린다
   }
   /** 바뀐 날을 서버에 보내 예상 인원을 다시 받는다(저장하지 않음). 늦게 온 응답은 버린다. */
@@ -1313,6 +1430,15 @@
     + '#cdpChoice .op small{color:var(--t3,#64748b);font-size:.68rem;line-height:1.45;display:block}'
     + '#cdpChoice .op:disabled{opacity:.45;cursor:default}'
     + '#cdpChoice .cx{display:block;margin:5px auto 0;border:0;background:none;color:var(--t3,#94a3b8);font-size:.7rem;cursor:pointer;text-decoration:underline}'
+    /* 결정 377 — Q&A 자리표 화면 전용(새 클래스만 — 일반 공고 화면에는 닿지 않는다) */
+    + '#cdpModal .cdp-qnote{font-size:.7rem;color:var(--t3,#64748b);line-height:1.45;min-width:0;overflow-wrap:anywhere}'
+    + '#cdpModal .cdp-qnote.warn{color:#b45309;font-weight:700}'
+    + '#cdpModal .cdp-qnote .cdp-reset{margin-left:6px;font-size:.68rem;color:#2563eb}'
+    + '#cdpModal .cdp-qlead{border-left-color:#2563eb;background:#eff5ff;color:#1e3a8a}'
+    + '#cdpModal .cdp-side>.cdp-qside{background:#eff5ff;color:#1e3a8a;line-height:1.55}'
+    + '#cdpModal .cdp-qextra .cdp-btn{white-space:nowrap}#cdpModal .cdp-qwho{font-size:.68rem;color:#92400e}'
+    + '@media (max-width:560px){#cdpModal .cdp-row.cdp-qrow,#cdpModal .cdp-colhead.cdp-qrow{grid-template-columns:minmax(0,1fr) auto 36px;column-gap:6px}'
+    + '#cdpModal .cdp-qrow>.cdp-qnote{grid-column:1/-1;order:9}#cdpModal .cdp-colhead.cdp-qrow span:last-child{display:none}#cdpModal .cdp-colhead.cdp-qrow .n{display:block;text-align:right;order:4}#cdpModal .cdp-qrow>.cdp-num{order:4;text-align:right}}'
     /* 결정 343 — 상품 일건수 경고 줄 · 바꾸기 팝업(기존 cdp-note warn · ch-box 모양을 따른다) */
     + '#cdpModal .cdp-note.cdp-od{display:flex;gap:8px;align-items:center;flex-wrap:wrap}#cdpModal .cdp-note.cdp-od>span{flex:1 1 260px}'
     + '#cdpModal .cdp-num .odw{display:block;margin-top:2px;color:#b45309;font-size:.62rem;font-weight:800;white-space:nowrap;line-height:1.2}'
@@ -1477,6 +1603,16 @@
     S.closedPin = {};   // [주말·공휴일 0명 확정] 스테이징 — 저장·재조회하면 비운다
     /* ★ 결정 182 — 서버가 날짜별 예상 인원을 주면 "예상 인원 방식"으로 연다(시트 일정 공고는 종전 화면) */
     S.pj = null;
+    /* ★ 결정 377 — Q&A 공고는 자리표 화면으로 연다(저장 길은 예상 인원 방식과 같은 S.pj — [기본으로] = remove) */
+    S.qna = (j.qna && typeof j.qna === 'object') ? j.qna : null;
+    if (S.qna) {
+      S.pj = { proj: null, map: {}, pend: {}, rm: {}, orig: {}, seq: 0, timer: null, loading: false, err: null, baseEnd: null, reset: null };
+      _pjSetProj(j.projection || null);
+      S.carryMode = j.carryStrategy || 'next';
+      document.getElementById('cdpTitle').textContent = '모집인원 조절 — ' + (S.title || S.campId);
+      render();
+      return;
+    }
     if (j.projection && j.scheduleDriven !== true) {
       S.pj = { proj: null, map: {}, pend: {}, rm: {}, orig: {}, seq: 0, timer: null, loading: false, err: null, baseEnd: null, reset: null };
       _pjSetProj(j.projection);
@@ -1581,6 +1717,7 @@
   function rowDates() {
     /* ★★ 예상 인원 방식은 renderProj 가 그린 줄 목록(pjDates)과 **같은 목록**이어야 한다 — 행 이벤트(bindRowEvents)가
        data-i 번호를 이 목록으로 날짜에 되돌리므로, 목록이 다르면 ＋/−·입력이 **다른 날짜**를 바꾼다. */
+    if (qnaOn()) return qnaDates();   // 결정 377 — Q&A 자리표 화면의 줄 목록(renderQna 와 같은 목록)
     if (projOn()) return pjDates();
     // 균형 모드 = 오늘~종료일 구간 전부(합계를 총량과 맞춰야 하므로 성긴 표로는 셀 수 없다)
     if (balanceOn()) return S.horiz;
@@ -1592,6 +1729,7 @@
   }
 
   function render() {
+    if (qnaOn()) return renderQna();
     if (projOn()) return renderProj();
     var j = S.data;
     var bd = document.getElementById('cdpBody');
@@ -2069,6 +2207,11 @@
         .concat((d.remove || []).map(function (x) { return fmtMD(x) + ' 기본으로'; }));
       return '계획 저장: ' + parts.join(', ') + (d.note ? ' · ' + d.note : '');
     }
+    if (ev.action === 'qna_extra') {   // 결정 377 — Q&A 일정 끝 [추가 모집]
+      return '추가 모집: 못 채운 자리 ' + (d.moved || 0) + '개를 ' + (d.from ? fmtMD(d.from) + '부터' : '다음 날부터') + ' 다시 깔았습니다'
+        + (d.skipped && d.skipped.length ? ' (0명 휴무 ' + d.skipped.map(fmtMD).join('·') + ' 건너뜀)' : '');
+    }
+    if (ev.action === 'qna_finish') return '그대로 끝내기: 못 채운 자리 ' + (d.lapsed || 0) + '개를 닫고 공고를 마감했습니다';
     if (ev.action === 'option_daily') {   // 결정 343 — [상품 일건수 바꾸기]
       return '상품 일건수: ' + (d.options || []).map(function (x) { return x.from + '→' + x.to + '명'; }).join(', ')
         + (d.campaignDaily != null ? ' · 공고 기본 ' + d.campaignDaily + '명' : '') + (d.linked ? ' · 리뷰오더도 함께' : '');
@@ -2209,7 +2352,7 @@
   }
   function _revert() {
     if (!S || !S.data) return;
-    if (S.pj) { S.pj.pend = {}; S.pj.rm = {}; S.pj.orig = {}; S.pj.reset = null; S.notes = []; pjPreview(); return; }
+    if (S.pj) { S.pj.pend = {}; S.pj.rm = {}; S.pj.orig = {}; S.pj.reset = null; S.notes = []; if (qnaOn()) { render(); return; } pjPreview(); return; }
     if (balanceOn()) {
       // 균형 모드 = "이 방식의 기본 배치로" — 지금 고른 방식대로 다시 깐다(합계는 항상 딱 맞는다)
       applyCarryMode(S.carryMode || DEFAULT_CARRY_MODE);
@@ -2714,6 +2857,7 @@
     _heldApply: _heldApply, _pjHeld: _pjHeld,
     _pinClosed: _pinClosed,
     _odOpen: _odOpen, _odNext: _odNext, _odBack: _odBack, _odCancel: _odCancel, _odApply: _odApply,
+    _qnaExtra: _qnaExtra,
     quickApplyHeld: quickApplyHeld, _quickDo: _quickDo, _quickDetail: _quickDetail, _quickClose: _quickClose,
   };
 })();

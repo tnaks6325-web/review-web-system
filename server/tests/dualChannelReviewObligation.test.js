@@ -120,8 +120,51 @@ test('completion writes the worktable submit cell once on transition; failure ab
       assert.equal(calls.length, 1); assert.equal(calls[0].kind, 'submit'); assert.equal(calls[0].rowIndex, 2); assert.equal(calls[0].client, db);
       await review.recomputeBundleReviewStateInTx(db, OS); assert.equal(calls.length, 1, 'already submitted seat is not rewritten');
     }
+    // 결정 375: the cell holds the completion time ('M/D HH:MM' KST, like the reviewer web submit and the staff
+    // manual submit), never the bare markStatusCell default ('제출' on V2 boards / 'O' on legacy boards).
+    { const { sql, db } = await fixture(); await addReview(sql, 'naver', 'review', 1); await addReview(sql, 'coupang', 'slot2', 2);
+      calls.length = 0;
+      const kst = () => { const d = new Date(Date.now() + 9 * 3600e3); return `${d.getUTCMonth() + 1}/${d.getUTCDate()} ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`; };
+      const before = kst();
+      await review.recomputeBundleReviewStateInTx(db, OS);
+      const after = kst();
+      assert.equal(calls.length, 1);
+      assert.match(String(calls[0].value || ''), /^\d{1,2}\/\d{1,2} \d{2}:\d{2}$/, 'completion writes the M/D HH:MM time, not the default mark');
+      assert.ok([before, after].includes(calls[0].value), `KST completion time expected (${before}..${after}), got ${calls[0].value}`);
+    }
     { const { sql, db } = await fixture(); await addReview(sql, 'naver', 'review', 1); await addReview(sql, 'coupang', 'slot2', 2);
       reply = { handled: true, ok: false, reason: 'no_status_column' };
       await assert.rejects(review.recomputeBundleReviewStateInTx(db, OS), e => e.code === 'review_board_write_failed'); }
   } finally { status.markStatusCell = orig; }
+});
+
+// 결정 375: markStatusCell's kind default ('제출'/'O') is kept for compatibility, so every server caller that marks
+// a review submission must pass the time value itself. A new caller without value re-creates the '제출' cells.
+test('every markStatusCell submit call in server/src passes a value (no bare default mark)', () => {
+  const fs = require('node:fs'); const path = require('node:path');
+  const root = path.join(__dirname, '..', 'src'); const found = [];
+  const walk = d => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (p.endsWith('.js')) {
+    const src = fs.readFileSync(p, 'utf8'); let i = -1;
+    while ((i = src.indexOf('.markStatusCell(', i + 1)) >= 0) {
+      let depth = 0, j = src.indexOf('(', i); const start = j;
+      for (; j < src.length; j++) { if (src[j] === '(') depth++; else if (src[j] === ')' && --depth === 0) break; }
+      const args = src.slice(start, j + 1);
+      if (/kind\s*:\s*['"]submit['"]/.test(args)) found.push({ file: path.relative(root, p), args });
+    } } } };
+  walk(root);
+  assert.ok(found.length >= 3, 'expected the reviewer submit, staff date-record and dual completion callers: ' + found.map(f => f.file).join(','));
+  for (const f of found) assert.match(f.args, /\bvalue\s*[:,}]/, `${f.file}: markStatusCell kind:'submit' without value -> writes the default '제출'`);
+  assert.ok(found.some(f => f.file.endsWith('dualChannelReview.service.js')), 'dual completion caller present');
+});
+
+test('submit time SQL is the single KST M/D HH:MM source (staff manual submit uses it too)', async () => {
+  const status = require('../src/services/sheetlessStatus.service');
+  const sql = new PGlite();
+  const v = await status.submitTimeValue({ query: (t, p) => sql.query(t, p) });
+  assert.match(v, /^\d{1,2}\/\d{1,2} \d{2}:\d{2}$/);
+  const d = new Date(Date.now() + 9 * 3600e3);
+  assert.ok(v.startsWith(`${d.getUTCMonth() + 1}/${d.getUTCDate()} `), 'Asia/Seoul calendar day: ' + v);
+  const trackB = require('node:fs').readFileSync(require.resolve('../src/services/trackB.service.js'), 'utf8');
+  assert.ok(!trackB.includes("to_char(NOW() AT TIME ZONE 'Asia/Seoul', 'FMMM/FMDD HH24:MI')"), 'no private copy of the submit time expression');
+  assert.equal((trackB.match(/\$\{SUBMIT_TIME_SQL\}/g) || []).length, 2);
 });

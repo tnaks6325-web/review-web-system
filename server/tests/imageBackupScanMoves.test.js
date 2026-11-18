@@ -141,6 +141,18 @@ async function run(fn){try{await fn();}catch(e){failures.push(e.message);console
   assert.ok(oauthCalls>0,'approved OAuth reader consulted');assert.equal(r.retry,0,'old-reader 404 is not a retry loop');
   assert.equal(jobs[0].status,'superseded');assert.equal(jobs.length,2);assert.equal(jobs[1].observation.descriptor.rootId,R2);
   await db.close();cases.push('old-reader 404 falls back to the approved reader matrix');});
+ // ⑪ a photo trashed in Drive before its upload-time job ran (duplicate thrown away). Every approved reader
+ //    sees it trashed: the job ends superseded (SOURCE_TRASHED), not 8 retries → blocked → publication stuck.
+ await run(async()=>{const meta={[R]:{id:R,name:'root',mimeType:FOLDER},[F1]:img(F1,R,{trashed:true})};
+  const {db,deps}=await setup(meta,[{rootId:R,readerKinds:['sa']}]);
+  await b.enqueue({fileId:F1,source:'upload',name:'x',mime:'image/jpeg',size:3,parentId:R,uploadedAt:'2026-11-12T00:00:00.000Z',jobKey:'upload:'+F1},{pool:db});
+  const r=await b.drainOnce({limit:1,deps});const job=(await q(db,'SELECT status,last_error_code FROM image_backup_outbox'))[0];
+  assert.equal(r.retry,0,'trashed source is not retried');assert.equal(job.status,'superseded');assert.equal(job.last_error_code,'SOURCE_TRASHED');
+  // a transient failure is still retried (never folded into "trashed").
+  meta[F1].trashed=false;const reader=deps.readers[0],get=reader.getMetadata;reader.getMetadata=async id=>{if(id===F1)throw Object.assign(new Error('x'),{code:'ENOTFOUND'});return get(id);};
+  await b.enqueue({fileId:F1,source:'upload',name:'y',mime:'image/jpeg',size:3,parentId:R,uploadedAt:'2026-11-13T00:00:00.000Z',jobKey:'upload2:'+F1},{pool:db});
+  const r2=await b.drainOnce({limit:1,deps});assert.equal(r2.retry,1);
+  await db.close();cases.push('trashed-before-backup upload job superseded (SOURCE_TRASHED); transient still retried');});
  if(failures.length)throw new Error(failures.length+' case(s) failed');
  console.log('PASS imageBackupScanMoves: '+cases.join('; ')+' ('+cases.length+' cases)');
 })().catch(e=>{console.error(e);process.exitCode=1;});

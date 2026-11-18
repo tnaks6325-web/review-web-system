@@ -251,12 +251,12 @@ const flat = s => s.days.map(d => `${d.date.slice(5)}:${d.optKey}${d.amount}`).j
   ok('★ P1-1: 어제 부족 인원 팝업은 순차진행 공고를 묻지 않는다', /if \(seqSet\.has\(String\(c\.id\)\)\) continue;/.test(rd('src/services/campaignShortage.service.js')));
   ok('★ P1-2: 끝내기는 다시 게시하면 다시 묻는다(추가 모집만 중복 차단) · 화면 확인 한 번 더', /action = \$2`, \[ids\.map\(String\), ACTIONS\.extra\]/.test(se)
     && /fin\.length && !window\.confirm/.test(fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'js', 'sequential-end-prompt.js'), 'utf8')));
-  ok('★ P1-3: 마스터는 받는 사람이 아니어도 본다', /admin && admin\.role === 'master'/.test(se));
+  ok('★ P1-3: 마스터는 받는 사람이 아니어도 본다', /!canDecideAll\(admin\)/.test(se) && require('../src/services/campaignShortage.service').canDecideAll({ role: 'master' }) === true   /* 결정 378: 판정을 canDecideAll 로 옮김 — 마스터 포함(관리자도) · 검사 의미 유지 */);
   ok('P2-2: 주말을 여는 저장(1명 이상)을 일정표에 얹어 본다 · 안내는 공고 수정', /for \(const x of set\) pm\[x\.date\] = x\.count;/.test(plan) && /\[공고 수정\]에서 그 상품의 하루 건수/.test(plan));
   ok('P2-1: 미리보기도 바꾼 계획을 일정표에 얹는다', /planPatch: \(\) => \(\{ \.\.\.plans \}\)/.test(plan));
   ok('P2-5: 작업표 날짜 맞추기도 손 글씨 상품을 본다', /SAVEPOINT relay_hand/.test(rd('src/services/sheetlessDailyPlan.service.js')));
   ok('P2-10: 차례 아닌 상품 거절 문구 = 여는 날', /function _waitingMsg\(ov\)/.test(cr) && (cr.match(/error: _waitingMsg\(ov\)/g) || []).length === 2);
-  ok('P2-11: 화면 파일 버전 표기를 올렸다(옛 조절 창이 남지 않게)', /campaign-daily-plan\.js\?v=20261012-seqdays/.test(wd));
+  ok('P2-11: 화면 파일 버전 표기를 올렸다(옛 조절 창이 남지 않게)', /campaign-daily-plan\.js\?v=(?:20261012-seqdays|20261116-qnaplan|20261116-adminprompt)/.test(wd)   /* 결정 377: 이후 버전도 같은 조절 창(검사 의미 불변) */);
 
   console.log('[8] Codex 리뷰 반영');
   {

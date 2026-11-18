@@ -66,14 +66,16 @@ async function drainOnce({limit=1,signal,deps={}}={}){
  const jobs=await claim({pool:d.pool,limit});result.claimed=jobs.length;
  for(const job of jobs){
   try{
-   signal?.throwIfAborted();const old=job.observation;let observations=[];
+   signal?.throwIfAborted();const old=job.observation;let observations=[],trashedSeen=false;
    // A candidate has no trusted root/reader yet. Try only approved matrix pairs;
    // failure of a required pair is not hidden by another successful reader.
-   const matrix=async()=>{for(const root of d.roots)for(const kind of root.readerKinds){const reader=d.readers.find(r=>r.kind===kind);if(!reader)throw Object.assign(new Error(),{code:'READER_UNAVAILABLE'});try{const o=await scan.observe({fileId:job.file_id,rootId:root.rootId,reader,source:old.source,deps:d});observations.push(o);}catch(e){if(e.code!=='UNRESOLVED_PATH'&&e.response?.status!==404&&e.code!==404)throw e;}}};
+   const matrix=async()=>{for(const root of d.roots)for(const kind of root.readerKinds){const reader=d.readers.find(r=>r.kind===kind);if(!reader)throw Object.assign(new Error(),{code:'READER_UNAVAILABLE'});try{const o=await scan.observe({fileId:job.file_id,rootId:root.rootId,reader,source:old.source,deps:d});observations.push(o);}catch(e){if(e.code==='SOURCE_TRASHED'){trashedSeen=true;continue;}if(e.code!=='UNRESOLVED_PATH'&&e.response?.status!==404&&e.code!==404)throw e;}}};
    if(old.descriptor){const reader=d.readers.find(r=>r.kind===old.readerKind);if(!reader)throw Object.assign(new Error(),{code:'READER_UNAVAILABLE'});
     // 결정 368: moved out of its root (e.g. into another approved root) = new observation → superseded below.
-    try{observations=[await scan.observe({fileId:job.file_id,rootId:old.descriptor.rootId,reader,source:old.source,deps:d})];}catch(e){if(e.code!=='UNRESOLVED_PATH'&&e.code!==404&&e.response?.status!==404)throw e;await matrix();}}
+    try{observations=[await scan.observe({fileId:job.file_id,rootId:old.descriptor.rootId,reader,source:old.source,deps:d})];}catch(e){if(e.code!=='UNRESOLVED_PATH'&&e.code!=='SOURCE_TRASHED'&&e.code!==404&&e.response?.status!==404)throw e;await matrix();}}
    else await matrix();
+   // 결정 368: in the trash for every approved reader = deleted before backup; earlier copies (if any) stay.
+   if(!observations.length&&trashedSeen){await finish({pool:d.pool,job,status:'superseded',code:'SOURCE_TRASHED'});continue;}
    if(!observations.length)throw Object.assign(new Error(),{code:'UNRESOLVED_PATH'});
    if(observations.some(o=>o.scope.decision==='exclude')){await finish({pool:d.pool,job,status:'superseded',code:'SCOPE_DENIED'});continue;}
    const o=observations[0];if(o.scope.decision==='retry')throw Object.assign(new Error(),{code:o.scope.reason});
@@ -98,7 +100,7 @@ async function drainOnce({limit=1,signal,deps={}}={}){
    verifyReceipt(receipt,descriptor,proof);
    if(await finish({pool:d.pool,job,status:'done',receipt}))result.verified++;
   }catch(e){
-   const code=['AUTH_REQUIRED','BAD_DESCRIPTOR','NOT_FOUND','KEY_CONFLICT','PRECONDITION_FAILED','SOURCE_CHANGED','VERIFY_FAILED','BUSY','STORE_UNAVAILABLE','SOURCE_MISSING','SOURCE_MISMATCH','TOO_LARGE','SCOPE_DENIED','UNSUPPORTED_MIME','UNRESOLVED_PATH','UNRESOLVED_VERSION','UNRESOLVED_SIZE','AMBIGUOUS_ROOT','READER_UNAVAILABLE'].includes(e.code)?e.code:'BACKUP_RETRY';
+   const code=['AUTH_REQUIRED','BAD_DESCRIPTOR','NOT_FOUND','KEY_CONFLICT','PRECONDITION_FAILED','SOURCE_CHANGED','SOURCE_TRASHED','VERIFY_FAILED','BUSY','STORE_UNAVAILABLE','SOURCE_MISSING','SOURCE_MISMATCH','TOO_LARGE','SCOPE_DENIED','UNSUPPORTED_MIME','UNRESOLVED_PATH','UNRESOLVED_VERSION','UNRESOLVED_SIZE','AMBIGUOUS_ROOT','READER_UNAVAILABLE'].includes(e.code)?e.code:'BACKUP_RETRY';
    const permanent=['AUTH_REQUIRED','BAD_DESCRIPTOR','NOT_FOUND','KEY_CONFLICT','PRECONDITION_FAILED','TOO_LARGE','SCOPE_DENIED','UNSUPPORTED_MIME'].includes(code);const blocked=permanent||job.attempts>=8;
    const delay=Math.min(21600,30*2**Math.min(job.attempts-1,10))+Math.floor(Math.random()*31);
    if(await finish({pool:d.pool,job,status:blocked?'blocked':'retry',code,delay}))result[blocked?'blocked':'retry']++;

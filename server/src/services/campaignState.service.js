@@ -2137,6 +2137,7 @@ module.exports = {
   pendingCarry,
   heldCarry,
   projectDailyQuotas,
+  planOverrideFor,   // 결정 377 — Q&A 추가 모집이 0명 휴무일을 같은 판정으로 건너뛴다
   __resetCarryCacheForTest,
   __resetPlanCacheForTest,
   TABLE_QUOTA_MODE,

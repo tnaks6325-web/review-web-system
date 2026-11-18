@@ -1,0 +1,437 @@
+{
+  "note": "가상 자료 — qnaExtraPgFixture 를 실제 서비스로 읽은 응답(2026-11-16 14:00 KST)",
+  "qna": {
+    "ok": true,
+    "campaignId": "camp_qna_fixture",
+    "title": "11/3더로우 Q/A 50건",
+    "status": "active",
+    "defaultDaily": 8,
+    "skipWeekends": false,
+    "recruitTotal": 50,
+    "recruitTotalSource": "campaign",
+    "scheduleTotal": null,
+    "scheduleLastDate": null,
+    "startDate": "2026-11-03",
+    "today": "2026-11-16",
+    "planEnabled": true,
+    "carryMode": "auto",
+    "carryStrategy": "spread",
+    "carryHeld": null,
+    "carryAppliedSum": 0,
+    "carryPending": 0,
+    "todaySubmitted": 0,
+    "planGateSubmittedAll": 49,
+    "planGateTodaySubmitted": 0,
+    "planGateKnown": true,
+    "planGateSource": "order_ledger",
+    "totalQuotaFull": false,
+    "todayNaturalQuota": 0,
+    "projection": {
+      "today": "2026-11-16",
+      "from": "2026-11-16",
+      "days": [
+        {
+          "date": "2026-11-16",
+          "quota": 0,
+          "planned": 1,
+          "closed": false
+        },
+        {
+          "date": "2026-11-17",
+          "quota": 0,
+          "planned": 0,
+          "closed": true
+        },
+        {
+          "date": "2026-11-18",
+          "quota": 1,
+          "planned": null,
+          "closed": false
+        }
+      ],
+      "endDate": "2026-11-18",
+      "remaining": 1,
+      "truncated": false
+    },
+    "scheduleDriven": false,
+    "scheduleDates": null,
+    "worktableDates": [
+      {
+        "date": "2026-11-03",
+        "slots": 8,
+        "filled": 7
+      },
+      {
+        "date": "2026-11-04",
+        "slots": 8,
+        "filled": 8
+      },
+      {
+        "date": "2026-11-05",
+        "slots": 8,
+        "filled": 8
+      },
+      {
+        "date": "2026-11-06",
+        "slots": 8,
+        "filled": 8
+      },
+      {
+        "date": "2026-11-07",
+        "slots": 6,
+        "filled": 6
+      },
+      {
+        "date": "2026-11-08",
+        "slots": 4,
+        "filled": 4
+      },
+      {
+        "date": "2026-11-09",
+        "slots": 2,
+        "filled": 2
+      },
+      {
+        "date": "2026-11-10",
+        "slots": 2,
+        "filled": 2
+      },
+      {
+        "date": "2026-11-11",
+        "slots": 2,
+        "filled": 2
+      },
+      {
+        "date": "2026-11-12",
+        "slots": 2,
+        "filled": 2
+      }
+    ],
+    "worktableLinked": true,
+    "plans": [
+      {
+        "date": "2026-11-16",
+        "count": 1,
+        "updatedBy": "망고",
+        "updatedAt": "2026-11-16T07:18:03.540Z"
+      },
+      {
+        "date": "2026-11-17",
+        "count": 0,
+        "updatedBy": "망고",
+        "updatedAt": "2026-11-16T07:18:03.541Z"
+      }
+    ],
+    "byDateSubmitted": {
+      "2026-11-03": 7,
+      "2026-11-04": 8,
+      "2026-11-05": 8,
+      "2026-11-06": 8,
+      "2026-11-07": 6,
+      "2026-11-08": 4,
+      "2026-11-09": 2,
+      "2026-11-10": 2,
+      "2026-11-11": 2,
+      "2026-11-12": 2
+    },
+    "todayUsed": 0,
+    "submittedAll": 49,
+    "progressSource": "worktable_filled",
+    "rounds": [],
+    "roundsTotal": 0,
+    "roundsDrift": false,
+    "events": [
+      {
+        "actor": "박은비",
+        "action": "plan_save",
+        "detail": {
+          "set": [
+            {
+              "date": "2026-11-16",
+              "count": 1
+            },
+            {
+              "date": "2026-11-17",
+              "count": 0
+            }
+          ]
+        },
+        "at": "2026-11-16T01:11:00.000Z"
+      }
+    ],
+    "optionDaily": null,
+    "qna": {
+      "today": "2026-11-16",
+      "days": [
+        {
+          "date": "2026-11-03",
+          "slots": 8,
+          "filled": 7,
+          "open": 1
+        },
+        {
+          "date": "2026-11-04",
+          "slots": 8,
+          "filled": 8,
+          "open": 0
+        },
+        {
+          "date": "2026-11-05",
+          "slots": 8,
+          "filled": 8,
+          "open": 0
+        },
+        {
+          "date": "2026-11-06",
+          "slots": 8,
+          "filled": 8,
+          "open": 0
+        },
+        {
+          "date": "2026-11-07",
+          "slots": 6,
+          "filled": 6,
+          "open": 0
+        },
+        {
+          "date": "2026-11-08",
+          "slots": 4,
+          "filled": 4,
+          "open": 0
+        },
+        {
+          "date": "2026-11-09",
+          "slots": 2,
+          "filled": 2,
+          "open": 0
+        },
+        {
+          "date": "2026-11-10",
+          "slots": 2,
+          "filled": 2,
+          "open": 0
+        },
+        {
+          "date": "2026-11-11",
+          "slots": 2,
+          "filled": 2,
+          "open": 0
+        },
+        {
+          "date": "2026-11-12",
+          "slots": 2,
+          "filled": 2,
+          "open": 0
+        }
+      ],
+      "first": "2026-11-03",
+      "last": "2026-11-12",
+      "ended": true,
+      "total": 50,
+      "filled": 49,
+      "extra": {
+        "end": "2026-11-12",
+        "total": 1,
+        "canDecide": true,
+        "start": {
+          "today": {
+            "ok": true,
+            "cutoffAt": "2026-11-16T14:50:00.000Z",
+            "days": [
+              "2026-11-16"
+            ],
+            "skipped": []
+          },
+          "tomorrow": {
+            "ok": true,
+            "days": [
+              "2026-11-18"
+            ],
+            "skipped": [
+              "2026-11-17"
+            ]
+          },
+          "default": "today"
+        }
+      }
+    }
+  },
+  "review": {
+    "ok": true,
+    "campaignId": "camp_review_fixture",
+    "title": "일반 리뷰 공고(비교용)",
+    "status": "active",
+    "defaultDaily": 8,
+    "skipWeekends": false,
+    "recruitTotal": 50,
+    "recruitTotalSource": "campaign",
+    "scheduleTotal": null,
+    "scheduleLastDate": null,
+    "startDate": "2026-11-03",
+    "today": "2026-11-16",
+    "planEnabled": true,
+    "carryMode": "auto",
+    "carryStrategy": "spread",
+    "carryHeld": null,
+    "carryAppliedSum": 0,
+    "carryPending": 0,
+    "todaySubmitted": 0,
+    "planGateSubmittedAll": 0,
+    "planGateTodaySubmitted": 0,
+    "planGateKnown": true,
+    "planGateSource": "applications",
+    "totalQuotaFull": false,
+    "todayNaturalQuota": 8,
+    "projection": {
+      "today": "2026-11-16",
+      "from": "2026-11-16",
+      "days": [
+        {
+          "date": "2026-11-16",
+          "quota": 8,
+          "planned": null,
+          "closed": false
+        },
+        {
+          "date": "2026-11-17",
+          "quota": 8,
+          "planned": null,
+          "closed": false
+        },
+        {
+          "date": "2026-11-18",
+          "quota": 5,
+          "planned": 5,
+          "closed": false
+        },
+        {
+          "date": "2026-11-19",
+          "quota": 8,
+          "planned": null,
+          "closed": false
+        },
+        {
+          "date": "2026-11-20",
+          "quota": 8,
+          "planned": null,
+          "closed": false
+        },
+        {
+          "date": "2026-11-21",
+          "quota": 8,
+          "planned": null,
+          "closed": false
+        },
+        {
+          "date": "2026-11-22",
+          "quota": 5,
+          "planned": null,
+          "closed": false
+        }
+      ],
+      "endDate": "2026-11-22",
+      "remaining": 50,
+      "truncated": false
+    },
+    "scheduleDriven": false,
+    "scheduleDates": null,
+    "worktableDates": null,
+    "worktableLinked": null,
+    "plans": [
+      {
+        "date": "2026-11-18",
+        "count": 5,
+        "updatedBy": "망고",
+        "updatedAt": "2026-11-16T07:18:03.541Z"
+      }
+    ],
+    "byDateSubmitted": {},
+    "todayUsed": 0,
+    "submittedAll": 0,
+    "progressSource": "applications",
+    "rounds": [],
+    "roundsTotal": 0,
+    "roundsDrift": false,
+    "events": [],
+    "optionDaily": null
+  },
+  "popup": {
+    "ok": true,
+    "items": [
+      {
+        "kind": "qna",
+        "campaignId": "camp_qna_fixture",
+        "title": "11/3더로우 Q/A 50건",
+        "thumbnailUrl": "",
+        "end": "2026-11-12",
+        "regularEnd": "2026-11-12",
+        "shortages": [
+          {
+            "optKey": "벨벳틴 부티크 상품",
+            "n": 1
+          }
+        ],
+        "total": 1,
+        "start": {
+          "today": {
+            "ok": true,
+            "cutoffAt": "2026-11-16T14:50:00.000Z",
+            "days": [
+              "2026-11-16"
+            ],
+            "skipped": []
+          },
+          "tomorrow": {
+            "ok": true,
+            "days": [
+              "2026-11-18"
+            ],
+            "skipped": [
+              "2026-11-17"
+            ]
+          },
+          "default": "today"
+        }
+      }
+    ],
+    "today": "2026-11-16"
+  },
+  "popupLate": {
+    "ok": true,
+    "items": [
+      {
+        "kind": "qna",
+        "campaignId": "camp_qna_fixture",
+        "title": "11/3더로우 Q/A 50건",
+        "thumbnailUrl": "",
+        "end": "2026-11-12",
+        "regularEnd": "2026-11-12",
+        "shortages": [
+          {
+            "optKey": "벨벳틴 부티크 상품",
+            "n": 1
+          }
+        ],
+        "total": 1,
+        "start": {
+          "today": {
+            "ok": false,
+            "code": "cutoff",
+            "why": "오늘 신청 마감 시각이 지나 오늘부터 열 수 없습니다"
+          },
+          "tomorrow": {
+            "ok": true,
+            "days": [
+              "2026-11-18"
+            ],
+            "skipped": [
+              "2026-11-17"
+            ]
+          },
+          "default": "tomorrow"
+        }
+      }
+    ],
+    "today": "2026-11-16"
+  }
+}

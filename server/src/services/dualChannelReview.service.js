@@ -109,7 +109,11 @@ async function recomputeBundleReviewStateInTx(db,orderSubmissionId){
  // Sheetless boards rebuild review_index.is_submitted from the worktable status cell; write it on the
  // incomplete->complete transition in this transaction, like the legacy web completion (submit.routes).
  if(state.complete && seat.is_submitted!==true){
-  const st=await require('./sheetlessStatus.service').markStatusCell({sheetId:seat.sheet_id,tabName:seat.tab_name,rowIndex:seat.seq,kind:'submit',by:'dual-review-complete',client:db});
+  // 결정 375: 칸에는 완료 시각(KST M/D HH:MM · 이 트랜잭션의 NOW())을 쓴다 — value 를 빼면 kind 기본값 '제출' 이 들어간다.
+  const status=require('./sheetlessStatus.service');
+  const value=await status.submitTimeValue(db);
+  if(!value)throw Object.assign(new Error('submit_time_unavailable'),{code:'review_board_write_failed',status:409});
+  const st=await status.markStatusCell({sheetId:seat.sheet_id,tabName:seat.tab_name,rowIndex:seat.seq,kind:'submit',value,by:'dual-review-complete',client:db});
   if(st && st.handled && !st.ok)throw Object.assign(new Error(st.reason||'write_failed'),{code:'review_board_write_failed',status:409});
  }
  const primary=state.current.find(r=>r.evidence_role==='review');
