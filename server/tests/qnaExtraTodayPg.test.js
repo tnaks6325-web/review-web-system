@@ -1,10 +1,10 @@
 'use strict';
 /* 결정 377 — Q&A 추가 모집 「오늘부터」 + 0명 휴무일 건너뛰기 + 조절 창 Q&A 재료. 실제 서비스 + 실 SQL(PGlite · 저장소 migrations).
  *  운영 사례(11/3더로우 Q/A 50건 — 자리표 11/03~11/12 · 못 채운 1)를 본뜬 가상 자료 · 오늘 = 2026-11-16(월) 14:00 KST.
- *  E1 팝업 목록: 오늘부터가 기본(마감 23:50 전) · 내일부터는 0명 휴무일(11/17)을 건너뛴 11/18
+ *  E1 팝업 목록: 오늘부터가 기본(마감 23:50 전) · 내일부터 = 11/17(결정 379 — 0명 계획 날을 건너뛰지 않는다)
  *  E2 오늘부터 반영 → 자리·작업표 줄이 11/16 으로 · 오늘 정원 1 · 상태 open · 신청 자리 묶기 통과 · 다시 묻지 않음
  *  E3 마감(23:50) 뒤 = 오늘 선택지 막힘 · 오늘부터 반영 거절 · 아무것도 안 옮김(fail-closed)
- *  E4 오늘이 0명 휴무 = 오늘부터 거절 · 내일부터 = 휴무일 건너뜀 · 옛 화면(시작일 없음) = 내일부터
+ *  E4 (검사 의미 변경 — 사용자 확정 379) 오늘·내일에 0명 계획이 있어도 Q&A 는 막지도 건너뛰지도 않는다 · 옛 화면(시작일 없음) = 내일부터
  *  E5 모르는 시작일 값 = 거절 · 시간창 공고는 창 끝 − 여유가 마감 · 주말 제외 공고의 토요일 = 오늘 불가
  *  E7 잠금 대기 중 마감이 지나면 잠근 뒤 시각으로 거절(현재 시각은 잠금 뒤에 읽는다)
  *  E6 조절 창 재료: Q&A 공고만 qna 칸(자리표 날짜별 자리 수 · 일정 끝 · 못 채운 1 · 정할 수 있음) · 일반 공고는 칸 없음
@@ -34,7 +34,8 @@ const F = require('./helpers/qnaExtraPgFixture');
 
   console.log('\n[결정 377 · Q&A 추가 모집 오늘부터 · 실 SQL]');
 
-  await t('E1 팝업 목록 — 오늘부터가 기본(23:50 마감 전) · 내일부터는 0명 휴무 11/17 을 건너뛴 11/18', async () => {
+  // ★ 검사 의미 변경 — 사용자 확정 379: Q&A 는 날짜별 계획(0명 휴무)을 판정에 쓰지 않으므로 내일부터 = 11/17 그대로(건너뛰기 없음)
+  await t('E1 팝업 목록 — 오늘부터가 기본(23:50 마감 전) · 내일부터 = 11/17(0명 계획이 있어도 건너뛰지 않음 · 결정 379)', async () => {
     await F.seed(pool, { plans: { '2026-11-16': 1, '2026-11-17': 0 } });
     const { items } = await se.listSequentialEnds(master, { now: NOW });
     const it = items.find(x => x.campaignId === F.CAMP);
@@ -44,8 +45,8 @@ const F = require('./helpers/qnaExtraPgFixture');
     assert.equal(it.start.today.ok, true);
     assert.equal(it.start.today.cutoffAt, F.kst('2026-11-16', '23:50').toISOString());
     assert.deepEqual(it.start.today.days, ['2026-11-16']);
-    assert.deepEqual(it.start.tomorrow.days, ['2026-11-18']);
-    assert.deepEqual(it.start.tomorrow.skipped, ['2026-11-17']);
+    assert.deepEqual(it.start.tomorrow.days, ['2026-11-17']);
+    assert.deepEqual(it.start.tomorrow.skipped, []);
     const before = await stateAt(NOW);
     assert.equal(before.s.dailyQuota, 0, '자리표가 끝나 오늘 정원 0(신고 상황 재현)');
   });
@@ -90,22 +91,22 @@ const F = require('./helpers/qnaExtraPgFixture');
     assert.equal((await pool.query(`SELECT 1 FROM campaign_plan_events WHERE campaign_id=$1`, [F.CAMP])).rows.length, 0);
   });
 
-  await t('E4 오늘 0명 휴무 = 오늘부터 거절 · 내일부터 = 휴무 11/17 건너뜀 → 11/18 · 옛 화면(시작일 없음)도 같은 길', async () => {
+  // ★ 검사 의미 변경 — 사용자 확정 379: 종전 「오늘 0명 휴무 = 오늘부터 거절 · 내일부터 = 휴무일 건너뜀」 → Q&A 는 그날 자리 수가 유일 기준
+  await t('E4 오늘·내일 0명 계획이 있어도 — 오늘부터 가능 · 내일부터 = 11/17 그대로(건너뛰지 않음) · 그날 자리대로 열림 · 옛 화면(시작일 없음) = 내일부터', async () => {
     await F.seed(pool, { plans: { '2026-11-16': 0, '2026-11-17': 0 } });
     const { items } = await se.listSequentialEnds(master, { now: NOW });
     const it = items.find(x => x.campaignId === F.CAMP);
-    assert.equal(it.start.today.ok, false); assert.equal(it.start.today.code, 'rest_day'); assert.match(it.start.today.why, /기본으로/);
-    const bad = await se.applySequentialEnds(master, [{ campaignId: F.CAMP, action: 'extra', end: '2026-11-12', start: 'today' }], { now: NOW });
-    assert.equal(bad.results[0].ok, false); assert.equal((await slotOf()).d, '2026-11-03');
+    assert.equal(it.start.today.ok, true, JSON.stringify(it.start.today)); assert.equal(it.start.default, 'today');
+    assert.deepEqual(it.start.tomorrow.days, ['2026-11-17']); assert.deepEqual(it.start.tomorrow.skipped, []);
     const ok = await se.applySequentialEnds(master, [{ campaignId: F.CAMP, action: 'extra', end: '2026-11-12' }], { now: NOW });   // 옛 화면 = start 없음
     assert.ok(ok.results[0].ok, JSON.stringify(ok));
-    assert.equal((await slotOf()).d, '2026-11-18');
-    assert.deepEqual(ok.results[0].skipped, ['2026-11-17']);
+    assert.equal((await slotOf()).d, '2026-11-17');
+    assert.deepEqual(ok.results[0].skipped, []);
     const ev = (await pool.query(`SELECT detail FROM campaign_plan_events WHERE campaign_id=$1 AND action='qna_extra'`, [F.CAMP])).rows[0].detail;
-    assert.equal(ev.start, 'tomorrow'); assert.deepEqual(ev.skipped, ['2026-11-17']);
-    // 11/18 이 오면 그 자리가 실제로 열린다(휴무로 닫히지 않는다)
-    const d18 = await stateAt(F.kst('2026-11-18', '10:00'));
-    assert.equal(d18.s.dailyQuota, 1); assert.equal(d18.s.state, 'open', JSON.stringify(d18.s));
+    assert.equal(ev.start, 'tomorrow'); assert.deepEqual(ev.skipped, []);
+    // 11/17 이 오면 그 자리가 실제로 열린다(0명 계획이 있어도 휴무로 닫히지 않는다)
+    const d17 = await stateAt(F.kst('2026-11-17', '10:00'));
+    assert.equal(d17.s.dailyQuota, 1); assert.equal(d17.s.state, 'open', JSON.stringify(d17.s));
   });
 
   await t('E5 모르는 시작일 = 거절 · 시간창 공고는 창 끝 − 여유가 마감 · 주말 제외 공고의 토요일 = 오늘 불가', async () => {
