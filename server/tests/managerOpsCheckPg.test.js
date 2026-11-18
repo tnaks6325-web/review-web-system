@@ -78,7 +78,7 @@ async function main(){const db=new PGlite();
  q=(await pool.query('SELECT * FROM ops_checks')).rows[0];assert.equal(q.status,'done');assert.equal(q.answers.manager.choice,'mandu');
  assert.equal((await pool.query('SELECT work_manager FROM work_orders')).rows[0].work_manager,'박세희');assert.equal((await pool.query('SELECT status FROM shared_sync_outbox')).rows[0].status,'pending');
  assert.equal((await manager.answer(args)).status,'done');assert.equal((await pool.query('SELECT * FROM shared_sync_outbox')).rows.length,1);
- await assert.rejects(manager.answer({...args,choice:'random'}),/만두 또는 망고/);await assert.rejects(manager.answer({...args,admin:{role:'staff'}}),/권한/);
+ await assert.rejects(manager.answer({...args,choice:'random'}),/만두·망고·기타/);await assert.rejects(manager.answer({...args,admin:{role:'staff'}}),/권한/);
  await pool.query(`UPDATE work_orders SET work_manager='랜덤',sync_version=sync_version+1`);await manager.refresh(pool);q=(await pool.query('SELECT * FROM ops_checks')).rows[0];assert.equal(q.status,'open');assert.deepEqual(q.answers,{});await assert.rejects(manager.answer(args),/바뀐/);
  await pool.query(`INSERT INTO recruit_campaigns(id,source_work_order_id,archived_at) VALUES('arch','fake-order',NOW())`);await assert.rejects(manager.answer({...args,baseVersion:q.facts.baseVersion}),/보관/);
  await manager.refresh(pool);assert.equal((await pool.query('SELECT status FROM ops_checks')).rows[0].status,'done');
@@ -217,6 +217,26 @@ async function main(){const db=new PGlite();
   assert.equal(response.status,200);assert.equal(response.body.item.remoteSync,'not_linked');assert.equal(response.body.item.localSaved,true);
   assert.equal(await tabMgr('ts3','설정 없는 작업'),'망고');
   assert.equal((await call('/'+t9.id+'/manager-answer',editor,{choice:'mandu',baseVersion:0})).status,409);
+  // 결정 374 — 「기타」(만두·망고 둘 다 아닌 작업 · 예: 블로그): 오더 갈래는 공유 저장으로 '기타' + 인트라넷 전달 대기, 탭 갈래는 빈 칸에 '기타'.
+  //   답한 뒤 다시 훑어도 미지정으로 되살아나지 않는다(기타는 미지정이 아니다).
+  await pool.query(`INSERT INTO tab_configs(sheet_id,tab_name,tab_gid,manager,display_name,sheetless) VALUES('etc-s','블로그 작업','etc-g','','블로그 작업',TRUE)`);
+  await pool.query(`INSERT INTO work_orders(id,source_review_order_id,work_manager,linked_tab_sheet_id,linked_tab_name) VALUES('etc-order','etc-ro','랜덤','etc-s','블로그 작업')`);
+  await manager.refresh(pool);
+  const qe=await byRef(manager.KIND+':etc-order');assert.ok(qe&&qe.status==='open','미지정 오더 질문');
+  const outE=(await pool.query(`SELECT count(*)::int n FROM shared_sync_outbox WHERE work_order_id='etc-order'`)).rows[0].n;
+  const ae=await manager.answer({db:pool,id:qe.id,baseVersion:Number(qe.facts.baseVersion),choice:'etc',admin:{role:'master',name:'가짜 관리자'},by:'가짜 관리자'});
+  assert.equal(ae.status,'done');
+  assert.equal((await pool.query(`SELECT work_manager FROM work_orders WHERE id='etc-order'`)).rows[0].work_manager,'기타','오더 작업담당 = 기타');
+  assert.equal((await pool.query(`SELECT count(*)::int n FROM shared_sync_outbox WHERE work_order_id='etc-order'`)).rows[0].n,outE+1,'인트라넷 전달 대기 1건');
+  const pushWo=(await pool.query(`SELECT * FROM work_orders WHERE id='etc-order'`)).rows[0];
+  assert.equal(require('../src/services/sharedSyncPush.service').buildPushBody(pushWo,'manager').view.work_manager,'기타','인트라넷에는 기타 그대로 보낸다(랜덤으로 바꾸지 않는다)');
+  await manager.refresh(pool);assert.ok(!(await openRefs()).includes(manager.KIND+':etc-order'),'기타는 미지정이 아니다 — 다시 묻지 않는다');
+  await assert.rejects(manager.answer({db:pool,id:qe.id,baseVersion:0,choice:'other',admin:{role:'master',name:'가짜 관리자'},by:'x'}),/만두·망고·기타/);
+  await tabRow('ts5','블로그 탭','t11');await own('ts5','t11');await manager.refresh(pool);const te=await byRef(TABQ+'ts5:t11');assert.ok(te,'탭 질문');
+  assert.equal((await manager.answer({...tArgs,id:te.id,choice:'etc'})).remoteSync,'not_linked');
+  assert.equal(await tabMgr('ts5','블로그 탭'),'기타','탭 칸 = 기타');
+  await manager.refresh(pool);assert.ok(!(await openRefs()).includes(TABQ+'ts5:t11'),'탭 갈래도 다시 묻지 않는다');
+  console.log('decision 374 기타: order(shared+outbox 기타)/tab(cell 기타)/no reopen PASS');
   console.log('decision 323 tab branch: scope/race/retry/source-arrives/finished/filled/no-config-row/HTTP PASS');
  }finally{await new Promise(r=>server.close(r));}
  console.log('actual HTTP auth/editor + SQL assignment/answer/outbox atomicity, stale/retry/stop PASS');

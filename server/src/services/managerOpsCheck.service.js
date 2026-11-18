@@ -64,7 +64,7 @@ async function refresh(db) {
           ON CONFLICT(ref_key) DO UPDATE SET facts=EXCLUDED.facts,facts_hash=EXCLUDED.facts_hash,
             lines=EXCLUDED.lines, status='open', done_at=NULL,done_by='', answers='{}'::jsonb,updated_at=NOW()
           WHERE ops_checks.facts_hash <> EXCLUDED.facts_hash OR ops_checks.status <> 'open'`,
-          [KIND,ref,JSON.stringify(facts),hash,JSON.stringify([{key:'manager',text:'작업담당이 미지정입니다. 만두·망고 중 누가 맡을까요?'}])]);
+          [KIND,ref,JSON.stringify(facts),hash,JSON.stringify([{key:'manager',text:'작업담당이 미지정입니다. 만두·망고 중 누가 맡을까요? 둘 다 아니면(블로그 등) 기타를 골라 주세요.'}])]);
       } else {
         await c.query(`UPDATE ops_checks SET status='done',done_at=NOW(),done_by='다른 화면에서 변경 또는 대상 종료',updated_at=NOW()
           WHERE ref_key=$1 AND status='open'`,[ref]);
@@ -80,7 +80,7 @@ async function refresh(db) {
    + empty tab_configs.manager + (no linked order, or the latest linked order has no intranet source and is undecided)
    + NO order with an intranet source linked to the tab at all (direct linked_tab_* or manual trackb_work_order_links).
    Those intranet-linked orders stay on the order branch / sharedPatch only (decision 306·311) — never the tab cell. */
-const TAB_TEXT = '작업담당이 미지정입니다. 만두·망고 중 누가 맡을까요? (인트라넷 오더가 없는 작업이라 리뷰웹에만 저장됩니다)';
+const TAB_TEXT = '작업담당이 미지정입니다. 만두·망고 중 누가 맡을까요? 둘 다 아니면(블로그 등) 기타 (인트라넷 오더가 없는 작업이라 리뷰웹에만 저장됩니다)';
 function _tabSuffix(sheetId, tabName, tabGid) {
   const g = String(tabGid == null ? '' : tabGid).trim();
   return `tab:${sheetId}:${g ? g : 'name:' + tabName}`;   // gid is rename-stable; name only when the tab has no gid
@@ -170,7 +170,7 @@ async function refreshTabs(db) {
 async function answerTab({ db, id, question, choice, baseVersion, by }) {
   const { OpsCheckError } = require('./opsCheck.service');
   const conflict = () => { const e = new OpsCheckError('stale', '이미 바뀐 질문입니다. 새로고침해 주세요.'); e.status = 409; return e; };
-  const value = normalizeManagerForStore({ mandu: '박세희', mango: '박은비' }[choice]);   // → 만두 / 망고 (tab cell vocabulary)
+  const value = normalizeManagerForStore({ mandu: '박세희', mango: '박은비', etc: '기타' }[choice]);   // → 만두 / 망고 / 기타 (tab cell vocabulary · 기타 = 결정 374)
   const f = question.facts || {};
   const tab = { sheetId: f.sheetId, tabName: f.tabName, tabGid: f.tabGid };
   if (!tab.sheetId || !tab.tabName) throw conflict();
@@ -212,8 +212,8 @@ async function answer({db,id,choice,baseVersion,admin,by}) {
   if (!['master','admin'].includes(admin && admin.role) || !await require('../utils/workdeskEditors').canEdit(admin)) {
     throw new OpsCheckError('forbidden','이 화면에서는 담당자를 배정할 권한이 없습니다.');
   }
-  const target = {mandu:'박세희',mango:'박은비'}[choice];
-  if (!target) throw new OpsCheckError('bad_choice','만두 또는 망고를 골라 주세요.');
+  const target = {mandu:'박세희',mango:'박은비',etc:'기타'}[choice];   // 기타 = 만두·망고 둘 다 아닌 작업(예: 블로그 · 결정 374)
+  if (!target) throw new OpsCheckError('bad_choice','만두·망고·기타 중에서 골라 주세요.');
   if (!Number.isSafeInteger(baseVersion) || baseVersion < 0) throw new OpsCheckError('stale','화면을 새로고침한 뒤 다시 선택해 주세요.');
   // Do NOT lock the question before acquiring the official L1/order locks, or open a second transaction inside them.
   const question = (await db.query('SELECT * FROM ops_checks WHERE id=$1',[id])).rows[0];
