@@ -22,7 +22,12 @@ const FX377 = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'qnaPl
 const clone = o => JSON.parse(JSON.stringify(o));
 
 let passed = 0;
-const t = async (name, fn) => { await fn(); passed++; console.log('  ✓ ' + name); };
+const failed = [];
+// 하나가 실패해도 나머지를 돌려 실패한 것을 모두 보인다(끝에서 실패 1개 이상 = exit 1)
+const t = async (name, fn) => {
+  try { await fn(); passed++; console.log('  ✓ ' + name); }
+  catch (e) { failed.push(name); console.log('  ✗ ' + name + '\n      ' + String((e && e.message) || e).split('\n').slice(0, 3).join(' / ')); }
+};
 
 function openCdp(overview, { calls = [], moveReply = null, extra = {} } = {}) {
   const fetchImpl = fakeFetch([
@@ -93,7 +98,7 @@ const rowOf = (m, md) => {
     await m.win.CampaignDailyPlan._save(); await tick(40);
     const mv = calls.filter(c => /qna-move$/.test(c.u));
     assert.equal(mv.length, 1); assert.equal(mv[0].method, 'POST');
-    assert.deepEqual(mv[0].body, { moves: [{ from: '2026-11-18', to: '2026-11-17', n: 1, fromOpen: 1 }], total: 50 });
+    assert.deepEqual(mv[0].body, { days: [{ date: '2026-11-17', n: 1 }, { date: '2026-11-18', n: -1, movable: 1 }], total: 50 });   // 리뷰 반영 — 날짜별 증감(검사 의미 불변: 보내는 모양만)
     assert.ok(!calls.some(c => c.method === 'POST' && /daily-plan$/.test(c.u)), '날짜별 계획을 저장하지 않는다');
     assert.ok(!calls.some(c => /preview$/.test(c.u)));
     assert.match(rowOf(m, '11/17 (화)'), /cdp-num">1</, '응답(실제 서비스 결과)으로 다시 그렸다');
@@ -171,11 +176,41 @@ const rowOf = (m, md) => {
 
   await t('V8 정적 — 화면 파일 버전 표기를 올렸다 · \'input\' 이벤트 금지 유지 · onclick 서버 문자열 보간 없음', async () => {
     const wd = fs.readFileSync(path.join(FRONT, 'workdesk.html'), 'utf8');
-    assert.match(wd, /js\/campaign-daily-plan\.js\?v=20261118-qnamove/);
+    assert.match(wd, /js\/campaign-daily-plan\.js\?v=20261118-qnamove2/);
     assert.ok(!/addEventListener\('input'/.test(CDP));
     assert.ok(!/onclick="[^"]*\$\{/.test(CDP));
   });
 
-  console.log(`\n${passed}개 통과`);
-  process.exit(0);
+  /* ── PR #1839 리뷰 반영(Codex P2) ── */
+  await t('V9 리뷰 P2② 화면은 날짜별 증감만 보낸다(짝짓기 없음) — 어느 날 빈 자리를 어느 날로 보낼지는 서버가 잠근 뒤 정한다', async () => {
+    const calls = [];
+    const two = clone(FX.qna);
+    two.qna.days.push({ date: '2026-11-19', slots: 1, filled: 0, open: 1, movable: 1 });
+    const m = openCdp(two, { calls });
+    await m.win.CampaignDailyPlan.open(two.campaignId); await tick();
+    step(m, '11/18 (수)', -1); step(m, '11/19 (목)', -1); step(m, '11/20 (금)', 1); step(m, '11/21 (토)', 1); await tick();
+    assert.equal(saveBtn(m).disabled, false);
+    await m.win.CampaignDailyPlan._save(); await tick(40);
+    const mv = calls.filter(c => /qna-move$/.test(c.u));
+    assert.equal(mv.length, 1);
+    assert.deepEqual(mv[0].body, { days: [
+      { date: '2026-11-18', n: -1, movable: 1 }, { date: '2026-11-19', n: -1, movable: 1 },
+      { date: '2026-11-20', n: 1 }, { date: '2026-11-21', n: 1 }], total: 50 });
+  });
+
+  await t('V10 리뷰 P2③ 공고 시작일 전 날 = [＋] 잠김(눌러도 그대로 · 이유 안내) · 시작일 당일은 가능', async () => {
+    const fut = clone(FX.qna);
+    fut.qna.move.start = '2026-11-20';
+    fut.qna.move.today = { ok: false, code: 'not_started', why: '공고 시작일(11/20) 전이라 오늘부터 열 수 없습니다' };
+    const m = openCdp(fut);
+    await m.win.CampaignDailyPlan.open(fut.campaignId); await tick();
+    assert.match(rowOf(m, '11/19 (목)'), /빈 자리 더하기" disabled[\s\S]*공고 시작일\(11\/20\) 전 — 자리를 둘 수 없습니다/);
+    assert.ok(!/빈 자리 더하기" disabled/.test(rowOf(m, '11/20 (금)')), '시작일 당일은 [＋] 가능');
+    step(m, '11/19 (목)', 1); await tick();
+    assert.match(toastText(m), /공고 시작일\(11\/20\) 전으로는 옮길 수 없습니다/);
+    assert.ok(!/cdp-state">변경</.test(body(m)));
+  });
+
+  console.log(`\n${passed}개 통과` + (failed.length ? ` · ${failed.length}개 실패` : ''));
+  process.exit(failed.length ? 1 : 0);
 })().catch(e => { console.error('✗', e && e.stack || e); process.exit(1); });

@@ -131,8 +131,11 @@ const st = require('../src/services/campaignState.service');
     /UPDATE qna_slots SET slot_date = \$2::date, round = round \+ 1/.test(qs) && /order_submission_id IS NULL`/.test(qs) && !/appendSlot/.test(qs));
   // ★ 결정 377: 시작일 기본 = 다음 날(옛 화면) · 오늘부터는 잠근 뒤 오늘 정원 판정(qnaTodayStartCheck)을 통과할 때만
   // ★ 검사 의미 변경 — 사용자 확정 379: 「0명 휴무일 건너뜀」 → 날짜 제외는 오더 휴무일(wo.holidays)·주말 제외만(0명 계획은 Q&A 판정에 안 씀)
+  // ★ 검사 의미 강화 — PR #1839 리뷰 반영(Codex P2): 「같은 하루 건수」 = 지금 자리표 분포의 최대치(옮기면 내려간다)가 아니라
+  //   자리표를 만든 원천(qnaCalendar.qnaUnitsFromWorkOrder 의 상품별 daily) — 추가 모집·옮기기가 같은 함수(_unitDailyCap) · 모르면 거절
   t('같은 하루 건수 · 기본 다음 날부터 · 오늘부터는 판정 통과 때만 · 오더 휴무일만 제외(0명 계획 건너뛰기 없음 · 결정 379)',
-    /MAX\(n\)::int AS per/.test(qs) && /extraFrom = kstDateStr\(new Date\(now\.getTime\(\) \+ DAY_MS\)\)/.test(qs)
+    /function _unitDailyCap\(wo\) \{[\s\S]{0,200}qnaUnitsFromWorkOrder\(/.test(qs) && /const perDay = _unitDailyCap\(wo\);/.test(qs)
+    && /if \(!pd\) throw _qerr\([^\n]*'qna_capacity_unknown'\)/.test(qs) && !/MAX\(n\)::int AS per/.test(qs) && /extraFrom = kstDateStr\(new Date\(now\.getTime\(\) \+ DAY_MS\)\)/.test(qs)
     && /if \(start === 'today'\) \{[\s\S]{0,400}qnaTodayStartCheck\([\s\S]{0,300}if \(!chk\.ok\) throw/.test(qs)
     && /const holidays = normalizeHolidayList\(wo\.holidays\);/.test(qs)
     && !/qnaRestDays|restDays/.test(qs));

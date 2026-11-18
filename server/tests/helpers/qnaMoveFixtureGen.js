@@ -29,7 +29,7 @@ const F = require('./qnaExtraPgFixture');
   // 시각 칸은 고정 값으로(다시 만들어도 같은 파일)
   const fix = o => { const j = JSON.parse(JSON.stringify(o)); (j.plans || []).forEach(p => { p.updatedAt = '2026-11-16T07:18:03.540Z'; }); (j.events || []).forEach(e => { e.at = '2026-11-17T05:00:00.000Z'; }); return j; };
   const qna = fix({ ok: true, ...(await cp.getPlanOverview(F.CAMP, { admin })) });
-  const r = await qs.moveQnaSlots({ campaignId: F.CAMP, moves: [{ from: '2026-11-18', to: '2026-11-17', n: 1, fromOpen: 1 }], total: 50, actor: '망고' });
+  const r = await qs.moveQnaSlots({ campaignId: F.CAMP, days: [{ date: '2026-11-18', n: -1, movable: 1 }, { date: '2026-11-17', n: 1 }], total: 50, actor: '망고' });
   const after = fix({ ok: true, ...(await cp.getPlanOverview(F.CAMP, { admin })), ...r, reload: false });
   const out = { note: '결정 379 — 실제 서비스(getPlanOverview · moveQnaSlots)로 만든 응답 · 가상 자료 · 오늘 2026-11-17(화) 14:00 KST · 만들기: tests/helpers/qnaMoveFixtureGen.js', qna, after };
   fs.writeFileSync(path.resolve(__dirname, '..', 'fixtures', 'qnaMoveOverview.json'), JSON.stringify(out, null, 1) + '\n');

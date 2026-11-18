@@ -1899,6 +1899,7 @@ function _cdpFail(res, err) {
     qna_plan_set: 409,
     qna_move_stale: 409, qna_move_bad: 400, qna_move_empty: 400, qna_move_past: 422, qna_move_closed_day: 422,
     qna_move_today: 422, qna_move_no_room: 422, not_qna: 400, not_active: 409, changed: 409,
+    qna_move_before_start: 422, qna_move_capacity_unknown: 409, qna_move_too_big: 400,   // PR #1839 리뷰 반영(Codex P2)
   };
   if (err && err.code && codes[err.code]) {
     res.status(codes[err.code]).json({ ok: false, code: err.code, error: err.message, ...(err.floor != null ? { floor: err.floor } : {}),
@@ -2052,7 +2053,7 @@ router.post('/campaigns/:id/qna-move', authMiddleware, internalMiddleware, async
     const campaignId = String(req.params.id);
     const b = req.body || {};
     const out = await require('../services/qnaSlots.service')
-      .moveQnaSlots({ campaignId, moves: b.moves, total: b.total, actor: _by(req) });
+      .moveQnaSlots({ campaignId, days: b.days, total: b.total, actor: _by(req) });
     let ov = null;
     try { ov = await require('../services/campaignPlan.service').getPlanOverview(campaignId, { admin: req.admin }); }
     catch (e) { logger.warn(`[qna-move] 반영 뒤 다시 읽기 실패 camp=${campaignId}: ${e.message}`); }

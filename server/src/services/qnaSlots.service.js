@@ -492,8 +492,8 @@ const QNA_EXTRA_STARTS = ['today', 'tomorrow'];
 
 /**
  * 오늘부터 다시 깔아도 되나 — **오늘 정원 판정(computeCampaignState) 그대로**(사본 0).
- *   열림 = 게시 중 · 모집 중/오늘 시간 전/오늘 몫이 차서 닫힘(사유 없음) · 신청 마감 시각(cutoffAt) 전 · 영업일.
- *   막힘 = 마감 시각 지남 · 종료·총원 충족 · 주말·공휴일·제외일 · 오늘 자리 수를 모름.
+ *   열림 = 게시 중 · 모집 중/오늘 늦은 시각에 엶/오늘 몫이 차서 닫힘(사유 없음) · 신청 마감 시각(cutoffAt) 전 · 영업일.
+ *   막힘 = 공고 시작일 전(not_started — 리뷰 반영) · 마감 시각 지남 · 종료·총원 충족 · 주말·공휴일·제외일 · 오늘 자리 수를 모름.
  *   ★ 결정 379 — 0명 휴무(rest_day) 막힘은 없앴다: Q&A 는 날짜별 계획을 판정에 쓰지 않는다(그날 자리 수가 유일 기준).
  * @param c       recruit_campaigns 행 · counts = fetchCampaignCounts 결과(qnaToday 실림)
  * @returns {{ok:boolean, code?:string, why?:string, cutoffAt?:string}}
@@ -504,10 +504,15 @@ function qnaTodayStartCheck(c, counts, now = new Date(), { skipWeekends = true, 
   let s = null;
   try { s = require('./campaignState.service').computeCampaignState(c, counts, now, null); } catch (_) { s = null; }
   if (!s) return { ok: false, code: 'unknown', why: '오늘 모집 상태를 확인하지 못해 오늘부터 열 수 없습니다' };
+  const today = kstDateStr(now);
+  /* ★ PR #1839 리뷰 반영(Codex P2) — 시작일이 오늘보다 뒤인 공고(날짜 preopen)는 오늘 아무도 신청할 수 없다.
+       오늘 늦은 시각에 여는 공고(시간 preopen)와 구분한다 — 판정 = computeCampaignState 의 startDate(같은 시작일 출처). */
+  if (s.state === 'preopen' && s.startDate && today < s.startDate) {
+    return { ok: false, code: 'not_started', why: `공고 시작일(${_md(s.startDate)}) 전이라 오늘부터 열 수 없습니다` };
+  }
   const cut = s.cutoffAt ? new Date(s.cutoffAt) : null;
   if (s.state === 'cutoff' || !cut || now >= cut) return { ok: false, code: 'cutoff', why: '오늘 신청 마감 시각이 지나 오늘부터 열 수 없습니다' };
   if (!['open', 'preopen', 'daily_done'].includes(s.state) || s.stateReason) return { ok: false, code: 'closed', why: '지금은 모집이 닫혀 있어 오늘부터 열 수 없습니다' };
-  const today = kstDateStr(now);
   const { businessDays } = require('../utils/worktablePlan');
   const bd = businessDays({ count: 1, startDate: today, skipWeekends, holidays });
   if (!bd.length || bd[0].date !== today) return { ok: false, code: 'not_business_day', why: '오늘은 주말·공휴일·제외일이라 오늘부터 열 수 없습니다' };
@@ -516,19 +521,21 @@ function qnaTodayStartCheck(c, counts, now = new Date(), { skipWeekends = true, 
 
 /**
  * 못 채운 자리를 어느 날로 옮길지(쓰기 0건) — 반영(applyQnaEnd)과 팝업 미리보기가 같은 계산을 쓴다.
- *   그 상품의 하루 건수 = 처음 자리표에서 하루에 가장 많이 깔린 수(321 확정 5 — 같은 하루 건수).
+ *   그 상품의 하루 건수 = 자리표를 만든 원천(오더 상품별 하루 건수 · _unitDailyCap — 321 확정 5 · 옮기기와 같은 함수).
+ *   ★ 원천에 없는 상품 = 거절(qna_capacity_unknown · fail-closed — 모르는 하루 건수로 깔지 않는다).
  * @returns {{moves:Array<{slot,date,label}>, days:string[], skipped:string[]}}
  *   skipped = 늘 빈 목록(결정 379 — 0명 휴무일 건너뛰기를 없앴다 · 응답 모양만 유지해 옛 화면이 그대로 읽는다)
  */
 async function qnaExtraPlan(db, it, wo, { startDate } = {}) {
   const { businessDays, normalizeHolidayList } = require('../utils/worktablePlan');
-  const perDay = await _unitPerDay(db, it.sheetId, it.tabName);
+  const perDay = _unitDailyCap(wo);
   const holidays = normalizeHolidayList(wo.holidays);
   const byUnit = new Map();
   for (const s of it.unfilled) { if (!byUnit.has(s.unit_key)) byUnit.set(s.unit_key, []); byUnit.get(s.unit_key).push(s); }
   const moves = [];
   for (const [, list] of byUnit) {
-    const pd = perDay.get(list[0].unit_key) || 1;
+    const pd = perDay.get(list[0].unit_key);
+    if (!pd) throw _qerr(`「${list[0].unit_key}」의 하루 건수를 오더에서 확인하지 못해 다시 깔지 않았습니다.`, 'qna_capacity_unknown');
     // 공개 자리가 그날 첫 자리라 먼저 찬다(확정 1) — 다시 깔 때도 그날 안에서 공개를 앞에 둔다
     const days = businessDays({ count: Math.ceil(list.length / pd), startDate, skipWeekends: wo.skip_weekends !== false, holidays });
     if (days.length * pd < list.length) throw Object.assign(new Error('다시 깔 날짜를 만들지 못했습니다.'), { code: 'no_days' });
@@ -606,16 +613,18 @@ async function qnaPlanView(db, camp, { admin = null, now = new Date(), counts = 
    결정 379 — 조절 창에서 빈 자리를 날짜 사이로 옮기기(사용자 확정 2026-11-17 「1+2까지만」)
    · 옮기는 것 = 빈 자리(_movableSql — 못 채운 자리 판정 + 신청 중 아님) · 총 자리 수 불변(새 자리·새 줄 없음 · 그 줄의 진행일자만)
    · 받는 날 = 오늘 이후 · 오늘은 신청 마감 전(qnaTodayStartCheck — 추가 모집 「오늘부터」와 같은 판정) · 오더 휴무일·주말 제외 아님
-     (businessDays — 자리표를 만들 때와 같은 날짜 규칙) · 상품별 하루 건수(처음 자리표에서 하루에 가장 많이 깔린 수 — 추가 모집과 같은 규칙)를 넘지 않음
-   · 상품 고르기 = 날짜 단위(그날 빈 자리 중 비공개 먼저 · 상품 순서 · 상품 안 순번) — 받는 날 하루 건수가 찬 상품은 건너뛴다.
-     공개 자리는 그 상품의 그날 공개가 이미 있으면 놓지 않는다(공개글 하루 1건 · qnaCalendar 규칙).
-   · 화면이 본 값(그날 옮길 수 있는 빈 자리 수 · 총 자리 수)과 지금 값이 다르면 409(qna_move_stale) — 화면이 다시 받아 그린다.
+     (businessDays — 자리표를 만들 때와 같은 날짜 규칙) · 공고 시작일 이후(리뷰 반영)
+     · 상품별 하루 건수(자리표를 만든 원천 = 오더 상품별 하루 건수 · _unitDailyCap — 추가 모집과 같은 함수)를 넘지 않음
+   · 화면은 날짜별 증감(날짜 → ±n)만 보낸다(리뷰 반영 — 날짜 순 짝짓기 없음). 어느 빈 자리를 어느 날로 보낼지는 서버가 잠근 뒤
+     고른 날짜 전체를 한꺼번에 배정한다(_assignQnaMoves — 최소 비용 유량 · 결정적 · 해가 있으면 찾는다 · 탐색 상한).
+     해가 여러 개면 비공개 먼저 · 상품 순서 · 상품 안 순번. 공개 자리는 그 상품의 그날 공개가 이미 있으면 놓지 않는다(공개글 하루 1건).
+   · 화면이 본 값(빼는 날의 옮길 수 있는 빈 자리 수 · 총 자리 수)과 지금 값이 다르면 409(qna_move_stale) — 화면이 다시 받아 그린다.
    · 잠금·줄 날짜 갱신·장부 다시 만들기 = 추가 모집(applyQnaEnd)과 **같은 함수**(_lockQnaCampaign · _moveSlotRows · _rebuildAfterMove).
    · 「지금」은 잠근 뒤 읽는다(결정 377 리뷰 반영과 같은 규율) · 하나라도 실패 = 전부 되돌림(fail-closed).
    · 일정 끝 결정(qna_extra)이 이미 있어도 옮길 수 있다(결정 기록과 무관 — 옮긴 뒤 새 일정 끝이 생기면 그때 다시 묻는다).
    ══════════════════════════════════════════════════════════════════════════════ */
-const QNA_MOVE_MAX = 60;          // 한 번에 보내는 이동 줄 수 상한
-const QNA_MOVE_MAX_N = 500;       // 이동 한 줄의 자리 수 상한
+const QNA_MOVE_MAX = 60;          // 한 번에 보내는 날짜(증감) 줄 수 상한
+const QNA_MOVE_MAX_N = 500;       // 한 날짜의 증감 · 한 번에 옮기는 자리 수 상한
 const QNA_MOVE_WINDOW_DAYS = 14;  // 조절 창이 보여 줄 받는 날 범위 = 오늘 ~ (마지막 날·오늘 중 늦은 날) + 14일
 const _YMD = /^\d{4}-\d{2}-\d{2}$/;
 function _qerr(message, code) { return Object.assign(new Error(message), { code }); }
@@ -638,7 +647,8 @@ function _slotDay(wo, ymd) {
 }
 
 /**
- * 조절 창 옮기기 재료(쓰기 0) — { from, to, closed:[쉬는 날], today:{ok, code?, why?, cutoffAt?} }.
+ * 조절 창 옮기기 재료(쓰기 0) — { from, to, closed:[쉬는 날], start:공고 시작일|null, today:{ok, code?, why?, cutoffAt?} }.
+ *   start = 이 날보다 이른 날로는 옮길 수 없다(리뷰 반영 — 화면은 [＋]를 잠근다 · 서버도 저장 때 다시 막는다).
  * ★ 화면은 이 칸이 있을 때만 [−]/[＋]를 그린다(구버전 서버 = 칸 없음 = 버튼 숨김). 서버는 저장 때 다시 잰다.
  */
 async function qnaMoveMaterial(db, camp, { counts = null, now = new Date(), last = null } = {}) {
@@ -650,7 +660,8 @@ async function qnaMoveMaterial(db, camp, { counts = null, now = new Date(), last
   for (let d = from; d <= to; d = _addDays(d, 1)) if (!_slotDay(wo, d).ok) closed.push(d);
   const { normalizeHolidayList } = require('../utils/worktablePlan');
   const chk = qnaTodayStartCheck(camp, counts, now, { skipWeekends: wo.skip_weekends !== false, holidays: normalizeHolidayList(wo.holidays) });
-  return { from, to, closed, today: chk };
+  const start = require('./campaignState.service').dateOnlyStr(camp.start_date) || null;
+  return { from, to, closed, start, today: chk };
 }
 
 /**
@@ -671,14 +682,20 @@ async function _lockQnaCampaign(client, campaignId) {
   return lock[0];
 }
 
-/** 상품(자리 단위)별 하루 건수 = 처음 자리표에서 하루에 가장 많이 깔린 수(321 확정 5 — 추가 모집·옮기기가 같은 규칙). */
-async function _unitPerDay(db, sheetId, tabName) {
-  const { rows: per } = await db.query(
-    `SELECT unit_key, MAX(n)::int AS per FROM (
-       SELECT unit_key, slot_date, COUNT(*) AS n FROM qna_slots
-        WHERE sheet_id = $1 AND tab_name = $2 AND status <> 'cancelled' GROUP BY unit_key, slot_date) t
-      GROUP BY unit_key`, [sheetId, tabName]);
-  return new Map(per.map(r => [r.unit_key, Math.max(1, r.per || 1)]));
+/**
+ * 상품(자리 단위)별 하루 건수 — **자리표를 만든 원천** 그대로(321 확정 5 · 추가 모집·옮기기가 같은 함수).
+ *   원천 = 작업오더 상품 목록을 자리표 생성기가 읽는 해석(qnaCalendar.qnaUnitsFromWorkOrder — 선택지 daily · 없으면 오더 daily_count).
+ *   단위 키 = 자리표 unit_key 와 같은 규칙(selectionKey). 접수 뒤 이 칸은 잠긴다(_qnaCalendarLocked · 상품 일건수 바꾸기도 Q&A 거절).
+ * ★ PR #1839 리뷰 반영(Codex P2) — 종전에는 지금 자리표의 날짜 분포에서 하루 최대치를 다시 쟀다. 옮기기로 분포가 흩어지면
+ *   최대치가 내려가 되돌리기가 막히고 추가 모집 용량도 줄었다. 바뀌는 자리 날짜가 아니라 바뀌지 않는 원천을 읽는다.
+ * @returns Map(unit_key → 하루 건수 ≥1) — 원천에 없거나 0 인 상품은 칸이 없다(부르는 쪽이 거절 · fail-closed)
+ */
+function _unitDailyCap(wo) {
+  let units = [];
+  try { units = require('../utils/qnaCalendar').qnaUnitsFromWorkOrder(wo || {}).units || []; } catch (_) { units = []; }
+  const out = new Map();
+  for (const u of units) if (u && u.unitKey && u.daily > 0) out.set(u.unitKey, u.daily);
+  return out;
 }
 
 /**
@@ -714,38 +731,147 @@ async function _rebuildAfterMove(sheetId, tabName, by) {
   catch (e) { logger.warn(`[qnaSlots] 자리 옮긴 뒤 장부 갱신 실패(다음 갱신이 맞춘다) by=${by}: ${e.message}`); }
 }
 
-/** 화면이 보낸 이동 목록 검사(쓰기 전) — [{from,to,n,fromOpen}] → 정규화. 틀리면 qna_move_bad/empty. */
-function _normalizeMoves(moves) {
-  if (!Array.isArray(moves) || !moves.length) throw _qerr('옮길 자리가 없습니다.', 'qna_move_empty');
-  if (moves.length > QNA_MOVE_MAX) throw _qerr(`한 번에 ${QNA_MOVE_MAX}줄까지만 옮길 수 있습니다.`, 'qna_move_bad');
-  const list = moves.map(m => {
-    const from = String((m && m.from) || '').trim(), to = String((m && m.to) || '').trim();
-    const n = Number(m && m.n), fromOpen = Number(m && m.fromOpen);
-    if (!_YMD.test(from) || !_YMD.test(to)) throw _qerr('날짜 형식이 올바르지 않습니다.', 'qna_move_bad');
-    if (from === to) throw _qerr('같은 날로는 옮길 수 없습니다.', 'qna_move_bad');
-    if (!Number.isInteger(n) || n < 1 || n > QNA_MOVE_MAX_N) throw _qerr('옮길 자리 수가 올바르지 않습니다.', 'qna_move_bad');
-    if (!Number.isInteger(fromOpen) || fromOpen < 0) throw _qerr('화면이 본 빈 자리 수가 없습니다 — 새로고침한 뒤 다시 옮겨 주세요.', 'qna_move_bad');
-    return { from, to, n, fromOpen };
-  });
-  const froms = new Map(), tos = new Set(list.map(m => m.to));
-  for (const m of list) {
-    if (tos.has(m.from)) throw _qerr(`${_md(m.from)}에서 빼면서 같은 날에 더할 수는 없습니다.`, 'qna_move_bad');
-    const f = froms.get(m.from) || { fromOpen: m.fromOpen, n: 0 };
-    if (f.fromOpen !== m.fromOpen) throw _qerr('같은 날의 빈 자리 수가 서로 다릅니다 — 새로고침한 뒤 다시 옮겨 주세요.', 'qna_move_bad');
-    f.n += m.n; froms.set(m.from, f);
+/**
+ * 화면이 보낸 날짜별 증감 검사(쓰기 전) — [{date, n, movable?}] → 정규화. 틀리면 qna_move_bad/empty.
+ *   n < 0 = 그날 빈 자리 n개 빼기(movable = 화면이 본 그날 옮길 수 있는 빈 자리 수 — 필수) · n > 0 = 그날로 n개 더하기.
+ * ★ PR #1839 리뷰 반영(Codex P2) — 화면은 「어느 날에서 어느 날로」 짝짓지 않는다(날짜 순 짝짓기는 가능한 재배치를 거절했다).
+ *   어느 빈 자리를 어느 날로 보낼지는 서버가 잠근 뒤 한꺼번에 정한다(_assignQnaMoves).
+ */
+function _normalizeDays(days) {
+  if (!Array.isArray(days) || !days.length) throw _qerr('옮길 자리가 없습니다.', 'qna_move_empty');
+  if (days.length > QNA_MOVE_MAX) throw _qerr(`한 번에 ${QNA_MOVE_MAX}일까지만 바꿀 수 있습니다.`, 'qna_move_bad');
+  const froms = new Map(), tos = new Map();
+  let minus = 0, plus = 0;
+  for (const x of days) {
+    const date = String((x && x.date) || '').trim(), n = Number(x && x.n);
+    if (!_YMD.test(date)) throw _qerr('날짜 형식이 올바르지 않습니다.', 'qna_move_bad');
+    if (froms.has(date) || tos.has(date)) throw _qerr(`${_md(date)}이 두 번 들어 있습니다 — 새로고침한 뒤 다시 옮겨 주세요.`, 'qna_move_bad');
+    if (!Number.isInteger(n) || n === 0 || Math.abs(n) > QNA_MOVE_MAX_N) throw _qerr('옮길 자리 수가 올바르지 않습니다.', 'qna_move_bad');
+    if (n < 0) {
+      const movable = Number(x && x.movable);
+      if (x == null || x.movable == null || !Number.isInteger(movable) || movable < 0) throw _qerr('화면이 본 빈 자리 수가 없습니다 — 새로고침한 뒤 다시 옮겨 주세요.', 'qna_move_bad');
+      if (-n > movable) throw _qerr(`${_md(date)}의 빈 자리(${movable}개)보다 많이 옮길 수 없습니다.`, 'qna_move_bad');
+      froms.set(date, { need: -n, movable }); minus += -n;
+    } else { tos.set(date, n); plus += n; }
   }
-  for (const [d, f] of froms) if (f.n > f.fromOpen) throw _qerr(`${_md(d)}의 빈 자리(${f.fromOpen}개)보다 많이 옮길 수 없습니다.`, 'qna_move_bad');
-  return { list, froms, tos: [...tos].sort() };
+  if (!minus || minus !== plus) throw _qerr(`뺀 자리(${minus}개)와 더한 자리(${plus}개)가 같아야 옮길 수 있습니다.`, 'qna_move_bad');
+  if (minus > QNA_MOVE_MAX_N) throw _qerr(`한 번에 ${QNA_MOVE_MAX_N}개까지만 옮길 수 있습니다.`, 'qna_move_bad');
+  const sortMap = m => new Map([...m].sort((a, b) => (a[0] < b[0] ? -1 : 1)));
+  return { froms: sortMap(froms), tos: sortMap(tos), total: minus };
+}
+
+const QNA_MOVE_SEARCH_BUDGET = 2000000;   // 배정 탐색 상한(간선 완화 횟수) — 넘으면 거절(qna_move_too_big · 나눠서 옮기게)
+
+/**
+ * 빈 자리 배정(순수 · 쓰기 0) — 빼는 날마다 정확히 need 개, 받는 날마다 정확히 need 개, 받는 날 상품별 하루 건수(cap − 이미 있는 수)
+ * · 공개 자리는 그 상품의 그날 공개가 없을 때 1개까지(공개글 하루 1건 · qnaCalendar 규칙)를 모두 지키는 배정을 찾는다.
+ *   방법 = 최소 비용 최대 유량(작은 규모 · 결정적 — 같은 입력이면 언제나 같은 결과). 해가 있으면 반드시 찾는다(날짜 순 짝짓기 아님).
+ *   해가 여러 개면 비공개 자리 → 상품 순서(unit_idx) → 상품 안 순번(unit_seq)을 먼저 옮긴다(비용 = 그날 후보 순서의 자리 묶음 순위).
+ * @param cand   Map(from → 그날 옮길 수 있는 빈 자리[] — 비공개 먼저·unit_idx·unit_seq 순)
+ * @param froms  Map(from → {need}) · tos Map(to → need) · occ Map('to|unit' → {n,pub}) · cap Map(unit → 하루 건수)
+ * @returns {{ ok:true, plan:Array<{slot,from,to}> } | { ok:false, placed:number }}
+ */
+function _assignQnaMoves({ cand, froms, tos, occ, cap, budget = QNA_MOVE_SEARCH_BUDGET }) {
+  const nodes = [];   // 정점 = 간선 목록 index 배열
+  const E = [];       // 간선 {to, cap, cost, rev}
+  const node = () => { nodes.push([]); return nodes.length - 1; };
+  const edge = (u, v, c, w) => {
+    nodes[u].push(E.length); E.push({ to: v, cap: c, cost: w });
+    nodes[v].push(E.length); E.push({ to: u, cap: 0, cost: -w });
+    return E.length - 2;
+  };
+  const S = node(), T = node();
+  const toList = [...tos.keys()];
+  const destNode = new Map();   // to → 정점
+  for (const t of toList) { const d = node(); destNode.set(t, d); edge(d, T, tos.get(t), 0); }
+  const unitNode = new Map();   // 'to|unit' → 정점(그날 그 상품 칸)
+  const pubNode = new Map();    // 'to|unit' → 정점(그날 그 상품 공개 칸)
+  const unitAt = (t, u) => {
+    const k = t + '|' + u;
+    if (!unitNode.has(k)) {
+      const o = occ.get(k) || { n: 0, pub: 0 };
+      const x = node(); unitNode.set(k, x); edge(x, destNode.get(t), Math.max(0, (cap.get(u) || 0) - o.n), 0);
+    }
+    return unitNode.get(k);
+  };
+  const pubAt = (t, u) => {
+    const k = t + '|' + u;
+    if (!pubNode.has(k)) {
+      const o = occ.get(k) || { n: 0, pub: 0 };
+      const x = node(); pubNode.set(k, x); edge(x, unitAt(t, u), o.pub > 0 ? 0 : 1, 0);
+    }
+    return pubNode.get(k);
+  };
+  const BIG = 1000000;
+  const groups = [];   // {from, rows, edgeIn, outs:[{to, e}]}
+  for (const [f, fr] of froms) {
+    const fn = node(); edge(S, fn, fr.need, 0);
+    const byKey = new Map();
+    for (const s of cand.get(f) || []) {
+      const k = s.unit_key + '|' + (s.visibility === 'public' ? 'P' : 'R');
+      if (!byKey.has(k)) byKey.set(k, []);
+      byKey.get(k).push(s);
+    }
+    let rank = 0;
+    for (const [, rows] of byKey) {   // Map 은 넣은 순서 = 후보 순서(비공개 먼저 · unit_idx · unit_seq)
+      const pub = rows[0].visibility === 'public', u = rows[0].unit_key;
+      const g = node();
+      const ge = edge(fn, g, rows.length, (pub ? BIG : 0) + (rank++));
+      const outs = [];
+      for (const t of toList) {
+        const o = occ.get(t + '|' + u) || { n: 0, pub: 0 };
+        if ((cap.get(u) || 0) - o.n <= 0) continue;   // 그날 그 상품은 이미 찼다
+        if (pub && o.pub > 0) continue;                // 그날 그 상품 공개가 이미 있다
+        outs.push({ to: t, e: edge(g, pub ? pubAt(t, u) : unitAt(t, u), rows.length, 0) });
+      }
+      groups.push({ from: f, rows, ge, outs });
+    }
+  }
+  // 최소 비용 경로로 하나씩 흘린다(SPFA — 되돌림 간선의 음수 비용 처리) · 탐색 상한
+  let flow = 0, work = 0;
+  const need = [...froms.values()].reduce((a, x) => a + x.need, 0);
+  while (flow < need) {
+    const dist = new Array(nodes.length).fill(Infinity), prevE = new Array(nodes.length).fill(-1), inQ = new Array(nodes.length).fill(false);
+    dist[S] = 0; const q = [S]; inQ[S] = true;
+    for (let h = 0; h < q.length; h++) {
+      const u = q[h]; inQ[u] = false;
+      for (const ei of nodes[u]) {
+        if (++work > budget) throw _qerr('한 번에 옮기기에는 고른 자리가 너무 많습니다 — 나눠서 옮겨 주세요.', 'qna_move_too_big');
+        const e = E[ei];
+        if (e.cap > 0 && dist[u] + e.cost < dist[e.to]) {
+          dist[e.to] = dist[u] + e.cost; prevE[e.to] = ei;
+          if (!inQ[e.to]) { inQ[e.to] = true; q.push(e.to); }
+        }
+      }
+    }
+    if (dist[T] === Infinity) break;
+    let add = Infinity;
+    for (let v = T; v !== S; v = E[prevE[v] ^ 1].to) add = Math.min(add, E[prevE[v]].cap);
+    for (let v = T; v !== S; v = E[prevE[v] ^ 1].to) { E[prevE[v]].cap -= add; E[prevE[v] ^ 1].cap += add; }
+    flow += add;
+  }
+  if (flow < need) return { ok: false, placed: flow };
+  // 흐른 양 = 그 묶음에서 그 날로 보낼 수 → 묶음 안 순번 순으로 자리를 고른다
+  const plan = [];
+  for (const g of groups) {
+    let i = 0;
+    for (const o of g.outs) {
+      const k = E[o.e ^ 1].cap;   // 되돌림 간선 용량 = 흐른 양
+      for (let c = 0; c < k; c++) plan.push({ slot: g.rows[i++], from: g.from, to: o.to });
+    }
+  }
+  return { ok: true, plan };
 }
 
 /**
  * 조절 창 [확정 저장] — 빈 자리 옮기기(공고 하나 · 독립 트랜잭션).
- * @param moves  [{from,to,n,fromOpen}] — fromOpen = 화면이 본 그날 옮길 수 있는 빈 자리 수
- * @param total  화면이 본 총 자리 수(없으면 검사 안 함 — 옛 화면은 이 길을 부르지 않는다)
+ * @param days   [{date, n, movable?}] — 날짜별 증감(n<0 빼기 · n>0 더하기) · movable = 화면이 본 그날 옮길 수 있는 빈 자리 수(빼는 날 필수)
+ * @param total  화면이 본 총 자리 수(없으면 검사 안 함)
  * @returns {{ok:true, moved:number, moves:Array<{from,to,n,units:Array<{name,n}>}>}}  실패는 throw(e.code)
  */
-async function moveQnaSlots({ campaignId, moves, total = null, actor = 'admin', now: nowIn = null, clock = null } = {}) {
-  const { list, froms, tos } = _normalizeMoves(moves);
+async function moveQnaSlots({ campaignId, days, total = null, actor = 'admin', now: nowIn = null, clock = null } = {}) {
+  const { froms, tos } = _normalizeDays(days);
+  const toList = [...tos.keys()];
   if (total != null && !Number.isInteger(Number(total))) throw _qerr('총 자리 수가 올바르지 않습니다.', 'qna_move_bad');
   const client = await _pool().connect();
   try {
@@ -761,15 +887,19 @@ async function moveQnaSlots({ campaignId, moves, total = null, actor = 'admin', 
         `SELECT COUNT(*) FILTER (WHERE status <> 'cancelled')::int AS n FROM qna_slots WHERE sheet_id = $1 AND tab_name = $2`, [sheetId, tabName]);
       if ((tr[0] && tr[0].n) !== Number(total)) throw _qerr('그사이 자리표가 바뀌었습니다 — 최신 자리로 다시 불러왔으니 다시 옮겨 주세요.', 'qna_move_stale');
     }
-    // 받는 날 — 지난 날 · 쉬는 날 · (오늘이면) 신청 마감 뒤는 막는다
+    const { rows: cr } = await client.query('SELECT * FROM recruit_campaigns WHERE id = $1', [campaignId]);
+    // ★ 리뷰 반영(Codex P2) — 공고 시작일 = 정원 판정(computeCampaignState)과 같은 출처(start_date · dateOnlyStr)
+    const startDate = require('./campaignState.service').dateOnlyStr(cr[0] && cr[0].start_date);
+    // 받는 날 — 지난 날 · 공고 시작일 전 · 쉬는 날 · (오늘이면) 신청 마감 뒤는 막는다
     const labels = new Map();
-    for (const d of tos) {
+    for (const d of toList) {
       if (d < today) throw _qerr(`지난 날(${_md(d)})로는 옮길 수 없습니다.`, 'qna_move_past');
+      if (startDate && d < startDate) throw _qerr(`공고 시작일(${_md(startDate)}) 전인 ${_md(d)}로는 옮길 수 없습니다 — 그날은 아무도 신청할 수 없습니다.`, 'qna_move_before_start');
       const sd = _slotDay(wo, d);
       if (!sd.ok) throw _qerr(`${_md(d)}은 오더의 휴무일·주말이라 자리를 둘 수 없습니다.`, 'qna_move_closed_day');
       labels.set(d, sd.label);
     }
-    if (tos.includes(today)) {
+    if (tos.has(today)) {
       let counts = null;
       await client.query('SAVEPOINT qna_move_counts');
       try {
@@ -779,7 +909,6 @@ async function moveQnaSlots({ campaignId, moves, total = null, actor = 'admin', 
         await client.query('ROLLBACK TO SAVEPOINT qna_move_counts');
         logger.warn(`[qnaSlots] 자리 옮기기 — 정원 재료 조회 실패(오늘로는 막음) camp=${campaignId}: ${e.message}`);
       }
-      const { rows: cr } = await client.query('SELECT * FROM recruit_campaigns WHERE id = $1', [campaignId]);
       const { normalizeHolidayList } = require('../utils/worktablePlan');
       const chk = qnaTodayStartCheck(cr[0], counts, now, { skipWeekends: wo.skip_weekends !== false, holidays: normalizeHolidayList(wo.holidays) });
       if (!chk.ok) throw _qerr(String(chk.why || '').replace('오늘부터 열 수 없습니다', '오늘로 옮길 수 없습니다'), 'qna_move_today');
@@ -791,42 +920,47 @@ async function moveQnaSlots({ campaignId, moves, total = null, actor = 'admin', 
         `SELECT s.id, s.seq, s.unit_key, s.unit_seq, s.visibility, s.product_name, s.option1_value, s.option2_value
            FROM qna_slots s
           WHERE s.sheet_id = $1 AND s.tab_name = $2 AND s.slot_date = $3::date AND ${_movableSql('s')}
-          ORDER BY (s.visibility = 'public'), s.unit_idx, s.unit_seq
+          ORDER BY (s.visibility = 'public'), s.unit_idx, s.unit_seq, s.id
           FOR UPDATE OF s`, [sheetId, tabName, d]);
-      if (rows.length !== f.fromOpen) throw _qerr(`그사이 ${_md(d)}의 빈 자리가 바뀌었습니다(지금 ${rows.length}개) — 최신 자리로 다시 불러왔으니 다시 옮겨 주세요.`, 'qna_move_stale');
+      if (rows.length !== f.movable) throw _qerr(`그사이 ${_md(d)}의 빈 자리가 바뀌었습니다(지금 ${rows.length}개) — 최신 자리로 다시 불러왔으니 다시 옮겨 주세요.`, 'qna_move_stale');
       cand.set(d, rows);
     }
+    // 상품별 하루 건수 = 자리표를 만든 원천(리뷰 반영) — 옮길 후보 상품의 원천이 없으면 거절(fail-closed)
+    const cap = _unitDailyCap(wo);
+    for (const [, rows] of cand) {
+      const miss = rows.find(s => !cap.has(s.unit_key));
+      if (miss) throw _qerr(`「${miss.unit_key}」의 하루 건수를 오더에서 확인하지 못해 옮기지 않았습니다.`, 'qna_move_capacity_unknown');
+    }
     // 받는 날 상품별 자리 수(하루 건수 · 공개 1건)
-    const perDay = await _unitPerDay(client, sheetId, tabName);
     const { rows: occRows } = await client.query(
       `SELECT to_char(slot_date, 'YYYY-MM-DD') AS d, unit_key, COUNT(*)::int AS n,
               COUNT(*) FILTER (WHERE visibility = 'public')::int AS pub
          FROM qna_slots WHERE sheet_id = $1 AND tab_name = $2 AND status <> 'cancelled' AND slot_date = ANY($3::date[])
-        GROUP BY 1, 2`, [sheetId, tabName, tos]);
+        GROUP BY 1, 2`, [sheetId, tabName, toList]);
     const occ = new Map(occRows.map(r => [r.d + '|' + r.unit_key, { n: r.n, pub: r.pub }]));
-    const taken = new Set(), plan = [], summary = [];
-    for (const m of list) {
-      let need = m.n;
-      const units = new Map();
-      for (const s of cand.get(m.from)) {
-        if (!need) break;
-        if (taken.has(s.id)) continue;
-        const k = m.to + '|' + s.unit_key, o = occ.get(k) || { n: 0, pub: 0 };
-        if (o.n >= (perDay.get(s.unit_key) || 1)) continue;
-        if (s.visibility === 'public' && o.pub > 0) continue;
-        o.n++; if (s.visibility === 'public') o.pub++; occ.set(k, o);
-        taken.add(s.id); need--;
-        plan.push({ slot: s, date: m.to, label: labels.get(m.to) });
-        const name = [s.product_name, s.option1_value, s.option2_value].map(v => String(v || '').trim()).filter(Boolean).join(' · ') || s.unit_key;
-        units.set(name, (units.get(name) || 0) + 1);
-      }
-      if (need) throw _qerr(`${_md(m.to)}은 상품별 하루 건수가 이미 차서 ${_md(m.from)}의 빈 자리 ${m.n}개를 다 옮길 수 없습니다(들어갈 수 있는 수 ${m.n - need}개).`, 'qna_move_no_room');
-      summary.push({ from: m.from, to: m.to, n: m.n, units: [...units].map(([name, n]) => ({ name, n })) });
+    // ★ 리뷰 반영(Codex P2) — 고른 날짜 전체를 한꺼번에 배정(날짜 순 짝짓기 아님 · 해가 있으면 찾는다)
+    const got = _assignQnaMoves({ cand, froms, tos, occ, cap });
+    if (!got.ok) {
+      const want = [...tos.values()].reduce((a, n) => a + n, 0);
+      throw _qerr(`고른 날(${toList.map(_md).join('·')})은 상품별 하루 건수가 이미 차서 빈 자리 ${want}개를 다 옮길 수 없습니다(들어갈 수 있는 수 ${got.placed}개).`, 'qna_move_no_room');
     }
+    const plan = got.plan.map(p => ({ slot: p.slot, date: p.to, label: labels.get(p.to), from: p.from }));
+    // 기록·응답 = 「빼는 날 → 받는 날, n개(상품별)」 — 빼는 날·받는 날 순
+    const by = new Map();
+    for (const p of plan) {
+      const k = p.from + '|' + p.date;
+      if (!by.has(k)) by.set(k, { from: p.from, to: p.date, n: 0, units: new Map() });
+      const x = by.get(k), s = p.slot;
+      const name = [s.product_name, s.option1_value, s.option2_value].map(v => String(v || '').trim()).filter(Boolean).join(' · ') || s.unit_key;
+      x.n++; x.units.set(name, (x.units.get(name) || 0) + 1);
+    }
+    const summary = [...by.values()].sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : a.to < b.to ? -1 : 1))
+      .map(x => ({ from: x.from, to: x.to, n: x.n, units: [...x.units].map(([name, n]) => ({ name, n })) }));
     const moved = await _moveSlotRows(client, { sheetId, tabName }, plan, { by: 'qna-move', bumpRound: false });
     await client.query(
       `INSERT INTO campaign_plan_events (campaign_id, actor, action, detail) VALUES ($1,$2,'qna_move',$3::jsonb)`,
-      [campaignId, String(actor).slice(0, 100), JSON.stringify({ after: today, total: total != null ? Number(total) : null, moved, moves: summary })]);
+      [campaignId, String(actor).slice(0, 100), JSON.stringify({ after: today, total: total != null ? Number(total) : null, moved,
+        days: [...froms].map(([date, f]) => ({ date, n: -f.need })).concat([...tos].map(([date, n]) => ({ date, n }))), moves: summary })]);
     await client.query('COMMIT');
     await _rebuildAfterMove(sheetId, tabName, 'qna-move');
     logger.info(`[qnaSlots] 조절 창 자리 옮기기 camp=${campaignId} moved=${moved} by=${actor}`);
@@ -980,5 +1114,5 @@ module.exports = { insertCalendar, isQnaTab, isQnaCampaign, isBoundRow, boundSeq
   qnaOptKeyMap, loadTodayByCampaign, pickSlotInTx, bindSlotForApply, publicSlotView, slotForApplication,
   QNA_END_ACTIONS, listQnaEnds, qnaShortages, applyQnaEnd,
   QNA_EXTRA_STARTS, qnaTodayStartCheck, qnaExtraPlan, qnaExtraStartOptions, qnaPlanView,
-  QNA_MOVE_MAX, QNA_MOVE_WINDOW_DAYS, qnaMoveMaterial, moveQnaSlots,
+  QNA_MOVE_MAX, QNA_MOVE_WINDOW_DAYS, qnaMoveMaterial, moveQnaSlots, _assignQnaMoves, _unitDailyCap,
   QNA_CAPTURE_SWEEP_BUFFER_SEC, listQnaCaptureTimeouts, sweepQnaCaptureTimeouts };

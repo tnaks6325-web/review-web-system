@@ -831,6 +831,8 @@
   }
   function qmvClosed(d) { var c = S.qna.move.closed; return !!(c && c.indexOf(d) >= 0); }
   function qmvTodayOk() { var t = S.qna.move.today; return !!(t && t.ok); }
+  /** 공고 시작일 전인가 — 그날은 아무도 신청할 수 없어 자리를 옮겨 오지 않는다(리뷰 반영 · 서버도 저장 때 다시 막는다 · 칸 없음 = 종전) */
+  function qmvBeforeStart(d) { var s = S.qna.move.start; return !!(s && d < s); }
   function qmvTodayWhy() {
     var t = S.qna.move.today;
     return String((t && t.why) || '오늘로는 옮길 수 없습니다').replace('오늘부터 열 수 없습니다', '오늘로는 옮길 수 없습니다');
@@ -839,7 +841,7 @@
   function qmvCanPlus(d) {
     if (qmvDelta(d) < 0) return true;
     var t = S.data.today;
-    if (d < t || d > S.qna.move.to || qmvClosed(d)) return false;
+    if (d < t || d > S.qna.move.to || qmvClosed(d) || qmvBeforeStart(d)) return false;
     return d !== t || qmvTodayOk();
   }
   /** [−]를 누를 수 있나 — 더한 날을 되돌리거나, 그날 옮길 빈 자리가 남았을 때 */
@@ -854,6 +856,7 @@
     if (dir < 0 && !qmvCanMinus(d)) { toast(fmtMD(d) + '에는 옮길 빈 자리(아직 신청이 없는 자리)가 없습니다'); return; }
     if (dir > 0 && !qmvCanPlus(d)) {
       toast(d < S.data.today ? '지난 날로는 옮길 수 없습니다'
+        : qmvBeforeStart(d) ? '공고 시작일(' + fmtMD(S.qna.move.start).replace(/\s*\(.*$/, '') + ') 전으로는 옮길 수 없습니다'
         : d === S.data.today && !qmvTodayOk() ? qmvTodayWhy()
         : qmvClosed(d) ? fmtMD(d) + '은 오더 휴무일·주말이라 자리를 둘 수 없습니다' : '이 날로는 옮길 수 없습니다');
       return;
@@ -862,28 +865,22 @@
     if (v) S.qmv[d] = v; else delete S.qmv[d];
     render();
   }
-  /** 날짜별 −/+ → 「from → to, n개」 이동 목록(앞 날짜끼리 짝짓기) · fromOpen = 화면이 본 그날 옮길 빈 자리 수 */
-  function qmvMoves() {
-    var minus = [], plus = [], out = [];
-    Object.keys(S.qmv).sort().forEach(function (d) { var v = S.qmv[d]; if (v < 0) minus.push({ d: d, n: -v }); else if (v > 0) plus.push({ d: d, n: v }); });
-    var i = 0, k = 0;
-    while (i < minus.length && k < plus.length) {
-      var n = Math.min(minus[i].n, plus[k].n), x = qnaDay(minus[i].d);
-      out.push({ from: minus[i].d, to: plus[k].d, n: n, fromOpen: x ? (Number(x.movable) || 0) : 0 });
-      minus[i].n -= n; plus[k].n -= n;
-      if (!minus[i].n) i++;
-      if (!plus[k].n) k++;
-    }
-    return out;
+  /** 날짜별 −/+ → 날짜별 증감 [{date, n, movable?}](날짜 순) — 짝짓지 않는다(리뷰 반영: 날짜 순 짝짓기는 가능한 재배치를 거절했다).
+   *  어느 빈 자리를 어느 날로 보낼지는 서버가 잠근 뒤 고른 날짜 전체로 정한다. movable = 빼는 날에 화면이 본 옮길 빈 자리 수(그사이 바뀌면 409). */
+  function qmvDays() {
+    return Object.keys(S.qmv).sort().filter(function (d) { return S.qmv[d]; }).map(function (d) {
+      var v = S.qmv[d], x = qnaDay(d);
+      return v < 0 ? { date: d, n: v, movable: x ? (Number(x.movable) || 0) : 0 } : { date: d, n: v };
+    });
   }
   async function _qnaMoveSave() {
     var sm = qmvSums();
     if (!sm.minus || sm.minus !== sm.plus || S.saving) return;
-    var campId = S.campId, moves = qmvMoves(), j;
+    var campId = S.campId, days = qmvDays(), j;
     S.saving = true;
     document.getElementById('cdpSaveBtn').disabled = true;
     try {
-      j = await _req('POST', EP + encodeURIComponent(campId) + '/qna-move', { moves: moves, total: Number(S.qna.total) || 0 });
+      j = await _req('POST', EP + encodeURIComponent(campId) + '/qna-move', { days: days, total: Number(S.qna.total) || 0 });
     } catch (e) {
       if (S) S.saving = false;
       var msg = String((e && e.message) || e);
@@ -1012,14 +1009,16 @@
   /** 결정 379 — 옮기기 화면의 날짜 줄 하나(상태 · [−] 자리 [＋] · 안내). 「휴무」·[기본으로]는 없다(하루 기준 = 자리 수). */
   function qmvRow(d, i) {
     var j = S.data, x = qnaDay(d), slots = x ? x.slots : 0, mov = x ? (Number(x.movable) || 0) : 0;
-    var dl = qmvDelta(d), isToday = d === j.today, past = d < j.today, closedDay = qmvClosed(d);
+    var dl = qmvDelta(d), isToday = d === j.today, past = d < j.today, closedDay = qmvClosed(d), early = !past && qmvBeforeStart(d);
     var todayBlocked = isToday && !qmvTodayOk();
     var stateText = dl ? '변경' : isToday ? '오늘' : past ? '지난 날' : closedDay ? '쉬는 날' : (slots ? '자리표' : '빈 날');
     var note = dl < 0 ? '빈 자리 ' + (-dl) + '개 빼기 — 저장 전'
       : dl > 0 ? '빈 자리 ' + dl + '개 더하기 — 저장 전'
       : past ? '못 채운 빈 자리 ' + mov + '개 — 다른 날로 옮길 수 있습니다'
       : x ? '남은 자리 ' + x.open + ' / ' + slots + (x.open > mov ? ' · 신청 중 ' + (x.open - mov) : '')
-      : closedDay ? '오더 휴무일·주말 — 자리를 둘 수 없습니다' : '자리 없음 — 이날은 모집하지 않습니다';
+      : closedDay ? '오더 휴무일·주말 — 자리를 둘 수 없습니다'
+      : early ? '공고 시작일(' + _esc(fmtMD(S.qna.move.start).replace(/\s*\(.*$/, '')) + ') 전 — 자리를 둘 수 없습니다'
+      : '자리 없음 — 이날은 모집하지 않습니다';
     if (todayBlocked && !dl) note += ' · ' + _esc(qmvTodayWhy());
     var dk = dayKind(d), hol = holidayName(d);
     return '<div class="cdp-row cdp-qrow cdp-qmv' + (isToday ? ' today' : '') + (dl ? ' moved' : '') + (!slots && !dl ? ' zero' : '') + '">'
