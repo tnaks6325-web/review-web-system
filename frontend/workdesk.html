@@ -3249,7 +3249,7 @@ function _dropSession(msg){ sessionStorage.removeItem('admin_token'); try{ local
   Object.assign(STATE,{ role:'',name:'',brandId:null,advName:'',advWork:null,advQ:'',advF:'all',brandNew:null,brandEdit:null,cur:null,tabs:[],
                         worktabs:null,_wtLoaded:false,_wtDirty:false,_wtBootSynced:false,
                         advOrder:null,_advOrderLoaded:false,_advOrderDirty:false,_advOrderBootSynced:false,_advOrderVersion:0,
-                        favs:null,_favLoaded:false,_finStatsAt:0,campEdit:null,canManageEditors:null,campsUnavailable:false,finFilter:'',
+                        favs:null,_favLoaded:false,_finStatsAt:0,campEdit:null,moEdit:null,canManageEditors:null,campsUnavailable:false,finFilter:'',
                         rvIm:'',rvImData:null,rvImSel:null,rvImAsk:null,rvImDone:null,rvImCounts:null,rvImMemo:null });   // ★ 명의 합치기 목록(실명·번호) 잔재 제거
   renderLogin(); if(msg){ const el=$('#lerr'); if(el) el.textContent=msg; } }
 async function api(path, opts){ const o=Object.assign({headers:{}},opts||{}); o.headers['Authorization']='Bearer '+token(); if(o.body)o.headers['Content-Type']='application/json';
@@ -3564,7 +3564,7 @@ function logout(){
                         advOrder:null,_advOrderLoaded:false,_advOrderDirty:false,_advOrderBootSynced:false,_advOrderVersion:0,
                         favs:null,_favLoaded:false,_finStatsAt:0,
                         finUnavailable:false,statsUnavailable:false,finTruncated:false,worktabsUnavailable:false,
-                        campEdit:null,canManageEditors:null,campsUnavailable:false,finFilter:'',
+                        campEdit:null,moEdit:null,canManageEditors:null,campsUnavailable:false,finFilter:'',
                         rvIm:'',rvImData:null,rvImSel:null,rvImAsk:null,rvImDone:null,rvImCounts:null,rvImMemo:null });   // ★ 명의 합치기 목록(실명·번호) 잔재 제거
   _NAVCS.cs=null; _NAVCS.re=null;   // 합산 뱃지도 초기화 — 안 하면 이전 계정의 건수가 다음 로그인에 남는다
   _NAVRI.n=null;                    // 리뷰검수 값도 같은 이유(홈 타일·브리핑이 이 값을 본다)
@@ -5802,14 +5802,19 @@ function _campBtnHtml(t,i){
   }
   return `<button class="wbl-b cmp" onclick="${stop}openTabCampaign(${i})" title="${esc(tip)}"><i class="wbl-cdot ${dot}"></i>공고${n}</button>`;
 }
-/** 작업오더·모집공고 편집 권한 — 홈 전용 플래그.
+/** 작업오더·모집공고 편집 권한 — 홈·작업보드 전용 플래그 두 개: 모집공고(STATE.campEdit) + 외부모집 수동제출(STATE.moEdit).
  *  ★ `STATE.canEdit` 를 쓰지 않는다: 그 값은 작업보드 그리드 편집(role!=='advertiser')에도 쓰여
  *    작업 탭을 한 번 열면 덮어써진다 → 홈에서 발행 버튼이 잘못 보인다. 서버가 최종 방어지만
- *    "눌러도 아무 일 없는 버튼"은 두지 않는다. */
+ *    "눌러도 아무 일 없는 버튼"은 두지 않는다.
+ *  ★★ 결정 380 — 둘은 **서로 다른 서버 판정**이다: 공고 = `canEditCampaign`(리뷰어·업체를 뺀 내부 직원 전원),
+ *    수동제출 = `canEdit`(편집 허용 명단 — 결정 269·348). 옛 서버(canEditCampaign 없음)는 공고도 종전
+ *    canEdit 을 따른다(그 서버는 명단 밖 직원의 공고 쓰기를 403 으로 막으므로 버튼을 보이면 막다른 길). */
 async function _loadCampPerm(){
   if(STATE.campEdit!=null) return STATE.campEdit;
   const r=await api('/api/trackb/perm').catch(()=>null);
-  STATE.campEdit=!!(r&&r.ok&&r.canEdit);
+  const ok=!!(r&&r.ok);
+  STATE.moEdit=!!(ok&&r.canEdit);
+  STATE.campEdit=(ok&&typeof r.canEditCampaign==='boolean')?r.canEditCampaign:STATE.moEdit;
   return STATE.campEdit;
 }
 async function openTabCampaign(i){
@@ -12593,8 +12598,8 @@ function _modal(title, bodyHtml){
 /* ══════════════════════════════════════════════════════════════
    작업오더 · 모집공고 (상단탭)
 
-   ★ 열람은 내부인 전원(관리자·AE). AE는 작업오더·모집공고를 모두 편집하고,
-     admin은 서버 `workdesk_editors` 명단을 따른다.
+   ★ 열람은 내부인 전원(관리자·AE). 작업오더 편집은 AE 와 서버 `workdesk_editors` 명단(STATE.canEdit).
+   ★ 결정 380: **모집공고** 편집(만들기·수정·게시·보관)은 리뷰어·업체를 뺀 내부 직원 전원(STATE.campEdit = /perm canEditCampaign).
      작업오더 접수는 시트/탭을 tab_configs·campaigns 에 등록하는 단일 관문이고
      공고 발행·수정은 정원·금액을 바꾸므로 보는 사람 전부에게 열 수 없다.
      프론트는 버튼만 감추고 **최종 판정은 서버**(editorOnlyMiddleware)가 한다.
@@ -13161,6 +13166,7 @@ async function renderCampaignsView(){
   //   스크롤 컨테이너에 섞여 팝업이 아니라 페이지 하단 블록으로 보인다(실측).
   if(window.RecruitModal) RecruitModal.mount();
   await _loadPerm();
+  await _loadCampPerm();   // 결정 380 — [＋ 새 공고]는 공고 판정(내부 직원 전원)
   /* ★ 머리말을 **먼저** 그린다 — 종전엔 카드 렌더 훅에서만 그려서 **공고가 0건이면 머리말 자체가
      없었다**(＋새 공고·보관함·정리 버튼이 통째로 사라져 아무것도 시작할 수 없는 막다른 길).
      건수는 목록이 도착하면 그 훅이 다시 채운다. */
@@ -13177,12 +13183,12 @@ async function renderCampaignsView(){
 function _rcRenderHead(total){
   $('#rchead').innerHTML=`<div class="mh"><h1>모집공고</h1>
     <span class="bd g">${total|0}건</span><span class="sp" style="flex:1"></span>
-    ${STATE.canEdit?'<button class="btn pri" onclick="openRecruitModal()">＋ 새 공고</button>':''}
+    ${STATE.campEdit===true?'<button class="btn pri" onclick="openRecruitModal()">＋ 새 공고</button>':''}
     <button class="btn" id="recruitArchiveBtn" onclick="toggleRecruitArchivedView()" title="보관(폐기)한 공고 보기 — 끝난 공고는 카드 [⋯] → [📦 보관]">📦 보관함</button>
     ${_taskDelAllowed()?'<button class="btn" onclick="openOrphanCampaigns()" title="작업이 삭제됐는데 남아 있는 공고를 찾아 정리합니다(무엇이 지워질지 먼저 보여줍니다)">🧹 지워진 작업의 공고</button>':''}
     <button class="btn" onclick="loadRecruitList()">새로고침</button></div>
     <div class="ovnote">관리자 대시보드와 <b>같은 카드·같은 모달</b>을 씁니다(한쪽만 바뀌는 일이 없게).
-      ${STATE.canEdit?'':'<b style="color:var(--muted)">현재 계정은 열람 전용입니다.</b>'}</div>`;
+      ${STATE.campEdit===true?'':'<b style="color:var(--muted)">현재 계정은 열람 전용입니다.</b>'}</div>`;
 }
 
 
@@ -13320,13 +13326,13 @@ async function _edAdd(){
   const meta=_edCandMap[name]||{};
   const r=await api('/api/trackb/workdesk-editors',{method:'POST',
     body:JSON.stringify({ name, username:meta.username||'', dept:meta.dept||'' })});
-  if(r&&r.ok){ el.value=''; _toast(`'${name}' 을(를) 명단에 추가했습니다.`); _edLoad(); STATE.canEdit=null; }
+  if(r&&r.ok){ el.value=''; _toast(`'${name}' 을(를) 명단에 추가했습니다.`); _edLoad(); STATE.canEdit=null; STATE.campEdit=null; STATE.moEdit=null; }
   else _toast('⚠ 추가 실패'+(r&&r.error?': '+r.error:''));
 }
 async function _edRemove(id,name){
   if(!confirm(`'${name}' 을(를) 명단에서 뺄까요?\n\n· 이후 접수·발행·수정을 할 수 없고 열람만 됩니다.`)) return;
   const r=await api('/api/trackb/workdesk-editors/'+encodeURIComponent(id),{method:'DELETE'});
-  if(r&&r.ok){ _toast('명단에서 제외했습니다.'); _edLoad(); STATE.canEdit=null; }
+  if(r&&r.ok){ _toast('명단에서 제외했습니다.'); _edLoad(); STATE.canEdit=null; STATE.campEdit=null; STATE.moEdit=null; }
   else _toast('⚠ 제외 실패'+(r&&r.error?': '+r.error:''));
 }
 
@@ -19357,13 +19363,14 @@ async function _deleteOrderRowCore(t,rowId){
     await reloadWorkdesk();
   }catch(_){ toast('삭제 정보를 불러오지 못했습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.'); }
 }
-/** 외부모집 수동제출 노출 게이트 — 서버(`/api/trackb/manual-order/*` = master · AE · 편집 허용 admin)와 1:1.
+/** 외부모집 수동제출 노출 게이트 — 서버(`/api/trackb/manual-order/*` = master · AE · 편집 허용 명단)와 1:1.
  *  ★ AE(staff)와 명단에 있는 admin 이 실행할 수 있다. 서버 권한 판정이 아직 안 왔으면
- *    버튼을 그리지 않는다 — "눌러도 403 나는 버튼"을 만들지 않는다(도착하면 `_emoSyncBtn` 이 채운다). */
+ *    버튼을 그리지 않는다 — "눌러도 403 나는 버튼"을 만들지 않는다(도착하면 `_emoSyncBtn` 이 채운다).
+ *  ★★ 결정 380: 공고 판정(STATE.campEdit — 내부 직원 전원)이 아니라 **명단 판정(STATE.moEdit = /perm canEdit)** 을 본다. */
 function canOpenExternalManualOrder(){
   if(STATE.role==='master') return true;   // 서버 canEdit 도 master 는 명단 없이 통과
   // ★ admin 도 명단 판정을 따른다(결정 269) — 서버는 명단 밖 admin 을 403 으로 막는데 화면이 보여 주던 막다른 길.
-  return (STATE.role==='staff'||STATE.role==='admin') && STATE.campEdit===true;
+  return (STATE.role==='staff'||STATE.role==='admin') && STATE.moEdit===true;
 }
 function _emoBtnHtml(){ return canOpenExternalManualOrder()
   ? `<button class="btn" style="margin-top:10px" onclick="openExternalManualOrder()">외부모집 수동제출</button>` : ''; }
@@ -19371,7 +19378,7 @@ function _emoBtnHtml(){ return canOpenExternalManualOrder()
 function _emoSyncBtn(){
   if(!_isInternalRole()) return;
   const fill=()=>{ const b=document.getElementById('emoBtnBox'); if(b) b.innerHTML=_emoBtnHtml(); };
-  if(STATE.campEdit!=null){ fill(); return; }
+  if(STATE.moEdit!=null){ fill(); return; }
   if(typeof _loadCampPerm==='function') _loadCampPerm().then(fill).catch(()=>{});
 }
 function openExternalManualOrder(){

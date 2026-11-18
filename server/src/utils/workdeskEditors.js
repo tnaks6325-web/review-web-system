@@ -21,9 +21,12 @@
  *   종전대로 작업할 수 있다(권한을 뺏는 게 아니라 이 화면만 좁힌 것).
  * ★ 조회 실패(테이블 부재·DB 오류)는 **읽기 전용으로 수렴**한다(fail-closed).
  *   편집은 되돌리기 어려운 작업이라, 모르면 열지 않는다.
+ * ★ 결정 380: **모집공고** 편집(수정·만들기·게시 상태·보관 등)은 명단이 아니라 `canEditCampaign`
+ *   (내부 직원 전원) — 이 명단은 작업오더 접수·수정 · 외부모집 수동제출 · 리뷰어 검색 · 공고 삭제에만 남는다.
  */
 
 const pool = require('../db/pool');
+const { isTrustedLoginToken } = require('../middleware/auth.middleware');
 const { logger } = require('./logger');
 
 const CACHE_MS = 60 * 1000;      // 요청마다 조회하지 않도록 짧게 캐시(명단 변경은 즉시 무효화)
@@ -115,6 +118,27 @@ function editorManagerMiddleware(req, res, next) {
   });
 }
 
+/**
+ * 모집공고 편집 가능 여부 — 결정 380(사용자 확정 2026-11-18 · 선택 A).
+ * 리뷰웹시스템[3버전]의 모집공고 **수정·만들기·게시 상태·보관**(+ 수동확정·블로그 승인/반려·플래그·상품페이지 판독)은
+ * 리뷰어·업체를 뺀 **모든 내부 직원**(master/admin/staff)이 한다. 명단(`canEdit`)은 보지 않는다.
+ * ★ 작업오더 접수·수정 · 외부모집 수동제출 · 리뷰어 검색(개인정보) · 공고 삭제는 여전히 `canEdit`(명단) —
+ *   결정 269·348 완화 금지. 이 함수로 바꾸지 않는다.
+ * ★ 로그인 세션 토큰만(aud·scope·purpose 가 있는 비로그인 토큰 제외) · 리뷰어 공고수정 토큰(via:'reviewer_campaign',
+ *   role 은 admin 이지만 약한 신원) 제외 — authMiddleware 가 이미 /api/trackb 밖으로 막지만 판정에서도 한 번 더 막는다.
+ * ★ 동기 함수 · DB 미조회 — 명단 조회 장애와 무관하다(역할만 본다).
+ */
+function canEditCampaign(admin) {
+  // 로그인 토큰 판정은 단일 출처(auth.middleware isTrustedLoginToken — aud·scope·purpose 없음 + via≠reviewer_campaign)를 태운다.
+  if (!isTrustedLoginToken(admin)) return false;
+  return admin.role === 'master' || admin.role === 'admin' || admin.role === 'staff';
+}
+
+function campaignEditorMiddleware(req, res, next) {
+  if (canEditCampaign(req.admin)) return next();
+  return res.status(403).json({ ok: false, error: '모집공고는 내부 직원만 수정할 수 있습니다.', readOnly: true });
+}
+
 /** 라우트 가드 — 편집 계열 엔드포인트 앞에 둔다 */
 async function editorOnlyMiddleware(req, res, next) {
   try {
@@ -127,5 +151,6 @@ async function editorOnlyMiddleware(req, res, next) {
 
 module.exports = {
   canEdit, canManageEditors, editorOnlyMiddleware, editorManagerMiddleware,
+  canEditCampaign, campaignEditorMiddleware,
   listEditors, addEditor, removeEditor, invalidate,
 };

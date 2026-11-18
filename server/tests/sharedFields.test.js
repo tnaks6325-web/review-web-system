@@ -35,7 +35,9 @@ t('① 운영 대조의 표기 차이는 같다로 판정', () => {
   same('review_type', '혼합(포토 3건, 텍스트 2건)', 'mixed');
   same('review_type', '자율리뷰', '');
   same('purchase_time', '13:00 ~ 18:00', '13:00~18:00');
-  same('purchase_time', '2시~5시', '14:00 ~ 17:00');
+  same('purchase_time', '오후 2시~5시', '14:00 ~ 17:00');   // 결정 381 — 오후 표시가 있을 때만 오후
+  same('purchase_time', '07:00 ~ 08:00', '오전 7시~8시');
+  same('purchase_time', '14:30 ~ 00:00', '14:30 ~ 24:00');  // 끝 00:00 = 그날 끝
   same('purchase_time', '자유시간대', ' 자유시간대 ');
   same('delivery_type', '빈택배', '빈박스');
   same('review_type_mix', [{ type: 'text', quantity: 2 }, { type: 'photo', quantity: 3 }], '[{"type":"photo","quantity":3},{"type":"text","quantity":2}]');
@@ -53,6 +55,8 @@ t('② 진짜 차이는 다르다로 판정', () => {
   differ('skip_weekends', '', false);          // 미정 vs 포함
   differ('review_type', '포토', '텍스트');
   differ('purchase_time', '13:00 ~ 18:00', '자유시간대');
+  differ('purchase_time', '07:00 ~ 08:00', '19:00 ~ 20:00');  // 결정 381 — 오전 7시 공고가 저녁 7시로 연결되던 자리
+  differ('purchase_time', '2시~5시', '14:00 ~ 17:00');        // 표시 없는 2시 = 02:00(24시간)
   differ('delivery_type', '택배발송대행', '빈박스');
   differ('product_url', 'https://a', 'https://b');
   differ('review_type_mix', '[{"type":"photo","quantity":3}]', '[{"type":"photo","quantity":4}]');
