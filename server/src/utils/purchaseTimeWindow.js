@@ -21,15 +21,23 @@
  *     `정오` = 12:00, `자정` = 00:00. 앞에만 오전/오후가 붙으면 뒤에도 같은 쪽(`오후 2~5시` = 14~17시).
  *   - 끝이 00:00(`00:00`·`0시`·`24시`·`자정`)이면 **24:00 = 그날 끝**
  *     (DB `TIME '24:00:00'` — `campaignPayAmountSync` · `campaignState.timeStrToMinutes` = 1440 기존 관례).
+ *     끝 자정은 앞에서 물려받은 오전/오후를 적용하지 않는다(`오전 10시~24시` = 10~24시, `오후 2시~00:00` = 14~24시).
+ *     물려받은 끝 `12시`는 시작 뒤에 오는 12시 — `오전 9시~12시` = 9~12시(정오), `오후 10시~12시` = 22~24시.
  *   - `H:MM`·`H시`·`H시 MM분`·`H시반`, 구분자 `~` `-` `–` `—` `〜` `～` `부터…까지`(공백 무관).
+ *     `부터…까지` 는 **양쪽 다 `시`·`:MM` 이 붙은 숫자**만(`1부터 3까지` = null — 종전과 같다).
+ *   - 날짜가 붙은 숫자는 시간이 아니다 — 뒤에 `일`·`월`·`년`·`/숫자`·`.숫자`, 앞에 `/`
+ *     (`18일부터 20일까지 구매 가능` = null, `18일부터 20일까지, 구매시간 09:00~11:00` = 09~11시).
  *   - **시작 ≥ 끝이면 null**(`12시~3시` 도 null — 추측하지 않는다).
  */
 
 /** @returns {{start:string,end:string}|null} `HH:MM` 두 값, 해석 불가면 null */
 function parsePurchaseTime(text) {
-  const P = '(?:(오전|오후|아침|새벽|저녁|밤|낮|a\\.?m\\.?|p\\.?m\\.?)\\s*)?(?:(정오|자정)|(\\d{1,2})(?:\\s*:\\s*(\\d{2})|\\s*시(?:\\s*(\\d{1,2})\\s*분|\\s*(반))?)?)(?:\\s*(a\\.?m\\.?|p\\.?m\\.?)(?![a-z]))?';
-  const m = new RegExp(P + '[^\\d~\\-–—〜～]*?(?:[~\\-–—〜～]|부터)[^\\d]*?' + P, 'i').exec(String(text || ''));
+  // 숫자 바로 뒤가 날짜(일·월·년·「11/19」·「11.19」)면 시간이 아니다 · 「부터」는 시·:MM 이 붙은 숫자끼리만(PR #1841 리뷰)
+  const P = (u) => '(?:(오전|오후|아침|새벽|저녁|밤|낮|a\\.?m\\.?|p\\.?m\\.?)\\s*)?(?:(정오|자정)|(\\d{1,2})(?!\\d|\\s*(?:일|월|년)|\\s*[/.]\\s*\\d)(?:\\s*:\\s*(\\d{2})|\\s*시(?:\\s*(\\d{1,2})\\s*분|\\s*(반))?)' + u + ')(?:\\s*(a\\.?m\\.?|p\\.?m\\.?)(?![a-z]))?';
+  const m = new RegExp('(?:^|[^\\d/])' + P('?') + '[^\\d~\\-–—〜～]*?[~\\-–—〜～][^\\d]*?' + P('?')
+    + '|(?:^|[^\\d/])' + P('') + '[^\\d~\\-–—〜～]*?부터[^\\d]*?' + P(''), 'i').exec(String(text || ''));
   if (!m) return null;
+  const o = (m[2] || m[3]) ? 0 : 14;
   const kind = (w) => {
     const x = String(w || '').toLowerCase().replace(/\./g, '');
     if (!x) return '';
@@ -37,18 +45,22 @@ function parsePurchaseTime(text) {
     if (x === '낮') return 'day';
     return x === '밤' ? 'night' : 'pm';
   };
-  const point = (i, inherit) => {
+  const point = (i, inherit, from) => {
     if (m[i + 1]) return { h: m[i + 1] === '정오' ? 12 : 0, mi: 0, mer: '' };
-    const mer = kind(m[i] || m[i + 6]) || inherit;
+    const own = kind(m[i] || m[i + 6]);
+    const mer = own || inherit;
     let h = parseInt(m[i + 2], 10);
     const mi = m[i + 3] !== undefined ? parseInt(m[i + 3], 10) : (m[i + 4] !== undefined ? parseInt(m[i + 4], 10) : (m[i + 5] ? 30 : 0));
+    // 물려받은 오전/오후: 끝 0시·00:00·24시 = 자정 그대로 · 끝 12시 = 시작 뒤에 오는 12시(정오, 아니면 자정)
+    if (!own && mer && (h === 0 || h === 24)) return { h, mi, mer };
+    if (!own && mer && h === 12) return { h: 12 * 60 + mi > from ? 12 : 24, mi, mer };
     if (mer === 'am') h = h === 12 ? 0 : (h <= 11 ? h : NaN);
     else if (mer === 'day') h = h === 12 ? 12 : (h >= 1 && h <= 6 ? h + 12 : NaN);
     else if (mer) h = h === 12 ? (mer === 'night' ? 0 : 12) : (h >= 1 && h <= 11 ? h + 12 : (h >= 13 ? h : NaN));
     return { h, mi, mer };
   };
-  const a = point(1, '');
-  const b = point(8, a.mer);
+  const a = point(1 + o, '', -1);
+  const b = point(8 + o, a.mer, a.h * 60 + a.mi);
   if (b.h === 0 && b.mi === 0) b.h = 24;
   if (!(a.h >= 0 && a.h <= 23) || !(b.h >= 0 && b.h <= 24) || !(a.mi <= 59) || !(b.mi <= 59) || (b.h === 24 && b.mi > 0)
     || (b.h * 60 + b.mi) <= (a.h * 60 + a.mi)) return null;
