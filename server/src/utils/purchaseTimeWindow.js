@@ -7,27 +7,53 @@
  *    리뷰어의 참여 가능 시간이 따라오므로 서버에도 같은 규칙이 필요해졌다.
  *
  * ★★★ **사본이 둘이 되는 자리다 — 회귀가드가 두 구현을 같은 문장 묶음으로 실행해
- *      결과가 한 글자도 다르지 않은지 대조한다**(`tests/inflowSourceEdit.test.js`).
- *      갈라지면 "발행할 땐 2시인데 고치면 3시" 가 된다.
+ *      결과가 한 글자도 다르지 않은지 대조하고, 기대값 표로 값 자체도 고정한다**(`tests/inflowSourceEdit.test.js`).
+ *      갈라지면 "발행할 땐 2시인데 고치면 3시" 가 된다. ★ **함수 본문은 화면 사본과 글자 그대로 같다**(가드가 글자 비교).
  *
  * ★ **해석하지 못하면 null** — 지어내지 않는다. 호출부는 null 이면 **아무것도 바꾸지 않는다**
  *   (해석 못 하는 문장은 지금도 시간창 없이 하루 종일 열림으로 운영된다).
- * ★ 1~8 시는 오후로 읽는다(현장 표기 관행: "2시~5시" = 14:00~17:00).
+ *
+ * ★★★ **24시간 보통의 한국시간으로 읽는다(결정 381 · 사용자 확정 2026-11-18 · 완화 금지)**
+ *   - 적힌 숫자 그대로 0~23시 — `07:00`·`7시` = 오전 7시, `2시` = 02:00. **오후 보정(종전 「1~8시 = +12」) 없음.**
+ *     종전 규칙이 인트라넷 24시간 고르개의 `07:00 ~ 08:00` 을 19:00~20:00 으로 바꿔 오전 7시 공고가 저녁 7시에 열렸다.
+ *   - `오전`/`AM`/`아침`/`새벽` = 그대로(12시 = 0시). `오후`/`PM`/`저녁`/`밤` 1~11시 = +12, 12시 = 12시
+ *     (`밤 12시` = 자정), 13시 이상은 그대로(`오후 13~20시`). `낮` 은 12시·1~6시만 읽고 나머지는 null.
+ *     `정오` = 12:00, `자정` = 00:00. 앞에만 오전/오후가 붙으면 뒤에도 같은 쪽(`오후 2~5시` = 14~17시).
+ *   - 끝이 00:00(`00:00`·`0시`·`24시`·`자정`)이면 **24:00 = 그날 끝**
+ *     (DB `TIME '24:00:00'` — `campaignPayAmountSync` · `campaignState.timeStrToMinutes` = 1440 기존 관례).
+ *   - `H:MM`·`H시`·`H시 MM분`·`H시반`, 구분자 `~` `-` `–` `—` `〜` `～` `부터…까지`(공백 무관).
+ *   - **시작 ≥ 끝이면 null**(`12시~3시` 도 null — 추측하지 않는다).
  */
 
 /** @returns {{start:string,end:string}|null} `HH:MM` 두 값, 해석 불가면 null */
 function parsePurchaseTime(text) {
-  const m = /(\d{1,2})(?::(\d{2}))?\s*시?[^\d~\-]*[~\-][^\d]*(\d{1,2})(?::(\d{2}))?\s*시?/.exec(String(text || ''));
+  const P = '(?:(오전|오후|아침|새벽|저녁|밤|낮|a\\.?m\\.?|p\\.?m\\.?)\\s*)?(?:(정오|자정)|(\\d{1,2})(?:\\s*:\\s*(\\d{2})|\\s*시(?:\\s*(\\d{1,2})\\s*분|\\s*(반))?)?)(?:\\s*(a\\.?m\\.?|p\\.?m\\.?)(?![a-z]))?';
+  const m = new RegExp(P + '[^\\d~\\-–—〜～]*?(?:[~\\-–—〜～]|부터)[^\\d]*?' + P, 'i').exec(String(text || ''));
   if (!m) return null;
-  let h1 = parseInt(m[1], 10);
-  const m1 = parseInt(m[2] || '0', 10);
-  let h2 = parseInt(m[3], 10);
-  const m2 = parseInt(m[4] || '0', 10);
-  if (h1 >= 1 && h1 <= 8) h1 += 12;
-  if (h2 >= 1 && h2 <= 8) h2 += 12;
-  if (h1 > 23 || h2 > 24 || m1 > 59 || m2 > 59 || (h2 * 60 + m2) <= (h1 * 60 + m1)) return null;
+  const kind = (w) => {
+    const x = String(w || '').toLowerCase().replace(/\./g, '');
+    if (!x) return '';
+    if (x === 'am' || x === '오전' || x === '아침' || x === '새벽') return 'am';
+    if (x === '낮') return 'day';
+    return x === '밤' ? 'night' : 'pm';
+  };
+  const point = (i, inherit) => {
+    if (m[i + 1]) return { h: m[i + 1] === '정오' ? 12 : 0, mi: 0, mer: '' };
+    const mer = kind(m[i] || m[i + 6]) || inherit;
+    let h = parseInt(m[i + 2], 10);
+    const mi = m[i + 3] !== undefined ? parseInt(m[i + 3], 10) : (m[i + 4] !== undefined ? parseInt(m[i + 4], 10) : (m[i + 5] ? 30 : 0));
+    if (mer === 'am') h = h === 12 ? 0 : (h <= 11 ? h : NaN);
+    else if (mer === 'day') h = h === 12 ? 12 : (h >= 1 && h <= 6 ? h + 12 : NaN);
+    else if (mer) h = h === 12 ? (mer === 'night' ? 0 : 12) : (h >= 1 && h <= 11 ? h + 12 : (h >= 13 ? h : NaN));
+    return { h, mi, mer };
+  };
+  const a = point(1, '');
+  const b = point(8, a.mer);
+  if (b.h === 0 && b.mi === 0) b.h = 24;
+  if (!(a.h >= 0 && a.h <= 23) || !(b.h >= 0 && b.h <= 24) || !(a.mi <= 59) || !(b.mi <= 59) || (b.h === 24 && b.mi > 0)
+    || (b.h * 60 + b.mi) <= (a.h * 60 + a.mi)) return null;
   const pad = n => String(n).padStart(2, '0');
-  return { start: `${pad(h1)}:${pad(m1)}`, end: `${pad(h2 === 24 ? 24 : h2)}:${pad(m2)}` };
+  return { start: `${pad(a.h)}:${pad(a.mi)}`, end: `${pad(b.h)}:${pad(b.mi)}` };
 }
 
 module.exports = { parsePurchaseTime };
