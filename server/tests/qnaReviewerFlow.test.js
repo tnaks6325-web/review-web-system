@@ -129,11 +129,13 @@ const st = require('../src/services/campaignState.service');
   const qs = S('src/services/qnaSlots.service.js');
   t('추가 모집 = 그 줄의 진행일자만 옮긴다(새 줄·새 자리 없음 · 주문 붙은 줄 제외)',
     /UPDATE qna_slots SET slot_date = \$2::date, round = round \+ 1/.test(qs) && /order_submission_id IS NULL`/.test(qs) && !/appendSlot/.test(qs));
-  // ★ 결정 377: 시작일 기본 = 다음 날(옛 화면) · 오늘부터는 잠근 뒤 오늘 정원 판정(qnaTodayStartCheck)을 통과할 때만 · 0명 휴무일은 건너뜀
-  t('같은 하루 건수 · 기본 다음 날부터 · 오늘부터는 판정 통과 때만 · 0명 휴무일 건너뜀(결정 377)',
+  // ★ 결정 377: 시작일 기본 = 다음 날(옛 화면) · 오늘부터는 잠근 뒤 오늘 정원 판정(qnaTodayStartCheck)을 통과할 때만
+  // ★ 검사 의미 변경 — 사용자 확정 379: 「0명 휴무일 건너뜀」 → 날짜 제외는 오더 휴무일(wo.holidays)·주말 제외만(0명 계획은 Q&A 판정에 안 씀)
+  t('같은 하루 건수 · 기본 다음 날부터 · 오늘부터는 판정 통과 때만 · 오더 휴무일만 제외(0명 계획 건너뛰기 없음 · 결정 379)',
     /MAX\(n\)::int AS per/.test(qs) && /extraFrom = kstDateStr\(new Date\(now\.getTime\(\) \+ DAY_MS\)\)/.test(qs)
     && /if \(start === 'today'\) \{[\s\S]{0,400}qnaTodayStartCheck\([\s\S]{0,300}if \(!chk\.ok\) throw/.test(qs)
-    && /normalizeHolidayList\(wo\.holidays\)\.concat\(restDays\)/.test(qs));
+    && /const holidays = normalizeHolidayList\(wo\.holidays\);/.test(qs)
+    && !/qnaRestDays|restDays/.test(qs));
   t('끝내기 = 못 채운 자리 닫음 + 공고 마감', /SET status = 'lapsed'/.test(qs) && /UPDATE recruit_campaigns SET status = 'closed'/.test(qs));
   t('작업표 기록과 같은 잠금 안에서 옮긴다(공고 잠금보다 먼저 잡는다 — ⑨)', /sheetless_worktable:\$\{pre\[0\]\.linked_sheet_id\}:\$\{pre\[0\]\.linked_tab_name\}/.test(qs));
   t('같은 일정 끝 추가 모집은 한 번만', /action = \$2 AND detail->>'end' = \$3/.test(qs));
@@ -173,12 +175,25 @@ const st = require('../src/services/campaignState.service');
   t('자리 고르기: 공개 자리 먼저(추가 모집으로 순서가 섞여도)', /ORDER BY \(s\.visibility <> 'public'\), s\.unit_seq/.test(qs9));
   t('자리 고르기 유예 = 신청 홀드 유예(단일 출처)', /graceSec == null\) graceSec = require\('\.\/campaignHold\.service'\)\.HOLD_GRACE_SEC/.test(qs9));
   {
-    const body = qs9.slice(qs9.indexOf('async function applyQnaEnd'));
-    const iTab = body.indexOf('pg_advisory_xact_lock'), iCamp = body.indexOf('FOR UPDATE');
+    /* 결정 379 — 잠금·줄 날짜 옮기기를 공통 함수(_lockQnaCampaign · _moveSlotRows)로 뽑아 추가 모집(applyQnaEnd)과
+       조절 창 옮기기(moveQnaSlots)가 함께 쓴다. 검사 의미 불변(같은 순서·같은 재확인·같은 되돌림)을 그 함수 본문에서 보고,
+       두 길이 맨 먼저 그 함수를 부르는지(사본 0)를 더 본다(강화). */
+    const fnBody = name => { const i = qs9.indexOf('async function ' + name + '('); return i < 0 ? '' : qs9.slice(i, qs9.indexOf('\n}\n', i)); };
+    const lockFn = fnBody('_lockQnaCampaign'), moveFn = fnBody('_moveSlotRows');
+    const iTab = lockFn.indexOf('pg_advisory_xact_lock'), iCamp = lockFn.indexOf('FOR UPDATE');
     t('일정 끝 반영: 작업표 잠금 → 공고 잠금 순서(교착 방지)', iTab > 0 && iCamp > iTab);
-    t('일정 끝 반영: 작업표 잠금은 한 번만', body.split('pg_advisory_xact_lock').length === 2);
-    t('일정 끝 반영: 잠근 뒤 공고의 작업표 연결 재확인', /lock\[0\]\.linked_sheet_id !== pre\[0\]\.linked_sheet_id/.test(body));
-    t('추가 모집: 줄이 안 움직이면 전부 되돌림', /mv\.rowCount !== 1\) throw/.test(body));
+    t('일정 끝 반영: 작업표 잠금은 한 번만', lockFn.split('pg_advisory_xact_lock').length === 2);
+    t('일정 끝 반영: 잠근 뒤 공고의 작업표 연결 재확인', /lock\[0\]\.linked_sheet_id !== pre\[0\]\.linked_sheet_id/.test(lockFn));
+    t('추가 모집: 줄이 안 움직이면 전부 되돌림', /mv\.rowCount !== 1\) throw/.test(moveFn));
+    const ext = fnBody('applyQnaEnd'), mov = fnBody('moveQnaSlots');
+    t('추가 모집·조절 창 옮기기가 같은 잠금 함수를 BEGIN 바로 뒤에 부른다(사본 0 · 결정 379)',
+      /BEGIN'\);\s*\n(?:\s*\/\/[^\n]*\n)?\s*await _lockQnaCampaign\(client, campaignId\)/.test(ext)
+      && /BEGIN'\);\s*\n\s*const lock = await _lockQnaCampaign\(client, campaignId\)/.test(mov)
+      && !/pg_advisory_xact_lock/.test(ext) && !/pg_advisory_xact_lock/.test(mov));
+    t('추가 모집·조절 창 옮기기가 같은 줄 옮기기·장부 함수를 쓴다(결정 379)',
+      /_moveSlotRows\(client, \{ sheetId: it\.sheetId, tabName: it\.tabName \}, plan\.moves, \{ by: 'qna-extra', bumpRound: true \}\)/.test(ext)
+      && /_moveSlotRows\(client, \{ sheetId, tabName \}, plan, \{ by: 'qna-move', bumpRound: false \}\)/.test(mov)
+      && /_rebuildAfterMove\(/.test(ext) && /_rebuildAfterMove\(/.test(mov) && !/rebuildLedgers/.test(ext + mov));
   }
   t('못 채운 자리 = 빈 줄이 살아 있는 자리', /cp2\.deleted_at IS NULL AND cp2\.order_submission_id IS NULL/.test(qs9));
   t('캡처 기한 넘김: 줄 삭제 길(주문 취소·같은 자리 보충)로 푼다', /hideWorkdeskRow\(\{[\s\S]{0,200}by: 'qna-capture-timeout', expectedRevision: r\.revision/.test(qs9));

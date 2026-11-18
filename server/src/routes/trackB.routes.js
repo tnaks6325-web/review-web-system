@@ -1895,6 +1895,10 @@ function _cdpFail(res, err) {
     // ★ 결정 228: 순차진행 일정표 공고의 날짜별 인원 — 늘리기·상품 없는 날 막음 / 줄이기는 두 번 확인 뒤(confirmReduce)
     sequential_over: 422, sequential_no_product: 422, sequential_reduce_needs_confirm: 409,
     recruit_quota_qna_locked: 409,   // 결정 321: Q&A 자리표 탭은 접수 뒤 건수를 바꾸지 않는다(일정 끝 추가 모집으로)
+    // ★ 결정 379: Q&A 공고 — 날짜별 인원 저장 막음 · 조절 창 빈 자리 옮기기(qnaSlots.moveQnaSlots)
+    qna_plan_set: 409,
+    qna_move_stale: 409, qna_move_bad: 400, qna_move_empty: 400, qna_move_past: 422, qna_move_closed_day: 422,
+    qna_move_today: 422, qna_move_no_room: 422, not_qna: 400, not_active: 409, changed: 409,
   };
   if (err && err.code && codes[err.code]) {
     res.status(codes[err.code]).json({ ok: false, code: err.code, error: err.message, ...(err.floor != null ? { floor: err.floor } : {}),
@@ -2039,6 +2043,20 @@ router.post('/campaigns/:id/daily-plan', authMiddleware, internalMiddleware, asy
     const campaignId = String(req.params.id);
     const out = await savePlans(campaignId, req.body, _by(req));
     res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId, { admin: req.admin })) });
+  } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
+});
+/* 결정 379 — Q&A 공고 조절 창의 빈 자리 옮기기([−]/[＋] → [확정 저장]). 권한 = 조절 창 저장과 같은 내부 직원(internalMiddleware).
+   판정·쓰기는 qnaSlots.moveQnaSlots 한 곳 · 응답에 조절 창 자료를 함께 싣는다(다시 읽기가 실패해도 반영은 됐다 — reload 로 알린다). */
+router.post('/campaigns/:id/qna-move', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const campaignId = String(req.params.id);
+    const b = req.body || {};
+    const out = await require('../services/qnaSlots.service')
+      .moveQnaSlots({ campaignId, moves: b.moves, total: b.total, actor: _by(req) });
+    let ov = null;
+    try { ov = await require('../services/campaignPlan.service').getPlanOverview(campaignId, { admin: req.admin }); }
+    catch (e) { logger.warn(`[qna-move] 반영 뒤 다시 읽기 실패 camp=${campaignId}: ${e.message}`); }
+    res.json({ ...(ov || {}), ...out, ok: true, reload: !ov });
   } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
 });
 /* 저장하지 않고 날짜별 예상 인원을 다시 계산(결정 182 — 조절 창이 바꾸는 즉시 보여준다). 쓰기 0건. */
