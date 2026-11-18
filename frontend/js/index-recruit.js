@@ -1557,18 +1557,44 @@ function rfSetRepurchaseCustomDays(input) {
 window.rfSetRepurchaseDays = rfSetRepurchaseDays;
 window.rfSetRepurchaseCustomDays = rfSetRepurchaseCustomDays;
 
-/** "2시~4시" / "14:00~16:00" / "17시 오픈 이후~19시까지" → {start:'14:00', end:'16:00'} (실패 시 null)
- *  구매시간대 특성상 1~8시는 오후로 해석(+12). 프리필용 — 최종 확정은 관리자 확인. */
+/** 구매시간 글자 → {start:'HH:MM', end:'HH:MM'} (실패 시 null). 프리필용 — 최종 확정은 관리자 확인.
+ *  ★★★ 24시간 보통의 한국시간(결정 381 · 완화 금지) — `07:00`·`7시` = 오전 7시, 오전/오후가 붙을 때만 오후로 읽는다.
+ *  ★★★ 서버 사본 `server/src/utils/purchaseTimeWindow.js` 와 **본문 글자 그대로 같다**(가드 `inflowSourceEdit.test.js` ②). */
 function _parsePurchaseTime(text) {
-  const m = /(\d{1,2})(?::(\d{2}))?\s*시?[^\d~\-]*[~\-][^\d]*(\d{1,2})(?::(\d{2}))?\s*시?/.exec(String(text || ""));
+  // 숫자 바로 뒤가 날짜(일·월·년·「11/19」·「11.19」)면 시간이 아니다 · 「부터」는 시·:MM 이 붙은 숫자끼리만(PR #1841 리뷰)
+  const P = (u) => '(?:(오전|오후|아침|새벽|저녁|밤|낮|a\\.?m\\.?|p\\.?m\\.?)\\s*)?(?:(정오|자정)|(\\d{1,2})(?!\\d|\\s*(?:일|월|년)|\\s*[/.]\\s*\\d)(?:\\s*:\\s*(\\d{2})|\\s*시(?:\\s*(\\d{1,2})\\s*분|\\s*(반))?)' + u + ')(?:\\s*(a\\.?m\\.?|p\\.?m\\.?)(?![a-z]))?';
+  const m = new RegExp('(?:^|[^\\d/])' + P('?') + '[^\\d~\\-–—〜～]*?[~\\-–—〜～][^\\d]*?' + P('?')
+    + '|(?:^|[^\\d/])' + P('') + '[^\\d~\\-–—〜～]*?부터[^\\d]*?' + P(''), 'i').exec(String(text || ''));
   if (!m) return null;
-  let h1 = parseInt(m[1], 10), m1 = parseInt(m[2] || "0", 10);
-  let h2 = parseInt(m[3], 10), m2 = parseInt(m[4] || "0", 10);
-  if (h1 >= 1 && h1 <= 8) h1 += 12;
-  if (h2 >= 1 && h2 <= 8) h2 += 12;
-  if (h1 > 23 || h2 > 24 || m1 > 59 || m2 > 59 || (h2 * 60 + m2) <= (h1 * 60 + m1)) return null;
-  const pad = n => String(n).padStart(2, "0");
-  return { start: `${pad(h1)}:${pad(m1)}`, end: `${pad(h2 === 24 ? 24 : h2)}:${pad(m2)}` };
+  const o = (m[2] || m[3]) ? 0 : 14;
+  const kind = (w) => {
+    const x = String(w || '').toLowerCase().replace(/\./g, '');
+    if (!x) return '';
+    if (x === 'am' || x === '오전' || x === '아침' || x === '새벽') return 'am';
+    if (x === '낮') return 'day';
+    return x === '밤' ? 'night' : 'pm';
+  };
+  const point = (i, inherit, from) => {
+    if (m[i + 1]) return { h: m[i + 1] === '정오' ? 12 : 0, mi: 0, mer: '' };
+    const own = kind(m[i] || m[i + 6]);
+    const mer = own || inherit;
+    let h = parseInt(m[i + 2], 10);
+    const mi = m[i + 3] !== undefined ? parseInt(m[i + 3], 10) : (m[i + 4] !== undefined ? parseInt(m[i + 4], 10) : (m[i + 5] ? 30 : 0));
+    // 물려받은 오전/오후: 끝 0시·00:00·24시 = 자정 그대로 · 끝 12시 = 시작 뒤에 오는 12시(정오, 아니면 자정)
+    if (!own && mer && (h === 0 || h === 24)) return { h, mi, mer };
+    if (!own && mer && h === 12) return { h: 12 * 60 + mi > from ? 12 : 24, mi, mer };
+    if (mer === 'am') h = h === 12 ? 0 : (h <= 11 ? h : NaN);
+    else if (mer === 'day') h = h === 12 ? 12 : (h >= 1 && h <= 6 ? h + 12 : NaN);
+    else if (mer) h = h === 12 ? (mer === 'night' ? 0 : 12) : (h >= 1 && h <= 11 ? h + 12 : (h >= 13 ? h : NaN));
+    return { h, mi, mer };
+  };
+  const a = point(1 + o, '', -1);
+  const b = point(8 + o, a.mer, a.h * 60 + a.mi);
+  if (b.h === 0 && b.mi === 0) b.h = 24;
+  if (!(a.h >= 0 && a.h <= 23) || !(b.h >= 0 && b.h <= 24) || !(a.mi <= 59) || !(b.mi <= 59) || (b.h === 24 && b.mi > 0)
+    || (b.h * 60 + b.mi) <= (a.h * 60 + a.mi)) return null;
+  const pad = n => String(n).padStart(2, '0');
+  return { start: `${pad(a.h)}:${pad(a.mi)}`, end: `${pad(b.h)}:${pad(b.mi)}` };
 }
 
 /** 유입가이드 HTML → 미리보기 평문 (원본은 _wdInflowRawHtml에 보존, 여긴 관리자 확인용)
