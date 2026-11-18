@@ -85,10 +85,12 @@ ok('campaignHold.service 에 blog_pending 참조 0(TTL 없는 상태를 스윕�
   !HOLD.includes('blog_pending'));
 
 console.log('\n§8a trackb 위임 + ops.blogPending');
-ok('trackb: /campaigns/:id/blog-approve 위임(confirm 과 같은 2단 게이트)',
-  /router\.post\('\/campaigns\/:id\/blog-approve', authMiddleware, internalMiddleware, editorOnlyMiddleware/.test(TRACKB));
+// 결정 380: confirm 과 같은 공고 편집 게이트(campaignEditorMiddleware — 내부 직원 전원)
+ok('trackb: /campaigns/:id/blog-approve 위임(confirm 과 같은 게이트)',
+  /router\.post\('\/campaigns\/:id\/blog-approve', authMiddleware, internalMiddleware, campaignEditorMiddleware/.test(TRACKB)
+  && /router\.post\('\/campaigns\/:id\/confirm', authMiddleware, internalMiddleware, campaignEditorMiddleware/.test(TRACKB));
 ok('trackb: /campaigns/:id/blog-reject 위임',
-  /router\.post\('\/campaigns\/:id\/blog-reject', authMiddleware, internalMiddleware, editorOnlyMiddleware/.test(TRACKB));
+  /router\.post\('\/campaigns\/:id\/blog-reject', authMiddleware, internalMiddleware, campaignEditorMiddleware/.test(TRACKB));
 ok('admin/list ops.blogPending(카드 관제 배지 재료)', /blogPending: blogPendingMap\.get\(r\.id\) \|\| 0/.test(CAMP));
 ok('_fetchBlogPendingCounts = status=blog_pending 집계', /WHERE campaign_id = ANY\(\$1\) AND status = 'blog_pending'/.test(CAMP));
 

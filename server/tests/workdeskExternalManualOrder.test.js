@@ -67,29 +67,36 @@ let opened = null;
 let state = { role: 'staff', cur: null, wd: null };
 let reloaded = 0;
 let permCalls = 0;
-const loadPerm = async () => { permCalls++; state.campEdit = true; return true; };
+const loadPerm = async () => { permCalls++; state.moEdit = true; return true; };
 let actions = externalManualOrder(state, text => { message = text; }, { ManualOrder: { open: ctx => { opened = ctx; } } }, async () => { reloaded++; }, isInternal, loadPerm, fakeDoc);
 assert.strictEqual(actions.canOpenExternalManualOrder(), false, '명단 판정 전에는 버튼을 그리지 않아야 합니다(눌러도 403 나는 버튼 금지).');
 actions.openExternalManualOrder();
 assert.match(message, /작업을 먼저 선택/, '선택한 작업이 없으면 원인을 안내해야 합니다.');
 
 // ★ AE(staff)는 이름 명단 없이 실행할 수 있다 — 서버 게이트와 1:1.
-state.campEdit = null;
+state.moEdit = null;
 actions._emoSyncBtn();
 assert.strictEqual(permCalls, 1, '명단 판정은 도착 시 한 번만 조회해야 합니다.');
 assert.strictEqual(actions.canOpenExternalManualOrder(), true, 'AE는 수동제출을 실행할 수 있어야 합니다.');
-state.campEdit = false;
+state.moEdit = false;
 assert.strictEqual(actions.canOpenExternalManualOrder(), false, '서버 편집 권한이 false면 노출하지 않아야 합니다.');
 
 state = { role: 'admin', cur: { sheetId: 'sheet-1', tabName: '8/12 외부모집', tabGid: 42, displayName: '탭 이름' }, wd: { meta: { displayName: '작업명' } } };
 actions = externalManualOrder(state, text => { message = text; }, { ManualOrder: { open: ctx => { opened = ctx; } } }, async () => { reloaded++; });
+// ★ 결정 380 — 수동제출은 공고 판정(STATE.campEdit)이 아니라 명단 판정(STATE.moEdit = /perm canEdit)을 본다.
 // ★ 결정 269 — admin 도 서버 canEdit(편집 허용 명단)과 1:1. 명단 판정 전·명단 밖이면 버튼 없음(눌러도 403 나는 막다른 길 금지).
 assert.strictEqual(actions.canOpenExternalManualOrder(), false, '명단 판정 전의 관리자에게는 버튼을 그리지 않아야 합니다.');
-state.campEdit = false;
+state.moEdit = false;
 assert.strictEqual(actions.canOpenExternalManualOrder(), false, '편집 허용 명단 밖 관리자에게는 버튼을 그리지 않아야 합니다(서버가 403).');
-state.campEdit = true;
+state.moEdit = true;
 assert.strictEqual(actions.canOpenExternalManualOrder(), true, '명단에 있는 관리자는 외부모집 수동제출 버튼을 사용할 수 있어야 합니다.');
-{ const ms = { role: 'master', campEdit: null };
+{ for (const role of ['staff', 'admin']) {
+    const s2 = { role, campEdit: true, moEdit: false };
+    const m2 = externalManualOrder(s2, () => {}, {}, async () => {});
+    assert.strictEqual(m2.canOpenExternalManualOrder(), false,
+      role + ': 공고 권한(campEdit)만 있는 명단 밖 직원에게 수동제출 버튼을 그리면 403 막다른 길(결정 380)');
+  } }
+{ const ms = { role: 'master', moEdit: null };
   const m = externalManualOrder(ms, () => {}, {}, async () => {});
   assert.strictEqual(m.canOpenExternalManualOrder(), true, 'master 는 서버도 명단 없이 통과하므로 바로 보여야 합니다.'); }
 actions.openExternalManualOrder();
@@ -106,15 +113,15 @@ assert.strictEqual(reloaded, 1, '수동제출 성공 후 현재 작업보드가 
 (async () => {
   const box = { innerHTML: '' };
   const doc = { getElementById: id => (id === 'emoBtnBox' ? box : null) };
-  const late = { role: 'staff', campEdit: null };
+  const late = { role: 'staff', moEdit: null };
   const a = externalManualOrder(late, () => {}, {}, async () => {},
-    () => true, async () => { late.campEdit = true; return true; }, doc);
+    () => true, async () => { late.moEdit = true; return true; }, doc);
   a._emoSyncBtn();
   await new Promise(r => setImmediate(r));
   assert.ok(/외부모집 수동제출/.test(box.innerHTML), '명단에 있는 AE 에게는 버튼이 채워져야 합니다.');
 
   // 광고주·리뷰어에게는 명단 조회조차 하지 않는다(눌러도 403 나는 버튼 금지 + 불필요한 요청 0).
-  const adv = { role: 'advertiser', campEdit: null };
+  const adv = { role: 'advertiser', moEdit: null };
   let advPerm = 0;
   const b = externalManualOrder(adv, () => {}, {}, async () => {},
     () => false, async () => { advPerm++; return true; }, doc);

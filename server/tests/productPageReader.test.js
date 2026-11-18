@@ -86,8 +86,9 @@ const shopSrc = rd('frontend/js/recruit-shop-import.js');
 
   console.log('\n[3] 라우트 — 편집자만 · 경로 순서');
   {
-    const i = routes.indexOf("router.post('/campaigns/product-page/extract', authMiddleware, internalMiddleware, editorOnlyMiddleware, productPageLimiter,");
-    ok('공고 편집 게이트 뒤 + 사람별 호출 제한(auth·내부인·편집자·제한)', i > 0);
+    // 결정 380: 공고를 고칠 수 있는 사람(campaignEditorMiddleware — 내부 직원 전원)과 같은 게이트
+    const i = routes.indexOf("router.post('/campaigns/product-page/extract', authMiddleware, internalMiddleware, campaignEditorMiddleware, productPageLimiter,");
+    ok('공고 편집 게이트 뒤 + 사람별 호출 제한(auth·내부인·공고 편집자·제한)', i > 0);
     const rl = rd('server/src/middleware/rateLimit.middleware.js');
     ok('호출 제한은 사람별(로그인 면제 없음)', /const productPageLimiter = rateLimit\(\{[\s\S]*?'u:' \+ _staffKey\(req\)[\s\S]*?max: 12,/.test(rl) && !/productPageLimiter = rateLimit\(\{[\s\S]{0,600}skip:/.test(rl));
     ok('/campaigns/:id 보다 앞', i < routes.indexOf("router.get('/campaigns/:id'"));
