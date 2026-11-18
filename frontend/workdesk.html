@@ -8613,52 +8613,58 @@ const _CF_LABEL={ matched:['확정','g'], ambiguous:['애매 — 골라 주세�
   duplicate_rows:['같은 주문이 여러 줄 — 중복 정리 먼저','x'], filled_unmatched:['상품 칸에 다른 값 — 표에서 직접 수정','x'] };
 function _cfClose(){ const o=document.getElementById('cfOv'); if(o) o.remove();
   if(STATE._cfEsc){ document.removeEventListener('keydown',STATE._cfEsc); STATE._cfEsc=null; } }
-function _cfShell(inner, foot){
+function _cfShell(inner, foot, title){
   let ov=document.getElementById('cfOv');
   if(!ov){ ov=document.createElement('div'); ov.className='wbl-ov'; ov.id='cfOv'; document.body.appendChild(ov);
     STATE._cfEsc=e=>{ if(e.key==='Escape') _cfClose(); }; document.addEventListener('keydown',STATE._cfEsc); }
   ov.innerHTML=`<div class="wbl-dlg cf-dlg" role="dialog" aria-labelledby="cfH">`+
-    `<div class="wbl-dh" id="cfH">📷 캡처로 상품 찾기</div><div class="wbl-db">${inner}</div><div class="wbl-df">${foot}</div></div>`;
+    `<div class="wbl-dh" id="cfH">${title||'📷 캡처로 상품 찾기'}</div><div class="wbl-db">${inner}</div><div class="wbl-df">${foot}</div></div>`;
 }
-async function openCaptureFill(cid, offset, keep){
+async function openCaptureFill(cid, offset, keep, kind){
   // ★ 다음 묶음으로 넘어가도 앞 묶음에서 고른 줄을 잃지 않는다(Codex 리뷰) — 고른 값과 그 줄 정보를 모아 둔다.
+  // ★ 결정 383: kind='classify' = 같은 표·같은 적용 길로 「분류」 칸(옵션 없는 택1 공고)을 채운다 — 서버에 target:'classify'.
   const prev=(keep&&STATE._cf&&STATE._cf.cid===cid)?STATE._cf:null;
+  const k=kind||(prev&&prev.kind)||'product', cls=k==='classify';
   STATE._cf=null;
-  _cfShell(`<p style="margin:0">상품을 모르는 주문의 구매 캡처를 읽고 있습니다… 사진이 많으면 1~2분 걸릴 수 있습니다.</p>`,
-    `<button class="wbl-b" onclick="_cfClose()">닫기</button>`);
+  const title=cls?'📷 캡처로 분류 채우기':'';
+  _cfShell(`<p style="margin:0">${cls?'「분류」가 빈 주문':'상품을 모르는 주문'}의 구매 캡처를 읽고 있습니다… 사진이 많으면 1~2분 걸릴 수 있습니다.</p>`,
+    `<button class="wbl-b" onclick="_cfClose()">닫기</button>`, title);
   const j=await api('/api/trackb/campaigns/'+encodeURIComponent(cid)+'/capture-product-fill',
-    {method:'POST',body:JSON.stringify({mode:'preview',offset:Number(offset)||0})}).catch(()=>null);
+    {method:'POST',body:JSON.stringify({mode:'preview',offset:Number(offset)||0,...(cls?{target:'classify'}:{})})}).catch(()=>null);
   if(!document.getElementById('cfOv')) return;   // 기다리는 사이 닫았으면 그대로
   if(!j||!j.ok){ _cfShell(`<p style="margin:0;color:var(--bad)">캡처를 읽지 못했습니다: ${esc((j&&j.error)||'서버 오류')}</p>`,
-    `<button class="wbl-b" onclick="_cfClose()">닫기</button>`); return; }
+    `<button class="wbl-b" onclick="_cfClose()">닫기</button>`, title); return; }
   const picks=prev?{...prev.picks}:{}; const seen=prev?{...prev.seen}:{};
   (j.items||[]).forEach(it=>{ seen[it.orderId]=it; if(it.status==='matched'&&it.optKey&&!(it.orderId in picks)) picks[it.orderId]=it.optKey; });
-  STATE._cf={cid, data:j, picks, seen};
+  STATE._cf={cid, data:j, picks, seen, kind:k};
   _cfRender();
 }
 function _cfPick(orderId, v){ const cf=STATE._cf; if(!cf) return; if(v) cf.picks[orderId]=v; else delete cf.picks[orderId]; _cfRender(); }
 function _cfRender(){
   const cf=STATE._cf; if(!cf) return; const d=cf.data, items=d.items||[], opts=d.options||[];
-  if(!items.length){ _cfShell(`<p style="margin:0">상품을 모르는 주문이 없습니다. 어긋남의 원인이 다른 곳(상품 정원·총원 설정)에 있을 수 있습니다.</p>`,
-    `<button class="wbl-b pri" onclick="_cfClose()">확인</button>`); return; }
+  const cls=cf.kind==='classify', title=cls?'📷 캡처로 분류 채우기':'';
+  if(!items.length){ _cfShell(cls?`<p style="margin:0">「분류」가 빈 주문이 없습니다.</p>`:`<p style="margin:0">상품을 모르는 주문이 없습니다. 어긋남의 원인이 다른 곳(상품 정원·총원 설정)에 있을 수 있습니다.</p>`,
+    `<button class="wbl-b pri" onclick="_cfClose()">확인</button>`, title); return; }
   const rows=items.map(it=>{
     const [lab,cls]=_CF_LABEL[it.status]||[it.status,'a'];
     const off=it.applicable===false;
     // ★ 같은 상품 이름을 여러 옵션이 쓰면 옵션 이름(optKey)까지 보여야 고를 수 있다(Codex 리뷰)
     const lbl=o=>opts.filter(x=>x.productName===o.productName).length>1?`${o.productName} · ${o.optKey}`:o.productName;
-    const sel=off?'<span class="cf-na">적용 불가</span>':`<select class="cf-sel" aria-label="${esc(it.seq)}번 줄 상품" onchange="_cfPick('${esc(it.orderId)}',this.value)">`+
+    const sel=off?'<span class="cf-na">적용 불가</span>':`<select class="cf-sel" aria-label="${esc(it.seq)}번 줄 ${cls?'분류':'상품'}" onchange="_cfPick('${esc(it.orderId)}',this.value)">`+
       `<option value="">선택 안 함</option>${opts.map(o=>`<option value="${esc(o.optKey)}"${cf.picks[it.orderId]===o.optKey?' selected':''}>${esc(lbl(o))}</option>`).join('')}</select>`;
     return `<tr><td class="num">${esc(it.seq)}</td><td class="num">${esc(String(it.day||'').slice(5))}</td>`+
       `<td>${esc(it.read||'')}</td><td><span class="cf-bd ${cls}">${esc(lab)}</span></td><td>${sel}</td></tr>`;
   }).join('');
   const n=Object.keys(cf.picks).length, matched=items.filter(i=>i.status==='matched').length;
   const carried=Object.keys(cf.picks).filter(id=>!items.some(i=>i.orderId===id)).length;
-  _cfShell(`<p style="margin:0 0 8px">상품을 모르는 주문 <b>${d.total}건</b> 중 ${items.length}건을 읽었습니다. 시스템이 확정한 <b>${matched}건</b>은 미리 골라 두었습니다 — 나머지는 캡처를 보고 골라 주세요. 고른 줄만 작업표 「상품」 칸에 적고, 작업 로그에 남습니다.</p>`+
-    `<div class="cf-tw"><table class="cf-t"><thead><tr><th>줄</th><th>구매일</th><th>캡처에서 읽은 글자</th><th>판정</th><th>상품</th></tr></thead><tbody>${rows}</tbody></table></div>`,
+  _cfShell((cls
+      ? `<p style="margin:0 0 8px">「분류」가 빈 주문 <b>${d.total}건</b> 중 ${items.length}건을 읽었습니다. 시스템이 확정한 <b>${matched}건</b>은 미리 골라 두었습니다 — 나머지는 캡처를 보고 골라 주세요. 고른 줄만 작업보드 「분류」 칸에 적습니다(이미 적힌 칸은 덮지 않습니다).</p>`
+      : `<p style="margin:0 0 8px">상품을 모르는 주문 <b>${d.total}건</b> 중 ${items.length}건을 읽었습니다. 시스템이 확정한 <b>${matched}건</b>은 미리 골라 두었습니다 — 나머지는 캡처를 보고 골라 주세요. 고른 줄만 작업표 「상품」 칸에 적고, 작업 로그에 남습니다.</p>`)+
+    `<div class="cf-tw"><table class="cf-t"><thead><tr><th>줄</th><th>구매일</th><th>캡처에서 읽은 글자</th><th>판정</th><th>${cls?'분류':'상품'}</th></tr></thead><tbody>${rows}</tbody></table></div>`,
     `${carried?`<span class="cf-na">앞 묶음에서 고른 ${carried}건 포함</span>`:''}`+
     `${d.nextOffset!=null?`<button class="wbl-b" onclick="openCaptureFill('${esc(cf.cid)}',${Number(d.nextOffset)},true)">다음 묶음 읽기</button>`:''}`+
     `<span style="flex:1"></span><button class="wbl-b" onclick="_cfClose()">닫기</button>`+
-    `<button class="wbl-b pri" id="cfApply" ${n?'':'disabled'} onclick="_cfApply()">${n}건 적용</button>`);
+    `<button class="wbl-b pri" id="cfApply" ${n?'':'disabled'} onclick="_cfApply()">${n}건 적용</button>`, title);
 }
 async function _cfApply(){
   const cf=STATE._cf; if(!cf) return; const items=Object.values(cf.seen||{});
@@ -8666,14 +8672,23 @@ async function _cfApply(){
     source:(it.status==='matched'&&it.optKey===cf.picks[it.orderId])?'capture':'manual' }));
   if(!picks.length) return;
   const b=document.getElementById('cfApply'); if(b){ b.disabled=true; b.textContent='적용 중…'; }
+  const cls=cf.kind==='classify';
   const r=await api('/api/trackb/campaigns/'+encodeURIComponent(cf.cid)+'/capture-product-fill',
-    {method:'POST',body:JSON.stringify({mode:'apply',confirm:true,picks})}).catch(()=>null);
+    {method:'POST',body:JSON.stringify({mode:'apply',confirm:true,picks,...(cls?{target:'classify'}:{})})}).catch(()=>null);
   if(!r||!r.ok){ if(b){ b.disabled=false; b.textContent=picks.length+'건 적용'; } alert('적용하지 못했습니다: '+((r&&r.error)||'서버 오류')); return; }
   const fails=(r.results||[]).filter(x=>!x.ok);
   _cfClose();
-  toast(`상품 ${r.written}건을 채웠습니다`+(fails.length?` · ${fails.length}건은 적지 않음(${esc(fails[0].message||fails[0].reason||'')})`:''));
+  toast(`${cls?'분류':'상품'} ${r.written}건을 채웠습니다`+(fails.length?` · ${fails.length}건은 적지 않음(${esc(fails[0].message||fails[0].reason||'')})`:''));
+  if(cls){ try{ if(typeof reloadWorkdesk==='function') await reloadWorkdesk(); }catch(_){ } return; }   // 결정 383 — 채운 값이 표에 바로 보이게
   try{ if(STATE.cur) await _wdQuotaAlert(STATE.cur); }catch(_){ }
 }
+/* ══ 결정 383 — 작업보드 「분류」 칸(추가 열) — 옵션 없는 「택1」 공고 ═══════════════════════════════════════
+   공고 창 「분류 후보」를 적은 공고의 작업표면 서버가 classifyColumn{campaignId,columnId,candidates} 를 싣는다(내부만).
+   · 그 칸 머리글 메뉴(값별 건수)에서 빈 값을 「(미분류)」로 부른다 — 후보별·미분류 건수는 이 메뉴가 센다(새 칩 없음).
+   · [📷 캡처로 분류 채우기] = 결정 232 표를 그대로(target:'classify') — 관리자·마스터만(서버 adminOrMaster 와 1:1). */
+function _isClassifyCol(col){ const c=STATE.wd&&STATE.wd.classifyColumn; return !!(c&&c.columnId&&col==='ccol:'+c.columnId); }
+function _ccCanUse(){ return (STATE.role==='master'||STATE.role==='admin') && !!(STATE.wd&&STATE.wd.classifyColumn&&STATE.wd.classifyColumn.campaignId); }
+function openCaptureClassify(){ const c=STATE.wd&&STATE.wd.classifyColumn; if(typeof closeGColMenu==='function') closeGColMenu(); if(!c||!c.campaignId) return; return openCaptureFill(c.campaignId, 0, false, 'classify'); }
 
 /* 발주 연결 줄 — 전폭 띠(.wobar)를 없애고 작업 조건 카드 **맨 아래 한 줄**로(사용자 확정).
    ★ 조작(명단 준비·발주 변경·연결 해제·발주 원문)은 [⋯] 메뉴 안 — 주 화면에 파괴 버튼을 늘어놓지 않는다. */
@@ -10018,19 +10033,21 @@ function openGColMenu(col, rect){   // 컬럼명(헤더) 클릭으로 호출 —
   const so=(STATE.gSort&&STATE.gSort.col===col)?STATE.gSort.dir:null;
   const canHide = col!=='#';
   const isCustom = col.indexOf('ccol:')===0;
+  const isClassify = _isClassifyCol(col);   // 결정 383 — 「분류」 칸: 빈 값 = (미분류) · 관리자에게 [📷 캡처로 분류 채우기]
   m.innerHTML=`
     <div class="gcm-sort"><button class="${so==='asc'?'on':''}" onclick="gSortCol('asc')">▲ 오름차순</button><button class="${so==='desc'?'on':''}" onclick="gSortCol('desc')">▼ 내림차순</button></div>
     <input class="gcm-search" placeholder="값 검색…" oninput="gFilterMenuList(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();applyGFilter();}">
     <div class="gcm-acts"><a onclick="gcmAll(true)">전체 선택</a><a onclick="gcmAll(false)">전체 해제</a></div>
     <div class="gcm-list" id="gcmlist">${vals.map(v=>{ const on=!cur||cur.has(v);
-      return `<label class="gcm-opt" data-v="${esc(v)}"><input type="checkbox" ${on?'checked':''} value="${esc(v)}"><span class="cv">${esc(v||'(빈값)')}</span><span class="cn">${counts[v]}</span></label>`;
+      return `<label class="gcm-opt" data-v="${esc(v)}"><input type="checkbox" ${on?'checked':''} value="${esc(v)}"><span class="cv">${esc(v||(isClassify?'(미분류)':'(빈값)'))}</span><span class="cn">${counts[v]}</span></label>`;
     }).join('')||'<div class="gcm-empty">값 없음</div>'}</div>
     <div class="gcm-foot"><button class="btn xs" onclick="closeGColMenu()">취소</button><button class="btn xs pri" onclick="applyGFilter()">적용</button></div>
     ${canHide?`<div class="gcm-div"></div><button class="gcm-hide" onclick="hideGCol()">⤫ 이 열 숨기기</button>`:''}
+    ${(isClassify&&_ccCanUse())?`<div class="gcm-div"></div><button class="gcm-hide" onclick="openCaptureClassify()" title="「분류」가 빈 주문의 구매 캡처를 읽어 후보 중 하나를 찾습니다(결과를 보고 적용 · 주문당 AI 1회)">📷 캡처로 분류 채우기</button>`:''}
     ${(isCustom&&STATE.canEdit)?`<button class="gcm-hide" onclick="deleteCustomColumnPrompt('${esc(col)}')">🗑 이 열 삭제(모든 메모 삭제)</button>`:''}`;
   m.classList.add('show');
   m.querySelector('.gcm-search').focus();
-  _placeMenu(m, rect, 252, 340);
+  _placeMenu(m, rect, 252, Math.max(340, m.offsetHeight||0));   // 결정 383 — 「분류」 칸은 버튼이 하나 더 있어 실제 높이로 화면 안에 놓는다
 }
 function closeGColMenu(){ STATE._gMenuCol=null; const m=$('#gcolmenu'); if(m) m.classList.remove('show'); }
 function gFilterMenuList(q){ const ql=(q||'').trim().toLowerCase(); const box=$('#gcmlist'); if(!box) return;

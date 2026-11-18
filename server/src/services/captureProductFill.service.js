@@ -120,24 +120,36 @@ async function _loadTargets(db, camp, options, onlyOrderId = null) {
   return out;
 }
 
+/**
+ * 캡처 사진 한 장을 내려받아 AI 로 읽은 상품명·옵션 글자 — 결정 232 미리보기와 결정 383 분류 미리보기의 **같은 판독 길**.
+ * 주문당 AI 1회. 실패는 status 로 말한다(download_failed · read_failed · no_product_text).
+ */
+async function readCaptureText(fileId, samples) {
+  let file;
+  try { file = await deps.download(String(fileId)); }
+  catch (e) { return { status: 'download_failed', error: String(e && e.message || e).slice(0, 120) }; }
+  let ex;
+  try {
+    const b64 = Buffer.from(file.buffer).toString('base64');
+    ex = await deps.extract(b64, file.mimeType || 'image/jpeg', { samples, allowProductOnly: true });
+  } catch (e) { return { status: 'read_failed', error: String(e && e.message || e).slice(0, 120) }; }
+  const name = String((ex && ex.productName) || '').trim();
+  const opt = String((ex && ex.productOption) || '').trim();
+  const read = [name, opt].filter(Boolean).join(' / ');
+  if (!name && !opt) return { status: 'no_product_text', read: '' };
+  return { status: 'read', name, opt, read };
+}
+async function loadSamples() { return deps.samples(); }
+
 async function _readOne(t, options, samples) {
   const base = { orderId: String(t.id), seq: Number(t.seq), day: t.day };
   // ★ 적용할 수 없는 줄은 AI 를 돌리지 않고 그렇게 말한다(미리보기에서 고른 것이 적용에서 거절되는 막다른 길 방지 — Codex 리뷰)
   if (t.dupRows) return { ...base, status: 'duplicate_rows', applicable: false };
   if (t.filledUnmatched) return { ...base, status: 'filled_unmatched', applicable: false, read: String(t.edited_product || t.row_product || '') };
   if (!t.capture_file_id) return { ...base, status: 'no_capture' };
-  let file;
-  try { file = await deps.download(String(t.capture_file_id)); }
-  catch (e) { return { ...base, status: 'download_failed', error: String(e && e.message || e).slice(0, 120) }; }
-  let ex;
-  try {
-    const b64 = Buffer.from(file.buffer).toString('base64');
-    ex = await deps.extract(b64, file.mimeType || 'image/jpeg', { samples, allowProductOnly: true });
-  } catch (e) { return { ...base, status: 'read_failed', error: String(e && e.message || e).slice(0, 120) }; }
-  const name = String((ex && ex.productName) || '').trim();
-  const opt = String((ex && ex.productOption) || '').trim();
-  const read = [name, opt].filter(Boolean).join(' / ');
-  if (!name && !opt) return { ...base, status: 'no_product_text', read: '' };
+  const rd = await readCaptureText(t.capture_file_id, samples);
+  if (rd.status !== 'read') return { ...base, ...rd };
+  const { name, opt, read } = rd;
   const { matchOption } = require('../utils/productCaptureMatch');
   const key = matchOption(`${name} ${opt}`.trim(), options, { shortText: opt });
   if (!key) return { ...base, status: 'ambiguous', read };
@@ -300,4 +312,5 @@ async function fillFromSubmitCapture({ orderSubmissionId, sheetId, tabName, capt
   return rowCount ? { written: true, optKey: key } : { written: false, skipped: 'already_filled' };
 }
 
-module.exports = { previewCaptureProducts, applyCaptureProducts, fillFromSubmitCapture, CaptureFillError, __setPoolForTest, __setDepsForTest };
+module.exports = { previewCaptureProducts, applyCaptureProducts, fillFromSubmitCapture, readCaptureText, loadSamples,
+  MAX_ITEMS, AI_CONCURRENCY, CaptureFillError, __setPoolForTest, __setDepsForTest };

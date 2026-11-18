@@ -4032,7 +4032,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   });
   const _skipWeekendsEl = document.getElementById("rf_skip_weekends");
   if (_skipWeekendsEl) _skipWeekendsEl.checked = false;
-  const _cashReceiptRequiredEl = document.getElementById("rf_cash_receipt_required"); if (_cashReceiptRequiredEl) _cashReceiptRequiredEl.checked = false; { const _rdmEl = document.getElementById("rf_required_delivery_memo"); if (_rdmEl) _rdmEl.value = ""; }   // 결정 260
+  const _cashReceiptRequiredEl = document.getElementById("rf_cash_receipt_required"); if (_cashReceiptRequiredEl) _cashReceiptRequiredEl.checked = false; { const _rdmEl = document.getElementById("rf_required_delivery_memo"); if (_rdmEl) _rdmEl.value = ""; }   // 결정 260 { const _rfEl = document.getElementById("rf_classify_candidates"); if (_rfEl) _rfEl.value = ""; }   // 결정 383
   rfSetChatRoom(false);
   // 혼합 리뷰 프리필은 동적으로 생성되는 입력칸의 진실원본이다. 새 모달을 열 때 이전 공고의
   // 수량이 섞이지 않도록 함께 초기화한다.
@@ -4148,6 +4148,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
       const _cashReceiptRequiredEl = document.getElementById("rf_cash_receipt_required"); if (_cashReceiptRequiredEl) _cashReceiptRequiredEl.checked = c.cash_receipt_required === true;
       /* 결정 260: 필수 배송메세지(예: 00) — 빈 값 = 확인 안 함 */
       { const _rdmEl = document.getElementById("rf_required_delivery_memo"); if (_rdmEl) _rdmEl.value = c.required_delivery_memo || ""; }
+      /* 결정 383: 분류 후보(옵션 없는 택1 공고 — 예: 피치, 레몬, 스트로베리) — 빈 값 = 사용 안 함 */
+      { const _rfEl = document.getElementById("rf_classify_candidates"); if (_rfEl) _rfEl.value = c.classify_candidates || ""; }
 
       /* 담당자 */
       const mgrVal = c.manager || "";
@@ -6115,6 +6117,7 @@ const _RF_DIFF_FIELDS = [
   ["time_range",        "구매시간대"],
   ["delivery_type",     "배송유형"],
   ["required_delivery_memo", "필수 배송메세지"],   // 결정 260
+  ["classify_candidates", "분류 후보"],          // 결정 383
   ["review_fee",        "리뷰비"],
   ["notes",             "유의사항"],
   ["chat_url",          "카톡 팀채팅방"],
@@ -6295,6 +6298,9 @@ async function saveRecruitPostImpl() {
     // ★ 결정 260: 필수 배송메세지 — 입력칸이 있는 화면에서만 싣는다(미전송 = 서버 유지 · 옛 화면이 저장해도 안 지워진다).
     ...(document.getElementById("rf_required_delivery_memo")
       ? { required_delivery_memo: document.getElementById("rf_required_delivery_memo").value.trim() } : {}),
+    // ★ 결정 383: 분류 후보 — 입력칸이 있는 화면에서만 싣는다(미전송 = 서버 유지).
+    ...(document.getElementById("rf_classify_candidates")
+      ? { classify_candidates: document.getElementById("rf_classify_candidates").value.trim() } : {}),
     review_fee:     Number(document.getElementById("rf_review_fee").value) || 0,
     badges:         _recruitBadges,
     // ★ 유의사항(notes)은 **입력칸이 있는 화면에서만** 전송한다(옵션표·리뷰타입과 같은 원칙).
@@ -6645,6 +6651,14 @@ async function saveRecruitPostImpl() {
     if (saved && (saved.requiredMemoWarning
         || (payload.required_delivery_memo && !(saved.data && Object.prototype.hasOwnProperty.call(saved.data, "required_delivery_memo"))))) {
       _changed.unshift("⚠ 필수 배송메세지가 저장되지 않았습니다 — 1~2분 뒤 다시 저장해주세요");
+    }
+    /* ★ 결정 383: 분류 후보 — 안 저장되면 작업보드 「분류」 칸이 조용히 안 채워진다. 서버가 이 칸을 모르면(배포 시차) 알린다.
+       후보가 하나뿐이면 고를 것이 없어 채우지 않는다 — 그 자리에서 말한다(서버가 다듬은 값 기준). */
+    if (saved && (saved.classifyWarning
+        || (payload.classify_candidates && !(saved.data && Object.prototype.hasOwnProperty.call(saved.data, "classify_candidates"))))) {
+      _changed.unshift("⚠ 분류 후보가 저장되지 않았습니다 — 1~2분 뒤 다시 저장해주세요");
+    } else if (saved && saved.data && saved.data.classify_candidates && String(saved.data.classify_candidates).split(", ").length < 2) {
+      _changed.unshift("⚠ 분류 후보는 두 개 이상 적어야 작업보드 「분류」 칸이 채워집니다");
     }
 
     /* ★ 양방향 4단계-2: 리뷰오더와 맞춰지는 칸을 고쳤으면 리뷰오더에도 갔다고 말하고, 창을 연 뒤 리뷰오더 쪽에서 먼저 바뀐 칸을

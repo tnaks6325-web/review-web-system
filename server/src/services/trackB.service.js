@@ -3810,13 +3810,17 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       .filter(field => field.indexOf('col:') === 0).map(field => field.slice(4))))]
     : [];
   // 커스텀 열(행별 자유메모) + 셀 배경색(migration 080) — 내부(master/admin/staff)만, 시트/write-back 무접촉.
-  let customCols = [], customValMap = new Map(), cellColorMap = new Map();
+  let customCols = [], customValMap = new Map(), cellColorMap = new Map(), classifyCol = null;
   if (showEdits) {
     const { rows: cc } = await db.query(
       `SELECT id, col_name AS "colName", sort_order AS "sortOrder"
          FROM trackb_custom_columns WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL
         ORDER BY sort_order, created_at`, [sheetId, tabName]).catch(() => ({ rows: [] }));
     customCols = cc;
+    // ★ 결정 383 — 이 작업표가 「분류 후보」를 적은 공고의 작업표면 화면이 「분류」 칸 머리글 메뉴([📷 캡처로 분류 채우기]·(미분류))를 그린다.
+    //   조회 실패 = 없음(종전 화면 그대로).
+    try { classifyCol = await require('./captureClassify.service').classifyColumnForTab(db, { sheetId, tabName, customColumns: cc }); }
+    catch (e) { classifyCol = null; }
     if (cc.length) {
       const { rows: cv } = await db.query(
         `SELECT column_id AS "columnId", anchor_type AS "anchorType", anchor_value AS "anchorValue", value_text AS "valueText"
@@ -4426,6 +4430,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   if (showEdits) {
     res.orphanEdits = { count: orphanCount, byType: orphanByType };
     res.headers = headers || []; res.customColumns = customCols;
+    if (classifyCol) res.classifyColumn = classifyCol;   // 결정 383 — 내부(showEdits)만
     // 가상 컬럼: 시트에 쓰지 않고 내부 응답에서만 선언한다. 업체용 응답에는 이 필드와
     // 각 행의 cashReceiptStatus가 모두 없어 제출 여부를 역추정할 수 없다.
     if (showCashReceiptStatus) res.cashReceiptColumn = { key: '__cashReceiptStatus', label: '현영' };
