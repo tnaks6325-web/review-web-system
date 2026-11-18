@@ -3120,8 +3120,11 @@ function renderOptRowsWithProduct(options, productLines, campaign) {
     renderOptRows(parsed.map((r, i) => ({
       /* ★ 옵션 없는 공고의 원문은 발행 폼이 **한 줄에 상품 하나**로 쓴다("상품명 - 결제금액 N원").
          그래서 한 덩어리 줄이 앞 줄 상품명을 이어받으면(inherited) 틀린다 — "린스" 가 "샴푸 린스" 가 되어
-         손대지 않은 저장 한 번에 둘째 상품부터 이름이 바뀌었다(2026-10-22 실측). 같은 줄 조각만 되붙인다(결정 042). */
-      productName: (r.inherited && r.optKey) ? r.optKey : [r.productName, r.optKey].filter(Boolean).join(" "),
+         손대지 않은 저장 한 번에 둘째 상품부터 이름이 바뀌었다(2026-10-22 실측). 같은 줄 조각만 되붙인다(결정 042).
+         ★★ 결정 382 — 되붙일 땐 **그 줄 원문**(금액만 걷어낸 것)을 쓴다. 조각을 공백으로 이으면 구분자
+         「/ - – | ·」가 지워져, 열고 그대로 저장만 해도 상품 줄이 바뀌었다(2026-11-18 세라모사이드).
+         원문이 비는 줄(금액만 있는 줄)만 종전 규칙으로 접는다. */
+      productName: r.lineName || ((r.inherited && r.optKey) ? r.optKey : [r.productName, r.optKey].filter(Boolean).join(" ")),
       optKey: "", payAmount: r.payAmount,
       // ★ 결정 277 — 원장 없는 공고의 상품 주소 = 공고 상품 페이지(랜딩) — 첫 카드에만(나머지는 모른다)
       optionUrl: i === 0 ? String(fallback.landing_url || "") : "",
@@ -3400,6 +3403,16 @@ function parseProductLinesToRows(text, fallbackProductName) {
       .replace(/[\d,]{4,}\s*원/g, "")
       .replace(/[\s\-·/|]+$/, "")
       .trim();
+    /* ★★ 결정 382 — 금액만 걷어낸 **그 줄 원문**(구분자 `/ - – | ·`·공백 그대로).
+       옵션 없는 공고·오더는 아래 조각 분해(옵션 추측)를 쓰지 않고 이 값을 상품명으로 쓴다 —
+       조각을 공백으로 되붙이면 「(피치 / 레몬 / 스트로베리)」가 열고 저장만 해도
+       「(피치 레몬 스트로베리)」로 바뀌었다(2026-11-18 세라모사이드 공고 실측).
+       ★ 「N원」은 결제금액 표기가 없을 때(그게 금액일 때)만 걷는다 — 「(2,000원 할인)」 같은 상품명 글자를 지키려고. */
+    const lineName = (mPay
+      ? line.replace(/\s*결제금액\s*[\d,]+\s*원?/g, "")
+      : line.replace(/\s*[\d,]{4,}\s*원/g, ""))
+      .replace(/^[\s\-–·/|]+|[\s\-–·/|]+$/g, "")
+      .trim();
     const parts = rest.split(/\s*[-–/|·]\s*/).map(p => p.trim()).filter(Boolean);
     let productName = "", optKey = "", inherited = false;
     if (parts.length >= 2) { productName = parts[0]; optKey = parts.slice(1).join(" "); }
@@ -3423,7 +3436,7 @@ function parseProductLinesToRows(text, fallbackProductName) {
     }
     if (!productName && !optKey && !pay) continue;
     if (productName) lastProd = productName;
-    rows.push({ productName: productName || lastProd, optKey, payAmount: pay, inherited });
+    rows.push({ productName: productName || lastProd, optKey, payAmount: pay, inherited, lineName });
   }
   return rows;
 }
@@ -3490,7 +3503,9 @@ function applyProductRowsFromOrder(prefill) {
     rows[0].dailyLimit ||= Number(p.daily_limit) || 0;
   }
   renderOptRows(rows.map(r => ({
-    productName: [r.productName, r.optKey].filter(Boolean).join(" "),   // 쪼개진 조각은 상품명으로 되붙인다
+    // 쪼개진 조각은 상품명으로 되붙인다 — ★ 결정 382: 같은 줄이면 그 줄 원문(구분자 유지) ·
+    //   한 덩어리 줄이 오더 상품명을 이어받은 경우(inherited)만 종전대로 「오더 상품명 + 줄」
+    productName: (!r.inherited && r.lineName) || [r.productName, r.optKey].filter(Boolean).join(" "),
     optKey: "", payAmount: r.payAmount, recruitTotal: r.recruitTotal, dailyLimit: r.dailyLimit,
   })), { mode: "none" });
   _setProdModeNote("작업오더에 옵션이 없어 자동 선택됨");
