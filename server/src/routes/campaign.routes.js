@@ -159,6 +159,14 @@ async function _listThumbs(data) {
   } catch (_) { return undefined; }
 }
 
+/* ★ 결정 386 — 리뷰어 작업가이드에 보일 필수 배송메세지(결정 260 칸). 구매양식 검사와 같은 정규화 함수 하나만 쓴다.
+   없음·조회 실패 = '' (카드 없음 = 종전 화면). 이미 구매양식이 그 글자로 검사하는 값이라 새로 드러나는 정보는 없다. */
+function _requiredMemoView(camp) {
+  try {
+    return require('../services/requiredDeliveryMemo.service').normalizeRequired(camp && camp.required_delivery_memo);
+  } catch (_) { return ''; }
+}
+
 async function _cashReceiptInfo(camp) {
   try {
     if (!camp) return null;
@@ -2012,6 +2020,7 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
       workDetail,                                                // HTML은 응답 직전 방어적 재정화
       inflowType,                                                 // 'guide' | 'link' | '' — 랜딩 버튼 게이트
       cashReceipt,                                                // 현영 탭만 {required, businessNo, guideImageUrl} — 아니면 null
+      requiredDeliveryMemo: _requiredMemoView(camp),              // ★ 결정 386: 필수 배송메세지('' = 없음) — 작업가이드 안내 카드
       guideThumbs: await _guideThumbs(workDetail, selectedOption, cashReceipt),   // 결정 354 — 가이드 사진 빠른 길 서명(m, 가산)
       // 카톡 팀채팅방 URL은 제출확정 후에만 반환(화면 숨김을 API에서도 강제 — DevTools 우회 차단)
       chatUrl: isSubmitted ? (camp.chat_url || '') : '',
@@ -5077,6 +5086,7 @@ router.get('/admin/:id/preview', authMiddleware, adminOrMasterMiddleware, async 
       workDetail,
       inflowType,
       cashReceipt,                          // 미리보기 = 실제 화면(현영 안내 카드 포함)
+      requiredDeliveryMemo: _requiredMemoView(camp),   // ★ 결정 386: 미리보기 = 실제 화면(필수 배송메세지 카드 포함)
       guideThumbs: await _guideThumbs(workDetail, sample, optionGuides, cashReceipt),   // 결정 354(가산)
       chatUrl: camp.chat_url || '',         // 관리자는 원래 카톡 URL을 설정·조회하는 주체
       landingUrl: camp.landing_url || '',

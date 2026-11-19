@@ -6948,6 +6948,7 @@ function _renderPreview() {
       specialNotesImages: _igUrls("notes"),
     },
     landingUrl: _v("rf_landing_url"),
+    requiredDeliveryMemo: _v("rf_required_delivery_memo"),   // ★ 결정 386: 리뷰어 화면과 같은 필수 배송메세지 카드
     inflowType: "",                 // 불명 = 랜딩 버튼 노출(실제 화면과 동일한 기본값)
     // ★ 선택지별 가이드를 설정한 공고는 첫 선택지 것을 보여준다(없으면 null = 공통 가이드 = 종전 동작)
     selectedOption: _rfFirstUnitGuide(),
@@ -6969,7 +6970,8 @@ function _renderPreview() {
    안내배지(_refreshBadgeWrap)·채널/담당자 버튼(selectRfBtn)·썸네일(upload/fetch)은
    이미 각자 _onPreviewInput()을 호출하도록 아래에서 감싼다. */
 const _PREVIEW_INPUTS = ["rf_wd_product","rf_wd_inflow","rf_wd_review","rf_wd_notes","rf_landing_url","rf_hold_ttl",
-  "rf_title","rf_channel_custom","rf_review_fee","rf_time_range"];
+  "rf_title","rf_channel_custom","rf_review_fee","rf_time_range",
+  "rf_required_delivery_memo"];   // 결정 386 — 필수 배송메세지 카드(고치거나 지우면 바로 다시 그린다)
 const _PREVIEW_SELECTS = ["rf_delivery_type","rf_status"];
 const _PREVIEW_CHECKS = ["rf_cash_receipt_required"];
 
