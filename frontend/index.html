@@ -394,6 +394,8 @@
     .part-info-btn.product { border-color:#111827; background:#111827; color:#fff; }
     .part-info-btn.chat { border-color:#F5D900; background:#FEE500; color:#191919; }
     .part-info-btn.submit { border-color:#2875E8; background:#2875E8; color:#fff; }
+    /* 결정 384 — 참여상품 정보 리뷰 가이드 첨부 사진(공고 화면과 같은 사진) */
+    .pi-guide-imgs img { display:block; width:100%; height:auto; border:1px solid #EEF1F7; border-radius:9px; margin-top:6px; }
     .part-info-btn.cs { border-color:#CFE0FD; background:#EEF3FB; color:#1B4F9C; }
     .part-info-btn.capture { border-color:#BDE5CA; background:#EFFBF3; color:#17643A; }
     .part-info-btn.cancel { border-color:#FECACA; background:#fff; color:#B91C1C; }
@@ -3193,13 +3195,9 @@ async function _partInfoLoadBrief(list, done, requestSeq){
       '<button onclick="_partInfoGoAccount()" style="margin-top:6px;border:1.5px solid #FECACA;background:#fff;color:#B91C1C;font-size:.72rem;font-weight:800;border-radius:9px;padding:6px 11px;cursor:pointer">내 계좌 정보 수정하기</button>' +
       '</div></div>');
     if (brief.productLines) rows.push(_partInfoRow('상품', escHtml(brief.productLines).replace(/\n/g,'<br>')));
-    // 📝 리뷰 가이드 (연결 공고 work_detail.reviewGuide) — 길면 스크롤, 줄바꿈 보존
-    const rg = String(brief.reviewGuide || '').trim();
-    if (rg) rows.push(
-      '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed #E5E7EB">' +
-      '<div style="font-weight:800;color:#111827;font-size:.74rem;margin-bottom:5px">📝 리뷰 가이드</div>' +
-      '<div style="color:#374151;font-size:.74rem;line-height:1.6;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-word">' + escHtml(rg) + '</div>' +
-      '</div>');
+    // 📝 리뷰 가이드 + 첨부 사진 — 결정 384(그리기는 _partInfoGuideHtml 한 곳)
+    const guideHtml = _partInfoGuideHtml(brief);
+    if (guideHtml) rows.push(guideHtml);
     const pu = String(brief.productUrl || '');
     _partInfoProductUrl = /^https?:\/\//i.test(pu) ? pu : '';
     if (rows.length){ if (detailEl){ detailEl.style.display=''; detailEl.style.color=''; detailEl.innerHTML = rows.join(''); } }
@@ -3210,6 +3208,27 @@ async function _partInfoLoadBrief(list, done, requestSeq){
     if (requestSeq !== _partInfoBriefSeq) return;
     hide(); _partInfoRenderBtns(done, '');
   }
+}
+/* 📝 참여상품 정보 — 리뷰 가이드 글 + 첨부 사진(결정 384).
+   ★ 글은 서버가 공고 화면과 같은 규칙(결정 282)으로 고른 값을 그대로 쓴다 — 여기서 다시 고르지 않는다.
+   ★ 사진은 공고 화면과 같은 렌더러(CampWorkDetail.imageListHtml — 우리 사진 통로만 · 호스트 재구성)로 그린다.
+   ★ 사진만 있어도 칸을 낸다(안 그리면 담당자가 넣은 가이드 사진이 통째로 사라진다).
+   ★ 옛 서버(사진 칸 없음)·렌더러 미적재면 글만 그린다(fail-soft). */
+function _partInfoGuideHtml(brief){
+  const b = brief || {};
+  const rg = String(b.reviewGuide || '').trim();
+  let imgs = '';
+  try {
+    const cwd = (typeof window !== 'undefined' && window.CampWorkDetail) || null;
+    if (cwd && typeof cwd.imageListHtml === 'function' && Array.isArray(b.reviewGuideImages) && b.reviewGuideImages.length)
+      imgs = cwd.imageListHtml(b.reviewGuideImages, API_BASE_URL, '리뷰 가이드 이미지').html || '';
+  } catch (_) { imgs = ''; }
+  if (!rg && !imgs) return '';
+  return '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed #E5E7EB">' +
+    '<div style="font-weight:800;color:#111827;font-size:.74rem;margin-bottom:5px">📝 리뷰 가이드</div>' +
+    (rg ? '<div style="color:#374151;font-size:.74rem;line-height:1.6;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-word">' + escHtml(rg) + '</div>' : '') +
+    (imgs ? '<div class="pi-guide-imgs">' + imgs + '</div>' : '') +
+    '</div>';
 }
 /* 입금 시각 표기 — 서버가 준 ISO 를 사람이 읽는 형태로. ★ 값이 이상하면 그리지 않는다(빈 문자열). */
 function _partInfoPaidAt(v){

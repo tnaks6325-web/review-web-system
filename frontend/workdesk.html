@@ -384,7 +384,7 @@
   .rvpstage{position:relative;min-width:0;min-height:0;display:flex;flex-direction:column;padding:40px 16px 14px;background:var(--card)}
   .rvpcols{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:12px}
   .rvpcols.hasreceipt{grid-template-columns:repeat(3,minmax(0,1fr))}
-  /* 결정 384 — 크게 보기 팝업의 「분류 확인」 줄(후보 단일 선택 · C스타일 담당자 토글과 같은 모양) */
+  /* 결정 385 — 크게 보기 팝업의 「분류 확인」 줄(후보 단일 선택 · C스타일 담당자 토글과 같은 모양) */
   .rvpcls{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:0 0 10px;padding:8px 10px;border:1px solid color-mix(in srgb,var(--warn) 30%,var(--line));border-radius:10px;background:var(--warn-soft)}
   .rvpcls .rvpclsk{font-size:11.5px;font-weight:800;color:var(--warn);margin-right:4px}
   .rvpcls .clsopt{border:1px solid #D9E1EC;border-radius:6px;background:#fff;color:#60718D;padding:6px 11px;font:inherit;font-size:12px;font-weight:800;cursor:pointer;transition:background .16s,border-color .16s,color .16s}
@@ -736,7 +736,7 @@
   table.sheetgrid td.gcashreceipt.missing,table.sheetgrid td.gcashreceipt.configuration_error{color:var(--warn)}
   table.sheetgrid td.gcashreceipt.not_applicable,table.sheetgrid td.gcashreceipt.unavailable{color:var(--muted)}
   .gcell.gempty{color:var(--line2)} .gcell.gok{color:var(--safe);font-weight:600}
-  /* 결정 384 — 「분류」가 빈 제출 주문 = 연한 노란 「확인」(경고 색 토큰 재사용 · 담당자 칸 칠하기 노랑 #ffe9a8·검색 강조와 구분되게 테두리 한 줄) */
+  /* 결정 385 — 「분류」가 빈 제출 주문 = 연한 노란 「확인」(경고 색 토큰 재사용 · 담당자 칸 칠하기 노랑 #ffe9a8·검색 강조와 구분되게 테두리 한 줄) */
   table.sheetgrid td.gcell.gclschk{background:var(--warn-soft);color:var(--warn);font-weight:700;cursor:pointer;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--warn) 30%,transparent)}
   table.sheetgrid td.gcell.gclschk:hover{background:color-mix(in srgb,var(--warn) 12%,var(--warn-soft))}
   td.gidlock{cursor:default}   /* 참여자·연락처 = 실제 제출 신원(수정 불가) */
@@ -7688,7 +7688,7 @@ function _rvPopCol(kind,files,r){
         `<button type="button"${i===0?' disabled':''} onclick="_rvPopStep2('${kind}',-1,${n})">‹</button>`+
         `<span>${i+1} / ${n}</span>`+
         `<button type="button"${i===n-1?' disabled':''} onclick="_rvPopStep2('${kind}',1,${n})">›</button></div>`
-    : (kind==='cap'&&STATE.rvPop&&STATE.rvPop.cls)   // 결정 384 — 분류 확인 줄은 모두 구매양식을 낸 주문이라 「미제출」이 아니다
+    : (kind==='cap'&&STATE.rvPop&&STATE.rvPop.cls)   // 결정 385 — 분류 확인 줄은 모두 구매양식을 낸 주문이라 「미제출」이 아니다
       ? `<div class="rvpempty warn"><b>${STATE.rvImgs?'캡처 없음':'사진을 불러오지 못했습니다'}</b><span>${STATE.rvImgs?'이 주문은 구매 캡처가 없습니다 — 리뷰어에게 확인한 값이 있으면 위에서 고르세요.':'잠시 후 창을 다시 열어 주세요.'}</span></div>`
     : `<div class="rvpempty${kind==='receipt'?'':' warn'}"><b>${esc(applicable?m[2]:'해당없음')}</b><span>${esc(applicable?m[3]:'현금영수증 제출 대상이 아닌 작업입니다.')}</span></div>`;
   return `<div class="rvpc"><div class="rvpch">${m[0]} ${esc(m[1])}<span class="cnt">${n}</span></div>${body}</div>`;
@@ -8722,7 +8722,7 @@ async function _cfApply(){
 function _isClassifyCol(col){ const c=STATE.wd&&STATE.wd.classifyColumn; return !!(c&&c.columnId&&col==='ccol:'+c.columnId); }
 function _ccCanUse(){ return (STATE.role==='master'||STATE.role==='admin') && !!(STATE.wd&&STATE.wd.classifyColumn&&STATE.wd.classifyColumn.campaignId); }
 function openCaptureClassify(){ const c=STATE.wd&&STATE.wd.classifyColumn; if(typeof closeGColMenu==='function') closeGColMenu(); if(!c||!c.campaignId) return; return openCaptureFill(c.campaignId, 0, false, 'classify'); }
-/* ══ 결정 384 — 「분류」가 빈 **구매양식 제출 주문** = 연한 노란 「확인」 칸 · 누르면 구매캡처를 보며 후보를 고른다 ═════════
+/* ══ 결정 385 — 「분류」가 빈 **구매양식 제출 주문** = 연한 노란 「확인」 칸 · 누르면 구매캡처를 보며 후보를 고른다 ═════════
    ★ 판정 단일 출처 = `_clsNeedsCheck` — 칸 그리기(buildGrid·_paintGridCell) · 머리글 메뉴 「(미분류)」 건수(gFilterValues) · 팝업 목록이 모두 이것.
      구매양식 주문이 붙은 줄(`hasOrder` = 서버 order_submission_id)만 · 칸 값은 `gCellDisp`(내려받기·정렬과 같은 값)가 빈칸일 때.
      주문 전 빈 줄은 확인할 것이 없어 표시하지 않고, 메뉴에서도 「(주문 전)」으로 따로 센다(종전엔 (미분류)에 섞여 400줄 공고에서 227 로 보였다).
@@ -9489,7 +9489,7 @@ function downloadWorkdeskXlsx(){
 function gFilterValues(r,col){
   const value=gCellDisp(r,col);
   if(col==='입금' && value) return String(value).split(/\s*,\s*/).filter(Boolean);
-  if(value==='' && _isClassifyCol(col) && !_clsNeedsCheck(r)) return [_CLS_NOORDER];   // 결정 384 — 주문 전 빈 줄은 (미분류)가 아니다(노란 칸과 같은 판정)
+  if(value==='' && _isClassifyCol(col) && !_clsNeedsCheck(r)) return [_CLS_NOORDER];   // 결정 385 — 주문 전 빈 줄은 (미분류)가 아니다(노란 칸과 같은 판정)
   return [value];
 }
 const _GRID_CHUNK=60;
@@ -9646,7 +9646,7 @@ function _gridDefaultFreezeUpto(headers){
 }
 function buildGrid(wd){
   _ensureHeaderDrag();   // 헤더 가로 드래그 일괄 숨김(1회 바인딩, 위임)
-  _clsBind();   // 결정 384 — 노란 「확인」 칸 누르기(1회 바인딩, 위임)
+  _clsBind();   // 결정 385 — 노란 「확인」 칸 누르기(1회 바인딩, 위임)
   _ensureCellRangeUI();  // 셀 범위 드래그(복사·붙여넣기·배경색) + 우클릭 편집(1회 바인딩, 위임)
   // ★ 표를 다시 그리면 선택 범위(행/열 인덱스)는 가리키던 셀을 잃는다 — 남겨 두면 복사·붙여넣기가
   //   **엉뚱한 칸**에 적용된다(필터·정렬·탭 전환 후 인덱스 의미가 바뀐다). 여기서 한 번에 비운다.
@@ -9727,7 +9727,7 @@ function buildGrid(wd){
     const bgStyle=(field)=>{ const c=cc[field]; return c?`background-color:${esc(c)};`:''; };
     /* `hist` = 이 칸에 **편집기록이 남아 있는가**(오버레이 존재). 표시값(`edited`)과 분리한다 —
        입금·리뷰제출 같은 상태 칸은 화면값이 작업표 원본이라 `edited` 는 false 지만 기록은 있다. */
-    const eCell=(field, disp, edited, extraCls, styleI, editv, hist, mk)=> {   // mk = 빈칸 대신 보일 화면 글자{mark,tip}(결정 384 — 값·복사에는 안 들어간다)
+    const eCell=(field, disp, edited, extraCls, styleI, editv, hist, mk)=> {   // mk = 빈칸 대신 보일 화면 글자{mark,tip}(결정 385 — 값·복사에는 안 들어간다)
       const statusKind=_workdeskStatusKindForField(field);
       const locked=!!statusKind;
       /* 빈 상태 칸(입금·리뷰제출)은 아무것도 그리지 않는다(사용자 요청 2026-10-15 — 「—」·잠금 점 없이 공란). 값이 있으면 종전대로. */
@@ -9767,7 +9767,7 @@ function buildGrid(wd){
       else if(c.kind==='custom'){
         // 커스텀 열(행별 자유메모) — 시트 오버레이(col:)와 같은 eCell 경로 재사용, 편집기록 없음(원본·오버레이 개념이 없다).
         const cv=(r.customValues&&r.customValues[c.colId])||'';
-        // 결정 384 — 「분류」가 빈 제출 주문 = 노란 「확인」(화면 글자만 · data-val 은 빈칸) · 편집 권한이 있는 칸만(누르면 고르기 창)
+        // 결정 385 — 「분류」가 빈 제출 주문 = 노란 「확인」(화면 글자만 · data-val 은 빈칸) · 편집 권한이 있는 칸만(누르면 고르기 창)
         const clsChk=canE&&_isClassifyCol(h)&&_clsNeedsCheck(r);
         tds+=eCell(h, cv, false, clsChk?' gclschk':'', i, cv, false, clsChk?{mark:'확인',tip:_CLS_TIP}:null); }
       else { const statusKind=_workdeskStatusKind(h); const hasHist=(h in ceMap); const ed=!statusKind&&hasHist; const raw= ed?ceMap[h]:rj[h];
@@ -10203,7 +10203,7 @@ function _paintGridCell(r, field, td){
   if(!td||!field) return;
   if(field.indexOf('ccol:')===0){   // 커스텀 열(자유메모) — 원본 개념이 없어 edited/편집기록 없음
     const disp=(r.customValues&&r.customValues[field.slice(5)])||'';
-    const clsChk=td.classList.contains('gedit')&&_isClassifyCol(field)&&_clsNeedsCheck(r);   // 결정 384 — 그리드 본문과 같은 판정
+    const clsChk=td.classList.contains('gedit')&&_isClassifyCol(field)&&_clsNeedsCheck(r);   // 결정 385 — 그리드 본문과 같은 판정
     td.classList.remove('edited'); td.classList.toggle('gempty', !disp&&!clsChk); td.classList.toggle('gclschk', clsChk);
     td.setAttribute('data-val', disp); td.setAttribute('title', clsChk?_CLS_TIP:(disp||''));
     td.innerHTML=esc(disp||(clsChk?'확인':'—'));

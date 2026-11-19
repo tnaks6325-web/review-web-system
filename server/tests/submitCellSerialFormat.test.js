@@ -87,7 +87,7 @@ console.log('\n[C~E] 표기 — 함수를 vm 으로 꺼내 실제 실행');
 
 console.log('\n[F] 복사(data-val) — 보이는 값, 단 입금은 종전 정본');
 {
-  // 결정 384 — eCell 에 빈칸 대신 보일 화면 글자(mk) 인자가 뒤에 붙었다 → 앞 일곱 인자까지만 맞춘다(검사 의미 불변)
+  // 결정 385 — eCell 에 빈칸 대신 보일 화면 글자(mk) 인자가 뒤에 붙었다 → 앞 일곱 인자까지만 맞춘다(검사 의미 불변)
   const i = html.indexOf('const eCell=(field, disp, edited, extraCls, styleI, editv, hist');
   assert(i > 0, 'eCell 을 찾지 못했다');
   const cell = html.slice(i, html.indexOf('\n    };', i));
