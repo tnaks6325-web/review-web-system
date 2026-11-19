@@ -69,5 +69,9 @@ const camp = read('frontend/campaign.html');
 ok('리뷰어 작업가이드가 응답 값을 렌더러에 넘긴다', /requiredDeliveryMemo:\s*j\.requiredDeliveryMemo/.test(camp));
 const rec = read('frontend/js/index-recruit.js');
 ok('공고 창 미리보기도 입력칸 값을 넘긴다', /requiredDeliveryMemo:\s*_v\("rf_required_delivery_memo"\)/.test(rec));
+// Codex 리뷰 #1846 — 입력칸을 고치거나 지우면 열린 미리보기가 바로 다시 그려져야 한다(목록에 없으면 다른 칸을 건드릴 때까지 옛 카드가 남는다)
+const inputsLit = rec.match(/const _PREVIEW_INPUTS = (\[[\s\S]*?\]);/);
+ok('필수 배송메세지 입력칸이 미리보기 다시 그리기 목록에 있다',
+  !!inputsLit && JSON.parse(inputsLit[1]).includes('rf_required_delivery_memo'), inputsLit && inputsLit[1]);
 
 console.log(`\n✅ requiredMemoGuide: ${passed}개 통과`);
