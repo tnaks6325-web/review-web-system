@@ -257,23 +257,23 @@ router.get('/my-files', reviewerSessionMiddleware, async (req, res) => {
   }
 });
 
-// ── 리뷰가이드 추출: work_detail.reviewGuide에서 [리뷰등록 가이드]/[리뷰가이드] 섹션만.
-//    [라벨] 마커가 없으면 평문 전체 그대로. (campaign-workdetail.js pickReviewOnly 서버 포팅 — 표시 규율 일치)
-function _pickReviewGuide(raw) {
-  const text = String(raw == null ? '' : raw);
-  if (!text.trim()) return '';
-  if (!/\[[^\]]+\]/.test(text)) return text.trim();
-  const norm = (s) => s.replace(/\s/g, '');
-  const keep = ['리뷰등록가이드', '리뷰가이드'];
-  const out = []; let take = false; let buf = [];
-  const flush = () => { const c = buf.join('\n').trim(); if (take && c) out.push(c); buf = []; };
-  text.split(/\r?\n/).forEach((ln) => {
-    const mm = ln.match(/^\s*\[([^\]]+)\]\s*(.*)$/);
-    if (mm) { flush(); take = keep.some((k) => norm(mm[1]).indexOf(k) >= 0); buf = mm[2] ? [mm[2]] : []; }
-    else buf.push(ln);
-  });
-  flush();
-  return out.join('\n').trim();
+// ── 리뷰가이드 [머리말] 고르기 = 발행 프리필 서버 사본 `_woPickSections`(결정 282) 단일 출처.
+//    ★ 결정 384 — 여기 있던 옛 사본(_pickReviewGuide)은 282 때 갱신이 빠져, 대괄호가 하나라도 있으면
+//      사람이 쓴 「[키워드] …」까지 통째로 버렸다(공고 화면엔 보이는데 참여상품 정보 팝업만 빈칸). 사본을 다시 만들지 않는다.
+const { _woPickSections } = require('../utils/woCampaignPrefill.generated');
+// 리뷰가이드 첨부 사진 — 공고 화면 렌더러(campaign-workdetail.js imageListHtml)가 받는 우리 사진 통로 형식만.
+//   호스트는 화면이 신뢰 베이스로 다시 만든다. 이미 공고 카드에 공개되는 값이라 새로 드러나는 정보는 없다.
+const _GUIDE_IMAGE_RE = /\/api\/order\/guide-image\/([-\w]{20,})$/;
+function _guideImageList(list) {
+  if (!Array.isArray(list)) return [];
+  const out = []; const seen = new Set();
+  for (const v of list) {
+    const m = typeof v === 'string' ? v.match(_GUIDE_IMAGE_RE) : null;
+    if (!m || seen.has(m[1])) continue;
+    seen.add(m[1]); out.push(v);
+    if (out.length >= 20) break;
+  }
+  return out;
 }
 
 // GET /api/review-edit/participation-brief?phone8&sheetId&tabName&gid&rowIndex
@@ -495,11 +495,12 @@ router.get('/participation-brief', reviewerSessionMiddleware, async (req, res) =
     } catch (_) { /* fail-soft */ }
     if (!productUrl) productUrl = c.landing_url || '';
 
-    let productLines = '', reviewGuide = '';
+    let productLines = '', reviewGuide = '', reviewGuideImages = [];
     try {
       const wd = typeof c.work_detail === 'string' ? JSON.parse(c.work_detail) : (c.work_detail || {});
       productLines = String((wd && wd.productLines) || '').trim();
-      reviewGuide = _pickReviewGuide(String((wd && wd.reviewGuide) || ''));
+      reviewGuide = _woPickSections(String((wd && wd.reviewGuide) || ''), ['리뷰등록 가이드', '리뷰가이드', '리뷰 가이드']);
+      reviewGuideImages = _guideImageList(wd && wd.reviewGuideImages);
     } catch (_) { /* work_detail 없음/파싱 실패 무시 */ }
 
     res.json({
@@ -511,6 +512,7 @@ router.get('/participation-brief', reviewerSessionMiddleware, async (req, res) =
         productUrl,
         productLines,
         reviewGuide,
+        reviewGuideImages,    // ★ 결정 384: 리뷰가이드 첨부 사진(우리 사진 통로 주소만) — 옛 화면은 무시한다
         workOptions,          // ★ D: [{label:'리뷰옵션', value:'텍스트'}] — 그 행의 작업지시
         payment,              // ★ M2: {status:'paid', paidAt, amount, memo} | {status:'paid', paidDate} (관리자 수동 확정) | {status:'failed'} | null
         purchaseCapture,      // ★ 강한 행 소유권 + 현재 order_submission_id 로 확인된 {fileId, uploadedAt} | null

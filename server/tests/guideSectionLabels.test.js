@@ -102,5 +102,11 @@ t('⑤ 발행 프리필 wd_review 가 키워드 가이드 오더를 비우지 �
   assert.match(String(p.wd_review || ''), /^전체 포토리뷰/);
 });
 
+t('⑥ 참여상품 정보 팝업(participation-brief)도 서버 사본 _woPickSections 를 쓴다 — 옛 사본 금지(결정 384)', () => {
+  const RE = fs.readFileSync(path.join(__dirname, '..', 'src/routes/reviewEdit.routes.js'), 'utf8');
+  assert.ok(!/function _pickReviewGuide/.test(RE), '옛 사본이 남아 있다 — [키워드] 가이드가 팝업에서 통째로 사라진다');
+  assert.ok(/_woPickSections\(String\(\(wd && wd\.reviewGuide\)/.test(RE));
+});
+
 console.log(`\n결과: ${pass} 통과 · ${fail} 실패`);
 if (fail) process.exit(1);
