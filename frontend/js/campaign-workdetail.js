@@ -353,7 +353,10 @@
     if (rdm && o.showProduct !== false) {
       html += '<div class="cwd-box" style="border:1px solid #FDBA74;background:#FFF7ED;border-radius:12px;padding:12px 14px;margin:10px 0">'
         + '<div class="cwd-tt" style="color:#C2410C">🚚 필수 배송메세지</div>'
-        + '<div class="cwd-body" style="font-size:1.02rem;font-weight:800;color:#1d1d1f">' + escAttr(rdm) + '</div>'
+        + '<div class="cwd-body" style="display:flex;align-items:center;gap:10px;font-size:1.02rem;font-weight:800;color:#1d1d1f">'
+        + '<span class="cwd-memo-text" style="flex:1;min-width:0;word-break:break-all">' + escAttr(rdm) + '</span>'
+        + '<button type="button" class="cwd-memo-copy" data-cwd-copy-memo="1" style="flex:none;border:1px solid #FDBA74;background:#fff;color:#C2410C;font:inherit;font-size:.8rem;font-weight:700;border-radius:8px;padding:5px 12px;cursor:pointer">복사</button>'
+        + '</div>'
         + '<div style="font-size:clamp(.62rem,3.2vw,.74rem);color:#9A3412;margin-top:6px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
         + '구매캡처에 이 배송메세지가 보여야 구매양식이 제출돼요.</div>'
         + '</div>';
@@ -577,6 +580,33 @@
     el.appendChild(tpl.content);
   }
 
+  /* 🚚 필수 배송메세지 [복사] — 결정 386. 문구는 화면에 보이는 그 글자(span)에서 읽는다(속성에 따로 싣지 않는다).
+     ★ 복사가 막힌 브라우저(권한 거부·기능 없음)는 문구를 선택해 두고 「길게 눌러 복사」로 알린다(Q&A 문구 복사와 같은 관용구). */
+  function _copyMemo(btn) {
+    var span = btn.parentNode && btn.parentNode.querySelector('.cwd-memo-text');
+    var text = span ? String(span.textContent || '') : '';
+    var done = function (label) {
+      btn.textContent = label;
+      clearTimeout(btn._cwdT);
+      btn._cwdT = setTimeout(function () { btn.textContent = '복사'; }, 2000);
+    };
+    var fallback = function () {
+      try {
+        var r = document.createRange(); r.selectNodeContents(span);
+        var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      } catch (_) {}
+      done('길게 눌러 복사');
+    };
+    if (!text) return;
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () { done('복사됨'); }, fallback);
+        return;
+      }
+    } catch (_) {}
+    fallback();
+  }
+
   /** 컨테이너에 렌더 + [상품 페이지 열기] 위임 처리(한 번만 바인딩) */
   function renderInto(el, d, o) {
     if (!el) return;
@@ -594,6 +624,8 @@
           all.textContent = anyClosed ? '안내 접기' : '전체 안내';
           return;
         }
+        var cp = e.target.closest && e.target.closest('[data-cwd-copy-memo]');
+        if (cp) { _copyMemo(cp); return; }   // 🚚 필수 배송메세지 [복사] — 결정 386
         var b = e.target.closest && e.target.closest('[data-cwd-landing]');
         if (!b) return;
         var u = b.getAttribute('data-cwd-landing');

@@ -50,6 +50,8 @@ ok('하단 안내는 「구매캡처에 이 배송메세지가 보여야 구매�
 const iProd = withMemo.indexOf('📦 상품'), iMemo = withMemo.indexOf('🚚 필수 배송메세지'), iRev = withMemo.indexOf('📝 리뷰 가이드');
 ok('상품 카드 바로 아래 · 리뷰 가이드보다 위', iProd >= 0 && iProd < iMemo && iMemo < iRev);
 ok('꺾쇠는 글자로', M.cardsHtml({ workDetail: wd, requiredDeliveryMemo: '<b>00</b>' }, {}).includes('&lt;b&gt;00'));
+ok('문구 옆 [복사] 버튼(사용자 요청 2026-11-19)', /<button type="button" class="cwd-memo-copy" data-cwd-copy-memo="1"[^>]*>복사<\/button>/.test(withMemo)
+  && /<span class="cwd-memo-text"[^>]*>문앞에 놓아주세요!<\/span>/.test(withMemo), withMemo);
 ok('값이 없거나 공백·옛 서버(칸 없음)면 카드 없음',
   !M.cardsHtml({ workDetail: wd, requiredDeliveryMemo: '' }, {}).includes('필수 배송메세지')
   && !M.cardsHtml({ workDetail: wd, requiredDeliveryMemo: '   ' }, {}).includes('필수 배송메세지')
@@ -74,4 +76,39 @@ const inputsLit = rec.match(/const _PREVIEW_INPUTS = (\[[\s\S]*?\]);/);
 ok('필수 배송메세지 입력칸이 미리보기 다시 그리기 목록에 있다',
   !!inputsLit && JSON.parse(inputsLit[1]).includes('rf_required_delivery_memo'), inputsLit && inputsLit[1]);
 
+(async () => {
+  console.log('\n[⑤ 복사 버튼 — 실제 클릭 처리기]');
+  // renderInto 의 위임 클릭 처리기를 가짜 DOM 으로 실제로 돌린다
+  const mk = (cls, text) => ({ className: cls, textContent: text, _attrs: {}, getAttribute(k) { return this._attrs[k] || null; } });
+  const memoSpan = mk('cwd-memo-text', '문앞에 놓아주세요!');
+  const btn = mk('cwd-memo-copy', '복사'); btn._attrs['data-cwd-copy-memo'] = '1';
+  btn.closest = sel => (sel === '[data-cwd-copy-memo]' ? btn : null);
+  btn.parentNode = { querySelector: s => (s === '.cwd-memo-text' ? memoSpan : null) };
+  let handler = null;
+  const el = { classList: { add() {}, remove() {} }, addEventListener: (t, h) => { if (t === 'click') handler = h; },
+    set innerHTML(v) {}, appendChild() {}, querySelectorAll: () => [], children: [] };
+  const copied = [];
+  Object.defineProperty(global, "navigator", { value: { clipboard: { writeText: t => { copied.push(t); return Promise.resolve(); } } }, configurable: true, writable: true });
+  global.window.setTimeout = global.setTimeout;
+  M.renderInto(el, { workDetail: wd, requiredDeliveryMemo: '문앞에 놓아주세요!' }, {});
+  ok('클릭 처리기가 붙었다', typeof handler === 'function');
+  handler({ target: btn });
+  await new Promise(r => setTimeout(r, 5));
+  ok('누르면 문구 그대로 복사 · 버튼이 「복사됨」', copied[0] === '문앞에 놓아주세요!' && btn.textContent === '복사됨', JSON.stringify([copied, btn.textContent]));
+  // 복사 불가(권한 거부) — 버튼이 길게 눌러 복사 안내로 바뀌고 문구를 선택해 둔다
+  let selected = null;
+  global.document.createRange = () => ({ selectNodeContents: n => { selected = n; } });
+  global.window.getSelection = () => ({ removeAllRanges() {}, addRange() {} });
+  Object.defineProperty(global, "navigator", { value: { clipboard: { writeText: () => Promise.reject(new Error('denied')) } }, configurable: true, writable: true });
+  btn.textContent = '복사';
+  handler({ target: btn });
+  await new Promise(r => setTimeout(r, 5));
+  ok('복사가 막힌 브라우저면 문구를 선택해 두고 「길게 눌러 복사」 안내', selected === memoSpan && /길게 눌러/.test(btn.textContent), btn.textContent);
+  Object.defineProperty(global, "navigator", { value: {}, configurable: true, writable: true });
+  btn.textContent = '복사'; selected = null;
+  handler({ target: btn });
+  await new Promise(r => setTimeout(r, 5));
+  ok('복사 기능 자체가 없는 브라우저도 같은 안내', selected === memoSpan && /길게 눌러/.test(btn.textContent));
+
 console.log(`\n✅ requiredMemoGuide: ${passed}개 통과`);
+})().catch(e => { console.error(e); process.exit(1); });
