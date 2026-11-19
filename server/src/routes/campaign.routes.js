@@ -3506,6 +3506,26 @@ async function _saveRequiredDeliveryMemo(id, value, row) {
   }
 }
 
+/* ★★ 결정 383 — 공고별 「분류 후보」(옵션 없는 「택1」 공고: `피치, 레몬, 스트로베리`). 리뷰웹 전용 칸(인트라넷 공유 칸 아님) —
+   거대한 INSERT/UPDATE 자리표에 끼우지 않고 저장 직후 이 칸만 따로 쓴다(결정 260 과 같은 이유). undefined = 유지(이 칸이 없는 화면).
+   후보가 둘 이상이고 분류할 수 있는 공고면 연결 작업표에 「분류」 칸(추가 열)을 미리 만든다 — **옵션 저장 뒤에** 불러야 옵션 수를 바로 본다.
+   ★ 실패는 숨기지 않는다(응답 경고) · 칸 만들기 실패는 경고만(첫 제출 때 다시 만든다). */
+async function _saveClassifyCandidates(id, value, row) {
+  if (value === undefined || value === null) return null;
+  const v = require('../utils/productCaptureMatch').formatClassifyCandidates(String(value).slice(0, 1000));
+  try {
+    await pool.query('UPDATE recruit_campaigns SET classify_candidates = $2 WHERE id = $1', [id, v]);
+    if (row) row.classify_candidates = v;
+  } catch (e) {
+    logger.warn(`[campaign] 분류 후보 저장 실패(${id}): ${e.message}`);
+    return '분류 후보 저장 실패: ' + e.message;
+  }
+  if (!v) return null;
+  try { await require('../services/captureClassify.service').ensureClassifyColumnForCampaign(id, { by: '공고 저장' }); }
+  catch (e) { logger.warn(`[campaign] 「분류」 칸 보장 실패(${id} — 첫 제출 때 다시 만든다): ${e.message}`); }
+  return null;
+}
+
 // POST /api/campaign/admin/create — 캠페인 생성
 router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
@@ -3537,6 +3557,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       work_kind, // ★ 099: 체험단 종류(review|blog) — 빈 값=리뷰체험단(기존 동작). 블로그면 리뷰타입 미사용
       cash_receipt_required, // 모집공고 직접 설정 — 무시트 공고도 구매 안내·배지에 반영
       required_delivery_memo, // ★ 결정 260: 필수 배송메세지(''=확인 안 함) — 아래 _saveRequiredDeliveryMemo 가 따로 저장
+      classify_candidates, // ★ 결정 383: 분류 후보(''=사용 안 함) — 아래 _saveClassifyCandidates 가 따로 저장
       workboard_display_name, // 탭 단위 표시 별칭(실제 상품명·주문/참여 이력은 무접촉)
       // ★ 135: 회수·혼합 부속정보. 배송유형이 그 기본형일 때만 저장하고, 아니면 비운다
       //   (작업오더 접수의 _deliveryMixJson·_recallFields 와 같은 규율 — 유형을 바꾸면
@@ -3838,6 +3859,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
     if (normOpts) await _ensureLinkedWorktableOptionColumn(rows[0].id, 'create');   // 옵션 2종+ → 연결 작업표에 옵션 칸 보장(fail-soft)
     if (normOpts) await _ensureLinkedWorktableProductColumn(rows[0].id, 'create');  // ★ 138: 상품 2종+ → 「상품」 칸 보장·소급(fail-soft)
     await _ensureLinkedWorktableDeliveryColumns(rows[0].id, 'create');   // ★ 135: 회수·혼합 → 연결 작업표에 부속 열 보장(fail-soft)
+    const classifyWarning = await _saveClassifyCandidates(rows[0].id, classify_candidates, rows[0]);   // ★ 결정 383(옵션 저장 뒤)
     // 작업오더와 모집공고는 별도 값이 아니라 같은 목표 인원이다. 생성 시에도 서버가
     // 역방향 링크와 작업오더 정원을 함께 저장해, 프론트 후속 호출 실패로 드리프트하지 않게 한다.
     let quotaSync = null;
@@ -3902,6 +3924,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       feeSchedules: await _loadFeeSchedules(pool, rows[0].id),
       ...(optionsWarning ? { optionsWarning } : {}), ...(feeWarning ? { feeWarning } : {}),
       ...(requiredMemoWarning ? { requiredMemoWarning } : {}),   // ★ 결정 260
+      ...(classifyWarning ? { classifyWarning } : {}),   // ★ 결정 383
       ...(blacklistWarning ? { blacklistWarning } : {}),   // ★ 결정 050 개정
       ...(quotaSync ? { quotaSync } : {}),
       ...(bidirLink ? { bidirLink } : {}),
@@ -3946,6 +3969,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       carry_strategy, // ★ 139: 이월 배치 전략 next|spread|extend — undefined=유지
       cash_receipt_required, // undefined=유지 / true·false=모집공고 직접 설정
       required_delivery_memo, // ★ 결정 260: undefined=유지 / ''=확인 안 함 — 아래 _saveRequiredDeliveryMemo 가 따로 저장
+      classify_candidates, // ★ 결정 383: undefined=유지 / ''=사용 안 함 — 아래 _saveClassifyCandidates 가 따로 저장
       workboard_display_name, // undefined=유지 / ''=표시명 해제(실제 상품명으로 폴백)
       skip_weekends, // undefined=유지 / true·false=주말 게시 직접 설정
       // ★ 135: 회수·혼합 부속정보 — undefined=유지(부속 칸 없는 화면이 저장해도 안 지워진다).
@@ -4543,6 +4567,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     if (normOpts) await _ensureLinkedWorktableOptionColumn(id, 'update');   // 옵션 2종+ → 연결 작업표에 옵션 칸 보장(fail-soft)
     if (normOpts) await _ensureLinkedWorktableProductColumn(id, 'update');  // ★ 138: 상품 2종+ → 「상품」 칸 보장·소급(fail-soft)
     await _ensureLinkedWorktableDeliveryColumns(id, 'update');   // ★ 135: 회수·혼합 → 연결 작업표에 부속 열 보장(fail-soft)
+    const classifyWarning = await _saveClassifyCandidates(id, classify_candidates, rows[0]);   // ★ 결정 383(옵션 저장 뒤)
     // ★ 082: 기간별 리뷰비 구간 교체(배열 전달 시에만 — 미전달=기존 구간 유지).
     //   구간표 UI 가 없는 화면(리뷰어앱 인라인 편집 등)이 저장해도 구간이 사라지지 않는다.
     // ★ 5단계: 연결 공고는 기간표를 다시 쓰지 않는다 — 화면 값이 지금과 같을 때만 여기까지 온다(공유 저장이 다르면 409).
@@ -4603,6 +4628,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       feeSchedules: await _loadFeeSchedules(pool, id),
       ...(optionsWarning ? { optionsWarning } : {}), ...(feeWarning ? { feeWarning } : {}),
       ...(requiredMemoWarning ? { requiredMemoWarning } : {}),   // ★ 결정 260
+      ...(classifyWarning ? { classifyWarning } : {}),   // ★ 결정 383
       ...(quotaSync ? { quotaSync } : {}),
       // ★ 095: 차수 공고라 총모집 전송값을 무시했음을 화면에 알린다(진행상품 표 hidden 재전송 케이스)
       ...(_rtLocked ? { recruitTotalLocked: true } : {}),

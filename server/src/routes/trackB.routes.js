@@ -364,16 +364,21 @@ router.post('/workdesk/tab-finish', authMiddleware, async (req, res, next) => {
 //   ★ AI 비용 때문에 크론 없이 사람이 필요할 때만. 전사 데이터 쓰기라 adminOrMaster 로 좁힌다.
 router.post('/campaigns/:id/capture-product-fill', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   const fill = require('../services/captureProductFill.service');
+  const cls = require('../services/captureClassify.service');
   try {
     const b = req.body || {};
     const campaignId = String(req.params.id || '');
+    // ★ 결정 383 — 같은 버튼·같은 권한으로 옵션 없는 「택1」 공고의 작업보드 「분류」 칸을 채운다(빈 칸만 · 보관 공고 제외).
+    const classify = b.target === 'classify';
     if (b.mode === 'apply') {
       if (b.confirm !== true) return res.status(400).json({ ok: false, code: 'confirm_required', error: '미리보기를 확인한 뒤 confirm:true 로 실행하세요.' });
+      if (classify) return res.json(await cls.applyCaptureClassify({ campaignId, picks: b.picks, by: _by(req) }));
       return res.json(await fill.applyCaptureProducts({ campaignId, picks: b.picks, by: _by(req) }));
     }
+    if (classify) return res.json(await cls.previewCaptureClassify({ campaignId, limit: b.limit, offset: b.offset }));
     return res.json(await fill.previewCaptureProducts({ campaignId, limit: b.limit, offset: b.offset }));
   } catch (err) {
-    if (err && (err instanceof fill.CaptureFillError || err.name === 'ProductColumnError' || err.constructor && err.constructor.name === 'ProductColumnError')) {
+    if (err && (err instanceof fill.CaptureFillError || err instanceof cls.ClassifyError || err.name === 'ProductColumnError' || err.constructor && err.constructor.name === 'ProductColumnError')) {
       return res.status(400).json({ ok: false, code: err.code, error: err.message });
     }
     next(err);

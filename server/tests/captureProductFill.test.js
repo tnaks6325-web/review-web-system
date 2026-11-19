@@ -94,6 +94,21 @@ const T = (id, extra = {}) => ({ id, capture_file_id: 'f' + id, selected_opt_key
     assert.equal(r.written, 0); assert.equal(r.results[0].reason, 'already_filled');
   });
 
+  await ok('Codex 리뷰 #1843: 200건 넘게 골라도 조용히 잘라 버리지 않는다(205건 → 205건 적음) · 지나치게 크면 통째로 거절(쓰기 0)', async () => {
+    const ids = Array.from({ length: 205 }, (_, i) => String(1000 + i));
+    const log = [];
+    fill.__setPoolForTest(stubPool(ids.map(id => T(id)), log));
+    fill.__setDepsForTest({ ensureColumn: async () => ({ headers: ['상품'] }), rebuild: async () => {} });
+    const r = await fill.applyCaptureProducts({ campaignId: 'c1', picks: ids.map(id => ({ orderId: id, optKey: F })) });
+    assert.equal(r.written, 205, '201번째 이후 선택도 적혀야 한다');
+    assert.equal(r.results.length, 205);
+    const log2 = [];
+    fill.__setPoolForTest(stubPool([], log2));
+    await assert.rejects(fill.applyCaptureProducts({ campaignId: 'c1', picks: Array.from({ length: 1001 }, (_, i) => ({ orderId: String(i), optKey: F })) }),
+      e => e.code === 'too_many');
+    assert(!log2.some(x => /UPDATE|INSERT/.test(x.s)), '거절 = 쓰기 0');
+  });
+
   await ok('라우트: 관리자 전용 · 적용은 confirm:true 필수', async () => {
     const src = require('fs').readFileSync(require('path').resolve(__dirname, '../src/routes/trackB.routes.js'), 'utf8');
     assert(/router\.post\('\/campaigns\/:id\/capture-product-fill', authMiddleware, adminOrMasterMiddleware/.test(src));

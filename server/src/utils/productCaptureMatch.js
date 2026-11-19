@@ -189,4 +189,124 @@ function capturedOtherOption(captureText, options, chosenKey, opt) {
   return only && only !== String(chosenKey || '') ? only : '';
 }
 
-module.exports = { mentionedOptions, matchOption, capturedOtherOption, _norm };
+/* ═══ 결정 383 — 옵션 없는 「택1」 공고의 **분류 후보**(직원이 공고 창에 적은 `피치, 레몬, 스트로베리`) 짝짓기 ═══
+ *
+ * 왜 matchOption 을 그대로 쓰지 않나(2026-11-18 올리브영 세라모사이드 캡처 30장 실측):
+ *   이 상품은 **상품명 자체에 맛이 다 들어 있다**(`세라모사이드 피치맛/레몬맛/스트로베리맛 28정`). 상품명+옵션을 합쳐
+ *   matchOption 에 넣으면 `피치`·`레몬`(약한 이름 — 낱말 일치만)은 옵션 글자의 `피치맛` 에 안 걸리고 `스트로베리`(강한 이름)만
+ *   상품명 속 글자로 걸려 "하나만 걸렸다 = 확실" 로 접힌다 → **30장 중 28장이 스트로베리, 그중 19장이 틀림.**
+ * 그래서 분류는 이 함수 하나로 따로 본다(matchOption·결정 230 의 상품 짝짓기는 손대지 않는다 — 완화 금지 유지):
+ *   ① **옵션 글자만** 대조한다. `옵션:` 머리말이 있으면 머리말 뒤를 본다 — 머리말 앞이 상품 제목(맛 둘 이상 나열)이면 버리고,
+ *      맛 하나를 따로 말하면 함께 센다(실측 #145: AI 가 옵션 칸에 상품명까지 넣음).
+ *   ② 상품명은 **옵션 글자가 아예 없을 때만**, 그리고 상품명에 후보가 **정확히 하나**만 보일 때만(실측 #127 단일 맛 상품).
+ *   ③ 짧은 후보(`피치` 한글 2자)도 `피치맛`·`세라마이드레몬밋`(오타) 안에서 걸린다 — 한글이 든 두 글자 이상 후보는 "들어 있으면" 걸린다.
+ *      모든 후보에 똑같이 붙은 꼬리(`피치맛/레몬맛` 의 `맛`)는 떼고 본다(알맹이 — 위 _cores 와 같은 생각, 꼬리만).
+ *      영문·숫자만인 후보(`L`·`XL`·`100`)는 따로 쓴 글자만(`XL` 속 `L` ✗ · `KS-100` 속 `100` ✗) · 한글 한 글자(`킹`)는 낱말 일치만.
+ *   ★★ **둘 이상이면 '' (모른다)** — 후보끼리 겹치면(`레몬` ⊂ `레몬라임`) 긴 쪽 안에서만 보인 짧은 쪽은 세지 않는다.
+ * 후보가 둘 미만이면 고를 것이 없으므로 '' (기능 꺼짐).
+ */
+const _CLS_SPLIT = /[,/|·・、\n\r;]+/;
+const _CLS_MAX = 20;
+const _clsNorm = (v) => _norm(String(v == null ? '' : v).normalize('NFKC'));
+
+/** 직원이 적은 분류 후보 글 → 후보 목록(같은 글자는 하나로 · 최대 20개 · 각 30자). */
+function parseClassifyCandidates(text) {
+  const raw = Array.isArray(text) ? text.map(x => String(x == null ? '' : x)) : String(text == null ? '' : text).normalize('NFKC').split(_CLS_SPLIT);
+  let parts = raw.map(s => s.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  // 「/」가 지워져 `피치 레몬 스트로베리` 처럼 한 덩어리로 온 경우(운영 실측) — 하나뿐이면 띄어쓰기로 나눈다(후보 하나는 쓸모가 없다).
+  if (parts.length === 1 && /\s/.test(parts[0])) parts = parts[0].split(/\s+/);
+  const seen = new Set(), out = [];
+  for (const p of parts) {
+    const label = p.slice(0, 30).trim();
+    const k = _clsNorm(label);
+    if (!k || seen.has(k)) continue;
+    seen.add(k); out.push(label);
+    if (out.length >= _CLS_MAX) break;
+  }
+  return out;
+}
+/** 저장용 한 줄(`피치, 레몬, 스트로베리`). */
+function formatClassifyCandidates(list) { return parseClassifyCandidates(list).join(', '); }
+
+/** 후보마다 대조할 글자(알맹이) — 모든 후보에 똑같이 붙은 꼬리를 떼되, 남는 것이 한글 두 글자 이상이고 서로 다를 때만. */
+function _classifyCores(keys) {
+  let suf = keys[0] || '';
+  for (const k of keys) { let i = 0; while (i < suf.length && i < k.length && suf[suf.length - 1 - i] === k[k.length - 1 - i]) i++; suf = suf.slice(suf.length - i); }
+  if (!suf) return keys.slice();
+  const cores = keys.map(k => k.slice(0, k.length - suf.length));
+  const ok = cores.every(c => c.length >= 2 && /[가-힣]/.test(c)) && new Set(cores).size === cores.length;
+  return ok ? cores : keys.slice();
+}
+
+/** 그 글자(text) 안에서 보이는 후보 index 집합. */
+function _classifyHits(text, cores) {
+  const src = String(text == null ? '' : text).normalize('NFKC').toLowerCase();
+  const compact = src.replace(/[^0-9a-z가-힣]+/g, '');
+  const tokens = new Set(src.split(/[^0-9a-z가-힣]+/).filter(Boolean));
+  if (!compact) return new Set();
+  const latinBound = (c) => {
+    // 따로 쓴 글자: 앞이 영문·숫자가 아니고(`KS-100` 처럼 영문·숫자 뒤 `-`/`_` 로 붙은 것도 아님) 뒤가 영문·숫자가 아니다.
+    let from = 0;
+    for (;;) {
+      const i = src.indexOf(c, from);
+      if (i < 0) return false;
+      const prev = i > 0 ? src[i - 1] : '', prev2 = i > 1 ? src[i - 2] : '', next = src[i + c.length] || '';
+      const prevOk = !/[0-9a-z]/.test(prev) && !(/[-_]/.test(prev) && /[0-9a-z]/.test(prev2));
+      if (prevOk && !/[0-9a-z]/.test(next)) return true;
+      from = i + 1;
+    }
+  };
+  const positions = (c) => { const out = []; let i = compact.indexOf(c); while (i >= 0) { out.push(i); i = compact.indexOf(c, i + 1); } return out; };
+  const hit = new Set();
+  cores.forEach((c, i) => {
+    if (!c) return;
+    if (/^[0-9a-z]+$/.test(c)) { if (latinBound(c)) hit.add(i); return; }
+    if (c.length < 2) { if (tokens.has(c)) hit.add(i); return; }
+    if (compact.includes(c)) hit.add(i);
+  });
+  // 겹치는 후보 — 짧은 후보가 **모든 자리에서** 함께 걸린 긴 후보 안에만 보이면 따로 센 것이 아니다.
+  for (const a of [...hit]) {
+    const ca = cores[a];
+    if (/^[0-9a-z]+$/.test(ca)) continue;   // 영문·숫자는 위 경계 규칙이 이미 가른다
+    const longer = [...hit].filter(b => b !== a && cores[b].length > ca.length && cores[b].includes(ca));
+    if (!longer.length) continue;
+    const covered = positions(ca).every(p => longer.some(b => positions(cores[b]).some(q => q <= p && p + ca.length <= q + cores[b].length)));
+    if (covered) hit.delete(a);
+  }
+  return hit;
+}
+
+/**
+ * 캡처 판독(상품명·옵션 글자) → 분류 후보 **하나**(확신할 때만). 모르거나 둘 이상이면 ''.
+ * @param {{productName?:string, productOption?:string}} capture
+ * @param {string|string[]} candidates 직원이 적은 후보(글 또는 목록)
+ */
+function classifyCaptureCandidate(capture, candidates) {
+  const list = parseClassifyCandidates(candidates);
+  if (list.length < 2) return '';
+  const cores = _classifyCores(list.map(_clsNorm));
+  const name = String((capture && capture.productName) || '');
+  const opt = String((capture && capture.productOption) || '').normalize('NFKC');
+  const LABEL = /옵션\s*:/;
+  const parts = opt.split(LABEL);
+  const optBody = parts.join(' ');
+  let hits;
+  if (_clsNorm(optBody.replace(/옵션/g, ''))) {
+    // ① 옵션 글자만 — 머리말이 있으면 머리말 뒤 + (머리말 앞이 후보 하나만 말할 때만) 머리말 앞
+    if (parts.length > 1) {
+      hits = new Set();
+      for (const seg of parts.slice(1)) for (const i of _classifyHits(seg, cores)) hits.add(i);
+      const pre = _classifyHits(parts[0], cores);
+      if (pre.size === 1) for (const i of pre) hits.add(i);
+    } else {
+      hits = _classifyHits(opt, cores);
+    }
+  } else {
+    // ② 옵션 줄이 아예 없을 때만 상품명 — 후보가 정확히 하나 보일 때만
+    hits = _classifyHits(name, cores);
+  }
+  return hits.size === 1 ? list[[...hits][0]] : '';
+}
+
+module.exports = { mentionedOptions, matchOption, capturedOtherOption, _norm,
+  parseClassifyCandidates, formatClassifyCandidates, classifyCaptureCandidate };
