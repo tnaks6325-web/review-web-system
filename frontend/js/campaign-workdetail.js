@@ -354,8 +354,8 @@
       html += '<div class="cwd-box" style="border:1px solid #FDBA74;background:#FFF7ED;border-radius:12px;padding:12px 14px;margin:10px 0">'
         + '<div class="cwd-tt" style="color:#C2410C">🚚 필수 배송메세지</div>'
         + '<div class="cwd-body" style="font-size:1.02rem;font-weight:800;color:#1d1d1f">' + escAttr(rdm) + '</div>'
-        + '<div style="font-size:.74rem;color:#9A3412;margin-top:6px;line-height:1.5">'
-        + '결제할 때 배송메세지(배송 요청사항)에 위 문구를 꼭 입력해 주세요. 구매캡처에 이 배송메세지가 보여야 구매양식이 제출돼요.</div>'
+        + '<div style="font-size:clamp(.62rem,3.2vw,.74rem);color:#9A3412;margin-top:6px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
+        + '구매캡처에 이 배송메세지가 보여야 구매양식이 제출돼요.</div>'
         + '</div>';
     }
 

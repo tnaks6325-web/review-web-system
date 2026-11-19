@@ -45,8 +45,8 @@ const M = global.window.CampWorkDetail;
 const wd = { productLines: '가상 탈취제 300g - 결제금액 10,000원', reviewGuide: '포토 리뷰' };
 const withMemo = M.cardsHtml({ workDetail: wd, requiredDeliveryMemo: '문앞에 놓아주세요!' }, { showOption: false });
 ok('「🚚 필수 배송메세지」 카드에 글자가 그대로', withMemo.includes('🚚 필수 배송메세지') && withMemo.includes('문앞에 놓아주세요!'), withMemo);
-ok('결제할 때 입력하라는 안내 · 캡처에 보여야 제출된다는 안내',
-  /결제할 때 배송메세지/.test(withMemo) && /구매캡처에 이 배송메세지가 보여야/.test(withMemo), withMemo);
+ok('하단 안내는 「구매캡처에 이 배송메세지가 보여야 구매양식이 제출돼요.」 한 문장만(사용자 확정 2026-11-19)',
+  withMemo.includes('>구매캡처에 이 배송메세지가 보여야 구매양식이 제출돼요.</div>') && !/결제할 때 배송메세지/.test(withMemo), withMemo);
 const iProd = withMemo.indexOf('📦 상품'), iMemo = withMemo.indexOf('🚚 필수 배송메세지'), iRev = withMemo.indexOf('📝 리뷰 가이드');
 ok('상품 카드 바로 아래 · 리뷰 가이드보다 위', iProd >= 0 && iProd < iMemo && iMemo < iRev);
 ok('꺾쇠는 글자로', M.cardsHtml({ workDetail: wd, requiredDeliveryMemo: '<b>00</b>' }, {}).includes('&lt;b&gt;00'));
