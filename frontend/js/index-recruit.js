@@ -6948,6 +6948,7 @@ function _renderPreview() {
       specialNotesImages: _igUrls("notes"),
     },
     landingUrl: _v("rf_landing_url"),
+    requiredDeliveryMemo: _v("rf_required_delivery_memo"),   // ★ 결정 386: 리뷰어 화면과 같은 필수 배송메세지 카드
     inflowType: "",                 // 불명 = 랜딩 버튼 노출(실제 화면과 동일한 기본값)
     // ★ 선택지별 가이드를 설정한 공고는 첫 선택지 것을 보여준다(없으면 null = 공통 가이드 = 종전 동작)
     selectedOption: _rfFirstUnitGuide(),
