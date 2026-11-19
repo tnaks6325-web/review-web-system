@@ -80,5 +80,41 @@ const PREVIEW = { ok: true, total: 3, nextOffset: null, options: [{ optKey: 'F',
     assert(/_cfCanUse\(qb\)\?'<button class="wbl-b" id="wdQbFill"/.test(html));
     assert(/fb\.onclick=\(\)=>\{ _wdQuotaAlertClose\(\); openCaptureFill\(cid\); \}/.test(html));
   });
+  // ★ Codex 리뷰 #1843: 여러 묶음을 읽어 200건 넘게 고르면 한 요청에 다 실었고, 서버(옛 판)가 200건 뒤를 조용히 버렸다.
+  //   → 화면이 200건씩 나눠 보내고 결과를 합친다(옛 서버·새 서버 모두에서 전부 적힌다). 상품 찾기·분류 채우기 같은 함수.
+  const many = (n, from = 0) => Array.from({ length: n }, (_, i) => ({ orderId: 'm' + (from + i), seq: from + i + 1, day: '2026-11-19', status: 'matched', optKey: 'F', read: 'F' }));
+  const oldServer = (b) => {   // 옛 서버: 200건만 적고 나머지는 말없이 버린다
+    const kept = b.picks.slice(0, 200);
+    return { ok: true, written: kept.length, results: kept.map(p => ({ orderId: p.orderId, ok: true })) };
+  };
+  await ok('Codex 리뷰 #1843: 묶음 둘(250건)을 골라 적용 → 200건씩 나눠 보내 250건 전부 적는다 · 안내는 합친 건수', async () => {
+    const { ctx, els, log } = harness('admin', (b) => b.mode === 'preview'
+      ? (b.offset ? { ok: true, total: 250, nextOffset: null, options: PREVIEW.options, items: many(50, 200) } : { ok: true, total: 250, nextOffset: 200, options: PREVIEW.options, items: many(200) })
+      : oldServer(b));
+    await ctx.openCaptureFill('c1', 0);
+    await ctx.openCaptureFill('c1', 200, true);
+    assert(/250건 적용/.test(els.cfOv.innerHTML));
+    await ctx._cfApply();
+    const aps = log.api.filter(x => x[1].mode === 'apply').map(x => x[1]);
+    assert(aps.every(b => b.picks.length <= 200 && b.confirm === true), '한 요청 200건 이하');
+    const sent = aps.flatMap(b => b.picks.map(p => p.orderId));
+    assert.equal(new Set(sent).size, 250, '고른 250건이 모두 서버에 간다(중복 없이)');
+    assert.equal(sent.length, 250);
+    assert(/상품 250건을 채웠습니다/.test(log.toast[0]), log.toast[0]);
+    assert(!els.cfOv, '적용 뒤 창 닫힘');
+  });
+  await ok('Codex 리뷰 #1843: 나눠 보내다 중간에 실패 → 이미 적힌 건은 알리고, 못 보낸 줄은 고른 채 창에 남긴다(다시 누르면 이어서)', async () => {
+    let n = 0;
+    const { ctx, els, log } = harness('admin', (b) => b.mode === 'preview'
+      ? { ok: true, total: 250, nextOffset: null, options: PREVIEW.options, items: many(250) }
+      : (++n === 1 ? oldServer(b) : { ok: false, error: '서버 오류' }));
+    await ctx.openCaptureFill('c1', 0);
+    await ctx._cfApply();
+    assert(/상품 200건을 채웠습니다/.test(log.toast[0]), '먼저 적힌 건수를 알린다');
+    assert(/적용하지 못했습니다/.test(log.alert[0]));
+    assert(els.cfOv, '창은 열려 있다');
+    assert.equal(Object.keys(ctx.STATE._cf.picks).length, 50, '못 보낸 50건만 남는다');
+    assert(/50건 적용/.test(els.cfOv.innerHTML));
+  });
   console.log(`\n✅ captureFillPopupUi: ${passed} passed`);
 })().catch(e => { console.error(e); process.exit(1); });

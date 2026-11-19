@@ -232,8 +232,11 @@ async function previewCaptureClassify({ campaignId, limit, offset = 0 } = {}) {
 async function applyCaptureClassify({ campaignId, picks = [], by = 'system' } = {}) {
   const db = getPool();
   const { camp, candidates } = await _loadClassifyCampaign(db, campaignId);
-  const MAX = _fill().MAX_ITEMS;
-  const list = (Array.isArray(picks) ? picks : []).slice(0, MAX)
+  // ★ Codex 리뷰 #1843: 고른 줄을 전부 적는다(200건 뒤를 말없이 버리지 않는다) — 지나치게 큰 요청만 통째로 거절(결정 232 와 같은 상한).
+  const APPLY_MAX = _fill().APPLY_MAX;
+  const raw = Array.isArray(picks) ? picks : [];
+  if (raw.length > APPLY_MAX) throw new ClassifyError('too_many', `한 번에 ${APPLY_MAX}건까지만 적용합니다 — 나눠서 적용해 주세요.`);
+  const list = raw
     .map(p => ({ orderId: String((p && p.orderId) || ''), optKey: String((p && p.optKey) || ''), source: p && p.source === 'manual' ? 'manual' : 'capture' }))
     .filter(p => p.orderId && p.optKey);
   if (!list.length) throw new ClassifyError('no_picks', '적용할 줄이 없습니다.');

@@ -4032,7 +4032,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
   });
   const _skipWeekendsEl = document.getElementById("rf_skip_weekends");
   if (_skipWeekendsEl) _skipWeekendsEl.checked = false;
-  const _cashReceiptRequiredEl = document.getElementById("rf_cash_receipt_required"); if (_cashReceiptRequiredEl) _cashReceiptRequiredEl.checked = false; { const _rdmEl = document.getElementById("rf_required_delivery_memo"); if (_rdmEl) _rdmEl.value = ""; }   // 결정 260 { const _rfEl = document.getElementById("rf_classify_candidates"); if (_rfEl) _rfEl.value = ""; }   // 결정 383
+  const _cashReceiptRequiredEl = document.getElementById("rf_cash_receipt_required"); if (_cashReceiptRequiredEl) _cashReceiptRequiredEl.checked = false; { const _rdmEl = document.getElementById("rf_required_delivery_memo"); if (_rdmEl) _rdmEl.value = ""; }   // 결정 260
+  /* 결정 383: 분류 후보 — 지난 공고의 후보가 새 공고에 남아 저장되지 않게(Codex 리뷰 #1843: 주석 뒤에 붙어 실행되지 않았다) */
+  { const _rfEl = document.getElementById("rf_classify_candidates"); if (_rfEl) _rfEl.value = ""; }
   rfSetChatRoom(false);
   // 혼합 리뷰 프리필은 동적으로 생성되는 입력칸의 진실원본이다. 새 모달을 열 때 이전 공고의
   // 수량이 섞이지 않도록 함께 초기화한다.

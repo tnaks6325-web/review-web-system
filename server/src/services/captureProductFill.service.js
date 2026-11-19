@@ -37,7 +37,10 @@ const deps = {
 function __setDepsForTest(d) { Object.assign(deps, d); }
 
 const PRODUCT_FIELD = () => 'col:' + require('./orderLedger.service').PRODUCT_HEADER;
-const MAX_ITEMS = 200;
+const MAX_ITEMS = 200;   // 미리보기 한 묶음(AI 판독 수) 상한
+// ★ Codex 리뷰 #1843: 적용은 AI 를 안 돌린다 — 미리보기 여러 묶음에서 고른 줄을 **전부** 적는다(예전엔 200건 뒤를 말없이 버렸다).
+//   지나치게 큰 요청만 통째로 거절한다(일부만 적고 나머지를 버리지 않는다). 화면은 MAX_ITEMS 씩 나눠 보낸다.
+const APPLY_MAX = 1000;
 const AI_CONCURRENCY = 3;
 
 class CaptureFillError extends Error {
@@ -191,7 +194,9 @@ async function previewCaptureProducts({ campaignId, limit = MAX_ITEMS, offset = 
 async function applyCaptureProducts({ campaignId, picks = [], by = 'system' } = {}) {
   const db = getPool();
   const { camp, options } = await _loadCampaign(db, campaignId);
-  const list = (Array.isArray(picks) ? picks : []).slice(0, MAX_ITEMS)
+  const raw = Array.isArray(picks) ? picks : [];
+  if (raw.length > APPLY_MAX) throw new CaptureFillError('too_many', `한 번에 ${APPLY_MAX}건까지만 적용합니다 — 나눠서 적용해 주세요.`);
+  const list = raw
     .map(p => ({ orderId: String((p && p.orderId) || ''), optKey: String((p && p.optKey) || ''), source: p && p.source === 'manual' ? 'manual' : 'capture' }))
     .filter(p => p.orderId && p.optKey);
   if (!list.length) throw new CaptureFillError('no_picks', '적용할 줄이 없습니다.');
@@ -313,4 +318,4 @@ async function fillFromSubmitCapture({ orderSubmissionId, sheetId, tabName, capt
 }
 
 module.exports = { previewCaptureProducts, applyCaptureProducts, fillFromSubmitCapture, readCaptureText, loadSamples,
-  MAX_ITEMS, AI_CONCURRENCY, CaptureFillError, __setPoolForTest, __setDepsForTest };
+  MAX_ITEMS, APPLY_MAX, AI_CONCURRENCY, CaptureFillError, __setPoolForTest, __setDepsForTest };

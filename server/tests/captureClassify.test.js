@@ -269,6 +269,18 @@ const CAP = { name: '[먹바속촉] 세라모사이드 피치맛/레몬맛/스�
     // 다시 미리보기 — 채운 주문은 대상에서 빠진다
     assert.equal((await svc.previewCaptureClassify({ campaignId: CAMP })).total, 0);
   });
+  await ok('C2b ★ Codex 리뷰 #1843: 미리보기를 여러 묶음 읽고 200건 넘게 골라도 전부 적는다(조용히 잘라 버리지 않는다) · 너무 많으면 통째로 거절', async () => {
+    await seed();
+    const ids = [];
+    for (let i = 0; i < 205; i++) ids.push(await order({ capture: 'fx' + i }));
+    const r = await svc.applyCaptureClassify({ campaignId: CAMP, by: '김수만', picks: ids.map(id => ({ orderId: id, optKey: '피치', source: 'manual' })) });
+    assert.equal(r.written, 205, '201번째 이후 선택도 적혀야 한다');
+    assert.equal(r.results.length, 205);
+    assert.equal((await valueOf(ids[204])).value_text, '피치');
+    // 한 요청이 지나치게 크면 일부만 적지 않고 통째로 거절(쓰기 0) — 화면은 200건씩 나눠 보낸다
+    const big = Array.from({ length: 1001 }, (_, i) => ({ orderId: 'x' + i, optKey: '피치' }));
+    await assert.rejects(svc.applyCaptureClassify({ campaignId: CAMP, picks: big }), e => e.code === 'too_many');
+  });
   await ok('C3 보관 공고·후보 없음·옵션 2개 이상 → 미리보기·적용 모두 거절(쓰기 0)', async () => {
     for (const [cfg, code] of [[{ archived: true }, 'archived'], [{ candidates: '' }, 'no_candidates'], [{ options: ['A', 'B'] }, 'multi_option']]) {
       await seed(cfg);
@@ -399,6 +411,31 @@ const CAP = { name: '[먹바속촉] 세라모사이드 피치맛/레몬맛/스�
     await ctx.openCaptureFill('c9', 0);
     assert.equal(log.api[0].target, undefined);
     assert(/📷 캡처로 상품 찾기/.test(els.cfOv.innerHTML));
+  });
+
+  await ok('E5 ★ Codex 리뷰 #1843: 공고 창을 새로 열면 「분류 후보」가 실제로 비워진다(vm 실행 — 후보 있는 공고 수정 → 닫기 → 새 공고)', async () => {
+    const vm = require('vm');
+    const ir = fs.readFileSync(path.join(ROOT, 'frontend/js/index-recruit.js'), 'utf8');
+    const fnStart = ir.indexOf('async function openRecruitModal(');
+    const a = ir.indexOf('/* ⚡ 참여형(M2) 필드 초기화 */', fnStart);
+    const b = ir.indexOf('rfSetChatRoom(false);', a);
+    assert(fnStart > 0 && a > fnStart && b > a, '초기화 묶음을 찾는다');
+    // 앞 공고(후보 있음)를 수정하고 닫은 상태 그대로의 입력칸
+    const els = {};
+    for (const id of ['rf_start_date', 'rf_window_start', 'rf_window_end', 'rf_daily_limit', 'rf_recruit_total', 'rf_landing_url',
+      'rf_wd_product', 'rf_wd_inflow', 'rf_wd_review', 'rf_wd_notes', 'rf_required_delivery_memo', 'rf_classify_candidates']) els[id] = { value: 'x' };
+    els.rf_classify_candidates.value = '피치, 레몬, 스트로베리'; els.rf_required_delivery_memo.value = '00';
+    els.rf_skip_weekends = { checked: true }; els.rf_cash_receipt_required = { checked: true };
+    vm.runInNewContext(ir.slice(a, b), { document: { getElementById: id => els[id] || null } });
+    assert.equal(els.rf_classify_candidates.value, '', '새 공고에 앞 공고의 분류 후보가 남으면 안 된다(저장 때 그대로 실려 엉뚱한 공고가 분류된다)');
+    assert.equal(els.rf_required_delivery_memo.value, '', '결정 260 필수 배송메세지도 그대로 비운다');
+    assert.equal(els.rf_cash_receipt_required.checked, false);
+    // 같은 종류의 실수(실행할 코드가 줄 끝 주석 뒤에 붙어 실행되지 않음)를 공고 창·작업보드 파일 전체에서 막는다
+    for (const f of ['frontend/js/index-recruit.js', 'frontend/js/recruit-modal.js', 'frontend/workdesk.html']) {
+      const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+      const bad = src.split('\n').map((l, i) => [i + 1, l]).filter(([, l]) => /\/\/[^"'`:]*(document\.getElementById\(|\.value *= )/.test(l));
+      assert.deepEqual(bad.map(([n]) => n), [], `${f}: 주석 뒤에 숨은 실행 코드`);
+    }
   });
 
   console.log(`\n✅ captureClassify: ${passed} passed`);

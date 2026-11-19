@@ -8673,15 +8673,32 @@ async function _cfApply(){
   if(!picks.length) return;
   const b=document.getElementById('cfApply'); if(b){ b.disabled=true; b.textContent='적용 중…'; }
   const cls=cf.kind==='classify';
-  const r=await api('/api/trackb/campaigns/'+encodeURIComponent(cf.cid)+'/capture-product-fill',
-    {method:'POST',body:JSON.stringify({mode:'apply',confirm:true,picks,...(cls?{target:'classify'}:{})})}).catch(()=>null);
-  if(!r||!r.ok){ if(b){ b.disabled=false; b.textContent=picks.length+'건 적용'; } alert('적용하지 못했습니다: '+((r&&r.error)||'서버 오류')); return; }
-  const fails=(r.results||[]).filter(x=>!x.ok);
+  // ★ Codex 리뷰 #1843: 여러 묶음에서 고른 줄을 한 요청에 다 실으면 옛 서버가 200건 뒤를 말없이 버렸다 —
+  //   한 묶음(200건)씩 나눠 보내고 결과를 합친다. 중간에 실패하면 이미 적힌 건은 알리고, 못 보낸 줄만 고른 채 창에 남긴다.
+  const CHUNK=200; let written=0, done=0, r=null; const results=[];
+  for(let k=0;k<picks.length;k+=CHUNK){
+    const part=picks.slice(k,k+CHUNK);
+    r=await api('/api/trackb/campaigns/'+encodeURIComponent(cf.cid)+'/capture-product-fill',
+      {method:'POST',body:JSON.stringify({mode:'apply',confirm:true,picks:part,...(cls?{target:'classify'}:{})})}).catch(()=>null);
+    if(!r||!r.ok) break;
+    written+=Number(r.written)||0; results.push(...(r.results||[])); done+=part.length;
+  }
+  const fails=results.filter(x=>!x.ok);
+  const msg=`${cls?'분류':'상품'} ${written}건을 채웠습니다`+(fails.length?` · ${fails.length}건은 적지 않음(${esc(fails[0].message||fails[0].reason||'')})`:'');
+  if(!r||!r.ok){
+    if(!done){ if(b){ b.disabled=false; b.textContent=picks.length+'건 적용'; } alert('적용하지 못했습니다: '+((r&&r.error)||'서버 오류')); return; }
+    picks.slice(0,done).forEach(p=>{ delete cf.picks[p.orderId]; });
+    toast(msg); _cfRender();
+    alert('적용하지 못했습니다: '+((r&&r.error)||'서버 오류'));
+    if(cls){ try{ if(typeof reloadWorkdesk==='function') await reloadWorkdesk(); }catch(_){ } }
+    return;
+  }
   _cfClose();
-  toast(`${cls?'분류':'상품'} ${r.written}건을 채웠습니다`+(fails.length?` · ${fails.length}건은 적지 않음(${esc(fails[0].message||fails[0].reason||'')})`:''));
+  toast(msg);
   if(cls){ try{ if(typeof reloadWorkdesk==='function') await reloadWorkdesk(); }catch(_){ } return; }   // 결정 383 — 채운 값이 표에 바로 보이게
   try{ if(STATE.cur) await _wdQuotaAlert(STATE.cur); }catch(_){ }
 }
+
 /* ══ 결정 383 — 작업보드 「분류」 칸(추가 열) — 옵션 없는 「택1」 공고 ═══════════════════════════════════════
    공고 창 「분류 후보」를 적은 공고의 작업표면 서버가 classifyColumn{campaignId,columnId,candidates} 를 싣는다(내부만).
    · 그 칸 머리글 메뉴(값별 건수)에서 빈 값을 「(미분류)」로 부른다 — 후보별·미분류 건수는 이 메뉴가 센다(새 칩 없음).
