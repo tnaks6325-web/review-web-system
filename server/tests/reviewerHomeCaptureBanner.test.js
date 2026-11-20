@@ -43,7 +43,9 @@ test('VM 홈은 한 줄 알림(옛 모듈이면 종전 목록) · 리뷰내역·
   assert.match(tab,/captureSelfService === '1'\) mc\.style\.display = key === 'home' \? '' : 'none'/);
   assert.match(tab,/else if \(key === 'cs'\) mc\.style\.display = 'none';/,'옛 서버용 목록은 종전대로');
   assert.match(HOME,/reviewer-purchase-capture\.js\?v=20261113-home-banner/);
-  assert.match(HOME,/reviewer-purchase-capture\.css\?v=20261113-home-banner/);
+  // CSS 는 한 줄 알림 이후 판(2026-11-13 이후 날짜)이어야 캐시가 갱신된다 — 뒤 판(예: 2026-11-20 단추 낮춤)도 받는다
+  const cssV=(HOME.match(/reviewer-purchase-capture\.css\?v=(\d{8})-[\w-]+/)||[])[1];
+  assert.ok(cssV&&cssV>='20261113','CSS 판 '+cssV);
 });
 
 test('VM 새 모양은 홈 알림·리뷰어 창 안에서만 — 직원 창·기존 목록 규칙을 건드리지 않는다',()=>{
@@ -114,9 +116,12 @@ for(const engine of ['chromium','webkit'])for(const width of [320,390,1280]){
     for(const s of ['[data-action="add"]','[data-action="request"]','textarea'])assert.equal(await sheet.locator(s).first().isVisible(),true,s);
     const bg=await sheet.locator('[data-action="request"]').evaluate(n=>getComputedStyle(n).backgroundColor);
     assert.equal(bg,'rgb(0, 113, 227)','주 단추는 파랑 채움');
-    const tall=await sheet.locator('[data-action="add"],[data-action="request"],textarea').evaluateAll(ns=>ns.map(n=>Math.round(n.getBoundingClientRect().height)));
-    const minTap=width<=360?36:40;   // 작은 휴대폰(360 이하)은 한 단계 작게(사용자 요청 2026-11-13)
-    assert.ok(tall.every(x=>x>=minTap),'단추·입력칸 '+minTap+'px 이상 '+tall);
+    // 단추 32px(작은 휴대폰 30px · 사용자 확정 2026-11-20 「안1」) · 메모칸 40px(작은 휴대폰 36px)은 그대로
+    const btnH=await sheet.locator('[data-action="add"],[data-action="request"]').evaluateAll(ns=>ns.map(n=>Math.round(n.getBoundingClientRect().height)));
+    const btnWant=width<=360?30:32;
+    assert.ok(btnH.length===2&&btnH.every(x=>x===btnWant),'단추 높이 '+btnWant+'px '+btnH);
+    const memoH=await sheet.locator('textarea').evaluate(n=>Math.round(n.getBoundingClientRect().height));
+    assert.ok(memoH>=(width<=360?36:40),'메모칸 높이 '+memoH);
     const req=await sheet.locator('[data-action="request"]').evaluate(n=>n.scrollWidth<=n.clientWidth);
     assert.equal(req,true,'「이미 제출했어요 · 확인 요청」 글자가 단추 안에 들어간다');
     assert.equal(await sheet.locator('textarea').evaluate(n=>getComputedStyle(n).fontSize),'16px','아이폰 확대 방지');
