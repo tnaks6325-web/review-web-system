@@ -391,7 +391,7 @@
    *  모집중(시간창 안)은 썸네일 중앙 "오늘 구매마감까지" 카운트다운(cutoffAt), 오픈전은 "오픈까지"(opensAt). */
   /** ★ 결정 259: 공고 전체 품절 멈춤 — 공개 목록은 soldoutPaused(서버 스위치 반영), 관리자 목록은 원본 칸. */
   function _soldoutPaused(c) { return !!(c && (c.soldoutPaused === true || c.soldout_paused_at)); }
-  /** ★ 결정 388 — 「원본 오더 삭제됨」 한 줄(관리자 카드 · 공고 수정 창이 같은 조각을 쓴다 — 문구 사본 0).
+  /** ★ 결정 389 — 「원본 오더 삭제됨」 한 줄(관리자 카드 · 공고 수정 창이 같은 조각을 쓴다 — 문구 사본 0).
    *  모양·글자 = 홈 작업 목록의 같은 표시(workdesk 상태 칸 · 결정 254): 빨간 굵은 작은 글자, 배경 없음.
    *  값(sod) = 서버가 **직원 응답에만** 싣는 { deletedAt } — 지운 직원 이름은 오지도 않고 그리지도 않는다.
    *  값이 없으면 '' (옛 서버·조회 실패·해당 없음 = 아무것도 그리지 않는다). */
@@ -957,7 +957,7 @@
       const delOvl = delMode
         ? `<div class="pdelpick" onclick="event.stopPropagation();toggleRecruitDelPick('${_esc(c.id)}')"><span class="box">✓</span></div>`
         : '';
-      // ★ 결정 388: 원본 오더가 지워진 공고 — 제목 바로 아래 한 줄(값이 없으면 한 글자도 그리지 않는다 · 관리자 카드에서만)
+      // ★ 결정 389: 원본 오더가 지워진 공고 — 제목 바로 아래 한 줄(값이 없으면 한 글자도 그리지 않는다 · 관리자 카드에서만)
       const sodHtml = _sourceOrderDeletedHtml(c.sourceOrderDeleted, { archived: !!c.archived_at });
       // 임시저장은 '종료'가 아니라 작업 중인 공고 — 흑백 처리하면 리본·미연결 경고가 안 읽혀 제외한다.
       return `

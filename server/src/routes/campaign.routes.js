@@ -1613,7 +1613,7 @@ router.get('/admin/popular-credit-audit', authMiddleware, adminOrMasterMiddlewar
   } catch (err) { next(err); }
 });
 
-/** ★ 결정 388 — 공고 한 건의 「원본 오더 삭제됨」 값(`{ deletedAt }` · 없으면 null).
+/** ★ 결정 389 — 공고 한 건의 「원본 오더 삭제됨」 값(`{ deletedAt }` · 없으면 null).
  *  sod = trackB.sourceOrderDeletedMap() 결과(홈 작업 목록과 같은 맵 — 사본 금지). ok:false(조회 실패) = null = 표시 없음.
  *  ★★ 부르는 곳 = 관리자 목록(_adminCampaignList)과 상세의 관리자 갈래뿐. 공개·리뷰어·업체 응답에 싣지 않는다(완화 금지). */
 function _sourceOrderDeletedFor(sod, row) {
@@ -1769,7 +1769,7 @@ async function getCampaignDetail(req, res, next) {
           orderInfo.syncedAt = _sn[0] && _sn[0].at ? new Date(_sn[0].at).toISOString() : null;
         } catch (_) { /* 표시만 생략 */ }
       }
-      /* ★ 결정 388: 「원본 오더 삭제됨」 — 홈 작업 목록과 같은 판정(sourceOrderDeletedMap · 결정 254)을 공고의 연결 작업 좌표로 찾는다.
+      /* ★ 결정 389: 「원본 오더 삭제됨」 — 홈 작업 목록과 같은 판정(sourceOrderDeletedMap · 결정 254)을 공고의 연결 작업 좌표로 찾는다.
          ★★ 이 관리자 갈래 안에서만 싣는다 — 같은 함수가 로그인 없는 리뷰어 공고 상세(`router.get('/:id')`)도 그린다(레드 4 · 완화 금지).
          값은 { deletedAt } 하나 — 지운 직원 이름은 싣지 않는다. 조회 실패 = 칸 없음(화면은 표시 없이 그대로 열린다). */
       let sourceOrderDeleted = null;
@@ -3440,7 +3440,7 @@ async function _adminCampaignList(req, res, next) {
       d.inflowMixed = true;
       d.inflowUnits = [...(inflowUnits.get(d.id) || new Map())].map(([name, type]) => ({ name, type }));
     }   // 결정 333 — 가산 필드(없으면 종전 칩)
-    /* ★ 결정 388: 「원본 오더 삭제됨」 — 홈 작업 목록과 같은 맵을 **한 번** 불러 공고마다 연결 작업 좌표로 찾는다(N+1 없음).
+    /* ★ 결정 389: 「원본 오더 삭제됨」 — 홈 작업 목록과 같은 맵을 **한 번** 불러 공고마다 연결 작업 좌표로 찾는다(N+1 없음).
        값은 { deletedAt } 하나(지운 직원 이름 없음) · 조회 실패 = 칸 없음(목록은 그대로). 이 목록은 관리자·내부 직원 전용 경로다. */
     try {
       const _sod = await require('../services/trackB.service').sourceOrderDeletedMap();

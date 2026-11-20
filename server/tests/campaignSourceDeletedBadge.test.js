@@ -1,5 +1,5 @@
 /**
- * campaignSourceDeletedBadge.test.js — 결정 388 회귀가드(RW-C)
+ * campaignSourceDeletedBadge.test.js — 결정 389 회귀가드(RW-C)
  * 실행: node tests/campaignSourceDeletedBadge.test.js
  *
  * 사용자 확정(2026-11-20): 리뷰웹시스템[3버전] 직원 화면의 **모집공고 목록 카드**와 **공고 수정 창**에
@@ -43,7 +43,7 @@ const CAMPS = [
 }));
 
 (async () => {
-  console.log('\n▶ 결정 388 — 「원본 오더 삭제됨」은 직원 화면(관리자 갈래)에만 · 지운 직원 이름 없음\n');
+  console.log('\n▶ 결정 389 — 「원본 오더 삭제됨」은 직원 화면(관리자 갈래)에만 · 지운 직원 이름 없음\n');
 
   const db = new PGlite();
   await db.exec(`
