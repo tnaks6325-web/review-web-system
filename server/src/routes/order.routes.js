@@ -1925,12 +1925,48 @@ router.get('/intake/:id', async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// 결정 387 — 오더 삭제 영향(남는 모집공고·작업보드) 미리보기 · 읽기 전용(쓰기 0)
+// GET /api/order/intake/:id/delete-impact   (:id = 리뷰웹 작업오더 id — 삭제 경로와 같은 id)
+// 키: **X-Intake-Key 헤더만** + 시간 일정 비교(_intakeKeyMatches · /shared 와 같은 모양). 주소·본문 열쇠는 받지 않는다.
+// 응답: { ok:true, id, deleted, kept }  — kept 는 삭제 응답의 kept 와 같은 모양(workTabDelete.orderDeleteImpact 하나).
+//   kept.known === false 면 「확인하지 못했습니다」(절대 「남는 것 없음」 아님).
+// ═══════════════════════════════════════════════════════════
+router.get('/intake/:id/delete-impact', async (req, res, next) => {
+  try {
+    await _ensureTables();
+    const expected = process.env.ORDER_INTAKE_KEY;
+    if (!expected) return res.status(503).json({ ok: false, error: 'intake 키가 서버에 설정되지 않았습니다. (ORDER_INTAKE_KEY)' });
+    if (!_intakeKeyMatches(req.headers['x-intake-key'], expected)) return res.status(401).json({ ok: false, error: '인증에 실패했습니다.' });
+    const id = String(req.params.id || '').trim();
+    if (!id) return res.status(400).json({ ok: false, error: 'id가 필요합니다.' });
+    const { rows } = await pool.query(`SELECT id, deleted_at FROM work_orders WHERE id = $1 LIMIT 1`, [id]);
+    if (!rows.length) return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
+    const kept = await _deleteKept(id);
+    res.json({ ok: true, id, deleted: !!rows[0].deleted_at, kept });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** 결정 387 — 삭제 응답·미리보기의 kept. ★ 절대 throw 하지 않는다(삭제는 이미 끝났다) · 2.5초 상한 · 실패 = known:false. */
+async function _deleteKept(id) {
+  try {
+    return await require('../services/workTabDelete.service').orderDeleteImpact((t, p) => pool.query(t, p), id);
+  } catch (e) {
+    logger.warn(`[order] ${id} 삭제 영향 확인 실패(삭제는 그대로): ${e && e.message}`);
+    return { known: false, reason: 'check_failed' };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // 외부(인트라넷) 보낸 오더 삭제 — 공유 시크릿 인증 (JWT 불필요)
 // DELETE /api/order/intake/:id
 // 키: X-Intake-Key 헤더 또는 body.intakeKey / ?intakeKey=
 // body(선택): { deleted_by, deleted_by_name }
 // 권한(관리자/등록자 본인) 검증은 인트라넷 측에서 선행.
 // soft delete: 행은 보존(처리 이력·memo_log 유지), deleted_at 으로 목록 제외.
+// 응답: { ok:true, id[, alreadyDeleted:true], kept } — kept(결정 387) = 남는 공고·작업보드(정리는 응답 뒤라 「예정」).
+//   기존 칸(ok·id·alreadyDeleted)은 그대로 — 옛 인트라넷은 ok 만 본다.
 // ═══════════════════════════════════════════════════════════
 router.delete('/intake/:id', async (req, res, next) => {
   try {
@@ -1955,7 +1991,8 @@ router.delete('/intake/:id', async (req, res, next) => {
     }
     // 이미 삭제됨 → 멱등 처리 (재시도 안전)
     if (cur[0].deleted_at) {
-      res.json({ ok: true, id, alreadyDeleted: true });
+      const kept = await _deleteKept(id);
+      res.json({ ok: true, id, alreadyDeleted: true, kept });
       // ★ 결정 254(Codex PR #1646): 지난번 정리가 재배포·일시 오류로 못 돌았어도 다시 보낸 삭제 요청이 정리를 다시 시도한다(멱등 — 이미 지웠으면 no_tab)
       setImmediate(() => {
         require('../services/workTabDelete.service').autoCleanupDeletedOrderTab(id, { by: '인트라넷 오더 삭제(재시도)' })
@@ -1975,7 +2012,8 @@ router.delete('/intake/:id', async (req, res, next) => {
     );
 
     logger.info(`[order] 인트라넷 작업오더 삭제: ${id} (by ${b.deleted_by || '?'})`);
-    res.json({ ok: true, id });
+    const kept = await _deleteKept(id);
+    res.json({ ok: true, id, kept });
     /* ★★ 결정 254 — 그 오더가 만든 작업이 손대지 않은 빈 작업이면 함께 정리한다(응답 뒤 · 절대 throw 없음).
        지우고 다시 올리면 빈 작업보드가 남아 같은 작업이 두 개로 보이던 문제(10/7 탄소매트·10/14 라자가구). 손댄 작업은 남기고 홈 목록에 "원본 오더 삭제됨". */
     const _by = `인트라넷 오더 삭제(${(b.deleted_by_name || b.deleted_by || '').toString().trim() || '?'})`;
