@@ -144,14 +144,15 @@ const svc = require('../src/services/workTabDelete.service');
   await ok('응답 뒤(setImmediate) 정리 · 절대 throw 없음 · 스위치', () => {
     const r = read('server/src/routes/order.routes.js');
     const d = r.slice(r.indexOf("router.delete('/intake/:id'"), r.indexOf('// 외부(인트라넷) 보낸 오더 수정'));
-    assert.ok(/res\.json\(\{ ok: true, id \}\);[\s\S]*setImmediate\(\(\) => \{\s*require\('\.\.\/services\/workTabDelete\.service'\)\.autoCleanupDeletedOrderTab\(id, \{ by: _by \}\)/.test(d));
+    // 결정 387: 응답에 kept(남는 공고·작업보드)를 싣는다 — 계산은 응답 **전**, 정리는 종전대로 응답 **뒤**(순서 불변)
+    assert.ok(/const kept = await _deleteKept\(id\);\s*res\.json\(\{ ok: true, id, kept \}\);[\s\S]*setImmediate\(\(\) => \{\s*require\('\.\.\/services\/workTabDelete\.service'\)\.autoCleanupDeletedOrderTab\(id, \{ by: _by \}\)/.test(d));
     const s = read('server/src/services/workTabDelete.service.js');
     const f = s.slice(s.indexOf('async function autoCleanupDeletedOrderTab'), s.indexOf('module.exports'));
     assert.ok(/INTAKE_DELETE_TAB_CLEANUP === '0'/.test(f));
     assert.ok(/confirm: true, onlyIfUntouched: true, notifyIntranet: false/.test(f));
     assert.ok(/catch \(e\) \{[\s\S]*return \{ ok: false, code: 'error'/.test(f));
     assert.ok(/WHERE id=\$1 AND deleted_at IS NOT NULL/.test(f), '지워진 오더만');
-    assert.ok(/res\.json\(\{ ok: true, id, alreadyDeleted: true \}\);\s*\/\/[^\n]*\n\s*setImmediate\(\(\) => \{\s*require\('\.\.\/services\/workTabDelete\.service'\)\.autoCleanupDeletedOrderTab\(id,/.test(d), '다시 보낸 삭제 요청도 정리를 다시 시도(멱등)');
+    assert.ok(/const kept = await _deleteKept\(id\);\s*res\.json\(\{ ok: true, id, alreadyDeleted: true, kept \}\);\s*\/\/[^\n]*\n\s*setImmediate\(\(\) => \{\s*require\('\.\.\/services\/workTabDelete\.service'\)\.autoCleanupDeletedOrderTab\(id,/.test(d), '다시 보낸 삭제 요청도 정리를 다시 시도(멱등)');
   });
   await ok('자동 정리는 드라이브·구글시트 무접촉(deleteDrive 넘기지 않음)', () => {
     const s = read('server/src/services/workTabDelete.service.js');

@@ -811,6 +811,100 @@ async function deleteOrphanCampaigns({ ids, confirm, by = 'admin', pool } = {}) 
   } finally { client.release(); }
 }
 
+/* ══ 결정 387 — 오더를 지울 때 리뷰웹에 **남는 모집공고·작업보드**를 알려 준다(읽기 전용 · 쓰기 0) ══════════════
+   발단(2026-11-18 세라모사이드): 첫 오더를 지웠는데 그 오더로 게시한 공고가 남아 다음 날 열렸다 — 삭제 응답이 `{ok,id}` 뿐이라
+   「공고·작업보드는 남겼다」를 아무도 몰랐다. 삭제 전 미리보기(GET /intake/:id/delete-impact)와 삭제 응답 kept 가 **이 함수 하나**를 쓴다.
+   ★ 실패·시간 초과 = { known:false } — 절대 「남는 것 없음」(campaigns:[])으로 접지 않는다(화면은 「확인하지 못했습니다」).
+   ★ 자동 보관·삭제 없음 — 알리기만 한다(사용자 확정 2026-11-20 ⑧). */
+const DELETE_IMPACT_DEADLINE_MS = 2500;
+
+/** 남는 공고의 상태 4종(사용자 확정 Q6 ㉠ — 문구는 인트라넷이 상태별로). 보관 공고는 「남는 공고」가 아니라 여기 오지 않는다.
+ *  open = 게시 중(리뷰어에게 보임) · draft = 임시저장(안 보임) · paused = 품절 멈춤(결정 229·259 공고 전체 멈춤 — 같은 스위치) · closed = 마감 */
+function _keptCampaignState(c) {
+  const status = String((c && c.status) || '');
+  if (status === 'draft') return 'draft';
+  if (status !== 'active') return 'closed';
+  if (c.soldout_paused_at && require('./campaignOptionPause.service').ENABLED) return 'paused';
+  return 'open';
+}
+
+/**
+ * 작업보드가 오더 삭제 뒤 자동 정리(autoCleanupDeletedOrderTab → deleteTask onlyIfUntouched)로 지워질지 **예측**한다(쓰기 0).
+ * ★ 실제 정리와 같은 입력·같은 판정을 그대로 부른다 — 스위치 · 직접 연결 작업만 · 결정 254 판정(_untouchedReasons, 글자 그대로) · 돈 기록(_moneyRows).
+ *   판정을 여기서 다시 쓰지 않는다(사본이 생기면 「정리 예정」이라 말하고 남기거나 그 반대가 된다).
+ * ★ 정리는 응답 뒤 비동기라 끝까지 「예정」이다(predicted:true) — 그 사이 주문·편집이 들어오면 실제 정리는 남긴다.
+ * @param {object} wo  work_orders 행(id · linked_tab_sheet_id · linked_tab_name · deleted_at · tab_deleted_at · tab_deleted_tab)
+ * @returns {{ outcome:'will_remove'|'remains'|'removed'|'absent'|'none', will_remove:boolean, reasons:string[], name:string, predicted:true }}
+ */
+async function predictCleanup(q, wo) {
+  const out = (outcome, reasons = [], name = String(wo.linked_tab_name || '')) =>
+    ({ outcome, will_remove: outcome === 'will_remove', reasons, name, predicted: true });
+  if (!wo.linked_tab_sheet_id || !wo.linked_tab_name) {
+    // 이미 정리됨(deleteTask 가 링크를 비우고 흔적을 남김 — 같은 삭제를 다시 보낸 경우)
+    if (wo.tab_deleted_at) return out('removed', [], String(wo.tab_deleted_tab || ''));
+    // Track B 링크로만 이어진 작업 — 자동 정리는 직접 연결만 본다(autoCleanupDeletedOrderTab 의 no_tab 갈래) → 남는다
+    const { rows: links } = await q(
+      `SELECT tab_name FROM trackb_work_order_links WHERE work_order_id=$1 AND deleted_at IS NULL ORDER BY tab_name LIMIT 1`, [wo.id]);
+    if (links.length) return out('remains', ['no_direct_tab'], String(links[0].tab_name || ''));
+    return out('none', [], '');
+  }
+  if (process.env.INTAKE_DELETE_TAB_CLEANUP === '0') return out('remains', ['cleanup_off']);   // autoCleanupDeletedOrderTab 와 같은 스위치
+  // 삭제 전 미리보기는 곧 지울 자기 오더를 「살아 있는 오더」로 세지 않는다(결정 332 가 이미 쓰는 예외 · 삭제 뒤엔 deleted_at 으로 빠진다)
+  const reasons = await _untouchedReasons(q, wo.linked_tab_sheet_id, wo.linked_tab_name, wo.deleted_at ? {} : { selfOrderId: wo.id });
+  if (reasons.length === 1 && reasons[0] === 'not_registered') return out('absent');   // 등록된 작업이 없음(autoCleanup 「작업이 이미 없음」)
+  if (reasons.length) return out('remains', reasons);
+  // deleteTask 는 forcePayment 없이 돈 기록이 있으면 거부한다(payment_locked) — 과거 리뷰비 증거(history_only)도 돈 기록이라 여기 걸린다
+  if ((await _moneyRows(q, wo.linked_tab_sheet_id, wo.linked_tab_name)).length) return out('remains', ['money_rows']);
+  return out('will_remove');
+}
+
+async function _orderDeleteImpactInner(q, workOrderId) {
+  const { rows: w } = await q(
+    `SELECT id, linked_campaign_id, linked_tab_sheet_id, linked_tab_name, deleted_at, tab_deleted_at, tab_deleted_tab
+       FROM work_orders WHERE id=$1`, [workOrderId]);
+  if (!w.length) return { known: false, reason: 'not_found' };
+  const wo = w[0];
+  /* ★ 남는 공고는 **직접** 찾는다 — liveCampaignForWorkOrders(역방향 짝)는 `w.deleted_at IS NULL` 조건이라 오더를 지운 뒤엔
+       오더 쪽 연결(linked_campaign_id)로만 이어진 공고를 못 본다 → 「남는 공고 없음」 오보(결정 387 · 완화 금지).
+       범위 = 공고가 가리키는 오더(source_work_order_id) ∪ 오더가 가리키는 공고(linked_campaign_id) ∪ 오더 작업보드에 연결된 공고 — 보관 안 된 것만. */
+  const { rows: camps } = await q(
+    `SELECT rc.id, rc.title, rc.status, rc.soldout_paused_at,
+            (SELECT COUNT(*) FROM campaign_applications a WHERE a.campaign_id = rc.id)::int AS applicants,
+            (SELECT COUNT(*) FROM campaign_applications a WHERE a.campaign_id = rc.id AND a.status = 'submitted')::int AS submitted
+       FROM recruit_campaigns rc
+      WHERE rc.archived_at IS NULL
+        AND (NULLIF(rc.source_work_order_id, '') = $1
+             OR rc.id = NULLIF($2, '')
+             OR (NULLIF($3, '') IS NOT NULL AND NULLIF($4, '') IS NOT NULL AND rc.linked_sheet_id = $3 AND rc.linked_tab_name = $4))
+      ORDER BY rc.created_at ASC NULLS LAST, rc.id ASC`,
+    [wo.id, String(wo.linked_campaign_id || ''), String(wo.linked_tab_sheet_id || ''), String(wo.linked_tab_name || '')]);
+  // ★ 응답 칸은 허용 목록만 — 신청자·담당자·삭제자 이름 등 사람 정보는 싣지 않는다
+  const campaigns = camps.map(c => ({ id: c.id, title: String(c.title || ''), state: _keptCampaignState(c),
+    applicants: Number(c.applicants) || 0, submitted: Number(c.submitted) || 0 }));
+  const worktable = await predictCleanup(q, wo);
+  return { known: true, phase: wo.deleted_at ? 'after' : 'preview', campaigns, worktable };
+}
+
+/**
+ * 결정 387 — 오더 삭제 영향(삭제 전 미리보기 · 삭제 응답 kept 둘 다). ★ 절대 throw 하지 않는다(삭제는 이미 끝났을 수 있다).
+ * @param q  (text, params) => Promise<{rows}>
+ * @returns {{known:true, phase:'preview'|'after', campaigns:[{id,title,state,applicants,submitted}], worktable:{…}} | {known:false, reason:'not_found'|'check_failed'|'timeout'}}
+ */
+async function orderDeleteImpact(q, workOrderId, { deadlineMs = DELETE_IMPACT_DEADLINE_MS } = {}) {
+  let timer = null;
+  const work = Promise.resolve().then(() => _orderDeleteImpactInner(q, workOrderId)).catch(e => {
+    logger.warn(`[order-delete-impact] ${workOrderId} 확인 실패: ${e && e.message}`);
+    return { known: false, reason: 'check_failed' };            // ★ 「남는 것 없음」으로 꾸미지 않는다(사용자 확정 ⑦)
+  });
+  const deadline = new Promise(resolve => {
+    timer = setTimeout(() => {
+      logger.warn(`[order-delete-impact] ${workOrderId} 확인 시간 초과(${deadlineMs}ms)`);
+      resolve({ known: false, reason: 'timeout' });
+    }, deadlineMs);
+  });
+  try { return await Promise.race([work, deadline]); } finally { clearTimeout(timer); }
+}
+
 /**
  * ★★ 결정 254 — 인트라넷에서 작업오더를 지웠을 때 그 오더가 만든 작업이 **손대지 않은 빈 작업**이면 함께 정리한다(사용자 확정 2026-10-15 "가").
  *   주문·편집·리뷰·메모·공고 참여 등 하나라도 있으면 지우지 않는다 — 홈 작업 목록에 "원본 오더 삭제됨"으로 보인다(tabStats 주석).
@@ -853,5 +947,6 @@ async function kindChangeReasons(q, { sheetId, tabName, selfOrderId }) {
 
 module.exports = {
   kindChangeReasons, previewTaskDelete, deleteTask, autoCleanupDeletedOrderTab, UNTOUCHED_BLOCK_TABLES,
+  orderDeleteImpact, predictCleanup, DELETE_IMPACT_DEADLINE_MS,
   untouchedReasons: (db, sheetId, tabName) => _untouchedReasons((t, p) => db.query(t, p), sheetId, tabName),
   DRIVE_FOLDER_KINDS, findOrphanCampaigns, deleteOrphanCampaigns, DELETE_TABLES, MONEY_TABLES, KEEP_TABLES, __setPoolForTest };
