@@ -114,6 +114,42 @@ function _filledRowSql(alias) {
   return `(${filledSql(alias)} OR ${alias}.is_submitted OR ${alias}.is_paid)`;
 }
 
+/* ★★ 결정 254 공고 범위 — 단일 출처(완화 금지 · RW-A0 2026-11-20).
+   「그 작업보드(시트·탭)의 **모든** 공고(보관·마감·임시저장 포함) + 같은 시트에서 탭 이름이 빈(빈 글자·NULL) 공고」.
+   자동 정리 판정(_untouchedReasons) · 판정 숫자(campaignUseCounts) · 실제 공고 삭제(deleteTask) · 삭제 미리보기 ·
+   양채널/보충 캡처 삭제 범위 · 종류 변경 「다른 곳에 묶인 공고」(order.routes, 결정 332)가 **이 조각 하나**를 쓴다.
+   ★ 좁히면(보관 공고 제외 · 빈 탭 이름 제외 · 「이 공고 하나만」) 다른 보관 공고에 신청이 있는데도 작업과 공고를 지운다(되돌릴 수 없음).
+   ★ 넓히면(시트 단위) 판정은 다른 탭 공고 때문에 막고, 삭제는 남의 탭 공고까지 지운다.
+   ★ 범위를 바꿔야 하면 이 함수만 고치고 `orderDeleteTabCleanupPg.test.js`(PGlite 실행 + 변이 자가검사)를 함께 고친다.
+   @param alias  공고 표 별칭('' = 별칭 없음) · @param sheet/tab  자리표시자(기본 $1/$2) — 코드 상수만 받는다(형식 검사). */
+function CAMPAIGN_TAB_SCOPE(alias = '', sheet = '$1', tab = '$2') {
+  if (!/^(?:[A-Za-z_][A-Za-z0-9_]*)?$/.test(String(alias)) || !/^\$\d+$/.test(String(sheet)) || !/^\$\d+$/.test(String(tab))) {
+    throw new Error('CAMPAIGN_TAB_SCOPE: 별칭·자리표시자 형식 오류');
+  }
+  const p = alias ? `${alias}.` : '';
+  return `${p}linked_sheet_id=${sheet} AND COALESCE(NULLIF(${p}linked_tab_name,''), ${tab})=${tab}`;
+}
+
+/**
+ * 결정 254 범위의 「누가 이 작업을 썼나」 숫자 — 판정(_untouchedReasons)의 campaign_used·filled_rows 와 **같은 범위·같은 조건**.
+ * ★ 신청은 상태 무관(취소·만료 포함) · 공고 경유 주문(order_submissions.sheet_id='campaign:<공고>') · 채운 줄은 지운 줄 흔적 포함(254 와 같은 쪽 = 더 엄격).
+ * ★ 판정을 대신하지 않는다 — 254 판정은 _untouchedReasons 가 그대로 한다. 이 숫자는 「신청 0」 같은 다른 판정·안내가 254 와 한 벌을 쓰게 하려는 것(사본 금지).
+ * ★ 조회 실패는 호출부로 던진다(fail-closed — 「0」으로 꾸미지 않는다).
+ * @param q  (text, params) => Promise<{rows}>
+ * @returns {Promise<{applications:number, campaignOrders:number, filledRows:number}>}
+ */
+async function campaignUseCounts(q, sheetId, tabName) {
+  const { rows } = await q(
+    `SELECT (SELECT COUNT(*) FROM campaign_applications a JOIN recruit_campaigns rc ON rc.id = a.campaign_id
+              WHERE ${CAMPAIGN_TAB_SCOPE('rc')})::int AS applications,
+            (SELECT COUNT(*) FROM order_submissions o JOIN recruit_campaigns rc ON o.sheet_id = 'campaign:' || rc.id
+              WHERE ${CAMPAIGN_TAB_SCOPE('rc')})::int AS campaign_orders,
+            (SELECT COUNT(*) FROM campaign_participants cp WHERE cp.sheet_id=$1 AND cp.tab_name=$2 AND ${_filledRowSql('cp')})::int AS filled_rows`,
+    [sheetId, tabName]);
+  const r = (rows && rows[0]) || {};
+  return { applications: Number(r.applications) || 0, campaignOrders: Number(r.campaign_orders) || 0, filledRows: Number(r.filled_rows) || 0 };
+}
+
 /**
  * @param {object} [opts]  체험단 종류 변경(결정 332)만 쓰는 예외 — 기본값이면 종전 판정 그대로.
  * @param {string} [opts.selfOrderId]        이 오더 자신의 연결은 「살아 있는 오더」로 치지 않는다(종류를 바꾸려는 그 오더다)
@@ -138,7 +174,7 @@ async function _untouchedReasons(q, sheetId, tabName, opts = {}) {
     `SELECT EXISTS (SELECT 1 FROM campaign_participants cp WHERE cp.sheet_id=$1 AND cp.tab_name=$2
                      AND ${_filledRowSql('cp')}) AS x`, [sheetId, tabName]);
   if (filled[0] && filled[0].x) reasons.push('filled_rows');
-  // 연결 공고 — 보관 안 된 공고가 있거나, 참여 신청·공고 주문이 하나라도 있으면 지우지 않는다(deleteTask 의 공고 삭제와 같은 범위)
+  // 연결 공고 — 보관 안 된 공고가 있거나, 참여 신청·공고 주문이 하나라도 있으면 지우지 않는다(deleteTask 의 공고 삭제와 같은 범위 = CAMPAIGN_TAB_SCOPE 하나)
   // 탭 이름이 비어 있는 연결 공고는 어느 작업 것인지 모른다 — 자동으로 지우지 않는다(Codex PR #1646 · 모르면 손대지 않는다)
   const { rows: amb } = await q(
     `SELECT EXISTS (SELECT 1 FROM recruit_campaigns WHERE linked_sheet_id=$1 AND COALESCE(linked_tab_name,'') = '') AS x`, [sheetId]);
@@ -152,7 +188,7 @@ async function _untouchedReasons(q, sheetId, tabName, opts = {}) {
             COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM campaign_applications a WHERE a.campaign_id = rc.id)
                               OR EXISTS (SELECT 1 FROM order_submissions o WHERE o.sheet_id = 'campaign:' || rc.id)) AS used
        FROM recruit_campaigns rc
-      WHERE rc.linked_sheet_id=$1 AND COALESCE(NULLIF(rc.linked_tab_name,''), $2)=$2`, [sheetId, tabName, allowDraft]);
+      WHERE ${CAMPAIGN_TAB_SCOPE('rc')}`, [sheetId, tabName, allowDraft]);
   if (rc[0] && Number(rc[0].live) > 0) reasons.push('live_campaign');
   if (rc[0] && Number(rc[0].used) > 0) reasons.push('campaign_used');
   // 이 작업을 가리키는 살아 있는 작업오더가 있으면(다른 오더가 이어 쓰는 중) 지우지 않는다
@@ -308,7 +344,7 @@ async function _dualDeleteScope(client, sheetId, tabName) {
   if (!state.channels || !state.artifacts) throw new Error('Incomplete dual purchase schema');
   const { rows: scope } = await client.query(`
     WITH campaigns AS (
-      SELECT id FROM recruit_campaigns WHERE linked_sheet_id=$1 AND COALESCE(NULLIF(linked_tab_name,''),$2)=$2
+      SELECT id FROM recruit_campaigns WHERE ${CAMPAIGN_TAB_SCOPE()}
     ), applications AS (
       SELECT id FROM campaign_applications WHERE campaign_id IN (SELECT id FROM campaigns)
     ), orders AS (
@@ -390,7 +426,7 @@ async function previewTaskDelete({ sheetId, tabName, pool } = {}) {
   const { rows: camps } = await q(
     `SELECT id, title, status, archived_at AS "archivedAt"
        FROM recruit_campaigns
-      WHERE linked_sheet_id=$1 AND COALESCE(NULLIF(linked_tab_name,''), $2)=$2
+      WHERE ${CAMPAIGN_TAB_SCOPE()}
       ORDER BY created_at DESC LIMIT 20`, [sheetId, tabName]);
   const { rows: wos } = await q(
     `SELECT id, title, status
@@ -568,7 +604,7 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, del
       const scopeSql = `(o.sheet_id=$1 AND o.tab_name=$2)
         OR o.id=ANY($3::uuid[])
         OR o.sheet_id IN (SELECT 'campaign:' || id FROM recruit_campaigns
-          WHERE linked_sheet_id=$1 AND COALESCE(NULLIF(linked_tab_name,''),$2)=$2)`;
+          WHERE ${CAMPAIGN_TAB_SCOPE()})`;
       const scopeArgs = [sheetId, tabName, dualScope ? dualScope.orders : []];
       const targets = await client.query(`SELECT o.id FROM order_submissions o
         WHERE ${scopeSql} ORDER BY o.id`, scopeArgs);
@@ -654,7 +690,7 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, del
        ★ 입금 회차 항목의 `campaign_id` 는 SET NULL(086)이라 회차 자체는 영향받지 않는다. */
     const rc = await client.query(
       `DELETE FROM recruit_campaigns
-        WHERE linked_sheet_id=$1 AND COALESCE(NULLIF(linked_tab_name,''), $2)=$2
+        WHERE ${CAMPAIGN_TAB_SCOPE()}
         RETURNING (COALESCE(status, '') = 'draft' AND published_at IS NULL) AS draft, (archived_at IS NULL) AS live`,
       [sheetId, tabName]);
     // ★ 결정 254: 자동 정리인데 보관 안 된 공고가 그사이 생겼으면 되돌린다(결과 검증) — 종류 변경은 게시한 적 없는 임시저장만 예외(결정 332)
@@ -948,5 +984,6 @@ async function kindChangeReasons(q, { sheetId, tabName, selfOrderId }) {
 module.exports = {
   kindChangeReasons, previewTaskDelete, deleteTask, autoCleanupDeletedOrderTab, UNTOUCHED_BLOCK_TABLES,
   orderDeleteImpact, predictCleanup, DELETE_IMPACT_DEADLINE_MS,
+  CAMPAIGN_TAB_SCOPE, campaignUseCounts,
   untouchedReasons: (db, sheetId, tabName) => _untouchedReasons((t, p) => db.query(t, p), sheetId, tabName),
   DRIVE_FOLDER_KINDS, findOrphanCampaigns, deleteOrphanCampaigns, DELETE_TABLES, MONEY_TABLES, KEEP_TABLES, __setPoolForTest };

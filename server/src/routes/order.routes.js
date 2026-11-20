@@ -905,7 +905,7 @@ async function _kindChangeCampaignElsewhere(q, order) {
   const { rows } = await q(
     `SELECT 1 FROM recruit_campaigns
       WHERE (id = NULLIF($1,'') OR NULLIF(source_work_order_id,'') = $2)
-        AND NOT (linked_sheet_id = $3 AND COALESCE(NULLIF(linked_tab_name,''), $4) = $4)
+        AND NOT (${require('../services/workTabDelete.service').CAMPAIGN_TAB_SCOPE('', '$3', '$4')})
       LIMIT 1`,
     [String(order.linked_campaign_id || ''), String(order.id), String(order.linked_tab_sheet_id || ''), String(order.linked_tab_name || '')]);
   return rows.length > 0;
