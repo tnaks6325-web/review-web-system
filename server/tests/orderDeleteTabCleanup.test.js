@@ -6,6 +6,8 @@
  *   [2] deleteTask(onlyIfUntouched) — 잠근 뒤 같은 트랜잭션에서 판정 · 걸리면 쓰기 0 · 인트라넷 메모 푸시 없음(기록만)
  *   [3] 오더 삭제 응답 뒤에 정리(절대 throw 없음) · 스위치
  *   [4] 홈 목록 "원본 오더 삭제됨"(살아 있는 오더가 없을 때만 · 실패 = 주석 없음) · 화면 배선
+ * ★ 이 파일의 스텁 pool 은 SQL 글자만 보고 숫자를 돌려준다 — **공고 범위(WHERE)는 여기서 검증되지 않는다**(범위를 좁혀도 통과).
+ *   범위 의미는 `orderDeleteTabCleanupPg.test.js`(PGlite 실제 실행 + 변이 자가검사 · 결정 390)가 맡는다.
  */
 'use strict';
 const assert = require('assert');
