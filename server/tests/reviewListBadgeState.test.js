@@ -74,9 +74,9 @@ console.log('\n[참여중 카드 상태 — 단일 출처]');
 const S = makeCtx();
 const st = (it) => JSON.parse(JSON.stringify(S._pendingCardState(it)));
 
-t('1. 리뷰를 쓸 차례인 카드 = 「리뷰 제출 필요」 · 누를 수 있다 · 이유 줄 없음', () => {
+t('1. 리뷰를 쓸 차례인 카드 = 「리뷰 미제출」 · 누를 수 있다 · 이유 줄 없음', () => {
   const s = st(base());
-  assert.equal(s.text, '리뷰 제출 필요'); assert.equal(s.tappable, true); assert.equal(s.reason, '');
+  assert.equal(s.text, '리뷰 미제출'); assert.equal(s.tappable, true); assert.equal(s.reason, '');
 });
 t('2. 여러 장 중 일부만 낸 카드 = 「리뷰 1/2 제출」(종전 문구 유지)', () => {
   const s = st(base({ captureSlots: [{ key: 'review' }, { key: 'receipt' }], submittedSlots: ['review'] }));
@@ -136,7 +136,7 @@ t('9. 다건 그룹 = 줄마다 같은 함수 글자 · 못 누르는 줄이 있
   ctx.renderReviewSubTab();
   const g = cards(ctx)[0];
   assert.match(g.className, /result-group-card/);
-  assert.match(g.innerHTML, /리뷰 제출 필요/);
+  assert.match(g.innerHTML, /리뷰 미제출/);
   assert.equal((g.innerHTML.match(/result-group-item-badge wait">반영 중</g) || []).length, 2);
   assert.equal((g.innerHTML.match(/잠시 뒤 리뷰를 제출할 수 있어요/g) || []).length, 1, '같은 이유는 한 번만');
   g.listeners.click();
