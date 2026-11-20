@@ -312,6 +312,10 @@ async function _loadBatchItems(batchId) {
     reviewerName: r.reviewer_name || '', amount: Number(r.amount || 0),
     productPrice: Number(r.product_price || 0), reviewFee: Number(r.review_fee || 0),
     status: r.status, resultStatus: r.result_status || '', resultSeq: r.result_seq,
+    // ★ 확정 기록(_commitBatchOutcome)이 이 값으로 「리뷰비만 보낸 건」(isFeeOnlyItem)을 가른다 — 빠지면 Q&A(321)·0원 구매(376)
+    //   항목이 리뷰비만 보낸 건으로 읽혀 입금일·지급완료 없이 끝난다(결과 파일 경로 _itemView 와 같은 재료).
+    isQna: r.is_qna === true,
+    zeroPricePurchase: r.zero_price_purchase === true,
   }));
 }
 

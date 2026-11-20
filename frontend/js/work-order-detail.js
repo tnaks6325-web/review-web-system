@@ -429,6 +429,7 @@ const WO_MANAGER_UNDECIDED = ['랜덤', '랜덤배정', '미정'];
 function _woManagerNick(raw) {
   const v = _woNormName(raw);
   if (!v) return "";
+  if (v === "기타") return "기타";   // 만두·망고 둘 다 아닌 작업(예: 블로그 · 결정 374) — 서버 utils/workManager 와 같은 판정
   for (const [name, nick] of Object.entries(WO_MANAGER_MAP)) if (v.includes(name)) return nick;
   for (const nick of Object.values(WO_MANAGER_MAP)) if (v.includes(nick)) return nick;
   return "";
@@ -1218,7 +1219,7 @@ function woAdminEditModal(order, opts) {
   var canAssignManager = !!(opts && opts.canAssignManager);
   if (!o.source_review_order_id || (o.manager_edit_capable === true && canAssignManager)) {
     pills(c1, "work_manager", "작업담당", [
-      { v: "박세희", l: "만두" }, { v: "박은비", l: "망고" }, { v: "랜덤", l: "미지정" },
+      { v: "박세희", l: "만두" }, { v: "박은비", l: "망고" }, { v: "기타", l: "기타" }, { v: "랜덤", l: "미지정" },
     ]);
   } else {
     roField(c1, "작업담당", _woManagerNick(o.work_manager) || "미지정");

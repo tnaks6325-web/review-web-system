@@ -76,7 +76,7 @@ async function _todayUsed(db, campaignId, dayStartUtcIso) {
 }
 
 /* ── 조회(모달 재료) ─────────────────────────────────────── */
-async function getPlanOverview(campaignId) {
+async function getPlanOverview(campaignId, { admin = null } = {}) {
   const camp = await _loadCampaign(campaignId);
   if (!camp.participation_mode) { const e = new Error('참여형 공고만 인원 조절을 지원합니다.'); e.code = 'not_participation'; throw e; }
   const today = kstTodayStr();
@@ -278,6 +278,14 @@ async function getPlanOverview(campaignId) {
     optionDaily = null;
     logger.warn(`[campaignPlan] 상품 일건수 조회 실패(경고 생략) camp=${camp.id}: ${e.message}`);
   }
+  /* ★ 결정 377 — Q&A 공고(서버가 자리표로 하루 몫을 정하는 공고 — computeCampaignState 의 isQna 와 같은 판정:
+       quotaCounts.qnaToday 가 숫자)는 화면이 날짜별 조절·이월 대신 자리표를 그리도록 재료를 싣는다.
+       ★ Q&A 가 아니면 칸 자체를 싣지 않는다(종전 응답 그대로) · 자리표 조회 실패 = { error:true }(화면은 안내만 — 가짜 숫자 금지). */
+  let qna;
+  if (quotaCounts && typeof quotaCounts.qnaToday === 'number') {
+    try { qna = await require('./qnaSlots.service').qnaPlanView(pool, camp, { admin, counts: quotaCounts }); }
+    catch (e) { qna = { error: true }; logger.warn(`[campaignPlan] Q&A 자리표 조회 실패 camp=${camp.id}: ${e.message}`); }
+  }
   return {
     campaignId: camp.id,
     title: camp.title || '',
@@ -337,6 +345,7 @@ async function getPlanOverview(campaignId) {
     roundsDrift: rounds.length > 0 && roundsTotal !== (Number(camp.recruit_total) || 0),
     events: eventsQ.rows.map(r => ({ actor: r.actor || '', action: r.action, detail: r.detail || null, at: r.created_at })),
     optionDaily,
+    ...(qna !== undefined ? { qna } : {}),
   };
 }
 
@@ -659,6 +668,16 @@ async function savePlans(campaignId, body, actor, opts) {
     if (!lockedCampaignRows.length) { const e = new Error('캠페인을 찾을 수 없습니다.'); e.code = 'not_found'; throw e; }
     // 잠금 전 읽은 총정원으로 작업표를 되돌리지 않도록, 이후 모든 슬롯 판단은 잠금된 최신 행을 쓴다.
     camp = lockedCampaignRows[0];
+    /* ★ 결정 379 — Q&A 공고는 날짜별 인원을 판정에 쓰지 않는다(그날 자리 수가 하루 기준). 저장하면 「저장했는데 아무 일도 안 일어남」
+         막다른 길이 되므로 set 은 막고 할 일을 말한다. 저장값 해제(remove)는 받는다(옛 0명 휴무를 지우는 정리 — 판정에는 이미 안 쓰인다).
+         판정 = 오늘 자리 수가 실리는 공고(loadTodayByCampaign — 정원 판정 qnaToday 와 같은 재료) · 조회 실패 = 종전 저장(무시될 뿐 해가 없다). */
+    if (set.length) {
+      const qm = await require('./qnaSlots.service').loadTodayByCampaign(client, [campaignId]);
+      if (qm && qm.has(String(campaignId))) {
+        const e = new Error('Q&A 공고는 자리표가 하루 인원을 정해 날짜별 인원을 저장하지 않습니다 — 화면을 새로고침한 뒤 날짜 줄의 [−]/[＋]로 빈 자리를 옮겨 주세요.');
+        e.code = 'qna_plan_set'; throw e;
+      }
+    }
     try { schedule = await _scheduleFor(camp); } catch (_) { schedule = null; }
     try {
       const { linkedWorkOrderForCampaign } = require('./linkedRecruitQuota.service');

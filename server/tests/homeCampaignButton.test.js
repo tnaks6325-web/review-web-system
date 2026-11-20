@@ -276,8 +276,10 @@ const isCampSelect = q => /FROM recruit_campaigns/.test(q) && /linked_sheet_id/.
   t('모달은 기존 공유 모달을 그대로 연다(사본 금지)', /openRecruitModal\(id\|\|null, prefill[,)]/.test(WD));
   t('연결 탭 드롭다운 재료를 먼저 채운다(_recruitTabList 의존)', /loadRecruitTabOptions/.test(WD.slice(WD.indexOf('async function _campOpenModal'), WD.indexOf('function _campPickerOpen'))));
   t('미발행은 그 작업의 탭을 프리필한다', /linked_sheet_id:t\.sheetId, linked_tab_name:t\.tabName/.test(WD));
+  // 결정 380: 홈 플래그는 공고 판정(canEditCampaign) · 옛 서버는 canEdit 으로 되돌아간다(그 서버는 명단 밖을 403)
   t('★ 편집 권한은 홈 전용 플래그(STATE.campEdit) — 그리드 편집 플래그와 섞지 않는다',
-    /STATE\.campEdit=!!\(r&&r\.ok&&r\.canEdit\)/.test(WD) && /campEdit:null/.test(WD));
+    /STATE\.campEdit=\(ok&&typeof r\.canEditCampaign==='boolean'\)\?r\.canEditCampaign:STATE\.moEdit;/.test(WD)
+    && /STATE\.moEdit=!!\(ok&&r\.canEdit\);/.test(WD) && /campEdit:null/.test(WD));
   t('계정 전환 시 편집 플래그를 비운다(logout·401 둘 다)',
     (WD.match(/campEdit:null,[^}]{0,160}campsUnavailable:false/g) || []).length >= 2);
   t('계정 전환 시 명단 관리 플래그도 비운다(logout·401 둘 다)',

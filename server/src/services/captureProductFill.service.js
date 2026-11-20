@@ -37,7 +37,10 @@ const deps = {
 function __setDepsForTest(d) { Object.assign(deps, d); }
 
 const PRODUCT_FIELD = () => 'col:' + require('./orderLedger.service').PRODUCT_HEADER;
-const MAX_ITEMS = 200;
+const MAX_ITEMS = 200;   // 미리보기 한 묶음(AI 판독 수) 상한
+// ★ Codex 리뷰 #1843: 적용은 AI 를 안 돌린다 — 미리보기 여러 묶음에서 고른 줄을 **전부** 적는다(예전엔 200건 뒤를 말없이 버렸다).
+//   지나치게 큰 요청만 통째로 거절한다(일부만 적고 나머지를 버리지 않는다). 화면은 MAX_ITEMS 씩 나눠 보낸다.
+const APPLY_MAX = 1000;
 const AI_CONCURRENCY = 3;
 
 class CaptureFillError extends Error {
@@ -120,24 +123,36 @@ async function _loadTargets(db, camp, options, onlyOrderId = null) {
   return out;
 }
 
+/**
+ * 캡처 사진 한 장을 내려받아 AI 로 읽은 상품명·옵션 글자 — 결정 232 미리보기와 결정 383 분류 미리보기의 **같은 판독 길**.
+ * 주문당 AI 1회. 실패는 status 로 말한다(download_failed · read_failed · no_product_text).
+ */
+async function readCaptureText(fileId, samples) {
+  let file;
+  try { file = await deps.download(String(fileId)); }
+  catch (e) { return { status: 'download_failed', error: String(e && e.message || e).slice(0, 120) }; }
+  let ex;
+  try {
+    const b64 = Buffer.from(file.buffer).toString('base64');
+    ex = await deps.extract(b64, file.mimeType || 'image/jpeg', { samples, allowProductOnly: true });
+  } catch (e) { return { status: 'read_failed', error: String(e && e.message || e).slice(0, 120) }; }
+  const name = String((ex && ex.productName) || '').trim();
+  const opt = String((ex && ex.productOption) || '').trim();
+  const read = [name, opt].filter(Boolean).join(' / ');
+  if (!name && !opt) return { status: 'no_product_text', read: '' };
+  return { status: 'read', name, opt, read };
+}
+async function loadSamples() { return deps.samples(); }
+
 async function _readOne(t, options, samples) {
   const base = { orderId: String(t.id), seq: Number(t.seq), day: t.day };
   // ★ 적용할 수 없는 줄은 AI 를 돌리지 않고 그렇게 말한다(미리보기에서 고른 것이 적용에서 거절되는 막다른 길 방지 — Codex 리뷰)
   if (t.dupRows) return { ...base, status: 'duplicate_rows', applicable: false };
   if (t.filledUnmatched) return { ...base, status: 'filled_unmatched', applicable: false, read: String(t.edited_product || t.row_product || '') };
   if (!t.capture_file_id) return { ...base, status: 'no_capture' };
-  let file;
-  try { file = await deps.download(String(t.capture_file_id)); }
-  catch (e) { return { ...base, status: 'download_failed', error: String(e && e.message || e).slice(0, 120) }; }
-  let ex;
-  try {
-    const b64 = Buffer.from(file.buffer).toString('base64');
-    ex = await deps.extract(b64, file.mimeType || 'image/jpeg', { samples, allowProductOnly: true });
-  } catch (e) { return { ...base, status: 'read_failed', error: String(e && e.message || e).slice(0, 120) }; }
-  const name = String((ex && ex.productName) || '').trim();
-  const opt = String((ex && ex.productOption) || '').trim();
-  const read = [name, opt].filter(Boolean).join(' / ');
-  if (!name && !opt) return { ...base, status: 'no_product_text', read: '' };
+  const rd = await readCaptureText(t.capture_file_id, samples);
+  if (rd.status !== 'read') return { ...base, ...rd };
+  const { name, opt, read } = rd;
   const { matchOption } = require('../utils/productCaptureMatch');
   const key = matchOption(`${name} ${opt}`.trim(), options, { shortText: opt });
   if (!key) return { ...base, status: 'ambiguous', read };
@@ -179,7 +194,9 @@ async function previewCaptureProducts({ campaignId, limit = MAX_ITEMS, offset = 
 async function applyCaptureProducts({ campaignId, picks = [], by = 'system' } = {}) {
   const db = getPool();
   const { camp, options } = await _loadCampaign(db, campaignId);
-  const list = (Array.isArray(picks) ? picks : []).slice(0, MAX_ITEMS)
+  const raw = Array.isArray(picks) ? picks : [];
+  if (raw.length > APPLY_MAX) throw new CaptureFillError('too_many', `한 번에 ${APPLY_MAX}건까지만 적용합니다 — 나눠서 적용해 주세요.`);
+  const list = raw
     .map(p => ({ orderId: String((p && p.orderId) || ''), optKey: String((p && p.optKey) || ''), source: p && p.source === 'manual' ? 'manual' : 'capture' }))
     .filter(p => p.orderId && p.optKey);
   if (!list.length) throw new CaptureFillError('no_picks', '적용할 줄이 없습니다.');
@@ -300,4 +317,5 @@ async function fillFromSubmitCapture({ orderSubmissionId, sheetId, tabName, capt
   return rowCount ? { written: true, optKey: key } : { written: false, skipped: 'already_filled' };
 }
 
-module.exports = { previewCaptureProducts, applyCaptureProducts, fillFromSubmitCapture, CaptureFillError, __setPoolForTest, __setDepsForTest };
+module.exports = { previewCaptureProducts, applyCaptureProducts, fillFromSubmitCapture, readCaptureText, loadSamples,
+  MAX_ITEMS, APPLY_MAX, AI_CONCURRENCY, CaptureFillError, __setPoolForTest, __setDepsForTest };

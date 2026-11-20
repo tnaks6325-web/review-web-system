@@ -47,6 +47,7 @@ const REQUIRED_SCHEMA = [
     'condition_snapshot_hash', 'status', 'superseded_at', 'created_by',
     'created_at'].map(c => ['purchase_capture_artifacts', c]),
   ['payment_batch_items', 'is_qna'],               // 212 — Q&A 입금 항목 표시(없으면 회차 담기 INSERT 실패)
+  ['payment_batch_items', 'zero_price_purchase'],  // 224 — 0원 구매 · 리뷰비만 표시(결정 376 · 없으면 회차 담기 INSERT 실패)
   ['campaign_applications', 'turn_starts_at'],   // 217 — 차례 타이머(결정 356): 참여 후속 UPDATE·취소 잠금 판정·작업조회·당기기(없으면 /apply 42703)
   ['campaign_applications', 'chain_ttl_min'],    // 217
   ['campaign_applications', 'qna_slot_id'],      // 211 — Q&A 신청 ↔ 날짜별 자리(없으면 Q&A 신청·인기 참여권 집계 실패)
@@ -71,6 +72,7 @@ const REQUIRED_SCHEMA = [
   ['order_submissions', 'delivery_memo_check'],    // 192 — 필수 배송메세지 확인 결과(주문 저장 INSERT·작업보드 명단 🚩)
   ['order_submissions', 'capture_flags'],          // 209 — 캡처 확인 🚩(결제금액·상품·개수 차이 · 주문 저장 INSERT·작업보드 명단)
   ['recruit_campaigns', 'required_delivery_memo'],  // 192 — 공고별 필수 배송메세지(구매양식 제출 게이트·공고 설정 창)
+  ['recruit_campaigns', 'classify_candidates'],     // 225 — 공고별 분류 후보(결정 383 · 공고 창 저장·작업보드 「분류」 칸·제출 뒤 자동 분류)
   ['order_submissions', 'rule_flags'],              // 187 — 바로 구매 규칙 위반 표시(작업보드·공고 카드·참여 관리 읽기)
   ['reviewers', 'kakao_id'],                       // 170 — 리뷰어 가입 INSERT·내정보 저장(없으면 가입 전면 42703)
   ['reviewers', 'shopping_id'],                    // 147 — 명의별 공통 쇼핑 아이디(본인)

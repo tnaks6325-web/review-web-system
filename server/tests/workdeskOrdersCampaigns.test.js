@@ -64,13 +64,32 @@ t('★ 열람은 내부인만(광고주 차단) — internalMiddleware', () => {
   READ.forEach(k => assert.ok(L[k].includes('internalMiddleware'),
     k + ': internalMiddleware 없음 — 광고주에게 열릴 수 있다'));
 });
+/* ★★ 결정 380(사용자 확정 2026-11-18 · 선택 A): 모집공고 수정·만들기·게시 상태·보관 등은 **내부 직원 전원**
+   (campaignEditorMiddleware = canEditCampaign 단일 출처). 명단(editorOnlyMiddleware)은 오더 접수·수정·
+   수동제출·리뷰어 검색·공고 삭제에만 남는다. 발행 직후 오더 역연결은 workOrderLinkGate(그 오더의 공고 연결 한 칸만 공고 권한).
+   검사 의미: "편집은 전부 공통 게이트 뒤"는 그대로 — 게이트가 두 갈래로 나뉘고, 어느 쪽인지까지 못 박는다(강화). */
+const CAMPAIGN_WRITE = ['POST /campaigns/create', 'PUT /campaigns/:id', 'POST /campaigns/:id/flags',
+  'POST /campaigns/:id/confirm', 'PUT /campaigns/:id/status', 'POST /campaigns/:id/dismiss',
+  'POST /campaigns/:id/blog-approve', 'POST /campaigns/:id/blog-reject', 'POST /campaigns/:id/archive'];
+const LINK_GATE = ['PUT /work-orders/update'];
 t('★★ 편집은 전부 공통 게이트 뒤 — AE 허용과 광고주 차단이 한 곳에서 적용', () => {
   WRITE.forEach(k => {
     assert.ok(L[k].includes('authMiddleware'), k + ': authMiddleware 없음');
     assert.ok(L[k].includes('internalMiddleware'), k + ': internalMiddleware 없음');
-    assert.ok(L[k].includes('editorOnlyMiddleware'),
-      k + ': editorOnlyMiddleware 없음 — 기능마다 AE 권한이 갈릴 수 있다');
+    if (CAMPAIGN_WRITE.includes(k)) {
+      assert.ok(L[k].includes('campaignEditorMiddleware') && !L[k].includes('editorOnlyMiddleware'),
+        k + ': 모집공고 쓰기는 campaignEditorMiddleware(내부 직원 전원) 하나여야 한다(결정 380)');
+    } else if (LINK_GATE.includes(k)) {
+      assert.ok(L[k].includes('workOrderLinkGate'), k + ': 오더 역연결 게이트(workOrderLinkGate) 없음');
+    } else {
+      assert.ok(L[k].includes('editorOnlyMiddleware') && !L[k].includes('campaignEditorMiddleware'),
+        k + ': editorOnlyMiddleware 없음 — 명단 게이트(결정 269·348)가 풀렸다');
+    }
   });
+  const TB = R('src/routes/trackB.routes.js');
+  const g = TB.match(/async function workOrderLinkGate\(req, res, next\) \{[\s\S]*?\n\}/);
+  assert.ok(g && /return editorOnlyMiddleware\(req, res, next\);\s*\n\}$/.test(g[0]),
+    '역연결 게이트는 조건이 안 맞으면 명단 게이트로 넘어가야 한다(fail-closed)');
 });
 t('★ 열람 라우트에는 편집 게이트를 걸지 않는다(읽기까지 막히면 탭이 무의미)', () => {
   READ.forEach(k => assert.ok(!L[k].includes('editorOnlyMiddleware'), k + ': 열람에 편집 게이트'));
@@ -279,7 +298,8 @@ t('★ 편집 버튼은 서버 판정(canEdit)으로만 노출', () => {
     '작업오더 편집 버튼 게이트 없음');
   assert.strictEqual((HTML.match(/_woAccept\('\$\{id\}'\)/g) || []).length, 1,
     '접수 버튼을 두 곳에서 만들면 게이트가 갈라진다');
-  assert.ok(/\$\{STATE\.canEdit\?'<button class="btn pri" onclick="openRecruitModal\(\)/.test(HTML),
+  // 결정 380: [＋ 새 공고]는 공고 판정(STATE.campEdit = /perm canEditCampaign)
+  assert.ok(/\$\{STATE\.campEdit===true\?'<button class="btn pri" onclick="openRecruitModal\(\)/.test(HTML),
     '공고 발행 버튼 게이트 없음');
 });
 t('열람 전용 계정에 이유를 알려준다(버튼만 사라지면 고장으로 오해)', () => {

@@ -120,6 +120,7 @@ const WO_MANAGER_MAP = { '박세희': '만두', '박은비': '망고' };
 function _woManagerNick(raw) {
   const v = _woNormName(raw);
   if (!v) return "";
+  if (v === "기타") return "기타";   // 만두·망고 둘 다 아닌 작업(예: 블로그 · 결정 374) — 서버 utils/workManager 와 같은 판정
   for (const [name, nick] of Object.entries(WO_MANAGER_MAP)) if (v.includes(name)) return nick;
   for (const nick of Object.values(WO_MANAGER_MAP)) if (v.includes(nick)) return nick;
   return "";

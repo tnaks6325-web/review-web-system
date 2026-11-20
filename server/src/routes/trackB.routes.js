@@ -364,16 +364,21 @@ router.post('/workdesk/tab-finish', authMiddleware, async (req, res, next) => {
 //   ★ AI 비용 때문에 크론 없이 사람이 필요할 때만. 전사 데이터 쓰기라 adminOrMaster 로 좁힌다.
 router.post('/campaigns/:id/capture-product-fill', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   const fill = require('../services/captureProductFill.service');
+  const cls = require('../services/captureClassify.service');
   try {
     const b = req.body || {};
     const campaignId = String(req.params.id || '');
+    // ★ 결정 383 — 같은 버튼·같은 권한으로 옵션 없는 「택1」 공고의 작업보드 「분류」 칸을 채운다(빈 칸만 · 보관 공고 제외).
+    const classify = b.target === 'classify';
     if (b.mode === 'apply') {
       if (b.confirm !== true) return res.status(400).json({ ok: false, code: 'confirm_required', error: '미리보기를 확인한 뒤 confirm:true 로 실행하세요.' });
+      if (classify) return res.json(await cls.applyCaptureClassify({ campaignId, picks: b.picks, by: _by(req) }));
       return res.json(await fill.applyCaptureProducts({ campaignId, picks: b.picks, by: _by(req) }));
     }
+    if (classify) return res.json(await cls.previewCaptureClassify({ campaignId, limit: b.limit, offset: b.offset }));
     return res.json(await fill.previewCaptureProducts({ campaignId, limit: b.limit, offset: b.offset }));
   } catch (err) {
-    if (err && (err instanceof fill.CaptureFillError || err.name === 'ProductColumnError' || err.constructor && err.constructor.name === 'ProductColumnError')) {
+    if (err && (err instanceof fill.CaptureFillError || err instanceof cls.ClassifyError || err.name === 'ProductColumnError' || err.constructor && err.constructor.name === 'ProductColumnError')) {
       return res.status(400).json({ ok: false, code: err.code, error: err.message });
     }
     next(err);
@@ -1603,16 +1608,19 @@ async function _logScopeTabs(req) {
 /* ══════════════════════════════════════════════════════════════
    작업오더 · 모집공고 — 리뷰웹시스템[3버전] 상단탭
 
-   ★ **열람은 내부인 전원**(master/admin/staff — 광고주 차단). AE(staff)는 작업오더 접수와
-     모집공고 운영을 모두 편집할 수 있다. admin은 기존 이름 명단(`utils/workdeskEditors.js`)을 따른다.
-     작업오더 접수는 시트/탭을 tab_configs·campaigns 에 등록하는 단일 관문이고
-     공고 발행·수정은 정원·금액을 바꾸므로, 보는 사람 전부에게 열 수 없다.
+   ★ **열람은 내부인 전원**(master/admin/staff — 광고주 차단). 작업오더 접수·수정·외부모집 수동제출·
+     리뷰어 검색·공고 삭제는 편집 허용 명단(`utils/workdeskEditors.js` canEdit — master·AE staff·명단)만.
+     작업오더 접수는 시트/탭을 tab_configs·campaigns 에 등록하는 단일 관문이라 보는 사람 전부에게 열 수 없다.
+   ★★ 결정 380(사용자 확정 2026-11-18 · 선택 A): **모집공고** 수정·만들기·게시 상태·보관(+ 플래그·수동확정·
+     블로그 승인/반려·취소확정·상품페이지 판독)은 리뷰어·업체를 뺀 **모든 내부 직원** — 판정 단일 출처 =
+     `canEditCampaign`(campaignEditorMiddleware). 화면 버튼도 `/perm` 의 같은 판정(canEditCampaign)을 따른다.
    ★ 라우트는 **기존 서비스·핸들러를 그대로 호출**한다(로직 복제 금지) — 여기서는
      Track B 경로로 노출하면서 권한만 다시 씌운다. 리뷰웹시스템[3버전]은 /api/trackb/* 하고만
      통신하고 인트라넷 SSO 토큰도 그 경로로만 격리되기 때문이다.
    ══════════════════════════════════════════════════════════════ */
 const wdEditors = require('../utils/workdeskEditors');
-const { canEdit, canManageEditors, editorOnlyMiddleware, editorManagerMiddleware } = wdEditors;
+const { canEdit, canManageEditors, editorOnlyMiddleware, editorManagerMiddleware,
+  canEditCampaign, campaignEditorMiddleware } = wdEditors;
 
 // 이 계정이 편집 가능한지 — AE는 역할로 허용, admin은 기존 명단 판정(서버 게이트가 최종 방어)
 router.get('/perm', authMiddleware, internalMiddleware, async (req, res, next) => {
@@ -1620,6 +1628,7 @@ router.get('/perm', authMiddleware, internalMiddleware, async (req, res, next) =
     res.json({
       ok: true,
       canEdit: await canEdit(req.admin),
+      canEditCampaign: canEditCampaign(req.admin),   // 결정 380 — 모집공고 버튼은 이 값(명단과 무관)
       canManageEditors: canManageEditors(req.admin),
       role: _role(req),
       name: (req.admin && req.admin.name) || '',
@@ -1718,7 +1727,27 @@ router.put('/work-orders/status', authMiddleware, internalMiddleware, editorOnly
 // 공고 저장 직후 work_orders.linked_campaign_id를 기록하는 역연결.
 // 리뷰웹시스템[3버전]의 인트라넷 SSO 토큰은 /api/trackb/* 로만 허용되므로,
 // 기존 /api/order/admin/update를 직접 호출하면 공고는 생성돼도 링크만 401로 실패했다.
-router.put('/work-orders/update', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+// ★ 결정 380: 명단 밖 직원도 공고를 발행할 수 있으므로, **그 오더로 만든 공고(source_work_order_id = 오더 id)의
+//   역연결 한 칸만** 공고 편집 권한으로 연다 — 메모·채팅방 등 다른 칸이 섞이거나, 다른 오더의 공고를 붙이거나,
+//   확인 조회가 실패하면 종전 명단 게이트로 넘어간다(fail-closed). 오더당 살아 있는 공고 하나 검사(결정 246)는 핸들러가 그대로 한다.
+async function workOrderLinkGate(req, res, next) {
+  try { if (await canEdit(req.admin)) return next(); } catch (_) { /* 아래로 */ }
+  try {
+    const b = req.body && typeof req.body === 'object' ? req.body : {};
+    const keys = Object.keys(b);
+    const woId = typeof b.id === 'string' ? b.id.trim() : '';
+    const campId = typeof b.linked_campaign_id === 'string' ? b.linked_campaign_id.trim() : '';
+    if (canEditCampaign(req.admin) && woId && campId
+        && keys.every(k => k === 'id' || k === 'linked_campaign_id')) {
+      const { rows } = await pool.query(
+        `SELECT 1 AS ok FROM recruit_campaigns WHERE id = $1 AND NULLIF(source_work_order_id, '') = $2 LIMIT 1`,
+        [campId, woId]);
+      if (rows && rows.length) return next();
+    }
+  } catch (_) { /* fail-closed — 아래 명단 게이트가 403 */ }
+  return editorOnlyMiddleware(req, res, next);
+}
+router.put('/work-orders/update', authMiddleware, internalMiddleware, workOrderLinkGate, (req, res, next) =>
   _updateHandler(req, res, next));
 // 관리자 수동 수정 — 인트라넷 SSO 토큰(via:'intranet')은 /api/order/* 에 도달 불가라 여기로 위임.
 // 편집은 접수·상태변경과 같은 2단 권한(내부인 열람 · AE 또는 편집 허용 admin).
@@ -1793,10 +1822,12 @@ const _campHandlers = {
 };
 router.get('/campaigns/list', authMiddleware, internalMiddleware, async (req, res, next) => {
   // 편집 가능 여부를 함께 실어 준다 — 프론트가 버튼 노출을 정한다(서버 게이트가 최종 방어)
+  //   canEdit = 명단 판정(종전 · 오더·수동제출) / canEditCampaign = 공고 판정(결정 380 · 내부 직원 전원)
   const _json = res.json.bind(res);
   try {
     const ce = await canEdit(req.admin);
-    res.json = (body) => _json(body && typeof body === 'object' ? { ...body, canEdit: ce } : body);
+    const cc = canEditCampaign(req.admin);
+    res.json = (body) => _json(body && typeof body === 'object' ? { ...body, canEdit: ce, canEditCampaign: cc } : body);
   } catch (_) { /* 판정 실패는 canEdit 미표기 → 프론트는 읽기 전용으로 취급 */ }
   return _campHandlers.list(req, res, next);
 });
@@ -1812,11 +1843,11 @@ router.get('/campaigns/:id/activity-log', authMiddleware, internalMiddleware, (r
    원본 핸들러는 JWT role 이 admin/master 일 때만 전체 행을 주는데, `staff`(AE)도 편집한다.
    AE가 공개 화이트리스트 뷰를 받으면 **수정은 되면서** 폼이
    work_detail·연결탭·정원·옵션을 빈 기본값으로 채우고, 저장하면 기존 설정이 조용히
-   지워진다(0·빈값·options:[]). 그래서 canEdit 이면 신뢰 플래그를 세워 위임한다.
+   지워진다(0·빈값·options:[]). 그래서 공고를 고칠 수 있으면(canEditCampaign — 결정 380) 신뢰 플래그를 세워 위임한다.
    ★ 판정 실패는 공개 뷰(fail-closed) — 모르면 더 주지 않는다. 편집은 서버 게이트가 막는다. */
 // 공고 편집 상품 카드 「쇼핑몰에서 가져오기」(결정 277) — 확장 프로그램이 읽은 상품페이지 글 → AI 판독 결과(저장 없음).
-//   공고를 고칠 수 있는 사람만(편집 게이트와 같다). 받은 글은 저장·로그하지 않는다. 원본 = 인트라넷 product-page-reader.
-router.post('/campaigns/product-page/extract', authMiddleware, internalMiddleware, editorOnlyMiddleware, productPageLimiter, async (req, res) => {
+//   공고를 고칠 수 있는 사람만(공고 편집 게이트와 같다 — 결정 380). 받은 글은 저장·로그하지 않는다. 원본 = 인트라넷 product-page-reader.
+router.post('/campaigns/product-page/extract', authMiddleware, internalMiddleware, campaignEditorMiddleware, productPageLimiter, async (req, res) => {
   res.set('Cache-Control', 'no-store');
   try {
     const out = await require('../services/productPageReader.service').extractProductPage(req.body);
@@ -1827,39 +1858,39 @@ router.post('/campaigns/product-page/extract', authMiddleware, internalMiddlewar
   }
 });
 router.get('/campaigns/:id', authMiddleware, internalMiddleware, async (req, res, next) => {
-  try { if (await canEdit(req.admin)) req._trustedAdminView = true; } catch (_) { /* 공개 뷰로 수렴 */ }
+  try { if (canEditCampaign(req.admin)) req._trustedAdminView = true; } catch (_) { /* 공개 뷰로 수렴 */ }
   return _campHandlers.detail(req, res, next);
 });
-router.post('/campaigns/create', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+router.post('/campaigns/create', authMiddleware, internalMiddleware, campaignEditorMiddleware, (req, res, next) =>
   _campHandlers.create(req, res, next));
-router.put('/campaigns/:id', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+router.put('/campaigns/:id', authMiddleware, internalMiddleware, campaignEditorMiddleware, (req, res, next) =>
   _campHandlers.update(req, res, next));
-router.post('/campaigns/:id/flags', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+router.post('/campaigns/:id/flags', authMiddleware, internalMiddleware, campaignEditorMiddleware, (req, res, next) =>
   _campHandlers.flags(req, res, next));
 // 갈라진 선택지 합치기 — 참여 기록을 옮기고 마감 행을 지우는 데이터 정리라 관리자 전용(원본과 같은 게이트).
 router.post('/campaigns/:id/options/merge', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
   _campHandlers.optionMerge(req, res, next));
+// ★ 삭제는 되돌릴 수 없어 결정 380 범위 밖 — 종전 명단 게이트 그대로(작업보드 모집공고 탭에는 삭제 버튼이 없다).
 router.delete('/campaigns/:id', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _campHandlers.del(req, res, next));
-router.post('/campaigns/:id/confirm', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+router.post('/campaigns/:id/confirm', authMiddleware, internalMiddleware, campaignEditorMiddleware, (req, res, next) =>
   _campHandlers.confirm(req, res, next));
-router.put('/campaigns/:id/status', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+router.put('/campaigns/:id/status', authMiddleware, internalMiddleware, campaignEditorMiddleware, (req, res, next) =>
   _campHandlers.status(req, res, next));
 router.get('/campaigns/:id/preview', authMiddleware, internalMiddleware, (req, res, next) =>
   _campHandlers.preview(req, res, next));
-router.post('/campaigns/:id/dismiss', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+router.post('/campaigns/:id/dismiss', authMiddleware, internalMiddleware, campaignEditorMiddleware, (req, res, next) =>
   _campHandlers.dismiss(req, res, next));
-// 127 블로그 승인제 — 승인/반려는 수동확정(confirm)과 같은 2단 게이트(AE 또는 편집 허용 admin).
-router.post('/campaigns/:id/blog-approve', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+// 127 블로그 승인제 — 승인/반려는 수동확정(confirm)과 같은 공고 편집 게이트(결정 380 — 내부 직원 전원).
+router.post('/campaigns/:id/blog-approve', authMiddleware, internalMiddleware, campaignEditorMiddleware, (req, res, next) =>
   _campHandlers.blogApprove(req, res, next));
-router.post('/campaigns/:id/blog-reject', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+router.post('/campaigns/:id/blog-reject', authMiddleware, internalMiddleware, campaignEditorMiddleware, (req, res, next) =>
   _campHandlers.blogReject(req, res, next));
-/* 130 보관/보관 해제 — **게시 토글·삭제·발행과 같은 2단 게이트**(AE 또는 편집 허용 admin).
+/* 130 보관/보관 해제 — **게시 토글·발행과 같은 공고 편집 게이트**(결정 380 — 리뷰어·업체를 뺀 내부 직원 전원).
    ★ 원본(`/api/campaign/admin/:id/archive`)은 adminOrMaster 이므로 이 경로가 더 넓다 —
-     같은 파일의 status·delete·create 프록시가 이미 그 계약이고(공고 관리는 AE와 편집 허용 admin이
-     담당), 보관은 **되돌릴 수 있고** 살아 있는 참여가 있으면 서비스가 거부한다(fail-closed).
-   ★ 명단에 없는 계정은 여기서 막히고, 관리자 대시보드는 종전 adminOrMaster 경로를 쓴다. */
-router.post('/campaigns/:id/archive', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+     같은 파일의 status·create 프록시가 이미 그 계약이고, 보관은 **되돌릴 수 있고** 살아 있는 참여가
+     있으면 서비스가 거부한다(fail-closed). 관리자 대시보드는 종전 adminOrMaster 경로를 쓴다. */
+router.post('/campaigns/:id/archive', authMiddleware, internalMiddleware, campaignEditorMiddleware, (req, res, next) =>
   _campHandlers.archive(req, res, next));
 
 // ── 날짜별 모집인원 조절 + 차수(095) ─────────────────────────
@@ -1895,6 +1926,11 @@ function _cdpFail(res, err) {
     // ★ 결정 228: 순차진행 일정표 공고의 날짜별 인원 — 늘리기·상품 없는 날 막음 / 줄이기는 두 번 확인 뒤(confirmReduce)
     sequential_over: 422, sequential_no_product: 422, sequential_reduce_needs_confirm: 409,
     recruit_quota_qna_locked: 409,   // 결정 321: Q&A 자리표 탭은 접수 뒤 건수를 바꾸지 않는다(일정 끝 추가 모집으로)
+    // ★ 결정 379: Q&A 공고 — 날짜별 인원 저장 막음 · 조절 창 빈 자리 옮기기(qnaSlots.moveQnaSlots)
+    qna_plan_set: 409,
+    qna_move_stale: 409, qna_move_bad: 400, qna_move_empty: 400, qna_move_past: 422, qna_move_closed_day: 422,
+    qna_move_today: 422, qna_move_no_room: 422, not_qna: 400, not_active: 409, changed: 409,
+    qna_move_before_start: 422, qna_move_capacity_unknown: 409, qna_move_too_big: 400,   // PR #1839 리뷰 반영(Codex P2)
   };
   if (err && err.code && codes[err.code]) {
     res.status(codes[err.code]).json({ ok: false, code: err.code, error: err.message, ...(err.floor != null ? { floor: err.floor } : {}),
@@ -2030,7 +2066,7 @@ router.post('/price-alerts/:id/resolve', authMiddleware, internalMiddleware, asy
 router.get('/campaigns/:id/daily-plan', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { getPlanOverview } = require('../services/campaignPlan.service');
-    res.json({ ok: true, ...(await getPlanOverview(String(req.params.id))) });
+    res.json({ ok: true, ...(await getPlanOverview(String(req.params.id), { admin: req.admin })) });
   } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
 });
 router.post('/campaigns/:id/daily-plan', authMiddleware, internalMiddleware, async (req, res, next) => {
@@ -2038,7 +2074,21 @@ router.post('/campaigns/:id/daily-plan', authMiddleware, internalMiddleware, asy
     const { savePlans, getPlanOverview } = require('../services/campaignPlan.service');
     const campaignId = String(req.params.id);
     const out = await savePlans(campaignId, req.body, _by(req));
-    res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId)) });
+    res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId, { admin: req.admin })) });
+  } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
+});
+/* 결정 379 — Q&A 공고 조절 창의 빈 자리 옮기기([−]/[＋] → [확정 저장]). 권한 = 조절 창 저장과 같은 내부 직원(internalMiddleware).
+   판정·쓰기는 qnaSlots.moveQnaSlots 한 곳 · 응답에 조절 창 자료를 함께 싣는다(다시 읽기가 실패해도 반영은 됐다 — reload 로 알린다). */
+router.post('/campaigns/:id/qna-move', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const campaignId = String(req.params.id);
+    const b = req.body || {};
+    const out = await require('../services/qnaSlots.service')
+      .moveQnaSlots({ campaignId, days: b.days, total: b.total, actor: _by(req) });
+    let ov = null;
+    try { ov = await require('../services/campaignPlan.service').getPlanOverview(campaignId, { admin: req.admin }); }
+    catch (e) { logger.warn(`[qna-move] 반영 뒤 다시 읽기 실패 camp=${campaignId}: ${e.message}`); }
+    res.json({ ...(ov || {}), ...out, ok: true, reload: !ov });
   } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
 });
 /* 저장하지 않고 날짜별 예상 인원을 다시 계산(결정 182 — 조절 창이 바꾸는 즉시 보여준다). 쓰기 0건. */

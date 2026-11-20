@@ -1604,6 +1604,21 @@ router.post('/order', async (req, res, next) => {
        저장된 모든 주문을 넘긴다 — 홀드 확정이 실패해 공고 참여에 묶이지 못한 주문도 바로 구매다(Codex PR #1628).
        공고 참여로 확정된 주문은 서비스가 campaign_application_id 로 거른다. */
     if (!_judgeAfterCapFill) require('../services/directPurchaseRules.service').judgeLater(ledger.orderSubmissionId, 'submit');
+    /* ★ 결정 383 — 옵션 없는 「택1」 공고(공고 창 「분류 후보」를 적은 공고)는 제출 때 이미 읽은 캡처 옵션 글자로
+       후보 하나가 확실할 때만 작업보드 「분류」 칸(추가 열)에 적는다. AI 추가 호출 0 · 빈 칸에만 · 응답 뒤 · 실패 = 미분류(접수와 무관).
+       공고 = 검증된 홀드의 공고 → 없으면 작업표에 연결된 후보 있는 공고 하나(captureClassify 단일 출처). */
+    if (b.productCaptureName || b.productCaptureOption) {
+      const _cls = { orderSubmissionId: ledger.orderSubmissionId,
+        campaignId: (holdCtx && holdCtx.verified && holdCtx.campaignId) || null,
+        sheetId: orderScope.sheetId, tabName: orderScope.tabName,
+        captureName: b.productCaptureName, captureOption: b.productCaptureOption, by: '제출 시' };
+      setImmediate(() => {
+        Promise.resolve()
+          .then(() => require('../services/captureClassify.service').classifyFromSubmitCapture(_cls))
+          .then(r => { if (r && r.written) logger.info(`[submit/order] 제출 캡처로 분류 os=${_cls.orderSubmissionId} → ${r.value}`); })
+          .catch(e => logger.warn(`[submit/order] 제출 캡처 분류 실패(무시 — 미분류로 둔다): ${e.message}`));
+      });
+    }
     res.json({
       ok: true,
       dbSaved: true,

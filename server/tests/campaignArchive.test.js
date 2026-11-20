@@ -257,8 +257,9 @@ function finishRest() {
     ok('archived 는 boolean 명시(빈 요청이 곧 보관이 되지 않게)', /typeof want !== 'boolean'/.test(arc));
     ok('42703(마이그레이션 미적용)은 not_ready 로 말한다', /not_ready/.test(arc));
   }
+  // 결정 380: 보관은 공고 편집 게이트(내부 직원 전원 · campaignEditorMiddleware) — 광고주·리뷰어는 계속 차단
   ok('★ Track B 프록시 — 인트라넷 SSO 토큰이 닿는 경로',
-    /router\.post\('\/campaigns\/:id\/archive', authMiddleware, internalMiddleware, editorOnlyMiddleware/.test(trackb));
+    /router\.post\('\/campaigns\/:id\/archive', authMiddleware, internalMiddleware, campaignEditorMiddleware/.test(trackb));
   {
     // 라우터 스택 실검사 — 문자열이 아니라 실제로 등록됐는지
     const campRouter = require('../src/routes/campaign.routes');

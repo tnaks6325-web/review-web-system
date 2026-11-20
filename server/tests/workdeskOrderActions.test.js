@@ -315,10 +315,11 @@ const callDetail = (req) => new Promise((resolve) => {
       'Object.prototype 오염만으로 전체 행이 나갔다 — hasOwnProperty 검사가 없다');
   });
 
-  t('Track B 라우트가 canEdit 일 때만 플래그를 세운다(세우는 곳은 한 곳뿐)', () => {
+  // 결정 380: 플래그 판정 = 공고 편집 판정(canEditCampaign — 내부 직원 전원)과 같은 함수(고칠 수 있는 사람 = 전체 행을 받는 사람)
+  t('Track B 라우트가 공고를 고칠 수 있을 때만 플래그를 세운다(세우는 곳은 한 곳뿐)', () => {
     const dir = path.join(__dirname, '..', 'src', 'routes');
     const tb = fs.readFileSync(path.join(dir, 'trackB.routes.js'), 'utf8');
-    assert.ok(/if \(await canEdit\(req\.admin\)\) req\._trustedAdminView = true;/.test(tb));
+    assert.ok(/if \(canEditCampaign\(req\.admin\)\) req\._trustedAdminView = true;/.test(tb));
     assert.ok(/catch \(_\) \{ \/\* 공개 뷰로 수렴 \*\/ \}/.test(tb), '판정 실패가 fail-closed 가 아니다');
     const n = (fs.readdirSync(dir).filter(f => f.endsWith('.js'))
       .map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n')

@@ -1,0 +1,514 @@
+{
+ "note": "결정 379 — 실제 서비스(getPlanOverview · moveQnaSlots)로 만든 응답 · 가상 자료 · 오늘 2026-11-17(화) 14:00 KST · 만들기: tests/helpers/qnaMoveFixtureGen.js",
+ "qna": {
+  "ok": true,
+  "campaignId": "camp_qna_fixture",
+  "title": "11/3더로우 Q/A 50건",
+  "status": "active",
+  "defaultDaily": 8,
+  "skipWeekends": false,
+  "recruitTotal": 50,
+  "recruitTotalSource": "campaign",
+  "scheduleTotal": null,
+  "scheduleLastDate": null,
+  "startDate": "2026-11-03",
+  "today": "2026-11-17",
+  "planEnabled": true,
+  "carryMode": "auto",
+  "carryStrategy": "spread",
+  "carryHeld": null,
+  "carryAppliedSum": 0,
+  "carryPending": 0,
+  "todaySubmitted": 0,
+  "planGateSubmittedAll": 49,
+  "planGateTodaySubmitted": 0,
+  "planGateKnown": true,
+  "planGateSource": "order_ledger",
+  "totalQuotaFull": false,
+  "todayNaturalQuota": 0,
+  "projection": {
+   "today": "2026-11-17",
+   "from": "2026-11-17",
+   "days": [
+    {
+     "date": "2026-11-17",
+     "quota": 0,
+     "planned": null,
+     "closed": false
+    },
+    {
+     "date": "2026-11-18",
+     "quota": 1,
+     "planned": null,
+     "closed": false
+    }
+   ],
+   "endDate": "2026-11-18",
+   "remaining": 1,
+   "truncated": false
+  },
+  "scheduleDriven": false,
+  "scheduleDates": null,
+  "worktableDates": [
+   {
+    "date": "2026-11-03",
+    "slots": 7,
+    "filled": 7
+   },
+   {
+    "date": "2026-11-04",
+    "slots": 8,
+    "filled": 8
+   },
+   {
+    "date": "2026-11-05",
+    "slots": 8,
+    "filled": 8
+   },
+   {
+    "date": "2026-11-06",
+    "slots": 8,
+    "filled": 8
+   },
+   {
+    "date": "2026-11-07",
+    "slots": 6,
+    "filled": 6
+   },
+   {
+    "date": "2026-11-08",
+    "slots": 4,
+    "filled": 4
+   },
+   {
+    "date": "2026-11-09",
+    "slots": 2,
+    "filled": 2
+   },
+   {
+    "date": "2026-11-10",
+    "slots": 2,
+    "filled": 2
+   },
+   {
+    "date": "2026-11-11",
+    "slots": 2,
+    "filled": 2
+   },
+   {
+    "date": "2026-11-12",
+    "slots": 2,
+    "filled": 2
+   },
+   {
+    "date": "2026-11-18",
+    "slots": 1,
+    "filled": 0
+   }
+  ],
+  "worktableLinked": true,
+  "plans": [
+   {
+    "date": "2026-11-17",
+    "count": 0,
+    "updatedBy": "망고",
+    "updatedAt": "2026-11-16T07:18:03.540Z"
+   }
+  ],
+  "byDateSubmitted": {
+   "2026-11-03": 7,
+   "2026-11-04": 8,
+   "2026-11-05": 8,
+   "2026-11-06": 8,
+   "2026-11-07": 6,
+   "2026-11-08": 4,
+   "2026-11-09": 2,
+   "2026-11-10": 2,
+   "2026-11-11": 2,
+   "2026-11-12": 2
+  },
+  "todayUsed": 0,
+  "submittedAll": 49,
+  "progressSource": "worktable_filled",
+  "rounds": [],
+  "roundsTotal": 0,
+  "roundsDrift": false,
+  "events": [],
+  "optionDaily": null,
+  "qna": {
+   "today": "2026-11-17",
+   "days": [
+    {
+     "date": "2026-11-03",
+     "slots": 7,
+     "filled": 7,
+     "open": 0,
+     "movable": 0
+    },
+    {
+     "date": "2026-11-04",
+     "slots": 8,
+     "filled": 8,
+     "open": 0,
+     "movable": 0
+    },
+    {
+     "date": "2026-11-05",
+     "slots": 8,
+     "filled": 8,
+     "open": 0,
+     "movable": 0
+    },
+    {
+     "date": "2026-11-06",
+     "slots": 8,
+     "filled": 8,
+     "open": 0,
+     "movable": 0
+    },
+    {
+     "date": "2026-11-07",
+     "slots": 6,
+     "filled": 6,
+     "open": 0,
+     "movable": 0
+    },
+    {
+     "date": "2026-11-08",
+     "slots": 4,
+     "filled": 4,
+     "open": 0,
+     "movable": 0
+    },
+    {
+     "date": "2026-11-09",
+     "slots": 2,
+     "filled": 2,
+     "open": 0,
+     "movable": 0
+    },
+    {
+     "date": "2026-11-10",
+     "slots": 2,
+     "filled": 2,
+     "open": 0,
+     "movable": 0
+    },
+    {
+     "date": "2026-11-11",
+     "slots": 2,
+     "filled": 2,
+     "open": 0,
+     "movable": 0
+    },
+    {
+     "date": "2026-11-12",
+     "slots": 2,
+     "filled": 2,
+     "open": 0,
+     "movable": 0
+    },
+    {
+     "date": "2026-11-18",
+     "slots": 1,
+     "filled": 0,
+     "open": 1,
+     "movable": 1
+    }
+   ],
+   "first": "2026-11-03",
+   "last": "2026-11-18",
+   "ended": false,
+   "total": 50,
+   "filled": 49,
+   "extra": null,
+   "move": {
+    "from": "2026-11-17",
+    "to": "2026-12-02",
+    "closed": [],
+    "start": "2026-11-03",
+    "today": {
+     "ok": true,
+     "cutoffAt": "2026-11-17T14:50:00.000Z"
+    }
+   }
+  }
+ },
+ "after": {
+  "ok": true,
+  "campaignId": "camp_qna_fixture",
+  "title": "11/3더로우 Q/A 50건",
+  "status": "active",
+  "defaultDaily": 8,
+  "skipWeekends": false,
+  "recruitTotal": 50,
+  "recruitTotalSource": "campaign",
+  "scheduleTotal": null,
+  "scheduleLastDate": null,
+  "startDate": "2026-11-03",
+  "today": "2026-11-17",
+  "planEnabled": true,
+  "carryMode": "auto",
+  "carryStrategy": "spread",
+  "carryHeld": null,
+  "carryAppliedSum": 0,
+  "carryPending": 0,
+  "todaySubmitted": 0,
+  "planGateSubmittedAll": 49,
+  "planGateTodaySubmitted": 0,
+  "planGateKnown": true,
+  "planGateSource": "order_ledger",
+  "totalQuotaFull": false,
+  "todayNaturalQuota": 1,
+  "projection": {
+   "today": "2026-11-17",
+   "from": "2026-11-17",
+   "days": [
+    {
+     "date": "2026-11-17",
+     "quota": 1,
+     "planned": null,
+     "closed": false
+    }
+   ],
+   "endDate": "2026-11-17",
+   "remaining": 1,
+   "truncated": false
+  },
+  "scheduleDriven": false,
+  "scheduleDates": null,
+  "worktableDates": [
+   {
+    "date": "2026-11-03",
+    "slots": 7,
+    "filled": 7
+   },
+   {
+    "date": "2026-11-04",
+    "slots": 8,
+    "filled": 8
+   },
+   {
+    "date": "2026-11-05",
+    "slots": 8,
+    "filled": 8
+   },
+   {
+    "date": "2026-11-06",
+    "slots": 8,
+    "filled": 8
+   },
+   {
+    "date": "2026-11-07",
+    "slots": 6,
+    "filled": 6
+   },
+   {
+    "date": "2026-11-08",
+    "slots": 4,
+    "filled": 4
+   },
+   {
+    "date": "2026-11-09",
+    "slots": 2,
+    "filled": 2
+   },
+   {
+    "date": "2026-11-10",
+    "slots": 2,
+    "filled": 2
+   },
+   {
+    "date": "2026-11-11",
+    "slots": 2,
+    "filled": 2
+   },
+   {
+    "date": "2026-11-12",
+    "slots": 2,
+    "filled": 2
+   },
+   {
+    "date": "2026-11-17",
+    "slots": 1,
+    "filled": 0
+   }
+  ],
+  "worktableLinked": true,
+  "plans": [
+   {
+    "date": "2026-11-17",
+    "count": 0,
+    "updatedBy": "망고",
+    "updatedAt": "2026-11-16T07:18:03.540Z"
+   }
+  ],
+  "byDateSubmitted": {
+   "2026-11-03": 7,
+   "2026-11-04": 8,
+   "2026-11-05": 8,
+   "2026-11-06": 8,
+   "2026-11-07": 6,
+   "2026-11-08": 4,
+   "2026-11-09": 2,
+   "2026-11-10": 2,
+   "2026-11-11": 2,
+   "2026-11-12": 2
+  },
+  "todayUsed": 0,
+  "submittedAll": 49,
+  "progressSource": "worktable_filled",
+  "rounds": [],
+  "roundsTotal": 0,
+  "roundsDrift": false,
+  "events": [
+   {
+    "actor": "망고",
+    "action": "qna_move",
+    "detail": {
+     "days": [
+      {
+       "n": -1,
+       "date": "2026-11-18"
+      },
+      {
+       "n": 1,
+       "date": "2026-11-17"
+      }
+     ],
+     "after": "2026-11-17",
+     "moved": 1,
+     "moves": [
+      {
+       "n": 1,
+       "to": "2026-11-17",
+       "from": "2026-11-18",
+       "units": [
+        {
+         "n": 1,
+         "name": "벨벳틴 부티크 상품"
+        }
+       ]
+      }
+     ],
+     "total": 50
+    },
+    "at": "2026-11-17T05:00:00.000Z"
+   }
+  ],
+  "optionDaily": null,
+  "qna": {
+   "today": "2026-11-17",
+   "days": [
+    {
+     "date": "2026-11-03",
+     "slots": 7,
+     "filled": 7,
+     "open": 0,
+     "movable": 0
+    },
+    {
+     "date": "2026-11-04",
+     "slots": 8,
+     "filled": 8,
+     "open": 0,
+     "movable": 0
+    },
+    {
+     "date": "2026-11-05",
+     "slots": 8,
+     "filled": 8,
+     "open": 0,
+     "movable": 0
+    },
+    {
+     "date": "2026-11-06",
+     "slots": 8,
+     "filled": 8,
+     "open": 0,
+     "movable": 0
+    },
+    {
+     "date": "2026-11-07",
+     "slots": 6,
+     "filled": 6,
+     "open": 0,
+     "movable": 0
+    },
+    {
+     "date": "2026-11-08",
+     "slots": 4,
+     "filled": 4,
+     "open": 0,
+     "movable": 0
+    },
+    {
+     "date": "2026-11-09",
+     "slots": 2,
+     "filled": 2,
+     "open": 0,
+     "movable": 0
+    },
+    {
+     "date": "2026-11-10",
+     "slots": 2,
+     "filled": 2,
+     "open": 0,
+     "movable": 0
+    },
+    {
+     "date": "2026-11-11",
+     "slots": 2,
+     "filled": 2,
+     "open": 0,
+     "movable": 0
+    },
+    {
+     "date": "2026-11-12",
+     "slots": 2,
+     "filled": 2,
+     "open": 0,
+     "movable": 0
+    },
+    {
+     "date": "2026-11-17",
+     "slots": 1,
+     "filled": 0,
+     "open": 1,
+     "movable": 1
+    }
+   ],
+   "first": "2026-11-03",
+   "last": "2026-11-17",
+   "ended": false,
+   "total": 50,
+   "filled": 49,
+   "extra": null,
+   "move": {
+    "from": "2026-11-17",
+    "to": "2026-12-01",
+    "closed": [],
+    "start": "2026-11-03",
+    "today": {
+     "ok": true,
+     "cutoffAt": "2026-11-17T14:50:00.000Z"
+    }
+   }
+  },
+  "moved": 1,
+  "moves": [
+   {
+    "from": "2026-11-18",
+    "to": "2026-11-17",
+    "n": 1,
+    "units": [
+     {
+      "name": "벨벳틴 부티크 상품",
+      "n": 1
+     }
+    ]
+   }
+  ],
+  "reload": false
+ }
+}

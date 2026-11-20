@@ -27,6 +27,15 @@ const ACTION = 'shortage_decision';
 function _norm(s) { return String(s || '').replace(/\s+/g, '').toLowerCase(); }
 
 /** 이 사람이 그 공고의 받는 사람인가 — 공고 담당자(닉네임) 또는 연결 작업오더를 보낸 AE. */
+/**
+ * ★ 결정 378(사용자 확정 2026-11-16) — 리뷰웹 관리자(admin)·마스터는 **모든 공고**의 팝업(어제 부족 인원 · 정규 일정 끝)을
+ *   보고 정한다. 인트라넷 SSO 는 master 를 발급하지 않아(최고 admin) 마스터만 예외로 두면 사장님 계정도 막힌다.
+ *   일반 직원(staff)은 종전대로 받는 사람(isRecipient)만. 목록·반영 4곳이 이 함수 하나를 쓴다(사본 금지).
+ */
+function canDecideAll(admin) {
+  return !!admin && (admin.role === 'master' || admin.role === 'admin');
+}
+
 function isRecipient(adminName, campaign, workOrder) {
   const me = _norm(adminName);
   if (!me) return false;
@@ -343,7 +352,7 @@ async function listShortages(admin, opts = {}) {
     //   한도 조회 실패(null)도 모름이라 묻지 않는다(코덱스 리뷰).
     if (optCapped === null || optCapped.has(String(c.id))) continue;
     if (unknownTime === null || unknownTime.has(String(c.id))) continue;   // 확정 시각 모르는 참여가 있으면 어제 수를 알 수 없다
-    if (!opts.skipRecipient && !isRecipient(admin && admin.name, c, wos.get(c.id))) continue;
+    if (!opts.skipRecipient && !canDecideAll(admin) && !isRecipient(admin && admin.name, c, wos.get(c.id))) continue;
     if (scheduleUnknown(c) || (schMap && st.isUsableSchedule(scheduleFor(schMap, c)))) continue;
     const counts = countsMap.get(c.id);
     const fx = facts.get(c.id);
@@ -431,7 +440,7 @@ async function _lockedRecheck(client, camp, d, it, cur, admin, opts) {
   if (capNow === null || capNow.has(String(d.campaignId))) throw err('상품별 하루 한도가 정해진 공고라 처리할 수 없습니다', 'not_eligible');
   const unkNow = await _unknownTimeIds(client, [camp], st.kstDayStartUtc(new Date()).getTime() - 86400000);
   if (unkNow === null || unkNow.has(String(d.campaignId))) throw err('확정 시각을 모르는 참여가 있어 어제 인원을 셀 수 없습니다', 'stale_shortage');
-  if (!opts.skipRecipient) {
+  if (!opts.skipRecipient && !canDecideAll(admin)) {
     const { linkedWorkOrdersForCampaigns } = require('./linkedRecruitQuota.service');
     let wo = null;
     try { wo = (await linkedWorkOrdersForCampaigns(client, [d.campaignId], ['created_by'])).get(d.campaignId) || null; } catch (_) { wo = null; }
@@ -562,4 +571,4 @@ async function applyDecisions(admin, decisions, opts = {}) {
   return { ok: true, date: cur.date, results };
 }
 
-module.exports = { listShortages, applyDecisions, computeShortage, isRecipient, ACTION };
+module.exports = { listShortages, applyDecisions, computeShortage, isRecipient, canDecideAll, ACTION };

@@ -1848,7 +1848,7 @@ async function applySharedPatch(p, inTxClient = null) {
         : isUndecidedWorkManager(rawTarget) ? '랜덤' : rawTarget;
       const keys = Object.keys(p.mine || {});
       if (keys.length !== 1 || keys[0] !== 'work_manager'
-          || (!p.forcePush && !['박세희', '박은비', '랜덤'].includes(target))) {
+          || (!p.forcePush && !['박세희', '박은비', '랜덤', '기타'].includes(target))) {   // 기타 = 결정 374(인트라넷도 같은 네 값)
         return await _abort(client, 400, { ok: false, code: 'manager_payload_invalid', error: '작업담당만 지정해 다시 저장해 주세요.' });
       }
       if (!String(wo.source_review_order_id || '').trim()) {

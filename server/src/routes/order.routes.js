@@ -1062,6 +1062,7 @@ function _sourceRevisionPreHook(source) {
 function _canonicalOriginalWorkManager(raw) {
   const value = String(raw == null ? '' : raw).trim();
   const mapped = mapWorkManager(value);
+  if (mapped === '기타') return '기타';   // 결정 374 — 만두·망고 둘 다 아닌 작업(인트라넷 작업담당 「기타」)
   if (mapped === '만두') return '박세희';
   if (mapped === '망고') return '박은비';
   if (isUndecidedWorkManager(value)) return '랜덤';
@@ -1095,7 +1096,7 @@ function _sourceManagerOtherChanges(current, b, derived, source) {
 async function _intakeSourceManager(res, { b, source, current, optionsJson, deliveryType, courierProxy, requester }) {
   const bid = b.bidir;
   const manager = _canonicalOriginalWorkManager(pickWorkManager(b));
-  if (!manager) return res.status(400).json({ ok: false, code: 'manager_value_invalid', error: '작업담당은 박세희·박은비·랜덤 중에서 골라 주세요.' });
+  if (!manager) return res.status(400).json({ ok: false, code: 'manager_value_invalid', error: '작업담당은 박세희·박은비·랜덤·기타 중에서 골라 주세요.' });
   const contentChanges = _sourceManagerOtherChanges(current, b, { optionsJson, deliveryType, courierProxy }, source);
   if (contentChanges.length) return res.status(400).json({ ok: false, code: 'split_save', fields: contentChanges,
     error: '양방향 동기화가 꺼진 동안에는 작업담당과 다른 변경을 함께 저장할 수 없습니다. 다른 내용부터 따로 저장한 뒤 다시 시도해 주세요.' });
@@ -1424,7 +1425,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
 
     if (_sourceManagerCapability(b)) {
       if (_hasExplicitWorkManager(b) && String(pickWorkManager(b) || '').trim() && !_canonicalOriginalWorkManager(pickWorkManager(b))) {
-        return res.status(400).json({ ok: false, code: 'manager_value_invalid', error: '작업담당은 박세희·박은비·랜덤 중에서 골라 주세요.' });
+        return res.status(400).json({ ok: false, code: 'manager_value_invalid', error: '작업담당은 박세희·박은비·랜덤·기타 중에서 골라 주세요.' });
       }
       const sw = await readBidirSwitch(pool);
       const managerChanged = _hasExplicitWorkManager(b)
@@ -2958,7 +2959,7 @@ _handlers.orderAdminEdit = async (req, res, next) => {
       }
       const rawManager = String(b.work_manager == null ? '' : b.work_manager).trim();
       const canonicalManager = _canonicalOriginalWorkManager(rawManager);
-      if (!canonicalManager) return res.status(400).json({ ok: false, code: 'manager_value_invalid', error: '작업담당은 박세희·박은비·랜덤 중에서 골라 주세요.' });
+      if (!canonicalManager) return res.status(400).json({ ok: false, code: 'manager_value_invalid', error: '작업담당은 박세희·박은비·랜덤·기타 중에서 골라 주세요.' });
       const baseVersion = Number(b.manager_base_version);
       const currentVersion = Number(o.sync_version || 0);
       const canonicalCurrent = _canonicalOriginalWorkManager(o.work_manager) || String(o.work_manager || '').trim();

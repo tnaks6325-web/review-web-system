@@ -15,7 +15,7 @@
   var SNOOZE_MS = 60 * 60 * 1000;
   var POLL_MS = 60 * 1000;
   var REFRESH_MS = 15 * 60 * 1000;
-  var S = { api: null, name: '', items: [], sel: {}, timer: null, gen: 0, lastFetch: 0, busy: false };
+  var S = { api: null, name: '', items: [], sel: {}, start: {}, focus: null, onDone: null, timer: null, gen: 0, lastFetch: 0, busy: false };
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function snoozeKey() { return 'wd_seqend_snooze_v1_' + S.name; }
@@ -61,6 +61,12 @@
       '#seOv .se-ft{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:12px 18px;border-top:1px solid #dfe3ea}',
       '#seOv .se-apply{font:inherit;font-weight:700;border:0;border-radius:9px;padding:10px 22px;background:#2f5bd3;color:#fff;cursor:pointer}',
       '#seOv .se-apply:disabled{opacity:.45;cursor:not-allowed}',
+      // 결정 377 — 모집인원 조절 창(z-index 10050) 위에서 열 때는 그보다 위에 둔다(같거나 낮으면 바탕 창이 클릭을 가로챈다)
+      '#seOv.over{z-index:10100}#seMsg.over{z-index:10110}',
+      '#seOv .se-start{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:.8rem}',
+      '#seOv .se-start .lb{color:#5b6478}',
+      '#seOv .se-b:disabled{opacity:.45;cursor:not-allowed}',
+      '#seOv .se-why{color:#5b6478;font-size:.76rem;line-height:1.45}',
       '#seMsg{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:9600;pointer-events:none;background:#1d2433;color:#fff;border-radius:14px;padding:16px 22px;display:grid;gap:6px;text-align:center;max-width:calc(100vw - 32px);box-shadow:0 10px 30px rgba(0,0,0,.25);font-family:inherit}',
       '#seMsg b{font-size:1.05rem}#seMsg span{font-size:.82rem;opacity:.85}#seMsg .bad{color:#ffb4a8;opacity:1}',
       '@media (prefers-reduced-motion:no-preference){#seMsg{animation:sefade 3.2s ease-in forwards}@keyframes sefade{0%{opacity:0;transform:translate(-50%,-46%)}10%{opacity:1;transform:translate(-50%,-50%)}60%{opacity:1}100%{opacity:0}}}',
@@ -70,7 +76,30 @@
 
   function visibleItems() {
     var sn = readSnooze(), now = Date.now();
+    // 결정 377 — 조절 창의 [추가 모집 정하기]로 열었으면 그 공고 하나만 보인다
+    if (S.focus) return S.items.filter(function (it) { return String(it.campaignId) === S.focus; });
     return S.items.filter(function (it) { return !(sn[it.campaignId] && sn[it.campaignId] > now); });
+  }
+  /* ★ 결정 377 — Q&A [추가 모집] 시작일(오늘부터/내일부터). 판정·날짜는 서버가 준 값 그대로(사본 0).
+       서버가 선택지를 안 주면(구버전 서버·계산 실패) 이 줄은 없고 종전 버튼 하나(= 내일부터)로 그린다. */
+  function fmtDays(days) { return (days || []).map(fmtMD).join('·'); }
+  function startPick(it) {
+    var o = it.start, v = S.start[it.campaignId];
+    if (v === 'today' && !(o.today && o.today.ok)) v = '';
+    return v || o['default'] || 'tomorrow';
+  }
+  function startHtml(it, i) {
+    var o = it.start, pick = startPick(it), td = o.today || {}, tm = o.tomorrow || {};
+    var cut = td.cutoffAt ? new Date(td.cutoffAt) : null;
+    var cutTxt = cut ? (function (k) { return ('0' + k.getUTCHours()).slice(-2) + ':' + ('0' + k.getUTCMinutes()).slice(-2); })(new Date(cut.getTime() + 9 * 3600000)) : '';
+    var cur = pick === 'today' ? td : tm;
+    var why = (pick === 'today' ? '오늘 ' + esc(cutTxt) + '까지 신청을 받습니다 · ' : '')
+      + (cur.days && cur.days.length ? esc(fmtDays(cur.days)) + '에 다시 엽니다' : '')
+      + (cur.skipped && cur.skipped.length ? ' · 0명(휴무)으로 닫아 둔 ' + esc(fmtDays(cur.skipped)) + '은 건너뜁니다' : '');
+    return '<div class="se-start"><span class="lb">시작일</span>'
+      + '<button type="button" class="se-b" data-i="' + i + '" data-s="today" aria-pressed="' + (pick === 'today') + '"' + (td.ok ? '' : ' disabled title="' + esc(td.why || '') + '"') + '>오늘부터</button>'
+      + '<button type="button" class="se-b" data-i="' + i + '" data-s="tomorrow" aria-pressed="' + (pick === 'tomorrow') + '">내일부터</button></div>'
+      + '<div class="se-why">' + why + (td.ok ? '' : (td.why ? '<br>오늘부터: ' + esc(td.why) : '')) + '</div>';
   }
   function thumbHtml(it) {
     var u = String(it.thumbnailUrl || '');
@@ -82,8 +111,9 @@
   function render() {
     var ov = document.getElementById('seOv');
     var list = visibleItems();
-    if (!list.length || isDismissed()) { if (ov) ov.remove(); return; }
+    if (!list.length || (isDismissed() && !S.focus)) { if (ov) ov.remove(); if (S.focus) closeFocus(); return; }
     if (!ov) { ov = document.createElement('div'); ov.id = 'seOv'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-labelledby', 'seTitle'); document.body.appendChild(ov); bind(ov); }
+    if (S.focus) ov.classList.add('over'); else ov.classList.remove('over');
     var picked = 0;
     var rows = list.map(function (it, i) {
       var sel = S.sel[it.campaignId] || '';
@@ -94,9 +124,10 @@
         '<div class="se-body"><div class="se-top"><b>' + esc(it.title) + '</b><span class="se-tag">' + (it.total | 0) + '건 모자람</span></div>' +
         '<div class="se-meta">' + (it.kind === 'qna' ? 'Q&amp;A · ' : '') + '정규 일정 ' + esc(fmtMD(it.end)) + ' 끝 · 상품별 모자란 건수</div>' +
         '<div class="se-short">' + shorts + '</div>' +
+        (it.kind === 'qna' && it.start ? startHtml(it, i) : '') +
         '<div class="se-acts">' +
           // 💬 결정 321: Q&A 공고는 못 채운 자리를 같은 공개 여부·문구로 다음 영업일부터 같은 하루 건수로 다시 깐다
-          '<button type="button" class="se-b" data-i="' + i + '" data-a="extra" aria-pressed="' + (sel === 'extra') + '">' + (it.kind === 'qna' ? '추가 모집 — 다음 영업일부터 같은 하루 건수로' : '추가 모집 — 다음 영업일부터 같은 순서로') + '</button>' +
+          '<button type="button" class="se-b" data-i="' + i + '" data-a="extra" aria-pressed="' + (sel === 'extra') + '">' + (it.kind === 'qna' ? (it.start ? '추가 모집 — 같은 하루 건수로' : '추가 모집 — 다음 영업일부터 같은 하루 건수로') : '추가 모집 — 다음 영업일부터 같은 순서로') + '</button>' +
           '<button type="button" class="se-b" data-i="' + i + '" data-a="finish" aria-pressed="' + (sel === 'finish') + '">그대로 끝내기 — 공고 마감</button>' +
           '<button type="button" class="se-b" data-i="' + i + '" data-a="snooze" aria-pressed="false">1시간 뒤 다시</button>' +
         '</div></div></div>';
@@ -115,11 +146,18 @@
     ov.addEventListener('click', function (e) {
       var t = e.target.closest ? e.target.closest('button') : null;
       if (!t) return;
-      if (t.getAttribute('data-x')) { setDismissed(); ov.remove(); return; }
+      if (t.getAttribute('data-x')) { if (S.focus) { closeFocus(); return; } setDismissed(); ov.remove(); return; }
       if (t.getAttribute('data-apply')) { apply(); return; }
       var i = Number(t.getAttribute('data-i')), a = t.getAttribute('data-a');
       var it = (S.view || [])[i]; if (!it) return;
-      if (a === 'snooze') { var sn = readSnooze(); sn[it.campaignId] = Date.now() + SNOOZE_MS; writeSnooze(sn); delete S.sel[it.campaignId]; render(); return; }
+      var sv = t.getAttribute('data-s');
+      if (sv) { if (!t.disabled) { S.start[it.campaignId] = sv; render(); } return; }
+      if (a === 'snooze') {
+        var sn = readSnooze(); sn[it.campaignId] = Date.now() + SNOOZE_MS; writeSnooze(sn); delete S.sel[it.campaignId];
+        // 결정 377 — [추가 모집 정하기]로 연 팝업(그 공고 하나)에서 미루면 닫는다(집중 보기는 미룸을 무시해 같은 항목이 다시 그려진다)
+        if (S.focus && String(it.campaignId) === S.focus) { closeFocus(); return; }
+        render(); return;
+      }
       S.sel[it.campaignId] = S.sel[it.campaignId] === a ? '' : a;
       render();
     });
@@ -128,6 +166,7 @@
   function message(title, sub, bad) {
     var old = document.getElementById('seMsg'); if (old) old.remove();
     var m = document.createElement('div'); m.id = 'seMsg'; m.setAttribute('role', 'status');
+    if (S.focus || S.onDone) m.className = 'over';
     m.innerHTML = '<b>' + esc(title) + '</b>' + (sub ? '<span class="' + (bad ? 'bad' : '') + '">' + esc(sub) + '</span>' : '');
     document.body.appendChild(m);
     setTimeout(function () { if (m.parentNode) m.remove(); }, 3400);
@@ -136,7 +175,12 @@
   async function apply() {
     if (S.busy || !S.api) return;
     var decisions = (S.view || []).filter(function (it) { return S.sel[it.campaignId]; })
-      .map(function (it) { return { campaignId: it.campaignId, action: S.sel[it.campaignId], end: it.end }; });
+      .map(function (it) {
+        var d = { campaignId: it.campaignId, action: S.sel[it.campaignId], end: it.end };
+        // 결정 377 — 서버가 시작일 선택지를 준 Q&A 공고만 보낸다(안 주면 보내지 않음 = 서버 종전 = 내일부터)
+        if (it.kind === 'qna' && it.start && d.action === 'extra') d.start = startPick(it);
+        return d;
+      });
     if (!decisions.length) return;
     // ★ 레드팀 P1-2: [그대로 끝내기]는 공고를 마감한다 — 한 번 더 확인한다(다시 게시하면 이 질문이 다시 뜬다)
     var fin = decisions.filter(function (d) { return d.action === 'finish'; });
@@ -153,8 +197,10 @@
         res = res.concat(j.results || []);
       }
       var ok = res.filter(function (r) { return r.ok; }).length, bad = res.filter(function (r) { return !r.ok; });
+      var done = S.onDone;
       message('반영했습니다 · ' + ok + '건', bad.length ? (bad.length + '건은 반영하지 못했습니다 — ' + (bad[0].error || '')) : '', bad.length > 0);
       res.forEach(function (r) { if (r.ok) delete S.sel[r.campaignId]; });
+      if (ok && done) { S.focus = null; S.onDone = null; try { done(res); } catch (_) { /* 바탕 화면 다시 그리기 실패는 팝업과 무관 */ } }
     } catch (e) {
       message('반영하지 못했습니다', (e && e.message) || '', true);
     } finally {
@@ -177,15 +223,33 @@
     } catch (_) { return false; }
   }
 
+  /* ★ 결정 377 — 모집인원 조절 창의 [추가 모집 정하기] 바로가기. 같은 팝업·같은 반영 길(새 경로 0)을 그 공고 하나만 보이게 연다.
+       ✕ 닫기·1시간 뒤 다시로 숨겨 둔 것과 무관하게 연다(사람이 직접 눌렀다). 목록에 없으면(이미 처리됨·받는 사람 아님) false.
+       @returns Promise<{ok:boolean, reason?:string}> */
+  async function openFor(campaignId, opts) {
+    if (!S.api) return { ok: false, reason: 'not_started' };
+    S.focus = String(campaignId); S.onDone = (opts && typeof opts.onDone === 'function') ? opts.onDone : null;
+    var sn = readSnooze(); if (sn[S.focus]) { delete sn[S.focus]; writeSnooze(sn); }
+    var okLoad = await load(true);
+    if (!okLoad) { closeFocus(); return { ok: false, reason: 'load_failed' }; }
+    if (!S.items.some(function (it) { return String(it.campaignId) === String(campaignId); })) { closeFocus(); return { ok: false, reason: 'not_listed' }; }
+    return { ok: true };
+  }
+  function closeFocus() {
+    S.focus = null; S.onDone = null;
+    var ov = document.getElementById('seOv'); if (ov) ov.remove();
+    if (!isDismissed()) render();
+  }
+
   function tick() {
-    if (!S.api || S.busy) return;
+    if (!S.api || S.busy || S.focus) return;
     if (Date.now() - S.lastFetch < REFRESH_MS) { render(); return; }
     load(true);
   }
 
   function start(opts) {
     if (!opts || typeof opts.api !== 'function') return;
-    S.gen++; S.api = opts.api; S.name = String(opts.name || ''); S.sel = {};
+    S.gen++; S.api = opts.api; S.name = String(opts.name || ''); S.sel = {}; S.start = {}; S.focus = null; S.onDone = null;
     injectStyles();
     load(true);
     if (S.timer) clearInterval(S.timer);
@@ -197,9 +261,9 @@
     try { Object.keys(sessionStorage).forEach(function (k) { if (k.indexOf('wd_seqend_dismiss_v1_') === 0) sessionStorage.removeItem(k); }); } catch (_) { /* noop */ }
     var msg = document.getElementById('seMsg'); if (msg) msg.remove();
     var ov = document.getElementById('seOv'); if (ov) ov.remove();
-    S.items = []; S.sel = {}; S.api = null;
+    S.items = []; S.sel = {}; S.start = {}; S.focus = null; S.onDone = null; S.api = null;
   }
 
-  window.SequentialEndPrompt = { start: start, stop: stop, _state: S, _render: render };
+  window.SequentialEndPrompt = { start: start, stop: stop, openFor: openFor, _state: S, _render: render };
   if (window.__SEQEND_PENDING) { var p = window.__SEQEND_PENDING; window.__SEQEND_PENDING = null; start(p); }
 })();

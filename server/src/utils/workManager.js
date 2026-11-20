@@ -19,6 +19,10 @@ const WORK_MANAGER_MAP = {
   '박은비': '망고',
 };
 
+/** 만두·망고 둘 다 아닌 작업(예: 블로그) — 인트라넷 작업담당 「기타」와 같은 글자(결정 374).
+ *  ★ 미지정이 아니다(질문을 다시 띄우지 않는다) · 입금관리에서 만두·망고 칩에 섞이지 않는다(「전체」·「기타」에서만). */
+const OTHER_MANAGER = '기타';
+
 /** 자동 선택하지 않고 관리자가 정해야 하는 값(인트라넷 표기 그대로) */
 const UNDECIDED = ['랜덤', '랜덤배정', '미정'];
 
@@ -29,11 +33,12 @@ function _norm(v) {
 
 /**
  * 작업담당 원문 → 리뷰웹 담당자 닉네임.
- * @returns {string} '만두' | '망고' | '' (빈 문자열 = 직접결정)
+ * @returns {string} '만두' | '망고' | '기타' | '' (빈 문자열 = 직접결정)
  */
 function mapWorkManager(raw) {
   const v = _norm(raw);
   if (!v) return '';
+  if (v === OTHER_MANAGER) return OTHER_MANAGER;   // 정확히 「기타」만(결정 374) — 다른 이름 속 글자는 잡지 않는다
   for (const [name, nick] of Object.entries(WORK_MANAGER_MAP)) {
     if (v.includes(name)) return nick;
   }
@@ -119,7 +124,7 @@ function resolveWorkManager({ orderWorkManager, tabManager } = {}) {
 }
 
 module.exports = {
-  WORK_MANAGER_MAP, UNDECIDED,
+  WORK_MANAGER_MAP, UNDECIDED, OTHER_MANAGER,
   mapWorkManager, isUndecidedWorkManager, workManagerLabel, pickWorkManager,
   normalizeManagerForStore, resolveWorkManager,
 };

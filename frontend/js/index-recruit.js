@@ -1,7 +1,7 @@
 /**
  * 공고 관리 API 베이스 — 화면마다 도달 가능한 경로가 다르다.
  *   · 관리자 대시보드 : /api/campaign/admin      (adminOrMaster)
- *   · 리뷰웹시스템[3버전]     : /api/trackb/campaigns    (내부인 열람 + 편집명단 게이트, 같은 핸들러에 위임)
+ *   · 리뷰웹시스템[3버전]     : /api/trackb/campaigns    (내부인 열람 + 공고 편집 게이트 = 내부 직원 전원(결정 380), 같은 핸들러에 위임)
  * ★ 두 네임스페이스는 **경로 모양이 동일**해서 베이스 문자열만 갈아끼우면 된다 —
  *   이 파일을 포크하지 않고 두 화면이 같은 발행·수정 로직을 쓰는 유일한 방법.
  */
@@ -1557,18 +1557,44 @@ function rfSetRepurchaseCustomDays(input) {
 window.rfSetRepurchaseDays = rfSetRepurchaseDays;
 window.rfSetRepurchaseCustomDays = rfSetRepurchaseCustomDays;
 
-/** "2시~4시" / "14:00~16:00" / "17시 오픈 이후~19시까지" → {start:'14:00', end:'16:00'} (실패 시 null)
- *  구매시간대 특성상 1~8시는 오후로 해석(+12). 프리필용 — 최종 확정은 관리자 확인. */
+/** 구매시간 글자 → {start:'HH:MM', end:'HH:MM'} (실패 시 null). 프리필용 — 최종 확정은 관리자 확인.
+ *  ★★★ 24시간 보통의 한국시간(결정 381 · 완화 금지) — `07:00`·`7시` = 오전 7시, 오전/오후가 붙을 때만 오후로 읽는다.
+ *  ★★★ 서버 사본 `server/src/utils/purchaseTimeWindow.js` 와 **본문 글자 그대로 같다**(가드 `inflowSourceEdit.test.js` ②). */
 function _parsePurchaseTime(text) {
-  const m = /(\d{1,2})(?::(\d{2}))?\s*시?[^\d~\-]*[~\-][^\d]*(\d{1,2})(?::(\d{2}))?\s*시?/.exec(String(text || ""));
+  // 숫자 바로 뒤가 날짜(일·월·년·「11/19」·「11.19」)면 시간이 아니다 · 「부터」는 시·:MM 이 붙은 숫자끼리만(PR #1841 리뷰)
+  const P = (u) => '(?:(오전|오후|아침|새벽|저녁|밤|낮|a\\.?m\\.?|p\\.?m\\.?)\\s*)?(?:(정오|자정)|(\\d{1,2})(?!\\d|\\s*(?:일|월|년)|\\s*[/.]\\s*\\d)(?:\\s*:\\s*(\\d{2})|\\s*시(?:\\s*(\\d{1,2})\\s*분|\\s*(반))?)' + u + ')(?:\\s*(a\\.?m\\.?|p\\.?m\\.?)(?![a-z]))?';
+  const m = new RegExp('(?:^|[^\\d/])' + P('?') + '[^\\d~\\-–—〜～]*?[~\\-–—〜～][^\\d]*?' + P('?')
+    + '|(?:^|[^\\d/])' + P('') + '[^\\d~\\-–—〜～]*?부터[^\\d]*?' + P(''), 'i').exec(String(text || ''));
   if (!m) return null;
-  let h1 = parseInt(m[1], 10), m1 = parseInt(m[2] || "0", 10);
-  let h2 = parseInt(m[3], 10), m2 = parseInt(m[4] || "0", 10);
-  if (h1 >= 1 && h1 <= 8) h1 += 12;
-  if (h2 >= 1 && h2 <= 8) h2 += 12;
-  if (h1 > 23 || h2 > 24 || m1 > 59 || m2 > 59 || (h2 * 60 + m2) <= (h1 * 60 + m1)) return null;
-  const pad = n => String(n).padStart(2, "0");
-  return { start: `${pad(h1)}:${pad(m1)}`, end: `${pad(h2 === 24 ? 24 : h2)}:${pad(m2)}` };
+  const o = (m[2] || m[3]) ? 0 : 14;
+  const kind = (w) => {
+    const x = String(w || '').toLowerCase().replace(/\./g, '');
+    if (!x) return '';
+    if (x === 'am' || x === '오전' || x === '아침' || x === '새벽') return 'am';
+    if (x === '낮') return 'day';
+    return x === '밤' ? 'night' : 'pm';
+  };
+  const point = (i, inherit, from) => {
+    if (m[i + 1]) return { h: m[i + 1] === '정오' ? 12 : 0, mi: 0, mer: '' };
+    const own = kind(m[i] || m[i + 6]);
+    const mer = own || inherit;
+    let h = parseInt(m[i + 2], 10);
+    const mi = m[i + 3] !== undefined ? parseInt(m[i + 3], 10) : (m[i + 4] !== undefined ? parseInt(m[i + 4], 10) : (m[i + 5] ? 30 : 0));
+    // 물려받은 오전/오후: 끝 0시·00:00·24시 = 자정 그대로 · 끝 12시 = 시작 뒤에 오는 12시(정오, 아니면 자정)
+    if (!own && mer && (h === 0 || h === 24)) return { h, mi, mer };
+    if (!own && mer && h === 12) return { h: 12 * 60 + mi > from ? 12 : 24, mi, mer };
+    if (mer === 'am') h = h === 12 ? 0 : (h <= 11 ? h : NaN);
+    else if (mer === 'day') h = h === 12 ? 12 : (h >= 1 && h <= 6 ? h + 12 : NaN);
+    else if (mer) h = h === 12 ? (mer === 'night' ? 0 : 12) : (h >= 1 && h <= 11 ? h + 12 : (h >= 13 ? h : NaN));
+    return { h, mi, mer };
+  };
+  const a = point(1 + o, '', -1);
+  const b = point(8 + o, a.mer, a.h * 60 + a.mi);
+  if (b.h === 0 && b.mi === 0) b.h = 24;
+  if (!(a.h >= 0 && a.h <= 23) || !(b.h >= 0 && b.h <= 24) || !(a.mi <= 59) || !(b.mi <= 59) || (b.h === 24 && b.mi > 0)
+    || (b.h * 60 + b.mi) <= (a.h * 60 + a.mi)) return null;
+  const pad = n => String(n).padStart(2, '0');
+  return { start: `${pad(a.h)}:${pad(a.mi)}`, end: `${pad(b.h)}:${pad(b.mi)}` };
 }
 
 /** 유입가이드 HTML → 미리보기 평문 (원본은 _wdInflowRawHtml에 보존, 여긴 관리자 확인용)
@@ -3120,8 +3146,11 @@ function renderOptRowsWithProduct(options, productLines, campaign) {
     renderOptRows(parsed.map((r, i) => ({
       /* ★ 옵션 없는 공고의 원문은 발행 폼이 **한 줄에 상품 하나**로 쓴다("상품명 - 결제금액 N원").
          그래서 한 덩어리 줄이 앞 줄 상품명을 이어받으면(inherited) 틀린다 — "린스" 가 "샴푸 린스" 가 되어
-         손대지 않은 저장 한 번에 둘째 상품부터 이름이 바뀌었다(2026-10-22 실측). 같은 줄 조각만 되붙인다(결정 042). */
-      productName: (r.inherited && r.optKey) ? r.optKey : [r.productName, r.optKey].filter(Boolean).join(" "),
+         손대지 않은 저장 한 번에 둘째 상품부터 이름이 바뀌었다(2026-10-22 실측). 같은 줄 조각만 되붙인다(결정 042).
+         ★★ 결정 382 — 되붙일 땐 **그 줄 원문**(금액만 걷어낸 것)을 쓴다. 조각을 공백으로 이으면 구분자
+         「/ - – | ·」가 지워져, 열고 그대로 저장만 해도 상품 줄이 바뀌었다(2026-11-18 세라모사이드).
+         원문이 비는 줄(금액만 있는 줄)만 종전 규칙으로 접는다. */
+      productName: r.lineName || ((r.inherited && r.optKey) ? r.optKey : [r.productName, r.optKey].filter(Boolean).join(" ")),
       optKey: "", payAmount: r.payAmount,
       // ★ 결정 277 — 원장 없는 공고의 상품 주소 = 공고 상품 페이지(랜딩) — 첫 카드에만(나머지는 모른다)
       optionUrl: i === 0 ? String(fallback.landing_url || "") : "",
@@ -3400,6 +3429,16 @@ function parseProductLinesToRows(text, fallbackProductName) {
       .replace(/[\d,]{4,}\s*원/g, "")
       .replace(/[\s\-·/|]+$/, "")
       .trim();
+    /* ★★ 결정 382 — 금액만 걷어낸 **그 줄 원문**(구분자 `/ - – | ·`·공백 그대로).
+       옵션 없는 공고·오더는 아래 조각 분해(옵션 추측)를 쓰지 않고 이 값을 상품명으로 쓴다 —
+       조각을 공백으로 되붙이면 「(피치 / 레몬 / 스트로베리)」가 열고 저장만 해도
+       「(피치 레몬 스트로베리)」로 바뀌었다(2026-11-18 세라모사이드 공고 실측).
+       ★ 「N원」은 결제금액 표기가 없을 때(그게 금액일 때)만 걷는다 — 「(2,000원 할인)」 같은 상품명 글자를 지키려고. */
+    const lineName = (mPay
+      ? line.replace(/\s*결제금액\s*[\d,]+\s*원?/g, "")
+      : line.replace(/\s*[\d,]{4,}\s*원/g, ""))
+      .replace(/^[\s\-–·/|]+|[\s\-–·/|]+$/g, "")
+      .trim();
     const parts = rest.split(/\s*[-–/|·]\s*/).map(p => p.trim()).filter(Boolean);
     let productName = "", optKey = "", inherited = false;
     if (parts.length >= 2) { productName = parts[0]; optKey = parts.slice(1).join(" "); }
@@ -3423,7 +3462,7 @@ function parseProductLinesToRows(text, fallbackProductName) {
     }
     if (!productName && !optKey && !pay) continue;
     if (productName) lastProd = productName;
-    rows.push({ productName: productName || lastProd, optKey, payAmount: pay, inherited });
+    rows.push({ productName: productName || lastProd, optKey, payAmount: pay, inherited, lineName });
   }
   return rows;
 }
@@ -3490,7 +3529,9 @@ function applyProductRowsFromOrder(prefill) {
     rows[0].dailyLimit ||= Number(p.daily_limit) || 0;
   }
   renderOptRows(rows.map(r => ({
-    productName: [r.productName, r.optKey].filter(Boolean).join(" "),   // 쪼개진 조각은 상품명으로 되붙인다
+    // 쪼개진 조각은 상품명으로 되붙인다 — ★ 결정 382: 같은 줄이면 그 줄 원문(구분자 유지) ·
+    //   한 덩어리 줄이 오더 상품명을 이어받은 경우(inherited)만 종전대로 「오더 상품명 + 줄」
+    productName: (!r.inherited && r.lineName) || [r.productName, r.optKey].filter(Boolean).join(" "),
     optKey: "", payAmount: r.payAmount, recruitTotal: r.recruitTotal, dailyLimit: r.dailyLimit,
   })), { mode: "none" });
   _setProdModeNote("작업오더에 옵션이 없어 자동 선택됨");
@@ -3992,6 +4033,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
   const _skipWeekendsEl = document.getElementById("rf_skip_weekends");
   if (_skipWeekendsEl) _skipWeekendsEl.checked = false;
   const _cashReceiptRequiredEl = document.getElementById("rf_cash_receipt_required"); if (_cashReceiptRequiredEl) _cashReceiptRequiredEl.checked = false; { const _rdmEl = document.getElementById("rf_required_delivery_memo"); if (_rdmEl) _rdmEl.value = ""; }   // 결정 260
+  /* 결정 383: 분류 후보 — 지난 공고의 후보가 새 공고에 남아 저장되지 않게(Codex 리뷰 #1843: 주석 뒤에 붙어 실행되지 않았다) */
+  { const _rfEl = document.getElementById("rf_classify_candidates"); if (_rfEl) _rfEl.value = ""; }
   rfSetChatRoom(false);
   // 혼합 리뷰 프리필은 동적으로 생성되는 입력칸의 진실원본이다. 새 모달을 열 때 이전 공고의
   // 수량이 섞이지 않도록 함께 초기화한다.
@@ -4107,6 +4150,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
       const _cashReceiptRequiredEl = document.getElementById("rf_cash_receipt_required"); if (_cashReceiptRequiredEl) _cashReceiptRequiredEl.checked = c.cash_receipt_required === true;
       /* 결정 260: 필수 배송메세지(예: 00) — 빈 값 = 확인 안 함 */
       { const _rdmEl = document.getElementById("rf_required_delivery_memo"); if (_rdmEl) _rdmEl.value = c.required_delivery_memo || ""; }
+      /* 결정 383: 분류 후보(옵션 없는 택1 공고 — 예: 피치, 레몬, 스트로베리) — 빈 값 = 사용 안 함 */
+      { const _rfEl = document.getElementById("rf_classify_candidates"); if (_rfEl) _rfEl.value = c.classify_candidates || ""; }
 
       /* 담당자 */
       const mgrVal = c.manager || "";
@@ -6074,6 +6119,7 @@ const _RF_DIFF_FIELDS = [
   ["time_range",        "구매시간대"],
   ["delivery_type",     "배송유형"],
   ["required_delivery_memo", "필수 배송메세지"],   // 결정 260
+  ["classify_candidates", "분류 후보"],          // 결정 383
   ["review_fee",        "리뷰비"],
   ["notes",             "유의사항"],
   ["chat_url",          "카톡 팀채팅방"],
@@ -6254,6 +6300,9 @@ async function saveRecruitPostImpl() {
     // ★ 결정 260: 필수 배송메세지 — 입력칸이 있는 화면에서만 싣는다(미전송 = 서버 유지 · 옛 화면이 저장해도 안 지워진다).
     ...(document.getElementById("rf_required_delivery_memo")
       ? { required_delivery_memo: document.getElementById("rf_required_delivery_memo").value.trim() } : {}),
+    // ★ 결정 383: 분류 후보 — 입력칸이 있는 화면에서만 싣는다(미전송 = 서버 유지).
+    ...(document.getElementById("rf_classify_candidates")
+      ? { classify_candidates: document.getElementById("rf_classify_candidates").value.trim() } : {}),
     review_fee:     Number(document.getElementById("rf_review_fee").value) || 0,
     badges:         _recruitBadges,
     // ★ 유의사항(notes)은 **입력칸이 있는 화면에서만** 전송한다(옵션표·리뷰타입과 같은 원칙).
@@ -6605,6 +6654,14 @@ async function saveRecruitPostImpl() {
         || (payload.required_delivery_memo && !(saved.data && Object.prototype.hasOwnProperty.call(saved.data, "required_delivery_memo"))))) {
       _changed.unshift("⚠ 필수 배송메세지가 저장되지 않았습니다 — 1~2분 뒤 다시 저장해주세요");
     }
+    /* ★ 결정 383: 분류 후보 — 안 저장되면 작업보드 「분류」 칸이 조용히 안 채워진다. 서버가 이 칸을 모르면(배포 시차) 알린다.
+       후보가 하나뿐이면 고를 것이 없어 채우지 않는다 — 그 자리에서 말한다(서버가 다듬은 값 기준). */
+    if (saved && (saved.classifyWarning
+        || (payload.classify_candidates && !(saved.data && Object.prototype.hasOwnProperty.call(saved.data, "classify_candidates"))))) {
+      _changed.unshift("⚠ 분류 후보가 저장되지 않았습니다 — 1~2분 뒤 다시 저장해주세요");
+    } else if (saved && saved.data && saved.data.classify_candidates && String(saved.data.classify_candidates).split(", ").length < 2) {
+      _changed.unshift("⚠ 분류 후보는 두 개 이상 적어야 작업보드 「분류」 칸이 채워집니다");
+    }
 
     /* ★ 양방향 4단계-2: 리뷰오더와 맞춰지는 칸을 고쳤으면 리뷰오더에도 갔다고 말하고, 창을 연 뒤 리뷰오더 쪽에서 먼저 바뀐 칸을
        지금 값으로 덮었으면 무엇을 덮었는지 보여준다(사용자 확정 2026-10-20 — 나중에 저장한 값 · 확인만).
@@ -6891,6 +6948,7 @@ function _renderPreview() {
       specialNotesImages: _igUrls("notes"),
     },
     landingUrl: _v("rf_landing_url"),
+    requiredDeliveryMemo: _v("rf_required_delivery_memo"),   // ★ 결정 386: 리뷰어 화면과 같은 필수 배송메세지 카드
     inflowType: "",                 // 불명 = 랜딩 버튼 노출(실제 화면과 동일한 기본값)
     // ★ 선택지별 가이드를 설정한 공고는 첫 선택지 것을 보여준다(없으면 null = 공통 가이드 = 종전 동작)
     selectedOption: _rfFirstUnitGuide(),
@@ -6912,7 +6970,8 @@ function _renderPreview() {
    안내배지(_refreshBadgeWrap)·채널/담당자 버튼(selectRfBtn)·썸네일(upload/fetch)은
    이미 각자 _onPreviewInput()을 호출하도록 아래에서 감싼다. */
 const _PREVIEW_INPUTS = ["rf_wd_product","rf_wd_inflow","rf_wd_review","rf_wd_notes","rf_landing_url","rf_hold_ttl",
-  "rf_title","rf_channel_custom","rf_review_fee","rf_time_range"];
+  "rf_title","rf_channel_custom","rf_review_fee","rf_time_range",
+  "rf_required_delivery_memo"];   // 결정 386 — 필수 배송메세지 카드(고치거나 지우면 바로 다시 그린다)
 const _PREVIEW_SELECTS = ["rf_delivery_type","rf_status"];
 const _PREVIEW_CHECKS = ["rf_cash_receipt_required"];
 

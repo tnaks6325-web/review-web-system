@@ -26,5 +26,10 @@ vm.createContext(ctx);vm.runInContext(src,ctx);
   ctx.api=async()=>({ok:true,item:{...q,status:'done',localSaved:true,remoteSync:'not_linked',answers:{manager:{choice:'mango'}}}});
   await ctx._tckManagerAnswer(0,1);home=ctx._tckHtml('home');
   assert.match(home,/인트라넷 오더 없음 · 리뷰웹에만 저장/);assert.doesNotMatch(home,/전달 상태 확인 필요/);assert.match(msg,/리뷰웹에만 저장됩니다/);}
+ // 결정 374 — [기타](만두·망고 둘 다 아닌 작업 · 예: 블로그): 세 번째 버튼, 보내는 답은 'etc'
+ {ctx.STATE.tckManagerItems=[{...q,status:'open'}];home=ctx._tckHtml('home');
+  assert.match(home,/onclick="_tckManagerAnswer\(0,2\)">기타<\/button>/,'기타 버튼');
+  let body=null;ctx.api=async(url,opts)=>{body=JSON.parse(opts.body);return {ok:true,item:{...q,status:'done',localSaved:true,remoteSync:'pending',answers:{manager:{choice:'etc'}}}};};
+  await ctx._tckManagerAnswer(0,2);assert.deepEqual(body,{choice:'etc',baseVersion:0},'기타 = etc');}
  console.log('manager home runtime: permission, escaping, home-only, chip, duplicate, failure, stored vs pending PASS');
 })().catch(e=>{console.error(e);process.exit(1)});

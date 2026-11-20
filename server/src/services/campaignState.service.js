@@ -285,6 +285,12 @@ function totalQuotaUsage(c, counts, schedule = null) {
   };
 }
 
+/** 결정 379 — 이 정원 재료가 Q&A 공고(오늘 자리 수가 숫자로 실림)인가 = 날짜별 계획을 판정에 쓰지 않는 공고.
+ *  ★ computeCampaignState 의 isQna 와 같은 재료(counts.qnaToday) — 단일 출처. */
+function qnaIgnoresPlans(counts) {
+  return !!counts && typeof counts.qnaToday === 'number' && Number.isFinite(counts.qnaToday);
+}
+
 /** 그날의 명시 조절값(없으면 null) — dailyQuota 와 computeCampaignState 표시 재료가
  *  **같은 판정**을 쓴다(사본을 두면 정원과 표시가 갈린다). 킬스위치도 여기서 함께 판정. */
 function planOverrideFor(plans, dateStr) {
@@ -475,6 +481,10 @@ function dailyQuota(c, submittedBeforeToday, carry, planCtx, eff, optCap = null)
 function computeCampaignState(c, counts, now = new Date(), schedule = null) {
   const base = { serverNow: now.toISOString() };
   if (!c || !c.participation_mode) return { ...base, state: 'legacy' };
+  /* ★★ 결정 379(사용자 확정 2026-11-17) — Q&A 공고(오늘 자리 수가 실린 공고)는 날짜별 계획(0명 휴무 포함)을 판정에 쓰지 않는다.
+       하루 기준 = 그날 자리 수 하나(자리 0 = 그날 안 열림). 계획 저장값은 지우지 않고 무시만 한다(데이터 변경 0).
+       판정 = qnaIgnoresPlans 하나(fetchCampaignCounts 도 같은 함수로 계획을 비운다 — 주말 게시·다음 오픈일 등 다른 소비처도 같은 값을 본다). */
+  if (qnaIgnoresPlans(counts) && counts.plans) counts = { ...counts, plans: null };
 
   // ★ 시트 일정(구매일자 컬럼 파생)이 있으면 시작일·마감일·정원의 진실원천이 된다.
   //   정원 = "오늘까지 누적 계획 − 전일까지 확정" → 못 채운 물량이 다음 진행일로 이월된다.
@@ -815,7 +825,10 @@ async function fetchCampaignCounts(pool, campaignIds, now = new Date()) {
     for (const id of ids) {
       const o = out.get(id);
       const q = qnaMap.get(String(id));
-      if (o && q) o.qnaToday = q.total;
+      if (o && q) {
+        o.qnaToday = q.total;
+        if (qnaIgnoresPlans(o)) o.plans = null;   // ★ 결정 379 — Q&A 는 날짜별 계획을 쓰지 않는다(이 깔때기를 읽는 모든 곳이 같은 값)
+      }
     }
   }
   return out;
@@ -2137,6 +2150,8 @@ module.exports = {
   pendingCarry,
   heldCarry,
   projectDailyQuotas,
+  planOverrideFor,
+  qnaIgnoresPlans,   // 결정 379 — Q&A 공고는 날짜별 계획을 판정에 쓰지 않는다
   __resetCarryCacheForTest,
   __resetPlanCacheForTest,
   TABLE_QUOTA_MODE,

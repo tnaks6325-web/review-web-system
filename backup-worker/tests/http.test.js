@@ -1,4 +1,4 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';import {env,d,proof,bytes,sha} from './helpers.js';import worker from '../src/index.js';import * as s from '../src/storage.js';
+import test from 'node:test';import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';import {env,d,proof,bytes,sha} from './helpers.js';import worker from '../src/index.js';import {admit,MAX_ACTIVE,BUDGET,BASE_RESERVE} from '../src/admission.js';import * as s from '../src/storage.js';
 const fixture=JSON.parse(await readFile(new URL('./fixtures/wire-v1.json',import.meta.url)));
 const auth=e=>({Authorization:'Bearer '+e.IMAGE_BACKUP_API_KEY});
 async function call(e,path,method='GET',body,headers={}){return worker.fetch(new Request('http://localhost'+path,{method,headers:{...auth(e),...headers},body,...(body instanceof ReadableStream?{duplex:'half'}:{})}),e);}
@@ -36,9 +36,23 @@ test('HTTP manifests/current uses exact pointer request and returns etag',async(
 test('an expired older response cannot release the newer request active-body slot',async()=>{
  const e=env();await (await upload(e)).text();const p='/v1/objects/'+Buffer.from(fixture.receipt.key).toString('base64url');
  const original=setTimeout;const timers=[];globalThis.setTimeout=(fn,ms)=>{const t=original(fn,ms);timers.push({fn,t});return t;};
- try {const first=await call(e,p);const old=timers.at(-1);clearTimeout(old.t);old.fn();await new Promise(r=>setImmediate(r));const second=await call(e,p);assert.equal(second.status,200);await first.body.cancel();const third=await call(e,p);assert.equal(third.status,429);await third.text();await second.text();}finally{globalThis.setTimeout=original;for(const {t} of timers)clearTimeout(t);}
+ try {const first=await call(e,p);const old=timers.at(-1);clearTimeout(old.t);old.fn();await new Promise(r=>setImmediate(r));const second=await call(e,p);assert.equal(second.status,200);await first.body.cancel();
+  // first's late cancel must not release anyone else's reservation: second + (MAX-1) more fill the isolate exactly.
+  const held=[second];for(let i=1;i<MAX_ACTIVE;i++){const r=await call(e,p);assert.equal(r.status,200);held.push(r);}
+  const over=await call(e,p);assert.equal(over.status,429);await over.text();for(const r of held)await r.text();}finally{globalThis.setTimeout=original;for(const {t} of timers)clearTimeout(t);}
 });
-test('one active body per isolate rejects overlap then releases after body consumed',async()=>{
+test('bounded per-isolate overlap: MAX_ACTIVE concurrent requests, then BUSY, then releases after body consumed',async()=>{
  const e=env();await (await upload(e)).text();const path='/v1/objects/'+Buffer.from(fixture.receipt.key).toString('base64url');
- const first=await call(e,path);assert.equal(first.status,200);const second=await call(e,path);assert.equal(second.status,429);assert.deepEqual(await second.json(),{v:1,error:{code:'BUSY',retryable:true}});await first.text();const third=await call(e,path);assert.equal(third.status,200);await third.text();
+ const held=[];for(let i=0;i<MAX_ACTIVE;i++){const r=await call(e,path);assert.equal(r.status,200,'request '+(i+1)+' admitted');held.push(r);}
+ const first=held.shift();for(const r of held)await r.text();for(let i=0;i<MAX_ACTIVE-1;i++)held[i]=await call(e,path);
+ const second=await call(e,path);assert.equal(second.status,429);assert.deepEqual(await second.json(),{v:1,error:{code:'BUSY',retryable:true}});await first.text();const third=await call(e,path);assert.equal(third.status,200);await third.text();for(const r of held)await r.text();
+});
+test('byte budget: two maximum-size bodies cannot be buffered at once; small requests still fit; release restores',()=>{
+ assert.ok(MAX_ACTIVE>=2&&MAX_ACTIVE<=8,'bounded count');assert.ok(BUDGET<=64*1024*1024,'budget well under the 128MB isolate');
+ const a=admit(BASE_RESERVE);a.grow(2*s.MAX_BYTES);
+ const b=admit(BASE_RESERVE);assert.throws(()=>b.grow(2*s.MAX_BYTES),e=>e.code==='BUSY','second 25MiB body rejected while first buffers');
+ b.release();const c=admit(BASE_RESERVE);c.grow(2*1024*1024);c.release();
+ a.release();a.release();const d2=admit(BASE_RESERVE);d2.grow(2*s.MAX_BYTES);d2.release();
+ const many=[];for(let i=0;i<MAX_ACTIVE;i++){const x=admit(BASE_RESERVE);x.grow(2*4*1024*1024);many.push(x);}
+ assert.throws(()=>admit(BASE_RESERVE),e=>e.code==='BUSY','count cap');for(const x of many)x.release();
 });
