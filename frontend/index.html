@@ -4095,6 +4095,13 @@ async function saveInlineSubAccount() {
   document.getElementById("inlineSubConfirm").scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
+/** 타계정 저장 성공 안내 — 결정 226·388: 서버가 합쳐진 칸을 빼고 저장했으면(foldedSkipped) 그 사실을 말한다.
+ *  추가는 실제로 아무것도 안 들어갔으므로 서버 문구만, 수정은 수정은 됐으므로 두 문장. 문구 단일 출처 = 서버 message. */
+function _subSaveToast(res, okText, isEdit) {
+  if (!(res && Number(res.foldedSkipped) > 0)) return okText;
+  const why = res.message || '본계정과 같은 번호의 타계정은 본계정으로 합쳐져 있어 다시 저장하지 않았어요.';
+  return isEdit ? okText + ' · ' + why : 'ℹ️ ' + why;
+}
 async function confirmSaveInlineSubAccount() {
   const _box = document.getElementById("inlineSubConfirm");
   if (_box && _box.dataset.snap !== undefined && _box.dataset.snap !== _inlineSubSnapshot()) {
@@ -4146,7 +4153,8 @@ async function confirmSaveInlineSubAccount() {
     const res = await gasPost({ action: "saveSubAccounts", name: user.name, phone8: user.phone8,
       subAccounts: JSON.stringify(subs), baseSubAccounts: JSON.stringify(base) });
     if (res && res.ok) {
-      showToast(editIdx >= 0 ? "✅ 타계정이 수정되었습니다" : "✅ 타계정이 추가되었습니다");
+      // 결정 226·388 — 본계정으로 합친 칸을 다시 넣으려 했으면 서버가 저장하지 않고 알려 준다(종전엔 「추가되었습니다」로 덮였다).
+      showToast(_subSaveToast(res, editIdx >= 0 ? "✅ 타계정이 수정되었습니다" : "✅ 타계정이 추가되었습니다", editIdx >= 0));
       _afterSubAccountsSaved(Array.isArray(res.subAccounts) ? res.subAccounts : subs);
       cancelInlineSubForm();
     } else if (res && res.code === "stale_sub_accounts") {

@@ -24,7 +24,7 @@ function extract(name) {
 const FUNCS = ['_parseSubAccounts', 'loadInlineProfile', '_showInlineProfileLoadError', 'reloadInlineProfile',
   'renderSelfIncomeInfo', 'loadSecureIdentityProfile', 'renderInlineSubList', '_subAccountsBase', '_afterSubAccountsSaved',
   'toggleInlineSubForm', 'editInlineSubAccount', 'cancelInlineSubForm', 'deleteInlineSubAccount', '_inlineSubSnapshot',
-  '_inlineSubPhoneValue', 'confirmSaveInlineSubAccount', 'saveIncomeInfoInline', '_escAttrX'];
+  '_inlineSubPhoneValue', '_subSaveToast', 'confirmSaveInlineSubAccount', 'saveIncomeInfoInline', '_escAttrX'];
 
 function el(id) {
   return { id, style: {}, dataset: {}, textContent: '', innerHTML: '', value: '', className: '', disabled: false, attrs: {},

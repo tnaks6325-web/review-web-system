@@ -3,6 +3,12 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <script>/* 결정 388 — 아이폰 사파리는 16px 보다 작은 입력칸을 누르면 화면을 확대하고, 키보드를 닫아도 그대로 둔다
+     (구매양식 직접 링크에서 왼쪽 항목 이름이 잘린 채 남는다 · iPhone 17 / iOS 27.2 실기 확인).
+     아이폰에서만 maximum-scale=1 을 붙인다 — 사파리는 이 값으로 「누를 때 자동 확대」만 막고 손가락 벌려 확대는 그대로 허용한다.
+     안드로이드 크롬은 자동 확대가 없고, 이 값을 붙이면 손가락 확대까지 막히므로 건드리지 않는다.
+     (리뷰어 홈 index.html · 공고 campaign.html 은 처음부터 maximum-scale=1 이다.) */
+  (function(){try{var ua=navigator.userAgent||'';var ios=/iP(hone|od|ad)/.test(ua)||(/Macintosh/.test(ua)&&navigator.maxTouchPoints>1);if(!ios)return;var m=document.querySelector('meta[name="viewport"]');if(m&&!/maximum-scale/.test(m.content))m.setAttribute('content',m.getAttribute('content')+', maximum-scale=1.0');}catch(_){}})();</script>
   <title>아이에이리뷰</title>
   <!-- PWA -->
   <link rel="manifest" href="/manifest.webmanifest"/>
