@@ -1204,8 +1204,9 @@ async function _intakeSourceBidir(res, { b, source, current, optionsJson, delive
     }
     if (m.product_options_json !== undefined) {
       const { qtyTiersPrint } = require('../services/productOptions.service');
-      const sent = qtyTiersPrint(m.product_options_json), now = qtyTiersPrint(current.product_options_json);
-      if (sent === null || now === null || sent !== now) {
+      // 읽지 못하는 글자(옛 글자형·깨짐)는 단계를 담을 수 없다 = 「단계 없음」으로 본다 — 깨진 데이터 오더의 종전 저장(상품 구성 무시 200)을 새로 막지 않는다
+      const sent = qtyTiersPrint(m.product_options_json) || '[]', now = qtyTiersPrint(current.product_options_json) || '[]';
+      if (sent !== now) {
         return res.status(409).json({ ok: false, code: 'quantity_tiers_unmatched_window', work_order_id: current.id,
           error: '리뷰웹 상품과 짝을 못 지은 창이라 구매수량 단계를 바꿀 수 없습니다. 단계를 원래대로 두고 저장하면 나머지 수정은 전달됩니다.' });
       }

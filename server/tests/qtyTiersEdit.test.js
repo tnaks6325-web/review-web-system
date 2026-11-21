@@ -146,6 +146,14 @@ const stubQ = ({ apps = 0, orders = 0, filled = 0, shared = 0, rounds = false, a
     const bid = routes.slice(routes.indexOf('async function _intakeSourceBidir('), routes.indexOf('const out = await applySharedPatch({', routes.indexOf('async function _intakeSourceBidir(')));
     assert.ok(bid.indexOf("code: 'products_unmatched_edit'") > 0 && bid.indexOf("code: 'quantity_tiers_unmatched_window'") > bid.indexOf("code: 'products_unmatched_edit'"));
     assert.ok(bid.indexOf('delete m.product_options_json; delete m.product_option; delete m.pay_amount;') > bid.indexOf("code: 'quantity_tiers_unmatched_window'"), '버리기는 두 검사 뒤');
+    // 읽지 못하는 글자 = 「단계 없음」(깨진 데이터 오더의 종전 저장을 새로 막지 않는다)
+    assert.match(bid, /qtyTiersPrint\(m\.product_options_json\) \|\| '\[\]', now = qtyTiersPrint\(current\.product_options_json\) \|\| '\[\]'/);
+    const { qtyTiersPrint } = require('../src/services/productOptions.service');
+    const t = { mode: 'common', rows: [{ qty: 2, people: 1, amount: 9 }, { qty: 1, people: 2, amount: 5 }] };
+    assert.equal(qtyTiersPrint('옛 글자형 상품'), null); assert.equal(qtyTiersPrint(''), '[]'); assert.equal(qtyTiersPrint('[{"name":"가"}]'), '[]');
+    assert.equal(qtyTiersPrint(JSON.stringify([{ name: '가', qty_tiers: t }])), qtyTiersPrint(JSON.stringify([{ name: '다른 이름', qty_tiers: { ...t, rows: [...t.rows].reverse() } }])), '상품 이름·줄 순서 무관');
+    assert.notEqual(qtyTiersPrint(JSON.stringify([{ name: '가', qty_tiers: t }])), qtyTiersPrint(JSON.stringify([{ name: '가', qty_tiers: { ...t, rows: [{ qty: 2, people: 1, amount: 10 }, t.rows[1]] } }])), '금액이 다르면 다름');
+    assert.equal(qtyTiersPrint(JSON.stringify([{ name: '가', qty_tiers: { mode: 'common', rows: [] } }])), '[]', '빈 단계 = 없음');
   });
 
   console.log(`qtyTiersEdit: ${passed} passed`);
