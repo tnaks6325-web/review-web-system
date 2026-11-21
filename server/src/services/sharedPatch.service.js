@@ -951,6 +951,23 @@ function validateQuantities(next, qtyProducts, { tierProducts = null } = {}) {
 }
 
 /**
+ * ★ 결정 392(R1 · 리뷰 PRRT_kwDOSEC8q866UJiP) — 작업보드 빈 줄에 깔린 옵션 표시 한 종류(label · n줄)가 새 선택지 인원과 맞나.
+ *   짝 = 옵션 줄은 공고 열쇠(optKey) 그대로 · 「상품 · 옵션」 표시(sheetlessOrder.stagedLabelMatches — 주문 배정과 같은 규칙) /
+ *   상품 줄(옵션 없는 상품)은 상품 이름 그대로. 짝이 정확히 하나 + n ≤ 그 선택지 새 인원일 때만 참. 그 밖(모름) = 거짓(fail-closed).
+ */
+function _labelFitsNewCounts(label, n, options) {
+  const { stagedLabelMatches } = require('./sheetlessOrder.service');
+  const t = String(label == null ? '' : label).trim();
+  const hits = (options || []).filter(o => {
+    const pName = String(o.productName || '').trim();
+    if (o.unitKind === 'product') return t === pName;
+    const k = String(o.optKey || '').trim();
+    return !!k && (t === k || stagedLabelMatches(t, k, pName));
+  });
+  return hits.length === 1 && n <= Math.max(0, Math.floor(_num(hits[0].recruitTotal)));
+}
+
+/**
  * 7단계-② 인원·일건수 → 공고(같은 트랜잭션). 기존 정원 장치를 그대로 쓴다(규칙 사본 0):
  *   총 하한 = 참여·구매·바로 구매(`assertTotalFloorInTx`) · 옵션 하한 = 그 옵션 참여·구매(`usedByOption`) ·
  *   작업표 줄 = 빈 줄만 지우고 새 줄은 빈 줄로(`syncWorktableSlotsInTx` — 채워진 줄보다 적게 못 줄인다).
@@ -989,6 +1006,11 @@ async function _projectQuantityInTx(client, camp, prev, next, { preferRetireIds 
     /* ★ 결정 392(R1 · 임시 — RW-A2 「옵션별 목표로 빈 줄 다시 나누기」가 풀 것) — 단계 저장에서 선택지(옵션·상품)가 2개 이상인 작업의 선택지별 인원이 바뀌면
        ① 리뷰타입을 섞어 쓰는 작업 = 거절(줄마다 깔린 리뷰옵션 배분이 어긋난다 · 사용자 확정 2026-11-20)
        ② 작업보드 빈 줄에 옵션 표시가 2종 이상 = 거절(뒤에서부터 지우고 표시 없이 더해 옵션 표시가 어긋난다 · 레드 13)
+       ③ 표시가 **1종**이어도 새 인원과 어긋나면 거절(리뷰 PRRT_kwDOSEC8q866UJiP — 블랙 10/화이트 0 · 10줄 모두 블랙 → 5/5 가 통과해
+          공고는 5/5 인데 줄은 전부 블랙으로 남았다: 총원이 같아 줄 맞추기가 안 돈다). 통과 = 그 표시가 선택지 하나와 짝지어지고
+          표시 줄 수 ≤ 그 선택지의 새 인원(줄 맞추기는 빈 줄을 지우거나 표시 없이 더할 뿐이라 이 부등식이 저장 뒤에도 지켜진다).
+          짝 못 지음(모르는 표시 · 여러 선택지에 걸림) = 거절(fail-closed). 표시 없는 줄만 = 통과.
+       ★ 단계 저장(r1)에만 건다 — 단계를 안 바꾼 일반 인원 저장은 main 에서도 같은 어긋남이 나지만 종전대로 둔다(RW-D 정책 대기 · r1QtyTiersPg [2p4]).
        선택지가 하나뿐이면 그 인원 = 총원이라 종전 줄 맞추기와 같다(세라모사이드 모양 통과). */
     if (r1) {
       const countChanged = (pn.options || []).filter(o => { const b = before.get(keyOf(o)); return !b || _num(b.recruitTotal) !== _num(o.recruitTotal); });
@@ -997,10 +1019,13 @@ async function _projectQuantityInTx(client, camp, prev, next, { preferRetireIds 
         if (CANON.reviewType(next.review_type) === 'mixed') return reject('option_rows_review_mix', tierRejectText('option_rows_review_mix'));
         if (camp.linked_sheet_id && camp.linked_tab_name) {
           const { rows: lab } = await client.query(
-            `SELECT COUNT(DISTINCT btrim(option_text))::int AS n FROM campaign_participants
-              WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND active = TRUE AND btrim(COALESCE(option_text, '')) <> ''`,
+            `SELECT btrim(option_text) AS label, COUNT(*)::int AS n FROM campaign_participants
+              WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND active = TRUE AND btrim(COALESCE(option_text, '')) <> ''
+              GROUP BY 1 LIMIT 3`,
             [camp.linked_sheet_id, camp.linked_tab_name]);
-          if (Number(lab[0] && lab[0].n) >= 2) return reject('quantity_tiers_option_counts', tierRejectText('quantity_tiers_option_counts'));
+          if (lab.length >= 2 || (lab.length === 1 && !_labelFitsNewCounts(lab[0].label, Number(lab[0].n), pn.options || []))) {
+            return reject('quantity_tiers_option_counts', tierRejectText('quantity_tiers_option_counts'));
+          }
         }
       }
     }

@@ -1483,6 +1483,7 @@ module.exports = {
   buildRowPatch,
   resolveProductLabel,
   listProductChoices,
+  stagedLabelMatches: _stagedLabelMatches,   // 결정 392 — 빈 줄 「상품 · 옵션」 표시 ↔ 옵션 짝(R1 옵션 인원 검사가 같은 규칙을 쓴다)
   __canAppendConfirmedOverflowOrderForTest: _canAppendConfirmedOverflowOrder,
   __pickOpenSlotForTest: _pickOpenSlot,
   __setPoolForTest,

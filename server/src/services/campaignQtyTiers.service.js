@@ -32,6 +32,13 @@ class QtyTierError extends Error {
   }
 }
 
+/** 공통 단계를 그 상품에 걸 수 있나(옵션 없는 공고 = 늘 참 · 옵션 있는 공고 = 그 상품 이름 줄이 있어야). 옵션별 단계도 이 짝이 먼저다(상품 이름 같음).
+ *  ★ 결정 392 — 단계 고치기 판정(qtyTiersEditVerdict)이 같은 규칙으로 「어느 상품에도 단계를 못 건다」를 미리 막는다(판정 = 저장 단일 출처). */
+function productPairs(pname, opts) {
+  const list = Array.isArray(opts) ? opts : [];
+  return !list.length || list.some(o => o && (clean(o.productName) === clean(pname) || o.optKey === clean(pname)));
+}
+
 /**
  * 발행 때 복사할 줄을 만든다(순수 함수 — DB 없음).
  * @param productOptionsJson 작업오더 상품 구성(정규화된 원본)
@@ -62,7 +69,7 @@ function planTierCopy(productOptionsJson, options) {
       }
     } else {
       // 공통 단계는 상품명으로 범위를 잡는다 — 옵션 있는 공고인데 그 상품이 없으면 단계가 어디에도 안 걸린다.
-      if (opts.length && !opts.some(o => o && (clean(o.productName) === pname || o.optKey === pname))) {
+      if (!productPairs(pname, opts)) {
         throw new QtyTierError(`「${pname}」 상품을 공고 옵션에서 찾지 못해 구매수량 단계를 걸 수 없습니다.`);
       }
       for (const r of tiers.rows) {
@@ -267,5 +274,5 @@ async function tableMatchesOrder(db, campaignId, productOptionsJson) {
 }
 
 module.exports = {
-  enabled, copiesFor, optionsFromRows, tableMatchesOrder, planTierCopy, insertTiers, loadContext, scopeFor, unresolved, fetchUsage, tierViews, judge, viewsForCampaign, summaryForCampaign, QtyTierError,
+  enabled, copiesFor, optionsFromRows, productPairs, tableMatchesOrder, planTierCopy, insertTiers, loadContext, scopeFor, unresolved, fetchUsage, tierViews, judge, viewsForCampaign, summaryForCampaign, QtyTierError,
 };

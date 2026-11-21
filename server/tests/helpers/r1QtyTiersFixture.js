@@ -106,6 +106,10 @@ async function boot({ pool }) {
         proj.skip_weekends === '1', proj.channel, proj.landing_url, proj.thumbnail_url, Number(proj.daily_limit) || 1,
         JSON.stringify({ inflowType: 'link', reviewGuide: pre.wd_review, specialNotes: pre.wd_notes, reviewGuideImages: [], specialNotesImages: [], productLines: pre.wd_product, payAmount: 12000 }),
         linkTab ? sheet : null, linkTab ? tab : null, JSON.stringify(Array.isArray(pre.review_type_mix) ? pre.review_type_mix : [])]);
+    // 배송 혼합 오더 — 발행처럼 공고에도 같은 혼합 수량(연결 대조가 어긋나 diverged 가 되지 않게)
+    if (w.delivery_type_mix && JSON.stringify(w.delivery_type_mix) !== '[]') {
+      await pool.query('UPDATE recruit_campaigns SET delivery_type_mix = $2::jsonb WHERE id = $1', [camp, JSON.stringify(w.delivery_type_mix)]);
+    }
     const optRows = [];
     let so = 0;
     for (const o of (_woProductMode(JSON.parse(JSON.stringify(w))) === 'opt' ? proj.options : [])) {

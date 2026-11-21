@@ -65,6 +65,41 @@ const stubQ = ({ apps = 0, orders = 0, filled = 0, shared = 0, rounds = false, a
     v = await svc.qtyTiersEditVerdict(stubQ(), { wo: WO({ delivery_type: '혼합' }), camp: CAMP, tiersCapable: true, active: true });
     assert.equal(v.locks_structure, false, '배송 혼합 = 이미 잠김');
   });
+  await ok('① 판정 = 저장 단일 출처(리뷰 PRRT_kwDOSEC8q866UJiT) — 배송 혼합(·깨진 혼합 값) = quantity_tiers_delivery_mix · 저장 validateQuantities 도 같은 상태에서 무조건 거절 · 혼합 없음 = 둘 다 통과', async () => {
+    const mixes = [
+      { mix: [{ type: 'real', quantity: 1 }, { type: 'empty', quantity: 2 }], blocked: true },
+      { mix: '[{"type":"real","quantity":1},{"type":"empty","quantity":2}]', blocked: true },
+      { mix: 'not json', blocked: true },
+      { mix: [], blocked: false },
+      { mix: null, blocked: false },
+    ];
+    for (const { mix, blocked } of mixes) {
+      const wo = WO({ delivery_type_mix: mix, delivery_type: blocked ? '혼합(실배송 1건, 빈박스 2건)' : '실배송', recruit_count: 3 });
+      const v = await svc.qtyTiersEditVerdict(stubQ(), { wo, camp: CAMP, tiersCapable: true, active: true });
+      const st = SP.readSharedState(wo);
+      const q = SP.validateQuantities(st, new Set(['가']), { tierProducts: new Set(['가']) });
+      assert.equal(!v.allowed, blocked, `판정 ${JSON.stringify(mix)} → ${JSON.stringify(v.reasons)}`);
+      assert.equal(!!(q && q.code === 'quantity_delivery_mix_locked'), blocked, `저장 ${JSON.stringify(mix)} → ${JSON.stringify(q)}`);
+      if (blocked) assert.deepEqual(v.reasons, ['quantity_tiers_delivery_mix']);
+    }
+    assert.match(svc.tierRejectText('quantity_tiers_delivery_mix'), /배송 혼합\(실배송·빈박스\) 작업이라 구매수량 단계를 바꿀 수 없습니다/);
+    // 판정 사유마다 전용 문구(기본 문구로 떨어지지 않음 — 인트라넷이 서버 error 를 그대로 보여 준다)
+    const dflt = svc.tierRejectText('__none__');
+    for (const code of Object.values(svc.REASON)) assert.notEqual(svc.tierRejectText(code), dflt, code);
+  });
+  await ok('① 판정 = 저장 단일 출처 — 닫히지 않은 상품 어느 것도 공고 옵션 줄과 짝 없음 = quantity_tiers_unmatched(planTierCopy 와 같은 productPairs) · 하나라도 짝 있음 = 허용', async () => {
+    const withOpts = rows => { const base = stubQ(); return async (sql, p) => (/FROM campaign_options/.test(String(sql)) ? { rows } : base(sql, p)); };
+    let v = await svc.qtyTiersEditVerdict(withOpts([{ opt_key: 'x', product_name: '다른', status: 'active' }]), { wo: WO(), camp: CAMP, tiersCapable: true, active: true });
+    assert.deepEqual(v.reasons, ['quantity_tiers_unmatched']);
+    v = await svc.qtyTiersEditVerdict(withOpts([{ opt_key: 'x', product_name: '다른', status: 'active' }, { opt_key: 'y', product_name: '가', status: 'closed' }]), { wo: WO(), camp: CAMP, tiersCapable: true, active: true });
+    assert.deepEqual(v.reasons, ['quantity_tiers_unmatched'], '마감 줄은 짝에서 뺀다(optionsFromRows 와 같음)');
+    v = await svc.qtyTiersEditVerdict(withOpts([{ opt_key: 'x', product_name: '가', status: 'active' }]), { wo: WO(), camp: CAMP, tiersCapable: true, active: true });
+    assert.equal(v.allowed, true);
+    v = await svc.qtyTiersEditVerdict(withOpts([]), { wo: WO(), camp: CAMP, tiersCapable: true, active: true });
+    assert.equal(v.allowed, true, '옵션 줄 없는 공고 = 공통 단계는 늘 걸린다');
+    const qt = require('../src/services/campaignQtyTiers.service');
+    assert.throws(() => qt.planTierCopy(JSON.stringify([{ name: '가', qty_tiers: { mode: 'common', rows: [{ qty: 1, people: 1, amount: 1 }] } }]), [{ optKey: 'x', productName: '다른' }]), qt.QtyTierError, '저장 반영도 같은 상태에서 거절');
+  });
   await ok('① 판정 — 조회 실패 = check_failed · 숫자 null(0 으로 꾸미지 않음) · 상한 넘김 = check_failed', async () => {
     const v = await svc.qtyTiersEditVerdict(stubQ({ throwOn: /AS applications/ }), { wo: WO(), camp: CAMP, tiersCapable: true, active: true });
     assert.deepEqual(v.reasons, ['check_failed']); assert.equal(v.applicants, null); assert.equal(v.filled_rows, null); assert.equal(v.allowed, false);

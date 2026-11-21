@@ -178,6 +178,78 @@ const OPT = (b = 5, w = 5, tiers = true) => ([{
     assert.equal(r.status, 200, '옵션 인원 그대로면 통과 ' + JSON.stringify(r.body));
   });
 
+  /* ★ 결정 392 보강(리뷰 PRRT_kwDOSEC8q866UJiP) — 옵션 표시가 **한 종류**만 깔린 작업보드도 새 옵션 인원과 어긋나면 거절.
+       표시 줄 수 > 그 옵션의 새 인원 · 짝 못 짓는 표시 = 거절(fail-closed) · 표시 없는 줄만 · 표시 줄 수 ≤ 새 인원 = 통과. */
+  const SIX_FOUR = p => { p[0].options[0].count = 6; p[0].options[1].count = 4; p[0].qty_tiers.rows[1].people = 4; p[0].qty_tiers.rows[3].people = 3; };
+  const label = (A, text, maxSeq = 9999) => pool.query(`UPDATE campaign_participants SET option_text = $3 WHERE sheet_id = $1 AND tab_name = $2 AND seq <= $4`, [A.sheet, A.tab, text, maxSeq]);
+  await ok('[2p] 단일 옵션 표시 — 10줄 모두 블랙 + 6/4 = quantity_tiers_option_counts · 「상품 · 옵션」 표시도 같음 · 짝 못 짓는 표시 = 거절', async () => {
+    const A = await setup('lab1', OPT());
+    await label(A, '블랙');
+    await rejects(A, await r1Patch(A, SIX_FOUR), { tiers: 1 }, 'quantity_tiers_option_counts', /옵션별 인원을 함께 바꿀 수 없습니다/);
+    const r = await A.putSource(await r1Patch(A, p => { p[0].qty_tiers.rows[2].amount = 41000; }), { tiers: 1 });
+    assert.equal(r.status, 200, '옵션 인원 그대로(단계 금액만)면 통과 ' + JSON.stringify(r.body));
+    const B = await setup('lab1sel', OPT());
+    await label(B, '탈취제 · 블랙');
+    await rejects(B, await r1Patch(B, SIX_FOUR), { tiers: 1 }, 'quantity_tiers_option_counts', /옵션별 인원/);
+    const C = await setup('lab1unk', OPT());
+    await label(C, '모르는 표시', 3);
+    await rejects(C, await r1Patch(C, SIX_FOUR), { tiers: 1 }, 'quantity_tiers_option_counts', /옵션별 인원/);
+  });
+
+  await ok('[2p2] 리뷰 재현 모양 — 블랙 10/화이트 0 · 빈 줄 10개 모두 블랙 → 5/5 + 단계 금액 변경 = 거절(공고 5/5 · 줄 전부 블랙으로 남지 않게)', async () => {
+    const P = [{ name: '탈취제', url: 'https://www.coupang.com/vp/products/78', option_schema_version: 2, product_mode: 'opt',
+      base: { pay: 0, count: 0, daily: 0, review_type_mix: [] }, options: [
+        { option_1: { name: '', value: '블랙' }, label: '블랙', url: '', pay: 15000, count: 10, daily: 2, review_type_mix: [] },
+        { option_1: { name: '', value: '화이트' }, label: '화이트', url: '', pay: 15000, count: 0, daily: 0, review_type_mix: [] }],
+      qty_tiers: { mode: 'common', buy_method: 'qty', rows: [{ option: null, qty: 2, people: 3, amount: 30000 }, { option: null, qty: 1, people: 7, amount: 15000 }] } }];
+    const A = await setup('lab10', P);
+    await label(A, '블랙');
+    await rejects(A, await r1Patch(A, p => { p[0].options[0].count = 5; p[0].options[1].count = 5; p[0].options[1].daily = 1; p[0].options[0].daily = 1; p[0].qty_tiers.rows[0].amount = 29000; }),
+      { tiers: 1 }, 'quantity_tiers_option_counts', /옵션별 인원/);
+  });
+
+  await ok('[2p3] 단일 옵션 표시가 새 인원 안 — 블랙 5줄(나머지 표시 없음) → 6/4 통과 · 이어서 4/6(블랙 5줄 > 4) = 거절', async () => {
+    const A = await setup('lab5', OPT());
+    await label(A, '블랙', 5);
+    let r = await A.putSource(await r1Patch(A, SIX_FOUR), { tiers: 1 });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual((await A.opts()).map(x => [x.opt_key, Number(x.recruit_total)]), [['블랙', 6], ['화이트', 4]]);
+    await rejects(A, await r1Patch(A, p => { p[0].options[0].count = 4; p[0].options[1].count = 6; p[0].qty_tiers.rows[1].people = 2; p[0].qty_tiers.rows[3].people = 5; }),
+      { tiers: 1 }, 'quantity_tiers_option_counts', /옵션별 인원/);
+  });
+
+  await ok('[2p4] 기존 동작 불변 — 단계 없는 상품의 일반 인원 저장(단계 안 바꿈)은 표시 한 종류여도 종전대로 200(RW-D 정책 대기 · 이 PR 에서 새로 막지 않음)', async () => {
+    const A = await setup('labgen', OPT(5, 5, false));
+    await label(A, '블랙');
+    const cur = await A.wo();
+    const p = JSON.parse(cur.product_options_json); p[0].options[0].count = 6; p[0].options[1].count = 4;
+    const json = JSON.stringify(p);
+    const r = await A.putSource({ product_options_json: json, product_option: require('../src/utils/orderProductSummary').productSummaryText(json), pay_amount: 15000 * 6 + 20000 * 4 });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual((await A.opts()).map(x => [x.opt_key, Number(x.recruit_total)]), [['블랙', 6], ['화이트', 4]]);
+  });
+
+  /* ★ 결정 392 보강(리뷰 PRRT_kwDOSEC8q866UJiT) — 배송 혼합 오더: 판정 = 못 고침(저장 409 와 같은 사유 · 단일 출처). */
+  await ok('[2q] 배송 혼합 오더 — /shared 판정 allowed=false(quantity_tiers_delivery_mix) · 단계 금액만 저장도 같은 코드 409 · 그대로 저장은 통과', async () => {
+    const A = await setup('dmix', F.SERAMO(400, F.T400), { extra: { delivery_type: '혼합(실배송 200건, 빈박스 200건)', delivery_type_mix: [{ type: 'real', quantity: 200 }, { type: 'empty', quantity: 200 }] } });
+    const s = await call('GET', `/api/order/intake/source/${A.sid}/shared?caps=tiers`);
+    assert.equal(s.status, 200, JSON.stringify(s.body));
+    assert.equal(s.body.qty_tiers_edit.allowed, false, JSON.stringify(s.body.qty_tiers_edit));
+    assert.deepEqual(s.body.qty_tiers_edit.reasons, ['quantity_tiers_delivery_mix']);
+    await rejects(A, await r1Patch(A, p => { p[0].qty_tiers.rows[0].amount = 35000; }), { tiers: 1 }, 'quantity_tiers_delivery_mix', /배송 혼합\(실배송·빈박스\) 작업이라 구매수량 단계를 바꿀 수 없습니다/);
+    const r = await A.putSource({ title: '가짜 제목 바꿈 dmix' }, { tiers: 1 });
+    assert.equal(r.status, 200, '단계 그대로면 나머지 수정은 전달 ' + JSON.stringify(r.body));
+  });
+
+  await ok('[2r] 공고 옵션 줄이 오더 상품과 짝 없음 — /shared 판정 allowed=false(quantity_tiers_unmatched) · 저장도 같은 코드 409(종전: 판정 허용 → 반영 단계 campaign_rejected)', async () => {
+    const A = await setup('unpair', OPT());
+    await pool.query(`UPDATE campaign_options SET product_name = '다른 상품' WHERE campaign_id = $1`, [A.camp]);
+    const s = await call('GET', `/api/order/intake/source/${A.sid}/shared?caps=tiers`);
+    assert.equal(s.body.qty_tiers_edit.allowed, false, JSON.stringify(s.body.qty_tiers_edit));
+    assert.deepEqual(s.body.qty_tiers_edit.reasons, ['quantity_tiers_unmatched']);
+    await rejects(A, await r1Patch(A, p => { p[0].qty_tiers.rows[0].amount = 31000; }), { tiers: 1 }, 'quantity_tiers_unmatched', /짝지을 수 없어 구매수량 단계를 바꿀 수 없습니다/);
+  });
+
   await ok('[2m] 리뷰타입 섞어 쓰기 작업 + 옵션 인원 변경 → option_rows_review_mix', async () => {
     const A = await setup('mix', OPT(), { reviewType: '혼합', extra: { review_type_mix: [{ type: 'photo', quantity: 6 }, { type: 'text', quantity: 4 }] } });
     await rejects(A, await r1Patch(A, p => { p[0].options[0].count = 6; p[0].options[1].count = 4; p[0].qty_tiers.rows[1].people = 4; p[0].qty_tiers.rows[3].people = 3; }),

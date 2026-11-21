@@ -18,10 +18,12 @@ const REASON = Object.freeze({
   tiers_off: 'quantity_tiers_off',       // CAMPAIGN_QTY_TIERS=0
   kind: 'kind_no_tiers',                 // 블로그·Q&A(Q1 ㉠)
   dual: 'dual_channel',                  // 동시진행(정규화가 이미 400 — 화면 안내용)
+  delivery_mix: 'quantity_tiers_delivery_mix',   // 배송 혼합(실배송·빈박스) — 저장의 validateQuantities 가 인원 바뀐 저장을 무조건 409(quantity_delivery_mix_locked) · 같은 판정 CANON.deliveryMix
   no_campaign: 'no_campaign',            // 공고 없는 접수 오더(정책 ⑤)
   archived: 'quantity_tiers_archived',   // 살아 있는 공고 없음 + 보관 공고 있음(정책 ⑥)
   shared_tab: 'shared_worktable',        // 같은 작업보드에 살아 있는 공고 2+
   rounds: 'rounds_exist',                // 차수 운영 공고
+  unpaired: 'quantity_tiers_unmatched', // 오더의 어느 상품도 공고 옵션 줄과 짝지을 수 없음(저장 반영 _projectQtyTiersInTx 가 무조건 거절 · 같은 규칙 productPairs)
   in_use: 'quantity_tiers_in_use',       // 신청 기록·공고 주문 > 0 (정책 ①)
   filled: 'worktable_filled',            // 작업보드 채운 줄 > 0 (정책 ①)
   failed: 'check_failed',
@@ -36,10 +38,12 @@ function tierRejectText(code, v = {}) {
     case 'quantity_tiers_off': return '지금은 구매수량 단계 기능이 꺼져 있어 바꿀 수 없습니다.' + tail;
     case 'kind_no_tiers': return '블로그·Q&A 체험단은 구매수량 단계를 쓰지 않습니다.' + tail;
     case 'dual_channel': return '동시진행(네이버+쿠팡) 상품은 구매수량 단계를 쓸 수 없습니다.' + tail;
+    case 'quantity_tiers_delivery_mix': return '배송 혼합(실배송·빈박스) 작업이라 구매수량 단계를 바꿀 수 없습니다(접수 뒤 인원·상품 구성이 잠겨 있습니다). 바꿔야 하면 새 리뷰오더로 접수해 주세요.' + tail;
     case 'no_campaign': return '아직 모집공고가 없는 오더라 이 창에서는 구매수량 단계를 바꿀 수 없습니다.' + tail;
     case 'quantity_tiers_archived': return '이 오더의 모집공고가 보관돼 있어 구매수량 단계를 바꿀 수 없습니다.' + tail;
     case 'shared_worktable': return '같은 작업보드를 쓰는 모집공고가 여럿이라 구매수량 단계를 바꿀 수 없습니다. 담당자에게 문의해 주세요.';
     case 'rounds_exist': return '차수로 운영하는 모집공고라 구매수량 단계를 바꿀 수 없습니다. 담당자에게 문의해 주세요.';
+    case 'quantity_tiers_unmatched': return '모집공고의 상품 줄과 이 오더의 상품을 짝지을 수 없어 구매수량 단계를 바꿀 수 없습니다. 담당자에게 문의해 주세요.';
     case 'quantity_tiers_in_use': return `이 작업의 모집공고에 이미 신청한 분이 ${Number(v.applicants) || 0}명 있어(취소·만료 포함) 구매수량 단계를 바꿀 수 없습니다.` + tail;
     case 'worktable_filled': return `작업보드에 이미 주문·이름이 들어간 줄이 ${Number(v.filled_rows) || 0}개 있어 구매수량 단계를 바꿀 수 없습니다.` + tail;
     case 'check_failed': return '신청한 분이 있는지 확인하지 못해 구매수량 단계를 바꾸지 않았습니다. 잠시 뒤 다시 저장해 주세요.';
@@ -86,6 +90,10 @@ async function qtyTiersEditVerdict(q, { wo, camp = undefined, tiersCapable, acti
     if (!qt.enabled()) reasons.push(REASON.tiers_off);
     else if (!qt.copiesFor(kind)) reasons.push(REASON.kind);
     if (require('../utils/dualChannel').rawHasDualChannels(wo && wo.product_options_json)) reasons.push(REASON.dual);
+    /* ★ 판정 = 저장 단일 출처(리뷰 PRRT_kwDOSEC8q866UJiT) — 단계 저장은 늘 「인원 바뀐 저장」(applyWrites quantityTouched)이라
+       validateQuantities 의 배송 혼합 무조건 거절에 걸린다. 같은 정규화(CANON.deliveryMix · 깨진 값 'invalid:…' 도 참)로 판정에서 먼저 막는다.
+       ★ 단계 금액만 바꾸기를 따로 열지 않는다(배송 혼합 오더 = 접수 뒤 인원·상품 구성 영구 금지 · 결정 275 「4.가」). */
+    if (wo && CANON.deliveryMix(wo.delivery_type_mix)) reasons.push(REASON.delivery_mix);
     if (wo) {
       if (camp === undefined) {
         const live = await require('./linkedRecruitQuota.service').liveCampaignForWorkOrders({ query: q }, [wo.id]);
@@ -107,6 +115,19 @@ async function qtyTiersEditVerdict(q, { wo, camp = undefined, tiersCapable, acti
         if (hasRounds[0] && hasRounds[0].x) {
           const { rows: rd } = await q('SELECT 1 FROM campaign_rounds WHERE campaign_id = $1 LIMIT 1', [camp.id]);
           if (rd.length) reasons.push(REASON.rounds);
+        }
+        /* ★ 판정 = 저장 단일 출처 — 반영(_projectQtyTiersInTx → planTierCopy)은 공고 옵션 줄과 짝 못 지은 상품의 단계를 무조건 거절한다.
+           닫히지 않은 상품 **어느 것도** 짝이 없으면 어떤 단계 저장도 통과할 수 없다 = 못 고침. 일부만 짝이 있으면 허용(그 상품의 단계는 저장된다 ·
+           짝 없는 상품에 단계를 넣는 저장만 반영 단계에서 quantity_tiers_unmatched — 고친 내용에 달린 거절). */
+        {
+          let plist = [];
+          try { plist = JSON.parse((wo && wo.product_options_json) || '[]'); } catch (_) { plist = []; }
+          const names = (Array.isArray(plist) ? plist : []).filter(p => p && typeof p === 'object' && p.closed !== true && String(p.name || '').trim()).map(p => String(p.name).trim());
+          if (names.length) {
+            const { rows: co } = await q('SELECT opt_key, product_name, status FROM campaign_options WHERE campaign_id = $1', [camp.id]);
+            const opts = qt.optionsFromRows(co);
+            if (!names.some(n => qt.productPairs(n, opts))) reasons.push(REASON.unpaired);
+          }
         }
         // ★ 「신청 0」 = 결정 254 범위 한 벌(작업보드 단위) + 이 공고 자체
         const u = sheet && tab ? await require('./workTabDelete.service').campaignUseCounts(q, sheet, tab) : { applications: 0, campaignOrders: 0, filledRows: 0 };
