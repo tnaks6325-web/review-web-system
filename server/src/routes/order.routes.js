@@ -1188,19 +1188,33 @@ async function _intakeSourceBidir(res, { b, source, current, optionsJson, delive
     return res.status(409).json({ ok: false, code: 'edit_base_required', work_order_id: current.id,
       error: '리뷰웹과 연결된 오더입니다. 수정 창을 닫고 다시 열어 주세요.' });
   }
+  const m = _sourceSharedMine(b, { optionsJson, deliveryType, courierProxy }, source);
+  // 담당자 capability 가 있는 새 창만 공유 저장 본체에 담당자를 포함한다.
+  // 이전 창의 전체 저장은 담당자 원장을 보존하고 아래 repair flag 로 같은 트랜잭션에서 좁게 되돌려 보낸다.
+  if (_sourceManagerCapability(b) && _hasExplicitWorkManager(b) && _canonicalOriginalWorkManager(m.work_manager)) m.work_manager = _canonicalOriginalWorkManager(m.work_manager);
+  else delete m.work_manager; // 빈 값은 지정 해제가 아니라 변경 없음 — 해제는 명시적인 '랜덤'만.
+  // 인트라넷 수정 창이 리뷰웹 상품 구성과 짝을 못 지어 금액 칸을 잠갔다(`bidir.skip_products`) — 그 저장의 상품 구성·합계·요약은 받지 않는다.
+  //   인트라넷 사본은 옛 금액일 수 있어 그대로 받으면 리뷰웹 금액이 되돌아간다(검토 2026-10-20).
+  /* ★★ 결정 391(Q7-d·e · 완화 금지) — 단, **조용히 버리지 않는다**: 창이 상품 칸을 고쳤다고 알리면(bidir.products_edited) 409,
+     표시가 없는 옛 창이라도 보낸 단계가 리뷰웹 단계와 다르면 409. 상품 칸을 안 고친 저장만 종전대로 상품 구성을 무시하고 나머지를 받는다. */
+  if (bid && (bid.skip_products === 1 || bid.skip_products === true)) {
+    if (bid.products_edited === 1 || bid.products_edited === true || bid.products_edited === '1') {
+      return res.status(409).json({ ok: false, code: 'products_unmatched_edit', work_order_id: current.id,
+        error: '이 수정 창은 리뷰웹 상품 구성과 짝을 못 지어 상품 칸 수정을 보낼 수 없습니다. 상품 칸은 그대로 두고 저장하면 나머지는 전달됩니다.' });
+    }
+    if (m.product_options_json !== undefined) {
+      const { qtyTiersPrint } = require('../services/productOptions.service');
+      const sent = qtyTiersPrint(m.product_options_json), now = qtyTiersPrint(current.product_options_json);
+      if (sent === null || now === null || sent !== now) {
+        return res.status(409).json({ ok: false, code: 'quantity_tiers_unmatched_window', work_order_id: current.id,
+          error: '리뷰웹 상품과 짝을 못 지은 창이라 구매수량 단계를 바꿀 수 없습니다. 단계를 원래대로 두고 저장하면 나머지 수정은 전달됩니다.' });
+      }
+    }
+    delete m.product_options_json; delete m.product_option; delete m.pay_amount;
+  }
   const out = await applySharedPatch({
     workOrderId: current.id,
-    mine: (() => {
-      const m = _sourceSharedMine(b, { optionsJson, deliveryType, courierProxy }, source);
-      // 담당자 capability 가 있는 새 창만 공유 저장 본체에 담당자를 포함한다.
-      // 이전 창의 전체 저장은 담당자 원장을 보존하고 아래 repair flag 로 같은 트랜잭션에서 좁게 되돌려 보낸다.
-      if (_sourceManagerCapability(b) && _hasExplicitWorkManager(b) && _canonicalOriginalWorkManager(m.work_manager)) m.work_manager = _canonicalOriginalWorkManager(m.work_manager);
-      else delete m.work_manager; // 빈 값은 지정 해제가 아니라 변경 없음 — 해제는 명시적인 '랜덤'만.
-      // 인트라넷 수정 창이 리뷰웹 상품 구성과 짝을 못 지어 금액 칸을 잠갔다(`bidir.skip_products`) — 그 저장의 상품 구성·합계·요약은 받지 않는다.
-      //   인트라넷 사본은 옛 금액일 수 있어 그대로 받으면 리뷰웹 금액이 되돌아간다(검토 2026-10-20).
-      if (bid && (bid.skip_products === 1 || bid.skip_products === true)) { delete m.product_options_json; delete m.product_option; delete m.pay_amount; }
-      return m;
-    })(),
+    mine: m,
     baseVersion,
     origin: 'intranet',
     opId: bid && bid.op_id ? String(bid.op_id).slice(0, 120) : '',
@@ -1226,6 +1240,8 @@ async function _intakeSourceBidir(res, { b, source, current, optionsJson, delive
     deliveryCapable: !!(bid && (bid.delivery === 1 || bid.delivery === true || bid.delivery === '1')),
     // ★ 7단계-④ ⑤-3: 옵션 있음↔없음도 그것을 아는 창만(옛 창은 방식 칸이 잠겨 있다 — 보내면 종전처럼 409)
     modeCapable: !!(bid && (bid.mode === 1 || bid.mode === true || bid.mode === '1')),
+    // ★ 결정 391(R1): 구매수량 단계 고치기도 그것을 아는 창만(리뷰웹 판정 칸 qty_tiers_edit 를 받은 창 — 옛 창은 단계를 저장본으로 고정해 보낸다 · 보내면 종전 409)
+    tiersCapable: !!(bid && (bid.tiers === 1 || bid.tiers === true || bid.tiers === '1')),
     managerRepairValue: !_sourceManagerCapability(b) && _hasExplicitWorkManager(b) ? pickWorkManager(b) : undefined,
     preHook: _sourceRevisionPreHook(source),
     extraSets: {
@@ -1764,6 +1780,12 @@ router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) 
     const writable = active
       ? [...normalWritable, ...(managerCapable ? ['work_manager'] : [])]
       : (managerCapable ? ['work_manager'] : null);
+    // 종류 변경 판정(결정 332 · 상한 없음 — 동작 그대로)과 R1 판정(상한 2.5초 · 넘으면 그 판정만 check_failed = 잠금)을 나란히
+    const qte = require('../services/qtyTiersEdit.service');
+    const [kindChange, qtyTiersEdit] = await Promise.all([
+      kindChangeVerdict(rows[0]),
+      caps.has('tiers') ? qte.withDeadline(qte.qtyTiersEditVerdict((t, v) => pool.query(t, v), { wo: rows[0], tiersCapable: true, active })) : Promise.resolve(null),
+    ]);
     res.json({
       ok: true,
       work_order_id: rows[0].id,
@@ -1787,8 +1809,11 @@ router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) 
       manager_base_version: Number(rows[0].sync_version || 0),
       // ★ 결정 332 — 접수된 리뷰↔블로그 오더의 종류를 바꿀 수 있나(손대지 않은 빈 작업일 때만 · 바꾸면 접수 대기로 되돌아간다).
       //   옛 리뷰웹엔 이 칸이 없다 → 인트라넷은 「못 바꿈」(종전 잠금)으로 읽는다.
-      kind_change: await kindChangeVerdict(rows[0]),
-      capabilities: { bidir_v1: true, keep_names: true, manager: managerCapable },
+      kind_change: kindChange,
+      /* ★ 결정 391(R1) — 이 오더에서 구매수량 단계를 고칠 수 있나(신청 0·채운 줄 0 … · 저장 때 같은 함수가 잠금 안에서 다시 본다).
+         단계 고치기를 아는 창(caps=tiers)만 계산한다 — 옛 창은 칸 없음(null) = 인트라넷이 종전 잠금으로 읽는다. */
+      qty_tiers_edit: qtyTiersEdit,
+      capabilities: { bidir_v1: true, keep_names: true, manager: managerCapable, tiers: true },
     });
   } catch (err) {
     next(err);

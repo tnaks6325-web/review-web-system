@@ -186,6 +186,9 @@ function writablePath(row, origin) {
   }
   if (m.kind !== 'leaf') return false;
   if (m.key === 'url') return true;
+  /* ★ 결정 391(R1 · 289 「가」 범위 좁힘) — 구매수량 단계 칸은 **단계 고치기를 아는 인트라넷 새 창**(bidir.tiers=1 → 판정 행 tiersCapable)만 쓴다.
+     열어도 저장 안에서 판정(qtyTiersEditVerdict — 신청 0·채운 줄 0 …)을 통과해야 실제로 쓴다. 옛 창·다른 출처 = 종전 영구 금지(quantity_tiers_locked). */
+  if (m.key === 'qty_tiers') return origin === 'intranet' && row.tiersCapable === true && !String(m.parent || '').includes('|o:');
   // 6단계 — 선택지별 유입가이드 {글, 사진}(옵션 guide · 옵션 없는 상품 guide). 옵션·상품 자체를 더하고 지우는 것은 여전히 막힘(그 경로가 따로 판정된다).
   if (m.key === 'guide') {
     // "옵션 없음" 류 라벨 옵션의 가이드는 프리필(리뷰어 화면 투영)이 상품 자리를 읽어 공고에 갈 길이 없다 — 막는다(조용히 갈라지지 않게)
@@ -447,6 +450,7 @@ function applyWrites(theirs, mine, writes) {
   let quantityTouched = false;
   const payProducts = new Set();
   const qtyProducts = new Set();
+  const tierProducts = new Set();   // ★ 결정 391 — 단계를 실제로 바꾼 상품(공고 단계 표 다시 쓰기·병합 검사 대상)
   const missed = [];
   const nextProducts = _parseList(next.product_options_json);
   const mineProducts = _parseList(mine && mine.product_options_json) || [];
@@ -533,7 +537,35 @@ function applyWrites(theirs, mine, writes) {
         quantityTouched = true; qtyProducts.add(pName);
       }
       else { missed.push(w.path); continue; }
-    } else if (leaf === 'url') { tp.url = mp.url; urlTouched = true; }
+    } else if (leaf === 'qty_tiers') {
+      /* ★ 결정 391(R1) — 판정(writablePath tiersCapable + 저장 안 qtyTiersEditVerdict)이 허락한 단계 줄만 여기 온다.
+         빈 값 ↔ 키 없음 = 바뀐 것 없음(결정 167 표준형 · 단계 변경으로 세지 않는다). 전부 빼기 = 키 삭제. */
+      const { isEmptyQtyTiers } = require('./productOptions.service');
+      if (isEmptyQtyTiers(mp.qty_tiers) && isEmptyQtyTiers(tp.qty_tiers)) continue;
+      if (isEmptyQtyTiers(mp.qty_tiers)) delete tp.qty_tiers;
+      else {
+        const t = JSON.parse(JSON.stringify(mp.qty_tiers));
+        if (t.mode === 'by_option') {
+          // ★ J2 — 단계 줄 옵션 이름을 리뷰웹 짝 옵션 이름으로 다시 적는다(띄어쓰기만 다른 이름이면 정규화가 「옵션이 없습니다」로 막는다)
+          const mo = Array.isArray(mp.options) ? mp.options : [], to = Array.isArray(tp.options) ? tp.options : [];
+          const ns = v => String(v == null ? '' : v).replace(/\s+/g, '');
+          let bad = false;
+          for (const r of (Array.isArray(t.rows) ? t.rows : [])) {
+            const want = String(r && r.option != null ? r.option : '').trim();
+            let src = mo.filter(o => String(o && o.label || '').trim() === want);
+            if (src.length !== 1) src = mo.filter(o => ns(o && o.label) === ns(want) || ns(optionKey(o)) === ns(want));
+            const dst = src.length === 1 ? to.filter(o => optionKey(o) === mineKeyO(src[0])) : [];
+            if (dst.length !== 1) { bad = true; break; }
+            r.option = String(dst[0].label || optionKey(dst[0]) || '').trim();
+          }
+          if (bad) { missed.push(w.path); continue; }
+        }
+        tp.qty_tiers = t;
+      }
+      // ★ 레드 1 — 결제합계 다시 계산 대상(인원 쪽 · derivePayFields 의 costProducts)에 넣는다. 결제금액 투영(_projectPayInTx)은 옵션 금액이 안 바뀌어 대상 아님.
+      tierProducts.add(pName); qtyProducts.add(pName); quantityTouched = true;
+    }
+    else if (leaf === 'url') { tp.url = mp.url; urlTouched = true; }
     else if (leaf === 'guide') { if (mp.guide === undefined) delete tp.guide; else tp.guide = mp.guide; guideTouched = true; }
     // ★ 결정 333 — 상품별 유입방식(키 없음 = 오더 전체 값을 따름 — 섞이지 않으면 인트라넷이 키를 뺀다)
     else if (leaf === 'inflow_type') { const t = unitInflowType(mp.inflow_type); if (t) tp.inflow_type = t; else delete tp.inflow_type; inflowUnitTouched = true; }
@@ -601,7 +633,8 @@ function applyWrites(theirs, mine, writes) {
   structure.productRenameMap = productRenameMap;
   const structureTouched = structure.addedProducts.length + structure.removedProducts.length + structure.addedOptions.length
     + structure.removedOptions.length + structure.reopened.length + structure.renamedOptions.length + structure.renamedProducts.length + structure.modeSwitched.length > 0;
-  return { next, productsTouched, urlTouched, guideTouched, inflowUnitTouched, quantityTouched, payTouched: payProducts.size > 0, payProducts, qtyProducts, missed, structure, structureTouched };
+  return { next, productsTouched, urlTouched, guideTouched, inflowUnitTouched, quantityTouched, payTouched: payProducts.size > 0, payProducts, qtyProducts, missed, structure, structureTouched,
+    tierProducts, tiersTouched: tierProducts.size > 0 };
 }
 
 /** 상품 하나의 상품구입비 — 인트라넷 totals 와 같은 규칙(옵션 금액이 비면 상품 기본 금액 · `workOrderPayAmounts` 와 같다).
@@ -871,11 +904,20 @@ function _tiersOn(p) { const t = p && p.qty_tiers; return t != null && (Array.is
  *   ③ 오더는 "총모집 = 상품·옵션 인원 합계" — 다른 모양은 담지 않는다 · ④ 배송 혼합·구매수량 단계 작업의 인원 변경은 4단계(구조)까지 막는다 ·
  *   ① 리뷰타입 혼합 작업은 혼합 수량을 인원에 맞춰 같이 바꿨을 때만(합계 = 인원 · 옵션별도 같다).
  */
-function validateQuantities(next, qtyProducts) {
+function validateQuantities(next, qtyProducts, { tierProducts = null } = {}) {
   const products = _parseList(next.product_options_json) || [];
   const byName = n => products.find(p => p && String(p.name || '').trim() === n);
   for (const n of qtyProducts || []) {
-    if (_tiersOn(byName(n))) return { code: 'quantity_tiers_locked', error: '구매수량 단계를 쓰는 상품은 아직 인원을 바꿀 수 없습니다(구조 단계에서 엽니다). 인원은 그대로 두고 저장해 주세요.' };
+    const p = byName(n);
+    if (!_tiersOn(p)) continue;
+    // ★ 결정 391(R1) — 판정이 허락한 단계 저장의 상품만 통과. 그 밖(옛 창·단계 안 바꾼 저장)의 단계 상품 인원은 종전대로 막힘.
+    if (!(tierProducts && tierProducts.has(n))) return { code: 'quantity_tiers_locked', error: '구매수량 단계를 쓰는 상품은 아직 인원을 바꿀 수 없습니다(구조 단계에서 엽니다). 인원은 그대로 두고 저장해 주세요.' };
+    // ★ 레드 2 — **병합 결과**를 정규화 단일 출처로 다시 검사(단계 인원 합 = 상품·옵션 인원 · 옵션 짝 · 중복 개수). 인트라넷발은 last_writer 라 이것이 유일한 방어.
+    try { require('./productOptions.service').normalizeQtyTiers(p.qty_tiers, p, products.indexOf(p)); }
+    catch (e) {
+      return { code: 'quantity_tiers_sum_mismatch',
+        error: `구매수량 단계가 상품 인원과 맞지 않아 저장하지 않았습니다(${e.message}). 창을 연 뒤 리뷰웹에서 인원이 바뀌었을 수 있습니다 — 창을 닫고 다시 열어 주세요.` };
+    }
   }
   if (CANON.deliveryMix(next.delivery_type_mix)) {
     return { code: 'quantity_delivery_mix_locked', error: '배송 혼합(실배송·빈박스) 작업은 접수 뒤 인원·리뷰타입·상품 구성을 바꿀 수 없습니다. 새 리뷰오더로 만들어 주세요.' };
@@ -914,7 +956,7 @@ function validateQuantities(next, qtyProducts) {
  *   작업표 줄 = 빈 줄만 지우고 새 줄은 빈 줄로(`syncWorktableSlotsInTx` — 채워진 줄보다 적게 못 줄인다).
  * ★ 차수가 있는 공고는 거부(연결 공고는 차수를 막는다 · 사용자 확정 ②) · 날짜 다시 배치는 커밋 뒤(`after.relay`).
  */
-async function _projectQuantityInTx(client, camp, prev, next, { preferRetireIds = null } = {}) {
+async function _projectQuantityInTx(client, camp, prev, next, { preferRetireIds = null, r1 = false } = {}) {
   const lrq = require('./linkedRecruitQuota.service');
   const reject = (reason, error) => ({ reject: { kind: 'quantity', out: { applied: false, reason }, error } });
   // 차수 표가 없는 DB(42P01)는 차수 없음 — SAVEPOINT 로 감싸 실패가 트랜잭션을 깨지 않게(검토 2026-10-21)
@@ -943,6 +985,24 @@ async function _projectQuantityInTx(client, camp, prev, next, { preferRetireIds 
        일정 끝 「추가 모집」으로 늘린다(자리표·작업표·공고 인원이 갈리지 않게 저장 전체를 거절). */
     if (CANON.workKind(prev.work_kind || next.work_kind) === 'qna' && (total !== prevTotal || changed.length)) {
       return reject('qna_calendar_locked', 'Q&A 작업은 접수 뒤 건수·하루 건수를 바꿀 수 없습니다 — 일정이 끝날 때 「추가 모집」으로 늘려 주세요.');
+    }
+    /* ★ 결정 391(R1 · 임시 — RW-A2 「옵션별 목표로 빈 줄 다시 나누기」가 풀 것) — 단계 저장에서 선택지(옵션·상품)가 2개 이상인 작업의 선택지별 인원이 바뀌면
+       ① 리뷰타입을 섞어 쓰는 작업 = 거절(줄마다 깔린 리뷰옵션 배분이 어긋난다 · 사용자 확정 2026-11-20)
+       ② 작업보드 빈 줄에 옵션 표시가 2종 이상 = 거절(뒤에서부터 지우고 표시 없이 더해 옵션 표시가 어긋난다 · 레드 13)
+       선택지가 하나뿐이면 그 인원 = 총원이라 종전 줄 맞추기와 같다(세라모사이드 모양 통과). */
+    if (r1) {
+      const countChanged = (pn.options || []).filter(o => { const b = before.get(keyOf(o)); return !b || _num(b.recruitTotal) !== _num(o.recruitTotal); });
+      if (countChanged.length && (pn.options || []).length >= 2) {
+        const { tierRejectText } = require('./qtyTiersEdit.service');
+        if (CANON.reviewType(next.review_type) === 'mixed') return reject('option_rows_review_mix', tierRejectText('option_rows_review_mix'));
+        if (camp.linked_sheet_id && camp.linked_tab_name) {
+          const { rows: lab } = await client.query(
+            `SELECT COUNT(DISTINCT btrim(option_text))::int AS n FROM campaign_participants
+              WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND active = TRUE AND btrim(COALESCE(option_text, '')) <> ''`,
+            [camp.linked_sheet_id, camp.linked_tab_name]);
+          if (Number(lab[0] && lab[0].n) >= 2) return reject('quantity_tiers_option_counts', tierRejectText('quantity_tiers_option_counts'));
+        }
+      }
     }
     const { rows: optRows } = await client.query(
       `SELECT id, opt_key, product_name, unit_kind, recruit_total, daily_limit FROM campaign_options WHERE campaign_id = $1 ORDER BY id FOR UPDATE`, [camp.id]);
@@ -1496,6 +1556,28 @@ async function _projectDualChannelProductInTx(client, camp, next) {
   return { applied: true };
 }
 
+/**
+ * ★ 결정 391(R1) — 오더 단계 → 공고 단계 표(같은 트랜잭션 · 발행 복사와 같은 함수 planTierCopy + insertTiers · 사본 0).
+ *   옵션 줄·인원이 먼저 맞아야 짝을 짓는다(_projectQuantityInTx 뒤). 공고 옵션 DB 줄은 발행 입력 모양으로 바꿔 넘긴다(optionsFromRows · 레드 7).
+ *   ★ fail-closed — 블로그·Q&A·스위치 꺼짐(copiesFor false: 판정을 통과했는데 여기 오면 구현 실수) · 짝 못 지음 · 줄 수 불일치 = reject(통째 ROLLBACK).
+ *   ★ 지우고 다시 쓴다 — 외래키 참조 0 · 「신청 0」 은 호출부가 잠금 안에서 판정·반영 뒤 다시 센다.
+ */
+async function _projectQtyTiersInTx(client, camp, next) {
+  const qt = require('./campaignQtyTiers.service');
+  const reject = (reason, error) => ({ reject: { kind: 'qty_tiers', out: { applied: false, reason }, error } });
+  if (!qt.copiesFor(next.work_kind)) return reject('quantity_tiers_off', '이 작업은 구매수량 단계를 모집공고에 걸 수 없어 저장하지 않았습니다.');
+  const { rows: opts } = await client.query(`SELECT opt_key, product_name, status FROM campaign_options WHERE campaign_id = $1 ORDER BY sort_order, id`, [camp.id]);
+  let rows;
+  try { rows = qt.planTierCopy(next.product_options_json, qt.optionsFromRows(opts)); }
+  catch (e) { if (e instanceof qt.QtyTierError) return reject('quantity_tiers_unmatched', e.message); throw e; }
+  const expected = (_parseList(next.product_options_json) || []).reduce((n, p) => n + (_tiersOn(p) && p.qty_tiers && Array.isArray(p.qty_tiers.rows) ? p.qty_tiers.rows.length : 0), 0);
+  if (rows.length !== expected) return reject('quantity_tiers_unmatched', '구매수량 단계 일부를 모집공고에 걸지 못해 저장하지 않았습니다. 개발 담당에게 알려 주세요.');
+  const { rows: was } = await client.query('SELECT product_name, opt_key, qty, people, pay_amount, buy_method FROM campaign_qty_tiers WHERE campaign_id = $1 ORDER BY sort_order, id', [camp.id]);
+  await client.query('DELETE FROM campaign_qty_tiers WHERE campaign_id = $1', [camp.id]);
+  await qt.insertTiers(client, camp.id, rows);
+  return { applied: true, before: was, after: rows };
+}
+
 async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTouched, extra = {}) {
   const sync = require('./campaignPayAmountSync.service');
   const applied = [];
@@ -1541,10 +1623,17 @@ async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTo
     if (rowCount) applied.push('required_memo');
   }
   if (extra.quantityChanged) {
-    const r = await _projectQuantityInTx(client, camp, extra.prev || {}, next, { preferRetireIds: structureOut && structureOut.preferRetireIds });
+    const r = await _projectQuantityInTx(client, camp, extra.prev || {}, next, { preferRetireIds: structureOut && structureOut.preferRetireIds, r1: extra.r1 === true });
     if (r.reject) return { reject: r.reject };
     if (r.applied) applied.push('quantity');
     if (r.after) after = { ...(after || {}), ...r.after, relay: !!((after && after.relay) || r.after.relay) };
+  }
+  // ★ 결정 391(R1) — 인원·옵션 줄을 맞춘 **뒤** 공고 단계 표를 다시 쓴다(by_option 짝이 맞은 옵션 줄로)
+  let qtyTiersOut = null;
+  if (extra.r1 === true) {
+    qtyTiersOut = await _projectQtyTiersInTx(client, camp, next);
+    if (qtyTiersOut.reject) return { reject: qtyTiersOut.reject };
+    applied.push('qty_tiers');
   }
   // 7단계-④ ④ 리뷰타입 → 공고(리뷰타입·혼합 수량·옵션 혼합·구매확정 배지) · 작업 탭 리뷰타입
   if (extra.reviewTypeChanged) {
@@ -1682,7 +1771,7 @@ async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTo
       if (rowCount) applied.push('channel');
     }
   }
-  return { applied, after };
+  return { applied, after, qtyTiers: qtyTiersOut };
 }
 
 /**
@@ -1920,10 +2009,27 @@ async function applySharedPatch(p, inTxClient = null) {
     }
     const peek = await lrq.liveCampaignForWorkOrders(client, [wo.id]);                          // 보관(마감) 공고 제외
     let camp = null;
+    /* ★★ 결정 391(R1 · 레드 8) — 단계를 고칠 수 있는 저장(인트라넷 새 창 · 지금 오더나 보낸 값에 단계가 있음)은 **공고 행보다 먼저** 탭 잠금
+       (`sheetless_worktable:` — 주문 기록·정원 보충·직원 셀 수정이 먼저 잡는 같은 키)을 잡는다 → 바로 구매·정원 보충과 줄을 선다.
+       잠금 순서 = L1 → 작업오더 행 → 탭 → 공고 행(정원 보충 「탭 → 공고」와 같은 방향 · 역방향 쌍 없음 — 수동 작업 삭제와의 1쌍은 40P01 → busy_retry, J3).
+       「지문이 다를 때만」보다 넓게 잡는다 — 단계 오더는 드물고, 놓치면 「단계는 썼는데 탭 잠금이 없는」 저장이 생긴다(아래 단언). */
+    let tierTabLock = null;
+    const _anyTiers = st => (_parseList(st && st.product_options_json) || []).some(_tiersOn);
+    const tierIntent = p.origin === 'intranet' && p.tiersCapable === true && (_anyTiers(wo) || _anyTiers(p.mine));
     if (peek) {
+      if (tierIntent) {
+        const { rows: lk } = await client.query('SELECT linked_sheet_id, linked_tab_name FROM recruit_campaigns WHERE id = $1', [peek.id]);
+        if (lk[0] && lk[0].linked_sheet_id && lk[0].linked_tab_name) {
+          tierTabLock = `sheetless_worktable:${lk[0].linked_sheet_id}:${lk[0].linked_tab_name}`;
+          await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [tierTabLock]);
+        }
+      }
       const { rows } = await client.query('SELECT * FROM recruit_campaigns WHERE id = $1 AND archived_at IS NULL FOR UPDATE', [peek.id]);
       camp = rows[0] || null;
       if (!camp) return await _abort(client, 409, { ok: false, code: 'link_changed_retry', error: '연결 공고가 방금 바뀌었습니다. 다시 시도해 주세요.' });
+      if (tierTabLock && tierTabLock !== `sheetless_worktable:${camp.linked_sheet_id}:${camp.linked_tab_name}`) {
+        return await _abort(client, 409, { ok: false, code: 'link_changed_retry', error: '연결 공고가 방금 바뀌었습니다. 다시 시도해 주세요.' });
+      }
     }
     /* ★★ 결정 312 — 관리자가 「마감된 공고」 묶음에서 맞출 때만 보관 공고를 기준으로 쓴다(살아 있는 공고가 있으면 거절 — 그건 보통 맞추기).
        보관 공고는 **읽기만** 한다: 공고 쪽만 고를 수 있고(_reconcilePrepareInTx) 공고 반영(projectToCampaignInTx)을 건너뛴다(완화 금지). */
@@ -2049,6 +2155,10 @@ async function applySharedPatch(p, inTxClient = null) {
     const structureCapable = p.origin !== 'intranet' || p.structureCapable === true;
     markStructureRows(plan, base, p.mine, { structureCapable, renameCapable: p.origin !== 'intranet' || p.renameCapable === true,
       reviewTypeCapable: p.origin !== 'intranet' || p.reviewTypeCapable === true, modeCapable: p.origin !== 'intranet' || p.modeCapable === true, theirs });
+    // ★ 결정 391(R1) — 단계 고치기를 아는 인트라넷 새 창(bidir.tiers=1)의 단계 칸만 쓸 수 있는 칸으로 표시한다(없으면 종전 409 quantity_tiers_locked)
+    if (p.origin === 'intranet' && p.tiersCapable === true) {
+      for (const w of [...plan.writes, ...plan.conflicts]) if (w.meta && w.meta.kind === 'leaf' && w.meta.key === 'qty_tiers') w.tiersCapable = true;
+    }
     // ★ 구조를 모르는 옛 인트라넷 창 — 마감 표시(그 창은 마감을 모른다)와 마감 줄 안의 칸은 "안 보낸 칸" 으로 버린다(금액·인원과 같은 장치 · 검토 2026-10-21).
     //   안 버리면 마감 줄이 생긴 오더는 옛 창에서 저장할 때마다 막힌다(인트라넷을 되돌리면 그 오더들이 전부 저장 불가).
     if (!structureCapable) {
@@ -2130,7 +2240,7 @@ async function applySharedPatch(p, inTxClient = null) {
       if (!inTxClient) await client.query('COMMIT');
       return { status: 200, body: { ok: true, noop: true, sync_version: curVersion } };
     }
-    let { next, productsTouched, urlTouched, guideTouched, inflowUnitTouched, quantityTouched, payTouched, payProducts, qtyProducts, missed, structure, structureTouched } = applyWrites(theirs, p.mine, plan.writes);
+    let { next, productsTouched, urlTouched, guideTouched, inflowUnitTouched, quantityTouched, payTouched, payProducts, qtyProducts, missed, structure, structureTouched, tierProducts, tiersTouched } = applyWrites(theirs, p.mine, plan.writes);
     // 입력뿐 아니라 병합 결과도 확인한다. 이후 상품 줄·금액·버전 쓰기 전에 통째로 거부한다.
     if (rawHasDualChannels(next.product_options_json) && !dualRuntime.isDualChannelReady('roundtrip')) {
       return await _abort(client, 409, { ok: false, ...DUAL_CHANNEL_NOT_READY });
@@ -2142,6 +2252,30 @@ async function applySharedPatch(p, inTxClient = null) {
     if (missed.length) {
       return await _abort(client, 409, { ok: false, code: 'write_unmatched', sync_version: curVersion, fields: missed.map(path => ({ path, label: _label(path) })),
         error: `상품·옵션 짝을 찾지 못해 저장하지 않았습니다: ${[...new Set(missed.map(path => _label(path)))].join(', ')}. 창을 닫고 다시 열어 주세요.` });
+    }
+    /* ★★ 결정 391(R1) — 단계를 실제로 바꾸는 저장: 잠금(L1 → 작업오더 행 → 탭 → 공고 행) **뒤** 같은 트랜잭션에서
+       ① 열 때와 같은 판정(qtyTiersEditVerdict — 신청 0·채운 줄 0·보관·차수·종류…) ② 창 기준 ↔ 지금 리뷰웹 상품 구성 같음(J1)
+       ③ 단계 + 구조(상품·옵션 더하기·지우기·이름·방식) 한 저장 금지(P9). 하나라도 걸리면 통째 되돌림(원본 번호도 안 오름 — 결정 262). */
+    const { tierRejectText } = require('./qtyTiersEdit.service');
+    if (tiersTouched) {
+      const v = await require('./qtyTiersEdit.service').qtyTiersEditVerdict((t, x) => client.query(t, x),
+        { wo, camp, tiersCapable: p.tiersCapable === true, active: wo.bidir_state === 'on' });   // 여기 왔다 = 인트라넷 on+apply 경로(라우트가 같은 스위치로 골랐다)
+      if (!v.allowed) {
+        return await _abort(client, 409, { ok: false, code: v.reasons[0], reasons: v.reasons, sync_version: curVersion,
+          applicants: v.applicants, filled_rows: v.filled_rows, error: tierRejectText(v.reasons[0], v) });
+      }
+      // ★ J1 — derivePayFields 의 untouchedByRw 와 같은 비교. 다르면 인트라넷 창의 옛 합계가 리뷰웹을 덮는다.
+      if (CANON.json(theirs.product_options_json) !== CANON.json(base.product_options_json)) {
+        return await _abort(client, 409, { ok: false, code: 'quantity_tiers_stale_base', sync_version: curVersion, error: tierRejectText('quantity_tiers_stale_base') });
+      }
+      if (structureTouched) {
+        return await _abort(client, 409, { ok: false, code: 'quantity_tiers_with_structure', sync_version: curVersion, error: tierRejectText('quantity_tiers_with_structure') });
+      }
+      // 단계를 바꿨으면 tierIntent 는 참이다(위 빈↔빈 은 세지 않음) — 탭 잠금 없이 여기 오면 구현 실수(정확성 단언 · 역순 잠금을 만들지 않는다)
+      if (!tierTabLock && camp && camp.linked_sheet_id && camp.linked_tab_name) {
+        logger.error(`[bidir/apply] ${wo.id} 단계 저장인데 탭 잠금 없음(구현 확인)`);
+        return await _abort(client, 409, { ok: false, code: 'link_changed_retry', sync_version: curVersion, error: tierRejectText('link_changed_retry') });
+      }
     }
     if (plan.writes.some(w => w.path === 'f:work_manager')) {
       const protection = await _managerEditProtection(client, wo);
@@ -2203,7 +2337,8 @@ async function applySharedPatch(p, inTxClient = null) {
     const qtyFieldWritten = plan.writes.some(w => w.meta && w.meta.kind === 'field' && PHASE7Q_SHARED_FIELDS.includes(w.meta.key));
     const quantityChanged = quantityTouched || qtyFieldWritten || reviewTypeWritten;
     if (quantityChanged) {
-      const qErr = validateQuantities(next, new Set([...qtyProducts].map(n => (structure.productRenameMap && structure.productRenameMap.get(n)) || n)));
+      const ren = n => (structure.productRenameMap && structure.productRenameMap.get(n)) || n;
+      const qErr = validateQuantities(next, new Set([...qtyProducts].map(ren)), { tierProducts: new Set([...tierProducts].map(ren)) });
       if (qErr) return await _abort(client, 409, { ok: false, code: qErr.code, sync_version: curVersion, error: qErr.error });
     }
     // 옛 인트라넷이 금액을 버린 저장인데 상품 주소가 바뀌었으면, 그 저장이 보낸 요약 문장(옛 금액이 적힌)을 쓰지 않는다
@@ -2221,6 +2356,10 @@ async function applySharedPatch(p, inTxClient = null) {
     const derived = derivePayFields({ base, theirs, mine: p.mine, next, payProducts: costProducts, origin: p.origin, recompute: closure.restored.length > 0,
       renameMap: structure.productRenameMap });
     if (derived.payAmountNote) logger.info(`[bidir/apply] ${wo.id} 결제합계: 구매수량 단계 상품이라 차이를 계산하지 않음(${derived.payAmountNote})`);
+    // ★ 결정 391(레드 1) — 단계를 바꿨는데 합계를 모른다(인트라넷이 합계를 안 보냄) = 옛 합계로 조용히 남기지 않는다
+    if (tiersTouched && derived.payAmountNote === 'tiers_kept') {
+      return await _abort(client, 409, { ok: false, code: 'quantity_tiers_pay_missing', sync_version: curVersion, error: tierRejectText('quantity_tiers_pay_missing') });
+    }
     if (derived.pay_amount !== undefined) next.pay_amount = derived.pay_amount;
     if (derived.product_option !== undefined) next.product_option = derived.product_option;
     // 7단계-④ ③ 이름만 바꾼 저장(금액·인원 그대로)도 상품 요약 문장은 이름이 바뀐다 — 인트라넷이 보낸 문장이 없으면 리뷰웹이 다시 만든다
@@ -2276,12 +2415,40 @@ async function applySharedPatch(p, inTxClient = null) {
     let campaign = { applied: [] };
     if (camp && !recArchived && (plan.writes.length || rec)) {   // 결정 312: 보관 공고에는 쓰지 않는다
       campaign = await projectToCampaignInTx(client, camp, next, writtenKeys, productsTouched,
-        { prev: theirs, payTouched, urlTouched: urlTouched || !!(rec && recPlan.force.urlTouched), guideTouched, inflowUnitTouched: inflowUnitTouched || !!(rec && recPlan.force.inflow), quantityChanged: quantityChanged || !!(rec && recPlan.force.quantity), structureTouched, structure, reviewTypeChanged: reviewTypeWritten || writtenKeys.has('review_type_mix'), actor: p.actor || p.origin });
+        { prev: theirs, payTouched, urlTouched: urlTouched || !!(rec && recPlan.force.urlTouched), guideTouched, inflowUnitTouched: inflowUnitTouched || !!(rec && recPlan.force.inflow), quantityChanged: quantityChanged || !!(rec && recPlan.force.quantity), structureTouched, structure, reviewTypeChanged: reviewTypeWritten || writtenKeys.has('review_type_mix'), actor: p.actor || p.origin,
+          r1: tiersTouched === true });
       if (campaign.reject) {
         const { campaignSyncNotice } = require('./campaignPayAmountSync.service');
         return await _abort(client, 409, { ok: false, code: 'campaign_rejected', sync_version: curVersion,
           reason: campaign.reject.out.reason, detail: campaign.reject.out.detail || null,
           error: campaign.reject.error || campaignSyncNotice(campaign.reject.kind, campaign.reject.out) || '모집공고에 반영할 수 없어 저장하지 않았습니다.' });
+      }
+    }
+    if (tiersTouched) {
+      // ★ 결정 391(레드 8) — 반영 **뒤** 한 번 더 센다(254 범위 한 벌). 탭 잠금·공고 행 잠금 안이라 그사이 들어온 신청·주문은 이미 커밋된 것뿐 — 있으면 통째 되돌림.
+      if (!camp || !campaign.qtyTiers) {
+        return await _abort(client, 409, { ok: false, code: 'no_campaign', sync_version: curVersion, error: tierRejectText('no_campaign') });
+      }
+      if (camp.linked_sheet_id && camp.linked_tab_name) {
+        const u = await require('./workTabDelete.service').campaignUseCounts((t, x) => client.query(t, x), camp.linked_sheet_id, camp.linked_tab_name);
+        if (u.applications || u.campaignOrders || u.filledRows) {
+          const code = (u.applications || u.campaignOrders) ? 'quantity_tiers_in_use' : 'worktable_filled';
+          const vv = { applicants: u.applications + u.campaignOrders, filled_rows: u.filledRows };
+          return await _abort(client, 409, { ok: false, code, sync_version: curVersion, ...vv, error: tierRejectText(code, vv) });
+        }
+      }
+      // 조절 이력(공고 조절 창 · 작업 활동 기록이 읽는다) — 기록은 부가 정보: SAVEPOINT 로 감싸 실패는 경고만(저장 실패로 접으면 막다른 길)
+      await client.query('SAVEPOINT r1_tier_event');
+      try {
+        const totalOf = st => Math.max(0, Math.floor(_num(st && st.recruit_count)));
+        const view = rows => (rows || []).map(t => ({ product: String(t.product_name || ''), option: t.opt_key == null ? null : String(t.opt_key), qty: Number(t.qty) || 0, people: Number(t.people) || 0, amount: Number(t.pay_amount) || 0 }));
+        await client.query(`INSERT INTO campaign_plan_events (campaign_id, actor, action, detail) VALUES ($1, $2, 'qty_tiers_changed', $3::jsonb)`,
+          [camp.id, String(p.actor || p.origin || ''), JSON.stringify({ by: p.origin, before: view(campaign.qtyTiers.before), after: view(campaign.qtyTiers.after),
+            total_before: totalOf(theirs), total_after: totalOf(next), pay_before: Number(theirs.pay_amount) || 0, pay_after: Number(next.pay_amount) || 0 })]);
+        await client.query('RELEASE SAVEPOINT r1_tier_event');
+      } catch (e) {
+        await client.query('ROLLBACK TO SAVEPOINT r1_tier_event').catch(() => {});
+        logger.warn(`[bidir/apply] ${wo.id} 단계 변경 이력 기록 실패(저장은 계속): ${e.message}`);
       }
     }
     // 맞추기 — 끝에 다시 비교한다. 한 칸이라도 다르면 통째로 되돌린다(fail-closed · 오더·공고가 다른 채 "연결" 되지 않게)

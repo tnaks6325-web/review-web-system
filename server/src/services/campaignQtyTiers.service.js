@@ -237,6 +237,35 @@ async function summaryForCampaign(db, campaignId) {
   return { groups: [...groups.values()], plain, totalAmount: complete ? amount : null, totalUnits: units, totalPeople: people };
 }
 
+/**
+ * ★ 결정 391 — 이 종류의 공고가 오더 단계를 복사·적용하나(단일 출처).
+ *   발행 복사(campaign.routes /admin/create) · R1 판정(qtyTiersEdit) · R1 공고 반영(sharedPatch._projectQtyTiersInTx) · 보관 해제 비교(campaignArchive)가 같은 판정을 쓴다.
+ *   블로그·Q&A 는 단계를 쓰지 않는다(결정 289 · Q1 ㉠). 스위치 꺼짐 = false.
+ */
+function copiesFor(workKind) {
+  const { workKindForStore } = require('../utils/workKind');
+  return enabled() && !['blog', 'qna'].includes(workKindForStore(workKind));
+}
+
+/** campaign_options 행 → planTierCopy 입력 모양({optKey, productName}) — 발행의 normOpts 와 같은 모양. 마감·지운 줄은 빼고 짝을 짓는다(레드 7). */
+function optionsFromRows(rows) {
+  return (rows || []).filter(r => r && !['closed', 'deleted'].includes(String(r.status || 'active')))
+    .map(r => ({ optKey: String(r.opt_key || ''), productName: String(r.product_name || '') }));
+}
+
+/**
+ * ★ 결정 391(Q8 ㉠) — 공고 단계 표가 「지금 오더로 다시 만든 표」와 같은가. 짝을 못 지으면 false(fail-closed — 비교 못 함 = 다름).
+ *   비교 칸 = 상품 이름 · 옵션 줄 · 개수 · 인원 · 1인 금액 · 구매 방법(sort_order 는 뺀다 — 순서 흔들림 무시).
+ */
+async function tableMatchesOrder(db, campaignId, productOptionsJson) {
+  const { rows: opts } = await db.query('SELECT opt_key, product_name, status FROM campaign_options WHERE campaign_id = $1 ORDER BY sort_order, id', [campaignId]);
+  let want;
+  try { want = planTierCopy(productOptionsJson, optionsFromRows(opts)); } catch (e) { if (e instanceof QtyTierError) return false; throw e; }
+  const { rows: have } = await db.query('SELECT product_name, opt_key, qty, people, pay_amount, buy_method FROM campaign_qty_tiers WHERE campaign_id = $1', [campaignId]);
+  const key = r => JSON.stringify([clean(r.product_name), r.opt_key == null ? null : String(r.opt_key), int(r.qty), int(r.people), int(r.pay_amount), r.buy_method === 'option' ? 'option' : 'qty']);
+  return JSON.stringify(want.map(key).sort()) === JSON.stringify(have.map(key).sort());
+}
+
 module.exports = {
-  enabled, planTierCopy, insertTiers, loadContext, scopeFor, unresolved, fetchUsage, tierViews, judge, viewsForCampaign, summaryForCampaign, QtyTierError,
+  enabled, copiesFor, optionsFromRows, tableMatchesOrder, planTierCopy, insertTiers, loadContext, scopeFor, unresolved, fetchUsage, tierViews, judge, viewsForCampaign, summaryForCampaign, QtyTierError,
 };
