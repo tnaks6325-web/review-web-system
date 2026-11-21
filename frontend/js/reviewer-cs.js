@@ -102,7 +102,27 @@
       document.body.appendChild(ov);
     }
     ov.style.display = "flex";
+    fitToVisible();
     return ov;
+  }
+  /* ★ 결정 391 — 휴대폰 키보드가 올라오면 대화창을 「지금 보이는 영역」에 맞춘다.
+     키보드가 떠도 화면 틀(레이아웃) 높이는 그대로라, 아래에 붙은 84vh 창은 입력칸을 보이려고 위로 밀려
+     머리(제목·뒤로·닫기)가 화면 밖으로 사라졌다(아이폰 사파리·안드로이드 크롬 실기 공통).
+     보이는 영역(visualViewport)의 위치·높이로 덮개를 옮기고, 창 높이는 그 높이를 넘지 않게 한다.
+     visualViewport 가 없는 브라우저는 종전 그대로(덮개 inset:0). 키보드가 내려가면 높이가 돌아와 종전 모양이 된다. */
+  function fitToVisible() {
+    const ov = document.getElementById("rcsOverlay");
+    const vv = window.visualViewport;
+    if (!ov || !vv || ov.style.display === "none") return;
+    ov.style.top = Math.round(vv.offsetTop) + "px";
+    ov.style.bottom = "auto";
+    ov.style.height = Math.round(vv.height) + "px";
+    const sheet = ov.firstElementChild;
+    if (sheet) sheet.style.maxHeight = Math.round(vv.height) + "px";
+  }
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", fitToVisible);
+    window.visualViewport.addEventListener("scroll", fitToVisible);
   }
   function closeAll() {
     _open = null;
@@ -157,6 +177,7 @@
         <button id="rcsSendBtn" onclick="ReviewerCS.send()" style="width:44px;height:44px;border:none;background:#3182f6;color:#fff;border-radius:12px;font-size:1rem;cursor:pointer;flex-shrink:0"><i class="fas fa-paper-plane"></i></button>
       </div>
     </div>`;
+    fitToVisible();
     await reloadChat();
   }
 
