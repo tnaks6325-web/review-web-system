@@ -6060,10 +6060,16 @@ const _FIN_KEY = (sheetId, tabName) => `${sheetId}\t${tabName}`;
 const _FIN_GKEY = (sheetId, tabGid) => `${sheetId}\tgid:${tabGid}`;
 /** 그 탭이 마감됐는가 — finishedTabsMap 의 map 을 받아 **이름 → gid 폴백**으로 판정한다(키 규칙 단일 출처). */
 function isTabFinishedIn(map, sheetId, tabName, tabGid) {
-  if (!map) return false;
-  if (map[_FIN_KEY(sheetId, tabName)]) return true;
+  return !!_tabEntryIn(map, sheetId, tabName, tabGid);
+}
+/** 탭 좌표 맵(마감·원본 오더 삭제됨 — 같은 키 규칙)에서 그 탭의 값을 **이름 → gid 폴백**으로 찾는다. 없으면 null.
+ *  ★ 빈 gid 는 찾지 않는다(전부 매칭되는 사고 방지). isTabFinishedIn 과 공고 「원본 오더 삭제됨」(결정 389)이 함께 쓴다. */
+function _tabEntryIn(map, sheetId, tabName, tabGid) {
+  if (!map) return null;
+  const v = map[_FIN_KEY(sheetId, tabName)];
+  if (v) return v;
   const g = String(tabGid == null ? '' : tabGid).trim();
-  return !!(g && map[_FIN_GKEY(sheetId, g)]);
+  return (g && map[_FIN_GKEY(sheetId, g)]) || null;
 }
 async function finishedTabsMap(db = getPool()) {
   try {
@@ -6123,6 +6129,18 @@ async function sourceOrderDeletedMap() {
     logger.warn(`[trackB] sourceOrderDeletedMap 실패(주석 없이 계속): ${err.message}`);
     return { ok: false, map: {} };
   }
+}
+
+/**
+ * ★ 결정 389 — 모집공고(연결 탭)용 「원본 오더 삭제됨」 표시 값. 판정 = sourceOrderDeletedMap(위 · 홈 작업 목록과 같은 맵) + 같은 키 규칙(이름 → gid 폴백).
+ *   ★★ 돌려주는 값은 `{ deletedAt }` **하나뿐** — 지운 직원 이름(deletedBy)은 싣지 않는다(사용자 확정 2026-11-20 · 완화 금지).
+ *   ★ 시트·작업 이름이 비면 null(어느 작업 것인지 모른다). 맵 없음(조회 실패) = null = 표시 없음.
+ *   ★ 이 값은 **직원(관리자 갈래) 응답에만** 싣는다 — 공개·리뷰어·업체 응답 금지(campaignSourceDeletedBadge 가드).
+ */
+function sourceOrderDeletedForTab(map, sheetId, tabName, tabGid) {
+  if (!String(sheetId || '').trim() || !String(tabName || '').trim()) return null;
+  const v = _tabEntryIn(map, sheetId, tabName, tabGid);
+  return v ? { deletedAt: v.deletedAt || null } : null;
 }
 
 /** 마감/복귀. finish=true 는 **검수 확인(inspected)** 없이는 거부한다(사용자 확정 ㉠ — 서버가 최종 방어).
@@ -6997,7 +7015,7 @@ module.exports = {
   setWorkdeskAdvertiserOrder,
   getWorkdeskWorktabs,
   setWorkdeskWorktabs,
-  finishedTabsMap, isTabFinishedIn, sourceOrderDeletedMap,
+  finishedTabsMap, isTabFinishedIn, sourceOrderDeletedMap, sourceOrderDeletedForTab,
   setTabFinished,
   autoFinishEligibleTabs,
   tabStatsMap,
