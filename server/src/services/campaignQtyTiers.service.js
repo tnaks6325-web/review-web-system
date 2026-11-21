@@ -32,6 +32,13 @@ class QtyTierError extends Error {
   }
 }
 
+/** 공통 단계를 그 상품에 걸 수 있나(옵션 없는 공고 = 늘 참 · 옵션 있는 공고 = 그 상품 이름 줄이 있어야). 옵션별 단계도 이 짝이 먼저다(상품 이름 같음).
+ *  ★ 결정 392 — 단계 고치기 판정(qtyTiersEditVerdict)이 같은 규칙으로 「어느 상품에도 단계를 못 건다」를 미리 막는다(판정 = 저장 단일 출처). */
+function productPairs(pname, opts) {
+  const list = Array.isArray(opts) ? opts : [];
+  return !list.length || list.some(o => o && (clean(o.productName) === clean(pname) || o.optKey === clean(pname)));
+}
+
 /**
  * 발행 때 복사할 줄을 만든다(순수 함수 — DB 없음).
  * @param productOptionsJson 작업오더 상품 구성(정규화된 원본)
@@ -62,7 +69,7 @@ function planTierCopy(productOptionsJson, options) {
       }
     } else {
       // 공통 단계는 상품명으로 범위를 잡는다 — 옵션 있는 공고인데 그 상품이 없으면 단계가 어디에도 안 걸린다.
-      if (opts.length && !opts.some(o => o && (clean(o.productName) === pname || o.optKey === pname))) {
+      if (!productPairs(pname, opts)) {
         throw new QtyTierError(`「${pname}」 상품을 공고 옵션에서 찾지 못해 구매수량 단계를 걸 수 없습니다.`);
       }
       for (const r of tiers.rows) {
@@ -237,6 +244,35 @@ async function summaryForCampaign(db, campaignId) {
   return { groups: [...groups.values()], plain, totalAmount: complete ? amount : null, totalUnits: units, totalPeople: people };
 }
 
+/**
+ * ★ 결정 392 — 이 종류의 공고가 오더 단계를 복사·적용하나(단일 출처).
+ *   발행 복사(campaign.routes /admin/create) · R1 판정(qtyTiersEdit) · R1 공고 반영(sharedPatch._projectQtyTiersInTx) · 보관 해제 비교(campaignArchive)가 같은 판정을 쓴다.
+ *   블로그·Q&A 는 단계를 쓰지 않는다(결정 289 · Q1 ㉠). 스위치 꺼짐 = false.
+ */
+function copiesFor(workKind) {
+  const { workKindForStore } = require('../utils/workKind');
+  return enabled() && !['blog', 'qna'].includes(workKindForStore(workKind));
+}
+
+/** campaign_options 행 → planTierCopy 입력 모양({optKey, productName}) — 발행의 normOpts 와 같은 모양. 마감·지운 줄은 빼고 짝을 짓는다(레드 7). */
+function optionsFromRows(rows) {
+  return (rows || []).filter(r => r && !['closed', 'deleted'].includes(String(r.status || 'active')))
+    .map(r => ({ optKey: String(r.opt_key || ''), productName: String(r.product_name || '') }));
+}
+
+/**
+ * ★ 결정 392(Q8 ㉠) — 공고 단계 표가 「지금 오더로 다시 만든 표」와 같은가. 짝을 못 지으면 false(fail-closed — 비교 못 함 = 다름).
+ *   비교 칸 = 상품 이름 · 옵션 줄 · 개수 · 인원 · 1인 금액 · 구매 방법(sort_order 는 뺀다 — 순서 흔들림 무시).
+ */
+async function tableMatchesOrder(db, campaignId, productOptionsJson) {
+  const { rows: opts } = await db.query('SELECT opt_key, product_name, status FROM campaign_options WHERE campaign_id = $1 ORDER BY sort_order, id', [campaignId]);
+  let want;
+  try { want = planTierCopy(productOptionsJson, optionsFromRows(opts)); } catch (e) { if (e instanceof QtyTierError) return false; throw e; }
+  const { rows: have } = await db.query('SELECT product_name, opt_key, qty, people, pay_amount, buy_method FROM campaign_qty_tiers WHERE campaign_id = $1', [campaignId]);
+  const key = r => JSON.stringify([clean(r.product_name), r.opt_key == null ? null : String(r.opt_key), int(r.qty), int(r.people), int(r.pay_amount), r.buy_method === 'option' ? 'option' : 'qty']);
+  return JSON.stringify(want.map(key).sort()) === JSON.stringify(have.map(key).sort());
+}
+
 module.exports = {
-  enabled, planTierCopy, insertTiers, loadContext, scopeFor, unresolved, fetchUsage, tierViews, judge, viewsForCampaign, summaryForCampaign, QtyTierError,
+  enabled, copiesFor, optionsFromRows, productPairs, tableMatchesOrder, planTierCopy, insertTiers, loadContext, scopeFor, unresolved, fetchUsage, tierViews, judge, viewsForCampaign, summaryForCampaign, QtyTierError,
 };

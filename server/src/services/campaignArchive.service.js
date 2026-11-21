@@ -90,6 +90,24 @@ async function unarchiveCampaign(db, id) {
         return { ok: false, code: 'work_order_campaign_exists', campaignId: live.id,
           error: `같은 작업오더로 살아 있는 모집공고가 이미 있습니다 — 「${live.title || live.id}」. 그 공고를 보관하거나 삭제한 뒤에 보관을 해제하세요.` };
       }
+      /* ★★ 결정 392(Q8 ㉠ · 완화 금지) — 리뷰 체험단 공고(단계를 복사하는 공고 = copiesFor)는 그 공고의 단계 표가 「지금 오더로 다시 만든 표」와 다르면 되살리지 않는다.
+         되살리면 옛 단계(또는 단계 없음)로 조용히 다시 모집돼 모두 1개씩 산다(결정 289-1 사고 모양). 비교 못 함(짝 못 지음) = 막음(fail-closed).
+         블로그·Q&A 공고는 비교하지 않는다. 지운 오더는 비교할 원본이 없어 종전대로. 종전 「살아 있는 공고」 거절이 먼저(순서 불변). */
+      const campaignQtyTiers = require('./campaignQtyTiers.service');
+      if (campaignQtyTiers.enabled()) {
+        const { rows: ck } = await q.query('SELECT work_kind FROM recruit_campaigns WHERE id = $1', [id]);
+        if (campaignQtyTiers.copiesFor(ck[0] && ck[0].work_kind)) {
+          for (const woId of woIds) {
+            const { rows: w } = await q.query('SELECT product_options_json FROM work_orders WHERE id = $1 AND deleted_at IS NULL', [woId]);
+            if (!w.length) continue;
+            if (!await campaignQtyTiers.tableMatchesOrder(q, id, w[0].product_options_json)) {
+              if (client) await client.query('ROLLBACK');
+              return { ok: false, code: 'unarchive_tiers_changed',
+                error: '이 공고의 구매수량 단계가 지금 오더의 단계와 달라 그대로 되살릴 수 없습니다 — 되살리면 다른 단계로 모집됩니다. 같은 오더로 새 공고를 발행해 주세요.' };
+            }
+          }
+        }
+      }
     }
     const { rows } = await q.query(
       `UPDATE recruit_campaigns SET archived_at = NULL,

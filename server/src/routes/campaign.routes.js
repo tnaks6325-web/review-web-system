@@ -3747,7 +3747,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
            짝지을 수 없으면 공고를 만들지 않는다(400) — 단계 없이 게시되면 리뷰어가 모두 1개씩 사고 아무도 모른다.
            ★ 원본은 서버가 오더에서 직접 읽는다(화면이 넘긴 값을 믿지 않는다 — 오더 단계는 접수 뒤 잠겨 있다, 결정 250).
            ★ 블로그 체험단·스위치 꺼짐은 복사하지 않는다(종전 동작). Q&A 체험단은 구매가 없어 단계 자체가 없다. */
-        if (campaignQtyTiers.enabled() && !['blog', 'qna'].includes(workKindForStore(work_kind))) {
+        if (campaignQtyTiers.copiesFor(work_kind)) {   // ★ 결정 392 — 복사 조건 단일 출처(R1 반영·보관 해제 비교와 같은 판정)
           const { rows: woRows } = await _insClient.query('SELECT product_options_json FROM work_orders WHERE id = $1', [_srcWoId]);
           try {
             _qtyTierRows = campaignQtyTiers.planTierCopy(woRows[0] && woRows[0].product_options_json, normOpts);

@@ -306,9 +306,12 @@ async function pg() {
     assert.equal(after.action, 'prompt', '바꾼 뒤 신청한 사람이 화이트 금액을 냈으면 그대로 묻는다');
 
     // 구매수량 단계 상품 금액을 인트라넷에서 바꾸는 것은(단계 칸 자체가 막혀) 저장 거부
+    //   ★ 결정 289 「가」(2026-10-26)부터 막힌 단계 칸의 코드는 영구 금지 quantity_tiers_locked(이 실 PG 갈래만 옛 field_not_editable 로 남아 빨강이었다 — 2026-11-21 확인).
+    //   결정 392: 단계 고치기를 모르는 창(tiersCapable 없음)은 그대로 막힌다(의미 불변).
     const tiered = JSON.parse(swJson); tiered[1].qty_tiers = [{ qty: 2, pay: 2000 }];
     r = await A.intranet({ product_options_json: JSON.stringify(tiered) });
-    assert.equal(r.body.code, 'field_not_editable', JSON.stringify(r.body));
+    assert.equal(r.status, 409, JSON.stringify(r.body));
+    assert.equal(r.body.code, 'quantity_tiers_locked', JSON.stringify(r.body));
 
     // ═══ 공고 창 — 리뷰비 · 옵션 금액 → 오더 ═══
     const openEditor = async (camp) => {

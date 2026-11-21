@@ -282,10 +282,29 @@ function rawHasQtyTiers(raw) {
   return Array.isArray(list) && list.some(p => p && typeof p === 'object' && Object.prototype.hasOwnProperty.call(p, 'qty_tiers'));
 }
 
+/**
+ * ★ 결정 392(R1) — 상품 구성의 구매수량 단계 「지문」(상품 이름은 뺀다 · 상품 순서·줄 순서 무관 · 옵션 줄 이름은 남긴다).
+ *   짝 못 지은 인트라넷 창(skip_products)이 단계를 바꿨는지 볼 때 쓴다 — 그 창은 이름 짝을 모르므로 이름 없이 비교한다.
+ *   빈 단계(키 없음·null·빈 rows)는 「단계 없음」으로 같게 본다(결정 167 표준형). 형식이 깨진 글자는 null(모름 — 호출부가 막는다).
+ */
+function qtyTiersPrint(raw) {
+  let list;
+  try { list = parse(raw); } catch (_) { return null; }
+  if (list === null) return '[]';
+  if (!Array.isArray(list)) return null;
+  const prints = list.map(p => p && typeof p === 'object' ? p.qty_tiers : undefined).filter(t => !isEmptyQtyTiers(t))
+    .map(t => JSON.stringify({ mode: String(t.mode || ''), buy: t.buy_method === 'option' ? 'option' : 'qty',
+      rows: (Array.isArray(t.rows) ? t.rows : []).map(r => JSON.stringify([String(r && r.option != null ? r.option : '').trim(), Number(r && r.qty) || 0, Number(r && r.people) || 0, Number(r && r.amount) || 0])).sort() }))
+    .sort();
+  return JSON.stringify(prints);
+}
+
 module.exports = {
   ProductOptionsError,
   normalizeProductOptionsJson,
   normalizeQtyTiers,
+  isEmptyQtyTiers,
+  qtyTiersPrint,
   rawHasQtyTiers,
   selectionKey,
   parseSelectionKey,

@@ -124,7 +124,11 @@ test('배선 — 잠금 안 게이트 · INSERT 뒤 UPDATE · 옵션 바꾸기 �
   assert.ok(beginAt >= 0 && insertAt > beginAt && tiersAt > insertAt && commitAt > tiersAt, '복사는 공고 INSERT 와 같은 client·트랜잭션에서 COMMIT 전');
   assert.equal((createTx.slice(beginAt, commitAt).match(/query\('COMMIT'\)/g) || []).length, 0, '단계 복사 앞 조기 COMMIT 금지');
   assert.match(createTx.slice(commitAt), /catch \(insErr\) \{\s*if \(_insClient\) await _insClient\.query\('ROLLBACK'\)/, '단계 복사 오류도 공고와 함께 롤백');
-  assert.match(routes, /!\['blog', 'qna'\]\.includes\(workKindForStore\(work_kind\)\)/, '블로그·Q&A 체험단은 복사하지 않는다');
+  // 결정 392 — 복사 조건은 단일 출처 copiesFor(발행·R1·보관 해제가 같은 판정). 의미 불변: 블로그·Q&A·스위치 꺼짐은 복사하지 않는다.
+  assert.match(routes, /if \(campaignQtyTiers\.copiesFor\(work_kind\)\)/, '발행 복사는 copiesFor 로');
+  assert.equal(svc.copiesFor('blog'), false, '블로그·Q&A 체험단은 복사하지 않는다');
+  assert.equal(svc.copiesFor('qna'), false); assert.equal(svc.copiesFor('Q&A'), svc.copiesFor('qna'));
+  assert.equal(svc.copiesFor('review'), true); assert.equal(svc.copiesFor(''), true, '빈 값 = 리뷰(종전)');
   assert.match(routes, /function _publicTierView\(v\) \{\n\s*return \{ qty: v\.qty, status: v\.status, remaining: v\.remaining, buyMethod: v\.buyMethod \};/, '참여 전 응답에 금액을 싣지 않는다(결정 041)');
   assert.match(hold, /purchase_qty = COALESCE\(os\.purchase_qty, ca\.purchase_qty\)/);
   assert.match(hold, /qty_tier_amount = COALESCE\(os\.qty_tier_amount, ca\.qty_tier_amount\)/);
@@ -167,9 +171,15 @@ test('「가」 — 접수 뒤 단계 수정·단계 상품 이름 바꾸기·�
   assert.ok(tb > 0, '단계 칸 막힘을 따로 본다');
   assert.ok(tb < sp.indexOf("code: 'field_not_editable'"), '일반 「아직 못 바꿈」보다 먼저');
   assert.match(sp.slice(tb, tb + 800), /code: 'quantity_tiers_locked'[\s\S]*새 리뷰오더로 접수해 주세요/);
-  // 단계 칸 자체는 계속 쓸 수 없는 칸(writablePath 의 leaf 목록에 qty_tiers 가 없다 = false)
+  // 단계 칸은 옛 창·다른 출처에서 계속 쓸 수 없는 칸 — 결정 392(R1)로 「인트라넷 새 창(tiersCapable) + 저장 안 판정(신청 0…)」만 연다(289 「가」 범위 좁힘 · 사용자 확정 2026-11-20).
+  //   의미: 표시 없는 저장은 종전과 같이 막힘(위 quantity_tiers_locked + 새 리뷰오더 문구) — 여는 조건을 이 한 줄 밖으로 넓히지 않는다.
   const wp = sp.slice(sp.indexOf('function writablePath(row, origin) {'), sp.indexOf('const _truthy = v =>'));
-  assert.ok(!/qty_tiers/.test(wp), '단계 칸을 쓸 수 있는 칸으로 열지 않는다');
+  assert.deepEqual(wp.match(/qty_tiers/g), ['qty_tiers'], '단계 칸 갈래는 하나뿐');
+  assert.match(wp, /if \(m\.key === 'qty_tiers'\) return origin === 'intranet' && row\.tiersCapable === true && !String\(m\.parent \|\| ''\)\.includes\('\|o:'\);/);
+  const SPm = require('../src/services/sharedPatch.service');
+  const tr = { meta: { kind: 'leaf', key: 'qty_tiers', parent: 'p:가' }, base: '{}', mine: '{"x":1}' };
+  assert.equal(SPm.writablePath(tr, 'intranet'), false, '표시 없는 창 = 단계 칸을 쓸 수 있는 칸으로 열지 않는다');
+  for (const o of ['campaign', 'rw_admin', 'reconcile']) assert.equal(SPm.writablePath({ ...tr, tiersCapable: true }, o), false, o);
   // ② 단계 상품 이름 바꾸기(인트라넷발 구조 저장)
   assert.match(sp, /for \(const r of structure\.renamedProducts \|\| \[\]\) \{\n\s*if \(_tiersOn\(list\.find\(y => String\(y && y\.name \|\| ''\)\.trim\(\) === String\(r\.to \|\| ''\)\.trim\(\)\)\)\) \{\n\s*return \{ code: 'quantity_tiers_locked'/);
   // ③ 공고 창 저장: 단계 공고의 상품 이름 바꾸기는 통째로 되돌린다(이름 바꾸기 뒤 · 쓰기 전)
