@@ -1,6 +1,6 @@
 'use strict';
 /**
- * qtyTiersEdit.test.js — 결정 391(R1) 판정 함수 · 쓰기 경로 열쇠 · 단일 출처 정적 가드.
+ * qtyTiersEdit.test.js — 결정 392(R1) 판정 함수 · 쓰기 경로 열쇠 · 단일 출처 정적 가드.
  *   ① qtyTiersEditVerdict(스텁 q): 연결 꺼짐·옛 창·스위치·블로그 · 신청/채운 줄 숫자 · 조회 실패 = check_failed + 숫자 null(0 으로 꾸미지 않음) · 상한 2.5초
  *   ② writablePath — 단계 칸은 인트라넷 새 창(tiersCapable)만 · 옛 창/다른 출처/옵션 줄 = 종전 false
  *   ③ applyWrites — 단계 갈래(빈↔빈 = 변화 없음 · 전부 빼기 = 키 삭제 · J2 옵션 이름을 리뷰웹 짝 이름으로 · 짝 없음 = write_unmatched)

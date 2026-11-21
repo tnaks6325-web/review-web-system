@@ -41,7 +41,7 @@ const names = (m) => JSON.parse(m.product_options_json).map(p => p.name);
 {
   const routes = fs.readFileSync(path.join(__dirname, '../src/routes/order.routes.js'), 'utf8');
   const svc = fs.readFileSync(path.join(__dirname, '../src/services/sharedPatch.service.js'), 'utf8');
-  // 결정 391 — 같은 응답에 R1 표시(tiers)가 더해졌다. 의미 불변: 기존 계약(bidir_v1·keep_names)과 manager capability 를 함께 준다.
+  // 결정 392 — 같은 응답에 R1 표시(tiers)가 더해졌다. 의미 불변: 기존 계약(bidir_v1·keep_names)과 manager capability 를 함께 준다.
   assert.ok(/capabilities: \{ bidir_v1: true, keep_names: true, manager: managerCapable, tiers: true \}/.test(routes), '수정 기준 응답은 기존 계약과 manager capability를 함께 제공');
   assert.ok(/nameMap: _bidirNameMap\(bid\)/.test(routes), '저장 경로가 짝을 넘긴다');
   assert.ok(/svc\.alignIntranetNames\(rows\[0\]\.state, _sourceSharedMine\(/.test(routes), '관찰 경로도 같은 함수로 되돌린 뒤 판정');

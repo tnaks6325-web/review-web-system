@@ -1,6 +1,6 @@
 'use strict';
 /**
- * R1(같은 오더에서 구매수량 단계 고치기 · 결정 391) 시험 고정구 — 저장소 migrations 를 전부 깐 DB 위에서
+ * R1(같은 오더에서 구매수량 단계 고치기 · 결정 392) 시험 고정구 — 저장소 migrations 를 전부 깐 DB 위에서
  * 실제 앱(인트라넷 원본 수정 PUT · /shared)과 실제 공유 저장(applySharedPatch)을 돌린다.
  *
  *   PGlite(연결 1개 · 기본 검사) 와 네이티브 PostgreSQL(동시성 · 선택 실행) 둘 다 같은 고정구를 쓴다.

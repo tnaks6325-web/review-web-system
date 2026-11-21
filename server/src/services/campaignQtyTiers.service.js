@@ -238,7 +238,7 @@ async function summaryForCampaign(db, campaignId) {
 }
 
 /**
- * ★ 결정 391 — 이 종류의 공고가 오더 단계를 복사·적용하나(단일 출처).
+ * ★ 결정 392 — 이 종류의 공고가 오더 단계를 복사·적용하나(단일 출처).
  *   발행 복사(campaign.routes /admin/create) · R1 판정(qtyTiersEdit) · R1 공고 반영(sharedPatch._projectQtyTiersInTx) · 보관 해제 비교(campaignArchive)가 같은 판정을 쓴다.
  *   블로그·Q&A 는 단계를 쓰지 않는다(결정 289 · Q1 ㉠). 스위치 꺼짐 = false.
  */
@@ -254,7 +254,7 @@ function optionsFromRows(rows) {
 }
 
 /**
- * ★ 결정 391(Q8 ㉠) — 공고 단계 표가 「지금 오더로 다시 만든 표」와 같은가. 짝을 못 지으면 false(fail-closed — 비교 못 함 = 다름).
+ * ★ 결정 392(Q8 ㉠) — 공고 단계 표가 「지금 오더로 다시 만든 표」와 같은가. 짝을 못 지으면 false(fail-closed — 비교 못 함 = 다름).
  *   비교 칸 = 상품 이름 · 옵션 줄 · 개수 · 인원 · 1인 금액 · 구매 방법(sort_order 는 뺀다 — 순서 흔들림 무시).
  */
 async function tableMatchesOrder(db, campaignId, productOptionsJson) {

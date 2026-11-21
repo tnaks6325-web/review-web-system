@@ -102,7 +102,7 @@ t('편집 로드는 저장된 값을 그대로 둔다(qna 보존)', /_wk\.value 
 /* ── 5) 구매가 없는 작업에 붙지 않아야 하는 것 ─────────────────── */
 console.log('\n5) 구매 전제 기능 제외');
 const cr = S('src/routes/campaign.routes.js').split(String.fromCharCode(0)).join('');
-// 결정 391 — 복사 조건은 단일 출처 copiesFor(발행·R1·보관 해제). 의미 불변: 블로그·Q&A 는 복사하지 않는다.
+// 결정 392 — 복사 조건은 단일 출처 copiesFor(발행·R1·보관 해제). 의미 불변: 블로그·Q&A 는 복사하지 않는다.
 const qtSrc = S('src/services/campaignQtyTiers.service.js');
 const qtSvc = require('../src/services/campaignQtyTiers.service');
 t('인당 구매수량 단계 복사 제외', /if \(campaignQtyTiers\.copiesFor\(work_kind\)\)/.test(cr)

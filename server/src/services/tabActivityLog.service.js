@@ -312,7 +312,7 @@ const SOURCES = [
         round_add: '차수 추가', round_remove: '차수 제거',
         worktable_rebuild: '작업표 재구성', participant_delete_replenish: '행 삭제 보충',
         shortage_decision: '어제 부족 인원 처리',
-        qty_tiers_changed: '구매수량 단계 변경(인트라넷)',   // 결정 391
+        qty_tiers_changed: '구매수량 단계 변경(인트라넷)',   // 결정 392
       };
       const items = rows.map(r => {
         const d = (r.detail && typeof r.detail === 'object') ? r.detail : {};

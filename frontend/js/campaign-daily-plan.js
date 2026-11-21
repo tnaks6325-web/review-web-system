@@ -2371,7 +2371,7 @@
       return '빈 자리 옮김: ' + (d.moves || []).map(function (m) { return fmtMD(m.from) + ' → ' + fmtMD(m.to) + ' ' + (m.n | 0) + '개'; }).join(', ');
     }
     if (ev.action === 'qna_finish') return '그대로 끝내기: 못 채운 자리 ' + (d.lapsed || 0) + '개를 닫고 공고를 마감했습니다';
-    if (ev.action === 'qty_tiers_changed') {   // 결정 391 — 인트라넷 리뷰오더에서 구매수량 단계 고침(신청 0일 때만)
+    if (ev.action === 'qty_tiers_changed') {   // 결정 392 — 인트라넷 리뷰오더에서 구매수량 단계 고침(신청 0일 때만)
       return '구매수량 단계 변경(인트라넷): ' + (d.after || []).map(function (x) { return (x.option ? x.option + ' ' : '') + x.qty + '개 ' + x.people + '명'; }).join(' · ')
         + (d.total_before != null && d.total_after != null && d.total_before !== d.total_after ? ' (총 ' + d.total_before + '→' + d.total_after + '명)' : '')
         + (!(d.after || []).length ? '모두 뺌(모두 1개 구매)' : '');

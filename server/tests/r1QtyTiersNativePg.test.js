@@ -1,6 +1,6 @@
 'use strict';
 /**
- * r1QtyTiersNativePg.test.js — 결정 391(R1) 동시성 · **실제 PostgreSQL**(연결 여러 개 · 잠금 대기를 pg_blocking_pids 로 확인).
+ * r1QtyTiersNativePg.test.js — 결정 392(R1) 동시성 · **실제 PostgreSQL**(연결 여러 개 · 잠금 대기를 pg_blocking_pids 로 확인).
  *   선택 실행: R1_NATIVE_PG_TEST=1 (initdb 로 새 클러스터를 만들고 끝나면 지운다 — tests/helpers/captureNativePgFixture.js).
  *
  *   A1 R1 이 공고 행을 잡은 동안 리뷰어 신청 → 신청은 기다렸다가 R1 커밋 뒤 「새 단계」로 판정된다

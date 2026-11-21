@@ -128,7 +128,7 @@ const quietMemo = async (fn) => {
   });
   await ok('판정 실패 = 못 바꿈(fail-closed) · 수정 창 판정을 공유 조회 응답에 싣는다', () => {
     assert.ok(/reasons: \['check_failed'\]/.test(src));
-    // 결정 391 — R1 판정과 나란히(Promise.all) 계산해 싣는다. 의미 불변: 종류 판정은 상한 없이 그 오더 행으로 · 응답 칸 kind_change.
+    // 결정 392 — R1 판정과 나란히(Promise.all) 계산해 싣는다. 의미 불변: 종류 판정은 상한 없이 그 오더 행으로 · 응답 칸 kind_change.
     assert.ok(/const \[kindChange, qtyTiersEdit\] = await Promise\.all\(\[\n\s*kindChangeVerdict\(rows\[0\]\),/.test(src));
     assert.ok(/kind_change: kindChange,/.test(src));
     assert.ok(!/withDeadline\(kindChangeVerdict/.test(src), '종류 판정에 상한을 씌우지 않는다');
