@@ -7708,7 +7708,11 @@ async function confirmSaveInlineSubAccount() {
     const res = await gasPost({ action: "saveSubAccounts", name: myName, phone8: myPhone8,
       subAccounts: JSON.stringify(subs), baseSubAccounts: JSON.stringify(base) });
     if (res?.ok) {
-      showToast(editIdx >= 0 ? "타계정이 수정되었습니다." : "타계정이 추가되었습니다.");
+      // 결정 226·388 — 본계정으로 합친 칸을 다시 넣으려 했으면 서버가 저장하지 않고 알려 준다(종전엔 「추가되었습니다」로 덮였다).
+      const _folded = Number(res.foldedSkipped) > 0;
+      const _why = res.message || "본계정과 같은 번호의 타계정은 본계정으로 합쳐져 있어 다시 저장하지 않았어요.";
+      showToast(!_folded ? (editIdx >= 0 ? "타계정이 수정되었습니다." : "타계정이 추가되었습니다.")
+        : (editIdx >= 0 ? "타계정이 수정되었습니다. " + _why : _why), _folded ? "warning" : undefined);
       _afterSubAccountsSaved(Array.isArray(res.subAccounts) ? res.subAccounts : subs);
       cancelInlineSubForm();
       // 모달 쪽도 동기화 (열려있으면)
