@@ -3697,6 +3697,17 @@ function _rfApplyOrderLink(info, linked) {
   _renderStartDateBasisNote();
 }
 
+/** ★ 결정 389 — 공고 수정 창 「리뷰오더 고유 항목」 머리의 「원본 오더 삭제됨」(카드와 같은 조각 CampCards.sourceOrderDeletedHtml — 문구 사본 0).
+ *  sod = 상세 응답의 sourceOrderDeleted({ deletedAt } · 서버가 직원 응답에만 싣는다). 없음(옛 서버·조회 실패·해당 없음) = 비우고 숨긴다. */
+function _rfApplySourceOrderDeleted(sod, archivedAt) {
+  const el = document.getElementById("rf_order_deleted");
+  if (!el) return;
+  const html = (sod && window.CampCards && typeof window.CampCards.sourceOrderDeletedHtml === "function")
+    ? window.CampCards.sourceOrderDeletedHtml(sod, { archived: !!archivedAt }) : "";
+  el.innerHTML = html;
+  el.hidden = !html;
+}
+
 /** 결정 279 — 시작일 옆 한 줄: 누가 정한 날인가(사람 · 아직 안 정함 → 첫 참여일로 맞춤 · 첫 참여일로 맞춤). 값은 바꾸지 않는다. */
 function _renderStartDateBasisNote() {
   const sRow = document.getElementById("rf_start_date_row");
@@ -3962,6 +3973,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   window._rfUnitInflowOk = true;   // ★ 결정 333 — 상품 카드 유입 선택을 보여도 되나(새 공고 = 예 · 수정 창 = 서버가 알려 줄 때만)
   _rfApplyFeeLinkLock();        // ★ 5단계: 지난 공고의 보기 전용 잠금을 푼다
   _rfApplyOrderLink(null, false);   // 시안 3차: 지난 공고의 연결 표시·시작일 잠금을 지운다
+  _rfApplySourceOrderDeleted(null, null);   // 결정 389: 지난 공고의 「원본 오더 삭제됨」 표시가 새 공고·다른 공고에 남지 않게
   window._rfOrderProductUrls = {};   // 결정 277: 연결 리뷰오더의 상품 메인 주소(보기용) — 새 공고·다른 공고에 남지 않게
   window._rfLiveLedger = false;
   window._rfForcedNone = false;
@@ -4131,6 +4143,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
       if (typeof renderFeeRows === "function") renderFeeRows(json.feeSchedules || []);
       _rfApplyFeeLinkLock();   // ★ 5단계: 리뷰오더와 맞춰지는 공고면 기간표 보기 전용
       _rfApplyOrderLink(json && json.orderInfo || null, !!window._rfBidirBase);   // 시안 3차: 고유 항목·연결 표시줄
+      _rfApplySourceOrderDeleted(json && json.sourceOrderDeleted || null, c.archived_at || null);   // 결정 389: 원본 오더가 지워진 공고(직원 응답에만 오는 칸)
       window._rfOrderProductUrls = (json && json.orderInfo && json.orderInfo.productUrls && typeof json.orderInfo.productUrls === "object") ? json.orderInfo.productUrls : {};
       // The compact editor intentionally does not render the legacy public-note
       // textarea.  Treat it as an optional compatibility field so an older

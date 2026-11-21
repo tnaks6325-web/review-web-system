@@ -391,6 +391,19 @@
    *  모집중(시간창 안)은 썸네일 중앙 "오늘 구매마감까지" 카운트다운(cutoffAt), 오픈전은 "오픈까지"(opensAt). */
   /** ★ 결정 259: 공고 전체 품절 멈춤 — 공개 목록은 soldoutPaused(서버 스위치 반영), 관리자 목록은 원본 칸. */
   function _soldoutPaused(c) { return !!(c && (c.soldoutPaused === true || c.soldout_paused_at)); }
+  /** ★ 결정 389 — 「원본 오더 삭제됨」 한 줄(관리자 카드 · 공고 수정 창이 같은 조각을 쓴다 — 문구 사본 0).
+   *  모양·글자 = 홈 작업 목록의 같은 표시(workdesk 상태 칸 · 결정 254): 빨간 굵은 작은 글자, 배경 없음.
+   *  값(sod) = 서버가 **직원 응답에만** 싣는 { deletedAt } — 지운 직원 이름은 오지도 않고 그리지도 않는다.
+   *  값이 없으면 '' (옛 서버·조회 실패·해당 없음 = 아무것도 그리지 않는다). */
+  function _sourceOrderDeletedHtml(sod, o) {
+    if (!sod) return '';
+    const d = sod.deletedAt ? new Date(sod.deletedAt) : null;
+    const at = d && !isNaN(d) ? `${d.getMonth() + 1}/${d.getDate()}` : '';
+    const archived = !!(o && o.archived);
+    const tip = `이 공고의 원본 오더가 삭제됐습니다${at ? '(' + at + ')' : ''}. 인트라넷에서 오더를 고쳐도 더 이상 이 공고에 반영되지 않습니다`
+      + (archived ? '.' : ' — 공고는 보관하기 전까지 그대로 남으니, 필요 없으면 카드 [⋯] → [📦 보관]으로 내리세요.');
+    return `<span class="pt-sod" style="display:inline-block;font-size:10.5px;color:var(--bad,#b91c1c);font-weight:700" title="${_esc(tip)}">원본 오더 삭제됨</span>`;
+  }
   function _pauseChip(c) {
     if (!_soldoutPaused(c)) return '';
     return `<div class="ppausechip" style="font-size:.68rem;font-weight:700;color:#B45309;background:#FEF3C7;border-radius:7px;padding:4px 8px;margin-top:6px;display:inline-block">품절로 잠시 멈춤</div>`;
@@ -944,6 +957,8 @@
       const delOvl = delMode
         ? `<div class="pdelpick" onclick="event.stopPropagation();toggleRecruitDelPick('${_esc(c.id)}')"><span class="box">✓</span></div>`
         : '';
+      // ★ 결정 389: 원본 오더가 지워진 공고 — 제목 바로 아래 한 줄(값이 없으면 한 글자도 그리지 않는다 · 관리자 카드에서만)
+      const sodHtml = _sourceOrderDeletedHtml(c.sourceOrderDeleted, { archived: !!c.archived_at });
       // 임시저장은 '종료'가 아니라 작업 중인 공고 — 흑백 처리하면 리본·미연결 경고가 안 읽혀 제외한다.
       return `
       <article class="pcard${isClosed && !isDraft ? ' is-closed' : ''}${isDaily ? ' is-dim' : ''}${isDraft ? ' pc-draft' : ''}${delMode ? ' pc-del' : ''}${picked ? ' pc-picked' : ''}"
@@ -951,7 +966,8 @@
         ${delOvl}
         <div class="pthumb">${thumbInner}${overlay}${badges}${topleft}</div>
         <div class="pbody">
-          <h3 class="ptitle">${_esc(c.title || '(제목 없음)')}</h3>
+          <h3 class="ptitle">${_esc(c.title || '(제목 없음)')}</h3>${sodHtml ? `
+          <div class="pt-sodrow" style="margin:-2px 0 4px;line-height:1.3">${sodHtml}</div>` : ''}
           <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">${isBlogCard ? '승인제' : '바로참여'}</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>
           ${_pauseChip(c)}
           ${gauge}
@@ -1573,5 +1589,5 @@
     });
   }
 
-  window.CampCards = { renderInto, cardHtml, seedThumbs, gridHtml, _more, _closeMenu, toggleArchive, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePopular, openManualOrder, openWorkdesk, sortByAvailability, qnaFirst, initChipMarquee: _initChipMarquee, needsFieldCleanup: _campNeedsFieldCleanup, _caeCarry };
+  window.CampCards = { renderInto, cardHtml, sourceOrderDeletedHtml: _sourceOrderDeletedHtml, seedThumbs, gridHtml, _more, _closeMenu, toggleArchive, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePopular, openManualOrder, openWorkdesk, sortByAvailability, qnaFirst, initChipMarquee: _initChipMarquee, needsFieldCleanup: _campNeedsFieldCleanup, _caeCarry };
 })();

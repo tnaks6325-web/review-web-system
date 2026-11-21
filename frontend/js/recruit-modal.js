@@ -451,7 +451,7 @@
                  ★ 칸의 화면 뒤 이름(id)·동작은 그대로다(프리필·저장·잠금이 그 이름으로 묶여 있다). 옮긴 것은 줄의 자리뿐. -->
             <div id="rf_kind_tabs" class="rf-kind-tabs" role="group" aria-label="체험단 종류(리뷰오더에서 정함)"><span data-kind="review" class="on">리뷰체험단</span><span data-kind="blog">블로그체험단</span><span data-kind="qna">Q&amp;A체험단</span></div>
             <section class="section rf-order-own" data-sec="order">
-              <div class="section-heading"><div><h3>리뷰오더 고유 항목</h3><span class="section-hint" id="rf_order_own_hint">리뷰오더에서 정한 값 · 연결된 공고에서는 보기 전용</span></div></div>
+              <div class="section-heading"><div><h3>리뷰오더 고유 항목</h3><span class="section-hint" id="rf_order_own_hint">리뷰오더에서 정한 값 · 연결된 공고에서는 보기 전용</span><span id="rf_order_deleted" class="rf-order-deleted" hidden></span></div></div>
               <div class="row-form">
                 <div class="form-row" id="rf_start_date_row"><span class="form-label">모집 시작일 <em class="required">*</em></span><div class="form-control"><div id="rf_start_date_control" class="date-control"><input id="rf_start_date" type="date" onchange="onRecruitDatesChange()" tabindex="-1"><button id="rf_start_date_trigger" type="button" aria-haspopup="dialog" aria-expanded="false" onclick="rfToggleStartDateCalendar(event)"><span id="rf_start_date_text">날짜 선택</span><span id="rf_start_day">날짜 변경</span><i class="fas fa-calendar-alt" aria-hidden="true"></i></button><div id="rf_start_calendar" class="rf-start-calendar" role="dialog" aria-label="모집 시작일 선택" hidden></div></div></div></div>
                 <div class="form-row" id="rf_order_manager_row" hidden><span class="form-label">리뷰오더 담당자</span><div class="form-control"><strong id="rf_order_manager"></strong><span class="tag">보기 전용</span></div></div>
@@ -1034,6 +1034,7 @@
 #recruitModal .rf-compact-main .section-heading{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px}
 #recruitModal .rf-compact-main .section-heading h3{margin:0;color:#172033;font-size:14px;letter-spacing:-.025em}
 #recruitModal .section-hint{color:#7F8A9B;font-size:10px}.section-count{color:#2563C8;font-size:10px;font-weight:850}
+#recruitModal .rf-order-deleted{margin-left:8px}
 /* 공고 창 시안 3차(결정 275) — 체험단 종류 탭 · 리뷰오더 고유 항목 · 리뷰오더와 맞춰지는 항목(파란 상자 · 양방향) · 리뷰웹에서만 정하는 값 */
 #recruitModal .rf-compact-main .rf-kind-tabs{display:grid;grid-template-columns:1fr 1fr;margin-top:14px;border:1px solid #DCE3EC;border-radius:8px;overflow:hidden}
 #recruitModal .rf-compact-main .rf-kind-tabs span{padding:8px;text-align:center;font-size:12px;font-weight:850;color:#617087;background:#fff}
