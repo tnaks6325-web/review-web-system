@@ -60,9 +60,10 @@ async function boot({ pool }) {
   const { projectOrderToCampaign } = require('../../src/utils/orderToCampaignProjection');
   const { _woCampaignPrefill, _woProductMode } = require('../../src/utils/woCampaignPrefill.generated');
   const srv = app.listen(0);
+  srv.keepAliveTimeout = 120000;   // 고정구 만들기가 수 초 걸린다 — 재사용 연결이 그 사이 끊겨 ECONNRESET 이 나지 않게
   const port = srv.address().port;
   const call = async (method, p, body, headers = {}) => {
-    const r = await fetch(`http://127.0.0.1:${port}${p}`, { method, headers: { 'content-type': 'application/json', 'x-intake-key': 'test-intake', ...headers }, body: body ? JSON.stringify(body) : undefined });
+    const r = await fetch(`http://127.0.0.1:${port}${p}`, { method, headers: { 'content-type': 'application/json', 'x-intake-key': 'test-intake', connection: 'close', ...headers }, body: body ? JSON.stringify(body) : undefined });
     return { status: r.status, body: await r.json() };
   };
   const setSwitch = async (v) => {
@@ -99,12 +100,12 @@ async function boot({ pool }) {
     await pool.query(
       `INSERT INTO recruit_campaigns (id, title, source_work_order_id, recruit_total, review_fee, time_range, window_start, window_end,
          delivery_type, review_type, work_kind, skip_weekends, channel, channel_custom, landing_url, thumbnail_url, daily_limit, participation_mode, status, work_detail,
-         linked_sheet_id, linked_tab_name, published_at)
-       VALUES ($1, '가짜 공고', $2, $3, $4, $5, '13:00', '18:00', $6, $7, $8, $9, $10, '', $11, $12, $13, TRUE, 'active', $14::jsonb, $15, $16, NOW())`,
+         linked_sheet_id, linked_tab_name, published_at, review_type_mix)
+       VALUES ($1, '가짜 공고', $2, $3, $4, $5, '13:00', '18:00', $6, $7, $8, $9, $10, '', $11, $12, $13, TRUE, 'active', $14::jsonb, $15, $16, NOW(), $17::jsonb)`,
       [camp, w.id, Number(proj.recruit_total), Number(proj.review_fee), pre.time_range, proj.delivery_type, proj.review_type, workKind,
         proj.skip_weekends === '1', proj.channel, proj.landing_url, proj.thumbnail_url, Number(proj.daily_limit) || 1,
         JSON.stringify({ inflowType: 'link', reviewGuide: pre.wd_review, specialNotes: pre.wd_notes, reviewGuideImages: [], specialNotesImages: [], productLines: pre.wd_product, payAmount: 12000 }),
-        linkTab ? sheet : null, linkTab ? tab : null]);
+        linkTab ? sheet : null, linkTab ? tab : null, JSON.stringify(Array.isArray(pre.review_type_mix) ? pre.review_type_mix : [])]);
     const optRows = [];
     let so = 0;
     for (const o of (_woProductMode(JSON.parse(JSON.stringify(w))) === 'opt' ? proj.options : [])) {
@@ -135,7 +136,7 @@ async function boot({ pool }) {
     const events = async () => (await pool.query(`SELECT action, actor, detail FROM campaign_plan_events WHERE campaign_id = $1 ORDER BY id`, [camp])).rows;
     /** 지금 상태 지문 — 거절 때 「아무것도 안 바뀜」을 한 줄로 비교한다. */
     const snapshot = async () => {
-      const x = await wo(); const c = await cRow();
+      const x = await wo(); const c = (await cRow()) || {};
       return JSON.stringify({ src: Number(x.source_revision), ver: String(x.sync_version), poj: x.product_options_json, pay: Number(x.pay_amount), rc: Number(x.recruit_count), dc: Number(x.daily_count),
         crt: Number(c.recruit_total), cdl: Number(c.daily_limit), opts: await opts(), tiers: await tiers(), rows: await rows(), ev: (await events()).length,
         snaps: Number((await pool.query('SELECT COUNT(*)::int n FROM work_order_shared_snapshots WHERE work_order_id=$1', [x.id])).rows[0].n) });

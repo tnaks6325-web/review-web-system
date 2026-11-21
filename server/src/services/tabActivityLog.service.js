@@ -312,6 +312,7 @@ const SOURCES = [
         round_add: '차수 추가', round_remove: '차수 제거',
         worktable_rebuild: '작업표 재구성', participant_delete_replenish: '행 삭제 보충',
         shortage_decision: '어제 부족 인원 처리',
+        qty_tiers_changed: '구매수량 단계 변경(인트라넷)',   // 결정 391
       };
       const items = rows.map(r => {
         const d = (r.detail && typeof r.detail === 'object') ? r.detail : {};
@@ -319,7 +320,9 @@ const SOURCES = [
         return {
           id: `cpe:${r.id}`,
           at: r.at, kind: 'quota',
-          message: r.action === 'shortage_decision'
+          message: r.action === 'qty_tiers_changed'
+            ? `${lab[r.action]} — ${(Array.isArray(d.after) ? d.after : []).map(x => `${x.option ? `${x.option} ` : ''}${_num(x.qty) || 0}개 ${_num(x.people) || 0}명`).join(' · ') || '모두 뺌(모두 1개 구매)'}${d.total_before != null && d.total_after != null && _num(d.total_before) !== _num(d.total_after) ? ` (총 ${_num(d.total_before)}→${_num(d.total_after)}명)` : ''}`
+            : r.action === 'shortage_decision'
             ? `${lab[r.action]} — ${d.choice === 'today' ? `오늘 모집에 ${_num(d.amount) || 0}명 더함` : '기간을 늘려 뒤에 붙임(이후 묻지 않음)'}${d.date ? ` (${d.date} 부족 ${_num(d.shortage) || 0}명)` : ''}`
             : `${lab[r.action] || r.action}${n ? ` — ${n}일치` : ''}${_num(d.amount) != null ? ` ${d.amount}명` : ''}`,
           who: _clip(r.actor, 40) || '담당자',
