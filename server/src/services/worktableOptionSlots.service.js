@@ -63,27 +63,37 @@ const TAB_LEVEL_TABLES = {
   tab_configs: '탭 등록행', orphan_capture_tombstones: '줄 좌표 없음(캡처 파일 묘비)', workboard_consolidation_link_events: '탭 단위 통폐합 기록', workboard_consolidation_targets: '탭 단위 통폐합 상태',
 };
 
-/* ── 안내 문구(인트라넷 저장 결과 알림 · 시안 「안 가」) — 「없습니다·실패·초과·불가·오류」 낱말 금지(알림 색이 낱말로 정해진다 · 가드) ── */
+/* ── 안내 문구(인트라넷 저장 결과 알림 · 시안 「안 가」) — 「없습니다·실패·초과·불가·오류」 낱말 금지(알림 색이 낱말로 정해진다 · 가드)
+ *   말투는 합니다체 하나(「~어요」 섞임 금지) · 옵션 이름 뒤 조사는 utils/koreanParticle(받침·숫자·대문자 약자 · 모르면 「<이름> 옵션은」).
+ *   시안의 「짝지을 수 없습니다」「붙일 수 없습니다」는 금지 낱말 「없습니다」를 품어 「짝짓지 못했습니다」「붙이지 못했습니다」로 쓴다. ── */
+const { withTopic } = require('../utils/koreanParticle');
 const NOTICE_HEAD = '작업보드 빈 줄의 옵션 표시는 그대로입니다 — ';
 const NOTICE_TAIL = ' 필요하면 리뷰웹 작업보드에서 직접 고쳐주세요.';
 const REASON_TEXT = {
-  shared_worktable: () => '같은 작업보드를 쓰는 모집공고가 여럿이에요.',
-  filled_unattributed: () => '이미 채운 줄 가운데 어느 옵션 몫인지 정해지지 않은 줄이 있어요.',
-  label_unmatched: () => '줄 표시 가운데 새 옵션과 짝이 정해지지 않는 줄이 있어요.',
-  label_ambiguous: () => '한 줄의 표시가 여러 옵션에 걸려 하나로 정해지지 않아요.',
-  over_target: d => (d && d.option ? `「${d.option}」은 이미 채우거나 손댄 줄(${d.fixed}줄)이 새 인원(${d.target}명)보다 많아요.` : '이미 채우거나 손댄 줄이 새 인원보다 많은 옵션이 있어요.'),
-  total_mismatch: d => (d ? `작업보드 줄 수(${d.rows}줄)와 옵션별 인원 합(${d.sum}명)이 달라요.` : '작업보드 줄 수와 옵션별 인원 합이 달라요.'),
-  row_cells_unknown: () => '옮길 줄의 상품·옵션 칸에 다른 값이 적혀 있어요.',
-  busy: () => '작업보드가 다른 저장을 처리하는 중이었어요.',
+  shared_worktable: () => '이 작업보드를 여러 모집공고가 함께 쓰고 있습니다.',
+  filled_unattributed: () => '이미 채운 줄 가운데 어느 옵션 몫인지 정해지지 않은 줄이 있습니다.',
+  label_unmatched: () => '줄 표시를 새 옵션과 짝짓지 못했습니다.',
+  label_ambiguous: () => '한 줄의 표시가 여러 옵션에 걸려 어느 옵션인지 정하지 못했습니다.',
+  over_target: d => {
+    const who = d && withTopic(d.option);
+    return who ? `${who} 이미 채우거나 손댄 줄(${d.fixed}줄)이 새 인원(${d.target}명)보다 많습니다.` : '이미 채우거나 손댄 줄이 새 인원보다 많은 옵션이 있습니다.';
+  },
+  total_mismatch: d => (d ? `작업보드 줄 수(${d.rows}줄)와 옵션별 인원 합(${d.sum}명)이 다릅니다.` : '작업보드 줄 수와 옵션별 인원 합이 다릅니다.'),
+  row_cells_unknown: () => '옮길 줄의 상품·옵션 칸에 다른 값이 적혀 있습니다.',
+  busy: () => '그때 작업보드가 다른 저장을 처리하는 중이었습니다.',
 };
-const MIX_TEXT = '리뷰타입을 섞어 쓰는 작업이라 모든 빈 줄에 표시가 있어야 하는데, 일부 빈 줄은 표시를 붙이지 못해요.';
-const CHECK_FAILED_TEXT = '작업보드 빈 줄의 옵션 표시를 맞췄는지 확인하지 못했어요 — 리뷰웹 작업보드에서 한 번 봐 주세요.';
+/* busy 다음 행동 — 「다시 저장」이 아니다: 다시 나누기는 옵션별 인원이 바뀐 저장에서만 돌아(sharedPatch rebalanceWanted)
+   같은 인원으로 다시 저장해도 안 돈다(막다른 길). 잠시 뒤 작업보드를 보고 직접 고치게 한다. */
+const TAIL_FOR = { busy: ' 잠시 뒤 리뷰웹 작업보드에서 확인하고 필요하면 직접 고쳐주세요.' };
+const MIX_TEXT = '리뷰타입을 섞어 쓰는 작업이라 일부 빈 줄에 표시를 붙이지 못했습니다.';
+/* 인트라넷 일반 문구(리뷰웹 답이 불분명할 때 · 인트라넷 api.ts reviewOrderOptionSlotsView 의 fallback)와 같은 뜻 = 같은 글자 */
+const CHECK_FAILED_TEXT = '작업보드 빈 줄의 옵션 표시를 맞췄는지 확인하지 못했습니다 — 리뷰웹 작업보드에서 한 번 봐 주세요.';
 function noticeFor(reason, detail, { reviewMix = false } = {}) {
   if (reason === 'check_failed') return CHECK_FAILED_TEXT;
   const f = REASON_TEXT[reason];
   if (!f) return CHECK_FAILED_TEXT;
   const why = reviewMix && ['label_unmatched', 'row_cells_unknown', 'label_ambiguous'].includes(reason) ? MIX_TEXT : f(detail);
-  return NOTICE_HEAD + why + NOTICE_TAIL;
+  return NOTICE_HEAD + why + (TAIL_FOR[reason] || NOTICE_TAIL);
 }
 
 const _t = v => String(v == null ? '' : v).trim();

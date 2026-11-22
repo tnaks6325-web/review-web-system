@@ -40,10 +40,46 @@ const ok = async (name, fn) => { try { await fn(); passed++; console.log('  ✓ 
     for (const r of reasons) for (const mix of [false, true]) {
       const t = S.noticeFor(r, { option: '피치', fixed: 70, target: 60, rows: 10, sum: 12 }, { reviewMix: mix });
       assert.ok(t && t.length > 20, r); assert.doesNotMatch(t, BANNED, `${r}: ${t}`);
-      if (r !== 'check_failed') { assert.match(t, /^작업보드 빈 줄의 옵션 표시는 그대로입니다 — /); assert.match(t, /필요하면 리뷰웹 작업보드에서 직접 고쳐주세요\.$/); }
+      if (r !== 'check_failed') { assert.match(t, /^작업보드 빈 줄의 옵션 표시는 그대로입니다 — /); assert.match(t, /리뷰웹 작업보드에서 (직접 고쳐주세요|확인하고 필요하면 직접 고쳐주세요)\.$/); }
+      // 말투 하나(합니다체) — 마디마다 「…니다」 또는 「…주세요」로 끝난다(「~어요」 섞임 금지 · 인트라넷 시안 「안 가」)
+      for (const part of t.split(/ — |(?<=\.) /)) assert.match(part, /(니다|주세요)\.?$/, `${r}: 말투 「${part}」`);
     }
-    assert.match(S.noticeFor('over_target', { option: '피치', fixed: 70, target: 60 }), /「피치」은 이미 채우거나 손댄 줄\(70줄\)이 새 인원\(60명\)보다 많아요/);
+    assert.match(S.noticeFor('over_target', { option: '피치', fixed: 70, target: 60 }), /피치는 이미 채우거나 손댄 줄\(70줄\)이 새 인원\(60명\)보다 많습니다/);
     assert.doesNotMatch(S.noticeFor('unknown_code'), BANNED, '모르는 사유 = 확인 못 함 문구');
+    assert.equal(S.noticeFor('unknown_code'), S.noticeFor('check_failed'), '모르는 사유 = 확인 못 함 문구');
+  });
+
+  await ok('②-2 안내 문구 원문 = 승인 시안 「안 가」(이유 9가지 + 리뷰타입 섞어 쓰기) · 조사 은/는', async () => {
+    const H = '작업보드 빈 줄의 옵션 표시는 그대로입니다 — ', T = ' 필요하면 리뷰웹 작업보드에서 직접 고쳐주세요.';
+    const want = {
+      shared_worktable: H + '이 작업보드를 여러 모집공고가 함께 쓰고 있습니다.' + T,
+      filled_unattributed: H + '이미 채운 줄 가운데 어느 옵션 몫인지 정해지지 않은 줄이 있습니다.' + T,
+      label_unmatched: H + '줄 표시를 새 옵션과 짝짓지 못했습니다.' + T,
+      label_ambiguous: H + '한 줄의 표시가 여러 옵션에 걸려 어느 옵션인지 정하지 못했습니다.' + T,
+      over_target: H + '피치는 이미 채우거나 손댄 줄(70줄)이 새 인원(60명)보다 많습니다.' + T,
+      total_mismatch: H + '작업보드 줄 수(10줄)와 옵션별 인원 합(12명)이 다릅니다.' + T,
+      row_cells_unknown: H + '옮길 줄의 상품·옵션 칸에 다른 값이 적혀 있습니다.' + T,
+      busy: H + '그때 작업보드가 다른 저장을 처리하는 중이었습니다. 잠시 뒤 리뷰웹 작업보드에서 확인하고 필요하면 직접 고쳐주세요.',
+      check_failed: '작업보드 빈 줄의 옵션 표시를 맞췄는지 확인하지 못했습니다 — 리뷰웹 작업보드에서 한 번 봐 주세요.',
+    };
+    const d = { option: '피치', fixed: 70, target: 60, rows: 10, sum: 12 };
+    assert.deepEqual(Object.keys(want).filter(k => k !== 'check_failed').sort(), Object.keys(S.REASON_TEXT).sort(), '이유 코드 전수(새 코드가 생기면 문구를 여기 적는다)');
+    for (const [r, w] of Object.entries(want)) assert.equal(S.noticeFor(r, d), w, r);
+    // 인트라넷 일반 문구(리뷰웹 답이 불분명할 때)와 같은 뜻 = 같은 글자
+    assert.equal(S.noticeFor('check_failed'), '작업보드 빈 줄의 옵션 표시를 맞췄는지 확인하지 못했습니다 — 리뷰웹 작업보드에서 한 번 봐 주세요.');
+    const MIX = H + '리뷰타입을 섞어 쓰는 작업이라 일부 빈 줄에 표시를 붙이지 못했습니다.' + T;
+    for (const r of ['label_unmatched', 'row_cells_unknown', 'label_ambiguous']) assert.equal(S.noticeFor(r, d, { reviewMix: true }), MIX, r);
+    assert.equal(S.noticeFor('over_target', d, { reviewMix: true }), want.over_target, '섞어 쓰기 문구는 짝 갈래에만');
+    // 옵션 이름 뒤 조사 — 받침 · 숫자 · 대문자 약자 · 모르면 「옵션은」(틀린 조사를 지어내지 않는다)
+    const ot = name => S.noticeFor('over_target', { option: name, fixed: 3, target: 2 });
+    assert.match(ot('레몬'), /— 레몬은 이미/);
+    assert.match(ot('피치(대)'), /— 피치\(대\)는 이미/);
+    assert.match(ot('옵션1'), /— 옵션1은 이미/);
+    assert.match(ot('XL'), /— XL은 이미/);
+    assert.match(ot('S'), /— S는 이미/);
+    assert.match(ot('Red'), /— Red 옵션은 이미/);
+    assert.equal(S.noticeFor('over_target', null), H + '이미 채우거나 손댄 줄이 새 인원보다 많은 옵션이 있습니다.' + T);
+    assert.equal(S.noticeFor('total_mismatch', null), H + '작업보드 줄 수와 옵션별 인원 합이 다릅니다.' + T);
   });
 
   await ok('③ 짝 규칙 단일 출처 — 주문 줄 고르기·정원 셈·이름 바꾸기 함수를 꺼내 쓴다(새 규칙 0)', async () => {
