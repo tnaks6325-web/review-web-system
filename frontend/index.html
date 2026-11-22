@@ -2762,6 +2762,37 @@ function _reEditBtnHtml(item){
   return '<button class="re-edit-minibtn" onclick="event.stopPropagation();openReviewEditModal(\''+id+'\')"><i class="fas fa-images"></i> 수정요청</button>';
 }
 
+/* ★ 결정 393 — 휴대폰 키보드가 올라오면 아래에서 올라오는 창(.ovl: 수정요청·참여상품 정보·안내)을 「지금 보이는 영역」에 맞춘다.
+   키보드가 떠도 화면 틀 높이는 그대로라, 입력칸을 보이려고 화면이 위로 밀리면서 창 머리(제목·닫기)가 밖으로 사라졌다
+   (아이폰 사파리 실기: 수정요청 사유 칸 −90px). 1:1 문의 대화창(reviewer-cs.js, 결정 391)과 같은 방법.
+   키보드가 없으면(보이는 높이 = 창 높이) 넣어 둔 값을 지워 CSS 종전 모양으로 돌아간다. visualViewport 가 없으면 무동작. */
+function _rhFitOvlToVisible(){
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const squeezed = vv.height < window.innerHeight - 1 || vv.offsetTop > 0.5;
+  document.querySelectorAll('.ovl').forEach(o => {
+    const sheet = o.firstElementChild;
+    if (squeezed) {
+      o.style.top = Math.round(vv.offsetTop) + 'px'; o.style.bottom = 'auto'; o.style.height = Math.round(vv.height) + 'px';
+      if (sheet) sheet.style.maxHeight = Math.round(Math.min(vv.height, window.innerHeight * 0.88)) + 'px';
+      // 창이 줄면 누른 입력칸이 창 안 스크롤 아래로 숨을 수 있다 — 창 안에서만 보이게 올린다.
+      const ae = document.activeElement;
+      if (sheet && ae && ae !== document.body && sheet.contains(ae)) {
+        const a = ae.getBoundingClientRect(), b = sheet.getBoundingClientRect();
+        if (a.bottom > b.bottom - 8) sheet.scrollTop += a.bottom - b.bottom + 12;
+        else if (a.top < b.top + 48) sheet.scrollTop -= (b.top + 48) - a.top;
+      }
+    } else {
+      o.style.top = ''; o.style.bottom = ''; o.style.height = '';
+      if (sheet) sheet.style.maxHeight = '';
+    }
+  });
+}
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', _rhFitOvlToVisible);
+  window.visualViewport.addEventListener('scroll', _rhFitOvlToVisible);
+}
+
 function _reEditEnsureOverlay(){
   if (document.getElementById('reEditOvl')) return;
   const ovl = document.createElement('div');
@@ -2824,6 +2855,7 @@ async function openReviewEditModal(regId){
   _reEditCtx = { phone8, sheetId:item.sheetId, tabName:item.tabName, gid:item.gid, rowIndex:item.rowIndex, label:item.label };
   _reEditNewB64 = null; _reEditTargetOldId = null;
   _reEditEnsureOverlay();
+  _rhFitOvlToVisible();
   document.getElementById('reEditLabel').textContent = item.label || '';
   document.getElementById('reEditBody').innerHTML = '<div style="text-align:center;color:#98A0AC;padding:24px"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
   document.getElementById('reEditOvl').classList.add('on');
@@ -3075,6 +3107,7 @@ function openPartInfoSheet(items, opts){
   _partInfoCancelable = null;
   const briefSeq = ++_partInfoBriefSeq;
   _partInfoEnsure();
+  _rhFitOvlToVisible();
   const it = list[0];
   /* ★ 제출완료 건에는 취소 좌표를 만들지 않는다 — 버튼 자체가 뜨지 않아야 한다(사용자 확정 2026-08-23).
        서버도 `review_submitted` 로 거부하지만, 화면에서 먼저 없앤다. */
