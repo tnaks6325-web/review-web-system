@@ -1,5 +1,5 @@
 'use strict';
-// Standalone opt-in: node server/tests/imageBackupNativePg.cjs [concurrency|slow|native|expiry]
+// Standalone opt-in: node server/tests/imageBackupNativePg.cjs [concurrency|slow|native|expiry|moves|referenced]
 // Starts ONLY a fresh loopback PostgreSQL, never reads DATABASE_URL or Drive credentials.
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),net=require('node:net');
 const {execFileSync}=require('node:child_process');
@@ -133,6 +133,21 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
    assert.equal((await pool.query("SELECT state FROM image_backup_scan_entries WHERE entry_key=$1",['file:'+F2])).rows[0].state,'done');
    await pool.query("UPDATE image_backup_outbox SET status='done' WHERE job_key=$1",[e2.job_key]);const p=await scan.scanStep({scanId:started.id,budgetMs:60000,deps});assert.equal(p.cursor?.phase,'publishing');
    console.log('PASS real PG superseded mid-scan: only that file re-observed, others done, scan reaches publication');
+  }
+  if(mode==='all'||mode==='referenced'){
+   // 결정 368 참조 사진 gap sweep on actual PostgreSQL: index-backed anti-join (migration 226), bounded windows,
+   // each statement under the backup pool's 1s statement_timeout, idempotent across calls.
+   await reset();await pool.query(fs.readFileSync(path.join(__dirname,'../migrations/226_image_backup_outbox_file_idx.sql'),'utf8'));
+   for(const t of ['review_submissions(file_id text)','order_submissions(capture_file_id text,capture_file_id_2 text)','review_index(review_file_id text)','review_inspections(file_id text)','review_edit_requests(old_file_id text,new_file_id text)','purchase_capture_artifacts(file_id text)','purchase_capture_supplements(file_id text)','purchase_submission_sessions(capture_file_id text)','guide_image_files(file_id text PRIMARY KEY,source text)','review_photo_relinks(file_id text)','payment_result_drive_archive(drive_file_id text)'])await pool.query('CREATE TABLE IF NOT EXISTS '+t);
+   await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS uq_review_sub_file ON review_submissions(file_id)");
+   await pool.query("INSERT INTO review_submissions(file_id) SELECT 'refgap'||lpad(g::text,8,'0') FROM generate_series(1,60000) g");
+   await pool.query("INSERT INTO image_backup_outbox(job_key,file_id,observation) SELECT 'obs:'||g,'refgap'||lpad(g::text,8,'0'),'{}' FROM generate_series(1,59000) g");await pool.query('ANALYZE');
+   const plan=(await pool.query("EXPLAIN SELECT 1 FROM image_backup_outbox o WHERE o.file_id='refgap00000001'")).rows.map(r=>r['QUERY PLAN']).join(' ');assert.match(plan,/image_backup_outbox_file/,'anti-join probe uses the file_id index');
+   await pool.query("SET statement_timeout='1000ms'");let t0=Date.now();
+   let g=await scan.enqueueReferencedGaps({pool,limit:600,referenced:['mydrive_0123456789']});assert.equal(g.enqueued,600);assert.equal(g.failedSources,0);const first=Date.now()-t0;
+   g=await scan.enqueueReferencedGaps({pool,limit:5000,referenced:['mydrive_0123456789']});assert.equal(g.enqueued,400);g=await scan.enqueueReferencedGaps({pool,limit:5000,referenced:['mydrive_0123456789']});assert.equal(g.enqueued,0);
+   assert.equal((await pool.query("SELECT count(*)::int n FROM image_backup_outbox WHERE job_key LIKE 'ref:%'")).rows[0].n,1000);
+   console.log('PASS real PG referenced gap sweep: file_id index probe, 60k refs/59k existing → 600+400+0 bounded idempotent, statement_timeout 1s respected (first call '+first+'ms)');
   }
  }finally{
   if(a)await a.end().catch(()=>{});if(b)await b.end().catch(()=>{});if(pool)await pool.end().catch(()=>{});

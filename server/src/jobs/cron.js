@@ -665,8 +665,13 @@ function startCronJobs() {
     }), {timezone:'Asia/Seoul'});
     cron.schedule('30 3 * * *', () => guarded('nightly', async () => {
       const scan = require('../services/imageBackupScan.service');
-      const s = await scan.startScan();
-      await scan.scanStep({scanId:s.id,budgetMs:10000});
+      try {
+        const s = await scan.startScan();
+        await scan.scanStep({scanId:s.id,budgetMs:10000});
+      } finally {
+        // 결정 368 참조 사진: bounded, idempotent gap sweep (OFF while IMAGE_BACKUP_REFERENCED_ROOT_IDS is empty).
+        await scan.enqueueReferencedGaps({limit:300});
+      }
     }), {timezone:'Asia/Seoul'});
   }
 
