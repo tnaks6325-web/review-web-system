@@ -53,6 +53,9 @@ const ok = async (name, fn) => { try { await fn(); passed++; console.log('  ✓ 
     assert.match(src, /String\(s\.ot\) === o\.opt_key/, '옵션 단위 = 주문 SQL 과 같은 원문 일치(cp.option_text = $4)');
     assert.match(src, /matchOrderOption\(opts, \{ selectedOptKey: r\.selected_opt_key, optionText: r\.option_text, selectedProduct: r\.selected_product,\s*rowProduct: r\.row_product, editedProduct: r\.edited_product, submittedAt: r\.submitted_at \}\)/, '채운 줄 = 정원 셈과 같은 함수·같은 입력');
     assert.match(src, /relabelRowCells\(s\.rj,/, '칸 규칙 = 이름 바꾸기와 같은 함수');
+    assert.match(src, /stagedComponentColumns\(heads\)/, 'v2 부품 칸 위치 = 칸 규칙과 같은 함수(리뷰 P1)');
+    assert.ok(!/1차\|1st/.test(src), '부품 칸 열 이름 규칙 사본 0(campaignOptionRename.stagedComponentColumns 하나)');
+    assert.match(src, /const lab = s => \(isProd\(o\) \? planP\(s\.r, s\.ot, s\.rj\) : _t\(s\.ot\)\);/, '새 표시 고르기 = 주문 쪽 planOf 순서(상품 단위 · 리뷰 P2)');
     const so = read('src/services/sheetlessOrder.service.js');
     assert.match(so, /await client\.query\('RELEASE SAVEPOINT slot_pick_staged'\);\n\s+return stagedSlotRows\(rows, key, productName\);/, '주문 줄 고르기가 같은 함수를 쓴다');
     assert.match(read('src/services/campaignOptionRename.service.js'), /rj = relabelRowCells\(rj, \{ optFrom: \[ot\], optTo: nextOt \}\);/, '이름 바꾸기가 같은 함수를 쓴다');
@@ -139,6 +142,81 @@ const ok = async (name, fn) => { try { await fn(); passed++; console.log('  ✓ 
       const q = S.planOptionSlots({ opts: [opt('고등어', 3, '고등어', 'product'), opt('옥돔', 1, '옥돔', 'product')], rows: fish, filledKey: new Map() });
       assert.equal(q.status, 'skipped', '정확 일치 규칙이면 짝을 못 짓는다(레드 H1)');
     } finally { so.resolveProductLabel = orig; }
+  });
+
+  /* ── 주문 쪽 줄 고르기로 되읽기(리뷰 P2 · 같은 부류 점검) — 옮긴 뒤 줄 상태를 **주문이 실제로 쓰는 함수**로 다시 읽어
+       옵션마다 그 옵션으로 골라지는 빈 줄 수·칸 값을 센다(옵션 단위: option_text = 키 + stagedSlotRows / 상품 단위: planOf 순서 + resolveProductLabel). */
+  const orderPicks = (opts, rows, moves) => {
+    const so = require('../src/services/sheetlessOrder.service');
+    const mv = new Map(moves.map(m => [m.id, m]));
+    const after = rows.filter(r => !r.filled).map(r => (mv.has(r.id) ? { ...r, option_text: mv.get(r.id).to, row_json: mv.get(r.id).row_json } : r));
+    const planOf = r => String(r.option_text || '').trim() || String((r.row_json || {}).상품 || '').trim();
+    const labels = [...new Set(after.map(planOf).filter(Boolean))];
+    const out = new Map();
+    for (const o of opts) {
+      const ids = o.unit_kind === 'product'
+        ? (() => { const k = so.resolveProductLabel(o.product_name || o.opt_key, labels); return k ? after.filter(r => planOf(r) === k).map(r => r.id) : []; })()
+        : [...after.filter(r => r.option_text === o.opt_key).map(r => r.id), ...so.stagedSlotRows(after, o.opt_key, o.product_name).map(r => r.id)];
+      out.set(o.opt_key, ids);
+    }
+    return { out, after: new Map(after.map(r => [r.id, r])) };
+  };
+
+  await ok('④-5 v2 부품 칸(리뷰 P1) — 「티셔츠 · 라지」 줄을 블루로: 1차옵션 = 「블루」(통째 표시 금지) · 2단 옵션 · 상품 2종 · 주문 줄 고르기 되읽기', async () => {
+    const v2 = (p, o1, o2 = '') => ({ ot: [p, o1, o2].filter(Boolean).join(' · '), rj: { 상품: p, '1차옵션': o1, ...(o2 ? { '2차옵션': o2 } : {}), 리뷰옵션: '포토' } });
+    const mk = list => { reset(); return list.map(x => ({ id: `r${++id}`, seq: id, option_text: x.ot, row_json: x.rj, filled: false, protected: false, overlay: null })); };
+    const cases = [
+      { name: '1단', opts: [opt('블루', 3), opt('라지', 1)], rows: mk([v2('티셔츠', '블루'), v2('티셔츠', '라지'), v2('티셔츠', '블루'), v2('티셔츠', '라지')]),
+        comp: { 블루: ['티셔츠', '블루', undefined], 라지: ['티셔츠', '라지', undefined] } },
+      { name: '2단', opts: [opt('블루 + S', 3), opt('블루 + M', 1)], rows: mk([v2('티셔츠', '블루', 'S'), v2('티셔츠', '블루', 'M'), v2('티셔츠', '블루', 'S'), v2('티셔츠', '블루', 'M')]),
+        comp: { '블루 + S': ['티셔츠', '블루', 'S'], '블루 + M': ['티셔츠', '블루', 'M'] } },
+      { name: '상품 2종', opts: [opt('블루', 3, '티셔츠'), opt('라지', 1, '바지')], rows: mk([v2('티셔츠', '블루'), v2('바지', '라지'), v2('티셔츠', '블루'), v2('바지', '라지')]),
+        comp: { 블루: ['티셔츠', '블루', undefined], 라지: ['바지', '라지', undefined] } },
+    ];
+    for (const c of cases) {
+      const p = S.planOptionSlots({ opts: c.opts, rows: c.rows, filledKey: new Map() });
+      assert.equal(p.status, 'applied', `${c.name}: ${JSON.stringify(p)}`);
+      assert.equal(p.moves.length, 1, c.name);
+      for (const m of p.moves) {
+        const [pr, o1, o2] = c.comp[m.option];
+        assert.equal(m.row_json.상품, pr, `${c.name}: 상품 칸`);
+        assert.equal(m.row_json['1차옵션'], o1, `${c.name}: 1차옵션 칸 = 부품 값(통째 표시 「${m.to}」 금지)`);
+        assert.equal(m.row_json['2차옵션'], o2, `${c.name}: 2차옵션 칸`);
+        assert.equal(m.row_json.리뷰옵션, '포토', `${c.name}: 리뷰옵션 칸 무접촉`);
+      }
+      const { out, after } = orderPicks(c.opts, c.rows, p.moves);
+      for (const o of c.opts) {
+        assert.equal(out.get(o.opt_key).length, o.recruit_total, `${c.name}: 주문이 「${o.opt_key}」로 고르는 빈 줄 수 = 새 인원`);
+        for (const rid of out.get(o.opt_key)) {
+          const r = after.get(rid); const [pr, o1, o2] = c.comp[o.opt_key];
+          assert.deepEqual([r.row_json.상품, r.row_json['1차옵션'], r.row_json['2차옵션']], [pr, o1, o2], `${c.name}: 「${o.opt_key}」로 골라지는 줄의 칸 = 그 옵션 값 (seq ${r.seq})`);
+        }
+      }
+      for (const m of p.moves) assert.ok(out.get(m.option).includes(m.id), `${c.name}: 옮긴 줄은 주문이 새 옵션(${m.option})으로 고른다`);
+    }
+    // 부품 칸에 다른 값(작업지시)이 적힌 v2 줄은 옮기지 않는다 — 그 자리 고정(다른 줄로 맞춤)
+    const rows = mk([v2('티셔츠', '블루'), v2('티셔츠', '라지'), v2('티셔츠', '블루'), { ot: '티셔츠 · 라지', rj: { 상품: '티셔츠', '1차옵션': '라지 포장 따로', 리뷰옵션: '포토' } }, v2('티셔츠', '라지')]);
+    const p = S.planOptionSlots({ opts: [opt('블루', 3), opt('라지', 2)], rows, filledKey: new Map() });
+    assert.equal(p.status, 'applied', JSON.stringify(p)); assert.ok(!p.moves.some(m => m.id === rows[3].id), '작업지시 적힌 부품 칸 줄 = 고정');
+    // 이름 바꾸기(기존 기능)의 칸 규칙은 그대로 — v1 줄(표시 = 옵션 이름)의 1차옵션 칸은 종전처럼 통째 이름을 따라간다(주문도 그 칸에 옵션 이름을 통째로 적는다)
+    const { relabelRowCells } = require('../src/services/campaignOptionRename.service');
+    assert.deepEqual(relabelRowCells({ 옵션: '블루', '1차옵션': '블루', 상품: '티셔츠' }, { optFrom: ['블루'], optTo: '블루(신형)' }), { 옵션: '블루(신형)', '1차옵션': '블루(신형)', 상품: '티셔츠' }, '이름 바꾸기 v1 = 종전 그대로');
+  });
+
+  await ok('④-6 상품 단위 · 계획이 「상품」 칸에만(리뷰 P2) — 표시 없음 · 고등어 2팩 세트/옥돔 1kg 2/2 → 3/1: 맞춤 · 새 표시 = 기존 상품 표기 · 주문 줄 고르기 되읽기', async () => {
+    const mk = n => { reset(); return Array.from({ length: n }, (_, i) => ({ id: `r${++id}`, seq: id, option_text: null, row_json: { 상품: i % 2 ? '옥돔 1kg' : '고등어 2팩 세트', 리뷰옵션: '포토' }, filled: false, protected: false, overlay: null })); };
+    const opts = [opt('고등어', 3, '고등어', 'product'), opt('옥돔', 1, '옥돔', 'product')];
+    const rows = mk(4);
+    const p = S.planOptionSlots({ opts, rows, filledKey: new Map() });
+    assert.equal(p.status, 'applied', JSON.stringify(p));
+    assert.deepEqual(p.moves.map(m => [m.to, m.row_json.상품, m.row_json.리뷰옵션]), [['고등어 2팩 세트', '고등어 2팩 세트', '포토']], '새 표시 = 작업보드의 기존 상품 표기(공고 상품 이름 「고등어」를 지어내지 않는다)');
+    const { out } = orderPicks(opts, rows, p.moves);
+    assert.equal(out.get('고등어').length, 3); assert.equal(out.get('옥돔').length, 1);
+    assert.ok(out.get('고등어').includes(p.moves[0].id), '옮긴 줄은 주문이 고등어로 고른다');
+    // 채운 줄 표시(「고등어」)와 빈 줄 상품 칸(「고등어 2팩 세트」)이 갈리면 — 주문 쪽 짝짓기(정확 일치 「고등어」가 이김)와 같은 결론으로 건너뜀
+    const rows2 = mk(5); rows2[4] = { ...rows2[4], option_text: '고등어', filled: true, row_json: { 상품: '고등어' } };
+    const p2 = S.planOptionSlots({ opts: [opt('고등어', 4, '고등어', 'product'), opt('옥돔', 1, '옥돔', 'product')], rows: rows2, filledKey: new Map([[rows2[4].id, '고등어']]) });
+    assert.notEqual(p2.status, 'applied', '빈 줄 표기와 채운 줄 표기가 둘 다 고등어에 걸리면(정확 일치 「고등어」가 이김) 짝을 못 지어 건너뜀 — 맞췄다고 꾸미지 않는다 ' + JSON.stringify(p2));
   });
 
   await ok('⑤ 트리거·잠금 순서 정적 — 선택지 인원만 · reconcile 제외 · 탭 잠금이 공고 행보다 먼저 · 장부 force · 응답 칸', async () => {

@@ -145,7 +145,7 @@ function planOptionSlots({ opts, rows, filledKey, classifyOnly = false }) {
   const ol = require('./orderLedger.service');
   const optionWriteColumns = heads => _byHeads('opt', heads, ol.optionWriteColumns);
   const productWriteColumns = heads => _byHeads('prod', heads, ol.productWriteColumns);
-  const { relabelRowCells } = require('./campaignOptionRename.service');
+  const { relabelRowCells, stagedComponentColumns } = require('./campaignOptionRename.service');
   const isProd = o => String(o.unit_kind || '') === 'product';
   const hasProd = opts.some(isProd);
   const prodCell = r => _t(((r.row_json || {})[PRODUCT_HEADER]));
@@ -180,15 +180,18 @@ function planOptionSlots({ opts, rows, filledKey, classifyOnly = false }) {
   const cellsMovable = (s, ownerKey) => {
     const rj = s.rj || {}; const heads = Object.keys(rj);
     const o = ownerKey ? optByKey.get(ownerKey) : null;
+    const sel = parseSelectionKey(_t(s.ot));
+    // ★ v2 줄(표시 「상품 · 옵션」)의 1·2차옵션 칸은 부품 칸 — 통째 옵션 값 검사에서 빼고 아래 부품 검사로만 본다(리뷰 P1)
+    const comp = stagedComponentColumns(heads);
+    const compSet = new Set(sel ? [...comp.o1, ...comp.o2] : []);
     const optVals = new Set(['', _t(s.ot), ...(o ? [o.opt_key] : [])]);
-    for (const i of optionWriteColumns(heads)) if (!optVals.has(_t(rj[heads[i]]))) return false;
+    for (const i of optionWriteColumns(heads)) if (!compSet.has(i) && !optVals.has(_t(rj[heads[i]]))) return false;
     // 표시 없는 줄: 옵션 단위 작업에서 모든 선택지가 한 상품이면 그 상품 이름만 허용(어느 옵션으로 가도 상품 칸이 맞다) · 그 밖 = 빈 칸만
     const oneProduct = [...new Set(opts.map(x => _t(x.product_name)).filter(Boolean))];
     const prodVals = new Set(['', ...(o ? prodsOf(o, s) : (!hasProd && oneProduct.length === 1 ? oneProduct : []))]);
     for (const i of productWriteColumns(heads)) if (!prodVals.has(_t(rj[heads[i]]))) return false;
-    const sel = parseSelectionKey(_t(s.ot));
-    for (const [re, part] of [[/^(?:1차|1st)\s*옵션$/, 'option1Value'], [/^(?:2차|2nd)\s*옵션$/, 'option2Value']]) {
-      for (const h of heads) if (re.test(String(h).trim().toLowerCase()) && _t(rj[h]) && !(sel && _t(sel[part]) === _t(rj[h]))) return false;
+    for (const [idx, part] of [[comp.o1, 'option1Value'], [comp.o2, 'option2Value']]) {
+      for (const i of idx) if (_t(rj[heads[i]]) && !(sel && _t(sel[part]) === _t(rj[heads[i]]))) return false;
     }
     return true;
   };
@@ -225,9 +228,12 @@ function planOptionSlots({ opts, rows, filledKey, classifyOnly = false }) {
     need.set(o.opt_key, T.get(o.opt_key) - fx);
   }
   // 새로 적을 표시 — 그 선택지로 짝지어진 빈 줄 표시(가장 많이) → 채운 줄 표시 → 주문이 처음 채울 때 적는 값(새 글자를 지어내지 않는다)
+  //   ★ 상품 단위는 줄 계획(planP = 주문 쪽 planOf 순서: 표식 → 손 글씨 → 상품 칸)으로 센다(리뷰 P2) — 표식이 비고 상품 칸에만
+  //     「고등어 2팩 세트」가 있는 작업에서 표식만 세면 공고 이름 「고등어」를 지어 적어, 되읽기에서 정확 일치 「고등어」가 이겨 나머지 줄이 짝을 잃는다.
   const labelFor = new Map();
   for (const o of opts) {
-    const tally = list => { const c = new Map(); for (const s of list) { const l = _t(s.ot); if (l) c.set(l, (c.get(l) || 0) + 1); } return [...c.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || ''; };
+    const lab = s => (isProd(o) ? planP(s.r, s.ot, s.rj) : _t(s.ot));
+    const tally = list => { const c = new Map(); for (const s of list) { const l = lab(s); if (l) c.set(l, (c.get(l) || 0) + 1); } return [...c.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || ''; };
     const emptyOwned = state0.filter(s => !s.filled && ownersOf(s).length === 1 && ownersOf(s)[0] === o.opt_key);
     const filledOwned = state0.filter(s => s.filled && ownersOf({ ...s, filled: false }).length === 1 && ownersOf({ ...s, filled: false })[0] === o.opt_key);
     labelFor.set(o.opt_key, tally(emptyOwned) || tally(filledOwned) || (isProd(o) ? (_t(o.product_name) || o.opt_key) : o.opt_key));
@@ -259,11 +265,19 @@ function planOptionSlots({ opts, rows, filledKey, classifyOnly = false }) {
       o2From: osel ? [osel.option2Value] : [], o2To: nsel ? _t(nsel.option2Value) : null,
     });
     // 칸 모양 확인(H10) — 계획 칸이 빈 칸이거나 새 선택지 값뿐이어야 한다(표시는 B 인데 상품 칸은 A 인 모양 금지)
+    //   ★ 부품 칸(리뷰 P1) — 새 표시가 「상품 · 옵션」이면 1·2차옵션 칸은 통째 표시가 아니라 **그 부품 값**(또는 빈 칸)이어야 한다.
     const heads = Object.keys(rj);
-    const okProd = new Set(['', isProd(o) ? nl : _t(o.product_name)]);
-    if (productWriteColumns(heads).some(j => !okProd.has(_t(rj[heads[j]])))) return { status: 'skipped', reason: 'row_cells_unknown', detail: { seq: Number(s.r.seq) }, options: optionsView() };
-    if (optionWriteColumns(heads).some(j => !['', nl].includes(_t(rj[heads[j]])))) return { status: 'skipped', reason: 'row_cells_unknown', detail: { seq: Number(s.r.seq) }, options: optionsView() };
-    if (!nsel && heads.some(h => /^(?:[12]차|1st|2nd)\s*옵션$/.test(String(h).trim().toLowerCase()) && _t(rj[h]))) return { status: 'skipped', reason: 'row_cells_unknown', detail: { seq: Number(s.r.seq) }, options: optionsView() };
+    const comp = stagedComponentColumns(heads);
+    const compSet = new Set(nsel ? [...comp.o1, ...comp.o2] : []);
+    const cellsBad = () => {
+      const okProd = new Set(['', isProd(o) ? nl : _t(o.product_name)]);
+      if (productWriteColumns(heads).some(j => !okProd.has(_t(rj[heads[j]])))) return true;
+      if (optionWriteColumns(heads).some(j => !compSet.has(j) && !['', nl].includes(_t(rj[heads[j]])))) return true;
+      if (!nsel) return heads.some((h, j) => (comp.o1.includes(j) || comp.o2.includes(j)) && _t(rj[h]));
+      return comp.o1.some(j => !['', _t(nsel.option1Value)].includes(_t(rj[heads[j]])))
+        || comp.o2.some(j => !['', _t(nsel.option2Value)].includes(_t(rj[heads[j]])));
+    };
+    if (cellsBad()) return { status: 'skipped', reason: 'row_cells_unknown', detail: { seq: Number(s.r.seq) }, options: optionsView() };
     if (from === to && _t(s.ot) === nl) continue;   // 같은 자리(표시 없는 줄이 아님) — 쓸 것 없음
     moves.push({ id: s.r.id, seq: Number(s.r.seq), from: _t(s.ot), to: nl, option: to, row_json: rj, s });
   }

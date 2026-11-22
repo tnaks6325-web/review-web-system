@@ -93,8 +93,19 @@ async function applyOptionRenames(client, campaignId, options) {
  *   - 상품 칸(productWriteColumns): 값이 productFrom 중 하나면 productTo (productTo 가 null 이면 상품 칸 무접촉)
  *   - 1·2차옵션 칸(v2 · 열 이름 「1차옵션」「2차옵션」): 값이 o1From/o2From 이면 o1To/o2To (To 가 null 이면 무접촉)
  *   ★ 빈 칸은 빈 칸 그대로(빈 글자는 어떤 From 과도 짝짓지 않는다) · 다른 값(작업지시)은 그대로.
+ *   ★★ 부품 칸(리뷰 P1 · 2026-11-23) — 호출자가 부품 값(o1/o2 From·To)을 하나라도 주면 그 줄은 v2 「상품 · 옵션」 줄이다:
+ *      1·2차옵션 칸은 **통째 표시 바꾸기(optFrom→optTo)에서 빠지고** 부품 값끼리만 바꾼다. 안 빼면 1차옵션 「라지」가 옵션 이름과 같아
+ *      통째 표시 「티셔츠 · 블루」로 바뀌고, 뒤의 부품 바꾸기는 더 이상 옛 값을 못 찾는다(그 뒤 주문은 빈 칸만 채워 그대로 남는다).
+ *      부품 값을 안 주는 호출(이름 바꾸기 — v1 줄은 주문도 그 칸에 옵션 이름을 통째로 적는다)은 종전 그대로.
  * @returns 새 row_json(입력은 바꾸지 않는다)
  */
+const _O1_RE = /^(?:1차|1st)\s*옵션$/;
+const _O2_RE = /^(?:2차|2nd)\s*옵션$/;
+/** v2 부품 칸(1차옵션·2차옵션) 위치 — 매퍼의 「상품 · 옵션」 쓰기 칸(orderLedger stagedCols)과 같은 열 이름 규칙. */
+function stagedComponentColumns(heads) {
+  const idxOf = re => (heads || []).map((h, i) => (re.test(String(h).trim().toLowerCase()) ? i : -1)).filter(i => i >= 0);
+  return { o1: idxOf(_O1_RE), o2: idxOf(_O2_RE) };
+}
 function relabelRowCells(rowJson, { optFrom = [], optTo = null, productFrom = [], productTo = null, o1From = [], o1To = null, o2From = [], o2To = null } = {}) {
   const { optionWriteColumns, productWriteColumns } = require('./orderLedger.service');
   const rj = rowJson && typeof rowJson === 'object' ? { ...rowJson } : {};
@@ -107,11 +118,13 @@ function relabelRowCells(rowJson, { optFrom = [], optTo = null, productFrom = []
     if (!f.size) return;
     for (const i of idx) if (f.has(norm(rj[heads[i]]))) rj[heads[i]] = to;
   };
-  swap(optionWriteColumns(heads), optFrom, optTo);
+  const comp = stagedComponentColumns(heads);
+  const componentMode = setOf(o1From).size > 0 || setOf(o2From).size > 0 || o1To != null || o2To != null;
+  const compSet = new Set(componentMode ? [...comp.o1, ...comp.o2] : []);
+  swap(optionWriteColumns(heads).filter(i => !compSet.has(i)), optFrom, optTo);
   swap(productWriteColumns(heads), productFrom, productTo);
-  const idxOf = re => heads.map((h, i) => (re.test(String(h).trim().toLowerCase()) ? i : -1)).filter(i => i >= 0);
-  swap(idxOf(/^(?:1차|1st)\s*옵션$/), o1From, o1To);
-  swap(idxOf(/^(?:2차|2nd)\s*옵션$/), o2From, o2To);
+  swap(comp.o1, o1From, o1To);
+  swap(comp.o2, o2From, o2To);
   return rj;
 }
 
@@ -176,4 +189,4 @@ async function relabelEmptySlotsInTx(client, campaignId, pairs, productPairs = [
   }
 }
 
-module.exports = { planOptionRenames, applyRenamePlanInTx, applyOptionRenames, relabelEmptySlotsInTx, relabelRowCells };
+module.exports = { planOptionRenames, applyRenamePlanInTx, applyOptionRenames, relabelEmptySlotsInTx, relabelRowCells, stagedComponentColumns };

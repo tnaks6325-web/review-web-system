@@ -255,6 +255,81 @@ const dayLabel = i => { const d = new Date(Date.UTC(2026, 11, 1 + i)); return `$
     console.log(`    · 2000줄 저장(다시 나누기 포함) ${ms}ms`);
   });
 
+  /* ── [14] 같은 부류 전수 대조(리뷰 P1·P2) — 작업보드 줄 모양별로: 다시 나눈 뒤 **실제 주문 기록 함수**로 옵션마다 새 인원만큼 사서
+         ① 모든 주문이 기존 빈 줄에 앉고(정원 밖 새 줄 0) ② 주문이 고른 줄의 다시 나누기 뒤 계획 = 산 옵션 ③ 채운 뒤 칸(상품·옵션·1·2차옵션) = 산 옵션 값(리뷰옵션 칸은 저장 뒤 리뷰옵션 재분배가 정한다 — 이 대조 밖).
+         「옮긴 줄 → 주문이 고르는 옵션 ≠ 새 옵션」 갈래 0 이 목표. */
+  const OPTP2 = (name, opts) => ([{ name, url: 'https://www.coupang.com/vp/products/502', option_schema_version: 2, product_mode: 'opt', base: { pay: 0, count: 0, daily: 0, review_type_mix: [] },
+    options: opts.map(([v1, v2, count]) => ({ option_1: { name: '색', value: v1 }, option_2: { name: '크기', value: v2 }, label: `${v1} + ${v2}`, url: '', pay: 10000, count, daily: 1, review_type_mix: [] })) }]);
+  const paintRaw = async (A, spec) => {
+    const { rows } = await pool.query('SELECT id, seq FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active ORDER BY seq', [A.sheet, A.tab]);
+    for (const r of rows) {
+      const s = spec(Number(r.seq));
+      const rj = { 번호: String(r.seq), 구매일자: dayLabel(Math.floor((Number(r.seq) - 1) / 2)), ...s.rj, 수취인: '', 연락처: '', 주문번호: '', 결제금액: '' };
+      await pool.query('UPDATE campaign_participants SET option_text=$2, row_json=$3::jsonb WHERE id=$1', [r.id, s.ot || null, JSON.stringify(rj)]);
+    }
+  };
+  const v2c = (p, o1, o2 = '') => ({ ot: [p, o1, o2].filter(Boolean).join(' · '), rj: { 상품: p, '1차옵션': o1, ...(o2 ? { '2차옵션': o2 } : {}), 리뷰옵션: '포토' } });
+  const planOfRow = r => String(r.option_text || '').trim() || String((r.row_json || {}).상품 || '').trim();
+  const SHAPES = [
+    { tag: 'tv1', name: 'v1 옵션 칸', prod: OPTP('티셔츠', [['블루', 2], ['라지', 2]]), paint: s => ({ ot: s % 2 ? '블루' : '라지', rj: { 상품: '티셔츠', 옵션: s % 2 ? '블루' : '라지', 리뷰옵션: '포토' } }),
+      edit: p => { p[0].options[0].count = 3; p[0].options[1].count = 1; }, buys: [['블루', 3], ['라지', 1]], buy: k => ({ optKey: k }),
+      owner: r => r.option_text, cells: k => ({ 상품: '티셔츠', 옵션: k }) },
+    { tag: 'tv2', name: 'v2 1단(상품·1차옵션)', prod: OPTP('티셔츠', [['블루', 2], ['라지', 2]]), paint: s => v2c('티셔츠', s % 2 ? '블루' : '라지'),
+      edit: p => { p[0].options[0].count = 3; p[0].options[1].count = 1; }, buys: [['블루', 3], ['라지', 1]], buy: k => ({ optKey: k }),
+      owner: r => String(r.option_text).split(' · ')[1], cells: k => ({ 상품: '티셔츠', '1차옵션': k }) },
+    { tag: 'tv22', name: 'v2 2단(1차·2차옵션)', prod: OPTP2('티셔츠', [['블루', 'S', 2], ['블루', 'M', 2]]), paint: s => v2c('티셔츠', '블루', s % 2 ? 'S' : 'M'),
+      edit: p => { p[0].options[0].count = 3; p[0].options[1].count = 1; }, buys: [['블루 + S', 3], ['블루 + M', 1]], buy: k => ({ optKey: k }),
+      owner: r => '블루 + ' + String(r.option_text).split(' · ')[2], cells: k => ({ 상품: '티셔츠', '1차옵션': '블루', '2차옵션': k.split(' + ')[1] }) },
+    { tag: 'tpl', name: '상품 단위 · 표시 = 상품 칸', prod: PRODS([['고등어', 2], ['옥돔', 2, 20000]]), paint: s => { const l = s % 2 ? '고등어 2팩 세트' : '옥돔 1kg'; return { ot: l, rj: { 상품: l, 리뷰옵션: '포토' } }; },
+      edit: p => { p[0].base.count = 3; p[1].base.count = 1; }, buys: [['고등어', 3], ['옥돔', 1]], buy: k => ({ product: k }),
+      owner: r => (planOfRow(r).startsWith('고등어') ? '고등어' : '옥돔'), cells: k => ({ 상품: k === '고등어' ? '고등어 2팩 세트' : '옥돔 1kg' }) },
+    { tag: 'tpc', name: '상품 단위 · 계획이 상품 칸에만(표시 없음)', prod: PRODS([['고등어', 2], ['옥돔', 2, 20000]]), paint: s => ({ ot: null, rj: { 상품: s % 2 ? '고등어 2팩 세트' : '옥돔 1kg', 리뷰옵션: '포토' } }),
+      edit: p => { p[0].base.count = 3; p[1].base.count = 1; }, buys: [['고등어', 3], ['옥돔', 1]], buy: k => ({ product: k }),
+      owner: r => (planOfRow(r).startsWith('고등어') ? '고등어' : '옥돔'), cells: k => ({ 상품: k === '고등어' ? '고등어 2팩 세트' : '옥돔 1kg' }) },
+    { tag: 'tbl', name: 'v1 표시 없는 줄 섞임', prod: OPTP('티셔츠', [['블루', 2], ['라지', 2]]), paint: s => (s <= 2 ? { ot: s % 2 ? '블루' : '라지', rj: { 상품: '티셔츠', 옵션: s % 2 ? '블루' : '라지', 리뷰옵션: '포토' } } : { ot: null, rj: { 상품: '', 옵션: '', 리뷰옵션: '포토' } }),
+      edit: p => { p[0].options[0].count = 3; p[0].options[1].count = 1; }, buys: [['블루', 3], ['라지', 1]], buy: k => ({ optKey: k }),
+      owner: r => r.option_text, cells: k => ({ 옵션: k }) },
+  ];
+  await ok('[14] 같은 부류 전수 대조 — 줄 모양 6종(v1 · v2 1단 · v2 2단 · 상품 단위 표시 · 상품 칸만 · 표시 없음 섞임): 다시 나눈 뒤 실제 주문이 고르는 옵션 = 새 옵션 · 칸 = 산 옵션 값 · 정원 밖 0', async () => {
+    const table = [];
+    for (const sh of SHAPES) {
+      const A = await setup(sh.tag, sh.prod);
+      await paintRaw(A, sh.paint);
+      const b = await okSave(A, sh.edit);
+      const st = b.option_slots && b.option_slots.status;
+      const pre = new Map((await rowsOf(A)).map(r => [Number(r.seq), r]));
+      let wrong = 0, overflow = 0, badCells = 0;
+      for (const [k, n] of sh.buys) for (let i = 0; i < n; i++) {
+        const pr = await purchase(A, sh.buy(k));
+        if (!pr.w.ok || !pr.row || !pre.has(Number(pr.row.seq))) { overflow++; continue; }
+        if (sh.owner(pre.get(Number(pr.row.seq))) !== k) wrong++;
+        const want = sh.cells(k);
+        if (Object.keys(want).some(h => String(pr.row.row_json[h] == null ? '' : pr.row.row_json[h]) !== want[h])) badCells++;
+      }
+      const rowsNow = await A.rows();
+      table.push({ shape: sh.name, status: st, moved: b.option_slots && b.option_slots.moved, wrong, overflow, badCells, rows: rowsNow });
+    }
+    console.log('    · 대조표 ' + JSON.stringify(table));
+    for (const t of table) {
+      assert.equal(t.status, 'applied', `${t.shape}: 다시 나눔 ${JSON.stringify(t)}`);
+      assert.deepEqual([t.wrong, t.overflow, t.badCells, t.rows], [0, 0, 0, 4], `${t.shape}: 주문이 고르는 옵션 ≠ 새 옵션 0 · 정원 밖 0 · 칸 어긋남 0 ${JSON.stringify(t)}`);
+    }
+  });
+
+  await ok('[15] 이름 바꾸기(기존 기능) · v2 빈 줄 — 부품 칸(1차옵션)에 통째 표시(「티셔츠 · …」)가 쓰이지 않는다', async () => {
+    const A = await setup('renv2', OPTP('티셔츠', [['블루', 2], ['라지', 2]]));
+    await paintRaw(A, s => v2c('티셔츠', s % 2 ? '블루' : '라지'));
+    const cur = await A.wo(); const p = JSON.parse(cur.product_options_json);
+    p[0].options[1] = { ...p[0].options[1], prev_label: '라지', label: '엑스라지', option_1: { name: '', value: '엑스라지' } };
+    const r = await A.putSource(tierEdit({ ...cur, product_options_json: JSON.stringify(p) }, () => {}), { structure: 1, rename: 1 });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual((await A.opts()).map(o => o.opt_key), ['블루', '엑스라지']);
+    for (const x of await rowsOf(A)) {
+      assert.doesNotMatch(String(x.row_json['1차옵션'] || ''), / · /, `seq ${x.seq} 1차옵션 = 부품 값`);
+      assert.ok(['블루', '라지', '엑스라지'].includes(String(x.row_json['1차옵션'])), `seq ${x.seq} 1차옵션 ${x.row_json['1차옵션']}`);
+    }
+  });
+
   console.log(`optionSlotsRebalancePg: ${passed} passed${failed ? `, ${failed} failed` : ''}`);
   await H.close();
   process.exit(failed ? 1 : 0);
