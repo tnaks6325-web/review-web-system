@@ -9,13 +9,17 @@ function fail(code){return Object.assign(new Error(code),{code});}
 function config(env=process.env){
  const allowed=JSON.parse(env.IMAGE_BACKUP_ALLOWED_ROOT_IDS||'[]'),excluded=JSON.parse(env.IMAGE_BACKUP_EXCLUDED_ROOT_IDS||'[]');
  const roots=JSON.parse(env.IMAGE_BACKUP_ROOT_READERS||'[]');
- if(!Array.isArray(allowed)||!allowed.length||!Array.isArray(excluded)||!Array.isArray(roots)||roots.length!==allowed.length)throw fail('BACKUP_CONFIG_INVALID');
+ // 결정 368 참조 사진: top-ancestor ids accepted ONLY for photos the review system references. Never scanned.
+ const referenced=JSON.parse(env.IMAGE_BACKUP_REFERENCED_ROOT_IDS||'[]');
+ if(!Array.isArray(allowed)||!allowed.length||!Array.isArray(excluded)||!Array.isArray(roots)||roots.length!==allowed.length||!Array.isArray(referenced))throw fail('BACKUP_CONFIG_INVALID');
  const ids=new Set();for(const r of roots){if(!/^[A-Za-z0-9_-]{10,200}$/.test(r.rootId)||ids.has(r.rootId)||!allowed.includes(r.rootId)||excluded.includes(r.rootId)||!Array.isArray(r.readerKinds)||!r.readerKinds.length||new Set(r.readerKinds).size!==r.readerKinds.length||r.readerKinds.some(k=>!['sa','oauth'].includes(k)))throw fail('BACKUP_CONFIG_INVALID');ids.add(r.rootId);}
- if([...allowed,...excluded].some(x=>!/^[A-Za-z0-9_-]{10,200}$/.test(x)))throw fail('BACKUP_CONFIG_INVALID');
- return {roots,excluded};
+ if([...allowed,...excluded,...referenced].some(x=>!/^[A-Za-z0-9_-]{10,200}$/.test(x)))throw fail('BACKUP_CONFIG_INVALID');
+ // A referenced top must be neither an approved root nor an excluded root (fail closed, no silent precedence).
+ if(new Set(referenced).size!==referenced.length||referenced.some(x=>typeof x!=='string'||allowed.includes(x)||excluded.includes(x)))throw fail('BACKUP_CONFIG_INVALID');
+ return {roots,excluded,referenced};
 }
 async function dependencies(deps={}){
- const cfg=deps.roots?{roots:deps.roots,excluded:deps.excluded||[]}:config();
+ const cfg=deps.roots?{roots:deps.roots,excluded:deps.excluded||[],referenced:deps.referenced||[]}:config();
  return {...cfg,pool:deps.pool||require('../db/imageBackupPool').getPool(),readers:deps.readers||require('./drive.service').getBackupReadClients(),api:deps.api||require('./imageBackupClient.service').createClient(),loadHints:deps.loadHints||loadHints,...deps};
 }
 async function loadHints({fileId,pool}){
@@ -67,6 +71,60 @@ async function observe({fileId,rootId,reader,source,deps,cache}){
  const observation={descriptor,modifiedTime:metadata.modifiedTime||null,md5Checksum:metadata.md5Checksum||null,readerKind:reader.kind};
  const jobKey='obs:'+backup.sha(backup.canonical({descriptor,modifiedTime:observation.modifiedTime,md5Checksum:observation.md5Checksum}));
  return {scope,metadata,observation,jobKey};
+}
+// 결정 368 참조 사진: photos the review system references (subset of the 결정 352 image allowlist single
+// source plus the relink audit file_id, guarded by imageBackupReferenced.test.js). The payment archive is never a source and stays excluded.
+const REFERENCE_SOURCES=Object.freeze([['review_submissions','file_id'],['order_submissions','capture_file_id'],['order_submissions','capture_file_id_2'],['review_index','review_file_id'],['review_inspections','file_id'],['review_edit_requests','old_file_id'],['review_edit_requests','new_file_id'],['purchase_capture_artifacts','file_id'],['purchase_capture_supplements','file_id'],['purchase_submission_sessions','capture_file_id'],['guide_image_files','file_id'],['review_photo_relinks','file_id']].map(([table,column])=>Object.freeze({table,column})));
+const REFERENCED_SQL='SELECT ('+REFERENCE_SOURCES.map(x=>`EXISTS(SELECT 1 FROM ${x.table} WHERE ${x.column}=$1)`).join(' OR ')+') AS referenced';
+// Query failure throws (job retried) — never folded into "not referenced" or "referenced".
+async function referencedBy({fileId,pool}){return (await pool.query(REFERENCED_SQL,[fileId])).rows[0]?.referenced===true;}
+// Walk single parents up to the top (a folder without parents). The file itself 404 = SOURCE_GONE for this reader.
+async function resolveTop({fileId,reader,cache,approved}){
+ async function get(id){if(!cache.has(id)){let m;try{m=await reader.getMetadata(id);}catch(e){if(id===fileId&&(e.code===404||e.response?.status===404))throw fail('SOURCE_GONE');throw e;}if(!m||m.id!==id)throw fail('SOURCE_CHANGED');if(m.trashed)throw fail('SOURCE_TRASHED');cache.set(id,m);}return cache.get(id);}
+ let m=await get(fileId);const seen=new Set([fileId]);
+ for(let depth=0;depth<100;depth++){
+  if(!Array.isArray(m.parents)||m.parents.length!==1)throw fail('UNRESOLVED_PATH');
+  const id=m.parents[0];if(seen.has(id))throw fail('UNRESOLVED_PATH');seen.add(id);m=await get(id);
+  // Approved root wins: a chain through an approved root is that root's observation, never a second one.
+  if(m.mimeType!==FOLDER||approved.has(id))throw fail('UNRESOLVED_PATH');
+  if(!m.parents||Array.isArray(m.parents)&&!m.parents.length)return id;
+ }
+ throw fail('UNRESOLVED_PATH');
+}
+// Same descriptor/size/mime/version/native/scope rules as observe(): only the root is the resolved top.
+async function observeReferenced({fileId,reader,source,deps:d,cache=new Map()}){
+ const approved=new Set(d.roots.map(r=>r.rootId)),top=await resolveTop({fileId,reader,cache,approved});
+ if(!d.referenced?.includes(top))throw fail('UNRESOLVED_PATH');
+ return observe({fileId,rootId:top,reader,source,deps:d,cache});
+}
+// oauth then sa. Network/other errors throw (retry); 404/outside/trashed are "not here" for that reader.
+async function observeReferencedAny({fileId,source,deps:d}){
+ const none={found:null,trashed:false,gone:false};
+ if(!d.referenced?.length||!(await referencedBy({fileId,pool:d.pool})))return none;
+ let tried=0,gone=0,trashed=false;
+ for(const kind of ['oauth','sa']){const reader=d.readers.find(r=>r.kind===kind);if(!reader)continue;tried++;
+  try{return {...none,found:await observeReferenced({fileId,reader,source,deps:d})};}
+  catch(e){if(e.code==='SOURCE_GONE'){gone++;continue;}if(e.code==='SOURCE_TRASHED'){trashed=true;continue;}if(notHere(e))continue;throw e;}}
+ if(!tried)throw fail('READER_UNAVAILABLE');
+ return {found:null,trashed,gone:gone===tried};
+}
+// Gap sweep: referenced ids with NO outbox row at all (index-backed anti-join, migration 226). Bounded keyset
+// windows keep each statement short under the backup pool's 1s statement timeout. Idempotent via enqueue.
+async function enqueueReferencedGaps({pool,limit=300,referenced,window=2000,budgetMs=20000,now=Date.now}={}){
+ if(!Number.isSafeInteger(limit)||limit<1||limit>5000)throw fail('BAD_LIMIT');
+ referenced=referenced||config().referenced;if(!referenced.length)return {enabled:false,enqueued:0};
+ pool=pool||require('../db/imageBackupPool').getPool();if(!(await backup.checkBackupSchema({pool})).ready)throw fail('BACKUP_SCHEMA_UNAVAILABLE');
+ const start=now();let enqueued=0,failed=0;
+ for(const x of REFERENCE_SOURCES){let after='';
+  try{while(enqueued<limit&&now()-start<budgetMs){
+   const rows=(await pool.query(`WITH w AS (SELECT ${x.column} AS id FROM ${x.table} WHERE ${x.column} IS NOT NULL AND ${x.column}>$1 ORDER BY ${x.column} LIMIT $2)
+ SELECT id,(NOT EXISTS(SELECT 1 FROM image_backup_outbox o WHERE o.file_id=w.id) AND NOT EXISTS(SELECT 1 FROM payment_result_drive_archive p WHERE p.drive_file_id=w.id)) AS gap FROM w ORDER BY id`,[after,window])).rows;
+   if(!rows.length)break;after=rows[rows.length-1].id;
+   for(const r of rows){if(enqueued>=limit)break;if(!r.gap||!/^[A-Za-z0-9_-]{10,200}$/.test(r.id))continue;if((await backup.enqueue({fileId:r.id,source:'referenced',jobKey:'ref:'+r.id},{pool})).accepted)enqueued++;}
+   if(rows.length<window)break;
+  }}catch(_){failed++;}
+ }
+ return {enabled:true,enqueued,failedSources:failed};
 }
 // 결정 368: a live service keeps moving/replacing photos during a multi-hour scan.
 // A file seen again with a different observation (or whose job was superseded) is
@@ -214,4 +272,4 @@ async function publishStep({scan,token,deps:d}){
  }
  throw fail('INVALID_STATE');
 }
-module.exports={MAX_FILE_REVISITS,observeLive,config,dependencies,loadHints,resolveActualPath,classifyScope,observe,transaction,startScan,scanStep,publishStep};
+module.exports={REFERENCE_SOURCES,referencedBy,observeReferenced,observeReferencedAny,enqueueReferencedGaps,MAX_FILE_REVISITS,observeLive,config,dependencies,loadHints,resolveActualPath,classifyScope,observe,transaction,startScan,scanStep,publishStep};

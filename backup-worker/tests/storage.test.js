@@ -42,3 +42,18 @@ test('get and head use only generated-key grammar and return wire metadata',asyn
  const o=await s.getObject(e,{key:r.key,head:false});assert.equal(o.sha256,sha);assert.equal(o.mime,d.mime);assert.equal(await new Response(o.body).text(),'abc');
  const h=await s.getObject(e,{key:r.key,head:true});assert.equal(h.body,null);assert.equal(h.size,3);await rejects(()=>s.getObject(e,{key:'orig/'+d.fileId,head:true}),'BAD_DESCRIPTOR');
 });
+// 결정 368 참조 사진: a referenced top ancestor (e.g. My Drive root) is accepted only when configured.
+const ref={...d,rootId:'mydrive_0123456789',chain:[{id:'mydrive_0123456789',name:'내 드라이브'}]};
+test('referenced root accepted only when configured; unknown root and malformed referenced config fail closed',async()=>{
+ let e=env();await rejects(()=>s.putVerifiedObject(e,{...args,descriptor:ref}),'SCOPE_DENIED');assert.equal(e.BACKUP.calls.length,0);
+ e=env();e.IMAGE_BACKUP_REFERENCED_ROOT_IDS=JSON.stringify([ref.rootId]);const r=await s.putVerifiedObject(e,{...args,descriptor:ref});assert.equal(r.verified,true);assert.ok(r.key.startsWith('v1/internal/'+Buffer.from('내 드라이브').toString('base64url')+'~'+ref.rootId+'/'));
+ assert.equal((await s.putVerifiedObject(e,args)).verified,true,'approved root still accepted');
+ await rejects(()=>s.putVerifiedObject(e,{...args,descriptor:{...ref,rootId:'unknown_0123456789',chain:[{id:'unknown_0123456789',name:'x'}]}}),'SCOPE_DENIED');
+ for(const value of ['bad-json','{}','[12345678901]','["short"]','',JSON.stringify([d.rootId]),JSON.stringify(['excluded_0123456789'])]){e=env();e.IMAGE_BACKUP_EXCLUDED_ROOT_IDS=JSON.stringify(['excluded_0123456789']);e.IMAGE_BACKUP_REFERENCED_ROOT_IDS=value;
+  for(const descriptor of [ref,d])await rejects(()=>s.putVerifiedObject(e,{...args,descriptor}),'SCOPE_DENIED');assert.equal(e.BACKUP.calls.length,0,value);}
+ e=env();e.IMAGE_BACKUP_REFERENCED_ROOT_IDS=JSON.stringify([ref.rootId]);e.IMAGE_BACKUP_EXCLUDED_ROOT_IDS=JSON.stringify(['parent_0123456789']);
+ await rejects(()=>s.putVerifiedObject(e,{...args,descriptor:{...ref,chain:[...ref.chain,{id:'parent_0123456789',name:'이체결과'}]}}),'SCOPE_DENIED');
+ e=env();e.IMAGE_BACKUP_REFERENCED_ROOT_IDS=JSON.stringify([ref.rootId]);
+ await rejects(()=>s.putVerifiedObject(e,{...args,descriptor:{...ref,chain:[...ref.chain,{id:d.rootId,name:'root'}]}}),'SCOPE_DENIED');
+});
+test('missing referenced variable keeps the current deploy behavior',async()=>{const e=env();assert.equal(e.IMAGE_BACKUP_REFERENCED_ROOT_IDS,undefined);assert.equal((await s.putVerifiedObject(e,args)).verified,true);});

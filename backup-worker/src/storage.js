@@ -38,9 +38,13 @@ export function validateEnvelope(env,e) {
  const field=p?.kind==='drive-md5'?'md5':p?.kind==='drive-sha256'?'sha256':null;
  if(!field)fail('BAD_DESCRIPTOR');exact(p,['kind',field,'size','sourceVersion']);
  if(typeof p[field]!=='string'||!(field==='md5'?/^[a-f0-9]{32}$/:SHA).test(p[field])||p.size!==d.size||p.sourceVersion!==d.sourceVersion)fail('BAD_DESCRIPTOR');
- let allowed,excluded;
- try {allowed=JSON.parse(env.IMAGE_BACKUP_ALLOWED_ROOT_IDS);excluded=JSON.parse(env.IMAGE_BACKUP_EXCLUDED_ROOT_IDS);}catch{fail('SCOPE_DENIED');}
- if(!Array.isArray(allowed)||!Array.isArray(excluded)||!allowed.every(v=>typeof v==='string'&&ID.test(v))||!excluded.every(v=>typeof v==='string'&&ID.test(v))||!allowed.includes(d.rootId)||d.chain.some(x=>excluded.includes(x.id)))fail('SCOPE_DENIED');
+ let allowed,excluded,referenced;
+ // Referenced tops (결정 368 참조 사진): absent variable = [] so the current deploy is unchanged; malformed fails closed.
+ try {allowed=JSON.parse(env.IMAGE_BACKUP_ALLOWED_ROOT_IDS);excluded=JSON.parse(env.IMAGE_BACKUP_EXCLUDED_ROOT_IDS);referenced=env.IMAGE_BACKUP_REFERENCED_ROOT_IDS===undefined?[]:JSON.parse(env.IMAGE_BACKUP_REFERENCED_ROOT_IDS);}catch{fail('SCOPE_DENIED');}
+ const ids=v=>Array.isArray(v)&&v.every(x=>typeof x==='string'&&ID.test(x));
+ if(!ids(allowed)||!ids(excluded)||!ids(referenced)||referenced.some(x=>allowed.includes(x)||excluded.includes(x))||!(allowed.includes(d.rootId)||referenced.includes(d.rootId))||d.chain.some(x=>excluded.includes(x.id)))fail('SCOPE_DENIED');
+ // An approved root wins: a referenced-top chain passing through an approved root is never a second copy.
+ if(referenced.includes(d.rootId)&&d.chain.some(x=>allowed.includes(x.id)))fail('SCOPE_DENIED');
  return e;
 }
 export function buildObjectKey({descriptor:d,sha256}) {

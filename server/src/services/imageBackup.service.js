@@ -58,6 +58,8 @@ function verifyReceipt(receipt,descriptor,proof){
  if(receipt?.v!==1||receipt.verified!==true||receipt.fileId!==descriptor.fileId||receipt.key!==key||receipt.size!==descriptor.size||receipt.mime!==descriptor.mime||! /^[a-f0-9]{64}$/.test(hash||'')||!receipt.objectEtag||receipt.objectEtag.includes('"')||receipt.receiptId!==expected||proof.kind==='drive-sha256'&&proof.sha256!==hash)throw Object.assign(new Error('VERIFY_FAILED'),{code:'VERIFY_FAILED'});
  return receipt;
 }
+// 결정 368: candidate enqueued by enqueueReferencedGaps (source 'referenced', no descriptor yet).
+const sweep=job=>job.observation?.source==='referenced'&&!job.observation?.descriptor;
 async function drainOnce({limit=1,signal,deps={}}={}){
  const result={claimed:0,verified:0,retry:0,blocked:0};if(!productionScope()||drainRunning)return result;drainRunning=true;
  try{
@@ -66,16 +68,23 @@ async function drainOnce({limit=1,signal,deps={}}={}){
  const jobs=await claim({pool:d.pool,limit});result.claimed=jobs.length;
  for(const job of jobs){
   try{
-   signal?.throwIfAborted();const old=job.observation;let observations=[],trashedSeen=false;
+   signal?.throwIfAborted();const old=job.observation;let observations=[],trashedSeen=false,goneSeen=false;
+   const referenced=d.referenced||[],isReferenced=rootId=>referenced.includes(rootId);
    // A candidate has no trusted root/reader yet. Try only approved matrix pairs;
    // failure of a required pair is not hidden by another successful reader.
    const matrix=async()=>{for(const root of d.roots)for(const kind of root.readerKinds){const reader=d.readers.find(r=>r.kind===kind);if(!reader)throw Object.assign(new Error(),{code:'READER_UNAVAILABLE'});try{const o=await scan.observe({fileId:job.file_id,rootId:root.rootId,reader,source:old.source,deps:d});observations.push(o);}catch(e){if(e.code==='SOURCE_TRASHED'){trashedSeen=true;continue;}if(e.code!=='UNRESOLVED_PATH'&&e.response?.status!==404&&e.code!==404)throw e;}}};
-   if(old.descriptor){const reader=d.readers.find(r=>r.kind===old.readerKind);if(!reader)throw Object.assign(new Error(),{code:'READER_UNAVAILABLE'});
+   // 결정 368 참조 사진: only when no approved observation exists (approved root wins, never two observations).
+   const referencedFallback=async()=>{if(observations.length||!referenced.length)return;const r=await scan.observeReferencedAny({fileId:job.file_id,source:old.source,deps:d});if(r.found)observations.push(r.found);else{trashedSeen=trashedSeen||r.trashed;goneSeen=r.gone;}};
+   if(old.descriptor&&isReferenced(old.descriptor.rootId)){await referencedFallback();if(!observations.length){goneSeen=false;await matrix();}}
+   else if(old.descriptor&&d.roots.some(r=>r.rootId===old.descriptor.rootId)){const reader=d.readers.find(r=>r.kind===old.readerKind);if(!reader)throw Object.assign(new Error(),{code:'READER_UNAVAILABLE'});
     // 결정 368: moved out of its root (e.g. into another approved root) = new observation → superseded below.
-    try{observations=[await scan.observe({fileId:job.file_id,rootId:old.descriptor.rootId,reader,source:old.source,deps:d})];}catch(e){if(e.code!=='UNRESOLVED_PATH'&&e.code!=='SOURCE_TRASHED'&&e.code!==404&&e.response?.status!==404)throw e;await matrix();}}
-   else await matrix();
+    try{observations=[await scan.observe({fileId:job.file_id,rootId:old.descriptor.rootId,reader,source:old.source,deps:d})];}catch(e){if(e.code!=='UNRESOLVED_PATH'&&e.code!=='SOURCE_TRASHED'&&e.code!==404&&e.response?.status!==404)throw e;await matrix();await referencedFallback();}}
+   // Candidate, or a descriptor whose root is no longer configured (never re-observed under an unapproved root).
+   else{await matrix();await referencedFallback();}
    // 결정 368: in the trash for every approved reader = deleted before backup; earlier copies (if any) stay.
    if(!observations.length&&trashedSeen){await finish({pool:d.pool,job,status:'superseded',code:'SOURCE_TRASHED'});continue;}
+   // Gap-sweep candidate whose referenced file is definitively 404 for every reader: gone, not a blocker.
+   if(!observations.length&&goneSeen&&sweep(job)){await finish({pool:d.pool,job,status:'superseded',code:'SOURCE_GONE'});continue;}
    if(!observations.length)throw Object.assign(new Error(),{code:'UNRESOLVED_PATH'});
    if(observations.some(o=>o.scope.decision==='exclude')){await finish({pool:d.pool,job,status:'superseded',code:'SCOPE_DENIED'});continue;}
    const o=observations[0];if(o.scope.decision==='retry')throw Object.assign(new Error(),{code:o.scope.reason});
@@ -94,16 +103,20 @@ async function drainOnce({limit=1,signal,deps={}}={}){
     receipt=await d.api.putObject({descriptor,proof,body,signal});
    }
    // Re-read the ENTIRE parent chain too: a folder rename is a new observation.
-   const after=await scan.observe({fileId:job.file_id,rootId:descriptor.rootId,reader,deps:d});
+   // Same resolver that produced the observation.
+   const after=(d.referenced||[]).includes(descriptor.rootId)?await scan.observeReferenced({fileId:job.file_id,reader,deps:d}):await scan.observe({fileId:job.file_id,rootId:descriptor.rootId,reader,deps:d});
    if(after.jobKey!==o.jobKey)throw Object.assign(new Error(),{code:'SOURCE_CHANGED'});
    if(body&&sha(body)!==receipt?.sha256)throw Object.assign(new Error(),{code:'VERIFY_FAILED'});
    verifyReceipt(receipt,descriptor,proof);
    if(await finish({pool:d.pool,job,status:'done',receipt}))result.verified++;
   }catch(e){
-   const code=['AUTH_REQUIRED','BAD_DESCRIPTOR','NOT_FOUND','KEY_CONFLICT','PRECONDITION_FAILED','SOURCE_CHANGED','SOURCE_TRASHED','VERIFY_FAILED','BUSY','STORE_UNAVAILABLE','SOURCE_MISSING','SOURCE_MISMATCH','TOO_LARGE','SCOPE_DENIED','UNSUPPORTED_MIME','UNRESOLVED_PATH','UNRESOLVED_VERSION','UNRESOLVED_SIZE','AMBIGUOUS_ROOT','READER_UNAVAILABLE'].includes(e.code)?e.code:'BACKUP_RETRY';
+   const code=['AUTH_REQUIRED','BAD_DESCRIPTOR','NOT_FOUND','KEY_CONFLICT','PRECONDITION_FAILED','SOURCE_CHANGED','SOURCE_TRASHED','VERIFY_FAILED','BUSY','STORE_UNAVAILABLE','SOURCE_MISSING','SOURCE_MISMATCH','TOO_LARGE','SCOPE_DENIED','UNSUPPORTED_MIME','UNRESOLVED_PATH','UNRESOLVED_VERSION','UNRESOLVED_SIZE','AMBIGUOUS_ROOT','READER_UNAVAILABLE','SOURCE_GONE'].includes(e.code)?e.code:'BACKUP_RETRY';
    const permanent=['AUTH_REQUIRED','BAD_DESCRIPTOR','NOT_FOUND','KEY_CONFLICT','PRECONDITION_FAILED','TOO_LARGE','SCOPE_DENIED','UNSUPPORTED_MIME'].includes(code);const blocked=permanent||job.attempts>=8;
    const delay=Math.min(21600,30*2**Math.min(job.attempts-1,10))+Math.floor(Math.random()*31);
-   if(await finish({pool:d.pool,job,status:blocked?'blocked':'retry',code,delay}))result[blocked?'blocked':'retry']++;
+   // A gap-sweep candidate still outside every root after the full retry budget ends superseded (code kept,
+   // countable) instead of blocked: the sweep must never hold scan publication (UNRESOLVED_OUTBOX) hostage.
+   const status=blocked?(!permanent&&code==='UNRESOLVED_PATH'&&sweep(job)?'superseded':'blocked'):'retry';
+   if(await finish({pool:d.pool,job,status,code,delay})&&status!=='superseded')result[status]++;
   }
  }
  return result;
