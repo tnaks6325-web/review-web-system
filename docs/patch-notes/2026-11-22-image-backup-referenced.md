@@ -13,11 +13,13 @@
 - 새 설정 `IMAGE_BACKUP_REFERENCED_ROOT_IDS`(서버·Worker, 기본 `[]` = 꺼짐 = 종전과 동일). 폴더 스캔 대상이 아니다. 승인/제외 root 와 겹치면 설정 오류.
 - 승인 폴더에서 못 찾은 사진만: 리뷰 시스템 칸에 그 번호가 실제로 있고, 맨 위 폴더가 참조 root 이면 기존 규칙 그대로 사본을 만든다(rootId = 맨 위 폴더). 이체결과·제외 폴더·크기/형식/버전 규칙 동일, 승인 폴더 관찰이 항상 우선.
 - 빈틈 찾기: 밤마다 300건까지, 백업 작업이 하나도 없는 참조 사진을 넣는다(멱등). 수동 `node server/scripts/image-backup.js gaps --limit N`(최대 5000). 삭제된 사진은 즉시, 범위 밖은 8회 뒤 superseded 로 끝나 발행을 막지 않는다.
-- migration 226: `image_backup_outbox(file_id)` 가산 색인.
+- migration 226: `image_backup_outbox(file_id)` 가산 색인 + 빈틈 찾기 진도 한 줄 표 `image_backup_referenced_cursor`(시간 예산이 끊겨도 다음 호출이 이어서, 마지막 표 뒤 처음으로, 동시 호출은 조건부 갱신).
+- 이미 백업된 참조 사진도 한 달에 한 번 다시 관찰(경로·이름·버전 변경 추적). 그대로면 새로 올리지 않고 끝, 바뀌었으면 새 사본(옛 사본 유지).
 - Worker: 참조 root 도 허용, 변수 없음 = `[]`, 형식 오류 = 전부 거절, 참조 root 사슬에 승인 root 가 끼면 거절.
 
 ## 검증
 - 서버 새 시험 `imageBackupReferenced.test.js` 14건 RED → GREEN, 크론·배선 시험 갱신 RED → GREEN, 기존 백업 시험 전부 통과, 서버 전체 시험 통과(커밋 기록 참조).
+- PR #1855 리뷰 보강 `imageBackupReferencedSweep.test.js` RED(4건) → GREEN(5건).
 - Worker unit 29/29, 실제 로컬 workerd 19/19(참조 root 저장·manifest part 허용·모르는 root 거절 — 수정 전 RED).
 - 실제 Worker + 서버 결합(`imageBackupReferencedWire.cjs`): 빈틈 찾기 → 처리 → 발행(`not_observed`) → 독립 전체 복원 2/2. 수정 전 Worker 로는 RED.
 - 실제 임시 PostgreSQL(`imageBackupNativePg.cjs referenced`): 색인 사용·6만 줄 중 1,000 빈틈을 600+400+0 으로·1초 제한 안.

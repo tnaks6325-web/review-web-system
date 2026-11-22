@@ -108,23 +108,43 @@ async function observeReferencedAny({fileId,source,deps:d}){
  if(!tried)throw fail('READER_UNAVAILABLE');
  return {found:null,trashed,gone:gone===tried};
 }
-// Gap sweep: referenced ids with NO outbox row at all (index-backed anti-join, migration 226). Bounded keyset
-// windows keep each statement short under the backup pool's 1s statement timeout. Idempotent via enqueue.
-async function enqueueReferencedGaps({pool,limit=300,referenced,window=2000,budgetMs=20000,now=Date.now}={}){
+// Gap sweep + periodic recheck over the referenced columns (결정 368, PR #1855 review):
+//  - gap: an id with NO outbox row at all → candidate 'ref:'+id (index-backed anti-join, migration 226).
+//  - recheck: an id whose latest descriptor job is DONE under a referenced root → candidate 'ref:'+id+':'+period,
+//    so each is re-observed at most once per period (folder scans never enumerate referenced roots). Draining it
+//    re-observes: unchanged = same obs jobKey (enqueue ON CONFLICT DO NOTHING) → candidate superseded, no upload;
+//    changed = new obs job, earlier copies kept. Candidates never block publication (drain sweep() rule).
+//  - progress: one durable cursor row (source + last id, migration 226). Each window advances it with a
+//    conditional UPDATE on version (CAS); a concurrent caller's newer value is never overwritten (we stop, raced).
+//    At most one lap per call, wrapping after the last source. Bounded keyset windows keep every statement short
+//    under the backup pool's 1s statement timeout. A failing source is skipped, counted, and the cursor moves on.
+async function enqueueReferencedGaps({pool,limit=300,referenced,window=2000,budgetMs=20000,now=Date.now,period=new Date().toISOString().slice(0,7)}={}){
  if(!Number.isSafeInteger(limit)||limit<1||limit>5000)throw fail('BAD_LIMIT');
+ if(!/^\d{4}-\d{2}$/.test(period))throw fail('BAD_PERIOD');
  referenced=referenced||config().referenced;if(!referenced.length)return {enabled:false,enqueued:0};
  pool=pool||require('../db/imageBackupPool').getPool();if(!(await backup.checkBackupSchema({pool})).ready)throw fail('BACKUP_SCHEMA_UNAVAILABLE');
- const start=now();let enqueued=0,failed=0;
- for(const x of REFERENCE_SOURCES){let after='';
-  try{while(enqueued<limit&&now()-start<budgetMs){
-   const rows=(await pool.query(`WITH w AS (SELECT ${x.column} AS id FROM ${x.table} WHERE ${x.column} IS NOT NULL AND ${x.column}>$1 ORDER BY ${x.column} LIMIT $2)
- SELECT id,(NOT EXISTS(SELECT 1 FROM image_backup_outbox o WHERE o.file_id=w.id) AND NOT EXISTS(SELECT 1 FROM payment_result_drive_archive p WHERE p.drive_file_id=w.id)) AS gap FROM w ORDER BY id`,[after,window])).rows;
-   if(!rows.length)break;after=rows[rows.length-1].id;
-   for(const r of rows){if(enqueued>=limit)break;if(!r.gap||!/^[A-Za-z0-9_-]{10,200}$/.test(r.id))continue;if((await backup.enqueue({fileId:r.id,source:'referenced',jobKey:'ref:'+r.id},{pool})).accepted)enqueued++;}
-   if(rows.length<window)break;
-  }}catch(_){failed++;}
+ let cur;try{await pool.query('INSERT INTO image_backup_referenced_cursor(id) VALUES(1) ON CONFLICT DO NOTHING');cur=(await pool.query('SELECT source,after_id,version FROM image_backup_referenced_cursor WHERE id=1')).rows[0];}catch(_){throw fail('BACKUP_SCHEMA_UNAVAILABLE');}
+ if(!cur)throw fail('BACKUP_SCHEMA_UNAVAILABLE');
+ const keys=REFERENCE_SOURCES.map(x=>x.table+'.'+x.column);let i=keys.indexOf(cur.source),after=i<0?'':cur.after_id,version=String(cur.version);if(i<0)i=0;
+ const start=now();let enqueued=0,gaps=0,rechecks=0,failed=0,raced=false,laps=0;
+ const save=async(src,id)=>{const r=await pool.query('UPDATE image_backup_referenced_cursor SET source=$1,after_id=$2,version=version+1,updated_at=now() WHERE id=1 AND version=$3 RETURNING version',[src,id,version]);if(!r.rows.length){raced=true;return false;}version=String(r.rows[0].version);return true;};
+ while(enqueued<limit&&laps<keys.length&&now()-start<budgetMs){
+  const x=REFERENCE_SOURCES[i],next=async()=>{i=(i+1)%keys.length;after='';laps++;return save(keys[i],'');};
+  let rows;
+  try{rows=(await pool.query(`WITH w AS (SELECT ${x.column} AS id FROM ${x.table} WHERE ${x.column} IS NOT NULL AND ${x.column}>$1 ORDER BY ${x.column} LIMIT $2)
+ SELECT w.id,EXISTS(SELECT 1 FROM payment_result_drive_archive p WHERE p.drive_file_id=w.id) AS paid,
+  NOT EXISTS(SELECT 1 FROM image_backup_outbox o WHERE o.file_id=w.id) AS gap,
+  COALESCE((SELECT o.status='done' AND o.observation->'descriptor'->>'rootId'=ANY($3::text[]) FROM image_backup_outbox o WHERE o.file_id=w.id AND o.observation->'descriptor' IS NOT NULL ORDER BY o.id DESC LIMIT 1),false) AS recheck
+ FROM w ORDER BY w.id`,[after,window,referenced])).rows;}
+  catch(_){failed++;if(!(await next()))break;continue;}
+  let last=after,full=true;
+  for(const r of rows){if(enqueued>=limit){full=false;break;}last=r.id;
+   if(r.paid||!/^[A-Za-z0-9_-]{10,200}$/.test(r.id)||!(r.gap||r.recheck))continue;
+   if((await backup.enqueue({fileId:r.id,source:'referenced',jobKey:'ref:'+r.id+(r.gap?'':':'+period)},{pool})).accepted){enqueued++;if(r.gap)gaps++;else rechecks++;}}
+  if(full&&rows.length<window){if(!(await next()))break;}
+  else{after=last;if(!(await save(keys[i],after)))break;}
  }
- return {enabled:true,enqueued,failedSources:failed};
+ return {enabled:true,enqueued,gaps,rechecks,failedSources:failed,raced};
 }
 // 결정 368: a live service keeps moving/replacing photos during a multi-hour scan.
 // A file seen again with a different observation (or whose job was superseded) is
