@@ -152,7 +152,9 @@ const stubQ = ({ apps = 0, orders = 0, filled = 0, shared = 0, rounds = false, a
   await ok('⑤ 정적 — 잠금 순서 · copiesFor 단일 출처 · 이력 라벨 · 종류 판정 상한 없음 · 거절은 통째 되돌림 경로', async () => {
     const sp = read('src/services/sharedPatch.service.js');
     const fn = sp.slice(sp.indexOf('async function applySharedPatch('), sp.indexOf('async function linkSharedOrderInTx('));
-    const lockAt = fn.indexOf("await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [tierTabLock]);");
+    // 결정 394 — 같은 탭 잠금 자리를 옵션 인원 변경 저장도 함께 쓴다(잠금 키 변수 이름만 바뀜 · 순서 검사 의미 불변 + 단계 저장이 그 키를 쓰는지 강화)
+    const lockAt = fn.indexOf("await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [key]);");
+    assert.ok(fn.indexOf('if (tierIntent || optIntent) {') > 0 && fn.indexOf('if (tierIntent) tierTabLock = key;') > 0 && fn.indexOf('if (tierIntent) tierTabLock = key;') < lockAt, '단계 저장은 이 탭 잠금을 잡고 기록한다');
     const campAt = fn.indexOf("'SELECT * FROM recruit_campaigns WHERE id = $1 AND archived_at IS NULL FOR UPDATE'");
     const woAt = fn.indexOf("'SELECT * FROM work_orders WHERE id = $1 FOR UPDATE'");
     const l1At = fn.indexOf('await lrq.lockWorkOrderCampaigns(client, [p.workOrderId]);');
