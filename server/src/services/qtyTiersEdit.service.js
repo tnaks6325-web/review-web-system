@@ -50,7 +50,6 @@ function tierRejectText(code, v = {}) {
     case 'quantity_tiers_stale_base': return '수정 창을 연 뒤 리뷰웹에서 상품 구성이 바뀌어 구매수량 단계를 저장하지 않았습니다. 창을 닫고 다시 열어 저장해 주세요.';
     case 'quantity_tiers_with_structure': return '구매수량 단계는 상품·옵션 더하기·지우기·이름 바꾸기와 따로 저장해 주세요.';
     case 'quantity_tiers_pay_missing': return '구매수량 단계를 바꿨는데 결제합계가 함께 오지 않아 저장하지 않았습니다. 창을 닫고 다시 열어 저장해 주세요.';
-    case 'quantity_tiers_option_counts': return '구매수량 단계를 고치는 저장에서는 아직 옵션별 인원을 함께 바꿀 수 없습니다(작업보드 빈 줄의 옵션 표시가 어긋납니다). 옵션 인원은 그대로 두고 총원·단계만 바꿔 주세요.';
     case 'option_rows_review_mix': return '리뷰타입(포토·텍스트) 수량을 섞어 쓰는 작업이라 옵션별 인원을 바꾸면 작업보드 줄의 리뷰옵션이 어긋납니다. 옵션 인원은 그대로 두고 저장해 주세요.';
     case 'link_changed_retry': return '연결 공고가 방금 바뀌었습니다. 잠시 뒤 다시 저장해 주세요.';
     default: return '구매수량 단계를 바꿀 수 없어 저장하지 않았습니다.' + tail;

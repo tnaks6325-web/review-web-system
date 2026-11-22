@@ -53,7 +53,7 @@ const dayLabel = i => { const d = new Date(Date.UTC(2026, 11, 1 + i)); return `$
   const purchase = async (A, { optKey = '', product = '' } = {}) => {
     osn += 1;
     const { rows } = await pool.query(`INSERT INTO order_submissions (sheet_id, tab_name, recipient, orderer, phone, price, order_num, mirror_status, source, selected_opt_key, selected_product)
-      VALUES ($1, $2, '가짜구매', '가짜구매', $3, '10000', $4, 'queued', 'order_submit', $5, $6) RETURNING id`, [A.sheet, A.tab, `010-7300-${String(1000 + osn)}`, `RB${osn}${Date.now()}`, optKey || null, product || null]);
+      VALUES ($1, $2, '가짜구매', '가짜구매', $3, '10000', $4, 'queued', 'order_submit', $5, $6) RETURNING id`, [A.sheet, A.tab, `010-7300-${String(1000 + osn)}`, `RB${osn}${Date.now()}`, optKey || null, product || '']);
     const w = await so.writeOrderToWorktable({ sheetId: A.sheet, tabName: A.tab, orderSubmissionId: rows[0].id,
       orderData: { recipient: '가짜구매', orderer: '가짜구매', phone: `010-7300-${String(1000 + osn)}`, price: '10000', orderNum: `RB${osn}`, selectedOptKey: optKey, selectedProduct: product } });
     const { rows: got } = await pool.query('SELECT seq, option_text, row_json FROM campaign_participants WHERE order_submission_id=$1 AND deleted_at IS NULL', [rows[0].id]);
@@ -112,6 +112,8 @@ const dayLabel = i => { const d = new Date(Date.UTC(2026, 11, 1 + i)); return `$
     let b = await okSave(A, p => { p[0].options[0].count = 6; p[0].options[1].count = 4; });
     assert.equal(b.option_slots && b.option_slots.status, 'applied', js(b.option_slots));
     assert.deepEqual(await emptyCounts(A), { 블루: 6, 라지: 4 });
+    const rv = {}; for (const r of await rowsOf(A)) { const v = String(r.row_json.리뷰옵션 || ''); rv[v] = (rv[v] || 0) + 1; }
+    assert.deepEqual(Object.values(rv).sort(), [4, 6], '바로 뒤 리뷰옵션 재분배가 6/4 로 맞춤 ' + JSON.stringify(rv));
     const B = await setup('mix2', OPTP('티셔츠', [['블루', 5], ['라지', 5]]), { reviewType: '혼합', extra: { review_type_mix: [{ type: 'photo', quantity: 6 }, { type: 'text', quantity: 4 }] } });
     await paint(B, s => (s === 10 ? { product: '티셔츠' } : { label: s % 2 ? '블루' : '라지', product: '티셔츠' }));
     const id10 = (await rowsOf(B)).find(r => Number(r.seq) === 10).id;
@@ -172,7 +174,9 @@ const dayLabel = i => { const d = new Date(Date.UTC(2026, 11, 1 + i)); return `$
     assert.deepEqual(await emptyCounts(A), { 블루: 8, 라지: 2 });
     // 같은 작업에서 한 번 더: 비고 칸(사람이 직접 쓴 칸)이 달린 줄 + 입금 표시 줄도 고정
     await pool.query(`UPDATE campaign_participants SET row_json = row_json || '{"비고":"가짜 직접 메모"}'::jsonb WHERE sheet_id=$1 AND tab_name=$2 AND seq=1`, [A.sheet, A.tab]);
-    await pool.query(`INSERT INTO manual_payment_marks (source_key, sheet_id, tab_name, anchor_type, anchor_value, deposit_col_key, stamp, created_by) VALUES ('rb-test',$1,$2,'manual',$3,'입금일','x','시험')`, [A.sheet, A.tab, await id(3)]);
+    const { rows: pb } = await pool.query(`INSERT INTO payment_batches (bank, created_by) VALUES ('kbank', '시험') RETURNING id`);
+    await pool.query(`INSERT INTO manual_payment_marks (source_key, batch_id, sheet_id, tab_name, anchor_type, anchor_value, deposit_col_key, stamp, paid_at, created_by)
+      VALUES ('rb-test', $4, $1, $2, 'manual', $3, '입금일', 'x', NOW(), '시험')`, [A.sheet, A.tab, await id(3), pb[0].id]);
     const b2 = await okSave(A, p => { p[0].options[0].count = 4; p[0].options[1].count = 6; });
     assert.equal(b2.option_slots.status, 'applied', js(b2.option_slots));
     const L2 = await labelsBySeq(A);

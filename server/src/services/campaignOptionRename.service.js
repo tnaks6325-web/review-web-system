@@ -87,6 +87,35 @@ async function applyOptionRenames(client, campaignId, options) {
 }
 
 /**
+ * ★ 결정 394 — 빈 줄 row_json 의 계획 칸을 「옛 글자와 **정확히 같은 칸만**」 새 글자로 바꾼다(순수 함수 · 결정 018 blank-only 규율).
+ *   이름 바꾸기 빈 줄 표식(relabelEmptySlotsInTx)과 작업보드 옵션 줄 다시 나누기(worktableOptionSlots)가 **이 함수 하나**를 쓴다.
+ *   - 옵션 칸(optionWriteColumns — 매퍼가 옵션을 쓰는 칸): 값이 optFrom 중 하나면 optTo
+ *   - 상품 칸(productWriteColumns): 값이 productFrom 중 하나면 productTo (productTo 가 null 이면 상품 칸 무접촉)
+ *   - 1·2차옵션 칸(v2 · 열 이름 「1차옵션」「2차옵션」): 값이 o1From/o2From 이면 o1To/o2To (To 가 null 이면 무접촉)
+ *   ★ 빈 칸은 빈 칸 그대로(빈 글자는 어떤 From 과도 짝짓지 않는다) · 다른 값(작업지시)은 그대로.
+ * @returns 새 row_json(입력은 바꾸지 않는다)
+ */
+function relabelRowCells(rowJson, { optFrom = [], optTo = null, productFrom = [], productTo = null, o1From = [], o1To = null, o2From = [], o2To = null } = {}) {
+  const { optionWriteColumns, productWriteColumns } = require('./orderLedger.service');
+  const rj = rowJson && typeof rowJson === 'object' ? { ...rowJson } : {};
+  const heads = Object.keys(rj);
+  const norm = v => String(v == null ? '' : v).trim();
+  const setOf = list => new Set((list || []).map(norm).filter(Boolean));
+  const swap = (idx, from, to) => {
+    if (to == null) return;
+    const f = setOf(from);
+    if (!f.size) return;
+    for (const i of idx) if (f.has(norm(rj[heads[i]]))) rj[heads[i]] = to;
+  };
+  swap(optionWriteColumns(heads), optFrom, optTo);
+  swap(productWriteColumns(heads), productFrom, productTo);
+  const idxOf = re => heads.map((h, i) => (re.test(String(h).trim().toLowerCase()) ? i : -1)).filter(i => i >= 0);
+  swap(idxOf(/^(?:1차|1st)\s*옵션$/), o1From, o1To);
+  swap(idxOf(/^(?:2차|2nd)\s*옵션$/), o2From, o2To);
+  return rj;
+}
+
+/**
  * 아직 아무도 채우지 않은 작업표 빈 줄 — 배정 표식(option_text)과 옛 이름이 적힌 옵션·상품 칸을 새 이름으로(사용자 확정 2026-10-21 「2.가」).
  *   pairs = [{from, to}](선택지 이름) · productPairs = [{from, to}](상품 칸만 · 상품 이름 바꾸기).
  * ★ 무시트 작업표만 · 다른 살아 있는 공고와 같이 쓰는 탭은 건드리지 않는다(작업표 줄 맞추기와 같은 조건) · 채운 줄은 절대 안 바꾼다.
@@ -113,19 +142,20 @@ async function relabelEmptySlotsInTx(client, campaignId, pairs, productPairs = [
           AND NULLIF(btrim(COALESCE(reviewer_name, '')), '') IS NULL AND NULLIF(btrim(COALESCE(recipient_name, '')), '') IS NULL
           AND NULLIF(btrim(COALESCE(phone8, '')), '') IS NULL
         FOR UPDATE`, [camp.linked_sheet_id, camp.linked_tab_name]);
-    const { optionWriteColumns, productWriteColumns } = require('./orderLedger.service');
+    const { productWriteColumns } = require('./orderLedger.service');
     let n = 0;
     for (const r of rows) {
       const ot = String(r.option_text || '').trim();
-      const rj = r.row_json && typeof r.row_json === 'object' ? { ...r.row_json } : {};
-      const heads = Object.keys(rj);
+      const rj0 = r.row_json && typeof r.row_json === 'object' ? r.row_json : {};
       let changed = false;
       let nextOt = r.option_text;
+      let rj = { ...rj0 };
       if (map.has(ot)) {
         nextOt = map.get(ot); changed = true;
-        for (const i of optionWriteColumns(heads)) if (String(rj[heads[i]] == null ? '' : rj[heads[i]]).trim() === ot) rj[heads[i]] = nextOt;
+        rj = relabelRowCells(rj, { optFrom: [ot], optTo: nextOt });
       }
       if (pmap.size) {
+        const heads = Object.keys(rj);
         for (const i of productWriteColumns(heads)) {
           const v = String(rj[heads[i]] == null ? '' : rj[heads[i]]).trim();
           if (pmap.has(v)) { rj[heads[i]] = pmap.get(v); changed = true; }
@@ -146,4 +176,4 @@ async function relabelEmptySlotsInTx(client, campaignId, pairs, productPairs = [
   }
 }
 
-module.exports = { planOptionRenames, applyRenamePlanInTx, applyOptionRenames, relabelEmptySlotsInTx };
+module.exports = { planOptionRenames, applyRenamePlanInTx, applyOptionRenames, relabelEmptySlotsInTx, relabelRowCells };

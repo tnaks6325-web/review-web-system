@@ -269,6 +269,22 @@ function _stagedLabelMatches(label, key, productName = '') {
 }
 
 /**
+ * 「상품 · 옵션」 빈 줄(option_text 에 ' · ' 가 든 줄) 가운데 이 주문 옵션(key · 그 옵션의 공고 상품 이름)과 같은 선택인 줄 — 순수 함수.
+ *   상품 이름까지 맞는 줄 → 없으면 작업표의 「상품 · 옵션」 표식이 **상품 하나뿐**일 때만 옵션만으로 짝짓는다(공고에서 상품 표기만 고친 경우).
+ * ★ 주문 줄 고르기(_stagedSlotCandidates)와 작업보드 옵션 줄 다시 나누기(worktableOptionSlots · 결정 394)가 **이 함수 하나**를 쓴다(짝 규칙 사본 금지).
+ * @param rows [{option_text, …}] — 같은 작업표의 「상품 · 옵션」 빈 줄들
+ */
+function stagedSlotRows(rows, key, productName = '') {
+  const list = (rows || []).filter(r => r && String(r.option_text == null ? '' : r.option_text).includes(' · '));
+  if (!key || !list.length) return [];
+  const exact = productName ? list.filter(r => _stagedLabelMatches(r.option_text, key, productName)) : [];
+  if (exact.length) return exact;
+  const { parseSelectionKey } = require('./productOptions.service');
+  const products = new Set(list.map(r => parseSelectionKey(r.option_text)).filter(Boolean).map(s => _normLabel(s.productName)));
+  return products.size === 1 ? list.filter(r => _stagedLabelMatches(r.option_text, key)) : [];
+}
+
+/**
  * ★★ v2 작업표(상품 1개 + 옵션 여러 개) — 주문 옵션 키와 **같은 선택의 「상품 · 옵션」 빈 줄** 후보 (2026-10-26 로컬 전과정 실테스트에서 발견).
  *   v2 접수는 빈 줄에 `selectionKey`(「에코 미니 가습기 300ml · 화이트」)를 적고, 공고 옵션 이름은 「화이트」라
  *   `option_text = 옵션 키` 조건에 영영 안 걸렸다 → 빈 줄 10개를 두고 주문마다 **정원 밖 새 줄**이 붙었다.
@@ -297,12 +313,7 @@ async function _stagedSlotCandidates(client, { sheetId, tabName, workboardId, ke
       productName = String((po[0] && po[0].product_name) || '').trim();
     }
     await client.query('RELEASE SAVEPOINT slot_pick_staged');
-    if (!rows.length) return [];
-    const exact = productName ? rows.filter(r => _stagedLabelMatches(r.option_text, key, productName)) : [];
-    if (exact.length) return exact;
-    const { parseSelectionKey } = require('./productOptions.service');
-    const products = new Set(rows.map(r => parseSelectionKey(r.option_text)).filter(Boolean).map(s => _normLabel(s.productName)));
-    return products.size === 1 ? rows.filter(r => _stagedLabelMatches(r.option_text, key)) : [];
+    return stagedSlotRows(rows, key, productName);
   } catch (e) {
     try { await client.query('ROLLBACK TO SAVEPOINT slot_pick_staged'); } catch (_) {}
     logger.warn(`[sheetlessOrder] 「상품 · 옵션」 빈 줄 조회 실패(종전대로 진행): ${e.message}`);
@@ -1484,6 +1495,7 @@ module.exports = {
   resolveProductLabel,
   listProductChoices,
   stagedLabelMatches: _stagedLabelMatches,   // 결정 392 — 빈 줄 「상품 · 옵션」 표시 ↔ 옵션 짝(R1 옵션 인원 검사가 같은 규칙을 쓴다)
+  stagedSlotRows,                            // 결정 394 — 「상품 · 옵션」 빈 줄 후보 거르기(주문 줄 고르기와 작업보드 옵션 줄 다시 나누기가 같은 함수)
   __canAppendConfirmedOverflowOrderForTest: _canAppendConfirmedOverflowOrder,
   __pickOpenSlotForTest: _pickOpenSlot,
   __setPoolForTest,

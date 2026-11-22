@@ -951,29 +951,12 @@ function validateQuantities(next, qtyProducts, { tierProducts = null } = {}) {
 }
 
 /**
- * ★ 결정 392(R1 · 리뷰 PRRT_kwDOSEC8q866UJiP) — 작업보드 빈 줄에 깔린 옵션 표시 한 종류(label · n줄)가 새 선택지 인원과 맞나.
- *   짝 = 옵션 줄은 공고 열쇠(optKey) 그대로 · 「상품 · 옵션」 표시(sheetlessOrder.stagedLabelMatches — 주문 배정과 같은 규칙) /
- *   상품 줄(옵션 없는 상품)은 상품 이름 그대로. 짝이 정확히 하나 + n ≤ 그 선택지 새 인원일 때만 참. 그 밖(모름) = 거짓(fail-closed).
- */
-function _labelFitsNewCounts(label, n, options) {
-  const { stagedLabelMatches } = require('./sheetlessOrder.service');
-  const t = String(label == null ? '' : label).trim();
-  const hits = (options || []).filter(o => {
-    const pName = String(o.productName || '').trim();
-    if (o.unitKind === 'product') return t === pName;
-    const k = String(o.optKey || '').trim();
-    return !!k && (t === k || stagedLabelMatches(t, k, pName));
-  });
-  return hits.length === 1 && n <= Math.max(0, Math.floor(_num(hits[0].recruitTotal)));
-}
-
-/**
  * 7단계-② 인원·일건수 → 공고(같은 트랜잭션). 기존 정원 장치를 그대로 쓴다(규칙 사본 0):
  *   총 하한 = 참여·구매·바로 구매(`assertTotalFloorInTx`) · 옵션 하한 = 그 옵션 참여·구매(`usedByOption`) ·
  *   작업표 줄 = 빈 줄만 지우고 새 줄은 빈 줄로(`syncWorktableSlotsInTx` — 채워진 줄보다 적게 못 줄인다).
  * ★ 차수가 있는 공고는 거부(연결 공고는 차수를 막는다 · 사용자 확정 ②) · 날짜 다시 배치는 커밋 뒤(`after.relay`).
  */
-async function _projectQuantityInTx(client, camp, prev, next, { preferRetireIds = null, r1 = false } = {}) {
+async function _projectQuantityInTx(client, camp, prev, next, { preferRetireIds = null, r1 = false, origin = '', actor = '' } = {}) {
   const lrq = require('./linkedRecruitQuota.service');
   const reject = (reason, error) => ({ reject: { kind: 'quantity', out: { applied: false, reason }, error } });
   // 차수 표가 없는 DB(42P01)는 차수 없음 — SAVEPOINT 로 감싸 실패가 트랜잭션을 깨지 않게(검토 2026-10-21)
@@ -1003,31 +986,16 @@ async function _projectQuantityInTx(client, camp, prev, next, { preferRetireIds 
     if (CANON.workKind(prev.work_kind || next.work_kind) === 'qna' && (total !== prevTotal || changed.length)) {
       return reject('qna_calendar_locked', 'Q&A 작업은 접수 뒤 건수·하루 건수를 바꿀 수 없습니다 — 일정이 끝날 때 「추가 모집」으로 늘려 주세요.');
     }
-    /* ★ 결정 392(R1 · 임시 — RW-A2 「옵션별 목표로 빈 줄 다시 나누기」가 풀 것) — 단계 저장에서 선택지(옵션·상품)가 2개 이상인 작업의 선택지별 인원이 바뀌면
-       ① 리뷰타입을 섞어 쓰는 작업 = 거절(줄마다 깔린 리뷰옵션 배분이 어긋난다 · 사용자 확정 2026-11-20)
-       ② 작업보드 빈 줄에 옵션 표시가 2종 이상 = 거절(뒤에서부터 지우고 표시 없이 더해 옵션 표시가 어긋난다 · 레드 13)
-       ③ 표시가 **1종**이어도 새 인원과 어긋나면 거절(리뷰 PRRT_kwDOSEC8q866UJiP — 블랙 10/화이트 0 · 10줄 모두 블랙 → 5/5 가 통과해
-          공고는 5/5 인데 줄은 전부 블랙으로 남았다: 총원이 같아 줄 맞추기가 안 돈다). 통과 = 그 표시가 선택지 하나와 짝지어지고
-          표시 줄 수 ≤ 그 선택지의 새 인원(줄 맞추기는 빈 줄을 지우거나 표시 없이 더할 뿐이라 이 부등식이 저장 뒤에도 지켜진다).
-          짝 못 지음(모르는 표시 · 여러 선택지에 걸림) = 거절(fail-closed). 표시 없는 줄만 = 통과.
-       ★ 단계 저장(r1)에만 건다 — 단계를 안 바꾼 일반 인원 저장은 main 에서도 같은 어긋남이 나지만 종전대로 둔다(RW-D 정책 대기 · r1QtyTiersPg [2p4]).
-       선택지가 하나뿐이면 그 인원 = 총원이라 종전 줄 맞추기와 같다(세라모사이드 모양 통과). */
-    if (r1) {
-      const countChanged = (pn.options || []).filter(o => { const b = before.get(keyOf(o)); return !b || _num(b.recruitTotal) !== _num(o.recruitTotal); });
-      if (countChanged.length && (pn.options || []).length >= 2) {
-        const { tierRejectText } = require('./qtyTiersEdit.service');
-        if (CANON.reviewType(next.review_type) === 'mixed') return reject('option_rows_review_mix', tierRejectText('option_rows_review_mix'));
-        if (camp.linked_sheet_id && camp.linked_tab_name) {
-          const { rows: lab } = await client.query(
-            `SELECT btrim(option_text) AS label, COUNT(*)::int AS n FROM campaign_participants
-              WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND active = TRUE AND btrim(COALESCE(option_text, '')) <> ''
-              GROUP BY 1 LIMIT 3`,
-            [camp.linked_sheet_id, camp.linked_tab_name]);
-          if (lab.length >= 2 || (lab.length === 1 && !_labelFitsNewCounts(lab[0].label, Number(lab[0].n), pn.options || []))) {
-            return reject('quantity_tiers_option_counts', tierRejectText('quantity_tiers_option_counts'));
-          }
-        }
-      }
+    /* ★ 결정 394(RW-A2 · RW-D · 사용자 확정 2026-11-22) — 선택지별 인원이 **실제로 바뀐** 저장만 작업보드 빈 줄 옵션 표시를 다시 나눈다
+       (worktableOptionSlots · 아래 줄 수 맞추기 뒤). 일건수·리뷰 비율만 바뀐 저장 · 자동 맞춤(reconcile) 저장은 안 돈다(사용자 답 2 · 레드 H9).
+       결정 392 의 임시 거절(quantity_tiers_option_counts)은 이 기능으로 바꿨다 — 맞출 수 없으면 거절 대신 통째 건너뛰고 저장은 된다(사용자 답 1·4). */
+    const countChanged = (pn.options || []).filter(o => { const b = before.get(keyOf(o)); return !b || _num(b.recruitTotal) !== _num(o.recruitTotal); });
+    const rebalanceWanted = countChanged.length > 0 && origin !== 'reconcile';
+    /* ★ 결정 392(R1 · 사용자 확정 2026-11-20) — 단계 저장에서 리뷰타입을 섞어 쓰는 작업의 선택지별 인원 변경은 거절(그대로 둔다 ·
+       11-22 답 3 「다시 나눈 뒤 모든 빈 줄이 표시를 가지면 다시 나눈다」는 일반 인원 저장(RW-D) 질문에 대한 답). */
+    if (r1 && countChanged.length && (pn.options || []).length >= 2 && CANON.reviewType(next.review_type) === 'mixed') {
+      const { tierRejectText } = require('./qtyTiersEdit.service');
+      return reject('option_rows_review_mix', tierRejectText('option_rows_review_mix'));
     }
     const { rows: optRows } = await client.query(
       `SELECT id, opt_key, product_name, unit_kind, recruit_total, daily_limit FROM campaign_options WHERE campaign_id = $1 ORDER BY id FOR UPDATE`, [camp.id]);
@@ -1056,11 +1024,28 @@ async function _projectQuantityInTx(client, camp, prev, next, { preferRetireIds 
     if (sets.length) await client.query(`UPDATE recruit_campaigns SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $1`, params);
     // 작업표 줄
     let worktable = null;
-    if (total !== prevTotal || total !== campTotal) worktable = await lrq.syncWorktableSlotsInTx(client, camp, total, 'bidir-quota', { preferRetireIds });
+    const slots = rebalanceWanted ? require('./worktableOptionSlots.service') : null;
+    if (total !== prevTotal || total !== campTotal) {
+      // ★ 결정 394 — 줄이기 순위: 구조가 고른 줄(지운·마감 옵션) → 인원이 넘치는 선택지의 옮길 줄 → 나머지 뒤에서부터 → 사람 기록 달린 빈 줄(맨 뒤 · 막지는 않음)
+      const pref = slots ? await slots.retirePreferenceInTx(client, camp) : {};
+      const merged = (preferRetireIds || (pref.preferRetireIds && pref.preferRetireIds.size)) ? new Set([...(preferRetireIds || []), ...(pref.preferRetireIds || [])]) : null;
+      worktable = await lrq.syncWorktableSlotsInTx(client, camp, total, 'bidir-quota', { preferRetireIds: merged, protectIds: pref.protectIds || null });
+    }
     if (total > prevTotal) {
       await require('./campaignHold.service').maybeReopenAfterQuotaIncrease(client, camp.id, prevTotal, { savepoint: true }).catch(() => false);
     }
-    return { applied: sets.length > 0 || changed.length > 0 || !!worktable, after: { worktable, relay: total !== prevTotal || total !== campTotal || _num(pn.daily_limit) !== _num(pp.daily_limit) } };
+    let relay = total !== prevTotal || total !== campTotal || _num(pn.daily_limit) !== _num(pp.daily_limit);
+    let optionSlots = null;
+    if (slots) {
+      optionSlots = await slots.rebalanceOptionSlotsInTx(client, camp, { by: 'bidir-rebalance', actor, origin, reviewMix: CANON.reviewType(next.review_type) === 'mixed' });
+      // ★ H5 — 옮긴 줄이 있으면 총원이 그대로여도 장부를 다시 만들고(force) 빈 줄 날짜를 다시 배치한다
+      if (optionSlots.status === 'applied') {
+        worktable = { ...(worktable && worktable.synced ? worktable : optionSlots.worktable), rebalanced: true };
+        relay = true;
+      }
+      delete optionSlots.worktable;
+    }
+    return { applied: sets.length > 0 || changed.length > 0 || !!worktable, after: { worktable, relay }, optionSlots };
   } catch (e) {
     if (e && /^recruit_quota/.test(String(e.code || ''))) return reject(e.code, e.message);
     throw e;
@@ -1632,6 +1617,7 @@ async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTo
     if (r.applied) applied.push('review_fee');
   }
   let after = null;
+  let optionSlots = null;
   // 7단계-③ 주말 제외 → 공고(주말·공휴일 모집 닫힘 판정 단일 출처 campaignWeekend 가 읽는 칸). 날짜별로 직접 정해 둔 인원은 그대로 두고
   //   (사용자 확정 2026-10-21 「가」) 작업표 빈 줄 날짜만 커밋 뒤 다시 배치한다.
   if (has('skip_weekends')) {
@@ -1648,9 +1634,13 @@ async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTo
     if (rowCount) applied.push('required_memo');
   }
   if (extra.quantityChanged) {
-    const r = await _projectQuantityInTx(client, camp, extra.prev || {}, next, { preferRetireIds: structureOut && structureOut.preferRetireIds, r1: extra.r1 === true });
+    const r = await _projectQuantityInTx(client, camp, extra.prev || {}, next, { preferRetireIds: structureOut && structureOut.preferRetireIds, r1: extra.r1 === true,
+      origin: extra.origin || '', actor: extra.actor || '' });
     if (r.reject) return { reject: r.reject };
     if (r.applied) applied.push('quantity');
+    // ★ 결정 394 — 응답 결과 칸(인트라넷 저장 결과 알림이 읽는다 · 해당 없음은 싣지 않는다 = 종전 응답 모양)
+    if (r.optionSlots && r.optionSlots.status !== 'not_applicable') optionSlots = r.optionSlots;
+    if (r.optionSlots && r.optionSlots.status === 'applied') applied.push('option_slots');
     if (r.after) after = { ...(after || {}), ...r.after, relay: !!((after && after.relay) || r.after.relay) };
   }
   // ★ 결정 392(R1) — 인원·옵션 줄을 맞춘 **뒤** 공고 단계 표를 다시 쓴다(by_option 짝이 맞은 옵션 줄로)
@@ -1796,7 +1786,7 @@ async function projectToCampaignInTx(client, camp, next, writtenKeys, productsTo
       if (rowCount) applied.push('channel');
     }
   }
-  return { applied, after, qtyTiers: qtyTiersOut };
+  return { applied, after, qtyTiers: qtyTiersOut, optionSlots };
 }
 
 /**
@@ -1897,7 +1887,8 @@ async function finishSharedPatchAfterCommit({ workOrderId, camp, campaign }) {
   const wo = { id: workOrderId };
   if (camp && campaign.after) {
       const lrq = require('./linkedRecruitQuota.service');
-      try { if (campaign.after.worktable) campaign.after.rebuilt = await lrq.rebuildWorktableProjection(campaign.after.worktable, 'bidir-quota'); }
+      // ★ 결정 394(H5) — 빈 줄 옵션 표시를 다시 나눴으면(rebalanced) 늘고 준 줄이 0이어도 장부를 다시 만든다(force)
+      try { if (campaign.after.worktable) campaign.after.rebuilt = await lrq.rebuildWorktableProjection(campaign.after.worktable, 'bidir-quota', campaign.after.worktable.rebalanced === true); }
       catch (e) { logger.warn(`[bidir/apply] ${wo.id} 작업표 장부 다시 만들기 실패(저장은 끝남): ${e.message}`); }
       // 리뷰옵션을 다시 나눴으면 장부도(검수가 장부의 리뷰옵션을 읽는다) — 줄 수 맞추기에서 이미 다시 만들었으면 건너뛴다
       try {
@@ -1915,6 +1906,19 @@ async function finishSharedPatchAfterCommit({ workOrderId, camp, campaign }) {
         catch (e) { logger.warn(`[bidir/apply] ${wo.id} 작업표 날짜 다시 배치 실패(저장은 끝남): ${e.message}`); }
       }
     }
+}
+
+/** ★ 결정 394 — 보낸 상품 구성(mine)이 지금 오더와 선택지별 인원이 다른가(잠금 순서용 예측 · 넓게 · 못 읽으면 false = 종전). */
+function _optionCountIntent(wo, mine) {
+  try {
+    if (!mine || !Object.prototype.hasOwnProperty.call(mine, 'product_options_json')) return false;
+    const counts = st => {
+      const pre = _prefillOf(st);
+      return (pre.options || []).map(o => `${String(o.productName || '').trim()}|${o.unitKind === 'product' ? '' : String(o.optKey || '').trim()}=${_num(o.recruitTotal)}`).sort().join(',');
+    };
+    const a = counts(wo), b = counts({ ...wo, ...mine });
+    return a !== b && (_prefillOf({ ...wo, ...mine }).options || []).length >= 2;
+  } catch (_) { return false; }
 }
 
 async function applySharedPatch(p, inTxClient = null) {
@@ -2041,12 +2045,18 @@ async function applySharedPatch(p, inTxClient = null) {
     let tierTabLock = null;
     const _anyTiers = st => (_parseList(st && st.product_options_json) || []).some(_tiersOn);
     const tierIntent = p.origin === 'intranet' && p.tiersCapable === true && (_anyTiers(wo) || _anyTiers(p.mine));
+    /* ★★ 결정 394(레드 H4) — 선택지별 인원이 바뀔 것 같은 저장(보낸 상품 구성의 선택지 인원 ≠ 지금 오더)도 R1 과 같은 자리에서 탭 잠금을 먼저 잡는다
+       → 다시 나누는 동안 주문 기록이 SKIP LOCKED 로 빈 줄을 건너뛰어 정원 밖 새 줄·보류가 생기지 않고 기다린다.
+       ★ 예측만 넓게(이름이 시스템마다 달라 더 잡을 수는 있다) · 바깥 트랜잭션(inTxClient)은 잡지 않는다(그쪽 잠금 순서를 모른다 —
+         다시 나누기가 기다리지 않는 시도 잠금으로 대신한다) · 탭이 그새 바뀌었으면 거절하지 않는다(R1 과 다름 — 일반 저장을 새로 막지 않는다). */
+    const optIntent = !tierIntent && !inTxClient && p.origin !== 'reconcile' && _optionCountIntent(wo, p.mine);
     if (peek) {
-      if (tierIntent) {
+      if (tierIntent || optIntent) {
         const { rows: lk } = await client.query('SELECT linked_sheet_id, linked_tab_name FROM recruit_campaigns WHERE id = $1', [peek.id]);
         if (lk[0] && lk[0].linked_sheet_id && lk[0].linked_tab_name) {
-          tierTabLock = `sheetless_worktable:${lk[0].linked_sheet_id}:${lk[0].linked_tab_name}`;
-          await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [tierTabLock]);
+          const key = `sheetless_worktable:${lk[0].linked_sheet_id}:${lk[0].linked_tab_name}`;
+          if (tierIntent) tierTabLock = key;
+          await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [key]);
         }
       }
       const { rows } = await client.query('SELECT * FROM recruit_campaigns WHERE id = $1 AND archived_at IS NULL FOR UPDATE', [peek.id]);
@@ -2441,7 +2451,7 @@ async function applySharedPatch(p, inTxClient = null) {
     if (camp && !recArchived && (plan.writes.length || rec)) {   // 결정 312: 보관 공고에는 쓰지 않는다
       campaign = await projectToCampaignInTx(client, camp, next, writtenKeys, productsTouched,
         { prev: theirs, payTouched, urlTouched: urlTouched || !!(rec && recPlan.force.urlTouched), guideTouched, inflowUnitTouched: inflowUnitTouched || !!(rec && recPlan.force.inflow), quantityChanged: quantityChanged || !!(rec && recPlan.force.quantity), structureTouched, structure, reviewTypeChanged: reviewTypeWritten || writtenKeys.has('review_type_mix'), actor: p.actor || p.origin,
-          r1: tiersTouched === true });
+          r1: tiersTouched === true, origin: p.origin });
       if (campaign.reject) {
         const { campaignSyncNotice } = require('./campaignPayAmountSync.service');
         return await _abort(client, 409, { ok: false, code: 'campaign_rejected', sync_version: curVersion,
@@ -2516,7 +2526,9 @@ async function applySharedPatch(p, inTxClient = null) {
     // 자기 사본과 같다고 적는다(remote_sync_version) — 안 적으면 늦게 도착한 옛 송신이 방금 저장한 수정을 되돌린다(검토 2026-10-20).
     const pushBack = p.origin === 'intranet' && (managerRepair || _pushBackKeys(p.mine, next).length > 0);   // 쓴 칸이 없어도(번호만) 사본이 다를 수 있다
     return { status: 200, ...(inTxClient && afterCommit ? { afterCommit } : {}), body: { ok: true, data: saved, sync_version: newVersion, push_back: pushBack, applied: plan.writes.map(w => w.path), campaign_applied: campaign.applied, overwritten,
-      ...(closure.restored.length ? { closed_options: closure.restored } : {}) } };
+      ...(closure.restored.length ? { closed_options: closure.restored } : {}),
+      // ★ 결정 394 — 작업보드 빈 줄 옵션 표시 다시 나누기 결과(선택지별 인원이 바뀐 저장에서만 · 옛 인트라넷은 모르는 칸을 버린다)
+      ...(campaign.optionSlots ? { option_slots: campaign.optionSlots } : {}) } };
   } catch (e) {
     try { if (!inTxClient) await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     if (['40P01', '55P03', '57014'].includes(e && e.code)) {

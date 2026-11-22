@@ -108,7 +108,7 @@ function _worktableSlotEmpty(row) {
  * 호출자는 동일 트랜잭션에서 작업오더/공고 정원을 갱신하므로, 슬롯 축소 실패 시
  * 두 저장값도 함께 롤백된다. 투영 장부 재생성은 커밋 후 별도 수행한다.
  */
-async function syncWorktableSlotsInTx(client, campaign, target, by = 'quota-sync', { preferRetireIds = null } = {}) {
+async function syncWorktableSlotsInTx(client, campaign, target, by = 'quota-sync', { preferRetireIds = null, protectIds = null } = {}) {
   if (!campaign || !campaign.linked_sheet_id || !campaign.linked_tab_name) return { synced: false, reason: 'no_worktable_link' };
   const { isSheetless } = require('../utils/sheetlessScope');
   if (!await isSheetless(client, campaign.linked_sheet_id, campaign.linked_tab_name)) return { synced: false, reason: 'not_sheetless' };
@@ -138,7 +138,9 @@ async function syncWorktableSlotsInTx(client, campaign, target, by = 'quota-sync
   await _assertQnaCalendarUnchanged(client, campaign, delta);
   if (delta.retire) {
     // 7단계-④: 지우거나 마감한 선택지의 빈 줄을 먼저 정리한다(preferRetireIds) — 나머지는 종전대로 뒤에서부터
-    const prefer = id => (preferRetireIds && preferRetireIds.has(String(id)) ? 0 : 1);
+    // ★ 결정 394: 사람 기록이 달린 빈 줄(protectIds)은 **맨 뒤 순위**로만 미룬다(막지 않는다 — 막으면 오늘 되는 인원 저장이
+    //   recruit_quota_worktable_below_used 로 새로 막힌다). 넘기지 않으면 종전 순서 그대로.
+    const prefer = id => (preferRetireIds && preferRetireIds.has(String(id)) ? 0 : (protectIds && protectIds.has(String(id)) ? 2 : 1));
     const ids = rows.filter(_worktableSlotEmpty).sort((a, b) => (prefer(a.id) - prefer(b.id)) || (Number(b.seq) - Number(a.seq))).slice(0, delta.retire).map(r => r.id);
     if (ids.length !== delta.retire) throw quotaError('줄일 수 있는 빈 작업보드 슬롯이 부족합니다.', 'recruit_quota_worktable_below_used');
     await client.query(

@@ -169,34 +169,43 @@ const OPT = (b = 5, w = 5, tiers = true) => ([{
     await rejects(B, await r1Patch(B, SERA_EDIT), { tiers: 1 }, 'rounds_exist', /차수로 운영하는/);
   });
 
-  await ok('[2l] 임시 — 빈 줄에 옵션 표시 2종인 작업보드 + 옵션 인원 변경 → quantity_tiers_option_counts(금액만은 통과)', async () => {
-    const A = await setup('optlab', OPT());
-    await pool.query(`UPDATE campaign_participants SET option_text = CASE WHEN seq <= 5 THEN '블랙' ELSE '화이트' END WHERE sheet_id = $1 AND tab_name = $2`, [A.sheet, A.tab]);
-    await rejects(A, await r1Patch(A, p => { p[0].options[0].count = 6; p[0].options[1].count = 4; p[0].qty_tiers.rows[1].people = 4; p[0].qty_tiers.rows[3].people = 3; }),
-      { tiers: 1 }, 'quantity_tiers_option_counts', /옵션별 인원을 함께 바꿀 수 없습니다/);
-    const r = await A.putSource(await r1Patch(A, p => { p[0].qty_tiers.rows[2].amount = 41000; }), { tiers: 1 });
-    assert.equal(r.status, 200, '옵션 인원 그대로면 통과 ' + JSON.stringify(r.body));
-  });
-
-  /* ★ 결정 392 보강(리뷰 PRRT_kwDOSEC8q866UJiP) — 옵션 표시가 **한 종류**만 깔린 작업보드도 새 옵션 인원과 어긋나면 거절.
-       표시 줄 수 > 그 옵션의 새 인원 · 짝 못 짓는 표시 = 거절(fail-closed) · 표시 없는 줄만 · 표시 줄 수 ≤ 새 인원 = 통과. */
+  /* ★ 결정 394(RW-A2) — 결정 392 의 임시 거절(quantity_tiers_option_counts)을 「빈 줄 옵션 표시 다시 나누기」로 바꿨다.
+       단계 저장 + 선택지별 인원 변경 = 200 · 빈 줄 표시가 새 인원에 맞춰짐(맞출 수 없으면 통째 건너뛰고 저장은 됨 + 결과 칸).
+       검사 의미 강화: 종전엔 「거절로 어긋남을 막음」만 봤고, 이제 「저장 뒤 빈 줄 표시 = 새 인원」까지 본다. */
   const SIX_FOUR = p => { p[0].options[0].count = 6; p[0].options[1].count = 4; p[0].qty_tiers.rows[1].people = 4; p[0].qty_tiers.rows[3].people = 3; };
   const label = (A, text, maxSeq = 9999) => pool.query(`UPDATE campaign_participants SET option_text = $3 WHERE sheet_id = $1 AND tab_name = $2 AND seq <= $4`, [A.sheet, A.tab, text, maxSeq]);
-  await ok('[2p] 단일 옵션 표시 — 10줄 모두 블랙 + 6/4 = quantity_tiers_option_counts · 「상품 · 옵션」 표시도 같음 · 짝 못 짓는 표시 = 거절', async () => {
-    const A = await setup('lab1', OPT());
-    await label(A, '블랙');
-    await rejects(A, await r1Patch(A, SIX_FOUR), { tiers: 1 }, 'quantity_tiers_option_counts', /옵션별 인원을 함께 바꿀 수 없습니다/);
+  const emptyLabels = async A => { const { rows } = await pool.query(`SELECT COALESCE(btrim(option_text), '') l, COUNT(*)::int n FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active GROUP BY 1 ORDER BY 1`, [A.sheet, A.tab]);
+    return Object.fromEntries(rows.map(r => [r.l, r.n])); };
+  const okR1 = async (A, patch, status = 'applied') => { const r = await A.putSource(patch, { tiers: 1 }); assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.option_slots && r.body.option_slots.status, status, String(JSON.stringify(r.body.option_slots))); return r; };
+  await ok('[2l] 결정 394 — 빈 줄 옵션 표시 2종 + 단계 저장의 옵션 인원 변경 → 200 + 빈 줄 6/4 로 다시 나눔(금액만 = 결과 칸 없음)', async () => {
+    const A = await setup('optlab', OPT());
+    await pool.query(`UPDATE campaign_participants SET option_text = CASE WHEN seq <= 5 THEN '블랙' ELSE '화이트' END WHERE sheet_id = $1 AND tab_name = $2`, [A.sheet, A.tab]);
+    await okR1(A, await r1Patch(A, SIX_FOUR));
+    assert.deepEqual(await emptyLabels(A), { 블랙: 6, 화이트: 4 });
+    assert.deepEqual((await A.opts()).map(x => [x.opt_key, Number(x.recruit_total)]), [['블랙', 6], ['화이트', 4]]);
     const r = await A.putSource(await r1Patch(A, p => { p[0].qty_tiers.rows[2].amount = 41000; }), { tiers: 1 });
-    assert.equal(r.status, 200, '옵션 인원 그대로(단계 금액만)면 통과 ' + JSON.stringify(r.body));
-    const B = await setup('lab1sel', OPT());
-    await label(B, '탈취제 · 블랙');
-    await rejects(B, await r1Patch(B, SIX_FOUR), { tiers: 1 }, 'quantity_tiers_option_counts', /옵션별 인원/);
-    const C = await setup('lab1unk', OPT());
-    await label(C, '모르는 표시', 3);
-    await rejects(C, await r1Patch(C, SIX_FOUR), { tiers: 1 }, 'quantity_tiers_option_counts', /옵션별 인원/);
+    assert.equal(r.status, 200, '옵션 인원 그대로면 통과 ' + JSON.stringify(r.body)); assert.equal(r.body.option_slots, undefined, '옵션 인원 그대로 = 다시 나누기 안 돎');
   });
 
-  await ok('[2p2] 리뷰 재현 모양 — 블랙 10/화이트 0 · 빈 줄 10개 모두 블랙 → 5/5 + 단계 금액 변경 = 거절(공고 5/5 · 줄 전부 블랙으로 남지 않게)', async () => {
+  await ok('[2p] 단일 옵션 표시 — 10줄 모두 블랙 + 6/4 = 블랙 6·화이트 4 · 「상품 · 옵션」 표시도 짝 지어 나눔 · 짝 못 짓는 표시 = 건너뜀(저장은 됨)', async () => {
+    const A = await setup('lab1', OPT());
+    await label(A, '블랙');
+    await okR1(A, await r1Patch(A, SIX_FOUR));
+    assert.deepEqual(await emptyLabels(A), { 블랙: 6, 화이트: 4 }, '종전(리뷰 재현) = 공고 6/4 인데 줄 전부 블랙');
+    const B = await setup('lab1sel', OPT());
+    await label(B, '탈취제 · 블랙');
+    await okR1(B, await r1Patch(B, SIX_FOUR));
+    assert.deepEqual(await emptyLabels(B), { '탈취제 · 블랙': 6, 화이트: 4 });
+    const C = await setup('lab1unk', OPT());
+    await label(C, '모르는 표시', 3);
+    const r = await okR1(C, await r1Patch(C, SIX_FOUR), 'skipped');
+    assert.equal(r.body.option_slots.reason, 'label_unmatched');
+    assert.deepEqual(await emptyLabels(C), { '': 7, '모르는 표시': 3 }, '건너뛰면 줄 표시 그대로');
+    assert.deepEqual((await C.opts()).map(x => [x.opt_key, Number(x.recruit_total)]), [['블랙', 6], ['화이트', 4]], '저장은 됨');
+  });
+
+  await ok('[2p2] 리뷰 재현 모양 — 블랙 10/화이트 0 · 빈 줄 10개 모두 블랙 → 5/5 + 단계 금액 변경 = 200 · 빈 줄 5/5', async () => {
     const P = [{ name: '탈취제', url: 'https://www.coupang.com/vp/products/78', option_schema_version: 2, product_mode: 'opt',
       base: { pay: 0, count: 0, daily: 0, review_type_mix: [] }, options: [
         { option_1: { name: '', value: '블랙' }, label: '블랙', url: '', pay: 15000, count: 10, daily: 2, review_type_mix: [] },
@@ -204,21 +213,21 @@ const OPT = (b = 5, w = 5, tiers = true) => ([{
       qty_tiers: { mode: 'common', buy_method: 'qty', rows: [{ option: null, qty: 2, people: 3, amount: 30000 }, { option: null, qty: 1, people: 7, amount: 15000 }] } }];
     const A = await setup('lab10', P);
     await label(A, '블랙');
-    await rejects(A, await r1Patch(A, p => { p[0].options[0].count = 5; p[0].options[1].count = 5; p[0].options[1].daily = 1; p[0].options[0].daily = 1; p[0].qty_tiers.rows[0].amount = 29000; }),
-      { tiers: 1 }, 'quantity_tiers_option_counts', /옵션별 인원/);
+    await okR1(A, await r1Patch(A, p => { p[0].options[0].count = 5; p[0].options[1].count = 5; p[0].options[1].daily = 1; p[0].options[0].daily = 1; p[0].qty_tiers.rows[0].amount = 29000; }));
+    assert.deepEqual(await emptyLabels(A), { 블랙: 5, 화이트: 5 });
   });
 
-  await ok('[2p3] 단일 옵션 표시가 새 인원 안 — 블랙 5줄(나머지 표시 없음) → 6/4 통과 · 이어서 4/6(블랙 5줄 > 4) = 거절', async () => {
+  await ok('[2p3] 단일 옵션 표시가 새 인원 안 — 블랙 5줄(나머지 표시 없음) → 6/4: 모든 빈 줄 표시 · 이어서 4/6 도 다시 나눔', async () => {
     const A = await setup('lab5', OPT());
     await label(A, '블랙', 5);
-    let r = await A.putSource(await r1Patch(A, SIX_FOUR), { tiers: 1 });
-    assert.equal(r.status, 200, JSON.stringify(r.body));
+    await okR1(A, await r1Patch(A, SIX_FOUR));
     assert.deepEqual((await A.opts()).map(x => [x.opt_key, Number(x.recruit_total)]), [['블랙', 6], ['화이트', 4]]);
-    await rejects(A, await r1Patch(A, p => { p[0].options[0].count = 4; p[0].options[1].count = 6; p[0].qty_tiers.rows[1].people = 2; p[0].qty_tiers.rows[3].people = 5; }),
-      { tiers: 1 }, 'quantity_tiers_option_counts', /옵션별 인원/);
+    assert.deepEqual(await emptyLabels(A), { 블랙: 6, 화이트: 4 });
+    await okR1(A, await r1Patch(A, p => { p[0].options[0].count = 4; p[0].options[1].count = 6; p[0].qty_tiers.rows[1].people = 2; p[0].qty_tiers.rows[3].people = 5; }));
+    assert.deepEqual(await emptyLabels(A), { 블랙: 4, 화이트: 6 });
   });
 
-  await ok('[2p4] 기존 동작 불변 — 단계 없는 상품의 일반 인원 저장(단계 안 바꿈)은 표시 한 종류여도 종전대로 200(RW-D 정책 대기 · 이 PR 에서 새로 막지 않음)', async () => {
+  await ok('[2p4] 일반 인원 저장(단계 안 바꿈)도 결정 394 부터 다시 나눔 — 표시 한 종류(블랙 10) → 6/4 = 200 · 빈 줄 6/4', async () => {
     const A = await setup('labgen', OPT(5, 5, false));
     await label(A, '블랙');
     const cur = await A.wo();
@@ -227,6 +236,7 @@ const OPT = (b = 5, w = 5, tiers = true) => ([{
     const r = await A.putSource({ product_options_json: json, product_option: require('../src/utils/orderProductSummary').productSummaryText(json), pay_amount: 15000 * 6 + 20000 * 4 });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.deepEqual((await A.opts()).map(x => [x.opt_key, Number(x.recruit_total)]), [['블랙', 6], ['화이트', 4]]);
+    assert.deepEqual(await emptyLabels(A), { 블랙: 6, 화이트: 4 });
   });
 
   /* ★ 결정 392 보강(리뷰 PRRT_kwDOSEC8q866UJiT) — 배송 혼합 오더: 판정 = 못 고침(저장 409 와 같은 사유 · 단일 출처). */
