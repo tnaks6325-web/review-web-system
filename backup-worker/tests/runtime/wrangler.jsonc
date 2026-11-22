@@ -7,6 +7,7 @@
   "vars": {
     "IMAGE_BACKUP_ALLOWED_ROOT_IDS": "[\"root_0123456789\"]",
     "IMAGE_BACKUP_EXCLUDED_ROOT_IDS": "[\"excluded_0123456789\"]",
+    "IMAGE_BACKUP_REFERENCED_ROOT_IDS": "[\"mydrive_0123456789\"]",
     "IMAGE_BACKUP_API_KEY": "unit-test-only-not-a-production-secret"
   },
   "r2_buckets": [
