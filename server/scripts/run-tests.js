@@ -59,6 +59,18 @@ if (process.env.TEST_LIVE_SERVICES !== '1') {
   ]) childEnv[key] = '';
 }
 
+/* ★ 파일마다 시간초과(기본 2분). 무거운 PGlite 전체 마이그레이션 시험만 이름으로 늘린다(결정 396).
+ *   CI 러너는 이 맥보다 약 3배 느리다 — r1QtyTiersPg 는 단독 32초인데 CI 4병렬에서 2분을 넘겨 main 점검이 번갈아 빨개졌다.
+ *   ★ 상한 5분 · 목록 밖은 그대로 2분 · SIGKILL 그대로(결정 276 완화 금지). */
+const DEFAULT_TIMEOUT_MS = 120_000;
+const MAX_TIMEOUT_MS = 300_000;
+const SLOW_TEST_TIMEOUT_MS = {
+  'r1QtyTiersPg.test.js': 300_000,
+};
+function timeoutFor(name) {
+  return Math.min(MAX_TIMEOUT_MS, SLOW_TEST_TIMEOUT_MS[name] || DEFAULT_TIMEOUT_MS);
+}
+
 let passed = 0;
 const failures = [];
 const startedAt = Date.now();
@@ -72,7 +84,7 @@ function runOne(name) {
       cwd: SERVER_DIR,
       env: childEnv,
       encoding: 'utf8',
-      timeout: 120_000,
+      timeout: timeoutFor(name),
       // ★ SIGKILL — 앱 코드가 SIGTERM 리스너를 달면(utils/sse.js) 기본 종료가 꺼져 시간초과 신호가 무시되고,
       //   멈춘 시험 하나가 실패로 보고되지 않은 채 점검 전체를 영원히 붙잡는다(결정 기록 참조 · 2026-10-21 실측 3시간+).
       killSignal: 'SIGKILL',
@@ -82,7 +94,7 @@ function runOne(name) {
       const output = `${stdout || ''}${stderr || ''}`;
       if (!error) return resolve({ name, ok: true, output });
       const reason = error.killed && error.signal
-        ? `timed out after 120 seconds (${error.signal})`
+        ? `timed out after ${timeoutFor(name) / 1000} seconds (${error.signal})`
         : (error.code != null ? `exit ${error.code}` : error.message);
       resolve({ name, ok: false, reason, output });
     });
