@@ -43,8 +43,14 @@ pool.on('error', (err) => {
   } catch (_) { /* noop */ }
 });
 
-pool.on('connect', () => {
+pool.on('connect', (client) => {
   logger.info('PostgreSQL: 새 연결 생성');
+  // 결정 368 보강: 빌려 간(checked-out) 연결은 위 pool 'error' 수신기를 잃는다. 그 상태에서
+  // 연결이 끊기면 처리 안 된 'error' 이벤트가 uncaughtException → 서버 전체 종료가 된다.
+  // 기록만 한다 — 진행 중 쿼리는 그대로 실패로 돌아가고, 끊긴 연결은 pg 가 버린다.
+  client.on('error', (err) => {
+    logger.error('PostgreSQL client error:', err && err.message);
+  });
 });
 
 module.exports = pool;
