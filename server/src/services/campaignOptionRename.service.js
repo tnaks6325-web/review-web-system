@@ -129,7 +129,7 @@ function relabelRowCells(rowJson, { optFrom = [], optTo = null, productFrom = []
 }
 
 /**
- * ★ 결정 400 — v2 「상품 · 옵션」 빈 줄(표시 「티셔츠 · XL」 · 1·2차옵션 칸)의 이름 바꾸기 계획(순수 함수).
+ * ★ 결정 401 — v2 「상품 · 옵션」 빈 줄(표시 「티셔츠 · XL」 · 1·2차옵션 칸)의 이름 바꾸기 계획(순수 함수).
  *   종전엔 표시가 옵션 이름과 **정확히 같은** 빈 줄(v1)만 따라가, v2 빈 줄은 옛 이름에 묶여 새 이름 바로 구매가 「빈 줄 없음」이 됐다(결정 291·394 사각).
  *   짝 = 주문 줄 고르기 함수(sheetlessOrder.stagedSlotRows — 상품까지 맞음 → 없으면 표시 상품이 하나뿐일 때만 옵션만) 그대로:
  *     이름 바꾸기 **전** 선택지 목록(지금 원장의 새 이름을 옛 이름으로 되돌린 것)으로 읽어, 이번에 이름을 바꾼 옵션 **하나에만** 걸리는 줄만 바꾼다.
@@ -230,7 +230,7 @@ async function relabelEmptySlotsInTx(client, campaignId, pairs, productPairs = [
           AND NULLIF(btrim(COALESCE(phone8, '')), '') IS NULL
         FOR UPDATE`, [camp.linked_sheet_id, camp.linked_tab_name]);
     const { productWriteColumns } = require('./orderLedger.service');
-    // ★ 결정 400 — v2 「상품 · 옵션」 빈 줄도 따라간다(같은 줄 범위 · 같은 잠금 · 짝 = 주문 줄 고르기 함수 · 모르면 그 줄만 그대로).
+    // ★ 결정 401 — v2 「상품 · 옵션」 빈 줄도 따라간다(같은 줄 범위 · 같은 잠금 · 짝 = 주문 줄 고르기 함수 · 모르면 그 줄만 그대로).
     //   주문 쪽 「상품 · 옵션」 짝짓기를 끄는 스위치(WORKTABLE_STAGED_OPTION_MATCH=0)면 주문도 이 줄을 안 쓰므로 바꾸지 않는다(종전).
     let staged = { changes: new Map(), skipped: 0 };
     if (map.size && process.env.WORKTABLE_STAGED_OPTION_MATCH !== '0' && rows.some(r => String(r.option_text || '').includes(' · '))) {

@@ -1,6 +1,6 @@
 'use strict';
 /**
- * optionRenameV2SlotsNativePg.test.js — 결정 400 동시성 · **실제 PostgreSQL**(연결 여러 개 · 잠금 대기를 pg_blocking_pids 로 확인).
+ * optionRenameV2SlotsNativePg.test.js — 결정 401 동시성 · **실제 PostgreSQL**(연결 여러 개 · 잠금 대기를 pg_blocking_pids 로 확인).
  *   선택 실행: RN_NATIVE_PG_TEST=1 (initdb 로 새 클러스터를 만들고 끝나면 지운다 — tests/helpers/captureNativePgFixture.js · UTF8 DB 따로).
  *
  *   N1 이름 바꾸기가 v2 빈 줄을 다시 쓴 직후(빈 줄 전부 FOR UPDATE · 공고 행 잠금을 쥔 채) 바로 구매 — v1 작업보드와 v2 작업보드의 결과가 같다

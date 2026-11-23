@@ -1,6 +1,6 @@
 'use strict';
 /**
- * optionRenameV2SlotsPg.test.js — 결정 400: 공고 옵션 이름을 바꾸면 v2 작업보드(「상품 · 옵션」 표시 · 1차·2차옵션 칸)의
+ * optionRenameV2SlotsPg.test.js — 결정 401: 공고 옵션 이름을 바꾸면 v2 작업보드(「상품 · 옵션」 표시 · 1차·2차옵션 칸)의
  *   손 안 댄 빈 줄도 새 이름을 따라간다(종전: v1 빈 줄만 따라가 새 이름 바로 구매가 「빈 줄 없음」 → 정원 밖 새 줄).
  *   PGlite + 저장소 migrations 전부 + 실제 앱(인트라넷 원본 수정 PUT · 양방향 공유 저장 이름 바꾸기) + 공고 창 저장과 같은 함수(applyOptionRenames)
  *   + 실제 주문 기록 함수(writeOrderToWorktable)로 「새 이름 주문이 그 줄을 잡는다 · 정원 밖 새 줄 0」을 확인한다.
