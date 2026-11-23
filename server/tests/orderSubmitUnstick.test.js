@@ -96,7 +96,9 @@ function harness(opts = {}) {
   const names = ['_reviewerIdentityRequestBody', '_loadOrderIdentityContext', '_prepareIdentityApprovals', 'submitOrderForm',
     'confirmOrderSubmit', '_closeOrderConfirm', '_proceedOrderSubmit', '_openOrderConfirm', '_cardsMissingCapture', '_finishPreviewSubmit'];
   // 새 도우미(없으면 옛 코드 — 동작으로 실패해야 한다)
-  const optional = ['_ofFriendlyErr', '_ofPostJson', '_submitOrderFormEscaped'];
+  const optional = ['_ofFriendlyErr', '_ofPostJson', '_submitOrderFormEscaped',
+    // 결정 399: confirmOrderSubmit·_openOrderConfirm 이 부르는 틀 안 자리 잡기 도우미(틀 밖에서는 무동작 · 검사 의미 불변)
+    '_ofVisibleBand', '_ofFrameApply', '_ofFrameIsOpen', '_ofFrameReplaceAll', '_ofFrameUnwatch', '_ofFrameWatch', '_ofFramePlace'];
   for (const n of names) { const src = cut(SA, n, false); if (src) vm.runInContext(src, ctx); }
   for (const n of optional) { const src = cut(SA, n, false); if (src) vm.runInContext(src, ctx); }
   const fireTimers = (minMs = 1000) => { for (const t of timers) if (t.f && t.ms >= minMs) { const f = t.f; t.f = null; f(); } };
@@ -281,4 +283,38 @@ test('_ofFriendlyErr: 옛 api.js(문구 함수 없음)여도 한국어로 접는
   const h = harness();
   assert.equal(h.ctx._ofFriendlyErr('참여 시간이 지났어요.', 'fb'), '참여 시간이 지났어요.');
   assert.match(h.ctx._ofFriendlyErr(new TypeError('Load failed'), 'fb'), NET_KO);
+});
+
+/* 결정 399(사용자 추가 요청 2026-11-23): 제출 앞단에서 멈춘 뒤(결정 398 길) 버튼은 누르기 전 글자 그대로 —
+ *   예전엔 기본값 '제출' 로 되돌려 [구매양식 제출] 이 [제출] 로 바뀌었다. [재제출] 처럼 글자를 넘기는 길은 그대로(⑤ 에서 확인). */
+test('⑦ 앞단 실패 뒤 버튼 글자 = 누르기 전 글자([구매양식 제출]) · 이미 [재제출] 이었으면 그 글자·색 그대로', async () => {
+  const ORIG = '\n        <i class="fas fa-paper-plane"></i> 구매양식 제출\n      ';
+  {
+    const h = harness({ fetch: (url) => (/manual-confirm/.test(url) ? netDrop() : null) });
+    h.nodes.btnOrderFormSubmit.innerHTML = ORIG;
+    const r = await settle(h.ctx.submitOrderForm());
+    assert.equal(r.state, 'resolved');
+    assertUnstuck(h, '앞단 끊김');
+    assert.equal(h.nodes.btnOrderFormSubmit.innerHTML, ORIG, '버튼 글자가 누르기 전과 다르다: ' + h.nodes.btnOrderFormSubmit.innerHTML);
+  }
+  {
+    const RETRY = '<i class="fas fa-redo"></i> 재제출';
+    const h = harness({ fetch: (url) => (/manual-confirm/.test(url) ? netDrop() : null) });
+    h.nodes.btnOrderFormSubmit.innerHTML = RETRY;
+    h.nodes.btnOrderFormSubmit.style.background = '#DC2626'; h.nodes.btnOrderFormSubmit.style.color = '#fff';
+    await settle(h.ctx.submitOrderForm());
+    assertUnstuck(h, '재제출 뒤 앞단 끊김');
+    assert.equal(h.nodes.btnOrderFormSubmit.innerHTML, RETRY);
+    assert.equal(h.nodes.btnOrderFormSubmit.style.background, '#DC2626', '[재제출] 의 빨간 모양이 사라졌다');
+  }
+  // 틀 안: 명의 확인 줄 맞추기(_syncSubmissionIdentityAction)가 할 일이 없으면 글자를 '제출' 로 덮는다(실측 2026-11-23) → 누르기 전 글자로
+  for (const [after, want] of [['제출', ORIG], ['내 주문이 맞습니다', '내 주문이 맞습니다']]) {
+    const h = harness({ fetch: (url) => (/manual-confirm/.test(url) ? netDrop() : null) });
+    const b = h.nodes.btnOrderFormSubmit;
+    b.innerHTML = ORIG;
+    h.ctx._syncSubmissionIdentityAction = () => { b.textContent = after; b.innerHTML = after; };
+    await settle(h.ctx.submitOrderForm());
+    assertUnstuck(h, '틀 안 앞단 끊김');
+    assert.equal(b.innerHTML, want, `명의 확인 줄이 '${after}' 일 때 버튼 글자: ${b.innerHTML}`);
+  }
 });

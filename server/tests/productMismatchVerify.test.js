@@ -245,7 +245,10 @@ t('5e 리뷰어 화면: 홀드 제출에만 판독값 · PRODUCT_MISMATCH 면 �
   assert.ok(/await _pmvAsk\(/.test(blk) && /payload\.confirmedProductKey = picked/.test(blk));
   assert.ok(/res\.code === "PRODUCT_WRONG_PURCHASE"[\s\S]{0,500}continue;/.test(blk), '잘못 구매는 실패로 남기고 다음 주문으로');
   assert.ok(i < f.indexOf('res.code === "NEED_CONFIRM"'), '다시 낸 응답도 아래 신원 처리가 이어 받는다');
-  assert.ok(/function _pmvAsk\(/.test(f) && /잘못 구매한 것 같아요/.test(f) && /function _pmvPlace\(/.test(f));
+  // 결정 399: 틀 안 위치 잡기는 공용 _ofFramePlace 로 합쳤다(옛 _pmvPlace 사본 폐기) — 창을 띄우는 그 함수가 부르는지까지 본다(검사 의미 강화)
+  assert.ok(/function _pmvAsk\(/.test(f) && /잘못 구매한 것 같아요/.test(f) && /function _ofFramePlace\(/.test(f));
+  { const a = f.indexOf('function _pmvAsk('); const body = f.slice(a, f.indexOf('\nfunction ', a + 1));
+    assert.ok(/document\.body\.appendChild\(ov\);\s*\n\s*_ofFramePlace\(ov\);/.test(body), '잘못 구매 창을 틀 안에서 보이는 자리에 놓지 않는다'); }
   assert.ok(/typeof json\.productOption === "string"/.test(f), '판독값이 글자가 아니면 버린다');
 });
 
