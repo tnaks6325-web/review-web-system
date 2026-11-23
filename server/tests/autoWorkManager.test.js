@@ -304,6 +304,15 @@ async function main() {
     await drain();
     assert.equal((await autoSnapshots(id)).length, 0, `이미 ${prior || '빈 값'}이던 오더는 소급 배정하지 않는다`);
   }
+  // PR #1859 리뷰(P2): 원본 수정이 사람 이름 「이미정」을 보내면 저장 정규화가 랜덤으로 접어도 **요청 원문**이 정확한 랜덤이 아니므로 배정하지 않는다.
+  {
+    const id = await seed('박세희', { status: 'reviewing' });
+    before = await row(id);
+    res = await run(sourceHandler, { params: { sourceReviewOrderId: before.source_review_order_id }, body: sourceBodyOf(before, { work_manager: '이미정' }) });
+    assert.equal(res.code, 200, JSON.stringify(res.body));
+    await drain();
+    assert.equal((await autoSnapshots(id)).length, 0, '원본 수정의 「이미정」(사람 이름)은 자동 배정하지 않는다');
+  }
   });
 
   await section('7) archived campaign manager change allowed, done blocked', async () => {

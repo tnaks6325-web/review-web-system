@@ -1135,17 +1135,20 @@ async function _intakeSourceManager(res, { b, source, current, optionsJson, deli
     out.body.manager_ack_version = Number(out.body.data.sync_version || 0);
   }
   const sent = res.status(out.status).json(out.body);
-  _scheduleAutoManagerAfterSource(out, current);
+  _scheduleAutoManagerAfterSource(out, current, b);
   return sent;
 }
 
 /** 결정 395 — 원본 수정이 작업담당을 「정해진 값 → 랜덤」으로 바꿨으면 커밋 뒤 자동 배정을 건다(응답은 이미 나갔다 ·
- *  이미 랜덤·빈 값이던 오더의 다른 수정은 소급하지 않는다 · 같은 요청 재전송(멱등)은 다시 걸지 않는다). */
-function _scheduleAutoManagerAfterSource(out, current) {
+ *  이미 랜덤·빈 값이던 오더의 다른 수정은 소급하지 않는다 · 같은 요청 재전송(멱등)은 다시 걸지 않는다).
+ *  ★ 요청 **원문**도 정확한 랜덤이어야 한다(PR #1859 리뷰 P2) — 저장 정규화(_canonicalOriginalWorkManager)는 부분 일치라
+ *    사람 이름 「이미정」도 랜덤으로 접는다. 접힌 저장값만 보면 사람 이름을 자동 배정으로 덮는다. */
+function _scheduleAutoManagerAfterSource(out, current, b) {
   try {
     const auto = require('../services/autoWorkManager.service');
     if (out && out.status === 200 && out.body && out.body.ok && !out.body.idempotent && out.body.data
         && current && out.body.data.id === current.id
+        && _hasExplicitWorkManager(b || {}) && isExactUndecidedWorkManager(pickWorkManager(b || {}))
         && auto.changedToUndecided(current.work_manager, out.body.data.work_manager)) {
       auto.scheduleAutoAssign(current.id, { reason: 'source_revision' });
     }
@@ -1281,7 +1284,7 @@ async function _intakeSourceBidir(res, { b, source, current, optionsJson, delive
   }
   if (out.status === 200 && out.body && !out.body.data) out.body.data = current;   // 인트라넷은 응답의 작업오더 ID 를 읽는다
   const sent = res.status(out.status).json(out.body);
-  _scheduleAutoManagerAfterSource(out, current);   // 결정 395 — 공유 저장이 작업담당을 랜덤으로 바꾼 경우만
+  _scheduleAutoManagerAfterSource(out, current, b);   // 결정 395 — 공유 저장이 작업담당을 랜덤으로 바꾼 경우만
   return sent;
 }
 
