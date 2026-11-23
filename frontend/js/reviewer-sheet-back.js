@@ -70,6 +70,10 @@
     var onSheetEntry = (stack.length > 0 || owed > 0) && curDepth() > base;
     if (timer) { try { w.clearTimeout(timer); } catch (_) {} timer = null; }
     owed = 0; stack = []; leaving = true;
+    // ★ 결정 403 후속(PR #1867 리뷰) — 이 화면으로 [뒤로] 돌아올 칸의 깊이로 맞춘다: 창 칸을 바꿔 끼우면(replace)
+    //   그 아래 칸(base)으로, 새 칸으로 떠나면(assign) 지금 칸으로 돌아온다. 안 맞추면 되살아난 화면의
+    //   popstate 를 「창 없는 헛 칸」으로 보고 한 번 더 뒤로 가서 이 화면을 건너뛰었다.
+    lastDepth = onSheetEntry ? base : curDepth();
     try {
       if (onSheetEntry) w.location.replace(url);
       else w.location.assign(url);
@@ -97,7 +101,11 @@
   });
   // 다른 화면으로 넘어가는 중에는 되돌리기를 부르지 않는다(이동이 취소되지 않게).
   w.addEventListener('pagehide', function () { leaving = true; });
-  w.addEventListener('pageshow', function () { leaving = false; });
+  w.addEventListener('pageshow', function (e) {
+    leaving = false;
+    // 저장된 화면 복원(bfcache)으로 돌아오면 셈을 지금 칸 기준으로 다시 맞춘다(창은 떠날 때 이미 비웠다).
+    if (e && e.persisted) { stack = []; owed = 0; lastDepth = curDepth(); }
+  });
 
   w.RhSheetBack = { opened: opened, closed: closed, leave: leave };
 })(typeof window !== 'undefined' ? window : this);

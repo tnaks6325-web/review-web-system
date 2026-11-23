@@ -267,6 +267,22 @@ test('창을 연 채 다른 화면으로(타계정 등록 · 인기상품의 일
   assert.deepStrictEqual(w2.B.entries.map(e => e.doc), ['index', 'campaign', 'other']);
 });
 
+test('리뷰 지적(PR #1864→1867): 창을 연 채 떠난 화면에서 [뒤로]로 공고에 돌아오면(저장된 화면 복원) 공고에 머문다 — 헛 칸으로 보고 한 번 더 뒤로 가지 않는다', async () => {
+  for (const [opener, go] of [['openAcctEmpty()', 'goRegisterSub()'], ['openPopGate()', "goPopNormal('c2')"]]) {
+    const w = world();
+    await w.run(opener); await settle();
+    w.run(go); await settle();
+    assert.strictEqual(w.B.how, 'replace');
+    // 그 화면에서 [뒤로] → 브라우저가 저장해 둔 공고 화면을 되살린다(같은 문서 · 창 칸이 아닌 첫 칸)
+    w.B.left = null; w.B.idx = 1;
+    (w.B.listeners.pageshow || []).forEach(fn => fn({ persisted: true }));
+    (w.B.listeners.popstate || []).forEach(fn => fn({ state: null }));
+    await settle();
+    assert.strictEqual(w.B.left, null, opener + ' 뒤 돌아온 공고에서 또 뒤로 가지 않는다');
+    assert.strictEqual(w.B.idx, 1, '공고 칸에 머문다');
+  }
+});
+
 test('창이 없을 때 떠나는 길은 종전처럼 새 칸(location.assign) — 공고로 돌아올 칸이 남는다', async () => {
   const w = world();
   w.run("goPopNormal('c3')"); await settle();
