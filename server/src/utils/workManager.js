@@ -9,8 +9,13 @@
  * 소비처는 ① 작업오더 접수 시 캠페인 탭 담당자 기입 ② 모집공고 발행 프리필(프론트 사본)
  * 두 곳이다. 두 곳이 어긋나면 "탭 담당자는 만두인데 공고 담당자는 빈칸"이 된다.
  *
- * ★ 랜덤은 빈 문자열을 돌려준다 — 자동으로 아무나 고르면 안 되고 관리자가 정해야 한다.
- *   (모르는 이름도 같은 이유로 빈 문자열 = fail-safe. 원문은 화면에 그대로 보여준다.)
+ * ★ 랜덤은 빈 문자열을 돌려준다(= 아직 만두·망고 어느 쪽도 아님). 모르는 이름도 빈 문자열 = fail-safe
+ *   (원문은 화면에 그대로 보여준다).
+ * ★★ 2026-11-23 사용자 확정으로 규칙이 바뀌었다(결정 395) — 종전 「랜덤은 자동으로 아무나 고르면 안 되고
+ *   관리자가 정해야 한다」는 **폐기**. 「랜덤」은 AE 가 만두·망고를 못 고를 때 쓰는 선택지라, 인트라넷에서
+ *   랜덤으로 들어온 작업오더는 리뷰웹이 **진행 중 작업이 적은 쪽**(같으면 번갈아)으로 자동 배정한다
+ *   (`services/autoWorkManager.service`). 이 파일의 매핑은 그대로다 — 배정은 기존 공유 저장 경로가 한다.
+ *   ★ 자동 배정 대상은 `isExactUndecidedWorkManager`(정확 일치)만 — 「이미정」 같은 사람 이름은 잡지 않는다.
  */
 
 /** 실명 → 리뷰웹 담당자 닉네임 */
@@ -49,10 +54,17 @@ function mapWorkManager(raw) {
   return '';
 }
 
-/** 관리자가 직접 정해야 하는 값인가(랜덤 등) */
+/** 미정 표기가 들어 있는가(랜덤 등 · 포함 비교 — 표시·정규화용. 쓰기 판정에는 아래 정확 일치를 쓴다) */
 function isUndecidedWorkManager(raw) {
   const v = _norm(raw);
   return !!v && UNDECIDED.some(u => v.includes(u));
+}
+
+/** 정식 미정 값과 **정확히** 같은가(공백만 무시) — 「이미정」 같은 사람 이름은 false(결정 311).
+ *  자동 배정·홈 미지정 질문처럼 **쓰기를 여는 판정**은 이것만 쓴다. 빈 값은 false(빈 값은 미정 표기가 아니다). */
+function isExactUndecidedWorkManager(raw) {
+  const v = String(raw == null ? '' : raw).replace(/\s+/g, '');
+  return !!v && UNDECIDED.includes(v);
 }
 
 /**
@@ -109,7 +121,8 @@ function normalizeManagerForStore(raw) {
  *    (065 이전에 그 칸을 탭 담당자로 넣어 "옵션은 만두/망고인데 값은 AE 실명"이 됐던 그 사고
  *    자리다). 닉네임 치환도 이 파일의 `mapWorkManager` 한 곳뿐 — 다른 이름 맵(예: C/S 닉네임)을
  *    끌어오면 AE·관리자 이름이 담당자 칩으로 새어 들어온다.
- * ★ 랜덤·미매핑은 **빈 값**(자동으로 아무나 배정 금지) → 그때만 탭 설정을 폴백으로 본다.
+ * ★ 랜덤·미매핑은 **빈 값** → 그때만 탭 설정을 폴백으로 본다(이 함수는 판정만 — 랜덤 자동 배정은 결정 395 의
+ *   `autoWorkManager.service` 가 공유 저장으로 work_manager 자체를 바꾼다. 여기서 아무나 고르지 않는다).
  *   탭 값도 매핑되면 닉네임으로 접고, 모르는 값은 **원문 보존**(임의 해석·조용한 담당자 변경 금지).
  *
  * @param {{orderWorkManager?: string, tabManager?: string}} p
@@ -125,6 +138,6 @@ function resolveWorkManager({ orderWorkManager, tabManager } = {}) {
 
 module.exports = {
   WORK_MANAGER_MAP, UNDECIDED, OTHER_MANAGER,
-  mapWorkManager, isUndecidedWorkManager, workManagerLabel, pickWorkManager,
+  mapWorkManager, isUndecidedWorkManager, isExactUndecidedWorkManager, workManagerLabel, pickWorkManager,
   normalizeManagerForStore, resolveWorkManager,
 };

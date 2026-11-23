@@ -128,7 +128,9 @@ async function main() {
   assert.equal(Number(ack.intranet_acked_version), 0, '부분 담당자 수신을 전체 공유 버전 승인으로 오인하지 않는다');
   assert.equal((await db.query(`SELECT status FROM shared_sync_outbox WHERE work_order_id='wo-full-paused'`)).rows[0].status, 'pending', '담당자 전용 전송은 전체 대기 줄을 완료 처리하지 않는다');
 
-  // A normal full correction queued before archive must still arrive; manager-only stays blocked.
+  // A normal full correction queued before archive/done must still arrive.
+  // ★ 결정 395(사용자 확정 2026-11-23 · 의미 변경): 보관 공고 작업의 manager-only 전송은 이제 **전달**한다(종전 dead).
+  //   완료(done) 작업의 manager-only 전송은 그대로 막는다(dead).
   for (const protection of ['archive', 'done']) for (const scope of ['full', 'manager']) {
     const id = `wo-${protection}-push-${scope}`;
     await insertOrder(id, 'on');
@@ -143,12 +145,14 @@ async function main() {
     });
     const message = sent.find(body => body.work_order_id === id);
     const queued = (await db.query(`SELECT status FROM shared_sync_outbox WHERE work_order_id=$1`, [id])).rows[0];
-    assert.equal(queued.status, scope === 'full' ? 'delivered' : 'dead', `${protection} ${scope} queue must retain its original delivery contract`);
-    assert.equal(!!message, scope === 'full');
-    if (message) assert.equal(message.view.special_notes, '가짜 보관 전 수정');
+    const delivered = scope === 'full' || protection === 'archive';
+    assert.equal(queued.status, delivered ? 'delivered' : 'dead', `${protection} ${scope} queue delivery contract`);
+    assert.equal(!!message, delivered);
+    if (message && scope === 'full') assert.equal(message.view.special_notes, '가짜 보관 전 수정');
+    if (message && scope === 'manager') assert.deepEqual(message.view, { work_manager: '박세희' }, '보관 공고 작업도 담당자 한 칸만 전달');
   }
 
-  // hard-off, 삭제·완료·보관·미연결은 service에서 fail-closed.
+  // hard-off, 삭제·완료·미연결은 service에서 fail-closed. ★ 결정 395: 보관 공고 작업(완료 아님)은 이제 저장된다(종전 409).
   process.env.BIDIR_HARD_OFF = '1';
   out = await service.applySharedPatch({ workOrderId: 'wo-off', mine: { work_manager: '박세희' }, baseVersion: 0, origin: 'rw_manager', managerOnly: true });
   assert.equal(out.status, 503); delete process.env.BIDIR_HARD_OFF;
@@ -159,7 +163,7 @@ async function main() {
   await insertOrder('wo-archived', 'off');
   const protectedCases = [
     ['wo-done', 'manager_order_done'], ['wo-unlinked', 'manager_order_unlinked'],
-    ['wo-deleted', 'order_not_found'], ['wo-archived', 'manager_campaign_archived'],
+    ['wo-deleted', 'order_not_found'],
   ];
   for (const [id, code] of protectedCases) {
     row = (await db.query(`SELECT * FROM work_orders WHERE id=$1`, [id])).rows[0];
@@ -168,6 +172,12 @@ async function main() {
     assert.equal(out.status, id === 'wo-deleted' ? 404 : 409, `${id}: ${JSON.stringify(out.body)}`);
     assert.equal(out.body.code, code);
   }
+  row = (await db.query(`SELECT * FROM work_orders WHERE id='wo-archived'`)).rows[0];
+  out = await service.applySharedPatch({ db: { connect: async () => ({ query: db.query.bind(db), release() {} }) }, workOrderId: 'wo-archived',
+    mine: { work_manager: '박은비' }, baseVersion: Number(row.sync_version), origin: 'rw_manager', managerOnly: true });
+  assert.equal(out.status, 200, `보관 공고 작업(완료 아님)은 담당자를 바꿀 수 있다: ${JSON.stringify(out.body)}`);
+  assert.equal((await db.query(`SELECT work_manager FROM work_orders WHERE id='wo-archived'`)).rows[0].work_manager, '박은비');
+  assert.equal((await db.query(`SELECT view_scope FROM shared_sync_outbox WHERE work_order_id='wo-archived'`)).rows[0].view_scope, 'manager');
 
   // 실제 관리자 편집 핸들러: 권한 없는 요청·표시 없는 요청은 막고 정상 요청은 저장 서비스로 연결한다.
   const pool = require('../src/db/pool');
@@ -398,7 +408,9 @@ async function main() {
   }
   console.log('review P2 mixed/full-only claim ON->OFF and re-enable: PASS');
 
-  // Review P2: full ON manager edits obey the same under-lock archive/completion gate.
+  // Review P2: full ON manager edits obey the same under-lock completion gate.
+  // ★ 결정 395(사용자 확정 2026-11-23 · 의미 변경): 보관(정·역방향·읽은 뒤 보관) = 이제 **저장**(담당자+다른 칸 한 트랜잭션) ·
+  //   완료(done) = 그대로 409 + 다른 칸까지 되돌림.
   for (const protection of ['archive-forward', 'archive-reverse', 'archive-between-read-and-lock', 'done']) {
     const id = `wo-full-protected-${protection}`;
     await insertOrder(id, 'on');
@@ -427,15 +439,22 @@ async function main() {
       finally { pool.query = originalQuery; }
       if (protection === 'archive-between-read-and-lock') assert.equal(injected, true);
     }
-    assert.equal(protectedResult.code, 409, `${protection}: full shared manager edit must be blocked: ${JSON.stringify(protectedResult.body)}`);
-    assert.equal(protectedResult.body.code, protection === 'done' ? 'manager_order_done' : 'manager_campaign_archived');
     const after = (await db.query('SELECT * FROM work_orders WHERE id=$1', [id])).rows[0];
+    if (protection !== 'done') {
+      assert.equal(protectedResult.code, 200, `${protection}: 보관 공고 작업의 공유 담당자 수정은 저장된다: ${JSON.stringify(protectedResult.body)}`);
+      assert.equal(after.work_manager, '박은비');
+      assert.equal(after.special_notes, 'must rollback', '같은 트랜잭션의 다른 칸도 함께 저장(이름은 종전 픽스처 그대로)');
+      assert.ok(Number(after.sync_version) > 10);
+      continue;
+    }
+    assert.equal(protectedResult.code, 409, `${protection}: full shared manager edit must be blocked: ${JSON.stringify(protectedResult.body)}`);
+    assert.equal(protectedResult.body.code, 'manager_order_done');
     assert.equal(after.work_manager, before.work_manager);
     assert.equal(after.special_notes, before.special_notes, 'mixed edit rolls back unrelated fields too');
     assert.equal(Number(after.sync_version), 10);
     assert.equal(Number((await db.query('SELECT count(*)::int n FROM shared_sync_outbox WHERE work_order_id=$1', [id])).rows[0].n), 0);
   }
-  console.log('review P2 ON archived/completed actual manager change + archive interleaving: PASS');
+  console.log('review P2 ON archived(allowed)/completed(blocked) actual manager change + archive interleaving: PASS');
 
   const sharedRoute = fs.readFileSync(path.join(__dirname, '..', 'src/routes/order.routes.js'), 'utf8');
   const listRoute = fs.readFileSync(path.join(__dirname, '..', 'src/routes/trackB.routes.js'), 'utf8');

@@ -2582,9 +2582,8 @@ async function listWorkOrders({ sheetId, tabName, limit = 100 } = {}) {
   const { rows } = await db.query(
     `SELECT w.id, w.title, w.recruit_count AS "recruitCount", w.status, w.created_at AS "createdAt",
             w.sync_version AS "syncVersion",
-            (COALESCE(w.source_review_order_id, '') <> '' AND w.status <> 'done'
-              AND NOT EXISTS (SELECT 1 FROM recruit_campaigns rc WHERE rc.archived_at IS NOT NULL
-                AND (rc.id = w.linked_campaign_id OR NULLIF(rc.source_work_order_id, '') = w.id))) AS "managerEditCapable",
+            -- 결정 395: 보관 공고 작업도 담당자 변경 가능(완료만 닫음 — 저장 쪽 _managerEditProtection 과 같은 기준)
+            (COALESCE(w.source_review_order_id, '') <> '' AND w.status <> 'done') AS "managerEditCapable",
             l.sheet_id AS "linkSheetId", l.tab_name AS "linkTabName"
        FROM work_orders w
        LEFT JOIN LATERAL (SELECT sheet_id, tab_name FROM trackb_work_order_links
@@ -4333,17 +4332,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   if (_cond && managerWo[0] && showEdits && managerEditAllowed && ['master', 'admin'].includes(role)
       && String(process.env.BIDIR_HARD_OFF || '').trim() !== '1'
       && String(managerWo[0].sourceReviewOrderId || '').trim() && managerWo[0].status !== 'done') {
-    try {
-      const { rows: archivedManagerCampaigns } = await db.query(
-        `SELECT id FROM recruit_campaigns WHERE archived_at IS NOT NULL
-          AND (id = NULLIF($1, '') OR NULLIF(source_work_order_id, '') = $2) LIMIT 1`,
-        [String(managerWo[0].linkedCampaignId || ''), String(managerWo[0].id)]);
-      if (!archivedManagerCampaigns.length) {
-        _cond.managerEdit = { capable: true, workOrderId: managerWo[0].id, syncVersion: Number(managerWo[0].syncVersion || 0) };
-      }
-    } catch (e) {
-      logger.warn(`[trackB] 담당자 빠른 배정 권한 확인 실패(편집 숨김): ${e.message}`);
-    }
+    // 결정 395(사용자 확정 2026-11-23): 보관된 모집공고에 연결된 작업도 연다(입금이 남아 있을 수 있다) — 완료만 닫는다.
+    _cond.managerEdit = { capable: true, workOrderId: managerWo[0].id, syncVersion: Number(managerWo[0].syncVersion || 0) };
   }
   /* 총 모집완료 표기는 시트/무시트 모두 작업 조건의 총건수를 쓴다. 반면 초과행 칠하기는
      시트 기반 과거 표에 오탐을 내지 않도록 종전처럼 무시트에만 한정한다. */

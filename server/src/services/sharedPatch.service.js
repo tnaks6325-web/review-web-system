@@ -1854,15 +1854,11 @@ async function _reconcilePrepareInTx(client, wo, camp, rec, actor, archived = fa
   return { wo: saved, plan };
 }
 
-/** Called only while holding L1 + the current work-order row lock. Shared by both save scopes. */
+/** Called only while holding L1 + the current work-order row lock. Shared by both save scopes.
+ *  ★ 결정 395(사용자 확정 2026-11-23): 보관된 모집공고에 연결된 작업도 담당자를 바꿀 수 있다(입금이 남아 있을 수 있다) —
+ *    종전 보관 잠금(manager_campaign_archived)을 뺐다. **완료(done) 보호는 그대로**(완화 금지). */
 async function _managerEditProtection(client, wo) {
   if (wo.status === 'done') return { status: 409, body: { ok: false, code: 'manager_order_done', error: '완료된 작업은 담당자를 바꿀 수 없습니다.' } };
-  const { rows: archived } = await client.query(
-    `SELECT id FROM recruit_campaigns
-      WHERE archived_at IS NOT NULL
-        AND (id = NULLIF($1, '') OR NULLIF(source_work_order_id, '') = $2)
-      LIMIT 1 FOR UPDATE`, [String(wo.linked_campaign_id || ''), String(wo.id)]);
-  if (archived.length) return { status: 409, body: { ok: false, code: 'manager_campaign_archived', error: '보관된 모집공고에 연결된 작업은 담당자를 바꿀 수 없습니다.' } };
   return null;
 }
 

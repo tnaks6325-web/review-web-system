@@ -144,17 +144,8 @@ async function _runOnce(opts) {
         if (!ids.length) continue;
         attempts = Math.max(...rows.filter(r => r.view_scope === 'manager').map(r => Number(r.attempts || 1)));
       }
-      // Archive protection is for manager-only delivery, not already queued full corrections.
-      if (scope === 'manager') {
-        const { rows: archived } = await db.query(
-          `SELECT id FROM recruit_campaigns WHERE archived_at IS NOT NULL
-            AND (id = NULLIF($1, '') OR NULLIF(source_work_order_id, '') = $2) LIMIT 1`,
-          [String(wo.linked_campaign_id || ''), String(wo.id)]);
-        if (archived.length) {
-          await _finish(db, ids, 'dead', '보관된 모집공고에 연결된 작업');
-          summary.dead++; continue;
-        }
-      }
+      // ★ 결정 395(사용자 확정 2026-11-23) — 보관된 모집공고에 연결된 작업의 담당자 변경도 인트라넷에 보낸다(종전 'dead' 처리 삭제).
+      //   완료(done) 작업의 담당자 범위 전송은 위에서 그대로 dead(저장 쪽 완료 보호와 같은 기준).
       const body = buildPushBody(wo, scope);
       const raw = JSON.stringify(body);
       // 보내기 직전 시각 갱신 — 앞 오더들이 오래 걸려도 다른 처리기가 이 줄을 "끊긴 줄" 로 다시 가져가지 않게.
