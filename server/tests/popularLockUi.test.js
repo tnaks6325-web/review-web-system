@@ -66,6 +66,11 @@ const start = campaign.indexOf('let _popCredit = null;');
 const end = campaign.indexOf('function renderPopNotice(){');
 assert(start > 0 && end > start, '참여권 블록을 찾지 못했다(구조가 바뀌면 가드를 함께 갱신할 것)');
 const block = campaign.slice(start, end);
+// ★ 결정 397: 참여권 조회는 공고 화면 호출 도우미(_campFetch — 시간 제한·끊김 구분)를 지난다 → 같은 블록을 함께 올린다(검사 의미 불변)
+const hA = campaign.indexOf('/* ═══ ★ 결정 397 — 공고 화면 서버 호출 도우미');
+const hB = campaign.indexOf('/* ═══ 결정 397 도우미 끝 ═══ */');
+assert(hA > 0 && hB > hA, '결정 397 호출 도우미 블록을 찾지 못했다');
+const helper = campaign.slice(hA, hB);
 
 function ctx({ camp, preview = false, btn = { disabled: false, textContent: '참여하기' }, subs = [], api = {} }) {
   const calls = [];
@@ -88,7 +93,9 @@ function ctx({ camp, preview = false, btn = { disabled: false, textContent: '참
       return { ok: true, json: async () => Object.assign({ ok: true }, v || { normalDone: 0, popularUsed: 0 }) };
     },
   };
+  sandbox.setTimeout = setTimeout; sandbox.clearTimeout = clearTimeout;
   vm.createContext(sandbox);
+  vm.runInContext(helper, sandbox);
   vm.runInContext(block, sandbox);
   return { sandbox, btn, calls };
 }
