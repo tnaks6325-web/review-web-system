@@ -230,3 +230,22 @@ test('campaign.html 의 모든 인라인 스크립트가 문법 오류 없이 �
   assert.ok(blocks.length >= 1);
   blocks.forEach((b, i) => { assert.doesNotThrow(() => new vm.Script(b, { filename: 'campaign.html#script' + i })); });
 });
+
+/* ───────────────── 리뷰 지적(PR #1864): 만료 화면에서도 공고 상태를 다시 본다 ───────────────── */
+test('M5 후속: 만료 화면이 보이는 동안 15초 갱신이 공고를 다시 불러와 안내를 다시 그린다(다시 열리면 [다시 참여하기] 복귀)', async () => {
+  const disp = { vPre: 'none', vExpired: '' };
+  const btn = { style: { display: 'none' } }, lead = { textContent: '' }, bought = { textContent: '' };
+  const sb = {
+    PREVIEW: false, _gateMask: '', _camp: { state: 'cutoff' }, document: { querySelectorAll: () => [] },
+    $: (id) => (id === 'expiredRejoinBtn' ? btn : id === 'expiredLead' ? lead : id === 'expiredBoughtText' ? bought : { style: { display: disp[id] == null ? 'none' : disp[id] } }),
+    getHold: () => null, enterJoined: async () => { throw new Error('만료 화면에서 참여 화면으로 가면 안 된다'); },
+    loadCampaign: async () => { sb._camp = { state: 'open' }; },
+  };
+  vm.createContext(sb);
+  ['_expiredCanRejoin', '_renderExpiredGuide', '_preRefreshTick'].forEach(n => vm.runInContext(grab(SCRIPT, n), sb));
+  vm.runInContext('_renderExpiredGuide()', sb);
+  assert.strictEqual(btn.style.display, 'none');
+  await vm.runInContext('_preRefreshTick()', sb);
+  assert.strictEqual(btn.style.display, '', '공고가 다시 열리면 [다시 참여하기]가 돌아온다');
+  assert.match(bought.textContent, /\[다시 참여하기\]로 새 구매양식/);
+});

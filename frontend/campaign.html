@@ -3116,6 +3116,13 @@ document.addEventListener('visibilitychange', () => { if(!document.hidden && !_c
 window.addEventListener('online', () => { if(!_campBooted && $('loadRetryBtn')) retryCampLoad(); });
 /** 참여 전 화면 15초 갱신 — ★ 결정 397: 이 기기에 잡아 둔 자리가 있으면 구매양식으로 다시 들어간다(만료·없음은 서버가 판정). */
 async function _preRefreshTick(){
+  // ★ 결정 400 후속(PR #1864 리뷰) — 만료 화면에서도 공고 상태를 다시 본다: 마감·멈춤으로 숨긴 [다시 참여하기]가
+  //   공고가 다시 열리면 돌아와야 한다(새로고침 없이). 만료 화면은 홀드가 이미 지워져 참여 화면으로 가지 않는다.
+  if($('vExpired').style.display !== 'none'){
+    try{ await loadCampaign(); }catch(_){ return; }
+    if($('vExpired').style.display !== 'none') _renderExpiredGuide();
+    return;
+  }
   if($('vPre').style.display === 'none') return;
   const sheetOpen = Array.prototype.some.call(document.querySelectorAll('.sheet-ovl'), el => el.style.display && el.style.display !== 'none');
   if(!PREVIEW && getHold() && !sheetOpen){ await enterJoined(); return; }
