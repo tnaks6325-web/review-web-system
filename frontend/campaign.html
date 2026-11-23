@@ -307,11 +307,12 @@
   <!-- 개편 1단계(사용자 확정 2026-11-07): 제한시간 0이 되면 바로 이 화면(이미 누른 제출은 끊지 않음 — _onHoldTimeUp) -->
   <div id="vExpired" class="statebig" style="display:none">
     <div class="e">⌛</div><h2>제한시간이 만료되었어요</h2>
-    <p>시간 안에 구매양식이 제출되지 않아 참여가 자동 취소되었어요.<br/>구매양식을 제출하지 않았다면 오늘 다시 참여할 수 있어요.</p>
+    <p>시간 안에 구매양식이 제출되지 않아 참여가 자동 취소되었어요.<br/><span id="expiredLead">구매양식을 제출하지 않았다면 오늘 다시 참여할 수 있어요.</span></p>
     <div class="sec">
       <button class="btn" id="expiredRejoinBtn" onclick="rejoinAfterExpired()">다시 참여하기</button>
+      <!-- ★ 결정 400(사용자 확정 2026-11-23 「가」): 서버 만료 안내(work-detail expired)와 같은 두 문장. 다시 참여할 수 없는 상태면 _renderExpiredGuide 가 바꾼다 -->
       <div class="cardbx lockcard"><div class="e">🛍️</div><div class="m">이미 구매하셨나요?</div>
-        <div class="s">구매양식을 이미 제출한 경우에만 운영자에게 알려주세요.</div>
+        <div class="s" id="expiredBoughtText">[다시 참여하기]로 새 구매양식을 열어 제출하세요. 자리가 없으면 운영자에게 문의해주세요.</div>
       </div>
       <button class="btn ghost" onclick="location.href='/'">홈으로</button>
     </div>
@@ -1984,29 +1985,9 @@ async function _doApply(optionKey, sub, purchaseQty){
       await enterJoined();
       return;
     }
-    const msg = {
-      preopen:'아직 오픈 전이에요', cutoff:'오늘 참여가 마감됐어요', daily_done:'오늘 인원이 모두 찼어요',
-      soft_full:'잔여 대기 중이에요 — 자리가 나면 열려요', closed:'모집이 종료됐어요',
-      campaign_paused:'지금은 품절로 잠시 멈춘 공고예요. 다시 열리면 참여할 수 있어요',   // 결정 259
-      already_today:'오늘은 이 캠페인에 이미 참여 이력이 있어요(내일 가능)',
-      already_submitted:'이미 참여 완료한 캠페인이에요',
-      duplicate_hold:'이미 참여 중이에요', hold_cap:'동시에 참여 가능한 캠페인은 2개까지예요',
-      daily_apply_cap:'오늘 참여 가능한 횟수를 넘었어요', rate_limited:'요청이 너무 많아요. 잠시 후 다시 시도해주세요',
-      // ★ 063 타계정 사유(서버가 최종 권위 — 화면 추정과 다를 수 있어 그대로 안내)
-      multi_disabled:'이 공고는 타계정 참여를 지원하지 않아요',
-      one_per_person:'이 공고는 1인 1회예요 — 다른 명의로 이미 참여했어요',
-      sub_invalid:'타계정 이름과 전화번호를 확인해주세요',
-      sub_shares_owner_phone:'본계정과 같은 번호의 타계정은 별도 참여할 수 없어요',
-      sub_not_registered:'등록된 타계정이 아니에요. 내정보 > 타계정에서 먼저 등록해주세요',
-      sub_is_registered_reviewer:'이 번호는 이미 리뷰어로 등록되어 있어요. 그 번호의 본인 계정으로 참여해주세요',
-      owner_hold_cap:'동시에 잡아둘 수 있는 자리 수를 넘었어요(구매·제출을 먼저 끝내주세요)',
-      sub_daily_limit:'이 공고의 타계정 참여 한도에 도달했어요',
-      blocked_by_other_owner:'이 번호는 다른 계정에서 이미 참여 신청했어요',
-      same_phone_other_name:'같은 번호의 다른 명의가 오늘 이미 참여했어요',
-      chain_after_close:'오늘 마감 전에 이 명의 차례가 안 와요',   // ★ 결정 356
-    }[j.reason] || (j.error || '지금은 참여할 수 없어요');
+    const msg = _applyReasonText(j);   // ★ 결정 400(L4) — 거절 사유 문구표는 _APPLY_REASON_TEXT 하나(여러 명의 _applyMany 와 같은 표)
     // 타계정 명의 사유면 그 명의를 시트에서 잠그고 재선택 유도(자리는 점유되지 않았음)
-    if(sub && ['already_today','already_submitted','duplicate_hold','sub_not_registered','sub_is_registered_reviewer',
+    if(sub && ['duplicate_hold','sub_not_registered','sub_is_registered_reviewer',
                'sub_shares_owner_phone','sub_invalid','blocked_by_other_owner','same_phone_other_name','chain_after_close'].includes(j.reason)){
       toast(msg);
       const p8 = _p8(sub.phone);
@@ -2038,7 +2019,7 @@ async function _applyLostRecover(sub, s, msg){
    ★ 한 명의라도 잡히면 그 명의들로 진행하고, 안 된 명의와 이유를 알려준다(그 명의는 시트에서 잠금 · 자리는 점유되지 않았다).
    ★ 아무 명의도 못 잡았고 이유가 명의 탓이 아니면(옵션 마감·모집 종료·내정보 미등록·인기 공고 조건 등) 첫 명의로 _doApply 를
      한 번 더 불러 종전과 똑같은 안내 화면(옵션 다시 고르기·내정보 안내·참여권 안내…)을 띄운다 — 처리 경로를 새로 만들지 않는다. */
-const _MANY_IDENTITY_REASONS = ['already_today','already_submitted','duplicate_hold','sub_not_registered','sub_is_registered_reviewer',
+const _MANY_IDENTITY_REASONS = ['duplicate_hold','sub_not_registered','sub_is_registered_reviewer',
   'sub_shares_owner_phone','sub_invalid','blocked_by_other_owner','same_phone_other_name','sub_daily_limit','owner_hold_cap','popular_locked',
   'chain_after_close'];   // ★ 결정 356 — 이 명의만 막힌다(자리 미점유) · 다음 명의는 계속
 let _applyManyBusy = false;
@@ -2124,21 +2105,33 @@ async function _applyMany(optionKey, sels, purchaseQty){
     : ok.length + '개 명의로 참여했어요 — 위 탭에서 명의마다 구매양식을 제출해 주세요' + (_seqOk ? '(한 명의씩 차례로 시간이 흘러요)' : (ok.some(o => o.sel.type === 'sub') ? '(타계정은 ' + subMin + '분 안에)' : '')));
   await enterJoined();
 }
-/** apply 거절 사유 → 사람 말(_doApply 의 안내문과 같은 표를 쓴다 · 모르는 사유는 서버 문구) */
+/** apply 거절 사유 → 사람 말. ★ 결정 400(L4): 한 명의(_doApply)·여러 명의(_applyMany)가 이 함수·이 표 하나를 쓴다
+ *  (예전엔 _doApply 안에 사본이 있어 같은 사유가 두 화면에서 다르게 보였다). 모르는 사유는 서버 문구(한국어) → 그것도 없으면 기본 문구.
+ *  ★ 서버가 더 이상 보내지 않는 옛 「오늘 이미 참여」·「이미 참여 완료」 사유(재참여 기간 판정 repurchase_window 로 바뀜)는 두지 않는다. */
 function _applyReasonText(j){
   return (j && j.reason && _APPLY_REASON_TEXT[j.reason]) || (j && j.error) || '지금은 참여할 수 없어요';
 }
 const _APPLY_REASON_TEXT = {
+  // 공고 상태(서버 st.state)
   preopen:'아직 오픈 전이에요', cutoff:'오늘 참여가 마감됐어요', daily_done:'오늘 인원이 모두 찼어요',
-  soft_full:'잔여 대기 중이에요', closed:'모집이 종료됐어요', campaign_paused:'품절로 잠시 멈춘 공고예요',
-  already_today:'오늘은 이미 참여 이력이 있어요', already_submitted:'이미 참여 완료한 명의예요',
-  duplicate_hold:'이미 참여 중이에요', owner_hold_cap:'동시에 잡아둘 수 있는 자리 수를 넘었어요',
-  sub_daily_limit:'타계정 참여 한도에 도달했어요', sub_not_registered:'등록된 타계정이 아니에요',
-  sub_is_registered_reviewer:'이미 리뷰어로 등록된 번호예요(본인 계정으로 참여)', sub_shares_owner_phone:'본계정과 같은 번호예요',
-  sub_invalid:'이름·전화번호를 확인해주세요', blocked_by_other_owner:'다른 계정에서 이미 참여 신청한 번호예요',
-  same_phone_other_name:'같은 번호의 다른 명의가 오늘 이미 참여했어요', popular_locked:'이 명의는 참여권이 없어요',
-  chain_after_close:'오늘 마감 전에 차례가 안 와요',   // ★ 결정 356
-  rate_limited:'요청이 너무 많아요. 잠시 후 다시 시도해주세요',
+  soft_full:'잔여 대기 중이에요 — 자리가 나면 열려요', closed:'모집이 종료됐어요',
+  campaign_paused:'지금은 품절로 잠시 멈춘 공고예요. 다시 열리면 참여할 수 있어요',   // 결정 259
+  // 한도·중복
+  duplicate_hold:'이미 참여 중이에요', hold_cap:'동시에 참여 가능한 캠페인은 2개까지예요',
+  owner_hold_cap:'동시에 잡아둘 수 있는 자리 수를 넘었어요(구매·제출을 먼저 끝내주세요)',
+  daily_apply_cap:'오늘 참여 가능한 횟수를 넘었어요', rate_limited:'요청이 너무 많아요. 잠시 후 다시 시도해주세요',
+  // ★ 063 타계정·명의 사유(서버가 최종 권위 — 화면 추정과 다를 수 있어 그대로 안내)
+  multi_disabled:'이 공고는 타계정 참여를 지원하지 않아요',
+  one_per_person:'이 공고는 1인 1회예요 — 다른 명의로 이미 참여했어요',
+  sub_invalid:'타계정 이름과 전화번호를 확인해주세요',
+  sub_shares_owner_phone:'본계정과 같은 번호의 타계정은 별도 참여할 수 없어요',
+  sub_not_registered:'등록된 타계정이 아니에요. 내정보 > 타계정에서 먼저 등록해주세요',
+  sub_is_registered_reviewer:'이 번호는 이미 리뷰어로 등록되어 있어요. 그 번호의 본인 계정으로 참여해주세요',
+  sub_daily_limit:'이 공고의 타계정 참여 한도에 도달했어요',
+  blocked_by_other_owner:'이 번호는 다른 계정에서 이미 참여 신청했어요',
+  same_phone_other_name:'같은 번호의 다른 명의가 오늘 이미 참여했어요',
+  popular_locked:'이 명의는 참여권이 없어요',   // 한 명의는 그 전에 참여권 안내 창으로 간다(_doApply) — 여러 명의 목록용
+  chain_after_close:'오늘 마감 전에 이 명의 차례가 안 와요',   // ★ 결정 356
 };
 
 async function _doChangeOption(newKey, purchaseQty){
@@ -2230,7 +2223,36 @@ async function releaseExpiredHold(h){
   }
   // 개편 1단계(사용자 확정 2026-11-07): 토스트 한 줄 대신 "제한시간이 만료되었어요" 화면 + [다시 참여하기](= 참여 전 화면).
   show('vExpired');
+  _renderExpiredGuide();
   try{ await loadCampaign(); }catch(_){ /* 다음 화면 갱신 주기에서 재시도 */ }
+  _renderExpiredGuide();   // ★ 결정 400 — 방금 불러온 공고 상태로(오늘 마감·모집 종료면 다시 참여하라고 하지 않는다)
+}
+/** ★ 결정 400 — 만료 뒤 지금 다시 참여할 수 있나: true(열림) · false(마감·종료·대기·멈춤·참여 불가) · null(공고 상태 모름).
+ *  참여 전 화면의 [참여하기] 잠금 판정(renderPre)과 같은 재료만 본다 — 서버가 최종 권위라 모르면 막지 않는다(null). */
+function _expiredCanRejoin(){
+  const c = _camp;
+  if(!c || typeof c.state !== 'string' || !c.state) return null;
+  if(c.state !== 'open') return false;
+  if(c.soldoutPaused === true) return false;
+  const opts = Array.isArray(c.options) ? c.options : [];
+  if(opts.length && !opts.some(o => o && o.selectable)) return false;
+  if(_gateMask === 'policy') return false;
+  return true;
+}
+/** ★ 결정 400(사용자 확정 2026-11-23 「가」) — 만료 화면 안내는 서버 만료 안내(work-detail expired)와 같은 말.
+ *  다시 참여할 수 없는 상태면 [다시 참여하기]를 숨기고 운영자 문의 한 줄만 · 열림/모름이면 승인 문구 두 문장 그대로. */
+function _renderExpiredGuide(){
+  const can = _expiredCanRejoin();
+  const btn = $('expiredRejoinBtn'), lead = $('expiredLead'), bought = $('expiredBoughtText');
+  if(can === false){
+    if(btn) btn.style.display = 'none';
+    if(lead) lead.textContent = '지금은 이 공고에 새로 참여할 수 없어요.';
+    if(bought) bought.textContent = '운영자에게 문의해주세요.';   // 제목이 「이미 구매하셨나요?」라 같은 말을 되풀이하지 않는다
+    return;
+  }
+  if(btn) btn.style.display = '';
+  if(lead) lead.textContent = '구매양식을 제출하지 않았다면 오늘 다시 참여할 수 있어요.';
+  if(bought) bought.textContent = '[다시 참여하기]로 새 구매양식을 열어 제출하세요. 자리가 없으면 운영자에게 문의해주세요.';
 }
 /** [다시 참여하기] — 참여 전 화면으로(오늘 다시 참여할 수 있어요). 홀드는 이미 지웠다. */
 function rejoinAfterExpired(){

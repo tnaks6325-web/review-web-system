@@ -1918,7 +1918,9 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
     if (!validHold && !isSubmitted) {
       return res.status(403).json({
         ok: false, reason: 'expired',
-        error: '참여가 만료되었어요. 구매양식을 제출하지 않았다면 다시 참여해서 새 구매양식을 열어주세요. 이미 구매하셨다면 운영자에게 문의해주세요.',
+        // ★ 결정 400(사용자 확정 2026-11-23 「가」): 공고 화면 만료 안내(#vExpired)와 같은 말 —
+        //   이미 샀으면 [다시 참여하기]로 새 구매양식을 열어 낸다 · 자리가 없을 때만 운영자 문의.
+        error: '참여가 만료되었어요. 이미 구매하셨다면 [다시 참여하기]로 새 구매양식을 열어 제출하세요. 자리가 없으면 운영자에게 문의해주세요.',
       });
     }
 
@@ -2055,7 +2057,9 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
 });
 
 // POST /api/campaign/:id/cancel — 본인 홀드 취소 (phone8+holdToken 이중 열쇠)
-//   취소해도 당일 이력이 남아 같은 캠페인 당일 재신청은 불가(§03-C — 프론트 확인 다이얼로그에서 고지).
+//   ★ 결정 400(L7): 취소는 같은 날 다시 참여를 막지 않는다 — 참여 신청 판정(_applyParticipation)은 같은 명의의
+//   제출 완료(submitted) 이력만 보고(재참여 기간), 취소(cancelled)·만료 줄은 읽지 않는다. 응답 문구·화면 확인 창이 같은 말.
+//   (옛 기획 §03-C 「취소하면 당일 재신청 불가」는 migration 113 이후 실제 규칙이 아니다.)
 router.post('/:id/cancel', applyLimiter, async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -2094,7 +2098,7 @@ router.post('/:id/cancel', applyLimiter, async (req, res, next) => {
       }
       await client.query('COMMIT');
       logger.info(`[campaign/cancel] camp=${id} app=${rows[0].id} phone8=***${p8.slice(-4)}`);
-      res.json({ ok: true, message: '참여가 취소되었습니다. 오늘은 이 캠페인에 다시 참여할 수 없어요.' });
+      res.json({ ok: true, message: '참여가 취소되었어요. 구매양식을 제출하지 않았다면 오늘 다시 참여할 수 있어요.' });
     } catch (e) {
       try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
       throw e;
