@@ -66,8 +66,9 @@ ok('마크업의 틀은 #orderFrame 하나(추가 틀은 명의마다 코드로�
     /const _srcFr = _frameOfSource\(ev\.source\);/.test(camp)
     && /if\(d\.type === 'order-submitted' && !PREVIEW && _srcFr && _tabsOn\(\) && _onTabSubmitted\(_srcFr, d\)\) return;/.test(camp)
     && /function _onTabSubmitted\(frame, d\)\{ return _onTabSubmittedP8\(frame && frame\.dataset\.p8, d\); \}/.test(camp));
+  // ★ 결정 402: 주소 비교는 틀이 지금 연 주소(_frameUrl) · 다시 열기는 _navFrame(방문 기록 0칸) — 검사 뜻(탭 넘기기만 건너뛰고 그 밖에는 다시 연다) 그대로
   ok('★ 353: 탭 넘기기만 같은 주소 재대입을 건너뛴다(그 명의 틀 유지) — 그 밖에는 종전처럼 다시 연다',
-    /if\(!\(keepFrame && frame\.getAttribute\('src'\) === _src\)\)\{\s*\n\s*frame\.src = _src;/.test(camp));
+    /if\(!\(keepFrame && _frameUrl\(frame\) === _src\)\)\{\s*\n\s*_navFrame\(frame, _src\);/.test(camp));
   ok('★ 353: 만료된 틀 비우기는 제출 중이면 건드리지 않는다',
     /function _releaseFrame\(p8\)\{\s*\n\s*const f = _frameByP8\(p8\); if\(!f \|\| _frameSubmitting\(f\)\) return;/.test(camp));
 }
