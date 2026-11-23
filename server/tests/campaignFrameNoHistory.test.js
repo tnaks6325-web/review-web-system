@@ -131,11 +131,11 @@ function detail({ app = 11, optionKey = '라벤더', qty = null } = {}) {
 const HOLD = (p8 = '00000000', tok = 'tok-a') => ({ phone8: p8, holdToken: tok, expiresAt: new Date(Date.now() + 9e5).toISOString() });
 const optOf = (u) => new URL(abs(u)).searchParams.get('optionKey');
 
-test('L1 처음 여는 틀 — 종전 그대로 src 로 연다(방문 기록 0 · 주소에 옵션·자리 문맥)', () => {
+test('L1 처음 여는 틀도 location.replace 로 연다(아이폰 사파리는 빈 문서에서의 첫 src 이동도 기록을 쌓는다 — 결정 403 실기) · 주소에 옵션·자리 문맥', () => {
   const { sb, hist, track } = world();
   sb._renderJoinedView(detail(), HOLD());
   assert.strictEqual(hist.navs.length, 1);
-  assert.strictEqual(hist.navs[0].how, 'src', '처음 열기는 src 대입 그대로(첫 이동은 기록을 쌓지 않는다)');
+  assert.strictEqual(hist.navs[0].how, 'replace', '처음 열기도 replace — 사파리에서 [뒤로]가 구매양식을 빈 화면으로 되돌리지 않게');
   assert.strictEqual(hist.pushes, 0);
   const u = new URL(abs(track[0].loaded));
   assert.strictEqual(u.pathname, '/search.html');
@@ -191,7 +191,7 @@ test('L1 여러 명의 틀(#orderTrack iframe[data-p8]) — 명의마다 옵션�
   sb._renderJoinedView(detail({ app: 11 }), HOLD('00000000', 'tok-a'));
   sb._renderJoinedView(detail({ app: 12 }), HOLD('11112222', 'tok-b'));
   assert.strictEqual(track.length, 2, '명의마다 틀 하나(결정 353)');
-  assert.deepStrictEqual(hist.navs.map(n => n.how), ['src', 'src'], '새 틀의 처음 열기는 src 그대로');
+  assert.deepStrictEqual(hist.navs.map(n => n.how), ['replace', 'replace'], '새 틀의 처음 열기도 replace(결정 403 — 사파리 첫 이동도 기록)');
   sb._renderJoinedView(detail({ app: 12, optionKey: '무향' }), HOLD('11112222', 'tok-b'));
   assert.strictEqual(optOf(track[1].loaded), '무향');
   assert.strictEqual(optOf(track[0].loaded), '라벤더', '다른 명의 틀은 그대로');
@@ -277,7 +277,7 @@ test('L1 정적 전수 — campaign.html 에서 틀 주소를 바꾸는 곳은 _
   assert.ok(/function openFormWindow\(\)\{[^\n]*_frameUrl\(/.test(SCRIPT), '[새 창으로 열기]도 _frameUrl');
 });
 
-test('L1 정적 — campaign.html 이 읽는 도우미 JS 에는 틀 주소를 바꾸는 곳이 없다 · 뒤로가기 도우미(RhSheetBack)를 쓰지 않는다', () => {
+test('L1 정적 — campaign.html 이 읽는 도우미 JS 에는 틀 주소를 바꾸는 곳이 없다 · 방문 기록은 뒤로가기 도우미(RhSheetBack) 한 곳만', () => {
   const srcs = [...CAMP.matchAll(/<script src="([^"?]+)/g)].map(m => m[1]);
   assert.ok(srcs.length >= 4, srcs.join(','));
   srcs.forEach(s => {
@@ -285,7 +285,11 @@ test('L1 정적 — campaign.html 이 읽는 도우미 JS 에는 틀 주소를 �
     assert.ok(!/(frame|Frame|iframe)[\w.$()'"\]\[]*\.src\s*=(?!=)/.test(js), s + ' 가 틀 주소를 바꾸면 안 된다');
     assert.ok(!/contentWindow\.location/.test(js), s);
   });
-  assert.ok(!/reviewer-sheet-back|RhSheetBack/.test(CAMP), '공고 화면은 리뷰어 홈 뒤로가기 도우미를 싣지 않는다(결정 372 범위 밖)');
+  // ★ 결정 403 — 창(바텀시트) 뒤로가기를 위해 리뷰어 홈 도우미를 싣는다(위 반복이 그 파일에도 틀 주소 바꾸기 0 을 확인한다).
+  //   그 외의 기록 조작은 여전히 0: 화면 스크립트에 pushState·popstate 없음 · 실린 JS 중 pushState 는 도우미 하나뿐.
+  assert.ok(srcs.includes('js/reviewer-sheet-back.js'), '공고 화면은 창 뒤로가기 도우미를 싣는다(결정 403)');
+  assert.deepStrictEqual(srcs.filter(s => /pushState/.test(fs.readFileSync(path.join(ROOT, 'frontend', s), 'utf8'))), ['js/reviewer-sheet-back.js'],
+    '방문 기록을 쌓는 JS 는 뒤로가기 도우미 하나뿐');
   assert.ok(!/pushState|onpopstate|'popstate'/.test(SCRIPT), '공고 화면은 방문 기록을 직접 쌓지 않는다');
 });
 
