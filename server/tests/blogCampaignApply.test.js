@@ -173,7 +173,8 @@ ok(!/isBlogCampaign[\s\S]{0,200}includes\(/.test(HTML), 'isBlogCampaign 이 문�
   const i = HTML.indexOf('async function _doApply');
   const body = HTML.slice(i, i + 2500);
   const iG = body.indexOf('openBlogSheet(optionKey, sub)');
-  const iF = body.indexOf('fetch(API_BASE_URL');
+  // 결정 397: 서버 호출은 공고 화면 도우미 _campFetch 를 지난다(시간 제한) — 「요청 전에 받는다」는 뜻은 그대로
+  const iF = body.search(/(?:_campFetch|\bfetch)\(API_BASE_URL/);
   ok(iG > 0 && iF > 0 && iG < iF, '★ 화면도 요청 전에 받는다(서버 왕복 낭비·자리 점유 0)');
   ok(/body\.blogUrl\s*=\s*_blogUrl/.test(body), '검증된 값을 blogUrl 로 전송');
 }
