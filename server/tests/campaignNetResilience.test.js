@@ -269,7 +269,9 @@ test('M2: loadCampaign — 502 HTML 은 「캠페인을 찾을 수 없어요」�
 
 /* ───────────────────────── M3 · L2 · [참여하기] ───────────────────────── */
 function applyWorld(fetchImpl, { recoverHold = false } = {}) {
-  const w = world({ view: 'vPre', hold: null, fetchImpl, fns: ['_doApply', '_applyLostRecover'] });
+  const w = world({ view: 'vPre', hold: null, fetchImpl, fns: ['_doApply', '_applyLostRecover', '_applyReasonText'] });
+  // ★ 결정 400(L4) — _doApply 의 거절 문구는 화면의 단일 사유표(_APPLY_REASON_TEXT)를 쓴다 → 같은 표를 함께 올린다(검사 뜻 그대로)
+  { const a = SCRIPT.indexOf('const _APPLY_REASON_TEXT = {'); w.run(SCRIPT.slice(a, SCRIPT.indexOf('\n};', a) + 3)); }
   Object.assign(w.sb, {
     getSession: () => ({ name: '김예시', phone8: '00000000' }), needLogin() {}, onJoin() {}, hideOptSheet() {}, hideAcctSheet() {},
     isBlogCampaign: () => false, _isBlogUrl: () => true, _qtyViewsFor: () => null, _chainOn: () => false,
