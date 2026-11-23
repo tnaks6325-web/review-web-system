@@ -80,11 +80,12 @@ async function main(){const db=new PGlite();
  assert.equal((await manager.answer(args)).status,'done');assert.equal((await pool.query('SELECT * FROM shared_sync_outbox')).rows.length,1);
  await assert.rejects(manager.answer({...args,choice:'random'}),/만두·망고·기타/);await assert.rejects(manager.answer({...args,admin:{role:'staff'}}),/권한/);
  await pool.query(`UPDATE work_orders SET work_manager='랜덤',sync_version=sync_version+1`);await manager.refresh(pool);q=(await pool.query('SELECT * FROM ops_checks')).rows[0];assert.equal(q.status,'open');assert.deepEqual(q.answers,{});await assert.rejects(manager.answer(args),/바뀐/);
- await pool.query(`INSERT INTO recruit_campaigns(id,source_work_order_id,archived_at) VALUES('arch','fake-order',NOW())`);await assert.rejects(manager.answer({...args,baseVersion:q.facts.baseVersion}),/보관/);
+ // ★ 결정 395: 보관 공고 작업의 담당자 저장 자체는 이제 열렸지만, 홈 질문은 진행 중 작업만 다룬다 — 대상이 보관되면 답은 「바뀐 질문」으로 거절(쓰기 0).
+ await pool.query(`INSERT INTO recruit_campaigns(id,source_work_order_id,archived_at) VALUES('arch','fake-order',NOW())`);await assert.rejects(manager.answer({...args,baseVersion:q.facts.baseVersion}),/바뀐 질문/);
  await manager.refresh(pool);assert.equal((await pool.query('SELECT status FROM ops_checks')).rows[0].status,'done');
  await pool.query('DELETE FROM recruit_campaigns');await manager.refresh(pool);q=(await pool.query('SELECT * FROM ops_checks')).rows[0];
  await pool.query(`INSERT INTO recruit_campaigns(id,archived_at) VALUES('direct-arch',NOW())`);await pool.query(`UPDATE work_orders SET linked_campaign_id='direct-arch'`);
- await assert.rejects(manager.answer({...args,baseVersion:q.facts.baseVersion}),/보관/);await manager.refresh(pool);assert.equal((await manager.list({db:pool,allowed:true})).items.length,0);
+ await assert.rejects(manager.answer({...args,baseVersion:q.facts.baseVersion}),/바뀐 질문/);await manager.refresh(pool);assert.equal((await manager.list({db:pool,allowed:true})).items.length,0);
  await pool.query('DELETE FROM recruit_campaigns');await pool.query(`UPDATE work_orders SET linked_campaign_id=''`);await manager.refresh(pool);q=(await pool.query('SELECT * FROM ops_checks')).rows[0];
  await pool.query(`UPDATE work_orders SET work_manager='박은비',sync_version=sync_version+1`);await assert.rejects(manager.answer({...args,baseVersion:q.facts.baseVersion}),/바뀐/);await manager.refresh(pool);assert.equal((await pool.query('SELECT status FROM ops_checks')).rows[0].status,'done');
  // Same current-order + tab fallback semantics, and every ineligible branch is a real SQL refresh.

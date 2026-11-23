@@ -1669,12 +1669,8 @@ router.get('/work-orders/list', authMiddleware, internalMiddleware, async (req, 
     }
     const { rows } = await pool.query(
       `SELECT wo.*,
-              (COALESCE(wo.source_review_order_id, '') <> '' AND wo.status <> 'done'
-                AND NOT EXISTS (
-                  SELECT 1 FROM recruit_campaigns rc
-                   WHERE rc.archived_at IS NOT NULL
-                     AND (rc.id = wo.linked_campaign_id OR NULLIF(rc.source_work_order_id, '') = wo.id)
-                )) AS manager_edit_capable
+              -- 결정 395: 보관 공고 작업도 담당자 변경 가능(완료만 닫음 — 저장 쪽 _managerEditProtection 과 같은 기준)
+              (COALESCE(wo.source_review_order_id, '') <> '' AND wo.status <> 'done') AS manager_edit_capable
          FROM work_orders wo WHERE ${where.join(' AND ')} ORDER BY wo.created_at DESC LIMIT 300`, params);
     // 상태별 건수(배지) — 필터와 무관하게 전체 기준
     const { rows: c } = await pool.query(

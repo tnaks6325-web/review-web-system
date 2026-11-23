@@ -59,7 +59,7 @@ const { mirrorOneSheet } = require('../services/rawMirror.service');
 const sse = require('../utils/sse');
 const { logger } = require('../utils/logger');
 const { fetchThumbFromUrl } = require('../utils/thumbFetch');
-const { mapWorkManager, pickWorkManager, isUndecidedWorkManager } = require('../utils/workManager');
+const { mapWorkManager, pickWorkManager, isUndecidedWorkManager, isExactUndecidedWorkManager } = require('../utils/workManager');
 const { LEGACY_DELIVERY_VALUES, normalizeReviewType } = require('../utils/reviewType');
 const { normalizeReviewTypeMix } = require('../utils/reviewTypeMix');
 const { deliveryBaseType, parseDeliveryType, canonicalDeliveryValue, isCourierProxyDelivery } = require('../utils/deliveryType');
@@ -589,6 +589,12 @@ router.post('/intake', async (req, res, next) => {
     // ★ 결정 325: 총모집 0 은 막지 않고(인트라넷 원본 번호가 어긋나면 안 된다) 이상로그 경고만 — 기다리지 않는다(fail-safe).
     void require('../services/zeroRecruitWarning.service').warnZeroRecruit(data, { stage: 'intake', by: requester });
     res.json({ ok: true, data });
+    /* ★★ 결정 395(사용자 확정 2026-11-23) — 작업담당 「랜덤」(정확 일치 · 「이미정」 같은 이름 제외)으로 들어온 새 오더는
+       리뷰웹이 진행 중 작업이 적은 쪽(만두·망고)으로 자동 배정한다. **접수 저장이 끝난 뒤** 기존 공유 저장 경로로 따로 돈다 —
+       위 응답은 종전 그대로이고, 배정이 실패해도 접수는 성공이다(미지정으로 남는다). 빈 값·박세희·박은비·기타는 건드리지 않는다. */
+    if (sourceContract && isExactUndecidedWorkManager(data && data.work_manager)) {
+      require('../services/autoWorkManager.service').scheduleAutoAssign(data.id, { reason: 'intake' });
+    }
   } catch (err) {
     // 인트라넷은 HTTP 실패를 기준으로 재시도를 판정한다. 다만 next(err)로 넘겨
     // Sentry·최근 오류·이상 로그의 공통 관측 경로는 반드시 유지한다.
@@ -1128,7 +1134,24 @@ async function _intakeSourceManager(res, { b, source, current, optionsJson, deli
       && _canonicalOriginalWorkManager(out.body.data.work_manager) === manager) {
     out.body.manager_ack_version = Number(out.body.data.sync_version || 0);
   }
-  return res.status(out.status).json(out.body);
+  const sent = res.status(out.status).json(out.body);
+  _scheduleAutoManagerAfterSource(out, current);
+  return sent;
+}
+
+/** 결정 395 — 원본 수정이 작업담당을 「정해진 값 → 랜덤」으로 바꿨으면 커밋 뒤 자동 배정을 건다(응답은 이미 나갔다 ·
+ *  이미 랜덤·빈 값이던 오더의 다른 수정은 소급하지 않는다 · 같은 요청 재전송(멱등)은 다시 걸지 않는다). */
+function _scheduleAutoManagerAfterSource(out, current) {
+  try {
+    const auto = require('../services/autoWorkManager.service');
+    if (out && out.status === 200 && out.body && out.body.ok && !out.body.idempotent && out.body.data
+        && current && out.body.data.id === current.id
+        && auto.changedToUndecided(current.work_manager, out.body.data.work_manager)) {
+      auto.scheduleAutoAssign(current.id, { reason: 'source_revision' });
+    }
+  } catch (e) {
+    logger.warn(`[order/auto-manager] ${current && current.id} 자동 배정 예약 실패(원본 수정은 유지): ${e.message}`);
+  }
 }
 
 /** 구 인트라넷 전체 저장이 담당자까지 보냈지만 그 칸은 읽기 전용이었던 경우,
@@ -1257,7 +1280,9 @@ async function _intakeSourceBidir(res, { b, source, current, optionsJson, delive
     _emitWorkOrderNew(out.body.data, { event: 'source_bidir_edit', source_revision: source.sourceRevision });
   }
   if (out.status === 200 && out.body && !out.body.data) out.body.data = current;   // 인트라넷은 응답의 작업오더 ID 를 읽는다
-  return res.status(out.status).json(out.body);
+  const sent = res.status(out.status).json(out.body);
+  _scheduleAutoManagerAfterSource(out, current);   // 결정 395 — 공유 저장이 작업담당을 랜덤으로 바꾼 경우만
+  return sent;
 }
 
 /** 관찰 모드 — 판정만 하고 기록한다(쓰기 0). 실패해도 종전 경로를 막지 않는다. */
@@ -1766,14 +1791,10 @@ router.get('/intake/source/:sourceReviewOrderId/shared', async (req, res, next) 
     const active = rows[0].bidir_state === 'on' && sw.in2rw === 'apply';
     const structureOpen = active ? await structureOpenFor(pool, rows[0]) : false;
     const caps = new Set(String(req.query.caps || '').split(',').map(x => x.trim()).filter(Boolean));
-    let managerArchived = false;
-    const { rows: archivedManagerCampaigns } = await pool.query(
-      `SELECT id FROM recruit_campaigns WHERE archived_at IS NOT NULL
-        AND (id = NULLIF($1, '') OR NULLIF(source_work_order_id, '') = $2) LIMIT 1`,
-      [String(rows[0].linked_campaign_id || ''), String(rows[0].id)]);
-    managerArchived = archivedManagerCampaigns.length > 0;
+    /* ★ 결정 395(사용자 확정 2026-11-23) — 보관된 모집공고에 연결된 작업도 담당자를 바꿀 수 있다(입금이 아직 남아 있을 수 있다).
+       종전 보관 잠금을 뺐다 · 완료(done) 작업은 그대로 닫는다(저장 쪽 _managerEditProtection 과 같은 기준). */
     const managerCapable = caps.has('manager') && !sw.hardOff
-      && !!String(rows[0].source_review_order_id || '').trim() && rows[0].status !== 'done' && !managerArchived;
+      && !!String(rows[0].source_review_order_id || '').trim() && rows[0].status !== 'done';
     const normalWritable = active ? [...WRITABLE_BY_ORIGIN.intranet].filter(f => f !== 'work_manager'
       && ((f !== STRUCTURE_FIELD && f !== RENAME_FIELD && f !== MODE_FIELD) || structureOpen)
       && (f !== 'review_type' || !structurePermanentlyLocked(readSharedState(rows[0])))

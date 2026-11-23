@@ -3,13 +3,13 @@
 // Decision 311: intranet-linked work (an order with source_review_order_id) is written ONLY through sharedPatch.
 // Decision 323: owned, active work with no intranet-linked order is written ONLY to the empty tab_configs.manager
 //   cell (tab branch below) — never for a tab that has any order with an intranet source.
-const { resolveWorkManager, mapWorkManager, UNDECIDED, normalizeManagerForStore } = require('../utils/workManager');
+const { resolveWorkManager, mapWorkManager, isExactUndecidedWorkManager, normalizeManagerForStore } = require('../utils/workManager');
 const KIND = 'manager_assignment';
 function isUnassigned(r) {
   const raw = String(r.work_manager || '').trim();
   const resolved = resolveWorkManager({orderWorkManager: raw, tabManager: r.tab_manager}).manager;
   // Reuse the canonical unresolved vocabulary, but require an exact value: e.g. 이미정 is a person, not 미정.
-  const undecided = value => !String(value || '').trim() || UNDECIDED.includes(String(value).replace(/\s+/g,''));
+  const undecided = value => !String(value || '').trim() || isExactUndecidedWorkManager(value);
   return undecided(raw) && undecided(resolved); // Unknown original or fallback names are never permission to overwrite.
 }
 const candidateSql = `SELECT w.*, tc.manager AS tab_manager, tc.display_name AS task_label,
