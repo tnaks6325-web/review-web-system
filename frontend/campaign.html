@@ -1633,6 +1633,31 @@ function _tabsOn(){ return _tabList().length >= 2; }
 function _framesAll(){ return [...document.querySelectorAll('#orderTrack iframe')]; }
 function _frameByP8(p8){ return _framesAll().find(f => f.dataset.p8 && f.dataset.p8 === String(p8)) || null; }
 function _frameOfSource(src){ return _framesAll().find(f => f.contentWindow === src) || null; }
+/* ★ 결정 402 — 틀 주소 바꾸기는 이 함수 하나로(브라우저 방문 기록을 쌓지 않는다 · 점검 L1).
+   이미 열린 틀의 src 를 다른 주소로 바꾸면 기록이 한 칸 쌓여(크롬·웹킷 실측) 휴대폰 [뒤로]가 공고를 떠나지 않고
+   틀만 바꾸기 전 주소(옛 옵션)로 되돌렸다.
+   - 처음 여는 틀(src 없음) = 종전 그대로 src 대입(처음의 빈 문서에서 가는 첫 이동은 기록을 쌓지 않는다).
+   - 이미 열린 틀 = contentWindow.location.replace — 지금 칸을 바꿔 끼운다. 같은 주소여도 다시 연다(제출 중 옛 옵션 파기 장치 그대로)
+     · 틀의 load 이벤트·높이 알림(postMessage)은 그대로 온다.
+   - replace 를 못 부르면(틀 창 없음·예외) 종전 src 대입 — 틀이 안 열리는 것보다 기록 한 칸이 낫다(fail-open).
+   - src 속성은 처음 주소에 머물므로 틀이 지금 연 주소는 data-nav-src 에 둔다 — 읽을 때는 _frameUrl() 로만. */
+function _frameUrl(f){ return !f ? '' : (f.dataset.navSrc != null ? f.dataset.navSrc : (f.getAttribute('src') || '')); }
+function _navFrame(f, url){
+  if(!f) return;
+  url = String(url || 'about:blank');
+  const opened = !!f.getAttribute('src');
+  f.dataset.navSrc = url;
+  if(opened){
+    try{
+      const w = f.contentWindow;
+      if(w && w.location && typeof w.location.replace === 'function'){
+        w.location.replace(url === 'about:blank' ? url : new URL(url, location.href).href);
+        return;
+      }
+    }catch(_){ /* 아래 종전 길로 */ }
+  }
+  f.src = url;
+}
 function _frameFor(p8){
   let f = _frameByP8(p8); if(f) return f;
   const frames = _framesAll();
@@ -1654,7 +1679,7 @@ function _frameSubmitting(f){ try{ return !!(f && f.contentWindow && f.contentWi
 /** 만료된 명의의 틀 비우기(다른 명의가 재사용할 수 있게). 제출 중이면 건드리지 않는다. */
 function _releaseFrame(p8){
   const f = _frameByP8(p8); if(!f || _frameSubmitting(f)) return;
-  f.dataset.p8 = ''; f.setAttribute('src', 'about:blank'); f.style.display = 'none';
+  f.dataset.p8 = ''; _navFrame(f, 'about:blank'); f.style.display = 'none';   // ★ 결정 402 — 비우기도 기록 0칸
   if(f.id === 'orderFrame') f.removeAttribute('id');
 }
 function renderAcctTabs(){
@@ -2442,10 +2467,11 @@ function _renderJoinedView(j, h){
       //   미리보기 단계 전환마다 시트 lane을 소모하지 않도록 **미리보기에서만** URL이 바뀔 때만 로드.
       //   리뷰어 경로는 항상 재대입(기존 동작) — 옵션 변경 시 인플라이트 제출을 파기하는
       //   TOCTOU 봉합이 이 재로드에 의존하므로 절대 캐싱하지 않는다.
-      if(!PREVIEW || frame.getAttribute('src') !== _src){
+      // ★ 결정 402: 주소 비교는 틀이 지금 연 주소(_frameUrl), 다시 열기는 _navFrame(이미 열린 틀은 방문 기록 0칸).
+      if(!PREVIEW || _frameUrl(frame) !== _src){
         // ★ 탭 넘기기만 같은 주소 재대입을 건너뛴다(그 명의의 사진·입력 유지). 옵션·개수를 바꾸면 주소가 달라져 다시 연다.
-        if(!(keepFrame && frame.getAttribute('src') === _src)){
-          frame.src = _src;
+        if(!(keepFrame && _frameUrl(frame) === _src)){
+          _navFrame(frame, _src);
           frame.onerror = ()=>{ $('frameFallback').style.display=''; };
         }
       }
@@ -2812,7 +2838,7 @@ window.addEventListener('message', (ev)=>{
     if(ev.source === ($('orderFrame')||{}).contentWindow) _capSaveHold(false, Number(d.failed) || 0);
   }
   else if(d.type === 'embed-height' && d.height){ $('orderFrame').style.height = Math.min(Math.max(d.height, 400), 4000) + 'px'; }
-  else if(d.type === 'embed-need-login'){ needLogin(()=>{ const f=$('orderFrame'); f.src = f.src; }); }
+  else if(d.type === 'embed-need-login'){ needLogin(()=>{ const f=$('orderFrame'); _navFrame(f, _frameUrl(f)); }); }   // ★ 결정 402
 });
 
 /** 일괄 제출 결과 — 명의별 한 줄. 성공 명의만 홀드를 정리하고, 실패 명의만 [이어서 진행] CTA 대상이 된다.
@@ -2875,7 +2901,7 @@ function openChat(){ if(_detail && _detail.chatUrl) window.open(_detail.chatUrl,
 //   새 창 제출의 확정 감지는 이 페이지의 10초 폴링 + 복귀(visibilitychange) 재조회가 담당.
 // ★ 미리보기에서는 noopener — 새 탭이 sessionStorage(관리자 미리보기 토큰)를 복제하지 않게 한다.
 //   리뷰어 경로는 기존 동작 유지(입력값 복원이 sessionStorage에 의존).
-function openFormWindow(){ const f=$('orderFrame'); if(f.src) window.open(f.src, '_blank', PREVIEW ? 'noopener' : ''); }
+function openFormWindow(){ const f=$('orderFrame'), u=_frameUrl(f); if(u) window.open(u, '_blank', PREVIEW ? 'noopener' : ''); }   // ★ 결정 402 — 지금 연 주소
 
 /* 참여 취소 */
 async function onCancel(){

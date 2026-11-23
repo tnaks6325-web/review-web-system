@@ -177,7 +177,8 @@ ok('⑦-R1 주소창에서 preview 파라미터 제거 — 복사·공유해도 
 ok('⑦-R2 토큰 저장 실패해도 주소창 정리는 항상 실행(finally)',
   /\}catch\(_\)\{ \/\* 저장 실패해도 아래 정리는 수행 \*\/ \}\s*\n\s*finally\{/.test(camp));
 ok('⑦-R2b 미리보기 새 창은 noopener — sessionStorage(관리자 토큰) 미복제',
-  /window\.open\(f\.src, '_blank', PREVIEW \? 'noopener' : ''\)/.test(camp));
+  // ★ 결정 402: 새 창 주소 = 틀이 지금 연 주소(_frameUrl) — noopener 검사 뜻 그대로
+  /const f=\$\('orderFrame'\), u=_frameUrl\(f\); if\(u\) window\.open\(u, '_blank', PREVIEW \? 'noopener' : ''\)/.test(camp));
 ok('⑦-R3 마감·게시전 공고도 진행 화면 확인 가능(모집중 가정 토글)',
   /_pvForceOpen/.test(camp) && /if\(PREVIEW && _pvForceOpen\)\{ jb\.disabled = false;/.test(camp) && /function pvToggleForce\(\)/.test(camp));
 // 버튼이 템플릿 문자열 → HTML+배선으로 이동(인라인 모형 제거). 게이트 규칙은 동일 —
@@ -189,7 +190,8 @@ ok('⑦-R5 미리보기는 잔여 리뷰어 세션을 쓰지 않음(타인 계�
   /if \(_PREVIEW_MODE\) \{\s*\n\s*authSession = \{ name: "미리보기", phone8: "" \};/.test(sapp)
   && /if \(!_PREVIEW_MODE\) \{[\s\S]{0,500}_prefillBankFromProfile\(\)/.test(sapp));
 ok('⑦-R6 미리보기 단계 전환 시만 iframe 재로드 생략(리뷰어는 항상 재로드 = TOCTOU 봉합 유지)',
-  /if\(!PREVIEW \|\| frame\.getAttribute\('src'\) !== _src\)\{/.test(camp));
+  // ★ 결정 402: 주소 비교는 틀이 지금 연 주소(_frameUrl) — 미리보기만 건너뛰고 리뷰어는 항상 다시 연다(검사 뜻 그대로)
+  /if\(!PREVIEW \|\| _frameUrl\(frame\) !== _src\)\{/.test(camp));
 ok('⑦-R8b 참여 취소 후에는 참여 전 화면으로 명시 복귀(가드로 인한 정체 방지)',
   /참여가 취소되었어요'\); await loadCampaign\(\); if\(_camp\) renderPre\(\);/.test(camp));
 ok('⑦-R7 미리보기 로드 실패 시 단계 버튼 제거(가짜 완료화면 방지)',
