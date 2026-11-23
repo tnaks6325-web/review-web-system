@@ -184,6 +184,17 @@
   <!-- 로딩 -->
   <div id="vLoading" class="statebig"><div class="e"><i class="fas fa-circle-notch fa-spin" style="color:var(--p)"></i></div><p>불러오는 중…</p></div>
 
+  <!-- ★ 결정 397: 이 기기에 잡아 둔 자리가 있는데 작업 내용을 못 받았을 때(끊김·시간 초과·서버 일시 오류).
+       참여 전 화면([참여하기])으로 보내지 않고, 토큰을 그대로 둔 채 다시 연결한다(토큰은 서버 판정으로만 지운다 — 결정 356). -->
+  <div id="vReconnect" class="statebig" style="display:none">
+    <div class="e">📶</div><h2>다시 연결하는 중이에요</h2>
+    <p><b>참여는 그대로 유지돼요.</b><br/>연결되면 구매양식이 자동으로 다시 열려요.</p>
+    <p id="reconnectWhy"></p>
+    <div class="sec">
+      <button class="btn" id="reconnectBtn" onclick="retryReconnect()">지금 다시 연결하기</button>
+    </div>
+  </div>
+
   <!-- 참여 전 -->
   <div id="vPre" style="display:none">
     <div class="sec"><div id="preCard"></div>
@@ -440,8 +451,60 @@ let _pvSimSubmitted = false; // 미리보기 가상 제출 완료 여부(브라�
 function $(id){ return document.getElementById(id); }
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.style.display='block';
   clearTimeout(t._h); t._h=setTimeout(()=>t.style.display='none', 3200); }
-function show(view){ ['vLoading','vPre','vMissing','vJoined','vExpired','vDone','vBlogPending','vBlogRejected'].forEach(v=>$(v).style.display = v===view?'':'none'); }
+function show(view){ ['vLoading','vPre','vMissing','vJoined','vExpired','vDone','vBlogPending','vBlogRejected','vReconnect'].forEach(v=>$(v).style.display = v===view?'':'none'); }
 function showPre(){ if(_camp) renderPre(); else show('vPre'); } // renderPre가 참여 버튼 상태도 복원(N4)
+
+/* ═══ ★ 결정 397 — 공고 화면 서버 호출 도우미 (시간 제한 · 끊김과 서버 응답 구분 · 쉬운 한국어) ═══
+   · 이 화면의 서버 호출은 모두 _campFetch 를 지난다. 요청 주소·본문·머리는 부르는 쪽이 준 그대로다(signal 만 더한다).
+   · 응답이 오면 { ok, status, headers, j, bad } — j = 읽은 JSON(못 읽으면 {} 이고 bad:true). 성공 응답의 뜻은 종전과 같다.
+   · 서버에 닿지 못함(끊김)·시간 초과는 던진다 — e.transport = true(시간 초과면 e.timeout) · 메시지는 쉬운 한국어(결정 359 문구).
+   · 화면 문구는 api.js 의 apiFriendlyErrorMessage(단일 출처)를 쓰고, 옛 api.js 라 함수가 없으면 같은 문구로 접는다. */
+const _CAMP_FETCH_TIMEOUT_MS = 15000;
+const _CAMP_MSG_NET    = '인터넷 연결이 불안정해요. 잠시 후 다시 시도해 주세요.';
+const _CAMP_MSG_SLOW   = '응답이 늦어지고 있어요. 잠시 후 다시 시도해 주세요.';
+const _CAMP_MSG_SERVER = '서버에 일시적인 문제가 있어요. 잠시 후 다시 시도해 주세요.';
+function _campNetErr(timeout){
+  const e = new Error(timeout ? _CAMP_MSG_SLOW : _CAMP_MSG_NET);
+  e.name = 'CampNetError'; e.transport = true; e.networkError = true;
+  if(timeout) e.timeout = true;
+  return e;
+}
+/** 서버가 답은 했지만 일시 장애(5xx·응답을 못 읽음)일 때 던지는 예외 — 사유(reason)가 붙은 응답은 업무상 거절이라 여기에 넣지 않는다. */
+function _campServerErr(status){
+  const e = new Error(_CAMP_MSG_SERVER); e.name = 'CampServerError'; e.server = true; e.httpStatus = status || 0; return e;
+}
+async function _campFetch(url, opts, o){
+  const ms = (o && o.timeoutMs) || _CAMP_FETCH_TIMEOUT_MS;
+  const ac = (typeof AbortController === 'function') ? new AbortController() : null;
+  let timer = null;
+  // 시간 제한은 본문 읽기까지 덮는다(헤더만 오고 본문이 멈추는 경우). 먼저 실패를 정하고 그다음 요청을 끊는다.
+  const expire = new Promise((_, rej) => { timer = setTimeout(() => { rej(_campNetErr(true)); try{ if(ac) ac.abort(); }catch(_){} }, ms); });
+  try{
+    let r;
+    try{ r = await Promise.race([fetch(url, ac ? Object.assign({}, opts || {}, { signal: ac.signal }) : opts), expire]); }
+    catch(e){ throw (e && e.transport) ? e : _campNetErr(!!(e && e.name === 'AbortError')); }
+    let j = {}, bad = false;
+    try{
+      const v = await Promise.race([r.json(), expire]);
+      if(v && typeof v === 'object') j = v; else bad = true;
+    }catch(e){ if(e && e.transport) throw e; bad = true; }
+    return { ok: !!r.ok, status: r.status, headers: r.headers, j, bad };
+  } finally { clearTimeout(timer); }
+}
+/** 응답은 왔지만 「잠깐의 서버 문제」인가 — 못 읽은 응답(배포 중 HTML 등) · 사유 없는 5xx. 사유가 있으면 서버의 진짜 판정이다.
+ *  (429 는 서버가 JSON 사유·문구를 준다 — 부르는 쪽이 그 문구를 그대로 보인다. 못 읽은 429 는 bad 로 여기에 든다.) */
+function _campTempFail(r){
+  if(!r) return true;
+  if(r.bad) return true;
+  return !r.ok && r.status >= 500 && !(r.j && r.j.reason);
+}
+/** 실패를 리뷰어가 읽을 문장으로 — 서버가 준 한국어 사유는 그대로, 영어 개발자 문구는 쉬운 말로. */
+function _campErrText(e, fallback){
+  if(typeof apiFriendlyErrorMessage === 'function') return apiFriendlyErrorMessage(e, fallback);
+  const m = String((e && e.message) || '');
+  return /[가-힣]/.test(m) ? m : (fallback || _CAMP_MSG_NET);
+}
+/* ═══ 결정 397 도우미 끝 ═══ */
 
 /* ═══ 세션 (index.html·search-app.js와 동일 키·포맷) ═══ */
 function getSession(){
@@ -466,14 +529,15 @@ async function doVerify(){
   if(!name) return toast('이름을 입력해주세요');
   if(p8.length!==8) return toast('전화번호 뒤 8자리를 입력해주세요');
   try{
-    const r = await fetch(API_BASE_URL + '/api/reviewer/verify?phone8=' + encodeURIComponent(p8) + '&name=' + encodeURIComponent(name));
-    const j = await r.json();
+    const r = await _campFetch(API_BASE_URL + '/api/reviewer/verify?phone8=' + encodeURIComponent(p8) + '&name=' + encodeURIComponent(name));
+    const j = r.j;
+    if(_campTempFail(r)){ toast(_CAMP_MSG_SERVER); return; }   // ★ 결정 397 — 서버 일시 오류를 「등록된 리뷰어 없음」으로 말하지 않는다
     if(!j || !j.ok){ toast(j && j.error ? j.error : '등록된 리뷰어를 찾을 수 없어요'); return; }
     saveSession(j.name || name, p8, j.reviewerToken);
     hideSheet();
     const fn = _afterLogin; _afterLogin = null;
     if(fn) fn();
-  }catch(e){ toast('확인 중 오류: ' + e.message); }
+  }catch(e){ toast(_campErrText(e)); }
 }
 
 /* ═══ 홀드 저장 (v2 — 명의별 맵) ═══
@@ -554,10 +618,10 @@ function recoverActiveHolds(preferredPhone){
   if(!s) return Promise.resolve(false);
   _holdRecoveryPromise = (async ()=>{
     try{
-      const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/my-active-holds', {
+      const r = await _campFetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/my-active-holds', {
         headers:_getAuthHeaders(), cache:'no-store'
-      });
-      const j = await r.json().catch(()=>({}));
+      }, { timeoutMs: 10000 });
+      const j = r.j;
       if(!r.ok || !j.ok || !Array.isArray(j.holds) || !j.holds.length) return false;
       // 서버 홀드를 저장하기 전에 기존 활성 명의를 잡아야 한다. 저장 후 읽으면
       // 빈 저장소에서도 첫 복구 명의가 "기존 선택"처럼 보여 로그인 명의보다 앞선다.
@@ -617,9 +681,9 @@ async function _confirmHoldExpiry(p8, opt){
   if(alone) show('vExpired');
   let r = null, j = null;
   try{
-    r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/work-detail?phone8=' + encodeURIComponent(h.phone8)
+    r = await _campFetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/work-detail?phone8=' + encodeURIComponent(h.phone8)
       + '&holdToken=' + encodeURIComponent(h.holdToken), { cache:'no-store' });
-    j = await r.json().catch(()=>({}));
+    j = r.j;
   }catch(_){ j = null; }
   if(j && (j.reason === 'expired' || j.reason === 'no_hold')){ delete _expiryAsk[p8]; return active ? releaseExpiredHold(h) : _expireOtherTab(p8); }
   if(r && r.ok && j && j.ok){
@@ -814,8 +878,8 @@ function _setPopCredit(o){ if(o) _popCredit = _popCalc(o); }
 /** 한 명의의 참여권 조회. 실패는 null(= 모름) — 0건으로 꾸미지 않는다. */
 async function _fetchPopCredit(phone8){
   try{
-    const r = await fetch(API_BASE_URL + '/api/campaign/popular-status?phone8=' + encodeURIComponent(phone8));
-    const j = await r.json();
+    const r = await _campFetch(API_BASE_URL + '/api/campaign/popular-status?phone8=' + encodeURIComponent(phone8));
+    const j = r.j;
     if(!(r.ok && j && j.ok)) return null;
     return _popCalc(j);
   }catch(_){ return null; }
@@ -963,8 +1027,9 @@ async function openPopGate(gateInfo){
   }
   body.innerHTML = '<div style="padding:22px;text-align:center;color:var(--t3)"><i class="fas fa-circle-notch fa-spin"></i> 일반 모집을 불러오는 중…</div>';
   try{
-    const r = await fetch(API_BASE_URL + '/api/campaign/list');
-    const j = await r.json();
+    const r = await _campFetch(API_BASE_URL + '/api/campaign/list');
+    const j = r.j;
+    if(!r.ok || r.bad) throw _campServerErr(r.status);   // ★ 결정 397 — 못 받은 목록을 「일반 모집이 없어요」로 접지 않는다(결정 359)
     if (window.CampCards && CampCards.seedThumbs) CampCards.seedThumbs(j);   // 결정 354 — 썸네일 빠른 길 서명
     const rows = (j.data || []).filter(x =>
       x.participation_mode && x.is_popular !== true && x.state === 'open' && String(x.id) !== String(CAMP_ID));
@@ -992,7 +1057,7 @@ async function openPopGate(gateInfo){
       }).join('') + '</tbody></table></div>' +
       '<div class="muted" style="margin-top:8px">구매양식을 <b>제출완료</b>하면, 이 인기 상품으로 바로 돌아갈 수 있어요.</div>';
   }catch(e){
-    body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--err)">목록을 불러오지 못했어요: ' + _escAttr(e.message) + '</div>';
+    body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--err)">목록을 불러오지 못했어요. ' + _escAttr(_campErrText(e)) + '</div>';
   }
 }
 function hidePopGate(){ const o=$('popGate'); if(o) o.style.display='none'; }
@@ -1223,17 +1288,17 @@ async function _doChangeQty(qty){
   const h = getHold(); if(!h) return;
   toast('구매수량 변경 중…');
   try{
-    const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/change-option', {
+    const r = await _campFetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/change-option', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ phone8: h.phone8, holdToken: h.holdToken, purchaseQty: qty })
     });
-    const j = await r.json().catch(()=>({}));
+    const j = r.j;
     if(r.ok && j.ok){ toast(j.unchanged ? '같은 개수예요' : '구매수량이 바뀌었어요'); await enterJoined(); return; }
     const q = _detail && _detail.qty;
     if(_qtyRetryFromServer(j, { mode:'change', cur: q && q.purchaseQty, views: q && q.tiers })) return;
     if(j.reason === 'not_changeable'){ toast('지금은 바꿀 수 없어요'); await enterJoined(); return; }
-    toast(j.error || '구매수량을 바꿀 수 없어요');
-  }catch(e){ toast('오류: ' + e.message); }
+    toast(_campTempFail(r) ? _CAMP_MSG_SERVER : (j.error || '구매수량을 바꿀 수 없어요'));
+  }catch(e){ toast(_campErrText(e)); }
 }
 function renderJoinedQty(j){
   const box = $('joinedQtyBox'); const q = j && j.qty;
@@ -1274,15 +1339,15 @@ async function loadSubs(force){
   if(_subs && !force) return _subs;
   const s = getSession(); if(!s) return (_subs = []);
   try{
-    const r = await fetch(API_BASE_URL + '/api/reviewer/profile/secure', { headers:_getAuthHeaders() });
-    const j = await r.json().catch(()=>({}));
+    const r = await _campFetch(API_BASE_URL + '/api/reviewer/profile/secure', { headers:_getAuthHeaders() });
+    const j = r.j;
     if(!r.ok || !j || !j.ok) throw new Error((j && j.error) || '명의 정보를 불러오지 못했습니다.');
     const identities = (j && j.profile && j.profile.identities) || [];
     _subs = Array.isArray(identities)
       ? identities.filter(x => x && x.type === 'sub' && x.name && x.phone && !x.merged)   // 담당자가 합친 명의(옛 번호)는 고르는 목록에서 숨김(조각 4)
       : [];
     _subsLoadError = null;
-    try { const sr = await fetch(API_BASE_URL + '/api/campaign/my-repurchase-status?ids=' + encodeURIComponent(CAMP_ID), { headers:_getAuthHeaders() }); const sj = await sr.json().catch(()=>({})); const e = sj && sj.ok && sj.status && sj.status[CAMP_ID]; _repurchaseAccounts = {}; ((e && e.accounts) || []).forEach(a => { if(a && a.phone8) _repurchaseAccounts[_p8(a.phone8)] = a; }); } catch (_) { _repurchaseAccounts = {}; }
+    try { const sr = await _campFetch(API_BASE_URL + '/api/campaign/my-repurchase-status?ids=' + encodeURIComponent(CAMP_ID), { headers:_getAuthHeaders() }); const sj = sr.j; const e = sj && sj.ok && sj.status && sj.status[CAMP_ID]; _repurchaseAccounts = {}; ((e && e.accounts) || []).forEach(a => { if(a && a.phone8) _repurchaseAccounts[_p8(a.phone8)] = a; }); } catch (_) { _repurchaseAccounts = {}; }
   }catch(e){ _subs = null; _subsLoadError = e; }
   return _subs;
 }
@@ -1856,10 +1921,10 @@ async function _doApply(optionKey, sub, purchaseQty){
     if(sub && sub.name && sub.phone){ body.subName = sub.name; body.subPhone = sub.phone; }
     if(purchaseQty) body.purchaseQty = purchaseQty;   // ★ 결정 289
     if(_chainOn()) body.sequential = true;   // ★ 결정 356 — 서버가 차례 줄을 만들 수 있다고 알릴 때만
-    const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/apply', {
+    const r = await _campFetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/apply', {
       method:'POST', headers:{'Content-Type':'application/json', ..._getAuthHeaders()}, body: JSON.stringify(body)
     });
-    const j = await r.json().catch(()=>({}));
+    const j = r.j;
     const _prevAct = activeP8();   // ★ 결정 356 — 기다리는 명의를 더하면 지금 진행 중인 명의를 계속 보여 준다
     if(r.ok && j.ok){
       // ★ j.phone8 = "명의" p8(서버 계약) — 홀드 맵의 키이자 work-detail/cancel/embed의 holdPhone8
@@ -1878,6 +1943,9 @@ async function _doApply(optionKey, sub, purchaseQty){
       await enterJoined();
       return;
     }
+    // ★ 결정 397(M3·L2) — 사유 없는 5xx·못 읽은 응답 = 「참여할 수 없어요」(거절)가 아니라 잠깐의 서버 문제.
+    //   그 사이 자리가 잡혔을 수 있으니 서버에 한 번 물어 이어서 연다(다시 보내지 않는다 — _applyMany 와 같은 복구).
+    if(_campTempFail(r)){ await _applyLostRecover(sub, s, _CAMP_MSG_SERVER); return; }
     if(j.reason === 'profile_missing'){ renderMissing(j.missing || []); return; }
     // ★ 서버가 최종 판정 — 화면 검사를 통과해도 서버가 거부하면 그 사유를 그대로 보이고 다시 받는다
     if(j.reason === 'blog_url_required'){ _blogUrl = ''; openBlogSheet(optionKey, sub, j.error || ('블로그 주소를 확인해주세요 — ' + _BLOG_URL_HINT)); return; }
@@ -1949,9 +2017,20 @@ async function _doApply(optionKey, sub, purchaseQty){
     }
     toast(msg);
     await loadCampaign(); // 카운터/상태 갱신
-  }catch(e){ toast('오류: ' + e.message); }
+  }catch(e){ await _applyLostRecover(sub, s, _campErrText(e)); }   // ★ 결정 397(L2) — 끊김·시간 초과: 응답만 못 받았을 수 있다
   finally{ if($('vPre').style.display !== 'none'){ const c=_camp; $('joinBtn').disabled = !(c && c.state==='open'); $('joinBtn').textContent='참여하기';
     if(c && c.state==='open' && c.soldoutPaused === true){ $('joinBtn').disabled = true; $('joinBtn').textContent = '품절로 잠시 멈춤'; } } }   // 결정 259: 거절 뒤에도 멈춤 표시 유지
+}
+
+/** ★ 결정 397(L2) — [참여하기]의 응답만 못 받았을 때(끊김·시간 초과·서버 일시 오류).
+ *  요청이 서버에 닿아 자리가 잡혔을 수 있다 → 서버에 잡힌 자리를 한 번 받아 와(recoverActiveHolds) **그 명의** 자리가 있으면 이어서 연다.
+ *  다시 보내지 않는다(자리를 하나 더 잡지 않는다). 없거나 확인도 못 하면 쉬운 말로 알리고 [참여하기]를 다시 누르게 둔다. */
+async function _applyLostRecover(sub, s, msg){
+  const want = _p8((sub && sub.phone) || (s && s.phone8));
+  let got = false;
+  try{ got = !!(await recoverActiveHolds(want)) && !!_allHolds()[want]; }catch(_){ got = false; }
+  if(got){ toast('참여가 확인됐어요 — 구매양식을 이어서 열게요'); await enterJoined(); return; }
+  toast(msg || _CAMP_MSG_NET);
 }
 
 /* ═══ ★ 결정 353 — 체크한 명의마다 자리 잡기 ═══
@@ -1971,6 +2050,7 @@ async function _applyMany(optionKey, sels, purchaseQty){
   hideOptSheet(); hideAcctSheet();
   if(purchaseQty == null){ const tv = _qtyViewsFor(optionKey); if(tv && tv.length) return openQtySheet({ mode:'join', optionKey, many: sels, views: tv }); }
   _applyManyBusy = true;
+  let _manyLost = false;   // ★ 결정 397 — 응답을 못 받은 요청이 있었나(그 뒤 서버 자리를 받아 왔다)
   const _prevActMany = activeP8();   // ★ 결정 356
   const jb = $('joinBtn'); if(jb){ jb.disabled = true; jb.textContent = '자리 잡는 중…'; }
   const ok = [], fail = [];
@@ -1988,11 +2068,13 @@ async function _applyMany(optionKey, sels, purchaseQty){
         if(sub){ body.subName = sub.name; body.subPhone = sub.phone; }
         if(purchaseQty) body.purchaseQty = purchaseQty;
         if(_chainOn()) body.sequential = true;   // ★ 결정 356 — _doApply 와 같은 칸
-        r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/apply', {
+        r = await _campFetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/apply', {
           method:'POST', headers:{'Content-Type':'application/json', ..._getAuthHeaders()}, body: JSON.stringify(body)
         });
-        j = await r.json().catch(()=>({}));
-      }catch(e){ j = { error: '연결 오류 — ' + e.message }; }
+        j = r.j;
+        // ★ 결정 397 — 사유 없는 5xx·못 읽은 응답도 「응답을 못 받은 요청」으로 센다(아래에서 서버 자리를 한 번 받아 온다 · 다시 보내지 않는다)
+        if(_campTempFail(r)) j = { error: '연결 오류 — ' + _CAMP_MSG_SERVER };
+      }catch(e){ j = { error: '연결 오류 — ' + _campErrText(e) }; }
       if(r.ok && j.ok){
         setHold({ applicationId: j.applicationId, holdToken: j.holdToken, phone8: j.phone8, expiresAt: j.expiresAt,
                   optionKey: optionKey || (j.optionKey || ''),
@@ -2017,11 +2099,15 @@ async function _applyMany(optionKey, sels, purchaseQty){
   } finally {
     _applyManyBusy = false;
     // ★ 결정 356(RED-10) — 응답을 못 받은 요청이 있으면 서버에 잡힌 자리를 한 번 받아 온다(다시 보내지 않는다 · 결정 353)
-    if(fail.some(f => /^연결 오류/.test(f.why || ''))) { try{ await recoverActiveHolds(); }catch(_){ /* 다음 확인에서 */ } }
+    if(fail.some(f => /^연결 오류/.test(f.why || ''))) { try{ await recoverActiveHolds(); }catch(_){ /* 다음 확인에서 */ } _manyLost = true; }
     if(jb && $('vPre').style.display !== 'none'){ const c=_camp; jb.disabled = !(c && c.state==='open'); jb.textContent='참여하기'; }
   }
   if(!ok.length){
     if(firstGlobal) return _doApply(optionKey, firstGlobal.sub, purchaseQty);   // 종전 안내 화면 그대로
+    // ★ 결정 397 — 응답만 못 받았고 서버에 고른 명의의 자리가 잡혀 있었으면 그 자리로 이어서 연다(새로 보내지 않는다)
+    if(_manyLost && sels.some(x => _allHolds()[_p8(x.phone || x.phone8)])){
+      toast('참여가 확인된 명의로 구매양식을 이어서 열게요'); await enterJoined(); return;
+    }
     toast(fail.map(f => (f.sel.name || '명의') + ': ' + f.why).join(' / ') || '지금은 참여할 수 없어요');
     renderAcctList(); $('acctSheet').style.display = 'flex';
     return;
@@ -2061,11 +2147,11 @@ async function _doChangeOption(newKey, purchaseQty){
   hideOptSheet();
   toast('옵션 변경 중…');
   try{
-    const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/change-option', {
+    const r = await _campFetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/change-option', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify(Object.assign({ phone8: h.phone8, holdToken: h.holdToken, optionKey: newKey }, purchaseQty ? { purchaseQty } : {}))
     });
-    const j = await r.json().catch(()=>({}));
+    const j = r.j;
     if(r.ok && j.ok){
       toast(j.unchanged ? '같은 옵션이에요' : '옵션이 변경됐어요');
       await enterJoined(); // work-detail 재조회 + 구매양식 iframe 재로드(인플라이트 제출 파기 — 서버권위 TOCTOU 봉합)
@@ -2079,8 +2165,8 @@ async function _doChangeOption(newKey, purchaseQty){
       toast('그 옵션은 마감됐어요. 다른 옵션을 선택해주세요'); await enterJoined(); return;
     }
     if(j.reason === 'not_changeable'){ toast('지금은 옵션을 변경할 수 없어요'); await enterJoined(); return; } // 만료/제출됨 → 화면 재동기화(리뷰 나잇 #2)
-    toast(j.error || '옵션을 변경할 수 없어요');
-  }catch(e){ toast('오류: ' + e.message); }
+    toast(_campTempFail(r) ? _CAMP_MSG_SERVER : (j.error || '옵션을 변경할 수 없어요'));
+  }catch(e){ toast(_campErrText(e)); }
 }
 
 function renderMissing(missing){
@@ -2164,15 +2250,17 @@ function _onHoldTimeUp(){
   const h = getHold(); if(h) _confirmHoldExpiry(h.phone8, { active:true });   // ★ 결정 356 — 토큰은 서버 판정으로만 지운다
 }
 let _enterSeq = 0;
+let _detailRetryTimer = null;   // ★ 결정 397 — 다시 시도 예약은 하나만(여러 길에서 불려도 겹쳐 쌓이지 않게)
 async function enterJoined(){
   const h = getHold();
   clearInterval(_bpTimer);
+  clearTimeout(_detailRetryTimer);
   if(!h) return renderPre();
   const seq = ++_enterSeq;   // ★ 결정 353: 탭을 빨리 넘기면 늦게 온 앞 명의 응답이 지금 명의 화면을 덮지 않게
   try{
-    const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) +
+    const r = await _campFetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) +
       '/work-detail?phone8=' + encodeURIComponent(h.phone8) + '&holdToken=' + encodeURIComponent(h.holdToken));
-    const j = await r.json().catch(()=>({}));
+    const j = r.j;
     if(seq !== _enterSeq && _tabsOn()) return;
     if(!r.ok || !j.ok){
       /* 📝 127 블로그 승인제 — 대기/반려는 만료가 아니다(토큰 보존). 서버 reason 이 단일 출처. */
@@ -2182,13 +2270,8 @@ async function enterJoined(){
       if(j.reason === 'no_hold'){ clearHold(); renderPre(); return; } // 확정 무효일 때만 토큰 파기
       // 일시 장애(429/5xx/배포 중 응답 파싱 실패): holdToken 보존 + 자동 재시도
       //   — 당일 재신청 0회 정책이라 토큰을 잃으면 참여권이 소각되므로 절대 여기서 지우지 않는다.
-      _detailRetry++;
-      if(_detailRetry <= 6){
-        if(_detailRetry >= 3) toast('서버 연결이 원활하지 않아요 — 자동으로 다시 시도합니다');
-        setTimeout(enterJoined, _detailRetry <= 2 ? 3000 : 8000);
-      } else {
-        toast('연결에 실패했어요. 잠시 후 새로고침해주세요 (참여는 유지돼요)');
-      }
+      { const tmp = _campTempFail(r) || r.status === 429;   // 429 는 사유(rate_limited)가 있어도 잠깐 기다리면 풀린다
+        _detailTempFail(r.status === 429 ? (j.error || _CAMP_MSG_SERVER) : (tmp ? _CAMP_MSG_SERVER : '구매양식을 불러오지 못했어요.'), tmp); }
       return;
     }
     _detailRetry = 0;
@@ -2208,8 +2291,56 @@ async function enterJoined(){
     _qnaSlotRetry = 0;
     if(_isDoneDetail(j)){ if(_tabDoneActive()) return; renderDone(); return; }
     _renderJoinedView(j, h);
-  }catch(e){ toast('불러오기 오류: ' + e.message); renderPre(); }
+  }catch(e){
+    // ★ 결정 397(H1) — 끊김·시간 초과(예외)도 위 5xx 와 같은 길: 토큰 보존 + 다시 시도. 참여 전 화면으로 보내지 않는다.
+    //   (종전엔 여기서 renderPre — 자리는 살아 있고 시간은 흐르는데 화면은 [참여하기]로 돌아가 다시 오지 않았다.)
+    if(seq !== _enterSeq && _tabsOn()) return;
+    _detailTempFail(_campErrText(e, '구매양식을 불러오지 못했어요.'), !!(e && (e.transport || e.server)));
+  }
 }
+/** ★ 결정 397 — 작업 내용을 못 받음. 토큰은 지우지 않는다(서버 판정으로만 — 결정 356).
+ *  · 구매양식을 보고 있던 중이면(옵션 변경 뒤 다시 열기 등) 그 화면을 그대로 두고 알리기만 한다 — 종전과 같다(6번까지).
+ *  · 승인 대기 화면이면 그대로 두고 30초 확인을 다시 건다.
+ *  · 그 밖(처음 열기·참여 전·완료 화면에서 다른 명의로)이면 「다시 연결하는 중 · 참여는 유지돼요」를 보이고 계속 다시 시도한다.
+ *    temp = 끊김·시간 초과·서버 일시 오류(연결되면 풀린다). 아니면(사유 없는 4xx 등) 6번까지만 자동으로 다시 묻는다. */
+function _detailTempFail(why, temp){
+  _detailRetry++;
+  clearTimeout(_detailRetryTimer);
+  if($('vBlogPending').style.display !== 'none'){ clearInterval(_bpTimer); _bpTimer = setInterval(enterJoined, 30000); return; }
+  if($('vJoined').style.display !== 'none'){
+    if(_detailRetry <= 6){
+      if(_detailRetry >= 3) toast('서버 연결이 원활하지 않아요 — 자동으로 다시 시도합니다');
+      _detailRetryTimer = setTimeout(_retryEnterJoined, _detailRetry <= 2 ? 3000 : 8000);
+    } else {
+      toast('연결에 실패했어요. 잠시 후 새로고침해주세요 (참여는 유지돼요)');
+    }
+    return;
+  }
+  _showReconnect(why);
+  if(temp || _detailRetry <= 6) _detailRetryTimer = setTimeout(_retryEnterJoined, _detailRetry <= 2 ? 3000 : (_detailRetry <= 6 ? 8000 : 15000));
+}
+/** 예약된 다시 시도 — 이미 누른 제출은 끊지 않는다(결정 351): 제출 중이면 틀을 다시 열지 않고 2초 뒤 다시 본다. */
+function _retryEnterJoined(){
+  if(_formSubmitting()){ clearTimeout(_detailRetryTimer); _detailRetryTimer = setTimeout(_retryEnterJoined, 2000); return; }
+  return enterJoined();
+}
+function _showReconnect(why){
+  const h = getHold();
+  const left = h ? Date.parse(h.expiresAt || '') - CampCards.serverNow() : NaN;
+  const el = $('reconnectWhy');
+  if(el) el.textContent = (why || _CAMP_MSG_NET)
+    + (isFinite(left) && left > 60000 ? ' (남은 시간 약 ' + Math.floor(left / 60000) + '분)' : '');
+  const b = $('reconnectBtn'); if(b){ b.disabled = false; b.textContent = '지금 다시 연결하기'; }
+  show('vReconnect');
+}
+/** [지금 다시 연결하기] — 기다리지 않고 바로 다시 묻는다. */
+function retryReconnect(){
+  const b = $('reconnectBtn'); if(b){ b.disabled = true; b.textContent = '연결 확인 중…'; }
+  return enterJoined().finally(() => { if(b && $('vReconnect').style.display !== 'none'){ b.disabled = false; b.textContent = '지금 다시 연결하기'; } });
+}
+function _reconnectNow(){ if(!document.hidden && $('vReconnect').style.display !== 'none') enterJoined(); }
+document.addEventListener('visibilitychange', _reconnectNow);
+window.addEventListener('online', _reconnectNow);
 
 /** 참여 후(작업가이드) 화면 렌더 — 리뷰어(홀드 있음)와 관리자 미리보기(hold=null) 공용.
  *  ★ 렌더 내용은 양쪽 동일. 다른 것은 구매양식 iframe 파라미터와 폴링 여부뿐. */
@@ -2412,13 +2543,14 @@ async function onQnaSubmit(){
   const btn = $('qnaSubmitBtn'); btn.disabled = true; btn.textContent = '제출 중…'; _qnaErr('');
   try{
     // ① 자리 줄 기록 + 신청 확정(이미 됐으면 같은 줄을 다시 돌려준다)
-    const r = await fetch(API_BASE_URL + '/api/submit/qna', { method:'POST',
+    const r = await _campFetch(API_BASE_URL + '/api/submit/qna', { method:'POST',
       headers: { 'Content-Type':'application/json', ..._getAuthHeaders() },
       body: JSON.stringify({ campaignId: CAMP_ID, campaignApplicationId: _detail.application.id, holdToken: h.holdToken,
-        holdPhone8: h.phone8, loginPhone8: sess.phone8, loginName: sess.name }) });
-    const s = await r.json().catch(()=>({}));
+        holdPhone8: h.phone8, loginPhone8: sess.phone8, loginName: sess.name }) }, { timeoutMs: 30000 });
+    const s = r.j;
     if(!r.ok || !s.ok){
       if(s.code === 'QNA_EXPIRED'){ await releaseExpiredHold(h); return; }
+      if(_campTempFail(r)) throw _campServerErr(r.status);   // ★ 결정 397
       throw new Error(s.error || '제출에 실패했어요. 다시 눌러 주세요.');
     }
     const t = s.target;
@@ -2435,7 +2567,7 @@ async function onQnaSubmit(){
     if(!fin || (!fin.success && !fin.ok)) throw new Error((fin && fin.error) || '제출 기록에 실패했어요. 다시 눌러 주세요.');
     renderDone();
   }catch(e){
-    _qnaErr(e.message || '제출에 실패했어요. 다시 눌러 주세요.');
+    _qnaErr(_campErrText(e, '제출에 실패했어요. 다시 눌러 주세요.'));
     btn.disabled = false; btn.textContent = '캡처 제출';
   }
 }
@@ -2482,9 +2614,9 @@ async function pollOnce(){
   const h = getHold(); if(!h) return;
   if($('vJoined').style.display === 'none') return;
   try{
-    const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) +
+    const r = await _campFetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) +
       '/work-detail?phone8=' + encodeURIComponent(h.phone8) + '&holdToken=' + encodeURIComponent(h.holdToken));
-    const j = await r.json().catch(()=>({}));
+    const j = r.j;
     if(r.ok && j.ok){
       if(j.serverNow) CampCards.setServerNow(j.serverNow);
       if(_isDoneDetail(j)){ if(!_tabDoneActive()) renderDone(); }
@@ -2709,9 +2841,9 @@ async function _ensureDoneChat(){
   btn.style.display = 'none';
   const h = getHold(); if(!h) return;
   try{
-    const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) +
+    const r = await _campFetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) +
       '/work-detail?phone8=' + encodeURIComponent(h.phone8) + '&holdToken=' + encodeURIComponent(h.holdToken));
-    const j = await r.json().catch(()=>({}));
+    const j = r.j;
     if(r.ok && j.ok && j.chatUrl){ _detail = _detail || {}; _detail.chatUrl = j.chatUrl; btn.style.display = ''; }
   }catch(_){ /* 실패해도 다음 폴링·재방문에서 자가복구 */ }
 }
@@ -2740,11 +2872,11 @@ async function onCancel(){
     ? (h.name || '이') + ' 명의 참여만 취소할까요?\n다른 명의는 그대로 진행돼요. 구매양식을 제출하지 않았다면 이 명의로 오늘 다시 참여할 수 있어요.'
     : '참여를 취소할까요?\n구매양식을 제출하지 않았다면 오늘 다시 참여할 수 있어요.')) return;
   try{
-    const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/cancel', {
+    const r = await _campFetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/cancel', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ phone8: h.phone8, holdToken: h.holdToken })
     });
-    const j = await r.json().catch(()=>({}));
+    const j = r.j;
     // ★ 취소 성공 = 참여 전 화면으로 돌아가야 한다. loadCampaign은 "참여 전 화면일 때만" 다시 그리므로
     //   (작업가이드 보던 중 카운트다운 재조회에 튕기지 않게 한 가드) 여기서는 renderPre를 명시 호출한다.
     if(r.ok && j.ok){
@@ -2759,8 +2891,8 @@ async function onCancel(){
       }
       toast('참여가 취소되었어요'); await loadCampaign(); if(_camp) renderPre();
     }
-    else toast(j.error || '취소할 수 없어요');
-  }catch(e){ toast('오류: ' + e.message); }
+    else toast(_campTempFail(r) ? _CAMP_MSG_SERVER : (j.error || '취소할 수 없어요'));
+  }catch(e){ toast(_campErrText(e)); }   // ★ 결정 397 — 취소가 됐는지 모른다: 화면·토큰은 그대로(다음 확인이 서버 상태를 맞춘다)
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -2807,11 +2939,11 @@ async function _enterPreview(){
        인트라넷 SSO 토큰(via:'intranet')은 그 경로에 **도달 자체가 불가**(authMiddleware 격리)라
        같은 핸들러를 위임하는 `/api/trackb/campaigns/:id/preview` 로 한 번 더 시도한다.
        ★ 폴백은 401/403 일 때만 — 그 외 오류를 재시도하면 실패 원인이 가려진다. */
-    const _pvGet = (base) => fetch(API_BASE_URL + base, { headers: { 'Authorization': 'Bearer ' + tok } });
+    const _pvGet = (base) => _campFetch(API_BASE_URL + base, { headers: { 'Authorization': 'Bearer ' + tok } });
     let r = await _pvGet('/api/campaign/admin/' + encodeURIComponent(CAMP_ID) + '/preview');
     if(r.status === 401 || r.status === 403)
       r = await _pvGet('/api/trackb/campaigns/' + encodeURIComponent(CAMP_ID) + '/preview');
-    const j = await r.json().catch(()=>({}));
+    const j = r.j;
     if(!r.ok || !j.ok){
       _pvFail(r.status === 401 ? '관리자 세션이 만료됐어요. 대시보드에서 다시 열어주세요.'
             : r.status === 403 ? '관리자 권한이 필요해요.'
@@ -2834,7 +2966,7 @@ async function _enterPreview(){
     const fb = $('pvForceBtn'); if(fb) fb.classList.toggle('on', _pvForceOpen);
     pvGo('pre');
   }catch(e){
-    _pvFail('미리보기 오류: ' + (e.message || ''));
+    _pvFail('미리보기 오류: ' + _escAttr(_campErrText(e)));
   }
 }
 /** 미리보기 진입 실패 — 안내를 띄우고 **단계 전환 버튼을 없앤다**.
@@ -2887,6 +3019,8 @@ function _scheduleCampaign429Retry(waitMs){
   _campaign429Retried = true;
   toast('요청이 많아요. 약 ' + Math.ceil(waitMs / 1000) + '초 후 다시 불러올게요.');
   setTimeout(()=>{
+    // ★ 결정 397 — 첫 로딩이 429 였으면 공고만 다시 부르지 않고 시작 경로 전체(자리 복원 → 구매양식)를 다시 탄다
+    if(!_campBooted){ _campInit(); return; }
     loadCampaign().catch(()=>{}); // 재시도 실패는 현재 안내를 유지하고 무한 재시도하지 않는다.
   }, waitMs);
 }
@@ -2898,13 +3032,15 @@ function loadCampaign(){
     // "그 리뷰어" 기준으로 세게 하려는 것이다(decision 188). 이 조회는 그 값을 읽지 않는다.
     const _rlS = getSession();
     const _rlQ = _rlS && _rlS.phone8 ? '?phone8=' + encodeURIComponent(_rlS.phone8) : '';
-    const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + _rlQ);
+    const r = await _campFetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + _rlQ);
     if(r.status === 429){
       const waitMs = _retryAfterMs(r);
       _scheduleCampaign429Retry(waitMs);
-      throw new Error('요청이 너무 많습니다. 잠시 후 다시 시도하세요.');
+      const e429 = new Error('요청이 너무 많습니다. 잠시 후 다시 시도하세요.'); e429.rateLimited = true;   // 다시 부르기는 위에서 예약했다
+      throw e429;
     }
-    const j = await r.json();
+    const j = r.j;
+    if(_campTempFail(r)) throw _campServerErr(r.status);   // ★ 결정 397 — 배포 중 HTML·5xx 를 「캠페인을 찾을 수 없어요」로 말하지 않는다
     _campaign429Retried = false;
   if(!j.ok) throw new Error(j.error || '캠페인을 찾을 수 없어요');
   if(j.serverNow) CampCards.setServerNow(j.serverNow);
@@ -2927,13 +3063,52 @@ function loadCampaign(){
 /** KST 날짜 문자열(YYYY-MM-DD) */
 function kstDateStr(ms){ return new Date(ms + 9*3600*1000).toISOString().slice(0,10); }
 
-(async function init(){
+/* ★ 결정 397(M2) — 첫 로딩 실패는 😥+영어 대신 쉬운 말 + [다시 불러오기] + 몇 초 뒤 자동으로 다시.
+   다시 불러오기는 이 시작 경로(_campInit)를 처음부터 다시 탄다 — 공고 → 자리 복원 → 구매양식(재방문). 시작은 한 번만 끝난다. */
+let _campBooted = false;
+let _bootRetryTimer = null, _bootFails = 0;
+function _setLoadingView(text){
+  $('vLoading').innerHTML = '<div class="e"><i class="fas fa-circle-notch fa-spin" style="color:var(--p)"></i></div><p>' + _escAttr(text || '불러오는 중…') + '</p>';
+  show('vLoading');
+}
+function _campLoadFail(e){
+  const h = getHold(), keep = !!(h && Date.parse(h.expiresAt || '') > Date.now());
+  $('vLoading').innerHTML = '<div class="e">😥</div><h2>공고를 불러오지 못했어요</h2><p>' + _escAttr(_campErrText(e, '잠시 후 다시 시도해 주세요.')) + '</p>'
+    + (keep ? '<p><b>이미 참여한 자리는 그대로 유지돼요.</b></p>' : '')
+    + '<div class="sec"><button class="btn" id="loadRetryBtn" onclick="retryCampLoad()">다시 불러오기</button></div>';
+  show('vLoading');
+  clearTimeout(_bootRetryTimer);
+  // 끊김·시간 초과·서버 일시 오류면 몇 초 뒤 자동으로 다시(5→10→20→30초). 429 는 loadCampaign 이 서버가 정한 시간 뒤로 이미 예약했다.
+  if(e && (e.transport || e.server) && !e.rateLimited){
+    _bootFails++;
+    _bootRetryTimer = setTimeout(retryCampLoad, Math.min(30000, 5000 * Math.pow(2, _bootFails - 1)));
+  }
+}
+function retryCampLoad(){
+  clearTimeout(_bootRetryTimer);
+  if(_campBooted) return;
+  _setLoadingView('불러오는 중…');
+  _campInit();
+}
+document.addEventListener('visibilitychange', () => { if(!document.hidden && !_campBooted && $('loadRetryBtn')) retryCampLoad(); });
+window.addEventListener('online', () => { if(!_campBooted && $('loadRetryBtn')) retryCampLoad(); });
+/** 참여 전 화면 15초 갱신 — ★ 결정 397: 이 기기에 잡아 둔 자리가 있으면 구매양식으로 다시 들어간다(만료·없음은 서버가 판정). */
+async function _preRefreshTick(){
+  if($('vPre').style.display === 'none') return;
+  const sheetOpen = Array.prototype.some.call(document.querySelectorAll('.sheet-ovl'), el => el.style.display && el.style.display !== 'none');
+  if(!PREVIEW && getHold() && !sheetOpen){ await enterJoined(); return; }
+  try{ await loadCampaign(); }catch(_){}
+}
+
+async function _campInit(){
   if(!CAMP_ID){ location.replace('/'); return; }
   // ★ 주소창 토큰·preview 파라미터는 어떤 요청보다 먼저 회수·제거하고, 토큰이 있을 때만 미리보기로 확정.
   //   토큰 없이 preview 주소로 들어온 방문자(= 링크를 전달받은 리뷰어)는 평범한 리뷰어 화면을 본다.
   if(PREVIEW_REQ){ _pvCaptureToken(); PREVIEW = !!_pvToken(); }
   try{
     await loadCampaign();
+    if(_campBooted) return;           // ★ 결정 397 — 다시 불러오기·429 재시도가 겹쳐도 시작은 한 번만
+    _campBooted = true; clearTimeout(_bootRetryTimer);
     // ★ 관리자 미리보기: 홀드 복원·폴링 없이 미리보기 데이터로 단계 전환만(서버 상태 무변경)
     if(PREVIEW){ await _enterPreview(); return; }
     // ★ 어제(KST 이전 일자) 홀드는 폐기 — 서버는 익일 재참여를 허용하므로 만료 화면에 영구 잠금되지 않게.
@@ -2956,15 +3131,20 @@ function kstDateStr(ms){ return new Date(ms + 9*3600*1000).toISOString().slice(0
         }catch(_){}
       }
     }
+    // ★ 결정 397 — 이 기기에 잡아 둔 자리가 있으면 확인이 끝날 때까지 참여 전 화면([참여하기])을 보이지 않는다
+    const _hadHold = !!getHold();
+    if(_hadHold) _setLoadingView('참여 중인 구매양식을 여는 중…');
     await recoverActiveHolds();
     const h = getHold();
     if(h) await enterJoined();      // 재방문: 홀드 있으면 참여 후 화면 복원(만료면 만료 화면)
+    else if(_hadHold) renderPre();
     // 참여 전 화면 카운터 갱신(15초)
-    setInterval(async ()=>{ if($('vPre').style.display !== 'none'){ try{ await loadCampaign(); }catch(_){}} }, 15000);
+    setInterval(_preRefreshTick, 15000);
   }catch(e){
-    $('vLoading').innerHTML = '<div class="e">😥</div><p>' + (e.message||'불러오지 못했어요') + '</p>';
+    _campLoadFail(e);
   }
-})();
+}
+_campInit();
 </script>
 </body>
 </html>
