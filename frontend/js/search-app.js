@@ -248,17 +248,138 @@ function _toggleSavedInfoDropdown(trigger) {
 
 /* 개편 1단계(시안 v17) — "내 정보에서 선택" 목록은 화면 좌우 폭(양쪽 8px)을 넘지 않게 화면 기준으로 띄운다.
  *  구매양식이 공고 화면의 틀(iframe) 안에 있으면 틀이 내용 높이만큼 늘어나 있어 틀 안 창 높이로는 "보이는 아래 공간"을
- *  알 수 없다 → 같은 출처인 부모 화면에서 틀 위치·보이는 높이를 읽어 위/아래를 정한다. 못 읽으면 아래로 연다. */
+ *  알 수 없다 → 같은 출처인 부모 화면에서 틀 위치·보이는 높이를 읽어 위/아래를 정한다. 못 읽으면 아래로 연다.
+ *
+ * ★ 결정 399 — 「틀 안에서 지금 리뷰어에게 보이는 자리」의 **단일 출처**(옛 _pmvPlace 의 parent.innerHeight 사본 폐기).
+ *   돌려주는 값 = 틀 안 화면 좌표(position:fixed 기준)의 { top, bottom, framed }.
+ *   · 보이는 영역 = 부모의 visualViewport(키보드가 뜨면 줄어든다). 그 윗변을 부모 getBoundingClientRect 좌표로 옮길 때
+ *     `문서 윗변(rect) + visualViewport.pageTop` 을 쓴다 — 안드로이드(rect 가 화면 틀 기준 → offsetTop 이 된다)와
+ *     아이폰(rect 가 보이는 영역 기준 → 0 이 된다, 결정 393 측정 함정) 어느 쪽이든 같은 식으로 맞는다(기기 판별 없음).
+ *   · 부모 화면 위에 붙어 있는 줄(머리 · 남은 시간 · 명의 탭 · 관리자 미리보기 줄)이 가리는 만큼 윗변을 내린다.
+ *     줄을 못 찾으면(다른 부모 화면) 가림 0 — 종전과 같다. 보이는 높이의 절반을 넘게 내리지는 않는다.
+ *   · 틀이 화면 밖이면(위·아래로 지나감) 가까운 끝에 최소 120px 자리를 준다 — "모른다"를 빈 자리로 만들지 않는다.
+ *   · 틀이 아니면(직접 링크) 종전 그대로: top 0 · bottom = visualViewport 높이(없으면 innerHeight) · framed=false. */
+const _OF_PARENT_TOP_BARS = "#pvBar, .hd, .holdbar, .acct-tabs";
 function _ofVisibleBand() {
-  let top = 0, bottom = window.innerHeight;
+  let top = 0, bottom = window.innerHeight, framed = false;
   try {
     if (window.parent !== window && window.frameElement) {
-      const fr = window.frameElement.getBoundingClientRect();
-      const ph = window.parent.visualViewport ? window.parent.visualViewport.height : window.parent.innerHeight;
-      top = Math.max(0, -fr.top); bottom = Math.min(window.innerHeight, ph - fr.top);
+      const pw = window.parent, fe = window.frameElement, pd = pw.document;
+      const fr = fe.getBoundingClientRect();
+      const ft = fr.top + (fe.clientTop || 0);
+      const vv = pw.visualViewport;
+      let visTop = 0, visBottom = pw.innerHeight;
+      if (vv && Number.isFinite(vv.height) && vv.height > 0) {
+        const docTop = pd.documentElement.getBoundingClientRect().top;
+        const pageTop = Number.isFinite(vv.pageTop) ? vv.pageTop : ((pw.scrollY || 0) + (vv.offsetTop || 0));
+        visTop = docTop + pageTop;
+        if (!Number.isFinite(visTop) || Math.abs(visTop) > (pw.innerHeight || vv.height)) visTop = 0;
+        visBottom = visTop + vv.height;
+      }
+      let cover = visTop;
+      pd.querySelectorAll(_OF_PARENT_TOP_BARS).forEach((el) => {
+        const r = el.getBoundingClientRect();
+        if (r.height > 0 && r.bottom > visTop && r.top < visBottom) cover = Math.max(cover, r.bottom);
+      });
+      cover = Math.min(cover, visTop + (visBottom - visTop) / 2);
+      const H = window.innerHeight, MIN = 120;
+      top = Math.min(H, Math.max(0, cover - ft));
+      bottom = Math.min(H, Math.max(0, visBottom - ft));
+      if (bottom - top < MIN) {
+        if (bottom < MIN) { top = 0; bottom = Math.min(H, MIN); }
+        else top = Math.max(0, bottom - MIN);
+      }
+      framed = true;
     } else if (window.visualViewport) bottom = window.visualViewport.height;
+  } catch (_) { top = 0; bottom = window.innerHeight; framed = false; }
+  return { top, bottom, framed };
+}
+
+/* ★ 결정 399 — 틀(iframe) 안의 화면 고정 창·토스트를 「지금 보이는 자리」에 놓는다(점검 2026-11-21 M1).
+ *   공고 화면의 틀은 내용 높이만큼 길어서 position:fixed 는 틀 전체 기준이다 → 가운데 정렬 창은 화면 밖(위)에,
+ *   아래 붙는 토스트는 틀 맨 아래(화면 밖)에 그려졌다. 덮개(어두운 막)는 그대로 틀 전체를 덮고, **안쪽 여백**만
+ *   보이는 자리 위·아래로 늘려 창이 그 사이에서 원래 정렬(가운데 · 폰 아래 붙는 창은 아래 끝)대로 놓이게 한다.
+ *   창 모양(색·크기·문구)은 그대로, 위치만 바뀐다. 열려 있는 동안 부모 화면 스크롤·크기 변화(키보드)마다 다시 놓는다.
+ *   ★ 틀이 아니면(직접 링크) 아무것도 하지 않는다 — 화면이 종전과 똑같다. */
+function _ofFrameApply(el) {
+  if (!el || !el.isConnected) return;
+  const band = _ofVisibleBand();
+  const H = window.innerHeight;
+  if (el.getAttribute("data-of-framed") === "toast") {
+    if (el.dataset.ofBase == null) el.dataset.ofBase = String(parseFloat(getComputedStyle(el).bottom) || 24);
+    if (!band.framed) return;
+    el.style.setProperty("bottom", Math.round(Math.max(0, H - band.bottom) + Number(el.dataset.ofBase)) + "px", "important");
+    return;
+  }
+  const card = el.firstElementChild;
+  if (!band.framed) {   // 틀 밖(다른 출처 부모)을 못 읽으면 창 쪽으로 화면을 한 번 옮긴다(옛 _pmvPlace 동작)
+    if (card && !el._ofScrolled) { el._ofScrolled = true; try { card.scrollIntoView({ block: "center" }); } catch (_) {} }
+    return;
+  }
+  if (el.dataset.ofPad == null) {
+    const cs = getComputedStyle(el);
+    el.dataset.ofPad = (parseFloat(cs.paddingTop) || 0) + "," + (parseFloat(cs.paddingBottom) || 0);
+  }
+  const [pt, pb] = el.dataset.ofPad.split(",").map(Number);
+  el.style.setProperty("padding-top", Math.round(band.top + pt) + "px", "important");
+  el.style.setProperty("padding-bottom", Math.round(Math.max(0, H - band.bottom) + pb) + "px", "important");
+  if (card) {
+    card.style.setProperty("max-height", Math.max(160, Math.round(band.bottom - band.top - pt - pb)) + "px", "important");
+    if (getComputedStyle(card).overflowY === "visible") card.style.overflowY = "auto";
+  }
+}
+function _ofFrameIsOpen(el) {
+  if (!el || !el.isConnected) return false;
+  if (el.getAttribute("data-of-framed") === "toast") return el.childElementCount > 0;
+  return getComputedStyle(el).display !== "none";
+}
+let _ofFrameWatching = null;
+function _ofFrameReplaceAll() {
+  let open = 0;
+  document.querySelectorAll("[data-of-framed]").forEach((el) => { if (_ofFrameIsOpen(el)) { open++; try { _ofFrameApply(el); } catch (_) {} } });
+  if (!open) _ofFrameUnwatch();
+}
+function _ofFrameUnwatch() {
+  const w = _ofFrameWatching; if (!w) return;
+  _ofFrameWatching = null;
+  try { w.targets.forEach(([t, ev]) => t.removeEventListener(ev, w.fn)); } catch (_) {}
+}
+function _ofFrameWatch() {
+  if (_ofFrameWatching || window.parent === window) return;
+  let raf = 0;
+  const fn = () => { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; _ofFrameReplaceAll(); }); };
+  const targets = [[window, "resize"]];
+  try {
+    const pw = window.parent;
+    pw.addEventListener("scroll", fn, { passive: true }); targets.push([pw, "scroll"]);
+    pw.addEventListener("resize", fn); targets.push([pw, "resize"]);
+    if (pw.visualViewport) {
+      pw.visualViewport.addEventListener("resize", fn); targets.push([pw.visualViewport, "resize"]);
+      pw.visualViewport.addEventListener("scroll", fn); targets.push([pw.visualViewport, "scroll"]);
+    }
+  } catch (_) { /* 다른 출처 부모 — 틀 크기 변화만 본다 */ }
+  window.addEventListener("resize", fn);
+  _ofFrameWatching = { fn, targets };
+}
+/** 화면 고정 창(덮개 div)을 열었을 때 부른다. 틀 안이면 보이는 자리에 놓고 닫힐 때까지 따라가게 한다. 틀 밖이면 무동작. */
+function _ofFramePlace(ov) {
+  if (!ov || window.parent === window) return false;
+  try {
+    ov.setAttribute("data-of-framed", "overlay");
+    _ofFrameApply(ov);
+    _ofFrameWatch();
+  } catch (_) { /* 위치를 못 정해도 창은 뜬다 */ }
+  return true;
+}
+/** 토스트 상자(#toastContainer)를 토스트를 띄울 때마다 보이는 자리 아래 끝에 맞춘다. 틀 밖이면 무동작. */
+function _ofFramePlaceToast(c) {
+  if (!c || window.parent === window) return false;
+  try {
+    c.setAttribute("data-of-framed", "toast");
+    _ofFrameApply(c);
+    _ofFrameWatch();
   } catch (_) {}
-  return { top, bottom };
+  return true;
 }
 function _ofPlaceMenu(trigger, menu) {
   const vw = Math.min(document.documentElement.clientWidth || window.innerWidth, window.innerWidth);
@@ -3277,6 +3398,7 @@ function _showDuplicateBlockModal(d, anchor) {
     else if (anchor && typeof anchor.click === 'function') anchor.click();
   });
   document.body.appendChild(overlay);
+  _ofFramePlace(overlay);   // ★ 결정 399
 }
 function _preRenderDup(scope, anchor) {
   const s = _preGet(scope);
@@ -4852,6 +4974,7 @@ function _optionFullModal(info, name, partial = null) {
     });
     document.addEventListener("keydown", onKey);
     document.body.appendChild(ov);
+    _ofFramePlace(ov);   // ★ 결정 399
     const c = ov.querySelector("[data-of-continue]"); if (c) { try { c.focus(); } catch (_) {} }
   });
 }
@@ -4965,6 +5088,7 @@ function _popularGateModal(info, { cards = 1 } = {}) {
     });
     document.addEventListener("keydown", onKey);
     document.body.appendChild(ov);
+    _ofFramePlace(ov);   // ★ 결정 399
     const c = ov.querySelector("[data-pg-continue]"); if (c) { try { c.focus(); } catch (_) {} }
   });
 }
@@ -7854,38 +7978,11 @@ function _rdmBump(tabName, orderNum) {
      **서버가 막는다**(PRODUCT_WRONG_PURCHASE — 화면을 믿지 않는다 · 담당자 확인용 기록).
    ★ 선택지는 서버가 준 두 개뿐 — 화면이 다른 값을 지어내지 않는다.
    ★ 참여 공고 화면 안(iframe — 내용 높이만큼 길어진다)에서는 화면 고정 창이 틀 한가운데(화면 밖)에 그려진다 →
-     지금 보이는 자리에 놓는다(_pmvPlace · 코드리뷰).
+     지금 보이는 자리에 놓는다(결정 399 공용 _ofFramePlace — 옛 _pmvPlace 사본 폐기 · 코드리뷰).
    ★ 결정 236 ④ mode="recheck" — 서버가 PRODUCT_PRICE_RECHECK("고른 상품이 맞다"고 했는데 결제금액이 다른 상품 가격)를
      돌려주면 같은 창으로 한 번 더 묻는다: "○○를 주문했다고 하셨지만 결제금액 N원은 △△ 결제금액이에요".
      닫기 = 「다시 확인할게요」(제출 안 함) · 고른 상품 = 다시 확인하고도 맞다(priceRecheckAck → 접수 + 담당자 확인 기록) ·
      금액이 같은 상품 = 잘못 구매(서버가 막는다). */
-function _pmvPlace(ov) {
-  try {
-    if (window.self === window.top) return;
-    const box = ov.querySelector(".pmv-box");
-    const docH = Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0);
-    ov.classList.add("pmv-in-frame");
-    ov.style.height = docH + "px";
-    let visTop = window.scrollY || 0, visH = window.innerHeight;
-    let placed = false;
-    try {
-      const fe = window.frameElement;            // 같은 출처(참여 공고 화면)일 때만 읽힌다
-      if (fe) {
-        const r = fe.getBoundingClientRect(), ph = window.parent.innerHeight;
-        visTop = Math.max(0, -r.top);
-        visH = Math.max(120, Math.min(r.bottom, ph) - Math.max(r.top, 0));
-        placed = true;
-      }
-    } catch (_) { placed = false; }
-    const bh = box.offsetHeight || 0;
-    // 폰(≤640px)은 바텀시트 — 지금 보이는 자리의 **아래 끝**에 붙인다 / 넓은 화면은 보이는 자리 가운데.
-    const sheet = window.innerWidth <= 640;
-    const want = sheet ? (visTop + visH - bh) : (visTop + (visH - bh) / 2);
-    box.style.marginTop = Math.max(sheet ? 0 : 8, Math.min(docH - bh, want)) + "px";
-    if (!placed) box.scrollIntoView({ block: "center" });   // 틀 밖을 못 읽으면 창 쪽으로 화면을 옮긴다
-  } catch (_) { /* 위치를 못 정해도 창은 뜬다 */ }
-}
-
 function _pmvAsk(res, orderNo, mode) {
   return new Promise((resolve) => {
     const cap = (res && res.captured) || {}, cho = (res && res.chosen) || {};
@@ -7955,7 +8052,7 @@ function _pmvAsk(res, orderNo, mode) {
     });
     document.addEventListener("keydown", onKey);
     document.body.appendChild(ov);
-    _pmvPlace(ov);
+    _ofFramePlace(ov);
     const first = ov.querySelector("[data-pmv]"); if (first) first.focus({ preventScroll: true });
   });
 }
@@ -9113,6 +9210,25 @@ function _ofViewCapture(cid) {
     prev.after(big);
   }
   big.querySelector("img").src = src; big.hidden = false;
+  _ofCapBigInFrame(big);
+}
+/* ★ 결정 399 — 틀(iframe) 안에서 아주 긴 캡처(스크롤 캡처 등)를 펼치면 양식이 공고 화면의 틀 높이 상한(4,000px)을 넘어
+ *   [구매양식 제출] 이 틀 속 스크롤로 숨었다(점검 2026-11-21 L3). 틀 안에서만: 펼친 사진 칸의 높이를 「보이는 높이의 1.5배
+ *   (480~1,600px)」로 묶고 그 안에서 위아래로 넘겨 보게 한다(사진은 폭 그대로라 글자 크기 불변) · 펼친 사진은 한 번에 하나.
+ *   상한을 올리지 않는 이유: 틀 안 화면은 min-height:100vh 라 틀이 한 번 커지면 줄지 않는다 — 상한이 유일한 멈춤 장치다.
+ *   틀 밖(직접 링크)은 종전 그대로(페이지 자체가 스크롤된다). */
+function _ofCapBigInFrame(big) {
+  if (!big || window.parent === window) return;
+  try {
+    document.querySelectorAll(".of-img-big").forEach((b) => { if (b !== big) b.hidden = true; });
+    const band = _ofVisibleBand();
+    const vis = Math.max(1, band.bottom - band.top);
+    big.style.maxHeight = Math.round(Math.min(1600, Math.max(480, vis * 1.5))) + "px";
+    big.style.overflowY = "auto";
+    big.style.webkitOverflowScrolling = "touch";
+    const hint = big.querySelector("span");
+    if (hint) { hint.style.position = "sticky"; hint.style.bottom = "0"; hint.style.background = "#f5f5f7"; }
+  } catch (_) {}
 }
 function _ofHideCaptureView(cid) { const big = document.getElementById(cid + "_imgBig"); if (big) big.hidden = true; }
 /** 구매사진 [사진 변경] — 사진 칸을 다시 누른 것과 같다. */
@@ -9414,6 +9530,7 @@ function _openOrderConfirm() {
   const m = document.getElementById("orderConfirmModal");
   if (!m) { submitOrderForm(); return; }   // 모달 미존재(하위호환) 시 바로 제출
   m.style.display = "flex";
+  _ofFramePlace(m);   // ★ 결정 399: 틀 안이면 지금 보이는 자리에(틀 밖은 무동작)
 }
 function confirmOrderSubmit() {
   if (window._submitOrderFormInProgress) { console.warn("[confirmOrderSubmit] 제출 진행 중 — 무시"); return; }
@@ -9427,6 +9544,7 @@ function confirmOrderSubmit() {
         + `캡처는 <b style="color:#111827">구매 확인과 리뷰비 정산</b>에 쓰입니다.`;
     }
     gate.style.display = "flex";
+    _ofFramePlace(gate);   // ★ 결정 399: 틀 안이면 지금 보이는 자리에(틀 밖은 무동작)
     return;
   }
   if (_PREVIEW_MODE) { _openOrderConfirm(); return; }
@@ -9566,18 +9684,28 @@ async function submitOrderForm() {
   if (window._submitOrderFormInProgress) { console.warn("[submitOrderForm] 진행 중 — 무시"); return; }
   window._submitOrderFormInProgress = true;
   const btn = document.getElementById("btnOrderFormSubmit");
+  // ★ 결정 399: 「처리 중…」으로 바꾸기 전 버튼 글자를 기억해 두고, 제출 앞단에서 멈추면(결정 398 길) 그 글자로 되돌린다.
+  //   예전엔 기본값 '제출' 로 되돌려 [구매양식 제출] 이 [제출] 로 바뀌었다. [재제출] 처럼 글자를 넘기는 길은 그대로.
+  const _btnOrigHtml = btn ? btn.innerHTML : "";
+  const _btnOrigBg = btn ? btn.style.background : "", _btnOrigColor = btn ? btn.style.color : "";
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 처리 중...'; }
 
   function _resetBtn(label) {
     window._submitOrderFormInProgress = false;
     if (btn) {
       btn.disabled = false;
-      btn.innerHTML = label || '<i class="fas fa-paper-plane"></i> 제출';
-      if (!label) _syncSubmissionIdentityAction();
-      // 재제출 모드가 아니면 스타일 초기화
+      const _orig = (/처리 중/.test(_btnOrigHtml) ? "" : _btnOrigHtml) || '<i class="fas fa-paper-plane"></i> 구매양식 제출';
+      btn.innerHTML = label || _orig;
       if (!label) {
-        btn.style.background = "";
-        btn.style.color = "";
+        _syncSubmissionIdentityAction();
+        // 틀 안에서는 명의 확인 줄 맞추기가 할 일이 없을 때 글자를 '제출' 로 덮는다 → 그때만 누르기 전 글자로 되돌린다
+        //   (「내 주문이 맞습니다」·「다른 캡처 올리기」·「확인 중…」 같은 명의 확인 글자는 그대로 둔다).
+        if (String(btn.textContent || "").trim() === "제출") btn.innerHTML = _orig;
+      }
+      // 재제출 모드가 아니면 스타일을 누르기 전 그대로(보통은 빈 값 = 초기화 · 이미 [재제출] 이었으면 그 빨간 모양 유지)
+      if (!label) {
+        btn.style.background = _btnOrigBg;
+        btn.style.color = _btnOrigColor;
       }
     }
   }
@@ -10730,29 +10858,6 @@ document.addEventListener("click", function(e) {
 });
 
 
-/** 간단한 토스트 메시지 */
-function showToast(msg, isErr) {
-  let t = document.getElementById("_toast");
-  if (!t) {
-    t = document.createElement("div");
-    t.id = "_toast";
-    Object.assign(t.style, {
-      position:"fixed", bottom:"24px", left:"50%", transform:"translateX(-50%)",
-      background: isErr ? "#EF4444" : "#12b886",
-      color:"#fff", padding:"8px 20px", borderRadius:"20px",
-      fontSize:".82rem", fontWeight:"600", zIndex:"9999",
-      boxShadow:"0 4px 14px rgba(0,0,0,.2)", transition:"opacity .3s"
-    });
-    document.body.appendChild(t);
-  }
-  t.style.background = isErr ? "#EF4444" : "#12b886";
-  t.textContent = msg;
-  t.style.opacity = "1";
-  clearTimeout(t._tid);
-  t._tid = setTimeout(() => { t.style.opacity = "0"; }, 2500);
-}
-
-
 function closeKeyMenu() {
   const dd = document.getElementById('keyDropdown');
   if (dd) dd.style.display = 'none';
@@ -11006,13 +11111,25 @@ document.addEventListener("keydown", e => {
 });
 
 
+/* ★ 결정 399 — 토스트는 이 함수 하나(점검 2026-11-21 L5). 예전엔 `showToast(msg, isErr)` 가 하나 더 있었고 뒤의 것이 이겨서
+ *   `showToast(…, true)`(오류로 쓴 9곳 · api.js 의 오류 안내)가 검은 일반 안내로, `"warn"` 은 없는 모양으로 떴다.
+ *   두 번째 값은 옛 참/거짓도 받는다: true → "error" · false/없음 → "info" · "warn" → "warning" · 모르는 값 → "info".
+ *   틀(iframe) 안이면 토스트 상자를 지금 보이는 자리 아래 끝에 놓는다(_ofFramePlaceToast · 틀 밖은 종전 그대로). */
+function _toastType(type) {
+  if (type === true) return "error";
+  if (type === "warn") return "warning";
+  return (type === "error" || type === "success" || type === "warning" || type === "info") ? type : "info";
+}
 function showToast(msg, type="info", duration=3500) {
   const c = document.getElementById("toastContainer");
+  if (!c) return;
+  const kind = _toastType(type);
   const t = document.createElement("div");
-  t.className = `toast ${type}`;
+  t.className = `toast ${kind}`;
   const icons = { error:"fa-circle-xmark", success:"fa-circle-check", warning:"fa-triangle-exclamation", info:"fa-circle-info" };
-  t.innerHTML = `<i class="fas ${icons[type]||"fa-circle-info"}"></i>${escHtml(msg)}`;
+  t.innerHTML = `<i class="fas ${icons[kind]}"></i>${escHtml(msg)}`;
   c.appendChild(t);
+  _ofFramePlaceToast(c);
   setTimeout(() => { t.style.transition="opacity .3s"; t.style.opacity="0"; setTimeout(()=>t.remove(),300); }, duration);
 }
 
@@ -11031,6 +11148,7 @@ function showCenterAlert(msg, duration=4000) {
     <button onclick="this.closest('#_centerAlertOverlay').remove()" style="margin-top:18px;padding:10px 32px;border:none;border-radius:8px;background:#DC2626;color:#fff;font-size:.9rem;font-weight:600;cursor:pointer">확인</button>
   </div>`;
   document.body.appendChild(overlay);
+  _ofFramePlace(overlay);   // ★ 결정 399
 
   // 자동 닫기
   if (duration > 0) {
