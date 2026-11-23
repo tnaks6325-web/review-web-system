@@ -277,7 +277,7 @@ test('L1 정적 전수 — campaign.html 에서 틀 주소를 바꾸는 곳은 _
   assert.ok(/function openFormWindow\(\)\{[^\n]*_frameUrl\(/.test(SCRIPT), '[새 창으로 열기]도 _frameUrl');
 });
 
-test('L1 정적 — campaign.html 이 읽는 도우미 JS 에는 틀 주소를 바꾸는 곳이 없다 · 뒤로가기 도우미(RhSheetBack)를 쓰지 않는다', () => {
+test('L1 정적 — campaign.html 이 읽는 도우미 JS 에는 틀 주소를 바꾸는 곳이 없다 · 방문 기록은 뒤로가기 도우미(RhSheetBack) 한 곳만', () => {
   const srcs = [...CAMP.matchAll(/<script src="([^"?]+)/g)].map(m => m[1]);
   assert.ok(srcs.length >= 4, srcs.join(','));
   srcs.forEach(s => {
@@ -285,7 +285,11 @@ test('L1 정적 — campaign.html 이 읽는 도우미 JS 에는 틀 주소를 �
     assert.ok(!/(frame|Frame|iframe)[\w.$()'"\]\[]*\.src\s*=(?!=)/.test(js), s + ' 가 틀 주소를 바꾸면 안 된다');
     assert.ok(!/contentWindow\.location/.test(js), s);
   });
-  assert.ok(!/reviewer-sheet-back|RhSheetBack/.test(CAMP), '공고 화면은 리뷰어 홈 뒤로가기 도우미를 싣지 않는다(결정 372 범위 밖)');
+  // ★ 결정 403 — 창(바텀시트) 뒤로가기를 위해 리뷰어 홈 도우미를 싣는다(위 반복이 그 파일에도 틀 주소 바꾸기 0 을 확인한다).
+  //   그 외의 기록 조작은 여전히 0: 화면 스크립트에 pushState·popstate 없음 · 실린 JS 중 pushState 는 도우미 하나뿐.
+  assert.ok(srcs.includes('js/reviewer-sheet-back.js'), '공고 화면은 창 뒤로가기 도우미를 싣는다(결정 403)');
+  assert.deepStrictEqual(srcs.filter(s => /pushState/.test(fs.readFileSync(path.join(ROOT, 'frontend', s), 'utf8'))), ['js/reviewer-sheet-back.js'],
+    '방문 기록을 쌓는 JS 는 뒤로가기 도우미 하나뿐');
   assert.ok(!/pushState|onpopstate|'popstate'/.test(SCRIPT), '공고 화면은 방문 기록을 직접 쌓지 않는다');
 });
 

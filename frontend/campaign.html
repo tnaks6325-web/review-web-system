@@ -10,6 +10,7 @@
   <script src="js/drive-thumb.js"></script>
   <script src="js/campaign-cards.js?v=20261104-inflow"></script>
   <script src="js/campaign-workdetail.js"></script>
+  <script src="js/reviewer-sheet-back.js?v=20261123-campsheet"></script>
   <style>
     :root{ --p:#3182f6; --p-light:#e8f1fe; --p-dark:#1b64da; --ok:#12b886; --ok-light:#D1FAE5;
       --warn:#F59E0B; --warn-light:#FEF3C7; --err:#EF4444; --err-light:#FEE2E2;
@@ -450,6 +451,41 @@ let _pvForceOpen = true;   // 미리보기 ①단계를 '모집중'으로 가정
 let _pvSimSubmitted = false; // 미리보기 가상 제출 완료 여부(브라우저 메모리에만 존재)
 
 function $(id){ return document.getElementById(id); }
+
+/* ═══ ★ 결정 403 — 휴대폰 [뒤로] = 열린 창(바텀시트) 하나만 닫기 ═══
+   리뷰어 홈과 같은 도우미(js/reviewer-sheet-back.js · RhSheetBack, 결정 370·372)를 그대로 쓴다 — 이 화면에서 방문 기록
+   조작(칸 쌓기·뒤로가기 신호 받기)을 따로 만들지 않는다. 창 열기 = _sheetOpen(id) 하나 · 닫기 = _sheetClose(id) 하나(각 hide 함수가 부른다).
+   · 뒤로가기로 닫을 때 부르는 함수 = 그 창의 [취소]와 같은 hide 함수(_sheetHideOf) — 뒤로가기는 [취소]와 똑같이 닫는다.
+   · 단추·성공 뒤 닫기는 도우미가 쌓은 칸을 조용히 되돌린다 → 그다음 [뒤로] 한 번에 공고를 떠난다(헛 누름 0).
+   · 닫자마자 다른 창을 열면(명의 → 옵션 → 개수) 새 창이 그 칸을 이어 쓴다 · 겹친 창(명의 + 도움말)은 맨 위부터 하나씩.
+   · 창을 연 채 다른 화면으로 가는 길은 _sheetLeave(url) — 창 칸을 그 주소로 바꾼다(돌아왔을 때 헛 칸 0).
+   · 도우미가 없으면(옛 캐시·차단) 아무 일도 안 한다 — 창은 단추로 종전처럼 닫힌다. 구매양식 틀(결정 402)은 건드리지 않는다. */
+function _sheetHideOf(id){
+  switch(id){
+    case 'loginSheet': return hideSheet;
+    case 'optSheet':   return hideOptSheet;
+    case 'qtySheet':   return hideQtySheet;
+    case 'blogSheet':  return hideBlogSheet;
+    case 'acctSheet':  return hideAcctSheet;
+    case 'multiHelp':  return hideMultiHelp;
+    case 'acctEmpty':  return hideAcctEmpty;
+    case 'popGate':    return hidePopGate;
+  }
+  return () => _sheetClose(id);
+}
+function _sheetOpen(id){
+  const el = $(id); if(!el) return;
+  el.style.display = 'flex';
+  try{ if(window.RhSheetBack) window.RhSheetBack.opened(id, _sheetHideOf(id)); }catch(_){}
+}
+function _sheetClose(id){
+  const el = $(id); if(el) el.style.display = 'none';
+  try{ if(window.RhSheetBack) window.RhSheetBack.closed(id); }catch(_){}
+}
+function _sheetLeave(url){
+  try{ if(window.RhSheetBack && typeof window.RhSheetBack.leave === 'function'){ window.RhSheetBack.leave(url); return; } }catch(_){}
+  location.href = url;
+}
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.style.display='block';
   clearTimeout(t._h); t._h=setTimeout(()=>t.style.display='none', 3200); }
 function show(view){ ['vLoading','vPre','vMissing','vJoined','vExpired','vDone','vBlogPending','vBlogRejected','vReconnect'].forEach(v=>$(v).style.display = v===view?'':'none'); }
@@ -522,8 +558,8 @@ function saveSession(name, phone8, reviewerToken){
   try{ localStorage.setItem('iad_reviewer_user', JSON.stringify({name, phone:phone8, phone8:session.phone8, reviewerToken:session.reviewerToken})); }catch(_){}
   return session;
 }
-function needLogin(then){ _afterLogin = then || null; $('loginSheet').style.display='flex'; }
-function hideSheet(){ $('loginSheet').style.display='none'; }
+function needLogin(then){ _afterLogin = then || null; _sheetOpen('loginSheet'); }
+function hideSheet(){ _sheetClose('loginSheet'); }
 async function doVerify(){
   const name = $('liName').value.trim();
   const p8 = $('liPhone').value.replace(/\D/g,'');
@@ -1005,7 +1041,7 @@ function renderPopNotice(){
    이동 전 sessionStorage에 복귀 캠페인을 기록 → 일반 제출완료 화면에서 "인기 상품으로 돌아가기" 버튼 제공. */
 async function openPopGate(gateInfo){
   const ovl = $('popGate'); if(!ovl) return;
-  ovl.style.display = 'flex';
+  _sheetOpen('popGate');
   const body = $('popGateBody');
   const cnt = $('popGateCount');
   // ★ 수치 출처는 한 곳 — 클릭으로 받은 서버 응답(gateInfo) 없으면 이미 조회해 둔 참여권 상태를 쓴다.
@@ -1061,11 +1097,11 @@ async function openPopGate(gateInfo){
     body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--err)">목록을 불러오지 못했어요. ' + _escAttr(_campErrText(e)) + '</div>';
   }
 }
-function hidePopGate(){ const o=$('popGate'); if(o) o.style.display='none'; }
+function hidePopGate(){ _sheetClose('popGate'); }
 function goPopNormal(id){
   // 선택한 일반 모집을 완료하면 원래 인기 공고로 돌아갈 수 있게 보관한다.
   try{ sessionStorage.setItem('pop_return_camp', JSON.stringify({ campaignId:CAMP_ID })); }catch(_){}
-  location.href = 'campaign.html?id=' + encodeURIComponent(id);
+  _sheetLeave('campaign.html?id=' + encodeURIComponent(id));   // ★ 결정 403 — 목록 창을 연 채 떠난다
 }
 function holdTtlText(){ return ((_camp && Number(_camp.hold_ttl_min)) || 20) + '분'; } // 공개 화이트리스트의 hold_ttl_min 사용
 
@@ -1200,7 +1236,7 @@ function openOptSheet(){
     : '선택한 옵션으로 자리가 잡혀요. 구매 전까지는 다른 옵션으로 바꿀 수 있어요.';
   $('optSheetGo').textContent = '이 옵션으로 참여';
   _renderOptSheetList((_camp && _camp.options) || [], null);
-  $('optSheet').style.display = 'flex';
+  _sheetOpen('optSheet');
 }
 function openChangeOptSheet(){
   if(!_detail) return;
@@ -1210,9 +1246,9 @@ function openChangeOptSheet(){
   $('optSheetNote').textContent = '이미 구매하셨다면 구매한 옵션과 같은지 꼭 확인 후 변경하세요. 변경하면 구매양식이 새로고침돼요.';
   $('optSheetGo').textContent = '이 옵션으로 변경';
   _renderOptSheetList(_detail.options || [], (_detail.application && _detail.application.optionKey) || null);
-  $('optSheet').style.display = 'flex';
+  _sheetOpen('optSheet');
 }
-function hideOptSheet(){ $('optSheet').style.display = 'none'; }
+function hideOptSheet(){ _sheetClose('optSheet'); }
 function onOptSheetConfirm(){
   if(!_optSheetSel) return toast('옵션을 선택해주세요');
   if(_optSheetMode === 'join_identity') { hideOptSheet(); _applyInitialAcct(_optSheetSel); }
@@ -1261,9 +1297,9 @@ function openQtySheet(p){
     list.appendChild(div);
   });
   $('qtySheetGo').disabled = true;
-  $('qtySheet').style.display = 'flex';
+  _sheetOpen('qtySheet');
 }
-function hideQtySheet(){ $('qtySheet').style.display = 'none'; }
+function hideQtySheet(){ _sheetClose('qtySheet'); }
 function onQtySheetConfirm(){
   const p = _qtyPending;
   if(!p || !_qtySel) return toast('구매수량을 선택해주세요');
@@ -1462,10 +1498,10 @@ function renderAcctList(){
 function openMultiHelp(){
   const img = $('multiHelpImg');
   if(img && !img.getAttribute('src')) img.setAttribute('src', '/docs/help/multi-identity-join.jpg');
-  $('multiHelp').style.display = 'flex';
+  _sheetOpen('multiHelp');
   const sh = $('multiHelp').querySelector('.sheet'); if(sh) sh.scrollTop = 0;
 }
-function hideMultiHelp(){ $('multiHelp').style.display = 'none'; }
+function hideMultiHelp(){ _sheetClose('multiHelp'); }
 /** 여러 명의 체크일 때 버튼 문구 = 체크한 수(그 수만큼만 자리를 잡는다) */
 function _syncAcctGo(){
   const n = _acctSelMany.length, go = $('acctSheetGo');
@@ -1498,15 +1534,15 @@ async function openAcctSheet(optionKey, next){
         ? '참여할 명의를 <b>모두 체크</b>하세요 — 체크한 수만큼만 구매양식이 열려요. 한 명의는 <b>1건만</b> 참여할 수 있어요.'
         : '한 명의는 이 공고에 <b>1건만</b> 참여할 수 있어요.')
       : '이 공고는 <b>1인 1회</b>예요 — 내 명의 중 <b>하나로만</b> 참여할 수 있어요.'; }
-  $('acctSheet').style.display = 'flex';
+  _sheetOpen('acctSheet');
 }
-function hideAcctSheet(){ $('acctSheet').style.display = 'none'; }
-function openAcctEmpty(){ $('acctEmpty').style.display = 'flex'; }
-function hideAcctEmpty(){ $('acctEmpty').style.display = 'none'; }
+function hideAcctSheet(){ _sheetClose('acctSheet'); }
+function openAcctEmpty(){ _sheetOpen('acctEmpty'); }
+function hideAcctEmpty(){ _sheetClose('acctEmpty'); }
 /** 타계정 등록 화면으로 — 돌아올 공고를 기록해 등록 후 "참여 이어가기" 안내 */
 function goRegisterSub(){
   try{ sessionStorage.setItem('sub_return_camp', CAMP_ID); }catch(_){}
-  location.href = '/index.html?returnCamp=' + encodeURIComponent(CAMP_ID) + '#my';
+  _sheetLeave('/index.html?returnCamp=' + encodeURIComponent(CAMP_ID) + '#my');   // ★ 결정 403 — 안내 창을 연 채 떠난다
 }
 function onAcctSheetConfirm(){
   if(!_acctSel) return toast('참여할 명의를 선택해주세요');
@@ -1545,7 +1581,7 @@ function _continueInitialAcct(){
   $('optSheetNote').textContent = '선택한 명의와 옵션으로 자리가 잡혀요.';
   $('optSheetGo').textContent = '이 옵션으로 참여';
   _renderOptSheetList(opts, null);
-  $('optSheet').style.display = 'flex';
+  _sheetOpen('optSheet');
 }
 /** 참여 후 화면의 [＋타계정으로 추가참여하기] */
 async function onAddSubJoin(){
@@ -1807,10 +1843,10 @@ function openBlogSheet(optionKey, sub, msg){
   }
   const note = $('blogSheetNote');
   if(note) note.textContent = msg || (_BLOG_URL_HINT + ' 를 넣어주세요. 작성한 글 주소(포스팅URL)는 나중에 리뷰 제출할 때 넣습니다.');
-  $('blogSheet').style.display = 'flex';
+  _sheetOpen('blogSheet');
   setTimeout(()=>{ try{ inp && inp.focus(); }catch(_){} }, 50);
 }
-function hideBlogSheet(){ $('blogSheet').style.display = 'none'; }
+function hideBlogSheet(){ _sheetClose('blogSheet'); }
 function onBlogSheetConfirm(){
   const v = String(($('blogUrlIn') || {}).value || '').trim();
   if(!_isBlogUrl(v)) return toast('블로그 주소를 확인해주세요 (' + _BLOG_URL_HINT + ')');
@@ -1993,7 +2029,7 @@ async function _doApply(optionKey, sub, purchaseQty){
     // ★ 결정 289 ③-나: 개수 미선택·없는 개수·그 개수 마감 → 서버가 준 최신 자리로 개수 창 다시(자리는 점유되지 않았다)
     if(_qtyRetryFromServer(j, { mode:'join', optionKey, sub, views: _qtyViewsFor(optionKey) })) return;
     if(j.reason === 'tier_unavailable'){ toast(j.error || '지금은 참여할 수 없어요'); await loadCampaign(); return; }
-    if(j.reason === 'not_registered'){ toast('리뷰어 등록 후 참여할 수 있어요'); setTimeout(()=>location.href='/search.html#register', 900); return; }
+    if(j.reason === 'not_registered'){ toast('리뷰어 등록 후 참여할 수 있어요'); setTimeout(()=>_sheetLeave('/search.html#register'), 900); return; }
     // 옵션 관련 사유 → 옵션 상태 갱신 후 선택 시트 재오픈
     if(['option_required','option_invalid','option_soldout','option_today_done','option_unavailable','option_waiting','option_paused'].includes(j.reason)){
       toast(j.reason === 'option_required' ? '참여할 옵션을 선택해주세요'
@@ -2018,7 +2054,7 @@ async function _doApply(optionKey, sub, purchaseQty){
       const p8 = _p8(sub.phone);
       _acctBlocked[p8] = msg;
       renderAcctList();
-      $('acctSheet').style.display = 'flex';
+      _sheetOpen('acctSheet');
       return;
     }
     toast(msg);
@@ -2115,7 +2151,7 @@ async function _applyMany(optionKey, sels, purchaseQty){
       toast('참여가 확인된 명의로 구매양식을 이어서 열게요'); await enterJoined(); return;
     }
     toast(fail.map(f => (f.sel.name || '명의') + ': ' + f.why).join(' / ') || '지금은 참여할 수 없어요');
-    renderAcctList(); $('acctSheet').style.display = 'flex';
+    renderAcctList(); _sheetOpen('acctSheet');
     return;
   }
   { // ★ 결정 356 — 이미 진행 중인 명의가 있으면 그대로, 없으면 차례가 가장 빠른 명의를 보여 준다
