@@ -90,12 +90,10 @@ async function _loadOrderIdentityContext() {
   if (!_EMBED_CTX || _PREVIEW_MODE || !_EMBED_CTX.app) return null;
   if (_identityContextPromise) return _identityContextPromise;
   _identityContextPromise = (async () => {
-    const response = await fetch(API_BASE_URL + "/api/reviewer/order-identity-context", {
-      method: "POST", headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
-      body: JSON.stringify(_reviewerIdentityRequestBody()),
-    });
-    const data = await response.json();
-    if (!response.ok || !data?.ok) throw new Error(data?.error || "참여 명의를 확인하지 못했습니다.");
+    // 결정 398: 끊김·무응답·HTML 502 도 시간 제한 + 쉬운 한국어로(맨 fetch 는 'Failed to fetch'·무한 대기를 남겼다).
+    const { response, data, error } = await _ofPostJson("/api/reviewer/order-identity-context", _reviewerIdentityRequestBody());
+    if (error) throw new Error(error);
+    if (!response.ok || !data?.ok) throw new Error(_ofFriendlyErr(data?.error, "참여 명의를 확인하지 못했습니다."));
     _activeIdentityContext = data;
     _orderInfoSuggestions = Array.isArray(data.orderInfoSuggestions) ? data.orderInfoSuggestions : [];
     const identity = data.selectedIdentity || {};
@@ -8708,20 +8706,18 @@ async function _manualConfirmIdentity(cid) {
   const requestId = st.analysisRequestId;
   st.identityBusy = true; _syncSubmissionIdentityAction();
   try {
-    const response = await fetch(API_BASE_URL + "/api/reviewer/order-identity-match/manual-confirm", {
-      method: "POST", headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
-      body: JSON.stringify(_reviewerIdentityRequestBody({
-        mode, manualConfirmed: true, reviewToken: st.reviewToken || "",
-        priorApprovalToken: st.priorApprovalToken || "",
-        extractToken: st.extractToken || "",
-        extracted: (mode === "form_edit" ? st.proofExtracted : st.extracted) || {},
-        formFields: _cardIdentityForm(cid),
-        savedIdentitySelections: _savedIdentitySelections(cid),
-      })),
-    });
-    const data = await response.json();
+    // 결정 398: 제출 버튼([내 주문이 맞습니다])에서 부르는 요청 — 무응답이면 「확인 중…」이 끝나지 않으므로 시간 제한 도우미로.
+    const { response, data, error: netError } = await _ofPostJson("/api/reviewer/order-identity-match/manual-confirm", _reviewerIdentityRequestBody({
+      mode, manualConfirmed: true, reviewToken: st.reviewToken || "",
+      priorApprovalToken: st.priorApprovalToken || "",
+      extractToken: st.extractToken || "",
+      extracted: (mode === "form_edit" ? st.proofExtracted : st.extracted) || {},
+      formFields: _cardIdentityForm(cid),
+      savedIdentitySelections: _savedIdentitySelections(cid),
+    }));
+    if (netError) throw new Error(netError);   // 통신 실패 = 다시 눌러 볼 수 있게(needsAnalysis 아님 — 종전과 같음)
     if (!response.ok || !data?.ok || !data.approvalToken) {
-      const error = new Error(data?.error || "수동 확인을 저장하지 못했습니다.");
+      const error = new Error(_ofFriendlyErr(data?.error, "수동 확인을 저장하지 못했습니다."));
       error.needsAnalysis = ['IDENTITY_TOKEN_INVALID','EXTRACT_FIELDS_TAMPERED','IDENTITY_CONTEXT_CHANGED'].includes(data?.code);
       throw error;
     }
@@ -9447,10 +9443,54 @@ function _proceedOrderSubmit() {
   submitOrderForm();
 }
 
+/* ★ 결정 398 — 구매양식 제출 앞단(명의 문맥·무캡처 확인)의 통신 실패는 「실패」로 접고 쉬운 한국어로 알린다.
+ *   맨 fetch + response.json() 은 끊김(TypeError)·HTML 502(SyntaxError)를 밖으로 던지고 무응답이면 끝없이 기다려
+ *   「선택 명의 확인 중…」이 영원히 남았다(점검 2026-11-21 H2). 문구 단일 출처 = api.js apiFriendlyErrorMessage(결정 359). */
+function _ofFriendlyErr(err, fallback) {
+  if (typeof apiFriendlyErrorMessage === "function") return apiFriendlyErrorMessage(err, fallback);
+  return fallback || "인터넷 연결이 불안정해요. 잠시 후 다시 시도해 주세요.";   // 옛 api.js 가 캐시에 남은 경우
+}
+/** POST(또는 method) JSON — 예외를 던지지 않는다. 시간 제한 20초(본문 읽기까지). 결과 { response, data, error }: error 가 있으면 서버 판정을 받지 못한 것(끊김·시간 초과·JSON 아님). */
+async function _ofPostJson(path, body, timeoutMs, method) {
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs || 20000) : null;
+  let response = null;
+  try {
+    response = await fetch(API_BASE_URL + path, {
+      method: method || "POST", headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
+      body: JSON.stringify(body || {}), ...(controller ? { signal: controller.signal } : {}),
+    });
+    const data = await response.json();
+    return { response, data, error: "" };
+  } catch (e) {
+    const info = { name: e && e.name, message: (e && e.message) || "", networkError: !response, timeout: !!(e && e.name === "AbortError") };
+    return { response, data: null, error: _ofFriendlyErr(info, response
+      ? "서버에 일시적인 문제가 있어요. 잠시 후 다시 시도해 주세요."
+      : "인터넷 연결이 불안정해요. 잠시 후 다시 시도해 주세요.") };
+  } finally { if (timer) clearTimeout(timer); }
+}
+/** 제출 함수 밖으로 던져진 예외의 마지막 정리 — 「제출 중」 표시(_submitOrderFormInProgress)를 반드시 푼다.
+ *  ㉮ 주문 요청 전 = [제출] 다시 살림 ㉯ 보냈지만 접수 0건 = [재제출](종전 전체 실패와 같음 · 같은 참여 자리는 서버가 한 번만 받는다)
+ *  ㉰ 이미 접수된 주문이 있으면 [제출]을 살리지 않는다(이중 제출 금지) — 표시만 풀고 새로고침을 안내한다. */
+function _submitOrderFormEscaped(err, st) {
+  try { console.error("[submitOrderForm] 예외로 중단:", err); } catch (_) {}
+  if (!window._submitOrderFormInProgress) return;   // 이미 정리됐다(완료 화면 이후 등)
+  if (st && st.okCount > 0) {
+    window._submitOrderFormInProgress = false;
+    const b = document.getElementById("btnOrderFormSubmit");
+    if (b) { b.disabled = true; b.innerHTML = '<i class="fas fa-check"></i> 접수됨'; }
+    showToast("주문은 접수됐어요. 다시 제출하지 마세요. 화면을 새로고침해 접수 내역을 확인해 주세요.", "warning");
+    return;
+  }
+  if (st && typeof st.resetBtn === "function") st.resetBtn(st.sent ? '<i class="fas fa-redo"></i> 재제출' : undefined);
+  else window._submitOrderFormInProgress = false;
+  showToast(_ofFriendlyErr(err, "제출을 마치지 못했어요. 다시 눌러 주세요."), "error");
+}
+
 async function _prepareIdentityApprovals(orders) {
   if (!_EMBED_CTX || _PREVIEW_MODE) return true;
   try { await _loadOrderIdentityContext(); }
-  catch (e) { showToast(e.message, "error"); return false; }
+  catch (e) { showToast(_ofFriendlyErr(e, "참여 명의를 확인하지 못했습니다."), "error"); return false; }
   for (const order of orders) {
     const st = _cardAiState[order.cid] || {};
     const hasCapture = String(order.imgThumbSrc || "").startsWith("data:");
@@ -9475,15 +9515,13 @@ async function _prepareIdentityApprovals(orders) {
       showToast("캡처 없이 제출하려면 예외 확인 버튼을 먼저 선택해주세요.", "warning");
       return false;
     }
-    const response = await fetch(API_BASE_URL + "/api/reviewer/order-identity-match/manual-confirm", {
-      method:"POST", headers:{ "Content-Type":"application/json", ..._getAuthHeaders() },
-      body:JSON.stringify(_reviewerIdentityRequestBody({
-        mode:"no_capture", manualConfirmed:true,
-        formFields:{ recipient:order.recipient, phone:order.phone, address:order.address },
-      })),
-    });
-    const data = await response.json();
-    if (!response.ok || !data?.ok) { showToast(data?.error || "무캡처 확인에 실패했습니다.", "error"); return false; }
+    const { response, data, error } = await _ofPostJson("/api/reviewer/order-identity-match/manual-confirm", _reviewerIdentityRequestBody({
+      mode:"no_capture", manualConfirmed:true,
+      formFields:{ recipient:order.recipient, phone:order.phone, address:order.address },
+    }));
+    // 결정 398: 확인을 받지 못했으면(끊김·시간 초과·HTML 502) 제출하지 않는다(fail-closed) — 부르는 쪽이 버튼을 푼다.
+    if (error) { showToast(error, "error"); return false; }
+    if (!response.ok || !data?.ok) { showToast(_ofFriendlyErr(data?.error, "무캡처 확인에 실패했습니다."), "error"); return false; }
     order.identityApprovalToken = data.approvalToken;
   }
   return true;
@@ -9492,13 +9530,12 @@ async function _prepareIdentityApprovals(orders) {
 async function _saveOrderShoppingIdIfRequested(order) {
   const checkbox = document.getElementById(order.cid + "_saveIdChk");
   if (!checkbox?.checked || !_activeIdentityContext?.selectedIdentity?.identityKey) return;
-  const response = await fetch(API_BASE_URL + "/api/reviewer/profile/identities/"
-    + encodeURIComponent(_activeIdentityContext.selectedIdentity.identityKey) + "/shopping-id", {
-    method:"PATCH", headers:{ "Content-Type":"application/json", ..._getAuthHeaders() },
-    body:JSON.stringify({ shoppingId: order.userId || "" }),
-  });
-  const data = await response.json();
-  if (!response.ok || !data?.ok) throw new Error(data?.error || "아이디를 명의에 저장하지 못했습니다.");
+  // 결정 398: 주문 접수 뒤 제출 루프 안에서 기다리는 요청이다 — 무응답이면 「제출 중」이 끝나지 않으므로 시간 제한 도우미로.
+  const { response, data, error } = await _ofPostJson("/api/reviewer/profile/identities/"
+    + encodeURIComponent(_activeIdentityContext.selectedIdentity.identityKey) + "/shopping-id",
+    { shoppingId: order.userId || "" }, 15000, "PATCH");
+  if (error) throw new Error(error);
+  if (!response.ok || !data?.ok) throw new Error(_ofFriendlyErr(data?.error, "아이디를 명의에 저장하지 못했습니다."));
   checkbox.checked = false;
 }
 
@@ -9546,6 +9583,11 @@ async function submitOrderForm() {
   }
 
   const ctx = window._orderFormCtx || {};
+  // ★ 결정 398: 이 아래에서 어떤 예외가 나도 「제출 중」 표시를 남기지 않는다(맨 아래 catch → _submitOrderFormEscaped).
+  //   _sofSent = 주문 요청을 한 번이라도 보냈나(결과를 모르면 [재제출] — 자동으로 다시 보내지 않는다) · successCount = 접수된 건수.
+  let _sofSent = false;
+  let successCount = 0;
+  try {
   // 캠페인 구매양식은 캠페인·신청건·홀드 토큰으로 서버가 문맥을 확정한다.
   // 시트 ID·탭명·gid 및 레거시 GAS URL은 제출 조건이 아니다.
 
@@ -9865,7 +9907,6 @@ async function submitOrderForm() {
   }
 
   // ── 각 주문 순차 제출 ──
-  let successCount = 0;
   const mirrorStatuses = [];   // ★ 제출 응답의 시트반영 상태(queued/failed/pending_no_row) 수집 → 완료화면 즉시 안내용
 
   const results = [];   // ★ 배치: 명의별 결과(부모 화면이 단수 값 하나로 거짓말하지 않게)
@@ -9960,13 +10001,11 @@ async function submitOrderForm() {
 
     try {
       let res;
-      try { res = await gasPost(payload, 30000); } catch(e1) {
-        console.warn(`[제출 ${i+1}] gasPost 실패:`, e1.message);
-        // ★ [Node.js 이관] gasPost 재시도 (1회, 30초 타임아웃)
-        try {
-          res = await gasPost(payload, 30000);
-        } catch(e2) { throw new Error("서버 연결 실패"); }
-      }
+      // ★ 결정 398(L6): gasPost 는 끊김·시간 초과를 예외가 아니라 { ok:false, networkError } 로 돌려준다(결정 359) —
+      //   예전의 "실패하면 1회 재시도" 분기는 실행된 적이 없다. 결과를 모르는 주문을 화면이 스스로 다시 보내지 않는다
+      //   (홀드 없는 직접 링크 주문은 서버가 같은 주문을 가려 주지 못한다) → 실패 안내 + [재제출]을 사람이 누른다.
+      _sofSent = true;
+      res = await gasPost(payload, 30000);
       if (!res) throw new Error("서버 응답이 없습니다.");
 
       // ★ 결정 230: 캡처 속 상품이 고른 상품과 다르다 — 실제로 산 상품을 고르게 하고 그 값으로 다시 제출한다.
@@ -10371,6 +10410,9 @@ async function submitOrderForm() {
         _embedPost({ type: "capture-uploads-done", failed });
       });
     }
+  }
+  } catch (_sofErr) {
+    _submitOrderFormEscaped(_sofErr, { sent: _sofSent, okCount: successCount, resetBtn: _resetBtn });
   }
 }
 
