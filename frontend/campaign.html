@@ -1672,7 +1672,7 @@ function _frameOfSource(src){ return _framesAll().find(f => f.contentWindow === 
 /* ★ 결정 402 — 틀 주소 바꾸기는 이 함수 하나로(브라우저 방문 기록을 쌓지 않는다 · 점검 L1).
    이미 열린 틀의 src 를 다른 주소로 바꾸면 기록이 한 칸 쌓여(크롬·웹킷 실측) 휴대폰 [뒤로]가 공고를 떠나지 않고
    틀만 바꾸기 전 주소(옛 옵션)로 되돌렸다.
-   - 처음 여는 틀(src 없음) = 종전 그대로 src 대입(처음의 빈 문서에서 가는 첫 이동은 기록을 쌓지 않는다).
+   - 처음 여는 틀도 replace(결정 403 — 아이폰 사파리는 빈 문서에서의 첫 src 이동도 기록을 쌓는다 · 실기 확인).
    - 이미 열린 틀 = contentWindow.location.replace — 지금 칸을 바꿔 끼운다. 같은 주소여도 다시 연다(제출 중 옛 옵션 파기 장치 그대로)
      · 틀의 load 이벤트·높이 알림(postMessage)은 그대로 온다.
    - replace 를 못 부르면(틀 창 없음·예외) 종전 src 대입 — 틀이 안 열리는 것보다 기록 한 칸이 낫다(fail-open).
@@ -1681,9 +1681,11 @@ function _frameUrl(f){ return !f ? '' : (f.dataset.navSrc != null ? f.dataset.na
 function _navFrame(f, url){
   if(!f) return;
   url = String(url || 'about:blank');
-  const opened = !!f.getAttribute('src');
+  // ★ 결정 403(아이폰 사파리 실기) — 처음 여는 틀도 replace: 사파리는 빈 문서(about:blank)에서 가는 첫 src 이동도 기록을
+  //   한 칸 쌓아, 참여 화면에서 [뒤로]가 공고를 떠나지 않고 구매양식을 빈 화면으로 되돌렸다(크롬은 안 쌓는다).
+  //   틀 창(처음의 빈 문서 포함 · 같은 출처)이 있으면 항상 replace, 없을 때만 종전 src 대입.
   f.dataset.navSrc = url;
-  if(opened){
+  {
     try{
       const w = f.contentWindow;
       if(w && w.location && typeof w.location.replace === 'function'){

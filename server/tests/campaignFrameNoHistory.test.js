@@ -131,11 +131,11 @@ function detail({ app = 11, optionKey = '라벤더', qty = null } = {}) {
 const HOLD = (p8 = '00000000', tok = 'tok-a') => ({ phone8: p8, holdToken: tok, expiresAt: new Date(Date.now() + 9e5).toISOString() });
 const optOf = (u) => new URL(abs(u)).searchParams.get('optionKey');
 
-test('L1 처음 여는 틀 — 종전 그대로 src 로 연다(방문 기록 0 · 주소에 옵션·자리 문맥)', () => {
+test('L1 처음 여는 틀도 location.replace 로 연다(아이폰 사파리는 빈 문서에서의 첫 src 이동도 기록을 쌓는다 — 결정 403 실기) · 주소에 옵션·자리 문맥', () => {
   const { sb, hist, track } = world();
   sb._renderJoinedView(detail(), HOLD());
   assert.strictEqual(hist.navs.length, 1);
-  assert.strictEqual(hist.navs[0].how, 'src', '처음 열기는 src 대입 그대로(첫 이동은 기록을 쌓지 않는다)');
+  assert.strictEqual(hist.navs[0].how, 'replace', '처음 열기도 replace — 사파리에서 [뒤로]가 구매양식을 빈 화면으로 되돌리지 않게');
   assert.strictEqual(hist.pushes, 0);
   const u = new URL(abs(track[0].loaded));
   assert.strictEqual(u.pathname, '/search.html');
@@ -191,7 +191,7 @@ test('L1 여러 명의 틀(#orderTrack iframe[data-p8]) — 명의마다 옵션�
   sb._renderJoinedView(detail({ app: 11 }), HOLD('00000000', 'tok-a'));
   sb._renderJoinedView(detail({ app: 12 }), HOLD('11112222', 'tok-b'));
   assert.strictEqual(track.length, 2, '명의마다 틀 하나(결정 353)');
-  assert.deepStrictEqual(hist.navs.map(n => n.how), ['src', 'src'], '새 틀의 처음 열기는 src 그대로');
+  assert.deepStrictEqual(hist.navs.map(n => n.how), ['replace', 'replace'], '새 틀의 처음 열기도 replace(결정 403 — 사파리 첫 이동도 기록)');
   sb._renderJoinedView(detail({ app: 12, optionKey: '무향' }), HOLD('11112222', 'tok-b'));
   assert.strictEqual(optOf(track[1].loaded), '무향');
   assert.strictEqual(optOf(track[0].loaded), '라벤더', '다른 명의 틀은 그대로');
