@@ -74,7 +74,7 @@ async function fixture() {
     connects++; const who = 'client-' + connects;
     return { query: (s,p) => query(s,p,who), release() {} };
   } };
-  const injected = { './qnaSlots.service': { isQnaTab: async () => false },
+  const injected = { './qnaSlots.service': { isQnaTab: async () => false }, './bookingSlots.service': { isBookingTab: async () => false },
     './quotaFloor.service': { campaignUsedFloor: async () => ({ known: true, total: 0 }), optionDirectOrders: async () => new Map() },
     './campaignState.service': { loadSequentialSchedule: async () => null },
     './campaignPlan.service': { relayCampaignWorktable: async () => ({ relayed: true }) },

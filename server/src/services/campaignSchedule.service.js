@@ -48,7 +48,11 @@ function findDateColumnIndex(headers) {
     const h = hs[i];
     if (h && DATE_HEADER_KEYWORDS.some(k => h.includes(k))) return i;
   }
-  return -1;
+  /* ★ 결정 407: 네이버예약리뷰 작업표의 날짜 칸 「이용일자」 — **다른 날짜 칸이 하나도 없을 때만**, 이름이 정확히 같을 때만 본다
+     (Q&A 「진행일자」를 columnResolver 가 받는 방식과 같다). 키워드 목록에 넣지 않는 이유 = 첫 매칭 규칙이라
+     기존 탭에 같은 이름 칸이 구매일 칸보다 앞에 있으면 그 탭의 날짜 칸이 바뀐다. 칸 이름 = worktablePlan 단일 출처. */
+  const { BOOKING_DATE_HEADER } = require('../utils/worktablePlan');
+  return hs.findIndex(h => h === BOOKING_DATE_HEADER);
 }
 
 /**

@@ -211,6 +211,7 @@ const REQUIRED_TABLES = [
   'order_purchase_channels',                      // 215 — two purchases under one parent
   'purchase_capture_artifacts',                   // 215 — staged/current/historical evidence
   'qna_slots',                                    // 210 — Q&A 날짜별 자리표(결정 321 · 없으면 무시트 탭 자동 정리·행 삭제가 깨진다)
+  'booking_slots',                                // 227 — 네이버예약리뷰 날짜별 자리표(결정 407 · 없으면 조회 실패 = 모든 탭을 예약 탭으로 보고 자동 정리를 쉰다)
   'payment_bank_rows',                            // 203 — 입금 통장 자동 대조(결정 293 · 없으면 입금관리 통장 확인이 죽는다)
   'payment_bank_sync',                            // 203 — 통장 받아 온 기록(같은 결정)
   'ops_checks',                                   // 205 — 오늘 확인할 것(결정 302)

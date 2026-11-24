@@ -105,6 +105,9 @@ async function _renameTabStateBody(client, { sheetId, oldTabName, newTabName, ta
     // 자동 정리(빈 줄·날짜 옮기기)가 자리 줄을 리뷰 줄처럼 손댄다.
     await client.query(
       'UPDATE qna_slots SET tab_name = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3', common);
+    // 네이버예약리뷰 자리표(결정 407)도 같다 — 안 옮기면 자리표 잃은 예약 탭이 리뷰 탭처럼 정리된다.
+    await client.query(
+      'UPDATE booking_slots SET tab_name = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3', common);
 
     // 입금 전 pending 항목은 다운로드 여부와 무관하게 현재 행의 동일성 좌표를 따라간다.
     // 이미 만든 이체 파일의 표시명은 그 파일 자체가 스냅샷으로 보존한다. DB 좌표를 옛 이름에

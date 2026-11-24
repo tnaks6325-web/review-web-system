@@ -162,15 +162,20 @@ async function createSheetlessWorktable({ workOrder: wo, tabName = '', planOptio
   const qnaSlots = plan.qnaCalendar
     ? plan.qnaCalendar.slots.map((s, i) => ({ ...s, rowSeq: headerRow + 1 + i }))
     : null;
+  /* ★★ 네이버예약리뷰(결정 407) — 업체가 정한 날짜별 자리표도 같은 흐름에서 저장한다(줄 번호 = 계획 줄 순서). */
+  const bookingSlots = plan.bookingCalendar
+    ? plan.bookingCalendar.slots.map((s, i) => ({ ...s, rowSeq: headerRow + 1 + i }))
+    : null;
 
   return {
     ok: true, sheetId, gid, tabName: title, campaignName,
     headerRow, columns: header, rows, filled,
     warnings: plan.warnings,
     qnaSlots,   // Q&A 자리표(줄 번호 붙음) — 재접수 복구(`qnaSlots.repairCalendarIfMissing`)가 쓴다. 리뷰·블로그 = null
+    bookingSlots,   // 예약리뷰 자리표(줄 번호 붙음) — 재접수 복구(`bookingSlots.repairCalendarIfMissing`)가 쓴다. 그 밖 = null
     // 실제 쓰기는 호출부(접수 라우트)가 등록과 같은 흐름에서 수행한다 — 아래 `persist` 참조.
     persist: () => persistSheetlessWorktable({ sheetId, gid, tabName: title, campaignName, headerRow, columns: header, rows, by,
-      workboardSchemaVersion: Number(wo.workboard_schema_version || 1), qnaSlots, workOrderId: wo.id }),
+      workboardSchemaVersion: Number(wo.workboard_schema_version || 1), qnaSlots, bookingSlots, workOrderId: wo.id }),
   };
 }
 
@@ -180,7 +185,7 @@ async function createSheetlessWorktable({ workOrder: wo, tabName = '', planOptio
  * ★ 호출 순서 계약: tab_configs 에 `sheetless=TRUE` 로 등록된 **뒤에** 불러야 한다.
  *   `rebuildLedgers` 가 fail-closed 로 그 플래그를 확인하기 때문(시트 기반 탭 덮어쓰기 차단).
  */
-async function persistSheetlessWorktable({ sheetId, gid, tabName, campaignName, headerRow, columns, rows, by = 'admin', workboardSchemaVersion = 1, qnaSlots = null, workOrderId = null } = {}) {
+async function persistSheetlessWorktable({ sheetId, gid, tabName, campaignName, headerRow, columns, rows, by = 'admin', workboardSchemaVersion = 1, qnaSlots = null, bookingSlots = null, workOrderId = null } = {}) {
   const participants = require('./participants.service');
   const { rebuildLedgers } = require('./sheetlessLedger.service');
 
@@ -206,6 +211,14 @@ async function persistSheetlessWorktable({ sheetId, gid, tabName, campaignName, 
     if (!v.ok) throw new Error(`Q&A 작업표 줄 ${v.mismatches.length}개가 자리표 계획과 다릅니다(줄 ${v.mismatches.slice(0, 5).join(', ')}) — 작업을 지우고 다시 접수하세요.`);
     const r = await qs.insertCalendar({ workOrderId, sheetId, tabName, slots: qnaSlots, by: `sheetless:${by}` });
     logger.info(`[sheetlessAccept] Q&A 자리표 ${r.inserted}/${qnaSlots.length}칸 tab=${tabName}`);
+  }
+  // ①-c 예약리뷰 자리표(결정 407) — Q&A 와 같은 규율: 실패는 던지고, 이미 있던 줄은 계획과 같을 때만 붙인다.
+  if (Array.isArray(bookingSlots) && bookingSlots.length) {
+    const bks = require('./bookingSlots.service');
+    const v = await bks.verifyRowsMatchPlan({ sheetId, tabName, planRows: rows });
+    if (!v.ok) throw new Error(`예약리뷰 작업표 줄 ${v.mismatches.length}개가 자리표 계획과 다릅니다(줄 ${v.mismatches.slice(0, 5).join(', ')}) — 작업을 지우고 다시 접수하세요.`);
+    const r = await bks.insertCalendar({ workOrderId, sheetId, tabName, slots: bookingSlots, by: `sheetless:${by}` });
+    logger.info(`[sheetlessAccept] 예약 자리표 ${r.inserted}/${bookingSlots.length}칸 tab=${tabName}`);
   }
 
   // ② 장부 3권 — 열 구성을 함께 넘긴다(첫 생성이라 저장된 헤더가 없다).

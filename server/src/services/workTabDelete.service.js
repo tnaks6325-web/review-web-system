@@ -47,6 +47,7 @@ const { logger } = require('../utils/logger');
 const DELETE_TABLES = [
   'participant_edits',
   'qna_slots',                    // Q&A 날짜별 자리표(210) — 작업표 줄과 함께 사라진다(줄 번호를 가리킨다)
+  'booking_slots',                // 네이버예약리뷰 날짜별 자리표(227 · 결정 407) — 같은 이유
   'campaign_participants',
   'workdesk_participant_deletions',
   'review_submissions',

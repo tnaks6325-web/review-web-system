@@ -36,6 +36,9 @@ function planToSheetValues(plan) {
   const { QNA_VISIBILITY_LABEL, QNA_PRIVATE_GUIDE } = require('../utils/qnaCalendar');
   const idxQnaVis = plan.columns.findIndex(c => c.name === QNA_VISIBILITY_HEADER);
   const idxQnaText = plan.columns.findIndex(c => c.name === QNA_TEXT_HEADER);
+  // 네이버예약리뷰(결정 407) — 자리마다 리뷰마감일(이용일 + N일). 예약번호 칸은 비워 둔다(리뷰어가 예약 뒤 낸다).
+  const { BOOKING_DEADLINE_HEADER } = require('../utils/worktablePlan');
+  const idxBookingDeadline = plan.columns.findIndex(c => c.name === BOOKING_DEADLINE_HEADER);
   const body = plan.rows.map(r => {
     const row = new Array(header.length).fill('');
     if (idxSeq >= 0) row[idxSeq] = String(r.seq);
@@ -54,6 +57,7 @@ function planToSheetValues(plan) {
       if (idxQnaVis >= 0) row[idxQnaVis] = QNA_VISIBILITY_LABEL[r.qnaVisibility] || '';
       if (idxQnaText >= 0) row[idxQnaText] = r.qnaVisibility === 'public' ? (r.qnaText || '') : QNA_PRIVATE_GUIDE;
     }
+    if (r.bookingDeadlineLabel && idxBookingDeadline >= 0) row[idxBookingDeadline] = r.bookingDeadlineLabel;
     return row;
   });
   return { header, body, filled: {
