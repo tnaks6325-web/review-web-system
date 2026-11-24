@@ -174,6 +174,79 @@ const imageUploadLimiter = rateLimit({
   },
 });
 
+// ── 리뷰 캡처 1차 필터(review-precheck) · 리뷰 캡처 업로드(review-upload) 전용 (결정 404) ─────────
+// ★★ 종전엔 둘 다 imageApiLimiter(인터넷 주소별 분당 10 한 통)였다. 사진을 한 장씩 4장 넣으면 1차 필터만
+//   1+2+3+4 = 10번이라 [제출하기]의 업로드가 429 로 막혔고, 통신사 공유 주소의 **다른 리뷰어**도 같이 막혔다
+//   (점검 2026-11-24 H2). 구매 캡처가 #1012 에서 겪고 imageUploadLimiter 로 통을 나눈 것과 같은 사고다.
+// ★ 고침 = 통을 나누고, 서버가 서명을 검증한 리뷰어 세션이면 **리뷰어별**로 센다(결정 188 과 같은 규칙):
+//   ① 1차 필터 = `rp:` 통(분당 10 — 종전 값) · ② 업로드 = `ru:` 통(분당 30 — imageUploadLimiter 와 같은 값)
+//   ③ 열쇠 = 검증된 리뷰어 세션(verifyReviewerSession — issuer·audience·scope 까지) → 리뷰어 번호 / 그 외 → 주소
+//      (★ phone8 등 요청 본문의 값은 쓰지 않는다 — 위조 가능한 값으로 통을 늘리지 못하게)
+// ★★ 남용 방어는 줄이지 않는다(완화 금지): 검증 안 된 요청은 종전처럼 주소별 10(1차 필터 = AI 콜)이고,
+//   검증된 리뷰어 요청도 주소별 상한 `RL_REVIEW_IMAGE_IP_CEILING`(분당 120, 두 길 합산)을 함께 받는다 —
+//   리뷰어 세션은 비밀번호 없이(이름+번호) 발급되므로(결정 201) 세션을 여럿 만들어 AI 콜을 늘리는 것을 이 상한이 막는다.
+//   로그인 직원 토큰만 면제(isTrustedLoginToken — 종전 imageApiLimiter 와 같은 함수).
+const { verifyReviewerSession } = require('../services/reviewerSession.service');
+const RL_REVIEW_PRECHECK_MAX = Number(process.env.RL_REVIEW_PRECHECK_MAX) || 10;
+const RL_REVIEW_UPLOAD_MAX = Number(process.env.RL_REVIEW_UPLOAD_MAX) || 30;
+const RL_REVIEW_IMAGE_IP_CEILING = Number(process.env.RL_REVIEW_IMAGE_IP_CEILING) || 120;
+function _trustedLoginSkip(req) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) return false;
+  try { return isTrustedLoginToken(jwt.verify(token, process.env.JWT_SECRET)); } catch (_) { return false; }
+}
+/** 리뷰 사진 두 길의 신원 — 검증된 리뷰어 세션이면 { verified:true, key:'r:<번호>' }, 아니면 주소. 요청당 한 번. */
+function reviewImageIdentity(req) {
+  if (req._rlReviewImageId) return req._rlReviewImageId;
+  let id = null;
+  const t = req.headers['x-reviewer-token'];
+  if (t && process.env.JWT_SECRET) {
+    try {
+      const p = verifyReviewerSession(t);
+      if (p && p.ownerReviewerId) id = { verified: true, key: `r:${p.ownerReviewerId}` };
+    } catch (_) { id = null; }   // 위조·만료 토큰 = 신원 없음(주소로 센다)
+  }
+  if (!id) id = { verified: false, key: `i:${clientIp(req)}` };
+  req._rlReviewImageId = id;
+  return id;
+}
+const reviewImageIpCeiling = rateLimit({
+  keyGenerator: (req) => `rc:${clientIp(req)}`,
+  windowMs: 60 * 1000,
+  max: RL_REVIEW_IMAGE_IP_CEILING,
+  message: { ok: false, error: '사진 확인 요청이 잠시 많았어요. 1분 뒤 다시 눌러 주세요.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  // 검증 안 된 요청은 아래 통 자체가 주소별이라 여기서 또 세지 않는다.
+  skip: (req) => _trustedLoginSkip(req) || !reviewImageIdentity(req).verified,
+});
+const _reviewPrecheckBucket = rateLimit({
+  keyGenerator: (req) => `rp:${reviewImageIdentity(req).key}`,
+  windowMs: 60 * 1000,
+  max: RL_REVIEW_PRECHECK_MAX,
+  message: { ok: false, error: '사진 확인 요청이 잠시 많았어요. 1분 뒤 다시 눌러 주세요.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: _trustedLoginSkip,
+});
+const _reviewUploadBucket = rateLimit({
+  keyGenerator: (req) => `ru:${reviewImageIdentity(req).key}`,
+  windowMs: 60 * 1000,
+  max: RL_REVIEW_UPLOAD_MAX,
+  message: { ok: false, error: '사진 올리기 요청이 잠시 많았어요. 1분 뒤 [제출하기]를 다시 눌러 주세요.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: _trustedLoginSkip,
+});
+function _chain(first, second) {
+  return (req, res, next) => first(req, res, (err) => (err ? next(err) : second(req, res, next)));
+}
+/** 리뷰 캡처 1차 필터 — 주소 상한(검증 리뷰어만) → 리뷰어별/주소별 분당 10. */
+const reviewPrecheckLimiter = _chain(reviewImageIpCeiling, _reviewPrecheckBucket);
+/** 리뷰 캡처 업로드 — 주소 상한(검증 리뷰어만) → 리뷰어별/주소별 분당 30. 1차 필터와 통이 다르다. */
+const reviewUploadLimiter = _chain(reviewImageIpCeiling, _reviewUploadBucket);
+
 // ── 광고주 접속 링크 교환(무인증 공개 경로) 전용 — 토큰 브루트포스 완화. IP당 분당 30회. ──
 const advertiserLinkLimiter = rateLimit({
   keyGenerator: (req) => clientIp(req),   // 실제 사용자 주소(프록시 주소 공용 통 방지)
@@ -207,4 +280,4 @@ const productPageLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-module.exports = { rateLimiter, rateIdentity, clientIp, identityLimiter, ipCeilingLimiter, registerLimiter, imageApiLimiter, imageUploadLimiter, intranetLoginLimiter, advertiserLinkLimiter, campaignTokenLimiter, productPageLimiter };
+module.exports = { rateLimiter, rateIdentity, clientIp, identityLimiter, ipCeilingLimiter, registerLimiter, imageApiLimiter, imageUploadLimiter, reviewPrecheckLimiter, reviewUploadLimiter, reviewImageIdentity, intranetLoginLimiter, advertiserLinkLimiter, campaignTokenLimiter, productPageLimiter };

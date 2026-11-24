@@ -172,7 +172,11 @@ function stubPool(handler) {
   console.log('\nC) 리뷰어 화면');
   {
     const sa = front('js/search-app.js');
-    assert.ok(/'Content-Type': 'application\/json', \.\.\._getAuthHeaders\(\)/.test(sa),
+    // 결정 404: precheck 는 시간 제한 도우미 _ofPostJson(결정 398) 경유 — 그 도우미가 리뷰어 세션 헤더를 싣는다
+    const _preOne = /async function _preCheckOne\(fileObj, ctx\) \{[\s\S]*?\n\}/.exec(sa)[0];
+    const _ofPost = /async function _ofPostJson\(path, body, timeoutMs, method\) \{[\s\S]*?\n\}/.exec(sa)[0];
+    assert.ok(/_ofPostJson\('\/api\/image\/review-precheck'/.test(_preOne)
+      && /"Content-Type": "application\/json", \.\.\._getAuthHeaders\(\)/.test(_ofPost),
       'precheck 호출에 리뷰어 세션 헤더 전달');
     const dupFn = /function _preRenderDup\(scope, anchor\)\{?[\s\S]*?\n\}/.exec(sa)[0];
     assert.ok(/이미 제출됬던 사진이에요/.test(dupFn), '확정 문구');

@@ -8,7 +8,7 @@ const _handlers = {};
 const { authMiddleware, adminOrMasterMiddleware, isTrustedLoginToken } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
 const { readSheet, getSpreadsheetMeta } = require('../services/sheets.service');
-const { imageApiLimiter, imageUploadLimiter } = require('../middleware/rateLimit.middleware');
+const { imageApiLimiter, imageUploadLimiter, reviewPrecheckLimiter, reviewUploadLimiter } = require('../middleware/rateLimit.middleware');
 const captureLinkBackfill = require('../services/captureLinkBackfill.service');
 const { extractOrderFromImage, verifyAddressMatch } = require('../services/gemini.service');
 const driveService = require('../services/drive.service');
@@ -396,10 +396,11 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
 //   호출되므로, 잘못된 파일이 저장되거나 제출로 기록되기 **전에** 되돌릴 수 있다.
 //   (사후에 교체요청 → 리뷰어 재제출은 왕복 비용이 커서 실무에서 가장 번거롭다)
 // ★ 현재 리뷰어 화면은 X-Reviewer-Token을 보내며, 중복 차단 신원은 검증된 세션에서만 읽는다.
-//   같은 이미지는 Gemini 해시 캐시로 상각되고 남용은 imageApiLimiter 로 막는다.
+//   같은 이미지는 Gemini 해시 캐시로 상각되고 남용은 reviewPrecheckLimiter 로 막는다
+//   (결정 404 — 업로드와 통을 나누고 검증된 리뷰어는 리뷰어별로 센다 · 주소별 상한 유지).
 // Body: { base64, mimeType, sheetId, tabName, slotKey }
 // ═══════════════════════════════════════════════════════════
-router.post('/review-precheck', imageApiLimiter, async (req, res) => {
+router.post('/review-precheck', reviewPrecheckLimiter, async (req, res) => {
   // ★★ 이 핸들러는 어떤 경우에도 500 을 내지 않는다 — 1차 필터의 장애가
   //    리뷰어의 첨부·제출을 막으면 막으려던 사고보다 큰 피해가 된다(fail-open).
   try {
@@ -494,7 +495,8 @@ router.post('/review-precheck', imageApiLimiter, async (req, res) => {
 //   { sheetId, tabName, reviewerName, campaignName, optionFolderName,
 //     files: [{ data: base64, mimeType, name? }] }
 // ═══════════════════════════════════════════════════════════
-router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
+// ★ 결정 404: 1차 필터와 다른 통(reviewUploadLimiter) — 사진을 한 장씩 넣은 확인 요청이 업로드를 429 로 막지 않게.
+router.post('/review-upload', reviewUploadLimiter, async (req, res, next) => {
   try {
     const { sheetId, tabName, reviewerName, campaignName, optionFolderName, files, gid, rowIndex, submitCol, memo, slotKey } = req.body;
     const slot = (slotKey || 'review').toString().trim() || 'review';

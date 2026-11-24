@@ -3473,24 +3473,91 @@ function _preRender(scope, anchorId) {
   el.innerHTML = html;
 }
 
+/* ★★ 결정 404 — 1차 필터(사전확인)는 「영원히 기다리지」 않고, 같은 사진을 두 번 묻지 않는다.
+ *   ① 시간 제한 `_PRE_TIMEOUT_MS`(20초 · 본문 읽기까지 · 결정 398 `_ofPostJson` 한 벌) — 무응답이면 `checking` 이
+ *      영영 남아 `_preHasBlock()` 이 [제출하기]를 영구히 막았다(점검 2026-11-24 H1).
+ *   ② 끊김·시간 초과·429·5xx = **무판정 통과(null)** — 종전 fail-open 그대로(결정 117·169). 중복은 업로드 때
+ *      서버가 Drive 저장 **전에** 다시 막는다(`diag.routes` review-upload `findOwnDuplicate`).
+ *   ③ 받은 판정은 사진 내용(b64) + 판정 문맥(작업·줄·칸·이름·번호)별로 기억한다(`_preCache`) — 사진을 넣고 뺄 때마다
+ *      그 칸 사진 전부를 다시 물어 1+2+3+4 = 10번이 되던 것(H2). **서버 판정(ok:true)만** 기억하고 null 은 기억하지
+ *      않는다(다음 첨부 때 다시 묻는다 — 「모른다」를 「통과」로 굳히지 않는다). 진행 중인 질문도 같이 쓴다. */
+const _PRE_TIMEOUT_MS = 20000;
+const _PRE_CACHE_MAX = 24;           // 사진 내용 기준 최근 24장(지운 사진을 다시 넣는 경우까지)
+const _preCache = new Map();         // b64 → Map(ctxKey → Promise<판정|null>)
+function _preCacheCtxKey(fileObj, ctx) {
+  return [ctx.sheetId, ctx.tabName, ctx.rowIndex, ctx.slotKey || 'review', ctx.reviewerName, ctx.phone8,
+    fileObj.type || 'image/jpeg'].map(v => (v == null ? '' : String(v))).join('\u0001');
+}
+/** 사진 1장의 판정 — 이미 물어본(또는 묻는 중인) 같은 사진·같은 문맥이면 다시 묻지 않는다. */
+function _preCheckCached(fileObj, ctx) {
+  const b64 = fileObj && fileObj.b64;
+  if (!b64) return _preCheckOne(fileObj || {}, ctx);
+  const ck = _preCacheCtxKey(fileObj, ctx);
+  let byCtx = _preCache.get(b64);
+  if (byCtx && byCtx.has(ck)) return byCtx.get(ck);
+  if (!byCtx) {
+    byCtx = new Map();
+    _preCache.set(b64, byCtx);
+    while (_preCache.size > _PRE_CACHE_MAX) _preCache.delete(_preCache.keys().next().value);
+  }
+  const p = Promise.resolve(_preCheckOne(fileObj, ctx)).catch(() => null).then(r => {
+    if (!r) {   // 판정을 못 받았으면 기억하지 않는다 — 다음에 다시 묻는다
+      const m = _preCache.get(b64);
+      if (m && m.get(ck) === p) { m.delete(ck); if (!m.size) _preCache.delete(b64); }
+    }
+    return r;
+  });
+  byCtx.set(ck, p);
+  return p;
+}
+
 /**
  * 파일 1장을 서버에 물어본다. 실패는 전부 '통과'로 흡수한다.
+ * ★ 결정 404: 시간 제한 20초(`_ofPostJson`) — 무응답도 null(통과)로 끝난다.
  * @returns {Promise<{verdict:string,message:string,blocked:boolean}|null>}
  */
 async function _preCheckOne(fileObj, ctx) {
   try {
-    const r = await fetch(API_BASE_URL + '/api/image/review-precheck', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', ..._getAuthHeaders() },
-      body: JSON.stringify({
-        base64: fileObj.b64, mimeType: fileObj.type || 'image/jpeg',
-        sheetId: ctx.sheetId, tabName: ctx.tabName, slotKey: ctx.slotKey || 'review',
-        rowIndex: ctx.rowIndex, reviewerName: ctx.reviewerName, phone8: ctx.phone8,
-      }),
-    });
-    if (!r.ok) return null;
-    const j = await r.json();
-    return (j && j.ok) ? j : null;
+    const { response, data, error } = await _ofPostJson('/api/image/review-precheck', {
+      base64: fileObj.b64, mimeType: fileObj.type || 'image/jpeg',
+      sheetId: ctx.sheetId, tabName: ctx.tabName, slotKey: ctx.slotKey || 'review',
+      rowIndex: ctx.rowIndex, reviewerName: ctx.reviewerName, phone8: ctx.phone8,
+    }, _PRE_TIMEOUT_MS);
+    if (error || !response || !response.ok) return null;   // 끊김·시간 초과·429·5xx = 무판정 통과
+    return (data && data.ok) ? data : null;
   } catch (_) { return null; }   // 네트워크 실패 = 무판정 통과
+}
+
+/* ★★ 결정 404 — 「확인 중」에 누른 [제출하기]는 확인이 끝나면 **이어서** 제출한다(다시 누르게 하지 않는다).
+ *   기다림은 `_PRE_SUBMIT_WAIT_MS` 까지만 — 그 안에 안 끝난 확인은 「확인 못 함」(통과)으로 접고 제출을 계속한다
+ *   (서버가 업로드 때 중복을 다시 막는다). 기다리는 동안 버튼은 「사진 확인 중…」으로 잠근다(두 번 제출 방지).
+ *   @returns {Promise<boolean>} false = 이미 다른 누름이 기다리는 중(이 누름은 아무것도 하지 않는다) */
+const _PRE_SUBMIT_WAIT_MS = 25000;
+let _preSubmitWaiting = false;
+function _preIsChecking() { return Object.values(_preState).some(s => s && s.checking); }
+async function _preAwaitChecks(btn) {
+  if (!_preIsChecking()) return true;
+  if (_preSubmitWaiting) return false;
+  _preSubmitWaiting = true;
+  const prevHtml = btn ? btn.innerHTML : '';
+  const prevDisabled = btn ? !!btn.disabled : false;
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 사진 확인 중…'; }
+  try {
+    const until = Date.now() + _PRE_SUBMIT_WAIT_MS;
+    while (_preIsChecking() && Date.now() < until) await new Promise(r => setTimeout(r, 200));
+    if (_preIsChecking()) {
+      console.warn('[precheck] 확인이 제때 끝나지 않아 건너뜀(통과 처리)');
+      for (const [scope, s] of Object.entries(_preState)) {
+        if (!s || !s.checking) continue;
+        s.checking = false;
+        try { _preRender(scope); } catch (_) { /* 화면 정리 실패도 제출은 막지 않는다 */ }
+      }
+    }
+  } finally {
+    if (btn) { btn.disabled = prevDisabled; btn.innerHTML = prevHtml; }
+    _preSubmitWaiting = false;
+  }
+  return true;
 }
 
 /**
@@ -3529,7 +3596,8 @@ async function _preCheckFilesInner(scope, anchorId, fileObjs, ctx) {
   s.requestId = requestId;
   s.checking = true;
   // 여러 장이면 가장 나쁜 판정을 그 슬롯의 상태로 삼는다(한 장이라도 이상하면 확인이 필요하다)
-  const results = await Promise.all(fileObjs.slice(0, 5).map(fo => _preCheckOne(fo, ctx)));
+  // ★ 결정 404: 이미 판정을 받은 사진은 다시 묻지 않는다(`_preCheckCached`) — 새로 넣은 사진만 서버로 간다.
+  const results = await Promise.all(fileObjs.slice(0, 5).map(fo => _preCheckCached(fo, ctx)));
   if (!_preState[scope] || _preState[scope].requestId !== requestId) return;
   const rank = { block: 3, warn: 2, pass: 1, skip: 0 };
   let worst = null;
@@ -4182,6 +4250,15 @@ async function _submitReviewSlots(item) {
     return;
   }
 
+  const btn = slotSubmitTrigger === "reviewThenReceipt"
+    ? document.getElementById("btnToReceipt")
+    : (S.receiptStepMode && S.step === 3)
+    ? document.getElementById("btnSubmitReceipt")
+    : document.getElementById("btnSubmit");
+  // ★ 결정 404: 사진 확인이 아직 도는 중이면 끝날 때까지(최대 25초) 기다렸다가 **이어서** 제출한다.
+  //   아래 검사(올릴 칸·블로그 URL·용량)는 기다린 **뒤의** 사진 상태로 한다.
+  if (!(await _preAwaitChecks(btn))) return;
+
   // 2단계에서는 리뷰만, 3단계에서는 현금영수증만 업로드한다.
   const slotsToUpload = slots.filter(s =>
     (S.filesBySlot[s.key] || []).length > 0
@@ -4226,11 +4303,6 @@ async function _submitReviewSlots(item) {
     return;
   }
 
-  const btn = slotSubmitTrigger === "reviewThenReceipt"
-    ? document.getElementById("btnToReceipt")
-    : (S.receiptStepMode && S.step === 3)
-    ? document.getElementById("btnSubmitReceipt")
-    : document.getElementById("btnSubmit");
   if (!btn) return;
   btn.disabled = true;
 
@@ -4471,6 +4543,8 @@ async function submitReview() {
   // ── 캡처 슬롯 모드 (단일 행, 여러 종류 캡처) → 전용 핸들러 ──
   if (S.captureSlots) { return _submitReviewSlots(items[0]); }
 
+  // ★ 결정 404: 사진 확인이 아직 도는 중이면 끝날 때까지(최대 25초) 기다렸다가 **이어서** 제출한다.
+  if (!(await _preAwaitChecks(document.getElementById("btnSubmit")))) return;
   // ★ 1차 필터에 잠긴 첨부가 남아 있으면 제출하지 않는다(우회 체크한 것은 통과).
   if (_preHasBlock()) {
     showToast(_preBlockedMessage() || "리뷰 화면이 아닌 것 같아요. 파일을 다시 골라주세요.", "warning");
@@ -4707,6 +4781,7 @@ function resetApp() {
   _setReceiptStepMode(false);
   // ★ 1차 필터 상태도 함께 비운다 — 남겨두면 다음 제출이 지난 판정 때문에 잠긴다.
   Object.keys(_preState).forEach(k => delete _preState[k]);
+  _preCache.clear();   // 결정 404 — 기억한 판정도 비운다(다음 제출은 새로 묻는다)
   const nameEl = document.getElementById("nameInput");
   const memoEl = document.getElementById("memoTxt");
   if (nameEl) nameEl.value = "";
