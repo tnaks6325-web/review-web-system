@@ -202,7 +202,7 @@ function planStagedRenames(rows, pairs, opts) {
   return { changes, skipped };
 }
 
-/* ───────────── ★ 결정 404 — 상품 이름 바꾸기(상품이 여러 개인 작업보드)의 빈 줄 계획 ─────────────
+/* ───────────── ★ 결정 405 — 상품 이름 바꾸기(상품이 여러 개인 작업보드)의 빈 줄 계획 ─────────────
  * 종전엔 상품 이름을 바꾸면 빈 줄의 상품 칸(정확히 같은 값)과 「표시 = 상품 이름」 줄만 따라갔다(결정 401 사각).
  *   - v2 「상품 · 옵션」 표시 앞부분은 옛 상품 이름 그대로 → 상품이 여러 개면 주문(stagedSlotRows = 상품 이름 정확 일치 → 상품 하나뿐일 때만 옵션만)이
  *     짝을 못 지어 새 이름 바로 구매가 「빈 줄 없음」.
@@ -402,7 +402,7 @@ async function relabelEmptySlotsInTx(client, campaignId, pairs, productPairs = [
       if (staged.skipped) logger.info(`[campaign/options] ${campaignId} 이름 바꾼 선택지의 「상품 · 옵션」 빈 줄 ${staged.skipped}줄은 어느 칸인지 정할 수 없어 그대로 둠`);
     }
     let n = 0;
-    // ★ 결정 404 — 상품 이름 바꾸기: 상품이 여러 개인 작업보드의 v2 「상품 · 옵션」 빈 줄·포함 관계로 짝지어진 상품 단위 빈 줄도 따라간다
+    // ★ 결정 405 — 상품 이름 바꾸기: 상품이 여러 개인 작업보드의 v2 「상품 · 옵션」 빈 줄·포함 관계로 짝지어진 상품 단위 빈 줄도 따라간다
     //   (같은 줄 범위 · 같은 잠금 · 짝 = 주문 쪽 실제 함수 · 모르면 그 줄만 그대로). 끄는 스위치 CAMPAIGN_PRODUCT_RENAME_SLOTS=0 = 종전.
     let pStaged = { changes: new Map(), skipped: 0 }, pUnit = { changes: new Map(), skipped: 0 };
     if (pmap.size && rows.length && process.env.CAMPAIGN_PRODUCT_RENAME_SLOTS !== '0') {
@@ -441,7 +441,7 @@ async function relabelEmptySlotsInTx(client, campaignId, pairs, productPairs = [
       }
       const pch = pStaged.changes.get(String(r.id)) || pUnit.changes.get(String(r.id));
       if (pch && !changed) {
-        // 결정 404 갈래가 바꾼 줄 — 상품 칸까지 이미 새 이름(아래 정확 일치 바꾸기를 다시 돌리면 맞바꾸기에서 되돌아간다)
+        // 결정 405 갈래가 바꾼 줄 — 상품 칸까지 이미 새 이름(아래 정확 일치 바꾸기를 다시 돌리면 맞바꾸기에서 되돌아간다)
         nextOt = pch.option_text; rj = { ...pch.row_json }; changed = true;
       } else if (pmap.size) {
         const heads = Object.keys(rj);

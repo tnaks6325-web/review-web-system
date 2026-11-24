@@ -394,7 +394,7 @@ async function _saveCampaignOptions(campaignId, options, { linked = false } = {}
     if (!lock.length) { await client.query('ROLLBACK'); return; }
     // ★ 결정 229(코드리뷰 P2): 지운·마감 상품에 남은 품절 신고·알림을 먼저 정리 — 이름 바꾸기가 "알림은 상품마다 하나"에 걸리지 않게
     await require('../services/campaignOptionPause.service').closeStaleForCampaign(client, campaignId);
-    // ★ 결정 404 — 저장 전 선택지(상품 이름)를 기억해 둔다: 상품 이름만 바꾼 저장도 빈 줄 표시·상품 칸이 따라가게(아래 COMMIT 직전)
+    // ★ 결정 405 — 저장 전 선택지(상품 이름)를 기억해 둔다: 상품 이름만 바꾼 저장도 빈 줄 표시·상품 칸이 따라가게(아래 COMMIT 직전)
     const { rows: _pnBefore } = await client.query('SELECT opt_key, product_name, status FROM campaign_options WHERE campaign_id=$1', [campaignId]);
     let _renamed = [];
     if (linked) {
@@ -468,7 +468,7 @@ async function _saveCampaignOptions(campaignId, options, { linked = false } = {}
     // ★ 결정 229: 이번 저장으로 지우거나 마감한 상품의 품절 신고·알림 정리(같은 이름으로 다시 열면 처음부터 센다)
     await require('../services/campaignOptionPause.service').closeStaleForCampaign(client, campaignId);
     {
-      // ★ 결정 404 — 상품 이름이 바뀐 선택지가 있으면 작업보드 빈 줄도 같은 함수(양방향 공유 저장과 같은 relabelEmptySlotsInTx)로 따라간다.
+      // ★ 결정 405 — 상품 이름이 바뀐 선택지가 있으면 작업보드 빈 줄도 같은 함수(양방향 공유 저장과 같은 relabelEmptySlotsInTx)로 따라간다.
       //   짝 = productRenamePairs(갈리거나 옛 이름이 남으면 버림) · 빈 줄 함수는 자체 SAVEPOINT — 실패해도 저장은 이어 간다.
       const _ren = require('../services/campaignOptionRename.service');
       const { rows: _pnAfter } = await client.query('SELECT opt_key, product_name, status FROM campaign_options WHERE campaign_id=$1', [campaignId]);

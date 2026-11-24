@@ -1,6 +1,6 @@
 'use strict';
 /**
- * productRenameSlotsNativePg.test.js — 결정 404 동시성 · **실제 PostgreSQL**(연결 여러 개 · 잠금 대기를 pg_blocking_pids 로 확인).
+ * productRenameSlotsNativePg.test.js — 결정 405 동시성 · **실제 PostgreSQL**(연결 여러 개 · 잠금 대기를 pg_blocking_pids 로 확인).
  *   선택 실행: PR_NATIVE_PG_TEST=1 (initdb 로 새 클러스터를 만들고 끝나면 그 폴더만 지운다 — tests/helpers/captureNativePgFixture.js · UTF8 DB 따로).
  *   상품 2개(고등어 · 고등어 2팩 세트) v2 작업보드 · 양방향 공유 저장으로 고등어 → 국산 고등어.
  *   N1 상품 이름 바꾸기가 빈 줄을 다시 쓴 직후(빈 줄 전부 FOR UPDATE 를 쥔 채) 바로 구매 — v1 작업보드와 v2 작업보드의 결과가 같다(잠금 범위 종전 그대로)
