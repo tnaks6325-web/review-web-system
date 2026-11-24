@@ -356,6 +356,7 @@ const v2c = (p, o1) => ({ ot: `${p} · ${o1}`, rj: { 상품: p, '1차옵션': o1
     const save = routes.slice(routes.indexOf('async function _saveCampaignOptions'), routes.indexOf("await client.query('COMMIT')", routes.indexOf('async function _saveCampaignOptions')));
     assert.match(save, /productRenamePairs\(/, '공고 창 저장 = 같은 짝 함수');
     assert.match(save, /relabelEmptySlotsInTx\(/, '공고 창 저장 = 같은 빈 줄 함수');
+    assert.match(save.slice(save.indexOf('productRenamePairs(')), /isQnaTab\([\s\S]*?!_qna\) await _ren\.relabelEmptySlotsInTx/, 'Q&A 자리표는 건드리지 않는다(결정 321)');
   });
 
   console.log(`productRenameSlotsPg: ${passed} passed${failed ? `, ${failed} failed` : ''}`);

@@ -473,7 +473,14 @@ async function _saveCampaignOptions(campaignId, options, { linked = false } = {}
       const _ren = require('../services/campaignOptionRename.service');
       const { rows: _pnAfter } = await client.query('SELECT opt_key, product_name, status FROM campaign_options WHERE campaign_id=$1', [campaignId]);
       const _pPairs = _ren.productRenamePairs(_pnBefore, _pnAfter, _renamed);
-      if (_pPairs.length) await _ren.relabelEmptySlotsInTx(client, campaignId, [], _pPairs);
+      // ★ Q&A체험단(결정 321) — 자리표는 접수 때 이름으로 깔린 날짜별 자리다 · 이름 바꾸기 단일 출처(applyRenamePlanInTx)와 같이 자리표는 건드리지 않는다
+      let _qna = false;
+      if (_pPairs.length) {
+        const { rows: _lc } = await client.query('SELECT linked_sheet_id, linked_tab_name FROM recruit_campaigns WHERE id=$1', [campaignId]);
+        _qna = !!(_lc[0] && _lc[0].linked_sheet_id && _lc[0].linked_tab_name
+          && await require('../services/qnaSlots.service').isQnaTab(client, _lc[0].linked_sheet_id, _lc[0].linked_tab_name));
+      }
+      if (_pPairs.length && !_qna) await _ren.relabelEmptySlotsInTx(client, campaignId, [], _pPairs);
     }
     await client.query('COMMIT');
   } catch (e) {
