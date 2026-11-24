@@ -81,7 +81,7 @@ ok('isLoginSessionToken: null·문자열 거부', !isLoginSessionToken(null) && 
 /* ═══ 속도 제한 면제·안내이미지 업로드도 같은 판정을 태운다(사본 금지) ═══ */
 const rl = fs.readFileSync(path.join(__dirname, '../src/middleware/rateLimit.middleware.js'), 'utf8');
 ok('속도 제한 면제: 서명만 보고 true 를 돌려주는 곳 0', !/jwt\.verify\([^;]*\);\s*return true/.test(rl) && !/jwt\.verify\(token, process\.env\.JWT_SECRET\);\s*\n\s*return true/.test(rl));
-// 결정 405: 리뷰 캡처 1차 필터·업로드 전용 제한기의 면제(`_trustedLoginSkip`)가 한 곳 더 — 같은 함수를 태운다(사본 금지 의미 그대로)
+// 결정 406: 리뷰 캡처 1차 필터·업로드 전용 제한기의 면제(`_trustedLoginSkip`)가 한 곳 더 — 같은 함수를 태운다(사본 금지 의미 그대로)
 ok('속도 제한 면제 3곳 모두 isTrustedLoginToken', (rl.match(/return isTrustedLoginToken\(jwt\.verify\(token/g) || []).length === 3
   && /function _trustedLoginSkip\(req\) \{[\s\S]{0,260}return isTrustedLoginToken\(jwt\.verify\(token/.test(rl));
 ok('전역 제한의 직원 통도 isTrustedLoginToken', /if \(bearerPayload && isTrustedLoginToken\(bearerPayload\)\)/.test(rl));

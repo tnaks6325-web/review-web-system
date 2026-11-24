@@ -397,7 +397,7 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
 //   (사후에 교체요청 → 리뷰어 재제출은 왕복 비용이 커서 실무에서 가장 번거롭다)
 // ★ 현재 리뷰어 화면은 X-Reviewer-Token을 보내며, 중복 차단 신원은 검증된 세션에서만 읽는다.
 //   같은 이미지는 Gemini 해시 캐시로 상각되고 남용은 reviewPrecheckLimiter 로 막는다
-//   (결정 405 — 업로드와 통을 나누고 검증된 리뷰어는 리뷰어별로 센다 · 주소별 상한 유지).
+//   (결정 406 — 업로드와 통을 나누고 검증된 리뷰어는 리뷰어별로 센다 · 주소별 상한 유지).
 // Body: { base64, mimeType, sheetId, tabName, slotKey }
 // ═══════════════════════════════════════════════════════════
 router.post('/review-precheck', reviewPrecheckLimiter, async (req, res) => {
@@ -495,7 +495,7 @@ router.post('/review-precheck', reviewPrecheckLimiter, async (req, res) => {
 //   { sheetId, tabName, reviewerName, campaignName, optionFolderName,
 //     files: [{ data: base64, mimeType, name? }] }
 // ═══════════════════════════════════════════════════════════
-// ★ 결정 405: 1차 필터와 다른 통(reviewUploadLimiter) — 사진을 한 장씩 넣은 확인 요청이 업로드를 429 로 막지 않게.
+// ★ 결정 406: 1차 필터와 다른 통(reviewUploadLimiter) — 사진을 한 장씩 넣은 확인 요청이 업로드를 429 로 막지 않게.
 router.post('/review-upload', reviewUploadLimiter, async (req, res, next) => {
   try {
     const { sheetId, tabName, reviewerName, campaignName, optionFolderName, files, gid, rowIndex, submitCol, memo, slotKey } = req.body;

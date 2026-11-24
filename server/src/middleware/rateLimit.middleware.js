@@ -174,7 +174,7 @@ const imageUploadLimiter = rateLimit({
   },
 });
 
-// ── 리뷰 캡처 1차 필터(review-precheck) · 리뷰 캡처 업로드(review-upload) 전용 (결정 405) ─────────
+// ── 리뷰 캡처 1차 필터(review-precheck) · 리뷰 캡처 업로드(review-upload) 전용 (결정 406) ─────────
 // ★★ 종전엔 둘 다 imageApiLimiter(인터넷 주소별 분당 10 한 통)였다. 사진을 한 장씩 4장 넣으면 1차 필터만
 //   1+2+3+4 = 10번이라 [제출하기]의 업로드가 429 로 막혔고, 통신사 공유 주소의 **다른 리뷰어**도 같이 막혔다
 //   (점검 2026-11-24 H2). 구매 캡처가 #1012 에서 겪고 imageUploadLimiter 로 통을 나눈 것과 같은 사고다.

@@ -183,8 +183,9 @@ test('「가」 — 접수 뒤 단계 수정·단계 상품 이름 바꾸기·�
   // ② 단계 상품 이름 바꾸기(인트라넷발 구조 저장)
   assert.match(sp, /for \(const r of structure\.renamedProducts \|\| \[\]\) \{\n\s*if \(_tiersOn\(list\.find\(y => String\(y && y\.name \|\| ''\)\.trim\(\) === String\(r\.to \|\| ''\)\.trim\(\)\)\)\) \{\n\s*return \{ code: 'quantity_tiers_locked'/);
   // ③ 공고 창 저장: 단계 공고의 상품 이름 바꾸기는 통째로 되돌린다(이름 바꾸기 뒤 · 쓰기 전)
+  //   (결정 405: 이름 바꾸기 결과를 받아 두는 대입 `_renamed = (…) || []` 허용 — 순서 「이름 바꾸기 → 단계 검사 → 쓰기」 의미 불변)
   const fn = routes.slice(routes.indexOf('async function _saveCampaignOptions('), routes.indexOf('INSERT INTO campaign_options (campaign_id, opt_key, option_url'));
-  assert.match(fn, /await _applyOptionRenames\(client, campaignId, options, keep\);[\s\S]*SELECT 1 FROM campaign_qty_tiers WHERE campaign_id=\$1 LIMIT 1[\s\S]*throw Object\.assign\(new Error\(`구매수량 단계가 있는 공고라 상품 이름/);
+  assert.match(fn, /await _applyOptionRenames\(client, campaignId, options, keep\)[^;\n]*;[\s\S]*SELECT 1 FROM campaign_qty_tiers WHERE campaign_id=\$1 LIMIT 1[\s\S]*throw Object\.assign\(new Error\(`구매수량 단계가 있는 공고라 상품 이름/);
 });
 
 // ★ 코드리뷰(PR #1690) P1·P2

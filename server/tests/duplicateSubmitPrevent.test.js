@@ -172,7 +172,7 @@ function stubPool(handler) {
   console.log('\nC) 리뷰어 화면');
   {
     const sa = front('js/search-app.js');
-    // 결정 405: precheck 는 시간 제한 도우미 _ofPostJson(결정 398) 경유 — 그 도우미가 리뷰어 세션 헤더를 싣는다
+    // 결정 406: precheck 는 시간 제한 도우미 _ofPostJson(결정 398) 경유 — 그 도우미가 리뷰어 세션 헤더를 싣는다
     const _preOne = /async function _preCheckOne\(fileObj, ctx\) \{[\s\S]*?\n\}/.exec(sa)[0];
     const _ofPost = /async function _ofPostJson\(path, body, timeoutMs, method\) \{[\s\S]*?\n\}/.exec(sa)[0];
     assert.ok(/_ofPostJson\('\/api\/image\/review-precheck'/.test(_preOne)

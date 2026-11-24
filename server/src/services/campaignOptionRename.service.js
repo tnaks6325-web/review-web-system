@@ -202,6 +202,168 @@ function planStagedRenames(rows, pairs, opts) {
   return { changes, skipped };
 }
 
+/* ───────────── ★ 결정 405 — 상품 이름 바꾸기(상품이 여러 개인 작업보드)의 빈 줄 계획 ─────────────
+ * 종전엔 상품 이름을 바꾸면 빈 줄의 상품 칸(정확히 같은 값)과 「표시 = 상품 이름」 줄만 따라갔다(결정 401 사각).
+ *   - v2 「상품 · 옵션」 표시 앞부분은 옛 상품 이름 그대로 → 상품이 여러 개면 주문(stagedSlotRows = 상품 이름 정확 일치 → 상품 하나뿐일 때만 옵션만)이
+ *     짝을 못 지어 새 이름 바로 구매가 「빈 줄 없음」.
+ *   - 상품 단위 줄이 포함 관계로 짝지어진 짧은 표시(「고등어」 ← 공고 「1.고등어 특가」)면 새 이름이 짝을 못 지어 상품만 고른 바로 구매가 다른 상품 줄을 잡았다.
+ * 짝 = 주문 쪽 실제 함수(stagedSlotRows · resolveProductLabel) 그대로 — 바꾸기 전 이름으로 읽어 그 상품 하나에만 걸리는 줄 중, 이름을 바꾸면
+ *   주문이 더는 고르지 못하는 줄만 바꾸고, 바꾼 뒤 같은 함수로 되읽어 새 이름 하나로만 읽힐 때만 쓴다. 상품 1개 작업보드는 주문이 그대로 고르므로 무접촉.
+ * 끄는 스위치 CAMPAIGN_PRODUCT_RENAME_SLOTS=0 = 종전 동작(두 갈래 모두). */
+function _stagedOwners(list, keys) {
+  const so = require('./sheetlessOrder.service');
+  const own = new Map();
+  for (const k of keys) for (const r of so.stagedSlotRows(list, k.key, k.product)) { const id = String(r.id); own.set(id, [...(own.get(id) || []), k.key]); }
+  return own;
+}
+const _sameList = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+/**
+ * v2 「상품 · 옵션」 빈 줄 — 상품 이름 바꾸기 계획(순수 함수).
+ * @param rows   빈 줄 [{id, option_text, row_json}]
+ * @param ppairs Map(옛 상품 이름 → 새 상품 이름)
+ * @param opts   지금(이름 바꾼 뒤) 공고 선택지 [{opt_key, product_name, unit_kind}]
+ * ★ fail-closed(그 줄만 그대로): 옵션 둘 이상에 걸림 · 상품 칸에 다른 글 · 되읽기 불일치 · 다른 줄의 짝이 달라짐(그때는 이 계획 전부 버림).
+ * @returns {{changes: Map<string, {option_text, row_json}>, skipped: number}}
+ */
+function planStagedProductRenames(rows, ppairs, opts) {
+  const so = require('./sheetlessOrder.service');
+  const { parseSelectionKey, selectionKey } = require('./productOptions.service');
+  const { productWriteColumns } = require('./orderLedger.service');
+  const t = v => String(v == null ? '' : v).trim();
+  const map = ppairs instanceof Map ? ppairs : new Map((ppairs || []).map(p => [p.from, p.to]));
+  const changes = new Map();
+  let skipped = 0;
+  const staged = (rows || []).filter(r => r && t(r.option_text).includes(' · ') && parseSelectionKey(r.option_text));
+  if (!map.size || !staged.length) return { changes, skipped };
+  const back = new Map([...map].map(([f, to]) => [to, f]));
+  const keyed = (opts || []).filter(o => o && String(o.unit_kind || 'option') !== 'product' && t(o.opt_key)).map(o => ({ key: t(o.opt_key), product: t(o.product_name) }));
+  const before = keyed.map(k => ({ key: k.key, product: back.has(k.product) ? back.get(k.product) : k.product }));
+  const prodOf = new Map(keyed.map(k => [k.key, k.product]));
+  const prevOf = new Map(before.map(k => [k.key, k.product]));
+  const renamed = new Set(before.filter(k => k.product !== prodOf.get(k.key)).map(k => k.key));
+  if (!renamed.size) return { changes, skipped };
+  const own0 = _stagedOwners(staged, before);      // 바꾸기 전 — 주문이 이 줄을 어느 옵션으로 골랐나
+  const ownMid = _stagedOwners(staged, keyed);     // 이름만 바꾸고 줄은 그대로 둘 때
+  const draft = new Map();
+  for (const r of staged) {
+    const id = String(r.id);
+    const ow = own0.get(id) || [];
+    if (!ow.some(k => renamed.has(k))) continue;                 // 이번 상품 이름 바꾸기와 무관한 줄
+    if (ow.length !== 1) { skipped++; continue; }                 // 옵션 둘 이상에 걸림
+    const key = ow[0];
+    if (_sameList(ownMid.get(id) || [], [key])) continue;         // 바꾸지 않아도 주문이 그대로 고른다(상품 1개 작업보드) — 종전 그대로
+    const ot = t(r.option_text);
+    const sel = parseSelectionKey(ot);
+    const pc = prodOf.get(key), pb = prevOf.get(key);
+    const rj0 = r.row_json && typeof r.row_json === 'object' ? r.row_json : {};
+    const heads = Object.keys(rj0);
+    if (!productWriteColumns(heads).every(i => ['', t(sel.productName), pb].includes(t(rj0[heads[i]])))) { skipped++; continue; }   // 상품 칸에 다른 글
+    const o1 = t(sel.option1Value), o2 = t(sel.option2Value);
+    const nl = selectionKey(pc, o1, o2);
+    // 부품 칸(1·2차옵션)은 그대로(같은 값으로 바꾸기 = 통째 표시 바꾸기에서 빼는 표시) · 상품 칸 = 새 상품 이름 · 통째 표시 칸 = 새 표시
+    const rj = relabelRowCells(rj0, { optFrom: [ot], optTo: nl, productFrom: [t(sel.productName), pb], productTo: pc, o1From: [o1], o1To: o1, o2From: o2 ? [o2] : [], o2To: o2 ? o2 : null });
+    draft.set(id, { option_text: nl, row_json: rj, key, product: pc });
+  }
+  if (draft.size) {
+    // 되읽기 — 바꾼 표시를 주문 쪽 같은 함수로 다시 읽는다: 바꾼 줄은 그 옵션 하나로만, 안 바꾼 줄은 짝이 그대로여야 한다
+    const after = staged.map(r => (draft.has(String(r.id)) ? { ...r, option_text: draft.get(String(r.id)).option_text } : r));
+    const own1 = _stagedOwners(after, keyed);
+    const collateral = staged.some(r => !draft.has(String(r.id)) && !_sameList(own1.get(String(r.id)) || [], ownMid.get(String(r.id)) || []));
+    for (const [id, d] of draft) {
+      if (!collateral && _sameList(own1.get(id) || [], [d.key]) && so.stagedLabelMatches(d.option_text, d.key, d.product)) changes.set(id, { option_text: d.option_text, row_json: d.row_json });
+      else skipped++;
+    }
+  }
+  return { changes, skipped };
+}
+
+/**
+ * 상품 단위 줄(표시 = 상품 이름 · 「 · 」 없음) — 포함 관계로 짝지어진 짧은 표시의 상품 이름 바꾸기 계획(순수 함수).
+ *   짝 = 상품만 고른 주문의 실제 함수 resolveProductLabel(공고 상품 이름 → 작업보드 표기 · 정확 → 포함 관계가 하나로 정해질 때만).
+ *   줄의 계획 = 주문 쪽 planOf 와 같은 순서(배정 표식 → 상품 칸). 손 글씨(담당자가 상품 칸을 고친 기록)가 있는 줄은 계획을 모르므로 손대지 않는다.
+ *   표기 목록 = 주문이 보는 것과 같게(채운 줄 표식 + 빈 줄 계획 + 손 글씨).
+ * ★ 표시가 옛 이름과 정확히 같은 줄은 여기서 다루지 않는다(종전 갈래가 바꾼다 — 동작 불변).
+ * ★ 표기가 1종뿐인 작업보드(상품 1개)는 주문이 상품을 보지 않는다 → 무접촉.
+ * ★ fail-closed(그 상품 줄 전부 그대로): 옛 이름이 어느 표기로도 하나로 안 정해짐 · 새 이름이 다른 상품 이름·표기를 품거나 그 안에 들어감 ·
+ *   손 글씨 줄 · 되읽기에서 새 이름이 자기 줄로 안 읽히거나 다른 상품의 짝이 달라짐.
+ * @param rows   빈 줄 [{id, option_text, row_json}]
+ * @param ppairs Map(옛 상품 이름 → 새 상품 이름)
+ * @param opts   지금 공고 선택지 [{opt_key, product_name, unit_kind}]
+ * @param ctx    { filledLabels: 채운 줄 표식[], overlays: Map(줄 id → 손 글씨 상품) }
+ */
+function planProductUnitRenames(rows, ppairs, opts, { filledLabels = [], overlays = new Map() } = {}) {
+  const { resolveProductLabel } = require('./sheetlessOrder.service');
+  const { PRODUCT_HEADER } = require('./orderLedger.service');
+  const t = v => String(v == null ? '' : v).trim();
+  const nz = v => t(v).replace(/\s+/g, '').toLowerCase();
+  const map = ppairs instanceof Map ? ppairs : new Map((ppairs || []).map(p => [p.from, p.to]));
+  const changes = new Map();
+  let skipped = 0;
+  const plain = (rows || []).filter(r => r && !t(r.option_text).includes(' · '));
+  if (!map.size || !plain.length) return { changes, skipped };
+  const planOf = r => (overlays.has(String(r.id)) ? t(overlays.get(String(r.id))) : (t(r.option_text) || t((r.row_json || {})[PRODUCT_HEADER])));
+  // 주문이 보는 표기 목록(_productWriteFor) = 빈 줄 계획 ∪ 그 탭 모든 줄의 배정 표식(채운 줄 포함)
+  const universe = list => [...new Set([...(filledLabels || []), ...list.map(r => t(r.option_text)),
+    ...list.filter(r => !t(r.option_text).includes(' · ')).map(planOf)].filter(Boolean))];
+  let work = (rows || []).filter(Boolean).slice();
+  const campNames = [...new Set((opts || []).map(o => t(o && (o.product_name || o.opt_key))).filter(Boolean))];
+  // 이 갈래는 **상품 단위 선택지**(옵션 없는 상품)의 이름 바꾸기만 — 옵션 단위 줄(표시 = 옵션 이름)은 종전 갈래(옵션 이름 · 상품 칸 정확 일치) 그대로
+  const unitNames = new Set((opts || []).filter(o => o && String(o.unit_kind || 'option') === 'product').map(o => t(o.product_name || o.opt_key)).filter(Boolean));
+  const optionKeys = new Set((opts || []).filter(o => o && String(o.unit_kind || 'option') !== 'product').map(o => t(o.opt_key)).filter(Boolean));
+  for (const [from, to] of map) {
+    if (!unitNames.has(t(to))) continue;
+    const U = universe(work);
+    if (U.length < 2) continue;                                   // 상품 1개 작업보드 — 주문이 상품을 보지 않는다
+    const X = resolveProductLabel(from, U);
+    if (!X || t(X) === t(from) || optionKeys.has(t(X))) continue;   // 모름(종전) · 정확히 같은 표시 = 종전 갈래 · 옵션 이름 표기 = 옵션 줄
+    if (resolveProductLabel(to, U) === X) continue;               // 바꾸지 않아도 새 이름이 그 줄로 짝지어진다
+    const mine = work.filter(r => !t(r.option_text).includes(' · ') && !optionKeys.has(t(r.option_text)) && planOf(r) === t(X));
+    if (!mine.length) continue;
+    const others = [...campNames.filter(n => n !== t(to) && n !== t(from)), ...U.filter(l => l !== t(X))];
+    const contains = others.some(o => nz(o) && nz(to) && (nz(o).includes(nz(to)) || nz(to).includes(nz(o))));
+    if (contains || mine.some(r => overlays.has(String(r.id)))) { skipped += mine.length; continue; }
+    const draft = new Map(mine.map(r => [String(r.id), {
+      ...r, option_text: t(r.option_text) === t(X) ? to : r.option_text,
+      row_json: relabelRowCells(r.row_json, { optFrom: [X], optTo: to, productFrom: [X, from], productTo: to }) }]));
+    const next = work.map(r => draft.get(String(r.id)) || r);
+    // 되읽기 — 새 이름은 바꾼 줄 표기로 정확히, 다른 공고 상품의 짝은 그대로여야 한다
+    const U2 = universe(next);
+    const stable = campNames.filter(n => n !== t(to) && n !== t(from)).every(n => resolveProductLabel(n, U2) === resolveProductLabel(n, U));
+    if (resolveProductLabel(to, U2) !== t(to) || !stable) { skipped += mine.length; continue; }
+    for (const [id, d] of draft) changes.set(id, { option_text: d.option_text, row_json: d.row_json });
+    work = next;
+  }
+  return { changes, skipped };
+}
+
+/**
+ * 공고 창 저장의 상품 이름 바꾸기 짝(순수) — 저장 전·후 선택지 줄에서 상품 이름이 바뀐 것만.
+ * @param beforeRows [{opt_key, product_name, status}] 저장 전 · afterRows 저장 후 · plan = 이번 저장의 선택지 이름 바꾸기 [{from, to}](상품 단위 = 상품 이름이 곧 선택지 이름)
+ * ★ 짝을 버리는 경우(fail-closed · 종전 = 빈 줄 무접촉): 같은 옛 이름이 서로 다른 새 이름으로 갈림 · 옛 이름을 그대로 쓰는 선택지가 남음 · 새 이름이 원래 다른 상품 이름.
+ * @returns [{from, to}]
+ */
+function productRenamePairs(beforeRows, afterRows, plan = []) {
+  const t = v => String(v == null ? '' : v).trim();
+  const live = list => (list || []).filter(r => r && String(r.status || 'active') !== 'deleted');
+  const mv = new Map((plan || []).map(p => [t(p.from), t(p.to)]));
+  const after = new Map(live(afterRows).map(r => [t(r.opt_key), t(r.product_name)]));
+  const cand = new Map();
+  for (const b of live(beforeRows)) {
+    const k = t(b.opt_key), pb = t(b.product_name);
+    const k2 = mv.has(k) ? mv.get(k) : k;
+    if (!pb || !after.has(k2)) continue;
+    const pa = after.get(k2);
+    if (!pa || pa === pb) continue;
+    if (!cand.has(pb)) cand.set(pb, new Set());
+    cand.get(pb).add(pa);
+  }
+  const beforeNames = new Set(live(beforeRows).map(r => t(r.product_name)).filter(Boolean));
+  const afterNames = new Set([...after.values()]);
+  return [...cand].filter(([from, tos]) => tos.size === 1 && !afterNames.has(from) && !beforeNames.has([...tos][0]))
+    .map(([from, tos]) => ({ from, to: [...tos][0] }));
+}
+
 /**
  * 아직 아무도 채우지 않은 작업표 빈 줄 — 배정 표식(option_text)과 옛 이름이 적힌 옵션·상품 칸을 새 이름으로(사용자 확정 2026-10-21 「2.가」).
  *   pairs = [{from, to}](선택지 이름) · productPairs = [{from, to}](상품 칸만 · 상품 이름 바꾸기).
@@ -240,6 +402,30 @@ async function relabelEmptySlotsInTx(client, campaignId, pairs, productPairs = [
       if (staged.skipped) logger.info(`[campaign/options] ${campaignId} 이름 바꾼 선택지의 「상품 · 옵션」 빈 줄 ${staged.skipped}줄은 어느 칸인지 정할 수 없어 그대로 둠`);
     }
     let n = 0;
+    // ★ 결정 405 — 상품 이름 바꾸기: 상품이 여러 개인 작업보드의 v2 「상품 · 옵션」 빈 줄·포함 관계로 짝지어진 상품 단위 빈 줄도 따라간다
+    //   (같은 줄 범위 · 같은 잠금 · 짝 = 주문 쪽 실제 함수 · 모르면 그 줄만 그대로). 끄는 스위치 CAMPAIGN_PRODUCT_RENAME_SLOTS=0 = 종전.
+    let pStaged = { changes: new Map(), skipped: 0 }, pUnit = { changes: new Map(), skipped: 0 };
+    if (pmap.size && rows.length && process.env.CAMPAIGN_PRODUCT_RENAME_SLOTS !== '0') {
+      const { rows: co } = await client.query(
+        `SELECT opt_key, product_name, unit_kind FROM campaign_options WHERE campaign_id = $1 AND COALESCE(status, 'active') <> 'deleted'`, [campaignId]);
+      if (process.env.WORKTABLE_STAGED_OPTION_MATCH !== '0' && rows.some(r => String(r.option_text || '').includes(' · '))) {
+        pStaged = planStagedProductRenames(rows, pmap, co);
+      }
+      if (rows.some(r => !String(r.option_text || '').includes(' · '))) {
+        const { PRODUCT_HEADER } = require('./orderLedger.service');
+        const { rows: fl } = await client.query(
+          `SELECT DISTINCT btrim(option_text) AS l FROM campaign_participants
+            WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND active = TRUE AND COALESCE(btrim(option_text), '') <> ''
+              AND NOT (id = ANY($3::uuid[]))`, [camp.linked_sheet_id, camp.linked_tab_name, rows.map(r => r.id)]);
+        const { rows: ov } = await client.query(
+          `SELECT DISTINCT ON (anchor_value) anchor_value, value_text FROM participant_edits
+            WHERE sheet_id = $1 AND tab_name = $2 AND anchor_type = 'manual' AND field = $3 AND kind = 'text' AND reverted_at IS NULL
+              AND anchor_value = ANY($4::text[])
+            ORDER BY anchor_value, created_at DESC, id DESC`, [camp.linked_sheet_id, camp.linked_tab_name, 'col:' + PRODUCT_HEADER, rows.map(r => String(r.id))]);
+        pUnit = planProductUnitRenames(rows, pmap, co, { filledLabels: fl.map(x => x.l), overlays: new Map(ov.map(o => [String(o.anchor_value), String(o.value_text == null ? '' : o.value_text)])) });
+      }
+      if (pStaged.skipped + pUnit.skipped) logger.info(`[campaign/options] ${campaignId} 상품 이름을 바꾼 빈 줄 ${pStaged.skipped + pUnit.skipped}줄은 어느 상품 줄인지 정할 수 없어 그대로 둠`);
+    }
     for (const r of rows) {
       const ot = String(r.option_text || '').trim();
       const rj0 = r.row_json && typeof r.row_json === 'object' ? r.row_json : {};
@@ -253,7 +439,11 @@ async function relabelEmptySlotsInTx(client, campaignId, pairs, productPairs = [
         const ch = staged.changes.get(String(r.id));
         nextOt = ch.option_text; rj = { ...ch.row_json }; changed = true;
       }
-      if (pmap.size) {
+      const pch = pStaged.changes.get(String(r.id)) || pUnit.changes.get(String(r.id));
+      if (pch && !changed) {
+        // 결정 405 갈래가 바꾼 줄 — 상품 칸까지 이미 새 이름(아래 정확 일치 바꾸기를 다시 돌리면 맞바꾸기에서 되돌아간다)
+        nextOt = pch.option_text; rj = { ...pch.row_json }; changed = true;
+      } else if (pmap.size) {
         const heads = Object.keys(rj);
         for (const i of productWriteColumns(heads)) {
           const v = String(rj[heads[i]] == null ? '' : rj[heads[i]]).trim();
@@ -275,4 +465,5 @@ async function relabelEmptySlotsInTx(client, campaignId, pairs, productPairs = [
   }
 }
 
-module.exports = { planOptionRenames, applyRenamePlanInTx, applyOptionRenames, relabelEmptySlotsInTx, relabelRowCells, stagedComponentColumns, planStagedRenames };
+module.exports = { planOptionRenames, applyRenamePlanInTx, applyOptionRenames, relabelEmptySlotsInTx, relabelRowCells, stagedComponentColumns, planStagedRenames,
+  planStagedProductRenames, planProductUnitRenames, productRenamePairs };
