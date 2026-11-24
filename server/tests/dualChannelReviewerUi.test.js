@@ -154,11 +154,14 @@ function topLevelFunctions(source,names){
  }).join('\n');
 }
 function dualReviewHelperNames(source){return [...source.matchAll(/^(?:async )?function (_dualReview\w*)\(/gm)].map(m=>m[1]);}
+// 결정 408: _submitReviewSlots 가 올리기 전에 부르는 사진 크기 판정(_reviewPhoto*) — 있는 것만(옛 HEAD 사본과 비교할 때도 돈다)
+function reviewPhotoHelperNames(source){return [...source.matchAll(/^(?:async )?function (_reviewPhoto\w*)\(/gm)].map(m=>m[1]);}
 async function runReviewSlots(source,{item,slots,filesBySlot,trigger=null,fetchImpl,uploadImpl}){
  const calls={fetch:[],upload:[],post:[],toast:[]};const nodes={};
  const el=id=>nodes[id]||(nodes[id]={id,textContent:'',className:'',innerHTML:'',disabled:false,value:id==='csMemo'?'메모':'',style:{},classList:{toggle(){},add(){},remove(){}}});
  const g={console:{log(){},warn(){},error(){}},Date,Set,Map,Array,Object,Number,String,JSON,Error,Promise,setTimeout,clearTimeout,AbortController,
   S:{captureSlots:slots,filesBySlot,slotSubmitTrigger:trigger,receiptStepMode:false,step:2},
+  APP_CONFIG:{MAX_FILE_SIZE:10*1024*1024,ALLOWED_MIME:['image/jpeg','image/png','image/gif','image/webp']},
   API_BASE_URL:'https://api.invalid',_getAuthHeaders:()=>({'X-Reviewer-Token':'reviewer-jwt'}),
   fetch:async(url,init)=>{const body=JSON.parse(init.body);calls.fetch.push({url,method:init.method,headers:init.headers,body});return fetchImpl(url,body);},
   gasPostUpload:async p=>{calls.upload.push(JSON.stringify(p));return uploadImpl?uploadImpl(p):{ok:true,uploadBatchId:'batch-1',files:p.files.map((f,i)=>({fileId:'legacy-'+i}))};},
@@ -168,7 +171,7 @@ async function runReviewSlots(source,{item,slots,filesBySlot,trigger=null,fetchI
   _isBlogItem:()=>false,_isPostUrl:()=>false,_BLOG_POST_URL_HINT:'',_preHasBlock:()=>false,_preBlockedMessage:()=>'',_preAwaitChecks:async()=>true,
   _csShowVerdict(){},_showDuplicateBlockModal(){},_csClearRouteNotice(){},_csShowRouteNotice(){},_csClearVerdict(){},
   document:{getElementById:el}};
- const names=['_submitReviewSlots',...dualReviewHelperNames(source)];
+ const names=['_submitReviewSlots',...dualReviewHelperNames(source),...reviewPhotoHelperNames(source)];
  vm.runInNewContext(topLevelFunctions(source,names)+'\nthis.__run=_submitReviewSlots;',g);
  await g.__run(item);return {calls,nodes};
 }

@@ -80,6 +80,8 @@ function harness({ fetchImpl, uploadImpl, scale = SCALE } = {}) {
   const code = [preDecls(SA), apiCode,
     ...['_preGet', '_preReset', '_preHasBlock', '_preBlockedMessage', '_preOverride', '_preCacheCtxKey', '_preCheckCached', '_preCheckOne',
       '_preIsChecking', '_preAwaitChecks', '_preCheckFiles', '_preCheckFilesInner', '_ofFriendlyErr', '_ofPostJson',
+      // 결정 408: 제출 두 길이 올리기 전에 부르는 크기 판정(보낼 크기 기준) — 없으면 '' (옛 코드에서도 돈다)
+      '_reviewPhotoRules', '_reviewPhotoSendCheck',
       'submitReview', '_submitReviewSlots'].map((n) => fn(SA, n))].join('\n');
   vm.runInContext(code + `
     this.__pre = {
