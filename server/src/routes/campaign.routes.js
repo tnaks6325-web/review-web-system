@@ -394,13 +394,16 @@ async function _saveCampaignOptions(campaignId, options, { linked = false } = {}
     if (!lock.length) { await client.query('ROLLBACK'); return; }
     // ★ 결정 229(코드리뷰 P2): 지운·마감 상품에 남은 품절 신고·알림을 먼저 정리 — 이름 바꾸기가 "알림은 상품마다 하나"에 걸리지 않게
     await require('../services/campaignOptionPause.service').closeStaleForCampaign(client, campaignId);
+    // ★ 결정 404 — 저장 전 선택지(상품 이름)를 기억해 둔다: 상품 이름만 바꾼 저장도 빈 줄 표시·상품 칸이 따라가게(아래 COMMIT 직전)
+    const { rows: _pnBefore } = await client.query('SELECT opt_key, product_name, status FROM campaign_options WHERE campaign_id=$1', [campaignId]);
+    let _renamed = [];
     if (linked) {
       const { rows: have } = await client.query(`SELECT opt_key FROM campaign_options WHERE campaign_id=$1 AND COALESCE(status,'active') <> 'deleted'`, [campaignId]);
       const haveKeys = new Set(have.map(r => r.opt_key));
       // ★ 결정 333 — 연결 공고의 줄 유입방식은 공유 저장(오더와 한 트랜잭션)만 쓴다 — 오래 열어 둔 창이 방금 인트라넷이 바꾼 값을 덮지 않게(null = 유지)
       options = options.filter(o => haveKeys.has(o.optKey)).map(o => ({ ...o, status: null, inflowType: null }));
     } else {
-      await _applyOptionRenames(client, campaignId, options, keep);
+      _renamed = (await _applyOptionRenames(client, campaignId, options, keep)) || [];
     }
     // ★ 결정 289(사용자 확정 2026-10-26 「가」): 구매수량 단계가 있는 공고는 상품 이름을 바꾸지 않는다 —
     //   상품 공통 단계는 상품 이름으로 짝지어져 있어, 바꾸면 단계가 조용히 빠져 모두 1개씩 산다. 통째로 되돌린다(호출부가 경고로 알린다).
@@ -464,6 +467,14 @@ async function _saveCampaignOptions(campaignId, options, { linked = false } = {}
     }
     // ★ 결정 229: 이번 저장으로 지우거나 마감한 상품의 품절 신고·알림 정리(같은 이름으로 다시 열면 처음부터 센다)
     await require('../services/campaignOptionPause.service').closeStaleForCampaign(client, campaignId);
+    {
+      // ★ 결정 404 — 상품 이름이 바뀐 선택지가 있으면 작업보드 빈 줄도 같은 함수(양방향 공유 저장과 같은 relabelEmptySlotsInTx)로 따라간다.
+      //   짝 = productRenamePairs(갈리거나 옛 이름이 남으면 버림) · 빈 줄 함수는 자체 SAVEPOINT — 실패해도 저장은 이어 간다.
+      const _ren = require('../services/campaignOptionRename.service');
+      const { rows: _pnAfter } = await client.query('SELECT opt_key, product_name, status FROM campaign_options WHERE campaign_id=$1', [campaignId]);
+      const _pPairs = _ren.productRenamePairs(_pnBefore, _pnAfter, _renamed);
+      if (_pPairs.length) await _ren.relabelEmptySlotsInTx(client, campaignId, [], _pPairs);
+    }
     await client.query('COMMIT');
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
