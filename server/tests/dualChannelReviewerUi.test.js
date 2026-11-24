@@ -165,7 +165,7 @@ async function runReviewSlots(source,{item,slots,filesBySlot,trigger=null,fetchI
   gasPost:async p=>{calls.post.push(JSON.stringify(p));return {ok:true,complete:true,missingSlots:[]};},
   showToast:(m,t)=>calls.toast.push(String(m)),showLoading(){},hideLoading(){},show(){},goStep(){},_updateReceiptStepActions(){},_clearSearchCache(){},
   escHtml:String,extractProductOption:()=>({options:[{value:'옵션A'}]}),_csIsReceiptSlot:s=>s?.role?s.role==='receipt':s?.key==='receipt',
-  _isBlogItem:()=>false,_isPostUrl:()=>false,_BLOG_POST_URL_HINT:'',_preHasBlock:()=>false,_preBlockedMessage:()=>'',
+  _isBlogItem:()=>false,_isPostUrl:()=>false,_BLOG_POST_URL_HINT:'',_preHasBlock:()=>false,_preBlockedMessage:()=>'',_preAwaitChecks:async()=>true,
   _csShowVerdict(){},_showDuplicateBlockModal(){},_csClearRouteNotice(){},_csShowRouteNotice(){},_csClearVerdict(){},
   document:{getElementById:el}};
  const names=['_submitReviewSlots',...dualReviewHelperNames(source)];

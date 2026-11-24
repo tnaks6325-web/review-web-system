@@ -161,8 +161,10 @@ RI.__setPoolForTest({ query: async (sql, params) => { _sql.push({ sql: String(sq
   /* ═══ ⑦ 배선 — 서버 ═══════════════════════════════════════════ */
   console.log('\n▶ 서버 배선');
   const diag = readS('routes/diag.routes.js');
+  // 결정 406: 리뷰 캡처 1차 필터 전용 제한기(업로드와 다른 통 · 검증 리뷰어별 · 주소 상한) — 리미터 뒤 등록은 그대로
   ok('1차 필터 엔드포인트가 리미터 뒤에 등록',
-    /router\.post\('\/review-precheck', imageApiLimiter/.test(diag));
+    /router\.post\('\/review-precheck', reviewPrecheckLimiter/.test(diag)
+    && /reviewPrecheckLimiter/.test(readS('middleware/rateLimit.middleware.js').split('module.exports')[1] || ''));
   ok('★ 1차 필터는 Drive·DB 쓰기 0 — 순수 판정만',
     !/review-precheck[\s\S]{0,2200}uploadFileBase64/.test(diag)
     && !/review-precheck[\s\S]{0,2200}INSERT INTO/.test(diag));
