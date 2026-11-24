@@ -308,20 +308,24 @@ function planProductUnitRenames(rows, ppairs, opts, { filledLabels = [], overlay
     ...list.filter(r => !t(r.option_text).includes(' · ')).map(planOf)].filter(Boolean))];
   let work = (rows || []).filter(Boolean).slice();
   const campNames = [...new Set((opts || []).map(o => t(o && (o.product_name || o.opt_key))).filter(Boolean))];
+  // 이 갈래는 **상품 단위 선택지**(옵션 없는 상품)의 이름 바꾸기만 — 옵션 단위 줄(표시 = 옵션 이름)은 종전 갈래(옵션 이름 · 상품 칸 정확 일치) 그대로
+  const unitNames = new Set((opts || []).filter(o => o && String(o.unit_kind || 'option') === 'product').map(o => t(o.product_name || o.opt_key)).filter(Boolean));
+  const optionKeys = new Set((opts || []).filter(o => o && String(o.unit_kind || 'option') !== 'product').map(o => t(o.opt_key)).filter(Boolean));
   for (const [from, to] of map) {
+    if (!unitNames.has(t(to))) continue;
     const U = universe(work);
     if (U.length < 2) continue;                                   // 상품 1개 작업보드 — 주문이 상품을 보지 않는다
     const X = resolveProductLabel(from, U);
-    if (!X || t(X) === t(from)) continue;                         // 모름(종전) · 정확히 같은 표시 = 종전 갈래
+    if (!X || t(X) === t(from) || optionKeys.has(t(X))) continue;   // 모름(종전) · 정확히 같은 표시 = 종전 갈래 · 옵션 이름 표기 = 옵션 줄
     if (resolveProductLabel(to, U) === X) continue;               // 바꾸지 않아도 새 이름이 그 줄로 짝지어진다
-    const mine = work.filter(r => !t(r.option_text).includes(' · ') && planOf(r) === t(X));
+    const mine = work.filter(r => !t(r.option_text).includes(' · ') && !optionKeys.has(t(r.option_text)) && planOf(r) === t(X));
     if (!mine.length) continue;
     const others = [...campNames.filter(n => n !== t(to) && n !== t(from)), ...U.filter(l => l !== t(X))];
     const contains = others.some(o => nz(o) && nz(to) && (nz(o).includes(nz(to)) || nz(to).includes(nz(o))));
     if (contains || mine.some(r => overlays.has(String(r.id)))) { skipped += mine.length; continue; }
     const draft = new Map(mine.map(r => [String(r.id), {
       ...r, option_text: t(r.option_text) === t(X) ? to : r.option_text,
-      row_json: relabelRowCells(r.row_json, { optFrom: [X], optTo: to, productFrom: [X], productTo: to }) }]));
+      row_json: relabelRowCells(r.row_json, { optFrom: [X], optTo: to, productFrom: [X, from], productTo: to }) }]));
     const next = work.map(r => draft.get(String(r.id)) || r);
     // 되읽기 — 새 이름은 바꾼 줄 표기로 정확히, 다른 공고 상품의 짝은 그대로여야 한다
     const U2 = universe(next);

@@ -339,6 +339,22 @@ const v2c = (p, o1) => ({ ot: `${p} · ${o1}`, rj: { 상품: p, '1차옵션': o1
     assert.equal(ec['1.참치 특가'], 1, '새 이름 바로 구매 = 새 이름 상품으로 센다 ' + JSON.stringify(ec));
   });
 
+  await ok('[13] 순수 — 상품 단위 갈래는 상품 단위 선택지만 · 옵션 이름 표기 줄(「1kg」)은 상품 이름이 그것을 품어도 손대지 않는다', async () => {
+    const rows = [{ id: 'a', option_text: '1kg', row_json: { 상품: '고등어', 옵션: '1kg' } }, { id: 'b', option_text: '기본', row_json: { 상품: '고등어 2팩 세트', 옵션: '기본' } }];
+    const opts = [{ opt_key: '1kg', product_name: '1kg 고등어 특가', unit_kind: 'option' }, { opt_key: '기본', product_name: '고등어 2팩 세트', unit_kind: 'option' }];
+    const p = ren.planProductUnitRenames(rows, new Map([['1kg 고등어', '1kg 고등어 특가']]), opts);
+    assert.equal(p.changes.size, 0, '옵션 단위 상품 이름 바꾸기 = 이 갈래 무접촉 ' + JSON.stringify([...p.changes]));
+    const opts2 = [{ opt_key: '1kg', product_name: '1kg', unit_kind: 'option' }, { opt_key: '1kg 고등어 특가', product_name: '1kg 고등어 특가', unit_kind: 'product' }];
+    const p2 = ren.planProductUnitRenames(rows, new Map([['1kg 고등어', '1kg 고등어 특가']]), opts2);
+    assert.equal(p2.changes.size, 0, '옵션 이름 표기 줄은 상품 단위 짝 대상이 아니다 ' + JSON.stringify([...p2.changes]));
+    // 상품 칸이 공고 옛 이름 그대로인 짧은 표시 줄 = 상품 칸도 새 이름
+    const rows3 = [{ id: 'c', option_text: '고등어', row_json: { 상품: '1.고등어 특가' } }, { id: 'd', option_text: '고등어 2팩 세트', row_json: { 상품: '고등어 2팩 세트' } }];
+    const opts3 = [{ opt_key: '1.참치 특가', product_name: '1.참치 특가', unit_kind: 'product' }, { opt_key: '2.고등어 2팩 세트', product_name: '2.고등어 2팩 세트', unit_kind: 'product' }];
+    const p3 = ren.planProductUnitRenames(rows3, new Map([['1.고등어 특가', '1.참치 특가']]), opts3);
+    assert.deepEqual(p3.changes.get('c'), { option_text: '1.참치 특가', row_json: { 상품: '1.참치 특가' } });
+    assert.ok(!p3.changes.has('d'));
+  });
+
   // ── 순수·정적 ──
   await ok('[11] 정적 — 단일 출처(주문 줄 고르기 stagedSlotRows·resolveProductLabel · 칸 규칙 relabelRowCells) · 호출처 3곳 · 끄는 스위치', async () => {
     const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'campaignOptionRename.service.js'), 'utf8');
