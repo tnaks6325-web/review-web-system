@@ -397,7 +397,7 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
 //   (사후에 교체요청 → 리뷰어 재제출은 왕복 비용이 커서 실무에서 가장 번거롭다)
 // ★ 현재 리뷰어 화면은 X-Reviewer-Token을 보내며, 중복 차단 신원은 검증된 세션에서만 읽는다.
 //   같은 이미지는 Gemini 해시 캐시로 상각되고 남용은 reviewPrecheckLimiter 로 막는다
-//   (결정 404 — 업로드와 통을 나누고 검증된 리뷰어는 리뷰어별로 센다 · 주소별 상한 유지).
+//   (결정 405 — 업로드와 통을 나누고 검증된 리뷰어는 리뷰어별로 센다 · 주소별 상한 유지).
 // Body: { base64, mimeType, sheetId, tabName, slotKey }
 // ═══════════════════════════════════════════════════════════
 router.post('/review-precheck', reviewPrecheckLimiter, async (req, res) => {
@@ -495,7 +495,7 @@ router.post('/review-precheck', reviewPrecheckLimiter, async (req, res) => {
 //   { sheetId, tabName, reviewerName, campaignName, optionFolderName,
 //     files: [{ data: base64, mimeType, name? }] }
 // ═══════════════════════════════════════════════════════════
-// ★ 결정 404: 1차 필터와 다른 통(reviewUploadLimiter) — 사진을 한 장씩 넣은 확인 요청이 업로드를 429 로 막지 않게.
+// ★ 결정 405: 1차 필터와 다른 통(reviewUploadLimiter) — 사진을 한 장씩 넣은 확인 요청이 업로드를 429 로 막지 않게.
 router.post('/review-upload', reviewUploadLimiter, async (req, res, next) => {
   try {
     const { sheetId, tabName, reviewerName, campaignName, optionFolderName, files, gid, rowIndex, submitCol, memo, slotKey } = req.body;
@@ -612,11 +612,15 @@ router.post('/review-upload', reviewUploadLimiter, async (req, res, next) => {
     /* ★★ Q&A체험단(결정 321) — 결과물이 **상품 문의 화면**이라, 리뷰 칸에 "리뷰 화면"을 기대하는 업로드 검수가
        정상 제출마다 형식 불일치 경고·관리자 알림·자동 이동을 만든다. 리뷰 칸의 업로드 검수만 건너뛴다
        (같은 파일 검사는 2차 검수가 그대로 본다). 판정 실패·미등록 탭 = false = 종전 동작. */
+    // ★★ 네이버예약리뷰(결정 404)도 같은 격리 — 리뷰 칸에 올라오는 것은 매장 방문 리뷰라 상품 리뷰 화면 판정이 성립하지 않는다(4단계 전까지).
     let _isQnaUpload = false;
+    let _isBookingUpload = false;
     try {
-      _isQnaUpload = require('../utils/workKind').isQnaKind(
-        await require('../services/workKindContext.service').workKindForTab({ sheetId, tabName }));
-    } catch (_) { _isQnaUpload = false; }
+      const _wk = require('../utils/workKind');
+      const _wkUp = await require('../services/workKindContext.service').workKindForTab({ sheetId, tabName });
+      _isQnaUpload = _wk.isQnaKind(_wkUp);
+      _isBookingUpload = _wk.isBookingKind(_wkUp);
+    } catch (_) { _isQnaUpload = false; _isBookingUpload = false; }
 
     let slotLabel = null;
     if (slot !== 'review') {
@@ -807,7 +811,7 @@ router.post('/review-upload', reviewUploadLimiter, async (req, res, next) => {
         // ── 3단계 AI 검수: 이 슬롯에 맞는 형식인지 판별(fail-open — 업로드는 이미 끝났고 막지 않는다) ──
         let verdict = null;
         try {
-          if (!(_isQnaUpload && _slotRole === 'review')) verdict = await verifyCapture({
+          if (!((_isQnaUpload || _isBookingUpload) && _slotRole === 'review')) verdict = await verifyCapture({
             base64: file.data, mimeType: file.mimeType || 'image/jpeg',
             // ★ 행 우선 유효 리뷰타입 — 혼합 탭의 구매확정 행은 구매확정 화면이 정상 제출이다.
             slotKey: _slotRole, companyBusinessNo: _companyBizNo, reviewType: _effReviewType,

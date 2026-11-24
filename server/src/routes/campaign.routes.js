@@ -45,7 +45,7 @@ const { deliveryBaseType } = require('../utils/deliveryType');
 const { normalizeDeliveryReviewFeeMix, validateDeliveryReviewFeeMix, DELIVERY_MIX_KEYS } = require('../utils/deliveryReviewFee');
 const { normalizeRecruitBadges } = require('../utils/recruitBadges');
 // ★ 099: 체험단 종류(리뷰/블로그) 저장 정규화 — 판정 단일 출처. 사본을 만들지 않는다.
-const { workKindForStore, resolveWorkKind, isBlogKind, isQnaKind } = require('../utils/workKind');
+const { workKindForStore, resolveWorkKind, isBlogKind, isQnaKind, isWorkKindReady, workKindNotReadyBody } = require('../utils/workKind');
 const { weekendPublicationState } = require('../services/campaignWeekend.service');
 // ★ 101 블로그URL — 형식 판정은 포스팅URL 과 **같은 단일 출처**(둘 다 "사람이 붙여넣는 주소").
 //   라벨만 다르다: 블로그URL = 블로그 주소 / 포스팅URL = 쓴 글 주소.
@@ -2264,6 +2264,13 @@ async function _applyParticipation(req, res, next, campPre) {
         tabKind: await tabWorkKind({ sheetId: campPre.linked_sheet_id, tabName: campPre.linked_tab_name }),
       });
     } catch (_) { _kind = null; }
+    /* ★★ 결정 404 안전벨트 — 아직 준비 안 된 종류(네이버예약리뷰) 공고에는 신청을 받지 않는다(잠금·자리 잡기 **전**).
+       1단계엔 그런 공고가 생길 수 없지만(저장 입구가 거절), 생기면 상품 리뷰 홀드·구매양식으로 흘러가는 것을 막는다.
+       판정 실패(null)는 종전 동작 그대로. */
+    if (!isWorkKindReady(_kind)) {
+      return res.status(409).json({ ok: false, reason: 'work_kind_not_ready',
+        error: '이 공고는 아직 참여를 받을 준비가 안 됐어요. 운영자에게 문의해주세요.' });
+    }
     if (isQnaKind(_kind)) {
       qnaApply = true;
       // ★ 23:50(KST) 부터 새 신청을 받지 않는다 — 자정에 그날 자리가 끝나 10분 안에 못 쓰고 풀리는 자리를 만들지 않는다(확정 7).
@@ -3604,6 +3611,8 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
     if (!title || !title.trim()) {
       return res.status(400).json({ ok: false, error: '공고 제목을 입력해주세요.' });
     }
+    // ★★ 결정 404(완화 금지) — 아직 준비 안 된 체험단 종류(네이버예약리뷰)로는 공고를 만들지 않는다(쓰기 전 거절 — 상품 리뷰 공고가 되지 않게).
+    if (!isWorkKindReady(work_kind)) return res.status(409).json(workKindNotReadyBody(work_kind));
     if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(String(start_date))) {
       return res.status(400).json({ ok: false, error: '시작일 형식이 올바르지 않습니다. (YYYY-MM-DD)' });
     }
@@ -4011,6 +4020,8 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       delivery_type_mix, delivery_review_fee_mix, recall_courier, recall_product,
     } = req.body;
 
+    // ★★ 결정 404(완화 금지) — 공고 종류를 아직 준비 안 된 종류(네이버예약리뷰)로 바꾸지 않는다(보냈을 때만 · 쓰기 전 거절).
+    if (work_kind !== undefined && work_kind !== null && !isWorkKindReady(work_kind)) return res.status(409).json(workKindNotReadyBody(work_kind));
     if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(String(start_date))) {
       return res.status(400).json({ ok: false, error: '시작일 형식이 올바르지 않습니다. (YYYY-MM-DD)' });
     }

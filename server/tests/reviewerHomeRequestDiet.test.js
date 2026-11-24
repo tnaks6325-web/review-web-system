@@ -79,7 +79,7 @@ function extractFn(src, name) {
     delete process.env.RL_TRUST_X_REAL_IP;
     const src = fs.readFileSync(path.join(__dirname, '../src/middleware/rateLimit.middleware.js'), 'utf8');
     const limiters = src.match(/= rateLimit\(\{/g).length;
-    // 결정 404: 리뷰 사진 두 통은 reviewImageIdentity(검증된 리뷰어 세션 = 리뷰어별 · 그 외 = 실제 사용자 주소)로 센다
+    // 결정 405: 리뷰 사진 두 통은 reviewImageIdentity(검증된 리뷰어 세션 = 리뷰어별 · 그 외 = 실제 사용자 주소)로 센다
     const keyed = (src.match(/keyGenerator: \(req\) => [^\n]*clientIp\(req\)|keyGenerator: \(req\) => rateIdentity|keyGenerator: \(req\) => `r[pu]:\$\{reviewImageIdentity\(req\)\.key\}`/g) || []).length;
     assert.ok(/if \(!id\) id = \{ verified: false, key: `i:\$\{clientIp\(req\)\}` \};/.test(src), '리뷰 사진 통의 신원이 없으면 실제 사용자 주소로 센다');
     assert.equal(keyed, limiters, '모든 제한기가 실제 사용자 주소(또는 사람별 신원)로 센다');
