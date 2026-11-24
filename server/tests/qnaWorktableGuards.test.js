@@ -55,6 +55,7 @@ const scope = require('../src/utils/sheetlessScope');
     const client = { query: async (sql, params) => {
       sqls.push(String(sql));
       if (/FROM qna_slots/.test(sql)) return { rows: isQna ? [{ q: true, x: 1 }] : [] };
+      if (/FROM booking_slots/.test(sql)) return { rows: [] };   // 예약 자리표 탭 아님(결정 407)
       if (/SELECT[\s\S]*FROM campaign_participants/.test(sql)) return { rows };
       if (/UPDATE campaign_participants/.test(sql)) return { rowCount: (params.length - 2) / 2 };
       throw new Error('unexpected sql ' + sql.slice(0, 40));
@@ -120,10 +121,14 @@ const scope = require('../src/utils/sheetlessScope');
   /* ── ⑤ 행 삭제 보충 ─────────────────────────────────────────── */
   console.log('\n⑤ 행 삭제 보충');
   const tb = S('src/services/trackB.service.js');
-  t('★ Q&A 탭: 지운 줄과 같은 날로 보충', /const finalDateLabel = _qnaTab \? removedRaw : \(planLabel \|\| lastSheetLabel \|\| removedRaw\);/.test(tb));
+  // 결정 407: 자리표 탭 = Q&A ∪ 예약리뷰(_slotTab = _qnaTab || _bookingTab) — Q&A 쪽 의미 불변(Q&A 탭이면 예약 판정은 돌지도 않는다)
+  t('★ Q&A 탭: 지운 줄과 같은 날로 보충', /const _slotTab = _qnaTab \|\| _bookingTab;/.test(tb)
+    && /const _bookingTab = !_qnaTab && /.test(tb)
+    && /const finalDateLabel = _slotTab \? removedRaw : \(planLabel \|\| lastSheetLabel \|\| removedRaw\);/.test(tb));
   t('★ 지운 줄이 자리표의 자리인지 같은 트랜잭션에서 본다', /const _qnaBound = _qnaTab && await require\('\.\/qnaSlots\.service'\)\.isBoundRow\(client, sheetId, tabName, row\.seq\);/.test(tb));
-  t('★ Q&A 탭: 자리 줄은 늘 보충 · 자리 없는 줄은 보충 안 함 / 리뷰 탭은 종전 규칙', /const shouldReplenish = _qnaTab \? _qnaBound : !\(boardTarget > 0 && boardAfterDelete >= boardTarget\);/.test(tb));
-  t('보충 자리 줄은 지운 줄의 진행일 칸 표기를 그대로 잇는다', /\(_qnaBound && row\.start_date\) \|\| finalDateLabel \|\| null/.test(tb));
+  t('★ Q&A 탭: 자리 줄은 늘 보충 · 자리 없는 줄은 보충 안 함 / 리뷰 탭은 종전 규칙', /const _slotBound = _qnaBound \|\| _bookingBound;/.test(tb)
+    && /const shouldReplenish = _slotTab \? _slotBound : !\(boardTarget > 0 && boardAfterDelete >= boardTarget\);/.test(tb));
+  t('보충 자리 줄은 지운 줄의 진행일 칸 표기를 그대로 잇는다', /\(_slotBound && row\.start_date\) \|\| finalDateLabel \|\| null/.test(tb));
   {
     const bl = [];
     const okc = { release() {}, query: async (sql) => { bl.push(sql); return /FROM qna_slots/.test(sql) ? { rows: [{ x: 1 }] } : { rows: [] }; } };
@@ -248,7 +253,7 @@ const scope = require('../src/utils/sheetlessScope');
     catch (e) { err = e; } finally { pool.query = origQ; scope.isSheetless = before; }
     t('★★ 줄 정리(중복 정리·짝 빈 줄 포함): 자리 줄이 섞이면 미리보기부터 거절', err && err.code === 'qna_slot_rows');
   }
-  t('주문 행 삭제: 자리 줄은 「줄 삭제」로 안내(409)', /code: 'qna_slot_row'/.test(S('src/services/workdeskOrderDelete.service.js')) && /out\.code === 'qna_slot_row' \? 409/.test(tbr));
+  t('주문 행 삭제: 자리 줄은 「줄 삭제」로 안내(409)', /code: 'qna_slot_row'/.test(S('src/services/workdeskOrderDelete.service.js')) && /out\.code === 'qna_slot_row' \|\| out\.code === 'booking_slot_row' \? 409/.test(tbr));
   t('구매일자 달력: 자리 줄의 진행일자는 못 바꾼다', /error: 'qna_slot_date_locked'/.test(tb));
   t('번호 없는 주문 옮기기: Q&A 탭은 거절하고 외부 wrapper가 되돌린다', /isQnaTab\(client, sheetId, tabName\)\) \{ return \{ ok: false, error: 'qna_slot_required' \}; \}/.test(tb)
     && /_runWorkdeskMutation\(input, client => assignUnslottedOrderToOpenSlotInTx\(client, input\)\)/.test(tb)

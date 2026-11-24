@@ -120,7 +120,7 @@ async function ensureCampaignWorktable({ campaignId, by = 'system' } = {}) {
        정원이 없거나 Q&A(날짜 자리표가 줄을 정한다)면 종전대로 0줄(주문이 들어올 때 이어붙인다).
        ★ fail-soft — 빈 줄 준비가 실패해도 작업표 생성(= 이 주문이 기록될 곳)은 살린다(SAVEPOINT · 종전 0줄 모양). */
     const recruitTotal = Number(c.recruit_total);
-    if (Number.isInteger(recruitTotal) && recruitTotal > 0 && !require('../utils/workKind').isQnaKind(c.work_kind)) {
+    if (Number.isInteger(recruitTotal) && recruitTotal > 0 && !require('../utils/workKind').isQnaKind(c.work_kind) && !require('../utils/workKind').isBookingKind(c.work_kind)) {
       await client.query('SAVEPOINT campaign_worktable_slots');
       try {
         await require('./linkedRecruitQuota.service').syncWorktableSlotsInTx(client,

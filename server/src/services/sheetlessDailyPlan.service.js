@@ -54,6 +54,10 @@ async function relayWorktableToProjection({ client, sheetId, tabName, days = [],
   if (await require('./qnaSlots.service').isQnaTab(client, sheetId, tabName)) {
     return { ok: true, skipped: true, reason: 'qna_slot_calendar', moved: 0 };
   }
+  /* ★★ 네이버예약리뷰(결정 407) — 줄 날짜 = 업체가 정한 이용일. 옮기면 업체가 받지 않는 날로 예약이 잡힌다(판정 실패도 손대지 않음). */
+  if (await require('./bookingSlots.service').isBookingTab(client, sheetId, tabName)) {
+    return { ok: true, skipped: true, reason: 'booking_slot_calendar', moved: 0 };
+  }
   const { parseDateColumn } = require('../utils/koreanDate');
   const anchor = String(today || '').match(/^(\d{4})-(\d{2})/);
   const parseOpts = { fallbackAnchor: anchor ? { y: Number(anchor[1]), m: Number(anchor[2]) } : undefined };

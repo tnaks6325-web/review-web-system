@@ -2772,6 +2772,13 @@ _handlers.orderAdminAccept = async (req, res, next) => {
             if (!qnaRepair.ok) throw new Error(`Q&A 자리표 복구 실패: ${qnaRepair.error}`);
             sheetlessResult.qnaRepair = qnaRepair;
           }
+          // ★ 네이버예약리뷰(결정 407) — 같은 규율: 자리표가 비어 있으면 줄과 같을 때만 되살린다. 못 살리면 던진다.
+          if (require('../utils/workKind').normalizeWorkKind(o.work_kind) === 'booking') {
+            const bookingRepair = await require('../services/bookingSlots.service')
+              .repairCalendarIfMissing({ workOrder: o, sheetId, tabName, by: req.admin?.name || 'admin' });
+            if (!bookingRepair.ok) throw new Error(`예약 자리표 복구 실패: ${bookingRepair.error}`);
+            sheetlessResult.bookingRepair = bookingRepair;
+          }
         }
       } catch (slErr) {
         /* ★★ Q&A(결정 321) — 자리표 없이 접수를 끝내면(상태 전이) [접수하기] 버튼이 사라져 다시 깔 길이 없다(막다른 길).
@@ -2781,6 +2788,12 @@ _handlers.orderAdminAccept = async (req, res, next) => {
           logger.error(`[order/accept] ${id} Q&A 자리표 저장 실패 — 접수를 끝내지 않음(다시 접수로 복구): ${slErr.message}`);
           return res.status(409).json({ ok: false, code: 'qna_calendar_failed', work_order_id: o.id,
             error: `Q&A 날짜별 자리표를 만들지 못해 접수를 끝내지 않았습니다 — [접수하기]를 다시 눌러 주세요. (${String(slErr.message || '').slice(0, 160)})` });
+        }
+        // ★★ 네이버예약리뷰(결정 407) — Q&A 와 같은 이유로 상태를 바꾸기 전에 멈춘다(자리표 없는 예약 작업 = 날짜 고르기가 막힌다).
+        if (require('../utils/workKind').normalizeWorkKind(o.work_kind) === 'booking') {
+          logger.error(`[order/accept] ${id} 예약 자리표 저장 실패 — 접수를 끝내지 않음(다시 접수로 복구): ${slErr.message}`);
+          return res.status(409).json({ ok: false, code: 'booking_calendar_failed', work_order_id: o.id,
+            error: `네이버예약리뷰 날짜별 자리표를 만들지 못해 접수를 끝내지 않았습니다 — [접수하기]를 다시 눌러 주세요. (${String(slErr.message || '').slice(0, 160)})` });
         }
         // ★ 여기 실패는 "등록은 됐는데 아무 데도 안 보이는" 상태가 된다 → 조용히 넘기지 않는다.
         indexBuilt = false;

@@ -37,6 +37,10 @@ async function addApplicantRow({ sheetId, tabName, applicant, by = 'campaign-app
   if (await require('./qnaSlots.service').isQnaTab(db, sheetId, tabName)) {
     throw new Error('Q&A 작업표에는 신청자 줄을 덧붙이지 않습니다 — 날짜별 자리에 묶어야 합니다.');
   }
+  // 네이버예약리뷰(결정 407)도 같다 — 줄 = 업체가 정한 날짜 자리(신청은 3단계에서 자리에 바로 묶는다).
+  if (await require('./bookingSlots.service').isBookingTab(db, sheetId, tabName)) {
+    throw new Error('예약리뷰 작업표에는 신청자 줄을 덧붙이지 않습니다 — 날짜별 자리에 묶어야 합니다.');
+  }
 
   const { rows: tc } = await db.query(
     `SELECT tab_gid, campaign_name FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`, [sheetId, tabName]);

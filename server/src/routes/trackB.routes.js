@@ -1506,7 +1506,7 @@ router.post('/workdesk/order-delete', authMiddleware, internalMiddleware, async 
     if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
     if (confirm !== true) return res.status(400).json({ ok: false, code: 'need_confirm', error: '삭제 영향 확인 후 다시 실행해 주세요.' });
     const out = await svc.deleteWorkdeskOrderRow({ sheetId, tabName, rowId, by: _by(req) });
-    res.status(out.ok ? 200 : (out.code === 'concurrent_cancel' || out.code === 'row_changed' || out.code === 'qna_slot_row' ? 409 : 404)).json(out);
+    res.status(out.ok ? 200 : (out.code === 'concurrent_cancel' || out.code === 'row_changed' || out.code === 'qna_slot_row' || out.code === 'booking_slot_row' ? 409 : 404)).json(out);
   } catch (err) { next(err); }
 });
 // 번호 없는 주문행은 목표 인원 밖의 추가 참여자로 남기지 않고, 작업오더 목표 안의 빈 슬롯으로만 이동한다.
@@ -1922,6 +1922,7 @@ function _cdpFail(res, err) {
     // ★ 결정 228: 순차진행 일정표 공고의 날짜별 인원 — 늘리기·상품 없는 날 막음 / 줄이기는 두 번 확인 뒤(confirmReduce)
     sequential_over: 422, sequential_no_product: 422, sequential_reduce_needs_confirm: 409,
     recruit_quota_qna_locked: 409,   // 결정 321: Q&A 자리표 탭은 접수 뒤 건수를 바꾸지 않는다(일정 끝 추가 모집으로)
+    recruit_quota_booking_locked: 409,   // 결정 407: 예약리뷰 날짜별 인원은 업체가 정한 값 — 접수 뒤 건수를 바꾸지 않는다
     // ★ 결정 379: Q&A 공고 — 날짜별 인원 저장 막음 · 조절 창 빈 자리 옮기기(qnaSlots.moveQnaSlots)
     qna_plan_set: 409,
     qna_move_stale: 409, qna_move_bad: 400, qna_move_empty: 400, qna_move_past: 422, qna_move_closed_day: 422,
@@ -2144,6 +2145,10 @@ router.post('/campaigns/:id/rounds', authMiddleware, internalMiddleware, async (
     if (await require('../services/qnaSlots.service').isQnaCampaign(campaignId)) {
       return res.status(409).json({ ok: false, code: 'rounds_qna_locked', error: 'Q&A 작업은 차수로 인원을 바꾸지 않습니다 — 일정이 끝날 때 「추가 모집」으로 늘려 주세요.' });
     }
+    // ★ 결정 407: 예약리뷰도 같다 — 날짜별 인원은 업체가 정한 값이다(차수로 늘리면 날짜 없는 줄이 생긴다). 판정 실패 = 막음.
+    if (await require('../services/bookingSlots.service').isBookingCampaign(campaignId)) {
+      return res.status(409).json({ ok: false, code: 'rounds_booking_locked', error: '네이버예약리뷰 작업은 차수로 인원을 바꾸지 않습니다 — 날짜별 인원은 업체가 정한 값입니다.' });
+    }
     const out = await addRound(campaignId, req.body, _by(req));
     /* ★ 7단계 🔴2(2026-10-20): 차수로 총 인원이 바뀌면 관리자 공고 창과 같은 한 곳(syncCampaignRecruitTotal)으로 연결 작업오더의 총모집과
        작업표 줄 수도 맞춘다 — 종전에는 공고 총량만 바뀌고 작업오더·작업표 줄은 옛 인원으로 남았다. 차수는 이미 저장됐으므로 실패는 알리기만 한다. */
@@ -2170,6 +2175,10 @@ router.delete('/campaigns/:id/rounds', authMiddleware, internalMiddleware, async
     // ★ 결정 321: Q&A 자리표 탭은 차수로 인원을 바꾸지 않는다 — 날짜별 자리(공개글 날)가 이미 깔렸다. 판정 실패 = 막음.
     if (await require('../services/qnaSlots.service').isQnaCampaign(campaignId)) {
       return res.status(409).json({ ok: false, code: 'rounds_qna_locked', error: 'Q&A 작업은 차수로 인원을 바꾸지 않습니다 — 일정이 끝날 때 「추가 모집」으로 늘려 주세요.' });
+    }
+    // ★ 결정 407: 예약리뷰도 같다 — 날짜별 인원은 업체가 정한 값이다(차수로 늘리면 날짜 없는 줄이 생긴다). 판정 실패 = 막음.
+    if (await require('../services/bookingSlots.service').isBookingCampaign(campaignId)) {
+      return res.status(409).json({ ok: false, code: 'rounds_booking_locked', error: '네이버예약리뷰 작업은 차수로 인원을 바꾸지 않습니다 — 날짜별 인원은 업체가 정한 값입니다.' });
     }
     const out = await removeLastRound(campaignId, _by(req));
     /* ★ 7단계 🔴2(2026-10-20): 차수로 총 인원이 바뀌면 관리자 공고 창과 같은 한 곳(syncCampaignRecruitTotal)으로 연결 작업오더의 총모집과
