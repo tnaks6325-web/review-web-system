@@ -3888,11 +3888,12 @@ function renderFeeSchedule() {
 /* ═══════════════════════════════════════
    모달 열기/닫기
 ═══════════════════════════════════════ */
-/** 작업오더 프리필의 체험단 종류 → 발행 폼 값. blog·qna 만 그대로 두고 나머지는 ''(= 리뷰, 종전 동작).
-   ★ Q&A 를 여기서 지우면 Q&A 오더로 발행한 공고가 리뷰 공고로 저장된다(구매양식·리뷰 검수가 붙는다). */
+/** 작업오더 프리필의 체험단 종류 → 발행 폼 값. blog·qna·booking 만 그대로 두고 나머지는 ''(= 리뷰, 종전 동작).
+   ★ Q&A 를 여기서 지우면 Q&A 오더로 발행한 공고가 리뷰 공고로 저장된다(구매양식·리뷰 검수가 붙는다).
+   ★ 네이버예약리뷰(결정 404)도 지우지 않는다 — 지우면 리뷰 공고로 조용히 저장되고, 지키면 서버가 「아직 준비 중」으로 거절한다. */
 function _rfPrefillWorkKind(raw) {
   const v = String(raw || "").trim();
-  return (v === "blog" || v === "qna") ? v : "";
+  return (v === "blog" || v === "qna" || v === "booking") ? v : "";
 }
 
 /* ═══ 127: 발행 모달 체험단 종류(work_kind) UI ═══
@@ -3903,7 +3904,7 @@ function _rfPrefillWorkKind(raw) {
 function _rfApplyWorkKindUi() {
   const _kind = document.getElementById("rf_work_kind")?.value || "";
   const isBlog = _kind === "blog";
-  const noReviewType = isBlog || _kind === "qna";   // Q&A체험단도 리뷰타입이 없다(결정 321)
+  const noReviewType = isBlog || _kind === "qna" || _kind === "booking";   // Q&A체험단(결정 321)·네이버예약리뷰(결정 404)도 리뷰타입이 없다
   // 시안 3차: 맨 위 체험단 종류 탭(보기 전용 — 체험단 종류는 리뷰오더에서 정하고 접수 뒤 바꾸지 않는다)
   document.querySelectorAll("#rf_kind_tabs [data-kind]").forEach(t => t.classList.toggle("on", t.dataset.kind === (_kind || "review")));   // 모르는 종류는 아무 탭도 켜지 않는다 — 리뷰로 보이면 안 된다(Q&A 탭은 결정 321 3단계에서 추가)
   // 리뷰타입 UI(두 레이아웃 변형 모두) — 카드형은 .rf-hrow, 행형은 .rf-review-type-row
@@ -6382,8 +6383,8 @@ async function saveRecruitPostImpl() {
     const _wkEl = document.getElementById("rf_work_kind");
     if (_wkEl) {
       payload.work_kind = _wkEl.value || "";
-      if (payload.work_kind === "blog" || payload.work_kind === "qna") {
-        payload.review_type = "";   // 별도 축 — 블로그·Q&A 공고에 리뷰타입을 싣지 않는다
+      if (payload.work_kind === "blog" || payload.work_kind === "qna" || payload.work_kind === "booking") {
+        payload.review_type = "";   // 별도 축 — 블로그·Q&A·네이버예약리뷰 공고에 리뷰타입을 싣지 않는다
         payload.review_type_mix = [];
         // ★ 일건수 정규화는 아래 참여형 블록이 payload.daily_limit 을 채운 **뒤**에 한다(순서 함정)
       }
