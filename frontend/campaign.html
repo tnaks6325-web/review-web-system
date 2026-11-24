@@ -47,6 +47,22 @@
     .qna-file{display:block;width:100%;box-sizing:border-box;border:1.5px dashed var(--border);border-radius:10px;padding:12px;text-align:center;font-size:.86rem;color:var(--t2);cursor:pointer;background:#FAFBFD;margin-bottom:10px}
     .qna-file img{display:block;max-width:100%;max-height:260px;margin:0 auto 6px;border-radius:8px}
     .qna-err{font-size:.8rem;color:#B42318;margin-top:8px;line-height:1.5}
+    /* 📅 결정 408 — 네이버예약리뷰(기존 cardbx·qna 칩 idiom 그대로 · 새 색 없음) */
+    .bk-place{font-size:.95rem;font-weight:800;color:var(--t1)}
+    .bk-addr{font-size:.8rem;color:var(--t2);margin-top:2px;word-break:keep-all}
+    .bk-link{display:inline-block;margin-top:8px;font-size:.88rem;font-weight:800;color:var(--p-dark);text-decoration:underline;text-underline-offset:3px}
+    .bk-pay{margin-top:10px;font-size:.82rem;color:var(--t2);line-height:1.55}
+    .bk-pay b{color:var(--t1)}
+    .bk-dates{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+    .bk-date{border:1.5px solid var(--border);border-radius:10px;background:#fff;padding:8px 4px;text-align:center;cursor:pointer;font-family:inherit;color:var(--t1)}
+    .bk-date .d{display:block;font-size:.86rem;font-weight:800}
+    .bk-date .n{display:block;font-size:.7rem;color:var(--t3);margin-top:2px}
+    .bk-date.on{border-color:var(--p);background:var(--p-light);color:var(--p-dark)}
+    .bk-date.on .d::before{content:'✓ '}
+    .bk-in{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+    .bk-in label{flex:0 0 72px;font-size:.8rem;font-weight:700;color:var(--t2)}
+    .bk-in input{flex:1;min-width:0;box-sizing:border-box;border:1.5px solid var(--border);border-radius:10px;padding:10px 11px;font-size:.95rem;font-family:inherit}
+    .bk-done{font-size:.84rem;color:#0ca678;font-weight:800;margin-bottom:8px}
     .wd-body{font-size:.88rem;color:var(--t1);white-space:pre-wrap;word-break:break-word;line-height:1.65}
     .wd-body img{max-width:100%;border-radius:10px;margin:6px 0}
     .lockcard{text-align:center;padding:26px 14px}
@@ -199,12 +215,14 @@
   <!-- 참여 전 -->
   <div id="vPre" style="display:none">
     <div class="sec"><div id="preCard"></div>
+      <!-- 📅 결정 408: 네이버예약리뷰 — 매장 안내 + 방문할 날짜 고르기(예약 공고에서만 보임) -->
+      <div class="cardbx" id="bkPreBox" style="display:none;border-color:var(--p)"></div>
       <div class="cardbx" id="preOptionsBox" style="display:none">
         <div class="wd-tt">🧩 상품 옵션 · 남은 자리</div>
         <div id="preOptions"></div>
         <div class="optnote">참여할 때 옵션을 선택해요. 금액 등 상세는 참여 후 확인할 수 있어요.</div>
       </div>
-      <div class="cardbx lockcard">
+      <div class="cardbx lockcard" id="preLockBox">
         <div class="e">🔒</div><div class="m">작업내용</div>
         <div class="s" id="preLockText">상품·옵션·결제금액, 유입가이드, 구매양식은<br/>참여 후에 확인할 수 있어요.</div>
       </div>
@@ -259,6 +277,11 @@
         <div class="wd-tt" style="color:var(--p-dark)">💬 오늘 남길 문의 — 문의를 등록한 뒤 캡처를 올리세요</div>
         <div id="qnaBody"></div>
       </div>
+      <!-- 📅 결정 408: 네이버예약리뷰 — 구매양식 대신 예약내역 제출 → 방문 뒤 리뷰 캡처 (예약 공고에서만 보임) -->
+      <div class="cardbx" id="bookingBox" style="display:none;border-color:var(--p)">
+        <div class="wd-tt" style="color:var(--p-dark)" id="bookingTitle">📅 예약하고 예약내역을 제출하세요</div>
+        <div id="bookingBody"></div>
+      </div>
       <div class="cardbx" id="orderBox" style="border-color:var(--p)">
         <div class="wd-tt" style="color:var(--p-dark)">🧾 구매양식 — 구매를 마친 뒤 여기서 바로 제출하세요</div>
         <div class="pv-note" id="pvFormNote" style="display:none">이 공고에는 <b>연결된 작업시트 탭이 없어</b> 리뷰어에게도 구매양식이 표시되지 않습니다.<br/>공고 수정에서 작업시트 탭을 연결해주세요.</div>
@@ -268,7 +291,7 @@
       </div>
       <!-- 👥 063 2단계: 타계정으로 한 건 더 참여(타계정 가능 공고 + 참여 가능한 명의 있을 때만 노출) -->
       <button class="btn" id="addSubBtn" style="margin-top:2px;display:none;background:linear-gradient(135deg,#7C3AED,#6D28D9)" onclick="onAddSubJoin()">＋ 타계정으로 추가참여하기</button>
-      <button class="btn ghost" style="margin-top:2px" onclick="onCancel()">참여 취소</button>
+      <button class="btn ghost" id="joinedCancelBtn" style="margin-top:2px" onclick="onCancel()">참여 취소</button>
       <div class="muted" id="joinedFootNote" style="text-align:center;margin-top:6px">구매양식을 제출하지 않았다면 오늘 다시 참여할 수 있어요.</div>
     </div>
   </div>
@@ -826,12 +849,17 @@ function renderPre(){
     const b = pc.querySelector('.pbtn'); if(b) b.style.display='none'; }
   const ttl = holdTtlText();
   // 💬 321: Q&A 는 구매가 없다 — 신청하면 오늘 자리가 정해지고 1시간(그날 자정 중 빠른 쪽) 안에 캡처 제출
-  $('preNotice').textContent = isQnaCampaign()
+  $('preNotice').textContent = isBookingCampaign()
+    ? '방문할 날짜를 고르고 참여하면 그 날 자리가 바로 잡혀요. ' + (c.cutoffAt ? '늦어도 ' + CampCards._fmtHM(c.closesAt) + '까지' : ttl + ' 안에') +
+      ' 네이버 예약을 마치고 예약번호와 예약내역 캡처를 제출해야 해요. 방문 뒤에는 리뷰 캡처를 올려 주세요.'
+    : isQnaCampaign()
     ? '참여하면 오늘 남길 문의가 바로 정해져요. 1시간 안에(밤 12시를 넘기지 않게) 상품 페이지에 문의를 등록하고 캡처를 제출해야 해요. 밤 11시 50분부터는 새로 참여할 수 없어요.\n' +
       '이 캠페인은 상품을 사지 않아요. 문의를 남기고 캡처를 내면 참여비를 받아요.'
     : '지금 참여하면 ' + (c.cutoffAt ? '늦어도 ' + CampCards._fmtHM(c.closesAt) + '까지' : ttl + ' 안에') +
     ' 구매와 구매양식 제출까지 완료해야 해요. 시간이 지나 자동 취소돼도 구매양식을 제출하지 않았다면 다시 참여할 수 있어요.\n' +
     '이 캠페인은 상품을 직접 구매(선결제)한 뒤 리뷰비와 함께 환급받는 방식이에요.';
+  if($('preLockBox')) $('preLockBox').style.display = isBookingCampaign() ? 'none' : '';   // 📅 408: 예약 공고는 위 매장 안내가 대신한다(세로 길이 줄이기)
+  renderBookingPre();
   if($('preLockText')) $('preLockText').innerHTML = isQnaCampaign()
     ? '남길 문의(공개 문구 또는 비밀글)와 캡처 제출 창은<br/>참여 후에 확인할 수 있어요.'
     : '상품·옵션·결제금액, 유입가이드, 구매양식은<br/>참여 후에 확인할 수 있어요.';
@@ -861,6 +889,8 @@ function renderPre(){
   if(PREVIEW && _pvForceOpen){ jb.disabled = false; jb.textContent = '참여하기'; $('preFootNote').textContent = ''; }
   // ★ 참여 리뷰어 게이트(091) 사유 고지형 — 폴링·재렌더에도 잠금 유지(마감 위장형은 _gateMask가 state를 덮는다)
   if(_gateMask === 'policy'){ jb.disabled = true; jb.textContent = '참여 불가'; }
+  // 📅 결정 408: 예약 공고인데 날짜 정보를 못 받았으면 참여를 막는다(fail-closed — 날짜 없이 신청하면 서버도 거절한다)
+  if(isBookingCampaign() && !(c && c.booking) && !(PREVIEW && _pvForceOpen)){ jb.disabled = true; jb.textContent = '날짜 정보를 불러오지 못했어요'; }
   renderPreOptions();   // 옵션명+잔여(옵션 등록 캠페인만)
   renderPopNotice();    // ★ 064: 인기상품 참여 조건 안내(인기 공고만)
   _applyPopLock();      // ★ 참여권 0건이면 [참여하기] 잠금(모르면 잠그지 않는다 — 서버가 최종 권위)
@@ -1187,7 +1217,7 @@ function _optGroupEl(text){
 function renderPreOptions(){
   const opts = (_camp && _camp.options) || [];
   const box = $('preOptionsBox');
-  if(!opts.length){ box.style.display = 'none'; return; }
+  if(!opts.length || isBookingCampaign()){ box.style.display = 'none'; return; }   // 📅 408: 매장 하나 — 남은 자리는 날짜 칸이 말한다
   box.style.display = '';
   const wrap = $('preOptions'); wrap.innerHTML = '';
   _optListItems(opts).forEach(it => {
@@ -1361,7 +1391,7 @@ let _initialAcctSel = null;
    자리를 잡은 명의만 탭이 된다. 옵션·구매수량은 한 번만 골라 모두 같게(답 3A). */
 let _acctSelMany = [];      // 시트에서 체크한 명의들(화면 순서)
 let _initialAcctSels = null; // 옵션 고르기로 넘어갈 때 들고 가는 체크 목록(2개 이상일 때만)
-function _acctMultiPick(){ return multiEnabled() && !isBlogCampaign() && !isQnaCampaign(); }
+function _acctMultiPick(){ return multiEnabled() && !isBlogCampaign() && !isQnaCampaign() && !isBookingCampaign(); }   // 📅 408: 예약은 명의마다 날짜를 고른다
 const _acctBlocked = {};   // 서버가 거절한 명의 p8 → 사유문구(재선택 유도용, 세션 한정)
 const _chainLate = new Set(); // ★ 결정 356 — chain_after_close 로 잠근 명의(시트를 다시 열 때 새로 판정)
 let _repurchaseAccounts = {};
@@ -1834,6 +1864,7 @@ function _isBlogUrl(v){
 /** 이 공고가 블로그체험단인가 — 서버가 준 값 정확 일치(탭명·상품명 추측 금지) */
 function isBlogCampaign(){ return !!(_camp && _camp.work_kind === 'blog'); }
 function isQnaCampaign(){ return !!(_camp && _camp.work_kind === 'qna'); }
+function isBookingCampaign(){ return !!(_camp && _camp.work_kind === 'booking'); }   // 📅 결정 408
 let _blogUrl     = '';     // 이번 참여에 쓸 값(확인된 뒤에만 채운다)
 let _blogPending = null;   // 시트 확인 후 이어서 실행할 apply 인자 {optionKey, sub}
 function openBlogSheet(optionKey, sub, msg){
@@ -1861,6 +1892,8 @@ function onBlogSheetConfirm(){
 
 /* ═══ 참여하기 ═══ */
 async function onJoin(){
+  // 📅 결정 408: 예약 공고는 날짜부터(명의·옵션 창을 열기 전에 — 고르지 않고 진행하면 서버가 어차피 거절한다)
+  if(isBookingCampaign() && !_bkDate && !PREVIEW){ toast('방문할 날짜를 먼저 골라 주세요'); _bkScrollToDates(); return; }
   // 관리자 미리보기는 리뷰어 세션·서버 홀드 없이도 옵션 선택부터 가상 진행을 확인한다.
   if(!PREVIEW){
     const s = getSession();
@@ -1975,6 +2008,8 @@ async function _doApply(optionKey, sub, purchaseQty){
   hideOptSheet();
   // ★ 블로그체험단은 블로그 주소가 필수 — **홀드 생성 요청 전에** 받는다(자리 미점유 = 그날 참여권 미소각)
   if(isBlogCampaign() && !_isBlogUrl(_blogUrl)){ hideAcctSheet(); return openBlogSheet(optionKey, sub); }
+  // 📅 결정 408: 예약 공고는 방문할 날짜를 먼저 고른다(자리 미점유 상태에서 — 서버가 다시 판정)
+  if(isBookingCampaign() && !_bkDate){ hideAcctSheet(); toast('방문할 날짜를 먼저 골라 주세요'); _bkScrollToDates(); return; }
   // ★ 결정 289 ③-나: 단계가 있는 상품은 개수를 먼저 받는다(자리 미점유 상태에서)
   if(purchaseQty == null){ const tv = _qtyViewsFor(optionKey); if(tv && tv.length){ hideAcctSheet(); return openQtySheet({ mode:'join', optionKey, sub, views: tv }); } }
   const jb = $('joinBtn'); if(jb){ jb.disabled = true; jb.textContent = '확인 중…'; }
@@ -1982,6 +2017,7 @@ async function _doApply(optionKey, sub, purchaseQty){
     const body = { name: s.name, phone: s.phone8, phone8: s.phone8 };
     if(optionKey) body.optionKey = optionKey;
     if(isBlogCampaign() && _blogUrl) body.blogUrl = _blogUrl;
+    if(isBookingCampaign() && _bkDate) body.bookingDate = _bkDate;   // 📅 결정 408 — 고른 날짜(서버가 잠금 안에서 그날 자리를 묶는다)
     if(sub && sub.name && sub.phone){ body.subName = sub.name; body.subPhone = sub.phone; }
     if(purchaseQty) body.purchaseQty = purchaseQty;   // ★ 결정 289
     if(_chainOn()) body.sequential = true;   // ★ 결정 356 — 서버가 차례 줄을 만들 수 있다고 알릴 때만
@@ -2032,6 +2068,10 @@ async function _doApply(optionKey, sub, purchaseQty){
     if(_qtyRetryFromServer(j, { mode:'join', optionKey, sub, views: _qtyViewsFor(optionKey) })) return;
     if(j.reason === 'tier_unavailable'){ toast(j.error || '지금은 참여할 수 없어요'); await loadCampaign(); return; }
     if(j.reason === 'not_registered'){ toast('리뷰어 등록 후 참여할 수 있어요'); setTimeout(()=>_sheetLeave('/search.html#register'), 900); return; }
+    // 📅 결정 408: 고른 날짜가 막 찼거나 고를 수 없는 날 — 자리는 잡히지 않았다. 남은 자리를 다시 받아 날짜를 다시 고르게 한다.
+    if(['booking_date_full','booking_date_closed','booking_date_invalid','booking_date_required'].includes(j.reason)){
+      hideAcctSheet(); toast(_applyReasonText(j)); _bkDate = ''; await loadCampaign(); _bkScrollToDates(); return;
+    }
     // 옵션 관련 사유 → 옵션 상태 갱신 후 선택 시트 재오픈
     if(['option_required','option_invalid','option_soldout','option_today_done','option_unavailable','option_waiting','option_paused'].includes(j.reason)){
       toast(j.reason === 'option_required' ? '참여할 옵션을 선택해주세요'
@@ -2111,6 +2151,7 @@ async function _applyMany(optionKey, sels, purchaseQty){
         if(optionKey) body.optionKey = optionKey;
         if(sub){ body.subName = sub.name; body.subPhone = sub.phone; }
         if(purchaseQty) body.purchaseQty = purchaseQty;
+        if(isBookingCampaign() && _bkDate) body.bookingDate = _bkDate;   // 📅 408 — _doApply 와 같은 칸
         if(_chainOn()) body.sequential = true;   // ★ 결정 356 — _doApply 와 같은 칸
         r = await _campFetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/apply', {
           method:'POST', headers:{'Content-Type':'application/json', ..._getAuthHeaders()}, body: JSON.stringify(body)
@@ -2195,6 +2236,11 @@ const _APPLY_REASON_TEXT = {
   same_phone_other_name:'같은 번호의 다른 명의가 오늘 이미 참여했어요',
   popular_locked:'이 명의는 참여권이 없어요',   // 한 명의는 그 전에 참여권 안내 창으로 간다(_doApply) — 여러 명의 목록용
   chain_after_close:'오늘 마감 전에 이 명의 차례가 안 와요',   // ★ 결정 356
+  // 📅 결정 408 — 네이버예약리뷰 날짜(서버 _BOOKING_DATE_MSG 와 같은 뜻)
+  booking_date_required:'방문할 날짜를 먼저 골라 주세요',
+  booking_date_invalid:'날짜를 읽지 못했어요. 다시 골라 주세요',
+  booking_date_closed:'오늘·지난 날짜는 고를 수 없어요. 내일 이후 날짜를 골라 주세요',
+  booking_date_full:'그 날짜는 방금 자리가 모두 찼어요. 다른 날짜를 골라 주세요',
 };
 
 async function _doChangeOption(newKey, purchaseQty){
@@ -2374,6 +2420,13 @@ async function enterJoined(){
       return;
     }
     _qnaSlotRetry = 0;
+    // 📅 408: 예약 공고도 같다 — 자리 정보를 못 받았으면 완료 화면으로 넘기지 않고 다시 불러온다(리뷰 캡처를 안 낸 사람이 「완료」를 보면 기한을 놓친다)
+    if(isBookingCampaign() && j.application && j.application.status === 'submitted' && !j.bookingSlot){
+      _qnaSlotRetry++;
+      if(_qnaSlotRetry <= 6) setTimeout(enterJoined, _qnaSlotRetry <= 2 ? 3000 : 8000);
+      else toast('정보를 불러오지 못했어요. 잠시 후 새로고침해주세요 (참여는 유지돼요)');
+      return;
+    }
     if(_isDoneDetail(j)){ if(_tabDoneActive()) return; renderDone(); return; }
     _renderJoinedView(j, h);
   }catch(e){
@@ -2448,11 +2501,19 @@ function _renderJoinedView(j, h){
       cashReceipt: j.cashReceipt,   // 현영 탭 공고만 서버가 내려줌(발행 안내 카드)
       requiredDeliveryMemo: j.requiredDeliveryMemo,   // ★ 결정 386: 필수 배송메세지 카드(없으면 카드 없음)
       qty: j.qty,                   // ★ 결정 289: 고른 개수 단계 — 상품 카드 결제금액을 그 단계 금액으로(1개 금액과 둘로 갈리지 않게)
-    }, { showOption: false, apiBase: API_BASE_URL, showInflow: !j.qnaSlot, showProduct: !j.qnaSlot, layout: 'v18' });
+    }, { showOption: false, apiBase: API_BASE_URL, showInflow: !j.qnaSlot && !j.bookingSlot, showProduct: !j.qnaSlot && !j.bookingSlot, layout: 'v18' });
     // 💬 321: Q&A 공고는 구매양식(iframe) 대신 문의 카드 — 구매가 없다
     const _qna = !!j.qnaSlot;
+    const _bk = !!j.bookingSlot;   // 📅 408: 예약 공고는 구매양식 대신 예약 카드(예약내역 → 방문 뒤 리뷰 캡처)
     $('qnaBox').style.display = _qna ? '' : 'none';
-    $('orderBox').style.display = _qna ? 'none' : '';
+    $('bookingBox').style.display = _bk ? '' : 'none';
+    $('orderBox').style.display = (_qna || _bk) ? 'none' : '';
+    if(_bk){
+      renderBookingCard(j, h);
+      if(!PREVIEW) startPolling();
+      show('vJoined');
+      return;
+    }
     $('holdLabel').textContent = _qna ? '캡처 제출까지' : '구매양식 제출까지';
     $('joinedFootNote').textContent = _qna ? '캡처를 제출하지 않았다면 오늘 다시 참여할 수 있어요.' : '구매양식을 제출하지 않았다면 오늘 다시 참여할 수 있어요.';
     if(_qna){
@@ -2602,23 +2663,32 @@ async function copyQnaText(){
   }
 }
 function _qnaErr(msg){ const e = $('qnaErr'); if(!e) return; e.textContent = msg || ''; e.style.display = msg ? '' : 'none'; }
+/** 캡처 사진 한 장 → 긴 변 1600px · JPEG 85%(업로드 시간 단축 — 글자는 충분히 읽힌다).
+ *  Q&A 캡처·예약내역·예약 리뷰 캡처가 같이 쓰는 하나(결정 408 — 줄이는 규칙 사본 0). */
+function _campShrinkImage(file){
+  return new Promise((resolve, reject) => {
+    const img = new Image(); const fr = new FileReader();
+    fr.onload = () => { img.src = fr.result; };
+    img.onload = () => {
+      const k = Math.min(1, 1600 / Math.max(img.width, img.height));
+      const c = document.createElement('canvas'); c.width = Math.round(img.width*k); c.height = Math.round(img.height*k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      const url = c.toDataURL('image/jpeg', 0.85);
+      resolve({ url, b64: url.split(',')[1] || '' });
+    };
+    img.onerror = () => reject(new Error('사진을 읽지 못했어요. 다른 사진을 골라 주세요.'));
+    fr.onerror = img.onerror;
+    fr.readAsDataURL(file);
+  });
+}
 function onQnaFile(inp){
   const f = inp.files && inp.files[0];
   _qnaB64 = ''; _qnaErr('');
   if(!f) return;
-  const img = new Image(); const fr = new FileReader();
-  fr.onload = () => { img.src = fr.result; };
-  img.onload = () => {
-    // 긴 변 1600px · JPEG 85% 로 줄인다(업로드 시간 단축 — 글자는 충분히 읽힌다)
-    const k = Math.min(1, 1600 / Math.max(img.width, img.height));
-    const c = document.createElement('canvas'); c.width = Math.round(img.width*k); c.height = Math.round(img.height*k);
-    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-    const url = c.toDataURL('image/jpeg', 0.85);
-    _qnaB64 = url.split(',')[1] || '';
-    $('qnaFileTxt').innerHTML = '<img src="' + url + '" alt="선택한 캡처"/>다른 사진으로 바꾸려면 누르세요';
-  };
-  img.onerror = () => _qnaErr('사진을 읽지 못했어요. 다른 사진을 골라 주세요.');
-  fr.readAsDataURL(f);
+  _campShrinkImage(f).then(r => {
+    _qnaB64 = r.b64;
+    $('qnaFileTxt').innerHTML = '<img src="' + r.url + '" alt="선택한 캡처"/>다른 사진으로 바꾸려면 누르세요';
+  }, e => _qnaErr(e.message));
 }
 async function onQnaSubmit(){
   if(PREVIEW) return toast('미리보기에서는 제출되지 않아요');
@@ -2655,6 +2725,204 @@ async function onQnaSubmit(){
   }catch(e){
     _qnaErr(_campErrText(e, '제출에 실패했어요. 다시 눌러 주세요.'));
     btn.disabled = false; btn.textContent = '캡처 제출';
+  }
+}
+
+/* ═══ 📅 결정 408 — 네이버예약리뷰 ═══
+   참여 전: 매장 안내(이름·주소·돈 방식) + 방문할 날짜 고르기(고를 수 있고 남은 자리가 있는 날만 · 기본 내일부터).
+   참여 후: ① 예약내역 — [네이버 예약 열기] → 고른 날로 예약 → 예약번호(+ 환급형은 결제금액) + 예약내역 캡처 1장 →
+              /api/submit/booking(그 자리 줄 기록 · 신청 확정) → 캡처는 구매캡처 길(uploadOrderImage · 받은 captureSession)
+            ② 방문 뒤 리뷰 — 리뷰 캡처 1장 → 기존 리뷰 캡처 업로드(uploadReviewImage) → submitReview(같은 줄 · 사본 0).
+   ★ 리뷰 캡처까지 내야 완료(_isDoneDetail) — 예약내역만 낸 사람이 「완료」를 보고 리뷰 마감을 놓치지 않게.
+   ★ 링크는 색·밑줄·「열기」로 구분한다(대각선 화살표 아이콘 쓰지 않음 — 사용자 디자인 규칙). */
+let _bkDate = '';
+let _bkResvB64 = '', _bkReviewB64 = '';
+/** 고를 수 있는 날짜 — 서버가 준 날짜 중 bookable 이고 남은 자리(left)가 있는 날만(순서 그대로). */
+function _bkPickableDates(bk){
+  const list = (bk && Array.isArray(bk.dates)) ? bk.dates : [];
+  return list.filter(d => d && d.bookable === true && Number(d.left) > 0);
+}
+/** 「12/5 (토)」 — 작업보드 이용일자와 같은 표기. */
+function _bkShort(ymd){
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd||'')); if(!m) return String(ymd||'');
+  return (+m[2]) + '/' + (+m[3]) + ' (' + '일월화수목금토'[new Date(Date.UTC(+m[1], +m[2]-1, +m[3])).getUTCDay()] + ')';
+}
+function _bkPayLine(payMode){
+  return payMode === 'free'
+    ? '<span class="qna-chip">무료체험형</span> <b>현장에서 업체가 무료로 처리해요, 예약만 해 주세요.</b> 리뷰를 올리면 리뷰비를 드려요.'
+    : '<span class="qna-chip">환급형</span> 예약할 때 <b>직접 결제</b>하고, 리뷰를 올리면 <b>결제금액 + 리뷰비</b>를 돌려드려요.';
+}
+function _bkScrollToDates(){
+  const el = $('bkDates') || $('bkPreBox');
+  if(el && el.scrollIntoView) try{ el.scrollIntoView({ block:'center', behavior:'smooth' }); }catch(_){ el.scrollIntoView(); }
+}
+function renderBookingPre(){
+  const box = $('bkPreBox'); if(!box) return;
+  if(!isBookingCampaign()){ box.style.display = 'none'; return; }
+  box.style.display = '';
+  const bk = _camp && _camp.booking;
+  // ★ 예약 안내를 못 받았으면(조회 실패·구버전 서버) 날짜를 고를 수 없다 — 참여를 막고 사실대로 말한다(fail-closed)
+  if(!bk){
+    box.innerHTML = '<div class="wd-tt" style="color:var(--p-dark)">📅 네이버 예약 체험단</div><div class="qna-err">날짜 정보를 불러오지 못했어요. 잠시 후 새로고침해 주세요.</div>';
+    return;   // [참여하기] 잠금은 renderPre 끝에서(버튼 상태를 마지막에 정하는 곳 — 순서 함정)
+  }
+  const picks = _bkPickableDates(bk);
+  if(_bkDate && !picks.some(d => d.date === _bkDate)) _bkDate = '';   // 고른 날이 찼으면 선택을 푼다
+  let html = '<div class="wd-tt" style="color:var(--p-dark)">📅 네이버 예약으로 방문하는 체험단</div>'
+    + '<div class="bk-place">' + _escAttr(bk.placeName || '') + '</div>'
+    + (bk.placeAddress ? '<div class="bk-addr">' + _escAttr(bk.placeAddress) + '</div>' : '')
+    + '<div class="bk-pay">' + _bkPayLine(bk.payMode) + (bk.reviewDeadlineDays ? '<br/>리뷰는 <b>방문일 + ' + Number(bk.reviewDeadlineDays) + '일</b> 안에 올려 주세요.' : '') + '</div>'
+    + '<div class="wd-tt" style="margin:12px 0 6px">방문할 날짜 고르기 <span style="font-weight:600">· 내일부터</span></div>';
+  if(!picks.length){
+    html += '<div class="muted" id="bkDates">지금 고를 수 있는 날짜가 없어요. 자리가 나면 다시 열려요.</div>';
+  } else {
+    html += '<div class="bk-dates" id="bkDates" role="group" aria-label="방문할 날짜">' + picks.map(d =>
+      '<button type="button" class="bk-date' + (d.date === _bkDate ? ' on' : '') + '" data-date="' + _escAttr(d.date) + '" aria-pressed="' + (d.date === _bkDate) + '" onclick="onBookingPickDate(this)">'
+      + '<span class="d">' + _escAttr(_bkShort(d.date)) + '</span><span class="n">' + Number(d.left) + '자리 남음</span></button>').join('') + '</div>';
+  }
+  box.innerHTML = html;
+}
+function onBookingPickDate(el){
+  const d = el && el.getAttribute('data-date'); if(!d) return;
+  _bkDate = (_bkDate === d) ? '' : d;   // 같은 날을 다시 누르면 해제
+  renderBookingPre();
+}
+function _bkErr(msg){ const e = $('bkErr'); if(!e) return; e.textContent = msg || ''; e.style.display = msg ? '' : 'none'; }
+async function onBookingFile(inp, kind){
+  const f = inp.files && inp.files[0];
+  if(kind === 'review') _bkReviewB64 = ''; else _bkResvB64 = '';
+  _bkErr('');
+  if(!f) return;
+  try{
+    const r = await _campShrinkImage(f);   // Q&A 캡처와 같은 축소 하나
+    if(kind === 'review') _bkReviewB64 = r.b64; else _bkResvB64 = r.b64;
+    const t = $(kind === 'review' ? 'bkReviewFileTxt' : 'bkResvFileTxt');
+    if(t) t.innerHTML = '<img src="' + r.url + '" alt="선택한 캡처"/>다른 사진으로 바꾸려면 누르세요';
+  }catch(e){ _bkErr(e.message); }
+}
+function renderBookingCard(j, h){
+  const b = j.bookingSlot || {};
+  const p = b.place || {};
+  const free = p.payMode === 'free';
+  const submitted = !!(j.application && j.application.status === 'submitted');
+  const day = _qnaDateLabel(b.date) || '';
+  const link = /^https?:\/\//i.test(String(p.bookingUrl || ''))
+    ? '<a class="bk-link" href="' + _escAttr(p.bookingUrl) + '" target="_blank" rel="noopener">네이버 예약 열기</a>' : '';
+  let html = '<div class="qna-meta"><span class="qna-chip">' + _escAttr(_bkShort(b.date)) + ' 방문</span>'
+    + '<span class="qna-chip priv">' + (free ? '무료체험형' : '환급형') + '</span></div>'
+    + '<div class="bk-place">' + _escAttr(p.placeName || '') + '</div>'
+    + (p.placeAddress ? '<div class="bk-addr">' + _escAttr(p.placeAddress) + '</div>' : '');
+  if(!submitted){
+    $('bookingTitle').textContent = '📅 예약하고 예약내역을 제출하세요';
+    $('holdLabel').textContent = '예약내역 제출까지';
+    $('joinedFootNote').textContent = '예약내역을 제출하지 않았다면 자리가 다른 분께 넘어가요.';
+    html += link
+      + '<ol class="qna-steps">'
+      + '<li><b>네이버 예약 열기</b> → <b>' + _escAttr(day) + '</b>로 예약' + (free ? ' — <b>현장에서 업체가 무료로 처리해요, 예약만 해 주세요</b>' : '하고 결제') + '</li>'
+      + '<li>예약 완료 화면(예약번호가 보이게)을 <b>캡처</b></li>'
+      + '<li>아래에 예약번호' + (free ? '' : '·결제금액') + '·캡처를 넣고 <b>예약내역 제출</b></li></ol>'
+      + '<div class="bk-in"><label for="bkResvNo">예약번호</label><input id="bkResvNo" inputmode="text" autocomplete="off" placeholder="예) 1234567890"/></div>'
+      + (free ? '' : '<div class="bk-in"><label for="bkPay">결제금액</label><input id="bkPay" inputmode="numeric" autocomplete="off" placeholder="원 (숫자만)"/></div>')
+      + '<label class="qna-file"><input type="file" accept="image/*" style="display:none" onchange="onBookingFile(this,\'resv\')"/>'
+      + '<span id="bkResvFileTxt">예약내역 캡처 선택</span></label>'
+      + '<button class="btn" type="button" id="bkResvBtn" onclick="onBookingResvSubmit()">예약내역 제출</button>'
+      + (b.deadline ? '<div class="muted" style="margin-top:8px">제출 기한 <b>' + _escAttr(_qnaHm(b.deadline)) + '</b>까지 — 지나면 자리가 다른 분께 넘어가요.</div>' : '');
+    startHoldCountdown(j.application.expiresAt || (h && h.expiresAt));
+  } else {
+    clearInterval(_holdTick);
+    $('bookingTitle').textContent = '📅 방문 뒤 리뷰 캡처를 올려 주세요';
+    $('holdLabel').textContent = '리뷰 마감';
+    $('holdCd').textContent = b.reviewDeadline ? _bkShort(b.reviewDeadline) : '-';
+    $('joinedFootNote').textContent = '리뷰 캡처를 올리면 참여가 끝나요.';
+    html += '<div class="bk-done" style="margin-top:8px">✅ 예약내역 접수됨' + (b.reservationNo ? ' · 예약번호 ' + _escAttr(b.reservationNo) : '') + '</div>'
+      + '<ol class="qna-steps"><li><b>' + _escAttr(day) + '</b>에 방문</li><li>네이버 예약 리뷰를 남기고 <b>캡처</b></li>'
+      + '<li>아래에서 캡처 1장을 올리고 <b>리뷰 캡처 제출</b></li></ol>'
+      + (b.reviewDeadline ? '<div class="muted" style="margin-bottom:10px;color:var(--t1)">리뷰 마감 <b>' + _escAttr(_qnaDateLabel(b.reviewDeadline)) + '</b>까지</div>' : '')
+      + '<label class="qna-file"><input type="file" accept="image/*" style="display:none" onchange="onBookingFile(this,\'review\')"/>'
+      + '<span id="bkReviewFileTxt">리뷰 캡처 선택</span></label>'
+      + '<button class="btn" type="button" id="bkReviewBtn" onclick="onBookingReviewSubmit()">리뷰 캡처 제출</button>';
+  }
+  html += '<div class="qna-err" id="bkErr" style="display:none"></div>';
+  $('bookingBody').innerHTML = html;
+  // 예약내역을 낸 뒤에는 서버가 취소를 받지 않는다(제출확정 = 취소 대상 아님) — 눌러도 막히는 버튼을 남기지 않는다(막다른 길 0)
+  if($('joinedCancelBtn')) $('joinedCancelBtn').style.display = submitted ? 'none' : '';
+  _bkResvB64 = ''; _bkReviewB64 = '';
+}
+/** 예약 제출 창구 호출(첫 제출 · 다시 누름 · 리뷰 단계의 줄 위치 받기 공용). */
+async function _bkSubmitCall(extra){
+  const h = getHold(); const sess = getSession();
+  const r = await _campFetch(API_BASE_URL + '/api/submit/booking', { method:'POST',
+    headers: { 'Content-Type':'application/json', ..._getAuthHeaders() },
+    body: JSON.stringify(Object.assign({ campaignId: CAMP_ID, campaignApplicationId: _detail.application.id, holdToken: h.holdToken,
+      holdPhone8: h.phone8, loginPhone8: sess.phone8, loginName: sess.name }, extra || {})) }, { timeoutMs: 30000 });
+  return r;
+}
+async function onBookingResvSubmit(){
+  if(PREVIEW) return toast('미리보기에서는 제출되지 않아요');
+  const h = getHold(); const sess = getSession();
+  if(!h || !_detail || !_detail.application) return toast('참여 정보를 다시 불러와 주세요');
+  if(!sess || !sess.reviewerToken) return needLogin(onBookingResvSubmit);
+  const no = String(($('bkResvNo') || {}).value || '').trim();
+  const payEl = $('bkPay');
+  const pay = payEl ? String(payEl.value || '').replace(/[^\d]/g, '') : '';
+  if(!no) return _bkErr('예약번호를 적어 주세요.');
+  if(payEl && !(Number(pay) > 0)) return _bkErr('결제한 금액을 숫자로 적어 주세요.');
+  if(!_bkResvB64) return _bkErr('예약내역 캡처를 먼저 선택해 주세요.');
+  const btn = $('bkResvBtn'); btn.disabled = true; btn.textContent = '제출 중…'; _bkErr('');
+  try{
+    // ① 자리 줄 기록 + 신청 확정(이미 됐으면 같은 줄 + 새 사진 세션)
+    const r = await _bkSubmitCall({ reservationNo: no, payAmount: pay || undefined, wantCaptureSession: true });
+    const s = r.j;
+    if(!r.ok || !s.ok){
+      if(s.code === 'BOOKING_EXPIRED'){ await releaseExpiredHold(h); return; }
+      if(_campTempFail(r)) throw _campServerErr(r.status);   // ★ 결정 397
+      throw new Error(s.error || '제출에 실패했어요. 다시 눌러 주세요.');
+    }
+    // ② 예약내역 캡처 — 구매캡처와 같은 저장 길(받은 세션으로만 · 자기 주문 칸에만 연결)
+    const cs = s.captureSession;
+    if(cs && cs.id && cs.token){
+      const name = (h.name || sess.name || '').trim();
+      const up = await gasPostUpload({ action:'uploadOrderImage', imageBase64:_bkResvB64, mimeType:'image/jpeg', fileName:(name || '예약내역') + '_예약내역.jpg',
+        displayName:'', tabName:s.target.tabName, round:'', sheetId:s.target.sheetId, orderSubmissionId:s.orderSubmissionId,
+        captureSessionId:cs.id, captureSessionToken:cs.token, captureIndex:1 }, 180000);
+      if(!up || !up.ok) toast('예약내역은 접수됐어요. 사진 저장은 실패했어요 — 리뷰어 홈 「구매사진」에서 다시 올려 주세요');
+    }
+    await enterJoined();   // 리뷰 캡처 단계로(서버가 단일 출처)
+  }catch(e){
+    _bkErr(_campErrText(e, '제출에 실패했어요. 다시 눌러 주세요.'));
+    btn.disabled = false; btn.textContent = '예약내역 제출';
+  }
+}
+async function onBookingReviewSubmit(){
+  if(PREVIEW) return toast('미리보기에서는 제출되지 않아요');
+  const h = getHold(); const sess = getSession();
+  if(!h || !_detail || !_detail.application) return toast('참여 정보를 다시 불러와 주세요');
+  if(!sess || !sess.reviewerToken) return needLogin(onBookingReviewSubmit);
+  if(!_bkReviewB64) return _bkErr('리뷰 캡처를 먼저 선택해 주세요.');
+  const btn = $('bkReviewBtn'); btn.disabled = true; btn.textContent = '제출 중…'; _bkErr('');
+  try{
+    // ① 그 자리 줄 위치(멱등 — 예약내역 때와 같은 줄)
+    const r = await _bkSubmitCall({});
+    const s = r.j;
+    if(!r.ok || !s.ok){
+      if(_campTempFail(r)) throw _campServerErr(r.status);
+      throw new Error(s.error || '제출에 실패했어요. 다시 눌러 주세요.');
+    }
+    const t = s.target;
+    // ② 리뷰 캡처 업로드(기존 리뷰 캡처 경로 그대로) ③ 제출 완료
+    const name = (h.name || sess.name || '').trim();
+    const up = await gasPostUpload({ action:'uploadReviewImage', sheetId:t.sheetId, tabName:t.tabName, gid:t.gid || '', rowIndex:t.rowIndex,
+      reviewerName:name, slotKey:'review', files:[{ name: name + '_1', mimeType:'image/jpeg', data:_bkReviewB64 }] }, 180000);
+    if(!up || (!up.ok && !up.success)) throw new Error((up && up.error) || '캡처를 올리지 못했어요. 다시 눌러 주세요.');
+    const now = new Date();
+    const fin = await gasPost({ action:'submitReview', sheetId:t.sheetId, tabName:t.tabName, gid:t.gid || '', rowIndex:t.rowIndex,
+      reviewerName:name, value: (now.getMonth()+1) + '/' + now.getDate() + ' ' + String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0'),
+      uploadBatchId: up.uploadBatchId }, 30000);
+    if(!fin || (!fin.success && !fin.ok)) throw new Error((fin && fin.error) || '제출 기록에 실패했어요. 다시 눌러 주세요.');
+    renderDone();
+  }catch(e){
+    _bkErr(_campErrText(e, '제출에 실패했어요. 다시 눌러 주세요.'));
+    btn.disabled = false; btn.textContent = '리뷰 캡처 제출';
   }
 }
 
@@ -2719,6 +2987,7 @@ document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) pollOnc
 function _isDoneDetail(j){
   if(!(j && j.application && j.application.status === 'submitted')) return false;
   if(isQnaCampaign() || j.qnaSlot) return !!(j.qnaSlot && j.qnaSlot.captureDone === true);
+  if(isBookingCampaign() || j.bookingSlot) return !!(j.bookingSlot && j.bookingSlot.reviewDone === true);   // 📅 408: 리뷰 캡처까지 내야 끝(예약내역만 = 아직)
   return true;
 }
 function renderDone(pendingConfirm){
@@ -2762,7 +3031,9 @@ function renderDone(pendingConfirm){
   }
   // 💬 321: Q&A 는 구매양식이 없다 — 완료 문구만 바꾼다(다른 경우는 종전 문구 그대로)
   if(!pendingConfirm && !PREVIEW){
-    $('vDone').querySelector('p').innerHTML = isQnaCampaign()
+    $('vDone').querySelector('p').innerHTML = isBookingCampaign()
+      ? '리뷰 캡처까지 제출되었어요.<br/>진행 상황은 리뷰어 홈의 참여현황에서 확인할 수 있어요.'
+      : isQnaCampaign()
       ? '문의 캡처가 제출되었어요.<br/>진행 상황은 리뷰어 홈의 참여현황에서 확인할 수 있어요.'
       : '구매양식이 제출되었어요.<br/>진행 상황은 리뷰어 홈의 참여현황에서 확인할 수 있어요.';
   }

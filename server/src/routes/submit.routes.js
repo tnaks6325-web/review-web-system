@@ -578,7 +578,7 @@ async function _authoritativeHold(ctx) {
     const { rows } = await pool.query(
       `SELECT ca.phone8, ca.option_key, ca.owner_phone8, ca.blog_url, ca.status,
               ca.order_submission_id, ca.late_order_id, ca.applied_at,
-              ca.purchase_qty, ca.qty_tier_amount, ca.qna_slot_id,
+              ca.purchase_qty, ca.qty_tier_amount, ca.qna_slot_id, ca.booking_slot_id,
               co.unit_kind AS unit_kind,
               co.product_name AS product_name,
               (so.id IS NOT NULL) AS sub_alive,
@@ -628,6 +628,8 @@ async function _authoritativeHold(ctx) {
     ctx.blogUrl = rows[0].blog_url || null;
     // ★ 결정 321: Q&A 자리에 묶인 신청인가(같은 왕복 · 순증 0). 칸은 부팅 필수 스키마(211)라 늘 있다.
     ctx.qnaSlotId = rows[0].qna_slot_id == null ? null : Number(rows[0].qna_slot_id);
+    // ★ 결정 408: 예약 자리에 묶인 신청인가(같은 왕복 · 순증 0). 칸은 부팅 필수 스키마(228)라 늘 있다.
+    ctx.bookingSlotId = rows[0].booking_slot_id == null ? null : Number(rows[0].booking_slot_id);
     // ★ 멱등 판정 재료: 이 홀드로 이미 접수된 "살아있는" 주문이 있는가.
     //   status='submitted' 확정건뿐 아니라 late_order_id(지각 접수)도 포함해야 한다 —
     //   confirmHoldInTx 의 late UPDATE 는 `late_order_id IS NULL` 조건이라 2회차 재제출은
@@ -847,6 +849,206 @@ router.post('/qna', async (req, res, next) => {
   }
 });
 
+/* ══════════════════════════════════════════════════════════════════════════════
+   ★★ 결정 408 — 네이버예약리뷰 예약내역 제출(구매양식 대신 · Q&A /qna 창구와 같은 틀).
+   예약리뷰는 구매양식(주문번호·주소·옵션)이 없다. 신청 때 묶인 자리(booking_slots)의 줄에
+   ① 예약번호를 신청 행에 새기고(같은 공고 중복 = 부분 유일 색인 228 이 거절)
+   ② 최소 장부 줄(order_submissions — 이름·연락처·입금 계좌·이용일자 · 환급형이면 결제금액)을 만들고 홀드를 확정(confirmHoldInTx)
+   ③ 작업표의 **그 자리 줄 번호**에 기록(writeOrderToWorktable sheetRow) + 예약번호 칸을 적은 뒤 그 줄 위치를 돌려준다.
+   화면은 이어서 예약내역 캡처를 **구매캡처 길**(uploadOrderImage · 발급한 captureSession)로 올린다(사본 0).
+   방문 뒤 리뷰 캡처는 기존 리뷰 캡처 업로드 → /api/submit/review(같은 줄) — 다시 부르면(멱등) 줄 위치를 돌려준다.
+   ★ 기한 = 신청 홀드 마감(구매양식과 같은 공고 홀드 시간 + 30초 여유)이 지났으면 아무것도 쓰지 않는다(자리는 만료로 풀린다).
+   ★ 운영에서 열린 길 없음 — booking 이 준비 중(NOT_READY_WORK_KINDS)인 동안 이 창구는 거절한다(신청도 안전벨트가 막아 묶인 신청이 없다).
+   ══════════════════════════════════════════════════════════════════════════════ */
+router.post('/booking', async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    if (!require('../utils/workKind').isWorkKindReady('booking')) {
+      return res.status(409).json({ ok: false, code: 'work_kind_not_ready', error: '이 공고는 아직 제출을 받을 준비가 안 됐어요. 운영자에게 문의해주세요.' });
+    }
+    let session = null;
+    try { session = verifyReviewerSession(req.headers['x-reviewer-token']); } catch (_) { session = null; }
+    if (!session || !session.ownerReviewerId) {
+      return res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_REQUIRED', error: '리뷰어 로그인을 다시 확인해주세요.' });
+    }
+    const loginPhone8 = String(session.loginPhone8 || b.loginPhone8 || '').replace(/\D/g, '').slice(-8);
+    const holdCtx = await _authoritativeHold(_campaignHoldCtx(b, loginPhone8));
+    if (!holdCtx || !holdCtx.verified) {
+      return res.status(403).json({ ok: false, code: 'BOOKING_HOLD_INVALID', error: '참여 내역을 찾을 수 없어요. 새로고침 후 다시 시도해주세요.' });
+    }
+    const bookingSlots = require('../services/bookingSlots.service');
+    const slot = await bookingSlots.slotForApplication(pool, holdCtx.applicationId);
+    if (!slot) return res.status(409).json({ ok: false, code: 'BOOKING_NOT_BOUND', error: '예약 자리가 묶인 참여가 아니에요.' });
+    const scope = await _resolveCampaignOrderScope({ holdCtx });
+    const wt = scope && scope.worktable;
+    if (!wt || wt.sheetId !== slot.sheet_id || wt.tabName !== slot.tab_name) {
+      logger.error(`[submit/booking] 공고 작업표와 자리표가 다름 app=${holdCtx.applicationId} slot=${slot.id}`);
+      return res.status(409).json({ ok: false, code: 'BOOKING_TARGET_MISMATCH', error: '작업표를 찾지 못했어요. 담당자에게 알려주세요.' });
+    }
+    const target = { sheetId: wt.sheetId, tabName: wt.tabName, gid: wt.tabGid || '', rowIndex: Number(slot.seq) };
+
+    const { rows: apps } = await pool.query(
+      `SELECT ca.status, ca.expires_at, ca.applicant_name, ca.applicant_phone, ca.owner_phone8, ca.owner_reviewer_id, ca.campaign_id,
+              (ca.expires_at > NOW() - make_interval(secs => $2)) AS in_time
+         FROM campaign_applications ca WHERE ca.id = $1`,
+      [holdCtx.applicationId, require('../services/campaignHold.service').HOLD_GRACE_SEC]);
+    const app = apps[0];
+    if (!app) return res.status(403).json({ ok: false, code: 'BOOKING_HOLD_INVALID', error: '참여 내역을 찾을 수 없어요.' });
+    if (app.owner_reviewer_id && String(app.owner_reviewer_id) !== String(session.ownerReviewerId)) {
+      return res.status(403).json({ ok: false, code: 'BOOKING_HOLD_FORBIDDEN', error: '이 참여를 제출할 권한이 없어요.' });
+    }
+
+    const { BOOKING_NUMBER_HEADER } = require('../utils/worktablePlan');
+    const { writeOrderToWorktable } = require('../services/sheetlessOrder.service');
+    // 예약번호 칸 — 리뷰어 구매양식 매퍼가 덮지 않는 시스템 칸이라 그 줄(우리 주문이 앉은 줄)에만 따로 적는다
+    const writeResvCell = async (orderSubmissionId, resvNo) => {
+      if (!resvNo) return;
+      await pool.query(
+        `UPDATE campaign_participants SET row_json = jsonb_set(COALESCE(row_json, '{}'::jsonb), ARRAY[$4::text], to_jsonb($5::text), true),
+                updated_by = 'booking-submit', updated_at = NOW()
+          WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL AND order_submission_id = $6::uuid`,
+        [target.sheetId, target.tabName, target.rowIndex, BOOKING_NUMBER_HEADER, resvNo, orderSubmissionId]);
+    };
+    const ensureRow = async (orderSubmissionId, orderData, resvNo) => {
+      const { rows: cur } = await pool.query(
+        `SELECT order_submission_id FROM campaign_participants
+          WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL LIMIT 1`,
+        [target.sheetId, target.tabName, target.rowIndex]);
+      if (!cur.length) return { ok: false, reason: 'booking_row_missing' };
+      if (cur[0].order_submission_id && String(cur[0].order_submission_id) !== String(orderSubmissionId)) return { ok: false, reason: 'booking_row_taken' };   // 다른 주문이 앉은 줄 — 덮지 않는다
+      let w = { ok: true, already: true };
+      if (!cur[0].order_submission_id) {
+        w = await writeOrderToWorktable({
+          sheetId: target.sheetId, tabName: target.tabName, tabGid: target.gid, workboardId: wt.workboardId || null,
+          sheetRow: target.rowIndex, orderData, orderSubmissionId,
+          loginPhone8, loginName: orderData.orderer,
+          requireEmptyOrSame: true,   // 바깥 확인 뒤 줄 잠금 안에서 한 번 더(남의 주문 줄을 덮지 않는다)
+        });
+      }
+      if (w && w.ok) await writeResvCell(orderSubmissionId, resvNo);
+      return w;
+    };
+    const wantSession = b.wantCaptureSession === true || b.wantCaptureSession === 'true';
+
+    if (holdCtx.doneKind === 'confirmed') {
+      // 재시도(·방문 뒤 리뷰 캡처 단계) — 줄 기록만 다시 맞춘다(원장에 있는 값 그대로)
+      const { rows: os } = await pool.query('SELECT * FROM order_submissions WHERE id = $1 AND deleted_at IS NULL', [holdCtx.doneOrderId]);
+      const { rows: rv0 } = await pool.query('SELECT booking_reservation_no FROM campaign_applications WHERE id = $1', [holdCtx.applicationId]);
+      const w = os.length
+        ? await ensureRow(holdCtx.doneOrderId, require('../services/orderLedger.service')._osRowToOrderData(os[0]), rv0[0] && rv0[0].booking_reservation_no)
+        : { ok: false, reason: 'order_missing' };
+      if (!w.ok) {
+        logger.error(`[submit/booking] 재시도 줄 기록 실패 app=${holdCtx.applicationId} ${w.reason}`);
+        return res.status(500).json({ ok: false, code: 'BOOKING_ROW_WRITE_FAILED', retryable: true, error: '작업표 기록에 실패했어요. 잠시 후 다시 눌러주세요.' });
+      }
+      const captureSession = wantSession ? await _issueCaptureSession(holdCtx.doneOrderId, target, 'booking_retry') : undefined;
+      return res.json({ ok: true, alreadySubmitted: true, orderSubmissionId: holdCtx.doneOrderId, target, captureSession });
+    }
+
+    // 입력 — 예약번호(필수) · 환급형이면 결제금액(필수). 쓰기 전에 모두 본다.
+    const resv = bookingSlots.normalizeReservationNo(b.reservationNo);
+    if (!resv.ok) {
+      return res.status(400).json({ ok: false, code: resv.reason === 'booking_resv_required' ? 'BOOKING_RESV_REQUIRED' : 'BOOKING_RESV_INVALID',
+        error: resv.reason === 'booking_resv_required' ? '예약번호를 적어 주세요.' : '예약번호는 숫자·영문·하이픈(-)으로 4~40자예요.' });
+    }
+    const place = await bookingSlots.placeInfoForTab(pool, slot.sheet_id, slot.tab_name);
+    if (!place) return res.status(409).json({ ok: false, code: 'BOOKING_PLACE_UNKNOWN', error: '예약 정보를 불러오지 못했어요. 담당자에게 알려주세요.' });
+    let price = null;
+    if (place.payMode === 'refund') {
+      const n = parseInt(String(b.payAmount == null ? '' : b.payAmount).replace(/[^\d]/g, ''), 10);
+      if (!Number.isFinite(n) || n <= 0 || n > 10000000) {
+        return res.status(400).json({ ok: false, code: 'BOOKING_PAY_REQUIRED', error: '결제한 금액을 숫자로 적어 주세요.' });
+      }
+      price = n;
+    }
+    if (app.status !== 'applied' || !app.in_time) {
+      return res.status(409).json({ ok: false, code: 'BOOKING_EXPIRED', error: '제출 기한이 지났어요. 자리가 다시 풀렸어요.' });
+    }
+
+    // ① 예약번호를 신청 행에 새긴다 — 같은 공고의 살아 있는 다른 신청이 같은 번호면 유일 색인이 거절(쓰기 0으로 응답)
+    try {
+      await pool.query(`UPDATE campaign_applications SET booking_reservation_no = $2 WHERE id = $1 AND status = 'applied'`,
+        [holdCtx.applicationId, resv.value]);
+    } catch (e) {
+      if (e && e.code === '23505' && /uq_campaign_apps_booking_resv/.test(String(e.constraint || e.message))) {
+        return res.status(409).json({ ok: false, code: 'BOOKING_RESV_DUP', error: '이 예약번호는 이 공고에서 이미 제출됐어요. 예약번호를 다시 확인해 주세요.' });
+      }
+      throw e;
+    }
+
+    // 장부 줄 재료 — 이름·연락처 = 신청 명의(서버 기록), 입금 계좌 = 명의가 타계정이면 그 타계정 계좌(없으면 본계정)
+    const { rows: rv } = await pool.query(
+      `SELECT name, phone, bank_name, bank_account, account_holder, sub_accounts FROM reviewers WHERE id = $1::uuid LIMIT 1`,
+      [session.ownerReviewerId]);
+    const owner = rv[0] || {};
+    let bank = owner.bank_name || '', account = owner.bank_account || '', depositor = owner.account_holder || '';
+    if (holdCtx.isSub) {
+      const hit = require('../services/identity.service').findSubAccount(owner.sub_accounts, app.applicant_name, holdCtx.phone8);
+      const sub = hit && hit.sub;
+      if (sub && String(sub.bankAccount || '').trim()) {
+        bank = sub.bankName || ''; account = sub.bankAccount || ''; depositor = sub.accountHolder || app.applicant_name || '';
+      }
+    }
+    // 이용일자 칸은 자리표가 적어 둔 값 그대로 다시 쓴다(잠긴 칸 — 표기를 바꾸지 않는다)
+    let dateStr = slot.slot_date;
+    try {
+      const { BOOKING_DATE_HEADER } = require('../utils/worktablePlan');
+      const { rows: rj } = await pool.query(
+        `SELECT row_json FROM campaign_participants WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL LIMIT 1`,
+        [target.sheetId, target.tabName, target.rowIndex]);
+      const v = rj[0] && rj[0].row_json && rj[0].row_json[BOOKING_DATE_HEADER];
+      if (v != null && String(v).trim()) dateStr = String(v);
+    } catch (_) { /* 자리 날짜 그대로 */ }
+    const orderData = {
+      orderer: String(app.applicant_name || '').trim(), recipient: String(app.applicant_name || '').trim(),
+      phone: String(app.applicant_phone || '').trim(), bank, account, depositor, dateStr,
+      ...(price != null ? { price: String(price) } : {}),   // 환급형만 — 결제금액 칸(무료체험형 작업표엔 칸이 없다)
+    };
+
+    const bookingLedger = await createOrderLedgerEntry({
+      sheetId: scope.sheetId, tabName: scope.tabName, gid: '',
+      skipSheetMirror: true, orderData, loginPhone8, loginName: orderData.orderer, source: 'booking_submit',
+      campaignHold: { ...holdCtx, expectedOptKey: holdCtx.optionKey || null, orderIdentity: { phone: orderData.phone }, skipTabBinding: true },
+    });
+    if (!bookingLedger || !bookingLedger.orderSubmissionId) {
+      return res.status(500).json({ ok: false, code: 'BOOKING_LEDGER_FAILED', retryable: true, error: '제출에 실패했어요. 다시 눌러주세요.' });
+    }
+    if (bookingLedger.holdResult !== 'confirmed') {
+      // 확인과 확정 사이에 기한이 지난 경우 — 장부 줄을 남기지 않는다(자리 없는 예약 주문은 갈 곳이 없다)
+      await pool.query(`UPDATE order_submissions SET deleted_at = NOW(), mirror_status = 'canceled', sheet_error = 'booking_hold_not_confirmed' WHERE id = $1`, [bookingLedger.orderSubmissionId]);
+      await pool.query(`UPDATE campaign_applications SET late_order_id = NULL WHERE id = $1 AND late_order_id = $2`, [holdCtx.applicationId, bookingLedger.orderSubmissionId]);
+      logger.warn(`[submit/booking] 홀드 확정 안 됨(${bookingLedger.holdResult}) — 장부 줄 취소 app=${holdCtx.applicationId} os=${bookingLedger.orderSubmissionId}`);
+      const { rows: done } = await pool.query(
+        `SELECT ca.order_submission_id FROM campaign_applications ca
+           JOIN order_submissions os ON os.id = ca.order_submission_id AND os.deleted_at IS NULL
+          WHERE ca.id = $1 AND ca.status = 'submitted' LIMIT 1`, [holdCtx.applicationId]);
+      if (done.length) return res.json({ ok: true, alreadySubmitted: true, orderSubmissionId: done[0].order_submission_id, target });
+      return res.status(409).json({ ok: false, code: 'BOOKING_EXPIRED', error: '제출 기한이 지났어요. 자리가 다시 풀렸어요.' });
+    }
+    if (wt.workboardId) {
+      await pool.query(`UPDATE order_submissions SET workboard_id = $2::uuid, updated_at = NOW() WHERE id = $1::uuid AND workboard_id IS NULL`,
+        [bookingLedger.orderSubmissionId, wt.workboardId]);
+    }
+    let w;
+    try { w = await ensureRow(bookingLedger.orderSubmissionId, orderData, resv.value); } catch (e) { w = { ok: false, reason: 'exception', message: e.message }; }
+    if (!w || !w.ok) {
+      try { await markOrderMirrorFailed(bookingLedger.orderSubmissionId, (w && (w.message || w.reason)) || 'booking_row_write_failed'); } catch (_) { /* noop */ }
+      logAbnormal({
+        flow: 'booking_submit', step: 'worktable_write', severity: 'critical',
+        error: new Error(`예약리뷰 작업표 기록 실패: ${w && w.reason}`),
+        context: { campaignId: holdCtx.campaignId, applicationId: holdCtx.applicationId, orderSubmissionId: bookingLedger.orderSubmissionId, seq: target.rowIndex },
+      });
+      return res.status(500).json({ ok: false, code: 'BOOKING_ROW_WRITE_FAILED', retryable: true, error: '작업표 기록에 실패했어요. 잠시 후 다시 눌러주세요.' });
+    }
+    const captureSession = await _issueCaptureSession(bookingLedger.orderSubmissionId, target, 'booking_submit');
+    logger.info(`[submit/booking] 접수 app=${holdCtx.applicationId} os=${bookingLedger.orderSubmissionId} seq=${target.rowIndex}`);
+    try { emitOrderSubmit({ sheetId: target.sheetId, tabName: target.tabName, orderer: orderData.orderer }); } catch (_) { /* noop */ }
+    return res.json({ ok: true, orderSubmissionId: bookingLedger.orderSubmissionId, target, captureSession });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/order', async (req, res, next) => {
   try {
     const b = req.body;
@@ -890,6 +1092,12 @@ router.post('/order', async (req, res, next) => {
     if (holdCtx && holdCtx.verified && holdCtx.qnaSlotId) {
       return res.status(409).json({ ok: false, reason: 'qna_use_capture',
         error: 'Q&A 참여는 구매양식이 아니라 문의 캡처로 제출해요. 화면을 새로고침해주세요.' });
+    }
+    /* ★ 결정 408: 예약 자리에 묶인 신청도 구매양식으로 받지 않는다 — 이 길로 들어오면 자리(booking_slots)를 모르는
+         일반 홀드 확정이 되어 고른 날 자리 줄이 아닌 아무 빈 줄에 들어간다. 제출 창구는 POST /api/submit/booking 하나다. */
+    if (holdCtx && holdCtx.verified && holdCtx.bookingSlotId) {
+      return res.status(409).json({ ok: false, reason: 'booking_use_reservation',
+        error: '예약 참여는 구매양식이 아니라 예약내역으로 제출해요. 화면을 새로고침해주세요.' });
     }
     const orderScope = await _resolveCampaignOrderScope({ sheetId, gid, tabName, holdCtx });
     if (!orderScope) {

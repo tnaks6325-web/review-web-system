@@ -1074,6 +1074,9 @@ function _woCampaignPrefill(o) {
     // ★ 미접수 오더 폴백 — 접수 전이라 linked_tab_*가 비어도 URL의 시트ID·gid로 찾아본다
     //   (같은 탭이 앞선 오더로 이미 등록돼 있으면 여기서 잡힌다)
     work_sheet_url:  o.work_sheet_url || "",
+    // ★ 결정 408: 네이버예약리뷰 — 서버가 계약 단일 출처(bookingSpecFromWorkOrder)로 정규화해 붙인 예약 정보(booking_spec)를
+    //   **그대로** 넘긴다(여기서 다시 해석하지 않는다). 발행 폼은 보기 전용 안내 카드로만 쓴다. 없으면 키 없음.
+    ...((_woIsBookingKind(o.work_kind) && o.booking_spec && typeof o.booking_spec === "object") ? { booking: o.booking_spec } : {}),
   };
   return prefill;
 }

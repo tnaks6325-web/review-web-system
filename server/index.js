@@ -51,6 +51,8 @@ const REQUIRED_SCHEMA = [
   ['campaign_applications', 'turn_starts_at'],   // 217 — 차례 타이머(결정 356): 참여 후속 UPDATE·취소 잠금 판정·작업조회·당기기(없으면 /apply 42703)
   ['campaign_applications', 'chain_ttl_min'],    // 217
   ['campaign_applications', 'qna_slot_id'],      // 211 — Q&A 신청 ↔ 날짜별 자리(없으면 Q&A 신청·인기 참여권 집계 실패)
+  ['campaign_applications', 'booking_slot_id'],  // 228 — 네이버예약리뷰 신청 ↔ 고른 날 자리(결정 408 · 없으면 구매양식 홀드 조회·참여 상세가 42703)
+  ['campaign_applications', 'booking_reservation_no'],   // 228 — 예약번호(같은 공고 중복 거절 · 결정 408)
   ['shared_sync_outbox', 'view_scope'],             // 206 — 담당자 단독 송신과 전체 공유 송신의 durable scope(없으면 공유 저장·송신 실패)
   ['campaign_participants', 'review_participation_id'],
   ['workdesk_review_resolutions', 'review_participation_id'],

@@ -45,13 +45,14 @@ const { deliveryBaseType } = require('../utils/deliveryType');
 const { normalizeDeliveryReviewFeeMix, validateDeliveryReviewFeeMix, DELIVERY_MIX_KEYS } = require('../utils/deliveryReviewFee');
 const { normalizeRecruitBadges } = require('../utils/recruitBadges');
 // ★ 099: 체험단 종류(리뷰/블로그) 저장 정규화 — 판정 단일 출처. 사본을 만들지 않는다.
-const { workKindForStore, resolveWorkKind, isBlogKind, isQnaKind, isWorkKindReady, workKindNotReadyBody } = require('../utils/workKind');
+const { workKindForStore, resolveWorkKind, isBlogKind, isQnaKind, isBookingKind, isWorkKindReady, workKindNotReadyBody } = require('../utils/workKind');
 const { weekendPublicationState } = require('../services/campaignWeekend.service');
 // ★ 101 블로그URL — 형식 판정은 포스팅URL 과 **같은 단일 출처**(둘 다 "사람이 붙여넣는 주소").
 //   라벨만 다르다: 블로그URL = 블로그 주소 / 포스팅URL = 쓴 글 주소.
 const { isPostUrl, BLOG_URL_HINT } = require('../utils/blogPostUrl');
 const { workKindForTab: tabWorkKind } = require('../services/workKindContext.service');
 const qnaSlots = require('../services/qnaSlots.service');   // ★ 결정 321 3단계 — Q&A 자리 묶기
+const bookingSlots = require('../services/bookingSlots.service');   // ★ 결정 408 — 네이버예약리뷰 날짜 자리 묶기
 const { syncCampaignRecruitTotal, displayRecruitTotalForCampaign, assertCampaignRecruitTotal } = require('../services/linkedRecruitQuota.service');
 const { loadPopularCreditMatches, loadPopularCreditState, canUsePopularCredit } = require('../services/popularCredit.service');
 const { repurchaseDays } = require('../utils/repurchaseGuard');
@@ -1833,6 +1834,12 @@ async function getCampaignDetail(req, res, next) {
           if (!view.options && tv.campaign && tv.campaign.length) view.qtyTiers = tv.campaign.map(_publicTierView);
         }
       } catch (e) { logger.warn(`[campaign/detail] 구매수량 단계 보기 실패(참여 때 다시 판정) camp=${id}: ${e.message}`); }
+      /* ★ 결정 408 — 네이버예약리뷰: 매장 안내(작업오더 계약 단일 출처) + 날짜별 남은 자리(내일부터 고를 수 있음).
+           예약 탭이 아니면 키 없음(종전 응답 그대로). 조회 실패 = 키 없음 — 화면은 예약 공고인데 이 값이 없으면 참여를 막는다(fail-closed). */
+      try {
+        const bk = await bookingSlots.bookingPublicView(pool, row, now);
+        if (bk) view.booking = bk;
+      } catch (e) { logger.warn(`[campaign/detail] 예약 안내 조회 실패(참여 화면이 막는다) camp=${id}: ${e.message}`); }
     }
     res.json({ ok: true, data: view, serverNow: now.toISOString() });
   } catch (err) {
@@ -1988,7 +1995,32 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
     } catch (e) {
       logger.warn(`[campaign/work-detail] Q&A 자리 조회 실패 camp=${id}: ${e.message}`);
     }
-    let canChangeOption = validHold && options.length >= 2 && !qnaSlot;   // Q&A 는 상품 변경 없음(change-option 이 다시 막는다)
+    // ★ 결정 408: 예약 신청이면 고른 날·리뷰 마감일·매장 안내·예약내역/리뷰 캡처 진행을 싣는다. 조회 실패 = null(화면은 다시 불러온다).
+    let bookingSlot = null;
+    try {
+      const slot = await bookingSlots.slotForApplication(pool, app.id);
+      if (slot) {
+        bookingSlot = bookingSlots.publicSlotView(slot, app.expires_at);
+        bookingSlot.place = await bookingSlots.placeInfoForTab(pool, slot.sheet_id, slot.tab_name);
+        bookingSlot.reservationDone = !!isSubmitted;
+        bookingSlot.reservationNo = isSubmitted ? String(slot.booking_reservation_no || '') : '';
+        bookingSlot.reviewDone = false;
+        if (isSubmitted) {
+          // 리뷰 캡처 제출 = 작업표 줄(진실원본) 또는 색인 — Q&A 캡처 판정과 같은 기준
+          const { rows: ri } = await pool.query(
+            `SELECT (COALESCE((SELECT cp.is_submitted FROM campaign_participants cp
+                                WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.seq = $3 AND cp.deleted_at IS NULL LIMIT 1), FALSE)
+                     OR EXISTS (SELECT 1 FROM review_index ri
+                                 WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $3 AND ri.is_submitted = TRUE)) AS done`,
+            [slot.sheet_id, slot.tab_name, Number(slot.seq)]);
+          bookingSlot.reviewDone = !!(ri[0] && ri[0].done === true);
+        }
+      }
+    } catch (e) {
+      bookingSlot = null;
+      logger.warn(`[campaign/work-detail] 예약 자리 조회 실패 camp=${id}: ${e.message}`);
+    }
+    let canChangeOption = validHold && options.length >= 2 && !qnaSlot && !bookingSlot;   // Q&A·예약은 상품 변경 없음(change-option 이 다시 막는다)
     if (canChangeOption) {
       try {
         const { views } = await _optionChangeViews(pool, id, app, now);
@@ -2051,6 +2083,7 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
       selectedOption,        // 내가 참여한 옵션(잠금표시·구매양식 고정용)
       canChangeOption,
       qnaSlot,               // ★ 결정 321: { date, visibility:'public'|'private', questionText, deadline } | null(Q&A 아님)
+      bookingSlot,           // ★ 결정 408: { date, reviewDeadline, deadline, place, reservationDone, reservationNo, reviewDone } | null(예약 아님)
       qty,                   // ★ 결정 289 ③-나: { purchaseQty, amount, tiers:[{qty,status,remaining,buyMethod,payAmount}], canChange } | null(단계 없음)
       joinedDisplay: joinedView,   // ★ 결정 214: { title, thumbnailUrl } | null
       workDetail,                                                // HTML은 응답 직전 방어적 재정화
@@ -2162,10 +2195,15 @@ router.post('/:id/change-option', applyLimiter, async (req, res, next) => {
       return res.status(409).json({ ok: false, reason: 'not_changeable', error: '지금은 옵션을 변경할 수 없어요(제출 완료 또는 만료).' });
     }
     // ★ 결정 321: Q&A 신청은 상품의 그날 자리 하나에 묶여 있다 — 상품을 바꾸려면 취소 후 다시 신청한다(자리 갈아타기 없음).
-    { const { rows: q } = await client.query('SELECT qna_slot_id FROM campaign_applications WHERE id=$1', [app.id]);
+    { const { rows: q } = await client.query('SELECT qna_slot_id, booking_slot_id FROM campaign_applications WHERE id=$1', [app.id]);
       if (q[0] && q[0].qna_slot_id != null) {
         await client.query('ROLLBACK');
         return res.status(409).json({ ok: false, reason: 'qna_option_locked', error: 'Q&A 참여는 상품을 바꿀 수 없어요. 취소 후 다시 신청해주세요.' });
+      }
+      // ★ 결정 408: 예약 신청은 고른 날의 자리에 묶여 있다 — 매장 하나라 바꿀 상품도 없다(날짜를 바꾸려면 취소 후 다시 신청).
+      if (q[0] && q[0].booking_slot_id != null) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ ok: false, reason: 'booking_option_locked', error: '예약 참여는 바꿀 수 없어요. 날짜를 바꾸려면 취소 후 다시 신청해주세요.' });
       } }
     // ★ 결정 289 — 지금 고른 개수(위 SELECT 칸 목록은 회귀가드가 고정 — 같은 tx·이미 잠근 행이라 따로 읽는다)
     { const { rows: q } = await client.query('SELECT purchase_qty FROM campaign_applications WHERE id=$1', [app.id]); app.purchase_qty = q[0] ? q[0].purchase_qty : null; }
@@ -2251,6 +2289,14 @@ function _publicTierView(v) {
   return { qty: v.qty, status: v.status, remaining: v.remaining, buyMethod: v.buyMethod };
 }
 
+/** ★ 결정 408 — 예약 날짜 거절 문구(서버 판정 단일 출처 · 화면 _APPLY_REASON_TEXT 와 같은 뜻). */
+const _BOOKING_DATE_MSG = {
+  booking_date_required: '방문할 날짜를 먼저 골라 주세요.',
+  booking_date_invalid: '날짜를 읽지 못했어요. 새로고침 후 다시 골라 주세요.',
+  booking_date_closed: '오늘·지난 날짜는 고를 수 없어요. 내일 이후 날짜를 골라 주세요.',
+  booking_date_full: '그 날짜는 자리가 모두 찼어요. 다른 날짜를 골라 주세요.',
+};
+
 async function _applyParticipation(req, res, next, campPre) {
   const id = campPre.id;
   const name = String(req.body.name || '').trim().slice(0, 100);
@@ -2273,6 +2319,8 @@ async function _applyParticipation(req, res, next, campPre) {
   let blogUrlIns = null;
   let blogApply = false;   // ★ 127: 이 신청이 블로그체험단인가(승인제 분기의 근거)
   let qnaApply = false;    // ★ 결정 321 3단계: Q&A체험단 — 신청 때 그날 자리 하나를 묶는다
+  let bookingApply = false;   // ★ 결정 408: 네이버예약리뷰 — 신청 때 리뷰어가 고른 날의 자리 하나를 묶는다
+  let bookingDate = null;
   {
     let _kind = null;
     try {
@@ -2288,6 +2336,16 @@ async function _applyParticipation(req, res, next, campPre) {
     if (!isWorkKindReady(_kind)) {
       return res.status(409).json({ ok: false, reason: 'work_kind_not_ready',
         error: '이 공고는 아직 참여를 받을 준비가 안 됐어요. 운영자에게 문의해주세요.' });
+    }
+    /* ★ 결정 408: 예약 공고 — 고른 날짜 형식·오늘 이후(기본 내일부터)를 잠금 **앞**에서 본다(자리 미점유).
+         그 날 자리가 남았는지는 잠금 안에서 자리 묶기가 다시 본다(fail-closed). */
+    if (isBookingKind(_kind)) {
+      bookingApply = true;
+      const chk = bookingSlots.checkBookingDate(req.body.bookingDate, new Date());
+      if (!chk.ok) {
+        return res.status(409).json({ ok: false, reason: chk.reason, error: _BOOKING_DATE_MSG[chk.reason] || '방문할 날짜를 다시 골라 주세요.' });
+      }
+      bookingDate = chk.date;
     }
     if (isQnaKind(_kind)) {
       qnaApply = true;
@@ -2329,7 +2387,7 @@ async function _applyParticipation(req, res, next, campPre) {
           tabKind: await tabWorkKind({ sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name }),
         });
       } catch (_) { _lockedKind = null; }
-      if (_lockedKind && isQnaKind(_lockedKind) !== qnaApply) {
+      if (_lockedKind && (isQnaKind(_lockedKind) !== qnaApply || isBookingKind(_lockedKind) !== bookingApply)) {
         await client.query('ROLLBACK');
         return res.status(409).json({ ok: false, reason: 'kind_changed', error: '공고 정보가 방금 바뀌었어요. 새로고침 후 다시 참여해주세요.' });
       }
@@ -2457,7 +2515,7 @@ async function _applyParticipation(req, res, next, campPre) {
        같은 캠페인 행 잠금 안이라 마지막 한 자리를 두 사람이 동시에 잡지 못한다. 단계 없는 공고는 조회 1번 뒤 그대로 통과.
        ★ SAVEPOINT 로 감싸지 않는다 — 옵션 게이트와 같이 실패하면 막힌다(표 존재는 필수 스키마 검사가 보장). */
     let qtyTierPick = null;
-    if (!blogApply && !qnaApply) {   // Q&A 는 구매가 없다(321) — 개수 단계도 없다
+    if (!blogApply && !qnaApply && !bookingApply) {   // Q&A 는 구매가 없다(321) — 개수 단계도 없다 · 예약리뷰도 개수 단계 없음(408)
       const verdict = await campaignQtyTiers.judge(client, id, chosenOpt ? chosenOpt.opt_key : null, req.body.purchaseQty);
       if (verdict && !verdict.ok) {
         await client.query('ROLLBACK');
@@ -2671,8 +2729,8 @@ async function _applyParticipation(req, res, next, campPre) {
           const o = other[0];
           let blocked = o.status !== 'submitted';
           let availableFrom = null;
-          if (!blocked && qnaApply) {
-            blocked = true;   // ★ 결정 321(확정 3): Q&A 는 재구매 기간이 없다 — 다른 명의로 제출했으면 이 공고는 끝(같은 명의 규칙과 같다)
+          if (!blocked && (qnaApply || bookingApply)) {
+            blocked = true;   // ★ 결정 321(확정 3): Q&A 는 재구매 기간이 없다 — 다른 명의로 제출했으면 이 공고는 끝(같은 명의 규칙과 같다) · 예약리뷰도 같다(408)
           } else if (!blocked) {
             const { repurchaseWindowFromSubmittedAt } = require('../utils/repurchaseGuard');
             const rw = repurchaseWindowFromSubmittedAt(o.submitted_at, camp.repurchase_days, now.getTime());
@@ -2701,11 +2759,12 @@ async function _applyParticipation(req, res, next, campPre) {
     //   ★ 하드 차단·예외 없음(리뷰어 셀프 참여는 관리자 확인 창구가 없다 — 관리자 대신등록만 예외 허용).
     //   조회 실패는 fail-open(막는 기능의 오류로 정상 참여를 막지 않는다 — 신원게이트와 같은 규율).
     // ★ 결정 321(확정 3): Q&A 는 구매가 없어 재구매 기간을 보지 않는다 — 대신 같은 공고 같은 명의는 한 번만(제출완료 = 영구 차단).
-    if (qnaApply && sameCampaignSubmittedAt) {
+    // ★ 결정 408: 예약리뷰도 같다 — 매장 방문 한 번(재구매 기간 대신 같은 공고 같은 명의 한 번).
+    if ((qnaApply || bookingApply) && sameCampaignSubmittedAt) {
       await client.query('ROLLBACK');
-      return res.status(409).json({ ok: false, reason: 'one_per_person', error: '이 Q&A 공고에는 이미 참여했어요.' });
+      return res.status(409).json({ ok: false, reason: 'one_per_person', error: bookingApply ? '이 예약 공고에는 이미 참여했어요.' : '이 Q&A 공고에는 이미 참여했어요.' });
     }
-    if (!qnaApply) try {
+    if (!qnaApply && !bookingApply) try {
       const { checkRepurchaseWindow, repurchaseWindowFromSubmittedAt } = require('../utils/repurchaseGuard');
       let rw = repurchaseWindowFromSubmittedAt(sameCampaignSubmittedAt, camp.repurchase_days, now.getTime());
       if (camp.linked_sheet_id && camp.linked_tab_name) {
@@ -2837,7 +2896,7 @@ async function _applyParticipation(req, res, next, campPre) {
          ★ 블로그(승인제 — 자리 미점유)·Q&A(날짜 자리 묶기 · qna_no_slot)는 종전. 작업표(무시트+활성 작업보드) 없으면 종전.
          ★ fail-open — 조회 실패는 SAVEPOINT 로 접고 종전대로 받는다(모든 신청이 막히면 안 된다).
          작업표 잠금(camp_tab_daily) 안이라 마지막 한 자리를 두 사람이 동시에 받지 못한다. */
-    if (!blogApply && !qnaApply && camp.linked_sheet_id && camp.linked_tab_name) {
+    if (!blogApply && !qnaApply && !bookingApply && camp.linked_sheet_id && camp.linked_tab_name) {   // 예약리뷰 = 자리 묶기가 대신한다(408)
       const roomSvc = require('../services/worktableApplyRoom.service');
       let room = null;
       if (roomSvc.enabled()) {
@@ -2875,7 +2934,7 @@ async function _applyParticipation(req, res, next, campPre) {
          그 시작이 오늘 cutoffAt(= 마감 − close_buffer_min, 상태 엔진이 이미 계산한 st.cutoffAt) 이상이면 **이 명의만** 거절(자리 미점유).
          계획 조회 실패는 종전 동시 시간으로(fail-open = 오늘과 같은 동작) — 참여를 막지 않는다. */
     let chainPlan = null;
-    if (req.body.sequential === true && !qnaApply && !blogApply && holdChain.chainEligibleCampaign(camp)) {
+    if (req.body.sequential === true && !qnaApply && !bookingApply && !blogApply && holdChain.chainEligibleCampaign(camp)) {
       try {
         await client.query('SAVEPOINT chain_plan');
         chainPlan = await holdChain.planChainLink(client, {
@@ -2909,6 +2968,20 @@ async function _applyParticipation(req, res, next, campPre) {
         await client.query('ROLLBACK');
         return res.status(409).json({ ok: false, reason: 'qna_no_slot', error: '오늘 이 상품의 Q&A 자리가 모두 찼어요.' });
       }
+    }
+    /* ★★ 결정 408: 예약 신청은 리뷰어가 고른 날의 빈 자리 하나를 묶는다(그날 순번 앞부터).
+         작업표 잠금(camp_tab_daily) 안이라 같은 자리에 둘이 묶이지 않는다(뒤에는 부분 유일 색인 228 이 받친다).
+         못 고르면 막는다(fail-closed) — 자리 없는 예약 신청은 예약내역을 적을 줄이 없다. */
+    let bookingBind = null;
+    if (bookingApply) {
+      const b = await bookingSlots.bindSlotForApply(client, {
+        sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name, date: bookingDate, now });
+      if (!b || !b.ok) {
+        await client.query('ROLLBACK');
+        const reason = (b && b.reason) || 'booking_date_full';
+        return res.status(409).json({ ok: false, reason, error: _BOOKING_DATE_MSG[reason] || _BOOKING_DATE_MSG.booking_date_full });
+      }
+      bookingBind = b;
     }
     const holdToken = crypto.randomBytes(24).toString('base64url');
     // 명의 표기값은 서버 권위(등록된 sub_accounts 값 우선 — 요청 오타로 홀드/신원판별 표기가 갈라지는 것 방지)
@@ -2958,6 +3031,9 @@ async function _applyParticipation(req, res, next, campPre) {
     }
     if (qnaBind) {   // ★ 결정 321 — INSERT 칸 목록은 고정(회귀가드) · 뒤이은 UPDATE 관용구로 묶은 자리를 새긴다
       await client.query(`UPDATE campaign_applications SET qna_slot_id = $2 WHERE id = $1`, [ins.rows[0].id, qnaBind.slot.id]);
+    }
+    if (bookingBind) {   // ★ 결정 408 — INSERT 칸 목록은 고정(회귀가드) · 뒤이은 UPDATE 관용구로 묶은 자리를 새긴다
+      await client.query(`UPDATE campaign_applications SET booking_slot_id = $2 WHERE id = $1`, [ins.rows[0].id, bookingBind.slot.id]);
     }
     if (qtyTierPick) {   // ★ 결정 289 — INSERT 칸 목록은 고정(회귀가드) · 뒤이은 UPDATE 관용구로 고른 개수·금액을 새긴다
       await client.query(
@@ -3052,6 +3128,7 @@ async function _applyParticipation(req, res, next, campPre) {
       expiresAt: ins.rows[0].expires_at, serverNow: now.toISOString(),
       optionKey: ins.rows[0].option_key || null,
       qnaSlot: qnaBind ? qnaSlots.publicSlotView(qnaBind.slot, ins.rows[0].expires_at) : undefined,
+      bookingSlot: bookingBind ? bookingSlots.publicSlotView(bookingBind.slot, ins.rows[0].expires_at) : undefined,   // ★ 결정 408
       // ★ 결정 356: 차례 줄에 섰을 때만 — 없으면(종전·구서버) 화면은 종전 동작. expiresAt 은 위 값 그대로(= 진짜 마감).
       chain: chainPlan ? { sequential: true, state: chainPlan.turnStartsAt.getTime() > now.getTime() ? 'waiting' : 'running',
         startsAt: chainPlan.turnStartsAt.toISOString(), expiresAt: chainPlan.expiresAt.toISOString() } : undefined,
@@ -3061,6 +3138,10 @@ async function _applyParticipation(req, res, next, campPre) {
     // ★ 결정 321: Q&A 자리 이중 묶기 백스톱(uq_campaign_apps_qna_slot) — "이미 참여 중"이 아니라 자리가 찬 것이다
     if (err.code === '23505' && err.constraint === 'uq_campaign_apps_qna_slot') {
       return res.status(409).json({ ok: false, reason: 'qna_no_slot', error: '방금 그 자리가 찼어요. 다시 참여해주세요.' });
+    }
+    // ★ 결정 408: 예약 자리 이중 묶기 백스톱(uq_campaign_apps_booking_slot) — 「이미 참여 중」이 아니라 그날 자리가 찬 것이다
+    if (err.code === '23505' && err.constraint === 'uq_campaign_apps_booking_slot') {
+      return res.status(409).json({ ok: false, reason: 'booking_date_full', error: _BOOKING_DATE_MSG.booking_date_full });
     }
     if (err.code === '23505') return res.status(409).json({ ok: false, reason: 'duplicate_hold', error: '이미 참여 중인 캠페인입니다.' }); // uq_campaign_apps_active_hold 백스톱
     return next(err);
