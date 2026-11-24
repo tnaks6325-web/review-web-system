@@ -64,7 +64,7 @@ const { LEGACY_DELIVERY_VALUES, normalizeReviewType } = require('../utils/review
 const { normalizeReviewTypeMix } = require('../utils/reviewTypeMix');
 const { deliveryBaseType, parseDeliveryType, canonicalDeliveryValue, isCourierProxyDelivery } = require('../utils/deliveryType');
 const { normalizeDeliveryTypeMix } = require('../utils/deliveryTypeMix');
-const { workKindForStore } = require('../utils/workKind');   // 099 — 체험단 종류(리뷰/블로그)
+const { workKindForStore, isWorkKindReady, workKindNotReadyBody } = require('../utils/workKind');   // 099 — 체험단 종류(리뷰/블로그) · 결정 404 아직 준비 안 된 종류 거절
 // 양방향 동기화(결정 275) — 칸 목록·스위치·공유 저장 단일 출처
 const { SHARED_FIELDS } = require('../utils/sharedFields');
 const { readBidirSwitch } = require('../utils/bidirSwitch');
@@ -475,6 +475,10 @@ router.post('/intake', async (req, res, next) => {
     if (!b.title || !String(b.title).trim()) {
       return res.status(400).json({ ok: false, error: '작업명을 입력해주세요.' });
     }
+    /* ★★ 결정 404(완화 금지) — 아직 리뷰웹이 끝까지 진행하지 못하는 체험단 종류(네이버예약리뷰)는 **읽기·쓰기 전에** 거절한다.
+       받아 두면 날짜 자리표·리뷰어 화면·검수·입금이 없는 채로 상품 리뷰 작업(구매양식·상품 리뷰 검수)이 깔린다.
+       인트라넷은 이 409 를 실패로 보여 주고(자동 재전송 없음) 같은 번호로 다시 보낼 수 있다. */
+    if (!isWorkKindReady(b.work_kind)) return res.status(409).json(workKindNotReadyBody(b.work_kind));
     // ★ work_sheet_url 은 선택 항목 (작업표 생성 도입에 따라 제출 필수 해제).
     //   시트 없이 제출된 오더는 접수 시점에 시트 URL을 채우거나 작업표를 생성해야 접수된다(accept 게이트 유지).
     const requester = (b.requester_name || b.created_by || '').toString().trim() || '인트라넷';
@@ -1321,6 +1325,8 @@ async function _intakeSourceRevisionHandler(req, res, next) {
     if (!b.title || !String(b.title).trim()) {
       return res.status(400).json({ ok: false, error: '작업명은 비워둘 수 없습니다.' });
     }
+    // ★★ 결정 404 — 새 오더와 같은 문(아직 준비 안 된 종류로 바꾸기). 결정 332 종류 바꾸기(작업표 삭제)보다 **앞**이라 아무것도 지우지 않는다.
+    if (!isWorkKindReady(b.work_kind)) return res.status(409).json(workKindNotReadyBody(b.work_kind));
 
     let source;
     try {
@@ -2100,6 +2106,8 @@ async function _intakeUpdateHandler(req, res, next) {
     }
     const id = String(req.params.id || '').trim();
     if (!id || id === 'list') return res.status(400).json({ ok: false, error: 'id가 필요합니다.' });
+    // ★★ 결정 404 — 옛 수정 경로도 같은 문(보냈을 때만 — 안 보낸 칸은 그대로 둔다).
+    if (b.work_kind !== undefined && !isWorkKindReady(b.work_kind)) return res.status(409).json(workKindNotReadyBody(b.work_kind));
 
     // 현재 상태 확인 (존재/삭제/완료 여부)
     const { rows: cur } = await pool.query(
