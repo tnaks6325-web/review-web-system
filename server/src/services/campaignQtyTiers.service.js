@@ -247,11 +247,11 @@ async function summaryForCampaign(db, campaignId) {
 /**
  * ★ 결정 392 — 이 종류의 공고가 오더 단계를 복사·적용하나(단일 출처).
  *   발행 복사(campaign.routes /admin/create) · R1 판정(qtyTiersEdit) · R1 공고 반영(sharedPatch._projectQtyTiersInTx) · 보관 해제 비교(campaignArchive)가 같은 판정을 쓴다.
- *   블로그·Q&A 는 단계를 쓰지 않는다(결정 289 · Q1 ㉠). 스위치 꺼짐 = false.
+ *   블로그·Q&A·네이버예약리뷰(결정 404 — 상품 구매가 없다)는 단계를 쓰지 않는다(결정 289 · Q1 ㉠). 스위치 꺼짐 = false.
  */
 function copiesFor(workKind) {
   const { workKindForStore } = require('../utils/workKind');
-  return enabled() && !['blog', 'qna'].includes(workKindForStore(workKind));
+  return enabled() && !['blog', 'qna', 'booking'].includes(workKindForStore(workKind));
 }
 
 /** campaign_options 행 → planTierCopy 입력 모양({optKey, productName}) — 발행의 normOpts 와 같은 모양. 마감·지운 줄은 빼고 짝을 짓는다(레드 7). */
