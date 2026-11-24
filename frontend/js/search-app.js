@@ -21,6 +21,8 @@ function show(idOrEl, displayType) {
 // selectedRows: item 배열 (1건이면 길이 1)
 // filesByIdx:   { [idx]: File[] }  — 슬롯별 파일 목록
 // memoByIdx:    { [idx]: string }  — 슬롯별 메모 (기존 단건 memoTxt와 별도)
+// ★ 파일 맨 앞에 둔다 — showScreen 이 스크립트를 읽는 도중에 불려도 선언 전 접근 오류(TDZ)가 나지 않게.
+let _preSubmitGen = 0;   // ★ 결정 406 후속(PR #1870 리뷰) — 화면 전환·제출 단계 이동·처음으로 때마다 +1: 기다린 제출이 다른 주문에 이어 붙지 않게
 const S = { selectedRow: null, selectedRows: [], filesByIdx: {}, memoByIdx: {}, files: [], step: 1, receiptStepMode: false };
 const REVIEWER_AUTH_KEY  = "rapp_reviewer_auth";  // ★ 리뷰어 로그인 세션 키
 
@@ -2273,6 +2275,7 @@ const SCREEN_TITLES = {
   screenOrderForm:    "구매양식"
 };
 function showScreen(id) {
+  _preSubmitGen++;   // ★ 결정 406 후속 — 화면이 바뀌면 기다리던 제출은 무효
   document.querySelectorAll(".screen").forEach(s => {
     s.classList.remove("active");
     s.style.display = "none";
@@ -3539,6 +3542,7 @@ async function _preAwaitChecks(btn) {
   if (!_preIsChecking()) return true;
   if (_preSubmitWaiting) return false;
   _preSubmitWaiting = true;
+  const gen0 = _preSubmitGen, row0 = S.selectedRow, rows0 = S.selectedRows, slots0 = S.captureSlots;
   const prevHtml = btn ? btn.innerHTML : '';
   const prevDisabled = btn ? !!btn.disabled : false;
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 사진 확인 중…'; }
@@ -3556,6 +3560,12 @@ async function _preAwaitChecks(btn) {
   } finally {
     if (btn) { btn.disabled = prevDisabled; btn.innerHTML = prevHtml; }
     _preSubmitWaiting = false;
+  }
+  // ★ 결정 406 후속(PR #1870 리뷰) — 기다리는 사이 [이전]으로 나가 다른 주문을 골랐거나 화면을 다시 열었으면
+  //   기다린 제출을 이어 하지 않는다(새 주문의 사진이 처음 주문으로 올라가는 것을 막는다).
+  if (_preSubmitGen !== gen0 || S.selectedRow !== row0 || S.selectedRows !== rows0 || S.captureSlots !== slots0) {
+    showToast("주문 선택이 바뀌어 제출을 멈췄어요. 확인 후 [제출하기]를 다시 눌러 주세요.", "warning");
+    return false;
   }
   return true;
 }
@@ -3786,6 +3796,7 @@ function _skipReceiptStep() {
 
 /* ── STEP 이동 ── */
 function goStep(n) {
+  _preSubmitGen++;   // ★ 결정 406 후속 — 단계가 바뀌면 기다리던 제출은 무효
   const steps = S.receiptStepMode ? [1, 2, 3] : [1, 2];
   if (!steps.includes(n)) n = 1;
   steps.forEach(i => {
@@ -4775,6 +4786,7 @@ async function submitReview() {
 }
 
 function resetApp() {
+  _preSubmitGen++;
   hide("successModal");
   S.files = []; S.selectedRow = null; S.selectedRows = []; S.filesByIdx = {}; S.memoByIdx = {};
   S.filesBySlot = {}; S.captureSlots = null; S.receiptStepMode = false; S.slotSubmitTrigger = null;

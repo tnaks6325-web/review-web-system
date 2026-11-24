@@ -130,6 +130,25 @@ test('H1-2 확인 중에 누른 [제출하기]는 확인이 끝나면 다시 누
   assert.equal(h.nodes.btnSubmit.disabled, false, '끝나면 버튼이 풀린다');
 });
 
+test('H1-7 리뷰 지적(PR #1870): 확인을 기다리는 동안 주문이 바뀌거나 화면을 떠났다 오면 기다린 제출은 멈춘다(다른 주문 사진이 엉뚱한 주문으로 올라가지 않게)', async () => {
+  for (const change of ['row', 'screen']) {
+    let release;
+    const h = harness({ scale: 10, fetchImpl: () => new Promise((r) => { release = () => r({ ok: true, status: 200, json: async () => ({ ok: true, verdict: 'pass', blocked: false, duplicate: null }) }); }) });
+    h.g.S.files = [fo('a')];
+    h.g._preCheckFiles('single', 'dropZone', h.g.S.files, ctx);
+    const sub = h.g.submitReview();
+    await new Promise((r) => setTimeout(r, 100));
+    if (change === 'row') h.g.S.selectedRow = { sheetId: 'sh', tabName: 'tab', gid: '1', rowIndex: 9, recipientName: '박다른', displayName: '박다른', row: {} };
+    else vm.runInContext('_preSubmitGen++', h.g);
+    h.g.S.files = [fo('b')];
+    release();
+    assert.equal(await within(sub, 1500), 'DONE');
+    assert.equal(h.calls.upload.length, 0, '★ ' + change + ': 바뀐 뒤에는 기다린 제출을 이어 하지 않는다');
+    assert.equal(h.calls.post.length, 0);
+    assert.ok(h.calls.toast.some((m) => /다시 눌러/.test(m)), '멈춘 이유를 알린다');
+  }
+});
+
 test('H1-3 1차 필터가 끝까지 응답하지 않아도 [제출하기]는 시간 안에 업로드까지 간다', async () => {
   const h = harness({ fetchImpl: (url, body, init) => (/review-precheck/.test(url) ? hang(url, body, init) : Promise.reject(new Error('unexpected'))) });
   h.g.S.files = [fo('a')];
