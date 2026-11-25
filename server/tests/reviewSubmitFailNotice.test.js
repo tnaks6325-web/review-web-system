@@ -354,5 +354,7 @@ test('L3-1 오타·내부 용어·딱딱한 말 정리 + 사진 칸 안내는 �
   assert.equal(hint[1], rule[1], '★ 안내 숫자 = 실제로 받는 원본 상한');
   assert.match(SA, /이미 제출했던 사진이에요/);
   assert.match(DIAG, /message: '이미 제출했던 사진이에요'/);
-  assert.match(HTML, /search-app\.js\?v=20261125-review-notice/);
+  // 이 변경을 받은 search-app.js 를 새로 받게 했는지(?v= 날짜가 결정 410 의 20261125 이후 · 결정 413 에서 패턴만 갱신 — 뜻 그대로)
+  const ver = /search-app\.js\?v=(\d{8})-[\w-]+/.exec(HTML);
+  assert.ok(ver && ver[1] >= '20261125', `search-app.js ?v= 가 결정 410 이후 판 — 실제: ${ver && ver[0]}`);
 });

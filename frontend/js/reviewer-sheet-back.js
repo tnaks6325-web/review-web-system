@@ -107,5 +107,7 @@
     if (e && e.persisted) { stack = []; owed = 0; lastDepth = curDepth(); }
   });
 
-  w.RhSheetBack = { opened: opened, closed: closed, leave: leave };
+  // depth() = 지금 칸이 이 문서의 첫 칸보다 몇 칸 위인지(창 칸 수) — 읽기만 한다(결정 413: 리뷰 제출 화면이
+  //   떠날 때 창 칸까지 한 번에 건너 들어온 칸으로 되돌아가려고 쓴다). 홈·공고 화면은 쓰지 않는다.
+  w.RhSheetBack = { opened: opened, closed: closed, leave: leave, depth: curDepth };
 })(typeof window !== 'undefined' ? window : this);
