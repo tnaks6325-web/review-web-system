@@ -562,7 +562,7 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
             <i class="fas fa-check-circle"></i>
             <div>
               <strong>이미 제출 완료</strong>
-              <p>이 참여자는 이미 리뷰를 제출했습니다.</p>
+              <p>이 건은 이미 리뷰를 제출했어요.</p>
             </div>
           </div>
           <div class="step-nav">
@@ -583,7 +583,7 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
             <div class="pane-num">2</div>
             <div>
               <h2>리뷰 캡처 제출</h2>
-              <p style="color:#DC2626;font-weight:700;font-size:.82rem">⚠️ 리뷰는 반드시 제대로 확인 후 제출. 오제출 문제발생 책임소재 리뷰어 귀책됩니다.</p>
+              <p style="color:#DC2626;font-weight:700;font-size:.82rem">⚠️ 제출하기 전에 사진을 꼭 다시 확인해 주세요. 잘못 낸 리뷰는 리뷰어 책임이에요.</p>
             </div>
           </div>
 
@@ -593,7 +593,7 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
             <div id="dzPlaceholder" class="dz-placeholder">
               <i class="fas fa-cloud-upload-alt"></i>
               <p>클릭하거나 이미지를 드래그하세요</p>
-              <span>JPG · PNG · GIF · WebP / 최대 10MB / 복수 선택 가능</span>
+              <span style="word-break:keep-all">JPG · PNG · GIF · WebP / 한 장 50MB까지(큰 사진은 자동으로 줄여요) / 여러 장 선택 가능</span>
             </div>
             <div id="dzPreview" class="dz-preview hidden"></div>
             <!-- PC 전용 3분할(좌 Ctrl+V · 중앙 끌어다 놓기 · 우 파일 추가) — search-app.js _dzSplitHtml 과 같은 모양(결정 263) -->
@@ -829,7 +829,7 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
 <!-- 업로드 직전 이미지 축소(단일 출처) — 서버 본문 10MB 상한으로 큰 캡처가 413 되는 것 방지 -->
 <script src="js/image-shrink.js"></script>
 
-<script src="js/search-app.js?v=20261124-review-size"></script>
+<script src="js/search-app.js?v=20261125-review-notice"></script>
 
 
 <!-- ══════════════════════════════════════════════════════

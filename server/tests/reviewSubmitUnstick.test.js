@@ -30,6 +30,7 @@ function fn(src, name) {
   if (at < 0) return '';
   return src.slice(at + 1, src.indexOf('\n}', at) + 2);
 }
+const rvHelpers = (src) => [...src.matchAll(/^(?:async )?function (_rv[A-Z]\w*)\(/gm)].map((m) => m[1]);
 /** 맨 위 한 줄 선언(const/let _pre… · _PRE…) 전부 */
 function preDecls(src) {
   return (src.match(/^(?:const|let) _(?:pre|PRE_)\w* = [^\n]*;[^\n]*$/gm) || []).join('\n');
@@ -82,6 +83,8 @@ function harness({ fetchImpl, uploadImpl, scale = SCALE } = {}) {
       '_preIsChecking', '_preAwaitChecks', '_preCheckFiles', '_preCheckFilesInner', '_ofFriendlyErr', '_ofPostJson',
       // 결정 408: 제출 두 길이 올리기 전에 부르는 크기 판정(보낼 크기 기준) — 없으면 '' (옛 코드에서도 돈다)
       '_reviewPhotoRules', '_reviewPhotoSendCheck',
+      // 결정 410: 제출 두 길이 부르는 실패 안내·문구 도우미(_rv…) — 있는 것만(옛 코드에서도 돈다)
+      ...rvHelpers(SA),
       'submitReview', '_submitReviewSlots'].map((n) => fn(SA, n))].join('\n');
   vm.runInContext(code + `
     this.__pre = {
@@ -122,7 +125,7 @@ test('H1-2 확인 중에 누른 [제출하기]는 확인이 끝나면 다시 누
   const sub2 = h.g.submitReview();   // 답답해서 한 번 더 누름
   await new Promise((r) => setTimeout(r, 150));
   assert.equal(h.calls.upload.length, 0, '확인이 끝나기 전에는 올리지 않는다');
-  assert.ok(!h.calls.toast.some((m) => /중복 여부를 확인하고 있어요/.test(m)), '★ 「확인 중」 토스트로 누름을 버리지 않는다(H1 — 다시 눌러야 했다)');
+  assert.ok(!h.calls.toast.some((m) => /(?:중복 여부를|사진을) 확인하고 있어요/.test(m)), '★ 「확인 중」 토스트로 누름을 버리지 않는다(H1 — 다시 눌러야 했다)');
   assert.match(h.nodes.btnSubmit.innerHTML, /사진 확인 중/, '기다리는 동안 버튼이 「사진 확인 중…」');
   assert.equal(h.nodes.btnSubmit.disabled, true, '기다리는 동안 버튼은 잠긴다(두 번 제출 방지)');
   release();
@@ -182,7 +185,7 @@ test('H1-5 확인이 끝나 「이미 낸 사진」으로 나오면 기다린 �
   release();
   assert.equal(await within(sub, 1500), 'DONE');
   assert.equal(h.calls.upload.length, 0, '확정 중복은 업로드하지 않는다');
-  assert.ok(h.calls.toast.some((m) => /이미 제출됬던 사진/.test(m)), '중복 안내');
+  assert.ok(h.calls.toast.some((m) => /이미 제출(?:됬|했)던 사진/.test(m)), '중복 안내');
 });
 
 test('H1-6 캡처 칸 화면(_submitReviewSlots)도 확인 중 누른 제출을 이어서 한다', async () => {
@@ -193,7 +196,7 @@ test('H1-6 캡처 칸 화면(_submitReviewSlots)도 확인 중 누른 제출을 
   h.g._preCheckFiles('slot:review', 'csSlot_review', h.g.S.filesBySlot.review, ctx);
   const sub = h.g.submitReview();
   await new Promise((r) => setTimeout(r, 30));
-  assert.ok(!h.calls.toast.some((m) => /중복 여부를 확인하고 있어요/.test(m)), '★ 칸 화면도 누름을 버리지 않는다');
+  assert.ok(!h.calls.toast.some((m) => /(?:중복 여부를|사진을) 확인하고 있어요/.test(m)), '★ 칸 화면도 누름을 버리지 않는다');
   release();
   assert.equal(await within(sub, 1500), 'DONE');
   assert.equal(h.calls.upload.length, 1, '칸 업로드 1번');

@@ -30,6 +30,8 @@ function fn(src, name) {
   return src.slice(at + 1, src.indexOf('\n}', at) + 2);
 }
 const photoHelpers = (src) => [...src.matchAll(/^(?:async )?function (_reviewPhoto\w*)\(/gm)].map((m) => m[1]);
+// 결정 410: 제출 두 길·넣는 길이 부르는 실패 안내 도우미(_rv…) + 문구 바탕(_ofFriendlyErr) — 있는 것만
+const rvHelpers = (src) => [...src.matchAll(/^(?:async )?function (_rv[A-Z]\w*|_ofFriendlyErr)\(/gm)].map((m) => m[1]);
 const captureConsts = (src) => (src.match(/^const REVIEW_CAPTURE_(?:MAX_PX|QUALITY)\s*=[^\n]*$/gm) || []).join('\n');
 // 운영 설정(search-config.js DEFAULT_CONFIG)의 값을 그대로 읽어 쓴다 — 시험이 따로 값을 박지 않는다
 const DEFAULT_CONFIG = vm.runInNewContext(CFG.slice(CFG.indexOf('const DEFAULT_CONFIG'), CFG.indexOf('const APP_CONFIG')) + '\nDEFAULT_CONFIG', { BOOTSTRAP_GAS_URL: '' });
@@ -70,7 +72,7 @@ function harness() {
   nodes.memoTxt = { value: '' };
   vm.createContext(g);
   const names = ['addFiles', '_mrAddFiles', '_csAddFiles', '_mrOnDrop', '_csOnDrop', 'compressImage', 'fileToBase64', 'fileToBase64Raw',
-    ...photoHelpers(SA), 'submitReview', '_submitReviewSlots'];
+    ...photoHelpers(SA), ...rvHelpers(SA), 'submitReview', '_submitReviewSlots'];
   vm.runInContext(captureConsts(SA) + '\n' + names.map((n) => fn(SA, n)).join('\n'), g);
   return { g, calls, nodes };
 }

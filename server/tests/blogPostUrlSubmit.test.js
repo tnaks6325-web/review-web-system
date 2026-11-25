@@ -321,7 +321,8 @@ t('★★ 다건: blog 행은 빈 슬롯으로 세지 않는다(행마다 판정
   const body = bodyOf(appSrc, 'async function submitReview()', 'function resetApp()');
   assert.ok(/if \(_isBlogItem\(it\)\) \{/.test(body), '다건 행별 blog 판정이 없다');
   assert.ok(/badUrl\.push\(idx \+ 1\)/.test(body), '다건 URL 검증이 없다');
-  assert.ok(/emptySlots\.length && emptySlots\.length === items\.length/.test(body),
+  // 결정 410 후속: 앞서 제출된 건을 뺀 「남은 건 수(pending)」와 비교해도 같은 의미(빈 배열을 0건으로 오판하지 않는 비교 앞 가드)
+  assert.ok(/emptySlots\.length && emptySlots\.length === (items\.length|pending)/.test(body),
     'blog 만 있을 때 "이미지를 첨부해주세요" 로 막힌다(빈 배열 === 0건 오판)');
 });
 t('★★ 파일 0장이면 업로드 호출 자체를 건너뛴다', () => {

@@ -554,7 +554,7 @@ router.post('/review-upload', reviewUploadLimiter, async (req, res, next) => {
         if (duplicate) {
           const rejected = {
             index: i + 1, rejected: 'duplicate_submitted',
-            message: '이미 제출됬던 사진이에요', duplicate,
+            message: '이미 제출했던 사진이에요', duplicate,   // 결정 410 — 오타(됬) 바로잡음
           };
           logger.warn(`[review-upload] 반영 완료된 중복 리뷰캡처 차단 (tab=${tabName}, row=${rowIndex}, match=${duplicate.fileId})`);
           return res.json({ ok: false, uploaded: 0, total: files.length, files: [rejected], error: rejected.message });

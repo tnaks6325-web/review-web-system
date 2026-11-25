@@ -516,8 +516,11 @@ function _xhrPost(url, jsonBody, timeoutMs, onProgress) {
   });
 }
 
-/** 이미지 업로드 전용 gasPost — 진행률 표시 + 재시도 안내 */
-async function gasPostUpload(body, timeout) {
+/** 이미지 업로드 전용 gasPost — 진행률 표시 + 실패 안내
+ *  opts.quiet = true 면 실패 토스트를 띄우지 않는다(부르는 화면이 그 실패를 직접 안내할 때 — 같은 말을 두 번 하지 않게 · 결정 410).
+ *  돌려주는 결과 모양은 quiet 와 상관없이 같다. */
+async function gasPostUpload(body, timeout, opts) {
+  const quiet = !!(opts && opts.quiet);
   const action = body.action || '';
   const route = _ACTION_MAP[action];
   if (!route) return { error: '알 수 없는 action: ' + action };
@@ -549,14 +552,15 @@ async function gasPostUpload(body, timeout) {
     const isNetwork = err.message.includes('네트워크');
 
     if (isTimeout) {
-      _apiToast('⏱ 업로드 시간 초과 — 네트워크 상태를 확인하고 다시 시도해주세요.\n이미지 크기가 크면 자동 압축 후 재시도됩니다.', 'error', 6000);
+      // ★ 결정 410 — 종전 토스트 끝줄(큰 사진은 줄여서 다시 보낸다는 안내)은 지키지 않는 약속이었다(업로드 시간 초과 뒤 다시 보내는 곳 0).
+      if (!quiet) _apiToast('⏱ 사진을 올리는 데 시간이 너무 오래 걸렸어요. 인터넷 연결을 확인하고 다시 시도해 주세요.', 'error', 6000);
       return { ok: false, networkError: true, timeout: true, error: '업로드 시간이 초과되었습니다. 이미지 크기를 줄이거나 네트워크를 확인하세요.', _transport: true };
     }
     if (isAborted || isNetwork) {
-      _apiToast('📡 업로드가 중단되었습니다 — 네트워크 연결을 확인하고 다시 시도해주세요.', 'error', 6000);
+      if (!quiet) _apiToast('📡 업로드가 중단되었습니다 — 네트워크 연결을 확인하고 다시 시도해주세요.', 'error', 6000);
       return { ok: false, networkError: true, error: '업로드가 중단되었습니다. 네트워크 연결을 확인하세요.', _transport: true };
     }
-    _apiToast('❌ 업로드 실패: ' + err.message, 'error', 5000);
+    if (!quiet) _apiToast('❌ 업로드 실패: ' + err.message, 'error', 5000);
     // ★ _transport = 요청이 서버에 닿지 못했다(응답 없음) — 서버가 판독에 실패한 것과 화면이 구분한다(가산 필드 · 2026-10-30).
     //   ok:false·networkError 도 가산(결정 359) — `ok === false` 로 판정하는 화면이 성공으로 접지 않게.
     return { ok: false, networkError: true, error: err.message, _transport: true };

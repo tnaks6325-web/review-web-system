@@ -98,7 +98,7 @@ function stubPool(handler) {
     const hardBlockAt = dg.indexOf("rejected: 'duplicate_submitted'", uploadAt);
     const driveUploadAt = dg.indexOf('driveService.uploadFileBase64', uploadAt);
     assert.ok(hardBlockAt > uploadAt && hardBlockAt < driveUploadAt, '중복 차단이 Drive 업로드보다 먼저');
-    assert.ok(/message: '이미 제출됬던 사진이에요'/.test(dg.slice(uploadAt, driveUploadAt)), '서버 차단 문구');
+    assert.ok(/message: '이미 제출했던 사진이에요'/.test(dg.slice(uploadAt, driveUploadAt)), '서버 차단 문구');
     assert.ok(/REVIEW_UPLOAD_AUTH_REQUIRED/.test(dg.slice(uploadAt, driveUploadAt)),
       '리뷰어 토큰이나 내부 담당자 인증이 없으면 업로드 자체를 거부');
     assert.ok(/replacedCurrent/.test(dg.slice(uploadAt)), '같은 행 재첨부는 교체 결과로 반환');
@@ -179,13 +179,13 @@ function stubPool(handler) {
       && /"Content-Type": "application\/json", \.\.\._getAuthHeaders\(\)/.test(_ofPost),
       'precheck 호출에 리뷰어 세션 헤더 전달');
     const dupFn = /function _preRenderDup\(scope, anchor\)\{?[\s\S]*?\n\}/.exec(sa)[0];
-    assert.ok(/이미 제출됬던 사진이에요/.test(dupFn), '확정 문구');
-    assert.ok(/다른 구매양식에 제출되어 반영됐어요/.test(dupFn), '반영 완료 설명');
+    assert.ok(/이미 제출했던 사진이에요/.test(dupFn), '확정 문구');   // 결정 410: 오타(됬) 바로잡음
+    assert.ok(/다른 참여 건의 리뷰로 이미 제출됐어요/.test(dupFn), '반영 완료 설명');   // 결정 410: 리뷰 사진에 「구매양식」 대신
     assert.ok(/_duplicateHistoryLine\(d\)/.test(dupFn), '제출일·수취인 참여건 한 줄');
     assert.ok(!/이번 구매양식의 리뷰 화면을 새로 캡처해 올려주세요/.test(sa), '삭제 확정 문구 없음');
     assert.ok(/s\.duplicateBlocked/.test(sa) && /if \(s\.duplicateBlocked\) return/.test(sa),
       '★★ 중복 차단은 제출 및 AI 우회 체크로도 해제 불가');
-    assert.ok(/사진 중복 여부를 확인하고 있어요/.test(sa), '비동기 확인 중 제출 경쟁 차단');
+    assert.ok(/if \(states\.some\(s => s\.checking\)\) return '사진을 확인하고 있어요/.test(sa), '비동기 확인 중 제출 경쟁 차단');   // 결정 410: 문구(중복 여부를 → 사진을)
     assert.ok(/다른 사진 선택/.test(sa) && /_showDuplicateBlockModal/.test(sa), '차단 팝업과 재선택 버튼');
     assert.ok(/querySelector\?\.\('input\[type="file"\]'\)/.test(sa), '다른 사진 선택은 슬롯 내부 파일 입력을 직접 연다');
     assert.ok(/현재 건의 리뷰 캡처를 교체하였습니다\./.test(sa), '같은 행 재첨부 완료 문구');
