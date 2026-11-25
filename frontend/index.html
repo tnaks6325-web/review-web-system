@@ -2972,7 +2972,7 @@ async function _reEditSubmit(){
       action:'reviewEditRequest', phone8:c.phone8, sheetId:c.sheetId, tabName:c.tabName, gid:c.gid,
       rowIndex:c.rowIndex, oldFileId:_reEditTargetOldId, reason,
       file:{ data:_reEditNewB64, mimeType:'image/jpeg', name:'replace.jpg' }
-    }, 120000);
+    }, 120000, { quiet: true });   // 결정 415: 실패 안내는 아래 catch 한 번만(업로드 도구 토스트 끔 · 결정 410 과 같은 방식)
     // ★ 결정 359: 업로드가 끊김(_transport)·응답 해석 실패(413·502 HTML → _httpStatus)·200+{error} 도 실패다.
     //   종전엔 `ok === false` 만 봐서 이 경우들에 「접수되었습니다」라고 거짓 안내했다(관리자는 받은 요청이 없다).
     const httpSt = Number(res && res._httpStatus) || 0;
