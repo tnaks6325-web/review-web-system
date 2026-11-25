@@ -1274,6 +1274,24 @@ function getSavedUser() {
   } catch(e) { return null; }
 }
 
+/* ★ 결정 417 — 리뷰어 등록(search.html#register)·그 화면 로그인 탭·구매양식 로그인은 공용 리뷰어 세션(rapp_reviewer_auth)만
+   쓰던 때가 있었다(옛 화면 캐시 포함). 홈 신원(USER_KEY)이 비어 있을 때만 그 세션을 홈 신원으로 한 번 옮겨 적는다 —
+   방금 가입한 사람에게 홈이 다시 로그인하라고 하지 않게(배포 순서·옛 캐시와 무관).
+   · 옮겨 적는 칸 = 그 세션에 이미 있던 이름·뒤 8자리·열쇠뿐(+ loginAt). 새로 저장하는 개인정보 0.
+   · 관리자 홈 탭(sessionStorage 에 탭 한정 세션이 있음)은 받지 않는다 — 다른 탭의 실제 리뷰어로 열리면 안 된다.
+   · 12시간 만료(expAt)가 지났거나 열쇠·이름·8자리가 없으면 받지 않는다(종전처럼 로그인 화면). 로그아웃은 두 칸을 함께 지운다. */
+function _adoptSharedReviewerLogin() {
+  try {
+    if (sessionStorage.getItem("rapp_reviewer_auth") !== null) return;
+    if (sessionStorage.getItem(HOME_SESSION_KEY) !== null) return;
+    const a = JSON.parse(localStorage.getItem("rapp_reviewer_auth") || "null");
+    const p8 = String((a && a.phone8) || "").replace(/[^0-9]/g, "");
+    if (!a || !a.name || p8.length !== 8 || !a.reviewerToken) return;
+    if (!(Number(a.expAt) > Date.now())) return;
+    localStorage.setItem(USER_KEY, JSON.stringify({ name: a.name, phone8: p8, reviewerToken: a.reviewerToken, loginAt: Date.now() }));
+  } catch (_) { /* 저장소를 못 쓰면 종전처럼 로그인 화면 */ }
+}
+
 function _reviewerTokenFresh(token) {
   try {
     const part = String(token || "").split(".")[1];
@@ -1363,6 +1381,7 @@ async function initPage() {
     document.getElementById("viewHome").style.display = "none";
     return false;
   }
+  if (!getSavedUser()) _adoptSharedReviewerLogin();   // ★ 결정 417
   let user = getSavedUser();
   if (user && user.name && user.phone8 && !_reviewerTokenFresh(user.reviewerToken)) {
     try {
@@ -1596,11 +1615,15 @@ async function doLogin() {
   btn.disabled = true;
   btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 확인 중...';
 
+  // ★ 결정 417 — 서버가 답을 안 하면 「확인 중...」에서 영영 멈추지 않게 20초 제한(_rhFetchJson 과 같은 시간).
+  //   _rhFetchJson 은 실패 응답(ok:false)을 예외로 바꿔 틀린 칸(json.field)을 잃으므로, 같은 AbortController 방식만 쓴다.
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 20000);
   try {
     // 1차: 리뷰어 등록 DB에서 확인 (/api/reviewer/verify)
     const verifyUrl = API_BASE_URL + "/api/reviewer/verify?phone8=" + encodeURIComponent(phone)
       + (name ? "&name=" + encodeURIComponent(name) : "");
-    const res = await fetch(verifyUrl);
+    const res = await fetch(verifyUrl, { signal: ctl.signal });
     const json = await res.json();
 
     if (json.ok) {
@@ -1613,9 +1636,10 @@ async function doLogin() {
       _highlightLoginField(json.field);
     }
   } catch(e) {
-    // 실제 서버/네트워크 오류는 입력 실수와 구분해 안내
-    showToast("일시적인 오류로 로그인하지 못했습니다. 잠시 후 다시 시도해주세요.");
+    // 실제 서버/네트워크 오류는 입력 실수와 구분해 안내 — 시간 초과·끊김·서버 오류는 쉬운 한국어로(결정 359 _rhErrMsg)
+    showToast(_rhErrMsg(e, "일시적인 오류로 로그인하지 못했습니다. 잠시 후 다시 시도해주세요."));
   } finally {
+    clearTimeout(timer);
     btn.disabled = false;
     btn.innerHTML = '<i class="fas fa-arrow-right"></i> 로그인';
   }

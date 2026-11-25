@@ -2184,6 +2184,9 @@ async function _doLoginDirect() {
 
     // 성공
     _saveAuthSession(data.name || name, true, true, data.phone8 || phone8, data.reviewerToken);
+    // ★ 결정 417 — 등록 화면(#register)의 로그인 탭: 옛 검색 화면을 그리지 않고(그리면 내정보 조회 등이 시작됐다 끊긴다)
+    //   리뷰어 홈(또는 돌아갈 공고)으로. 구매양식 대기·틀 안·등록 화면이 아닌 진입은 _authDoneDest 가 null = 아래 종전 길.
+    if (_authDoneLeave()) return;
     _applyLoginUI(data.name || name);
     const ni = document.getElementById("nameInput");
     if (ni) ni.value = data.name || name;
@@ -2348,20 +2351,28 @@ async function _submitRegister(name, phone, p1, p2, kakaoId) {
       const login = await gasGet({ action: "verifyReviewer", name, phone8: regPhone8 });
       if (!login?.ok || !login.reviewerToken) throw new Error(login?.error || "등록 후 로그인 세션을 발급하지 못했습니다.");
       _saveAuthSession(login.name || name, true, true, login.phone8 || regPhone8, login.reviewerToken);
-      _applyLoginUI(name);
+      if (!_authDoneDest()) _applyLoginUI(name);   // ★ 결정 417 — 곧 떠날 화면이면 옛 검색 화면을 그리지 않는다(아래에서 홈·공고로)
 
       // ★ v9.14: authScreen 등록 시 소득정보 입력 시 백그라운드 저장
       const regIncomeNameInl = (document.getElementById("regIncomeNameInline")?.value || "").trim();
       const regJuminInl = (document.getElementById("regJuminNoInline")?.value || "").replace(/[^0-9]/g, "");
+      let incSave = null;
       if (regIncomeNameInl || regJuminInl) {
         const incP = { action:"saveIncomeInfo", phone8:regPhone8, incomeName:regIncomeNameInl, jumin:regJuminInl };
-        gasPost(incP).catch(() => gasGet(incP))
+        incSave = gasPost(incP).catch(() => gasGet(incP))
           .then(r => { if(r?.ok) console.log("[등록] 소득정보(authScreen) 저장 완료"); })
           .catch(e => console.warn("[등록] 소득정보 저장 실패:", e.message));
       }
 
       const ni = document.getElementById("nameInput");
       if (ni) ni.value = name;
+
+      // ★ 결정 417 — 등록을 마치면 옛 검색 화면이 아니라 리뷰어 홈(또는 가입하러 떠나온 공고)으로.
+      //   화면을 떠나면 진행 중인 소득정보 저장 요청이 끊길 수 있어 최대 8초만 기다린 뒤 떠난다(저장 실패는 종전처럼 조용히).
+      if (_authDoneDest()) {
+        if (incSave) await Promise.race([incSave, new Promise(r => setTimeout(r, 8000))]);
+        if (_authDoneLeave()) return;
+      }
 
       await doSearch();
     } else if (data && (data.reason === "phone_registered_as_sub_account" || data.reason === "phone_registered_other_name")) {
@@ -11093,6 +11104,28 @@ function _syncReviewerHomeSessionForReturn() {
       localStorage.setItem("iad_reviewer_user", JSON.stringify(homeUser));
     }
   } catch (_) { /* 이동은 유지하고 홈에서 재로그인을 안내한다 */ }
+}
+
+/* ★ 결정 417 — 리뷰어 등록 화면(search.html#register)에서 등록·로그인을 마친 뒤 갈 곳.
+   · 공고 본인 확인 창의 [리뷰어 등록하기]로 왔으면(?returnCamp=<공고 id>) 그 공고로 — 형식 검증은 홈 returnCamp(결정 045)와 같은
+     ^[A-Za-z0-9_-]{1,64}$ (공고 id 만 받아 같은 사이트 안 경로로만 간다 = 바깥 주소로 튕기는 길 없음).
+   · 그 밖의 등록 화면 진입은 리뷰어 홈(/).
+   · 구매양식 대기(_pendingOrderForm) · 틀 안(공고 화면 구매양식) · 등록 화면이 아닌 진입(관리자 이름검색·리뷰 제출)은 null = 종전 그대로. */
+function _authDoneDest() {
+  if (window._pendingOrderForm) return null;
+  try { if (window.self !== window.top) return null; } catch (_) { return null; }
+  if (location.hash !== "#register") return null;
+  const id = new URLSearchParams(location.search).get("returnCamp");
+  if (id && /^[A-Za-z0-9_-]{1,64}$/.test(id)) return "/campaign.html?id=" + encodeURIComponent(id);
+  return "/";
+}
+/** 갈 곳이 있으면 홈 신원(iad_reviewer_user)을 같은 도우미로 적고 그 화면으로 바꿔 간다(방문 기록에 등록 화면을 남기지 않음). */
+function _authDoneLeave() {
+  const dest = _authDoneDest();
+  if (!dest) return false;
+  _syncReviewerHomeSessionForReturn();
+  window.location.replace(dest);
+  return true;
 }
 
 /** ★ 리뷰어 메인화면으로 이동 = 신규 포털(index.html)
