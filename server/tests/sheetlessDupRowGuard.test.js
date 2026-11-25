@@ -85,6 +85,13 @@ function poolWithHeaders(opts) {
     ok('중복으로 판정', r.reason === 'duplicate_row', JSON.stringify(r));
     ok('그 줄을 가리킨다', r.seq === 60);
     ok('새 슬롯을 먹지 않는다', !pool.seen.some(c => CLAIM.test(c.q)));
+    /* ★ 2026-11-04: 1차 방어 SQL 은 JS 템플릿 문자열이라 `'\D'` 로 쓰면 백슬래시가 사라져 'D' 가 됐다(글자 D만 지움) —
+         운영 연락처 78%가 '-' 를 섞어 저장돼 1차 방어가 사실상 한 번도 맞지 않았다. 스텁은 SQL 뜻을 안 봐서 못 잡았으므로
+         **실제로 보낸 SQL 문자열**을 본다. */
+    const first = pool.seen.find(c => /JOIN order_submissions os2/.test(c.q));
+    ok('1차 방어 — 주문번호·연락처를 숫자만 남겨 비교한다(실제 보낸 SQL)',
+      first && (first.q.match(/regexp_replace\(COALESCE\(os2\.(order_num|phone), ''\), '\[\^0-9\]', '', 'g'\)/g) || []).length === 2, first && first.q);
+    ok('1차 방어 — 비교 값도 숫자만(연락처 01089508885)', first && first.params[4] === '01089508885' && first.params[3] === '5102385176784');
   }
 
   console.log('\n[B] 링크가 오염된 경우 — 표 주문번호로 막는다(이번 수정)');
@@ -155,6 +162,20 @@ function poolWithHeaders(opts) {
     ok('자기 줄은 제외한다', /cp\.order_submission_id IS NULL OR cp\.order_submission_id <> \$3::uuid/.test(ord));
     ok('삭제된 줄은 근거가 아니다', /jsonb_each_text[\s\S]{0,400}cp\.deleted_at IS NULL/.test(ord.replace(/\s+/g, ' ')) ||
       /cp\.deleted_at IS NULL[\s\S]{0,400}cp\.phone8 = \$5/.test(ord.replace(/\s+/g, ' ')));
+  }
+
+  console.log('\n[Z] 서버 SQL 안 정규식 백슬래시 — 템플릿 문자열에서 사라지는 모양이 없어야 한다');
+  {
+    const fs = require('fs'), path = require('path');
+    const walk = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(path.join(d, e.name)) : (e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
+    const bad = [];
+    for (const f of walk(path.join(__dirname, '..', 'src'))) {
+      fs.readFileSync(f, 'utf8').split('\n').forEach((line, i) => {
+        if (/^\s*(\/\/|\*)/.test(line)) return;   // 주석 제외
+        if (/(regexp_replace|regexp_match|~\*?|SIMILAR TO)[^\n]*'[^']*(?<!\\)\\[A-Za-z]/.test(line)) bad.push(path.relative(path.join(__dirname, '..'), f) + ':' + (i + 1));
+      });
+    }
+    ok("SQL 정규식에 홑 백슬래시(예: '\\D') 없음 — 숫자만은 '[^0-9]', 공백은 '\\\\s'", bad.length === 0, bad.join(', '));
   }
 
   console.log('\n통과: ' + passed + '건');
