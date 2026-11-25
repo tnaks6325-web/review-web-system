@@ -347,12 +347,44 @@ async function placeInfoForTab(db, sheetId, tabName) {
        FROM booking_slots s JOIN work_orders wo ON wo.id = s.work_order_id
       WHERE s.sheet_id = $1 AND s.tab_name = $2 ORDER BY s.id LIMIT 1`, [sheetId, tabName]);
   if (!rows.length) return null;
-  const { spec } = require('../utils/bookingCalendar').bookingSpecFromWorkOrder(rows[0]);
+  return _placeFromWorkOrderRow(rows[0]);
+}
+
+/** 오더 한 줄 → 매장 안내(placeInfoForTab · placeInfoForTabs 가 같은 변환을 탄다 — 사본 0). 계약을 못 읽으면 null. */
+function _placeFromWorkOrderRow(row) {
+  const { spec } = require('../utils/bookingCalendar').bookingSpecFromWorkOrder(row);
   if (!spec) return null;
   return {
     placeName: spec.placeName, placeAddress: spec.placeAddress, bookingUrl: spec.bookingUrl,
     payMode: spec.payMode, payModeLabel: spec.payModeLabel, pay: spec.pay, reviewDeadlineDays: spec.reviewDeadlineDays,
   };
+}
+
+/**
+ * ★ 결정 411(5단계 입금) — 여러 작업의 매장 안내를 한 번에. 예약리뷰 입금 판정(환급형/무료체험형 · 1건 결제금액)의 재료.
+ * 고르는 오더 = placeInfoForTab 과 같다(그 작업 자리표를 만든 오더 · 자리 번호가 가장 작은 줄) — 예약내역 창구가 결제금액을 묻는 근거와 같은 값.
+ * @param {Array<{sheetId,tabName}>} pairs
+ * @returns {Promise<Map<string,object|null>|null>}  키 `시트||탭` · 자리표가 있는 작업만 키가 생긴다(계약을 못 읽으면 값 null) ·
+ *   ★ 조회 실패 = null(호출부가 예약리뷰 줄을 「확인 필요」로 보류한다 — fail-closed).
+ */
+async function placeInfoForTabs(db, pairs = []) {
+  const uniq = [...new Map((pairs || []).filter(p => p && p.sheetId && p.tabName)
+    .map(p => [String(p.sheetId) + '||' + String(p.tabName), { sheetId: String(p.sheetId), tabName: String(p.tabName) }])).values()];
+  const out = new Map();
+  if (!uniq.length) return out;
+  try {
+    const { rows } = await (db || _pool()).query(
+      `SELECT DISTINCT ON (s.sheet_id, s.tab_name) s.sheet_id AS "sheetId", s.tab_name AS "tabName",
+              wo.id, wo.work_kind, wo.workboard_schema_version, wo.recruit_count, wo.pay_amount, wo.product_url, wo.product_options_json
+         FROM booking_slots s JOIN work_orders wo ON wo.id = s.work_order_id
+         JOIN jsonb_to_recordset($1::jsonb) AS x("sheetId" text, "tabName" text) ON x."sheetId" = s.sheet_id AND x."tabName" = s.tab_name
+        ORDER BY s.sheet_id, s.tab_name, s.id`, [JSON.stringify(uniq)]);
+    for (const r of rows) out.set(r.sheetId + '||' + r.tabName, _placeFromWorkOrderRow(r));
+    return out;
+  } catch (e) {
+    logger.warn('[bookingSlots] 매장 안내 묶음 조회 실패(예약리뷰 입금은 확인 필요로 보류): ' + e.message);
+    return null;
+  }
 }
 
 /**
@@ -393,4 +425,6 @@ module.exports = {
   // 3단계(결정 409)
   BOOKING_SAME_DAY_OK, bookableFrom, seatsForTab, loadFreeByCampaign, checkBookingDate, pickSlotInTx, bindSlotForApply,
   slotForApplication, publicSlotView, placeInfoForTab, bookingPublicView, normalizeReservationNo,
+  // 5단계(결정 411)
+  placeInfoForTabs,
 };

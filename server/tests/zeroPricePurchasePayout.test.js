@@ -225,7 +225,8 @@ const list = o => withStubPool(payHandler(o), async svc => {
   await ta('3e 회차 담기 — 서버가 다시 계산한 대상값으로만 박제(제품비 0 · 금액 = 리뷰비일 때만)', () => {
     const p = read('src/services/payment.service.js');
     assert.ok(/amount, transfer_memo, is_qna, zero_price_purchase\$\{/.test(p), 'INSERT 칸');
-    assert.ok(/it\.zeroPricePurchase === true && Number\(it\.productPrice\) === 0 && Number\(it\.amount\) === Number\(it\.reviewFee\)/.test(p), '박제 조건');
+    // 결정 411 — 예약리뷰 무료체험형(bookingFree)도 같은 표시로 박제하지만 모양 확인(제품비 0 · 금액 = 리뷰비)은 그대로 뒤에 붙는다
+    assert.ok(/\(it\.zeroPricePurchase === true(?: \|\| it\.bookingFree === true)?\) && Number\(it\.productPrice\) === 0 && Number\(it\.amount\) === Number\(it\.reviewFee\)/.test(p), '박제 조건');
   });
   await ta('3f 동시진행 묶음 줄은 이 규칙을 쓰지 않는다(종전 no_price 그대로)', () => {
     const p = read('src/services/payment.service.js');

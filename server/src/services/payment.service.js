@@ -44,6 +44,7 @@ const { normName } = require('./identity.service');
 // 담당자 판정 **단일 출처**(065 + 회차 #18) — payment.service·trackB.service(홈 목록)가
 // 같은 함수를 부른다. 사본을 두면 "탭 담당자는 만두인데 공고 담당자는 빈칸"이 그대로 재발한다.
 const { resolveWorkManager } = require('../utils/workManager');
+const { BOOKING_NUMBER_HEADER } = require('../utils/worktablePlan');   // 결정 411 — 예약리뷰 예약내역(예약번호 칸) 머리글 단일 출처
 
 const BANK_LABEL = { kbank: '케이뱅크', hana: '하나은행', manual: '수동 이력' };
 
@@ -357,6 +358,10 @@ async function listPaymentTargets(opts = {}) {
   // ★ 결정 247 재료 — 업체가 직접 입금하는 작업(이체은행 = 업체입금 · 판정 실패 = null = 전 건 보류 · fail-closed)
   const advPayoutTabs = await _classifyAdvertiserPayout(
     [...new Set(rows.map(r => r.sheetId + '||' + r.tabName))], campMap, tabMap);
+  /* ★ 결정 411 재료 — 예약리뷰 작업의 매장 안내(환급형/무료체험형 · 1건 결제금액). 자리표가 있는 작업만 키가 생긴다.
+       조회 실패 = null → 예약리뷰로 판정된 줄은 「확인 필요」 보류(fail-closed) · 예약 아닌 줄은 종전 그대로. */
+  const bookingPlaces = await require('./bookingSlots.service').placeInfoForTabs(_db(),
+    [...new Map(rows.map(r => [r.sheetId + '||' + r.tabName, { sheetId: r.sheetId, tabName: r.tabName }])).values()]);
 
   const items = rows.map(r => {
     const key = r.sheetId + '||' + r.tabName;
@@ -572,10 +577,20 @@ async function listPaymentTargets(opts = {}) {
          제품비 칸이 없어 0 이 정상이다(no_price 로 막지 않는다). 판정 = 공고 > 탭 종류(resolveWorkKind 단일 출처).
          모르면(종류 칸 없음) 리뷰로 본다 = 종전처럼 no_price 로 막힌다(보내지 않는 쪽). */
     const isQna = resolveWorkKind({ campaignKind: camp && camp.workKind, tabKind: tab && tab.workKind }) === 'qna';
+    /* ★★ 결정 411 — 네이버예약리뷰: 환급형 = 결제금액(1건 금액 이하) + 리뷰비 · 무료체험형 = 리뷰비만. 판정 = bookingPayoutOf 하나.
+         예약리뷰 여부 = 공고 > 탭 종류(resolveWorkKind) **또는** 그 작업에 자리표가 있음(종류 칸이 어긋나도 예약 규칙 쪽으로 — fail-closed). */
+    const isBooking = !isQna && (resolveWorkKind({ campaignKind: camp && camp.workKind, tabKind: tab && tab.workKind }) === 'booking'
+      || !!(bookingPlaces && bookingPlaces.has(key)));
+    const booking = bookingPayoutOf({
+      isBooking, place: bookingPlaces ? (bookingPlaces.get(key) || null) : null, payoutMode: payout.mode, productPrice,
+      reservationNo: displayed.rowJson ? displayed.rowJson[BOOKING_NUMBER_HEADER] : '',
+    });
+    const payPrice = booking ? booking.productPrice : productPrice;   // 금액 식에 들어갈 제품비(예약리뷰만 다를 수 있다)
     /* ★★ 결정 376(사용자 확정 2026-11-16 "결제금액 0원 작업은 리뷰비만 입금관리에 올라오게") — 일반(우리 은행) 작업에서
          리뷰어가 **0원에 구매**한 줄은 제품비 없이 리뷰비만 보낸다. 판정 = zeroPricePurchaseOf 하나(fail-closed — 모르면 보류).
-         금액은 아래 식 그대로(productPrice 0 + 리뷰비) — 금액 식을 바꾸지 않는다. 회차 항목에 zero_price_purchase 로 박제(createBatch). */
-    const zeroPricePurchase = zeroPricePurchaseOf({
+         금액은 아래 식 그대로(productPrice 0 + 리뷰비) — 금액 식을 바꾸지 않는다. 회차 항목에 zero_price_purchase 로 박제(createBatch).
+         ★ 예약리뷰는 이 판정을 타지 않는다(자기 규칙 bookingPayoutOf — 결정 411). */
+    const zeroPricePurchase = !booking && zeroPricePurchaseOf({
       payoutMode: payout.mode, isQna, productPrice,
       workboardAmountZero: rowAmountIsExplicitZero(displayed.rowJson || r.amountCells),
       orderPrices: linkedOrderPrices === null ? null
@@ -584,7 +599,7 @@ async function listPaymentTargets(opts = {}) {
       fee,
     });
     // ★ 결정 292 — 제품비는 업체가 보낸다 → 우리 이체 금액 = **리뷰비만**(회차에는 제품비 0 으로 박제 — createBatch).
-    const amount = (goodsByAdvertiser || isQna) ? fee : productPrice + fee;
+    const amount = (goodsByAdvertiser || isQna) ? fee : payPrice + fee;
 
     const issues = [];      // 있으면 다운로드에서 제외(막는 사유)
     const warnings = [];    // 진행은 되지만 사람이 알아야 하는 것
@@ -596,7 +611,9 @@ async function listPaymentTargets(opts = {}) {
       if (!String(acct.accountHolder || '').trim()) issues.push('no_holder');
     }
     // split: 제품비 값이 없다 = 아직 구매(투입) 전 — 리뷰비도 구매가 끝난 줄에만 보낸다(사용자 확정 2026-10-26).
-    if (!productPrice && !isQna && !zeroPricePurchase) issues.push(goodsByAdvertiser ? 'not_purchased' : 'no_price');
+    // ★ 결정 411 — 예약리뷰는 이 줄 대신 bookingPayoutOf 의 사유(결제금액 없음·1건 금액 초과·예약내역 없음·설정 모름)를 싣는다.
+    if (!productPrice && !isQna && !zeroPricePurchase && !booking) issues.push(goodsByAdvertiser ? 'not_purchased' : 'no_price');
+    if (booking) for (const x of booking.issues) issues.push(x);
     if (amount <= 0) issues.push(goodsByAdvertiser ? 'split_no_fee' : 'zero_amount');
     /* ★★ 결정 369 — 리뷰오더 물건비는 「업체입금」인데 이체은행이 우리 은행(케이뱅크·하나·자동)인 작업은 **보류**.
          그대로 두면 제품비까지 우리가 보낸다(업체도 보내면 이중 입금 · 2026-11-13 플라워민트·누룽칩 3차가 이 상태였다).
@@ -680,11 +697,15 @@ async function listPaymentTargets(opts = {}) {
       /* 양식 계좌로 보내는데 등록DB 계좌가 **다를 때만** 실린다(같거나 등록 계좌가 없으면 null).
          화면은 이 값을 **그리기만** 한다 — 판정 사본을 만들지 않는다. */
       accountMismatch: acctMismatch,
-      productPrice, reviewFee: fee, amount, priceSource, feeSource, deliveryKind,
+      productPrice: payPrice, reviewFee: fee, amount, priceSource, feeSource, deliveryKind,
       // 결정 292 — 입금 방식(ours|advertiser|split). split = 제품비는 업체, 금액은 리뷰비만. 화면이 받은 값을 회차 만들 때 되돌려 대조한다.
       payoutMode: payout.mode, goodsByAdvertiser,
       isQna,   // 결정 321 4단계 — createBatch 가 회차 항목에 is_qna 로 박제(isFeeOnlyItem 에서 빠지는 근거)
       zeroPricePurchase,   // 결정 376 — 0원 구매 · 리뷰비만(createBatch 가 zero_price_purchase 로 박제 · isFeeOnlyItem 에서 빠지는 근거)
+      // 결정 411 — 예약리뷰: 돈 방식(refund|free)·1건 결제금액(환급 상한 · 화면 보완 카드 안내용)·무료체험형 표시
+      //   (bookingFree = createBatch 가 zero_price_purchase 로 박제 — 리뷰비만이 정상인 항목 · isFeeOnlyItem 에서 빠지는 근거)
+      bookingPayMode: booking ? booking.payMode : null, bookingPayCap: booking ? booking.cap : null,
+      bookingFree: !!(booking && booking.free),
       workboardPrice, orderPrice, priceMismatch,
       qtyTierAmount: (ord && ord.qtyTierAmount) || linkedTierMap[key + '||' + r.rowIndex] || null,
       tabReviewFee: tabFee, campaignReviewFee: campFee,
@@ -935,6 +956,41 @@ function zeroPricePurchaseOf({ payoutMode, isQna, productPrice, workboardAmountZ
   }
   const f = Number(fee);
   return fee != null && Number.isFinite(f) && f > 0;
+}
+
+/**
+ * ★★ 결정 411 — 네이버예약리뷰(work_kind 'booking') 입금 판정 **단일 출처**(사용자 확정 2026-11-25
+ *    「환급형 = 결제금액 + 리뷰비 · 무료체험형 = 리뷰비만 · 입금관리 담당자 목록에 정상으로」).
+ *
+ * 금액 식은 종전 그대로(`제품비 + 리뷰비`) — 여기서는 **제품비 자리에 무엇을 넣을지와 막을지만** 정한다.
+ *   - 환급형(refund): 제품비 = 그 줄의 결제금액(리뷰어가 예약내역 때 적은 값 · 작업보드 표시값 → 주문 원장 · 종전 계산 그대로).
+ *       ★ 오더의 1건 결제금액(`base.pay` — 예약내역 창구가 묻는 근거와 같은 `placeInfoForTab(s)`)보다 크면 `booking_pay_over`,
+ *         비었으면 `booking_pay_missing` 으로 **담당자 확인**(보류). 상한으로 깎아 보내거나 0·상한으로 채워 보내지 않는다(추측 금지).
+ *   - 무료체험형(free): 제품비 = 0(결제금액 칸·주문 금액은 보지 않는다 — 업체가 현장에서 무료 처리) → 리뷰비만.
+ *       회차 항목에는 「0원 구매」 표시(zero_price_purchase)로 박제해 「리뷰비만 보낸 건」(split) 판정에서 뺀다(createBatch).
+ *   - 공통: 예약내역(그 줄 「예약번호」 칸 · 작업보드 표시값)이 없으면 `booking_no_reservation`.
+ *       리뷰 제출·계좌·제외·회차 잠금 등 나머지 조건은 종전 그대로(대상 SQL `ri.is_submitted` 등).
+ *   - 예약 설정을 모름(자리표·오더 계약을 못 읽음 · 조회 실패 · 돈 방식 모름 · 환급형인데 1건 금액 0) = `booking_place_unknown`(fail-closed).
+ *   - 이체은행이 「제품비 업체 · 리뷰비 …」(split)면 `booking_payout_mode` — 예약리뷰는 우리 은행에서 보낸다(결정 292 의
+ *       「제품비 업체」 규칙과 섞지 않는다 · 작업 조건 › 이체은행을 바꾸면 풀린다). 업체입금(advertiser)은 종전처럼 목록에서 빠진다.
+ * @returns {null | { payMode, cap, productPrice, free, issues: string[] }}  예약리뷰가 아니면 null(종전 규칙).
+ */
+function bookingPayoutOf({ isBooking, place, payoutMode, productPrice, reservationNo } = {}) {
+  if (!isBooking) return null;
+  const issues = [];
+  if (payoutMode === 'split') issues.push('booking_payout_mode');
+  if (!String(reservationNo == null ? '' : reservationNo).trim()) issues.push('booking_no_reservation');
+  const price = Number(productPrice) > 0 ? Number(productPrice) : 0;
+  const mode = place && place.payMode;
+  if (mode === 'free') return { payMode: 'free', cap: 0, productPrice: 0, free: true, issues };
+  const cap = place && Number.isInteger(Number(place.pay)) ? Number(place.pay) : 0;
+  if (mode !== 'refund' || !(cap > 0)) {
+    issues.push('booking_place_unknown');
+    return { payMode: mode === 'refund' ? 'refund' : null, cap: cap > 0 ? cap : null, productPrice: price, free: false, issues };
+  }
+  if (!price) issues.push('booking_pay_missing');
+  else if (price > cap) issues.push('booking_pay_over');
+  return { payMode: 'refund', cap, productPrice: price, free: false, issues };
 }
 
 /**
@@ -1640,6 +1696,8 @@ function isFeeOnlyItem(it) {
   if (it.isQna === true || it.is_qna === true) return false;
   // 결정 376 — 0원 구매 항목도 같다(제품값 0 이 정상 · 받을 돈 전부 = 리뷰비 · 입금일·PAID 를 남긴다)
   if (it.zeroPricePurchase === true || it.zero_price_purchase === true) return false;
+  // 결정 411 — 예약리뷰 무료체험형(리뷰비만이 정상 · 회차 항목에는 zero_price_purchase 로 박제된다)
+  if (it.bookingFree === true) return false;
   const pp = Number(it.productPrice != null ? it.productPrice : it.product_price);
   const fee = Number(it.reviewFee != null ? it.reviewFee : it.review_fee);
   const amt = Number(it.amount);
@@ -1962,7 +2020,8 @@ async function createBatch({ bank, rows, by }) {
            // 결정 321 4단계 — Q&A 는 제품비 0 · is_qna 표시(서버가 다시 계산한 대상값 — 화면 값을 믿지 않는다)
            // 결정 376 — 0원 구매 표시는 서버가 다시 계산한 값이고, 모양(제품비 0 · 금액 = 리뷰비)이 맞을 때만 박제(어긋나면 FALSE = 종전 판정)
            (it.goodsByAdvertiser || it.isQna) ? 0 : it.productPrice, it.reviewFee, it.amount, it.transferMemo, it.isQna === true,
-           it.zeroPricePurchase === true && Number(it.productPrice) === 0 && Number(it.amount) === Number(it.reviewFee),...(it.orderSubmissionId?[it.orderSubmissionId,it.eligibilityFingerprint]:[])]);
+           // 결정 411 — 예약리뷰 무료체험형도 같은 표시(리뷰어가 0원을 낸 방문 · 리뷰비만이 정상인 항목 — 판정은 bookingPayoutOf · 모양 확인은 그대로)
+           (it.zeroPricePurchase === true || it.bookingFree === true) && Number(it.productPrice) === 0 && Number(it.amount) === Number(it.reviewFee),...(it.orderSubmissionId?[it.orderSubmissionId,it.eligibilityFingerprint]:[])]);
         await client.query('RELEASE SAVEPOINT sp_item');
         saved.push({ ...it, id: row.id, ...((it.goodsByAdvertiser || it.isQna) ? { productPrice: 0 } : {}) });
       } catch (e) {
@@ -2559,7 +2618,7 @@ module.exports = {
   _acctChangedAt, _holderKey,
   advertiserPayoutAccounts, advertiserPayoutLocked, advertiserPaysFrom, isAdvertiserPayoutChoice,
   __splitCandidateKeysForTest: _splitCandidateKeys,
-  payoutModeFrom, payoutModeLocked, advertiserGoodsFrom, splitBankOf, transferBankCodeOf, isFeeOnlyItem, feeOnlyItemSql, zeroPricePurchaseOf, SPLIT_PAYOUT, SPLIT_PAYOUT_LABEL,
+  payoutModeFrom, payoutModeLocked, advertiserGoodsFrom, splitBankOf, transferBankCodeOf, isFeeOnlyItem, feeOnlyItemSql, zeroPricePurchaseOf, bookingPayoutOf, SPLIT_PAYOUT, SPLIT_PAYOUT_LABEL,
   ADVERTISER_PAYOUT, ADVERTISER_PAYOUT_LABEL, _classifyAdvertiserPayout,
   _loadLinkedQtyTierAmounts,
 };

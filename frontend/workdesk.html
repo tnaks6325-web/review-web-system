@@ -13571,6 +13571,10 @@ const PAY_ISSUE_LABEL = {
   workboard_total_mismatch:'작업표 결제금액 ≠ 두 금액 합계', already_locked:'다른 회차에 이미 담김',
   financial_amount_changed:'금액이 바뀜(새로고침)', financial_context_unverified:'입금 정보 확인 안 됨',
   missing_validated_naver_receipt:'네이버 영수증 검수 전', missing_validated_coupang_receipt:'쿠팡 영수증 검수 전',
+  // 결정 411 — 네이버예약리뷰(환급형 = 결제금액 + 리뷰비 · 무료체험형 = 리뷰비만) — 금액을 추측하지 않고 담당자 확인으로 멈춘 줄
+  booking_pay_over:'예약리뷰 결제금액이 1건 금액보다 큼 — 작업보드 결제금액 확인', booking_pay_missing:'예약리뷰 결제금액 없음 — 작업보드 결제금액 확인',
+  booking_no_reservation:'예약내역(예약번호) 없음 — 작업보드 예약번호 확인', booking_place_unknown:'예약 설정(환급형·무료체험형) 확인 실패 — 담당자 확인',
+  booking_payout_mode:'예약리뷰는 우리 은행에서 보냄 — 작업 조건에서 이체은행 확인',
 };
 const PAY_BANKS = [['kbank','케이뱅크'],['hana','하나은행']];
 /* 보완 창구 분류 — ★ 사유마다 "고치는 곳"이 다르다.
@@ -13616,8 +13620,14 @@ function _pmAcctChipHtml(mm){
   return `<span class="pmmmchip" title="${esc(r ? `구매양식 계좌로 보냅니다 — ${t(f)} (등록 계좌: ${t(r)})` : `구매양식 계좌로 보냅니다 — 등록된 계좌가 없습니다`)}">계좌 확인</span>`;
 }
 const PAY_FIX_KIND = {
-  no_bank:'work', order_goods_by_advertiser:'work',   // 결정 369 — 이체은행을 작업 조건에서 바꾸면 그 작업 전부 풀린다 bank_unknown:'account', no_account:'account', no_holder:'account',
+  // 결정 369 — 이체은행을 작업 조건에서 바꾸면 그 작업 전부 풀린다 · 결정 411 — 예약리뷰 이체은행도 같은 창구
+  no_bank:'work', order_goods_by_advertiser:'work', booking_payout_mode:'work',
+  // ★ 결정 411 때 되살림 — 369 에서 위 주석이 같은 줄의 계좌 세 칸을 삼켜, 표의 계좌 보류 줄에 [보완] 버튼이 사라져 있었다
+  bank_unknown:'account', no_account:'account', no_holder:'account',
 };
+/* 결정 411 — 예약리뷰 「담당자 확인」 사유(금액을 추측하지 않고 멈춘 줄). 보완 카드가 작업마다 한 줄로 센다 —
+   고를 줄이 하나도 없는 예약 작업은 작업 목록에서 빠지므로, 여기서 말하지 않으면 아무 데도 안 보인다. */
+const PAY_BOOKING_CHECK_ISSUES = ['booking_pay_over','booking_pay_missing','booking_no_reservation','booking_place_unknown'];
 const PAY_ACCT_ISSUES = ['bank_unknown','no_account','no_holder'];
 
 async function renderPaymentView(){
@@ -14601,9 +14611,13 @@ function _pmBuildFix(items){
     const iss=it.issues||[], warn=it.warnings||[];
     const hasAcct = iss.some(x=>PAY_ACCT_ISSUES.includes(x));
     // 이 작업 카드에 실을 일이 하나라도 있는 행만 센다(정상 행은 카드를 만들지 않는다)
+    const bkCheck = iss.some(x=>PAY_BOOKING_CHECK_ISSUES.includes(x));   // 결정 411 — 예약리뷰 담당자 확인
     if(!(iss.includes('no_bank') || warn.includes('no_memo') || hasAcct
-        || iss.includes('no_reviewer') || iss.includes('no_price') || iss.includes('order_goods_by_advertiser'))) continue;
+        || iss.includes('no_reviewer') || iss.includes('no_price') || iss.includes('order_goods_by_advertiser')
+        || iss.includes('booking_payout_mode') || bkCheck)) continue;
     const w=work(it); w.rows++;
+    if(bkCheck){ w.bookingCheck=(w.bookingCheck||0)+1; if(it.bookingPayCap>0) w.bookingPayCap=it.bookingPayCap; }
+    if(iss.includes('booking_payout_mode')){ w.needPayoutMode=true; w.payoutModeRows=(w.payoutModeRows||0)+1; w.bookingPayout=true; }
     // 결정 369 — 리뷰오더 물건비 업체입금 ↔ 이체은행 우리 은행: 작업 조건 › 이체은행에서 바꾸면 그 작업 전부 풀린다
     if(iss.includes('order_goods_by_advertiser')){ w.needPayoutMode=true; w.payoutModeRows=(w.payoutModeRows||0)+1; }
     // ── 작업 단위(이체은행 미지정 · 통장표시 없음) — 저장하면 그 작업의 모든 행이 함께 풀린다
@@ -14614,7 +14628,7 @@ function _pmBuildFix(items){
          사유별 건수(bankRows/memoRows)는 그 줄의 title 로 남긴다(조용한 누락 금지).
        ★★ 리뷰비는 여기 없다 — **0 = 리뷰비 없는 작업**(사용자 확정 2026-08-24)이라 보완 대상이
          아니다. 리뷰비를 정하려면 작업보드 › 작업 조건 › 리뷰비에서 설정한다. */
-    if(iss.includes('no_bank') || warn.includes('no_memo') || iss.includes('order_goods_by_advertiser')) w.setupRows++;
+    if(iss.includes('no_bank') || warn.includes('no_memo') || iss.includes('order_goods_by_advertiser') || iss.includes('booking_payout_mode')) w.setupRows++;
     // ★ 리뷰비 0 = 상품비만 이체된다 — 보류(막는 사유)는 아니지만 **말하지 않으면 그대로 나간다**.
     // ── 리뷰어 단위(은행명·계좌·예금주) — 원장은 평면 배열 하나로 두고(인덱스 계약 유지)
     //    작업 카드는 그 리뷰어의 인덱스를 참조만 한다(한 리뷰어가 여러 작업에 걸칠 수 있다).
@@ -14733,7 +14747,9 @@ function _pmFixBlock(){
     const need=[];
     if(w.needBank) need.push({ic:'🏦', short:'이체은행', long:'이체은행 미지정', n:w.bankRows});
     if(w.needMemo) need.push({ic:'🏷', short:'통장표시', long:'통장표시 없음', n:w.memoRows});
-    if(w.needPayoutMode) need.push({ic:'🏢', short:'이체은행(리뷰오더는 업체입금)', long:'리뷰오더 물건비가 업체입금인데 이체은행이 우리 은행', n:w.payoutModeRows});
+    if(w.needPayoutMode) need.push(w.bookingPayout
+      ? {ic:'🏢', short:'이체은행(예약리뷰는 우리 은행)', long:'예약리뷰인데 이체은행이 「제품비 업체」', n:w.payoutModeRows}
+      : {ic:'🏢', short:'이체은행(리뷰오더는 업체입금)', long:'리뷰오더 물건비가 업체입금인데 이체은행이 우리 은행', n:w.payoutModeRows});
     if(need.length){
       const label = need.map(p=>`${p.ic} ${p.short}`).join(' · ')
         + `<span class="tail">— 작업보드 › 작업 조건에서 설정합니다</span>`;
@@ -14751,6 +14767,9 @@ function _pmFixBlock(){
       <span class="nm">👤 리뷰어 미등록 ${w.noReviewer}건 — 등록리뷰어DB에서 먼저 등록해야 계좌를 지목할 수 있습니다</span></div>`);
     if(w.noPrice) lines.push(`<div class="pmfixrow info">
       <span class="nm">💰 결제금액 없음 ${w.noPrice}건 — 시트 결제금액 칸을 채우면 다음 조회에서 자동으로 풀립니다</span></div>`);
+    // 결정 411 — 예약리뷰: 금액을 추측하지 않고 멈춘 줄(결제금액 없음·1건 금액 초과·예약번호 없음)
+    if(w.bookingCheck) lines.push(`<div class="pmfixrow info">
+      <span class="nm">📅 예약리뷰 확인 ${w.bookingCheck}건 — [📋 작업보드]에서 그 줄의 예약번호·결제금액${w.bookingPayCap>0?`(1건 최대 ${_pmNum(w.bookingPayCap)}원)`:''}을 확인해 고치면 다음 조회에서 풀립니다</span></div>`);
     return `<div class="pmfixcard">
       <div class="wh"><span class="nm" title="${esc(w.tabLabel)}">${esc(w.tabLabel)}</span>
         <span class="n">${w.rows}건</span>${_pmBoardBtn(i)}</div>
@@ -14870,7 +14889,7 @@ function _pmRowFix(idx){
   const f=STATE.pmFix||{works:[],accts:[]};
   const it=(STATE.pmItems||[])[idx]; if(!it) return;
   const iss=it.issues||[];
-  if(iss.includes('no_bank') || iss.includes('order_goods_by_advertiser')){   // 결정 369 — 같은 창구(작업 조건 › 이체은행)
+  if(iss.includes('no_bank') || iss.includes('order_goods_by_advertiser') || iss.includes('booking_payout_mode')){   // 결정 369·411 — 같은 창구(작업 조건 › 이체은행)
     const i=f.works.findIndex(w=>w.sheetId===it.sheetId&&w.tabName===it.tabName);
     if(i>=0) return _pmOpenBoard(i);      // 작업 조건 카드에서 정한다(창구 하나)
   }
