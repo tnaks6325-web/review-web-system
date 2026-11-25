@@ -2889,7 +2889,9 @@ function renderBookingCard(j, h){
   } else {
     clearInterval(_holdTick);
     $('bookingTitle').textContent = '📅 방문 뒤 리뷰 캡처를 올려 주세요';
-    $('holdLabel').textContent = '리뷰 마감';
+    // ★ 결정 419: 마감 날·전날은 「· 오늘 마감」/「· 내일 마감」 + 기존 「곧 마감」 색(is-soon) — 글자·날짜는 서버 KST(휴대폰 시계 안 씀) · 표시만(지나도 제출은 그대로)
+    $('holdLabel').textContent = '리뷰 마감' + (b.reviewDeadlineNotice ? ' · ' + b.reviewDeadlineNotice : '');
+    { const _bar = $('holdLabel').closest('.holdbar'); if(_bar) _bar.classList.toggle('is-soon', !!b.reviewDeadlineNotice); }
     $('holdCd').textContent = b.reviewDeadline ? _bkShort(b.reviewDeadline) : '-';
     $('joinedFootNote').textContent = '리뷰 캡처를 올리면 참여가 끝나요.';
     html += '<div class="bk-done" style="margin-top:8px">✅ 예약내역 접수됨' + (b.reservationNo ? ' · 예약번호 ' + _escAttr(b.reservationNo) : '') + '</div>'

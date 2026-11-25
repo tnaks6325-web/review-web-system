@@ -2011,7 +2011,7 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
     try {
       const slot = await bookingSlots.slotForApplication(pool, app.id);
       if (slot) {
-        bookingSlot = bookingSlots.publicSlotView(slot, app.expires_at);
+        bookingSlot = bookingSlots.publicSlotView(slot, app.expires_at, now);   // ★ 결정 419 — 리뷰 마감 안내도 같은 서버 시각으로
         bookingSlot.place = await bookingSlots.placeInfoForTab(pool, slot.sheet_id, slot.tab_name);
         bookingSlot.reservationDone = !!isSubmitted;
         bookingSlot.reservationNo = isSubmitted ? String(slot.booking_reservation_no || '') : '';
