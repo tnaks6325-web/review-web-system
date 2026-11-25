@@ -214,6 +214,8 @@ const REQUIRED_TABLES = [
   'purchase_capture_artifacts',                   // 215 — staged/current/historical evidence
   'qna_slots',                                    // 210 — Q&A 날짜별 자리표(결정 321 · 없으면 무시트 탭 자동 정리·행 삭제가 깨진다)
   'booking_slots',                                // 227 — 네이버예약리뷰 날짜별 자리표(결정 407 · 없으면 조회 실패 = 모든 탭을 예약 탭으로 보고 자동 정리를 쉰다)
+  'receipt_pool',                                 // 230 — 영수증리뷰 영수증 묶음(결정 420 · 없으면 조회 실패 = 모든 탭을 영수증 탭으로 보고 자동 정리를 쉰다)
+  'receipt_review_files',                         // 230 — 비공개 영수증 사진 목록(결정 420 · 사진 통로 거절 목록 — 없으면 사진 판정 조회가 실패해 fail-open 이 된다)
   'payment_bank_rows',                            // 203 — 입금 통장 자동 대조(결정 293 · 없으면 입금관리 통장 확인이 죽는다)
   'payment_bank_sync',                            // 203 — 통장 받아 온 기록(같은 결정)
   'ops_checks',                                   // 205 — 오늘 확인할 것(결정 302)

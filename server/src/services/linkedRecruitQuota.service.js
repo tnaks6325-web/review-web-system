@@ -191,6 +191,11 @@ async function _assertQnaCalendarUnchanged(client, campaign, delta) {
   if (await require('./bookingSlots.service').isBookingTab(client, campaign.linked_sheet_id, campaign.linked_tab_name)) {
     throw quotaError('네이버예약리뷰 작업은 접수 뒤 건수를 바꿀 수 없습니다 — 날짜별 인원은 업체가 정한 값입니다.', 'recruit_quota_booking_locked');
   }
+  /* ★★ 영수증리뷰(결정 420) — 줄 = AE 가 붙인 영수증 한 장. 총 건수로 줄을 늘리면 영수증 없는 자리가 생기고, 줄이면 영수증 자리가 지워진다.
+     판정 실패 = 영수증 탭으로 본다(막음). */
+  if (await require('./receiptPool.service').isReceiptPoolTab(client, campaign.linked_sheet_id, campaign.linked_tab_name)) {
+    throw quotaError('영수증리뷰 작업은 접수 뒤 건수를 바꿀 수 없습니다 — 모집 인원은 붙인 영수증 장수입니다.', 'recruit_quota_receipt_locked');
+  }
 }
 
 async function assertWorktableSlotsInTx(client, campaign, target) {

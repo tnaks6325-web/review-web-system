@@ -179,7 +179,7 @@ function poolOf(db) {
   /* ── ⑤ 줄 삭제 보충 ───────────────────────────────────────────── */
   console.log('\n⑤ 줄 삭제 보충');
   t('★ 예약 탭: 지운 줄과 같은 날로 보충', /const finalDateLabel = _slotTab \? removedRaw : \(planLabel \|\| lastSheetLabel \|\| removedRaw\);/.test(tbs));
-  t('★ 자리 줄만 늘 보충 · 자리 없는 줄은 보충 안 함', /const shouldReplenish = _slotTab \? _slotBound : !\(boardTarget > 0 && boardAfterDelete >= boardTarget\);/.test(tbs));
+  t('★ 자리 줄만 늘 보충 · 자리 없는 줄은 보충 안 함', /const shouldReplenish = _slotTab \? _slotBound : (?:_receiptTab \? _receiptBound : )?!\(boardTarget > 0 && boardAfterDelete >= boardTarget\);/.test(tbs));
   t('★ 보충 줄이 리뷰마감일 칸을 잇는다(같은 날 = 같은 마감)', /if \(_bookingBound\) \{[\s\S]{0,400}BOOKING_DEADLINE_HEADER/.test(tbs));
   t('★★ 자리표가 보충 줄을 가리키게 같은 트랜잭션에서 옮긴다', /if \(_bookingBound && replacement\) \{\s*await client\.query\(\s*'UPDATE booking_slots SET seq = \$4, updated_at = NOW\(\) WHERE sheet_id = \$1 AND tab_name = \$2 AND seq = \$3'/.test(tbs));
   {
@@ -221,7 +221,7 @@ function poolOf(db) {
     t('★★ 줄 정리(중복 정리·짝 빈 줄 포함): 자리 줄이 섞이면 미리보기부터 거절(실제 SQL)', err && err.code === 'booking_slot_rows');
   }
   t('주문 행 삭제: 자리 줄은 「줄 삭제」로 안내(409)', /code: 'booking_slot_row'/.test(S('src/services/workdeskOrderDelete.service.js'))
-    && /out\.code === 'booking_slot_row' \? 409/.test(S('src/routes/trackB.routes.js')));
+    && /out\.code === 'booking_slot_row'(?: \|\| out\.code === 'receipt_pool_row')? \? 409/.test(S('src/routes/trackB.routes.js')));
   t('★ 차수 추가·삭제: 예약 공고는 409(두 경로 모두)', (S('src/routes/trackB.routes.js').match(/isBookingCampaign\(campaignId\)\) \{\s*return res\.status\(409\)\.json\(\{ ok: false, code: 'rounds_booking_locked'/g) || []).length === 2);
   t('작업 삭제 때 자리표도 함께 지운다', require('../src/services/workTabDelete.service').DELETE_TABLES.includes('booking_slots'));
   t('★ 작업 이름 바꾸기: 자리표도 같은 트랜잭션에서 따라간다', /UPDATE booking_slots SET tab_name = \$1, updated_at = NOW\(\) WHERE sheet_id = \$2 AND tab_name = \$3/.test(S('src/services/tabRename.service.js')));

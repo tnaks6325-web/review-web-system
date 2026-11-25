@@ -43,6 +43,7 @@ async function run(rows, days, today = '2026-09-26') {
     sqls.push(String(sql));
     if (/FROM qna_slots/.test(sql)) return { rows: [] };   // Q&A 자리표 탭 아님(결정 321)
     if (/FROM booking_slots/.test(sql)) return { rows: [] };   // 예약 자리표 탭 아님(결정 407)
+    if (/FROM receipt_pool/.test(sql)) return { rows: [] };   // 영수증 탭 아님(결정 420)
     if (/SELECT[\s\S]*FROM campaign_participants/.test(sql)) return { rows };
     if (/UPDATE campaign_participants/.test(sql)) {
       const n = (params.length - 2) / 2;

@@ -27,6 +27,7 @@ const { findPaymentColumnIndex } = require('./columnResolver');   // 작업보�
 const _wsh = require('./workboardStatusHeaders.service');   // 상태 칸(리뷰제출·입금) 머리글 판정 단일 출처 — 작업보드·홈·업체관리 공용(결정 281)
 const { loadPopularCreditMatches } = require('./popularCredit.service');   // 인기 참여권·운영 목적 라벨 단일 출처
 const { cashReceiptSubmissionStates, cashReceiptSubmissionRowKey } = require('./paymentReceiptGate.service');
+const { redactReceiptFileIds } = require('../utils/receiptPool');   // 영수증리뷰 오더 글에서 영수증 파일 번호를 지운다 — 작업보드 응답(업체 화면에도 나감 · 결정 420)
 
 // ── 공유 링크 토큰 생성 — 단일 출처(업체 접속 링크 · 브랜드 열람 링크 공용, 사본 금지) ──
 //   ★ 12바이트 base64url = **16자**. 이 토큰은 URL 프래그먼트(#a=)로 카톡에 붙어 다니므로 길이가 곧
@@ -3708,6 +3709,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       WHERE deleted_at IS NULL AND ($3::text IS NOT NULL AND id=$3 OR (linked_tab_sheet_id=$1 AND linked_tab_name=$2))
       ORDER BY ($3::text IS NOT NULL AND id=$3) DESC, created_at DESC LIMIT 1`,
     [sheetId, tabName, await _effectiveLinkedWorkOrderId(db, sheetId, tabName)]).catch(() => ({ rows: [] }));
+  // 결정 420 — 영수증리뷰 영수증 파일 번호는 작업보드 응답(업체 화면에도 나간다)에 싣지 않는다(장수만 남김 · 다른 오더는 글 그대로).
   if (wo[0]) wo[0].options = _parseWoOptions(wo[0].productOptionsJson);
   // 조건의 수동 연결 우선순위는 보존한다. 담당자만 홈·입금관리의 최신 직접 연결을 읽는다.
   const { rows: managerWo } = await db.query(
@@ -4438,7 +4440,10 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   /* 업체 응답의 meta 에서 내부 정산 값(입금명·리뷰비·이체은행·입금 주체)을 뺀다 — 화면은 업체에게 이 값을 쓰지 않는다(리뷰 반영 · 종전부터 새던 값). */
   const _resMeta = { ...(meta[0] || {}) };
   if (role === 'advertiser') { delete _resMeta.depositName; delete _resMeta.tabReviewFee; delete _resMeta.tabTransferBank; }
-  const res = { role, maskPII, archived: !!archived, meta: _resMeta, detail: wo[0] || null, counts, roster: out,
+  /* 결정 420 — 오더 글(productOptionsJson)의 영수증 파일 번호는 응답에 싣지 않는다(업체 화면에도 나간다 · { no: N } 만 남김).
+     영수증 목록이 없는 글은 같은 문자열 그대로(다른 오더 응답 바이트 불변). 위 옵션 해석·조건 요약은 파일 번호를 읽지 않는다. */
+  const _detail = wo[0] ? { ...wo[0], productOptionsJson: redactReceiptFileIds(wo[0].productOptionsJson) } : null;
+  const res = { role, maskPII, archived: !!archived, meta: _resMeta, detail: _detail, counts, roster: out,
     sourceOfTruth: (meta[0] && meta[0].sourceOfTruth) || 'sheet' };   // 진실원천(cutover 상태) 표시용
   /* 결정 289 ④ — 「구매수량」 가상 칸(시트에 쓰지 않는다 · 현영 칸과 같은 방식). 내부·업체 모두(사용자 확정 「가」).
      개수가 실린 줄이 하나도 없으면 선언하지 않는다 = 종전 표 그대로. 보관본은 roster 쿼리가 NULL 이라 생기지 않는다. */
@@ -4455,6 +4460,14 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     // 가상 컬럼: 시트에 쓰지 않고 내부 응답에서만 선언한다. 업체용 응답에는 이 필드와
     // 각 행의 cashReceiptStatus가 모두 없어 제출 여부를 역추정할 수 없다.
     if (showCashReceiptStatus) res.cashReceiptColumn = { key: '__cashReceiptStatus', label: '현영' };
+    /* 결정 420 — 영수증리뷰 탭: 「영수증」 칸(N번)에 직원용 [보기](사진은 인증 통로 GET /workdesk/receipt-image 로만 · 파일 번호는 싣지 않는다).
+       내부 응답에만(이 블록 = showEdits) · 판정 실패 = 싣지 않음(버튼 없음 = 종전 표 그대로 · 화면 표시용이라 자동 정리 판정과 달리 fail-open). */
+    if (!archived) {
+      try {
+        const { rows: _rp } = await getPool().query('SELECT 1 FROM receipt_pool WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1', [sheetId, tabName]);
+        if (_rp.length) res.receiptPoolColumn = { header: require('../utils/worktablePlan').RECEIPT_POOL_HEADER };
+      } catch (_) { /* 표시만 — 버튼을 그리지 않는다 */ }
+    }
     /* ★ 그 탭의 상태 칸(리뷰제출·입금) 헤더명 — 화면 잠금·[📎 수동 리뷰제출] 판정의 **단일 출처**.
        화면이 이름 목록 사본으로 판정하면 헤더가 그냥 `리뷰` 인 탭에서 서버(제출 시각을 그 칸에 쓴다)와
        갈려 "직접 타이핑은 되는데 수동 제출 메뉴는 없는" 상태가 된다(2026-08-21 실측).
@@ -4673,6 +4686,16 @@ async function editWorkdeskRowInTx(client, { sheetId, tabName, rowId, field, val
         const bks = require('./bookingSlots.service');
         if (await bks.isBookingTab(client, sheetId, tabName) && await bks.isBoundRow(client, sheetId, tabName, row.seq)) {
           return { ok: false, error: 'booking_slot_cell_locked', field, message: '예약리뷰 자리 줄의 이용일자·리뷰마감일·상품은 바꿀 수 없습니다 — 업체가 정한 날짜별 자리표 값입니다.' };
+        }
+      }
+      // ★ 영수증리뷰(결정 420) — 자리 줄의 참여일자·영수증·상품(매장) 칸은 시스템이 정한다(영수증 번호 = 묶음 · 참여일자 = 참여한 날).
+      //   리뷰마감일 칸은 막지 않는다(담당자가 기한을 늘려 줄 수 있는 값 — 3단계에 참여일 + N일로 채워진다).
+      const _receiptCell = [_wp.RECEIPT_DATE_HEADER, _wp.RECEIPT_POOL_HEADER].includes(_hdr)
+        || (_hi >= 0 && (_pwc(_heads).includes(_hi) || _owc(_heads).includes(_hi)));
+      if (_receiptCell) {
+        const rps = require('./receiptPool.service');
+        if (await rps.isReceiptPoolTab(client, sheetId, tabName) && await rps.isPoolBoundRow(client, sheetId, tabName, row.seq)) {
+          return { ok: false, error: 'receipt_pool_cell_locked', field, message: '영수증리뷰 자리 줄의 참여일자·영수증·상품은 바꿀 수 없습니다 — 영수증 묶음과 참여 기록이 정한 값입니다.' };
         }
       }
       if (!await _isTabColumn(client, sheetId, tabName, row.tab_gid, field.slice(4), row.row_json)) {
@@ -5165,12 +5188,16 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
     /* ★★ 네이버예약리뷰(결정 407) — 같은 규율: 업체가 정한 날짜 자리. 지운 줄과 같은 날로 보충하고 자리표가 새 줄을 가리킨다. */
     const _bookingTab = !_qnaTab && await require('./bookingSlots.service').isBookingTab(client, sheetId, tabName);
     const _slotTab = _qnaTab || _bookingTab;   // 줄 날짜 = 자리표 날짜인 탭(Q&A · 예약리뷰)
+    /* ★★ 영수증리뷰(결정 420) — 줄 = 영수증 한 장 자리. 지운 줄의 **같은 영수증**으로 늘 보충하고 묶음이 새 줄을 가리킨다.
+       ★ 날짜 갈래(_slotTab)에는 넣지 않는다 — 참여일자는 지운 사람의 참여일이라 새 자리(아직 아무도 참여 안 함)에 잇지 않는다. */
+    const _receiptTab = !_qnaTab && !_bookingTab && await require('./receiptPool.service').isReceiptPoolTab(client, sheetId, tabName);
     const finalDateLabel = _slotTab ? removedRaw : (planLabel || lastSheetLabel || removedRaw);
     // 지운 줄이 자리표의 자리인가 — 자리에 묶인 줄만 "늘 보충 + 자리 옮기기". 손으로 더한 줄(자리 없음)은 종전 규칙(총 건수 기준).
     //   조회 실패 = 묶인 것으로 본다(보충은 안전 쪽 — 자리가 사라지는 것보다 줄 하나 남는 것이 싸다).
     const _qnaBound = _qnaTab && await require('./qnaSlots.service').isBoundRow(client, sheetId, tabName, row.seq);
     const _bookingBound = _bookingTab && await require('./bookingSlots.service').isBoundRow(client, sheetId, tabName, row.seq);
     const _slotBound = _qnaBound || _bookingBound;
+    const _receiptBound = _receiptTab && await require('./receiptPool.service').isPoolBoundRow(client, sheetId, tabName, row.seq);
 
     // 행 자체는 실제 삭제한다. 삭제 표식은 별도 최소 테이블에 두어, 작업표 행을
     // 논리삭제 레코드로 남기지 않으면서도 재투영에 의해 같은 seq가 되살지 않게 한다.
@@ -5214,7 +5241,7 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
     const removedWasActive = tabRows.some(r => Number(r.seq) === Number(row.seq));
     const boardAfterDelete = Math.max(0, tabRows.length - (removedWasActive ? 1 : 0));
     // ★ Q&A·예약 탭: 자리 줄 = 늘 보충 · 자리 없는 줄(손으로 더한 줄) = 보충 안 함(자리표 밖 줄을 새로 만들지 않는다).
-    const shouldReplenish = _slotTab ? _slotBound : !(boardTarget > 0 && boardAfterDelete >= boardTarget);
+    const shouldReplenish = _slotTab ? _slotBound : _receiptTab ? _receiptBound : !(boardTarget > 0 && boardAfterDelete >= boardTarget);
     const blank = {};
     headers.forEach(h => { blank[h] = ''; });
     if (dateHeader) blank[dateHeader] = finalDateLabel;
@@ -5238,6 +5265,12 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
       const { BOOKING_DEADLINE_HEADER } = require('../utils/worktablePlan');
       const rj = row.row_json && typeof row.row_json === 'object' ? row.row_json : {};
       if (Object.prototype.hasOwnProperty.call(blank, BOOKING_DEADLINE_HEADER) && rj[BOOKING_DEADLINE_HEADER] != null) blank[BOOKING_DEADLINE_HEADER] = String(rj[BOOKING_DEADLINE_HEADER]);
+    }
+    // ★ 영수증리뷰 자리 줄은 「영수증」 칸(N번)만 잇는다(같은 영수증 자리 · 잠긴 칸이라 줄 값 그대로). 참여일자·리뷰마감일은 비운다(새 자리).
+    if (_receiptBound) {
+      const { RECEIPT_POOL_HEADER } = require('../utils/worktablePlan');
+      const rj = row.row_json && typeof row.row_json === 'object' ? row.row_json : {};
+      if (Object.prototype.hasOwnProperty.call(blank, RECEIPT_POOL_HEADER) && rj[RECEIPT_POOL_HEADER] != null) blank[RECEIPT_POOL_HEADER] = String(rj[RECEIPT_POOL_HEADER]);
     }
     // ★★ 다음 번호는 **표 전체**(소프트삭제·비활성 줄 포함)에서 골라야 한다 — `uq_participants_seq`
     //   는 부분 인덱스가 아니라 지워진 줄의 번호도 영구히 점유한다. 살아있는 줄(`tabRows`)만 보고
@@ -5277,6 +5310,11 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
     if (_bookingBound && replacement) {
       await client.query(
         'UPDATE booking_slots SET seq = $4, updated_at = NOW() WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3',
+        [sheetId, tabName, row.seq, replacement.rows[0].seq]);
+    }
+    if (_receiptBound && replacement) {
+      await client.query(
+        'UPDATE receipt_pool SET seq = $4, updated_at = NOW() WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3',
         [sheetId, tabName, row.seq, replacement.rows[0].seq]);
     }
 
@@ -5458,6 +5496,9 @@ async function setWorkdeskPurchaseDateInTx(client, { sheetId, tabName, rowId, fo
   // ★ 네이버예약리뷰(결정 407) — 자리 줄의 이용일자는 업체가 정한 날이다(달력으로 옮기지 않는다).
   const bks = require('./bookingSlots.service');
   if (await bks.isBookingTab(client, sheetId, tabName) && await bks.isBoundRow(client, sheetId, tabName, row.seq)) return { ok: false, error: 'booking_slot_date_locked' };
+  // ★ 영수증리뷰(결정 420) — 자리 줄의 참여일자는 리뷰어가 참여한 날이다(달력으로 넣거나 옮기지 않는다 · 3단계에 시스템이 적는다).
+  const rps = require('./receiptPool.service');
+  if (await rps.isReceiptPoolTab(client, sheetId, tabName) && await rps.isPoolBoundRow(client, sheetId, tabName, row.seq)) return { ok: false, error: 'receipt_pool_date_locked' };
   if (row.order_submission_id) {
     const changed = await client.query(`UPDATE order_submissions SET date_str=$2,updated_at=NOW(),
       last_edit_seq=GREATEST(COALESCE(last_edit_seq,0),$3) WHERE id=$1 AND deleted_at IS NULL`, [row.order_submission_id, fmt, Date.now()]);
@@ -6859,6 +6900,8 @@ async function assignUnslottedOrderToOpenSlotInTx(client, { sheetId, tabName, ro
     if (await require('./qnaSlots.service').isQnaTab(client, sheetId, tabName)) { return { ok: false, error: 'qna_slot_required' }; }
     // ★ 네이버예약리뷰(결정 407)도 같다 — 주문은 신청 때 고른 그 날 자리에만 들어간다.
     if (await require('./bookingSlots.service').isBookingTab(client, sheetId, tabName)) { return { ok: false, error: 'booking_slot_required' }; }
+    // ★ 영수증리뷰(결정 420)도 같다 — 주문은 참여 때 배정된 그 영수증 자리에만 들어간다.
+    if (await require('./receiptPool.service').isReceiptPoolTab(client, sheetId, tabName)) { return { ok: false, error: 'receipt_pool_required' }; }
 
     const effectiveId = await _effectiveLinkedWorkOrderId(client, sheetId, tabName);
     const { rows: workOrders } = await client.query(

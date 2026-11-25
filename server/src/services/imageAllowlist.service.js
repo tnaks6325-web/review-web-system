@@ -40,6 +40,9 @@ const DRIVE_IMAGE_SOURCES = Object.freeze([
 ]);
 const PRIVATE_SOURCES = Object.freeze([
   { table: 'payment_result_drive_archive', column: 'drive_file_id' },
+  // 결정 420 — 영수증리뷰 영수증 사진(결제 카드·시각이 찍힘 · 배정된 리뷰어와 직원만). 올리기가 주소를 돌려주기 전에 적는다.
+  //   여기 있으면 어느 공개 목록에 함께 적혀 있어도 두 통로·엣지(354)가 거절한다. 보는 길 = 인증 통로(receiptPool.sendReceiptImage)뿐.
+  { table: 'receipt_review_files', column: 'file_id' },
 ]);
 const GUIDE_IMAGE_SOURCES = Object.freeze([
   { table: 'guide_image_files', column: 'file_id' },

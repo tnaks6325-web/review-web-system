@@ -86,6 +86,17 @@ async function _assertNoBookingSlotRows(db, { sheetId, tabName, rounds = [], seq
   }
 }
 
+/* ★★ 영수증리뷰(결정 420) — 영수증 자리 줄(영수증 한 장 = 한 사람)도 줄 정리로 내리지 않는다(같은 규율 · 차수 단위는 통째로 막음).
+   판정 실패 = 영수증 탭(fail-closed) · 묶인 줄 조회 실패는 던진다(정리를 멈춘다). */
+async function _assertNoReceiptPoolRows(db, { sheetId, tabName, rounds = [], seqs = [] } = {}) {
+  const rps = require('./receiptPool.service');
+  if (!await rps.isReceiptPoolTab(db, sheetId, tabName)) return;
+  const bound = (Array.isArray(rounds) && rounds.length) ? ['차수 단위'] : await rps.poolBoundSeqs(db, sheetId, tabName, seqs);
+  if (bound.length) {
+    throw new LedgerError('receipt_pool_rows', `영수증리뷰 자리 줄은 줄 정리로 내리지 않습니다(${bound.slice(0, 5).join(', ')}) — 지울 줄은 「줄 삭제」로 지워 주세요(같은 영수증 자리로 다시 채워집니다).`);
+  }
+}
+
 /**
  * 헤더 결정 — 한 번 정해지면 유지한다(재생성마다 열 순서가 흔들리면 행 배정·표시가 어긋난다).
  * 우선순위: ① 이미 저장된 장부 헤더(이관 작업·재생성) → ② 호출자가 준 열 구성(작업표 생성 시)
@@ -474,6 +485,7 @@ async function retireRows({ sheetId, tabName, rounds = [], seqs = [], dryRun = t
     }
   }
   await _assertNoBookingSlotRows(db, { sheetId, tabName, rounds, seqs });   // ★★ 결정 407 — 예약리뷰 자리 줄도 같은 규율
+  await _assertNoReceiptPoolRows(db, { sheetId, tabName, rounds, seqs });   // ★★ 결정 420 — 영수증리뷰 자리 줄도
 
   /* ★ 작업표 쓰기는 `participants.service` 가 소유한다(쓰기 소유자 규율) — 여기는 게이트·순서·장부만. */
   const r = await require('./participants.service')

@@ -1017,6 +1017,8 @@
   .tlicard.fail{border-left:4px solid var(--bad)} .tlicard.suspect{border-left:4px solid var(--warn)} .tlicard.done{opacity:.55;background:var(--card2)}
   .tlithumb{width:108px;height:108px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--card2);cursor:zoom-in}.tlithumb img{width:100%;height:100%;object-fit:cover}.tlihead{display:flex;gap:7px;align-items:baseline;flex-wrap:wrap}.tlihead b{font-size:13px}.tlimeta{font-size:11px;color:var(--muted)}.tlireason{font-size:12px;line-height:1.5;margin:7px 0}.tliacts{display:flex;gap:5px;flex-wrap:wrap}.tliacts .btn{height:28px;padding:0 9px;font-size:11px}.tliacts .bad{color:var(--bad);border-color:#f3b7bd}@media(max-width:560px){.tlicard{grid-template-columns:1fr}.tlithumb{width:100%;height:180px}}
   /* ── 그리드 제거 × · 편집 이력 모달 ── */
+  .grcpt{margin-left:6px;padding:1px 6px;border:1px solid color-mix(in srgb,var(--accent) 40%,var(--line));border-radius:5px;background:var(--card);color:var(--accent);font:700 10.5px/1.35 inherit;cursor:pointer}.grcpt:hover{background:color-mix(in srgb,var(--accent) 10%,var(--card))}.grcpt:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  #rpOv .wbl-dlg{width:min(560px,100%);max-height:90vh;display:flex;flex-direction:column}#rpOv .rp-body{flex:1;min-height:0;overflow:auto;display:grid;place-items:center;background:var(--bg,#f6f7f9)}#rpOv .rp-img{max-width:100%;max-height:70vh;display:block;border-radius:8px}#rpOv .rp-wait{padding:28px 8px;color:var(--muted);font-size:12px}#rpOv .wbl-df{display:flex;align-items:center;gap:8px;padding:10px 18px;border-top:1px solid var(--line)}#rpOv .rp-note{margin-right:auto;color:var(--faint);font-size:10.5px}
   .rdel{margin-left:6px;padding:1px 5px;border:1px solid color-mix(in srgb,var(--bad) 35%,var(--line));border-radius:5px;background:var(--card);color:var(--bad);font:700 10.5px/1.35 inherit;cursor:pointer;opacity:0;transition:opacity .12s,background .12s,border-color .12s} tr:hover .rdel,.rdel:focus-visible{opacity:1}.rdel:hover{background:var(--bad-soft);border-color:var(--bad)}.rdel:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   /* 공유 링크 복사 완료 — 화면 중앙에서 천천히 사라지는 알림(사용자 확정 2026-08-19).
      ★ pointer-events:none — 알림이 떠 있는 동안에도 화면 조작이 막히지 않는다.
@@ -9397,7 +9399,7 @@ const _GRID_WIDTH_KEY='wd_grid_column_widths_v1',_GRID_WIDTH_MIN=52,_GRID_WIDTH_
 let _gridMeasureCtx=null; const _gridMeasureCache=new Map();
 // 컬럼 폭 = 헤더와 전체 작업보드에서 가장 긴 표시값. 필터/정렬은 폭을 바꾸지 않는다.
 function _gridTextPx(value,font){ const text=String(value==null?'':value).replace(/\s+/g,' '),key=font+'\\0'+text; if(_gridMeasureCache.has(key))return _gridMeasureCache.get(key); let width=0; try{if(!_gridMeasureCtx&&typeof document!=='undefined')_gridMeasureCtx=document.createElement('canvas').getContext('2d');if(_gridMeasureCtx){_gridMeasureCtx.font=font;width=_gridMeasureCtx.measureText(text).width;}}catch(_){} if(!width)width=[...text].reduce((sum,ch)=>sum+(ch.charCodeAt(0)>255?12:7.2),0);_gridMeasureCache.set(key,width);return width;}
-function _gridAutoColumnWidths(wd,cols){const widths=new Map(),rows=Array.isArray(wd&&wd.roster)?wd.roster:[];(cols||[]).forEach(c=>{const h=c.key;let widest=_gridTextPx(_colLabel(h),_GRID_HEAD_FONT)+_GRID_HEAD_PAD;rows.forEach(r=>{widest=Math.max(widest,_gridTextPx(gCellDisp(r,h),_GRID_BODY_FONT)+_GRID_CELL_PAD+(typeof _bkOverduePad==='function'?_bkOverduePad(r,h):0));});widths.set(h,Math.ceil(widest));});return widths;}
+function _gridAutoColumnWidths(wd,cols){const widths=new Map(),rows=Array.isArray(wd&&wd.roster)?wd.roster:[];(cols||[]).forEach(c=>{const h=c.key;let widest=_gridTextPx(_colLabel(h),_GRID_HEAD_FONT)+_GRID_HEAD_PAD;rows.forEach(r=>{widest=Math.max(widest,_gridTextPx(gCellDisp(r,h),_GRID_BODY_FONT)+_GRID_CELL_PAD+(typeof _bkOverduePad==='function'?_bkOverduePad(r,h):0));});if(_rpIsCol(h))widest+=_RP_BTN_PX;widths.set(h,Math.ceil(widest));});return widths;}
 function _gridWidthClamp(value){const n=Math.round(Number(value));return Number.isFinite(n)?Math.max(_GRID_WIDTH_MIN,Math.min(_GRID_WIDTH_MAX,n)):null;}
 function _gridWidthScope(){const t=STATE.cur;if(!t)return '';return [STATE.role||'',STATE.name||'',t.sheetId||'',t.tabName||''].map(v=>encodeURIComponent(String(v))).join('|');}
 function _gridWidthStore(){try{const parsed=JSON.parse(localStorage.getItem(_GRID_WIDTH_KEY)||'{}');return parsed&&typeof parsed==='object'&&!Array.isArray(parsed)?parsed:{};}catch(_){return {};}}
@@ -9409,6 +9411,10 @@ function _gridApplyWidthPrefs(widths,cols){const prefs=_gridWidthPrefsForRender(
 function _gridHasManualWidth(key){return Object.prototype.hasOwnProperty.call(_gridWidthPrefsForRender(),key);}
 function _gridWidthKeyToken(value){return encodeURIComponent(String(value)).replace(/'/g,'%27');}
 const _CASH_RECEIPT_COL='__cashReceiptStatus';
+/* ★ 결정 420 — 영수증리뷰 「영수증」 칸. 서버가 내부 응답에 receiptPoolColumn 을 실을 때만(영수증 묶음이 있는 탭 · 업체 응답엔 없음).
+   칸 이름은 서버 값(worktablePlan.RECEIPT_POOL_HEADER)을 그대로 쓴다 — 화면에 이름 사본을 두지 않는다. */
+const _RP_BTN_PX=44;   // 「영수증」 칸 [보기] 단추 폭(자동 열 너비에 더한다 — 안 더하면 단추가 칸 밖으로 잘려 눌리지 않는다 · 2026-11-25 미리보기 실측)
+function _rpIsCol(h){ const c=STATE.wd&&STATE.wd.receiptPoolColumn; return STATE.role!=='advertiser'&&!!(c&&c.header)&&h===c.header; }
 function _cashReceiptColumn(wd){return STATE.role!=='advertiser'&&wd&&wd.cashReceiptColumn?[{key:_CASH_RECEIPT_COL,kind:'cashReceipt'}]:[];}
 function _cashReceiptDisplay(status){return ({submitted:'제출완료',missing:'미제출',not_applicable:'해당없음',configuration_error:'설정확인',unavailable:'확인불가'})[status]||'확인불가';}
 function _cashReceiptTitle(status){return ({submitted:'현금영수증 제출 완료',missing:'현금영수증 제출 전',not_applicable:'현금영수증 제출 대상이 아닌 작업',configuration_error:'현금영수증 대상이지만 제출 슬롯 설정을 확인해야 합니다',unavailable:'현금영수증 제출 상태를 불러오지 못했습니다'})[status]||'현금영수증 제출 상태를 확인할 수 없습니다';}
@@ -9868,6 +9874,9 @@ function buildGrid(wd){
         // 결정 385 — 「분류」가 빈 제출 주문 = 노란 「확인」(화면 글자만 · data-val 은 빈칸) · 편집 권한이 있는 칸만(누르면 고르기 창)
         const clsChk=_isClassifyCol(h)&&_clsCanCheck(r);   // = canE && 확인 대상(_clsCanCheck 한 곳)
         tds+=eCell(h, cv, false, clsChk?' gclschk':'', i, cv, false, clsChk?{mark:'확인',tip:_CLS_TIP}:null); }
+      else if(_rpIsCol(h)){   // 결정 420 — 영수증리뷰 「영수증」 칸: 읽기 전용(서버가 잠근 칸) + 직원 [보기](사진은 인증 통로로만)
+        const v=String(rj[h]==null?'':rj[h]);
+        tds+=`<td ${cls(i,'gcell gstatuslock gctr'+(v?'':' gempty'))} style="${cstyle(i)}${bgStyle('col:'+h)}" title="${esc(v?'영수증 번호 — 바꿀 수 없습니다 · [보기]로 영수증 사진을 엽니다(직원만)':'')}" data-rid="${esc(r.id)}" data-cfield="${esc('col:'+h)}">${esc(v)}${v&&r.seq!=null?`<button class="grcpt" type="button" onclick="event.stopPropagation();openReceiptPoolImage(${Number(r.seq)},this)">보기</button>`:''}</td>`; }
       else { const statusKind=_workdeskStatusKind(h); const hasHist=(h in ceMap); const ed=!statusKind&&hasHist; const raw= ed?ceMap[h]:rj[h];
         const disp= ed?(raw==null?'':String(raw)):_gridVal(h, raw);
         const editv= ed?disp:_gridEditVal(h, raw);
@@ -19556,6 +19565,28 @@ async function hideRow(rowId, opts){
   reloadWorkdesk();
 }
 function _orderDeleteCount(n){ return (Number(n)||0).toLocaleString('ko-KR'); }
+/* ★ 결정 420 — 영수증리뷰 영수증 사진 보기(직원만). 주소에 토큰·파일 번호를 싣지 않는다 — 헤더 인증으로 받아 화면 안에서만 연다(blob).
+   닫으면 바로 지운다(revokeObjectURL). 실패는 쉬운 말로 알리고 창을 닫지 않는다. */
+async function openReceiptPoolImage(seq, btn){
+  const t=STATE.cur; if(!t) return;
+  const cell=btn&&btn.parentElement, label=cell&&cell.firstChild&&cell.firstChild.nodeType===3?String(cell.firstChild.textContent||'').trim():'';
+  let ov=document.getElementById('rpOv'); if(ov) ov.remove();
+  ov=document.createElement('div'); ov.id='rpOv'; ov.className='wbl-ov';
+  ov.innerHTML=`<section class="wbl-dlg" role="dialog" aria-modal="true" aria-labelledby="rpTitle"><header class="wbl-dh" id="rpTitle">🧾 영수증 ${esc(label||'')}</header><div class="wbl-db rp-body"><div class="rp-wait">영수증 사진을 불러오는 중…</div></div><footer class="wbl-df"><span class="rp-note">직원만 볼 수 있는 사진입니다 · 리뷰어에게는 참여한 사람에게만 보입니다</span><button class="wbl-b" type="button" onclick="closeReceiptPoolImage()">닫기</button></footer></section>`;
+  ov.addEventListener('click',e=>{ if(e.target===ov) closeReceiptPoolImage(); });
+  document.body.appendChild(ov);
+  const body=ov.querySelector('.rp-body');
+  try{
+    const q=`sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&seq=${encodeURIComponent(seq)}`;
+    const res=await fetch(API_BASE+'/api/trackb/workdesk/receipt-image?'+q,{headers:{Authorization:'Bearer '+token()},cache:'no-store'});
+    if(!res.ok){ body.innerHTML=`<div class="rp-wait">${res.status===404?'이 줄에는 영수증 사진이 없습니다.':'영수증 사진을 불러오지 못했습니다 — 잠시 뒤 다시 눌러 주세요.'}</div>`; return; }
+    const url=URL.createObjectURL(await res.blob());
+    if(!document.getElementById('rpOv')){ URL.revokeObjectURL(url); return; }
+    ov.dataset.url=url;
+    body.innerHTML=`<img class="rp-img" alt="영수증 ${esc(label||'')}" src="${url}">`;
+  }catch(_){ body.innerHTML='<div class="rp-wait">영수증 사진을 불러오지 못했습니다 — 인터넷 연결을 확인하고 다시 눌러 주세요.</div>'; }
+}
+function closeReceiptPoolImage(){ const ov=document.getElementById('rpOv'); if(!ov) return; if(ov.dataset.url) URL.revokeObjectURL(ov.dataset.url); ov.remove(); }
 async function assignUnslottedOrder(rowId){
   if(STATE._assignUnslottedBusy) return;
   const t=STATE.cur; if(!t) return;
@@ -19564,7 +19595,7 @@ async function assignUnslottedOrder(rowId){
   try{
     const result=await api('/api/trackb/workdesk/assign-unslotted-order',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,confirm:true})});
     if(!result||!result.ok){
-      const messages={no_open_slot:'목표 인원 안에 비어 있는 슬롯이 없습니다.',already_numbered:'이미 번호가 배정된 주문입니다.',work_order_target_missing:'작업오더 목표인원을 찾을 수 없습니다.',need_confirm:'확인 후 다시 시도해 주세요.',qna_slot_required:'Q&A 작업은 주문을 아무 빈 줄로 옮기지 않습니다 — 신청 때 고른 자리에만 들어갑니다.'};
+      const messages={no_open_slot:'목표 인원 안에 비어 있는 슬롯이 없습니다.',already_numbered:'이미 번호가 배정된 주문입니다.',work_order_target_missing:'작업오더 목표인원을 찾을 수 없습니다.',need_confirm:'확인 후 다시 시도해 주세요.',qna_slot_required:'Q&A 작업은 주문을 아무 빈 줄로 옮기지 않습니다 — 신청 때 고른 자리에만 들어갑니다.',receipt_pool_required:'영수증리뷰 작업은 주문을 아무 빈 줄로 옮기지 않습니다 — 참여 때 배정된 영수증 자리에만 들어갑니다.'};
       toast(messages[result&&result.error]||(result&&result.error)||'번호 배정에 실패했습니다. 새로고침 후 다시 시도해 주세요.');
       return;
     }

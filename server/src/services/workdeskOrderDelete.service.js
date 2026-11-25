@@ -75,6 +75,11 @@ async function deleteWorkdeskOrderRow({ sheetId, tabName, rowId, by = 'admin', p
   if (await bks.isBookingTab(db, sheetId, tabName) && await bks.isBoundRow(db, sheetId, tabName, rows[0].seq)) {
     return { ok: false, code: 'booking_slot_row', error: '예약리뷰 자리 줄은 여기서 지우지 않습니다 — 「줄 삭제」로 지우면 주문이 취소되고 같은 날 자리로 다시 채워집니다.' };
   }
+  // 영수증리뷰(결정 420)도 같다 — 영수증 자리가 사라지지 않게 「줄 삭제」(같은 영수증 자리로 보충)로 안내한다.
+  const rps = require('./receiptPool.service');
+  if (await rps.isReceiptPoolTab(db, sheetId, tabName) && await rps.isPoolBoundRow(db, sheetId, tabName, rows[0].seq)) {
+    return { ok: false, code: 'receipt_pool_row', error: '영수증리뷰 자리 줄은 여기서 지우지 않습니다 — 「줄 삭제」로 지우면 주문이 취소되고 같은 영수증 자리로 다시 채워집니다.' };
+  }
   const orderSubmissionId = rows[0].orderSubmissionId;
   const { cancelOrderSubmission } = require('./orderCancellation.service');
   try {
@@ -99,6 +104,9 @@ async function deleteWorkdeskOrderRow({ sheetId, tabName, rowId, by = 'admin', p
         if (await bks.isBookingTab(client, sheetId, tabName) && await bks.isBoundRow(client, sheetId, tabName, current[0].seq)) {
           throw Object.assign(new Error('예약리뷰 자리 줄은 「줄 삭제」로 지워 주세요.'), { code: 'booking_slot_row' });
         }
+        if (await rps.isReceiptPoolTab(client, sheetId, tabName) && await rps.isPoolBoundRow(client, sheetId, tabName, current[0].seq)) {
+          throw Object.assign(new Error('영수증리뷰 자리 줄은 「줄 삭제」로 지워 주세요.'), { code: 'receipt_pool_row' });
+        }
       },
       beforeCancelCommit: async (client) => {
         // 주문 ID까지 다시 대조해, 이름이 같은 다른 행을 지우는 일이 없게 한다.
@@ -117,7 +125,7 @@ async function deleteWorkdeskOrderRow({ sheetId, tabName, rowId, by = 'admin', p
     });
     return { ...out, rowId, orderSubmissionId };
   } catch (err) {
-    if (err && ['row_changed', 'qna_slot_row', 'booking_slot_row'].includes(err.code)) return { ok: false, code: err.code, error: err.message };
+    if (err && ['row_changed', 'qna_slot_row', 'booking_slot_row', 'receipt_pool_row'].includes(err.code)) return { ok: false, code: err.code, error: err.message };
     throw err;
   }
 }

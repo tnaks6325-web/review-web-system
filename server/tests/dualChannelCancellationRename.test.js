@@ -108,6 +108,7 @@ async function seedRename(f) {
     CREATE TABLE review_report_links(sheet_id text,tab_name text);
     CREATE TABLE qna_slots(sheet_id text,tab_name text,updated_at timestamptz);
     CREATE TABLE booking_slots(sheet_id text,tab_name text,updated_at timestamptz);
+    CREATE TABLE receipt_pool(sheet_id text,tab_name text,updated_at timestamptz);
     CREATE TABLE payment_batches(id text PRIMARY KEY,historical_key text);
     CREATE TABLE payment_batch_items(id text PRIMARY KEY,batch_id text,sheet_id text,tab_name text,row_index int,status text,amount int);
     CREATE TABLE payment_records(sheet_id text,tab_name text,row_index int,status text,source_key text,amount int);
@@ -190,6 +191,7 @@ async function test(name, run) {
     const deletion = load('workdeskOrderDelete', {
       './qnaSlots.service': { isQnaTab: async () => false, isBoundRow: async () => false },
       './bookingSlots.service': { isBookingTab: async () => false, isBoundRow: async () => false },
+      './receiptPool.service': { isReceiptPoolTab: async () => false, isPoolBoundRow: async () => false },
       './orderCancellation.service': { ...f.cancellation, cancelOrderSubmission: async args => {
         assert.equal(args.pool, f.pool, 'selected pool must reach cancellation'); forwarded = true;
         return f.cancellation.cancelOrderSubmission(args);
@@ -279,7 +281,7 @@ async function test(name, run) {
       }
     });
     const deletion = load('workdeskOrderDelete', {
-      './qnaSlots.service': { isQnaTab: async () => false }, './bookingSlots.service': { isBookingTab: async () => false }, './orderCancellation.service': f.cancellation,
+      './qnaSlots.service': { isQnaTab: async () => false }, './bookingSlots.service': { isBookingTab: async () => false }, './receiptPool.service': { isReceiptPoolTab: async () => false }, './orderCancellation.service': f.cancellation,
     });
     const out = await deletion.deleteWorkdeskOrderRow({ sheetId: 's', tabName: 'old', rowId: 'row', pool: f.pool });
     assert.equal(out.code, 'row_changed');
