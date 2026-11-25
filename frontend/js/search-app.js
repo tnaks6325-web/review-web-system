@@ -3181,17 +3181,7 @@ async function _csLoadCrGuides(item, receiptSlotKey = 'receipt') {
 
 async function _csAddFiles(slotKey, newFiles) {
   if (!S.filesBySlot[slotKey]) S.filesBySlot[slotKey] = [];
-  const MAX = 10 * 1024 * 1024;
-  for (const f of newFiles) {
-    if (f.size > MAX) { showToast(`${f.name}: 10MB 초과`, "warning"); continue; }
-    try {
-      const b64 = await fileToBase64(f);
-      const actualType = (f.type.startsWith('image/') && f.size > 1024 * 1024) ? 'image/jpeg' : f.type;
-      S.filesBySlot[slotKey].push({ file: f, b64, size: f.size, type: actualType, name: f.name });
-    } catch (e) {
-      showToast(`${f.name}: 이미지 읽기 실패 (다시 선택해주세요)`, "error");
-    }
-  }
+  await _reviewPhotoAdd(S.filesBySlot[slotKey], newFiles);   // ★ 결정 408: 받는 규칙 단일 출처
   _csRenderPreview(slotKey);
   _updateReceiptStepActions();
   // 1차 필터 — 미리보기는 먼저 그리고(사용자가 기다리지 않게) 판별은 뒤따라 붙인다
@@ -3252,7 +3242,7 @@ function _csOnDrop(e, slotKey) {
   e.preventDefault();
   const dz = document.getElementById("csDz_" + slotKey);
   if (dz) dz.classList.remove("drag-over");
-  const files = Array.from(e.dataTransfer?.files || []).filter(f => f.type.startsWith("image/"));
+  const files = Array.from(e.dataTransfer?.files || []);   // ★ 결정 408: 형식 안내는 _reviewPhotoAdd
   _csAddFiles(slotKey, files);
 }
 function _csRemoveFile(slotKey, fileIdx) {
@@ -3651,7 +3641,7 @@ function _mrOnDrop(e, idx) {
   e.preventDefault();
   const dz = document.getElementById("mrDz_" + idx);
   if (dz) dz.classList.remove("drag-over");
-  const files = Array.from(e.dataTransfer?.files || []).filter(f => f.type.startsWith("image/"));
+  const files = Array.from(e.dataTransfer?.files || []);   // ★ 결정 408: 형식 안내는 _reviewPhotoAdd
   _mrAddFiles(idx, files);
 }
 
@@ -3660,18 +3650,7 @@ function _mrOnDrop(e, idx) {
  */
 async function _mrAddFiles(idx, newFiles) {
   if (!S.filesByIdx[idx]) S.filesByIdx[idx] = [];
-  const MAX = 10 * 1024 * 1024;
-  for (const f of newFiles) {
-    if (f.size > MAX) { showToast(`${f.name}: 10MB 초과`, "warning"); continue; }
-    try {
-      const b64 = await fileToBase64(f);
-      // ★ 이미지 압축 시 JPEG로 변환되므로 type 업데이트
-      const actualType = (f.type.startsWith('image/') && f.size > 1024 * 1024) ? 'image/jpeg' : f.type;
-      S.filesByIdx[idx].push({ file: f, b64, size: f.size, type: actualType, name: f.name });
-    } catch(e) {
-      showToast(`${f.name}: 이미지 읽기 실패 (다시 선택해주세요)`, "error");
-    }
-  }
+  await _reviewPhotoAdd(S.filesByIdx[idx], newFiles);   // ★ 결정 408: 받는 규칙 단일 출처
   _mrRenderPreview(idx);
   _preCheckFiles('idx:' + idx, 'mrSlot_' + idx, S.filesByIdx[idx],
     { ..._preCtx(idx), slotKey: 'review' });
@@ -4022,7 +4001,7 @@ function bindDragDrop() {
   zone.addEventListener("dragleave", () => zone.classList.remove("drag-over"));
   zone.addEventListener("drop", e => {
     e.preventDefault(); zone.classList.remove("drag-over");
-    addFiles(Array.from(e.dataTransfer.files).filter(f => APP_CONFIG.ALLOWED_MIME.includes(f.type)));
+    addFiles(Array.from(e.dataTransfer.files));   // ★ 결정 408: 형식은 넣는 함수가 보고 안내한다(말없이 버리지 않는다)
   });
 }
 function onFilesSelected(e) { addFiles(Array.from(e.target.files)); e.target.value = ""; }
@@ -4031,7 +4010,7 @@ function onFilesSelected(e) { addFiles(Array.from(e.target.files)); e.target.val
  *  사용자 요청: "저장 없이 Ctrl+V 로 바로 붙여넣기 · 어딜 누르고 붙여넣어야 하는지 불분명 · 선택했다는 시각적 표시 ·
  *  클릭 시 바로 파일탐색기를 열지 말 것 · 영역을 3분할(좌 Ctrl+V / 중앙 끌어다놓기 / 우 파일추가)".
  *  ★ PC(마우스)만 3분할을 보인다 — 휴대폰은 Ctrl+V·끌어다 놓기가 없어 종전대로 누르면 바로 사진 고르기(화면 불변).
- *  ★ 넣는 길은 클릭·드래그와 같은 addFiles / _mrAddFiles / _csAddFiles — 형식·10MB·AI 사전확인 사본 0.
+ *  ★ 넣는 길은 클릭·드래그와 같은 addFiles / _mrAddFiles / _csAddFiles — 형식·크기(_reviewPhotoAdd · 결정 408)·AI 사전확인 사본 0.
  *  ★ 선택된 칸 = 마지막으로 누른 칸 · 아직 안 눌렀으면 비어 있는 첫 칸. 실선 파란 테두리 + 왼쪽 칸 "✓ 선택됨"(css .paste-target).
  *  ★ 파일 탐색기는 오른쪽 [파일 추가]만 연다. 칸의 다른 곳을 누르면 그 칸을 선택만 한다.
  *  ★ Ctrl+V 는 화면 어디서나 → 선택된 칸. 클립보드에 사진이 없으면 가로채지 않는다(비고란 글자 붙여넣기 그대로).
@@ -4118,7 +4097,7 @@ async function _zonePasteFromClipboard(z) {
   _pasteInto(z, blobs);
 }
 /** 붙여넣은 사진(클립보드 Blob/File)을 그 칸에 넣는다 — 클릭·드래그와 같은 함수로.
- *  ★ 성공 안내는 실제로 받아들여진 장수만(10MB 초과·형식 불가·읽기 실패는 넣는 함수가 각자 오류 안내). */
+ *  ★ 성공 안내는 실제로 받아들여진 장수만(크기·형식 불가·읽기 실패는 넣는 함수 _reviewPhotoAdd 가 오류 안내). */
 async function _pasteInto(z, imgs) {
   // 클립보드 사진은 이름이 없거나 모두 image.png 라 구분되게 다시 붙인다(내용은 그대로)
   const stamp = new Date().toTimeString().slice(0, 8).replace(/:/g, "");
@@ -4157,18 +4136,8 @@ function bindPasteUpload() {
  *   → submitReview() 시점에 File 참조가 만료되는 Android WebView 문제 방지
  */
 async function addFiles(files) {
-  for (const f of files) {
-    if (!APP_CONFIG.ALLOWED_MIME.includes(f.type)) { showToast(`${f.name}: 지원하지 않는 형식`, "error"); continue; }
-    if (f.size > APP_CONFIG.MAX_FILE_SIZE)          { showToast(`${f.name}: 10MB 초과`, "error");        continue; }
-    try {
-      const b64 = await fileToBase64(f);
-      // ★ 이미지 압축 시 JPEG로 변환되므로 type을 image/jpeg로 설정
-      const actualType = (f.type.startsWith('image/') && f.size > 1024 * 1024) ? 'image/jpeg' : f.type;
-      S.files.push({ file: f, b64, size: f.size, type: actualType, name: f.name });
-    } catch(e) {
-      showToast(`${f.name}: 이미지 읽기 실패 (다시 선택해주세요)`, "error");
-    }
-  }
+  // ★ 결정 408: 받는 규칙(형식·한 장·합계)은 _reviewPhotoAdd 한 곳 — 줄인 뒤(보낼 크기)로 판정한다.
+  await _reviewPhotoAdd(S.files, files);
   renderPreviews();
   _preCheckFiles('single', 'dropZone', S.files, { ..._preCtx(0), slotKey: 'review' });
 }
@@ -4305,13 +4274,11 @@ async function _submitReviewSlots(item) {
     return;
   }
 
-  // 용량 검사 (전체 합산 15MB)
-  const MAX_TOTAL_MB = 15;
-  const totalBytes = slotsToUpload.reduce((s, slot) =>
-    s + (S.filesBySlot[slot.key] || []).reduce((a, fo) => a + (fo.size || 0), 0), 0);
-  if (totalBytes > MAX_TOTAL_MB * 1024 * 1024) {
-    showToast(`이미지 총 용량이 ${MAX_TOTAL_MB}MB를 초과합니다.`, "warning");
-    return;
+  // ★ 결정 408: 크기는 **보낼(줄인 뒤) 사진**으로, 실제로 한 번에 보내는 단위(칸마다 업로드 1번)로 본다.
+  //   종전 = 원본 크기 합 15MB(칸 전체) — 스크린숏 몇 장으로 막혔다. 올리기 전에 전부 본다.
+  for (const slot of slotsToUpload) {
+    const big = _reviewPhotoSendCheck(S.filesBySlot[slot.key] || [], `「${slot.label || slot.key}」 칸의 `);
+    if (big) { showToast(big, "warning"); return; }
   }
 
   if (!btn) return;
@@ -4595,6 +4562,13 @@ async function submitReview() {
     if (S.files.length === 0) { showToast("이미지를 1장 이상 첨부해주세요.", "warning"); return; }
   }
 
+  // ★ 결정 408: 크기는 **보낼(줄인 뒤) 사진**으로 — 건마다 업로드 1번이라 건마다 본다. 올리기 전에 전부 본다
+  //   (종전엔 원본 크기 합 15MB 를 업로드 반복 안에서 던져 「모든 제출에 실패했습니다: 1번 오류:」로 나왔다).
+  for (let idx = 0; idx < items.length; idx++) {
+    const big = _reviewPhotoSendCheck(isMulti ? (S.filesByIdx[idx] || []) : S.files, isMulti ? `${idx + 1}번 리뷰의 ` : '');
+    if (big) { showToast(big, "warning"); return; }
+  }
+
   const btn = document.getElementById("btnSubmit");
   btn.disabled = true;
   const progressWrap = document.getElementById("mrProgressWrap");
@@ -4602,7 +4576,6 @@ async function submitReview() {
   const progressLabel = document.getElementById("mrProgressLabel");
   if (isMulti && progressWrap) progressWrap.classList.add("show");
 
-  const MAX_TOTAL_MB = 15;
   let successCount = 0;
   const errors = [];
   let replacedCurrent = false;
@@ -4636,11 +4609,7 @@ async function submitReview() {
         if (files.length === 0) {
           showLoading(isMulti ? `(${idx+1}/${items.length}) 제출 중...` : "제출 중...");
         } else {
-          // ★ 파일 크기 검사 (이미 b64로 저장된 객체 기준)
-          const totalBytes = files.reduce((s, fo) => s + (fo.size || 0), 0);
-          if (totalBytes > MAX_TOTAL_MB * 1024 * 1024) {
-            throw new Error(`이미지 총 용량이 ${MAX_TOTAL_MB}MB를 초과합니다.`);
-          }
+          // ★ 크기 검사는 반복 앞(_reviewPhotoSendCheck · 결정 408)에서 끝났다 — 여기서 원본 크기로 다시 막지 않는다.
 
           // ★ 이미 선택 시점에 Base64 변환 완료 → 별도 변환 불필요
           const fileData = files.map(fo => fo.b64);
@@ -11078,6 +11047,92 @@ function _jsonpGet(fullUrl, timeoutMs) {
 const REVIEW_CAPTURE_MAX_PX  = 1600;
 const REVIEW_CAPTURE_QUALITY = 0.75;
 
+/* ★★ 결정 408 — 리뷰 사진을 **받는 규칙 단일 출처**(넣는 길 3곳 addFiles · _mrAddFiles · _csAddFiles 와 제출 두 길이 함께 쓴다).
+   ★ 판정은 **실제로 보낼(줄인 뒤) 사진**으로 한다 — 종전엔 줄이기 전 원본 크기로 막아, 휴대폰 스크린숏 몇 장(원본 합 15MB↑ ·
+     보낼 양 1MB 남짓)이 「총 용량 15MB 초과」로, 원본 11MB 캡처(줄이면 0.5MB)가 「10MB 초과」로 막혔다(점검 2026-11-24 M1).
+   ★ 형식도 **보낼 내용**(앞 몇 바이트)으로 본다 — 받는 형식은 APP_CONFIG.ALLOWED_MIME(JPG·PNG·GIF·WebP) 그대로.
+     휴대폰이 JPG 로 바꿔 줄 수 있는 사진(예 아이폰 HEIC)은 JPG 로 받고, 바꾸지 못한 파일은 쉬운 말로 돌려보낸다(L5 — 종전엔 단건만 형식을 봤다).
+   ★ 서버가 진짜 관문이다(본문 상한 express.json 15mb · app.js) — 여기 값은 그 안에 들어오게 **앞에서 알려 주는** 것뿐, 서버 상한은 그대로 둔다.
+     maxSendChars 는 한 번에 보내는 사진 글자(base64) 합 — 15MB 본문에서 이름·메모 등 나머지 칸 몫을 1MB 남긴다.
+   ★ 장수 상한은 없다(화면·서버 어디에도 없었다 — 새로 만들지 않는다). 합계 상한이 사실상 그 역할을 한다. */
+function _reviewPhotoRules() {
+  return {
+    types: APP_CONFIG.ALLOWED_MIME,           // 받는 형식(보낼 내용 기준)
+    maxFileBytes: APP_CONFIG.MAX_FILE_SIZE,   // 한 장 — 줄인 뒤 보낼 크기(10MB)
+    maxSendChars: 14 * 1024 * 1024,           // 한 번(한 칸·한 건) 보내는 사진 base64 글자 합 — 서버 본문 15MB 안
+    maxOriginalBytes: 50 * 1024 * 1024,       // 줄이기 전 원본 — 휴대폰이 읽다가 멈추지 않게(종전 10MB 보다 넉넉히)
+  };
+}
+/** 보낼 내용(base64) 앞머리로 형식을 본다 — 이름표(f.type)가 아니라 실제 바이트. 모르면 '' */
+function _reviewPhotoSniff(b64) {
+  const h = String(b64 || '').slice(0, 16);
+  if (h.startsWith('/9j/')) return 'image/jpeg';
+  if (h.startsWith('iVBORw0KGgo')) return 'image/png';
+  if (h.startsWith('R0lGOD')) return 'image/gif';
+  if (h.startsWith('UklGR') && /^UklGR.{6}XRUJQ/.test(h)) return 'image/webp';
+  return '';
+}
+/** base64 글자 수 → 실제 바이트(대략) */
+function _reviewPhotoBytes(b64) { return Math.floor(String(b64 || '').length * 3 / 4); }
+function _reviewPhotoMB(bytes) { return Math.round(bytes / (1024 * 1024)) + 'MB'; }
+function _reviewPhotoTypeHint() {
+  const label = { 'image/jpeg': 'JPG', 'image/png': 'PNG', 'image/gif': 'GIF', 'image/webp': 'WebP' };
+  return (_reviewPhotoRules().types || []).map(t => label[t] || t).join('·') + ' 사진만 올릴 수 있어요';
+}
+/** 한 번에 보낼 사진 묶음(한 칸·한 건)이 너무 큰지 — 넘으면 리뷰어가 읽을 안내, 아니면 ''.
+ *  ★ 제출 두 길이 **올리기 전에** 부른다(업로드를 시작한 뒤 던지지 않는다 — 일부만 올라가지 않게). */
+function _reviewPhotoSendCheck(list, where) {
+  const R = _reviewPhotoRules();
+  const files = Array.isArray(list) ? list : [];
+  let chars = 0, big = -1, bigLen = -1;
+  files.forEach((fo, i) => {
+    const n = String((fo && fo.b64) || '').length;
+    chars += n;
+    if (n > bigLen) { bigLen = n; big = i; }
+  });
+  if (chars <= R.maxSendChars) return '';
+  return `${where || ''}사진을 모두 합치면 한 번에 보낼 수 있는 크기를 넘어요. ` +
+    `가장 큰 ${big + 1}번째 사진을 빼고 다시 제출해 주세요.`;
+}
+/** ★ 넣는 길 3곳의 공용 몸통 — 고른 파일을 줄인 뒤(보낼 모양으로) 규칙을 보고 list 에 넣는다. 넣은 장수를 돌려준다.
+ *  넣지 못한 파일은 이유를 쉬운 말로 알린다(조용히 버리지 않는다). */
+async function _reviewPhotoAdd(list, files) {
+  const R = _reviewPhotoRules();
+  let added = 0;
+  for (const f of (files || [])) {
+    if (!f) continue;
+    const name = f.name || '사진';
+    const t = String(f.type || '');
+    if (t && !t.startsWith('image/')) { showToast(`${name}: ${_reviewPhotoTypeHint()}`, "error"); continue; }
+    if (f.size > R.maxOriginalBytes) {
+      showToast(`${name}: 사진 파일이 너무 커서 넣지 못했어요(${_reviewPhotoMB(R.maxOriginalBytes)}까지). 화면을 나눠 캡처해 다시 넣어 주세요.`, "warning");
+      continue;
+    }
+    let b64 = '';
+    try {
+      b64 = await compressImage(f);   // 보낼 모양(긴 변 1600px JPEG)으로 먼저 줄인다 — 판정은 그 다음
+    } catch (e) {
+      showToast(`${name}: 이미지 읽기 실패 (다시 선택해주세요)`, "error");
+      continue;
+    }
+    const type = _reviewPhotoSniff(b64);
+    if (!type || !(R.types || []).includes(type)) { showToast(`${name}: ${_reviewPhotoTypeHint()}`, "error"); continue; }
+    if (_reviewPhotoBytes(b64) > R.maxFileBytes) {
+      showToast(`${name}: 줄여도 ${_reviewPhotoMB(R.maxFileBytes)}가 넘어 넣지 못했어요. 화면을 나눠 캡처해 다시 넣어 주세요.`, "warning");
+      continue;
+    }
+    const used = list.reduce((a, fo) => a + String((fo && fo.b64) || '').length, 0);
+    if (used + b64.length > R.maxSendChars) {
+      showToast(`${name}: 이 칸 사진을 모두 합치면 한 번에 보낼 수 있는 크기를 넘어 넣지 못했어요. 다른 사진을 빼고 다시 넣어 주세요.`, "warning");
+      continue;
+    }
+    // size 는 종전처럼 원본 크기(기록용) — 크기 판정은 b64(보낼 내용)로만 한다. type = 보낼 내용의 실제 형식.
+    list.push({ file: f, b64, size: f.size, type, name: f.name });
+    added++;
+  }
+  return added;
+}
+
 /**
  * ★ 이미지 압축/리사이즈 (모바일 최적화)
  * - **긴 변** 기준 REVIEW_CAPTURE_MAX_PX 로 축소 (세로로 긴 캡처도 줄어든다)
@@ -11164,13 +11219,6 @@ function fileToBase64Raw(file) {
   });
 }
 
-/** ★ fileToBase64 — 이미지는 자동 압축, 그 외는 원본 변환 */
-function fileToBase64(file) {
-  if (file.type && file.type.startsWith('image/')) {
-    return compressImage(file);
-  }
-  return fileToBase64Raw(file);
-}
 function escHtml(s) {
   return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
