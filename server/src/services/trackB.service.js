@@ -4159,6 +4159,19 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   // is_submitted 플래그만 보면 재투영 전 카드 건수와 표의 제출 칸이 다시 갈릴 수 있다.
   let executionAmount = 0;
   const executionOrderIds = new Set();
+  /* 결정 422 — 예약리뷰 자리 줄의 리뷰마감일(자리표 단일 출처 · 줄 번호 → YYYY-MM-DD). 내부 작업보드만 읽는다.
+     ★ 표시만이라 조회 실패(표 없음 포함)는 표를 막지 않는다 — 「마감 지남」 없이 종전 표(경고만 남김). */
+  let bookingDeadlines = null, bookingOverdueCount = 0;
+  const _bkNow = new Date();
+  if (showEdits) {
+    try {
+      const { rows: bkr } = await db.query(
+        `SELECT seq, to_char(review_deadline, 'YYYY-MM-DD') AS d FROM booking_slots WHERE sheet_id=$1 AND tab_name=$2`, [sheetId, tabName]);
+      if (bkr.length) bookingDeadlines = new Map(bkr.filter(x => x.d).map(x => [Number(x.seq), x.d]));
+    } catch (e) {
+      logger.warn(`[trackB] 예약리뷰 리뷰마감일 조회 실패(「마감 지남」 없이 종전 표) sheet=${sheetId} tab=${tabName}: ${e.message}`);
+    }
+  }
   for (const r of roster) {
     const anchor = _deriveAnchor(r);
     let ov = {}, editable = !!anchor, ambiguous = false;
@@ -4235,6 +4248,14 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
        「미진행」 같은 글자가 제출로 세지면 0528 남이섬처럼 "제출 60 · 참여 35"가 된다(결정 283). 줄별 상태(`reviewObligationStatus`)는 그대로다. */
     const reviewSubmitted = syn.filled && !syn.reviewResolution && syn.reviewObligationStatus==='fulfilled';
     if (syn.reviewResolution) syn.submitted = false;
+    /* ★ 결정 422 — 네이버예약리뷰 「마감 지남」(내부 작업보드만 · 표시만 — 리뷰어 제출·입금은 막지 않는다).
+       사람이 든 줄(filled)인데 리뷰 제출이 끝나지 않았고(미작성 종결 제외) 자리표 리뷰마감일 < 오늘(서버 KST)일 때만.
+       판정 = bookingSlots.reviewDeadlineStateAt 하나(리뷰어 「오늘/내일 마감」과 같은 함수). */
+    const _bkDl = bookingDeadlines && bookingDeadlines.get(Number(r.seq));
+    if (_bkDl && syn.filled && !syn.reviewResolution && !reviewSubmitted
+        && require('./bookingSlots.service').reviewDeadlineStateAt(_bkDl, _bkNow) === 'overdue') {
+      syn.bookingReviewOverdue = true; bookingOverdueCount++;
+    }
     const paidHeader = String(tabPaidHeader || r.submit_col2 || '').trim();
     // 상태 셀의 화면 정본은 rowJson이다. participant_edits의 col:입금 값은 편집기록
     // 마커용으로만 남으며, 오래된 빈 이력이 현재 작업보드 값을 덮어 집계를 줄이면 안 된다.
@@ -4504,6 +4525,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   /* 결정 299 — 입금일 두 칸(내부·업체 모두 같은 모양 · 사용자 확정 권장안). paidHeader = 화면이 「업체입금일(제품비)」로 이름표를 바꿀 칸. */
   if (feeDep) res.feeDepositColumn = { key: '__feeDeposit', label: '리뷰비 입금일(인애드)', paidLabel: '업체입금일(제품비)',
     paidHeader: tabPaidHeader || null, ...(feeDep.unavailable ? { unavailable: true } : {}) };
+  /* 결정 422 — 예약 자리 줄이 있는 내부 작업보드에만 「리뷰 마감 지남」 건수(0 포함). 다른 작업·업체 화면은 키 없음 = 종전. */
+  if (bookingDeadlines) res.bookingReviewOverdue = bookingOverdueCount;
   if (showEdits) {
     res.orphanEdits = { count: orphanCount, byType: orphanByType };
     res.headers = headers || []; res.customColumns = customCols;

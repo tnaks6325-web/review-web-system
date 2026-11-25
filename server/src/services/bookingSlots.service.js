@@ -327,12 +327,55 @@ async function slotForApplication(db, applicationId) {
   return rows[0] || null;
 }
 
-/** 리뷰어 화면에 내보내는 자리 정보(작업표 위치·내부 번호는 빼고 할 일만). deadline = 예약내역 제출 기한(홀드 마감). */
-function publicSlotView(slot, deadline) {
+/* ── 결정 422 — 리뷰 마감 안내(보여 주기만 · 넘겨도 막지 않는다) ──
+   판정 = bookingCalendar.reviewDeadlineState 하나 · 오늘 = 서버 시계 KST(_kstToday) — 휴대폰 시계를 쓰지 않는다. */
+function reviewDeadlineStateAt(deadlineYmd, now = new Date()) {
+  return require('../utils/bookingCalendar').reviewDeadlineState(deadlineYmd, _kstToday(now));
+}
+/** 리뷰어 화면에 싣는 마감 세 칸 — 마감일 · 상태 · 안내 글자(「오늘 마감」/「내일 마감」/빈 글자). */
+function reviewerDeadlineView(deadlineYmd, now = new Date()) {
+  const state = reviewDeadlineStateAt(deadlineYmd, now);
+  return {
+    reviewDeadline: deadlineYmd || null,
+    reviewDeadlineState: state,
+    reviewDeadlineNotice: require('../utils/bookingCalendar').reviewDeadlineNotice(state),
+  };
+}
+/**
+ * 작업표 줄(시트·탭·줄 번호)마다 자리표의 리뷰마감일(YYYY-MM-DD) — 리뷰어 검색 결과 안내용.
+ * @param {Array<{sheetId,tabName,rowIndex}>} rows
+ * @returns {Promise<Map<string,string>|null>} 키 `시트||탭||줄 번호` · 자리 줄만 키가 생긴다 · ★ 조회 실패 = null(안내 없이 종전 화면).
+ */
+async function reviewDeadlinesForRows(db, rows = []) {
+  const uniq = [...new Map((rows || []).filter(r => r && r.sheetId && r.tabName && Number.isInteger(Number(r.rowIndex)))
+    .map(r => [String(r.sheetId) + '||' + String(r.tabName) + '||' + Number(r.rowIndex),
+      { sheetId: String(r.sheetId), tabName: String(r.tabName), seq: Number(r.rowIndex) }])).values()];
+  const out = new Map();
+  if (!uniq.length) return out;
+  try {
+    const { rows: hit } = await (db || _pool()).query(
+      `SELECT s.sheet_id AS "sheetId", s.tab_name AS "tabName", s.seq, to_char(s.review_deadline, 'YYYY-MM-DD') AS d
+         FROM booking_slots s
+         JOIN jsonb_to_recordset($1::jsonb) AS x("sheetId" text, "tabName" text, seq int)
+           ON x."sheetId" = s.sheet_id AND x."tabName" = s.tab_name AND x.seq = s.seq`, [JSON.stringify(uniq)]);
+    for (const r of hit) if (r.d) out.set(r.sheetId + '||' + r.tabName + '||' + Number(r.seq), r.d);
+    return out;
+  } catch (e) {
+    logger.warn('[bookingSlots] 리뷰마감일 묶음 조회 실패(마감 안내 없이 종전 화면): ' + e.message);
+    return null;
+  }
+}
+
+/** 리뷰어 화면에 내보내는 자리 정보(작업표 위치·내부 번호는 빼고 할 일만). deadline = 예약내역 제출 기한(홀드 마감).
+ *  ★ 결정 422: 리뷰 마감 상태·안내 글자도 서버가 정해 싣는다(now = 서버 시계). */
+function publicSlotView(slot, deadline, now = new Date()) {
   if (!slot) return null;
+  const dl = reviewerDeadlineView(slot.review_deadline || null, now);
   return {
     date: slot.slot_date || null,
-    reviewDeadline: slot.review_deadline || null,
+    reviewDeadline: dl.reviewDeadline,
+    reviewDeadlineState: dl.reviewDeadlineState,
+    reviewDeadlineNotice: dl.reviewDeadlineNotice,
     deadline: deadline ? new Date(deadline).toISOString() : null,
   };
 }
@@ -427,4 +470,6 @@ module.exports = {
   slotForApplication, publicSlotView, placeInfoForTab, bookingPublicView, normalizeReservationNo,
   // 5단계(결정 411)
   placeInfoForTabs,
+  // 결정 422 — 리뷰 마감 안내(표시만)
+  reviewDeadlineStateAt, reviewerDeadlineView, reviewDeadlinesForRows,
 };
