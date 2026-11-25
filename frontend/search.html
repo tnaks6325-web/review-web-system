@@ -62,9 +62,10 @@ body{ background:#F4F5F8 !important; letter-spacing:-.01em; }
 <link rel="stylesheet" href="css/toss-theme.css"/>
 </head>
 <body class="toss-ui">
-<!-- ★ 직접 제출 모드: index.html에서 리뷰 카드 클릭 시 중간 화면을 보이지 않게 처리 -->
+<!-- ★ 직접 제출 모드: index.html에서 리뷰 카드 클릭 시 중간 화면을 보이지 않게 처리
+     ★ 결정 413 — 그 제출 화면을 새로고침(이어서 보기 칸 iad_direct_submit_keep_v1)할 때도 같다 -->
 <script>
-if (sessionStorage.getItem("iad_direct_submit_items")) {
+if (sessionStorage.getItem("iad_direct_submit_items") || sessionStorage.getItem("iad_direct_submit_keep_v1")) {
   document.body.style.visibility = "hidden";
   document.body.style.overflow = "hidden";
   // ★ 실패안전(백지 방지): 스크립트 로드 실패·렌더 예외 등 어떤 이유로든 복원 로직이
@@ -829,7 +830,9 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
 <!-- 업로드 직전 이미지 축소(단일 출처) — 서버 본문 10MB 상한으로 큰 캡처가 413 되는 것 방지 -->
 <script src="js/image-shrink.js"></script>
 
-<script src="js/search-app.js?v=20261125-review-notice"></script>
+<!-- ★ 결정 413 — 리뷰 제출 화면 휴대폰 [뒤로] = 열린 창만 닫기 · 떠나기 확인(리뷰어 홈 도우미 그대로 · 결정 372·403) -->
+<script src="js/reviewer-sheet-back.js?v=20261125-review-keep"></script>
+<script src="js/search-app.js?v=20261125-review-keep"></script>
 
 
 <!-- ══════════════════════════════════════════════════════

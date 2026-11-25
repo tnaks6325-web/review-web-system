@@ -1704,6 +1704,7 @@ async function _doAdminSearch() {
 /** 로그아웃 */
 function _logout() {
   _clearReviewerSession();
+  _rvKeepDrop();   // ★ 결정 413 — 로그아웃하면 이어서 보기 칸도 지운다
   _authState = null;
 
   // ── 결과 영역 숨기기 ──
@@ -1741,6 +1742,8 @@ function _logout() {
 async function _restoreReviewerSession() {
   const session = _loadAuthSession();
   if (!session) {
+    // ★ 결정 413 — 새로고침으로 「이어서 보기」 칸만 남은 채 로그인이 없으면 종전(새로고침 = 리뷰어 홈)처럼 홈으로.
+    if (window._rvKeepOnly) { _rvKeepDrop(); window.location.replace("/"); return; }
     // 세션 없음 → 직접 제출 모드였어도 body 복원
     _revealBodyIfHidden();
     return;
@@ -1760,6 +1763,7 @@ async function _restoreReviewerSession() {
     console.log("[DirectSubmit] 직접 제출 모드 — 검색 생략, 즉시 제출 화면 표시:", directItems.length, "건");
     try {
       openSubmitMulti(directItems);
+      _rvDraftStart(window._rvKeepRestored);   // ★ 결정 413 — 새로고침이면 비고 되살림 · 사진 다시 넣기 안내
     } catch (e) {
       // 렌더 중 예외가 나도 body를 숨긴 채로 두지 않는다(백지 방지).
       console.error("[DirectSubmit] 제출 화면 렌더 실패:", e && e.message);
@@ -1768,6 +1772,8 @@ async function _restoreReviewerSession() {
     }
     return;
   }
+  // ★ 결정 413 — 새로고침으로 다시 열 대상이 다른 리뷰어 것·시간이 지난 것이면 종전처럼 리뷰어 홈으로.
+  if (window._rvKeepRejected) { window.location.replace("/"); return; }
 
   // 일반 모드: 바로 결과 조회
   try {
@@ -1781,17 +1787,29 @@ async function _restoreReviewerSession() {
 
 /**
  * ★ index.html에서 리뷰 카드 클릭 시 저장한 아이템을 소비(consume)하는 함수.
- *   sessionStorage의 'iad_direct_submit_items' 키를 읽고 즉시 삭제.
+ *   sessionStorage의 'iad_direct_submit_items' 키(= 「방금 넘겨받음」 신호)를 읽고 즉시 삭제한다(옛 홈·새 홈 공통 계약 그대로).
+ *   ★ 결정 413 — 넘겨받은 대상은 같은 탭의 「이어서 보기」 칸(iad_direct_submit_keep_v1 · 리뷰어 뒤 8자리 · 시각)으로 옮겨 두고,
+ *     제출이 성공하거나 리뷰어가 스스로 나갈 때 지운다. 새로고침(넘겨받음 신호 없음)이면 그 칸을 읽되,
+ *     같은 리뷰어·시간 안일 때만 같은 제출 화면을 다시 연다 — 아니면 지우고 종전처럼 리뷰어 홈(window._rvKeepRejected).
  *   아이템 배열 반환 또는 null.
  */
 function _consumeDirectSubmitItems() {
   try {
     const raw = sessionStorage.getItem("iad_direct_submit_items");
-    if (!raw) return null;
-    sessionStorage.removeItem("iad_direct_submit_items");
-    const items = JSON.parse(raw);
+    let items = null, kept = null;
+    if (raw) {
+      sessionStorage.removeItem("iad_direct_submit_items");
+      _rvKeepDrop();   // 새로 넘겨받으면 지난 건은 버린다
+      items = JSON.parse(raw);
+    } else {
+      kept = _rvKeepRead();
+      if (!kept) { _rvKeepDrop(); window._rvKeepRejected = true; return null; }
+      items = kept.items;
+    }
     if (Array.isArray(items) && items.length > 0) {
       window._enteredFromDirectSubmit = true; // ★ 플래그: backToSearch() 시 홈으로 이동
+      window._rvKeepRestored = kept;          // 새로고침으로 다시 연 경우만 — 비고·「사진 다시 넣기」 안내(_rvDraftStart)
+      _rvKeepSave(items, kept);
       return items;
     }
     return null;
@@ -1799,6 +1817,218 @@ function _consumeDirectSubmitItems() {
     console.warn("[DirectSubmit] 직접 제출 아이템 파싱 실패:", e.message);
     return null;
   }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ★ 결정 413 — 리뷰 제출 화면: 새로고침해도 같은 건 · 넣은 사진·쓴 비고를 말없이 버리지 않는다 · 휴대폰 [뒤로]
+   ────────────────────────────────────────────────────────────
+   - 이어서 보기 칸(sessionStorage iad_direct_submit_keep_v1) = { v:1, p8, at, items, memo:{one,byIdx,slot}, photos }.
+     사진은 메모리에만 있어 새로고침을 넘지 못한다 — 다시 열면 「사진을 다시 넣어 주세요」만 알린다.
+   - 떠나기 전 확인: 사진·비고가 있으면 위쪽 [←] · 휴대폰 [뒤로]에서 한 번 묻는다(이 화면의 confirm). 사진이 있을 때만
+     브라우저 자체 확인(beforeunload — 새로고침·탭 닫기).
+   - 휴대폰 [뒤로]는 리뷰어 홈 도우미(js/reviewer-sheet-back.js · RhSheetBack, 결정 372·403) 하나로: 사진·비고가 생기면
+     「떠나기 확인」 칸 하나(rvLeaveGuard), 같은 사진 안내 창·일부만 제출된 완료 창은 그 위에 제 칸. 이 화면이 방문 기록을 직접 쌓거나 듣지 않는다(도우미만).
+   - 떠날 때는 들어온 칸(리뷰어 홈)으로 되돌아간다(history.go) — 새 칸으로 홈을 열면 [뒤로]가 다시 제출 화면 → 홈으로 튕긴다.
+   - 리뷰어 홈에서 넘어온 제출(_enteredFromDirectSubmit)·맨 위 창(틀 안 아님)에서만. 관리자 이름검색·구매양식은 종전 그대로.
+   - 이 도우미들은 모두 예외를 안에서 삼킨다 — 저장·기록이 막혀도 제출은 종전처럼 된다(fail-open).
+   ══════════════════════════════════════════════════════════════ */
+function _rvWin() { return typeof window !== "undefined" ? window : null; }
+function _rvKeepDrop() {
+  try { sessionStorage.removeItem("iad_direct_submit_keep_v1"); } catch (_) {}
+}
+/** 이어서 보기 칸 읽기 — 같은 리뷰어(뒤 8자리)·마지막 손댄 지 3시간 안일 때만. 그 밖(다른 사람·만료·깨짐)은 null. */
+function _rvKeepRead() {
+  try {
+    const k = JSON.parse(sessionStorage.getItem("iad_direct_submit_keep_v1") || "null");
+    const me = String((_getReviewerSession() || {}).phone8 || "");
+    if (!k || k.v !== 1 || !Array.isArray(k.items) || !k.items.length) return null;
+    if (!me || String(k.p8 || "") !== me) return null;
+    const age = Date.now() - Number(k.at || 0);
+    if (!(age >= 0 && age < 3 * 60 * 60 * 1000)) return null;
+    return k;
+  } catch (_) { return null; }
+}
+function _rvKeepSave(items, prev) {
+  try {
+    const me = String((_getReviewerSession() || {}).phone8 || "");
+    if (!me) return;   // 누구 것인지 모르면 남기지 않는다(새로고침 = 종전처럼 홈)
+    const k = { v: 1, p8: me, at: Date.now(), items, memo: (prev && prev.memo) || {}, photos: 0 };
+    sessionStorage.setItem("iad_direct_submit_keep_v1", JSON.stringify(k));
+  } catch (_) {}
+}
+/** 칸의 비고·사진 수만 고쳐 쓴다(대상은 그대로). */
+function _rvKeepPatch(memo, photos) {
+  try {
+    const k = JSON.parse(sessionStorage.getItem("iad_direct_submit_keep_v1") || "null");
+    if (!k || k.v !== 1) return;
+    k.memo = memo; k.photos = photos; k.at = Date.now();
+    sessionStorage.setItem("iad_direct_submit_keep_v1", JSON.stringify(k));
+  } catch (_) {}
+}
+function _rvDraftPhotoCount() {
+  let n = 0;
+  try {
+    n += (S.files || []).length;
+    Object.values(S.filesByIdx || {}).forEach(a => { n += (a || []).length; });
+    Object.values(S.filesBySlot || {}).forEach(a => { n += (a || []).length; });
+  } catch (_) {}
+  return n;
+}
+function _rvDraftMemo() {
+  const m = { one: "", byIdx: {}, slot: "" };
+  try {
+    const one = document.getElementById("memoTxt");
+    if (one && !(S.selectedRows && S.selectedRows.length > 1) && !S.captureSlots) m.one = one.value || "";
+    (S.selectedRows || []).forEach((_, i) => { const el = document.getElementById("mrMemo_" + i); if (el && el.value) m.byIdx[i] = el.value; });
+    const cs = document.getElementById("csMemo");
+    if (cs) m.slot = cs.value || "";
+  } catch (_) {}
+  return m;
+}
+function _rvMemoAny(m) {
+  return !!(m && (String(m.one || "").trim() || String(m.slot || "").trim() || Object.values(m.byIdx || {}).some(v => String(v || "").trim())));
+}
+/** 지금 떠나면 사라질 것이 있나 — 제출을 다 마쳤으면(완료 창) 없음. */
+function _rvDraftDirty() {
+  const w = _rvWin(); const d = w && w._rvDraft;
+  if (!d || d.done) return false;
+  return _rvDraftPhotoCount() > 0 || _rvMemoAny(_rvDraftMemo());
+}
+function _rvBackOn() {
+  const w = _rvWin();
+  try { return !!(w && w._enteredFromDirectSubmit && w.parent === w && w.RhSheetBack && w._rvDraft); } catch (_) { return false; }
+}
+function _rvBackOpened(id, close) { try { if (_rvBackOn()) _rvWin().RhSheetBack.opened(id, close); } catch (_) {} }
+function _rvBackClosed(id) { try { const w = _rvWin(); if (w && w.RhSheetBack) w.RhSheetBack.closed(id); } catch (_) {} }
+function _rvBackDepth() {
+  try { const w = _rvWin(); const n = w && w.RhSheetBack && typeof w.RhSheetBack.depth === "function" ? Number(w.RhSheetBack.depth()) : 0; return n > 0 ? n : 0; } catch (_) { return 0; }
+}
+function _rvOnBeforeUnload(e) {
+  const w = _rvWin();
+  if (!w || w._rvLeaving || !w._rvDraft || w._rvDraft.done || _rvDraftPhotoCount() === 0) return;
+  try { e.preventDefault(); e.returnValue = ""; } catch (_) {}
+  return "";
+}
+function _rvUnloadArm(on) {
+  try {
+    const w = _rvWin(); if (!w || typeof w.addEventListener !== "function") return;
+    if (on && !w._rvUnloadOn) { w.addEventListener("beforeunload", _rvOnBeforeUnload); w._rvUnloadOn = true; }
+    if (!on && w._rvUnloadOn) { w.removeEventListener("beforeunload", _rvOnBeforeUnload); w._rvUnloadOn = false; }
+  } catch (_) {}
+}
+/** 사진·비고가 바뀔 때마다(미리보기 다시 그리기·비고 입력) — 칸 갱신 · 떠나기 확인 칸 · beforeunload. arm=false 면 칸은 세우지 않는다. */
+function _rvDraftSync(arm) {
+  try {
+    const w = _rvWin(); const d = w && w._rvDraft;
+    if (!d || w._rvLeaving) return;
+    const photos = _rvDraftPhotoCount();
+    const memo = _rvDraftMemo();
+    if (!d.keepOff) _rvKeepPatch(memo, photos);
+    _rvUnloadArm(!d.done && photos > 0);
+    if (!d.done && (photos > 0 || _rvMemoAny(memo))) { if (arm !== false) _rvBackOpened("rvLeaveGuard", _rvOnBackLeave); }
+    else _rvBackClosed("rvLeaveGuard");
+  } catch (_) {}
+}
+/** 리뷰어 홈에서 넘어온 제출 화면을 연 직후 — 새로고침이면 비고를 되살리고 사진은 다시 넣어 달라고 알린다. */
+function _rvDraftStart(kept) {
+  try {
+    const w = _rvWin(); if (!w || !w._enteredFromDirectSubmit) return;
+    // ★ 결정 413 후속 — 이 문서가 어느 건의 제출 화면인지(이어서 보기 칸의 대상) 기억 — 「앞으로/뒤로」로 되살아날 때 대조한다.
+    let itemsKey = "";
+    try { const k0 = JSON.parse(sessionStorage.getItem("iad_direct_submit_keep_v1") || "null"); itemsKey = k0 && Array.isArray(k0.items) ? JSON.stringify(k0.items) : ""; } catch (_) {}
+    w._rvDraft = { done: false, keepOff: false, itemsKey };
+    w._rvLeaving = false;
+    const m = kept && kept.memo;
+    if (m) {
+      const one = document.getElementById("memoTxt"); if (one && m.one) one.value = m.one;
+      Object.keys(m.byIdx || {}).forEach(i => { const el = document.getElementById("mrMemo_" + i); if (el) el.value = m.byIdx[i]; });
+      const cs = document.getElementById("csMemo"); if (cs && m.slot) cs.value = m.slot;
+    }
+    if (!w._rvDraftBound) {
+      w._rvDraftBound = true;
+      document.addEventListener("input", (e) => {
+        const id = e && e.target && e.target.id || "";
+        if (id === "memoTxt" || id === "csMemo" || /^mrMemo_\d+$/.test(id)) _rvDraftSync();
+      }, true);
+      // 떠난 화면이 「앞으로」로 저장된 채 되살아나면(이미 비운 칸) 홈으로 — 지난 사진이 남은 화면을 다시 보이지 않는다.
+      //   ★ 결정 413 후속(아이폰 실기) — 떠난 적이 없어도, 이어서 보기 칸이 비었거나(제출·나가기로 끝난 건) 다른 건으로 바뀌었으면
+      //   그 문서는 지난 화면이다 — 홈으로. (아이폰 사파리는 한참 전 제출 화면도 저장해 두었다가 [뒤로]에 그대로 되살린다.)
+      w.addEventListener("pageshow", (e) => {
+        if (!e || !e.persisted) return;
+        let stale = !!w._rvLeaving;
+        const d = w._rvDraft;
+        if (!stale && d && !d.done) {
+          let cur = "";
+          try { const k = JSON.parse(sessionStorage.getItem("iad_direct_submit_keep_v1") || "null"); cur = k && Array.isArray(k.items) ? JSON.stringify(k.items) : ""; } catch (_) {}
+          stale = !cur || (!!d.itemsKey && cur !== d.itemsKey);
+        }
+        if (stale) { try { w.location.replace("/"); } catch (_) {} }
+      });
+      w.addEventListener("pagehide", () => { if (w._rvLeaveTimer) { clearTimeout(w._rvLeaveTimer); w._rvLeaveTimer = null; } });
+    }
+    if (kept && Number(kept.photos) > 0) showToast("새로고침해서 넣은 사진이 지워졌어요. 사진을 다시 넣어 주세요.", "warning");
+    _rvDraftSync(false);   // 칸 갱신만 — 떠나기 확인 칸은 리뷰어가 손댄 뒤에 세운다(손길 없이 쌓은 칸은 브라우저가 건너뛴다)
+  } catch (_) {}
+}
+/** 떠나기 확인 — 이 화면의 confirm 한 번. true = 나간다. */
+function _rvAskLeave() {
+  const photos = _rvDraftPhotoCount() > 0;
+  const memo = _rvMemoAny(_rvDraftMemo());
+  const msg = photos && memo ? "넣은 사진과 쓴 비고가 지워져요. 나갈까요?"
+    : photos ? "넣은 사진이 지워져요. 나갈까요?" : "쓴 비고가 지워져요. 나갈까요?";
+  try { return confirm(msg); } catch (_) { return true; }
+}
+/** 제출 화면 정리 — 이어서 보기 칸·beforeunload 를 끈다(떠나기 확인 칸은 closeGuard 일 때만 되돌린다). */
+function _rvDraftEnd(closeGuard) {
+  try {
+    const w = _rvWin(); if (!w) return;
+    _rvKeepDrop();
+    _rvUnloadArm(false);
+    if (closeGuard) _rvBackClosed("rvLeaveGuard");
+    w._rvDraft = null;
+  } catch (_) {}
+}
+/** 제출이 서버에 들어갔다 — 새로고침으로 다시 열지 않는다. allDone 이면 떠날 때 묻지 않는다(완료 창). */
+function _rvDraftSubmitted(allDone) {
+  try {
+    const w = _rvWin(); const d = w && w._rvDraft;
+    _rvKeepDrop();
+    if (!d) return;
+    d.keepOff = true;
+    if (allDone) { d.done = true; _rvUnloadArm(false); _rvBackClosed("rvLeaveGuard"); }
+  } catch (_) {}
+}
+/** 리뷰어 홈으로 나가기 — 들어온 칸(홈)으로 되돌아간다. atBase = 떠나기 확인 칸이 이미 빠진 뒤(휴대폰 [뒤로]). */
+function _rvLeaveHome(atBase) {
+  const w = _rvWin(); if (!w) return;
+  w._rvLeaving = true;
+  _rvDraftEnd(false);
+  let fromHome = false;
+  try {
+    const r = new URL(document.referrer || "", w.location.href);
+    fromHome = !!document.referrer && r.origin === w.location.origin && /^\/(index(\.html)?)?$/.test(r.pathname);
+  } catch (_) {}
+  const steps = 1 + (atBase ? 0 : _rvBackDepth());
+  try {
+    if (fromHome && w.history && w.history.length > steps) {
+      w.history.go(-steps);
+      // 되돌아가지 못하고 이 문서에 남으면(기록이 예상과 다름) 홈을 연다 — 비운 제출 화면에 남지 않는다.
+      w._rvLeaveTimer = setTimeout(() => { try { w.location.replace("/"); } catch (_) {} }, 4000);
+      return;
+    }
+  } catch (_) {}
+  try { w.location.replace("/"); } catch (_) { w.location.href = "/"; }
+}
+/** 위쪽 [←] — 사진·비고가 있으면 한 번 묻고 홈으로. */
+function _rvLeaveAsk() {
+  if (_rvDraftDirty() && !_rvAskLeave()) return;
+  _rvLeaveHome(false);
+}
+/** 휴대폰 [뒤로]로 떠나기 확인 칸이 빠졌다(도우미가 부름 — 위에 열린 창은 도우미가 먼저 하나씩 닫는다). */
+function _rvOnBackLeave() {
+  const w = _rvWin(); if (!w || w._rvLeaving) return;
+  if (!_rvDraftDirty() || _rvAskLeave()) { _rvLeaveHome(true); return; }
+  _rvDraftSync();   // [취소] — 사진·비고 그대로, 확인 칸을 다시 세운다
 }
 
 /**
@@ -2198,14 +2428,20 @@ document.addEventListener("DOMContentLoaded", () => {
   //   리뷰어 홈은 index.html(=/)로 일원화 → 일반 진입은 무조건 메인으로 리다이렉트.
   //   예외(계속 search.html 사용): ① 리뷰어 등록(#register), ② 관리자 바이패스(이름검색),
   //   ③ index.html 리뷰카드에서 넘어온 직접 제출(iad_direct_submit_items).
+  //      ★ 결정 413 — 또는 그 제출 화면을 새로고침(이어서 보기 칸 iad_direct_submit_keep_v1 — 같은 리뷰어·시간 안인지는 _consumeDirectSubmitItems 가 본다).
   //   (구매양식 form 모드는 위 initOrderFormMode()에서 이미 return 되어 여기 도달 안 함)
   const _hasAdminSession = (() => { try { const exp = Number(sessionStorage.getItem(ADMIN_BYPASS_KEY) || 0); return Date.now() < exp; } catch(_){return false;} })();
   const _isRegisterMode = location.hash === "#register";
-  const _hasDirectSubmit = (() => { try { return !!sessionStorage.getItem("iad_direct_submit_items"); } catch(_){return false;} })();
+  const _hasHandoff = (() => { try { return !!sessionStorage.getItem("iad_direct_submit_items"); } catch(_){return false;} })();
+  const _hasKeep = (() => { try { return !!sessionStorage.getItem("iad_direct_submit_keep_v1"); } catch(_){return false;} })();
+  const _hasDirectSubmit = _hasHandoff || _hasKeep;
+  window._rvKeepOnly = !_hasHandoff && _hasKeep;
   if (!_hasAdminSession && !_isRegisterMode && !_hasDirectSubmit) {
     window.location.replace("/");
     return;
   }
+  // ★ 결정 413 — 등록·관리자 화면은 이어서 보기 칸만으로 화면을 가리지 않는다(머리 스크립트가 숨겼으면 바로 보인다).
+  if (window._rvKeepOnly && (_isRegisterMode || _hasAdminSession)) _revealBodyIfHidden();
 
   // 일반 모드: 검색 화면 활성화
   showScreen("screenSearch");
@@ -2305,8 +2541,9 @@ function showScreen(id) {
 
 function backToSearch() {
   // ★ 직접 제출 모드(index.html에서 진입)인 경우 홈으로 돌아감
+  //   ★ 결정 413 — 사진·비고가 있으면 한 번 묻고, 새 칸으로 홈을 열지 않고 들어온 칸(홈)으로 되돌아간다.
   if (window._enteredFromDirectSubmit) {
-    window.location.href = '/';
+    _rvLeaveAsk();
     return;
   }
   S.selectedRow  = null;
@@ -3256,6 +3493,7 @@ function _csRemoveFile(slotKey, fileIdx) {
     { ..._preCtx(0), slotKey });
 }
 function _csRenderPreview(slotKey) {
+  _rvDraftSync();   // ★ 결정 413
   const files = S.filesBySlot[slotKey] || [];
   const hint    = document.getElementById("csDzHint_" + slotKey);
   const preview = document.getElementById("csPreview_" + slotKey);
@@ -3388,6 +3626,7 @@ function _showDuplicateBlockModal(d, anchor) {
   </div>`;
   overlay.querySelector('button').addEventListener('click', () => {
     overlay.remove();
+    _rvBackClosed('_reviewDuplicateBlockModal');   // ★ 결정 413 — 단추로 닫으면 쌓아 둔 칸을 되돌린다
     const fileInput = anchor && (anchor.matches?.('input[type="file"]')
       ? anchor : anchor.querySelector?.('input[type="file"]'));
     if (fileInput && typeof fileInput.click === 'function') fileInput.click();
@@ -3395,6 +3634,8 @@ function _showDuplicateBlockModal(d, anchor) {
   });
   document.body.appendChild(overlay);
   _ofFramePlace(overlay);   // ★ 결정 399
+  // ★ 결정 413 — 휴대폰 [뒤로] = 이 창만 닫기([다른 사진 선택]과 달리 사진 고르기는 열지 않는다 · 넣은 사진 그대로)
+  _rvBackOpened('_reviewDuplicateBlockModal', () => { const o = document.getElementById('_reviewDuplicateBlockModal'); if (o) o.remove(); });
 }
 function _preRenderDup(scope, anchor) {
   const s = _preGet(scope);
@@ -3666,6 +3907,7 @@ function _mrRemoveFile(idx, fileIdx) {
     { ..._preCtx(idx), slotKey: 'review' });
 }
 function _mrRenderPreview(idx) {
+  _rvDraftSync();   // ★ 결정 413
   const files = S.filesByIdx[idx] || [];
   const hint    = document.getElementById("mrDzHint_" + idx);
   const preview = document.getElementById("mrPreview_" + idx);
@@ -4153,6 +4395,7 @@ function removeFile(i) {
   _preCheckFiles('single', 'dropZone', S.files, { ..._preCtx(0), slotKey: 'review' });
 }
 function renderPreviews() {
+  _rvDraftSync();   // ★ 결정 413 — 사진이 바뀌면 이어서 보기 칸·떠나기 확인·beforeunload 를 맞춘다
   const ph   = document.getElementById("dzPlaceholder");
   const prev = document.getElementById("dzPreview");
   if (!ph || !prev) return;
@@ -4332,6 +4575,7 @@ function _rvRetryTail(btn, closed, reason) {
 /** 완료 창을 닫고 제출 화면으로 — 실패한 건의 사진·비고는 그대로 있고, 제출된 건은 다시 올리지 않는다(S.mrDoneKeys). */
 function _rvCloseForRetry() {
   hide("successModal");
+  _rvBackClosed("successModal");   // ★ 결정 413 — 뒤로가기로 닫혔으면 도우미가 이미 뺐다(두 번 되돌리지 않음)
   _rvSuccessModalPrep(0);
   const n = document.getElementById("rvSubmitFailNotice");
   try { if (n && typeof n.scrollIntoView === "function") n.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (_) {}
@@ -4593,6 +4837,7 @@ async function _submitReviewSlots(item) {
         if (status) { status.textContent = "✓ 제출됨"; status.className = "mr-slot-status ok"; }
       });
       showToast("리뷰 제출이 완료되었습니다.", "success");
+      _rvDraftSubmitted(false);   // ★ 결정 413 — 제출된 건은 새로고침으로 다시 열지 않는다(영수증 칸 사진은 계속 지킨다)
       goStep(3);
       return;
     }
@@ -4608,6 +4853,7 @@ async function _submitReviewSlots(item) {
         ? '현재 건의 제출물을 교체했습니다.'
         : `<strong>${escHtml(reviewerName)}</strong>님의 리뷰가 제출되었습니다 😊<br>`
           + `<span style="font-size:.82rem;color:#16a34a">${doneList}</span>`;
+      _rvDraftSubmitted(true);   // ★ 결정 413
       show("successModal", "flex");
     } else {
       const doneList = slots.map(s =>
@@ -4617,6 +4863,7 @@ async function _submitReviewSlots(item) {
       document.getElementById("successMessage").innerHTML =
         `일부 캡처가 제출되었습니다.<br><span style="font-size:.82rem">${doneList}</span>`
         + `<br><span style="font-size:.82rem;color:#DC2626">${missLabels} 을(를) 보완 제출하면 완료됩니다.</span>`;
+      _rvDraftSubmitted(true);   // ★ 결정 413 — 올린 칸은 비웠다(남은 칸은 리뷰 내역에서 보완 제출)
       show("successModal", "flex");
     }
     if (uploadErrors.length > 0) {
@@ -4891,7 +5138,11 @@ async function submitReview() {
           retryable > 0 ? "넣은 사진과 비고는 그대로 있어요. 제출된 건은 다시 올리지 않으니, 확인한 뒤 아래 버튼을 다시 눌러 주세요." : "");
       }
       _rvSuccessModalPrep(isMulti ? retryable : 0);
+      // ★ 결정 413 — 제출된 건은 새로고침으로 다시 열지 않는다 · 다 끝났으면 떠날 때 묻지 않는다 ·
+      //   일부만 됐으면 완료 창에 제 칸(휴대폰 [뒤로] = [닫고 실패한 건 다시 내기]와 같이 창만 닫기)
+      _rvDraftSubmitted(!(isMulti && retryable > 0));
       show("successModal", "flex");
+      if (isMulti && retryable > 0) _rvBackOpened("successModal", _rvCloseForRetry);
     } else {
       // ★ 결정 410 — 모두 실패: 3.5초 토스트 대신 [제출하기] 위에 남는 안내 · 한 건이면 「1번」·「모든」 없이
       _rvFailNoticeShow(btnNow, isMulti ? "리뷰가 제출되지 않았어요" : "제출되지 않았어요",
@@ -4918,6 +5169,7 @@ async function submitReview() {
 }
 
 function resetApp() {
+  _rvDraftEnd(true);   // ★ 결정 413 — 처음으로 = 이어서 보기 칸·떠나기 확인을 끈다
   _preSubmitGen++;
   _rvFailNoticeClear();   // 결정 410
   S.mrDoneKeys = new Set();
@@ -10849,6 +11101,12 @@ function goToReviewerMain(tab) {
   // 구매양식 입력 상태 정리 (혹시 모를 잔여 상태 초기화)
   try { resetOrderFormForReentry(); } catch (_) {}
   window._pendingOrderForm = false;
+  // ★ 결정 413 — 리뷰 제출 화면에서 떠나면 이어서 보기 칸·beforeunload 를 끈다. 창 칸 위(일부만 제출된 완료 창)면
+  //   새 칸을 쌓지 않고 들어온 칸(홈)으로 되돌아간다 — 쌓으면 홈에서 [뒤로]가 비운 제출 화면으로 튕긴다.
+  if (window._enteredFromDirectSubmit) {
+    if (_rvBackDepth() > 0) { _rvLeaveHome(false); return; }
+    _rvDraftEnd(false);
+  }
   _syncReviewerHomeSessionForReturn();
   // 신규 리뷰어 홈(index.html = 루트)으로 전체 페이지 이동.
   // 리뷰 제출 완료 버튼은 방금 제출한 건을 확인할 수 있게 리뷰내역 탭을 지정한다.
