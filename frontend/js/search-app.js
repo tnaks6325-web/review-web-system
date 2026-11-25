@@ -8605,6 +8605,10 @@ function addOrderCard() {
   _updateCardCountBadge();
   _ofpRender(cid);
   // 스크롤 — 주문 칸이 탭으로 넘어가면(결정 353) 탭 줄로
+  // ★ 결정 416 — 공고 화면 틀(embed) 안의 첫 주문 칸은 화면을 옮기지 않는다. 틀 안 scrollIntoView 는 부모 공고 화면까지 움직여
+  //   참여 직후 새 단계 맨 위(남은 시간·상품·작업 내용)를 지나 주문 칸을 위쪽 띠 밑(화면 맨 위)에 붙였다 — 자리는 부모가 정한다.
+  //   리뷰어가 더한 칸(두 번째부터)·직접 연 구매양식은 종전 그대로.
+  if (idx === 0 && _EMBED_CTX && window.parent !== window) return;
   setTimeout(() => (document.getElementById("ofCardTabs") && !document.getElementById("ofCardTabs").hidden ? document.getElementById("ofCardTabs") : cardEl).scrollIntoView({ behavior: "smooth", block: "start" }), 100);
 }
 
