@@ -84,7 +84,7 @@ function world({ tabsOn = false, preview = false } = {}) {
   }
   const first = makeFrame(); first.id = 'orderFrame'; track.push(first);
   const els = {};
-  ['wdCards', 'qnaBox', 'orderBox', 'holdLabel', 'joinedFootNote', 'pvFormNote', 'frameFallback'].forEach(id => {
+  ['wdCards', 'qnaBox', 'bookingBox', 'orderBox', 'holdLabel', 'joinedFootNote', 'pvFormNote', 'frameFallback'].forEach(id => {
     els[id] = { style: { display: '' }, textContent: '', innerHTML: '' };
   });
   els.orderTrack = { appendChild(f) { track.push(f); return f; } };

@@ -9387,7 +9387,10 @@ function _gridEditVal(h, raw){ const v=(raw==null?'':String(raw)).trim(); if(!v)
 // 표시값: 날짜형 헤더(구매일자 등)는 "월/일 (요일)" 로 통일 — ISO(yyyy-mm-dd)·일련번호는 요일 계산, 시트식 "7 / 3 (금)" 은 표기 정규화.
 function _gridVal(h, raw){ const v=_gridEditVal(h, raw); if(!v)return '';
   if(_isDepositCol(h)) return _fmtMD(v);
-  if(/일자|날짜|date/i.test(h)) return _fmtKDate(v);
+  // ★ 결정 409: 네이버예약리뷰 「리뷰마감일」도 「이용일자」와 같은 날짜 표기(12/7 (월)) — 이름에 「일자」가 없어 위 규칙에 안 걸린다.
+  //   정확히 그 이름일 때만(서버 BOOKING_DEADLINE_HEADER 와 같은 글자 · 회귀가드가 대조) — 다른 탭의 비슷한 이름 칸은 그대로.
+  //   ★ 바깥 const 로 빼지 말 것 — 함수를 잘라 실행하는 기존 가드(submitCellSerialFormat)가 같은 선언을 두 번 읽는다.
+  if(/일자|날짜|date/i.test(h) || h==='리뷰마감일') return _fmtKDate(v);
   /* ★ 리뷰제출 칸은 **위 두 갈래에 걸리지 않을 때만** 여기로 온다(헤더가 `리뷰`·`리뷰제출`·`리뷰제출일` 인 탭).
      `리뷰제출일자` 처럼 날짜형 이름이면 위에서 이미 처리되므로 종전 표기가 그대로 유지된다. */
   if(_workdeskStatusKind(h)==='review') return _fmtSubmitCell(v);
