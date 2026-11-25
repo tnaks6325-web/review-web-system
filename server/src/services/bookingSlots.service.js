@@ -191,14 +191,14 @@ async function repairCalendarIfMissing({ workOrder, sheetId, tabName, by = 'admi
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════
-   3단계 — 리뷰어가 날짜를 골라 신청 · 자리 묶기 · 예약번호 (결정 408 · migration 228)
+   3단계 — 리뷰어가 날짜를 골라 신청 · 자리 묶기 · 예약번호 (결정 409 · migration 228)
    ★ 자리가 비었는지 = 이 자리를 가리키는 신청이 「제출 완료」이거나 「살아 있는 홀드」가 아님(신청 표가 단일 출처 —
      자리표 status 는 신청·만료·취소 때 고치지 않는다). Q&A 211 과 같은 방식.
    ★ 한 자리에 둘 = 부분 유일 색인 `uq_campaign_apps_booking_slot` 이 받친다(동시 신청 과판매 구조적 차단).
    ★ 고를 수 있는 날 = **내일(KST)부터**(기본값 · 당일 예약 제외 — 그날 예약이 열려 있는지·업체가 받아 줄지 알 수 없다).
    ══════════════════════════════════════════════════════════════════════════════ */
 
-/** 당일 예약을 받을지 — 기본 받지 않음(결정 408 기본값). 바꾸려면 이 값과 결정 문서를 함께 고친다. */
+/** 당일 예약을 받을지 — 기본 받지 않음(결정 409 기본값). 바꾸려면 이 값과 결정 문서를 함께 고친다. */
 const BOOKING_SAME_DAY_OK = false;
 const _DAY_MS = 86400000;
 const _YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -390,7 +390,7 @@ function normalizeReservationNo(raw) {
 module.exports = {
   insertCalendar, isBookingTab, isBookingCampaign, isBoundRow, boundSeqs, boundRowSql,
   calendarForTab, seatsByDate, verifyRowsMatchPlan, repairCalendarIfMissing,
-  // 3단계(결정 408)
+  // 3단계(결정 409)
   BOOKING_SAME_DAY_OK, bookableFrom, seatsForTab, loadFreeByCampaign, checkBookingDate, pickSlotInTx, bindSlotForApply,
   slotForApplication, publicSlotView, placeInfoForTab, bookingPublicView, normalizeReservationNo,
 };

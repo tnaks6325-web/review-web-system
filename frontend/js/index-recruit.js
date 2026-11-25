@@ -2375,7 +2375,7 @@ function participationCheckErrors() {
   const manager = document.getElementById("rf_manager")?.value.trim() || "";
   const channel = document.getElementById("rf_channel")?.value.trim() || "";
   const startDate = document.getElementById("rf_start_date")?.value || "";
-  // ★ 결정 408: 네이버예약리뷰는 구매채널·모집 시작일·하루 인원이 없다(날짜별 인원은 리뷰오더가 정하고 리뷰어가 날짜를 고른다)
+  // ★ 결정 409: 네이버예약리뷰는 구매채널·모집 시작일·하루 인원이 없다(날짜별 인원은 리뷰오더가 정하고 리뷰어가 날짜를 고른다)
   const _wkBooking = (document.getElementById("rf_work_kind")?.value || "") === "booking";
   if (!manager) errs.push("담당자를 선택해주세요");
   if (!channel && !_wkBooking) errs.push("구매채널을 선택해주세요");
@@ -3931,7 +3931,7 @@ function _rfApplyWorkKindUi() {
   _rfApplyBookingUi(_kind === "booking");
 }
 
-/* ═══ 📅 결정 408: 네이버예약리뷰 발행 폼 ═══
+/* ═══ 📅 결정 409: 네이버예약리뷰 발행 폼 ═══
    ★ 예약 정보(매장·주소·네이버 예약 주소·돈 방식·날짜별 인원·리뷰 기한)는 **리뷰오더가 정한 값**이다 — 이 폼은 보기 전용 카드로만 보여 준다.
      재료 = 프리필의 booking(서버가 bookingSpecFromWorkOrder 로 정규화한 값 그대로 · 화면 해석 사본 0).
    ★ 상품 리뷰 전용 칸(구매채널·배송유형·배송 조합·회수·필수 배송메세지·주말 포함·유입 방식·상품 추가·상품메인 URL)은 숨긴다 —
@@ -4049,7 +4049,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   _rfLastScheduledPurchaseWindow = { start: "", end: "" };
   if (typeof recruitSaveBlockClear === "function") recruitSaveBlockClear();  // 지난번 차단 사유 잔류 방지
   _rfLinkedMiss = null; _rfSugCache = [];   // 지난 공고의 "탭 못 찾음" 사유가 새 모달에 남지 않게(로드보다 먼저)
-  window._rfBookingSpec = null;   // ★ 결정 408: 지난 공고의 예약 정보가 새 공고에 남지 않게(종류 초기화보다 먼저)
+  window._rfBookingSpec = null;   // ★ 결정 409: 지난 공고의 예약 정보가 새 공고에 남지 않게(종류 초기화보다 먼저)
   { const _wk = document.getElementById("rf_work_kind"); if (_wk) _wk.value = ""; _rfApplyWorkKindUi(); }   // ★ 127: 종류 초기화(기본=리뷰)
   /* 저장 성공 시 버튼을 '✓ 저장됨'(비활성)으로 두고 모달을 닫으므로, 다시 열 때 되돌린다 */
   { const _sb = document.getElementById("recruitSaveBtn");
@@ -4470,7 +4470,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
       _setRecruitGlobalReviewTypeMix(prefillReviewMix);
       if (prefill.review_type) _rfPickBtn("review_type", _rfReviewTypeKey(prefill.review_type));
       /* ★ 127: 작업오더의 체험단 종류 → 공고에 그대로 전파(blog 면 리뷰타입 카드 숨김) */
-      window._rfBookingSpec = (prefill.booking && typeof prefill.booking === "object") ? prefill.booking : null;   // ★ 결정 408 — 보기 전용 예약 정보
+      window._rfBookingSpec = (prefill.booking && typeof prefill.booking === "object") ? prefill.booking : null;   // ★ 결정 409 — 보기 전용 예약 정보
       { const _wk = document.getElementById("rf_work_kind"); if (_wk) _wk.value = _rfPrefillWorkKind(prefill.work_kind); _rfApplyWorkKindUi(); }
 
       /* ★ 065: 연결 탭 자동 선택 — 접수 시 확정된 탭(work_sheet_url 은 제출 필수).
@@ -6509,7 +6509,7 @@ async function saveRecruitPostImpl() {
         if (payload.work_kind === "blog" && !(Number(payload.daily_limit) > 0)) {
           payload.daily_limit = (Number(payload.recruit_total) > 0) ? Number(payload.recruit_total) : 9999;
         }
-        /* ★ 결정 408: 네이버예약리뷰도 「그날 정원」이 없다 — 열림/마감은 서버가 자리표의 남은 자리로 정한다.
+        /* ★ 결정 409: 네이버예약리뷰도 「그날 정원」이 없다 — 열림/마감은 서버가 자리표의 남은 자리로 정한다.
            일건수가 비면 총모집으로 채워(블로그와 같은 정규화) 하루 인원 판정이 조용히 막지 않게 한다. */
         if (payload.work_kind === "booking" && !(Number(payload.daily_limit) > 0)) {
           payload.daily_limit = (Number(payload.recruit_total) > 0) ? Number(payload.recruit_total) : 9999;

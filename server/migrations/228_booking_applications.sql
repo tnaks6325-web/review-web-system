@@ -23,5 +23,5 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_campaign_apps_booking_resv
   ON campaign_applications (campaign_id, booking_reservation_no)
   WHERE booking_reservation_no IS NOT NULL AND status IN ('applied', 'submitted');
 
-COMMENT ON COLUMN campaign_applications.booking_slot_id IS '네이버예약리뷰(결정 408) — 이 신청이 차지한 날짜별 자리(booking_slots.id). 다른 종류 신청은 NULL.';
-COMMENT ON COLUMN campaign_applications.booking_reservation_no IS '네이버예약리뷰(결정 408) — 예약내역 제출 때 받은 네이버 예약번호(정규화). 같은 공고 안에서 살아 있는 신청끼리 겹치지 않는다.';
+COMMENT ON COLUMN campaign_applications.booking_slot_id IS '네이버예약리뷰(결정 409) — 이 신청이 차지한 날짜별 자리(booking_slots.id). 다른 종류 신청은 NULL.';
+COMMENT ON COLUMN campaign_applications.booking_reservation_no IS '네이버예약리뷰(결정 409) — 예약내역 제출 때 받은 네이버 예약번호(정규화). 같은 공고 안에서 살아 있는 신청끼리 겹치지 않는다.';

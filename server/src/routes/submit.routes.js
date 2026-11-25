@@ -628,7 +628,7 @@ async function _authoritativeHold(ctx) {
     ctx.blogUrl = rows[0].blog_url || null;
     // ★ 결정 321: Q&A 자리에 묶인 신청인가(같은 왕복 · 순증 0). 칸은 부팅 필수 스키마(211)라 늘 있다.
     ctx.qnaSlotId = rows[0].qna_slot_id == null ? null : Number(rows[0].qna_slot_id);
-    // ★ 결정 408: 예약 자리에 묶인 신청인가(같은 왕복 · 순증 0). 칸은 부팅 필수 스키마(228)라 늘 있다.
+    // ★ 결정 409: 예약 자리에 묶인 신청인가(같은 왕복 · 순증 0). 칸은 부팅 필수 스키마(228)라 늘 있다.
     ctx.bookingSlotId = rows[0].booking_slot_id == null ? null : Number(rows[0].booking_slot_id);
     // ★ 멱등 판정 재료: 이 홀드로 이미 접수된 "살아있는" 주문이 있는가.
     //   status='submitted' 확정건뿐 아니라 late_order_id(지각 접수)도 포함해야 한다 —
@@ -850,7 +850,7 @@ router.post('/qna', async (req, res, next) => {
 });
 
 /* ══════════════════════════════════════════════════════════════════════════════
-   ★★ 결정 408 — 네이버예약리뷰 예약내역 제출(구매양식 대신 · Q&A /qna 창구와 같은 틀).
+   ★★ 결정 409 — 네이버예약리뷰 예약내역 제출(구매양식 대신 · Q&A /qna 창구와 같은 틀).
    예약리뷰는 구매양식(주문번호·주소·옵션)이 없다. 신청 때 묶인 자리(booking_slots)의 줄에
    ① 예약번호를 신청 행에 새기고(같은 공고 중복 = 부분 유일 색인 228 이 거절)
    ② 최소 장부 줄(order_submissions — 이름·연락처·입금 계좌·이용일자 · 환급형이면 결제금액)을 만들고 홀드를 확정(confirmHoldInTx)
@@ -1093,7 +1093,7 @@ router.post('/order', async (req, res, next) => {
       return res.status(409).json({ ok: false, reason: 'qna_use_capture',
         error: 'Q&A 참여는 구매양식이 아니라 문의 캡처로 제출해요. 화면을 새로고침해주세요.' });
     }
-    /* ★ 결정 408: 예약 자리에 묶인 신청도 구매양식으로 받지 않는다 — 이 길로 들어오면 자리(booking_slots)를 모르는
+    /* ★ 결정 409: 예약 자리에 묶인 신청도 구매양식으로 받지 않는다 — 이 길로 들어오면 자리(booking_slots)를 모르는
          일반 홀드 확정이 되어 고른 날 자리 줄이 아닌 아무 빈 줄에 들어간다. 제출 창구는 POST /api/submit/booking 하나다. */
     if (holdCtx && holdCtx.verified && holdCtx.bookingSlotId) {
       return res.status(409).json({ ok: false, reason: 'booking_use_reservation',

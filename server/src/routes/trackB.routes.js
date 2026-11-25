@@ -569,7 +569,7 @@ router.get('/parity-trend', authMiddleware, internalMiddleware, async (req, res,
 // ── 작업오더(발주) 연동 — 수동 링크 + 작업세부 + 명단 골격 준비 — admin/master ──
 //   ★ Track A 무접촉: 링크는 Track B 전용 테이블 trackb_work_order_links(051)에만 저장(work_orders는 읽기만).
 //     work_orders.linked_tab_* 는 order.routes 승인 흐름이 읽어 분기하므로 절대 안 씀. 명단 골격은 manual 슬롯.
-/* ★ 결정 408 — 네이버예약리뷰 오더에는 정규화한 예약 계약(매장·주소·예약 주소·돈 방식·날짜별 인원·리뷰 기한)을 붙인다.
+/* ★ 결정 409 — 네이버예약리뷰 오더에는 정규화한 예약 계약(매장·주소·예약 주소·돈 방식·날짜별 인원·리뷰 기한)을 붙인다.
      판정·정규화 = bookingCalendar.bookingSpecFromWorkOrder 단일 출처 — 발행 폼 프리필(_woCampaignPrefill)이 그대로 옮겨
      보여 준다(화면에 계약 해석 사본 0). 예약 아님·읽기 실패 = 키 없음(발행 폼은 「예약 정보를 못 읽었다」고 말한다).
      ★ 붙이는 곳 = 작업오더 목록(/work-orders/list) — 발행 폼 프리필의 원본 행이 오는 곳. 작업 카드 [공고 발행]의 /work-orders 는

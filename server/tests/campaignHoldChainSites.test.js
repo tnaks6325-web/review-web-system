@@ -32,7 +32,7 @@ const EXPECTED = {
   // 끝남(당김) = cancel(취소)·cancelled+submitted(수동확정 선-취소+확정) · 나머지는 ALLOW(사유)
   'src/routes/campaign.routes.js': 'cancelled,expired,cancelled,submitted,applied,blog_rejected,cancelled',
   //  ↑ 취소(HOOK) · 신청 앞 만료(ALLOW: 예상 마감이 곧 다음 시작) · 수동확정 선-취소(HOOK) · 수동확정(HOOK) · 블로그 승인/반려(ALLOW: 차례 제외) · 미참여 확정(ALLOW: 이미 끝난 행)
-  'src/services/bookingSlots.service.js': 'expired',                     // 예약리뷰 고른 날 지난 홀드 정리(ALLOW: 차례 제외 · 결정 408)
+  'src/services/bookingSlots.service.js': 'expired',                     // 예약리뷰 고른 날 지난 홀드 정리(ALLOW: 차례 제외 · 결정 409)
   'src/services/campaignHold.service.js': 'submitted,expired',          // 제출 확정(HOOK) · 스윕 만료(ALLOW: I5)
   'src/services/manualOrder.service.js': 'submitted',                    // 외부/담당자 확정(HOOK)
   'src/services/orderCancellation.service.js': 'cancelled',              // 주문 취소(ALLOW: submitted 행 — applied 가 아니다)
@@ -74,7 +74,7 @@ ok('② DB 트리거 없음(RED-25)', !/CREATE (OR REPLACE )?TRIGGER/i.test(R('m
 
 // ④ /apply
 const apply = between(routes, 'async function _applyParticipation(', "router.post('/:id/apply'");
-ok('④ 차례 줄은 sequential:true + Q&A·예약리뷰(408)·블로그 아님 + 공고 자격일 때만',
+ok('④ 차례 줄은 sequential:true + Q&A·예약리뷰(409)·블로그 아님 + 공고 자격일 때만',
   /if \(req\.body\.sequential === true && !qnaApply && !bookingApply && !blogApply && holdChain\.chainEligibleCampaign\(camp\)\)/.test(apply));
 ok('④ cutoff·마감은 상태 엔진 값 하나(st.cutoffAt·st.closesAt) — close_buffer_min 사본 없음',
   /closesAt: st\.closesAt, cutoffAt: st\.cutoffAt/.test(apply) && !/close_buffer_min\s*\?\?/.test(chain));

@@ -1,5 +1,5 @@
 /**
- * bookingReviewerFlow.test.js — 네이버예약리뷰 3단계 회귀가드: 모집공고·날짜 고르기 신청·예약내역/리뷰 제출 (결정 408)
+ * bookingReviewerFlow.test.js — 네이버예약리뷰 3단계 회귀가드: 모집공고·날짜 고르기 신청·예약내역/리뷰 제출 (결정 409)
  * 실행: node tests/bookingReviewerFlow.test.js
  *
  * 위험:

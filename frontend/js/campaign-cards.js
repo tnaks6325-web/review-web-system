@@ -412,7 +412,7 @@
   function _optChip(c) {
     const opts = (c && c.options) || [];
     if (!opts.length) return '';
-    if (c.work_kind === 'booking') return '';   // 📅 결정 408: 예약 공고는 매장 하나 — 고를 것은 날짜(공고 화면 날짜 칸)
+    if (c.work_kind === 'booking') return '';   // 📅 결정 409: 예약 공고는 매장 하나 — 고를 것은 날짜(공고 화면 날짜 칸)
     const open = opts.filter(o => o.status === 'open').length;
     // ★ 결정 212: 순차진행의 대기(waiting) 선택지는 마감이 아니다 — "N종 마감"에 세지 않는다.
     // ★ 결정 229: 품절로 잠시 멈춘(paused) 선택지도 마감이 아니다 — 따로 센다(담당자가 다시 열 수 있다).
@@ -751,7 +751,7 @@
     const blogChip = isBlogCard ? `<span class="pt-badge" style="background:#7C3AED;color:#fff">📝 블로그</span>`
       // 💬 결정 321: Q&A체험단 배지(확정 2) — 같은 자리·같은 규칙(정확 일치)
       : c.work_kind === 'qna' ? `<span class="pt-badge" style="background:#1b64da;color:#fff">Q&amp;A</span>`
-      // 📅 결정 408: 네이버예약리뷰 배지 — 같은 자리·같은 규칙(정확 일치)
+      // 📅 결정 409: 네이버예약리뷰 배지 — 같은 자리·같은 규칙(정확 일치)
       : c.work_kind === 'booking' ? `<span class="pt-badge" style="background:#03C75A;color:#fff">📅 네이버 예약</span>` : '';
     const badges = (channel || c.delivery_type || crChip || blogChip)
       ? `<div class="pt-badges">${blogChip}${channel ? `<span class="pt-badge ch">${_esc(channel)}</span>` : ''}${c.delivery_type ? `<span class="pt-badge dl">${_esc(_dlBadge(c.delivery_type))}</span>` : ''}${crChip}</div>`
