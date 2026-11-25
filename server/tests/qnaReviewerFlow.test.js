@@ -250,9 +250,12 @@ const st = require('../src/services/campaignState.service');
   const pay = require('../src/services/payment.service');
   const ps = S('src/services/payment.service.js');
   t('Q&A 판정 = 공고 > 탭 종류(resolveWorkKind 단일 출처)', /const isQna = resolveWorkKind\(\{ campaignKind: camp && camp\.workKind, tabKind: tab && tab\.workKind \}\) === 'qna';/.test(ps));
-  t('Q&A 금액 = 참여비만', /const amount = \(goodsByAdvertiser \|\| isQna\) \? fee : productPrice \+ fee;/.test(ps));
+  // 결정 411 — 제품비 자리는 payPrice(예약리뷰만 다를 수 있다 · 그 밖은 productPrice 그대로) — Q&A 는 여전히 참여비만
+  t('Q&A 금액 = 참여비만', /const amount = \(goodsByAdvertiser \|\| isQna\) \? fee : payPrice \+ fee;/.test(ps)
+    && /const payPrice = booking \? booking\.productPrice : productPrice;/.test(ps) && /const isBooking = !isQna && /.test(ps));
   // 결정 376 — 0원 구매 · 리뷰비만도 같은 자리에서 빠진다(Q&A 제외는 그대로 · 검사 의미 불변)
-  t('Q&A 는 금액 없음(no_price)으로 막지 않는다', /if \(!productPrice && !isQna && !zeroPricePurchase\) issues\.push/.test(ps));
+  // 결정 411 — 예약리뷰도 이 줄을 비킨다(자기 사유 bookingPayoutOf) — Q&A 비킴은 그대로
+  t('Q&A 는 금액 없음(no_price)으로 막지 않는다', /if \(!productPrice && !isQna && !zeroPricePurchase(?: && !booking)?\) issues\.push/.test(ps));
   t('회차 항목에 is_qna 박제 · 제품비 0', /\(it\.goodsByAdvertiser \|\| it\.isQna\) \? 0 : it\.productPrice, it\.reviewFee, it\.amount, it\.transferMemo, it\.isQna === true/.test(ps));
   t('「리뷰비만」(JS): Q&A 항목은 아님', pay.isFeeOnlyItem({ product_price: 0, review_fee: 2000, amount: 2000, is_qna: true }) === false
     && pay.isFeeOnlyItem({ productPrice: 0, reviewFee: 2000, amount: 2000, isQna: true }) === false);
