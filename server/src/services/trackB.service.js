@@ -1735,13 +1735,7 @@ async function settlementForTab({ sheetId, tabName, role = 'master', advertiserI
   const closeout = closeoutAvailable ? await latestCloseout({ sheetId, tabName }) : null;
   if (!link) return { linked: false, closeout, closeoutAvailable };
   // 링크된 sales 단건만 프록시(그 탭에 링크된 계약만 — 타 업체 계약 도달 불가). 견적은 sales_id 로 역파생.
-  const sales = link.salesId ? await _salesById(link.salesId) : null;
-  const quoteResult = link.salesId ? await _quoteForSalesResult(link.salesId) : { quote: null, lookupFailed: false };
-  const quote = quoteResult.quote;
-  const contractNumber = (sales && sales.contractNumber) || link.contractNumber || '';
-  // 총비용 = 견적서 합계 우선, 없으면 계약금액 — 업체관리 요약(settlementSummaryForAdvertiser)과 같은 규칙.
-  const totalCost = quote && quote.totalAmount > 0 ? quote.totalAmount : (sales && sales.amount > 0 ? sales.amount : null);
-  const invRes = link.salesId && sales ? await _invoicesForSales(link.salesId) : { rows: null };
+  const { sales, quoteResult, invRows } = await _settlementSources(link.salesId);
   // 같은 계약을 함께 쓰는 다른 작업(내부 전용 — 광고주에겐 다른 업체 작업명이 섞일 수 있어 미동봉).
   //   ★ fail-soft: 조회 실패면 필드를 싣지 않는다(화면은 "모름"을 공유 없음으로 꾸미지 않고 아무것도 안 그린다).
   let sharedTabs, sharedTabCount;
@@ -1760,25 +1754,110 @@ async function settlementForTab({ sheetId, tabName, role = 'master', advertiserI
       sharedTabs = sh.map(({ total, ...r }) => r);
     } catch (e) { logger.warn(`[settlement] 공유 작업 조회 실패: ${e.message}`); }
   }
+  const view = _settlementTabView({ link, sales, quoteResult, invRows });
   return {
-    linked: true, contractNumber, salesId: link.salesId,
+    linked: true, contractNumber: view.contractNumber, salesId: link.salesId,
     sharedTabs, sharedTabCount,
     // Nit5: 광고주에겐 내부 정보(linkedBy·담당자) 미노출.
     linkedBy: isAdv ? undefined : link.linkedBy,
-    proxyDown: link.salesId && !sales,   // 프록시 실패(라벨만) 신호
+    proxyDown: view.proxyDown,
     closeout, closeoutAvailable,
+    quote: view.quote, quoteLookupFailed: view.quoteLookupFailed,
+    invoice: view.invoice, totalCost: view.totalCost, payment: view.payment, amount: view.amount,
+    paidAmount: view.paidAmount, paidDate: view.paidDate,
+    salesInfo: sales ? { advertiserName: sales.advertiserName, productName: sales.productName, manager: isAdv ? undefined : sales.manager } : null,
+  };
+}
+// 계약 하나의 인트라넷 재료(계약·견적·계산서) — 계산서는 계약 조회가 성공했을 때만 묻는다(종전 순서 그대로).
+async function _settlementSources(salesId) {
+  const sales = salesId ? await _salesById(salesId) : null;
+  const quoteResult = salesId ? await _quoteForSalesResult(salesId) : { quote: null, lookupFailed: false };
+  const invRes = salesId && sales ? await _invoicesForSales(salesId) : { rows: null };
+  return { sales, quoteResult, invRows: invRes.rows };
+}
+// 작업 하나의 정산 표시값 — ★ 단일 출처: 작업보드 정산 칸(settlementForTab)과 홈 작업목록(homeSettlementSummary)이
+//   같은 함수로 만든다(사본을 두면 "작업보드는 미입금인데 홈은 입금완료"로 갈린다).
+function _settlementTabView({ link, sales, quoteResult, invRows }) {
+  const quote = quoteResult.quote;
+  // 총비용 = 견적서 합계 우선, 없으면 계약금액 — 업체관리 요약(settlementSummaryForAdvertiser)과 같은 규칙.
+  const totalCost = quote && quote.totalAmount > 0 ? quote.totalAmount : (sales && sales.amount > 0 ? sales.amount : null);
+  return {
+    linked: true,
+    contractNumber: (sales && sales.contractNumber) || link.contractNumber || '',
+    salesId: link.salesId,
+    proxyDown: link.salesId && !sales,   // 프록시 실패(라벨만) 신호
     quote: quote || null,
     quoteLookupFailed: !!quoteResult.lookupFailed,
     // 계산서 = 여러 장의 발행 합계 vs 목표(혼합계약은 발행분). 'partial' 은 일부만 발행된 상태(신설).
-    invoice: _invoiceProgress(sales, invRes.rows, totalCost),
+    invoice: _invoiceProgress(sales, invRows, totalCost),
     totalCost,
     payment: sales ? { status: sales.paymentStatus, date: sales.paymentDate } : null,
     amount: sales ? sales.amount : null,
     // 입금매칭 누계/최근 입금일(광고주 정산 카드 금액 4칸용 — 내부 스텝퍼에도 추가만, 기존 필드 불변)
     paidAmount: sales ? sales.paidAmount : null,
     paidDate: sales ? _normIntraDate(sales.paidDate || sales.paymentDate) : null,
-    salesInfo: sales ? { advertiserName: sales.advertiserName, productName: sales.productName, manager: isAdv ? undefined : sales.manager } : null,
   };
+}
+
+// ── 홈 작업목록 「업체 정산」 칸 — 계약이 매칭된 작업 전부의 정산 표시값을 한 번에(내부 직원 전용). ──
+//   ★ 칸 하나하나는 작업보드 정산 칸과 **같은 모양**(_settlementTabView)이라 화면이 setlSummaryHtml 로 그대로 그린다.
+//   ★ scope = 'run'(진행 중) | 'fin'(마감 보관함) — 보관함은 그 탭을 열 때만 부른다(인트라넷 조회를 반으로).
+//   ★ 같은 계약은 한 번만 묻고(계약 1건을 작업 여럿이 나눠 쓴다), 한 번에 6건까지만 동시에 묻는다.
+//   ★ 결과는 60초 다시 쓴다 — 홈을 오갈 때마다 인트라넷을 수백 번 두드리지 않게. fresh=1(계약 매칭 직후)은 건너뛴다.
+//   ★ 계약 조회 실패는 그 작업만 proxyDown(화면 주황 「확인 필요」) — "미입금"으로 꾸미지 않는다.
+const HOME_SETTLEMENT_TTL_MS = 60 * 1000;
+const HOME_SETTLEMENT_CONCURRENCY = 6;
+const _homeSettlementCache = new Map();   // scope → { at, items }
+async function homeSettlementSummary({ role, staffName, scope = 'run', force = false, includeParticipantTabs = false } = {}) {
+  const sc = scope === 'fin' ? 'fin' : 'run';
+  const now = Date.now(); const c = _homeSettlementCache.get(sc);
+  // 내부 역할은 모두 같은 범위(allWorkdesk)라 범위별로만 나눠 둔다.
+  if (!force && c && now - c.at < HOME_SETTLEMENT_TTL_MS) return c.items;
+  const tabs = await scopedActiveTabs({ role, staffName, limit: 2000, allStaff: role === 'staff', allWorkdesk: true, includeParticipantTabs });
+  const fin = await finishedTabsMap();
+  if (!fin.ok) throw new Error('마감 여부를 불러오지 못했습니다');   // 진행 중/보관함을 못 가르면 섞어 내보내지 않는다
+  const isFin = t => {
+    const g = String(t.tabGid == null ? '' : t.tabGid).trim();
+    return !!(fin.map[`${t.sheetId}\t${t.tabName}`] || (g ? fin.map[`${t.sheetId}\tgid:${g}`] : null));
+  };
+  const want = new Set(tabs.filter(t => isFin(t) === (sc === 'fin')).map(t => `${t.sheetId}\t${t.tabName}`));
+  const db = getPool();
+  const { rows: links } = await db.query(
+    `SELECT sheet_id AS "sheetId", tab_name AS "tabName", sales_id AS "salesId", contract_number AS "contractNumber"
+       FROM trackb_settlement_links WHERE deleted_at IS NULL`);
+  const mine = links.filter(l => want.has(`${l.sheetId}\t${l.tabName}`));
+  const ids = [...new Set(mine.map(l => l.salesId).filter(Boolean))];
+  const src = new Map();
+  for (let k = 0; k < ids.length; k += HOME_SETTLEMENT_CONCURRENCY) {
+    await Promise.all(ids.slice(k, k + HOME_SETTLEMENT_CONCURRENCY).map(async (sid) => { src.set(sid, await _settlementSources(sid)); }));
+  }
+  // 같은 계약을 함께 쓰는 작업(작업보드 칸의 「작업 N개 공유」 배지와 같은 재료) — 실패하면 칸만 뺀다(fail-soft).
+  let shareBy = null;
+  if (ids.length) {
+    try {
+      const { rows: sh } = await db.query(
+        `SELECT l.sales_id AS "salesId", l.sheet_id AS "sheetId", l.tab_name AS "tabName",
+                COALESCE(NULLIF(tc.display_name, ''), l.tab_name) AS label
+           FROM trackb_settlement_links l
+           LEFT JOIN tab_configs tc ON tc.sheet_id = l.sheet_id AND tc.tab_name = l.tab_name
+          WHERE l.deleted_at IS NULL AND l.sales_id = ANY($1::text[])
+          ORDER BY l.created_at ASC`, [ids]);
+      shareBy = new Map();
+      for (const r of sh) { if (!shareBy.has(r.salesId)) shareBy.set(r.salesId, []); shareBy.get(r.salesId).push(r); }
+    } catch (e) { logger.warn(`[settlement] 홈 공유 작업 조회 실패: ${e.message}`); }
+  }
+  const items = mine.map(l => {
+    const s = src.get(l.salesId) || { sales: null, quoteResult: { quote: null, lookupFailed: false }, invRows: null };
+    const out = { sheetId: l.sheetId, tabName: l.tabName, ..._settlementTabView({ link: l, sales: s.sales, quoteResult: s.quoteResult, invRows: s.invRows }) };
+    if (shareBy && l.salesId) {
+      const others = (shareBy.get(l.salesId) || []).filter(r => !(r.sheetId === l.sheetId && r.tabName === l.tabName));
+      out.sharedTabCount = others.length + 1;
+      out.sharedTabs = others.slice(0, 20).map(({ salesId, ...r }) => r);
+    }
+    return out;
+  });
+  _homeSettlementCache.set(sc, { at: Date.now(), items });
+  return items;
 }
 
 // ═══ 견적서·계산서 문서 뷰어(광고주 전체 작업 표의 칸 클릭 → 팝업) ═══
@@ -7091,7 +7170,7 @@ module.exports = {
   invoiceDocForTab,
   brandsForAdvertiser, createBrand, updateBrand, assignBrandTabs, brandTabAllowed,
   tabBrandManagersMap, tabBrandManagersFor, setTabBrandManagers, _normBrandManagers,
-  settlementSummaryForAdvertiser, advertiserWorkSummary, reviewImagesForTab,
+  settlementSummaryForAdvertiser, homeSettlementSummary, advertiserWorkSummary, reviewImagesForTab,
   __advertiserColumnsForTest: _advertiserColumns,   // 광고주 컬럼 화이트리스트(회귀가드 전용 노출)
   __advertiserHeaderCandidatesForTest: _advertiserHeaderCandidates,
   __advertiserColumnValueForTest: _advertiserColumnValue,
