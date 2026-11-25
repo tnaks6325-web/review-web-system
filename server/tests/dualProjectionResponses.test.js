@@ -83,7 +83,8 @@ async function setup() {
         selected_opt_key text, mirror_status text, owner_reviewer_id uuid, participant_identity_id uuid, participant_card_id uuid,
         participant_identity_key_hash text, campaign_application_id integer, deleted_at timestamptz,
         submitted_at timestamptz DEFAULT now(), sheet_written_at timestamptz, rule_flags jsonb, delivery_memo text,
-        delivery_memo_check text, capture_flags jsonb, purchase_qty int, qty_tier_amount int, dedup_key text);
+        delivery_memo_check text, capture_flags jsonb, purchase_qty int, qty_tier_amount int, dedup_key text,
+        source text DEFAULT 'order_submit', capture_file_id text);   -- 결정 412: 실제 칸(036 source · 062 capture_file_id) — 작업보드 명단이 예약내역 검사 대조에 읽는다
       CREATE TABLE campaign_participants(id uuid PRIMARY KEY, seq int, sheet_id text, tab_name text, tab_gid text, source text,
         order_submission_id uuid, identity_key text, phone8 text, recipient_name text, reviewer_name text, option_text text,
         product_name text, round text, row_json jsonb, submit_col text, submit_col2 text, active boolean DEFAULT true,

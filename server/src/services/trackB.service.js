@@ -3722,7 +3722,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             ria.is_submitted AS submitted, FALSE AS paid, 'archive'::text AS source,
             NULL::uuid AS order_submission_id, NULL::text AS identity_key, ria.row_json, ria.submit_col, ria.submit_col2,
             NULL::uuid AS "popularPurposeApplicationId", NULL::text AS "popularPurposePhone8", NULL::jsonb AS "ruleFlags",
-            NULL::text AS "deliveryMemo", NULL::text AS "deliveryMemoCheck", NULL::jsonb AS "captureFlags", NULL::int AS "purchaseQty"
+            NULL::text AS "deliveryMemo", NULL::text AS "deliveryMemoCheck", NULL::jsonb AS "captureFlags", NULL::int AS "purchaseQty",
+            NULL::jsonb AS "bookingCapture"
        FROM review_index_archive ria
       WHERE ria.sheet_id=$1 AND ria.tab_name=$2
       ORDER BY ria.row_index`
@@ -3745,7 +3746,10 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             -- 결정 319: 캡처 확인 🚩(결제금액·상품·개수 차이로 받은 주문 · 내부 작업보드만)
             purpose_order.capture_flags AS "captureFlags",
             -- 결정 289 ④: 리뷰어가 고른 구매수량(공고 참여 주문만 · 없으면 NULL = 1개 기본) — 「구매수량」 가상 칸·판매 개수
-            purpose_order.purchase_qty AS "purchaseQty"
+            purpose_order.purchase_qty AS "purchaseQty",
+            -- 결정 412: 네이버예약리뷰 예약내역 주문이면 지금 첫 장 사진 번호(예약내역 자동 검사 결과가 그 사진 것인지 대조 · 내부 작업보드만)
+            CASE WHEN purpose_order.source = 'booking_submit'
+                 THEN jsonb_build_object('fileId', purpose_order.capture_file_id) END AS "bookingCapture"
        FROM campaign_participants cp
        LEFT JOIN order_submissions purpose_order
          ON purpose_order.id = cp.order_submission_id AND purpose_order.deleted_at IS NULL
@@ -4130,6 +4134,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     if (showEdits) {
       const cf = _captureCheckLabels(r.captureFlags);
       if (cf.length) syn.captureCheck = cf;
+      /* 결정 412 — 네이버예약리뷰 예약내역 자동 검사(일치 · 다름+이유 · 확인 못 함). 판정·문구는 bookingCaptureCheck 한 곳 · 내부에만 싣는다. */
+      const bkc = require('./bookingCaptureCheck.service').reservationCheckView(r.captureFlags, r.bookingCapture);
+      if (bkc) syn.bookingCheck = bkc;
     }
     /* 결정 289 ④ — 고른 구매수량(내부·업체 모두 · 사용자 확정 「가」). 개인정보가 아니고 결제금액 칸이 이미 보인다. */
     if (r.purchaseQty != null && Number(r.purchaseQty) > 0) syn.purchaseQty = Number(r.purchaseQty);
