@@ -92,11 +92,24 @@ async function serverPart() {
   ok(by.R1.sharedTabCount === 3 && by.R1.sharedTabs.map(s => s.tabName).sort().join() === 'R2,X', '공유 배지 재료 — 같은 계약을 함께 쓰는 다른 작업(범위 밖 작업 포함 전체 수)');
   const fin = await svc.homeSettlementSummary({ role: 'admin', scope: 'fin', force: true });
   ok(fin.length === 1 && fin[0].tabName === 'F1', '보관함 묶음 = 마감된 작업만');
+  await svc.homeSettlementSummary({ role: 'admin', scope: 'run' });   // (위 fin fresh 가 run 저장분도 버렸다) 다시 저장
   calls = [];
   await svc.homeSettlementSummary({ role: 'admin', scope: 'run' });
   ok(calls.length === 0, '60초 안에는 받아 둔 값을 다시 쓴다(인트라넷 조회 0)');
   await svc.homeSettlementSummary({ role: 'admin', scope: 'run', force: true });
   ok(calls.length > 0, 'fresh(계약 매칭 직후)는 저장분을 건너뛰고 새로 묻는다');
+  // 리뷰 지적(PR 1885 ①): 마감/복귀 직후 fresh 로 한 범위를 새로 받으면 다른 범위의 60초 저장분도 버린다
+  //   (작업이 진행 중 ↔ 보관함으로 옮겨졌는데 다른 범위 저장분이 옛 구성을 60초 더 내주지 않게).
+  //   (계약 조회는 아래 단계에도 20초 저장이 있어 인트라넷 호출 수로는 못 본다 → 묶음을 새로 만들었는지 = 마감 목록을 다시 읽었는지)
+  const P1 = svcPool(); svc.__setPoolForTest(P1);
+  const finReads = () => P1.q.filter(x => /trackb_tab_finished/.test(x.s)).length;
+  await svc.homeSettlementSummary({ role: 'admin', scope: 'fin' });   // fin 저장
+  await svc.homeSettlementSummary({ role: 'admin', scope: 'fin' });
+  const n0 = finReads();
+  await svc.homeSettlementSummary({ role: 'admin', scope: 'run', force: true });
+  const n1 = finReads();
+  await svc.homeSettlementSummary({ role: 'admin', scope: 'fin' });
+  ok(finReads() > n1 && n1 > n0, 'fresh 는 두 범위 저장분을 함께 버린다(마감/복귀로 작업이 범위를 옮긴다)');
   finFails = true;
   let threw = false;
   try { await svc.homeSettlementSummary({ role: 'admin', scope: 'run', force: true }); } catch (_) { threw = true; }
@@ -133,13 +146,22 @@ function grab(name) {
 function screenPart() {
   console.log('D. 입금 판정 — 금액 기준');
   const names = ['_setlPayState', 'setlSummaryHtml', '_awMD', '_manWon', '_shareBadge', '_wonFmt', '_homeSetlBag', '_homeSetlOf', '_setlIsUnpaid',
-    '_setlUnpaidRest', '_homeSetlMatch', '_homeSetlSumHtml', '_homeSetlChipsHtml', '_homeSetlCellHtml', '_homeSetlCtx', '_finVisible', '_openSettlementPaymentFor', 'openSettlementDocument'];
+    '_setlUnpaidRest', '_homeSetlMatch', '_homeSetlSumHtml', '_homeSetlChipsHtml', '_homeSetlCellHtml', '_homeSetlCtx', '_finVisible', '_openSettlementPaymentFor', 'openSettlementDocument',
+    '_homeSetlReady', '_homeSetlInvalidate', '_homeSetlLoad', '_homeSetlRefresh', '_homeSetlPick', '_finRefresh', '_finSearch'];
   const modal = [];
   const box = {
     STATE: { role: 'admin', tabs: [], finTab: 'run', finFilter: '', finQ: '', finMgr: '' },
     esc: s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])),
     isFinished: t => !!t.finished, _tabSearchText: t => t.tabName, _finMatchFilter: () => true, _finUnpaid: () => 0,
     _modal: (title, body) => modal.push({ title, body }), awDocOpen: () => {}, openSettlementPayment: () => modal.push({ title: 'WORKDESK' }),
+    _isInternalRole: () => true, HOME_SETL_TTL_MS: 60000, Date,
+    // 정산 묶음 요청 — 테스트가 응답 시점을 쥔다
+    apiCalls: [], api(u) { return new Promise((res) => box.apiCalls.push({ u, res })); },
+    // 홈 DOM 흉내(본문·거름 단추·합계 줄만)
+    dom: { wblMount: {}, wblBody: { innerHTML: '' }, wblSetlF: { outerHTML: '' }, wblSetlSum: { outerHTML: '' } },
+    document: { getElementById: id => box.dom[id] || null },
+    _finBodyHtml: () => 'BODY', _finRenderList: () => { box.rendered++; }, rendered: 0, _finHoldHeight: () => {}, _finRenderLegacy: () => {},
+    _finEnsureStats: async () => {}, _wtPruneFinished: () => {}, _renderTabList: () => {}, _renderWorktabs: () => {}, _finBarHtml: () => '',
   };
   vm.createContext(box);
   vm.runInContext('const _SETTLE_PAY={unpaid:[\'미입금\',\'bad\'],partial:[\'부분입금\',\'warn\'],paid:[\'입금완료\',\'safe\']};\n' + names.map(grab).join(''), box);
@@ -192,13 +214,61 @@ function screenPart() {
   box.openSettlementDocument({ stopPropagation() {}, preventDefault() {}, target: { closest: () => null } }, 'payment');
   ok(modal.length === 1 && modal[0].title === 'WORKDESK', '작업보드 칸에서 누르면 종전 경로 그대로');
   ok(/const st=\(ev&&_homeSetlCtx\(ev\)\)\|\|STATE\.settle/.test(WD), '[계약 매칭] 도 홈 칸이면 그 줄 작업으로 연다');
-  ok(/STATE\.homeSettle=\{run:null,fin:null\};/.test(grab('_contractMatchApplied')), '계약 매칭/해제 직후 홈 묶음을 버리고 새로 받는다(옛 계약 금액이 남지 않게)');
+  ok(/_homeSetlInvalidate\(\)/.test(grab('_contractMatchApplied')), '계약 매칭/해제 직후 홈 묶음을 버리고 새로 받는다(옛 계약 금액이 남지 않게)');
   ok(!/_finRenderList\(\)/.test(grab('_homeSetlRefresh')) && !/_finRenderList\(\)/.test(grab('_homeSetlLoad')),
     '★ 정산이 늦게 도착해도 머리줄(검색칸)을 다시 그리지 않는다 — 한글 입력이 깨지지 않게');
+  return box;
+}
+
+/* F. 리뷰 지적 4건(PR 1885) — 실제 함수를 vm 에서 돌린다 */
+async function reviewPart(box) {
+  console.log('F. 리뷰 지적');
+  const flush = () => new Promise(r => setImmediate(r));
+  const t = (n, o) => ({ sheetId: 'sl', tabName: n, stats: { manager: '' }, ...o });
+  const MAP = { 'sl\tA': { linked: true, salesId: 'S1', totalCost: 5000000, paidAmount: 0 }, 'sl\tB': { linked: true, salesId: 'S2', totalCost: 1000000, paidAmount: 0 } };
+  const A = t('A', { stats: { manager: '김' } }), B = t('B', { stats: { manager: '이' } });
+  box.STATE.tabs = [A, B]; box.STATE.finTab = 'run'; box.STATE.finMgr = ''; box.STATE.finQ = ''; box.STATE.homeSetlF = '';
+
+  // ③ 뒤늦게 온 옛 응답이 계약 매칭 뒤 새 응답을 덮지 않는다
+  box.STATE.homeSettle = { run: { at: 1, map: { ...MAP } }, fin: null };
+  box.apiCalls.length = 0;
+  box._homeSetlLoad('run', false);                       // 60초 지나 다시 받는 중(옛 응답)
+  box._homeSetlInvalidate();                             // 그 사이 계약 매칭 → 버리고 fresh 로 다시
+  ok(box.apiCalls.length === 2 && /fresh=1/.test(box.apiCalls[1].u), '계약 매칭 직후 fresh 로 다시 받는다');
+  box.apiCalls[1].res({ ok: true, items: [{ sheetId: 'sl', tabName: 'A', linked: true, salesId: 'NEW', totalCost: 7, paidAmount: 7 }] }); await flush();
+  box.apiCalls[0].res({ ok: true, items: [{ sheetId: 'sl', tabName: 'A', linked: true, salesId: 'OLD', totalCost: 5, paidAmount: 0 }] }); await flush();
+  ok(box._homeSetlOf(A).salesId === 'NEW', '★ 뒤늦게 도착한 옛 응답은 버린다(새 계약 값이 옛 계약으로 되돌아가지 않는다)');
+
+  // ① 마감/복귀 직후 홈 묶음을 버리고 새로 받는다(작업이 범위를 옮긴다)
+  box.STATE.homeSettle = { run: { at: Date.now(), map: { ...MAP } }, fin: { at: Date.now(), map: {} } };
+  box.apiCalls.length = 0;
+  await box._finRefresh();
+  ok(box.STATE.homeSettle.fin === null && box.apiCalls.length === 1 && /fresh=1/.test(box.apiCalls[0].u),
+    '★ 마감/복귀(_finRefresh) 직후 두 범위 저장분을 버리고 fresh 로 다시 받는다(옮겨 간 작업이 「계약 매칭」으로 보이지 않게)');
+  box.apiCalls[0].res({ ok: true, items: Object.entries(MAP).map(([k, v]) => ({ sheetId: 'sl', tabName: k.split('\t')[1], ...v })) }); await flush();
+
+  // ② 합계는 지금 보이는 목록(담당·검색 거름 포함)으로
+  box.STATE.homeSetlF = 'unpaid'; box.STATE.finMgr = '김';
+  ok(/업체 미입금 <b>1건<\/b> · 남은 금액 합계 <b>5,000,000원<\/b>/.test(box._homeSetlSumHtml(box.STATE.tabs)), '★ 담당자를 고르면 합계도 그 담당 작업만(다른 담당의 미입금을 더하지 않는다)');
+  box.STATE.finMgr = '';
+  box.dom.wblSetlSum.outerHTML = '';
+  box._finSearch('B');
+  ok(/업체 미입금 <b>1건<\/b> · 남은 금액 합계 <b>1,000,000원<\/b>/.test(box.dom.wblSetlSum.outerHTML), '★ 검색어를 바꾸면 합계 줄도 그 목록으로 다시 센다');
+  box._finSearch(''); box.STATE.finQ = '';
+
+  // ④ 못 받았을 때 켜 둔 거름을 끌 수 있고, 빈 목록으로 꾸미지 않는다
+  box.STATE.homeSetlF = 'unpaid';
+  box.STATE.homeSettle = { run: { failed: true, at: 1 }, fin: null };
+  const chips = box._homeSetlChipsHtml(box.STATE.tabs);
+  ok(/<button class="wbl-chip on"(?![^>]*disabled)[^>]*>업체 미입금/.test(chips), '★ 못 받아도 켜 둔 거름 단추는 눌러서 끌 수 있다');
+  ok(/disabled[^>]*>계약 미매칭/.test(chips), '켜지 않은 다른 단추는 그대로 꺼 둔다');
+  ok(box._finVisible().length === 2, '★ 못 받으면 거름을 쉬고 전체 목록을 보인다(미입금 0건처럼 빈 목록으로 꾸미지 않는다)');
+  ok(/불러오지 못해/.test(box._homeSetlSumHtml(box.STATE.tabs)), '거름을 쉬는 이유를 목록 위에 말한다');
+  box.STATE.homeSetlF = '';
 }
 
 (async () => {
   await serverPart();
-  screenPart();
+  await reviewPart(screenPart());
   console.log(`\nhomeSettlementColumn: ${pass} passed`);
 })().catch(e => { console.error('❌', e && e.message); process.exit(1); });

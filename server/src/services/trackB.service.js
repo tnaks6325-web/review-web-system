@@ -1813,6 +1813,9 @@ async function homeSettlementSummary({ role, staffName, scope = 'run', force = f
   const now = Date.now(); const c = _homeSettlementCache.get(sc);
   // 내부 역할은 모두 같은 범위(allWorkdesk)라 범위별로만 나눠 둔다.
   if (!force && c && now - c.at < HOME_SETTLEMENT_TTL_MS) return c.items;
+  // fresh(계약 매칭·마감/복귀 직후) = 두 범위 저장분을 함께 버린다 — 마감/복귀는 작업을 진행 중 ↔ 보관함으로 옮겨서
+  //   다른 범위 저장분이 옛 구성(옮겨 간 작업 없음)을 60초 더 내준다(PR 1885 리뷰 ①).
+  if (force) _homeSettlementCache.clear();
   const tabs = await scopedActiveTabs({ role, staffName, limit: 2000, allStaff: role === 'staff', allWorkdesk: true, includeParticipantTabs });
   const fin = await finishedTabsMap();
   if (!fin.ok) throw new Error('마감 여부를 불러오지 못했습니다');   // 진행 중/보관함을 못 가르면 섞어 내보내지 않는다

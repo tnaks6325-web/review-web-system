@@ -4776,6 +4776,8 @@ function _finAbsorb(r){
 async function _finRefresh(){
   await _finEnsureStats(true);
   _wtPruneFinished();  // 마감된 작업을 열린 줄에서 정리(데이터 도착 지점 — 렌더는 순수하게 둔다)
+  // 마감/복귀로 작업이 진행 중 ↔ 보관함을 옮겼다 — 홈 「업체 정산」 묶음을 버리고 새로 받는다(옮겨 간 작업이 「계약 매칭」으로 보이지 않게 · PR 1885 리뷰 ①)
+  if(STATE.homeSettle&&(STATE.homeSettle.run||STATE.homeSettle.fin)) _homeSetlInvalidate();
   if(document.getElementById('wblMount')) _finRenderList();
   if(document.getElementById('tb2')) _renderTabList();
   _renderWorktabs();
@@ -5781,7 +5783,8 @@ function _finVisible(){
   if(fin) list=list.slice().sort((a,b)=>String(b.finishedAt||'').localeCompare(String(a.finishedAt||'')));
   else if(f==='pay') list=list.slice().sort((a,b)=>_finUnpaid(b)-_finUnpaid(a));   // 미입금 큰 순(안정 정렬)
   // 업체 정산 거름(진행 중·보관함 공용) — 판정은 _homeSetlMatch 한 곳(버튼 건수와 같은 함수). 미입금은 남은 돈 큰 순.
-  const sf=STATE.homeSetlF||'';
+  // ★ 정산을 못 받았으면(받는 중·실패) 거름을 쉬고 전체를 보인다 — 빈 목록은 「미입금 0건」으로 읽힌다(PR 1885 리뷰 ④).
+  const sf=_homeSetlReady(fin?'fin':'run')?(STATE.homeSetlF||''):'';
   if(sf){
     list=list.filter(t=>_homeSetlMatch(t,sf));
     if(sf==='unpaid') list=list.slice().sort((a,b)=>_setlUnpaidRest(_homeSetlOf(b))-_setlUnpaidRest(_homeSetlOf(a)));
@@ -5797,6 +5800,15 @@ function _finVisible(){
      (_finSearch 주석과 같은 사고 계열). 도착 시 표 본문·거름 단추·합계 줄만 갈아 끼운다(_homeSetlRefresh). */
 var HOME_SETL_TTL_MS=60000;
 function _homeSetlBag(sc){ STATE.homeSettle=STATE.homeSettle||{run:null,fin:null}; return STATE.homeSettle[sc]; }
+function _homeSetlReady(sc){ const b=_homeSetlBag(sc); return !!(b&&b.map&&!b.failed); }
+/* 받아 둔 묶음을 버리고 지금 탭 것을 fresh 로 다시 받는다 — 계약 매칭/해제(_contractMatchApplied)·마감/복귀(_finRefresh) 직후.
+   ★ 세대(homeSetlGen)를 올려, 그 전에 떠난 요청이 늦게 도착해도 새 값을 덮지 못하게 한다(PR 1885 리뷰 ③).
+   ★ 서버도 fresh 면 두 범위 저장분을 함께 버린다(마감/복귀는 작업을 진행 중 ↔ 보관함으로 옮긴다 · 리뷰 ①). */
+function _homeSetlInvalidate(){
+  STATE.homeSetlGen=(STATE.homeSetlGen||0)+1;
+  STATE.homeSettle={run:null,fin:null};
+  if(document.getElementById('wblMount')) _homeSetlLoad(STATE.finTab==='fin'?'fin':'run',true);
+}
 function _homeSetlOf(t){
   const b=_homeSetlBag(isFinished(t)?'fin':'run');
   if(!b||b.loading&&!b.map) return null;                                    // 받는 중 — 「…」
@@ -5815,8 +5827,10 @@ function _homeSetlMatch(t,f){
 async function _homeSetlLoad(sc,force){
   const cur=_homeSetlBag(sc);
   if(cur&&cur.loading) return;
+  const gen=STATE.homeSetlGen||0;
   STATE.homeSettle[sc]={loading:true,map:cur&&cur.map||null,at:cur&&cur.at||0};
   let r=null; try{ r=await api('/api/trackb/home/settlement?scope='+sc+(force?'&fresh=1':'')); }catch(_){ }
+  if((STATE.homeSetlGen||0)!==gen) return;   // 그 사이 버려진 요청 — 새 값을 덮지 않는다
   const m={};
   if(r&&r.ok&&Array.isArray(r.items)){ for(const it of r.items) m[it.sheetId+'\t'+it.tabName]=it; STATE.homeSettle[sc]={map:m,at:Date.now()}; }
   else STATE.homeSettle[sc]={failed:true,at:Date.now()};
@@ -5832,7 +5846,7 @@ function _homeSetlRefresh(){
   const all=(STATE.tabs||[]).filter(t=>!t.archived);
   const body=document.getElementById('wblBody'); if(body) body.innerHTML=_finBodyHtml();
   const chips=document.getElementById('wblSetlF'); if(chips) chips.outerHTML=_homeSetlChipsHtml(all);
-  const sum=document.getElementById('wblSetlSum'); if(sum) sum.outerHTML=_homeSetlSumHtml(all);
+  const sum=document.getElementById('wblSetlSum'); if(sum) sum.outerHTML=_homeSetlSumHtml();
 }
 function _homeSetlPick(f){ STATE.homeSetlF=(STATE.homeSetlF===f)?'':f; _finRenderList(); }   // 같은 단추 다시 누르면 해제
 function _homeSetlChipsHtml(all){
@@ -5842,14 +5856,19 @@ function _homeSetlChipsHtml(all){
   const why=b&&b.failed?'정산 정보를 불러오지 못했습니다 — 잠시 후 다시 들어오면 다시 불러옵니다':'정산 정보를 불러오는 중입니다';
   const n=f=>list.filter(t=>_homeSetlMatch(t,f)).length;
   const f=STATE.homeSetlF||'';
-  const btn=(k,label,tip)=>`<button class="wbl-chip${f===k?' on':''}"${ready?'':' disabled'} title="${esc(ready?tip:why)}" onclick="_homeSetlPick('${k}')">${label} ${ready?n(k):'…'}</button>`;
+  // ★ 켜 둔 단추는 못 받았어도 눌러서 끌 수 있다(PR 1885 리뷰 ④) — 켜지 않은 단추만 꺼 둔다.
+  const btn=(k,label,tip)=>`<button class="wbl-chip${f===k?' on':''}"${ready||f===k?'':' disabled'} title="${esc(ready?tip:why)}" onclick="_homeSetlPick('${k}')">${label} ${ready?n(k):'…'}</button>`;
   return `<span class="wbl-setlf" id="wblSetlF">${btn('unpaid','업체 미입금','견적서(없으면 계약) 금액보다 업체 입금액이 적은 작업 — 남은 금액이 큰 순으로 보여 줍니다')}${btn('nomatch','계약 미매칭','인트라넷 계약이 매칭되지 않아 업체 입금 여부를 알 수 없는 작업')}</span>`;
 }
 /* [업체 미입금] 을 켜면 남은 금액 합계 한 줄 — ★ 같은 계약을 여러 작업이 나눠 쓰면 한 번만 더한다(작업마다 더하면 두 배가 된다). */
-function _homeSetlSumHtml(all){
-  if(STATE.homeSetlF!=='unpaid') return '<div id="wblSetlSum"></div>';
-  const fin=STATE.finTab==='fin';
-  const list=all.filter(t=>isFinished(t)===fin&&_setlIsUnpaid(_homeSetlOf(t)));
+//   ★ 합계 = 지금 표에 보이는 목록(_finVisible — 담당·검색·스위치 거름 포함) 그대로(PR 1885 리뷰 ②). 검색할 때도 다시 센다(_finSearch).
+function _homeSetlSumHtml(){
+  const f=STATE.homeSetlF||'';
+  if(!f) return '<div id="wblSetlSum"></div>';
+  const fin=STATE.finTab==='fin', b=_homeSetlBag(fin?'fin':'run');
+  if(!_homeSetlReady(fin?'fin':'run')) return `<div id="wblSetlSum" class="wbl-note wbl-setlsum">${b&&b.failed?'정산 정보를 불러오지 못해 거르지 않은 전체 목록입니다 — 잠시 후 다시 들어오면 다시 불러옵니다':'정산 정보를 불러오는 중이라 거르지 않은 전체 목록입니다'}</div>`;
+  if(f!=='unpaid') return '<div id="wblSetlSum"></div>';
+  const list=_finVisible().filter(t=>_setlIsUnpaid(_homeSetlOf(t)));
   const seen={}; let sum=0;
   for(const t of list){ const d=_homeSetlOf(t), k=d.salesId||(t.sheetId+'\t'+t.tabName); if(!seen[k]){ seen[k]=1; sum+=_setlUnpaidRest(d); } }
   return `<div id="wblSetlSum" class="wbl-note wbl-setlsum">업체 미입금 <b>${list.length}건</b> · 남은 금액 합계 <b>${_wonFmt(sum)}</b> <span>(같은 계약을 나눠 쓰는 작업은 한 번만 더함)</span></div>`;
@@ -6580,7 +6599,7 @@ function _finRenderList(){
         mgrs.map(m=>`<button class="wbl-chip${STATE.finMgr===m?' on':''}" onclick="_finPickMgr(this.dataset.m)" data-m="${esc(m)}">${esc(m)}</button>`).join(''):''}
       <input class="wbl-q" id="wblQ" placeholder="🔎 작업명 · 업체 · 담당자 검색" value="${esc(STATE.finQ||'')}" oninput="_finSearch(this.value)">
     </div>
-    ${_homeSetlSumHtml(all)}
+    ${_homeSetlSumHtml()}
     <div id="wblBody">${_finBodyHtml()}</div>
     ${fin?`<div id="wblLegacy">${_finLegacyHtml()}</div>`:''}
     ${_finFilterNoteHtml(all,filt)}
@@ -6809,6 +6828,7 @@ function _finSearch(v){
   if(!b){ _finRenderList(); return; }
   _finHoldHeight(b,v);
   b.innerHTML=_finBodyHtml();
+  const ss=document.getElementById('wblSetlSum'); if(ss) ss.outerHTML=_homeSetlSumHtml();   // 업체 미입금 합계도 같은 목록으로(PR 1885 리뷰 ②)
   _finRenderLegacy();   // 결정 258: 예전 마감 작업도 같은 검색어로 거른다(표 본문만 — 입력칸 DOM 은 그대로)
 }
 /* ══ 결정 258: 마감 보관함 아래 "📦 예전 마감 작업" — 옛 관리자 대시보드 ⬛ 마감(tab_configs.is_closed) ══
@@ -9413,10 +9433,7 @@ function _contractMatchApplied(sheetId,tabName,salesId,contractNumber){
   const st=STATE.settle;
   if(st&&st.tab&&st.tab.sheetId===sheetId&&st.tab.tabName===tabName) loadSettlement(st.tab);
   // ③ 홈 작업목록 「업체 정산」 — 받아 둔 묶음을 버리고 새로 받는다(옛 계약 금액이 그 줄에 남지 않게 · 60초 저장분 건너뜀)
-  if(STATE.homeSettle&&(STATE.homeSettle.run||STATE.homeSettle.fin)){
-    STATE.homeSettle={run:null,fin:null};
-    if(document.getElementById('wblMount')) _homeSetlLoad(STATE.finTab==='fin'?'fin':'run',true);
-  }
+  if(STATE.homeSettle&&(STATE.homeSettle.run||STATE.homeSettle.fin)) _homeSetlInvalidate();
 }
 async function toggleSettleVis(advertiserId,visible){
   const r=await api('/api/trackb/settlement/visibility',{method:'POST',body:JSON.stringify({advertiserId,visible})});
