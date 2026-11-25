@@ -13,13 +13,18 @@ function _key(row) {
   return [String(row && row.sheetId || ''), String(row && row.tabName || ''), Number(row && row.rowIndex)].join('\t');
 }
 
-function _columnEdits(value) {
+/* ★ 결정 411 — 예약리뷰 입금은 그 줄의 「예약번호」 칸(예약내역 제출의 흔적)도 작업보드 표시값으로 본다.
+     금액 칸과 같은 합성(물리값 + 편집 덧씌움)을 타야 직원이 작업보드에서 적은 예약번호가 입금 판정에 보인다.
+     ★ 금액 판정(extractAmountNumber·「편집됨」 표시)에는 섞지 않는다 — 금액 칸만 센다(아래 edited). */
+const CARRIED_TEXT_HEADERS = new Set([require('../utils/worktablePlan').BOOKING_NUMBER_HEADER]);
+
+function _columnEdits(value, { carry = false } = {}) {
   const out = {};
   if (!value || typeof value !== 'object') return out;
   for (const [field, cellValue] of Object.entries(value)) {
     if (!String(field).startsWith('col:')) continue;
     const header = String(field).slice(4);
-    if (isAmountCandidateHeader(header)) out[header] = cellValue == null ? '' : cellValue;
+    if (isAmountCandidateHeader(header) || (carry && CARRIED_TEXT_HEADERS.has(header))) out[header] = cellValue == null ? '' : cellValue;
   }
   return out;
 }
@@ -32,7 +37,7 @@ function resolveDisplayedAmount({ fallbackRowJson, participantRowJson, manualEdi
   // 현재 앵커뿐 아니라 과거 물리행(manual) 편집도 전부 숨긴다.
   const manual = ambiguous ? {} : _columnEdits(manualEdits);
   const current = ambiguous ? {} : _columnEdits(anchorEdits);
-  const merged = { ...physical, ...manual, ...current };
+  const merged = { ...physical, ...(ambiguous ? {} : _columnEdits(manualEdits, { carry: true })), ...(ambiguous ? {} : _columnEdits(anchorEdits, { carry: true })) };
   const amount = extractAmountNumber(merged);
   const edited = Object.keys(manual).length > 0 || Object.keys(current).length > 0;
   return { amount, source: amount ? (edited ? 'workboard_edit' : 'workboard') : null, rowJson: merged };

@@ -153,7 +153,8 @@ const _otherIssues = it => (it.issues || []).filter(x => x !== 'dual_bundle_chec
   await ta('3c 입금관리 — 사유 라벨 · 작업 단위 보완(작업 조건으로 가는 버튼)', () => {
     assert.ok(/order_goods_by_advertiser:'리뷰오더 물건비가 업체입금/.test(HTML));
     assert.ok(/no_bank:'work', order_goods_by_advertiser:'work'/.test(HTML));
-    assert.ok(/if\(iss\.includes\('no_bank'\) \|\| iss\.includes\('order_goods_by_advertiser'\)\)\{/.test(HTML), '행 보완이 막다른 길');
+    // 결정 411 — 같은 창구에 예약리뷰 이체은행 사유가 덧붙을 수 있다(작업 조건으로 가는 갈래는 그대로)
+    assert.ok(/if\(iss\.includes\('no_bank'\) \|\| iss\.includes\('order_goods_by_advertiser'\)(?: \|\| iss\.includes\('booking_payout_mode'\))?\)\{/.test(HTML), '행 보완이 막다른 길');
     assert.ok(/if\(w\.needPayoutMode\) need\.push\(/.test(HTML), '작업 카드에 고칠 것이 안 뜬다');
   });
 

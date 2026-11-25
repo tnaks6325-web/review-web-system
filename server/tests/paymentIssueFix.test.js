@@ -809,7 +809,10 @@ async function withStubPool(handler, run) {
     const capLine = (HTML.match(/const _PM_FIX_CARD_CAP\s*=\s*\d+;/) || [])[0];
     assert.ok(capLine, '_PM_FIX_CARD_CAP 선언을 찾지 못했다');
     // vm 최상위 `const` 는 전역 객체에 안 붙는다 → 값을 밖에서도 읽도록 `var` 로만 바꿔 주입(값은 소스 그대로)
-    const src = [capLine.replace(/^const/, 'var'), pick('_pmBoardBtn'),
+    // 결정 411 — 예약리뷰 확인 사유 목록도 소스 그대로(_pmBuildFix 가 읽는다)
+    const bkLine = (HTML.match(/const PAY_BOOKING_CHECK_ISSUES = \[[^\]]*\];/) || [])[0];
+    assert.ok(bkLine, 'PAY_BOOKING_CHECK_ISSUES 선언을 찾지 못했다');
+    const src = [capLine.replace(/^const/, 'var'), bkLine.replace(/^const/, 'var'), pick('_pmBoardBtn'),
       pick('_pmBuildFix'), pick('_pmAcctName'), pick('_pmAcctTail'), pick('_pmAcctLabel'),
       pick('_pmAcctPlain'), pick('_pmFixBlock'), pick('_pmFixAcct')].join('\n');
     const sandbox = {
