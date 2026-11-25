@@ -59,7 +59,7 @@ function mkDom() {
     }
     closest(sel) { let n = this; while (n) { if (sel === '.step-nav' && /\bstep-nav\b/.test(n.className)) return n; n = n.parentNode; } return null; }
     querySelector(sel) {
-      const hit = (c) => (sel === 'h2' && c.tagName === 'h2') || (sel === '.modal-box' && /\bmodal-box\b/.test(c.className));
+      const hit = (c) => (sel === 'h2' && c.tagName === 'h2') || (sel === '.modal-box' && /\bmodal-box\b/.test(c.className)) || (sel === '.success-circle' && /\bsuccess-circle\b/.test(c.className)) || (sel === 'i' && c.tagName === 'i');
       const walk = (n) => { for (const c of n.children) { if (hit(c)) return c; const r = walk(c); if (r) return r; } return null; };
       return walk(this);
     }
@@ -74,6 +74,7 @@ function mkDom() {
   const btn = mk('button', 'btnSubmit', 'btn-submit', nav); btn.innerHTML = '<i class="fas fa-paper-plane"></i> 제출하기';
   const modal = mk('div', 'successModal', 'modal-overlay', body);
   const box = mk('div', '', 'modal-box success-modal', modal);
+  const circle = mk('div', '', 'success-circle', box); const icon = mk('i', '', 'fas fa-check', circle);
   const h2 = mk('h2', '', '', box); h2.textContent = '제출 완료!';
   mk('p', 'successMessage', '', box);
   const NULLABLE = new Set(['rvSubmitFailNotice', 'btnSuccessRetryFailed']);
@@ -81,7 +82,7 @@ function mkDom() {
     getElementById: (id) => byId[id] || (NULLABLE.has(id) ? null : mk('div', id, '', null)),
     createElement: (tag) => new El(tag),
   };
-  return { document, byId, body, pane, nav, btn, modal, h2 };
+  return { document, byId, body, pane, nav, btn, modal, h2, icon };
 }
 
 const SCALE = 1000;   // 화면 시간 1초 = 시험 1ms
@@ -289,6 +290,7 @@ test('L4-1 2건 중 2번만 실패 → 완료 창에 「2번 상품B (파랑): �
   assert.match(msg, /2번 상품B \(파랑\): 서버에 일시적인 문제가 있어요/);
   assert.match(msg, /실패한 1건 다시 내기/);
   assert.match(h.dom.h2.textContent, /일부만 제출됐어요/, '제목이 「제출 완료!」가 아니다');
+  assert.equal(h.dom.icon.className, 'fas fa-exclamation', '★ 일부 실패에 초록 확인 표시를 두지 않는다(다 된 것으로 읽힌다)');
   const rb = h.dom.byId.btnSuccessRetryFailed;
   assert.ok(rb && /닫고 실패한 1건 다시 내기/.test(rb.innerHTML), '그 자리에서 다시 낼 단추');
   assert.ok(h.notice() && /2번 상품B/.test(h.notice().text), '창을 닫아도 화면에 남는다');
@@ -306,6 +308,7 @@ test('L4-1 2건 중 2번만 실패 → 완료 창에 「2번 상품B (파랑): �
   assert.equal(h.notice(), null);
   assert.equal(h.dom.h2.textContent, '제출 완료!');
   assert.equal(h.dom.byId.btnSuccessRetryFailed, undefined, '다 되면 단추 없음');
+  assert.equal(h.dom.icon.className, 'fas fa-check', '다 되면 확인 표시로 되돌림');
 });
 
 test('L4-2 여러 건이 모두 실패하면 남는 안내에 건마다 이름·이유(「모든 제출에 실패」·「1번 오류」 없음)', async () => {

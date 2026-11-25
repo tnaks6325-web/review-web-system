@@ -4300,6 +4300,14 @@ function _rvSuccessModalPrep(partialLeft) {
   if (!modal || typeof modal.querySelector !== "function") return;
   const h2 = modal.querySelector("h2");
   if (h2) h2.textContent = partialLeft > 0 ? "일부만 제출됐어요" : "제출 완료!";
+  // 일부 실패에 초록 확인 표시를 그대로 두면 「다 됐다」로 읽힌다 — 주황 느낌표로 바꾸고, 전부 성공이면 원래대로.
+  const circle = modal.querySelector(".success-circle");
+  if (circle) {
+    circle.style.background = partialLeft > 0 ? "#fff4e5" : "";
+    circle.style.color = partialLeft > 0 ? "#d97706" : "";
+    const ic = circle.querySelector("i");
+    if (ic) ic.className = partialLeft > 0 ? "fas fa-exclamation" : "fas fa-check";
+  }
   let rb = document.getElementById("btnSuccessRetryFailed");
   if (!partialLeft) { if (rb && typeof rb.remove === "function") rb.remove(); return; }
   const box = modal.querySelector(".modal-box");
