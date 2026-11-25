@@ -4349,6 +4349,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
         _setRecruitGlobalReviewTypeMix(_useOrderMix ? orderReviewMix : savedReviewMix);
         _rfPickBtn("review_type", _rfReviewTypeKey(c.review_type || ""));
         /* ★ 127: 체험단 종류 복원 — blog 면 리뷰타입 카드 숨김 + 안내 배너 */
+        // ★ 결정 414: 예약 공고 수정 — 서버가 연결 오더 계약으로 붙인 보기 전용 예약 안내(없으면 카드가 「불러오지 못했습니다」라고 말한다)
+        window._rfBookingSpec = (json && json.bookingSpec && typeof json.bookingSpec === "object") ? json.bookingSpec : null;
         { const _wk = document.getElementById("rf_work_kind"); if (_wk) _wk.value = (c.work_kind === "blog") ? "blog" : (c.work_kind || ""); _rfApplyWorkKindUi(); }
         /* 💸 086 이체 설정 복원 — 저장값 없으면 [자동] 버튼이 선택된다 */
         _rfPickTransferBank(c.transfer_bank || "");

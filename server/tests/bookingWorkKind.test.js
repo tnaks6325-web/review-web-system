@@ -9,6 +9,7 @@
  *  ② **조용한 강등** — booking 이 어디선가 review 로 접히면 매장 방문 작업에 구매양식·상품 리뷰 검수가 붙는다.
  *  ③ **반쪽 접수** — 2~5단계(날짜 자리표·리뷰어 화면·검수·입금)가 없는 동안 booking 오더·공고가 저장되면
  *     상품 리뷰 작업보드가 깔린다. 저장 입구 5곳은 **아무것도 쓰기 전에** `work_kind_not_ready` 로 거절한다(fail-closed).
+ *     ★ 결정 414: booking 은 개방됐다 — 장치는 다음 종류용으로 남고, 이 시험은 시험 안에서 booking 을 준비 중으로 되돌려 장치를 본다.
  *  ④ **검수 차단** — 결과물이 상품 리뷰 화면이 아니라 AI 상품 리뷰 판정이 정상 제출을 잠그면 안 된다.
  *  ⑤ **판정 사본** — 서버 `isBookingKind` 와 프론트 `_woIsBookingKind` 가 같은 표기에 다른 답을 내면 갈라진다.
  *
@@ -77,9 +78,15 @@ function legacyNormalize(raw) {
     return !!m && !new RegExp(m[1].slice(1, -2), 'i').test('예약') && !new RegExp(m[1].slice(1, -2), 'i').test('예약구매');
   })());
 
-  /* ── 2) 아직 준비 안 됨 — 저장 입구 fail-closed ─────────────────── */
-  console.log('\n2) 아직 준비 안 됨 — 저장 입구에서 거절(아무것도 쓰지 않음)');
-  t('준비 판정: booking 만 막고 나머지는 연다', !WK.isWorkKindReady('booking') && !WK.isWorkKindReady('네이버예약리뷰')
+  /* ── 2) 준비 중 장치 — 저장 입구 fail-closed ─────────────────── */
+  /* ★ 결정 414(2026-11-25): booking 은 2~5단계 + 접수 뒤 수정 잠금이 생겨 준비 중 목록에서 빠졌다(개방 — 배포 그대로의 끝까지 흐름은 bookingOpenE2E).
+     장치(목록·판정·거절 본문·저장 입구 5곳)는 다음 새 종류를 위해 남는다 — 아래는 **시험 안에서만** booking 을 목록에 다시 넣어
+     「준비 중인 종류」의 거절이 5곳 모두 아무것도 쓰기 전에 걸리는지 그대로 본다(검사 의미 불변). */
+  console.log('\n2) 준비 중 장치 — 저장 입구에서 거절(아무것도 쓰지 않음 · 시험 안에서 booking 을 준비 중으로 되돌려 확인)');
+  t('★★ 배포 그대로: booking 개방(준비 중 목록 비어 있음) · 다른 종류도 연다', WK.NOT_READY_WORK_KINDS.length === 0 && WK.isWorkKindReady('booking')
+    && ['', null, undefined, 'review', 'blog', 'qna', '리뷰체험단', '아무거나', '네이버예약리뷰'].every(v => WK.isWorkKindReady(v)));
+  WK.NOT_READY_WORK_KINDS.push('booking');   // ★ 시험 안에서만 — 아래 finally 에서 되돌린다
+  t('준비 판정(준비 중인 종류): booking 만 막고 나머지는 연다', !WK.isWorkKindReady('booking') && !WK.isWorkKindReady('네이버예약리뷰')
     && ['', null, undefined, 'review', 'blog', 'qna', '리뷰체험단', '아무거나'].every(v => WK.isWorkKindReady(v)));
   const nr = WK.workKindNotReadyBody('booking');
   t('거절 본문: 코드 work_kind_not_ready · 칸 work_kind · 한국어 안내(무엇을 하면 되는지)', nr.ok === false && nr.code === 'work_kind_not_ready'
@@ -147,7 +154,9 @@ function legacyNormalize(raw) {
     t('대조군: 블로그 공고 만들기는 이 문에 안 걸린다', !(passCreate.res.body && passCreate.res.body.code === 'work_kind_not_ready'));
   } finally {
     pool.query = origQuery; pool.connect = origConnect;
+    WK.NOT_READY_WORK_KINDS.length = 0;   // 배포 그대로(빈 목록)로 되돌림
   }
+  t('★ 시험 뒤 준비 중 목록 원상 복귀(빈 목록 = booking 개방)', WK.NOT_READY_WORK_KINDS.length === 0 && WK.isWorkKindReady('booking'));
   const ord = S('src/routes/order.routes.js');
   t('★ 원본 수정의 거절은 종류 바꾸기(결정 332 — 작업표 삭제)보다 앞', ord.indexOf('workKindNotReadyBody(b.work_kind)', ord.indexOf('async function _intakeSourceRevisionHandler'))
     < ord.indexOf('결정 332 — 접수된 리뷰↔블로그 오더의 종류 바꾸기'));

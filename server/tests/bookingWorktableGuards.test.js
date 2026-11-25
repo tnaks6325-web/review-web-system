@@ -236,7 +236,7 @@ function poolOf(db) {
   /* ── ⑦ 1단계 안전핀 유지 ─────────────────────────────────────── */
   console.log('\n⑦ 1단계 안전핀 유지');
   const wk = require('../src/utils/workKind');
-  t('★★ booking 은 아직 준비 중(저장 입구 5곳 거절 그대로)', wk.NOT_READY_WORK_KINDS.includes('booking') && wk.isWorkKindReady('booking') === false);
+  t('★★ booking 개방(결정 414 — 준비 중 목록 비어 있음 · 저장 입구 장치는 다음 종류용으로 남음)', wk.NOT_READY_WORK_KINDS.length === 0 && wk.isWorkKindReady('booking') === true && typeof wk.workKindNotReadyBody === 'function');
 
   console.log(`\n✅ ${pass}개 통과\n`);
   await db.close();

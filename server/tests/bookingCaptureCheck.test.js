@@ -8,7 +8,7 @@
  *  ③ 검사가 리뷰어를 막는다(업로드 실패·제출 거절) — 담당자 표시만 해야 한다(fail-open).
  *  ④ 예약 리뷰 캡처에 상품 리뷰 판정(형식·상품명·본문겹침)이 다시 붙는다 — 1단계 격리 유지, 같은 파일 검사는 유지.
  *  ⑤ AI 호출이 늘어난다 — 예약 리뷰 캡처는 종전처럼 1번, 예약내역 캡처는 1번(같은 사진은 캐시).
- *  ⑥ 1단계 안전핀(NOT_READY_WORK_KINDS)이 풀린다.
+ *  ⑥ 준비 중 목록(NOT_READY_WORK_KINDS)이 시험 뒤 배포 그대로가 아니다(결정 414 개방 뒤 = 빈 목록).
  * ★ 실제 처리기(신청·예약내역 제출·구매캡처 업로드·리뷰 1차 필터·2차 검수·작업보드 조회)를 PGlite(저장소 migrations 그대로)에서 돌린다.
  *   AI 는 가짜 전송(@google/generative-ai 자리에 가짜 모듈)으로만 답한다 — 외부 호출 0 · 운영 DB 0 · 가짜 이름·가짜 매장.
  */
@@ -201,7 +201,7 @@ function handlerOf(router, method, p) {
   await q(`INSERT INTO reviewers (name, phone, bank_name, bank_account, account_holder, address)
            VALUES ('가짜하나', '01011112222', '가짜은행', '000-0000-0001', '가짜하나', '서울 가짜구')`);
   const wk = require('../src/utils/workKind');
-  t('★★★ 1단계 안전핀 그대로(booking 준비 중 · 운영에서 열린 길 없음)', wk.NOT_READY_WORK_KINDS.includes('booking') && wk.isWorkKindReady('booking') === false);
+  t('★★★ 배포 그대로: booking 개방(준비 중 목록 비어 있음 · 결정 414)', wk.NOT_READY_WORK_KINDS.length === 0 && wk.isWorkKindReady('booking') === true);
   const campaignRoutes = require('../src/routes/campaign.routes');
   const submitRoutes = require('../src/routes/submit.routes');
   const diagRoutes = require('../src/routes/diag.routes');
@@ -242,7 +242,7 @@ function handlerOf(router, method, p) {
   } finally {
     wk.NOT_READY_WORK_KINDS.length = 0; wk.NOT_READY_WORK_KINDS.push(...saved);
   }
-  t('★★ 시험 뒤 준비 중 목록 원상 복귀', wk.NOT_READY_WORK_KINDS.includes('booking'));
+  t('★★ 시험 뒤 준비 중 목록 원상 복귀(빈 목록)', wk.NOT_READY_WORK_KINDS.length === 0);
 
   /* ── 3) 예약내역 캡처 업로드 → 자동 검사(실제 업로드 처리기) ─────── */
   console.log('\n3) 예약내역 캡처 업로드 → 자동 검사');

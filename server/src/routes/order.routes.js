@@ -804,12 +804,15 @@ function _productOptionsLockedShape(value) {
     try { parsed = JSON.parse(text); } catch (_) { return null; }
   }
   if (!Array.isArray(parsed)) return null;
-  const strip = node => {
-    if (Array.isArray(node)) return node.map(strip);
+  /* ★ 결정 414 — 예약 설정(booking) 안의 안내용 칸(매장 주소)은 접수 뒤에도 고친다(bookingCalendar.BOOKING_EDITABLE_AFTER_ACCEPT_KEYS 단일 출처).
+     `booking` 키가 있는 오더(예약리뷰)에만 닿는다 — 다른 오더의 잠긴 모양은 그대로. */
+  const bookingOpen = new Set(require('../utils/bookingCalendar').BOOKING_EDITABLE_AFTER_ACCEPT_KEYS);
+  const strip = (node, parentKey) => {
+    if (Array.isArray(node)) return node.map(x => strip(x, parentKey));
     if (node && typeof node === 'object') {
       return Object.fromEntries(Object.entries(node)
-        .filter(([key]) => !PRODUCT_OPTION_EDITABLE_KEYS.has(key))
-        .map(([key, v]) => [key, strip(v)]));
+        .filter(([key]) => !PRODUCT_OPTION_EDITABLE_KEYS.has(key) && !(parentKey === 'booking' && bookingOpen.has(key)))
+        .map(([key, v]) => [key, strip(v, key)]));
     }
     return node;
   };
@@ -859,6 +862,47 @@ function _qnaLockedFields(cur, b, optionsJson) {
   if (optionsJson !== undefined && _productOptionsLockedChanged(cur.product_options_json, optionsJson)) locked.push('product_options_json');
   return locked;
 }
+
+/**
+ * ★★ 네이버예약리뷰(결정 414 · 완화 금지) — 접수로 날짜별 자리표(booking_slots)가 깔린 오더인가.
+ *   Q&A `_qnaCalendarLocked` 와 같은 규율: 작업표가 연결됐으면(접수됨) 자리표 저장이 실패했어도 잠근다(재접수가 같은 값으로 다시 깔 수 있게).
+ *   ★ 예약 오더가 아니면 항상 false(= 종전 동작). 조회 실패 = 잠금(fail-closed · 표 없음 42P01 만 false).
+ */
+async function _bookingCalendarLocked(order) {
+  const o = order || {};
+  if (require('../utils/workKind').normalizeWorkKind(o.work_kind) !== 'booking' || !o.id) return false;
+  if (o.linked_tab_name) return true;
+  try {
+    const { rows } = await pool.query('SELECT 1 FROM booking_slots WHERE work_order_id = $1 LIMIT 1', [o.id]);
+    return rows.length > 0;
+  } catch (e) {
+    if (e && e.code === '42P01') return false;
+    logger.warn(`[order] 예약 자리표 조회 실패 — 접수 뒤 수정을 잠금(fail-closed): ${e.message}`);
+    return true;
+  }
+}
+
+/**
+ * ★★ 예약 오더 접수 뒤 잠금 칸(결정 414) — 판정 = `bookingCalendar.bookingLockedChanges` 단일 출처 + Q&A 와 같은 맨 위 칸(총 건수·하루 건수·시작일·주말 제외·제외일·종류).
+ *   열림: 매장 주소 · 네이버 예약 링크 · 1인 결제금액 · 결제합계 · 리뷰비·글 칸(가이드·특이사항 등). 단 고친 결과가 계약을 깨면(무료체험형에 금액 등) 막는다.
+ * @returns {{ fields: string[], booking: string[], invalid: string[] }} 셋 다 비면 통과
+ */
+function _bookingLockedFields(cur, b, optionsJson) {
+  const fields = _qnaLockedFields(cur, b, undefined);   // 맨 위 칸 비교는 Q&A 와 같은 함수(상품 구성은 아래 계약 비교가 본다)
+  const next = { ...cur };
+  for (const k of ['recruit_count', 'pay_amount', 'work_kind']) if (b[k] !== undefined) next[k] = b[k];
+  if (optionsJson !== undefined) next.product_options_json = optionsJson;
+  const r = require('../utils/bookingCalendar').bookingLockedChanges(cur, next);
+  return { fields, booking: r.locked, invalid: r.invalid };
+}
+function _bookingLockBody(cur, lk) {
+  const { bookingLockMessage } = require('../utils/bookingCalendar');
+  const blocked = [...new Set([...lk.fields, ...((lk.booking.length || lk.invalid.length) ? ['product_options_json'] : [])])];
+  return { ok: false, code: 'booking_calendar_locked', blocked_fields: blocked, booking_locked: lk.booking, booking_invalid: lk.invalid,
+    work_order_id: cur.id,
+    error: bookingLockMessage({ locked: lk.booking, invalid: lk.invalid, topLabels: lk.fields.map(_sourceFieldLabel) }) };
+}
+const _bookingLockHit = lk => !!(lk && (lk.fields.length || lk.booking.length || lk.invalid.length));
 
 /**
  * ★★ 접수된 오더의 체험단 종류가 바뀌는 요청인가(2026-11-03).
@@ -1465,6 +1509,13 @@ async function _intakeSourceRevisionHandler(req, res, next) {
         return res.status(409).json({ ok: false, code: 'qna_calendar_locked', blocked_fields: locked, work_order_id: current.id,
           error: 'Q&A 작업은 접수 뒤 건수·상품·하루 건수·공개 문구·시작일을 바꿀 수 없습니다 — 일정이 끝날 때 「추가 모집」으로 늘려 주세요.' });
       }
+    }
+    /* ★★ 네이버예약리뷰(결정 414 · 완화 금지) — 날짜별 자리표가 깔린 오더는 발행 전이라도 날짜·날짜별 인원·총 모집·진행 방식·리뷰 마감·매장 이름을
+       원본에서 바꾸지 않는다(Q&A 와 같은 자리 · 양방향 연결 오더도 공유 저장보다 **먼저** 여기서 멈춘다 — 쓰기 0).
+       매장 주소·예약 링크·1인 결제금액·글 칸은 통과(고친 결과가 계약을 지킬 때만). */
+    if (await _bookingCalendarLocked(current)) {
+      const lk = _bookingLockedFields(current, b, optionsJson);
+      if (_bookingLockHit(lk)) return res.status(409).json(_bookingLockBody(current, lk));
     }
 
     // ★★ 접수된 오더의 종류 변경은 어떤 경로로도 통과시키지 않는다(작업표가 그 종류로 이미 깔렸다).
@@ -2147,6 +2198,11 @@ async function _intakeUpdateHandler(req, res, next) {
     const _legacyOptions = b.product_options_json !== undefined ? _requestOptionsJson(b) : undefined;
     if (b.work_kind !== undefined && _acceptedWorkKindChanged(cur[0], b.work_kind)) {
       return res.status(409).json({ ok: false, code: 'accepted_kind_locked', fields: ['work_kind'], error: ACCEPTED_KIND_CHANGE_ERROR });
+    }
+    // ★★ 결정 414 — 예약 자리표가 깔린 오더는 이 옛 경로로도 자리표를 정한 값을 바꾸지 않는다(원본 수정과 같은 판정 · 같은 문구).
+    if (await _bookingCalendarLocked(cur[0])) {
+      const lk = _bookingLockedFields(cur[0], b, _legacyOptions);
+      if (_bookingLockHit(lk)) { const body = _bookingLockBody(cur[0], lk); return res.status(409).json({ ...body, fields: body.blocked_fields }); }
     }
     if (isSourceEditLocked(cur[0]) || await _qnaCalendarLocked(cur[0])) {
       // 종전 잠금이 걸린 오더는 종전 비교 그대로, Q&A 자리표 잠금만 걸린 오더는 자리표 칸만 본다.
@@ -3053,6 +3109,11 @@ _handlers.orderAdminEdit = async (req, res, next) => {
         return res.status(409).json({ ok: false, code: 'qna_calendar_locked', fields: locked,
           error: 'Q&A 작업은 접수 뒤 건수·상품·하루 건수·공개 문구·시작일을 바꿀 수 없습니다 — 일정이 끝날 때 「추가 모집」으로 늘려 주세요.' });
       }
+    }
+    // ★★ 결정 414 — 예약 자리표가 깔린 오더는 관리자 오더 수정 창에서도 자리표를 정한 값을 바꾸지 않는다(같은 판정 · 같은 값 재전송은 통과).
+    if (await _bookingCalendarLocked(o)) {
+      const lk = _bookingLockedFields(o, b, b.product_options_json !== undefined ? _requestOptionsJson(b) : undefined);
+      if (_bookingLockHit(lk)) { const body = _bookingLockBody(o, lk); return res.status(409).json({ ...body, fields: body.blocked_fields }); }
     }
 
     const managerCapable = b.manager_capable === 1 || b.manager_capable === true || b.manager_capable === '1';

@@ -186,6 +186,9 @@ function writablePath(row, origin) {
   }
   if (m.kind !== 'leaf') return false;
   if (m.key === 'url') return true;
+  /* ★ 결정 414 — 예약 설정(booking) 칸: 같은 저장 안의 예약 잠금 판정(bookingLockedChanges)이 「안내용 칸(매장 주소)만 바뀜」으로 확인한 줄만 쓴다
+     (`bookingOk` — 판정이 붙인다). 표시 없으면 종전처럼 막는다(fail-closed). 옵션에는 이 칸이 없다. */
+  if (m.key === 'booking') return row.bookingOk === true && !String(m.parent || '').includes('|o:');
   /* ★ 결정 392(R1 · 289 「가」 범위 좁힘) — 구매수량 단계 칸은 **단계 고치기를 아는 인트라넷 새 창**(bidir.tiers=1 → 판정 행 tiersCapable)만 쓴다.
      열어도 저장 안에서 판정(qtyTiersEditVerdict — 신청 0·채운 줄 0 …)을 통과해야 실제로 쓴다. 옛 창·다른 출처 = 종전 영구 금지(quantity_tiers_locked). */
   if (m.key === 'qty_tiers') return origin === 'intranet' && row.tiersCapable === true && !String(m.parent || '').includes('|o:');
@@ -565,6 +568,8 @@ function applyWrites(theirs, mine, writes) {
       // ★ 레드 1 — 결제합계 다시 계산 대상(인원 쪽 · derivePayFields 의 costProducts)에 넣는다. 결제금액 투영(_projectPayInTx)은 옵션 금액이 안 바뀌어 대상 아님.
       tierProducts.add(pName); qtyProducts.add(pName); quantityTouched = true;
     }
+    // ★ 결정 414 — 예약 설정은 통째로 옮긴다(판정이 안내용 칸만 바뀐 줄에만 bookingOk 를 붙인다 · 날짜·인원·돈 방식은 저장 전에 막힘)
+    else if (leaf === 'booking') { if (mp.booking === undefined) delete tp.booking; else tp.booking = JSON.parse(JSON.stringify(mp.booking)); }
     else if (leaf === 'url') { tp.url = mp.url; urlTouched = true; }
     else if (leaf === 'guide') { if (mp.guide === undefined) delete tp.guide; else tp.guide = mp.guide; guideTouched = true; }
     // ★ 결정 333 — 상품별 유입방식(키 없음 = 오더 전체 값을 따름 — 섞이지 않으면 인트라넷이 키를 뺀다)
@@ -2124,6 +2129,29 @@ async function applySharedPatch(p, inTxClient = null) {
       if (qnaBlocked.length) {
         return await _abort(client, 409, { ok: false, code: 'qna_calendar_locked', sync_version: curVersion, fields: qnaBlocked.map(w => ({ path: w.path, label: _label(w) })),
           error: 'Q&A 작업은 접수 뒤 주말 제외·시작일·제외일과 상품·옵션 이름을 바꿀 수 없습니다 — 날짜별 자리표가 이 값으로 깔렸습니다.' });
+      }
+    }
+    /* ★★ 네이버예약리뷰(결정 414 · 완화 금지) — 날짜별 자리표를 정한 값(날짜·날짜별 인원·총 모집·진행 방식·리뷰 마감·매장 이름·매장 구성)은
+       접수 뒤 어느 출처(인트라넷·공고 창·작업보드·발행 맞추기)로도 바꾸지 않는다. 판정 = bookingCalendar.bookingLockedChanges 단일 출처 —
+       이 저장을 그대로 적용한 **다음 상태**로 비교한다(쓰기 전 · 같은 함수 applyWrites 로 계산만). 매장 주소·예약 링크·1인 결제금액은 통과(고친 결과가 계약을 지킬 때만).
+       ★ 주말 제외·시작일·제외일은 여기서 잠그지 않는다 — 예약 자리표는 그 값을 읽지 않는다(업체가 정한 날짜 그대로 · 결정 407).
+         잠그면 발행 맞추기(오더 「정하지 않음」 → 공고 「주말 포함」)가 늘 실패한다(Q&A 와 다른 점).
+       ★ booking 칸을 보내는데 예약 작업이 아니면 막는다(fail-closed — 모르는 칸을 쓰지 않는다). */
+    {
+      const _bkRows = [...plan.writes, ...plan.conflicts];
+      const _bkLeaf = w => w.meta && w.meta.kind === 'leaf' && w.meta.key === 'booking';
+      if (CANON.workKind(theirs.work_kind) === 'booking' || _bkRows.some(_bkLeaf)) {
+        const bc = require('../utils/bookingCalendar');
+        const r = CANON.workKind(theirs.work_kind) === 'booking'
+          ? bc.bookingLockedChanges({ ...wo, ...theirs }, { ...wo, ...theirs, ...applyWrites(theirs, p.mine, _bkRows).next })
+          : { locked: ['place_shape'], invalid: [] };
+        if (r.locked.length || r.invalid.length) {
+          return await _abort(client, 409, { ok: false, code: 'booking_calendar_locked', sync_version: curVersion,
+            fields: _bkRows.filter(w => _bkLeaf(w) || (w.meta && w.meta.kind === 'field' && w.meta.key === 'recruit_count') || w.rename || (w.meta && w.meta.key === 'base'))
+              .map(w => ({ path: w.path, label: _label(w) })), booking_locked: r.locked, booking_invalid: r.invalid,
+            error: bc.bookingLockMessage({ locked: r.locked, invalid: r.invalid }) });
+        }
+        _bkRows.forEach(w => { if (_bkLeaf(w)) w.bookingOk = true; });
       }
     }
 
