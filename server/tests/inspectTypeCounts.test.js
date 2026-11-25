@@ -41,6 +41,9 @@ const FIX = [
   { name: '같은 파일(warn)',    checks: { duplicate: V('warn') },                                         want: ['duplicate'] },
   { name: '본문 겹침',          checks: { similarity: V('warn') },                                        want: ['similarity'] },
   { name: '작성자 표기',        checks: { author: V('warn') },                                            want: ['author'] },
+  // 결정 412 — 네이버예약리뷰 리뷰 캡처: 매장 리뷰 아님·다른 매장(warn) = 유형 · 못 읽음(skip + unknown)은 유형 아님(상태 「판정 불가」가 말한다)
+  { name: '매장 리뷰 확인(place warn)', checks: { place: V('warn', { reason: 'place_differs' }) },       want: ['place'] },
+  { name: 'place 판정 불가 → 유형 아님', checks: { place: V('skip', { evidence: 'unknown' }) },         want: [] },
   { name: '한 건에 두 유형',    checks: { format: V('fail'), product: V('warn') },                        want: ['format_fail', 'product'] },
   { name: '전부 통과',          checks: { format: V('pass'), product: V('pass') },                        want: [] },
   { name: 'skip 만',            checks: { format: V('skip'), product: V('skip') },                        want: [] },

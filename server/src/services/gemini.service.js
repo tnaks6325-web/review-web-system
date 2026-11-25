@@ -778,8 +778,82 @@ async function generateStructuredJson(prompt, opts = {}) {
   return text;
 }
 
+// ═══════════════════════════════════════════════════════════
+// ★★ 결정 412 — 네이버예약리뷰 캡처 판독(예약내역 · 방문 리뷰)
+//   새 제공자·새 모델 없음 — 위 _runModel(같은 MODEL_NAME·GEN_CONFIG·키 라운드로빈·시간 제한·재시도)과
+//   같은 이미지 캐시(_extractCache)를 그대로 쓴다. 상품 리뷰 판별(classifySubmissionImage)의 kind 기준은 건드리지 않는다
+//   (예약 화면 전용 프롬프트를 따로 둔다 — 그 기준 3줄은 기존 슬롯 검수가 쓰고 있다).
+//   판정(맞다/다르다/모른다)은 여기서 하지 않는다 — bookingCaptureCheck.service 한 곳(읽기만 여기).
+// ═══════════════════════════════════════════════════════════
+const BOOKING_PROMPTS = {
+  reservation: `[네이버 예약내역 판독]
+이 이미지는 리뷰어가 네이버 예약(booking.naver.com · 네이버 지도/플레이스 예약)으로 매장을 예약한 뒤 올린 예약내역 캡처여야 합니다.
+화면에 보이는 글자만 그대로 옮기세요. 추정하거나 고치지 말고, 보이지 않는 칸은 빈 값으로 두세요.
+
+screen 판정:
+- "naver_booking": 네이버 예약 상세/예약 완료/예약 내역 화면(예약번호·이용일시·업체명·결제정보 중 둘 이상이 보임)
+- "other": 그 밖의 화면(쇼핑 주문내역, 리뷰 화면, 다른 예약 앱, 빈 화면 등)
+
+JSON 으로만 답하세요:
+{"screen":"naver_booking|other","confidence":0.0~1.0,"cancelled":true 또는 false(예약취소·취소완료 표시가 보이면 true),
+ "placeName":"업체명/매장명 그대로","visitDate":"이용일(방문일) 날짜 글자 그대로 — 연도가 보이면 연도까지","visitTime":"이용 시각 그대로",
+ "reservationNo":"예약번호 그대로","amount":"실제 결제금액(총 결제금액) 숫자 — 없으면 빈 값","reason":"한 문장 근거"}`,
+  review: `[네이버 플레이스 방문자 리뷰 판독]
+이 이미지는 리뷰어가 매장 방문 뒤 남긴 네이버 플레이스(네이버 지도) 방문자 리뷰 캡처여야 합니다.
+화면에 보이는 글자만 그대로 옮기세요. 추정하거나 고치지 마세요.
+
+screen 판정:
+- "naver_place_review": 네이버 플레이스/네이버 지도의 방문자 리뷰(매장 이름, 방문 리뷰 본문 또는 키워드 리뷰, "방문일"·"N번째 방문"·"예약"·"영수증" 표시 등)
+- "other_review": 매장 방문 리뷰가 아닌 다른 리뷰(쇼핑 상품 리뷰, 다른 앱의 리뷰, 블로그 글 등)
+- "other": 리뷰가 아닌 화면
+
+JSON 으로만 답하세요:
+{"screen":"naver_place_review|other_review|other","confidence":0.0~1.0,"placeName":"리뷰를 남긴 매장 이름 그대로",
+ "authorMask":"작성자 표시 이름 그대로","visitDate":"방문일 글자 그대로","reason":"한 문장 근거"}`,
+};
+// 프롬프트·화면 규칙이 달라지면 숫자를 올린다(옛 판독이 캐시에서 새 규칙을 가로막지 않게).
+const BOOKING_CACHE_VERSION = 'booking1';
+
+/**
+ * 예약리뷰 캡처 판독 — `opts.purpose` = 'reservation'(예약내역, 기본) | 'review'(방문 리뷰).
+ * 실패는 throw(호출부 bookingCaptureCheck 가 「모름」으로 기록한다 — 막지 않는다).
+ */
+async function readBookingCapture(base64Data, mimeType = 'image/jpeg', opts = {}) {
+  const purpose = opts.purpose === 'review' ? 'review' : 'reservation';
+  if (!_initGemini()) throw new Error('Gemini API가 설정되지 않았습니다.');
+  const startTime = Date.now();
+  const cacheHash = _getCacheKey(`${BOOKING_CACHE_VERSION}-${purpose}:` + base64Data);
+  const cached = _getFromCache(cacheHash);
+  if (cached) return { ...cached, elapsed: Date.now() - startTime, cached: true };
+  const cleanBase64 = String(base64Data || '').replace(/^data:image\/[a-z]+;base64,/, '');
+  const { text } = await _runModel([BOOKING_PROMPTS[purpose], { inlineData: { data: cleanBase64, mimeType: mimeType || 'image/jpeg' } }], 'booking_' + purpose);
+  if (!text || !text.trim()) throw new Error('AI 응답이 비어 있습니다.');
+  const p = JSON.parse(text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim());
+  const str = (v, n) => String(v == null ? '' : v).trim().slice(0, n);
+  const screens = purpose === 'review' ? ['naver_place_review', 'other_review', 'other'] : ['naver_booking', 'other'];
+  const out = {
+    purpose,
+    screen: screens.includes(p.screen) ? p.screen : 'other',
+    confidence: Math.max(0, Math.min(1, Number(p.confidence) || 0)),
+    placeName: str(p.placeName, 120),
+    visitDate: str(p.visitDate, 60),
+    reason: str(p.reason, 200),
+  };
+  if (purpose === 'reservation') {
+    out.cancelled = p.cancelled === true;
+    out.visitTime = str(p.visitTime, 40);
+    out.reservationNo = str(p.reservationNo, 60);
+    out.amount = Math.max(0, parseInt(String(p.amount == null ? '' : p.amount).replace(/[^\d]/g, ''), 10) || 0);
+  } else {
+    out.authorMask = str(p.authorMask, 60);
+  }
+  _putToCache(cacheHash, out);
+  return { ...out, elapsed: Date.now() - startTime };
+}
+
 module.exports = {
   generateStructuredJson,
+  readBookingCapture,
   extractOrderFromImage,
   verifyAddressMatch,
   classifySubmissionImage,

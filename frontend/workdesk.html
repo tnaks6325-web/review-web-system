@@ -7187,6 +7187,31 @@ function _visitBadge(r){
   const link=r.hasOrder?'구매양식 주문과 연결된 줄':'주문 연결 없음(수기 입력 등)';
   return ` <span class="visit ${cls}" title="이 작업에서 이 계정(명의)의 ${n}번째 참여 — ${link}">${n}회</span>`;
 }
+/* ── 결정 412 — 네이버예약리뷰 예약내역 자동 검사(내부 작업보드만 · 서버가 bookingCheck 를 실은 줄만) ──
+   ★ 판정·이유 문장은 서버(bookingCaptureCheck) 한 곳 — 화면은 받은 것을 그리기만 한다(사본 0).
+   ★ 「확인 못 함」(unknown)은 일치처럼 보이지 않게 회색 ❔ 로 따로 말한다. 막는 버튼은 없다(표시만). */
+function _bkCheckBadge(r){
+  const c=r&&r.bookingCheck; if(!c||!c.status) return '';
+  const why=esc((Array.isArray(c.lines)?c.lines:[]).join(' · '));
+  if(c.status==='mismatch') return ` <span class="src" style="background:#FEE2E2;color:#B91C1C" title="예약내역 캡처가 신청 내용과 다릅니다(자동 검사): ${why} — 예약내역 캡처를 보고 판단하세요.">🚩 예약내역 확인 필요</span>`;
+  if(c.status==='unknown') return ` <span class="src" style="background:#F1F5F9;color:#475569" title="예약내역 캡처를 자동으로 확인하지 못했습니다: ${why}">❔ 예약내역 자동 확인 못 함</span>`;
+  if(c.status==='match') return ` <span class="src" style="background:#ECFDF5;color:#047857" title="${why}">✓ 예약내역 일치</span>`;
+  return '';
+}
+/* 시트 그리드는 이름 칸이 좁아 이름 뒤 배지가 잘린다 — 다름(🚩)·확인 못 함(❔)은 이름 **앞**에 표시(일치는 미리보기 줄로 충분). */
+function _bkCheckMark(r){
+  const c=r&&r.bookingCheck; if(!c) return '';
+  const why=(Array.isArray(c.lines)?c.lines:[]).join(' · ');
+  if(c.status==='mismatch') return `<span class="bkcmk" style="margin-right:3px" title="${esc('예약내역 확인 필요: '+why)}">🚩</span>`;
+  if(c.status==='unknown') return `<span class="bkcmk" style="margin-right:3px;color:#475569" title="${esc('예약내역 자동 확인 못 함: '+why)}">❔</span>`;
+  return '';
+}
+function _bkCheckLines(r){
+  const c=r&&r.bookingCheck; if(!c||!c.status) return '';
+  const color=c.status==='mismatch'?'#B91C1C':(c.status==='match'?'#047857':'#475569');
+  const key=c.status==='mismatch'?'🚩 예약내역 다름':(c.status==='match'?'✓ 예약내역 일치':'❔ 예약내역 확인 못 함');
+  return (Array.isArray(c.lines)?c.lines:[]).map(t=>`<div class="rvmemo" style="color:${color}" title="${esc(t)}"><span class="rvmemok" style="color:${color}">${key}</span><span class="rvmemov" title="${esc(t)}">${esc(t)}</span></div>`).join('');
+}
 /* ── 리뷰어 연락처·카카오톡 아이디 (시안 C, 사용자 확정 2026-09-30) ──
    ★ 누구의 정보인지는 서버가 정한다(리뷰어에게 메시지와 같은 판정 — 타계정 참여 줄은 본계정 정보).
    ★ 내부 담당자에게만 조회·표시(광고주 미표시 = 서버 게이트와 1:1).
@@ -7276,7 +7301,7 @@ function renderWorkdesk(wd){
   } else {
     const rows=(wd.roster||[]).map((r,displayIndex)=>`<tr id="row-${esc(r.id)}"${r.ambiguous?' class="amb"':''}><td>${canEdit?`<span class="exp" title="제출 내용·시트 행 펼치기" onclick="toggleDetail('${esc(r.id)}')">▸</span> `:''}${displayIndex+1}</td>`+
       `<td class="gidlock" title="실제 제출 리뷰어 정보 — 수정 불가">${esc(r.name||'—')}`+
-      `${r.source==='manual'?' <span class="src manual">수동</span>':''}${_visitBadge(r)}${_talkBadge(r)}${r.popularPurpose?' <span class="src" style="background:#FFF7ED;color:#9A3412" title="이 일반상품 구매양식 제출은 이후 인기상품 참여 1건의 참여권으로 실제 사용되었습니다">🔥 인기상품목적 참여건</span>':''}${(Array.isArray(r.ruleFlags)&&r.ruleFlags.length)?' <span class="src" style="background:#FEE2E2;color:#B91C1C" title="'+esc('공고 참여 없이 바로 낸 구매가 공고 참여 규칙에 걸렸습니다 — 막지 않고 표시만 합니다. 입금 여부는 담당자가 정합니다: '+r.ruleFlags.join(' · '))+'">⚠ 규칙 위반: '+esc(r.ruleFlags.join(' · '))+'</span>':''}${r.deliveryMemoCheck==='staff_review'?' <span class="src" style="background:#FEE2E2;color:#B91C1C" title="필수 배송메세지가 캡처에서 확인되지 않아 리뷰어가 「직원 확인 요청」으로 제출했습니다. 구매캡처에 배송메세지가 없으면 [주문 취소]로 반려하세요.">🚩 배송메세지 확인 필요</span>':''}${(Array.isArray(r.captureCheck)&&r.captureCheck.length)?' <span class="src" style="background:#FEE2E2;color:#B91C1C" title="'+esc('구매캡처 확인 필요(결정 319): '+r.captureCheck.join(' · ')+' — 구매캡처를 보고 다른 상품·개수를 샀으면 [주문 취소]로 반려하세요.')+'">🚩 캡처 확인 필요</span>':''}${r.ambiguous?' <span class="src" style="background:var(--warn-soft);color:var(--warn)" title="같은 주문·신원이 여러 줄 — 이 행에는 수정 오버레이(입금일 포함)를 적용하지 않습니다">⚠중복</span>':''}</td>`+
+      `${r.source==='manual'?' <span class="src manual">수동</span>':''}${_visitBadge(r)}${_talkBadge(r)}${typeof _bkCheckBadge==='function'?_bkCheckBadge(r):''}${r.popularPurpose?' <span class="src" style="background:#FFF7ED;color:#9A3412" title="이 일반상품 구매양식 제출은 이후 인기상품 참여 1건의 참여권으로 실제 사용되었습니다">🔥 인기상품목적 참여건</span>':''}${(Array.isArray(r.ruleFlags)&&r.ruleFlags.length)?' <span class="src" style="background:#FEE2E2;color:#B91C1C" title="'+esc('공고 참여 없이 바로 낸 구매가 공고 참여 규칙에 걸렸습니다 — 막지 않고 표시만 합니다. 입금 여부는 담당자가 정합니다: '+r.ruleFlags.join(' · '))+'">⚠ 규칙 위반: '+esc(r.ruleFlags.join(' · '))+'</span>':''}${r.deliveryMemoCheck==='staff_review'?' <span class="src" style="background:#FEE2E2;color:#B91C1C" title="필수 배송메세지가 캡처에서 확인되지 않아 리뷰어가 「직원 확인 요청」으로 제출했습니다. 구매캡처에 배송메세지가 없으면 [주문 취소]로 반려하세요.">🚩 배송메세지 확인 필요</span>':''}${(Array.isArray(r.captureCheck)&&r.captureCheck.length)?' <span class="src" style="background:#FEE2E2;color:#B91C1C" title="'+esc('구매캡처 확인 필요(결정 319): '+r.captureCheck.join(' · ')+' — 구매캡처를 보고 다른 상품·개수를 샀으면 [주문 취소]로 반려하세요.')+'">🚩 캡처 확인 필요</span>':''}${r.ambiguous?' <span class="src" style="background:var(--warn-soft);color:var(--warn)" title="같은 주문·신원이 여러 줄 — 이 행에는 수정 오버레이(입금일 포함)를 적용하지 않습니다">⚠중복</span>':''}</td>`+
       `<td class="ph">${esc(_fmtPhone(r.phone8))}</td>`+
       _tcell(r,'round',r.round)+_tcell(r,'option_text',r.option)+
       _bcell(r,'is_submitted',r.submitted)+_bcell(r,'is_paid',r.paid)+
@@ -7590,7 +7615,9 @@ function _rvRender2(pane){
     /* 결정 260 — 필수 배송메세지 미확인(직원 확인 요청) 주문: 캡처를 보고 반려(주문 취소)할지 정하라는 한 줄. */
     +(r.deliveryMemoCheck==='staff_review'?`<div class="rvmemo" style="color:#B91C1C" title="필수 배송메세지가 캡처에서 확인되지 않아 리뷰어가 「직원 확인 요청」으로 제출했습니다. 캡처에 배송메세지가 없으면 줄 메뉴 [주문 취소]로 반려하세요."><span class="rvmemok" style="color:#B91C1C">🚩 확인 필요</span><span class="rvmemov">필수 배송메세지 미확인 — 캡처 확인 후 없으면 주문 취소</span></div>`:'')
     /* 결정 319 — 결제금액·상품·개수가 공고와 다른 채 받은 주문: 캡처를 보고 반려(주문 취소)할지 정하라는 줄. */
-    +((Array.isArray(r.captureCheck)?r.captureCheck:[]).map(t=>`<div class="rvmemo" style="color:#B91C1C" title="${esc(t)} — 구매캡처를 보고 다른 상품·개수를 샀으면 줄 메뉴 [주문 취소]로 반려하세요."><span class="rvmemok" style="color:#B91C1C">🚩 확인 필요</span><span class="rvmemov" title="${esc(t)}">${esc(t)}</span></div>`).join(''));
+    +((Array.isArray(r.captureCheck)?r.captureCheck:[]).map(t=>`<div class="rvmemo" style="color:#B91C1C" title="${esc(t)} — 구매캡처를 보고 다른 상품·개수를 샀으면 줄 메뉴 [주문 취소]로 반려하세요."><span class="rvmemok" style="color:#B91C1C">🚩 확인 필요</span><span class="rvmemov" title="${esc(t)}">${esc(t)}</span></div>`).join(''))
+    /* 결정 412 — 네이버예약리뷰 예약내역 자동 검사 결과 줄(일치 · 다름+이유 · 확인 못 함). */
+    +(typeof _bkCheckLines==='function'?_bkCheckLines(r):'');
   if(STATE.rvImgs===null){ _rvFill(pane, hd+who2+`<div class="rvnone"><b>제출물을 불러오지 못했습니다</b><span>잠시 후 다시 시도해 주세요.</span></div>`); return; }
   const files=(STATE.rvImgs&&STATE.rvImgs[String(r.seq)])||[];
   /* 기본 두 칸에서는 종전처럼 제목을 생략한다. 내부 현영 대상은 세 갈래를 구분해야 하므로
@@ -9739,9 +9766,11 @@ function buildGrid(wd){
     const memoMark = r.deliveryMemoCheck==='staff_review'
       ? `<span class="rdmmk" style="margin-right:3px" title="필수 배송메세지 미확인 — 리뷰어가 「직원 확인 요청」으로 제출했습니다. 구매캡처에 배송메세지가 없으면 줄 메뉴 [주문 취소]로 반려하세요.">🚩</span>` : '';
     /* 결정 319: 결제금액·상품·개수가 공고와 다른 채 받은 주문 — 이름 앞 🚩(이유는 마우스를 올리면). */
-    const capMark = (Array.isArray(r.captureCheck)&&r.captureCheck.length)
-      ? `<span class="capmk" style="margin-right:3px" title="${esc('구매캡처 확인 필요: '+r.captureCheck.join(' · ')+' — 다른 상품·개수를 샀으면 줄 메뉴 [주문 취소]로 반려하세요.')}">🚩</span>` : '';
-    const badge = (r.source==='manual'?' <span class="src manual">수동</span>':'') + _visitBadge(r) + _talkBadge(r)
+    const capMark = ((Array.isArray(r.captureCheck)&&r.captureCheck.length)
+      ? `<span class="capmk" style="margin-right:3px" title="${esc('구매캡처 확인 필요: '+r.captureCheck.join(' · ')+' — 다른 상품·개수를 샀으면 줄 메뉴 [주문 취소]로 반려하세요.')}">🚩</span>` : '')
+      /* 결정 412: 네이버예약리뷰 예약내역이 신청 내용과 다름(자동 검사) — 같은 자리 이름 앞 🚩 */
+      + (typeof _bkCheckMark==='function'?_bkCheckMark(r):'');
+    const badge = (r.source==='manual'?' <span class="src manual">수동</span>':'') + _visitBadge(r) + _talkBadge(r) + (typeof _bkCheckBadge==='function'?_bkCheckBadge(r):'')
                 + (r.over===true?' <span class="govb" title="총건수(정원)를 넘겨 들어온 줄입니다 — 줄을 지우지 않고 표시만 합니다">초과</span>':'')
 
                 + (r.editable===false?' <span class="lock" title="주문/신원 앵커 없음 또는 중복 — 편집 잠금">🔒</span>':'');
@@ -17078,7 +17107,7 @@ function _riRenderHead(sum){
      SQL 로 파생해 센다). 여기 있는 것은 화면 필터·재검수 대상 선정용 최소 사본이고,
      회귀가드(`tests/inspectTypeCounts.test.js`)가 같은 픽스처로 두 구현을 실행해 **결과 동일**을
      고정한다 — 한쪽만 고치면 그 자리에서 빨개진다. */
-const RI_TYPES=[['cancel','🚫 주문취소'],['receipt_validation','🧾 현금영수증 검수 필요'],['receipt','🧾 현금영수증으로 보임'],['format_fail','📵 리뷰화면 아님'],['channel','🔀 채널 다름'],['product','🏷 상품명 다름'],['duplicate','📄 같은 파일'],['similarity','✍ 본문 겹침'],['author','👤 작성자 표기']];
+const RI_TYPES=[['cancel','🚫 주문취소'],['receipt_validation','🧾 현금영수증 검수 필요'],['receipt','🧾 현금영수증으로 보임'],['format_fail','📵 리뷰화면 아님'],['channel','🔀 채널 다름'],['product','🏷 상품명 다름'],['duplicate','📄 같은 파일'],['similarity','✍ 본문 겹침'],['author','👤 작성자 표기'],['place','🏪 매장 리뷰 확인']];
 function _riIssueTypes(r){
   const c=(r&&r.checks)||{}, out=[];
   /* ★ 주문취소 — 리뷰어가 그 작업을 취소한 신호. verdict 를 보지 않는다(취소 화면은
@@ -17092,6 +17121,7 @@ function _riIssueTypes(r){
   if(c.duplicate&&(c.duplicate.verdict==='fail'||c.duplicate.verdict==='warn')) out.push('duplicate');
   if(c.similarity&&c.similarity.verdict==='warn') out.push('similarity');
   if(c.author&&c.author.verdict==='warn') out.push('author');
+  if(c.place&&c.place.verdict==='warn') out.push('place');   // 결정 412 — 네이버예약리뷰 리뷰 캡처(매장 리뷰 아님·다른 매장)
   return out;
 }
 /* ══ 관계 줄 — "이 건 ▶ 짝" (시안 design-inspect-duplicate-relation.html, 사용자 확정) ══
@@ -17273,11 +17303,12 @@ const RI_TYPE_META={
   similarity:{cls:'t-sim',tag:'SIM',label:'✍ 본문 겹침'},
   channel:{cls:'t-chan',tag:'CHAN',label:'🔀 채널 다름'},
   author:{cls:'t-auth',tag:'AUTH',label:'👤 작성자 표기'},
+  place:{cls:'t-chan',tag:'PLACE',label:'🏪 매장 리뷰 확인'},   // 결정 412 — 네이버예약리뷰 리뷰 캡처(매장 리뷰 아님·다른 매장)
 };
 function _riPrimaryIssue(r){
   const t=_riIssueTypes(r);
   // ★ 주문취소가 맨 앞 — 담당자에게 "리뷰 화면이 아님"보다 "취소됨"이 먼저 읽혀야 한다
-  for(const k of ['cancel','duplicate','receipt_validation','receipt','format_fail','product','similarity','channel','author']) if(t.includes(k)) return k;
+  for(const k of ['cancel','duplicate','receipt_validation','receipt','format_fail','product','place','similarity','channel','author']) if(t.includes(k)) return k;
   return null;
 }
 /* ★★ AI 가 판별한 화면 종류의 **단일 출처** — 원장(2차 검수)은 `kind`, 자동분류 판정값은 `got`
@@ -17361,6 +17392,8 @@ function _riCardActions(r,i){
   }
   if(p==='channel') return {main:{...A.ok,t:'✓ 정상 — 채널 추정 오인',m:'m-blue'}, subs:[A.promote,A.bad], more:moves};
   if(p==='similarity') return {main:{...A.detail,t:'👁 겹친 제출과 나란히 보기',m:'m-vio'}, subs:[A.bad,A.ok], more:moves};
+  // 결정 412 — 예약 리뷰 캡처의 매장 확인: 캡처를 열어 매장을 본 뒤 정상/불량(자동 반려 없음)
+  if(p==='place') return {main:{...A.detail,t:'👁 캡처에서 매장 확인',m:'m-slate'}, subs:[A.ok,A.bad], more:moves};
   return {main:{...A.detail,t:'👁 반복 제출 확인',m:'m-slate'}, subs:[A.ok,A.bad], more:moves};   // author
 }
 /* [⋯] = 그 카드에서 숨긴 나머지 조치 전부 — 맞춤 배치는 빠른 길이지 선택지 축소가 아니다 */
@@ -17587,6 +17620,13 @@ function _riReasons(c, opt){
     out.push(`본문 ${Math.round((c.similarity.score||0)*100)}% 겹침 — ${c.similarity.matchReviewer||''} ${c.similarity.matchRow?c.similarity.matchRow+'행':''}${c.similarity.matchTab&&c.similarity.scope==='global'?' ('+c.similarity.matchTab+')':''}`.trim());
   if(c.author && c.author.verdict==='warn')
     out.push(`같은 작성자 표기(${c.author.ocr||''})가 ${(c.author.others||[]).join(', ')} 제출에도 있음`);
+  /* 결정 412 — 네이버예약리뷰: 네이버 플레이스 방문자 리뷰인지 · 그 매장인지(막지 않음 · 담당자 확인용) */
+  if(c.place && c.place.verdict==='warn')
+    out.push(c.place.reason==='place_differs'
+      ? `다른 매장 리뷰로 보임 — 캡처 "${String(c.place.ocr||'').slice(0,40)}" · 공고 매장 "${String(c.place.expected||'').slice(0,40)}"`
+      : '네이버 플레이스 방문자 리뷰 화면이 아닌 것 같습니다 — 매장 방문 리뷰 캡처인지 확인해 주세요');
+  else if(c.place && c.place.evidence==='unknown')
+    out.push('매장 방문 리뷰인지 자동으로 확인하지 못했습니다 — 캡처를 직접 확인해 주세요');
   return out;
 }
 /** 카드의 탭명을 눌러 그 작업만 본다 — [⚙ 기대 상품명]은 탭이 정해져야 열린다. */

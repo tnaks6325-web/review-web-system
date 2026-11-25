@@ -367,6 +367,16 @@ router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
       logger.warn(`[image-upload] 완료 알림 실패 (사진 연결 유지): ${notifyErr.message}`);
     }
 
+    /* ★★ 결정 412 — 네이버예약리뷰 예약내역 캡처(첫 장)면 자동 검사를 **기다리지 않고** 예약한다.
+       담당자 표시만(작업보드 「예약내역 확인」) — 이 응답·리뷰어 제출에는 어떤 영향도 없다(서비스가 오류를 삼킨다). */
+    if (!second && uploadCtx.orderSource === 'booking_submit') {
+      try {
+        require('../services/bookingCaptureCheck.service').scheduleReservationCheck({
+          orderSubmissionId, fileId: finalLinkedFileId, base64: imageBase64, mimeType: mimeType || 'image/jpeg',
+        });
+      } catch (_) { /* 검사 예약 실패는 업로드와 무관 */ }
+    }
+
     res.json({
       ok: true,
       captureIndex,
@@ -462,6 +472,11 @@ router.post('/review-precheck', reviewPrecheckLimiter, async (req, res) => {
       //   캐시 지문(sampleSig)이 일치해 첨부 판정이 제출 때 히트한다(AI 콜 순증 0).
       samples = await inspect.submissionSamples({ expectedChannel, slotKey: 'review' });
     } catch (_) { /* 채널을 모르면 대조만 생략(예시도 미동봉) */ }
+
+    /* ★ 결정 412 — 네이버예약리뷰 탭은 1차 정책이 어차피 skip('booking_tab')(결정 404 격리 그대로)이라,
+       결과를 쓰지 않는 상품 리뷰 판별 AI 호출을 하지 않는다(비용 순감 · 첨부 대기 단축). 같은 파일 대조(duplicate)는 그대로 싣는다.
+       예약 리뷰 캡처의 매장 판정은 제출 뒤 2차 검수(checks.place) 한 번이 한다. */
+    if (workKind === 'booking') return pass(inspect.precheckPolicy({ classified: null, slotKey: 'review', reviewType, workKind }).code);
 
     let classified = null;
     try {

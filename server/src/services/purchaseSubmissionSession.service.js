@@ -52,7 +52,7 @@ async function inspectForUpload({ sessionId, sessionToken, orderSubmissionId, ca
     `SELECT ps.id, ps.status, ps.capture_sheet_id AS "captureSheetId",
             ps.capture_tab_name AS "captureTabName", ps.capture_file_id AS "sessionFileId",
             os.id AS "orderSubmissionId", os.capture_file_id AS "orderFileId",
-            os.capture_file_id_2 AS "orderFileId2"
+            os.capture_file_id_2 AS "orderFileId2", os.source AS "orderSource"
        FROM purchase_submission_sessions ps
        JOIN order_submissions os ON os.id = ps.order_submission_id
       WHERE ps.id = $1 AND ps.order_submission_id = $2
@@ -71,6 +71,8 @@ async function inspectForUpload({ sessionId, sessionToken, orderSubmissionId, ca
     orderSubmissionId: row.orderSubmissionId,
     captureSheetId: row.captureSheetId || '',
     captureTabName: row.captureTabName || '',
+    // 결정 412 — 주문 출처(예약내역 제출 'booking_submit' 이면 업로드 뒤 예약내역 자동 검사를 예약한다 · 같은 왕복 · 조회 추가 0)
+    orderSource: row.orderSource || '',
     // 두 번째 장은 그 칸만 본다 — 첫 장이 이미 연결됐다고 두 번째 장을 막지 않는다(세션 파일 칸은 첫 장 전용).
     alreadyCompleted: second ? !!row.orderFileId2 : !!(row.orderFileId || row.sessionFileId),
     captureFileId: second ? (row.orderFileId2 || '') : (row.orderFileId || row.sessionFileId || ''),

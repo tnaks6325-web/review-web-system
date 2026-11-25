@@ -1249,7 +1249,17 @@ async function inspectSubmissionCore({
 
     let cls = null;
     let inspectionSamples = opts.samples || [];
-    if (base64) {
+    /* ★★ 결정 412 — 네이버예약리뷰 탭의 리뷰 칸은 상품 리뷰 판별(classify) 대신 **예약 리뷰 판독 한 번**
+       (gemini.readBookingCapture purpose 'review')으로 「네이버 플레이스 방문자 리뷰인가 · 그 매장인가」만 본다(checks.place).
+       상품 리뷰 판정 셋(형식·상품명·본문겹침)의 격리(결정 404)는 아래 _isBlogTab 갈래 그대로 · 같은 파일 검사도 그대로.
+       AI 호출 수는 종전과 같다(classify 1번 → 예약 판독 1번). 판정은 bookingCaptureCheck.judgeReview 한 곳. */
+    const _bookingReview = isReview && exp.workKind === 'booking';
+    let bookingRead = null;
+    if (_bookingReview && base64) {
+      try { bookingRead = await require('./gemini.service').readBookingCapture(base64, mimeType || 'image/jpeg', { purpose: 'review' }); }
+      catch (_) { bookingRead = null; }   // fail-open — 판정 불가로 남는다(통과 아님)
+    }
+    if (base64 && !_bookingReview) {
       try {
         // ★ 첨부 시점 1차 필터가 이미 같은 이미지를 판정했다면 캐시 히트 = AI 콜 0
         const { classifySubmissionImage } = require('./gemini.service');
@@ -1358,18 +1368,28 @@ async function inspectSubmissionCore({
       : { verdict: 'skip' };
 
     // ⑤ 작성자 — 실명 대조는 하지 않는다(마스킹이라 불가). 대신 **같은 표기의 재사용**만 본다.
+    const _authorMask = _bookingReview ? (bookingRead && bookingRead.authorMask) : (cls && cls.authorMask);
     checks.author = isReview
-      ? await findAuthorReuse({ authorMask: cls && cls.authorMask, fileId, sheetId, tabName, reviewerName })
+      ? await findAuthorReuse({ authorMask: _authorMask, fileId, sheetId, tabName, reviewerName })
       : { verdict: 'skip', ocr: (cls && cls.authorMask) || '' };
+
+    // ⑥ 결정 412 — 네이버예약리뷰: 네이버 플레이스 방문자 리뷰 · 공고 매장과 같은 매장인가(담당자 표시만 · 막지 않음).
+    //   매장 이름 = 자리표의 오더(bookingSlots.placeInfoForTab — 리뷰어 화면·예약내역 검사와 같은 출처). 조회 실패 = 비교 불가(판정 불가).
+    if (_bookingReview) {
+      let _placeName = '';
+      try { const _pl = await require('./bookingSlots.service').placeInfoForTab(_db(), sheetId, tabName); _placeName = (_pl && _pl.placeName) || ''; }
+      catch (_) { _placeName = ''; }
+      checks.place = require('./bookingCaptureCheck.service').judgeReview({ read: base64 ? bookingRead : null, expected: { placeName: _placeName } });
+    }
 
     const status = computeStatus(checks, { preserveReceiptPolicy: isReceipt });
     const persistence = await _upsertInspection({
       fileId, sheetId, tabName, rowIndex, reviewerName, slotKey, status, checks,
       channel: (cls && cls.channel) || null, device: (cls && cls.device) || null,
-      ocrProduct: (cls && cls.productName) || null,
+      ocrProduct: (cls && cls.productName) || (bookingRead && bookingRead.placeName) || null,
       ocrText: (cls && cls.reviewText) || null,
-      ocrAuthor: (cls && cls.authorMask) || null,
-      fileHash: hash, confidence: (cls && cls.confidence) || null,
+      ocrAuthor: (cls && cls.authorMask) || (bookingRead && bookingRead.authorMask) || null,
+      fileHash: hash, confidence: (cls && cls.confidence) || (bookingRead && bookingRead.confidence) || null,
       productClusterKey: learnedProduct.clusterKey || null,
     });
     return { status, checks, ...persistence };
