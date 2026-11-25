@@ -67,7 +67,7 @@ function reviewDeadlineOf(ymd, days) {
   return d ? { date: d.date, label: d.label, dow: d.dow } : null;
 }
 
-/* ── 결정 419 — 리뷰 마감 안내(보여 주기만 · 넘겨도 막지 않는다 · 사용자 확정 2026-11-25 「1번」) ──
+/* ── 결정 422 — 리뷰 마감 안내(보여 주기만 · 넘겨도 막지 않는다 · 사용자 확정 2026-11-25 「1번」) ──
    판정 단일 출처: 리뷰어 화면(「오늘 마감」·「내일 마감」)과 담당자 작업보드(「마감 지남」)가 이 함수 하나를 탄다.
    ★ 오늘 = 서버 KST(부르는 쪽이 정한다 · 휴대폰 시계 안 씀 — 결정 415 와 같은 방향). 모르는 값 = null(「지남」으로 꾸미지 않는다). */
 const REVIEW_DEADLINE_NOTICE = Object.freeze({ today: '오늘 마감', tomorrow: '내일 마감' });
@@ -290,7 +290,7 @@ function bookingSpecForScreen(row) {
 
 module.exports = {
   bookingSpecFromWorkOrder, buildBookingCalendar, reviewDeadlineOf, isValidYmd,
-  // 결정 419 — 리뷰 마감 안내(표시만)
+  // 결정 422 — 리뷰 마감 안내(표시만)
   reviewDeadlineState, reviewDeadlineNotice, REVIEW_DEADLINE_NOTICE,
   // 결정 414 — 접수 뒤 수정 잠금 · 화면용 계약
   BOOKING_EDITABLE_AFTER_ACCEPT_KEYS, BOOKING_LOCK_LABELS, bookingLockedChanges, bookingLockMessage, bookingSpecForScreen,

@@ -320,7 +320,7 @@ input,textarea,button{font-family:inherit}
 .result-tab{font-size:.75rem;color:var(--t3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .result-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
 .status-badge{padding:3px 9px;border-radius:20px;font-size:.73rem;font-weight:700}.status-pending{background:var(--warn-l);color:#92400E}.status-done{background:var(--ok-l);color:#065F46}
-/* 결정 419 — 네이버예약리뷰 리뷰 마감 안내(마감 날 「오늘 마감」 빨강 · 전날 「내일 마감」 주황 · 글자·날짜는 서버 KST) */
+/* 결정 422 — 네이버예약리뷰 리뷰 마감 안내(마감 날 「오늘 마감」 빨강 · 전날 「내일 마감」 주황 · 글자·날짜는 서버 KST) */
 .dl-chip{padding:3px 8px;border-radius:20px;font-size:.7rem;font-weight:800;white-space:nowrap;flex-shrink:0;background:#FEF3C7;color:#B45309}.dl-chip.today{background:#FEE2E2;color:#B91C1C}
 .dl-notice{background:var(--card);border:1px solid var(--border);border-radius:var(--rs);padding:10px 12px;margin-bottom:12px;font-size:.84rem;color:var(--t1,#1F2937)}.dl-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.dl-line+.dl-line{margin-top:6px}.dl-who{color:#6B7280;font-size:.78rem}
 .result-chevron{color:var(--t3);font-size:.8rem}.result-card:not(.is-done):hover .result-chevron{color:var(--p)}

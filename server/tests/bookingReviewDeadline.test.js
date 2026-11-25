@@ -1,5 +1,5 @@
 /**
- * bookingReviewDeadline.test.js — 네이버예약리뷰 리뷰 마감 안내(결정 419 · 사용자 확정 2026-11-25 「1번」).
+ * bookingReviewDeadline.test.js — 네이버예약리뷰 리뷰 마감 안내(결정 422 · 사용자 확정 2026-11-25 「1번」).
  * 실행: node tests/bookingReviewDeadline.test.js
  *
  * 사용자 확정:
@@ -446,7 +446,7 @@ function screens() {
 }
 
 (async () => {
-  console.log('\n▶ 네이버예약리뷰 리뷰 마감 안내(결정 419)\n');
+  console.log('\n▶ 네이버예약리뷰 리뷰 마감 안내(결정 422)\n');
   await e2e();
   screens();
   console.log(`\n✅ ${pass}개 통과\n`);

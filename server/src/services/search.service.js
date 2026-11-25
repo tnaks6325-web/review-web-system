@@ -98,7 +98,7 @@ async function _attachDualPurchaseProjection(items) {
 }
 
 /**
- * ★ 결정 419 — 네이버예약리뷰 리뷰 마감 안내(리뷰어 홈 리뷰 내역 · 리뷰 제출 페이지가 같은 결과를 그린다).
+ * ★ 결정 422 — 네이버예약리뷰 리뷰 마감 안내(리뷰어 홈 리뷰 내역 · 리뷰 제출 페이지가 같은 결과를 그린다).
  *   리뷰를 아직 내지 않은 예약 줄에만 자리표의 리뷰마감일 · 상태 · 안내 글자(「오늘 마감」/「내일 마감」)를 싣는다.
  *   판정·글자·오늘(서버 KST) = bookingSlots.reviewerDeadlineView 하나 · 보여 주기만(제출은 막지 않는다).
  *   예약 줄이 없으면 조회 0 · 조회 실패 = 안내 없이 종전 결과(표시만이라 결과를 막지 않는다).
@@ -924,7 +924,7 @@ async function searchByName(query, phone8, opts = {}) {
       await _removeUnpayableReceiptSlots(multiSlotItems);
     }
     await _attachDualPurchaseProjection(results);   // 동시진행 행만 — 탭 슬롯 판정 뒤에 덮어쓴다
-    await _attachBookingReviewDeadline(results);    // 결정 419 — 네이버예약리뷰 미제출 줄만(그 밖은 조회 0)
+    await _attachBookingReviewDeadline(results);    // 결정 422 — 네이버예약리뷰 미제출 줄만(그 밖은 조회 0)
 
     // ── order_submissions 병합(append·best-effort) — 색인행 뒤에 붙어 results[0..n-1] 불변 ──
     if (includeSubmitted && mergePhoneList && !opts.ownerHistory) {

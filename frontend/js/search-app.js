@@ -2929,7 +2929,7 @@ function renderResults(results) {
   show(section);
 }
 
-/* ★ 결정 419 — 네이버예약리뷰 리뷰 마감 날·전날 안내(「오늘 마감」/「내일 마감」).
+/* ★ 결정 422 — 네이버예약리뷰 리뷰 마감 날·전날 안내(「오늘 마감」/「내일 마감」).
    글자·날짜 판정은 서버(search.service → bookingSlots.reviewerDeadlineView · 서버 KST) 한 곳 — 화면은 받은 글자를 그리기만 한다.
    ★ 표시만 — 마감이 지나도 제출은 그대로 열린다(사용자 확정 2026-11-25). 글자가 없으면(일반 리뷰·옛 서버) 아무것도 그리지 않는다. */
 function _dlChipHtml(item) {
@@ -3032,7 +3032,7 @@ function openSubmitMulti(items) {
 
   // STEP1: 다건 정보 확인 그리드 렌더
   _renderMultiInfoGrid(items);
-  // ★ 결정 419 — 네이버예약리뷰 리뷰 마감 날·전날이면 STEP1 맨 위에 「오늘 마감」/「내일 마감」 한 줄(표시만 · 맨 앞에 끼워 넣어 순서 무관)
+  // ★ 결정 422 — 네이버예약리뷰 리뷰 마감 날·전날이면 STEP1 맨 위에 「오늘 마감」/「내일 마감」 한 줄(표시만 · 맨 앞에 끼워 넣어 순서 무관)
   if (typeof _renderDeadlineNotice === "function") _renderDeadlineNotice(items);
 
   // STEP2: 다건 이미지 슬롯 렌더

@@ -264,7 +264,7 @@
     .result-right.rr-col { flex-direction:column; align-items:flex-end; gap:4px; }
     .result-right .rr-row { display:flex; align-items:center; gap:6px; }
     .status-badge-order.todo, .status-badge-order.wait { padding:5px 9px; white-space:nowrap; }
-    /* 결정 419 — 네이버예약리뷰 리뷰 마감 안내(마감 날 「오늘 마감」 빨강 · 전날 「내일 마감」 주황 · 글자·날짜는 서버 KST) */
+    /* 결정 422 — 네이버예약리뷰 리뷰 마감 안내(마감 날 「오늘 마감」 빨강 · 전날 「내일 마감」 주황 · 글자·날짜는 서버 KST) */
     .dl-chip { font-size:.62rem; font-weight:800; padding:3px 8px; border-radius:6px; white-space:nowrap; background:#FEF3C7; color:#B45309; }
     .dl-chip.today { background:#FEE2E2; color:#B91C1C; }
     /* 못 누르는 카드의 이유 한 줄(결정 371) — 눌러도 아무 일이 없던 이유와 할 일 */
@@ -2596,7 +2596,7 @@ function renderReviewSubTab() {
       // 못 누르는 카드 = 왜 지금은 안 되는지 · 무엇을 하면 되는지 한 줄(눌러도 아무 일이 없던 이유)
       const reasonHtml = (!st.tappable && st.reason) ? `<div class="c-reason"><i class="fas fa-circle-info"></i><span>${escHtml(st.reason)}</span></div>` : '';
       const subBadgeHtml = (isDone && item.isPaid) ? '<span class="status-badge-paid">입금완료</span>' : '';
-      // ★ 결정 419: 네이버예약리뷰 리뷰 마감 날·전날 — 글자는 서버가 정한 그대로(「오늘 마감」/「내일 마감」 · 휴대폰 시계 안 씀 · 표시만)
+      // ★ 결정 422: 네이버예약리뷰 리뷰 마감 날·전날 — 글자는 서버가 정한 그대로(「오늘 마감」/「내일 마감」 · 휴대폰 시계 안 씀 · 표시만)
       const dlHtml = (!isDone && item.reviewDeadlineNotice)
         ? `<span class="dl-chip${item.reviewDeadlineState === 'today' ? ' today' : ''}">${escHtml(item.reviewDeadlineNotice)}</span>` : '';
       const receiptBadgeHtml = isDone && _hasPendingCashReceipt(item)
@@ -3141,7 +3141,7 @@ function openPartInfoSheet(items, opts){
     : '';
   document.getElementById('partInfoBody').innerHTML =
     '<div style="font-size:.9rem;font-weight:800;color:#111827;line-height:1.4">' + escHtml(_partInfoLabel(it)) + statusChip
-      // ★ 결정 419: 네이버예약리뷰 리뷰 마감 날·전날 — 카드와 같은 서버 글자(「오늘 마감」/「내일 마감」) · 한 건 창에만
+      // ★ 결정 422: 네이버예약리뷰 리뷰 마감 날·전날 — 카드와 같은 서버 글자(「오늘 마감」/「내일 마감」) · 한 건 창에만
       + ((!done && !many && it.reviewDeadlineNotice) ? ' <span class="dl-chip' + (it.reviewDeadlineState === 'today' ? ' today' : '') + '" style="vertical-align:middle">' + escHtml(it.reviewDeadlineNotice) + '</span>' : '')
       + '</div>' +
     /* 카드 첫 줄과 **같은 이름**을 말한다 — 누른 카드와 열린 팝업이 서로 다른 명의를 말하면 안 된다. */

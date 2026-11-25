@@ -327,7 +327,7 @@ async function slotForApplication(db, applicationId) {
   return rows[0] || null;
 }
 
-/* ── 결정 419 — 리뷰 마감 안내(보여 주기만 · 넘겨도 막지 않는다) ──
+/* ── 결정 422 — 리뷰 마감 안내(보여 주기만 · 넘겨도 막지 않는다) ──
    판정 = bookingCalendar.reviewDeadlineState 하나 · 오늘 = 서버 시계 KST(_kstToday) — 휴대폰 시계를 쓰지 않는다. */
 function reviewDeadlineStateAt(deadlineYmd, now = new Date()) {
   return require('../utils/bookingCalendar').reviewDeadlineState(deadlineYmd, _kstToday(now));
@@ -367,7 +367,7 @@ async function reviewDeadlinesForRows(db, rows = []) {
 }
 
 /** 리뷰어 화면에 내보내는 자리 정보(작업표 위치·내부 번호는 빼고 할 일만). deadline = 예약내역 제출 기한(홀드 마감).
- *  ★ 결정 419: 리뷰 마감 상태·안내 글자도 서버가 정해 싣는다(now = 서버 시계). */
+ *  ★ 결정 422: 리뷰 마감 상태·안내 글자도 서버가 정해 싣는다(now = 서버 시계). */
 function publicSlotView(slot, deadline, now = new Date()) {
   if (!slot) return null;
   const dl = reviewerDeadlineView(slot.review_deadline || null, now);
@@ -470,6 +470,6 @@ module.exports = {
   slotForApplication, publicSlotView, placeInfoForTab, bookingPublicView, normalizeReservationNo,
   // 5단계(결정 411)
   placeInfoForTabs,
-  // 결정 419 — 리뷰 마감 안내(표시만)
+  // 결정 422 — 리뷰 마감 안내(표시만)
   reviewDeadlineStateAt, reviewerDeadlineView, reviewDeadlinesForRows,
 };
