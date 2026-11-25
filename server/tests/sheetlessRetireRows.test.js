@@ -142,7 +142,7 @@ console.log('\n[B] 정리 게이트 — 무시트 탭만 · dryRun 기본 · 대
     const iReb = blk.indexOf('rebuildLedgers({');
     ok('★★ 순서가 계약: 작업표 정리(위임)가 장부 재생성보다 **앞** — 반대면 투영이 되살린다',
       iDel > 0 && iReb > iDel);
-    ok('★ 장부 재생성 실패는 조용히 넘기지 않는다(ledgerError 로 고지)', /ledgerError/.test(blk.slice(0, 1600)));
+    ok('★ 장부 재생성 실패는 조용히 넘기지 않는다(ledgerError 로 고지)', /ledgerError/.test(blk.slice(0, 1800)));   // 창 = 함수 앞부분(결정 407 예약 자리 게이트 한 줄만큼 넓힘 — 검사 의미 불변)
     ok('★ dryRun 이면 장부를 다시 만들지 않는다', /if \(dryRun\) return \{ \.\.\.r/.test(blk.slice(0, 1600)));
     assert(typeof realRebuild === 'function');
     // 실제 실행 경로: 정리 0건이면 장부 재생성도 안 한다

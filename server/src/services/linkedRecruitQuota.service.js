@@ -180,10 +180,16 @@ async function syncWorktableSlotsInTx(client, campaign, target, by = 'quota-sync
 /* ★★ Q&A체험단(결정 321 · 사용자 확정 2026-11-03) — 줄 = 날짜별 자리라 건수를 바꾸면 자리표와 어긋난다.
    접수 뒤 건수 변경은 막고(저장 전 확인 · 같은 트랜잭션의 정원 저장도 함께 롤백), 늘리려면 일정 끝 「추가 모집」으로 한다.
    ★ 확인(assert)과 실제 맞추기(sync) 두 곳이 이 함수 하나를 탄다 — 한쪽만 막으면 저장 뒤 실패가 된다. */
+// 이름은 Q&A 시절 그대로 — 결정 407 부터 예약리뷰 자리표 탭도 같은 함수가 막는다(확인·맞추기 두 곳이 이것 하나를 탄다).
 async function _assertQnaCalendarUnchanged(client, campaign, delta) {
   if (!(delta && (delta.retire || delta.add))) return;
   if (await require('./qnaSlots.service').isQnaTab(client, campaign.linked_sheet_id, campaign.linked_tab_name)) {
     throw quotaError('Q&A 작업은 접수 뒤 건수를 바꿀 수 없습니다 — 일정이 끝날 때 「추가 모집」으로 늘려 주세요.', 'recruit_quota_qna_locked');
+  }
+  /* ★★ 네이버예약리뷰(결정 407) — 줄 = 업체가 정한 날짜별 자리. 총 건수로 줄을 늘리거나 줄이면 날짜별 인원이 어긋난다
+     (늘린 줄은 날짜가 없고, 줄인 줄은 그날 자리를 지운다). 판정 실패 = 예약 탭으로 본다(막음). */
+  if (await require('./bookingSlots.service').isBookingTab(client, campaign.linked_sheet_id, campaign.linked_tab_name)) {
+    throw quotaError('네이버예약리뷰 작업은 접수 뒤 건수를 바꿀 수 없습니다 — 날짜별 인원은 업체가 정한 값입니다.', 'recruit_quota_booking_locked');
   }
 }
 

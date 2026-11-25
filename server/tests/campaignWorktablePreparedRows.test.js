@@ -22,6 +22,7 @@ async function makeDb() {
     CREATE TABLE order_submissions(id uuid PRIMARY KEY, deleted_at timestamptz, mirror_status text);
     CREATE TABLE sync_queue(id serial, type text, status text, payload jsonb);
     ${require('fs').readFileSync(require('path').join(__dirname,'../migrations/210_qna_slots.sql'),'utf8').match(/CREATE TABLE IF NOT EXISTS qna_slots \([\s\S]*?\n\);/)[0]}
+    ${require('fs').readFileSync(require('path').join(__dirname,'../migrations/227_booking_slots.sql'),'utf8').match(/CREATE TABLE IF NOT EXISTS booking_slots \([\s\S]*?\n\);/)[0]}
   `);
   const q = (s, p) => pg.query(s, p).then(r => ({ ...r, rowCount: r.affectedRows ?? r.rows.length }));
   return { pg, pool: { query: q, connect: async () => ({ query: q, release() {} }) } };

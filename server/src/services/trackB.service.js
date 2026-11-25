@@ -4634,6 +4634,16 @@ async function editWorkdeskRowInTx(client, { sheetId, tabName, rowId, field, val
               return { ok: false, error: 'qna_slot_cell_locked', field, message: 'Q&A 자리 줄의 진행일자·공개여부·문의문구·상품·옵션은 바꿀 수 없습니다 — 날짜별 자리표가 정한 값입니다.' };
         }
       }
+      // ★ 네이버예약리뷰(결정 407) — 자리 줄의 이용일자·리뷰마감일·상품(매장) 칸은 자리표가 정한다(업체가 정한 날짜).
+      //   예약번호 칸은 막지 않는다(3단계에 리뷰어가 내고 담당자가 고칠 수 있는 값).
+      const _bookingCell = [_wp.BOOKING_DATE_HEADER, _wp.BOOKING_DEADLINE_HEADER].includes(_hdr)
+        || (_hi >= 0 && (_pwc(_heads).includes(_hi) || _owc(_heads).includes(_hi)));
+      if (_bookingCell) {
+        const bks = require('./bookingSlots.service');
+        if (await bks.isBookingTab(client, sheetId, tabName) && await bks.isBoundRow(client, sheetId, tabName, row.seq)) {
+          return { ok: false, error: 'booking_slot_cell_locked', field, message: '예약리뷰 자리 줄의 이용일자·리뷰마감일·상품은 바꿀 수 없습니다 — 업체가 정한 날짜별 자리표 값입니다.' };
+        }
+      }
       if (!await _isTabColumn(client, sheetId, tabName, row.tab_gid, field.slice(4), row.row_json)) {
         return { ok: false, error: 'field_not_editable', field };
       }
@@ -5121,10 +5131,15 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
     /* ★★ Q&A체험단(결정 321) — 줄 = 날짜별 자리. 지운 줄의 **같은 날·같은 자리**로 보충하고(마지막 계획일로 보내지 않는다),
        자리표가 새 줄을 가리키게 옮긴다(아래). 총 건수와 무관하게 늘 보충한다 — 자리가 사라지면 그날 공개글이 없어진다. */
     const _qnaTab = await require('./qnaSlots.service').isQnaTab(client, sheetId, tabName);
-    const finalDateLabel = _qnaTab ? removedRaw : (planLabel || lastSheetLabel || removedRaw);
+    /* ★★ 네이버예약리뷰(결정 407) — 같은 규율: 업체가 정한 날짜 자리. 지운 줄과 같은 날로 보충하고 자리표가 새 줄을 가리킨다. */
+    const _bookingTab = !_qnaTab && await require('./bookingSlots.service').isBookingTab(client, sheetId, tabName);
+    const _slotTab = _qnaTab || _bookingTab;   // 줄 날짜 = 자리표 날짜인 탭(Q&A · 예약리뷰)
+    const finalDateLabel = _slotTab ? removedRaw : (planLabel || lastSheetLabel || removedRaw);
     // 지운 줄이 자리표의 자리인가 — 자리에 묶인 줄만 "늘 보충 + 자리 옮기기". 손으로 더한 줄(자리 없음)은 종전 규칙(총 건수 기준).
     //   조회 실패 = 묶인 것으로 본다(보충은 안전 쪽 — 자리가 사라지는 것보다 줄 하나 남는 것이 싸다).
     const _qnaBound = _qnaTab && await require('./qnaSlots.service').isBoundRow(client, sheetId, tabName, row.seq);
+    const _bookingBound = _bookingTab && await require('./bookingSlots.service').isBoundRow(client, sheetId, tabName, row.seq);
+    const _slotBound = _qnaBound || _bookingBound;
 
     // 행 자체는 실제 삭제한다. 삭제 표식은 별도 최소 테이블에 두어, 작업표 행을
     // 논리삭제 레코드로 남기지 않으면서도 재투영에 의해 같은 seq가 되살지 않게 한다.
@@ -5167,8 +5182,8 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
     // 예: 200건 작업에 201줄이 있을 때 1줄 삭제 → 200줄이므로 새 201번을 만들면 안 된다.
     const removedWasActive = tabRows.some(r => Number(r.seq) === Number(row.seq));
     const boardAfterDelete = Math.max(0, tabRows.length - (removedWasActive ? 1 : 0));
-    // ★ Q&A 탭: 자리 줄 = 늘 보충 · 자리 없는 줄(손으로 더한 줄) = 보충 안 함(자리표 밖 줄을 새로 만들지 않는다).
-    const shouldReplenish = _qnaTab ? _qnaBound : !(boardTarget > 0 && boardAfterDelete >= boardTarget);
+    // ★ Q&A·예약 탭: 자리 줄 = 늘 보충 · 자리 없는 줄(손으로 더한 줄) = 보충 안 함(자리표 밖 줄을 새로 만들지 않는다).
+    const shouldReplenish = _slotTab ? _slotBound : !(boardTarget > 0 && boardAfterDelete >= boardTarget);
     const blank = {};
     headers.forEach(h => { blank[h] = ''; });
     if (dateHeader) blank[dateHeader] = finalDateLabel;
@@ -5185,6 +5200,13 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
       const inherited = await _inheritSlotPlanInTx(client, { sheetId, tabName, row, headers });
       for (const [h, v] of Object.entries(inherited.cells)) blank[h] = v;
       inheritedOptionText = inherited.optionText;
+    }
+    // ★ 예약리뷰 자리 줄은 리뷰마감일 칸도 잇는다(같은 날 = 같은 마감 · 잠긴 칸이라 줄 값 그대로).
+    //   계획 칸 목록(planCellHeaders)에 넣지 않는 이유 = 리뷰 탭의 같은 이름 칸 보충 동작을 바꾸지 않기 위해.
+    if (_bookingBound) {
+      const { BOOKING_DEADLINE_HEADER } = require('../utils/worktablePlan');
+      const rj = row.row_json && typeof row.row_json === 'object' ? row.row_json : {};
+      if (Object.prototype.hasOwnProperty.call(blank, BOOKING_DEADLINE_HEADER) && rj[BOOKING_DEADLINE_HEADER] != null) blank[BOOKING_DEADLINE_HEADER] = String(rj[BOOKING_DEADLINE_HEADER]);
     }
     // ★★ 다음 번호는 **표 전체**(소프트삭제·비활성 줄 포함)에서 골라야 한다 — `uq_participants_seq`
     //   는 부분 인덱스가 아니라 지워진 줄의 번호도 영구히 점유한다. 살아있는 줄(`tabRows`)만 보고
@@ -5210,7 +5232,7 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
            RETURNING id, seq`,
           [sheetId, (tabRows[0] && tabRows[0].tab_gid) || null, tabName,
             // Q&A 자리 줄은 지운 줄의 진행일 칸(start_date)을 그대로 잇는다 — 표기까지 같아야 자리표 대조(verifyRowsMatchPlan)가 맞는다.
-            (_qnaBound && row.start_date) || finalDateLabel || null, JSON.stringify(blank), String(by).slice(0, 100), inheritedOptionText]);
+            (_slotBound && row.start_date) || finalDateLabel || null, JSON.stringify(blank), String(by).slice(0, 100), inheritedOptionText]);
         if (tryInsert.rows.length) replacement = tryInsert;
       }
       if (!replacement) throw new HideRowError('replacement_slot_failed');
@@ -5219,6 +5241,11 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
     if (_qnaBound && replacement) {
       await client.query(
         'UPDATE qna_slots SET seq = $4, updated_at = NOW() WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3',
+        [sheetId, tabName, row.seq, replacement.rows[0].seq]);
+    }
+    if (_bookingBound && replacement) {
+      await client.query(
+        'UPDATE booking_slots SET seq = $4, updated_at = NOW() WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3',
         [sheetId, tabName, row.seq, replacement.rows[0].seq]);
     }
 
@@ -5397,6 +5424,9 @@ async function setWorkdeskPurchaseDateInTx(client, { sheetId, tabName, rowId, fo
   const row = rows[0];
   const qs = require('./qnaSlots.service');
   if (await qs.isQnaTab(client, sheetId, tabName) && await qs.isBoundRow(client, sheetId, tabName, row.seq)) return { ok: false, error: 'qna_slot_date_locked' };
+  // ★ 네이버예약리뷰(결정 407) — 자리 줄의 이용일자는 업체가 정한 날이다(달력으로 옮기지 않는다).
+  const bks = require('./bookingSlots.service');
+  if (await bks.isBookingTab(client, sheetId, tabName) && await bks.isBoundRow(client, sheetId, tabName, row.seq)) return { ok: false, error: 'booking_slot_date_locked' };
   if (row.order_submission_id) {
     const changed = await client.query(`UPDATE order_submissions SET date_str=$2,updated_at=NOW(),
       last_edit_seq=GREATEST(COALESCE(last_edit_seq,0),$3) WHERE id=$1 AND deleted_at IS NULL`, [row.order_submission_id, fmt, Date.now()]);
@@ -6796,6 +6826,8 @@ async function assignUnslottedOrderToOpenSlotInTx(client, { sheetId, tabName, ro
     if (_displayNumber(source.row_json)) { return { ok: false, error: 'already_numbered' }; }
     // ★ Q&A체험단(결정 321) — 주문은 신청 때 고른 그 자리(날짜·공개/비공개)에만 들어간다. 아무 빈 줄에나 옮기면 자리표와 어긋난다.
     if (await require('./qnaSlots.service').isQnaTab(client, sheetId, tabName)) { return { ok: false, error: 'qna_slot_required' }; }
+    // ★ 네이버예약리뷰(결정 407)도 같다 — 주문은 신청 때 고른 그 날 자리에만 들어간다.
+    if (await require('./bookingSlots.service').isBookingTab(client, sheetId, tabName)) { return { ok: false, error: 'booking_slot_required' }; }
 
     const effectiveId = await _effectiveLinkedWorkOrderId(client, sheetId, tabName);
     const { rows: workOrders } = await client.query(

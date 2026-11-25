@@ -20,6 +20,7 @@ async function run() {
     async query(sql, params) {
       calls.push({ sql: String(sql), params });
       if (/FROM qna_slots/.test(String(sql))) return { rows: [] };   // Q&A 자리표 탭 아님(결정 321)
+      if (/FROM booking_slots/.test(String(sql))) return { rows: [] };   // 예약 자리표 탭 아님(결정 407)
       if (/SELECT id, seq, tab_gid, reviewer_name/.test(String(sql))) return { rows };
       if (/UPDATE campaign_participants/.test(String(sql))) return { rowCount: 2, rows: [] };
       throw new Error(`unexpected query: ${sql}`);

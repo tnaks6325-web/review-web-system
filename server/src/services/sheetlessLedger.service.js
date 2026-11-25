@@ -75,6 +75,17 @@ class LedgerError extends Error {
   constructor(code, message) { super(message); this.code = code; }
 }
 
+/* ★★ 네이버예약리뷰(결정 407) — 업체가 정한 날짜 자리 줄은 줄 정리(중복 정리·짝 빈 줄 정리 포함)로 내리지 않는다.
+   차수 단위 정리는 예약 탭에서 통째로 막는다. 판정 실패 = 예약 탭(fail-closed) · 묶인 줄 조회 실패는 던진다(정리를 멈춘다). */
+async function _assertNoBookingSlotRows(db, { sheetId, tabName, rounds = [], seqs = [] } = {}) {
+  const bks = require('./bookingSlots.service');
+  if (!await bks.isBookingTab(db, sheetId, tabName)) return;
+  const bound = (Array.isArray(rounds) && rounds.length) ? ['차수 단위'] : await bks.boundSeqs(db, sheetId, tabName, seqs);
+  if (bound.length) {
+    throw new LedgerError('booking_slot_rows', `예약리뷰 자리 줄은 줄 정리로 내리지 않습니다(${bound.slice(0, 5).join(', ')}) — 지울 줄은 「줄 삭제」로 지워 주세요(같은 날 자리로 다시 채워집니다).`);
+  }
+}
+
 /**
  * 헤더 결정 — 한 번 정해지면 유지한다(재생성마다 열 순서가 흔들리면 행 배정·표시가 어긋난다).
  * 우선순위: ① 이미 저장된 장부 헤더(이관 작업·재생성) → ② 호출자가 준 열 구성(작업표 생성 시)
@@ -462,6 +473,7 @@ async function retireRows({ sheetId, tabName, rounds = [], seqs = [], dryRun = t
       throw new LedgerError('qna_slot_rows', `Q&A 자리 줄은 줄 정리로 내리지 않습니다(${bound.slice(0, 5).join(', ')}) — 지울 줄은 「줄 삭제」로 지워 주세요(같은 날 자리로 다시 채워집니다).`);
     }
   }
+  await _assertNoBookingSlotRows(db, { sheetId, tabName, rounds, seqs });   // ★★ 결정 407 — 예약리뷰 자리 줄도 같은 규율
 
   /* ★ 작업표 쓰기는 `participants.service` 가 소유한다(쓰기 소유자 규율) — 여기는 게이트·순서·장부만. */
   const r = await require('./participants.service')
