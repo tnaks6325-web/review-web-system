@@ -127,6 +127,7 @@ function loadSubmitRouter({ workKind, captureSlots = null, incomeType = null, ha
     markStatusCell: async () => ({ handled: false }),
     markSheetlessMemo: async () => ({ handled: true, ok: true }),
     markSheetlessPostDate: async () => ({ handled: false }),   // 127
+    submitTimeValue: async () => '11/25 10:00',   // 결정 415 — 리뷰제출 칸 시각은 서버가 만든다(가짜 서비스도 그 자리를 채운다)
   } };
   require.cache[sheetsPath] = { exports: {
     writeSheet: async () => ({}), readSheet: async () => [], appendSheet: async () => ({}),
