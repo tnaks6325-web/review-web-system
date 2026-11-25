@@ -78,6 +78,10 @@
     .sheet{background:#fff;border-radius:20px 20px 0 0;width:100%;max-width:600px;padding:22px 18px 28px}
     .sheet h3{font-size:1.02rem;margin-bottom:4px}
     .sheet p{font-size:.78rem;color:var(--t3);margin-bottom:14px}
+    /* ★ 결정 417 — 본인 확인 창: 실패 안내는 창 안에 남기고(토스트는 3초 뒤 사라짐), 처음 온 사람에게 등록 입구(리뷰어 홈 로그인의 「처음이신가요?」 줄과 같은 모양) */
+    .li-msg{background:var(--err-light);border:1px solid #FCA5A5;color:#991B1B;border-radius:10px;padding:10px 12px;font-size:.8rem;line-height:1.5;margin:0 0 10px;word-break:keep-all}
+    .li-reg{margin-top:14px;text-align:center;font-size:.78rem;color:var(--t3)}
+    .li-reg a{color:var(--p);text-decoration:none;font-weight:600;display:inline-block;padding:6px 2px}
     .inp{width:100%;padding:13px;border:1.5px solid var(--border);border-radius:10px;font-size:.95rem;font-family:inherit;margin-bottom:10px}
     .toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:#111827;color:#fff;font-size:.82rem;
       font-weight:600;border-radius:10px;padding:11px 18px;z-index:2000;display:none;max-width:88vw;text-align:center}
@@ -442,8 +446,10 @@
     <p>등록된 리뷰어인지 확인 후 참여할 수 있어요.</p>
     <input class="inp" id="liName" placeholder="이름 (실명)" autocomplete="name"/>
     <input class="inp" id="liPhone" placeholder="전화번호 뒤 8자리" inputmode="numeric" maxlength="8"/>
+    <div class="li-msg" id="liMsg" role="alert" style="display:none"></div>
     <button class="btn" onclick="doVerify()">확인하고 계속하기</button>
     <button class="btn ghost" style="margin-top:8px" onclick="hideSheet()">취소</button>
+    <div class="li-reg">처음이신가요? <a href="/search#register" onclick="return goRegisterNew()">리뷰어 등록하기 →</a></div>
   </div>
 </div>
 
@@ -640,23 +646,36 @@ function saveSession(name, phone8, reviewerToken){
   try{ localStorage.setItem('iad_reviewer_user', JSON.stringify({name, phone:phone8, phone8:session.phone8, reviewerToken:session.reviewerToken})); }catch(_){}
   return session;
 }
-function needLogin(then){ _afterLogin = then || null; _sheetOpen('loginSheet'); }
+function needLogin(then){ _afterLogin = then || null; const m = $('liMsg'); if(m){ m.textContent = ''; m.style.display = 'none'; } _sheetOpen('loginSheet'); }
 function hideSheet(){ _sheetClose('loginSheet'); }
+/** ★ 결정 417 — 본인 확인 실패 안내를 창 안에 남긴다(토스트는 3초 뒤 사라지고 [취소]를 덮는다). 문구는 서버가 준 그대로. */
+function _liMsg(text){
+  const m = $('liMsg'); if(!m) return;
+  m.textContent = text || '';
+  m.style.display = text ? '' : 'none';
+}
 async function doVerify(){
   const name = $('liName').value.trim();
   const p8 = $('liPhone').value.replace(/\D/g,'');
   if(!name) return toast('이름을 입력해주세요');
   if(p8.length!==8) return toast('전화번호 뒤 8자리를 입력해주세요');
+  _liMsg('');
   try{
     const r = await _campFetch(API_BASE_URL + '/api/reviewer/verify?phone8=' + encodeURIComponent(p8) + '&name=' + encodeURIComponent(name));
     const j = r.j;
-    if(_campTempFail(r)){ toast(_CAMP_MSG_SERVER); return; }   // ★ 결정 397 — 서버 일시 오류를 「등록된 리뷰어 없음」으로 말하지 않는다
-    if(!j || !j.ok){ toast(j && j.error ? j.error : '등록된 리뷰어를 찾을 수 없어요'); return; }
+    if(_campTempFail(r)){ toast(_CAMP_MSG_SERVER); _liMsg(_CAMP_MSG_SERVER); return; }   // ★ 결정 397 — 서버 일시 오류를 「등록된 리뷰어 없음」으로 말하지 않는다
+    if(!j || !j.ok){ const msg = j && j.error ? j.error : '등록된 리뷰어를 찾을 수 없어요'; toast(msg); _liMsg(msg); return; }
     saveSession(j.name || name, p8, j.reviewerToken);
     hideSheet();
     const fn = _afterLogin; _afterLogin = null;
     if(fn) fn();
-  }catch(e){ toast(_campErrText(e)); }
+  }catch(e){ const msg = _campErrText(e); toast(msg); _liMsg(msg); }
+}
+/** ★ 결정 417 — 본인 확인 창의 「처음이신가요? 리뷰어 등록하기」: 등록 화면에 돌아올 공고를 넘기고(결정 045 returnCamp 와 같은 방식 ·
+ *  등록 화면이 형식을 다시 검사한다), 등록이 끝나면 등록 화면이 이 공고로 돌려보낸다. 창을 연 채 떠나므로 _sheetLeave(결정 403). */
+function goRegisterNew(){
+  _sheetLeave('/search?returnCamp=' + encodeURIComponent(CAMP_ID) + '#register');
+  return false;
 }
 
 /* ═══ 홀드 저장 (v2 — 명의별 맵) ═══
@@ -2126,7 +2145,7 @@ async function _doApply(optionKey, sub, purchaseQty){
     // ★ 결정 289 ③-나: 개수 미선택·없는 개수·그 개수 마감 → 서버가 준 최신 자리로 개수 창 다시(자리는 점유되지 않았다)
     if(_qtyRetryFromServer(j, { mode:'join', optionKey, sub, views: _qtyViewsFor(optionKey) })) return;
     if(j.reason === 'tier_unavailable'){ toast(j.error || '지금은 참여할 수 없어요'); await loadCampaign(); return; }
-    if(j.reason === 'not_registered'){ toast('리뷰어 등록 후 참여할 수 있어요'); setTimeout(()=>_sheetLeave('/search.html#register'), 900); return; }
+    if(j.reason === 'not_registered'){ toast('리뷰어 등록 후 참여할 수 있어요'); setTimeout(goRegisterNew, 900); return; }   // ★ 결정 417 — 등록 뒤 이 공고로 돌아온다
     // 📅 결정 409: 고른 날짜가 막 찼거나 고를 수 없는 날 — 자리는 잡히지 않았다. 남은 자리를 다시 받아 날짜를 다시 고르게 한다.
     if(['booking_date_full','booking_date_closed','booking_date_invalid','booking_date_required'].includes(j.reason)){
       hideAcctSheet(); toast(_applyReasonText(j)); _bkDate = ''; await loadCampaign(); _bkScrollToDates(); return;
