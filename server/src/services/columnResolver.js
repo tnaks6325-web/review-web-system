@@ -185,6 +185,9 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbCol
   // ★ 결정 321: Q&A체험단 작업표는 「구매일자」 자리가 「진행일자」다 — 다른 날짜 칸이 하나도 없을 때만 그것을 본다
   //   (종전 탭의 판정 순서는 그대로 · 진행일자를 따로 둔 리뷰 탭이 있어도 구매일 칸이 이긴다).
   if (startDateIdx < 0) startDateIdx = headers.findIndex(h => h.includes('진행일자'));
+  // ★ 결정 414: 네이버예약리뷰 작업표는 그 자리가 「이용일자」다 — 위 둘이 다 없을 때만, 이름이 **정확히** 그것일 때만 본다
+  //   (부분 일치·키워드 목록에 넣지 않는다 — 첫 매칭 규칙이라 기존 탭의 판정이 바뀐다 · 결정 407 날짜 칸 찾기와 같은 규율).
+  if (startDateIdx < 0) startDateIdx = headers.findIndex(h => String(h).trim() === '이용일자');
   const endDateIdx = headers.findIndex(h => endDateKeywords.some(k => h.includes(k)));
 
   const roundKeywords = ['회차', '차수', 'round'];

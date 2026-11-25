@@ -201,7 +201,78 @@ function buildBookingCalendar(spec, { startSeq = 1 } = {}) {
   return { slots, days, total: slots.length, blockers: [] };
 }
 
+/* ═══ ★★ 결정 414 — 접수 뒤 수정 잠금(단일 출처 · 완화 금지) ═══
+   접수로 날짜별 자리표(booking_slots)·작업표 줄(이용일자·리뷰마감일·결제금액 칸)이 **이 계약 값으로** 이미 깔렸다.
+   그래서 접수 뒤에는 자리표를 정한 값을 바꾸지 않는다(Q&A `_qnaCalendarLocked` 와 같은 규율):
+     잠금 = 매장 이름 · 매장 구성(매장 수·옵션) · 진행 방식(환급형/무료체험형) · 날짜·날짜별 인원 · 총 모집인원 · 리뷰 마감 N일
+     열림 = 매장 주소(place_address · 안내용) · 네이버 예약 링크(url) · 1건 결제금액(base.pay · 환급형) · 가이드·특이사항 등 글 칸
+   ★ 열린 칸도 고친 **결과가 계약을 지켜야** 한다(invalid) — 매장 안내(placeInfoForTab)·입금(bookingPayoutOf)이 오더를 그때그때 읽어,
+     계약이 깨지면 리뷰어 신청이 막히고 입금이 「예약 설정 모름」으로 멈춘다(무료체험형에 결제금액을 넣는 것 등).
+   ★ 비교는 정규화된 계약(bookingSpecFromWorkOrder) 기준 — 표기 차이(키 순서·공백)로 막지 않는다.
+   ★ 예약리뷰에는 「추가 모집」·차수가 없다(차수 = rounds_booking_locked · 결정 407). 날짜·인원을 바꾸려면 새 리뷰오더로 접수한다. */
+/** 예약 설정(booking) 안에서 접수 뒤에도 고칠 수 있는 키 — 안내용 칸만. 넓히지 말 것(완화 금지). */
+const BOOKING_EDITABLE_AFTER_ACCEPT_KEYS = Object.freeze(['place_address']);
+const BOOKING_LOCK_LABELS = Object.freeze({
+  place_name: '매장 이름', place_shape: '매장 구성(매장 하나 · 옵션 없음)', pay_mode: '진행 방식(환급형/무료체험형)',
+  dates: '날짜·날짜별 인원', total: '총 모집인원', review_deadline_days: '리뷰 마감(이용일 + N일)',
+});
+
+/**
+ * 접수된 예약 오더의 수정이 자리표를 정한 값을 바꾸는가.
+ * @param {object} cur  지금 작업오더 행
+ * @param {object} next 수정 뒤 모양(보내지 않은 칸은 cur 값 그대로 채워 넘긴다)
+ * @returns {{ locked: string[], invalid: string[] }} locked = BOOKING_LOCK_LABELS 키 · invalid = 수정 뒤 계약이 새로 깨진 사유(사람 말)
+ */
+function bookingLockedChanges(cur = {}, next = {}) {
+  const a = bookingSpecFromWorkOrder(cur || {});
+  const z = bookingSpecFromWorkOrder(next || {});
+  const locked = [];
+  if (!a.spec || !z.spec) {
+    // 한쪽 계약을 못 읽음 — 비교 근거가 없다. 상품 구성이 조금이라도 다르면 잠금(fail-closed).
+    const canonJ = v => { try { return JSON.stringify(typeof v === 'string' ? JSON.parse(v || '[]') : (v || [])); } catch (_) { return String(v); } };
+    if (!z.spec || canonJ(cur && cur.product_options_json) !== canonJ(next && next.product_options_json)) locked.push('place_shape');
+  } else {
+    if (a.spec.placeName !== z.spec.placeName) locked.push('place_name');
+    if (a.spec.payMode !== z.spec.payMode) locked.push('pay_mode');
+    if (JSON.stringify(a.spec.dates) !== JSON.stringify(z.spec.dates)) locked.push('dates');
+    if (a.spec.reviewDeadlineDays !== z.spec.reviewDeadlineDays) locked.push('review_deadline_days');
+  }
+  if ((_strictInt(cur && cur.recruit_count) || 0) !== (_strictInt(next && next.recruit_count) || 0)) locked.push('total');
+  // ★ 새로 깨진 사유만 — 지금 이미 있던 사유로 글 칸 수정까지 영영 막지 않는다(막다른 길 방지).
+  const had = new Set((a.blockers || []).map(b => b.code));
+  const invalid = (z.blockers || []).filter(b => !had.has(b.code)).map(b => b.message);
+  return { locked: [...new Set(locked)], invalid };
+}
+
+/** 잠금 409 문구 — 인트라넷이 실패 사유로 그대로 보여 준다(무엇을 하면 되는지까지).
+ *  ★ 「추가 모집」이라는 말을 쓰지 않는다 — 인트라넷 실패 안내(reviewOrderDeliveryFailMessage)가 그 말이 있으면 **Q&A 안내**(「일정 끝 추가 모집으로 늘려라」)로
+ *    바꿔 보여 준다(예약리뷰엔 그 길이 없다). 「새 리뷰오더」가 있으면 인트라넷이 「새 리뷰오더로 접수」 안내를 고른다. */
+function bookingLockMessage({ locked = [], invalid = [], topLabels = [] } = {}) {
+  const names = [...new Set([...topLabels, ...locked.map(k => BOOKING_LOCK_LABELS[k] || k)])];
+  if (names.length) {
+    return `네이버예약리뷰 작업은 접수 뒤 이 칸을 바꿀 수 없습니다: ${names.join(', ')} — 날짜별 자리가 이 값으로 이미 깔렸습니다. `
+      + '원래 값으로 되돌려 저장해 주세요. 날짜·인원을 바꾸거나 늘리려면 새 리뷰오더로 접수해 주세요(네이버예약리뷰는 접수 뒤 인원 늘리기·차수가 없습니다). '
+      + '매장 주소·네이버 예약 링크·1인 결제금액·리뷰비·가이드·특이사항은 고칠 수 있습니다.';
+  }
+  return `네이버예약리뷰 예약 설정이 맞지 않아 저장하지 않았습니다 — ${invalid.join(' ')} 고쳐서 다시 저장해 주세요. `
+    + '진행 방식·날짜를 바꿔야 한다면 새 리뷰오더로 접수해 주세요(리뷰웹시스템 작업보드에서도 바꿀 수 없습니다).';
+}
+
+/**
+ * 화면용 예약 계약(발행 폼 보기 전용 카드 · 결정 409) — 예약 오더가 아니거나 못 읽으면 undefined.
+ * ★ 작업오더 목록·작업 카드 [공고 발행]·공고 수정 창이 같은 이 함수를 탄다(사본 0 · 결정 414).
+ */
+function bookingSpecForScreen(row) {
+  if (!row || !require('./workKind').isBookingKind(row.work_kind)) return undefined;
+  try {
+    const { spec, blockers } = bookingSpecFromWorkOrder(row);
+    return spec ? { ...spec, blockers: (blockers || []).map(b => b.message) } : undefined;
+  } catch (_) { return undefined; }
+}
+
 module.exports = {
   bookingSpecFromWorkOrder, buildBookingCalendar, reviewDeadlineOf, isValidYmd,
+  // 결정 414 — 접수 뒤 수정 잠금 · 화면용 계약
+  BOOKING_EDITABLE_AFTER_ACCEPT_KEYS, BOOKING_LOCK_LABELS, bookingLockedChanges, bookingLockMessage, bookingSpecForScreen,
   BOOKING_PAY_MODES, BOOKING_PAY_MODE_LABEL, DEFAULT_REVIEW_DEADLINE_DAYS, MAX_REVIEW_DEADLINE_DAYS, MAX_BOOKING_DATES, MAX_BOOKING_SLOTS,
 };

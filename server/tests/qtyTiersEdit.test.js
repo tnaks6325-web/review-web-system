@@ -52,7 +52,7 @@ const stubQ = ({ apps = 0, orders = 0, filled = 0, shared = 0, rounds = false, a
   await ok('① 판정 — 연결 꺼짐(active=false) 첫 사유 · 옛 창 · 블로그 · Q&A · 스위치 꺼짐 · 이미 단계 있음 = 구조 잠김 안내 없음', async () => {
     let v = await svc.qtyTiersEditVerdict(stubQ(), { wo: WO(), camp: CAMP, tiersCapable: false, active: false });
     assert.deepEqual(v.reasons.slice(0, 2), ['bidir_not_active', 'tiers_not_capable']); assert.equal(v.allowed, false);
-    for (const k of ['blog', 'qna']) {
+    for (const k of ['blog', 'qna', 'booking']) {   // 결정 414 — 예약리뷰도(강화)
       v = await svc.qtyTiersEditVerdict(stubQ(), { wo: WO({ work_kind: k }), camp: CAMP, tiersCapable: true, active: true });
       assert.deepEqual(v.reasons, ['kind_no_tiers'], k);
     }

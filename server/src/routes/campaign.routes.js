@@ -1702,6 +1702,10 @@ async function getCampaignDetail(req, res, next) {
          (2026-08-21 신고). → 수정 모달이 **열 때부터** 그 사실을 말하고 칸을 잠그도록 재료를 준다.
          ★ 조회 실패·095 미적용 = **null(모름)** — 화면이 "잠금 없음"으로 꾸미지 않는다. */
       let roundsLock = null;
+      /* ★ 결정 414 — 예약 공고 수정 창의 보기 전용 예약 안내(결정 409 카드). 재료 = 아래 **같은 한 번의 연결 오더 조회**(사본 조회 금지)를
+         bookingCalendar.bookingSpecForScreen(작업오더 목록 프리필과 같은 함수)으로 바꾼 것. 예약 공고가 아니거나 못 읽으면 칸 없음 →
+         화면은 「불러오지 못했습니다」라고 말한다(빈 카드로 꾸미지 않음). */
+      let bookingSpec;
       let orderInfo = null;   // 연결 리뷰오더 안내(보기 전용) — 없음·조회 실패 = null(화면은 「연결된 리뷰오더 없음」)
       try {
         const { rows: _rr } = await pool.query(
@@ -1727,6 +1731,7 @@ async function getCampaignDetail(req, res, next) {
           // 공고 창 시안 3차(결정 275): 「리뷰오더 고유 항목」 보기 전용 · 연결 표시줄 재료(읽기만)
           'id', 'title', 'manager_name', 'work_manager', 'product_distribution_mode', 'source_review_order_id', 'bidir_state',
           'product_options_json',   // 결정 277: 상품 메인 주소를 아직 모르는 줄(198 이전)의 카드에 오더 쪽 주소를 보여 준다(보기만)
+          'work_kind', 'workboard_schema_version', 'recruit_count', 'pay_amount',   // 결정 414: 예약 안내 재료(bookingSpecFromWorkOrder 가 읽는 칸)
         ]);
         if (wo && wo.id) {
           orderInfo = {
@@ -1771,6 +1776,11 @@ async function getCampaignDetail(req, res, next) {
             inflowType: String(wo.inflow_type || ''),
           };
         }
+        // 결정 414 — 예약 공고만 · 못 읽으면 칸 없음(위 값들은 그대로 실린다)
+        if (wo && isBookingKind(rows[0].work_kind)) {
+          try { bookingSpec = require('../utils/bookingCalendar').bookingSpecForScreen(wo); }
+          catch (e) { logger.warn(`[campaign/detail] 예약 안내 변환 실패(카드는 못 읽었다고 표시) camp=${id}: ${e.message}`); }
+        }
       } catch (e) {
         logger.warn(`[campaign] 작업오더 프리필(혼합 조합·유입방식·시작일·안내값) 실패 camp=${id}: ${e.message}`);
       }
@@ -1802,6 +1812,7 @@ async function getCampaignDetail(req, res, next) {
         ...(bidir ? { bidir } : {}),
         ...(orderInfo ? { orderInfo } : {}),
         ...(sourceOrderDeleted ? { sourceOrderDeleted } : {}),
+        ...(bookingSpec ? { bookingSpec } : {}),
       });
     }
     const now = new Date();

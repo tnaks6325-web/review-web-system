@@ -572,14 +572,11 @@ router.get('/parity-trend', authMiddleware, internalMiddleware, async (req, res,
 /* ★ 결정 409 — 네이버예약리뷰 오더에는 정규화한 예약 계약(매장·주소·예약 주소·돈 방식·날짜별 인원·리뷰 기한)을 붙인다.
      판정·정규화 = bookingCalendar.bookingSpecFromWorkOrder 단일 출처 — 발행 폼 프리필(_woCampaignPrefill)이 그대로 옮겨
      보여 준다(화면에 계약 해석 사본 0). 예약 아님·읽기 실패 = 키 없음(발행 폼은 「예약 정보를 못 읽었다」고 말한다).
-     ★ 붙이는 곳 = 작업오더 목록(/work-orders/list) — 발행 폼 프리필의 원본 행이 오는 곳. 작업 카드 [공고 발행]의 /work-orders 는
-       요약(제목·인원 · work_kind 없음)만 주어 예약 여부를 알 수 없다 — 그 길의 발행 폼은 종류 탭·예약 카드가 비고, 저장은 1단계 안전핀이 막는다. */
+     ★ 붙이는 곳 = 작업오더 목록(/work-orders/list) — 발행 폼 프리필의 원본 행이 오는 곳.
+     ★ 결정 414 — 작업 카드 [공고 발행]의 /work-orders 는 요약 행이라, 거기에 `work_kind` 만 싣고(아래) 화면이 예약 오더면 이 목록의 원본 행으로
+       프리필한다(같은 프리필 함수 · 같은 계약). 변환 = bookingCalendar.bookingSpecForScreen 단일 출처(공고 수정 창도 같은 함수). */
 function _bookingSpecOf(row) {
-  if (!row || !require('../utils/workKind').isBookingKind(row.work_kind)) return undefined;
-  try {
-    const { spec, blockers } = require('../utils/bookingCalendar').bookingSpecFromWorkOrder(row);
-    return spec ? { ...spec, blockers: (blockers || []).map(b => b.message) } : undefined;
-  } catch (_) { return undefined; }
+  return require('../utils/bookingCalendar').bookingSpecForScreen(row);
 }
 const _withBookingSpec = (row) => { const b = _bookingSpecOf(row); return b ? { booking_spec: b } : {}; };
 
