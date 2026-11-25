@@ -128,7 +128,7 @@ const OPT = (b = 5, w = 5, tiers = true) => ([{
 
   await ok('[2e] 블로그 체험단 — kind_no_tiers', async () => {
     const A = await setup('blog', F.SERAMO(400, F.T400), { workKind: 'blog' });
-    await rejects(A, await r1Patch(A, SERA_EDIT), { tiers: 1 }, 'kind_no_tiers', /블로그·Q&A 체험단은 구매수량 단계를 쓰지 않습니다/);
+    await rejects(A, await r1Patch(A, SERA_EDIT), { tiers: 1 }, 'kind_no_tiers', /블로그·Q&A·네이버예약리뷰 체험단은 구매수량 단계를 쓰지 않습니다/);
   });
 
   await ok('[2f] J1 — 창을 연 뒤 리뷰웹 상품 구성이 바뀜 → quantity_tiers_stale_base', async () => {

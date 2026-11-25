@@ -2581,7 +2581,7 @@ async function listWorkOrders({ sheetId, tabName, limit = 100 } = {}) {
   const lim = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 300);
   const { rows } = await db.query(
     `SELECT w.id, w.title, w.recruit_count AS "recruitCount", w.status, w.created_at AS "createdAt",
-            w.sync_version AS "syncVersion",
+            w.sync_version AS "syncVersion", COALESCE(w.work_kind, '') AS "workKind",
             -- 결정 395: 보관 공고 작업도 담당자 변경 가능(완료만 닫음 — 저장 쪽 _managerEditProtection 과 같은 기준)
             (COALESCE(w.source_review_order_id, '') <> '' AND w.status <> 'done') AS "managerEditCapable",
             l.sheet_id AS "linkSheetId", l.tab_name AS "linkTabName"
@@ -2592,7 +2592,8 @@ async function listWorkOrders({ sheetId, tabName, limit = 100 } = {}) {
       ORDER BY w.created_at DESC LIMIT $1`, [lim]);
   return rows.map(r => {
     const here = !!(sheetId && r.linkSheetId === sheetId && r.linkTabName === tabName);
-    return { id: r.id, title: r.title, recruitCount: r.recruitCount, status: r.status, createdAt: r.createdAt,
+    // ★ 결정 414 — work_kind: 작업 카드 [공고 발행]이 예약 오더인지 알고 원본 행(예약 안내 포함)으로 프리필하게(값만 · 판정 사본 없음)
+    return { id: r.id, title: r.title, recruitCount: r.recruitCount, status: r.status, createdAt: r.createdAt, work_kind: r.workKind || '',
       manager_edit_capable: !!r.managerEditCapable, manager_base_version: Number(r.syncVersion || 0),
       linkedHere: here, linkedElsewhere: !!(r.linkSheetId && !here), linkedTabName: r.linkTabName || null };
   }).sort((a, b) => (b.linkedHere ? 1 : 0) - (a.linkedHere ? 1 : 0));

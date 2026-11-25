@@ -9,7 +9,7 @@
  *  ④ 예약내역(예약번호) 없이 리뷰만 낸 줄, 리뷰 전 줄이 돈을 받는다.
  *  ⑤ 무료체험형 회차 항목이 「리뷰비만 보낸 건」(결정 292 split 모양)으로 읽혀 입금일·지급완료 없이 끝난다(결정 321·376 과 같은 함정).
  *  ⑥ 이체 파일(다운로드)에 다른 금액이 찍힌다.
- *  ⑦ 1단계 안전핀(NOT_READY_WORK_KINDS)이 풀린다 — 5단계도 운영에서 booking 을 열지 않는다.
+ *  ⑦ 준비 중 목록(NOT_READY_WORK_KINDS)이 시험 뒤 배포 그대로가 아니다(결정 414 개방 뒤 = 빈 목록).
  * ★ 작업표 접수·신청·예약내역 제출·리뷰 제출 표시·입금 대상·회차 담기·이체 파일은 PGlite(저장소 migrations 그대로)에서 실제로 돌린다.
  *   운영 DB 에 닿지 않는다(가짜 이름·가짜 매장·가짜 계좌). 신청·예약내역 처리기는 시험 안에서만 준비 중 목록을 비워 돈다.
  */
@@ -193,7 +193,7 @@ function handlerOf(router, method, p) {
   } finally {
     wk.NOT_READY_WORK_KINDS.length = 0; wk.NOT_READY_WORK_KINDS.push(...saved);
   }
-  t('★★★ 시험 뒤 1단계 안전핀 그대로(준비 중 목록에 booking)', wk.NOT_READY_WORK_KINDS.includes('booking') && wk.isWorkKindReady('booking') === false);
+  t('★★★ 시험 뒤 준비 중 목록 원상 복귀(빈 목록 = booking 개방 · 결정 414)', wk.NOT_READY_WORK_KINDS.length === 0 && wk.isWorkKindReady('booking') === true);
   t('환급형 예약내역: 작업표 결제금액 칸 = 리뷰어가 적은 금액', String((await q(`SELECT row_json->>'결제금액' AS v FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2 AND seq=$3`,
     [works.R.sheetId, works.R.tab, people['가짜초과'].rowIndex])).rows[0].v).replace(/\D/g, '') === '30000');
 

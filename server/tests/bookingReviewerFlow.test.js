@@ -10,7 +10,7 @@
  *  ⑤ 예약내역이 구매양식 길(/api/submit/order)로 들어가거나, 같은 공고에서 같은 예약번호가 두 번 들어간다.
  *  ⑥ 1단계 안전핀(저장 입구·신청 안전벨트)이 풀린다 — 3단계도 운영에서 booking 을 열지 않는다.
  * ★ 자리 묶기·만료·취소·예약번호 색인·신청/참여상세/예약내역 제출 처리기는 PGlite(저장소 migrations 그대로)에서 실제로 돌린다.
- *   운영 DB 에 닿지 않는다(가짜 이름·가짜 매장). 신청 처리기는 시험 안에서만 준비 중 목록을 비워 돈다(운영 코드는 그대로 막힘).
+ *   운영 DB 에 닿지 않는다(가짜 이름·가짜 매장). ★ 결정 414: booking 개방 — 준비 중 목록은 배포 그대로 비어 있고, 안전벨트 장치만 시험 안에서 되돌려 본다.
  */
 const assert = require('assert');
 const fs = require('fs');
@@ -241,11 +241,14 @@ function handlerOf(router, method, p) {
   await q(`INSERT INTO reviewers (name, phone, bank_name, bank_account, account_holder, address)
            VALUES ('가짜하나', '01011112222', '가짜은행', '000-0000-0001', '가짜하나', '서울 가짜구'),
                   ('가짜둘', '01033334444', '가짜은행', '000-0000-0002', '가짜둘', '서울 가짜구')`);
+  /* ★ 결정 414: booking 개방 — 신청 안전벨트 장치는 다음 종류용으로 남는다. 시험 안에서만 booking 을 준비 중으로 되돌려
+       「준비 중이면 잠금 전에 거절」을 그대로 보고(검사 의미 불변), 다시 비워 흐름을 돈다. */
+  t('★★ 배포 그대로: 준비 중 목록이 비어 있다(booking 개방)', wk.NOT_READY_WORK_KINDS.length === 0 && wk.isWorkKindReady('booking') === true);
+  wk.NOT_READY_WORK_KINDS.push('booking');
   const r0 = await call(apply, { params: { id: CAMP }, body: { name: '가짜하나', phone: '01011112222', bookingDate: T1 } });
-  t('★★★ 1단계 안전벨트 그대로: 운영 설정에서는 예약 공고 신청을 잠금 전에 거절(work_kind_not_ready)', r0.statusCode === 409 && r0.body.reason === 'work_kind_not_ready');
-  t('★★ 준비 중 목록에 booking 그대로(저장 입구 5곳·신청 안전벨트 유지)', wk.NOT_READY_WORK_KINDS.includes('booking') && wk.isWorkKindReady('booking') === false);
-  const saved = wk.NOT_READY_WORK_KINDS.slice();
-  wk.NOT_READY_WORK_KINDS.length = 0;   // ★ 시험 안에서만 — 3단계 흐름을 실제 처리기로 돌려 보기 위해(운영 코드는 그대로)
+  t('★★★ 신청 안전벨트 장치 그대로: 준비 중인 종류면 예약 공고 신청을 잠금 전에 거절(work_kind_not_ready)', r0.statusCode === 409 && r0.body.reason === 'work_kind_not_ready');
+  const saved = [];   // 배포 그대로 = 빈 목록
+  wk.NOT_READY_WORK_KINDS.length = 0;
   let appId = null, holdToken = null;
   try {
     const rNo = await call(apply, { params: { id: CAMP }, body: { name: '가짜하나', phone: '01011112222' } });
@@ -323,7 +326,7 @@ function handlerOf(router, method, p) {
   } finally {
     wk.NOT_READY_WORK_KINDS.length = 0; wk.NOT_READY_WORK_KINDS.push(...saved);
   }
-  t('★★ 시험 뒤 준비 중 목록 원상 복귀', wk.NOT_READY_WORK_KINDS.includes('booking'));
+  t('★★ 시험 뒤 준비 중 목록 원상 복귀(빈 목록)', wk.NOT_READY_WORK_KINDS.length === 0);
   tx.release();
 
   /* ── 8) 정적 계약 ─────────────────────────────────────────── */
@@ -348,7 +351,7 @@ function handlerOf(router, method, p) {
     && sb.indexOf("app.status !== 'applied' || !app.in_time") < sb.indexOf('booking_reservation_no = $2')
     && sb.indexOf('booking_reservation_no = $2') < sb.indexOf('createOrderLedgerEntry('));
   t('★ 작업표는 그 자리 줄 번호로만(sheetRow: target.rowIndex · 남의 줄 안 덮음)', /sheetRow: target\.rowIndex/.test(sb) && /requireEmptyOrSame: true/.test(sb));
-  t('★ 제출 창구도 준비 중 판정 뒤(운영에서 열린 길 없음)', /isWorkKindReady\('booking'\)/.test(sb));
+  t('★ 제출 창구도 준비 중 판정 장치를 그대로 탄다(다음에 다시 준비 중이 되면 함께 닫힌다)', /isWorkKindReady\('booking'\)/.test(sb));
   t('홀드 조회가 booking_slot_id 를 같은 왕복에 읽는다', /ca\.qna_slot_id, ca\.booking_slot_id,/.test(sub));
   t('★ 검수 격리 그대로(리뷰 업로드의 예약 탭 건너뜀)', /_isBookingUpload/.test(S('src/routes/diag.routes.js')));
 

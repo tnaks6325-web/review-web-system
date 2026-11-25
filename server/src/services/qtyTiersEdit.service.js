@@ -16,7 +16,7 @@ const REASON = Object.freeze({
   not_active: 'bidir_not_active',        // 연결 off·diverged · in2rw≠apply · 비상 스위치
   old_window: 'tiers_not_capable',       // 창이 단계 고치기를 모름(caps/bidir.tiers 없음)
   tiers_off: 'quantity_tiers_off',       // CAMPAIGN_QTY_TIERS=0
-  kind: 'kind_no_tiers',                 // 블로그·Q&A(Q1 ㉠)
+  kind: 'kind_no_tiers',                 // 블로그·Q&A·네이버예약리뷰(Q1 ㉠ · 결정 404·414)
   dual: 'dual_channel',                  // 동시진행(정규화가 이미 400 — 화면 안내용)
   delivery_mix: 'quantity_tiers_delivery_mix',   // 배송 혼합(실배송·빈박스) — 저장의 validateQuantities 가 인원 바뀐 저장을 무조건 409(quantity_delivery_mix_locked) · 같은 판정 CANON.deliveryMix
   no_campaign: 'no_campaign',            // 공고 없는 접수 오더(정책 ⑤)
@@ -36,7 +36,7 @@ function tierRejectText(code, v = {}) {
     case 'bidir_not_active': return '리뷰웹과 연결이 꺼져 있거나 맞추는 중인 오더라 구매수량 단계를 바꿀 수 없습니다.' + tail;
     case 'tiers_not_capable': return '이 수정 창은 구매수량 단계 고치기를 모르는 옛 화면입니다. 창을 닫고 다시 열어 주세요.';
     case 'quantity_tiers_off': return '지금은 구매수량 단계 기능이 꺼져 있어 바꿀 수 없습니다.' + tail;
-    case 'kind_no_tiers': return '블로그·Q&A 체험단은 구매수량 단계를 쓰지 않습니다.' + tail;
+    case 'kind_no_tiers': return '블로그·Q&A·네이버예약리뷰 체험단은 구매수량 단계를 쓰지 않습니다.' + tail;   // 결정 414 — 예약리뷰를 열며 함께 고침(404 「6단계」 메모)
     case 'dual_channel': return '동시진행(네이버+쿠팡) 상품은 구매수량 단계를 쓸 수 없습니다.' + tail;
     case 'quantity_tiers_delivery_mix': return '배송 혼합(실배송·빈박스) 작업이라 구매수량 단계를 바꿀 수 없습니다(접수 뒤 인원·상품 구성이 잠겨 있습니다). 바꿔야 하면 새 리뷰오더로 접수해 주세요.' + tail;
     case 'no_campaign': return '아직 모집공고가 없는 오더라 이 창에서는 구매수량 단계를 바꿀 수 없습니다.' + tail;
