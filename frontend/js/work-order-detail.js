@@ -454,7 +454,7 @@ function _woManagerLabel(raw) {
    (workManager 사본 규율과 같다). 여기 라벨을 고치면 서버도 함께 고쳐야 한다.
    ★ 빈 값 = 리뷰체험단(기존 동작)이고, 상세 화면에서는 **줄 자체를 안 그린다** —
      기존 오더 전부에 "리뷰체험단" 이라는 새 줄이 갑자기 생기면 화면이 달라진다. */
-const WO_KIND_LABELS = { review: '리뷰체험단', blog: '블로그체험단', qna: 'Q&A체험단', booking: '네이버예약리뷰' };
+const WO_KIND_LABELS = { review: '리뷰체험단', blog: '블로그체험단', qna: 'Q&A체험단', booking: '네이버예약리뷰', receipt: '영수증리뷰' };
 
 /** 이 오더가 블로그체험단인가 — 판정 한 곳(배지·프리필·리뷰타입 숨김이 같은 답을 본다). */
 function _woIsBlogKind(raw) {
@@ -477,15 +477,23 @@ function _woIsBookingKind(raw) {
   return v === 'booking' || /네이버\s*예약\s*리뷰|예약자\s*리뷰|예약리뷰|\bbooking\b/i.test(v);
 }
 
-/** 리뷰타입이 없는 체험단(블로그·Q&A·네이버예약리뷰)인가 — 프리필이 리뷰타입을 흘리지 않게. */
-function _woHasNoReviewType(raw) { return _woIsBlogKind(raw) || _woIsQnaKind(raw) || _woIsBookingKind(raw); }
+/** 이 오더가 영수증리뷰인가(결정 418) — 서버 `isReceiptKind` 와 같은 표기 규칙(블로그 → Q&A → 예약리뷰 다음에 본다).
+   ★ 현금영수증 글(`현금영수증 리뷰` = 상품 리뷰)을 먼저 지우고 본다 · lookbehind 금지(옛 사파리 문법 오류). */
+function _woIsReceiptKind(raw) {
+  const v = String(raw == null ? '' : raw).trim();
+  if (!v || _woIsBlogKind(v) || _woIsQnaKind(v) || _woIsBookingKind(v)) return false;
+  return v === 'receipt' || /(?:^|[^가-힣]|네이버)\s*영수증\s*(?:인증\s*)?리뷰|\breceipt\b/i.test(v.replace(/(?:현금|지출\s*증빙\s*용?)\s*영수증|\bcash[\s_-]*receipts?\b/gi, ' '));
+}
+
+/** 리뷰타입이 없는 체험단(블로그·Q&A·네이버예약리뷰·영수증리뷰)인가 — 프리필이 리뷰타입을 흘리지 않게. */
+function _woHasNoReviewType(raw) { return _woIsBlogKind(raw) || _woIsQnaKind(raw) || _woIsBookingKind(raw) || _woIsReceiptKind(raw); }
 
 /** 표시용 라벨. 빈 값이면 빈 문자열(= `_woKv` 가 줄을 버린다). */
 function _woWorkKindLabel(raw) {
   const v = String(raw == null ? '' : raw).trim();
   if (!v) return "";
   return _woIsBlogKind(v) ? WO_KIND_LABELS.blog : _woIsQnaKind(v) ? WO_KIND_LABELS.qna
-    : _woIsBookingKind(v) ? WO_KIND_LABELS.booking : WO_KIND_LABELS.review;
+    : _woIsBookingKind(v) ? WO_KIND_LABELS.booking : _woIsReceiptKind(v) ? WO_KIND_LABELS.receipt : WO_KIND_LABELS.review;
 }
 
 // 상품·옵션 요약에서 아래 개별 필드와 중복되는 값 제거:
@@ -1524,7 +1532,7 @@ function woAdvertiserLinkPicker(resp, onLink) {
     _woManagerNick: _woManagerNick, _woManagerUndecided: _woManagerUndecided,
     _woManagerLabel: _woManagerLabel,
     // 체험단 종류(099) — 배지·프리필·목록이 같은 판정을 쓴다(사본 금지)
-    WO_KIND_LABELS: WO_KIND_LABELS, _woIsBlogKind: _woIsBlogKind, _woIsQnaKind: _woIsQnaKind, _woIsBookingKind: _woIsBookingKind, _woWorkKindLabel: _woWorkKindLabel,
+    WO_KIND_LABELS: WO_KIND_LABELS, _woIsBlogKind: _woIsBlogKind, _woIsQnaKind: _woIsQnaKind, _woIsBookingKind: _woIsBookingKind, _woIsReceiptKind: _woIsReceiptKind, _woWorkKindLabel: _woWorkKindLabel,
     _woCleanProductOption: _woCleanProductOption, _woGuideUrls: _woGuideUrls, _woNormName: _woNormName,
     _INFLOW_LABEL: _INFLOW_LABEL, WO_MANAGER_MAP: WO_MANAGER_MAP,
     WO_MANAGER_UNDECIDED: WO_MANAGER_UNDECIDED,

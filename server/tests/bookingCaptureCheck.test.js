@@ -201,7 +201,7 @@ function handlerOf(router, method, p) {
   await q(`INSERT INTO reviewers (name, phone, bank_name, bank_account, account_holder, address)
            VALUES ('가짜하나', '01011112222', '가짜은행', '000-0000-0001', '가짜하나', '서울 가짜구')`);
   const wk = require('../src/utils/workKind');
-  t('★★★ 배포 그대로: booking 개방(준비 중 목록 비어 있음 · 결정 414)', wk.NOT_READY_WORK_KINDS.length === 0 && wk.isWorkKindReady('booking') === true);
+  t('★★★ 배포 그대로: booking 개방(준비 중 목록에 booking 없음 · 결정 414 · 418 영수증리뷰는 준비 중)', !wk.NOT_READY_WORK_KINDS.includes('booking') && wk.isWorkKindReady('booking') === true);
   const campaignRoutes = require('../src/routes/campaign.routes');
   const submitRoutes = require('../src/routes/submit.routes');
   const diagRoutes = require('../src/routes/diag.routes');
@@ -242,7 +242,7 @@ function handlerOf(router, method, p) {
   } finally {
     wk.NOT_READY_WORK_KINDS.length = 0; wk.NOT_READY_WORK_KINDS.push(...saved);
   }
-  t('★★ 시험 뒤 준비 중 목록 원상 복귀(빈 목록)', wk.NOT_READY_WORK_KINDS.length === 0);
+  t('★★ 시험 뒤 준비 중 목록 원상 복귀(배포 그대로)', JSON.stringify(wk.NOT_READY_WORK_KINDS) === JSON.stringify(saved) && !wk.NOT_READY_WORK_KINDS.includes('booking'));
 
   /* ── 3) 예약내역 캡처 업로드 → 자동 검사(실제 업로드 처리기) ─────── */
   console.log('\n3) 예약내역 캡처 업로드 → 자동 검사');
@@ -381,7 +381,7 @@ function handlerOf(router, method, p) {
     && upSeg.indexOf('scheduleReservationCheck(') > upSeg.indexOf("purchaseSessions[second ? 'completeCapture2' : 'completeCapture']")
     && !/await [^\n]*scheduleReservationCheck\(/.test(upSeg) && /!second && uploadCtx\.orderSource/.test(upSeg));
   t('★ 업로드 세션 조회가 주문 출처를 같은 왕복에 읽는다(추가 조회 0)', /os\.source AS "orderSource"/.test(S('src/services/purchaseSubmissionSession.service.js')));
-  t('★★ 업로드 검수(verifyCapture)의 예약 탭 건너뜀은 그대로(결정 404)', /if \(!\(\(_isQnaUpload \|\| _isBookingUpload\) && _slotRole === 'review'\)\) verdict = await verifyCapture\(\{/.test(dg));
+  t('★★ 업로드 검수(verifyCapture)의 예약 탭 건너뜀은 그대로(결정 404)', /if \(!\(\(_isQnaUpload \|\| _isBookingUpload( \|\| _isReceiptReviewUpload)?\) && _slotRole === 'review'\)\) verdict = await verifyCapture\(\{/.test(dg));   // 결정 418 영수증리뷰 추가(의미 불변)
   const isrc = S('src/services/reviewInspect.service.js');
   t('★★ 1차 필터 정책의 예약 skip 은 그대로(precheckPolicy)', /if \(workKind === 'booking'\) return skip\('booking_tab'\);/.test(isrc));
   t('★ 예약 검사 판정은 한 곳(bookingCaptureCheck) — 검수 서비스는 그것을 부른다(사본 0)', /bookingCaptureCheck\.service'\)\.judgeReview\(/.test(isrc)

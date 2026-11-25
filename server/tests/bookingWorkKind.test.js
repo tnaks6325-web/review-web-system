@@ -57,7 +57,9 @@ function legacyNormalize(raw) {
     t(`예약리뷰 표기 → booking: ${v}`, WK.normalizeWorkKind(v) === 'booking' && WK.workKindForStore(v) === 'booking' && WK.isBookingKind(v));
   }
   for (const v of ['예약', '예약구매', '사전예약', '예약 리뷰', '사전예약 리뷰체험단', '예약 구매 리뷰', '예약판매 상품 리뷰', 'rebooking', 'bookings', '리뷰체험단', '리뷰', '영수증리뷰', '방문리뷰', null, undefined, '']) {
-    t(`예약리뷰 아님 → 종전 판정: ${v}`, !WK.isBookingKind(v) && WK.normalizeWorkKind(v) === legacyNormalize(v));
+    // 결정 418 — 「영수증리뷰」는 다섯 번째 종류(receipt)가 됐다: 종전 review → receipt 만 허용(예약리뷰가 가져가지 않는다는 의미는 그대로).
+    t(`예약리뷰 아님 → 종전 판정: ${v}`, !WK.isBookingKind(v) && (WK.normalizeWorkKind(v) === legacyNormalize(v)
+      || (legacyNormalize(v) === 'review' && WK.normalizeWorkKind(v) === 'receipt' && v === '영수증리뷰')));
   }
   t('★ 블로그를 먼저 본다(블로그 표기에 예약리뷰가 섞여도 blog)', WK.normalizeWorkKind('네이버 블로그 예약리뷰') === 'blog');
   t('★ Q&A 다음에 본다(Q&A 표기에 예약리뷰가 섞여도 qna)', WK.normalizeWorkKind('Q&A 예약리뷰') === 'qna');
@@ -83,7 +85,9 @@ function legacyNormalize(raw) {
      장치(목록·판정·거절 본문·저장 입구 5곳)는 다음 새 종류를 위해 남는다 — 아래는 **시험 안에서만** booking 을 목록에 다시 넣어
      「준비 중인 종류」의 거절이 5곳 모두 아무것도 쓰기 전에 걸리는지 그대로 본다(검사 의미 불변). */
   console.log('\n2) 준비 중 장치 — 저장 입구에서 거절(아무것도 쓰지 않음 · 시험 안에서 booking 을 준비 중으로 되돌려 확인)');
-  t('★★ 배포 그대로: booking 개방(준비 중 목록 비어 있음) · 다른 종류도 연다', WK.NOT_READY_WORK_KINDS.length === 0 && WK.isWorkKindReady('booking')
+  // 결정 418 — 준비 중 목록에 영수증리뷰(receipt)가 들어갔다: 「booking 개방」은 「목록에 booking 없음」으로 본다(의미 불변).
+  const shippedNotReady = WK.NOT_READY_WORK_KINDS.slice();
+  t('★★ 배포 그대로: booking 개방(준비 중 목록에 booking 없음) · 다른 종류도 연다', !WK.NOT_READY_WORK_KINDS.includes('booking') && WK.isWorkKindReady('booking')
     && ['', null, undefined, 'review', 'blog', 'qna', '리뷰체험단', '아무거나', '네이버예약리뷰'].every(v => WK.isWorkKindReady(v)));
   WK.NOT_READY_WORK_KINDS.push('booking');   // ★ 시험 안에서만 — 아래 finally 에서 되돌린다
   t('준비 판정(준비 중인 종류): booking 만 막고 나머지는 연다', !WK.isWorkKindReady('booking') && !WK.isWorkKindReady('네이버예약리뷰')
@@ -154,9 +158,10 @@ function legacyNormalize(raw) {
     t('대조군: 블로그 공고 만들기는 이 문에 안 걸린다', !(passCreate.res.body && passCreate.res.body.code === 'work_kind_not_ready'));
   } finally {
     pool.query = origQuery; pool.connect = origConnect;
-    WK.NOT_READY_WORK_KINDS.length = 0;   // 배포 그대로(빈 목록)로 되돌림
+    WK.NOT_READY_WORK_KINDS.length = 0; WK.NOT_READY_WORK_KINDS.push(...shippedNotReady);   // 배포 그대로로 되돌림
   }
-  t('★ 시험 뒤 준비 중 목록 원상 복귀(빈 목록 = booking 개방)', WK.NOT_READY_WORK_KINDS.length === 0 && WK.isWorkKindReady('booking'));
+  t('★ 시험 뒤 준비 중 목록 원상 복귀(배포 그대로 = booking 개방)', JSON.stringify(WK.NOT_READY_WORK_KINDS) === JSON.stringify(shippedNotReady)
+    && WK.isWorkKindReady('booking'));
   const ord = S('src/routes/order.routes.js');
   t('★ 원본 수정의 거절은 종류 바꾸기(결정 332 — 작업표 삭제)보다 앞', ord.indexOf('workKindNotReadyBody(b.work_kind)', ord.indexOf('async function _intakeSourceRevisionHandler'))
     < ord.indexOf('결정 332 — 접수된 리뷰↔블로그 오더의 종류 바꾸기'));
@@ -180,14 +185,15 @@ function legacyNormalize(raw) {
     && inspect.precheckPolicy({ classified: otherShot, workKind: 'review' }).verdict === 'block');
   const isrc = S('src/services/reviewInspect.service.js');
   t('2차: 형식·상품명·본문겹침 skip 갈래에 booking 포함 · 같은 파일 검사는 갈래 밖',
-    /const _isBlogTab = exp\.workKind === 'blog' \|\| exp\.workKind === 'qna' \|\| exp\.workKind === 'booking';/.test(isrc)
-    && /reason: exp\.workKind === 'qna' \? 'qna_tab' : exp\.workKind === 'booking' \? 'booking_tab' : 'blog_tab'/.test(isrc)
+    // 결정 418 — 같은 갈래에 영수증리뷰가 더해졌다(의미 불변: booking 포함 고정)
+    /const _isBlogTab = exp\.workKind === 'blog' \|\| exp\.workKind === 'qna' \|\| exp\.workKind === 'booking'( \|\| exp\.workKind === 'receipt')?;/.test(isrc)
+    && /reason: exp\.workKind === 'qna' \? 'qna_tab' : exp\.workKind === 'booking' \? 'booking_tab' : (exp\.workKind === 'receipt' \? 'receipt_review_tab' : )?'blog_tab'/.test(isrc)
     && /checks\.duplicate = await classifyDuplicateContext\(\{\n\s*dup: await findDuplicate\(/.test(isrc));
   const dg = S('src/routes/diag.routes.js');
   t('★★ 업로드 검수: booking 탭의 리뷰 칸도 형식 판정·자동 이동·불일치 알림을 만들지 않는다',
     /_isBookingUpload = _wk\.isBookingKind\(_wkUp\);/.test(dg)
-    && /if \(!\(\(_isQnaUpload \|\| _isBookingUpload\) && _slotRole === 'review'\)\) verdict = await verifyCapture\(\{/.test(dg)
-    && /\} catch \(_\) \{ _isQnaUpload = false; _isBookingUpload = false; \}/.test(dg));
+    && /if \(!\(\(_isQnaUpload \|\| _isBookingUpload( \|\| _isReceiptReviewUpload)?\) && _slotRole === 'review'\)\) verdict = await verifyCapture\(\{/.test(dg)   // 결정 418 영수증리뷰 추가(의미 불변)
+    && /\} catch \(_\) \{ _isQnaUpload = false; _isBookingUpload = false;( _isReceiptReviewUpload = false;)? \}/.test(dg));
 
   /* ── 4) 프론트 사본 ≡ 서버 ─────────────────────────────────────── */
   console.log('\n4) 프론트 사본 ≡ 서버');
@@ -215,7 +221,8 @@ function legacyNormalize(raw) {
   const grab = (src, name) => { const i = src.indexOf('function ' + name + '('); assert(i >= 0, name); let d = 0, j = src.indexOf('{', i);
     for (; j < src.length; j++) { if (src[j] === '{') d++; else if (src[j] === '}' && --d === 0) break; } return src.slice(i, j + 1); };
   vm.runInContext(wodSrc.match(/const WO_KIND_LABELS = \{[^}]*\};/)[0].replace('const ', 'var ')
-    + grab(wodSrc, '_woIsBlogKind') + grab(wodSrc, '_woIsQnaKind') + grab(wodSrc, '_woIsBookingKind') + grab(wodSrc, '_woWorkKindLabel'), wodCtx);
+    + grab(wodSrc, '_woIsBlogKind') + grab(wodSrc, '_woIsQnaKind') + grab(wodSrc, '_woIsBookingKind') + grab(wodSrc, '_woIsReceiptKind')   // 결정 418 — 라벨 함수가 영수증리뷰 판정도 부른다(추출 대상만 더함)
+    + grab(wodSrc, '_woWorkKindLabel'), wodCtx);
   t('상세 라벨: booking → 네이버예약리뷰 · 나머지 불변', wodCtx._woWorkKindLabel('booking') === '네이버예약리뷰'
     && wodCtx._woWorkKindLabel('예약자 리뷰') === '네이버예약리뷰' && wodCtx._woWorkKindLabel('qna') === 'Q&A체험단'
     && wodCtx._woWorkKindLabel('') === '' && wodCtx._woWorkKindLabel('blog') === '블로그체험단' && wodCtx._woWorkKindLabel('review') === '리뷰체험단');
@@ -230,8 +237,8 @@ function legacyNormalize(raw) {
   t('★★ 프리필: booking·qna·blog 는 그대로, 나머지는 리뷰(빈 값)', irCtx._rfPrefillWorkKind('booking') === 'booking'
     && irCtx._rfPrefillWorkKind('qna') === 'qna' && irCtx._rfPrefillWorkKind('blog') === 'blog'
     && irCtx._rfPrefillWorkKind('review') === '' && irCtx._rfPrefillWorkKind('') === '' && irCtx._rfPrefillWorkKind(undefined) === '');
-  t('★ 발행 폼: booking 은 리뷰타입 카드를 숨기고 저장 때 비운다', /const noReviewType = isBlog \|\| _kind === "qna" \|\| _kind === "booking";/.test(ir)
-    && /if \(payload\.work_kind === "blog" \|\| payload\.work_kind === "qna" \|\| payload\.work_kind === "booking"\) \{\s*payload\.review_type = "";/.test(ir));
+  t('★ 발행 폼: booking 은 리뷰타입 카드를 숨기고 저장 때 비운다', /const noReviewType = isBlog \|\| _kind === "qna" \|\| _kind === "booking"( \|\| _kind === "receipt")?;/.test(ir)   // 결정 418 영수증리뷰 추가(의미 불변)
+    && /if \(payload\.work_kind === "blog" \|\| payload\.work_kind === "qna" \|\| payload\.work_kind === "booking"( \|\| payload\.work_kind === "receipt")?\) \{\s*payload\.review_type = "";/.test(ir));
 
   /* ── 6) 구매·배송 전제 기능 제외 · 막다른 길 ─────────────────── */
   console.log('\n6) 구매 전제 기능 제외 · 막다른 길');
@@ -239,11 +246,11 @@ function legacyNormalize(raw) {
   t('인당 구매수량 단계 복사 제외(실행 — 판정 단일 출처 copiesFor)', qtSvc.copiesFor('booking') === false && qtSvc.copiesFor('네이버예약리뷰') === false
     && qtSvc.copiesFor('qna') === false && qtSvc.copiesFor('blog') === false && qtSvc.copiesFor('review') === qtSvc.copiesFor(''));
   const sh = S('src/services/campaignShortage.service.js');
-  t('미달 연장 팝업 제외(후보 SQL 1곳 + 잠금 재확인·공고>탭 판정 includes 2곳)', /NOT IN \('blog','qna','booking'\)/.test(sh)
-    && /const NO_DAILY_CARRY_KINDS = \['blog', 'qna', 'booking'\];/.test(sh)
+  t('미달 연장 팝업 제외(후보 SQL 1곳 + 잠금 재확인·공고>탭 판정 includes 2곳)', /NOT IN \('blog','qna','booking'(,'receipt')?\)/.test(sh)   // 결정 418 영수증리뷰 추가(의미 불변)
+    && /const NO_DAILY_CARRY_KINDS = \['blog', 'qna', 'booking'(, 'receipt')?\];/.test(sh)
     && (sh.match(/NO_DAILY_CARRY_KINDS\.includes\(/g) || []).length === 2);
   t('작업보드 「＋ 블로거 추가」: booking 작업에는 안 보인다(서버가 blog 아님으로 거부하는 버튼)',
-    /\['review', 'qna', 'booking'\]\.includes\(String\(t\.workKind \|\| ''\)\)\) return false;/.test(F('workdesk.html')));
+    /\['review', 'qna', 'booking'(, 'receipt')?\]\.includes\(String\(t\.workKind \|\| ''\)\)\) return false;/.test(F('workdesk.html')));   // 결정 418 영수증리뷰 추가(의미 불변)
   t('광고주 포털 작업 종류: 네이버예약리뷰 체험단', /order\.work_kind === 'booking' \? '네이버예약리뷰 체험단'/.test(S('src/services/advertiserProjection.service.js')));
   t('동시진행 설정은 일반 리뷰 작업만 받는다(허용 목록에 booking 없음 — 종전 규칙 그대로)',
     /if \(state\.work_kind !== undefined && !\['', 'review', '리뷰'\]\.includes\(state\.work_kind\)\) fail\(/.test(S('src/services/dualChannelSettings.service.js')));

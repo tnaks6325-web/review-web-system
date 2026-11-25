@@ -205,7 +205,8 @@ for (const k of WK.WORK_KINDS) {
 // ★ Q&A체험단(2026-11-03)·네이버예약리뷰(결정 404)도 리뷰타입이 없다 — 판정은 `_woHasNoReviewType`(블로그 ∪ Q&A ∪ 예약리뷰) 한 곳. 블로그 포함을 함께 고정한다.
 t('★★ 블로그 오더는 리뷰타입을 프리필하지 않는다(별도 축 — 캡처 검수 개입 차단)',
   /review_type:\s*_woHasNoReviewType\(o\.work_kind\) \? "" : \(o\.review_type \|\| ""\)/.test(wod)
-  && /function _woHasNoReviewType\(raw\) \{ return _woIsBlogKind\(raw\) \|\| _woIsQnaKind\(raw\) \|\| _woIsBookingKind\(raw\); \}/.test(wod));
+  // 결정 418 — 영수증리뷰가 더해졌다(의미 불변: 블로그 포함 고정 그대로).
+  && /function _woHasNoReviewType\(raw\) \{ return _woIsBlogKind\(raw\) \|\| _woIsQnaKind\(raw\) \|\| _woIsBookingKind\(raw\)( \|\| _woIsReceiptKind\(raw\))?; \}/.test(wod));
 
 t('발행 프리필에 work_kind 동봉', /work_kind:\s*String\(o\.work_kind \|\| ""\)\.trim\(\)/.test(wod));
 
