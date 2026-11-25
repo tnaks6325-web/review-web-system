@@ -81,6 +81,13 @@ const ISSUE_RULES = [
     js: (c) => !!(c.author && c.author.verdict === 'warn'),
     sql: (a) => `${a}->'author'->>'verdict' = 'warn'`,
   },
+  {
+    key: 'place',
+    /* 결정 412 — 네이버예약리뷰 리뷰 캡처: 네이버 플레이스 방문자 리뷰가 아님(확신) · 다른 매장 리뷰(warn).
+       못 읽음(evidence unknown)은 유형으로 세지 않는다 — 검수 상태 「판정 불가」가 말한다. */
+    js: (c) => !!(c.place && c.place.verdict === 'warn'),
+    sql: (a) => `${a}->'place'->>'verdict' = 'warn'`,
+  },
 ];
 
 const ISSUE_KEYS = ISSUE_RULES.map(r => r.key);
