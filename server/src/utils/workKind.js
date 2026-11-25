@@ -1,7 +1,7 @@
 /**
  * workKind.js — **작업유형(체험단 종류) 판정의 단일 출처**.
  *
- * 리뷰체험단(review) / 블로그체험단(blog) / Q&A체험단(qna) / 네이버예약리뷰(booking) 는 진행 방식 자체가 다르다:
+ * 리뷰체험단(review) / 블로그체험단(blog) / Q&A체험단(qna) / 네이버예약리뷰(booking) / 영수증리뷰(receipt) 는 진행 방식 자체가 다르다:
  *   · 리뷰 : 구매일자를 미리 깔아 두고 그 날짜만큼 모집 → 결과물 = 리뷰 캡처
  *   · 블로그: 구매일자를 **미리 정할 수 없다**(모집된 사람이 생기면 그때 구매) → 결과물 = 포스팅URL
  *   · Q&A  : **구매하지 않는다** — 상품 페이지에 문의(공개/비공개)만 남긴다 → 결과물 = 문의 화면 캡처,
@@ -10,6 +10,11 @@
  *            주문번호·주소 없음. 제출 = 예약내역 캡처(구매양식 자리) → 이용 뒤 리뷰 캡처.
  *            ★ 1단계는 **알아보기만** 한다 — 2~5단계(날짜 자리표·리뷰어 화면·검수·입금)가 없는 동안에는 저장 입구가
  *              `isWorkKindReady` 로 거절한다(`NOT_READY_WORK_KINDS` · fail-closed). 그 단계가 생기면 목록에서 뺀다.
+ *   · 영수증리뷰(receipt, 결정 418): 매장을 방문(비용은 업체 부담)하고 **AE 가 붙인 영수증 한 장**으로 네이버 영수증 리뷰를 남긴다 —
+ *            택배·상품 옵션·주문번호·주소·날짜 고르기 없음. 제출 = 리뷰 캡처만 · 입금 = 리뷰비만.
+ *            ★ 1단계는 **알아보기만** 한다 — 2~5단계(영수증 묶음·리뷰어 화면·검수·입금)가 없는 동안 저장 입구가 거절한다.
+ *            ★★ 「현금영수증」(상품 리뷰 작업의 발행 안내·선택 캡처 칸 — 결정 114/115/122)과 **다른 것**이다. 표기 규칙은 현금영수증 글을
+ *              먼저 지우고 본다(`CASH_RECEIPT_WORDS`). 현금영수증 캡처 칸 키도 `receipt` 지만 그건 **캡처 칸 축**이라 이 값과 비교하지 않는다.
  *
  * ★★ 이것은 리뷰타입(포토·텍스트·구매확정·별점·혼합)과 **다른 축**이다(사용자 확정 2026-08-10).
  *   리뷰타입은 "리뷰를 어떤 형태로 쓰는가"이고 여기는 "무슨 체험단인가"다.
@@ -29,7 +34,8 @@ const WORK_KINDS = [
   { key: 'review', label: '리뷰체험단' },
   { key: 'blog',   label: '블로그체험단' },
   { key: 'qna',    label: 'Q&A체험단' },
-  { key: 'booking', label: '네이버예약리뷰' },   // 결정 404 — 영수증리뷰는 나중에 따로(지금 넣지 않는다)
+  { key: 'booking', label: '네이버예약리뷰' },   // 결정 404
+  { key: 'receipt', label: '영수증리뷰' },       // 결정 418 — 1단계: 알아보되 저장하지 않는다(NOT_READY_WORK_KINDS)
 ];
 
 const WORK_KIND_KEYS = WORK_KINDS.map(k => k.key);
@@ -47,6 +53,18 @@ const QNA_PATTERN = /q\s*[&\/]\s*a|\bqna\b|큐앤에이|문의\s*등록/i;
  *    영문은 낱말 경계(`rebooking`·`bookings` 는 아님). 인트라넷(6단계)은 코드값 `booking` 만 보낸다 — 규칙을 넓히지 않는다. */
 const BOOKING_PATTERN = /네이버\s*예약\s*리뷰|예약자\s*리뷰|예약리뷰|\bbooking\b/i;
 
+/** 영수증리뷰 표기 — `영수증리뷰` `영수증 리뷰` `영수증인증 리뷰` `네이버 영수증 리뷰` · 영문 낱말 `receipt`(결정 418).
+ *  ★ 맨 「영수증」은 잡지 않는다 — `영수증 발행`·`영수증 캡처`·`영수증 첨부` 는 상품 리뷰 작업 글에도 흔하다. 「영수증」 바로 뒤에
+ *    (띄어쓰기·「인증」만 허용) 「리뷰」가 와야 한다.
+ *  ★ 「영수증」 바로 앞이 한글이면 잡지 않는다(`현금영수증리뷰`·`간이영수증 리뷰`·`카드영수증리뷰`) — 「네이버」만 예외.
+ *    영문은 낱말 경계(`receipts`·`receipt2`·`cash_receipt`·`receipt_validation` 은 아님). 인트라넷은 코드값 `receipt` 만 보낸다 — 규칙을 넓히지 않는다.
+ *  ★ lookbehind(`(?<!…)`)를 쓰지 않는다 — 화면 사본(work-order-detail.js)이 옛 사파리에서 통째로 문법 오류가 된다. */
+const RECEIPT_PATTERN = /(?:^|[^가-힣]|네이버)\s*영수증\s*(?:인증\s*)?리뷰|\breceipt\b/i;
+
+/** ★★ 현금영수증 글 지우개 — 영수증리뷰 판정 **전에** 지운다(`현금 영수증 리뷰`·`지출증빙용 영수증 리뷰`·`cash receipt review` = 상품 리뷰).
+ *  전역(/g) 정규식이라 **replace 에만** 쓴다(.test 에 쓰면 lastIndex 때문에 같은 값에 답이 번갈아 바뀐다). */
+const CASH_RECEIPT_WORDS = /(?:현금|지출\s*증빙\s*용?)\s*영수증|\bcash[\s_-]*receipts?\b/gi;
+
 /**
  * ★★ 아직 리뷰웹이 끝까지 진행하지 못하는 종류 — **알아보되 저장하지 않는다**(결정 404 · 완화 금지).
  *   판정에서 빼 두면 `normalizeWorkKind` 가 조용히 review 로 접어 상품 리뷰 작업(구매양식·상품 리뷰 검수)이 깔린다.
@@ -55,8 +73,10 @@ const BOOKING_PATTERN = /네이버\s*예약\s*리뷰|예약자\s*리뷰|예약�
  * ★ 결정 414(2026-11-25) — 네이버예약리뷰(booking)는 2~5단계(407·409·412·411)와 접수 뒤 수정 잠금이 다 생겨 뺐다(개방).
  *   목록·판정(`isWorkKindReady`)·거절 본문은 **다음 새 종류(영수증리뷰 등)를 위해 그대로 둔다** — 빈 목록 = 모두 준비됨.
  *   새 종류를 판정에 넣을 때는 여기에 먼저 넣고 시작한다(결정 404 와 같은 순서).
+ * ★★ 결정 418(2026-11-25) — 영수증리뷰(receipt) 1단계: 판정만 넣고 여기 둔다. 2~5단계(영수증 묶음·리뷰어 화면·검수·입금)와
+ *   접수 뒤 잠금이 **모두** 생긴 뒤(6단계 개방)에만 뺀다 — 하나만 생겼다고 빼지 않는다(완화 금지).
  */
-const NOT_READY_WORK_KINDS = [];
+const NOT_READY_WORK_KINDS = ['receipt'];
 
 /** key → label. 모르는 key 는 빈 문자열. */
 function workKindLabel(key) {
@@ -71,14 +91,14 @@ function workKindLabel(key) {
  *   · 인트라넷 폼   : `블로그체험단` `리뷰체험단` `Q&A체험단`
  *   · 코드값        : `blog` `review` `qna`
  *   · 사람이 적은 값: `블로그` `블로그 체험단` `네이버 블로그` / `Q&A` `Q/A 등록` `QnA` `문의등록`
- *                     / `네이버예약리뷰` `예약자 리뷰` `예약리뷰`
+ *                     / `네이버예약리뷰` `예약자 리뷰` `예약리뷰` / `영수증리뷰` `영수증 인증 리뷰`
  *
  * ★ 어느 쪽으로도 안 읽히면 **`'review'`**(기본) — 여기서 null 을 돌려주면 호출부마다
  *   "모를 때 무엇으로 볼지"를 다시 정하게 되고 그 판단이 갈린다.
  * ★ 블로그를 먼저 본다 — 블로그 판정은 Q&A 이전부터 있던 규칙이라 그 답이 바뀌면 안 된다.
  *   Q&A 는 **확실한 표기만** 잡는다(`qa` 처럼 짧은 낱말은 다른 글자에 섞여 오탐한다).
  *
- * @returns {'review'|'blog'|'qna'|'booking'}
+ * @returns {'review'|'blog'|'qna'|'booking'|'receipt'}
  */
 function normalizeWorkKind(raw) {
   const s = String(raw == null ? '' : raw).trim();
@@ -91,6 +111,9 @@ function normalizeWorkKind(raw) {
   if (QNA_PATTERN.test(s)) return 'qna';
   // ★ 네이버예약리뷰는 맨 뒤(결정 404) — 블로그·Q&A 답은 그대로 두고, 「모르면 리뷰」로 떨어지던 표기에서만 가져온다.
   if (BOOKING_PATTERN.test(s)) return 'booking';
+  // ★ 영수증리뷰는 그다음(결정 418) — 앞 넷의 답은 그대로 두고 「모르면 리뷰」로 떨어지던 표기에서만 가져온다.
+  //   ★★ 현금영수증 글을 먼저 지운다 — `현금영수증 리뷰`는 상품 리뷰다(결정 114/115/122 의 다른 기능).
+  if (RECEIPT_PATTERN.test(s.replace(CASH_RECEIPT_WORDS, ' '))) return 'receipt';
   return DEFAULT_WORK_KIND;
 }
 
@@ -109,8 +132,14 @@ function isBookingKind(raw) {
   return normalizeWorkKind(raw) === 'booking';
 }
 
+/** 영수증리뷰인가 — 택배·상품 옵션·리뷰타입·날짜 고르기가 없는 매장 방문 작업(결정 418). 모르면 false(= 종전 경로).
+ *  ★ 현금영수증(캡처 칸·발행 안내)과 무관 — 그 판정은 `captureSlots`(칸 설정·진행방식·공고 설정)이 하고 이 값을 보지 않는다. */
+function isReceiptKind(raw) {
+  return normalizeWorkKind(raw) === 'receipt';
+}
+
 /**
- * 이 종류를 지금 저장해도 되나 — 빈 값·리뷰·블로그·Q&A·모르는 값 = true(종전 그대로), `NOT_READY_WORK_KINDS` = false.
+ * 이 종류를 지금 저장해도 되나 — 빈 값·리뷰·블로그·Q&A·예약리뷰·모르는 값 = true(종전 그대로), `NOT_READY_WORK_KINDS`(지금 영수증리뷰) = false.
  * ★ 저장 입구는 **아무것도 쓰기 전에** 이것을 본다(결정 404 · fail-closed).
  */
 function isWorkKindReady(raw) {
@@ -142,7 +171,7 @@ function workKindNotReadyBody(raw) {
  * @param {object} p
  * @param {string} [p.campaignKind]  recruit_campaigns.work_kind
  * @param {string} [p.tabKind]       tab_configs.work_kind
- * @returns {'review'|'blog'|'qna'|'booking'}
+ * @returns {'review'|'blog'|'qna'|'booking'|'receipt'}
  */
 function resolveWorkKind({ campaignKind, tabKind } = {}) {
   const camp = String(campaignKind == null ? '' : campaignKind).trim();
@@ -162,7 +191,7 @@ function resolveWorkKind({ campaignKind, tabKind } = {}) {
  *   없게 되고, blank-only 전파(`COALESCE(NULLIF(...))`)가 통째로 무력화된다.
  *   판정에서는 어차피 빈 값 = review 라 동작은 같고, 원장만 정직해진다.
  *
- * @returns {''|'review'|'blog'|'qna'|'booking'}
+ * @returns {''|'review'|'blog'|'qna'|'booking'|'receipt'}
  */
 function workKindForStore(raw) {
   const s = String(raw == null ? '' : raw).trim();
@@ -172,6 +201,6 @@ function workKindForStore(raw) {
 
 module.exports = {
   WORK_KINDS, WORK_KIND_KEYS, WORK_KIND_LABELS, DEFAULT_WORK_KIND, NOT_READY_WORK_KINDS,
-  workKindLabel, normalizeWorkKind, isBlogKind, isQnaKind, isBookingKind, resolveWorkKind, workKindForStore,
+  workKindLabel, normalizeWorkKind, isBlogKind, isQnaKind, isBookingKind, isReceiptKind, resolveWorkKind, workKindForStore,
   isWorkKindReady, workKindNotReadyBody,
 };

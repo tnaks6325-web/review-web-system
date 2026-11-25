@@ -54,8 +54,8 @@ const plan = read('src/services/campaignPlan.service.js');
 ok('savePlans 훅은 미전달이면 무동작(종전 동작)', /if \(opts && typeof opts\.afterLock === 'function'\)/.test(plan) && /if \(opts && typeof opts\.beforeCommit === 'function'\) await opts\.beforeCommit\(client\)/.test(plan)
   && plan.indexOf('opts.beforeCommit(client)') < plan.indexOf("await client.query('COMMIT');\n    // 작업표 원본"));
 // 결정 404 — 네이버예약리뷰 추가(패턴 갱신 · 블로그·Q&A 포함은 그대로 고정 + 예약리뷰 포함까지 고정 = 강화)
-ok('블로그·Q&A·네이버예약리뷰 공고 제외', /COALESCE\(rc\.work_kind,''\) NOT IN \('blog','qna','booking'\)/.test(src)
-  && /const NO_DAILY_CARRY_KINDS = \['blog', 'qna', 'booking'\];/.test(src)
+ok('블로그·Q&A·네이버예약리뷰·영수증리뷰 공고 제외', /COALESCE\(rc\.work_kind,''\) NOT IN \('blog','qna','booking','receipt'\)/.test(src)   // 결정 418 영수증리뷰 포함까지 고정(강화)
+  && /const NO_DAILY_CARRY_KINDS = \['blog', 'qna', 'booking', 'receipt'\];/.test(src)
   && (src.match(/NO_DAILY_CARRY_KINDS\.includes\(/g) || []).length === 2);
 ok('시트 일정 기능이 켜지면 시트 연결 공고는 묻지 않음(실패와 일정 없음을 구분할 수 없음)', /scheduleUnknown\(c\) \|\|/.test(src) && /schMap === null \|\| !st\.isUsableSchedule\(scheduleFor\(schMap, c\)\)/.test(src));
 ok('잠근 순간 오늘 다시 열 수 있는지 재확인', /const again = _canRaiseToday\(camp, stNow, lockNow\)/.test(src));

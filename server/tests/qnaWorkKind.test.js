@@ -57,8 +57,8 @@ t('블로그 안전핀은 그대로(blog_tab)', inspect.precheckPolicy({ classif
 t('미지정은 종전 경로(Q&A·블로그 skip 아님)', !['qna_tab', 'blog_tab'].includes(inspect.precheckPolicy({ classified: otherShot, workKind: null }).code));
 const isrc = S('src/services/reviewInspect.service.js');
 // 결정 404 — 같은 갈래에 네이버예약리뷰가 더해졌다(패턴만 갱신 · 의미 불변: qna·blog 포함과 qna_tab 사유를 그대로 고정).
-t('2차: 형식·상품명·본문겹침 skip 갈래에 qna 포함', /const _isBlogTab = exp\.workKind === 'blog' \|\| exp\.workKind === 'qna'( \|\| exp\.workKind === 'booking')?;/.test(isrc)
-  && /reason: exp\.workKind === 'qna' \? 'qna_tab' : (exp\.workKind === 'booking' \? 'booking_tab' : )?'blog_tab'/.test(isrc));
+t('2차: 형식·상품명·본문겹침 skip 갈래에 qna 포함', /const _isBlogTab = exp\.workKind === 'blog' \|\| exp\.workKind === 'qna'( \|\| exp\.workKind === 'booking')?( \|\| exp\.workKind === 'receipt')?;/.test(isrc)
+  && /reason: exp\.workKind === 'qna' \? 'qna_tab' : (exp\.workKind === 'booking' \? 'booking_tab' : )?(exp\.workKind === 'receipt' \? 'receipt_review_tab' : )?'blog_tab'/.test(isrc));
 
 /* ── 3) 프론트 사본 ≡ 서버 ─────────────────────────────────────── */
 console.log('\n3) 프론트 사본 ≡ 서버');
@@ -85,7 +85,8 @@ const grab = (src, name) => { const i = src.indexOf('function ' + name + '('); a
   for (; j < src.length; j++) { if (src[j] === '{') d++; else if (src[j] === '}' && --d === 0) break; } return src.slice(i, j + 1); };
 vm.runInContext(wodSrc.match(/const WO_KIND_LABELS = \{[^}]*\};/)[0].replace('const ', 'var ')
   // 결정 404 — 라벨 함수가 예약리뷰 판정도 부르므로 함께 꺼낸다(의미 불변: 아래 기대값 그대로)
-  + grab(wodSrc, '_woIsBlogKind') + grab(wodSrc, '_woIsQnaKind') + grab(wodSrc, '_woIsBookingKind') + grab(wodSrc, '_woWorkKindLabel'), wodCtx);
+  + grab(wodSrc, '_woIsBlogKind') + grab(wodSrc, '_woIsQnaKind') + grab(wodSrc, '_woIsBookingKind') + grab(wodSrc, '_woIsReceiptKind')   // 결정 418 — 라벨 함수가 영수증리뷰 판정도 부른다(추출 대상만 더함)
+  + grab(wodSrc, '_woWorkKindLabel'), wodCtx);
 t('상세 라벨: qna → Q&A체험단 · 빈 값 → 줄 없음 · 블로그 불변', wodCtx._woWorkKindLabel('qna') === 'Q&A체험단'
   && wodCtx._woWorkKindLabel('') === '' && wodCtx._woWorkKindLabel('blog') === '블로그체험단' && wodCtx._woWorkKindLabel('review') === '리뷰체험단');
 
@@ -108,10 +109,10 @@ const cr = S('src/routes/campaign.routes.js').split(String.fromCharCode(0)).join
 const qtSrc = S('src/services/campaignQtyTiers.service.js');
 const qtSvc = require('../src/services/campaignQtyTiers.service');
 t('인당 구매수량 단계 복사 제외', /if \(campaignQtyTiers\.copiesFor\(work_kind\)\)/.test(cr)
-  && /return enabled\(\) && !\['blog', 'qna'(, 'booking')?\]\.includes\(workKindForStore\(workKind\)\);/.test(qtSrc)   // 결정 404 예약리뷰 추가(의미 불변)
+  && /return enabled\(\) && !\['blog', 'qna'(, 'booking')?(, 'receipt')?\]\.includes\(workKindForStore\(workKind\)\);/.test(qtSrc)   // 결정 404 예약리뷰·418 영수증리뷰 추가(의미 불변)
   && qtSvc.copiesFor('qna') === false && qtSvc.copiesFor('blog') === false);
 const sh = S('src/services/campaignShortage.service.js');
-t('미달 연장 팝업 제외(후보 SQL 1곳 + 잠금 재확인·공고>탭 판정 includes 2곳)', /NOT IN \('blog','qna'(,'booking')?\)/.test(sh)   // 결정 404 예약리뷰 추가(의미 불변)
+t('미달 연장 팝업 제외(후보 SQL 1곳 + 잠금 재확인·공고>탭 판정 includes 2곳)', /NOT IN \('blog','qna'(,'booking')?(,'receipt')?\)/.test(sh)   // 결정 404 예약리뷰·418 영수증리뷰 추가(의미 불변)
   && (sh.match(/NO_DAILY_CARRY_KINDS\.includes\(/g) || []).length === 2);
 
 /* ── 6) 코드 검토가 짚은 막다른 길·새는 자리 ─────────────────── */
@@ -120,15 +121,16 @@ const dg = S('src/routes/diag.routes.js');
 t('★★ 업로드 검수: qna 탭의 리뷰 칸은 형식 판정·자동 이동·불일치 알림을 만들지 않는다',
   /const _wk = require\('\.\.\/utils\/workKind'\);/.test(dg) && /_isQnaUpload = _wk\.isQnaKind\(_wkUp\);/.test(dg)
   // 결정 404 — 같은 격리에 네이버예약리뷰가 더해져 조건·실패 처리 글자가 바뀌었다(의미 불변: qna 리뷰 칸 건너뜀 · 실패 = false).
-  && /if \(!\(\(_isQnaUpload \|\| _isBookingUpload\) && _slotRole === 'review'\)\) verdict = await verifyCapture\(\{/.test(dg)
-  && /\} catch \(_\) \{ _isQnaUpload = false; _isBookingUpload = false; \}/.test(dg));
+  // 결정 418 — 영수증리뷰가 더해졌다(의미 불변: qna 리뷰 칸 건너뜀 · 실패 = false).
+  && /if \(!\(\(_isQnaUpload \|\| _isBookingUpload( \|\| _isReceiptReviewUpload)?\) && _slotRole === 'review'\)\) verdict = await verifyCapture\(\{/.test(dg)
+  && /\} catch \(_\) \{ _isQnaUpload = false; _isBookingUpload = false;( _isReceiptReviewUpload = false;)? \}/.test(dg));
 t('작업보드 「＋ 블로거 추가」: qna 작업에는 안 보인다(서버가 거부하는 버튼)',
-  /\['review', 'qna'(, 'booking')?\]\.includes\(String\(t\.workKind \|\| ''\)\)\) return false;/.test(F('workdesk.html')));   // 결정 404 예약리뷰 추가(의미 불변)
+  /\['review', 'qna'(, 'booking')?(, 'receipt')?\]\.includes\(String\(t\.workKind \|\| ''\)\)\) return false;/.test(F('workdesk.html')));   // 결정 404 예약리뷰·418 영수증리뷰 추가(의미 불변)
 // 결정 404 — 같은 조건에 네이버예약리뷰가 더해졌다(패턴만 갱신 · 의미 불변: qna·blog 를 그대로 고정).
-t('★ 발행 폼: qna 는 리뷰타입 카드를 숨기고 저장 때 비운다', /const noReviewType = isBlog \|\| _kind === "qna"( \|\| _kind === "booking")?;/.test(ir)
+t('★ 발행 폼: qna 는 리뷰타입 카드를 숨기고 저장 때 비운다', /const noReviewType = isBlog \|\| _kind === "qna"( \|\| _kind === "booking")?( \|\| _kind === "receipt")?;/.test(ir)
   && /row\.style\.display = noReviewType \? "none" : ""/.test(ir)
-  && /if \(payload\.work_kind === "blog" \|\| payload\.work_kind === "qna"( \|\| payload\.work_kind === "booking")?\) \{\s*payload\.review_type = "";/.test(ir));
+  && /if \(payload\.work_kind === "blog" \|\| payload\.work_kind === "qna"( \|\| payload\.work_kind === "booking")?( \|\| payload\.work_kind === "receipt")?\) \{\s*payload\.review_type = "";/.test(ir));
 t('발행 폼 종류 탭: qna 를 리뷰로 켜지 않는다', /t\.dataset\.kind === \(_kind \|\| "review"\)/.test(ir));
-t('광고주 포털 작업 종류: Q&A 체험단', /order\.work_kind === 'qna' \? 'Q&A 체험단' : (order\.work_kind === 'booking' \? '네이버예약리뷰 체험단' : )?'리뷰 체험단'/.test(S('src/services/advertiserProjection.service.js')));
+t('광고주 포털 작업 종류: Q&A 체험단', /order\.work_kind === 'qna' \? 'Q&A 체험단' : (order\.work_kind === 'booking' \? '네이버예약리뷰 체험단' : )?(order\.work_kind === 'receipt' \? '영수증리뷰 체험단' : )?'리뷰 체험단'/.test(S('src/services/advertiserProjection.service.js')));
 
 console.log(`\n✅ ${pass}개 통과\n`);

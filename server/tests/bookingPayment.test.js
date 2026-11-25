@@ -193,7 +193,9 @@ function handlerOf(router, method, p) {
   } finally {
     wk.NOT_READY_WORK_KINDS.length = 0; wk.NOT_READY_WORK_KINDS.push(...saved);
   }
-  t('★★★ 시험 뒤 준비 중 목록 원상 복귀(빈 목록 = booking 개방 · 결정 414)', wk.NOT_READY_WORK_KINDS.length === 0 && wk.isWorkKindReady('booking') === true);
+  // 결정 418 — 준비 중 목록에 영수증리뷰(receipt)가 들어갔다: 「배포 그대로」 = 시험 전 목록과 같음 + booking 없음(의미 불변)
+  t('★★★ 시험 뒤 준비 중 목록 원상 복귀(배포 그대로 = booking 개방 · 결정 414)', JSON.stringify(wk.NOT_READY_WORK_KINDS) === JSON.stringify(saved)
+    && !wk.NOT_READY_WORK_KINDS.includes('booking') && wk.isWorkKindReady('booking') === true);
   t('환급형 예약내역: 작업표 결제금액 칸 = 리뷰어가 적은 금액', String((await q(`SELECT row_json->>'결제금액' AS v FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2 AND seq=$3`,
     [works.R.sheetId, works.R.tab, people['가짜초과'].rowIndex])).rows[0].v).replace(/\D/g, '') === '30000');
 
