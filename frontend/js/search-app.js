@@ -2878,7 +2878,7 @@ function renderResults(results) {
         <div class="result-avatar"></div>
         <div class="result-body">${productHtml}</div>
         <div class="result-right">
-          <span class="status-badge status-pending">${receiptPending ? '현금영수증 미제출' : '미제출'}</span>
+          ${typeof _dlChipHtml === "function" ? _dlChipHtml(item) : ""}<span class="status-badge status-pending">${receiptPending ? '현금영수증 미제출' : '미제출'}</span>
           <i class="fas fa-chevron-right result-chevron"></i>
         </div>`;
       card.addEventListener("click", () => openSubmitMulti(items));
@@ -2906,7 +2906,7 @@ function renderResults(results) {
         return `<div class="result-group-item">
           <i class="fas fa-box" style="color:var(--p);font-size:.72rem;flex-shrink:0"></i>
           <span class="result-group-item-label">${escHtml(taskLabel)}${escHtml(roundTxt)}</span>
-          <span class="result-group-item-badge">미제출</span>
+          ${typeof _dlChipHtml === "function" ? _dlChipHtml(item) : ""}<span class="result-group-item-badge">미제출</span>
         </div>`;
       }).join("");
 
@@ -2927,6 +2927,37 @@ function renderResults(results) {
   });
 
   show(section);
+}
+
+/* ★ 결정 422 — 네이버예약리뷰 리뷰 마감 날·전날 안내(「오늘 마감」/「내일 마감」).
+   글자·날짜 판정은 서버(search.service → bookingSlots.reviewerDeadlineView · 서버 KST) 한 곳 — 화면은 받은 글자를 그리기만 한다.
+   ★ 표시만 — 마감이 지나도 제출은 그대로 열린다(사용자 확정 2026-11-25). 글자가 없으면(일반 리뷰·옛 서버) 아무것도 그리지 않는다. */
+function _dlChipHtml(item) {
+  const n = item && item.reviewDeadlineNotice;
+  if (!n || (item && item.isSubmitted)) return "";
+  return `<span class="dl-chip${item.reviewDeadlineState === "today" ? " today" : ""}">${escHtml(n)}</span>`;
+}
+/** 제출 화면 맨 위 한 줄 — 「[오늘 마감] 리뷰 마감 11/25 (수)」. 홈 카드에서 넘겨받은 서버 글자 그대로(휴대폰 시계로 다시 세지 않는다).
+ *  여러 건을 함께 낼 때는 안내가 있는 건만 작업 이름과 함께. 안내가 하나도 없으면 아무것도 그리지 않는다(종전 화면). */
+function _renderDeadlineNotice(items) {
+  const old = document.getElementById("submitDeadlineNotice");
+  if (old) old.remove();
+  const step1 = document.getElementById("step1");
+  const list = (Array.isArray(items) ? items : []).filter(it => it && it.reviewDeadlineNotice && !it.isSubmitted);
+  if (!step1 || !list.length) return;
+  const md = (ymd) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || "")); if (!m) return "";
+    return (+m[2]) + "/" + (+m[3]) + " (" + "일월화수목금토"[new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay()] + ")";
+  };
+  const box = document.createElement("div");
+  box.id = "submitDeadlineNotice";
+  box.className = "dl-notice";
+  box.innerHTML = list.map(it => {
+    const d = md(it.reviewDeadline);
+    const who = items.length > 1 ? ` <span class="dl-who">· ${escHtml(it.tcDisplayName || it.productName || "")}</span>` : "";
+    return `<div class="dl-line">${_dlChipHtml(it)}<span>리뷰 마감${d ? " <b>" + escHtml(d) + "</b>" : ""}</span>${who}</div>`;
+  }).join("");
+  step1.insertBefore(box, step1.firstChild);
 }
 
 /* ── 리뷰 제출 화면 (다건 통합) ── */
@@ -3001,6 +3032,8 @@ function openSubmitMulti(items) {
 
   // STEP1: 다건 정보 확인 그리드 렌더
   _renderMultiInfoGrid(items);
+  // ★ 결정 422 — 네이버예약리뷰 리뷰 마감 날·전날이면 STEP1 맨 위에 「오늘 마감」/「내일 마감」 한 줄(표시만 · 맨 앞에 끼워 넣어 순서 무관)
+  if (typeof _renderDeadlineNotice === "function") _renderDeadlineNotice(items);
 
   // STEP2: 다건 이미지 슬롯 렌더
   _renderMultiImageSlots(items);

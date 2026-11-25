@@ -635,6 +635,8 @@
   .visit{font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;background:#dbeafe;color:#1d4ed8}
   /* 총건수 초과 줄(2026-08-24) — 연한 배경으로 식별만. 셀에 담당자가 칠한 인라인 배경은 그대로 이긴다. */
   .govb{font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;background:#fee2e2;color:#b91c1c}
+  /* 결정 422 — 네이버예약리뷰 「마감 지남」(리뷰마감일 칸 · 화면 글자만 — 칸 값·복사·내려받기는 날짜 그대로) */
+  td.gbkover::after{content:'마감 지남';display:inline-block;margin-left:6px;font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;background:#fee2e2;color:#b91c1c;vertical-align:1px}
   tr.gover>td{background:#fff5f5}
   tr.gover>td:first-child{box-shadow:3px 0 0 #ef4444 inset}
   .visit.v2{background:#fef3c7;color:#b45309}
@@ -7216,6 +7218,18 @@ function _bkCheckBadge(r){
   if(c.status==='match') return ` <span class="src" style="background:#ECFDF5;color:#047857" title="${why}">✓ 예약내역 일치</span>`;
   return '';
 }
+/* ── 결정 422 — 네이버예약리뷰 「마감 지남」(내부 작업보드만 · 표시만 — 리뷰어는 마감 뒤에도 그대로 낸다) ──
+   ★ 판정은 서버 한 곳(`bookingReviewOverdue` = 사람이 든 줄 · 리뷰 아직 · 자리표 리뷰마감일 < 오늘 KST) — 화면은 받은 표시를 그리기만 한다.
+   ★ 글자는 CSS(td.gbkover::after) — 칸 값·복사(data-val)·내려받기·정렬·표 검색은 날짜 그대로(결정 385 의 화면 글자와 같은 규율). */
+function _bkOverdueCls(r,h){ return (r&&r.bookingReviewOverdue===true&&h==='리뷰마감일')?' gbkover':''; }
+/* 자동 열 너비에 「마감 지남」 자리를 더한다(안 더하면 글자가 칸 밖으로 잘린다). */
+function _bkOverduePad(r,h){ return _bkOverdueCls(r,h)?64:0; }
+/* 표 위 막대 — 서버가 센 건수(예약 작업 내부 화면에만 온다 · 0·없음 = 그리지 않는다). */
+function _bkOverdueBar(wd){
+  const n=Number(wd&&wd.bookingReviewOverdue);
+  if(!Number.isFinite(n)||n<=0) return '';
+  return `<span class="gsmsg show bkover" title="${esc('리뷰마감일이 지났는데 리뷰가 아직 없는 줄입니다(리뷰마감일 칸에 「마감 지남」). 막지 않고 표시만 합니다 — 리뷰어는 지금도 리뷰를 낼 수 있고, 내면 입금도 그대로입니다.')}">⏰ 리뷰 마감 지남 <b>${n}</b>명</span>`;
+}
 /* 시트 그리드는 이름 칸이 좁아 이름 뒤 배지가 잘린다 — 다름(🚩)·확인 못 함(❔)은 이름 **앞**에 표시(일치는 미리보기 줄로 충분). */
 function _bkCheckMark(r){
   const c=r&&r.bookingCheck; if(!c) return '';
@@ -9383,7 +9397,7 @@ const _GRID_WIDTH_KEY='wd_grid_column_widths_v1',_GRID_WIDTH_MIN=52,_GRID_WIDTH_
 let _gridMeasureCtx=null; const _gridMeasureCache=new Map();
 // 컬럼 폭 = 헤더와 전체 작업보드에서 가장 긴 표시값. 필터/정렬은 폭을 바꾸지 않는다.
 function _gridTextPx(value,font){ const text=String(value==null?'':value).replace(/\s+/g,' '),key=font+'\\0'+text; if(_gridMeasureCache.has(key))return _gridMeasureCache.get(key); let width=0; try{if(!_gridMeasureCtx&&typeof document!=='undefined')_gridMeasureCtx=document.createElement('canvas').getContext('2d');if(_gridMeasureCtx){_gridMeasureCtx.font=font;width=_gridMeasureCtx.measureText(text).width;}}catch(_){} if(!width)width=[...text].reduce((sum,ch)=>sum+(ch.charCodeAt(0)>255?12:7.2),0);_gridMeasureCache.set(key,width);return width;}
-function _gridAutoColumnWidths(wd,cols){const widths=new Map(),rows=Array.isArray(wd&&wd.roster)?wd.roster:[];(cols||[]).forEach(c=>{const h=c.key;let widest=_gridTextPx(_colLabel(h),_GRID_HEAD_FONT)+_GRID_HEAD_PAD;rows.forEach(r=>{widest=Math.max(widest,_gridTextPx(gCellDisp(r,h),_GRID_BODY_FONT)+_GRID_CELL_PAD);});widths.set(h,Math.ceil(widest));});return widths;}
+function _gridAutoColumnWidths(wd,cols){const widths=new Map(),rows=Array.isArray(wd&&wd.roster)?wd.roster:[];(cols||[]).forEach(c=>{const h=c.key;let widest=_gridTextPx(_colLabel(h),_GRID_HEAD_FONT)+_GRID_HEAD_PAD;rows.forEach(r=>{widest=Math.max(widest,_gridTextPx(gCellDisp(r,h),_GRID_BODY_FONT)+_GRID_CELL_PAD+(typeof _bkOverduePad==='function'?_bkOverduePad(r,h):0));});widths.set(h,Math.ceil(widest));});return widths;}
 function _gridWidthClamp(value){const n=Math.round(Number(value));return Number.isFinite(n)?Math.max(_GRID_WIDTH_MIN,Math.min(_GRID_WIDTH_MAX,n)):null;}
 function _gridWidthScope(){const t=STATE.cur;if(!t)return '';return [STATE.role||'',STATE.name||'',t.sheetId||'',t.tabName||''].map(v=>encodeURIComponent(String(v))).join('|');}
 function _gridWidthStore(){try{const parsed=JSON.parse(localStorage.getItem(_GRID_WIDTH_KEY)||'{}');return parsed&&typeof parsed==='object'&&!Array.isArray(parsed)?parsed:{};}catch(_){return {};}}
@@ -9859,7 +9873,7 @@ function buildGrid(wd){
         const editv= ed?disp:_gridEditVal(h, raw);
         const ok=(_workdeskStatusKind(h)&&disp)?' gok':'';
         const ctr=_isCtrCol(h)?' gctr':'';   // 시트 날짜/연락처 열 가운데 정렬
-        tds+=eCell('col:'+h, disp, ed, ok+ctr, i, editv, hasHist); }
+        tds+=eCell('col:'+h, disp, ed, ok+ctr+(typeof _bkOverdueCls==='function'?_bkOverdueCls(r,h):''), i, editv, hasHist); }   // 결정 422 — 리뷰마감일 칸 「마감 지남」
     });
     // data-p8/data-nm = 리뷰어 로그 딥링크가 이 행을 찾아 강조하는 키(표시에는 영향 없음)
     // data-rid = 행 식별자(업체 뷰어의 리뷰 미리보기 선택 키) — 셀에만 있던 것을 행에도 올려 tr 단위로 잡는다.
@@ -9910,6 +9924,7 @@ function buildGrid(wd){
       </div>
       <button class="btn xs grid-export" type="button" title="현재 보이는 열과 필터·정렬된 행을 XLSX로 저장합니다" onclick="downloadWorkdeskXlsx()"><i class="fas fa-download"></i> 내려받기</button>
       <span class="gsmsg" id="gsMsg"></span>
+      ${typeof _bkOverdueBar==='function'?_bkOverdueBar(wd):''}
       ${nSel?`<span class="gselact"><b>${nSel}개 열 선택</b><button class="btn xs pri" onclick="hideSelectedCols()">숨기기</button><button class="btn xs" onclick="clearColSel()">취소</button></span>`:''}
       <label>고정 열</label><select id="fzsel" onchange="setFreeze(this.value)">${fzOpts}</select>
       <label>행 그룹</label><select id="grpsel" onchange="setGGroup(this.value)">${grpOpts}</select>
