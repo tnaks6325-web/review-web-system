@@ -165,7 +165,12 @@ router.post('/review', async (req, res, next) => {
       });
     }
 
-    const submitValue = value || '제출';
+    /* ★★ 결정 415 — 리뷰제출 칸에 쓰는 제출 시각은 **서버가 KST 로 정한다**(결정 248 구매일자와 같은 규율).
+       화면이 보내는 `value`(리뷰어 휴대폰 시계로 만든 `M/D HH:MM`)는 칸에 쓰지 않는다 — 시계·시간대가 틀린 기기는
+       다른 날짜·시각을 찍었다. 필드는 계속 받는다(옛 화면·새 화면 모두 그대로 보낸다 · 새 화면+옛 서버도 시각이 남게).
+       값은 완료 트랜잭션 안에서 결정 375 의 식 한 벌(`sheetlessStatus.submitTimeValue` = SUBMIT_TIME_SQL)로 만든다 —
+       같은 트랜잭션의 completed_at·updated_at 과 같은 순간이다. 부분 제출(칸을 쓰지 않음)이면 빈 값. */
+    let submitValue = '';
 
     // ★ 체험단 종류 — memo 열 우선순위와 무시트 기록 대상이 갈린다.
     //   조회 실패·미등록 탭은 null → `isBlogKind(null)=false` = 리뷰체험단 경로(종전 동작).
@@ -290,6 +295,9 @@ router.post('/review', async (req, res, next) => {
         // Cell, attachment completion and both flags commit together. Uploads remain
         // staged on failure so the reviewer can retry without uploading again.
         try {
+          // 결정 415: 시각은 서버 KST — 만들지 못하면 기본값('제출')으로 접지 않고 실패(결정 375 ③ · 재시도 안내).
+          submitValue = await require('../services/sheetlessStatus.service').submitTimeValue(completionClient);
+          if (!submitValue) throw new Error('submit_time_unavailable');
           const st = await require('../services/sheetlessStatus.service')
             .markStatusCell({ sheetId, tabName, rowIndex, kind: 'submit', value: submitValue, by: 'review-submit', client: completionClient });
           if(st.handled && !st.ok) throw new Error(st.reason||'write_failed');
