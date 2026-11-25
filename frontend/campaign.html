@@ -517,7 +517,66 @@ function _sheetLeave(url){
 }
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.style.display='block';
   clearTimeout(t._h); t._h=setTimeout(()=>t.style.display='none', 3200); }
-function show(view){ ['vLoading','vPre','vMissing','vJoined','vExpired','vDone','vBlogPending','vBlogRejected','vReconnect'].forEach(v=>$(v).style.display = v===view?'':'none'); }
+function show(view){ ['vLoading','vPre','vMissing','vJoined','vExpired','vDone','vBlogPending','vBlogRejected','vReconnect'].forEach(v=>$(v).style.display = v===view?'':'none');
+  try{ _stageAfterShow(view); }catch(_){ /* 스크롤 실패가 화면 바꾸기를 막지 않는다 */ } }
+
+/* ═══ ★ 결정 416 — 단계가 바뀌면 새 단계의 맨 위를 위쪽 띠 아래로 ═══
+   [참여하기]·[예약내역 제출]·[리뷰 캡처 제출]·구매양식 제출·Q&A 캡처 제출 뒤 화면이 바뀌어도 누른 자리(아래쪽)에 머물러
+   새 단계 맨 윗줄(예약 카드 첫 줄·방문일 칩, 완료 화면의 ✅)이 위쪽 띠 밑에 가려지던 것(실기 확인 2026-11-25).
+   · 부르는 곳은 show() 한 곳 — 종류(구매·예약·Q&A·블로그)별 사본을 두지 않는다. 단계 = 보이는 화면 + 예약 카드의 단계(예약내역/리뷰).
+   · 처음 열 때(새로고침·재방문 복원)는 올리지 않는다 — 시작 경로(_campInit)가 끝난 뒤 _stageArm() 부터.
+   · 같은 단계를 다시 그리는 것(10초 확인·다시 불러오기·옵션·개수 변경·명의 탭)은 올리지 않는다.
+   · 리뷰어가 보이는 칸(입력칸·구매양식 틀)에 입력 중이면 올리지 않는다. 움직임 줄이기 설정이면 한 번에.
+   · 화면이 바뀌면 문서 맨 위(머리 바로 아래가 새 단계 맨 위) · 같은 화면 안에서 예약 카드 단계만 바뀌면 그 카드 맨 위를
+     위쪽 띠(머리·남은 시간·명의 탭) 바로 아래로. 띠 목록은 틀 안 「보이는 자리」 계산(결정 399 _OF_PARENT_TOP_BARS)과 같다. */
+const _STAGE_TOP_BARS = '#pvBar, .hd, .holdbar, .acct-tabs';
+let _stageSeen = '';      // 마지막으로 보인 단계(불러오는 중 화면은 치지 않는다)
+let _stageArmed = false;  // 시작 경로가 끝났나 — 그 전(첫 화면)에는 올리지 않는다
+function _stageArm(){ _stageArmed = true; }
+function _stageAfterShow(view){
+  if(view === 'vLoading') return;
+  const bk = $('bookingBox');
+  const sub = (view === 'vJoined' && bk && bk.style.display !== 'none' && bk.dataset && bk.dataset.stage) ? String(bk.dataset.stage) : '';
+  const key = view + (sub ? ':' + sub : '');
+  const prev = _stageSeen;
+  _stageSeen = key;
+  if(!_stageArmed || !prev || prev === key) return;
+  if(_stageTyping()) return;
+  _stageScrollTop(prev.split(':')[0] === view ? bk : null);
+}
+/** 리뷰어가 지금 보이는 칸에 입력 중인가 — 지나간 단계(숨은 칸)에 남은 커서·누른 단추는 입력 중이 아니다. */
+function _stageTyping(){
+  const a = document.activeElement;
+  if(!a || a === document.body || a === document.documentElement) return false;
+  if(!a.getClientRects || !a.getClientRects().length) return false;
+  const tag = String(a.tagName || '').toUpperCase();
+  if(tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'IFRAME' || a.isContentEditable) return true;
+  if(tag === 'INPUT') return !/^(button|submit|reset|checkbox|radio|file|image|range|color|hidden)$/i.test(String(a.type || 'text'));
+  return false;
+}
+/** el 바깥에 있고 지금 보이는 위쪽 띠의 아래 끝(화면 위에 붙었을 때) — el 안의 띠는 el 과 함께 움직이므로 치지 않는다. */
+function _stageBandBottom(el){
+  let b = 0;
+  Array.prototype.forEach.call(document.querySelectorAll(_STAGE_TOP_BARS), s => {
+    if(!s || (el && el.contains(s)) || !s.getClientRects().length) return;
+    const cs = getComputedStyle(s);
+    if(cs.position !== 'sticky' && cs.position !== 'fixed') return;
+    b = Math.max(b, (parseFloat(cs.top) || 0) + s.getBoundingClientRect().height);
+  });
+  return b;
+}
+/** el 없으면 문서 맨 위 · 있으면 el 맨 위를 위쪽 띠 바로 아래로. */
+function _stageScrollTop(el){
+  let y = 0;
+  if(el){
+    const cur = window.scrollY || window.pageYOffset || 0;
+    y = Math.max(0, Math.round(el.getBoundingClientRect().top + cur - _stageBandBottom(el)));
+  }
+  let reduce = false;
+  try{ reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }catch(_){}
+  try{ window.scrollTo({ top:y, left:0, behavior: reduce ? 'auto' : 'smooth' }); }
+  catch(_){ window.scrollTo(0, y); }
+}
 function showPre(){ if(_camp) renderPre(); else show('vPre'); } // renderPre가 참여 버튼 상태도 복원(N4)
 
 /* ═══ ★ 결정 397 — 공고 화면 서버 호출 도우미 (시간 제한 · 끊김과 서버 응답 구분 · 쉬운 한국어) ═══
@@ -2384,8 +2443,7 @@ function _renderExpiredGuide(){
 }
 /** [다시 참여하기] — 참여 전 화면으로(오늘 다시 참여할 수 있어요). 홀드는 이미 지웠다. */
 function rejoinAfterExpired(){
-  renderPre();
-  try{ window.scrollTo(0, 0); }catch(_){}
+  renderPre();   // 만료 → 참여 전 = 단계 바뀜 — 맨 위로는 show() 의 도우미가 한다(결정 416 · 따로 올리지 않는다)
 }
 /** 제출이 진행 중인가(같은 출처 틀 안의 구매양식) — 진행 중이면 0초가 돼도 화면을 덮지 않는다. */
 function _formSubmitting(){
@@ -2863,6 +2921,7 @@ function renderBookingCard(j, h){
   }
   html += '<div class="qna-err" id="bkErr" style="display:none"></div>';
   $('bookingBody').innerHTML = html;
+  $('bookingBox').dataset.stage = submitted ? 'review' : 'resv';   // ★ 결정 416 — 단계가 바뀌면 show() 가 카드 맨 위를 띠 아래로
   // 예약내역을 낸 뒤에는 서버가 취소를 받지 않는다(제출확정 = 취소 대상 아님) — 눌러도 막히는 버튼을 남기지 않는다(막다른 길 0)
   if($('joinedCancelBtn')) $('joinedCancelBtn').style.display = submitted ? 'none' : '';
   _bkResvB64 = ''; _bkReviewB64 = '';
@@ -2959,23 +3018,28 @@ function startHoldCountdown(expiresAtIso){
   let baseLabel = (_ws > CampCards.serverNow()) ? ('차례 대기 · ' + CampCards._fmtHM(_h0.startsAt) + '부터 시작 · 미리 제출해도 돼요') : _plain;
   lab.textContent = baseLabel;
   if(bar) bar.classList.remove('is-soon');
+  // ★ 결정 416 — 첫 숫자를 바로 그린다(종전: 첫 틱 0.5초 뒤까지 「--:--」). 끝났거나 모르는 시간은 그리지 않고
+  //   만료 처리(00:00 · 확인 · 만료 화면)는 종전처럼 틱이 한다 — 이 자리는 아직 화면이 바뀌기 전일 수 있다.
+  { const r0 = end - CampCards.serverNow(); if(isFinite(r0) && r0 > 0) el.textContent = _holdCdText(r0); }
   _holdTick = setInterval(()=>{
     const remain = end - CampCards.serverNow();
     if(baseLabel !== _plain && !(_ws > CampCards.serverNow())){ baseLabel = _plain; lab.textContent = baseLabel; }   // ★ 356 — 차례 시작
     const soon = remain > 0 && remain < 180000 && !(_ws > CampCards.serverNow());   // 기다리는 동안은 '곧 마감' 표시 안 함
     if(bar && bar.classList.contains('is-soon') !== soon){ bar.classList.toggle('is-soon', soon); lab.textContent = baseLabel + (soon ? ' · 곧 마감돼요' : ''); }
     if(remain <= 0){ clearInterval(_holdTick); el.textContent = '00 : 00'; pollOnce(); _onHoldTimeUp(); return; }
-    // 📝 127: 블로그 구매기한(24h)처럼 1시간 이상 남으면 시:분으로 — 분:초로 '1440 : 00' 이 뜨지 않게
-    if(remain >= 3600000){
-      const hh = Math.floor(remain/3600000);
-      const mm = String(Math.floor(remain%3600000/60000)).padStart(2,'0');
-      el.textContent = hh + '시간 ' + mm + '분';
-      return;
-    }
-    const m = String(Math.floor(remain/60000)).padStart(2,'0');
-    const s2 = String(Math.floor(remain%60000/1000)).padStart(2,'0');
-    el.textContent = m + ' : ' + s2;
+    el.textContent = _holdCdText(remain);
   }, 500);
+}
+/** 남은 시간 글자 — 바로 그리기·틱 공용(결정 416). 📝 127: 블로그 구매기한(24h)처럼 1시간 이상 남으면 시:분으로 — 분:초로 '1440 : 00' 이 뜨지 않게 */
+function _holdCdText(remain){
+  if(remain >= 3600000){
+    const hh = Math.floor(remain/3600000);
+    const mm = String(Math.floor(remain%3600000/60000)).padStart(2,'0');
+    return hh + '시간 ' + mm + '분';
+  }
+  const m = String(Math.floor(remain/60000)).padStart(2,'0');
+  const s2 = String(Math.floor(remain%60000/1000)).padStart(2,'0');
+  return m + ' : ' + s2;
 }
 
 /* 폴링: 10초(+복귀 시 즉시) — 만료/제출확정 감지 (새 창 제출 폴백 포함) */
@@ -3493,7 +3557,7 @@ async function _campInit(){
     if(_campBooted) return;           // ★ 결정 397 — 다시 불러오기·429 재시도가 겹쳐도 시작은 한 번만
     _campBooted = true; clearTimeout(_bootRetryTimer);
     // ★ 관리자 미리보기: 홀드 복원·폴링 없이 미리보기 데이터로 단계 전환만(서버 상태 무변경)
-    if(PREVIEW){ await _enterPreview(); return; }
+    if(PREVIEW){ await _enterPreview(); _stageArm(); return; }
     // ★ 어제(KST 이전 일자) 홀드는 폐기 — 서버는 익일 재참여를 허용하므로 만료 화면에 영구 잠금되지 않게.
     //   v2는 명의별 맵이므로 **전체를 순회**해 지난 날짜 홀드만 골라 버린다(오늘 것은 명의 불문 보존).
     {
@@ -3521,6 +3585,7 @@ async function _campInit(){
     const h = getHold();
     if(h) await enterJoined();      // 재방문: 홀드 있으면 참여 후 화면 복원(만료면 만료 화면)
     else if(_hadHold) renderPre();
+    _stageArm();   // ★ 결정 416 — 여기까지가 처음 열기(새로고침 자리 그대로). 이제부터 단계가 바뀌면 새 단계 맨 위로
     // 참여 전 화면 카운터 갱신(15초)
     setInterval(_preRefreshTick, 15000);
   }catch(e){
