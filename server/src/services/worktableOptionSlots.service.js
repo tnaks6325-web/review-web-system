@@ -60,7 +60,7 @@ const TAB_LEVEL_TABLES = {
   parity_snapshots: '탭 단위 점검 기록', reviewer_event_logs: '탭 단위 이벤트 로그', tab_column_mappings: '열 구성', tab_status_column_bindings: '열 구성',
   unrecognized_tabs: '탭 단위', short_links: '탭 단위 주소', trackb_thread_seen: '탭 단위', trackb_tab_threads: '탭 단위 대화', trackb_tab_memos: '탭 단위 메모',
   trackb_tab_closeouts: '탭 단위 마감', trackb_tab_finished: '탭 단위 완료', trackb_tab_daily_done: '탭 단위 날짜 완료', trackb_settlement_links: '탭 단위 정산 연결',
-  trackb_work_order_links: '탭 단위 오더 연결', trackb_brand_tab_map: '탭 단위 브랜드', trackb_tab_brand_managers: '탭 단위 브랜드 담당자', trackb_share_links: '탭 단위 공유 주소',
+  trackb_work_order_links: '탭 단위 오더 연결', trackb_brand_tab_map: '탭 단위 브랜드', trackb_tab_brand_managers: '탭 단위 브랜드 담당자', trackb_share_links: '탭 단위 공유 주소', trackb_advertiser_work_links: '탭 단위 업체 단축 주소',
   tab_configs: '탭 등록행', orphan_capture_tombstones: '줄 좌표 없음(캡처 파일 묘비)', workboard_consolidation_link_events: '탭 단위 통폐합 기록', workboard_consolidation_targets: '탭 단위 통폐합 상태',
 };
 
