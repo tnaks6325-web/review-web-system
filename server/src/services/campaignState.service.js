@@ -291,6 +291,14 @@ function qnaIgnoresPlans(counts) {
   return !!counts && typeof counts.qnaToday === 'number' && Number.isFinite(counts.qnaToday);
 }
 
+/** 결정 409 — 이 정원 재료가 네이버예약리뷰 공고(고를 수 있는 남은 자리 합이 숫자로 실림)인가.
+ *  ★ computeCampaignState 의 isBooking 과 같은 재료(counts.bookingFree) — 단일 출처.
+ *  예약 공고는 날짜별 계획·시트 일정(이용일자 칸)·작업표 오늘 채움을 정원 판정에 쓰지 않는다 —
+ *  리뷰어는 방문일 **전에** 신청하고, 날짜별 인원은 자리표(booking_slots)가 정한다. */
+function bookingIgnoresPlans(counts) {
+  return !!counts && typeof counts.bookingFree === 'number' && Number.isFinite(counts.bookingFree);
+}
+
 /** 그날의 명시 조절값(없으면 null) — dailyQuota 와 computeCampaignState 표시 재료가
  *  **같은 판정**을 쓴다(사본을 두면 정원과 표시가 갈린다). 킬스위치도 여기서 함께 판정. */
 function planOverrideFor(plans, dateStr) {
@@ -485,6 +493,15 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
        하루 기준 = 그날 자리 수 하나(자리 0 = 그날 안 열림). 계획 저장값은 지우지 않고 무시만 한다(데이터 변경 0).
        판정 = qnaIgnoresPlans 하나(fetchCampaignCounts 도 같은 함수로 계획을 비운다 — 주말 게시·다음 오픈일 등 다른 소비처도 같은 값을 본다). */
   if (qnaIgnoresPlans(counts) && counts.plans) counts = { ...counts, plans: null };
+  /* ★★ 결정 409 — 네이버예약리뷰 공고는 「고를 수 있는 날(내일부터)의 남은 자리 합」 하나로 연다/닫는다.
+       작업표 「이용일자」 칸이 시트 일정처럼 읽히면 첫 방문일까지 「오픈 예정」이 되고(리뷰어는 방문 전에 신청한다),
+       이용일 = 오늘인 줄이 「오늘 채움」으로 세져 오늘 마감이 된다 — 그래서 그 재료를 비운다(데이터 변경 0 · 판정만). */
+  const isBooking = bookingIgnoresPlans(counts);
+  if (isBooking) {
+    counts = { ...counts, plans: null, tableTodayFilled: undefined, tableTodayQuota: undefined,
+      tableTodaySubmitted: undefined, tableTodayActiveHolds: undefined };
+    schedule = null;
+  }
 
   // ★ 시트 일정(구매일자 컬럼 파생)이 있으면 시작일·마감일·정원의 진실원천이 된다.
   //   정원 = "오늘까지 누적 계획 − 전일까지 확정" → 못 채운 물량이 다음 진행일로 이월된다.
@@ -528,7 +545,7 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
        못 채운 자리는 넘기지 않는다(확정 — 일정 끝 「추가 모집」). 작업표 진행일자 칸이 시트 일정처럼 읽혀도 이 값이 이긴다. */
   const isQna = typeof counts.qnaToday === 'number' && Number.isFinite(counts.qnaToday);
   const tableTodayQuota = Number(counts.tableTodayQuota);
-  const quota = Number.isFinite(tableTodayQuota) ? Math.max(0, tableTodayQuota) : (isQna ? Math.max(0, counts.qnaToday) : campaignQuota);
+  const quota0 = Number.isFinite(tableTodayQuota) ? Math.max(0, tableTodayQuota) : (isQna ? Math.max(0, counts.qnaToday) : campaignQuota);
   const ownTodaySubmitted = Math.max(0, Number(counts.todaySubmitted) || 0);
   const ownTodayActiveHolds = Math.max(0, Number(counts.todayActiveHolds) || 0);
   const groupedTodaySubmitted = Number(counts.tableTodaySubmitted);
@@ -551,6 +568,9 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
     ? Math.max(todaySubmitted, Math.max(0, tableTodayFilled))
     : todaySubmitted;
   const todayCount = confirmedTodayCount + todayActiveHolds;
+  /* ★ 결정 409 — 예약 공고의 「오늘 정원」 = 오늘 쓴 수 + 고를 수 있는 남은 자리(남은 자리가 있으면 열림 · 0이면 아래에서 soft_full).
+       하루 인원·이월·시트 일정 정원은 쓰지 않는다(날짜별 인원은 자리표가 정한다). */
+  const quota = isBooking ? todayCount + Math.max(0, counts.bookingFree) : quota0;
   const opensAt = kstTodayAt(c.window_start, now);
   const closesAt = kstTodayAt(c.window_end, now);
   const bufferMin = Number(c.close_buffer_min ?? 10) || 0;
@@ -568,7 +588,7 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
     //   (조절 50을 "+10 이월"로 표기하면 관리자가 이월 사고로 오해).
     // ★ 기준선은 그 공고의 "평소 그날 인원" — 시트 일정 공고는 **시트의 그날 행 수**이지
     //   daily_limit 이 아니다(둘은 아무 관계가 없어 근거 없는 "+15 이월" 칩이 뜬다).
-    carryAdded: (isQna || ovToday !== null || _seqDayRoom(counts.optionCaps) !== null) ? 0   // ★ 결정 228: 일정표 공고엔 이월이 없다(Q&A 도 — 321)
+    carryAdded: (isQna || isBooking || ovToday !== null || _seqDayRoom(counts.optionCaps) !== null) ? 0   // 결정 409: 예약 공고도 이월 없음   // ★ 결정 228: 일정표 공고엔 이월이 없다(Q&A 도 — 321)
       : Math.max(0, quota - (sch ? (Number(sch.byDate[todayStr]) || 0) : eff.dailyLimit)),
     todayPlanned: ovToday,                 // 오늘의 명시 조절값(없으면 null)
     planAdjusted: ovToday !== null,        // 카드 "조절됨" 표시 재료(관리자 전용 소비)
@@ -703,6 +723,10 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
     return { ...payload, state: 'soft_full', stateReason: 'table_over_total' };
   }
 
+  /* ★ 결정 409 — 예약 공고는 고를 수 있는 남은 자리가 없으면 「자리 없음」(soft_full) — 「내일 다시 오픈」이 아니다.
+       홀드가 만료·취소되면 자리가 다시 나 저절로 열린다(영속하지 않음). */
+  if (isBooking && !(counts.bookingFree > 0)) return { ...payload, state: 'soft_full', stateReason: 'booking_full' };
+
   // 금일완료(홀드 만료 반환 시 open 복귀)
   if (todayCount >= quota) return { ...payload, state: 'daily_done', reopensAt: _reopenIso() };
 
@@ -828,6 +852,19 @@ async function fetchCampaignCounts(pool, campaignIds, now = new Date()) {
       if (o && q) {
         o.qnaToday = q.total;
         if (qnaIgnoresPlans(o)) o.plans = null;   // ★ 결정 379 — Q&A 는 날짜별 계획을 쓰지 않는다(이 깔때기를 읽는 모든 곳이 같은 값)
+      }
+    }
+  }
+  /* ★ 결정 409: 네이버예약리뷰 공고의 고를 수 있는 남은 자리 합 — 이 깔때기에 싣는다(목록·상세·참여 게이트가 같은 정원을 본다).
+     쿼리 순서 계약(066 q[0]/q[1])을 흔들지 않게 맨 뒤(Q&A 다음). 실패 = 미부착 = 종전 정원(참여는 자리 묶기가 다시 막는다). */
+  const bookingMap = await require('./bookingSlots.service').loadFreeByCampaign(pool, ids, now);
+  if (bookingMap) {
+    for (const id of ids) {
+      const o = out.get(id);
+      const b = bookingMap.get(String(id));
+      if (o && b) {
+        o.bookingFree = b.free;
+        if (bookingIgnoresPlans(o)) o.plans = null;   // 예약 공고는 날짜별 계획을 쓰지 않는다(이 깔때기를 읽는 모든 곳이 같은 값)
       }
     }
   }
@@ -2152,6 +2189,7 @@ module.exports = {
   projectDailyQuotas,
   planOverrideFor,
   qnaIgnoresPlans,   // 결정 379 — Q&A 공고는 날짜별 계획을 판정에 쓰지 않는다
+  bookingIgnoresPlans,   // 결정 409 — 예약 공고는 남은 자리 합 하나로 연다/닫는다
   __resetCarryCacheForTest,
   __resetPlanCacheForTest,
   TABLE_QUOTA_MODE,

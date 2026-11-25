@@ -190,7 +190,207 @@ async function repairCalendarIfMissing({ workOrder, sheetId, tabName, by = 'admi
   return { ok: true, repaired: true, inserted: r.inserted };
 }
 
+/* ══════════════════════════════════════════════════════════════════════════════
+   3단계 — 리뷰어가 날짜를 골라 신청 · 자리 묶기 · 예약번호 (결정 409 · migration 228)
+   ★ 자리가 비었는지 = 이 자리를 가리키는 신청이 「제출 완료」이거나 「살아 있는 홀드」가 아님(신청 표가 단일 출처 —
+     자리표 status 는 신청·만료·취소 때 고치지 않는다). Q&A 211 과 같은 방식.
+   ★ 한 자리에 둘 = 부분 유일 색인 `uq_campaign_apps_booking_slot` 이 받친다(동시 신청 과판매 구조적 차단).
+   ★ 고를 수 있는 날 = **내일(KST)부터**(기본값 · 당일 예약 제외 — 그날 예약이 열려 있는지·업체가 받아 줄지 알 수 없다).
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/** 당일 예약을 받을지 — 기본 받지 않음(결정 409 기본값). 바꾸려면 이 값과 결정 문서를 함께 고친다. */
+const BOOKING_SAME_DAY_OK = false;
+const _DAY_MS = 86400000;
+const _YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function _kstToday(now = new Date()) { return require('./qnaSlots.service').kstDateStr(now); }
+
+/** 리뷰어가 고를 수 있는 첫날(YYYY-MM-DD, KST) — 기본 내일. */
+function bookableFrom(now = new Date()) {
+  return BOOKING_SAME_DAY_OK ? _kstToday(now) : _kstToday(new Date(now.getTime() + _DAY_MS));
+}
+
+/** SQL 조각 — 이 자리(alias)를 지금 쥐고 있는 신청이 있다(제출 완료 · 유예 안의 홀드). $grace 자리 번호를 받는다. */
+function _heldSql(alias, graceParam) {
+  return `EXISTS (SELECT 1 FROM campaign_applications ca
+                   WHERE ca.booking_slot_id = ${alias}.id
+                     AND (ca.status = 'submitted'
+                          OR (ca.status = 'applied' AND (ca.expires_at IS NULL OR ca.expires_at > NOW() - make_interval(secs => ${graceParam})))))`;
+}
+
+/**
+ * 날짜별 남은 자리 — 참여 전 화면·공고 정원의 재료(취소 자리 제외).
+ * @returns {Promise<Array<{date,total,taken,left,bookable}>>}  left = 열린 자리 − 쥔 신청 · bookable = 내일부터
+ */
+async function seatsForTab(db, sheetId, tabName, now = new Date()) {
+  const grace = require('./campaignHold.service').HOLD_GRACE_SEC;
+  const { rows } = await (db || _pool()).query(
+    `SELECT to_char(s.slot_date, 'YYYY-MM-DD') AS date, COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE s.status = 'open' AND ${_heldSql('s', '$3')})::int AS taken,
+            COUNT(*) FILTER (WHERE s.status = 'open' AND NOT ${_heldSql('s', '$3')})::int AS free
+       FROM booking_slots s
+      WHERE s.sheet_id = $1 AND s.tab_name = $2 AND s.status <> 'cancelled'
+      GROUP BY s.slot_date ORDER BY s.slot_date`, [sheetId, tabName, grace]);
+  const from = bookableFrom(now);
+  return rows.map(r => ({ date: r.date, total: Number(r.total), taken: Number(r.taken), left: Number(r.free), bookable: r.date >= from }));
+}
+
+/**
+ * 공고별 「고를 수 있는 날의 남은 자리 합」 — Map(campaignId → { free, total }). 예약 탭(자리표 있음)에 연결된 공고만 싣는다.
+ * ★ 공고 정원의 단일 출처 재료 — `campaignState.fetchCampaignCounts` 가 맨 뒤에서 싣고 `computeCampaignState` 가
+ *   `counts.bookingFree` 로 연다/닫는다(이용일자 칸을 시트 일정으로 읽지 않는다).
+ * ★ 실패 = null(덮지 않음 — 표시는 종전). 실제 신청은 자리 묶기(`pickSlotInTx`)가 fail-closed 로 다시 막는다.
+ */
+async function loadFreeByCampaign(db, campaignIds, now = new Date()) {
+  const ids = (campaignIds || []).filter(Boolean).map(String);
+  if (!ids.length) return new Map();
+  const q = db || _pool();
+  let sp = false;
+  try {
+    if (_inTx(db)) { try { await q.query('SAVEPOINT booking_free'); sp = true; } catch (_) { sp = false; } }
+    const grace = require('./campaignHold.service').HOLD_GRACE_SEC;
+    const { rows } = await q.query(
+      `SELECT rc.id::text AS campaign_id,
+              COUNT(*) FILTER (WHERE s.status <> 'cancelled')::int AS total,
+              COUNT(*) FILTER (WHERE s.status = 'open' AND s.slot_date >= $2::date AND NOT ${_heldSql('s', '$3')})::int AS free
+         FROM recruit_campaigns rc
+         JOIN booking_slots s ON s.sheet_id = rc.linked_sheet_id AND s.tab_name = rc.linked_tab_name
+        WHERE rc.id::text = ANY($1::text[])
+        GROUP BY 1`, [ids, bookableFrom(now), grace]);
+    if (sp) await q.query('RELEASE SAVEPOINT booking_free');
+    const out = new Map();
+    for (const r of rows) out.set(String(r.campaign_id), { free: Number(r.free) || 0, total: Number(r.total) || 0 });
+    return out;
+  } catch (e) {
+    if (sp) await q.query('ROLLBACK TO SAVEPOINT booking_free').catch(() => {});
+    logger.warn(`[bookingSlots] 남은 자리 조회 실패(표시는 종전 · 신청은 자리 묶기가 막는다): ${e.message}`);
+    return null;
+  }
+}
+
+/** 고른 날짜 검사(잠금 앞에서도 쓴다 — 자리 미점유). @returns {{ok:true,date}|{ok:false,reason}} */
+function checkBookingDate(raw, now = new Date()) {
+  const date = String(raw == null ? '' : raw).trim();
+  if (!date) return { ok: false, reason: 'booking_date_required' };
+  if (!_YMD_RE.test(date) || !require('../utils/bookingCalendar').isValidYmd(date)) return { ok: false, reason: 'booking_date_invalid' };
+  if (date < bookableFrom(now)) return { ok: false, reason: 'booking_date_closed' };
+  return { ok: true, date };
+}
+
+/**
+ * 고른 날의 빈 자리 하나를 고른다(그날 순번 앞부터).
+ * ★ 반드시 신청 트랜잭션 안·작업표 잠금(`camp_tab_daily`) 뒤에서 부른다 — 같은 작업표 신청이 한 줄로 서서 한 자리에 둘이 묶이지 않는다.
+ * ★ 마감이 지났는데 아직 스윕이 정리하지 않은 홀드는 여기서 먼저 정리한다(부분 유일 색인이 그 신청을 살아 있다고 본다).
+ */
+async function pickSlotInTx(client, { sheetId, tabName, date, graceSec } = {}) {
+  if (!client || !sheetId || !tabName || !date) return null;
+  if (graceSec == null) graceSec = require('./campaignHold.service').HOLD_GRACE_SEC;
+  await client.query(
+    `UPDATE campaign_applications ca SET status = 'expired'
+       FROM booking_slots s
+      WHERE ca.booking_slot_id = s.id AND s.sheet_id = $1 AND s.tab_name = $2 AND s.slot_date = $3::date
+        AND ca.status = 'applied' AND ca.expires_at <= NOW() - make_interval(secs => $4)`,
+    [sheetId, tabName, date, graceSec]);
+  const { rows } = await client.query(
+    `SELECT s.id, s.seq, s.date_seq, to_char(s.slot_date, 'YYYY-MM-DD') AS slot_date,
+            to_char(s.review_deadline, 'YYYY-MM-DD') AS review_deadline
+       FROM booking_slots s
+      WHERE s.sheet_id = $1 AND s.tab_name = $2 AND s.slot_date = $3::date AND s.status = 'open'
+        AND NOT EXISTS (SELECT 1 FROM campaign_applications ca
+                         WHERE ca.booking_slot_id = s.id AND ca.status IN ('applied', 'submitted'))
+      ORDER BY s.date_seq
+      LIMIT 1
+      FOR UPDATE OF s`, [sheetId, tabName, date]);
+  return rows[0] || null;
+}
+
+/**
+ * 신청 트랜잭션 안에서 고른 날의 자리 하나를 묶을 대상을 고른다.
+ * @returns {Promise<{ok:true, slot}|{ok:false, reason}>} reason: booking_date_required|invalid|closed|full (fail-closed)
+ */
+async function bindSlotForApply(client, { sheetId, tabName, date, now = new Date() } = {}) {
+  const chk = checkBookingDate(date, now);
+  if (!chk.ok) return chk;
+  if (!sheetId || !tabName) return { ok: false, reason: 'booking_date_full' };
+  const slot = await pickSlotInTx(client, { sheetId, tabName, date: chk.date });
+  return slot ? { ok: true, slot } : { ok: false, reason: 'booking_date_full' };
+}
+
+/** 신청에 묶인 자리(없으면 null). 참여 상세·제출 창구가 읽는다. */
+async function slotForApplication(db, applicationId) {
+  const { rows } = await (db || _pool()).query(
+    `SELECT s.id, s.work_order_id, s.sheet_id, s.tab_name, s.seq, s.date_seq, s.status,
+            to_char(s.slot_date, 'YYYY-MM-DD') AS slot_date, to_char(s.review_deadline, 'YYYY-MM-DD') AS review_deadline,
+            ca.booking_reservation_no
+       FROM campaign_applications ca JOIN booking_slots s ON s.id = ca.booking_slot_id
+      WHERE ca.id = $1 LIMIT 1`, [Number(applicationId) || 0]);
+  return rows[0] || null;
+}
+
+/** 리뷰어 화면에 내보내는 자리 정보(작업표 위치·내부 번호는 빼고 할 일만). deadline = 예약내역 제출 기한(홀드 마감). */
+function publicSlotView(slot, deadline) {
+  if (!slot) return null;
+  return {
+    date: slot.slot_date || null,
+    reviewDeadline: slot.review_deadline || null,
+    deadline: deadline ? new Date(deadline).toISOString() : null,
+  };
+}
+
+/**
+ * 매장 안내(매장 이름·주소·네이버 예약 주소·돈 방식·리뷰 기한) — 작업오더 계약(`bookingSpecFromWorkOrder`) 단일 출처.
+ * ★ 공고 사본을 쓰지 않는다(오더가 고쳐지면 갈린다). 오더를 못 읽으면 null(화면은 신청을 막는다 — fail-closed).
+ */
+async function placeInfoForTab(db, sheetId, tabName) {
+  const { rows } = await (db || _pool()).query(
+    `SELECT wo.id, wo.work_kind, wo.workboard_schema_version, wo.recruit_count, wo.pay_amount, wo.product_url, wo.product_options_json
+       FROM booking_slots s JOIN work_orders wo ON wo.id = s.work_order_id
+      WHERE s.sheet_id = $1 AND s.tab_name = $2 ORDER BY s.id LIMIT 1`, [sheetId, tabName]);
+  if (!rows.length) return null;
+  const { spec } = require('../utils/bookingCalendar').bookingSpecFromWorkOrder(rows[0]);
+  if (!spec) return null;
+  return {
+    placeName: spec.placeName, placeAddress: spec.placeAddress, bookingUrl: spec.bookingUrl,
+    payMode: spec.payMode, payModeLabel: spec.payModeLabel, pay: spec.pay, reviewDeadlineDays: spec.reviewDeadlineDays,
+  };
+}
+
+/**
+ * 참여 전 공고 상세의 예약 안내 — 매장 이름·주소·돈 방식·리뷰 기한 + 날짜별 남은 자리. 예약 탭이 아니면 null.
+ * ★ 네이버 예약 주소·결제금액은 **참여 후**(참여 상세 bookingSlot.place)에만 싣는다 — 작업내용·금액은 참여 후 공개(결정 041)이고,
+ *   자리 없이 먼저 예약해 버리는 길을 열지 않는다. 작업표 위치·자리 번호도 내보내지 않는다.
+ */
+async function bookingPublicView(db, camp, now = new Date()) {
+  if (!camp || !camp.linked_sheet_id || !camp.linked_tab_name) return null;
+  const seats = await seatsForTab(db, camp.linked_sheet_id, camp.linked_tab_name, now);
+  if (!seats.length) return null;
+  const place = await placeInfoForTab(db, camp.linked_sheet_id, camp.linked_tab_name);
+  return {
+    placeName: place ? place.placeName : '', placeAddress: place ? place.placeAddress : '',
+    payMode: place ? place.payMode : '', payModeLabel: place ? place.payModeLabel : '',
+    reviewDeadlineDays: place ? place.reviewDeadlineDays : null,
+    placeKnown: !!place,
+    bookableFrom: bookableFrom(now),
+    dates: seats.map(s => ({ date: s.date, total: s.total, left: s.left, bookable: s.bookable })),
+    free: seats.filter(s => s.bookable).reduce((n, s) => n + s.left, 0),
+  };
+}
+
+/**
+ * 예약번호 정규화 — 띄어쓰기 제거 · 영문 대문자 · 숫자/영문/하이픈만 · 4~40자.
+ * @returns {{ok:true,value}|{ok:false,reason:'booking_resv_required'|'booking_resv_invalid'}}
+ */
+function normalizeReservationNo(raw) {
+  const v = String(raw == null ? '' : raw).replace(/\s+/g, '').toUpperCase();
+  if (!v) return { ok: false, reason: 'booking_resv_required' };
+  if (!/^[0-9A-Z-]{4,40}$/.test(v)) return { ok: false, reason: 'booking_resv_invalid' };
+  return { ok: true, value: v };
+}
+
 module.exports = {
   insertCalendar, isBookingTab, isBookingCampaign, isBoundRow, boundSeqs, boundRowSql,
   calendarForTab, seatsByDate, verifyRowsMatchPlan, repairCalendarIfMissing,
+  // 3단계(결정 409)
+  BOOKING_SAME_DAY_OK, bookableFrom, seatsForTab, loadFreeByCampaign, checkBookingDate, pickSlotInTx, bindSlotForApply,
+  slotForApplication, publicSlotView, placeInfoForTab, bookingPublicView, normalizeReservationNo,
 };

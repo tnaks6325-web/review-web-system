@@ -2375,9 +2375,11 @@ function participationCheckErrors() {
   const manager = document.getElementById("rf_manager")?.value.trim() || "";
   const channel = document.getElementById("rf_channel")?.value.trim() || "";
   const startDate = document.getElementById("rf_start_date")?.value || "";
+  // ★ 결정 409: 네이버예약리뷰는 구매채널·모집 시작일·하루 인원이 없다(날짜별 인원은 리뷰오더가 정하고 리뷰어가 날짜를 고른다)
+  const _wkBooking = (document.getElementById("rf_work_kind")?.value || "") === "booking";
   if (!manager) errs.push("담당자를 선택해주세요");
-  if (!channel) errs.push("구매채널을 선택해주세요");
-  if (!startDate) errs.push("모집 시작일을 입력해주세요");
+  if (!channel && !_wkBooking) errs.push("구매채널을 선택해주세요");
+  if (!startDate && !_wkBooking) errs.push("모집 시작일을 입력해주세요");
   const ws = document.getElementById("rf_window_start")?.value || "";
   const we = document.getElementById("rf_window_end")?.value || "";
   // 자율주문(종일 오픈) = 양쪽 모두 비움 허용. 한쪽만 입력/역전은 오류(서버 게이트와 동일 규칙)
@@ -2386,7 +2388,7 @@ function participationCheckErrors() {
   // ★ 127: 블로그는 '그날 정원' 개념이 없다(구매일 미정·승인제) — 일건수 요구를 면제한다.
   //   저장 payload 가 총모집(무제한이면 9999)으로 자동 채우므로 서버 게이트도 통과한다.
   const _wkBlog = (document.getElementById("rf_work_kind")?.value || "") === "blog";
-  if (!(dl >= 1) && !_wkBlog) errs.push("하루 진행 인원(1 이상)을 입력해주세요");
+  if (!(dl >= 1) && !_wkBlog && !_wkBooking) errs.push("하루 진행 인원(1 이상)을 입력해주세요");
   return errs;
 }
 function renderPartCheck() {
@@ -3926,6 +3928,72 @@ function _rfApplyWorkKindUi() {
     }
     note.style.display = "";
   } else if (note) note.style.display = "none";
+  _rfApplyBookingUi(_kind === "booking");
+}
+
+/* ═══ 📅 결정 409: 네이버예약리뷰 발행 폼 ═══
+   ★ 예약 정보(매장·주소·네이버 예약 주소·돈 방식·날짜별 인원·리뷰 기한)는 **리뷰오더가 정한 값**이다 — 이 폼은 보기 전용 카드로만 보여 준다.
+     재료 = 프리필의 booking(서버가 bookingSpecFromWorkOrder 로 정규화한 값 그대로 · 화면 해석 사본 0).
+   ★ 상품 리뷰 전용 칸(구매채널·배송유형·배송 조합·회수·필수 배송메세지·주말 포함·유입 방식·상품 추가·상품메인 URL)은 숨긴다 —
+     택배·옵션·구매수량 단계·주소·주문번호가 없는 작업이다(결정 404 확정 7). 리뷰타입 숨김은 위 noReviewType 이 한다.
+   ★ 값을 지우지는 않는다(저장 payload 가 예약 공고에서 무시·정규화한다) — 종류가 바뀌면 그대로 다시 보인다. */
+const _RF_BOOKING_HIDE_IDS = ["rf_channel_btns", "rf_delivery_toggle", "rf_delivery_type", "rf_delivery_mix_row", "rf_delivery_fee_row",
+  "rf_recall_row", "rf_required_delivery_memo", "rf_skip_weekends_toggle", "rf_inflow_type_ui", "rf_product_main_url"];
+function _rfApplyBookingUi(isBooking) {
+  _RF_BOOKING_HIDE_IDS.forEach(id => {
+    const el = document.getElementById(id);
+    const row = el ? (el.id.endsWith("_row") || el.classList.contains("form-row") ? el : (el.closest(".form-row") || el.closest(".rf-hrow"))) : null;
+    if (!row) return;
+    if (isBooking) { if (row._rfBkWasHidden === undefined) row._rfBkWasHidden = row.hidden; row.hidden = true; }
+    else if (row._rfBkWasHidden !== undefined) { row.hidden = row._rfBkWasHidden; delete row._rfBkWasHidden; }
+  });
+  const add = document.getElementById("rf_opt_addbtn");
+  if (add) { if (isBooking) { add.dataset.rfBk = "1"; add.hidden = true; } else if (add.dataset.rfBk) { delete add.dataset.rfBk; add.hidden = false; } }
+  if (isBooking) { const sw = document.getElementById("rf_skip_weekends"); if (sw) sw.checked = false; }   // 날짜는 업체가 정했다 — 주말 신청 차단을 걸지 않는다
+  let card = document.getElementById("rf_booking_card");
+  if (!isBooking) { if (card) card.hidden = true; return; }
+  if (!card) {
+    card = document.createElement("div");
+    card.id = "rf_booking_card";
+    card.className = "rf-booking-card";
+    card.style.cssText = "margin:6px 0 12px;padding:12px 14px;background:#F5F9FF;border:1px solid #BFD7FF;border-radius:10px;font-size:.8rem;color:#1F2937;line-height:1.6";
+    const tabs = document.getElementById("rf_kind_tabs");
+    if (tabs && tabs.parentElement) tabs.insertAdjacentElement("afterend", card);
+    else document.getElementById("recruitModalTitle")?.parentElement?.appendChild(card);
+  }
+  card.hidden = false;
+  card.innerHTML = _rfRenderBookingCard(window._rfBookingSpec || null);
+}
+/** 「12/4 (금)」 — 작업보드 날짜 칸과 같은 표기. */
+function _rfBkDay(ymd) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || "")); if (!m) return String(ymd || "");
+  return `${+m[2]}/${+m[3]} (${"일월화수목금토"[new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay()]})`;
+}
+/** 예약 안내 카드 HTML(보기 전용). spec 없음 = 못 읽었다고 말한다(빈 카드로 꾸미지 않는다). */
+function _rfRenderBookingCard(spec) {
+  const e = v => (typeof escHtml === "function" ? escHtml(String(v == null ? "" : v)) : String(v == null ? "" : v).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])));
+  const head = '<div style="font-weight:800;color:#1D4ED8;margin-bottom:6px">📅 네이버예약리뷰 · 리뷰오더에서 정한 예약 정보 <span style="font-weight:600;color:#64748B">(보기 전용)</span></div>';
+  if (!spec) return head + '<div style="color:#B42318">예약 정보를 불러오지 못했습니다 — 리뷰오더의 매장·날짜별 인원을 확인해 주세요.</div>';
+  const free = spec.payMode === "free";
+  const won = n => Number(n || 0).toLocaleString("ko-KR") + "원";
+  const row = (k, v) => `<div style="display:flex;gap:8px"><span style="flex:0 0 64px;color:#64748B">${k}</span><span style="flex:1;min-width:0;word-break:break-all">${v}</span></div>`;
+  const url = String(spec.bookingUrl || "");
+  const link = /^https?:\/\//i.test(url)
+    ? `<a href="${e(url)}" target="_blank" rel="noopener" style="color:#1D4ED8;font-weight:700;text-decoration:underline">네이버 예약 열기</a>`
+    : '<span style="color:#B42318">예약 주소 없음</span>';
+  const dates = (Array.isArray(spec.dates) ? spec.dates : []).map(d =>
+    `<span style="display:inline-block;margin:2px 4px 2px 0;padding:2px 8px;border-radius:999px;background:#fff;border:1px solid #CBD5E1;white-space:nowrap">${e(_rfBkDay(d.date))} <b>${Number(d.count) || 0}명</b></span>`).join("");
+  const warn = (Array.isArray(spec.blockers) && spec.blockers.length)
+    ? `<div style="margin-top:6px;color:#B42318">⚠ ${spec.blockers.map(e).join(" · ")}</div>` : "";
+  return head
+    + row("매장", `<b>${e(spec.placeName || "")}</b>`)
+    + row("주소", e(spec.placeAddress || "—"))
+    + row("예약", link)
+    + row("돈 방식", free ? "<b>무료체험형</b> — 리뷰어는 예약만 · 현장에서 업체가 무료 처리 · 리뷰비만 지급"
+      : `<b>환급형</b> — 리뷰어가 예약·결제(1건 ${e(won(spec.pay))}) · 결제금액 환급 + 리뷰비`)
+    + row("리뷰 기한", `이용일 + ${Number(spec.reviewDeadlineDays) || 3}일`)
+    + row("날짜·인원", `${dates || "—"} <span style="color:#64748B">합 ${Number(spec.total) || 0}명</span>`)
+    + warn;
 }
 
 function _ensureWorkboardDisplayNameInput() {
@@ -3981,6 +4049,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   _rfLastScheduledPurchaseWindow = { start: "", end: "" };
   if (typeof recruitSaveBlockClear === "function") recruitSaveBlockClear();  // 지난번 차단 사유 잔류 방지
   _rfLinkedMiss = null; _rfSugCache = [];   // 지난 공고의 "탭 못 찾음" 사유가 새 모달에 남지 않게(로드보다 먼저)
+  window._rfBookingSpec = null;   // ★ 결정 409: 지난 공고의 예약 정보가 새 공고에 남지 않게(종류 초기화보다 먼저)
   { const _wk = document.getElementById("rf_work_kind"); if (_wk) _wk.value = ""; _rfApplyWorkKindUi(); }   // ★ 127: 종류 초기화(기본=리뷰)
   /* 저장 성공 시 버튼을 '✓ 저장됨'(비활성)으로 두고 모달을 닫으므로, 다시 열 때 되돌린다 */
   { const _sb = document.getElementById("recruitSaveBtn");
@@ -4401,6 +4470,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
       _setRecruitGlobalReviewTypeMix(prefillReviewMix);
       if (prefill.review_type) _rfPickBtn("review_type", _rfReviewTypeKey(prefill.review_type));
       /* ★ 127: 작업오더의 체험단 종류 → 공고에 그대로 전파(blog 면 리뷰타입 카드 숨김) */
+      window._rfBookingSpec = (prefill.booking && typeof prefill.booking === "object") ? prefill.booking : null;   // ★ 결정 409 — 보기 전용 예약 정보
       { const _wk = document.getElementById("rf_work_kind"); if (_wk) _wk.value = _rfPrefillWorkKind(prefill.work_kind); _rfApplyWorkKindUi(); }
 
       /* ★ 065: 연결 탭 자동 선택 — 접수 시 확정된 탭(work_sheet_url 은 제출 필수).
@@ -6437,6 +6507,11 @@ async function saveRecruitPostImpl() {
            블로그는 '그날 정원' 개념이 없어(구매일 미정·승인제) daily=0 이면 daily_done 판정이
            모집을 조용히 막는다. 서버 create 도 같은 정규화를 하지만(이중 방어) update 는 프론트가 담당. */
         if (payload.work_kind === "blog" && !(Number(payload.daily_limit) > 0)) {
+          payload.daily_limit = (Number(payload.recruit_total) > 0) ? Number(payload.recruit_total) : 9999;
+        }
+        /* ★ 결정 409: 네이버예약리뷰도 「그날 정원」이 없다 — 열림/마감은 서버가 자리표의 남은 자리로 정한다.
+           일건수가 비면 총모집으로 채워(블로그와 같은 정규화) 하루 인원 판정이 조용히 막지 않게 한다. */
+        if (payload.work_kind === "booking" && !(Number(payload.daily_limit) > 0)) {
           payload.daily_limit = (Number(payload.recruit_total) > 0) ? Number(payload.recruit_total) : 9999;
         }
         }
