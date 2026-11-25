@@ -156,8 +156,10 @@ function topLevelFunctions(source,names){
 function dualReviewHelperNames(source){return [...source.matchAll(/^(?:async )?function (_dualReview\w*)\(/gm)].map(m=>m[1]);}
 // 결정 408: _submitReviewSlots 가 올리기 전에 부르는 사진 크기 판정(_reviewPhoto*) — 있는 것만(옛 HEAD 사본과 비교할 때도 돈다)
 function reviewPhotoHelperNames(source){return [...source.matchAll(/^(?:async )?function (_reviewPhoto\w*)\(/gm)].map(m=>m[1]);}
+// 결정 410: 실패 안내 도우미(_rv…) + 문구 바탕(_ofFriendlyErr) — 있는 것만. 화면에 남는 실패 안내(_rvFailNoticeShow)는 calls.notice 에 적는다
+function rvHelperNames(source){return [...source.matchAll(/^(?:async )?function (_rv[A-Z]\w*|_ofFriendlyErr)\(/gm)].map(m=>m[1]);}
 async function runReviewSlots(source,{item,slots,filesBySlot,trigger=null,fetchImpl,uploadImpl}){
- const calls={fetch:[],upload:[],post:[],toast:[]};const nodes={};
+ const calls={fetch:[],upload:[],post:[],toast:[],notice:[]};const nodes={};
  const el=id=>nodes[id]||(nodes[id]={id,textContent:'',className:'',innerHTML:'',disabled:false,value:id==='csMemo'?'메모':'',style:{},classList:{toggle(){},add(){},remove(){}}});
  const g={console:{log(){},warn(){},error(){}},Date,Set,Map,Array,Object,Number,String,JSON,Error,Promise,setTimeout,clearTimeout,AbortController,
   S:{captureSlots:slots,filesBySlot,slotSubmitTrigger:trigger,receiptStepMode:false,step:2},
@@ -171,8 +173,9 @@ async function runReviewSlots(source,{item,slots,filesBySlot,trigger=null,fetchI
   _isBlogItem:()=>false,_isPostUrl:()=>false,_BLOG_POST_URL_HINT:'',_preHasBlock:()=>false,_preBlockedMessage:()=>'',_preAwaitChecks:async()=>true,
   _csShowVerdict(){},_showDuplicateBlockModal(){},_csClearRouteNotice(){},_csShowRouteNotice(){},_csClearVerdict(){},
   document:{getElementById:el}};
- const names=['_submitReviewSlots',...dualReviewHelperNames(source),...reviewPhotoHelperNames(source)];
+ const names=['_submitReviewSlots',...dualReviewHelperNames(source),...reviewPhotoHelperNames(source),...rvHelperNames(source)];
  vm.runInNewContext(topLevelFunctions(source,names)+'\nthis.__run=_submitReviewSlots;',g);
+ if(typeof g._rvFailNoticeShow==='function')g._rvFailNoticeShow=(btn,title,lines,tail)=>{calls.notice.push([title,...(lines||[]),tail||''].join(' '));return null;};
  await g.__run(item);return {calls,nodes};
 }
 const dualSlots=()=>[{key:'review',label:'네이버 리뷰',channel:'naver',role:'review',evidenceRevision:0},{key:'slot2',label:'쿠팡 리뷰',channel:'coupang',role:'review',evidenceRevision:2},{key:'receipt',label:'네이버 현금영수증',channel:'naver',role:'receipt',required:false,evidenceRevision:0}];
@@ -215,10 +218,10 @@ test('dual review partial completion follows the server decision and a stage con
  assert.match(r.nodes.successMessage.innerHTML,/쿠팡 리뷰 을\(를\) 보완 제출/);assert.equal(r.calls.upload.length+r.calls.post.length,0);
  r=await runReviewSlots(searchSource(),{item:dualItem(),slots:dualSlots(),filesBySlot:{review:[{b64:'QUFB',type:'image/png',size:3}]},
   fetchImpl:stagingServer({'review-stage':()=>({ok:false,status:409,json:async()=>({ok:false,code:'review_revision_changed',error:'사진이 바뀌었습니다. 새로고침해주세요.'})})})});
- assert.equal(r.calls.fetch.length,1);assert.equal(r.calls.upload.length+r.calls.post.length,0);assert.match(r.calls.toast.join(' '),/사진이 바뀌었습니다/);
+ assert.equal(r.calls.fetch.length,1);assert.equal(r.calls.upload.length+r.calls.post.length,0);assert.match([...r.calls.toast,...r.calls.notice].join(' '),/사진이 바뀌었습니다/);
  r=await runReviewSlots(searchSource(),{item:dualItem(),slots:dualSlots(),filesBySlot:{review:[{b64:'QUFB',type:'image/png',size:3}]},
   fetchImpl:stagingServer({'review-stage':()=>({ok:false,status:404,json:async()=>{throw Error('html');}})})});
- assert.match(r.calls.toast.join(' '),/준비 중/);assert.equal(r.calls.fetch.length,1);
+ assert.match([...r.calls.toast,...r.calls.notice].join(' '),/준비 중/);assert.equal(r.calls.fetch.length,1);
 });
 test('ordinary review slot submission bytes and requests equal untouched HEAD; no dual endpoint is called',async()=>{
  const cp=require('node:child_process');
@@ -232,7 +235,7 @@ test('ordinary review slot submission bytes and requests equal untouched HEAD; n
   assert.equal(after.calls.fetch.length,0);assert.ok(after.calls.upload.length>0);
   assert.deepEqual(after.calls.upload.map(p=>p.replace(/"value":"[^"]*"/,'')),before.calls.upload.map(p=>p.replace(/"value":"[^"]*"/,'')));
   assert.deepEqual(after.calls.post.map(p=>p.replace(/"value":"[^"]*"/,'')),before.calls.post.map(p=>p.replace(/"value":"[^"]*"/,'')));
-  assert.deepEqual(after.calls.toast,before.calls.toast);
+  assert.deepEqual(after.calls.toast,before.calls.toast);assert.deepEqual(after.calls.notice,[]);
  }
 });
 test('a dual order cannot enter the grouped multi-row legacy review submission',()=>{

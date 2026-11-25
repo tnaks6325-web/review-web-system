@@ -136,7 +136,7 @@ const CTX = { sheetId: 'S1', tabName: '노티드_우유크림폭탄떡 쿠팡 20
     ok('D3: ★★ 카드 — 유형 유지 · 사정 설명 · 주 조치 뒤집기 · 제거는 보조');
 
     const sa = readFront('js/search-app.js');
-    assert.ok(/duplicateBlocked/.test(sa) && /이미 제출됬던 사진이에요/.test(sa)
+    assert.ok(/duplicateBlocked/.test(sa) && /이미 제출했던 사진이에요/.test(sa)
       && !/한 화면에 두 리뷰가 같이 보이는 캡처/.test(sa),
       '★ 리뷰어 첨부 단계는 다른 구매양식에 반영 완료된 동일 캡처를 차단한다');
     ok('D4: ★ 리뷰어 첨부 안내 — 반영 완료된 다른 구매양식 동일 캡처 차단');

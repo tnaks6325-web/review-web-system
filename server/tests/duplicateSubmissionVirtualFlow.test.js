@@ -185,7 +185,7 @@ function post(baseUrl, path, token, body) {
     assert.strictEqual(upload.status, 200);
     assert.strictEqual(upload.body.ok, false);
     assert.strictEqual(upload.body.uploaded, 0);
-    assert.strictEqual(upload.body.error, '이미 제출됬던 사진이에요');
+    assert.strictEqual(upload.body.error, '이미 제출했던 사진이에요');   // 결정 410: 오타 바로잡음
     assert.strictEqual(upload.body.files[0].rejected, 'duplicate_submitted');
     assert.strictEqual(driveUploadCalls, 0);
     console.log('  통과 ⑧ 두 장 중 한 장이 완료 중복 → 두 장 모두 저장 전 차단');

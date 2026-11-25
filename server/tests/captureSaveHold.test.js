@@ -14,7 +14,7 @@ const read = (rel) => fs.readFileSync(path.join(__dirname, '..', '..', rel), 'ut
   // ── A ──
   {
     const api = read('frontend/api.js');
-    const s = api.indexOf('async function gasPostUpload(body, timeout) {');
+    const s = api.indexOf('async function gasPostUpload(body, timeout');   // 결정 410: 셋째 인자(opts.quiet)가 붙어도 시작점은 같다
     const e = api.indexOf('\n}\n', s) + 3;
     const mk = (mode) => {
       const ctx = {

@@ -87,7 +87,7 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 
   /* ── B. gasPostUpload / _xhrPost ── */
   {
-    const s = API.indexOf('async function gasPostUpload(body, timeout) {');
+    const s = API.indexOf('async function gasPostUpload(body, timeout');   // 결정 410: 셋째 인자(opts.quiet)가 붙어도 시작점은 같다
     const e = API.indexOf('\n}\n', s) + 3;
     const mk = (mode) => {
       const ctx = { _ACTION_MAP: { reviewEditRequest: { method: 'POST', path: '/x' } }, API_BASE_URL: 'http://t',

@@ -2276,6 +2276,7 @@ const SCREEN_TITLES = {
 };
 function showScreen(id) {
   _preSubmitGen++;   // ★ 결정 406 후속 — 화면이 바뀌면 기다리던 제출은 무효
+  _rvFailNoticeClear();   // ★ 결정 410
   document.querySelectorAll(".screen").forEach(s => {
     s.classList.remove("active");
     s.style.display = "none";
@@ -3015,6 +3016,7 @@ function _renderMultiImageSlots(items) {
   }
 
   // 다건: 기존 단건 UI 숨기고 다건 슬롯 생성
+  S.mrDoneKeys = new Set();   // ★ 결정 410 — 새로 고른 묶음은 「앞서 제출된 건」이 없다
   if (singleDrop) singleDrop.style.display = "none";
   if (singleMemo) singleMemo.style.display = "none";
 
@@ -3246,6 +3248,7 @@ function _csOnDrop(e, slotKey) {
   _csAddFiles(slotKey, files);
 }
 function _csRemoveFile(slotKey, fileIdx) {
+  _rvFailNoticeClear();   // 결정 410
   if (S.filesBySlot[slotKey]) S.filesBySlot[slotKey].splice(fileIdx, 1);
   _csRenderPreview(slotKey);
   _updateReceiptStepActions();
@@ -3333,8 +3336,8 @@ function _preHasBlock() {
 }
 function _preBlockedMessage() {
   const states = Object.values(_preState);
-  if (states.some(s => s.checking)) return '사진 중복 여부를 확인하고 있어요. 잠시만 기다려주세요.';
-  if (states.some(s => s.duplicateBlocked)) return '이미 제출됬던 사진이에요';
+  if (states.some(s => s.checking)) return '사진을 확인하고 있어요. 잠시만 기다려 주세요.';
+  if (states.some(s => s.duplicateBlocked)) return '이미 제출했던 사진이에요';
   const s = states.find(x => x.blocked && !x.overridden);
   return s ? s.message : '';
 }
@@ -3378,8 +3381,8 @@ function _showDuplicateBlockModal(d, anchor) {
   overlay.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(17,25,39,.52);display:flex;align-items:center;justify-content:center;padding:18px;backdrop-filter:blur(2px)';
   overlay.innerHTML = `<div style="width:min(390px,100%);background:#fff;border-radius:18px;padding:22px 20px;box-shadow:0 24px 70px rgba(0,0,0,.28)">
     <div style="width:44px;height:44px;border-radius:14px;background:#FFF1F0;color:#C7372F;display:grid;place-items:center;font-size:23px;font-weight:900;margin-bottom:14px">!</div>
-    <h3 id="_reviewDuplicateBlockTitle" style="font-size:18px;letter-spacing:-.025em;margin:0 0 8px;color:#17202E">이미 제출됬던 사진이에요</h3>
-    <p style="font-size:13px;color:#596477;margin:0 0 16px">이 사진은 다른 구매양식에 제출되어 반영됐어요.</p>
+    <h3 id="_reviewDuplicateBlockTitle" style="font-size:18px;letter-spacing:-.025em;margin:0 0 8px;color:#17202E">이미 제출했던 사진이에요</h3>
+    <p style="font-size:13px;color:#596477;margin:0 0 16px">이 사진은 다른 참여 건의 리뷰로 이미 제출됐어요.</p>
     <div style="padding:11px;border-radius:10px;background:#F7F8FA;font-size:11px;color:#657083;margin-bottom:15px">${escHtml(_duplicateHistoryLine(d))}</div>
     <button type="button" style="width:100%;border:0;border-radius:11px;background:#246BFD;color:#fff;font-weight:800;padding:12px;cursor:pointer">다른 사진 선택</button>
   </div>`;
@@ -3413,8 +3416,8 @@ function _preRenderDup(scope, anchor) {
   el.style.cssText = 'margin-top:8px;padding:10px 12px;border-radius:9px;background:#FEF3F2;'
     + 'border:1px solid #F3C8C4;color:#B42318;font-size:.78rem;font-weight:700;line-height:1.5';
   el.innerHTML =
-    '이미 제출됬던 사진이에요'
-    + '<div style="font-weight:500;margin-top:4px;color:#7F1D1D">이 사진은 다른 구매양식에 제출되어 반영됐어요.</div>'
+    '이미 제출했던 사진이에요'
+    + '<div style="font-weight:500;margin-top:4px;color:#7F1D1D">이 사진은 다른 참여 건의 리뷰로 이미 제출됐어요.</div>'
     + `<div style="font-weight:500;font-size:.72rem;margin-top:7px;padding:8px 9px;border-radius:7px;background:#F7F8FA;color:#657083">${escHtml(_duplicateHistoryLine(d))}</div>`
     + (thumb ? `<div style="display:flex;gap:8px;align-items:center;margin-top:8px">${thumb}<span style="font-size:.72rem;font-weight:500;color:#7F1D1D">앞서 제출한 사진</span></div>` : '');
 }
@@ -3656,6 +3659,7 @@ async function _mrAddFiles(idx, newFiles) {
     { ..._preCtx(idx), slotKey: 'review' });
 }
 function _mrRemoveFile(idx, fileIdx) {
+  _rvFailNoticeClear();   // 결정 410
   if (S.filesByIdx[idx]) S.filesByIdx[idx].splice(fileIdx, 1);
   _mrRenderPreview(idx);
   _preCheckFiles('idx:' + idx, 'mrSlot_' + idx, S.filesByIdx[idx],
@@ -3776,6 +3780,7 @@ function _skipReceiptStep() {
 /* ── STEP 이동 ── */
 function goStep(n) {
   _preSubmitGen++;   // ★ 결정 406 후속 — 단계가 바뀌면 기다리던 제출은 무효
+  _rvFailNoticeClear();   // ★ 결정 410 — 단계가 바뀌면 지난 실패 안내도 지운다
   const steps = S.receiptStepMode ? [1, 2, 3] : [1, 2];
   if (!steps.includes(n)) n = 1;
   steps.forEach(i => {
@@ -4142,6 +4147,7 @@ async function addFiles(files) {
   _preCheckFiles('single', 'dropZone', S.files, { ..._preCtx(0), slotKey: 'review' });
 }
 function removeFile(i) {
+  _rvFailNoticeClear();   // 결정 410
   S.files.splice(i, 1);
   renderPreviews();
   _preCheckFiles('single', 'dropZone', S.files, { ..._preCtx(0), slotKey: 'review' });
@@ -4219,7 +4225,113 @@ async function _dualReviewStageSlot(item, slot, files, tokens) {
 }
 
 /* ── 캡처 슬롯 모드 제출 (단일 행에 리뷰/현금영수증 등 여러 종류 캡처) ── */
+/* ★ 결정 410 — 리뷰 제출 실패는 **화면에 남긴다**(점검 2026-11-24 M2) · 실패 문구는 **한 벌**(M3) · 여러 건 일부 실패는 **어느 건인지**(L4).
+ *   종전: 실패 안내가 3.5초 토스트 하나뿐 → 사진은 그대로·버튼은 「제출하기」라 화면이 누르기 전과 같아 「제출됐나?」 헷갈렸다.
+ *         문구는 「모든 제출에 실패했습니다: 1번 오류: 서버 응답 파싱 실패 (HTTP 502)」처럼 개발자 말 · 업로드 끊김은 토스트 2개.
+ *   이제: [제출하기] 바로 위 빨간 상자(_rvFailNoticeShow)가 다음 제출·사진 넣기/빼기·단계 이동 때까지 남는다. 사진·비고는 그대로.
+ *         문구는 _rvFailReason 한 곳 — 쉬운 한국어로 바꾸는 바탕은 api.js apiFriendlyErrorMessage(결정 359, _ofFriendlyErr 경유). */
+function _rvFailReason(x, fallback) {
+  const o = x && typeof x === "object" ? x : { message: String(x == null ? "" : x) };
+  if (o.rvFriendly) return o.message;   // 이미 바꾼 문구(_rvFailErr)
+  const st = Number(o._httpStatus || o.httpStatus) || 0;
+  if (o.code === "REVIEW_CLOSED_NO_REVIEW") return "리뷰 제출 기한이 지나 마감된 건이에요. 궁금한 점은 담당자에게 문의해 주세요.";
+  if (st === 413) return "사진 용량이 너무 커서 보내지 못했어요. 사진 수를 줄여 다시 제출해 주세요.";
+  if (st === 429) return "사진 올리기 요청이 잠시 많았어요. 1분 뒤 [제출하기]를 다시 눌러 주세요.";
+  if (o._transport && o.timeout) return "사진을 올리는 데 시간이 너무 오래 걸렸어요. 인터넷 연결이 좋은 곳에서 다시 눌러 주세요.";
+  if (o._transport) return "인터넷 연결이 불안정해요. 연결을 확인하고 다시 눌러 주세요.";
+  if (st >= 500 || o.badResponse) return "서버에 일시적인 문제가 있어요. 잠시 후 다시 눌러 주세요.";
+  // 옛 api.js 가 캐시에 남아 바탕 함수가 없으면 _ofFriendlyErr 는 기본 문구만 준다 — 서버가 준 한국어 사유는 가리지 않는다.
+  const raw = String(o.message != null && o.message !== "" ? o.message : (o.error || "")).trim();
+  if (typeof apiFriendlyErrorMessage !== "function" && /[가-힣]/.test(raw)) return raw;
+  return _ofFriendlyErr(o, fallback || "제출하지 못했어요. 잠시 후 다시 눌러 주세요.");
+}
+/** 실패 결과(업로드·기록 응답 또는 예외)를 쉬운 문구의 Error 로 — catch 에서 다시 바꾸지 않는다. */
+function _rvFailErr(x, fallback) {
+  const e = new Error(_rvFailReason(x, fallback));
+  e.rvFriendly = true;
+  e.rvClosed = !!(x && typeof x === "object" && (x.code === "REVIEW_CLOSED_NO_REVIEW" || x.rvClosed));   // 마감 = 다시 눌러도 안 된다
+  return e;
+}
+/** 여러 건 화면에서 그 건을 가리키는 말 — 「2번 ○○상품(옵션)」 */
+function _rvItemLabel(item, idx) {
+  const it = item || {};
+  const name = String(it.tcDisplayName || it.productName || "").trim();
+  let opt = "";
+  try {
+    const { options } = extractProductOption(it.row || {});
+    const v = (options || []).map(o => o.value).filter(Boolean).join("/");
+    if (v) opt = ` (${v})`;
+  } catch (_) {}
+  return `${idx + 1}번${name ? " " + name : ""}${opt}`;
+}
+function _rvItemKey(item) {
+  const it = item || {};
+  return [it.sheetId || "", it.tabName || "", it.rowIndex == null ? "" : it.rowIndex].join("|");
+}
+/** 남는 실패 안내 지우기 — 다음 제출·사진 넣기/빼기·단계/화면 이동 때. */
+function _rvFailNoticeClear() {
+  const el = document.getElementById("rvSubmitFailNotice");
+  if (el && typeof el.remove === "function") el.remove();
+}
+/** [제출하기] 바로 위에 남는 빨간 안내(결정 410). 모양은 첨부 칸의 「이미 제출했던 사진」 상자(_preRenderDup)와 같다. */
+function _rvFailNoticeShow(btn, title, lines, tail) {
+  _rvFailNoticeClear();
+  if (!btn || typeof document.createElement !== "function") return null;
+  const nav = typeof btn.closest === "function" ? btn.closest(".step-nav") : null;
+  const before = nav || btn;
+  const host = before && before.parentNode;
+  if (!host || typeof host.insertBefore !== "function") return null;
+  const el = document.createElement("div");
+  el.id = "rvSubmitFailNotice";
+  el.className = "rv-fail-notice";
+  if (el.setAttribute) { el.setAttribute("role", "alert"); el.setAttribute("aria-live", "assertive"); }
+  el.style.cssText = "margin-top:14px;padding:10px 12px;border-radius:9px;background:#FEF3F2;"
+    + "border:1px solid #F3C8C4;color:#B42318;font-size:.78rem;font-weight:700;line-height:1.5;word-break:keep-all";
+  el.innerHTML = `<i class="fas fa-circle-exclamation"></i> ${escHtml(title)}`
+    + (lines || []).filter(Boolean).map(l => `<div style="font-weight:500;margin-top:4px;color:#7F1D1D">${escHtml(l)}</div>`).join("")
+    + (tail ? `<div style="font-weight:500;font-size:.72rem;margin-top:7px;padding:8px 9px;border-radius:7px;background:#F7F8FA;color:#657083">${escHtml(tail)}</div>` : "");
+  host.insertBefore(el, before);
+  try { if (typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest", behavior: "smooth" }); } catch (_) {}
+  return el;
+}
+/** 완료 창 제목·[실패한 건 다시 내기] 단추 — 일부만 제출됐을 때만 바꾼다(그 밖엔 종전 모양 「제출 완료!」 · 단추 1개). */
+function _rvSuccessModalPrep(partialLeft) {
+  const modal = document.getElementById("successModal");
+  if (!modal || typeof modal.querySelector !== "function") return;
+  const h2 = modal.querySelector("h2");
+  if (h2) h2.textContent = partialLeft > 0 ? "일부만 제출됐어요" : "제출 완료!";
+  let rb = document.getElementById("btnSuccessRetryFailed");
+  if (!partialLeft) { if (rb && typeof rb.remove === "function") rb.remove(); return; }
+  const box = modal.querySelector(".modal-box");
+  if (!rb && box && typeof document.createElement === "function") {
+    rb = document.createElement("button");
+    rb.id = "btnSuccessRetryFailed";
+    rb.type = "button";
+    rb.className = "btn-ghost full-width";
+    rb.style.cssText = "width:100%;justify-content:center;margin-top:8px";
+    rb.addEventListener("click", _rvCloseForRetry);
+    box.appendChild(rb);
+  }
+  if (rb) rb.innerHTML = `<i class="fas fa-redo"></i> 닫고 실패한 ${partialLeft}건 다시 내기`;
+}
+/** 실패 안내 끝줄 — 사진·비고가 그대로라는 것 + (이유가 할 일을 말하지 않을 때만) 다시 누르라는 말. 마감(다시 눌러도 안 됨)이면 없음. */
+function _rvRetryTail(btn, closed, reason) {
+  if (closed) return "";
+  if (/다시 (눌러|제출해|선택|넣어|시도해)/.test(String(reason || ""))) return "넣은 사진과 비고는 그대로 있어요.";
+  const which = btn && btn.id === "btnSubmit" ? "[제출하기]를" : "아래 버튼을";
+  return `넣은 사진과 비고는 그대로 있어요. 확인한 뒤 ${which} 다시 눌러 주세요.`;
+}
+/** 완료 창을 닫고 제출 화면으로 — 실패한 건의 사진·비고는 그대로 있고, 제출된 건은 다시 올리지 않는다(S.mrDoneKeys). */
+function _rvCloseForRetry() {
+  hide("successModal");
+  _rvSuccessModalPrep(0);
+  const n = document.getElementById("rvSubmitFailNotice");
+  try { if (n && typeof n.scrollIntoView === "function") n.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (_) {}
+}
+
 async function _submitReviewSlots(item) {
+  _rvFailNoticeClear();   // ★ 결정 410 — 다음 제출을 누르면 지난 실패 안내를 지운다
+  _rvSuccessModalPrep(0);
   const slots = S.captureSlots || [];
   const submitted = new Set(Array.isArray(item.submittedSlots) ? item.submittedSlots : []);
   const slotSubmitTrigger = S.slotSubmitTrigger;
@@ -4290,6 +4402,7 @@ async function _submitReviewSlots(item) {
   const memo = document.getElementById("csMemo")?.value.trim() || "";
 
   const uploadErrors = [];
+  const uploadReasons = [];   // 결정 410 — 칸 이름 없는 이유만(칸이 하나일 때 안내)
   const slotOutcome = {};   // 자동 분류 결과: { stayed(그 칸에 남은 파일 있음), movedTo:[대상 슬롯키] }
   let replacedCurrent = false;
   let reviewUploadBatchId = null;
@@ -4331,7 +4444,7 @@ async function _submitReviewSlots(item) {
             mimeType: files[fi].type || "image/jpeg",
             data:     b64,
           }))
-        }, 180000);
+        }, 180000, { quiet: true });   // ★ 결정 410 — 실패는 이 화면이 한 번만 알린다(업로드 도구의 토스트 끔)
         replacedCurrent = replacedCurrent || !!(upRes && upRes.replacedCurrent);
         if (!upRes || (!upRes.ok && !upRes.success)) {
           // 전부 중복 반려로 실패한 경우 — 그 슬롯에 빨간 안내를 남기고 실패로 처리
@@ -4341,7 +4454,7 @@ async function _submitReviewSlots(item) {
             _csShowVerdict(slot.key, rj0.message || "이미 제출된 파일과 같아 등록되지 않았어요.", true);
             if (rj0.duplicate) _showDuplicateBlockModal(rj0.duplicate, document.getElementById('csSlot_' + slot.key));
           }
-          throw new Error(upRes?.error || "이미지 업로드 실패");
+          throw _rvFailErr(upRes, "사진을 올리지 못했어요. 잠시 후 다시 눌러 주세요.");
         }
         /* ★ AI 검수 결과(3단계) — 슬롯 형식이 다르면 그 자리에 경고를 띄우고 재첨부를 권한다.
            업로드는 이미 끝났고 제출도 막지 않는다(오탐으로 정당한 제출이 차단되는 쪽이 더 나쁘다).
@@ -4381,7 +4494,10 @@ async function _submitReviewSlots(item) {
           status.className = (bad || !stayed) ? "mr-slot-status wait" : "mr-slot-status ok";
         }
       } catch (slotErr) {
-        uploadErrors.push(`${slot.label || slot.key}: ${slotErr.message || "실패"}`);
+        const why = _rvFailReason(slotErr, "사진을 올리지 못했어요. 잠시 후 다시 눌러 주세요.");
+        uploadReasons.push(why);
+        uploadErrors.push(`${slot.label || slot.key}: ${why}`);
+        if (slotErr && slotErr.rvClosed) uploadErrors.closed = true;
         if (status) { status.textContent = "✗ 실패"; status.className = "mr-slot-status wait"; }
       }
     }
@@ -4390,7 +4506,10 @@ async function _submitReviewSlots(item) {
     //   **아무 오류도 없는데 "업로드 실패"로 돌아간다** — 올린 게 있을 때만 판정한다.
     if (slotsToUpload.length > 0 && uploadErrors.length === slotsToUpload.length) {
       hideLoading();
-      showToast("업로드 실패: " + uploadErrors.join(" / "), "error");
+      // ★ 결정 410 — 3.5초 토스트 대신 [제출하기] 위에 남는 안내(칸이 하나면 「칸이름:」 없이 이유만)
+      _rvFailNoticeShow(btn, "제출되지 않았어요",
+        slotsToUpload.length === 1 ? uploadReasons : uploadErrors,
+        _rvRetryTail(btn, uploadErrors.closed, uploadReasons.length === 1 ? uploadReasons[0] : ""));
       return;
     }
 
@@ -4425,7 +4544,7 @@ async function _submitReviewSlots(item) {
     hideLoading();
 
     if (!result || (!result.success && !result.ok)) {
-      throw new Error(result?.error || "제출 기록 실패");
+      throw _rvFailErr(result, "제출 기록을 남기지 못했어요. 잠시 후 다시 눌러 주세요.");
     }
 
     _clearSearchCache();
@@ -4493,13 +4612,15 @@ async function _submitReviewSlots(item) {
       show("successModal", "flex");
     }
     if (uploadErrors.length > 0) {
-      showToast("일부 업로드 실패: " + uploadErrors.join(" / "), "warning", 5000);
+      // ★ 결정 410 — 완료 창 안에서 어느 칸을 못 올렸는지·무엇을 하면 되는지(종전: 창 뒤 5초 토스트 「일부 업로드 실패」)
+      const sm = document.getElementById("successMessage");
+      if (sm) sm.innerHTML += `<br><span style="font-size:.82rem;color:#DC2626">올리지 못한 칸 — ${uploadErrors.map(escHtml).join(" / ")}</span>`
+        + `<br><span style="font-size:.78rem;color:#7F1D1D">리뷰 내역에서 이 건을 다시 열어 그 칸을 다시 제출해 주세요.</span>`;
     }
   } catch (err) {
     hideLoading();
-    const msg = (err.message && err.message !== "undefined" && err.message !== "null")
-      ? err.message : "제출에 실패했습니다. 네트워크를 확인하고 다시 시도해주세요.";
-    showToast("제출 실패: " + msg, "error");
+    const why = _rvFailReason(err, "제출하지 못했어요. 잠시 후 다시 눌러 주세요.");
+    _rvFailNoticeShow(btn, "제출되지 않았어요", [why], _rvRetryTail(btn, err && err.rvClosed, why));
     console.error("[submitReviewSlots] 오류:", err);
   } finally {
     btn.disabled = false;
@@ -4514,6 +4635,8 @@ async function _submitReviewSlots(item) {
 
 /* ── 리뷰 제출 ── */
 async function submitReview() {
+  _rvFailNoticeClear();   // ★ 결정 410 — 다음 제출을 누르면 지난 실패 안내를 지운다
+  _rvSuccessModalPrep(0);
   const items = S.selectedRows && S.selectedRows.length > 0 ? S.selectedRows : (S.selectedRow ? [S.selectedRow] : []);
   if (!items.length) { showToast("주문 정보를 다시 확인해주세요.", "error"); return; }
   if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 설정해주세요.", "error"); return; }
@@ -4577,12 +4700,16 @@ async function submitReview() {
   if (isMulti && progressWrap) progressWrap.classList.add("show");
 
   let successCount = 0;
-  const errors = [];
+  let alreadyDone = 0;
+  const errors = [];   // 결정 410 — { label, reason, closed } (종전 「1번 오류: …」 문자열)
   let replacedCurrent = false;
+  // ★ 결정 410(L4) — 여러 건 중 앞서 제출된 건은 다시 올리지 않는다([닫고 실패한 건 다시 내기] 뒤 다시 누름).
+  if (!S.mrDoneKeys) S.mrDoneKeys = new Set();
 
   try {
     for (let idx = 0; idx < items.length; idx++) {
       const item  = items[idx];
+      if (isMulti && S.mrDoneKeys.has(_rvItemKey(item))) { alreadyDone++; continue; }
       const files = isMulti ? (S.filesByIdx[idx] || []) : S.files;
       const memo  = isMulti
         ? (document.getElementById("mrMemo_" + idx)?.value.trim() || "")
@@ -4640,7 +4767,7 @@ async function submitReview() {
               mimeType: files[fi].type || "image/jpeg",
               data:     b64,
             }))
-          }, 180000);
+          }, 180000, { quiet: true });   // ★ 결정 410 — 실패는 이 화면이 한 번만 알린다(업로드 도구의 토스트 끔)
           replacedCurrent = replacedCurrent || !!(uploadResult && uploadResult.replacedCurrent);
           if (uploadResult && uploadResult.uploadBatchId) reviewUploadBatchId = uploadResult.uploadBatchId;
 
@@ -4651,7 +4778,7 @@ async function submitReview() {
               const _anchor = document.getElementById(isMulti ? 'mrSlot_' + idx : 'dropZone');
               _showDuplicateBlockModal(_rj0.duplicate, _anchor);
             }
-            throw new Error(uploadResult?.error || "이미지 업로드 실패");
+            throw _rvFailErr(uploadResult, "사진을 올리지 못했어요. 잠시 후 다시 눌러 주세요.");
           }
 
           // ── 자동 분류(파일 라우팅) 결과 반영: 리뷰 칸에 남은 파일이 없으면 제출을 기록하지 않는다 ──
@@ -4667,7 +4794,7 @@ async function submitReview() {
             }
             throw new Error(_rj ? (_rj.message || "이미 제출된 파일과 같아 등록되지 않았어요.")
               : _mv ? ((_mv.routed && _mv.routed.message) || "첨부한 이미지가 리뷰 캡처가 아닌 것으로 확인되어 옮겨졌어요. 리뷰 캡처를 다시 첨부해주세요.")
-              : "이미지 업로드 실패");
+              : "사진을 올리지 못했어요. 잠시 후 다시 눌러 주세요.");
           }
           const _rtMoved = _rtFiles.filter(r => r && r.routed).length;
           const _rtRejected = _rtFiles.filter(r => r && r.rejected).length;
@@ -4698,19 +4825,19 @@ async function submitReview() {
         hideLoading();
         if (result && (result.success || result.ok)) {
           successCount++;
+          if (isMulti) S.mrDoneKeys.add(_rvItemKey(item));
           // 슬롯 상태 표시
           if (isMulti) {
             const slotStatus = document.getElementById("mrSlotStatus_" + idx);
             if (slotStatus) { slotStatus.textContent = "✓ 완료"; slotStatus.className = "mr-slot-status ok"; }
           }
         } else {
-          const errMsg = result?.error || (result == null ? "서버 응답 없음" : "알 수 없는 오류");
-          throw new Error(errMsg);
+          throw _rvFailErr(result, "제출 기록을 남기지 못했어요. 잠시 후 다시 눌러 주세요.");
         }
       } catch (itemErr) {
         hideLoading();
-        const msg = (itemErr.message && itemErr.message !== "undefined") ? itemErr.message : "제출 실패";
-        errors.push(`${idx+1}번 오류: ${msg}`);
+        errors.push({ label: _rvItemLabel(item, idx),
+          reason: _rvFailReason(itemErr, "제출하지 못했어요. 잠시 후 다시 눌러 주세요."), closed: !!(itemErr && itemErr.rvClosed) });
         console.error(`[submitReview] ${idx+1}번 실패:`, itemErr);
         if (isMulti) {
           const slotStatus = document.getElementById("mrSlotStatus_" + idx);
@@ -4721,34 +4848,56 @@ async function submitReview() {
 
     // 진행 바 완료
     if (isMulti && progressFill)  progressFill.style.width  = "100%";
-    if (isMulti && progressLabel) progressLabel.textContent  = `완료: ${successCount}/${items.length}건`;
+    if (isMulti && progressLabel) progressLabel.textContent  = `완료: ${successCount + alreadyDone}/${items.length}건`;
 
-    if (successCount > 0) {
+    const btnNow = document.getElementById("btnSubmit") || btn;
+    const retryable = errors.filter(e => !e.closed).length;
+    const allClosed = errors.length > 0 && retryable === 0;
+    if (successCount > 0 || (alreadyDone > 0 && errors.length === 0)) {
       _clearSearchCache();
       const reviewerName = items[0].displayName || "이름없음";
+      // ★ 결정 410(L4) — 일부 실패면 어느 건이 왜 안 됐는지·무엇을 하면 되는지(종전: 「1건 실패 (콘솔 확인)」)
+      const failBox = errors.length > 0
+        ? `<div style="margin-top:12px;padding:10px 12px;border-radius:9px;background:#FEF3F2;border:1px solid #F3C8C4;color:#B42318;font-size:.78rem;font-weight:700;line-height:1.5;text-align:left;word-break:keep-all">`
+          + `제출되지 않은 건 ${errors.length}건`
+          + errors.map(e => `<div style="font-weight:500;margin-top:4px;color:#7F1D1D">${escHtml(e.label)}: ${escHtml(e.reason)}</div>`).join("")
+          + (retryable > 0
+            ? `<div style="font-weight:500;font-size:.72rem;margin-top:7px;color:#657083">아래 [닫고 실패한 ${retryable}건 다시 내기]를 누르면 그 건만 다시 제출해요. 제출된 건은 다시 올리지 않아요.</div>`
+            : "")
+          + `</div>`
+        : "";
       const successMsg = isMulti
-        ? `<strong>${escHtml(reviewerName)}</strong>님의 리뷰 <b>${successCount}건</b>이 제출되었습니다 😊`
-          + (errors.length > 0 ? `<br><span style="color:#DC2626;font-size:.82rem">${errors.length}건 실패 (콘솔 확인)</span>` : "")
+        ? `<strong>${escHtml(reviewerName)}</strong>님의 리뷰 <b>${successCount || alreadyDone}건</b>이 제출되었습니다 😊` + failBox
         : (replacedCurrent
             ? '현재 건의 리뷰 캡처를 교체하였습니다.'
             : `<strong>${escHtml(reviewerName)}</strong>님의 리뷰가 제출되었습니다 😊`);
       document.getElementById("successMessage").innerHTML = successMsg;
+      if (isMulti && errors.length > 0) {
+        _rvFailNoticeShow(btnNow, `${errors.length}건은 제출되지 않았어요`, errors.map(e => `${e.label}: ${e.reason}`),
+          retryable > 0 ? "넣은 사진과 비고는 그대로 있어요. 제출된 건은 다시 올리지 않으니, 확인한 뒤 아래 버튼을 다시 눌러 주세요." : "");
+      }
+      _rvSuccessModalPrep(isMulti ? retryable : 0);
       show("successModal", "flex");
     } else {
-      showToast("모든 제출에 실패했습니다: " + errors.join(" / "), "error");
+      // ★ 결정 410 — 모두 실패: 3.5초 토스트 대신 [제출하기] 위에 남는 안내 · 한 건이면 「1번」·「모든」 없이
+      _rvFailNoticeShow(btnNow, isMulti ? "리뷰가 제출되지 않았어요" : "제출되지 않았어요",
+        isMulti ? errors.map(e => `${e.label}: ${e.reason}`) : errors.map(e => e.reason),
+        isMulti ? (allClosed ? "" : "넣은 사진과 비고는 그대로 있어요. 확인한 뒤 아래 버튼을 다시 눌러 주세요.") : _rvRetryTail(btnNow, allClosed, errors[0] && errors[0].reason));
     }
 
   } catch (err) {
     hideLoading();
-    const displayMsg = (err.message && err.message !== "undefined" && err.message !== "null")
-      ? err.message
-      : "제출에 실패했습니다. 네트워크를 확인하고 다시 시도해주세요.";
-    showToast("제출 실패: " + displayMsg, "error");
+    const why = _rvFailReason(err, "제출하지 못했어요. 잠시 후 다시 눌러 주세요.");
+    _rvFailNoticeShow(btn, "제출되지 않았어요", [why], _rvRetryTail(btn, err && err.rvClosed, why));
     console.error("[submitReview] 전체 오류:", err);
   } finally {
     btn.disabled = false;
+    // ★ 결정 410(L4) — 일부만 제출됐으면 남은 건만 다시 낸다는 것을 버튼에 적는다
+    const left = isMulti && S.mrDoneKeys ? items.filter(it => !S.mrDoneKeys.has(_rvItemKey(it))).length : 0;
     btn.innerHTML = isMulti
-      ? `<i class="fas fa-paper-plane"></i> ${items.length}건 제출하기`
+      ? (left > 0 && left < items.length
+        ? `<i class="fas fa-redo"></i> 실패한 ${left}건 다시 제출하기`
+        : `<i class="fas fa-paper-plane"></i> ${items.length}건 제출하기`)
       : '<i class="fas fa-paper-plane"></i> 제출하기';
     if (isMulti && progressWrap) setTimeout(() => progressWrap.classList.remove("show"), 2000);
   }
@@ -4756,6 +4905,8 @@ async function submitReview() {
 
 function resetApp() {
   _preSubmitGen++;
+  _rvFailNoticeClear();   // 결정 410
+  S.mrDoneKeys = new Set();
   hide("successModal");
   S.files = []; S.selectedRow = null; S.selectedRows = []; S.filesByIdx = {}; S.memoByIdx = {};
   S.filesBySlot = {}; S.captureSlots = null; S.receiptStepMode = false; S.slotSubmitTrigger = null;
@@ -11097,6 +11248,7 @@ function _reviewPhotoSendCheck(list, where) {
 /** ★ 넣는 길 3곳의 공용 몸통 — 고른 파일을 줄인 뒤(보낼 모양으로) 규칙을 보고 list 에 넣는다. 넣은 장수를 돌려준다.
  *  넣지 못한 파일은 이유를 쉬운 말로 알린다(조용히 버리지 않는다). */
 async function _reviewPhotoAdd(list, files) {
+  _rvFailNoticeClear();   // ★ 결정 410 — 사진을 바꾸면 지난 실패 안내를 지운다(빼기 3곳도 같다)
   const R = _reviewPhotoRules();
   let added = 0;
   for (const f of (files || [])) {
