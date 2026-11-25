@@ -1933,7 +1933,10 @@ function _rvDraftSync(arm) {
 function _rvDraftStart(kept) {
   try {
     const w = _rvWin(); if (!w || !w._enteredFromDirectSubmit) return;
-    w._rvDraft = { done: false, keepOff: false };
+    // ★ 결정 413 후속 — 이 문서가 어느 건의 제출 화면인지(이어서 보기 칸의 대상) 기억 — 「앞으로/뒤로」로 되살아날 때 대조한다.
+    let itemsKey = "";
+    try { const k0 = JSON.parse(sessionStorage.getItem("iad_direct_submit_keep_v1") || "null"); itemsKey = k0 && Array.isArray(k0.items) ? JSON.stringify(k0.items) : ""; } catch (_) {}
+    w._rvDraft = { done: false, keepOff: false, itemsKey };
     w._rvLeaving = false;
     const m = kept && kept.memo;
     if (m) {
@@ -1948,7 +1951,19 @@ function _rvDraftStart(kept) {
         if (id === "memoTxt" || id === "csMemo" || /^mrMemo_\d+$/.test(id)) _rvDraftSync();
       }, true);
       // 떠난 화면이 「앞으로」로 저장된 채 되살아나면(이미 비운 칸) 홈으로 — 지난 사진이 남은 화면을 다시 보이지 않는다.
-      w.addEventListener("pageshow", (e) => { if (e && e.persisted && w._rvLeaving) { try { w.location.replace("/"); } catch (_) {} } });
+      //   ★ 결정 413 후속(아이폰 실기) — 떠난 적이 없어도, 이어서 보기 칸이 비었거나(제출·나가기로 끝난 건) 다른 건으로 바뀌었으면
+      //   그 문서는 지난 화면이다 — 홈으로. (아이폰 사파리는 한참 전 제출 화면도 저장해 두었다가 [뒤로]에 그대로 되살린다.)
+      w.addEventListener("pageshow", (e) => {
+        if (!e || !e.persisted) return;
+        let stale = !!w._rvLeaving;
+        const d = w._rvDraft;
+        if (!stale && d && !d.done) {
+          let cur = "";
+          try { const k = JSON.parse(sessionStorage.getItem("iad_direct_submit_keep_v1") || "null"); cur = k && Array.isArray(k.items) ? JSON.stringify(k.items) : ""; } catch (_) {}
+          stale = !cur || (!!d.itemsKey && cur !== d.itemsKey);
+        }
+        if (stale) { try { w.location.replace("/"); } catch (_) {} }
+      });
       w.addEventListener("pagehide", () => { if (w._rvLeaveTimer) { clearTimeout(w._rvLeaveTimer); w._rvLeaveTimer = null; } });
     }
     if (kept && Number(kept.photos) > 0) showToast("새로고침해서 넣은 사진이 지워졌어요. 사진을 다시 넣어 주세요.", "warning");

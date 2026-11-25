@@ -437,6 +437,24 @@ test('L1-9 틀(iframe) 안·도우미가 없을 때는 방문 기록을 건드�
 });
 
 /* ═══ 정적 — 배선·한 벌·배포 스큐 ═══ */
+test('L1-10 아이폰 실기: 저장돼 있던 지난 제출 화면이 [뒤로]로 되살아나면(그 건은 이미 끝났거나 다른 건으로 바뀜) 홈으로 — 같은 건이면 그대로', async () => {
+  const fire = (w) => (w.B.listeners.pageshow || []).forEach((f) => f({ persisted: true }));
+  // ① 같은 건 그대로 — 남는다
+  const w1 = world({ handoff: [ITEM_A] }); await w1.boot(); w1.typeMemo('배송이 빨랐어요');
+  fire(w1); await settle();
+  assert.equal(w1.B.left, null, '같은 건의 화면이 되살아나면 그대로 둔다');
+  // ② 그 건이 끝남(이어서 보기 칸 비움 — 다른 문서에서 나가기·제출) — 홈으로
+  const w2 = world({ handoff: [ITEM_A] }); await w2.boot(); w2.typeMemo('배송이 빨랐어요');
+  w2.ss.removeItem('iad_direct_submit_keep_v1');
+  fire(w2); await settle();
+  assert.ok(w2.B.left && /\/$/.test(new URL(w2.B.left).pathname), '★ 끝난 건의 지난 화면은 홈으로 — 실제: ' + w2.B.left);
+  // ③ 다른 건으로 바뀜 — 홈으로
+  const w3 = world({ handoff: [ITEM_A] }); await w3.boot();
+  const k = JSON.parse(w3.ss.getItem('iad_direct_submit_keep_v1')); k.items = [ITEM_B]; w3.ss.setItem('iad_direct_submit_keep_v1', JSON.stringify(k));
+  fire(w3); await settle();
+  assert.ok(w3.B.left, '★ 다른 건이 열려 있으면 지난 건 화면은 홈으로');
+});
+
 test('S-1 search.html 은 도우미를 search-app.js 보다 먼저 싣고 둘 다 ?v= 를 올렸다 · 머리 스크립트는 새로고침 칸도 가린다', () => {
   const tags = [...HTML.matchAll(/<script src="([^"]+)"><\/script>/g)].map((m) => m[1]);
   const iH = tags.findIndex((t) => /^js\/reviewer-sheet-back\.js\?v=/.test(t));
