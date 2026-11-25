@@ -21,6 +21,7 @@ const shareLinks = require('../services/shareLink.service');   // 작업보드·
 const { isTrackingField } = require('../utils/trackingColumn');   // 택배송장 열 판정 단일 출처(사본 금지)
 const { addClient: addSseClient } = require('../utils/sse');
 const shortLinkSvc = require('../services/shortLink.service');
+const advWorkLinks = require('../services/advertiserWorkLink.service');   // 업체 작업 링크 단축 주소(229 · 결정 419)
 // ★ 이 파일은 예전부터 `logger` 를 최상위 import 없이 써 왔다(review-inspect 목록 실패 경로) —
 //   그 자리는 평소 안 타서 드러나지 않았을 뿐 ReferenceError 였다. 여기서 함께 바로잡는다.
 const { logger } = require('../utils/logger');
@@ -739,7 +740,15 @@ router.post('/advertiser-link', authMiddleware, internalMiddleware, async (req, 
       if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
       const owner = await svc.advertiserForTab({ sheetId: String(sheetId), tabName: String(tabName) });
       if (!owner) return res.json({ ok: true, advertiser: null, link: null });
-      return res.json({ ok: true, advertiser: owner, link: await svc.ensureAdvertiserLink({ advertiserId: owner.id, by: _by(req) }) });
+      const link = await svc.ensureAdvertiserLink({ advertiserId: owner.id, by: _by(req) });
+      /* ★ 결정 419: 카톡에서 안 끊기는 단축 주소 코드도 함께 준다(살아 있는 링크일 때만).
+         실패·표 없음(229 미적용)이면 shortCode 를 빼고 — 화면은 종전 긴 주소로 복사한다(fail-soft). */
+      let shortCode;
+      if (link && link.token && link.active !== false) {
+        try { shortCode = (await advWorkLinks.ensureWorkLink({ token: link.token, sheetId, tabName, by: _by(req) })).code; }
+        catch (e) { logger.warn(`[advertiser-work-link] 단축 주소 생략(긴 주소로 복사): ${e && e.message}`); }
+      }
+      return res.json({ ok: true, advertiser: owner, link, ...(shortCode ? { shortCode } : {}) });
     }
     if (action === 'generate') { const o = await svc.generateAdvertiserLink({ advertiserId, by: _by(req) }); return res.status(o.ok ? 200 : (o.code || 400)).json(o); }
     if (action === 'revoke') { const o = await svc.setAdvertiserLinkActive({ advertiserId, active: false, by: _by(req) }); return res.status(o.ok ? 200 : (o.code || 400)).json(o); }
@@ -757,6 +766,21 @@ router.post('/advertiser-link', authMiddleware, internalMiddleware, async (req, 
 router.post('/advertiser-link-login', advertiserLinkLimiter, async (req, res, next) => {
   try { res.json(await authSvc.loginByLinkToken((req.body || {}).token)); }
   catch (err) { next(err); }
+});
+
+// ── 업체 작업 단축 주소 되찾기(공개·무인증 · 결정 419) — `#k=<code>` → 원래의 접속 열쇠 + 작업 좌표.
+//   ★★ 여기서 입장을 판정하지 않는다(사본 금지) — 화면이 돌려받은 열쇠로 위 교환을 그대로 탄다.
+//      폐기·회전·업체 종료·합치기 별칭은 전부 그 교환(loginByLinkToken) 한 곳이 정한다.
+//   ★ 교환과 같은 레이트리밋(IP당 분당 30회) — 코드 추측을 막는다.
+router.post('/advertiser-work-link/resolve', advertiserLinkLimiter, async (req, res, next) => {
+  try {
+    const row = await advWorkLinks.resolveWorkLink((req.body || {}).code);
+    if (!row) return res.status(404).json({ ok: false, code: 'not_found', error: '링크를 찾을 수 없습니다.' });
+    res.json({ ok: true, token: row.token, work: { s: row.sheetId, t: row.tabName } });
+  } catch (err) {
+    if (advWorkLinks.notReady(err)) return res.status(404).json({ ok: false, code: 'not_found', error: '링크를 찾을 수 없습니다.' });
+    next(err);
+  }
 });
 
 // ── 광고주(거래처) 로그인 계정 관리 — master/admin. (옛 /api/admin/advertiser-users 는 2026-10-04 제거 — 결정 186 95번) 로직을

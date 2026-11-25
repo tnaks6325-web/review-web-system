@@ -85,6 +85,7 @@ const DELETE_TABLES = [
   'trackb_cell_colors',
   'trackb_custom_columns',
   'trackb_share_links',
+  'trackb_advertiser_work_links',   // 229 — 업체 작업 단축 주소(결정 419: 작업을 지우면 그 작업으로 가는 주소도 지운다)
   'tab_configs',
 ];
 
