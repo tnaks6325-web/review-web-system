@@ -3330,6 +3330,22 @@ async function boot(){
   //     ★ 대신 logout 이 해시를 지운다 — 안 지우면 로그아웃 직후 boot 이 다시 교환해 **로그아웃이 안 된다**.
   //   ★ 짧은 키 `#a=` 우선, 이미 뿌린 `#adv=` 링크도 계속 받는다(하위호환 — 폴백 제거 금지).
   //     정규식 `[#&]a=` 는 `#adv=` 를 매칭하지 않는다(a 다음이 = 여야 한다) — 두 키가 서로를 삼키지 않는다.
+  // ★ 결정 419: 업체 작업 단축 주소(`#k=<code>`) — 서버에서 원래 열쇠+작업 좌표를 되찾아 주소를 `#a=…&work=…` 로
+  //   바꾼 뒤 **아래 기존 교환·작업 열기를 그대로 탄다**(입장 판정 사본 0 — 폐기·회전은 교환이 막는다).
+  //   못 되찾으면 문구 없는 로그인 화면으로 흘리지 않는다(조용한 실패 금지).
+  const advk=(location.hash||'').match(/[#&]k=([A-Za-z0-9_-]{8,64})(?:&|$)/);
+  if(advk){
+    let rk=null, net=false;
+    try{ const resp=await fetch(API_BASE+'/api/trackb/advertiser-work-link/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:advk[1]})});
+      rk=await resp.json().catch(()=>null); if(!(resp.status===404)&&!(rk&&rk.ok)) net=true; }catch(_){ net=true; }
+    if(!(rk&&rk.ok&&typeof rk.token==='string'&&rk.token))
+      return renderLogin(net?'접속 링크를 확인하지 못했습니다. 잠시 뒤 새로고침해 주세요.':'접속 링크가 유효하지 않거나 폐기되었습니다. 담당자에게 문의하세요.');
+    const w=rk.work&&typeof rk.work.s==='string'&&typeof rk.work.t==='string'?{sheetId:rk.work.s,tabName:rk.work.t}:null;
+    const full=_advWorkLinkUrl(rk.token,w), h=full.slice(full.indexOf('#'));
+    try{ history.replaceState(history.state,'',location.pathname+location.search+h); }catch(_){ }
+    if(location.hash!==h){ try{ location.hash=h; }catch(_){ } }
+    _ADV_WORK=_readAdvertiserWork(location.hash);
+  }
   const advm=(location.hash||'').match(/[#&]a=([^&]+)/)||(location.hash||'').match(/[#&]adv=([^&]+)/);
   if(advm){ let t=null; try{ t=decodeURIComponent(advm[1]); }catch(_){ }
     // ★ 주소가 깨져 토큰을 못 읽으면 **문구 없는 로그인 화면으로 흘리지 않는다**(조용한 실패 금지).
@@ -3505,7 +3521,9 @@ async function copyAdvertiserLink(i){
   if(!lk||!lk.token){ alert('광고주 링크를 불러오지 못했습니다: '+((r&&r.error)||'서버 오류')); return; }
   const name=(r.advertiser&&r.advertiser.name)||'업체';
   if(lk.active===false){ alert(`"${name}" 광고주 링크는 폐기된 상태라 복사하지 않았습니다.\n업체관리 → ${name} → 광고주 접속 링크에서 [다시 활성] 후 사용하세요.`); return; }
-  const url=_advWorkLinkUrl(lk.token,work);
+  // ★ 결정 419: 서버가 단축 코드를 주면 짧은 주소(`#k=`) — 긴 주소는 작업 이름의 `)` 에서 카톡 링크가 끊겼다.
+  //   코드가 없으면(옛 서버·표 없음·만들기 실패) 종전 긴 주소로 복사한다(fail-soft).
+  const url=(typeof r.shortCode==='string'&&/^[A-Za-z0-9_-]{8,64}$/.test(r.shortCode))?_advShortLinkUrl(r.shortCode):_advWorkLinkUrl(lk.token,work);
   // ★ 성공 알림에도 노출 범위를 말한다 — 경고가 마우스 올림(title)에만 있으면 터치 화면·평소 경로에서 못 본다(Codex 리뷰 P2).
   if(await _copyText(url)){ _shareLinkOk(`"${name}" 광고주 링크가 복사되었습니다`,
     '이 업체의 모든 작업(리뷰어 연락처·주소 포함)이 보이니 광고주에게만 전달하세요'); return; }
@@ -20581,6 +20599,8 @@ async function createAdvertiser(){
 // ── 광고주 전용 접속 링크(매직 링크) — master/admin 만. 광고주는 이 링크만 열면 로그인 없이
 //   이 업체 뷰(소유 탭·마스킹·읽기전용)로 진입. 유출 대비 회전/폐기 가능. 링크 CRUD = /api/trackb/advertiser-link. ──
 function _advLinkUrl(token){ return location.origin + '/workdesk#a=' + encodeURIComponent(token); }
+// 업체 작업 단축 주소(결정 419) — 받은 화면이 boot 에서 서버로 원래 열쇠+작업 좌표를 되찾는다.
+function _advShortLinkUrl(code){ return location.origin + '/workdesk#k=' + encodeURIComponent(code); }
 function _advWorkLinkUrl(token,work){
   const url=_advLinkUrl(token);
   return work&&work.sheetId&&work.tabName ? url+'&work='+encodeURIComponent(JSON.stringify({s:work.sheetId,t:work.tabName})) : url;
