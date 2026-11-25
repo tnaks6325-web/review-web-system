@@ -311,6 +311,22 @@ test('L4-1 2건 중 2번만 실패 → 완료 창에 「2번 상품B (파랑): �
   assert.equal(h.dom.icon.className, 'fas fa-check', '다 되면 확인 표시로 되돌림');
 });
 
+
+test('L4-1b 리뷰 지적(PR #1874): 다시 내기 전에 이미 제출된 건의 사진을 빼도 실패한 건만 다시 올라간다(제출된 건은 확인에서 뺀다)', async () => {
+  let failB = true;
+  const h = harness({ rows: rows2(), upload: (p) => (failB && p.rowIndex === 6 ? { ok: false, error: '서버 응답 파싱 실패 (HTTP 502)', _httpStatus: 502 } : { ok: true, uploadBatchId: 'b' + p.rowIndex, files: p.files.map((f, k) => ({ fileId: 'f' + k })) }) });
+  h.g.S.filesByIdx = { 0: [fo('a')], 1: [fo('b')] };
+  await h.g.submitReview();
+  h.dom.byId.btnSuccessRetryFailed.listeners.click();
+  h.g.S.filesByIdx[0] = [];            // 제출된 1번의 사진을 빼 버림
+  failB = false;
+  const before = h.calls.upload.length;
+  const toastsBefore = h.calls.toast.length;
+  await h.g.submitReview();
+  assert.deepEqual(h.calls.upload.slice(before).map((p) => p.rowIndex), [6], '★ 실패한 2번만 다시 올라간다');
+  assert.ok(!h.calls.toast.slice(toastsBefore).some((m) => /이미지가 없습니다|1장 이상/.test(m)), '제출된 건의 빈 사진으로 막지 않는다');
+});
+
 test('L4-2 여러 건이 모두 실패하면 남는 안내에 건마다 이름·이유(「모든 제출에 실패」·「1번 오류」 없음)', async () => {
   const h = harness({ rows: rows2(), upload: (p) => (p.rowIndex === 5 ? { ok: false, networkError: true, error: '업로드가 중단되었습니다. 네트워크 연결을 확인하세요.', _transport: true } : { ok: false, error: 'boom', _httpStatus: 500 }) });
   h.g.S.filesByIdx = { 0: [fo('a')], 1: [fo('b')] };

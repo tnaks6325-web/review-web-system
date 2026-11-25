@@ -4666,10 +4666,15 @@ async function submitReview() {
      ★ 127(사용자 확정 2026-08-19): 블로그도 **캡처 + 포스팅URL 둘 다** 필수 — M4-2 의
        "사진 0장 허용"을 뒤집었다. URL 형식 검증도 그 자리에서(서버가 최종 방어).
      ★ 판정은 행마다(다건은 서로 다른 작업일 수 있다). 리뷰체험단 규칙은 종전 그대로. */
+  // ★ 결정 410 후속(PR #1874 리뷰) — 앞서 제출된 건은 제출 전 확인(빈 사진·블로그 주소·크기)에서도 뺀다.
+  //   안 빼면 다시 내기 전에 제출된 건의 사진을 빼기만 해도 실패한 건을 다시 낼 수 없다(막다른 길).
+  const _rvDone = (it) => !!(S.mrDoneKeys && S.mrDoneKeys.has(_rvItemKey(it)));
   if (isMulti) {
     const badUrl = [];
     const emptySlots = [];
+    const pending = items.filter((it) => !_rvDone(it)).length;
     items.forEach((it, idx) => {
+      if (_rvDone(it)) return;
       if (_isBlogItem(it)) {
         const m = document.getElementById("mrMemo_" + idx)?.value.trim() || "";
         if (!_isPostUrl(m)) badUrl.push(idx + 1);
@@ -4679,7 +4684,7 @@ async function submitReview() {
     if (badUrl.length) {
       showToast(`${badUrl.join(", ")}번: ${_BLOG_POST_URL_HINT}`, "warning"); return;
     }
-    if (emptySlots.length && emptySlots.length === items.length) {
+    if (emptySlots.length && emptySlots.length === pending) {
       showToast("각 리뷰마다 이미지를 1장 이상 첨부해주세요.", "warning"); return;
     }
     if (emptySlots.length > 0) {
@@ -4696,6 +4701,7 @@ async function submitReview() {
   // ★ 결정 408: 크기는 **보낼(줄인 뒤) 사진**으로 — 건마다 업로드 1번이라 건마다 본다. 올리기 전에 전부 본다
   //   (종전엔 원본 크기 합 15MB 를 업로드 반복 안에서 던져 「모든 제출에 실패했습니다: 1번 오류:」로 나왔다).
   for (let idx = 0; idx < items.length; idx++) {
+    if (isMulti && _rvDone(items[idx])) continue;
     const big = _reviewPhotoSendCheck(isMulti ? (S.filesByIdx[idx] || []) : S.files, isMulti ? `${idx + 1}번 리뷰의 ` : '');
     if (big) { showToast(big, "warning"); return; }
   }
