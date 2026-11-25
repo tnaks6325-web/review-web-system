@@ -628,14 +628,19 @@ router.post('/review-upload', reviewUploadLimiter, async (req, res, next) => {
        정상 제출마다 형식 불일치 경고·관리자 알림·자동 이동을 만든다. 리뷰 칸의 업로드 검수만 건너뛴다
        (같은 파일 검사는 2차 검수가 그대로 본다). 판정 실패·미등록 탭 = false = 종전 동작. */
     // ★★ 네이버예약리뷰(결정 404)도 같은 격리 — 리뷰 칸에 올라오는 것은 매장 방문 리뷰라 상품 리뷰 화면 판정이 성립하지 않는다(4단계 전까지).
+    // ★★ 영수증리뷰(결정 418)도 같은 격리 — 리뷰 칸에 올라오는 것은 네이버 영수증 리뷰라 상품 리뷰 화면 판정이 성립하지 않는다(4단계 전까지).
+    //   현금영수증 칸(_slotRole 'receipt' · 아래 `_isReceiptUpload` = **현금영수증 칸** 판정)은 이 격리와 무관 — 종전대로 검사한다.
+    //   ★ 그래서 이름이 `_isReceiptReviewUpload` 다(체험단 종류 축) — 현금영수증 칸 축 `_isReceiptUpload` 와 섞지 않는다.
     let _isQnaUpload = false;
     let _isBookingUpload = false;
+    let _isReceiptReviewUpload = false;
     try {
       const _wk = require('../utils/workKind');
       const _wkUp = await require('../services/workKindContext.service').workKindForTab({ sheetId, tabName });
       _isQnaUpload = _wk.isQnaKind(_wkUp);
       _isBookingUpload = _wk.isBookingKind(_wkUp);
-    } catch (_) { _isQnaUpload = false; _isBookingUpload = false; }
+      _isReceiptReviewUpload = _wk.isReceiptKind(_wkUp);
+    } catch (_) { _isQnaUpload = false; _isBookingUpload = false; _isReceiptReviewUpload = false; }
 
     let slotLabel = null;
     if (slot !== 'review') {
@@ -826,7 +831,7 @@ router.post('/review-upload', reviewUploadLimiter, async (req, res, next) => {
         // ── 3단계 AI 검수: 이 슬롯에 맞는 형식인지 판별(fail-open — 업로드는 이미 끝났고 막지 않는다) ──
         let verdict = null;
         try {
-          if (!((_isQnaUpload || _isBookingUpload) && _slotRole === 'review')) verdict = await verifyCapture({
+          if (!((_isQnaUpload || _isBookingUpload || _isReceiptReviewUpload) && _slotRole === 'review')) verdict = await verifyCapture({
             base64: file.data, mimeType: file.mimeType || 'image/jpeg',
             // ★ 행 우선 유효 리뷰타입 — 혼합 탭의 구매확정 행은 구매확정 화면이 정상 제출이다.
             slotKey: _slotRole, companyBusinessNo: _companyBizNo, reviewType: _effReviewType,

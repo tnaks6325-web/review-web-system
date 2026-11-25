@@ -111,15 +111,18 @@ const WO = (mut, top = {}) => { const p = place(); if (mut) mut(p); return { id:
   console.log('\n③ 준비 중 장치(다음 종류용)');
   {
     const wk = require('../src/utils/workKind');
-    t('★ 지금 목록은 비어 있다(booking 개방)', Array.isArray(wk.NOT_READY_WORK_KINDS) && wk.NOT_READY_WORK_KINDS.length === 0 && wk.isWorkKindReady('booking'));
+    // 결정 418 — 목록에 영수증리뷰(receipt)가 들어갔다: 「booking 개방」 = 목록에 booking 없음(의미 불변)
+    const shipped = wk.NOT_READY_WORK_KINDS.slice();
+    t('★ 지금 목록에 booking 이 없다(booking 개방)', Array.isArray(wk.NOT_READY_WORK_KINDS) && !wk.NOT_READY_WORK_KINDS.includes('booking') && wk.isWorkKindReady('booking'));
     wk.NOT_READY_WORK_KINDS.push('booking');
     try {
       const body = wk.workKindNotReadyBody('booking');
       t('★ 목록에 넣으면 장치가 그대로 거절한다(판정 · 409 본문 · 한국어 안내)', wk.isWorkKindReady('booking') === false && body.code === 'work_kind_not_ready'
         && /네이버예약리뷰는 아직 리뷰웹에서 진행할 수 없습니다/.test(body.error));
-    } finally { wk.NOT_READY_WORK_KINDS.length = 0; }
+    } finally { wk.NOT_READY_WORK_KINDS.length = 0; wk.NOT_READY_WORK_KINDS.push(...shipped); }
     const src = S('src/utils/workKind.js');
-    t('목록 선언은 빈 배열 그대로(장치 삭제 금지)', /const NOT_READY_WORK_KINDS = \[\];/.test(src));
+    const decl = src.match(/const NOT_READY_WORK_KINDS = \[([^\]]*)\];/);
+    t('목록 선언은 배열 그대로 · booking 은 없다(장치 삭제 금지 · 결정 418 영수증리뷰는 들어갈 수 있다)', !!decl && !/booking/.test(decl[1]));
   }
 
   /* ④ 구매수량 단계 문구 */

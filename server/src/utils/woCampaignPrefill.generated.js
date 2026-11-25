@@ -144,7 +144,13 @@ function _woIsBookingKind(raw) {
   return v === 'booking' || /네이버\s*예약\s*리뷰|예약자\s*리뷰|예약리뷰|\bbooking\b/i.test(v);
 }
 
-function _woHasNoReviewType(raw) { return _woIsBlogKind(raw) || _woIsQnaKind(raw) || _woIsBookingKind(raw); }
+function _woIsReceiptKind(raw) {
+  const v = String(raw == null ? '' : raw).trim();
+  if (!v || _woIsBlogKind(v) || _woIsQnaKind(v) || _woIsBookingKind(v)) return false;
+  return v === 'receipt' || /(?:^|[^가-힣]|네이버)\s*영수증\s*(?:인증\s*)?리뷰|\breceipt\b/i.test(v.replace(/(?:현금|지출\s*증빙\s*용?)\s*영수증|\bcash[\s_-]*receipts?\b/gi, ' '));
+}
+
+function _woHasNoReviewType(raw) { return _woIsBlogKind(raw) || _woIsQnaKind(raw) || _woIsBookingKind(raw) || _woIsReceiptKind(raw); }
 
 function _woCleanProductOption(raw, productUrl) {
   if (!raw || !String(raw).trim()) return "";
@@ -602,4 +608,4 @@ function _woCampaignPrefill(o) {
   return prefill;
 }
 
-module.exports = { _driveId, _woPickSections, _woCleanGuide, _woProductLines, _woManagerNick, _woIsBlogKind, _woIsQnaKind, _woIsBookingKind, _woHasNoReviewType, _woCleanProductOption, _woGuideUrls, _woNormName, _woDeliveryBase, _woChannelFromUrl, _woChannel, _woProductMode, _woProductUnitSrc, _woUnitGuide, _woOptionRows, _woPlainGuideToHtml, _woReviewImgHtml, _woGuideImages, _woBuildInflowHtml, _woStripReviewMeta, _woFirstProductInfo, _woDualChannelProduct, _woCampaignPrefill };
+module.exports = { _driveId, _woPickSections, _woCleanGuide, _woProductLines, _woManagerNick, _woIsBlogKind, _woIsQnaKind, _woIsBookingKind, _woIsReceiptKind, _woHasNoReviewType, _woCleanProductOption, _woGuideUrls, _woNormName, _woDeliveryBase, _woChannelFromUrl, _woChannel, _woProductMode, _woProductUnitSrc, _woUnitGuide, _woOptionRows, _woPlainGuideToHtml, _woReviewImgHtml, _woGuideImages, _woBuildInflowHtml, _woStripReviewMeta, _woFirstProductInfo, _woDualChannelProduct, _woCampaignPrefill };

@@ -243,12 +243,13 @@ function handlerOf(router, method, p) {
                   ('가짜둘', '01033334444', '가짜은행', '000-0000-0002', '가짜둘', '서울 가짜구')`);
   /* ★ 결정 414: booking 개방 — 신청 안전벨트 장치는 다음 종류용으로 남는다. 시험 안에서만 booking 을 준비 중으로 되돌려
        「준비 중이면 잠금 전에 거절」을 그대로 보고(검사 의미 불변), 다시 비워 흐름을 돈다. */
-  t('★★ 배포 그대로: 준비 중 목록이 비어 있다(booking 개방)', wk.NOT_READY_WORK_KINDS.length === 0 && wk.isWorkKindReady('booking') === true);
+  // 결정 418 — 준비 중 목록에 영수증리뷰(receipt)가 들어갔다: 「booking 개방」 = 목록에 booking 없음 · 끝나면 배포 그대로 목록으로(의미 불변)
+  const saved = wk.NOT_READY_WORK_KINDS.slice();   // 배포 그대로
+  t('★★ 배포 그대로: 준비 중 목록에 booking 이 없다(booking 개방)', !wk.NOT_READY_WORK_KINDS.includes('booking') && wk.isWorkKindReady('booking') === true);
   wk.NOT_READY_WORK_KINDS.push('booking');
   const r0 = await call(apply, { params: { id: CAMP }, body: { name: '가짜하나', phone: '01011112222', bookingDate: T1 } });
   t('★★★ 신청 안전벨트 장치 그대로: 준비 중인 종류면 예약 공고 신청을 잠금 전에 거절(work_kind_not_ready)', r0.statusCode === 409 && r0.body.reason === 'work_kind_not_ready');
-  const saved = [];   // 배포 그대로 = 빈 목록
-  wk.NOT_READY_WORK_KINDS.length = 0;
+  wk.NOT_READY_WORK_KINDS.length = 0;   // ★ 시험 안에서만 — 흐름을 돌리려고 비운다(끝에 saved 로 되돌림)
   let appId = null, holdToken = null;
   try {
     const rNo = await call(apply, { params: { id: CAMP }, body: { name: '가짜하나', phone: '01011112222' } });
@@ -326,7 +327,7 @@ function handlerOf(router, method, p) {
   } finally {
     wk.NOT_READY_WORK_KINDS.length = 0; wk.NOT_READY_WORK_KINDS.push(...saved);
   }
-  t('★★ 시험 뒤 준비 중 목록 원상 복귀(빈 목록)', wk.NOT_READY_WORK_KINDS.length === 0);
+  t('★★ 시험 뒤 준비 중 목록 원상 복귀(배포 그대로)', JSON.stringify(wk.NOT_READY_WORK_KINDS) === JSON.stringify(saved) && !wk.NOT_READY_WORK_KINDS.includes('booking'));
   tx.release();
 
   /* ── 8) 정적 계약 ─────────────────────────────────────────── */
