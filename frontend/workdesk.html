@@ -1960,6 +1960,11 @@
   .tp3doc.part .tp3dot{border-color:var(--accent)}
   .tp3doc.part .tp3sub{color:var(--ink2,#344054)}
   .tp3doc .tp3meter{position:absolute;left:0;bottom:0;height:2px;background:var(--accent);pointer-events:none}
+  /* 계산서 미발행 → 인트라넷 발행 창(결정 428) — 아직 안 됐지만 **누를 수 있는** 칸: 흰 칸 + 진한 글자(회색 비활성과 구분). */
+  .tp3doc.issue{color:var(--ink2,#344054);border-color:var(--line2)}
+  .tp3doc.issue .tp3dot{border-color:var(--accent)}
+  .tp3doc.issue .tp3sub{color:var(--ink2,#344054)}
+  .tp3doc.issue:hover,.tp3doc.issue:focus-visible{border-color:var(--accent);color:var(--accent-deep)}
   .tp3doc:disabled{cursor:not-allowed;color:#aeb6c2;background:#f5f7fa;border-color:#e6eaf0;box-shadow:none;opacity:1}
   .tp3doc:disabled .tp3dot{border-color:#d6dce5;border-style:dashed}
   .tp3doc:disabled .tp3sub{color:#bcc3cd}
@@ -9104,10 +9109,14 @@ function setlSummaryHtml(d){
        `hidden`(팝업이 "정산 정보 표시가 꺼져 있습니다"를 말해 준다). 그 둘까지 막으면
        사유를 볼 길이 없는 막다른 길이 된다. */
   const dead=(ready,retry)=>!ready&&!retry&&!(d&&d.hidden);
-  const btn=(kind,label,ready,sub,disabled=!d,unknown=false,part=0)=>`<button type="button" class="tp3doc${ready?' ready':''}${unknown?' unknown':''}${part?' part':''}"${disabled?' disabled':''} onclick="openSettlementDocument(event,'${kind}')"><span class="tp3dot"></span>${label}<span class="tp3sub">${esc(sub)}</span>${part?`<span class="tp3meter" style="width:${(part*100).toFixed(1)}%"></span>`:''}</button>`;
+  const btn=(kind,label,ready,sub,disabled=!d,unknown=false,part=0,tip='')=>`<button type="button" class="tp3doc${ready?' ready':''}${unknown?' unknown':''}${part?' part':''}${tip?' issue':''}"${disabled?' disabled':''}${tip?` title="${esc(tip)}"`:''} onclick="openSettlementDocument(event,'${kind}')"><span class="tp3dot"></span>${label}<span class="tp3sub">${esc(sub)}</span>${part?`<span class="tp3meter" style="width:${(part*100).toFixed(1)}%"></span>`:''}</button>`;
   const canMatch=!!d&&!d.hidden&&!d.linked&&(STATE.role==='master'||STATE.role==='admin'||STATE.role==='staff');
+  /* 계산서 미발행 → 인트라넷 발행 창(결정 428 · 사용자 확정 2026-11-25) — 내부 직원 · 계약 매칭 · 조회 성공 · 미발행일 때만 누를 수 있다.
+     견적서가 없어도 누른다(인트라넷이 발행 직후 같은 내용으로 견적서를 만들어 붙인다) — 그 사실을 설명으로 알린다. */
+  const iIssue=!iReady&&!iPart&&!iRetry&&!!_setlIssueInvoiceUrl(d);
+  const iTip=iIssue?((qReady||qPart)?'인트라넷에서 세금계산서 발행 창을 엽니다 — 발행은 직접 누릅니다':'견적서 없음 — 발행하면 같은 내용으로 견적서가 자동 생성됩니다 · 인트라넷에서 세금계산서 발행 창을 엽니다'):'';
   const match=canMatch?'<button type="button" class="tp3doc tp3match" onclick="openProgressContractMatch(event)">계약 매칭</button>':'';
-  return `<span class="setlsummary"><span class="tp3docs">${btn('quote','견적서',qReady,qSub,dead(qReady||qPart,qRetry),qRetry,qPart?Math.max(qR,.04):0)}${btn('invoice','계산서',iReady,iSub,dead(iReady||iPart,iRetry),iRetry,iPart?Math.max(iR,.04):0)}${btn('payment','입금',pReady,pSub,dead(pReady||pPart,pRetry),pRetry,pPart?Math.max(pR,.04):0)}${match}</span>${d&&d.linked&&!d.hidden&&Array.isArray(d.sharedTabs)&&d.sharedTabs.length?`<span class="tp3share">${_shareBadge(d.sharedTabCount||d.sharedTabs.length+1,d.sharedTabs.map(x=>x&&x.label||''))}</span>`:''}</span>`;
+  return `<span class="setlsummary"><span class="tp3docs">${btn('quote','견적서',qReady,qSub,dead(qReady||qPart,qRetry),qRetry,qPart?Math.max(qR,.04):0)}${btn('invoice','계산서',iReady,iSub,dead(iReady||iPart||iIssue,iRetry),iRetry,iPart?Math.max(iR,.04):0,iTip)}${btn('payment','입금',pReady,pSub,dead(pReady||pPart,pRetry),pRetry,pPart?Math.max(pR,.04):0)}${match}</span>${d&&d.linked&&!d.hidden&&Array.isArray(d.sharedTabs)&&d.sharedTabs.length?`<span class="tp3share">${_shareBadge(d.sharedTabCount||d.sharedTabs.length+1,d.sharedTabs.map(x=>x&&x.label||''))}</span>`:''}</span>`;
 }
 /* 입금 상태(단일 출처) — 'paid' | 'partial' | 'unpaid'. 총비용(견적 합계 우선, 없으면 계약금액)을 알면 **금액으로** 판정하고,
    모를 때만 인트라넷 상태값을 쓴다. 작업보드 정산 칸·입금 창·홈 「업체 정산」 칸·[업체 미입금] 이 함께 쓴다. */
@@ -9118,8 +9127,29 @@ function _setlPayState(d){
   const st=d.payment&&d.payment.status;
   return st==='paid'?'paid':(paid>0?'partial':'unpaid');
 }
+/* 인트라넷 계산서 발행 입구 주소(결정 428) — 두 저장소 약속: https://inadd-system.pages.dev/?issue_invoice=<salesId>.
+   내부 직원 · 계약 매칭 · 조회 성공 · 계산서 발행 완료가 아닐 때만 주소를 준다(아니면 ''). salesId 는 [A-Za-z0-9_-]{1,64} 만. */
+function _setlIssueInvoiceUrl(d){
+  const r=STATE.role;
+  if(!(r==='master'||r==='admin'||r==='staff')) return '';
+  if(!d||d.hidden||!d.linked||d.proxyDown) return '';
+  if(d.invoice&&d.invoice.status==='issued') return '';
+  const sid=String(d.salesId||'');
+  return /^[A-Za-z0-9_-]{1,64}$/.test(sid)?'https://inadd-system.pages.dev/?issue_invoice='+sid:'';
+}
+/* [계산서] 칸 — 미발행(발행 이력 없음)이면 인트라넷 발행 창을 새 탭으로 열고 true. 일부 발행·발행 완료는 false(종전 발행 이력 카드). */
+function _setlInvoiceIssueOpen(ev){
+  const st=_homeSetlCtx(ev)||STATE.settle, d=st&&st.data;
+  const url=_setlIssueInvoiceUrl(d);
+  if(!url||(d.invoice&&d.invoice.status==='partial')) return false;
+  // 견적서가 없으면 한 번 알린다(휴대폰엔 마우스 설명이 없다) — 취소해도 칸 클릭은 끝(빈 발행 이력 카드를 띄우지 않는다).
+  const noQuote=!(d.quote&&(d.quote.quoteNumber||d.quote.count));
+  if(noQuote&&!confirm('이 계약에는 견적서가 없습니다.\n계산서를 발행하면 같은 내용으로 견적서가 자동으로 만들어져 계약에 연결됩니다.\n\n인트라넷 세금계산서 발행 창을 열까요?')) return true;
+  window.open(url,'_blank','noopener'); return true;
+}
 function openSettlementDocument(ev,kind){
   if(ev){ ev.stopPropagation(); ev.preventDefault(); }
+  if(kind==='invoice'&&_setlInvoiceIssueOpen(ev)) return;
   if(kind==='quote'||kind==='invoice'){ awDocOpen(ev,kind); return; }
   const h=_homeSetlCtx(ev);   // 홈 작업목록 「업체 정산」 칸에서 누른 것이면 그 줄의 작업·정산으로 연다
   if(h) _openSettlementPaymentFor(h); else openSettlementPayment();
@@ -9145,11 +9175,15 @@ function awDocOpen(ev,kind,i){
   const h=i==null?_homeSetlCtx(ev):null;   // 홈 「업체 정산」 칸에서 누르면 그 줄의 작업
   const t=(i!=null?STATE.tabs[i]:null)||(h&&h.tab)||(STATE.settle&&STATE.settle.tab)||STATE.cur; if(!t) return;
   const title=(kind==='quote'?'📄 견적서 — ':'🧾 세금계산서 — ')+t.tabName;
-  _modal(title,'<div class="empty" style="padding:24px">불러오는 중…</div>');
+  /* 누른 때의 정산 값으로 묶는다(PR 1894 리뷰) — 응답 사이 작업보드가 다른 작업으로 바뀌면 STATE.settle 은 그 작업 것이다.
+     창 안 「불러오는 중」 자리에 이 요청 번호를 달아, 그 자리가 남아 있을 때만 응답을 그린다(뒤에 연 창을 늦은 응답이 덮지 않게). */
+  const st=STATE.settle, sd=(h&&h.data)||(st&&st.tab&&st.tab.sheetId===t.sheetId&&st.tab.tabName===t.tabName?st.data:null);
+  const seq=String(window.__awDocSeq=(window.__awDocSeq||0)+1), mine=()=>!!document.querySelector(`#wdModal [data-aw="${seq}"]`);
+  _modal(title,`<div class="empty" style="padding:24px" data-aw="${seq}">불러오는 중…</div>`);
   const path=kind==='quote'?'quote-doc':'invoice-doc';
   api(`/api/trackb/workdesk/${path}?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`)
-    .then(async r=>{ if(document.getElementById('wdModal')) _modal(title, kind==='quote'?await _qdocBody(r):_idocBody(r)); })
-    .catch(()=>{ if(document.getElementById('wdModal')) _modal(title,'<div class="empty" style="padding:24px">불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</div>'); });
+    .then(async r=>{ if(mine()) _modal(title, kind==='quote'?await _qdocBody(r):_idocBody(r)+_idocIssueMore(sd)); })
+    .catch(()=>{ if(mine()) _modal(title,'<div class="empty" style="padding:24px">불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</div>'); });
 }
 async function _qdocBody(r){
   if(!r||r.ok===false) return '<div class="empty" style="padding:24px">불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</div>';
@@ -9230,6 +9264,12 @@ function _idocBody(r){
     </div></div>${r.proxyDown?'<div class="empty" style="padding:10px">인트라넷 연결이 원활하지 않아 상세 이력을 불러오지 못했습니다.</div>':''}`;
   }
   return cards+`<p style="font-size:11px;color:var(--faint);margin:10px 2px 0">※ 세금계산서 원본은 국세청 홈택스·수신 이메일에서 확인할 수 있습니다. 이 카드는 발행 이력 요약입니다.</p>`;
+}
+/* 일부 발행 계약 — 발행 이력 카드 아래 [인트라넷에서 이어서 발행] (결정 428). 주소 판정은 _setlIssueInvoiceUrl 한 곳. */
+function _idocIssueMore(d){
+  const url=_setlIssueInvoiceUrl(d);
+  if(!url||!(d.invoice&&d.invoice.status==='partial')) return '';
+  return `<div style="display:flex;justify-content:flex-end;margin-top:10px"><a class="btn sm" style="text-decoration:none" href="${esc(url)}" target="_blank" rel="noopener">인트라넷에서 이어서 발행</a></div>`;
 }
 const _SETTLE_INV={not_issued:['미발행','warn'],issued:['발행완료','safe'],requested:['발행요청','warn'],partial:['일부 발행','']};
 const _SETTLE_Q={draft:['작성중','warn'],sent:['발송','ok'],accepted:['수락','safe'],rejected:['반려','bad'],expired:['만료','bad']};
