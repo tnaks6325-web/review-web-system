@@ -75,7 +75,8 @@ const DS = require('../src/services/drive.service');
     ok('[B2] 새 파일 이동+이름 = 왕복 1회 · 실패 시 종전 2단계 폴백(이동 실패는 여전히 승인 실패)');
 
     const resAt = ap.indexOf('res.json({ ok: true });');
-    const archAt = ap.indexOf('_archiveOldFileAfterReply(committed);');
+    // (결정 433) 현금영수증이면 영수증 폴더를 두 번째 인자로 넘긴다 — 호출 위치(응답 뒤) 검사는 그대로.
+    const archAt = ap.indexOf('_archiveOldFileAfterReply(committed');
     assert.ok(resAt > 0 && archAt > resAt, '옛 파일 보관 이동은 응답을 보낸 **뒤**에 시작해야 한다');
     assert.ok(!/_resolveArchiveFolder\(\)/.test(ap), '승인 요청 안에서 보관 폴더를 다루지 않는다(응답 뒤 함수로 옮겼다)');
     assert.ok(ap.indexOf("postReviewEditDecision(committed, 'approved'") < resAt, '리뷰어 통지는 여전히 응답 전(저장 확정 뒤)');

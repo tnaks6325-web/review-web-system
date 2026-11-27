@@ -824,8 +824,10 @@ router.post('/review-upload', reviewUploadLimiter, async (req, res, next) => {
           targetFolderId,
           /* ★ 공개 권한은 **응답을 기다리지 않고** 뒤에서 건다 — Drive 왕복 1회(약 1초)인데
              업로드 결과(파일 ID·링크)에는 영향이 없고, 그 1초를 리뷰어가 그대로 기다리고 있었다.
-             공개가 늦어지는 동안의 영향은 구글 CDN 썸네일이 잠깐 우리 프록시로 폴백하는 것뿐. */
-          { deferShare: true }
+             공개가 늦어지는 동안의 영향은 구글 CDN 썸네일이 잠깐 우리 프록시로 폴백하는 것뿐.
+             ★★ 현금영수증 칸은 공개 링크를 만들지 않는다(결정 433 · 완화 금지) — 영수증에는 결제 정보가 있고,
+             직원 화면은 공개 링크 없이도 서버 사진 통로로 보인다. */
+          { deferShare: true, shareAnyone: !_isReceiptUpload }
         );
 
         // ── 3단계 AI 검수: 이 슬롯에 맞는 형식인지 판별(fail-open — 업로드는 이미 끝났고 막지 않는다) ──
@@ -895,6 +897,16 @@ router.post('/review-upload', reviewUploadLimiter, async (req, res, next) => {
                   });
                   if (toFolderId) {
                     await driveService.moveFile(uploaded.id, toFolderId, targetFolderId);
+                    if (rd.target === 'receipt') {
+                      /* ★★ 리뷰 칸 사진에는 공개 권한이 걸려 있다 — 영수증 폴더로 옮겼으면 걷는다(결정 433).
+                         뒤에서 거는 공개 권한이 **다 걸린 뒤에** 걷어야 늦게 도착한 권한이 남지 않는다.
+                         실패해도 이동·안내는 그대로(이미 끝난 일) — 기록만 남긴다. */
+                      try {
+                        if (uploaded.afterUpload) await uploaded.afterUpload;
+                        const rm = await driveService.removePublicLinks(uploaded.id);
+                        if (rm.failed) logger.warn(`[review-upload] 영수증 폴더로 옮긴 파일 공개 권한 제거 실패: ${uploaded.id}`);
+                      } catch (_) {}
+                    }
                     finalSlot = toSlotKey;
                     routed = {
                       from: slot, to: toSlotKey, toLabel,
