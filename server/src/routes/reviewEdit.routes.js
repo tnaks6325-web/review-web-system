@@ -134,6 +134,7 @@ async function _resolveFolders(sheetId, tabName, slot, { withStaging = true } = 
   // 대상 폴더(구 파일이 사는 곳): 기본 슬롯은 [리뷰], 현금영수증은 비공개 구매캡처 경로,
   // 그 외는 [리뷰] 아래 슬롯 라벨 서브폴더.
   let targetFolderId = reviewFolderId;
+  let isReceipt = false;
   if (slot && slot !== 'review') {
     // 라벨 판정은 공용 유틸 — 현영 자동 슬롯도 같은 폴더명을 쓰게(업로드 경로와 일치해야 파일이 흩어지지 않음)
     const rt = await reviewTypeForTab({ sheetId, tabName }).catch(() => null);
@@ -141,6 +142,7 @@ async function _resolveFolders(sheetId, tabName, slot, { withStaging = true } = 
       .cashReceiptRequiredForTab({ sheetId, tabName }).catch(() => null);
     const label = slotLabelOf(cfg.capture_slots, cfg.income_type, slot, rt, cr === true);
     if (isCashReceiptSlot(cfg.capture_slots, cfg.income_type, slot, rt, cr === true)) {
+      isReceipt = true;
       targetFolderId = await fileRouteService.resolveTargetFolder({
         target: 'receipt', sheetId, tabName, reviewBaseFolderId: reviewFolderId, receiptLabel: label,
       });
@@ -157,11 +159,13 @@ async function _resolveFolders(sheetId, tabName, slot, { withStaging = true } = 
   //   ★ relocate-orphan-reviews(전역 키워드 검색)는 리뷰형식 파일명만 대상 → 스테이징
   //     파일명을 비리뷰형식(수정대기_*)으로 두어 승인 전 [리뷰]로 승격/링크되는 것을 막는다.
   //   ★ 승인(withStaging:false)은 스테이징 폴더가 필요 없다 — Drive 검색 1회를 아낀다(캐시가 식었을 때).
-  const rootFolderIdForStaging = rootFolderId;
+  //   ★★ 현금영수증은 링크 공개인 최상위 아래에 두지 않는다 — 그 (비공개) 영수증 폴더 안 [리뷰수정대기] 에 둔다
+  //     (결정 433 · 완화 금지). 승인은 같은 영수증 폴더로 옮기고, 반려는 휴지통 — 어느 쪽도 공개 트리를 지나지 않는다.
+  const rootFolderIdForStaging = isReceipt ? targetFolderId : rootFolderId;
   const staging = withStaging ? await driveService.getOrCreateSubFolder(rootFolderIdForStaging, '[리뷰수정대기]') : null;
 
   const campaignLabel = cfg.display_name || cfg.campaign_name || tabName;
-  return { reviewFolderId, targetFolderId, stagingFolderId: staging ? staging.id : null, campaignLabel };
+  return { reviewFolderId, targetFolderId, stagingFolderId: staging ? staging.id : null, campaignLabel, isReceipt };
 }
 
 /**
@@ -610,10 +614,11 @@ router.post('/request', imageApiLimiter, async (req, res) => {
     // 폴더 확보 + 새 파일 스테이징 업로드
     //   ★ 스테이징 파일명은 "비리뷰형식"(수정대기_*) — 승인 전에는 리뷰형식 파일명 재배치
     //     도구(relocate-orphan-reviews)의 reviewPattern에 걸리지 않게. 승인 시 정식명으로 rename.
-    const { targetFolderId, stagingFolderId, campaignLabel } = await _resolveFolders(sheetId, tabName, slot);
+    const { targetFolderId, stagingFolderId, campaignLabel, isReceipt } = await _resolveFolders(sheetId, tabName, slot);
     const newName = '수정대기_' + crypto.randomBytes(6).toString('hex') + '.jpg';
+    // ★★ 현금영수증 교체 사진은 공개 링크를 만들지 않는다(결정 433 · 완화 금지) — 관리자 화면은 서버 사진 통로로 본다.
     const uploaded = await driveService.uploadFileBase64(
-      file.data, newName, file.mimeType || 'image/jpeg', stagingFolderId
+      file.data, newName, file.mimeType || 'image/jpeg', stagingFolderId, isReceipt ? { shareAnyone: false } : {}
     );
     const newUrl = uploaded.webViewLink || `https://drive.google.com/file/d/${uploaded.id}/view`;
 
@@ -761,10 +766,23 @@ _handlers.reviewEditList = async (req, res) => {
  *   종전에도 실패를 무시했다 — 실패하면 구 파일이 [리뷰] 폴더에 남는다(링크는 이미 새 파일로 바뀌었다 → 고아 캡처 정리 A 대상).
  * ★ 절대 throw 하지 않는다(응답 뒤라 잡아 줄 곳이 없다 — 처리되지 않은 rejection 은 프로세스를 흔든다).
  */
-function _archiveOldFileAfterReply(committed) {
+function _archiveOldFileAfterReply(committed, receiptFolderId = null) {
   if (!committed || !committed.old_file_id) return;
   setImmediate(async () => {
     try {
+      /* ★★ 현금영수증의 구 파일은 링크 공개인 최상위 [리뷰교체보관] 으로 보내지 않는다 —
+         그 영수증 폴더 안 [교체보관] 에 두고, 직접 걸린 공개 권한도 걷는다(결정 433 · 완화 금지). */
+      if (receiptFolderId) {
+        const box = await driveService.getOrCreateSubFolder(receiptFolderId, '[교체보관]');
+        const om = await driveService.getFileParents(committed.old_file_id);
+        const op = Array.isArray(om.parents) ? om.parents : [];
+        if (!op.includes(box.id)) await driveService.moveFile(committed.old_file_id, box.id, op.join(',') || undefined);
+        const rm = await driveService.removePublicLinks(committed.old_file_id);
+        if (rm.failed) logger.warn(`[review-edit] 교체된 영수증 공개 권한 제거 실패: ${committed.old_file_id}`);
+        try { await driveService.renameFile(committed.old_file_id, _archiveName(committed, committed.old_file_name)); }
+        catch (e) { logger.warn(`[review-edit] 보관 영수증 rename 실패(무시): ${e.message}`); }
+        return;
+      }
       const archiveId = await _resolveArchiveFolder();
       const oldMeta = await driveService.getFileParents(committed.old_file_id);
       const oldParents = Array.isArray(oldMeta.parents) ? oldMeta.parents : [];
@@ -813,9 +831,11 @@ _handlers.reviewEditApprove = async (req, res) => {
     // 1) 대상 폴더 확보(트랜잭션 밖) — 요청 이후 폴더가 이동/재생성됐어도 현재 [리뷰]로 배치
     // 요청 당시 저장된 폴더를 신뢰하지 않고 현재 슬롯 역할로 다시 계산한다.
     // 배포 전에 생성된 영수증 교체요청의 공개 [리뷰] 하위 target_folder_id도 여기서 교정된다.
-    const targetFolderId = (await _resolveFolders(
+    const _fold = await _resolveFolders(
       r0.sheet_id, r0.tab_name, r0.slot_key || 'review', { withStaging: false }
-    )).targetFolderId;
+    );
+    const targetFolderId = _fold.targetFolderId;
+    const _isReceiptSlot = _fold.isReceipt === true;
     _lap('folders');
 
     // 2) 새 파일을 대상 폴더로 이동(멱등: 이미 대상이면 skip) + 정식 리뷰 파일명으로 rename
@@ -846,6 +866,14 @@ _handlers.reviewEditApprove = async (req, res) => {
     } else {
       try { await driveService.renameFile(r0.new_file_id, finalName); }
       catch (e) { logger.warn(`[review-edit] 새 파일 rename 실패(무시): ${e.message}`); }
+    }
+    // ★★ 배포 전에 접수된 영수증 교체 사진은 공개 권한을 달고 있다 — 영수증 폴더로 옮긴 뒤 걷는다(결정 433 · 실패는 기록만).
+    if (_isReceiptSlot) {
+      try {
+        const rm = await driveService.removePublicLinks(r0.new_file_id);
+        if (rm.failed) logger.warn(`[review-edit] 교체 영수증 공개 권한 제거 실패: ${r0.new_file_id}`);
+      } catch (_) {}
+      _lap('private');
     }
     const finalUrl = r0.new_file_url || `https://drive.google.com/file/d/${r0.new_file_id}/view`;
     _lap('move');
@@ -952,7 +980,7 @@ _handlers.reviewEditApprove = async (req, res) => {
     logger.info(`[review-edit] approve 단계별 ms: ${_steps.join(' ')} 합계=${Date.now() - _tStart}`);
 
     res.json({ ok: true });
-    _archiveOldFileAfterReply(committed);
+    _archiveOldFileAfterReply(committed, _isReceiptSlot ? targetFolderId : null);
   } catch (err) {
     logger.error(`[review-edit] approve 실패: ${err.message}`);
     res.json({ ok: false, error: err.message || '승인 처리 중 오류가 발생했습니다.' });

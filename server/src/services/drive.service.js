@@ -488,10 +488,51 @@ async function uploadFileBase64(base64Data, fileName, mimeType, parentFolderId, 
     if (_postUpload) await _postUpload();
     await _normalizeOwner(usedClient, oauth, data.id);
   };
-  if (opts.deferShare) setImmediate(() => { _after().catch(() => {}); });
-  else await _after();
+  if (opts.deferShare) {
+    /* ★ 뒤에서 도는 뒷정리가 끝나는 시점을 부르는 쪽이 기다릴 수 있게 둔다(결정 433).
+       리뷰 칸에 올린 사진이 자동으로 현금영수증 폴더로 옮겨지면, 공개 권한이 **다 걸린 뒤에** 걷어야 한다 —
+       먼저 걷으면 늦게 도착한 공개 권한이 그대로 남는다. 열거되지 않는 속성이라 응답 JSON 에는 실리지 않는다. */
+    const done = new Promise((resolve) => setImmediate(() => { _after().catch(() => {}).finally(resolve); }));
+    Object.defineProperty(data, 'afterUpload', { value: done, enumerable: false });
+  } else await _after();
 
   return data;
+}
+
+/**
+ * 파일에 **직접** 걸린 공개 권한(anyone·domain)을 걷는다 — 현금영수증 폴더로 옮긴 파일 전용(결정 433).
+ * ★ 폴더에서 물려받은 권한은 건드리지 않는다(파일에서 지울 수 없고, 폴더가 비공개면 애초에 없다).
+ * ★ 던지지 않는다: { removed, failed } — 실패는 기록만 하고 이동·원장은 그대로 둔다(이미 끝난 일이다).
+ * @param {string} fileId
+ * @returns {Promise<{removed:number, failed:number}>}
+ */
+async function removePublicLinks(fileId) {
+  const out = { removed: 0, failed: 0 };
+  if (!fileId) return out;
+  const d = _getOAuthDrive() || _getReadDrive();
+  if (!d) { out.failed++; return out; }
+  let perms = [];
+  try {
+    const r = await d.permissions.list({ fileId, supportsAllDrives: true,
+      fields: 'permissions(id, type, permissionDetails(inherited))' });
+    perms = r.data.permissions || [];
+  } catch (e) {
+    logger.warn(`[Drive] 공개 권한 조회 실패(현금영수증): ${fileId} — ${e.message}`);
+    out.failed++; return out;
+  }
+  for (const p of perms) {
+    if (p.type !== 'anyone' && p.type !== 'domain') continue;
+    const det = Array.isArray(p.permissionDetails) ? p.permissionDetails : [];
+    if (det.length && det.every((x) => x && x.inherited)) continue;   // 폴더에서 물려받은 것
+    try {
+      await d.permissions.delete({ fileId, permissionId: p.id, supportsAllDrives: true });
+      out.removed++;
+    } catch (e) {
+      logger.warn(`[Drive] 공개 권한 제거 실패(현금영수증): ${fileId} — ${e.message}`);
+      out.failed++;
+    }
+  }
+  return out;
 }
 
 /**
@@ -1610,6 +1651,7 @@ module.exports = {
   getFileParents,
   findFolderByName,
   uploadFileBase64,
+  removePublicLinks,
   listPermissionTypes,
   findFolderPath,
   setFolderAnyoneReader,

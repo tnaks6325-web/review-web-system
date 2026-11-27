@@ -148,7 +148,8 @@ const db = {
     '관리자가 승인한 영수증 교체본은 pending 원장을 만든 뒤 즉시 receipt 재검수해야 한다');
   assert.match(reviewEditRoute, /isCashReceiptSlot\(cfg\.capture_slots, cfg\.income_type, slot, rt, cr === true\)[\s\S]{0,500}resolveTargetFolder\(\{[\s\S]{0,200}target: 'receipt'[\s\S]{0,300}if \(!targetFolderId\) throw new Error/,
     '영수증 교체본은 공개 리뷰 폴더로 폴백하지 않고 비공개 영수증 경로만 사용해야 한다');
-  assert.match(reviewEditRoute, /const targetFolderId = \(await _resolveFolders\([\s\S]{0,180}r0\.slot_key \|\| 'review'[\s\S]{0,100}\)\.targetFolderId/,
+  // (결정 433) 승인은 _resolveFolders 결과 한 벌에서 대상 폴더와 영수증 여부를 함께 꺼낸다 — 검사 의미 불변.
+  assert.match(reviewEditRoute, /const _fold = await _resolveFolders\([\s\S]{0,180}r0\.slot_key \|\| 'review'[\s\S]{0,100}\);\s*const targetFolderId = _fold\.targetFolderId;/,
     '승인 시 요청에 저장된 과거 폴더가 아니라 현재 슬롯 역할로 대상 폴더를 다시 계산해야 한다');
   assert.match(driveRoute, /PUBLIC_REPORT_RECEIPT_EVIDENCE_SQL = `[\s\S]*receiptValidation[\s\S]*ri\.status[\s\S]*'resolved'[\s\S]*ri\.resolution[\s\S]*'ok'/,
     '직원이 정상 승인한 리뷰 슬롯의 AI 영수증 오판은 공개 리포트에서 복구해야 한다');
