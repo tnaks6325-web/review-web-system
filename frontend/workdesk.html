@@ -2772,6 +2772,21 @@ table.wbl-t td.nc .rest{position:absolute;left:50%;top:100%;transform:translateX
   background:var(--card);border:1px solid var(--line);border-radius:6px;padding:2px 8px;
   box-shadow:0 1px 3px rgba(16,24,40,.2);opacity:0;pointer-events:none;z-index:12;transition:opacity .15s}
 table.wbl-t td.nc:hover .rest,table.wbl-t td.nc:focus-within .rest{opacity:1}
+/* 홈 「업체 정산」 칸 — 작업보드 정산 칸(.tp3docs·.tp3doc·[계약 매칭] 은 견적서 아래 줄)을 **그대로** 쓰고
+   버튼 폭만 표 한 줄에 맞게 좁힌다(결정 421). 표 폭이 화면을 넘지 않게 [계약 매칭] 을 옆에 붙이지 않는다. */
+table.wbl-t th.wbl-setl-h{white-space:nowrap}
+table.wbl-t td.wbl-setl{padding:5px 4px}
+table.wbl-t td.wbl-setl .tp3docs{margin-top:0;grid-template-columns:repeat(3,62px);gap:4px}
+/* 정산 버튼이 두 줄(이름 + 날짜)이라 줄이 이미 높다 — 그 높이 안에서 작업명을 두 줄까지 접어 칸 폭을 돌려받는다
+   (종전: 한 줄 + 280px 말줄임). 전체 이름은 줄에 마우스를 올리면 뜨는 설명(_tabTip)에 그대로 있다. 휴대폰 규칙은 따로(아래 미디어쿼리). */
+@media(min-width:721px){table.wbl-t td .wbl-nm{max-width:190px;min-width:150px;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-all}}
+table.wbl-t td.wbl-setl .tp3match{padding:5px 8px;white-space:nowrap}
+/* 칸이 하나 늘어 표가 좁아질 때 담당 이름이 세로로 한 글자씩 꺾이지 않게(짧은 이름 칸) */
+table.wbl-t td[data-label="담당"]{white-space:nowrap}
+table.wbl-t td.wbl-setl .tp3share{margin-top:3px}
+.wbl-setlf{display:inline-flex;gap:4px;padding-left:8px;border-left:1px solid var(--line)}
+.wbl-setlsum{border-top:0;border-bottom:1px solid var(--line);background:var(--warn-soft);color:var(--ink)}
+.wbl-setlsum span{color:var(--muted)}
 /* 미입금 필터 중 — 흐름 안(inline)으로 되돌려 상자 옆에 붙인다(행 높이 불변) */
 table.wbl-t td.nc .rest.on{position:static;transform:none;opacity:1;margin:0 0 0 4px;padding:0;border:0;background:transparent;
   box-shadow:none;color:var(--warn);font-weight:700}
@@ -2883,7 +2898,8 @@ table.wbl-t td.nc .rest.on{position:static;transform:none;opacity:1;margin:0 0 0
   table.wbl-t tbody{display:grid;gap:6px}
   /* ★★ 좁은 화면 배치는 **칸 번호에 묶여 있다** — 숫자 4칸(총건수·참여·제출·입금)으로 나누면서
      번호가 2씩 밀렸다. 새 순서: 1작업명 2작업표 3공유 4담당 5총건수 6참여 7제출 8입금
-     9상태 10저장폴더 11모집공고 12마감 13더보기(12오늘완료 열은 2026-09-30 제거 — 뒤 번호가 1씩 당겨졌다).
+     9상태 10업체정산 11저장폴더 12모집공고 13마감 14더보기 15업체접속(12오늘완료 열은 2026-09-30 제거 — 뒤 번호가 1씩 당겨졌다
+     · 10업체정산은 결정 421 로 끼워 넣어 뒤 번호가 1씩 밀렸다).
      ★ 상태 배지는 **작업명과 같은 줄 오른쪽**에 얹는다(숫자 5칸이 둘째 줄을 다 쓴다).
      ★ 숫자 칸 라벨은 **한 글자**로 줄인다(`총건수 50`이면 네 칸이 화면을 넘는다). */
   table.wbl-t tbody tr{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto auto;gap:3px 8px;padding:9px 11px;background:var(--card);border:1px solid var(--line);border-radius:11px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
@@ -2912,13 +2928,28 @@ table.wbl-t td.nc .rest.on{position:static;transform:none;opacity:1;margin:0 0 0
   table.wbl-t tr.mob-open td:nth-child(1){padding-bottom:8px;border-bottom:1px solid var(--line)}
   table.wbl-t tr.mob-open td:nth-child(2),table.wbl-t tr.mob-open td:nth-child(3),table.wbl-t tr.mob-open td:nth-child(n+10){display:flex;flex-direction:column;align-items:stretch}
   table.wbl-t tr.mob-open td:nth-child(9) .wbl-s-sub{display:block}
-  table.wbl-t tr.mob-open td:nth-child(2){grid-column:1/3;grid-row:3}
-  table.wbl-t tr.mob-open td:nth-child(3){grid-column:3/6;grid-row:3}
-  table.wbl-t tr.mob-open td:nth-child(10){grid-column:1/-1;grid-row:4}
+  table.wbl-t tr.mob-open td:nth-child(2){grid-column:1/3;grid-row:4}
+  table.wbl-t tr.mob-open td:nth-child(3){grid-column:3/6;grid-row:4}
   table.wbl-t tr.mob-open td:nth-child(11){grid-column:1/-1;grid-row:5}
-  table.wbl-t tr.mob-open td:nth-child(12){grid-column:1/3;grid-row:6}
-  table.wbl-t tr.mob-open td:nth-child(13){grid-column:3/6;grid-row:6}
-  table.wbl-t tr.mob-open td[data-label="업체 접속"]{grid-column:1/-1;grid-row:7}
+  table.wbl-t tr.mob-open td:nth-child(12){grid-column:1/-1;grid-row:6}
+  table.wbl-t tr.mob-open td:nth-child(13){grid-column:1/3;grid-row:7}
+  table.wbl-t tr.mob-open td:nth-child(14){grid-column:3/6;grid-row:7}
+  table.wbl-t tr.mob-open td[data-label="업체 접속"]{grid-column:1/-1;grid-row:8}
+  /* 업체 정산(결정 421) — 접힌 카드에도 셋째 줄에 **입금 한 칸**(+ 미매칭이면 [계약 매칭])만, 펼치면 세 칸 전부.
+     ★ 휴대폰은 세로가 길어지는 것을 싫어한다(사용자 선호) — 접힌 카드엔 업체 입금만 남긴다. */
+  table.wbl-t td.wbl-setl{display:flex;grid-column:1/-1;grid-row:3;align-items:center;gap:6px;padding:0}
+  table.wbl-t td.wbl-setl .setlsummary{min-width:0;flex:1;display:flex;align-items:center;gap:6px}
+  table.wbl-t td.wbl-setl .tp3docs{flex:1;grid-template-columns:repeat(3,minmax(0,1fr)) auto}
+  table.wbl-t tr:not(.mob-open) td.wbl-setl .tp3docs{display:flex;flex-wrap:wrap;gap:6px}
+  /* 접힌 카드는 버튼을 한 줄짜리로(점 · 입금 · 날짜/금액이 가로로) — 카드가 세로로 덜 길어지게 */
+  table.wbl-t tr:not(.mob-open) td.wbl-setl .tp3doc{flex-wrap:nowrap;padding:4px 10px;min-height:26px}
+  table.wbl-t tr:not(.mob-open) td.wbl-setl .tp3doc .tp3sub{flex:0 0 auto;margin:0;font-size:11px}
+  table.wbl-t tr:not(.mob-open) td.wbl-setl .tp3doc:not(.tp3match):not([onclick*="'payment'"]){display:none}
+  table.wbl-t tr:not(.mob-open) td.wbl-setl .tp3share{display:none}
+  /* 계약이 없는 작업은 접힌 카드에 [계약 매칭] 만 — 회색 「입금 미입금」은 모르는 것을 미입금으로 읽히게 한다 */
+  table.wbl-t tr:not(.mob-open) td.wbl-setl .tp3docs:has(.tp3match) .tp3doc:not(.tp3match){display:none}
+  table.wbl-t td.wbl-setl .tp3share{margin-top:0;white-space:nowrap}
+  .wbl-setlf{order:5;padding-left:0;border-left:0}
   table.wbl-t td.wbl-btncol{width:auto}
   table.wbl-t td.wbl-c{text-align:left;align-items:stretch}
   table.wbl-t td .wbl-b{width:100%;min-height:38px;font-size:11px}
@@ -4746,6 +4777,8 @@ function _finAbsorb(r){
 async function _finRefresh(){
   await _finEnsureStats(true);
   _wtPruneFinished();  // 마감된 작업을 열린 줄에서 정리(데이터 도착 지점 — 렌더는 순수하게 둔다)
+  // 마감/복귀로 작업이 진행 중 ↔ 보관함을 옮겼다 — 홈 「업체 정산」 묶음을 버리고 새로 받는다(옮겨 간 작업이 「계약 매칭」으로 보이지 않게 · PR 1885 리뷰 ①)
+  if(STATE.homeSettle&&(STATE.homeSettle.run||STATE.homeSettle.fin)) _homeSetlInvalidate();
   if(document.getElementById('wblMount')) _finRenderList();
   if(document.getElementById('tb2')) _renderTabList();
   _renderWorktabs();
@@ -5753,7 +5786,99 @@ function _finVisible(){
   // 보관함은 최근 마감 순(방금 마감한 것이 위) · 진행 중은 서버 순서(업체·작업명) 그대로.
   if(fin) list=list.slice().sort((a,b)=>String(b.finishedAt||'').localeCompare(String(a.finishedAt||'')));
   else if(f==='pay') list=list.slice().sort((a,b)=>_finUnpaid(b)-_finUnpaid(a));   // 미입금 큰 순(안정 정렬)
+  // 업체 정산 거름(진행 중·보관함 공용) — 판정은 _homeSetlMatch 한 곳(버튼 건수와 같은 함수). 미입금은 남은 돈 큰 순.
+  // ★ 정산을 못 받았으면(받는 중·실패) 거름을 쉬고 전체를 보인다 — 빈 목록은 「미입금 0건」으로 읽힌다(PR 1885 리뷰 ④).
+  const sf=_homeSetlReady(fin?'fin':'run')?(STATE.homeSetlF||''):'';
+  if(sf){
+    list=list.filter(t=>_homeSetlMatch(t,sf));
+    if(sf==='unpaid') list=list.slice().sort((a,b)=>_setlUnpaidRest(_homeSetlOf(b))-_setlUnpaidRest(_homeSetlOf(a)));
+  }
   return list;
+}
+/* ══ 홈 작업목록 「업체 정산」 칸 + [업체 미입금]·[계약 미매칭] (사용자 확정 2026-11-25 A안) ══════════════════
+   ★ 칸 내용 = 작업보드 정산 칸을 그리는 setlSummaryHtml **그대로**(사본 0 — 모양·글자·판정이 같다).
+   ★ 재료 = GET /api/trackb/home/settlement?scope=run|fin — 작업보드 칸과 같은 서버 함수(_settlementTabView)로 만든 값.
+     보관함은 그 탭을 열 때만 받는다. 받은 값은 60초 다시 쓰고, 계약 매칭 직후엔 버리고 새로 받는다(_contractMatchApplied).
+   ★ 모르는 것은 꾸미지 않는다 — 받는 중 = 「…」(setlSummaryHtml(null)), 못 받음 = 주황 「확인 필요」, 계약 없음 = [계약 매칭].
+   ★★ 정산이 늦게 도착해도 **머리줄(검색칸)은 다시 그리지 않는다** — 검색칸 DOM 을 새로 만들면 한글 입력이 깨진다
+     (_finSearch 주석과 같은 사고 계열). 도착 시 표 본문·거름 단추·합계 줄만 갈아 끼운다(_homeSetlRefresh). */
+var HOME_SETL_TTL_MS=60000;
+function _homeSetlBag(sc){ STATE.homeSettle=STATE.homeSettle||{run:null,fin:null}; return STATE.homeSettle[sc]; }
+function _homeSetlReady(sc){ const b=_homeSetlBag(sc); return !!(b&&b.map&&!b.failed); }
+/* 받아 둔 묶음을 버리고 지금 탭 것을 fresh 로 다시 받는다 — 계약 매칭/해제(_contractMatchApplied)·마감/복귀(_finRefresh) 직후.
+   ★ 세대(homeSetlGen)를 올려, 그 전에 떠난 요청이 늦게 도착해도 새 값을 덮지 못하게 한다(PR 1885 리뷰 ③).
+   ★ 서버도 fresh 면 두 범위 저장분을 함께 버린다(마감/복귀는 작업을 진행 중 ↔ 보관함으로 옮긴다 · 리뷰 ①). */
+function _homeSetlInvalidate(){
+  STATE.homeSetlGen=(STATE.homeSetlGen||0)+1;
+  STATE.homeSettle={run:null,fin:null};
+  if(document.getElementById('wblMount')) _homeSetlLoad(STATE.finTab==='fin'?'fin':'run',true);
+}
+function _homeSetlOf(t){
+  const b=_homeSetlBag(isFinished(t)?'fin':'run');
+  if(!b||b.loading&&!b.map) return null;                                    // 받는 중 — 「…」
+  if(b.failed) return {linked:true,proxyDown:true,quoteLookupFailed:true};   // 못 받음 — 주황 「확인 필요」
+  return b.map[t.sheetId+'\t'+t.tabName]||{linked:false};                   // 매칭된 계약이 없으면 [계약 매칭]
+}
+/* 업체 미입금 = 업체관리 「미입금」 칩과 같은 판정(단일 출처) — 계약 매칭·조회 성공·총비용보다 입금액이 적음. */
+function _setlIsUnpaid(st){ return !!st&&st.linked!==false&&!st.proxyDown&&Number(st.totalCost)>0&&(Number(st.paidAmount)||0)<Number(st.totalCost); }
+function _setlUnpaidRest(st){ return _setlIsUnpaid(st)?Number(st.totalCost)-(Number(st.paidAmount)||0):0; }
+function _homeSetlMatch(t,f){
+  const d=_homeSetlOf(t);
+  if(f==='unpaid') return _setlIsUnpaid(d);
+  if(f==='nomatch') return !!d&&d.linked===false;
+  return true;
+}
+async function _homeSetlLoad(sc,force){
+  const cur=_homeSetlBag(sc);
+  if(cur&&cur.loading) return;
+  const gen=STATE.homeSetlGen||0;
+  STATE.homeSettle[sc]={loading:true,map:cur&&cur.map||null,at:cur&&cur.at||0};
+  let r=null; try{ r=await api('/api/trackb/home/settlement?scope='+sc+(force?'&fresh=1':'')); }catch(_){ }
+  if((STATE.homeSetlGen||0)!==gen) return;   // 그 사이 버려진 요청 — 새 값을 덮지 않는다
+  const m={};
+  if(r&&r.ok&&Array.isArray(r.items)){ for(const it of r.items) m[it.sheetId+'\t'+it.tabName]=it; STATE.homeSettle[sc]={map:m,at:Date.now()}; }
+  else STATE.homeSettle[sc]={failed:true,at:Date.now()};
+  _homeSetlRefresh();
+}
+function _homeSetlEnsure(){
+  if(!_isInternalRole()) return;
+  const sc=STATE.finTab==='fin'?'fin':'run', b=_homeSetlBag(sc);
+  if(!b||(!b.loading&&Date.now()-(b.at||0)>HOME_SETL_TTL_MS)) _homeSetlLoad(sc,false);
+}
+function _homeSetlRefresh(){
+  if(!document.getElementById('wblMount')) return;
+  const all=(STATE.tabs||[]).filter(t=>!t.archived);
+  const body=document.getElementById('wblBody'); if(body) body.innerHTML=_finBodyHtml();
+  const chips=document.getElementById('wblSetlF'); if(chips) chips.outerHTML=_homeSetlChipsHtml(all);
+  const sum=document.getElementById('wblSetlSum'); if(sum) sum.outerHTML=_homeSetlSumHtml();
+}
+function _homeSetlPick(f){ STATE.homeSetlF=(STATE.homeSetlF===f)?'':f; _finRenderList(); }   // 같은 단추 다시 누르면 해제
+function _homeSetlChipsHtml(all){
+  const fin=STATE.finTab==='fin', b=_homeSetlBag(fin?'fin':'run');
+  const list=all.filter(t=>isFinished(t)===fin);
+  const ready=!!(b&&b.map&&!b.failed);
+  const why=b&&b.failed?'정산 정보를 불러오지 못했습니다 — 잠시 후 다시 들어오면 다시 불러옵니다':'정산 정보를 불러오는 중입니다';
+  const n=f=>list.filter(t=>_homeSetlMatch(t,f)).length;
+  const f=STATE.homeSetlF||'';
+  // ★ 켜 둔 단추는 못 받았어도 눌러서 끌 수 있다(PR 1885 리뷰 ④) — 켜지 않은 단추만 꺼 둔다.
+  const btn=(k,label,tip)=>`<button class="wbl-chip${f===k?' on':''}"${ready||f===k?'':' disabled'} title="${esc(ready?tip:why)}" onclick="_homeSetlPick('${k}')">${label} ${ready?n(k):'…'}</button>`;
+  return `<span class="wbl-setlf" id="wblSetlF">${btn('unpaid','업체 미입금','견적서(없으면 계약) 금액보다 업체 입금액이 적은 작업 — 남은 금액이 큰 순으로 보여 줍니다')}${btn('nomatch','계약 미매칭','인트라넷 계약이 매칭되지 않아 업체 입금 여부를 알 수 없는 작업')}</span>`;
+}
+/* [업체 미입금] 을 켜면 남은 금액 합계 한 줄 — ★ 같은 계약을 여러 작업이 나눠 쓰면 한 번만 더한다(작업마다 더하면 두 배가 된다). */
+//   ★ 합계 = 지금 표에 보이는 목록(_finVisible — 담당·검색·스위치 거름 포함) 그대로(PR 1885 리뷰 ②). 검색할 때도 다시 센다(_finSearch).
+function _homeSetlSumHtml(){
+  const f=STATE.homeSetlF||'';
+  if(!f) return '<div id="wblSetlSum"></div>';
+  const fin=STATE.finTab==='fin', b=_homeSetlBag(fin?'fin':'run');
+  if(!_homeSetlReady(fin?'fin':'run')) return `<div id="wblSetlSum" class="wbl-note wbl-setlsum">${b&&b.failed?'정산 정보를 불러오지 못해 거르지 않은 전체 목록입니다 — 잠시 후 다시 들어오면 다시 불러옵니다':'정산 정보를 불러오는 중이라 거르지 않은 전체 목록입니다'}</div>`;
+  if(f!=='unpaid') return '<div id="wblSetlSum"></div>';
+  const list=_finVisible().filter(t=>_setlIsUnpaid(_homeSetlOf(t)));
+  const seen={}; let sum=0;
+  for(const t of list){ const d=_homeSetlOf(t), k=d.salesId||(t.sheetId+'\t'+t.tabName); if(!seen[k]){ seen[k]=1; sum+=_setlUnpaidRest(d); } }
+  return `<div id="wblSetlSum" class="wbl-note wbl-setlsum">업체 미입금 <b>${list.length}건</b> · 남은 금액 합계 <b>${_wonFmt(sum)}</b> <span>(같은 계약을 나눠 쓰는 작업은 한 번만 더함)</span></div>`;
+}
+function _homeSetlCellHtml(t,i){
+  return `<td class="wbl-setl" data-label="업체 정산" data-setl-i="${i}">${setlSummaryHtml(_homeSetlOf(t))}</td>`;
 }
 /* ── 필터 3종 판정(단일 출처 — 목록·스위치 건수 공용) ──────────────────────────────
    today = 금일 진행: 연결 공고가 "모집중"(사용자 확정 Q1 — 공고 상태는
@@ -6449,6 +6574,7 @@ function _finBodyHtml(){
       <td data-label="담당">${esc((s.manager)||'—')}</td>
       ${_finNumCells(t,i,filt)}
       <td data-label="상태">${st}${sod}</td>
+      ${_homeSetlCellHtml(t,i)}
       <td class="wbl-c wbl-btncol" data-label="저장폴더">${_folBtnsHtml(t,i)}</td>
       <td class="wbl-c wbl-btncol" data-label="모집공고">${_campBtnHtml(t,i)}</td>
       ${tdFinish}${_taskMoreCell(i)}<td class="wbl-c wbl-btncol" data-label="업체 접속">${_isInternalRole()&&!t.archived?`<button type="button" class="wbl-b" onclick="event.stopPropagation();copyAdvertiserLink(${i})" title="해당 작업부터 열리는 업체 접속 링크입니다. 같은 업체의 다른 작업과 리뷰어 연락처·주소도 보이니 광고주에게만 전달하세요.">작업별 업체 링크</button>`:''}</td></tr>`;
@@ -6461,7 +6587,7 @@ function _finBodyHtml(){
     ? `<div class="wbl-facts" style="margin:0;border-radius:0;border-left:0;border-right:0;border-top:0">인원·제출·입금이 모두 채워진 작업은 <b>자동으로 이곳으로 옮겨집니다</b>(마감자 칸에 <b>자동 마감</b>으로 표시). 아직 끝난 게 아니면 <b>[↩ 진행중으로 복귀]</b>를 누르세요 — 되돌린 작업은 다시 자동으로 넘어오지 않습니다.</div>`
     : '';
   return rows.length?`${autoNote}<div class="wbl-tw"><table class="wbl-t"><thead><tr>
-      <th>작업명</th><th class="wbl-c">작업표</th><th class="wbl-c">공유</th><th>담당</th><th class="nh">총건수</th><th class="nh">참여</th><th class="nh">제출</th><th class="nh">입금</th><th>상태</th><th class="wbl-c">저장폴더</th><th class="wbl-c">모집공고</th><th class="wbl-c">마감</th><th class="wbl-c">⋯</th><th class="wbl-c">업체 접속</th>
+      <th>작업명</th><th class="wbl-c">작업표</th><th class="wbl-c">공유</th><th>담당</th><th class="nh">총건수</th><th class="nh">참여</th><th class="nh">제출</th><th class="nh">입금</th><th>상태</th><th class="wbl-setl-h">업체 정산</th><th class="wbl-c">저장폴더</th><th class="wbl-c">모집공고</th><th class="wbl-c">마감</th><th class="wbl-c">⋯</th><th class="wbl-c">업체 접속</th>
     </tr></thead><tbody>${body}</tbody></table></div>`
     : `${autoNote}<div class="wbl-empty">${fin?'마감한 작업이 없습니다.':(STATE.finQ||STATE.finMgr||filt)?'조건에 맞는 작업이 없습니다.':'진행 중인 작업이 없습니다.'}</div>`;
 }
@@ -6486,16 +6612,19 @@ function _finRenderList(){
         <button class="${fin?'on':''}" onclick="_finPickTab('fin')">마감 보관함 ${nFin}</button>
       </span>
       ${fin?'':_finSwitchHtml(all)}
+      ${_isInternalRole()?_homeSetlChipsHtml(all):''}
       ${mgrs.length?`<button class="wbl-chip${STATE.finMgr?'':' on'}" onclick="_finPickMgr('')">전체</button>`+
         mgrs.map(m=>`<button class="wbl-chip${STATE.finMgr===m?' on':''}" onclick="_finPickMgr(this.dataset.m)" data-m="${esc(m)}">${esc(m)}</button>`).join(''):''}
       <input class="wbl-q" id="wblQ" placeholder="🔎 작업명 · 업체 · 담당자 검색" value="${esc(STATE.finQ||'')}" oninput="_finSearch(this.value)">
     </div>
+    ${_homeSetlSumHtml()}
     <div id="wblBody">${_finBodyHtml()}</div>
     ${fin?`<div id="wblLegacy">${_finLegacyHtml()}</div>`:''}
     ${_finFilterNoteHtml(all,filt)}
     ${_finNoticeHtml()}
     <div class="wbl-note">줄을 클릭하면 그 작업이 작업보드에서 열립니다 · 마감은 전 직원 공통이며 [↩ 진행중으로 복귀]로 되돌릴 수 있습니다.</div>
   </div>`;
+  _homeSetlEnsure();   // 업체 정산 칸 재료(그 탭 것만 · 60초 지난 것만 다시)
 }
 /* ── 필터 3분할 토글 스위치(진행 중 탭 전용) ─────────────────────────────────────
    ★ 건수는 목록과 **같은 판정**(_finMatchFilter)으로 센다 — 따로 세면 숫자와 목록이 갈린다.
@@ -6669,7 +6798,7 @@ function _finNoticeHtml(){
   if(STATE.worktabsUnavailable) n.push('⚠ 열린 작업 줄을 불러오지 못했습니다 — 이 기기에 남아 있던 목록을 그대로 쓰고 있습니다(새로고침해 주세요).');
   return n.length?`<div class="wbl-warn" style="margin:0;border-radius:0;border-left:0;border-right:0">${n.map(esc).join('<br>')}</div>`:'';
 }
-function _finPickTab(v){ STATE.finTab=v; STATE.finMgr=''; STATE.finFilter=''; _finRenderList(); }
+function _finPickTab(v){ STATE.finTab=v; STATE.finMgr=''; STATE.finFilter=''; STATE.homeSetlF=''; _finRenderList(); }
 function _finPickMgr(m){ STATE.finMgr=m; _finRenderList(); }
 /* ★★ 검색은 **표 본문만** 다시 그린다(사용자 신고 실측 수정 — 한글 '면' 이 'ㅁㅕㄴ' 으로 쪼개지던 버그).
    원인: 종전엔 입력 한 글자마다 _finRenderList 가 헤더까지 innerHTML 로 통째 교체해 **입력칸 DOM 이
@@ -6717,6 +6846,7 @@ function _finSearch(v){
   if(!b){ _finRenderList(); return; }
   _finHoldHeight(b,v);
   b.innerHTML=_finBodyHtml();
+  const ss=document.getElementById('wblSetlSum'); if(ss) ss.outerHTML=_homeSetlSumHtml();   // 업체 미입금 합계도 같은 목록으로(PR 1885 리뷰 ②)
   _finRenderLegacy();   // 결정 258: 예전 마감 작업도 같은 검색어로 거른다(표 본문만 — 입력칸 DOM 은 그대로)
 }
 /* ══ 결정 258: 마감 보관함 아래 "📦 예전 마감 작업" — 옛 관리자 대시보드 ⬛ 마감(tab_configs.is_closed) ══
@@ -8943,7 +9073,9 @@ function setlSummaryHtml(d){
   const qRetry=!unavailable&&!d.quote&&!!d.quoteLookupFailed;
   const iReady=!unavailable&&!!(d.invoice&&d.invoice.status==='issued');
   const iPart=!unavailable&&!!(d.invoice&&d.invoice.status==='partial');
-  const pReady=!unavailable&&!!(d.payment&&d.payment.status==='paid');
+  /* ★ 입금 완료 = _setlPayState 한 곳(금액 기준) — 인트라넷은 **일부만 배정돼도** payment_status 를 'paid' 로 저장해
+     종전엔 300만/500만인 계약이 「입금완료」로 보였다(2026-11-25 운영 4건 · 사용자 확정: 금액 기준). */
+  const pReady=!unavailable&&_setlPayState(d)==='paid';
   const pPart=!unavailable&&!pReady&&(Number(d.paidAmount)||0)>0;
   /* ★★ 인트라넷 프록시가 죽으면 `sales` 가 통째로 null 이라 `invoice`·`payment` 도 null 이 된다 —
      그 상태를 '미발행'·'미입금' 으로 적으면 **모르는 것을 단정하는 거짓말**이고, 아래 비활성 규칙과
@@ -8975,10 +9107,28 @@ function setlSummaryHtml(d){
   const match=canMatch?'<button type="button" class="tp3doc tp3match" onclick="openProgressContractMatch(event)">계약 매칭</button>':'';
   return `<span class="setlsummary"><span class="tp3docs">${btn('quote','견적서',qReady,qSub,dead(qReady||qPart,qRetry),qRetry,qPart?Math.max(qR,.04):0)}${btn('invoice','계산서',iReady,iSub,dead(iReady||iPart,iRetry),iRetry,iPart?Math.max(iR,.04):0)}${btn('payment','입금',pReady,pSub,dead(pReady||pPart,pRetry),pRetry,pPart?Math.max(pR,.04):0)}${match}</span>${d&&d.linked&&!d.hidden&&Array.isArray(d.sharedTabs)&&d.sharedTabs.length?`<span class="tp3share">${_shareBadge(d.sharedTabCount||d.sharedTabs.length+1,d.sharedTabs.map(x=>x&&x.label||''))}</span>`:''}</span>`;
 }
+/* 입금 상태(단일 출처) — 'paid' | 'partial' | 'unpaid'. 총비용(견적 합계 우선, 없으면 계약금액)을 알면 **금액으로** 판정하고,
+   모를 때만 인트라넷 상태값을 쓴다. 작업보드 정산 칸·입금 창·홈 「업체 정산」 칸·[업체 미입금] 이 함께 쓴다. */
+function _setlPayState(d){
+  if(!d) return 'unpaid';
+  const paid=Number(d.paidAmount)||0, tc=Number(d.totalCost)||0;
+  if(tc>0) return paid>=tc?'paid':(paid>0?'partial':'unpaid');
+  const st=d.payment&&d.payment.status;
+  return st==='paid'?'paid':(paid>0?'partial':'unpaid');
+}
 function openSettlementDocument(ev,kind){
   if(ev){ ev.stopPropagation(); ev.preventDefault(); }
   if(kind==='quote'||kind==='invoice'){ awDocOpen(ev,kind); return; }
-  openSettlementPayment();
+  const h=_homeSetlCtx(ev);   // 홈 작업목록 「업체 정산」 칸에서 누른 것이면 그 줄의 작업·정산으로 연다
+  if(h) _openSettlementPaymentFor(h); else openSettlementPayment();
+}
+/* 홈 작업목록 「업체 정산」 칸의 문맥 — 누른 버튼이 그 칸(td[data-setl-i]) 안이면 {data, tab}, 아니면 null(작업보드 칸).
+   ★ STATE.settle(열어 둔 작업보드의 정산)을 덮지 않는다 — 덮으면 작업보드로 돌아갔을 때 다른 작업 정산이 보인다. */
+function _homeSetlCtx(ev){
+  const el=ev&&ev.target&&ev.target.closest?ev.target.closest('td[data-setl-i]'):null;
+  if(!el) return null;
+  const t=(STATE.tabs||[])[+el.getAttribute('data-setl-i')];
+  return t?{data:_homeSetlOf(t),tab:t}:null;
 }
 // ══ P2 정산 파이프라인 스텝퍼 ══
 const _SETTLE_PAY={unpaid:['미입금','bad'],partial:['부분입금','warn'],paid:['입금완료','safe']};
@@ -8990,7 +9140,8 @@ let _QDOC=null;   // 열린 팝업의 versions 캐시(탭 전환용)
 let _QDOC_ASSETS={}; // 인트라넷 PDF와 같은 활성 로고·직인(data URI)
 function awDocOpen(ev,kind,i){
   if(ev){ ev.stopPropagation(); ev.preventDefault(); }
-  const t=(i!=null?STATE.tabs[i]:null)||(STATE.settle&&STATE.settle.tab)||STATE.cur; if(!t) return;
+  const h=i==null?_homeSetlCtx(ev):null;   // 홈 「업체 정산」 칸에서 누르면 그 줄의 작업
+  const t=(i!=null?STATE.tabs[i]:null)||(h&&h.tab)||(STATE.settle&&STATE.settle.tab)||STATE.cur; if(!t) return;
   const title=(kind==='quote'?'📄 견적서 — ':'🧾 세금계산서 — ')+t.tabName;
   _modal(title,'<div class="empty" style="padding:24px">불러오는 중…</div>');
   const path=kind==='quote'?'quote-doc':'invoice-doc';
@@ -9092,17 +9243,18 @@ async function loadSettlement(t){
   const cellS=$('#setlCell .setlsummary');
   if(cellS) cellS.outerHTML=setlSummaryHtml(STATE.settle.data);
 }
-function openSettlementPayment(){
-  const st=STATE.settle, d=st&&st.data, t=(st&&st.tab)||STATE.cur;
+function openSettlementPayment(){ _openSettlementPaymentFor(STATE.settle); }
+function _openSettlementPaymentFor(st){
+  const d=st&&st.data, t=(st&&st.tab)||STATE.cur;
   const title='💳 입금 — '+((t&&t.tabName)||'작업');
   if(!d||d.hidden||!d.linked){
     _modal(title,'<div class="empty" style="padding:24px">정산 정보가 아직 준비되지 않았습니다. 궁금하신 내용은 담당자에게 문의해 주세요.</div>');
     return;
   }
-  const pay=d.payment||{}, status=(_SETTLE_PAY[pay.status]||[pay.status||'미입금','neutral'])[0];
+  const pay=d.payment||{}, ps=_setlPayState(d), status=_SETTLE_PAY[ps][0];
   const amount=d.paidAmount==null?'—':_wonFmt(d.paidAmount);
   const date=d.paidDate||pay.date;
-  _modal(title,`<div class="idc"><div class="ih ${pay.status==='paid'?'ok':'wait'}">${esc(status)}</div><div class="ig">
+  _modal(title,`<div class="idc"><div class="ih ${ps==='paid'?'ok':'wait'}">${esc(status)}</div><div class="ig">
     <div class="cell"><span class="k">입금액</span><b>${amount}</b></div>
     <div class="cell"><span class="k">입금일</span><b>${date?esc(String(date).slice(0,10)):'—'}</b></div>
     <div class="cell"><span class="k">계약 금액</span><b>${d.amount==null?'—':_wonFmt(d.amount)}</b></div>
@@ -9112,7 +9264,7 @@ function openSettlementPayment(){
 function openProgressContractMatch(ev){
   if(ev){ ev.stopPropagation(); ev.preventDefault(); }
   if(!(STATE.role==='master'||STATE.role==='admin'||STATE.role==='staff')) return;
-  const st=STATE.settle, d=st&&st.data, t=(st&&st.tab)||STATE.cur;
+  const st=(ev&&_homeSetlCtx(ev))||STATE.settle, d=st&&st.data, t=(st&&st.tab)||STATE.cur;
   if(!t||!d||d.hidden||d.linked) return;
   openContractMatchModal({sheetId:t.sheetId,tabName:t.tabName,linked:false});
 }
@@ -9298,6 +9450,8 @@ function _contractMatchApplied(sheetId,tabName,salesId,contractNumber){
   // ② 작업보드 정산 카드 — 그 탭을 열어 둔 상태면 재조회(스텝퍼·요약 셀이 함께 갱신된다)
   const st=STATE.settle;
   if(st&&st.tab&&st.tab.sheetId===sheetId&&st.tab.tabName===tabName) loadSettlement(st.tab);
+  // ③ 홈 작업목록 「업체 정산」 — 받아 둔 묶음을 버리고 새로 받는다(옛 계약 금액이 그 줄에 남지 않게 · 60초 저장분 건너뜀)
+  if(STATE.homeSettle&&(STATE.homeSettle.run||STATE.homeSettle.fin)) _homeSetlInvalidate();
 }
 async function toggleSettleVis(advertiserId,visible){
   const r=await api('/api/trackb/settlement/visibility',{method:'POST',body:JSON.stringify({advertiserId,visible})});
@@ -20983,10 +21137,7 @@ function _ovmRowMatch(t,f,q){
   if(f==='nomatch' && t.salesId) return false;
   if(f==='cand' && !t.finishCand) return false;
   if(f==='fin' && !t.finished) return false;
-  if(f==='unpaid'){
-    if(!st||st.proxyDown||!st.totalCost) return false;
-    if((st.paidAmount||0)>=st.totalCost) return false;
-  }
+  if(f==='unpaid' && !_setlIsUnpaid(st)) return false;
   const nq=String(q||'').trim().toLowerCase(); if(!nq) return true;
   const pm=parseTabMeta(t.tabName);
   const ob=_ownBrand(t);   // 검색어는 지정 브랜드명으로도 걸린다(작업명에 없는 브랜드로 배정한 경우)

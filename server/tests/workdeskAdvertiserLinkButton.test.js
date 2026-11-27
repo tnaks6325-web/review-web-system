@@ -76,12 +76,12 @@ function harness(cur, apiResult, copyOk = true) {
     const t={sheetId:'S',tabName:'작업',stats:{}};
     const ctx={STATE:{role:'admin',tabs:[t]},_finVisible:()=>[t],_finCanEdit:()=>false,esc:String,
       isFinishCandidate:()=>false,_tabTip:()=>'',_tabLabel:()=> '작업',_finNumCells:()=>'<td></td>'.repeat(4),
-      _folBtnsHtml:()=>'',_campBtnHtml:()=>'',_taskMoreCell:()=>'<td></td>'};
+      _folBtnsHtml:()=>'',_campBtnHtml:()=>'',_taskMoreCell:()=>'<td></td>',_homeSetlCellHtml:()=>'<td class="wbl-setl"></td>'};
     vm.createContext(ctx);vm.runInContext(fn('_isInternalRole')+'\n'+fn('_finBodyHtml'),ctx);
     const rendered=ctx._finBodyHtml();
     assert.match(rendered,/onclick="event.stopPropagation\(\);copyAdvertiserLink\(0\)"/);
     assert.match(rendered,/작업별 업체 링크/);assert.match(rendered,/copyTaskLinkFromHome\(0\)/);
-    assert.equal((rendered.split('</thead>')[0].match(/<th[ >]/g)||[]).length,14);
+    assert.equal((rendered.split('</thead>')[0].match(/<th[ >]/g)||[]).length,15);   // 결정 421: + 업체 정산 1열
     for(const role of ['advertiser','reviewer']){ctx.STATE.role=role;assert.doesNotMatch(ctx._finBodyHtml(),/copyAdvertiserLink\(0\)/);}
     ctx.STATE.role='staff';t.archived=true;assert.doesNotMatch(ctx._finBodyHtml(),/copyAdvertiserLink\(0\)/);
   });
