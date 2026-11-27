@@ -864,15 +864,21 @@ async function _loadOptionsRaw(db, campaignId) {
 
 // ═══════════════════════════════════════════════════════════
 // 공개 응답 화이트리스트 (M1 선행 보안 — PRD §08)
-//   레거시(participation_mode=false): 현행 /list 반환 필드 그대로 유지(카톡 신청 플로우 호환).
-//   참여형(participation_mode=true): chat_url·notes·description·max/current_slots·linked_* 미반환
+//   ★★ 이 두 목록이 로그인 없는 공고 목록(GET /list)·공고 상세(GET /:id)에 실리는 **행 칸의 유일한 출처**다
+//     (_publicView 가 _pick 으로만 고른다 — 결정 431 · 완화 금지). 칸을 더하려면 리뷰어 화면 소비처를 먼저 찾고
+//     tests/campaignPublicListFields.test.js 의 허용 목록을 함께 고친다. 직원 화면은 /admin/list · 관리자 JWT 상세(전체 행)를 쓴다.
+//   레거시(participation_mode=false): 카드가 그리는 칸 + 카톡 신청 플로우(chat_url)만.
+//     ★ 결정 431: description(내부 설명)·linked_sheet_id(구글 시트 고유번호)·linked_tab_name(작업 탭 이름) 제거 —
+//       리뷰어 화면 소비처 0(공유 목록·홈 옛 카드·공고 화면 모두 안 읽는다). 시트 고유번호만으로 시트가 열릴 수 있다.
+//   참여형(participation_mode=true): chat_url·notes·description·max/current_slots·linked_*·manager 미반환
 //     — 작업내용·카톡URL은 신청(홀드) 후 work-detail 게이트에서만, 총원 계열은 어디에도 노출 금지.
+//     ★ 결정 431: manager(담당 칸) 제거 — 참여형 카드·공고 화면 소비처 0(관리자 카드는 /admin/list 를 쓴다).
 // ═══════════════════════════════════════════════════════════
 const PUBLIC_FIELDS_LEGACY = [
   'id', 'title', 'channel', 'channel_custom', 'manager', 'time_range',
   'delivery_type', 'review_fee', 'badges', 'notes', 'chat_url',
   'status', 'sort_order', 'max_slots', 'current_slots', 'deadline',
-  'description', 'linked_sheet_id', 'linked_tab_name', 'created_at',
+  'created_at',
   // ★ 139: 공개 목록도 서버가 저장한 이월 배치 방식을 전달해야 카드·일정 모달이
   // 다음날 가산 기본값으로 되돌아가지 않는다. 민감정보가 아닌 운영 규칙값이다.
   'carry_strategy',
@@ -880,7 +886,7 @@ const PUBLIC_FIELDS_LEGACY = [
   'work_kind',  // ★ 127: 리뷰어 홈 공고 탭(리뷰/블로그) 필터 재료 — 레거시 공고도 같은 축으로 갈린다
 ];
 const PUBLIC_FIELDS_PARTICIPATION = [
-  'id', 'title', 'channel', 'channel_custom', 'manager', 'time_range',
+  'id', 'title', 'channel', 'channel_custom', 'time_range',
   'delivery_type', 'review_fee', 'delivery_review_fee_mix', 'badges', 'status', 'sort_order',
   'thumbnail_url', 'created_at',
   'hold_ttl_min', 'close_buffer_min', // 민감정보 아님 — 프론트 안내문("N분 안에 제출")의 정확성용
