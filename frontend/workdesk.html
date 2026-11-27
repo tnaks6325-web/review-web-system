@@ -9175,11 +9175,15 @@ function awDocOpen(ev,kind,i){
   const h=i==null?_homeSetlCtx(ev):null;   // 홈 「업체 정산」 칸에서 누르면 그 줄의 작업
   const t=(i!=null?STATE.tabs[i]:null)||(h&&h.tab)||(STATE.settle&&STATE.settle.tab)||STATE.cur; if(!t) return;
   const title=(kind==='quote'?'📄 견적서 — ':'🧾 세금계산서 — ')+t.tabName;
-  _modal(title,'<div class="empty" style="padding:24px">불러오는 중…</div>');
+  /* 누른 때의 정산 값으로 묶는다(PR 1894 리뷰) — 응답 사이 작업보드가 다른 작업으로 바뀌면 STATE.settle 은 그 작업 것이다.
+     창 안 「불러오는 중」 자리에 이 요청 번호를 달아, 그 자리가 남아 있을 때만 응답을 그린다(뒤에 연 창을 늦은 응답이 덮지 않게). */
+  const st=STATE.settle, sd=(h&&h.data)||(st&&st.tab&&st.tab.sheetId===t.sheetId&&st.tab.tabName===t.tabName?st.data:null);
+  const seq=String(window.__awDocSeq=(window.__awDocSeq||0)+1), mine=()=>!!document.querySelector(`#wdModal [data-aw="${seq}"]`);
+  _modal(title,`<div class="empty" style="padding:24px" data-aw="${seq}">불러오는 중…</div>`);
   const path=kind==='quote'?'quote-doc':'invoice-doc';
   api(`/api/trackb/workdesk/${path}?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`)
-    .then(async r=>{ if(document.getElementById('wdModal')) _modal(title, kind==='quote'?await _qdocBody(r):_idocBody(r)+_idocIssueMore((h&&h.data)||(STATE.settle&&STATE.settle.data))); })
-    .catch(()=>{ if(document.getElementById('wdModal')) _modal(title,'<div class="empty" style="padding:24px">불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</div>'); });
+    .then(async r=>{ if(mine()) _modal(title, kind==='quote'?await _qdocBody(r):_idocBody(r)+_idocIssueMore(sd)); })
+    .catch(()=>{ if(mine()) _modal(title,'<div class="empty" style="padding:24px">불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</div>'); });
 }
 async function _qdocBody(r){
   if(!r||r.ok===false) return '<div class="empty" style="padding:24px">불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</div>';

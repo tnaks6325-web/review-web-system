@@ -84,4 +84,41 @@ box.STATE.settle = { data: { ...NOINV, invoice: { status: 'issued' } }, tab: { t
 box.openSettlementDocument(ev, 'invoice');
 ok(opened.length === 1 && docs.length === 2, '발행 완료는 종전처럼 발행 이력 카드');
 
-console.log(`\nsettlementInvoiceIssueLink: ${pass} passed`);
+(async () => {
+  console.log('D. 늦게 온 응답 (PR 1894 리뷰)');
+  // 실제 awDocOpen 을 돌린다 — 응답 시점은 테스트가 쥔다. 창(wdModal)은 innerHTML 한 벌로 흉내.
+  const pending = [];
+  const modalEl = { html: '' };
+  const B = { STATE: { role: 'staff', settle: null, tabs: [], cur: null },
+    esc: box.esc, _homeSetlCtx: () => null, _qdocBody: async () => 'Q', _idocBody: () => 'CARDS',
+    api: (u) => new Promise((res) => pending.push({ u, res })),
+    _modal: (title, body) => { modalEl.title = title; modalEl.html = body; },
+    document: { getElementById: (id) => (id === 'wdModal' && modalEl.open ? modalEl : null),
+      querySelector: (sel) => { const m = /\[data-aw="([^"]+)"\]/.exec(sel); return modalEl.open && m && modalEl.html.includes(`data-aw="${m[1]}"`) ? {} : null; } },
+  };
+  B._modal = (title, body) => { modalEl.open = true; modalEl.title = title; modalEl.html = body; };
+  B.window = B;
+  vm.createContext(B);
+  vm.runInContext(['_setlIssueInvoiceUrl', '_idocIssueMore', 'awDocOpen'].map(grab).join(''), B);
+  const A_ = { tab: { sheetId: 's', tabName: 'A' }, data: { ...NOINV, salesId: 'sales-A', invoice: { status: 'partial' } } };
+  const B_ = { tab: { sheetId: 's', tabName: 'B' }, data: { ...NOINV, salesId: 'sales-B', invoice: { status: 'partial' } } };
+  const ev2 = { stopPropagation() {}, preventDefault() {}, target: { closest: () => null } };
+  // ① A 의 이력을 열어 둔 채 작업보드가 B 로 바뀐 뒤 A 응답이 온다
+  B.STATE.settle = A_; B.STATE.cur = A_.tab;
+  B.awDocOpen(ev2, 'invoice');
+  B.STATE.settle = B_; B.STATE.cur = B_.tab;
+  pending.shift().res({ ok: true, linked: true }); await new Promise(r => setImmediate(r));
+  ok(/세금계산서 — A/.test(modalEl.title) && /issue_invoice=sales-A/.test(modalEl.html) && !/sales-B/.test(modalEl.html),
+    '★ A 의 이력 창에는 A 계약의 [이어서 발행] 주소만 — 눌렀을 때의 계약으로 묶는다');
+  // ② A 를 연 뒤 B 를 열었고, A 응답이 B 응답보다 늦게 온다
+  B.STATE.settle = A_; B.STATE.cur = A_.tab;
+  B.awDocOpen(ev2, 'invoice');
+  B.STATE.settle = B_; B.STATE.cur = B_.tab;
+  B.awDocOpen(ev2, 'invoice');
+  const pA = pending.shift(), pB = pending.shift();
+  pB.res({ ok: true, linked: true }); await new Promise(r => setImmediate(r));
+  pA.res({ ok: true, linked: true }); await new Promise(r => setImmediate(r));
+  ok(/세금계산서 — B/.test(modalEl.title) && /issue_invoice=sales-B/.test(modalEl.html) && !/sales-A/.test(modalEl.html),
+    '★ 나중에 연 B 창을 늦게 온 A 응답이 덮지 않는다');
+  console.log(`\nsettlementInvoiceIssueLink: ${pass} passed`);
+})().catch(e => { console.error('❌', e && e.message); process.exit(1); });
