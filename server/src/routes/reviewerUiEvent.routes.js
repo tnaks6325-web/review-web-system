@@ -1,5 +1,5 @@
 'use strict';
-/* 결정 425 — POST /api/reviewer/ui-event : 리뷰어 화면 사건 횟수(지금은 「사진을 다시 넣어 주세요」 안내가 뜬 횟수 하나).
+/* 결정 427 — POST /api/reviewer/ui-event : 리뷰어 화면 사건 횟수(지금은 「사진을 다시 넣어 주세요」 안내가 뜬 횟수 하나).
  *   로그인 없이 받는다(직접 링크·공고 틀 어디서든 · 누가 보냈는지는 받지도 남기지도 않는다).
  *   - 허용 목록(reviewerUiEvents.service UI_EVENTS) 밖 = 400 · 본문이 크면(512바이트 초과) = 413 · 받으면 204(기록은 기다리지 않음).
  *   - 인터넷 주소별 분당 20회(diag client-error 와 같은 express-rate-limit 꼴 · 주소는 세기에만 쓰고 저장하지 않는다).

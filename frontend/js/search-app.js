@@ -101,7 +101,7 @@ async function _loadOrderIdentityContext() {
     const identity = data.selectedIdentity || {};
     (_orderCardIds || []).forEach((cid) => {
       const idEl = document.getElementById(cid + "_userId");
-      // ★ 결정 425 (가) — 저장된 아이디는 빈 칸만 채운다. 새로고침 전에 리뷰어가 친 값(초안)이 있으면 그 값이 이긴다
+      // ★ 결정 427 (가) — 저장된 아이디는 빈 칸만 채운다. 새로고침 전에 리뷰어가 친 값(초안)이 있으면 그 값이 이긴다
       //   (종전: 이 응답이 초안 복원(300ms 뒤)보다 먼저 오면 저장된 아이디가 먼저 들어가 「빈 칸만 채우는」 복원이 건너뛰었다).
       if (idEl && !idEl.value) idEl.value = (typeof _embedDraftValue === "function" ? _embedDraftValue(idEl.id) : "") || identity.shoppingId || "";
       if (idEl) idEl.dataset.savedValue = identity.shoppingId || "";
@@ -1079,7 +1079,7 @@ function _embedSaveForm() {
       fields[el.id] = (el.type === "checkbox" || el.type === "radio") ? (el.checked ? "1" : "") : (el.value || "");
     });
     const draft = { layout: _EMBED_FORM_LAYOUT, fields };
-    // ★ 결정 425 — 사진은 담지 않는다. 「몇 번째 주문의 몇 장째에 사진이 있었다」만(다시 열 때 안내용) · 없으면 칸 자체를 두지 않는다.
+    // ★ 결정 427 — 사진은 담지 않는다. 「몇 번째 주문의 몇 장째에 사진이 있었다」만(다시 열 때 안내용) · 없으면 칸 자체를 두지 않는다.
     try { const ph = typeof _ofPhMarkList === "function" ? _ofPhMarkList() : []; if (ph.length) { draft.photos = ph; draft.photosAt = Date.now(); } } catch (_) {}
     sessionStorage.setItem(_EMBED_FORM_ID_KEY, JSON.stringify(draft));
     sessionStorage.removeItem(_EMBED_FORM_KEY);   // 옛 위치 초안은 새 초안이 생기는 순간 필요 없다
@@ -1120,7 +1120,7 @@ function _embedRestoreForm() {
     _embedSaveForm();   // 옮긴 값은 바로 아이디 초안으로 남긴다
   } catch (_) { /* noop */ }
 }
-/** ★ 결정 425 (가) — 초안에 적힌 그 칸의 값(없으면 ""). 명의의 저장된 기본값(쇼핑몰 아이디)이 리뷰어가 친 값을 덮지 않게
+/** ★ 결정 427 (가) — 초안에 적힌 그 칸의 값(없으면 ""). 명의의 저장된 기본값(쇼핑몰 아이디)이 리뷰어가 친 값을 덮지 않게
  *   `_loadOrderIdentityContext` 가 빈 칸을 채우기 전에 먼저 본다. 복원(_embedRestoreForm)과 같은 조건에서만 읽는다. */
 function _embedDraftValue(id) {
   if (!id || !_EMBED_CTX || !_EMBED_FORM_ID_KEY) return "";
@@ -1133,7 +1133,7 @@ function _embedDraftValue(id) {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   ★ 결정 425 — 구매양식: 넣은 사진은 새로고침을 넘지 못한다(C안 — 사진은 휴대폰에도 서버에도 따로 보관하지 않는다)
+   ★ 결정 427 — 구매양식: 넣은 사진은 새로고침을 넘지 못한다(C안 — 사진은 휴대폰에도 서버에도 따로 보관하지 않는다)
    ────────────────────────────────────────────────────────────
    - 사진이 들어 있는 동안만 떠나기 전 브라우저 확인(beforeunload). 직접 링크 = 이 화면이 · 공고 틀 안 = 부모(공고 화면)가 묻는다
      (틀 안에서 걸면 옵션·개수를 바꿀 때·만료로 틀을 비울 때도 물어 막다른 길이 된다 — campaign.html `_framePhotosSync`).
@@ -6108,7 +6108,7 @@ function initOrderFormMode() {
     _precheckProfileGateOnEntry(window._slotAuth || {});
   }
 
-  // ★ 결정 425 — 새로고침 전에 사진이 있었으면 어느 사진을 다시 넣을지 사진 칸 위에 알린다(카드를 그린 뒤 · 초안 저장보다 먼저 읽는다)
+  // ★ 결정 427 — 새로고침 전에 사진이 있었으면 어느 사진을 다시 넣을지 사진 칸 위에 알린다(카드를 그린 뒤 · 초안 저장보다 먼저 읽는다)
   if (typeof _ofPhStart === "function") _ofPhStart();
 
   return true;
@@ -8882,7 +8882,7 @@ function removeOrderCard(cid) {
   const el = document.getElementById(cid);
   if (el) el.remove();
   _updateCardCountBadge();
-  if (typeof _ofPhChanged === "function") _ofPhChanged(cid);   // ★ 결정 425 — 지운 카드의 사진·「다시 넣어 주세요」도 거둔다
+  if (typeof _ofPhChanged === "function") _ofPhChanged(cid);   // ★ 결정 427 — 지운 카드의 사진·「다시 넣어 주세요」도 거둔다
 }
 
 /** ── 공유 토글 (주문자/은행/예금주 동일 사용) ── */
@@ -9045,7 +9045,7 @@ function removeCardImg(cid) {
   // oninput 핸들러 복원 (price)
   const priceEl = document.getElementById(cid+"_price");
   if (priceEl) priceEl.setAttribute("oninput", `formatPriceInput(this);this.classList.remove('ai-filled');this.dataset.userEdited='1';_ofClearError('${cid}_price')`);
-  if (typeof _ofPhChanged === "function") _ofPhChanged();   // ★ 결정 425
+  if (typeof _ofPhChanged === "function") _ofPhChanged();   // ★ 결정 427
 }
 
 /* ══ 결정 288: 구매캡처 2장째(선택) ═══════════════════════════════════════════
@@ -9070,7 +9070,7 @@ function _setCardImg2(file, cid, opts = {}) {
     const th = document.getElementById(cid + "_img2Thumb"); if (th) th.src = dataUrl;
     const pv = document.getElementById(cid + "_img2Preview"); if (pv) pv.style.display = "flex";
     const bx = document.getElementById(cid + "_img2Box"); if (bx) bx.style.display = "";
-    if (typeof _ofPhChanged === "function") _ofPhChanged();   // ★ 결정 425
+    if (typeof _ofPhChanged === "function") _ofPhChanged();   // ★ 결정 427
     if (opts.deferAi) { const lb = document.getElementById(cid + "_img2Label"); if (lb) lb.textContent = "2장째 · 첫 장 확인 뒤 읽습니다"; }
     else _callCardExtractAi2(cid);
   };
@@ -9085,7 +9085,7 @@ function removeCardImg2(cid) {
   const bx = document.getElementById(cid + "_img2Box"); if (bx) bx.style.display = "none";
   const lb = document.getElementById(cid + "_img2Label"); if (lb) lb.textContent = "2장째 첨부됨";
   if (st && st.rdmNeedImg2) _rdmNeedImg2(cid);
-  if (typeof _ofPhChanged === "function") _ofPhChanged();   // ★ 결정 425 — 사진을 뺐다(남은 사진이 없으면 떠나기 전 확인을 끈다)
+  if (typeof _ofPhChanged === "function") _ofPhChanged();   // ★ 결정 427 — 사진을 뺐다(남은 사진이 없으면 떠나기 전 확인을 끈다)
 }
 
 /* ★ 결정 300 — 필수 배송메세지가 확인되지 않아 막힌 주문 칸에만 「배송메세지 사진 추가」 버튼을 보인다
@@ -9169,7 +9169,7 @@ function _processCardImgFile(file, cid) {
         document.getElementById(cid+"_imgThumb").src = dataUrl;
         document.getElementById(cid+"_imgPreview").style.display = "flex";
         document.getElementById(cid+"_imgZone").style.display = "none";
-        if (typeof _ofPhChanged === "function") _ofPhChanged();   // ★ 결정 425 — 사진이 들어왔다: 떠나기 전 확인 · 다시 넣을 사진 안내에서 빼기
+        if (typeof _ofPhChanged === "function") _ofPhChanged();   // ★ 결정 427 — 사진이 들어왔다: 떠나기 전 확인 · 다시 넣을 사진 안내에서 빼기
         document.getElementById(cid+"_aiResult").classList.remove("show");
         document.getElementById(cid+"_aiError").style.display = "none";
         const lbl = document.getElementById(cid+"_imgLabel"); if (lbl) lbl.textContent = file.name + " · AI 분석 중…";
@@ -11222,7 +11222,7 @@ async function submitOrderForm() {
 
   // 성공 후 플래그 초기화
   window._forceResubmit = false;
-  if (typeof _ofPhSubmitted === "function") _ofPhSubmitted();   // ★ 결정 425 — 제출이 들어갔다: 떠나기 전 확인·다시 넣을 사진 안내·표시를 거둔다
+  if (typeof _ofPhSubmitted === "function") _ofPhSubmitted();   // ★ 결정 427 — 제출이 들어갔다: 떠나기 전 확인·다시 넣을 사진 안내·표시를 거둔다
 
   // ── 완료 화면 표시 ──
   const wrapEl   = document.getElementById("ofOrderCardsWrap");

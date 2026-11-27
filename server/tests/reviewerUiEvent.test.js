@@ -1,5 +1,5 @@
 'use strict';
-/* 결정 425 — POST /api/reviewer/ui-event : 리뷰어 화면 사건 횟수(지금은 「사진을 다시 넣어 주세요」 안내가 뜬 횟수 하나).
+/* 결정 427 — POST /api/reviewer/ui-event : 리뷰어 화면 사건 횟수(지금은 「사진을 다시 넣어 주세요」 안내가 뜬 횟수 하나).
  *   [A] 입구(진짜 라우터 · 진짜 express · 가짜 기록기): 허용 목록 · 크기 · 204 · 기다리지 않음 · 기록 실패 무관 · 인터넷 주소별 분당 상한
  *   [B] 표(진짜 migration 231 · PGlite): 기록 한 줄 · 개인정보 칸 없음 · 주인에게 줄 하루별 셈 SQL · 표가 없어도 실패를 삼킨다
  *   [C] 연결: app.js 가 reviewerRoutes 보다 먼저 싣는다 · 기동 필수 표(REQUIRED_TABLES)에 넣지 않는다
@@ -93,7 +93,7 @@ test('B-1 migration 231 — 개인정보 칸 없는 표 · 기록 한 줄 · 하
   assert.deepStrictEqual(cols, ['id', 'event', 'screen', 'slots', 'created_at'], '★ 이름·전화·사진·주문번호·리뷰어·인터넷 주소 칸이 없다');
   assert.equal(await recordUiEvent(normalizeUiEvent({ event: 'photo_reattach_notice', screen: 'campaign', slots: 2 }), pool), true);
   assert.equal(await recordUiEvent(normalizeUiEvent({ event: 'photo_reattach_notice', screen: 'direct', slots: 1 }), pool), true);
-  // 결정 425 문서의 주인용 셈 SQL 과 같은 꼴(읽기 전용)
+  // 결정 427 문서의 주인용 셈 SQL 과 같은 꼴(읽기 전용)
   const doc = fs.readFileSync(fs.readdirSync(path.join(ROOT, '../docs/decisions')).filter((f) => /^425-/.test(f)).map((f) => path.join(ROOT, '../docs/decisions', f))[0], 'utf8');
   const m = /```sql\n([\s\S]*?)```/.exec(doc);
   assert.ok(m, '결정 문서에 하루별 셈 SQL');
