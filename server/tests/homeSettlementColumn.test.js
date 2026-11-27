@@ -145,7 +145,7 @@ function grab(name) {
 
 function screenPart() {
   console.log('D. 입금 판정 — 금액 기준');
-  const names = ['_setlPayState', 'setlSummaryHtml', '_awMD', '_manWon', '_shareBadge', '_wonFmt', '_homeSetlBag', '_homeSetlOf', '_setlIsUnpaid',
+  const names = ['_setlPayState', 'setlSummaryHtml', '_awMD', '_manWon', '_shareBadge', '_wonFmt', '_setlIssueInvoiceUrl', '_homeSetlBag', '_homeSetlOf', '_setlIsUnpaid',
     '_setlUnpaidRest', '_homeSetlMatch', '_homeSetlSumHtml', '_homeSetlChipsHtml', '_homeSetlCellHtml', '_homeSetlCtx', '_finVisible', '_openSettlementPaymentFor', 'openSettlementDocument',
     '_homeSetlReady', '_homeSetlInvalidate', '_homeSetlLoad', '_homeSetlRefresh', '_homeSetlPick', '_finRefresh', '_finSearch'];
   const modal = [];
