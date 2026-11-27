@@ -113,7 +113,7 @@ function receiptReviewSpecFromWorkOrder(wo = {}) {
   const woTotal = _strictInt(wo && wo.recruit_count);
   const baseCount = p.base && p.base.count != null && String(p.base.count).trim() !== '' ? _strictInt(p.base.count) : null;
   if ((woTotal || 0) !== total || (baseCount != null && baseCount !== total)) {
-    block('receipt_total_mismatch', `모집 인원 ${woTotal || 0}명(상품 인원 ${baseCount == null ? '-' : baseCount}명)과 영수증 ${total}장이 다릅니다 — 영수증 장수만큼만 모집합니다.`);
+    block('receipt_total_mismatch', `모집 인원 ${woTotal || 0}명(상품 인원 ${baseCount == null ? '-' : baseCount}명)과 영수증 ${total}장이 다릅니다 — 모집 인원은 영수증 장수를 따릅니다(리뷰오더를 다시 저장하면 장수로 맞춰집니다 · 결정 420 Q2).`);
   }
 
   const pay = _strictInt(p.base && p.base.pay) || 0;
@@ -163,6 +163,75 @@ function buildReceiptPool(spec, { startSeq = 1 } = {}) {
 }
 
 /**
+ * ★★ 모집 인원 = 영수증 장수 자동 맞춤(결정 420 사용자 확정 Q2 · 2026-11-25) — 저장 입구가 **저장 전에** 부른다(단일 출처).
+ *   AE 가 총모집과 다른 장수의 영수증을 붙이면 거절하지 않고 총모집(`recruit_count`)·상품 인원(`base.count`)을 장수로 맞춘다
+ *   → 이 두 값을 읽는 모든 곳(작업표 계획·공고 프리필·모집 상한·입금·이상로그)이 같은 수를 본다.
+ * ★ 영수증 오더가 아니면 손대지 않는다(`applied:false`).
+ * ★★ fail-closed — 맞출 근거가 확실할 때만 맞춘다: 살아 있는 상품이 정확히 하나 · 옵션 없음 · `receipt.receipts` 가 1..MAX 장인 목록.
+ *   그 밖(영수증 없음·목록 아님·상한 초과·매장 둘·형식 깨짐)은 받은 그대로 둔다 → 계약 판정이 `receipt_no_files` 등으로 막는다
+ *   (0명으로 접거나 고쳐 깔지 않는다). 장수 = 받은 줄 수(= 계약 판정의 `total`) — 틀린 번호·중복은 계약 판정이 따로 막는다.
+ * ★ 계약 판정의 `receipt_total_mismatch` 는 남긴다(방어선 두 겹) — 이 맞춤을 건너뛴 값(DB 직접·새 저장 경로)이면 계획이 멈춘다.
+ * @param {string} workKind  오더 종류(라벨·코드)
+ * @param {string|Array} raw  상품 원본(product_options_json)
+ * @returns {{ applied:false } | { applied:true, count:number, json:string, requested:{ baseCount:any } }}
+ */
+function receiptRecruitFollow(workKind, raw) {
+  const none = { applied: false };
+  if (!require('./workKind').isReceiptKind(workKind)) return none;
+  let list;
+  if (Array.isArray(raw)) list = raw;
+  else { try { list = JSON.parse(raw || ''); } catch (_) { return none; } }
+  if (!Array.isArray(list)) return none;
+  const liveIdx = list.map((p, i) => (p && typeof p === 'object' && !Array.isArray(p) && !p.closed ? i : -1)).filter(i => i >= 0);
+  if (liveIdx.length !== 1) return none;
+  const p = list[liveIdx[0]];
+  if (String(p.product_mode || '').trim() === 'opt' || (Array.isArray(p.options) && p.options.length)) return none;
+  const r = p.receipt;
+  if (!r || typeof r !== 'object' || Array.isArray(r) || !Array.isArray(r.receipts)) return none;
+  const count = r.receipts.length;
+  if (count < 1 || count > MAX_RECEIPTS) return none;
+  const base = p.base && typeof p.base === 'object' && !Array.isArray(p.base) ? p.base : null;
+  const requested = { baseCount: base && base.count != null ? base.count : null };
+  // 이미 같은 수면 원문 글자 그대로(잠금 비교·양방향 지문 바이트 불변)
+  if (base && _strictInt(base.count) === count && typeof raw === 'string') return { applied: true, count, json: raw, requested };
+  const next = list.slice();
+  next[liveIdx[0]] = { ...p, base: { ...(base || {}), count } };
+  return { applied: true, count, json: JSON.stringify(next), requested };
+}
+
+/**
+ * ★★ 접수 뒤 영수증 덧붙이기 판정(결정 420 사용자 확정 Q3 · 2026-11-25) — 이전 오더 → 새 오더(둘 다 저장 입구 맞춤 뒤 값).
+ *   허용 = **뒤에 덧붙이기만**(모집 인원 = 이전 장수 + 덧붙인 장수). 이미 있는 영수증을 빼기·바꾸기·순서 바꾸기 = 잠금
+ *   (`receipts_removed` — 영수증 번호 = 이미 깔린 작업표 줄 · 3단계부터는 리뷰어에게 간 자리일 수 있다. 아직 안 간 영수증 빼기는
+ *   배정 상태를 아는 3단계 이후 사용자와 다시 정한다). 매장 이름·리뷰 마감 일수도 접수 뒤 잠금(묶음·안내와 갈린다).
+ * ★★ fail-closed — 어느 한쪽 계약을 못 읽으면 덧붙이지 않고 `receipt_shape` 잠금 · 잠금/새 사유가 하나라도 있으면 `append` 는 빈 목록.
+ * ★ 새로 깨진 사유만 `invalid`(이미 있던 사유로 글 칸 수정까지 막지 않는다 — 예약 414 와 같은 규율).
+ * ★ 2단계 = 판정만. 실제 줄·묶음 덧붙이기(같은 트랜잭션 · 유일 색인)는 안전핀을 푸는 단계가 원본 수정 경로에 잇는다.
+ * @returns {{ append: Array<{poolSeq,fileId}>, locked: string[], invalid: string[], fromTotal: number|null, toTotal: number|null }}
+ */
+function receiptAppendDecision(cur = {}, next = {}) {
+  const a = receiptReviewSpecFromWorkOrder(cur || {});
+  const z = receiptReviewSpecFromWorkOrder(next || {});
+  const locked = [];
+  let append = [];
+  if (!a.spec || !z.spec) {
+    locked.push('receipt_shape');
+  } else {
+    if (a.spec.placeName !== z.spec.placeName) locked.push('place_name');
+    if (a.spec.reviewDeadlineDays !== z.spec.reviewDeadlineDays) locked.push('review_deadline_days');
+    const aIds = a.spec.receipts.map(x => x.fileId);
+    const zIds = z.spec.receipts.map(x => x.fileId);
+    if (zIds.length < aIds.length || !aIds.every((id, i) => zIds[i] === id)) locked.push('receipts_removed');
+    else append = z.spec.receipts.slice(aIds.length).map(x => ({ poolSeq: x.poolSeq, fileId: x.fileId }));
+    if ((_strictInt(next && next.recruit_count) || 0) !== a.spec.total + append.length) locked.push('total');
+  }
+  const had = new Set((a.blockers || []).map(b => b.code));
+  const invalid = (z.blockers || []).filter(b => !had.has(b.code)).map(b => b.message);
+  if (locked.length || invalid.length) append = [];
+  return { append, locked: [...new Set(locked)], invalid, fromTotal: a.spec ? a.spec.total : null, toTotal: z.spec ? z.spec.total : null };
+}
+
+/**
  * 화면 응답용 — 상품 원본 글(product_options_json)에서 영수증 파일 번호를 지운다(장수·순서는 남긴다: `{ no: N }`).
  * ★ 작업보드 응답(workdeskTab `detail`)은 업체(광고주) 화면에도 나간다 — 파일 번호가 실리면 비공개 사진의 열쇠가 퍼진다.
  * ★ 영수증 목록이 없는 글은 **받은 값 그대로** 돌려준다(리뷰·블로그·Q&A·예약 오더 응답 바이트 불변).
@@ -186,6 +255,7 @@ function redactReceiptFileIds(raw) {
 
 module.exports = {
   redactReceiptFileIds,
+  receiptRecruitFollow, receiptAppendDecision,   // 결정 420 사용자 확정 Q2·Q3(2026-11-25)
   receiptReviewSpecFromWorkOrder, buildReceiptPool, receiptPoolLabel, isReceiptFileId,
   RECEIPT_REVIEW_DEFAULT_DEADLINE_DAYS, RECEIPT_REVIEW_MAX_DEADLINE_DAYS, MAX_RECEIPTS, RECEIPT_FILE_ID_RE,
 };

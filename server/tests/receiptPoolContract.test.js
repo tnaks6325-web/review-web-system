@@ -70,7 +70,7 @@ t('★★ 파일 번호 형식이 틀리면 잠금(드라이브 번호 모양만
   ['https://x/api/order/guide-image/abc', '', 'short', 'a b c d e f g h i j k l m n'].every(v => badSpec({ receipts: [{ file_id: v }, ...RECEIPTS(3)] }).includes('receipt_file_invalid'))
   && badSpec({ receipts: ['fake_receipt_0001_abcdefghijk', ...RECEIPTS(3)] }).includes('receipt_file_invalid'));
 t('★★ 같은 영수증이 두 번이면 잠금(한 장 = 한 사람)', badSpec({ receipts: [...RECEIPTS(3), { file_id: FID(1) }] }).includes('receipt_file_duplicate'));
-t('★★ 모집 인원 ≠ 영수증 장수면 잠금(장수만큼만 받는다)', bad({ recruit_count: 5 }).includes('receipt_total_mismatch')
+t('★★ 모집 인원 ≠ 영수증 장수면 잠금(방어선 두 겹 — 저장 입구가 장수로 맞추지만(결정 420 Q2 · receiptRecruitFollow.test) 맞춤을 건너뛴 값은 계획이 멈춘다)', bad({ recruit_count: 5 }).includes('receipt_total_mismatch')
   && badSpec({}, { base: { pay: 0, count: 3, daily: 0 } }).includes('receipt_total_mismatch')
   && bad({ recruit_count: 0 }).includes('receipt_total_mismatch'));
 t('★★ 결제금액이 있으면 잠금(매장 비용은 업체 부담 · 리뷰비만)', badSpec({}, { base: { pay: 9000, count: 4, daily: 0 } }).includes('receipt_has_pay')

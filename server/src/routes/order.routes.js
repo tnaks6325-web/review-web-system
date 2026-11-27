@@ -337,6 +337,29 @@ function _holidaysJson(v) {
  *    나머지 두 갈래는 리뷰웹 내부 호출부(정규화를 거치지 않는 자리)를 위한 폴백이다.
  * ★ 값이 없으면 `''`(빈 원문) — `undefined`(모름)와 구분된다. 빈 원문끼리는 정상적으로 "같다"로 비교된다.
  */
+/**
+ * ★★ 영수증리뷰 모집 인원 = 영수증 장수(결정 420 사용자 확정 Q2 · 2026-11-25) — 저장 입구 4곳(새 오더 · 원본 수정 · 옛 수정 경로 ·
+ *   관리자 수정)이 **저장·잠금 비교 전에** 부른다. 판정 = `receiptPool.receiptRecruitFollow` 단일 출처.
+ *   상품 원본을 보냈으면 그 원본으로, 총모집만 보냈으면 저장된 원본(cur)의 장수로 맞춘다. 영수증 오더가 아니거나 맞출 근거가
+ *   없으면(영수증 없음 등) 아무것도 바꾸지 않는다(계약 판정이 막는다 · fail-closed). 요청한 수와 달랐으면 서버 기록에만 남긴다.
+ */
+function _followReceiptRecruit(b, cur = null) {
+  if (!b) return;
+  const kind = b.work_kind !== undefined ? b.work_kind : (cur ? cur.work_kind : undefined);
+  const sent = b.product_options_json !== undefined;
+  if (!sent && (b.recruit_count === undefined || !cur)) return;
+  const r = require('../utils/receiptPool').receiptRecruitFollow(kind, sent ? _requestOptionsJson(b) : cur.product_options_json);
+  if (!r.applied) return;
+  if (sent) {
+    if (normalizedProductOptions.has(b)) normalizedProductOptions.set(b, r.json);
+    b.product_options_json = r.json;
+  }
+  if (String(b.recruit_count) !== String(r.count) || String(r.requested.baseCount) !== String(r.count)) {
+    logger.info(`[order] 영수증리뷰 모집 인원 = 영수증 장수 ${r.count} (요청 총모집 ${b.recruit_count === undefined ? '-' : b.recruit_count} · 상품 인원 ${r.requested.baseCount == null ? '-' : r.requested.baseCount}) wo=${(cur && cur.id) || '(새 오더)'}`);
+  }
+  b.recruit_count = r.count;
+}
+
 function _requestOptionsJson(b) {
   const o = b || {};
   if (normalizedProductOptions.has(o)) return normalizedProductOptions.get(o);
@@ -524,6 +547,9 @@ router.post('/intake', async (req, res, next) => {
         throw err;
       }
     }
+
+    // ★★ 결정 420 Q2 — 영수증리뷰: 모집 인원·상품 인원 = 붙인 영수증 장수(저장 전 · 영수증 오더가 아니면 그대로).
+    _followReceiptRecruit(b);
 
     // A matching retry returns the original work order. A different key or
     // version for the same source is intentionally not treated as a new order.
@@ -1395,6 +1421,8 @@ async function _intakeSourceRevisionHandler(req, res, next) {
       }
       throw err;
     }
+    // ★★ 결정 420 Q2 — 영수증리뷰: 모집 인원·상품 인원 = 붙인 영수증 장수(옵션 읽기·잠금 비교 전).
+    _followReceiptRecruit(b);
     try {
       assertSupportedWorkboardSchemaVersion(source.workboardSchemaVersion);
     } catch (err) {
@@ -2181,6 +2209,8 @@ async function _intakeUpdateHandler(req, res, next) {
       if (err instanceof ProductOptionsError) return res.status(400).json({ ok: false, code: err.code, error: err.message });
       throw err;
     }
+    // ★★ 결정 420 Q2 — 영수증리뷰: 모집 인원·상품 인원 = 영수증 장수(잠금 비교 전 · 총모집만 보내면 저장된 영수증 장수).
+    _followReceiptRecruit(b, cur[0]);
 
     /* ★ 양방향 4단계-3(결정 275): 양방향 연결 오더의 공유 칸은 이 옛 경로(작업오더 ID 직접 수정)로 바꾸지 않는다 —
        공유 저장(applySharedPatch)을 건너뛰면 버전·스냅숏·공고 투영·인트라넷 송신이 모두 빠진다. 지금 인트라넷은 이 경로를
@@ -3189,6 +3219,8 @@ _handlers.orderAdminEdit = async (req, res, next) => {
       if (err instanceof ProductOptionsError) return res.status(400).json({ ok: false, code: err.code, error: err.message });
       throw err;
     }
+    // ★★ 결정 420 Q2 — 영수증리뷰: 모집 인원·상품 인원 = 영수증 장수(잠금 비교 전 · 총모집만 보내면 저장된 영수증 장수).
+    _followReceiptRecruit(b, o);
     /* ★★ Q&A체험단(결정 321) — 자리표가 깔린 오더는 이 화면에서도 작업표 칸(건수·상품·하루 건수·공개 문구·시작일)을 바꾸지 않는다.
        같은 값 재전송은 통과(작업표 칸 잠금과 같은 비교). 리뷰·블로그 오더는 자리표가 없어 종전 그대로. */
     if (await _qnaCalendarLocked(o)) {
