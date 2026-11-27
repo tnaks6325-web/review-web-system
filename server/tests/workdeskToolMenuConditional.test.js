@@ -49,7 +49,7 @@ function makeSandbox({ role = 'master', roster = [], cur = { sheetId: 's1', tabN
   vm.runInContext([
     grab('_ddCount'), grab('_mhKey'),
     grab('_mhToolsVisible'), grab('_mhMenuHtml'),
-    grab('_ddCan'), grab('_brCanAdd'),
+    grab('_ddCan'), grab('_brCanAdd'), grab('_taskDelAllowed'),
     'function _isInternalRole(){ const r=STATE.role; return r==="master"||r==="admin"||r==="staff"; }',
   ].join('\n'), sb);
   return sb;
@@ -99,7 +99,8 @@ const R = (round, name = '홍길동') => ({ round, name, submitted: false, paid:
     ok('할 일이 없으면 정리 버튼이 안 뜬다', !/openDedupeModal/.test(hW));
     /* 종전: 정리 버튼이 없어도 master 도구(write-back 시뮬 등)는 그대로 — 그 도구들이 제거돼 (결정 186 5번 — 2026-09-28 원본 전환·write-back 제거)
        할 일이 없으면 메뉴가 비므로, 빈 상자 대신 사유 한 줄을 그린다(빈 메뉴 금지). */
-    const hE = vm.runInContext('_mhMenuHtml()', makeSandbox({ roster: [R('1'), R('1')], dedupe: 0, workKind: 'review' }));
+    // (작업 삭제가 admin/master 메뉴에 들어와 — 도구가 하나도 없는 경우는 staff 로 본다. 검사 의미 불변)
+    const hE = vm.runInContext('_mhMenuHtml()', makeSandbox({ role: 'staff', roster: [R('1'), R('1')], dedupe: 0, workKind: 'review' }));
     ok('★ 도구가 하나도 없으면(리뷰 작업·중복 0) 빈 상자 대신 사유를 말한다',
       /지금 이 작업에 쓸 도구가 없습니다/.test(hE) && !/<button/.test(hE), hE);
     ok('도구가 있으면 사유 문구를 붙이지 않는다', !/지금 이 작업에 쓸 도구가 없습니다/.test(hW));
