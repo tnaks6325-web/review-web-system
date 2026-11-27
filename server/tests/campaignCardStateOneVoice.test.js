@@ -220,9 +220,16 @@ function campaignPagePart() {
   const apply = grab('async function _doApply(');
   const iEnd = apply.indexOf('_isEndedRefusal(j)'), iGeneric = apply.lastIndexOf('await loadCampaign(); // 카운터/상태 갱신');
   ok('D6 ★ 참여하기 거절 처리: 끝났다 거절이면 덮기 + 끝난 화면(일반 「다시 받기」 갈래보다 앞)', iEnd > 0 && iGeneric > 0 && iEnd < iGeneric
-    && /if\(_isEndedRefusal\(j\)\)\{ _endedMask = j\.reason;[\s\S]{0,200}renderPre\(\)/.test(apply));
+    && /if\(_isEndedRefusal\(j\)\)\{ _endedMask = j\.reason;[\s\S]{0,700}renderPre\(\)/.test(apply));
   ok('D7 ★ finally 가 열려 있지 않은 공고의 버튼을 회색 「참여하기」로 남기지 않는다(그 상태 말로 다시 그림)',
     /finally\{[\s\S]{0,700}if\(c && c\.state !== 'open'\) renderPre\(\);/.test(apply));
+  // ★ #1895 리뷰(P2): 이미 참여해 구매·제출 화면을 보던 사람이 「타계정으로 추가참여」를 끝났다로 거절당해도
+  //   보던 화면(vJoined)을 참여 전 화면으로 바꾸지 않는다 — loadCampaign 과 같은 「참여 전 화면일 때만」 가드.
+  const endBranch = (apply.match(/if\(_isEndedRefusal\(j\)\)\{[\s\S]*?return; \}/) || [''])[0];
+  ok('D11 ★ 끝났다 거절 갈래의 renderPre 는 참여 전 화면(vPre·vLoading)일 때만 — 참여 중 화면을 덮지 않는다',
+    !!endBranch && /renderPre\(\)/.test(endBranch)
+    && !/_applyEndedMask\(_camp\);\s*renderPre\(\)/.test(endBranch)
+    && /\$\('vPre'\)\.style\.display !== 'none' \|\| \$\('vLoading'\)\.style\.display !== 'none'\)\s*renderPre\(\)/.test(endBranch), endBranch.slice(0, 300));
   const many = ch.slice(ch.indexOf('async function _applyMany('), ch.indexOf('async function _applyMany(') + 6000);
   ok('D8 여러 명의 참여도 끝났다 거절이면 나머지 명의를 보내지 않는다(목록에 archived)', /\['closed','archived','cutoff'/.test(many));
   ok('D9 거절 문구표에 archived(모집 종료와 같은 말)', /archived:'모집이 종료됐어요'/.test(ch));

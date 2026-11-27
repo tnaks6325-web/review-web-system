@@ -2208,7 +2208,9 @@ async function _doApply(optionKey, sub, purchaseQty){
     // ★ 결정 432(M2): 보관·모집 종료 거절 = 끝난 공고 — 끝난 모습으로 바꾸고 [참여하기]를 되살리지 않는다(아래 finally 도 그 상태 말로 다시 그린다)
     if(_isEndedRefusal(j)){ _endedMask = j.reason; hideAcctSheet(); toast(msg);
       try{ await loadCampaign(); }catch(_){ /* 못 받아도 끝난 모습은 지금 그린다 */ }
-      if(_camp){ _applyEndedMask(_camp); renderPre(); }
+      // 참여 전 화면일 때만 끝난 모습으로 다시 그린다 — 이미 참여해 구매·제출 화면을 보던 사람이 「타계정으로 추가참여」를
+      // 거절당한 것이면 보던 화면(자리는 살아 있다)을 덮지 않는다(loadCampaign 과 같은 가드 · #1895 리뷰).
+      if(_camp){ _applyEndedMask(_camp); if($('vPre').style.display !== 'none' || $('vLoading').style.display !== 'none') renderPre(); }
       return; }
     toast(msg);
     await loadCampaign(); // 카운터/상태 갱신
