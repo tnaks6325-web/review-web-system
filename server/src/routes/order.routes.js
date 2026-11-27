@@ -337,6 +337,29 @@ function _holidaysJson(v) {
  *    나머지 두 갈래는 리뷰웹 내부 호출부(정규화를 거치지 않는 자리)를 위한 폴백이다.
  * ★ 값이 없으면 `''`(빈 원문) — `undefined`(모름)와 구분된다. 빈 원문끼리는 정상적으로 "같다"로 비교된다.
  */
+/**
+ * ★★ 영수증리뷰 모집 인원 = 영수증 장수(결정 420 사용자 확정 Q2 · 2026-11-25) — 저장 입구 4곳(새 오더 · 원본 수정 · 옛 수정 경로 ·
+ *   관리자 수정)이 **저장·잠금 비교 전에** 부른다. 판정 = `receiptPool.receiptRecruitFollow` 단일 출처.
+ *   상품 원본을 보냈으면 그 원본으로, 총모집만 보냈으면 저장된 원본(cur)의 장수로 맞춘다. 영수증 오더가 아니거나 맞출 근거가
+ *   없으면(영수증 없음 등) 아무것도 바꾸지 않는다(계약 판정이 막는다 · fail-closed). 요청한 수와 달랐으면 서버 기록에만 남긴다.
+ */
+function _followReceiptRecruit(b, cur = null) {
+  if (!b) return;
+  const kind = b.work_kind !== undefined ? b.work_kind : (cur ? cur.work_kind : undefined);
+  const sent = b.product_options_json !== undefined;
+  if (!sent && (b.recruit_count === undefined || !cur)) return;
+  const r = require('../utils/receiptPool').receiptRecruitFollow(kind, sent ? _requestOptionsJson(b) : cur.product_options_json);
+  if (!r.applied) return;
+  if (sent) {
+    if (normalizedProductOptions.has(b)) normalizedProductOptions.set(b, r.json);
+    b.product_options_json = r.json;
+  }
+  if (String(b.recruit_count) !== String(r.count) || String(r.requested.baseCount) !== String(r.count)) {
+    logger.info(`[order] 영수증리뷰 모집 인원 = 영수증 장수 ${r.count} (요청 총모집 ${b.recruit_count === undefined ? '-' : b.recruit_count} · 상품 인원 ${r.requested.baseCount == null ? '-' : r.requested.baseCount}) wo=${(cur && cur.id) || '(새 오더)'}`);
+  }
+  b.recruit_count = r.count;
+}
+
 function _requestOptionsJson(b) {
   const o = b || {};
   if (normalizedProductOptions.has(o)) return normalizedProductOptions.get(o);
@@ -524,6 +547,9 @@ router.post('/intake', async (req, res, next) => {
         throw err;
       }
     }
+
+    // ★★ 결정 420 Q2 — 영수증리뷰: 모집 인원·상품 인원 = 붙인 영수증 장수(저장 전 · 영수증 오더가 아니면 그대로).
+    _followReceiptRecruit(b);
 
     // A matching retry returns the original work order. A different key or
     // version for the same source is intentionally not treated as a new order.
@@ -1395,6 +1421,8 @@ async function _intakeSourceRevisionHandler(req, res, next) {
       }
       throw err;
     }
+    // ★★ 결정 420 Q2 — 영수증리뷰: 모집 인원·상품 인원 = 붙인 영수증 장수(옵션 읽기·잠금 비교 전).
+    _followReceiptRecruit(b);
     try {
       assertSupportedWorkboardSchemaVersion(source.workboardSchemaVersion);
     } catch (err) {
@@ -2181,6 +2209,8 @@ async function _intakeUpdateHandler(req, res, next) {
       if (err instanceof ProductOptionsError) return res.status(400).json({ ok: false, code: err.code, error: err.message });
       throw err;
     }
+    // ★★ 결정 420 Q2 — 영수증리뷰: 모집 인원·상품 인원 = 영수증 장수(잠금 비교 전 · 총모집만 보내면 저장된 영수증 장수).
+    _followReceiptRecruit(b, cur[0]);
 
     /* ★ 양방향 4단계-3(결정 275): 양방향 연결 오더의 공유 칸은 이 옛 경로(작업오더 ID 직접 수정)로 바꾸지 않는다 —
        공유 저장(applySharedPatch)을 건너뛰면 버전·스냅숏·공고 투영·인트라넷 송신이 모두 빠진다. 지금 인트라넷은 이 경로를
@@ -2435,6 +2465,77 @@ router.get('/guide-image/:id', async (req, res) => {
     }
     return res.redirect(302, `https://drive.google.com/thumbnail?id=${id}&sz=w2000`);
   }
+});
+
+// ═══════════════════════════════════════════════════════════
+// 영수증리뷰 영수증 사진 — 결정 418·420 (비공개 · 공개 주소 없음)
+//   POST /api/order/receipt-review-image      body { imageBase64, mimeType, fileName? } → { ok, id }   (주소를 돌려주지 않는다)
+//   GET  /api/order/receipt-review-image/:id  → 사진(인트라넷 AE 미리보기 · 캐시 금지)
+// 인증: X-Intake-Key(인트라넷 서버) 또는 내부 담당자 로그인(master·admin·staff · Authorization 헤더만 — 주소 토큰·업체·리뷰어 불가)
+// ★★ 유입가이드(guide-image)와 같은 드라이브 올리기를 쓰되 **세 가지가 다르다**(완화 금지):
+//   ① 드라이브 공개 권한을 주지 않는다(shareAnyone:false — 구글 썸네일 주소로도 안 열린다)
+//   ② 공개 안내 사진 목록(guide_image_files)에 적지 않고 비공개 영수증 목록(receipt_review_files)에 적는다 —
+//      결정 352 거절 목록(PRIVATE_SOURCES)이라 무인증 통로(drive/image·guide-image)·엣지(354)가 이 번호를 거절한다
+//   ③ 주소로 받아 오기(imageUrl)를 받지 않는다(영수증 = AE 가 올린 파일만)
+// 폴더: env RECEIPT_REVIEW_FOLDER_ID 우선, 없으면 AI_REVIEW_FOLDER_ID(또는 DRIVE_ROOT_FOLDER_ID) 하위 [영수증리뷰]
+// ═══════════════════════════════════════════════════════════
+const RECEIPT_REVIEW_IMAGE_MIME = /^image\/(?:jpe?g|png|webp|heic|heif|gif)$/i;
+function _receiptReviewImageAuth(req) {
+  const intakeKey = req.headers['x-intake-key'] || (req.body && typeof req.body === 'object' ? req.body.intakeKey : undefined);
+  if (process.env.ORDER_INTAKE_KEY && intakeKey === process.env.ORDER_INTAKE_KEY) return { who: 'intranet', by: 'intranet' };
+  try {
+    const tok = (req.headers.authorization || '').split(' ')[1];
+    if (!tok) return null;
+    const d = jwt.verify(tok, process.env.JWT_SECRET);
+    // 결정 201 — 로그인 토큰만 · 내부 담당자만(업체 role advertiser 제외) · 인트라넷 SSO 토큰은 Track B 전용 규율 그대로(제외)
+    if (isTrustedLoginToken(d) && ['master', 'admin', 'staff'].includes(d.role) && d.via !== 'intranet') return { who: 'staff', by: String(d.name || d.role) };
+  } catch (_) { /* fallthrough */ }
+  return null;
+}
+
+router.post('/receipt-review-image', async (req, res, next) => {
+  try {
+    const auth = _receiptReviewImageAuth(req);
+    if (!auth) return res.status(401).json({ ok: false, error: '인증에 실패했습니다.' });
+    const b = req.body || {};
+    const raw = typeof b.imageBase64 === 'string' ? b.imageBase64.trim() : '';
+    const dataMime = (/^data:([^;,]+)[;,]/.exec(raw) || [])[1] || '';
+    const mime = String(b.mimeType || dataMime || '').trim().toLowerCase();
+    if (!raw || !RECEIPT_REVIEW_IMAGE_MIME.test(mime) || (dataMime && !RECEIPT_REVIEW_IMAGE_MIME.test(dataMime))) {
+      return res.status(400).json({ ok: false, error: '영수증 사진(이미지 파일)만 올릴 수 있습니다.' });
+    }
+    let folderId = process.env.RECEIPT_REVIEW_FOLDER_ID;
+    if (!folderId) {
+      const root = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
+      if (!root) return res.status(503).json({ ok: false, error: 'Drive 폴더가 설정되지 않았습니다. (RECEIPT_REVIEW_FOLDER_ID 또는 AI_REVIEW_FOLDER_ID)' });
+      folderId = (await drive.ensureFolderPath(root, ['[영수증리뷰]'])).id;
+    }
+    const ext = (mime.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+    let name = String(b.fileName || ('receipt_' + Date.now())).replace(/[\\/:*?"<>|]+/g, '_').slice(0, 120);
+    if (!/\.[a-z0-9]+$/i.test(name)) name += '.' + ext;
+    const up = await drive.uploadFileBase64(raw, name, mime, folderId, { shareAnyone: false });
+    // ★★ 주소(번호)를 돌려주기 **전에** 비공개 목록에 적는다 — 실패하면 올리기 실패(목록 밖 번호는 접수가 거절한다).
+    await require('../services/receiptPool.service').registerReceiptUpload(up.id, { source: `upload:${auth.who}`, mimeType: mime, by: auth.by });
+    res.json({ ok: true, id: up.id });
+  } catch (err) {
+    next(err);
+  }
+});
+_handlers.receiptReviewImageUpload = lastRouteHandler(router);
+
+router.get('/receipt-review-image/:id', async (req, res) => {
+  if (!_receiptReviewImageAuth(req)) return res.status(401).json({ ok: false, error: '인증에 실패했습니다.' });
+  const id = String(req.params.id || '');
+  if (!/^[-\w]{20,200}$/.test(id)) return res.status(400).send('bad id');
+  let known = false;
+  try { known = await require('../services/receiptPool.service').isRegisteredReceiptFile(id); }
+  catch (e) {
+    logger.warn(`[order] 영수증 사진 목록 조회 실패 — 내주지 않음(fail-closed): ${e.message}`);
+    res.set('Cache-Control', 'no-store');
+    return res.status(503).json({ ok: false, error: '잠시 뒤 다시 시도해 주세요.' });
+  }
+  if (!known) { res.set('Cache-Control', 'no-store'); return res.status(404).send('not found'); }   // 목록 밖 = 드라이브 읽기 0
+  return require('../services/receiptPool.service').sendReceiptImage(res, id);
 });
 
 // (AE 대시보드 staff.html 전용 POST /submit · GET /my · PUT /my/update 는 2026-09-28 제거 — 결정 186 49번.
@@ -2835,6 +2936,13 @@ _handlers.orderAdminAccept = async (req, res, next) => {
             if (!bookingRepair.ok) throw new Error(`예약 자리표 복구 실패: ${bookingRepair.error}`);
             sheetlessResult.bookingRepair = bookingRepair;
           }
+          // ★ 영수증리뷰(결정 420) — 같은 규율: 영수증 묶음이 비어 있으면 줄과 같을 때만 되살린다. 못 살리면 던진다.
+          if (require('../utils/workKind').isReceiptKind(o.work_kind)) {
+            const receiptRepair = await require('../services/receiptPool.service')
+              .repairPoolIfMissing({ workOrder: o, sheetId, tabName, by: req.admin?.name || 'admin' });
+            if (!receiptRepair.ok) throw new Error(`영수증 묶음 복구 실패: ${receiptRepair.error}`);
+            sheetlessResult.receiptRepair = receiptRepair;
+          }
         }
       } catch (slErr) {
         /* ★★ Q&A(결정 321) — 자리표 없이 접수를 끝내면(상태 전이) [접수하기] 버튼이 사라져 다시 깔 길이 없다(막다른 길).
@@ -2850,6 +2958,16 @@ _handlers.orderAdminAccept = async (req, res, next) => {
           logger.error(`[order/accept] ${id} 예약 자리표 저장 실패 — 접수를 끝내지 않음(다시 접수로 복구): ${slErr.message}`);
           return res.status(409).json({ ok: false, code: 'booking_calendar_failed', work_order_id: o.id,
             error: `네이버예약리뷰 날짜별 자리표를 만들지 못해 접수를 끝내지 않았습니다 — [접수하기]를 다시 눌러 주세요. (${String(slErr.message || '').slice(0, 160)})` });
+        }
+        // ★★ 영수증리뷰(결정 420) — 같은 이유로 상태를 바꾸기 전에 멈춘다(영수증 묶음 없는 영수증 작업 = 참여해도 줄 영수증이 없다).
+        //   영수증 사진이 비공개 올리기로 올라온 것이 아니면(receipt_file_unregistered) 다시 눌러도 같다 — 문구가 그 사실을 말한다.
+        if (require('../utils/workKind').isReceiptKind(o.work_kind)) {
+          logger.error(`[order/accept] ${id} 영수증 묶음 저장 실패 — 접수를 끝내지 않음(다시 접수로 복구): ${slErr.message}`);
+          return res.status(409).json({ ok: false, code: 'receipt_pool_failed', work_order_id: o.id,
+            ...(slErr && slErr.code === 'receipt_file_unregistered' ? { reason: 'receipt_file_unregistered' } : {}),
+            error: slErr && slErr.code === 'receipt_file_unregistered'
+              ? `영수증리뷰 영수증 묶음을 만들지 못해 접수를 끝내지 않았습니다 — ${String(slErr.message || '').slice(0, 160)}`
+              : `영수증리뷰 영수증 묶음을 만들지 못해 접수를 끝내지 않았습니다 — [접수하기]를 다시 눌러 주세요. (${String(slErr.message || '').slice(0, 160)})` });
         }
         // ★ 여기 실패는 "등록은 됐는데 아무 데도 안 보이는" 상태가 된다 → 조용히 넘기지 않는다.
         indexBuilt = false;
@@ -3101,6 +3219,8 @@ _handlers.orderAdminEdit = async (req, res, next) => {
       if (err instanceof ProductOptionsError) return res.status(400).json({ ok: false, code: err.code, error: err.message });
       throw err;
     }
+    // ★★ 결정 420 Q2 — 영수증리뷰: 모집 인원·상품 인원 = 영수증 장수(잠금 비교 전 · 총모집만 보내면 저장된 영수증 장수).
+    _followReceiptRecruit(b, o);
     /* ★★ Q&A체험단(결정 321) — 자리표가 깔린 오더는 이 화면에서도 작업표 칸(건수·상품·하루 건수·공개 문구·시작일)을 바꾸지 않는다.
        같은 값 재전송은 통과(작업표 칸 잠금과 같은 비교). 리뷰·블로그 오더는 자리표가 없어 종전 그대로. */
     if (await _qnaCalendarLocked(o)) {

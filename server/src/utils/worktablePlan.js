@@ -23,7 +23,7 @@ const { isSheetHeaderRow } = require('./sheetHeader');
 //   여기서 어휘 표를 다시 만들면 검수(resolveReviewType)와 시트 표기가 갈라진다.
 const { REVIEW_TYPE_SHEET_LABELS, isReviewOptionHeader } = require('./reviewType');
 const { normalizeReviewTypeMix } = require('./reviewTypeMix');
-const { isBlogKind, isQnaKind, isBookingKind } = require('./workKind');
+const { isBlogKind, isQnaKind, isBookingKind, isReceiptKind } = require('./workKind');
 const { isPostDateHeader } = require('./memoColumn');
 const { isTrackingHeader } = require('./trackingColumn');   // 택배송장 열 판정 단일 출처(사본 금지)
 const { deliveryBaseType, parseDeliveryType } = require('./deliveryType');   // 배송유형 기본형 판정 단일 출처(사본 금지)
@@ -743,6 +743,42 @@ function ensureBookingColumns(columns, { payMode = 'refund' } = {}) {
   return columns;
 }
 
+/* ── 영수증리뷰 작업표 칸 (결정 418·420) ─────────────────────────────
+   「구매일자」 자리를 「참여일자」로 바꾼다 — 매퍼의 「일자」 규칙으로 같은 날짜 역할(dateStr)을 받는다
+   (Q&A 「진행일자」·예약 「이용일자」와 같은 방식 · 규칙을 넓히지 않는다). ★ 줄을 깔 때는 **비워 둔다** — 리뷰어가 기간 안에
+   아무 날이나 방문하므로 미리 정할 날짜가 없다(참여할 때 3단계가 그날을 적는다 · 리뷰마감일 = 참여일 + N일도 그때).
+   영수증·리뷰마감일은 **시스템이 적는 칸**(역할 없음 — 리뷰어 구매양식 매퍼가 덮어쓰지 않는다).
+   ★ 「영수증」 칸 = 영수증 번호(`N번`)만 — 파일 번호는 싣지 않는다(작업표·장부는 업체 화면에도 나간다 · 사진은 직원 통로로만).
+   ★ 결제금액·주문번호·아이디·연락처·주소·리뷰옵션·상품옵션·택배 칸 없음(구매·배송이 없다 · 입금은 리뷰비만).
+   ★ 이름(수취인)·입금 계좌·리뷰·입금일 칸은 둔다. 상품 칸 = 매장 이름(v2 선택 키 — 주문 짝짓기가 읽는다). */
+const RECEIPT_DATE_HEADER = '참여일자';
+const RECEIPT_POOL_HEADER = '영수증';
+const RECEIPT_DEADLINE_HEADER = BOOKING_DEADLINE_HEADER;   // 같은 이름 「리뷰마감일」 — 작업보드 날짜 표기(결정 409)·마감 안내가 한 이름을 읽는다
+const RECEIPT_PLAN_HEADERS = [RECEIPT_POOL_HEADER, RECEIPT_DEADLINE_HEADER];
+const RECEIPT_DROP_ROLES = new Set(['orderNum', 'userId', 'phone', 'address', 'price', 'option', 'option_1', 'option_2', 'tracking_number', 'review_option_instruction']);
+
+function isReceiptWorkOrder(wo = {}) { return isReceiptKind(wo.work_kind); }
+
+function ensureReceiptColumns(columns) {
+  const [dc] = classifyHeaders([RECEIPT_DATE_HEADER], {});
+  const dateCol = { name: dc.header, role: dc.role, label: dc.label, tier: dc.tier, origin: 'system', typeKey: 'receipt' };
+  const di = _roleIndex(columns, 'dateStr');
+  if (di >= 0) columns[di] = { ...columns[di], ...dateCol };
+  else {
+    // 참여일자 칸이 없는 표준 열 — 번호 칸 바로 뒤에 만든다(3단계 참여일 기록 자리 · 없으면 마감 계산이 갈 곳이 없다)
+    const si = _roleIndex(columns, 'seq');
+    columns.splice(si >= 0 ? si + 1 : 0, 0, { ...dateCol, conflict: dc.conflict || null });
+  }
+  for (let i = columns.length - 1; i >= 0; i--) if (isReviewOptionHeader(columns[i].name) || isTrackingHeader(columns[i].name)) columns.splice(i, 1);
+  _removeRoles(columns, RECEIPT_DROP_ROLES);
+  let at = -1;
+  columns.forEach((c, i) => { if (c.role === 'product') at = i; });
+  if (at < 0) at = _roleIndex(columns, 'dateStr');
+  const add = RECEIPT_PLAN_HEADERS.filter(h => !columns.some(c => c.name === h)).map(h => systemVariableColumn(h, 'receipt'));
+  columns.splice(at + 1, 0, ...add);
+  return columns;
+}
+
 function systemVariableColumn(header, typeKey) {
   const [classified] = classifyHeaders([header], {});
   return {
@@ -925,8 +961,10 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
   if (isBlogPlan) ensureBlogColumns(columns);
   const isQnaPlan = isQnaWorkOrder(wo);
   const isBookingPlan = isBookingWorkOrder(wo);
-  /* 날짜가 업체가 정한 값(예약리뷰)·자리표 값(Q&A)인 계획 — 리뷰 구매일자 분배·옵션 배분·리뷰 형태 배분을 쓰지 않는다. */
-  const isSlotPlan = isQnaPlan || isBookingPlan;
+  const isReceiptPlan = isReceiptWorkOrder(wo);   // 결정 420 — 줄 = 영수증 한 장(날짜 없음)
+  /* 줄이 오더 계약으로 정해지는 계획(날짜 = 업체가 정한 값(예약리뷰)·자리표 값(Q&A) · 줄 = 영수증(영수증리뷰)) —
+     리뷰 구매일자 분배·옵션 배분·리뷰 형태 배분·미리보기 조정을 쓰지 않는다. */
+  const isSlotPlan = isQnaPlan || isBookingPlan || isReceiptPlan;
 
   const rawTotal = o.total != null ? o.total : wo.recruit_count;
   let total = Math.max(0, Math.min(parseInt(rawTotal, 10) || 0, MAX_ROWS));
@@ -991,6 +1029,21 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     total = Math.min(bookingCal.total, MAX_ROWS);
   }
 
+  /* ★★ 영수증리뷰(결정 420) — 줄 = **AE 가 붙인 영수증 한 장**(= 리뷰어 한 명 자리). 건수 = 영수증 장수(오더 계약 receipt).
+     날짜는 만들지 않는다(기간 안 자유 방문 — 참여일자는 참여할 때 채워진다). 계약 잠금은 그대로 계획 잠금이 된다. */
+  let receiptPool = null;
+  let receiptSpec = null;
+  if (isReceiptPlan) {
+    const { receiptReviewSpecFromWorkOrder, buildReceiptPool } = require('./receiptPool');
+    const rs = receiptReviewSpecFromWorkOrder(wo);
+    receiptSpec = rs.spec;
+    receiptPool = rs.blockers.length
+      ? { slots: [], total: 0, blockers: [] }
+      : buildReceiptPool(rs.spec, { startSeq: 1 });
+    receiptPool.blockers.unshift(...rs.blockers);
+    total = Math.min(receiptPool.total, MAX_ROWS);
+  }
+
   const stagedSelections = isV2 ? stagedSelectionsFromWorkOrder(wo) : [];
   const selectionByKey = new Map(stagedSelections.map(selection => [selection.selectionKey, selection]));
   let optKeys = o.options != null ? o.options : (isV2
@@ -1027,6 +1080,8 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     ? { buckets: [], rowOptions: qnaCal.slots.map(s => s.unitKey) }
     : isBookingPlan
       ? { buckets: [], rowOptions: bookingCal.slots.map(s => s.unitKey) }
+      : isReceiptPlan
+      ? { buckets: [], rowOptions: receiptPool.slots.map(s => s.unitKey) }
       : distributeOptions({ total, options: optKeys, includeSingle: isV2, distributionMode: productDistributionMode });
   /* ★★ 127: 블로그체험단은 구매일자를 **미리 정할 수 없다**(모집·승인된 블로거가 생기면 그때 구매).
      날짜를 깔면 리뷰 규칙(그날 정원 파생)이 잘못 작동하므로 구매일자 칸을 통째로 비워 둔다 —
@@ -1037,7 +1092,7 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     : isBookingPlan
       ? { days: bookingCal.days.map(d => ({ date: d.date, label: d.label, dow: d.dow, count: d.count })),
           rowDates: bookingCal.slots.map(s => ({ date: s.date, label: s.dateLabel })) }
-      : isBlogPlan
+      : (isBlogPlan || isReceiptPlan)   // ★ 영수증리뷰도 날짜를 미리 깔지 않는다(결정 420 — 참여할 때 채워진다)
       ? { days: [], rowDates: [] }
       : distributeDates({ total, daily, startDate, skipWeekends, holidays });
 
@@ -1142,7 +1197,7 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
 
   const round = isV2 ? roundSpec(wo) : { label: '', blocker: null };
   // ★ 예약리뷰(결정 407)는 택배가 없다 — 택배발송대행 표시가 와도 송장 칸을 붙이지 않는다.
-  const courier = isV2 && !isBookingPlan ? isCourierProxy(wo) : { enabled: false, blocker: null };
+  const courier = isV2 && !isBookingPlan && !isReceiptPlan ? isCourierProxy(wo) : { enabled: false, blocker: null };   // 영수증리뷰(결정 420)도 택배 없음
   let reviewOptions = { labels: new Array(total).fill(''), blocker: null };
   let variableColumnBlockers = [];
   if (isV2 && stagedSelections.length) {
@@ -1178,10 +1233,12 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
       reviewOptionLabel: reviewOptions.labels[i] || '',
       ...(isQnaPlan ? { qnaVisibility: qnaCal.slots[i].visibility, qnaText: qnaCal.slots[i].text } : {}),
       ...(isBookingPlan ? { bookingDeadlineLabel: bookingCal.slots[i].reviewDeadlineLabel } : {}),
+      ...(isReceiptPlan ? { receiptPoolLabel: receiptPool.slots[i].label } : {}),
     });
   }
   if (isQnaPlan && columns.length) ensureQnaColumns(columns);
   if (isBookingPlan && columns.length) ensureBookingColumns(columns, { payMode: bookingSpec ? bookingSpec.payMode : 'refund' });
+  if (isReceiptPlan && columns.length) ensureReceiptColumns(columns);
 
   /* ── 막을 것(blockers) — 그대로 만들면 반드시 잘못된 표가 되는 경우만 ── */
   const blockers = [];
@@ -1197,6 +1254,7 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
   blockers.push(...variableColumnBlockers);
   if (isQnaPlan) blockers.push(...qnaCal.blockers);
   if (isBookingPlan) blockers.push(...bookingCal.blockers);
+  if (isReceiptPlan) blockers.push(...receiptPool.blockers);
   const optSum = buckets.reduce((a, b) => a + b.count, 0);
   if (buckets.length && optSum !== total) {
     blockers.push({ code: 'option_sum', message: `옵션 배분 합계(${optSum})가 총 건수(${total})와 다릅니다.` });
@@ -1223,7 +1281,10 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
 
   /* ── 알릴 것(warnings) — 생성은 되지만 사람이 알아야 하는 것 ── */
   const warnings = [];
-  if (isBookingPlan) {
+  if (isReceiptPlan) {
+    warnings.push({ code: 'receipt_pool', message: `영수증리뷰 — 붙인 영수증 ${total}장 = 리뷰어 ${total}명 자리를 만듭니다(참여일자는 리뷰어가 참여할 때 채워집니다). 참여일자·영수증·리뷰마감일 칸이 자동 포함됩니다.` });
+  }
+  else if (isBookingPlan) {
     const mode = bookingSpec ? (bookingSpec.payModeLabel || '') : '';
     warnings.push({ code: 'booking_calendar', message: `네이버예약리뷰${mode ? `(${mode})` : ''} — 업체가 정한 날짜별 자리 ${total}개(${days.length}일)를 만듭니다. 이용일자·예약번호·리뷰마감일 칸이 자동 포함됩니다.` });
   }
@@ -1239,7 +1300,7 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
   else if (!daily) warnings.push({ code: 'no_daily', message: '일건수가 없어 날짜를 나누지 않았습니다.' });
   else if (rows.some(r => !r.date)) warnings.push({ code: 'date_short', message: '날짜를 다 채우지 못했습니다(기간이 너무 깁니다). 일건수를 확인하세요.' });
   // 예약리뷰는 구매채널이 없다(네이버 예약 주소) — 채널 전용 열 안내는 오탐이라 말하지 않는다.
-  if (channel === 'unknown' && !isBookingPlan) warnings.push({ code: 'unknown_channel', message: '상품 URL로 구매채널을 알 수 없어 채널 전용 열(예: 쿠팡ID)을 넣지 않았습니다.' });
+  if (channel === 'unknown' && !isBookingPlan && !isReceiptPlan) warnings.push({ code: 'unknown_channel', message: '상품 URL로 구매채널을 알 수 없어 채널 전용 열(예: 쿠팡ID)을 넣지 않았습니다.' });
   if (dupRoles.length) warnings.push({ code: 'duplicate_role', message: `같은 역할의 열이 둘 이상입니다(${dupRoles.join(', ')}) — 리뷰어 제출이 두 칸에 같은 값을 씁니다.` });
   const conflicts = columns.filter(c => c.conflict);
   if (conflicts.length) warnings.push({ code: 'status_conflict', message: `상태 칸과 제출 기입이 겹치는 열이 있습니다: ${conflicts.map(c => c.name).join(', ')}` });
@@ -1256,7 +1317,7 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     warnings.push({ code: 'option_column_added', message: '표준 열에 옵션 칸이 없어 시스템이 「옵션」 열을 추가했습니다(리뷰어가 고른 옵션이 이 칸에 기입됩니다).' });
   }
   /* ★ 138 — 상품 칸도 시스템이 만들었으면 **말한다**(조용한 자동 추가 금지 — 옵션 칸과 같은 규율). */
-  if (!isBookingPlan && columns.some(c => c.origin === 'system' && c.name === '상품')) {   // 예약리뷰 상품 칸 = 매장 이름(여러 상품 안내 아님)
+  if (!isBookingPlan && !isReceiptPlan && columns.some(c => c.origin === 'system' && c.name === '상품')) {   // 예약리뷰 상품 칸 = 매장 이름(여러 상품 안내 아님)
     warnings.push({ code: 'product_column_added', message: '상품이 여러 개라 시스템이 「상품」 열을 추가했습니다(리뷰어가 고른 상품이 이 칸에 기입됩니다).' });
   }
   if (optionCountFallbackSum != null) {
@@ -1327,6 +1388,7 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     canCreate: blockers.length === 0,
     ...(isQnaPlan ? { qnaCalendar: qnaCal } : {}),
     ...(isBookingPlan ? { bookingCalendar: bookingCal, bookingSpec } : {}),
+    ...(isReceiptPlan ? { receiptPool, receiptSpec } : {}),
   };
 }
 
@@ -1379,6 +1441,7 @@ module.exports = {
   BLOG_REQUIRED_HEADERS, ensureBlogColumns, isBlogWorkOrder,
   QNA_DATE_HEADER, QNA_VISIBILITY_HEADER, QNA_TEXT_HEADER, QNA_PLAN_HEADERS, ensureQnaColumns, isQnaWorkOrder, businessDays, normalizeHolidayList,
   BOOKING_DATE_HEADER, BOOKING_NUMBER_HEADER, BOOKING_DEADLINE_HEADER, BOOKING_PLAN_HEADERS, ensureBookingColumns, isBookingWorkOrder,
+  RECEIPT_DATE_HEADER, RECEIPT_POOL_HEADER, RECEIPT_DEADLINE_HEADER, RECEIPT_PLAN_HEADERS, ensureReceiptColumns, isReceiptWorkOrder,
   REVIEW_SUBMIT_HEADER, ensureReviewColumn,
   productKeysFromWorkOrder,   // 138 — 상품 축 판정(작업오더 기준)
   DELIVERY_KIND_HEADER, RECALL_HEADERS,

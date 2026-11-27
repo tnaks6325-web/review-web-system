@@ -1822,6 +1822,15 @@ function _activateFrame(f, dir){
   if(dir){ f.classList.remove('slide-l', 'slide-r'); void f.offsetWidth; f.classList.add(dir > 0 ? 'slide-l' : 'slide-r'); }
 }
 function _frameSubmitting(f){ try{ return !!(f && f.contentWindow && f.contentWindow._submitOrderFormInProgress); }catch(_){ return false; } }
+/* ★ 결정 427 — 틀 안 구매양식에 사진이 들어 있는 동안만, 이 화면을 떠나기 전(새로고침·탭 닫기) 브라우저가 한 번 묻는다.
+   틀이 스스로 묻지 않는 이유: 옵션·개수를 바꿀 때(_navFrame)·만료로 틀을 비울 때(_releaseFrame)도 틀 문서가 바뀌어 같이 물었다(막다른 길).
+   틀은 사진이 바뀔 때 'embed-photos' 만 알리고, 여기서 틀마다 _ofHasUnsentPhotos() 로 다시 센다(바꿔 낀 틀·옛 틀 = 사진 0 = 안 묻는다). */
+function _frameHasPhotos(f){ try{ const w = f && f.contentWindow; return !!(w && typeof w._ofHasUnsentPhotos === 'function' && w._ofHasUnsentPhotos()); }catch(_){ return false; } }
+function _photosBeforeUnload(e){ if(!_framesAll().some(_frameHasPhotos)) return; e.preventDefault(); e.returnValue = ''; return ''; }
+function _framePhotosSync(){
+  if(_framesAll().some(_frameHasPhotos)) window.addEventListener('beforeunload', _photosBeforeUnload);
+  else window.removeEventListener('beforeunload', _photosBeforeUnload);
+}
 /** 만료된 명의의 틀 비우기(다른 명의가 재사용할 수 있게). 제출 중이면 건드리지 않는다. */
 function _releaseFrame(p8){
   const f = _frameByP8(p8); if(!f || _frameSubmitting(f)) return;
@@ -3188,6 +3197,7 @@ window.addEventListener('message', (ev)=>{
   // ★ 결정 353: 명의마다 틀이 따로라 높이·완료는 "보낸 틀" 기준으로 처리한다.
   const _srcFr = _frameOfSource(ev.source);
   if(d.type === 'purchase-swipe' && _srcFr && _srcFr.id === 'orderFrame' && (d.dir === 1 || d.dir === -1)){ _goTabStep(d.dir); return; }
+  if(d.type === 'embed-photos' && _srcFr){ if(!PREVIEW) _framePhotosSync(); return; }   // ★ 결정 427
   if(d.type === 'embed-height' && d.height && _srcFr && _srcFr.id !== 'orderFrame'){ _srcFr.style.height = Math.min(Math.max(d.height, 400), 4000) + 'px'; return; }
   if(d.type === 'order-submitted' && !PREVIEW && _srcFr && _tabsOn() && _onTabSubmitted(_srcFr, d)) return;
   if(d.type === 'capture-uploads-done' && _srcFr && _uploadsPendingP8.has(_srcFr.dataset.p8)){

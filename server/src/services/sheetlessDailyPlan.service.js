@@ -58,6 +58,10 @@ async function relayWorktableToProjection({ client, sheetId, tabName, days = [],
   if (await require('./bookingSlots.service').isBookingTab(client, sheetId, tabName)) {
     return { ok: true, skipped: true, reason: 'booking_slot_calendar', moved: 0 };
   }
+  /* ★★ 영수증리뷰(결정 420) — 줄 날짜 = 리뷰어가 참여한 날(참여할 때 생긴다). 빈 줄에 계획 날짜를 붙이면 없는 참여일이 생긴다(판정 실패도 손대지 않음). */
+  if (await require('./receiptPool.service').isReceiptPoolTab(client, sheetId, tabName)) {
+    return { ok: true, skipped: true, reason: 'receipt_pool', moved: 0 };
+  }
   const { parseDateColumn } = require('../utils/koreanDate');
   const anchor = String(today || '').match(/^(\d{4})-(\d{2})/);
   const parseOpts = { fallbackAnchor: anchor ? { y: Number(anchor[1]), m: Number(anchor[2]) } : undefined };

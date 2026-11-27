@@ -39,6 +39,9 @@ function planToSheetValues(plan) {
   // 네이버예약리뷰(결정 407) — 자리마다 리뷰마감일(이용일 + N일). 예약번호 칸은 비워 둔다(리뷰어가 예약 뒤 낸다).
   const { BOOKING_DEADLINE_HEADER } = require('../utils/worktablePlan');
   const idxBookingDeadline = plan.columns.findIndex(c => c.name === BOOKING_DEADLINE_HEADER);
+  // 영수증리뷰(결정 420) — 자리마다 영수증 번호(N번)만. 파일 번호는 싣지 않는다 · 참여일자·리뷰마감일은 참여할 때 채워진다.
+  const { RECEIPT_POOL_HEADER } = require('../utils/worktablePlan');
+  const idxReceiptPool = plan.columns.findIndex(c => c.name === RECEIPT_POOL_HEADER);
   const body = plan.rows.map(r => {
     const row = new Array(header.length).fill('');
     if (idxSeq >= 0) row[idxSeq] = String(r.seq);
@@ -58,6 +61,7 @@ function planToSheetValues(plan) {
       if (idxQnaText >= 0) row[idxQnaText] = r.qnaVisibility === 'public' ? (r.qnaText || '') : QNA_PRIVATE_GUIDE;
     }
     if (r.bookingDeadlineLabel && idxBookingDeadline >= 0) row[idxBookingDeadline] = r.bookingDeadlineLabel;
+    if (r.receiptPoolLabel && idxReceiptPool >= 0) row[idxReceiptPool] = r.receiptPoolLabel;
     return row;
   });
   return { header, body, filled: {

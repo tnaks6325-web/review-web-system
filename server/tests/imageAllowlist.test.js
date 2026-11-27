@@ -60,6 +60,7 @@ const countingDb = { query: (...a) => { queryCount++; return db.query(...a); } }
     CREATE TABLE reviewer_event_logs (id SERIAL PRIMARY KEY, context JSONB NOT NULL DEFAULT '{}'::jsonb);
     CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMPTZ DEFAULT NOW());
     CREATE TABLE payment_result_drive_archive (file_sha256 TEXT PRIMARY KEY, drive_file_id TEXT);
+    CREATE TABLE receipt_review_files (file_id TEXT PRIMARY KEY);   -- 결정 420 거절 목록(영수증리뷰 비공개 영수증 — 마이그레이션 230)
     CREATE TABLE payment_result_uploads (id SERIAL PRIMARY KEY, file_blob BYTEA, file_name TEXT);
     CREATE TABLE work_orders (id SERIAL PRIMARY KEY, guide_images TEXT DEFAULT '', review_guide TEXT DEFAULT '');
     CREATE TABLE cs_messages (id SERIAL PRIMARY KEY, image_urls JSONB NOT NULL DEFAULT '[]'::jsonb);

@@ -1552,8 +1552,29 @@ router.post('/workdesk/order-delete', authMiddleware, internalMiddleware, async 
     if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
     if (confirm !== true) return res.status(400).json({ ok: false, code: 'need_confirm', error: '삭제 영향 확인 후 다시 실행해 주세요.' });
     const out = await svc.deleteWorkdeskOrderRow({ sheetId, tabName, rowId, by: _by(req) });
-    res.status(out.ok ? 200 : (out.code === 'concurrent_cancel' || out.code === 'row_changed' || out.code === 'qna_slot_row' || out.code === 'booking_slot_row' ? 409 : 404)).json(out);
+    res.status(out.ok ? 200 : (out.code === 'concurrent_cancel' || out.code === 'row_changed' || out.code === 'qna_slot_row' || out.code === 'booking_slot_row' || out.code === 'receipt_pool_row' ? 409 : 404)).json(out);
   } catch (err) { next(err); }
+});
+// ── 영수증리뷰 영수증 사진 보기(결정 420) — 내부 담당자만 · 작업보드 줄 번호로(파일 번호를 화면에 주지 않는다) ──
+//   ★ 업체(광고주)는 못 본다(internalMiddleware) · 묶음에 없는 줄·비공개 영수증 목록 밖 파일 = 404(드라이브 읽기 0) · 캐시 금지.
+//   ★ 판정 조회 실패 = 내주지 않음(fail-closed — 사진이 안 뜨는 것이 남의 결제 영수증이 새는 것보다 싸다).
+router.get('/workdesk/receipt-image', authMiddleware, internalMiddleware, async (req, res) => {
+  const sheetId = String(req.query.sheetId || '');
+  const tabName = String(req.query.tabName || '');
+  const seq = parseInt(req.query.seq, 10);
+  if (!sheetId || !tabName || !Number.isInteger(seq)) return res.status(400).json({ ok: false, error: 'sheetId, tabName, seq 필수' });
+  const rps = require('../services/receiptPool.service');
+  let fileId = null;
+  try {
+    fileId = await rps.fileForRow(null, sheetId, tabName, seq);
+    if (fileId && !await rps.isRegisteredReceiptFile(fileId)) fileId = null;
+  } catch (e) {
+    logger.warn(`[trackB] 영수증 사진 조회 실패 — 내주지 않음(fail-closed): ${e.message}`);
+    res.set('Cache-Control', 'no-store');
+    return res.status(503).json({ ok: false, error: '잠시 뒤 다시 시도해 주세요.' });
+  }
+  if (!fileId) { res.set('Cache-Control', 'no-store'); return res.status(404).json({ ok: false, error: '이 줄에는 영수증이 없습니다.' }); }
+  return rps.sendReceiptImage(res, fileId);
 });
 // 번호 없는 주문행은 목표 인원 밖의 추가 참여자로 남기지 않고, 작업오더 목표 안의 빈 슬롯으로만 이동한다.
 // 대상·빈 슬롯은 서버가 다시 검증하므로 클라이언트가 번호를 지정하거나 이미 채워진 행을 덮을 수 없다.
@@ -1970,6 +1991,7 @@ function _cdpFail(res, err) {
     sequential_over: 422, sequential_no_product: 422, sequential_reduce_needs_confirm: 409,
     recruit_quota_qna_locked: 409,   // 결정 321: Q&A 자리표 탭은 접수 뒤 건수를 바꾸지 않는다(일정 끝 추가 모집으로)
     recruit_quota_booking_locked: 409,   // 결정 407: 예약리뷰 날짜별 인원은 업체가 정한 값 — 접수 뒤 건수를 바꾸지 않는다
+    recruit_quota_receipt_locked: 409,   // 결정 420: 영수증리뷰 모집 인원 = 붙인 영수증 장수 — 접수 뒤 건수를 바꾸지 않는다
     // ★ 결정 379: Q&A 공고 — 날짜별 인원 저장 막음 · 조절 창 빈 자리 옮기기(qnaSlots.moveQnaSlots)
     qna_plan_set: 409,
     qna_move_stale: 409, qna_move_bad: 400, qna_move_empty: 400, qna_move_past: 422, qna_move_closed_day: 422,
@@ -2196,6 +2218,10 @@ router.post('/campaigns/:id/rounds', authMiddleware, internalMiddleware, async (
     if (await require('../services/bookingSlots.service').isBookingCampaign(campaignId)) {
       return res.status(409).json({ ok: false, code: 'rounds_booking_locked', error: '네이버예약리뷰 작업은 차수로 인원을 바꾸지 않습니다 — 날짜별 인원은 업체가 정한 값입니다.' });
     }
+    // ★ 결정 420: 영수증리뷰도 같다 — 모집 인원은 붙인 영수증 장수다(차수로 늘리면 영수증 없는 줄이 생긴다). 판정 실패 = 막음.
+    if (await require('../services/receiptPool.service').isReceiptPoolCampaign(campaignId)) {
+      return res.status(409).json({ ok: false, code: 'rounds_receipt_locked', error: '영수증리뷰 작업은 차수로 인원을 바꾸지 않습니다 — 모집 인원은 붙인 영수증 장수입니다.' });
+    }
     const out = await addRound(campaignId, req.body, _by(req));
     /* ★ 7단계 🔴2(2026-10-20): 차수로 총 인원이 바뀌면 관리자 공고 창과 같은 한 곳(syncCampaignRecruitTotal)으로 연결 작업오더의 총모집과
        작업표 줄 수도 맞춘다 — 종전에는 공고 총량만 바뀌고 작업오더·작업표 줄은 옛 인원으로 남았다. 차수는 이미 저장됐으므로 실패는 알리기만 한다. */
@@ -2226,6 +2252,10 @@ router.delete('/campaigns/:id/rounds', authMiddleware, internalMiddleware, async
     // ★ 결정 407: 예약리뷰도 같다 — 날짜별 인원은 업체가 정한 값이다(차수로 늘리면 날짜 없는 줄이 생긴다). 판정 실패 = 막음.
     if (await require('../services/bookingSlots.service').isBookingCampaign(campaignId)) {
       return res.status(409).json({ ok: false, code: 'rounds_booking_locked', error: '네이버예약리뷰 작업은 차수로 인원을 바꾸지 않습니다 — 날짜별 인원은 업체가 정한 값입니다.' });
+    }
+    // ★ 결정 420: 영수증리뷰도 같다 — 모집 인원은 붙인 영수증 장수다(차수로 늘리면 영수증 없는 줄이 생긴다). 판정 실패 = 막음.
+    if (await require('../services/receiptPool.service').isReceiptPoolCampaign(campaignId)) {
+      return res.status(409).json({ ok: false, code: 'rounds_receipt_locked', error: '영수증리뷰 작업은 차수로 인원을 바꾸지 않습니다 — 모집 인원은 붙인 영수증 장수입니다.' });
     }
     const out = await removeLastRound(campaignId, _by(req));
     /* ★ 7단계 🔴2(2026-10-20): 차수로 총 인원이 바뀌면 관리자 공고 창과 같은 한 곳(syncCampaignRecruitTotal)으로 연결 작업오더의 총모집과

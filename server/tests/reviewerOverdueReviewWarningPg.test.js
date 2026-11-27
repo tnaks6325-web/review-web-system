@@ -96,7 +96,9 @@ async function callRoute(router, ownerReviewerId) {
       phone8 TEXT, participant_identity_id UUID
     );
     CREATE TABLE recruit_campaigns (id TEXT PRIMARY KEY, title TEXT);
-    CREATE TABLE tab_configs (sheet_id TEXT, tab_name TEXT, display_name TEXT, campaign_name TEXT);
+    CREATE TABLE tab_configs (sheet_id TEXT, tab_name TEXT, display_name TEXT, campaign_name TEXT, work_kind TEXT);
+    -- 결정 425: 경고 후보에서 네이버예약리뷰 줄을 빼는 판정(bookingTabSql)이 읽는 표 — 비어 있으면 종전 결과 그대로.
+    CREATE TABLE booking_slots (sheet_id TEXT, tab_name TEXT, seq INT, slot_date DATE, status TEXT);
     CREATE TABLE review_reminder_states (order_submission_id UUID, review_status TEXT);
     CREATE TABLE workdesk_participant_deletions (
       order_submission_id UUID, sheet_id TEXT, tab_name TEXT, seq INT

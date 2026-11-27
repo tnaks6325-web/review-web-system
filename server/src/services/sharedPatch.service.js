@@ -1085,7 +1085,7 @@ function _unitsOf(state) {
 function structurePermanentlyLocked(st) {
   const { deliveryBaseType } = require('../utils/deliveryType');
   if (CANON.deliveryMix(st.delivery_type_mix) || ['혼합', '회수'].includes(deliveryBaseType(st.delivery_type))) return true;
-  if (['blog', 'qna'].includes(CANON.workKind(st.work_kind))) return true;
+  if (['blog', 'qna', 'receipt'].includes(CANON.workKind(st.work_kind))) return true;   // 결정 420 — 영수증리뷰: 상품 = 매장 하나 · 줄 = 영수증(구조를 더하거나 빼면 영수증 묶음과 갈린다)
   return (_parseList(st.product_options_json) || []).some(_tiersOn);
 }
 
