@@ -15,6 +15,7 @@ const { logger } = require('../utils/logger');
 const {
   decideReviewerGate, globalGateEnabled, normalizeMessageType, normalizeCriteria, summarizeHistory,
 } = require('../utils/reviewerGate');
+const { clockStartLateralSql } = require('../utils/reviewClockStart');   // 결정 423 — 리뷰 날수 시작일 단일 출처
 
 const CRITERIA_KEY = 'reviewer_gate_criteria';
 const SEARCH_LIMIT = 50;
@@ -124,7 +125,10 @@ async function searchReviewers(campaignId, q, db = pool) {
 /** 이전 리뷰 집계 — 판정 일수는 설정탭 "블랙리스트 관리기준".
  *  ★ 재정의(2026-08-05 사용자 확정): 두 값 모두 **미제출 행**의 경과일수 —
  *    기한경과 = 14일↑(단 30일 미만 — 넘으면 미작성으로 승격, 이중 계수 없음) / 리뷰미작성 = 30일↑.
- *  구매 시점을 모르는 행(주문원장 미연결)은 경과일수를 셀 수 없어 건수에서 제외(누적참여에는 포함). */
+ *  구매 시점을 모르는 행(주문원장 미연결)은 경과일수를 셀 수 없어 건수에서 제외(누적참여에는 포함).
+ *  ★ 결정 423 — 경과일수의 시작일 = utils/reviewClockStart 단일 출처(기본 = 구매양식 제출 시각 그대로 ·
+ *    네이버예약리뷰 = 이용일 KST 0시). 예약 줄의 이용일을 모르면 시작일 = NULL → 세지 않는다(fail-safe · 로그 ·
+ *    제출 시각으로 되돌아가지 않는다). 이용일이 아직 안 온 줄은 경과일수가 음수라 저절로 안 센다. */
 async function _reviewHistory(p8s, db = pool) {
   const c = await getCriteria(db);
   const { rows } = await db.query(
@@ -132,21 +136,26 @@ async function _reviewHistory(p8s, db = pool) {
             COUNT(*)::int AS joined,
             COUNT(*) FILTER (WHERE ri.is_submitted = TRUE OR ri.review_file_id IS NOT NULL)::int AS done,
             COUNT(*) FILTER (WHERE NOT (ri.is_submitted = TRUE OR ri.review_file_id IS NOT NULL)
-                               AND os.submitted_at IS NOT NULL
-                               AND os.submitted_at < NOW() - ($3 || ' days')::interval)::int AS nowrite,
+                               AND clk.start_at IS NOT NULL
+                               AND clk.start_at < NOW() - ($3 || ' days')::interval)::int AS nowrite,
             COUNT(*) FILTER (WHERE NOT (ri.is_submitted = TRUE OR ri.review_file_id IS NOT NULL)
-                               AND os.submitted_at IS NOT NULL
-                               AND os.submitted_at < NOW() - ($2 || ' days')::interval
-                               AND os.submitted_at >= NOW() - ($3 || ' days')::interval)::int AS overdue
+                               AND clk.start_at IS NOT NULL
+                               AND clk.start_at < NOW() - ($2 || ' days')::interval
+                               AND clk.start_at >= NOW() - ($3 || ' days')::interval)::int AS overdue,
+            COUNT(*) FILTER (WHERE NOT (ri.is_submitted = TRUE OR ri.review_file_id IS NOT NULL)
+                               AND os.submitted_at IS NOT NULL AND clk.start_at IS NULL)::int AS clock_unknown
        FROM review_index ri
        LEFT JOIN order_submissions os
               ON os.sheet_id = ri.sheet_id AND os.tab_name = ri.tab_name
              AND os.sheet_row = ri.row_index AND os.deleted_at IS NULL
+       JOIN LATERAL (${clockStartLateralSql({ alias: 'ri', submittedAt: 'os.submitted_at' })}) clk ON TRUE
       WHERE ri.phone8 = ANY($1)
       GROUP BY ri.phone8`,
     [p8s, String(c.overdueDays), String(c.nowriteDays)]);
   const m = new Map();
-  rows.forEach(r => m.set(r.phone8, r));
+  let unknown = 0;
+  rows.forEach(r => { m.set(r.phone8, r); unknown += Number(r.clock_unknown) || 0; });
+  if (unknown) logger.warn(`[reviewerGate] 블랙 집계 — 네이버예약리뷰 이용일을 확인하지 못한 미제출 줄 ${unknown}건은 기한경과·미작성으로 세지 않음(fail-safe)`);
   return m;
 }
 
