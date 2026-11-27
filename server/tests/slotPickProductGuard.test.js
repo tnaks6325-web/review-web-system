@@ -44,6 +44,7 @@ async function pg() {
       CREATE TABLE tab_configs(sheet_id text, tab_name text, tab_gid text, sheetless boolean DEFAULT TRUE, work_kind text);
       CREATE TABLE qna_slots(sheet_id text, tab_name text);
       CREATE TABLE booking_slots(sheet_id text, tab_name text, seq int);
+      CREATE TABLE receipt_pool(sheet_id text, tab_name text, seq int);
       CREATE TABLE recruit_campaigns(id text PRIMARY KEY, linked_sheet_id text, linked_tab_name text, linked_tab_gid text, archived_at timestamptz);
     `);
     return db;

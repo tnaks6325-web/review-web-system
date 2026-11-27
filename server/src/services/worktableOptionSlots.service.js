@@ -55,6 +55,7 @@ const TAB_LEVEL_TABLES = {
   campaign_participants: '줄 자체(판정 대상)',
   qna_slots: 'Q&A 작업은 다시 나누기 해당 없음(isQnaTab)',
   booking_slots: '예약리뷰 작업은 다시 나누기 해당 없음(isBookingTab)',
+  receipt_pool: '영수증리뷰 작업은 다시 나누기 해당 없음(isReceiptPoolTab)',
   review_report_links: '탭 단위 보고 주소', review_index: '장부(줄에서 다시 만든다)', review_index_archive: '장부 보관본',
   index_master: '탭 단위 색인', index_master_archive: '탭 단위 색인 보관본', raw_sheet_rows: '장부 미러(줄에서 다시 만든다)', raw_sheet_tabs: '탭 단위 미러',
   parity_snapshots: '탭 단위 점검 기록', reviewer_event_logs: '탭 단위 이벤트 로그', tab_column_mappings: '열 구성', tab_status_column_bindings: '열 구성',
@@ -383,6 +384,7 @@ async function _applicable(client, camp) {
   if (!await isSheetless(client, camp.linked_sheet_id, camp.linked_tab_name)) return 'not_sheetless';
   if (await require('./qnaSlots.service').isQnaTab(client, camp.linked_sheet_id, camp.linked_tab_name)) return 'qna';
   if (await require('./bookingSlots.service').isBookingTab(client, camp.linked_sheet_id, camp.linked_tab_name)) return 'booking';
+  if (await require('./receiptPool.service').isReceiptPoolTab(client, camp.linked_sheet_id, camp.linked_tab_name)) return 'receipt';
   return null;
 }
 
