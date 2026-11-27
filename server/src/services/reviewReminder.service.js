@@ -274,8 +274,9 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
     //   visit_not_yet 사유로 막는다) ② 이용일을 모르는 줄(start_at NULL)은 「보고만」 하려고 예약내역 제출 뒤 같은 기간 동안
     //   읽는다(사유 visit_date_unknown · 절대 보내지 않음 · 날수 계산에 제출 시각을 쓰지 않는다 — COALESCE 는 읽는 기간에만).
     //   정렬은 시작일 순(모르는 줄은 맨 뒤 — 진짜 후보 자리를 뺏지 않는다).
-    // ★ 결정 426 — 알림 방식(pl · utils/reviewReminderPlan 단일 출처). 마감일이 있는 예약 줄은 자동 발송 때 **마감일이 어제·오늘인 줄만**
-    //   읽는다(오늘 = 보냄 · 어제 = 「늦게 안 보냄」 보고용) — 이용일 + 16일보다 늦은 마감(오더 리뷰 기한 최대 30일)도 마감일에 읽힌다.
+    // ★ 결정 426 — 알림 방식(pl · utils/reviewReminderPlan 단일 출처). 마감일이 있는 예약 줄은 자동 발송 때 **마감일이 오늘인 줄만**
+    //   읽는다(PR #1891 리뷰 P2: 어제 마감 줄까지 읽으면 자동 발송은 어차피 거절하는데 LIMIT 를 먼저
+    //   잡아먹어, 지난 마감 줄이 많으면 오늘 마감 줄이 하루뿐인 발송일을 놓친다) — 이용일 + 16일보다 늦은 마감(오더 리뷰 기한 최대 30일)도 마감일에 읽힌다.
     //   기본 방식 줄은 pl.deadline_ymd 가 항상 NULL 이라 ELSE = 종전 기간 절 그대로(같은 줄·같은 순서).
     //   마감일 모르는 예약 줄은 ELSE(종전 기간)로 읽어 deadline_unknown 으로 보고만 한다(절대 보내지 않음).
     const lookbackDays = target ? null : (config.scheduleDays || DEFAULT_SCHEDULE_DAYS)[2] + 2;
@@ -327,7 +328,7 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
          AND ${require('./reviewObligation.service').unfulfilledSql('ri')}
          AND ri.row_index IS NOT NULL
          AND ($2::int IS NULL OR CASE WHEN pl.deadline_ymd IS NOT NULL
-               THEN pl.deadline_ymd::date BETWEEN (NOW() AT TIME ZONE 'Asia/Seoul')::date - 1 AND (NOW() AT TIME ZONE 'Asia/Seoul')::date
+               THEN pl.deadline_ymd::date = (NOW() AT TIME ZONE 'Asia/Seoul')::date
                ELSE COALESCE(clk.start_at, ord.submitted_at) >= NOW() - ($2::int * INTERVAL '1 day') END)
          AND ($2::int IS NULL OR clk.basis = '${reviewClockStart.DEFAULT_BASIS}' OR clk.start_at IS NULL OR clk.start_at <= NOW())
          AND ($3::text IS NULL OR (ri.sheet_id = $3 AND ri.tab_name = $4 AND ri.row_index = ANY($5::int[])))

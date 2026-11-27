@@ -312,7 +312,7 @@ async function addRow(q, key, { tab, row, subDays, visit, deadline, slotStatus =
   t('★ 마감일 모름은 로그를 남긴다', warns.some(w => /마감일/.test(w) && /deadline_unknown/.test(w)), warns);
   t('이용일 모름(k10)은 종전대로 visit_date_unknown', dry.skipped.visit_date_unknown === 1, dry.skipped);
   t('이미 보낸 예약 줄(k11·k12) = booking_reminder_delivered(2차 없음)', dry.skipped.booking_reminder_delivered === 2, dry.skipped);
-  t('어제 마감(k5) = 자동 안 보냄(booking_deadline_day_passed — 늦게 보내지 않음)', dry.skipped.booking_deadline_day_passed === 1, dry.skipped);
+  t('★ 어제 마감(k5) = 자동 후보로 읽지도 않음(늦게 보내지 않음 · 후보 상한을 잡아먹지 않음 — PR #1891 리뷰 P2)', !dueB.includes('k5') && !dry.skipped.booking_deadline_day_passed, dry.skipped);
   const nonDueKeys = dry.items.filter(x => !isBooking(x)).map(x => x.orderSubmissionId).join(',');
   t('★ 비예약 자동 대상 = 얼린 종전 판정의 대상과 같다', nonDueKeys === oldDueNon.map(x => x.row.orderSubmissionId).join(','), { nonDueKeys });
 
@@ -414,6 +414,19 @@ async function addRow(q, key, { tab, row, subDays, visit, deadline, slotStatus =
   let planSrc = ''; try { planSrc = read('src/utils/reviewReminderPlan.js'); } catch (_) { /* RED */ }
   t('마감일 = 자리표 review_deadline 칸(화면 「오늘 마감」 과 같은 칸 · bookingSlots.reviewDeadlinesForRows 와 같은 칸)', /review_deadline/.test(planSrc) && /review_deadline/.test(read('src/services/bookingSlots.service.js')));
   t('예약 줄 판정 = reviewClockStart 의 종류 판정 SQL 한 벌(KIND_ROW_SQL)', /KIND_ROW_SQL/.test(planSrc));
+
+  console.log('\n[7] 지난 마감 예약 줄이 많아도 오늘 마감 줄이 후보 상한(기본 40)에 밀리지 않는다 (PR #1891 리뷰 P2)');
+  await q(`INSERT INTO tab_configs (sheet_id, tab_name, work_kind) VALUES ('S','예약탭C','booking')`);
+  for (let i = 0; i < 300; i++) await addRow(q, `old${i}`, { tab: '예약탭C', row: 1000 + i, subDays: 30, visit: V(-25), deadline: V(-1) });
+  await addRow(q, 'kz', { tab: '예약탭C', row: 2000, subDays: 9, visit: V(-3), deadline: TODAY });
+  const nz = sent.length;
+  const candZ = await svc.loadCandidates(Math.max(config.cycleLimit * 4, 100), config);
+  const posZ = candZ.findIndex(x => x.tabName === '예약탭C' && Number(x.rowIndex) === 2000);
+  const oldInCand = candZ.filter(x => x.tabName === '예약탭C' && Number(x.rowIndex) < 2000).length;
+  t('★ 자동 후보(상한 그대로)에 어제 마감 줄은 0 · 오늘 마감 kz 는 들어 있다', oldInCand === 0 && posZ >= 0, { posZ, oldInCand, n: candZ.length });
+  const runZ = await svc.run({ dryRun: false, now: new Date(NOW + 120000) });
+  t('★ 어제 마감 300줄이 있어도 오늘 마감 kz 는 기본 상한으로 자동 발송된다', sent.slice(nz).some(m => m.to === ROWS.kz.phone), { runZ, sentNew: sent.length - nz });
+  t('★ 어제 마감 줄은 한 통도 자동 발송되지 않는다', !sent.slice(nz).some(m => Object.keys(ROWS).some(k => k.startsWith('old') && ROWS[k].phone === m.to)));
 
   if (softFails.length) { console.log(`\n✗ ${softFails.length} failed (soft)`); process.exit(1); }
   console.log(`\n${pass} booking reminder deadline-day checks passed`);
