@@ -579,7 +579,12 @@ router.get('/parity-trend', authMiddleware, internalMiddleware, async (req, res,
 function _bookingSpecOf(row) {
   return require('../utils/bookingCalendar').bookingSpecForScreen(row);
 }
-const _withBookingSpec = (row) => { const b = _bookingSpecOf(row); return b ? { booking_spec: b } : {}; };
+const _withBookingSpec = (row) => {
+  const b = _bookingSpecOf(row);
+  // ★ 결정 432 — 영수증리뷰 오더에는 발행 폼 보기 전용 매장 정보(receipt_spec · 영수증 파일 번호 없음 — 장수만)를 같은 자리에서 붙인다.
+  const r = require('../utils/receiptPool').receiptSpecForScreen(row);
+  return { ...(b ? { booking_spec: b } : {}), ...(r ? { receipt_spec: r } : {}) };
+};
 
 router.get('/work-orders', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {

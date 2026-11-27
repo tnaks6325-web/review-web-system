@@ -76,6 +76,7 @@ function world({ fetchImpl, view = 'vPre', hold = { phone8: '00000000', holdToke
     _applyChainView: () => false, _tabsOn: () => false, _isDoneDetail: () => false, _tabDoneActive: () => false,
     isQnaCampaign: () => false,
     isBookingCampaign: () => false,   // 결정 409
+    isReceiptCampaign: () => false,   // 결정 432(같은 자리 스텁)
     CampCards: { serverNow: () => Date.now(), setServerNow() {} },
     _escAttr: (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
     _p8: (v) => String(v || '').replace(/\D/g, '').slice(-8),

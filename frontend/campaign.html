@@ -63,6 +63,18 @@
     .bk-in label{flex:0 0 72px;font-size:.8rem;font-weight:700;color:var(--t2)}
     .bk-in input{flex:1;min-width:0;box-sizing:border-box;border:1.5px solid var(--border);border-radius:10px;padding:10px 11px;font-size:.95rem;font-family:inherit}
     .bk-done{font-size:.84rem;color:#0ca678;font-weight:800;margin-bottom:8px}
+    /* 🧾 결정 432 — 영수증리뷰: 남은 영수증 · 내 영수증 사진(보기·저장·크게 보기) */
+    .dl-chip{display:inline-block;padding:2px 8px;border-radius:6px;font-size:.74rem;font-weight:800;white-space:nowrap;background:#FEF3C7;color:#B45309;vertical-align:middle}   /* 리뷰어 홈(index.html)과 같은 색 — 결정 422 */
+    .dl-chip.today{background:#FEE2E2;color:#B91C1C}
+    .rc-left{display:inline-block;margin-top:8px;padding:4px 10px;border-radius:999px;background:#ecfdf5;color:#065f46;font-size:.84rem;font-weight:800}
+    .rc-img{display:block;width:100%;max-height:360px;object-fit:contain;border:1px solid var(--border);border-radius:10px;background:#fafbfd;cursor:zoom-in}
+    .rc-imgbox{margin:10px 0 6px}
+    .rc-imgmsg{font-size:.82rem;color:var(--t2);text-align:center;padding:18px 8px;border:1.5px dashed var(--border);border-radius:10px}
+    .rc-acts{display:flex;gap:8px;margin:8px 0 12px}
+    .rc-acts .btn{flex:1;margin:0}
+    .rc-zoom{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:9999;display:flex;align-items:center;justify-content:center;overflow:auto;touch-action:pinch-zoom}
+    .rc-zoom img{max-width:100%;max-height:100%;object-fit:contain}
+    .rc-zoom button{position:fixed;top:12px;right:12px;border:0;border-radius:999px;padding:8px 14px;font-weight:800;background:#fff;color:#111;font-size:.9rem}
     .wd-body{font-size:.88rem;color:var(--t1);white-space:pre-wrap;word-break:break-word;line-height:1.65}
     .wd-body img{max-width:100%;border-radius:10px;margin:6px 0}
     .lockcard{text-align:center;padding:26px 14px}
@@ -221,6 +233,8 @@
     <div class="sec"><div id="preCard"></div>
       <!-- 📅 결정 409: 네이버예약리뷰 — 매장 안내 + 방문할 날짜 고르기(예약 공고에서만 보임) -->
       <div class="cardbx" id="bkPreBox" style="display:none;border-color:var(--p)"></div>
+      <!-- 🧾 결정 432: 영수증리뷰 — 매장 안내 + 남은 영수증(영수증 공고에서만 보임) -->
+      <div class="cardbx" id="rcPreBox" style="display:none;border-color:var(--p)"></div>
       <div class="cardbx" id="preOptionsBox" style="display:none">
         <div class="wd-tt">🧩 상품 옵션 · 남은 자리</div>
         <div id="preOptions"></div>
@@ -285,6 +299,11 @@
       <div class="cardbx" id="bookingBox" style="display:none;border-color:var(--p)">
         <div class="wd-tt" style="color:var(--p-dark)" id="bookingTitle">📅 예약하고 예약내역을 제출하세요</div>
         <div id="bookingBody"></div>
+      </div>
+      <!-- 🧾 결정 432: 영수증리뷰 — 구매양식 대신 내 영수증 + 리뷰 캡처 제출 (영수증 공고에서만 보임) -->
+      <div class="cardbx" id="receiptBox" style="display:none;border-color:var(--p)">
+        <div class="wd-tt" style="color:var(--p-dark)" id="receiptTitle">🧾 매장에 방문해 영수증 리뷰를 남겨 주세요</div>
+        <div id="receiptBody"></div>
       </div>
       <div class="cardbx" id="orderBox" style="border-color:var(--p)">
         <div class="wd-tt" style="color:var(--p-dark)">🧾 구매양식 — 구매를 마친 뒤 여기서 바로 제출하세요</div>
@@ -535,7 +554,8 @@ let _stageArmed = false;  // 시작 경로가 끝났나 — 그 전(첫 화면)�
 function _stageArm(){ _stageArmed = true; }
 function _stageAfterShow(view){
   if(view === 'vLoading') return;
-  const bk = $('bookingBox');
+  const _rcb = $('receiptBox');
+  const bk = (_rcb && _rcb.style.display !== 'none') ? _rcb : $('bookingBox');   // 🧾 432 — 영수증 카드도 같은 단계 스크롤(결정 416)
   const sub = (view === 'vJoined' && bk && bk.style.display !== 'none' && bk.dataset && bk.dataset.stage) ? String(bk.dataset.stage) : '';
   const key = view + (sub ? ':' + sub : '');
   const prev = _stageSeen;
@@ -610,6 +630,7 @@ async function _campFetch(url, opts, o){
     catch(e){ throw (e && e.transport) ? e : _campNetErr(!!(e && e.name === 'AbortError')); }
     let j = {}, bad = false;
     try{
+      if(o && o.blob){ const b = await Promise.race([r.blob(), expire]); return { ok: !!r.ok, status: r.status, headers: r.headers, j, bad: false, blob: b }; }   // 🧾 432 — 내 영수증 사진(본문 = 사진)
       const v = await Promise.race([r.json(), expire]);
       if(v && typeof v === 'object') j = v; else bad = true;
     }catch(e){ if(e && e.transport) throw e; bad = true; }
@@ -927,7 +948,9 @@ function renderPre(){
     const b = pc.querySelector('.pbtn'); if(b) b.style.display='none'; }
   const ttl = holdTtlText();
   // 💬 321: Q&A 는 구매가 없다 — 신청하면 오늘 자리가 정해지고 1시간(그날 자정 중 빠른 쪽) 안에 캡처 제출
-  $('preNotice').textContent = isBookingCampaign()
+  $('preNotice').textContent = isReceiptCampaign()
+    ? '참여하면 이 매장의 영수증 1장이 바로 정해져요. 기간 안에 편한 날 매장에 방문해 그 영수증으로 네이버 영수증 리뷰를 남기고 리뷰 캡처를 올려 주세요. 결제는 하지 않아요(업체 부담) — 리뷰를 올리면 리뷰비를 드려요.'
+    : isBookingCampaign()
     ? '방문할 날짜를 고르고 참여하면 그 날 자리가 바로 잡혀요. ' + (c.cutoffAt ? '늦어도 ' + CampCards._fmtHM(c.closesAt) + '까지' : ttl + ' 안에') +
       ' 네이버 예약을 마치고 예약번호와 예약내역 캡처를 제출해야 해요. 방문 뒤에는 리뷰 캡처를 올려 주세요.'
     : isQnaCampaign()
@@ -936,8 +959,9 @@ function renderPre(){
     : '지금 참여하면 ' + (c.cutoffAt ? '늦어도 ' + CampCards._fmtHM(c.closesAt) + '까지' : ttl + ' 안에') +
     ' 구매와 구매양식 제출까지 완료해야 해요. 시간이 지나 자동 취소돼도 구매양식을 제출하지 않았다면 다시 참여할 수 있어요.\n' +
     '이 캠페인은 상품을 직접 구매(선결제)한 뒤 리뷰비와 함께 환급받는 방식이에요.';
-  if($('preLockBox')) $('preLockBox').style.display = isBookingCampaign() ? 'none' : '';   // 📅 409: 예약 공고는 위 매장 안내가 대신한다(세로 길이 줄이기)
+  if($('preLockBox')) $('preLockBox').style.display = (isBookingCampaign() || isReceiptCampaign()) ? 'none' : '';   // 📅 409: 예약 공고는 위 매장 안내가 대신한다(세로 길이 줄이기) · 🧾 432 영수증도
   renderBookingPre();
+  renderReceiptPre();
   if($('preLockText')) $('preLockText').innerHTML = isQnaCampaign()
     ? '남길 문의(공개 문구 또는 비밀글)와 캡처 제출 창은<br/>참여 후에 확인할 수 있어요.'
     : '상품·옵션·결제금액, 유입가이드, 구매양식은<br/>참여 후에 확인할 수 있어요.';
@@ -969,6 +993,11 @@ function renderPre(){
   if(_gateMask === 'policy'){ jb.disabled = true; jb.textContent = '참여 불가'; }
   // 📅 결정 409: 예약 공고인데 날짜 정보를 못 받았으면 참여를 막는다(fail-closed — 날짜 없이 신청하면 서버도 거절한다)
   if(isBookingCampaign() && !(c && c.booking) && !(PREVIEW && _pvForceOpen)){ jb.disabled = true; jb.textContent = '날짜 정보를 불러오지 못했어요'; }
+  // 🧾 결정 432: 영수증 공고인데 안내를 못 받았으면 참여를 막는다(fail-closed) · 남은 영수증 0 = 「마감」
+  if(isReceiptCampaign() && !(PREVIEW && _pvForceOpen)){
+    if(!(c && c.receipt)){ jb.disabled = true; jb.textContent = '매장 정보를 불러오지 못했어요'; }
+    else if(st === 'soft_full' || !(Number(c.receipt.free) > 0)){ jb.disabled = true; jb.textContent = '마감 — 영수증이 모두 나갔어요'; }
+  }
   renderPreOptions();   // 옵션명+잔여(옵션 등록 캠페인만)
   renderPopNotice();    // ★ 064: 인기상품 참여 조건 안내(인기 공고만)
   _applyPopLock();      // ★ 참여권 0건이면 [참여하기] 잠금(모르면 잠그지 않는다 — 서버가 최종 권위)
@@ -1295,7 +1324,7 @@ function _optGroupEl(text){
 function renderPreOptions(){
   const opts = (_camp && _camp.options) || [];
   const box = $('preOptionsBox');
-  if(!opts.length || isBookingCampaign()){ box.style.display = 'none'; return; }   // 📅 409: 매장 하나 — 남은 자리는 날짜 칸이 말한다
+  if(!opts.length || isBookingCampaign() || isReceiptCampaign()){ box.style.display = 'none'; return; }   // 📅 409: 매장 하나 — 남은 자리는 날짜 칸이 말한다
   box.style.display = '';
   const wrap = $('preOptions'); wrap.innerHTML = '';
   _optListItems(opts).forEach(it => {
@@ -1469,7 +1498,7 @@ let _initialAcctSel = null;
    자리를 잡은 명의만 탭이 된다. 옵션·구매수량은 한 번만 골라 모두 같게(답 3A). */
 let _acctSelMany = [];      // 시트에서 체크한 명의들(화면 순서)
 let _initialAcctSels = null; // 옵션 고르기로 넘어갈 때 들고 가는 체크 목록(2개 이상일 때만)
-function _acctMultiPick(){ return multiEnabled() && !isBlogCampaign() && !isQnaCampaign() && !isBookingCampaign(); }   // 📅 409: 예약은 명의마다 날짜를 고른다
+function _acctMultiPick(){ return multiEnabled() && !isBlogCampaign() && !isQnaCampaign() && !isBookingCampaign() && !isReceiptCampaign(); }   // 📅 409: 예약은 명의마다 날짜를 고른다
 const _acctBlocked = {};   // 서버가 거절한 명의 p8 → 사유문구(재선택 유도용, 세션 한정)
 const _chainLate = new Set(); // ★ 결정 356 — chain_after_close 로 잠근 명의(시트를 다시 열 때 새로 판정)
 let _repurchaseAccounts = {};
@@ -1952,6 +1981,7 @@ function _isBlogUrl(v){
 function isBlogCampaign(){ return !!(_camp && _camp.work_kind === 'blog'); }
 function isQnaCampaign(){ return !!(_camp && _camp.work_kind === 'qna'); }
 function isBookingCampaign(){ return !!(_camp && _camp.work_kind === 'booking'); }   // 📅 결정 409
+function isReceiptCampaign(){ return !!(_camp && _camp.work_kind === 'receipt'); }   // 🧾 결정 432
 let _blogUrl     = '';     // 이번 참여에 쓸 값(확인된 뒤에만 채운다)
 let _blogPending = null;   // 시트 확인 후 이어서 실행할 apply 인자 {optionKey, sub}
 function openBlogSheet(optionKey, sub, msg){
@@ -2156,6 +2186,8 @@ async function _doApply(optionKey, sub, purchaseQty){
     if(j.reason === 'tier_unavailable'){ toast(j.error || '지금은 참여할 수 없어요'); await loadCampaign(); return; }
     if(j.reason === 'not_registered'){ toast('리뷰어 등록 후 참여할 수 있어요'); setTimeout(goRegisterNew, 900); return; }   // ★ 결정 417 — 등록 뒤 이 공고로 돌아온다
     // 📅 결정 409: 고른 날짜가 막 찼거나 고를 수 없는 날 — 자리는 잡히지 않았다. 남은 자리를 다시 받아 날짜를 다시 고르게 한다.
+    // 🧾 결정 432: 마지막 영수증이 방금 나갔다 — 영수증은 잡히지 않았다. 공고를 다시 받아 「마감」을 보여 준다.
+    if(j.reason === 'receipt_sold_out' || j.reason === 'receipt_place_unknown'){ hideAcctSheet(); toast(_applyReasonText(j)); await loadCampaign(); return; }
     if(['booking_date_full','booking_date_closed','booking_date_invalid','booking_date_required'].includes(j.reason)){
       hideAcctSheet(); toast(_applyReasonText(j)); _bkDate = ''; await loadCampaign(); _bkScrollToDates(); return;
     }
@@ -2328,6 +2360,9 @@ const _APPLY_REASON_TEXT = {
   booking_date_invalid:'날짜를 읽지 못했어요. 다시 골라 주세요',
   booking_date_closed:'오늘·지난 날짜는 고를 수 없어요. 내일 이후 날짜를 골라 주세요',
   booking_date_full:'그 날짜는 방금 자리가 모두 찼어요. 다른 날짜를 골라 주세요',
+  // 🧾 결정 432 — 영수증리뷰(서버 _RECEIPT_APPLY_MSG 와 같은 뜻)
+  receipt_sold_out:'영수증이 모두 나갔어요 — 이 공고는 마감됐어요',
+  receipt_place_unknown:'매장 정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요',
 };
 
 async function _doChangeOption(newKey, purchaseQty){
@@ -2507,6 +2542,13 @@ async function enterJoined(){
     }
     _qnaSlotRetry = 0;
     // 📅 409: 예약 공고도 같다 — 자리 정보를 못 받았으면 완료 화면으로 넘기지 않고 다시 불러온다(리뷰 캡처를 안 낸 사람이 「완료」를 보면 기한을 놓친다)
+    // 🧾 432: 영수증 공고도 같다 — 배정 정보를 못 받았으면 완료로 넘기지 않고 다시 불러온다
+    if(isReceiptCampaign() && j.application && j.application.status === 'submitted' && !j.receiptSeat){
+      _qnaSlotRetry++;
+      if(_qnaSlotRetry <= 6) setTimeout(enterJoined, _qnaSlotRetry <= 2 ? 3000 : 8000);
+      else toast('정보를 불러오지 못했어요. 잠시 후 새로고침해주세요 (참여는 유지돼요)');
+      return;
+    }
     if(isBookingCampaign() && j.application && j.application.status === 'submitted' && !j.bookingSlot){
       _qnaSlotRetry++;
       if(_qnaSlotRetry <= 6) setTimeout(enterJoined, _qnaSlotRetry <= 2 ? 3000 : 8000);
@@ -2587,13 +2629,21 @@ function _renderJoinedView(j, h){
       cashReceipt: j.cashReceipt,   // 현영 탭 공고만 서버가 내려줌(발행 안내 카드)
       requiredDeliveryMemo: j.requiredDeliveryMemo,   // ★ 결정 386: 필수 배송메세지 카드(없으면 카드 없음)
       qty: j.qty,                   // ★ 결정 289: 고른 개수 단계 — 상품 카드 결제금액을 그 단계 금액으로(1개 금액과 둘로 갈리지 않게)
-    }, { showOption: false, apiBase: API_BASE_URL, showInflow: !j.qnaSlot && !j.bookingSlot, showProduct: !j.qnaSlot && !j.bookingSlot, layout: 'v18' });
+    }, { showOption: false, apiBase: API_BASE_URL, showInflow: !j.qnaSlot && !j.bookingSlot && !j.receiptSeat, showProduct: !j.qnaSlot && !j.bookingSlot && !j.receiptSeat, layout: 'v18' });
     // 💬 321: Q&A 공고는 구매양식(iframe) 대신 문의 카드 — 구매가 없다
     const _qna = !!j.qnaSlot;
     const _bk = !!j.bookingSlot;   // 📅 409: 예약 공고는 구매양식 대신 예약 카드(예약내역 → 방문 뒤 리뷰 캡처)
     $('qnaBox').style.display = _qna ? '' : 'none';
     $('bookingBox').style.display = _bk ? '' : 'none';
-    $('orderBox').style.display = (_qna || _bk) ? 'none' : '';
+    const _rc = !!j.receiptSeat;   // 🧾 432: 영수증 공고는 구매양식 대신 영수증 카드(참여 확정 → 내 영수증 → 리뷰 캡처)
+    if($('receiptBox')) $('receiptBox').style.display = _rc ? '' : 'none';
+    $('orderBox').style.display = (_qna || _bk || _rc) ? 'none' : '';
+    if(_rc){
+      renderReceiptCard(j, h);
+      if(!PREVIEW) startPolling();
+      show('vJoined');
+      return;
+    }
     if(_bk){
       renderBookingCard(j, h);
       if(!PREVIEW) startPolling();
@@ -2998,19 +3048,199 @@ async function onBookingReviewSubmit(){
       throw new Error(s.error || '제출에 실패했어요. 다시 눌러 주세요.');
     }
     const t = s.target;
-    // ② 리뷰 캡처 업로드(기존 리뷰 캡처 경로 그대로) ③ 제출 완료
-    const name = (h.name || sess.name || '').trim();
-    const up = await gasPostUpload({ action:'uploadReviewImage', sheetId:t.sheetId, tabName:t.tabName, gid:t.gid || '', rowIndex:t.rowIndex,
-      reviewerName:name, slotKey:'review', files:[{ name: name + '_1', mimeType:'image/jpeg', data:_bkReviewB64 }] }, 180000);
-    if(!up || (!up.ok && !up.success)) throw new Error((up && up.error) || '캡처를 올리지 못했어요. 다시 눌러 주세요.');
-    const now = new Date();
-    const fin = await gasPost({ action:'submitReview', sheetId:t.sheetId, tabName:t.tabName, gid:t.gid || '', rowIndex:t.rowIndex,
-      reviewerName:name, value: (now.getMonth()+1) + '/' + now.getDate() + ' ' + String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0'),
-      uploadBatchId: up.uploadBatchId }, 30000);
-    if(!fin || (!fin.success && !fin.ok)) throw new Error((fin && fin.error) || '제출 기록에 실패했어요. 다시 눌러 주세요.');
+    // ② 리뷰 캡처 업로드(기존 리뷰 캡처 경로 그대로) ③ 제출 완료 — 영수증리뷰(432)와 같은 도우미 하나
+    await _campReviewCaptureSubmit(t, (h.name || sess.name || '').trim(), _bkReviewB64);
     renderDone();
   }catch(e){
     _bkErr(_campErrText(e, '제출에 실패했어요. 다시 눌러 주세요.'));
+    btn.disabled = false; btn.textContent = '리뷰 캡처 제출';
+  }
+}
+
+/* ═══ 🧾 결정 432 — 영수증리뷰 ═══
+   참여 전: 매장 안내(이름·주소·리뷰 기한) + 남은 영수증(서버 receipt.free = 아직 아무에게도 안 간 장).
+   참여 순간: 서버가 안 쓴 영수증 한 장을 묶는다(동시에 마지막 한 장 → 한 명만 · 나머지는 「마감」).
+   참여 후: ① 참여 확정 — 입력 없이 /api/submit/receipt(그 영수증 줄 기록 · 참여일자·리뷰마감일) 를 바로 부른다
+            ② 내 영수증 — 본인 확인 통로(POST /api/submit/receipt/image · 헤더 인증 · 캐시 금지)로 받아 화면 안에서만 보여 준다(blob)
+            ③ 리뷰 — 리뷰 캡처 1장 → 기존 리뷰 캡처 업로드(uploadReviewImage) → submitReview(같은 줄 · 예약리뷰와 같은 길).
+   ★ 리뷰 캡처까지 내야 완료(_isDoneDetail) · 리뷰어는 결제·영수증 캡처를 내지 않는다(금액 확인 없음). */
+let _rcReviewB64 = '', _rcImgUrl = '', _rcJoinTry = 0, _rcImgSeq = 0;
+/** 리뷰 캡처 1장 → 기존 리뷰 캡처 업로드(uploadReviewImage) → submitReview(같은 줄) — 예약(409)·영수증(432) 공용(사본 0). 실패는 던진다. */
+async function _campReviewCaptureSubmit(t, name, b64){
+  const up = await gasPostUpload({ action:'uploadReviewImage', sheetId:t.sheetId, tabName:t.tabName, gid:t.gid || '', rowIndex:t.rowIndex,
+    reviewerName:name, slotKey:'review', files:[{ name: name + '_1', mimeType:'image/jpeg', data:b64 }] }, 180000);
+  if(!up || (!up.ok && !up.success)) throw new Error((up && up.error) || '캡처를 올리지 못했어요. 다시 눌러 주세요.');
+  const now = new Date();
+  const fin = await gasPost({ action:'submitReview', sheetId:t.sheetId, tabName:t.tabName, gid:t.gid || '', rowIndex:t.rowIndex,
+    reviewerName:name, value: (now.getMonth()+1) + '/' + now.getDate() + ' ' + String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0'),
+    uploadBatchId: up.uploadBatchId }, 30000);
+  if(!fin || (!fin.success && !fin.ok)) throw new Error((fin && fin.error) || '제출 기록에 실패했어요. 다시 눌러 주세요.');
+}
+function renderReceiptPre(){
+  const box = $('rcPreBox'); if(!box) return;
+  if(!isReceiptCampaign()){ box.style.display = 'none'; return; }
+  box.style.display = '';
+  const rc = _camp && _camp.receipt;
+  if(!rc){
+    box.innerHTML = '<div class="wd-tt" style="color:var(--p-dark)">🧾 영수증리뷰 체험단</div><div class="qna-err">매장 정보를 불러오지 못했어요. 잠시 후 새로고침해 주세요.</div>';
+    return;   // [참여하기] 잠금은 renderPre 끝에서
+  }
+  const left = Math.max(0, Number(rc.free) || 0);
+  box.innerHTML = '<div class="wd-tt" style="color:var(--p-dark)">🧾 매장 방문 영수증리뷰</div>'
+    + '<div class="bk-place">' + _escAttr(rc.placeName || '') + '</div>'
+    + (rc.placeAddress ? '<div class="bk-addr">' + _escAttr(rc.placeAddress) + '</div>' : '')
+    + '<div class="bk-pay"><span class="qna-chip">결제 없음</span> 매장 비용은 업체가 내요. <b>영수증 리뷰</b>를 올리면 리뷰비를 드려요.'
+    + (rc.reviewDeadlineDays ? '<br/>리뷰는 <b>참여한 날 + ' + Number(rc.reviewDeadlineDays) + '일</b> 안에 올려 주세요(기간 안 아무 날 방문).' : '') + '</div>'
+    + (left > 0 ? '<div class="rc-left" id="rcLeft">영수증 ' + left + '장 남음</div>' : '<div class="rc-left" id="rcLeft" style="background:#f1f3f5;color:#495057">마감 — 영수증이 모두 나갔어요</div>');
+}
+function _rcErr(msg){ const e = $('rcErr'); if(!e) return; e.textContent = msg || ''; e.style.display = msg ? '' : 'none'; }
+async function onReceiptFile(inp){
+  const f = inp.files && inp.files[0];
+  _rcReviewB64 = ''; _rcErr('');
+  if(!f) return;
+  try{
+    const r = await _campShrinkImage(f);   // Q&A·예약 캡처와 같은 축소 하나
+    _rcReviewB64 = r.b64;
+    const t = $('rcReviewFileTxt');
+    if(t) t.innerHTML = '<img src="' + r.url + '" alt="선택한 캡처"/>다른 사진으로 바꾸려면 누르세요';
+  }catch(e){ _rcErr(e.message); }
+}
+/** 참여 확정 창구(첫 확정 · 리뷰 단계의 줄 위치 받기 공용 — 멱등). */
+async function _rcSubmitCall(){
+  const h = getHold(); const sess = getSession();
+  return _campFetch(API_BASE_URL + '/api/submit/receipt', { method:'POST',
+    headers: { 'Content-Type':'application/json', ..._getAuthHeaders() },
+    body: JSON.stringify({ campaignId: CAMP_ID, campaignApplicationId: _detail.application.id, holdToken: h.holdToken,
+      holdPhone8: h.phone8, loginPhone8: sess.phone8, loginName: sess.name }) }, { timeoutMs: 30000 });
+}
+function renderReceiptCard(j, h){
+  const b = j.receiptSeat || {};
+  const p = b.place || {};
+  const joined = !!(j.application && j.application.status === 'submitted' && b.joined);
+  let html = '<div class="qna-meta">' + (b.receiptNo ? '<span class="qna-chip">영수증 ' + Number(b.receiptNo) + '번</span>' : '')
+    + (b.joinedDate ? '<span class="qna-chip priv">' + _escAttr(_bkShort(b.joinedDate)) + ' 참여</span>' : '') + '</div>'
+    + '<div class="bk-place">' + _escAttr(p.placeName || '') + '</div>'
+    + (p.placeAddress ? '<div class="bk-addr">' + _escAttr(p.placeAddress) + '</div>' : '')
+    + (/^https?:\/\//i.test(String(p.placeUrl || '')) ? '<a class="bk-link" href="' + _escAttr(p.placeUrl) + '" target="_blank" rel="noopener">네이버 플레이스 열기</a>' : '');
+  clearInterval(_holdTick);
+  if(!joined){
+    $('receiptTitle').textContent = '🧾 영수증을 받는 중이에요';
+    $('holdLabel').textContent = '영수증 받는 중';
+    $('holdCd').textContent = '…';
+    $('joinedFootNote').textContent = '잠시만 기다려 주세요.';
+    html += '<div class="muted" style="margin-top:10px" id="rcJoinMsg">참여를 확인하고 있어요…</div>'
+      + '<button class="btn" type="button" id="rcJoinBtn" style="display:none" onclick="onReceiptJoin()">다시 시도</button>';
+  } else {
+    $('receiptTitle').textContent = '🧾 매장에 방문해 영수증 리뷰를 남겨 주세요';
+    // ★ 결정 422 — 마감 날·전날 「· 오늘 마감」/「· 내일 마감」 + 「곧 마감」 색(is-soon) — 글자·날짜는 서버 KST · 표시만(지나도 제출은 그대로)
+    $('holdLabel').textContent = '리뷰 마감' + (b.reviewDeadlineNotice ? ' · ' + b.reviewDeadlineNotice : '');
+    { const _bar = $('holdLabel').closest('.holdbar'); if(_bar) _bar.classList.toggle('is-soon', !!b.reviewDeadlineNotice); }
+    $('holdCd').textContent = b.reviewDeadline ? _bkShort(b.reviewDeadline) : '-';
+    $('joinedFootNote').textContent = '리뷰 캡처를 올리면 참여가 끝나요.';
+    html += '<div class="wd-tt" style="margin:12px 0 4px">내 영수증</div>'
+      + '<div class="rc-imgbox" id="rcImgBox"><div class="rc-imgmsg">영수증을 불러오는 중…</div></div>'
+      + '<div class="rc-acts"><button class="btn ghost" type="button" onclick="onReceiptZoom()">크게 보기</button>'
+      + '<button class="btn ghost" type="button" onclick="onReceiptSave()">사진 저장</button></div>'
+      + '<ol class="qna-steps"><li>리뷰 마감 전 편한 날 <b>매장에 방문</b></li>'
+      + '<li>네이버에서 <b>위 영수증으로 영수증 리뷰</b>를 남기고 <b>캡처</b></li>'
+      + '<li>아래에서 캡처 1장을 올리고 <b>리뷰 캡처 제출</b></li></ol>'
+      + (b.reviewDeadline ? '<div class="muted" style="margin-bottom:10px;color:var(--t1)">리뷰 마감 <b>' + _escAttr(_qnaDateLabel(b.reviewDeadline)) + '</b>까지'
+        + (b.reviewDeadlineNotice ? ' <span class="dl-chip' + (b.reviewDeadlineState === 'today' ? ' today' : '') + '">' + _escAttr(b.reviewDeadlineNotice) + '</span>' : '') + '</div>' : '')
+      + '<label class="qna-file"><input type="file" accept="image/*" style="display:none" onchange="onReceiptFile(this)"/>'
+      + '<span id="rcReviewFileTxt">리뷰 캡처 선택</span></label>'
+      + '<button class="btn" type="button" id="rcReviewBtn" onclick="onReceiptReviewSubmit()">리뷰 캡처 제출</button>';
+  }
+  html += '<div class="qna-err" id="rcErr" style="display:none"></div>';
+  $('receiptBody').innerHTML = html;
+  $('receiptBox').dataset.stage = joined ? 'review' : 'join';   // ★ 결정 416 — 단계가 바뀌면 카드 맨 위를 띠 아래로
+  // 영수증을 받은 뒤에는 서버가 취소를 받지 않는다(참여 확정 = 취소 대상 아님) — 눌러도 막히는 버튼을 남기지 않는다(막다른 길 0)
+  if($('joinedCancelBtn')) $('joinedCancelBtn').style.display = joined ? 'none' : '';
+  _rcReviewB64 = '';
+  if(joined) _rcLoadImage();
+  else if(!PREVIEW) onReceiptJoin();
+}
+/** 참여 확정 — 입력 없이 한 번(실패하면 [다시 시도]). 확정되면 서버 값으로 다시 그린다. */
+async function onReceiptJoin(){
+  const h = getHold(); const sess = getSession();
+  if(!h || !_detail || !_detail.application) return;
+  if(!sess || !sess.reviewerToken) return needLogin(onReceiptJoin);
+  const btn = $('rcJoinBtn'), msg = $('rcJoinMsg');
+  if(btn) btn.style.display = 'none';
+  if(msg) msg.textContent = '참여를 확인하고 있어요…';
+  try{
+    const r = await _rcSubmitCall();
+    const s2 = r.j;
+    if(!r.ok || !s2.ok){
+      if(s2 && s2.code === 'RECEIPT_EXPIRED'){ await releaseExpiredHold(h); return; }
+      if(_campTempFail(r)) throw _campServerErr(r.status);
+      throw new Error((s2 && s2.error) || '참여 확인에 실패했어요. 다시 눌러 주세요.');
+    }
+    _rcJoinTry = 0;
+    await enterJoined();
+  }catch(e){
+    _rcJoinTry++;
+    if(msg) msg.textContent = _campErrText(e, '참여 확인에 실패했어요. 다시 눌러 주세요.');
+    if(btn) btn.style.display = '';
+  }
+}
+/** 내 영수증 사진 — 헤더 인증 fetch → blob(주소를 만들지 않는다 · 화면 안에서만). */
+async function _rcLoadImage(){
+  const box = $('rcImgBox'); if(!box) return;
+  if(PREVIEW){ box.innerHTML = '<div class="rc-imgmsg">미리보기에서는 영수증을 보여 주지 않아요</div>'; return; }
+  const h = getHold(); const sess = getSession();
+  const seq = ++_rcImgSeq;   // 카드가 연달아 다시 그려지면(재방문 복원 등) 늦게 온 앞 응답이 지금 사진 주소를 지우지 않게 — 마지막 요청만 쓴다
+  try{
+    const resp = await _campFetch(API_BASE_URL + '/api/submit/receipt/image', { method:'POST', cache:'no-store',
+      headers: { 'Content-Type':'application/json', ..._getAuthHeaders() },
+      body: JSON.stringify({ campaignId: CAMP_ID, campaignApplicationId: _detail.application.id, holdToken: h.holdToken,
+        holdPhone8: h.phone8, loginPhone8: sess && sess.phone8 }) }, { blob: true, timeoutMs: 30000 });
+    if(!resp.ok || !resp.blob) throw new Error('HTTP ' + resp.status);
+    const blob = resp.blob;
+    if(seq !== _rcImgSeq) return;   // 더 새 요청이 있다 — 그쪽이 그린다
+    const prev = _rcImgUrl;
+    _rcImgUrl = URL.createObjectURL(blob);
+    const cur = $('rcImgBox'); if(!cur) return;
+    cur.innerHTML = '<img class="rc-img" id="rcImg" alt="내 영수증" src="' + _rcImgUrl + '" onclick="onReceiptZoom()"/>';
+    if(prev && prev !== _rcImgUrl) setTimeout(() => { try{ URL.revokeObjectURL(prev); }catch(_){} }, 0);
+  }catch(e){
+    if(seq !== _rcImgSeq) return;
+    box.innerHTML = '<div class="rc-imgmsg">영수증을 불러오지 못했어요. <a href="#" onclick="_rcLoadImage();return false">다시 불러오기</a></div>';
+  }
+}
+function onReceiptZoom(){
+  if(!_rcImgUrl) return toast('영수증을 불러온 뒤에 볼 수 있어요');
+  const z = document.createElement('div'); z.className = 'rc-zoom'; z.setAttribute('role','dialog'); z.setAttribute('aria-label','내 영수증 크게 보기');
+  z.innerHTML = '<img alt="내 영수증" src="' + _rcImgUrl + '"/><button type="button">닫기</button>';
+  z.onclick = (ev) => { if(ev.target === z || ev.target.tagName === 'BUTTON') z.remove(); };
+  document.body.appendChild(z);
+}
+function onReceiptSave(){
+  if(!_rcImgUrl) return toast('영수증을 불러온 뒤에 저장할 수 있어요');
+  const a = document.createElement('a'); a.href = _rcImgUrl; a.download = '영수증.jpg';
+  document.body.appendChild(a); a.click(); a.remove();
+  toast('저장이 안 되면 사진을 길게 눌러 저장해 주세요');
+}
+async function onReceiptReviewSubmit(){
+  if(PREVIEW) return toast('미리보기에서는 제출되지 않아요');
+  const h = getHold(); const sess = getSession();
+  if(!h || !_detail || !_detail.application) return toast('참여 정보를 다시 불러와 주세요');
+  if(!sess || !sess.reviewerToken) return needLogin(onReceiptReviewSubmit);
+  if(!_rcReviewB64) return _rcErr('리뷰 캡처를 먼저 선택해 주세요.');
+  const btn = $('rcReviewBtn'); btn.disabled = true; btn.textContent = '제출 중…'; _rcErr('');
+  try{
+    // ① 그 영수증 줄 위치(멱등 — 참여 확정 때와 같은 줄)
+    const r = await _rcSubmitCall();
+    const s2 = r.j;
+    if(!r.ok || !s2.ok){
+      if(_campTempFail(r)) throw _campServerErr(r.status);
+      throw new Error((s2 && s2.error) || '제출에 실패했어요. 다시 눌러 주세요.');
+    }
+    const t = s2.target;
+    // ② 리뷰 캡처 업로드 ③ 제출 완료 — 예약리뷰와 같은 도우미(사본 0)
+    await _campReviewCaptureSubmit(t, (h.name || sess.name || '').trim(), _rcReviewB64);
+    renderDone();
+  }catch(e){
+    _rcErr(_campErrText(e, '제출에 실패했어요. 다시 눌러 주세요.'));
     btn.disabled = false; btn.textContent = '리뷰 캡처 제출';
   }
 }
@@ -3082,6 +3312,7 @@ function _isDoneDetail(j){
   if(!(j && j.application && j.application.status === 'submitted')) return false;
   if(isQnaCampaign() || j.qnaSlot) return !!(j.qnaSlot && j.qnaSlot.captureDone === true);
   if(isBookingCampaign() || j.bookingSlot) return !!(j.bookingSlot && j.bookingSlot.reviewDone === true);   // 📅 409: 리뷰 캡처까지 내야 끝(예약내역만 = 아직)
+  if(isReceiptCampaign() || j.receiptSeat) return !!(j.receiptSeat && j.receiptSeat.reviewDone === true);   // 🧾 432: 리뷰 캡처까지 내야 끝
   return true;
 }
 function renderDone(pendingConfirm){
@@ -3125,7 +3356,7 @@ function renderDone(pendingConfirm){
   }
   // 💬 321: Q&A 는 구매양식이 없다 — 완료 문구만 바꾼다(다른 경우는 종전 문구 그대로)
   if(!pendingConfirm && !PREVIEW){
-    $('vDone').querySelector('p').innerHTML = isBookingCampaign()
+    $('vDone').querySelector('p').innerHTML = (isBookingCampaign() || isReceiptCampaign())
       ? '리뷰 캡처까지 제출되었어요.<br/>진행 상황은 리뷰어 홈의 참여현황에서 확인할 수 있어요.'
       : isQnaCampaign()
       ? '문의 캡처가 제출되었어요.<br/>진행 상황은 리뷰어 홈의 참여현황에서 확인할 수 있어요.'

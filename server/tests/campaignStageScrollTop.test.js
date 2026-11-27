@@ -301,7 +301,7 @@ test('구조: 화면 바꾸기 show() 한 곳이 도우미를 부르고(실패�
   assert.strictEqual((SCRIPT.match(/_stageScrollTop\(/g) || []).length, 2, '스크롤 도우미는 정의 1 + 부르는 곳 1(_stageAfterShow)뿐');
   assert.ok(!/window\.scrollTo\(0, 0\)/.test(SCRIPT), '단계 바꿀 때 따로 맨 위로 올리는 사본이 없다(만료 → 다시 참여하기도 같은 도우미)');
   for (const fn of ['renderDone', 'renderDoneBatch']) assert.ok(/show\('vDone'\);\s*\}$/.test(grab(fn)), fn + ' 는 show 로 끝난다');
-  assert.strictEqual((grab('_renderJoinedView').match(/show\('vJoined'\)/g) || []).length, 3, '참여 후 화면 세 갈래(예약·Q&A·구매양식) 모두 show');
+  assert.strictEqual((grab('_renderJoinedView').match(/show\('vJoined'\)/g) || []).length, 4, '참여 후 화면 네 갈래(영수증·예약·Q&A·구매양식) 모두 show');   // 결정 432: 영수증리뷰 갈래 추가(검사 의미 불변 — 갈래마다 show)
 });
 
 /* ───────────── 일반 구매 공고: 틀(구매양식) 안 첫 주문 칸이 부모 화면을 끌어내리지 않는다 ───────────── */

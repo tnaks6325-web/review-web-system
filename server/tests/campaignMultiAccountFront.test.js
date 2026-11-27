@@ -76,7 +76,7 @@ ok('마크업의 틀은 #orderFrame 하나(추가 틀은 명의마다 코드로�
 {
   const am = camp.slice(camp.indexOf('async function _applyMany('), camp.indexOf('function _applyReasonText('));
   ok('★ 353: 여러 개 체크는 「타계정 허용」 공고만(블로그·Q&A 제외)',
-    /function _acctMultiPick\(\)\{ return multiEnabled\(\) && !isBlogCampaign\(\) && !isQnaCampaign\(\) && !isBookingCampaign\(\); \}/.test(camp));
+    /function _acctMultiPick\(\)\{ return multiEnabled\(\) && !isBlogCampaign\(\) && !isQnaCampaign\(\) && !isBookingCampaign\(\)(?: && !isReceiptCampaign\(\))?; \}/.test(camp));   // 결정 432: 영수증리뷰도 명의마다 한 장
   ok('★ 353: 체크한 명의마다 한 번씩만 자리 요청(고른 수를 넘지 않음) · 요청 칸은 _doApply 와 같다',
     /for\(let i = 0; i < sels\.length; i\+\+\)\{/.test(am) && (am.match(/\/apply'/g) || []).length === 1
     && /body\.subName = sub\.name; body\.subPhone = sub\.phone;/.test(am) && /if\(purchaseQty\) body\.purchaseQty = purchaseQty;/.test(am)

@@ -357,7 +357,14 @@ async function reviewDeadlinesForRows(db, rows = []) {
       `SELECT s.sheet_id AS "sheetId", s.tab_name AS "tabName", s.seq, to_char(s.review_deadline, 'YYYY-MM-DD') AS d
          FROM booking_slots s
          JOIN jsonb_to_recordset($1::jsonb) AS x("sheetId" text, "tabName" text, seq int)
-           ON x."sheetId" = s.sheet_id AND x."tabName" = s.tab_name AND x.seq = s.seq`, [JSON.stringify(uniq)]);
+           ON x."sheetId" = s.sheet_id AND x."tabName" = s.tab_name AND x.seq = s.seq
+       UNION ALL
+       /* ★ 결정 432 — 영수증리뷰 줄: 지금 그 영수증을 가진 참여의 리뷰마감일(배정 때 새긴 값 · 참여일 + N일) */
+       SELECT p.sheet_id, p.tab_name, p.seq, to_char(p.review_deadline, 'YYYY-MM-DD')
+         FROM receipt_pool p
+         JOIN jsonb_to_recordset($1::jsonb) AS y("sheetId" text, "tabName" text, seq int)
+           ON y."sheetId" = p.sheet_id AND y."tabName" = p.tab_name AND y.seq = p.seq
+        WHERE p.review_deadline IS NOT NULL`, [JSON.stringify(uniq)]);
     for (const r of hit) if (r.d) out.set(r.sheetId + '||' + r.tabName + '||' + Number(r.seq), r.d);
     return out;
   } catch (e) {

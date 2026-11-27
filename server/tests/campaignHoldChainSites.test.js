@@ -37,6 +37,7 @@ const EXPECTED = {
   'src/services/manualOrder.service.js': 'submitted',                    // 외부/담당자 확정(HOOK)
   'src/services/orderCancellation.service.js': 'cancelled',              // 주문 취소(ALLOW: submitted 행 — applied 가 아니다)
   'src/services/qnaSlots.service.js': 'expired',                         // Q&A(ALLOW: 차례 제외)
+  'src/services/receiptPool.service.js': 'expired',                      // 영수증리뷰 고르기 직전 지난 홀드 정리(ALLOW: 차례 제외 · 결정 432)
   'src/services/trackB.service.js': 'cancelled',                         // 작업표 줄 삭제(ALLOW: 주문 붙은 행만 · 예상 마감대로)
 };
 ok('① 신청 행 status 변경 자리 = 고정 표(새 자리는 당길지 정하고 표를 고친다)', JSON.stringify(found) === JSON.stringify(EXPECTED));
@@ -75,7 +76,7 @@ ok('② DB 트리거 없음(RED-25)', !/CREATE (OR REPLACE )?TRIGGER/i.test(R('m
 // ④ /apply
 const apply = between(routes, 'async function _applyParticipation(', "router.post('/:id/apply'");
 ok('④ 차례 줄은 sequential:true + Q&A·예약리뷰(409)·블로그 아님 + 공고 자격일 때만',
-  /if \(req\.body\.sequential === true && !qnaApply && !bookingApply && !blogApply && holdChain\.chainEligibleCampaign\(camp\)\)/.test(apply));
+  /if \(req\.body\.sequential === true && !qnaApply && !bookingApply(?: && !receiptApply)? && !blogApply && holdChain\.chainEligibleCampaign\(camp\)\)/.test(apply));
 ok('④ cutoff·마감은 상태 엔진 값 하나(st.cutoffAt·st.closesAt) — close_buffer_min 사본 없음',
   /closesAt: st\.closesAt, cutoffAt: st\.cutoffAt/.test(apply) && !/close_buffer_min\s*\?\?/.test(chain));
 ok('④ chain_after_close 거절은 INSERT 앞(자리 미점유)', apply.indexOf("reason: 'chain_after_close'") > 0

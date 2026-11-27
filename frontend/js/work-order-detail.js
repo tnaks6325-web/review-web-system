@@ -1085,6 +1085,8 @@ function _woCampaignPrefill(o) {
     // ★ 결정 409: 네이버예약리뷰 — 서버가 계약 단일 출처(bookingSpecFromWorkOrder)로 정규화해 붙인 예약 정보(booking_spec)를
     //   **그대로** 넘긴다(여기서 다시 해석하지 않는다). 발행 폼은 보기 전용 안내 카드로만 쓴다. 없으면 키 없음.
     ...((_woIsBookingKind(o.work_kind) && o.booking_spec && typeof o.booking_spec === "object") ? { booking: o.booking_spec } : {}),
+    // ★ 결정 432: 영수증리뷰 — 서버가 계약 단일 출처(receiptSpecForScreen · 영수증 파일 번호 없음)로 붙인 매장 정보(receipt_spec)를 그대로
+    ...((_woIsReceiptKind(o.work_kind) && o.receipt_spec && typeof o.receipt_spec === "object") ? { receipt: o.receipt_spec } : {}),
   };
   return prefill;
 }

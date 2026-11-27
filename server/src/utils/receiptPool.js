@@ -236,6 +236,20 @@ function receiptAppendDecision(cur = {}, next = {}) {
  * ★ 작업보드 응답(workdeskTab `detail`)은 업체(광고주) 화면에도 나간다 — 파일 번호가 실리면 비공개 사진의 열쇠가 퍼진다.
  * ★ 영수증 목록이 없는 글은 **받은 값 그대로** 돌려준다(리뷰·블로그·Q&A·예약 오더 응답 바이트 불변).
  */
+/**
+ * ★ 결정 432 — 발행 폼 보기 전용 카드용 계약(작업오더 목록 프리필). **영수증 파일 번호를 싣지 않는다**(장수만).
+ * 영수증리뷰가 아니거나 못 읽으면 undefined(키 없음 — 화면은 「불러오지 못했다」고 말한다).
+ */
+function receiptSpecForScreen(row) {
+  try {
+    if (!row || String(row.work_kind || '').trim() !== 'receipt') return undefined;
+    const { spec, blockers } = receiptReviewSpecFromWorkOrder(row);
+    if (!spec) return undefined;
+    return { placeName: spec.placeName, placeAddress: spec.placeAddress, placeUrl: spec.placeUrl,
+      total: spec.total, reviewDeadlineDays: spec.reviewDeadlineDays, blockers: (blockers || []).map(b => b.message) };
+  } catch (_) { return undefined; }
+}
+
 function redactReceiptFileIds(raw) {
   if (raw == null) return raw;
   const text = typeof raw === 'string' ? raw : null;
@@ -254,7 +268,7 @@ function redactReceiptFileIds(raw) {
 }
 
 module.exports = {
-  redactReceiptFileIds,
+  redactReceiptFileIds, receiptSpecForScreen,   // receiptSpecForScreen = 결정 432 발행 폼 카드(파일 번호 없음)
   receiptRecruitFollow, receiptAppendDecision,   // 결정 420 사용자 확정 Q2·Q3(2026-11-25)
   receiptReviewSpecFromWorkOrder, buildReceiptPool, receiptPoolLabel, isReceiptFileId,
   RECEIPT_REVIEW_DEFAULT_DEADLINE_DAYS, RECEIPT_REVIEW_MAX_DEADLINE_DAYS, MAX_RECEIPTS, RECEIPT_FILE_ID_RE,

@@ -299,6 +299,13 @@ function bookingIgnoresPlans(counts) {
   return !!counts && typeof counts.bookingFree === 'number' && Number.isFinite(counts.bookingFree);
 }
 
+/** 결정 432 — 이 정원 재료가 영수증리뷰 공고(남은 영수증 수가 숫자로 실림)인가. ★ computeCampaignState 의 isReceipt 와 같은 재료.
+ *  영수증 공고는 날짜별 계획·시트 일정(작업표 「참여일자」 칸)·작업표 오늘 채움을 정원 판정에 쓰지 않는다 —
+ *  모집 정원 = 영수증 장수, 남은 자리 = 아직 아무에게도 안 간 영수증(receiptPool.receiptTakenSql 단일 출처). */
+function receiptIgnoresPlans(counts) {
+  return !!counts && typeof counts.receiptFree === 'number' && Number.isFinite(counts.receiptFree);
+}
+
 /** 그날의 명시 조절값(없으면 null) — dailyQuota 와 computeCampaignState 표시 재료가
  *  **같은 판정**을 쓴다(사본을 두면 정원과 표시가 갈린다). 킬스위치도 여기서 함께 판정. */
 function planOverrideFor(plans, dateStr) {
@@ -497,6 +504,11 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
        작업표 「이용일자」 칸이 시트 일정처럼 읽히면 첫 방문일까지 「오픈 예정」이 되고(리뷰어는 방문 전에 신청한다),
        이용일 = 오늘인 줄이 「오늘 채움」으로 세져 오늘 마감이 된다 — 그래서 그 재료를 비운다(데이터 변경 0 · 판정만). */
   const isBooking = bookingIgnoresPlans(counts);
+  const isReceipt = !isBooking && receiptIgnoresPlans(counts);   // ★ 결정 432 — 영수증 공고도 같은 이유로 그 재료를 비운다(참여일자 칸 = 시트 일정처럼 읽힌다)
+  if (isReceipt) {
+    counts = { ...counts, plans: null, tableTodayFilled: undefined, tableTodayQuota: undefined,
+      tableTodaySubmitted: undefined, tableTodayActiveHolds: undefined };
+  }
   if (isBooking) {
     counts = { ...counts, plans: null, tableTodayFilled: undefined, tableTodayQuota: undefined,
       tableTodaySubmitted: undefined, tableTodayActiveHolds: undefined };
@@ -570,7 +582,9 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
   const todayCount = confirmedTodayCount + todayActiveHolds;
   /* ★ 결정 409 — 예약 공고의 「오늘 정원」 = 오늘 쓴 수 + 고를 수 있는 남은 자리(남은 자리가 있으면 열림 · 0이면 아래에서 soft_full).
        하루 인원·이월·시트 일정 정원은 쓰지 않는다(날짜별 인원은 자리표가 정한다). */
-  const quota = isBooking ? todayCount + Math.max(0, counts.bookingFree) : quota0;
+  const quota = isBooking ? todayCount + Math.max(0, counts.bookingFree)
+    : isReceipt ? todayCount + Math.max(0, counts.receiptFree)   // ★ 결정 432 — 오늘 쓴 수 + 남은 영수증(하루 인원·이월 없음)
+    : quota0;
   const opensAt = kstTodayAt(c.window_start, now);
   const closesAt = kstTodayAt(c.window_end, now);
   const bufferMin = Number(c.close_buffer_min ?? 10) || 0;
@@ -588,7 +602,7 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
     //   (조절 50을 "+10 이월"로 표기하면 관리자가 이월 사고로 오해).
     // ★ 기준선은 그 공고의 "평소 그날 인원" — 시트 일정 공고는 **시트의 그날 행 수**이지
     //   daily_limit 이 아니다(둘은 아무 관계가 없어 근거 없는 "+15 이월" 칩이 뜬다).
-    carryAdded: (isQna || isBooking || ovToday !== null || _seqDayRoom(counts.optionCaps) !== null) ? 0   // 결정 409: 예약 공고도 이월 없음   // ★ 결정 228: 일정표 공고엔 이월이 없다(Q&A 도 — 321)
+    carryAdded: (isQna || isBooking || isReceipt || ovToday !== null || _seqDayRoom(counts.optionCaps) !== null) ? 0   // 결정 409: 예약 공고도 이월 없음   // ★ 결정 228: 일정표 공고엔 이월이 없다(Q&A 도 — 321)
       : Math.max(0, quota - (sch ? (Number(sch.byDate[todayStr]) || 0) : eff.dailyLimit)),
     todayPlanned: ovToday,                 // 오늘의 명시 조절값(없으면 null)
     planAdjusted: ovToday !== null,        // 카드 "조절됨" 표시 재료(관리자 전용 소비)
@@ -726,6 +740,8 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
   /* ★ 결정 409 — 예약 공고는 고를 수 있는 남은 자리가 없으면 「자리 없음」(soft_full) — 「내일 다시 오픈」이 아니다.
        홀드가 만료·취소되면 자리가 다시 나 저절로 열린다(영속하지 않음). */
   if (isBooking && !(counts.bookingFree > 0)) return { ...payload, state: 'soft_full', stateReason: 'booking_full' };
+  /* ★ 결정 432 — 영수증 공고는 남은 영수증이 없으면 「마감」(soft_full · 「내일 다시 오픈」 아님). 리뷰 전 취소·만료로 영수증이 돌아오면 저절로 열린다. */
+  if (isReceipt && !(counts.receiptFree > 0)) return { ...payload, state: 'soft_full', stateReason: 'receipt_full' };
 
   // 금일완료(홀드 만료 반환 시 open 복귀)
   if (todayCount >= quota) return { ...payload, state: 'daily_done', reopensAt: _reopenIso() };
@@ -865,6 +881,19 @@ async function fetchCampaignCounts(pool, campaignIds, now = new Date()) {
       if (o && b) {
         o.bookingFree = b.free;
         if (bookingIgnoresPlans(o)) o.plans = null;   // 예약 공고는 날짜별 계획을 쓰지 않는다(이 깔때기를 읽는 모든 곳이 같은 값)
+      }
+    }
+  }
+  /* ★ 결정 432: 영수증리뷰 공고의 남은 영수증 — 이 깔때기에 싣는다(목록 카드·상세·참여 게이트가 같은 수를 본다).
+     쿼리 순서 계약(066)을 흔들지 않게 맨 뒤(예약 다음). 실패 = 미부착 = 종전 정원(참여는 영수증 배정이 다시 막는다). */
+  const receiptMap = await require('./receiptPool.service').loadFreeByCampaign(pool, ids);
+  if (receiptMap) {
+    for (const id of ids) {
+      const o = out.get(id);
+      const r = receiptMap.get(String(id));
+      if (o && r) {
+        o.receiptFree = r.free;
+        if (receiptIgnoresPlans(o)) o.plans = null;
       }
     }
   }
@@ -2190,6 +2219,7 @@ module.exports = {
   planOverrideFor,
   qnaIgnoresPlans,   // 결정 379 — Q&A 공고는 날짜별 계획을 판정에 쓰지 않는다
   bookingIgnoresPlans,   // 결정 409 — 예약 공고는 남은 자리 합 하나로 연다/닫는다
+  receiptIgnoresPlans,   // 결정 432 — 영수증 공고는 남은 영수증 수 하나로 연다/닫는다
   __resetCarryCacheForTest,
   __resetPlanCacheForTest,
   TABLE_QUOTA_MODE,

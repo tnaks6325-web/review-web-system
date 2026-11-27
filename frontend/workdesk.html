@@ -8707,7 +8707,7 @@ async function _cndPublish(cd){
     let o=((r&&r.items)||[]).find(x=>String(x.id)===String(cd.workOrderId));
     /* ★ 결정 414: 이 응답은 요약 행(제목·인원·종류)이라 예약 오더는 예약 안내·총 모집·연결 작업이 빈 발행 폼이 됐다 —
        예약 오더면 홈 [공고 발행]과 같은 원본 행(작업오더 목록 · 서버가 붙인 booking_spec)으로 프리필한다. 다른 종류는 종전 그대로. */
-    if(o && (typeof _woIsBookingKind==='function'?_woIsBookingKind(o.work_kind):String(o.work_kind||'')==='booking')) o=(await _cndPublishFullRow(o.id))||o;
+    if(o && ((typeof _woIsBookingKind==='function'?_woIsBookingKind(o.work_kind):String(o.work_kind||'')==='booking') || String(o.work_kind||'')==='receipt')) o=(await _cndPublishFullRow(o.id))||o;   // ★ 결정 432 — 영수증리뷰도 같은 원본 행(receipt_spec)
     if(o && typeof _woCampaignPrefill==='function') return openRecruitModal(null,_woCampaignPrefill(o),o.id);
   }
   return openRecruitModal(null,{linked_sheet_id:t.sheetId,linked_tab_name:t.tabName,linked_tab_gid:t.tabGid||''});

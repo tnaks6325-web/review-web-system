@@ -57,7 +57,7 @@ const st = require('../src/services/campaignState.service');
   t('오늘 자리 없는 상품 = 오늘 마감(today_done)', v0.status === 'today_done');
   const camp = S('src/services/campaignState.service.js');
   t('공고 정원 재료는 깔때기 맨 뒤에서 싣는다(066 쿼리 순서 계약 유지)',
-    /_loadOptionDayCaps\(pool, ids, now\);[\s\S]{0,600}loadTodayByCampaign\(pool, ids, now\)[\s\S]{0,800}loadFreeByCampaign\(pool, ids, now\)[\s\S]{0,600}return out;/.test(camp));   // 결정 409: 예약 남은 자리는 Q&A 다음 맨 뒤
+    /_loadOptionDayCaps\(pool, ids, now\);[\s\S]{0,600}loadTodayByCampaign\(pool, ids, now\)[\s\S]{0,800}loadFreeByCampaign\(pool, ids, now\)[\s\S]{0,900}receiptPool\.service'\)\.loadFreeByCampaign\(pool, ids\)[\s\S]{0,600}return out;/.test(camp));   // 결정 409: 예약 남은 자리는 Q&A 다음 맨 뒤
   t('상품별 재료도 같은 단일 출처(loadTodayByCampaign)', /fetchOptionCountsBatch[\s\S]*loadTodayByCampaign\(db, ids, now\)/.test(camp));
   t('Q&A 는 순차진행 규칙을 쓰지 않는다', /if \(qnaToday\) return views;/.test(camp));
 
@@ -77,9 +77,9 @@ const st = require('../src/services/campaignState.service');
   const routes = S('src/routes/campaign.routes.js');
   const ap = routes.slice(routes.indexOf('async function _applyParticipation('), routes.indexOf("router.post('/:id/apply'"));
   t('23:50 확인은 잠금(pool.connect) 앞', ap.indexOf('qnaApplyClosed') > 0 && ap.indexOf('qnaApplyClosed') < ap.indexOf('pool.connect()'));
-  t('개수 단계 건너뜀', /if \(!blogApply && !qnaApply(?: && !bookingApply)?\)/.test(ap));
+  t('개수 단계 건너뜀', /if \(!blogApply && !qnaApply(?: && !bookingApply)?(?: && !receiptApply)?\)/.test(ap));
   t('같은 공고 제출완료 = 막음(one_per_person) · 재구매 기간은 건너뜀',
-    /if \(\(qnaApply \|\| bookingApply\) && sameCampaignSubmittedAt\)[\s\S]{0,200}one_per_person/.test(ap) && /if \(!qnaApply && !bookingApply\) try \{/.test(ap));   // 결정 409: 예약리뷰도 같은 갈래
+    /if \(\(qnaApply \|\| bookingApply(?: \|\| receiptApply)?\) && sameCampaignSubmittedAt\)[\s\S]{0,200}one_per_person/.test(ap) && /if \(!qnaApply && !bookingApply(?: && !receiptApply)?\) try \{/.test(ap));   // 결정 409: 예약리뷰도 같은 갈래
   const iBind = ap.indexOf('bindSlotForApply'), iIns = ap.indexOf('INSERT INTO campaign_applications');
   t('자리 묶기는 모든 게이트 뒤(인기 참여권 판정 뒤)·INSERT 앞', iBind > ap.indexOf('canUsePopularCredit') && iBind < iIns);
   t('작업표 잠금(camp_tab_daily) 뒤에서 묶는다', ap.indexOf('camp_tab_daily') < iBind);
@@ -146,7 +146,7 @@ const st = require('../src/services/campaignState.service');
   /* ── ⑦ 리뷰어 화면 ─────────────────────────────────────────── */
   console.log('⑦ 리뷰어 화면');
   const ch = F('campaign.html');
-  t('Q&A 공고는 구매양식 대신 Q&A 카드', /\$\('qnaBox'\)\.style\.display = _qna \? '' : 'none'/.test(ch) && /\$\('orderBox'\)\.style\.display = \(_qna \|\| _bk\) \? 'none' : ''/.test(ch));   // 결정 409: 예약 카드도 같은 자리
+  t('Q&A 공고는 구매양식 대신 Q&A 카드', /\$\('qnaBox'\)\.style\.display = _qna \? '' : 'none'/.test(ch) && /\$\('orderBox'\)\.style\.display = \(_qna \|\| _bk(?: \|\| _rc)?\) \? 'none' : ''/.test(ch));   // 결정 409: 예약 카드도 같은 자리
   t('캡처 전에는 완료 화면으로 넘어가지 않는다(진입·폴링 둘 다)',
     // ★ 결정 353: 여러 명의 탭 화면이면 그 명의만 정리하고 다음 명의로(_tabDoneActive) — 판정은 여전히 _isDoneDetail 하나
     (ch.match(/if\(_isDoneDetail\(j\)\)\{ (?:if\(_tabDoneActive\(\)\) return; |if\(!_tabDoneActive\(\)\) )?renderDone\(\);/g) || []).length === 2
@@ -229,7 +229,7 @@ const st = require('../src/services/campaignState.service');
   t('신청 종류 판정: 공고의 작업표 칸 이름(linked_sheet_id)', /tabWorkKind\(\{ sheetId: campPre\.linked_sheet_id/.test(camp9) && !/campPre\.linked_tab_sheet_id/.test(camp9));
   t('신청: 잠근 공고로 종류 재확인(갈리면 막음)', /isQnaKind\(_lockedKind\) !== qnaApply/.test(camp9));
   t('신청: 자리 이중 묶기 충돌 = 자리 찼음 안내', /err\.constraint === 'uq_campaign_apps_qna_slot'[\s\S]{0,120}reason: 'qna_no_slot'/.test(camp9));
-  t('1인 1회 공고: 다른 명의로 제출한 Q&A 도 기간 없이 막는다', /if \(!blocked && \(qnaApply \|\| bookingApply\)\) \{\s*blocked = true;/.test(camp9));   // 결정 409: 예약리뷰도 같은 갈래
+  t('1인 1회 공고: 다른 명의로 제출한 Q&A 도 기간 없이 막는다', /if \(!blocked && \(qnaApply \|\| bookingApply(?: \|\| receiptApply)?\)\) \{\s*blocked = true;/.test(camp9));   // 결정 409: 예약리뷰도 같은 갈래
   {
     const { qnaUnitsFromWorkOrder } = require('../src/utils/qnaCalendar');
     const wo = { daily_count: 1, product_options_json: JSON.stringify([
