@@ -782,7 +782,7 @@ router.post('/identity-fold-notice/dismiss', reviewerSessionMiddleware, async (r
 });
 
 // GET /api/reviewer/overdue-review-warning — 로그인 시 보여줄 가장 오래된 리뷰 미제출 1건.
-// 구매양식 제출 뒤 10일이 지난 주문 중 현재 리뷰내역의 참여행과 연결된 건만 고른다.
+// 구매양식 제출 뒤 10일이 지난 주문 중 현재 리뷰내역의 참여행과 연결된 건만 고른다(네이버예약리뷰 줄 제외 — 결정 425).
 // 경고 표시 여부는 캠페인 참여 제한과 무관하며 이 API는 읽기만 수행한다.
 router.get('/overdue-review-warning', reviewerSessionMiddleware, async (req, res, next) => {
   try {
@@ -952,6 +952,11 @@ router.get('/overdue-review-warning', reviewerSessionMiddleware, async (req, res
          AND NOT COALESCE(cp.owner_work_submitted, FALSE)
          AND NOT COALESCE(ri.is_submitted, FALSE)
          AND ${require('../services/reviewObligation.service').unfulfilledSql('ri')}
+         /* 결정 425(사용자 확정 2026-11-25 「①」): 네이버예약리뷰 줄은 이 경고에서 뺀다 — 「제출 뒤 10일」의 제출 = 예약 직후 낸
+            예약내역이라 방문도 하기 전에 「리뷰 미제출 · N일 경과」가 뜬다. 예약 줄은 결정 422 의 「내일/오늘 마감」(이용일 기준)만.
+            ★ 화면이 아니라 여기서 빼는 이유: 가장 오래된 1건이 예약 줄이면 다른 종류의 진짜 경고까지 같이 사라진다(다음 건을 고른다).
+            ★ 판정 = bookingTabSql 하나(자리표가 있거나 탭 종류 booking) — 확실히 예약일 때만 뺀다(종류 모름 = 종전대로 띄운다). */
+         AND NOT ${require('../utils/bookingTabSql').bookingTabSql('ri.sheet_id', 'ri.tab_name')}
          AND COALESCE(cp.owner_link_count, 1) = 1
          AND NOT EXISTS (
            SELECT 1 FROM review_closed_targets rrs
