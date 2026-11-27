@@ -78,7 +78,7 @@ const _grabFn = name => {
   return WD.slice(m.index, i + 1) + '\n';
 };
 // 결정 421: 홈 「업체 정산」 칸은 작업보드 정산 칸 렌더러(setlSummaryHtml)를 그대로 부른다 — 그 구현도 함께 넣는다.
-const LABEL_SRC = ['_tabLabel', '_tabTip', '_tabSearchText', '_isInternalRole', 'setlSummaryHtml', '_setlPayState', '_awMD', '_manWon', '_shareBadge', '_wonFmt'].map(_grabFn).join('');
+const LABEL_SRC = ['_tabLabel', '_tabTip', '_tabSearchText', '_isInternalRole', 'setlSummaryHtml', '_setlIssueInvoiceUrl', '_setlPayState', '_awMD', '_manWon', '_shareBadge', '_wonFmt'].map(_grabFn).join('');
 const BLOCK = LABEL_SRC + WD.slice(s0, s1);
 t('★ 마감 체크는 isFinishCandidate 그대로(판정 사본 금지)', /f==='cand'\) return isFinishCandidate\(t\)/.test(BLOCK));
 
