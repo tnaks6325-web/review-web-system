@@ -461,7 +461,7 @@ test('S-1 search.html 은 도우미를 search-app.js 보다 먼저 싣고 둘 �
   const iA = tags.findIndex((t) => /^js\/search-app\.js\?v=/.test(t));
   assert.ok(iH >= 0, '★ 리뷰어 홈 도우미를 싣는다(사본 금지 — 결정 372·403)');
   assert.ok(iA > iH, '도우미가 먼저');
-  { const v = /v=(\d{8})-[\w-]+/.exec(tags[iA]); assert.ok(v && v[1] >= '20261125', tags[iA]); }   // 결정 417·425 가 search-app.js 를 다시 올렸다(뜻 그대로 — 413 판(20261125) 이후로 올렸는가)
+  { const v = /v=(\d{8})-[\w-]+/.exec(tags[iA]); assert.ok(v && v[1] >= '20261125', tags[iA]); }   // 결정 417·427 가 search-app.js 를 다시 올렸다(뜻 그대로 — 413 판(20261125) 이후로 올렸는가)
   assert.match(HTML, /sessionStorage\.getItem\("iad_direct_submit_items"\) \|\| sessionStorage\.getItem\("iad_direct_submit_keep_v1"\)/);
 });
 

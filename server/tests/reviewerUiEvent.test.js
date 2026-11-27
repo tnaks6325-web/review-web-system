@@ -94,7 +94,7 @@ test('B-1 migration 231 — 개인정보 칸 없는 표 · 기록 한 줄 · 하
   assert.equal(await recordUiEvent(normalizeUiEvent({ event: 'photo_reattach_notice', screen: 'campaign', slots: 2 }), pool), true);
   assert.equal(await recordUiEvent(normalizeUiEvent({ event: 'photo_reattach_notice', screen: 'direct', slots: 1 }), pool), true);
   // 결정 427 문서의 주인용 셈 SQL 과 같은 꼴(읽기 전용)
-  const doc = fs.readFileSync(fs.readdirSync(path.join(ROOT, '../docs/decisions')).filter((f) => /^425-/.test(f)).map((f) => path.join(ROOT, '../docs/decisions', f))[0], 'utf8');
+  const doc = fs.readFileSync(fs.readdirSync(path.join(ROOT, '../docs/decisions')).filter((f) => /^427-구매양식-사진은/.test(f)).map((f) => path.join(ROOT, '../docs/decisions', f))[0], 'utf8');
   const m = /```sql\n([\s\S]*?)```/.exec(doc);
   assert.ok(m, '결정 문서에 하루별 셈 SQL');
   const rows = (await db.query(m[1])).rows;
