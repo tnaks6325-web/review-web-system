@@ -200,8 +200,11 @@ function withSolapiEnv(fn) {
 
   await test('종결·제출 상태는 LIMIT 전에 후보에서 제외한다', () => {
     const source = fs.readFileSync(path.join(__dirname, '../src/services/reviewReminder.service.js'), 'utf8');
-    assert.ok(/COALESCE\(s\.review_status, 'pending'\) = 'pending'[\s\S]*ORDER BY ord\.submitted_at[\s\S]*LIMIT \$1/.test(source));
-    assert.ok(/ord\.submitted_at >= NOW\(\) - \(\$2::int \* INTERVAL '1 day'\)/.test(source), '발송 창보다 오래된 구매는 읽지 않는다');
+    // ★ 결정 423 — 정렬·기간의 기준이 「시작일」(clk.start_at · 기본 = ord.submitted_at 그 값 · 예약 = 이용일)로 바뀌어 글자만 갱신(의미 불변 ·
+    //   비예약 줄이 종전과 같은 줄·같은 순서인 것은 bookingReviewClockStart.test.js 가 얼린 종전 SQL 과 대조한다).
+    assert.ok(/COALESCE\(s\.review_status, 'pending'\) = 'pending'[\s\S]*ORDER BY clk\.start_at[\s\S]*LIMIT \$1/.test(source));
+    assert.ok(/COALESCE\(clk\.start_at, ord\.submitted_at\) >= NOW\(\) - \(\$2::int \* INTERVAL '1 day'\)/.test(source), '발송 창보다 오래된 구매(예약 = 이용일)는 읽지 않는다');
+    assert.ok(/clockStartLateralSql\(\{ alias: 'ri', submittedAt: 'ord\.submitted_at' \}\)/.test(source), '시작일 = 제출 시각을 넘긴 단일 출처 식');
     assert.ok(!/COALESCE\(ri\.end_date, ''\) <> ''/.test(source), '비어 있는 시트 마감일 칸에 의존하지 않는다');
   });
 

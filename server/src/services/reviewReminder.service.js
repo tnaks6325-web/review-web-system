@@ -3,6 +3,7 @@
 const pool = require('../db/pool');
 const solapi = require('./solapi.service');
 const { logger } = require('../utils/logger');
+const reviewClockStart = require('../utils/reviewClockStart');
 
 const TEMPLATE_NAMES = Object.freeze({
   1: '리뷰미작성_1차',
@@ -32,6 +33,7 @@ function getReviewReminderConfig(env = process.env) {
     missing: provider.missing,
     // ★ 발송 시점 = 구매일(구매양식 제출일, KST) 기준 1차·2차·3차 경과일(사용자 확정 2026-09-30: 7·13·14일).
     //   제출기한 = 구매일 + 마지막 값(14일)의 끝. 시트 마감일 칸(end_date)은 어떤 작업표에도 없어 쓰지 않는다.
+    //   ★ 결정 423 — 네이버예약리뷰 줄은 「구매일」 자리에 이용일(방문 날짜)을 쓴다(같은 7·13·14일 · utils/reviewClockStart).
     scheduleDays: _scheduleDays(env.REVIEW_REMINDER_SCHEDULE_DAYS),
     // 앞 회차가 늦게 나갔을 때 다음 회차와 너무 붙지 않게 하는 최소 간격(시간).
     minGapHours: _intEnv('REVIEW_REMINDER_MIN_GAP_HOURS', 12, 1, 72, env),
@@ -177,13 +179,19 @@ function _eligibleAt(row, sched, config) {
 function _summarizePreview(rows, now, config) {
   const items = [];
   for (const row of rows) {
-    const sched = reminderSchedule(row.orderedAt, config);
+    // ★ 결정 423 — 날수 시작일 = 종류별 단일 출처(기본 = 구매양식 제출 시각 · 네이버예약리뷰 = 이용일 KST 0시).
+    //   예약 줄의 이용일을 모르면 at = null → visit_date_unknown(보내지 않음 · 제출 시각으로 되돌아가지 않는다).
+    const start = reviewClockStart.clockStartOfRow(row);
+    const byVisit = start.basis !== reviewClockStart.DEFAULT_BASIS;
+    const sched = reminderSchedule(start.at, config);
     const deadline = sched ? sched.deadline : null;
     const phone = normalizeKoreanMobile(row.orderPhone);
     const reminderNo = Number(row.reminderCount || 0) + 1;
     const eligibleAt = sched ? _eligibleAt(row, sched, config) : null;
     let reason = null;
-    if (!sched) reason = 'purchase_date_unknown';
+    if (byVisit && !start.at) reason = 'visit_date_unknown';
+    else if (byVisit && start.at > now) reason = 'visit_not_yet';
+    else if (!sched) reason = 'purchase_date_unknown';
     else if (!phone) reason = 'participant_phone_invalid';
     else if (row.reviewStatus && row.reviewStatus !== 'pending') reason = row.reviewStatus;
     else if (Number(row.reminderCount || 0) >= 3) reason = 'all_reminders_delivered';
@@ -194,6 +202,12 @@ function _summarizePreview(rows, now, config) {
     items.push({ row, deadline, phone, reminderNo, eligibleAt, reason });
   }
   return items;
+}
+
+/** 예약 줄 이용일 모름 — 보내지 않은 건수를 남긴다(fail-safe 의 흔적 · 결정 423). */
+function _warnUnknownVisit(preview, where) {
+  const n = (preview || []).filter(x => x.reason === 'visit_date_unknown').length;
+  if (n) logger.warn(`[review-reminder] 네이버예약리뷰 이용일을 확인하지 못한 줄 ${n}건 — 알림톡 안 보냄(visit_date_unknown · ${where})`);
 }
 
 function createReviewReminderService({ db = pool, provider = solapi } = {}) {
@@ -214,6 +228,12 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
   async function loadCandidates(limit, config = getReviewReminderConfig(), target = null) {
     // 발송 창(구매 +마지막 회차일)보다 오래된 구매는 애초에 읽지 않는다(+1일 여유).
     // ★ 담당자 수동 발송(target)은 특정 줄을 지목하므로 기간 절을 끄고 그 줄만 읽는다.
+    // ★ 결정 423 — 기간·정렬의 기준 = 시작일(clk.start_at · utils/reviewClockStart 단일 출처).
+    //   기본(리뷰·블로그·Q&A) 줄은 clk.start_at = ord.submitted_at 그 값이라 종전과 같은 줄·같은 순서다.
+    //   네이버예약리뷰 줄 = 이용일 KST 0시 — ① 이용일이 아직 안 온 줄은 자동 발송 후보에서 뺀다(담당자 지목은 읽어서
+    //   visit_not_yet 사유로 막는다) ② 이용일을 모르는 줄(start_at NULL)은 「보고만」 하려고 예약내역 제출 뒤 같은 기간 동안
+    //   읽는다(사유 visit_date_unknown · 절대 보내지 않음 · 날수 계산에 제출 시각을 쓰지 않는다 — COALESCE 는 읽는 기간에만).
+    //   정렬은 시작일 순(모르는 줄은 맨 뒤 — 진짜 후보 자리를 뺏지 않는다).
     const lookbackDays = target ? null : (config.scheduleDays || DEFAULT_SCHEDULE_DAYS)[2] + 2;
     const tSheet = target ? String(target.sheetId || '') : null;
     const tTab = target ? String(target.tabName || '') : null;
@@ -224,6 +244,7 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
              ri.campaign_name AS "campaignName", ri.product_name AS "productName",
              ri.start_date AS "startDate", ri.end_date AS "endDate", ri.phone8,
              ord.id AS "orderSubmissionId", ord.phone AS "orderPhone", ord.submitted_at AS "orderedAt",
+             clk.basis AS "clockBasis", clk.start_at AS "clockStartAt",
              COALESCE(s.review_status, 'pending') AS "reviewStatus",
              COALESCE(s.reminder_count, 0)::int AS "reminderCount",
              s.last_reminded_at AS "lastRemindedAt", s.final_due_at AS "finalDueAt",
@@ -254,11 +275,13 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
           ORDER BY picked.priority, picked.submitted_at DESC, picked.id DESC
           LIMIT 1
         ) ord ON TRUE
+        JOIN LATERAL (${reviewClockStart.clockStartLateralSql({ alias: 'ri', submittedAt: 'ord.submitted_at' })}) clk ON TRUE
         LEFT JOIN review_reminder_states s ON s.order_submission_id = ord.id
        WHERE ri.is_submitted = FALSE
          AND ${require('./reviewObligation.service').unfulfilledSql('ri')}
          AND ri.row_index IS NOT NULL
-         AND ($2::int IS NULL OR ord.submitted_at >= NOW() - ($2::int * INTERVAL '1 day'))
+         AND ($2::int IS NULL OR COALESCE(clk.start_at, ord.submitted_at) >= NOW() - ($2::int * INTERVAL '1 day'))
+         AND ($2::int IS NULL OR clk.basis = '${reviewClockStart.DEFAULT_BASIS}' OR clk.start_at IS NULL OR clk.start_at <= NOW())
          AND ($3::text IS NULL OR (ri.sheet_id = $3 AND ri.tab_name = $4 AND ri.row_index = ANY($5::int[])))
          AND COALESCE(s.review_status, 'pending') = 'pending'
          AND NOT EXISTS (SELECT 1 FROM review_closed_targets closed
@@ -268,7 +291,7 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
             WHERE wd.order_submission_id = ord.id
                OR (wd.sheet_id = ri.sheet_id AND wd.tab_name = ri.tab_name AND wd.seq = ri.row_index)
          )
-       ORDER BY ord.submitted_at, ri.sheet_id, ri.tab_name, ri.row_index
+       ORDER BY clk.start_at, ri.sheet_id, ri.tab_name, ri.row_index
        LIMIT $1`, [limit, lookbackDays, tSheet, tTab, tRows]);
     return rows;
   }
@@ -541,6 +564,7 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
 
     if (dryRun) {
       const preview = _summarizePreview(await loadCandidates(candidateLimit, config), now, config);
+      _warnUnknownVisit(preview, 'dry-run');
       return {
         ok: true,
         dryRun: true,
@@ -573,6 +597,7 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
     if (!remaining) return { ok: true, reconciled, submitted, closed, sent: 0, dailyCapReached: true };
 
     const preview = _summarizePreview(await loadCandidates(Math.max(candidateLimit * 4, 100), config), now, config);
+    _warnUnknownVisit(preview, 'auto');
     const due = preview.filter(x => !x.reason).slice(0, Math.min(candidateLimit, remaining));
     const outcomes = [];
     for (const item of due) {
@@ -632,6 +657,9 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
   const MANUAL_OK = new Set([null, 'not_due']);
   const MANUAL_REASON = {
     purchase_date_unknown: '구매 기록이 없어 알림톡 회차를 정할 수 없습니다 — 문자로 보내세요',
+    // 결정 423 — 네이버예약리뷰는 이용일(방문 날짜)부터 센다.
+    visit_date_unknown: '이용일(방문 날짜)을 확인하지 못해 알림톡 회차를 정할 수 없습니다 — 문자로 보내세요',
+    visit_not_yet: '아직 이용일(방문 날짜) 전입니다 — 방문한 뒤에 보낼 수 있습니다',
     participant_phone_invalid: '주문 연락처가 휴대폰 번호가 아닙니다',
     all_reminders_delivered: '알림톡 3회를 이미 모두 보냈습니다',
     provider_result_pending: '앞서 보낸 알림톡의 도착 확인을 기다리는 중입니다',
@@ -646,6 +674,7 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
     try { await reconcileAccepted(now); } catch (e) { logger.warn(`[review-reminder] 수동 미리보기 결과 확인 실패: ${e.message}`); }
     const rows = await loadCandidates(Math.min(500, (rowIndexes || []).length * 2 + 10), config, { sheetId, tabName, rowIndexes });
     const preview = _summarizePreview(rows, now, config);
+    _warnUnknownVisit(preview, 'manual');
     const byRow = new Map();
     for (const x of preview) {
       if (byRow.has(Number(x.row.rowIndex))) continue;   // 같은 줄에 주문이 둘이면 최신(LATERAL LIMIT 1)만

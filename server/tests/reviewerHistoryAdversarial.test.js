@@ -49,7 +49,7 @@ async function seedOrder(who=owner,extra={}){return q(`INSERT INTO order_submiss
  CREATE TABLE index_master(sheet_id text,tab_name text,submitted_count int);
  CREATE TABLE raw_sheet_tabs(sheet_id text,tab_name text,detected_headers jsonb,headers jsonb,mirrored_at timestamptz);
  ALTER TABLE participant_edits ADD reverted_by text;
- ALTER TABLE tab_configs ADD tab_gid text,ADD workboard_schema_version int DEFAULT 1;
+ ALTER TABLE tab_configs ADD tab_gid text,ADD workboard_schema_version int DEFAULT 1,ADD work_kind text DEFAULT '';
  ALTER TABLE order_submissions ADD phone text,ADD sheet_row int;
  ALTER TABLE review_index ADD campaign_name text,ADD start_date text,ADD end_date text,ADD review_file_id text;
  ALTER TABLE review_submissions ADD file_id text,ADD upload_batch_id uuid;
@@ -58,7 +58,8 @@ async function seedOrder(who=owner,extra={}){return q(`INSERT INTO order_submiss
  CREATE INDEX audit_cp_identity ON campaign_participants(sheet_id,tab_gid,identity_key) WHERE identity_key IS NOT NULL AND active;
  CREATE INDEX audit_ri_coord ON review_index(sheet_id,tab_name,row_index);
  CREATE INDEX audit_pe_anchor ON participant_edits(sheet_id,tab_name,anchor_type,anchor_value) WHERE reverted_at IS NULL;`);
- for(const file of ['160_review_reminder_alimtalk.sql','161_workdesk_review_resolutions.sql','162_reviewer_participations.sql'])await pg.exec(read('migrations/'+file));
+ // 결정 423 — 알림톡 후보 SQL 이 리뷰 날수 시작일(예약 줄 = 자리표 이용일)을 같은 왕복에 읽는다: 탭 종류 칸(099)·자리표(227)를 실제 migration 그대로.
+ for(const file of ['160_review_reminder_alimtalk.sql','161_workdesk_review_resolutions.sql','162_reviewer_participations.sql','227_booking_slots.sql'])await pg.exec(read('migrations/'+file));
  const values=[null,'',' ','\n','\t','\r\n','\u00a0','false',' FALSE ','false\n',false,true,0,'0','미제출',' 미제출 ','미제출\n','취소건','취소건\n','미작성 종결','톡방확인완료','톡방 확인 완료','2026-09-17','의미없는문자열'];
  for(let i=0;i<values.length;i++)await check('CELL-'+String(i+1).padStart(2,'0'),'cell','JS와 SQL 판정 일치 '+JSON.stringify(values[i]),async()=>{
   await reset();const cp=await row(values[i]);const expected=obligation.classifyCell(values[i]),actual=(await ledger(cp.id)).review_obligation_status;

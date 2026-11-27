@@ -3252,22 +3252,26 @@ router.get('/reviewers', authMiddleware, adminOrMasterMiddleware, async (req, re
     } else if (flag === 'candidate' || flag === 'overdue') {
       const { getCriteria } = require('../services/reviewerGate.service');
       const c = await getCriteria();
-      const unsub = `NOT (ri.is_submitted = TRUE OR ri.review_file_id IS NOT NULL) AND os.submitted_at IS NOT NULL`;
+      // ★ 결정 423 — 경과일수의 시작일 = utils/reviewClockStart 단일 출처(_reviewHistory 와 같은 식 · 기본 = 제출 시각 그대로 ·
+      //   네이버예약리뷰 = 이용일 KST 0시 · 이용일 모름 = NULL = 세지 않음).
+      const unsub = `NOT (ri.is_submitted = TRUE OR ri.review_file_id IS NOT NULL) AND clk.start_at IS NOT NULL`;
       let cond;
       if (flag === 'candidate') {          // 미작성(30일↑) 1건 이상
         params.push(String(c.nowriteDays));
-        cond = `${unsub} AND os.submitted_at < NOW() - ($${params.length} || ' days')::interval`;
+        cond = `${unsub} AND clk.start_at < NOW() - ($${params.length} || ' days')::interval`;
       } else {                             // "기한경과만"(14일↑ ~ 30일 미만 — 미작성 승격분 제외)
         params.push(String(c.overdueDays));
         const pOver = params.length;
         params.push(String(c.nowriteDays));
-        cond = `${unsub} AND os.submitted_at < NOW() - ($${pOver} || ' days')::interval
-                        AND os.submitted_at >= NOW() - ($${params.length} || ' days')::interval`;
+        cond = `${unsub} AND clk.start_at < NOW() - ($${pOver} || ' days')::interval
+                        AND clk.start_at >= NOW() - ($${params.length} || ' days')::interval`;
       }
+      const { clockStartLateralSql } = require('../utils/reviewClockStart');
       where.push(`reviewers.phone8 IN (
         SELECT ri.phone8 FROM review_index ri
         LEFT JOIN order_submissions os ON os.sheet_id = ri.sheet_id AND os.tab_name = ri.tab_name
               AND os.sheet_row = ri.row_index AND os.deleted_at IS NULL
+        JOIN LATERAL (${clockStartLateralSql({ alias: 'ri', submittedAt: 'os.submitted_at' })}) clk ON TRUE
         WHERE ${cond}
         GROUP BY ri.phone8)`);
     }

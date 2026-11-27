@@ -49,7 +49,10 @@ function ok(name, cond, extra) {
       !/review_file_at > os\.submitted_at/.test(sql));
     ok('★ overdue 는 상하한 양쪽( ≥ overdueDays AND < nowriteDays ) — 30일 넘으면 미작성으로 승격 = 이중계수 없음',
       /AS overdue/.test(sql) && /\$2 \|\| ' days'/.test(sql) && />= NOW\(\) - \(\$3 \|\| ' days'\)::interval/.test(sql));
-    ok('구매 시점 없는 행 제외(os.submitted_at IS NOT NULL)', (sql.match(/os\.submitted_at IS NOT NULL/g) || []).length >= 2);
+    // ★ 결정 423 — 경과일수 시작일 = clk.start_at(기본 = os.submitted_at 그 값 · 예약 = 이용일 · 모름 = NULL)으로 글자만 갱신(의미 강화:
+    //   구매 시점 없는 행 + 이용일 모르는 예약 줄을 함께 뺀다 · 같은 집계인지는 bookingReviewClockStart.test.js 가 종전 SQL 과 대조).
+    ok('구매 시점(예약 = 이용일) 없는 행 제외(clk.start_at IS NOT NULL)', (sql.match(/clk\.start_at IS NOT NULL/g) || []).length >= 2
+      && /clockStartLateralSql\(\{ alias: 'ri', submittedAt: 'os\.submitted_at' \}\)/.test(sql));
   }
 
   // ── B. annotateReviewerRows 실행 ──
@@ -120,7 +123,9 @@ function ok(name, cond, extra) {
     || /COALESCE\(bank_account,''\),'\[\^0-9\]','','g'\) LIKE/.test(trackBSrc));
   ok('flag 필터 4종(blacklist/available/candidate/overdue)', /'blacklist' \|\| flag === 'available'/.test(trackBSrc)
     && /'candidate' \|\| flag === 'overdue'/.test(trackBSrc));
-  ok('★ overdue 필터는 미작성 승격분 제외(상하한 양쪽)', /AND os\.submitted_at >= NOW\(\) - \(\$\$\{params\.length\} \|\| ' days'\)::interval/.test(trackBSrc));
+  // ★ 결정 423 — 시작일 = clk.start_at(_reviewHistory 와 같은 단일 출처 식)으로 글자만 갱신(의미 불변)
+  ok('★ overdue 필터는 미작성 승격분 제외(상하한 양쪽)', /AND clk\.start_at >= NOW\(\) - \(\$\$\{params\.length\} \|\| ' days'\)::interval/.test(trackBSrc)
+    && /clockStartLateralSql\(\{ alias: 'ri', submittedAt: 'os\.submitted_at' \}\)/.test(trackBSrc));
   ok('reviewer-gate 응답에 globalBlacklist — 조회 실패는 **필드 미동봉**(빈 배열로 "0명" 위장 금지)',
     /globalBlacklist = await listGlobalBlacklist/.test(trackBSrc)
     && /\.\.\.\(globalBlacklist \? \{ globalBlacklist \} : \{\}\)/.test(trackBSrc));

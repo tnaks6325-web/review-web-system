@@ -64,9 +64,9 @@ async function insertCalendar({ db, workOrderId, sheetId, tabName, slots = [], b
 }
 
 /* 판정 = 자리표가 있거나, 탭이 네이버예약리뷰로 등록돼 있다(자리표 저장이 실패한 예약 탭도 리뷰 탭처럼 정리되지 않게).
-   탭 종류는 접수 때 tab_configs.work_kind 에 기록된다. */
-const IS_BOOKING_TAB_SQL = `SELECT (EXISTS (SELECT 1 FROM booking_slots WHERE sheet_id = $1 AND tab_name = $2)
-                                OR EXISTS (SELECT 1 FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 AND work_kind = 'booking')) AS b`;
+   탭 종류는 접수 때 tab_configs.work_kind 에 기록된다.
+   ★ SQL 조각 = utils/bookingTabSql 하나(리뷰 날수 시작일 — 결정 423 — 과 같은 판정 · 사본 0). */
+const IS_BOOKING_TAB_SQL = `SELECT ${require('../utils/bookingTabSql').bookingTabSql('$1', '$2')} AS b`;
 
 /**
  * 이 탭이 예약 자리표 탭인가.
