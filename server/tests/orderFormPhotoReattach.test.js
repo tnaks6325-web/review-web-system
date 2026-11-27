@@ -277,7 +277,7 @@ test('R-1 공고 틀: 사진 두 장 → 새로고침 → 사진 칸 바로 위�
   assert.equal(p2.doc.getElementById('oc_0_orderNumber').value, '2026-1125-001', '쓴 글자는 종전처럼 남는다');
   const n = p2.notice();
   assert.ok(n, '★ 사진이 지워졌다는 안내가 화면에 남는다(토스트만이 아니다)');
-  assert.equal(n.textContent, '새로고침해서 넣은 사진이 지워졌어요. 1번째 주문의 구매캡처(1장째)·배송메세지 사진(2장째)를 다시 넣어 주세요.');
+  assert.equal(n.textContent, '새로고침해서 넣은 사진이 지워졌어요. 1번째 주문의 구매캡처(1장째)·배송메세지 사진(2장째)을 다시 넣어 주세요.');
   const zone = p2.doc.getElementById('oc_0_imgZone');
   assert.equal(n.nextSibling, zone, '★ 사진 칸 바로 위');
   assert.equal(p2.toasts.filter((t) => /지워졌어요/.test(t.m)).length, 1, '토스트도 한 번');
@@ -290,7 +290,7 @@ test('R-2 다시 넣은 칸은 문구에서 빠지고, 남은 칸은 다음 새�
   await p1.attach1(); await p1.attach2();
   const p2 = page({ embed: true, ss }); p2.open();
   await p2.attach1();
-  assert.equal(p2.notice().textContent, '새로고침해서 넣은 사진이 지워졌어요. 1번째 주문의 배송메세지 사진(2장째)를 다시 넣어 주세요.', '★ 다시 넣은 첫 장은 빠진다');
+  assert.equal(p2.notice().textContent, '새로고침해서 넣은 사진이 지워졌어요. 1번째 주문의 배송메세지 사진(2장째)을 다시 넣어 주세요.', '★ 다시 넣은 첫 장은 빠진다');
   const p3 = page({ embed: true, ss }); p3.open();   // 2장째를 안 넣고 또 새로고침
   assert.match(p3.notice().textContent, /구매캡처\(1장째\)·배송메세지 사진\(2장째\)/, '지금 있던 첫 장 + 아직 안 넣은 2장째');
   await p3.attach1(); await p3.attach2();

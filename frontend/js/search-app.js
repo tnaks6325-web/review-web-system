@@ -1231,7 +1231,8 @@ function _ofPhSave() {
 function _ofPhNoticeText(list) {
   const parts = list.map((x) => x.o + "의 " + x.s.map((n) => (n === 2 ? "배송메세지 사진(2장째)" : "구매캡처(1장째)")).join("·"));
   return (_EMBED_CTX ? "새로고침해서 넣은 사진이 지워졌어요. " : "새로고침해서 쓴 내용과 넣은 사진이 지워졌어요. ")
-    + parts.join(" · ") + "를 다시 넣어 주세요.";
+    // 조사는 괄호 앞 낱말에 맞춘다 — 「…사진(2장째)을」 · 「…구매캡처(1장째)를」
+    + parts.join(" · ") + (((list[list.length - 1] || {}).s || []).slice(-1)[0] === 2 ? "을" : "를") + " 다시 넣어 주세요.";
 }
 /** 사진 칸 바로 위 안내(남은 것이 없으면 거둔다). first = 다시 열린 직후 한 번 — 토스트 + 횟수 기록. */
 function _ofPhRenderNotice(first) {
