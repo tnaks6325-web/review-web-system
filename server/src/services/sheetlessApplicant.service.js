@@ -41,6 +41,10 @@ async function addApplicantRow({ sheetId, tabName, applicant, by = 'campaign-app
   if (await require('./bookingSlots.service').isBookingTab(db, sheetId, tabName)) {
     throw new Error('예약리뷰 작업표에는 신청자 줄을 덧붙이지 않습니다 — 날짜별 자리에 묶어야 합니다.');
   }
+  // 영수증리뷰(결정 420)도 같다 — 줄 = 영수증 한 장 자리(신청은 3단계에서 안 쓴 영수증 자리에 바로 묶는다).
+  if (await require('./receiptPool.service').isReceiptPoolTab(db, sheetId, tabName)) {
+    throw new Error('영수증리뷰 작업표에는 신청자 줄을 덧붙이지 않습니다 — 영수증 자리에 묶어야 합니다.');
+  }
 
   const { rows: tc } = await db.query(
     `SELECT tab_gid, campaign_name FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`, [sheetId, tabName]);

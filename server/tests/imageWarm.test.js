@@ -316,6 +316,7 @@ async function pgliteFixture() {
     CREATE TABLE reviewer_event_logs (context JSONB, occurred_at TIMESTAMPTZ);
     CREATE TABLE guide_image_files (file_id TEXT PRIMARY KEY, created_at TIMESTAMPTZ);
     CREATE TABLE payment_result_drive_archive (drive_file_id TEXT);
+    CREATE TABLE receipt_review_files (file_id TEXT PRIMARY KEY);   -- 결정 420 거절 목록(영수증리뷰 비공개 영수증)
   `);
   const d = (n) => `now() - interval '${n} days'`;
   await db.exec(`

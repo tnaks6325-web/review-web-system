@@ -379,6 +379,7 @@ test('D4) 기간 없음(null) SQL 이 PGlite 에서 오래된 사진까지 잡�
       CREATE TABLE reviewer_event_logs (context JSONB, occurred_at TIMESTAMPTZ);
       CREATE TABLE guide_image_files (file_id TEXT PRIMARY KEY, created_at TIMESTAMPTZ);
       CREATE TABLE payment_result_drive_archive (drive_file_id TEXT);
+      CREATE TABLE receipt_review_files (file_id TEXT PRIMARY KEY);   -- 결정 420 거절 목록(영수증리뷰 비공개 영수증)
       INSERT INTO review_submissions (file_id, created_at) VALUES ('${IDS.jpg}', now() - interval '900 days'), ('${IDS.png}', now() - interval '1 day');
       INSERT INTO guide_image_files VALUES ('${IDS.b}', now() - interval '400 days');
     `);
