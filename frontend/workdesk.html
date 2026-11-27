@@ -2939,8 +2939,9 @@ table.wbl-t td.nc .rest.on{position:static;transform:none;opacity:1;margin:0 0 0
 .wbl-facts{margin:9px 0 3px;padding:9px 12px;background:var(--card2);border:1px solid var(--line);border-radius:9px;font-size:11.5px}
 .wbl-ul{margin:8px 0 0 17px;padding:0}
 .wbl-ul li{margin:3px 0;font-size:11.5px;color:var(--muted)}
-.wbl-chk{display:flex;gap:8px;align-items:flex-start;margin-top:12px;padding:10px 12px;background:var(--warn-soft);border:1px solid #f0dcb8;border-radius:9px;font-size:11.5px;font-weight:750;color:var(--ink);cursor:pointer}
-.wbl-chk input{margin-top:2px}
+/* ★ flex 로 두면 라벨 안 글자·굵은 글자·안내가 각각 칸이 돼 세로 기둥으로 쪼개진다(작업 삭제 확인창 실측) — 블록 + 체크 상자만 왼쪽에 띄운다. */
+.wbl-chk{display:block;position:relative;margin-top:12px;padding:10px 12px 10px 34px;background:var(--warn-soft);border:1px solid #f0dcb8;border-radius:9px;font-size:11.5px;font-weight:750;color:var(--ink);cursor:pointer}
+.wbl-chk input{position:absolute;left:12px;top:11px;margin:0}
 .wbl-chk .sub{display:block;font-weight:400;color:var(--warn);margin-top:2px}
 .wbl-df{display:flex;gap:8px;justify-content:flex-end;padding:12px 16px;background:var(--card2);border-top:1px solid var(--line)}
 /* 결정 297·298 — 리뷰 점검(🏁 마감 확인창 · [🔍 리뷰 점검])(시안 docs/design-finish-inspect.html) */
@@ -4831,7 +4832,8 @@ function _mhToolsRender(){
      나중에 게이트가 넓어지면 여기가 자동으로 따라와야 한다(두 곳이 갈리면 "버튼은 있는데
      [⋯] 가 안 뜬다"가 된다). */
 function _mhToolsVisible(){
-  return !!(_ddCan() || _brCanAdd());
+  // ★ [🗑 작업 삭제](admin/master)도 이 메뉴의 도구다 — 홈 [⋯] 와 같은 게이트 _taskDelAllowed(서버 adminOrMaster 와 1:1).
+  return !!(_ddCan() || _brCanAdd() || _taskDelAllowed());
 }
 /* 메뉴 내용 — 조건부 버튼은 여기 한 곳에서만 정한다(렌더와 재렌더가 갈리지 않게). */
 function _mhMenuHtml(){
@@ -4841,7 +4843,9 @@ function _mhMenuHtml(){
   const ddBadge = (dd && dd > 0) ? ` ${dd}` : '';
   /* (master 전용 [Track B로 전환]·[write-back 시뮬]·[그림자 투영] 은 2026-09-28 제거 — 결정 186 5번.) */
   const html = (ddShow ? `<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 대량이체에 담긴 줄은 보류)">♻ 중복 정리${ddBadge}</button>` : '')
-    + (_brCanAdd() ? `<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>` : '');
+    + (_brCanAdd() ? `<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>` : '')
+    /* [🗑 작업 삭제] — 홈 작업목록 [⋯] 와 **같은 확인창·같은 서버 호출**(openTaskDelete · 미리보기 → 체크 → 실행). 맨 아래에 둔다. */
+    + (_taskDelAllowed() ? `<button class="btn mh-del" style="color:var(--bad,#b91c1c)" onclick="openTaskDeleteCurrent()" title="이 작업을 지웁니다 — 먼저 무엇이 지워지는지 보여주고, 확인 체크를 해야 지워집니다(되돌릴 수 없음)">🗑 작업 삭제</button>` : '');
   /* 빈 메뉴 금지 — 중복 0건으로 정리 버튼이 숨으면 [⋯] 를 연 사람에게 빈 상자 대신 사유를 말한다. */
   return html || '<div class="mh-empty" style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap">지금 이 작업에 쓸 도구가 없습니다</div>';
 }
@@ -6063,6 +6067,15 @@ function _tdShell(inner){
   ov.innerHTML=`<div class="wbl-dlg">${inner}</div>`;     // ★ 바깥 클릭으로 닫지 않는다(실수 클릭 보호) — [취소]·Esc 만
   if(!ov.dataset.k){ ov.dataset.k='1'; document.addEventListener('keydown',e=>{ if(e.key==='Escape') _tdClose(); }); }
 }
+/* 작업보드 상단 [⋯] → [🗑 작업 삭제] — 지금 연 작업을 목록 인덱스로 바꿔 홈과 **같은** openTaskDelete 를 탄다(사본 0).
+   ★ STATE.cur 객체 자체가 아니라 같은 좌표(sheetId·tabName)의 목록 항목을 찾는다 — 목록을 다시 읽으면 객체가 바뀐다. */
+function openTaskDeleteCurrent(){
+  const w=document.getElementById('mhTools'); if(w) w.classList.remove('open');
+  const c=STATE.cur; if(!c){ toast('작업을 먼저 여세요'); return; }
+  const i=(STATE.tabs||[]).findIndex(t=>t.sheetId===c.sheetId&&t.tabName===c.tabName);
+  if(i<0){ toast('작업 목록에서 이 작업을 찾지 못했습니다 — 새로고침 후 다시 시도해 주세요'); return; }
+  openTaskDelete(i);
+}
 async function openTaskDelete(i){
   _closeTaskMenu();
   const t=(STATE.tabs||[])[i]; if(!t){ toast('작업을 찾지 못했습니다'); return; }
@@ -6166,6 +6179,11 @@ async function _tdGo(forcePayment){
     return;
   }
   _tdClose();
+  /* ★ 지운 작업이 열린 작업 줄(0단)에 남으면 누를 곳 없는 탭이 된다 → 빼 준다(사용자가 방금 한 조작이라 _wtCommit).
+     ★ 지금 작업보드에서 그 작업을 보고 있었다면 홈으로 보낸다 — 사라진 작업 화면에 머물지 않게. */
+  try{ const k=_favKey(t); if(_wtList().includes(k)) wtClose(null,k); }catch(_){ }
+  const _wasOpen=!!(STATE.cur&&STATE.cur.sheetId===t.sheetId&&STATE.cur.tabName===t.tabName);
+  if(_wasOpen){ STATE.cur=null; switchView('home'); }
   const pay=(j.paymentDeleted||[]).reduce((n,m)=>n+(m.count||0),0);
   /* ★ 드라이브 결과는 **조용히 넘기지 않는다** — 못 지운 폴더가 있으면 그 사실과 사유를 말한다
      (삭제 자체는 성공이라 화면이 말하지 않으면 고아 폴더가 그대로 남는다). */
