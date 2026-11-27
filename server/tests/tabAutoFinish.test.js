@@ -285,6 +285,7 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
       _finUnpaid: () => 0,
       _finDate: v => v || '',
       _folBtnsHtml: () => '', _campBtnHtml: () => '', _taskMoreCell: () => '<td></td>',
+      _homeSetlCellHtml: () => '<td class="wbl-setl"></td>',   // 결정 421: 업체 정산 칸(칸 수만 본다)
       _tabLabel: t => t.tabName, _tabTip: () => '', _mobileToggleTaskRow: () => {},
       isFinishCandidate: () => false,
       esc: v => String(v == null ? '' : v),
@@ -308,7 +309,7 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   // ⚠ `<th` 로 세면 `<thead>` 까지 잡혀 항상 +1 이 된다(이 가드를 쓰다 실제로 밟았다) — 경계 문자를 붙인다.
   const nTh = (htmlRun.match(/<th[\s>]/g) || []).length, nTd = (htmlRun.match(/<td[\s>]/g) || []).length;
   t('진행 중 탭은 헤더 칸 수 ≡ 행 칸 수(승인된 작업별 업체 링크 열 포함)',
-    nTh === nTd && nTh === 14, `th=${nTh} td=${nTd}`);   // 2026-11-06 승인: 기존 13열 + 업체 접속 1열. 안내가 표 밖에 있는 기존 검사는 유지.
+    nTh === nTd && nTh === 15, `th=${nTh} td=${nTd}`);   // 결정 421: + 업체 정산 1열   // 2026-11-06 승인: 기존 13열 + 업체 접속 1열. 안내가 표 밖에 있는 기존 검사는 유지.
 
   console.log(`\n✅ ${pass} 케이스 통과\n`);
   process.exit(0);

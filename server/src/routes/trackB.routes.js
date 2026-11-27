@@ -892,6 +892,17 @@ router.get('/ownership/settlement', authMiddleware, internalMiddleware, async (r
   } catch (err) { next(err); }
 });
 
+// ── 홈 작업목록 「업체 정산」 칸 — 계약이 매칭된 작업 전부의 정산(작업보드 정산 칸과 같은 모양) · 내부 직원 전용. ──
+//   scope=run(진행 중) | fin(마감 보관함) · fresh=1 = 계약 매칭 직후 60초 저장분을 건너뛴다. 읽기 전용.
+router.get('/home/settlement', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const items = await svc.homeSettlementSummary({ role: _role(req), staffName: req.admin && req.admin.name, scope: req.query.scope === 'fin' ? 'fin' : 'run', force: req.query.fresh === '1',
+      // 홈 목록(/tabs?stats=1)과 같은 범위 — 참여자 탭까지 넣는 결정은 /tabs 처럼 경로가 한다(서비스 기본값은 끈 상태).
+      includeParticipantTabs: true });
+    res.json({ ok: true, items });
+  } catch (err) { next(err); }
+});
+
 // ── 업체용 뷰어 "내 작업 목록"(화면 A) — 광고주 본인 소유 탭 요약 배치. ──
 //   ★ advertiserId 는 쿼리가 아니라 토큰(req.admin.advertiser_id)에서만 — 남의 업체 요약 도달 불가(IDOR 차단).
 //   ★ 광고주 렌즈는 서비스(advertiserWorkSummary)가 강제 — 내부 필드(비고·담당·salesId)는 응답에 아예 없음.
