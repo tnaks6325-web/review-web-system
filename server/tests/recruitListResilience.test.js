@@ -94,7 +94,7 @@ function makePage(fetchImpl) {
     fetch: (url, init) => { calls.push(String(url)); return ctx.__fetch(String(url), init || {}); },
     __fetch: fetchImpl,
     CampCards: {
-      seedThumbs() {}, setServerNow() {},
+      seedThumbs() {}, setServerNow(v) { (ctx.__clock = ctx.__clock || []).push(v); },
       sortByAvailability: (l) => (l || []).slice(), qnaFirst: (l) => (l || []).slice(),
       cardHtml: (c) => `<article class="pcard" data-camp-id="${c.id}"></article>`,
       startTicker: (cb) => { if (cb) ticker.cb = cb; },
@@ -281,6 +281,17 @@ test('M4 늦게 온 옛 응답은 새 응답을 덮지 않는다', async () => {
   d2.resolve(okRes([P('p9')])); await flush();
   d1.resolve(okRes(DATA)); await flush();
   assert.deepStrictEqual(pg.ids(), ['p9']);
+});
+
+test('P2 서버 시계는 새로 받은 응답일 때만 맞춘다(탭 전환으로 받아 둔 응답의 serverNow 로 시계를 되감지 않음)', async () => {
+  const pg = makePage(null);
+  await loadOk(pg);
+  assert.deepStrictEqual(pg.ctx.__clock, ['2026-11-27T03:00:00.000Z'], '첫 응답에서 한 번 맞춰야 함');
+  pg.run("setRecruitKind('blog')"); pg.run("setRecruitKind('qna')"); pg.run("setRecruitKind('review')"); await flush();
+  assert.strictEqual(pg.ctx.__clock.length, 1, '탭 전환이 옛 serverNow 로 시계를 다시 맞춤(시계가 뒤로 감) :: ' + pg.ctx.__clock.length);
+  pg.ctx.__fetch = async () => ({ ok: true, status: 200, json: async () => ({ ok: true, data: DATA, serverNow: '2026-11-27T03:05:00.000Z' }) });
+  pg.run('loadCampaigns()'); await flush();
+  assert.deepStrictEqual(pg.ctx.__clock, ['2026-11-27T03:00:00.000Z', '2026-11-27T03:05:00.000Z'], '새 응답에서는 다시 맞춰야 함');
 });
 
 test('M5 카운트다운 0 재조회는 목록을 먼저 비우지 않고 받은 뒤 한 번에 바꾼다', async () => {

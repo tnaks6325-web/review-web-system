@@ -515,6 +515,9 @@ async function loadCampaigns() {
   _rcBusy = false;
   _rcLastJson = json;
   if (window.CampCards && CampCards.seedThumbs) CampCards.seedThumbs(json);   // 결정 354 — 썸네일 빠른 길 서명
+  // 서버 시계는 **새로 받은 응답에서만** 맞춘다 — 탭 전환은 받아 둔 응답으로 다시 그리므로, 거기서 맞추면
+  // 그 응답의 옛 serverNow 로 시계가 흐른 시간만큼 뒤로 감겨 카운트다운이 늘어난다(결정 430 · PR #1893 리뷰).
+  if (window.CampCards && CampCards.setServerNow) CampCards.setServerNow(json && json.serverNow);
   _rcRender(json);
 }
 
@@ -536,7 +539,6 @@ function _rcRender(json) {
     const frag = document.createDocumentFragment();
     const showParts = parts.length && window.CampCards;
     if (showParts) {
-      CampCards.setServerNow(json.serverNow);
       const pwrap = document.createElement("div");
       pwrap.className = "pcards-grid";
       pwrap.innerHTML = parts.map(c => CampCards.cardHtml(c)).join("");
