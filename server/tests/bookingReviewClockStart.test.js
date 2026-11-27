@@ -220,30 +220,32 @@ async function addRow(q, key, { tab, row, subDays, visitDays = undefined, slotSt
     .map(x => [x.row.orderSubmissionId, x.reason, x.reminderNo, x.eligibleAt && x.eligibleAt.toISOString(), x.deadline && x.deadline.toISOString()].join('|'));
   t('★ 비예약 발송 판정(사유·회차·발송 가능 시각·제출기한) = 종전 줄 모양(시작일 칸 없음)과 같다', JSON.stringify(pv(oldRows)) === JSON.stringify(pv(newRows)));
 
-  console.log('\n[2] 예약 줄 = 이용일부터 7·13·14일');
+  console.log('\n[2] 예약 줄 = 이용일부터(방문 전 안 보냄 · 이용일 모름 안 보냄) — 발송 날짜는 결정 426(리뷰 마감일 당일 한 번)');
+  // ★ 결정 426(사용자 확정 2026-11-25 ③)로 예약 줄 알림톡은 「이용일 + 7·13·14일」이 아니라 「리뷰 마감일(자리표 · 이 시험 = 이용일 + 3) 당일 한 번」.
+  //   여기서는 423 의 이용일 판정(방문 전 · 이용일 모름 · 제출 시각으로 안 되돌아감)만 지키고, 발송 날짜·회차는 bookingReminderDeadlineDay.test.js 가 지킨다.
   const bk = newRows.filter(isBooking).map(keyOf).sort();
   t('★ 방문 전(b2 5일 뒤 · b8 2일 뒤) 줄은 고르지 않는다', !bk.includes('b2') && !bk.includes('b8'), bk);
-  t('★ b1(예약내역 20일 전 · 방문 8일 전)은 이용일 기준이라 읽힌다', bk.includes('b1'), bk);
-  t('b5(방문 35일 전)는 알림 기간(이용일+14일)을 지나 읽지 않는다', !bk.includes('b5'), bk);
+  t('★ (결정 426) b1(방문 8일 전 · 마감 5일 전 지남)은 자동 발송 때 읽지 않는다(마감일이 어제·오늘인 줄만)', !bk.includes('b1'), bk);
+  t('b5(방문 35일 전)는 읽지 않는다', !bk.includes('b5'), bk);
   const dry = await svc.run({ dryRun: true, now, limit: 500 });
   const dueKeys = dry.items.filter(isBooking).map(keyOf).sort();
-  t('★ 예약 발송 대상 = b1·b3·b7(이용일 + 7일 지난 줄)만', JSON.stringify(dueKeys) === JSON.stringify(['b1', 'b3', 'b7']), { dueKeys, skipped: dry.skipped });
-  const b1Item = dry.items.find(x => keyOf(x) === 'b1');
-  t('b1 = 1차 · 제출기한 = 이용일 + 14일', !!b1Item && b1Item.reminderNo === 1 && b1Item.deadline === kstYmd(NOW - 8 * DAY + 14 * DAY).replace(/-/g, '.'), b1Item);
+  t('★ (결정 426) 예약 자동 대상 = 없음(오늘 마감인 줄이 없다 — 이용일 + 7·13·14일로 보내지 않는다)', dueKeys.length === 0, { dueKeys, skipped: dry.skipped });
   t('★ 이용일 모름(b4 자리 없음 · b9 취소된 자리) = 보내지 않음 · 사유 visit_date_unknown',
     dry.skipped.visit_date_unknown === 2 && !dry.items.some(x => ['b4', 'b9'].includes(keyOf(x))), dry.skipped);
   t('★ 이용일 모름은 로그를 남긴다', warns.some(w => /이용일/.test(w) && /visit_date_unknown|안 보냄|보내지 않/.test(w)), warns);
-  t('b11(오늘 방문)은 아직 1차 전(not_due)', !dry.items.some(x => keyOf(x) === 'b11'));
+  t('b11(오늘 방문)은 아직 안 보낸다', !dry.items.some(x => keyOf(x) === 'b11'));
 
-  // 시계 앞뒤 — 이용일 + 7일 KST 0시 직전/정각
-  const b1Row = newRows.find(x => keyOf(x) === 'b1');
+  // 시계 앞뒤 — 이용일 판정(423)과 마감일 당일(426)
+  const b1Row = (await svc.loadCandidates(10, config, { sheetId: 'S', tabName: '예약탭', rowIndexes: [101] }))[0];
   const visitMid = new Date(kstYmd(NOW - 8 * DAY) + 'T00:00:00+09:00').getTime();
-  t('b1 줄을 읽었다(시계 앞뒤 시험 재료)', !!b1Row);
+  t('b1 줄을 읽었다(시계 앞뒤 시험 재료 · 담당자 지목 읽기)', !!b1Row);
   const at = ms => (b1Row ? reminder._summarizePreview([b1Row], new Date(ms), config)[0] : {});
-  t('이용일 + 7일 0시(KST) 1ms 전 = not_due', at(visitMid + 7 * DAY - 1).reason === 'not_due');
-  t('이용일 + 7일 0시(KST) 정각 = 1차 가능', at(visitMid + 7 * DAY).reason === null && at(visitMid + 7 * DAY).reminderNo === 1);
-  t('이용일 + 13일 = 2차(1차 뒤)', !!b1Row && reminder._summarizePreview([{ ...b1Row, reminderCount: 1, lastRemindedAt: new Date(visitMid + 7 * DAY + 3600000) }], new Date(visitMid + 13 * DAY + 3600000), config)[0].reason === null);
-  t('이용일 + 15일 = 알림 기간 지남', at(visitMid + 15 * DAY + 3600000).reason === 'schedule_passed');
+  t('(결정 426) 이용일 + 3일(= 리뷰마감일) 0시 1ms 전 = 아직', at(visitMid + 3 * DAY - 1).reason === 'booking_before_deadline_day');
+  t('(결정 426) 이용일 + 3일(= 리뷰마감일) 0시 정각 = 1차 · 제출기한 = 마감일', at(visitMid + 3 * DAY).reason === null && at(visitMid + 3 * DAY).reminderNo === 1
+    && reminder.formatKstDate(at(visitMid + 3 * DAY).deadline) === kstYmd(NOW - 5 * DAY).replace(/-/g, '.'));
+  t('(결정 426) 이용일 + 7일(종전 1차 날) = 자동 안 보냄(마감일 지남)', at(visitMid + 7 * DAY).reason === 'booking_deadline_day_passed');
+  t('(결정 426) 1차 뒤 이용일 + 13일 = 다시 안 보냄(2차 없음)', !!b1Row && reminder._summarizePreview([{ ...b1Row, reminderCount: 1, lastRemindedAt: new Date(visitMid + 3 * DAY + 3600000) }], new Date(visitMid + 13 * DAY + 3600000), config)[0].reason === 'booking_reminder_delivered');
+  t('이용일 + 15일 = 알림 기간 지남(마감일 + 7일 뒤)', at(visitMid + 15 * DAY + 3600000).reason === 'booking_schedule_passed');
   t('이용일 전(시계를 방문 전날로) = visit_not_yet', at(visitMid - 3600000).reason === 'visit_not_yet');
   t('★ 예약 줄인데 시작일이 비면(조회 실패 모양) 제출 시각으로 되돌아가지 않는다',
     !!b1Row && reminder._summarizePreview([{ ...b1Row, clockStartAt: null }], new Date(visitMid + 8 * DAY), config)[0].reason === 'visit_date_unknown');

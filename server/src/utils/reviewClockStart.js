@@ -6,6 +6,8 @@
  *   · 리뷰 미작성 알림톡 1·2·3차 = 시작일 + 7·13·14일(결정 194 · reviewReminder.service 후보 SQL + 발송 창)
  *   · 블랙리뷰어 「기한경과」(14일↑) · 「리뷰미작성」(30일↑) 집계(결정 050 · reviewerGate._reviewHistory)
  *   · 등록리뷰어DB 필터 「🚨 후보」·「기한경과만」(trackB.routes GET /reviewers)
+ *   ★ 결정 426 — 알림톡을 「언제·몇 번·어떤 기한으로」 보내는지(종류별 알림 방식)는 형제 모듈 `utils/reviewReminderPlan`.
+ *     네이버예약리뷰 알림톡은 7·13·14일이 아니라 리뷰 마감일 당일 한 번이다(이 모듈의 이용일은 「방문 전엔 안 보냄」 판정에만 쓴다).
  *
  * 종류별 시작일:
  *   · 기본(리뷰·블로그·Q&A·영수증) = 구매양식/제출 시각(order_submissions.submitted_at) — **종전 그대로**.
@@ -87,6 +89,7 @@ function clockStartOfRow(row) {
 
 module.exports = {
   DEFAULT_BASIS, CLOCK_START_BY_KIND,
+  KIND_ROW_SQL,   // 결정 426 — 알림 방식(utils/reviewReminderPlan)도 같은 종류 판정 SQL 을 쓴다(사본 0)
   clockStartBasis, clockStartLateralSql, clockStartOfRow,
   bookingTabSql,
 };
