@@ -185,8 +185,11 @@ function mkDb({ options = [], paused = false, reports = 0, alerts = [], particip
     ok('리뷰어 상세: 참여 버튼 = 품절로 잠시 멈춤 · 거절 문구 · 거절 뒤에도 표시 유지', /c\.soldoutPaused === true\)\{ jb\.disabled = true; jb\.textContent = '품절로 잠시 멈춤'/.test(camp) && /campaign_paused:'/.test(camp)
       && /finally\{[^\n]*\n\s+if\(c && c\.state==='open' && c\.soldoutPaused === true\)/.test(camp));
     const cc = RF('frontend/js/campaign-cards.js');
-    ok('카드: 멈춤 표시 · 참여 버튼 끔 · 참여 가능 공고보다 뒤로', /function _soldoutPaused\(c\)/.test(cc) && /c\.state === 'open' && _soldoutPaused\(c\)\) \{/.test(cc)
-      && /c\.state === 'open' && _soldoutPaused\(c\)\) \? 2/.test(cc));
+    /* ★ 결정 432: 카드 판정이 reviewerNow 한 함수로 모였다 — 패턴만 그 함수를 따라간다(검사 의미 불변: 멈춤이면 버튼 끔 · 정렬 등급 2). */
+    ok('카드: 멈춤 표시 · 참여 버튼 끔 · 참여 가능 공고보다 뒤로', /function _soldoutPaused\(c\)/.test(cc)
+      && /if \(st !== 'open'\) return st;[\s\S]{0,80}if \(_soldoutPaused\(c\)\) return 'paused';/.test(cc)
+      && /if \(now === 'paused'\) \{\s*\/\/[^\n]*\n\s*footer = `<button type="button" class="pbtn off">품절로 잠시 멈춤<\/button>/.test(cc)
+      && /_AVAIL_RANK = \{[^}]*paused: 2/.test(cc) && /const k = reviewerNow\(c\);/.test(cc));
   }
 
   console.log(`\n${n - failed}/${n} 통과`);

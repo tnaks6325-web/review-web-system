@@ -88,9 +88,13 @@ console.log('\n[B] 목록에서 내린다');
 console.log('\n[C] 보관된 공고는 참여를 받지 않는다');
 {
   const apply = routeBody(routes, "router.post('/:id/apply'");
-  ok("★ apply 게이트에 archived 차단", /if \(camp\.archived_at\)[\s\S]{0,200}reason: 'archived'/.test(apply));
+  // ★ 결정 432: 판정이 상태 서비스의 isArchivedCampaign(= archived_at 유무) 하나로 모였다 — 공고 화면(공개 상세)도 같은 함수(검사 의미 불변)
+  ok("★ apply 게이트에 archived 차단", /if \(isArchivedCampaign\(camp\)\)[\s\S]{0,200}reason: 'archived'/.test(apply));
+  const { isArchivedCampaign } = require('../src/services/campaignState.service');
+  ok('★ 그 판정 = archived_at 유무(보관 시각이 있으면 보관)', isArchivedCampaign({ archived_at: '2026-08-19T00:00:00Z' }) === true
+    && isArchivedCampaign({ archived_at: null }) === false && isArchivedCampaign(null) === false);
   // 참여형 분기(_applyParticipation)보다 **앞**이어야 두 경로가 함께 막힌다
-  const iArc = apply.indexOf('camp.archived_at');
+  const iArc = apply.indexOf('isArchivedCampaign(camp)');
   const iPart = apply.indexOf('_applyParticipation');
   ok('★ 레거시·참여형 분기보다 앞 — 한 곳에서 두 경로를 막는다', iArc > -1 && iPart > -1 && iArc < iPart,
     { iArc, iPart });

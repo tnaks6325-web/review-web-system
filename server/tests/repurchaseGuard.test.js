@@ -342,7 +342,8 @@ const eq = (name, got, want) => ok(`${name} → ${JSON.stringify(got)}`, JSON.st
   ok('c.repurchase 가 없으면 빈 문자열(=평소 카드, 조용히 무동작)', cc.includes(`let repurchaseSash = '';`));
   ok('썸네일 마크업에 삽입됨', cc.includes('${topleft}${repurchaseSash}${editChip}${moChip}'));
   ok('★ 잠긴 상태에서 [참여하기] 버튼도 함께 막는다(카드는 열려 보이는데 실제 참여만 막히는 상태 방지)',
-    cc.includes(`if (c.state === 'open' && repurchaseLocked)`));
+    // ★ 결정 432: 판정이 reviewerNow 로 모였다 — 열린 공고 + 모든 명의 잠금 = 'repurchase_wait' → 버튼 「재참여 대기 중」(검사 의미 불변)
+    cc.includes(`if (_repurchaseLocked(c)) return 'repurchase_wait';`) && cc.includes(`} else if (now === 'repurchase_wait') {`));
   const idx = readF('index.html');
   const detailPage = readF('campaign.html');
   ok('★ 미확인 타명의는 참여 가능으로 단정하지 않고 신청 시 서버 확인을 안내',
