@@ -227,7 +227,9 @@ test('H2-5 등록 때 넣은 소득신고 정보 저장이 끝난 뒤 떠난다(
 });
 
 test('H2-6 등록 화면 스크립트는 새 판(?v=)으로 싣는다', () => {
-  assert.match(SEARCH_HTML, /js\/search-app\.js\?v=20261125-login-deadend/);
+  // 결정 425 에서 패턴만 갱신(뜻 그대로) — 결정 417 판(20261125) 이후로 올렸는가
+  const ver = /js\/search-app\.js\?v=(\d{8})-[\w-]+/.exec(SEARCH_HTML);
+  assert.ok(ver && ver[1] >= '20261125', `search-app.js ?v= 가 결정 417 이후 판 — 실제: ${ver && ver[0]}`);
 });
 
 /* ═════════════ H2 보강 — 홈이 공용 세션을 옮겨 적기 ═════════════ */

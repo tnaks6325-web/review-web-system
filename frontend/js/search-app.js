@@ -101,7 +101,9 @@ async function _loadOrderIdentityContext() {
     const identity = data.selectedIdentity || {};
     (_orderCardIds || []).forEach((cid) => {
       const idEl = document.getElementById(cid + "_userId");
-      if (idEl && !idEl.value) idEl.value = identity.shoppingId || "";
+      // ★ 결정 425 (가) — 저장된 아이디는 빈 칸만 채운다. 새로고침 전에 리뷰어가 친 값(초안)이 있으면 그 값이 이긴다
+      //   (종전: 이 응답이 초안 복원(300ms 뒤)보다 먼저 오면 저장된 아이디가 먼저 들어가 「빈 칸만 채우는」 복원이 건너뛰었다).
+      if (idEl && !idEl.value) idEl.value = (typeof _embedDraftValue === "function" ? _embedDraftValue(idEl.id) : "") || identity.shoppingId || "";
       if (idEl) idEl.dataset.savedValue = identity.shoppingId || "";
       const who = document.getElementById(cid + "_identityWho");
       if (who) {
@@ -1076,7 +1078,10 @@ function _embedSaveForm() {
       if (!el.id) return;
       fields[el.id] = (el.type === "checkbox" || el.type === "radio") ? (el.checked ? "1" : "") : (el.value || "");
     });
-    sessionStorage.setItem(_EMBED_FORM_ID_KEY, JSON.stringify({ layout: _EMBED_FORM_LAYOUT, fields }));
+    const draft = { layout: _EMBED_FORM_LAYOUT, fields };
+    // ★ 결정 425 — 사진은 담지 않는다. 「몇 번째 주문의 몇 장째에 사진이 있었다」만(다시 열 때 안내용) · 없으면 칸 자체를 두지 않는다.
+    try { const ph = typeof _ofPhMarkList === "function" ? _ofPhMarkList() : []; if (ph.length) { draft.photos = ph; draft.photosAt = Date.now(); } } catch (_) {}
+    sessionStorage.setItem(_EMBED_FORM_ID_KEY, JSON.stringify(draft));
     sessionStorage.removeItem(_EMBED_FORM_KEY);   // 옛 위치 초안은 새 초안이 생기는 순간 필요 없다
   } catch (_) { /* noop */ }
 }
@@ -1114,6 +1119,211 @@ function _embedRestoreForm() {
     });
     _embedSaveForm();   // 옮긴 값은 바로 아이디 초안으로 남긴다
   } catch (_) { /* noop */ }
+}
+/** ★ 결정 425 (가) — 초안에 적힌 그 칸의 값(없으면 ""). 명의의 저장된 기본값(쇼핑몰 아이디)이 리뷰어가 친 값을 덮지 않게
+ *   `_loadOrderIdentityContext` 가 빈 칸을 채우기 전에 먼저 본다. 복원(_embedRestoreForm)과 같은 조건에서만 읽는다. */
+function _embedDraftValue(id) {
+  if (!id || !_EMBED_CTX || !_EMBED_FORM_ID_KEY) return "";
+  if (new URLSearchParams(location.search).get('dual')==='1' || _BATCH) return "";
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(_EMBED_FORM_ID_KEY) || "null");
+    const v = saved && saved.fields && typeof saved.fields === "object" ? saved.fields[id] : "";
+    return typeof v === "string" ? v : "";
+  } catch (_) { return ""; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ★ 결정 425 — 구매양식: 넣은 사진은 새로고침을 넘지 못한다(C안 — 사진은 휴대폰에도 서버에도 따로 보관하지 않는다)
+   ────────────────────────────────────────────────────────────
+   - 사진이 들어 있는 동안만 떠나기 전 브라우저 확인(beforeunload). 직접 링크 = 이 화면이 · 공고 틀 안 = 부모(공고 화면)가 묻는다
+     (틀 안에서 걸면 옵션·개수를 바꿀 때·만료로 틀을 비울 때도 물어 막다른 길이 된다 — campaign.html `_framePhotosSync`).
+   - 다시 열렸을 때 사진이 있었으면 「새로고침해서 넣은 사진이 지워졌어요. 1번째 주문의 구매캡처(1장째)를 다시 넣어 주세요.」를
+     사진 칸 바로 위(+ 토스트 한 번)에. 다시 넣으면 그 칸은 문구에서 빠지고, 다 넣거나 제출하면 사라진다.
+   - 표시: 공고 틀 = 기존 초안(embedForm_<app>:id)의 photos 칸 · 직접 링크 = orderFormPhotos_<시트>:<탭> (같은 탭 sessionStorage).
+     담는 것은 「몇 번째 주문의 몇 장째」뿐 — 사진·이름·번호는 담지 않는다. 직접 링크는 이 표시만 둔다(입력값 초안은 만들지 않는다).
+   - 안내를 띄울 때 횟수 기록 한 번(POST /api/reviewer/ui-event · 개인정보 0 · 기다리지 않고 실패는 삼킨다).
+   - 모두 예외를 안에서 삼킨다 — 표시·기록이 막혀도 첨부·제출은 종전 그대로(fail-open). 상태는 window._ofPh (맨 위 const/let 0).
+   ══════════════════════════════════════════════════════════════ */
+function _ofPhState() {
+  const w = typeof window !== "undefined" ? window : null;
+  if (!w) return { pending: [], done: false };
+  return w._ofPh || (w._ofPh = { pending: [], done: false, noticed: false });
+}
+/** 직접 링크 표시 칸 이름 — 그 양식(시트·탭)별. 공고 틀·관리자 미리보기는 "" (틀은 기존 초안을 쓴다). */
+function _ofPhDirectKey() {
+  if (_EMBED_CTX) return "";
+  const c = (typeof window !== "undefined" && window._orderFormCtx) || {};
+  if (!c.sheetId) return "";
+  return "orderFormPhotos_" + c.sheetId + ":" + (c.tabName || "") + (c.ncMode ? ":nc" : "");
+}
+function _ofPhCardLabel(cid) {
+  try {
+    const el = document.getElementById(cid);
+    const b = el && el.querySelector ? el.querySelector(".ofc-badge-num") : null;
+    const s = String((b && b.textContent) || "").replace(/^[^0-9A-Za-z가-힣]+/, "").trim();
+    if (/^[0-9A-Za-z가-힣 ]{1,24}$/.test(s)) return s;
+  } catch (_) {}
+  const i = (_orderCardIds || []).indexOf(cid);
+  return (i >= 0 ? i + 1 : 1) + "번째 주문";
+}
+/** 지금 화면에 들어 있는 사진 — [{ c: 카드, o: "1번째 주문", s: [1, 2] }] (1 = 구매캡처 1장째 · 2 = 배송메세지 사진 2장째) */
+function _ofPhNow() {
+  const out = [];
+  (_orderCardIds || []).forEach((cid) => {
+    const st = (_cardAiState || {})[cid] || {};
+    const th = document.getElementById(cid + "_imgThumb");
+    const src = th ? String((typeof th.getAttribute === "function" ? th.getAttribute("src") : th.src) || "") : "";
+    const s = [];
+    if (st.lastBase64 || src.startsWith("data:")) s.push(1);
+    if (st.img2 && st.img2.dataUrl) s.push(2);
+    if (s.length) out.push({ c: cid, o: _ofPhCardLabel(cid), s });
+  });
+  return out;
+}
+/** 표시 칸에 남길 목록 = 지금 들어 있는 사진 + 지난번에 지워져 아직 다시 넣지 않은 사진. */
+function _ofPhMarkList() {
+  const now = _ofPhNow();
+  const out = now.map((x) => ({ c: x.c, o: x.o, s: x.s.slice() }));
+  (_ofPhState().pending || []).forEach((p) => {
+    const cur = out.find((x) => x.c === p.c);
+    if (!cur) { out.push({ c: p.c, o: p.o, s: p.s.slice() }); return; }
+    p.s.forEach((n) => { if (!cur.s.includes(n)) cur.s.push(n); });
+    cur.s.sort();
+  });
+  return out;
+}
+function _ofPhClean(list) {
+  if (!Array.isArray(list)) return [];
+  return list.slice(0, 10).map((x) => {
+    const c = String((x && x.c) || "");
+    const o = String((x && x.o) || "");
+    const s = (Array.isArray(x && x.s) ? x.s : []).map(Number).filter((n, i, a) => (n === 1 || n === 2) && a.indexOf(n) === i).sort();
+    return (/^[\w-]{1,24}$/.test(c) && /^[0-9A-Za-z가-힣 ]{1,24}$/.test(o) && s.length) ? { c, o, s } : null;
+  }).filter(Boolean);
+}
+/** 지난번 표시 읽기 — 3시간 넘었거나 깨졌으면 없음. */
+function _ofPhReadMark() {
+  try {
+    let rec = null;
+    if (_EMBED_CTX) {
+      if (!_EMBED_FORM_ID_KEY) return [];
+      const d = JSON.parse(sessionStorage.getItem(_EMBED_FORM_ID_KEY) || "null");
+      rec = d ? { at: d.photosAt, photos: d.photos } : null;
+    } else {
+      const k = _ofPhDirectKey(); if (!k) return [];
+      rec = JSON.parse(sessionStorage.getItem(k) || "null");
+    }
+    if (!rec || !Array.isArray(rec.photos)) return [];
+    const age = Date.now() - Number(rec.at || 0);
+    if (!(age >= 0 && age < 3 * 60 * 60 * 1000)) return [];
+    return _ofPhClean(rec.photos);
+  } catch (_) { return []; }
+}
+function _ofPhSave() {
+  try {
+    if (_EMBED_CTX) { _embedSaveForm(); return; }   // 공고 틀 = 기존 초안에 함께(_embedSaveForm 이 photos 칸을 붙인다)
+    const k = _ofPhDirectKey(); if (!k) return;
+    const list = _ofPhMarkList();
+    if (list.length) sessionStorage.setItem(k, JSON.stringify({ v: 1, at: Date.now(), photos: list }));
+    else sessionStorage.removeItem(k);
+  } catch (_) {}
+}
+function _ofPhNoticeText(list) {
+  const parts = list.map((x) => x.o + "의 " + x.s.map((n) => (n === 2 ? "배송메세지 사진(2장째)" : "구매캡처(1장째)")).join("·"));
+  return (_EMBED_CTX ? "새로고침해서 넣은 사진이 지워졌어요. " : "새로고침해서 쓴 내용과 넣은 사진이 지워졌어요. ")
+    + parts.join(" · ") + "를 다시 넣어 주세요.";
+}
+/** 사진 칸 바로 위 안내(남은 것이 없으면 거둔다). first = 다시 열린 직후 한 번 — 토스트 + 횟수 기록. */
+function _ofPhRenderNotice(first) {
+  try {
+    const st = _ofPhState();
+    let box = document.getElementById("ofPhotoReattachNotice");
+    const list = st.done ? [] : (st.pending || []);
+    if (!list.length) { if (box && box.parentNode) box.parentNode.removeChild(box); return; }
+    const at = list.map((p) => document.getElementById(p.c + "_imgZone")).find(Boolean) || document.getElementById("ofOrderCardsWrap");
+    if (!at || !at.parentNode) return;
+    if (!box) {
+      box = document.createElement("div");
+      box.id = "ofPhotoReattachNotice";
+      box.setAttribute("role", "status");
+      box.style.cssText = "margin:0 0 8px;padding:10px 12px;border:1.5px solid #FCD34D;border-radius:10px;background:#FFFBEB;color:#92400E;font-size:.8rem;line-height:1.55;font-weight:600;text-align:left";
+    }
+    if (box.parentNode !== at.parentNode || box.nextSibling !== at) at.parentNode.insertBefore(box, at);
+    const text = _ofPhNoticeText(list);
+    box.textContent = text;
+    if (first && !st.noticed) {
+      st.noticed = true;
+      showToast(text, "warning", 6000);
+      _ofPhCount(list);
+    }
+  } catch (_) {}
+}
+/** 횟수 기록 — 안내가 뜬 사실과 사진 칸 수만(이름·번호·사진·주문번호 없음). 기다리지 않는다 · 옛 서버(404)·끊김은 조용히. */
+function _ofPhCount(list) {
+  try {
+    if (typeof fetch !== "function" || typeof API_BASE_URL === "undefined" || !API_BASE_URL) return;
+    const slots = list.reduce((n, x) => n + x.s.length, 0);
+    const p = fetch(API_BASE_URL + "/api/reviewer/ui-event", {
+      method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event: "photo_reattach_notice", screen: _EMBED_CTX ? "campaign" : "direct", slots }),
+    });
+    if (p && typeof p.catch === "function") p.catch(() => {});
+  } catch (_) {}
+}
+function _ofPhOnBeforeUnload(e) {
+  const st = _ofPhState();
+  if (st.done || !_ofPhNow().length) return;
+  try { e.preventDefault(); e.returnValue = ""; } catch (_) {}
+  return "";
+}
+/** 떠나기 전 확인 켜기/끄기 — 공고 틀 안이면 부모에게 「사진이 바뀌었다」만 알린다(부모가 _ofHasUnsentPhotos 로 다시 센다). */
+function _ofPhArm(on) {
+  try {
+    const w = typeof window !== "undefined" ? window : null;
+    if (!w || typeof w.addEventListener !== "function") return;
+    if (_EMBED_CTX && w.parent !== w) { _embedPost({ type: "embed-photos", n: on ? 1 : 0 }); return; }
+    if (on && !w._ofPhUnloadOn) { w.addEventListener("beforeunload", _ofPhOnBeforeUnload); w._ofPhUnloadOn = true; }
+    if (!on && w._ofPhUnloadOn) { w.removeEventListener("beforeunload", _ofPhOnBeforeUnload); w._ofPhUnloadOn = false; }
+  } catch (_) {}
+}
+/** 사진을 넣거나 뺄 때마다(첫 장·2장째·주문 카드 삭제). removedCid = 지운 카드(그 카드의 「다시 넣어 주세요」도 거둔다). */
+function _ofPhChanged(removedCid) {
+  try {
+    if (_PREVIEW_MODE) return;
+    const st = _ofPhState();
+    if (st.done) return;
+    const now = _ofPhNow();
+    st.pending = (st.pending || []).filter((p) => p.c !== removedCid).map((p) => {
+      const cur = now.find((x) => x.c === p.c);
+      return cur ? { c: p.c, o: p.o, s: p.s.filter((n) => !cur.s.includes(n)) } : p;
+    }).filter((p) => p.s.length);
+    _ofPhSave();
+    _ofPhArm(now.length > 0);
+    _ofPhRenderNotice(false);
+  } catch (_) {}
+}
+/** 구매양식을 연 직후(카드를 그린 뒤) — 지난번 표시가 있으면 안내 · 부모가 셀 수 있게 창구를 둔다. */
+function _ofPhStart() {
+  try {
+    if (_PREVIEW_MODE) return;
+    const w = typeof window !== "undefined" ? window : null; if (!w) return;
+    const st = _ofPhState();
+    st.done = false; st.noticed = false;
+    st.pending = _ofPhReadMark();
+    w._ofHasUnsentPhotos = () => { try { return !_ofPhState().done && _ofPhNow().length > 0; } catch (_) { return false; } };
+    _ofPhArm(false);
+    _ofPhRenderNotice(true);
+  } catch (_) {}
+}
+/** 제출이 서버에 들어갔다(완료 화면) — 확인·안내·표시를 모두 거둔다. */
+function _ofPhSubmitted() {
+  try {
+    const st = _ofPhState();
+    st.done = true; st.pending = [];
+    _ofPhArm(false);
+    _ofPhRenderNotice(false);
+    const k = _ofPhDirectKey(); if (k) sessionStorage.removeItem(k);
+  } catch (_) {}
 }
 /** ★ 061 참여형 옵션 잠금: embed에 optionKey가 오면 시트 옵션 피커 대신 "참여한 옵션" 잠금표시.
  *   서버가 제출 시 홀드의 option_key로 최종 override하므로 화면값은 표시용(조작 무의미). */
@@ -5897,6 +6107,9 @@ function initOrderFormMode() {
     _precheckProfileGateOnEntry(window._slotAuth || {});
   }
 
+  // ★ 결정 425 — 새로고침 전에 사진이 있었으면 어느 사진을 다시 넣을지 사진 칸 위에 알린다(카드를 그린 뒤 · 초안 저장보다 먼저 읽는다)
+  if (typeof _ofPhStart === "function") _ofPhStart();
+
   return true;
 }
 
@@ -8668,6 +8881,7 @@ function removeOrderCard(cid) {
   const el = document.getElementById(cid);
   if (el) el.remove();
   _updateCardCountBadge();
+  if (typeof _ofPhChanged === "function") _ofPhChanged(cid);   // ★ 결정 425 — 지운 카드의 사진·「다시 넣어 주세요」도 거둔다
 }
 
 /** ── 공유 토글 (주문자/은행/예금주 동일 사용) ── */
@@ -8830,6 +9044,7 @@ function removeCardImg(cid) {
   // oninput 핸들러 복원 (price)
   const priceEl = document.getElementById(cid+"_price");
   if (priceEl) priceEl.setAttribute("oninput", `formatPriceInput(this);this.classList.remove('ai-filled');this.dataset.userEdited='1';_ofClearError('${cid}_price')`);
+  if (typeof _ofPhChanged === "function") _ofPhChanged();   // ★ 결정 425
 }
 
 /* ══ 결정 288: 구매캡처 2장째(선택) ═══════════════════════════════════════════
@@ -8854,6 +9069,7 @@ function _setCardImg2(file, cid, opts = {}) {
     const th = document.getElementById(cid + "_img2Thumb"); if (th) th.src = dataUrl;
     const pv = document.getElementById(cid + "_img2Preview"); if (pv) pv.style.display = "flex";
     const bx = document.getElementById(cid + "_img2Box"); if (bx) bx.style.display = "";
+    if (typeof _ofPhChanged === "function") _ofPhChanged();   // ★ 결정 425
     if (opts.deferAi) { const lb = document.getElementById(cid + "_img2Label"); if (lb) lb.textContent = "2장째 · 첫 장 확인 뒤 읽습니다"; }
     else _callCardExtractAi2(cid);
   };
@@ -8868,6 +9084,7 @@ function removeCardImg2(cid) {
   const bx = document.getElementById(cid + "_img2Box"); if (bx) bx.style.display = "none";
   const lb = document.getElementById(cid + "_img2Label"); if (lb) lb.textContent = "2장째 첨부됨";
   if (st && st.rdmNeedImg2) _rdmNeedImg2(cid);
+  if (typeof _ofPhChanged === "function") _ofPhChanged();   // ★ 결정 425 — 사진을 뺐다(남은 사진이 없으면 떠나기 전 확인을 끈다)
 }
 
 /* ★ 결정 300 — 필수 배송메세지가 확인되지 않아 막힌 주문 칸에만 「배송메세지 사진 추가」 버튼을 보인다
@@ -8951,6 +9168,7 @@ function _processCardImgFile(file, cid) {
         document.getElementById(cid+"_imgThumb").src = dataUrl;
         document.getElementById(cid+"_imgPreview").style.display = "flex";
         document.getElementById(cid+"_imgZone").style.display = "none";
+        if (typeof _ofPhChanged === "function") _ofPhChanged();   // ★ 결정 425 — 사진이 들어왔다: 떠나기 전 확인 · 다시 넣을 사진 안내에서 빼기
         document.getElementById(cid+"_aiResult").classList.remove("show");
         document.getElementById(cid+"_aiError").style.display = "none";
         const lbl = document.getElementById(cid+"_imgLabel"); if (lbl) lbl.textContent = file.name + " · AI 분석 중…";
@@ -11003,6 +11221,7 @@ async function submitOrderForm() {
 
   // 성공 후 플래그 초기화
   window._forceResubmit = false;
+  if (typeof _ofPhSubmitted === "function") _ofPhSubmitted();   // ★ 결정 425 — 제출이 들어갔다: 떠나기 전 확인·다시 넣을 사진 안내·표시를 거둔다
 
   // ── 완료 화면 표시 ──
   const wrapEl   = document.getElementById("ofOrderCardsWrap");

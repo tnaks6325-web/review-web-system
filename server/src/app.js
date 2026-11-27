@@ -79,6 +79,8 @@ app.use('/api/index',     indexRoutes);
 app.use('/api/tab',       tabRoutes);
 
 // 리뷰어 관리 (Section 7)
+// ★ 결정 425 — 리뷰어 화면 사건 횟수(POST /api/reviewer/ui-event · 로그인 없음 · 개인정보 0). reviewerRoutes 보다 먼저(그쪽 미들웨어를 거치지 않게).
+app.use('/api/reviewer',  require('./routes/reviewerUiEvent.routes'));
 app.use('/api/reviewer',  reviewerRoutes);
 // 구매사진 셀프 보완: 기존 일반 업로드·명의/지급 처리와 분리된 인증 경로.
 const purchaseCaptureRouters = createPurchaseCaptureRouters();
