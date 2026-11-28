@@ -1,5 +1,5 @@
 /**
- * receiptReviewerCancel.test.js — 영수증리뷰: 리뷰어가 리뷰를 내기 **전에** 스스로 참여 취소 (결정 432 사용자 확정 2026-11-28 ①)
+ * receiptReviewerCancel.test.js — 영수증리뷰: 리뷰어가 리뷰를 내기 **전에** 스스로 참여 취소 (결정 434 사용자 확정 2026-11-28 ①)
  * 실행: node tests/receiptReviewerCancel.test.js
  *
  * 위험:
@@ -67,7 +67,7 @@ function handlerOf(router, method, p) {
 }
 
 (async () => {
-  console.log('\n▶ 영수증리뷰 — 리뷰 전 리뷰어 스스로 참여 취소(결정 432 · 2026-11-28 ①)\n');
+  console.log('\n▶ 영수증리뷰 — 리뷰 전 리뷰어 스스로 참여 취소(결정 434 · 2026-11-28 ①)\n');
   const db = await openDb();
   const pool = poolOf(db);
   const poolPath = require.resolve('../src/db/pool');

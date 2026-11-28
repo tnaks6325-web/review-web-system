@@ -255,7 +255,7 @@ async function sendReceiptImage(res, fileId) {
   return res.send(f.buffer);
 }
 
-/* ═══ ★★ 결정 432 — 3단계: 참여 = 안 쓴 영수증 한 장 배정 (migration 232) ═══
+/* ═══ ★★ 결정 434 — 3단계: 참여 = 안 쓴 영수증 한 장 배정 (migration 232) ═══
    영수증이 비었는지 판정은 **이 SQL 조각 하나**(`receiptTakenSql`)다 — 배정(pickReceiptInTx)·남은 영수증 수(공고 카드·정원)가 함께 쓴다.
      쓴 영수증 = ㉮ 그 영수증으로 리뷰를 낸 적 있음(reviewed_at) 또는 ㉯ 살아 있는 신청(제출 확정 · 유예 안의 홀드)이 쥐고 있음.
    ★★ 「되돌리기」 쓰기가 따로 없다 — 신청 표가 단일 출처라, 신청이 취소·만료·줄 삭제로 살아 있지 않게 되는 순간
@@ -463,7 +463,7 @@ module.exports = {
   registerReceiptUpload, unregisteredFiles, isRegisteredReceiptFile,
   insertPool, isReceiptPoolTab, isReceiptPoolCampaign, isPoolBoundRow, poolBoundSeqs, poolBoundRowSql,
   poolForTab, poolCounts, fileForRow, verifyRowsMatchPool, repairPoolIfMissing, sendReceiptImage,
-  // 3단계(결정 432)
+  // 3단계(결정 434)
   receiptTakenSql, freeCountsForTab, loadFreeByCampaign, pickReceiptInTx, joinDatesFor, placeInfoForTab,
   bindReceiptForApply, poolForApplication, receiptPublicView, reviewerSeatView, markReviewedRow,
 };

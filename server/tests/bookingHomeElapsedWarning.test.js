@@ -56,7 +56,7 @@ async function openDb() {
 // 경고 SQL 은 한 번 들어올 때 「예약 조건만 뺀 종전 SQL」도 같이 돌려 둔다(대조용).
 const { bookingTabSql } = require('../src/utils/bookingTabSql');
 const BOOKING_CLAUSE = bookingTabSql('ri.sheet_id', 'ri.tab_name');
-// 결정 432 사용자 확정(2026-11-28) — 영수증리뷰 줄도 같은 자리에서 뺀다(425 를 영수증에도). 종전 SQL = 두 조건을 다 뺀 것.
+// 결정 434 사용자 확정(2026-11-28) — 영수증리뷰 줄도 같은 자리에서 뺀다(425 를 영수증에도). 종전 SQL = 두 조건을 다 뺀 것.
 const RECEIPT_CLAUSE = require('../src/utils/receiptTabSql').receiptTabSql('ri.sheet_id', 'ri.tab_name');
 let lastBaseline = null;
 let warningSqlSeen = 0;
@@ -114,7 +114,7 @@ const ROWS = [
   { key: 'rc', days: 12, kind: 'receipt', name: '가짜영수증' },
   { key: 'un', days: 11, kind: null, name: '종류 모름 작업' },
   { key: 'bk3', days: 9, kind: 'booking', slot: -2, name: '9일 예약(10일 전 · 종전에도 없음)' },
-  { key: 'rc2', days: 11.5, kind: null, pool: true, name: '가짜영수증(묶음만 · 탭 종류 칸 없음)' },   // 결정 432(2026-11-28) — 맨 뒤(앞 줄 번호 불변)
+  { key: 'rc2', days: 11.5, kind: null, pool: true, name: '가짜영수증(묶음만 · 탭 종류 칸 없음)' },   // 결정 434(2026-11-28) — 맨 뒤(앞 줄 번호 불변)
 ];
 const idOf = i => `${String(i + 1).repeat(8)}-1111-4111-8111-${String(i + 1).repeat(12)}`;
 
@@ -164,7 +164,7 @@ const idOf = i => `${String(i + 1).repeat(8)}-1111-4111-8111-${String(i + 1).rep
     && lastBaseline[0].orderSubmissionId === ROWS[0].oid, lastBaseline);
 
   // 2) 다른 종류는 종전과 같은 줄·같은 경과일(리뷰 → 블로그 → Q&A → 종류 모름).
-  //    ★ 결정 432 사용자 확정(2026-11-28) — 영수증리뷰(rc · 탭 종류 receipt / rc2 · 영수증 묶음만)는 예약처럼 빠진다
+  //    ★ 결정 434 사용자 확정(2026-11-28) — 영수증리뷰(rc · 탭 종류 receipt / rc2 · 영수증 묶음만)는 예약처럼 빠진다
   //      (리뷰 기한이 10일보다 길면 마감 전에 「N일 경과」가 뜬다 — 「내일/오늘 마감」 안내만 남긴다). 종전(이 결정 전)에는 rc 가 12일로 떴다.
   const isRcRow = r => r && (r.kind === 'receipt' || r.pool === true);
   const order = ['rv', 'bl', 'qn', 'un'];
@@ -195,7 +195,7 @@ const idOf = i => `${String(i + 1).repeat(8)}-1111-4111-8111-${String(i + 1).rep
   await db.query(`INSERT INTO tab_configs(sheet_id, tab_name, display_name, work_kind, sheetless) VALUES ($1, $2, $3, 'booking', TRUE)`, [ROWS[6].sid, ROWS[6].tab, ROWS[6].name]);
   const nowBooking = await ask('탭 종류 booking 으로');
   t('  같은 줄도 탭 종류가 네이버예약리뷰면 뺀다', nowBooking === null, nowBooking);
-  // 결정 432(2026-11-28) — 영수증 줄은 「종류 때문에」 빠진다: 같은 rc 줄의 탭 종류를 리뷰로 바꾸면 다시 뜬다(12일).
+  // 결정 434(2026-11-28) — 영수증 줄은 「종류 때문에」 빠진다: 같은 rc 줄의 탭 종류를 리뷰로 바꾸면 다시 뜬다(12일).
   await db.query(`UPDATE tab_configs SET work_kind = 'review' WHERE sheet_id = $1 AND tab_name = $2`, [ROWS[5].sid, ROWS[5].tab]);
   const rcAsReview = await ask('rc 탭 종류 review 로');
   t('  ★ 같은 영수증 줄도 탭 종류가 영수증이 아니면 종전대로 띄운다(확실히 영수증일 때만 뺀다)', rcAsReview && rcAsReview.orderSubmissionId === ROWS[5].oid && rcAsReview.elapsedDays === 12, rcAsReview);

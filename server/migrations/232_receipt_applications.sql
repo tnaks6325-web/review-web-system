@@ -1,4 +1,4 @@
--- 232: 영수증리뷰 3단계 — 신청 ↔ 영수증 한 장 묶기 + 참여일·리뷰마감일 + 리뷰 낸 영수증 표시 (결정 432 · 2026-11-27).
+-- 232: 영수증리뷰 3단계 — 신청 ↔ 영수증 한 장 묶기 + 참여일·리뷰마감일 + 리뷰 낸 영수증 표시 (결정 434 · 2026-11-27).
 --
 -- 리뷰어가 참여하는 순간 **안 쓴 영수증 한 장**이 그 신청에 묶인다(campaign_applications.receipt_pool_id).
 --   영수증이 비었는지 = 이 영수증을 가리키는 신청이 「살아 있음」(applied·submitted)이 아니고, 그 영수증으로 리뷰를 낸 적이 없음.
@@ -25,5 +25,5 @@ ALTER TABLE receipt_pool ADD COLUMN IF NOT EXISTS joined_date DATE;
 ALTER TABLE receipt_pool ADD COLUMN IF NOT EXISTS review_deadline DATE;
 ALTER TABLE receipt_pool ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
 
-COMMENT ON COLUMN campaign_applications.receipt_pool_id IS '영수증리뷰(결정 432) — 이 신청에 배정된 영수증(receipt_pool.id). 다른 종류 신청은 NULL.';
-COMMENT ON COLUMN receipt_pool.reviewed_at IS '영수증리뷰(결정 432) — 이 영수증으로 리뷰 캡처가 제출된 때. 있으면 신청이 취소돼도 다시 배정하지 않는다.';
+COMMENT ON COLUMN campaign_applications.receipt_pool_id IS '영수증리뷰(결정 434) — 이 신청에 배정된 영수증(receipt_pool.id). 다른 종류 신청은 NULL.';
+COMMENT ON COLUMN receipt_pool.reviewed_at IS '영수증리뷰(결정 434) — 이 영수증으로 리뷰 캡처가 제출된 때. 있으면 신청이 취소돼도 다시 배정하지 않는다.';

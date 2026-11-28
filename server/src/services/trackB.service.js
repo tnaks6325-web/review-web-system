@@ -4173,7 +4173,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       const { rows: bkr } = await db.query(
         `SELECT seq, to_char(review_deadline, 'YYYY-MM-DD') AS d FROM booking_slots WHERE sheet_id=$1 AND tab_name=$2
          UNION ALL SELECT seq, to_char(review_deadline, 'YYYY-MM-DD') FROM receipt_pool
-          WHERE sheet_id=$1 AND tab_name=$2 AND seq IS NOT NULL AND review_deadline IS NOT NULL`, [sheetId, tabName]);   // ★ 결정 432 — 영수증리뷰 줄도 같은 「마감 지남」
+          WHERE sheet_id=$1 AND tab_name=$2 AND seq IS NOT NULL AND review_deadline IS NOT NULL`, [sheetId, tabName]);   // ★ 결정 434 — 영수증리뷰 줄도 같은 「마감 지남」
       if (bkr.length) bookingDeadlines = new Map(bkr.filter(x => x.d).map(x => [Number(x.seq), x.d]));
     } catch (e) {
       logger.warn(`[trackB] 예약리뷰 리뷰마감일 조회 실패(「마감 지남」 없이 종전 표) sheet=${sheetId} tab=${tabName}: ${e.message}`);
@@ -5147,7 +5147,7 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
     const row = rows[0];
 
     if (expectedRevision && row.revision !== expectedRevision) throw new HideRowError('row_changed');
-    /* ★ 결정 432(2026-11-28 ①) — 리뷰어 스스로 취소(reviewerOrderCancel)는 **잠근 줄에서** 리뷰 제출 여부를 다시 본다(판정과 실행 사이에
+    /* ★ 결정 434(2026-11-28 ①) — 리뷰어 스스로 취소(reviewerOrderCancel)는 **잠근 줄에서** 리뷰 제출 여부를 다시 본다(판정과 실행 사이에
          리뷰가 들어와도 지우지 않는다 — 이 트랜잭션 통째 되돌림). 작업표 줄 · 리뷰 색인 · 영수증 줄 「리뷰 냄」 셋 중 하나라도면 거절.
        ★ 담당자 [줄 삭제]는 이 옵션을 넘기지 않는다(동작 불변 — 리뷰 낸 줄도 담당자는 지울 수 있다). */
     if (requireNoReview) {

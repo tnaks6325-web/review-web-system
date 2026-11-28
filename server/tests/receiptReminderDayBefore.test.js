@@ -1,6 +1,6 @@
 'use strict';
 /**
- * receiptReminderDayBefore.test.js — 결정 432 사용자 확정(2026-11-28 ②) 회귀가드 (스키마 변경 0).
+ * receiptReminderDayBefore.test.js — 결정 434 사용자 확정(2026-11-28 ②) 회귀가드 (스키마 변경 0).
  *
  * 무엇을 막나:
  *   영수증리뷰(receipt) 줄의 리뷰 미작성 알림톡은 **리뷰 마감일 전날(KST) 한 번만** 나간다.

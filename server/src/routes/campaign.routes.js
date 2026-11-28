@@ -55,7 +55,7 @@ const { isPostUrl, BLOG_URL_HINT } = require('../utils/blogPostUrl');
 const { workKindForTab: tabWorkKind } = require('../services/workKindContext.service');
 const qnaSlots = require('../services/qnaSlots.service');   // ★ 결정 321 3단계 — Q&A 자리 묶기
 const bookingSlots = require('../services/bookingSlots.service');   // ★ 결정 409 — 네이버예약리뷰 날짜 자리 묶기
-const receiptPoolSvc = require('../services/receiptPool.service');   // ★ 결정 432 — 영수증리뷰 참여 순간 영수증 한 장 배정
+const receiptPoolSvc = require('../services/receiptPool.service');   // ★ 결정 434 — 영수증리뷰 참여 순간 영수증 한 장 배정
 const { syncCampaignRecruitTotal, displayRecruitTotalForCampaign, assertCampaignRecruitTotal } = require('../services/linkedRecruitQuota.service');
 const { loadPopularCreditMatches, loadPopularCreditState, canUsePopularCredit } = require('../services/popularCredit.service');
 const { repurchaseDays } = require('../utils/repurchaseGuard');
@@ -968,7 +968,7 @@ function _publicView(row, counts, now, schedule) {
     // ★ 결정 259: 공고 전체 품절 멈춤 — state 는 그대로 두고 표시만 얹는다(판정은 apply 게이트 · 같은 칸·같은 스위치).
     //   옛 화면은 이 필드를 몰라 [참여하기]를 그리지만 누르면 서버가 campaign_paused 로 거절한다.
     soldoutPaused: !!row.soldout_paused_at && _optionPause().ENABLED,
-    // ★ 결정 432: 영수증리뷰 공고만 — 남은 영수증 장수(숫자 하나 · 파일 번호·작업표 위치 없음). 다른 공고는 키 없음(응답 그대로).
+    // ★ 결정 434: 영수증리뷰 공고만 — 남은 영수증 장수(숫자 하나 · 파일 번호·작업표 위치 없음). 다른 공고는 키 없음(응답 그대로).
     ...(counts && typeof counts.receiptFree === 'number' && Number.isFinite(counts.receiptFree) ? { receiptLeft: Math.max(0, counts.receiptFree) } : {}),
   });
 }
@@ -1869,7 +1869,7 @@ async function getCampaignDetail(req, res, next) {
         const bk = await bookingSlots.bookingPublicView(pool, row, now);
         if (bk) view.booking = bk;
       } catch (e) { logger.warn(`[campaign/detail] 예약 안내 조회 실패(참여 화면이 막는다) camp=${id}: ${e.message}`); }
-      /* ★ 결정 432 — 영수증리뷰: 매장 이름·주소·리뷰 기한 + 남은 영수증(참여 전). 네이버 플레이스 주소·영수증 사진은 참여 후에만(041).
+      /* ★ 결정 434 — 영수증리뷰: 매장 이름·주소·리뷰 기한 + 남은 영수증(참여 전). 네이버 플레이스 주소·영수증 사진은 참여 후에만(041).
            영수증 탭이 아니면 키 없음. 조회 실패 = 키 없음 — 화면은 영수증 공고인데 이 값이 없으면 참여를 막는다(fail-closed). */
       try {
         const rc = await receiptPoolSvc.receiptPublicView(pool, row);
@@ -2055,7 +2055,7 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
       bookingSlot = null;
       logger.warn(`[campaign/work-detail] 예약 자리 조회 실패 camp=${id}: ${e.message}`);
     }
-    /* ★ 결정 432: 영수증리뷰 신청이면 배정된 영수증 번호·참여일·리뷰 마감 안내·매장 안내(플레이스 주소 포함 — 참여 후 공개)·리뷰 진행.
+    /* ★ 결정 434: 영수증리뷰 신청이면 배정된 영수증 번호·참여일·리뷰 마감 안내·매장 안내(플레이스 주소 포함 — 참여 후 공개)·리뷰 진행.
          영수증 사진 자체는 싣지 않는다(파일 번호 0) — 화면은 본인 확인 통로(POST /api/submit/receipt/image)로 받는다.
          조회 실패 = null(화면은 다시 불러온다 — 리뷰를 안 낸 사람이 「완료」를 보지 않게). */
     let receiptSeat = null;
@@ -2144,7 +2144,7 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
       canChangeOption,
       qnaSlot,               // ★ 결정 321: { date, visibility:'public'|'private', questionText, deadline } | null(Q&A 아님)
       bookingSlot,           // ★ 결정 409: { date, reviewDeadline, deadline, place, reservationDone, reservationNo, reviewDone } | null(예약 아님)
-      receiptSeat,           // ★ 결정 432: { receiptNo, joinedDate, reviewDeadline(State/Notice), place, joined, reviewDone } | null(영수증리뷰 아님)
+      receiptSeat,           // ★ 결정 434: { receiptNo, joinedDate, reviewDeadline(State/Notice), place, joined, reviewDone } | null(영수증리뷰 아님)
       qty,                   // ★ 결정 289 ③-나: { purchaseQty, amount, tiers:[{qty,status,remaining,buyMethod,payAmount}], canChange } | null(단계 없음)
       joinedDisplay: joinedView,   // ★ 결정 214: { title, thumbnailUrl } | null
       workDetail,                                                // HTML은 응답 직전 방어적 재정화
@@ -2168,7 +2168,7 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
   }
 });
 
-/* ★★ 결정 432 사용자 확정(2026-11-28 ①) — 영수증리뷰: 영수증을 받은 뒤(참여 확정 = submitted)라도 **리뷰를 내기 전이면** 리뷰어가 스스로 취소한다.
+/* ★★ 결정 434 사용자 확정(2026-11-28 ①) — 영수증리뷰: 영수증을 받은 뒤(참여 확정 = submitted)라도 **리뷰를 내기 전이면** 리뷰어가 스스로 취소한다.
    새 창구를 만들지 않는다 — 리뷰어 [참여 취소](이 라우트)가 받고, 실행은 리뷰어 주문취소와 **같은 실행부**
    (`reviewerOrderCancel.cancelOrderByReviewer` → `trackB.hideWorkdeskRow` = 담당자 [줄 삭제]: 주문 무효 + 신청 취소 + 작업표 줄 제거 +
    같은 영수증으로 보충 줄 + 묶음 seq 옮기기 — 한 트랜잭션)를 탄다. 영수증 표에 「반납」을 쓰지 않는다(신청 표 + receiptTakenSql 단일 출처).
@@ -2255,7 +2255,7 @@ router.post('/:id/cancel', applyLimiter, async (req, res, next) => {
       );
       if (rows.length === 0) {
         await client.query('ROLLBACK');
-        // ★ 결정 432(2026-11-28 ①) — 영수증을 받은(확정된) 영수증리뷰 참여는 리뷰 전이면 같은 버튼으로 취소한다(위 _receiptSelfCancel).
+        // ★ 결정 434(2026-11-28 ①) — 영수증을 받은(확정된) 영수증리뷰 참여는 리뷰 전이면 같은 버튼으로 취소한다(위 _receiptSelfCancel).
         if (await _receiptSelfCancel(req, res, { id, p8, token })) return;
         return res.status(404).json({ ok: false, error: '취소할 수 있는 참여가 없습니다.' });
       }
@@ -2321,7 +2321,7 @@ router.post('/:id/change-option', applyLimiter, async (req, res, next) => {
         await client.query('ROLLBACK');
         return res.status(409).json({ ok: false, reason: 'booking_option_locked', error: '예약 참여는 바꿀 수 없어요. 날짜를 바꾸려면 취소 후 다시 신청해주세요.' });
       } }
-    // ★ 결정 432: 영수증리뷰 참여는 영수증 한 장에 묶여 있다 — 매장 하나라 바꿀 상품이 없다(위 SELECT 칸 목록은 회귀가드 고정 — 따로 읽는다).
+    // ★ 결정 434: 영수증리뷰 참여는 영수증 한 장에 묶여 있다 — 매장 하나라 바꿀 상품이 없다(위 SELECT 칸 목록은 회귀가드 고정 — 따로 읽는다).
     { const { rows: q } = await client.query('SELECT receipt_pool_id FROM campaign_applications WHERE id=$1', [app.id]);
       if (q[0] && q[0].receipt_pool_id != null) {
         await client.query('ROLLBACK');
@@ -2412,7 +2412,7 @@ function _publicTierView(v) {
 }
 
 /** ★ 결정 409 — 예약 날짜 거절 문구(서버 판정 단일 출처 · 화면 _APPLY_REASON_TEXT 와 같은 뜻). */
-/* ★ 결정 432 — 영수증리뷰 참여 거절 문구(모두 409 · 영수증 미점유). */
+/* ★ 결정 434 — 영수증리뷰 참여 거절 문구(모두 409 · 영수증 미점유). */
 const _RECEIPT_APPLY_MSG = {
   receipt_sold_out: '영수증이 모두 나갔어요 — 이 공고는 마감됐어요.',
   receipt_place_unknown: '매장 정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.',
@@ -2448,7 +2448,7 @@ async function _applyParticipation(req, res, next, campPre) {
   let qnaApply = false;    // ★ 결정 321 3단계: Q&A체험단 — 신청 때 그날 자리 하나를 묶는다
   let bookingApply = false;   // ★ 결정 409: 네이버예약리뷰 — 신청 때 리뷰어가 고른 날의 자리 하나를 묶는다
   let bookingDate = null;
-  let receiptApply = false;   // ★ 결정 432: 영수증리뷰 — 참여하는 순간 안 쓴 영수증 한 장을 묶는다(날짜 고르기 없음)
+  let receiptApply = false;   // ★ 결정 434: 영수증리뷰 — 참여하는 순간 안 쓴 영수증 한 장을 묶는다(날짜 고르기 없음)
   {
     let _kind = null;
     try {
@@ -2589,7 +2589,7 @@ async function _applyParticipation(req, res, next, campPre) {
     const st = computeCampaignState(camp, stateCounts, now, activeSchedule);
     if (st.state !== 'open') {
       await client.query('ROLLBACK');
-      if (receiptApply && st.state === 'soft_full') return res.status(409).json({ ok: false, reason: 'receipt_sold_out', state: st, error: _RECEIPT_APPLY_MSG.receipt_sold_out });   // ★ 결정 432 — 영수증 다 나감 = 「마감」
+      if (receiptApply && st.state === 'soft_full') return res.status(409).json({ ok: false, reason: 'receipt_sold_out', state: st, error: _RECEIPT_APPLY_MSG.receipt_sold_out });   // ★ 결정 434 — 영수증 다 나감 = 「마감」
       return res.status(409).json({ ok: false, reason: st.state, state: st, error: '지금은 신청할 수 없습니다.' });
     }
     // ★★ 결정 259: 공고 전체 품절 멈춤 — 상태 엔진은 그대로 두고(하루 인원·앞날 예상 불변) **새 신청만** 여기서 막는다.
@@ -2890,7 +2890,7 @@ async function _applyParticipation(req, res, next, campPre) {
     //   조회 실패는 fail-open(막는 기능의 오류로 정상 참여를 막지 않는다 — 신원게이트와 같은 규율).
     // ★ 결정 321(확정 3): Q&A 는 구매가 없어 재구매 기간을 보지 않는다 — 대신 같은 공고 같은 명의는 한 번만(제출완료 = 영구 차단).
     // ★ 결정 409: 예약리뷰도 같다 — 매장 방문 한 번(재구매 기간 대신 같은 공고 같은 명의 한 번).
-    if ((qnaApply || bookingApply || receiptApply) && sameCampaignSubmittedAt) {   // ★ 결정 432: 영수증리뷰도 같다 — 영수증 한 장 = 한 번
+    if ((qnaApply || bookingApply || receiptApply) && sameCampaignSubmittedAt) {   // ★ 결정 434: 영수증리뷰도 같다 — 영수증 한 장 = 한 번
       await client.query('ROLLBACK');
       return res.status(409).json({ ok: false, reason: 'one_per_person',
         error: bookingApply ? '이 예약 공고에는 이미 참여했어요.' : receiptApply ? '이 영수증리뷰 공고에는 이미 참여했어요.' : '이 Q&A 공고에는 이미 참여했어요.' });
@@ -3027,7 +3027,7 @@ async function _applyParticipation(req, res, next, campPre) {
          ★ 블로그(승인제 — 자리 미점유)·Q&A(날짜 자리 묶기 · qna_no_slot)는 종전. 작업표(무시트+활성 작업보드) 없으면 종전.
          ★ fail-open — 조회 실패는 SAVEPOINT 로 접고 종전대로 받는다(모든 신청이 막히면 안 된다).
          작업표 잠금(camp_tab_daily) 안이라 마지막 한 자리를 두 사람이 동시에 받지 못한다. */
-    if (!blogApply && !qnaApply && !bookingApply && !receiptApply && camp.linked_sheet_id && camp.linked_tab_name) {   // 예약리뷰 = 자리 묶기가 대신한다(409) · 영수증리뷰 = 영수증 배정이 대신한다(432)
+    if (!blogApply && !qnaApply && !bookingApply && !receiptApply && camp.linked_sheet_id && camp.linked_tab_name) {   // 예약리뷰 = 자리 묶기가 대신한다(409) · 영수증리뷰 = 영수증 배정이 대신한다(434)
       const roomSvc = require('../services/worktableApplyRoom.service');
       let room = null;
       if (roomSvc.enabled()) {
@@ -3245,7 +3245,7 @@ async function _applyParticipation(req, res, next, campPre) {
       try { await client.query('ROLLBACK TO SAVEPOINT card_bind'); } catch (_) { /* noop */ }
       logger.warn(`[campaign/apply] 명의 카드 기록 실패(참여는 계속): ${bindErr.code || ''} ${bindErr.message}`);
     }
-    /* ★★ 결정 432: 영수증리뷰 — 안 쓴 영수증 한 장을 이 신청에 묶고 참여일·리뷰마감일(참여일 + 오더의 N일 · KST)을 새긴다.
+    /* ★★ 결정 434: 영수증리뷰 — 안 쓴 영수증 한 장을 이 신청에 묶고 참여일·리뷰마감일(참여일 + 오더의 N일 · KST)을 새긴다.
          모든 게이트 뒤 · 작업표 잠금(camp_tab_daily) 안 · 같은 트랜잭션(INSERT·명의 카드 기록 뒤 COMMIT 앞 — 신청 행 번호가 있어야 묶는다).
          고른 장은 FOR UPDATE SKIP LOCKED + 부분 유일 색인 232 — 마지막 한 장을 둘이 노려도 하나만 받는다.
          못 묶으면 신청 INSERT 까지 통째로 되돌린다(fail-closed — 영수증 없는 참여는 할 일이 없다). */
@@ -3275,7 +3275,7 @@ async function _applyParticipation(req, res, next, campPre) {
       optionKey: ins.rows[0].option_key || null,
       qnaSlot: qnaBind ? qnaSlots.publicSlotView(qnaBind.slot, ins.rows[0].expires_at) : undefined,
       bookingSlot: bookingBind ? bookingSlots.publicSlotView(bookingBind.slot, ins.rows[0].expires_at) : undefined,   // ★ 결정 409
-      // ★ 결정 432: 배정된 영수증 번호·참여일·리뷰마감일만(파일 번호·작업표 위치 없음) — 화면은 곧바로 참여 확정(/api/submit/receipt)을 부른다
+      // ★ 결정 434: 배정된 영수증 번호·참여일·리뷰마감일만(파일 번호·작업표 위치 없음) — 화면은 곧바로 참여 확정(/api/submit/receipt)을 부른다
       receiptSeat: receiptBind ? { receiptNo: receiptBind.pool.pool_seq, joinedDate: receiptBind.dates.joinedDate, reviewDeadline: receiptBind.dates.reviewDeadline } : undefined,
       // ★ 결정 356: 차례 줄에 섰을 때만 — 없으면(종전·구서버) 화면은 종전 동작. expiresAt 은 위 값 그대로(= 진짜 마감).
       chain: chainPlan ? { sequential: true, state: chainPlan.turnStartsAt.getTime() > now.getTime() ? 'waiting' : 'running',

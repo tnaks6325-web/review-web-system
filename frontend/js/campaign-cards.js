@@ -439,7 +439,7 @@
     const opts = (c && c.options) || [];
     if (!opts.length) return '';
     if (c.work_kind === 'booking') return '';   // 📅 결정 409: 예약 공고는 매장 하나 — 고를 것은 날짜(공고 화면 날짜 칸)
-    if (c.work_kind === 'receipt') return '';   // 🧾 결정 432: 영수증리뷰도 매장 하나 — 남은 수는 영수증 칩이 말한다
+    if (c.work_kind === 'receipt') return '';   // 🧾 결정 434: 영수증리뷰도 매장 하나 — 남은 수는 영수증 칩이 말한다
     const open = opts.filter(o => o.status === 'open').length;
     // ★ 결정 212: 순차진행의 대기(waiting) 선택지는 마감이 아니다 — "N종 마감"에 세지 않는다.
     // ★ 결정 229: 품절로 잠시 멈춘(paused) 선택지도 마감이 아니다 — 따로 센다(담당자가 다시 열 수 있다).
@@ -781,7 +781,7 @@
       : c.work_kind === 'qna' ? `<span class="pt-badge" style="background:#1b64da;color:#fff">Q&amp;A</span>`
       // 📅 결정 409: 네이버예약리뷰 배지 — 같은 자리·같은 규칙(정확 일치)
       : c.work_kind === 'booking' ? `<span class="pt-badge" style="background:#03C75A;color:#fff">📅 네이버 예약</span>`
-      // 🧾 결정 432: 영수증리뷰 배지 + 남은 영수증(서버 receiptLeft = 아직 아무에게도 안 간 장 · 숫자만)
+      // 🧾 결정 434: 영수증리뷰 배지 + 남은 영수증(서버 receiptLeft = 아직 아무에게도 안 간 장 · 숫자만)
       : c.work_kind === 'receipt' ? `<span class="pt-badge" style="background:#0f766e;color:#fff">🧾 영수증리뷰</span>${typeof c.receiptLeft === 'number' && Number.isFinite(c.receiptLeft) ? `<span class="pt-badge" style="background:#ecfdf5;color:#065f46">영수증 ${Number(c.receiptLeft)}장 남음</span>` : ''}` : '';
     const badges = (channel || c.delivery_type || crChip || blogChip)
       ? `<div class="pt-badges">${blogChip}${channel ? `<span class="pt-badge ch">${_esc(channel)}</span>` : ''}${c.delivery_type ? `<span class="pt-badge dl">${_esc(_dlBadge(c.delivery_type))}</span>` : ''}${crChip}</div>`
@@ -985,7 +985,7 @@
     else if (restDay) footer = `<button type="button" class="pbtn off">오늘은 진행 없음</button><div class="pnote">${c.nextWorkDate ? '다음 진행일 ' + _esc(_fmtMD(c.nextWorkDate)) : '다음 진행일 안내 예정'}</div>`;
     // ★ '내일'을 문구에 박아 두면 주말 제외·0명 조절 공고에서 거짓이 된다 — reopensAt(서버 판정) 우선.
     else if (isDaily) footer = `<button type="button" class="pbtn off">오늘은 마감</button><div class="pnote">${c.reopensAt ? _esc(_fmtOpenLabel(c.reopensAt)) : (c.opensAt ? '내일 ' + _fmtHM(c.opensAt) + ' 오픈' : '내일 다시 오픈')}</div>`;
-    else if (c.state === 'soft_full' && (c.stateReason === 'receipt_full' || c.work_kind === 'receipt')) footer = `<button type="button" class="pbtn off">마감</button><div class="pnote">영수증이 모두 나갔어요</div>`;   // 🧾 결정 432
+    else if (c.state === 'soft_full' && (c.stateReason === 'receipt_full' || c.work_kind === 'receipt')) footer = `<button type="button" class="pbtn off">마감</button><div class="pnote">영수증이 모두 나갔어요</div>`;   // 🧾 결정 434
     else if (c.state === 'soft_full') footer = `<button type="button" class="pbtn off">잔여 대기 중</button>`;
 
     if (admin) {

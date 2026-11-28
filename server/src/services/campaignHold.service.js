@@ -69,7 +69,7 @@ async function _isScheduleDriven(q, campaignId) {
 }
 
 /**
- * ★★ 결정 432 — 영수증리뷰 공고인지. 이런 공고도 마감을 **영속하지 않는다** — 영수증이 다 나가 status='closed' 를 저장하면,
+ * ★★ 결정 434 — 영수증리뷰 공고인지. 이런 공고도 마감을 **영속하지 않는다** — 영수증이 다 나가 status='closed' 를 저장하면,
  * 리뷰 전에 줄 삭제·취소로 돌아온 영수증을 다음 참여자가 받지 못한다(사용자 확정 2026-11-27 「다시 준다」).
  * 남은 영수증 0 은 상태 엔진이 soft_full 로 보여 주고, 돌아오면 저절로 열린다.
  * ★ 판정 = receiptPool.isReceiptPoolTab(조회 실패 = 영수증 탭으로 본다 → 영속하지 않음 · 표시는 상태 엔진이 그대로 「가득」).
@@ -89,7 +89,7 @@ async function _isReceiptCampaign(q, campaignId) {
 async function maybePersistClosed(q, campaignId, opts = {}) {
   if (!opts[CONFIRMED_CALLER_PRELOCK]) await _assertCallerLifecycle(q, campaignId, opts.lockedScope);
   if (await _isScheduleDriven(q, campaignId)) return;
-  if (await _isReceiptCampaign(q, campaignId)) return;   // ★ 결정 432 — 영수증 공고는 영속 마감 없음(돌아온 영수증을 다시 준다)
+  if (await _isReceiptCampaign(q, campaignId)) return;   // ★ 결정 434 — 영수증 공고는 영속 마감 없음(돌아온 영수증을 다시 준다)
   await q.query(
     `UPDATE recruit_campaigns rc SET status = 'closed', updated_at = NOW()
       WHERE rc.id = $1 AND rc.participation_mode AND rc.status = 'active' AND rc.recruit_total > 0

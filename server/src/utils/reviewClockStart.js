@@ -34,7 +34,7 @@ const CLOCK_START_BY_KIND = Object.freeze({
 });
 
 /** 종류 key → 그 종류 줄인지 판정하는 SQL(별칭 a = review_index 별칭).
- *  ★ receipt 는 알림 방식(utils/reviewReminderPlan — 마감 전날 한 번 · 결정 432 2026-11-28 ②)만 쓴다 —
+ *  ★ receipt 는 알림 방식(utils/reviewReminderPlan — 마감 전날 한 번 · 결정 434 2026-11-28 ②)만 쓴다 —
  *    시작일(CLOCK_START_BY_KIND)에는 넣지 않았다(영수증 시작일 = 제출 시각 = 참여일 그대로 · 블랙리스트·등록리뷰어 필터 불변). */
 const KIND_ROW_SQL = Object.freeze({
   booking: (a) => bookingTabSql(`${a}.sheet_id`, `${a}.tab_name`),

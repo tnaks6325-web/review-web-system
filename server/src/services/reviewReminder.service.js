@@ -179,7 +179,7 @@ function _eligibleAt(row, sched, config) {
 }
 
 /**
- * ★ 결정 426·432 — 마감일 기준 「한 번」 알림 방식(예약 = 마감일 당일 · 영수증 = 마감 전날) 한 줄의 발송 판정.
+ * ★ 결정 426·434 — 마감일 기준 「한 번」 알림 방식(예약 = 마감일 당일 · 영수증 = 마감 전날) 한 줄의 발송 판정.
  *   마감일 = 그 줄의 리뷰마감일 칸(화면 「오늘/내일 마감」과 같은 칸 · planDeadline) · 1차 템플릿 한 번 · #{제출기한} = 마감일.
  *   보내는 날 = 마감일 − rules.sendOffsetDays. 사유 코드는 방식마다(rules.reasons — 예약 코드는 결정 426 그대로).
  *   자동 = 보내는 날 0시~끝(KST)만(사유 없음) · 다음 날부터 = reasons.passed(자동은 늦게 안 보냄 · 담당자 수동만)
@@ -262,7 +262,7 @@ function _warnUnknownVisit(preview, where) {
   const isRc = x => x.row && x.row.reminderPlan === 'day_before_deadline_once';
   const d = unk.filter(x => !isRc(x)).length, dr = unk.filter(isRc).length;
   if (d) logger.warn(`[review-reminder] 네이버예약리뷰 리뷰 마감일을 확인하지 못한 줄 ${d}건 — 알림톡 안 보냄(deadline_unknown · ${where})`);
-  // 결정 432(2026-11-28 ②) — 영수증리뷰 줄(영수증 줄 마감일·참여일 모름 · 취소로 영수증이 다른 줄로 옮겨 간 옛 줄 포함)
+  // 결정 434(2026-11-28 ②) — 영수증리뷰 줄(영수증 줄 마감일·참여일 모름 · 취소로 영수증이 다른 줄로 옮겨 간 옛 줄 포함)
   if (dr) logger.warn(`[review-reminder] 영수증리뷰 리뷰 마감일을 확인하지 못한 줄 ${dr}건 — 알림톡 안 보냄(deadline_unknown · ${where})`);
 }
 
@@ -293,7 +293,7 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
     // ★ 결정 426 — 알림 방식(pl · utils/reviewReminderPlan 단일 출처). 마감일이 있는 예약 줄은 자동 발송 때 **마감일이 오늘인 줄만**
     //   읽는다(PR #1891 리뷰 P2: 어제 마감 줄까지 읽으면 자동 발송은 어차피 거절하는데 LIMIT 를 먼저
     //   잡아먹어, 지난 마감 줄이 많으면 오늘 마감 줄이 하루뿐인 발송일을 놓친다) — 이용일 + 16일보다 늦은 마감(오더 리뷰 기한 최대 30일)도 마감일에 읽힌다.
-    //   ★ 결정 432(2026-11-28 ②) — 영수증 줄도 같은 자리: 「자동으로 보내는 날」(pl.auto_send_ymd = 마감 전날 · 참여 당일이면 NULL)이
+    //   ★ 결정 434(2026-11-28 ②) — 영수증 줄도 같은 자리: 「자동으로 보내는 날」(pl.auto_send_ymd = 마감 전날 · 참여 당일이면 NULL)이
     //   오늘인 줄만 읽는다(예약 = auto_send_ymd 가 곧 마감일 — 종전 「마감일이 오늘」 그대로). 지난 줄·참여 당일 줄은 후보 LIMIT 밖.
     //   기본 방식 줄은 pl.deadline_ymd 가 항상 NULL 이라 ELSE = 종전 기간 절 그대로(같은 줄·같은 순서).
     //   마감일 모르는 예약 줄은 ELSE(종전 기간)로 읽어 deadline_unknown 으로 보고만 한다(절대 보내지 않음).
@@ -723,7 +723,7 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
    */
   // ★ 결정 426 — 네이버예약리뷰: 마감일 다음 날~마감일 + 7일은 자동은 안 보내지만 담당자는 보낼 수 있다(booking_deadline_day_passed).
   //   마감일 전(booking_before_deadline_day)은 앞당겨 보내지 않는다(not_due 와 다른 사유 — MANUAL_OK 에 넣지 않는다).
-  // ★ 결정 432(2026-11-28 ②) — 영수증리뷰: 보내는 날(마감 전날) 다음 날~마감일 + 7일 · 리뷰 기한 1일이라 자동이 쉰 줄은 담당자가 보낼 수 있다.
+  // ★ 결정 434(2026-11-28 ②) — 영수증리뷰: 보내는 날(마감 전날) 다음 날~마감일 + 7일 · 리뷰 기한 1일이라 자동이 쉰 줄은 담당자가 보낼 수 있다.
   //   보내는 날 전(receipt_before_send_day)은 앞당겨 보내지 않는다(MANUAL_OK 에 넣지 않는다).
   const MANUAL_OK = new Set([null, 'not_due', 'booking_deadline_day_passed', 'receipt_send_day_passed', 'receipt_send_day_is_join_day']);
   const MANUAL_REASON = {
@@ -740,7 +740,7 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
     booking_before_deadline_day: '네이버예약리뷰 알림톡은 리뷰 마감일 당일에 보냅니다 — 마감일부터 보낼 수 있습니다',
     booking_schedule_passed: `알림톡 기간(리뷰 마감일 후 ${reviewReminderPlan.PLAN_RULES.deadline_day_once.manualLateDays}일)이 지났습니다 — 문자로 보내세요`,
     booking_reminder_delivered: '리뷰 마감일 알림톡을 이미 보냈습니다(네이버예약리뷰는 한 번만)',
-    // 결정 432(2026-11-28 ②) — 영수증리뷰는 리뷰 마감일 전날 한 번.
+    // 결정 434(2026-11-28 ②) — 영수증리뷰는 리뷰 마감일 전날 한 번.
     receipt_before_send_day: '영수증리뷰 알림톡은 리뷰 마감일 전날에 보냅니다 — 마감 전날부터 보낼 수 있습니다',
     receipt_schedule_passed: `알림톡 기간(리뷰 마감일 후 ${reviewReminderPlan.PLAN_RULES.day_before_deadline_once.manualLateDays}일)이 지났습니다 — 문자로 보내세요`,
     receipt_reminder_delivered: '리뷰 마감 전날 알림톡을 이미 보냈습니다(영수증리뷰는 한 번만)',

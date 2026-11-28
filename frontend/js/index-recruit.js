@@ -2376,7 +2376,7 @@ function participationCheckErrors() {
   const channel = document.getElementById("rf_channel")?.value.trim() || "";
   const startDate = document.getElementById("rf_start_date")?.value || "";
   // ★ 결정 409: 네이버예약리뷰는 구매채널·모집 시작일·하루 인원이 없다(날짜별 인원은 리뷰오더가 정하고 리뷰어가 날짜를 고른다)
-  const _wkBooking = ["booking", "receipt"].includes(document.getElementById("rf_work_kind")?.value || "");   // ★ 결정 432: 영수증리뷰도 같다(매장 방문 · 남은 영수증이 정원)
+  const _wkBooking = ["booking", "receipt"].includes(document.getElementById("rf_work_kind")?.value || "");   // ★ 결정 434: 영수증리뷰도 같다(매장 방문 · 남은 영수증이 정원)
   if (!manager) errs.push("담당자를 선택해주세요");
   if (!channel && !_wkBooking) errs.push("구매채널을 선택해주세요");
   if (!startDate && !_wkBooking) errs.push("모집 시작일을 입력해주세요");
@@ -3929,7 +3929,7 @@ function _rfApplyWorkKindUi() {
     }
     note.style.display = "";
   } else if (note) note.style.display = "none";
-  _rfApplyBookingUi(_kind === "booking" || _kind === "receipt", _kind);   // ★ 결정 432: 영수증리뷰도 같은 칸을 숨기고 안내 카드를 보인다
+  _rfApplyBookingUi(_kind === "booking" || _kind === "receipt", _kind);   // ★ 결정 434: 영수증리뷰도 같은 칸을 숨기고 안내 카드를 보인다
 }
 
 /* ═══ 📅 결정 409: 네이버예약리뷰 발행 폼 ═══
@@ -3965,7 +3965,7 @@ function _rfApplyBookingUi(isBooking, kind) {
   card.hidden = false;
   card.innerHTML = kind === "receipt" ? _rfRenderReceiptCard(window._rfReceiptSpec || null) : _rfRenderBookingCard(window._rfBookingSpec || null);
 }
-/** 🧾 결정 432 — 영수증리뷰 안내 카드(보기 전용). 재료 = 프리필의 receipt(서버 receiptSpecForScreen · 영수증 파일 번호 없음). */
+/** 🧾 결정 434 — 영수증리뷰 안내 카드(보기 전용). 재료 = 프리필의 receipt(서버 receiptSpecForScreen · 영수증 파일 번호 없음). */
 function _rfRenderReceiptCard(spec) {
   const e = v => (typeof escHtml === "function" ? escHtml(String(v == null ? "" : v)) : String(v == null ? "" : v).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])));
   const head = '<div style="font-weight:800;color:#0F766E;margin-bottom:6px">🧾 영수증리뷰 · 리뷰오더에서 정한 매장 정보 <span style="font-weight:600;color:#64748B">(보기 전용)</span></div>';
@@ -4072,7 +4072,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   if (typeof recruitSaveBlockClear === "function") recruitSaveBlockClear();  // 지난번 차단 사유 잔류 방지
   _rfLinkedMiss = null; _rfSugCache = [];   // 지난 공고의 "탭 못 찾음" 사유가 새 모달에 남지 않게(로드보다 먼저)
   window._rfBookingSpec = null;   // ★ 결정 409: 지난 공고의 예약 정보가 새 공고에 남지 않게(종류 초기화보다 먼저)
-  window._rfReceiptSpec = null;   // ★ 결정 432: 영수증리뷰도 같다
+  window._rfReceiptSpec = null;   // ★ 결정 434: 영수증리뷰도 같다
   { const _wk = document.getElementById("rf_work_kind"); if (_wk) _wk.value = ""; _rfApplyWorkKindUi(); }   // ★ 127: 종류 초기화(기본=리뷰)
   /* 저장 성공 시 버튼을 '✓ 저장됨'(비활성)으로 두고 모달을 닫으므로, 다시 열 때 되돌린다 */
   { const _sb = document.getElementById("recruitSaveBtn");
@@ -4496,7 +4496,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
       if (prefill.review_type) _rfPickBtn("review_type", _rfReviewTypeKey(prefill.review_type));
       /* ★ 127: 작업오더의 체험단 종류 → 공고에 그대로 전파(blog 면 리뷰타입 카드 숨김) */
       window._rfBookingSpec = (prefill.booking && typeof prefill.booking === "object") ? prefill.booking : null;   // ★ 결정 409 — 보기 전용 예약 정보
-      window._rfReceiptSpec = (prefill.receipt && typeof prefill.receipt === "object") ? prefill.receipt : null;   // ★ 결정 432 — 보기 전용 매장 정보
+      window._rfReceiptSpec = (prefill.receipt && typeof prefill.receipt === "object") ? prefill.receipt : null;   // ★ 결정 434 — 보기 전용 매장 정보
       { const _wk = document.getElementById("rf_work_kind"); if (_wk) _wk.value = _rfPrefillWorkKind(prefill.work_kind); _rfApplyWorkKindUi(); }
 
       /* ★ 065: 연결 탭 자동 선택 — 접수 시 확정된 탭(work_sheet_url 은 제출 필수).
@@ -6537,7 +6537,7 @@ async function saveRecruitPostImpl() {
         }
         /* ★ 결정 409: 네이버예약리뷰도 「그날 정원」이 없다 — 열림/마감은 서버가 자리표의 남은 자리로 정한다.
            일건수가 비면 총모집으로 채워(블로그와 같은 정규화) 하루 인원 판정이 조용히 막지 않게 한다. */
-        if ((payload.work_kind === "booking" || payload.work_kind === "receipt") && !(Number(payload.daily_limit) > 0)) {   // ★ 결정 432: 영수증리뷰도 같다
+        if ((payload.work_kind === "booking" || payload.work_kind === "receipt") && !(Number(payload.daily_limit) > 0)) {   // ★ 결정 434: 영수증리뷰도 같다
           payload.daily_limit = (Number(payload.recruit_total) > 0) ? Number(payload.recruit_total) : 9999;
         }
         }

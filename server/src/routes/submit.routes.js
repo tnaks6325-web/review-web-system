@@ -440,7 +440,7 @@ router.post('/review', async (req, res, next) => {
         await completionClient.query('COMMIT');
         completionClient.release(); completionClient=null;
 
-        /* ★ 결정 432 — 영수증리뷰: 리뷰를 낸 영수증 줄에 「리뷰 냄」을 새긴다(그 뒤 신청이 취소돼도 다른 사람에게 다시 주지 않는다).
+        /* ★ 결정 434 — 영수증리뷰: 리뷰를 낸 영수증 줄에 「리뷰 냄」을 새긴다(그 뒤 신청이 취소돼도 다른 사람에게 다시 주지 않는다).
              영수증 줄이 아니면 0줄(다른 종류 동작 불변) · 실패는 경고만(리뷰 제출을 되돌리지 않는다). 커밋 뒤라 제출 트랜잭션을 깨지 않는다. */
         await require('../services/receiptPool.service').markReviewedRow(pool, sheetId, tabName, rowIndex);
 
@@ -642,7 +642,7 @@ async function _authoritativeHold(ctx) {
     ctx.qnaSlotId = rows[0].qna_slot_id == null ? null : Number(rows[0].qna_slot_id);
     // ★ 결정 409: 예약 자리에 묶인 신청인가(같은 왕복 · 순증 0). 칸은 부팅 필수 스키마(228)라 늘 있다.
     ctx.bookingSlotId = rows[0].booking_slot_id == null ? null : Number(rows[0].booking_slot_id);
-    // ★ 결정 432: 영수증이 배정된 신청인가(같은 왕복 · 순증 0). 칸은 부팅 필수 스키마(232)라 늘 있다.
+    // ★ 결정 434: 영수증이 배정된 신청인가(같은 왕복 · 순증 0). 칸은 부팅 필수 스키마(232)라 늘 있다.
     ctx.receiptPoolId = rows[0].receipt_pool_id == null ? null : Number(rows[0].receipt_pool_id);
     // ★ 멱등 판정 재료: 이 홀드로 이미 접수된 "살아있는" 주문이 있는가.
     //   status='submitted' 확정건뿐 아니라 late_order_id(지각 접수)도 포함해야 한다 —
@@ -1063,7 +1063,7 @@ router.post('/booking', async (req, res, next) => {
   }
 });
 
-/* ═══ ★★ 결정 432 — 영수증리뷰 참여 확정 · 내 영수증 보기 ═══
+/* ═══ ★★ 결정 434 — 영수증리뷰 참여 확정 · 내 영수증 보기 ═══
    참여(POST /api/campaign/:id/apply)가 안 쓴 영수증 한 장을 신청에 묶은 뒤, 화면이 곧바로(입력 없이) 이 창구를 부른다:
      ① 최소 장부 줄(source='receipt_join' · 이름·연락처·입금 계좌 · 참여일자) + 홀드 확정(같은 트랜잭션)
      ② **배정된 영수증 줄 번호로만** 작업표 기록(남의 줄 안 덮음) + 「리뷰마감일」 칸 — 참여일·마감일은 배정 때 영수증 줄에 새긴 값(사본 0)
@@ -1300,7 +1300,7 @@ router.post('/order', async (req, res, next) => {
       return res.status(409).json({ ok: false, reason: 'booking_use_reservation',
         error: '예약 참여는 구매양식이 아니라 예약내역으로 제출해요. 화면을 새로고침해주세요.' });
     }
-    /* ★ 결정 432: 영수증이 배정된 신청도 구매양식으로 받지 않는다 — 이 길로 들어오면 배정된 영수증 줄이 아닌 아무 빈 줄에 들어간다.
+    /* ★ 결정 434: 영수증이 배정된 신청도 구매양식으로 받지 않는다 — 이 길로 들어오면 배정된 영수증 줄이 아닌 아무 빈 줄에 들어간다.
          참여 확정 창구는 POST /api/submit/receipt 하나다(리뷰어는 리뷰 캡처만 낸다). */
     if (holdCtx && holdCtx.verified && holdCtx.receiptPoolId) {
       return res.status(409).json({ ok: false, reason: 'receipt_use_join',

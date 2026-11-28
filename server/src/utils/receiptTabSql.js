@@ -1,6 +1,6 @@
 'use strict';
 /**
- * receiptTabSql.js — 「이 탭이 영수증리뷰(영수증 묶음) 탭인가」 SQL 조각의 단일 출처 (결정 420 판정 · 결정 432 사용자 확정 2026-11-28 에서 조각으로 뺌).
+ * receiptTabSql.js — 「이 탭이 영수증리뷰(영수증 묶음) 탭인가」 SQL 조각의 단일 출처 (결정 420 판정 · 결정 434 사용자 확정 2026-11-28 에서 조각으로 뺌).
  *
  * 판정 = 영수증 묶음(receipt_pool)이 있거나, 탭 종류(tab_configs.work_kind)가 receipt 다
  *   (묶음 저장이 실패한 영수증 탭도 리뷰 탭처럼 다뤄지지 않게 — receiptPool.service 머리말). `bookingTabSql` 과 같은 모양.

@@ -59,7 +59,7 @@ async function seedOrder(who=owner,extra={}){return q(`INSERT INTO order_submiss
  CREATE INDEX audit_ri_coord ON review_index(sheet_id,tab_name,row_index);
  CREATE INDEX audit_pe_anchor ON participant_edits(sheet_id,tab_name,anchor_type,anchor_value) WHERE reverted_at IS NULL;`);
  // 결정 423 — 알림톡 후보 SQL 이 리뷰 날수 시작일(예약 줄 = 자리표 이용일)을 같은 왕복에 읽는다: 탭 종류 칸(099)·자리표(227)를 실제 migration 그대로.
- // 결정 432(2026-11-28 ②) — 알림 방식(영수증 = 마감 전날)이 영수증 묶음(230)·영수증 줄 참여일·마감일(232)을 같은 왕복에 읽는다 — 실제 migration 그대로(검사 의미 불변).
+ // 결정 434(2026-11-28 ②) — 알림 방식(영수증 = 마감 전날)이 영수증 묶음(230)·영수증 줄 참여일·마감일(232)을 같은 왕복에 읽는다 — 실제 migration 그대로(검사 의미 불변).
  for(const file of ['160_review_reminder_alimtalk.sql','161_workdesk_review_resolutions.sql','162_reviewer_participations.sql','227_booking_slots.sql','230_receipt_pool.sql'])await pg.exec(read('migrations/'+file));
  // 232 는 신청 표(이 고정 스키마는 뒤에서 만든다)도 고치므로 영수증 줄 칸(참여일·마감일·리뷰 냄)만 — migration 원문의 그 문장들 그대로.
  for(const stmt of read('migrations/232_receipt_applications.sql').split(';').map(x=>x.replace(/^\s*--.*$/gm,'').trim()).filter(x=>/^ALTER TABLE receipt_pool /.test(x)))await pg.exec(stmt+';');

@@ -52,7 +52,7 @@ const FUNCS = ['$', 'needLogin', 'hideSheet', 'openOptSheet', 'openChangeOptShee
   '_syncAcctGo', 'openAcctSheet', 'hideAcctSheet', 'openAcctEmpty', 'hideAcctEmpty', 'goRegisterSub', 'onAcctSheetConfirm',
   '_applyInitialAcct', '_continueInitialAcct', 'openBlogSheet', 'hideBlogSheet', 'onBlogSheetConfirm', 'openPopGate', 'hidePopGate',
   'goPopNormal'];
-const NEW_FUNCS = ['_sheetHideOf', '_sheetOpen', '_sheetClose', '_sheetLeave', 'onReceiptZoom'];   // 결정 403 · 432(영수증 크게 보기) — 옛 화면에는 없다(없으면 건너뛴다)
+const NEW_FUNCS = ['_sheetHideOf', '_sheetOpen', '_sheetClose', '_sheetLeave', 'onReceiptZoom'];   // 결정 403 · 434(영수증 크게 보기) — 옛 화면에는 없다(없으면 건너뛴다)
 
 /** 공고 화면 + 가짜 브라우저. 리뷰어 홈(index) → 공고 화면으로 들어온 상태에서 시작한다. */
 function world({ helper = true, subsDelay = 0 } = {}) {
@@ -88,7 +88,7 @@ function world({ helper = true, subsDelay = 0 } = {}) {
     children: [], _a: {}, appendChild(c) { this.children.push(c); return c; }, querySelector() { return null; },
     getAttribute(k) { return this._a[k] == null ? null : this._a[k]; }, setAttribute(k, v) { this._a[k] = String(v); }, focus() {},
     classList: { add() {}, remove() {} }, scrollTop: 0 });
-  // body = 화면에 붙인 동적 창(영수증 [크게 보기] · 결정 432). remove() = 그 창을 떼어 낸다.
+  // body = 화면에 붙인 동적 창(영수증 [크게 보기] · 결정 434). remove() = 그 창을 떼어 낸다.
   const body = { children: [], appendChild(c) { c.parentNode = body; body.children.push(c); return c; } };
   const mkDyn = () => Object.assign(mk(''), { className: '', parentNode: null, onclick: null,
     remove() { if (this.parentNode) { this.parentNode.children.splice(this.parentNode.children.indexOf(this), 1); this.parentNode = null; } } });
@@ -328,7 +328,7 @@ test('정적 — 도우미를 싣고, 창 8개 모두 「여는 곳 = _sheetOpen
   for (const fn of ['goPopNormal', 'goRegisterSub']) assert.match(grab(fn), /_sheetLeave\(/, fn + ' 는 창을 연 채 떠난다 → _sheetLeave');
 });
 
-/* ★ 결정 432 — 영수증 [크게 보기](화면 위 창)도 같은 규칙: 연 채 [뒤로] = 그 창만 닫힘 · 단추로 닫은 뒤 [뒤로] 한 번 = 떠남.
+/* ★ 결정 434 — 영수증 [크게 보기](화면 위 창)도 같은 규칙: 연 채 [뒤로] = 그 창만 닫힘 · 단추로 닫은 뒤 [뒤로] 한 번 = 떠남.
      실기(안드로이드 크롬 · 2026-11-27)에서 크게 보기를 연 채 [뒤로]를 누르면 공고 화면을 통째로 떠났다(창은 그대로 사라짐). */
 test('🧾 영수증 [크게 보기]: 연 채 [뒤로] → 크게 보기만 닫히고 공고에 남는다 → 한 번 더 [뒤로] = 떠난다', async () => {
   const w = world();

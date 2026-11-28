@@ -359,7 +359,7 @@ async function reviewDeadlinesForRows(db, rows = []) {
          JOIN jsonb_to_recordset($1::jsonb) AS x("sheetId" text, "tabName" text, seq int)
            ON x."sheetId" = s.sheet_id AND x."tabName" = s.tab_name AND x.seq = s.seq
        UNION ALL
-       /* ★ 결정 432 — 영수증리뷰 줄: 지금 그 영수증을 가진 참여의 리뷰마감일(배정 때 새긴 값 · 참여일 + N일) */
+       /* ★ 결정 434 — 영수증리뷰 줄: 지금 그 영수증을 가진 참여의 리뷰마감일(배정 때 새긴 값 · 참여일 + N일) */
        SELECT p.sheet_id, p.tab_name, p.seq, to_char(p.review_deadline, 'YYYY-MM-DD')
          FROM receipt_pool p
          JOIN jsonb_to_recordset($1::jsonb) AS y("sheetId" text, "tabName" text, seq int)

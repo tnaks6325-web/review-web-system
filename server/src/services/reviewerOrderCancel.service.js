@@ -92,7 +92,7 @@ async function cancelOrderByReviewer({ sheetId, tabName, rowIndex, phone8 = '', 
   const db = pool || require('../db/pool');
   const gate = await assessReviewerCancel(db, { sheetId, tabName, rowIndex });
   if (!gate.cancelable) return { ok: false, code: gate.reason, error: gate.message };
-  /* ★ 결정 432(2026-11-28 ①) — 영수증리뷰 참여 취소는 라우트가 그 참여의 주문 번호를 함께 준다. 그 줄에 앉은 주문이 다르면(줄이 바뀜)
+  /* ★ 결정 434(2026-11-28 ①) — 영수증리뷰 참여 취소는 라우트가 그 참여의 주문 번호를 함께 준다. 그 줄에 앉은 주문이 다르면(줄이 바뀜)
        지우지 않는다(남의 줄을 지목하지 못한다 — fail-closed). 옛 호출부(주문취소 창구)는 넘기지 않아 동작 불변. */
   if (expectedOrderSubmissionId && String(gate.orderSubmissionId || '') !== String(expectedOrderSubmissionId)) {
     return { ok: false, code: 'no_row', error: CANCEL_BLOCK_REASONS.no_row };
@@ -107,7 +107,7 @@ async function cancelOrderByReviewer({ sheetId, tabName, rowIndex, phone8 = '', 
   const by = `reviewer:${String(phone8 || '').slice(-4)}`;
   /* ★ `actorRole` 을 넘기지 않는다 — 그 게이트는 "담당자가 남의 구매기록을 지우는" 경우를 막는
        것이고, 여기는 **본인 것**이다(소유권은 라우트가 강한 키로 이미 확인했다). */
-  // ★ requireNoReview — 판정(assess)과 실행 사이에 리뷰가 들어와도 지우지 않는다(잠근 줄에서 다시 본다 · 결정 432 2026-11-28 ①).
+  // ★ requireNoReview — 판정(assess)과 실행 사이에 리뷰가 들어와도 지우지 않는다(잠근 줄에서 다시 본다 · 결정 434 2026-11-28 ①).
   const out = await trackB.hideWorkdeskRow({ sheetId, tabName, rowId: gate.rowId, by, requireNoReview: true });
   if (!out || out.ok !== true) {
     return { ok: false, code: (out && out.error) || 'cancel_failed', error: CANCEL_BLOCK_REASONS[(out && out.error)] || '취소하지 못했습니다. 잠시 후 다시 시도해주세요.' };

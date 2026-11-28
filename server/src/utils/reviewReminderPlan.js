@@ -1,6 +1,6 @@
 'use strict';
 /**
- * reviewReminderPlan.js — **「리뷰 미작성 알림톡을 언제·몇 번·어떤 기한으로 보내나」 종류별 단일 출처** (결정 426 · 사용자 확정 2026-11-25 ③ · 결정 432 사용자 확정 2026-11-28 ②).
+ * reviewReminderPlan.js — **「리뷰 미작성 알림톡을 언제·몇 번·어떤 기한으로 보내나」 종류별 단일 출처** (결정 426 · 사용자 확정 2026-11-25 ③ · 결정 434 사용자 확정 2026-11-28 ②).
  *
  * 형제 모듈 `utils/reviewClockStart`(날수 시작일 · 결정 423)와 같은 종류 판정 SQL(`KIND_ROW_SQL`)을 쓴다 — 예약·영수증 줄 판정 사본 0.
  *
@@ -13,7 +13,7 @@
  *     ① 네이버예약리뷰(booking) = `deadline_day_once` — **리뷰 마감일 당일 한 번**(sendOffsetDays 0 · 결정 426).
  *          마감일 = 자리표 `booking_slots.review_deadline`(= 이용일 + 오더 리뷰 기한 N일 · 결정 407·422) —
  *          리뷰어 화면 「오늘 마감」(`bookingSlots.reviewDeadlineStateAt`)과 담당자 작업보드 「마감 지남」이 읽는 **같은 칸**.
- *     ② 영수증리뷰(receipt) = `day_before_deadline_once` — **리뷰 마감일 전날 한 번**(sendOffsetDays 1 · 결정 432 사용자 확정 2026-11-28 ②).
+ *     ② 영수증리뷰(receipt) = `day_before_deadline_once` — **리뷰 마감일 전날 한 번**(sendOffsetDays 1 · 결정 434 사용자 확정 2026-11-28 ②).
  *          마감일 = 영수증 줄 `receipt_pool.review_deadline`(= 참여일 + 오더의 리뷰 기한 N일 · 배정 때 새김 — 리뷰어 화면
  *          「내일/오늘 마감」·참여 상세 `receiptSeat`·담당자 「마감 지남」이 읽는 **같은 칸**). 참여일 = 같은 줄 `joined_date`.
  *          ★ 보내는 날이 참여한 날과 같거나 앞이면(리뷰 기한 1일) **자동으로 보내지 않는다**(`autoAfterStartDay` — 참여 당일에
@@ -33,7 +33,7 @@ const DEFAULT_PLAN = 'schedule_days';
 /** 종류 → 알림 방식. 여기 없는 종류 = 기본. */
 const REMINDER_PLAN_BY_KIND = Object.freeze({
   booking: 'deadline_day_once',          // 결정 426 — 네이버예약리뷰 = 리뷰 마감일 당일 한 번
-  receipt: 'day_before_deadline_once',   // 결정 432(2026-11-28 ②) — 영수증리뷰 = 리뷰 마감일 전날 한 번
+  receipt: 'day_before_deadline_once',   // 결정 434(2026-11-28 ②) — 영수증리뷰 = 리뷰 마감일 전날 한 번
 });
 
 /** 방식 → 그 줄 마감일(YYYY-MM-DD 글자) SQL(별칭 a = review_index 별칭). 모르면 NULL 이어야 한다(fail-safe). */

@@ -8707,7 +8707,7 @@ async function _cndPublish(cd){
     let o=((r&&r.items)||[]).find(x=>String(x.id)===String(cd.workOrderId));
     /* ★ 결정 414: 이 응답은 요약 행(제목·인원·종류)이라 예약 오더는 예약 안내·총 모집·연결 작업이 빈 발행 폼이 됐다 —
        예약 오더면 홈 [공고 발행]과 같은 원본 행(작업오더 목록 · 서버가 붙인 booking_spec)으로 프리필한다. 다른 종류는 종전 그대로. */
-    if(o && ((typeof _woIsBookingKind==='function'?_woIsBookingKind(o.work_kind):String(o.work_kind||'')==='booking') || String(o.work_kind||'')==='receipt')) o=(await _cndPublishFullRow(o.id))||o;   // ★ 결정 432 — 영수증리뷰도 같은 원본 행(receipt_spec)
+    if(o && ((typeof _woIsBookingKind==='function'?_woIsBookingKind(o.work_kind):String(o.work_kind||'')==='booking') || String(o.work_kind||'')==='receipt')) o=(await _cndPublishFullRow(o.id))||o;   // ★ 결정 434 — 영수증리뷰도 같은 원본 행(receipt_spec)
     if(o && typeof _woCampaignPrefill==='function') return openRecruitModal(null,_woCampaignPrefill(o),o.id);
   }
   return openRecruitModal(null,{linked_sheet_id:t.sheetId,linked_tab_name:t.tabName,linked_tab_gid:t.tabGid||''});
@@ -19731,7 +19731,7 @@ const _HIDE_ROW_ERRORS={
   order_cancel_failed:'구매기록 취소에 실패해 행도 지우지 않았습니다(둘은 함께 처리됩니다). 다시 시도해 주세요.',
   invalid_order_id:'이 행에 연결된 주문 식별자가 올바르지 않습니다. 담당 개발자에게 알려주세요.',
   row_not_found:'그 행을 찾지 못했습니다 — 다른 담당자가 이미 지웠을 수 있습니다. 새로고침 후 확인해 주세요.',
-  review_submitted:'리뷰가 이미 제출된 줄이라 리뷰어 취소로는 지우지 않았습니다. 새로고침 후 확인해 주세요.',   // 결정 432(2026-11-28 ①) — 리뷰어 취소 전용 재확인 사유(담당자 [줄 삭제]는 이 사유를 내지 않는다)
+  review_submitted:'리뷰가 이미 제출된 줄이라 리뷰어 취소로는 지우지 않았습니다. 새로고침 후 확인해 주세요.',   // 결정 434(2026-11-28 ①) — 리뷰어 취소 전용 재확인 사유(담당자 [줄 삭제]는 이 사유를 내지 않는다)
   row_changed:'그 사이 행이 바뀌었습니다. 새로고침 후 다시 시도해 주세요.',
   not_sheetless:'구글시트를 아직 쓰는 옛 작업이라 행을 지울 수 없습니다 — 다음 시트 반영 때 그 행이 되살아납니다. 구글시트에서 직접 지워 주세요.',
   row_campaign_not_found:'이 주문에 연결된 공고를 하나로 좁히지 못했습니다.',

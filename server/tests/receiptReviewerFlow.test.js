@@ -1,5 +1,5 @@
 /**
- * receiptReviewerFlow.test.js — 영수증리뷰 3단계 회귀가드: 모집공고 · 참여 순간 영수증 한 장 배정 · 내 영수증 보기 · 리뷰 제출 (결정 432)
+ * receiptReviewerFlow.test.js — 영수증리뷰 3단계 회귀가드: 모집공고 · 참여 순간 영수증 한 장 배정 · 내 영수증 보기 · 리뷰 제출 (결정 434)
  * 실행: node tests/receiptReviewerFlow.test.js
  *
  * 위험:
@@ -379,7 +379,7 @@ function handlerOf(router, method, p) {
   const cv = F('campaign.html');
   t('화면: 리뷰 캡처까지 내야 완료(_isDoneDetail 영수증 갈래)', /if\(isReceiptCampaign\(\) \|\| j\.receiptSeat\) return !!\(j\.receiptSeat && j\.receiptSeat\.reviewDone === true\);/.test(cv));
   t('★ 화면: 내 영수증은 헤더 인증 fetch → blob(주소를 만들지 않는다 · 캐시 금지)', /\/api\/submit\/receipt\/image', \{ method:'POST', cache:'no-store'[\s\S]{0,300}\{ blob: true/.test(cv) && /URL\.createObjectURL\(blob\)/.test(cv)
-    && !/drive\/image|guide-image/.test(cv.slice(cv.indexOf('결정 432 — 영수증리뷰 ═══'), cv.indexOf('function startHoldCountdown('))));
+    && !/drive\/image|guide-image/.test(cv.slice(cv.indexOf('결정 434 — 영수증리뷰 ═══'), cv.indexOf('function startHoldCountdown('))));
   t('화면: 영수증 공고 안내를 못 받으면 [참여하기] 잠금 · 남은 0 = 「마감」', /if\(!\(c && c\.receipt\)\)\{ jb\.disabled = true;/.test(cv) && /마감 — 영수증이 모두 나갔어요/.test(cv));
   t('화면: 마지막 영수증 거절 → 공고 다시 받기(receipt_sold_out)', /if\(j\.reason === 'receipt_sold_out' \|\| j\.reason === 'receipt_place_unknown'\)\{ hideAcctSheet\(\); toast\(_applyReasonText\(j\)\); await loadCampaign\(\); return; \}/.test(cv));
   const cards = F('js/campaign-cards.js');
