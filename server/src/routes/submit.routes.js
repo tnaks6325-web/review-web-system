@@ -440,9 +440,8 @@ router.post('/review', async (req, res, next) => {
         await completionClient.query('COMMIT');
         completionClient.release(); completionClient=null;
 
-        /* ★ 결정 434 — 영수증리뷰: 리뷰를 낸 영수증 줄에 「리뷰 냄」을 새긴다(그 뒤 신청이 취소돼도 다른 사람에게 다시 주지 않는다).
-             영수증 줄이 아니면 0줄(다른 종류 동작 불변) · 실패는 경고만(리뷰 제출을 되돌리지 않는다). 커밋 뒤라 제출 트랜잭션을 깨지 않는다. */
-        await require('../services/receiptPool.service').markReviewedRow(pool, sheetId, tabName, rowIndex);
+        /* ★ 결정 434(PR #1897 리뷰 ①) — 영수증리뷰 「리뷰 냄」은 위 완료 트랜잭션 안에서 이미 새겼다(무시트 「리뷰제출」 칸 기록 실행부
+             `sheetlessStatus.markStatusCell` → `receiptPool.markReceiptReviewedInTx` — 담당자 완료 길과 같은 단일 출처). 커밋 뒤 따로 쓰지 않는다. */
 
         // Optional review memo failure does not undo completion. Required blog URL
         // was already saved inside the transaction; never write it a second time here.

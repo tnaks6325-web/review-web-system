@@ -2234,6 +2234,11 @@ router.post('/:id/cancel', applyLimiter, async (req, res, next) => {
       return res.status(400).json({ ok: false, error: 'phone8(8자리)과 holdToken이 필요합니다.' });
     }
     const client = await pool.connect();
+    /* ★ 결정 434(PR #1897 리뷰 ③) — 빌린 연결은 정확히 한 번 반납한다(releaseOnce). 영수증 취소(_receiptSelfCancel)는 자기 연결
+         (pool.query · 실행부 트랜잭션)을 따로 쓰므로, 넘어가기 **전에** 이 연결을 먼저 반납한다 — 쥔 채 기다리면 연결 1개(DB_POOL_MAX=1)에서
+         교착(시간초과)이고, 평소 크기에서도 취소가 몰리면 연결이 마른다. */
+    let released = false;
+    const releaseOnce = () => { if (!released) { released = true; client.release(); } };
     try {
       await client.query('BEGIN');
       // ★ 결정 356: 차례 줄 행(turn_starts_at 은 INSERT 때 정해져 바뀌지 않는다)이면 캠페인 행을 먼저 잠근다 —
@@ -2255,6 +2260,7 @@ router.post('/:id/cancel', applyLimiter, async (req, res, next) => {
       );
       if (rows.length === 0) {
         await client.query('ROLLBACK');
+        releaseOnce();   // ★ PR #1897 리뷰 ③ — 영수증 취소로 넘어가기 전에 반납(아래 _receiptSelfCancel 은 자기 연결을 쓴다)
         // ★ 결정 434(2026-11-28 ①) — 영수증을 받은(확정된) 영수증리뷰 참여는 리뷰 전이면 같은 버튼으로 취소한다(위 _receiptSelfCancel).
         if (await _receiptSelfCancel(req, res, { id, p8, token })) return;
         return res.status(404).json({ ok: false, error: '취소할 수 있는 참여가 없습니다.' });
@@ -2267,10 +2273,10 @@ router.post('/:id/cancel', applyLimiter, async (req, res, next) => {
       logger.info(`[campaign/cancel] camp=${id} app=${rows[0].id} phone8=***${p8.slice(-4)}`);
       res.json({ ok: true, message: '참여가 취소되었어요. 구매양식을 제출하지 않았다면 오늘 다시 참여할 수 있어요.' });
     } catch (e) {
-      try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+      if (!released) { try { await client.query('ROLLBACK'); } catch (_) { /* noop */ } }   // 반납한 연결에는 쓰지 않는다
       throw e;
     } finally {
-      client.release();
+      releaseOnce();
     }
   } catch (err) {
     next(err);

@@ -442,21 +442,41 @@ function reviewerSeatView(poolRow, place, now = new Date()) {
 }
 
 /**
- * 리뷰 캡처가 제출된 영수증 줄에 「리뷰 냄」을 새긴다 — 그 뒤 신청이 취소돼도 영수증을 다시 주지 않는 근거.
- * ★ 리뷰 제출을 막지 않는다(실패 = 경고만 · 판정 ㉯는 제출 확정 신청이 그대로 쥐고 있어 그 사이 다른 사람에게 가지 않는다).
+ * ★★ 결정 434(PR #1897 리뷰 ①) — 「이 영수증으로 리뷰를 냈다」(receipt_pool.reviewed_at)를 새기는 **단일 출처**.
+ *   그 뒤 신청이 취소되거나 담당자가 줄을 지워 영수증이 보충 줄로 옮겨 가도 다시 주지 않는 근거(receiptTakenSql ㉮ · pickReceiptInTx).
+ * ★ 부르는 곳 = 리뷰 완료를 쓰는 **모든** 트랜잭션 안(커밋과 함께 굳고, 완료가 되돌려지면 같이 되돌려진다):
+ *     ㉠ 무시트 상태 칸 「리뷰제출」 기록 단일 실행부 `sheetlessStatus._writeCellAndRebuild(kind='submit')`
+ *        = 리뷰어 리뷰 캡처 제출 · 담당자 [리뷰제출일 기록] · 동시진행 묶음 완료
+ *     ㉡ 그 실행부를 거치지 않는 담당자 [수동 리뷰제출] `trackB.manualWorkdeskReviewSubmitInTx`
+ *     ㉢ 받침 — 담당자 [줄 삭제]가 리뷰 낸 줄의 영수증을 보충 줄로 옮기기 직전(`trackB._hideParticipantInTx` — 영수증이 줄을 옮기는 유일한 곳)
+ * ★ 영수증 줄이 아니면 0줄(다른 종류 작업 쓰기 0). 트랜잭션 안이면 SAVEPOINT 로 격리 — 실패해도 리뷰 완료를 되돌리지 않는다
+ *   (경고만 · 그 사이에는 제출 확정 신청이 영수증을 쥐고 있고, 줄을 지울 때 ㉢ 받침이 다시 새긴다).
+ * @returns {Promise<number>} 새긴 줄 수(0 = 영수증 줄 아님 · 이미 새김 · 실패)
  */
-async function markReviewedRow(db, sheetId, tabName, seq) {
-  const n = parseInt(seq, 10);
+async function markReceiptReviewedInTx(client, { sheetId, tabName, rowIndex } = {}) {
+  const n = parseInt(rowIndex, 10);
   if (!sheetId || !tabName || !Number.isInteger(n)) return 0;
+  const q = client || _pool();
+  const sp = _inTx(client);
   try {
-    const r = await (db || _pool()).query(
+    if (sp) await q.query('SAVEPOINT receipt_reviewed');
+    const r = await q.query(
       `UPDATE receipt_pool SET reviewed_at = NOW(), updated_at = NOW()
         WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND reviewed_at IS NULL`, [sheetId, tabName, n]);
-    return r.rowCount || 0;
+    if (sp) await q.query('RELEASE SAVEPOINT receipt_reviewed');
+    return (r && r.rowCount) || 0;
   } catch (e) {
-    logger.warn(`[receiptPool] 리뷰 낸 영수증 표시 실패(리뷰 제출은 그대로) tab=${tabName} seq=${n}: ${e.message}`);
+    if (sp) {
+      try { await q.query('ROLLBACK TO SAVEPOINT receipt_reviewed'); await q.query('RELEASE SAVEPOINT receipt_reviewed'); } catch (_) { /* 바깥 트랜잭션이 정리한다 */ }
+    }
+    logger.warn(`[receiptPool] 리뷰 낸 영수증 표시 실패(리뷰 완료는 그대로 · 줄 삭제 때 다시 새김) tab=${tabName} seq=${n}: ${e.message}`);
     return 0;
   }
+}
+
+/** 옛 이름(시험·호출 호환) — 같은 실행부(`markReceiptReviewedInTx`)로만 간다. */
+async function markReviewedRow(db, sheetId, tabName, seq) {
+  return markReceiptReviewedInTx(db, { sheetId, tabName, rowIndex: seq });
 }
 
 module.exports = {
@@ -465,5 +485,5 @@ module.exports = {
   poolForTab, poolCounts, fileForRow, verifyRowsMatchPool, repairPoolIfMissing, sendReceiptImage,
   // 3단계(결정 434)
   receiptTakenSql, freeCountsForTab, loadFreeByCampaign, pickReceiptInTx, joinDatesFor, placeInfoForTab,
-  bindReceiptForApply, poolForApplication, receiptPublicView, reviewerSeatView, markReviewedRow,
+  bindReceiptForApply, poolForApplication, receiptPublicView, reviewerSeatView, markReviewedRow, markReceiptReviewedInTx,
 };

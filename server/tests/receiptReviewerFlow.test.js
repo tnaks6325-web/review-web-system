@@ -373,7 +373,13 @@ function handlerOf(router, method, p) {
     && /if \(\(qnaApply \|\| bookingApply \|\| receiptApply\) && sameCampaignSubmittedAt\)/.test(routes));
   t('잠근 공고로 종류 재확인(영수증 여부가 갈리면 막음)', /isReceiptKind\(_lockedKind\) !== receiptApply/.test(routes));
   const sub = S('src/routes/submit.routes.js');
-  t('★ 리뷰 제출 커밋 뒤 「리뷰 냄」 표시(제출 트랜잭션 밖)', /await completionClient\.query\('COMMIT'\);[\s\S]{0,400}receiptPool\.service'\)\.markReviewedRow\(pool, sheetId, tabName, rowIndex\)/.test(sub));
+  // ★ 결정 434(PR #1897 리뷰 ①) — 「리뷰 냄」은 커밋 뒤가 아니라 완료 트랜잭션 **안**(강화): 리뷰제출 칸 실행부가 같은 client 로 새기고,
+  //   커밋 뒤 따로 쓰는 호출은 없다(행동 확인 = receiptPr1897ReviewFixes 「되돌리면 같이 되돌려진다」).
+  const _wcr = S('src/services/sheetlessStatus.service.js');
+  t('★ 리뷰 제출 = 완료 트랜잭션 안 리뷰제출 칸 실행부가 「리뷰 냄」(커밋 뒤 따로 안 씀)',
+    /markStatusCell\(\{ sheetId, tabName, rowIndex, kind: 'submit', value: submitValue, by: 'review-submit', client: completionClient \}\)[\s\S]*await completionClient\.query\('COMMIT'\);/.test(sub)
+    && !/markReviewedRow\(pool, sheetId, tabName, rowIndex\)/.test(sub)
+    && /if \(kind === 'submit'\) await require\('\.\/receiptPool\.service'\)\.markReceiptReviewedInTx\(db, \{ sheetId, tabName, rowIndex \}\);/.test(_wcr));
   t('★ 영수증 보기 = 비공개 목록 확인 뒤에만 드라이브 읽기 · 응답에 파일 번호 없음', /isRegisteredReceiptFile\(c\.rp\.file_id\)\)\) return res\.status\(404\)[\s\S]{0,80}sendReceiptImage\(res, c\.rp\.file_id\)/.test(sub));
   t('★ 본인 확인 = 리뷰어 세션 소유자 = 참여 소유자(소유자 모르면 거절)', /if \(!app\.owner_reviewer_id \|\| String\(app\.owner_reviewer_id\) !== String\(session\.ownerReviewerId\)\)/.test(sub));
   const cv = F('campaign.html');
