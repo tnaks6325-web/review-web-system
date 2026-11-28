@@ -4171,7 +4171,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   if (showEdits) {
     try {
       const { rows: bkr } = await db.query(
-        `SELECT seq, to_char(review_deadline, 'YYYY-MM-DD') AS d FROM booking_slots WHERE sheet_id=$1 AND tab_name=$2`, [sheetId, tabName]);
+        `SELECT seq, to_char(review_deadline, 'YYYY-MM-DD') AS d FROM booking_slots WHERE sheet_id=$1 AND tab_name=$2
+         UNION ALL SELECT seq, to_char(review_deadline, 'YYYY-MM-DD') FROM receipt_pool
+          WHERE sheet_id=$1 AND tab_name=$2 AND seq IS NOT NULL AND review_deadline IS NOT NULL`, [sheetId, tabName]);   // ★ 결정 434 — 영수증리뷰 줄도 같은 「마감 지남」
       if (bkr.length) bookingDeadlines = new Map(bkr.filter(x => x.d).map(x => [Number(x.seq), x.d]));
     } catch (e) {
       logger.warn(`[trackB] 예약리뷰 리뷰마감일 조회 실패(「마감 지남」 없이 종전 표) sheet=${sheetId} tab=${tabName}: ${e.message}`);
@@ -5067,6 +5069,10 @@ async function manualWorkdeskReviewSubmitInTx(client, { sheetId, tabName, rowId,
       `UPDATE index_master SET submitted_count = submitted_count + 1
         WHERE sheet_id=$1 AND tab_name=$2 AND submitted_count < row_count`,
       [sheetId, tabName]).catch(() => null);
+    /* ★★ 결정 434(PR #1897 리뷰 ①) — 담당자 [수동 리뷰제출]도 리뷰 완료다. 이 길은 상태 칸 실행부(sheetlessStatus)를 거치지 않으므로
+         같은 트랜잭션에서 직접 「리뷰 냄」을 새긴다(단일 출처 `markReceiptReviewedInTx` · 영수증 줄 아니면 0줄 · 실패는 격리·경고만).
+         안 새기면 담당자가 이 줄을 지울 때 영수증이 보충 줄로 옮겨 가 이미 쓴 영수증이 다음 참여자에게 간다. */
+    await require('./receiptPool.service').markReceiptReviewedInTx(client, { sheetId, tabName, rowIndex: participant.seq });
 
     return { ok: true, rowId, rowIndex: participant.seq, submitColumn: submitCol, submitValue: updated[0] && updated[0].submit_value, _reviewer: participant.reviewer_name || '' };
 }
@@ -5075,6 +5081,21 @@ async function manualWorkdeskReviewSubmitInTx(client, { sheetId, tabName, rowId,
 // 행 삭제 실패 사유. 트랜잭션 본문은 이 예외로만 중단한다.
 class HideRowError extends Error {
   constructor(code) { super(code); this.name = 'HideRowError'; this.code = code; }
+}
+
+/**
+ * 이 작업표 줄은 리뷰를 냈나 — 작업표 줄 표시 · 리뷰 색인 · 영수증 줄 「리뷰 냄」 셋 중 하나라도면 true.
+ * ★ 쓰는 곳 = 리뷰어 취소 잠금 안 재확인(requireNoReview · 결정 434 ①) · 줄 삭제가 영수증을 옮기기 전 받침(PR #1897 리뷰 ①) — 같은 판정(사본 0).
+ * @returns {Promise<boolean|null>} 빈 결과 = null(모름 — 호출부가 「리뷰 낸 것」 쪽으로 접는다)
+ */
+async function _rowReviewDoneInTx(client, { rowId, sheetId, tabName, seq }) {
+  const { rows: rv } = await client.query(
+    `SELECT (COALESCE((SELECT cp.is_submitted FROM campaign_participants cp WHERE cp.id = $1), FALSE)
+             OR EXISTS (SELECT 1 FROM review_index ri WHERE ri.sheet_id = $2 AND ri.tab_name = $3 AND ri.row_index = $4 AND ri.is_submitted = TRUE)
+             OR EXISTS (SELECT 1 FROM receipt_pool rcp WHERE rcp.sheet_id = $2 AND rcp.tab_name = $3 AND rcp.seq = $4 AND rcp.reviewed_at IS NOT NULL)) AS done`,
+    [rowId, sheetId, tabName, seq]);
+  if (!rv.length || typeof rv[0].done !== 'boolean') return null;
+  return rv[0].done;
 }
 
 // 주문(구매양식) 취소와 같은 트랜잭션 안에서 돌 수 있도록 client 를 주입받는다.
@@ -5131,7 +5152,7 @@ async function _inheritSlotPlanInTx(client, { sheetId, tabName, row, headers }) 
   return { cells, optionText };
 }
 
-async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expectedRevision, requireCancelledOrder = false }) {
+async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expectedRevision, requireCancelledOrder = false, requireNoReview = false }) {
     // 작업표 행과 리뷰어 참여내역은 같은 참여 단위다. 기존처럼 화면 오버레이만
     // 숨기면 review_index/order_submissions 쪽의 "내 참여내역"이 남아 서로 다른
     // 사실을 말하게 된다. 행을 잠근 뒤, 이 행에만 연결된 신원·참여 링크를 함께 해제한다.
@@ -5145,6 +5166,13 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
     const row = rows[0];
 
     if (expectedRevision && row.revision !== expectedRevision) throw new HideRowError('row_changed');
+    /* ★ 결정 434(2026-11-28 ①) — 리뷰어 스스로 취소(reviewerOrderCancel)는 **잠근 줄에서** 리뷰 제출 여부를 다시 본다(판정과 실행 사이에
+         리뷰가 들어와도 지우지 않는다 — 이 트랜잭션 통째 되돌림). 작업표 줄 · 리뷰 색인 · 영수증 줄 「리뷰 냄」 셋 중 하나라도면 거절.
+       ★ 담당자 [줄 삭제]는 이 옵션을 넘기지 않는다(동작 불변 — 리뷰 낸 줄도 담당자는 지울 수 있다). */
+    if (requireNoReview) {
+      const done = await _rowReviewDoneInTx(client, { rowId, sheetId, tabName, seq: row.seq });
+      if (done !== false) throw new HideRowError('review_submitted');   // 모르면(빈 결과) 지우지 않는다(fail-closed)
+    }
     if (requireCancelledOrder && row.order_submission_id) {
       const current = await client.query('SELECT deleted_at FROM order_submissions WHERE id=$1', [row.order_submission_id]);
       if (current.rows.length !== 1 || !current.rows[0].deleted_at) throw new HideRowError('row_changed');
@@ -5280,7 +5308,13 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
     const _bookingBound = _bookingTab && await require('./bookingSlots.service').isBoundRow(client, sheetId, tabName, row.seq);
     const _slotBound = _qnaBound || _bookingBound;
     const _receiptBound = _receiptTab && await require('./receiptPool.service').isPoolBoundRow(client, sheetId, tabName, row.seq);
-
+    /* ★★ 결정 434(PR #1897 리뷰 ①) 받침 — 영수증이 줄을 옮기는 곳은 여기 하나다(아래 보충 줄로 seq 이동). 지우는 줄이 리뷰를 낸 줄이면
+         옮기기 **전에** 그 영수증에 「리뷰 냄」을 굳힌다 — 리뷰 완료를 새기지 않은 길(시트 반영·옛 데이터 등)이 있어도 쓴 영수증이
+         보충 줄로 옮겨 가 다음 참여자에게 가지 않는다. 판정 = requireNoReview 와 같은 함수(_rowReviewDoneInTx · 모르면 리뷰 낸 것으로 본다).
+         지우기 전(줄이 아직 있을 때) 판정한다. 리뷰 전 줄은 그대로(영수증이 다음 사람에게 간다 — 사용자 확정 2026-11-27). */
+    if (_receiptBound && await _rowReviewDoneInTx(client, { rowId, sheetId, tabName, seq: row.seq }) !== false) {
+      await require('./receiptPool.service').markReceiptReviewedInTx(client, { sheetId, tabName, rowIndex: row.seq });
+    }
     // 행 자체는 실제 삭제한다. 삭제 표식은 별도 최소 테이블에 두어, 작업표 행을
     // 논리삭제 레코드로 남기지 않으면서도 재투영에 의해 같은 seq가 되살지 않게 한다.
     await client.query(
@@ -5442,7 +5476,7 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
 // ★ 목표 수 이내에서는 총 모집인원을 줄이지 않는다 — 지운 자리는 마지막 진행일의 빈 자리로
 //   보충한다. 이미 목표를 초과한 표는 삭제 뒤 목표 수 이상이면 보충하지 않아 초과분을 되살리지 않는다.
 // ★ 주문 취소와 행 제거는 반드시 한 트랜잭션 — 한쪽만 반영되면 원장과 작업표가 갈린다.
-async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRole = null, expectedRevision } = {}) {
+async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRole = null, expectedRevision, requireNoReview = false } = {}) {
   const db = getPool();
   // 살아 있는 구매양식이 붙은 행인지 먼저 본다(짧은 조회 — 잠금 없음).
   let liveOrderId = null;
@@ -5467,7 +5501,7 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRol
   }
 
   const runInOwnTx = () => _runWorkdeskMutation({ sheetId, tabName, rowId }, client =>
-    _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expectedRevision, requireCancelledOrder: true }));
+    _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expectedRevision, requireCancelledOrder: true, requireNoReview }));
 
   let result = null;
   let orderCanceled = false;
@@ -5487,7 +5521,7 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRol
           if (rows.length !== 1 || String(rows[0].order_submission_id || '') !== String(liveOrderId)) throw new HideRowError('row_changed');
         },
         // 행 제거·총원 보충을 주문 취소와 같은 트랜잭션에 둔다. 여기서 throw 하면 취소도 롤백된다.
-        beforeCancelCommit: async (client) => { result = await _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expectedRevision }); },
+        beforeCancelCommit: async (client) => { result = await _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expectedRevision, requireNoReview }); },
       });
       if (!canceled || !canceled.ok) return { ok: false, error: (canceled && canceled.code) || 'order_cancel_failed' };
       // 그 사이 다른 경로가 먼저 취소했다면 본문이 돌지 않았다 — 행 제거만 이어서 한다.

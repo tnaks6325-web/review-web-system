@@ -223,7 +223,7 @@ function handlerOf(router, method, p) {
   const sPlain = st.computeCampaignState(C, base, nowD);
   t('★ 예약 아님(bookingFree 없음) = 종전 그대로', sPlain.state === 'open' && sPlain.dailyQuota === 6);
   const css = S('src/services/campaignState.service.js');
-  t('공고 정원 재료는 깔때기 맨 뒤에서 싣는다(066 순서 계약 · Q&A 다음)', /loadTodayByCampaign\(pool, ids, now\)[\s\S]{0,900}loadFreeByCampaign\(pool, ids, now\)[\s\S]{0,400}return out;/.test(css));
+  t('공고 정원 재료는 깔때기 맨 뒤에서 싣는다(066 순서 계약 · Q&A 다음)', /loadTodayByCampaign\(pool, ids, now\)[\s\S]{0,900}loadFreeByCampaign\(pool, ids, now\)[\s\S]{0,900}receiptPool\.service'\)\.loadFreeByCampaign\(pool, ids\)[\s\S]{0,600}return out;/.test(css));
 
   /* ── 6) 신청 처리기(실제 처리기 · PGlite) ────────────────────── */
   console.log('\n6) 신청 처리기');
@@ -339,10 +339,10 @@ function handlerOf(router, method, p) {
   const iBind = ap.indexOf('bookingSlots.bindSlotForApply'), iIns = ap.indexOf('INSERT INTO campaign_applications');
   t('★★ 자리 묶기는 모든 게이트 뒤(인기 참여권 뒤)·작업표 잠금 뒤·INSERT 앞', iBind > ap.indexOf('canUsePopularCredit') && iBind > ap.indexOf('camp_tab_daily') && iBind < iIns);
   t('INSERT 칸 목록은 그대로 — 뒤이은 UPDATE 로 booking_slot_id', /SET booking_slot_id = \$2 WHERE id = \$1/.test(ap) && !/INSERT INTO campaign_applications\s*\([^)]*booking_slot_id/.test(ap));
-  t('★ 예약 신청은 개수 단계·작업표 빈 줄 관문·차례 줄을 타지 않는다', /if \(!blogApply && !qnaApply && !bookingApply\)/.test(ap)
-    && /if \(!blogApply && !qnaApply && !bookingApply && camp\.linked_sheet_id/.test(ap) && /!qnaApply && !bookingApply && !blogApply && holdChain\.chainEligibleCampaign/.test(ap));
+  t('★ 예약 신청은 개수 단계·작업표 빈 줄 관문·차례 줄을 타지 않는다', /if \(!blogApply && !qnaApply && !bookingApply(?: && !receiptApply)?\)/.test(ap)
+    && /if \(!blogApply && !qnaApply && !bookingApply(?: && !receiptApply)? && camp\.linked_sheet_id/.test(ap) && /!qnaApply && !bookingApply(?: && !receiptApply)? && !blogApply && holdChain\.chainEligibleCampaign/.test(ap));
   t('★ 예약 신청 기한 = 공고 홀드 시간(구매양식과 같다 · Q&A 1시간 규칙 아님)', /const _baseExp = qnaApply \? qnaSlots\.qnaHoldExpiry\(now\)\.getTime\(\) : now\.getTime\(\) \+ ttlMs;/.test(ap));
-  t('같은 공고 같은 명의 제출완료 = 막음 · 재구매 기간은 보지 않음(Q&A 와 같다)', /if \(\(qnaApply \|\| bookingApply\) && sameCampaignSubmittedAt\)/.test(ap) && /if \(!qnaApply && !bookingApply\) try \{/.test(ap));
+  t('같은 공고 같은 명의 제출완료 = 막음 · 재구매 기간은 보지 않음(Q&A 와 같다)', /if \(\(qnaApply \|\| bookingApply(?: \|\| receiptApply)?\) && sameCampaignSubmittedAt\)/.test(ap) && /if \(!qnaApply && !bookingApply(?: && !receiptApply)?\) try \{/.test(ap));
   t('잠근 공고로 종류 재확인(예약 여부가 갈리면 막음)', /isBookingKind\(_lockedKind\) !== bookingApply/.test(ap));
   t('자리 이중 묶기 충돌 = 「그날 자리 찼음」', /err\.constraint === 'uq_campaign_apps_booking_slot'[\s\S]{0,160}reason: 'booking_date_full'/.test(routes));
   t('상품 바꾸기: 예약 신청은 막음(booking_option_locked)', /booking_option_locked/.test(routes));
@@ -360,7 +360,7 @@ function handlerOf(router, method, p) {
   const ch = F('campaign.html');
   t('★ 예약 공고: 참여 전 매장 안내 + 날짜 고르기 카드', /id="bkPreBox"/.test(ch) && /function renderBookingPre\(/.test(ch));
   t('★ 신청 본문에 고른 날짜(bookingDate)', /body\.bookingDate = _bkDate/.test(ch));
-  t('★ 예약 공고는 구매양식 대신 예약 카드', /\$\('bookingBox'\)\.style\.display = _bk \? '' : 'none'/.test(ch) && /\$\('orderBox'\)\.style\.display = \(_qna \|\| _bk\) \? 'none' : ''/.test(ch));
+  t('★ 예약 공고는 구매양식 대신 예약 카드', /\$\('bookingBox'\)\.style\.display = _bk \? '' : 'none'/.test(ch) && /\$\('orderBox'\)\.style\.display = \(_qna \|\| _bk(?: \|\| _rc)?\) \? 'none' : ''/.test(ch));
   t('★ 제출 순서 = 예약내역 기록 → 예약내역 캡처(구매캡처 길) ', ch.indexOf("'/api/submit/booking'") > 0 && ch.indexOf("'/api/submit/booking'") < ch.indexOf("action:'uploadOrderImage'"));
   t('★ 리뷰 캡처는 기존 리뷰 업로드 길(uploadReviewImage → submitReview)', /function onBookingReviewSubmit\(/.test(ch)
     && ch.indexOf("action:'uploadReviewImage'", ch.indexOf('function onBookingReviewSubmit(')) > 0);
@@ -403,7 +403,7 @@ function handlerOf(router, method, p) {
       t('★ 발행 폼: 예약 공고는 상품 리뷰 전용 칸(구매채널·배송·회수·필수 배송메세지·주말·유입 방식·상품메인 URL)을 숨기고 상품 추가를 감춘다',
         ['rf_channel_btns', 'rf_delivery_toggle', 'rf_delivery_mix_row', 'rf_recall_row', 'rf_required_delivery_memo', 'rf_skip_weekends_toggle', 'rf_inflow_type_ui', 'rf_product_main_url']
           .every(id => hide.includes('"' + id + '"'))
-        && /function _rfApplyWorkKindUi\(\)[\s\S]{0,4000}_rfApplyBookingUi\(_kind === "booking"\);/.test(ir) && /getElementById\("rf_opt_addbtn"\)[\s\S]{0,200}add\.hidden = true/.test(ir));
+        && /function _rfApplyWorkKindUi\(\)[\s\S]{0,4000}_rfApplyBookingUi\(_kind === "booking"(?: \|\| _kind === "receipt", _kind)?\);/.test(ir) && /getElementById\("rf_opt_addbtn"\)[\s\S]{0,200}add\.hidden = true/.test(ir));
       t('발행 폼 게시 전 점검: 예약 공고는 구매채널·모집 시작일·하루 인원을 요구하지 않는다', /if \(!channel && !_wkBooking\)/.test(ir) && /if \(!startDate && !_wkBooking\)/.test(ir) && /!_wkBlog && !_wkBooking\) errs\.push/.test(ir));
       // 카드 실제 실행 — 무료체험형 · 링크 「열기」 · 날짜·인원
       const fnSrc = ir.slice(ir.indexOf('function _rfBkDay('), ir.indexOf('function _ensureWorkboardDisplayNameInput'));

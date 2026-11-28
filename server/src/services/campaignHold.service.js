@@ -68,10 +68,33 @@ async function _isScheduleDriven(q, campaignId) {
   }
 }
 
+/**
+ * ★★ 결정 434 — 영수증리뷰 공고인지. 이런 공고도 마감을 **영속하지 않는다** — 영수증이 다 나가 status='closed' 를 저장하면,
+ * 리뷰 전에 줄 삭제·취소로 돌아온 영수증을 다음 참여자가 받지 못한다(사용자 확정 2026-11-27 「다시 준다」).
+ * 남은 영수증 0 은 상태 엔진이 soft_full 로 보여 주고, 돌아오면 저절로 열린다.
+ * ★ 판정 = receiptPool.isReceiptPoolTab(조회 실패 = 영수증 탭으로 본다 → 영속하지 않음 · 표시는 상태 엔진이 그대로 「가득」).
+ */
+async function _isReceiptCampaign(q, campaignId) {
+  try {
+    const { rows } = await q.query(`SELECT linked_sheet_id, linked_tab_name FROM recruit_campaigns WHERE id = $1 LIMIT 1`, [campaignId]);
+    const r = rows[0];
+    return await _isReceiptLinked(q, r && r.linked_sheet_id, r && r.linked_tab_name);
+  } catch (_) {
+    return false;
+  }
+}
+/** 연결된 작업표가 영수증 탭인가 — 마감 영속 제외 판정 하나(maybePersistClosed · 매분 정리 백스톱 공용 · PR #1897 리뷰 ②).
+ *  판정 = receiptPool.isReceiptPoolTab(SAVEPOINT 격리 · 조회 실패 = 영수증 탭으로 본다 → 영속하지 않음). 연결 없음 = false. */
+async function _isReceiptLinked(q, sheetId, tabName) {
+  if (!sheetId || !tabName) return false;
+  return require('./receiptPool.service').isReceiptPoolTab(q, sheetId, tabName);
+}
+
 /** closed 영속 단일 헬퍼 — 자동확정·수동확정·스윕 백스톱 공용. 멱등(WHERE status='active'). */
 async function maybePersistClosed(q, campaignId, opts = {}) {
   if (!opts[CONFIRMED_CALLER_PRELOCK]) await _assertCallerLifecycle(q, campaignId, opts.lockedScope);
   if (await _isScheduleDriven(q, campaignId)) return;
+  if (await _isReceiptCampaign(q, campaignId)) return;   // ★ 결정 434 — 영수증 공고는 영속 마감 없음(돌아온 영수증을 다시 준다)
   await q.query(
     `UPDATE recruit_campaigns rc SET status = 'closed', updated_at = NOW()
       WHERE rc.id = $1 AND rc.participation_mode AND rc.status = 'active' AND rc.recruit_total > 0
@@ -393,7 +416,7 @@ async function sweepExpiredHoldsInTx(pool, { campaignIds, exclude = false, dismi
   // ③ closed 영속 백스톱(soft_full 영구표류 방지). ★ 후보를 먼저 뽑고 시트 일정 캠페인은 제외 —
   //    영속하면 시트에 날짜를 추가해도 재개되지 않기 때문(063 자동 재개 보장).
   const cand = await pool.query(
-    `SELECT rc.id, rc.linked_sheet_id, rc.linked_tab_gid FROM recruit_campaigns rc
+    `SELECT rc.id, rc.linked_sheet_id, rc.linked_tab_gid, rc.linked_tab_name FROM recruit_campaigns rc
       WHERE rc.participation_mode AND rc.status = 'active' AND rc.recruit_total > 0
         AND rc.id ${exclude ? '<> ALL' : '= ANY'}($1::text[])
         AND (SELECT COUNT(*) FROM campaign_applications ca
@@ -409,6 +432,19 @@ async function sweepExpiredHoldsInTx(pool, { campaignIds, exclude = false, dismi
       const m = await deriveSchedules(pool, tabs);
       ids = cand.rows.filter(r => !scheduleFor(m, r)).map(r => r.id);
     } catch (_) { /* 판정 실패 = 기존 동작(전부 영속)으로 폴백 */ }
+  }
+  /* ★★ 결정 434(PR #1897 리뷰 ②) — 영수증리뷰 공고도 제외한다(maybePersistClosed 와 같은 판정 `_isReceiptLinked`).
+       여기서 닫으면 maybePersistClosed 의 제외가 다음 분까지만 미뤄질 뿐 — 영수증이 다 나간 공고가 closed 로 굳어,
+       리뷰 전 취소·줄 삭제로 돌아온 영수증을 다음 참여자가 받지 못한다(상태 엔진의 status 게이트). 남은 0장은 상태 엔진이 soft_full 로 보여 준다.
+       ★ 후보(정원만큼 확정된 활성 공고)에만 묻는다 · 판정 실패 = 영수증으로 본다(영속하지 않음 — 표시는 상태 엔진이 그대로 「가득」). */
+  if (ids.length) {
+    const keep = [];
+    for (const r of cand.rows) {
+      if (!ids.includes(r.id)) continue;
+      if (await _isReceiptLinked(pool, r.linked_sheet_id, r.linked_tab_name)) continue;
+      keep.push(r.id);
+    }
+    ids = keep;
   }
   let closedCount = 0;
   if (ids.length) {

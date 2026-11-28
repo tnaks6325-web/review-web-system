@@ -179,20 +179,28 @@ function _eligibleAt(row, sched, config) {
 }
 
 /**
- * ★ 결정 426 — 네이버예약리뷰(알림 방식 deadline_day_once) 한 줄의 발송 판정(사용자 확정 2026-11-25 ③).
- *   마감일 = 자리표 리뷰마감일(화면 「오늘 마감」과 같은 칸 · planDeadline) · 1차 템플릿 한 번 · #{제출기한} = 마감일.
- *   자동 = 마감일 0시~끝(KST)만(사유 없음) · 마감일 다음 날부터 = booking_deadline_day_passed(자동은 늦게 안 보냄 · 담당자 수동만)
- *   · 마감일 + manualLateDays 끝 뒤 = booking_schedule_passed · 마감일 전 = booking_before_deadline_day(앞당겨 보내지 않음).
+ * ★ 결정 426·434 — 마감일 기준 「한 번」 알림 방식(예약 = 마감일 당일 · 영수증 = 마감 전날) 한 줄의 발송 판정.
+ *   마감일 = 그 줄의 리뷰마감일 칸(화면 「오늘/내일 마감」과 같은 칸 · planDeadline) · 1차 템플릿 한 번 · #{제출기한} = 마감일.
+ *   보내는 날 = 마감일 − rules.sendOffsetDays. 사유 코드는 방식마다(rules.reasons — 예약 코드는 결정 426 그대로).
+ *   자동 = 보내는 날 0시~끝(KST)만(사유 없음) · 다음 날부터 = reasons.passed(자동은 늦게 안 보냄 · 담당자 수동만)
+ *   · 마감일 + manualLateDays 끝 뒤 = reasons.schedulePassed · 보내는 날 전 = reasons.before(앞당겨 보내지 않음).
+ *   ★ 영수증(autoAfterStartDay): 보내는 날 ≤ 참여일 = reasons.startDay(자동만 쉼 · 수동 가능) · 참여일 모름 = deadline_unknown.
  *   ★ 마감일 모름 = deadline_unknown(보내지 않음 · 제출 시각·7·13·14일로 되돌아가지 않는다) · 이용일 판정(423)은 그대로 먼저.
  */
-function _bookingDeadlineItem(row, start, pl, now, config) {
+function _deadlinePlanItem(row, start, pl, now, config) {
   const rules = pl.rules;
+  const R = (rules && rules.reasons) || {};
   const phone = normalizeKoreanMobile(row.orderPhone);
   const reminderNo = rules ? rules.reminderNo : 1;
   const ymd = pl.deadlineYmd ? pl.deadlineYmd.split('-').map(Number) : null;
   const deadline = ymd ? _kstEndOfDay(ymd[0], ymd[1], ymd[2]) : null;
-  const dayStart = deadline ? new Date(deadline.getTime() - 24 * 60 * 60 * 1000 + 1) : null;
+  const offset = rules ? rules.sendOffsetDays : 0;
+  const sendDayEnd = deadline ? new Date(deadline.getTime() - offset * 24 * 60 * 60 * 1000) : null;
+  const dayStart = sendDayEnd ? new Date(sendDayEnd.getTime() - 24 * 60 * 60 * 1000 + 1) : null;
   const manualEnd = deadline && rules ? _addKstDaysEnd(deadline, rules.manualLateDays) : null;
+  const startYmd = pl.startYmd ? pl.startYmd.split('-').map(Number) : null;
+  const startDayEnd = startYmd ? _kstEndOfDay(startYmd[0], startYmd[1], startYmd[2]) : null;
+  const needStart = !!(rules && rules.autoAfterStartDay);
   const sentCount = Number(row.reminderCount || 0);
   const eligibleAt = deadline && rules && sentCount < rules.maxSends ? dayStart : null;
   let reason = null;
@@ -200,16 +208,20 @@ function _bookingDeadlineItem(row, start, pl, now, config) {
   else if (start.at > now) reason = 'visit_not_yet';
   else if (!rules) reason = 'reminder_plan_unknown';
   else if (!deadline) reason = 'deadline_unknown';
+  else if (needStart && !startDayEnd) reason = 'deadline_unknown';
   else if (!phone) reason = 'participant_phone_invalid';
   else if (row.reviewStatus && row.reviewStatus !== 'pending') reason = row.reviewStatus;
-  else if (sentCount >= rules.maxSends) reason = 'booking_reminder_delivered';
+  else if (sentCount >= rules.maxSends) reason = R.delivered;
   else if (row.hasOpenAttempt) reason = 'provider_result_pending';
   else if (row.latestAttemptAt && _addHours(row.latestAttemptAt, config.retryHours) > now) reason = 'retry_cooldown';
-  else if (now < dayStart) reason = 'booking_before_deadline_day';
-  else if (now > manualEnd) reason = 'booking_schedule_passed';
-  else if (now > deadline) reason = 'booking_deadline_day_passed';
+  else if (now < dayStart) reason = R.before;
+  else if (now > manualEnd) reason = R.schedulePassed;
+  else if (now > sendDayEnd) reason = R.passed;
+  else if (needStart && sendDayEnd.getTime() <= startDayEnd.getTime()) reason = R.startDay;
   return { row, deadline, phone, reminderNo, eligibleAt, reason };
 }
+/** 결정 426 이름 그대로(시험·옛 호출부) — 같은 판정. */
+const _bookingDeadlineItem = _deadlinePlanItem;
 
 function _summarizePreview(rows, now, config) {
   const items = [];
@@ -219,7 +231,7 @@ function _summarizePreview(rows, now, config) {
     const start = reviewClockStart.clockStartOfRow(row);
     // ★ 결정 426 — 알림 방식 = 종류별 단일 출처. 기본 방식 줄은 아래 종전 판정 그대로(한 글자도 안 바뀜).
     const pl = reviewReminderPlan.reminderPlanOfRow(row);
-    if (pl.plan !== reviewReminderPlan.DEFAULT_PLAN) { items.push(_bookingDeadlineItem(row, start, pl, now, config)); continue; }
+    if (pl.plan !== reviewReminderPlan.DEFAULT_PLAN) { items.push(_deadlinePlanItem(row, start, pl, now, config)); continue; }
     const byVisit = start.basis !== reviewClockStart.DEFAULT_BASIS;
     const sched = reminderSchedule(start.at, config);
     const deadline = sched ? sched.deadline : null;
@@ -246,8 +258,12 @@ function _summarizePreview(rows, now, config) {
 function _warnUnknownVisit(preview, where) {
   const n = (preview || []).filter(x => x.reason === 'visit_date_unknown').length;
   if (n) logger.warn(`[review-reminder] 네이버예약리뷰 이용일을 확인하지 못한 줄 ${n}건 — 알림톡 안 보냄(visit_date_unknown · ${where})`);
-  const d = (preview || []).filter(x => x.reason === 'deadline_unknown' || x.reason === 'reminder_plan_unknown').length;
+  const unk = (preview || []).filter(x => x.reason === 'deadline_unknown' || x.reason === 'reminder_plan_unknown');
+  const isRc = x => x.row && x.row.reminderPlan === 'day_before_deadline_once';
+  const d = unk.filter(x => !isRc(x)).length, dr = unk.filter(isRc).length;
   if (d) logger.warn(`[review-reminder] 네이버예약리뷰 리뷰 마감일을 확인하지 못한 줄 ${d}건 — 알림톡 안 보냄(deadline_unknown · ${where})`);
+  // 결정 434(2026-11-28 ②) — 영수증리뷰 줄(영수증 줄 마감일·참여일 모름 · 취소로 영수증이 다른 줄로 옮겨 간 옛 줄 포함)
+  if (dr) logger.warn(`[review-reminder] 영수증리뷰 리뷰 마감일을 확인하지 못한 줄 ${dr}건 — 알림톡 안 보냄(deadline_unknown · ${where})`);
 }
 
 function createReviewReminderService({ db = pool, provider = solapi } = {}) {
@@ -277,6 +293,8 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
     // ★ 결정 426 — 알림 방식(pl · utils/reviewReminderPlan 단일 출처). 마감일이 있는 예약 줄은 자동 발송 때 **마감일이 오늘인 줄만**
     //   읽는다(PR #1891 리뷰 P2: 어제 마감 줄까지 읽으면 자동 발송은 어차피 거절하는데 LIMIT 를 먼저
     //   잡아먹어, 지난 마감 줄이 많으면 오늘 마감 줄이 하루뿐인 발송일을 놓친다) — 이용일 + 16일보다 늦은 마감(오더 리뷰 기한 최대 30일)도 마감일에 읽힌다.
+    //   ★ 결정 434(2026-11-28 ②) — 영수증 줄도 같은 자리: 「자동으로 보내는 날」(pl.auto_send_ymd = 마감 전날 · 참여 당일이면 NULL)이
+    //   오늘인 줄만 읽는다(예약 = auto_send_ymd 가 곧 마감일 — 종전 「마감일이 오늘」 그대로). 지난 줄·참여 당일 줄은 후보 LIMIT 밖.
     //   기본 방식 줄은 pl.deadline_ymd 가 항상 NULL 이라 ELSE = 종전 기간 절 그대로(같은 줄·같은 순서).
     //   마감일 모르는 예약 줄은 ELSE(종전 기간)로 읽어 deadline_unknown 으로 보고만 한다(절대 보내지 않음).
     const lookbackDays = target ? null : (config.scheduleDays || DEFAULT_SCHEDULE_DAYS)[2] + 2;
@@ -290,7 +308,7 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
              ri.start_date AS "startDate", ri.end_date AS "endDate", ri.phone8,
              ord.id AS "orderSubmissionId", ord.phone AS "orderPhone", ord.submitted_at AS "orderedAt",
              clk.basis AS "clockBasis", clk.start_at AS "clockStartAt",
-             pl.plan AS "reminderPlan", pl.deadline_ymd AS "planDeadline",
+             pl.plan AS "reminderPlan", pl.deadline_ymd AS "planDeadline", pl.start_ymd AS "planStart",
              COALESCE(s.review_status, 'pending') AS "reviewStatus",
              COALESCE(s.reminder_count, 0)::int AS "reminderCount",
              s.last_reminded_at AS "lastRemindedAt", s.final_due_at AS "finalDueAt",
@@ -328,7 +346,7 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
          AND ${require('./reviewObligation.service').unfulfilledSql('ri')}
          AND ri.row_index IS NOT NULL
          AND ($2::int IS NULL OR CASE WHEN pl.deadline_ymd IS NOT NULL
-               THEN pl.deadline_ymd::date = (NOW() AT TIME ZONE 'Asia/Seoul')::date
+               THEN pl.auto_send_ymd::date = (NOW() AT TIME ZONE 'Asia/Seoul')::date
                ELSE COALESCE(clk.start_at, ord.submitted_at) >= NOW() - ($2::int * INTERVAL '1 day') END)
          AND ($2::int IS NULL OR clk.basis = '${reviewClockStart.DEFAULT_BASIS}' OR clk.start_at IS NULL OR clk.start_at <= NOW())
          AND ($3::text IS NULL OR (ri.sheet_id = $3 AND ri.tab_name = $4 AND ri.row_index = ANY($5::int[])))
@@ -705,7 +723,9 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
    */
   // ★ 결정 426 — 네이버예약리뷰: 마감일 다음 날~마감일 + 7일은 자동은 안 보내지만 담당자는 보낼 수 있다(booking_deadline_day_passed).
   //   마감일 전(booking_before_deadline_day)은 앞당겨 보내지 않는다(not_due 와 다른 사유 — MANUAL_OK 에 넣지 않는다).
-  const MANUAL_OK = new Set([null, 'not_due', 'booking_deadline_day_passed']);
+  // ★ 결정 434(2026-11-28 ②) — 영수증리뷰: 보내는 날(마감 전날) 다음 날~마감일 + 7일 · 리뷰 기한 1일이라 자동이 쉰 줄은 담당자가 보낼 수 있다.
+  //   보내는 날 전(receipt_before_send_day)은 앞당겨 보내지 않는다(MANUAL_OK 에 넣지 않는다).
+  const MANUAL_OK = new Set([null, 'not_due', 'booking_deadline_day_passed', 'receipt_send_day_passed', 'receipt_send_day_is_join_day']);
   const MANUAL_REASON = {
     purchase_date_unknown: '구매 기록이 없어 알림톡 회차를 정할 수 없습니다 — 문자로 보내세요',
     // 결정 423 — 네이버예약리뷰는 이용일(방문 날짜)부터 센다.
@@ -720,6 +740,10 @@ function createReviewReminderService({ db = pool, provider = solapi } = {}) {
     booking_before_deadline_day: '네이버예약리뷰 알림톡은 리뷰 마감일 당일에 보냅니다 — 마감일부터 보낼 수 있습니다',
     booking_schedule_passed: `알림톡 기간(리뷰 마감일 후 ${reviewReminderPlan.PLAN_RULES.deadline_day_once.manualLateDays}일)이 지났습니다 — 문자로 보내세요`,
     booking_reminder_delivered: '리뷰 마감일 알림톡을 이미 보냈습니다(네이버예약리뷰는 한 번만)',
+    // 결정 434(2026-11-28 ②) — 영수증리뷰는 리뷰 마감일 전날 한 번.
+    receipt_before_send_day: '영수증리뷰 알림톡은 리뷰 마감일 전날에 보냅니다 — 마감 전날부터 보낼 수 있습니다',
+    receipt_schedule_passed: `알림톡 기간(리뷰 마감일 후 ${reviewReminderPlan.PLAN_RULES.day_before_deadline_once.manualLateDays}일)이 지났습니다 — 문자로 보내세요`,
+    receipt_reminder_delivered: '리뷰 마감 전날 알림톡을 이미 보냈습니다(영수증리뷰는 한 번만)',
     deadline_unknown: '리뷰 마감일을 확인하지 못해 알림톡을 보낼 수 없습니다 — 문자로 보내세요',
     reminder_plan_unknown: '알림 방식을 확인하지 못해 알림톡을 보낼 수 없습니다 — 문자로 보내세요',
     submitted: '리뷰를 이미 제출했습니다',
@@ -780,4 +804,5 @@ module.exports = {
   _summarizePreview,
   reminderSchedule,
   _bookingDeadlineItem,
+  _deadlinePlanItem,
 };

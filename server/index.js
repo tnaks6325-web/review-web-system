@@ -53,6 +53,9 @@ const REQUIRED_SCHEMA = [
   ['campaign_applications', 'qna_slot_id'],      // 211 — Q&A 신청 ↔ 날짜별 자리(없으면 Q&A 신청·인기 참여권 집계 실패)
   ['campaign_applications', 'booking_slot_id'],  // 228 — 네이버예약리뷰 신청 ↔ 고른 날 자리(결정 409 · 없으면 구매양식 홀드 조회·참여 상세가 42703)
   ['campaign_applications', 'booking_reservation_no'],   // 228 — 예약번호(같은 공고 중복 거절 · 결정 409)
+  ['campaign_applications', 'receipt_pool_id'],  // 232 — 영수증리뷰 신청 ↔ 배정된 영수증(결정 434 · 없으면 구매양식 홀드 조회·참여 상세가 42703)
+  ['receipt_pool', 'review_deadline'],           // 232 — 배정된 참여의 리뷰마감일(결정 434 · 마감 안내·작업보드 「마감 지남」)
+  ['receipt_pool', 'reviewed_at'],               // 232 — 리뷰 낸 영수증(결정 434 · 취소돼도 다시 배정하지 않는 근거)
   ['shared_sync_outbox', 'view_scope'],             // 206 — 담당자 단독 송신과 전체 공유 송신의 durable scope(없으면 공유 저장·송신 실패)
   ['campaign_participants', 'review_participation_id'],
   ['workdesk_review_resolutions', 'review_participation_id'],

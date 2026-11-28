@@ -104,8 +104,7 @@ async function insertPool({ db, workOrderId, sheetId, tabName, slots = [], by = 
 
 /* 판정 = 묶음이 있거나, 탭이 영수증리뷰로 등록돼 있다(묶음 저장이 실패한 영수증 탭도 리뷰 탭처럼 정리되지 않게).
    탭 종류는 접수 때 tab_configs.work_kind 에 기록된다. */
-const IS_RECEIPT_POOL_TAB_SQL = `SELECT (EXISTS (SELECT 1 FROM receipt_pool WHERE sheet_id = $1 AND tab_name = $2)
-                                     OR EXISTS (SELECT 1 FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 AND work_kind = 'receipt')) AS b`;
+const IS_RECEIPT_POOL_TAB_SQL = `SELECT ${require('../utils/receiptTabSql').receiptTabSql('$1', '$2')} AS b`;   // 판정 조각 단일 출처(utils/receiptTabSql)
 
 /**
  * 이 탭이 영수증 탭인가.
@@ -256,8 +255,235 @@ async function sendReceiptImage(res, fileId) {
   return res.send(f.buffer);
 }
 
+/* ═══ ★★ 결정 434 — 3단계: 참여 = 안 쓴 영수증 한 장 배정 (migration 232) ═══
+   영수증이 비었는지 판정은 **이 SQL 조각 하나**(`receiptTakenSql`)다 — 배정(pickReceiptInTx)·남은 영수증 수(공고 카드·정원)가 함께 쓴다.
+     쓴 영수증 = ㉮ 그 영수증으로 리뷰를 낸 적 있음(reviewed_at) 또는 ㉯ 살아 있는 신청(제출 확정 · 유예 안의 홀드)이 쥐고 있음.
+   ★★ 「되돌리기」 쓰기가 따로 없다 — 신청 표가 단일 출처라, 신청이 취소·만료·줄 삭제로 살아 있지 않게 되는 순간
+     (campaignHoldChainSites ① 표의 모든 status 변경 자리) 영수증이 저절로 다음 참여자에게 돌아간다(예약 228 과 같은 방식).
+     리뷰를 이미 낸 영수증은 ㉮ 때문에 돌아가지 않는다(사용자 확정 2026-11-27). */
+
+/** SQL 조각 — 이 영수증(alias)이 쓰였다(리뷰 냄 · 또는 살아 있는 신청이 쥠). graceParam = 홀드 유예 초 자리 번호. */
+function receiptTakenSql(alias, graceParam) {
+  return `(${alias}.reviewed_at IS NOT NULL
+           OR EXISTS (SELECT 1 FROM campaign_applications ca
+                       WHERE ca.receipt_pool_id = ${alias}.id
+                         AND (ca.status = 'submitted'
+                              OR (ca.status = 'applied' AND (ca.expires_at IS NULL OR ca.expires_at > NOW() - make_interval(secs => ${graceParam}))))))`;
+}
+
+/** 탭의 남은 영수증 — { total(취소 제외), free(아직 아무에게도 안 간 장) }. */
+async function freeCountsForTab(db, sheetId, tabName) {
+  const grace = require('./campaignHold.service').HOLD_GRACE_SEC;
+  const { rows } = await (db || _pool()).query(
+    `SELECT COUNT(*) FILTER (WHERE p.status <> 'cancelled')::int AS total,
+            COUNT(*) FILTER (WHERE p.status = 'open' AND p.seq IS NOT NULL AND NOT ${receiptTakenSql('p', '$3')})::int AS free
+       FROM receipt_pool p WHERE p.sheet_id = $1 AND p.tab_name = $2`, [sheetId, tabName, grace]);
+  return { total: Number(rows[0] ? rows[0].total : 0), free: Number(rows[0] ? rows[0].free : 0) };
+}
+
+/**
+ * 공고별 남은 영수증 — Map(campaignId → { free, total }). 영수증 탭에 연결된 공고만 싣는다.
+ * ★ 공고 정원의 단일 출처 재료 — `campaignState.fetchCampaignCounts` 가 맨 뒤에서 `counts.receiptFree` 로 싣는다.
+ * ★ 실패 = null(덮지 않음 — 표시는 종전). 실제 참여는 배정(`pickReceiptInTx`)이 fail-closed 로 다시 막는다.
+ */
+async function loadFreeByCampaign(db, campaignIds) {
+  const ids = (campaignIds || []).filter(Boolean).map(String);
+  if (!ids.length) return new Map();
+  const q = db || _pool();
+  let sp = false;
+  try {
+    if (_inTx(db)) { try { await q.query('SAVEPOINT receipt_free'); sp = true; } catch (_) { sp = false; } }
+    const grace = require('./campaignHold.service').HOLD_GRACE_SEC;
+    const { rows } = await q.query(
+      `SELECT rc.id::text AS campaign_id,
+              COUNT(*) FILTER (WHERE p.status <> 'cancelled')::int AS total,
+              COUNT(*) FILTER (WHERE p.status = 'open' AND p.seq IS NOT NULL AND NOT ${receiptTakenSql('p', '$2')})::int AS free
+         FROM recruit_campaigns rc
+         JOIN receipt_pool p ON p.sheet_id = rc.linked_sheet_id AND p.tab_name = rc.linked_tab_name
+        WHERE rc.id::text = ANY($1::text[])
+        GROUP BY 1`, [ids, grace]);
+    if (sp) await q.query('RELEASE SAVEPOINT receipt_free');
+    const out = new Map();
+    for (const r of rows) out.set(String(r.campaign_id), { free: Number(r.free) || 0, total: Number(r.total) || 0 });
+    return out;
+  } catch (e) {
+    if (sp) await q.query('ROLLBACK TO SAVEPOINT receipt_free').catch(() => {});
+    logger.warn(`[receiptPool] 남은 영수증 조회 실패(표시는 종전 · 참여는 배정이 막는다): ${e.message}`);
+    return null;
+  }
+}
+
+/**
+ * 안 쓴 영수증 한 장을 고른다(영수증 번호 앞부터).
+ * ★ 반드시 신청 트랜잭션 안·작업표 잠금(`camp_tab_daily`) 뒤에서 부른다. 고른 줄은 `FOR UPDATE SKIP LOCKED` —
+ *   다른 트랜잭션이 막 쥔 장은 건너뛰고 다음 장을 본다. 마지막 장을 둘이 노리면 하나만 받는다(뒤에는 부분 유일 색인 232 이 받친다).
+ * ★ 마감이 지났는데 아직 스윕이 정리하지 않은 홀드는 먼저 정리한다(부분 유일 색인이 그 신청을 살아 있다고 본다).
+ */
+async function pickReceiptInTx(client, { sheetId, tabName, graceSec } = {}) {
+  if (!client || !sheetId || !tabName) return null;
+  if (graceSec == null) graceSec = require('./campaignHold.service').HOLD_GRACE_SEC;
+  await client.query(
+    `UPDATE campaign_applications ca SET status = 'expired'
+       FROM receipt_pool p
+      WHERE ca.receipt_pool_id = p.id AND p.sheet_id = $1 AND p.tab_name = $2
+        AND ca.status = 'applied' AND ca.expires_at <= NOW() - make_interval(secs => $3)`,
+    [sheetId, tabName, graceSec]);
+  const { rows } = await client.query(
+    `SELECT p.id, p.work_order_id, p.seq, p.pool_seq
+       FROM receipt_pool p
+      WHERE p.sheet_id = $1 AND p.tab_name = $2 AND p.status = 'open' AND p.seq IS NOT NULL
+        AND p.reviewed_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM campaign_applications ca
+                         WHERE ca.receipt_pool_id = p.id AND ca.status IN ('applied', 'submitted'))
+      ORDER BY p.pool_seq
+      LIMIT 1
+      FOR UPDATE OF p SKIP LOCKED`, [sheetId, tabName]);
+  return rows[0] ? { ...rows[0], id: Number(rows[0].id), seq: Number(rows[0].seq), pool_seq: Number(rows[0].pool_seq) } : null;
+}
+
+/** 오늘(KST) YYYY-MM-DD — 서버 시계(휴대폰 시계 안 씀 · 결정 415·422 와 같은 방향). */
+function _kstToday(now = new Date()) { return require('./qnaSlots.service').kstDateStr(now); }
+
+/** 참여일 → { joinedDate, joinedLabel, reviewDeadline, reviewDeadlineLabel } (달력 날 · 날짜 더하기 단일 출처 = bookingCalendar.reviewDeadlineOf). */
+function joinDatesFor(joinYmd, days) {
+  const { reviewDeadlineOf } = require('../utils/bookingCalendar');
+  const j = reviewDeadlineOf(joinYmd, 0);
+  const d = reviewDeadlineOf(joinYmd, days);
+  if (!j || !d) return null;
+  return { joinedDate: j.date, joinedLabel: j.label, reviewDeadline: d.date, reviewDeadlineLabel: d.label };
+}
+
+/**
+ * 매장 안내(매장 이름·주소·네이버 플레이스 주소·리뷰 마감 N일) — 작업오더 계약(`receiptReviewSpecFromWorkOrder`) 단일 출처.
+ * ★ 파일 번호는 싣지 않는다. 오더를 못 읽으면 null(호출부가 참여를 막는다 — fail-closed).
+ */
+async function placeInfoForTab(db, sheetId, tabName) {
+  const { rows } = await (db || _pool()).query(
+    `SELECT wo.id, wo.work_kind, wo.workboard_schema_version, wo.recruit_count, wo.pay_amount, wo.product_url, wo.product_options_json, wo.review_fee
+       FROM receipt_pool p JOIN work_orders wo ON wo.id::text = p.work_order_id::text
+      WHERE p.sheet_id = $1 AND p.tab_name = $2 ORDER BY p.pool_seq LIMIT 1`, [sheetId, tabName]);
+  if (!rows.length) return null;
+  const { spec } = require('../utils/receiptPool').receiptReviewSpecFromWorkOrder(rows[0]);
+  if (!spec) return null;
+  return { placeName: spec.placeName, placeAddress: spec.placeAddress, placeUrl: spec.placeUrl, reviewDeadlineDays: spec.reviewDeadlineDays };
+}
+
+/**
+ * 신청 트랜잭션 안에서 영수증 한 장을 이 신청에 묶는다 — 고르기 · 신청 행에 새기기 · 참여일·리뷰마감일 새기기(같은 트랜잭션).
+ * @returns {Promise<{ok:true, pool, dates}|{ok:false, reason:'receipt_sold_out'|'receipt_place_unknown'}>}
+ *   ★ 못 고르면·오더 계약을 못 읽으면 묶지 않는다(fail-closed — 영수증 없는 참여는 할 일이 없다).
+ */
+async function bindReceiptForApply(client, { sheetId, tabName, applicationId, now = new Date() } = {}) {
+  if (!sheetId || !tabName || !applicationId) return { ok: false, reason: 'receipt_sold_out' };
+  const place = await placeInfoForTab(client, sheetId, tabName);
+  if (!place) return { ok: false, reason: 'receipt_place_unknown' };
+  const picked = await pickReceiptInTx(client, { sheetId, tabName });
+  if (!picked) return { ok: false, reason: 'receipt_sold_out' };
+  const dates = joinDatesFor(_kstToday(now), place.reviewDeadlineDays);
+  if (!dates) return { ok: false, reason: 'receipt_place_unknown' };
+  // 새기기 — 그 사이 다른 신청이 같은 장을 쥐었으면 0줄(조건) · 진짜 동시면 부분 유일 색인이 23505 로 막는다.
+  //   ★ 둘 다 「마감」으로 접는다 — 호출부(신청)가 곧바로 ROLLBACK 하므로 깨진 트랜잭션을 이어 쓰지 않는다(SAVEPOINT 불필요).
+  let upd;
+  try {
+    upd = await client.query(
+      `UPDATE campaign_applications SET receipt_pool_id = $2
+        WHERE id = $1
+          AND NOT EXISTS (SELECT 1 FROM campaign_applications o
+                           WHERE o.receipt_pool_id = $2 AND o.id <> $1 AND o.status IN ('applied', 'submitted'))`,
+      [applicationId, picked.id]);
+  } catch (e) {
+    if (e && e.code === '23505') return { ok: false, reason: 'receipt_sold_out' };   // 부분 유일 색인 — 같은 장을 다른 신청이 먼저 쥠
+    throw e;
+  }
+  if (!upd || !(upd.rowCount > 0)) return { ok: false, reason: 'receipt_sold_out' };
+  await client.query(
+    `UPDATE receipt_pool SET joined_date = $2::date, review_deadline = $3::date, updated_at = NOW() WHERE id = $1`,
+    [picked.id, dates.joinedDate, dates.reviewDeadline]);
+  return { ok: true, pool: picked, dates, place };
+}
+
+/** 신청에 배정된 영수증(없으면 null). 참여 상세·참여 확정·영수증 보기 통로가 읽는다. ★ file_id 는 서버 안에서만 쓴다(응답에 싣지 말 것). */
+async function poolForApplication(db, applicationId) {
+  const { rows } = await (db || _pool()).query(
+    `SELECT p.id, p.work_order_id, p.sheet_id, p.tab_name, p.seq, p.pool_seq, p.file_id, p.status,
+            to_char(p.joined_date, 'YYYY-MM-DD') AS joined_date, to_char(p.review_deadline, 'YYYY-MM-DD') AS review_deadline,
+            p.reviewed_at
+       FROM campaign_applications ca JOIN receipt_pool p ON p.id = ca.receipt_pool_id
+      WHERE ca.id = $1 LIMIT 1`, [Number(applicationId) || 0]);
+  return rows[0] ? { ...rows[0], id: Number(rows[0].id), seq: rows[0].seq == null ? null : Number(rows[0].seq) } : null;
+}
+
+/**
+ * 참여 전 공고 상세의 영수증리뷰 안내 — 매장 이름·주소·리뷰 기한 + 남은 영수증 수. 영수증 탭이 아니면 null.
+ * ★ 네이버 플레이스 주소·영수증 사진(파일 번호)은 **참여 후**에만(결정 041 · 431 공개 칸 허용목록 밖).
+ */
+async function receiptPublicView(db, camp) {
+  if (!camp || !camp.linked_sheet_id || !camp.linked_tab_name) return null;
+  const c = await freeCountsForTab(db, camp.linked_sheet_id, camp.linked_tab_name);
+  if (!c.total) return null;
+  const place = await placeInfoForTab(db, camp.linked_sheet_id, camp.linked_tab_name);
+  return {
+    placeName: place ? place.placeName : '', placeAddress: place ? place.placeAddress : '',
+    reviewDeadlineDays: place ? place.reviewDeadlineDays : null,
+    placeKnown: !!place, total: c.total, free: c.free,
+  };
+}
+
+/** 참여 상세(work-detail)의 영수증 칸 — 할 일·마감만(작업표 위치·파일 번호 없음). 마감 안내 = bookingSlots.reviewerDeadlineView 하나(결정 422). */
+function reviewerSeatView(poolRow, place, now = new Date()) {
+  if (!poolRow) return null;
+  const dl = require('./bookingSlots.service').reviewerDeadlineView(poolRow.review_deadline || null, now);
+  return {
+    receiptNo: Number(poolRow.pool_seq) || null,
+    joinedDate: poolRow.joined_date || null,
+    reviewDeadline: dl.reviewDeadline, reviewDeadlineState: dl.reviewDeadlineState, reviewDeadlineNotice: dl.reviewDeadlineNotice,
+    place: place ? { placeName: place.placeName, placeAddress: place.placeAddress, placeUrl: place.placeUrl, reviewDeadlineDays: place.reviewDeadlineDays } : null,
+  };
+}
+
+/**
+ * ★★ 결정 434(PR #1897 리뷰 ①) — 「이 영수증으로 리뷰를 냈다」(receipt_pool.reviewed_at)를 새기는 **단일 출처**.
+ *   그 뒤 신청이 취소되거나 담당자가 줄을 지워 영수증이 보충 줄로 옮겨 가도 다시 주지 않는 근거(receiptTakenSql ㉮ · pickReceiptInTx).
+ * ★ 부르는 곳 = 리뷰 완료를 쓰는 **모든** 트랜잭션 안(커밋과 함께 굳고, 완료가 되돌려지면 같이 되돌려진다):
+ *     ㉠ 무시트 상태 칸 「리뷰제출」 기록 단일 실행부 `sheetlessStatus._writeCellAndRebuild(kind='submit')`
+ *        = 리뷰어 리뷰 캡처 제출 · 담당자 [리뷰제출일 기록] · 동시진행 묶음 완료
+ *     ㉡ 그 실행부를 거치지 않는 담당자 [수동 리뷰제출] `trackB.manualWorkdeskReviewSubmitInTx`
+ *     ㉢ 받침 — 담당자 [줄 삭제]가 리뷰 낸 줄의 영수증을 보충 줄로 옮기기 직전(`trackB._hideParticipantInTx` — 영수증이 줄을 옮기는 유일한 곳)
+ * ★ 영수증 줄이 아니면 0줄(다른 종류 작업 쓰기 0). 트랜잭션 안이면 SAVEPOINT 로 격리 — 실패해도 리뷰 완료를 되돌리지 않는다
+ *   (경고만 · 그 사이에는 제출 확정 신청이 영수증을 쥐고 있고, 줄을 지울 때 ㉢ 받침이 다시 새긴다).
+ * @returns {Promise<number>} 새긴 줄 수(0 = 영수증 줄 아님 · 이미 새김 · 실패)
+ */
+async function markReceiptReviewedInTx(client, { sheetId, tabName, rowIndex } = {}) {
+  const n = parseInt(rowIndex, 10);
+  if (!sheetId || !tabName || !Number.isInteger(n)) return 0;
+  const q = client || _pool();
+  const sp = _inTx(client);
+  try {
+    if (sp) await q.query('SAVEPOINT receipt_reviewed');
+    const r = await q.query(
+      `UPDATE receipt_pool SET reviewed_at = NOW(), updated_at = NOW()
+        WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND reviewed_at IS NULL`, [sheetId, tabName, n]);
+    if (sp) await q.query('RELEASE SAVEPOINT receipt_reviewed');
+    return (r && r.rowCount) || 0;
+  } catch (e) {
+    if (sp) {
+      try { await q.query('ROLLBACK TO SAVEPOINT receipt_reviewed'); await q.query('RELEASE SAVEPOINT receipt_reviewed'); } catch (_) { /* 바깥 트랜잭션이 정리한다 */ }
+    }
+    logger.warn(`[receiptPool] 리뷰 낸 영수증 표시 실패(리뷰 완료는 그대로 · 줄 삭제 때 다시 새김) tab=${tabName} seq=${n}: ${e.message}`);
+    return 0;
+  }
+}
+
+/** 옛 이름(시험·호출 호환) — 같은 실행부(`markReceiptReviewedInTx`)로만 간다. */
+async function markReviewedRow(db, sheetId, tabName, seq) {
+  return markReceiptReviewedInTx(db, { sheetId, tabName, rowIndex: seq });
+}
+
 module.exports = {
   registerReceiptUpload, unregisteredFiles, isRegisteredReceiptFile,
   insertPool, isReceiptPoolTab, isReceiptPoolCampaign, isPoolBoundRow, poolBoundSeqs, poolBoundRowSql,
   poolForTab, poolCounts, fileForRow, verifyRowsMatchPool, repairPoolIfMissing, sendReceiptImage,
+  // 3단계(결정 434)
+  receiptTakenSql, freeCountsForTab, loadFreeByCampaign, pickReceiptInTx, joinDatesFor, placeInfoForTab,
+  bindReceiptForApply, poolForApplication, receiptPublicView, reviewerSeatView, markReviewedRow, markReceiptReviewedInTx,
 };

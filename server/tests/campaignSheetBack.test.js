@@ -52,7 +52,7 @@ const FUNCS = ['$', 'needLogin', 'hideSheet', 'openOptSheet', 'openChangeOptShee
   '_syncAcctGo', 'openAcctSheet', 'hideAcctSheet', 'openAcctEmpty', 'hideAcctEmpty', 'goRegisterSub', 'onAcctSheetConfirm',
   '_applyInitialAcct', '_continueInitialAcct', 'openBlogSheet', 'hideBlogSheet', 'onBlogSheetConfirm', 'openPopGate', 'hidePopGate',
   'goPopNormal'];
-const NEW_FUNCS = ['_sheetHideOf', '_sheetOpen', '_sheetClose', '_sheetLeave'];   // 결정 403 — 옛 화면에는 없다(없으면 건너뛴다)
+const NEW_FUNCS = ['_sheetHideOf', '_sheetOpen', '_sheetClose', '_sheetLeave', 'onReceiptZoom'];   // 결정 403 · 434(영수증 크게 보기) — 옛 화면에는 없다(없으면 건너뛴다)
 
 /** 공고 화면 + 가짜 브라우저. 리뷰어 홈(index) → 공고 화면으로 들어온 상태에서 시작한다. */
 function world({ helper = true, subsDelay = 0 } = {}) {
@@ -88,7 +88,11 @@ function world({ helper = true, subsDelay = 0 } = {}) {
     children: [], _a: {}, appendChild(c) { this.children.push(c); return c; }, querySelector() { return null; },
     getAttribute(k) { return this._a[k] == null ? null : this._a[k]; }, setAttribute(k, v) { this._a[k] = String(v); }, focus() {},
     classList: { add() {}, remove() {} }, scrollTop: 0 });
-  const document = { getElementById(id) { return els[id] || (els[id] = mk(id)); }, createElement() { return mk(''); }, querySelectorAll() { return []; } };
+  // body = 화면에 붙인 동적 창(영수증 [크게 보기] · 결정 434). remove() = 그 창을 떼어 낸다.
+  const body = { children: [], appendChild(c) { c.parentNode = body; body.children.push(c); return c; } };
+  const mkDyn = () => Object.assign(mk(''), { className: '', parentNode: null, onclick: null,
+    remove() { if (this.parentNode) { this.parentNode.children.splice(this.parentNode.children.indexOf(this), 1); this.parentNode = null; } } });
+  const document = { getElementById(id) { return els[id] || (els[id] = mk(id)); }, createElement() { return mkDyn(); }, querySelectorAll() { return []; }, body };
   const store = () => { const m = {}; return { getItem: k => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = String(v); }, removeItem: k => { delete m[k]; } }; };
   const sb = {
     console, URL, URLSearchParams, JSON, Math, Object, Array, Promise, String, Number, Set,
@@ -116,12 +120,13 @@ function world({ helper = true, subsDelay = 0 } = {}) {
     ' _acctOptKey = null, _acctNext = "apply", _acctSel = null, _acctSelMany = [], _initialAcctSel = null, _initialAcctSels = null,' +
     ' _blogUrl = "", _blogPending = null, _subs = [{ name: "타계정", phone: "01011112222" }], _subsLoadError = false,' +
     ' _chainLate = new Set(), _acctBlocked = {}, _popCredit = null, _popSubCredits = null,' +
-    ' _camp = { options: [{ optKey: "a", selectable: true }, { optKey: "b", selectable: true }] }, _detail = null;\n' + src, sb, { filename: 'campaign.html#sheets' });
+    ' _camp = { options: [{ optKey: "a", selectable: true }, { optKey: "b", selectable: true }] }, _detail = null, _rcImgUrl = \"\";\n' + src, sb, { filename: 'campaign.html#sheets' });
   const run = (code) => vm.runInContext(code, sb);
   const shown = (id) => els[id] ? els[id].style.display : 'none';
   const open = () => SHEETS.filter(id => shown(id) === 'flex');
   async function back() { traverse(-1); await settle(); }
-  return { B, log, sb, run, shown, open, back, els };
+  const zooms = () => body.children.filter(c => c.className === 'rc-zoom');
+  return { B, log, sb, run, shown, open, back, els, zooms };
 }
 
 /** 창마다 여는 방법 — 화면에서 실제로 쓰는 여는 함수 그대로 */
@@ -321,6 +326,38 @@ test('정적 — 도우미를 싣고, 창 8개 모두 「여는 곳 = _sheetOpen
   assert.strictEqual((SCRIPT.match(/_sheetOpen\('/g) || []).length, 12, '창을 여는 곳 12곳(로그인1·인기1·옵션3·개수1·도움말1·명의3·미등록1·블로그1)');
   assert.ok(!/pushState|onpopstate|'popstate'/.test(SCRIPT), '방문 기록 조작은 도우미 한 곳(결정 372) — 화면에 따로 두지 않는다');
   for (const fn of ['goPopNormal', 'goRegisterSub']) assert.match(grab(fn), /_sheetLeave\(/, fn + ' 는 창을 연 채 떠난다 → _sheetLeave');
+});
+
+/* ★ 결정 434 — 영수증 [크게 보기](화면 위 창)도 같은 규칙: 연 채 [뒤로] = 그 창만 닫힘 · 단추로 닫은 뒤 [뒤로] 한 번 = 떠남.
+     실기(안드로이드 크롬 · 2026-11-27)에서 크게 보기를 연 채 [뒤로]를 누르면 공고 화면을 통째로 떠났다(창은 그대로 사라짐). */
+test('🧾 영수증 [크게 보기]: 연 채 [뒤로] → 크게 보기만 닫히고 공고에 남는다 → 한 번 더 [뒤로] = 떠난다', async () => {
+  const w = world();
+  w.run("_rcImgUrl = 'blob:fake'; onReceiptZoom()"); await settle();
+  assert.strictEqual(w.zooms().length, 1, '크게 보기가 열린다');
+  await w.back();
+  assert.strictEqual(w.B.left, null, '크게 보기를 연 채 누른 [뒤로]가 공고 화면을 떠나면 안 된다');
+  assert.strictEqual(w.zooms().length, 0, '크게 보기는 닫힌다');
+  await w.back();
+  assert.strictEqual(w.B.left, HOME, '닫힌 뒤 [뒤로] 한 번에 떠난다(헛 누름 없음)');
+});
+
+for (const how of ['button', 'backdrop']) {
+  test(`🧾 영수증 [크게 보기]: ${how === 'button' ? '[닫기] 단추로' : '어두운 바깥을 눌러'} 닫은 뒤 [뒤로] 한 번에 떠난다`, async () => {
+    const w = world();
+    w.run("_rcImgUrl = 'blob:fake'; onReceiptZoom()"); await settle();
+    const z = w.zooms()[0];
+    z.onclick({ target: how === 'button' ? { tagName: 'BUTTON' } : z }); await settle();
+    assert.strictEqual(w.zooms().length, 0);
+    assert.strictEqual(w.B.idx, 1, '쌓은 칸은 되돌려졌다');
+    await w.back();
+    assert.strictEqual(w.B.left, HOME);
+  });
+}
+
+test('🧾 영수증 [크게 보기]: 사진을 아직 못 불러왔으면 창도 칸도 만들지 않는다', async () => {
+  const w = world();
+  w.run('onReceiptZoom()'); await settle();
+  assert.deepStrictEqual([w.zooms().length, w.B.idx, w.log.toasts.length], [0, 1, 1]);
 });
 
 test('인라인 스크립트 문법', () => {

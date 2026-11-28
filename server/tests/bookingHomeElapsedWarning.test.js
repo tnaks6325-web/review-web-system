@@ -56,6 +56,8 @@ async function openDb() {
 // 경고 SQL 은 한 번 들어올 때 「예약 조건만 뺀 종전 SQL」도 같이 돌려 둔다(대조용).
 const { bookingTabSql } = require('../src/utils/bookingTabSql');
 const BOOKING_CLAUSE = bookingTabSql('ri.sheet_id', 'ri.tab_name');
+// 결정 434 사용자 확정(2026-11-28) — 영수증리뷰 줄도 같은 자리에서 뺀다(425 를 영수증에도). 종전 SQL = 두 조건을 다 뺀 것.
+const RECEIPT_CLAUSE = require('../src/utils/receiptTabSql').receiptTabSql('ri.sheet_id', 'ri.tab_name');
 let lastBaseline = null;
 let warningSqlSeen = 0;
 function poolOf(db) {
@@ -66,7 +68,7 @@ function poolOf(db) {
     }
     if (sql.includes('WITH warning_candidate_ids AS MATERIALIZED')) {
       warningSqlSeen++;
-      const old = sql.split(`AND NOT ${BOOKING_CLAUSE}`).join('');
+      const old = sql.split(`AND NOT ${BOOKING_CLAUSE}`).join('').split(`AND NOT ${RECEIPT_CLAUSE}`).join('');
       lastBaseline = old === sql ? null : (await db.query(old, params || [])).rows;
     }
     const r = await db.query(sql, params || []);
@@ -112,6 +114,7 @@ const ROWS = [
   { key: 'rc', days: 12, kind: 'receipt', name: '가짜영수증' },
   { key: 'un', days: 11, kind: null, name: '종류 모름 작업' },
   { key: 'bk3', days: 9, kind: 'booking', slot: -2, name: '9일 예약(10일 전 · 종전에도 없음)' },
+  { key: 'rc2', days: 11.5, kind: null, pool: true, name: '가짜영수증(묶음만 · 탭 종류 칸 없음)' },   // 결정 434(2026-11-28) — 맨 뒤(앞 줄 번호 불변)
 ];
 const idOf = i => `${String(i + 1).repeat(8)}-1111-4111-8111-${String(i + 1).repeat(12)}`;
 
@@ -131,6 +134,9 @@ const idOf = i => `${String(i + 1).repeat(8)}-1111-4111-8111-${String(i + 1).rep
     await db.query(`INSERT INTO campaign_participants(order_submission_id, sheet_id, tab_name, seq, reviewer_name, phone8, owner_reviewer_id, is_submitted, submit_col, row_json)
                     VALUES ($1, $2, $3, 1, '가짜리뷰어', $4, $5, FALSE, '리뷰', '{}'::jsonb)`, [oid, sid, tab, P8, OWNER]);
     if (r.kind) await db.query(`INSERT INTO tab_configs(sheet_id, tab_name, display_name, work_kind, sheetless) VALUES ($1, $2, $3, $4, TRUE)`, [sid, tab, r.name, r.kind]);
+    if (r.pool) {
+      await db.query(`INSERT INTO receipt_pool(work_order_id, sheet_id, tab_name, seq, pool_seq, file_id, status) VALUES ('wo-' || $1, $2, $3, 1, 1, 'fake_rc_' || $1, 'open')`, [r.key, sid, tab]);
+    }
     if (r.slot !== undefined) {
       await db.query(`INSERT INTO booking_slots(work_order_id, sheet_id, tab_name, seq, slot_date, date_seq, review_deadline, status)
                       VALUES ('wo-' || $1, $2, $3, 1, (NOW() AT TIME ZONE 'Asia/Seoul')::date + $4::int, 1,
@@ -157,8 +163,11 @@ const idOf = i => `${String(i + 1).repeat(8)}-1111-4111-8111-${String(i + 1).rep
   t('  종전 SQL(예약 조건만 뺀 것)은 이 순간 예약 줄을 골랐다 — RED 의 근거', Array.isArray(lastBaseline) && lastBaseline[0]
     && lastBaseline[0].orderSubmissionId === ROWS[0].oid, lastBaseline);
 
-  // 2) 다른 종류는 종전과 같은 줄·같은 경과일(리뷰 → 블로그 → Q&A → 영수증 → 종류 모름).
-  const order = ['rv', 'bl', 'qn', 'rc', 'un'];
+  // 2) 다른 종류는 종전과 같은 줄·같은 경과일(리뷰 → 블로그 → Q&A → 종류 모름).
+  //    ★ 결정 434 사용자 확정(2026-11-28) — 영수증리뷰(rc · 탭 종류 receipt / rc2 · 영수증 묶음만)는 예약처럼 빠진다
+  //      (리뷰 기한이 10일보다 길면 마감 전에 「N일 경과」가 뜬다 — 「내일/오늘 마감」 안내만 남긴다). 종전(이 결정 전)에는 rc 가 12일로 떴다.
+  const isRcRow = r => r && (r.kind === 'receipt' || r.pool === true);
+  const order = ['rv', 'bl', 'qn', 'un'];
   for (let i = 0; i < order.length; i++) {
     const want = ROWS.find(r => r.key === order[i]);
     if (i > 0) {
@@ -170,13 +179,13 @@ const idOf = i => `${String(i + 1).repeat(8)}-1111-4111-8111-${String(i + 1).rep
     // 종전 SQL 과 대조: 종전 답에서 예약 줄을 건너뛴 첫 줄 = 새 답.
     const oldPick = (lastBaseline || []).map(r => byOid[r.orderSubmissionId]);
     t(`  종전 SQL 대조(${want.key}): 종전도 예약을 빼면 같은 줄`, lastBaseline !== null && oldPick.length > 0
-      && (oldPick[0].kind === 'booking' || oldPick[0].slot !== undefined || oldPick[0].oid === want.oid), oldPick.map(r => r.key));
+      && (oldPick[0].kind === 'booking' || oldPick[0].slot !== undefined || isRcRow(oldPick[0]) || oldPick[0].oid === want.oid), oldPick.map(r => r.key));
   }
 
   // 3) 예약 줄만 남으면 경고 없음(종전엔 예약 줄을 띄웠다).
   await markDone('un');
   const none = await ask('예약만 남음');
-  t('★★ 예약 줄만 남으면 홈 경고 없음(빨간 「N일 경과」 안 뜸)', none === null, none);
+  t('★★ 예약·영수증리뷰 줄(rc 12일 · 묶음만 있는 rc2 11.5일)만 남으면 홈 경고 없음(빨간 「N일 경과」 안 뜸)', none === null, none);
   t('  종전 SQL 은 이때도 예약 줄(20일)을 띄웠다', Array.isArray(lastBaseline) && lastBaseline[0] && lastBaseline[0].orderSubmissionId === ROWS[0].oid, lastBaseline);
 
   // 4) 종류 모름(fail 방향): 자리표도 탭 종류도 없는 줄은 종전대로 띄운다 — 위 2) 의 'un' 이 그 증명. 탭 종류를 booking 으로 바꾸면 빠진다.
@@ -186,6 +195,10 @@ const idOf = i => `${String(i + 1).repeat(8)}-1111-4111-8111-${String(i + 1).rep
   await db.query(`INSERT INTO tab_configs(sheet_id, tab_name, display_name, work_kind, sheetless) VALUES ($1, $2, $3, 'booking', TRUE)`, [ROWS[6].sid, ROWS[6].tab, ROWS[6].name]);
   const nowBooking = await ask('탭 종류 booking 으로');
   t('  같은 줄도 탭 종류가 네이버예약리뷰면 뺀다', nowBooking === null, nowBooking);
+  // 결정 434(2026-11-28) — 영수증 줄은 「종류 때문에」 빠진다: 같은 rc 줄의 탭 종류를 리뷰로 바꾸면 다시 뜬다(12일).
+  await db.query(`UPDATE tab_configs SET work_kind = 'review' WHERE sheet_id = $1 AND tab_name = $2`, [ROWS[5].sid, ROWS[5].tab]);
+  const rcAsReview = await ask('rc 탭 종류 review 로');
+  t('  ★ 같은 영수증 줄도 탭 종류가 영수증이 아니면 종전대로 띄운다(확실히 영수증일 때만 뺀다)', rcAsReview && rcAsReview.orderSubmissionId === ROWS[5].oid && rcAsReview.elapsedDays === 12, rcAsReview);
 
   t('경고 SQL 을 실제로 돌렸다(처리기 경로)', warningSqlSeen >= 8, warningSqlSeen);
   console.log(`\n✅ bookingHomeElapsedWarning — ${pass}개 통과`);

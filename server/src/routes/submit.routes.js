@@ -440,6 +440,9 @@ router.post('/review', async (req, res, next) => {
         await completionClient.query('COMMIT');
         completionClient.release(); completionClient=null;
 
+        /* ★ 결정 434(PR #1897 리뷰 ①) — 영수증리뷰 「리뷰 냄」은 위 완료 트랜잭션 안에서 이미 새겼다(무시트 「리뷰제출」 칸 기록 실행부
+             `sheetlessStatus.markStatusCell` → `receiptPool.markReceiptReviewedInTx` — 담당자 완료 길과 같은 단일 출처). 커밋 뒤 따로 쓰지 않는다. */
+
         // Optional review memo failure does not undo completion. Required blog URL
         // was already saved inside the transaction; never write it a second time here.
         if (!_isBlog) try {
@@ -586,7 +589,7 @@ async function _authoritativeHold(ctx) {
     const { rows } = await pool.query(
       `SELECT ca.phone8, ca.option_key, ca.owner_phone8, ca.blog_url, ca.status,
               ca.order_submission_id, ca.late_order_id, ca.applied_at,
-              ca.purchase_qty, ca.qty_tier_amount, ca.qna_slot_id, ca.booking_slot_id,
+              ca.purchase_qty, ca.qty_tier_amount, ca.qna_slot_id, ca.booking_slot_id, ca.receipt_pool_id,
               co.unit_kind AS unit_kind,
               co.product_name AS product_name,
               (so.id IS NOT NULL) AS sub_alive,
@@ -638,6 +641,8 @@ async function _authoritativeHold(ctx) {
     ctx.qnaSlotId = rows[0].qna_slot_id == null ? null : Number(rows[0].qna_slot_id);
     // ★ 결정 409: 예약 자리에 묶인 신청인가(같은 왕복 · 순증 0). 칸은 부팅 필수 스키마(228)라 늘 있다.
     ctx.bookingSlotId = rows[0].booking_slot_id == null ? null : Number(rows[0].booking_slot_id);
+    // ★ 결정 434: 영수증이 배정된 신청인가(같은 왕복 · 순증 0). 칸은 부팅 필수 스키마(232)라 늘 있다.
+    ctx.receiptPoolId = rows[0].receipt_pool_id == null ? null : Number(rows[0].receipt_pool_id);
     // ★ 멱등 판정 재료: 이 홀드로 이미 접수된 "살아있는" 주문이 있는가.
     //   status='submitted' 확정건뿐 아니라 late_order_id(지각 접수)도 포함해야 한다 —
     //   confirmHoldInTx 의 late UPDATE 는 `late_order_id IS NULL` 조건이라 2회차 재제출은
@@ -1057,6 +1062,193 @@ router.post('/booking', async (req, res, next) => {
   }
 });
 
+/* ═══ ★★ 결정 434 — 영수증리뷰 참여 확정 · 내 영수증 보기 ═══
+   참여(POST /api/campaign/:id/apply)가 안 쓴 영수증 한 장을 신청에 묶은 뒤, 화면이 곧바로(입력 없이) 이 창구를 부른다:
+     ① 최소 장부 줄(source='receipt_join' · 이름·연락처·입금 계좌 · 참여일자) + 홀드 확정(같은 트랜잭션)
+     ② **배정된 영수증 줄 번호로만** 작업표 기록(남의 줄 안 덮음) + 「리뷰마감일」 칸 — 참여일·마감일은 배정 때 영수증 줄에 새긴 값(사본 0)
+   리뷰 단계도 이 창구로 줄 위치를 받는다(이미 확정 = 멱등). 리뷰어가 내는 것은 리뷰 캡처뿐이다(구매양식·영수증 캡처 없음). */
+async function _receiptCtx(req, res, code) {
+  const b = req.body || {};
+  if (!require('../utils/workKind').isWorkKindReady('receipt')) {
+    res.status(409).json({ ok: false, code: 'work_kind_not_ready', error: '이 공고는 아직 참여를 받을 준비가 안 됐어요. 운영자에게 문의해주세요.' });
+    return null;
+  }
+  let session = null;
+  try { session = verifyReviewerSession(req.headers['x-reviewer-token']); } catch (_) { session = null; }
+  if (!session || !session.ownerReviewerId) {
+    res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_REQUIRED', error: '리뷰어 로그인을 다시 확인해주세요.' });
+    return null;
+  }
+  const loginPhone8 = String(session.loginPhone8 || b.loginPhone8 || '').replace(/\D/g, '').slice(-8);
+  const holdCtx = await _authoritativeHold(_campaignHoldCtx(b, loginPhone8));
+  if (!holdCtx || !holdCtx.verified || !holdCtx.receiptPoolId) {
+    res.status(403).json({ ok: false, code: code + '_HOLD_INVALID', error: '참여 내역을 찾을 수 없어요. 새로고침 후 다시 시도해주세요.' });
+    return null;
+  }
+  const { rows: apps } = await pool.query(
+    `SELECT ca.status, ca.expires_at, ca.applicant_name, ca.applicant_phone, ca.owner_phone8, ca.owner_reviewer_id, ca.campaign_id,
+            (ca.expires_at > NOW() - make_interval(secs => $2)) AS in_time
+       FROM campaign_applications ca WHERE ca.id = $1`,
+    [holdCtx.applicationId, require('../services/campaignHold.service').HOLD_GRACE_SEC]);
+  const app = apps[0];
+  if (!app) { res.status(403).json({ ok: false, code: code + '_HOLD_INVALID', error: '참여 내역을 찾을 수 없어요.' }); return null; }
+  // ★ 본인 확인 — 이 참여의 소유자가 아닌 세션은 거절(영수증 사진은 배정된 리뷰어 본인만 본다)
+  if (!app.owner_reviewer_id || String(app.owner_reviewer_id) !== String(session.ownerReviewerId)) {
+    res.status(403).json({ ok: false, code: code + '_FORBIDDEN', error: '이 참여를 볼 권한이 없어요.' });
+    return null;
+  }
+  const receiptPool = require('../services/receiptPool.service');
+  const rp = await receiptPool.poolForApplication(pool, holdCtx.applicationId);
+  if (!rp || rp.seq == null || rp.status === 'cancelled') {
+    res.status(409).json({ ok: false, code: code + '_NOT_BOUND', error: '영수증이 배정된 참여가 아니에요.' });
+    return null;
+  }
+  return { b, session, loginPhone8, holdCtx, app, rp, receiptPool };
+}
+
+router.post('/receipt', async (req, res, next) => {
+  try {
+    const c = await _receiptCtx(req, res, 'RECEIPT');
+    if (!c) return;
+    const { session, loginPhone8, holdCtx, app, rp } = c;
+    const scope = await _resolveCampaignOrderScope({ holdCtx });
+    const wt = scope && scope.worktable;
+    if (!wt || wt.sheetId !== rp.sheet_id || wt.tabName !== rp.tab_name) {
+      logger.error(`[submit/receipt] 공고 작업표와 영수증 묶음이 다름 app=${holdCtx.applicationId} pool=${rp.id}`);
+      return res.status(409).json({ ok: false, code: 'RECEIPT_TARGET_MISMATCH', error: '작업표를 찾지 못했어요. 담당자에게 알려주세요.' });
+    }
+    const target = { sheetId: wt.sheetId, tabName: wt.tabName, gid: wt.tabGid || '', rowIndex: Number(rp.seq) };
+    const { RECEIPT_DEADLINE_HEADER } = require('../utils/worktablePlan');
+    const { writeOrderToWorktable } = require('../services/sheetlessOrder.service');
+    const dates = rp.joined_date && rp.review_deadline
+      ? { joinedLabel: c.receiptPool.joinDatesFor(rp.joined_date, 0).joinedLabel,
+          reviewDeadlineLabel: c.receiptPool.joinDatesFor(rp.review_deadline, 0).joinedLabel }
+      : null;
+    // 「리뷰마감일」 칸 — 리뷰어 구매양식 매퍼가 덮지 않는 시스템 칸이라 그 줄(우리 주문이 앉은 줄)에만 따로 적는다
+    const writeDeadlineCell = async (orderSubmissionId) => {
+      if (!dates) return;
+      await pool.query(
+        `UPDATE campaign_participants SET row_json = jsonb_set(COALESCE(row_json, '{}'::jsonb), ARRAY[$4::text], to_jsonb($5::text), true),
+                updated_by = 'receipt-join', updated_at = NOW()
+          WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL AND order_submission_id = $6::uuid`,
+        [target.sheetId, target.tabName, target.rowIndex, RECEIPT_DEADLINE_HEADER, dates.reviewDeadlineLabel, orderSubmissionId]);
+    };
+    const ensureRow = async (orderSubmissionId, orderData) => {
+      const { rows: cur } = await pool.query(
+        `SELECT order_submission_id FROM campaign_participants
+          WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL LIMIT 1`,
+        [target.sheetId, target.tabName, target.rowIndex]);
+      if (!cur.length) return { ok: false, reason: 'receipt_row_missing' };
+      if (cur[0].order_submission_id && String(cur[0].order_submission_id) !== String(orderSubmissionId)) return { ok: false, reason: 'receipt_row_taken' };   // 다른 주문이 앉은 줄 — 덮지 않는다
+      let w = { ok: true, already: true };
+      if (!cur[0].order_submission_id) {
+        w = await writeOrderToWorktable({
+          sheetId: target.sheetId, tabName: target.tabName, tabGid: target.gid, workboardId: wt.workboardId || null,
+          sheetRow: target.rowIndex, orderData, orderSubmissionId,
+          loginPhone8, loginName: orderData.orderer,
+          requireEmptyOrSame: true,   // 바깥 확인 뒤 줄 잠금 안에서 한 번 더(남의 주문 줄을 덮지 않는다)
+        });
+      }
+      if (w && w.ok) await writeDeadlineCell(orderSubmissionId);
+      return w;
+    };
+
+    if (holdCtx.doneKind === 'confirmed') {
+      // 재시도(·리뷰 캡처 단계) — 줄 기록만 다시 맞춘다(원장에 있는 값 그대로)
+      const { rows: os } = await pool.query('SELECT * FROM order_submissions WHERE id = $1 AND deleted_at IS NULL', [holdCtx.doneOrderId]);
+      const w = os.length
+        ? await ensureRow(holdCtx.doneOrderId, require('../services/orderLedger.service')._osRowToOrderData(os[0]))
+        : { ok: false, reason: 'order_missing' };
+      if (!w.ok) {
+        logger.error(`[submit/receipt] 재시도 줄 기록 실패 app=${holdCtx.applicationId} ${w.reason}`);
+        return res.status(500).json({ ok: false, code: 'RECEIPT_ROW_WRITE_FAILED', retryable: true, error: '작업표 기록에 실패했어요. 잠시 후 다시 눌러주세요.' });
+      }
+      return res.json({ ok: true, alreadySubmitted: true, orderSubmissionId: holdCtx.doneOrderId, target });
+    }
+    if (!dates) return res.status(409).json({ ok: false, code: 'RECEIPT_DATES_UNKNOWN', error: '참여 날짜를 불러오지 못했어요. 담당자에게 알려주세요.' });
+    if (app.status !== 'applied' || !app.in_time) {
+      return res.status(409).json({ ok: false, code: 'RECEIPT_EXPIRED', error: '참여 확인 시간이 지났어요. 영수증이 다른 분께 넘어갔을 수 있어요 — 다시 참여해 주세요.' });
+    }
+
+    // 장부 줄 재료 — 이름·연락처 = 신청 명의(서버 기록), 입금 계좌 = 명의가 타계정이면 그 타계정 계좌(없으면 본계정)
+    const { rows: rv } = await pool.query(
+      `SELECT name, phone, bank_name, bank_account, account_holder, sub_accounts FROM reviewers WHERE id = $1::uuid LIMIT 1`,
+      [session.ownerReviewerId]);
+    const owner = rv[0] || {};
+    let bank = owner.bank_name || '', account = owner.bank_account || '', depositor = owner.account_holder || '';
+    if (holdCtx.isSub) {
+      const hit = require('../services/identity.service').findSubAccount(owner.sub_accounts, app.applicant_name, holdCtx.phone8);
+      const sub = hit && hit.sub;
+      if (sub && String(sub.bankAccount || '').trim()) {
+        bank = sub.bankName || ''; account = sub.bankAccount || ''; depositor = sub.accountHolder || app.applicant_name || '';
+      }
+    }
+    const orderData = {
+      orderer: String(app.applicant_name || '').trim(), recipient: String(app.applicant_name || '').trim(),
+      phone: String(app.applicant_phone || '').trim(), bank, account, depositor,
+      dateStr: dates.joinedLabel,   // 「참여일자」 칸(이름에 「일자」 → 매퍼의 날짜 역할) = 배정 때 새긴 참여일(KST)
+    };
+    const receiptLedger = await createOrderLedgerEntry({
+      sheetId: scope.sheetId, tabName: scope.tabName, gid: '',
+      skipSheetMirror: true, orderData, loginPhone8, loginName: orderData.orderer, source: 'receipt_join',
+      campaignHold: { ...holdCtx, expectedOptKey: holdCtx.optionKey || null, orderIdentity: { phone: orderData.phone }, skipTabBinding: true },
+    });
+    if (!receiptLedger || !receiptLedger.orderSubmissionId) {
+      return res.status(500).json({ ok: false, code: 'RECEIPT_LEDGER_FAILED', retryable: true, error: '참여 확인에 실패했어요. 다시 눌러주세요.' });
+    }
+    if (receiptLedger.holdResult !== 'confirmed') {
+      // 확인과 확정 사이에 기한이 지난 경우 — 장부 줄을 남기지 않는다(영수증 없는 참여는 갈 곳이 없다)
+      await pool.query(`UPDATE order_submissions SET deleted_at = NOW(), mirror_status = 'canceled', sheet_error = 'receipt_hold_not_confirmed' WHERE id = $1`, [receiptLedger.orderSubmissionId]);
+      await pool.query(`UPDATE campaign_applications SET late_order_id = NULL WHERE id = $1 AND late_order_id = $2`, [holdCtx.applicationId, receiptLedger.orderSubmissionId]);
+      logger.warn(`[submit/receipt] 홀드 확정 안 됨(${receiptLedger.holdResult}) — 장부 줄 취소 app=${holdCtx.applicationId} os=${receiptLedger.orderSubmissionId}`);
+      const { rows: done } = await pool.query(
+        `SELECT ca.order_submission_id FROM campaign_applications ca
+           JOIN order_submissions os ON os.id = ca.order_submission_id AND os.deleted_at IS NULL
+          WHERE ca.id = $1 AND ca.status = 'submitted' LIMIT 1`, [holdCtx.applicationId]);
+      if (done.length) return res.json({ ok: true, alreadySubmitted: true, orderSubmissionId: done[0].order_submission_id, target });
+      return res.status(409).json({ ok: false, code: 'RECEIPT_EXPIRED', error: '참여 확인 시간이 지났어요. 영수증이 다른 분께 넘어갔을 수 있어요 — 다시 참여해 주세요.' });
+    }
+    if (wt.workboardId) {
+      await pool.query(`UPDATE order_submissions SET workboard_id = $2::uuid, updated_at = NOW() WHERE id = $1::uuid AND workboard_id IS NULL`,
+        [receiptLedger.orderSubmissionId, wt.workboardId]);
+    }
+    let w;
+    try { w = await ensureRow(receiptLedger.orderSubmissionId, orderData); } catch (e) { w = { ok: false, reason: 'exception', message: e.message }; }
+    if (!w || !w.ok) {
+      try { await markOrderMirrorFailed(receiptLedger.orderSubmissionId, (w && (w.message || w.reason)) || 'receipt_row_write_failed'); } catch (_) { /* noop */ }
+      logAbnormal({
+        flow: 'receipt_join', step: 'worktable_write', severity: 'critical',
+        error: new Error(`영수증리뷰 작업표 기록 실패: ${w && w.reason}`),
+        context: { campaignId: holdCtx.campaignId, applicationId: holdCtx.applicationId, orderSubmissionId: receiptLedger.orderSubmissionId, seq: target.rowIndex },
+      });
+      return res.status(500).json({ ok: false, code: 'RECEIPT_ROW_WRITE_FAILED', retryable: true, error: '작업표 기록에 실패했어요. 잠시 후 다시 눌러주세요.' });
+    }
+    logger.info(`[submit/receipt] 참여 확정 app=${holdCtx.applicationId} os=${receiptLedger.orderSubmissionId} seq=${target.rowIndex} 영수증=${rp.pool_seq}번`);
+    try { emitOrderSubmit({ sheetId: target.sheetId, tabName: target.tabName, orderer: orderData.orderer }); } catch (_) { /* noop */ }
+    return res.json({ ok: true, orderSubmissionId: receiptLedger.orderSubmissionId, target });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* 내 영수증 사진 — 배정된 리뷰어 본인만(리뷰어 세션 + 그 참여의 홀드 토큰 + 소유자 일치 + 참여 확정 뒤).
+   ★★ 무인증 사진 통로(drive/image·guide-image)·엣지로는 절대 내주지 않는다(receipt_review_files = 거절 목록 · 결정 352·420).
+   ★ 비공개 목록 밖 파일 = 404(드라이브 읽기 0) · 캐시 금지(private, no-store) · 파일 번호는 응답에 싣지 않는다. */
+router.post('/receipt/image', async (req, res, next) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    const c = await _receiptCtx(req, res, 'RECEIPT_IMAGE');
+    if (!c) return;
+    if (c.app.status !== 'submitted') {
+      return res.status(409).json({ ok: false, code: 'RECEIPT_NOT_JOINED', error: '참여 확인이 끝나면 영수증이 보여요. 새로고침해 주세요.' });
+    }
+    if (!(await c.receiptPool.isRegisteredReceiptFile(c.rp.file_id))) return res.status(404).send('not found');
+    return c.receiptPool.sendReceiptImage(res, c.rp.file_id);
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/order', async (req, res, next) => {
   try {
     const b = req.body;
@@ -1106,6 +1298,12 @@ router.post('/order', async (req, res, next) => {
     if (holdCtx && holdCtx.verified && holdCtx.bookingSlotId) {
       return res.status(409).json({ ok: false, reason: 'booking_use_reservation',
         error: '예약 참여는 구매양식이 아니라 예약내역으로 제출해요. 화면을 새로고침해주세요.' });
+    }
+    /* ★ 결정 434: 영수증이 배정된 신청도 구매양식으로 받지 않는다 — 이 길로 들어오면 배정된 영수증 줄이 아닌 아무 빈 줄에 들어간다.
+         참여 확정 창구는 POST /api/submit/receipt 하나다(리뷰어는 리뷰 캡처만 낸다). */
+    if (holdCtx && holdCtx.verified && holdCtx.receiptPoolId) {
+      return res.status(409).json({ ok: false, reason: 'receipt_use_join',
+        error: '영수증리뷰 참여는 구매양식을 내지 않아요. 화면을 새로고침해주세요.' });
     }
     const orderScope = await _resolveCampaignOrderScope({ sheetId, gid, tabName, holdCtx });
     if (!orderScope) {

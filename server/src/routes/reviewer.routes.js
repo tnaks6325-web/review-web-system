@@ -957,6 +957,9 @@ router.get('/overdue-review-warning', reviewerSessionMiddleware, async (req, res
             ★ 화면이 아니라 여기서 빼는 이유: 가장 오래된 1건이 예약 줄이면 다른 종류의 진짜 경고까지 같이 사라진다(다음 건을 고른다).
             ★ 판정 = bookingTabSql 하나(자리표가 있거나 탭 종류 booking) — 확실히 예약일 때만 뺀다(종류 모름 = 종전대로 띄운다). */
          AND NOT ${require('../utils/bookingTabSql').bookingTabSql('ri.sheet_id', 'ri.tab_name')}
+         /* 결정 434 사용자 확정(2026-11-28): 영수증리뷰 줄도 뺀다(425 를 영수증에도) — 리뷰 기한(참여 + N일 · 최대 30)이 10일보다 길면
+            마감 전에 「N일 경과」가 뜬다. 영수증 줄은 「내일/오늘 마감」 안내 + 마감 전날 알림톡만. 판정 = utils/receiptTabSql 하나(확실히 영수증일 때만). */
+         AND NOT ${require('../utils/receiptTabSql').receiptTabSql('ri.sheet_id', 'ri.tab_name')}
          AND COALESCE(cp.owner_link_count, 1) = 1
          AND NOT EXISTS (
            SELECT 1 FROM review_closed_targets rrs

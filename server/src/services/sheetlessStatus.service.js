@@ -403,6 +403,10 @@ async function _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, va
   } catch (e) {
     return { handled: true, ok: false, reason: 'write_failed', message: e.message, column: header };
   }
+  /* ★★ 결정 434(PR #1897 리뷰 ①) — 「리뷰제출」 칸 기록 = 리뷰 완료. 영수증리뷰 줄이면 같은 트랜잭션에서 그 영수증에 「리뷰 냄」을 새긴다
+       (리뷰어 제출 · 담당자 [리뷰제출일 기록] · 동시진행 묶음 완료가 모두 여기를 지난다 — 단일 출처 `markReceiptReviewedInTx`).
+       영수증 줄이 아니면 0줄 · 실패는 그 도우미가 격리하고 경고만(리뷰 완료를 되돌리지 않는다). */
+  if (kind === 'submit') await require('./receiptPool.service').markReceiptReviewedInTx(db, { sheetId, tabName, rowIndex });
 
   // ── 장부 재생성 — 이걸 빼면 화면(검색·리뷰내역·홈 통계)에 반영되지 않는다 ──
   if (deferRebuild) return { handled: true, ok: true, deferred: true, column: header, value: nextValue };

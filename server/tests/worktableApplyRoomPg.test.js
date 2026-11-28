@@ -194,7 +194,7 @@ const { PGlite } = require(process.env.PGLITE_MODULE || '@electric-sql/pglite');
     assert.ok(apply.indexOf("reason: 'popular_locked'") < at && apply.indexOf("reason: 'hold_cap'") < at, '다른 관문을 다 지난 뒤');
     assert.ok(at < apply.indexOf('INSERT INTO campaign_applications'), '홀드 INSERT 앞');
     const gate = apply.slice(apply.lastIndexOf('결정 340', at), apply.indexOf('// 홀드 생성:', at));
-    assert.match(gate, /if \(!blogApply && !qnaApply && !bookingApply && camp\.linked_sheet_id && camp\.linked_tab_name\)/);
+    assert.match(gate, /if \(!blogApply && !qnaApply && !bookingApply(?: && !receiptApply)? && camp\.linked_sheet_id && camp\.linked_tab_name\)/);
     assert.match(gate, /SAVEPOINT wt_room/);
     assert.match(gate, /catch \(e\) \{\s*room = null;\s*try \{ await client\.query\('ROLLBACK TO SAVEPOINT wt_room'\)/, '조회 실패 = 모름 = 종전대로 받음(fail-open)');
     assert.ok(!/catch[\s\S]*ROLLBACK'\);[\s\S]*worktable_full/.test(gate.slice(0, gate.indexOf('roomSvc.isFull'))), '실패 갈래에서 거절하지 않는다');
