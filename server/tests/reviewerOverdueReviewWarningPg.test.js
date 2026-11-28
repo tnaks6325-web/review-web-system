@@ -99,6 +99,8 @@ async function callRoute(router, ownerReviewerId) {
     CREATE TABLE tab_configs (sheet_id TEXT, tab_name TEXT, display_name TEXT, campaign_name TEXT, work_kind TEXT);
     -- 결정 425: 경고 후보에서 네이버예약리뷰 줄을 빼는 판정(bookingTabSql)이 읽는 표 — 비어 있으면 종전 결과 그대로.
     CREATE TABLE booking_slots (sheet_id TEXT, tab_name TEXT, seq INT, slot_date DATE, status TEXT);
+    -- 결정 432(2026-11-28): 영수증리뷰 줄도 빼는 판정(receiptTabSql)이 읽는 표 — 비어 있으면 종전 결과 그대로(검사 의미 불변).
+    CREATE TABLE receipt_pool (sheet_id TEXT, tab_name TEXT, seq INT, status TEXT);
     CREATE TABLE review_reminder_states (order_submission_id UUID, review_status TEXT);
     CREATE TABLE workdesk_participant_deletions (
       order_submission_id UUID, sheet_id TEXT, tab_name TEXT, seq INT

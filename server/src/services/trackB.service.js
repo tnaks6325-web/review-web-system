@@ -5133,7 +5133,7 @@ async function _inheritSlotPlanInTx(client, { sheetId, tabName, row, headers }) 
   return { cells, optionText };
 }
 
-async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expectedRevision, requireCancelledOrder = false }) {
+async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expectedRevision, requireCancelledOrder = false, requireNoReview = false }) {
     // 작업표 행과 리뷰어 참여내역은 같은 참여 단위다. 기존처럼 화면 오버레이만
     // 숨기면 review_index/order_submissions 쪽의 "내 참여내역"이 남아 서로 다른
     // 사실을 말하게 된다. 행을 잠근 뒤, 이 행에만 연결된 신원·참여 링크를 함께 해제한다.
@@ -5147,6 +5147,17 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
     const row = rows[0];
 
     if (expectedRevision && row.revision !== expectedRevision) throw new HideRowError('row_changed');
+    /* ★ 결정 432(2026-11-28 ①) — 리뷰어 스스로 취소(reviewerOrderCancel)는 **잠근 줄에서** 리뷰 제출 여부를 다시 본다(판정과 실행 사이에
+         리뷰가 들어와도 지우지 않는다 — 이 트랜잭션 통째 되돌림). 작업표 줄 · 리뷰 색인 · 영수증 줄 「리뷰 냄」 셋 중 하나라도면 거절.
+       ★ 담당자 [줄 삭제]는 이 옵션을 넘기지 않는다(동작 불변 — 리뷰 낸 줄도 담당자는 지울 수 있다). */
+    if (requireNoReview) {
+      const { rows: rv } = await client.query(
+        `SELECT (COALESCE((SELECT cp.is_submitted FROM campaign_participants cp WHERE cp.id = $1), FALSE)
+                 OR EXISTS (SELECT 1 FROM review_index ri WHERE ri.sheet_id = $2 AND ri.tab_name = $3 AND ri.row_index = $4 AND ri.is_submitted = TRUE)
+                 OR EXISTS (SELECT 1 FROM receipt_pool rcp WHERE rcp.sheet_id = $2 AND rcp.tab_name = $3 AND rcp.seq = $4 AND rcp.reviewed_at IS NOT NULL)) AS done`,
+        [rowId, sheetId, tabName, row.seq]);
+      if (!rv.length || rv[0].done !== false) throw new HideRowError('review_submitted');   // 모르면(빈 결과) 지우지 않는다(fail-closed)
+    }
     if (requireCancelledOrder && row.order_submission_id) {
       const current = await client.query('SELECT deleted_at FROM order_submissions WHERE id=$1', [row.order_submission_id]);
       if (current.rows.length !== 1 || !current.rows[0].deleted_at) throw new HideRowError('row_changed');
@@ -5444,7 +5455,7 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
 // ★ 목표 수 이내에서는 총 모집인원을 줄이지 않는다 — 지운 자리는 마지막 진행일의 빈 자리로
 //   보충한다. 이미 목표를 초과한 표는 삭제 뒤 목표 수 이상이면 보충하지 않아 초과분을 되살리지 않는다.
 // ★ 주문 취소와 행 제거는 반드시 한 트랜잭션 — 한쪽만 반영되면 원장과 작업표가 갈린다.
-async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRole = null, expectedRevision } = {}) {
+async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRole = null, expectedRevision, requireNoReview = false } = {}) {
   const db = getPool();
   // 살아 있는 구매양식이 붙은 행인지 먼저 본다(짧은 조회 — 잠금 없음).
   let liveOrderId = null;
@@ -5469,7 +5480,7 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRol
   }
 
   const runInOwnTx = () => _runWorkdeskMutation({ sheetId, tabName, rowId }, client =>
-    _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expectedRevision, requireCancelledOrder: true }));
+    _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expectedRevision, requireCancelledOrder: true, requireNoReview }));
 
   let result = null;
   let orderCanceled = false;
@@ -5489,7 +5500,7 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRol
           if (rows.length !== 1 || String(rows[0].order_submission_id || '') !== String(liveOrderId)) throw new HideRowError('row_changed');
         },
         // 행 제거·총원 보충을 주문 취소와 같은 트랜잭션에 둔다. 여기서 throw 하면 취소도 롤백된다.
-        beforeCancelCommit: async (client) => { result = await _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expectedRevision }); },
+        beforeCancelCommit: async (client) => { result = await _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expectedRevision, requireNoReview }); },
       });
       if (!canceled || !canceled.ok) return { ok: false, error: (canceled && canceled.code) || 'order_cancel_failed' };
       // 그 사이 다른 경로가 먼저 취소했다면 본문이 돌지 않았다 — 행 제거만 이어서 한다.

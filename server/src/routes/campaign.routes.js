@@ -2159,6 +2159,59 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
   }
 });
 
+/* ★★ 결정 432 사용자 확정(2026-11-28 ①) — 영수증리뷰: 영수증을 받은 뒤(참여 확정 = submitted)라도 **리뷰를 내기 전이면** 리뷰어가 스스로 취소한다.
+   새 창구를 만들지 않는다 — 리뷰어 [참여 취소](이 라우트)가 받고, 실행은 리뷰어 주문취소와 **같은 실행부**
+   (`reviewerOrderCancel.cancelOrderByReviewer` → `trackB.hideWorkdeskRow` = 담당자 [줄 삭제]: 주문 무효 + 신청 취소 + 작업표 줄 제거 +
+   같은 영수증으로 보충 줄 + 묶음 seq 옮기기 — 한 트랜잭션)를 탄다. 영수증 표에 「반납」을 쓰지 않는다(신청 표 + receiptTakenSql 단일 출처).
+   ★ 열쇠 = phone8 + 홀드 토큰(종전) **+ 리뷰어 세션 소유자 = 참여 소유자**(주문까지 지우므로 내 영수증 통로와 같은 본인 확인 · 모르면 거절).
+   ★ 리뷰 낸 뒤 = 409 review_submitted(영수증 줄 reviewed_at 먼저 · 실행부가 잠근 줄에서 작업표·리뷰 색인·reviewed_at 을 다시 본다).
+   @returns {Promise<boolean>} 응답을 보냈으면 true(영수증 확정 참여가 아니면 false — 호출부가 종전 404). */
+async function _receiptSelfCancel(req, res, { id, p8, token }) {
+  const { rows } = await pool.query(
+    `SELECT ca.id, ca.owner_reviewer_id, ca.order_submission_id, ca.applicant_name
+       FROM campaign_applications ca
+      WHERE ca.campaign_id = $1 AND ca.phone8 = $2 AND ca.hold_token = $3 AND ca.hold_token <> ''
+        AND ca.status = 'submitted' AND ca.receipt_pool_id IS NOT NULL
+      ORDER BY ca.id DESC LIMIT 1`, [id, p8, token]);
+  if (!rows.length) return false;
+  const app = rows[0];
+  if (!isWorkKindReady('receipt')) { res.status(409).json(workKindNotReadyBody('receipt')); return true; }   // 1단계 안전핀(두 겹)
+  let session = null;
+  try { session = require('../services/reviewerSession.service').verifyReviewerSession(req.headers['x-reviewer-token']); } catch (_) { session = null; }
+  if (!session || !session.ownerReviewerId) {
+    res.status(401).json({ ok: false, code: 'REVIEWER_AUTH_REQUIRED', error: '리뷰어 로그인을 다시 확인해주세요.' });
+    return true;
+  }
+  if (!app.owner_reviewer_id || String(app.owner_reviewer_id) !== String(session.ownerReviewerId)) {
+    res.status(403).json({ ok: false, code: 'RECEIPT_CANCEL_FORBIDDEN', error: '본인 참여만 취소할 수 있어요.' });
+    return true;
+  }
+  const roc = require('../services/reviewerOrderCancel.service');
+  const seat = await receiptPoolSvc.poolForApplication(pool, app.id);
+  if (!seat || seat.seq == null) {
+    res.status(409).json({ ok: false, code: 'no_row', reason: 'no_row', error: roc.CANCEL_BLOCK_REASONS.no_row });
+    return true;
+  }
+  if (seat.reviewed_at) {
+    res.status(409).json({ ok: false, code: 'review_submitted', reason: 'review_submitted', error: roc.CANCEL_BLOCK_REASONS.review_submitted });
+    return true;
+  }
+  const out = await roc.cancelOrderByReviewer({
+    sheetId: seat.sheet_id, tabName: seat.tab_name, rowIndex: seat.seq, phone8: p8,
+    reviewerName: String(app.applicant_name || '').trim().slice(0, 60),
+    kind: 'receipt', expectedOrderSubmissionId: app.order_submission_id,
+  });
+  if (!out || !out.ok) {
+    const code = (out && out.code) || 'cancel_failed';
+    res.status(409).json({ ok: false, code, reason: code,
+      error: code === 'no_order' ? '참여 기록을 작업표에 맞추는 중이에요. 잠시 후 다시 눌러 주세요.' : ((out && out.error) || '취소하지 못했어요. 잠시 후 다시 시도해 주세요.') });
+    return true;
+  }
+  logger.info(`[campaign/cancel] 영수증리뷰 참여 취소(리뷰 전) camp=${id} app=${app.id} 영수증=${seat.pool_seq}번 phone8=***${p8.slice(-4)}`);
+  res.json({ ok: true, message: '참여를 취소했어요. 받은 영수증은 다른 분께 넘어갔어요.' });
+  return true;
+}
+
 // POST /api/campaign/:id/cancel — 본인 홀드 취소 (phone8+holdToken 이중 열쇠)
 //   ★ 결정 400(L7): 취소는 같은 날 다시 참여를 막지 않는다 — 참여 신청 판정(_applyParticipation)은 같은 명의의
 //   제출 완료(submitted) 이력만 보고(재참여 기간), 취소(cancelled)·만료 줄은 읽지 않는다. 응답 문구·화면 확인 창이 같은 말.
@@ -2193,6 +2246,8 @@ router.post('/:id/cancel', applyLimiter, async (req, res, next) => {
       );
       if (rows.length === 0) {
         await client.query('ROLLBACK');
+        // ★ 결정 432(2026-11-28 ①) — 영수증을 받은(확정된) 영수증리뷰 참여는 리뷰 전이면 같은 버튼으로 취소한다(위 _receiptSelfCancel).
+        if (await _receiptSelfCancel(req, res, { id, p8, token })) return;
         return res.status(404).json({ ok: false, error: '취소할 수 있는 참여가 없습니다.' });
       }
       if (chained.length) {   // 진행 중이었으면 다음 명의 시작 · 대기 중이었으면 뒤 명의만 앞으로(자기 SAVEPOINT — 실패해도 취소는 그대로)

@@ -404,7 +404,9 @@ async function addRow(q, key, { tab, row, subDays, visit, deadline, slotStatus =
   t('reviewReminderPlan 모듈이 있다(종류별 알림 방식 단일 출처)', !!plan);
   if (plan) {
     t('booking = 마감일 당일 한 번(deadline_day_once)', plan.reminderPlanOfKind('booking') === 'deadline_day_once' && plan.reminderPlanOfKind('네이버예약리뷰') === 'deadline_day_once');
-    for (const k of ['review', 'blog', 'qna', 'receipt', '', null, '모르는값', '영수증리뷰']) t(`${JSON.stringify(k)} = 종전 7·13·14일(schedule_days)`, plan.reminderPlanOfKind(k) === 'schedule_days');
+    for (const k of ['review', 'blog', 'qna', '', null, '모르는값']) t(`${JSON.stringify(k)} = 종전 7·13·14일(schedule_days)`, plan.reminderPlanOfKind(k) === 'schedule_days');
+    // 결정 432 사용자 확정(2026-11-28 ②) — 영수증리뷰는 「마감 전날 한 번」으로 바뀌었다(자세한 가드 = receiptReminderDayBefore). 예약 방식과는 다른 값이어야 한다.
+    for (const k of ['receipt', '영수증리뷰']) t(`${JSON.stringify(k)} = 마감 전날 한 번(day_before_deadline_once · 예약 방식 아님)`, plan.reminderPlanOfKind(k) === 'day_before_deadline_once');
     t('수동 늦은 발송 창 = 마감일 + 7일', plan.PLAN_RULES.deadline_day_once.manualLateDays === 7);
   }
   const read = p => fs.readFileSync(path.join(SERVER, p), 'utf8');

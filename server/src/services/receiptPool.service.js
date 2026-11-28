@@ -104,8 +104,7 @@ async function insertPool({ db, workOrderId, sheetId, tabName, slots = [], by = 
 
 /* 판정 = 묶음이 있거나, 탭이 영수증리뷰로 등록돼 있다(묶음 저장이 실패한 영수증 탭도 리뷰 탭처럼 정리되지 않게).
    탭 종류는 접수 때 tab_configs.work_kind 에 기록된다. */
-const IS_RECEIPT_POOL_TAB_SQL = `SELECT (EXISTS (SELECT 1 FROM receipt_pool WHERE sheet_id = $1 AND tab_name = $2)
-                                     OR EXISTS (SELECT 1 FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 AND work_kind = 'receipt')) AS b`;
+const IS_RECEIPT_POOL_TAB_SQL = `SELECT ${require('../utils/receiptTabSql').receiptTabSql('$1', '$2')} AS b`;   // 판정 조각 단일 출처(utils/receiptTabSql)
 
 /**
  * 이 탭이 영수증 탭인가.
