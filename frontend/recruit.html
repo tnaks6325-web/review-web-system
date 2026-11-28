@@ -249,6 +249,9 @@ body{font-family:'Pretendard',sans-serif;background:var(--bg);color:var(--t1);mi
 @keyframes spin{to{transform:rotate(360deg)}}
 .rc-empty{text-align:center;padding:60px 20px;color:var(--t4)}
 .rc-empty i{font-size:2.5rem;display:block;margin-bottom:14px;opacity:.25}
+.rc-error i{color:#DC2626;opacity:1}
+.rc-retry-btn{padding:10px 22px;border:none;border-radius:999px;background:var(--p);color:#fff;font-size:.86rem;font-weight:800;cursor:pointer}
+.rc-retry-btn:disabled{opacity:.6;cursor:default}
 
 /* ── 반응형 ── */
 @media(max-width:400px){
@@ -308,6 +311,8 @@ body{ background:#F4F5F8 !important; letter-spacing:-.01em; }
     <p style="font-size:.9rem;font-weight:600;color:var(--t2);margin-bottom:6px">현재 모집 중인 캠페인이 없습니다</p>
     <p style="font-size:.78rem">잠시 후 다시 확인해주세요</p>
   </div>
+  <!-- 결정 430: 목록을 못 받았을 때(서버 오류·끊김·무응답) — 「없습니다」와 따로 둔다 -->
+  <div id="rcError" class="rc-empty rc-error" style="display:none"></div>
   <div id="rcList"></div>
 </div>
 
@@ -425,10 +430,11 @@ function setRecruitKind(k){
   _rcKind = _RC_KINDS[k] ? k : "review";
   try{ sessionStorage.setItem("rc_kind_v1", _rcKind); }catch(_){}
   _rcPaintKindTabs();
-  const container = document.getElementById("rcList");
-  if (container) container.innerHTML = "";
-  document.getElementById("rcEmpty").style.display = "none";
-  loadCampaigns();
+  // ★ 결정 430(M4·H1): 탭은 받아 둔 응답으로 다시 그리기만 한다 — 서버를 다시 부르지 않으니
+  //   늦게 온 응답이 덧붙어 카드가 두 벌 나오지 않고, 통신이 끊겨도 탭 아래가 비지 않는다.
+  if (_rcLastJson) { _rcRender(_rcLastJson); return; }
+  if (_rcBusy) return;        // 첫 응답을 기다리는 중 — 「불러오는 중」 그대로, 도착하면 지금 탭으로 그린다
+  loadCampaigns();            // 처음 불러오기가 실패한 뒤 — 다시 불러온다(불러오는 중 → 목록 또는 실패 상자)
 }
 function _rcPaintKindTabs(){
   document.querySelectorAll(".rc-kind-tabs .rc-kt").forEach(b => {
@@ -439,53 +445,133 @@ function _rcPaintKindTabs(){
   });
 }
 
+/* ★ 결정 430 — 공유 목록 불러오기 (리뷰어 홈 결정 359 `_rhFetchJson` 과 같은 판정 · 공고 화면 결정 397 처럼 15초).
+   - 시간 제한(AbortController · 본문 읽기까지) + 상태코드·본문(ok:false·error) 판정 — 실패는 던진다.
+     이 API 는 실패를 HTTP 200 + {error} 로 주는 경로가 있어 상태코드만 보면 안 된다(결정 028).
+   - 받은 응답은 _rcLastJson 에 두고 탭 전환·다시 그리기는 그것으로만(M4).
+   - 요청마다 번호(_rcLoadSeq) — 마지막 요청의 응답만 그린다(늦게 온 옛 응답은 버린다).
+   - 실패: 받아 둔 목록이 있으면 그대로 둔다 / 없으면 실패 상자 + [다시 불러오기].
+     「현재 모집 중인 캠페인이 없습니다」는 진짜 빈 목록일 때만.
+   - 문구는 api.js apiFriendlyErrorMessage(단일 출처) — 옛 api.js 캐시면 같은 뜻의 한국어로 접는다(영어 e.message 금지). */
+const _RC_LIST_TIMEOUT_MS = 15000;
+let _rcLastJson = null;
+let _rcLoadSeq = 0;
+let _rcBusy = false;
+async function _rcFetchList(timeoutMs) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs || _RC_LIST_TIMEOUT_MS);
+  try {
+    const res = await fetch(API_BASE_URL + "/api/campaign/list", { signal: ctl.signal });
+    let json = null;
+    try { json = await res.json(); } catch (e) { if (e && e.name === "AbortError") throw e; json = null; }
+    if (!res.ok || !json || json.ok === false || json.error) {
+      const err = new Error((json && json.error) || ("HTTP " + res.status));
+      err.status = res.status;
+      throw err;
+    }
+    return json;
+  } finally { clearTimeout(timer); }
+}
+function _rcErrMsg(e) {
+  try { if (typeof apiFriendlyErrorMessage === "function") return apiFriendlyErrorMessage(e, "잠시 후 다시 시도해 주세요."); } catch (_) {}
+  if (e && e.name === "AbortError") return "응답이 늦어지고 있어요. 잠시 후 다시 시도해 주세요.";
+  return "잠시 후 다시 시도해 주세요.";
+}
+function _rcShowLoading() {
+  document.getElementById("rcError").style.display = "none";
+  document.getElementById("rcEmpty").style.display = "none";
+  document.getElementById("rcLoading").style.display = "";
+}
+function _rcShowError(e) {
+  document.getElementById("rcLoading").style.display = "none";
+  document.getElementById("rcEmpty").style.display = "none";
+  document.getElementById("rcList").innerHTML = "";
+  document.getElementById("rcActiveCount").textContent = "";
+  const box = document.getElementById("rcError");
+  box.innerHTML =
+    `<i class="fas fa-exclamation-circle"></i>
+     <p style="font-size:.9rem;font-weight:700;color:var(--t2);margin-bottom:6px">캠페인 목록을 불러오지 못했습니다</p>
+     <p style="font-size:.78rem;margin-bottom:16px">${_esc(_rcErrMsg(e))}</p>
+     <button type="button" class="rc-retry-btn" onclick="this.disabled=true;loadCampaigns()">다시 불러오기</button>`;
+  box.style.display = "";
+}
+
 async function loadCampaigns() {
   _rcPaintKindTabs();
+  const seq = ++_rcLoadSeq;
+  _rcBusy = true;
+  if (!_rcLastJson) _rcShowLoading();   // 이미 보던 목록이 있으면 조용히 다시 받는다(카운트다운 0 · 신청 뒤)
+  let json;
   try {
-    const res  = await fetch(API_BASE_URL + "/api/campaign/list");
-    const json = await res.json();
-    if (window.CampCards && CampCards.seedThumbs) CampCards.seedThumbs(json);   // 결정 354 — 썸네일 빠른 길 서명
+    json = await _rcFetchList(_RC_LIST_TIMEOUT_MS);
+  } catch (e) {
+    if (seq !== _rcLoadSeq) return;     // 더 새 요청이 있다 — 그쪽이 화면을 정한다
+    _rcBusy = false;
+    if (_rcLastJson) return;            // 다시 부르다 실패 — 방금 보던 목록을 지우지 않는다(남은 자리 수만 잠시 옛 값)
+    _rcShowError(e);
+    return;
+  }
+  if (seq !== _rcLoadSeq) return;       // 늦게 온 옛 응답은 버린다(M4)
+  _rcBusy = false;
+  _rcLastJson = json;
+  if (window.CampCards && CampCards.seedThumbs) CampCards.seedThumbs(json);   // 결정 354 — 썸네일 빠른 길 서명
+  // 서버 시계는 **새로 받은 응답에서만** 맞춘다 — 탭 전환은 받아 둔 응답으로 다시 그리므로, 거기서 맞추면
+  // 그 응답의 옛 serverNow 로 시계가 흐른 시간만큼 뒤로 감겨 카운트다운이 늘어난다(결정 430 · PR #1893 리뷰).
+  if (window.CampCards && CampCards.setServerNow) CampCards.setServerNow(json && json.serverNow);
+  _rcRender(json);
+}
+
+/* 받아 둔 응답으로 지금 탭의 목록을 그린다 — 새 내용을 다 만든 뒤 한 번에 바꿔 끼우고 스크롤 자리를 지킨다(M5).
+   (종전: 카운트다운 0 때 목록을 먼저 비우고 응답을 기다려 아이폰에서 맨 위로 튀었다) */
+function _rcRender(json) {
+  try {
+    const data = (json && Array.isArray(json.data)) ? json.data : [];
     // ★ M2: 참여형(participation_mode) 공고는 공용 카드 모듈로 렌더(campaign.html 상세로 이동).
     //   레거시 공고는 기존 카드/신청 흐름 그대로.
     // 정렬 = 지금 참여 가능한 공고가 위(오늘 마감된 건은 아래로) — 공용 규칙(campaign-cards.js)
-    const _partsRaw = (json.data || []).filter(c => c.participation_mode && c.status !== "closed" && _rcShown(c));
+    const _partsRaw = data.filter(c => c.participation_mode && c.status !== "closed" && _rcShown(c));
     const parts = window.CampCards ? CampCards.qnaFirst(CampCards.sortByAvailability(_partsRaw)) : _partsRaw;
-    const all  = (json.data || []).filter(c => !c.participation_mode && _rcKindOf(c) === _rcKind);
-
-    document.getElementById("rcLoading").style.display = "none";
+    const all  = data.filter(c => !c.participation_mode && _rcKindOf(c) === _rcKind);
 
     const activeList = all.filter(c => c.status === "active");
     const closedList = all.filter(c => c.status === "closed");
 
-    if (all.length === 0 && parts.length === 0) {
-      document.getElementById("rcEmpty").style.display = "";
-      return;
-    }
-
-    document.getElementById("rcActiveCount").textContent = `진행중 ${activeList.length + parts.filter(c=>c.state==='open'||c.state==='cutoff').length}건`;
-    const container = document.getElementById("rcList");
-
-    if (parts.length && window.CampCards) {
-      CampCards.setServerNow(json.serverNow);
+    const frag = document.createDocumentFragment();
+    const showParts = parts.length && window.CampCards;
+    if (showParts) {
       const pwrap = document.createElement("div");
       pwrap.className = "pcards-grid";
       pwrap.innerHTML = parts.map(c => CampCards.cardHtml(c)).join("");
-      container.appendChild(pwrap);
-      CampCards.startTicker(() => { container.innerHTML = ""; loadCampaigns(); });
+      frag.appendChild(pwrap);
     }
-
-    activeList.forEach(c => container.appendChild(_buildCard(c)));
+    activeList.forEach(c => frag.appendChild(_buildCard(c)));
     if (closedList.length > 0) {
       const sep = document.createElement("div");
       sep.style.cssText = "text-align:center;padding:12px;font-size:.75rem;color:var(--t4);font-weight:600";
       sep.textContent = `── 마감된 캠페인 (${closedList.length}건) ──`;
-      container.appendChild(sep);
-      closedList.forEach(c => container.appendChild(_buildCard(c)));
+      frag.appendChild(sep);
+      closedList.forEach(c => frag.appendChild(_buildCard(c)));
     }
-  } catch(e) {
-    document.getElementById("rcLoading").innerHTML =
-      `<i class="fas fa-exclamation-circle" style="color:#DC2626;font-size:2rem;display:block;margin-bottom:12px"></i>
-       <p style="color:#DC2626">불러오기 실패: ${_esc(e.message)}</p>`;
+
+    const y = window.scrollY || window.pageYOffset || 0;
+    const container = document.getElementById("rcList");
+    document.getElementById("rcLoading").style.display = "none";
+    document.getElementById("rcError").style.display = "none";
+    container.innerHTML = "";
+    if (all.length === 0 && parts.length === 0) {
+      document.getElementById("rcEmpty").style.display = "";
+      document.getElementById("rcActiveCount").textContent = "";
+    } else {
+      document.getElementById("rcEmpty").style.display = "none";
+      document.getElementById("rcActiveCount").textContent = `진행중 ${activeList.length + parts.filter(c=>c.state==='open'||c.state==='cutoff').length}건`;
+      container.appendChild(frag);
+    }
+    if (y && (window.scrollY || window.pageYOffset || 0) !== y) window.scrollTo(0, y);
+    // 카운트다운 0 → 조용히 다시 받기(목록을 비우지 않는다 — 받은 뒤 위에서 한 번에 바꾼다)
+    if (showParts) CampCards.startTicker(() => loadCampaigns());
+  } catch (e) {
+    console.warn("[recruit] 목록 그리기 실패", e);
+    if (!document.getElementById("rcList").innerHTML) _rcShowError(e);
   }
 }
 
@@ -581,8 +667,7 @@ async function submitApplication() {
     }
     rcShowToast("🎉 " + (data.message || "참여 신청이 완료되었습니다!"), "success");
     closeApplyModal();
-    // 목록 새로고침 (정원 업데이트)
-    document.getElementById("rcList").innerHTML = "";
+    // 목록 새로고침 (정원 업데이트) — 결정 430: 비우지 않고 받은 뒤 바꿔 끼운다(실패하면 보던 목록 유지)
     loadCampaigns();
   } catch(e) {
     rcShowToast(e.message, "error");

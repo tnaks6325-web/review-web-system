@@ -483,6 +483,25 @@ function dailyQuota(c, submittedBeforeToday, carry, planCtx, eff, optCap = null)
 }
 
 /**
+ * ★★ 결정 432(모집안내 점검 M2) — 보관(archived_at · migration 130)된 공고는 **리뷰어에게 끝난 공고**다.
+ *   판정 = `isArchivedCampaign` 하나 — 참여 관문(POST /:id/apply 403 archived)과 리뷰어 공개 상세(`_publicView`)가
+ *   **같은 함수**를 본다. 종전엔 관문만 보관을 봐서, 링크로 연 공고 화면은 「지금 구매 가능 · 참여하기」인데
+ *   누르면 「모집이 종료된 공고입니다」 → 다시 받아도 'open' → [참여하기]가 되살아나는 반복이었다.
+ * ★★ `computeCampaignState`(상태엔진)에는 넣지 않는다(완화 금지) — 보관은 노출 축이지 상태 축이 아니다(결정 048).
+ *   상태엔진은 직원 목록·보관함 카드·작업보드·외부모집 수동제출·부족 알림 등 17곳이 부르고, 보관 공고로도
+ *   「오더·공고 맞추기」(결정 312)·담당자 변경(결정 395)이 돌아간다 — 거기서 'closed' 로 바뀌면 직원 화면이 갈린다.
+ *   리뷰어 응답만 덮는다(state 'closed' · stateReason 'archived' · 쉬운 말 한 줄). 공개 칸은 늘지 않는다(결정 431).
+ */
+const ARCHIVED_STATE_MESSAGE = '모집이 끝난 공고예요';
+function isArchivedCampaign(c) { return !!(c && c.archived_at); }
+/** 리뷰어 공개 뷰에 덮을 「끝난 공고」 값 — 보관 아님 = null(덮지 않는다). */
+function reviewerArchivedState(c) {
+  if (!isArchivedCampaign(c)) return null;
+  return { state: 'closed', stateReason: 'archived', stateMessage: ARCHIVED_STATE_MESSAGE,
+    closedKind: null, resumesOn: null, resumesAt: null };
+}
+
+/**
  * 상태 판정 (순수 함수 — DB 없이 테스트 가능)
  * @param c      recruit_campaigns 행 (participation_mode, status, window_start, window_end,
  *               close_buffer_min, hold_ttl_min, daily_limit, recruit_total)
@@ -2177,6 +2196,9 @@ function liveOptions(rows) {
 
 module.exports = {
   computeCampaignState,
+  isArchivedCampaign,      // 결정 432 — 보관 = 리뷰어에게 끝난 공고(참여 관문·공개 상세 같은 판정)
+  reviewerArchivedState,   // 결정 432
+  ARCHIVED_STATE_MESSAGE,
   ORDER_COUNTED_SQL,   // 결정 279 — 첫 참여일 맞춤이 같은 "센 주문" 규칙을 쓴다(사본 금지)
   fetchCampaignCounts,
   fetchOptionCounts,

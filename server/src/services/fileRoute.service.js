@@ -97,6 +97,14 @@ async function _sheetTitleFor(sheetId, tabName) {
   return tabName;
 }
 
+/** 영수증 폴더로 옮긴 파일의 직접 공개 권한 제거 — 던지지 않는다(결정 433). */
+async function _dropPublicLinks(driveService, fileId) {
+  try {
+    const rm = await driveService.removePublicLinks(fileId);
+    if (rm && rm.failed) logger.warn(`[fileRoute] 영수증 폴더로 옮긴 파일 공개 권한 제거 실패: ${fileId}`);
+  } catch (_) {}
+}
+
 /**
  * 이동 대상 폴더 ID.
  * @param {object} p { target: 'review'|'receipt'|'capture', sheetId, tabName,
@@ -282,6 +290,8 @@ async function revertRouteCore({ fileId, by = 'revert' } = {}) {
   if (cur.trashed) return { ok: false, error: '파일이 휴지통에 있습니다. Drive에서 먼저 복구해주세요.' };
   const parent = (cur.parents || [])[0] || null;
   if (parent !== toFolderId) await driveService.moveFile(fileId, toFolderId, parent);
+  // ★★ 영수증 폴더로 돌아가는 파일은 리뷰 칸에 있던 동안 걸린 공개 권한을 걷는다(결정 433 · 실패는 기록만).
+  if (backTarget === 'receipt') await _dropPublicLinks(driveService, fileId);
 
   if (backTarget === 'receipt') {
     const pendingChecks = JSON.stringify({
@@ -470,6 +480,8 @@ async function manualRouteCore({ fileId, target, by = '' } = {}) {
     const parent = (cur.parents || [])[0] || null;
     if (parent !== toFolderId) await driveService.moveFile(fileId, toFolderId, parent);
   } catch (e) { return { ok: false, error: `Drive 이동 실패: ${e.message}` }; }
+  // ★★ 영수증 칸으로 옮긴 파일은 리뷰 칸에서 걸린 공개 권한을 걷는다(결정 433 · 실패는 기록만).
+  if (MANUAL_ROUTE_TARGETS[t] === 'receipt') await _dropPublicLinks(driveService, fileId);
 
   // ★ routed_from_slot 은 COALESCE — 자동 이동 뒤 사람이 다시 옮겨도 **최초 출처**를 보존해
   //   되돌리기가 항상 원래 칸으로 간다.

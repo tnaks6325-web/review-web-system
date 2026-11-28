@@ -26,6 +26,8 @@ const {
   timeStrToMinutes,
   kstDayStartUtc,
   kstTodayAt,
+  isArchivedCampaign,      // ★ 결정 432 — 보관 판정 한 곳(참여 관문 · 공개 상세)
+  reviewerArchivedState,
 } = require('../services/campaignState.service');
 const { deriveSchedules, tabsOfCampaigns, scheduleFor, describeTabDates } = require('../services/campaignSchedule.service');
 const { sequentialDisplay, joinedDisplay } = require('../utils/sequentialDisplay');   // ★ 결정 214
@@ -924,7 +926,7 @@ function _publicView(row, counts, now, schedule) {
   if (!row.participation_mode) {
     const weekend = weekendPublicationState(row, now, counts && counts.plans);
     const resume = _weekendResume(row, weekend, counts, now, null);
-    return {
+    return _overArchived(row, {
       ..._pick(row, PUBLIC_FIELDS_LEGACY),
       participation_mode: false,
       state: weekend.blocked ? 'weekend_unpublished' : row.status,
@@ -933,14 +935,14 @@ function _publicView(row, counts, now, schedule) {
       closedKind: weekend.blocked ? (weekend.closedKind || 'weekend') : null,
       resumesOn: resume ? resume.date : weekend.resumesOn,
       resumesAt: resume ? resume.iso : null,
-    };
+    });
   }
   const st = computeCampaignState(row, counts || {
     activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0,
   }, now, schedule);
   const weekend = weekendPublicationState(row, now, counts && counts.plans);
   const resume = _weekendResume(row, weekend, counts, now, schedule);
-  return {
+  return _overArchived(row, {
     ..._pick(row, PUBLIC_FIELDS_PARTICIPATION),
     participation_mode: true,
     state: weekend.blocked ? 'weekend_unpublished' : st.state,
@@ -968,7 +970,14 @@ function _publicView(row, counts, now, schedule) {
     soldoutPaused: !!row.soldout_paused_at && _optionPause().ENABLED,
     // ★ 결정 432: 영수증리뷰 공고만 — 남은 영수증 장수(숫자 하나 · 파일 번호·작업표 위치 없음). 다른 공고는 키 없음(응답 그대로).
     ...(counts && typeof counts.receiptFree === 'number' && Number.isFinite(counts.receiptFree) ? { receiptLeft: Math.max(0, counts.receiptFree) } : {}),
-  };
+  });
+}
+
+/** ★ 결정 432(M2): 보관 공고는 리뷰어 공개 뷰에서 「끝난 공고」 — 이미 있는 칸(state·stateReason·stateMessage·
+ *  closedKind·resumes*)의 값만 덮는다(공개 칸 추가 0 · 결정 431). 주말 미게시·품절 멈춤보다 보관이 이긴다. */
+function _overArchived(row, view) {
+  const arc = reviewerArchivedState(row);
+  return arc ? Object.assign(view, arc) : view;
 }
 
 /* 작업표 기준 오늘 채움 수를 상태엔진 입력에 붙인다. null/실패는 기존 공고 신청 집계를 그대로
@@ -3319,7 +3328,8 @@ router.post('/:id/apply', applyLimiter, async (req, res, next) => {
     /* ★★ 130: 보관된 공고는 참여를 받지 않는다. 목록에는 안 보이는데 링크로는 참여되는
        상태를 만들지 않는다(085 리뷰어 숨김이 "링크를 알면 참여 가능"인 것과 의도적으로 다르다
        — 저쪽은 테스트용 비공개, 이쪽은 끝난 공고다). 레거시·참여형 분기보다 앞에 둔다. */
-    if (camp.archived_at) {
+    /* ★ 결정 432: 판정은 isArchivedCampaign 하나 — 공고 화면(_publicView)도 같은 함수로 「끝난 공고」를 보인다. */
+    if (isArchivedCampaign(camp)) {
       return res.status(403).json({ ok: false, reason: 'archived', error: '모집이 종료된 공고입니다.' });
     }
 

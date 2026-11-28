@@ -391,6 +391,32 @@
    *  모집중(시간창 안)은 썸네일 중앙 "오늘 구매마감까지" 카운트다운(cutoffAt), 오픈전은 "오픈까지"(opensAt). */
   /** ★ 결정 259: 공고 전체 품절 멈춤 — 공개 목록은 soldoutPaused(서버 스위치 반영), 관리자 목록은 원본 칸. */
   function _soldoutPaused(c) { return !!(c && (c.soldoutPaused === true || c.soldout_paused_at)); }
+  /** 재참여(재구매) 기간 — 이 리뷰어의 고를 수 있는 명의(login_only 제외)가 **모두** 잠겼나.
+   *  값은 서버(GET /my-repurchase-status → 화면이 c.repurchase 로 붙임)가 준다. 없으면(조회 전·옛 서버) false. */
+  function _repurchaseLocked(c) {
+    const accts = (c && c.repurchase && Array.isArray(c.repurchase.accounts)) ? c.repurchase.accounts : [];
+    const usable = accts.filter(a => a && a.status !== 'login_only');
+    return usable.length > 0 && usable.every(a => a.status === 'locked');
+  }
+  /**
+   * ★★ 결정 432(모집안내 점검 M3·L1) — 「지금 이 사람이 이 카드로 할 수 있는 일」 **한 곳**.
+   *   'join'            지금 참여할 수 있다(서버 상태 open · 품절 멈춤 아님 · 재참여 잠금 아님)
+   *   'paused'          품절로 잠시 멈춤(결정 259 — 서버 apply 가 campaign_paused 로 막는다)
+   *   'repurchase_wait' 재참여 대기(모든 명의가 재참여 기간 안 — 서버 apply 가 repurchase_window 로 막는다)
+   *   그 밖             서버 상태 그대로(preopen · cutoff · daily_done · soft_full · closed · weekend_unpublished …)
+   * 사진 위 「● 지금 구매 가능」 띠 · 아래 버튼 · 「바로참여」 표시 · 목록 정렬 등급이 **이 값 하나**를 본다 —
+   * 종전엔 띠는 state 만, 버튼은 멈춤·잠금까지, 정렬은 멈춤만 봐서 한 카드가 「지금 구매 가능」+「재참여 대기 중」을 함께 말했다.
+   * ★ 관리자 카드(admin)는 종전대로 서버 상태만 본다(집계 화면 — 품절은 _pauseChip 이 따로 말한다 · 직원 화면 불변).
+   */
+  function reviewerNow(c, o) {
+    if (!c) return '';
+    const st = c.state || '';
+    if (st !== 'open') return st;
+    if (o && o.admin) return 'join';
+    if (_soldoutPaused(c)) return 'paused';
+    if (_repurchaseLocked(c)) return 'repurchase_wait';
+    return 'join';
+  }
   /** ★ 결정 389 — 「원본 오더 삭제됨」 한 줄(관리자 카드 · 공고 수정 창이 같은 조각을 쓴다 — 문구 사본 0).
    *  모양·글자 = 홈 작업 목록의 같은 표시(workdesk 상태 칸 · 결정 254): 빨간 굵은 작은 글자, 배경 없음.
    *  값(sod) = 서버가 **직원 응답에만** 싣는 { deletedAt } — 지운 직원 이름은 오지도 않고 그리지도 않는다.
@@ -716,6 +742,7 @@
     const isClosed = c.state === 'closed' || c.status === 'closed';
     const isPre = c.state === 'preopen';
     const isDaily = c.state === 'daily_done';
+    const now = reviewerNow(c, { admin });   // ★ 결정 432 — 띠·버튼·「바로참여」가 이 값 하나를 본다
     const quota = Number(c.dailyQuota) || 0;
     const today = Number(c.todayCount) || 0;
     // ★★ 표 기준 오늘 참여(사용자 확정 2026-08-10, B안) — **관리자 카드에서만** 이 값을 쓴다.
@@ -819,7 +846,8 @@
       // 오늘 마감 = 썸네일을 덮어 회색으로 낮추고 가운데에 다시 열릴 때까지를 흰 글씨로 센다.
       // ★ 기준은 `reopensAt`(다음 오픈) — `opensAt`은 **오늘의** 오픈 시각이라 이미 지났다(카운트다운 0 고착).
       overlay = `<div class="pt-ovl pre"><span class="ol">오늘 모집 완료</span><span class="ot" data-camp-countdown="${_esc(c.reopensAt)}">--:--:--</span><span class="ol">${_esc(_fmtOpenWhen(c.reopensAt))} 다시 오픈</span></div>`;
-    } else if (c.state === 'open' && c.cutoffAt) {
+    } else if (now === 'join' && c.cutoffAt) {
+      // ★ 결정 432: 품절 멈춤·재참여 대기 카드엔 「지금 구매 가능」 띠를 그리지 않는다(아래 버튼과 같은 말 — 한 카드 한 말).
       // 💬 결정 321: Q&A 는 구매가 없다 — 같은 카운트다운, 말만 "참여·신청"
       overlay = `<div class="pt-ovl now"><span class="live-pill"><span class="dot"></span>${(c.work_kind === 'qna' || c.work_kind === 'booking' || c.work_kind === 'receipt') ? '지금 참여 가능' : '지금 구매 가능'}</span><span class="lab">${(c.work_kind === 'qna' || c.work_kind === 'booking' || c.work_kind === 'receipt') ? '오늘 신청마감까지' : '오늘 구매마감까지'}</span><span class="ot" data-camp-countdown="${_esc(c.cutoffAt)}">--:--:--</span></div>`;
     }
@@ -836,7 +864,7 @@
     const repLocked = repUsable.filter(a => a.status === 'locked');
     const repUnknown = repUsable.filter(a => a.status === 'unknown');
     let repurchaseSash = '';
-    const repurchaseLocked = !admin && repUsable.length > 0 && repUsable.every(a => a.status === 'locked');
+    const repurchaseLocked = !admin && _repurchaseLocked(c);   // 판정은 reviewerNow 와 같은 함수(사본 0)
     if (!admin && repReady.length) repurchaseSash = `<div class="pt-sash ready"><span class="ps-t">✅ ${(repReady[0].type === 'sub' ? '타계정 ' : '본계정 ') + _esc(repReady[0].displayName || '')}로 재참여 가능</span></div>`;
     else if (!admin && repUnknown.length) repurchaseSash = '<div class="pt-sash lock"><span class="ps-t">타계정 참여 시 재참여 이력 확인</span></div>';
     else if (repurchaseLocked) {
@@ -935,14 +963,14 @@
     const restDay = c.stateReason === 'rest_day';
     const ended = c.stateReason === 'schedule_ended';
     let footer = '';
-    if (c.state === 'open' && _soldoutPaused(c)) {
+    if (now === 'paused') {
       // ★ 결정 259: 서버(apply 게이트)가 막는다 — 버튼도 그 사실을 보여준다(열려 보이는데 눌러도 거부 금지).
       footer = `<button type="button" class="pbtn off">품절로 잠시 멈춤</button><div class="pnote">다시 열리면 참여할 수 있어요</div>`;
-    } else if (c.state === 'open' && repurchaseLocked) {
+    } else if (now === 'repurchase_wait') {
       // ★ 참여는 실제로 서버(apply 게이트)에서 막히므로, 버튼도 그 사실을 보여준다 —
       //   안 그러면 "카드는 열려 보이는데 눌러도 거부"라는 헷갈리는 상태가 된다.
       footer = `<button type="button" class="pbtn off">재참여 대기 중</button><div class="pnote">재참여 가능일 이후 다시 참여할 수 있어요</div>`;
-    } else if (c.state === 'open') footer = isBlogCard
+    } else if (now === 'join') footer = isBlogCard
       ? `<button type="button" class="pbtn go">신청하기</button><div class="pnote">블로그 주소 제출 → 관리자 승인 후 구매 진행</div>`
       : c.work_kind === 'qna'
         ? `<button type="button" class="pbtn go">참여하기</button><div class="pnote">구매 없음 · 문의 등록 후 캡처 제출</div>`
@@ -988,6 +1016,8 @@
         </div>
       </article>`;
     }
+    // ★ 결정 432(L1): 초록 「바로참여」는 지금 바로 참여할 수 있는 카드(now==='join')에만 — 종료·오늘 마감·오픈 전·멈춤·재참여 대기엔 없다.
+    //   블로그 「승인제」는 종류를 말하는 글자라 그대로. 관리자 카드는 종전 그대로.
     return `
       <article class="pcard${isClosed ? ' is-closed' : ''}${isDaily ? ' is-dim' : ''}" data-camp-id="${_esc(c.id)}"
            onclick="location.href='campaign.html?id=${encodeURIComponent(c.id)}'">
@@ -995,7 +1025,7 @@
         <div class="pbody">
           <h3 class="ptitle">${_esc(c.title || '(제목 없음)')}</h3>
           ${c.nowRecruiting ? `<div class="pt-now" style="font-size:.74rem;font-weight:700;color:#1D4ED8;margin:-2px 0 4px">지금 모집: ${_esc(c.nowRecruiting)}</div>` : ''}
-          <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">${isBlogCard ? '승인제' : '바로참여'}</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>
+          <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}${isBlogCard ? '<span class="pt-live">승인제</span>' : (now === 'join' ? '<span class="pt-live">바로참여</span>' : '')}${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>
           ${_optChip(c)}
           ${gauge}
           ${footer}
@@ -1012,11 +1042,12 @@
    *
    * 등급 0 지금 참여 가능 / 1 곧 열림·잔여 대기 / 2 오늘 마감(내일 다시 오픈) / 3 완전 종료
    */
-  const _AVAIL_RANK = { open: 0, preopen: 1, soft_full: 1, cutoff: 2, daily_done: 2, weekend_unpublished: 2, closed: 3 };
+  // ★ 결정 259·432: 품절로 멈춘 공고·재참여 대기 공고는 지금 참여할 수 없다 — 오늘 마감과 같은 등급(2).
+  //   등급 재료 = reviewerNow(카드의 띠·버튼과 같은 함수). open 은 reviewerNow 가 join/paused/repurchase_wait 로 나눈다.
+  const _AVAIL_RANK = { open: 0, join: 0, preopen: 1, soft_full: 1, paused: 2, repurchase_wait: 2, cutoff: 2, daily_done: 2, weekend_unpublished: 2, closed: 3 };
   function sortByAvailability(list) {
     return (list || [])
-      // ★ 결정 259: 품절로 멈춘 공고는 지금 참여할 수 없다 — 오늘 마감과 같은 등급(2)
-      .map((c, i) => ({ c, i, r: (c && c.state === 'open' && _soldoutPaused(c)) ? 2 : (_AVAIL_RANK[c && c.state] != null ? _AVAIL_RANK[c.state] : 1) }))
+      .map((c, i) => { const k = reviewerNow(c); return { c, i, r: _AVAIL_RANK[k] != null ? _AVAIL_RANK[k] : 1 }; })
       .sort((a, b) => (a.r - b.r) || (a.i - b.i))   // 안정 정렬(원래 순서를 tie-break로)
       .map(x => x.c);
   }
@@ -1600,5 +1631,5 @@
     });
   }
 
-  window.CampCards = { renderInto, cardHtml, sourceOrderDeletedHtml: _sourceOrderDeletedHtml, seedThumbs, gridHtml, _more, _closeMenu, toggleArchive, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePopular, openManualOrder, openWorkdesk, sortByAvailability, qnaFirst, initChipMarquee: _initChipMarquee, needsFieldCleanup: _campNeedsFieldCleanup, _caeCarry };
+  window.CampCards = { renderInto, cardHtml, sourceOrderDeletedHtml: _sourceOrderDeletedHtml, seedThumbs, gridHtml, _more, _closeMenu, toggleArchive, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePopular, openManualOrder, openWorkdesk, sortByAvailability, qnaFirst, initChipMarquee: _initChipMarquee, needsFieldCleanup: _campNeedsFieldCleanup, _caeCarry, reviewerNow };
 })();
