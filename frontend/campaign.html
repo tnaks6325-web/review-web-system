@@ -3211,8 +3211,16 @@ function onReceiptZoom(){
   if(!_rcImgUrl) return toast('영수증을 불러온 뒤에 볼 수 있어요');
   const z = document.createElement('div'); z.className = 'rc-zoom'; z.setAttribute('role','dialog'); z.setAttribute('aria-label','내 영수증 크게 보기');
   z.innerHTML = '<img alt="내 영수증" src="' + _rcImgUrl + '"/><button type="button">닫기</button>';
-  z.onclick = (ev) => { if(ev.target === z || ev.target.tagName === 'BUTTON') z.remove(); };
+  /* ★ 결정 403 규칙 그대로 — 휴대폰 [뒤로] = 이 창만 닫기 · [닫기]/바깥으로 닫으면 쌓은 칸을 조용히 되돌려 다음 [뒤로] 한 번에 떠난다.
+       같은 도우미(RhSheetBack) 한 곳만 쓴다(방문 기록을 화면에서 따로 만지지 않는다). 실기 확인(안드로이드 크롬)에서 연 채 [뒤로]가 공고를 떠났다. */
+  const drop = () => { if(z.parentNode) z.remove(); };
+  z.onclick = (ev) => {
+    if(ev.target !== z && ev.target.tagName !== 'BUTTON') return;
+    drop();
+    try{ if(window.RhSheetBack) window.RhSheetBack.closed('rcZoom'); }catch(_){}
+  };
   document.body.appendChild(z);
+  try{ if(window.RhSheetBack) window.RhSheetBack.opened('rcZoom', drop); }catch(_){}
 }
 function onReceiptSave(){
   if(!_rcImgUrl) return toast('영수증을 불러온 뒤에 저장할 수 있어요');
