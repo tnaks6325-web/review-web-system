@@ -23,8 +23,11 @@ async function _assertCancellationScope(client, orderSubmissionId, lockedScope, 
     Object.keys(t).every(k => String(s[k] ?? '') === String(t[k] ?? ''))))) throw scopeRequired();
 }
 
-async function _cancelOrderSubmissionBody(client, { orderSubmissionId, canceledBy = 'admin', beforeCancelCommit, beforeCancelMutation }) {
+async function _cancelOrderSubmissionBody(client, { orderSubmissionId, canceledBy = 'admin', beforeCancelCommit, beforeCancelMutation, beforeOrderLock }) {
   const by = String(canceledBy || 'admin').slice(0, 100);
+  /* ★★ 결정 439 — 호출자가 「주문 행보다 먼저」 잡아야 하는 잠금(작업표 [줄 삭제] = 탭 잠금 `sheetless_worktable:`)을 여기서 잡는다.
+       lifecycle·주문 작업 잠금(try — 기다리지 않음) 뒤 · 이 트랜잭션의 첫 행 잠금(주문 행) 앞. 넘기지 않으면 종전 그대로. */
+  if (typeof beforeOrderLock === 'function') await beforeOrderLock(client);
   // Used only by server callers to revalidate selected row/order affinity after all upper locks.
   // Preserve the existing order -> participant row-lock order even for ordinary work.
   if (typeof beforeCancelMutation === 'function') {
@@ -80,7 +83,7 @@ function publishOrderCancellationAfterCommit(orderSubmissionId, out) {
 
 // Standalone wrapper: lifecycle first, legacy session job lock second, mutation on the SAME client.
 async function cancelOrderSubmission({ orderSubmissionId, canceledBy = 'admin', beforeCancelCommit,
-  beforeCancelMutation, pool, lifecycleTargets = [] } = {}) {
+  beforeCancelMutation, beforeOrderLock, pool, lifecycleTargets = [] } = {}) {
   if (!UUID_RE.test(String(orderSubmissionId || ''))) return invalidOrder();
   const db = pool || require('../db/pool');
   const lifecycle = require('./dualChannelLifecycle.service');
@@ -101,7 +104,7 @@ async function cancelOrderSubmission({ orderSubmissionId, canceledBy = 'admin', 
       await client.query('ROLLBACK');
       return concurrentCancel();
     }
-    out = await _cancelOrderSubmissionBody(client, { orderSubmissionId, canceledBy, beforeCancelCommit, beforeCancelMutation });
+    out = await _cancelOrderSubmissionBody(client, { orderSubmissionId, canceledBy, beforeCancelCommit, beforeCancelMutation, beforeOrderLock });
     await client.query('COMMIT');
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
