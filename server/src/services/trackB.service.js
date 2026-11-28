@@ -5476,7 +5476,33 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expec
 // ★ 목표 수 이내에서는 총 모집인원을 줄이지 않는다 — 지운 자리는 마지막 진행일의 빈 자리로
 //   보충한다. 이미 목표를 초과한 표는 삭제 뒤 목표 수 이상이면 보충하지 않아 초과분을 되살리지 않는다.
 // ★ 주문 취소와 행 제거는 반드시 한 트랜잭션 — 한쪽만 반영되면 원장과 작업표가 갈린다.
-async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRole = null, expectedRevision, requireNoReview = false } = {}) {
+//
+// ★★★ 결정 439(2026-11-28 · 완화 금지) — 잠금 순서: 이 실행부의 **모든 트랜잭션은 첫 잠금으로 탭 잠금**(`sheetless_worktable:<시트>:<탭>`)을 잡는다
+//   (동시진행 범위 잠금 lifecycle 뒤 · 주문 행·내 줄·공고 행·탭 줄 잠금 앞). 주문 기록·정원 보충·직원 셀 수정·날짜 맞추기와 같은 키·같은 자리(결정 182).
+//   종전엔 「내 줄 → 공고 행 → 탭의 모든 줄」 순이라, 같은 탭에서 줄 삭제·참여 취소가 몰리면 A(내 줄 쥠 → 공고 대기) ↔ B(공고 쥠 → A 의 줄 대기)로
+//   교착(40P01)했다(실 PG 실측: 5건 동시 → 첫 시도 1건만 성공). 탭 잠금에서 줄을 서면 같은 탭의 삭제끼리는 순환이 생길 수 없다.
+//   ★ 탭 잠금을 이 트랜잭션 **중간에**(내 줄·공고를 잠근 뒤) 잡지 말 것 — 구매 기록(탭 → 줄)과 순서가 뒤집혀 교착한다(결정 182 원래 경고).
+//   ★ 날짜 맞추기(relay)·장부 재생성은 종전대로 커밋 **뒤**(자기 트랜잭션 · 자기 탭 잠금).
+function _hideTabLockKey(sheetId, tabName) { return `sheetless_worktable:${sheetId}:${tabName}`; }
+async function _lockHideTabFirstInTx(client, { sheetId, tabName }) {
+  await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [_hideTabLockKey(sheetId, tabName)]);
+}
+// ★ 결정 439 — 추가 방어 한 겹(뿌리 처방은 위 잠금 순서). 다른 기능과의 드문 역순 쌍(예: 수동 작업 삭제 — 결정 392)이 교착으로
+//   이 트랜잭션을 끊으면, Postgres 가 통째로 되돌린 상태라 **처음부터 다시** 해도 안전하다(커밋 전 · 커밋 뒤 단계는 성공한 시도에서만 돈다).
+//   40P01 만 · 최대 3번 · 짧은 무작위 대기. 그 밖의 실패·업무 거절은 다시 하지 않는다(종전 그대로 알린다).
+const HIDE_DEADLOCK_ATTEMPTS = 3;
+async function hideWorkdeskRow(args = {}) {
+  let out;
+  for (let attempt = 1; attempt <= HIDE_DEADLOCK_ATTEMPTS; attempt++) {
+    out = await _hideWorkdeskRowOnce(args);
+    const deadlocked = !!(out && out.ok === false && out.error === 'unexpected' && out.pgCode === '40P01');
+    if (!deadlocked || attempt === HIDE_DEADLOCK_ATTEMPTS) return out;
+    logger.warn(`[trackB] 행 삭제 교착(40P01) — 다시 시도 ${attempt + 1}/${HIDE_DEADLOCK_ATTEMPTS} tab=${args.tabName} row=${args.rowId}`);
+    await new Promise(r => setTimeout(r, 20 + Math.floor(Math.random() * 80) * attempt));
+  }
+  return out;
+}
+async function _hideWorkdeskRowOnce({ sheetId, tabName, rowId, by = 'admin', actorRole = null, expectedRevision, requireNoReview = false } = {}) {
   const db = getPool();
   // 살아 있는 구매양식이 붙은 행인지 먼저 본다(짧은 조회 — 잠금 없음).
   let liveOrderId = null;
@@ -5500,8 +5526,11 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRol
     return { ok: false, error: 'order_cancel_forbidden' };
   }
 
-  const runInOwnTx = () => _runWorkdeskMutation({ sheetId, tabName, rowId }, client =>
-    _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expectedRevision, requireCancelledOrder: true, requireNoReview }));
+  // ★ 결정 439 — 탭 잠금이 이 트랜잭션의 첫 잠금(lifecycle 뒤 · 내 줄 앞).
+  const runInOwnTx = () => _runWorkdeskMutation({ sheetId, tabName, rowId }, async client => {
+    await _lockHideTabFirstInTx(client, { sheetId, tabName });
+    return _hideParticipantInTx(client, { sheetId, tabName, rowId, by, expectedRevision, requireCancelledOrder: true, requireNoReview });
+  });
 
   let result = null;
   let orderCanceled = false;
@@ -5514,6 +5543,8 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRol
         canceledBy: by,
         pool: db,
         lifecycleTargets: [{ sheetId, tabName }],
+        // ★ 결정 439 — 탭 잠금을 주문 행보다 먼저(lifecycle·주문 작업 잠금 뒤 · 이 트랜잭션의 첫 행 잠금 앞).
+        beforeOrderLock: (client) => _lockHideTabFirstInTx(client, { sheetId, tabName }),
         // This callback runs after upper locks, before the first cancellation write.
         beforeCancelMutation: async (client) => {
           const { rows } = await client.query(`SELECT order_submission_id FROM campaign_participants
@@ -5544,8 +5575,9 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRol
     };
   }
 
-  /* ★ 결정 182 — 보충 줄의 날짜를 규칙(날짜별 예상 인원)에 맞춘다. 커밋 **뒤**에 한다: 행 삭제 트랜잭션은
-     줄을 잠근 채라, 그 안에서 탭 잠금을 잡으면 구매 기록(탭 잠금 → 줄 잠금)과 순서가 뒤집혀 교착한다.
+  /* ★ 결정 182 — 보충 줄의 날짜를 규칙(날짜별 예상 인원)에 맞춘다. 커밋 **뒤**에 한다(자기 트랜잭션·자기 탭 잠금).
+     ★ 결정 439 — 행 삭제 트랜잭션도 이제 탭 잠금을 **첫 잠금**으로 쥔다. 그래서 그 트랜잭션이 끝나기 전에 다른 연결로
+       relay 를 부르면 자기 탭 잠금을 기다리며 멈춘다 — 커밋 뒤 자리를 지킨다.
      ★ 절대 throw 없음 — 날짜 맞추기 실패가 행 삭제를 되돌리지 않는다. */
   let worktableRelay = null;
   if (result && result.campaignId) {
