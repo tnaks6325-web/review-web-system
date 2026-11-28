@@ -269,10 +269,12 @@ test('M2: loadCampaign — 502 HTML 은 「캠페인을 찾을 수 없어요」�
 });
 
 /* ───────────────────────── M3 · L2 · [참여하기] ───────────────────────── */
-function applyWorld(fetchImpl, { recoverHold = false } = {}) {
-  const w = world({ view: 'vPre', hold: null, fetchImpl, fns: ['_doApply', '_applyLostRecover', '_applyReasonText'] });
+function applyWorld(fetchImpl, { recoverHold = false, view = 'vPre' } = {}) {
+  const w = world({ view, hold: null, fetchImpl, fns: ['_doApply', '_applyLostRecover', '_applyReasonText', '_isEndedRefusal', '_applyEndedMask'] });
   // ★ 결정 400(L4) — _doApply 의 거절 문구는 화면의 단일 사유표(_APPLY_REASON_TEXT)를 쓴다 → 같은 표를 함께 올린다(검사 뜻 그대로)
   { const a = SCRIPT.indexOf('const _APPLY_REASON_TEXT = {'); w.run(SCRIPT.slice(a, SCRIPT.indexOf('\n};', a) + 3)); }
+  // ★ 결정 432 — _doApply 가 「끝났다」 거절(보관·모집 종료) 판정·덮기 함수를 부른다 → 그 표와 함수를 함께 올린다(검사 뜻 그대로)
+  w.run((SCRIPT.match(/const _ENDED_REFUSALS = \[[^\]]*\];/) || [''])[0] + '\nlet _endedMask = null;');
   Object.assign(w.sb, {
     getSession: () => ({ name: '김예시', phone8: '00000000' }), needLogin() {}, onJoin() {}, hideOptSheet() {}, hideAcctSheet() {},
     isBlogCampaign: () => false, _isBlogUrl: () => true, _qtyViewsFor: () => null, _chainOn: () => false,
@@ -318,6 +320,36 @@ test('M3: 진짜 거절(사유 있음)은 종전 문구 그대로 · 복구 조�
   await w.run('_doApply("", null, 1)');
   assert.deepStrictEqual(w.log.toasts, ['오늘 참여가 마감됐어요']);
   assert.strictEqual(w.log.recover.length, 0);
+});
+
+test('결정 432(M2): 보관 공고 거절(403 archived)이면 끝난 모습 — 옛 서버가 다시 open 을 줘도 [참여하기]를 되살리지 않는다', async () => {
+  const w = applyWorld(async () => res(403, { ok: false, reason: 'archived', error: '모집이 종료된 공고입니다.' }));
+  // 옛 서버: 다시 받아도 state open 그대로(종전 무한 반복의 원인)
+  w.sb.loadCampaign = async () => { w.log.loadCampaign++; w.run('_camp = { state: "open" }; _applyEndedMask(_camp);'); };
+  await w.run('_doApply("", null, 1)');
+  assert.deepStrictEqual(w.log.toasts, ['모집이 종료됐어요']);
+  assert.strictEqual(w.run('_camp.state'), 'closed');
+  assert.strictEqual(w.run('_camp.stateReason'), 'archived');
+  assert.ok(w.log.renderPre >= 1, '끝난 모습을 다시 그린다');
+  assert.strictEqual(w.els.joinBtn.disabled, true, '[참여하기]를 되살리지 않는다');
+  assert.strictEqual(w.log.recover.length, 0);
+});
+
+test('결정 432 · #1895 리뷰: 참여 중(구매·제출 화면)에 「타계정으로 추가참여」가 끝났다로 거절돼도 보던 화면을 참여 전으로 바꾸지 않는다', async () => {
+  const w = applyWorld(async () => res(403, { ok: false, reason: 'archived', error: '모집이 종료된 공고입니다.' }), { view: 'vJoined' });
+  await w.run('_doApply("", { name: "타계정", phone: "01000000001" }, 1)');
+  assert.deepStrictEqual(w.log.toasts, ['모집이 종료됐어요']);
+  assert.strictEqual(w.run('_camp.state'), 'closed', '데이터는 끝난 것으로 덮는다');
+  assert.strictEqual(w.log.renderPre, 0, '참여 중 화면을 참여 전 화면으로 덮음');
+  assert.strictEqual(w.els.vJoined.style.display, '', '보던 참여 화면이 사라짐');
+  assert.strictEqual(w.els.vPre.style.display, 'none');
+});
+
+test('결정 432: 다시 열릴 수 있는 거절(cutoff)은 덮지 않는다 — 다시 받은 상태를 따른다', async () => {
+  const w = applyWorld(async () => res(409, { ok: false, reason: 'cutoff', error: '마감' }));
+  await w.run('_doApply("", null, 1)');
+  assert.strictEqual(w.run('_endedMask'), null);
+  assert.strictEqual(w.run('_camp.state'), 'open');
 });
 
 test('M4: [참여하기] 요청 칸은 종전 그대로(주소·본문·머리)', async () => {

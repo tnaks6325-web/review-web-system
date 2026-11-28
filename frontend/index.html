@@ -25,7 +25,7 @@
   <script src="js/image-shrink.js"></script>
   <link rel="stylesheet" href="css/reviewer-purchase-capture.css?v=20261120-sheet-button-32"/>
   <script src="js/reviewer-purchase-capture.js?v=20261113-home-banner-back"></script>
-  <script src="js/campaign-cards.js?v=20261104-inflow"></script>
+  <script src="js/campaign-cards.js?v=20261127-onevoice"></script>
   <script src="js/campaign-workdetail.js"></script>
   <style>
     :root {
@@ -4637,15 +4637,18 @@ function _renderRecruitPreview(json) {
     // 127: 종류 탭 건수(탭에 표기 — 필터 전에 센다)
     const _all = (json.data || []).filter(c => (c.participation_mode && c.status !== "closed") || (c.status === "active" && !c.participation_mode));
     _rcPaintKindTabs({ review: _all.filter(c => _rcKindOf(c) === "review").length, blog: _all.filter(c => _rcKindOf(c) === "blog").length, qna: _all.filter(c => _rcKindOf(c) === "qna").length });
-    const parts = window.CampCards
-      ? CampCards.qnaFirst(CampCards.sortByAvailability((json.data || []).filter(c => c.participation_mode && c.status !== "closed" && _rcShown(c))))
-      : (json.data || []).filter(c => c.participation_mode && c.status !== "closed" && _rcShown(c));
     // 재참여 안내 — 이미 받아 둔 결과가 있으면 카드 데이터에 병합(없으면 아래에서 조회 후 재렌더)
-    parts.forEach(c => {
+    // ★ 결정 432(M3): 정렬보다 **먼저** 붙인다 — 정렬(CampCards.sortByAvailability)이 카드의 띠·버튼과 같은 판정(reviewerNow)으로
+    //   「재참여 대기」 카드를 지금 참여 가능 묶음 아래로 보내려면 그 재료가 정렬 시점에 있어야 한다.
+    const _partsIn = (json.data || []).filter(c => c.participation_mode && c.status !== "closed" && _rcShown(c));
+    _partsIn.forEach(c => {
       const rs = _rcRepurchaseStatus[c.id];
       if (rs) c.repurchase = rs;
       else delete c.repurchase;   // 캐시된 목록 객체에 남은 이전 locked/ready 상태도 함께 제거
     });
+    const parts = window.CampCards
+      ? CampCards.qnaFirst(CampCards.sortByAvailability(_partsIn))
+      : _partsIn;
     const partHtml = (window.CampCards && parts.length)
       ? (CampCards.setServerNow(json.serverNow), '<div class="pcards-grid">' + parts.map(c => CampCards.cardHtml(c)).join("") + '</div>')
       : "";

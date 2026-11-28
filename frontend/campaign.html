@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
   <script src="api.js"></script>
   <script src="js/drive-thumb.js"></script>
-  <script src="js/campaign-cards.js?v=20261104-inflow"></script>
+  <script src="js/campaign-cards.js?v=20261127-onevoice"></script>
   <script src="js/campaign-workdetail.js"></script>
   <script src="js/reviewer-sheet-back.js?v=20261124-leaveback"></script>
   <style>
@@ -910,6 +910,24 @@ function _renderGateBlocked(j){
   renderPre();
 }
 
+/* ═══ ★★ 결정 432(모집안내 점검 M2) — 「이 공고는 끝났다」는 참여 거절 ═══
+   보관된 공고(403 archived)·모집 종료(409 closed)는 다시 눌러도 같은 답이다. 그 거절을 받으면 화면을 **끝난 모습**으로 바꾸고,
+   다시 받아도(15초 갱신·카운트다운 — 옛 서버는 보관 공고를 여전히 'open' 으로 보낸다) 그 모습을 유지한다.
+   종전엔 토스트 뒤 다시 받은 상태가 'open' 이라 [참여하기]가 되살아나 리뷰어가 같은 거절을 반복해서 받았다.
+   ★ 다시 열릴 수 있는 거절(오늘 마감·잔여 대기·품절 멈춤·오픈 전·명의 사유)은 넣지 않는다 — 그건 다시 받은 상태를 따른다.
+   ★ 덮기는 이 화면(탭)이 살아 있는 동안만 — 새로 열면 서버 상태부터 다시 본다(서버가 언제나 최종 권위). */
+const _ENDED_REFUSALS = ['archived', 'closed'];
+let _endedMask = null;   // null | 'archived' | 'closed'
+function _isEndedRefusal(j){
+  return !!(j && typeof j.reason === 'string' && _ENDED_REFUSALS.indexOf(j.reason) >= 0);
+}
+function _applyEndedMask(c){
+  if(!_endedMask || !c) return c;
+  if(c.state !== 'closed'){ c.state = 'closed'; c.stateReason = _endedMask === 'archived' ? 'archived' : ''; }
+  if(_endedMask === 'archived' && !c.stateReason) c.stateReason = 'archived';
+  return c;
+}
+
 /* ═══ 참여 전 화면 ═══ */
 function renderPre(){
   const c = _camp;
@@ -953,7 +971,8 @@ function renderPre(){
     : '모집 종료';
   const _md = (CampCards._fmtMD ? CampCards._fmtMD : () => '');
   $('preFootNote').textContent =
-      c.stateReason==='rest_day' ? (c.nextWorkDate ? '다음 진행일은 ' + _md(c.nextWorkDate) + '이에요' : '다음 진행일이 정해지면 다시 열려요')
+      c.stateReason==='archived' ? (c.stateMessage || '모집이 끝난 공고예요')   // ★ 결정 432 — 보관(내린) 공고
+    : c.stateReason==='rest_day' ? (c.nextWorkDate ? '다음 진행일은 ' + _md(c.nextWorkDate) + '이에요' : '다음 진행일이 정해지면 다시 열려요')
     : c.stateReason==='schedule_ended' ? (c.endDate ? _md(c.endDate) + '로 일정이 끝났어요' : '일정이 끝났어요')
     : (st==='daily_done' && c.opensAt) ? ('내일 ' + CampCards._fmtHM(c.opensAt) + ' 다시 오픈돼요') : '';
   // 옵션 등록 캠페인인데 선택 가능한 옵션이 0이면 캠페인이 open이어도 마감 표시(리뷰 나잇 #1)
@@ -2186,11 +2205,20 @@ async function _doApply(optionKey, sub, purchaseQty){
       _sheetOpen('acctSheet');
       return;
     }
+    // ★ 결정 432(M2): 보관·모집 종료 거절 = 끝난 공고 — 끝난 모습으로 바꾸고 [참여하기]를 되살리지 않는다(아래 finally 도 그 상태 말로 다시 그린다)
+    if(_isEndedRefusal(j)){ _endedMask = j.reason; hideAcctSheet(); toast(msg);
+      try{ await loadCampaign(); }catch(_){ /* 못 받아도 끝난 모습은 지금 그린다 */ }
+      // 참여 전 화면일 때만 끝난 모습으로 다시 그린다 — 이미 참여해 구매·제출 화면을 보던 사람이 「타계정으로 추가참여」를
+      // 거절당한 것이면 보던 화면(자리는 살아 있다)을 덮지 않는다(loadCampaign 과 같은 가드 · #1895 리뷰).
+      if(_camp){ _applyEndedMask(_camp); if($('vPre').style.display !== 'none' || $('vLoading').style.display !== 'none') renderPre(); }
+      return; }
     toast(msg);
     await loadCampaign(); // 카운터/상태 갱신
   }catch(e){ await _applyLostRecover(sub, s, _campErrText(e)); }   // ★ 결정 397(L2) — 끊김·시간 초과: 응답만 못 받았을 수 있다
   finally{ if($('vPre').style.display !== 'none'){ const c=_camp; $('joinBtn').disabled = !(c && c.state==='open'); $('joinBtn').textContent='참여하기';
-    if(c && c.state==='open' && c.soldoutPaused === true){ $('joinBtn').disabled = true; $('joinBtn').textContent = '품절로 잠시 멈춤'; } } }   // 결정 259: 거절 뒤에도 멈춤 표시 유지
+    if(c && c.state==='open' && c.soldoutPaused === true){ $('joinBtn').disabled = true; $('joinBtn').textContent = '품절로 잠시 멈춤'; }   // 결정 259: 거절 뒤에도 멈춤 표시 유지
+    // ★ 결정 432: 열려 있지 않은 공고(끝남·마감·대기)면 회색 「참여하기」로 남기지 않고 그 상태 말로 다시 그린다(renderPre 한 곳)
+    if(c && c.state !== 'open') renderPre(); } }
 }
 
 /** ★ 결정 397(L2) — [참여하기]의 응답만 못 받았을 때(끊김·시간 초과·서버 일시 오류).
@@ -2263,7 +2291,7 @@ async function _applyMany(optionKey, sels, purchaseQty){
       if(sub && _MANY_IDENTITY_REASONS.includes(j.reason)) _acctBlocked[_p8(sub.phone)] = why;
       if(j.reason === 'chain_after_close'){ const _cp = _p8(sub ? sub.phone : s.phone8); _acctBlocked[_cp] = why; _chainLate.add(_cp); }   // ★ 356 본계정도
       // 모집 자체가 닫힌 이유면 나머지 명의도 같은 이유 — 더 보내지 않는다
-      if(['closed','cutoff','daily_done','soft_full','campaign_paused','preopen','rate_limited','tier_unavailable','not_registered','profile_missing','reviewer_blocked'].includes(j.reason)) {
+      if(['closed','archived','cutoff','daily_done','soft_full','campaign_paused','preopen','rate_limited','tier_unavailable','not_registered','profile_missing','reviewer_blocked'].includes(j.reason)) {   // ★ 결정 432 — 보관도 공고 전체 사유
         for(let k = i + 1; k < sels.length; k++) fail.push({ sel: sels[k], why });
         break;
       }
@@ -2306,6 +2334,7 @@ const _APPLY_REASON_TEXT = {
   // 공고 상태(서버 st.state)
   preopen:'아직 오픈 전이에요', cutoff:'오늘 참여가 마감됐어요', daily_done:'오늘 인원이 모두 찼어요',
   soft_full:'잔여 대기 중이에요 — 자리가 나면 열려요', closed:'모집이 종료됐어요',
+  archived:'모집이 종료됐어요',   // ★ 결정 432 — 보관(내린) 공고 = 리뷰어에게는 모집 종료와 같은 말
   campaign_paused:'지금은 품절로 잠시 멈춘 공고예요. 다시 열리면 참여할 수 있어요',   // 결정 259
   // 한도·중복
   duplicate_hold:'이미 참여 중이에요', hold_cap:'동시에 참여 가능한 캠페인은 2개까지예요',
@@ -3501,6 +3530,7 @@ function loadCampaign(){
   // ★ 공고별 참여 리뷰어 게이트(091) — 마감 위장: 서버가 reviewer_blocked(gate:'closed')를 준 뒤에는
   //   폴링·카운트다운 재조회가 화면을 '모집중'으로 되돌리면 위장이 깨진다 → 상태를 계속 마감으로 덮는다.
   if(_gateMask === 'closed'){ _camp.state = 'closed'; _camp.stateReason = ''; }
+  _applyEndedMask(_camp);   // ★ 결정 432 — 「끝났다」 거절을 받은 뒤에는 다시 받아도 끝난 모습 그대로
   // ★ 카운트다운 0 도달 시 카드 티커가 이 함수를 재호출한다(CampCards.startTicker).
   //   그때 무조건 renderPre()를 하면 **작업가이드·제출완료를 보고 있던 화면이 참여 전으로 튕긴다**
   //   (리뷰어가 구매 진행 중 cutoff를 맞으면 구매양식이 사라지는 기존 버그). 참여 전 화면일 때만 다시 그린다.
